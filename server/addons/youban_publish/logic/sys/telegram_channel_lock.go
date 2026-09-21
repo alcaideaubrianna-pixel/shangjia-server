@@ -13,7 +13,7 @@ import (
 	hglock "hotgo/internal/library/hgrds/lock"
 )
 
-const telegramChannelLeaseTTL = 2 * time.Minute
+const telegramChannelLeaseTTL = telegramPublishTaskTimeout + 2*time.Minute
 
 func (s *sSysPublish) withTelegramChannelLock(ctx context.Context, chatId string, fn func() error) error {
 	key := telegramChannelLockKey(chatId)
@@ -25,7 +25,10 @@ func (s *sSysPublish) withTelegramChannelLock(ctx context.Context, chatId string
 
 func (s *sSysPublish) tryTelegramChannelLease(ctx context.Context, chatId string) (*hglock.Lock, bool, error) {
 	key := telegramChannelLockKey(chatId)
-	lease := hglock.NewConfig(telegramChannelLeaseTTL, time.Second).Mutex(key)
+	// Telegram/network calls can ignore cancellation while a worker is being
+	// recovered. A fixed lease prevents such a caller from blocking the channel
+	// forever through watchdog renewal.
+	lease := hglock.NewConfig(telegramChannelLeaseTTL, time.Second).WithoutWatchDog().Mutex(key)
 	if err := lease.TryLock(ctx); err != nil {
 		if gerror.Is(err, hglock.ErrLockFailed) {
 			return nil, false, nil

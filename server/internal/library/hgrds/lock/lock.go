@@ -20,6 +20,7 @@ import (
 type Config struct {
 	ttl             time.Duration // 过期时间
 	tryLockInterval time.Duration // 重新获取锁间隔
+	watchDogEnabled bool          // 是否自动续期
 }
 
 // Lock 一把锁 不可重复使用
@@ -29,6 +30,7 @@ type Lock struct {
 	watchDog        chan struct{} // 看门狗
 	ttl             time.Duration // 过期时间
 	tryLockInterval time.Duration // 重新获取锁间隔
+	watchDogEnabled bool          // 是否自动续期
 	wg              sync.WaitGroup
 }
 
@@ -37,7 +39,16 @@ func NewConfig(ttl, tryLockInterval time.Duration) *Config {
 	return &Config{
 		ttl:             ttl,
 		tryLockInterval: tryLockInterval,
+		watchDogEnabled: true,
 	}
+}
+
+// WithoutWatchDog returns a lock config whose lease has a fixed maximum life.
+// It is intended for external I/O where a stuck caller must not renew forever.
+func (lc *Config) WithoutWatchDog() *Config {
+	config := *lc
+	config.watchDogEnabled = false
+	return &config
 }
 
 // Mutex 根据配置创建一把锁
@@ -48,6 +59,7 @@ func (lc *Config) Mutex(resource string) *Lock {
 		watchDog:        make(chan struct{}),
 		ttl:             lc.ttl,
 		tryLockInterval: lc.tryLockInterval,
+		watchDogEnabled: lc.watchDogEnabled,
 	}
 }
 
@@ -94,7 +106,9 @@ func (l *Lock) TryLock(ctx context.Context) error {
 		return ErrLockFailed
 	}
 
-	go l.startWatchDog()
+	if l.watchDogEnabled {
+		go l.startWatchDog()
+	}
 	return nil
 }
 
@@ -112,7 +126,9 @@ func (l *Lock) Unlock(ctx context.Context) error {
 		return ErrNotExist
 	}
 
-	close(l.watchDog)
+	if l.watchDogEnabled {
+		close(l.watchDog)
+	}
 	return err
 }
 
