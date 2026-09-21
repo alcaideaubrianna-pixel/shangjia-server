@@ -154,7 +154,7 @@ func (s *sSysPublish) handleAntiScanMattingTask(ctx context.Context, task *asynq
 	stageStartedAt = time.Now()
 	if strings.TrimSpace(payload.SourceURL) != "" || strings.TrimSpace(payload.StoragePath) != "" {
 		media = &telegramMediaItem{
-			Id: media.Id, AttachmentId: media.AttachmentId, MediaType: media.MediaType,
+			Id: media.Id, AttachmentId: 0, MediaType: media.MediaType,
 			FileUrl: payload.SourceURL, StoragePath: payload.StoragePath, AssetHash: media.AssetHash,
 		}
 		g.Log().Warningf(ctx, "防扫图任务使用已解析媒体来源 taskId:%s sourceUrl:%t storagePath:%t", payload.TaskId, strings.TrimSpace(payload.SourceURL) != "", strings.TrimSpace(payload.StoragePath) != "")

@@ -19,8 +19,8 @@ import (
 var facePPHTTPClient = &http.Client{
 	Timeout: 10 * time.Second,
 	Transport: &http.Transport{
-		MaxIdleConns:          16,
-		MaxIdleConnsPerHost:   4,
+		MaxIdleConns:          128,
+		MaxIdleConnsPerHost:   64,
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   5 * time.Second,
 		ResponseHeaderTimeout: 9 * time.Second,
@@ -71,10 +71,13 @@ func facePPPortraitMatting(ctx context.Context, imageBytes []byte, imageHash str
 		return "", gerror.Wrap(err, "调用 Face++ 人体抠图失败")
 	}
 	defer resp.Body.Close()
+	readStartedAt := time.Now()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4*1024*1024))
 	if err != nil {
 		return "", err
 	}
+	g.Log().Warningf(ctx, "防扫图 Face++ 响应读取完成 imageHash:%s status:%d responseBytes:%d durationMs:%d", imageHash, resp.StatusCode, len(raw), time.Since(readStartedAt).Milliseconds())
+	jsonStartedAt := time.Now()
 	var out struct {
 		BodyImage string `json:"body_image"`
 		Error     string `json:"error_message"`
@@ -82,17 +85,19 @@ func facePPPortraitMatting(ctx context.Context, imageBytes []byte, imageHash str
 	if err = json.Unmarshal(raw, &out); err != nil {
 		return "", gerror.Wrap(err, "解析 Face++ 响应失败")
 	}
+	g.Log().Warningf(ctx, "防扫图 Face++ JSON 解析完成 imageHash:%s durationMs:%d", imageHash, time.Since(jsonStartedAt).Milliseconds())
 	if resp.StatusCode != http.StatusOK || out.Error != "" {
 		return "", gerror.Newf("Face++ 人体抠图失败（%d）：%s", resp.StatusCode, out.Error)
 	}
 	if out.BodyImage == "" {
 		return "", gerror.New("Face++ 未返回人像图片")
 	}
+	decodeStartedAt := time.Now()
 	decoded, err := decodeBase64Image(out.BodyImage)
 	if err != nil {
 		return "", gerror.Wrap(err, "解码 Face++ 人像图片失败")
 	}
-	g.Log().Warningf(ctx, "防扫图 Face++ 响应解码完成 imageHash:%s outputBytes:%d durationMs:%d", imageHash, len(decoded), time.Since(startedAt).Milliseconds())
+	g.Log().Warningf(ctx, "防扫图 Face++ Base64 解码完成 imageHash:%s outputBytes:%d durationMs:%d", imageHash, len(decoded), time.Since(decodeStartedAt).Milliseconds())
 	uploadStartedAt := time.Now()
 	url, err := uploadAntiScanSegment(ctx, decoded, imageHash)
 	g.Log().Warningf(ctx, "防扫图 Face++ 结果上传完成 imageHash:%s durationMs:%d success:%t", imageHash, time.Since(uploadStartedAt).Milliseconds(), err == nil)

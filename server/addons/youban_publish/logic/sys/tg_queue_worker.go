@@ -196,7 +196,7 @@ func normalizeCycleQueueConcurrency(concurrency int) int {
 
 func normalizeAntiScanMattingConcurrency(concurrency int) int {
 	if concurrency < 1 {
-		return 64
+		return 128
 	}
 	if concurrency > 800 {
 		return 800
