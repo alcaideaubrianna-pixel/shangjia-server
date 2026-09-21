@@ -81,7 +81,7 @@ func (s *sSysPublish) enqueueAntiScanMattingTask(ctx context.Context, payload an
 	payload.TaskId = guid.S()
 	state := &sysin.AntiScanSegmentModel{
 		ImageHash: payload.ImageHash, Width: payload.Width, Height: payload.Height,
-		Status: antiScanMattingStatusProcessing, TaskId: payload.TaskId, RetryAfterMs: 1000,
+		Status: antiScanMattingStatusProcessing, TaskId: payload.TaskId, RetryAfterMs: 300,
 	}
 	if err := saveAntiScanMattingTaskState(ctx, payload.MediaId, payload.Provider, state); err != nil {
 		return nil, gerror.Wrap(err, "保存人像分割任务状态失败")
@@ -117,7 +117,7 @@ func (s *sSysPublish) handleAntiScanMattingTask(ctx context.Context, task *asynq
 		}
 		state := &sysin.AntiScanSegmentModel{
 			ImageHash: payload.ImageHash, Width: payload.Width, Height: payload.Height,
-			Status: antiScanMattingStatusProcessing, TaskId: payload.TaskId, RetryAfterMs: 1000,
+			Status: antiScanMattingStatusProcessing, TaskId: payload.TaskId, RetryAfterMs: 300,
 			Error: "人像分割遇到临时错误，系统正在自动重试",
 		}
 		retryCount, _ := asynq.GetRetryCount(ctx)
