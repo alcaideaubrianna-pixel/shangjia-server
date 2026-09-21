@@ -231,6 +231,7 @@ func (s *sSysPublish) AdminAntiScanSegment(ctx context.Context, in *sysin.AntiSc
 	res, err = s.enqueueAntiScanMattingTask(ctx, antiScanMattingQueuePayload{
 		TenantId: account.TenantId, AccountId: account.Id, MediaId: in.MediaId,
 		ImageHash: imageHash, Provider: provider, Width: width, Height: height,
+		SourceURL: media.FileUrl, StoragePath: media.StoragePath,
 	})
 	if err != nil {
 		return nil, err

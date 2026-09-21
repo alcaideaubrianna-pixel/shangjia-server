@@ -37,6 +37,11 @@ type antiScanMattingQueuePayload struct {
 	Provider  string `json:"provider"`
 	Width     int    `json:"width"`
 	Height    int    `json:"height"`
+	// SourceURL/StoragePath are captured by the API node so the Worker can
+	// fetch the already-resolved object directly instead of waiting on the
+	// Telegram media cache again.
+	SourceURL   string `json:"sourceUrl,omitempty"`
+	StoragePath string `json:"storagePath,omitempty"`
 }
 
 func antiScanMattingTaskCacheKey(mediaId int64, provider string) string {
@@ -147,6 +152,13 @@ func (s *sSysPublish) handleAntiScanMattingTask(ctx context.Context, task *asynq
 		return gerror.New("人像分割服务配置已更新，请重新提交")
 	}
 	stageStartedAt = time.Now()
+	if strings.TrimSpace(payload.SourceURL) != "" || strings.TrimSpace(payload.StoragePath) != "" {
+		media = &telegramMediaItem{
+			Id: media.Id, AttachmentId: media.AttachmentId, MediaType: media.MediaType,
+			FileUrl: payload.SourceURL, StoragePath: payload.StoragePath, AssetHash: media.AssetHash,
+		}
+		g.Log().Warningf(ctx, "防扫图任务使用已解析媒体来源 taskId:%s sourceUrl:%t storagePath:%t", payload.TaskId, strings.TrimSpace(payload.SourceURL) != "", strings.TrimSpace(payload.StoragePath) != "")
+	}
 	path, _, err := cachedTelegramMediaFile(ctx, media)
 	if err != nil {
 		return gerror.Wrap(err, "读取媒体图片失败")
