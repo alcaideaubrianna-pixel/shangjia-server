@@ -817,7 +817,7 @@ func normalizeManagedMediaPresentationURL(raw string) string {
 	if err != nil || cdnURL.Hostname() == "" || strings.EqualFold(parsed.Hostname(), cdnURL.Hostname()) {
 		return raw
 	}
-	if !isManagedMediaHostname(parsed.Hostname()) {
+	if !isManagedMediaHostname(parsed.Hostname()) && managedMediaObjectPath(raw) == "" {
 		return raw
 	}
 	return strings.TrimRight(cdnBase, "/") + "/" + strings.TrimLeft(parsed.EscapedPath(), "/") + querySuffix(parsed)

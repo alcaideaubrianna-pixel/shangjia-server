@@ -784,8 +784,13 @@ func cachedTelegramVideoPosterFile(ctx context.Context, media *telegramMediaItem
 		}
 	}
 	if source := strings.TrimSpace(media.PosterUrl); strings.HasPrefix(strings.ToLower(source), "http") && !isLocalTelegramURL(source) {
-		path, err := cachedRemoteMediaFile(ctx, mediaFileCacheKey(media, source), source, mediaFileCacheExt(&telegramMediaItem{MediaType: "image", FileUrl: source}, source))
-		return path, nil, err
+		poster := &telegramMediaItem{
+			Id:          media.Id,
+			MediaType:   "image",
+			FileUrl:     source,
+			StoragePath: managedMediaObjectPath(source),
+		}
+		return cachedTelegramMediaFile(ctx, poster)
 	}
 	videoPath, cleanup, err := cachedTelegramMediaFile(ctx, media)
 	if err != nil || strings.TrimSpace(videoPath) == "" {

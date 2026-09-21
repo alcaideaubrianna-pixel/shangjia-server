@@ -31,6 +31,15 @@ func TestNormalizeMediaPresentationURLUsesConfiguredCDN(t *testing.T) {
 	}
 }
 
+func TestNormalizeManagedMediaPresentationURLRewritesLegacyObjectURLByPath(t *testing.T) {
+	path := "hotgo/file/2026-09-14/example.mp4"
+	want := mediaContentCDNBaseURL() + "/" + path
+	actual := normalizeManagedMediaPresentationURL("https://retired.example/" + path)
+	if actual != want {
+		t.Fatalf("unexpected legacy presentation URL: got %q want %q", actual, want)
+	}
+}
+
 func TestNormalizeMediaPresentationURLRewritesManagedLegacyURLWithoutStoragePath(t *testing.T) {
 	previous := storager.GetConfig()
 	storager.SetConfig(&model.UploadConfig{

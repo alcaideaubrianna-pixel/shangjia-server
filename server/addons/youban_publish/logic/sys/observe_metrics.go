@@ -83,6 +83,15 @@ func observeTelegramPublishFailure(ctx context.Context, stage string) {
 	counter.Add(ctx, 1, metric.WithAttributes(attribute.String("stage", stage)))
 }
 
+func observeMediaFileCacheSource(ctx context.Context, source, result, errorClass string) {
+	counter, _ := publishObserveMeter.Int64Counter("xiaohuiji.media.download_source_events")
+	counter.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("source", source),
+		attribute.String("result", result),
+		attribute.String("error_class", errorClass),
+	))
+}
+
 func observeTelegramPublishRecovery(ctx context.Context, result string) {
 	counter, _ := publishObserveMeter.Int64Counter("xiaohuiji.tg.publish_recoveries")
 	counter.Add(ctx, 1, metric.WithAttributes(attribute.String("result", result)))
