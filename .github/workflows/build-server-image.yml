@@ -81,11 +81,12 @@ jobs:
           echo '${{ steps.server_meta.outputs.tags }}' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Trigger enabled Dokploy targets
+        timeout-minutes: 20
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.YOUBAN_TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.YOUBAN_TELEGRAM_CHAT_ID }}
         run: |
-          python3 scripts/ci/trigger-dokploy-webhooks.py \
+          python3 -u scripts/ci/trigger-dokploy-webhooks.py \
             --config deploy/dokploy-targets.json \
             --version "sha-${GITHUB_SHA::7}" \
             --revision "${GITHUB_SHA}"

@@ -148,13 +148,23 @@ def wait_until_healthy(target, revision="", retries=DEFAULT_HEALTH_RETRIES,
             separator = "&" if "?" in health_url else "?"
             health = read_health(f"{health_url}{separator}{query}" if query else health_url)
             if target.get("verify_revision") and not revision_matches(health.get("revision"), revision):
+                confirmed = 0
                 raise RuntimeError(f"revision is {health.get('revision')!r}, expected {revision!r}")
             confirmed += 1
+            print(
+                f"health check {target['name']}: attempt {attempt}/{retries}, "
+                f"confirmation {confirmed}/{confirmations if target.get('verify_revision') else 1}",
+                flush=True,
+            )
             if confirmed >= (confirmations if target.get("verify_revision") else 1):
                 return
         except (urllib.error.URLError, TimeoutError, RuntimeError) as error:
             last_error = error
-            confirmed = 0
+            print(
+                f"health check {target['name']}: attempt {attempt}/{retries} failed: {error}",
+                file=sys.stderr,
+                flush=True,
+            )
         if attempt < retries:
             sleep(5)
     raise RuntimeError(f"health check failed after {retries} attempts: {last_error}")
@@ -201,7 +211,7 @@ def main(argv=None):
         if args.dry_run:
             print(f"would trigger {name} ({args.version})")
             continue
-        print(f"triggering {name} ({args.version})")
+        print(f"triggering {name} ({args.version})", flush=True)
         try:
             trigger(target, args.version)
             wait_until_healthy(target, args.revision or args.version)
@@ -217,7 +227,7 @@ def main(argv=None):
             f"🚀 <b>{escape(name)} 已触发部署</b>\n"
             f"版本：<code>{escape(args.version)}</code>"
         )
-        print(f"triggered {name}")
+        print(f"triggered {name}", flush=True)
     return 0
 
 

@@ -23,11 +23,10 @@ class TriggerDokployWebhooksTest(unittest.TestCase):
                 "xiaohuiji-api",
                 "xiaohuiji-account",
                 "xiaohuiji-scheduler",
-                "xiaohuiji-worker-app2",
-                "xiaohuiji-worker-app3",
+                "xiaohuiji-publish-worker-app2",
+                "xiaohuiji-worker-app4",
                 "xiaohuiji-media-worker-app3",
                 "xiaohuiji-collector-worker-app3",
-                "xiaohuiji-publish-worker-app1",
                 "xiaohuiji-publish-worker-app3",
             ],
             [target["name"] for target in targets],
@@ -88,6 +87,25 @@ class TriggerDokployWebhooksTest(unittest.TestCase):
         responses = [
             {"revision": "old"},
             {"revision": "1234567890"},
+            {"revision": "1234567890"},
+        ]
+        with mock.patch.object(MODULE, "read_health", side_effect=responses) as read_health:
+            MODULE.wait_until_healthy(
+                target, revision="sha-1234567", retries=3, confirmations=2, sleep=lambda _: None,
+            )
+
+        self.assertEqual(3, read_health.call_count)
+
+    def test_wait_until_healthy_keeps_confirmation_across_transport_error(self):
+        target = {
+            "name": "api",
+            "health_url": "https://example.com/readyz",
+            "wait_seconds": 0,
+            "verify_revision": True,
+        }
+        responses = [
+            {"revision": "1234567890"},
+            TimeoutError("transient timeout"),
             {"revision": "1234567890"},
         ]
         with mock.patch.object(MODULE, "read_health", side_effect=responses) as read_health:
