@@ -147,7 +147,7 @@ groups:
           summary: "TG 上架自动补偿连续失败"
           description: "最近 15 分钟自动补偿失败 {{ $value }} 次，请检查资料维护队列和发布链路"
       - alert: YoubanTelegramReconcileStuck
-        expr: '{__name__="xiaohuiji.tg.reconcile_oldest_age_seconds"} > 180'
+        expr: 'youban_tg_reconcile_oldest_age_seconds > 180'
         for: 2m
         labels:
           severity: CRIT
@@ -156,7 +156,7 @@ groups:
           summary: "TG 发送结果对账卡住"
           description: "最老待对账任务已等待 {{ $value }} 秒，可能持续占用频道发送槽位"
       - alert: YoubanTelegramReconcileTaskMissing
-        expr: '{__name__="xiaohuiji.tg.reconcile_task_missing"} > 0'
+        expr: 'youban_tg_reconcile_missing_tasks > 0'
         for: 2m
         labels:
           severity: CRIT
@@ -165,7 +165,7 @@ groups:
           summary: "TG 对账账号任务丢失"
           description: "当前有 {{ $value }} 个 unknown 发布任务没有对应的活动账号对账任务"
       - alert: YoubanTelegramReconcileBacklog
-        expr: '{__name__="xiaohuiji.tg.reconcile_unknown_jobs"} > 10'
+        expr: 'youban_tg_reconcile_unknown_jobs > 10'
         for: 5m
         labels:
           severity: WARN

@@ -103,35 +103,6 @@ receivers:
             value_column: violation_count
             value_type: int
       - sql: |
-          SELECT COUNT(*)::bigint AS unknown_count,
-                 COALESCE(EXTRACT(EPOCH FROM (NOW() - MIN(updated_at))), 0)::bigint AS oldest_age_seconds
-          FROM hg_youban_publish_tg_job
-          WHERE status = 'unknown'
-        metrics:
-          - metric_name: xiaohuiji.tg.reconcile_unknown_jobs
-            value_column: unknown_count
-            value_type: int
-          - metric_name: xiaohuiji.tg.reconcile_oldest_age_seconds
-            value_column: oldest_age_seconds
-            value_type: int
-      - sql: |
-          SELECT COUNT(*)::bigint AS missing_count
-          FROM hg_youban_publish_tg_job j
-          WHERE j.status = 'unknown'
-            AND j.updated_at < NOW() - INTERVAL '2 minutes'
-            AND NOT EXISTS (
-              SELECT 1
-              FROM hg_tg_collector_account_task t
-              WHERE t.tenant_id = j.tenant_id
-                AND t.task_key = 'message-reconcile:' || j.id::text
-                AND t.task_type = 'message_reconcile'
-                AND t.status IN ('pending','processing','failed_retry')
-            )
-        metrics:
-          - metric_name: xiaohuiji.tg.reconcile_task_missing
-            value_column: missing_count
-            value_type: int
-      - sql: |
           SELECT COUNT(*)::bigint AS violation_count
           FROM (
             SELECT channel_id

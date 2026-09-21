@@ -25,9 +25,9 @@ OpenObserve 部署完成后创建 Telegram Webhook Destination，并按以下规
 | Asynq Task 对应 DB 已结束 | `xiaohuiji.invariant.asynq_task_terminal_db_job > 0` |
 | sending 超时 | `xiaohuiji.invariant.stale_sending_jobs > 0` |
 | 恢复器失败 | `xiaohuiji.recovery.runs{result="failed"}` 5 分钟增量 > 0 |
-| TG 对账卡住 | `xiaohuiji.tg.reconcile_oldest_age_seconds > 180` |
-| TG 对账任务丢失 | `xiaohuiji.tg.reconcile_task_missing > 0` |
-| TG 对账积压 | `xiaohuiji.tg.reconcile_unknown_jobs > 10` |
+| TG 对账卡住 | `youban_tg_reconcile_oldest_age_seconds > 180` |
+| TG 对账任务丢失 | `youban_tg_reconcile_missing_tasks > 0` |
+| TG 对账积压 | `youban_tg_reconcile_unknown_jobs > 10` |
 | TG 对账超限 | `xiaohuiji.tg.reconcile_events{result="submission_exhausted"}` 10 分钟增量 > 0 |
 | Gateway Bot 不一致 | configured 与 running 两条 `xiaohuiji.tg.gateway_bots` 不相等 |
 | 租约冲突 | `xiaohuiji.tg.account_lease_events{action="conflict"}` 5 分钟增量 > 10 |
