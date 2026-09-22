@@ -59,7 +59,11 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) error {
 				"last_dispatch_error": "频道正在发送其他任务，已等待重新调度",
 				"updated_at":          gtime.Now(),
 			}).Update()
-		return s.enqueueTelegramJobDirectWithUnique(ctx, jobId, delay, false)
+		// The lease holder wakes the highest-priority job when it finishes.
+		// Re-enqueuing here creates a hot dispatch loop while the same channel is
+		// still busy and can starve foreground publishes behind bulk work. The
+		// periodic recovery loop remains the fallback if the lease holder exits.
+		return nil
 	}
 	defer func() {
 		s.releaseTelegramChannelLease(ctx, lease)
