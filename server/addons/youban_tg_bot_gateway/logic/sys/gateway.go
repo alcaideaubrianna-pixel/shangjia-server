@@ -47,6 +47,7 @@ type sGateway struct {
 	bindings               map[string][]service.BotBinding
 	clients                map[string]*tgbot.Bot
 	mediaClients           map[string]*tgbot.Bot
+	webhookAuditAt         time.Time
 	queueMu                sync.Mutex
 	queue                  *asynq.Server
 	queueCli               *asynq.Client
@@ -101,7 +102,7 @@ func (s *sGateway) MediaClient(ctx context.Context, token string) (*tgbot.Bot, e
 	if s.newMediaClientForToken != nil {
 		clientFactory = s.newMediaClientForToken
 	}
-	client, err = clientFactory(token, conf.ProxyURL, conf.ServerURL, nil)
+	client, err = clientFactory(token, conf.ProxyURL, conf.MediaServerURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +220,7 @@ func (s *sGateway) Client(ctx context.Context, token string) (*tgbot.Bot, error)
 	if s.newClientForToken != nil {
 		clientFactory = s.newClientForToken
 	}
-	client, err = clientFactory(token, conf.ProxyURL, "", nil)
+	client, err = clientFactory(token, conf.ProxyURL, conf.RuntimeServerURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -238,7 +239,7 @@ func (s *sGateway) Probe(ctx context.Context, token string) (*models.User, error
 	if err != nil {
 		return nil, err
 	}
-	client, err := newBot(strings.TrimSpace(token), conf.ProxyURL, "", nil)
+	client, err := newBot(strings.TrimSpace(token), conf.ProxyURL, conf.RuntimeServerURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -262,6 +263,7 @@ func (s *sGateway) sync(ctx context.Context) error {
 	s.mu.Lock()
 	s.bindings = bindings
 	s.mu.Unlock()
+	s.scheduleLocalWebhookAudit(ctx, conf, bindings)
 	mode := runtimeMode(ctx, conf)
 	for key, items := range bindings {
 		if len(items) == 0 {
@@ -288,6 +290,52 @@ func (s *sGateway) sync(ctx context.Context) error {
 	s.mu.Unlock()
 	s.observeBotCounts(ctx, len(bindings))
 	return nil
+}
+
+func (s *sGateway) scheduleLocalWebhookAudit(ctx context.Context, conf *service.RuntimeConfig, bindings map[string][]service.BotBinding) {
+	serverURL := strings.TrimRight(strings.TrimSpace(conf.MediaServerURL), "/")
+	if serverURL == "" || serverURL == strings.TrimRight(strings.TrimSpace(conf.RuntimeServerURL), "/") {
+		return
+	}
+	s.mu.Lock()
+	if !s.webhookAuditAt.IsZero() && time.Since(s.webhookAuditAt) < 5*time.Minute {
+		s.mu.Unlock()
+		return
+	}
+	s.webhookAuditAt = time.Now()
+	s.mu.Unlock()
+	tokens := make([]string, 0, len(bindings))
+	for _, items := range bindings {
+		if len(items) > 0 && strings.TrimSpace(items[0].Token) != "" {
+			tokens = append(tokens, strings.TrimSpace(items[0].Token))
+		}
+	}
+	go s.auditLocalWebhooks(context.WithoutCancel(ctx), conf.ProxyURL, serverURL, tokens)
+}
+
+func (s *sGateway) auditLocalWebhooks(ctx context.Context, proxyURL, serverURL string, tokens []string) {
+	configured, failures := int64(0), int64(0)
+	for _, token := range tokens {
+		auditCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+		client, err := newBotWithTimeout(token, proxyURL, serverURL, nil, 8*time.Second)
+		if err == nil {
+			var info *models.WebhookInfo
+			info, err = client.GetWebhookInfo(auditCtx)
+			if err == nil && info != nil && strings.TrimSpace(info.URL) != "" {
+				configured++
+			}
+		}
+		cancel()
+		if err != nil {
+			failures++
+		}
+	}
+	gauge, _ := gatewayObserveMeter.Int64Gauge("xiaohuiji.tg.local_api_webhooks")
+	gauge.Record(ctx, configured, metric.WithAttributes(attribute.String("state", "configured")))
+	gauge.Record(ctx, failures, metric.WithAttributes(attribute.String("state", "audit_failed")))
+	if configured > 0 || failures > 0 {
+		g.Log().Warningf(ctx, "本地TG Bot API Webhook审计异常 configured:%d failed:%d bots:%d", configured, failures, len(tokens))
+	}
 }
 
 func (s *sGateway) loadBindings(ctx context.Context) (map[string][]service.BotBinding, error) {
@@ -319,14 +367,14 @@ func (s *sGateway) observeBotCounts(ctx context.Context, configured int) {
 }
 
 func (s *sGateway) ensure(ctx context.Context, key, token, mode string, conf *service.RuntimeConfig) error {
-	signature := mode + "\n" + strings.TrimSpace(conf.WebhookBaseURL) + "\n" + strings.TrimSpace(conf.ProxyURL) + "\n" + strings.Join(allowedUpdates(), ",")
+	signature := mode + "\n" + strings.TrimSpace(conf.WebhookBaseURL) + "\n" + strings.TrimSpace(conf.ProxyURL) + "\n" + strings.TrimSpace(conf.RuntimeServerURL) + "\n" + strings.Join(allowedUpdates(), ",")
 	s.mu.Lock()
 	current := s.runtimes[key]
 	s.mu.Unlock()
 	if current != nil && current.signature == signature {
 		return nil
 	}
-	client, err := newBot(token, conf.ProxyURL, "", func(handlerCtx context.Context, bot *tgbot.Bot, update *models.Update) {
+	client, err := newBot(token, conf.ProxyURL, conf.RuntimeServerURL, func(handlerCtx context.Context, bot *tgbot.Bot, update *models.Update) {
 		if submitErr := s.submitUpdate(handlerCtx, key, update); submitErr != nil {
 			g.Log().Warningf(handlerCtx, "TG Bot Gateway更新提交失败 key:%s err:%+v", key, submitErr)
 		}

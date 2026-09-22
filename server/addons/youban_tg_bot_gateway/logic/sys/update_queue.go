@@ -5,11 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/hibiken/asynq"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+
+	"hotgo/addons/youban_tg_bot_gateway/service"
 )
 
 const (
@@ -116,9 +122,32 @@ func (s *sGateway) enqueueUpdateBody(ctx context.Context, key string, body []byt
 		asynq.Unique(5*time.Minute),
 	)
 	if errors.Is(err, asynq.ErrDuplicateTask) {
+		var update models.Update
+		_ = json.Unmarshal(body, &update)
+		s.observeDuplicateUpdate(ctx, key, update.ID)
 		return nil
 	}
 	return err
+}
+
+func (s *sGateway) observeDuplicateUpdate(ctx context.Context, key string, updateID int64) {
+	s.mu.Lock()
+	bindings := append([]service.BotBinding(nil), s.bindings[key]...)
+	s.mu.Unlock()
+	owners := make(map[string]struct{})
+	references := make([]string, 0, len(bindings))
+	for _, binding := range bindings {
+		owners[binding.Owner] = struct{}{}
+		references = append(references, binding.Owner+":"+strconv.FormatInt(binding.ReferenceID, 10))
+	}
+	if len(owners) == 0 {
+		owners["unknown"] = struct{}{}
+	}
+	counter, _ := gatewayObserveMeter.Int64Counter("xiaohuiji.tg.gateway_duplicate_updates")
+	for owner := range owners {
+		counter.Add(ctx, 1, metric.WithAttributes(attribute.String("owner", owner)))
+	}
+	g.Log().Warningf(ctx, "TG Bot Gateway重复Update已拦截 updateId:%d bindings:%s", updateID, strings.Join(references, ","))
 }
 
 func (s *sGateway) handleUpdateTask(ctx context.Context, task *asynq.Task) error {

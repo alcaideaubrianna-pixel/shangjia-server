@@ -988,18 +988,22 @@ func (s *sSysPublish) downloadBotTelegramMediaWithToken(ctx context.Context, bot
 	if err != nil {
 		return nil, gerror.Wrap(err, "创建Bot媒体下载客户端失败")
 	}
-	file, err := bot.GetFile(ctx, &tgbot.GetFileParams{FileID: fileID})
-	if err != nil {
-		return nil, gerror.Wrap(err, "读取Bot媒体文件信息失败")
-	}
-	if file == nil || strings.TrimSpace(file.FilePath) == "" {
-		return nil, gerror.New("Bot媒体文件路径为空")
-	}
-
 	conf, err := service.SysConfig().GetTelegram(ctx)
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取Bot媒体下载网络配置失败")
 	}
+	endpoint := telegramBotAPIEndpoint(conf.BotApiServerUrl)
+	getFileStartedAt := time.Now()
+	file, err := bot.GetFile(ctx, &tgbot.GetFileParams{FileID: fileID})
+	if err != nil {
+		observeTelegramBotGetFile(ctx, endpoint, "error", time.Since(getFileStartedAt))
+		return nil, gerror.Wrap(err, "读取Bot媒体文件信息失败")
+	}
+	observeTelegramBotGetFile(ctx, endpoint, "success", time.Since(getFileStartedAt))
+	if file == nil || strings.TrimSpace(file.FilePath) == "" {
+		return nil, gerror.New("Bot媒体文件路径为空")
+	}
+
 	remoteSource, err := botMediaDownloadSource(bot, file, conf.BotApiFileUrl)
 	if err != nil {
 		return nil, err
@@ -1016,7 +1020,10 @@ func (s *sSysPublish) downloadBotTelegramMediaWithToken(ctx context.Context, bot
 		return nil, gerror.Wrap(err, "创建Bot媒体下载网络客户端失败")
 	}
 	path, err := cachedRemoteMediaFileWithMetaSourceAndDownloader(ctx, cacheKey, remoteSource, cacheSource, collectMediaExt(item.Type, ""), func(downloadCtx context.Context, source string, filePath string) error {
-		return downloadMediaFileCacheWithClient(downloadCtx, client, source, filePath)
+		downloadStartedAt := time.Now()
+		downloadErr := downloadMediaFileCacheWithClient(downloadCtx, client, source, filePath)
+		observeTelegramBotFileDownload(downloadCtx, endpoint, downloadErr, time.Since(downloadStartedAt))
+		return downloadErr
 	})
 	if err != nil {
 		return nil, gerror.Wrap(err, "下载Bot媒体文件失败")

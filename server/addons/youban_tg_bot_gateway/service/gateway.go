@@ -9,11 +9,12 @@ import (
 )
 
 type RuntimeConfig struct {
-	Mode           string
-	ProxyURL       string
-	ServerURL      string
-	WebhookBaseURL string
-	WebhookSecret  string
+	Mode             string
+	ProxyURL         string
+	RuntimeServerURL string
+	MediaServerURL   string
+	WebhookBaseURL   string
+	WebhookSecret    string
 }
 
 type BotBinding struct {

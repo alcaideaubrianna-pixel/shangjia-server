@@ -1,0 +1,85 @@
+groups:
+  - name: youban-tg-delivery-health
+    interval: 15s
+    rules:
+      - alert: YoubanTelegramNoProgress
+        expr: 'youban_tg_progress_seconds_since_success > 120 and on(datname) youban_tg_due_health_due_jobs > 0'
+        for: 2m
+        labels:
+          severity: CRIT
+          category: publish
+        annotations:
+          summary: "TG 发布全站无进度"
+          description: "存在到期任务，但连续 {{ $value }} 秒没有成功发送，请检查 Worker、Telegram 和频道锁"
+      - alert: YoubanTelegramPartialDelivery
+        expr: 'youban_tg_delivery_health_partial_jobs > 0'
+        for: 2m
+        labels:
+          severity: CRIT
+          category: publish
+        annotations:
+          summary: "TG 展示资料与验证资料发送不完整"
+          description: "当前有 {{ $value }} 个任务的展示阶段已完成，但验证阶段超过 3 分钟仍未完成"
+      - alert: YoubanTelegramVerificationDelayed
+        expr: 'youban_tg_delivery_health_partial_jobs_warning > 0'
+        for: 1m
+        labels:
+          severity: WARN
+          category: publish
+        annotations:
+          summary: "TG 验证资料发送延迟"
+          description: "当前有 {{ $value }} 个任务展示阶段完成后超过 1 分钟仍未发送验证资料"
+      - alert: YoubanTelegramDueWithoutActive
+        expr: 'youban_tg_due_health_oldest_due_age_seconds > 300 and on(datname) youban_tg_due_health_due_without_active > 0'
+        for: 5m
+        labels:
+          severity: WARN
+          category: publish
+        annotations:
+          summary: "TG 到期任务缺少活动发送者"
+          description: "存在无活动发送者的到期任务，最老任务已等待 {{ $value }} 秒，可能发生频道饥饿或锁残留"
+      - alert: YoubanTelegramDispatchLoop
+        expr: 'youban_tg_dispatch_health_loop_jobs > 0'
+        for: 5m
+        labels:
+          severity: WARN
+          category: publish
+        annotations:
+          summary: "TG 任务重复调度"
+          description: "当前有 {{ $value }} 个活动任务调度超过 10 次，请检查退回原因、频道锁和消费者容量"
+      - alert: YoubanTelegramUnknownStuck
+        expr: 'youban_tg_dispatch_health_stuck_jobs > 0'
+        for: 2m
+        labels:
+          severity: CRIT
+          category: publish
+        annotations:
+          summary: "TG 发送或对账任务卡住"
+          description: "当前有 {{ $value }} 个 sending/unknown 任务超过 5 分钟未更新"
+      - alert: YoubanTelegramDeliveryMetricsMissing
+        expr: 'absent_over_time(youban_tg_due_health_due_jobs[5m])'
+        for: 2m
+        labels:
+          severity: CRIT
+          category: observability
+        annotations:
+          summary: "TG 发布数据库指标消失"
+          description: "连续 5 分钟没有 TG 发布健康指标，请检查 pg_exporter 与 VictoriaMetrics 抓取链路"
+      - alert: YoubanTelegramAttemptRecoveryStuck
+        expr: 'youban_tg_attempt_health_expired_total > 0 and on(datname) youban_tg_attempt_health_oldest_expired_age_seconds > 120'
+        for: 2m
+        labels:
+          severity: CRIT
+          category: publish
+        annotations:
+          summary: "TG 发送超时恢复卡住"
+          description: "当前有 {{ $value }} 个过期 Attempt 尚未处理，独立超时队列或 Worker 可能异常"
+      - alert: YoubanTelegramAttemptMetricsMissing
+        expr: 'absent_over_time(youban_tg_attempt_health_expired_total[5m])'
+        for: 2m
+        labels:
+          severity: WARN
+          category: observability
+        annotations:
+          summary: "TG Attempt 健康指标消失"
+          description: "连续 5 分钟没有 Attempt 恢复指标，请检查 pg_exporter 查询配置"

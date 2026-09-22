@@ -90,11 +90,12 @@ func init() {
 			return nil, err
 		}
 		return &gatewayservice.RuntimeConfig{
-			Mode:           conf.BotRuntimeMode,
-			ProxyURL:       conf.ProxyUrl,
-			ServerURL:      conf.BotApiServerUrl,
-			WebhookBaseURL: conf.WebhookBaseUrl,
-			WebhookSecret:  conf.WebhookSecret,
+			Mode:             conf.BotRuntimeMode,
+			ProxyURL:         conf.ProxyUrl,
+			RuntimeServerURL: conf.BotRuntimeApiUrl,
+			MediaServerURL:   conf.BotApiServerUrl,
+			WebhookBaseURL:   conf.WebhookBaseUrl,
+			WebhookSecret:    conf.WebhookSecret,
 		}, nil
 	})
 	payment.RegisterNotifyCall(tenantVipOrderGroup, publish.TenantVipPayNotify)

@@ -49,6 +49,7 @@ func (s *sSysConfig) GetTelegram(ctx context.Context) (conf *model.TelegramConfi
 		return nil, err
 	}
 	conf.ProxyUrl = strings.TrimSpace(conf.ProxyUrl)
+	conf.BotRuntimeApiUrl = strings.TrimRight(strings.TrimSpace(os.Getenv("YOUBAN_TELEGRAM_RUNTIME_API_URL")), "/")
 	conf.BotApiServerUrl = strings.TrimRight(strings.TrimSpace(os.Getenv("YOUBAN_TELEGRAM_BOT_API_URL")), "/")
 	if conf.BotApiServerUrl == "" {
 		conf.BotApiServerUrl = strings.TrimRight(strings.TrimSpace(gconv.String(res.List["botApiServerUrl"])), "/")

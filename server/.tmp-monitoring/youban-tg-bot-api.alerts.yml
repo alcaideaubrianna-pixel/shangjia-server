@@ -1,0 +1,57 @@
+groups:
+  - name: youban-tg-bot-api
+    interval: 15s
+    rules:
+      - alert: YoubanTelegramLocalWebhookConfigured
+        expr: '{__name__="xiaohuiji.tg.local_api_webhooks",state="configured"} > 0'
+        for: 1m
+        labels:
+          severity: CRIT
+          category: bot
+        annotations:
+          summary: "本地 Bot API 意外配置 Webhook"
+          description: "本地媒体 Bot API 上存在 {{ $value }} 个 Webhook，可能导致同一 Update 被重复投递"
+      - alert: YoubanTelegramLocalWebhookAuditFailed
+        expr: '{__name__="xiaohuiji.tg.local_api_webhooks",state="audit_failed"} > 0'
+        for: 10m
+        labels:
+          severity: WARN
+          category: bot
+        annotations:
+          summary: "本地 Bot API Webhook 审计失败"
+          description: "有 {{ $value }} 个 Bot 无法完成本地 Webhook 审计，请检查 Bot API 服务与网络"
+      - alert: YoubanTelegramDuplicateUpdate
+        expr: 'sum(increase({__name__="xiaohuiji.tg.gateway_duplicate_updates"}[5m])) > 0'
+        labels:
+          severity: CRIT
+          category: bot
+        annotations:
+          summary: "Telegram Update 重复投递"
+          description: "最近 5 分钟检测到 {{ $value }} 个重复 Update，已在队列入口拦截"
+      - alert: YoubanTelegramLocalGetFileErrors
+        expr: 'sum(increase({__name__="xiaohuiji.tg.bot_api.get_file_requests",endpoint="local",result="error"}[5m])) > 3'
+        for: 2m
+        labels:
+          severity: WARN
+          category: media
+        annotations:
+          summary: "本地 Bot API getFile 失败增多"
+          description: "最近 5 分钟本地 getFile 失败 {{ $value }} 次"
+      - alert: YoubanTelegramLocalFileDownloadErrors
+        expr: 'sum(increase({__name__="xiaohuiji.tg.bot_api.file_download_requests",endpoint="local",result="error"}[5m])) > 3'
+        for: 2m
+        labels:
+          severity: WARN
+          category: media
+        annotations:
+          summary: "本地 Bot API 文件下载失败增多"
+          description: "最近 5 分钟本地文件下载失败 {{ $value }} 次，请检查 404/5xx 与文件服务"
+      - alert: YoubanTelegramLocalFileDownloadSlow
+        expr: 'sum(rate({__name__="xiaohuiji.tg.bot_api.file_download_duration_seconds_sum",endpoint="local"}[5m])) / clamp_min(sum(rate({__name__="xiaohuiji.tg.bot_api.file_download_duration_seconds_count",endpoint="local"}[5m])), 0.001) > 10'
+        for: 5m
+        labels:
+          severity: WARN
+          category: media
+        annotations:
+          summary: "本地 Bot API 文件下载变慢"
+          description: "本地文件下载平均耗时持续超过 10 秒"

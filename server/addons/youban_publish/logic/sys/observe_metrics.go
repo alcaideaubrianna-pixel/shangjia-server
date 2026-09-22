@@ -2,12 +2,52 @@ package sys
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
+
+func telegramBotAPIEndpoint(serverURL string) string {
+	if strings.TrimSpace(serverURL) == "" {
+		return "official"
+	}
+	return "local"
+}
+
+func observeTelegramBotGetFile(ctx context.Context, endpoint, result string, duration time.Duration) {
+	attrs := metric.WithAttributes(attribute.String("endpoint", endpoint), attribute.String("result", result))
+	counter, _ := publishObserveMeter.Int64Counter("xiaohuiji.tg.bot_api.get_file_requests")
+	histogram, _ := publishObserveMeter.Float64Histogram("xiaohuiji.tg.bot_api.get_file_duration_seconds")
+	counter.Add(ctx, 1, attrs)
+	histogram.Record(ctx, duration.Seconds(), attrs)
+}
+
+func observeTelegramBotFileDownload(ctx context.Context, endpoint string, err error, duration time.Duration) {
+	result, statusCode := "success", "2xx"
+	if err != nil {
+		result, statusCode = "error", "transport"
+		var statusErr *mediaFileCacheHTTPStatusError
+		if errors.As(err, &statusErr) {
+			statusCode = http.StatusText(statusErr.statusCode)
+			if statusCode == "" {
+				statusCode = "other"
+			} else {
+				statusCode = fmt.Sprintf("%d", statusErr.statusCode)
+			}
+		}
+	}
+	attrs := metric.WithAttributes(attribute.String("endpoint", endpoint), attribute.String("result", result), attribute.String("status_code", statusCode))
+	counter, _ := publishObserveMeter.Int64Counter("xiaohuiji.tg.bot_api.file_download_requests")
+	histogram, _ := publishObserveMeter.Float64Histogram("xiaohuiji.tg.bot_api.file_download_duration_seconds")
+	counter.Add(ctx, 1, attrs)
+	histogram.Record(ctx, duration.Seconds(), attrs)
+}
 
 var publishObserveMeter = otel.Meter("hotgo/addons/youban_publish")
 

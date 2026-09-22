@@ -4,6 +4,7 @@ type TelegramConfig struct {
 	AppId             int    `json:"appId"`
 	AppHash           string `json:"appHash"`
 	ProxyUrl          string `json:"proxyUrl"`
+	BotRuntimeApiUrl  string `json:"botRuntimeApiUrl"`
 	BotApiServerUrl   string `json:"botApiServerUrl"`
 	BotApiFileUrl     string `json:"botApiFileUrl"`
 	BotRuntimeMode    string `json:"botRuntimeMode"`
