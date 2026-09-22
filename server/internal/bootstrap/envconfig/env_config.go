@@ -43,6 +43,7 @@ var items = []item{
 	{Key: "youbanPublish.queue.autoDeleteConcurrency", EnvKeys: []string{"YOUBAN_PUBLISH_AUTO_DELETE_CONCURRENCY"}},
 	{Key: "youbanPublish.queue.accountBusyTimeoutSeconds", EnvKeys: []string{"YOUBAN_PUBLISH_ACCOUNT_BUSY_TIMEOUT_SECONDS"}},
 	{Key: "youbanPublish.queue.mediaConcurrency", EnvKeys: []string{"YOUBAN_PUBLISH_MEDIA_WORKER_CONCURRENCY"}},
+	{Key: "youbanPublish.queue.mediaBulkConcurrency", EnvKeys: []string{"YOUBAN_PUBLISH_MEDIA_BULK_CONCURRENCY"}},
 	{Key: "youbanPublish.queue.mediaBulkShards", EnvKeys: []string{"YOUBAN_PUBLISH_MEDIA_BULK_SHARDS"}},
 	{Key: "youbanPublish.queue.mediaRealtimeWeight", EnvKeys: []string{"YOUBAN_PUBLISH_MEDIA_REALTIME_WEIGHT"}},
 	{Key: "youbanPublish.queue.mediaBulkWeight", EnvKeys: []string{"YOUBAN_PUBLISH_MEDIA_BULK_WEIGHT"}},

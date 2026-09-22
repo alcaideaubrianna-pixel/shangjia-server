@@ -123,7 +123,7 @@ func collectMediaRetryErrorFrom(err error) *collectMediaRetryError {
 		return newCollectMediaRetryError("账号采集媒体下载临时中断，等待重试: "+err.Error(), 30*time.Second)
 	}
 	message := strings.ToLower(err.Error())
-	if strings.Contains(message, "file_reference_expired") {
+	if strings.Contains(message, "file_reference_expired") || isBotMediaPermanentlyUnavailableError(err) {
 		return nil
 	}
 	if _, ok := tgerr.AsFloodWait(err); ok || strings.Contains(message, "too many requests") || strings.Contains(message, "flood_wait") {
