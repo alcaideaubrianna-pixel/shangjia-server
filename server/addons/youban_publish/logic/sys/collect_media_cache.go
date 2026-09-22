@@ -984,7 +984,7 @@ func (s *sSysPublish) downloadBotTelegramMediaWithToken(ctx context.Context, bot
 	if fileID == "" {
 		return nil, gerror.New("Bot采集媒体缺少File ID")
 	}
-	bot, err := s.telegramBot(ctx, botToken)
+	bot, err := s.telegramMediaBot(ctx, botToken)
 	if err != nil {
 		return nil, gerror.Wrap(err, "创建Bot媒体下载客户端失败")
 	}
