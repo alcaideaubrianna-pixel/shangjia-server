@@ -219,7 +219,7 @@ func (s *sGateway) Client(ctx context.Context, token string) (*tgbot.Bot, error)
 	if s.newClientForToken != nil {
 		clientFactory = s.newClientForToken
 	}
-	client, err = clientFactory(token, conf.ProxyURL, conf.ServerURL, nil)
+	client, err = clientFactory(token, conf.ProxyURL, "", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -238,7 +238,7 @@ func (s *sGateway) Probe(ctx context.Context, token string) (*models.User, error
 	if err != nil {
 		return nil, err
 	}
-	client, err := newBot(strings.TrimSpace(token), conf.ProxyURL, conf.ServerURL, nil)
+	client, err := newBot(strings.TrimSpace(token), conf.ProxyURL, "", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -319,14 +319,14 @@ func (s *sGateway) observeBotCounts(ctx context.Context, configured int) {
 }
 
 func (s *sGateway) ensure(ctx context.Context, key, token, mode string, conf *service.RuntimeConfig) error {
-	signature := mode + "\n" + strings.TrimSpace(conf.WebhookBaseURL) + "\n" + strings.TrimSpace(conf.ProxyURL) + "\n" + strings.TrimSpace(conf.ServerURL) + "\n" + strings.Join(allowedUpdates(), ",")
+	signature := mode + "\n" + strings.TrimSpace(conf.WebhookBaseURL) + "\n" + strings.TrimSpace(conf.ProxyURL) + "\n" + strings.Join(allowedUpdates(), ",")
 	s.mu.Lock()
 	current := s.runtimes[key]
 	s.mu.Unlock()
 	if current != nil && current.signature == signature {
 		return nil
 	}
-	client, err := newBot(token, conf.ProxyURL, conf.ServerURL, func(handlerCtx context.Context, bot *tgbot.Bot, update *models.Update) {
+	client, err := newBot(token, conf.ProxyURL, "", func(handlerCtx context.Context, bot *tgbot.Bot, update *models.Update) {
 		if submitErr := s.submitUpdate(handlerCtx, key, update); submitErr != nil {
 			g.Log().Warningf(handlerCtx, "TG Bot Gateway更新提交失败 key:%s err:%+v", key, submitErr)
 		}

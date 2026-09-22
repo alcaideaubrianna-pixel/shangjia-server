@@ -110,10 +110,13 @@ func TestClientCacheMissUsesLightweightFactory(t *testing.T) {
 		return &service.RuntimeConfig{}, nil
 	}
 	want := new(tgbot.Bot)
-	gateway.newClientForToken = func(gotToken, _, _ string, _ tgbot.HandlerFunc) (*tgbot.Bot, error) {
+	gateway.newClientForToken = func(gotToken, _, serverURL string, _ tgbot.HandlerFunc) (*tgbot.Bot, error) {
 		factoryCalls++
 		if gotToken != token {
 			t.Fatalf("client token = %q, want %q", gotToken, token)
+		}
+		if serverURL != "" {
+			t.Fatalf("ordinary client server URL = %q, want official API", serverURL)
 		}
 		return want, nil
 	}
@@ -140,14 +143,17 @@ func TestMediaClientUsesDedicatedCache(t *testing.T) {
 		return map[string][]service.BotBinding{key: {{Owner: "test", ReferenceID: 1, Token: token}}}, nil
 	}
 	gateway.runtimeConfigForClient = func(context.Context) (*service.RuntimeConfig, error) {
-		return &service.RuntimeConfig{}, nil
+		return &service.RuntimeConfig{ServerURL: "http://telegram-bot-api.internal"}, nil
 	}
 	want := new(tgbot.Bot)
 	factoryCalls := 0
-	gateway.newMediaClientForToken = func(gotToken, _, _ string, _ tgbot.HandlerFunc) (*tgbot.Bot, error) {
+	gateway.newMediaClientForToken = func(gotToken, _, serverURL string, _ tgbot.HandlerFunc) (*tgbot.Bot, error) {
 		factoryCalls++
 		if gotToken != token {
 			t.Fatalf("media client token = %q, want %q", gotToken, token)
+		}
+		if serverURL != "http://telegram-bot-api.internal" {
+			t.Fatalf("media client server URL = %q", serverURL)
 		}
 		return want, nil
 	}
