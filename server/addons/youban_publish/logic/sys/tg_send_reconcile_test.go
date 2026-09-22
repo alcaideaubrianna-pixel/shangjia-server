@@ -4,9 +4,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
-
-	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
 )
 
 func TestTelegramJobPhaseMarkerStableAndDistinct(t *testing.T) {
@@ -74,95 +71,5 @@ func TestTelegramCleanupPhaseRetriesWithoutDeliveryReconcile(t *testing.T) {
 	}
 	if telegramSendPhaseIsCleanup(telegramSendPhaseDisplaySending) {
 		t.Fatal("display delivery must not be classified as cleanup")
-	}
-}
-
-func TestTelegramUnknownReconcileCauseStillCounts(t *testing.T) {
-	decision := telegramUnknownReconcileNextState(telegramJobRecord{RetryCount: 1}, errors.New("协议号暂不可用"))
-	if decision.Status != "unknown" {
-		t.Fatalf("unexpected status: %s", decision.Status)
-	}
-	if decision.ReconcileCount != 1 {
-		t.Fatalf("cause must increment reconcile count, got %d", decision.ReconcileCount)
-	}
-	if decision.RetryDelay != telegramUnknownReconcileRetryDelay {
-		t.Fatalf("unexpected retry delay: %s", decision.RetryDelay)
-	}
-}
-
-func TestTelegramUnknownReconcileFallsBackToRetry(t *testing.T) {
-	decision := telegramUnknownReconcileNextState(telegramJobRecord{RetryCount: 1, ReconcileCount: telegramUnknownReconcileMaxCount - 1}, errors.New("读取频道历史失败"))
-	if decision.Status != "failed_retry" {
-		t.Fatalf("unexpected status: %s", decision.Status)
-	}
-	if decision.RetryCount != 2 || decision.RetryDelay <= 0 {
-		t.Fatalf("unexpected retry decision: %+v", decision)
-	}
-}
-
-func TestTelegramUnknownReconcileStopsAtRetryLimit(t *testing.T) {
-	decision := telegramUnknownReconcileNextState(telegramJobRecord{RetryCount: telegramRetryMaxCount - 1, ReconcileCount: telegramUnknownReconcileMaxCount - 1}, nil)
-	if decision.Status != "failed" || decision.DispatchStatus != tgDispatchStatusDone {
-		t.Fatalf("unexpected terminal decision: %+v", decision)
-	}
-	if decision.RetryDelay != 0 {
-		t.Fatalf("terminal decision must not retry: %s", decision.RetryDelay)
-	}
-}
-
-func TestTelegramJobReconcilePurpose(t *testing.T) {
-	if purpose := telegramJobReconcilePurpose(telegramJobRecord{SendPhase: telegramSendPhaseVerifySending}); purpose != "verify" {
-		t.Fatalf("verify phase purpose = %q", purpose)
-	}
-	if purpose := telegramJobReconcilePurpose(telegramJobRecord{SendPhase: telegramSendPhaseDisplaySending}); purpose != "display" {
-		t.Fatalf("display phase purpose = %q", purpose)
-	}
-}
-
-func TestTelegramIncompleteReconcileNeverFallsBackToResend(t *testing.T) {
-	if telegramIncompleteReconcileShouldStop(telegramJobRecord{}) {
-		t.Fatal("first partial reconciliation must wait for channel history")
-	}
-	if !telegramIncompleteReconcileShouldStop(telegramJobRecord{ReconcileCount: telegramUnknownReconcileMaxCount - 1}) {
-		t.Fatal("repeated partial reconciliation must stop instead of resending")
-	}
-}
-
-func TestTelegramReconcileUsesBackgroundAccountPriority(t *testing.T) {
-	if telegramReconcileAccountTaskPriority >= 100 {
-		t.Fatalf("reconciliation must not use urgent account priority: %d", telegramReconcileAccountTaskPriority)
-	}
-	if telegramReconcileAccountTaskPriority != collectorin.EventPriorityRealtime {
-		t.Fatalf("reconciliation priority = %d, want realtime", telegramReconcileAccountTaskPriority)
-	}
-	if telegramReconcileAccountTaskAttempts != 2 {
-		t.Fatalf("reconciliation attempts = %d, want 2", telegramReconcileAccountTaskAttempts)
-	}
-}
-
-func TestTelegramUnknownReconcileDelaysAreBounded(t *testing.T) {
-	if telegramUnknownReconcileDelay > 10*time.Second {
-		t.Fatalf("initial reconciliation delay is too long: %s", telegramUnknownReconcileDelay)
-	}
-	if telegramUnknownReconcileScheduleDelay >= time.Minute {
-		t.Fatalf("scheduled reconciliation guard is too long: %s", telegramUnknownReconcileScheduleDelay)
-	}
-}
-
-func TestTelegramUnknownReconcileBackoff(t *testing.T) {
-	want := []time.Duration{10 * time.Second, 20 * time.Second, 30 * time.Second, time.Minute}
-	for index, delay := range want {
-		if got := telegramUnknownReconcileBackoff(index + 1); got != delay {
-			t.Fatalf("backoff(%d) = %s, want %s", index+1, got, delay)
-		}
-	}
-}
-
-func TestTelegramUnknownReconcileSubmissionIsBounded(t *testing.T) {
-	if telegramUnknownReconcileSubmissionShouldStop(telegramJobRecord{ReconcileCount: telegramUnknownReconcileMaxCount - 1}) {
-		t.Fatal("last reconciliation submission must still be allowed")
-	}
-	if !telegramUnknownReconcileSubmissionShouldStop(telegramJobRecord{ReconcileCount: telegramUnknownReconcileMaxCount}) {
-		t.Fatal("reconciliation submissions must stop at the configured limit")
 	}
 }

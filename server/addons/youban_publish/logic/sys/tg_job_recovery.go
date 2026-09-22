@@ -65,6 +65,9 @@ func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 	if err := s.recoverStaleTelegramSendingJobs(ctx, 100); err != nil {
 		g.Log().Warningf(ctx, "恢复卡住的TG推送任务失败：%+v", err)
 	}
+	if err := s.requeueExpiredTelegramAttempts(ctx, 100); err != nil {
+		g.Log().Warningf(ctx, "重新投递过期TG发送Attempt失败：%+v", err)
+	}
 	if err := s.recoverTerminalTelegramAttempts(ctx, 500); err != nil {
 		g.Log().Warningf(ctx, "收敛TG发送Attempt状态失败：%+v", err)
 	}
@@ -85,6 +88,9 @@ func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if err := s.requeueExpiredTelegramAttempts(ctx, 100); err != nil {
+				g.Log().Warningf(ctx, "重新投递过期TG发送Attempt失败：%+v", err)
+			}
 			if err := s.recoverTerminalTelegramAttempts(ctx, 500); err != nil {
 				g.Log().Warningf(ctx, "收敛TG发送Attempt状态失败：%+v", err)
 			}
@@ -108,6 +114,32 @@ func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 			}
 		}
 	}
+}
+
+func (s *sSysPublish) requeueExpiredTelegramAttempts(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		limit = 100
+	}
+	var ids []int64
+	err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
+		Fields("id").Where("status", telegramAttemptStatusWaiting).
+		WhereLTE("webhook_deadline", gtime.Now().Add(-5*time.Second)).
+		OrderAsc("webhook_deadline").OrderAsc("id").Limit(limit).Scan(&ids)
+	if err != nil {
+		return gerror.Wrap(err, "读取过期TG发送Attempt失败")
+	}
+	queued := 0
+	for _, attemptId := range ids {
+		if err = s.enqueueTelegramAttemptTimeout(ctx, attemptId, 0); err != nil {
+			g.Log().Warningf(ctx, "重新投递过期TG发送Attempt失败 attemptId:%d err:%+v", attemptId, err)
+			continue
+		}
+		queued++
+	}
+	if queued > 0 {
+		g.Log().Infof(ctx, "已重新投递过期TG发送Attempt：%d条", queued)
+	}
+	return nil
 }
 
 func (s *sSysPublish) recoverTerminalTelegramAttempts(ctx context.Context, limit int) error {
