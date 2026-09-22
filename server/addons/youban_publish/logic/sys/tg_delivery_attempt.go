@@ -191,12 +191,9 @@ func (s *sSysPublish) handleTelegramAttemptTimeout(ctx context.Context, attemptI
 	if err != nil || attempt.Id <= 0 || attempt.Status != telegramAttemptStatusWaiting {
 		return err
 	}
-	if attempt.WebhookDeadline != nil && attempt.WebhookDeadline.After(gtime.Now()) {
-		_, err = s.enqueueTelegramAttemptTimeout(ctx, attempt.Id, time.Until(attempt.WebhookDeadline.Time))
-		return err
-	}
 	result, err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
 		Where("id", attempt.Id).Where("status", telegramAttemptStatusWaiting).
+		Where("webhook_deadline IS NOT NULL AND webhook_deadline <= NOW()").
 		Data(g.Map{"status": telegramAttemptStatusRetryWait, "updated_at": gtime.Now()}).Update()
 	if err != nil {
 		return gerror.Wrap(err, "更新TG Attempt超时状态失败")
