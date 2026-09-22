@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 
 	"hotgo/addons/youban_bot/model/input/sysin"
 	publishsysin "hotgo/addons/youban_publish/model/input/sysin"
+	publishservice "hotgo/addons/youban_publish/service"
 	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
@@ -850,12 +852,38 @@ func (s *sSysBot) telegramFileDownloadURL(ctx context.Context, tgBot *tgbot.Bot,
 	if file == nil || strings.TrimSpace(file.FilePath) == "" {
 		return "", gerror.New("读取Telegram媒体文件地址失败")
 	}
-	return telegramFileURL(botToken, file.FilePath), nil
+	filePath := strings.TrimSpace(file.FilePath)
+	if !filepath.IsAbs(filePath) {
+		return telegramFileURL(botToken, filePath), nil
+	}
+	conf, err := publishservice.SysConfig().GetTelegram(ctx)
+	if err != nil {
+		return "", gerror.Wrap(err, "读取Telegram本地文件服务配置失败")
+	}
+	return telegramLocalFileURL(filePath, conf.BotApiFileUrl)
 }
 
 func telegramFileURL(botToken string, filePath string) string {
 	filePath = strings.ReplaceAll(url.PathEscape(strings.TrimSpace(filePath)), "%2F", "/")
 	return "https://api.telegram.org/file/bot" + strings.TrimSpace(botToken) + "/" + filePath
+}
+
+func telegramLocalFileURL(filePath string, fileBaseURL string) (string, error) {
+	const localRoot = "/var/lib/telegram-bot-api/"
+	filePath = filepath.ToSlash(strings.TrimSpace(filePath))
+	relative := strings.TrimPrefix(filePath, localRoot)
+	if relative == filePath || relative == "" || strings.HasPrefix(relative, "../") {
+		return "", gerror.New("TG Bot API返回了不受支持的本地文件路径")
+	}
+	fileBaseURL = strings.TrimRight(strings.TrimSpace(fileBaseURL), "/")
+	if fileBaseURL == "" {
+		return "", gerror.New("TG Bot API本地模式缺少文件服务地址")
+	}
+	segments := strings.Split(relative, "/")
+	for i := range segments {
+		segments[i] = url.PathEscape(segments[i])
+	}
+	return fileBaseURL + "/" + strings.Join(segments, "/"), nil
 }
 
 func isIgnorableTelegramError(err error) bool {
