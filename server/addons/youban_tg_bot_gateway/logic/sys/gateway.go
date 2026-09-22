@@ -30,6 +30,8 @@ import (
 
 var gatewayObserveMeter = otel.Meter("hotgo/addons/youban_tg_bot_gateway")
 
+const telegramMediaRequestTimeout = 10 * time.Minute
+
 type botRuntime struct {
 	cancel        context.CancelFunc
 	signature     string
@@ -94,7 +96,7 @@ func (s *sGateway) MediaClient(ctx context.Context, token string) (*tgbot.Bot, e
 		return nil, err
 	}
 	clientFactory := func(token, proxyURL, serverURL string, handler tgbot.HandlerFunc) (*tgbot.Bot, error) {
-		return newBotWithTimeout(token, proxyURL, serverURL, handler, 2*time.Minute)
+		return newBotWithTimeout(token, proxyURL, serverURL, handler, telegramMediaRequestTimeout)
 	}
 	if s.newMediaClientForToken != nil {
 		clientFactory = s.newMediaClientForToken
