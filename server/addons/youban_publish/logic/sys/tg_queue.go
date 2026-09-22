@@ -584,7 +584,6 @@ func (s *sSysPublish) enqueueTelegramAttemptTimeout(ctx context.Context, attempt
 		asynq.Queue(tgQueueNameAttemptTimeout),
 		asynq.MaxRetry(5),
 		asynq.Timeout(time.Minute),
-		asynq.Unique(time.Minute),
 	}
 	if delay > 0 {
 		options = append(options, asynq.ProcessIn(delay))
