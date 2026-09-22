@@ -47,6 +47,14 @@ youban_tg_due_health:
       FROM hg_youban_publish_tg_job
       WHERE status IN ('sending','unknown')
          OR (status IN ('pending','failed_retry') AND dispatch_status IN ('queued','processing'))
+         OR (status = 'failed_retry'
+             AND last_dispatch_error ILIKE ANY (ARRAY[
+               '%FLOOD_WAIT%',
+               '%发送频率过快%',
+               '%触发限流%'
+             ])
+             AND (COALESCE(next_retry_at, NOW()) > NOW()
+                  OR updated_at > NOW() - INTERVAL '5 minutes'))
     ), recent_progress AS MATERIALIZED (
       SELECT tenant_id, channel_id, MAX(sent_at) AS last_sent_at
       FROM hg_youban_publish_tg_job
