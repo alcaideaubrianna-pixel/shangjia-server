@@ -13,6 +13,7 @@ type telegramMediaItem struct {
 	StoragePath           string `json:"storagePath"`
 	PosterStoragePath     string `json:"posterStoragePath"`
 	TgFileId              string `json:"tgFileId"`
+	TgFileUniqueId        string `json:"tgFileUniqueId"`
 	TgThumbFileId         string `json:"tgThumbFileId"`
 	AssetHash             string `json:"assetHash"`
 	SortIndex             int    `json:"sortIndex"`

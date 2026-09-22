@@ -4,11 +4,14 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+
+	"hotgo/utility/simple"
 )
 
 const telegramBotMessageSourceTable = "hg_youban_publish_bot_message_source"
@@ -29,11 +32,16 @@ func (s *sSysPublish) handleTelegramUpdate(ctx context.Context, botId int64, ten
 	text := telegramMessageText(msg)
 	g.Log().Debugf(ctx, "收到上架插件Telegram消息 bot:%d type:%s chat:%d message:%d text:%s", botId, updateType, msg.Chat.ID, msg.ID, text)
 	s.recordTelegramBotMessageSource(ctx, botId, tenantId, update.ID, updateType, msg, text)
-	s.matchTelegramDeliveryAttempt(ctx, botId, msg, text)
 	s.handleTelegramAutoDelete(ctx, botId, tenantId, msg, text)
 	if err := s.cacheBotMessage(ctx, tenantId, botId, msg); err != nil {
 		g.Log().Warningf(ctx, "缓存上架Bot频道消息失败 bot:%d chat:%d err:%+v", botId, msg.Chat.ID, err)
 	}
+	matchCtx := context.WithoutCancel(ctx)
+	simple.SafeGo(matchCtx, func(ctx context.Context) {
+		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		s.matchTelegramDeliveryAttempt(ctx, botId, msg, text)
+	})
 }
 
 func (s *sSysPublish) recordTelegramBotMessageSource(ctx context.Context, botId, tenantId int64, updateId int64, updateType string, msg *models.Message, text string) {

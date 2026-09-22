@@ -95,6 +95,9 @@ func (s *sSysPublish) handleTelegramAutoDelete(ctx context.Context, botId int64,
 	if msg == nil || msg.ID <= 0 || strings.TrimSpace(text) == "" {
 		return
 	}
+	if telegramTextHasInternalDeliveryMarker(text) {
+		return
+	}
 	channel, err := s.autoDeleteChannel(ctx, msg.Chat, tenantId)
 	if err != nil || channel == nil || channel.Id <= 0 {
 		if err != nil {

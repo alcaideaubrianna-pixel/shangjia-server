@@ -25,6 +25,7 @@ const (
 	telegramAttemptStatusConfirmed = "confirmed"
 	telegramAttemptStatusRetryWait = "retry_wait"
 	telegramAttemptWebhookWait     = 15 * time.Second
+	telegramAttemptLateGrace       = 15 * time.Second
 	telegramAttemptMaxRetries      = 3
 )
 
@@ -89,6 +90,10 @@ func telegramAttemptMarker(token string) string {
 	}
 	marker.WriteRune('\u2064')
 	return marker.String()
+}
+
+func telegramTextHasInternalDeliveryMarker(text string) bool {
+	return strings.Contains(text, "\u2063") && strings.Contains(text, "\u2064")
 }
 
 func (s *sSysPublish) confirmTelegramDeliveryAttempt(ctx context.Context, attempt telegramDeliveryAttempt, messages []*telegramSentMessage, response bool) error {
@@ -216,6 +221,9 @@ func (s *sSysPublish) handleTelegramAttemptTimeout(ctx context.Context, attemptI
 		observeTelegramPublishFailure(ctx, "webhook_timeout")
 		return s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusFailed)
 	}
+	if delay < telegramAttemptLateGrace {
+		delay = telegramAttemptLateGrace
+	}
 	return s.enqueueTelegramJobDirectWithUnique(ctx, attempt.JobId, delay, false)
 }
 
@@ -291,7 +299,8 @@ func (s *sSysPublish) matchTelegramDeliveryAttempt(ctx context.Context, botId in
 	var attempts []telegramDeliveryAttempt
 	if err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
 		Where("bot_id", botId).Where("target_chat_id", chatId).
-		WhereIn("status", []string{telegramAttemptStatusSending, telegramAttemptStatusWaiting}).
+		WhereIn("status", []string{telegramAttemptStatusSending, telegramAttemptStatusWaiting, telegramAttemptStatusRetryWait}).
+		Where("status <> ? OR webhook_deadline IS NOT NULL", telegramAttemptStatusRetryWait).
 		WhereGTE("created_at", gtime.Now().Add(-time.Minute)).
 		OrderDesc("id").Limit(4).Scan(&attempts); err != nil {
 		g.Log().Warningf(ctx, "匹配TG Webhook Attempt失败 bot:%d chat:%s message:%d err:%+v", botId, chatId, msg.ID, err)
@@ -305,7 +314,8 @@ func (s *sSysPublish) matchTelegramDeliveryAttempt(ctx context.Context, botId in
 			Fields("attempt.*").
 			Where("source.chat_id", chatId).Where("source.media_group_id", msg.MediaGroupID).
 			WhereGT("source.matched_attempt_id", 0).
-			WhereIn("attempt.status", []string{telegramAttemptStatusSending, telegramAttemptStatusWaiting}).
+			WhereIn("attempt.status", []string{telegramAttemptStatusSending, telegramAttemptStatusWaiting, telegramAttemptStatusRetryWait}).
+			Where("attempt.status <> ? OR attempt.webhook_deadline IS NOT NULL", telegramAttemptStatusRetryWait).
 			OrderDesc("source.id").Limit(1).Scan(&grouped)
 		if err == nil && grouped.Id > 0 {
 			matched = &grouped
@@ -322,15 +332,15 @@ func (s *sSysPublish) matchTelegramDeliveryAttempt(ctx context.Context, botId in
 		}
 	}
 	if matched == nil {
-		for i := range attempts {
-			if attempts[i].Phase == "verify" {
-				matched = &attempts[i]
-				break
-			}
-		}
+		matched = s.matchTelegramVerifyAttempt(ctx, attempts, msg)
 	}
 	if matched == nil {
 		return
+	}
+	if matched.Status == telegramAttemptStatusRetryWait {
+		if !s.confirmLateTelegramAttempt(ctx, *matched) {
+			return
+		}
 	}
 	result, err := g.DB().Model(telegramBotMessageSourceTable).Safe().Ctx(ctx).
 		Where("chat_id", chatId).Where("message_id", msg.ID).
@@ -372,6 +382,100 @@ func (s *sSysPublish) matchTelegramDeliveryAttempt(ctx context.Context, botId in
 	s.confirmTelegramAttemptFromWebhook(ctx, *matched, job, count)
 }
 
+func (s *sSysPublish) matchTelegramVerifyAttempt(ctx context.Context, attempts []telegramDeliveryAttempt, msg *models.Message) *telegramDeliveryAttempt {
+	fileUniqueId := telegramMessageFileUniqueId(msg)
+	mediaType := telegramMessageMediaType(msg)
+	if mediaType == "" {
+		return nil
+	}
+	matched := make([]*telegramDeliveryAttempt, 0, 1)
+	for index := range attempts {
+		attempt := &attempts[index]
+		if attempt.Phase != "verify" || attempt.Status == telegramAttemptStatusRetryWait && (attempt.WebhookDeadline == nil || gtime.Now().Sub(attempt.WebhookDeadline) > telegramAttemptLateGrace) {
+			continue
+		}
+		job, err := s.telegramJobById(ctx, attempt.JobId)
+		if err != nil {
+			continue
+		}
+		media, err := s.telegramJobMedia(ctx, job, "verify")
+		if err != nil {
+			continue
+		}
+		s.loadTelegramMediaUniqueIds(ctx, media)
+		if !telegramVerifyMediaMatches(media, mediaType, fileUniqueId) {
+			continue
+		}
+		matched = append(matched, attempt)
+	}
+	if len(matched) != 1 {
+		return nil
+	}
+	return matched[0]
+}
+
+func (s *sSysPublish) loadTelegramMediaUniqueIds(ctx context.Context, media []*telegramMediaItem) {
+	ids := make([]int64, 0, len(media))
+	byId := make(map[int64]*telegramMediaItem, len(media))
+	for _, item := range media {
+		if item != nil && item.Id > 0 {
+			ids = append(ids, item.Id)
+			byId[item.Id] = item
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	var rows []*struct {
+		MediaId        int64  `json:"mediaId"`
+		TgFileUniqueId string `json:"tgFileUniqueId"`
+	}
+	if err := g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).
+		Fields("media_id,tg_file_unique_id").WhereIn("media_id", ids).
+		Where("tg_file_unique_id <> ''").WhereNull("deleted_at").
+		OrderDesc("id").Scan(&rows); err != nil {
+		return
+	}
+	for _, row := range rows {
+		if item := byId[row.MediaId]; item != nil && item.TgFileUniqueId == "" {
+			item.TgFileUniqueId = strings.TrimSpace(row.TgFileUniqueId)
+		}
+	}
+}
+
+func telegramVerifyMediaMatches(media []*telegramMediaItem, messageType, fileUniqueId string) bool {
+	for _, item := range media {
+		if item == nil || normalizeTelegramMediaType(item.MediaType) != normalizeTelegramMediaType(messageType) {
+			continue
+		}
+		// A known unique ID is authoritative. Fresh uploads do not have one yet,
+		// so they additionally rely on the sole active Attempt and short window.
+		if item.TgFileUniqueId == "" || fileUniqueId != "" && item.TgFileUniqueId == fileUniqueId {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeTelegramMediaType(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "photo" {
+		return "image"
+	}
+	return value
+}
+
+func (s *sSysPublish) confirmLateTelegramAttempt(ctx context.Context, attempt telegramDeliveryAttempt) bool {
+	result, err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
+		Where("id", attempt.Id).Where("status", telegramAttemptStatusRetryWait).
+		Data(g.Map{"status": telegramAttemptStatusWaiting, "updated_at": gtime.Now()}).Update()
+	if err != nil {
+		return false
+	}
+	affected, _ := result.RowsAffected()
+	return affected > 0
+}
+
 func (s *sSysPublish) confirmTelegramAttemptFromWebhook(ctx context.Context, attempt telegramDeliveryAttempt, job telegramJobRecord, count int) {
 	result, err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
 		Where("id", attempt.Id).WhereIn("status", []string{telegramAttemptStatusSending, telegramAttemptStatusWaiting}).
@@ -381,7 +485,7 @@ func (s *sSysPublish) confirmTelegramAttemptFromWebhook(ctx context.Context, att
 		return
 	}
 	affected, _ := result.RowsAffected()
-	if affected == 0 || job.Status != "unknown" {
+	if affected == 0 {
 		return
 	}
 	phase := telegramSendPhaseDisplayConfirmed
@@ -389,7 +493,7 @@ func (s *sSysPublish) confirmTelegramAttemptFromWebhook(ctx context.Context, att
 		phase = telegramSendPhaseVerifyConfirmed
 	}
 	_, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("id", job.Id).Where("status", "unknown").
+		Where("id", job.Id).WhereIn("status", []string{"unknown", "pending", "failed_retry"}).
 		Data(g.Map{"status": "failed_retry", "send_phase": phase, "dispatch_status": tgDispatchStatusIdle,
 			"next_retry_at": nil, "error_message": "", "updated_at": gtime.Now()}).Update()
 	if err == nil {
