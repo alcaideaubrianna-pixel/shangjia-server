@@ -216,9 +216,6 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 		return err
 	}
 	bot, err := s.telegramBot(ctx, botToken)
-	if len(displayMedia) > 0 || len(verifyMedia) > 0 {
-		bot, err = s.telegramMediaBot(ctx, botToken)
-	}
 	if err != nil {
 		return err
 	}
