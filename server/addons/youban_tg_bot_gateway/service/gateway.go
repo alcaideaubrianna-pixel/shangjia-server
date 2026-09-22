@@ -11,6 +11,7 @@ import (
 type RuntimeConfig struct {
 	Mode           string
 	ProxyURL       string
+	ServerURL      string
 	WebhookBaseURL string
 	WebhookSecret  string
 }

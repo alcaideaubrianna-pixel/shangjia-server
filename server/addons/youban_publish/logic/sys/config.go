@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"time"
 
@@ -48,6 +49,14 @@ func (s *sSysConfig) GetTelegram(ctx context.Context) (conf *model.TelegramConfi
 		return nil, err
 	}
 	conf.ProxyUrl = strings.TrimSpace(conf.ProxyUrl)
+	conf.BotApiServerUrl = strings.TrimRight(strings.TrimSpace(os.Getenv("YOUBAN_TELEGRAM_BOT_API_URL")), "/")
+	if conf.BotApiServerUrl == "" {
+		conf.BotApiServerUrl = strings.TrimRight(strings.TrimSpace(gconv.String(res.List["botApiServerUrl"])), "/")
+	}
+	conf.BotApiFileUrl = strings.TrimRight(strings.TrimSpace(os.Getenv("YOUBAN_TELEGRAM_BOT_FILE_URL")), "/")
+	if conf.BotApiFileUrl == "" {
+		conf.BotApiFileUrl = strings.TrimRight(strings.TrimSpace(gconv.String(res.List["botApiFileUrl"])), "/")
+	}
 	conf.BotRuntimeMode = strings.ToLower(strings.TrimSpace(conf.BotRuntimeMode))
 	conf.WebhookBaseUrl = strings.TrimRight(strings.TrimSpace(conf.WebhookBaseUrl), "/")
 	if conf.WebhookBaseUrl == "" {

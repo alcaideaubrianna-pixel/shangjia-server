@@ -50,8 +50,8 @@ type sGateway struct {
 	queueCli               *asynq.Client
 	loadBindingsForClient  func(context.Context) (map[string][]service.BotBinding, error)
 	runtimeConfigForClient func(context.Context) (*service.RuntimeConfig, error)
-	newClientForToken      func(string, string, tgbot.HandlerFunc) (*tgbot.Bot, error)
-	newMediaClientForToken func(string, string, tgbot.HandlerFunc) (*tgbot.Bot, error)
+	newClientForToken      func(string, string, string, tgbot.HandlerFunc) (*tgbot.Bot, error)
+	newMediaClientForToken func(string, string, string, tgbot.HandlerFunc) (*tgbot.Bot, error)
 }
 
 func init() { service.RegisterGateway(NewGateway()) }
@@ -93,13 +93,13 @@ func (s *sGateway) MediaClient(ctx context.Context, token string) (*tgbot.Bot, e
 	if err != nil {
 		return nil, err
 	}
-	clientFactory := func(token, proxyURL string, handler tgbot.HandlerFunc) (*tgbot.Bot, error) {
-		return newBotWithTimeout(token, proxyURL, handler, 2*time.Minute)
+	clientFactory := func(token, proxyURL, serverURL string, handler tgbot.HandlerFunc) (*tgbot.Bot, error) {
+		return newBotWithTimeout(token, proxyURL, serverURL, handler, 2*time.Minute)
 	}
 	if s.newMediaClientForToken != nil {
 		clientFactory = s.newMediaClientForToken
 	}
-	client, err = clientFactory(token, conf.ProxyURL, nil)
+	client, err = clientFactory(token, conf.ProxyURL, conf.ServerURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +217,7 @@ func (s *sGateway) Client(ctx context.Context, token string) (*tgbot.Bot, error)
 	if s.newClientForToken != nil {
 		clientFactory = s.newClientForToken
 	}
-	client, err = clientFactory(token, conf.ProxyURL, nil)
+	client, err = clientFactory(token, conf.ProxyURL, conf.ServerURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -236,7 +236,7 @@ func (s *sGateway) Probe(ctx context.Context, token string) (*models.User, error
 	if err != nil {
 		return nil, err
 	}
-	client, err := newBot(strings.TrimSpace(token), conf.ProxyURL, nil)
+	client, err := newBot(strings.TrimSpace(token), conf.ProxyURL, conf.ServerURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -317,14 +317,14 @@ func (s *sGateway) observeBotCounts(ctx context.Context, configured int) {
 }
 
 func (s *sGateway) ensure(ctx context.Context, key, token, mode string, conf *service.RuntimeConfig) error {
-	signature := mode + "\n" + strings.TrimSpace(conf.WebhookBaseURL) + "\n" + strings.TrimSpace(conf.ProxyURL) + "\n" + strings.Join(allowedUpdates(), ",")
+	signature := mode + "\n" + strings.TrimSpace(conf.WebhookBaseURL) + "\n" + strings.TrimSpace(conf.ProxyURL) + "\n" + strings.TrimSpace(conf.ServerURL) + "\n" + strings.Join(allowedUpdates(), ",")
 	s.mu.Lock()
 	current := s.runtimes[key]
 	s.mu.Unlock()
 	if current != nil && current.signature == signature {
 		return nil
 	}
-	client, err := newBot(token, conf.ProxyURL, func(handlerCtx context.Context, bot *tgbot.Bot, update *models.Update) {
+	client, err := newBot(token, conf.ProxyURL, conf.ServerURL, func(handlerCtx context.Context, bot *tgbot.Bot, update *models.Update) {
 		if submitErr := s.submitUpdate(handlerCtx, key, update); submitErr != nil {
 			g.Log().Warningf(handlerCtx, "TG Bot Gateway更新提交失败 key:%s err:%+v", key, submitErr)
 		}
@@ -639,17 +639,30 @@ func allowedUpdates() []string {
 	}
 }
 
-func newBot(token, proxyURL string, handler tgbot.HandlerFunc) (*tgbot.Bot, error) {
-	return newBotWithTimeout(token, proxyURL, handler, 35*time.Second)
+func newBot(token, proxyURL, serverURL string, handler tgbot.HandlerFunc) (*tgbot.Bot, error) {
+	return newBotWithTimeout(token, proxyURL, serverURL, handler, 35*time.Second)
 }
 
-func newBotWithTimeout(token, proxyURL string, handler tgbot.HandlerFunc, timeout time.Duration) (*tgbot.Bot, error) {
+func newBotWithTimeout(token, proxyURL, serverURL string, handler tgbot.HandlerFunc, timeout time.Duration) (*tgbot.Bot, error) {
 	client, err := httpClient(proxyURL)
 	if err != nil {
 		return nil, err
 	}
 	client.Timeout = timeout
-	return tgbot.New(token, tgbot.WithHTTPClient(timeout, client), tgbot.WithSkipGetMe(), tgbot.WithAllowedUpdates(tgbot.AllowedUpdates(allowedUpdates())), tgbot.WithDefaultHandler(handler))
+	options := []tgbot.Option{
+		tgbot.WithHTTPClient(timeout, client),
+		tgbot.WithSkipGetMe(),
+		tgbot.WithAllowedUpdates(tgbot.AllowedUpdates(allowedUpdates())),
+		tgbot.WithDefaultHandler(handler),
+	}
+	if serverURL = strings.TrimRight(strings.TrimSpace(serverURL), "/"); serverURL != "" {
+		parsed, parseErr := url.Parse(serverURL)
+		if parseErr != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+			return nil, gerror.New("TG Bot API Server URL配置无效")
+		}
+		options = append(options, tgbot.WithServerURL(serverURL))
+	}
+	return tgbot.New(token, options...)
 }
 func httpClient(proxyURL string) (*http.Client, error) {
 	// Telegram occasionally sends HTTP/2 GOAWAY while a request body is in

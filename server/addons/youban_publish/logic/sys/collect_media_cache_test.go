@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/container/gvar"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -30,6 +31,23 @@ func TestTelegramCollectorMediaCacheURL(t *testing.T) {
 	}
 	if got := telegramCollectorMediaCacheURL(&collectorin.MediaCacheEntry{StoragePath: "storage/cache/media.jpg"}); got != "" {
 		t.Fatalf("got URL %q, want empty URL for local path", got)
+	}
+}
+
+func TestBotMediaDownloadSourceUsesLocalFileServer(t *testing.T) {
+	got, err := botMediaDownloadSource(nil, &models.File{FilePath: "/var/lib/telegram-bot-api/123/video/file 1.mp4"}, "http://10.3.4.11:18082/")
+	if err != nil {
+		t.Fatalf("botMediaDownloadSource() error = %v", err)
+	}
+	if want := "http://10.3.4.11:18082/123/video/file%201.mp4"; got != want {
+		t.Fatalf("botMediaDownloadSource() = %q, want %q", got, want)
+	}
+}
+
+func TestBotMediaDownloadSourceRequiresLocalFileServer(t *testing.T) {
+	_, err := botMediaDownloadSource(nil, &models.File{FilePath: "/var/lib/telegram-bot-api/123/video/file.mp4"}, "")
+	if err == nil {
+		t.Fatal("botMediaDownloadSource() expected missing file server error")
 	}
 }
 

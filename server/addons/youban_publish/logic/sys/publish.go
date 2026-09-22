@@ -92,6 +92,7 @@ func init() {
 		return &gatewayservice.RuntimeConfig{
 			Mode:           conf.BotRuntimeMode,
 			ProxyURL:       conf.ProxyUrl,
+			ServerURL:      conf.BotApiServerUrl,
 			WebhookBaseURL: conf.WebhookBaseUrl,
 			WebhookSecret:  conf.WebhookSecret,
 		}, nil

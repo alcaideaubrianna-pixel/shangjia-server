@@ -29,6 +29,12 @@ func TestHTTPClientDisablesHTTP2(t *testing.T) {
 	}
 }
 
+func TestNewBotRejectsInvalidServerURL(t *testing.T) {
+	if _, err := newBot("123456:test-token", "", "://invalid", nil); err == nil {
+		t.Fatal("newBot() expected invalid server URL error")
+	}
+}
+
 type failingGatewayFeature struct{}
 
 func (f *failingGatewayFeature) Key() string   { return "failing-test-feature" }
@@ -104,7 +110,7 @@ func TestClientCacheMissUsesLightweightFactory(t *testing.T) {
 		return &service.RuntimeConfig{}, nil
 	}
 	want := new(tgbot.Bot)
-	gateway.newClientForToken = func(gotToken, _ string, _ tgbot.HandlerFunc) (*tgbot.Bot, error) {
+	gateway.newClientForToken = func(gotToken, _, _ string, _ tgbot.HandlerFunc) (*tgbot.Bot, error) {
 		factoryCalls++
 		if gotToken != token {
 			t.Fatalf("client token = %q, want %q", gotToken, token)
@@ -138,7 +144,7 @@ func TestMediaClientUsesDedicatedCache(t *testing.T) {
 	}
 	want := new(tgbot.Bot)
 	factoryCalls := 0
-	gateway.newMediaClientForToken = func(gotToken, _ string, _ tgbot.HandlerFunc) (*tgbot.Bot, error) {
+	gateway.newMediaClientForToken = func(gotToken, _, _ string, _ tgbot.HandlerFunc) (*tgbot.Bot, error) {
 		factoryCalls++
 		if gotToken != token {
 			t.Fatalf("media client token = %q, want %q", gotToken, token)

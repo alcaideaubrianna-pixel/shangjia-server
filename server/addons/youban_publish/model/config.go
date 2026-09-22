@@ -4,6 +4,8 @@ type TelegramConfig struct {
 	AppId             int    `json:"appId"`
 	AppHash           string `json:"appHash"`
 	ProxyUrl          string `json:"proxyUrl"`
+	BotApiServerUrl   string `json:"botApiServerUrl"`
+	BotApiFileUrl     string `json:"botApiFileUrl"`
 	BotRuntimeMode    string `json:"botRuntimeMode"`
 	WebhookBaseUrl    string `json:"webhookBaseUrl"`
 	WebhookSecret     string `json:"webhookSecret"`
