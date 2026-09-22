@@ -51,6 +51,32 @@ func TestDownloadMediaFileCacheWithRetrySkipsPermanentHTTPError(t *testing.T) {
 	}
 }
 
+func TestDownloadMediaFileCacheHonorsParentCancellation(t *testing.T) {
+	requestStarted := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+		close(requestStarted)
+		<-request.Context().Done()
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- downloadMediaFileCache(ctx, server.URL, filepath.Join(t.TempDir(), "media.jpg"))
+	}()
+	<-requestStarted
+	cancel()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("downloadMediaFileCache() error = nil after cancellation")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("downloadMediaFileCache() ignored parent cancellation")
+	}
+}
+
 func TestRewriteMediaFileCacheBaseURL(t *testing.T) {
 	got := rewriteMediaFileCacheBaseURL(
 		"https://cos.xiao-feiji.cc/hotgo/file/example.jpg?version=2",

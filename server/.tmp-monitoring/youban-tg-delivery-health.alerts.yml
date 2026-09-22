@@ -55,7 +55,16 @@ groups:
           category: publish
         annotations:
           summary: "TG 发送或对账任务卡住"
-          description: "当前有 {{ $value }} 个 sending/unknown 任务超过 5 分钟未更新"
+          description: "当前有 {{ $value }} 个 sending/unknown 任务超过 8 分钟未更新，自动恢复链路可能失效"
+      - alert: YoubanTelegramMessagePushStuck
+        expr: 'youban_tg_message_push_health_stuck_jobs > 0'
+        for: 2m
+        labels:
+          severity: CRIT
+          category: message_push
+        annotations:
+          summary: "TG 批量私推任务卡住"
+          description: "当前有 {{ $value }} 个批量私推任务超过 8 分钟未更新，请检查私推 Worker、目标频道和恢复链路"
       - alert: YoubanTelegramDeliveryMetricsMissing
         expr: 'absent_over_time(youban_tg_due_health_due_jobs[5m])'
         for: 2m

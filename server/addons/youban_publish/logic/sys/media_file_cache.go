@@ -32,6 +32,7 @@ const (
 	mediaFileCacheTargetRatio     = 0.9
 	mediaFileCachePruneInterval   = 5 * time.Minute
 	mediaFileCacheWorkerAttempts  = 3
+	mediaFileCacheDownloadTimeout = 90 * time.Second
 	mediaFileCacheCosModeCDN      = "cdn"
 	mediaFileCacheCosModeOrigin   = "origin"
 )
@@ -419,15 +420,15 @@ func cachedGeneratedMediaFile(ctx context.Context, key string, source string, ex
 }
 
 func downloadMediaFileCache(ctx context.Context, source string, filePath string) error {
-	downloadCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Minute)
+	downloadCtx, cancel := context.WithTimeout(ctx, mediaFileCacheDownloadTimeout)
 	defer cancel()
-	return downloadMediaFileCacheWithClient(downloadCtx, &http.Client{Timeout: 10 * time.Minute}, source, filePath)
+	return downloadMediaFileCacheWithClient(downloadCtx, &http.Client{Timeout: mediaFileCacheDownloadTimeout}, source, filePath)
 }
 
 func downloadWorkerMediaFileCache(ctx context.Context, source string, filePath string) error {
-	downloadCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Minute)
+	downloadCtx, cancel := context.WithTimeout(ctx, mediaFileCacheDownloadTimeout)
 	defer cancel()
-	return downloadMediaFileCacheWithRetry(downloadCtx, &http.Client{Timeout: 2 * time.Minute}, source, filePath, mediaFileCacheWorkerAttempts, time.Sleep)
+	return downloadMediaFileCacheWithRetry(downloadCtx, &http.Client{Timeout: mediaFileCacheDownloadTimeout}, source, filePath, mediaFileCacheWorkerAttempts, time.Sleep)
 }
 
 func downloadMediaFileCacheWithRetry(ctx context.Context, client *http.Client, source string, filePath string, attempts int, sleep func(time.Duration)) error {

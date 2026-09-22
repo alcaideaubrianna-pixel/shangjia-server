@@ -12,6 +12,8 @@ youban_tg_delivery_health:
            COALESCE(EXTRACT(EPOCH FROM (NOW() - MIN(updated_at))), 0)::bigint AS oldest_partial_age_seconds
     FROM hg_youban_publish_tg_job
     WHERE status IN ('sending','unknown')
+      AND operation_no NOT LIKE 'message_push:%'
+      AND operation_no NOT LIKE 'message_push_plan:%'
       AND send_phase IN ('display_confirmed','verify_sending')
       AND updated_at < NOW() - INTERVAL '1 minute'
   ttl: 30
@@ -84,10 +86,12 @@ youban_tg_dispatch_health:
     SELECT current_database() AS datname,
            COUNT(*) FILTER (WHERE dispatch_count > 10)::bigint AS loop_jobs,
            COALESCE(MAX(dispatch_count), 0)::bigint AS max_dispatch_count,
-           COUNT(*) FILTER (WHERE status IN ('sending','unknown') AND updated_at < NOW() - INTERVAL '5 minutes')::bigint AS stuck_jobs
+           COUNT(*) FILTER (WHERE status IN ('sending','unknown') AND updated_at < NOW() - INTERVAL '8 minutes')::bigint AS stuck_jobs
     FROM hg_youban_publish_tg_job
     WHERE status IN ('pending','failed_retry','sending','unknown')
-      AND (dispatch_count > 10 OR (status IN ('sending','unknown') AND updated_at < NOW() - INTERVAL '5 minutes'))
+      AND operation_no NOT LIKE 'message_push:%'
+      AND operation_no NOT LIKE 'message_push_plan:%'
+      AND (dispatch_count > 10 OR (status IN ('sending','unknown') AND updated_at < NOW() - INTERVAL '8 minutes'))
   ttl: 30
   timeout: 2
   tags: [ "dbname:railway" ]
@@ -95,7 +99,30 @@ youban_tg_dispatch_health:
     - datname: { usage: LABEL, description: database name }
     - loop_jobs: { usage: GAUGE, description: active Telegram jobs dispatched more than ten times }
     - max_dispatch_count: { usage: GAUGE, description: maximum dispatch count among abnormal active jobs }
-    - stuck_jobs: { usage: GAUGE, description: sending or unknown jobs unchanged for over five minutes }
+    - stuck_jobs: { usage: GAUGE, description: sending or unknown jobs unchanged beyond the eight-minute recovery window }
+
+youban_tg_message_push_health:
+  name: youban_tg_message_push_health
+  desc: Telegram message push jobs stuck beyond the recovery window
+  predicate_queries:
+    - name: tg job table exists
+      predicate_query: |
+        SELECT to_regclass('public.hg_youban_publish_tg_job') IS NOT NULL;
+  query: |-
+    SELECT current_database() AS datname,
+           COUNT(*)::bigint AS stuck_jobs,
+           COALESCE(EXTRACT(EPOCH FROM (NOW() - MIN(updated_at))), 0)::bigint AS oldest_stuck_age_seconds
+    FROM hg_youban_publish_tg_job
+    WHERE status IN ('sending','unknown')
+      AND (operation_no LIKE 'message_push:%' OR operation_no LIKE 'message_push_plan:%')
+      AND updated_at < NOW() - INTERVAL '8 minutes'
+  ttl: 30
+  timeout: 2
+  tags: [ "dbname:railway" ]
+  metrics:
+    - datname: { usage: LABEL, description: database name }
+    - stuck_jobs: { usage: GAUGE, description: message push jobs unchanged beyond the eight-minute recovery window }
+    - oldest_stuck_age_seconds: { usage: GAUGE, description: age of the oldest stuck message push job }
 
 youban_tg_progress:
   name: youban_tg_progress
