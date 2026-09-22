@@ -18,15 +18,16 @@ import (
 )
 
 const (
-	publishTgAttemptTable          = "hg_youban_publish_tg_attempt"
-	publishTgAttemptMessageTable   = "hg_youban_publish_tg_attempt_message"
-	telegramAttemptStatusSending   = "sending"
-	telegramAttemptStatusWaiting   = "awaiting_webhook"
-	telegramAttemptStatusConfirmed = "confirmed"
-	telegramAttemptStatusRetryWait = "retry_wait"
-	telegramAttemptWebhookWait     = 15 * time.Second
-	telegramAttemptLateGrace       = 15 * time.Second
-	telegramAttemptMaxRetries      = 3
+	publishTgAttemptTable           = "hg_youban_publish_tg_attempt"
+	publishTgAttemptMessageTable    = "hg_youban_publish_tg_attempt_message"
+	telegramAttemptStatusSending    = "sending"
+	telegramAttemptStatusWaiting    = "awaiting_webhook"
+	telegramAttemptStatusConfirmed  = "confirmed"
+	telegramAttemptStatusRetryWait  = "retry_wait"
+	telegramAttemptStatusSuperseded = "superseded"
+	telegramAttemptWebhookWait      = 15 * time.Second
+	telegramAttemptLateGrace        = 15 * time.Second
+	telegramAttemptMaxRetries       = 3
 )
 
 var errTelegramAwaitingWebhook = gerror.New("等待Telegram Webhook确认")
@@ -56,6 +57,9 @@ func (s *sSysPublish) beginTelegramDeliveryAttempt(ctx context.Context, job tele
 	if err != nil {
 		return attempt, gerror.Wrap(err, "读取TG发送尝试次数失败")
 	}
+	if err = s.supersedeExpiredTelegramAttempts(ctx, job.Id, phase); err != nil {
+		return attempt, err
+	}
 	attempt = telegramDeliveryAttempt{
 		JobId: job.Id, TenantId: job.TenantId, BotId: job.BotId, ChannelId: job.ChannelId,
 		TargetChatId: normalizeTelegramChannelChatID(job.TargetChatId), Phase: phase,
@@ -73,6 +77,29 @@ func (s *sSysPublish) beginTelegramDeliveryAttempt(ctx context.Context, job tele
 		return attempt, gerror.Wrap(err, "创建TG发送Attempt失败")
 	}
 	return attempt, nil
+}
+
+func (s *sSysPublish) supersedeExpiredTelegramAttempts(ctx context.Context, jobId int64, phase string) error {
+	_, err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
+		Where("job_id", jobId).Where("phase", phase).
+		Where("status", telegramAttemptStatusRetryWait).
+		Where("webhook_deadline IS NULL OR webhook_deadline <= ?", gtime.Now().Add(-telegramAttemptLateGrace)).
+		Data(g.Map{"status": telegramAttemptStatusSuperseded, "webhook_deadline": nil, "updated_at": gtime.Now()}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "关闭过期TG发送Attempt失败")
+	}
+	return nil
+}
+
+func (s *sSysPublish) supersedeOpenTelegramAttempts(ctx context.Context, jobId int64) error {
+	_, err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
+		Where("job_id", jobId).
+		WhereIn("status", []string{telegramAttemptStatusSending, telegramAttemptStatusWaiting, telegramAttemptStatusRetryWait}).
+		Data(g.Map{"status": telegramAttemptStatusSuperseded, "webhook_deadline": nil, "updated_at": gtime.Now()}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "关闭TG任务遗留Attempt失败")
+	}
+	return nil
 }
 
 func telegramAttemptMarker(token string) string {

@@ -54,3 +54,13 @@ func TestTelegramVerifyFreshUploadUsesMediaTypeFallback(t *testing.T) {
 		t.Fatal("fresh upload should match the sole short-lived attempt by normalized media type")
 	}
 }
+
+func TestTelegramAttemptTerminalStatusesAreDistinct(t *testing.T) {
+	statuses := map[string]struct{}{
+		telegramAttemptStatusConfirmed:  {},
+		telegramAttemptStatusSuperseded: {},
+	}
+	if len(statuses) != 2 {
+		t.Fatal("confirmed and superseded attempts must remain distinguishable")
+	}
+}

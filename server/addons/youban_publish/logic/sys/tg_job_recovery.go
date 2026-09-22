@@ -65,6 +65,9 @@ func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 	if err := s.recoverStaleTelegramSendingJobs(ctx, 100); err != nil {
 		g.Log().Warningf(ctx, "恢复卡住的TG推送任务失败：%+v", err)
 	}
+	if err := s.recoverTerminalTelegramAttempts(ctx, 500); err != nil {
+		g.Log().Warningf(ctx, "收敛TG发送Attempt状态失败：%+v", err)
+	}
 	if err := s.recoverPendingIdleTelegramJobs(ctx, 500); err != nil {
 		g.Log().Warningf(ctx, "恢复待入队TG推送任务失败：%+v", err)
 	}
@@ -82,6 +85,9 @@ func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if err := s.recoverTerminalTelegramAttempts(ctx, 500); err != nil {
+				g.Log().Warningf(ctx, "收敛TG发送Attempt状态失败：%+v", err)
+			}
 			if err := s.supersedeExpiredMessagePushPlanJobs(ctx, 1000); err != nil {
 				g.Log().Warningf(ctx, "终止过期历史消息计划任务失败：%+v", err)
 			}
@@ -102,6 +108,36 @@ func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 			}
 		}
 	}
+}
+
+func (s *sSysPublish) recoverTerminalTelegramAttempts(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		limit = 100
+	}
+	var ids []int64
+	err := g.DB().Model(publishTgAttemptTable+" attempt").Safe().Ctx(ctx).
+		InnerJoin(publishTgJobTable+" job", "job.id=attempt.job_id").
+		Fields("attempt.id").
+		WhereIn("attempt.status", []string{telegramAttemptStatusSending, telegramAttemptStatusWaiting, telegramAttemptStatusRetryWait}).
+		WhereIn("job.status", []string{"sent", "failed", "superseded"}).
+		OrderAsc("attempt.id").Limit(limit).Scan(&ids)
+	if err != nil {
+		return gerror.Wrap(err, "读取终态TG任务遗留Attempt失败")
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	result, err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
+		WhereIn("id", ids).
+		WhereIn("status", []string{telegramAttemptStatusSending, telegramAttemptStatusWaiting, telegramAttemptStatusRetryWait}).
+		Data(g.Map{"status": telegramAttemptStatusSuperseded, "webhook_deadline": nil, "updated_at": gtime.Now()}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "收敛终态TG任务遗留Attempt失败")
+	}
+	if affected, _ := result.RowsAffected(); affected > 0 {
+		g.Log().Infof(ctx, "已收敛终态TG任务遗留Attempt：%d条", affected)
+	}
+	return nil
 }
 
 func (s *sSysPublish) recoverStaleTelegramDispatchJobs(ctx context.Context, limit int) error {

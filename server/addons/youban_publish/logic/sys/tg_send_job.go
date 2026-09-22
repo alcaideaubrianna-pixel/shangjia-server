@@ -683,6 +683,9 @@ func (s *sSysPublish) completeTelegramJobLockedByProfile(ctx context.Context, jo
 		return nil
 	}
 	job.SentAt = sentAt
+	if attemptErr := s.supersedeOpenTelegramAttempts(ctx, job.Id); attemptErr != nil {
+		g.Log().Warningf(ctx, "关闭TG任务遗留Attempt失败 jobId:%d err:%+v", job.Id, attemptErr)
+	}
 	s.markTelegramLastSuccess(ctx, job, sentAt)
 	s.appendTelegramJobLog(ctx, job, "publish", "sent", s.telegramJobPublishMessage(ctx, job, "TG资料推送成功"))
 	if recordErr := s.appendPublishSuccessRecord(ctx, job); recordErr != nil {
