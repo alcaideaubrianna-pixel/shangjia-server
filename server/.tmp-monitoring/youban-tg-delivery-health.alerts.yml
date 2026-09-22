@@ -30,14 +30,14 @@ groups:
           summary: "TG 验证资料发送延迟"
           description: "当前有 {{ $value }} 个任务展示阶段完成后超过 1 分钟仍未发送验证资料"
       - alert: YoubanTelegramDueWithoutActive
-        expr: 'youban_tg_due_health_oldest_due_age_seconds > 300 and on(datname) youban_tg_due_health_due_without_active > 0'
+        expr: 'youban_tg_due_health_oldest_without_active_age_seconds > 300 and on(datname) youban_tg_due_health_due_without_active > 0'
         for: 5m
         labels:
           severity: WARN
           category: publish
         annotations:
           summary: "TG 到期任务缺少活动发送者"
-          description: "存在无活动发送者的到期任务，最老任务已等待 {{ $value }} 秒，可能发生频道饥饿或锁残留"
+          description: "存在无活动发送者且连续 5 分钟无发送进度的频道，最老任务已等待 {{ $value }} 秒"
       - alert: YoubanTelegramDispatchLoop
         expr: 'youban_tg_dispatch_health_loop_jobs > 0'
         for: 5m

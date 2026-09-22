@@ -31,20 +31,38 @@ youban_tg_due_health:
       predicate_query: |
         SELECT to_regclass('public.hg_youban_publish_tg_job') IS NOT NULL;
   query: |-
-    WITH active_chat AS MATERIALIZED (
-      SELECT DISTINCT target_chat_id
+    WITH due_channel AS MATERIALIZED (
+      SELECT tenant_id, channel_id, target_chat_id,
+             COUNT(*)::bigint AS due_jobs,
+             MIN(COALESCE(next_retry_at, created_at)) AS oldest_due_at
       FROM hg_youban_publish_tg_job
-      WHERE status = 'sending' AND dispatch_status = 'processing'
+      WHERE status IN ('pending','failed_retry')
+        AND dispatch_status IN ('idle','queued')
+        AND COALESCE(next_retry_at, created_at) <= NOW()
+      GROUP BY tenant_id, channel_id, target_chat_id
+    ), active_channel AS MATERIALIZED (
+      SELECT DISTINCT tenant_id, channel_id
+      FROM hg_youban_publish_tg_job
+      WHERE status IN ('sending','unknown')
+         OR (status IN ('pending','failed_retry') AND dispatch_status IN ('queued','processing'))
+    ), recent_progress AS MATERIALIZED (
+      SELECT tenant_id, channel_id, MAX(sent_at) AS last_sent_at
+      FROM hg_youban_publish_tg_job
+      WHERE sent_at > NOW() - INTERVAL '1 hour'
+      GROUP BY tenant_id, channel_id
+    ), stalled AS MATERIALIZED (
+      SELECT d.*
+      FROM due_channel d
+      LEFT JOIN active_channel a USING (tenant_id, channel_id)
+      LEFT JOIN recent_progress p USING (tenant_id, channel_id)
+      WHERE a.channel_id IS NULL
+        AND (p.last_sent_at IS NULL OR p.last_sent_at < NOW() - INTERVAL '5 minutes')
     )
     SELECT current_database() AS datname,
-           COUNT(*)::bigint AS due_jobs,
-           COALESCE(EXTRACT(EPOCH FROM (NOW() - MIN(COALESCE(j.next_retry_at, j.created_at)))), 0)::bigint AS oldest_due_age_seconds,
-           COUNT(*) FILTER (WHERE a.target_chat_id IS NULL)::bigint AS due_without_active
-    FROM hg_youban_publish_tg_job j
-    LEFT JOIN active_chat a ON a.target_chat_id = j.target_chat_id
-    WHERE j.status IN ('pending','failed_retry')
-      AND j.dispatch_status IN ('idle','queued')
-      AND COALESCE(j.next_retry_at, j.created_at) <= NOW()
+           COALESCE((SELECT SUM(due_jobs) FROM due_channel), 0)::bigint AS due_jobs,
+           COALESCE(EXTRACT(EPOCH FROM (NOW() - (SELECT MIN(oldest_due_at) FROM due_channel))), 0)::bigint AS oldest_due_age_seconds,
+           COALESCE((SELECT COUNT(*) FROM stalled), 0)::bigint AS due_without_active,
+           COALESCE(EXTRACT(EPOCH FROM (NOW() - (SELECT MIN(oldest_due_at) FROM stalled))), 0)::bigint AS oldest_without_active_age_seconds
   ttl: 30
   timeout: 2
   tags: [ "dbname:railway" ]
@@ -53,6 +71,7 @@ youban_tg_due_health:
     - due_jobs: { usage: GAUGE, description: due Telegram publishing jobs }
     - oldest_due_age_seconds: { usage: GAUGE, description: oldest due Telegram publishing job age }
     - due_without_active: { usage: GAUGE, description: due jobs whose target channel has no active sender }
+    - oldest_without_active_age_seconds: { usage: GAUGE, description: age of the oldest due channel with no active sender and no progress for five minutes }
 
 youban_tg_dispatch_health:
   name: youban_tg_dispatch_health

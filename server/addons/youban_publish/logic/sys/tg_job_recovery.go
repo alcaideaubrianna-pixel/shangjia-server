@@ -365,7 +365,9 @@ func (s *sSysPublish) supersedeExpiredMessagePushPlanJobs(ctx context.Context, l
 		limit = 100
 	}
 	deadline := telegramRecoveryTimeText(gtime.Now().Add(-messagePushPlanJobExpireAfter))
-	var ids []int64
+	var rows []struct {
+		Id int64 `json:"id"`
+	}
 	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Fields("id").
 		Where("operation_no LIKE ?", "message_push_plan:%").
@@ -373,8 +375,14 @@ func (s *sSysPublish) supersedeExpiredMessagePushPlanJobs(ctx context.Context, l
 		WhereLT("created_at", deadline).
 		OrderAsc("id").
 		Limit(limit).
-		Scan(&ids); err != nil {
+		Scan(&rows); err != nil {
 		return gerror.Wrap(err, "读取过期历史消息计划任务失败")
+	}
+	ids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		if row.Id > 0 {
+			ids = append(ids, row.Id)
+		}
 	}
 	if len(ids) == 0 {
 		return nil
