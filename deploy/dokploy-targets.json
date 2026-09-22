@@ -1,4 +1,5 @@
 {
+  "image": "ghcr.io/alcaideaubrianna-pixel/youban-server",
   "targets": [
     {
       "name": "xiaohuiji-api",
@@ -7,19 +8,28 @@
       "order": 10,
       "waitSeconds": 30,
       "healthUrl": "https://api.xiaohuiji.cc/readyz",
-      "verifyRevision": true
+      "verifyRevision": true,
+      "applicationId": "weBRBJ19sGcRH53vllDU7",
+      "appName": "xiaohuiji-api-y2dif1",
+      "serverId": "O1C4Nk9JMWZxnLU4bnWba"
     },
     {
       "name": "xiaohuiji-account",
       "webhook": "https://dokploy.xiao-feiji.cc/api/deploy/41Qhv-ZsLLGaJ_-j9lU5o",
       "enabled": true,
-      "order": 20
+      "order": 20,
+      "applicationId": "uWbYT-orP4LsukA0zcGEs",
+      "appName": "xiaohuiji-account-o42tsw",
+      "serverId": "O1C4Nk9JMWZxnLU4bnWba"
     },
     {
       "name": "xiaohuiji-scheduler",
       "webhook": "https://dokploy.xiao-feiji.cc/api/deploy/EFYpEGNqynD_KC4a_pssf",
       "enabled": true,
-      "order": 30
+      "order": 30,
+      "applicationId": "vvUIqyzXxJT7hKYslxRz9",
+      "appName": "xiaohuiji-scheduler-lgcfj8",
+      "serverId": "O1C4Nk9JMWZxnLU4bnWba"
     },
     {
       "name": "xiaohuiji-worker-app2",
@@ -31,13 +41,19 @@
       "name": "xiaohuiji-publish-worker-app2",
       "webhook": "https://dokploy.xiao-feiji.cc/api/deploy/OiC9KJQmtaow4xF-BqrageSrRw76Yb9l",
       "enabled": true,
-      "order": 42
+      "order": 42,
+      "applicationId": "p9xlEU5WNpQ3dnnqi6nYS",
+      "appName": "xiaohuiji-media-worker-hyvozv",
+      "serverId": "KZlD5IuDm0pmjLHm2wyW7"
     },
     {
       "name": "xiaohuiji-worker-app4",
       "webhook": "https://dokploy.xiao-feiji.cc/api/deploy/6YtDmsmnkJ-cwqdqTT2GL",
       "enabled": true,
-      "order": 45
+      "order": 45,
+      "applicationId": "TehnN9c60N4YzeLlWZebu",
+      "appName": "xiaohuiji-worker-app4-ts0kjb",
+      "serverId": "A-M6aJ_9UM2Oj_mNH_qMl"
     },
     {
       "name": "xiaohuiji-worker-app3",
@@ -49,13 +65,19 @@
       "name": "xiaohuiji-media-worker-app3",
       "webhook": "https://dokploy.xiao-feiji.cc/api/deploy/e7Cv2URu_o93FAioDASdi",
       "enabled": true,
-      "order": 60
+      "order": 60,
+      "applicationId": "AwryJ2f51rm_KVM42Weth",
+      "appName": "xiaohuiji-media-worker-app3-wvbun3",
+      "serverId": "9UrzWwQ3LfOHWYx8e1D6v"
     },
     {
       "name": "xiaohuiji-collector-worker-app3",
       "webhook": "https://dokploy.xiao-feiji.cc/api/deploy/4aIUrakpVyEQQ_n_H6Y6M",
       "enabled": true,
-      "order": 70
+      "order": 70,
+      "applicationId": "kc6W-HuLIKblfFGogpLNe",
+      "appName": "xiaohuiji-collector-worker-app3-gdbxr3",
+      "serverId": "9UrzWwQ3LfOHWYx8e1D6v"
     },
     {
       "name": "xiaohuiji-publish-worker-app1",
@@ -67,7 +89,10 @@
       "name": "xiaohuiji-publish-worker-app3",
       "webhook": "https://dokploy.xiao-feiji.cc/api/deploy/PkDBNLuoWkOSrLP6C5LAO",
       "enabled": true,
-      "order": 90
+      "order": 90,
+      "applicationId": "WE54eehevISDrfSYUkeT_",
+      "appName": "xiaohuiji-publish-worker-app3-tapeq2",
+      "serverId": "9UrzWwQ3LfOHWYx8e1D6v"
     }
   ]
 }

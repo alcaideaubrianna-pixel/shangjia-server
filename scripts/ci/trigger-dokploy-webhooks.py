@@ -16,12 +16,16 @@ DEFAULT_RETRIES = 3
 # Wait through a start-first rollout and image extraction on slower nodes.
 DEFAULT_HEALTH_RETRIES = 60
 DEFAULT_REVISION_CONFIRMATIONS = 5
+DEFAULT_RUNTIME_RETRIES = 60
 
 
 def load_targets(path):
     with Path(path).open(encoding="utf-8") as handle:
         document = json.load(handle)
 
+    image = str(document.get("image", "")).strip()
+    if not image:
+        raise ValueError("image is required")
     targets = document.get("targets")
     if not isinstance(targets, list):
         raise ValueError("targets must be a list")
@@ -48,6 +52,9 @@ def load_targets(path):
 
         if target.get("enabled") is not True:
             continue
+        for field in ("applicationId", "appName", "serverId"):
+            if not str(target.get(field, "")).strip():
+                raise ValueError(f"enabled target {name} requires {field}")
         webhook = str(target.get("webhook", "")).strip()
         parsed = urllib.parse.urlparse(webhook)
         if parsed.scheme != "https" or not parsed.netloc:
@@ -67,6 +74,10 @@ def load_targets(path):
             "wait_seconds": wait_seconds,
             "health_url": health_url,
             "verify_revision": target.get("verifyRevision") is True,
+            "application_id": str(target["applicationId"]).strip(),
+            "app_name": str(target["appName"]).strip(),
+            "server_id": str(target["serverId"]).strip(),
+            "image": image,
         })
 
     return sorted(enabled, key=lambda item: item["order"])
@@ -82,6 +93,97 @@ def post(url, payload, timeout=DEFAULT_TIMEOUT_SECONDS):
     with urllib.request.urlopen(request, timeout=timeout) as response:
         response.read()
         return response.status
+
+
+def dokploy_request(path, payload=None, query=None, timeout=DEFAULT_TIMEOUT_SECONDS):
+    base_url = os.environ.get("DOKPLOY_URL", "").strip().rstrip("/")
+    api_key = os.environ.get("DOKPLOY_API_KEY", "").strip()
+    if not base_url or not api_key:
+        raise RuntimeError("DOKPLOY_URL and DOKPLOY_API_KEY are required")
+    url = f"{base_url}/api/{path}"
+    if query:
+        url = f"{url}?{urllib.parse.urlencode(query)}"
+    data = None if payload is None else json.dumps(payload).encode("utf-8")
+    request = urllib.request.Request(
+        url,
+        data=data,
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "youban-deploy-ci/1.0",
+            "x-api-key": api_key,
+        },
+        method="GET" if payload is None else "POST",
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        body = response.read()
+        if not 200 <= response.status < 300:
+            raise RuntimeError(f"Dokploy API {path} returned HTTP {response.status}")
+    try:
+        result = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise RuntimeError(f"Dokploy API {path} returned invalid JSON: {error}") from error
+    if isinstance(result, dict) and result.get("success") is False:
+        raise RuntimeError(f"Dokploy API {path} failed: {result.get('message', 'unknown error')}")
+    return result.get("data", result) if isinstance(result, dict) else result
+
+
+def pin_target_image(target, version):
+    image = f"{target['image']}:{version}"
+    dokploy_request("application.update", {
+        "applicationId": target["application_id"],
+        "dockerImage": image,
+    })
+    application = dokploy_request(
+        "application.one", query={"applicationId": target["application_id"]},
+    )
+    if application.get("dockerImage") != image:
+        raise RuntimeError(
+            f"Dokploy image is {application.get('dockerImage')!r}, expected {image!r}"
+        )
+    return image
+
+
+def running_container_images(target):
+    containers = dokploy_request("docker.getServiceContainersByAppName", query={
+        "appName": target["app_name"],
+        "serverId": target["server_id"],
+    })
+    images = []
+    for container in containers or []:
+        if container.get("state") != "running":
+            continue
+        config = dokploy_request("docker.getConfig", query={
+            "containerId": container.get("containerId", ""),
+            "serverId": target["server_id"],
+        })
+        image = (((config or {}).get("Spec") or {}).get("ContainerSpec") or {}).get("Image")
+        images.append(str(image or ""))
+    return images
+
+
+def wait_for_running_image(target, expected_image, retries=DEFAULT_RUNTIME_RETRIES, sleep=time.sleep):
+    last_images = []
+    for attempt in range(1, retries + 1):
+        try:
+            last_images = running_container_images(target)
+            if last_images and all(image == expected_image for image in last_images):
+                print(
+                    f"runtime check {target['name']}: attempt {attempt}/{retries}, "
+                    f"running={len(last_images)} image={expected_image}",
+                    flush=True,
+                )
+                return
+        except (urllib.error.URLError, TimeoutError, RuntimeError) as error:
+            last_images = [f"error: {error}"]
+        print(
+            f"runtime check {target['name']}: attempt {attempt}/{retries} "
+            f"images={last_images!r}, expected={expected_image!r}",
+            file=sys.stderr,
+            flush=True,
+        )
+        if attempt < retries:
+            sleep(5)
+    raise RuntimeError(f"running container image mismatch: {last_images!r}")
 
 
 def trigger(target, version, retries=DEFAULT_RETRIES, sleep=time.sleep):
@@ -206,6 +308,7 @@ def main(argv=None):
         print("no Dokploy targets enabled; deployment skipped")
         return 0
 
+    failures = []
     for target in targets:
         name = target["name"]
         if args.dry_run:
@@ -213,21 +316,28 @@ def main(argv=None):
             continue
         print(f"triggering {name} ({args.version})", flush=True)
         try:
+            expected_image = pin_target_image(target, args.version)
             trigger(target, args.version)
             wait_until_healthy(target, args.revision or args.version)
-        except RuntimeError as error:
+            wait_for_running_image(target, expected_image)
+        except (urllib.error.URLError, TimeoutError, RuntimeError) as error:
+            failures.append((name, str(error)))
             send_telegram(
                 f"❌ <b>{escape(name)} 部署触发失败</b>\n"
                 f"版本：<code>{escape(args.version)}</code>\n"
                 f"错误：<code>{escape(str(error))}</code>"
             )
             print(f"failed to trigger {name}: {error}", file=sys.stderr)
-            return 1
+            continue
         send_telegram(
             f"🚀 <b>{escape(name)} 已触发部署</b>\n"
             f"版本：<code>{escape(args.version)}</code>"
         )
         print(f"triggered {name}", flush=True)
+    if failures:
+        summary = "; ".join(f"{name}: {error}" for name, error in failures)
+        print(f"deployment failures: {summary}", file=sys.stderr)
+        return 1
     return 0
 
 

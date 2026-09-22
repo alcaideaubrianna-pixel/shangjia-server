@@ -3,8 +3,15 @@
 The production server image is built once from
 `feat/railway-runtime-ci-split` and published to GHCR with two tags:
 
-- `feat-railway-runtime-ci-split`: the fixed tag configured in Dokploy
+- `feat-railway-runtime-ci-split`: a convenience tag; production does not deploy it
 - `sha-<short-commit>`: an immutable audit and rollback tag
+
+Before each deployment, CI uses the Dokploy API to set every enabled
+application's `dockerImage` to the immutable `sha-<short-commit>` tag. It then
+triggers the deploy webhook and reads the running Swarm task through Dokploy's
+Docker API. A target is successful only when every running task uses the exact
+immutable image. A webhook response or a saved application setting alone is
+not treated as deployment success.
 
 Deployment targets are maintained in `deploy/dokploy-targets.json`. Targets
 are called sequentially by ascending `order`. A target is skipped unless its
@@ -14,11 +21,18 @@ are called sequentially by ascending `order`. A target is skipped unless its
 
 For every Dokploy application:
 
-1. Set the Docker image to
-   `ghcr.io/alcaideaubrianna-pixel/youban-server:feat-railway-runtime-ci-split`.
+1. Set an initial immutable Docker image such as
+   `ghcr.io/alcaideaubrianna-pixel/youban-server:sha-<commit>`.
 2. Configure GHCR credentials that can pull this private package.
 3. Copy the application deploy webhook into `deploy/dokploy-targets.json`.
 4. Set `enabled` to `true` only after that runtime has completed cutover.
+5. Add `applicationId`, the Dokploy-generated `appName`, and `serverId` to the
+   target. These fields are used for image pinning and runtime verification.
+
+GitHub Actions requires two repository secrets:
+
+- `DOKPLOY_URL`: the Dokploy base URL
+- `DOKPLOY_API_KEY`: an API key with application update and Docker read access
 
 The webhook URL contains a deployment token. This project intentionally keeps
 these URLs in `deploy/dokploy-targets.json` for centralized maintenance. The
@@ -29,9 +43,9 @@ GitHub Actions triggers targets by ascending `order`. After triggering a
 target, it waits for `waitSeconds`; when `healthUrl` is configured, deployment
 continues only after the endpoint returns HTTP 2xx. When `verifyRevision` is
 enabled, CI also requires consecutive responses from the requested Git
-revision. This prevents one healthy new replica from hiding an old replica
-during a rolling update. Put the API first so a failed rolling update stops
-deployment before singleton services and workers.
+revision. Runtime image verification applies to every target, including
+workers without an HTTP endpoint. A failed target is recorded while remaining
+targets continue; the job reports all failures and exits non-zero at the end.
 
 ## Migration order
 

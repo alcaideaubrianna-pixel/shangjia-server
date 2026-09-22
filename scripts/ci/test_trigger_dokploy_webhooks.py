@@ -34,16 +34,18 @@ class TriggerDokployWebhooksTest(unittest.TestCase):
 
     def write_config(self, targets):
         handle = tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False)
-        json.dump({"targets": targets}, handle)
+        json.dump({"image": "registry.example.com/server", "targets": targets}, handle)
         handle.close()
         self.addCleanup(Path(handle.name).unlink)
         return handle.name
 
     def test_loads_only_enabled_targets_in_order(self):
         path = self.write_config([
-            {"name": "second", "webhook": "https://example.com/2", "enabled": True, "order": 20},
+            {"name": "second", "webhook": "https://example.com/2", "enabled": True, "order": 20,
+             "applicationId": "app-2", "appName": "second-app", "serverId": "server-1"},
             {"name": "disabled", "webhook": "", "enabled": False, "order": 30},
-            {"name": "first", "webhook": "https://example.com/1", "enabled": True, "order": 10},
+            {"name": "first", "webhook": "https://example.com/1", "enabled": True, "order": 10,
+             "applicationId": "app-1", "appName": "first-app", "serverId": "server-1"},
         ])
 
         targets = MODULE.load_targets(path)
@@ -52,7 +54,8 @@ class TriggerDokployWebhooksTest(unittest.TestCase):
 
     def test_enabled_target_requires_https_webhook(self):
         path = self.write_config([
-            {"name": "api", "webhook": "http://example.com/deploy", "enabled": True, "order": 10},
+            {"name": "api", "webhook": "http://example.com/deploy", "enabled": True, "order": 10,
+             "applicationId": "app-1", "appName": "api-app", "serverId": "server-1"},
         ])
 
         with self.assertRaisesRegex(ValueError, "requires an HTTPS webhook"):
@@ -64,6 +67,28 @@ class TriggerDokployWebhooksTest(unittest.TestCase):
             MODULE.trigger(target, "sha-1234567", sleep=lambda _: None)
 
         self.assertEqual(2, post.call_count)
+
+    def test_pin_target_image_updates_and_confirms_immutable_image(self):
+        target = {"application_id": "app-1", "image": "registry.example.com/server"}
+        with mock.patch.object(MODULE, "dokploy_request", side_effect=[{}, {
+            "dockerImage": "registry.example.com/server:sha-1234567",
+        }]) as request:
+            image = MODULE.pin_target_image(target, "sha-1234567")
+
+        self.assertEqual("registry.example.com/server:sha-1234567", image)
+        self.assertEqual("application.update", request.call_args_list[0].args[0])
+
+    def test_runtime_check_requires_all_running_containers_on_expected_image(self):
+        target = {"name": "worker"}
+        with mock.patch.object(MODULE, "running_container_images", side_effect=[
+            ["registry/server:old", "registry/server:sha-1234567"],
+            ["registry/server:sha-1234567"],
+        ]) as images:
+            MODULE.wait_for_running_image(
+                target, "registry/server:sha-1234567", retries=2, sleep=lambda _: None,
+            )
+
+        self.assertEqual(2, images.call_count)
 
     def test_wait_until_healthy_waits_for_success(self):
         target = {
@@ -125,6 +150,27 @@ class TriggerDokployWebhooksTest(unittest.TestCase):
         ])
 
         self.assertEqual(0, MODULE.main(["--config", path, "--version", "sha-1234567"]))
+
+    def test_main_continues_after_target_failure_and_returns_failure(self):
+        targets = [
+            {"name": "first", "application_id": "app-1"},
+            {"name": "second", "application_id": "app-2"},
+        ]
+        with mock.patch.object(MODULE, "load_targets", return_value=targets), \
+                mock.patch.object(MODULE, "pin_target_image", side_effect=[
+                    RuntimeError("update failed"), "registry/server:sha-1234567",
+                ]), \
+                mock.patch.object(MODULE, "trigger") as trigger, \
+                mock.patch.object(MODULE, "wait_until_healthy"), \
+                mock.patch.object(MODULE, "wait_for_running_image"), \
+                mock.patch.object(MODULE, "send_telegram"):
+            result = MODULE.main([
+                "--config", "unused.json", "--version", "sha-1234567",
+                "--revision", "1234567",
+            ])
+
+        self.assertEqual(1, result)
+        trigger.assert_called_once_with(targets[1], "sha-1234567")
 
 
 if __name__ == "__main__":
