@@ -120,16 +120,19 @@ func (s *sSysPublish) requeueExpiredTelegramAttempts(ctx context.Context, limit 
 	if limit <= 0 {
 		limit = 100
 	}
-	var ids []int64
+	var rows []struct {
+		Id int64 `json:"id"`
+	}
 	err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
 		Fields("id").Where("status", telegramAttemptStatusWaiting).
 		WhereLTE("webhook_deadline", gtime.Now().Add(-5*time.Second)).
-		OrderAsc("webhook_deadline").OrderAsc("id").Limit(limit).Scan(&ids)
+		OrderAsc("webhook_deadline").OrderAsc("id").Limit(limit).Scan(&rows)
 	if err != nil {
 		return gerror.Wrap(err, "读取过期TG发送Attempt失败")
 	}
 	queued := 0
-	for _, attemptId := range ids {
+	for _, row := range rows {
+		attemptId := row.Id
 		enqueued, enqueueErr := s.enqueueTelegramAttemptTimeout(ctx, attemptId, 0)
 		if enqueueErr != nil {
 			err = enqueueErr
@@ -150,18 +153,24 @@ func (s *sSysPublish) recoverTerminalTelegramAttempts(ctx context.Context, limit
 	if limit <= 0 {
 		limit = 100
 	}
-	var ids []int64
+	var rows []struct {
+		Id int64 `json:"id"`
+	}
 	err := g.DB().Model(publishTgAttemptTable+" attempt").Safe().Ctx(ctx).
 		InnerJoin(publishTgJobTable+" job", "job.id=attempt.job_id").
 		Fields("attempt.id").
 		WhereIn("attempt.status", []string{telegramAttemptStatusSending, telegramAttemptStatusWaiting, telegramAttemptStatusRetryWait}).
 		WhereIn("job.status", []string{"sent", "failed", "superseded"}).
-		OrderAsc("attempt.id").Limit(limit).Scan(&ids)
+		OrderAsc("attempt.id").Limit(limit).Scan(&rows)
 	if err != nil {
 		return gerror.Wrap(err, "读取终态TG任务遗留Attempt失败")
 	}
-	if len(ids) == 0 {
+	if len(rows) == 0 {
 		return nil
+	}
+	ids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.Id)
 	}
 	result, err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
 		WhereIn("id", ids).
