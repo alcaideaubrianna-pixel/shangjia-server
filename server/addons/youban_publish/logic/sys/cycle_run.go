@@ -393,6 +393,7 @@ func (s *sSysPublish) channelCyclePage(ctx context.Context, channel channelCycle
 		rows, err := g.DB().GetAll(ctx, `SELECT * FROM (SELECT MIN(r.id) AS id,r.tenant_id,MAX(j.account_id) AS account_id,r.profile_id,r.channel_id
 	FROM hg_youban_publish_success_record r JOIN hg_youban_publish_tg_job j ON j.id=r.job_id
 	WHERE r.tenant_id=? AND r.channel_id=? AND r.status='success'
+		AND `+cycleProfileMediaAvailableSQL("r.profile_id")+`
 	GROUP BY r.tenant_id,r.channel_id,r.profile_id) q
 	WHERE id > ? ORDER BY id ASC LIMIT ?`, channel.TenantId, channel.Id, cursorId, limit)
 		if err != nil {

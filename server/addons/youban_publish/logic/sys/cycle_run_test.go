@@ -1,11 +1,26 @@
 package sys
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/gogf/gf/v2/os/gtime"
 )
+
+func TestCycleProfileMediaAvailableSQLExcludesUnrecoverableTelegramMedia(t *testing.T) {
+	condition := cycleProfileMediaAvailableSQL("r.profile_id")
+	for _, fragment := range []string{
+		"m.profile_id=r.profile_id",
+		"m.processing_status='failed'",
+		"COALESCE(m.storage_path,'')=''",
+		"m.file_url LIKE 'https://api.telegram.org/file/bot%'",
+	} {
+		if !strings.Contains(condition, fragment) {
+			t.Fatalf("cycle media condition missing %q: %s", fragment, condition)
+		}
+	}
+}
 
 func TestCyclePublishIdentifiers(t *testing.T) {
 	operationNo := cyclePublishOperationNo(12, 34, 56)

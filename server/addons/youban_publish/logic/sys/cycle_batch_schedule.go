@@ -117,8 +117,22 @@ func (s *sSysPublish) createScheduledBatchCycleRun(ctx context.Context, channel 
 }
 
 func (s *sSysPublish) batchCycleCandidateCount(ctx context.Context, tenantId, channelId, cursor int64) (int, error) {
-	sql := `(SELECT MIN(id) AS id FROM hg_youban_publish_success_record WHERE tenant_id=? AND channel_id=? AND status='success' GROUP BY profile_id) q`
+	sql := `(SELECT MIN(r.id) AS id
+		FROM hg_youban_publish_success_record r
+		WHERE r.tenant_id=? AND r.channel_id=? AND r.status='success'
+			AND ` + cycleProfileMediaAvailableSQL("r.profile_id") + `
+		GROUP BY r.profile_id) q`
 	return g.DB().Model(sql, tenantId, channelId).Safe().Ctx(ctx).WhereGT("id", cursor).Count()
+}
+
+func cycleProfileMediaAvailableSQL(profileField string) string {
+	return `NOT EXISTS (
+		SELECT 1 FROM ` + publishMediaTable + ` m
+		WHERE m.profile_id=` + profileField + ` AND m.status=1 AND m.deleted_at IS NULL
+			AND m.processing_status='failed'
+			AND COALESCE(m.storage_path,'')=''
+			AND m.file_url LIKE 'https://api.telegram.org/file/bot%'
+	)`
 }
 
 func nextBatchCycleAt(clock string, base time.Time) *gtime.Time {
