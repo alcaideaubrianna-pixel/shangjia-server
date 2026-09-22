@@ -170,7 +170,8 @@ func (s *sSysPublish) waitTelegramDeliveryWebhook(ctx context.Context, attempt t
 	if err != nil {
 		return gerror.Wrap(err, "设置TG任务等待Webhook失败")
 	}
-	return s.enqueueTelegramAttemptTimeout(ctx, attempt.Id, telegramAttemptWebhookWait)
+	_, err = s.enqueueTelegramAttemptTimeout(ctx, attempt.Id, telegramAttemptWebhookWait)
+	return err
 }
 
 func (s *sSysPublish) telegramAttemptById(ctx context.Context, attemptId int64) (telegramDeliveryAttempt, error) {
@@ -191,7 +192,8 @@ func (s *sSysPublish) handleTelegramAttemptTimeout(ctx context.Context, attemptI
 		return err
 	}
 	if attempt.WebhookDeadline != nil && attempt.WebhookDeadline.After(gtime.Now()) {
-		return s.enqueueTelegramAttemptTimeout(ctx, attempt.Id, time.Until(attempt.WebhookDeadline.Time))
+		_, err = s.enqueueTelegramAttemptTimeout(ctx, attempt.Id, time.Until(attempt.WebhookDeadline.Time))
+		return err
 	}
 	result, err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
 		Where("id", attempt.Id).Where("status", telegramAttemptStatusWaiting).

@@ -1,0 +1,123 @@
+youban_tg_delivery_health:
+  name: youban_tg_delivery_health
+  desc: Telegram publishing delivery health based on bounded active job sets
+  predicate_queries:
+    - name: tg job table exists
+      predicate_query: |
+        SELECT to_regclass('public.hg_youban_publish_tg_job') IS NOT NULL;
+  query: |-
+    SELECT current_database() AS datname,
+           COUNT(*)::bigint AS partial_jobs,
+           COALESCE(EXTRACT(EPOCH FROM (NOW() - MIN(updated_at))), 0)::bigint AS oldest_partial_age_seconds
+    FROM hg_youban_publish_tg_job
+    WHERE status IN ('sending','unknown')
+      AND send_phase IN ('display_confirmed','verify_sending')
+      AND updated_at < NOW() - INTERVAL '3 minutes'
+  ttl: 30
+  timeout: 2
+  tags: [ "dbname:railway" ]
+  metrics:
+    - datname: { usage: LABEL, description: database name }
+    - partial_jobs: { usage: GAUGE, description: jobs with display delivery but verification phase incomplete for over three minutes }
+    - oldest_partial_age_seconds: { usage: GAUGE, description: oldest incomplete verification delivery age }
+
+youban_tg_due_health:
+  name: youban_tg_due_health
+  desc: Due Telegram jobs and channels without an active sender
+  predicate_queries:
+    - name: tg job table exists
+      predicate_query: |
+        SELECT to_regclass('public.hg_youban_publish_tg_job') IS NOT NULL;
+  query: |-
+    WITH active_chat AS MATERIALIZED (
+      SELECT DISTINCT target_chat_id
+      FROM hg_youban_publish_tg_job
+      WHERE status = 'sending' AND dispatch_status = 'processing'
+    )
+    SELECT current_database() AS datname,
+           COUNT(*)::bigint AS due_jobs,
+           COALESCE(EXTRACT(EPOCH FROM (NOW() - MIN(COALESCE(j.next_retry_at, j.created_at)))), 0)::bigint AS oldest_due_age_seconds,
+           COUNT(*) FILTER (WHERE a.target_chat_id IS NULL)::bigint AS due_without_active
+    FROM hg_youban_publish_tg_job j
+    LEFT JOIN active_chat a ON a.target_chat_id = j.target_chat_id
+    WHERE j.status IN ('pending','failed_retry')
+      AND j.dispatch_status IN ('idle','queued')
+      AND COALESCE(j.next_retry_at, j.created_at) <= NOW()
+  ttl: 30
+  timeout: 2
+  tags: [ "dbname:railway" ]
+  metrics:
+    - datname: { usage: LABEL, description: database name }
+    - due_jobs: { usage: GAUGE, description: due Telegram publishing jobs }
+    - oldest_due_age_seconds: { usage: GAUGE, description: oldest due Telegram publishing job age }
+    - due_without_active: { usage: GAUGE, description: due jobs whose target channel has no active sender }
+
+youban_tg_dispatch_health:
+  name: youban_tg_dispatch_health
+  desc: Telegram dispatcher loops and stale processing jobs
+  predicate_queries:
+    - name: tg job table exists
+      predicate_query: |
+        SELECT to_regclass('public.hg_youban_publish_tg_job') IS NOT NULL;
+  query: |-
+    SELECT current_database() AS datname,
+           COUNT(*) FILTER (WHERE dispatch_count > 10)::bigint AS loop_jobs,
+           COALESCE(MAX(dispatch_count), 0)::bigint AS max_dispatch_count,
+           COUNT(*) FILTER (WHERE status IN ('sending','unknown') AND updated_at < NOW() - INTERVAL '5 minutes')::bigint AS stuck_jobs
+    FROM hg_youban_publish_tg_job
+    WHERE status IN ('pending','failed_retry','sending','unknown')
+      AND (dispatch_count > 10 OR (status IN ('sending','unknown') AND updated_at < NOW() - INTERVAL '5 minutes'))
+  ttl: 30
+  timeout: 2
+  tags: [ "dbname:railway" ]
+  metrics:
+    - datname: { usage: LABEL, description: database name }
+    - loop_jobs: { usage: GAUGE, description: active Telegram jobs dispatched more than ten times }
+    - max_dispatch_count: { usage: GAUGE, description: maximum dispatch count among abnormal active jobs }
+    - stuck_jobs: { usage: GAUGE, description: sending or unknown jobs unchanged for over five minutes }
+
+youban_tg_progress:
+  name: youban_tg_progress
+  desc: Recent global Telegram publishing progress from a bounded task window
+  predicate_queries:
+    - name: tg job table exists
+      predicate_query: |
+        SELECT to_regclass('public.hg_youban_publish_tg_job') IS NOT NULL;
+  query: |-
+    SELECT current_database() AS datname,
+           COALESCE(EXTRACT(EPOCH FROM (NOW() - MAX(sent_at))), 0)::bigint AS seconds_since_success
+    FROM (
+      SELECT sent_at
+      FROM hg_youban_publish_tg_job
+      ORDER BY id DESC
+      LIMIT 10000
+    ) recent
+    WHERE sent_at IS NOT NULL
+  ttl: 30
+  timeout: 2
+  tags: [ "dbname:railway" ]
+  metrics:
+    - datname: { usage: LABEL, description: database name }
+    - seconds_since_success: { usage: GAUGE, description: seconds since last successful Telegram delivery in recent task window }
+
+youban_tg_attempt_health:
+  name: youban_tg_attempt_health
+  desc: Expired Telegram delivery attempts waiting for timeout recovery
+  predicate_queries:
+    - name: tg attempt table exists
+      predicate_query: |
+        SELECT to_regclass('public.hg_youban_publish_tg_attempt') IS NOT NULL;
+  query: |-
+    SELECT current_database() AS datname,
+           COUNT(*)::bigint AS expired_total,
+           COALESCE(EXTRACT(EPOCH FROM (NOW() - MIN(webhook_deadline))), 0)::bigint AS oldest_expired_age_seconds
+    FROM hg_youban_publish_tg_attempt
+    WHERE status = 'awaiting_webhook'
+      AND webhook_deadline < NOW() - INTERVAL '5 seconds'
+  ttl: 30
+  timeout: 2
+  tags: [ "dbname:railway" ]
+  metrics:
+    - datname: { usage: LABEL, description: database name }
+    - expired_total: { usage: GAUGE, description: expired attempts waiting for timeout recovery }
+    - oldest_expired_age_seconds: { usage: GAUGE, description: age of the oldest expired attempt }

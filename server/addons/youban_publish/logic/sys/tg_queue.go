@@ -24,6 +24,7 @@ const (
 	tgQueueNameMediaProcess       = "youban_publish_media_process"
 	tgQueueNameMediaBulkPrefix    = "youban_publish_media_bulk_"
 	tgQueueNameAutoDelete         = "youban_publish_auto_delete"
+	tgQueueNameAttemptTimeout     = "youban_publish_attempt_timeout"
 	tgQueueNameBackground         = "youban_publish_background"
 	tgQueueNameCycle              = "youban_publish_cycle"
 	tgQueueNameCollectProcess     = "youban_publish_collect_process"
@@ -567,20 +568,20 @@ func (s *sSysPublish) enqueueTelegramTask(ctx context.Context, taskType string, 
 	return s.enqueueTelegramTaskWithQueue(ctx, taskType, jobId, delay, unique, tgQueueNameDefault)
 }
 
-func (s *sSysPublish) enqueueTelegramAttemptTimeout(ctx context.Context, attemptId int64, delay time.Duration) error {
+func (s *sSysPublish) enqueueTelegramAttemptTimeout(ctx context.Context, attemptId int64, delay time.Duration) (bool, error) {
 	if attemptId <= 0 {
-		return nil
+		return false, nil
 	}
 	client, err := s.telegramQueueClient(ctx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	payload, err := json.Marshal(tgAttemptQueuePayload{AttemptId: attemptId})
 	if err != nil {
-		return err
+		return false, err
 	}
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameBackground),
+		asynq.Queue(tgQueueNameAttemptTimeout),
 		asynq.MaxRetry(5),
 		asynq.Timeout(time.Minute),
 		asynq.Unique(time.Minute),
@@ -590,9 +591,9 @@ func (s *sSysPublish) enqueueTelegramAttemptTimeout(ctx context.Context, attempt
 	}
 	_, err = client.EnqueueContext(ctx, asynq.NewTask(tgTaskTypeAttemptTimeout, payload), options...)
 	if errors.Is(err, asynq.ErrDuplicateTask) {
-		return nil
+		return false, nil
 	}
-	return err
+	return err == nil, err
 }
 
 func (s *sSysPublish) enqueueTelegramTaskWithQueue(ctx context.Context, taskType string, jobId int64, delay time.Duration, unique bool, queueName string) error {

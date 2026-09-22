@@ -130,11 +130,15 @@ func (s *sSysPublish) requeueExpiredTelegramAttempts(ctx context.Context, limit 
 	}
 	queued := 0
 	for _, attemptId := range ids {
-		if err = s.enqueueTelegramAttemptTimeout(ctx, attemptId, 0); err != nil {
+		enqueued, enqueueErr := s.enqueueTelegramAttemptTimeout(ctx, attemptId, 0)
+		if enqueueErr != nil {
+			err = enqueueErr
 			g.Log().Warningf(ctx, "重新投递过期TG发送Attempt失败 attemptId:%d err:%+v", attemptId, err)
 			continue
 		}
-		queued++
+		if enqueued {
+			queued++
+		}
 	}
 	if queued > 0 {
 		g.Log().Infof(ctx, "已重新投递过期TG发送Attempt：%d条", queued)

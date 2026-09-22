@@ -33,10 +33,16 @@ func TestMediaProcessQueueIsIsolatedFromCollectionDownloads(t *testing.T) {
 
 func TestCriticalBackgroundQueuesAreObservable(t *testing.T) {
 	queues := telegramObserveQueueNames(context.Background())
-	for _, queue := range []string{tgQueueNameAutoDelete, tgQueueNameCollectProcess, tgQueueNameCycle} {
+	for _, queue := range []string{tgQueueNameAutoDelete, tgQueueNameAttemptTimeout, tgQueueNameCollectProcess, tgQueueNameCycle} {
 		if !slices.Contains(queues, queue) {
 			t.Fatalf("critical queue %s must be observable: %v", queue, queues)
 		}
+	}
+}
+
+func TestAttemptTimeoutQueueIsIsolated(t *testing.T) {
+	if tgQueueNameAttemptTimeout == tgQueueNameBackground || tgQueueNameAttemptTimeout == tgQueueNameCollectProcess {
+		t.Fatal("attempt timeout recovery must not compete with background collection tasks")
 	}
 }
 
