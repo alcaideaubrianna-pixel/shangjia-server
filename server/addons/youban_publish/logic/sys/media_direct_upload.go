@@ -58,6 +58,25 @@ func (s *sSysPublish) MyMediaDirectUploadCreate(ctx context.Context, in *sysin.M
 }
 
 func (s *sSysPublish) createMediaDirectUpload(ctx context.Context, in *sysin.MediaDirectUploadCreateInp, tenantId, accountId int64) (*sysin.MediaDirectUploadCreateModel, error) {
+	startedAt := time.Now()
+	defer func() {
+		g.Log().Infof(ctx, "发布媒体直传 create 完成 tenantId:%d accountId:%d profileId:%d mediaType:%s size:%d durationMs:%d", tenantId, accountId, func() int64 {
+			if in == nil {
+				return 0
+			}
+			return in.ProfileId
+		}(), func() string {
+			if in == nil {
+				return ""
+			}
+			return in.MediaType
+		}(), func() int64 {
+			if in == nil {
+				return 0
+			}
+			return in.FileSize
+		}(), time.Since(startedAt).Milliseconds())
+	}()
 	if in == nil {
 		return nil, gerror.New("直传参数不能为空")
 	}
@@ -194,6 +213,15 @@ func (s *sSysPublish) MyMediaDirectUploadComplete(ctx context.Context, in *sysin
 }
 
 func (s *sSysPublish) completeMediaDirectUpload(ctx context.Context, in *sysin.MediaDirectUploadCompleteInp, poster *ghttp.UploadFile, admin bool) (*sysin.MediaModel, error) {
+	startedAt := time.Now()
+	stageStartedAt := startedAt
+	logStage := func(stage string) {
+		g.Log().Infof(ctx, "发布媒体直传 complete 阶段 stage:%s durationMs:%d totalMs:%d", stage, time.Since(stageStartedAt).Milliseconds(), time.Since(startedAt).Milliseconds())
+		stageStartedAt = time.Now()
+	}
+	defer func() {
+		g.Log().Infof(ctx, "发布媒体直传 complete 完成 durationMs:%d", time.Since(startedAt).Milliseconds())
+	}()
 	if in == nil {
 		return nil, gerror.New("完成参数不能为空")
 	}
@@ -204,6 +232,7 @@ func (s *sSysPublish) completeMediaDirectUpload(ctx context.Context, in *sysin.M
 	if err = verifyDirectUploadIdentity(ctx, session, admin); err != nil {
 		return nil, err
 	}
+	logStage("session")
 	if session.MediaId > 0 {
 		return s.mediaViewById(ctx, session.MediaId)
 	}
@@ -218,6 +247,7 @@ func (s *sSysPublish) completeMediaDirectUpload(ctx context.Context, in *sysin.M
 	if head.ContentLength != session.FileSize {
 		return nil, gerror.Newf("COS文件大小不匹配，预期:%d 实际:%d", session.FileSize, head.ContentLength)
 	}
+	logStage("cos_head")
 	attachment := new(basesysin.AttachmentListModel)
 	if session.AttachmentId > 0 {
 		if err = dao.SysAttachment.Ctx(ctx).WherePri(session.AttachmentId).Scan(&attachment.SysAttachment); err != nil {
@@ -235,6 +265,7 @@ func (s *sSysPublish) completeMediaDirectUpload(ctx context.Context, in *sysin.M
 			return nil, err
 		}
 	}
+	logStage("attachment")
 	task, err := s.resolveMediaEditTask(ctx, &session.Media, session.TenantId, session.AccountId)
 	if err != nil {
 		return nil, err
@@ -246,6 +277,7 @@ func (s *sSysPublish) completeMediaDirectUpload(ctx context.Context, in *sysin.M
 	if err != nil {
 		return nil, err
 	}
+	logStage("media_save")
 	session.MediaId = media.Id
 	_ = cache.Instance().Set(ctx, directUploadSessionPrefix+in.SessionId, session, directUploadSessionTTL)
 	if err = s.enqueueMediaProcess(ctx, media.Id, 0); err != nil {
@@ -320,5 +352,6 @@ func (s *sSysPublish) mediaViewById(ctx context.Context, id int64) (*sysin.Media
 	if res.Id <= 0 {
 		return nil, gerror.New("直传媒体不存在")
 	}
+	normalizeMediaListFileURL([]*sysin.MediaModel{res})
 	return res, nil
 }

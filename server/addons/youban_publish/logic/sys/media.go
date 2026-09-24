@@ -709,14 +709,9 @@ func (s *sSysPublish) saveMediaAttachment(ctx context.Context, task gdb.Record, 
 			return nil, err
 		}
 	}
-	if task["profile_id"].Int64() > 0 {
-		err = s.withProfileMediaSyncLock(ctx, task["profile_id"].Int64(), func(ctx context.Context, tx gdb.TX) error {
-			return s.syncOwnedMediaToProfile(ctx, tx, task, task["profile_id"].Int64())
-		})
-		if err != nil {
-			return nil, err
-		}
-	}
+	// The direct-upload completion path only persists the publish media row.
+	// The profile media projection is rebuilt when the profile is saved/published,
+	// so uploading several files does not serialize on the profile sync lock.
 	var media *sysin.MediaModel
 	if err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Where("id", mediaId).Scan(&media); err != nil {
 		return nil, gerror.Wrap(err, "读取任务媒体失败")
