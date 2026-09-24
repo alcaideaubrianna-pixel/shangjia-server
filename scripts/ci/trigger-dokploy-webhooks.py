@@ -246,7 +246,13 @@ def wait_until_healthy(target, revision="", retries=DEFAULT_HEALTH_RETRIES,
     confirmed = 0
     for attempt in range(1, retries + 1):
         try:
-            query = urllib.parse.urlencode({"revision": revision}) if target.get("verify_revision") else ""
+            # Prevent a CDN/proxy from returning a previous readiness response.
+            # The deployment is start-first, so the endpoint may briefly route to
+            # an old replica while Docker is replacing tasks.
+            query_params = {"_deploy_check": str(time.time_ns())}
+            if target.get("verify_revision"):
+                query_params["revision"] = revision
+            query = urllib.parse.urlencode(query_params)
             separator = "&" if "?" in health_url else "?"
             health = read_health(f"{health_url}{separator}{query}" if query else health_url)
             if target.get("verify_revision") and not revision_matches(health.get("revision"), revision):
@@ -318,8 +324,11 @@ def main(argv=None):
         try:
             expected_image = pin_target_image(target, args.version)
             trigger(target, args.version)
-            wait_until_healthy(target, args.revision or args.version)
             wait_for_running_image(target, expected_image)
+            # Only probe the public endpoint after every running task is on the
+            # immutable image. Otherwise a load-balanced old replica can make a
+            # valid rollout look stuck for the full health-check window.
+            wait_until_healthy(target, args.revision or args.version)
         except (urllib.error.URLError, TimeoutError, RuntimeError) as error:
             failures.append((name, str(error)))
             send_telegram(
