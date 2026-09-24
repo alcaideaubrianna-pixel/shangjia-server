@@ -19,7 +19,7 @@ func (s *sSysPublish) AdminTgAccountList(ctx context.Context, in *sysin.TgAccoun
 	if in == nil {
 		in = &sysin.TgAccountListInp{}
 	}
-	current, err := s.currentAdminAccount(ctx)
+	current, err := s.ensureGroupPushCapability(ctx)
 	if err != nil {
 		return nil, 0, err
 	}

@@ -16,7 +16,7 @@ import (
 )
 
 func (s *sSysPublish) AdminChannelCacheList(ctx context.Context, in *sysin.ChannelCacheListInp) (list []*sysin.ChannelCacheModel, totalCount int, err error) {
-	account, err := s.currentAdminAccount(ctx)
+	account, err := s.ensureGroupPushCapability(ctx)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -128,7 +128,7 @@ func channelCacheListFields() string {
 }
 
 func (s *sSysPublish) AdminChannelCacheResolve(ctx context.Context, in *sysin.ChannelCacheResolveInp) ([]*sysin.ChannelCacheResolveModel, error) {
-	account, err := s.currentAdminAccount(ctx)
+	account, err := s.ensureGroupPushCapability(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +163,7 @@ func (s *sSysPublish) AdminChannelCacheResolve(ctx context.Context, in *sysin.Ch
 }
 
 func (s *sSysPublish) AdminChannelCacheRefresh(ctx context.Context, in *sysin.ChannelCacheRefreshInp) (res *sysin.ChannelCacheRefreshModel, err error) {
-	account, err := s.currentAdminAccount(ctx)
+	account, err := s.ensureGroupPushCapability(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +201,7 @@ func (s *sSysPublish) AdminChannelCacheRefresh(ctx context.Context, in *sysin.Ch
 }
 
 func (s *sSysPublish) AdminChannelCacheRefreshStatus(ctx context.Context, in *sysin.ChannelCacheRefreshStatusInp) (*sysin.ChannelCacheRefreshModel, error) {
-	account, err := s.currentAdminAccount(ctx)
+	account, err := s.ensureGroupPushCapability(ctx)
 	if err != nil {
 		return nil, err
 	}
