@@ -41,7 +41,7 @@ type messagePushPlanRecord struct {
 }
 
 func (s *sSysPublish) AdminMessagePushPlanList(ctx context.Context, in *sysin.MessagePushPlanListInp) (list []*sysin.MessagePushPlanModel, totalCount int, err error) {
-	account, err := s.currentAdminAccount(ctx)
+	account, err := s.ensureGroupPushCapability(ctx)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -89,7 +89,7 @@ func (s *sSysPublish) AdminMessagePushPlanList(ctx context.Context, in *sysin.Me
 }
 
 func (s *sSysPublish) AdminMessagePushPlanSave(ctx context.Context, in *sysin.MessagePushPlanSaveInp) (res *sysin.MessagePushPlanSaveModel, err error) {
-	account, err := s.currentAdminAccount(ctx)
+	account, err := s.ensureGroupPushCapability(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +163,7 @@ func (s *sSysPublish) AdminMessagePushPlanSave(ctx context.Context, in *sysin.Me
 }
 
 func (s *sSysPublish) AdminMessagePushPlanDelete(ctx context.Context, in *sysin.MessagePushPlanDeleteInp) error {
-	account, err := s.currentAdminAccount(ctx)
+	account, err := s.ensureGroupPushCapability(ctx)
 	if err != nil {
 		return err
 	}
@@ -190,7 +190,7 @@ func (s *sSysPublish) AdminMessagePushPlanDelete(ctx context.Context, in *sysin.
 }
 
 func (s *sSysPublish) AdminMessagePushPlanStatus(ctx context.Context, in *sysin.MessagePushPlanStatusInp) error {
-	account, err := s.currentAdminAccount(ctx)
+	account, err := s.ensureGroupPushCapability(ctx)
 	if err != nil {
 		return err
 	}

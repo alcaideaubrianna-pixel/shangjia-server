@@ -52,7 +52,7 @@ type listenerTargetRecord struct {
 }
 
 func (s *sSysPublish) AdminListenerPlanList(ctx context.Context, in *sysin.ListenerPlanListInp) (list []*sysin.ListenerPlanModel, totalCount int, err error) {
-	account, err := s.currentAdminAccount(ctx)
+	account, err := s.ensureGroupPushCapability(ctx)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -87,8 +87,46 @@ func (s *sSysPublish) AdminListenerPlanList(ctx context.Context, in *sysin.Liste
 	return list, totalCount, err
 }
 
+func (s *sSysPublish) AccountListenerPlanList(ctx context.Context, in *sysin.ListenerPlanListInp) (list []*sysin.ListenerPlanModel, totalCount int, err error) {
+	account, err := s.ensureGroupPushCapability(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	return s.listenerPlanListByTenant(ctx, account.TenantId, in)
+}
+
+func (s *sSysPublish) listenerPlanListByTenant(ctx context.Context, tenantId int64, in *sysin.ListenerPlanListInp) (list []*sysin.ListenerPlanModel, totalCount int, err error) {
+	if in == nil {
+		in = &sysin.ListenerPlanListInp{}
+	}
+	if err = ensureMessageListenTables(ctx); err != nil {
+		return nil, 0, err
+	}
+	if err = in.Filter(ctx); err != nil {
+		return nil, 0, err
+	}
+	mod := g.DB().Model(messageListenPlanTable).Safe().Ctx(ctx).Where("tenant_id", tenantId).WhereNull("deleted_at")
+	if in.Keyword != "" {
+		like := "%" + in.Keyword + "%"
+		mod = mod.Where("(name LIKE ? OR keywords_json LIKE ?)", like, like)
+	}
+	if in.Status > 0 {
+		mod = mod.Where("status", in.Status)
+	}
+	totalCount, err = mod.Clone().Count()
+	if err != nil {
+		return nil, 0, gerror.Wrap(err, "获取监听计划总数失败")
+	}
+	var plans []*listenerPlanRecord
+	if err = mod.Page(in.Page, in.PerPage).OrderDesc("id").Scan(&plans); err != nil {
+		return nil, 0, gerror.Wrap(err, "获取监听计划列表失败")
+	}
+	list, err = s.listenerPlanModels(ctx, plans, tenantId)
+	return
+}
+
 func (s *sSysPublish) AdminListenerPlanSave(ctx context.Context, in *sysin.ListenerPlanSaveInp) (res *sysin.ListenerPlanSaveModel, err error) {
-	account, err := s.currentAdminAccount(ctx)
+	account, err := s.ensureGroupPushCapability(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +184,7 @@ func (s *sSysPublish) AdminListenerPlanSave(ctx context.Context, in *sysin.Liste
 }
 
 func (s *sSysPublish) AdminListenerPlanDelete(ctx context.Context, in *sysin.ListenerPlanDeleteInp) error {
-	account, err := s.currentAdminAccount(ctx)
+	account, err := s.ensureGroupPushCapability(ctx)
 	if err != nil {
 		return err
 	}
@@ -180,7 +218,7 @@ func (s *sSysPublish) AdminListenerPlanDelete(ctx context.Context, in *sysin.Lis
 }
 
 func (s *sSysPublish) AdminListenerPlanStatus(ctx context.Context, in *sysin.ListenerPlanStatusInp) error {
-	account, err := s.currentAdminAccount(ctx)
+	account, err := s.ensureGroupPushCapability(ctx)
 	if err != nil {
 		return err
 	}
@@ -209,7 +247,7 @@ func (s *sSysPublish) AdminListenerPlanStatus(ctx context.Context, in *sysin.Lis
 }
 
 func (s *sSysPublish) AdminListenerPlanUnbind(ctx context.Context, in *sysin.ListenerPlanUnbindInp) error {
-	account, err := s.currentAdminAccount(ctx)
+	account, err := s.ensureGroupPushCapability(ctx)
 	if err != nil {
 		return err
 	}

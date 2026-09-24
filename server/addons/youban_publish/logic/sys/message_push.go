@@ -14,7 +14,7 @@ import (
 )
 
 func (s *sSysPublish) AdminMessageTemplateList(ctx context.Context, in *sysin.MessageTemplateListInp) (list []*sysin.MessageTemplateModel, totalCount int, err error) {
-	account, err := s.currentAdminAccount(ctx)
+	account, err := s.ensureGroupPushCapability(ctx)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -48,7 +48,7 @@ func (s *sSysPublish) AdminMessageTemplateList(ctx context.Context, in *sysin.Me
 }
 
 func (s *sSysPublish) AdminMessageTemplateSave(ctx context.Context, in *sysin.MessageTemplateSaveInp) (res *sysin.MessageTemplateSaveModel, err error) {
-	account, err := s.currentAdminAccount(ctx)
+	account, err := s.ensureGroupPushCapability(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +178,7 @@ func (s *sSysPublish) AdminMessageTemplateSave(ctx context.Context, in *sysin.Me
 }
 
 func (s *sSysPublish) AdminMessageTemplateDelete(ctx context.Context, in *sysin.MessageTemplateDeleteInp) (err error) {
-	account, err := s.currentAdminAccount(ctx)
+	account, err := s.ensureGroupPushCapability(ctx)
 	if err != nil {
 		return err
 	}

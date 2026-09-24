@@ -19,12 +19,30 @@ func (s *sSysPublish) AccountCapability(ctx context.Context, app string, account
 		if accountId <= 0 {
 			return nil, gerror.New("后台账号信息不完整")
 		}
-		return &sysin.AccountCapabilityModel{AccountId: accountId, AccountType: sysin.PublishAccountTypeAdmin, TelegramBindingEnabled: 1}, nil
+		return &sysin.AccountCapabilityModel{AccountId: accountId, AccountType: sysin.PublishAccountTypeAdmin, TelegramBindingEnabled: 1, GroupPushEnabled: 1}, nil
 	}
 	if app != "api" {
 		return nil, gerror.Newf("不支持的账号应用类型：%s", app)
 	}
 	return s.activeAccountCapability(ctx, 0, accountId)
+}
+
+func (s *sSysPublish) ensureGroupPushCapability(ctx context.Context) (*sysin.AccountModel, error) {
+	account, err := s.currentAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if account.AccountType == sysin.PublishAccountTypeAdmin {
+		return account, nil
+	}
+	capability, err := s.AccountCapability(ctx, "api", account.Id)
+	if err != nil {
+		return nil, err
+	}
+	if capability.AccountType != sysin.PublishAccountTypeAdmin && capability.GroupPushEnabled != 1 {
+		return nil, gerror.New("当前账号未开通群聊推送权限")
+	}
+	return account, nil
 }
 
 func (s *sSysPublish) activeAccountCapability(ctx context.Context, tenantId, accountId int64) (*sysin.AccountCapabilityModel, error) {
@@ -50,6 +68,7 @@ func (s *sSysPublish) activeAccountCapability(ctx context.Context, tenantId, acc
 	if capability.AccountType != sysin.PublishAccountTypeUploader {
 		capability.SharedResourceEnabled = 0
 		capability.TelegramBindingEnabled = 0
+		capability.GroupPushEnabled = 0
 	}
 	return capability, nil
 }

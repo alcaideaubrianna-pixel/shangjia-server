@@ -18,7 +18,7 @@ import (
 )
 
 func (s *sSysPublish) AdminMediaUpload(ctx context.Context, in *sysin.MediaUploadInp, file *ghttp.UploadFile, poster *ghttp.UploadFile, originalFile *ghttp.UploadFile) (res *sysin.MediaModel, err error) {
-	account, err := s.currentAdminAccount(ctx)
+	account, err := s.ensureGroupPushCapability(ctx)
 	if err != nil {
 		return nil, err
 	}

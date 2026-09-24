@@ -1,5 +1,6 @@
 ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "shared_resource_enabled" smallint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "telegram_binding_enabled" smallint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "group_push_enabled" smallint NOT NULL DEFAULT 0;
 
 ALTER TABLE "hg_youban_publish_collect_rule"
   ADD COLUMN IF NOT EXISTS "full_match_enabled" smallint NOT NULL DEFAULT 0;

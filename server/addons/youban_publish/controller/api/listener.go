@@ -22,6 +22,48 @@ func (c *cPublishAdmin) ListenerPlanList(ctx context.Context, req *publish.Admin
 	return
 }
 
+func (c *cPublish) AccountListenerPlanList(ctx context.Context, req *publish.AccountListenerPlanListReq) (res *publish.AccountListenerPlanListRes, err error) {
+	list, totalCount, err := service.SysPublish().AccountListenerPlanList(ctx, &req.ListenerPlanListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.ListenerPlanModel{}
+	}
+	res = &publish.AccountListenerPlanListRes{List: list}
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublish) AccountListenerPlanSave(ctx context.Context, req *publish.AccountListenerPlanSaveReq) (*publish.AccountListenerPlanSaveRes, error) {
+	data, err := service.SysPublish().AdminListenerPlanSave(ctx, &req.ListenerPlanSaveInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.AccountListenerPlanSaveRes{Id: data.Id}, nil
+}
+
+func (c *cPublish) AccountListenerPlanDelete(ctx context.Context, req *publish.AccountListenerPlanDeleteReq) (*publish.AccountListenerPlanDeleteRes, error) {
+	if err := service.SysPublish().AdminListenerPlanDelete(ctx, &req.ListenerPlanDeleteInp); err != nil {
+		return nil, err
+	}
+	return &publish.AccountListenerPlanDeleteRes{}, nil
+}
+
+func (c *cPublish) AccountListenerPlanStatus(ctx context.Context, req *publish.AccountListenerPlanStatusReq) (*publish.AccountListenerPlanStatusRes, error) {
+	if err := service.SysPublish().AdminListenerPlanStatus(ctx, &req.ListenerPlanStatusInp); err != nil {
+		return nil, err
+	}
+	return &publish.AccountListenerPlanStatusRes{}, nil
+}
+
+func (c *cPublish) AccountListenerPlanUnbind(ctx context.Context, req *publish.AccountListenerPlanUnbindReq) (*publish.AccountListenerPlanUnbindRes, error) {
+	if err := service.SysPublish().AdminListenerPlanUnbind(ctx, &req.ListenerPlanUnbindInp); err != nil {
+		return nil, err
+	}
+	return &publish.AccountListenerPlanUnbindRes{}, nil
+}
+
 func (c *cPublishAdmin) ListenerPlanSave(ctx context.Context, req *publish.AdminListenerPlanSaveReq) (res *publish.AdminListenerPlanSaveRes, err error) {
 	data, err := service.SysPublish().AdminListenerPlanSave(ctx, &req.ListenerPlanSaveInp)
 	if err != nil {

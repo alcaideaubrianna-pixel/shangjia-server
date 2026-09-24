@@ -513,6 +513,36 @@ func (c *cPublishAdmin) MessageTemplateList(ctx context.Context, req *publish.Ad
 	return
 }
 
+func (c *cPublish) AccountMessageTemplateList(ctx context.Context, req *publish.AccountMessageTemplateListReq) (res *publish.AccountMessageTemplateListRes, err error) {
+	list, total, err := service.SysPublish().AdminMessageTemplateList(ctx, &req.MessageTemplateListInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AccountMessageTemplateListRes{List: list}
+	res.PageRes.Pack(req, total)
+	return
+}
+func (c *cPublish) AccountMessageTemplateSave(ctx context.Context, req *publish.AccountMessageTemplateSaveReq) (*publish.AccountMessageTemplateSaveRes, error) {
+	v, e := service.SysPublish().AdminMessageTemplateSave(ctx, &req.MessageTemplateSaveInp)
+	if e != nil {
+		return nil, e
+	}
+	return &publish.AccountMessageTemplateSaveRes{MessageTemplateSaveModel: v}, nil
+}
+func (c *cPublish) AccountMessageTemplateDelete(ctx context.Context, req *publish.AccountMessageTemplateDeleteReq) (*publish.AccountMessageTemplateDeleteRes, error) {
+	if e := service.SysPublish().AdminMessageTemplateDelete(ctx, &req.MessageTemplateDeleteInp); e != nil {
+		return nil, e
+	}
+	return &publish.AccountMessageTemplateDeleteRes{}, nil
+}
+func (c *cPublish) AccountMessageTemplatePush(ctx context.Context, req *publish.AccountMessageTemplatePushReq) (*publish.AccountMessageTemplatePushRes, error) {
+	v, e := service.SysPublish().AdminMessageTemplatePush(ctx, &req.MessageTemplatePushInp)
+	if e != nil {
+		return nil, e
+	}
+	return &publish.AccountMessageTemplatePushRes{MessageTemplatePushModel: v}, nil
+}
+
 func (c *cPublishAdmin) MessageTemplateSave(ctx context.Context, req *publish.AdminMessageTemplateSaveReq) (res *publish.AdminMessageTemplateSaveRes, err error) {
 	item, err := service.SysPublish().AdminMessageTemplateSave(ctx, &req.MessageTemplateSaveInp)
 	if err != nil {
@@ -554,6 +584,18 @@ func (c *cPublishAdmin) MessageTemplateMediaUpload(ctx context.Context, req *pub
 	return
 }
 
+func (c *cPublish) MessageTemplateMediaUpload(ctx context.Context, req *publish.MessageTemplateMediaUploadReq) (*publish.MessageTemplateMediaUploadRes, error) {
+	file := g.RequestFromCtx(ctx).GetUploadFile("file")
+	if file == nil {
+		return nil, gerror.New("没有找到上传的文件")
+	}
+	data, err := service.SysPublish().AdminMessageTemplateMediaUpload(ctx, &req.MessageTemplateMediaUploadInp, file, g.RequestFromCtx(ctx).GetUploadFile("poster"), g.RequestFromCtx(ctx).GetUploadFile("originalFile"))
+	if err != nil {
+		return nil, err
+	}
+	return &publish.MessageTemplateMediaUploadRes{MessageTemplateMediaModel: data}, nil
+}
+
 func (c *cPublishAdmin) MessagePushPlanList(ctx context.Context, req *publish.AdminMessagePushPlanListReq) (res *publish.AdminMessagePushPlanListRes, err error) {
 	list, totalCount, err := service.SysPublish().AdminMessagePushPlanList(ctx, &req.MessagePushPlanListInp)
 	if err != nil {
@@ -566,6 +608,35 @@ func (c *cPublishAdmin) MessagePushPlanList(ctx context.Context, req *publish.Ad
 	res.List = list
 	res.PageRes.Pack(req, totalCount)
 	return
+}
+
+func (c *cPublish) AccountMessagePushPlanList(ctx context.Context, req *publish.AccountMessagePushPlanListReq) (res *publish.AccountMessagePushPlanListRes, err error) {
+	list, total, err := service.SysPublish().AdminMessagePushPlanList(ctx, &req.MessagePushPlanListInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AccountMessagePushPlanListRes{List: list}
+	res.PageRes.Pack(req, total)
+	return
+}
+func (c *cPublish) AccountMessagePushPlanSave(ctx context.Context, req *publish.AccountMessagePushPlanSaveReq) (*publish.AccountMessagePushPlanSaveRes, error) {
+	v, e := service.SysPublish().AdminMessagePushPlanSave(ctx, &req.MessagePushPlanSaveInp)
+	if e != nil {
+		return nil, e
+	}
+	return &publish.AccountMessagePushPlanSaveRes{MessagePushPlanSaveModel: v}, nil
+}
+func (c *cPublish) AccountMessagePushPlanDelete(ctx context.Context, req *publish.AccountMessagePushPlanDeleteReq) (*publish.AccountMessagePushPlanDeleteRes, error) {
+	if e := service.SysPublish().AdminMessagePushPlanDelete(ctx, &req.MessagePushPlanDeleteInp); e != nil {
+		return nil, e
+	}
+	return &publish.AccountMessagePushPlanDeleteRes{}, nil
+}
+func (c *cPublish) AccountMessagePushPlanStatus(ctx context.Context, req *publish.AccountMessagePushPlanStatusReq) (*publish.AccountMessagePushPlanStatusRes, error) {
+	if e := service.SysPublish().AdminMessagePushPlanStatus(ctx, &req.MessagePushPlanStatusInp); e != nil {
+		return nil, e
+	}
+	return &publish.AccountMessagePushPlanStatusRes{}, nil
 }
 
 func (c *cPublishAdmin) MessagePushPlanSave(ctx context.Context, req *publish.AdminMessagePushPlanSaveReq) (res *publish.AdminMessagePushPlanSaveRes, err error) {

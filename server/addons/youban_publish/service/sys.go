@@ -191,6 +191,7 @@ type ISysPublish interface {
 	QuickPushSaveTemplateByBot(ctx context.Context, in *sysin.QuickPushBotSaveTemplateInp) (res *sysin.MessageTemplateSaveModel, err error)
 	QuickPushExecuteByBot(ctx context.Context, in *sysin.QuickPushBotExecuteInp) (res *sysin.QuickPushBotExecuteModel, err error)
 	AdminListenerPlanList(ctx context.Context, in *sysin.ListenerPlanListInp) (list []*sysin.ListenerPlanModel, totalCount int, err error)
+	AccountListenerPlanList(ctx context.Context, in *sysin.ListenerPlanListInp) (list []*sysin.ListenerPlanModel, totalCount int, err error)
 	AdminListenerPlanSave(ctx context.Context, in *sysin.ListenerPlanSaveInp) (res *sysin.ListenerPlanSaveModel, err error)
 	AdminListenerPlanDelete(ctx context.Context, in *sysin.ListenerPlanDeleteInp) (err error)
 	AdminListenerPlanStatus(ctx context.Context, in *sysin.ListenerPlanStatusInp) (err error)

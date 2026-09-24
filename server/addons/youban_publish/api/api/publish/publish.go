@@ -424,12 +424,48 @@ type AdminMessageTemplateMediaUploadRes struct {
 	*sysin.MessageTemplateMediaModel
 }
 
+type MessageTemplateMediaUploadReq struct {
+	g.Meta `path:"/publish/messageTemplate/media/upload" method:"post" mime:"multipart/form-data" tags:"上架插件" summary:"上传消息模板媒体"`
+	sysin.MessageTemplateMediaUploadInp
+}
+type MessageTemplateMediaUploadRes struct {
+	*sysin.MessageTemplateMediaModel
+}
+
 type AdminMessageTemplatePushReq struct {
 	g.Meta `path:"/publish/admin/messageTemplate/push" method:"post" tags:"上架插件管理端" summary:"推送消息模板"`
 	sysin.MessageTemplatePushInp
 }
 
 type AdminMessageTemplatePushRes struct {
+	*sysin.MessageTemplatePushModel
+}
+
+type AccountMessageTemplateListReq struct {
+	g.Meta `path:"/publish/account/messageTemplate/list" method:"get"`
+	sysin.MessageTemplateListInp
+}
+type AccountMessageTemplateListRes struct {
+	form.PageRes
+	List []*sysin.MessageTemplateModel `json:"list"`
+}
+type AccountMessageTemplateSaveReq struct {
+	g.Meta `path:"/publish/account/messageTemplate/save" method:"post"`
+	sysin.MessageTemplateSaveInp
+}
+type AccountMessageTemplateSaveRes struct {
+	*sysin.MessageTemplateSaveModel
+}
+type AccountMessageTemplateDeleteReq struct {
+	g.Meta `path:"/publish/account/messageTemplate/delete" method:"post"`
+	sysin.MessageTemplateDeleteInp
+}
+type AccountMessageTemplateDeleteRes struct{}
+type AccountMessageTemplatePushReq struct {
+	g.Meta `path:"/publish/account/messageTemplate/push" method:"post"`
+	sysin.MessageTemplatePushInp
+}
+type AccountMessageTemplatePushRes struct {
 	*sysin.MessageTemplatePushModel
 }
 
@@ -465,6 +501,32 @@ type AdminMessagePushPlanStatusReq struct {
 }
 
 type AdminMessagePushPlanStatusRes struct{}
+
+type AccountMessagePushPlanListReq struct {
+	g.Meta `path:"/publish/account/messagePushPlan/list" method:"get"`
+	sysin.MessagePushPlanListInp
+}
+type AccountMessagePushPlanListRes struct {
+	form.PageRes
+	List []*sysin.MessagePushPlanModel `json:"list"`
+}
+type AccountMessagePushPlanSaveReq struct {
+	g.Meta `path:"/publish/account/messagePushPlan/save" method:"post"`
+	sysin.MessagePushPlanSaveInp
+}
+type AccountMessagePushPlanSaveRes struct {
+	*sysin.MessagePushPlanSaveModel
+}
+type AccountMessagePushPlanDeleteReq struct {
+	g.Meta `path:"/publish/account/messagePushPlan/delete" method:"post"`
+	sysin.MessagePushPlanDeleteInp
+}
+type AccountMessagePushPlanDeleteRes struct{}
+type AccountMessagePushPlanStatusReq struct {
+	g.Meta `path:"/publish/account/messagePushPlan/status" method:"post"`
+	sysin.MessagePushPlanStatusInp
+}
+type AccountMessagePushPlanStatusRes struct{}
 
 type AdminQuickPushPlanListReq struct {
 	g.Meta `path:"/publish/admin/quickPushPlan/list" method:"get" tags:"上架插件管理端" summary:"快速推送计划列表"`

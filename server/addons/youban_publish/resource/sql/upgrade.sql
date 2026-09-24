@@ -1,4 +1,5 @@
 ALTER TABLE `hg_youban_publish_account_setting`
+  ADD COLUMN IF NOT EXISTS `group_push_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '上架账号是否可使用群聊推送',
   ADD COLUMN IF NOT EXISTS `shared_resource_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '上架账号是否可管理租户共享资料',
   ADD COLUMN IF NOT EXISTS `telegram_binding_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '上架账号是否可绑定并使用Telegram';
 

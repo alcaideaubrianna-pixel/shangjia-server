@@ -51,6 +51,7 @@ func (s *sSysPublish) MyAccountSettingSave(ctx context.Context, in *sysin.Accoun
 	}
 	in.SharedResourceEnabled = current.SharedResourceEnabled
 	in.TelegramBindingEnabled = current.TelegramBindingEnabled
+	in.GroupPushEnabled = current.GroupPushEnabled
 	if err = in.Filter(ctx); err != nil {
 		return nil, err
 	}
@@ -83,6 +84,7 @@ func (s *sSysPublish) AdminAccountSettingSave(ctx context.Context, in *sysin.Acc
 	if target.AccountType != sysin.PublishAccountTypeUploader {
 		in.SharedResourceEnabled = 0
 		in.TelegramBindingEnabled = 0
+		in.GroupPushEnabled = 0
 	}
 	if err = s.saveAccountSetting(ctx, admin.TenantId, admin.Id, in); err != nil {
 		return nil, err
@@ -161,6 +163,7 @@ func (s *sSysPublish) saveAccountSetting(ctx context.Context, tenantId int64, op
 		"mark_position":            in.MarkPosition,
 		"shared_resource_enabled":  in.SharedResourceEnabled,
 		"telegram_binding_enabled": in.TelegramBindingEnabled,
+		"group_push_enabled":       in.GroupPushEnabled,
 		"updated_by":               operatorId,
 		"updated_at":               now,
 	}
@@ -234,6 +237,7 @@ func fillAccountSettingModel(model *sysin.AccountSettingModel, row gdb.Record) {
 	model.MarkPosition = strings.TrimSpace(row["mark_position"].String())
 	model.SharedResourceEnabled = row["shared_resource_enabled"].Int()
 	model.TelegramBindingEnabled = row["telegram_binding_enabled"].Int()
+	model.GroupPushEnabled = row["group_push_enabled"].Int()
 	model.CreatedAt = row["created_at"].GTime()
 	model.UpdatedAt = row["updated_at"].GTime()
 	if model.MarkMode == "" {

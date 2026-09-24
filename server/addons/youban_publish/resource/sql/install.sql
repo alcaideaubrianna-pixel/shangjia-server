@@ -918,6 +918,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_account_setting` (
   `mark_position` varchar(16) NOT NULL DEFAULT 'bottom' COMMENT '显示位置',
 	`shared_resource_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '上架账号是否可管理租户共享资料',
 	`telegram_binding_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '上架账号是否可绑定并使用Telegram',
+	`group_push_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '上架账号是否可使用群聊推送',
   `default_recycle_days` int(11) NOT NULL DEFAULT '0' COMMENT '默认循环天数',
   `cycle_publish_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否循环上架',
   `cycle_publish_days` int(11) NOT NULL DEFAULT '4' COMMENT '循环上架天数',

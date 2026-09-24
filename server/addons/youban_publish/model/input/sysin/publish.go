@@ -226,6 +226,7 @@ type AccountSettingSaveInp struct {
 	MarkPosition           string `json:"markPosition" dc:"显示位置：top/bottom/feeLine"`
 	SharedResourceEnabled  int    `json:"sharedResourceEnabled" dc:"是否允许上架账号管理租户共享资料"`
 	TelegramBindingEnabled int    `json:"telegramBindingEnabled" dc:"是否允许上架账号绑定并使用Telegram"`
+	GroupPushEnabled       int    `json:"groupPushEnabled" dc:"是否允许上架账号使用群聊推送"`
 }
 
 func (in *AccountSettingSaveInp) Filter(ctx context.Context) error {
@@ -264,6 +265,9 @@ func (in *AccountSettingSaveInp) Filter(ctx context.Context) error {
 	if in.TelegramBindingEnabled != 0 && in.TelegramBindingEnabled != 1 {
 		return gerror.New("TG绑定开关不合法")
 	}
+	if in.GroupPushEnabled != 0 && in.GroupPushEnabled != 1 {
+		return gerror.New("群聊推送开关不合法")
+	}
 	return nil
 }
 
@@ -279,6 +283,7 @@ type AccountSettingModel struct {
 	PreviewMark            string      `json:"previewMark" dc:"编号标识预览"`
 	SharedResourceEnabled  int         `json:"sharedResourceEnabled" dc:"是否允许管理租户共享资料"`
 	TelegramBindingEnabled int         `json:"telegramBindingEnabled" dc:"是否允许绑定并使用Telegram"`
+	GroupPushEnabled       int         `json:"groupPushEnabled" dc:"是否允许使用群聊推送"`
 	CreatedAt              *gtime.Time `json:"createdAt" dc:"创建时间"`
 	UpdatedAt              *gtime.Time `json:"updatedAt" dc:"更新时间"`
 }
@@ -289,20 +294,22 @@ type AccountCapabilityModel struct {
 	AccountType            string `json:"accountType" dc:"账号类型"`
 	SharedResourceEnabled  int    `json:"sharedResourceEnabled" dc:"是否允许管理租户共享资料"`
 	TelegramBindingEnabled int    `json:"telegramBindingEnabled" dc:"是否允许绑定并使用Telegram"`
+	GroupPushEnabled       int    `json:"groupPushEnabled" dc:"是否允许使用群聊推送"`
 }
 
 type CurrentAccountModel struct {
-	Id          int64                 `json:"id" dc:"账号ID"`
-	TenantId    int64                 `json:"tenantId" dc:"租户ID"`
-	ParentId    int64                 `json:"parentId" dc:"父账号ID"`
-	AccountType string                `json:"accountType" dc:"账号类型"`
-	Nickname    string                `json:"nickname" dc:"账号名称"`
-	Username    string                `json:"username" dc:"用户名"`
-	Remark      string                `json:"remark" dc:"个人简介"`
-	Status      int                   `json:"status" dc:"状态"`
-	CreatedAt   *gtime.Time           `json:"createdAt" dc:"创建时间"`
-	UpdatedAt   *gtime.Time           `json:"updatedAt" dc:"更新时间"`
-	Vip         *TenantVipStatusModel `json:"vip" dc:"会员状态"`
+	Id               int64                 `json:"id" dc:"账号ID"`
+	TenantId         int64                 `json:"tenantId" dc:"租户ID"`
+	ParentId         int64                 `json:"parentId" dc:"父账号ID"`
+	AccountType      string                `json:"accountType" dc:"账号类型"`
+	Nickname         string                `json:"nickname" dc:"账号名称"`
+	Username         string                `json:"username" dc:"用户名"`
+	Remark           string                `json:"remark" dc:"个人简介"`
+	Status           int                   `json:"status" dc:"状态"`
+	CreatedAt        *gtime.Time           `json:"createdAt" dc:"创建时间"`
+	UpdatedAt        *gtime.Time           `json:"updatedAt" dc:"更新时间"`
+	Vip              *TenantVipStatusModel `json:"vip" dc:"会员状态"`
+	GroupPushEnabled int                   `json:"groupPushEnabled" dc:"是否允许群聊推送"`
 }
 
 type UpdateAccountPasswordInp struct {
