@@ -1,4 +1,7 @@
 -- Interactive upgrades must remain short. Historical cleanup and backfills belong in upgrade.pgsql.sql.
+ALTER TABLE "hg_youban_publish_account_setting"
+  ADD COLUMN IF NOT EXISTS "group_push_enabled" smallint NOT NULL DEFAULT 0;
+
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_dedupe_entry" (
   "id" BIGSERIAL PRIMARY KEY,
   "tenant_id" bigint NOT NULL DEFAULT 0,
