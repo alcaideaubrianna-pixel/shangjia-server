@@ -20,6 +20,16 @@ CREATE INDEX test_index ON test_table (id);`)
 	}
 }
 
+func TestSplitSqlSkipsLineCommentOnlyStatements(t *testing.T) {
+	statements := splitSql("-- comment with a semicolon;\nCREATE TABLE test_table (id bigint);\n-- trailing comment;")
+	if len(statements) != 1 {
+		t.Fatalf("expected one executable SQL statement, got %d: %#v", len(statements), statements)
+	}
+	if !strings.Contains(statements[0], "CREATE TABLE test_table") {
+		t.Fatalf("comment handling removed executable SQL: %#v", statements)
+	}
+}
+
 func TestSqlDollarQuoteTag(t *testing.T) {
 	if got := sqlDollarQuoteTag("$migration$body"); got != "$migration$" {
 		t.Fatalf("unexpected dollar quote tag: %q", got)

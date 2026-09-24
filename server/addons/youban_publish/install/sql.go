@@ -263,13 +263,21 @@ func readSqlFile(path string) string {
 
 func splitSql(content string) []string {
 	var (
-		list    []string
-		builder strings.Builder
-		quote   byte
-		escape  bool
-		dollar  string
+		list        []string
+		builder     strings.Builder
+		quote       byte
+		escape      bool
+		dollar      string
+		lineComment bool
 	)
 	for index := 0; index < len(content); index++ {
+		if lineComment {
+			if content[index] == '\n' {
+				lineComment = false
+				builder.WriteByte(content[index])
+			}
+			continue
+		}
 		if dollar != "" {
 			if strings.HasPrefix(content[index:], dollar) {
 				builder.WriteString(dollar)
@@ -288,6 +296,11 @@ func splitSql(content string) []string {
 				dollar = tag
 				continue
 			}
+		}
+		if quote == 0 && content[index] == '-' && index+1 < len(content) && content[index+1] == '-' {
+			lineComment = true
+			index++
+			continue
 		}
 
 		builder.WriteByte(content[index])
