@@ -59,7 +59,7 @@ func (s *sSysPublish) activeAccountCapability(ctx context.Context, tenantId, acc
 		mod = mod.Where("a."+accountColumns.TenantId, tenantId)
 	}
 	var capability *sysin.AccountCapabilityModel
-	if err := mod.Fields("a.id AS account_id,a.tenant_id,a.account_type,COALESCE(s.shared_resource_enabled,0) AS shared_resource_enabled,COALESCE(s.telegram_binding_enabled,0) AS telegram_binding_enabled").Scan(&capability); err != nil {
+	if err := mod.Fields("a.id AS account_id,a.tenant_id,a.account_type,COALESCE(s.shared_resource_enabled,0) AS shared_resource_enabled,COALESCE(s.telegram_binding_enabled,0) AS telegram_binding_enabled,COALESCE(s.group_push_enabled,0) AS group_push_enabled").Scan(&capability); err != nil {
 		return nil, gerror.Wrap(err, "读取上架账号权限失败")
 	}
 	if capability == nil || capability.AccountId <= 0 || capability.TenantId <= 0 {

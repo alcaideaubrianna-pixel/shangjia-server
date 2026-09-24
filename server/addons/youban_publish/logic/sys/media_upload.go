@@ -61,7 +61,7 @@ func (s *sSysPublish) resolveMediaEditTask(ctx context.Context, in *sysin.MediaU
 }
 
 func (s *sSysPublish) AdminMessageTemplateMediaUpload(ctx context.Context, in *sysin.MessageTemplateMediaUploadInp, file *ghttp.UploadFile, poster *ghttp.UploadFile, originalFile *ghttp.UploadFile) (*sysin.MessageTemplateMediaModel, error) {
-	account, err := s.currentAdminAccount(ctx)
+	account, err := s.ensureGroupPushCapability(ctx)
 	if err != nil {
 		return nil, err
 	}

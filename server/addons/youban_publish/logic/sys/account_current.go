@@ -19,6 +19,9 @@ func (s *sSysPublish) CurrentAccount(ctx context.Context) (*sysin.CurrentAccount
 	if err != nil {
 		return nil, err
 	}
+	if account.AccountType == sysin.PublishAccountTypeAdmin {
+		capability.GroupPushEnabled = 1
+	}
 	return &sysin.CurrentAccountModel{
 		Id:               account.Id,
 		TenantId:         account.TenantId,
