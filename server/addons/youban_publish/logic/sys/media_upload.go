@@ -148,7 +148,7 @@ func (s *sSysPublish) saveUploadedTaskMedia(ctx context.Context, task gdb.Record
 		}
 	}
 	saveStartedAt := time.Now()
-	res, err = s.saveMediaAttachment(ctx, task, in, attachment, nil, originalAttachment, "")
+	res, err = s.saveMediaAttachment(ctx, task, in, attachment, nil, originalAttachment, "", true)
 	logMediaUploadStage(ctx, "save_media", saveStartedAt, in, file, err)
 	if err == nil && res != nil && res.Id > 0 {
 		if enqueueErr := s.enqueueMediaProcess(ctx, res.Id, 0); enqueueErr != nil {

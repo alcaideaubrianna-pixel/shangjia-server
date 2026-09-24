@@ -74,7 +74,7 @@ func (s *sSysPublish) attachMultipartMedia(ctx context.Context, in *sysin.MediaM
 	if attachment.Id <= 0 {
 		return nil, gerror.New("分片附件不存在或无权使用")
 	}
-	res, err := s.saveMediaAttachment(ctx, task, &in.MediaUploadInp, attachment, nil, nil, "")
+	res, err := s.saveMediaAttachment(ctx, task, &in.MediaUploadInp, attachment, nil, nil, "", true)
 	if err != nil {
 		return nil, err
 	}

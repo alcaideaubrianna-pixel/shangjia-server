@@ -1399,7 +1399,7 @@ func (s *sSysPublish) importLegacyCMSMedia(ctx context.Context, runId int64, sou
 			MediaType: item.MediaType,
 			Purpose:   purpose,
 			SortIndex: sortIndex,
-		}, attachment, mediaPosterAttachment(assets.Poster), nil, assets.PerceptualHash); err != nil {
+		}, attachment, mediaPosterAttachment(assets.Poster), nil, assets.PerceptualHash, true); err != nil {
 			return imported, err
 		}
 		imported++
