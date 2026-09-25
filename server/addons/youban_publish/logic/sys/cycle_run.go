@@ -79,7 +79,8 @@ func (s *sSysPublish) RunChannelCycleScheduler(ctx context.Context) error {
 }
 
 func (s *sSysPublish) pauseInactiveFreeChannelCycles(ctx context.Context) error {
-	cutoff := gtime.Now().Add(-time.Duration(maxConfigInt(ctx, "youbanPublish.cycle.freeInactiveDays", 15)) * 24 * time.Hour)
+	inactiveDays := maxConfigInt(ctx, "youbanPublish.cycle.freeInactiveDays", 7)
+	cutoff := gtime.Now().Add(-time.Duration(inactiveDays) * 24 * time.Hour)
 	var channels []*channelCycleRecord
 	if err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).Fields("id,tenant_id,cycle_publish_enabled,status,publish_direction,cycle_publish_mode").Where("cycle_publish_enabled", 1).Where("status", 1).Where("publish_direction", "up").WhereNull("deleted_at").Scan(&channels); err != nil {
 		return gerror.Wrap(err, "读取免费循环频道失败")
@@ -106,7 +107,7 @@ func (s *sSysPublish) pauseInactiveFreeChannelCycles(ctx context.Context) error 
 		}
 		notified[channel.TenantId] = true
 		if accountId, notifyErr := s.tenantVipNotifyAccountId(ctx, channel.TenantId, 0); notifyErr == nil && accountId > 0 {
-			_ = botService.SysBot().NotifyAccount(ctx, &botsysin.NotifyAccountInp{BotStrategy: "official", FallbackBoundBot: true, IgnoreFeatureSwitch: true, App: consts.AppApi, AccountId: accountId, Text: fmt.Sprintf("为避免长期未使用的频道循环推送持续占用服务器资源，保障整体服务稳定运行，因连续 %d 天未使用后台，频道循环推送已暂时关闭。重新进入后台后，可在频道配置中手动恢复。", maxConfigInt(ctx, "youbanPublish.cycle.freeInactiveDays", 15))})
+			_ = botService.SysBot().NotifyAccount(ctx, &botsysin.NotifyAccountInp{BotStrategy: "official", FallbackBoundBot: true, IgnoreFeatureSwitch: true, App: consts.AppApi, AccountId: accountId, Text: fmt.Sprintf("为避免长期未使用的频道循环推送持续占用服务器资源，保障整体服务稳定运行，因连续 %d 天未使用后台，频道循环推送已暂时关闭。\n\n重新进入后台后，可在频道配置中手动恢复。", inactiveDays)})
 		}
 	}
 	return nil

@@ -936,7 +936,7 @@ func (s *sSysPublish) processExpiredTenantVip(ctx context.Context, vip *entity.Y
 		_, err := tx.Model(tenantVipEventTable).Safe().Ctx(ctx).Data(g.Map{
 			"event_key": eventKey, "event_type": tenantVipEventExpired, "tenant_id": vip.TenantId,
 			"after_expired_at": locked.ExpiredAt, "notify_status": "pending",
-			"remark":     fmt.Sprintf("会员到期后，频道循环上架将按基础版规则运行，固定间隔为 %d 天；续费后恢复会员自定义周期。", maxConfigInt(ctx, "youbanPublish.cycle.freeIntervalDays", 15)),
+			"remark":     fmt.Sprintf("会员到期后，频道循环上架将按基础版规则运行，固定间隔为 %d 天；连续 %d 天未使用后台后，为避免长期占用服务器资源，循环推送会自动暂停；续费后恢复会员自定义周期。", maxConfigInt(ctx, "youbanPublish.cycle.freeIntervalDays", 15), maxConfigInt(ctx, "youbanPublish.cycle.freeInactiveDays", 7)),
 			"created_at": now, "updated_at": now,
 		}).OnConflict("event_key").OnDuplicateEx("id").Save()
 		if err != nil {
@@ -978,7 +978,11 @@ func (s *sSysPublish) processExpiredTenantVip(ctx context.Context, vip *entity.Y
 	if result.Applied {
 		_, _ = cache.Instance().Remove(ctx, tenantVipCacheKey(vip.TenantId))
 		_, _ = cache.Instance().Remove(ctx, tenantVipFullCacheKey(vip.TenantId))
-		for _, channelId := range result.DowngradedChannelIds {
+		var channelIds []int64
+		if loadErr := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).Fields("id").Where("tenant_id", vip.TenantId).Where("cycle_publish_enabled", 1).WhereNull("deleted_at").Scan(&channelIds); loadErr != nil {
+			g.Log().Warningf(ctx, "读取会员到期循环重算频道失败 tenantId:%d err:%+v", vip.TenantId, loadErr)
+		}
+		for _, channelId := range uniqueIds(channelIds) {
 			if enqueueErr := s.enqueueCycleReschedule(ctx, channelId, 0); enqueueErr != nil {
 				g.Log().Warningf(ctx, "提交会员到期循环重算失败 channel:%d err:%+v", channelId, enqueueErr)
 			}

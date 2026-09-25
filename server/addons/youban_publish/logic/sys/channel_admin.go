@@ -66,6 +66,7 @@ func (s *sSysPublish) AdminChannelList(ctx context.Context, in *sysin.ChannelLis
 	}
 	applyChannelBotIds(list)
 	applyChannelBotPermissionSummary(list)
+	s.applyEffectiveChannelCycleInfo(ctx, list)
 	return list, totalCount, nil
 }
 
@@ -127,6 +128,7 @@ func (s *sSysPublish) MyChannelList(ctx context.Context, in *sysin.ChannelListIn
 	}
 	applyChannelBotIds(list)
 	applyChannelBotPermissionSummary(list)
+	s.applyEffectiveChannelCycleInfo(ctx, list)
 	return list, totalCount, nil
 }
 
@@ -153,8 +155,23 @@ func (s *sSysPublish) ServerChannelList(ctx context.Context, in *sysin.ChannelLi
 		return nil, 0, err
 	}
 	applyChannelBotIds(list)
+	s.applyEffectiveChannelCycleInfo(ctx, list)
 	applyChannelBotPermissionSummary(list)
 	return list, totalCount, nil
+}
+
+func (s *sSysPublish) applyEffectiveChannelCycleInfo(ctx context.Context, list []*sysin.ChannelModel) {
+	for _, channel := range list {
+		if channel == nil {
+			continue
+		}
+		channel.StoredCyclePublishDays = channel.CyclePublishDays
+		vip, err := s.tenantVipStatus(ctx, channel.TenantId)
+		channel.CycleVipActive = err == nil && tenantVipStatusActive(vip)
+		if !channel.CycleVipActive {
+			channel.CyclePublishDays = maxConfigInt(ctx, "youbanPublish.cycle.freeIntervalDays", 15)
+		}
+	}
 }
 
 func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSaveInp) (err error) {

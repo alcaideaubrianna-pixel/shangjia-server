@@ -311,6 +311,7 @@ type CurrentAccountModel struct {
 	Vip                   *TenantVipStatusModel `json:"vip" dc:"会员状态"`
 	GroupPushEnabled      int                   `json:"groupPushEnabled" dc:"是否允许群聊推送"`
 	CycleFreeIntervalDays int                   `json:"cycleFreeIntervalDays" dc:"免费频道循环间隔天数"`
+	CycleFreeInactiveDays int                   `json:"cycleFreeInactiveDays" dc:"免费频道循环自动暂停天数"`
 }
 
 type UpdateAccountPasswordInp struct {
@@ -1325,6 +1326,8 @@ type ChannelModel struct {
 	PublishDirection        string      `json:"publishDirection" dc:"上架/下架频道：up/down"`
 	CyclePublishEnabled     int         `json:"cyclePublishEnabled" dc:"是否循环上架"`
 	CyclePublishDays        int         `json:"cyclePublishDays" dc:"循环时间，生产按天，开发按秒"`
+	StoredCyclePublishDays  int         `json:"storedCyclePublishDays" dc:"会员保存的循环时间"`
+	CycleVipActive          bool        `json:"cycleVipActive" dc:"频道所属租户会员是否有效"`
 	CyclePublishTime        string      `json:"cyclePublishTime" dc:"循环上架时间"`
 	CyclePublishMode        string      `json:"cyclePublishMode" dc:"循环模式"`
 	CycleBatchSize          int         `json:"cycleBatchSize" dc:"批次循环数量"`

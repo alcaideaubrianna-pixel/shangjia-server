@@ -934,7 +934,24 @@
       width: 100,
       render: (row) => (row.cyclePublishEnabled === 1 ? '开启' : '关闭'),
     },
-    { title: '循环天数', key: 'cyclePublishDays', width: 100 },
+    {
+      title: '会员状态',
+      key: 'cycleVipActive',
+      width: 100,
+      render: (row) => renderMiniTag(row.cycleVipActive ? '付费会员' : '免费版', row.cycleVipActive ? 'success' : 'warning'),
+    },
+    {
+      title: '生效周期',
+      key: 'cyclePublishDays',
+      width: 110,
+      render: (row) => `${row.cyclePublishDays || 0} 天`,
+    },
+    {
+      title: '会员配置',
+      key: 'storedCyclePublishDays',
+      width: 110,
+      render: (row) => `${row.storedCyclePublishDays || 0} 天`,
+    },
     { title: '状态', key: 'status', width: 100, render: (row) => renderStatus(row.status) },
     { title: '更新时间', key: 'updatedAt', width: 180 },
   ];
