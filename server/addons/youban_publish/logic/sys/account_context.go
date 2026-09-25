@@ -4,8 +4,6 @@ import (
 	"context"
 
 	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/frame/g"
-	"github.com/gogf/gf/v2/os/gtime"
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
@@ -35,13 +33,6 @@ func (s *sSysPublish) currentAccount(ctx context.Context) (*sysin.AccountModel, 
 	}
 	if account == nil || account.Id <= 0 {
 		return nil, gerror.New("当前用户未绑定上架账号")
-	}
-	if account.AccountType == sysin.PublishAccountTypeAdmin {
-		now := gtime.Now()
-		_, _ = pdao.YoubanPublishAccount.Ctx(ctx).WherePri(account.Id).Data(g.Map{
-			accountColumns.LastActiveAt: now,
-		}).Update()
-		account.LastActiveAt = now
 	}
 	return account, nil
 }

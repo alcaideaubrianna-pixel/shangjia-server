@@ -232,9 +232,6 @@ ALTER TABLE "hg_youban_publish_collect_event" ADD COLUMN IF NOT EXISTS "material
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_material" ON "hg_youban_publish_collect_event" ("source_id", "source_chat_id", "material_role", "material_parent_event_id", "source_message_id");
 ALTER TABLE "hg_youban_publish_collect_review" DROP COLUMN IF EXISTS "media_json";
 
--- 后台活跃时间：用于识别免费账号长期未使用后台的情况，避免循环计划长期占用服务器资源。
-ALTER TABLE "hg_youban_publish_account" ADD COLUMN IF NOT EXISTS "last_active_at" timestamp DEFAULT NULL;
-
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_event_log" (
   "id" BIGSERIAL PRIMARY KEY,
   "tenant_id" bigint NOT NULL DEFAULT 0,

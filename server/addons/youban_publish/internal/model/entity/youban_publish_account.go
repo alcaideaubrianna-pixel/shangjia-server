@@ -41,5 +41,4 @@ type YoubanPublishAccount struct {
 	ContactOther           string      `json:"contactOther"           orm:"contact_other"            description:"其他联系方式"`
 	FollowApprovalRequired int         `json:"followApprovalRequired" orm:"follow_approval_required" description:"关注我是否需要审批"`
 	PublicFollowEnabled    int         `json:"publicFollowEnabled"    orm:"public_follow_enabled"    description:"是否公开关注"`
-	LastActiveAt           *gtime.Time `json:"lastActiveAt"            orm:"last_active_at"             description:"最后后台活跃时间"`
 }

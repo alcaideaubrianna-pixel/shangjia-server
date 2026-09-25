@@ -43,5 +43,4 @@ type YoubanPublishAccount struct {
 	ContactOther           any         // 其他联系方式
 	FollowApprovalRequired any         // 关注我是否需要审批
 	PublicFollowEnabled    any         // 是否公开关注
-	LastActiveAt           *gtime.Time // 最后后台活跃时间
 }

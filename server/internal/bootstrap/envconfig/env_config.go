@@ -55,9 +55,6 @@ var items = []item{
 	{Key: "youbanPublish.fullPush.expandLeaseSeconds", EnvKeys: []string{"YOUBAN_PUBLISH_FULL_PUSH_LEASE_SECONDS"}},
 	{Key: "youbanPublish.queue.publishBulkConcurrency", EnvKeys: []string{"YOUBAN_PUBLISH_BULK_CONCURRENCY"}},
 	{Key: "youbanPublish.queue.cycleConcurrency", EnvKeys: []string{"YOUBAN_PUBLISH_CYCLE_CONCURRENCY"}},
-	// 免费循环推送业务策略：免费间隔天数与后台不活跃自动暂停天数。
-	{Key: "youbanPublish.messagePush.freeIntervalDays", EnvKeys: []string{"YOUBAN_PUBLISH_MESSAGE_PUSH_FREE_INTERVAL_DAYS"}},
-	{Key: "youbanPublish.messagePush.freeInactiveDays", EnvKeys: []string{"YOUBAN_PUBLISH_MESSAGE_PUSH_FREE_INACTIVE_DAYS"}},
 	{Key: "youbanPublish.collect.globalMediaConcurrency", EnvKeys: []string{"YOUBAN_PUBLISH_GLOBAL_MEDIA_CONCURRENCY"}},
 	{Key: "youbanPublish.collect.accountMediaConcurrency", EnvKeys: []string{"YOUBAN_PUBLISH_ACCOUNT_MEDIA_CONCURRENCY"}},
 	{Key: "youbanPublish.collect.accountMediaLeaseSeconds", EnvKeys: []string{"YOUBAN_PUBLISH_ACCOUNT_MEDIA_LEASE_SECONDS"}},
