@@ -71,7 +71,10 @@ func (s *sSysPublish) AdminMessagePushPlanList(ctx context.Context, in *sysin.Me
 	if err = mod.Page(in.Page, in.PerPage).OrderDesc("id").Scan(&records); err != nil {
 		return nil, 0, gerror.Wrap(err, "获取消息推送计划列表失败")
 	}
-	models := messagePushPlanModels(records)
+	models, err := s.messagePushPlanModels(ctx, records)
+	if err != nil {
+		return nil, 0, err
+	}
 	groups := make(map[int64][]string)
 	for _, item := range models {
 		if item == nil {
@@ -124,6 +127,24 @@ func (s *sSysPublish) AdminMessagePushPlanSave(ctx context.Context, in *sysin.Me
 	}
 	now := gtime.Now()
 	nextRunAt := firstMessagePushPlanRunAt(in.Times, now)
+	intervalDays := in.IntervalDays
+	vip, vipErr := s.tenantVipStatus(ctx, account.TenantId)
+	if vipErr != nil {
+		return nil, vipErr
+	}
+	if !tenantVipStatusActive(vip) {
+		intervalDays = s.freeMessagePushPlanIntervalDays(ctx)
+	}
+	if in.Id > 0 {
+		storedPlan, loadErr := s.messagePushPlanById(ctx, in.Id, account.TenantId)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		if !tenantVipStatusActive(vip) {
+			// Keep the member's custom value for renewal; free/expired plans use ENV at runtime.
+			intervalDays = storedPlan.IntervalDays
+		}
+	}
 	data := g.Map{
 		"tenant_id":        account.TenantId,
 		"name":             in.Name,
@@ -131,7 +152,7 @@ func (s *sSysPublish) AdminMessagePushPlanSave(ctx context.Context, in *sysin.Me
 		"template_ids":     mustJsonEncode(in.TemplateIds),
 		"target_chat_ids":  mustJsonEncode(in.TargetChatIds),
 		"times":            mustJsonEncode(in.Times),
-		"interval_days":    in.IntervalDays,
+		"interval_days":    intervalDays,
 		"interval_seconds": in.IntervalSeconds,
 		"status":           in.Status,
 		"push_mode":        in.PushMode,
@@ -269,7 +290,7 @@ func (s *sSysPublish) repairMessagePushPlanSchedules(ctx context.Context) error 
 	}
 	now := gtime.Now()
 	for _, plan := range plans {
-		nextRunAt := messagePushPlanNextRunAtFromRecord(decodeStringArray(plan.Times), plan.IntervalDays, plan.LastRunAt, now)
+		nextRunAt := messagePushPlanNextRunAtFromRecord(decodeStringArray(plan.Times), s.effectiveMessagePushPlanIntervalDays(ctx, plan), plan.LastRunAt, now)
 		if messagePushPlanSameWallClock(plan.NextRunAt, nextRunAt) {
 			continue
 		}
@@ -495,11 +516,19 @@ func (s *sSysPublish) ensureMessagePushPlansBelongTenant(ctx context.Context, id
 	return nil
 }
 
-func messagePushPlanModels(records []*messagePushPlanRecord) []*sysin.MessagePushPlanModel {
+func (s *sSysPublish) messagePushPlanModels(ctx context.Context, records []*messagePushPlanRecord) ([]*sysin.MessagePushPlanModel, error) {
 	list := make([]*sysin.MessagePushPlanModel, 0, len(records))
 	for _, item := range records {
 		if item == nil {
 			continue
+		}
+		intervalDays := normalizeMessagePushPlanIntervalDays(item.IntervalDays)
+		vip, err := s.tenantVipStatus(ctx, item.TenantId)
+		if err != nil {
+			return nil, gerror.Wrap(err, "读取消息推送计划会员状态失败")
+		}
+		if !tenantVipStatusActive(vip) {
+			intervalDays = s.freeMessagePushPlanIntervalDays(ctx)
 		}
 		list = append(list, &sysin.MessagePushPlanModel{
 			Id:              item.Id,
@@ -509,7 +538,7 @@ func messagePushPlanModels(records []*messagePushPlanRecord) []*sysin.MessagePus
 			TemplateIds:     decodeInt64Array(item.TemplateIds),
 			TargetChatIds:   decodeStringArray(item.TargetChatIds),
 			Times:           decodeStringArray(item.Times),
-			IntervalDays:    normalizeMessagePushPlanIntervalDays(item.IntervalDays),
+			IntervalDays:    intervalDays,
 			IntervalSeconds: item.IntervalSeconds,
 			Status:          item.Status,
 			NextRunAt:       messagePushPlanWallClock(item.NextRunAt),
@@ -523,7 +552,7 @@ func messagePushPlanModels(records []*messagePushPlanRecord) []*sysin.MessagePus
 			DeletedAt:       item.DeletedAt,
 		})
 	}
-	return list
+	return list, nil
 }
 
 func firstMessagePushPlanRunAt(times []string, now *gtime.Time) *gtime.Time {
@@ -670,6 +699,10 @@ func (s *sSysPublish) effectiveMessagePushPlanIntervalDays(ctx context.Context, 
 	if err == nil && tenantVipStatusActive(vip) {
 		return normalizeMessagePushPlanIntervalDays(plan.IntervalDays)
 	}
+	return s.freeMessagePushPlanIntervalDays(ctx)
+}
+
+func (s *sSysPublish) freeMessagePushPlanIntervalDays(ctx context.Context) int {
 	days := g.Cfg().MustGet(ctx, "youbanPublish.messagePush.freeIntervalDays", 9).Int()
 	if days <= 0 {
 		days = 9
