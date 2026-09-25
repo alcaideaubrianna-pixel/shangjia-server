@@ -277,6 +277,17 @@ func (s *sSysPublish) recoverChannelCycleRuns(ctx context.Context) error {
 		if active {
 			continue
 		}
+		if err = s.finalizeChannelCycleDelivery(ctx, run); err != nil {
+			return err
+		}
+		var status string
+		if err = g.DB().Model(publishCycleRunTable).Safe().Ctx(ctx).
+			Where("id", run.Id).ValueScan("status", &status); err != nil {
+			return gerror.Wrap(err, "校验超时频道循环发送状态失败")
+		}
+		if status != cycleRunStatusDispatching {
+			continue
+		}
 		if err = s.markStaleDispatchingCycleRun(ctx, run, now); err != nil {
 			return err
 		}

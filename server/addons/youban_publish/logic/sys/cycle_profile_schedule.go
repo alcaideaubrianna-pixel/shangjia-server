@@ -315,6 +315,10 @@ func (s *sSysPublish) refreshChannelProfileCycleNextAt(ctx context.Context, chan
 	var nextAt any
 	if !value.IsNil() {
 		nextAt = value.Val()
+	} else {
+		// Empty channels still need a future checkpoint; keeping NULL would
+		// enqueue the same reschedule task on every scheduler pass.
+		nextAt = gtime.Now().Add(24 * time.Hour)
 	}
 	_, err = g.DB().Model(publishChannelTable).Safe().Ctx(ctx).Where("id", channelId).Data(g.Map{
 		"cycle_next_run_at": nextAt, "updated_at": gtime.Now(),
