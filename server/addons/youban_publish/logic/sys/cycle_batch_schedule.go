@@ -77,14 +77,14 @@ func (s *sSysPublish) createScheduledBatchCycleRun(ctx context.Context, channel 
 			return nil
 		}
 		cursor := channel.BatchCursor
-		var activeRunId int64
-		activeRunId, err = tx.Model(publishCycleRunTable).Safe().Ctx(ctx).
+		activeRunValue, valueErr := tx.Model(publishCycleRunTable).Safe().Ctx(ctx).
 			Where("channel_id", channel.Id).
 			WhereIn("status", []string{cycleRunStatusPending, cycleRunStatusRunning, cycleRunStatusDispatching}).
 			OrderAsc("id").Value("id")
-		if err != nil {
-			return err
+		if valueErr != nil {
+			return valueErr
 		}
+		activeRunId := activeRunValue.Int64()
 		if activeRunId > 0 {
 			result, updateErr := tx.Model(publishChannelTable).Safe().Ctx(ctx).
 				Where("id", channel.Id).Where("cycle_active_run_id", -1).
