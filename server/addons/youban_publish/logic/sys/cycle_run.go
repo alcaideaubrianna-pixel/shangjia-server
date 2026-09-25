@@ -13,7 +13,11 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	botsysin "hotgo/addons/youban_bot/model/input/sysin"
+	botService "hotgo/addons/youban_bot/service"
+	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/consts"
 )
 
 const (
@@ -64,6 +68,7 @@ type channelProfileRecord struct {
 
 func (s *sSysPublish) RunChannelCycleScheduler(ctx context.Context) error {
 	return runChannelCycleSchedulerStages(ctx, []channelCycleSchedulerStage{
+		{name: "暂停长期未活跃免费循环", run: s.pauseInactiveFreeChannelCycles},
 		{name: "恢复循环批次", run: s.recoverChannelCycleRuns},
 		{name: "核对循环补偿", run: func(ctx context.Context) error { return s.reconcileRecoveredChannelCycleRuns(ctx, 20) }},
 		{name: "收尾循环批次", run: func(ctx context.Context) error { return s.finalizeDispatchingChannelCycleRuns(ctx, 20) }},
@@ -71,6 +76,40 @@ func (s *sSysPublish) RunChannelCycleScheduler(ctx context.Context) error {
 		{name: "恢复循环重算", run: func(ctx context.Context) error { return s.enqueuePendingProfileCycleReschedules(ctx, 200) }},
 		{name: "扫描时间循环", run: s.runProfileCycleDueScan},
 	})
+}
+
+func (s *sSysPublish) pauseInactiveFreeChannelCycles(ctx context.Context) error {
+	cutoff := gtime.Now().Add(-time.Duration(maxConfigInt(ctx, "youbanPublish.cycle.freeInactiveDays", 15)) * 24 * time.Hour)
+	var channels []*channelCycleRecord
+	if err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).Fields("id,tenant_id,cycle_publish_enabled,status,publish_direction,cycle_publish_mode").Where("cycle_publish_enabled", 1).Where("status", 1).Where("publish_direction", "up").WhereNull("deleted_at").Scan(&channels); err != nil {
+		return gerror.Wrap(err, "读取免费循环频道失败")
+	}
+	notified := make(map[int64]bool)
+	for _, channel := range channels {
+		vip, err := s.tenantVipStatus(ctx, channel.TenantId)
+		if err != nil || tenantVipStatusActive(vip) {
+			continue
+		}
+		var last *gtime.Time
+		if err = pdao.YoubanPublishAccount.Ctx(ctx).Fields("last_active_at").Where("tenant_id", channel.TenantId).Where("account_type", sysin.PublishAccountTypeAdmin).Where("status", 1).OrderDesc("last_active_at").Limit(1).Scan(&last); err != nil {
+			return err
+		}
+		if last != nil && !last.Before(cutoff) {
+			continue
+		}
+		if _, err = g.DB().Model(publishChannelTable).Safe().Ctx(ctx).Where("id", channel.Id).Where("cycle_publish_enabled", 1).Data(g.Map{"cycle_publish_enabled": 0, "updated_at": gtime.Now()}).Update(); err != nil {
+			return err
+		}
+		_ = s.syncChannelCycleAfterSave(ctx, channel.TenantId, channel.Id, 0, 0, "")
+		if notified[channel.TenantId] {
+			continue
+		}
+		notified[channel.TenantId] = true
+		if accountId, notifyErr := s.tenantVipNotifyAccountId(ctx, channel.TenantId, 0); notifyErr == nil && accountId > 0 {
+			_ = botService.SysBot().NotifyAccount(ctx, &botsysin.NotifyAccountInp{BotStrategy: "official", FallbackBoundBot: true, IgnoreFeatureSwitch: true, App: consts.AppApi, AccountId: accountId, Text: fmt.Sprintf("为避免长期未使用的频道循环推送持续占用服务器资源，保障整体服务稳定运行，因连续 %d 天未使用后台，频道循环推送已暂时关闭。重新进入后台后，可在频道配置中手动恢复。", maxConfigInt(ctx, "youbanPublish.cycle.freeInactiveDays", 15))})
+		}
+	}
+	return nil
 }
 
 func (s *sSysPublish) reconcileRecoveredChannelCycleRuns(ctx context.Context, limit int) error {

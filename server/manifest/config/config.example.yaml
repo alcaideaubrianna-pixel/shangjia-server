@@ -380,6 +380,8 @@ youbanPublish:
   cycle:
     # 免费/到期会员频道循环上架的固定间隔天数，默认 15 天。
     freeIntervalDays: 15
+    # 免费账号连续未使用后台达到该天数后，频道循环推送会自动暂停。
+    freeInactiveDays: 15
   mediaSearch:
     pgvector:
       enabled: false

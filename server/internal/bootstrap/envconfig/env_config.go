@@ -57,6 +57,7 @@ var items = []item{
 	{Key: "youbanPublish.queue.cycleConcurrency", EnvKeys: []string{"YOUBAN_PUBLISH_CYCLE_CONCURRENCY"}},
 	// 免费账号频道循环上架的固定间隔天数，默认 15 天。
 	{Key: "youbanPublish.cycle.freeIntervalDays", EnvKeys: []string{"YOUBAN_PUBLISH_CYCLE_FREE_INTERVAL_DAYS"}},
+	{Key: "youbanPublish.cycle.freeInactiveDays", EnvKeys: []string{"YOUBAN_PUBLISH_CYCLE_FREE_INACTIVE_DAYS"}},
 	{Key: "youbanPublish.collect.globalMediaConcurrency", EnvKeys: []string{"YOUBAN_PUBLISH_GLOBAL_MEDIA_CONCURRENCY"}},
 	{Key: "youbanPublish.collect.accountMediaConcurrency", EnvKeys: []string{"YOUBAN_PUBLISH_ACCOUNT_MEDIA_CONCURRENCY"}},
 	{Key: "youbanPublish.collect.accountMediaLeaseSeconds", EnvKeys: []string{"YOUBAN_PUBLISH_ACCOUNT_MEDIA_LEASE_SECONDS"}},
