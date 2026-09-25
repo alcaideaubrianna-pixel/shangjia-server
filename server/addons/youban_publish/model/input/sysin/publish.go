@@ -120,6 +120,7 @@ type AccountModel struct {
 	AllowedRegionJson  string      `json:"allowedRegionJson" dc:"可发布地区JSON"`
 	DownCount          int         `json:"downCount" dc:"下架资料数量"`
 	LastLoginAt        *gtime.Time `json:"lastLoginAt" dc:"最后登录时间"`
+	LastActiveAt       *gtime.Time `json:"lastActiveAt" dc:"最后后台活跃时间"`
 	Remark             string      `json:"remark" dc:"备注"`
 	Status             int         `json:"status" dc:"状态"`
 	UploadCount        int         `json:"uploadCount" dc:"上架资料数量"`
@@ -298,18 +299,20 @@ type AccountCapabilityModel struct {
 }
 
 type CurrentAccountModel struct {
-	Id               int64                 `json:"id" dc:"账号ID"`
-	TenantId         int64                 `json:"tenantId" dc:"租户ID"`
-	ParentId         int64                 `json:"parentId" dc:"父账号ID"`
-	AccountType      string                `json:"accountType" dc:"账号类型"`
-	Nickname         string                `json:"nickname" dc:"账号名称"`
-	Username         string                `json:"username" dc:"用户名"`
-	Remark           string                `json:"remark" dc:"个人简介"`
-	Status           int                   `json:"status" dc:"状态"`
-	CreatedAt        *gtime.Time           `json:"createdAt" dc:"创建时间"`
-	UpdatedAt        *gtime.Time           `json:"updatedAt" dc:"更新时间"`
-	Vip              *TenantVipStatusModel `json:"vip" dc:"会员状态"`
-	GroupPushEnabled int                   `json:"groupPushEnabled" dc:"是否允许群聊推送"`
+	Id                          int64                 `json:"id" dc:"账号ID"`
+	TenantId                    int64                 `json:"tenantId" dc:"租户ID"`
+	ParentId                    int64                 `json:"parentId" dc:"父账号ID"`
+	AccountType                 string                `json:"accountType" dc:"账号类型"`
+	Nickname                    string                `json:"nickname" dc:"账号名称"`
+	Username                    string                `json:"username" dc:"用户名"`
+	Remark                      string                `json:"remark" dc:"个人简介"`
+	Status                      int                   `json:"status" dc:"状态"`
+	CreatedAt                   *gtime.Time           `json:"createdAt" dc:"创建时间"`
+	UpdatedAt                   *gtime.Time           `json:"updatedAt" dc:"更新时间"`
+	Vip                         *TenantVipStatusModel `json:"vip" dc:"会员状态"`
+	GroupPushEnabled            int                   `json:"groupPushEnabled" dc:"是否允许群聊推送"`
+	MessagePushFreeIntervalDays int                   `json:"messagePushFreeIntervalDays" dc:"免费循环间隔天数"`
+	MessagePushFreeInactiveDays int                   `json:"messagePushFreeInactiveDays" dc:"免费循环未活跃暂停天数"`
 }
 
 type UpdateAccountPasswordInp struct {

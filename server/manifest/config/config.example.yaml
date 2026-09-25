@@ -377,6 +377,11 @@ runtime:
   roles: [ "all" ]
 
 youbanPublish:
+  messagePush:
+    # 免费用户循环推送的固定间隔天数，默认 9 天。
+    freeIntervalDays: 9
+    # 免费用户连续未使用后台达到该天数后，循环计划会暂时暂停。
+    freeInactiveDays: 15
   mediaSearch:
     pgvector:
       enabled: false

@@ -52,6 +52,7 @@ type YoubanPublishAccountColumns struct {
 	ContactOther           string // 其他联系方式
 	FollowApprovalRequired string // 关注我是否需要审批
 	PublicFollowEnabled    string // 是否公开关注
+	LastActiveAt           string // 最后后台活跃时间
 }
 
 // youbanPublishAccountColumns holds the columns for the table hg_youban_publish_account.
@@ -87,6 +88,7 @@ var youbanPublishAccountColumns = YoubanPublishAccountColumns{
 	ContactOther:           "contact_other",
 	FollowApprovalRequired: "follow_approval_required",
 	PublicFollowEnabled:    "public_follow_enabled",
+	LastActiveAt:           "last_active_at",
 }
 
 // NewYoubanPublishAccountDao creates and returns a new DAO object for table data access.

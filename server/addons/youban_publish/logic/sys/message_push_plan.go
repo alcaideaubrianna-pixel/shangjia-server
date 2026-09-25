@@ -11,8 +11,11 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	botsysin "hotgo/addons/youban_bot/model/input/sysin"
+	botService "hotgo/addons/youban_bot/service"
 	publishdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/consts"
 	hglock "hotgo/internal/library/hgrds/lock"
 )
 
@@ -288,6 +291,9 @@ func (s *sSysPublish) repairMessagePushPlanSchedules(ctx context.Context) error 
 }
 
 func (s *sSysPublish) executeDueMessagePushPlans(ctx context.Context, limit int) error {
+	if err := s.pauseInactiveFreeMessagePushPlans(ctx); err != nil {
+		g.Log().Warningf(ctx, "暂停长期未活跃免费循环计划失败：%+v", err)
+	}
 	if limit <= 0 {
 		limit = 20
 	}
@@ -314,6 +320,56 @@ func (s *sSysPublish) executeDueMessagePushPlans(ctx context.Context, limit int)
 	for _, plan := range plans {
 		if err := s.executeMessagePushPlan(ctx, plan); err != nil {
 			g.Log().Warningf(ctx, "执行消息推送计划失败 plan:%d err:%+v", plan.Id, err)
+		}
+	}
+	return nil
+}
+
+// pauseInactiveFreeMessagePushPlans releases scheduler resources held by tenants
+// that no longer use the backend. Membership and thresholds are evaluated at run time.
+func (s *sSysPublish) pauseInactiveFreeMessagePushPlans(ctx context.Context) error {
+	inactiveDays := g.Cfg().MustGet(ctx, "youbanPublish.messagePush.freeInactiveDays", 15).Int()
+	if inactiveDays <= 0 {
+		inactiveDays = 15
+	}
+	cutoff := gtime.Now().Add(-time.Duration(inactiveDays) * 24 * time.Hour)
+	var plans []*messagePushPlanRecord
+	if err := publishdao.YoubanPublishMessagePushPlan.Ctx(ctx).Where("status", 1).WhereNull("deleted_at").Scan(&plans); err != nil {
+		return gerror.Wrap(err, "读取循环计划失败")
+	}
+	accountCols := publishdao.YoubanPublishAccount.Columns()
+	planCols := publishdao.YoubanPublishMessagePushPlan.Columns()
+	for _, plan := range plans {
+		vip, err := s.tenantVipStatus(ctx, plan.TenantId)
+		if err != nil || tenantVipStatusActive(vip) {
+			continue
+		}
+		lastActive := new(gtime.Time)
+		if err = publishdao.YoubanPublishAccount.Ctx(ctx).Fields(accountCols.LastActiveAt).
+			Where(accountCols.TenantId, plan.TenantId).
+			Where(accountCols.AccountType, sysin.PublishAccountTypeAdmin).
+			Where(accountCols.Status, 1).OrderDesc(accountCols.LastActiveAt).Limit(1).Scan(&lastActive); err != nil {
+			return err
+		}
+		if lastActive.IsZero() || lastActive.Before(cutoff) {
+			_, err = publishdao.YoubanPublishMessagePushPlan.Ctx(ctx).Where(planCols.Id, plan.Id).Where(planCols.Status, 1).Data(g.Map{
+				planCols.Status:     2,
+				planCols.NextRunAt:  nil,
+				planCols.LastResult: "为避免长期未使用的循环推送计划持续占用服务器资源，保障整体服务稳定运行，该计划已暂时暂停。重新进入后台后可手动恢复。",
+			}).Update()
+			if err != nil {
+				return gerror.Wrap(err, "暂停循环计划失败")
+			}
+			notifyId, notifyErr := s.tenantVipNotifyAccountId(ctx, plan.TenantId, 0)
+			if notifyErr == nil && notifyId > 0 {
+				if notifyErr = botService.SysBot().NotifyAccount(ctx, &botsysin.NotifyAccountInp{
+					BotStrategy: "official", FallbackBoundBot: true, IgnoreFeatureSwitch: true,
+					RequireDelivery: true, App: consts.AppApi, AccountId: notifyId,
+					Text: "为避免长期未使用的循环推送计划持续占用服务器资源，保障整体服务稳定运行，该计划已暂时暂停。重新进入后台后，可前往群聊推送页面手动恢复。",
+				}); notifyErr != nil {
+					g.Log().Warningf(ctx, "发送循环计划暂停通知失败 tenantId:%d planId:%d err:%+v", plan.TenantId, plan.Id, notifyErr)
+				}
+			}
 		}
 	}
 	return nil
@@ -393,7 +449,7 @@ func (s *sSysPublish) finishMessagePushPlan(ctx context.Context, plan messagePus
 		Data(g.Map{
 			"last_run_at": now,
 			"last_result": lastResult,
-			"next_run_at": nextMessagePushPlanRunAt(times, plan.IntervalDays, scheduledAt, now),
+			"next_run_at": nextMessagePushPlanRunAt(times, s.effectiveMessagePushPlanIntervalDays(ctx, plan), scheduledAt, now),
 			"locked_at":   nil,
 			"updated_at":  now,
 		}).
@@ -607,6 +663,18 @@ func normalizeMessagePushPlanIntervalDays(intervalDays int) int {
 		return 1
 	}
 	return intervalDays
+}
+
+func (s *sSysPublish) effectiveMessagePushPlanIntervalDays(ctx context.Context, plan messagePushPlanRecord) int {
+	vip, err := s.tenantVipStatus(ctx, plan.TenantId)
+	if err == nil && tenantVipStatusActive(vip) {
+		return normalizeMessagePushPlanIntervalDays(plan.IntervalDays)
+	}
+	days := g.Cfg().MustGet(ctx, "youbanPublish.messagePush.freeIntervalDays", 9).Int()
+	if days <= 0 {
+		days = 9
+	}
+	return days
 }
 
 func shouldWaitMessagePushPlan(templateIndex int, channelIndex int, templateCount int, channelCount int) bool {
