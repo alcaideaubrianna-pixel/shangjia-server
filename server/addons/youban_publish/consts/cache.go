@@ -9,5 +9,4 @@ const (
 	DuplicateScanBatchKeyPrefix       = "youban_publish:duplicate_scan:batch:"
 	DuplicateScanWorkKeyPrefix        = "youban_publish:duplicate_scan:work:"
 	DuplicateScanResultKeyPrefix      = "youban_publish:duplicate_scan:result:v4:"
-	PublishAccountActivityKeyPrefix   = "youban_publish:account:activity:"
 )

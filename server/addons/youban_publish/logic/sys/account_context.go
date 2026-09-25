@@ -2,22 +2,16 @@ package sys
 
 import (
 	"context"
-	"strconv"
-	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
-	publishconsts "hotgo/addons/youban_publish/consts"
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
-	"hotgo/internal/library/cache"
 	"hotgo/internal/library/contexts"
 	internalService "hotgo/internal/service"
 )
-
-const publishAccountActivityCacheTTL = 30 * time.Minute
 
 func (s *sSysPublish) currentAccount(ctx context.Context) (*sysin.AccountModel, error) {
 	userId := contexts.GetUserId(ctx)
@@ -43,15 +37,11 @@ func (s *sSysPublish) currentAccount(ctx context.Context) (*sysin.AccountModel, 
 		return nil, gerror.New("当前用户未绑定上架账号")
 	}
 	if account.AccountType == sysin.PublishAccountTypeAdmin {
-		cacheKey := publishconsts.PublishAccountActivityKeyPrefix + strconv.FormatInt(account.Id, 10)
-		if value, cacheErr := cache.Instance().Get(ctx, cacheKey); cacheErr != nil || value.IsNil() {
-			now := gtime.Now()
-			_, _ = pdao.YoubanPublishAccount.Ctx(ctx).WherePri(account.Id).Data(g.Map{
-				accountColumns.LastActiveAt: now,
-			}).Update()
-			_ = cache.Instance().Set(ctx, cacheKey, now, publishAccountActivityCacheTTL)
-			account.LastActiveAt = now
-		}
+		now := gtime.Now()
+		_, _ = pdao.YoubanPublishAccount.Ctx(ctx).WherePri(account.Id).Data(g.Map{
+			accountColumns.LastActiveAt: now,
+		}).Update()
+		account.LastActiveAt = now
 	}
 	return account, nil
 }
