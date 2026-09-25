@@ -81,6 +81,7 @@ func (s *sSysPublish) profilePushChannels(ctx context.Context, profile *sysin.Pr
 		if channel == nil {
 			continue
 		}
+		channel.CyclePublishDays = s.effectiveChannelCycleDays(ctx, profile.TenantId, channel.CyclePublishDays)
 		channel.FirstPushAt = firstPushByChannel[channel.ChannelId]
 		if channel.CyclePublishEnabled != 1 {
 			channel.NextPushAt = nil

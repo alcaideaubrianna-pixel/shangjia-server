@@ -631,7 +631,7 @@ func tenantVipEventNotifyText(event *tenantVipEventRow) string {
 		return fmt.Sprintf("⚠️ <b>VIP 将在 6 小时内到期</b>\n会员即将到期，续费后可继续使用全部会员功能。\n\n<b>到期时间：</b>%s", expiredAt)
 	case tenantVipEventExpired:
 		extra := ""
-		if strings.Contains(event.Remark, "批次循环") {
+		if strings.TrimSpace(event.Remark) != "" && strings.TrimSpace(event.Remark) != "会员到期" {
 			extra = "\n" + event.Remark
 		}
 		return fmt.Sprintf("⏰ <b>VIP 会员已到期</b>\n相关会员功能已暂停，续费成功后将自动恢复。%s\n\n<b>到期时间：</b>%s", extra, expiredAt)
@@ -935,7 +935,8 @@ func (s *sSysPublish) processExpiredTenantVip(ctx context.Context, vip *entity.Y
 		eventKey := fmt.Sprintf("%s:%d:%d", tenantVipEventExpired, locked.TenantId, locked.ExpiredAt.Timestamp())
 		_, err := tx.Model(tenantVipEventTable).Safe().Ctx(ctx).Data(g.Map{
 			"event_key": eventKey, "event_type": tenantVipEventExpired, "tenant_id": vip.TenantId,
-			"after_expired_at": locked.ExpiredAt, "notify_status": "pending", "remark": "会员到期",
+			"after_expired_at": locked.ExpiredAt, "notify_status": "pending",
+			"remark":     fmt.Sprintf("会员到期后，频道循环上架将按基础版规则运行，固定间隔为 %d 天；续费后恢复会员自定义周期。", maxConfigInt(ctx, "youbanPublish.cycle.freeIntervalDays", 15)),
 			"created_at": now, "updated_at": now,
 		}).OnConflict("event_key").OnDuplicateEx("id").Save()
 		if err != nil {

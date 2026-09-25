@@ -213,9 +213,9 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 		if existing != nil && existing.CyclePublishEnabled == 1 && existing.CyclePublishMode == "time" && existing.CyclePublishDays > 0 {
 			in.CyclePublishDays = existing.CyclePublishDays
 		} else {
-			in.CyclePublishDays = g.Cfg().MustGet(ctx, "youbanPublish.cycle.freeIntervalDays", 9).Int()
+			in.CyclePublishDays = g.Cfg().MustGet(ctx, "youbanPublish.cycle.freeIntervalDays", 15).Int()
 			if in.CyclePublishDays <= 0 {
-				in.CyclePublishDays = 9
+				in.CyclePublishDays = 15
 			}
 		}
 	}

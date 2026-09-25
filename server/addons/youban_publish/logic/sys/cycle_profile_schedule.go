@@ -117,7 +117,16 @@ func (s *sSysPublish) profileCycleChannelConfigById(ctx context.Context, channel
 	if err != nil {
 		return config, gerror.Wrap(err, "读取频道循环配置失败")
 	}
+	config.Days = s.effectiveChannelCycleDays(ctx, config.TenantId, config.Days)
 	return config, nil
+}
+
+func (s *sSysPublish) effectiveChannelCycleDays(ctx context.Context, tenantId int64, storedDays int) int {
+	vip, err := s.tenantVipStatus(ctx, tenantId)
+	if err == nil && tenantVipStatusActive(vip) {
+		return defaultCycleDays(storedDays)
+	}
+	return maxConfigInt(ctx, "youbanPublish.cycle.freeIntervalDays", 15)
 }
 
 func profileCycleChannelUsable(config profileCycleChannelConfig) bool {
@@ -422,6 +431,7 @@ func (s *sSysPublish) dispatchDueProfileCycle(ctx context.Context, row profileCy
 		Id: row.ChannelId, TenantId: row.TenantId, Enabled: row.ChannelEnabled, Days: row.ChannelDays,
 		Mode: row.ChannelMode, PublishTime: row.ChannelPublishTime, Status: row.ChannelStatus, Direction: row.PublishDirection,
 	}
+	config.Days = s.effectiveChannelCycleDays(ctx, config.TenantId, config.Days)
 	if !profileCycleChannelUsable(config) {
 		return false, s.disableProfileCycleJob(ctx, row.JobId, "频道循环配置已关闭")
 	}
