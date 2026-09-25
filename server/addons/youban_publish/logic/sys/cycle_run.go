@@ -223,6 +223,7 @@ func (s *sSysPublish) AdminChannelCycleRun(ctx context.Context, in *sysin.Channe
 func (s *sSysPublish) recoverChannelCycleRuns(ctx context.Context) error {
 	now := gtime.Now()
 	staleRunningBefore := now.Add(-35 * time.Minute)
+	staleDispatchingBefore := now.Add(-30 * time.Minute)
 	var staleRunning []cycleRunRecord
 	if err := g.DB().Model(publishCycleRunTable).Safe().Ctx(ctx).
 		Fields("id,channel_id").
@@ -256,6 +257,31 @@ func (s *sSysPublish) recoverChannelCycleRuns(ctx context.Context) error {
 		}
 	}
 
+	// A dispatching run is normally finalized by terminal-state polling. If it
+	// has been idle for too long and has no unfinished child jobs, release it
+	// as a partial failure. Never re-enqueue a run with pending/sending jobs,
+	// otherwise Telegram messages could be sent twice.
+	var staleDispatching []cycleRunRecord
+	if err := g.DB().Model(publishCycleRunTable).Safe().Ctx(ctx).
+		Fields("id,channel_id").
+		Where("status", cycleRunStatusDispatching).
+		WhereLTE("updated_at", staleDispatchingBefore).
+		OrderAsc("id").Limit(20).Scan(&staleDispatching); err != nil {
+		return gerror.Wrap(err, "读取超时频道循环发送批次失败")
+	}
+	for _, run := range staleDispatching {
+		active, err := s.cycleRunHasUnfinishedJobs(ctx, run.Id)
+		if err != nil {
+			return err
+		}
+		if active {
+			continue
+		}
+		if err = s.markStaleDispatchingCycleRun(ctx, run, now); err != nil {
+			return err
+		}
+	}
+
 	var waiting []cycleRunRecord
 	if err := g.DB().Model(publishCycleRunTable).Safe().Ctx(ctx).
 		Fields("id,channel_id").
@@ -271,6 +297,32 @@ func (s *sSysPublish) recoverChannelCycleRuns(ctx context.Context) error {
 			return gerror.Wrap(err, "恢复滞留频道循环批次入队失败")
 		}
 	}
+	return nil
+}
+
+func (s *sSysPublish) cycleRunHasUnfinishedJobs(ctx context.Context, runId int64) (bool, error) {
+	count, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		WhereLike("operation_no", fmt.Sprintf("cycle_batch:%d:", runId)+"%").
+		WhereIn("status", []string{"pending", "sending", "failed_retry", "unknown"}).Count()
+	return count > 0, err
+}
+
+func (s *sSysPublish) markStaleDispatchingCycleRun(ctx context.Context, run cycleRunRecord, now *gtime.Time) error {
+	message := "循环批次发送状态超时且无未完成任务，已释放并等待下次调度"
+	result, err := g.DB().Model(publishCycleRunTable).Safe().Ctx(ctx).
+		Where("id", run.Id).Where("status", cycleRunStatusDispatching).
+		Data(g.Map{"status": cycleRunStatusPartial, "stage": "finished", "error_message": message, "finished_at": now, "updated_at": now}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "释放超时频道循环发送批次失败")
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return nil
+	}
+	_, _ = g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
+		Where("id", run.ChannelId).Where("cycle_active_run_id", run.Id).
+		Data(g.Map{"cycle_active_run_id": 0, "cycle_last_run_at": now, "cycle_last_error_message": message, "updated_at": now}).Update()
+	s.appendChannelCycleRunLog(ctx, run, "warning", "stale_dispatching_recovered", message, nil)
 	return nil
 }
 

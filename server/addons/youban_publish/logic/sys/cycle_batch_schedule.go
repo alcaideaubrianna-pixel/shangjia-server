@@ -77,6 +77,21 @@ func (s *sSysPublish) createScheduledBatchCycleRun(ctx context.Context, channel 
 			return nil
 		}
 		cursor := channel.BatchCursor
+		var activeRunId int64
+		activeRunId, err = tx.Model(publishCycleRunTable).Safe().Ctx(ctx).
+			Where("channel_id", channel.Id).
+			Where("cursor_id", cursor).
+			WhereIn("status", []string{cycleRunStatusPending, cycleRunStatusRunning, cycleRunStatusDispatching}).
+			OrderAsc("id").Value("id")
+		if err != nil {
+			return err
+		}
+		if activeRunId > 0 {
+			_, _ = tx.Model(publishChannelTable).Safe().Ctx(ctx).
+				Where("id", channel.Id).Where("cycle_active_run_id", -1).
+				Data(g.Map{"cycle_active_run_id": activeRunId, "updated_at": now}).Update()
+			return nil
+		}
 		count, err := s.batchCycleCandidateCount(ctx, channel.TenantId, channel.Id, cursor)
 		if err != nil {
 			return err

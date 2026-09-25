@@ -392,7 +392,6 @@ func (s *sSysPublish) enqueuePendingProfileCycleReschedules(ctx context.Context,
 		Where("c.publish_direction", "up").
 		WhereNull("c.cycle_next_run_at").
 		WhereNull("c.deleted_at").
-		Where("EXISTS (SELECT 1 FROM " + publishChannelProfileTable + " cp WHERE cp.channel_id=c.id AND cp.status='active')").
 		OrderAsc("c.id").
 		Limit(limit).
 		Scan(&channelIds)
