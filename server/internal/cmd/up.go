@@ -194,6 +194,8 @@ func handleUpgradeFix(ctx context.Context, args map[string]string) (err error) {
 			return gerror.New("materialImportMediaRepair 的 a3 必须是逗号分隔的有效分组ID")
 		}
 		err = fix.RepairYoubanPublishMaterialImportMissingMedia(ctx, accountId, groupIds)
+	case "resetPublishAccountLastActive":
+		err = fix.ResetYoubanPublishAccountLastActive(ctx)
 	default:
 		err = gerror.Newf("fix a1 is invalid, a1:%v", a1)
 	}
