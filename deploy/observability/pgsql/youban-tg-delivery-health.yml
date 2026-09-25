@@ -29,20 +29,31 @@ youban_tg_due_health:
       predicate_query: |
         SELECT to_regclass('public.hg_youban_publish_tg_job') IS NOT NULL;
   query: |-
-    WITH active_chat AS MATERIALIZED (
-      SELECT DISTINCT target_chat_id
-      FROM hg_youban_publish_tg_job
-      WHERE status = 'sending' AND dispatch_status = 'processing'
+    WITH active_sender AS MATERIALIZED (
+      SELECT DISTINCT tenant_id, id AS account_id
+      FROM hg_youban_publish_tg_account
+      WHERE status = 'authorized'
+        AND deleted_at IS NULL
+        AND NULLIF(BTRIM(session_key), '') IS NOT NULL
     )
     SELECT current_database() AS datname,
            COUNT(*)::bigint AS due_jobs,
            COALESCE(EXTRACT(EPOCH FROM (NOW() - MIN(COALESCE(j.next_retry_at, j.created_at)))), 0)::bigint AS oldest_due_age_seconds,
-           COUNT(*) FILTER (WHERE a.target_chat_id IS NULL)::bigint AS due_without_active
+           COUNT(*) FILTER (WHERE a.account_id IS NULL)::bigint AS due_without_active
     FROM hg_youban_publish_tg_job j
-    LEFT JOIN active_chat a ON a.target_chat_id = j.target_chat_id
+    LEFT JOIN active_sender a ON a.tenant_id = j.tenant_id AND a.account_id = j.account_id
     WHERE j.status IN ('pending','failed_retry')
       AND j.dispatch_status IN ('idle','queued')
       AND COALESCE(j.next_retry_at, j.created_at) <= NOW()
+      AND NOT (
+        j.status = 'failed_retry'
+        AND (
+          j.error_message ILIKE '%bot配置不存在%'
+          OR j.error_message ILIKE '%读取TG会话失败%'
+          OR j.error_message ILIKE '%tg会话不存在%'
+          OR j.error_message ILIKE '%relation "hg_youban_publish_tg_session" does not exist%'
+        )
+      )
   ttl: 30
   timeout: 2
   tags: [ "dbname:railway" ]

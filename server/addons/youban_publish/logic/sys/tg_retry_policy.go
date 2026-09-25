@@ -274,6 +274,12 @@ func isTelegramPermanentSendError(err error) bool {
 	}
 	message := strings.ToLower(err.Error())
 	permanentParts := []string{
+		// These errors cannot recover by retrying the same job. Keep history,
+		// but move the job to a terminal state so it cannot starve a channel.
+		"bot配置不存在",
+		"读取tg会话失败",
+		"tg会话不存在",
+		"relation \"hg_youban_publish_tg_session\" does not exist",
 		"bad request: chat not found",
 		"chat not found",
 		"bad request: message to copy not found",
