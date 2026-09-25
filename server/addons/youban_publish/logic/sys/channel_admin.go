@@ -205,6 +205,20 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 	if err = in.Filter(ctx); err != nil {
 		return err
 	}
+	vip, err := s.tenantVipStatus(ctx, in.TenantId)
+	if err != nil {
+		return err
+	}
+	if in.CyclePublishEnabled == 1 && in.CyclePublishMode == "time" && !tenantVipStatusActive(vip) {
+		if existing != nil && existing.CyclePublishEnabled == 1 && existing.CyclePublishMode == "time" && existing.CyclePublishDays > 0 {
+			in.CyclePublishDays = existing.CyclePublishDays
+		} else {
+			in.CyclePublishDays = g.Cfg().MustGet(ctx, "youbanPublish.cycle.freeIntervalDays", 9).Int()
+			if in.CyclePublishDays <= 0 {
+				in.CyclePublishDays = 9
+			}
+		}
+	}
 	if in.CyclePublishMode == "batch" {
 		if err = s.ensureTenantVipFeature(ctx, in.TenantId, sysin.TenantVipFeatureBatchCycle); err != nil {
 			return err

@@ -377,6 +377,9 @@ runtime:
   roles: [ "all" ]
 
 youbanPublish:
+  cycle:
+    # 免费/到期会员频道循环上架的固定间隔天数，默认 9 天。
+    freeIntervalDays: 9
   mediaSearch:
     pgvector:
       enabled: false
