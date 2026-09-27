@@ -1,0 +1,17 @@
+groups:
+  - name: youban-postgres-exporter-health
+    interval: 15s
+    rules:
+      # pg_exporter exposes this as a monotonically increasing per-query
+      # error count. Exclude the known catalog probes that are intentionally
+      # noisy on the production database; business/Youban probes remain
+      # covered by the alert.
+      - alert: PostgresExporterQueryError
+        expr: 'sum by (ins, instance, datname) (increase(pg_exporter_query_scrape_error_count{job="pgsql",query!~"pg_seq|pg_table_size|pg_index|pg_relkind|pg_defpart"}[5m])) > 3'
+        for: 2m
+        labels:
+          severity: WARN
+          category: pgsql
+        annotations:
+          summary: "PostgreSQL exporter 查询失败增多"
+          description: "5 分钟内监控查询失败超过 3 次（已过滤已知高噪音 catalog 探针），请检查数据库迁移、权限、锁等待或查询超时"
