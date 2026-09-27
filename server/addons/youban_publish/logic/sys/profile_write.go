@@ -30,24 +30,11 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 		return nil, err
 	}
 	draftOnly := in.DraftOnly && in.Id <= 0 && normalizeProfileUUID(in.Uuid) == ""
-	if !draftOnly {
-		in.Province, in.City, _, err = location.NormalizeRegionCodes(ctx, in.Province, in.City)
-		if err != nil {
-			return nil, err
-		}
-		if strings.TrimSpace(in.Province) == "" || strings.TrimSpace(in.City) == "" {
-			parsedProvince, parsedCity := profileextractor.RegionLabels(in.PlainText)
-			if strings.TrimSpace(in.Province) == "" {
-				in.Province = parsedProvince
-			}
-			if strings.TrimSpace(in.City) == "" {
-				in.City = parsedCity
-			}
-			in.Province, in.City, _, err = location.NormalizeRegionCodes(ctx, in.Province, in.City)
-			if err != nil {
-				return nil, err
-			}
-		}
+	if draftOnly {
+		in.Province = safeProfileRegionValue(in.Province)
+		in.City = safeProfileRegionValue(in.City)
+	} else {
+		in.Province, in.City = normalizeProfileRegionsBestEffort(ctx, in.PlainText, in.Province, in.City)
 	}
 	if tenantId <= 0 || accountId <= 0 {
 		return nil, gerror.New("上架账号信息不完整")
@@ -169,6 +156,67 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 		"resultQueryMs":        time.Since(maintenanceQueuedAt).Milliseconds(), "elapsedMs": time.Since(startedAt).Milliseconds(),
 	})
 	return &sysin.ProfileSaveModel{Id: profileId, Uuid: profile[columns.SourceNoteUuid].String(), ProfileNo: profile[columns.ProfileNo].String()}, nil
+}
+
+const profileRegionMaxRunes = 64
+
+// normalizeProfileRegionsBestEffort keeps region enrichment from blocking a
+// profile save. Region parsing and the province dictionary are auxiliary
+// metadata; the original profile text remains the source of truth when either
+// step is unavailable. Values that cannot fit the database contract are
+// cleared rather than allowing the INSERT to fail.
+func normalizeProfileRegionsBestEffort(ctx context.Context, plainText, province, city string) (string, string) {
+	// Some clients send labelled values in the province/city fields themselves,
+	// for example "北京     城市：北京". Parse those fields first so the next
+	// label cannot leak into a varchar(64) value.
+	providedProvince, providedCity := profileextractor.RegionLabels(fmt.Sprintf("省份:%s\n城市:%s", province, city))
+	if providedProvince != "" {
+		province = providedProvince
+	}
+	if providedCity != "" {
+		city = providedCity
+	}
+	if strings.TrimSpace(province) == "" || strings.TrimSpace(city) == "" {
+		parsedProvince, parsedCity := profileextractor.RegionLabels(plainText)
+		if strings.TrimSpace(province) == "" {
+			province = parsedProvince
+		}
+		if strings.TrimSpace(city) == "" {
+			city = parsedCity
+		}
+	}
+	provinceLength, cityLength := len([]rune(strings.TrimSpace(province))), len([]rune(strings.TrimSpace(city)))
+	if provinceLength > profileRegionMaxRunes || cityLength > profileRegionMaxRunes {
+		g.Log().Warning(ctx, "资料地区字段超过数据库长度，已忽略异常字段", g.Map{
+			"provinceLength": provinceLength,
+			"cityLength":     cityLength,
+			"maxLength":      profileRegionMaxRunes,
+		})
+	}
+	province = safeProfileRegionValue(province)
+	city = safeProfileRegionValue(city)
+	if province == "" && city == "" {
+		return "", ""
+	}
+
+	normalizedProvince, normalizedCity, _, err := location.NormalizeRegionCodes(ctx, province, city)
+	if err != nil {
+		g.Log().Warning(ctx, "资料地区编码转换失败，已降级保存原始资料", g.Map{
+			"provinceLength": len([]rune(province)),
+			"cityLength":     len([]rune(city)),
+			"error":          err.Error(),
+		})
+		return province, city
+	}
+	return safeProfileRegionValue(normalizedProvince), safeProfileRegionValue(normalizedCity)
+}
+
+func safeProfileRegionValue(value string) string {
+	value = strings.TrimSpace(value)
+	if len([]rune(value)) > profileRegionMaxRunes {
+		return ""
+	}
+	return value
 }
 
 func (s *sSysPublish) supersedeProfilePendingTelegramJobsOutsideChannels(ctx context.Context, profileId, tenantId, accountId int64, channelIds []int64) error {

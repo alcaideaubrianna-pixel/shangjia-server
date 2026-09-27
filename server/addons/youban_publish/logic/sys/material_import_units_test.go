@@ -331,6 +331,20 @@ func TestMaterialImportRegionCodesSupportsMunicipalityFromCityField(t *testing.T
 	}
 }
 
+func TestMaterialImportRegionCodesSupportsCompactProvinceAndCityFields(t *testing.T) {
+	guangdong := &legacyCMSRegionOption{Id: 440000, Level: 1, Title: "广东省"}
+	shenzhen := &legacyCMSRegionOption{Id: 440300, Pid: guangdong.Id, Level: 2, Title: "深圳市"}
+	index := &legacyCMSRegionIndex{
+		provincesByName: map[string]*legacyCMSRegionOption{"广东": guangdong},
+		citiesByName:    map[string][]*legacyCMSRegionOption{"深圳": {shenzhen}},
+		optionsById:     map[int64]*legacyCMSRegionOption{guangdong.Id: guangdong, shenzhen.Id: shenzhen},
+	}
+	provinceCode, cityCode := materialImportRegionCodesFromIndex("省份：广东    城市：深圳", index)
+	if provinceCode != "440000" || cityCode != "440300" {
+		t.Fatalf("codes = (%q, %q), want (%q, %q)", provinceCode, cityCode, "440000", "440300")
+	}
+}
+
 func TestMaterialImportRegionCodesPrefersLongestDistrictName(t *testing.T) {
 	chongqing := &legacyCMSRegionOption{Id: 500000, Level: 1, Title: "重庆市"}
 	city := &legacyCMSRegionOption{Id: 500100, Pid: chongqing.Id, Level: 2, Title: "市辖区"}

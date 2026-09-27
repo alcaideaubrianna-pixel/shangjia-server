@@ -154,6 +154,18 @@ var materialImportCityLabels = []string{
 
 func materialImportRegionFieldsFromText(text string) materialImportRegionFields {
 	fields := materialImportRegionFields{}
+	// The legacy importer historically parsed one location label per line.
+	// Supplement it with the shared extractor so compact formats such as
+	// "省份：广东 城市：深圳" populate both fields without coupling them to a
+	// particular city or municipality.
+	if province, city := profileextractor.RegionLabels(text); province != "" || city != "" {
+		if province != "" {
+			fields.provinceTexts = append(fields.provinceTexts, province)
+		}
+		if city != "" {
+			fields.cityTexts = append(fields.cityTexts, city)
+		}
+	}
 	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(strings.ReplaceAll(line, "\u00a0", " "))

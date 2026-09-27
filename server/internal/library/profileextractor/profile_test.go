@@ -76,13 +76,27 @@ func TestMergeKeepsExistingValues(t *testing.T) {
 }
 
 func TestRegionLabels(t *testing.T) {
-	province, city := RegionLabels("所在省份：浙江\n所在城市：杭州")
-	if province != "浙江" || city != "杭州" {
-		t.Fatalf("unexpected region: %q %q", province, city)
+	tests := []struct {
+		text     string
+		province string
+		city     string
+	}{
+		{text: "所在省份：浙江\n所在城市：杭州", province: "浙江", city: "杭州"},
+		{text: "省份：广东\n城市:深圳", province: "广东", city: "深圳"},
+		{text: "省份：北京                                                           城市：北京", province: "北京", city: "北京"},
+		{text: "现居省:上海市 现居市:浦东新区 年龄:25", province: "上海市", city: "浦东新区"},
+		{text: "province=guangdong city=guangzhou", province: "guangdong", city: "guangzhou"},
+		{text: "所在地区：深圳 身高：165", province: "", city: "深圳"},
 	}
-	province, city = RegionLabels("省份：广东\n城市:深圳")
-	if province != "广东" || city != "深圳" {
-		t.Fatalf("unexpected region: %q %q", province, city)
+	for _, test := range tests {
+		province, city := RegionLabels(test.text)
+		if province != test.province || city != test.city {
+			t.Errorf("text %q parsed region %q %q, want %q %q", test.text, province, city, test.province, test.city)
+		}
+	}
+	province, city := RegionLabels("省份：北京 城市：北京 年龄：25")
+	if province == "北京 城市：北京 年龄：25" || city == "北京 年龄：25" {
+		t.Fatalf("label boundary leaked into region value: %q %q", province, city)
 	}
 }
 
