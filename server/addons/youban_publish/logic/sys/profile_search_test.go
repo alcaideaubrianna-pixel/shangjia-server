@@ -32,6 +32,16 @@ func TestSegmentedLikeConditionSearchesEveryTermAcrossFields(t *testing.T) {
 	}
 }
 
+func TestProfileTextSearchKeepsColumnsSargable(t *testing.T) {
+	condition, _ := profileTextSearchCondition("深圳", noteIndexSearchFields())
+	if strings.Contains(condition, "COALESCE(") {
+		t.Fatalf("text search must not wrap indexed columns: %s", condition)
+	}
+	if !strings.Contains(condition, "i.profile_no LIKE ?") {
+		t.Fatalf("note index search must use indexed profile_no column: %s", condition)
+	}
+}
+
 func TestSplitProfileSearchTermsRemovesDuplicates(t *testing.T) {
 	terms := splitProfileSearchTerms(" af001  深圳 af001 ")
 	if len(terms) != 2 || terms[0] != "af001" || terms[1] != "深圳" {
@@ -53,8 +63,8 @@ func TestNormalizeProfileSearchKeyword(t *testing.T) {
 
 func TestParseProfilePublishMark(t *testing.T) {
 	for input, want := range map[string][2]string{
-		"001":   {"001", ""},
-		"天空001": {"001", "天空"},
+		"001":     {"001", ""},
+		"天空001":   {"001", "天空"},
 		"xxy6400": {"6400", "xxy"},
 	} {
 		sequence, prefix, ok := parseProfilePublishMark(input)

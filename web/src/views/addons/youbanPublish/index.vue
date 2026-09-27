@@ -967,7 +967,11 @@
       title: '会员状态',
       key: 'cycleVipActive',
       width: 100,
-      render: (row) => renderMiniTag(row.cycleVipActive ? '付费会员' : '免费版', row.cycleVipActive ? 'success' : 'warning'),
+      render: (row) =>
+        renderMiniTag(
+          row.cycleVipActive ? '付费会员' : '免费版',
+          row.cycleVipActive ? 'success' : 'warning'
+        ),
     },
     {
       title: '生效周期',

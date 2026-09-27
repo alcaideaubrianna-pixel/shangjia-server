@@ -67,7 +67,7 @@ func profileTableSearchFields() profileSearchFields {
 
 func noteIndexSearchFields() profileSearchFields {
 	return profileSearchFields{
-		ProfileNo: "p.profile_no", Title: "i.title", Summary: "i.summary", PlainText: "i.plain_text",
+		ProfileNo: "i.profile_no", Title: "i.title", Summary: "i.summary", PlainText: "i.plain_text",
 		AccountAlias: "a", SettingAlias: "account_setting", StateAlias: "ps",
 	}
 }
@@ -79,7 +79,9 @@ func applyProfileKeywordSearch(mod *gdb.Model, keyword string, fields profileSea
 	}
 	upper := strings.ToUpper(keyword)
 	if profileSearchNoRegexp.MatchString(upper) {
-		return mod.Where("UPPER("+fields.ProfileNo+") = ?", upper)
+		// Profile numbers are normalized to upper-case at write time. Keep the
+		// predicate sargable so PostgreSQL can use the regular B-tree index.
+		return mod.Where(fields.ProfileNo+" = ?", upper)
 	}
 	if sequence, prefix, ok := parseProfilePublishMark(keyword); ok {
 		condition, args := profilePublishMarkSearchCondition(sequence, prefix, fields.StateAlias)
@@ -94,7 +96,10 @@ func profileTextSearchCondition(keyword string, fields profileSearchFields) (str
 	if len(terms) == 0 {
 		return "1=1", nil
 	}
-	return segmentedLikeConditionNullSafe([]string{fields.ProfileNo, fields.Title, fields.Summary, fields.PlainText}, terms)
+	// NULL values naturally do not satisfy LIKE; avoid wrapping columns in
+	// COALESCE because that would prevent PostgreSQL from using raw-column
+	// pg_trgm indexes.
+	return segmentedLikeCondition([]string{fields.ProfileNo, fields.Title, fields.Summary, fields.PlainText}, terms)
 }
 
 func normalizeProfileSearchKeyword(keyword string) string {

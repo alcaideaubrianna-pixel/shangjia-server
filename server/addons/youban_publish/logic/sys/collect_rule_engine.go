@@ -14,7 +14,7 @@ var (
 	collectLinkPattern               = regexp.MustCompile(`(?i)(https?://|t\.me/|telegram\.me/)`)
 	collectUsernamePattern           = regexp.MustCompile(`@`)
 	collectStandaloneCodeCaptionRule = regexp.MustCompile(`^[A-Za-z]{1,4}\d{3,6}$`)
-	collectMaterialMetaLineRule      = regexp.MustCompile(`^\s*(?:昵称|编号|同行)\s*(?:[:：=].*)?\s*$`)
+	collectMaterialMetaLineRule      = regexp.MustCompile(`^\s*(?:标题|昵称|编号|编码|同行)\s*(?:[:：=].*)?\s*$`)
 	collectMaterialCodeLineRule      = regexp.MustCompile(`^\s*(?:(?:[A-Za-z]{1,8}[-_ ]?\d{3,10}|[\p{Han}]{1,8}\d{3,10})(?:\s+|$))+\s*$`)
 	collectIntroFeeAmountRule        = regexp.MustCompile(`(?:(?:介绍|推荐|牵线|居间|对接)费(?:用)?|中介(?:服务)?费(?:用)?)\s*[:：=；;，,]?\s*([¥￥]?\s*\d[\d,.]*(?:\s*(?:元|万))?)`)
 	collectIntroFeeStandaloneSuffix  = regexp.MustCompile(`^[\p{Han}A-Za-z0-9]{1,32}$`)
@@ -314,7 +314,7 @@ func applyCollectIntroFeeTruncate(text string) string {
 	firstContentLine := true
 	for start < len(lines) {
 		line := strings.TrimSpace(lines[start])
-		if line == "" || collectMaterialMetaLineRule.MatchString(line) || collectMaterialCodeLineRule.MatchString(line) || (firstContentLine && !collectLineContainsChinese(line)) {
+		if line == "" || collectMaterialMetaLineRule.MatchString(line) || collectMaterialCodeLineRule.MatchString(line) || (firstContentLine && isCollectMaterialAlphaNumericCode(line)) {
 			start++
 			changed = true
 			continue
@@ -358,6 +358,27 @@ func collectShortTitleLine(line string) bool {
 		}
 	}
 	return visible > 0 && visible < 5
+}
+
+func isCollectMaterialAlphaNumericCode(line string) bool {
+	normalized := normalizeCollectKeywordText(strings.TrimSpace(line))
+	if normalized == "" {
+		return false
+	}
+	hasLetter := false
+	hasDigit := false
+	for _, char := range normalized {
+		switch {
+		case char >= 'A' && char <= 'Z', char >= 'a' && char <= 'z':
+			hasLetter = true
+		case char >= '0' && char <= '9':
+			hasDigit = true
+		case char == '-', char == '_', unicode.IsSpace(char):
+		default:
+			return false
+		}
+	}
+	return hasLetter && hasDigit
 }
 
 func isCollectIntroFeeSourceMarkLine(line string) bool {
@@ -427,15 +448,6 @@ func isCollectInvisibleVariationSelector(r rune) bool {
 	return (r >= '\u180b' && r <= '\u180d') ||
 		(r >= '\ufe00' && r <= '\ufe0f') ||
 		(r >= '\U000e0100' && r <= '\U000e01ef')
-}
-
-func collectLineContainsChinese(line string) bool {
-	for _, char := range line {
-		if unicode.Is(unicode.Han, char) {
-			return true
-		}
-	}
-	return false
 }
 
 func normalizedCollectTerms(values []string) []string {
