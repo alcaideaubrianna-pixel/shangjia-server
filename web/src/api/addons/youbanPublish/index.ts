@@ -24,6 +24,22 @@ export function ChannelList(params = {}) {
   return http.request({ url: '/youban_publish/publish/channel/list', method: 'get', params });
 }
 
+export function GlobalAutoDeleteKeywordsView(params = {}) {
+  return http.request({
+    url: '/youban_publish/publish/admin/autoDelete/keywords/view',
+    method: 'get',
+    params,
+  });
+}
+
+export function GlobalAutoDeleteKeywordsSave(params = {}) {
+  return http.request({
+    url: '/youban_publish/publish/admin/autoDelete/keywords/save',
+    method: 'POST',
+    params,
+  });
+}
+
 export function AccountSave(params = {}) {
   return http.request({ url: '/youban_publish/publish/account/save', method: 'POST', params });
 }

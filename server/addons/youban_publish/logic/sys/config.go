@@ -133,6 +133,59 @@ func (s *sSysConfig) UpdateConfigByGroup(ctx context.Context, in *sysin.UpdateCo
 	return nil
 }
 
+func (s *sSysConfig) GlobalAutoDeleteKeywordsView(ctx context.Context) (*sysin.GlobalAutoDeleteKeywordsViewModel, error) {
+	in := &sysin.GetConfigInp{}
+	in.AddonName = global.GetAddonName()
+	in.Group = publishConfigGroupAutoDelete
+	res, err := baseservice.SysAddonsConfig().GetConfigByGroup(ctx, &in.GetAddonsConfigInp)
+	if err != nil {
+		return nil, err
+	}
+	if res == nil || res.List == nil {
+		return &sysin.GlobalAutoDeleteKeywordsViewModel{Keywords: []string{}}, nil
+	}
+	keywords, err := parseGlobalAutoDeleteKeywords(res.List["keywords"])
+	if err != nil {
+		return nil, err
+	}
+	return &sysin.GlobalAutoDeleteKeywordsViewModel{Keywords: keywords}, nil
+}
+
+func (s *sSysConfig) GlobalAutoDeleteKeywordsSave(ctx context.Context, in *sysin.GlobalAutoDeleteKeywordsSaveInp) error {
+	if in == nil {
+		return gerror.New("全局自动删除关键字配置不能为空")
+	}
+	if err := in.Filter(ctx); err != nil {
+		return err
+	}
+	return s.updateConfigGroup(ctx, publishConfigGroupAutoDelete, g.Map{"keywords": in.Keywords})
+}
+
+func parseGlobalAutoDeleteKeywords(raw interface{}) ([]string, error) {
+	if raw == nil {
+		return []string{}, nil
+	}
+	if keywords, ok := raw.([]string); ok {
+		return mergeAutoDeleteStrings(keywords), nil
+	}
+	if value, ok := raw.(string); ok {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return []string{}, nil
+		}
+		var keywords []string
+		if err := json.Unmarshal([]byte(value), &keywords); err == nil {
+			return mergeAutoDeleteStrings(keywords), nil
+		}
+		return mergeAutoDeleteStrings(strings.Split(value, "\n")), nil
+	}
+	var keywords []string
+	if err := gconv.Scan(raw, &keywords); err != nil {
+		return nil, gerror.Wrap(err, "解析全局自动删除关键字失败")
+	}
+	return mergeAutoDeleteStrings(keywords), nil
+}
+
 func (s *sSysConfig) PublishConfigView(ctx context.Context, in *sysin.PublishConfigViewInp) (res *sysin.PublishConfigViewModel, err error) {
 	conf := defaultPublishConfig()
 	if err = s.scanConfigGroup(ctx, publishConfigGroupPublish, conf); err != nil {

@@ -355,6 +355,31 @@
                   </n-form-item>
                 </n-form>
               </section>
+              <section class="config-panel">
+                <div class="config-panel-title">全局自动删除关键字</div>
+                <n-form label-placement="left" label-width="150">
+                  <n-form-item label="删除关键字">
+                    <n-input
+                      v-model:value="autoDeleteKeywordsText"
+                      type="textarea"
+                      :autosize="{ minRows: 4, maxRows: 12 }"
+                      placeholder="每行一个关键字，例如：异常提示"
+                    />
+                  </n-form-item>
+                </n-form>
+                <n-text depth="3"
+                  >频道收到包含任一关键字的非上架资料消息时，会进入 Bot 自动删除队列。</n-text
+                >
+                <n-space justify="end">
+                  <n-button
+                    type="primary"
+                    :loading="autoDeleteKeywordsSaving"
+                    @click="saveAutoDeleteKeywords"
+                  >
+                    保存关键字
+                  </n-button>
+                </n-space>
+              </section>
               <n-space justify="end">
                 <n-button @click="loadConfigs">重置</n-button>
                 <n-button type="primary" :loading="configSaving" @click="saveConfigs"
@@ -633,6 +658,8 @@
     TagDelete,
     TagList,
     TagSave,
+    GlobalAutoDeleteKeywordsView,
+    GlobalAutoDeleteKeywordsSave,
   } from '@/api/addons/youbanPublish';
   import { getConfig as getSysConfig } from '@/api/sys/config';
 
@@ -680,6 +707,8 @@
   const botRefreshing = ref(false);
   const configLoading = ref(false);
   const configSaving = ref(false);
+  const autoDeleteKeywordsSaving = ref(false);
+  const autoDeleteKeywordsText = ref('');
   const cloudResourceLoading = ref(false);
   const cloudResourceSaving = ref(false);
 
@@ -1371,6 +1400,7 @@
       applyTelegramConfig(telegramRes?.list || {}, basicConfig?.list?.basicDomain || '');
       botWebhookConfigLoaded.value = true;
       Object.assign(collectConfig, newCollectConfig(), collectRes?.list || {});
+      await loadAutoDeleteKeywords();
     } finally {
       configLoading.value = false;
     }
@@ -1406,6 +1436,52 @@
     } finally {
       configSaving.value = false;
     }
+  }
+
+  async function loadAutoDeleteKeywords() {
+    try {
+      const autoDeleteRes: any = await GlobalAutoDeleteKeywordsView();
+      autoDeleteKeywordsText.value = normalizeAutoDeleteKeywords(autoDeleteRes?.keywords);
+    } catch {
+      message.error('读取全局自动删除关键字失败');
+    }
+  }
+
+  async function saveAutoDeleteKeywords() {
+    autoDeleteKeywordsSaving.value = true;
+    try {
+      await GlobalAutoDeleteKeywordsSave({
+        keywords: parseAutoDeleteKeywords(autoDeleteKeywordsText.value),
+      });
+      message.success('全局自动删除关键字已保存');
+    } finally {
+      autoDeleteKeywordsSaving.value = false;
+    }
+  }
+
+  function normalizeAutoDeleteKeywords(value: unknown) {
+    if (Array.isArray(value)) return value.map(String).filter(Boolean).join('\n');
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) return parsed.map(String).filter(Boolean).join('\n');
+      } catch {
+        // Some old configurations are returned as plain text.
+      }
+      return value;
+    }
+    return '';
+  }
+
+  function parseAutoDeleteKeywords(value: string) {
+    return Array.from(
+      new Set(
+        value
+          .split(/\r?\n/)
+          .map((item) => item.trim())
+          .filter(Boolean)
+      )
+    );
   }
 
   async function loadCloudResourceConfig() {

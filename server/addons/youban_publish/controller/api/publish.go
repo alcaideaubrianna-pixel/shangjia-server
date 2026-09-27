@@ -1022,6 +1022,21 @@ func (c *cPublishAdmin) AutoDeleteConfigSave(ctx context.Context, req *publish.A
 	return
 }
 
+func (c *cPublishAdmin) GlobalAutoDeleteKeywordsView(ctx context.Context, req *publish.AdminGlobalAutoDeleteKeywordsViewReq) (res *publish.AdminGlobalAutoDeleteKeywordsViewRes, err error) {
+	data, err := service.SysConfig().GlobalAutoDeleteKeywordsView(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.AdminGlobalAutoDeleteKeywordsViewRes{GlobalAutoDeleteKeywordsViewModel: data}, nil
+}
+
+func (c *cPublishAdmin) GlobalAutoDeleteKeywordsSave(ctx context.Context, req *publish.AdminGlobalAutoDeleteKeywordsSaveReq) (res *publish.AdminGlobalAutoDeleteKeywordsSaveRes, err error) {
+	if err = service.SysConfig().GlobalAutoDeleteKeywordsSave(ctx, &req.GlobalAutoDeleteKeywordsSaveInp); err != nil {
+		return nil, err
+	}
+	return &publish.AdminGlobalAutoDeleteKeywordsSaveRes{}, nil
+}
+
 func (c *cPublishAdmin) AntiScanConfigView(ctx context.Context, req *publish.AdminAntiScanConfigViewReq) (res *publish.AdminAntiScanConfigViewRes, err error) {
 	data, err := service.SysConfig().AntiScanConfigView(ctx, &req.AntiScanConfigViewInp)
 	if err != nil {

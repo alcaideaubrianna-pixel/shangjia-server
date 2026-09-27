@@ -87,6 +87,19 @@ type AutoDeleteConfigSaveInp struct {
 	model.AutoDeleteConfig
 }
 
+type GlobalAutoDeleteKeywordsViewModel struct {
+	Keywords []string `json:"keywords"`
+}
+
+type GlobalAutoDeleteKeywordsSaveInp struct {
+	Keywords []string `json:"keywords"`
+}
+
+func (in *GlobalAutoDeleteKeywordsSaveInp) Filter(ctx context.Context) error {
+	in.Keywords = uniqueStringsConfig(in.Keywords)
+	return nil
+}
+
 func (in *AutoDeleteConfigSaveInp) Filter(ctx context.Context) error {
 	in.CustomKeywords = uniqueStringsConfig(in.CustomKeywords)
 	in.CustomRules = uniqueStringsConfig(in.CustomRules)

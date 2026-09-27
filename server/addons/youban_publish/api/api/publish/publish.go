@@ -832,6 +832,21 @@ type AdminAutoDeleteConfigSaveReq struct {
 
 type AdminAutoDeleteConfigSaveRes struct{}
 
+type AdminGlobalAutoDeleteKeywordsViewReq struct {
+	g.Meta `path:"/publish/admin/autoDelete/keywords/view" method:"get" tags:"上架插件管理端" summary:"查看全局自动删除关键字"`
+}
+
+type AdminGlobalAutoDeleteKeywordsViewRes struct {
+	*sysin.GlobalAutoDeleteKeywordsViewModel
+}
+
+type AdminGlobalAutoDeleteKeywordsSaveReq struct {
+	g.Meta `path:"/publish/admin/autoDelete/keywords/save" method:"post" tags:"上架插件管理端" summary:"保存全局自动删除关键字"`
+	sysin.GlobalAutoDeleteKeywordsSaveInp
+}
+
+type AdminGlobalAutoDeleteKeywordsSaveRes struct{}
+
 type AdminAntiScanConfigViewReq struct {
 	g.Meta `path:"/publish/admin/antiScan/view" method:"get" tags:"上架插件管理端" summary:"查看防扫图配置"`
 	sysin.AntiScanConfigViewInp

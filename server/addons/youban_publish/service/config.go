@@ -18,6 +18,8 @@ type ISysConfig interface {
 	AutoDeleteConfigView(ctx context.Context, in *sysin.AutoDeleteConfigViewInp) (res *sysin.AutoDeleteConfigViewModel, err error)
 	AutoDeleteConfigForTenant(ctx context.Context, tenantId int64) (res *sysin.AutoDeleteConfigViewModel, err error)
 	AutoDeleteConfigSave(ctx context.Context, in *sysin.AutoDeleteConfigSaveInp) error
+	GlobalAutoDeleteKeywordsView(ctx context.Context) (*sysin.GlobalAutoDeleteKeywordsViewModel, error)
+	GlobalAutoDeleteKeywordsSave(ctx context.Context, in *sysin.GlobalAutoDeleteKeywordsSaveInp) error
 	CloudResourceConfigView(ctx context.Context, in *sysin.CloudResourceConfigViewInp) (res *sysin.CloudResourceConfigViewModel, err error)
 	CloudResourceConfigSave(ctx context.Context, in *sysin.CloudResourceConfigSaveInp) error
 	CloudResourceConfigTest(ctx context.Context, in *sysin.CloudResourceConfigTestInp) (res *sysin.CloudResourceConfigTestModel, err error)
