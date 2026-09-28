@@ -360,10 +360,10 @@ func (s *sSysPublish) FollowNoteView(ctx context.Context, in *sysin.ProfileViewI
 	if err != nil {
 		return nil, err
 	}
-	if in == nil || !hasProfileSelector(in.Id, in.Uuid) {
-		return nil, gerror.New("资料UUID不能为空")
+	if !hasProfileViewSelector(in) {
+		return nil, gerror.New("资料ID、UUID或编号不能为空")
 	}
-	profileId, err := s.resolveProfileId(ctx, in.Id, in.Uuid, 0, 0)
+	profileId, err := s.resolveProfileViewId(ctx, in, 0, 0)
 	if err != nil {
 		return nil, err
 	}

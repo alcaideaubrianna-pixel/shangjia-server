@@ -93,8 +93,8 @@ func (s *sSysPublish) profileView(ctx context.Context, profileId int64, tenantId
 }
 
 func (s *sSysPublish) profileViewBySelector(ctx context.Context, in *sysin.ProfileViewInp, tenantId int64, accountId int64) (res *sysin.ProfileModel, err error) {
-	if in == nil || !hasProfileSelector(in.Id, in.Uuid) {
-		return nil, gerror.New("资料UUID不能为空")
+	if !hasProfileViewSelector(in) {
+		return nil, gerror.New("资料ID、UUID或编号不能为空")
 	}
 	base, err := s.profileBaseModel(ctx, tenantId, accountId)
 	if err != nil {
@@ -102,8 +102,10 @@ func (s *sSysPublish) profileViewBySelector(ctx context.Context, in *sysin.Profi
 	}
 	if in.Id > 0 {
 		base = base.Where("p.id", in.Id)
-	} else {
+	} else if normalizeProfileUUID(in.Uuid) != "" {
 		base = base.Where("p.source_note_uuid", normalizeProfileUUID(in.Uuid))
+	} else {
+		base = base.Where("p.profile_no", strings.ToUpper(strings.TrimSpace(in.ProfileNo)))
 	}
 	if err = base.Fields(profileListFields()).Scan(&res); err != nil {
 		return nil, gerror.Wrap(err, "获取资料详情失败")

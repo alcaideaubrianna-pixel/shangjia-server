@@ -44,8 +44,8 @@ func (s *sSysPublish) MyProfileView(ctx context.Context, in *sysin.ProfileViewIn
 	if err != nil {
 		return nil, err
 	}
-	if in == nil || !hasProfileSelector(in.Id, in.Uuid) {
-		return nil, gerror.New("资料UUID不能为空")
+	if !hasProfileViewSelector(in) {
+		return nil, gerror.New("资料ID、UUID或编号不能为空")
 	}
 	capability, err := s.activeAccountCapability(ctx, account.TenantId, account.Id)
 	if err != nil {
@@ -55,7 +55,7 @@ func (s *sSysPublish) MyProfileView(ctx context.Context, in *sysin.ProfileViewIn
 	if capability.SharedResourceEnabled == 1 {
 		ownerScope = 0
 	}
-	profileId, err := s.resolveProfileId(ctx, in.Id, in.Uuid, account.TenantId, ownerScope)
+	profileId, err := s.resolveProfileViewId(ctx, in, account.TenantId, ownerScope)
 	if err != nil {
 		return nil, err
 	}
@@ -254,8 +254,8 @@ func (s *sSysPublish) AdminProfileView(ctx context.Context, in *sysin.ProfileVie
 	if err != nil {
 		return nil, err
 	}
-	if in == nil || !hasProfileSelector(in.Id, in.Uuid) {
-		return nil, gerror.New("资料UUID不能为空")
+	if !hasProfileViewSelector(in) {
+		return nil, gerror.New("资料ID、UUID或编号不能为空")
 	}
 	scope, err := s.adminProfileVisibleScope(ctx, account, &sysin.ProfileListInp{AccountScope: "all"})
 	if err != nil {
@@ -470,10 +470,10 @@ func (s *sSysPublish) ServerProfileList(ctx context.Context, in *sysin.ProfileLi
 }
 
 func (s *sSysPublish) ServerProfileView(ctx context.Context, in *sysin.ProfileViewInp) (res *sysin.ProfileViewModel, err error) {
-	if in == nil || !hasProfileSelector(in.Id, in.Uuid) {
-		return nil, gerror.New("资料ID不能为空")
+	if !hasProfileViewSelector(in) {
+		return nil, gerror.New("资料ID、UUID或编号不能为空")
 	}
-	profileId, err := s.resolveProfileId(ctx, in.Id, in.Uuid, 0, 0)
+	profileId, err := s.resolveProfileViewId(ctx, in, 0, 0)
 	if err != nil {
 		return nil, err
 	}

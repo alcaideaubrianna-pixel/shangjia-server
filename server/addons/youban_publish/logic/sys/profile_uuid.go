@@ -42,6 +42,10 @@ func hasProfileSelector(id int64, uuid string) bool {
 	return id > 0 || normalizeProfileUUID(uuid) != ""
 }
 
+func hasProfileViewSelector(in *sysin.ProfileViewInp) bool {
+	return in != nil && (hasProfileSelector(in.Id, in.Uuid) || strings.TrimSpace(in.ProfileNo) != "")
+}
+
 func (s *sSysPublish) ensureProfileModelUUID(ctx context.Context, profile *sysin.ProfileModel) error {
 	_ = ctx
 	if profile == nil || profile.Id <= 0 || normalizeProfileUUID(profile.Uuid) != "" {
@@ -84,6 +88,28 @@ func (s *sSysPublish) resolveProfileId(ctx context.Context, id int64, uuid strin
 		return 0, gerror.New("资料不存在或无权操作")
 	}
 	return profileId, nil
+}
+
+func (s *sSysPublish) resolveProfileViewId(ctx context.Context, in *sysin.ProfileViewInp, tenantId int64, accountId int64) (int64, error) {
+	if in == nil || !hasProfileViewSelector(in) {
+		return 0, gerror.New("资料ID、UUID或编号不能为空")
+	}
+	if hasProfileSelector(in.Id, in.Uuid) {
+		return s.resolveProfileId(ctx, in.Id, in.Uuid, tenantId, accountId)
+	}
+	base, err := s.profileBaseModel(ctx, tenantId, accountId)
+	if err != nil {
+		return 0, err
+	}
+	profileNo := strings.ToUpper(strings.TrimSpace(in.ProfileNo))
+	row, err := base.Fields("p.id").Where("p.profile_no", profileNo).One()
+	if err != nil {
+		return 0, gerror.Wrap(err, "读取资料编号失败")
+	}
+	if row.IsEmpty() || row["id"].Int64() <= 0 {
+		return 0, gerror.New("资料不存在或无权操作")
+	}
+	return row["id"].Int64(), nil
 }
 
 func (s *sSysPublish) allowedProfileTargetIds(ctx context.Context, ids []int64, uuids []string, tenantId int64, accountId int64) ([]int64, error) {

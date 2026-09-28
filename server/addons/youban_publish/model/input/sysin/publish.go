@@ -522,8 +522,9 @@ type ProfileListInp struct {
 }
 
 type ProfileViewInp struct {
-	Id   int64  `json:"id" dc:"资料ID"`
-	Uuid string `json:"uuid" dc:"资料UUID"`
+	Id        int64  `json:"id" dc:"资料ID"`
+	Uuid      string `json:"uuid" dc:"资料UUID"`
+	ProfileNo string `json:"profileNo" dc:"资料编号"`
 }
 
 type AdminProfilePublishInp struct {

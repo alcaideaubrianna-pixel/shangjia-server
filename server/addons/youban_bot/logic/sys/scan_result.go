@@ -11,6 +11,7 @@ import (
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/util/grand"
 
 	publishsysin "hotgo/addons/youban_publish/model/input/sysin"
@@ -49,6 +50,7 @@ func (s *sSysBot) searchScanMediaAndReply(ctx context.Context, botId int64, chat
 	token := strings.ToUpper(grand.S(10))
 	state := &scanResultState{TenantId: account.TenantId, AccountId: account.AccountId, AccountType: account.AccountType}
 	buttons := make([][]models.InlineKeyboardButton, 0, len(list))
+	sourceLinkTotal := 0
 	for _, note := range list {
 		if note == nil || note.Id <= 0 {
 			continue
@@ -59,7 +61,11 @@ func (s *sSysBot) searchScanMediaAndReply(ctx context.Context, botId int64, chat
 		if sourceName := profileSourceName(note); sourceName != "" {
 			label += " [" + shortButtonText(sourceName, 16) + "]"
 		}
-		buttons = append(buttons, []models.InlineKeyboardButton{{Text: label, CallbackData: fmt.Sprintf("scan:view:%s:%d", token, note.Id)}})
+		row := scanResultButtonRow(token, note, label)
+		if len(row) > 1 {
+			sourceLinkTotal++
+		}
+		buttons = append(buttons, row)
 	}
 	if len(state.ProfileIds) == 0 {
 		return s.sendMessageOnly(ctx, botId, chatId, "未找到相似资料。")
@@ -79,8 +85,19 @@ func (s *sSysBot) searchScanMediaAndReply(ctx context.Context, botId int64, chat
 	if err != nil {
 		return err
 	}
+	g.Log().Info(ctx, "Bot扫图结果已组装", g.Map{
+		"botId": botId, "accountId": account.AccountId, "resultTotal": len(state.ProfileIds), "sourceLinkTotal": sourceLinkTotal,
+	})
 	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, html.EscapeString(text), "HTML", false, &models.InlineKeyboardMarkup{InlineKeyboard: buttons})
 	return err
+}
+
+func scanResultButtonRow(token string, note *publishsysin.NoteModel, label string) []models.InlineKeyboardButton {
+	row := []models.InlineKeyboardButton{{Text: label, CallbackData: fmt.Sprintf("scan:view:%s:%d", token, note.Id)}}
+	if sourceURL := strings.TrimSpace(note.CollectSourceUrl); sourceURL != "" {
+		row = append(row, models.InlineKeyboardButton{Text: "来源频道 >", URL: sourceURL})
+	}
+	return row
 }
 
 func scanResultKey(token string) string {
