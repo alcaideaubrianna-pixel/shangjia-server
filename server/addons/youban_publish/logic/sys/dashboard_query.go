@@ -35,10 +35,11 @@ func (s *sSysPublish) dashboardTaskCounts(ctx context.Context, tenantId int64, a
 	}
 	mod := g.DB().Model(dao.ContentProfile.Table()+" p").Safe().Ctx(ctx).
 		InnerJoin(publishProfileStateTable+" ps", "ps.profile_id=p.id AND ps.deleted_at IS NULL").
-		Fields("CASE WHEN ps.publish_task_status IN ('pending','publishing','published','failed','canceled') THEN ps.publish_task_status ELSE 'pending' END AS status", "COUNT(*) AS count").
+		Fields("ps.publish_task_status AS status", "COUNT(*) AS count").
 		Where("ps.tenant_id", tenantId).
+		WhereIn("ps.publish_task_status", []string{"pending", "publishing", "published", "failed", "canceled"}).
 		WhereNull("p.deleted_at").
-		Group("CASE WHEN ps.publish_task_status IN ('pending','publishing','published','failed','canceled') THEN ps.publish_task_status ELSE 'pending' END")
+		Group("ps.publish_task_status")
 	if accountId > 0 {
 		mod = mod.Where("ps.account_id", accountId)
 	}
