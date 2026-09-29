@@ -367,6 +367,24 @@ func (s *sSysPublish) saveCollectSourceRules(ctx context.Context, tx gdb.TX, ten
 	if !valid {
 		return gerror.New("采集源只能绑定当前账号启用的专属规则")
 	}
+	// A rule is source-specific. Older clients could submit an existing rule ID
+	// from the same account, which silently made multiple sources share one rule.
+	// Clone the rule (including its items) on conflict so existing clients remain
+	// compatible while each source gets an independent rule going forward.
+	otherSourceValue, err := tx.Model(pdao.YoubanPublishCollectSourceRule.Table()).Ctx(ctx).
+		Fields("source_id").Where("rule_id", ruleIds[0]).Where("status", 1).
+		Where("source_id !=", sourceId).Value()
+	if err != nil {
+		return gerror.Wrap(err, "检查采集规则是否已被其他来源使用失败")
+	}
+	otherSourceId := otherSourceValue.Int64()
+	if otherSourceId > 0 {
+		clonedRuleId, cloneErr := cloneCollectRuleTx(ctx, tx, tenantId, accountId.Int64(), ruleIds[0], sourceId)
+		if cloneErr != nil {
+			return cloneErr
+		}
+		ruleIds[0] = clonedRuleId
+	}
 	if _, err := tx.Model(pdao.YoubanPublishCollectSourceRule.Table()).Ctx(ctx).Where("source_id", sourceId).Delete(); err != nil {
 		return gerror.Wrap(err, "清理采集源规则失败")
 	}
@@ -388,4 +406,59 @@ func (s *sSysPublish) saveCollectSourceRules(ctx context.Context, tx gdb.TX, ten
 		}
 	}
 	return nil
+}
+
+func cloneCollectRuleTx(ctx context.Context, tx gdb.TX, tenantId, accountId, ruleId, sourceId int64) (int64, error) {
+	rule, err := tx.Model(pdao.YoubanPublishCollectRule.Table()).Ctx(ctx).
+		Where("id", ruleId).Where("tenant_id", tenantId).Where("account_id", accountId).
+		WhereNull("deleted_at").One()
+	if err != nil {
+		return 0, gerror.Wrap(err, "读取待复制采集规则失败")
+	}
+	if rule.IsEmpty() {
+		return 0, gerror.New("待复制采集规则不存在")
+	}
+	data := g.Map{}
+	for key, value := range rule {
+		if key == "id" || key == "created_at" || key == "updated_at" || key == "deleted_at" || key == "deleted_by" {
+			continue
+		}
+		data[key] = value
+	}
+	data["name"] = rule["name"].String() + " · 来源 " + strconv.FormatInt(sourceId, 10)
+	data["tenant_id"] = tenantId
+	data["account_id"] = accountId
+	data["global_enabled"] = 0
+	now := gtime.Now()
+	data["created_by"] = accountId
+	data["updated_by"] = accountId
+	data["created_at"] = now
+	data["updated_at"] = now
+	newRuleId, err := tx.Model(pdao.YoubanPublishCollectRule.Table()).Ctx(ctx).Data(data).InsertAndGetId()
+	if err != nil {
+		return 0, gerror.Wrap(err, "复制采集规则失败")
+	}
+	items, err := tx.Model(collectRuleItemTable).Ctx(ctx).
+		Where("rule_id", ruleId).OrderAsc("sort").OrderAsc("id").All()
+	if err != nil {
+		return 0, gerror.Wrap(err, "读取采集规则项失败")
+	}
+	for _, item := range items {
+		itemData := g.Map{}
+		for key, value := range item {
+			if key == "id" || key == "created_at" || key == "updated_at" {
+				continue
+			}
+			itemData[key] = value
+		}
+		itemData["rule_id"] = newRuleId
+		itemData["tenant_id"] = tenantId
+		itemData["account_id"] = accountId
+		itemData["created_at"] = now
+		itemData["updated_at"] = now
+		if _, err = tx.Model(collectRuleItemTable).Ctx(ctx).Data(itemData).Insert(); err != nil {
+			return 0, gerror.Wrap(err, "复制采集规则项失败")
+		}
+	}
+	return newRuleId, nil
 }
