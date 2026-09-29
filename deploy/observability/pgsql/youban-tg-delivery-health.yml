@@ -6,18 +6,40 @@ youban_tg_delivery_health:
       predicate_query: |
         SELECT to_regclass('public.hg_youban_publish_tg_job') IS NOT NULL;
   query: |-
+    WITH candidates AS (
+      SELECT j.id, j.channel_id, j.updated_at, j.send_phase
+      FROM hg_youban_publish_tg_job j
+      WHERE j.status = 'sending'
+        AND j.send_phase IN ('display_confirmed','verify_sending')
+        AND j.updated_at < NOW() - INTERVAL '3 minutes'
+        AND (j.next_retry_at IS NULL OR j.next_retry_at <= NOW())
+        AND COALESCE(j.error_message, '') NOT ILIKE '%FLOOD_WAIT%'
+        AND COALESCE(j.error_message, '') NOT ILIKE '%awaiting_webhook%'
+        AND EXISTS (
+          SELECT 1 FROM hg_youban_publish_media m
+          WHERE m.profile_id = j.profile_id AND m.purpose = 'verify' AND m.deleted_at IS NULL
+            AND (NULLIF(BTRIM(m.storage_path), '') IS NOT NULL
+              OR NULLIF(BTRIM(m.file_url), '') IS NOT NULL
+              OR NULLIF(BTRIM(m.tg_file_id), '') IS NOT NULL)
+        )
+    )
     SELECT current_database() AS datname,
            COUNT(*)::bigint AS partial_jobs,
-           COALESCE(EXTRACT(EPOCH FROM (NOW() - MIN(updated_at))), 0)::bigint AS oldest_partial_age_seconds
-    FROM hg_youban_publish_tg_job
-    WHERE status IN ('sending','unknown')
-      AND send_phase IN ('display_confirmed','verify_sending')
-      AND updated_at < NOW() - INTERVAL '3 minutes'
+           COALESCE(EXTRACT(EPOCH FROM (NOW() - MIN(updated_at))), 0)::bigint AS oldest_partial_age_seconds,
+           COALESCE(MIN(id), 0)::bigint AS job_id,
+           COALESCE(MIN(channel_id), 0)::bigint AS channel_id,
+           COUNT(*) FILTER (WHERE send_phase = 'display_confirmed')::bigint AS display_confirmed_jobs,
+           COUNT(*) FILTER (WHERE send_phase = 'verify_sending')::bigint AS verify_sending_jobs
+    FROM candidates
   ttl: 30
   timeout: 2
   tags: [ "dbname:railway" ]
   metrics:
     - datname: { usage: LABEL, description: database name }
+    - job_id: { usage: LABEL, description: oldest incomplete verification job id }
+    - channel_id: { usage: LABEL, description: oldest incomplete verification channel id }
+    - display_confirmed_jobs: { usage: GAUGE, description: jobs waiting to start verification delivery }
+    - verify_sending_jobs: { usage: GAUGE, description: jobs actively sending verification media }
     - partial_jobs: { usage: GAUGE, description: jobs with display delivery but verification phase incomplete for over three minutes }
     - oldest_partial_age_seconds: { usage: GAUGE, description: oldest incomplete verification delivery age }
 

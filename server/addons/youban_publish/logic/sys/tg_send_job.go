@@ -302,6 +302,13 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 		s.appendTelegramJobLog(ctx, job, "publish", "superseded", "TG展示资料已发送但任务已废弃，停止推送验证资料")
 		return errTelegramJobSuperseded
 	}
+	if len(verifyMedia) == 0 {
+		g.Log().Infof(ctx, "TG任务无验证资料，跳过验证发送 jobId:%d channelId:%d", job.Id, job.ChannelId)
+		if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseVerifyConfirmed); err != nil {
+			return err
+		}
+		return s.completeTelegramJob(ctx, job)
+	}
 	if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseVerifySending); err != nil {
 		return err
 	}
