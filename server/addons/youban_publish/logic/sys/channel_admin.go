@@ -227,13 +227,12 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 		return err
 	}
 	if in.CyclePublishEnabled == 1 && in.CyclePublishMode == "time" && !tenantVipStatusActive(vip) {
-		if existing != nil && existing.CyclePublishEnabled == 1 && existing.CyclePublishMode == "time" && existing.CyclePublishDays > 0 {
-			in.CyclePublishDays = existing.CyclePublishDays
-		} else {
-			in.CyclePublishDays = g.Cfg().MustGet(ctx, "youbanPublish.cycle.freeIntervalDays", 15).Int()
-			if in.CyclePublishDays <= 0 {
-				in.CyclePublishDays = 15
-			}
+		// Non-members always use the global free-cycle interval. Do not retain
+		// a previously stored member/custom interval when a channel is edited or
+		// a tenant is downgraded; the scheduler applies the same rule at runtime.
+		in.CyclePublishDays = maxConfigInt(ctx, "youbanPublish.cycle.freeIntervalDays", 15)
+		if in.CyclePublishDays <= 0 {
+			in.CyclePublishDays = 15
 		}
 	}
 	if in.CyclePublishMode == "batch" {

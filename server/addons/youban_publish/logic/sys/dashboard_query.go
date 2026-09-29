@@ -35,10 +35,10 @@ func (s *sSysPublish) dashboardTaskCounts(ctx context.Context, tenantId int64, a
 	}
 	mod := g.DB().Model(dao.ContentProfile.Table()+" p").Safe().Ctx(ctx).
 		InnerJoin(publishProfileStateTable+" ps", "ps.profile_id=p.id AND ps.deleted_at IS NULL").
-		Fields("CASE WHEN p.status = 1 THEN 'published' ELSE 'pending' END AS status", "COUNT(*) AS count").
+		Fields("CASE WHEN ps.publish_task_status IN ('pending','publishing','published','failed','canceled') THEN ps.publish_task_status ELSE 'pending' END AS status", "COUNT(*) AS count").
 		Where("ps.tenant_id", tenantId).
 		WhereNull("p.deleted_at").
-		Group("CASE WHEN p.status = 1 THEN 'published' ELSE 'pending' END")
+		Group("CASE WHEN ps.publish_task_status IN ('pending','publishing','published','failed','canceled') THEN ps.publish_task_status ELSE 'pending' END")
 	if accountId > 0 {
 		mod = mod.Where("ps.account_id", accountId)
 	}
@@ -53,7 +53,7 @@ func (s *sSysPublish) dashboardTaskCounts(ctx context.Context, tenantId int64, a
 }
 
 func (s *sSysPublish) dashboardSimpleCount(ctx context.Context, table string, tenantId int64, accountId int64) (int, error) {
-	mod := g.DB().Model(table).Safe().Ctx(ctx).Where("tenant_id", tenantId).WhereNull("deleted_at")
+	mod := g.DB().Model(table).Safe().Ctx(ctx).Where("tenant_id", tenantId).Where("status", 1).WhereNull("deleted_at")
 	if accountId > 0 {
 		mod = mod.Where("account_id", accountId)
 	}

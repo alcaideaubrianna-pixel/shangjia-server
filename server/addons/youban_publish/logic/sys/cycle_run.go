@@ -73,6 +73,7 @@ func (s *sSysPublish) RunChannelCycleScheduler(ctx context.Context) error {
 		{name: "核对循环补偿", run: func(ctx context.Context) error { return s.reconcileRecoveredChannelCycleRuns(ctx, 20) }},
 		{name: "收尾循环批次", run: func(ctx context.Context) error { return s.finalizeDispatchingChannelCycleRuns(ctx, 20) }},
 		{name: "扫描批次循环", run: func(ctx context.Context) error { return s.scheduleDueChannelBatchCycles(ctx, 50) }},
+		{name: "恢复到期时间循环", run: func(ctx context.Context) error { return s.enqueueDueProfileCycleReschedules(ctx, 20) }},
 		{name: "恢复循环重算", run: func(ctx context.Context) error { return s.enqueuePendingProfileCycleReschedules(ctx, 200) }},
 		{name: "扫描时间循环", run: s.runProfileCycleDueScan},
 	})

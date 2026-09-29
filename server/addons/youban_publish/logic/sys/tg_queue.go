@@ -503,11 +503,17 @@ func (s *sSysPublish) enqueueCycleReschedule(ctx context.Context, channelId int6
 		asynq.Queue(tgQueueNameCycle),
 		asynq.MaxRetry(5),
 		asynq.Timeout(2 * time.Hour),
+		// Prevent scheduler ticks from creating duplicate rebuilds for the same
+		// channel while an earlier reschedule task is queued or running.
+		asynq.Unique(30 * time.Minute),
 	}
 	if delay > 0 {
 		options = append(options, asynq.ProcessIn(delay))
 	}
 	_, err = client.EnqueueContext(ctx, task, options...)
+	if errors.Is(err, asynq.ErrDuplicateTask) {
+		return nil
+	}
 	return err
 }
 

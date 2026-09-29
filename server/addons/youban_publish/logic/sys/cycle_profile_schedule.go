@@ -410,6 +410,36 @@ func (s *sSysPublish) enqueuePendingProfileCycleReschedules(ctx context.Context,
 	return nil
 }
 
+// enqueueDueProfileCycleReschedules recovers time-mode channels whose summary
+// checkpoint is already due but whose profile-level plans are missing or stale.
+// It deliberately only enqueues the existing reschedule task; the worker keeps
+// ownership of the channel lock and cursor-based rebuild.
+func (s *sSysPublish) enqueueDueProfileCycleReschedules(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		limit = 20
+	}
+	var channelIds []int64
+	err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
+		Fields("id").
+		Where("cycle_publish_enabled", 1).
+		Where("cycle_publish_mode", "time").
+		Where("status", 1).
+		Where("publish_direction", "up").
+		Where("cycle_active_run_id", 0).
+		Where("cycle_next_run_at IS NOT NULL AND cycle_next_run_at<=?", gtime.Now()).
+		WhereNull("deleted_at").
+		OrderAsc("cycle_next_run_at").OrderAsc("id").Limit(limit).Scan(&channelIds)
+	if err != nil {
+		return gerror.Wrap(err, "读取到期时间循环恢复频道失败")
+	}
+	for _, channelId := range channelIds {
+		if err = s.enqueueCycleReschedule(ctx, channelId, 0); err != nil {
+			return gerror.Wrapf(err, "提交到期时间循环恢复任务失败 channel:%d", channelId)
+		}
+	}
+	return nil
+}
+
 func (s *sSysPublish) profileCycleDueRows(ctx context.Context, limit int) ([]profileCycleDueRow, error) {
 	if limit <= 0 {
 		limit = profileCycleScanBatchSize

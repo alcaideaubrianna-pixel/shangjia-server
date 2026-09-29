@@ -4,15 +4,18 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/dao"
+	"hotgo/internal/library/cache"
 )
 
 const dashboardTodoLimit = 6
+const dashboardOverviewCacheTTL = 10 * time.Second
 
 func (s *sSysPublish) AdminDashboardOverview(ctx context.Context) (*sysin.DashboardOverviewModel, error) {
 	account, err := s.currentAdminAccount(ctx)
@@ -78,6 +81,13 @@ func (s *sSysPublish) AdminDashboardRank(ctx context.Context) (*sysin.DashboardR
 }
 
 func (s *sSysPublish) dashboardOverview(ctx context.Context, tenantId int64, accountId int64, admin bool) (*sysin.DashboardOverviewModel, error) {
+	cacheKey := fmt.Sprintf("youban_publish:dashboard_overview:%d:%d:%t", tenantId, accountId, admin)
+	if value, cacheErr := cache.Instance().Get(ctx, cacheKey); cacheErr == nil && !value.IsNil() {
+		var cached sysin.DashboardOverviewModel
+		if scanErr := value.Scan(&cached); scanErr == nil {
+			return &cached, nil
+		}
+	}
 	// 首屏只做轻量聚合，避免工作台打开时扫描大列表。
 	profile, err := s.profileStats(ctx, &sysin.TrendInp{Days: 7}, tenantId, accountId)
 	if err != nil {
@@ -103,12 +113,14 @@ func (s *sSysPublish) dashboardOverview(ctx context.Context, tenantId int64, acc
 		}
 	}
 	stats := dashboardStats(profile, counts, tgOnline, channels, accounts, admin)
-	return &sysin.DashboardOverviewModel{
+	result := &sysin.DashboardOverviewModel{
 		Stats:      stats,
 		Health:     dashboardHealth(tgOnline, tgTotal, counts[sysin.PublishTaskStatusFailed], channels),
 		QuickLinks: dashboardQuickLinks(counts, admin),
 		Profile:    profile,
-	}, nil
+	}
+	_ = cache.Instance().Set(ctx, cacheKey, result, dashboardOverviewCacheTTL)
+	return result, nil
 }
 
 func dashboardStats(profile *sysin.ProfileStatsModel, counts map[string]int, tgOnline int, channels int, accounts int, admin bool) []*sysin.DashboardStatModel {
