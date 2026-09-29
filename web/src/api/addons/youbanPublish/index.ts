@@ -25,21 +25,25 @@ export function ChannelList(params = {}) {
 }
 
 export function GlobalAutoDeleteKeywordsView(params = {}) {
-  return http.request({
-    url: '/api/youban_publish/publish/admin/autoDelete/keywords/view',
-    method: 'get',
-    requestOptions: { joinPrefix: false },
-    params,
-  });
+  return http.request(
+    {
+      url: '/api/youban_publish/publish/admin/autoDelete/keywords/view',
+      method: 'get',
+      params,
+    },
+    { joinPrefix: false }
+  );
 }
 
 export function GlobalAutoDeleteKeywordsSave(params = {}) {
-  return http.request({
-    url: '/api/youban_publish/publish/admin/autoDelete/keywords/save',
-    method: 'POST',
-    requestOptions: { joinPrefix: false },
-    params,
-  });
+  return http.request(
+    {
+      url: '/api/youban_publish/publish/admin/autoDelete/keywords/save',
+      method: 'POST',
+      params,
+    },
+    { joinPrefix: false }
+  );
 }
 
 export function AccountSave(params = {}) {
