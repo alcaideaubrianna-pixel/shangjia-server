@@ -43,7 +43,10 @@ func publishAdminAuth(r *ghttp.Request) {
 	}
 
 	user := contexts.GetUser(r.Context())
-	if user == nil || user.App != consts.AppApi {
+	// The web admin uses the AppAdmin token while API clients use AppApi.
+	// These shared publish-admin endpoints must accept both contexts, then
+	// continue through the administrator permission check below.
+	if user == nil || (user.App != consts.AppApi && user.App != consts.AppAdmin) {
 		r.Response.Status = http.StatusUnauthorized
 		response.JsonExit(r, gcode.CodeNotAuthorized.Code(), "请先登录上架系统")
 		return
