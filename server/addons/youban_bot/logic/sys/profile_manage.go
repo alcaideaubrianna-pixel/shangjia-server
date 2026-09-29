@@ -1538,6 +1538,19 @@ func profileCardMarkupForNote(note *publishsysin.NoteModel, purpose string) *mod
 		return profileCardMarkup("", purpose)
 	}
 	markup := profileCardMarkup(note.ProfileNo, purpose)
+	// 查询资料时只提供与当前状态相反的操作，避免同时展示上架和下架。
+	if purpose == "view" {
+		profileNo := strings.ToUpper(strings.TrimSpace(note.ProfileNo))
+		statusAction := "pf:up:"
+		statusLabel := "上架"
+		if note.Status == 1 {
+			statusAction = "pf:down:"
+			statusLabel = "下架"
+		}
+		if len(markup.InlineKeyboard) >= 3 {
+			markup.InlineKeyboard[2] = []models.InlineKeyboardButton{{Text: statusLabel, CallbackData: statusAction + profileNo}}
+		}
+	}
 	url := strings.TrimSpace(note.CollectSourceUrl)
 	if url == "" {
 		return markup
