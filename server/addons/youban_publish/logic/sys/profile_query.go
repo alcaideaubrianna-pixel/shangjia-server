@@ -142,16 +142,59 @@ func (s *sSysPublish) notesFromProfiles(ctx context.Context, profiles []*sysin.P
 	if err != nil {
 		return nil, 0, err
 	}
+	mediaBuckets, err := s.mediaListByProfilesForNotes(ctx, profiles)
+	if err != nil {
+		return nil, 0, err
+	}
 	list = make([]*sysin.NoteModel, 0, len(profiles))
 	for _, item := range profiles {
-		note := &sysin.NoteModel{ProfileModel: *item}
-		note.Media, err = s.mediaListByProfile(ctx, item.Id, item.TenantId, item.AccountId)
-		if err != nil {
-			return nil, 0, err
+		if item == nil {
+			continue
 		}
+		note := &sysin.NoteModel{ProfileModel: *item}
+		note.Media = mediaBuckets[item.Id]
 		list = append(list, note)
 	}
 	return list, totalCount, nil
+}
+
+// mediaListByProfilesForNotes loads the page media in one query. The profile
+// query has already enforced the tenant/account visibility boundary, and media
+// is attached by the globally unique profile ID.
+func (s *sSysPublish) mediaListByProfilesForNotes(ctx context.Context, profiles []*sysin.ProfileModel) (map[int64][]*sysin.MediaModel, error) {
+	buckets := make(map[int64][]*sysin.MediaModel, len(profiles))
+	profileIds := make([]int64, 0, len(profiles))
+	allowed := make(map[int64]struct{}, len(profiles))
+	for _, profile := range profiles {
+		if profile == nil || profile.Id <= 0 {
+			continue
+		}
+		profileIds = append(profileIds, profile.Id)
+		buckets[profile.Id] = []*sysin.MediaModel{}
+		allowed[profile.Id] = struct{}{}
+	}
+	profileIds = uniqueIds(profileIds)
+	if len(profileIds) == 0 {
+		return buckets, nil
+	}
+	var rows []*sysin.MediaModel
+	if err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+		WhereIn("profile_id", profileIds).
+		WhereNull("deleted_at").
+		OrderAsc("profile_id").OrderAsc("sort_index").OrderAsc("id").
+		Scan(&rows); err != nil {
+		return nil, gerror.Wrap(err, "获取笔记媒体失败")
+	}
+	normalizeMediaListFileURL(rows)
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		if _, ok := allowed[row.ProfileId]; ok {
+			buckets[row.ProfileId] = append(buckets[row.ProfileId], row)
+		}
+	}
+	return buckets, nil
 }
 
 func (s *sSysPublish) adminNoteList(ctx context.Context, in *sysin.NoteListInp, tenantId int64, tenantIds []int64, accountIds []int64, viewer *sysin.AccountModel) (*sysin.AdminNotePageModel, error) {
