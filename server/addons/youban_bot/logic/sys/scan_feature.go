@@ -58,6 +58,8 @@ func (scanMediaMessageHandler) Handle(ctx context.Context, bot *sSysBot, event *
 		if bot.scanMediaGroupResolved(ctx, event.BotId, userId, groupId) {
 			return true, nil
 		}
+	} else if err = bot.acknowledgeScanMedia(ctx, event.BotId, userId, event.Msg); err != nil {
+		return true, err
 	}
 	lookupStartedAt := time.Now()
 	note, _, lookupErr := bot.lookupForwardedScanProfile(ctx, event.BotId, account, event.Msg)

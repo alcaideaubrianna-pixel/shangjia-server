@@ -71,6 +71,27 @@ func scanMediaGroupLockKey(botId int64, userId string, groupId string) string {
 	return scanMediaGroupKey(botId, userId, groupId) + ":lock"
 }
 
+// acknowledgeScanMedia gives single-media scans the same immediate feedback
+// as albums. The message id makes retries/webhook redelivery idempotent.
+func (s *sSysBot) acknowledgeScanMedia(ctx context.Context, botId int64, userId string, msg *models.Message) error {
+	if msg == nil {
+		return nil
+	}
+	key := fmt.Sprintf("youban_bot:scan_ack:%d:%s:%d", botId, strings.TrimSpace(userId), msg.ID)
+	value, err := cache.Instance().Get(ctx, key)
+	if err == nil && value != nil && !value.IsNil() {
+		return nil
+	}
+	if err := cache.Instance().Set(ctx, key, 1, scanMediaGroupTTL); err != nil {
+		return err
+	}
+	if err := s.sendMessageOnly(ctx, botId, fmt.Sprintf("%d", msg.Chat.ID), "已收到，正在查询，请稍候…"); err != nil {
+		_, _ = cache.Instance().Remove(ctx, key)
+		return err
+	}
+	return nil
+}
+
 // acknowledgeScanMediaGroup gives immediate feedback before Telegram file
 // resolution or fingerprint calculation starts. The distributed lock prevents
 // concurrent album updates from sending the acknowledgement more than once.
