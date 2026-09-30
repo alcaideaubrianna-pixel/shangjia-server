@@ -509,14 +509,27 @@ func (s *sSysPublish) applyProfileCollectionMetadata(ctx context.Context, list [
 			display = tgDisplays[row.TenantId][row.TgAccountId][normalizeTelegramChannelChatID(row.SourceChatId)]
 		}
 		if !display.Empty() {
-			item.CollectSourceName = display.Title
-			item.CollectSourceUsername = display.Username
+			mergeProfileCollectionDisplay(item, display)
 		}
 		if item.CollectSourceMessageId > 0 {
 			item.CollectSourceUrl = collectedTelegramMessageURL(item.CollectSourceChatId, item.CollectSourceUsername, item.CollectSourceMessageId)
 		}
 	}
 	return nil
+}
+
+func mergeProfileCollectionDisplay(item *sysin.ProfileModel, display telegramChannelDisplay) {
+	if item == nil || display.Empty() {
+		return
+	}
+	// Display cache is optional and may contain only a title. Never erase the
+	// durable dispatch username, which is required to build the source URL.
+	if title := strings.TrimSpace(display.Title); title != "" {
+		item.CollectSourceName = title
+	}
+	if username := strings.TrimSpace(display.Username); username != "" {
+		item.CollectSourceUsername = username
+	}
 }
 
 // Collection events are operational records and may be cleaned before their

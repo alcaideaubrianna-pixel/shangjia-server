@@ -1,6 +1,10 @@
 package sys
 
-import "testing"
+import (
+	"testing"
+
+	"hotgo/addons/youban_publish/model/input/sysin"
+)
 
 func TestApplyProfileCollectionJobSource(t *testing.T) {
 	metadata := map[int64]profileCollectionMetadataRow{
@@ -47,5 +51,13 @@ func TestCollectedTelegramMessageURLUsesSourceUsername(t *testing.T) {
 	got := collectedTelegramMessageURL("3974614787", "@Qidi_SKS2", 1749)
 	if got != "https://t.me/Qidi_SKS2/1749" {
 		t.Fatalf("source URL = %q", got)
+	}
+}
+
+func TestMergeProfileCollectionDisplayDoesNotEraseSnapshotUsername(t *testing.T) {
+	item := &sysin.ProfileModel{CollectSourceName: "snapshot", CollectSourceUsername: "source_user"}
+	mergeProfileCollectionDisplay(item, telegramChannelDisplay{Title: "Live title"})
+	if item.CollectSourceName != "Live title" || item.CollectSourceUsername != "source_user" {
+		t.Fatalf("display merge erased source snapshot: %#v", item)
 	}
 }
