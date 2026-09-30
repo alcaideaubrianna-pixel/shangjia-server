@@ -2,7 +2,11 @@ package sys
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -24,7 +28,7 @@ func (s *sSysPublish) profileList(ctx context.Context, in *sysin.ProfileListInp)
 	if err != nil {
 		return nil, 0, err
 	}
-	return s.profileListByModel(ctx, base, in)
+	return s.profileListByModel(ctx, base, in, profileListCountCacheKey("tenant", in.TenantId, in.AccountId, nil, in))
 }
 
 func (s *sSysPublish) profileListByAccountIds(ctx context.Context, in *sysin.ProfileListInp, tenantId int64, accountIds []int64) (list []*sysin.ProfileModel, totalCount int, err error) {
@@ -40,11 +44,11 @@ func (s *sSysPublish) profileListByAccountIds(ctx context.Context, in *sysin.Pro
 		return nil, 0, err
 	}
 	base = base.WhereIn("ps.account_id", accountIds)
-	return s.profileListByModel(ctx, base, in)
+	return s.profileListByModel(ctx, base, in, profileListCountCacheKey("accounts", tenantId, 0, accountIds, in))
 }
 
-func (s *sSysPublish) profileListByModel(ctx context.Context, base *gdb.Model, in *sysin.ProfileListInp) (list []*sysin.ProfileModel, totalCount int, err error) {
-	list, totalCount, err = s.searchProfilePage(ctx, base, in, profileListFields(), "统计资料失败", "获取资料列表失败")
+func (s *sSysPublish) profileListByModel(ctx context.Context, base *gdb.Model, in *sysin.ProfileListInp, countCacheKey string) (list []*sysin.ProfileModel, totalCount int, err error) {
+	list, totalCount, err = s.searchProfilePage(ctx, base, in, profileListFields(), "统计资料失败", "获取资料列表失败", countCacheKey)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -61,6 +65,28 @@ func (s *sSysPublish) profileListByModel(ctx context.Context, base *gdb.Model, i
 		return nil, 0, err
 	}
 	return
+}
+
+func profileListCountCacheKey(scope string, tenantId int64, accountId int64, accountIds []int64, in *sysin.ProfileListInp) string {
+	ids := append([]int64(nil), accountIds...)
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	cacheInput := &sysin.ProfileListInp{}
+	if in != nil {
+		*cacheInput = *in
+		// Pagination does not affect the total count. Excluding it lets page 1,
+		// page 2 and refresh requests reuse the same exact count briefly.
+		cacheInput.Page = 0
+		cacheInput.PerPage = 0
+	}
+	payload, _ := json.Marshal(struct {
+		Scope      string                `json:"scope"`
+		TenantId   int64                 `json:"tenantId"`
+		AccountId  int64                 `json:"accountId"`
+		AccountIds []int64               `json:"accountIds"`
+		Input      *sysin.ProfileListInp `json:"input"`
+	}{scope, tenantId, accountId, ids, cacheInput})
+	sum := sha1.Sum(payload)
+	return "youban_publish:profile_list_count:" + hex.EncodeToString(sum[:])
 }
 
 func (s *sSysPublish) profileView(ctx context.Context, profileId int64, tenantId int64, accountId int64) (res *sysin.ProfileModel, err error) {

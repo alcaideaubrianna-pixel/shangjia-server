@@ -30,12 +30,12 @@ type profileSearchFields struct {
 	StateAlias   string
 }
 
-func (s *sSysPublish) searchProfilePage(ctx context.Context, base *gdb.Model, in *sysin.ProfileListInp, fields string, countErrMessage string, listErrMessage string) ([]*sysin.ProfileModel, int, error) {
+func (s *sSysPublish) searchProfilePage(ctx context.Context, base *gdb.Model, in *sysin.ProfileListInp, fields string, countErrMessage string, listErrMessage string, countCacheKeys ...string) ([]*sysin.ProfileModel, int, error) {
 	if in == nil {
 		in = &sysin.ProfileListInp{}
 	}
 	mod := s.profileSearchModel(ctx, base, in)
-	return s.scanProfilePage(mod, in, fields, countErrMessage, listErrMessage)
+	return s.scanProfilePage(ctx, mod, in, fields, countErrMessage, listErrMessage, countCacheKeys...)
 }
 
 func (s *sSysPublish) searchDistinctProfilePage(ctx context.Context, base *gdb.Model, in *sysin.ProfileListInp, fields string, countErrMessage string, listErrMessage string, countCacheKeys ...string) ([]*sysin.ProfileModel, int, error) {
@@ -153,10 +153,29 @@ func profilePublishMarkExpr(fields profileSearchFields, sequenceExpr string) str
 	return "CASE WHEN COALESCE(" + fields.SettingAlias + ".enable_title_mark,0)=1 AND COALESCE(" + fields.SettingAlias + ".number_source,'sequence')<>'random' THEN CONCAT(" + prefix + "," + sequenceExpr + ") ELSE '' END"
 }
 
-func (s *sSysPublish) scanProfilePage(mod *gdb.Model, in *sysin.ProfileListInp, fields string, countErrMessage string, listErrMessage string) ([]*sysin.ProfileModel, int, error) {
-	totalCount, err := mod.Clone().Count()
-	if err != nil {
-		return nil, 0, gerror.Wrap(err, countErrMessage)
+func (s *sSysPublish) scanProfilePage(ctx context.Context, mod *gdb.Model, in *sysin.ProfileListInp, fields string, countErrMessage string, listErrMessage string, countCacheKeys ...string) ([]*sysin.ProfileModel, int, error) {
+	totalCount := 0
+	countCacheKey := ""
+	if len(countCacheKeys) > 0 {
+		countCacheKey = countCacheKeys[0]
+	}
+	countCached := false
+	if countCacheKey != "" {
+		if cached, cacheErr := cache.Instance().Get(ctx, countCacheKey); cacheErr == nil && !cached.IsNil() {
+			if cached.Scan(&totalCount) == nil {
+				countCached = true
+			}
+		}
+	}
+	if !countCached {
+		var countErr error
+		totalCount, countErr = mod.Clone().Count()
+		if countErr != nil {
+			return nil, 0, gerror.Wrap(countErr, countErrMessage)
+		}
+		if countCacheKey != "" {
+			_ = cache.Instance().Set(ctx, countCacheKey, totalCount, adminNoteCountCacheTTL)
+		}
 	}
 	if totalCount == 0 {
 		return []*sysin.ProfileModel{}, 0, nil
