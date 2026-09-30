@@ -68,3 +68,15 @@ func TestApplyProfileCoverAsset(t *testing.T) {
 		})
 	}
 }
+
+func TestProfileListCountCacheKeyIgnoresPagination(t *testing.T) {
+	first := &sysin.ProfileListInp{}
+	first.Page = 1
+	first.PerPage = 20
+	second := &sysin.ProfileListInp{}
+	second.Page = 2
+	second.PerPage = 50
+	if profileListCountCacheKey("accounts", 25, 0, []int64{473, 472}, first) != profileListCountCacheKey("accounts", 25, 0, []int64{472, 473}, second) {
+		t.Fatal("pagination or account ordering changed the count cache key")
+	}
+}
