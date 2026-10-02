@@ -474,12 +474,38 @@ func (s *sSysBot) deleteProfileByCallback(ctx context.Context, botId int64, chat
 			return
 		}
 		lines := []string{fmt.Sprintf("资料编号：%s 已经下架删除", html.EscapeString(no))}
+		channelNames := profileDeleteChannelNames(workCtx, accountCopy.TenantId, note.ChannelIds)
 		for _, channelId := range note.ChannelIds {
-			lines = append(lines, fmt.Sprintf("频道 %d ✅", channelId))
+			name := channelNames[channelId]
+			if name == "" {
+				name = fmt.Sprintf("频道 %d", channelId)
+			}
+			lines = append(lines, fmt.Sprintf("%s ✅", html.EscapeString(name)))
 		}
 		_ = s.sendMessageOnly(workCtx, botId, chatId, strings.Join(lines, "\n"))
 	}()
 	return nil
+}
+
+func profileDeleteChannelNames(ctx context.Context, tenantId int64, ids []int64) map[int64]string {
+	result := make(map[int64]string)
+	if tenantId <= 0 || len(ids) == 0 {
+		return result
+	}
+	var rows []struct {
+		Id       int64  `orm:"id"`
+		Title    string `orm:"channel_title"`
+		Username string `orm:"channel_username"`
+	}
+	if err := g.DB().Model("hg_youban_publish_channel").Safe().Ctx(ctx).
+		Fields("id,channel_title,channel_username").Where("tenant_id", tenantId).
+		WhereIn("id", ids).WhereNull("deleted_at").Scan(&rows); err != nil {
+		return result
+	}
+	for _, row := range rows {
+		result[row.Id] = firstNonEmpty(strings.TrimSpace(row.Title), strings.TrimPrefix(strings.TrimSpace(row.Username), "@"))
+	}
+	return result
 }
 
 func (s *sSysBot) handleProfileInlineQuery(ctx context.Context, botId int64, query *models.InlineQuery) error {
