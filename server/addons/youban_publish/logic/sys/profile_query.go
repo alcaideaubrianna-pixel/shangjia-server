@@ -13,6 +13,7 @@ import (
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/dao"
@@ -466,17 +467,18 @@ func (s *sSysPublish) applyProfileNonKeywordFilters(ctx context.Context, mod *gd
 }
 
 type profileCollectionMetadataRow struct {
-	DispatchId      int64  `orm:"dispatch_id"`
-	TenantId        int64  `orm:"tenant_id"`
-	ProfileId       int64  `orm:"profile_id"`
-	SourceId        int64  `orm:"source_id"`
-	SourceType      string `orm:"source_type"`
-	SourceName      string `orm:"source_name"`
-	SourceUsername  string `orm:"source_username"`
-	SourceChatId    string `orm:"source_chat_id"`
-	SourceMessageId int64  `orm:"source_message_id"`
-	BotId           int64  `orm:"bot_id"`
-	TgAccountId     int64  `orm:"tg_account_id"`
+	DispatchId      int64       `orm:"dispatch_id"`
+	TenantId        int64       `orm:"tenant_id"`
+	ProfileId       int64       `orm:"profile_id"`
+	SourceId        int64       `orm:"source_id"`
+	SourceType      string      `orm:"source_type"`
+	SourceName      string      `orm:"source_name"`
+	SourceUsername  string      `orm:"source_username"`
+	SourceChatId    string      `orm:"source_chat_id"`
+	SourceMessageId int64       `orm:"source_message_id"`
+	SourceCreatedAt *gtime.Time `orm:"source_created_at"`
+	BotId           int64       `orm:"bot_id"`
+	TgAccountId     int64       `orm:"tg_account_id"`
 }
 
 type profileCollectionJobSourceRow struct {
@@ -509,7 +511,8 @@ func (s *sSysPublish) applyProfileCollectionMetadata(ctx context.Context, list [
 			"COALESCE(NULLIF(bc.chat_username,''),NULLIF(s.source_username,''),d.source_username_snapshot) AS source_username," +
 			"COALESCE(s.bot_id,0) AS bot_id,COALESCE(s.tg_account_id,0) AS tg_account_id," +
 			"COALESCE(NULLIF(e.source_chat_id,''),NULLIF(d.source_chat_id_snapshot,''),s.source_chat_id) AS source_chat_id," +
-			"COALESCE(NULLIF(e.source_message_id,0),NULLIF(d.source_message_id_snapshot,0),0) AS source_message_id").
+			"COALESCE(NULLIF(e.source_message_id,0),NULLIF(d.source_message_id_snapshot,0),0) AS source_message_id," +
+			"e.received_at AS source_created_at").
 		OrderAsc("d.profile_id").OrderDesc("d.id").Scan(&rows)
 	if err != nil {
 		return gerror.Wrap(err, "读取资料采集来源失败")
@@ -571,6 +574,7 @@ func (s *sSysPublish) applyProfileCollectionMetadata(ctx context.Context, list [
 		item.CollectSourceUsername = strings.TrimSpace(row.SourceUsername)
 		item.CollectSourceChatId = strings.TrimSpace(row.SourceChatId)
 		item.CollectSourceMessageId = row.SourceMessageId
+		item.CollectSourceCreatedAt = row.SourceCreatedAt
 		display := telegramChannelDisplay{}
 		if strings.EqualFold(strings.TrimSpace(row.SourceType), sysin.CollectSourceTypeBot) {
 			display = botDisplays[row.TenantId][row.BotId][normalizeTelegramChannelChatID(row.SourceChatId)]

@@ -555,6 +555,7 @@ type ProfileModel struct {
 	CollectSourceChatId    string      `json:"collectSourceChatId" dc:"采集来源TG Chat ID"`
 	CollectSourceMessageId int64       `json:"collectSourceMessageId" dc:"采集来源消息ID"`
 	CollectSourceUrl       string      `json:"collectSourceUrl" dc:"采集来源地址"`
+	CollectSourceCreatedAt *gtime.Time `json:"collectSourceCreatedAt" dc:"采集来源消息时间"`
 	TenantName             string      `json:"tenantName" dc:"账号归属"`
 	AccountName            string      `json:"accountName" dc:"上架账号昵称"`
 	Nickname               string      `json:"nickname" dc:"账号名称"`

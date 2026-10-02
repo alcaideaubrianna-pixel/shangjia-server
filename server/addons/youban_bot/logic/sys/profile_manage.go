@@ -1096,21 +1096,32 @@ func profileCardStatusHeader(note *publishsysin.NoteModel, status string) string
 		return ""
 	}
 	lines := []string{
-		"标题：<b>" + html.EscapeString(note.Title) + "</b>",
+		"标题：<code>" + html.EscapeString(note.Title) + "</code>",
 		"编号：<code>" + html.EscapeString(note.ProfileNo) + "</code>",
 		"状态：" + html.EscapeString(status),
 	}
 	if note.PublishedAt != nil {
-		lines = append(lines, "发布时间："+html.EscapeString(note.PublishedAt.Format("Y-m-d H:i:s")))
+		lines = append(lines, "发布时间："+html.EscapeString(profileCardChinaTime(note.PublishedAt)))
 	}
 	if note.Status == 1 {
 		if note.UpdatedAt != nil {
-			lines = append(lines, "更新时间："+html.EscapeString(note.UpdatedAt.Format("Y-m-d H:i:s")))
+			lines = append(lines, "更新时间："+html.EscapeString(profileCardChinaTime(note.UpdatedAt)))
 		}
 	} else if note.UpdatedAt != nil {
-		lines = append(lines, "下架时间："+html.EscapeString(note.UpdatedAt.Format("Y-m-d H:i:s")))
+		lines = append(lines, "下架时间："+html.EscapeString(profileCardChinaTime(note.UpdatedAt)))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func profileCardChinaTime(value *gtime.Time) string {
+	if value == nil {
+		return ""
+	}
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		loc = time.FixedZone("CST", 8*60*60)
+	}
+	return value.Time.In(loc).Format("2006-01-02 15:04:05")
 }
 
 func (s *sSysBot) sendProfileByNo(ctx context.Context, botId int64, chatId string, account *botProfileAccount, no string) error {
@@ -1435,9 +1446,28 @@ func profileSourceDisplay(note *publishsysin.NoteModel) string {
 	}
 	url := strings.TrimSpace(note.CollectSourceUrl)
 	if url == "" {
-		return "资料来源：" + html.EscapeString(name)
+		result := "资料来源：" + html.EscapeString(name)
+		if note.CollectSourceCreatedAt != nil {
+			result += "\n来源时间：" + html.EscapeString(profileSourceChinaTime(note.CollectSourceCreatedAt))
+		}
+		return result
 	}
-	return "资料来源：" + html.EscapeString(name) + "\n资料链接：<a href=\"" + html.EscapeString(url) + "\">" + html.EscapeString(telegramSourceLinkLabel(url)) + "</a>"
+	result := "资料来源：" + html.EscapeString(name)
+	if note.CollectSourceCreatedAt != nil {
+		result += "\n来源时间：" + html.EscapeString(profileSourceChinaTime(note.CollectSourceCreatedAt))
+	}
+	return result + "\n资料链接：<a href=\"" + html.EscapeString(url) + "\">" + html.EscapeString(telegramSourceLinkLabel(url)) + "</a>"
+}
+
+func profileSourceChinaTime(value *gtime.Time) string {
+	if value == nil {
+		return ""
+	}
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		loc = time.FixedZone("CST", 8*60*60)
+	}
+	return value.Time.In(loc).Format("2006 年 1 月 2 日 15:04:05")
 }
 
 func telegramSourceLinkLabel(url string) string {
