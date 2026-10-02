@@ -259,6 +259,7 @@ type ISysPublish interface {
 	EnsureBotMediaSearchAccess(ctx context.Context, tenantId int64) error
 	BotProfileMediaSearch(ctx context.Context, in *sysin.BotMediaSearchInp) (list []*sysin.NoteModel, totalCount int, err error)
 	BotProfileView(ctx context.Context, in *sysin.BotProfileViewInp) (res *sysin.NoteModel, err error)
+	BotProfileDelete(ctx context.Context, tenantId int64, accountId int64, in *sysin.ProfileDeleteInp) error
 	BotProfileForwardLookup(ctx context.Context, in *sysin.BotProfileForwardLookupInp) (res *sysin.NoteModel, err error)
 	BotProfileStatus(ctx context.Context, in *sysin.BotProfileStatusInp) (res *sysin.ProfileStatusModel, err error)
 	BotProfileCreate(ctx context.Context, in *sysin.BotProfileCreateInp) (res *sysin.ProfileSaveModel, err error)

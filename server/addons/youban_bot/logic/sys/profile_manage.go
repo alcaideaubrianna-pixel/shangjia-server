@@ -406,6 +406,12 @@ func (s *sSysBot) handleProfileCallback(ctx context.Context, botId int64, query 
 		return true, s.changeProfilesStatusByCallback(ctx, botId, chatId, account, query, action, no, 1)
 	case "down":
 		return true, s.changeProfilesStatusByCallback(ctx, botId, chatId, account, query, action, no, 2)
+	case "del":
+		return true, s.confirmProfileDelete(ctx, botId, chatId, no)
+	case "delconfirm":
+		return true, s.deleteProfileByCallback(ctx, botId, chatId, account, query, no)
+	case "delcancel":
+		return true, s.sendMessageOnly(ctx, botId, chatId, "已取消删除。")
 	case "send":
 		err := s.sendProfileByNo(ctx, botId, chatId, account, no)
 		s.auditProfileCallback(ctx, query, account, action, no, err)
@@ -434,6 +440,46 @@ func (s *sSysBot) handleProfileCallback(ctx context.Context, botId int64, query 
 		return true, s.sendProfileCreateStepPrompt(ctx, botId, chatId, "waiting_display")
 	}
 	return true, nil
+}
+
+func (s *sSysBot) confirmProfileDelete(ctx context.Context, botId int64, chatId, profileNo string) error {
+	row, err := s.botById(ctx, botId)
+	if err != nil {
+		return err
+	}
+	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId,
+		fmt.Sprintf("确定删除并下架资料 <code>%s</code>？此操作会删除资料并清理已推送消息。", html.EscapeString(profileNo)), "HTML", false,
+		&models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{{
+			{Text: "确认删除并下架", CallbackData: "pf:delconfirm:" + profileNo},
+			{Text: "取消", CallbackData: "pf:delcancel:" + profileNo},
+		}}})
+	return err
+}
+
+func (s *sSysBot) deleteProfileByCallback(ctx context.Context, botId int64, chatId string, account *botProfileAccount, query *models.CallbackQuery, no string) error {
+	note, err := publishService.SysPublish().BotProfileView(ctx, botProfileViewInput(account, no))
+	if err != nil {
+		return s.replyBotError(ctx, botId, chatId, "资料删除", err)
+	}
+	if err = s.sendMessageOnly(ctx, botId, chatId, fmt.Sprintf("资料编号：%s 正在执行下架并删除，请稍候…", html.EscapeString(no))); err != nil {
+		return err
+	}
+	profileId := note.Id
+	accountCopy := *account
+	go func() {
+		workCtx := context.Background()
+		err := publishService.SysPublish().BotProfileDelete(workCtx, accountCopy.TenantId, accountCopy.AccountId, &publishsysin.ProfileDeleteInp{Ids: []int64{profileId}})
+		if err != nil {
+			_ = s.sendMessageOnly(workCtx, botId, chatId, fmt.Sprintf("资料编号：%s 下架删除失败：%s", html.EscapeString(no), html.EscapeString(err.Error())))
+			return
+		}
+		lines := []string{fmt.Sprintf("资料编号：%s 已经下架删除", html.EscapeString(no))}
+		for _, channelId := range note.ChannelIds {
+			lines = append(lines, fmt.Sprintf("频道 %d ✅", channelId))
+		}
+		_ = s.sendMessageOnly(workCtx, botId, chatId, strings.Join(lines, "\n"))
+	}()
+	return nil
 }
 
 func (s *sSysBot) handleProfileInlineQuery(ctx context.Context, botId int64, query *models.InlineQuery) error {
@@ -1602,7 +1648,7 @@ func profileCardMarkupForNote(note *publishsysin.NoteModel, purpose string) *mod
 			statusLabel = "下架"
 		}
 		if len(markup.InlineKeyboard) >= 3 {
-			markup.InlineKeyboard[2] = []models.InlineKeyboardButton{{Text: statusLabel, CallbackData: statusAction + profileNo}}
+			markup.InlineKeyboard[2] = []models.InlineKeyboardButton{{Text: statusLabel, CallbackData: statusAction + profileNo}, {Text: "删除", CallbackData: "pf:del:" + profileNo}}
 		}
 	}
 	url := strings.TrimSpace(note.CollectSourceUrl)

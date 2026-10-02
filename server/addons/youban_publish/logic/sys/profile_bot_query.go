@@ -169,6 +169,17 @@ func (s *sSysPublish) BotProfileView(ctx context.Context, in *sysin.BotProfileVi
 	return &sysin.NoteModel{ProfileModel: *profile, Media: media}, nil
 }
 
+func (s *sSysPublish) BotProfileDelete(ctx context.Context, tenantId int64, accountId int64, in *sysin.ProfileDeleteInp) error {
+	if in == nil || len(in.Ids) != 1 {
+		return gerror.New("请选择一条资料")
+	}
+	account, err := s.activeAccountCapability(ctx, tenantId, accountId)
+	if err != nil {
+		return err
+	}
+	return s.deleteProfilesByCapability(ctx, in, account)
+}
+
 // BotProfileForwardLookup uses the durable Telegram send ledger before the Bot
 // falls back to downloading media and calculating image fingerprints. The
 // permission scope is derived from the currently bound account, so a forwarded
