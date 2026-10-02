@@ -1076,17 +1076,41 @@ func (s *sSysBot) sendProfileCard(ctx context.Context, botId int64, chatId strin
 		status = "上架"
 	}
 	mediaSummary := profileMediaSummary(note.Media)
-	header := fmt.Sprintf("<b>%s</b>\n编号：<code>%s</code>\n状态：%s", html.EscapeString(note.Title), html.EscapeString(note.ProfileNo), status)
+	header := profileCardStatusHeader(note, status)
 	if mediaSummary != "" {
 		header += "\n" + mediaSummary
 	}
 	if source := profileSourceDisplay(note); source != "" {
 		header += "\n" + source
 	}
-	text := profileCardText(header, note.PlainText)
+	// Search/detail cards are status summaries. The original body is sent only
+	// by the explicit preview/send flow, avoiding duplicate and noisy replies.
+	text := profileCardText(header, "")
 	markup := profileCardMarkupForNote(note, purpose)
 	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, text, "HTML", false, markup)
 	return err
+}
+
+func profileCardStatusHeader(note *publishsysin.NoteModel, status string) string {
+	if note == nil {
+		return ""
+	}
+	lines := []string{
+		"标题：<b>" + html.EscapeString(note.Title) + "</b>",
+		"编号：<code>" + html.EscapeString(note.ProfileNo) + "</code>",
+		"状态：" + html.EscapeString(status),
+	}
+	if note.PublishedAt != nil {
+		lines = append(lines, "发布时间："+html.EscapeString(note.PublishedAt.Format("Y-m-d H:i:s")))
+	}
+	if note.Status == 1 {
+		if note.UpdatedAt != nil {
+			lines = append(lines, "更新时间："+html.EscapeString(note.UpdatedAt.Format("Y-m-d H:i:s")))
+		}
+	} else if note.UpdatedAt != nil {
+		lines = append(lines, "下架时间："+html.EscapeString(note.UpdatedAt.Format("Y-m-d H:i:s")))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (s *sSysBot) sendProfileByNo(ctx context.Context, botId int64, chatId string, account *botProfileAccount, no string) error {
