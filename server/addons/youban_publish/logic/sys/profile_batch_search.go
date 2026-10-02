@@ -95,7 +95,10 @@ func profileImageSearchListFields() string {
 
 func profileImageSearchResultCacheKey(ctx context.Context, profileIds []int64, scope *publishmodel.MediaSearchScope, viewer *sysin.AccountModel, permission string) string {
 	parts := []string{
-		"youban_publish:profile_image_search:result:v3",
+		// v4 invalidates entries created before collection source metadata was
+		// attached to image-search results. Without this bump, BOT scans can
+		// return a profile card missing its source-channel link for the cache TTL.
+		"youban_publish:profile_image_search:result:v4",
 		fmt.Sprintf("permission=%s", strings.TrimSpace(permission)),
 		fmt.Sprintf("scope=%s", mediaSearchScopeCacheKey(scope)),
 		fmt.Sprintf("version=%s", mediaSearchScopeVersion(ctx, scope)),
