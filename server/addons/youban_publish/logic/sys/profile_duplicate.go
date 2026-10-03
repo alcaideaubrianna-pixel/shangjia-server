@@ -41,6 +41,15 @@ type duplicateImageRow struct {
 	PerceptualHash string `orm:"perceptual_hash"`
 }
 
+type duplicatePreviewMediaRow struct {
+	Id                int64  `orm:"id"`
+	ProfileId         int64  `orm:"profile_id"`
+	FileUrl           string `orm:"file_url"`
+	StoragePath       string `orm:"storage_path"`
+	EditedFileUrl     string `orm:"edited_file_url"`
+	EditedStoragePath string `orm:"edited_storage_path"`
+}
+
 type duplicateProfileRow struct {
 	Id        int64       `orm:"id"`
 	PlainText string      `orm:"plain_text"`
@@ -929,6 +938,35 @@ func (s *sSysPublish) loadDuplicateProfiles(ctx context.Context, ids []int64) (m
 		}
 		for _, row := range rows {
 			result[row.Id] = row
+		}
+	}
+	for start := 0; start < len(ids); start += duplicateScanChunkSize {
+		end := start + duplicateScanChunkSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		var mediaRows []*duplicatePreviewMediaRow
+		if err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+			Fields("id,profile_id,file_url,storage_path,edited_file_url,edited_storage_path").
+			WhereIn("profile_id", ids[start:end]).WhereNull("deleted_at").
+			WhereIn("media_type", []string{"image", "photo"}).
+			Where("purpose IS NULL OR purpose='' OR purpose='display'").
+			OrderAsc("profile_id").OrderAsc("sort_index").OrderAsc("id").Scan(&mediaRows); err != nil {
+			return nil, gerror.Wrap(err, "读取重复资料预览图失败")
+		}
+		for _, media := range mediaRows {
+			profile := result[media.ProfileId]
+			if profile == nil || len(profile.Media) > 0 {
+				continue
+			}
+			fileURL, storagePath := media.FileUrl, media.StoragePath
+			if strings.TrimSpace(media.EditedFileUrl) != "" || strings.TrimSpace(media.EditedStoragePath) != "" {
+				fileURL, storagePath = media.EditedFileUrl, media.EditedStoragePath
+			}
+			profile.Media = []*sysin.AdminNoteDuplicateMediaModel{{
+				Id:      media.Id,
+				FileUrl: normalizeMediaPresentationURL(fileURL, storagePath),
+			}}
 		}
 	}
 	return result, nil
