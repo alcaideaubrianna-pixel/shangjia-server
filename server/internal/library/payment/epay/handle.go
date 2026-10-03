@@ -17,8 +17,9 @@ import (
 )
 
 const (
-	defaultGateway = "https://pay.v8jisu.cn"
-	signTypeMD5    = "MD5"
+	defaultGateway  = "https://pay.v8jisu.cn"
+	defaultCurrency = "USD"
+	signTypeMD5     = "MD5"
 )
 
 func New(config *model.PayConfig) *EPay {
@@ -50,6 +51,10 @@ func (h *EPay) Notify(ctx context.Context, in payin.NotifyInp) (res *payin.Notif
 	}
 	if notify == nil {
 		err = gerror.New("解析易支付回调参数失败")
+		return
+	}
+	if strings.TrimSpace(notify.Pid) != strings.TrimSpace(h.config.RainbowPid) {
+		err = gerror.New("易支付回调商户ID不匹配")
 		return
 	}
 	if notify.TradeStatus != "TRADE_SUCCESS" {
@@ -92,6 +97,7 @@ func (h *EPay) CreateOrder(ctx context.Context, in payin.CreateOrderInp) (res *p
 		"return_url":   in.Pay.ReturnUrl,
 		"name":         in.Pay.Subject,
 		"money":        fmt.Sprintf("%.2f", in.Pay.PayAmount),
+		"currency":     defaultCurrency,
 		"sign_type":    signTypeMD5,
 	}
 	if tradeType != "" {
@@ -103,6 +109,7 @@ func (h *EPay) CreateOrder(ctx context.Context, in payin.CreateOrderInp) (res *p
 		TradeType:  tradeType,
 		PayURL:     h.submitURL(params),
 		OutTradeNo: in.Pay.OutTradeNo,
+		Currency:   defaultCurrency,
 	}
 	return
 }
