@@ -258,6 +258,14 @@ func (s *sSysBot) telegramBot(ctx context.Context, botToken string) (*tgbot.Bot,
 	return gatewayservice.Gateway().Client(ctx, botToken)
 }
 
+func (s *sSysBot) telegramMediaBot(ctx context.Context, botToken string) (*tgbot.Bot, error) {
+	botToken = strings.TrimSpace(botToken)
+	if botToken == "" {
+		return nil, gerror.New("Telegram Bot Token未配置")
+	}
+	return gatewayservice.Gateway().MediaClient(ctx, botToken)
+}
+
 func (s *sSysBot) clearTelegramBotCache() {}
 
 func telegramProxyUrl(ctx context.Context) string {
@@ -770,10 +778,12 @@ func (s *sSysBot) resolveTelegramMessageMedia(ctx context.Context, botToken stri
 	if fileId == "" {
 		return nil, nil
 	}
-	tgBot, err := s.telegramBot(ctx, botToken)
+	clientStartedAt := time.Now()
+	tgBot, err := s.telegramMediaBot(ctx, botToken)
 	if err != nil {
 		return nil, err
 	}
+	g.Log().Infof(ctx, "Bot媒体解析阶段完成 stage:client_init durationMs:%d", time.Since(clientStartedAt).Milliseconds())
 	var thumbURL string
 	var thumbErr error
 	thumbDone := make(chan struct{})
@@ -845,7 +855,9 @@ func (s *sSysBot) telegramFileDownloadURL(ctx context.Context, tgBot *tgbot.Bot,
 	}
 	callCtx, cancel := telegramAPICtx()
 	defer cancel()
+	getFileStartedAt := time.Now()
 	file, err := tgBot.GetFile(callCtx, &tgbot.GetFileParams{FileID: fileId})
+	g.Log().Infof(ctx, "Bot媒体解析阶段完成 stage:get_file durationMs:%d success:%t", time.Since(getFileStartedAt).Milliseconds(), err == nil)
 	if err != nil {
 		return "", err
 	}
