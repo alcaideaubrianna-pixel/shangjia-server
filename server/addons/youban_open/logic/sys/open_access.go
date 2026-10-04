@@ -47,6 +47,9 @@ func (s *sOpenAccess) AppList(ctx context.Context, in *sysin.CmsAppListInp) ([]*
 	if list == nil {
 		list = []*sysin.CmsAppModel{}
 	}
+	for _, app := range list {
+		app.HasHeartbeat = app.LastHeartbeatAt != nil
+	}
 	return list, nil
 }
 
@@ -96,6 +99,102 @@ func (s *sOpenAccess) AppResetSecret(ctx context.Context, in *sysin.CmsAppResetS
 		return nil, gerror.New("CMS应用不存在")
 	}
 	return s.appCredential(ctx, in.Id, secret)
+}
+
+func (s *sOpenAccess) AppDelete(ctx context.Context, in *sysin.CmsAppDeleteInp) error {
+	appColumns := pdao.CmsApp.Columns()
+	appId, err := pdao.CmsApp.Ctx(ctx).Where(appColumns.Id, in.Id).Value(appColumns.AppId)
+	if err != nil {
+		return gerror.Wrap(err, "读取CMS应用失败")
+	}
+	if strings.TrimSpace(appId.String()) == "" {
+		return gerror.New("CMS应用不存在")
+	}
+
+	err = pdao.CmsApp.Ctx(ctx).Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		for _, table := range []string{
+			"hg_youban_open_profile_actor_daily",
+			"hg_youban_open_profile_signal",
+			"hg_youban_open_profile_metric_daily",
+			"hg_youban_open_profile_event",
+			pdao.CmsTenantBinding.Table(),
+			pdao.CmsBindingCode.Table(),
+		} {
+			if _, deleteErr := tx.Model(table).Where(appColumns.AppId, appId.String()).Delete(); deleteErr != nil {
+				return deleteErr
+			}
+		}
+		result, deleteErr := tx.Model(pdao.CmsApp.Table()).Where(appColumns.Id, in.Id).Delete()
+		if deleteErr != nil {
+			return deleteErr
+		}
+		affected, _ := result.RowsAffected()
+		if affected == 0 {
+			return gerror.New("CMS应用不存在")
+		}
+		return nil
+	})
+	if err != nil {
+		return gerror.Wrap(err, "删除CMS应用失败")
+	}
+	s.ClearAllowedTenantCache(ctx, appId.String())
+	return nil
+}
+
+func (s *sOpenAccess) AppBindTenant(ctx context.Context, in *sysin.CmsAppBindTenantInp) (*sysin.CmsBindingModel, error) {
+	if err := ensureBindingTables(ctx); err != nil {
+		return nil, gerror.Wrap(err, "初始化CMS绑定表失败")
+	}
+	appColumns := pdao.CmsApp.Columns()
+	var app *sysin.CmsAppModel
+	if err := pdao.CmsApp.Ctx(ctx).Where(appColumns.Id, in.Id).Scan(&app); err != nil {
+		return nil, gerror.Wrap(err, "读取CMS应用失败")
+	}
+	if app == nil {
+		return nil, gerror.New("CMS应用不存在")
+	}
+	if app.Status != 1 {
+		return nil, gerror.New("仅已授权的CMS应用可以绑定租户")
+	}
+
+	tenantExists, err := g.DB().Model("hg_youban_publish_tenant").
+		Where("id", in.TenantId).WhereNull("deleted_at").Where("status", 1).Count()
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取租户账户失败")
+	}
+	if tenantExists == 0 {
+		return nil, gerror.New("租户账户不存在或已停用")
+	}
+
+	columns := pdao.CmsTenantBinding.Columns()
+	var existing *sysin.CmsBindingModel
+	if err := pdao.CmsTenantBinding.Ctx(ctx).Where(columns.AppId, app.AppId).Where(columns.TenantId, in.TenantId).Scan(&existing); err != nil {
+		return nil, gerror.Wrap(err, "读取CMS绑定记录失败")
+	}
+	now := gtime.Now()
+	data := g.Map{
+		columns.Status: sysin.CmsBindingApproved, columns.Reason: "后台直接绑定",
+		columns.RequestedAt: now, columns.ReviewedAt: now, columns.UpdatedAt: now,
+	}
+	if existing == nil {
+		data[columns.AppId] = app.AppId
+		data[columns.TenantId] = in.TenantId
+		data[columns.CodeVersion] = 0
+		data[columns.CreatedAt] = now
+		if _, err := pdao.CmsTenantBinding.Ctx(ctx).Data(data).Insert(); err != nil {
+			return nil, gerror.Wrap(err, "绑定租户账户失败")
+		}
+	} else {
+		if _, err := pdao.CmsTenantBinding.Ctx(ctx).Where(columns.Id, existing.Id).Data(data).Update(); err != nil {
+			return nil, gerror.Wrap(err, "绑定租户账户失败")
+		}
+	}
+	s.ClearAllowedTenantCache(ctx, app.AppId)
+	binding, err := s.findBinding(ctx, app.AppId, in.TenantId, 0)
+	if err == nil && binding != nil && (existing == nil || existing.Status != sysin.CmsBindingApproved) {
+		s.emitApproved(ctx, binding)
+	}
+	return binding, err
 }
 
 func (s *sOpenAccess) appCredential(ctx context.Context, id int64, revealedSecret string) (*sysin.CmsAppCredentialModel, error) {

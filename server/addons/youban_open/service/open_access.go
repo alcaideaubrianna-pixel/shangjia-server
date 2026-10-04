@@ -11,6 +11,8 @@ type IOpenAccess interface {
 	AppList(ctx context.Context, in *sysin.CmsAppListInp) ([]*sysin.CmsAppModel, error)
 	AppSave(ctx context.Context, in *sysin.CmsAppSaveInp) (*sysin.CmsAppCredentialModel, error)
 	AppResetSecret(ctx context.Context, in *sysin.CmsAppResetSecretInp) (*sysin.CmsAppCredentialModel, error)
+	AppDelete(ctx context.Context, in *sysin.CmsAppDeleteInp) error
+	AppBindTenant(ctx context.Context, in *sysin.CmsAppBindTenantInp) (*sysin.CmsBindingModel, error)
 	RegisterInstance(ctx context.Context, in *sysin.CmsInstanceRegisterInp, sourceIP string) (*sysin.CmsInstanceRegisterModel, error)
 	HeartbeatInstance(ctx context.Context, in *sysin.CmsInstanceHeartbeatInp, sourceIP string) (*sysin.CmsInstanceRegisterModel, error)
 	AppSecret(ctx context.Context, appId string) (string, error)

@@ -509,3 +509,11 @@ export function CmsAppResetSecret(params = {}) {
     params,
   });
 }
+
+export function CmsAppDelete(params = {}) {
+  return http.request({ url: '/youban_open/cmsApp/delete', method: 'POST', params });
+}
+
+export function CmsAppBindTenant(params = {}) {
+  return http.request({ url: '/youban_open/cmsApp/bindTenant', method: 'POST', params });
+}

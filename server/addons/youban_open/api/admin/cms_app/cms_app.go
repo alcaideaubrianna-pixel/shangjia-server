@@ -22,3 +22,13 @@ type ResetSecretReq struct {
 	sysin.CmsAppResetSecretInp
 }
 type ResetSecretRes struct{ *sysin.CmsAppCredentialModel }
+type DeleteReq struct {
+	g.Meta `path:"/cmsApp/delete" method:"post"`
+	sysin.CmsAppDeleteInp
+}
+type DeleteRes struct{}
+type BindTenantReq struct {
+	g.Meta `path:"/cmsApp/bindTenant" method:"post"`
+	sysin.CmsAppBindTenantInp
+}
+type BindTenantRes struct{ *sysin.CmsBindingModel }

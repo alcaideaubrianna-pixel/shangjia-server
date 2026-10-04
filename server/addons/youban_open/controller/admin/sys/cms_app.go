@@ -31,3 +31,16 @@ func (c *cCmsApp) ResetSecret(ctx context.Context, req *cms_app.ResetSecretReq) 
 	}
 	return &cms_app.ResetSecretRes{CmsAppCredentialModel: v}, nil
 }
+func (c *cCmsApp) Delete(ctx context.Context, req *cms_app.DeleteReq) (*cms_app.DeleteRes, error) {
+	if err := service.OpenAccess().AppDelete(ctx, &req.CmsAppDeleteInp); err != nil {
+		return nil, err
+	}
+	return &cms_app.DeleteRes{}, nil
+}
+func (c *cCmsApp) BindTenant(ctx context.Context, req *cms_app.BindTenantReq) (*cms_app.BindTenantRes, error) {
+	v, err := service.OpenAccess().AppBindTenant(ctx, &req.CmsAppBindTenantInp)
+	if err != nil {
+		return nil, err
+	}
+	return &cms_app.BindTenantRes{CmsBindingModel: v}, nil
+}

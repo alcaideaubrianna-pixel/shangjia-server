@@ -108,6 +108,33 @@
         </n-space>
       </template>
     </n-modal>
+
+    <n-modal
+      v-model:show="bindingVisible"
+      :mask-closable="false"
+      preset="dialog"
+      title="绑定小灰机租户账户"
+      :loading="binding"
+      positive-text="确认绑定"
+      negative-text="取消"
+      @positive-click="bindTenant"
+    >
+      <n-form label-placement="left" label-width="92">
+        <n-form-item label="CMS 应用">
+          <n-input :value="bindingApp?.name || ''" readonly />
+        </n-form-item>
+        <n-form-item label="租户账户" required>
+          <n-select
+            v-model:value="selectedTenantId"
+            :options="tenantOptions"
+            :loading="tenantLoading"
+            filterable
+            clearable
+            placeholder="请选择租户账户"
+          />
+        </n-form-item>
+      </n-form>
+    </n-modal>
   </div>
 </template>
 
@@ -116,7 +143,14 @@
   import type { DataTableColumns, FormInst, FormRules } from 'naive-ui';
   import { NButton, NPopconfirm, NSpace, NTag, useMessage } from 'naive-ui';
 
-  import { CmsAppList, CmsAppResetSecret, CmsAppSave } from '@/api/addons/youbanPublish';
+  import {
+    CmsAppBindTenant,
+    CmsAppDelete,
+    CmsAppList,
+    CmsAppResetSecret,
+    CmsAppSave,
+    TenantList,
+  } from '@/api/addons/youbanPublish';
 
   interface CmsApp {
     id: number;
@@ -127,6 +161,7 @@
     sourceIp?: string;
     cmsVersion?: string;
     lastHeartbeatAt?: string;
+    hasHeartbeat: boolean;
     status: number;
     createdAt?: string;
     updatedAt?: string;
@@ -142,6 +177,12 @@
   const apps = ref<CmsApp[]>([]);
   const editorVisible = ref(false);
   const credentialVisible = ref(false);
+  const bindingVisible = ref(false);
+  const binding = ref(false);
+  const tenantLoading = ref(false);
+  const bindingApp = ref<CmsApp | null>(null);
+  const selectedTenantId = ref<number | null>(null);
+  const tenantOptions = ref<Array<{ label: string; value: number }>>([]);
   const formRef = ref<FormInst | null>(null);
   const query = reactive<{ name: string; status: number | null }>({ name: '', status: null });
   const form = reactive({ id: 0, name: '', baseUrl: '', status: 1 });
@@ -220,6 +261,17 @@
         ),
     },
     {
+      title: '心跳',
+      key: 'hasHeartbeat',
+      width: 84,
+      render: (row) =>
+        h(
+          NTag,
+          { type: row.hasHeartbeat ? 'success' : 'default', bordered: false },
+          { default: () => (row.hasHeartbeat ? '有' : '无') }
+        ),
+    },
+    {
       title: '最后心跳',
       key: 'lastHeartbeatAt',
       width: 180,
@@ -228,12 +280,17 @@
     {
       title: '操作',
       key: 'actions',
-      width: 190,
+      width: 300,
       fixed: 'right',
       render: (row) =>
         h(NSpace, null, {
           default: () => [
             h(NButton, { size: 'small', onClick: () => openEdit(row) }, { default: () => '编辑' }),
+            h(
+              NButton,
+              { size: 'small', type: 'primary', onClick: () => openBinding(row) },
+              { default: () => '绑定租户' }
+            ),
             h(
               NPopconfirm,
               { onPositiveClick: () => resetSecret(row) },
@@ -241,6 +298,15 @@
                 trigger: () =>
                   h(NButton, { size: 'small', type: 'warning' }, { default: () => '重置密钥' }),
                 default: () => `确认重置“${row.name}”的密钥？旧密钥将立即失效。`,
+              }
+            ),
+            h(
+              NPopconfirm,
+              { onPositiveClick: () => deleteApp(row) },
+              {
+                trigger: () =>
+                  h(NButton, { size: 'small', type: 'error' }, { default: () => '删除' }),
+                default: () => `确认删除“${row.name}”？相关绑定和开放统计数据也会删除。`,
               }
             ),
           ],
@@ -310,6 +376,48 @@
     }
     showCredential(result);
     await loadApps();
+  }
+
+  async function deleteApp(app: CmsApp) {
+    await CmsAppDelete({ id: app.id });
+    message.success('CMS 应用已删除');
+    await loadApps();
+  }
+
+  async function openBinding(app: CmsApp) {
+    bindingApp.value = app;
+    selectedTenantId.value = null;
+    bindingVisible.value = true;
+    if (tenantOptions.value.length > 0) return;
+    tenantLoading.value = true;
+    try {
+      const result = (await TenantList({ page: 1, pageSize: 500, status: 1 })) as {
+        list?: Array<{ id: number; name?: string; username?: string; remark?: string }>;
+      };
+      tenantOptions.value = (result?.list || []).map((tenant) => ({
+        label: tenant.username || tenant.name || tenant.remark || `租户 ${tenant.id}`,
+        value: tenant.id,
+      }));
+    } finally {
+      tenantLoading.value = false;
+    }
+  }
+
+  async function bindTenant() {
+    if (binding.value) return false;
+    if (!bindingApp.value || !selectedTenantId.value) {
+      message.warning('请选择租户账户');
+      return false;
+    }
+    binding.value = true;
+    try {
+      await CmsAppBindTenant({ id: bindingApp.value.id, tenantId: selectedTenantId.value });
+      bindingVisible.value = false;
+      message.success('租户账户已绑定');
+    } finally {
+      binding.value = false;
+    }
+    return false;
   }
 
   function showCredential(result: CmsCredential) {

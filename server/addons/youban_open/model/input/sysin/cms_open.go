@@ -29,6 +29,7 @@ type CmsAppModel struct {
 	SourceIp        string      `json:"sourceIp"`
 	CmsVersion      string      `json:"cmsVersion"`
 	LastHeartbeatAt *gtime.Time `json:"lastHeartbeatAt"`
+	HasHeartbeat    bool        `json:"hasHeartbeat"`
 	ReviewMode      string      `json:"reviewMode"`
 	Status          int         `json:"status"`
 	CreatedAt       *gtime.Time `json:"createdAt"`
@@ -135,4 +136,13 @@ type CmsAppCredentialModel struct {
 
 type CmsAppResetSecretInp struct {
 	Id int64 `json:"id" v:"required|min:1#请选择CMS应用"`
+}
+
+type CmsAppDeleteInp struct {
+	Id int64 `json:"id" v:"required|min:1#请选择CMS应用"`
+}
+
+type CmsAppBindTenantInp struct {
+	Id       int64 `json:"id" v:"required|min:1#请选择CMS应用"`
+	TenantId int64 `json:"tenantId" v:"required|min:1#请选择租户账户"`
 }
