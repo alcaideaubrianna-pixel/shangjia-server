@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -122,7 +123,7 @@ func (s *sSysPublish) handleAntiScanMattingTask(ctx context.Context, task *asynq
 		}
 		retryCount, _ := asynq.GetRetryCount(ctx)
 		maxRetry, _ := asynq.GetMaxRetry(ctx)
-		if retryCount >= maxRetry {
+		if retryCount >= maxRetry || errors.Is(err, asynq.SkipRetry) {
 			state.Status = antiScanMattingStatusFailed
 			state.RetryAfterMs = 0
 			state.Error = antiScanMattingErrorMessage
@@ -140,6 +141,9 @@ func (s *sSysPublish) handleAntiScanMattingTask(ctx context.Context, task *asynq
 	media, err := s.antiScanSegmentMedia(ctx, payload.MediaId, account)
 	g.Log().Warningf(ctx, "防扫图任务阶段完成 stage:media_lookup taskId:%s durationMs:%d", payload.TaskId, time.Since(stageStartedAt).Milliseconds())
 	if err != nil {
+		if isPermanentAntiScanMattingError(err) {
+			return fmt.Errorf("%v: %w", err, asynq.SkipRetry)
+		}
 		return err
 	}
 	stageStartedAt = time.Now()

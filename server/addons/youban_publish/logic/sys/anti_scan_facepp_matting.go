@@ -5,9 +5,15 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"image"
+	"image/jpeg"
+	"image/png"
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"strings"
 	"time"
 
@@ -15,6 +21,30 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"hotgo/addons/youban_publish/model"
 )
+
+const (
+	// Face++ documents a decimal 2 MB request limit. Keep multipart overhead headroom.
+	facePPMaximumImageBytes = 2_000_000 - 16*1024
+	facePPMaximumDimension  = 4096
+)
+
+var errFacePPPermanent = errors.New("Face++ permanent request error")
+
+type facePPAPIError struct {
+	StatusCode int
+	Message    string
+}
+
+func (e *facePPAPIError) Error() string {
+	return fmt.Sprintf("Face++ 人体抠图失败（%d）：%s", e.StatusCode, e.Message)
+}
+
+func (e *facePPAPIError) Unwrap() error {
+	if isFacePPPermanentResponse(e.StatusCode, e.Message) {
+		return errFacePPPermanent
+	}
+	return nil
+}
 
 var facePPHTTPClient = &http.Client{
 	Timeout: 10 * time.Second,
@@ -35,7 +65,7 @@ func facePPPortraitMatting(ctx context.Context, imageBytes []byte, imageHash str
 	if conf == nil || strings.TrimSpace(conf.FacePlusApiKey) == "" || strings.TrimSpace(conf.FacePlusApiSecret) == "" {
 		return "", gerror.New("Face++ 缺少 API Key 或 API Secret")
 	}
-	n, _, _, err := prepareCloudMattingImageBytes(imageBytes, 1600)
+	n, contentType, filename, err := prepareFacePPMattingImageBytes(imageBytes)
 	if err != nil {
 		return "", err
 	}
@@ -45,7 +75,10 @@ func facePPPortraitMatting(ctx context.Context, imageBytes []byte, imageHash str
 	_ = mw.WriteField("api_key", conf.FacePlusApiKey)
 	_ = mw.WriteField("api_secret", conf.FacePlusApiSecret)
 	_ = mw.WriteField("return_grayscale", "0")
-	part, err := mw.CreateFormFile("image_file", "image.jpg")
+	partHeader := make(textproto.MIMEHeader)
+	partHeader.Set("Content-Disposition", fmt.Sprintf(`form-data; name="image_file"; filename="%s"`, filename))
+	partHeader.Set("Content-Type", contentType)
+	part, err := mw.CreatePart(partHeader)
 	if err != nil {
 		return "", err
 	}
@@ -87,7 +120,7 @@ func facePPPortraitMatting(ctx context.Context, imageBytes []byte, imageHash str
 	}
 	g.Log().Warningf(ctx, "防扫图 Face++ JSON 解析完成 imageHash:%s durationMs:%d", imageHash, time.Since(jsonStartedAt).Milliseconds())
 	if resp.StatusCode != http.StatusOK || out.Error != "" {
-		return "", gerror.Newf("Face++ 人体抠图失败（%d）：%s", resp.StatusCode, out.Error)
+		return "", &facePPAPIError{StatusCode: resp.StatusCode, Message: out.Error}
 	}
 	if out.BodyImage == "" {
 		return "", gerror.New("Face++ 未返回人像图片")
@@ -105,3 +138,66 @@ func facePPPortraitMatting(ctx context.Context, imageBytes []byte, imageHash str
 }
 
 func decodeBase64Image(v string) ([]byte, error) { return base64.StdEncoding.DecodeString(v) }
+
+func prepareFacePPMattingImageBytes(imageBytes []byte) ([]byte, string, string, error) {
+	img, format, err := image.Decode(bytes.NewReader(imageBytes))
+	if err != nil {
+		return nil, "", "", gerror.Wrap(err, "Face++ 图片格式无法解析")
+	}
+	format = strings.ToLower(format)
+	bounds := img.Bounds()
+	if len(imageBytes) <= facePPMaximumImageBytes && bounds.Dx() <= facePPMaximumDimension && bounds.Dy() <= facePPMaximumDimension {
+		switch format {
+		case "jpeg":
+			return imageBytes, "image/jpeg", "image.jpg", nil
+		case "png":
+			return imageBytes, "image/png", "image.png", nil
+		}
+	}
+	if bounds.Dx() > facePPMaximumDimension || bounds.Dy() > facePPMaximumDimension {
+		img = resizeAntiScanPreviewImage(img, facePPMaximumDimension)
+	}
+	if format == "png" {
+		var lossless bytes.Buffer
+		encoder := png.Encoder{CompressionLevel: png.BestCompression}
+		if err = encoder.Encode(&lossless, img); err == nil && lossless.Len() <= facePPMaximumImageBytes {
+			return lossless.Bytes(), "image/png", "image.png", nil
+		}
+	}
+	for _, quality := range []int{95, 92, 88, 84, 80, 76} {
+		var output bytes.Buffer
+		if err = jpeg.Encode(&output, img, &jpeg.Options{Quality: quality}); err != nil {
+			return nil, "", "", gerror.Wrap(err, "压缩 Face++ 图片失败")
+		}
+		if output.Len() <= facePPMaximumImageBytes {
+			return output.Bytes(), "image/jpeg", "image.jpg", nil
+		}
+	}
+	for maxDimension := max(bounds.Dx(), bounds.Dy()) * 9 / 10; maxDimension >= 640; maxDimension = maxDimension * 9 / 10 {
+		resized := resizeAntiScanPreviewImage(img, maxDimension)
+		var output bytes.Buffer
+		if err = jpeg.Encode(&output, resized, &jpeg.Options{Quality: 88}); err != nil {
+			return nil, "", "", gerror.Wrap(err, "缩放 Face++ 图片失败")
+		}
+		if output.Len() <= facePPMaximumImageBytes {
+			return output.Bytes(), "image/jpeg", "image.jpg", nil
+		}
+	}
+	return nil, "", "", gerror.New("图片压缩后仍超过 Face++ 2MB 限制")
+}
+
+func isFacePPPermanentResponse(statusCode int, message string) bool {
+	if statusCode == http.StatusRequestTimeout || statusCode == http.StatusTooManyRequests || statusCode >= http.StatusInternalServerError {
+		return false
+	}
+	if statusCode >= http.StatusBadRequest && statusCode < http.StatusInternalServerError {
+		return true
+	}
+	message = strings.ToUpper(strings.TrimSpace(message))
+	for _, code := range []string{"IMAGE_ERROR_UNSUPPORTED_FORMAT", "INVALID_IMAGE_SIZE", "INVALID_IMAGE_URL", "IMAGE_FILE_TOO_LARGE", "MISSING_ARGUMENTS", "BAD_ARGUMENTS", "COEXISTENCE_ARGUMENTS", "AUTHENTICATION_ERROR", "AUTHORIZATION_ERROR"} {
+		if strings.Contains(message, code) {
+			return true
+		}
+	}
+	return false
+}

@@ -153,7 +153,7 @@ func (in *CloudResourceUsageQueryInp) Filter(ctx context.Context) error {
 		return gerror.New("云资源类型不合法")
 	}
 	in.Provider = strings.ToLower(strings.TrimSpace(in.Provider))
-	if in.Provider != "" && in.Provider != CloudResourceProviderAliyun && in.Provider != CloudResourceProviderTencent && in.Provider != CloudResourceProviderFapiHub && in.Provider != CloudResourceProviderLegacy {
+	if in.Provider != "" && in.Provider != CloudResourceProviderAliyun && in.Provider != CloudResourceProviderTencent && in.Provider != CloudResourceProviderFapiHub && in.Provider != CloudResourceProviderFacePlus && in.Provider != CloudResourceProviderLegacy {
 		return gerror.New("云资源服务来源不合法")
 	}
 	return nil

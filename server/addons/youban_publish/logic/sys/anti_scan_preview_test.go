@@ -45,6 +45,17 @@ func TestAntiScanMattingPublicErrorDoesNotExposeProvider(t *testing.T) {
 	}
 }
 
+func TestAntiScanMattingPublicErrorPreservesRetryClassification(t *testing.T) {
+	permanent := antiScanMattingPublicErrorFor(&facePPAPIError{StatusCode: 413, Message: "IMAGE_FILE_TOO_LARGE"})
+	if !isPermanentAntiScanMattingError(permanent) {
+		t.Fatal("permanent Face++ error must stop queue retries")
+	}
+	transient := antiScanMattingPublicErrorFor(&facePPAPIError{StatusCode: 500, Message: "INTERNAL_ERROR"})
+	if isPermanentAntiScanMattingError(transient) {
+		t.Fatal("transient Face++ error must remain retryable")
+	}
+}
+
 func TestNormalizeAntiScanMattingConcurrency(t *testing.T) {
 	for _, tc := range []struct{ input, want int }{{0, 64}, {-1, 64}, {20, 20}, {800, 800}, {801, 800}} {
 		if got := normalizeAntiScanMattingConcurrency(tc.input); got != tc.want {

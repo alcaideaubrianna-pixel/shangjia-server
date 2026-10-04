@@ -38,6 +38,17 @@ func TestCloudResourceUsageListFilterRejectsProvider(t *testing.T) {
 	}
 }
 
+func TestCloudResourceUsageQueryFilterAcceptsFacePlus(t *testing.T) {
+	in := &CloudResourceUsageQueryInp{
+		StartDate: "2026-10-01",
+		EndDate:   "2026-10-04",
+		Provider:  CloudResourceProviderFacePlus,
+	}
+	if err := in.Filter(context.Background()); err != nil {
+		t.Fatalf("expected Face++ provider to be accepted: %v", err)
+	}
+}
+
 func TestCloudResourceUsageListFilterRejectsLongRange(t *testing.T) {
 	in := &CloudResourceUsageListInp{CloudResourceUsageQueryInp: CloudResourceUsageQueryInp{
 		StartDate: "2025-01-01",

@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	_ "image/gif"
@@ -493,33 +494,51 @@ type antiScanMattingResult struct {
 }
 
 func (s *sSysPublish) createAntiScanMatting(ctx context.Context, imageHash string, imageBytes []byte, conf *model.CloudResourceConfig, usageOwner cloudResourceUsageOwner, provider string) (string, error) {
-	startedAt := time.Now()
 	var segmentURL string
 	var err error
 	providerName := "aliyun-matting"
 	if provider == "facepp" {
+		primaryStartedAt := time.Now()
 		segmentURL, err = facePPPortraitMatting(ctx, imageBytes, imageHash, conf)
+		recordMattingProviderUsage(ctx, usageOwner, sysin.CloudResourceProviderFacePlus, err == nil, time.Since(primaryStartedAt))
 		providerName = "facepp-matting"
 		if err != nil && antiScanTencentMattingFallbackReady(conf) {
 			primaryErr := err
 			fallbackStartedAt := time.Now()
 			result, fallbackErr := tencentCOSPortraitMatting(ctx, imageBytes, imageHash, conf, false)
+			recordMattingProviderUsage(ctx, usageOwner, sysin.CloudResourceProviderTencent, fallbackErr == nil && result != nil && strings.TrimSpace(result.URL) != "", time.Since(fallbackStartedAt))
 			if fallbackErr == nil && result != nil && strings.TrimSpace(result.URL) != "" {
 				segmentURL = result.URL
 				err = nil
 				// provider 列仅允许 32 字符；持久化为所选能力标记，实际降级信息由调用日志与指标记录。
 				providerName = "facepp-matting"
-				g.Log().Warningf(ctx, "Face++抠图失败，已降级腾讯云 imageHash:%s fallbackDurationMs:%d primaryErr:%+v", imageHash, time.Since(fallbackStartedAt).Milliseconds(), primaryErr)
+				g.Log().Warning(ctx, "Face++抠图失败，已降级腾讯云", g.Map{
+					"imageHash": imageHash, "primaryProvider": provider, "actualProvider": sysin.CloudResourceProviderTencent,
+					"fallbackDurationMs": time.Since(fallbackStartedAt).Milliseconds(), "fallbackSuccess": true, "primaryError": primaryErr.Error(),
+				})
 			} else {
-				g.Log().Warningf(ctx, "Face++抠图及腾讯云降级均失败 imageHash:%s primaryErr:%+v fallbackErr:%+v", imageHash, primaryErr, fallbackErr)
+				if fallbackErr != nil {
+					err = fallbackErr
+				} else {
+					err = gerror.New("腾讯云人像抠图降级返回空结果")
+				}
+				g.Log().Warning(ctx, "Face++抠图及腾讯云降级均失败", g.Map{
+					"imageHash": imageHash, "primaryProvider": provider, "actualProvider": sysin.CloudResourceProviderTencent,
+					"fallbackDurationMs": time.Since(fallbackStartedAt).Milliseconds(), "fallbackSuccess": false,
+					"primaryError": primaryErr.Error(), "fallbackError": fallbackErrorText(fallbackErr, result),
+				})
 			}
 		}
 	} else if provider == "aliyun" {
+		providerStartedAt := time.Now()
 		segmentURL, err = aliyunCOSPortraitMatting(ctx, imageBytes, imageHash, conf)
+		recordMattingProviderUsage(ctx, usageOwner, sysin.CloudResourceProviderAliyun, err == nil, time.Since(providerStartedAt))
 	} else if provider == "tencent" {
 		providerName = "tencent-ci-matting"
 		var result *tencentPortraitMattingResult
+		providerStartedAt := time.Now()
 		result, err = tencentCOSPortraitMatting(ctx, imageBytes, imageHash, conf, false)
+		recordMattingProviderUsage(ctx, usageOwner, sysin.CloudResourceProviderTencent, err == nil && result != nil && strings.TrimSpace(result.URL) != "", time.Since(providerStartedAt))
 		if result != nil {
 			segmentURL = result.URL
 		}
@@ -527,24 +546,18 @@ func (s *sSysPublish) createAntiScanMatting(ctx context.Context, imageHash strin
 		providerName = "fapihub-matting"
 		client := newFapiHubClient(conf.FapiHubApiKey, conf.FapiHubEndpoint, conf.FapiHubModel)
 		var pngBytes []byte
+		providerStartedAt := time.Now()
 		pngBytes, err = client.removeBackground(ctx, imageBytes)
+		recordMattingProviderUsage(ctx, usageOwner, sysin.CloudResourceProviderFapiHub, err == nil, time.Since(providerStartedAt))
 		if err == nil {
 			uploadStartedAt := time.Now()
 			segmentURL, err = uploadAntiScanSegment(ctx, pngBytes, imageHash)
 			g.Log().Infof(ctx, "防扫图阶段完成 stage:segment_upload durationMs:%d outputBytes:%d imageHash:%s", time.Since(uploadStartedAt).Milliseconds(), len(pngBytes), imageHash)
 		}
 	}
-	recordCloudResourceUsage(ctx, cloudResourceUsageEvent{
-		cloudResourceUsageOwner: usageOwner,
-		ResourceType:            sysin.CloudResourceTypeBackgroundMatting,
-		Provider:                provider,
-		Scene:                   cloudResourceUsageScenePreview,
-		Success:                 err == nil,
-		Duration:                time.Since(startedAt),
-	})
 	if err != nil {
 		g.Log().Warningf(ctx, "云端抠图调用失败 imageHash:%s err:%+v", imageHash, err)
-		return "", antiScanMattingPublicError()
+		return "", antiScanMattingPublicErrorFor(err)
 	}
 	segmentRaw := encodeAntiScanSegmentPortraitURL(providerName, segmentURL)
 	saveStartedAt := time.Now()
@@ -557,6 +570,27 @@ func (s *sSysPublish) createAntiScanMatting(ctx context.Context, imageHash strin
 	}
 	g.Log().Infof(ctx, "防扫图阶段完成 stage:segment_cache_save durationMs:%d imageHash:%s", time.Since(saveStartedAt).Milliseconds(), imageHash)
 	return segmentRaw, nil
+}
+
+func recordMattingProviderUsage(ctx context.Context, owner cloudResourceUsageOwner, provider string, success bool, duration time.Duration) {
+	recordCloudResourceUsage(ctx, cloudResourceUsageEvent{
+		cloudResourceUsageOwner: owner,
+		ResourceType:            sysin.CloudResourceTypeBackgroundMatting,
+		Provider:                provider,
+		Scene:                   cloudResourceUsageScenePreview,
+		Success:                 success,
+		Duration:                duration,
+	})
+}
+
+func fallbackErrorText(err error, result *tencentPortraitMattingResult) string {
+	if err != nil {
+		return err.Error()
+	}
+	if result == nil {
+		return "empty result"
+	}
+	return "empty result URL"
 }
 
 func antiScanTencentMattingFallbackReady(conf *model.CloudResourceConfig) bool {
@@ -605,6 +639,21 @@ func antiScanMattingCacheMatches(cached *antiScanDetectResult, provider string) 
 
 func antiScanMattingPublicError() error {
 	return gerror.New(antiScanMattingErrorMessage)
+}
+
+type antiScanMattingCallError struct {
+	permanent bool
+}
+
+func (e *antiScanMattingCallError) Error() string { return antiScanMattingErrorMessage }
+
+func antiScanMattingPublicErrorFor(cause error) error {
+	return &antiScanMattingCallError{permanent: errors.Is(cause, errFacePPPermanent)}
+}
+
+func isPermanentAntiScanMattingError(err error) bool {
+	var target *antiScanMattingCallError
+	return errors.As(err, &target) && target.permanent
 }
 
 func encodeFapiHubSegmentPortrait(imageBytes []byte) string {
