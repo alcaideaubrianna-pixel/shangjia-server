@@ -70,6 +70,15 @@ func (s *sSysPublish) failTgAccountRefresh(ctx context.Context, id int64, tenant
 
 const tgAccountSessionExpiredMessage = "TG账号登录态已失效，请重新扫码登录"
 
+type tgAccountAuthOwner struct {
+	Id               int64  `json:"id"`
+	TenantId         int64  `json:"tenant_id"`
+	AccountId        int64  `json:"account_id"`
+	DisplayName      string `json:"display_name"`
+	TelegramUsername string `json:"telegram_username"`
+	Status           string `json:"status"`
+}
+
 func (s *sSysPublish) expireTgAccountSession(ctx context.Context, id int64, tenantId int64, operatorId int64, message string) (string, string) {
 	s.updateTgAccountRefreshResult(ctx, id, tenantId, operatorId, sysin.PublishTgAccountStatusExpired, message, nil, "", "")
 	s.cancelTelegramDeleteFallbackTasks(ctx, []int64{id}, message)
@@ -130,6 +139,9 @@ func (s *sSysPublish) handleTgAccountPermanentAuthError(ctx context.Context, tgA
 	if account.Id <= 0 {
 		return
 	}
+	if account.Status != sysin.PublishTgAccountStatusAuthorized {
+		return
+	}
 	if strings.TrimSpace(message) == "" {
 		message = telegramPermanentAccountAuthMessage(cause)
 	}
@@ -148,13 +160,13 @@ func (s *sSysPublish) handleTgAccountPermanentAuthError(ctx context.Context, tgA
 	}
 }
 
-func (s *sSysPublish) notifyTgAccountOwner(ctx context.Context, tgAccountId int64, tenantId int64) (*messagePushTgAccountOwner, error) {
+func (s *sSysPublish) notifyTgAccountOwner(ctx context.Context, tgAccountId int64, tenantId int64) (*tgAccountAuthOwner, error) {
 	if tgAccountId <= 0 {
-		return &messagePushTgAccountOwner{}, nil
+		return &tgAccountAuthOwner{}, nil
 	}
-	var account *messagePushTgAccountOwner
+	var account *tgAccountAuthOwner
 	mod := g.DB().Model(publishTgAccountTable).Safe().Ctx(ctx).
-		Fields("id,tenant_id,account_id,display_name,telegram_username").
+		Fields("id,tenant_id,account_id,display_name,telegram_username,status").
 		Where("id", tgAccountId).
 		WhereNull("deleted_at")
 	if tenantId > 0 {
@@ -164,7 +176,7 @@ func (s *sSysPublish) notifyTgAccountOwner(ctx context.Context, tgAccountId int6
 		return nil, gerror.Wrap(err, "读取TG账号失败")
 	}
 	if account == nil {
-		return &messagePushTgAccountOwner{}, nil
+		return &tgAccountAuthOwner{}, nil
 	}
 	return account, nil
 }

@@ -26,6 +26,7 @@ import (
 
 	"hotgo/addons/youban_publish/model"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/library/cache"
 )
 
 const (
@@ -36,7 +37,13 @@ const (
 	tgLoginStatusAuthorized       = "authorized"
 	tgLoginStatusFailed           = "failed"
 	tgLoginStatusExpired          = "expired"
+	tgLoginPasswordCommandTTL     = 30 * time.Second
+	tgLoginPasswordPollInterval   = 200 * time.Millisecond
 )
+
+type telegramLoginPasswordCommand struct {
+	Password string `json:"password"`
+}
 
 type telegramLoginRuntime struct {
 	loginToken       string
@@ -138,19 +145,13 @@ func (s *sSysPublish) TelegramLoginPassword(ctx context.Context, in *sysin.Teleg
 	if item.Status != tgLoginStatusPasswordRequired {
 		return nil, gerror.New("当前扫码会话不需要二次验证密码")
 	}
-	runtime := s.getLoginRuntime(token, account.Id)
-	if runtime == nil {
-		return nil, gerror.New("扫码登录会话已失效，请重新发起登录")
-	}
 	if err = s.updateTelegramLoginStatus(ctx, token, account.Id, g.Map{
 		"error_message": "",
 	}); err != nil {
 		return nil, err
 	}
-	select {
-	case runtime.passwordCh <- password:
-	case <-time.After(10 * time.Second):
-		return nil, gerror.New("提交二次验证密码超时，请重试")
+	if err = s.submitTelegramLoginPassword(ctx, token, account.Id, password); err != nil {
+		return nil, err
 	}
 	return s.waitTelegramPasswordResult(ctx, token, account.Id)
 }
@@ -330,26 +331,74 @@ func friendlyTelegramPhoneError(err error) error {
 }
 
 func (s *sSysPublish) waitTelegramPassword(ctx context.Context, runtime *telegramLoginRuntime, client *telegram.Client) (*tg.AuthAuthorization, error) {
+	ticker := time.NewTicker(tgLoginPasswordPollInterval)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case password := <-runtime.passwordCh:
-			authorization, err := client.Auth().Password(ctx, password)
-			if errors.Is(err, auth.ErrPasswordInvalid) {
-				_ = s.updateLoginRuntimeStatus(ctx, runtime, g.Map{
-					"status":        tgLoginStatusPasswordRequired,
-					"error_message": "二次验证密码错误，请重新输入",
-					"expires_at":    gtime.Now().Add(5 * time.Minute),
-				})
+			if authorization, done, err := s.applyTelegramLoginPassword(ctx, runtime, client, password); done || err != nil {
+				return authorization, err
+			}
+		case <-ticker.C:
+			password, err := s.consumeTelegramLoginPassword(ctx, runtime.loginToken, runtime.accountId)
+			if err != nil {
+				g.Log().Warningf(ctx, "读取TG登录密码指令失败 accountId:%d err:%+v", runtime.accountId, err)
 				continue
 			}
-			if err != nil {
-				return nil, err
+			if password == "" {
+				continue
 			}
-			return authorization, nil
+			if authorization, done, err := s.applyTelegramLoginPassword(ctx, runtime, client, password); done || err != nil {
+				return authorization, err
+			}
 		}
 	}
+}
+
+func (s *sSysPublish) applyTelegramLoginPassword(ctx context.Context, runtime *telegramLoginRuntime, client *telegram.Client, password string) (*tg.AuthAuthorization, bool, error) {
+	authorization, err := client.Auth().Password(ctx, password)
+	if errors.Is(err, auth.ErrPasswordInvalid) {
+		_ = s.updateLoginRuntimeStatus(ctx, runtime, g.Map{
+			"status":        tgLoginStatusPasswordRequired,
+			"error_message": "二次验证密码错误，请重新输入",
+			"expires_at":    gtime.Now().Add(5 * time.Minute),
+		})
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, true, err
+	}
+	return authorization, true, nil
+}
+
+func telegramLoginPasswordCommandKey(token string, accountId int64) string {
+	return fmt.Sprintf("youban_publish:tg_login_password:%d:%s", accountId, strings.TrimSpace(token))
+}
+
+func (s *sSysPublish) submitTelegramLoginPassword(ctx context.Context, token string, accountId int64, password string) error {
+	command := telegramLoginPasswordCommand{Password: password}
+	if err := cache.Instance().Set(ctx, telegramLoginPasswordCommandKey(token, accountId), command, tgLoginPasswordCommandTTL); err != nil {
+		return gerror.Wrap(err, "提交二次验证密码失败")
+	}
+	return nil
+}
+
+func (s *sSysPublish) consumeTelegramLoginPassword(ctx context.Context, token string, accountId int64) (string, error) {
+	key := telegramLoginPasswordCommandKey(token, accountId)
+	value, err := cache.Instance().Get(ctx, key)
+	if err != nil || value.IsNil() {
+		return "", err
+	}
+	var command telegramLoginPasswordCommand
+	if err = value.Scan(&command); err != nil {
+		return "", gerror.Wrap(err, "解析二次验证密码指令失败")
+	}
+	if _, err = cache.Instance().Remove(ctx, key); err != nil {
+		return "", gerror.Wrap(err, "确认二次验证密码指令失败")
+	}
+	return command.Password, nil
 }
 
 func (s *sSysPublish) finishTelegramLogin(ctx context.Context, token string, tenantId int64, accountId int64, sessionKey string, authorization *tg.AuthAuthorization) error {

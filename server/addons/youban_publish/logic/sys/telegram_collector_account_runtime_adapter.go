@@ -15,6 +15,14 @@ import (
 
 type publishAccountRuntimeProvider struct{ publish *sSysPublish }
 
+func (p *publishAccountRuntimeProvider) ObserveAccountTaskError(ctx context.Context, task *collectorin.AccountTask, err error) {
+	if task == nil || err == nil || !isTelegramPermanentAccountAuthError(err) {
+		return
+	}
+	p.publish.handleTgAccountPermanentAuthError(context.Background(), task.AccountID, 0, telegramPermanentAccountAuthMessage(err), err)
+	collectorservice.AccountRuntime().Restart(task.AccountID)
+}
+
 type publishAccountRuntimePayload struct {
 	Listeners []accountListenPlanRuntime
 }

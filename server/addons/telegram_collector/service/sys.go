@@ -69,6 +69,7 @@ type AccountRuntimeMessageObserver interface {
 type AccountRuntimeProvider interface {
 	ListAccountRuntimes(ctx context.Context) ([]*sysin.AccountRuntimeBinding, error)
 	OpenAccountRuntime(ctx context.Context, binding *sysin.AccountRuntimeBinding) (AccountRuntimeSession, error)
+	ObserveAccountTaskError(ctx context.Context, task *sysin.AccountTask, err error)
 }
 
 type AccountOperation func(context.Context, *telegram.Client) error

@@ -115,6 +115,9 @@ func processAccountTask(ctx context.Context, client *telegram.Client, lease *sys
 				err = collectorservice.AccountTasks().Complete(ctx, task.ID, lease, result)
 			} else {
 				g.Log().Warningf(ctx, "Telegram账号任务处理失败 taskId:%d type:%s tgAccountId:%d duration:%s err:%+v", task.ID, task.TaskType, task.AccountID, time.Since(startedAt).Round(time.Millisecond), handleErr)
+				if provider := collectorservice.AccountRuntimeProviderInstance(); provider != nil {
+					provider.ObserveAccountTaskError(ctx, task, handleErr)
+				}
 				resultStatus = "failed"
 				err = collectorservice.AccountTasks().Fail(ctx, &sysin.AccountTaskFailure{
 					TaskID: task.ID, Lease: lease, Cause: handleErr, RetryDelay: retryDelay(handleErr),
