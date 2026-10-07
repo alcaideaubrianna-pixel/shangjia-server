@@ -43,12 +43,15 @@ func publishAdminAuth(r *ghttp.Request) {
 	}
 
 	user := contexts.GetUser(r.Context())
-	// The web admin uses the AppAdmin token while API clients use AppApi.
-	// These shared publish-admin endpoints must accept both contexts, then
-	// continue through the administrator permission check below.
 	if user == nil || (user.App != consts.AppApi && user.App != consts.AppAdmin) {
 		r.Response.Status = http.StatusUnauthorized
 		response.JsonExit(r, gcode.CodeNotAuthorized.Code(), "请先登录上架系统")
+		return
+	}
+	// The system admin route has already passed AdminAuth. DeptType is an
+	// account-side role and must only be enforced for AppApi identities.
+	if user.App == consts.AppAdmin {
+		r.Middleware.Next()
 		return
 	}
 

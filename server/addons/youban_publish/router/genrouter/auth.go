@@ -20,8 +20,12 @@ func publishAdminAuth(r *ghttp.Request) {
 	}
 
 	user := contexts.GetUser(r.Context())
-	if user == nil || user.App != consts.AppApi {
+	if user == nil || (user.App != consts.AppApi && user.App != consts.AppAdmin) {
 		response.JsonExit(r, gcode.CodeNotAuthorized.Code(), "请先登录上架系统")
+		return
+	}
+	if user.App == consts.AppAdmin {
+		r.Middleware.Next()
 		return
 	}
 
