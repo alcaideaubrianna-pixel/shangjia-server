@@ -11,6 +11,9 @@ import (
 type ListReq struct {
 	g.Meta `path:"/open/v1/profiles" method:"get" tags:"开放资料" summary:"获取开放资料列表"`
 	form.PageReq
+	Current         int    `json:"current" dc:"兼容页码；未传 page 时生效"`
+	WithTotal       int    `json:"withTotal" d:"1" v:"in:0,1#withTotal 仅支持 0 或 1" dc:"是否返回总数和总页数"`
+	ExcludeIds      string `json:"excludeIds" dc:"需要排除的资料ID，多个值用逗号分隔"`
 	Feed            string `json:"feed" dc:"排序方式：latest/hot/recommended" v:"in:latest,hot,recommended#feed 仅支持 latest、hot、recommended"`
 	ActorId         string `json:"actorId" dc:"平台侧不可逆用户标识，用于个性化推荐"`
 	Keyword         string `json:"keyword" dc:"资料编号或正文关键词" v:"length:0,50#关键词不能超过50个字符"`

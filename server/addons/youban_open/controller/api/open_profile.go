@@ -21,6 +21,7 @@ var OpenProfile = cOpenProfile{}
 type cOpenProfile struct{}
 
 func (c *cOpenProfile) List(ctx context.Context, req *open.ListReq) (res *open.ListRes, err error) {
+	normalizeOpenProfilePage(req)
 	in := openProfileListInput(req)
 	provinceCodes, err := normalizeProvinceCodes(req.ProvinceCode, req.ProvinceCodes)
 	if err != nil {
@@ -65,7 +66,7 @@ func (c *cOpenProfile) List(ctx context.Context, req *open.ListReq) (res *open.L
 			return nil, err
 		}
 	}
-	in.Feed, in.ActorId, in.WithTotal = feed, strings.TrimSpace(req.ActorId), 0
+	in.Feed, in.ActorId, in.WithTotal = feed, strings.TrimSpace(req.ActorId), req.WithTotal
 	list, total, err := service.SysContent().ListProfiles(scopedCtx, &in)
 	if err != nil {
 		return nil, err
@@ -75,10 +76,17 @@ func (c *cOpenProfile) List(ctx context.Context, req *open.ListReq) (res *open.L
 	return res, nil
 }
 
+func normalizeOpenProfilePage(req *open.ListReq) {
+	if req != nil && req.Page <= 0 && req.Current > 0 {
+		req.Page = req.Current
+	}
+}
+
 func openProfileListInput(req *open.ListReq) sysin.ContentProfileListInp {
 	return sysin.ContentProfileListInp{
 		PageReq: req.PageReq, Keyword: strings.TrimSpace(req.Keyword),
-		Province: strings.TrimSpace(req.ProvinceCode), City: strings.TrimSpace(req.CityCode),
+		ExcludeProfileIds: strings.TrimSpace(req.ExcludeIds),
+		Province:          strings.TrimSpace(req.ProvinceCode), City: strings.TrimSpace(req.CityCode),
 		AgeMin: req.AgeMin, AgeMax: req.AgeMax, HeightMin: req.HeightMin, HeightMax: req.HeightMax,
 		WeightMin: req.WeightMin, WeightMax: req.WeightMax, Cups: req.Cups,
 		HasVideo: req.HasVideo, HasVerification: req.HasVerification, IsVirgin: req.IsVirgin,
