@@ -158,7 +158,25 @@ func (s *sSysConfig) GlobalAutoDeleteKeywordsSave(ctx context.Context, in *sysin
 	if err := in.Filter(ctx); err != nil {
 		return err
 	}
-	return s.updateConfigGroup(ctx, publishConfigGroupAutoDelete, g.Map{"keywords": in.Keywords})
+	raw, err := marshalGlobalAutoDeleteKeywords(in.Keywords)
+	if err != nil {
+		return gerror.Wrap(err, "编码全局自动删除关键字失败")
+	}
+	if err = s.updateConfigGroup(ctx, publishConfigGroupAutoDelete, g.Map{"keywords": raw}); err != nil {
+		return err
+	}
+	if err = (&sSysPublish{}).enqueueTelegramAutoDeleteBackfill(ctx, 0, 0); err != nil {
+		return gerror.Wrap(err, "启动历史关键字消息清理任务失败")
+	}
+	return nil
+}
+
+func marshalGlobalAutoDeleteKeywords(keywords []string) (string, error) {
+	raw, err := json.Marshal(keywords)
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
 }
 
 func parseGlobalAutoDeleteKeywords(raw interface{}) ([]string, error) {

@@ -35,6 +35,7 @@ const (
 	tgTaskTypePublish             = "youban_publish:tg:publish"
 	tgTaskTypeCleanup             = "youban_publish:tg:cleanup"
 	tgTaskTypeAutoDelete          = "youban_publish:tg:auto_delete"
+	tgTaskTypeAutoDeleteBackfill  = "youban_publish:tg:auto_delete_backfill"
 	tgTaskTypeImport              = "youban_publish:import:legacy"
 	tgTaskTypeRepair              = "youban_publish:tg:message_repair"
 	tgTaskTypeImportMatch         = "youban_publish:import:tg_match"
@@ -100,6 +101,10 @@ type autoDeleteQueuePayload struct {
 	ChatId    string `json:"chatId"`
 	MessageId int    `json:"messageId"`
 	Keyword   string `json:"keyword"`
+}
+
+type autoDeleteBackfillQueuePayload struct {
+	CursorId int64 `json:"cursorId"`
 }
 
 type mediaProcessQueuePayload struct {
@@ -288,6 +293,31 @@ func (s *sSysPublish) enqueueTelegramAutoDelete(ctx context.Context, payload aut
 		asynq.Timeout(time.Minute),
 		asynq.Unique(2*time.Minute),
 	)
+	if errors.Is(err, asynq.ErrDuplicateTask) {
+		return nil
+	}
+	return err
+}
+
+func (s *sSysPublish) enqueueTelegramAutoDeleteBackfill(ctx context.Context, cursorId int64, delay time.Duration) error {
+	client, err := s.telegramQueueClient(ctx)
+	if err != nil {
+		return err
+	}
+	body, err := json.Marshal(autoDeleteBackfillQueuePayload{CursorId: cursorId})
+	if err != nil {
+		return err
+	}
+	options := []asynq.Option{
+		asynq.Queue(tgQueueNameAutoDelete),
+		asynq.MaxRetry(10),
+		asynq.Timeout(2 * time.Minute),
+		asynq.Unique(10 * time.Minute),
+	}
+	if delay > 0 {
+		options = append(options, asynq.ProcessIn(delay))
+	}
+	_, err = client.EnqueueContext(ctx, asynq.NewTask(tgTaskTypeAutoDeleteBackfill, body), options...)
 	if errors.Is(err, asynq.ErrDuplicateTask) {
 		return nil
 	}

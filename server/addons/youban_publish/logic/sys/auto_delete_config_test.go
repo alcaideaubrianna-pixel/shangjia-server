@@ -1,6 +1,7 @@
 package sys
 
 import (
+	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
@@ -8,6 +9,20 @@ import (
 	"hotgo/addons/youban_publish/model"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
+
+func TestMarshalGlobalAutoDeleteKeywordsUsesJSON(t *testing.T) {
+	raw, err := marshalGlobalAutoDeleteKeywords([]string{"处理异常", "录入失败"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if raw != `["处理异常","录入失败"]` {
+		t.Fatalf("unexpected encoded keywords: %s", raw)
+	}
+	var decoded []string
+	if err = json.Unmarshal([]byte(raw), &decoded); err != nil || len(decoded) != 2 {
+		t.Fatalf("invalid keyword JSON: decoded=%v err=%v", decoded, err)
+	}
+}
 
 func TestMergeAutoDeleteStrings(t *testing.T) {
 	got := mergeAutoDeleteStrings(
