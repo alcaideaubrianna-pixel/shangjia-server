@@ -320,14 +320,11 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 		}
 		return s.completeTelegramJob(ctx, job)
 	}
+	// Always give the Bot API the first chance to upload videos without a
+	// reusable file_id. The account fallback requires channel-admin access and
+	// is only safe after the Bot send returns a concrete failure.
 	if telegramVerifyMediaNeedsAccountUpload(verifyMedia) {
-		reason := gerror.New("验证视频没有可复用的Telegram file_id，直接使用频道绑定协议号发送")
-		if _, fallbackErr := s.sendTelegramJobMediaByAccount(ctx, job, "verify", "", verifyMedia, reason); errors.Is(fallbackErr, errTelegramMediaFallbackQueued) {
-			g.Log().Infof(ctx, "TG验证资料直接切换协议号上传 jobId:%d channelId:%d media:%s", job.Id, job.ChannelId, telegramMediaDebugSummary(verifyMedia))
-			return errTelegramMediaFallbackQueued
-		} else if fallbackErr != nil {
-			g.Log().Warningf(ctx, "TG验证资料协议号直传不可用，回退Bot发送 jobId:%d channelId:%d err:%+v", job.Id, job.ChannelId, fallbackErr)
-		}
+		g.Log().Infof(ctx, "TG验证资料无可复用file_id，先尝试Bot本地上传 jobId:%d channelId:%d media:%s", job.Id, job.ChannelId, telegramMediaDebugSummary(verifyMedia))
 	}
 	if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseVerifySending); err != nil {
 		return err
