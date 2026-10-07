@@ -1,9 +1,44 @@
 package sys
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestTelegramMediaSendTimeoutsFitPublishTaskDeadline(t *testing.T) {
+	if telegramVerifySendTimeout <= 0 || telegramVerifySendTimeout >= telegramDisplaySendTimeout {
+		t.Fatalf("unexpected media timeouts: verify=%s display=%s", telegramVerifySendTimeout, telegramDisplaySendTimeout)
+	}
+	if telegramDisplaySendTimeout+telegramVerifySendTimeout+telegramAttemptWebhookWait >= telegramPublishTaskTimeout {
+		t.Fatal("media send and webhook timeouts must fit publish task deadline")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), telegramVerifySendTimeout)
+	defer cancel()
+	if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > telegramVerifySendTimeout {
+		t.Fatal("verify send context must carry the configured deadline")
+	}
+}
+
+func TestTelegramVerifyMediaNeedsAccountUpload(t *testing.T) {
+	if !telegramVerifyMediaNeedsAccountUpload([]*telegramMediaItem{{MediaType: "video"}}) {
+		t.Fatal("verify video without file_id should use account upload")
+	}
+	if telegramVerifyMediaNeedsAccountUpload([]*telegramMediaItem{{MediaType: "video", TgFileId: "telegram-file-id"}}) {
+		t.Fatal("verify video with reusable file_id should keep the Bot fast path")
+	}
+	if telegramVerifyMediaNeedsAccountUpload([]*telegramMediaItem{{MediaType: "image"}}) {
+		t.Fatal("non-video verification media should not force account upload")
+	}
+}
+
+func TestTelegramSentMessageIDs(t *testing.T) {
+	got := telegramSentMessageIDs([]*telegramSentMessage{nil, {MessageId: 0}, {MessageId: 1880}, {MessageId: 1849}})
+	if len(got) != 2 || got[0] != 1880 || got[1] != 1849 {
+		t.Fatalf("unexpected message ids: %v", got)
+	}
+}
 
 func TestTelegramAttemptMarkerStableAndDistinct(t *testing.T) {
 	first := telegramAttemptMarker("attempt-a")

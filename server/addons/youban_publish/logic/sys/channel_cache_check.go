@@ -30,21 +30,24 @@ type channelBotAttachTaskPayload struct {
 }
 
 func (s *sSysPublish) AdminChannelCheck(ctx context.Context, in *sysin.ChannelCheckInp) (res *sysin.ChannelCheckModel, err error) {
-	checkCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
-	defer cancel()
-	ctx = checkCtx
 	account, err := s.currentAdminAccount(ctx)
 	if err != nil {
 		return nil, err
 	}
-	res, err = s.checkAdminChannelBots(ctx, in, account.TenantId, true)
+	checkCtx, cancelCheck := context.WithTimeout(ctx, 40*time.Second)
+	res, err = s.checkAdminChannelBots(checkCtx, in, account.TenantId, true)
+	cancelCheck()
 	if err != nil || res == nil {
 		return res, err
 	}
-	if err = s.persistChannelBotPermission(ctx, account.TenantId, in.ChannelId, in.TgAccountId, res.TargetChatId, res.BotResults); err != nil {
+	persistCtx, cancelPersist := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancelPersist()
+	if err = s.persistChannelBotPermission(persistCtx, account.TenantId, in.ChannelId, in.TgAccountId, res.TargetChatId, res.BotResults); err != nil {
 		return nil, gerror.Wrap(err, "保存频道 Bot 权限检测结果失败")
 	}
-	s.refreshAutoDeleteChannelCache(ctx)
+	cacheCtx, cancelCache := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	s.refreshAutoDeleteChannelCache(cacheCtx)
+	cancelCache()
 	return res, nil
 }
 
@@ -224,22 +227,11 @@ func channelCheckTelegramErrorMessage(err error) string {
 }
 
 func (s *sSysPublish) attachChannelBots(ctx context.Context, tenantId int64, tgAccountId int64, channel *sysin.ChannelCacheModel, bots []*sysin.BotModel) error {
-	payload := channelBotAttachTaskPayload{TenantID: tenantId, TGAccountID: tgAccountId, ChannelID: channel.ChannelId, AccessHash: channel.AccessHash}
-	for _, bot := range bots {
-		if bot != nil && bot.Id > 0 {
-			payload.BotIDs = append(payload.BotIDs, bot.Id)
-		}
-	}
-	body, err := json.Marshal(payload)
+	submit, err := channelBotAttachTaskSubmit(tenantId, tgAccountId, channel, bots)
 	if err != nil {
-		return gerror.Wrap(err, "创建频道Bot管理任务失败")
+		return err
 	}
-	task, err := collectorservice.AccountTasks().SubmitAndWait(ctx, &collectorin.AccountTaskSubmit{
-		TenantID: tenantId, AccountID: tgAccountId,
-		TaskType: collectorin.AccountTaskTypeChannelBotAttach,
-		TaskKey:  "channel-bot-attach:" + base64.RawURLEncoding.EncodeToString(body),
-		Priority: -100, MaxAttempts: 3,
-	}, 500*time.Millisecond)
+	task, err := collectorservice.AccountTasks().SubmitAndWait(ctx, submit, 500*time.Millisecond)
 	if err != nil {
 		return gerror.Wrap(err, "提交频道Bot管理任务失败")
 	}
@@ -250,6 +242,28 @@ func (s *sSysPublish) attachChannelBots(ctx context.Context, tenantId int64, tgA
 		return gerror.New("频道Bot管理任务未完成，请稍后重新检测")
 	}
 	return nil
+}
+
+func channelBotAttachTaskSubmit(tenantId int64, tgAccountId int64, channel *sysin.ChannelCacheModel, bots []*sysin.BotModel) (*collectorin.AccountTaskSubmit, error) {
+	if channel == nil {
+		return nil, gerror.New("创建频道Bot管理任务失败：频道信息为空")
+	}
+	payload := channelBotAttachTaskPayload{TenantID: tenantId, TGAccountID: tgAccountId, ChannelID: channel.ChannelId, AccessHash: channel.AccessHash}
+	for _, bot := range bots {
+		if bot != nil && bot.Id > 0 {
+			payload.BotIDs = append(payload.BotIDs, bot.Id)
+		}
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, gerror.Wrap(err, "创建频道Bot管理任务失败")
+	}
+	return &collectorin.AccountTaskSubmit{
+		TenantID: tenantId, AccountID: tgAccountId,
+		TaskType: collectorin.AccountTaskTypeChannelBotAttach,
+		TaskKey:  "channel-bot-attach:" + base64.RawURLEncoding.EncodeToString(body),
+		Priority: -100, MaxAttempts: 1,
+	}, nil
 }
 
 func (s *sSysPublish) attachChannelBotsWithClient(ctx context.Context, client *telegram.Client, tenantId int64, tgAccountId int64, channel *sysin.ChannelCacheModel, bots []*sysin.BotModel) error {

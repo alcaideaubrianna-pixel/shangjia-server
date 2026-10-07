@@ -99,6 +99,7 @@ func accountTaskCanRevive(taskType string) bool {
 		sysin.AccountTaskTypeMessageReconcile,
 		sysin.AccountTaskTypeMessageMediaFallback,
 		sysin.AccountTaskTypeMessageDeleteFallback,
+		sysin.AccountTaskTypeChannelBotAttach,
 		sysin.AccountTaskTypeManagedBotUsernameCheck:
 		return true
 	default:

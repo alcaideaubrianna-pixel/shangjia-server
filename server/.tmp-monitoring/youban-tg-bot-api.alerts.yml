@@ -55,3 +55,19 @@ groups:
         annotations:
           summary: "本地 Bot API 文件下载变慢"
           description: "本地文件下载平均耗时持续超过 10 秒"
+      - alert: YoubanTelegramMediaSendTimeout
+        expr: 'sum by (phase) (increase({__name__="xiaohuiji.tg.media_send_requests",result="timeout"}[5m])) > 0'
+        labels:
+          severity: CRIT
+          category: publish
+        annotations:
+          summary: "TG Bot API 媒体发送超时"
+          description: "最近 5 分钟 {{ $labels.phase }} 阶段发生 {{ $value }} 次发送超时；请结合 YoubanTelegramSendStageStuck 中的业务 ID 定位"
+      - alert: YoubanTelegramLateDelivery
+        expr: 'sum by (phase,action) (increase({__name__="xiaohuiji.tg.late_delivery_events"}[5m])) > 0'
+        labels:
+          severity: CRIT
+          category: publish
+        annotations:
+          summary: "TG Bot API 出现迟到发送响应"
+          description: "最近 5 分钟 {{ $labels.phase }} 阶段出现 {{ $value }} 次迟到响应，处理动作：{{ $labels.action }}"

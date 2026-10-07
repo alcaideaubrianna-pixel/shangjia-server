@@ -123,6 +123,33 @@ func observeTelegramPublishFailure(ctx context.Context, stage string) {
 	counter.Add(ctx, 1, metric.WithAttributes(attribute.String("stage", stage)))
 }
 
+func observeTelegramMediaSend(ctx context.Context, phase string, err error, duration time.Duration) {
+	result := "success"
+	if err != nil {
+		result = "error"
+		if errors.Is(err, context.DeadlineExceeded) || strings.Contains(strings.ToLower(err.Error()), "deadline exceeded") {
+			result = "timeout"
+		} else if errors.Is(err, context.Canceled) {
+			result = "canceled"
+		}
+	}
+	attrs := metric.WithAttributes(attribute.String("phase", phase), attribute.String("result", result))
+	requests, _ := publishObserveMeter.Int64Counter("xiaohuiji.tg.media_send_requests")
+	durations, _ := publishObserveMeter.Float64Histogram("xiaohuiji.tg.media_send_duration_seconds")
+	requests.Add(ctx, 1, attrs)
+	durations.Record(ctx, duration.Seconds(), attrs)
+}
+
+func observeTelegramLateDelivery(ctx context.Context, phase, action string, count int) {
+	attrs := metric.WithAttributes(attribute.String("phase", phase), attribute.String("action", action))
+	events, _ := publishObserveMeter.Int64Counter("xiaohuiji.tg.late_delivery_events")
+	messages, _ := publishObserveMeter.Int64Counter("xiaohuiji.tg.late_delivery_messages")
+	events.Add(ctx, 1, attrs)
+	if count > 0 {
+		messages.Add(ctx, int64(count), attrs)
+	}
+}
+
 func observeMediaFileCacheSource(ctx context.Context, source, result, errorClass string) {
 	counter, _ := publishObserveMeter.Int64Counter("xiaohuiji.media.download_source_events")
 	counter.Add(ctx, 1, metric.WithAttributes(

@@ -2,7 +2,10 @@ package sys
 
 import (
 	"errors"
+	"strings"
 	"testing"
+
+	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
 func TestChannelBotMemberErrorMessage(t *testing.T) {
@@ -34,6 +37,26 @@ func TestChannelBotMemberErrorMessage(t *testing.T) {
 				t.Fatalf("message = %q, want %q", got, test.want)
 			}
 		})
+	}
+}
+
+func TestChannelBotAttachTaskSubmitDoesNotRetryTelegramCooldown(t *testing.T) {
+	channel := &sysin.ChannelCacheModel{ChannelId: "3891086979", AccessHash: "123"}
+	bots := []*sysin.BotModel{{Id: 59}, nil, {Id: 0}}
+
+	first, err := channelBotAttachTaskSubmit(74, 66, channel, bots)
+	if err != nil {
+		t.Fatalf("build task: %v", err)
+	}
+	second, err := channelBotAttachTaskSubmit(74, 66, channel, bots)
+	if err != nil {
+		t.Fatalf("build task again: %v", err)
+	}
+	if first.MaxAttempts != 1 {
+		t.Fatalf("max attempts = %d, want 1", first.MaxAttempts)
+	}
+	if first.TaskKey != second.TaskKey || !strings.HasPrefix(first.TaskKey, "channel-bot-attach:") {
+		t.Fatalf("task key should be stable, first=%q second=%q", first.TaskKey, second.TaskKey)
 	}
 }
 

@@ -177,3 +177,99 @@ youban_tg_attempt_health:
     - datname: { usage: LABEL, description: database name }
     - expired_total: { usage: GAUGE, description: expired attempts waiting for timeout recovery }
     - oldest_expired_age_seconds: { usage: GAUGE, description: age of the oldest expired attempt }
+
+youban_tg_send_stage_detail:
+  name: youban_tg_send_stage_detail
+  desc: Individual Telegram delivery attempts stuck before or during webhook confirmation
+  predicate_queries:
+    - name: tg attempt and job tables exist
+      predicate_query: |
+        SELECT to_regclass('public.hg_youban_publish_tg_attempt') IS NOT NULL
+           AND to_regclass('public.hg_youban_publish_tg_job') IS NOT NULL;
+  query: |-
+    SELECT current_database() AS datname,
+           attempt.id::text AS attempt_id,
+           job.id::text AS job_id,
+           job.profile_id::text AS profile_id,
+           job.channel_id::text AS channel_id,
+           job.bot_id::text AS bot_id,
+           attempt.phase,
+           attempt.status,
+           EXTRACT(EPOCH FROM (NOW() - attempt.updated_at))::bigint AS age_seconds,
+           1::bigint AS active
+    FROM hg_youban_publish_tg_attempt attempt
+    JOIN hg_youban_publish_tg_job job ON job.id = attempt.job_id
+    WHERE job.status IN ('sending','unknown')
+      AND (
+        (attempt.status = 'sending' AND attempt.updated_at < NOW() - INTERVAL '45 seconds')
+        OR
+        (attempt.status = 'awaiting_webhook' AND attempt.webhook_deadline < NOW() - INTERVAL '5 seconds')
+      )
+    ORDER BY attempt.updated_at
+    LIMIT 100
+  ttl: 30
+  timeout: 2
+  tags: [ "dbname:railway" ]
+  metrics:
+    - datname: { usage: LABEL, description: database name }
+    - attempt_id: { usage: LABEL, description: delivery attempt id }
+    - job_id: { usage: LABEL, description: publish job id }
+    - profile_id: { usage: LABEL, description: profile id }
+    - channel_id: { usage: LABEL, description: channel id }
+    - bot_id: { usage: LABEL, description: bot id }
+    - phase: { usage: LABEL, description: display or verify phase }
+    - status: { usage: LABEL, description: attempt status }
+    - age_seconds: { usage: GAUGE, description: seconds since attempt last changed }
+    - active: { usage: GAUGE, description: one for each abnormal attempt }
+
+youban_tg_duplicate_verify_detail:
+  name: youban_tg_duplicate_verify_detail
+  desc: Jobs with multiple live verification messages
+  predicate_queries:
+    - name: tg message table exists
+      predicate_query: |
+        SELECT to_regclass('public.hg_youban_publish_tg_message') IS NOT NULL;
+  query: |-
+    WITH recent AS MATERIALIZED (
+      SELECT id,job_id,profile_id,bot_id,purpose,status,deleted_at
+      FROM hg_youban_publish_tg_message
+      ORDER BY id DESC
+      LIMIT 10000
+    ), counts AS (
+      SELECT job_id,profile_id,bot_id,COUNT(*)::bigint AS message_count
+      FROM recent
+      WHERE purpose = 'verify' AND status = 'sent' AND deleted_at IS NULL
+      GROUP BY job_id,profile_id,bot_id
+      HAVING COUNT(*) > 1
+    )
+    SELECT current_database() AS datname,
+           counts.job_id::text AS job_id,
+           counts.profile_id::text AS profile_id,
+           job.channel_id::text AS channel_id,
+           counts.bot_id::text AS bot_id,
+           counts.message_count,
+           expected.expected_count
+    FROM counts
+    JOIN hg_youban_publish_tg_job job ON job.id = counts.job_id
+    CROSS JOIN LATERAL (
+      SELECT COUNT(*)::bigint AS expected_count
+      FROM hg_youban_publish_media media
+      WHERE media.profile_id = counts.profile_id
+        AND media.purpose = 'verify'
+        AND media.status = 1
+        AND media.deleted_at IS NULL
+    ) expected
+    WHERE counts.message_count > GREATEST(expected.expected_count, 1)
+    ORDER BY counts.message_count DESC
+    LIMIT 100
+  ttl: 30
+  timeout: 2
+  tags: [ "dbname:railway" ]
+  metrics:
+    - datname: { usage: LABEL, description: database name }
+    - job_id: { usage: LABEL, description: publish job id }
+    - profile_id: { usage: LABEL, description: profile id }
+    - channel_id: { usage: LABEL, description: channel id }
+    - bot_id: { usage: LABEL, description: bot id }
+    - message_count: { usage: GAUGE, description: live verification messages for the job }
+    - expected_count: { usage: GAUGE, description: verification media expected for the profile }

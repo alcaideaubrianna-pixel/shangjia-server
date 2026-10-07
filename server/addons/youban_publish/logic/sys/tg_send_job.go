@@ -19,6 +19,11 @@ import (
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
+const (
+	telegramDisplaySendTimeout = 90 * time.Second
+	telegramVerifySendTimeout  = 30 * time.Second
+)
+
 var (
 	errTelegramJobSuperseded       = errors.New("TG推送任务已废弃")
 	errTelegramDeliveryUncertain   = errors.New("Telegram发送结果待对账")
@@ -244,7 +249,13 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 		}
 		displayCaption := telegramCaptionWithJobMarker(caption, job.Id, "display") + telegramAttemptMarker(attempt.AttemptToken)
 		g.Log().Infof(ctx, "TG展示资料开始Bot发送 jobId:%d botId:%d chat:%s media:%s", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(displayMedia))
-		messages, err = s.sendTelegramDisplayPart(ctx, bot, job.TargetChatId, displayCaption, displayMedia)
+		displaySendCtx, cancelDisplaySend := context.WithTimeout(ctx, telegramDisplaySendTimeout)
+		displaySendStartedAt := time.Now()
+		messages, err = s.sendTelegramDisplayPart(displaySendCtx, bot, job.TargetChatId, displayCaption, displayMedia)
+		cancelDisplaySend()
+		displaySendDuration := time.Since(displaySendStartedAt)
+		observeTelegramMediaSend(ctx, "display", err, displaySendDuration)
+		g.Log().Infof(ctx, "TG展示资料Bot发送结束 jobId:%d profileId:%d channelId:%d botId:%d chat:%s duration:%s messages:%d messageIds:%v err:%v", job.Id, job.ProfileId, job.ChannelId, job.BotId, job.TargetChatId, displaySendDuration.Round(time.Millisecond), len(messages), telegramSentMessageIDs(messages), err)
 		if err != nil && len(messages) == 0 && shouldFallbackTelegramMediaToAccount(err) {
 			g.Log().Warningf(ctx, "Bot展示媒体发送失败，命中媒体降级条件 jobId:%d botId:%d chat:%s media:%s err:%+v", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(displayMedia), err)
 			messages, err = s.sendTelegramJobMediaByAccount(ctx, job, "display", displayCaption, displayMedia, err)
@@ -309,6 +320,15 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 		}
 		return s.completeTelegramJob(ctx, job)
 	}
+	if telegramVerifyMediaNeedsAccountUpload(verifyMedia) {
+		reason := gerror.New("验证视频没有可复用的Telegram file_id，直接使用频道绑定协议号发送")
+		if _, fallbackErr := s.sendTelegramJobMediaByAccount(ctx, job, "verify", "", verifyMedia, reason); errors.Is(fallbackErr, errTelegramMediaFallbackQueued) {
+			g.Log().Infof(ctx, "TG验证资料直接切换协议号上传 jobId:%d channelId:%d media:%s", job.Id, job.ChannelId, telegramMediaDebugSummary(verifyMedia))
+			return errTelegramMediaFallbackQueued
+		} else if fallbackErr != nil {
+			g.Log().Warningf(ctx, "TG验证资料协议号直传不可用，回退Bot发送 jobId:%d channelId:%d err:%+v", job.Id, job.ChannelId, fallbackErr)
+		}
+	}
 	if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseVerifySending); err != nil {
 		return err
 	}
@@ -320,7 +340,13 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	// 否则公群采集器可能把 caption 当作资料正文处理。
 	verifyCaption := ""
 	g.Log().Infof(ctx, "TG验证资料开始Bot发送 jobId:%d botId:%d chat:%s media:%s", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(verifyMedia))
-	verifyMessages, err := s.sendTelegramVerifyPart(ctx, bot, job.TargetChatId, verifyCaption, verifyMedia)
+	verifySendCtx, cancelVerifySend := context.WithTimeout(ctx, telegramVerifySendTimeout)
+	verifySendStartedAt := time.Now()
+	verifyMessages, err := s.sendTelegramVerifyPart(verifySendCtx, bot, job.TargetChatId, verifyCaption, verifyMedia)
+	cancelVerifySend()
+	verifySendDuration := time.Since(verifySendStartedAt)
+	observeTelegramMediaSend(ctx, "verify", err, verifySendDuration)
+	g.Log().Infof(ctx, "TG验证资料Bot发送结束 jobId:%d profileId:%d channelId:%d botId:%d chat:%s duration:%s messages:%d messageIds:%v err:%v", job.Id, job.ProfileId, job.ChannelId, job.BotId, job.TargetChatId, verifySendDuration.Round(time.Millisecond), len(verifyMessages), telegramSentMessageIDs(verifyMessages), err)
 	if err != nil && len(verifyMessages) == 0 && shouldFallbackTelegramMediaToAccount(err) {
 		g.Log().Warningf(ctx, "Bot验证媒体发送失败，命中媒体降级条件 jobId:%d botId:%d chat:%s media:%s err:%+v", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(verifyMedia), err)
 		verifyMessages, err = s.sendTelegramJobMediaByAccount(ctx, job, "verify", verifyCaption, verifyMedia, err)
@@ -358,6 +384,14 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 		}
 		return gerror.Wrapf(err, "TG验证资料推送失败，job:%d，channel:%d，chat:%s", job.Id, job.ChannelId, job.TargetChatId)
 	}
+	if stillSending, stateErr := s.telegramJobStillSending(ctx, job.Id); stateErr != nil {
+		return stateErr
+	} else if !stillSending {
+		deletedIds := s.cleanupTelegramSentMessages(ctx, bot, job.TargetChatId, verifyMessages, "验证资料Bot响应迟到，任务已由其他发送链路完成")
+		observeTelegramLateDelivery(ctx, "verify", "cleanup", len(deletedIds))
+		g.Log().Warningf(ctx, "TG验证资料Bot响应迟到，已自动清理 jobId:%d profileId:%d channelId:%d botId:%d chat:%s returnedMessageIds:%v deletedMessageIds:%v", job.Id, job.ProfileId, job.ChannelId, job.BotId, job.TargetChatId, telegramSentMessageIDs(verifyMessages), deletedIds)
+		return errTelegramJobSuperseded
+	}
 	if err = validateTelegramMediaSendResult("verify", verifyMedia, verifyMessages); err != nil {
 		_ = s.cleanupTelegramSentMessages(ctx, bot, job.TargetChatId, verifyMessages, "验证媒体发送结果不完整")
 		return err
@@ -380,6 +414,28 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 		return telegramDeliveryUncertainError(err)
 	}
 	return s.updateTelegramMediaFileIds(ctx, verifyMessages)
+}
+
+func telegramVerifyMediaNeedsAccountUpload(media []*telegramMediaItem) bool {
+	for _, item := range media {
+		if item == nil || item.MediaType != "video" {
+			continue
+		}
+		if !telegramMediaUsesReusableFileId(item) {
+			return true
+		}
+	}
+	return false
+}
+
+func telegramSentMessageIDs(messages []*telegramSentMessage) []int64 {
+	ids := make([]int64, 0, len(messages))
+	for _, message := range messages {
+		if message != nil && message.MessageId > 0 {
+			ids = append(ids, message.MessageId)
+		}
+	}
+	return ids
 }
 
 func logTelegramBotMediaSendFailure(ctx context.Context, job telegramJobRecord, purpose string, media []*telegramMediaItem, err error) {
@@ -502,7 +558,7 @@ func (s *sSysPublish) sendTelegramJobMediaByAccount(ctx context.Context, job tel
 	if err != nil {
 		return nil, gerror.Wrap(err, "提交协议号媒体降级任务失败")
 	}
-	s.appendTelegramJobLog(ctx, job, "account_fallback", "queued", "Bot媒体组超过请求大小限制，已提交账号服务常驻客户端发送")
+	s.appendTelegramJobLog(ctx, job, "account_fallback", "queued", fmt.Sprintf("Bot媒体发送失败，已提交账号服务常驻客户端发送 purpose:%s reason:%v", purpose, botErr))
 	return nil, errTelegramMediaFallbackQueued
 }
 

@@ -56,6 +56,7 @@ func TestAccountTaskCanRevive(t *testing.T) {
 		sysin.AccountTaskTypeMediaDownload,
 		sysin.AccountTaskTypeMessageReconcile,
 		sysin.AccountTaskTypeMessageMediaFallback,
+		sysin.AccountTaskTypeChannelBotAttach,
 		sysin.AccountTaskTypeManagedBotUsernameCheck,
 	} {
 		if !accountTaskCanRevive(taskType) {

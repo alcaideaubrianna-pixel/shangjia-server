@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -76,6 +77,7 @@ func (s *sSysPublish) beginTelegramDeliveryAttempt(ctx context.Context, job tele
 	if err != nil {
 		return attempt, gerror.Wrap(err, "创建TG发送Attempt失败")
 	}
+	g.Log().Infof(ctx, "TG发送Attempt已创建 attemptId:%d jobId:%d profileId:%d channelId:%d botId:%d chat:%s phase:%s attemptNo:%d expectedCount:%d", attempt.Id, job.Id, job.ProfileId, job.ChannelId, job.BotId, attempt.TargetChatId, phase, attempt.AttemptNo, expectedCount)
 	return attempt, nil
 }
 
@@ -171,6 +173,7 @@ func (s *sSysPublish) waitTelegramDeliveryWebhook(ctx context.Context, attempt t
 		return gerror.Wrap(err, "设置TG任务等待Webhook失败")
 	}
 	_, err = s.enqueueTelegramAttemptTimeout(ctx, attempt.Id, telegramAttemptWebhookWait)
+	g.Log().Warningf(ctx, "TG发送响应不确定，等待Webhook确认 attemptId:%d jobId:%d channelId:%d botId:%d chat:%s phase:%s deadline:%s cause:%v", attempt.Id, attempt.JobId, attempt.ChannelId, attempt.BotId, attempt.TargetChatId, attempt.Phase, deadline.String(), cause)
 	return err
 }
 
@@ -213,6 +216,18 @@ func (s *sSysPublish) handleTelegramAttemptTimeout(ctx context.Context, attemptI
 	if err != nil {
 		return err
 	}
+	if attempt.Phase == "verify" {
+		cause := gerror.Newf("Telegram Bot验证资料发送结果未在%d秒内确认", int(telegramAttemptWebhookWait/time.Second))
+		_, fallbackErr := s.sendTelegramJobMediaByAccount(ctx, job, "verify", "", nil, cause)
+		if errors.Is(fallbackErr, errTelegramMediaFallbackQueued) {
+			g.Log().Warningf(ctx, "TG验证资料确认超时，已切换协议号发送 attemptId:%d jobId:%d channelId:%d", attempt.Id, job.Id, job.ChannelId)
+			return nil
+		}
+		if fallbackErr != nil {
+			g.Log().Warningf(ctx, "TG验证资料确认超时，协议号降级不可用，继续队列重试 attemptId:%d jobId:%d err:%+v", attempt.Id, job.Id, fallbackErr)
+		}
+	}
+	g.Log().Warningf(ctx, "TG发送Attempt确认超时 attemptId:%d jobId:%d profileId:%d channelId:%d botId:%d chat:%s phase:%s attemptNo:%d", attempt.Id, job.Id, job.ProfileId, job.ChannelId, job.BotId, attempt.TargetChatId, attempt.Phase, attempt.AttemptNo)
 	withinRound := (attempt.AttemptNo-1)%telegramAttemptMaxRetries + 1
 	status := "failed_retry"
 	dispatchStatus := tgDispatchStatusIdle

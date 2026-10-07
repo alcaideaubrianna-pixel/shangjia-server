@@ -92,3 +92,21 @@ groups:
         annotations:
           summary: "TG Attempt 健康指标消失"
           description: "连续 5 分钟没有 Attempt 恢复指标，请检查 pg_exporter 查询配置"
+      - alert: YoubanTelegramSendStageStuck
+        expr: 'youban_tg_send_stage_detail_age_seconds > 45'
+        for: 30s
+        labels:
+          severity: CRIT
+          category: publish
+        annotations:
+          summary: "TG 媒体发送阶段卡住"
+          description: "Attempt {{ $labels.attempt_id }} / Job {{ $labels.job_id }} / Profile {{ $labels.profile_id }} / Channel {{ $labels.channel_id }} / Bot {{ $labels.bot_id }} 在 {{ $labels.phase }} 阶段保持 {{ $labels.status }} 已 {{ $value }} 秒"
+      - alert: YoubanTelegramDuplicateVerification
+        expr: 'youban_tg_duplicate_verify_detail_message_count > 1'
+        for: 30s
+        labels:
+          severity: CRIT
+          category: publish
+        annotations:
+          summary: "TG 验证视频重复发送"
+          description: "Job {{ $labels.job_id }} / Profile {{ $labels.profile_id }} / Channel {{ $labels.channel_id }} / Bot {{ $labels.bot_id }} 当前存在 {{ $value }} 条有效验证消息，请立即检查迟到 Bot 响应与协议号降级"
