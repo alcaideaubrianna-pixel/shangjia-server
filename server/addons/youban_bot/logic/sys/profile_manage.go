@@ -1221,7 +1221,7 @@ func (s *sSysBot) sendProfileContent(ctx context.Context, botId int64, chatId st
 	if err != nil {
 		return err
 	}
-	callCtx, cancel := telegramAPICtx()
+	callCtx, cancel := telegramMediaAPICtx()
 	defer cancel()
 	displayCaption := profilePreviewDisplayCaption(note)
 	if profileHasSendablePurposeMedia(ctx, s, note.Media, "display") {

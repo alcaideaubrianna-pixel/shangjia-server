@@ -165,7 +165,7 @@ func (s *sSysBot) sendScanProfileContent(ctx context.Context, botId int64, chatI
 	if err != nil {
 		return err
 	}
-	callCtx, cancel := telegramAPICtx()
+	callCtx, cancel := telegramMediaAPICtx()
 	defer cancel()
 	caption := profilePreviewDisplayCaption(note)
 	if profileHasPurposeMedia(note.Media, "display") {

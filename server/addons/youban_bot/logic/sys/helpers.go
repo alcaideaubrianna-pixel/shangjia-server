@@ -751,6 +751,12 @@ func telegramAPICtx() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), 35*time.Second)
 }
 
+// Media uploads may require Telegram to fetch a remote image or stream a
+// multipart body; keep them aligned with the gateway media client's timeout.
+func telegramMediaAPICtx() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), 10*time.Minute)
+}
+
 func (s *sSysBot) resolveTelegramMessageMedia(ctx context.Context, botToken string, msg *models.Message) ([]*publishsysin.MessageTemplateMediaInp, error) {
 	if msg == nil {
 		return nil, nil
