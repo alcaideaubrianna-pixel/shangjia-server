@@ -269,6 +269,9 @@ func (s *sSysPublish) advanceFullPushBatch(ctx context.Context, batch fullPushBa
 	if err = s.checkpointFullPushBatch(ctx, batch.Id, lastProfileId, queued); err != nil {
 		return err
 	}
+	if err = s.compactFullPushActiveRecords(ctx, batch.TenantId, batch.BatchNo, 0); err != nil {
+		return err
+	}
 	batch.CursorProfileId = lastProfileId
 	batch.QueuedCount += queued
 	if len(profiles) < limit || lastProfileId >= batch.SnapshotMaxProfileId {

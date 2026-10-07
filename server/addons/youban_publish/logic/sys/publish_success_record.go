@@ -92,6 +92,43 @@ func (s *sSysPublish) upsertPublishJobRecord(ctx context.Context, job telegramJo
 	if err != nil {
 		return gerror.Wrap(err, "保存发布记录失败")
 	}
+	if isFullPushActiveRecord(action, status) && status == "sending" {
+		return s.compactFullPushActiveRecords(ctx, job.TenantId, job.OperationNo, job.Id)
+	}
+	return nil
+}
+
+func isFullPushActiveRecord(action string, status string) bool {
+	return action == publishSuccessTypeFull && (status == "pending" || status == "sending")
+}
+
+// compactFullPushActiveRecords keeps one live progress row per full-push batch.
+// Terminal results remain untouched and are still recorded per job.
+func (s *sSysPublish) compactFullPushActiveRecords(ctx context.Context, tenantId int64, operationNo string, keepJobId int64) error {
+	batchNo := fullPushOperationBatchKey(operationNo)
+	if batchNo == "" {
+		return nil
+	}
+	mod := g.DB().Model(publishSuccessRecordTable).Safe().Ctx(ctx).
+		Where("tenant_id", tenantId).
+		Where("operation_no >= ? AND operation_no < ?", batchNo+":", batchNo+";").
+		WhereIn("status", []string{"pending", "sending"})
+	if keepJobId <= 0 {
+		var latest struct {
+			JobId int64 `json:"job_id"`
+		}
+		if err := mod.Clone().Fields("job_id").OrderDesc("id").Limit(1).Scan(&latest); err != nil {
+			return gerror.Wrap(err, "读取全量推送活动记录失败")
+		}
+		keepJobId = latest.JobId
+	}
+	if keepJobId <= 0 {
+		return nil
+	}
+	_, err := mod.WhereNot("job_id", keepJobId).Delete()
+	if err != nil {
+		return gerror.Wrap(err, "收敛全量推送活动记录失败")
+	}
 	return nil
 }
 
