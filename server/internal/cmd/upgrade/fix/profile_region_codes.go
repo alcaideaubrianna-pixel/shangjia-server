@@ -2,6 +2,7 @@ package fix
 
 import (
 	"context"
+	"regexp"
 	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -10,9 +11,77 @@ import (
 
 	"hotgo/internal/dao"
 	"hotgo/internal/library/location"
+	"hotgo/internal/library/profileextractor"
 )
 
 const profileRegionBackfillBatchSize = 1000
+
+var canonicalProfileRegionCodePattern = regexp.MustCompile(`^[0-9]{6}$`)
+
+// BackfillContentProfileRegionsFromText repairs missing or malformed region
+// fields only when explicit labels in the original text resolve uniquely.
+func BackfillContentProfileRegionsFromText(ctx context.Context) error {
+	columns := dao.ContentProfile.Columns()
+	var lastID int64
+	processed, updated := 0, 0
+	for {
+		var rows []struct {
+			ID        int64  `orm:"id"`
+			Province  string `orm:"province"`
+			City      string `orm:"city"`
+			PlainText string `orm:"plain_text"`
+		}
+		if err := dao.ContentProfile.Ctx(ctx).
+			Fields(columns.Id, columns.Province, columns.City, columns.PlainText).
+			WhereGT(columns.Id, lastID).
+			WhereNull(columns.DeletedAt).
+			OrderAsc(columns.Id).
+			Limit(profileRegionBackfillBatchSize).
+			Scan(&rows); err != nil {
+			return gerror.Wrap(err, "读取原文地区待回填资料失败")
+		}
+		if len(rows) == 0 {
+			break
+		}
+		updates := make([]profileRegionUpdate, 0, len(rows))
+		for _, row := range rows {
+			lastID, processed = row.ID, processed+1
+			province, city, ok, normalizeErr := profileRegionCodesFromText(ctx, row.PlainText, row.Province, row.City)
+			if normalizeErr != nil {
+				return normalizeErr
+			}
+			if !ok {
+				continue
+			}
+			updates = append(updates, profileRegionUpdate{ID: row.ID, Province: province, City: city})
+			updated++
+		}
+		if err := applyProfileRegionUpdates(ctx, updates); err != nil {
+			return err
+		}
+		g.Log().Infof(ctx, "资料原文地区回填进度：lastProfileId=%d processed=%d updated=%d", lastID, processed, updated)
+	}
+	g.Log().Infof(ctx, "资料原文地区回填完成：processed=%d updated=%d", processed, updated)
+	return nil
+}
+
+func profileRegionCodesFromText(ctx context.Context, text, currentProvince, currentCity string) (province, city string, ok bool, err error) {
+	if canonicalProfileRegionCodePattern.MatchString(strings.TrimSpace(currentProvince)) {
+		return "", "", false, nil
+	}
+	parsedProvince, parsedCity := profileextractor.RegionLabels(text)
+	if parsedProvince == "" && parsedCity == "" {
+		return "", "", false, nil
+	}
+	province, city, _, err = location.NormalizeRegionCodes(ctx, parsedProvince, parsedCity)
+	if err != nil || !canonicalProfileRegionCodePattern.MatchString(province) {
+		return "", "", false, err
+	}
+	if city == "" && canonicalProfileRegionCodePattern.MatchString(strings.TrimSpace(currentCity)) {
+		city = strings.TrimSpace(currentCity)
+	}
+	return province, city, province != strings.TrimSpace(currentProvince) || city != strings.TrimSpace(currentCity), nil
+}
 
 // BackfillContentProfileRegionCodes canonicalizes recognized domestic region
 // names. It is idempotent and leaves ambiguous or overseas values untouched.

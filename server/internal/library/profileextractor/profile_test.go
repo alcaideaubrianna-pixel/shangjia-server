@@ -87,6 +87,8 @@ func TestRegionLabels(t *testing.T) {
 		{text: "现居省:上海市 现居市:浦东新区 年龄:25", province: "上海市", city: "浦东新区"},
 		{text: "province=guangdong city=guangzhou", province: "guangdong", city: "guangzhou"},
 		{text: "所在地区：深圳 身高：165", province: "", city: "深圳"},
+		{text: "昵称：玥玥 📍 省份：广东 🏙 城市：深圳 🎂 年龄：23", province: "广东", city: "深圳"},
+		{text: "昵称 梦梦 📍 省份：广东 🏙 城市：广州 🎂 年龄：22", province: "广东", city: "广州"},
 	}
 	for _, test := range tests {
 		province, city := RegionLabels(test.text)
@@ -104,6 +106,30 @@ func TestParseFeiNiuUnitLabels(t *testing.T) {
 	result := Parse("身高(cm)：156\n体重(斤)：86\n罩杯：A")
 	if result.Height != 156 || result.Weight != 86 || result.Cup != "A" {
 		t.Fatalf("unexpected unit-labelled fields: %+v", result)
+	}
+}
+
+func TestParseEmojiSeparatedProfileFields(t *testing.T) {
+	result := Parse("昵称：玥玥 📍 省份：广东 🏙 城市：深圳 🎂 年龄：23 📏 身高：166 ⚖️ 体重：96 👙 罩杯：d 💫 是不是处：不是")
+	if result.Age != 23 || result.Height != 166 || result.Weight != 96 || result.Cup != "D" || result.Virgin != 2 {
+		t.Fatalf("unexpected emoji-separated fields: %+v", result)
+	}
+}
+
+func TestParseShortVirginLabels(t *testing.T) {
+	tests := []struct {
+		text string
+		want int
+	}{
+		{text: "是不是处：不是", want: 2},
+		{text: "是不是处：否", want: 2},
+		{text: "是不是处：不", want: 2},
+		{text: "是不是处：是", want: 1},
+	}
+	for _, test := range tests {
+		if got := Parse(test.text).Virgin; got != test.want {
+			t.Errorf("Parse(%q).Virgin = %d, want %d", test.text, got, test.want)
+		}
 	}
 }
 

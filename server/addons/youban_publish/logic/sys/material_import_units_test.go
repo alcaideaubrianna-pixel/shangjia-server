@@ -435,6 +435,7 @@ func TestMaterialImportRegionCodesSupportsMultipleCities(t *testing.T) {
 func TestMaterialImportRegionCodesSupportsRegionAliases(t *testing.T) {
 	guangdong := &legacyCMSRegionOption{Id: 440000, Level: 1, Title: "广东省"}
 	guangzhou := &legacyCMSRegionOption{Id: 440100, Pid: guangdong.Id, Level: 2, Title: "广州市"}
+	shenzhen := &legacyCMSRegionOption{Id: 440300, Pid: guangdong.Id, Level: 2, Title: "深圳市"}
 	baiyun := &legacyCMSRegionOption{Id: 440111, Pid: guangzhou.Id, Level: 3, Title: "白云区"}
 	yunnan := &legacyCMSRegionOption{Id: 530000, Level: 1, Title: "云南省"}
 	dehong := &legacyCMSRegionOption{Id: 533100, Pid: yunnan.Id, Level: 2, Title: "德宏傣族景颇族自治州"}
@@ -445,6 +446,7 @@ func TestMaterialImportRegionCodesSupportsRegionAliases(t *testing.T) {
 		provincesByName: map[string]*legacyCMSRegionOption{"广东": guangdong, "云南": yunnan, "贵州": guizhou},
 		citiesByName: map[string][]*legacyCMSRegionOption{
 			"广州":         {guangzhou},
+			"深圳":         {shenzhen},
 			"德宏傣族景颇族自治州": {dehong},
 			"黔南布依族苗族自治州": {qiannan},
 		},
@@ -452,6 +454,7 @@ func TestMaterialImportRegionCodesSupportsRegionAliases(t *testing.T) {
 		optionsById: map[int64]*legacyCMSRegionOption{
 			guangdong.Id: guangdong,
 			guangzhou.Id: guangzhou,
+			shenzhen.Id:  shenzhen,
 			baiyun.Id:    baiyun,
 			yunnan.Id:    yunnan,
 			dehong.Id:    dehong,
@@ -467,6 +470,7 @@ func TestMaterialImportRegionCodesSupportsRegionAliases(t *testing.T) {
 		wantCity     string
 	}{
 		{name: "district without suffix", text: "所在省份：广东\n所在城市：白云", wantProvince: "440000", wantCity: "440100"},
+		{name: "emoji separated labels", text: "昵称：玥玥 📍 省份：广东 🏙 城市：深圳 🎂 年龄：23", wantProvince: "440000", wantCity: "440300"},
 		{name: "single character city name", text: "所在省份：云南\n所在城市：芒市", wantProvince: "530000", wantCity: "533100"},
 		{name: "autonomous prefecture short name", text: "所在省份：贵州\n所在城市：黔南", wantProvince: "520000", wantCity: "522700"},
 	}

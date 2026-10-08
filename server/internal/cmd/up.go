@@ -86,8 +86,12 @@ func handleUpgradeFix(ctx context.Context, args map[string]string) (err error) {
 		err = fix.BackfillContentProfileAge(ctx)
 	case "contentProfileVirgin":
 		err = fix.BackfillContentProfileVirgin(ctx)
+	case "contentProfileExtractedFields":
+		err = fix.BackfillContentProfileExtractedFields(ctx)
 	case "contentProfileRegionCodes":
 		err = fix.BackfillContentProfileRegionCodes(ctx)
+	case "contentProfileRegionsFromText":
+		err = fix.BackfillContentProfileRegionsFromText(ctx)
 	case "mediaPHashProfileIndexes":
 		err = fix.ApplyYoubanPublishMediaPHashProfileIndexes(ctx)
 	case "contentMediaRepair":
