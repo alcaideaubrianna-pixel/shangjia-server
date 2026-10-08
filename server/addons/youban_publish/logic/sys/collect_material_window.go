@@ -151,6 +151,21 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 		case profileMessageKindVerify:
 			g.Log().Debugf(ctx, "采集消息识别为验证组 eventId:%d sourceMessageId:%d groupedId:%s media:%d role:%s", event["id"].Int64(), event["source_message_id"].Int64(), event["source_grouped_id"].String(), event["media_count"].Int(), role)
 			displayIndex := s.findCollectDisplayEvent(rows, messageViews, index)
+			if displayIndex < 0 {
+				storedDisplay, lookupErr := s.findStoredCollectDisplayEvent(ctx, event)
+				if lookupErr != nil {
+					return lookupErr
+				}
+				if !storedDisplay.IsEmpty() {
+					if err = s.bindCollectMaterialPair(ctx, storedDisplay, event); err != nil {
+						return err
+					}
+					if err = s.processCollectEvent(ctx, event["id"].Int64(), payload.TenantId, payload.AccountId); err != nil && !isCollectProcessRetryError(err) {
+						return err
+					}
+					continue
+				}
+			}
 			if displayIndex >= 0 {
 				display := rows[displayIndex]
 				if err = s.bindCollectMaterialPair(ctx, display, event); err != nil {
@@ -205,7 +220,7 @@ func (s *sSysPublish) findCollectVerifyEvent(rows []gdb.Record, views []collectM
 			continue
 		}
 		candidate := rows[pair.VerifyIndex]
-		if strings.TrimSpace(candidate["material_role"].String()) != "" && strings.TrimSpace(candidate["material_role"].String()) != collectMaterialRolePending {
+		if strings.TrimSpace(candidate["material_role"].String()) != "" && strings.TrimSpace(candidate["material_role"].String()) != collectMaterialRolePending && !collectMaterialEventNeedsPairRepair(candidate) {
 			return -1
 		}
 		if !collectMaterialEventOlderThan(candidate, collectMaterialGroupingDelay) {
@@ -214,6 +229,27 @@ func (s *sSysPublish) findCollectVerifyEvent(rows []gdb.Record, views []collectM
 		return pair.VerifyIndex
 	}
 	return -1
+}
+
+func (s *sSysPublish) findStoredCollectDisplayEvent(ctx context.Context, verify gdb.Record) (gdb.Record, error) {
+	messageID := verify["source_message_id"].Int64()
+	if messageID <= 0 {
+		return nil, nil
+	}
+	row, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+		Where("tenant_id", verify["tenant_id"].Int64()).
+		Where("account_id", verify["account_id"].Int64()).
+		Where("source_id", verify["source_id"].Int64()).
+		Where("source_chat_id", verify["source_chat_id"].String()).
+		Where("material_role", collectMaterialRoleDisplay).
+		Where("source_message_id ~ '^[0-9]+$'").
+		Where("source_message_id::bigint < ? AND source_message_id::bigint >= ?", messageID, messageID-collectMaterialWindowLookahead).
+		WhereIn("status", []string{sysin.CollectEventStatusPrechecked, sysin.CollectEventStatusMediaPending, sysin.CollectEventStatusMediaReady, sysin.CollectEventStatusProcessed, sysin.CollectEventStatusDispatched}).
+		Order("source_message_id::bigint DESC, id DESC").Limit(1).One()
+	if err != nil {
+		return nil, gerror.Wrap(err, "回看验证资料前序展示组失败")
+	}
+	return row, nil
 }
 
 func (s *sSysPublish) findCollectDisplayEvent(rows []gdb.Record, views []collectMaterialMessageView, verifyIndex int) int {
@@ -273,6 +309,12 @@ func (s *sSysPublish) bindCollectMaterialPair(ctx context.Context, display gdb.R
 			"updated_at":               now,
 		}).Update(); err != nil {
 		return gerror.Wrap(err, "绑定资料验证组失败")
+	}
+	if _, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
+		Where("event_id", verify["id"].Int64()).
+		Where("cache_status", collectMediaCacheCanceled).
+		Data(g.Map{"cache_status": collectMediaCachePending, "error_message": "", "next_retry_at": nil, "updated_at": now}).Update(); err != nil {
+		return gerror.Wrap(err, "恢复验证媒体下载失败")
 	}
 	g.Log().Infof(ctx, "采集资料组绑定完成 chat:%s displayEventId:%d verifyEventId:%d", strings.TrimSpace(display["source_chat_id"].String()), display["id"].Int64(), verify["id"].Int64())
 	return nil

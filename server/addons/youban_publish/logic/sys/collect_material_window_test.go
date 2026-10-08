@@ -49,13 +49,24 @@ func TestFindCollectDisplayEventRepairsAlreadyPairedVerify(t *testing.T) {
 	}
 }
 
+func TestFindCollectVerifyEventAcceptsUnmatchedVerifyRetry(t *testing.T) {
+	receivedAt := gtime.NewFromTime(time.Now().Add(-6 * time.Minute))
+	rows := []gdb.Record{
+		{"id": gvar.New(20), "source_message_id": gvar.New(300), "material_role": gvar.New("pending"), "raw_text": gvar.New("昵称：A300"), "received_at": gvar.New(receivedAt)},
+		{"id": gvar.New(21), "source_message_id": gvar.New(301), "material_role": gvar.New("verify"), "status": gvar.New("ignored"), "error_message": gvar.New(collectMaterialVerifyUnmatchedMessage), "raw_text": gvar.New(""), "received_at": gvar.New(receivedAt)},
+	}
+	if got := (&sSysPublish{}).findCollectVerifyEvent(rows, collectMaterialEventViews(rows, collectTestMediaByEvent(rows)), 0); got != 1 {
+		t.Fatalf("verify retry event index=%d, want 1", got)
+	}
+}
+
 func collectTestMediaByEvent(rows []gdb.Record) map[int64][]collectMediaItem {
 	result := make(map[int64][]collectMediaItem, len(rows))
 	for _, row := range rows {
 		text := row["raw_text"].String()
 		messageId := row["source_message_id"].Int64()
 		switch {
-		case text == "" && (messageId == 102 || messageId == 201):
+		case text == "" && (messageId == 102 || messageId == 201 || messageId == 301):
 			result[row["id"].Int64()] = []collectMediaItem{{Type: "video", FileId: "video"}}
 		case strings.HasPrefix(text, "昵称："):
 			result[row["id"].Int64()] = []collectMediaItem{{Type: "photo", FileId: "photo"}}

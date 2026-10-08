@@ -411,6 +411,9 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 			g.Log().Warningf(ctx, "验证资料已完成但没有父展示事件 eventId:%d", eventId)
 			return nil
 		}
+		if err = s.repairExistingCollectedProfileVerification(ctx, parentEventId); err != nil {
+			return err
+		}
 		g.Log().Infof(ctx, "验证资料媒体已完成，回流处理父展示事件 verifyEventId:%d parentEventId:%d", eventId, parentEventId)
 		if err = s.processCollectEvent(ctx, parentEventId, tenantId, accountId); err != nil {
 			g.Log().Warningf(ctx, "验证资料回流父展示事件失败，将重新排队 verifyEventId:%d parentEventId:%d err:%+v", eventId, parentEventId, err)

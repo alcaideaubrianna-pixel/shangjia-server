@@ -12,6 +12,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/internal/dao"
 )
 
@@ -167,6 +168,35 @@ func collectProfileVerificationMediaCount(ctx context.Context, profileID int64) 
 	count, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 		Where("profile_id", profileID).Where("purpose", collectMaterialRoleVerify).WhereNull("deleted_at").Count()
 	return count, gerror.Wrapf(err, "检查资料验证媒体失败 profileId:%d", profileID)
+}
+
+func (s *sSysPublish) repairExistingCollectedProfileVerification(ctx context.Context, displayEventID int64) error {
+	display, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).Where("id", displayEventID).One()
+	if err != nil || display.IsEmpty() {
+		return gerror.Wrap(err, "读取待补验证视频的展示事件失败")
+	}
+	rows, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
+		Fields("profile_id").Where("event_id", displayEventID).WhereGT("profile_id", 0).Group("profile_id").All()
+	if err != nil {
+		return gerror.Wrap(err, "读取待补验证视频的资料失败")
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	content, err := s.collectContentFromEvent(ctx, display)
+	if err != nil {
+		return gerror.Wrap(err, "读取待补验证视频的采集快照失败")
+	}
+	content, err = s.canonicalCollectProfileMedia(ctx, display, content)
+	if err != nil {
+		return gerror.Wrap(err, "整理待补验证视频的采集媒体失败")
+	}
+	for _, row := range rows {
+		if err = s.repairDuplicateProfileVerification(ctx, row["profile_id"].Int64(), display, content); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *sSysPublish) repairDuplicateProfileVerification(ctx context.Context, profileID int64, event gdb.Record, content *collectContentResult) error {
