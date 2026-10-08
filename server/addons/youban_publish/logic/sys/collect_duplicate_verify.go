@@ -59,11 +59,15 @@ func RepairCollectDuplicateVerification(ctx context.Context, options CollectDupl
 				result.Skipped++
 				continue
 			}
+			if options.DryRun {
+				result.Recoverable++
+				result.ProfileIDs = append(result.ProfileIDs, profileID)
+				continue
+			}
 			content, contentErr := service.collectContentFromEvent(ctx, event)
 			if contentErr != nil {
 				return result, gerror.Wrapf(contentErr, "读取重复资料采集快照失败 eventId:%d", lastEventID)
 			}
-			service.enrichCollectContentMediaMetadata(ctx, content)
 			content, contentErr = service.canonicalCollectProfileMedia(ctx, event, content)
 			if contentErr != nil {
 				return result, gerror.Wrapf(contentErr, "整理重复资料验证媒体失败 eventId:%d", lastEventID)
@@ -74,9 +78,6 @@ func RepairCollectDuplicateVerification(ctx context.Context, options CollectDupl
 			}
 			result.Recoverable++
 			result.ProfileIDs = append(result.ProfileIDs, profileID)
-			if options.DryRun {
-				continue
-			}
 			before, countErr := collectProfileVerificationMediaCount(ctx, profileID)
 			if countErr != nil {
 				return result, countErr
