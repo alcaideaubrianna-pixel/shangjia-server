@@ -824,7 +824,14 @@ func cachedTelegramVideoPosterFile(ctx context.Context, media *telegramMediaItem
 			FileUrl:     source,
 			StoragePath: managedMediaObjectPath(source),
 		}
-		return cachedTelegramMediaFile(ctx, poster)
+		posterPath, posterCleanup, posterErr := cachedTelegramMediaFile(ctx, poster)
+		if posterErr == nil && strings.TrimSpace(posterPath) != "" {
+			return posterPath, posterCleanup, nil
+		}
+		if posterCleanup != nil {
+			posterCleanup()
+		}
+		g.Log().Warningf(ctx, "TG视频历史缩略图不可用，降级从视频生成 mediaId:%d host:%s err:%+v", media.Id, mediaFileCacheSourceHost(source), posterErr)
 	}
 	videoPath, cleanup, err := cachedTelegramMediaFile(ctx, media)
 	if err != nil || strings.TrimSpace(videoPath) == "" {
