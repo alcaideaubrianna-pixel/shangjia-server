@@ -114,7 +114,6 @@ func RebalanceCollectMediaQueue(ctx context.Context) (*CollectMediaQueueRebalanc
 		}
 		_, enqueueErr := client.EnqueueContext(ctx, asynq.NewTask(tgTaskTypeCollectMedia, body),
 			asynq.Queue(collectMediaQueueName(ctx, payload)),
-			asynq.Unique(collectMediaTaskUniqueTTL),
 			asynq.MaxRetry(10),
 			asynq.Timeout(30*time.Minute),
 		)
