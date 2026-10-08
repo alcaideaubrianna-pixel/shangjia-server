@@ -242,10 +242,9 @@ func (s *sSysPublish) findStoredCollectDisplayEvent(ctx context.Context, verify 
 		Where("source_id", verify["source_id"].Int64()).
 		Where("source_chat_id", verify["source_chat_id"].String()).
 		Where("material_role", collectMaterialRoleDisplay).
-		Where("source_message_id ~ '^[0-9]+$'").
-		Where("source_message_id::bigint < ? AND source_message_id::bigint >= ?", messageID, messageID-collectMaterialWindowLookahead).
+		Where("source_message_id < ? AND source_message_id >= ?", messageID, messageID-collectMaterialWindowLookahead).
 		WhereIn("status", []string{sysin.CollectEventStatusPrechecked, sysin.CollectEventStatusMediaPending, sysin.CollectEventStatusMediaReady, sysin.CollectEventStatusProcessed, sysin.CollectEventStatusDispatched}).
-		Order("source_message_id::bigint DESC, id DESC").Limit(1).One()
+		OrderDesc("source_message_id").OrderDesc("id").Limit(1).One()
 	if err != nil {
 		return nil, gerror.Wrap(err, "回看验证资料前序展示组失败")
 	}
