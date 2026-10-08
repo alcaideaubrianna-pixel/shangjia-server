@@ -41,6 +41,11 @@ OpenObserve 部署完成后创建 Telegram Webhook Destination，并按以下规
 | 单频道清空时间过长 | `xiaohuiji.publish.channel_estimated_clear_minutes > 120` |
 | 有任务但没有消费者 | `xiaohuiji.invariant.queued_jobs_without_consumer > 0` 持续 2 分钟 |
 | 队列任务无消费者数量 | `xiaohuiji.invariant.queue_pending_without_consumer > 0` 持续 2 分钟 |
+| 采集处理队列放大 | `xiaohuiji.collect.process_queue_amplification_ratio > 3` 持续 5 分钟；大于 10 为 CRIT |
+| 媒体事件长期未完成 | `xiaohuiji.collect.media_pending_stale_events > 0` 持续 2 分钟 |
+| media_pending 缺少队列任务 | `xiaohuiji.invariant.media_pending_missing_asynq_task > 0` 持续 2 分钟 |
+| Bot API getFile 失败 | 本地端点 5 分钟错误数大于 5 |
+| Bot API 文件下载网络失败 | 本地端点 5 分钟 transport error 大于 5 |
 
 ## Telegram 消息字段
 

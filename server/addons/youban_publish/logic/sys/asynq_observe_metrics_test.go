@@ -26,3 +26,24 @@ func TestIsAsynqQueueNotFound(t *testing.T) {
 		})
 	}
 }
+
+func TestCollectQueueAmplificationRatio(t *testing.T) {
+	tests := []struct {
+		name       string
+		tasks      int
+		partitions int
+		want       float64
+	}{
+		{name: "balanced", tasks: 125, partitions: 125, want: 1},
+		{name: "amplified", tasks: 6500, partitions: 125, want: 52},
+		{name: "empty", tasks: 0, partitions: 0, want: 0},
+		{name: "orphan tasks", tasks: 4, partitions: 0, want: 4},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := collectQueueAmplificationRatio(test.tasks, test.partitions); got != test.want {
+				t.Fatalf("collectQueueAmplificationRatio(%d, %d) = %v, want %v", test.tasks, test.partitions, got, test.want)
+			}
+		})
+	}
+}

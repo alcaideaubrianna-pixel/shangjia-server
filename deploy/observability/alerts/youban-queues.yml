@@ -146,6 +146,78 @@ groups:
         annotations:
           summary: "TG 上架自动补偿连续失败"
           description: "最近 15 分钟自动补偿失败 {{ $value }} 次，请检查资料维护队列和发布链路"
+      - alert: YoubanCollectProcessQueueAmplification
+        expr: '{__name__="xiaohuiji.collect.process_queue_amplification_ratio"} > 3 and {__name__="xiaohuiji.collect.process_queue_amplification_ratio"} <= 10'
+        for: 5m
+        labels:
+          severity: WARN
+          category: collect
+        annotations:
+          summary: "采集处理队列出现重复任务放大"
+          description: "采集处理任务数是有效分区数的 {{ $value }} 倍，调度去重或唤醒逻辑可能异常"
+      - alert: YoubanCollectProcessQueueAmplificationCritical
+        expr: '{__name__="xiaohuiji.collect.process_queue_amplification_ratio"} > 10'
+        for: 2m
+        labels:
+          severity: CRIT
+          category: collect
+        annotations:
+          summary: "采集处理队列严重放大"
+          description: "采集处理任务数是有效分区数的 {{ $value }} 倍，已可能造成跨租户饥饿"
+      - alert: YoubanCollectMediaPendingStale
+        expr: '{__name__="xiaohuiji.collect.media_pending_stale_events"} > 0'
+        for: 2m
+        labels:
+          severity: CRIT
+          category: collect
+        annotations:
+          summary: "采集媒体任务超过 10 分钟未完成"
+          description: "当前有 {{ $value }} 个 media_pending 事件超过 10 分钟，请检查 Bot API 和媒体 Worker"
+      - alert: YoubanCollectMediaPendingTaskMissing
+        expr: '{__name__="xiaohuiji.invariant.media_pending_missing_asynq_task"} > 0'
+        for: 2m
+        labels:
+          severity: CRIT
+          category: collect
+        annotations:
+          summary: "采集媒体数据库任务与 Asynq 队列脱节"
+          description: "当前有 {{ $value }} 个超时 media_pending 事件没有对应 Asynq 任务，请执行媒体队列恢复"
+      - alert: YoubanCollectObserveMetricsUnhealthy
+        expr: '{__name__="xiaohuiji.collect.observe_healthy"} == 0 or absent_over_time({__name__="xiaohuiji.collect.observe_healthy"}[3m])'
+        for: 2m
+        labels:
+          severity: CRIT
+          category: observability
+        annotations:
+          summary: "采集队列一致性监控失效"
+          description: "采集队列监控查询失败或连续 3 分钟没有上报，不能确认数据库与队列是否一致"
+      - alert: YoubanBotApiGetFileErrors
+        expr: 'sum(increase({__name__="xiaohuiji.tg.bot_api.get_file_requests",endpoint="local",result="error"}[5m])) > 5'
+        for: 1m
+        labels:
+          severity: CRIT
+          category: telegram
+        annotations:
+          summary: "本地 Telegram Bot API getFile 持续失败"
+          description: "最近 5 分钟本地 Bot API getFile 失败 {{ $value }} 次，请检查容器 DNS、端口和服务状态"
+      - alert: YoubanBotApiGetFileLatencyHigh
+        expr: 'histogram_quantile(0.95, sum by (le) (rate({__name__="xiaohuiji.tg.bot_api.get_file_duration_seconds_bucket",endpoint="local"}[5m]))) > 5'
+        for: 3m
+        labels:
+          severity: WARN
+          category: telegram
+        annotations:
+          summary: "本地 Telegram Bot API getFile 延迟过高"
+          description: "本地 Bot API getFile P95 已超过 5 秒，媒体队列吞吐将明显下降"
+      - alert: YoubanBotApiFileTransportErrors
+        expr: 'sum(increase({__name__="xiaohuiji.tg.bot_api.file_download_requests",endpoint="local",result="error",status_code="transport"}[5m])) > 5'
+        for: 1m
+        labels:
+          severity: CRIT
+          category: telegram
+        annotations:
+          summary: "本地 Telegram Bot API 文件下载网络失败"
+          description: "最近 5 分钟本地 Bot API 文件下载发生 {{ $value }} 次网络错误，请检查容器网络和文件服务"
       - alert: YoubanTelegramReconcileStuck
         expr: 'youban_tg_reconcile_oldest_age_seconds > 180'
         for: 2m
