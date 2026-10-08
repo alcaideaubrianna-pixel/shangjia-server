@@ -40,6 +40,31 @@ func TestCriticalBackgroundQueuesAreObservable(t *testing.T) {
 	}
 }
 
+func TestCollectProcessQueuesAreShardedAndObservable(t *testing.T) {
+	first := collectProcessQueuePayload{TenantId: 2, AccountId: 3, SourceId: 4, SourceChatId: "-1003981090528"}
+	same := collectProcessQueuePayload{TenantId: 2, AccountId: 3, SourceId: 4, SourceChatId: "3981090528"}
+	if collectProcessQueueName(first) != collectProcessQueueName(same) {
+		t.Fatal("equivalent Telegram chat IDs must use the same process queue")
+	}
+	otherChat := collectProcessQueuePayload{TenantId: 2, AccountId: 3, SourceId: 9, SourceChatId: "3981090529"}
+	if collectProcessQueueName(first) != collectProcessQueueName(otherChat) {
+		t.Fatal("one tenant account must stay in one fair process queue")
+	}
+	queues := collectProcessQueueNames()
+	if len(queues) != collectProcessQueueShards+1 || queues[0] != tgQueueNameCollectProcess {
+		t.Fatalf("unexpected process queues: %v", queues)
+	}
+	observed := telegramObserveQueueNames(context.Background())
+	for _, queue := range queues {
+		if !slices.Contains(observed, queue) {
+			t.Fatalf("process queue %s must be observable", queue)
+		}
+	}
+	if collectProcessWorkerQueues()[tgQueueNameBackground] != 1 {
+		t.Fatal("collector worker must continue consuming legacy background tasks")
+	}
+}
+
 func TestAttemptTimeoutQueueIsIsolated(t *testing.T) {
 	if tgQueueNameAttemptTimeout == tgQueueNameBackground || tgQueueNameAttemptTimeout == tgQueueNameCollectProcess {
 		t.Fatal("attempt timeout recovery must not compete with background collection tasks")

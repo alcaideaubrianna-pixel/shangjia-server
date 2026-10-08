@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"strings"
 	"time"
 
@@ -16,51 +17,78 @@ import (
 )
 
 const (
-	tgQueueNameUrgent             = "youban_publish_tg_urgent"
-	tgQueueNameDefault            = "youban_publish_tg"
-	tgQueueNameBulk               = "youban_publish_tg_bulk"
-	tgQueueNameMedia              = "youban_publish_media"
-	tgQueueNameMediaRealtime      = "youban_publish_media_realtime"
-	tgQueueNameMediaProcess       = "youban_publish_media_process"
-	tgQueueNameMediaBulkPrefix    = "youban_publish_media_bulk_"
-	tgQueueNameAutoDelete         = "youban_publish_auto_delete"
-	tgQueueNameAttemptTimeout     = "youban_publish_attempt_timeout"
-	tgQueueNameBackground         = "youban_publish_background"
-	tgQueueNameCycle              = "youban_publish_cycle"
-	tgQueueNameCollectProcess     = "youban_publish_collect_process"
-	tgQueueNameHistory            = "youban_publish_history"
-	tgQueueNameProfileMaintenance = "youban_publish_profile_maintenance"
-	tgQueueNameDuplicateScan      = "youban_publish_duplicate_scan"
-	tgQueueNameMatting            = "youban_publish_matting"
-	tgTaskTypePublish             = "youban_publish:tg:publish"
-	tgTaskTypeCleanup             = "youban_publish:tg:cleanup"
-	tgTaskTypeAutoDelete          = "youban_publish:tg:auto_delete"
-	tgTaskTypeAutoDeleteBackfill  = "youban_publish:tg:auto_delete_backfill"
-	tgTaskTypeImport              = "youban_publish:import:legacy"
-	tgTaskTypeRepair              = "youban_publish:tg:message_repair"
-	tgTaskTypeImportMatch         = "youban_publish:import:tg_match"
-	tgTaskTypeImportSync          = "youban_publish:import:tg_sync"
-	tgTaskTypeDown                = "youban_publish:profile:down"
-	tgTaskTypeCycleRun            = "youban_publish:cycle:run"
-	tgTaskTypeCycleReschedule     = "youban_publish:cycle:reschedule"
-	tgTaskTypeCycleRefresh        = "youban_publish:cycle:refresh"
-	tgTaskTypeCollectMedia        = "youban_publish:collect:media_cache"
-	tgTaskTypeMediaProcess        = "youban_publish:media:process"
-	tgTaskTypeCollectProcess      = "youban_publish:collect:process"
-	tgTaskTypeCollectHistory      = "youban_publish:collect:history"
-	tgTaskTypeCollectTrigger      = "youban_publish:collect:trigger"
-	tgTaskTypeCollectSourceDelete = "youban_publish:collect:source_delete"
-	tgTaskTypeChannelMemberSync   = "youban_publish:tg:channel_member_sync"
-	tgTaskTypeBotMediaRepair      = "youban_publish:bot:media_repair"
-	tgTaskTypeProfileMaintenance  = "youban_publish:profile:maintenance"
-	tgTaskTypeProfileSubmit       = "youban_publish:profile:submit"
-	tgTaskTypePublishRecovery     = "youban_publish:profile:publish_recovery"
-	tgTaskTypeDuplicateScan       = "youban_publish:profile:duplicate_scan"
-	tgTaskTypeMatting             = "youban_publish:anti_scan:matting"
-	tgTaskTypeAttemptTimeout      = "youban_publish:tg:attempt_timeout"
+	tgQueueNameUrgent               = "youban_publish_tg_urgent"
+	tgQueueNameDefault              = "youban_publish_tg"
+	tgQueueNameBulk                 = "youban_publish_tg_bulk"
+	tgQueueNameMedia                = "youban_publish_media"
+	tgQueueNameMediaRealtime        = "youban_publish_media_realtime"
+	tgQueueNameMediaProcess         = "youban_publish_media_process"
+	tgQueueNameMediaBulkPrefix      = "youban_publish_media_bulk_"
+	tgQueueNameAutoDelete           = "youban_publish_auto_delete"
+	tgQueueNameAttemptTimeout       = "youban_publish_attempt_timeout"
+	tgQueueNameBackground           = "youban_publish_background"
+	tgQueueNameCycle                = "youban_publish_cycle"
+	tgQueueNameCollectProcess       = "youban_publish_collect_process"
+	tgQueueNameCollectProcessPrefix = "youban_publish_collect_process_"
+	tgQueueNameHistory              = "youban_publish_history"
+	tgQueueNameProfileMaintenance   = "youban_publish_profile_maintenance"
+	tgQueueNameDuplicateScan        = "youban_publish_duplicate_scan"
+	tgQueueNameMatting              = "youban_publish_matting"
+	tgTaskTypePublish               = "youban_publish:tg:publish"
+	tgTaskTypeCleanup               = "youban_publish:tg:cleanup"
+	tgTaskTypeAutoDelete            = "youban_publish:tg:auto_delete"
+	tgTaskTypeAutoDeleteBackfill    = "youban_publish:tg:auto_delete_backfill"
+	tgTaskTypeImport                = "youban_publish:import:legacy"
+	tgTaskTypeRepair                = "youban_publish:tg:message_repair"
+	tgTaskTypeImportMatch           = "youban_publish:import:tg_match"
+	tgTaskTypeImportSync            = "youban_publish:import:tg_sync"
+	tgTaskTypeDown                  = "youban_publish:profile:down"
+	tgTaskTypeCycleRun              = "youban_publish:cycle:run"
+	tgTaskTypeCycleReschedule       = "youban_publish:cycle:reschedule"
+	tgTaskTypeCycleRefresh          = "youban_publish:cycle:refresh"
+	tgTaskTypeCollectMedia          = "youban_publish:collect:media_cache"
+	tgTaskTypeMediaProcess          = "youban_publish:media:process"
+	tgTaskTypeCollectProcess        = "youban_publish:collect:process"
+	tgTaskTypeCollectHistory        = "youban_publish:collect:history"
+	tgTaskTypeCollectTrigger        = "youban_publish:collect:trigger"
+	tgTaskTypeCollectSourceDelete   = "youban_publish:collect:source_delete"
+	tgTaskTypeChannelMemberSync     = "youban_publish:tg:channel_member_sync"
+	tgTaskTypeBotMediaRepair        = "youban_publish:bot:media_repair"
+	tgTaskTypeProfileMaintenance    = "youban_publish:profile:maintenance"
+	tgTaskTypeProfileSubmit         = "youban_publish:profile:submit"
+	tgTaskTypePublishRecovery       = "youban_publish:profile:publish_recovery"
+	tgTaskTypeDuplicateScan         = "youban_publish:profile:duplicate_scan"
+	tgTaskTypeMatting               = "youban_publish:anti_scan:matting"
+	tgTaskTypeAttemptTimeout        = "youban_publish:tg:attempt_timeout"
 )
 
 const collectMediaMaxBulkQueueShards = 16
+
+const collectProcessQueueShards = 16
+
+func collectProcessQueueName(payload collectProcessQueuePayload) string {
+	hash := fnv.New32a()
+	_, _ = hash.Write([]byte(fmt.Sprintf("%d:%d", payload.TenantId, payload.AccountId)))
+	return fmt.Sprintf("%s%02d", tgQueueNameCollectProcessPrefix, hash.Sum32()%collectProcessQueueShards)
+}
+
+func collectProcessQueueNames() []string {
+	queues := make([]string, 0, collectProcessQueueShards+1)
+	queues = append(queues, tgQueueNameCollectProcess)
+	for shard := 0; shard < collectProcessQueueShards; shard++ {
+		queues = append(queues, fmt.Sprintf("%s%02d", tgQueueNameCollectProcessPrefix, shard))
+	}
+	return queues
+}
+
+func collectProcessWorkerQueues() map[string]int {
+	queues := make(map[string]int, collectProcessQueueShards+2)
+	for _, queue := range collectProcessQueueNames() {
+		queues[queue] = 1
+	}
+	queues[tgQueueNameBackground] = 1
+	return queues
+}
 
 const telegramPublishTaskTimeout = 5 * time.Minute
 

@@ -190,6 +190,12 @@ func clearCollectSourceTasks(inspector *asynq.Inspector, sourceId int64) error {
 		{name: tgQueueNameMediaRealtime, label: "实时媒体缓存"},
 		{name: tgQueueNameMedia, label: "旧媒体缓存"},
 	}
+	for _, name := range collectProcessQueueNames() {
+		queues = append(queues, struct {
+			name  string
+			label string
+		}{name: name, label: "采集处理"})
+	}
 	for _, name := range collectMediaBulkQueueNames() {
 		queues = append(queues, struct {
 			name  string

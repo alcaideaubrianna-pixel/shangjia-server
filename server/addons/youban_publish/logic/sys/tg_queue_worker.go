@@ -65,11 +65,8 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
 	server := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
-		Concurrency: g.Cfg().MustGet(ctx, "youbanPublish.queue.backgroundConcurrency", 4).Int(),
-		Queues: map[string]int{
-			tgQueueNameCollectProcess: 10,
-			tgQueueNameBackground:     1,
-		},
+		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.backgroundConcurrency", 4).Int(),
+		Queues:         collectProcessWorkerQueues(),
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
 	cycleServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
@@ -453,7 +450,7 @@ func (s *sSysPublish) handleCollectProcessTask(ctx context.Context, task *asynq.
 	delay, pending, removeSchedule, err := s.processCollectSourceTask(ctx, payload)
 	if err != nil || !pending {
 		if err == nil && removeSchedule {
-			removeCollectProcessSchedule(ctx, payload)
+			return s.reconcileCollectProcessSchedule(ctx, payload)
 		}
 		return err
 	}

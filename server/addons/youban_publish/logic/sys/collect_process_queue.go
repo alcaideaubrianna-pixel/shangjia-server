@@ -81,7 +81,7 @@ func (s *sSysPublish) enqueueCollectProcessTask(ctx context.Context, payload col
 		uniqueTTL = delay + 10*time.Second
 	}
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameCollectProcess),
+		asynq.Queue(collectProcessQueueName(payload)),
 		asynq.MaxRetry(collectProcessTaskMaxRetry),
 		asynq.Timeout(30 * time.Minute),
 	}
@@ -150,7 +150,29 @@ func reserveCollectProcessSchedule(ctx context.Context, payload collectProcessQu
 		g.Log().Warningf(ctx, "采集源调度去重缓存不可用，放行任务 sourceId:%d err:%+v", payload.SourceId, err)
 		return true, nil
 	}
+	if !ok {
+		if err = cache.Instance().Set(ctx, collectProcessScheduleKey(payload), 1, ttl); err != nil {
+			return false, gerror.Wrap(err, "续期采集源调度去重缓存失败")
+		}
+	}
 	return ok, nil
+}
+
+func (s *sSysPublish) reconcileCollectProcessSchedule(ctx context.Context, payload collectProcessQueuePayload) error {
+	removeCollectProcessSchedule(ctx, payload)
+	enabled, err := collectProcessSourceEnabled(ctx, payload)
+	if err != nil || !enabled {
+		return err
+	}
+	delay, pending, err := nextCollectProcessDelay(ctx, payload)
+	if err != nil || !pending {
+		return err
+	}
+	if delay < collectProcessMinimumDelay {
+		delay = collectProcessMinimumDelay
+	}
+	_, err = s.enqueueCollectProcessTask(ctx, payload, delay, true)
+	return err
 }
 
 func refreshCollectProcessSchedule(ctx context.Context, payload collectProcessQueuePayload, ttl time.Duration) error {

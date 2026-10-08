@@ -173,6 +173,9 @@ func telegramObserveQueueNames(ctx context.Context) []string {
 	for queue := range collectMediaBulkWorkerQueues(ctx) {
 		set[queue] = struct{}{}
 	}
+	for _, queue := range collectProcessQueueNames() {
+		set[queue] = struct{}{}
+	}
 	queues := make([]string, 0, len(set))
 	for queue := range set {
 		queues = append(queues, queue)
