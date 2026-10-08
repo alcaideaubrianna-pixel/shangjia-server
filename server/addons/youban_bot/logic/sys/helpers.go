@@ -862,9 +862,18 @@ func (s *sSysBot) telegramFileDownloadURL(ctx context.Context, tgBot *tgbot.Bot,
 	callCtx, cancel := telegramAPICtx()
 	defer cancel()
 	getFileStartedAt := time.Now()
-	file, err := tgBot.GetFile(callCtx, &tgbot.GetFileParams{FileID: fileId})
-	g.Log().Infof(ctx, "Bot媒体解析阶段完成 stage:get_file durationMs:%d success:%t", time.Since(getFileStartedAt).Milliseconds(), err == nil)
+	file, attempts, err := telegramBotGetFileWithRetry(ctx, callCtx, fileId, func(requestCtx context.Context) (*models.File, error) {
+		return tgBot.GetFile(requestCtx, &tgbot.GetFileParams{FileID: fileId})
+	})
+	g.Log().Info(ctx, "Bot媒体解析阶段完成", g.Map{
+		"stage": "get_file", "fileId": fileId, "attempts": attempts,
+		"durationMs": time.Since(getFileStartedAt).Milliseconds(), "success": err == nil,
+	})
 	if err != nil {
+		if isRetryableTelegramBotGetFileError(err) {
+			g.Log().Warning(ctx, "Bot媒体解析临时网络故障重试耗尽", g.Map{"fileId": fileId, "attempts": attempts, "err": err})
+			return "", gerror.New("Telegram媒体服务暂时不可用，请稍后重试")
+		}
 		return "", err
 	}
 	if file == nil || strings.TrimSpace(file.FilePath) == "" {
