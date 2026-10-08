@@ -23,3 +23,21 @@ func TestValidateTelegramMediaPurpose(t *testing.T) {
 		})
 	}
 }
+
+func TestTelegramMediaSetHasCompleteCopyRefs(t *testing.T) {
+	complete := []*telegramMediaItem{
+		{TgFileId: "copy:123:10"},
+		{TgFileId: "copy:123:11"},
+	}
+	mixed := []*telegramMediaItem{
+		{TgFileId: "copy:123:10"},
+		{TgFileId: "BAACAgEAA-test"},
+	}
+
+	if !telegramMediaSetHasCompleteCopyRefs(complete) {
+		t.Fatal("complete copy references should use Telegram group copy")
+	}
+	if telegramMediaSetHasCompleteCopyRefs(mixed) {
+		t.Fatal("mixed copy references must fall back to persistent media upload")
+	}
+}

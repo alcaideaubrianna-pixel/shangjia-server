@@ -35,6 +35,10 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 		return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, media[0], replyMarkup...)
 	}
 	if telegramMediaSetHasCopyRef(media) && !telegramMediaSetRequiresUpload(media) {
+		if !telegramMediaSetHasCompleteCopyRefs(media) {
+			g.Log().Warningf(ctx, "TG媒体组复制引用不完整，回退持久化媒体上传 purpose:%s chat:%s media:%s", purpose, chatId, telegramMediaDebugSummary(media))
+			return s.sendTelegramMediaSet(ctx, bot, chatId, purpose, caption, telegramMediaSetWithoutTgFileId(media), replyMarkup...)
+		}
 		if strings.TrimSpace(caption) == "" {
 			return s.copyTelegramMediaSet(ctx, bot, chatId, purpose, caption, media)
 		}
@@ -57,7 +61,10 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 			return nil, err
 		}
 		if !ok {
-			return nil, gerror.New("多媒体组复制引用不完整，且本地媒体缓存不可用")
+			if captionMessage != nil {
+				s.cleanupTelegramSentMessages(ctx, bot, chatId, []*telegramSentMessage{{MessageId: int64(captionMessage.ID), Purpose: purpose}}, "复制媒体组引用不完整")
+			}
+			return s.sendTelegramMediaSet(ctx, bot, chatId, purpose, caption, telegramMediaSetWithoutTgFileId(media), replyMarkup...)
 		}
 		messages := make([]*telegramSentMessage, 0, len(copied)+1)
 		if captionMessage != nil {
@@ -110,6 +117,15 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 		allMessages = append(allMessages, telegramSentMessagesFromGroup(msgs, purpose, chunk)...)
 	}
 	return allMessages, nil
+}
+
+func telegramMediaSetHasCompleteCopyRefs(media []*telegramMediaItem) bool {
+	for _, chunk := range splitTelegramMediaItems(media, telegramMediaGroupMaxItems) {
+		if _, _, ok := telegramCopyMediaGroupRefs(chunk); !ok {
+			return false
+		}
+	}
+	return len(media) > 1
 }
 
 func telegramMediaSetRequiresUpload(media []*telegramMediaItem) bool {
