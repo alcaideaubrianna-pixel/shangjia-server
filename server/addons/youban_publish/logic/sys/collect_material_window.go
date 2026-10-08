@@ -236,13 +236,21 @@ func (s *sSysPublish) findStoredCollectDisplayEvent(ctx context.Context, verify 
 	if messageID <= 0 {
 		return nil, nil
 	}
+	verifyAt := verify["received_at"].GTime()
+	if verifyAt == nil {
+		verifyAt = verify["created_at"].GTime()
+	}
+	if verifyAt == nil || verifyAt.IsZero() {
+		return nil, nil
+	}
 	row, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
 		Where("tenant_id", verify["tenant_id"].Int64()).
 		Where("account_id", verify["account_id"].Int64()).
 		Where("source_id", verify["source_id"].Int64()).
 		Where("source_chat_id", verify["source_chat_id"].String()).
 		Where("material_role", collectMaterialRoleDisplay).
-		Where("source_message_id < ? AND source_message_id >= ?", messageID, messageID-collectMaterialWindowLookahead).
+		Where("source_message_id < ?", messageID).
+		Where("COALESCE(received_at,created_at) BETWEEN ? AND ?", verifyAt.Add(-collectMaterialVerifyWindowDefault), verifyAt).
 		WhereIn("status", []string{sysin.CollectEventStatusPrechecked, sysin.CollectEventStatusMediaPending, sysin.CollectEventStatusMediaReady, sysin.CollectEventStatusProcessed, sysin.CollectEventStatusDispatched}).
 		OrderDesc("source_message_id").OrderDesc("id").Limit(1).One()
 	if err != nil {
