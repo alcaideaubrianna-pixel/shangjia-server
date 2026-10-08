@@ -33,12 +33,13 @@ type CollectDuplicateVerifyRepairResult struct {
 // RepairCollectDuplicateVerification backfills verification media that was
 // cached after an existing profile had already been selected by deduplication.
 func RepairCollectDuplicateVerification(ctx context.Context, options CollectDuplicateVerifyRepairOptions) (*CollectDuplicateVerifyRepairResult, error) {
-	if options.Limit <= 0 || options.Limit > 10000 {
-		options.Limit = 1000
+	if options.Limit <= 0 || options.Limit > 100000 {
+		options.Limit = 50000
 	}
 	result := &CollectDuplicateVerifyRepairResult{ProfileIDs: make([]int64, 0)}
 	service := NewSysPublish()
 	lastEventID := int64(0)
+	seenProfiles := make(map[int64]struct{})
 	for result.Candidates < options.Limit {
 		batchSize := options.Limit - result.Candidates
 		if batchSize > 200 {
@@ -51,6 +52,10 @@ func RepairCollectDuplicateVerification(ctx context.Context, options CollectDupl
 		if len(rows) == 0 {
 			break
 		}
+		existingProfiles, err := collectProfilesWithVerificationMedia(ctx, duplicateProfileIDsFromEvents(rows))
+		if err != nil {
+			return result, err
+		}
 		for _, event := range rows {
 			lastEventID = event["id"].Int64()
 			result.Candidates++
@@ -59,6 +64,15 @@ func RepairCollectDuplicateVerification(ctx context.Context, options CollectDupl
 				result.Skipped++
 				continue
 			}
+			if _, exists := existingProfiles[profileID]; exists {
+				result.Skipped++
+				continue
+			}
+			if _, seen := seenProfiles[profileID]; seen {
+				result.Skipped++
+				continue
+			}
+			seenProfiles[profileID] = struct{}{}
 			if options.DryRun {
 				result.Recoverable++
 				result.ProfileIDs = append(result.ProfileIDs, profileID)
@@ -97,6 +111,35 @@ func RepairCollectDuplicateVerification(ctx context.Context, options CollectDupl
 		}
 	}
 	g.Log().Infof(ctx, "重复资料验证媒体修复完成 dryRun:%t candidates:%d recoverable:%d repaired:%d skipped:%d profiles:%v", options.DryRun, result.Candidates, result.Recoverable, result.Repaired, result.Skipped, result.ProfileIDs)
+	return result, nil
+}
+
+func duplicateProfileIDsFromEvents(rows gdb.Result) []int64 {
+	ids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		if profileID := duplicateProfileIDFromMessage(row["error_message"].String()); profileID > 0 {
+			ids = append(ids, profileID)
+		}
+	}
+	return ids
+}
+
+func collectProfilesWithVerificationMedia(ctx context.Context, profileIDs []int64) (map[int64]struct{}, error) {
+	result := make(map[int64]struct{})
+	if len(profileIDs) == 0 {
+		return result, nil
+	}
+	rows, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+		Fields("profile_id").WhereIn("profile_id", profileIDs).
+		Where("purpose", collectMaterialRoleVerify).WhereNull("deleted_at").Group("profile_id").All()
+	if err != nil {
+		return nil, gerror.Wrap(err, "批量检查资料验证媒体失败")
+	}
+	for _, row := range rows {
+		if profileID := row["profile_id"].Int64(); profileID > 0 {
+			result[profileID] = struct{}{}
+		}
+	}
 	return result, nil
 }
 
