@@ -37,7 +37,7 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 	if telegramMediaSetHasCopyRef(media) && !telegramMediaSetRequiresUpload(media) {
 		if !telegramMediaSetHasCompleteCopyRefs(media) {
 			g.Log().Warningf(ctx, "TG媒体组复制引用不完整，回退持久化媒体上传 purpose:%s chat:%s media:%s", purpose, chatId, telegramMediaDebugSummary(media))
-			return s.sendTelegramMediaSet(ctx, bot, chatId, purpose, caption, telegramMediaSetWithoutTgFileId(media), replyMarkup...)
+			return s.sendTelegramMediaSet(ctx, bot, chatId, purpose, caption, telegramMediaSetWithoutCopyRefs(media), replyMarkup...)
 		}
 		if strings.TrimSpace(caption) == "" {
 			return s.copyTelegramMediaSet(ctx, bot, chatId, purpose, caption, media)
@@ -56,7 +56,7 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 				s.cleanupTelegramSentMessages(ctx, bot, chatId, []*telegramSentMessage{{MessageId: int64(captionMessage.ID), Purpose: purpose}}, "复制媒体组失败")
 			}
 			if isTelegramCopySourceUnavailableError(err) || isTelegramPhotoTooLargeError(err) {
-				return s.sendTelegramMediaSet(ctx, bot, chatId, purpose, caption, telegramMediaSetWithoutTgFileId(media))
+				return s.sendTelegramMediaSet(ctx, bot, chatId, purpose, caption, telegramMediaSetWithoutCopyRefs(media))
 			}
 			return nil, err
 		}
@@ -64,7 +64,7 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 			if captionMessage != nil {
 				s.cleanupTelegramSentMessages(ctx, bot, chatId, []*telegramSentMessage{{MessageId: int64(captionMessage.ID), Purpose: purpose}}, "复制媒体组引用不完整")
 			}
-			return s.sendTelegramMediaSet(ctx, bot, chatId, purpose, caption, telegramMediaSetWithoutTgFileId(media), replyMarkup...)
+			return s.sendTelegramMediaSet(ctx, bot, chatId, purpose, caption, telegramMediaSetWithoutCopyRefs(media), replyMarkup...)
 		}
 		messages := make([]*telegramSentMessage, 0, len(copied)+1)
 		if captionMessage != nil {
@@ -285,14 +285,14 @@ func (s *sSysPublish) copyTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 		}
 		messages, err := s.copyTelegramSingleMedia(ctx, bot, chatId, purpose, caption, media[0], ref)
 		if err != nil && (isTelegramPhotoTooLargeError(err) || isTelegramCopySourceUnavailableError(err)) {
-			return s.sendTelegramMediaSet(ctx, bot, chatId, purpose, caption, telegramMediaSetWithoutTgFileId(media))
+			return s.sendTelegramMediaSet(ctx, bot, chatId, purpose, caption, telegramMediaSetWithoutCopyRefs(media))
 		}
 		return messages, err
 	}
 	copied, ok, err := s.copyTelegramMediaGroup(ctx, bot, chatId, purpose, caption, media)
 	if err != nil {
 		if isTelegramPhotoTooLargeError(err) || isTelegramCopySourceUnavailableError(err) {
-			return s.sendTelegramMediaSet(ctx, bot, chatId, purpose, caption, telegramMediaSetWithoutTgFileId(media))
+			return s.sendTelegramMediaSet(ctx, bot, chatId, purpose, caption, telegramMediaSetWithoutCopyRefs(media))
 		}
 		return copied, err
 	}
@@ -586,6 +586,24 @@ func telegramMediaSetWithoutTgFileId(media []*telegramMediaItem) []*telegramMedi
 		cloned.TgFileId = ""
 		cloned.TgThumbFileId = ""
 		cloned.ForceUpload = true
+		list = append(list, &cloned)
+	}
+	return list
+}
+
+func telegramMediaSetWithoutCopyRefs(media []*telegramMediaItem) []*telegramMediaItem {
+	list := make([]*telegramMediaItem, 0, len(media))
+	for _, item := range media {
+		if item == nil {
+			list = append(list, item)
+			continue
+		}
+		cloned := *item
+		if _, ok := telegramCopyMediaRefFromFileId(cloned.TgFileId); ok {
+			cloned.TgFileId = ""
+			cloned.TgThumbFileId = ""
+			cloned.ForceUpload = true
+		}
 		list = append(list, &cloned)
 	}
 	return list

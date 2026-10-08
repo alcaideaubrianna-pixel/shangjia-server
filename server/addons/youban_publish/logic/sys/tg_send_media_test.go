@@ -41,3 +41,21 @@ func TestTelegramMediaSetHasCompleteCopyRefs(t *testing.T) {
 		t.Fatal("mixed copy references must fall back to persistent media upload")
 	}
 }
+
+func TestTelegramMediaSetWithoutCopyRefs(t *testing.T) {
+	media := []*telegramMediaItem{
+		{TgFileId: "copy:123:10", TgThumbFileId: "thumb-copy"},
+		{TgFileId: "BAACAgEAA-video", TgThumbFileId: "thumb-video"},
+	}
+
+	result := telegramMediaSetWithoutCopyRefs(media)
+	if result[0].TgFileId != "" || result[0].TgThumbFileId != "" || !result[0].ForceUpload {
+		t.Fatalf("copy reference was not converted to upload: %+v", result[0])
+	}
+	if result[1].TgFileId != media[1].TgFileId || result[1].TgThumbFileId != media[1].TgThumbFileId || result[1].ForceUpload {
+		t.Fatalf("reusable file_id should be preserved: %+v", result[1])
+	}
+	if media[0].TgFileId == "" || media[0].ForceUpload {
+		t.Fatal("source media must not be mutated")
+	}
+}
