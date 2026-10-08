@@ -387,9 +387,9 @@ youbanPublish:
     pgvector:
       enabled: false
   mediaFileCache:
-    cosDownloadMode: "cdn"     # cdn: 服务端经公共CDN下载；origin: 通过COS SDK从Bucket源站下载，失败降级CDN
-    workerCdnBaseUrl: "https://sto.xiao-feiji.cc" # Worker 大流量下载免费域名；为空时使用上传配置的公共地址
-    fallbackCdnBaseUrl: "https://cos.xiao-feiji.cc" # Worker 免费域名失败后的付费备用地址
+    cosDownloadMode: "cdn"     # ENV: YOUBAN_PUBLISH_MEDIA_CACHE_DOWNLOAD_MODE；cdn: 公共CDN，origin: COS SDK源站
+    workerCdnBaseUrl: "https://sto.xiao-feiji.cc" # ENV: YOUBAN_PUBLISH_MEDIA_CACHE_WORKER_CDN_BASE_URL
+    fallbackCdnBaseUrl: "https://cos.xiao-feiji.cc" # ENV: YOUBAN_PUBLISH_MEDIA_CACHE_FALLBACK_CDN_BASE_URL
   telegramDeleteFallback:
     intervalSeconds: 60        # 协议号旧消息删除任务的首次等待时间
     jitterSeconds: 30          # 在最小间隔上增加的确定性抖动上限
