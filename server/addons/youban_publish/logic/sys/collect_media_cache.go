@@ -139,6 +139,7 @@ func collectMediaRetryErrorFrom(err error) *collectMediaRetryError {
 		"connection reset",
 		"connection refused",
 		"connection closed",
+		"no such host",
 		"dc is closed",
 		"broken pipe",
 		"temporary",

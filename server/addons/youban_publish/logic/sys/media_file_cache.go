@@ -453,6 +453,7 @@ func isRetryableMediaFileCacheError(ctx context.Context, err error) bool {
 	var statusErr *mediaFileCacheHTTPStatusError
 	if errors.As(err, &statusErr) {
 		return statusErr.statusCode == http.StatusRequestTimeout ||
+			statusErr.statusCode == http.StatusUnavailableForLegalReasons ||
 			statusErr.statusCode == http.StatusTooManyRequests ||
 			statusErr.statusCode >= http.StatusInternalServerError
 	}

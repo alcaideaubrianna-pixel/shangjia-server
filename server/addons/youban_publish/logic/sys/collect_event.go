@@ -853,6 +853,9 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 		}
 		if hit != nil {
 			reason := fmt.Sprintf("资料库已存在相同资料 profileId:%d channelId:%d layer:%s", hit.ProfileID, hit.ChannelID, hit.Layer)
+			if repairErr := s.repairDuplicateProfileVerification(ctx, hit.ProfileID, event, content); repairErr != nil {
+				return false, "", repairErr
+			}
 			s.appendCollectEventLogForRecord(ctx, event, "dedupe", "skipped", reason, fmt.Sprintf("rule=%d", rule["id"].Int64()))
 			g.Log().Infof(ctx, "采集资料指纹命中 eventId:%d ruleId:%d profileId:%d channelId:%d layer:%s cacheHit:%t", event["id"].Int64(), rule["id"].Int64(), hit.ProfileID, hit.ChannelID, hit.Layer, hit.CacheHit)
 			return false, reason, nil
@@ -864,6 +867,9 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 		}
 		if profileId > 0 {
 			reason := fmt.Sprintf("资料库已存在整套相似图片 profileId:%d threshold:%d", profileId, collectProfilePHashDuplicateThreshold)
+			if repairErr := s.repairDuplicateProfileVerification(ctx, profileId, event, content); repairErr != nil {
+				return false, "", repairErr
+			}
 			s.appendCollectEventLogForRecord(ctx, event, "dedupe", "skipped", reason, fmt.Sprintf("rule=%d", rule["id"].Int64()))
 			g.Log().Infof(ctx, "采集资料整套图片命中 eventId:%d ruleId:%d profileId:%d threshold:%d", event["id"].Int64(), rule["id"].Int64(), profileId, collectProfilePHashDuplicateThreshold)
 			return false, reason, nil

@@ -68,6 +68,7 @@ var (
 		>> 统一采集资料未上架状态  [go run main.go up -m=fix -a1=collectProfileOfflineState]
 		>> 初始化上架管理员最后活跃时间  [go run main.go up -m=fix -a1=resetPublishAccountLastActive]
 		>> 修复拆分的Bot媒体组，默认仅预览  [go run main.go up -m=fix -a1=collectBotMediaGroupRepair -since="2026-08-12 19:00:00" -limit=100 -apply=1]
+		>> 回填重复资料缺失的验证视频，默认仅预览  [go run main.go up -m=fix -a1=collectDuplicateVerifyRepair -limit=1000 -apply=1]
 		---------------------------------------------------------------------------------
 		更多
        	github地址：https://github.com/bufanyun/hotgo

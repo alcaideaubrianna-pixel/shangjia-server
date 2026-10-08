@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -63,5 +64,12 @@ func TestMediaFileCacheErrorClass(t *testing.T) {
 	}
 	if got := mediaFileCacheErrorClass(&mediaFileCacheHTTPStatusError{statusCode: 503}); got != "5xx" {
 		t.Fatalf("503 class=%q", got)
+	}
+}
+
+func TestMediaFileCacheHTTP451IsRetryable(t *testing.T) {
+	err := &mediaFileCacheHTTPStatusError{statusCode: http.StatusUnavailableForLegalReasons}
+	if !isRetryableMediaFileCacheError(context.Background(), err) {
+		t.Fatal("HTTP 451 from a CDN edge must be retryable")
 	}
 }
