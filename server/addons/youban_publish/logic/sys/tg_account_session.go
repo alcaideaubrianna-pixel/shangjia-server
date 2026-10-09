@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -70,6 +71,50 @@ func (s *sSysPublish) failTgAccountRefresh(ctx context.Context, id int64, tenant
 
 const tgAccountSessionExpiredMessage = "TG账号登录态已失效，请重新扫码登录"
 
+// telegramAccountCanPublish is the single gate used before a Telegram publish
+// task enters Asynq. It prevents disabled/expired accounts from repeatedly
+// consuming queue capacity while their channel jobs remain pending.
+func (s *sSysPublish) telegramAccountCanPublish(ctx context.Context, tenantId, tgAccountId int64) (bool, error) {
+	if tenantId <= 0 || tgAccountId <= 0 {
+		return false, nil
+	}
+	var account struct {
+		Status     string `orm:"status"`
+		SessionKey string `orm:"session_key"`
+	}
+	err := g.DB().Model(publishTgAccountTable).Safe().Ctx(ctx).
+		Fields("status,session_key").
+		Where("id", tgAccountId).
+		Where("tenant_id", tenantId).
+		WhereNull("deleted_at").
+		Scan(&account)
+	if err != nil {
+		return false, gerror.Wrap(err, "检查TG账号发布状态失败")
+	}
+	return account.Status == sysin.PublishTgAccountStatusAuthorized && strings.TrimSpace(account.SessionKey) != "", nil
+}
+
+func (s *sSysPublish) pauseTelegramJobsForUnavailableAccount(ctx context.Context, tgAccountId int64, reason string) error {
+	if tgAccountId <= 0 {
+		return nil
+	}
+	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("account_id", tgAccountId).
+		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
+		WhereIn("dispatch_status", []string{"", tgDispatchStatusIdle, tgDispatchStatusQueued, tgDispatchStatusProcessing}).
+		Data(g.Map{
+			"dispatch_status":     tgDispatchStatusIdle,
+			"next_retry_at":       gtime.Now().Add(15 * time.Minute),
+			"last_dispatch_error": reason,
+			"updated_at":          gtime.Now(),
+		}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "暂停失效TG账号待发送任务失败")
+	}
+	g.Log().Warningf(ctx, "TG账号不可用，已暂停待发送任务 tgAccountId:%d reason:%s", tgAccountId, reason)
+	return nil
+}
+
 type tgAccountAuthOwner struct {
 	Id               int64  `json:"id"`
 	TenantId         int64  `json:"tenant_id"`
@@ -81,6 +126,9 @@ type tgAccountAuthOwner struct {
 
 func (s *sSysPublish) expireTgAccountSession(ctx context.Context, id int64, tenantId int64, operatorId int64, message string) (string, string) {
 	s.updateTgAccountRefreshResult(ctx, id, tenantId, operatorId, sysin.PublishTgAccountStatusExpired, message, nil, "", "")
+	if err := s.pauseTelegramJobsForUnavailableAccount(ctx, id, message); err != nil {
+		g.Log().Warningf(ctx, "暂停失效TG账号任务失败 tgAccountId:%d err:%+v", id, err)
+	}
 	s.cancelTelegramDeleteFallbackTasks(ctx, []int64{id}, message)
 	return sysin.PublishTgAccountStatusExpired, message
 }
