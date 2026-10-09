@@ -108,11 +108,18 @@ func (lease *collectMediaAccountLease) renew() {
 		case <-ticker.C:
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			now := time.Now()
-			_, _ = g.Redis().GroupScript().Eval(ctx, collectMediaAccountLeaseRenewScript, 1, []string{lease.key}, []interface{}{
+			result, err := g.Redis().GroupScript().Eval(ctx, collectMediaAccountLeaseRenewScript, 1, []string{lease.key}, []interface{}{
 				lease.token,
 				now.Add(lease.ttl).UnixMilli(),
 				(lease.ttl * 2).Milliseconds(),
 			})
+			if err != nil {
+				g.Log().Warningf(ctx, "采集媒体账号租约续期失败 key:%s err:%+v", lease.key, err)
+				continue
+			}
+			if result.Int() != 1 {
+				g.Log().Warningf(ctx, "采集媒体账号租约已丢失 key:%s", lease.key)
+			}
 			cancel()
 		}
 	}

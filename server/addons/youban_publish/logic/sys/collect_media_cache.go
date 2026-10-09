@@ -1378,6 +1378,7 @@ func (s *sSysPublish) acquireCollectMediaDownloadSlots(ctx context.Context, tena
 		if !acquired {
 			<-globalSlots
 			<-accountSlots
+			observeCollectMediaScheduler(ctx, "account_concurrency_full", tenantId, tgAccountId)
 			return func() {}, newCollectMediaFairnessRetryError("TG账号媒体并发已满，等待公平调度", 3*time.Second)
 		}
 	}

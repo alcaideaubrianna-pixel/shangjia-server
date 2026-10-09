@@ -193,14 +193,18 @@ func (s *sSysPublish) recoverPendingCollectMedia(ctx context.Context, limit int)
 		if payload.EventId <= 0 || payload.TenantId <= 0 || payload.AccountId <= 0 || payload.SourceId <= 0 {
 			continue
 		}
-		enqueued, enqueueErr := s.enqueueCollectMediaCacheTask(ctx, payload, 0)
+		// Recovery must bypass Asynq's 24-hour unique key. A lost or stuck
+		// unique task otherwise prevents this media event from being requeued.
+		enqueued, enqueueErr := s.enqueueCollectMediaCacheDeferred(ctx, payload, 0)
 		if enqueueErr != nil {
 			g.Log().Warningf(ctx, "恢复待处理采集媒体任务投递失败 eventId:%d sourceId:%d err:%+v", payload.EventId, payload.SourceId, enqueueErr)
 			continue
 		}
 		if !enqueued {
+			observeCollectMediaScheduler(ctx, "recovery_enqueue_skipped", payload.TenantId, payload.TgAccountId)
 			continue
 		}
+		observeCollectMediaScheduler(ctx, "recovery_reenqueued", payload.TenantId, payload.TgAccountId)
 		if _, updateErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).
 			Where(eventCols.Id, payload.EventId).
 			Where(eventCols.Status, sysin.CollectEventStatusMediaPending).

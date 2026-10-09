@@ -159,6 +159,16 @@ func observeMediaFileCacheSource(ctx context.Context, source, result, errorClass
 	))
 }
 
+func observeCollectMediaScheduler(ctx context.Context, action string, tenantID, tgAccountID int64) {
+	attrs := metric.WithAttributes(
+		attribute.String("action", action),
+		attribute.Int64("tenant_id", tenantID),
+		attribute.Int64("tg_account_id", tgAccountID),
+	)
+	counter, _ := publishObserveMeter.Int64Counter("xiaohuiji.collect.media_scheduler_events")
+	counter.Add(ctx, 1, attrs)
+}
+
 func observeTelegramPublishRecovery(ctx context.Context, result string) {
 	counter, _ := publishObserveMeter.Int64Counter("xiaohuiji.tg.publish_recoveries")
 	counter.Add(ctx, 1, metric.WithAttributes(attribute.String("result", result)))
