@@ -10,13 +10,14 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
+	"hotgo/internal/library/tasklog"
 )
 
 var collectEventCleanupStatuses = []string{"failed", "ignored"}
 
 func (s *sSysPublish) cleanupCollectEventsOlderThan(ctx context.Context, days, limit int) error {
 	if days <= 0 {
-		days = collectEventRetentionDays
+		days = tasklog.RetentionDays()
 	}
 	if limit <= 0 {
 		limit = 1000

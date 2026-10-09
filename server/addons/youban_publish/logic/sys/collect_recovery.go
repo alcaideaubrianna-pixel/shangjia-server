@@ -12,6 +12,7 @@ import (
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/library/tasklog"
 )
 
 const (
@@ -37,7 +38,7 @@ func (s *sSysPublish) runCollectRecovery(ctx context.Context) {
 
 func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	mediaBatchSize := collectMediaRecoveryBatchSize(ctx)
-	if err := s.cleanupCollectEventsOlderThan(ctx, collectEventRetentionDays, 1000); err != nil {
+	if err := s.cleanupCollectEventsOlderThan(ctx, tasklog.RetentionDays(), 1000); err != nil {
 		g.Log().Warningf(ctx, "清理过期采集事件失败：%+v", err)
 	}
 	if err := s.recoverStaleCollectMediaRows(ctx, mediaBatchSize); err != nil {
