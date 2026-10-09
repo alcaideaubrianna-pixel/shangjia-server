@@ -83,6 +83,44 @@ youban_tg_due_health:
     - due_without_active: { usage: GAUGE, description: due jobs whose target channel has no active sender }
     - oldest_without_active_age_seconds: { usage: GAUGE, description: age of the oldest due channel with no active sender and no progress for five minutes }
 
+youban_tg_backlog_health:
+  name: youban_tg_backlog_health
+  desc: Global Telegram publishing backlog, active lanes and drain rate
+  predicate_queries:
+    - name: tg job table exists
+      predicate_query: |
+        SELECT to_regclass('public.hg_youban_publish_tg_job') IS NOT NULL;
+  query: |-
+    WITH jobs AS MATERIALIZED (
+      SELECT tenant_id,channel_id,status,dispatch_status,next_retry_at,created_at,sent_at
+      FROM hg_youban_publish_tg_job
+      WHERE status IN ('pending','failed_retry','sending','unknown','sent')
+        AND operation_no NOT LIKE 'message_push:%'
+        AND operation_no NOT LIKE 'message_push_plan:%'
+    ), aggregate AS (
+      SELECT
+        COUNT(*) FILTER (WHERE status IN ('pending','failed_retry') AND dispatch_status IN ('idle','queued') AND COALESCE(next_retry_at,created_at) <= NOW())::bigint AS due_jobs,
+        COUNT(*) FILTER (WHERE status IN ('sending','unknown') OR (status IN ('pending','failed_retry') AND dispatch_status IN ('queued','processing')))::bigint AS active_jobs,
+        COUNT(DISTINCT (tenant_id,channel_id)) FILTER (WHERE status IN ('sending','unknown') OR (status IN ('pending','failed_retry') AND dispatch_status IN ('queued','processing')))::bigint AS active_channels,
+        COALESCE(EXTRACT(EPOCH FROM (NOW() - MIN(COALESCE(next_retry_at,created_at))) FILTER (WHERE status IN ('pending','failed_retry') AND dispatch_status IN ('idle','queued') AND COALESCE(next_retry_at,created_at) <= NOW())),0)::bigint AS oldest_due_age_seconds,
+        COUNT(*) FILTER (WHERE status='sent' AND sent_at >= NOW()-INTERVAL '10 minutes')::bigint AS sent_10m
+      FROM jobs
+    )
+    SELECT current_database() AS datname, due_jobs, active_jobs, active_channels, oldest_due_age_seconds, sent_10m,
+           CASE WHEN sent_10m > 0 THEN (due_jobs * 600 / sent_10m)::bigint ELSE 0 END AS estimated_drain_seconds
+    FROM aggregate
+  ttl: 30
+  timeout: 2
+  tags: [ "dbname:railway" ]
+  metrics:
+    - datname: { usage: LABEL, description: database name }
+    - due_jobs: { usage: GAUGE, description: globally due Telegram publishing jobs }
+    - active_jobs: { usage: GAUGE, description: globally active Telegram publishing jobs }
+    - active_channels: { usage: GAUGE, description: channels with an active Telegram publishing lane }
+    - oldest_due_age_seconds: { usage: GAUGE, description: age of the oldest globally due job }
+    - sent_10m: { usage: GAUGE, description: successful Telegram jobs in the last ten minutes }
+    - estimated_drain_seconds: { usage: GAUGE, description: estimated seconds to drain current backlog at the recent global rate }
+
 youban_tg_dispatch_health:
   name: youban_tg_dispatch_health
   desc: Telegram dispatcher loops and stale processing jobs

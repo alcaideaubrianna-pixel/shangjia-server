@@ -38,6 +38,24 @@ groups:
         annotations:
           summary: "TG 到期任务缺少活动发送者"
           description: "存在无活动发送者且连续 5 分钟无发送进度的频道，最老任务已等待 {{ $value }} 秒"
+      - alert: YoubanTelegramGlobalBacklogGrowing
+        expr: 'youban_tg_backlog_health_due_jobs > 500 and youban_tg_backlog_health_sent_10m == 0'
+        for: 5m
+        labels:
+          severity: CRIT
+          category: publish
+        annotations:
+          summary: "TG 全局发送无吞吐"
+          description: "全局有 {{ $value }} 条到期任务，但最近 10 分钟没有成功发送"
+      - alert: YoubanTelegramDrainTimeHigh
+        expr: 'youban_tg_backlog_health_estimated_drain_seconds > 7200'
+        for: 10m
+        labels:
+          severity: WARN
+          category: publish
+        annotations:
+          summary: "TG 全局积压预计清空时间过长"
+          description: "当前全局积压按最近吞吐预计需要 {{ $value }} 秒清空，请检查发送速率和限流"
       - alert: YoubanTelegramDispatchLoop
         expr: 'youban_tg_dispatch_health_loop_jobs > 0'
         for: 5m
