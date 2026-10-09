@@ -19,13 +19,13 @@ import (
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/cache"
 	"hotgo/internal/library/hgrds/lock"
+	"hotgo/internal/library/tasklog"
 )
 
 const (
 	collectEventRulesCacheVersionKey = "youban_publish:collect:event_rules:version"
 	collectEventRulesCacheKeyPrefix  = "youban_publish:collect:event_rules"
 	collectEventRulesCacheTTL        = time.Minute
-	collectEventRetentionDays        = 3
 )
 
 func (s *sSysPublish) CollectEventList(ctx context.Context, in *sysin.CollectEventListInp) (list []*sysin.CollectEventModel, totalCount int, err error) {
@@ -40,7 +40,7 @@ func (s *sSysPublish) CollectEventList(ctx context.Context, in *sysin.CollectEve
 		LeftJoin(pdao.YoubanPublishCollectSource.Table()+" s", "s.id=e.source_id").
 		Where("e.tenant_id", account.TenantId).
 		Where("e.account_id", account.Id).
-		WhereGTE("e.created_at", gtime.Now().Add(-time.Duration(collectEventRetentionDays)*24*time.Hour))
+		WhereGTE("e.created_at", gtime.Now().Add(-time.Duration(tasklog.RetentionDays())*24*time.Hour))
 	if in.SourceId > 0 {
 		mod = mod.Where("e.source_id", in.SourceId)
 	}
@@ -861,20 +861,6 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 			}
 			s.appendCollectEventLogForRecord(ctx, event, "dedupe", "skipped", reason, fmt.Sprintf("rule=%d", rule["id"].Int64()))
 			g.Log().Infof(ctx, "采集资料指纹命中 eventId:%d ruleId:%d profileId:%d channelId:%d layer:%s cacheHit:%t", event["id"].Int64(), rule["id"].Int64(), hit.ProfileID, hit.ChannelID, hit.Layer, hit.CacheHit)
-			return false, reason, nil
-		}
-		profileId, similarErr := s.findCollectProfilePHashDuplicate(ctx, event["tenant_id"].Int64(), event["account_id"].Int64(), channelIds, content.Media)
-		if similarErr != nil {
-			g.Log().Warningf(ctx, "采集资料模糊图片判重失败，保留精确判重结果并继续 eventId:%d ruleId:%d err:%v", event["id"].Int64(), rule["id"].Int64(), similarErr)
-			profileId = 0
-		}
-		if profileId > 0 {
-			reason := fmt.Sprintf("资料库已存在整套相似图片 profileId:%d threshold:%d", profileId, collectProfilePHashDuplicateThreshold)
-			if repairErr := s.repairDuplicateProfileVerification(ctx, profileId, event, content); repairErr != nil {
-				return false, "", repairErr
-			}
-			s.appendCollectEventLogForRecord(ctx, event, "dedupe", "skipped", reason, fmt.Sprintf("rule=%d", rule["id"].Int64()))
-			g.Log().Infof(ctx, "采集资料整套图片命中 eventId:%d ruleId:%d profileId:%d threshold:%d", event["id"].Int64(), rule["id"].Int64(), profileId, collectProfilePHashDuplicateThreshold)
 			return false, reason, nil
 		}
 	}

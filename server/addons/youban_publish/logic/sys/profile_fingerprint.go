@@ -49,7 +49,9 @@ func (e *profileFingerprintDuplicateError) Error() string {
 func buildProfileFingerprints(channelIDs []int64, finalText string, media []collectMediaItem) []profileFingerprint {
 	normalizedText := normalizeCollectText(normalizeCollectKeywordText(finalText))
 	material := collectDedupeMaterialFromItems(collectHash(normalizedText), media)
-	signatures := material.signatures(true)
+	// Collection dedupe is intentionally media-only. Template text is common
+	// across unrelated profiles and must never block a new profile by itself.
+	signatures := material.exactMediaSignatures()
 	channelIDs = uniqueIds(channelIDs)
 	sort.Slice(channelIDs, func(i, j int) bool { return channelIDs[i] < channelIDs[j] })
 	result := make([]profileFingerprint, 0, len(channelIDs)*len(signatures))
