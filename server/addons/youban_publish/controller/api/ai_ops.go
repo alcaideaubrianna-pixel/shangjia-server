@@ -47,3 +47,11 @@ func (c *cAIOps) ProfileDelete(ctx context.Context, req *aiops.ProfileDeleteReq)
 	}
 	return res, nil
 }
+
+func (c *cAIOps) TelegramMessageContext(ctx context.Context, req *aiops.TelegramMessageContextReq) (*aiops.TelegramMessageContextRes, error) {
+	result, err := service.SysPublish().AIOpsTelegramMessageContext(ctx, req.URL)
+	if err != nil {
+		return nil, err
+	}
+	return &aiops.TelegramMessageContextRes{AIOpsTelegramMessageContextModel: result}, nil
+}

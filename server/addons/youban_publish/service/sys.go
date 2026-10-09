@@ -82,6 +82,7 @@ type ISysPublish interface {
 	AIOpsQueueBotMediaRepair(ctx context.Context, profileIds []int64, limit int) ([]int64, error)
 	AIOpsRepublishProfiles(ctx context.Context, in *sysin.ProfileStatusInp) (*sysin.ProfileStatusModel, error)
 	AIOpsDeleteImportedProfiles(ctx context.Context, tenantId, accountId int64, profileIds []int64, dryRun bool) ([]int64, error)
+	AIOpsTelegramMessageContext(ctx context.Context, messageURL string) (*sysin.AIOpsTelegramMessageContextModel, error)
 	ServerMediaList(ctx context.Context, in *sysin.MediaListInp) (list []*sysin.MediaModel, err error)
 	ServerMediaDelete(ctx context.Context, in *sysin.MediaDeleteInp) (err error)
 	ServerBotList(ctx context.Context, in *sysin.BotListInp) (list []*sysin.BotModel, totalCount int, err error)

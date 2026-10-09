@@ -1,6 +1,10 @@
 package aiops
 
-import "github.com/gogf/gf/v2/frame/g"
+import (
+	"github.com/gogf/gf/v2/frame/g"
+
+	"hotgo/addons/youban_publish/model/input/sysin"
+)
 
 type ProfileMediaReq struct {
 	g.Meta     `path:"/profile/media" method:"post" tags:"AI运维" summary:"诊断或恢复资料媒体"`
@@ -47,4 +51,13 @@ type ProfileDeleteRes struct {
 	Candidates int     `json:"candidates"`
 	Deleted    int     `json:"deleted"`
 	ProfileIds []int64 `json:"profileIds"`
+}
+
+type TelegramMessageContextReq struct {
+	g.Meta `path:"/telegram/message/context" method:"get" tags:"AI运维" summary:"按Telegram消息地址查询资料采集链路"`
+	URL    string `json:"url" v:"required#消息地址不能为空" dc:"Telegram消息地址"`
+}
+
+type TelegramMessageContextRes struct {
+	*sysin.AIOpsTelegramMessageContextModel
 }
