@@ -336,11 +336,12 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 		Where(enabledCollectSourceExistsSQL("e")).
 		Group("e.source_id,e.source_chat_id").
 		OrderAsc("oldest_at").
-		Limit(limit).
 		All()
 	if err != nil {
 		return gerror.Wrap(err, "读取待恢复采集源失败")
 	}
+	sourceRows = fairCollectRecoverySourceRows(sourceRows, limit, time.Now().Unix()/60)
+	perSourceLimit := collectRecoveryPerSourceLimit(limit, len(sourceRows))
 	remaining := limit
 	for _, sourceRow := range sourceRows {
 		if remaining <= 0 {
@@ -348,7 +349,7 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 		}
 		sourceId := sourceRow["source_id"].Int64()
 		sourceChatId := sourceRow["source_chat_id"].String()
-		sourceLimit := 10
+		sourceLimit := perSourceLimit
 		if sourceLimit > remaining {
 			sourceLimit = remaining
 		}
@@ -409,6 +410,37 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 		}
 	}
 	return nil
+}
+
+func fairCollectRecoverySourceRows(rows gdb.Result, limit int, round int64) gdb.Result {
+	if limit <= 0 || len(rows) <= limit {
+		return rows
+	}
+	windowCount := (len(rows) + limit - 1) / limit
+	window := int(round % int64(windowCount))
+	if window < 0 {
+		window += windowCount
+	}
+	start := window * limit
+	result := make(gdb.Result, 0, limit)
+	for offset := 0; offset < limit; offset++ {
+		result = append(result, rows[(start+offset)%len(rows)])
+	}
+	return result
+}
+
+func collectRecoveryPerSourceLimit(totalLimit, sourceCount int) int {
+	if totalLimit <= 0 || sourceCount <= 0 {
+		return 1
+	}
+	quota := totalLimit / sourceCount
+	if quota < 1 {
+		return 1
+	}
+	if quota > 10 {
+		return 10
+	}
+	return quota
 }
 
 func enabledCollectSourceExistsSQL(ownerAlias string) string {
