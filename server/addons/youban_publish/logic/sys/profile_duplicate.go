@@ -29,7 +29,7 @@ const (
 	duplicateScanBatchSize        = 500
 	duplicateScanSessionTTL       = 24 * time.Hour
 	duplicateScanResultTTL        = 15 * time.Minute
-	duplicateScanAlgorithmVersion = 6
+	duplicateScanAlgorithmVersion = 7
 	duplicateScanPagesPerTask     = 20
 	duplicateScanStartLockTTL     = 10 * time.Second
 )
@@ -383,15 +383,13 @@ func (s *sSysPublish) appendDuplicateScanSignatures(ctx context.Context, token s
 	}
 	profileRows := make([]duplicateProfileRow, 0, len(ids))
 	if err := g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).
-		Fields(dao.ContentProfile.Columns().Id, dao.ContentProfile.Columns().PlainText, dao.ContentProfile.Columns().CreatedAt).
+		Fields(dao.ContentProfile.Columns().Id, dao.ContentProfile.Columns().CreatedAt).
 		WhereIn(dao.ContentProfile.Columns().Id, ids).WhereNull(dao.ContentProfile.Columns().DeletedAt).
 		Scan(&profileRows); err != nil {
-		return gerror.Wrap(err, "读取重复资料正文失败")
+		return gerror.Wrap(err, "读取重复资料时间失败")
 	}
-	textByProfile := make(map[int64]string, len(profileRows))
 	createdByProfile := make(map[int64]int64, len(profileRows))
 	for _, row := range profileRows {
-		textByProfile[row.Id] = row.PlainText
 		if row.CreatedAt != nil {
 			createdByProfile[row.Id] = row.CreatedAt.Time.UnixNano()
 		}
@@ -400,23 +398,11 @@ func (s *sSysPublish) appendDuplicateScanSignatures(ctx context.Context, token s
 	if err := work.preloadProcessed(ids); err != nil {
 		return err
 	}
-	lookupKeys := make([]string, 0)
-	for _, profileId := range ids {
-		if values, complete := duplicateImagePHashes(mediaByProfile[profileId]); complete {
-			lookupKeys = append(lookupKeys, duplicatePHashBucketKeys(values, true)...)
-		}
-	}
-	if err := work.preloadBuckets(uniqueStrings(lookupKeys)); err != nil {
-		return err
-	}
 	groupSignatures := make([]string, 0, len(ids))
 	for _, profileId := range ids {
-		if signature, complete := duplicateProfileSignature(textByProfile[profileId], mediaByProfile[profileId]); complete {
+		if signature, complete := duplicateProfileSignature("", mediaByProfile[profileId]); complete {
 			groupSignatures = append(groupSignatures, signature)
 		}
-	}
-	for _, signatures := range work.buckets {
-		groupSignatures = append(groupSignatures, signatures...)
 	}
 	if err := work.preloadGroups(uniqueStrings(groupSignatures)); err != nil {
 		return err
@@ -429,7 +415,7 @@ func (s *sSysPublish) appendDuplicateScanSignatures(ctx context.Context, token s
 		if processed {
 			continue
 		}
-		signature, complete := duplicateProfileSignature(textByProfile[profileId], mediaByProfile[profileId])
+		signature, complete := duplicateProfileSignature("", mediaByProfile[profileId])
 		if !complete {
 			session.IncompleteTotal++
 			work.markProfileProcessed(profileId)
@@ -445,9 +431,6 @@ func (s *sSysPublish) appendDuplicateScanSignatures(ctx context.Context, token s
 		} else {
 			group.addMember(profileId, createdByProfile[profileId])
 			work.setGroup(signature, group)
-		}
-		if err = work.appendPHash(profileId, createdByProfile[profileId], mediaByProfile[profileId]); err != nil {
-			return err
 		}
 		work.markProfileProcessed(profileId)
 	}
@@ -637,11 +620,7 @@ func (s *sSysPublish) AdminNoteDuplicateCleanup(ctx context.Context, in *sysin.A
 	if err != nil {
 		return nil, err
 	}
-	phashValidated, err := applyDuplicatePHashValidation(ctx, ids, candidateById)
-	if err != nil {
-		return nil, err
-	}
-	if err = validateDuplicateCleanupState(ids, candidateById, profiles, signatures, phashValidated); err != nil {
+	if err = validateDuplicateCleanupState(ids, candidateById, profiles, signatures); err != nil {
 		return nil, err
 	}
 	if _, err = s.updateProfileStatus(ctx, &sysin.ProfileStatusInp{Ids: ids, Status: 2}, account.TenantId, 0); err != nil {
@@ -654,45 +633,6 @@ func (s *sSysPublish) AdminNoteDuplicateCleanup(ctx context.Context, in *sysin.A
 		_, _ = cache.Instance().Remove(ctx, session.ResultCacheKey)
 	}
 	return &sysin.AdminNoteDuplicateCleanupModel{DeletedIds: ids}, nil
-}
-
-func applyDuplicatePHashValidation(ctx context.Context, ids []int64, candidates map[int64]duplicateScanCandidate) (map[int64]bool, error) {
-	validated := make(map[int64]bool)
-	validationIds := make([]int64, 0, len(ids)*2)
-	for _, id := range ids {
-		candidate, ok := candidates[id]
-		if ok && strings.HasPrefix(candidate.Signature, "phash:") {
-			validationIds = append(validationIds, id, candidate.KeepProfileId)
-		}
-	}
-	validationIds = uniqueIds(validationIds)
-	if len(validationIds) == 0 {
-		return validated, nil
-	}
-	var rows []duplicateImageRow
-	if err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
-		Fields("id,profile_id,perceptual_hash").WhereIn("profile_id", validationIds).
-		WhereNull("deleted_at").WhereIn("media_type", []string{"image", "photo"}).
-		Where("purpose IS NULL OR purpose='' OR purpose='display'").
-		OrderAsc("profile_id").OrderAsc("sort_index").OrderAsc("id").Scan(&rows); err != nil {
-		return nil, gerror.Wrap(err, "校验相似资料图片指纹失败")
-	}
-	byProfile := make(map[int64][]duplicateImageRow, len(validationIds))
-	for _, row := range rows {
-		byProfile[row.ProfileId] = append(byProfile[row.ProfileId], row)
-	}
-	for _, id := range ids {
-		candidate, ok := candidates[id]
-		if !ok || !strings.HasPrefix(candidate.Signature, "phash:") {
-			continue
-		}
-		left, leftOK := duplicateImagePHashes(byProfile[id])
-		right, rightOK := duplicateImagePHashes(byProfile[candidate.KeepProfileId])
-		if leftOK && rightOK && duplicateScanPHashSetsMatch(left, right, collectProfilePHashDuplicateThreshold) {
-			validated[id] = true
-		}
-	}
-	return validated, nil
 }
 
 func validateDuplicateScanSessionOwner(session *duplicateScanSession, account *sysin.AccountModel) error {
@@ -709,17 +649,14 @@ func duplicateScanSessionOwnedBy(session *duplicateScanSession, account *sysin.A
 	return session != nil && account != nil && session.TenantId == account.TenantId && session.AdminAccountId == account.Id
 }
 
-func validateDuplicateCleanupState(ids []int64, candidates map[int64]duplicateScanCandidate, profiles map[int64]*sysin.AdminNoteDuplicateItemModel, signatures map[int64]string, phashValidated map[int64]bool) error {
+func validateDuplicateCleanupState(ids []int64, candidates map[int64]duplicateScanCandidate, profiles map[int64]*sysin.AdminNoteDuplicateItemModel, signatures map[int64]string) error {
 	for _, id := range ids {
 		candidate, ok := candidates[id]
 		if !ok {
 			return gerror.New("待删除资料不属于当前扫描批次，请重新扫描")
 		}
 		target, keep := profiles[id], profiles[candidate.KeepProfileId]
-		signatureValid := phashValidated[id]
-		if !strings.HasPrefix(candidate.Signature, "phash:") {
-			signatureValid = signatures[id] == candidate.Signature && signatures[candidate.KeepProfileId] == candidate.Signature
-		}
+		signatureValid := signatures[id] == candidate.Signature && signatures[candidate.KeepProfileId] == candidate.Signature
 		if target == nil || keep == nil || !signatureValid || !duplicateProfileNewer(keep, target) {
 			return gerror.New("重复资料已发生变化，为避免误删，请重新扫描后再试")
 		}
@@ -1001,20 +938,9 @@ func (s *sSysPublish) loadDuplicateValidationState(ctx context.Context, ids []in
 			mediaByProfile[row.ProfileId] = append(mediaByProfile[row.ProfileId], row)
 		}
 	}
-	var textRows []duplicateProfileRow
-	if err = g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).
-		Fields(dao.ContentProfile.Columns().Id, dao.ContentProfile.Columns().PlainText).
-		WhereIn(dao.ContentProfile.Columns().Id, ids).WhereNull(dao.ContentProfile.Columns().DeletedAt).
-		Scan(&textRows); err != nil {
-		return nil, nil, gerror.Wrap(err, "校验重复资料正文失败")
-	}
-	textByProfile := make(map[int64]string, len(textRows))
-	for _, row := range textRows {
-		textByProfile[row.Id] = row.PlainText
-	}
 	signatures := make(map[int64]string, len(ids))
 	for _, id := range ids {
-		if signature, complete := duplicateProfileSignature(textByProfile[id], mediaByProfile[id]); complete {
+		if signature, complete := duplicateProfileSignature("", mediaByProfile[id]); complete {
 			signatures[id] = signature
 		}
 	}
@@ -1045,8 +971,13 @@ func duplicateImageSignature(rows []duplicateImageRow) (string, bool) {
 	values := make([]string, 0, len(rows))
 	for _, row := range rows {
 		value := strings.ToLower(strings.TrimSpace(row.Md5))
-		if value == "" {
+		if value != "" {
+			value = "md5:" + value
+		} else {
 			value = strings.ToLower(strings.TrimSpace(row.PerceptualHash))
+			if value != "" {
+				value = "phash:" + value
+			}
 		}
 		if value == "" {
 			return "", false
@@ -1057,11 +988,7 @@ func duplicateImageSignature(rows []duplicateImageRow) (string, bool) {
 	return collectHash(strings.Join(values, "|")), true
 }
 
-func duplicateProfileSignature(text string, rows []duplicateImageRow) (string, bool) {
-	normalized := normalizeCollectText(normalizeCollectKeywordText(text))
-	if normalized != "" {
-		return "text:" + collectHash(normalized), true
-	}
+func duplicateProfileSignature(_ string, rows []duplicateImageRow) (string, bool) {
 	imageSignature, ok := duplicateImageSignature(rows)
 	if !ok {
 		return "", false

@@ -43,6 +43,14 @@ func TestDuplicateImageSignatureFallsBackToPHash(t *testing.T) {
 	}
 }
 
+func TestDuplicateImageSignatureDoesNotMixMD5AndPHash(t *testing.T) {
+	md5Signature, ok := duplicateImageSignature([]duplicateImageRow{{Md5: "d87a07c29151f7c5"}})
+	phashSignature, phashOK := duplicateImageSignature([]duplicateImageRow{{PerceptualHash: "d87a07c29151f7c5"}})
+	if !ok || !phashOK || md5Signature == phashSignature {
+		t.Fatalf("MD5 and pHash values must use distinct namespaces: %q == %q", md5Signature, phashSignature)
+	}
+}
+
 func TestDuplicatePHashBucketKeysAlwaysIncludeExactSetKey(t *testing.T) {
 	keys := duplicatePHashBucketKeys([]string{"CC2AF3518C676C93", "d87a07c29151f7c5"}, true)
 	want := "exact:cc2af3518c676c93|d87a07c29151f7c5"
@@ -54,11 +62,9 @@ func TestDuplicatePHashBucketKeysAlwaysIncludeExactSetKey(t *testing.T) {
 	t.Fatalf("exact pHash set key %q missing from %#v", want, keys)
 }
 
-func TestDuplicateProfileSignatureUsesNormalizedText(t *testing.T) {
-	left, ok := duplicateProfileSignature("介绍费：7888\nB2", nil)
-	right, rightOK := duplicateProfileSignature("介绍费：7888\u200b\nB2", nil)
-	if !ok || !rightOK || left != right || len(left) < len("text:") || left[:len("text:")] != "text:" {
-		t.Fatalf("normalized text must produce the same signature: %q != %q", left, right)
+func TestDuplicateProfileSignatureIgnoresTextOnlyMatches(t *testing.T) {
+	if signature, ok := duplicateProfileSignature("相同文案", nil); ok || signature != "" {
+		t.Fatalf("text-only profiles must not be treated as image duplicates: %q", signature)
 	}
 }
 
@@ -301,7 +307,7 @@ func TestValidateDuplicateCleanupStateRejectsChangedTargetSignature(t *testing.T
 		1: {Id: 1, CreatedAt: targetTime},
 		2: {Id: 2, CreatedAt: keepTime},
 	}
-	if err := validateDuplicateCleanupState([]int64{1}, candidates, profiles, map[int64]string{1: "changed", 2: "same"}, nil); err == nil {
+	if err := validateDuplicateCleanupState([]int64{1}, candidates, profiles, map[int64]string{1: "changed", 2: "same"}); err == nil {
 		t.Fatal("expected changed target signature to be rejected")
 	}
 }
@@ -309,26 +315,26 @@ func TestValidateDuplicateCleanupStateRejectsChangedTargetSignature(t *testing.T
 func TestValidateDuplicateCleanupStateRejectsMissingKeep(t *testing.T) {
 	candidates := map[int64]duplicateScanCandidate{1: {ProfileId: 1, KeepProfileId: 2, Signature: "same"}}
 	profiles := map[int64]*sysin.AdminNoteDuplicateItemModel{1: {Id: 1}}
-	if err := validateDuplicateCleanupState([]int64{1}, candidates, profiles, map[int64]string{1: "same"}, nil); err == nil {
+	if err := validateDuplicateCleanupState([]int64{1}, candidates, profiles, map[int64]string{1: "same"}); err == nil {
 		t.Fatal("expected missing retained profile to be rejected")
 	}
 }
 
-func TestValidateDuplicateCleanupStateKeepsTextAndPHashIndependent(t *testing.T) {
+func TestValidateDuplicateCleanupStateRequiresExactImageSignature(t *testing.T) {
 	keepTime := gtime.New(time.Unix(20, 0))
 	targetTime := gtime.New(time.Unix(10, 0))
 	candidates := map[int64]duplicateScanCandidate{
-		1: {ProfileId: 1, KeepProfileId: 3, Signature: "text:same"},
-		2: {ProfileId: 2, KeepProfileId: 3, Signature: "phash:3"},
+		1: {ProfileId: 1, KeepProfileId: 3, Signature: "image:same"},
+		2: {ProfileId: 2, KeepProfileId: 3, Signature: "image:same"},
 	}
 	profiles := map[int64]*sysin.AdminNoteDuplicateItemModel{
 		1: {Id: 1, CreatedAt: targetTime},
 		2: {Id: 2, CreatedAt: targetTime},
 		3: {Id: 3, CreatedAt: keepTime},
 	}
-	signatures := map[int64]string{1: "text:same", 2: "text:other", 3: "text:same"}
-	if err := validateDuplicateCleanupState([]int64{1, 2}, candidates, profiles, signatures, map[int64]bool{2: true}); err != nil {
-		t.Fatalf("text and pHash candidates sharing a keep must validate independently: %v", err)
+	signatures := map[int64]string{1: "image:same", 2: "image:other", 3: "image:same"}
+	if err := validateDuplicateCleanupState([]int64{1, 2}, candidates, profiles, signatures); err == nil {
+		t.Fatal("changed exact image signature must be rejected")
 	}
 }
 
@@ -339,7 +345,7 @@ func TestValidateDuplicateCleanupStateRequiresNewerKeep(t *testing.T) {
 		1: {Id: 1, CreatedAt: sameTime},
 		2: {Id: 2, CreatedAt: sameTime},
 	}
-	if err := validateDuplicateCleanupState([]int64{2}, candidates, profiles, map[int64]string{1: "same", 2: "same"}, nil); err == nil {
+	if err := validateDuplicateCleanupState([]int64{2}, candidates, profiles, map[int64]string{1: "same", 2: "same"}); err == nil {
 		t.Fatal("expected older retained profile to be rejected")
 	}
 }
