@@ -133,17 +133,6 @@ func (material collectDedupeMaterial) signatures(includePHash bool) []collectDed
 	return items
 }
 
-func (material collectDedupeMaterial) exactMediaSignatures() []collectDedupeSignature {
-	items := make([]collectDedupeSignature, 0, 2)
-	if material.mediaKey != "" && material.mediaTotal > 0 && material.mediaCount == material.mediaTotal {
-		items = append(items, collectDedupeSignature{layer: "media_fingerprint", value: material.mediaKey, total: material.mediaTotal, count: material.mediaCount})
-	}
-	if material.imagePHashKey != "" && material.imageTotal > 0 && material.imagePHashCount == material.imageTotal {
-		items = append(items, collectDedupeSignature{layer: "image_phash", value: material.imagePHashKey, total: material.imageTotal, count: material.imagePHashCount})
-	}
-	return items
-}
-
 func collectDedupeMaterialFromItems(textHash string, items []collectMediaItem) collectDedupeMaterial {
 	mediaKey := collectMediaFingerprintSetKey(items)
 	imagePHashKey, imagePHashCount := collectImagePHashSetKey(items)
