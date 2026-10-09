@@ -509,6 +509,15 @@ func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, even
 				return
 			}
 			defer releaseAccountSlot()
+			itemTimeout := time.Duration(g.Cfg().MustGet(ctx, "youbanPublish.collect.mediaItemTimeoutSeconds", int(collectMediaDefaultItemTimeout/time.Second)).Int()) * time.Second
+			if itemTimeout < 30*time.Second {
+				itemTimeout = 30 * time.Second
+			}
+			if itemTimeout > 15*time.Minute {
+				itemTimeout = 15 * time.Minute
+			}
+			itemCtx, cancelItem := context.WithTimeout(ctx, itemTimeout)
+			defer cancelItem()
 			g.Log().Debugf(ctx, "采集媒体下载获取全局/账号并发槽完成 eventId:%d mediaId:%d wait:%s", event["id"].Int64(), row.Id, time.Since(accountSlotStartedAt).Round(time.Millisecond))
 			statusStartedAt := time.Now()
 			_, statusErr := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).Where("id", row.Id).Data(g.Map{
@@ -533,9 +542,9 @@ func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, even
 			s.appendCollectEventLogForRecord(ctx, event, "media", "downloading", logMessage, fmt.Sprintf("mediaId=%d sourceMessageId=%d sourceFileId=%s", row.Id, row.SourceMessageId, row.SourceFileId))
 			var cached *collectDownloadedMedia
 			if sourceType == sysin.CollectSourceTypeBot {
-				cached, err = s.downloadBotTelegramMedia(ctx, event["tenant_id"].Int64(), event["bot_id"].Int64(), items[index])
+				cached, err = s.downloadBotTelegramMedia(itemCtx, event["tenant_id"].Int64(), event["bot_id"].Int64(), items[index])
 			} else {
-				cached, err = s.downloadTelegramMedia(ctx, event["tenant_id"].Int64(), event["account_id"].Int64(), event["tg_account_id"].Int64(), items[index])
+				cached, err = s.downloadTelegramMedia(itemCtx, event["tenant_id"].Int64(), event["account_id"].Int64(), event["tg_account_id"].Int64(), items[index])
 			}
 			if err != nil {
 				downloadDuration := time.Since(startedAt).Milliseconds()
@@ -1304,6 +1313,7 @@ const (
 	collectMediaDefaultAccountConcurrency = 8
 	collectMediaMaxGlobalConcurrency      = 256
 	collectMediaMaxAccountConcurrency     = 8
+	collectMediaDefaultItemTimeout        = 3 * time.Minute
 )
 
 func normalizeCollectMediaConcurrency(globalLimit int, accountLimit int) (int, int) {

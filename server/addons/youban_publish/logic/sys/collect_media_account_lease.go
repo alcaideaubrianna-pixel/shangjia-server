@@ -40,12 +40,13 @@ return removed
 `
 
 type collectMediaAccountLease struct {
-	key   string
-	token string
-	ttl   time.Duration
-	stop  chan struct{}
-	done  chan struct{}
-	once  sync.Once
+	key         string
+	token       string
+	ttl         time.Duration
+	maxLifetime time.Duration
+	stop        chan struct{}
+	done        chan struct{}
+	once        sync.Once
 }
 
 func acquireCollectMediaAccountLease(ctx context.Context, tenantId int64, tgAccountId int64, limit int) (*collectMediaAccountLease, bool, error) {
@@ -59,13 +60,21 @@ func acquireCollectMediaAccountLease(ctx context.Context, tenantId int64, tgAcco
 	if ttl > 10*time.Minute {
 		ttl = 10 * time.Minute
 	}
+	maxLifetime := time.Duration(g.Cfg().MustGet(ctx, "youbanPublish.collect.accountMediaLeaseMaxLifetimeSeconds", 600).Int()) * time.Second
+	if maxLifetime < ttl {
+		maxLifetime = ttl
+	}
+	if maxLifetime > 30*time.Minute {
+		maxLifetime = 30 * time.Minute
+	}
 	now := time.Now()
 	lease := &collectMediaAccountLease{
-		key:   fmt.Sprintf("%s:%d:%d", collectMediaAccountLeaseKeyPrefix, tenantId, tgAccountId),
-		token: guid.S(),
-		ttl:   ttl,
-		stop:  make(chan struct{}),
-		done:  make(chan struct{}),
+		key:         fmt.Sprintf("%s:%d:%d", collectMediaAccountLeaseKeyPrefix, tenantId, tgAccountId),
+		token:       guid.S(),
+		ttl:         ttl,
+		maxLifetime: maxLifetime,
+		stop:        make(chan struct{}),
+		done:        make(chan struct{}),
 	}
 	result, err := g.Redis().GroupScript().Eval(ctx, collectMediaAccountLeaseAcquireScript, 1, []string{lease.key}, []interface{}{
 		now.UnixMilli(),
@@ -80,7 +89,7 @@ func acquireCollectMediaAccountLease(ctx context.Context, tenantId int64, tgAcco
 	if result.Int() != 1 {
 		return nil, false, nil
 	}
-	go lease.renew()
+	go lease.renew(now)
 	return lease, true, nil
 }
 
@@ -97,7 +106,7 @@ func (lease *collectMediaAccountLease) Release() {
 	})
 }
 
-func (lease *collectMediaAccountLease) renew() {
+func (lease *collectMediaAccountLease) renew(acquiredAt time.Time) {
 	defer close(lease.done)
 	ticker := time.NewTicker(lease.ttl / 3)
 	defer ticker.Stop()
@@ -106,6 +115,13 @@ func (lease *collectMediaAccountLease) renew() {
 		case <-lease.stop:
 			return
 		case <-ticker.C:
+			if time.Since(acquiredAt) >= lease.maxLifetime {
+				g.Log().Warningf(context.Background(), "采集媒体账号租约达到最大生命周期，强制释放 key:%s lifetime:%s", lease.key, time.Since(acquiredAt))
+				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				_, _ = g.Redis().GroupScript().Eval(ctx, collectMediaAccountLeaseReleaseScript, 1, []string{lease.key}, []interface{}{lease.token})
+				cancel()
+				return
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			now := time.Now()
 			result, err := g.Redis().GroupScript().Eval(ctx, collectMediaAccountLeaseRenewScript, 1, []string{lease.key}, []interface{}{

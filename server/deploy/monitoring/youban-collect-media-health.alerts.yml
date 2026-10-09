@@ -1,0 +1,73 @@
+groups:
+  - name: youban-collect-media-health
+    interval: 15s
+    rules:
+      - alert: YoubanCollectMediaPendingStale
+        expr: '{__name__="xiaohuiji.collect.media_pending_oldest_age_seconds"} > 300'
+        for: 5m
+        labels:
+          severity: CRIT
+          category: collect
+        annotations:
+          summary: "采集媒体积压超过 5 分钟"
+          description: "最老媒体待处理时间已达 {{ $value }} 秒；检查 media-worker、Bot API 与 TG 账号租约"
+
+      - alert: YoubanCollectMediaPendingCritical
+        expr: '{__name__="xiaohuiji.collect.media_pending_events"} > 100'
+        for: 10m
+        labels:
+          severity: WARN
+          category: collect
+        annotations:
+          summary: "采集媒体待处理数量持续过高"
+          description: "媒体待处理事件数为 {{ $value }}，已持续 10 分钟"
+
+      - alert: YoubanCollectMediaAccountConcurrencyFull
+        expr: 'sum by (tenant_id, tg_account_id) (increase({__name__="xiaohuiji.collect.media_scheduler_events",action="account_concurrency_full"}[5m])) > 20'
+        for: 5m
+        labels:
+          severity: WARN
+          category: collect
+        annotations:
+          summary: "TG 账号媒体并发持续满载"
+          description: "租户 {{ $labels.tenant_id }} 的 TG 账号 {{ $labels.tg_account_id }} 最近 5 分钟触发并发满载 {{ $value }} 次"
+
+      - alert: YoubanCollectMediaRecoveryNoProgress
+        expr: 'sum by (tenant_id, tg_account_id) (increase({__name__="xiaohuiji.collect.media_scheduler_events",action="recovery_reenqueued"}[10m])) > 0 and sum by (tenant_id, tg_account_id) (increase({__name__="xiaohuiji.collect.media_scheduler_events",action="account_concurrency_full"}[10m])) > 50'
+        for: 10m
+        labels:
+          severity: CRIT
+          category: collect
+        annotations:
+          summary: "采集媒体恢复任务反复入队但没有有效进展"
+          description: "租户 {{ $labels.tenant_id }} 的 TG 账号 {{ $labels.tg_account_id }} 持续恢复入队且并发槽位长期满载"
+
+      - alert: YoubanCollectMediaRecoveryEnqueueSkipped
+        expr: 'sum by (tenant_id, tg_account_id) (increase({__name__="xiaohuiji.collect.media_scheduler_events",action="recovery_enqueue_skipped"}[10m])) > 5'
+        for: 5m
+        labels:
+          severity: WARN
+          category: collect
+        annotations:
+          summary: "采集媒体恢复入队被跳过"
+          description: "租户 {{ $labels.tenant_id }} 的 TG 账号 {{ $labels.tg_account_id }} 最近 10 分钟恢复入队被跳过 {{ $value }} 次"
+
+      - alert: YoubanCollectMediaPendingTaskMissing
+        expr: '{__name__="xiaohuiji.invariant.media_pending_missing_asynq_task"} > 0'
+        for: 3m
+        labels:
+          severity: CRIT
+          category: collect
+        annotations:
+          summary: "采集媒体待处理事件缺少队列任务"
+          description: "检测到 {{ $value }} 个 media_pending 事件没有对应 Asynq 任务"
+
+      - alert: YoubanCollectMediaDownloadSourceErrors
+        expr: 'sum by (source, error_class) (increase({__name__="xiaohuiji.media.download_source_events",result="error"}[5m])) > 5'
+        for: 3m
+        labels:
+          severity: WARN
+          category: media
+        annotations:
+          summary: "采集媒体下载源错误增加"
+          description: "下载源 {{ $labels.source }} / {{ $labels.error_class }} 最近 5 分钟失败 {{ $value }} 次"
