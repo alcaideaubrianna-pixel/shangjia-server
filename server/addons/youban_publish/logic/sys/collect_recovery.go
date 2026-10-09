@@ -329,18 +329,21 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 	}
 	deadline := gtime.Now().Add(-collectEventRecoverAfter)
 	statuses := []string{sysin.CollectEventStatusPending, sysin.CollectEventStatusGroupCollect, sysin.CollectEventStatusWaitingOrder, sysin.CollectEventStatusPrechecked, sysin.CollectEventStatusMediaPending, sysin.CollectEventStatusMediaReady, sysin.CollectEventStatusFailed}
-	sourceRows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
-		Fields("e.source_id,e.source_chat_id,MIN(e.updated_at) AS oldest_at").
+	sourceModel := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
+		Fields("e.source_id,e.source_chat_id").
 		WhereIn("e.status", statuses).
 		WhereLTE("e.updated_at", deadline).
 		Where(enabledCollectSourceExistsSQL("e")).
 		Group("e.source_id,e.source_chat_id").
-		OrderAsc("oldest_at").
-		All()
+		OrderAsc("e.source_id,e.source_chat_id")
+	sourceCount, err := sourceModel.Clone().Fields("1").Count()
+	if err != nil {
+		return gerror.Wrap(err, "统计待恢复采集源失败")
+	}
+	sourceRows, err := sourceModel.Offset(fairCollectRecoverySourceOffset(sourceCount, limit, time.Now().Unix()/60)).Limit(limit).All()
 	if err != nil {
 		return gerror.Wrap(err, "读取待恢复采集源失败")
 	}
-	sourceRows = fairCollectRecoverySourceRows(sourceRows, limit, time.Now().Unix()/60)
 	perSourceLimit := collectRecoveryPerSourceLimit(limit, len(sourceRows))
 	remaining := limit
 	for _, sourceRow := range sourceRows {
@@ -412,21 +415,16 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 	return nil
 }
 
-func fairCollectRecoverySourceRows(rows gdb.Result, limit int, round int64) gdb.Result {
-	if limit <= 0 || len(rows) <= limit {
-		return rows
+func fairCollectRecoverySourceOffset(sourceCount, limit int, round int64) int {
+	if sourceCount <= limit || limit <= 0 {
+		return 0
 	}
-	windowCount := (len(rows) + limit - 1) / limit
+	windowCount := (sourceCount + limit - 1) / limit
 	window := int(round % int64(windowCount))
 	if window < 0 {
 		window += windowCount
 	}
-	start := window * limit
-	result := make(gdb.Result, 0, limit)
-	for offset := 0; offset < limit; offset++ {
-		result = append(result, rows[(start+offset)%len(rows)])
-	}
-	return result
+	return window * limit
 }
 
 func collectRecoveryPerSourceLimit(totalLimit, sourceCount int) int {

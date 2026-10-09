@@ -1,37 +1,27 @@
 package sys
 
-import (
-	"testing"
+import "testing"
 
-	"github.com/gogf/gf/v2/container/gvar"
-	"github.com/gogf/gf/v2/database/gdb"
-)
-
-func TestFairCollectRecoverySourceRowsRotatesWindows(t *testing.T) {
-	rows := make(gdb.Result, 0, 157)
-	for id := 1; id <= 157; id++ {
-		rows = append(rows, gdb.Record{"source_id": gvar.New(id)})
+func TestFairCollectRecoverySourceOffset(t *testing.T) {
+	tests := []struct {
+		name        string
+		sourceCount int
+		limit       int
+		round       int64
+		want        int
+	}{
+		{name: "first window", sourceCount: 157, limit: 100, round: 0, want: 0},
+		{name: "second window", sourceCount: 157, limit: 100, round: 1, want: 100},
+		{name: "wraps windows", sourceCount: 157, limit: 100, round: 2, want: 0},
+		{name: "short input", sourceCount: 2, limit: 100, round: 1, want: 0},
+		{name: "invalid limit", sourceCount: 157, limit: 0, round: 1, want: 0},
 	}
-
-	first := fairCollectRecoverySourceRows(rows, 100, 0)
-	second := fairCollectRecoverySourceRows(rows, 100, 1)
-	if len(first) != 100 || len(second) != 100 {
-		t.Fatalf("window sizes = %d and %d, want 100", len(first), len(second))
-	}
-	seen := make(map[int64]bool, len(rows))
-	for _, row := range append(first, second...) {
-		seen[row["source_id"].Int64()] = true
-	}
-	if len(seen) != len(rows) {
-		t.Fatalf("two windows covered %d sources, want %d", len(seen), len(rows))
-	}
-}
-
-func TestFairCollectRecoverySourceRowsKeepsShortInput(t *testing.T) {
-	rows := gdb.Result{{"source_id": gvar.New(1)}, {"source_id": gvar.New(2)}}
-	got := fairCollectRecoverySourceRows(rows, 100, 1)
-	if len(got) != len(rows) || got[0]["source_id"].Int() != 1 || got[1]["source_id"].Int() != 2 {
-		t.Fatalf("fairCollectRecoverySourceRows() = %#v, want original rows", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := fairCollectRecoverySourceOffset(tt.sourceCount, tt.limit, tt.round); got != tt.want {
+				t.Fatalf("fairCollectRecoverySourceOffset(%d, %d, %d) = %d, want %d", tt.sourceCount, tt.limit, tt.round, got, tt.want)
+			}
+		})
 	}
 }
 
