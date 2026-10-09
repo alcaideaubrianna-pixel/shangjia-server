@@ -92,10 +92,13 @@ func (s *sSysPublish) pauseInactiveFreeChannelCycles(ctx context.Context) error 
 		if err != nil || tenantVipStatusActive(vip) {
 			continue
 		}
-		var last *gtime.Time
-		if err = pdao.YoubanPublishAccount.Ctx(ctx).Fields("last_active_at").Where("tenant_id", channel.TenantId).Where("account_type", sysin.PublishAccountTypeAdmin).Where("status", 1).OrderDesc("last_active_at").Limit(1).Scan(&last); err != nil {
+		var activity struct {
+			LastActiveAt *gtime.Time `orm:"last_active_at"`
+		}
+		if err = pdao.YoubanPublishAccount.Ctx(ctx).Fields("last_active_at").Where("tenant_id", channel.TenantId).Where("account_type", sysin.PublishAccountTypeAdmin).Where("status", 1).OrderDesc("last_active_at").Limit(1).Scan(&activity); err != nil {
 			return err
 		}
+		last := activity.LastActiveAt
 		if last != nil && !last.Before(cutoff) {
 			continue
 		}

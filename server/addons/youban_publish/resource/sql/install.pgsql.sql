@@ -1920,6 +1920,7 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_media_phash_lsh_lookup" ON "hg_youban_publis
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_phash_lsh_profile_id" ON "hg_youban_publish_media_phash_lsh" ("profile_id");
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_media_fingerprint" ("media_id" bigint PRIMARY KEY,"tenant_id" bigint NOT NULL DEFAULT 0,"account_id" bigint NOT NULL DEFAULT 0,"profile_id" bigint NOT NULL DEFAULT 0,"media_type" varchar(16) NOT NULL DEFAULT '',"phash_bits" bit(64),"md5" varchar(128) NOT NULL DEFAULT '',"deleted_at" timestamp DEFAULT NULL,"updated_at" timestamp DEFAULT NULL);
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_fingerprint_scope" ON "hg_youban_publish_media_fingerprint" ("tenant_id","media_type","deleted_at");
+CREATE INDEX IF NOT EXISTS "idx_ybp_media_fingerprint_exact_scope" ON "hg_youban_publish_media_fingerprint" ("phash_bits", "tenant_id", "account_id", "profile_id", "media_id") WHERE "deleted_at" IS NULL AND "media_type" = 'image' AND "phash_bits" IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_success_record" (
   "id" BIGSERIAL PRIMARY KEY, "job_id" bigint NOT NULL DEFAULT 0, "task_id" bigint NOT NULL DEFAULT 0,

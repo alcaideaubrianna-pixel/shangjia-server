@@ -9,7 +9,10 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 )
 
-const telegramBotGetFileMaxAttempts = 4
+const (
+	telegramBotGetFileMaxAttempts    = 4
+	telegramBotGetFileAttemptTimeout = 3 * time.Second
+)
 
 var telegramBotGetFileRetryDelays = []time.Duration{
 	250 * time.Millisecond,
@@ -26,7 +29,9 @@ func telegramBotGetFileWithRetry(
 	var file *models.File
 	var err error
 	for attempt := 1; attempt <= telegramBotGetFileMaxAttempts; attempt++ {
-		file, err = request(requestCtx)
+		attemptCtx, cancel := context.WithTimeout(requestCtx, telegramBotGetFileAttemptTimeout)
+		file, err = request(attemptCtx)
+		cancel()
 		if err == nil || !isRetryableTelegramBotGetFileError(err) || attempt == telegramBotGetFileMaxAttempts || requestCtx.Err() != nil {
 			return file, attempt, err
 		}
@@ -61,6 +66,7 @@ func isRetryableTelegramBotGetFileError(err error) bool {
 		"broken pipe",
 		"unexpected eof",
 		"i/o timeout",
+		"context deadline exceeded",
 		"tls handshake timeout",
 	} {
 		if strings.Contains(message, fragment) {

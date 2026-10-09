@@ -995,10 +995,12 @@ func (s *sSysPublish) downloadBotTelegramMediaWithToken(ctx context.Context, bot
 	}
 	endpoint := telegramBotAPIEndpoint(conf.BotApiServerUrl)
 	getFileStartedAt := time.Now()
-	file, err := bot.GetFile(ctx, &tgbot.GetFileParams{FileID: fileID})
+	file, attempts, err := telegramBotGetFileWithBoundedRetry(ctx, func(requestCtx context.Context) (*models.File, error) {
+		return bot.GetFile(requestCtx, &tgbot.GetFileParams{FileID: fileID})
+	})
 	if err != nil {
 		observeTelegramBotGetFile(ctx, endpoint, "error", time.Since(getFileStartedAt))
-		return nil, gerror.Wrap(err, "读取Bot媒体文件信息失败")
+		return nil, gerror.Wrapf(err, "读取Bot媒体文件信息失败，已尝试%d次", attempts)
 	}
 	observeTelegramBotGetFile(ctx, endpoint, "success", time.Since(getFileStartedAt))
 	if file == nil || strings.TrimSpace(file.FilePath) == "" {

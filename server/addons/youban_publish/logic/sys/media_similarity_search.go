@@ -8,6 +8,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/corona10/goimagehash"
 	"github.com/gogf/gf/v2/database/gdb"
@@ -124,7 +125,9 @@ func (s *sSysPublish) profileFingerprintSearchCandidatesExactFirst(ctx context.C
 		return []publishProfilePHashDistance{}, nil
 	}
 	if fingerprint.MD5 != "" {
+		startedAt := time.Now()
 		exact, err := mediaMD5CandidateMatches(ctx, fingerprint.MD5, scope, candidateProfileIds)
+		observeBotMediaSearchStage(ctx, "md5_query", startedAt, err)
 		if err != nil {
 			return nil, err
 		}
@@ -132,17 +135,57 @@ func (s *sSysPublish) profileFingerprintSearchCandidatesExactFirst(ctx context.C
 			return exact, nil
 		}
 	}
-	queryHash := fingerprint.PHash
-	exactInput := *in
-	exactInput.Threshold = 0
-	exact, err := s.profilePHashSearchCandidates(ctx, queryHash, &exactInput, scope, candidateProfileIds)
+	startedAt := time.Now()
+	var exact []publishProfilePHashDistance
+	var err error
+	if isPostgresDatabase() {
+		exact, err = mediaPHashExactCandidateMatches(ctx, fingerprint.PHash, scope, candidateProfileIds)
+	} else {
+		exactInput := *in
+		exactInput.Threshold = 0
+		exact, err = s.profilePHashSearchCandidates(ctx, fingerprint.PHash, &exactInput, scope, candidateProfileIds)
+	}
+	observeBotMediaSearchStage(ctx, "phash_exact", startedAt, err)
 	if err != nil {
 		return nil, err
 	}
 	if len(exact) > 0 {
 		return exact, nil
 	}
-	return s.profilePHashSearchCandidates(ctx, queryHash, in, scope, candidateProfileIds)
+	startedAt = time.Now()
+	items, err := s.profilePHashSearchCandidates(ctx, fingerprint.PHash, in, scope, candidateProfileIds)
+	observeBotMediaSearchStage(ctx, "phash_approx", startedAt, err)
+	return items, err
+}
+
+func mediaPHashExactCandidateMatches(ctx context.Context, queryHash *goimagehash.ImageHash, scope *publishmodel.MediaSearchScope, candidateProfileIds []int64) ([]publishProfilePHashDistance, error) {
+	if queryHash == nil || scope == nil || len(scope.Partitions) == 0 {
+		return []publishProfilePHashDistance{}, nil
+	}
+	mod := g.DB().Model("hg_youban_publish_media_fingerprint f").Safe().Ctx(ctx).
+		Fields("f.media_id,f.profile_id,f.account_id,f.tenant_id,f.media_type").
+		Where("f.phash_bits = ('x'||?)::bit(64)", fmt.Sprintf("%016x", queryHash.GetHash())).
+		Where("f.media_type", "image").
+		WhereNull("f.deleted_at")
+	if scopeSQL, scopeArgs := mediaPHashBucketScopeSQL("f", scope.Partitions); scopeSQL != "" {
+		mod = mod.Where("("+scopeSQL+")", scopeArgs...)
+	} else {
+		return []publishProfilePHashDistance{}, nil
+	}
+	if len(candidateProfileIds) > 0 {
+		mod = mod.WhereIn("f.profile_id", uniqueIds(candidateProfileIds))
+	}
+	mod = mod.Where("EXISTS (SELECT 1 FROM hg_content_profile p WHERE p.id=f.profile_id AND p.deleted_at IS NULL)")
+	mod = mod.Where("EXISTS (SELECT 1 FROM hg_youban_publish_profile_state ps WHERE ps.profile_id=f.profile_id AND ps.account_id=f.account_id AND ps.tenant_id=f.tenant_id AND ps.deleted_at IS NULL)")
+	rows := make([]mediaPHashBucketCandidateRow, 0)
+	if err := mod.Scan(&rows); err != nil {
+		return nil, gerror.Wrap(err, "查询媒体pHash精确匹配失败")
+	}
+	items := make([]publishProfilePHashDistance, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, publishProfilePHashDistance{ProfileId: row.ProfileId, Distance: 0, MediaId: row.MediaId, MediaType: row.MediaType})
+	}
+	return mediaPHashDeduplicateProfiles(items), nil
 }
 
 func mediaMD5CandidateMatches(ctx context.Context, md5Value string, scope *publishmodel.MediaSearchScope, candidateProfileIds []int64) ([]publishProfilePHashDistance, error) {
@@ -212,8 +255,12 @@ func (s *sSysPublish) profilePHashSearchCandidates(ctx context.Context, queryHas
 }
 
 func isVectorPHashEnabled(ctx context.Context) bool {
+	return g.Cfg().MustGet(ctx, "youbanPublish.mediaSearch.pgvector.enabled", false).Bool() && isPostgresDatabase()
+}
+
+func isPostgresDatabase() bool {
 	dbType := strings.ToLower(g.DB().GetConfig().Type)
-	return g.Cfg().MustGet(ctx, "youbanPublish.mediaSearch.pgvector.enabled", false).Bool() && (dbType == "pgsql" || dbType == "postgres")
+	return dbType == "pgsql" || dbType == "postgres"
 }
 
 func (s *sSysPublish) profilePHashVectorCandidates(ctx context.Context, queryHash *goimagehash.ImageHash, in *sysin.ProfileImageSearchInp, scope *publishmodel.MediaSearchScope, candidateProfileIds []int64) ([]publishProfilePHashDistance, error) {

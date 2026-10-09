@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 
@@ -155,7 +156,9 @@ func (s *sSysPublish) botMediaSearchFingerprint(ctx context.Context, fingerprint
 	if len(profileIds) == 0 {
 		return []*sysin.NoteModel{}, total, false, nil
 	}
+	startedAt := time.Now()
 	list, err := s.profileImageSearchNotesByScope(ctx, profileIds, searchScope, nil, "")
+	observeBotMediaSearchStage(ctx, "profile_load", startedAt, err)
 	if err != nil {
 		return nil, 0, false, err
 	}

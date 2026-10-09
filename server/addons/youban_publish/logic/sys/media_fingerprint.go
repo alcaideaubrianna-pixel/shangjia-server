@@ -96,7 +96,9 @@ func cachedRemoteImageFingerprint(ctx context.Context, imageURL string) (*mediaF
 	if imageURL == "" {
 		return nil, gerror.New("请发送要搜索的图片")
 	}
+	startedAt := time.Now()
 	path, err := cachedRemoteMediaFile(ctx, mediaFileCacheKey(nil, imageURL), imageURL, mediaFileCacheExt(&telegramMediaItem{MediaType: "image", FileUrl: imageURL}, imageURL))
+	observeBotMediaSearchStage(ctx, "remote_download", startedAt, err)
 	if err != nil {
 		return nil, err
 	}
@@ -104,11 +106,22 @@ func cachedRemoteImageFingerprint(ctx context.Context, imageURL string) (*mediaF
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取缓存图片失败")
 	}
-	hash, err := imagePHashFromBytes(content)
+	startedAt = time.Now()
+	img, _, err := image.Decode(bytes.NewReader(content))
+	observeBotMediaSearchStage(ctx, "image_decode", startedAt, err)
 	if err != nil {
-		return nil, err
+		return nil, gerror.New("图片格式不支持，请上传 JPG、PNG 或 GIF")
 	}
-	return &mediaFingerprint{MD5: md5Hex(content), PHash: hash}, nil
+	startedAt = time.Now()
+	md5Value := md5Hex(content)
+	observeBotMediaSearchStage(ctx, "md5_compute", startedAt, nil)
+	startedAt = time.Now()
+	hash, err := goimagehash.PerceptionHash(img)
+	observeBotMediaSearchStage(ctx, "phash_compute", startedAt, err)
+	if err != nil {
+		return nil, gerror.Wrap(err, "计算图片感知哈希失败")
+	}
+	return &mediaFingerprint{MD5: md5Value, PHash: hash}, nil
 }
 
 func imagePHashFromBytes(content []byte) (*goimagehash.ImageHash, error) {

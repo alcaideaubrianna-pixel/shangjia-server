@@ -32,3 +32,4 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_profile_state_dashboard" ON "hg
 DROP INDEX CONCURRENTLY IF EXISTS "idx_ybp_media_phash_lsh_search";
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_media_fingerprint_hnsw" ON "hg_youban_publish_media_fingerprint" USING hnsw ("phash_bits" bit_hamming_ops) WITH (m=8, ef_construction=64);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_media_fingerprint_exact_scope" ON "hg_youban_publish_media_fingerprint" ("phash_bits", "tenant_id", "account_id", "profile_id", "media_id") WHERE "deleted_at" IS NULL AND "media_type" = 'image' AND "phash_bits" IS NOT NULL;
