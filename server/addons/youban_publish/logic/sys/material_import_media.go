@@ -548,7 +548,6 @@ func (s *sSysPublish) refreshMaterialImportTaskStats(ctx context.Context, taskId
 		taskCols.MediaTotal:  mediaTotalValue.Int(),
 		taskCols.MediaDone:   mediaDoneValue.Int(),
 		taskCols.MediaFailed: mediaFailedValue.Int(),
-		taskCols.UpdatedAt:   gtime.Now(),
 	}).Update()
 	return err
 }
