@@ -220,10 +220,11 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 	if err != nil {
 		return err
 	}
-	if available, checkErr := s.telegramAccountCanPublish(ctx, job.TenantId, job.AccountId); checkErr != nil {
+	tgAccountId, available, checkErr := s.telegramJobAccountCanPublish(ctx, job)
+	if checkErr != nil {
 		return checkErr
 	} else if !available {
-		return s.pauseTelegramJobsForUnavailableAccount(ctx, job.AccountId, "TG账号当前未授权或会话不可用")
+		return s.pauseTelegramJobsForUnavailableAccount(ctx, tgAccountId, "TG账号当前未授权或会话不可用")
 	}
 	if delay <= 0 {
 		if windowDelay, enabled := s.telegramPublishWindowDelay(ctx, job.TenantId, job.AccountId); enabled && windowDelay > 0 {

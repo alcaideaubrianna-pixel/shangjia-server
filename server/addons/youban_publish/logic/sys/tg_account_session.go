@@ -74,32 +74,53 @@ const tgAccountSessionExpiredMessage = "TG账号登录态已失效，请重新�
 // telegramAccountCanPublish is the single gate used before a Telegram publish
 // task enters Asynq. It prevents disabled/expired accounts from repeatedly
 // consuming queue capacity while their channel jobs remain pending.
-func (s *sSysPublish) telegramAccountCanPublish(ctx context.Context, tenantId, tgAccountId int64) (bool, error) {
-	if tenantId <= 0 || tgAccountId <= 0 {
-		return false, nil
+func (s *sSysPublish) telegramJobAccountCanPublish(ctx context.Context, job telegramJobRecord) (int64, bool, error) {
+	if job.TenantId <= 0 || job.ChannelId <= 0 {
+		return 0, false, nil
+	}
+	channelTable := publishChannelTable
+	if isMessagePushOperationNo(job.OperationNo) {
+		channelTable = publishTgChannelTable
+	}
+	channel, err := g.DB().Model(channelTable).Safe().Ctx(ctx).
+		Fields("tg_account_id").Where("id", job.ChannelId).Where("tenant_id", job.TenantId).WhereNull("deleted_at").One()
+	if err != nil {
+		return 0, false, gerror.Wrap(err, "读取TG任务发送账号失败")
+	}
+	tgAccountId := channel["tg_account_id"].Int64()
+	if tgAccountId <= 0 {
+		return 0, false, nil
 	}
 	var account struct {
 		Status     string `orm:"status"`
 		SessionKey string `orm:"session_key"`
 	}
-	err := g.DB().Model(publishTgAccountTable).Safe().Ctx(ctx).
+	err = g.DB().Model(publishTgAccountTable).Safe().Ctx(ctx).
 		Fields("status,session_key").
 		Where("id", tgAccountId).
-		Where("tenant_id", tenantId).
+		Where("tenant_id", job.TenantId).
 		WhereNull("deleted_at").
 		Scan(&account)
 	if err != nil {
-		return false, gerror.Wrap(err, "检查TG账号发布状态失败")
+		return tgAccountId, false, gerror.Wrap(err, "检查TG账号发布状态失败")
 	}
-	return account.Status == sysin.PublishTgAccountStatusAuthorized && strings.TrimSpace(account.SessionKey) != "", nil
+	return tgAccountId, account.Status == sysin.PublishTgAccountStatusAuthorized && strings.TrimSpace(account.SessionKey) != "", nil
 }
 
 func (s *sSysPublish) pauseTelegramJobsForUnavailableAccount(ctx context.Context, tgAccountId int64, reason string) error {
 	if tgAccountId <= 0 {
 		return nil
 	}
+	accountChannelCondition := `(
+		(operation_no NOT LIKE 'message_push:%' AND operation_no NOT LIKE 'message_push_plan:%' AND EXISTS (
+			SELECT 1 FROM ` + publishChannelTable + ` c WHERE c.id=` + publishTgJobTable + `.channel_id AND c.tenant_id=` + publishTgJobTable + `.tenant_id AND c.tg_account_id=? AND c.deleted_at IS NULL
+		)) OR
+		((operation_no LIKE 'message_push:%' OR operation_no LIKE 'message_push_plan:%') AND EXISTS (
+			SELECT 1 FROM ` + publishTgChannelTable + ` c WHERE c.id=` + publishTgJobTable + `.channel_id AND c.tenant_id=` + publishTgJobTable + `.tenant_id AND c.tg_account_id=? AND c.deleted_at IS NULL
+		))
+	)`
 	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("account_id", tgAccountId).
+		Where(accountChannelCondition, tgAccountId, tgAccountId).
 		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
 		WhereIn("dispatch_status", []string{"", tgDispatchStatusIdle, tgDispatchStatusQueued, tgDispatchStatusProcessing}).
 		Data(g.Map{
