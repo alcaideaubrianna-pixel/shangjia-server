@@ -2,7 +2,9 @@ package sys
 
 import (
 	"context"
+	"errors"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,6 +20,8 @@ var (
 	scanStageDurationSum    metric.Float64Counter
 	scanStageDurationBucket metric.Int64Counter
 	scanDirectLookupCount   metric.Int64Counter
+	scanGetFileRequests     metric.Int64Counter
+	scanGetFileDuration     metric.Float64Histogram
 )
 
 var scanDurationBuckets = []struct {
@@ -36,7 +40,56 @@ func initScanMetrics() {
 		scanStageDurationSum, _ = meter.Float64Counter("xiaohuiji.bot.scan.stage.duration.sum", metric.WithUnit("s"))
 		scanStageDurationBucket, _ = meter.Int64Counter("xiaohuiji.bot.scan.stage.duration.bucket")
 		scanDirectLookupCount, _ = meter.Int64Counter("xiaohuiji.bot.scan.direct_lookup")
+		scanGetFileRequests, _ = meter.Int64Counter("xiaohuiji.bot.scan.telegram_get_file.requests")
+		scanGetFileDuration, _ = meter.Float64Histogram("xiaohuiji.bot.scan.telegram_get_file.duration_seconds", metric.WithUnit("s"))
 	})
+}
+
+func observeScanTelegramGetFile(ctx context.Context, botId int64, attempts int, startedAt time.Time, err error) {
+	initScanMetrics()
+	attrs := metric.WithAttributes(
+		attribute.String("bot_id", strconv.FormatInt(botId, 10)),
+		attribute.Int("attempts", attempts),
+		attribute.String("result", scanTelegramRequestResult(err)),
+		attribute.String("error_type", scanTelegramErrorType(err)),
+	)
+	if scanGetFileRequests != nil {
+		scanGetFileRequests.Add(ctx, 1, attrs)
+	}
+	if scanGetFileDuration != nil {
+		scanGetFileDuration.Record(ctx, time.Since(startedAt).Seconds(), attrs)
+	}
+}
+
+func scanTelegramRequestResult(err error) string {
+	if err == nil {
+		return "success"
+	}
+	if errors.Is(err, context.DeadlineExceeded) || strings.Contains(strings.ToLower(err.Error()), "deadline exceeded") {
+		return "timeout"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "canceled"
+	}
+	return "error"
+}
+
+func scanTelegramErrorType(err error) string {
+	if err == nil {
+		return "none"
+	}
+	message := strings.ToLower(err.Error())
+	for _, item := range []struct{ fragment, label string }{
+		{"no such host", "dns"}, {"server misbehaving", "dns"},
+		{"deadline exceeded", "timeout"}, {"i/o timeout", "timeout"},
+		{"connection refused", "connection_refused"}, {"connection reset", "connection_reset"},
+		{"unexpected eof", "unexpected_eof"}, {"bad request", "bad_request"},
+	} {
+		if strings.Contains(message, item.fragment) {
+			return item.label
+		}
+	}
+	return "other"
 }
 
 func observeScanRequest(ctx context.Context, botId int64, result string) {

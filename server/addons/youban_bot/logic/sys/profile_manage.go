@@ -1045,7 +1045,7 @@ func (s *sSysBot) consumeProfileSearchImageMessage(ctx context.Context, botId in
 	if err != nil {
 		return err
 	}
-	media, err := s.resolveTelegramMessageMedia(ctx, row.BotToken, msg)
+	media, err := s.resolveTelegramMessageMedia(ctx, botId, row.BotToken, msg)
 	if err != nil {
 		g.Log().Warning(ctx, "Bot图片搜索读取TG文件失败", g.Map{"botId": botId, "chatId": chatId, "err": err})
 		return s.replyBotError(ctx, botId, chatId, "图片搜索", err)
@@ -2127,7 +2127,7 @@ func (s *sSysBot) consumeProfileSessionMessage(ctx context.Context, botId int64,
 		if err != nil {
 			return err
 		}
-		preparedMedia, err = s.resolveTelegramMessageMedia(ctx, row.BotToken, msg)
+		preparedMedia, err = s.resolveTelegramMessageMedia(ctx, botId, row.BotToken, msg)
 		if err != nil {
 			chatId := fmt.Sprintf("%d", msg.Chat.ID)
 			_ = s.replyBotError(ctx, botId, chatId, "资料管理", gerror.Wrap(err, "当前资料媒体解析失败，请重新发送当前步骤"))
@@ -2197,7 +2197,7 @@ func (s *sSysBot) consumeProfileSessionMessageLocked(ctx context.Context, botId 
 	}
 	media := preparedMedia
 	if media == nil {
-		media, err = s.resolveTelegramMessageMedia(ctx, row.BotToken, msg)
+		media, err = s.resolveTelegramMessageMedia(ctx, botId, row.BotToken, msg)
 		if err != nil {
 			g.Log().Warningf(ctx, "Bot资料处理失败 trace:%s stage:resolve_media elapsed_ms:%d err:%v", trace, time.Since(startedAt).Milliseconds(), err)
 			_ = s.replyBotError(ctx, botId, chatId, "资料管理", gerror.Wrap(err, "当前资料媒体解析失败，请重新发送当前步骤"))
@@ -2849,7 +2849,7 @@ func (s *sSysBot) rebuildProfileMediaGroupFromStoredMessages(ctx context.Context
 			}
 			text := strings.TrimSpace(firstNonEmpty(message.Text, message.Caption))
 			textByMessage[index] = text
-			items, resolveErr := s.resolveTelegramMessageMedia(ctx, row.BotToken, &message)
+			items, resolveErr := s.resolveTelegramMessageMedia(ctx, botId, row.BotToken, &message)
 			if resolveErr != nil {
 				errorMu.Lock()
 				if firstErr == nil {

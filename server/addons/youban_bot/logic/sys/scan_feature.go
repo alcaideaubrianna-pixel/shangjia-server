@@ -84,7 +84,7 @@ func (scanMediaMessageHandler) Handle(ctx context.Context, bot *sSysBot, event *
 		return true, err
 	}
 	resolveStartedAt := time.Now()
-	media, err := bot.resolveTelegramMessageMedia(ctx, botTokenForEvent(ctx, bot, event.BotId), event.Msg)
+	media, err := bot.resolveTelegramMessageMedia(ctx, event.BotId, botTokenForEvent(ctx, bot, event.BotId), event.Msg)
 	observeScanStage(ctx, event.BotId, "telegram_resolve", resolveStartedAt, err)
 	if err != nil {
 		observeScanRequest(ctx, event.BotId, "failed")

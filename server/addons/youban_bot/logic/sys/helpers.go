@@ -757,7 +757,7 @@ func telegramMediaAPICtx() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), 10*time.Minute)
 }
 
-func (s *sSysBot) resolveTelegramMessageMedia(ctx context.Context, botToken string, msg *models.Message) ([]*publishsysin.MessageTemplateMediaInp, error) {
+func (s *sSysBot) resolveTelegramMessageMedia(ctx context.Context, botId int64, botToken string, msg *models.Message) ([]*publishsysin.MessageTemplateMediaInp, error) {
 	if msg == nil {
 		return nil, nil
 	}
@@ -795,13 +795,13 @@ func (s *sSysBot) resolveTelegramMessageMedia(ctx context.Context, botToken stri
 	thumbDone := make(chan struct{})
 	if thumbFileId != "" {
 		go func() {
-			thumbURL, thumbErr = s.telegramFileDownloadURL(ctx, tgBot, botToken, thumbFileId)
+			thumbURL, thumbErr = s.telegramFileDownloadURL(ctx, botId, tgBot, botToken, thumbFileId)
 			close(thumbDone)
 		}()
 	} else {
 		close(thumbDone)
 	}
-	fileURL, err := s.telegramFileDownloadURL(ctx, tgBot, botToken, fileId)
+	fileURL, err := s.telegramFileDownloadURL(ctx, botId, tgBot, botToken, fileId)
 	if err != nil {
 		return nil, err
 	}
@@ -854,7 +854,7 @@ func scanPhotoSize(items []models.PhotoSize) models.PhotoSize {
 	return best
 }
 
-func (s *sSysBot) telegramFileDownloadURL(ctx context.Context, tgBot *tgbot.Bot, botToken string, fileId string) (string, error) {
+func (s *sSysBot) telegramFileDownloadURL(ctx context.Context, botId int64, tgBot *tgbot.Bot, botToken string, fileId string) (string, error) {
 	fileId = strings.TrimSpace(fileId)
 	if fileId == "" {
 		return "", nil
@@ -865,6 +865,7 @@ func (s *sSysBot) telegramFileDownloadURL(ctx context.Context, tgBot *tgbot.Bot,
 	file, attempts, err := telegramBotGetFileWithRetry(ctx, callCtx, fileId, func(requestCtx context.Context) (*models.File, error) {
 		return tgBot.GetFile(requestCtx, &tgbot.GetFileParams{FileID: fileId})
 	})
+	observeScanTelegramGetFile(ctx, botId, attempts, getFileStartedAt, err)
 	g.Log().Info(ctx, "Bot媒体解析阶段完成", g.Map{
 		"stage": "get_file", "fileId": fileId, "attempts": attempts,
 		"durationMs": time.Since(getFileStartedAt).Milliseconds(), "success": err == nil,

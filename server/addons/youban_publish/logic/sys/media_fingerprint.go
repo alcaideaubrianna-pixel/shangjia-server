@@ -96,8 +96,21 @@ func cachedRemoteImageFingerprint(ctx context.Context, imageURL string) (*mediaF
 	if imageURL == "" {
 		return nil, gerror.New("请发送要搜索的图片")
 	}
+	cacheKey := mediaFileCacheKey(nil, imageURL)
+	cacheExt := mediaFileCacheExt(&telegramMediaItem{MediaType: "image", FileUrl: imageURL}, imageURL)
+	effectiveSource := mediaFileCachePreferWorkerURL(ctx, imageURL)
+	source := "origin"
+	if mediaFileCacheIsWorkerURL(ctx, effectiveSource) {
+		source = "worker"
+	}
+	cacheHit := fileExists(mediaFileCachePath(mediaFileCacheDir(ctx), cacheKey, cacheExt))
 	startedAt := time.Now()
-	path, err := cachedRemoteMediaFile(ctx, mediaFileCacheKey(nil, imageURL), imageURL, mediaFileCacheExt(&telegramMediaItem{MediaType: "image", FileUrl: imageURL}, imageURL))
+	path, err := cachedRemoteMediaFile(ctx, cacheKey, imageURL, cacheExt)
+	var size int64
+	if info, statErr := os.Stat(path); statErr == nil {
+		size = info.Size()
+	}
+	observeBotMediaDownload(ctx, source, cacheHit, size, startedAt, err)
 	observeBotMediaSearchStage(ctx, "remote_download", startedAt, err)
 	if err != nil {
 		return nil, err

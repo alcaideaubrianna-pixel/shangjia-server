@@ -203,7 +203,7 @@ func (quickPushSessionMessageHandler) Handle(ctx context.Context, bot *sSysBot, 
 		return true, err
 	}
 	stageStartedAt = time.Now()
-	media, err := bot.resolveTelegramMessageMedia(ctx, row.BotToken, event.Msg)
+	media, err := bot.resolveTelegramMessageMedia(ctx, event.BotId, row.BotToken, event.Msg)
 	g.Log().Infof(ctx, "TG链路 quick_push_media_resolved updateId:%d botId:%d chatId:%s messageId:%d media:%d duration:%s err:%v", event.UpdateID, event.BotId, chatId, event.Msg.ID, len(media), time.Since(stageStartedAt), err)
 	if err != nil {
 		return true, err
