@@ -58,8 +58,11 @@
     {
       "name": "xiaohuiji-worker-app3",
       "webhook": "https://dokploy.xiao-feiji.cc/api/deploy/4S_4CLQJsRiN9eCclg171",
-      "enabled": false,
-      "order": 50
+      "enabled": true,
+      "order": 50,
+      "applicationId": "2Pigt22NPslR7ArldVowZ",
+      "appName": "xiaohuiji-worker-app3-psctwe",
+      "serverId": "9UrzWwQ3LfOHWYx8e1D6v"
     },
     {
       "name": "xiaohuiji-media-worker-app3",

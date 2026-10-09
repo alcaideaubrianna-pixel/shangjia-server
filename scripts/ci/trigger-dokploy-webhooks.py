@@ -330,6 +330,27 @@ def main(argv=None):
             # valid rollout look stuck for the full health-check window.
             wait_until_healthy(target, args.revision or args.version)
         except (urllib.error.URLError, TimeoutError, RuntimeError) as error:
+            # A webhook can be accepted while Dokploy fails later during the
+            # image pull (for example a transient GHCR EOF). Re-trigger once
+            # after a runtime image mismatch instead of accepting the stale
+            # container and failing the whole rollout without recovery.
+            if str(error).startswith("running container image mismatch"):
+                try:
+                    print(f"retrying {name} after runtime image mismatch", file=sys.stderr, flush=True)
+                    trigger(target, args.version)
+                    wait_for_running_image(target, expected_image, retries=12)
+                    wait_until_healthy(target, args.revision or args.version)
+                except (urllib.error.URLError, TimeoutError, RuntimeError) as retry_error:
+                    error = retry_error
+                else:
+                    error = None
+            if error is None:
+                send_telegram(
+                    f"🚀 <b>{escape(name)} 已触发部署（重试成功）</b>\n"
+                    f"版本：<code>{escape(args.version)}</code>"
+                )
+                print(f"triggered {name} after retry", flush=True)
+                continue
             failures.append((name, str(error)))
             send_telegram(
                 f"❌ <b>{escape(name)} 部署触发失败</b>\n"
