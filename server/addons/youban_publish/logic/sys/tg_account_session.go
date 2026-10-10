@@ -78,12 +78,13 @@ func (s *sSysPublish) telegramJobAccountCanPublish(ctx context.Context, job tele
 	if job.TenantId <= 0 || job.ChannelId <= 0 {
 		return 0, false, nil
 	}
-	channelTable := publishChannelTable
-	if isMessagePushOperationNo(job.OperationNo) {
-		channelTable = publishTgChannelTable
+	channelTable, hasSoftDelete := telegramJobChannelTable(job.OperationNo)
+	channelModel := g.DB().Model(channelTable).Safe().Ctx(ctx).
+		Fields("tg_account_id").Where("id", job.ChannelId).Where("tenant_id", job.TenantId)
+	if hasSoftDelete {
+		channelModel = channelModel.WhereNull("deleted_at")
 	}
-	channel, err := g.DB().Model(channelTable).Safe().Ctx(ctx).
-		Fields("tg_account_id").Where("id", job.ChannelId).Where("tenant_id", job.TenantId).WhereNull("deleted_at").One()
+	channel, err := channelModel.One()
 	if err != nil {
 		return 0, false, gerror.Wrap(err, "读取TG任务发送账号失败")
 	}
@@ -107,6 +108,13 @@ func (s *sSysPublish) telegramJobAccountCanPublish(ctx context.Context, job tele
 	return tgAccountId, account.Status == sysin.PublishTgAccountStatusAuthorized && strings.TrimSpace(account.SessionKey) != "", nil
 }
 
+func telegramJobChannelTable(operationNo string) (table string, hasSoftDelete bool) {
+	if isMessagePushOperationNo(operationNo) {
+		return publishTgChannelTable, false
+	}
+	return publishChannelTable, true
+}
+
 func (s *sSysPublish) pauseTelegramJobsForUnavailableAccount(ctx context.Context, tgAccountId int64, reason string) error {
 	if tgAccountId <= 0 {
 		return nil
@@ -116,7 +124,7 @@ func (s *sSysPublish) pauseTelegramJobsForUnavailableAccount(ctx context.Context
 			SELECT 1 FROM ` + publishChannelTable + ` c WHERE c.id=` + publishTgJobTable + `.channel_id AND c.tenant_id=` + publishTgJobTable + `.tenant_id AND c.tg_account_id=? AND c.deleted_at IS NULL
 		)) OR
 		((operation_no LIKE 'message_push:%' OR operation_no LIKE 'message_push_plan:%') AND EXISTS (
-			SELECT 1 FROM ` + publishTgChannelTable + ` c WHERE c.id=` + publishTgJobTable + `.channel_id AND c.tenant_id=` + publishTgJobTable + `.tenant_id AND c.tg_account_id=? AND c.deleted_at IS NULL
+			SELECT 1 FROM ` + publishTgChannelTable + ` c WHERE c.id=` + publishTgJobTable + `.channel_id AND c.tenant_id=` + publishTgJobTable + `.tenant_id AND c.tg_account_id=?
 		))
 	)`
 	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
