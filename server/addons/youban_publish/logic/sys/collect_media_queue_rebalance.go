@@ -73,7 +73,7 @@ func RebalanceCollectMediaQueue(ctx context.Context) (*CollectMediaQueueRebalanc
 	client := asynq.NewClient(telegramQueueRedisOpt(ctx))
 	defer client.Close()
 
-	queues := append([]string{tgQueueNameMediaRealtime}, collectMediaBulkQueueNames()...)
+	queues := append(collectMediaRealtimeQueueNames(), collectMediaBulkQueueNames()...)
 	existingQueues, err := inspector.Queues()
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取媒体队列失败")

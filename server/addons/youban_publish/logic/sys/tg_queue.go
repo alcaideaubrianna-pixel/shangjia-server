@@ -24,6 +24,7 @@ const (
 	tgQueueNameDefault              = "youban_publish_tg"
 	tgQueueNameBulk                 = "youban_publish_tg_bulk"
 	tgQueueNameMediaRealtime        = "youban_publish_media_realtime"
+	tgQueueNameMediaRealtimePrefix  = "youban_publish_media_realtime_"
 	tgQueueNameMediaProcess         = "youban_publish_media_process"
 	tgQueueNameMediaBulkPrefix      = "youban_publish_media_bulk_"
 	tgQueueNameAutoDelete           = "youban_publish_auto_delete"
@@ -105,6 +106,21 @@ func collectMediaBulkQueueNames() []string {
 	queues := make([]string, 0, collectMediaMaxBulkQueueShards)
 	for shard := 0; shard < collectMediaMaxBulkQueueShards; shard++ {
 		queues = append(queues, collectMediaBulkQueueName(shard))
+	}
+	return queues
+}
+
+func collectMediaRealtimeQueueName(shard int) string {
+	if shard < 0 {
+		shard = -shard
+	}
+	return fmt.Sprintf("%s%d", tgQueueNameMediaRealtimePrefix, shard%collectMediaMaxBulkQueueShards)
+}
+
+func collectMediaRealtimeQueueNames() []string {
+	queues := make([]string, 0, collectMediaMaxBulkQueueShards)
+	for shard := 0; shard < collectMediaMaxBulkQueueShards; shard++ {
+		queues = append(queues, collectMediaRealtimeQueueName(shard))
 	}
 	return queues
 }

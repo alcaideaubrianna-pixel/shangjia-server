@@ -84,7 +84,7 @@ func TestCycleQueueIsIsolatedAndConcurrencyBounded(t *testing.T) {
 }
 
 func TestCollectMediaQueueNamePrioritizesRealtime(t *testing.T) {
-	if got := collectMediaQueueName(context.Background(), collectMediaQueuePayload{TgAccountId: 13}); got != tgQueueNameMediaRealtime {
+	if got := collectMediaQueueName(context.Background(), collectMediaQueuePayload{TgAccountId: 13}); got != collectMediaRealtimeQueueName(13) {
 		t.Fatalf("realtime queue = %s", got)
 	}
 	cases := map[int64]string{
@@ -104,7 +104,7 @@ func TestCollectMediaQueueNamePrioritizesRealtime(t *testing.T) {
 func TestCollectMediaWorkerQueuesSeparateRealtimeAndBulk(t *testing.T) {
 	realtimeQueues := collectMediaRealtimeWorkerQueues()
 	bulkQueues := collectMediaBulkWorkerQueues(context.Background())
-	if len(realtimeQueues) != 1 || realtimeQueues[tgQueueNameMediaRealtime] != 1 {
+	if len(realtimeQueues) != collectMediaMaxBulkQueueShards || realtimeQueues[collectMediaRealtimeQueueName(0)] != 1 {
 		t.Fatalf("realtime queues = %#v", realtimeQueues)
 	}
 	if len(bulkQueues) != collectMediaMaxBulkQueueShards+1 {

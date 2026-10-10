@@ -58,7 +58,7 @@ func collectMediaQueuePayloadFromEvent(event gdb.Record) collectMediaQueuePayloa
 
 func collectMediaQueueName(ctx context.Context, payload collectMediaQueuePayload) string {
 	if !payload.Bulk {
-		return tgQueueNameMediaRealtime
+		return collectMediaRealtimeQueueName(int(payload.TgAccountId % int64(collectMediaMaxBulkQueueShards)))
 	}
 	return collectMediaBulkQueueName(int(payload.TgAccountId % int64(collectMediaBulkQueueShards(ctx))))
 }
@@ -175,7 +175,11 @@ func collectMediaBulkQueueShards(ctx context.Context) int {
 }
 
 func collectMediaRealtimeWorkerQueues() map[string]int {
-	return map[string]int{tgQueueNameMediaRealtime: 1}
+	queues := make(map[string]int, collectMediaMaxBulkQueueShards)
+	for _, queue := range collectMediaRealtimeQueueNames() {
+		queues[queue] = 1
+	}
+	return queues
 }
 
 func collectMediaBulkWorkerQueues(ctx context.Context) map[string]int {
