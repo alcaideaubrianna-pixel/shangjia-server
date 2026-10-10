@@ -28,14 +28,39 @@ func (s *sSysPublish) refreshAdminTgAccountSession(ctx context.Context, id int64
 	if _, err := s.adminTgAccountById(ctx, id, tenantId); err != nil {
 		return sysin.PublishTgAccountStatusFailed, err.Error()
 	}
-	_, err := collectorservice.AccountTasks().Submit(ctx, &collectorin.AccountTaskSubmit{
-		TenantID: tenantId, AccountID: id, TaskType: collectorin.AccountTaskTypeTgAccountRefresh,
-		TaskKey: fmt.Sprintf("tg-account-refresh:%d:%d:%d", id, tenantId, operatorId), Priority: 10, MaxAttempts: 3,
+	runtime := collectorservice.AccountRuntime()
+	if runtime == nil {
+		return sysin.PublishTgAccountStatusFailed, "Telegram账号运行时未启动"
+	}
+
+	// Refresh is a user-triggered health probe. Execute it through the
+	// priority lane so a backlog of media tasks cannot make the result stale.
+	var user *tg.User
+	used, err := runtime.ExecutePriority(ctx, id, 20*time.Second, func(probeCtx context.Context, client *telegram.Client) error {
+		if client == nil {
+			return gerror.New("Telegram客户端未就绪")
+		}
+		var probeErr error
+		user, probeErr = client.Self(probeCtx)
+		return probeErr
 	})
+	if !used {
+		return sysin.PublishTgAccountStatusFailed, "Telegram账号运行时未就绪"
+	}
 	if err != nil {
+		if isTelegramPermanentAccountAuthError(err) {
+			return s.expireTgAccountSession(ctx, id, tenantId, operatorId, telegramPermanentAccountAuthMessage(err))
+		}
 		return sysin.PublishTgAccountStatusFailed, err.Error()
 	}
-	return sysin.PublishTgAccountStatusPending, "TG账号刷新任务已提交"
+
+	username, displayName := "", ""
+	if user != nil {
+		username = user.Username
+		displayName = strings.TrimSpace(user.FirstName + " " + user.LastName)
+	}
+	s.updateTgAccountRefreshResult(ctx, id, tenantId, operatorId, sysin.PublishTgAccountStatusAuthorized, "", user, username, displayName)
+	return sysin.PublishTgAccountStatusAuthorized, "Telegram账号连接正常"
 }
 
 func (s *sSysPublish) handleTgAccountRefreshTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) error {
