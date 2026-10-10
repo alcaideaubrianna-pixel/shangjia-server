@@ -193,9 +193,6 @@ func (s *sSysPublish) sendTelegramJobLockedByChannel(ctx context.Context, jobId 
 }
 
 func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJobRecord) error {
-	if job.SendPhase == telegramSendPhaseVerifyConfirmed {
-		return nil
-	}
 	job.TargetChatId = normalizeTelegramChannelChatID(job.TargetChatId)
 	if strings.TrimSpace(job.TargetChatId) == "" {
 		return gerror.New("TG目标频道未配置")
@@ -219,6 +216,12 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	verifyMedia, err := s.telegramJobMedia(ctx, job, "verify")
 	if err != nil {
 		return err
+	}
+	// Legacy jobs used verify_confirmed for both verified and display-only
+	// publishes. Keep verified jobs idempotent, while allowing display-only
+	// jobs to migrate to the truthful completed_without_verify phase below.
+	if job.SendPhase == telegramSendPhaseVerifyConfirmed && len(verifyMedia) > 0 {
+		return nil
 	}
 	bot, err := s.telegramBot(ctx, botToken)
 	if err != nil {
@@ -315,10 +318,10 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	}
 	if len(verifyMedia) == 0 {
 		g.Log().Infof(ctx, "TG任务无验证资料，跳过验证发送 jobId:%d channelId:%d", job.Id, job.ChannelId)
-		if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseVerifyConfirmed); err != nil {
+		if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseCompletedNoVerify); err != nil {
 			return err
 		}
-		return s.completeTelegramJob(ctx, job)
+		return nil
 	}
 	// Always give the Bot API the first chance to upload videos without a
 	// reusable file_id. The account fallback requires channel-admin access and
@@ -727,6 +730,9 @@ func (s *sSysPublish) completeTelegramJobLockedByProfile(ctx context.Context, jo
 		}
 		return s.supersedeTelegramJobAndCompleteOperation(ctx, job)
 	}
+	if err = s.validateTelegramJobCompletion(ctx, job.Id, job.ProfileId); err != nil {
+		return err
+	}
 	sentAt := gtime.Now()
 	data := telegramJobStateUpdateData("sent", 0, sentAt)
 	data["error_message"] = ""
@@ -770,6 +776,46 @@ func (s *sSysPublish) completeTelegramJobLockedByProfile(ctx context.Context, jo
 	}
 	if job.CollectEventId > 0 {
 		return s.markCollectDispatchSentByProfile(ctx, job.ProfileId, job.CollectEventId)
+	}
+	return nil
+}
+
+func (s *sSysPublish) validateTelegramJobCompletion(ctx context.Context, jobID, profileID int64) error {
+	job, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Fields("send_phase").Where("id", jobID).One()
+	if err != nil {
+		return gerror.Wrap(err, "读取TG任务完成阶段失败")
+	}
+	if job.IsEmpty() {
+		return gerror.Newf("TG任务不存在 jobId:%d", jobID)
+	}
+	phase := strings.TrimSpace(job["send_phase"].String())
+	verifyMediaCount, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+		Where("profile_id", profileID).Where("purpose", "verify").WhereNull("deleted_at").Count()
+	if err != nil {
+		return gerror.Wrap(err, "检查TG任务验证媒体失败")
+	}
+	verifyMessageCount, err := g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).
+		Where("job_id", jobID).Where("purpose", "verify").Where("status", "sent").WhereNull("deleted_at").Count()
+	if err != nil {
+		return gerror.Wrap(err, "检查TG任务验证消息失败")
+	}
+	if err = telegramJobCompletionError(phase, verifyMediaCount, verifyMessageCount); err != nil {
+		return gerror.Wrapf(err, "TG任务完成条件不满足 jobId:%d profileId:%d", jobID, profileID)
+	}
+	return nil
+}
+
+func telegramJobCompletionError(phase string, verifyMediaCount, verifyMessageCount int) error {
+	phase = strings.TrimSpace(phase)
+	if verifyMediaCount > 0 {
+		if phase != telegramSendPhaseVerifyConfirmed || verifyMessageCount <= 0 {
+			return gerror.Newf("资料已有验证媒体但验证消息未确认 phase:%s verifyMessages:%d", phase, verifyMessageCount)
+		}
+		return nil
+	}
+	if phase != telegramSendPhaseCompletedNoVerify {
+		return gerror.Newf("无验证资料任务完成阶段不合法 phase:%s", phase)
 	}
 	return nil
 }

@@ -92,7 +92,7 @@ func (s *sSysPublish) CollectMaterialDiagnose(ctx context.Context, in *sysin.Col
 			if mediaErr != nil {
 				return nil, mediaErr
 			}
-			views = append(views, collectMaterialMessageView{RawText: row["raw_text"].String(), Media: items})
+			views = append(views, collectMaterialMessageView{RawText: row["raw_text"].String(), Media: items, MessageAt: collectMaterialEventAt(row)})
 		}
 		pairByDisplay := make(map[int]collectMaterialPair)
 		verifyIndexes := make(map[int]struct{})

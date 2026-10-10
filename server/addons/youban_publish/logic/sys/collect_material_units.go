@@ -25,8 +25,9 @@ type collectMaterialUnit struct {
 }
 
 type collectMaterialMessageView struct {
-	RawText string
-	Media   []collectMediaItem
+	RawText   string
+	Media     []collectMediaItem
+	MessageAt time.Time
 }
 
 type collectMaterialPair struct {
@@ -49,7 +50,13 @@ func pairCollectMaterialMessages(messages []collectMaterialMessageView) []collec
 			}
 		case profileMessageKindVerify:
 			if lastDisplayIndex >= 0 {
-				pairs = append(pairs, collectMaterialPair{DisplayIndex: lastDisplayIndex, VerifyIndex: index})
+				displayAt := messages[lastDisplayIndex].MessageAt
+				verifyAt := message.MessageAt
+				withinWindow := displayAt.IsZero() || verifyAt.IsZero() ||
+					(!verifyAt.Before(displayAt) && verifyAt.Sub(displayAt) <= collectMaterialVerifyWindowDefault)
+				if withinWindow {
+					pairs = append(pairs, collectMaterialPair{DisplayIndex: lastDisplayIndex, VerifyIndex: index})
+				}
 				lastDisplayIndex = -1
 			}
 		}
@@ -61,8 +68,9 @@ func collectMaterialEventViews(rows []gdb.Record, mediaByEvent map[int64][]colle
 	views := make([]collectMaterialMessageView, 0, len(rows))
 	for _, row := range rows {
 		views = append(views, collectMaterialMessageView{
-			RawText: row["raw_text"].String(),
-			Media:   mediaByEvent[row["id"].Int64()],
+			RawText:   row["raw_text"].String(),
+			Media:     mediaByEvent[row["id"].Int64()],
+			MessageAt: collectMaterialEventAt(row),
 		})
 	}
 	return views
@@ -114,7 +122,11 @@ func pairCollectMaterialUnits(units []*collectMaterialUnit) []*collectMaterialUn
 			views = append(views, collectMaterialMessageView{})
 			continue
 		}
-		views = append(views, collectMaterialMessageView{RawText: unit.RawText, Media: unit.Media})
+		messageAt := time.Time{}
+		if unit.MessageAt != nil {
+			messageAt = unit.MessageAt.Time
+		}
+		views = append(views, collectMaterialMessageView{RawText: unit.RawText, Media: unit.Media, MessageAt: messageAt})
 	}
 	verifyByDisplay := make(map[int]int)
 	for _, pair := range pairCollectMaterialMessages(views) {

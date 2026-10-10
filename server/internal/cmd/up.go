@@ -167,16 +167,6 @@ func handleUpgradeFix(ctx context.Context, args map[string]string) (err error) {
 			return repairErr
 		}
 		g.Log().Infof(ctx, "Bot媒体组修复完成 dryRun:%t groups:%d events:%d media:%d requeued:%d groupedIds:%v", strings.TrimSpace(args["apply"]) != "1", result.Groups, result.Events, result.Media, result.Requeued, result.GroupedIDs)
-	case "collectDuplicateVerifyRepair":
-		limit, _ := strconv.Atoi(args["limit"])
-		result, repairErr := publishsys.RepairCollectDuplicateVerification(ctx, publishsys.CollectDuplicateVerifyRepairOptions{
-			Limit:  limit,
-			DryRun: strings.TrimSpace(args["apply"]) != "1",
-		})
-		if repairErr != nil {
-			return repairErr
-		}
-		g.Log().Infof(ctx, "重复资料验证媒体修复完成 dryRun:%t candidates:%d recoverable:%d repaired:%d skipped:%d profileIds:%v", strings.TrimSpace(args["apply"]) != "1", result.Candidates, result.Recoverable, result.Repaired, result.Skipped, result.ProfileIDs)
 	case "collectProfileMediaRebuild":
 		profileIDs := make([]int64, 0)
 		for _, value := range strings.Split(args["a2"], ",") {

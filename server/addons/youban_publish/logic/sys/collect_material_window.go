@@ -19,8 +19,6 @@ import (
 const (
 	collectMaterialGroupingDelay           = 3 * time.Minute
 	collectMaterialVerifyWindowDefault     = 5 * time.Minute
-	collectMaterialVerifyWindowMin         = 3 * time.Minute
-	collectMaterialVerifyWindowMax         = 5 * time.Minute
 	collectMaterialVerifyRetryDelay        = time.Minute
 	collectMaterialWaitingVerifyRetryDelay = 10 * time.Second
 	collectMaterialWindowLookahead         = 32
@@ -133,7 +131,7 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 				}
 				continue
 			}
-			if !collectMaterialEventIngestOlderThan(event, collectMaterialVerifyWindow(ctx)) {
+			if !collectMaterialEventIngestOlderThan(event, collectMaterialVerifyWindowDefault) {
 				if err = s.markCollectMaterialWaitingVerify(ctx, event["id"].Int64()); err != nil {
 					return err
 				}
@@ -176,7 +174,7 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 				}
 				continue
 			}
-			if !collectMaterialEventIngestOlderThan(event, collectMaterialVerifyWindow(ctx)) {
+			if !collectMaterialEventIngestOlderThan(event, collectMaterialVerifyWindowDefault) {
 				continue
 			}
 			if err = s.ignoreCollectEvent(ctx, event["id"].Int64(), collectMaterialVerifyUnmatchedMessage, "group"); err != nil {
@@ -392,18 +390,6 @@ func collectMaterialWindowBatchSize(ctx context.Context) int {
 		return 200
 	}
 	return batchSize
-}
-
-func collectMaterialVerifyWindow(ctx context.Context) time.Duration {
-	seconds := g.Cfg().MustGet(ctx, "youbanPublish.collect.materialVerifyWindowSeconds", int(collectMaterialVerifyWindowDefault/time.Second)).Int()
-	duration := time.Duration(seconds) * time.Second
-	if duration < collectMaterialVerifyWindowMin {
-		return collectMaterialVerifyWindowMin
-	}
-	if duration > collectMaterialVerifyWindowMax {
-		return collectMaterialVerifyWindowMax
-	}
-	return duration
 }
 
 func (s *sSysPublish) mergeCollectMaterialContent(ctx context.Context, display gdb.Record, content *collectContentResult) (*collectContentResult, error) {

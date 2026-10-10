@@ -364,6 +364,9 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 			return err
 		}
 		if len(verifyMedia) == 0 {
+			if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseCompletedNoVerify); err != nil {
+				return err
+			}
 			g.Log().Infof(ctx, "协议号媒体降级任务发送成功 taskId:%d jobId:%d tgAccountId:%d displayMessages:%d verifyMessages:0", task.ID, job.Id, task.AccountID, len(messages))
 			return s.completeTelegramJobAndWakeChannel(ctx, job)
 		}

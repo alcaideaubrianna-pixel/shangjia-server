@@ -40,6 +40,9 @@ func TestTelegramSendPhaseHasDisplay(t *testing.T) {
 	if !telegramSendPhaseHasDisplay(telegramSendPhaseVerifyConfirmed) {
 		t.Fatal("confirmed verify phase must never resend display media")
 	}
+	if !telegramSendPhaseHasDisplay(telegramSendPhaseCompletedNoVerify) {
+		t.Fatal("completed without verify phase must never resend display media")
+	}
 	if telegramSendPhaseHasDisplay(telegramSendPhaseDisplaySending) {
 		t.Fatal("unconfirmed display phase must be reconciled before reuse")
 	}
@@ -52,6 +55,7 @@ func TestTelegramSendPhaseHasCleanup(t *testing.T) {
 		telegramSendPhaseDisplayConfirmed,
 		telegramSendPhaseVerifySending,
 		telegramSendPhaseVerifyConfirmed,
+		telegramSendPhaseCompletedNoVerify,
 	}
 	for _, phase := range completed {
 		if !telegramSendPhaseHasCleanup(phase) {
@@ -62,6 +66,31 @@ func TestTelegramSendPhaseHasCleanup(t *testing.T) {
 		if telegramSendPhaseHasCleanup(phase) {
 			t.Fatalf("phase %q must require cleanup", phase)
 		}
+	}
+}
+
+func TestTelegramJobCompletionError(t *testing.T) {
+	tests := []struct {
+		name               string
+		phase              string
+		verifyMediaCount   int
+		verifyMessageCount int
+		wantErr            bool
+	}{
+		{name: "display only truthful phase", phase: telegramSendPhaseCompletedNoVerify},
+		{name: "legacy false verified phase", phase: telegramSendPhaseVerifyConfirmed, wantErr: true},
+		{name: "verify media without message", phase: telegramSendPhaseVerifyConfirmed, verifyMediaCount: 1, wantErr: true},
+		{name: "verify message without confirmed phase", phase: telegramSendPhaseDisplayConfirmed, verifyMediaCount: 1, verifyMessageCount: 1, wantErr: true},
+		{name: "verified publish", phase: telegramSendPhaseVerifyConfirmed, verifyMediaCount: 1, verifyMessageCount: 1},
+		{name: "late verify invalidates display only completion", phase: telegramSendPhaseCompletedNoVerify, verifyMediaCount: 1, wantErr: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := telegramJobCompletionError(test.phase, test.verifyMediaCount, test.verifyMessageCount)
+			if (err != nil) != test.wantErr {
+				t.Fatalf("telegramJobCompletionError() err=%v, wantErr=%t", err, test.wantErr)
+			}
+		})
 	}
 }
 

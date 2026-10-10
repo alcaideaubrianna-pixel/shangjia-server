@@ -21,6 +21,7 @@ const (
 	telegramSendPhaseDisplayConfirmed  = "display_confirmed"
 	telegramSendPhaseVerifySending     = "verify_sending"
 	telegramSendPhaseVerifyConfirmed   = "verify_confirmed"
+	telegramSendPhaseCompletedNoVerify = "completed_without_verify"
 	// Telegram does not provide an idempotency key for send requests. An
 	// ambiguous response therefore needs an asynchronous reconciliation window
 	// before the job is allowed to retry.
@@ -31,7 +32,8 @@ func telegramSendPhaseHasCleanup(phase string) bool {
 	switch strings.TrimSpace(phase) {
 	case telegramSendPhaseCleanupConfirmed,
 		telegramSendPhaseDisplaySending, telegramSendPhaseDisplayConfirmed,
-		telegramSendPhaseVerifySending, telegramSendPhaseVerifyConfirmed:
+		telegramSendPhaseVerifySending, telegramSendPhaseVerifyConfirmed,
+		telegramSendPhaseCompletedNoVerify:
 		return true
 	default:
 		return false
@@ -44,7 +46,8 @@ func telegramSendPhaseIsCleanup(phase string) bool {
 
 func telegramSendPhaseHasDisplay(phase string) bool {
 	switch strings.TrimSpace(phase) {
-	case telegramSendPhaseDisplayConfirmed, telegramSendPhaseVerifySending, telegramSendPhaseVerifyConfirmed:
+	case telegramSendPhaseDisplayConfirmed, telegramSendPhaseVerifySending,
+		telegramSendPhaseVerifyConfirmed, telegramSendPhaseCompletedNoVerify:
 		return true
 	default:
 		return false

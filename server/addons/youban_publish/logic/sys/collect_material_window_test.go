@@ -181,3 +181,25 @@ func TestPairCollectMaterialMessagesCases(t *testing.T) {
 		})
 	}
 }
+
+func TestPairCollectMaterialMessagesRejectsVerifyOutsideFiveMinutes(t *testing.T) {
+	displayAt := time.Now().Add(-10 * time.Minute)
+	views := []collectMaterialMessageView{
+		{RawText: "昵称：A", Media: []collectMediaItem{{Type: "photo", FileId: "p"}}, MessageAt: displayAt},
+		{Media: []collectMediaItem{{Type: "video", FileId: "v"}}, MessageAt: displayAt.Add(5*time.Minute + time.Second)},
+	}
+	if pairs := pairCollectMaterialMessages(views); len(pairs) != 0 {
+		t.Fatalf("verification outside five-minute window must not pair: %+v", pairs)
+	}
+}
+
+func TestPairCollectMaterialMessagesAcceptsVerifyAtFiveMinuteBoundary(t *testing.T) {
+	displayAt := time.Now().Add(-10 * time.Minute)
+	views := []collectMaterialMessageView{
+		{RawText: "昵称：A", Media: []collectMediaItem{{Type: "photo", FileId: "p"}}, MessageAt: displayAt},
+		{Media: []collectMediaItem{{Type: "video", FileId: "v"}}, MessageAt: displayAt.Add(5 * time.Minute)},
+	}
+	if pairs := pairCollectMaterialMessages(views); len(pairs) != 1 {
+		t.Fatalf("verification at five-minute boundary must pair: %+v", pairs)
+	}
+}

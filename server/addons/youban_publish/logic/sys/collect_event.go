@@ -411,9 +411,6 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 			g.Log().Warningf(ctx, "验证资料已完成但没有父展示事件 eventId:%d", eventId)
 			return nil
 		}
-		if err = s.repairExistingCollectedProfileVerification(ctx, parentEventId); err != nil {
-			return err
-		}
 		g.Log().Infof(ctx, "验证资料媒体已完成，回流处理父展示事件 verifyEventId:%d parentEventId:%d", eventId, parentEventId)
 		if err = s.processCollectEvent(ctx, parentEventId, tenantId, accountId); err != nil {
 			g.Log().Warningf(ctx, "验证资料回流父展示事件失败，将重新排队 verifyEventId:%d parentEventId:%d err:%+v", eventId, parentEventId, err)
@@ -840,29 +837,15 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 		return false, "", gerror.New("采集规则未配置目标频道")
 	}
 	fingerprints := buildProfileFingerprints(channelIds, decision.Text, content.Media)
-	if rule["dedupe_enabled"].Int() == 1 {
-		ready, readyErr := profileFingerprintBackfillReady(ctx)
-		if readyErr != nil {
-			return false, "", readyErr
-		}
-		if !ready {
-			return false, "", newCollectProcessRetryError(15*time.Second, "资料指纹索引正在初始化")
-		}
+	hit, findErr := s.findCollectRuleDuplicate(ctx, event, rule, fingerprints)
+	if findErr != nil {
+		return false, "", findErr
 	}
-	if rule["dedupe_enabled"].Int() == 1 {
-		hit, findErr := s.findProfileFingerprintDuplicate(ctx, event["tenant_id"].Int64(), event["account_id"].Int64(), fingerprints, 0)
-		if findErr != nil {
-			return false, "", findErr
-		}
-		if hit != nil {
-			reason := fmt.Sprintf("资料库已存在相同资料 profileId:%d channelId:%d layer:%s", hit.ProfileID, hit.ChannelID, hit.Layer)
-			if repairErr := s.repairDuplicateProfileVerification(ctx, hit.ProfileID, event, content); repairErr != nil {
-				return false, "", repairErr
-			}
-			s.appendCollectEventLogForRecord(ctx, event, "dedupe", "skipped", reason, fmt.Sprintf("rule=%d", rule["id"].Int64()))
-			g.Log().Infof(ctx, "采集资料指纹命中 eventId:%d ruleId:%d profileId:%d channelId:%d layer:%s cacheHit:%t", event["id"].Int64(), rule["id"].Int64(), hit.ProfileID, hit.ChannelID, hit.Layer, hit.CacheHit)
-			return false, reason, nil
-		}
+	if hit != nil {
+		reason := fmt.Sprintf("资料库已存在相同资料 profileId:%d channelId:%d layer:%s", hit.ProfileID, hit.ChannelID, hit.Layer)
+		s.appendCollectEventLogForRecord(ctx, event, "dedupe", "skipped", reason, fmt.Sprintf("rule=%d", rule["id"].Int64()))
+		g.Log().Infof(ctx, "采集资料指纹命中 eventId:%d ruleId:%d profileId:%d channelId:%d layer:%s cacheHit:%t", event["id"].Int64(), rule["id"].Int64(), hit.ProfileID, hit.ChannelID, hit.Layer, hit.CacheHit)
+		return false, reason, nil
 	}
 	var dispatchId int64
 	var concurrentDispatch gdb.Record
@@ -944,6 +927,23 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 		return false, "", err
 	}
 	return true, "", nil
+}
+
+// findCollectRuleDuplicate is the only collection dedupe entry. Material
+// grouping is already complete before this function runs, so a hit ends the
+// current group and never mutates or republishes the existing profile.
+func (s *sSysPublish) findCollectRuleDuplicate(ctx context.Context, event, rule gdb.Record, fingerprints []profileFingerprint) (*profileFingerprintDuplicateError, error) {
+	if rule["dedupe_enabled"].Int() != 1 {
+		return nil, nil
+	}
+	ready, err := profileFingerprintBackfillReady(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !ready {
+		return nil, newCollectProcessRetryError(15*time.Second, "资料指纹索引正在初始化")
+	}
+	return s.findProfileFingerprintDuplicate(ctx, event["tenant_id"].Int64(), event["account_id"].Int64(), fingerprints, 0)
 }
 
 func (s *sSysPublish) resumeExistingCollectDispatch(ctx context.Context, dispatch gdb.Record, event gdb.Record, content *collectContentResult, rule gdb.Record, text string) (bool, string, error) {
