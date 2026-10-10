@@ -105,14 +105,20 @@ func (s *sSysPublish) prepareProfilePublishJobs(ctx context.Context, profileId, 
 		operationNo = newTelegramOperationNo("profile", profileId)
 	}
 	jobIds := make([]int64, 0, len(channels))
-	for _, channel := range channels {
-		jobId, createErr := s.ensureTelegramProfileJobWithMeta(ctx, source, channel, operationNo, meta)
-		if createErr != nil {
-			return nil, createErr
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if txErr := s.beginProfilePublishOperationTx(ctx, tx, source["tenant_id"].Int64(), source["account_id"].Int64(), profileId, operationNo); txErr != nil {
+			return txErr
 		}
-		jobIds = append(jobIds, jobId)
-	}
-	if err = s.beginProfilePublishOperation(ctx, source["tenant_id"].Int64(), source["account_id"].Int64(), profileId, operationNo); err != nil {
+		for _, channel := range channels {
+			jobId, createErr := s.ensureTelegramProfileJobWithMetaTx(ctx, tx, source, channel, operationNo, meta)
+			if createErr != nil {
+				return createErr
+			}
+			jobIds = append(jobIds, jobId)
+		}
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 	return jobIds, nil
@@ -120,6 +126,11 @@ func (s *sSysPublish) prepareProfilePublishJobs(ctx context.Context, profileId, 
 
 func (s *sSysPublish) enqueuePreparedProfileJobs(ctx context.Context, jobIds []int64, operatorId int64) {
 	for _, jobId := range jobIds {
+		if job, readErr := s.telegramJobById(ctx, jobId); readErr != nil {
+			g.Log().Warningf(ctx, "读取资料待发送记录失败 jobId:%d err:%+v", jobId, readErr)
+		} else if recordErr := s.upsertPublishJobRecord(ctx, job, "pending", ""); recordErr != nil {
+			g.Log().Warningf(ctx, "保存资料待发送记录失败 jobId:%d err:%+v", jobId, recordErr)
+		}
 		if err := s.enqueueTelegramJob(ctx, jobId, 0); err != nil {
 			message := "Redis调度失败，等待数据库调度器恢复：" + err.Error()
 			_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", jobId).Data(g.Map{
@@ -135,7 +146,17 @@ func (s *sSysPublish) ensureTelegramProfileJob(ctx context.Context, source gdb.R
 }
 
 func (s *sSysPublish) ensureTelegramProfileJobWithMeta(ctx context.Context, source gdb.Record, channel telegramJobChannel, operationNo string, meta telegramProfilePublishMeta) (int64, error) {
-	existing, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+	var jobID int64
+	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		var txErr error
+		jobID, txErr = s.ensureTelegramProfileJobWithMetaTx(ctx, tx, source, channel, operationNo, meta)
+		return txErr
+	})
+	return jobID, err
+}
+
+func (s *sSysPublish) ensureTelegramProfileJobWithMetaTx(ctx context.Context, tx gdb.TX, source gdb.Record, channel telegramJobChannel, operationNo string, meta telegramProfilePublishMeta) (int64, error) {
+	existing, err := tx.Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("profile_id", source["profile_id"].Int64()).
 		Where("operation_no", operationNo).
 		Where("channel_id", channel.Id).
@@ -158,7 +179,7 @@ func (s *sSysPublish) ensureTelegramProfileJobWithMeta(ctx context.Context, sour
 		CollectEventId: meta.CollectEventId, CollectSourceId: meta.CollectSourceId,
 		CollectSourceChatId: strings.TrimSpace(meta.CollectSourceChatId), CollectSourceMessageId: meta.CollectSourceMessageId,
 	}
-	jobId, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Data(g.Map{
+	jobID, err := tx.Model(publishTgJobTable).Safe().Ctx(ctx).Data(g.Map{
 		"operation_no": operationNo,
 		"tenant_id":    job.TenantId, "merchant_id": job.TenantId, "account_id": job.AccountId,
 		"profile_id": job.ProfileId, "channel_id": job.ChannelId, "bot_id": job.BotId,
@@ -169,21 +190,9 @@ func (s *sSysPublish) ensureTelegramProfileJobWithMeta(ctx context.Context, sour
 		"dispatch_status": tgDispatchStatusIdle, "created_at": now, "updated_at": now,
 	}).InsertAndGetId()
 	if err != nil {
-		if isDuplicateKeyError(err) {
-			value, readErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-				Where("profile_id", job.ProfileId).
-				Where("operation_no", operationNo).Where("channel_id", channel.Id).Fields("id").Value()
-			if readErr == nil && value.Int64() > 0 {
-				return value.Int64(), nil
-			}
-		}
 		return 0, gerror.Wrap(err, "创建资料TG频道任务失败")
 	}
-	job.Id = jobId
-	if recordErr := s.upsertPublishJobRecord(ctx, job, "pending", ""); recordErr != nil {
-		g.Log().Warningf(ctx, "保存资料待发送记录失败 jobId:%d err:%+v", jobId, recordErr)
-	}
-	return jobId, nil
+	return jobID, nil
 }
 
 func (s *sSysPublish) completeProfileTelegramOperation(ctx context.Context, job telegramJobRecord, isCycle bool) (bool, error) {

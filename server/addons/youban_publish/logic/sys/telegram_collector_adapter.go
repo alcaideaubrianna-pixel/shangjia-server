@@ -360,15 +360,9 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 	}
 	stage("保存展示消息")
 	if parts[1] == "display" {
-		if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseDisplayConfirmed); err != nil {
-			return err
-		}
 		if len(verifyMedia) == 0 {
-			if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseCompletedNoVerify); err != nil {
-				return err
-			}
 			g.Log().Infof(ctx, "协议号媒体降级任务发送成功 taskId:%d jobId:%d tgAccountId:%d displayMessages:%d verifyMessages:0", task.ID, job.Id, task.AccountID, len(messages))
-			return s.completeTelegramJobAndWakeChannel(ctx, job)
+			return s.finalizeTelegramMediaDelivery(ctx, job, false, true)
 		}
 		// 验证资料必须保持纯媒体，不附加对账 marker，避免干扰公群采集器。
 		verifyCaption := ""
@@ -384,17 +378,11 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 			return err
 		}
 		stage("保存验证消息")
-		if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseVerifyConfirmed); err != nil {
-			return err
-		}
 		g.Log().Infof(ctx, "协议号媒体降级任务发送成功 taskId:%d jobId:%d tgAccountId:%d displayMessages:%d verifyMessages:%d", task.ID, job.Id, task.AccountID, len(messages), len(verifyMessages))
-		return s.completeTelegramJobAndWakeChannel(ctx, job)
-	}
-	if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseVerifyConfirmed); err != nil {
-		return err
+		return s.finalizeTelegramMediaDelivery(ctx, job, true, true)
 	}
 	g.Log().Infof(ctx, "协议号验证媒体降级任务发送成功 taskId:%d jobId:%d tgAccountId:%d verifyMessages:%d", task.ID, job.Id, task.AccountID, len(messages))
-	return s.completeTelegramJobAndWakeChannel(ctx, job)
+	return s.finalizeTelegramMediaDelivery(ctx, job, true, true)
 }
 
 func validateTelegramMediaSendResult(purpose string, media []*telegramMediaItem, messages []*telegramSentMessage) error {

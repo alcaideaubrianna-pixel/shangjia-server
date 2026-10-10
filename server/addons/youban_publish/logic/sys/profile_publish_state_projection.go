@@ -30,6 +30,14 @@ func (s *sSysPublish) beginProfilePublishOperation(ctx context.Context, tenantId
 	return s.writeProfilePublishOperationState(ctx, tenantId, accountId, profileId, operationNo, sysin.PublishTaskStatusPending, false)
 }
 
+func (s *sSysPublish) beginProfilePublishOperationTx(ctx context.Context, tx gdb.TX, tenantId, accountId, profileId int64, operationNo string) error {
+	operationNo = strings.TrimSpace(operationNo)
+	if tenantId <= 0 || accountId <= 0 || profileId <= 0 || operationNo == "" {
+		return gerror.New("上架操作状态参数不完整")
+	}
+	return s.writeProfilePublishOperationStateTx(ctx, tx, tenantId, accountId, profileId, operationNo, sysin.PublishTaskStatusPending, false)
+}
+
 func (s *sSysPublish) updateProfilePublishOperationState(ctx context.Context, job telegramJobRecord, status string) error {
 	status = strings.TrimSpace(status)
 	if job.TenantId <= 0 || job.AccountId <= 0 || job.ProfileId <= 0 || strings.TrimSpace(job.OperationNo) == "" || status == "" {
@@ -89,46 +97,50 @@ func (s *sSysPublish) profilePublishOperationIsCurrent(ctx context.Context, job 
 }
 
 func (s *sSysPublish) writeProfilePublishOperationState(ctx context.Context, tenantId, accountId, profileId int64, operationNo, status string, requireCurrentOperation bool) error {
-	now := gtime.Now()
 	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		stateMod := tx.Model(publishProfileStateTable).Safe().Ctx(ctx).
-			Where("tenant_id", tenantId).
-			Where("account_id", accountId).
-			Where("profile_id", profileId).
-			WhereNull("deleted_at")
-		if requireCurrentOperation {
-			stateMod = stateMod.Where("publish_operation_no", strings.TrimSpace(operationNo))
-		}
-		if requireCurrentOperation && (status == sysin.PublishTaskStatusPending || status == sysin.PublishTaskStatusPublishing) {
-			stateMod = stateMod.Where("publish_task_status <> ?", sysin.PublishTaskStatusFailed)
-		}
-		data := g.Map{
-			"publish_task_status":     status,
-			"publish_task_updated_at": now,
-			"updated_at":              now,
-		}
-		if !requireCurrentOperation {
-			data["publish_operation_no"] = strings.TrimSpace(operationNo)
-		}
-		result, err := stateMod.Where("publish_task_status <> ? OR publish_operation_no <> ?", status, strings.TrimSpace(operationNo)).Data(data).Update()
-		if err != nil {
-			return gerror.Wrap(err, "更新资料上架操作状态失败")
-		}
-		affected, _ := result.RowsAffected()
-		if affected == 0 {
-			return nil
-		}
-		indexMod := tx.Model(publishNoteIndexTable).Unscoped().Safe().Ctx(ctx).
-			Where("tenant_id", tenantId).
-			Where("account_id", accountId).
-			Where("profile_id", profileId).
-			WhereNull("deleted_at").
-			Where("task_status <> ?", status)
-		if _, err = indexMod.Data(g.Map{"task_status": status}).Update(); err != nil {
-			return gerror.Wrap(err, "更新资料列表上架状态失败")
-		}
-		return nil
+		return s.writeProfilePublishOperationStateTx(ctx, tx, tenantId, accountId, profileId, operationNo, status, requireCurrentOperation)
 	})
+}
+
+func (s *sSysPublish) writeProfilePublishOperationStateTx(ctx context.Context, tx gdb.TX, tenantId, accountId, profileId int64, operationNo, status string, requireCurrentOperation bool) error {
+	now := gtime.Now()
+	stateMod := tx.Model(publishProfileStateTable).Safe().Ctx(ctx).
+		Where("tenant_id", tenantId).
+		Where("account_id", accountId).
+		Where("profile_id", profileId).
+		WhereNull("deleted_at")
+	if requireCurrentOperation {
+		stateMod = stateMod.Where("publish_operation_no", strings.TrimSpace(operationNo))
+	}
+	if requireCurrentOperation && (status == sysin.PublishTaskStatusPending || status == sysin.PublishTaskStatusPublishing) {
+		stateMod = stateMod.Where("publish_task_status <> ?", sysin.PublishTaskStatusFailed)
+	}
+	data := g.Map{
+		"publish_task_status":     status,
+		"publish_task_updated_at": now,
+		"updated_at":              now,
+	}
+	if !requireCurrentOperation {
+		data["publish_operation_no"] = strings.TrimSpace(operationNo)
+	}
+	result, err := stateMod.Where("publish_task_status <> ? OR publish_operation_no <> ?", status, strings.TrimSpace(operationNo)).Data(data).Update()
+	if err != nil {
+		return gerror.Wrap(err, "更新资料上架操作状态失败")
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return nil
+	}
+	indexMod := tx.Model(publishNoteIndexTable).Unscoped().Safe().Ctx(ctx).
+		Where("tenant_id", tenantId).
+		Where("account_id", accountId).
+		Where("profile_id", profileId).
+		WhereNull("deleted_at").
+		Where("task_status <> ?", status)
+	if _, err = indexMod.Data(g.Map{"task_status": status}).Update(); err != nil {
+		return gerror.Wrap(err, "更新资料列表上架状态失败")
+	}
+	return nil
 }
 
 func (s *sSysPublish) recoverProfilePublishOperationStates(ctx context.Context, limit int) error {

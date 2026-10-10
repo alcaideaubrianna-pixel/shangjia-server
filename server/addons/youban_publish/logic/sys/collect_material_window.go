@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -120,8 +121,12 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 				g.Log().Debugf(ctx, "采集消息暂未匹配验证组 eventId:%d sourceMessageId:%d media:%d age:%s", event["id"].Int64(), event["source_message_id"].Int64(), event["media_count"].Int(), collectMaterialEventTime(event))
 			}
 			if verifyIndex >= 0 {
-				if err = s.bindCollectMaterialPair(ctx, event, rows[verifyIndex]); err != nil {
-					return err
+				paired, pairErr := s.bindCollectMaterialPair(ctx, event, rows[verifyIndex])
+				if pairErr != nil {
+					return pairErr
+				}
+				if !paired {
+					continue
 				}
 				if err = s.processCollectEvent(ctx, event["id"].Int64(), payload.TenantId, payload.AccountId); err != nil {
 					if !isCollectProcessRetryError(err) {
@@ -137,9 +142,14 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 				}
 				continue
 			}
-			if err = s.markCollectMaterialRole(ctx, event["id"].Int64(), collectMaterialRoleDisplay, 0, "complete"); err != nil {
-				return err
+			claimed, claimErr := s.markCollectMaterialRole(ctx, event["id"].Int64(), collectMaterialRoleDisplay, 0, "complete")
+			if claimErr != nil {
+				return claimErr
 			}
+			if !claimed {
+				continue
+			}
+			s.appendCollectEventLogForRecord(ctx, event, "group", "timeout_without_verify", "验证窗口到期，按无验证资料继续处理", "")
 			if err = s.processCollectEvent(ctx, event["id"].Int64(), payload.TenantId, payload.AccountId); err != nil {
 				if !isCollectProcessRetryError(err) {
 					return err
@@ -155,8 +165,12 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 					return lookupErr
 				}
 				if !storedDisplay.IsEmpty() {
-					if err = s.bindCollectMaterialPair(ctx, storedDisplay, event); err != nil {
-						return err
+					paired, pairErr := s.bindCollectMaterialPair(ctx, storedDisplay, event)
+					if pairErr != nil {
+						return pairErr
+					}
+					if !paired {
+						continue
 					}
 					if err = s.processCollectEvent(ctx, event["id"].Int64(), payload.TenantId, payload.AccountId); err != nil && !isCollectProcessRetryError(err) {
 						return err
@@ -166,8 +180,12 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 			}
 			if displayIndex >= 0 {
 				display := rows[displayIndex]
-				if err = s.bindCollectMaterialPair(ctx, display, event); err != nil {
-					return err
+				paired, pairErr := s.bindCollectMaterialPair(ctx, display, event)
+				if pairErr != nil {
+					return pairErr
+				}
+				if !paired {
+					continue
 				}
 				if err = s.processCollectEvent(ctx, display["id"].Int64(), payload.TenantId, payload.AccountId); err != nil && !isCollectProcessRetryError(err) {
 					return err
@@ -201,6 +219,20 @@ func shouldResumeClassifiedDisplayEvent(event gdb.Record) bool {
 }
 
 const collectMaterialVerifyUnmatchedMessage = "验证资料未匹配到前序资料组"
+
+var errCollectMaterialPairRace = errors.New("采集资料组已被并发处理")
+
+func collectMaterialMutableStatuses() []string {
+	return []string{
+		sysin.CollectEventStatusPending,
+		sysin.CollectEventStatusGroupCollect,
+		sysin.CollectEventStatusWaitingOrder,
+		sysin.CollectEventStatusPrechecked,
+		sysin.CollectEventStatusMediaPending,
+		sysin.CollectEventStatusMediaReady,
+		sysin.CollectEventStatusFailed,
+	}
+}
 
 func collectMaterialEventNeedsPairRepair(event gdb.Record) bool {
 	return event["status"].String() == sysin.CollectEventStatusIgnored &&
@@ -249,7 +281,7 @@ func (s *sSysPublish) findStoredCollectDisplayEvent(ctx context.Context, verify 
 		Where("material_role", collectMaterialRoleDisplay).
 		Where("source_message_id < ?", messageID).
 		Where("COALESCE(received_at,created_at) BETWEEN ? AND ?", verifyAt.Add(-collectMaterialVerifyWindowDefault), verifyAt).
-		WhereIn("status", []string{sysin.CollectEventStatusPrechecked, sysin.CollectEventStatusMediaPending, sysin.CollectEventStatusMediaReady, sysin.CollectEventStatusProcessed, sysin.CollectEventStatusDispatched}).
+		WhereIn("status", collectMaterialMutableStatuses()).
 		OrderDesc("source_message_id").OrderDesc("id").Limit(1).One()
 	if err != nil {
 		return nil, gerror.Wrap(err, "回看验证资料前序展示组失败")
@@ -286,57 +318,89 @@ func truncateCollectDiagnosticText(value string, limit int) string {
 	return value[:limit] + "..."
 }
 
-func (s *sSysPublish) bindCollectMaterialPair(ctx context.Context, display gdb.Record, verify gdb.Record) error {
+func (s *sSysPublish) bindCollectMaterialPair(ctx context.Context, display gdb.Record, verify gdb.Record) (bool, error) {
 	if display["id"].Int64() <= 0 || verify["id"].Int64() <= 0 {
-		return nil
+		return false, nil
 	}
 	now := gtime.Now()
-	if _, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
-		Where("id", display["id"].Int64()).
-		Where("material_role", collectMaterialRolePending).
-		Data(g.Map{
-			"material_role":         collectMaterialRoleDisplay,
-			"material_group_status": "paired",
-			"updated_at":            now,
-		}).Update(); err != nil {
-		return gerror.Wrap(err, "绑定资料展示组失败")
+	paired := false
+	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		result, txErr := tx.Model(pdao.YoubanPublishCollectEvent.Table()).Ctx(ctx).
+			Where("id", display["id"].Int64()).
+			Where("material_role", collectMaterialRolePending).
+			WhereIn("status", collectMaterialMutableStatuses()).
+			Data(g.Map{"material_role": collectMaterialRoleDisplay, "material_group_status": "paired", "updated_at": now}).Update()
+		if txErr != nil {
+			return gerror.Wrap(txErr, "绑定资料展示组失败")
+		}
+		affected, txErr := result.RowsAffected()
+		if txErr != nil {
+			return gerror.Wrap(txErr, "确认资料展示组绑定结果失败")
+		}
+		if affected == 0 {
+			return nil
+		}
+		result, txErr = tx.Model(pdao.YoubanPublishCollectEvent.Table()).Ctx(ctx).
+			Where("id", verify["id"].Int64()).
+			Where("material_role = ? OR (status = ? AND error_message = ?)", collectMaterialRolePending, sysin.CollectEventStatusIgnored, collectMaterialVerifyUnmatchedMessage).
+			Data(g.Map{"status": sysin.CollectEventStatusGroupCollect, "material_role": collectMaterialRoleVerify, "material_parent_event_id": display["id"].Int64(), "material_group_status": "paired", "error_message": "", "processed_at": nil, "updated_at": now}).Update()
+		if txErr != nil {
+			return gerror.Wrap(txErr, "绑定资料验证组失败")
+		}
+		affected, txErr = result.RowsAffected()
+		if txErr != nil {
+			return gerror.Wrap(txErr, "确认资料验证组绑定结果失败")
+		}
+		if affected == 0 {
+			return errCollectMaterialPairRace
+		}
+		if _, txErr = tx.Model(pdao.YoubanPublishCollectEventMedia.Table()).Ctx(ctx).
+			Where("event_id", verify["id"].Int64()).Where("cache_status", collectMediaCacheCanceled).
+			Data(g.Map{"cache_status": collectMediaCachePending, "error_message": "", "next_retry_at": nil, "updated_at": now}).Update(); txErr != nil {
+			return gerror.Wrap(txErr, "恢复验证媒体下载失败")
+		}
+		paired = true
+		return nil
+	})
+	if errors.Is(err, errCollectMaterialPairRace) {
+		g.Log().Infof(ctx, "采集验证组配对竞态已跳过 displayEventId:%d verifyEventId:%d", display["id"].Int64(), verify["id"].Int64())
+		return false, nil
 	}
-	if _, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
-		Where("id", verify["id"].Int64()).
-		Where("material_role = ? OR (status = ? AND error_message = ?)", collectMaterialRolePending, sysin.CollectEventStatusIgnored, collectMaterialVerifyUnmatchedMessage).
-		Data(g.Map{
-			"status":                   sysin.CollectEventStatusGroupCollect,
-			"material_role":            collectMaterialRoleVerify,
-			"material_parent_event_id": display["id"].Int64(),
-			"material_group_status":    "paired",
-			"error_message":            "",
-			"processed_at":             nil,
-			"updated_at":               now,
-		}).Update(); err != nil {
-		return gerror.Wrap(err, "绑定资料验证组失败")
+	if err != nil {
+		return false, err
 	}
-	if _, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
-		Where("event_id", verify["id"].Int64()).
-		Where("cache_status", collectMediaCacheCanceled).
-		Data(g.Map{"cache_status": collectMediaCachePending, "error_message": "", "next_retry_at": nil, "updated_at": now}).Update(); err != nil {
-		return gerror.Wrap(err, "恢复验证媒体下载失败")
+	if !paired {
+		g.Log().Infof(ctx, "采集资料组配对竞态已跳过 displayEventId:%d verifyEventId:%d", display["id"].Int64(), verify["id"].Int64())
+		return false, nil
 	}
 	g.Log().Infof(ctx, "采集资料组绑定完成 chat:%s displayEventId:%d verifyEventId:%d", strings.TrimSpace(display["source_chat_id"].String()), display["id"].Int64(), verify["id"].Int64())
-	return nil
+	s.appendCollectEventLogForRecord(ctx, display, "group", "paired", "展示资料与验证资料已在同一窗口配对", fmt.Sprintf(`{"verifyEventId":%d}`, verify["id"].Int64()))
+	return true, nil
 }
 
-func (s *sSysPublish) markCollectMaterialRole(ctx context.Context, eventID int64, role string, parentID int64, status string) error {
-	_, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).Where("id", eventID).Data(g.Map{
-		"material_role":            role,
-		"material_parent_event_id": parentID,
-		"material_group_status":    status,
-		"updated_at":               gtime.Now(),
-	}).Update()
-	return gerror.Wrap(err, "更新采集资料组角色失败")
+func (s *sSysPublish) markCollectMaterialRole(ctx context.Context, eventID int64, role string, parentID int64, status string) (bool, error) {
+	result, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+		Where("id", eventID).
+		Where("material_role", collectMaterialRolePending).
+		WhereIn("status", collectMaterialMutableStatuses()).
+		Data(g.Map{
+			"material_role":            role,
+			"material_parent_event_id": parentID,
+			"material_group_status":    status,
+			"updated_at":               gtime.Now(),
+		}).Update()
+	if err != nil {
+		return false, gerror.Wrap(err, "更新采集资料组角色失败")
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, gerror.Wrap(err, "确认采集资料组角色失败")
+	}
+	return affected > 0, nil
 }
 
 func (s *sSysPublish) markCollectMaterialWaitingVerify(ctx context.Context, eventID int64) error {
-	_, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+	result, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
 		Where("id", eventID).
 		Where("material_role", collectMaterialRolePending).
 		Where("material_group_status IS NULL OR material_group_status = '' OR material_group_status IN (?, ?)", collectMaterialGroupWaitingVerify, collectMaterialGroupCollecting).
@@ -344,7 +408,17 @@ func (s *sSysPublish) markCollectMaterialWaitingVerify(ctx context.Context, even
 			"material_group_status": collectMaterialGroupWaitingVerify,
 			"updated_at":            gtime.Now(),
 		}).Update()
-	return gerror.Wrap(err, "更新采集资料验证等待状态失败")
+	if err != nil {
+		return gerror.Wrap(err, "更新采集资料验证等待状态失败")
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return gerror.Wrap(err, "确认采集资料验证等待状态失败")
+	}
+	if affected > 0 {
+		s.appendCollectEventLog(ctx, eventID, "group", "waiting_verify", "展示资料进入固定5分钟验证窗口", "")
+	}
+	return nil
 }
 
 func (s *sSysPublish) pairedCollectVerifyEvent(ctx context.Context, displayEventID int64) (gdb.Record, error) {

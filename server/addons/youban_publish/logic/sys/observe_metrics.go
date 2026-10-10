@@ -59,6 +59,11 @@ func observeTelegramBotFileDownload(ctx context.Context, endpoint string, err er
 
 var publishObserveMeter = otel.Meter("hotgo/addons/youban_publish")
 
+func observeDurableLogWriteFailure(ctx context.Context, logType string) {
+	counter, _ := publishObserveMeter.Int64Counter("xiaohuiji.durable_log.write_failures")
+	counter.Add(ctx, 1, metric.WithAttributes(attribute.String("log_type", logType)))
+}
+
 func observePublishRuntimeHeartbeat(ctx context.Context, config publishRuntimeConfig) {
 	roles := map[string]bool{
 		"account":           config.Account,

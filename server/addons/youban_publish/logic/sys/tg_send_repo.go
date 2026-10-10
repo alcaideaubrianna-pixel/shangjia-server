@@ -260,6 +260,20 @@ func (s *sSysPublish) confirmTelegramMediaPhase(ctx context.Context, job telegra
 	return nil
 }
 
+// finalizeTelegramMediaDelivery owns the terminal phase transition shared by
+// Bot and account transports. Media transports only confirm their own phase.
+func (s *sSysPublish) finalizeTelegramMediaDelivery(ctx context.Context, job telegramJobRecord, hasVerify, complete bool) error {
+	if !hasVerify {
+		if err := s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseCompletedNoVerify); err != nil {
+			return err
+		}
+	}
+	if !complete {
+		return nil
+	}
+	return s.completeTelegramJobAndWakeChannel(ctx, job)
+}
+
 func (s *sSysPublish) ensureTelegramMediaGroupPurpose(ctx context.Context, job telegramJobRecord, item *telegramSentMessage) error {
 	if item == nil || strings.TrimSpace(item.MediaGroupId) == "" || (item.Purpose != "display" && item.Purpose != "verify") {
 		return nil
@@ -280,7 +294,7 @@ func (s *sSysPublish) ensureTelegramMediaGroupPurpose(ctx context.Context, job t
 }
 
 func (s *sSysPublish) appendTelegramJobLog(ctx context.Context, job telegramJobRecord, action string, status string, message string) {
-	_, _ = g.DB().Model(publishTgJobLogTable).Safe().Ctx(ctx).Data(g.Map{
+	_, err := g.DB().Model(publishTgJobLogTable).Safe().Ctx(ctx).Data(g.Map{
 		"job_id":     job.Id,
 		"tenant_id":  job.TenantId,
 		"account_id": job.AccountId,
@@ -291,4 +305,8 @@ func (s *sSysPublish) appendTelegramJobLog(ctx context.Context, job telegramJobR
 		"message":    message,
 		"created_at": gtime.Now(),
 	}).Insert()
+	if err != nil {
+		observeDurableLogWriteFailure(ctx, "telegram_job")
+		g.Log().Warningf(ctx, "TG任务持久日志写入失败 jobId:%d action:%s status:%s err:%+v", job.Id, action, status, err)
+	}
 }

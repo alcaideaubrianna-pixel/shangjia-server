@@ -8,7 +8,26 @@ import (
 	"github.com/gogf/gf/v2/container/gvar"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/os/gtime"
+
+	"hotgo/addons/youban_publish/model/input/sysin"
 )
+
+func TestCollectMaterialMutableStatusesExcludeTerminalEvents(t *testing.T) {
+	statuses := make(map[string]struct{})
+	for _, status := range collectMaterialMutableStatuses() {
+		statuses[status] = struct{}{}
+	}
+	for _, terminal := range []string{sysin.CollectEventStatusProcessed, sysin.CollectEventStatusDispatched, sysin.CollectEventStatusIgnored} {
+		if _, ok := statuses[terminal]; ok {
+			t.Fatalf("terminal status %q must not be mutable", terminal)
+		}
+	}
+	for _, active := range []string{sysin.CollectEventStatusPending, sysin.CollectEventStatusGroupCollect, sysin.CollectEventStatusMediaReady} {
+		if _, ok := statuses[active]; !ok {
+			t.Fatalf("active status %q must remain mutable", active)
+		}
+	}
+}
 
 func TestFindCollectVerifyEventUsesOneFollowingVideoGroup(t *testing.T) {
 	receivedAt := gtime.NewFromTime(time.Now().Add(-4 * time.Minute))

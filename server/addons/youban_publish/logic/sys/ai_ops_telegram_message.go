@@ -49,7 +49,7 @@ func (s *sSysPublish) AIOpsTelegramMessageContext(ctx context.Context, messageUR
 
 func (s *sSysPublish) resolveAIOpsPublishedMessage(ctx context.Context, ref aiOpsTelegramMessageRef, result *sysin.AIOpsTelegramMessageContextModel) error {
 	mod := g.DB().Model("hg_youban_publish_tg_message m").Ctx(ctx).
-		Fields("m.job_id,m.profile_id,j.status AS job_status,j.channel_id,j.collect_event_id,j.collect_source_id,j.collect_source_chat_id,j.collect_source_message_id,c.channel_title").
+		Fields("m.job_id,m.profile_id,j.status AS job_status,j.send_phase,j.dispatch_status,j.error_message,j.last_dispatch_error,j.operation_no,j.channel_id,j.collect_event_id,j.collect_source_id,j.collect_source_chat_id,j.collect_source_message_id,c.channel_title").
 		LeftJoin("hg_youban_publish_tg_job j", "j.id=m.job_id").
 		LeftJoin("hg_youban_publish_channel c", "c.id=j.channel_id").
 		Where("m.tg_message_id", ref.MessageId).
@@ -69,6 +69,8 @@ func (s *sSysPublish) resolveAIOpsPublishedMessage(ctx context.Context, ref aiOp
 	result.Found, result.MatchType = true, "published_message"
 	result.JobId, result.ProfileId = row["job_id"].Int64(), row["profile_id"].Int64()
 	result.JobStatus, result.ChannelId = row["job_status"].String(), row["channel_id"].Int64()
+	result.JobSendPhase, result.JobDispatchStatus = row["send_phase"].String(), row["dispatch_status"].String()
+	result.JobError, result.JobDispatchError, result.OperationNo = row["error_message"].String(), row["last_dispatch_error"].String(), row["operation_no"].String()
 	result.ChannelTitle = row["channel_title"].String()
 	result.CollectEventId, result.CollectSourceId = row["collect_event_id"].Int64(), row["collect_source_id"].Int64()
 	result.CollectSourceChatId = row["collect_source_chat_id"].String()
@@ -136,6 +138,11 @@ func (s *sSysPublish) fillAIOpsCollectionContext(ctx context.Context, result *sy
 		}
 	}
 	if result.CollectEventId > 0 {
+		if result.JobId <= 0 {
+			if err := s.fillAIOpsLatestCollectJob(ctx, result); err != nil {
+				return err
+			}
+		}
 		if err := s.fillAIOpsCollectEvent(ctx, result); err != nil {
 			return err
 		}
@@ -163,11 +170,36 @@ func (s *sSysPublish) fillAIOpsCollectionContext(ctx context.Context, result *sy
 		}
 		result.CollectRuleName, result.CollectRuleStatus = rule["name"].String(), rule["status"].Int()
 	}
-	if result.VerifyMediaCount > 0 {
-		result.Diagnosis = "验证媒体已采集"
-	} else {
-		result.Diagnosis = "未发现验证媒体，请检查源消息配对和媒体缓存阶段"
+	switch {
+	case result.VerifyMediaCount > 0 && result.SentVerifyCount > 0:
+		result.Diagnosis = "验证媒体已采集并已发送"
+	case result.VerifyMediaCount > 0 && result.JobId > 0:
+		result.Diagnosis = "验证媒体已采集但尚未确认发送，请检查Job发送阶段、Attempt和错误字段"
+	case result.MaterialGroupStatus == "complete":
+		result.Diagnosis = "固定5分钟窗口到期时未匹配到验证媒体，资料按无验证发布"
+	case result.MaterialGroupStatus == "paired":
+		result.Diagnosis = "采集组已配对，但验证媒体记录缺失，请检查媒体缓存链路"
+	default:
+		result.Diagnosis = "未发现验证媒体，请检查采集组窗口决策和媒体缓存阶段"
 	}
+	return nil
+}
+
+func (s *sSysPublish) fillAIOpsLatestCollectJob(ctx context.Context, result *sysin.AIOpsTelegramMessageContextModel) error {
+	job, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Fields("id,status,send_phase,dispatch_status,error_message,last_dispatch_error,operation_no,channel_id").
+		Where("collect_event_id", result.CollectEventId).OrderDesc("id").Limit(1).One()
+	if err != nil {
+		return gerror.Wrap(err, "读取采集事件TG任务失败")
+	}
+	if job.IsEmpty() {
+		return nil
+	}
+	result.JobId = job["id"].Int64()
+	result.JobStatus, result.JobSendPhase = job["status"].String(), job["send_phase"].String()
+	result.JobDispatchStatus = job["dispatch_status"].String()
+	result.JobError, result.JobDispatchError = job["error_message"].String(), job["last_dispatch_error"].String()
+	result.OperationNo, result.ChannelId = job["operation_no"].String(), job["channel_id"].Int64()
 	return nil
 }
 
@@ -179,6 +211,7 @@ func (s *sSysPublish) fillAIOpsCollectEvent(ctx context.Context, result *sysin.A
 	}
 	if !event.IsEmpty() {
 		result.CollectEventStatus = event["status"].String()
+		result.MaterialGroupStatus = event["material_group_status"].String()
 		if result.CollectSourceId <= 0 {
 			result.CollectSourceId = event["source_id"].Int64()
 		}
@@ -190,13 +223,29 @@ func (s *sSysPublish) fillAIOpsCollectEvent(ctx context.Context, result *sysin.A
 		}
 	}
 	counts, err := g.DB().Model("hg_youban_publish_collect_event_media em").Ctx(ctx).
-		Fields("COUNT(*) FILTER (WHERE COALESCE(em.media_type,'') <> 'video') AS display_count,COUNT(*) FILTER (WHERE em.media_type='video') AS verify_count").
-		Where("em.event_id=? OR em.event_id IN (SELECT id FROM hg_youban_publish_collect_event WHERE material_parent_event_id=?)", result.CollectEventId, result.CollectEventId).
+		LeftJoin("hg_youban_publish_collect_event e", "e.id=em.event_id").
+		Fields("COUNT(*) FILTER (WHERE COALESCE(e.material_role,'') <> 'verify') AS display_count,COUNT(*) FILTER (WHERE e.material_role='verify') AS verify_count").
+		Where("em.event_id=? OR (e.material_parent_event_id=? AND e.material_role=?)", result.CollectEventId, result.CollectEventId, collectMaterialRoleVerify).
 		One()
 	if err != nil {
 		return gerror.Wrap(err, "统计采集媒体失败")
 	}
 	result.DisplayMediaCount, result.VerifyMediaCount = counts["display_count"].Int(), counts["verify_count"].Int()
+	if result.JobId > 0 {
+		sent, countErr := g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).
+			Fields("COUNT(*) FILTER (WHERE purpose='display') AS display_count,COUNT(*) FILTER (WHERE purpose='verify') AS verify_count").
+			Where("job_id", result.JobId).WhereNull("deleted_at").One()
+		if countErr != nil {
+			return gerror.Wrap(countErr, "统计TG已发送消息失败")
+		}
+		result.SentDisplayCount, result.SentVerifyCount = sent["display_count"].Int(), sent["verify_count"].Int()
+		attempt, attemptErr := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
+			Fields("phase,status,error_message").Where("job_id", result.JobId).OrderDesc("id").Limit(1).One()
+		if attemptErr != nil {
+			return gerror.Wrap(attemptErr, "读取TG最近发送尝试失败")
+		}
+		result.LatestAttemptPhase, result.LatestAttemptStatus, result.LatestAttemptError = attempt["phase"].String(), attempt["status"].String(), attempt["error_message"].String()
+	}
 	return nil
 }
 

@@ -318,10 +318,7 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	}
 	if len(verifyMedia) == 0 {
 		g.Log().Infof(ctx, "TG任务无验证资料，跳过验证发送 jobId:%d channelId:%d", job.Id, job.ChannelId)
-		if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseCompletedNoVerify); err != nil {
-			return err
-		}
-		return nil
+		return s.finalizeTelegramMediaDelivery(ctx, job, false, false)
 	}
 	// Always give the Bot API the first chance to upload videos without a
 	// reusable file_id. The account fallback requires channel-admin access and

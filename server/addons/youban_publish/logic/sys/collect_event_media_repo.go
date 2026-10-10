@@ -58,7 +58,7 @@ func (s *sSysPublish) appendCollectEventLog(ctx context.Context, eventId int64, 
 		tenantId = event[eventCols.TenantId].Int64()
 		accountId = event[eventCols.AccountId].Int64()
 	}
-	_, _ = pdao.YoubanPublishCollectEventLog.Ctx(ctx).Data(g.Map{
+	_, err := pdao.YoubanPublishCollectEventLog.Ctx(ctx).Data(g.Map{
 		cols.TenantId:  tenantId,
 		cols.AccountId: accountId,
 		cols.EventId:   eventId,
@@ -68,6 +68,10 @@ func (s *sSysPublish) appendCollectEventLog(ctx context.Context, eventId int64, 
 		cols.MetaText:  strings.TrimSpace(meta),
 		cols.CreatedAt: gtime.Now(),
 	}).Insert()
+	if err != nil {
+		observeDurableLogWriteFailure(ctx, "collect_event")
+		g.Log().Warningf(ctx, "采集事件持久日志写入失败 eventId:%d stage:%s status:%s err:%+v", eventId, stage, status, err)
+	}
 }
 
 func (s *sSysPublish) appendCollectEventLogForRecord(ctx context.Context, event gdb.Record, stage string, status string, message string, meta string) {
@@ -88,7 +92,7 @@ func (s *sSysPublish) appendCollectEventLogWithOwner(ctx context.Context, eventI
 		return
 	}
 	cols := pdao.YoubanPublishCollectEventLog.Columns()
-	_, _ = pdao.YoubanPublishCollectEventLog.Ctx(ctx).Data(g.Map{
+	_, err := pdao.YoubanPublishCollectEventLog.Ctx(ctx).Data(g.Map{
 		cols.TenantId:  tenantId,
 		cols.AccountId: accountId,
 		cols.EventId:   eventId,
@@ -98,6 +102,10 @@ func (s *sSysPublish) appendCollectEventLogWithOwner(ctx context.Context, eventI
 		cols.MetaText:  strings.TrimSpace(meta),
 		cols.CreatedAt: gtime.Now(),
 	}).Insert()
+	if err != nil {
+		observeDurableLogWriteFailure(ctx, "collect_event")
+		g.Log().Warningf(ctx, "采集事件持久日志写入失败 eventId:%d stage:%s status:%s err:%+v", eventId, stage, status, err)
+	}
 }
 
 func skipCollectEventLog(stage string, status string, message string) bool {
