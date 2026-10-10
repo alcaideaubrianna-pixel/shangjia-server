@@ -12,7 +12,6 @@ import (
 
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
-	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -43,8 +42,11 @@ func (h *publishCollectorAccountTaskHandler) HandleAccountTaskCompletion(ctx con
 		return nil
 	}
 	mediaCols := pdao.YoubanPublishCollectEventMedia.Columns()
-	var mediaRow gdb.Record
-	if err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).Fields(mediaCols.EventId).Where(mediaCols.Id, mediaID).Scan(&mediaRow); err != nil {
+	mediaRow, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
+		Fields(mediaCols.EventId).
+		Where(mediaCols.Id, mediaID).
+		One()
+	if err != nil {
 		return gerror.Wrapf(err, "读取异步账号媒体归属事件失败 mediaId:%d", mediaID)
 	}
 	if mediaRow.IsEmpty() {
