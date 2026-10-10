@@ -1004,9 +1004,7 @@ func (s *sSysPublish) downloadBotTelegramMediaWithToken(ctx context.Context, bot
 	}
 	endpoint := telegramBotAPIEndpoint(conf.BotApiServerUrl)
 	getFileStartedAt := time.Now()
-	file, attempts, err := telegramBotGetFileWithBoundedRetry(ctx, func(requestCtx context.Context) (*models.File, error) {
-		return bot.GetFile(requestCtx, &tgbot.GetFileParams{FileID: fileID})
-	})
+	bot, file, endpoint, attempts, err := telegramBotGetFileWithFallback(ctx, botId, botToken, bot, conf, fileID)
 	if err != nil {
 		observeTelegramBotGetFile(ctx, endpoint, "error", time.Since(getFileStartedAt))
 		return nil, gerror.Wrapf(err, "读取Bot媒体文件信息失败，已尝试%d次", attempts)

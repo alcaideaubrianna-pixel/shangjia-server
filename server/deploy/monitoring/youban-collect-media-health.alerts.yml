@@ -71,3 +71,23 @@ groups:
         annotations:
           summary: "采集媒体下载源错误增加"
           description: "下载源 {{ $labels.source }} / {{ $labels.error_class }} 最近 5 分钟失败 {{ $value }} 次"
+
+      - alert: YoubanTelegramBotGetFileFallbackHigh
+        expr: 'sum by (action) (increase({__name__="xiaohuiji.tg.bot_api.get_file_fallback_events",action="official_failed"}[5m])) > 3'
+        for: 2m
+        labels:
+          severity: CRIT
+          category: media
+        annotations:
+          summary: "Bot getFile 本地与官方兜底均失败"
+          description: "最近 5 分钟官方 Bot API 兜底失败 {{ $value }} 次，Bot 媒体下载不可用"
+
+      - alert: YoubanTelegramBotGetFileFallbackUsed
+        expr: 'sum(increase({__name__="xiaohuiji.tg.bot_api.get_file_fallback_events",action="official_success"}[10m])) > 10'
+        for: 5m
+        labels:
+          severity: WARN
+          category: media
+        annotations:
+          summary: "Bot getFile 持续依赖官方兜底"
+          description: "最近 10 分钟官方 Bot API 兜底成功 {{ $value }} 次，请检查本地 Bot API"

@@ -28,6 +28,14 @@ func observeTelegramBotGetFile(ctx context.Context, endpoint, result string, dur
 	histogram.Record(ctx, duration.Seconds(), attrs)
 }
 
+func observeTelegramBotGetFileFallback(ctx context.Context, action string, botID int64) {
+	counter, _ := publishObserveMeter.Int64Counter("xiaohuiji.tg.bot_api.get_file_fallback_events")
+	counter.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("action", action),
+		attribute.Int64("bot_id", botID),
+	))
+}
+
 func observeTelegramBotFileDownload(ctx context.Context, endpoint string, err error, duration time.Duration) {
 	result, statusCode := "success", "2xx"
 	if err != nil {
