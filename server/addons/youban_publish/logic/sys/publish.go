@@ -65,6 +65,7 @@ func init() {
 	service.RegisterSysPublish(publish)
 	collectorservice.RegisterDeliveryHandler(&publishCollectorDeliveryHandler{publish: publish})
 	accountTaskHandler := &publishCollectorAccountTaskHandler{publish: publish}
+	collectorservice.RegisterAccountTaskCompletionHandler(collectorin.AccountTaskTypeMediaDownload, accountTaskHandler)
 	collectorservice.RegisterAccountTaskHandler(collectorin.AccountTaskTypeHistoryPage, accountTaskHandler)
 	collectorservice.RegisterAccountTaskHandler(collectorin.AccountTaskTypeMaterialImportHistoryPage, accountTaskHandler)
 	collectorservice.RegisterAccountTaskHandler(collectorin.AccountTaskTypeDialogCacheRefresh, accountTaskHandler)

@@ -287,7 +287,7 @@ func (s *sSysPublish) downloadMaterialImportItems(ctx context.Context, task *sys
 				items[index].StoragePath = ""
 			}
 			itemCtx, cancel := context.WithTimeout(groupCtx, materialImportMediaItemTimeout)
-			down, err := s.downloadTelegramMedia(itemCtx, task.TenantId, task.AccountId, task.TgAccountId, item)
+			down, err := s.downloadTelegramMedia(itemCtx, task.TenantId, task.AccountId, task.TgAccountId, 0, item)
 			cancel()
 			if err != nil {
 				if collectMediaSourceGone(err) {

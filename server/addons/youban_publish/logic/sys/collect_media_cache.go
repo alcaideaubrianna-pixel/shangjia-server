@@ -550,7 +550,7 @@ func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, even
 			if sourceType == sysin.CollectSourceTypeBot {
 				cached, err = s.downloadBotTelegramMedia(itemCtx, event["tenant_id"].Int64(), event["bot_id"].Int64(), items[index])
 			} else {
-				cached, err = s.downloadTelegramMedia(itemCtx, event["tenant_id"].Int64(), event["account_id"].Int64(), event["tg_account_id"].Int64(), items[index])
+				cached, err = s.downloadTelegramMedia(itemCtx, event["tenant_id"].Int64(), event["account_id"].Int64(), event["tg_account_id"].Int64(), row.Id, items[index])
 			}
 			if err != nil {
 				downloadDuration := time.Since(startedAt).Milliseconds()
@@ -917,13 +917,13 @@ func collectMediaAuthBytesInvalid(err error) bool {
 	return strings.Contains(strings.ToLower(err.Error()), "auth_bytes_invalid")
 }
 
-func (s *sSysPublish) downloadTelegramMedia(ctx context.Context, tenantId int64, accountId int64, tgAccountId int64, item collectMediaItem) (*collectDownloadedMedia, error) {
+func (s *sSysPublish) downloadTelegramMedia(ctx context.Context, tenantId int64, accountId int64, tgAccountId int64, mediaID int64, item collectMediaItem) (*collectDownloadedMedia, error) {
 	if tgAccountId <= 0 {
 		return nil, gerror.New("账号采集媒体缺少TG账号")
 	}
 	task, err := collectorservice.AccountTasks().SubmitAndWait(ctx, &collectorin.AccountTaskSubmit{
 		TenantID: tenantId, AccountID: tgAccountId, TaskType: collectorin.AccountTaskTypeMediaDownload,
-		TaskKey: accountMediaDownloadTaskKey(tgAccountId, item), Priority: collectorin.EventPriorityRealtime,
+		TaskKey: accountMediaDownloadTaskKey(tgAccountId, mediaID, item), Priority: collectorin.EventPriorityRealtime,
 		MediaOwnerAccountID: accountId, Media: ptrCollectorMediaItem(collectorMediaItemFromCollect(item)), MaxAttempts: 5,
 	}, time.Second)
 	if err != nil {
@@ -959,7 +959,10 @@ func ptrCollectorMediaItem(item collectorin.CollectorMediaItem) *collectorin.Col
 	return &item
 }
 
-func accountMediaDownloadTaskKey(tgAccountID int64, item collectMediaItem) string {
+func accountMediaDownloadTaskKey(tgAccountID int64, mediaID int64, item collectMediaItem) string {
+	if mediaID > 0 {
+		return fmt.Sprintf("collect-media:%d", mediaID)
+	}
 	identity := fmt.Sprintf("%d|%s|%s|%d|%d|%d", tgAccountID, strings.TrimSpace(item.Type), strings.TrimSpace(item.FileId), item.SourceMediaId, item.SourceDCId, item.SourceSize)
 	return fmt.Sprintf("media:%x", sha256.Sum256([]byte(identity)))
 }

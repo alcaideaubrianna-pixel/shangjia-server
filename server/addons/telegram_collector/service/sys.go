@@ -44,6 +44,13 @@ type AccountTaskHandler interface {
 	HandleAccountTask(ctx context.Context, client *telegram.Client, task *sysin.AccountTask) (*sysin.AccountMediaDownloadResult, error)
 }
 
+// AccountTaskCompletionHandler receives terminal results after the task row is
+// durably completed. Consumers use the stable task key to reconcile their own
+// records without blocking the account worker.
+type AccountTaskCompletionHandler interface {
+	HandleAccountTaskCompletion(ctx context.Context, task *sysin.AccountTask, result *sysin.AccountMediaDownloadResult)
+}
+
 type AccountMediaProvider interface {
 	ResolvePeer(ctx context.Context, tenantID, accountID int64, chatID string, client *telegram.Client) (tg.InputPeerClass, error)
 	StoreMedia(ctx context.Context, task *sysin.AccountTask, localPath string) (*sysin.AccountMediaDownloadResult, error)
@@ -99,6 +106,7 @@ var localCollector ICollector
 var localDeliveryHandler DeliveryHandler
 var localAccountTasks IAccountTasks
 var accountTaskHandlers = map[string]AccountTaskHandler{}
+var accountTaskCompletionHandlers = map[string]AccountTaskCompletionHandler{}
 var localAccountRuntime IAccountRuntime
 var localAccountRuntimeProvider AccountRuntimeProvider
 var localAccountMediaProvider AccountMediaProvider
@@ -134,6 +142,17 @@ func RegisterAccountTaskHandler(taskType string, handler AccountTaskHandler) {
 }
 
 func AccountTaskHandlerFor(taskType string) AccountTaskHandler { return accountTaskHandlers[taskType] }
+
+func RegisterAccountTaskCompletionHandler(taskType string, handler AccountTaskCompletionHandler) {
+	if taskType == "" || handler == nil {
+		return
+	}
+	accountTaskCompletionHandlers[taskType] = handler
+}
+
+func AccountTaskCompletionHandlerFor(taskType string) AccountTaskCompletionHandler {
+	return accountTaskCompletionHandlers[taskType]
+}
 
 func AccountMedia() AccountMediaProvider              { return localAccountMediaProvider }
 func RegisterAccountMedia(value AccountMediaProvider) { localAccountMediaProvider = value }

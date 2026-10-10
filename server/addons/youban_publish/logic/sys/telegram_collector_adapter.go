@@ -20,6 +20,7 @@ import (
 
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
 	botService "hotgo/addons/youban_bot/service"
+	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/cache"
 )
@@ -31,6 +32,36 @@ type publishCollectorDeliveryHandler struct {
 type publishCollectorAccountTaskHandler struct{ publish *sSysPublish }
 
 type publishCollectorAccountMediaProvider struct{ publish *sSysPublish }
+
+func (h *publishCollectorAccountTaskHandler) HandleAccountTaskCompletion(ctx context.Context, task *collectorin.AccountTask, result *collectorin.AccountMediaDownloadResult) {
+	if h == nil || h.publish == nil || task == nil || result == nil || task.TaskType != collectorin.AccountTaskTypeMediaDownload {
+		return
+	}
+	mediaID := parseCollectMediaTaskKey(task.TaskKey)
+	if mediaID <= 0 || strings.TrimSpace(result.StoragePath) == "" && strings.TrimSpace(result.FileURL) == "" {
+		return
+	}
+	data := g.Map{
+		"cache_status": "ready", "file_url": result.FileURL, "storage_path": result.StoragePath,
+		"source_file_id": result.Media.FileID, "source_kind": result.Media.SourceKind,
+		"source_media_id": result.Media.SourceMediaID, "source_access_hash": result.Media.SourceAccessHash,
+		"source_file_reference": result.Media.SourceFileReference, "source_thumb_size": result.Media.SourceThumbSize,
+		"source_mime_type": result.Media.SourceMimeType, "source_dc_id": result.Media.SourceDCID,
+		"source_size": result.Media.SourceSize, "error_message": "", "updated_at": gtime.Now(),
+	}
+	if _, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).Where("id", mediaID).Update(data); err != nil {
+		g.Log().Warningf(ctx, "异步账号媒体结果回写失败 mediaId:%d err:%+v", mediaID, err)
+	}
+}
+
+func parseCollectMediaTaskKey(key string) int64 {
+	const prefix = "collect-media:"
+	if !strings.HasPrefix(key, prefix) {
+		return 0
+	}
+	id, _ := strconv.ParseInt(strings.TrimPrefix(key, prefix), 10, 64)
+	return id
+}
 
 func (h *publishCollectorAccountTaskHandler) HandleAccountTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) (*collectorin.AccountMediaDownloadResult, error) {
 	if h == nil || h.publish == nil || task == nil {
