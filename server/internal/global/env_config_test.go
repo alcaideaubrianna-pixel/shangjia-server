@@ -97,7 +97,6 @@ database:
 	assertCfg("youbanPublish.queue.mediaBulkShards", "16")
 	assertCfg("youbanPublish.queue.mediaRealtimeWeight", "24")
 	assertCfg("youbanPublish.queue.autoDeleteConcurrency", "32")
-	assertCfg("youbanPublish.collect.accountMediaConcurrency", "2")
 	assertCfg("youbanPublish.collect.mediaRecoveryBatchSize", "300")
 	assertCfg("youbanPublish.collect.materialVerifyWindowSeconds", "240")
 	assertCfg("telegramCollector.enabled", "true")

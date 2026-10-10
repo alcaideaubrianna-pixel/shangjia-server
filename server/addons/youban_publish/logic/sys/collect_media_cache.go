@@ -497,18 +497,13 @@ func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, even
 			}
 			g.Log().Debugf(ctx, "采集媒体下载获取并发槽完成 eventId:%d mediaId:%d wait:%s", event["id"].Int64(), row.Id, time.Since(slotStartedAt).Round(time.Millisecond))
 			defer func() { <-fileSlots }()
-			accountSlotStartedAt := time.Now()
-			releaseAccountSlot := func() {}
-			var slotErr error
-			if event["source_type"].String() != sysin.CollectSourceTypeBot {
-				releaseAccountSlot, slotErr = s.acquireCollectMediaDownloadSlots(ctx, event["tenant_id"].Int64(), event["tg_account_id"].Int64())
-			}
+			releaseGlobalSlot, slotErr := s.acquireCollectMediaDownloadSlots(ctx)
 			if slotErr != nil {
 				result.err = slotErr
 				results[index] = result
 				return
 			}
-			defer releaseAccountSlot()
+			defer releaseGlobalSlot()
 			itemTimeout := time.Duration(g.Cfg().MustGet(ctx, "youbanPublish.collect.mediaItemTimeoutSeconds", int(collectMediaDefaultItemTimeout/time.Second)).Int()) * time.Second
 			if itemTimeout < 30*time.Second {
 				itemTimeout = 30 * time.Second
@@ -518,7 +513,7 @@ func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, even
 			}
 			itemCtx, cancelItem := context.WithTimeout(ctx, itemTimeout)
 			defer cancelItem()
-			g.Log().Debugf(ctx, "采集媒体下载获取全局/账号并发槽完成 eventId:%d mediaId:%d wait:%s", event["id"].Int64(), row.Id, time.Since(accountSlotStartedAt).Round(time.Millisecond))
+			g.Log().Debugf(ctx, "采集媒体下载获取全局并发槽完成 eventId:%d mediaId:%d", event["id"].Int64(), row.Id)
 			statusStartedAt := time.Now()
 			_, statusErr := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).Where("id", row.Id).Data(g.Map{
 				"cache_status":          collectMediaCacheDownloading,
@@ -1307,39 +1302,24 @@ type collectMediaCacheResult struct {
 }
 
 const (
-	collectMediaDefaultGlobalConcurrency  = 64
-	collectMediaDefaultAccountConcurrency = 8
-	collectMediaMaxGlobalConcurrency      = 256
-	collectMediaMaxAccountConcurrency     = 8
-	collectMediaDefaultItemTimeout        = 3 * time.Minute
+	collectMediaDefaultGlobalConcurrency = 64
+	collectMediaMaxGlobalConcurrency     = 256
+	collectMediaDefaultItemTimeout       = 3 * time.Minute
 )
 
-func normalizeCollectMediaConcurrency(globalLimit int, accountLimit int) (int, int) {
+func normalizeCollectMediaConcurrency(globalLimit int) int {
 	if globalLimit < 1 {
 		globalLimit = 1
 	}
 	if globalLimit > collectMediaMaxGlobalConcurrency {
 		globalLimit = collectMediaMaxGlobalConcurrency
 	}
-	if accountLimit < 1 {
-		accountLimit = 1
-	}
-	if accountLimit > collectMediaMaxAccountConcurrency {
-		accountLimit = collectMediaMaxAccountConcurrency
-	}
-	if accountLimit > globalLimit {
-		accountLimit = globalLimit
-	}
-	return globalLimit, accountLimit
+	return globalLimit
 }
 
-func (s *sSysPublish) acquireCollectMediaDownloadSlots(ctx context.Context, tenantId int64, tgAccountId int64) (func(), error) {
-	if tenantId <= 0 {
-		return func() {}, gerror.New("采集媒体下载缺少租户")
-	}
+func (s *sSysPublish) acquireCollectMediaDownloadSlots(ctx context.Context) (func(), error) {
 	globalLimit := g.Cfg().MustGet(ctx, "youbanPublish.collect.globalMediaConcurrency", collectMediaDefaultGlobalConcurrency).Int()
-	accountLimit := g.Cfg().MustGet(ctx, "youbanPublish.collect.accountMediaConcurrency", collectMediaDefaultAccountConcurrency).Int()
-	globalLimit, accountLimit = normalizeCollectMediaConcurrency(globalLimit, accountLimit)
+	globalLimit = normalizeCollectMediaConcurrency(globalLimit)
 	// The Redis lease is the cross-worker account limiter. Keep only the
 	// process-wide slot locally; a second local account semaphore can strand
 	// every event for an account when one Telegram download ignores context.
@@ -1349,7 +1329,7 @@ func (s *sSysPublish) acquireCollectMediaDownloadSlots(ctx context.Context, tena
 	}
 	globalSlots := s.collectMediaSlots
 	s.collectMediaMu.Unlock()
-	waitSeconds := g.Cfg().MustGet(ctx, "youbanPublish.collect.mediaAccountAcquireTimeoutSeconds", 15).Int()
+	waitSeconds := g.Cfg().MustGet(ctx, "youbanPublish.collect.mediaAcquireTimeoutSeconds", 15).Int()
 	if waitSeconds < 1 {
 		waitSeconds = 1
 	}
@@ -1360,25 +1340,7 @@ func (s *sSysPublish) acquireCollectMediaDownloadSlots(ctx context.Context, tena
 	case <-waitCtx.Done():
 		return func() {}, newCollectMediaFairnessRetryError("采集媒体调度等待超时，等待下一轮公平重试", 3*time.Second)
 	}
-	var lease *collectMediaAccountLease
-	if tgAccountId > 0 {
-		var acquired bool
-		var err error
-		lease, acquired, err = acquireCollectMediaAccountLease(ctx, tenantId, tgAccountId, accountLimit)
-		if err != nil {
-			<-globalSlots
-			return func() {}, gerror.Wrap(err, "获取TG账号媒体分布式并发租约失败")
-		}
-		if !acquired {
-			<-globalSlots
-			observeCollectMediaScheduler(ctx, "account_concurrency_full", tenantId, tgAccountId)
-			return func() {}, newCollectMediaFairnessRetryError("TG账号媒体并发已满，等待公平调度", 3*time.Second)
-		}
-	}
 	return func() {
-		if lease != nil {
-			lease.Release()
-		}
 		<-globalSlots
 	}, nil
 }
