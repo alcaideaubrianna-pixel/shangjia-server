@@ -22,6 +22,17 @@ import (
 
 var errAccountMediaSourceGone = errors.New("Telegram原消息已删除或已无可用媒体")
 
+func isAccountMediaSourceUnavailable(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToUpper(err.Error())
+	return strings.Contains(message, "CHANNEL_INVALID") ||
+		strings.Contains(message, "CHANNEL_PRIVATE") ||
+		strings.Contains(message, "MESSAGE_ID_INVALID") ||
+		strings.Contains(message, "MESSAGE_NOT_MODIFIED")
+}
+
 type accountMediaTaskHandler struct{}
 
 func init() {
@@ -39,7 +50,10 @@ func (h *accountMediaTaskHandler) HandleAccountTask(ctx context.Context, client 
 	media := task.Media
 	path, refreshed, err := downloadAccountTaskMedia(ctx, client, provider, task, media)
 	if err != nil {
-		if errors.Is(err, errAccountMediaSourceGone) {
+		if errors.Is(err, errAccountMediaSourceGone) || isAccountMediaSourceUnavailable(err) {
+			if isAccountMediaSourceUnavailable(err) {
+				err = gerror.Wrap(errAccountMediaSourceGone, "Telegram源频道或原消息不可访问")
+			}
 			return &sysin.AccountMediaDownloadResult{Media: media, ErrorCode: "source_gone", ErrorMessage: err.Error()}, nil
 		}
 		return nil, err

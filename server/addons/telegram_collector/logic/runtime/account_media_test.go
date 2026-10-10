@@ -96,6 +96,21 @@ func TestAccountMediaTransferErrors(t *testing.T) {
 	}
 }
 
+func TestIsAccountMediaSourceUnavailable(t *testing.T) {
+	for _, message := range []string{
+		"rpc error code 400: CHANNEL_INVALID",
+		"rpc error code 400: CHANNEL_PRIVATE",
+		"rpc error code 400: MESSAGE_ID_INVALID",
+	} {
+		if !isAccountMediaSourceUnavailable(errors.New(message)) {
+			t.Fatalf("%q should be classified as source unavailable", message)
+		}
+	}
+	if isAccountMediaSourceUnavailable(errors.New("rpc error: timeout")) {
+		t.Fatal("timeout must remain retryable")
+	}
+}
+
 func TestAccountMediaTransferRetiredConnectionClosesAfterRelease(t *testing.T) {
 	closed := 0
 	pool := &accountMediaTransferPool{}
