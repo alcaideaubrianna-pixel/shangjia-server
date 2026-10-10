@@ -12,6 +12,7 @@ import (
 
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -49,8 +50,27 @@ func (h *publishCollectorAccountTaskHandler) HandleAccountTaskCompletion(ctx con
 		"source_mime_type": result.Media.SourceMimeType, "source_dc_id": result.Media.SourceDCID,
 		"source_size": result.Media.SourceSize, "error_message": "", "updated_at": gtime.Now(),
 	}
-	if _, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).Where("id", mediaID).Update(data); err != nil {
+	mediaCols := pdao.YoubanPublishCollectEventMedia.Columns()
+	var mediaRow gdb.Record
+	if err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).Fields(mediaCols.EventId).Where(mediaCols.Id, mediaID).Scan(&mediaRow); err != nil {
+		g.Log().Warningf(ctx, "读取异步账号媒体归属事件失败 mediaId:%d err:%+v", mediaID, err)
+		return
+	}
+	if _, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).Where(mediaCols.Id, mediaID).Update(data); err != nil {
 		g.Log().Warningf(ctx, "异步账号媒体结果回写失败 mediaId:%d err:%+v", mediaID, err)
+		return
+	}
+	eventID := mediaRow[mediaCols.EventId].Int64()
+	if eventID <= 0 {
+		return
+	}
+	event, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).WherePri(eventID).One()
+	if err != nil || event.IsEmpty() {
+		g.Log().Warningf(ctx, "读取异步账号媒体事件失败 mediaId:%d eventId:%d err:%+v", mediaID, eventID, err)
+		return
+	}
+	if err = h.publish.enqueueCollectMediaCache(ctx, collectMediaQueuePayloadFromEvent(event), 0); err != nil {
+		g.Log().Warningf(ctx, "异步账号媒体完成后重新投递事件失败 mediaId:%d eventId:%d err:%+v", mediaID, eventID, err)
 	}
 }
 

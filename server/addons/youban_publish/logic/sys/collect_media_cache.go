@@ -526,15 +526,18 @@ func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, even
 			defer cancelItem()
 			g.Log().Debugf(ctx, "采集媒体下载获取全局并发槽完成 eventId:%d mediaId:%d", event["id"].Int64(), row.Id)
 			statusStartedAt := time.Now()
-			_, statusErr := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).Where("id", row.Id).Data(g.Map{
+			statusData := g.Map{
 				"cache_status":          collectMediaCacheDownloading,
 				"cache_hit":             0,
-				"download_attempts":     gdb.Raw("download_attempts+1"),
 				"download_error_type":   "",
 				collectMediaNextRetryAt: nil,
 				"error_message":         "",
 				"updated_at":            gtime.Now(),
-			}).Update()
+			}
+			if event["source_type"].String() == sysin.CollectSourceTypeBot {
+				statusData["download_attempts"] = gdb.Raw("download_attempts+1")
+			}
+			_, statusErr := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).Where("id", row.Id).Data(statusData).Update()
 			if statusErr != nil {
 				g.Log().Warningf(ctx, "采集媒体更新下载中状态失败 eventId:%d mediaId:%d duration:%s err:%+v", event["id"].Int64(), row.Id, time.Since(statusStartedAt).Round(time.Millisecond), statusErr)
 			} else {
@@ -921,11 +924,18 @@ func (s *sSysPublish) downloadTelegramMedia(ctx context.Context, tenantId int64,
 	if tgAccountId <= 0 {
 		return nil, gerror.New("账号采集媒体缺少TG账号")
 	}
-	task, err := collectorservice.AccountTasks().SubmitAndWait(ctx, &collectorin.AccountTaskSubmit{
+	submit := &collectorin.AccountTaskSubmit{
 		TenantID: tenantId, AccountID: tgAccountId, TaskType: collectorin.AccountTaskTypeMediaDownload,
 		TaskKey: accountMediaDownloadTaskKey(tgAccountId, mediaID, item), Priority: collectorin.EventPriorityRealtime,
 		MediaOwnerAccountID: accountId, Media: ptrCollectorMediaItem(collectorMediaItemFromCollect(item)), MaxAttempts: 5,
-	}, time.Second)
+	}
+	if mediaID > 0 {
+		if _, err := collectorservice.AccountTasks().Submit(ctx, submit); err != nil {
+			return nil, gerror.Wrap(err, "提交账号媒体下载任务失败")
+		}
+		return nil, newCollectMediaFairnessRetryError("账号媒体已进入SDK下载队列", 30*time.Second)
+	}
+	task, err := collectorservice.AccountTasks().SubmitAndWait(ctx, submit, time.Second)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return nil, newCollectMediaFairnessRetryError("账号媒体下载任务等待执行", 3*time.Second)
