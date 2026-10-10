@@ -17,6 +17,9 @@ import (
 )
 
 const (
+	// tgQueueNameMediaLegacy is read only by the one-time migration. It is
+	// intentionally not registered by any worker.
+	tgQueueNameMediaLegacy          = "youban_publish_media"
 	tgQueueNameUrgent               = "youban_publish_tg_urgent"
 	tgQueueNameDefault              = "youban_publish_tg"
 	tgQueueNameBulk                 = "youban_publish_tg_bulk"

@@ -23,6 +23,49 @@ type CollectMediaQueueRebalanceResult struct {
 	ActiveTasks     int
 }
 
+// MigrateLegacyCollectMediaQueue moves waiting tasks from the removed shared
+// media queue into the realtime or sharded bulk queues. Active tasks are left
+// untouched because deleting them can duplicate a download already in flight.
+func MigrateLegacyCollectMediaQueue(ctx context.Context) (int, error) {
+	inspector := asynq.NewInspector(telegramQueueRedisOpt(ctx))
+	defer inspector.Close()
+	client := asynq.NewClient(telegramQueueRedisOpt(ctx))
+	defer client.Close()
+	migrated := 0
+	for _, list := range []func(string, ...asynq.ListOption) ([]*asynq.TaskInfo, error){
+		inspector.ListPendingTasks, inspector.ListScheduledTasks, inspector.ListRetryTasks,
+	} {
+		tasks, err := listAllAsynqTasks(list, tgQueueNameMediaLegacy)
+		if err != nil {
+			if errors.Is(err, asynq.ErrQueueNotFound) {
+				return migrated, nil
+			}
+			return migrated, gerror.Wrap(err, "读取旧媒体队列任务失败")
+		}
+		for _, task := range tasks {
+			payload, ok := collectMediaPayloadFromTaskInfo(task)
+			if !ok {
+				continue
+			}
+			body, err := json.Marshal(payload)
+			if err != nil {
+				return migrated, err
+			}
+			_, err = client.EnqueueContext(ctx, asynq.NewTask(tgTaskTypeCollectMedia, body),
+				asynq.Queue(collectMediaQueueName(ctx, payload)), asynq.MaxRetry(10), asynq.Timeout(30*time.Minute))
+			if err != nil && !errors.Is(err, asynq.ErrDuplicateTask) && !errors.Is(err, asynq.ErrTaskIDConflict) {
+				return migrated, gerror.Wrapf(err, "迁移旧媒体任务失败 task:%s", task.ID)
+			}
+			if deleteErr := inspector.DeleteTask(tgQueueNameMediaLegacy, task.ID); deleteErr != nil && !errors.Is(deleteErr, asynq.ErrTaskNotFound) {
+				return migrated, gerror.Wrapf(deleteErr, "删除旧媒体任务失败 task:%s", task.ID)
+			}
+			migrated++
+		}
+	}
+	g.Log().Infof(ctx, "旧共享媒体队列迁移完成 migrated=%d", migrated)
+	return migrated, nil
+}
+
 func RebalanceCollectMediaQueue(ctx context.Context) (*CollectMediaQueueRebalanceResult, error) {
 	result := new(CollectMediaQueueRebalanceResult)
 	inspector := asynq.NewInspector(telegramQueueRedisOpt(ctx))
