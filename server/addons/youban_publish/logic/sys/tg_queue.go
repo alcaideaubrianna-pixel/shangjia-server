@@ -20,7 +20,6 @@ const (
 	tgQueueNameUrgent               = "youban_publish_tg_urgent"
 	tgQueueNameDefault              = "youban_publish_tg"
 	tgQueueNameBulk                 = "youban_publish_tg_bulk"
-	tgQueueNameMedia                = "youban_publish_media"
 	tgQueueNameMediaRealtime        = "youban_publish_media_realtime"
 	tgQueueNameMediaProcess         = "youban_publish_media_process"
 	tgQueueNameMediaBulkPrefix      = "youban_publish_media_bulk_"

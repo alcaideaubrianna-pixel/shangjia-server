@@ -19,7 +19,7 @@ func TestCollectQueuesUseSharedWorkers(t *testing.T) {
 }
 
 func TestMediaProcessQueueIsIsolatedFromCollectionDownloads(t *testing.T) {
-	if tgQueueNameMediaProcess == tgQueueNameMediaRealtime || tgQueueNameMediaProcess == tgQueueNameMedia {
+	if tgQueueNameMediaProcess == tgQueueNameMediaRealtime {
 		t.Fatal("profile media processing must not compete with collection downloads")
 	}
 	if mediaProcessDefaultConcurrency != 2 {
@@ -217,9 +217,9 @@ func TestListCollectSourceTasksScansAllPages(t *testing.T) {
 			return tasks, nil
 		}
 		payload, _ := json.Marshal(collectMediaQueuePayload{SourceId: 42, EventId: 9})
-		return []*asynq.TaskInfo{{ID: "target", Queue: tgQueueNameMedia, Type: tgTaskTypeCollectMedia, Payload: payload}}, nil
+		return []*asynq.TaskInfo{{ID: "target", Queue: tgQueueNameMediaRealtime, Type: tgTaskTypeCollectMedia, Payload: payload}}, nil
 	}
-	tasks, err := listCollectSourceTasks(list, tgQueueNameMedia, 42)
+	tasks, err := listCollectSourceTasks(list, tgQueueNameMediaRealtime, 42)
 	if err != nil {
 		t.Fatalf("list source tasks: %v", err)
 	}

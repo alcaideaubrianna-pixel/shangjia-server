@@ -180,20 +180,13 @@ func collectMediaRealtimeWorkerQueues() map[string]int {
 
 func collectMediaBulkWorkerQueues(ctx context.Context) map[string]int {
 	bulkWeight := g.Cfg().MustGet(ctx, "youbanPublish.queue.mediaBulkWeight", 1).Int()
-	legacyWeight := g.Cfg().MustGet(ctx, "youbanPublish.queue.mediaLegacyWeight", 1).Int()
 	if bulkWeight < 1 {
 		bulkWeight = 1
 	}
 	if bulkWeight > 20 {
 		bulkWeight = 20
 	}
-	if legacyWeight < 1 {
-		legacyWeight = 1
-	}
-	if legacyWeight > 20 {
-		legacyWeight = 20
-	}
-	queues := map[string]int{tgQueueNameMedia: legacyWeight}
+	queues := make(map[string]int)
 	for _, queue := range collectMediaBulkQueueNames() {
 		queues[queue] = bulkWeight
 	}

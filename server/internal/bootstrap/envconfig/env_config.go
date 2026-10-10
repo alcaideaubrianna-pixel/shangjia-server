@@ -47,7 +47,6 @@ var items = []item{
 	{Key: "youbanPublish.queue.mediaBulkShards", EnvKeys: []string{"YOUBAN_PUBLISH_MEDIA_BULK_SHARDS"}},
 	{Key: "youbanPublish.queue.mediaRealtimeWeight", EnvKeys: []string{"YOUBAN_PUBLISH_MEDIA_REALTIME_WEIGHT"}},
 	{Key: "youbanPublish.queue.mediaBulkWeight", EnvKeys: []string{"YOUBAN_PUBLISH_MEDIA_BULK_WEIGHT"}},
-	{Key: "youbanPublish.queue.mediaLegacyWeight", EnvKeys: []string{"YOUBAN_PUBLISH_MEDIA_LEGACY_WEIGHT"}},
 	{Key: "youbanPublish.fullPush.expandWorkerCount", EnvKeys: []string{"YOUBAN_PUBLISH_FULL_PUSH_EXPAND_WORKERS"}},
 	{Key: "youbanPublish.fullPush.pageSize", EnvKeys: []string{"YOUBAN_PUBLISH_FULL_PUSH_PAGE_SIZE"}},
 	{Key: "youbanPublish.fullPush.candidateCount", EnvKeys: []string{"YOUBAN_PUBLISH_FULL_PUSH_CANDIDATE_COUNT"}},

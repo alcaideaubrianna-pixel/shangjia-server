@@ -45,7 +45,6 @@ type sSysPublish struct {
 	collectMediaMu        publishRuntimeMutex
 	collectMediaLastTouch map[string]time.Time
 	collectMediaSlots     chan struct{}
-	collectMediaAccounts  map[string]chan struct{}
 
 	accountCircuitMu publishRuntimeMutex
 	accountCircuits  map[int64]accountCollectCircuit
@@ -57,7 +56,6 @@ func NewSysPublish() *sSysPublish {
 		telegramChannelLocks:  make(map[string]*publishRuntimeMutex),
 		collectGroupTimers:    make(map[int64]*time.Timer),
 		collectMediaLastTouch: make(map[string]time.Time),
-		collectMediaAccounts:  make(map[string]chan struct{}),
 		accountCircuits:       make(map[int64]accountCollectCircuit),
 	}
 }
