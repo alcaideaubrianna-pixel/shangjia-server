@@ -1549,13 +1549,16 @@ func profileShareHeader(note *publishsysin.NoteModel) string {
 }
 
 func profileSourceName(note *publishsysin.NoteModel) string {
-	if note == nil || !note.IsCollected {
+	if note == nil {
 		return ""
 	}
 	name := strings.TrimSpace(note.CollectSourceName)
 	username := strings.TrimPrefix(strings.TrimSpace(note.CollectSourceUsername), "@")
 	if name == "" {
 		name = username
+	}
+	if name == "" && strings.TrimSpace(note.CollectSourceUrl) != "" {
+		name = "来源频道"
 	}
 	return name
 }
