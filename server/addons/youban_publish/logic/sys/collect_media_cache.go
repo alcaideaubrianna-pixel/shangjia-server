@@ -455,7 +455,10 @@ func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, even
 		err   error
 	}
 	results := make([]downloadResult, len(rows))
-	fileSlots := make(chan struct{}, accountCollectMediaConcurrency(ctx))
+	var fileSlots chan struct{}
+	if event["source_type"].String() == sysin.CollectSourceTypeBot {
+		fileSlots = make(chan struct{}, accountCollectMediaConcurrency(ctx))
+	}
 	var downloadWait sync.WaitGroup
 	for index, row := range rows {
 		if row == nil || !collectEventMediaRowNeedsCache(event, row) {
@@ -487,23 +490,31 @@ func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, even
 			defer downloadWait.Done()
 			startedAt := time.Now()
 			result := downloadResult{index: index, row: row}
-			slotStartedAt := time.Now()
-			select {
-			case fileSlots <- struct{}{}:
-			case <-ctx.Done():
-				result.err = ctx.Err()
-				results[index] = result
-				return
+			if fileSlots != nil {
+				slotStartedAt := time.Now()
+				select {
+				case fileSlots <- struct{}{}:
+				case <-ctx.Done():
+					result.err = ctx.Err()
+					results[index] = result
+					return
+				}
+				g.Log().Debugf(ctx, "采集媒体下载获取并发槽完成 eventId:%d mediaId:%d wait:%s", event["id"].Int64(), row.Id, time.Since(slotStartedAt).Round(time.Millisecond))
+				defer func() { <-fileSlots }()
 			}
-			g.Log().Debugf(ctx, "采集媒体下载获取并发槽完成 eventId:%d mediaId:%d wait:%s", event["id"].Int64(), row.Id, time.Since(slotStartedAt).Round(time.Millisecond))
-			defer func() { <-fileSlots }()
-			releaseGlobalSlot, slotErr := s.acquireCollectMediaDownloadSlots(ctx)
-			if slotErr != nil {
-				result.err = slotErr
-				results[index] = result
-				return
+			// Account media is already scheduled by the collector's AccountTasks
+			// runtime and gotd's media pool. Do not hold a publish-level slot while
+			// SubmitAndWait is waiting for that SDK-managed worker. Bot downloads
+			// still use the publish-level global limiter.
+			if event["source_type"].String() == sysin.CollectSourceTypeBot {
+				releaseGlobalSlot, slotErr := s.acquireCollectMediaDownloadSlots(ctx)
+				if slotErr != nil {
+					result.err = slotErr
+					results[index] = result
+					return
+				}
+				defer releaseGlobalSlot()
 			}
-			defer releaseGlobalSlot()
 			itemTimeout := time.Duration(g.Cfg().MustGet(ctx, "youbanPublish.collect.mediaItemTimeoutSeconds", int(collectMediaDefaultItemTimeout/time.Second)).Int()) * time.Second
 			if itemTimeout < 30*time.Second {
 				itemTimeout = 30 * time.Second
