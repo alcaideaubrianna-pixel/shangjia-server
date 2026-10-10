@@ -209,7 +209,7 @@ func (s *sSysPublish) repairDuplicateProfileVerification(ctx context.Context, pr
 		return gerror.Wrap(err, "检查重复资料验证媒体失败")
 	}
 	if existing > 0 {
-		return nil
+		return s.republishProfileChannelsMissingVerification(ctx, profileID, event)
 	}
 	verifySnapshot := *content
 	verifySnapshot.Media = collectMediaWithPurpose(content.Media, collectMaterialRoleVerify)
@@ -286,7 +286,55 @@ func (s *sSysPublish) repairDuplicateProfileVerification(ctx context.Context, pr
 	if inserted > 0 {
 		g.Log().Infof(ctx, "重复资料已补充验证媒体 profileId:%d eventId:%d count:%d", profileID, event["id"].Int64(), inserted)
 		s.appendCollectEventLogForRecord(ctx, event, "dedupe", "verification_repaired", "重复资料缺少验证视频，已从本次采集补充", fmt.Sprintf("profileId=%d count=%d", profileID, inserted))
+		if err = s.republishProfileChannelsMissingVerification(ctx, profileID, event); err != nil {
+			return err
+		}
 	}
+	return nil
+}
+
+func duplicateVerificationRepairOperationNo(profileID, eventID int64) string {
+	return fmt.Sprintf("verify-repair:%d:profile:%d", eventID, profileID)
+}
+
+func (s *sSysPublish) republishProfileChannelsMissingVerification(ctx context.Context, profileID int64, event gdb.Record) error {
+	if profileID <= 0 || event.IsEmpty() {
+		return nil
+	}
+	tenantID := event["tenant_id"].Int64()
+	accountID := event["account_id"].Int64()
+	eventID := event["id"].Int64()
+	if tenantID <= 0 || accountID <= 0 || eventID <= 0 {
+		return gerror.Newf("验证视频补推参数不完整 profileId:%d eventId:%d tenantId:%d accountId:%d", profileID, eventID, tenantID, accountID)
+	}
+	rows, err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
+		Fields("j.channel_id").
+		Where("j.profile_id", profileID).
+		Where("j.tenant_id", tenantID).
+		Where("j.account_id", accountID).
+		Where("j.status", "sent").
+		Where("EXISTS (SELECT 1 FROM " + publishTgMessageTable + " display_message WHERE display_message.job_id=j.id AND display_message.purpose='display' AND display_message.status='sent')").
+		Where("NOT EXISTS (SELECT 1 FROM " + publishTgMessageTable + " verify_message WHERE verify_message.job_id=j.id AND verify_message.purpose='verify' AND verify_message.status='sent')").
+		Group("j.channel_id").
+		OrderAsc("j.channel_id").All()
+	if err != nil {
+		return gerror.Wrapf(err, "读取缺少验证视频的已发布频道失败 profileId:%d", profileID)
+	}
+	channelIDs := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		if channelID := row["channel_id"].Int64(); channelID > 0 {
+			channelIDs = append(channelIDs, channelID)
+		}
+	}
+	if len(channelIDs) == 0 {
+		return nil
+	}
+	operationNo := duplicateVerificationRepairOperationNo(profileID, eventID)
+	g.Log().Infof(ctx, "重复资料验证媒体触发频道补推 profileId:%d eventId:%d tenantId:%d accountId:%d channelIds:%v operationNo:%s", profileID, eventID, tenantID, accountID, channelIDs, operationNo)
+	if err = s.submitProfilePublish(ctx, profileID, tenantID, accountID, accountID, operationNo, channelIDs, false); err != nil {
+		return gerror.Wrapf(err, "提交验证视频补推失败 profileId:%d eventId:%d channelIds:%v", profileID, eventID, channelIDs)
+	}
+	s.appendCollectEventLogForRecord(ctx, event, "publish", "verification_republish_submitted", "验证视频补齐后已提交频道重新上架", fmt.Sprintf("profileId=%d channelIds=%v operationNo=%s", profileID, channelIDs, operationNo))
 	return nil
 }
 

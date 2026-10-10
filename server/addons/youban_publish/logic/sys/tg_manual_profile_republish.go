@@ -10,7 +10,10 @@ import (
 
 func isManualProfilePublishOperation(operationNo string) bool {
 	operationNo = strings.ToLower(strings.TrimSpace(operationNo))
-	return strings.HasPrefix(operationNo, "profile:") || strings.HasPrefix(operationNo, "batchtext:")
+	return strings.HasPrefix(operationNo, "profile:") ||
+		strings.HasPrefix(operationNo, "batchtext:") ||
+		strings.HasPrefix(operationNo, "ai-republish:") ||
+		strings.HasPrefix(operationNo, "verify-repair:")
 }
 
 func (s *sSysPublish) prepareProfileChannelPublish(ctx context.Context, current telegramJobRecord) (bool, error) {
