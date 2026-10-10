@@ -62,6 +62,7 @@ var items = []item{
 	{Key: "youbanPublish.collect.accountMediaConcurrency", EnvKeys: []string{"YOUBAN_PUBLISH_ACCOUNT_MEDIA_CONCURRENCY"}},
 	{Key: "youbanPublish.collect.accountMediaLeaseSeconds", EnvKeys: []string{"YOUBAN_PUBLISH_ACCOUNT_MEDIA_LEASE_SECONDS"}},
 	{Key: "youbanPublish.collect.accountMediaLeaseMaxLifetimeSeconds", EnvKeys: []string{"YOUBAN_PUBLISH_ACCOUNT_MEDIA_LEASE_MAX_LIFETIME_SECONDS"}},
+	{Key: "youbanPublish.collect.mediaAccountAcquireTimeoutSeconds", EnvKeys: []string{"YOUBAN_PUBLISH_MEDIA_ACCOUNT_ACQUIRE_TIMEOUT_SECONDS"}},
 	{Key: "youbanPublish.collect.mediaItemTimeoutSeconds", EnvKeys: []string{"YOUBAN_PUBLISH_MEDIA_ITEM_TIMEOUT_SECONDS"}},
 	{Key: "youbanPublish.collect.mediaFileConcurrency", EnvKeys: []string{"YOUBAN_PUBLISH_MEDIA_FILE_CONCURRENCY"}},
 	{Key: "youbanPublish.collect.mediaDownloadThreads", EnvKeys: []string{"YOUBAN_PUBLISH_MEDIA_DOWNLOAD_THREADS"}},
