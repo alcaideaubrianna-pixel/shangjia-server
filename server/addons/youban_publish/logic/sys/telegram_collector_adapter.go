@@ -34,13 +34,31 @@ type publishCollectorAccountTaskHandler struct{ publish *sSysPublish }
 
 type publishCollectorAccountMediaProvider struct{ publish *sSysPublish }
 
-func (h *publishCollectorAccountTaskHandler) HandleAccountTaskCompletion(ctx context.Context, task *collectorin.AccountTask, result *collectorin.AccountMediaDownloadResult) {
+func (h *publishCollectorAccountTaskHandler) HandleAccountTaskCompletion(ctx context.Context, task *collectorin.AccountTask, result *collectorin.AccountMediaDownloadResult) error {
 	if h == nil || h.publish == nil || task == nil || result == nil || task.TaskType != collectorin.AccountTaskTypeMediaDownload {
-		return
+		return nil
 	}
 	mediaID := parseCollectMediaTaskKey(task.TaskKey)
-	if mediaID <= 0 || strings.TrimSpace(result.StoragePath) == "" && strings.TrimSpace(result.FileURL) == "" {
-		return
+	if mediaID <= 0 {
+		return nil
+	}
+	mediaCols := pdao.YoubanPublishCollectEventMedia.Columns()
+	var mediaRow gdb.Record
+	if err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).Fields(mediaCols.EventId).Where(mediaCols.Id, mediaID).Scan(&mediaRow); err != nil {
+		return gerror.Wrapf(err, "读取异步账号媒体归属事件失败 mediaId:%d", mediaID)
+	}
+	if mediaRow.IsEmpty() {
+		return gerror.Newf("异步账号媒体记录不存在 mediaId:%d", mediaID)
+	}
+	eventID := mediaRow[mediaCols.EventId].Int64()
+	if eventID <= 0 {
+		return gerror.Newf("异步账号媒体缺少归属事件 mediaId:%d", mediaID)
+	}
+	if result.ErrorCode == "source_gone" {
+		return h.publish.discardCollectEventGroup(ctx, eventID, firstNonEmpty(result.ErrorMessage, "TG原消息已删除或已无可用媒体"))
+	}
+	if strings.TrimSpace(result.StoragePath) == "" && strings.TrimSpace(result.FileURL) == "" {
+		return gerror.Newf("异步账号媒体下载未返回存储地址 mediaId:%d", mediaID)
 	}
 	data := g.Map{
 		"cache_status": "ready", "file_url": result.FileURL, "storage_path": result.StoragePath,
@@ -50,28 +68,20 @@ func (h *publishCollectorAccountTaskHandler) HandleAccountTaskCompletion(ctx con
 		"source_mime_type": result.Media.SourceMimeType, "source_dc_id": result.Media.SourceDCID,
 		"source_size": result.Media.SourceSize, "error_message": "", "updated_at": gtime.Now(),
 	}
-	mediaCols := pdao.YoubanPublishCollectEventMedia.Columns()
-	var mediaRow gdb.Record
-	if err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).Fields(mediaCols.EventId).Where(mediaCols.Id, mediaID).Scan(&mediaRow); err != nil {
-		g.Log().Warningf(ctx, "读取异步账号媒体归属事件失败 mediaId:%d err:%+v", mediaID, err)
-		return
-	}
 	if _, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).Where(mediaCols.Id, mediaID).Update(data); err != nil {
-		g.Log().Warningf(ctx, "异步账号媒体结果回写失败 mediaId:%d err:%+v", mediaID, err)
-		return
-	}
-	eventID := mediaRow[mediaCols.EventId].Int64()
-	if eventID <= 0 {
-		return
+		return gerror.Wrapf(err, "异步账号媒体结果回写失败 mediaId:%d", mediaID)
 	}
 	event, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).WherePri(eventID).One()
-	if err != nil || event.IsEmpty() {
-		g.Log().Warningf(ctx, "读取异步账号媒体事件失败 mediaId:%d eventId:%d err:%+v", mediaID, eventID, err)
-		return
+	if err != nil {
+		return gerror.Wrapf(err, "读取异步账号媒体事件失败 mediaId:%d eventId:%d", mediaID, eventID)
+	}
+	if event.IsEmpty() {
+		return gerror.Newf("异步账号媒体事件不存在 mediaId:%d eventId:%d", mediaID, eventID)
 	}
 	if err = h.publish.enqueueCollectMediaCache(ctx, collectMediaQueuePayloadFromEvent(event), 0); err != nil {
-		g.Log().Warningf(ctx, "异步账号媒体完成后重新投递事件失败 mediaId:%d eventId:%d err:%+v", mediaID, eventID, err)
+		return gerror.Wrapf(err, "异步账号媒体完成后重新投递事件失败 mediaId:%d eventId:%d", mediaID, eventID)
 	}
+	return nil
 }
 
 func parseCollectMediaTaskKey(key string) int64 {

@@ -44,11 +44,10 @@ type AccountTaskHandler interface {
 	HandleAccountTask(ctx context.Context, client *telegram.Client, task *sysin.AccountTask) (*sysin.AccountMediaDownloadResult, error)
 }
 
-// AccountTaskCompletionHandler receives terminal results after the task row is
-// durably completed. Consumers use the stable task key to reconcile their own
-// records without blocking the account worker.
+// AccountTaskCompletionHandler persists a successful handler result before the
+// task is marked completed. Returning an error keeps the task retryable.
 type AccountTaskCompletionHandler interface {
-	HandleAccountTaskCompletion(ctx context.Context, task *sysin.AccountTask, result *sysin.AccountMediaDownloadResult)
+	HandleAccountTaskCompletion(ctx context.Context, task *sysin.AccountTask, result *sysin.AccountMediaDownloadResult) error
 }
 
 type AccountMediaProvider interface {

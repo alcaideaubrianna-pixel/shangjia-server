@@ -3,7 +3,18 @@ package sys
 import (
 	"errors"
 	"testing"
+	"time"
 )
+
+func TestCollectMediaAsyncSubmittedPreservesDownloadingState(t *testing.T) {
+	err := newCollectMediaAsyncSubmittedError("submitted", 30*time.Second)
+	if !err.deferWithoutFailure {
+		t.Fatal("async submission must defer the event without recording a failure")
+	}
+	if !err.preserveDownloading {
+		t.Fatal("async submission must preserve downloading state until its completion callback")
+	}
+}
 
 func TestCollectMediaRetryErrorRejectsPermanentWrongFileID(t *testing.T) {
 	err := errors.New("Bad Request: wrong file_id or the file is temporarily unavailable")

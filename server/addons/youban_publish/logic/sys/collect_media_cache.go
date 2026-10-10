@@ -39,6 +39,7 @@ type collectMediaRetryError struct {
 	delay               time.Duration
 	rateLimited         bool
 	deferWithoutFailure bool
+	preserveDownloading bool
 }
 
 type collectEventMediaCacheSummary struct {
@@ -85,6 +86,12 @@ func newCollectMediaRetryError(message string, delay time.Duration) *collectMedi
 func newCollectMediaFairnessRetryError(message string, delay time.Duration) *collectMediaRetryError {
 	retryErr := newCollectMediaRetryError(message, delay)
 	retryErr.deferWithoutFailure = true
+	return retryErr
+}
+
+func newCollectMediaAsyncSubmittedError(message string, delay time.Duration) *collectMediaRetryError {
+	retryErr := newCollectMediaFairnessRetryError(message, delay)
+	retryErr.preserveDownloading = true
 	return retryErr
 }
 
@@ -570,14 +577,16 @@ func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, even
 					}
 				}
 				if retryErr != nil {
-					_, _ = pdao.YoubanPublishCollectEventMedia.Ctx(ctx).Where("id", row.Id).Data(g.Map{
-						"cache_status":          collectMediaCachePending,
-						"download_duration_ms":  downloadDuration,
-						"download_error_type":   errorType,
-						"error_message":         retryErr.message,
-						collectMediaNextRetryAt: gtime.Now().Add(retryErr.delay),
-						"updated_at":            gtime.Now(),
-					}).Update()
+					if !retryErr.preserveDownloading {
+						_, _ = pdao.YoubanPublishCollectEventMedia.Ctx(ctx).Where("id", row.Id).Data(g.Map{
+							"cache_status":          collectMediaCachePending,
+							"download_duration_ms":  downloadDuration,
+							"download_error_type":   errorType,
+							"error_message":         retryErr.message,
+							collectMediaNextRetryAt: gtime.Now().Add(retryErr.delay),
+							"updated_at":            gtime.Now(),
+						}).Update()
+					}
 					result.err = retryErr
 				} else {
 					_, _ = pdao.YoubanPublishCollectEventMedia.Ctx(ctx).Where("id", row.Id).Data(g.Map{
@@ -933,7 +942,7 @@ func (s *sSysPublish) downloadTelegramMedia(ctx context.Context, tenantId int64,
 		if _, err := collectorservice.AccountTasks().Submit(ctx, submit); err != nil {
 			return nil, gerror.Wrap(err, "提交账号媒体下载任务失败")
 		}
-		return nil, newCollectMediaFairnessRetryError("账号媒体已进入SDK下载队列", 30*time.Second)
+		return nil, newCollectMediaAsyncSubmittedError("账号媒体已进入SDK下载队列", 30*time.Second)
 	}
 	task, err := collectorservice.AccountTasks().SubmitAndWait(ctx, submit, time.Second)
 	if err != nil {
