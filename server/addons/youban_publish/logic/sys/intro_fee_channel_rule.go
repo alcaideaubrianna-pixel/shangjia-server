@@ -160,6 +160,29 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 	if err := sourceModel.Fields("source_chat_id, title AS chat_title, source_username AS chat_username, last_event_at AS last_message_at").OrderDesc("updated_at").Limit(introFeeChannelCandidateScanLimit).Scan(&sourceRows); err != nil {
 		return nil, 0, err
 	}
+	// BOT sources are aggregate sources and may not have source_chat_id. In
+	// that case recover historical chats from events, but only through the
+	// current rule's source binding. The source_id predicate keeps this bounded
+	// and prevents channels from unrelated rules leaking into the dialog.
+	if ruleID > 0 {
+		var historicalRows []struct {
+			ChatId     string      `orm:"source_chat_id"`
+			LastSeenAt *gtime.Time `orm:"last_seen_at"`
+		}
+		eventModel := g.DB().Model(publishCollectEventTable+" e").Ctx(ctx).
+			Where("e.tenant_id", tenantID).
+			WhereNot("e.source_chat_id", "").
+			Where("EXISTS (SELECT 1 FROM "+pdao.YoubanPublishCollectSourceRule.Table()+" sr JOIN "+publishCollectSourceTable+" s ON s.id=sr.source_id WHERE sr.rule_id=? AND sr.status=1 AND sr.tenant_id=? AND s.id=e.source_id AND s.account_id=? AND s.deleted_at IS NULL)", ruleID, tenantID, accountID).
+			Group("e.source_chat_id").
+			Fields("e.source_chat_id, MAX(e.received_at) AS last_seen_at").
+			OrderDesc("last_seen_at").Limit(introFeeChannelCandidateScanLimit)
+		if err := eventModel.Scan(&historicalRows); err != nil {
+			return nil, 0, err
+		}
+		for _, historical := range historicalRows {
+			sourceRows = append(sourceRows, sourceCandidate{ChatId: historical.ChatId, LastSeenAt: historical.LastSeenAt})
+		}
+	}
 	scopedChatIDs := make([]string, 0, len(sourceRows)*2)
 	for _, source := range sourceRows {
 		scopedChatIDs = append(scopedChatIDs, tgChannelCacheLookupIds(source.ChatId)...)
