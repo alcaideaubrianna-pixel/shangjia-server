@@ -136,11 +136,46 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 		deduplicated = append(deduplicated, row)
 	}
 	configured = deduplicated
+	// A rule-scoped dialog must only contain channels belonging to sources
+	// bound to this rule. The compact source/source_rule tables are the
+	// historical index; do not broaden the result with all account/BOT chats.
+	type sourceCandidate struct {
+		ChatId       string      `orm:"source_chat_id"`
+		ChatTitle    string      `orm:"chat_title"`
+		ChatUsername string      `orm:"chat_username"`
+		LastSeenAt   *gtime.Time `orm:"last_message_at"`
+	}
+	sourceModel := g.DB().Model(publishCollectSourceTable).Ctx(ctx).
+		Where("tenant_id", tenantID).WhereNot("source_chat_id", "").WhereNull("deleted_at")
+	if accountID > 0 {
+		sourceModel = sourceModel.Where("account_id", accountID)
+	}
+	if botID > 0 {
+		sourceModel = sourceModel.Where("bot_id", botID)
+	}
+	if ruleID > 0 {
+		sourceModel = sourceModel.Where("EXISTS (SELECT 1 FROM "+pdao.YoubanPublishCollectSourceRule.Table()+" sr WHERE sr.source_id="+publishCollectSourceTable+".id AND sr.rule_id=? AND sr.tenant_id=? AND sr.status=1)", ruleID, tenantID)
+	}
+	var sourceRows []sourceCandidate
+	if err := sourceModel.Fields("source_chat_id, title AS chat_title, source_username AS chat_username, last_event_at AS last_message_at").OrderDesc("updated_at").Limit(introFeeChannelCandidateScanLimit).Scan(&sourceRows); err != nil {
+		return nil, 0, err
+	}
+	scopedChatIDs := make([]string, 0, len(sourceRows)*2)
+	for _, source := range sourceRows {
+		scopedChatIDs = append(scopedChatIDs, tgChannelCacheLookupIds(source.ChatId)...)
+	}
+	scopedChatIDs = uniqueStrings(scopedChatIDs)
 	cacheModel := g.DB().Model(publishBotChannelCacheTable).Ctx(ctx).Where("tenant_id", tenantID)
 	if botID > 0 {
 		cacheModel = cacheModel.Where("bot_id", botID)
 	}
-	if botID == 0 {
+	if len(scopedChatIDs) > 0 {
+		cacheModel = cacheModel.WhereIn("chat_id", scopedChatIDs)
+	} else if ruleID > 0 {
+		// No source is bound to this rule; configured rows above are still
+		// returned, but unrelated historical chats must not leak in.
+		cacheModel = cacheModel.Where("1=0")
+	} else if botID == 0 {
 		cacheModel = cacheModel.WhereIn("chat_id", g.DB().Model(publishCollectSourceTable).Ctx(ctx).Fields("source_chat_id").Where("tenant_id", tenantID).Where("account_id", accountID).WhereNull("deleted_at"))
 	}
 	var candidates []struct {
@@ -168,6 +203,11 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 		canonicalModel = canonicalModel.InnerJoin(pdao.YoubanPublishCollectAccountChannel.Table()+" ac", "ac.channel_id=hg_youban_publish_collect_channel.id AND ac.tenant_id=hg_youban_publish_collect_channel.tenant_id").
 			Where("ac.account_id", accountID).WhereNull("ac.deleted_at")
 	}
+	if len(scopedChatIDs) > 0 {
+		canonicalModel = canonicalModel.WhereIn("hg_youban_publish_collect_channel.telegram_chat_id", scopedChatIDs)
+	} else if ruleID > 0 {
+		canonicalModel = canonicalModel.Where("1=0")
+	}
 	if err := canonicalModel.
 		Fields("telegram_chat_id AS chat_id,title AS chat_title,username AS chat_username,last_seen_at AS last_message_at").
 		OrderDesc("last_seen_at").Limit(introFeeChannelCandidateScanLimit).Scan(&canonicalCandidates); err == nil {
@@ -175,23 +215,7 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 	}
 	// Collection sources are the compact historical index. Never scan the event
 	// or message tables when opening this management dialog.
-	var sourceCandidates []struct {
-		ChatId string `orm:"source_chat_id"`
-	}
-	sourceModel := g.DB().Model(publishCollectSourceTable).Ctx(ctx).
-		Where("tenant_id", tenantID).WhereNot("source_chat_id", "").WhereNull("deleted_at")
-	if botID > 0 {
-		sourceModel = sourceModel.Where("bot_id", botID)
-		if accountID > 0 {
-			sourceModel = sourceModel.Where("account_id", accountID)
-		}
-	} else if accountID > 0 {
-		sourceModel = sourceModel.Where("account_id", accountID)
-	}
-	if err := sourceModel.Fields("source_chat_id").Group("source_chat_id").OrderDesc("MAX(updated_at)").Limit(introFeeChannelCandidateScanLimit).Scan(&sourceCandidates); err != nil {
-		return nil, 0, err
-	}
-	for _, sourceCandidate := range sourceCandidates {
+	for _, sourceCandidate := range sourceRows {
 		id := canonicalCollectSourceChatID(sourceCandidate.ChatId)
 		if id == "" {
 			continue
@@ -201,7 +225,7 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 			ChatTitle    string      `orm:"chat_title"`
 			ChatUsername string      `orm:"chat_username"`
 			LastSeenAt   *gtime.Time `orm:"last_message_at"`
-		}{ChatId: id})
+		}{ChatId: id, ChatTitle: sourceCandidate.ChatTitle, ChatUsername: sourceCandidate.ChatUsername, LastSeenAt: sourceCandidate.LastSeenAt})
 	}
 	for _, candidate := range candidates {
 		id := canonicalCollectSourceChatID(candidate.ChatId)
