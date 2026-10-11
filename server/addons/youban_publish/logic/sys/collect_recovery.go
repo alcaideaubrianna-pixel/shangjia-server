@@ -247,6 +247,21 @@ func (s *sSysPublish) recoverStaleCollectMediaRows(ctx context.Context, limit in
 	return nil
 }
 
+// RepairStaleCollectMedia performs the same bounded recovery as the runtime
+// watchdog, but runs synchronously for an operator after a deployment or
+// queue outage. It first normalizes timed-out downloads and then immediately
+// requeues the affected event-scoped media tasks.
+func RepairStaleCollectMedia(ctx context.Context, limit int) error {
+	service := NewSysPublish()
+	if limit <= 0 {
+		limit = 1000
+	}
+	if err := service.recoverStaleCollectMediaRows(ctx, limit); err != nil {
+		return err
+	}
+	return service.recoverPendingCollectMedia(ctx, limit)
+}
+
 func (s *sSysPublish) recoverPendingCollectMedia(ctx context.Context, limit int) error {
 	if limit <= 0 {
 		limit = 1000

@@ -173,6 +173,12 @@ func handleUpgradeFix(ctx context.Context, args map[string]string) (err error) {
 			limit = 1000
 		}
 		err = publishsys.RepairBotCollectMedia(ctx, limit)
+	case "collectMediaStaleRepair":
+		limit, _ := strconv.Atoi(args["limit"])
+		if limit <= 0 {
+			limit = 1000
+		}
+		err = publishsys.RepairStaleCollectMedia(ctx, limit)
 	case "collectNoticeCleanup":
 		limit, _ := strconv.Atoi(args["limit"])
 		if limit <= 0 {
