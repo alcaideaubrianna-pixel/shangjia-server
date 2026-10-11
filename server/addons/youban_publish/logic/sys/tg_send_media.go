@@ -30,6 +30,15 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 		observeTelegramMediaPurposeViolation(ctx, "send")
 		return nil, err
 	}
+	if len(media) > 1 && media[0] != nil && media[0].TenantId > 0 && !telegramMediaSetHasCopyRef(media) && !telegramMediaSetRequiresUpload(media) {
+		if relayMessages, relayErr := s.prepareRelayMediaSet(ctx, media, purpose); relayErr == nil && len(relayMessages) == len(media) {
+			for i, item := range media {
+				item.TgFileId = telegramCopyMediaFileId(relayMessages[i].TgFileId, int(relayMessages[i].MessageId))
+			}
+		} else if relayErr != nil {
+			g.Log().Warningf(ctx, "relay 媒体组准备失败，回退原有上传链路 purpose:%s err:%+v", purpose, relayErr)
+		}
+	}
 	s.prepareTelegramMediaItemsForSend(ctx, media)
 	if len(media) == 1 {
 		return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, media[0], replyMarkup...)
