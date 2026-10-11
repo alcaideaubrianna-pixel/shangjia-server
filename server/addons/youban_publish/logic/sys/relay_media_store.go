@@ -10,6 +10,7 @@ import (
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 	"hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/internal/model/do"
@@ -121,12 +122,12 @@ func claimRelayMedia(ctx context.Context, tenantId, mediaId int64, purpose, vers
 }
 
 func completeRelayMedia(ctx context.Context, tenantId, mediaId int64, purpose, version, token string, ref relayMediaRef) error {
-	_, err := dao.YoubanPublishRelayMedia.Ctx(ctx).Data(do.YoubanPublishRelayMedia{RelayChannelId: ref.RelayChannelId, RelayChatId: ref.RelayChatId, MessageId: ref.MessageId, FileId: ref.FileId, Status: "ready", LeaseToken: ""}).Where("tenant_id", tenantId).Where("media_id", mediaId).Where("purpose", purpose).Where("media_version", version).Where("lease_token", token).Update()
+	_, err := dao.YoubanPublishRelayMedia.Ctx(ctx).Data(g.Map{"relay_channel_id": ref.RelayChannelId, "relay_chat_id": ref.RelayChatId, "message_id": ref.MessageId, "file_id": ref.FileId, "status": "ready", "lease_token": "", "lease_until": gdb.Raw("NULL"), "last_error": gdb.Raw("''")}).Where("tenant_id", tenantId).Where("media_id", mediaId).Where("purpose", purpose).Where("media_version", version).Where("lease_token", token).Update()
 	return err
 }
 
 func failRelayMedia(ctx context.Context, tenantId, mediaId int64, purpose, version, token string, cause error) error {
-	_, err := dao.YoubanPublishRelayMedia.Ctx(ctx).Data(do.YoubanPublishRelayMedia{Status: "failed", LeaseToken: "", LastError: cause.Error()}).Where("tenant_id", tenantId).Where("media_id", mediaId).Where("purpose", purpose).Where("media_version", version).Where("lease_token", token).Update()
+	_, err := dao.YoubanPublishRelayMedia.Ctx(ctx).Data(g.Map{"status": "failed", "lease_token": "", "lease_until": gdb.Raw("NULL"), "last_error": cause.Error()}).Where("tenant_id", tenantId).Where("media_id", mediaId).Where("purpose", purpose).Where("media_version", version).Where("lease_token", token).Update()
 	return err
 }
 
