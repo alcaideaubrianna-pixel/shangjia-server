@@ -1,5 +1,17 @@
 import { http } from '@/utils/http/axios';
 
+export function RelayChannelList(params = {}) {
+  return http.request({ url: '/youban_publish/publish/relay/channel/list', method: 'get', params });
+}
+
+export function RelayChannelSave(params = {}) {
+  return http.request({ url: '/youban_publish/publish/relay/channel/save', method: 'POST', params });
+}
+
+export function RelayChannelStatus(params = {}) {
+  return http.request({ url: '/youban_publish/publish/relay/channel/status', method: 'POST', params });
+}
+
 export function TenantList(params = {}) {
   return http.request({ url: '/youban_publish/publish/tenant/list', method: 'get', params });
 }
