@@ -17,6 +17,7 @@ import (
 
 var mysqlBusinessSqlFiles = []string{
 	"addons/youban_publish/resource/sql/install.sql",
+	"addons/youban_publish/resource/sql/relay.sql",
 	"addons/youban_publish/resource/sql/menu.sql",
 }
 
@@ -28,6 +29,7 @@ var mysqlOnlineUpgradeSqlFiles = []string{
 
 var pgsqlBusinessSqlFiles = []string{
 	"addons/youban_publish/resource/sql/install.pgsql.sql",
+	"addons/youban_publish/resource/sql/relay.pgsql.sql",
 	"addons/youban_publish/resource/sql/menu.pgsql.sql",
 }
 
