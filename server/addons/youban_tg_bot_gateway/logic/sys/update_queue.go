@@ -142,14 +142,19 @@ func (s *sGateway) enqueueUpdateBody(ctx context.Context, key string, body []byt
 	enqueueCtx, cancel := context.WithTimeout(ctx, tgGatewayEnqueueTimeout)
 	defer cancel()
 	queueName := tgGatewayBulkQueueName
+	taskTimeout := 2 * time.Minute
 	var update models.Update
 	if unmarshalErr := json.Unmarshal(body, &update); unmarshalErr == nil && updateNeedsInteractiveQueue(&update) {
 		queueName = tgGatewayInteractiveQueueName
+		// Interactive updates must not occupy a worker while a downstream
+		// operation is stuck. A short lease keeps private chat and callbacks
+		// responsive; the task is retried by Asynq when the handler times out.
+		taskTimeout = 20 * time.Second
 	}
 	_, err = client.EnqueueContext(enqueueCtx, asynq.NewTask(tgGatewayTaskType, payload),
 		asynq.Queue(queueName),
 		asynq.MaxRetry(10),
-		asynq.Timeout(2*time.Minute),
+		asynq.Timeout(taskTimeout),
 		asynq.Unique(5*time.Minute),
 	)
 	if errors.Is(err, asynq.ErrDuplicateTask) {
