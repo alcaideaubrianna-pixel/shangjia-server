@@ -264,7 +264,10 @@ func prepareStoredMediaAssets(ctx context.Context, mediaType string, storagePath
 	case "video":
 		poster, err := buildVideoPosterResultFromPath(ctx, storagePath, fileName)
 		if err != nil {
-			return nil, err
+			// A poster is an auxiliary asset. Do not discard an otherwise valid
+			// video when a node's FFmpeg encoder/filter is unavailable.
+			g.Log().Warningf(ctx, "视频封面生成失败，保留原视频继续处理 file:%s err:%v", storagePath, err)
+			return &mediaUploadAssets{}, nil
 		}
 		res := &mediaUploadAssets{Poster: poster}
 		if poster != nil {
