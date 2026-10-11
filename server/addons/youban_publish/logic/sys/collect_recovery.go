@@ -333,28 +333,19 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 	}
 	deadline := gtime.Now().Add(-collectEventRecoverAfter)
 	statuses := []string{sysin.CollectEventStatusPending, sysin.CollectEventStatusGroupCollect, sysin.CollectEventStatusWaitingOrder, sysin.CollectEventStatusPrechecked, sysin.CollectEventStatusMediaPending, sysin.CollectEventStatusMediaReady, sysin.CollectEventStatusFailed}
-	// Keep the grouped source query separate from the count query. GoFrame
-	// appends Fields calls on a cloned model; cloning a query that already
-	// selects source_id and source_chat_id can produce COUNT(source_id,
-	// source_chat_id), which PostgreSQL rejects.
+	// Recovery is driven by the database stale timestamp. Do not rotate a
+	// window based on the number of sources: with a large backlog that can
+	// leave one source outside the window indefinitely. Always take the oldest
+	// stale source first so every source is eventually re-enqueued.
 	sourceModel := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
-		Fields("e.source_id,e.source_chat_id").
+		Fields("e.source_id,e.source_chat_id,MIN(e.updated_at) AS oldest_updated_at").
 		WhereIn("e.status", statuses).
 		WhereLTE("e.updated_at", deadline).
 		Where(enabledCollectSourceExistsSQL("e")).
 		Group("e.source_id,e.source_chat_id").
-		OrderAsc("e.source_id,e.source_chat_id")
-	sourceCountModel := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
-		Fields("e.source_id").
-		WhereIn("e.status", statuses).
-		WhereLTE("e.updated_at", deadline).
-		Where(enabledCollectSourceExistsSQL("e")).
-		Group("e.source_id,e.source_chat_id")
-	sourceCount, err := sourceCountModel.Count()
-	if err != nil {
-		return gerror.Wrap(err, "统计待恢复采集源失败")
-	}
-	sourceRows, err := sourceModel.Offset(fairCollectRecoverySourceOffset(sourceCount, limit, time.Now().Unix()/60)).Limit(limit).All()
+		OrderAsc("oldest_updated_at").
+		Limit(limit)
+	sourceRows, err := sourceModel.All()
 	if err != nil {
 		return gerror.Wrap(err, "读取待恢复采集源失败")
 	}
