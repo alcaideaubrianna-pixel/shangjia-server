@@ -106,13 +106,40 @@ func (s *sSysPublish) AdminRelayChannelSave(ctx context.Context, in *sysin.Relay
 	if status == relayChannelStatusEnabled {
 		return gerror.New("启用 relay 频道必须通过状态接口完成 Bot 权限校验")
 	}
-	data := do.YoubanPublishRelayChannel{TenantId: in.TenantId, TgAccountId: in.TgAccountId, TargetChatId: strings.TrimSpace(in.TargetChatId), Title: in.Title, Status: status, HealthStatus: relayChannelHealthUnknown, BotPermissionStatus: relayBotPermissionUnknown}
+	target := strings.TrimSpace(in.TargetChatId)
+	channelIDText := strings.TrimPrefix(target, "-100")
+	channelID, err := strconv.ParseInt(channelIDText, 10, 64)
+	if err != nil || channelID <= 0 || in.AccessHash == 0 {
+		return gerror.New("已有频道缺少有效的频道标识或 access hash，请刷新频道缓存后重试")
+	}
+	if strings.TrimSpace(in.BotUsername) == "" {
+		return gerror.New("请选择推送 Bot")
+	}
+	client, err := s.TelegramClient(ctx, in.TgAccountId)
+	if err != nil {
+		return err
+	}
+	inputChannel := &tg.InputChannel{ChannelID: channelID, AccessHash: in.AccessHash}
+	if _, err = client.API().ChannelsGetChannels(ctx, []tg.InputChannelClass{inputChannel}); err != nil {
+		return gerror.Wrap(err, "协议账号无法访问该频道，请确认频道属于该账号且账号仍在线")
+	}
+	bot, err := resolveRelayBot(ctx, client.API(), in.BotUsername)
+	if err != nil {
+		return err
+	}
+	if _, err = client.API().ChannelsInviteToChannel(ctx, &tg.ChannelsInviteToChannelRequest{Channel: inputChannel, Users: []tg.InputUserClass{bot}}); err != nil && !strings.Contains(strings.ToUpper(err.Error()), "ALREADY") {
+		return gerror.Wrap(err, "邀请 relay Bot 失败")
+	}
+	if _, err = client.API().ChannelsEditAdmin(ctx, &tg.ChannelsEditAdminRequest{Channel: inputChannel, UserID: bot, AdminRights: tg.ChatAdminRights{PostMessages: true, EditMessages: true, DeleteMessages: true, ChangeInfo: true, Other: true}, Rank: "relay"}); err != nil {
+		return gerror.Wrap(err, "设置 relay Bot 权限失败")
+	}
+	data := do.YoubanPublishRelayChannel{TenantId: in.TenantId, TgAccountId: in.TgAccountId, ChannelId: strconv.FormatInt(channelID, 10), TargetChatId: target, Title: in.Title, Status: status, HealthStatus: relayChannelHealthUnknown, BotPermissionStatus: relayBotPermissionReady}
 	m := dao.YoubanPublishRelayChannel.Ctx(ctx)
 	if in.Id > 0 {
 		_, err := m.WherePri(in.Id).Data(data).Update()
 		return err
 	}
-	_, err := m.Data(data).Insert()
+	_, err = m.Data(data).Insert()
 	return err
 }
 func (s *sSysPublish) AdminRelayChannelStatus(ctx context.Context, in *sysin.RelayChannelStatusInp) error {

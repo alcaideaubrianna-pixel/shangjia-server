@@ -1718,6 +1718,8 @@ type RelayChannelListInp struct {
 	TenantId int64 `json:"tenantId"`
 }
 type RelayChannelSaveInp struct {
+	AccessHash   int64  `json:"accessHash"`
+	BotUsername  string `json:"botUsername"`
 	Id           int64  `json:"id"`
 	TenantId     int64  `json:"tenantId"`
 	TgAccountId  int64  `json:"tgAccountId"`
