@@ -78,3 +78,12 @@ ALTER TABLE `hg_youban_publish_anti_scan_cache` ADD INDEX IF NOT EXISTS `idx_ybp
 ALTER TABLE `hg_youban_publish_message_media` ADD COLUMN IF NOT EXISTS `original_file_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '原始访问地址';
 ALTER TABLE `hg_youban_publish_message_media` ADD COLUMN IF NOT EXISTS `original_storage_path` varchar(1024) NOT NULL DEFAULT '' COMMENT '原始存储路径';
 ALTER TABLE `hg_youban_publish_message_media` ADD COLUMN IF NOT EXISTS `edit_status` varchar(16) NOT NULL DEFAULT 'raw' COMMENT '编辑状态：raw/edited';
+ALTER TABLE `hg_youban_publish_collect_source` ADD COLUMN IF NOT EXISTS `channel_suffix` text NOT NULL;
+ALTER TABLE `hg_youban_publish_collect_source` ADD COLUMN IF NOT EXISTS `channel_blacklisted` tinyint(1) NOT NULL DEFAULT 0;
+ALTER TABLE `hg_youban_publish_collect_source` ADD KEY `idx_ybp_collect_source_channel_rule` (`tenant_id`,`account_id`,`source_chat_id`,`channel_blacklisted`);
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_intro_fee_channel_rule` (
+ `id` bigint NOT NULL AUTO_INCREMENT, `tenant_id` bigint NOT NULL DEFAULT 0, `rule_id` bigint NOT NULL DEFAULT 0, `bot_id` bigint NOT NULL DEFAULT 0,
+ `channel_id` varchar(128) NOT NULL DEFAULT '', `channel_title` varchar(255) NOT NULL DEFAULT '', `channel_username` varchar(128) NOT NULL DEFAULT '',
+ `suffix` varchar(255) NOT NULL DEFAULT '', `status` tinyint NOT NULL DEFAULT 1, `last_seen_at` datetime NULL, `created_at` datetime NULL, `updated_at` datetime NULL, `deleted_at` datetime NULL,
+ PRIMARY KEY (`id`), UNIQUE KEY `uk_ybp_intro_fee_channel_rule` (`tenant_id`,`rule_id`,`bot_id`,`channel_id`), KEY `idx_ybp_intro_fee_channel_rule_lookup` (`tenant_id`,`rule_id`,`bot_id`,`channel_id`,`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
