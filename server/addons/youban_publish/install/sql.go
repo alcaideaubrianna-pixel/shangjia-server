@@ -23,6 +23,7 @@ var mysqlBusinessSqlFiles = []string{
 var mysqlOnlineUpgradeSqlFiles = []string{
 	"addons/youban_publish/resource/sql/menu.sql",
 	"addons/youban_publish/resource/sql/upgrade_online.sql",
+	"addons/youban_publish/resource/sql/relay.sql",
 }
 
 var pgsqlBusinessSqlFiles = []string{
@@ -33,6 +34,7 @@ var pgsqlBusinessSqlFiles = []string{
 var pgsqlOnlineUpgradeSqlFiles = []string{
 	"addons/youban_publish/resource/sql/menu.pgsql.sql",
 	"addons/youban_publish/resource/sql/upgrade_online.pgsql.sql",
+	"addons/youban_publish/resource/sql/relay.pgsql.sql",
 }
 
 const publishInstallLockKey = "youban_publish:install"

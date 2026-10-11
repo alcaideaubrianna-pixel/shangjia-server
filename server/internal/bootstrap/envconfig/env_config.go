@@ -67,6 +67,7 @@ var items = []item{
 	{Key: "youbanPublish.collect.materialVerifyWindowSeconds", EnvKeys: []string{"YOUBAN_PUBLISH_MATERIAL_VERIFY_WINDOW_SECONDS"}},
 	{Key: "youbanPublish.mediaFileCache.cosDownloadMode", EnvKeys: []string{"YOUBAN_PUBLISH_MEDIA_CACHE_DOWNLOAD_MODE"}},
 	{Key: "youbanPublish.mediaFileCache.workerCdnBaseUrl", EnvKeys: []string{"YOUBAN_PUBLISH_MEDIA_CACHE_WORKER_CDN_BASE_URL"}},
+	{Key: "youbanPublish.mediaFileCache.cosDownloadCdnBaseUrl", EnvKeys: []string{"YOUBAN_PUBLISH_COS_DOWNLOAD_CDN_URL"}},
 	{Key: "youbanPublish.mediaFileCache.fallbackCdnBaseUrl", EnvKeys: []string{"YOUBAN_PUBLISH_MEDIA_CACHE_FALLBACK_CDN_BASE_URL"}},
 	{Key: "youbanPublish.mediaSearch.pgvector.enabled", EnvKeys: []string{"YOUBAN_PUBLISH_MEDIA_SEARCH_PGVECTOR_ENABLED"}},
 	{Key: "telegramCollector.enabled", EnvKeys: []string{"YOUBAN_TELEGRAM_COLLECTOR_ENABLED"}},

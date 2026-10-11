@@ -165,6 +165,18 @@ func validateTelegramMediaPurpose(purpose string, media []*telegramMediaItem) er
 }
 
 func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bot, chatId string, purpose string, caption string, media *telegramMediaItem, replyMarkup ...models.ReplyMarkup) ([]*telegramSentMessage, error) {
+	if media != nil && strings.TrimSpace(media.TgFileId) == "" && media.TenantId > 0 {
+		if relay, err := relayReadyMedia(ctx, media.TenantId, media.Id, purpose, "original"); err == nil && relay != nil && relay.MessageId > 0 && strings.TrimSpace(relay.RelayChatId) != "" {
+			ref := telegramCopyMediaRef{ChatId: relay.RelayChatId, MessageId: int(relay.MessageId)}
+			cloned := *media
+			cloned.TgFileId = "copy:" + ref.ChatId + ":" + strconv.FormatInt(relay.MessageId, 10)
+			messages, copyErr := s.copyTelegramSingleMedia(ctx, bot, chatId, purpose, caption, &cloned, ref)
+			if copyErr == nil {
+				return messages, nil
+			}
+			g.Log().Warningf(ctx, "relay 媒体复制失败，回退原有上传链路 tenant:%d media:%d relay:%s:%d err:%+v", media.TenantId, media.Id, ref.ChatId, relay.MessageId, copyErr)
+		}
+	}
 	s.prepareTelegramMediaItemForSend(ctx, media)
 	if ref, ok := telegramCopyMediaRefFromFileId(media.TgFileId); ok && !telegramMediaRequiresSanitizedUpload(media) {
 		messages, err := s.copyTelegramSingleMedia(ctx, bot, chatId, purpose, caption, media, ref)
