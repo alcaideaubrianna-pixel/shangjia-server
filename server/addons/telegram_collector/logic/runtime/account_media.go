@@ -72,6 +72,12 @@ func (h *accountMediaTaskHandler) HandleAccountTask(ctx context.Context, client 
 	}
 	if refreshed.Type == sysin.MediaKindVideo && strings.TrimSpace(refreshed.SourceThumbSize) != "" {
 		thumbPath, thumbErr := transferAccountTaskMediaThumb(ctx, client, task.AccountID, refreshed)
+		if accountMediaReferenceExpired(thumbErr) {
+			if renewed, refreshErr := refreshAccountTaskMedia(ctx, client, provider, task, refreshed); refreshErr == nil {
+				refreshed = renewed
+				thumbPath, thumbErr = transferAccountTaskMediaThumb(ctx, client, task.AccountID, refreshed)
+			}
+		}
 		if thumbErr == nil {
 			defer os.Remove(thumbPath)
 			result.PosterURL, result.PosterPath, thumbErr = provider.StoreMediaPoster(ctx, task, thumbPath)

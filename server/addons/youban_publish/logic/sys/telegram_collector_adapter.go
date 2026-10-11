@@ -712,8 +712,8 @@ func (p *publishCollectorAccountMediaProvider) StoreMedia(ctx context.Context, t
 		task.Media.FileMD5 = md5Value
 		task.Media.SourceSize = mediaSize
 		task.Media.FilePHash = cached.PHash
-		task.Media.PosterURL = firstNonEmpty(cached.PosterURL, cached.PosterStoragePath)
-		return &collectorin.AccountMediaDownloadResult{FileURL: task.Media.FileURL, StoragePath: task.Media.StoragePath, Media: task.Media}, nil
+		task.Media.PosterURL = cached.PosterURL
+		return &collectorin.AccountMediaDownloadResult{FileURL: task.Media.FileURL, StoragePath: task.Media.StoragePath, PosterURL: cached.PosterURL, PosterPath: cached.PosterStoragePath, Media: task.Media}, nil
 	}
 	attachment, err := p.publish.uploadCollectMediaToStorage(ctx, task.Media.Type, localPath)
 	if err != nil {
