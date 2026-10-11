@@ -10,6 +10,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 	pdao "hotgo/addons/youban_publish/internal/dao"
+	pdo "hotgo/addons/youban_publish/internal/model/do"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/cache"
 	"time"
@@ -17,9 +18,10 @@ import (
 
 const introFeeChannelRuleTable = "hg_youban_publish_intro_fee_channel_rule"
 const introFeeChannelRuleCacheTTL = 10 * time.Minute
+const introFeeChannelCandidateScanLimit = 2000
 
-func introFeeChannelRuleCacheKey(tenant, rule, bot int64, channel string) string {
-	return fmt.Sprintf("youban_publish:intro_fee_rule:%d:%d:%d:%s", tenant, rule, bot, channel)
+func introFeeChannelRuleCacheKey(tenant, account, rule, bot int64, channel string) string {
+	return fmt.Sprintf("youban_publish:intro_fee_rule:%d:%d:%d:%d:%s", tenant, account, rule, bot, channel)
 }
 
 func (s *sSysPublish) resolveIntroFeeChannelSuffix(ctx context.Context, event gdb.Record, rule gdb.Record) (string, bool, error) {
@@ -31,7 +33,8 @@ func (s *sSysPublish) resolveIntroFeeChannelSuffix(ctx context.Context, event gd
 	if botID == 0 {
 		botID = rule["bot_id"].Int64()
 	}
-	key := introFeeChannelRuleCacheKey(event["tenant_id"].Int64(), rule["id"].Int64(), botID, chatID)
+	accountID := event["account_id"].Int64()
+	key := introFeeChannelRuleCacheKey(event["tenant_id"].Int64(), accountID, rule["id"].Int64(), botID, chatID)
 	if value, cacheErr := cache.Instance().Get(ctx, key); cacheErr == nil && !value.IsNil() {
 		if value.String() == "__none__" {
 			return "", false, nil
@@ -39,18 +42,18 @@ func (s *sSysPublish) resolveIntroFeeChannelSuffix(ctx context.Context, event gd
 		return value.String(), true, nil
 	}
 	mod := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).
-		Fields("suffix").Where("tenant_id", event["tenant_id"]).Where("rule_id", rule["id"]).WhereIn("channel_id", tgChannelCacheLookupIds(chatID)).Where("status", 1).WhereNull("deleted_at")
+		Fields("suffix").Where("tenant_id", event["tenant_id"]).WhereIn("account_id", []int64{accountID, 0}).Where("rule_id", rule["id"]).WhereIn("channel_id", tgChannelCacheLookupIds(chatID)).Where("status", 1).WhereNull("deleted_at")
 	if botID > 0 {
 		mod = mod.Where("bot_id", botID)
 	} else {
 		mod = mod.Where("bot_id", 0)
 	}
-	row, err := mod.OrderDesc("id").Limit(1).One()
+	row, err := mod.OrderDesc("account_id").OrderDesc("id").Limit(1).One()
 	if err != nil {
 		return "", false, gerror.Wrap(err, "读取介绍费频道后缀规则失败")
 	}
 	if row.IsEmpty() && botID > 0 {
-		row, err = g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Fields("suffix").Where("tenant_id", event["tenant_id"]).Where("rule_id", 0).Where("bot_id", botID).WhereIn("channel_id", tgChannelCacheLookupIds(chatID)).Where("status", 1).WhereNull("deleted_at").OrderDesc("id").Limit(1).One()
+		row, err = g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Fields("suffix").Where("tenant_id", event["tenant_id"]).WhereIn("account_id", []int64{accountID, 0}).Where("rule_id", 0).Where("bot_id", botID).WhereIn("channel_id", tgChannelCacheLookupIds(chatID)).Where("status", 1).WhereNull("deleted_at").OrderDesc("account_id").OrderDesc("id").Limit(1).One()
 	}
 	if row.IsEmpty() {
 		_ = cache.Instance().Set(ctx, key, "__none__", time.Minute)
@@ -75,7 +78,7 @@ func (s *sSysPublish) IntroFeeChannelRuleList(ctx context.Context, in *sysin.Int
 	if !s.introFeeRuleOwned(ctx, account.TenantId, account.Id, in.RuleId) {
 		return nil, 0, gerror.New("介绍费规则不存在或无权访问")
 	}
-	mod := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Where("tenant_id", account.TenantId).Where("rule_id", in.RuleId).Where("bot_id", in.BotId).WhereNull("deleted_at")
+	mod := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Where("tenant_id", account.TenantId).Where("account_id", account.Id).Where("rule_id", in.RuleId).Where("bot_id", in.BotId).WhereNull("deleted_at")
 	if in.IncludeCandidates {
 		return s.introFeeChannelRuleCandidates(ctx, account.TenantId, account.Id, in.RuleId, in.BotId, in.Keyword, in.Page, in.PerPage)
 	}
@@ -118,17 +121,25 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 		perPage = 20
 	}
 	configured := make([]*sysin.IntroFeeChannelRuleItem, 0)
-	if err := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Where("tenant_id", tenantID).Where("rule_id", ruleID).Where("bot_id", botID).WhereNull("deleted_at").OrderDesc("updated_at").Scan(&configured); err != nil {
+	if err := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Where("tenant_id", tenantID).WhereIn("account_id", []int64{accountID, 0}).Where("rule_id", ruleID).Where("bot_id", botID).WhereNull("deleted_at").OrderDesc("account_id").OrderDesc("updated_at").Limit(introFeeChannelCandidateScanLimit).Scan(&configured); err != nil {
 		return nil, 0, err
 	}
 	seen := make(map[string]struct{}, len(configured))
+	deduplicated := configured[:0]
 	for _, row := range configured {
+		channelID := canonicalCollectSourceChatID(row.ChannelId)
+		if _, exists := seen[channelID]; exists {
+			continue
+		}
 		row.Configured = true
-		seen[canonicalCollectSourceChatID(row.ChannelId)] = struct{}{}
+		seen[channelID] = struct{}{}
+		deduplicated = append(deduplicated, row)
 	}
-	// For a rule-scoped dialog, historical candidates must come from sources
-	// explicitly bound to this rule; never mix in other account/BOT channels.
-	var sourceCandidates []struct {
+	configured = deduplicated
+	// A rule-scoped dialog must only contain channels belonging to sources
+	// bound to this rule. The compact source/source_rule tables are the
+	// historical index; do not broaden the result with all account/BOT chats.
+	type sourceCandidate struct {
 		ChatId       string      `orm:"source_chat_id"`
 		ChatTitle    string      `orm:"chat_title"`
 		ChatUsername string      `orm:"chat_username"`
@@ -145,11 +156,35 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 	if ruleID > 0 {
 		sourceModel = sourceModel.Where("EXISTS (SELECT 1 FROM "+pdao.YoubanPublishCollectSourceRule.Table()+" sr WHERE sr.source_id="+publishCollectSourceTable+".id AND sr.rule_id=? AND sr.tenant_id=? AND sr.status=1)", ruleID, tenantID)
 	}
-	if err := sourceModel.Fields("source_chat_id, title AS chat_title, source_username AS chat_username, last_event_at AS last_message_at").OrderDesc("updated_at").Limit(2000).Scan(&sourceCandidates); err != nil {
+	var sourceRows []sourceCandidate
+	if err := sourceModel.Fields("source_chat_id, title AS chat_title, source_username AS chat_username, last_event_at AS last_message_at").OrderDesc("updated_at").Limit(introFeeChannelCandidateScanLimit).Scan(&sourceRows); err != nil {
 		return nil, 0, err
 	}
-	scopedChatIDs := make([]string, 0, len(sourceCandidates)*2)
-	for _, source := range sourceCandidates {
+	// BOT sources are aggregate sources and may not have source_chat_id. In
+	// that case recover historical chats from events, but only through the
+	// current rule's source binding. The source_id predicate keeps this bounded
+	// and prevents channels from unrelated rules leaking into the dialog.
+	if ruleID > 0 {
+		var historicalRows []struct {
+			ChatId     string      `orm:"source_chat_id"`
+			LastSeenAt *gtime.Time `orm:"last_seen_at"`
+		}
+		eventModel := g.DB().Model(publishCollectEventTable+" e").Ctx(ctx).
+			Where("e.tenant_id", tenantID).
+			WhereNot("e.source_chat_id", "").
+			Where("EXISTS (SELECT 1 FROM "+pdao.YoubanPublishCollectSourceRule.Table()+" sr JOIN "+publishCollectSourceTable+" s ON s.id=sr.source_id WHERE sr.rule_id=? AND sr.status=1 AND sr.tenant_id=? AND s.id=e.source_id AND s.account_id=? AND s.deleted_at IS NULL)", ruleID, tenantID, accountID).
+			Group("e.source_chat_id").
+			Fields("e.source_chat_id, MAX(e.received_at) AS last_seen_at").
+			OrderDesc("last_seen_at").Limit(introFeeChannelCandidateScanLimit)
+		if err := eventModel.Scan(&historicalRows); err != nil {
+			return nil, 0, err
+		}
+		for _, historical := range historicalRows {
+			sourceRows = append(sourceRows, sourceCandidate{ChatId: historical.ChatId, LastSeenAt: historical.LastSeenAt})
+		}
+	}
+	scopedChatIDs := make([]string, 0, len(sourceRows)*2)
+	for _, source := range sourceRows {
 		scopedChatIDs = append(scopedChatIDs, tgChannelCacheLookupIds(source.ChatId)...)
 	}
 	scopedChatIDs = uniqueStrings(scopedChatIDs)
@@ -160,6 +195,8 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 	if len(scopedChatIDs) > 0 {
 		cacheModel = cacheModel.WhereIn("chat_id", scopedChatIDs)
 	} else if ruleID > 0 {
+		// No source is bound to this rule; configured rows above are still
+		// returned, but unrelated historical chats must not leak in.
 		cacheModel = cacheModel.Where("1=0")
 	} else if botID == 0 {
 		cacheModel = cacheModel.WhereIn("chat_id", g.DB().Model(publishCollectSourceTable).Ctx(ctx).Fields("source_chat_id").Where("tenant_id", tenantID).Where("account_id", accountID).WhereNull("deleted_at"))
@@ -170,15 +207,39 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 		ChatUsername string      `orm:"chat_username"`
 		LastSeenAt   *gtime.Time `orm:"last_message_at"`
 	}
-	if err := cacheModel.Fields("chat_id,chat_title,chat_username,last_message_at").OrderDesc("last_message_at").Scan(&candidates); err != nil {
+	if err := cacheModel.Fields("chat_id,chat_title,chat_username,last_message_at").OrderDesc("last_message_at").Limit(introFeeChannelCandidateScanLimit).Scan(&candidates); err != nil {
 		return nil, 0, err
 	}
-	// Historical events can predate bot_channel_cache. Include their source chat
-	// ids as candidates as well, and let the cache query below provide titles when
-	// available. This keeps the channel-rule dialog useful for already collected
-	// material after a cache rebuild or migration.
-	for _, eventCandidate := range sourceCandidates {
-		id := canonicalCollectSourceChatID(eventCandidate.ChatId)
+	var canonicalCandidates []struct {
+		ChatId       string      `orm:"chat_id"`
+		ChatTitle    string      `orm:"chat_title"`
+		ChatUsername string      `orm:"chat_username"`
+		LastSeenAt   *gtime.Time `orm:"last_message_at"`
+	}
+	canonicalModel := g.DB().Model(pdao.YoubanPublishCollectChannel.Table()).Ctx(ctx).
+		Where("hg_youban_publish_collect_channel.tenant_id", tenantID).
+		Where("hg_youban_publish_collect_channel.status", "active").WhereNull("hg_youban_publish_collect_channel.deleted_at")
+	if botID > 0 {
+		canonicalModel = canonicalModel.InnerJoin(pdao.YoubanPublishCollectBotChannel.Table()+" bc", "bc.channel_id=hg_youban_publish_collect_channel.id AND bc.tenant_id=hg_youban_publish_collect_channel.tenant_id").
+			Where("bc.bot_id", botID).Where("bc.status", "!=", sysin.CollectBotChannelRemoved).WhereNull("bc.deleted_at")
+	} else if accountID > 0 {
+		canonicalModel = canonicalModel.InnerJoin(pdao.YoubanPublishCollectAccountChannel.Table()+" ac", "ac.channel_id=hg_youban_publish_collect_channel.id AND ac.tenant_id=hg_youban_publish_collect_channel.tenant_id").
+			Where("ac.account_id", accountID).WhereNull("ac.deleted_at")
+	}
+	if len(scopedChatIDs) > 0 {
+		canonicalModel = canonicalModel.WhereIn("hg_youban_publish_collect_channel.telegram_chat_id", scopedChatIDs)
+	} else if ruleID > 0 {
+		canonicalModel = canonicalModel.Where("1=0")
+	}
+	if err := canonicalModel.
+		Fields("telegram_chat_id AS chat_id,title AS chat_title,username AS chat_username,last_seen_at AS last_message_at").
+		OrderDesc("last_seen_at").Limit(introFeeChannelCandidateScanLimit).Scan(&canonicalCandidates); err == nil {
+		candidates = append(candidates, canonicalCandidates...)
+	}
+	// Collection sources are the compact historical index. Never scan the event
+	// or message tables when opening this management dialog.
+	for _, sourceCandidate := range sourceRows {
+		id := canonicalCollectSourceChatID(sourceCandidate.ChatId)
 		if id == "" {
 			continue
 		}
@@ -187,7 +248,7 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 			ChatTitle    string      `orm:"chat_title"`
 			ChatUsername string      `orm:"chat_username"`
 			LastSeenAt   *gtime.Time `orm:"last_message_at"`
-		}{ChatId: id, ChatTitle: eventCandidate.ChatTitle, ChatUsername: eventCandidate.ChatUsername, LastSeenAt: eventCandidate.LastSeenAt})
+		}{ChatId: id, ChatTitle: sourceCandidate.ChatTitle, ChatUsername: sourceCandidate.ChatUsername, LastSeenAt: sourceCandidate.LastSeenAt})
 	}
 	for _, candidate := range candidates {
 		id := canonicalCollectSourceChatID(candidate.ChatId)
@@ -199,6 +260,81 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 		}
 		seen[id] = struct{}{}
 		configured = append(configured, &sysin.IntroFeeChannelRuleItem{RuleId: ruleID, BotId: botID, ChannelId: id, ChannelTitle: candidate.ChatTitle, ChannelUsername: candidate.ChatUsername, LastSeenAt: candidate.LastSeenAt, Configured: false})
+	}
+	// Enrich all rows in three bounded queries. The dialog must not issue one
+	// query per channel because historical BOT lists can be large.
+	lookupIDs := make([]string, 0, len(configured)*2)
+	for _, row := range configured {
+		if row != nil {
+			lookupIDs = append(lookupIDs, tgChannelCacheLookupIds(row.ChannelId)...)
+		}
+	}
+	type channelInfo struct {
+		Id             int64  `json:"id"`
+		TelegramChatId string `json:"telegramChatId"`
+		Status         string `json:"status"`
+		Title          string `json:"title"`
+		Username       string `json:"username"`
+		InviteLink     string `json:"inviteLink"`
+	}
+	var channels []channelInfo
+	channelByID := make(map[string]channelInfo, len(configured))
+	channelPKs := make([]int64, 0, len(configured))
+	if len(lookupIDs) > 0 {
+		_ = pdao.YoubanPublishCollectChannel.Ctx(ctx).
+			Fields("id,telegram_chat_id,status,title,username,invite_link").
+			Where("tenant_id", tenantID).WhereIn("telegram_chat_id", uniqueStrings(lookupIDs)).WhereNull("deleted_at").Scan(&channels)
+		for _, channel := range channels {
+			channelByID[canonicalCollectSourceChatID(channel.TelegramChatId)] = channel
+			channelPKs = append(channelPKs, channel.Id)
+		}
+	}
+	botStatusByChannel := make(map[int64]string, len(channels))
+	accountStatusByChannel := make(map[int64]string, len(channels))
+	if len(channelPKs) > 0 && botID > 0 {
+		var relations []struct {
+			ChannelId int64  `json:"channelId"`
+			Status    string `json:"status"`
+		}
+		_ = pdao.YoubanPublishCollectBotChannel.Ctx(ctx).Fields("channel_id,status").Where("tenant_id", tenantID).Where("bot_id", botID).WhereIn("channel_id", channelPKs).Scan(&relations)
+		for _, relation := range relations {
+			botStatusByChannel[relation.ChannelId] = relation.Status
+		}
+	}
+	if len(channelPKs) > 0 && accountID > 0 {
+		var relations []struct {
+			ChannelId int64  `json:"channelId"`
+			Status    string `json:"status"`
+		}
+		_ = pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Fields("channel_id,status").Where("tenant_id", tenantID).Where("account_id", accountID).WhereIn("channel_id", channelPKs).Scan(&relations)
+		for _, relation := range relations {
+			accountStatusByChannel[relation.ChannelId] = relation.Status
+		}
+	}
+	for _, row := range configured {
+		if row == nil || row.ChannelId == "" {
+			continue
+		}
+		if channel, ok := channelByID[canonicalCollectSourceChatID(row.ChannelId)]; ok {
+			if strings.TrimSpace(row.ChannelTitle) == "" {
+				row.ChannelTitle = strings.TrimSpace(channel.Title)
+			}
+			if strings.TrimSpace(row.ChannelUsername) == "" {
+				row.ChannelUsername = strings.TrimSpace(channel.Username)
+			}
+			if strings.TrimSpace(channel.InviteLink) != "" {
+				row.ChannelLink = strings.TrimSpace(channel.InviteLink)
+			}
+			row.ChannelStatus = channel.Status
+			row.BotStatus = botStatusByChannel[channel.Id]
+			row.AccountStatus = accountStatusByChannel[channel.Id]
+			if row.AccountStatus == sysin.CollectAccountChannelDisabled {
+				row.Blacklisted = true
+			}
+		}
+		if row.ChannelLink == "" && row.ChannelUsername != "" {
+			row.ChannelLink = "https://t.me/" + strings.TrimPrefix(row.ChannelUsername, "@")
+		}
 	}
 	s.fillIntroFeeChannelBlacklist(ctx, tenantID, accountID, configured)
 	if keyword = strings.TrimSpace(keyword); keyword != "" {
@@ -236,26 +372,112 @@ func (s *sSysPublish) IntroFeeChannelRuleSave(ctx context.Context, in *sysin.Int
 	}
 	in.ChannelId = canonicalCollectSourceChatID(in.ChannelId)
 	now := gtime.Now()
-	data := g.Map{"tenant_id": account.TenantId, "rule_id": in.RuleId, "bot_id": in.BotId, "channel_id": strings.TrimSpace(in.ChannelId), "suffix": strings.TrimSpace(in.Suffix), "status": in.Status, "updated_at": now}
+	data := g.Map{"tenant_id": account.TenantId, "account_id": account.Id, "rule_id": in.RuleId, "bot_id": in.BotId, "channel_id": strings.TrimSpace(in.ChannelId), "suffix": strings.TrimSpace(in.Suffix), "status": in.Status, "updated_at": now}
 	if in.Status == 0 {
 		data["status"] = 1
 	}
 	if in.Id > 0 {
-		_, err = g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Where("id", in.Id).Where("tenant_id", account.TenantId).WhereNull("deleted_at").Data(data).Update()
-		_, _ = cache.Instance().Remove(ctx, introFeeChannelRuleCacheKey(account.TenantId, in.RuleId, in.BotId, in.ChannelId))
-		return in.Id, err
+		result, updateErr := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).
+			Where("id", in.Id).Where("tenant_id", account.TenantId).WhereIn("account_id", []int64{account.Id, 0}).
+			Where("rule_id", in.RuleId).WhereNull("deleted_at").Data(data).Update()
+		if updateErr != nil {
+			return 0, updateErr
+		}
+		rows, rowsErr := result.RowsAffected()
+		if rowsErr != nil {
+			return 0, rowsErr
+		}
+		if rows == 0 {
+			return 0, gerror.New("频道后缀规则不存在或无权修改")
+		}
+		_, _ = cache.Instance().Remove(ctx, introFeeChannelRuleCacheKey(account.TenantId, account.Id, in.RuleId, in.BotId, in.ChannelId))
+		return in.Id, nil
 	}
-	if existing, queryErr := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Where("tenant_id", account.TenantId).Where("rule_id", in.RuleId).Where("bot_id", in.BotId).WhereIn("channel_id", tgChannelCacheLookupIds(in.ChannelId)).One(); queryErr != nil {
+	if existing, queryErr := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Where("tenant_id", account.TenantId).WhereIn("account_id", []int64{account.Id, 0}).Where("rule_id", in.RuleId).Where("bot_id", in.BotId).WhereIn("channel_id", tgChannelCacheLookupIds(in.ChannelId)).OrderDesc("account_id").One(); queryErr != nil {
 		return 0, queryErr
 	} else if !existing.IsEmpty() {
 		id := existing["id"].Int64()
-		_, err = g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Where("id", id).Data(g.Map{"suffix": data["suffix"], "status": data["status"], "deleted_at": nil, "updated_at": now}).Update()
-		_, _ = cache.Instance().Remove(ctx, introFeeChannelRuleCacheKey(account.TenantId, in.RuleId, in.BotId, in.ChannelId))
+		_, err = g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Where("id", id).Data(g.Map{"account_id": account.Id, "suffix": data["suffix"], "status": data["status"], "deleted_at": nil, "updated_at": now}).Update()
+		_, _ = cache.Instance().Remove(ctx, introFeeChannelRuleCacheKey(account.TenantId, account.Id, in.RuleId, in.BotId, in.ChannelId))
 		return id, err
 	}
 	data["created_at"] = now
 	id, err := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Data(data).InsertAndGetId()
 	return id, err
+}
+
+func (s *sSysPublish) BotIntroFeeChannelRuleSave(ctx context.Context, in *sysin.IntroFeeChannelRuleSaveInp, tenantId, accountId int64) (int64, error) {
+	if tenantId <= 0 || accountId <= 0 || in == nil {
+		return 0, gerror.New("频道后缀参数不完整")
+	}
+	if !s.introFeeRuleOwned(ctx, tenantId, accountId, in.RuleId) {
+		return 0, gerror.New("介绍费规则不存在或无权访问")
+	}
+	now := gtime.Now()
+	status := in.Status
+	if status == 0 {
+		status = 1
+	}
+	data := g.Map{"tenant_id": tenantId, "account_id": accountId, "rule_id": in.RuleId, "bot_id": in.BotId, "channel_id": canonicalCollectSourceChatID(in.ChannelId), "suffix": strings.TrimSpace(in.Suffix), "status": status, "updated_at": now}
+	if in.Id > 0 {
+		result, updateErr := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).
+			Where("id", in.Id).Where("tenant_id", tenantId).WhereIn("account_id", []int64{accountId, 0}).
+			Where("rule_id", in.RuleId).Data(data).Update()
+		if updateErr != nil {
+			return 0, updateErr
+		}
+		rows, rowsErr := result.RowsAffected()
+		if rowsErr != nil {
+			return 0, rowsErr
+		}
+		if rows == 0 {
+			return 0, gerror.New("频道后缀规则不存在或无权修改")
+		}
+		return in.Id, nil
+	}
+	var existing struct {
+		Id int64 `json:"id"`
+	}
+	_ = g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Fields("id").Where("tenant_id", tenantId).WhereIn("account_id", []int64{accountId, 0}).Where("rule_id", in.RuleId).Where("bot_id", in.BotId).Where("channel_id", data["channel_id"]).WhereNull("deleted_at").OrderDesc("account_id").Scan(&existing)
+	if existing.Id > 0 {
+		_, err := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Where("id", existing.Id).Data(data).Update()
+		return existing.Id, err
+	}
+	id, err := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Data(data).InsertAndGetId()
+	return id, err
+}
+
+func (s *sSysPublish) BotIntroFeeChannelRuleDelete(ctx context.Context, id, ruleId, tenantId, accountId int64) error {
+	if id <= 0 || !s.introFeeRuleOwned(ctx, tenantId, accountId, ruleId) {
+		return gerror.New("频道后缀规则不存在或无权删除")
+	}
+	result, err := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).
+		Where("id", id).Where("tenant_id", tenantId).WhereIn("account_id", []int64{accountId, 0}).
+		Where("rule_id", ruleId).WhereNull("deleted_at").Data(g.Map{"deleted_at": gtime.Now()}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "删除频道后缀规则失败")
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return gerror.Wrap(err, "检查频道后缀规则删除结果失败")
+	}
+	if rows == 0 {
+		return gerror.New("频道后缀规则不存在或无权删除")
+	}
+	return nil
+}
+
+func (s *sSysPublish) BotIntroFeeChannelRuleList(ctx context.Context, in *sysin.IntroFeeChannelRuleListInp, tenantId, accountId int64) ([]*sysin.IntroFeeChannelRuleItem, int, error) {
+	if tenantId <= 0 || accountId <= 0 {
+		return nil, 0, gerror.New("频道规则参数不完整")
+	}
+	if in == nil {
+		in = &sysin.IntroFeeChannelRuleListInp{}
+	}
+	if !s.introFeeRuleOwned(ctx, tenantId, accountId, in.RuleId) {
+		return nil, 0, gerror.New("介绍费规则不存在或无权访问")
+	}
+	return s.introFeeChannelRuleCandidates(ctx, tenantId, accountId, in.RuleId, in.BotId, in.Keyword, in.Page, in.PerPage)
 }
 
 func (s *sSysPublish) introFeeRuleOwned(ctx context.Context, tenantID, accountID, ruleID int64) bool {
@@ -274,10 +496,13 @@ func (s *sSysPublish) IntroFeeChannelRuleDelete(ctx context.Context, id int64) e
 	if id <= 0 {
 		return gerror.New("规则ID无效")
 	}
-	row, _ := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Fields("rule_id,bot_id,channel_id").Where("id", id).Where("tenant_id", account.TenantId).WhereNull("deleted_at").One()
-	_, err = g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Where("id", id).Where("tenant_id", account.TenantId).WhereNull("deleted_at").Data(g.Map{"deleted_at": gtime.Now()}).Update()
+	row, _ := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Fields("rule_id,bot_id,channel_id").Where("id", id).Where("tenant_id", account.TenantId).WhereIn("account_id", []int64{account.Id, 0}).WhereNull("deleted_at").One()
+	if row.IsEmpty() {
+		return gerror.New("频道后缀规则不存在或无权删除")
+	}
+	_, err = g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Where("id", id).Where("tenant_id", account.TenantId).WhereIn("account_id", []int64{account.Id, 0}).WhereNull("deleted_at").Data(g.Map{"deleted_at": gtime.Now()}).Update()
 	if !row.IsEmpty() {
-		_, _ = cache.Instance().Remove(ctx, introFeeChannelRuleCacheKey(account.TenantId, row["rule_id"].Int64(), row["bot_id"].Int64(), row["channel_id"].String()))
+		_, _ = cache.Instance().Remove(ctx, introFeeChannelRuleCacheKey(account.TenantId, account.Id, row["rule_id"].Int64(), row["bot_id"].Int64(), row["channel_id"].String()))
 	}
 	return err
 }
@@ -290,9 +515,12 @@ func (s *sSysPublish) AdminIntroFeeChannelRuleList(ctx context.Context, in *sysi
 	if in == nil {
 		in = &sysin.AdminIntroFeeChannelRuleListInp{}
 	}
-	mod := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Where("tenant_id", admin.TenantId).Where("bot_id", in.BotId).Where("rule_id", in.RuleId).WhereNull("deleted_at")
+	if in.AccountId <= 0 || !s.publishAccountBelongsToTenant(ctx, in.AccountId, admin.TenantId) {
+		return nil, 0, gerror.New("请选择有效的采集账户")
+	}
+	mod := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Where("tenant_id", admin.TenantId).WhereIn("account_id", []int64{in.AccountId, 0}).Where("bot_id", in.BotId).Where("rule_id", in.RuleId).WhereNull("deleted_at")
 	if in.IncludeCandidates {
-		return s.introFeeChannelRuleCandidates(ctx, admin.TenantId, 0, in.RuleId, in.BotId, in.Keyword, in.Page, in.PerPage)
+		return s.introFeeChannelRuleCandidates(ctx, admin.TenantId, in.AccountId, in.RuleId, in.BotId, in.Keyword, in.Page, in.PerPage)
 	}
 	if kw := strings.TrimSpace(in.Keyword); kw != "" {
 		like := "%" + kw + "%"
@@ -308,25 +536,33 @@ func (s *sSysPublish) AdminIntroFeeChannelRuleSave(ctx context.Context, in *sysi
 	if err != nil {
 		return 0, err
 	}
-	if in == nil || in.BotId <= 0 || strings.TrimSpace(in.ChannelId) == "" {
-		return 0, gerror.New("机器人、规则和频道ID不能为空")
+	if in == nil || in.BotId <= 0 || in.AccountId <= 0 || strings.TrimSpace(in.ChannelId) == "" {
+		return 0, gerror.New("账户、机器人和频道ID不能为空")
+	}
+	if !s.publishAccountBelongsToTenant(ctx, in.AccountId, admin.TenantId) {
+		return 0, gerror.New("采集账户不存在或无权访问")
 	}
 	channelID := canonicalCollectSourceChatID(in.ChannelId)
 	now := gtime.Now()
-	data := g.Map{"tenant_id": admin.TenantId, "bot_id": in.BotId, "rule_id": in.RuleId, "channel_id": channelID, "suffix": strings.TrimSpace(in.Suffix), "status": 1, "updated_at": now}
+	data := g.Map{"tenant_id": admin.TenantId, "account_id": in.AccountId, "bot_id": in.BotId, "rule_id": in.RuleId, "channel_id": channelID, "suffix": strings.TrimSpace(in.Suffix), "status": 1, "updated_at": now}
 	if in.Id > 0 {
 		_, err = g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Where("id", in.Id).Where("tenant_id", admin.TenantId).Data(data).Update()
 		return in.Id, err
 	}
-	row, _ := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Where("tenant_id", admin.TenantId).Where("bot_id", in.BotId).Where("rule_id", in.RuleId).Where("channel_id", channelID).One()
+	row, _ := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Where("tenant_id", admin.TenantId).WhereIn("account_id", []int64{in.AccountId, 0}).Where("bot_id", in.BotId).Where("rule_id", in.RuleId).Where("channel_id", channelID).OrderDesc("account_id").One()
 	if !row.IsEmpty() {
 		id := row["id"].Int64()
-		_, err = g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Where("id", id).Data(g.Map{"suffix": data["suffix"], "status": 1, "deleted_at": nil, "updated_at": now}).Update()
+		_, err = g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Where("id", id).Data(g.Map{"account_id": in.AccountId, "suffix": data["suffix"], "status": 1, "deleted_at": nil, "updated_at": now}).Update()
 		return id, err
 	}
 	data["created_at"] = now
 	id, err := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Data(data).InsertAndGetId()
 	return id, err
+}
+
+func (s *sSysPublish) publishAccountBelongsToTenant(ctx context.Context, accountID, tenantID int64) bool {
+	ok, err := g.DB().Model("hg_youban_publish_account").Ctx(ctx).Where("id", accountID).Where("tenant_id", tenantID).WhereNull("deleted_at").Exist()
+	return err == nil && ok
 }
 
 func (s *sSysPublish) AdminIntroFeeChannelRuleDelete(ctx context.Context, id int64) error {
@@ -346,21 +582,32 @@ func (s *sSysPublish) IntroFeeChannelBlacklist(ctx context.Context, in *sysin.In
 	if err != nil {
 		return err
 	}
-	if in == nil || in.Id <= 0 {
-		return gerror.New("规则ID无效")
+	if in == nil {
+		return gerror.New("频道状态参数不能为空")
 	}
-	row, err := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Fields("rule_id,bot_id,channel_id").Where("id", in.Id).Where("tenant_id", account.TenantId).WhereNull("deleted_at").One()
-	if err != nil {
-		return gerror.Wrap(err, "读取介绍费频道规则失败")
+	ruleID, botID, channelID := in.RuleId, in.BotId, canonicalCollectSourceChatID(in.ChannelId)
+	if in.Id > 0 {
+		row, queryErr := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Fields("rule_id,bot_id,channel_id").Where("id", in.Id).Where("tenant_id", account.TenantId).WhereIn("account_id", []int64{account.Id, 0}).WhereNull("deleted_at").One()
+		if queryErr != nil {
+			return gerror.Wrap(queryErr, "读取介绍费频道规则失败")
+		}
+		if row.IsEmpty() {
+			return gerror.New("频道规则不存在或无权修改")
+		}
+		ruleID, botID, channelID = row["rule_id"].Int64(), row["bot_id"].Int64(), row["channel_id"].String()
 	}
-	if row.IsEmpty() || !s.introFeeRuleOwned(ctx, account.TenantId, account.Id, row["rule_id"].Int64()) {
+	if channelID == "" || !s.introFeeRuleOwned(ctx, account.TenantId, account.Id, ruleID) {
 		return gerror.New("介绍费规则不存在或无权修改")
 	}
-	mod := g.DB().Model(publishCollectSourceTable).Ctx(ctx).Where("tenant_id", account.TenantId).Where("account_id", account.Id).WhereIn("source_chat_id", tgChannelCacheLookupIds(canonicalCollectSourceChatID(row["channel_id"].String())))
-	if botID := row["bot_id"].Int64(); botID > 0 {
+	mod := g.DB().Model(publishCollectSourceTable).Ctx(ctx).Where("tenant_id", account.TenantId).Where("account_id", account.Id).WhereIn("source_chat_id", tgChannelCacheLookupIds(channelID))
+	if botID > 0 {
 		mod = mod.Where("bot_id", botID)
 	}
 	_, err = mod.Data(g.Map{"channel_blacklisted": introFeeBoolToInt(in.Blacklisted != 0)}).Update()
+	if err == nil {
+		s.setCollectAccountChannelEnabled(ctx, account.TenantId, account.Id, channelID, in.Blacklisted == 0)
+		s.refreshCollectSourceCache(ctx)
+	}
 	return err
 }
 
@@ -369,18 +616,53 @@ func (s *sSysPublish) AdminIntroFeeChannelBlacklist(ctx context.Context, in *sys
 	if err != nil {
 		return err
 	}
-	if in == nil || in.Id <= 0 {
-		return gerror.New("规则ID无效")
+	if in == nil {
+		return gerror.New("频道状态参数不能为空")
 	}
-	row, err := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Fields("bot_id,channel_id").Where("id", in.Id).Where("tenant_id", admin.TenantId).WhereNull("deleted_at").One()
-	if err != nil {
-		return gerror.Wrap(err, "读取介绍费频道规则失败")
+	accountID, botID, channelID := in.AccountId, in.BotId, canonicalCollectSourceChatID(in.ChannelId)
+	if in.Id > 0 {
+		row, queryErr := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Fields("account_id,bot_id,channel_id").Where("id", in.Id).Where("tenant_id", admin.TenantId).WhereNull("deleted_at").One()
+		if queryErr != nil {
+			return gerror.Wrap(queryErr, "读取介绍费频道规则失败")
+		}
+		if row.IsEmpty() {
+			return gerror.New("介绍费频道规则不存在")
+		}
+		accountID, botID, channelID = row["account_id"].Int64(), row["bot_id"].Int64(), row["channel_id"].String()
 	}
-	if row.IsEmpty() {
-		return gerror.New("介绍费频道规则不存在")
+	if accountID <= 0 || channelID == "" || !s.publishAccountBelongsToTenant(ctx, accountID, admin.TenantId) {
+		return gerror.New("采集账户或频道不存在")
 	}
-	_, err = g.DB().Model(publishCollectSourceTable).Ctx(ctx).Where("tenant_id", admin.TenantId).Where("bot_id", row["bot_id"].Int64()).WhereIn("source_chat_id", tgChannelCacheLookupIds(canonicalCollectSourceChatID(row["channel_id"].String()))).Data(g.Map{"channel_blacklisted": introFeeBoolToInt(in.Blacklisted != 0)}).Update()
+	mod := g.DB().Model(publishCollectSourceTable).Ctx(ctx).Where("tenant_id", admin.TenantId).Where("account_id", accountID).Where("bot_id", botID).WhereIn("source_chat_id", tgChannelCacheLookupIds(channelID))
+	_, err = mod.Data(g.Map{"channel_blacklisted": introFeeBoolToInt(in.Blacklisted != 0)}).Update()
+	if err == nil {
+		s.setCollectAccountChannelEnabled(ctx, admin.TenantId, accountID, channelID, in.Blacklisted == 0)
+		s.refreshCollectSourceCache(ctx)
+	}
 	return err
+}
+
+func (s *sSysPublish) setCollectAccountChannelEnabled(ctx context.Context, tenantID, accountID int64, chatID string, enabled bool) {
+	status := sysin.CollectAccountChannelDisabled
+	approval := "rejected"
+	if enabled {
+		status = sysin.CollectAccountChannelEnabled
+		approval = "approved"
+	}
+	var channel struct {
+		Id int64 `json:"id"`
+	}
+	if err := pdao.YoubanPublishCollectChannel.Ctx(ctx).Fields("id").Where("tenant_id", tenantID).WhereIn("telegram_chat_id", tgChannelCacheLookupIds(chatID)).Scan(&channel); err != nil || channel.Id <= 0 {
+		return
+	}
+	now := gtime.Now()
+	data := pdo.YoubanPublishCollectAccountChannel{TenantId: tenantID, AccountId: accountID, ChannelId: channel.Id, CollectEnabled: introFeeBoolToInt(enabled), Status: status, ApprovalStatus: approval}
+	if enabled {
+		data.ApprovedAt = now
+	} else {
+		data.DisabledAt = now
+	}
+	pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Data(data).OnConflict("tenant_id,account_id,channel_id").OnDuplicate("collect_enabled,status,approval_status,approved_at,disabled_at,updated_at").Save()
 }
 
 func introFeeBoolToInt(value bool) int {
