@@ -347,9 +347,10 @@ type CollectRuleSaveInp struct {
 
 type IntroFeeChannelRuleListInp struct {
 	form.PageReq
-	RuleId  int64  `json:"ruleId"`
-	BotId   int64  `json:"botId"`
-	Keyword string `json:"keyword"`
+	RuleId            int64  `json:"ruleId"`
+	BotId             int64  `json:"botId"`
+	Keyword           string `json:"keyword"`
+	IncludeCandidates bool   `json:"includeCandidates"`
 }
 type IntroFeeChannelRuleItem struct {
 	Id              int64       `json:"id"`
@@ -360,6 +361,7 @@ type IntroFeeChannelRuleItem struct {
 	ChannelUsername string      `json:"channelUsername"`
 	Suffix          string      `json:"suffix"`
 	Status          int         `json:"status"`
+	Configured      bool        `json:"configured"`
 	LastSeenAt      *gtime.Time `json:"lastSeenAt"`
 }
 type IntroFeeChannelRuleSaveInp struct {
@@ -372,9 +374,10 @@ type IntroFeeChannelRuleSaveInp struct {
 }
 type AdminIntroFeeChannelRuleListInp struct {
 	form.PageReq
-	BotId   int64  `json:"botId"`
-	RuleId  int64  `json:"ruleId"`
-	Keyword string `json:"keyword"`
+	BotId             int64  `json:"botId"`
+	RuleId            int64  `json:"ruleId"`
+	Keyword           string `json:"keyword"`
+	IncludeCandidates bool   `json:"includeCandidates"`
 }
 type AdminIntroFeeChannelRuleSaveInp struct {
 	Id        int64  `json:"id"`

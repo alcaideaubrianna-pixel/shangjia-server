@@ -75,12 +75,83 @@ func (s *sSysPublish) IntroFeeChannelRuleList(ctx context.Context, in *sysin.Int
 		return nil, 0, gerror.New("介绍费规则不存在或无权访问")
 	}
 	mod := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Where("tenant_id", account.TenantId).Where("rule_id", in.RuleId).Where("bot_id", in.BotId).WhereNull("deleted_at")
+	if in.IncludeCandidates {
+		return s.introFeeChannelRuleCandidates(ctx, account.TenantId, account.Id, in.RuleId, in.BotId, in.Keyword, in.Page, in.PerPage)
+	}
 	if kw := strings.TrimSpace(in.Keyword); kw != "" {
 		like := "%" + kw + "%"
 		mod = mod.Where("(channel_id LIKE ? OR channel_title LIKE ? OR channel_username LIKE ?)", like, like, like)
 	}
 	err = mod.Page(in.Page, in.PerPage).OrderDesc("updated_at").ScanAndCount(&list, &totalCount, false)
 	return
+}
+
+// introFeeChannelRuleCandidates combines configured rules with channels already
+// seen by this account/bot. It intentionally reads the compact source/cache
+// tables instead of scanning the message or event tables.
+func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantID, accountID, ruleID, botID int64, keyword string, page, perPage int) ([]*sysin.IntroFeeChannelRuleItem, int, error) {
+	if page <= 0 {
+		page = 1
+	}
+	if perPage <= 0 || perPage > 100 {
+		perPage = 20
+	}
+	configured := make([]*sysin.IntroFeeChannelRuleItem, 0)
+	if err := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Where("tenant_id", tenantID).Where("rule_id", ruleID).Where("bot_id", botID).WhereNull("deleted_at").OrderDesc("updated_at").Scan(&configured); err != nil {
+		return nil, 0, err
+	}
+	seen := make(map[string]struct{}, len(configured))
+	for _, row := range configured {
+		row.Configured = true
+		seen[canonicalCollectSourceChatID(row.ChannelId)] = struct{}{}
+	}
+	cacheModel := g.DB().Model(publishBotChannelCacheTable).Ctx(ctx).Where("tenant_id", tenantID)
+	if botID > 0 {
+		cacheModel = cacheModel.Where("bot_id", botID)
+	}
+	if botID == 0 {
+		cacheModel = cacheModel.WhereIn("chat_id", g.DB().Model(publishCollectSourceTable).Ctx(ctx).Fields("source_chat_id").Where("tenant_id", tenantID).Where("account_id", accountID).WhereNull("deleted_at"))
+	}
+	var candidates []struct {
+		ChatId       string      `orm:"chat_id"`
+		ChatTitle    string      `orm:"chat_title"`
+		ChatUsername string      `orm:"chat_username"`
+		LastSeenAt   *gtime.Time `orm:"last_message_at"`
+	}
+	if err := cacheModel.Fields("chat_id,chat_title,chat_username,last_message_at").OrderDesc("last_message_at").Scan(&candidates); err != nil {
+		return nil, 0, err
+	}
+	for _, candidate := range candidates {
+		id := canonicalCollectSourceChatID(candidate.ChatId)
+		if id == "" {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		configured = append(configured, &sysin.IntroFeeChannelRuleItem{RuleId: ruleID, BotId: botID, ChannelId: id, ChannelTitle: candidate.ChatTitle, ChannelUsername: candidate.ChatUsername, LastSeenAt: candidate.LastSeenAt, Configured: false})
+	}
+	if keyword = strings.TrimSpace(keyword); keyword != "" {
+		filtered := configured[:0]
+		lower := strings.ToLower(keyword)
+		for _, row := range configured {
+			if strings.Contains(strings.ToLower(row.ChannelId+row.ChannelTitle+row.ChannelUsername), lower) {
+				filtered = append(filtered, row)
+			}
+		}
+		configured = filtered
+	}
+	total := len(configured)
+	start := (page - 1) * perPage
+	if start >= total {
+		return []*sysin.IntroFeeChannelRuleItem{}, total, nil
+	}
+	end := start + perPage
+	if end > total {
+		end = total
+	}
+	return configured[start:end], total, nil
 }
 
 func (s *sSysPublish) IntroFeeChannelRuleSave(ctx context.Context, in *sysin.IntroFeeChannelRuleSaveInp) (int64, error) {
@@ -151,6 +222,9 @@ func (s *sSysPublish) AdminIntroFeeChannelRuleList(ctx context.Context, in *sysi
 		in = &sysin.AdminIntroFeeChannelRuleListInp{}
 	}
 	mod := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Where("tenant_id", admin.TenantId).Where("bot_id", in.BotId).Where("rule_id", in.RuleId).WhereNull("deleted_at")
+	if in.IncludeCandidates {
+		return s.introFeeChannelRuleCandidates(ctx, admin.TenantId, 0, in.RuleId, in.BotId, in.Keyword, in.Page, in.PerPage)
+	}
 	if kw := strings.TrimSpace(in.Keyword); kw != "" {
 		like := "%" + kw + "%"
 		mod = mod.Where("(channel_id LIKE ? OR channel_title LIKE ? OR channel_username LIKE ?)", like, like, like)
