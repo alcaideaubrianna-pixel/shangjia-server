@@ -293,7 +293,7 @@ func (s *sSysPublish) prepareCollectMaterialSnapshot(ctx context.Context, event 
 				}
 				assets = &mediaAssetMetadata{
 					PerceptualHash:    cacheState.Entry.PHash,
-					PosterURL:         firstNonEmpty(cacheState.Entry.PosterURL, cacheState.Entry.PosterStoragePath),
+					PosterURL:         cacheState.Entry.PosterURL,
 					PosterStoragePath: cacheState.Entry.PosterStoragePath,
 				}
 			}

@@ -1082,7 +1082,7 @@ func (s *sSysPublish) downloadBotTelegramMediaWithToken(ctx context.Context, bot
 		item.SourceSize = mediaSize
 		item.SourceMimeType = mimeType
 		item.FilePhash = cached.PHash
-		item.PosterUrl = firstNonEmpty(cached.PosterURL, cached.PosterStoragePath)
+		item.PosterUrl = cached.PosterURL
 		return &collectDownloadedMedia{FileUrl: item.FileUrl, Path: item.StoragePath, Item: item}, nil
 	}
 	attachment, err := s.uploadCollectMediaToStorage(ctx, item.Type, path)
