@@ -16,13 +16,17 @@ func (s *sSysPublish) prepareRelayMedia(ctx context.Context, media *telegramMedi
 	if err != nil || token == "" {
 		return nil, err
 	}
+	markRelayChannelUse(ctx, channel.Id, 1)
+	defer markRelayChannelUse(ctx, channel.Id, -1)
 	client, err := s.TelegramClient(ctx, channel.TgAccountId)
 	if err != nil {
+		markRelayChannelFailure(ctx, channel.Id, err, time.Minute)
 		_ = failRelayMedia(ctx, media.TenantId, media.Id, purpose, "original", token, err)
 		return nil, err
 	}
 	peer, err := s.collectMediaInputPeer(ctx, media.TenantId, channel.TgAccountId, client, channel.TargetChatId)
 	if err != nil {
+		markRelayChannelFailure(ctx, channel.Id, err, time.Minute)
 		_ = failRelayMedia(ctx, media.TenantId, media.Id, purpose, "original", token, err)
 		return nil, err
 	}
@@ -34,6 +38,7 @@ func (s *sSysPublish) prepareRelayMedia(ctx context.Context, media *telegramMedi
 		if err == nil {
 			err = gerror.New("relay 上传未返回消息")
 		}
+		markRelayChannelFailure(ctx, channel.Id, err, time.Minute)
 		_ = failRelayMedia(ctx, media.TenantId, media.Id, purpose, "original", token, err)
 		return nil, err
 	}

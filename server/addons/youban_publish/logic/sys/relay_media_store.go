@@ -100,3 +100,14 @@ func markRelayChannelUse(ctx context.Context, id int64, delta int) {
 	}
 	_, _ = g.DB().Model("hg_youban_publish_relay_channel").Ctx(ctx).WherePri(id).Data(g.Map{"in_flight_count": current, "last_used_at": time.Now()}).Update()
 }
+
+func markRelayChannelFailure(ctx context.Context, id int64, cause error, cooldown time.Duration) {
+	if id <= 0 || cause == nil {
+		return
+	}
+	status := relayChannelHealthError
+	if cooldown > 0 {
+		status = relayChannelHealthCooldown
+	}
+	_, _ = g.DB().Model("hg_youban_publish_relay_channel").Ctx(ctx).WherePri(id).Data(g.Map{"health_status": status, "cooldown_until": time.Now().Add(cooldown), "last_error": cause.Error(), "updated_at": time.Now()}).Update()
+}
