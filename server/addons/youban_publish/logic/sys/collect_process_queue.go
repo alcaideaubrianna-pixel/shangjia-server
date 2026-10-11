@@ -310,7 +310,7 @@ func nextCollectProcessDelay(ctx context.Context, payload collectProcessQueuePay
 	due, err := dueModel.
 		Fields("e.id").
 		WhereIn("e.status", statuses).
-		Where("e.material_role IS NULL OR e.material_role = '' OR e.material_role IN (?,?) OR (e.status = ? AND e.material_role = ? AND e.error_message = ?)", collectMaterialRolePending, collectMaterialRoleDisplay, sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage).
+		Where("((e.status <> ? AND (e.material_role IS NULL OR e.material_role = '' OR e.material_role IN (?,?))) OR (e.status = ? AND e.material_role = ? AND e.error_message = ?))", sysin.CollectEventStatusIgnored, collectMaterialRolePending, collectMaterialRoleDisplay, sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage).
 		Where("(e.processed_at IS NULL AND (e.material_group_status IS NULL OR e.material_group_status <> ?) AND e.created_at <= ?) OR (e.processed_at IS NULL AND e.material_group_status = ? AND e.updated_at <= ?) OR (e.status = ? AND e.material_role = ? AND e.error_message = ? AND e.updated_at <= ?)", collectMaterialGroupWaitingVerify, groupDeadline, collectMaterialGroupWaitingVerify, waitingVerifyDeadline, sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage, verifyDeadline).
 		Limit(1).
 		One()
@@ -323,7 +323,7 @@ func nextCollectProcessDelay(ctx context.Context, payload collectProcessQueuePay
 	normal, err := collectProcessEventModel(ctx, payload).
 		Fields("e.created_at AS ready_from").
 		WhereIn("e.status", statuses).
-		Where("e.material_role IS NULL OR e.material_role = '' OR e.material_role = ?", collectMaterialRolePending).
+		Where("e.status <> ? AND (e.material_role IS NULL OR e.material_role = '' OR e.material_role = ?)", sysin.CollectEventStatusIgnored, collectMaterialRolePending).
 		Where("e.material_group_status IS NULL OR e.material_group_status <> ?", collectMaterialGroupWaitingVerify).
 		WhereNull("e.processed_at").
 		OrderAsc("e.created_at").

@@ -41,7 +41,10 @@ func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload co
 	now := gtime.Now()
 	eventModel := collectProcessEventModel(ctx, payload).
 		WhereIn("e.status", collectProcessWindowStatuses()).
-		Where("e.material_role IS NULL OR e.material_role = '' OR e.material_role IN (?,?) OR (e.status = ? AND e.material_role = ? AND e.error_message = ?)", collectMaterialRolePending, collectMaterialRoleDisplay, sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage).
+		// Ignored events are terminal and must never re-enter the normal window.
+		// Only an ignored verify event with the explicit unmatched marker remains
+		// eligible for the bounded verification retry path.
+		Where("((e.status <> ? AND (e.material_role IS NULL OR e.material_role = '' OR e.material_role IN (?,?))) OR (e.status = ? AND e.material_role = ? AND e.error_message = ?))", sysin.CollectEventStatusIgnored, collectMaterialRolePending, collectMaterialRoleDisplay, sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage).
 		Where("(e.processed_at IS NULL AND (e.material_group_status IS NULL OR e.material_group_status <> ? OR e.updated_at <= ?)) OR (e.status = ? AND e.material_role = ? AND e.error_message = ? AND e.updated_at <= ?)", collectMaterialGroupWaitingVerify, now.Add(-collectMaterialWaitingVerifyRetryDelay), sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage, now.Add(-collectMaterialVerifyRetryDelay))
 	if payload.EventId > 0 {
 		eventModel = eventModel.Where("e.id", payload.EventId)
