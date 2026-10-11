@@ -12,7 +12,6 @@ import (
 
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
-	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -43,8 +42,11 @@ func (h *publishCollectorAccountTaskHandler) HandleAccountTaskCompletion(ctx con
 		return nil
 	}
 	mediaCols := pdao.YoubanPublishCollectEventMedia.Columns()
-	var mediaRow gdb.Record
-	if err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).Fields(mediaCols.EventId).Where(mediaCols.Id, mediaID).Scan(&mediaRow); err != nil {
+	mediaRow, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
+		Fields(mediaCols.EventId).
+		Where(mediaCols.Id, mediaID).
+		One()
+	if err != nil {
 		return gerror.Wrapf(err, "读取异步账号媒体归属事件失败 mediaId:%d", mediaID)
 	}
 	if mediaRow.IsEmpty() {
@@ -67,6 +69,12 @@ func (h *publishCollectorAccountTaskHandler) HandleAccountTaskCompletion(ctx con
 		"source_file_reference": result.Media.SourceFileReference, "source_thumb_size": result.Media.SourceThumbSize,
 		"source_mime_type": result.Media.SourceMimeType, "source_dc_id": result.Media.SourceDCID,
 		"source_size": result.Media.SourceSize, "error_message": "", "updated_at": gtime.Now(),
+	}
+	if posterURL := strings.TrimSpace(result.PosterURL); posterURL != "" {
+		data["poster_url"] = posterURL
+	}
+	if posterPath := normalizeStoredMediaPath(result.PosterPath); posterPath != "" {
+		data["poster_storage_path"] = posterPath
 	}
 	if _, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).Where(mediaCols.Id, mediaID).Update(data); err != nil {
 		return gerror.Wrapf(err, "异步账号媒体结果回写失败 mediaId:%d", mediaID)
@@ -709,8 +717,8 @@ func (p *publishCollectorAccountMediaProvider) StoreMedia(ctx context.Context, t
 		task.Media.FileMD5 = md5Value
 		task.Media.SourceSize = mediaSize
 		task.Media.FilePHash = cached.PHash
-		task.Media.PosterURL = firstNonEmpty(cached.PosterURL, cached.PosterStoragePath)
-		return &collectorin.AccountMediaDownloadResult{FileURL: task.Media.FileURL, StoragePath: task.Media.StoragePath, Media: task.Media}, nil
+		task.Media.PosterURL = cached.PosterURL
+		return &collectorin.AccountMediaDownloadResult{FileURL: task.Media.FileURL, StoragePath: task.Media.StoragePath, PosterURL: cached.PosterURL, PosterPath: cached.PosterStoragePath, Media: task.Media}, nil
 	}
 	attachment, err := p.publish.uploadCollectMediaToStorage(ctx, task.Media.Type, localPath)
 	if err != nil {
@@ -725,6 +733,27 @@ func (p *publishCollectorAccountMediaProvider) StoreMedia(ctx context.Context, t
 	return &collectorin.AccountMediaDownloadResult{
 		AttachmentID: attachment.Id, FileURL: item.FileURL, StoragePath: item.StoragePath, Media: item,
 	}, nil
+}
+
+func (p *publishCollectorAccountMediaProvider) StoreMediaPoster(ctx context.Context, task *collectorin.AccountTask, localPath string) (string, string, error) {
+	if p == nil || p.publish == nil || task == nil {
+		return "", "", gerror.New("Telegram账号媒体封面存储参数无效")
+	}
+	ctx = collectMediaRuntimeContext(ctx, task.MediaOwnerAccountID)
+	md5Value, mediaSize, mimeType, err := calculateTelegramMediaFingerprint(localPath, "image", "image/jpeg")
+	if err != nil {
+		return "", "", err
+	}
+	if cached, ok, cacheErr := lookupTelegramCollectorMediaCache(ctx, "image", md5Value, mediaSize, mimeType); cacheErr != nil {
+		return "", "", cacheErr
+	} else if ok {
+		return telegramCollectorMediaCacheURL(cached), normalizeStoredMediaPath(cached.StoragePath), nil
+	}
+	attachment, err := p.publish.uploadCollectMediaToStorage(ctx, "image", localPath)
+	if err != nil {
+		return "", "", err
+	}
+	return strings.TrimSpace(attachment.FileUrl), normalizeStoredMediaPath(attachment.Path), nil
 }
 
 func collectorMediaItemFromCollect(item collectMediaItem) collectorin.CollectorMediaItem {

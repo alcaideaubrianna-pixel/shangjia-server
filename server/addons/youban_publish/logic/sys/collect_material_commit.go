@@ -293,7 +293,7 @@ func (s *sSysPublish) prepareCollectMaterialSnapshot(ctx context.Context, event 
 				}
 				assets = &mediaAssetMetadata{
 					PerceptualHash:    cacheState.Entry.PHash,
-					PosterURL:         firstNonEmpty(cacheState.Entry.PosterURL, cacheState.Entry.PosterStoragePath),
+					PosterURL:         cacheState.Entry.PosterURL,
 					PosterStoragePath: cacheState.Entry.PosterStoragePath,
 				}
 			}
@@ -376,12 +376,6 @@ func (s *sSysPublish) prepareCollectMaterialSnapshot(ctx context.Context, event 
 }
 
 func validatePreparedCollectMedia(media collectPreparedMedia) error {
-	if !strings.EqualFold(strings.TrimSpace(media.MediaType), "video") {
-		return nil
-	}
-	if strings.TrimSpace(media.PosterURL) == "" && strings.TrimSpace(media.PosterStoragePath) == "" {
-		return gerror.New("采集视频预览图尚未生成，等待媒体处理完成")
-	}
 	return nil
 }
 

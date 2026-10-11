@@ -289,6 +289,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_import_run_log" (
   "created_at" timestamp DEFAULT NULL
 );
 CREATE INDEX IF NOT EXISTS "idx_ybp_import_run_log_run" ON "hg_youban_publish_import_run_log" ("run_id", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_import_run_log_created" ON "hg_youban_publish_import_run_log" ("created_at", "id");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_material_import_task" (
   "id" BIGSERIAL PRIMARY KEY,
@@ -369,6 +370,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_material_import_group_media" (
   "file_url" varchar(1024) NOT NULL DEFAULT '',
   "storage_path" varchar(1024) NOT NULL DEFAULT '',
   "poster_url" varchar(1024) NOT NULL DEFAULT '',
+  "poster_storage_path" varchar(1024) NOT NULL DEFAULT '',
   "source_kind" varchar(32) NOT NULL DEFAULT '',
   "source_media_id" bigint NOT NULL DEFAULT 0,
   "source_access_hash" bigint NOT NULL DEFAULT 0,
@@ -1478,6 +1480,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_event_log" (
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_log_event" ON "hg_youban_publish_collect_event_log" ("event_id", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_log_owner" ON "hg_youban_publish_collect_event_log" ("tenant_id", "account_id", "created_at");
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_log_stage" ON "hg_youban_publish_collect_event_log" ("event_id", "stage", "status");
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_log_created" ON "hg_youban_publish_collect_event_log" ("created_at", "id");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_content" (
   "id" BIGSERIAL PRIMARY KEY,
@@ -1633,6 +1636,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_history_log" (
   "created_at" timestamp DEFAULT NULL
 );
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_history_log_task" ON "hg_youban_publish_collect_history_log" ("task_id", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_history_log_created" ON "hg_youban_publish_collect_history_log" ("created_at", "id");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_account_follow" (
   "id" BIGSERIAL PRIMARY KEY,
@@ -1708,6 +1712,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_cycle_run_log" (
 );
 ALTER TABLE IF EXISTS "hg_youban_publish_cycle_run_log" ADD COLUMN IF NOT EXISTS "channel_id" bigint NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS "idx_ybp_cycle_run_log_run" ON "hg_youban_publish_cycle_run_log" ("run_id", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_cycle_run_log_created" ON "hg_youban_publish_cycle_run_log" ("created_at", "id");
 DELETE FROM "hg_youban_publish_cycle_run_log";
 DELETE FROM "hg_youban_publish_cycle_run";
 DROP TABLE IF EXISTS "hg_youban_publish_cycle_plan";
@@ -2131,6 +2136,19 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_image_quota_ledger" (
   UNIQUE ("reference_key")
 );
 CREATE INDEX IF NOT EXISTS "idx_ybp_image_quota_ledger_tenant" ON "hg_youban_publish_image_quota_ledger" ("tenant_id", "id");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_relay_media" (
+  "id" BIGSERIAL PRIMARY KEY, "tenant_id" bigint NOT NULL DEFAULT 0, "media_id" bigint NOT NULL DEFAULT 0,
+  "profile_id" bigint NOT NULL DEFAULT 0, "purpose" varchar(16) NOT NULL DEFAULT 'display',
+  "media_version" varchar(128) NOT NULL DEFAULT '', "relay_channel_id" bigint NOT NULL DEFAULT 0,
+  "relay_chat_id" varchar(128) NOT NULL DEFAULT '', "message_id" bigint NOT NULL DEFAULT 0,
+  "file_id" varchar(1024) NOT NULL DEFAULT '', "status" varchar(16) NOT NULL DEFAULT 'uploading',
+  "lease_token" varchar(128) NOT NULL DEFAULT '', "lease_until" timestamp DEFAULT NULL,
+  "last_error" text, "expires_at" timestamp DEFAULT NULL, "created_at" timestamp DEFAULT NULL, "updated_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_relay_media_key" ON "hg_youban_publish_relay_media" ("tenant_id", "media_id", "purpose", "media_version");
+CREATE INDEX IF NOT EXISTS "idx_ybp_relay_media_ready" ON "hg_youban_publish_relay_media" ("tenant_id", "media_id", "purpose", "status");
+CREATE INDEX IF NOT EXISTS "idx_ybp_relay_media_lease" ON "hg_youban_publish_relay_media" ("status", "lease_until", "id");
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "anti_scan_mode" varchar(32) NOT NULL DEFAULT 'lightweight';
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "anti_scan_background_url" varchar(1024) NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "anti_scan_background_name" varchar(255) NOT NULL DEFAULT '';

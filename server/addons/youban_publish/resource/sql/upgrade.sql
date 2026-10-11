@@ -20,6 +20,9 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_material_import_group_media` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴TG资料导入分组媒体';
 
 ALTER TABLE `hg_youban_publish_collect_event_media`
+  ADD COLUMN IF NOT EXISTS `poster_storage_path` varchar(1024) NOT NULL DEFAULT '' COMMENT '封面存储路径' AFTER `poster_url`;
+
+ALTER TABLE `hg_youban_publish_collect_event_media`
   ADD COLUMN `source_kind` varchar(32) NOT NULL DEFAULT '' COMMENT 'TG来源媒体类型' AFTER `poster_url`,
   ADD COLUMN `source_media_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'TG媒体ID' AFTER `source_kind`,
   ADD COLUMN `source_access_hash` bigint(20) NOT NULL DEFAULT '0' COMMENT 'TG媒体访问哈希' AFTER `source_media_id`,
@@ -921,3 +924,17 @@ ALTER TABLE `hg_youban_publish_collect_dispatch` ADD COLUMN IF NOT EXISTS `sourc
 ALTER TABLE `hg_youban_publish_collect_dispatch` ADD COLUMN IF NOT EXISTS `source_username_snapshot` varchar(128) NOT NULL DEFAULT '';
 ALTER TABLE `hg_youban_publish_collect_dispatch` ADD COLUMN IF NOT EXISTS `source_chat_id_snapshot` varchar(128) NOT NULL DEFAULT '';
 ALTER TABLE `hg_youban_publish_collect_dispatch` ADD COLUMN IF NOT EXISTS `source_message_id_snapshot` bigint(20) NOT NULL DEFAULT '0';
+
+-- Relay media cache: Telegram messages uploaded once and copied to publish targets.
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_relay_media` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0', `media_id` bigint(20) NOT NULL DEFAULT '0',
+  `profile_id` bigint(20) NOT NULL DEFAULT '0', `purpose` varchar(16) NOT NULL DEFAULT 'display',
+  `media_version` varchar(128) NOT NULL DEFAULT '', `relay_channel_id` bigint(20) NOT NULL DEFAULT '0',
+  `relay_chat_id` varchar(128) NOT NULL DEFAULT '', `message_id` bigint(20) NOT NULL DEFAULT '0',
+  `file_id` varchar(1024) NOT NULL DEFAULT '', `status` varchar(16) NOT NULL DEFAULT 'uploading',
+  `lease_token` varchar(128) NOT NULL DEFAULT '', `lease_until` datetime DEFAULT NULL,
+  `last_error` text, `expires_at` datetime DEFAULT NULL, `created_at` datetime DEFAULT NULL, `updated_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`), UNIQUE KEY `uk_ybp_relay_media_key` (`tenant_id`,`media_id`,`purpose`,`media_version`),
+  KEY `idx_ybp_relay_media_ready` (`tenant_id`,`media_id`,`purpose`,`status`), KEY `idx_ybp_relay_media_lease` (`status`,`lease_until`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Telegram中转媒体索引';

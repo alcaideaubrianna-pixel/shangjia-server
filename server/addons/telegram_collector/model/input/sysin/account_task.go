@@ -72,6 +72,8 @@ type AccountMediaDownloadResult struct {
 	AttachmentID int64              `json:"attachmentId,omitempty"`
 	FileURL      string             `json:"fileUrl,omitempty"`
 	StoragePath  string             `json:"storagePath,omitempty"`
+	PosterURL    string             `json:"posterUrl,omitempty"`
+	PosterPath   string             `json:"posterPath,omitempty"`
 	Media        CollectorMediaItem `json:"media"`
 	ErrorCode    string             `json:"errorCode,omitempty"`
 	ErrorMessage string             `json:"errorMessage,omitempty"`

@@ -184,6 +184,10 @@ func accountMessageMedia(message *tg.Message, chatID string) []sysin.CollectorMe
 		item.SourceMimeType = document.MimeType
 		item.SourceDCID = document.DCID
 		item.SourceSize = document.Size
+		// Telegram stores video thumbnails on the document. Preserve the
+		// largest size so downstream consumers can request the native thumb
+		// instead of having to generate one from the video.
+		item.SourceThumbSize = accountLargestDocumentThumbSizeType(document)
 		if value.Video || value.Round || strings.HasPrefix(strings.ToLower(strings.TrimSpace(document.MimeType)), "video/") {
 			item.Type = sysin.MediaKindVideo
 		}
@@ -191,6 +195,21 @@ func accountMessageMedia(message *tg.Message, chatID string) []sysin.CollectorMe
 		return nil
 	}
 	return []sysin.CollectorMediaItem{item}
+}
+
+func accountLargestDocumentThumbSizeType(document *tg.Document) string {
+	if document == nil || len(document.Thumbs) == 0 {
+		return ""
+	}
+	bestType := ""
+	bestScore := -1
+	for _, item := range document.Thumbs {
+		sizeType, score := accountPhotoSizeScore(item)
+		if sizeType != "" && score >= bestScore {
+			bestType, bestScore = sizeType, score
+		}
+	}
+	return bestType
 }
 
 func accountLargestPhotoSizeType(photo *tg.Photo) string {

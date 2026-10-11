@@ -21,62 +21,94 @@ type YoubanPublishCollectEventMediaDao struct {
 
 // YoubanPublishCollectEventMediaColumns defines and stores column names for the table hg_youban_publish_collect_event_media.
 type YoubanPublishCollectEventMediaColumns struct {
-	Id               string //
-	TenantId         string //
-	AccountId        string //
-	SourceId         string //
-	SourceType       string //
-	EventId          string //
-	SourceChatId     string //
-	SourceMessageId  string //
-	SourceGroupedId  string //
-	SourceMediaKey   string //
-	MediaType        string //
-	SourceRefType    string //
-	SourceFileId     string //
-	SourceMessageRef string //
-	BackupChannelId  string //
-	BackupChatId     string //
-	BackupMessageId  string //
-	FileUrl          string //
-	StoragePath      string //
-	PosterUrl        string //
-	MetaJson         string //
-	SortIndex        string //
-	CacheStatus      string //
-	ErrorMessage     string //
-	CreatedAt        string //
-	UpdatedAt        string //
+	Id                  string //
+	TenantId            string //
+	AccountId           string //
+	SourceId            string //
+	SourceType          string //
+	EventId             string //
+	SourceChatId        string //
+	SourceMessageId     string //
+	SourceGroupedId     string //
+	SourceMediaKey      string //
+	MediaType           string //
+	SourceRefType       string //
+	SourceFileId        string //
+	SourceMessageRef    string //
+	BackupChannelId     string //
+	BackupChatId        string //
+	BackupMessageId     string //
+	FileUrl             string //
+	StoragePath         string //
+	PosterUrl           string //
+	SourceKind          string //
+	SourceMediaId       string //
+	SourceAccessHash    string //
+	SourceFileReference string //
+	SourceThumbSize     string //
+	SourceMimeType      string //
+	SourceDcId          string //
+	SourceSize          string //
+	FileMd5             string //
+	FilePhash           string //
+	MetaJson            string //
+	SortIndex           string //
+	CacheStatus         string //
+	DownloadDurationMs  string //
+	DownloadBytes       string //
+	DownloadAttempts    string //
+	CacheHit            string //
+	DownloadErrorType   string //
+	NextRetryAt         string //
+	ErrorMessage        string //
+	CreatedAt           string //
+	UpdatedAt           string //
 }
 
 // youbanPublishCollectEventMediaColumns holds the columns for the table hg_youban_publish_collect_event_media.
 var youbanPublishCollectEventMediaColumns = YoubanPublishCollectEventMediaColumns{
-	Id:               "id",
-	TenantId:         "tenant_id",
-	AccountId:        "account_id",
-	SourceId:         "source_id",
-	SourceType:       "source_type",
-	EventId:          "event_id",
-	SourceChatId:     "source_chat_id",
-	SourceMessageId:  "source_message_id",
-	SourceGroupedId:  "source_grouped_id",
-	SourceMediaKey:   "source_media_key",
-	MediaType:        "media_type",
-	SourceRefType:    "source_ref_type",
-	SourceFileId:     "source_file_id",
-	SourceMessageRef: "source_message_ref",
-	BackupChannelId:  "backup_channel_id",
-	BackupChatId:     "backup_chat_id",
-	BackupMessageId:  "backup_message_id",
-	FileUrl:          "file_url",
-	StoragePath:      "storage_path",
-	PosterUrl:        "poster_url",
-	MetaJson:         "meta_json",
-	SortIndex:        "sort_index",
-	CacheStatus:      "cache_status",
-	ErrorMessage:     "error_message",
-	CreatedAt:        "created_at",
-	UpdatedAt:        "updated_at",
+	Id:                  "id",
+	TenantId:            "tenant_id",
+	AccountId:           "account_id",
+	SourceId:            "source_id",
+	SourceType:          "source_type",
+	EventId:             "event_id",
+	SourceChatId:        "source_chat_id",
+	SourceMessageId:     "source_message_id",
+	SourceGroupedId:     "source_grouped_id",
+	SourceMediaKey:      "source_media_key",
+	MediaType:           "media_type",
+	SourceRefType:       "source_ref_type",
+	SourceFileId:        "source_file_id",
+	SourceMessageRef:    "source_message_ref",
+	BackupChannelId:     "backup_channel_id",
+	BackupChatId:        "backup_chat_id",
+	BackupMessageId:     "backup_message_id",
+	FileUrl:             "file_url",
+	StoragePath:         "storage_path",
+	PosterUrl:           "poster_url",
+	SourceKind:          "source_kind",
+	SourceMediaId:       "source_media_id",
+	SourceAccessHash:    "source_access_hash",
+	SourceFileReference: "source_file_reference",
+	SourceThumbSize:     "source_thumb_size",
+	SourceMimeType:      "source_mime_type",
+	SourceDcId:          "source_dc_id",
+	SourceSize:          "source_size",
+	FileMd5:             "file_md5",
+	FilePhash:           "file_phash",
+	MetaJson:            "meta_json",
+	SortIndex:           "sort_index",
+	CacheStatus:         "cache_status",
+	DownloadDurationMs:  "download_duration_ms",
+	DownloadBytes:       "download_bytes",
+	DownloadAttempts:    "download_attempts",
+	CacheHit:            "cache_hit",
+	DownloadErrorType:   "download_error_type",
+	NextRetryAt:         "next_retry_at",
+	ErrorMessage:        "error_message",
+	CreatedAt:           "created_at",
+	UpdatedAt:           "updated_at",
 }
 
 // NewYoubanPublishCollectEventMediaDao creates and returns a new DAO object for table data access.
