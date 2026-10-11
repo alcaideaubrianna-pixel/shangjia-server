@@ -12,6 +12,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gcmd"
 	"github.com/gogf/gf/v2/os/gres"
+	publishservice "hotgo/addons/youban_publish/service"
 	"hotgo/internal/library/casbin"
 	"hotgo/internal/model/input/sysin"
 	"hotgo/internal/service"
@@ -41,6 +42,8 @@ var (
 				err = handleCasbin(ctx, args)
 			case "content":
 				err = handleContent(ctx, args)
+			case "collectSourceBackfill":
+				err = handleCollectSourceBackfill(ctx, args)
 			case "gres":
 				err = handleGRes(ctx, args)
 			default:
@@ -73,6 +76,23 @@ func handleCasbin(ctx context.Context, args map[string]string) (err error) {
 		err = gerror.Newf("casbin a1 is invalid, a1:%v", a1)
 	}
 	return
+}
+
+func handleCollectSourceBackfill(ctx context.Context, args map[string]string) error {
+	lastID := g.NewVar(args["lastId"]).Int64()
+	batchSize := g.NewVar(args["batchSize"]).Int()
+	if batchSize <= 0 {
+		batchSize = 500
+	}
+	if batchSize > 2000 {
+		return gerror.New("collectSourceBackfill batchSize cannot exceed 2000")
+	}
+	scanned, updated, nextID, err := publishservice.SysPublish().BackfillCollectedSourceMetadata(ctx, lastID, batchSize)
+	if err != nil {
+		return err
+	}
+	g.Log().Infof(ctx, "collect source metadata backfill done scanned:%d updated:%d nextId:%d", scanned, updated, nextID)
+	return nil
 }
 
 func handleContent(ctx context.Context, args map[string]string) (err error) {
