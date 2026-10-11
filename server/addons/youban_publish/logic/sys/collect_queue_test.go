@@ -150,7 +150,7 @@ func TestFairCollectMediaQueuePayloadsRoundRobinsAccounts(t *testing.T) {
 	}
 }
 
-func TestCollectProcessTaskBodyIsSourceScoped(t *testing.T) {
+func TestCollectProcessTaskBodyPreservesEvent(t *testing.T) {
 	first, err := collectProcessTaskBody(collectProcessQueuePayload{TenantId: 2, AccountId: 3, SourceId: 4, EventId: 100})
 	if err != nil {
 		t.Fatalf("marshal first payload: %v", err)
@@ -159,14 +159,14 @@ func TestCollectProcessTaskBodyIsSourceScoped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal second payload: %v", err)
 	}
-	if string(first) != string(second) {
-		t.Fatalf("source task payload must ignore event id: %s != %s", first, second)
+	if string(first) == string(second) {
+		t.Fatalf("event tasks must keep independent payloads: %s == %s", first, second)
 	}
 	var payload collectProcessQueuePayload
 	if err = json.Unmarshal(first, &payload); err != nil {
 		t.Fatalf("decode payload: %v", err)
 	}
-	if payload.EventId != 0 || payload.SourceId != 4 {
+	if payload.EventId != 100 || payload.SourceId != 4 {
 		t.Fatalf("unexpected normalized payload: %+v", payload)
 	}
 }
@@ -182,7 +182,7 @@ func TestCollectProcessTaskBodyPreservesSourceChat(t *testing.T) {
 	if err = json.Unmarshal(body, &payload); err != nil {
 		t.Fatalf("decode payload: %v", err)
 	}
-	if payload.EventId != 0 || payload.SourceChatId != "-1003981090528" {
+	if payload.EventId != 100 || payload.SourceChatId != "-1003981090528" {
 		t.Fatalf("unexpected normalized payload: %+v", payload)
 	}
 }
@@ -192,6 +192,14 @@ func TestCollectProcessScheduleKeyIsSourceScoped(t *testing.T) {
 	second := collectProcessScheduleKey(collectProcessQueuePayload{TenantId: 2, AccountId: 3, SourceId: 5})
 	if first == second || first != "youban_publish:collect:process:schedule:2:3:4" {
 		t.Fatalf("unexpected schedule keys: %s %s", first, second)
+	}
+}
+
+func TestCollectProcessScheduleKeyIsEventScoped(t *testing.T) {
+	first := collectProcessScheduleKey(collectProcessQueuePayload{TenantId: 2, AccountId: 3, SourceId: 4, EventId: 100})
+	second := collectProcessScheduleKey(collectProcessQueuePayload{TenantId: 2, AccountId: 3, SourceId: 4, EventId: 200})
+	if first == second || first != "youban_publish:collect:process:schedule:2:3:event:100" {
+		t.Fatalf("unexpected event schedule keys: %s %s", first, second)
 	}
 }
 

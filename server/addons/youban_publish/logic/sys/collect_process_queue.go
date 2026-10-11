@@ -111,6 +111,9 @@ func (s *sSysPublish) enqueueCollectProcessTask(ctx context.Context, payload col
 }
 
 func collectProcessScheduleKey(payload collectProcessQueuePayload) string {
+	if payload.EventId > 0 {
+		return fmt.Sprintf("%s%d:%d:event:%d", publishconsts.CollectProcessScheduleKeyPrefix, payload.TenantId, payload.AccountId, payload.EventId)
+	}
 	return fmt.Sprintf("%s%d:%d:%s", publishconsts.CollectProcessScheduleKeyPrefix, payload.TenantId, payload.AccountId, collectProcessPartition(payload))
 }
 
@@ -201,6 +204,7 @@ func collectProcessTaskBody(payload collectProcessQueuePayload) ([]byte, error) 
 	return json.Marshal(collectProcessQueuePayload{
 		TenantId:     payload.TenantId,
 		AccountId:    payload.AccountId,
+		EventId:      payload.EventId,
 		SourceId:     payload.SourceId,
 		SourceChatId: payload.SourceChatId,
 	})
@@ -260,6 +264,16 @@ func (s *sSysPublish) processCollectSourceTask(ctx context.Context, payload coll
 		return 0, false, false, err
 	}
 	if !enabled {
+		return 0, false, true, nil
+	}
+	if payload.EventId > 0 {
+		if err = s.processCollectSourceWindow(ctx, payload); err != nil {
+			var retryErr *collectProcessRetryError
+			if errors.As(err, &retryErr) {
+				return retryErr.delay, true, false, nil
+			}
+			return 0, false, false, err
+		}
 		return 0, false, true, nil
 	}
 	reserved, err := reserveCollectProcessExecution(ctx, payload)

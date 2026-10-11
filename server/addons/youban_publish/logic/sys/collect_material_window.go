@@ -39,10 +39,14 @@ func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload co
 	}
 	batchSize := collectMaterialWindowBatchSize(ctx)
 	now := gtime.Now()
-	rows, err := collectProcessEventModel(ctx, payload).
+	eventModel := collectProcessEventModel(ctx, payload).
 		WhereIn("e.status", collectProcessWindowStatuses()).
 		Where("e.material_role IS NULL OR e.material_role = '' OR e.material_role IN (?,?) OR (e.status = ? AND e.material_role = ? AND e.error_message = ?)", collectMaterialRolePending, collectMaterialRoleDisplay, sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage).
-		Where("(e.processed_at IS NULL AND (e.material_group_status IS NULL OR e.material_group_status <> ? OR e.updated_at <= ?)) OR (e.status = ? AND e.material_role = ? AND e.error_message = ? AND e.updated_at <= ?)", collectMaterialGroupWaitingVerify, now.Add(-collectMaterialWaitingVerifyRetryDelay), sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage, now.Add(-collectMaterialVerifyRetryDelay)).
+		Where("(e.processed_at IS NULL AND (e.material_group_status IS NULL OR e.material_group_status <> ? OR e.updated_at <= ?)) OR (e.status = ? AND e.material_role = ? AND e.error_message = ? AND e.updated_at <= ?)", collectMaterialGroupWaitingVerify, now.Add(-collectMaterialWaitingVerifyRetryDelay), sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage, now.Add(-collectMaterialVerifyRetryDelay))
+	if payload.EventId > 0 {
+		eventModel = eventModel.Where("e.id", payload.EventId)
+	}
+	rows, err := eventModel.
 		OrderAsc("e.source_chat_id").
 		OrderAsc("e.source_message_id").
 		OrderAsc("e.id").
