@@ -938,12 +938,9 @@ func (s *sSysPublish) downloadTelegramMedia(ctx context.Context, tenantId int64,
 		TaskKey: accountMediaDownloadTaskKey(tgAccountId, mediaID, item), Priority: collectorin.EventPriorityRealtime,
 		MediaOwnerAccountID: accountId, Media: ptrCollectorMediaItem(collectorMediaItemFromCollect(item)), MaxAttempts: 5,
 	}
-	if mediaID > 0 {
-		if _, err := collectorservice.AccountTasks().Submit(ctx, submit); err != nil {
-			return nil, gerror.Wrap(err, "提交账号媒体下载任务失败")
-		}
-		return nil, newCollectMediaAsyncSubmittedError("账号媒体已进入SDK下载队列", 30*time.Second)
-	}
+	// Media rows already have a persistent ID. They still need to wait for the
+	// SDK task result here; returning an async-retry error after Submit leaves
+	// every normal media item permanently stuck in media_pending.
 	task, err := collectorservice.AccountTasks().SubmitAndWait(ctx, submit, time.Second)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
