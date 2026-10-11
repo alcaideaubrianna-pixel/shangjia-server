@@ -39,7 +39,6 @@ type collectMediaRetryError struct {
 	delay               time.Duration
 	rateLimited         bool
 	deferWithoutFailure bool
-	preserveDownloading bool
 }
 
 type collectEventMediaCacheSummary struct {
@@ -86,12 +85,6 @@ func newCollectMediaRetryError(message string, delay time.Duration) *collectMedi
 func newCollectMediaFairnessRetryError(message string, delay time.Duration) *collectMediaRetryError {
 	retryErr := newCollectMediaRetryError(message, delay)
 	retryErr.deferWithoutFailure = true
-	return retryErr
-}
-
-func newCollectMediaAsyncSubmittedError(message string, delay time.Duration) *collectMediaRetryError {
-	retryErr := newCollectMediaFairnessRetryError(message, delay)
-	retryErr.preserveDownloading = true
 	return retryErr
 }
 
@@ -204,9 +197,6 @@ func (s *sSysPublish) ExecuteCollectMediaCache(ctx context.Context, payload coll
 	}
 	g.Log().Debugf(ctx, "采集媒体任务获取事件锁完成 eventId:%d wait:%s", payload.EventId, time.Since(lockStartedAt).Round(time.Millisecond))
 	defer func() { _ = distributedLock.Unlock(context.Background()) }()
-	accountIntervalStartedAt := time.Now()
-	s.waitCollectMediaAccountInterval(ctx, payload.TenantId, payload.TgAccountId)
-	g.Log().Debugf(ctx, "采集媒体任务账号间隔等待完成 eventId:%d wait:%s", payload.EventId, time.Since(accountIntervalStartedAt).Round(time.Millisecond))
 	readEventStartedAt := time.Now()
 	event, err := s.collectMediaCacheEvent(ctx, payload)
 	if err != nil {
@@ -216,6 +206,11 @@ func (s *sSysPublish) ExecuteCollectMediaCache(ctx context.Context, payload coll
 	if event.IsEmpty() {
 		g.Log().Warningf(ctx, "采集媒体任务对应事件不存在，跳过历史任务 eventId:%d tenantId:%d accountId:%d sourceId:%d", payload.EventId, payload.TenantId, payload.AccountId, payload.SourceId)
 		return nil
+	}
+	if event["source_type"].String() == sysin.CollectSourceTypeAccount {
+		accountIntervalStartedAt := time.Now()
+		s.waitCollectMediaAccountInterval(ctx, payload.TenantId, payload.TgAccountId)
+		g.Log().Debugf(ctx, "采集媒体任务账号间隔等待完成 eventId:%d wait:%s", payload.EventId, time.Since(accountIntervalStartedAt).Round(time.Millisecond))
 	}
 	if event["source_type"].String() == sysin.CollectSourceTypeBot && event["bot_id"].Int64() <= 0 {
 		botID, resolveErr := s.resolveCollectEventBotID(ctx, event)
@@ -577,16 +572,14 @@ func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, even
 					}
 				}
 				if retryErr != nil {
-					if !retryErr.preserveDownloading {
-						_, _ = pdao.YoubanPublishCollectEventMedia.Ctx(ctx).Where("id", row.Id).Data(g.Map{
-							"cache_status":          collectMediaCachePending,
-							"download_duration_ms":  downloadDuration,
-							"download_error_type":   errorType,
-							"error_message":         retryErr.message,
-							collectMediaNextRetryAt: gtime.Now().Add(retryErr.delay),
-							"updated_at":            gtime.Now(),
-						}).Update()
-					}
+					_, _ = pdao.YoubanPublishCollectEventMedia.Ctx(ctx).Where("id", row.Id).Data(g.Map{
+						"cache_status":          collectMediaCachePending,
+						"download_duration_ms":  downloadDuration,
+						"download_error_type":   errorType,
+						"error_message":         retryErr.message,
+						collectMediaNextRetryAt: gtime.Now().Add(retryErr.delay),
+						"updated_at":            gtime.Now(),
+					}).Update()
 					result.err = retryErr
 				} else {
 					_, _ = pdao.YoubanPublishCollectEventMedia.Ctx(ctx).Where("id", row.Id).Data(g.Map{

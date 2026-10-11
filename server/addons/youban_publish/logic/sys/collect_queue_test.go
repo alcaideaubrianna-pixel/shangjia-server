@@ -107,7 +107,7 @@ func TestCollectMediaWorkerQueuesSeparateRealtimeAndBulk(t *testing.T) {
 	if len(realtimeQueues) != collectMediaMaxBulkQueueShards || realtimeQueues[collectMediaRealtimeQueueName(0)] != 1 {
 		t.Fatalf("realtime queues = %#v", realtimeQueues)
 	}
-	if len(bulkQueues) != collectMediaMaxBulkQueueShards+1 {
+	if len(bulkQueues) != collectMediaMaxBulkQueueShards {
 		t.Fatalf("queue count = %d", len(bulkQueues))
 	}
 	if _, ok := bulkQueues[tgQueueNameMediaRealtime]; ok {

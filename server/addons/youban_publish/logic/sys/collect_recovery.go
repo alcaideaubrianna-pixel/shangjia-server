@@ -422,117 +422,64 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 	}
 	deadline := gtime.Now().Add(-collectEventRecoverAfter)
 	statuses := []string{sysin.CollectEventStatusPending, sysin.CollectEventStatusGroupCollect, sysin.CollectEventStatusWaitingOrder, sysin.CollectEventStatusPrechecked, sysin.CollectEventStatusMediaPending, sysin.CollectEventStatusMediaReady, sysin.CollectEventStatusFailed}
-	// Recovery is driven by the database stale timestamp. Do not rotate a
-	// window based on the number of sources: with a large backlog that can
-	// leave one source outside the window indefinitely. Always take the oldest
-	// stale source first so every source is eventually re-enqueued.
-	sourceModel := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
-		Fields("e.source_id,e.source_chat_id,MIN(e.updated_at) AS oldest_updated_at").
+	rows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
+		Fields("e.*").
 		WhereIn("e.status", statuses).
 		WhereLTE("e.updated_at", deadline).
 		Where(enabledCollectSourceExistsSQL("e")).
-		Group("e.source_id,e.source_chat_id").
-		OrderAsc("oldest_updated_at").
-		Limit(limit)
-	sourceRows, err := sourceModel.All()
+		OrderAsc("e.updated_at").
+		OrderAsc("e.id").
+		Limit(limit).
+		All()
 	if err != nil {
-		return gerror.Wrap(err, "读取待恢复采集源失败")
+		return gerror.Wrap(err, "读取待恢复采集事件失败")
 	}
-	perSourceLimit := collectRecoveryPerSourceLimit(limit, len(sourceRows))
-	remaining := limit
-	for _, sourceRow := range sourceRows {
-		if remaining <= 0 {
-			break
+	for _, row := range rows {
+		if row.IsEmpty() || row["id"].Int64() <= 0 || !shouldRecoverCollectEvent(row) {
+			continue
 		}
-		sourceId := sourceRow["source_id"].Int64()
-		sourceChatId := sourceRow["source_chat_id"].String()
-		sourceLimit := perSourceLimit
-		if sourceLimit > remaining {
-			sourceLimit = remaining
+		if row["status"].String() == sysin.CollectEventStatusMediaPending && !s.collectEventHasDueMedia(ctx, row["id"].Int64()) {
+			continue
 		}
-		rows, queryErr := s.collectRecoveryEventRows(ctx, sourceId, sourceChatId, statuses, deadline, sourceLimit)
-		if queryErr != nil {
-			return queryErr
+		claimData := g.Map{"updated_at": gtime.Now()}
+		if row["status"].String() == sysin.CollectEventStatusFailed {
+			claimData["status"] = sysin.CollectEventStatusPending
+			claimData["error_message"] = ""
+			claimData["processed_at"] = nil
 		}
-		sourceQueued := false
-		for _, row := range rows {
-			if row.IsEmpty() || row["id"].Int64() <= 0 || !shouldRecoverCollectEvent(row) {
-				continue
-			}
-			if row["status"].String() == sysin.CollectEventStatusMediaPending && !s.collectEventHasDueMedia(ctx, row["id"].Int64()) {
-				continue
-			}
-			if row["status"].String() == sysin.CollectEventStatusFailed {
-				result, resetErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).
-					Where("id", row["id"].Int64()).
-					Where("status", sysin.CollectEventStatusFailed).
-					WhereLTE("updated_at", deadline).
-					Data(g.Map{
-						"status": sysin.CollectEventStatusPending, "error_message": "", "processed_at": nil, "updated_at": gtime.Now(),
-					}).Update()
-				if resetErr != nil {
-					g.Log().Warningf(ctx, "重置失败采集事件状态失败 event:%d err:%+v", row["id"].Int64(), resetErr)
-					continue
-				}
-				affected, _ := result.RowsAffected()
-				if affected == 0 {
-					continue
-				}
-			}
-			remaining--
-			if !sourceQueued {
-				queued, processErr := s.enqueueCollectProcessDeferred(ctx, collectProcessQueuePayload{
-					EventId:      row["id"].Int64(),
-					SourceId:     row["source_id"].Int64(),
-					SourceChatId: row["source_chat_id"].String(),
-					TenantId:     row["tenant_id"].Int64(),
-					AccountId:    row["account_id"].Int64(),
-				}, 0)
-				if processErr != nil {
-					g.Log().Warningf(ctx, "恢复采集源投递失败 source:%d event:%d err:%+v", sourceId, row["id"].Int64(), processErr)
-					continue
-				}
-				if !queued {
-					g.Log().Warningf(ctx, "恢复采集源任务未实际入队 source:%d event:%d", sourceId, row["id"].Int64())
-					continue
-				}
-				sourceQueued = true
-			}
-			if _, updateErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).
-				Where("id", row["id"].Int64()).
-				WhereLTE("updated_at", deadline).
-				Data(g.Map{"updated_at": gtime.Now()}).Update(); updateErr != nil {
-				g.Log().Warningf(ctx, "更新恢复采集事件心跳失败 event:%d err:%+v", row["id"].Int64(), updateErr)
-			}
+		claimResult, claimErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+			Where("id", row["id"].Int64()).
+			WhereLTE("updated_at", deadline).
+			Data(claimData).Update()
+		if claimErr != nil {
+			g.Log().Warningf(ctx, "抢占待恢复采集事件失败 event:%d err:%+v", row["id"].Int64(), claimErr)
+			continue
+		}
+		claimed, claimErr := claimResult.RowsAffected()
+		if claimErr != nil {
+			g.Log().Warningf(ctx, "确认待恢复采集事件抢占结果失败 event:%d err:%+v", row["id"].Int64(), claimErr)
+			continue
+		}
+		if claimed == 0 {
+			continue
+		}
+		queued, processErr := s.enqueueCollectProcessDeferred(ctx, collectProcessQueuePayload{
+			EventId:      row["id"].Int64(),
+			SourceId:     row["source_id"].Int64(),
+			SourceChatId: row["source_chat_id"].String(),
+			TenantId:     row["tenant_id"].Int64(),
+			AccountId:    row["account_id"].Int64(),
+		}, 0)
+		if processErr != nil {
+			g.Log().Warningf(ctx, "恢复采集事件投递失败 source:%d event:%d err:%+v", row["source_id"].Int64(), row["id"].Int64(), processErr)
+			continue
+		}
+		if !queued {
+			g.Log().Warningf(ctx, "恢复采集事件任务未实际入队 source:%d event:%d", row["source_id"].Int64(), row["id"].Int64())
+			continue
 		}
 	}
 	return nil
-}
-
-func fairCollectRecoverySourceOffset(sourceCount, limit int, round int64) int {
-	if sourceCount <= limit || limit <= 0 {
-		return 0
-	}
-	windowCount := (sourceCount + limit - 1) / limit
-	window := int(round % int64(windowCount))
-	if window < 0 {
-		window += windowCount
-	}
-	return window * limit
-}
-
-func collectRecoveryPerSourceLimit(totalLimit, sourceCount int) int {
-	if totalLimit <= 0 || sourceCount <= 0 {
-		return 1
-	}
-	quota := totalLimit / sourceCount
-	if quota < 1 {
-		return 1
-	}
-	if quota > 10 {
-		return 10
-	}
-	return quota
 }
 
 func enabledCollectSourceExistsSQL(ownerAlias string) string {
@@ -552,42 +499,6 @@ func (s *sSysPublish) collectEventHasDueMedia(ctx context.Context, eventId int64
 		Limit(1).
 		One()
 	return err == nil && !row.IsEmpty()
-}
-
-func (s *sSysPublish) collectRecoveryEventRows(ctx context.Context, sourceId int64, sourceChatId string, statuses []string, deadline *gtime.Time, limit int) (gdb.Result, error) {
-	mediaRows, err := collectRecoveryEventModel(ctx, sourceId, sourceChatId).
-		Where("status", sysin.CollectEventStatusMediaPending).
-		WhereLTE("updated_at", deadline).
-		OrderAsc("updated_at").
-		Limit(limit).
-		All()
-	if err != nil {
-		return nil, gerror.Wrap(err, "读取待恢复采集媒体事件失败")
-	}
-	if len(mediaRows) >= limit {
-		return mediaRows, nil
-	}
-	otherRows, err := collectRecoveryEventModel(ctx, sourceId, sourceChatId).
-		WhereNot("status", sysin.CollectEventStatusMediaPending).
-		WhereIn("status", statuses).
-		WhereLTE("updated_at", deadline).
-		OrderAsc("updated_at").
-		Limit(limit - len(mediaRows)).
-		All()
-	if err != nil {
-		return nil, gerror.Wrap(err, "读取待恢复采集事件失败")
-	}
-	return append(mediaRows, otherRows...), nil
-}
-
-func collectRecoveryEventModel(ctx context.Context, sourceId int64, sourceChatId string) *gdb.Model {
-	model := pdao.YoubanPublishCollectEvent.Ctx(ctx).Where("source_id", sourceId)
-	if chatID := canonicalCollectSourceChatID(sourceChatId); chatID != "" {
-		model = model.WhereIn("source_chat_id", tgChannelCacheLookupIds(chatID))
-	} else {
-		model = model.Where("source_chat_id", "")
-	}
-	return model
 }
 
 func shouldRecoverCollectEvent(row gdb.Record) bool {
