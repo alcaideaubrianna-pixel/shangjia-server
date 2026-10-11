@@ -251,6 +251,9 @@ func mediaFileCacheFallbackURL(ctx context.Context, objectPath string) string {
 }
 
 func mediaFileCacheCDNURL(ctx context.Context, configKey string, objectPath string) string {
+	if override := strings.TrimSpace(g.Cfg().MustGet(ctx, "youbanPublish.mediaFileCache.cosDownloadCdnBaseUrl", "").String()); override != "" {
+		return strings.TrimRight(override, "/") + "/" + strings.TrimLeft(objectPath, "/")
+	}
 	base := strings.TrimRight(g.Cfg().MustGet(ctx, configKey, "").String(), "/")
 	if base == "" {
 		return ""

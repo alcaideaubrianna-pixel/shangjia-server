@@ -7,6 +7,29 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 )
 
+type RelayChannelListReq struct {
+	g.Meta `path:"/publish/relay/channel/list" method:"get" tags:"上架插件后台" summary:"Relay频道列表"`
+	sysin.RelayChannelListInp
+}
+type RelayChannelListRes struct {
+	List []*sysin.RelayChannelModel `json:"list"`
+}
+type RelayChannelSaveReq struct {
+	g.Meta `path:"/publish/relay/channel/save" method:"post" tags:"上架插件后台" summary:"保存Relay频道"`
+	sysin.RelayChannelSaveInp
+}
+type RelayChannelSaveRes struct{}
+type RelayChannelStatusReq struct {
+	g.Meta `path:"/publish/relay/channel/status" method:"post" tags:"上架插件后台" summary:"切换Relay频道"`
+	sysin.RelayChannelStatusInp
+}
+type RelayChannelStatusRes struct{}
+type RelayChannelCreateReq struct {
+	g.Meta `path:"/publish/relay/channel/create" method:"post" tags:"上架插件后台" summary:"创建Relay频道"`
+	sysin.RelayChannelCreateInp
+}
+type RelayChannelCreateRes struct{ *sysin.RelayChannelModel }
+
 type TenantListReq struct {
 	g.Meta `path:"/publish/tenant/list" method:"get" tags:"上架插件后台" summary:"租户列表"`
 	sysin.TenantListInp

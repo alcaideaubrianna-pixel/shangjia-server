@@ -2,10 +2,12 @@ package sys
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gotd/td/telegram"
 	"github.com/hibiken/asynq"
 
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
@@ -16,6 +18,8 @@ import (
 )
 
 type sSysPublish struct {
+	accountClientsMu      sync.RWMutex
+	accountClients        map[int64]*telegram.Client
 	runtimeCancel         context.CancelFunc
 	runtimeDone           chan struct{}
 	runtimeMu             publishRuntimeMutex
@@ -36,6 +40,7 @@ type sSysPublish struct {
 	duplicateQueueServer  *asynq.Server
 	historyQueueServer    *asynq.Server
 	mattingQueueServer    *asynq.Server
+	relayQueueServer      *asynq.Server
 
 	telegramChannelMu    publishRuntimeMutex
 	telegramChannelLocks map[string]*publishRuntimeMutex
@@ -52,6 +57,7 @@ type sSysPublish struct {
 
 func NewSysPublish() *sSysPublish {
 	return &sSysPublish{
+		accountClients:        make(map[int64]*telegram.Client),
 		tgLogins:              make(map[string]*telegramLoginRuntime),
 		telegramChannelLocks:  make(map[string]*publishRuntimeMutex),
 		collectGroupTimers:    make(map[int64]*time.Timer),
