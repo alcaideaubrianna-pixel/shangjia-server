@@ -333,6 +333,10 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 	}
 	deadline := gtime.Now().Add(-collectEventRecoverAfter)
 	statuses := []string{sysin.CollectEventStatusPending, sysin.CollectEventStatusGroupCollect, sysin.CollectEventStatusWaitingOrder, sysin.CollectEventStatusPrechecked, sysin.CollectEventStatusMediaPending, sysin.CollectEventStatusMediaReady, sysin.CollectEventStatusFailed}
+	// Keep the grouped source query separate from the count query. GoFrame
+	// appends Fields calls on a cloned model; cloning a query that already
+	// selects source_id and source_chat_id can produce COUNT(source_id,
+	// source_chat_id), which PostgreSQL rejects.
 	sourceModel := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
 		Fields("e.source_id,e.source_chat_id").
 		WhereIn("e.status", statuses).
@@ -340,9 +344,13 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 		Where(enabledCollectSourceExistsSQL("e")).
 		Group("e.source_id,e.source_chat_id").
 		OrderAsc("e.source_id,e.source_chat_id")
-	// Count a single grouped column. GoFrame otherwise includes every selected
-	// field in COUNT(...), producing PostgreSQL's invalid COUNT(bigint, varchar).
-	sourceCount, err := sourceModel.Clone().Fields("e.source_id").Count()
+	sourceCountModel := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
+		Fields("e.source_id").
+		WhereIn("e.status", statuses).
+		WhereLTE("e.updated_at", deadline).
+		Where(enabledCollectSourceExistsSQL("e")).
+		Group("e.source_id,e.source_chat_id")
+	sourceCount, err := sourceCountModel.Count()
 	if err != nil {
 		return gerror.Wrap(err, "统计待恢复采集源失败")
 	}
