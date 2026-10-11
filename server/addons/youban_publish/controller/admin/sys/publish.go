@@ -16,6 +16,19 @@ var PublishAdmin = cPublishAdmin{}
 type cPublishServer struct{}
 type cPublishAdmin struct{}
 
+func (c *cPublishServer) RelayChannelList(ctx context.Context, req *publish.RelayChannelListReq) (*publish.RelayChannelListRes, error) {
+	list, err := service.SysPublish().AdminRelayChannelList(ctx, &req.RelayChannelListInp)
+	return &publish.RelayChannelListRes{List: list}, err
+}
+func (c *cPublishServer) RelayChannelSave(ctx context.Context, req *publish.RelayChannelSaveReq) (*publish.RelayChannelSaveRes, error) {
+	err := service.SysPublish().AdminRelayChannelSave(ctx, &req.RelayChannelSaveInp)
+	return &publish.RelayChannelSaveRes{}, err
+}
+func (c *cPublishServer) RelayChannelStatus(ctx context.Context, req *publish.RelayChannelStatusReq) (*publish.RelayChannelStatusRes, error) {
+	err := service.SysPublish().AdminRelayChannelStatus(ctx, &req.RelayChannelStatusInp)
+	return &publish.RelayChannelStatusRes{}, err
+}
+
 func (c *cPublishServer) TenantList(ctx context.Context, req *publish.TenantListReq) (res *publish.TenantListRes, err error) {
 	list, totalCount, err := service.SysPublish().AdminTenantList(ctx, &req.TenantListInp)
 	if err != nil {

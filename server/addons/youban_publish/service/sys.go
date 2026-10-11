@@ -12,6 +12,9 @@ import (
 )
 
 type ISysPublish interface {
+	AdminRelayChannelList(ctx context.Context, in *sysin.RelayChannelListInp) (list []*sysin.RelayChannelModel, err error)
+	AdminRelayChannelSave(ctx context.Context, in *sysin.RelayChannelSaveInp) (err error)
+	AdminRelayChannelStatus(ctx context.Context, in *sysin.RelayChannelStatusInp) (err error)
 	AccountCapability(ctx context.Context, app string, accountId int64) (res *sysin.AccountCapabilityModel, err error)
 	TenantVipStatus(ctx context.Context, tenantId int64) (res *sysin.TenantVipStatusModel, err error)
 	ImageProcessingQuota(ctx context.Context) (res *sysin.ImageProcessingQuotaModel, err error)

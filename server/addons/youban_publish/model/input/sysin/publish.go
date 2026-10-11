@@ -1713,3 +1713,31 @@ type TelegramLoginPasswordInp struct {
 	LoginToken string `json:"loginToken" v:"required#登录令牌不能为空" dc:"登录令牌"`
 	Password   string `json:"password" v:"required#二次验证密码不能为空" dc:"二次验证密码"`
 }
+
+type RelayChannelListInp struct {
+	TenantId int64 `json:"tenantId"`
+}
+type RelayChannelSaveInp struct {
+	Id           int64  `json:"id"`
+	TenantId     int64  `json:"tenantId"`
+	TgAccountId  int64  `json:"tgAccountId"`
+	TargetChatId string `json:"targetChatId"`
+	Title        string `json:"title"`
+	Status       string `json:"status"`
+}
+type RelayChannelStatusInp struct {
+	Id     int64  `json:"id"`
+	Status string `json:"status"`
+}
+type RelayChannelModel struct {
+	Id                  int64  `json:"id"`
+	TenantId            int64  `json:"tenantId"`
+	TgAccountId         int64  `json:"tgAccountId"`
+	TargetChatId        string `json:"targetChatId"`
+	Title               string `json:"title"`
+	Status              string `json:"status"`
+	HealthStatus        string `json:"healthStatus"`
+	BotPermissionStatus string `json:"botPermissionStatus"`
+	InFlightCount       int    `json:"inFlightCount"`
+	LastError           string `json:"lastError"`
+}
