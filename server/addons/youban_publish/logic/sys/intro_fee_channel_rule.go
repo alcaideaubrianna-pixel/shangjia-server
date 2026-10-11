@@ -96,6 +96,9 @@ func (s *sSysPublish) fillIntroFeeChannelBlacklist(ctx context.Context, tenantID
 		if accountID > 0 {
 			mod = mod.Where("account_id", accountID)
 		}
+		if row.BotId > 0 {
+			mod = mod.Where("bot_id", row.BotId)
+		}
 		var value int
 		if err := mod.Fields("channel_blacklisted").OrderDesc("id").Limit(1).Scan(&value); err == nil {
 			row.Blacklisted = value != 0

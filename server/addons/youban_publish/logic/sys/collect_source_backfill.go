@@ -52,13 +52,42 @@ func (s *sSysPublish) BackfillCollectedSourceMetadata(ctx context.Context, lastI
 			eventByKey[event["source_unique_key"].String()] = event
 		}
 	}
+	jobByProfile := make(map[int64]gdb.Record, len(profiles))
+	profileIds := make([]int64, 0, len(profiles))
+	for _, profile := range profiles {
+		profileIds = append(profileIds, profile["id"].Int64())
+	}
+	var jobs []gdb.Record
+	if jobs, err = g.DB().Model("hg_youban_publish_tg_job").Ctx(ctx).
+		Fields("profile_id,collect_source_message_id,created_at").
+		WhereIn("profile_id", profileIds).
+		WhereGT("collect_source_message_id", 0).
+		OrderAsc("id").All(); err != nil {
+		return scanned, 0, nextId, err
+	}
+	for _, job := range jobs {
+		if _, exists := jobByProfile[job["profile_id"].Int64()]; !exists {
+			jobByProfile[job["profile_id"].Int64()] = job
+		}
+	}
 	if err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		for _, profile := range profiles {
 			event, ok := eventByKey[profile["source_key"].String()]
 			if !ok {
+				job, jobOK := jobByProfile[profile["id"].Int64()]
+				if !jobOK {
+					continue
+				}
+				event = job
+			}
+			messageID := event["source_message_id"].Int64()
+			if messageID <= 0 {
+				messageID = event["collect_source_message_id"].Int64()
+			}
+			if messageID <= 0 {
 				continue
 			}
-			data := g.Map{"source_note_id": event["source_message_id"].Int64(), "updated_at": gtime.Now()}
+			data := g.Map{"source_note_id": messageID, "updated_at": gtime.Now()}
 			if !event["received_at"].IsNil() {
 				data["source_created_at"] = event["received_at"]
 			}
