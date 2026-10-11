@@ -116,6 +116,10 @@ func (s *sSysPublish) AdminRelayChannelStatus(ctx context.Context, in *sysin.Rel
 	if in.Status != relayChannelStatusEnabled && in.Status != relayChannelStatusDisabled {
 		return gerror.New("relay 频道状态不合法")
 	}
-	_, err := g.DB().Model("hg_youban_publish_relay_channel").Ctx(ctx).WherePri(in.Id).Data(g.Map{"status": in.Status, "updated_at": time.Now()}).Update()
+	data := g.Map{"status": in.Status, "updated_at": time.Now()}
+	if in.Status == relayChannelStatusEnabled {
+		data["health_status"] = relayChannelHealthReady
+	}
+	_, err := g.DB().Model("hg_youban_publish_relay_channel").Ctx(ctx).WherePri(in.Id).Data(data).Update()
 	return err
 }

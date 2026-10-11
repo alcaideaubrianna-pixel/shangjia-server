@@ -176,6 +176,14 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 			}
 			g.Log().Warningf(ctx, "relay 媒体复制失败，回退原有上传链路 tenant:%d media:%d relay:%s:%d err:%+v", media.TenantId, media.Id, ref.ChatId, relay.MessageId, copyErr)
 		}
+		if relayMessages, relayErr := s.prepareRelayMedia(ctx, media, purpose); relayErr == nil && len(relayMessages) > 0 {
+			ref := relayMessages[0]
+			cloned := *media
+			cloned.TgFileId = telegramCopyMediaFileId(ref.TgFileId, ref.MessageId)
+			if copied, copyErr := s.copyTelegramSingleMedia(ctx, bot, chatId, purpose, caption, &cloned, telegramCopyMediaRef{ChatId: ref.TgFileId, MessageId: int(ref.MessageId)}); copyErr == nil {
+				return copied, nil
+			}
+		}
 	}
 	s.prepareTelegramMediaItemForSend(ctx, media)
 	if ref, ok := telegramCopyMediaRefFromFileId(media.TgFileId); ok && !telegramMediaRequiresSanitizedUpload(media) {
