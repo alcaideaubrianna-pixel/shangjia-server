@@ -345,32 +345,6 @@ type CollectRuleSaveInp struct {
 	Status                  int                       `json:"status" dc:"状态"`
 }
 
-type IntroFeeChannelRuleListInp struct {
-	form.PageReq
-	RuleId  int64  `json:"ruleId"`
-	BotId   int64  `json:"botId"`
-	Keyword string `json:"keyword"`
-}
-type IntroFeeChannelRuleItem struct {
-	Id              int64       `json:"id"`
-	RuleId          int64       `json:"ruleId"`
-	BotId           int64       `json:"botId"`
-	ChannelId       string      `json:"channelId"`
-	ChannelTitle    string      `json:"channelTitle"`
-	ChannelUsername string      `json:"channelUsername"`
-	Suffix          string      `json:"suffix"`
-	Status          int         `json:"status"`
-	LastSeenAt      *gtime.Time `json:"lastSeenAt"`
-}
-type IntroFeeChannelRuleSaveInp struct {
-	Id        int64  `json:"id"`
-	RuleId    int64  `json:"ruleId"`
-	BotId     int64  `json:"botId"`
-	ChannelId string `json:"channelId"`
-	Suffix    string `json:"suffix"`
-	Status    int    `json:"status"`
-}
-
 func (in *CollectRuleSaveInp) Filter(ctx context.Context) error {
 	in.Name = strings.TrimSpace(in.Name)
 	in.TargetChannelIds = uniquePositiveInt64(in.TargetChannelIds)
