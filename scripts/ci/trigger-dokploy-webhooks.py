@@ -56,9 +56,11 @@ def load_targets(path):
             if not str(target.get(field, "")).strip():
                 raise ValueError(f"enabled target {name} requires {field}")
         webhook = str(target.get("webhook", "")).strip()
-        parsed = urllib.parse.urlparse(webhook)
-        if parsed.scheme != "https" or not parsed.netloc:
-            raise ValueError(f"enabled target {name} requires an HTTPS webhook")
+        direct_deploy = target.get("directDeploy") is True
+        if not direct_deploy:
+            parsed = urllib.parse.urlparse(webhook)
+            if parsed.scheme != "https" or not parsed.netloc:
+                raise ValueError(f"enabled target {name} requires an HTTPS webhook")
         wait_seconds = target.get("waitSeconds", 10)
         if not isinstance(wait_seconds, int) or wait_seconds < 0:
             raise ValueError(f"target {name} waitSeconds must be a non-negative integer")
@@ -70,6 +72,7 @@ def load_targets(path):
         enabled.append({
             "name": name,
             "webhook": webhook,
+            "direct_deploy": direct_deploy,
             "order": order,
             "wait_seconds": wait_seconds,
             "health_url": health_url,
@@ -202,6 +205,13 @@ def trigger(target, version, retries=DEFAULT_RETRIES, sleep=time.sleep):
     raise RuntimeError(f"webhook failed after {retries} attempts: {last_error}")
 
 
+def deploy_direct(target):
+    dokploy_request("application.deploy", {
+        "applicationId": target["application_id"],
+        "title": f"CI deploy {target['name']}",
+    })
+
+
 def read_health(url):
     request = urllib.request.Request(
         url,
@@ -323,7 +333,10 @@ def main(argv=None):
         print(f"triggering {name} ({args.version})", flush=True)
         try:
             expected_image = pin_target_image(target, args.version)
-            trigger(target, args.version)
+            if target["direct_deploy"]:
+                deploy_direct(target)
+            else:
+                trigger(target, args.version)
             wait_for_running_image(target, expected_image)
             # Only probe the public endpoint after every running task is on the
             # immutable image. Otherwise a load-balanced old replica can make a
@@ -337,7 +350,10 @@ def main(argv=None):
             if str(error).startswith("running container image mismatch"):
                 try:
                     print(f"retrying {name} after runtime image mismatch", file=sys.stderr, flush=True)
-                    trigger(target, args.version)
+                    if target["direct_deploy"]:
+                        deploy_direct(target)
+                    else:
+                        trigger(target, args.version)
                     wait_for_running_image(target, expected_image, retries=12)
                     wait_until_healthy(target, args.revision or args.version)
                 except (urllib.error.URLError, TimeoutError, RuntimeError) as retry_error:
