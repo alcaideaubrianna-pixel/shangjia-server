@@ -131,6 +131,10 @@ func (s *sSysPublish) IntroFeeChannelRuleDelete(ctx context.Context, id int64) e
 	if id <= 0 {
 		return gerror.New("规则ID无效")
 	}
+	row, _ := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Fields("rule_id,bot_id,channel_id").Where("id", id).Where("tenant_id", account.TenantId).WhereNull("deleted_at").One()
 	_, err = g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Where("id", id).Where("tenant_id", account.TenantId).WhereNull("deleted_at").Data(g.Map{"deleted_at": gtime.Now()}).Update()
+	if !row.IsEmpty() {
+		_, _ = cache.Instance().Remove(ctx, introFeeChannelRuleCacheKey(account.TenantId, row["rule_id"].Int64(), row["bot_id"].Int64(), row["channel_id"].String()))
+	}
 	return err
 }
