@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	hglock "hotgo/internal/library/hgrds/lock"
@@ -73,12 +74,34 @@ func claimRelayMedia(ctx context.Context, tenantId, mediaId int64, purpose, vers
 	token := relayLeaseToken()
 	now := time.Now()
 	until := now.Add(lease)
-	_, err := g.DB().Model("hg_youban_publish_relay_media").Ctx(ctx).Data(g.Map{
-		"tenant_id": tenantId, "media_id": mediaId, "purpose": purpose, "media_version": version,
-		"status": "uploading", "lease_token": token, "lease_until": until, "updated_at": now,
-	}).OnConflict("tenant_id,media_id,purpose,media_version").OnDuplicate(g.Map{"status": "uploading", "lease_token": token, "lease_until": until, "updated_at": now}).Save()
-	if err != nil {
-		return "", gerror.Wrap(err, "申请 relay 媒体租约失败")
+	model := g.DB().Model("hg_youban_publish_relay_media").Ctx(ctx)
+	var state struct {
+		Status     string    `orm:"status"`
+		LeaseUntil time.Time `orm:"lease_until"`
+	}
+	if err := model.Where("tenant_id", tenantId).Where("media_id", mediaId).Where("purpose", purpose).Where("media_version", version).Scan(&state); err != nil {
+		return "", gerror.Wrap(err, "读取 relay 媒体租约失败")
+	}
+	if state.Status == "uploading" && !state.LeaseUntil.IsZero() && state.LeaseUntil.After(now) {
+		return "", nil
+	}
+	data := g.Map{"status": "uploading", "lease_token": token, "lease_until": until, "updated_at": now}
+	if state.Status == "" {
+		data["tenant_id"] = tenantId
+		data["media_id"] = mediaId
+		data["purpose"] = purpose
+		data["media_version"] = version
+		if _, err := model.Data(data).Insert(); err != nil {
+			return "", gerror.Wrap(err, "创建 relay 媒体租约失败")
+		}
+	} else {
+		result, err := model.Where("tenant_id", tenantId).Where("media_id", mediaId).Where("purpose", purpose).Where("media_version", version).Data(data).Update()
+		if err != nil {
+			return "", gerror.Wrap(err, "更新 relay 媒体租约失败")
+		}
+		if affected, _ := result.RowsAffected(); affected == 0 {
+			return "", nil
+		}
 	}
 	value, _ := g.DB().Model("hg_youban_publish_relay_media").Ctx(ctx).Where("tenant_id", tenantId).Where("media_id", mediaId).Where("purpose", purpose).Where("media_version", version).Value("lease_token")
 	current := ""
@@ -103,27 +126,25 @@ func failRelayMedia(ctx context.Context, tenantId, mediaId int64, purpose, versi
 
 func chooseRelayChannel(ctx context.Context, tenantId int64) (*relayChannelRecord, error) {
 	var channel relayChannelRecord
-	err := g.DB().Model("hg_youban_publish_relay_channel").Ctx(ctx).Where("tenant_id", tenantId).Where("status", relayChannelStatusEnabled).Where("health_status", relayChannelHealthReady).Where("(cooldown_until IS NULL OR cooldown_until < ?)", time.Now()).Order("in_flight_count ASC, last_used_at ASC, id ASC").Limit(1).Scan(&channel)
+	err := g.DB().Model("hg_youban_publish_relay_channel").Ctx(ctx).Where("tenant_id", tenantId).Where("status", relayChannelStatusEnabled).Where("(health_status = ? OR (health_status = ? AND cooldown_until < ?))", relayChannelHealthReady, relayChannelHealthCooldown, time.Now()).Where("(cooldown_until IS NULL OR cooldown_until < ?)", time.Now()).Order("in_flight_count ASC, last_used_at ASC, id ASC").Limit(1).Scan(&channel)
 	if err != nil {
 		return nil, gerror.Wrap(err, "选择 relay 频道失败")
 	}
 	if channel.Id == 0 {
 		return nil, nil
 	}
+	if channel.HealthStatus == relayChannelHealthCooldown {
+		_, _ = g.DB().Model("hg_youban_publish_relay_channel").Ctx(ctx).WherePri(channel.Id).Data(g.Map{"health_status": relayChannelHealthReady, "cooldown_until": nil, "updated_at": time.Now()}).Update()
+	}
 	return &channel, nil
 }
 
 func markRelayChannelUse(ctx context.Context, id int64, delta int) {
-	var current int
-	value, _ := g.DB().Model("hg_youban_publish_relay_channel").Ctx(ctx).WherePri(id).Value("in_flight_count")
-	if value != nil {
-		current = value.Int()
+	if delta > 0 {
+		_, _ = g.DB().Model("hg_youban_publish_relay_channel").Ctx(ctx).WherePri(id).Data(g.Map{"in_flight_count": gdb.Raw(fmt.Sprintf("in_flight_count + %d", delta)), "last_used_at": time.Now()}).Update()
+		return
 	}
-	current += delta
-	if current < 0 {
-		current = 0
-	}
-	_, _ = g.DB().Model("hg_youban_publish_relay_channel").Ctx(ctx).WherePri(id).Data(g.Map{"in_flight_count": current, "last_used_at": time.Now()}).Update()
+	_, _ = g.DB().Model("hg_youban_publish_relay_channel").Ctx(ctx).WherePri(id).Where("in_flight_count > 0").Data(g.Map{"in_flight_count": gdb.Raw(fmt.Sprintf("in_flight_count + %d", delta)), "last_used_at": time.Now()}).Update()
 }
 
 func markRelayChannelFailure(ctx context.Context, id int64, cause error, cooldown time.Duration) {
