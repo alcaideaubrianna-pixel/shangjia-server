@@ -37,12 +37,12 @@ func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload co
 	batchSize := collectMaterialWindowBatchSize(ctx)
 	now := gtime.Now()
 	rows, err := collectProcessEventModel(ctx, payload).
-		WhereIn("status", collectProcessWindowStatuses()).
-		Where("material_role IS NULL OR material_role = '' OR material_role IN (?,?) OR (status = ? AND material_role = ? AND error_message = ?)", collectMaterialRolePending, collectMaterialRoleDisplay, sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage).
-		Where("(processed_at IS NULL AND (material_group_status IS NULL OR material_group_status <> ? OR updated_at <= ?)) OR (status = ? AND material_role = ? AND error_message = ? AND updated_at <= ?)", collectMaterialGroupWaitingVerify, now.Add(-collectMaterialWaitingVerifyRetryDelay), sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage, now.Add(-collectMaterialVerifyRetryDelay)).
-		OrderAsc("source_chat_id").
-		OrderAsc("source_message_id").
-		OrderAsc("id").
+		WhereIn("e.status", collectProcessWindowStatuses()).
+		Where("e.material_role IS NULL OR e.material_role = '' OR e.material_role IN (?,?) OR (e.status = ? AND e.material_role = ? AND e.error_message = ?)", collectMaterialRolePending, collectMaterialRoleDisplay, sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage).
+		Where("(e.processed_at IS NULL AND (e.material_group_status IS NULL OR e.material_group_status <> ? OR e.updated_at <= ?)) OR (e.status = ? AND e.material_role = ? AND e.error_message = ? AND e.updated_at <= ?)", collectMaterialGroupWaitingVerify, now.Add(-collectMaterialWaitingVerifyRetryDelay), sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage, now.Add(-collectMaterialVerifyRetryDelay)).
+		OrderAsc("e.source_chat_id").
+		OrderAsc("e.source_message_id").
+		OrderAsc("e.id").
 		Limit(batchSize + collectMaterialWindowLookahead).
 		All()
 	if err != nil {
