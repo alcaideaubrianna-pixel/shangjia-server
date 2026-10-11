@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -259,6 +260,20 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 			continue
 		}
 		if _, exists := seen[id]; exists {
+			for _, configuredRow := range configured {
+				if configuredRow != nil && canonicalCollectSourceChatID(configuredRow.ChannelId) == id {
+					if configuredRow.LastSeenAt == nil || candidate.LastSeenAt != nil && candidate.LastSeenAt.After(configuredRow.LastSeenAt) {
+						configuredRow.LastSeenAt = candidate.LastSeenAt
+					}
+					if strings.TrimSpace(configuredRow.ChannelTitle) == "" {
+						configuredRow.ChannelTitle = candidate.ChatTitle
+					}
+					if strings.TrimSpace(configuredRow.ChannelUsername) == "" {
+						configuredRow.ChannelUsername = candidate.ChatUsername
+					}
+					break
+				}
+			}
 			continue
 		}
 		seen[id] = struct{}{}
@@ -350,6 +365,16 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 		}
 		configured = filtered
 	}
+	sort.SliceStable(configured, func(i, j int) bool {
+		left, right := configured[i], configured[j]
+		if left == nil || left.LastSeenAt == nil {
+			return false
+		}
+		if right == nil || right.LastSeenAt == nil {
+			return true
+		}
+		return left.LastSeenAt.After(right.LastSeenAt)
+	})
 	total := len(configured)
 	start := (page - 1) * perPage
 	if start >= total {
