@@ -133,24 +133,3 @@ CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_attempt_message" ON "hg_youban_publ
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_attempt_message_job" ON "hg_youban_publish_tg_attempt_message" ("job_id", "attempt_id");
 ALTER TABLE "hg_youban_publish_account" ADD COLUMN IF NOT EXISTS "last_active_at" timestamp DEFAULT NULL;
 UPDATE "hg_youban_publish_account" SET "last_active_at" = NOW() WHERE "last_active_at" IS NULL;
-ALTER TABLE "hg_youban_publish_collect_source" ADD COLUMN IF NOT EXISTS "channel_suffix" text NOT NULL DEFAULT '';
-ALTER TABLE "hg_youban_publish_collect_source" ADD COLUMN IF NOT EXISTS "channel_blacklisted" smallint NOT NULL DEFAULT 0;
-CREATE INDEX IF NOT EXISTS "idx_ybp_collect_source_channel_rule" ON "hg_youban_publish_collect_source" ("tenant_id","account_id","source_chat_id","channel_blacklisted");
-
-CREATE TABLE IF NOT EXISTS "hg_youban_publish_intro_fee_channel_rule" (
-  "id" BIGSERIAL PRIMARY KEY,
-  "tenant_id" BIGINT NOT NULL DEFAULT 0,
-  "rule_id" BIGINT NOT NULL DEFAULT 0,
-  "bot_id" BIGINT NOT NULL DEFAULT 0,
-  "channel_id" VARCHAR(128) NOT NULL DEFAULT '',
-  "channel_title" VARCHAR(255) NOT NULL DEFAULT '',
-  "channel_username" VARCHAR(128) NOT NULL DEFAULT '',
-  "suffix" VARCHAR(255) NOT NULL DEFAULT '',
-  "status" SMALLINT NOT NULL DEFAULT 1,
-  "last_seen_at" TIMESTAMP NULL,
-  "created_at" TIMESTAMP NULL,
-  "updated_at" TIMESTAMP NULL,
-  "deleted_at" TIMESTAMP NULL
-);
-CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_intro_fee_channel_rule" ON "hg_youban_publish_intro_fee_channel_rule" ("tenant_id","rule_id","bot_id","channel_id") WHERE "deleted_at" IS NULL;
-CREATE INDEX IF NOT EXISTS "idx_ybp_intro_fee_channel_rule_lookup" ON "hg_youban_publish_intro_fee_channel_rule" ("tenant_id","rule_id","bot_id","channel_id","status");

@@ -87,15 +87,6 @@ ALTER TABLE "hg_youban_publish_collect_source"
 ALTER TABLE "hg_youban_publish_collect_source"
   ADD COLUMN IF NOT EXISTS "history_collect_days" integer NOT NULL DEFAULT 30;
 
-ALTER TABLE "hg_youban_publish_collect_source"
-  ADD COLUMN IF NOT EXISTS "channel_suffix" text NOT NULL DEFAULT '';
-
-ALTER TABLE "hg_youban_publish_collect_source"
-  ADD COLUMN IF NOT EXISTS "channel_blacklisted" smallint NOT NULL DEFAULT 0;
-
-CREATE INDEX IF NOT EXISTS "idx_ybp_collect_source_channel_rule"
-  ON "hg_youban_publish_collect_source" ("tenant_id", "account_id", "source_chat_id", "channel_blacklisted");
-
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_source_bot_scope" ON "hg_youban_publish_collect_source" ("bot_id", "bot_collect_scope", "source_chat_id", "status");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_bot_channel_cache" (
