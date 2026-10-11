@@ -2,11 +2,15 @@ package sys
 
 import (
 	"context"
+	"fmt"
+	"html"
+	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	botService "hotgo/addons/youban_bot/service"
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	pdo "hotgo/addons/youban_publish/internal/model/do"
 	"hotgo/addons/youban_publish/model/input/sysin"
@@ -60,6 +64,7 @@ func (s *sSysPublish) introFeeChannelPurge(ctx context.Context, in *sysin.IntroF
 	if in.Preview {
 		return result, nil
 	}
+	channelTitle := s.collectChannelDisplayName(ctx, tenantID, channelID)
 	if err = s.disableCollectChannel(ctx, tenantID, accountID, in.BotId, channelID); err != nil {
 		return nil, err
 	}
@@ -75,7 +80,37 @@ func (s *sSysPublish) introFeeChannelPurge(ctx context.Context, in *sysin.IntroF
 		return nil, err
 	}
 	s.refreshCollectSourceCache(ctx)
+	if notifyErr := botService.SysBot().NotifySuperAdmins(ctx, in.BotId, "collect_source", collectChannelPurgeNotifyText(channelTitle, channelID, result)); notifyErr != nil {
+		g.Log().Warningf(ctx, "发送频道删除下架BOT通知失败 tenantId:%d accountId:%d ruleId:%d channelId:%s err:%+v", tenantID, accountID, in.RuleId, channelID, notifyErr)
+	}
 	return result, nil
+}
+
+func (s *sSysPublish) collectChannelDisplayName(ctx context.Context, tenantID int64, channelID string) string {
+	var channel struct {
+		Title string `json:"title"`
+	}
+	_ = pdao.YoubanPublishCollectChannel.Ctx(ctx).Fields(pdao.YoubanPublishCollectChannel.Columns().Title).
+		Where(pdao.YoubanPublishCollectChannel.Columns().TenantId, tenantID).
+		WhereIn(pdao.YoubanPublishCollectChannel.Columns().TelegramChatId, tgChannelCacheLookupIds(channelID)).
+		OrderDesc(pdao.YoubanPublishCollectChannel.Columns().Id).Limit(1).Scan(&channel)
+	return strings.TrimSpace(channel.Title)
+}
+
+func collectChannelPurgeNotifyText(title, channelID string, result *sysin.IntroFeeChannelPurgeModel) string {
+	if strings.TrimSpace(title) == "" {
+		title = channelID
+	}
+	status := "频道已禁用，配置和计数已清理"
+	if result != nil && result.Queued == 1 {
+		status = "下架删除任务已提交，后台处理中"
+	}
+	profileCount, messageCount := 0, 0
+	if result != nil {
+		profileCount, messageCount = result.ProfileCount, result.MessageCount
+	}
+	return fmt.Sprintf("采集频道删除并下架\n频道：%s\n频道 ID：%s\n关联资料：%d 条\n已推送消息：%d 条\n状态：%s",
+		html.EscapeString(title), html.EscapeString(channelID), profileCount, messageCount, status)
 }
 
 func (s *sSysPublish) disableCollectChannel(ctx context.Context, tenantID, accountID, botID int64, channelID string) error {
