@@ -105,9 +105,19 @@ func (s *sSysPublish) createScheduledBatchCycleRun(ctx context.Context, channel 
 		if err != nil {
 			return err
 		}
-		if count == 0 && cursor > 0 {
-			cursor = 0
-			count, err = s.batchCycleCandidateCount(ctx, channel.TenantId, channel.Id, 0)
+		// A batch must be filled from the next cycle when the current cursor
+		// reaches the tail. Keep the run target stable so the executor can wrap
+		// around in the same scheduled run instead of waiting until tomorrow.
+		if cursor > 0 {
+			fromStart, countErr := s.batchCycleCandidateCount(ctx, channel.TenantId, channel.Id, 0)
+			if countErr != nil {
+				return countErr
+			}
+			if count+fromStart > channel.BatchSize {
+				count = channel.BatchSize
+			} else {
+				count += fromStart
+			}
 		}
 		if err != nil {
 			return err
