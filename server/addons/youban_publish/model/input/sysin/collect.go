@@ -362,6 +362,7 @@ type IntroFeeChannelRuleItem struct {
 	Suffix          string      `json:"suffix"`
 	Status          int         `json:"status"`
 	Configured      bool        `json:"configured"`
+	Blacklisted     bool        `json:"blacklisted"`
 	LastSeenAt      *gtime.Time `json:"lastSeenAt"`
 }
 type IntroFeeChannelRuleSaveInp struct {
@@ -386,6 +387,11 @@ type AdminIntroFeeChannelRuleSaveInp struct {
 	ChannelId string `json:"channelId"`
 	Suffix    string `json:"suffix"`
 	Status    int    `json:"status"`
+}
+
+type IntroFeeChannelBlacklistInp struct {
+	Id          int64 `json:"id"`
+	Blacklisted int   `json:"blacklisted"`
 }
 
 func (in *CollectRuleSaveInp) Filter(ctx context.Context) error {

@@ -208,6 +208,11 @@ type AdminIntroFeeChannelRuleDeleteReq struct {
 	Id     int64 `json:"id"`
 }
 type AdminIntroFeeChannelRuleDeleteRes struct{}
+type AdminIntroFeeChannelBlacklistReq struct {
+	g.Meta `path:"/publish/admin/bot/intro-fee/channel-rule/blacklist" method:"post" tags:"上架插件管理端" summary:"设置机器人介绍费频道黑名单"`
+	sysin.IntroFeeChannelBlacklistInp
+}
+type AdminIntroFeeChannelBlacklistRes struct{}
 
 type AdminBotDeleteReq struct {
 	g.Meta `path:"/publish/admin/bot/delete" method:"post" tags:"上架插件管理端" summary:"删除Bot"`

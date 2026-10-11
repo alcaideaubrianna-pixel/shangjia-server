@@ -270,3 +270,52 @@ func (s *sSysPublish) AdminIntroFeeChannelRuleDelete(ctx context.Context, id int
 	_, err = g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Where("id", id).Where("tenant_id", admin.TenantId).WhereNull("deleted_at").Data(g.Map{"deleted_at": gtime.Now()}).Update()
 	return err
 }
+
+func (s *sSysPublish) IntroFeeChannelBlacklist(ctx context.Context, in *sysin.IntroFeeChannelBlacklistInp) error {
+	account, err := s.currentAccount(ctx)
+	if err != nil {
+		return err
+	}
+	if in == nil || in.Id <= 0 {
+		return gerror.New("规则ID无效")
+	}
+	row, err := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Fields("rule_id,bot_id,channel_id").Where("id", in.Id).Where("tenant_id", account.TenantId).WhereNull("deleted_at").One()
+	if err != nil {
+		return gerror.Wrap(err, "读取介绍费频道规则失败")
+	}
+	if row.IsEmpty() || !s.introFeeRuleOwned(ctx, account.TenantId, account.Id, row["rule_id"].Int64()) {
+		return gerror.New("介绍费规则不存在或无权修改")
+	}
+	mod := g.DB().Model(publishCollectSourceTable).Ctx(ctx).Where("tenant_id", account.TenantId).Where("account_id", account.Id).WhereIn("source_chat_id", tgChannelCacheLookupIds(canonicalCollectSourceChatID(row["channel_id"].String())))
+	if botID := row["bot_id"].Int64(); botID > 0 {
+		mod = mod.Where("bot_id", botID)
+	}
+	_, err = mod.Data(g.Map{"channel_blacklisted": introFeeBoolToInt(in.Blacklisted != 0)}).Update()
+	return err
+}
+
+func (s *sSysPublish) AdminIntroFeeChannelBlacklist(ctx context.Context, in *sysin.IntroFeeChannelBlacklistInp) error {
+	admin, err := s.currentAdminAccount(ctx)
+	if err != nil {
+		return err
+	}
+	if in == nil || in.Id <= 0 {
+		return gerror.New("规则ID无效")
+	}
+	row, err := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Fields("bot_id,channel_id").Where("id", in.Id).Where("tenant_id", admin.TenantId).WhereNull("deleted_at").One()
+	if err != nil {
+		return gerror.Wrap(err, "读取介绍费频道规则失败")
+	}
+	if row.IsEmpty() {
+		return gerror.New("介绍费频道规则不存在")
+	}
+	_, err = g.DB().Model(publishCollectSourceTable).Ctx(ctx).Where("tenant_id", admin.TenantId).Where("bot_id", row["bot_id"].Int64()).WhereIn("source_chat_id", tgChannelCacheLookupIds(canonicalCollectSourceChatID(row["channel_id"].String()))).Data(g.Map{"channel_blacklisted": introFeeBoolToInt(in.Blacklisted != 0)}).Update()
+	return err
+}
+
+func introFeeBoolToInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}

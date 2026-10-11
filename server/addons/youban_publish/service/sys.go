@@ -323,6 +323,8 @@ type ISysPublish interface {
 	AdminIntroFeeChannelRuleList(ctx context.Context, in *sysin.AdminIntroFeeChannelRuleListInp) (list []*sysin.IntroFeeChannelRuleItem, totalCount int, err error)
 	AdminIntroFeeChannelRuleSave(ctx context.Context, in *sysin.AdminIntroFeeChannelRuleSaveInp) (int64, error)
 	AdminIntroFeeChannelRuleDelete(ctx context.Context, id int64) error
+	IntroFeeChannelBlacklist(ctx context.Context, in *sysin.IntroFeeChannelBlacklistInp) error
+	AdminIntroFeeChannelBlacklist(ctx context.Context, in *sysin.IntroFeeChannelBlacklistInp) error
 	CollectSourceSave(ctx context.Context, in *sysin.CollectSourceSaveInp) (id int64, err error)
 	CollectSourceDelete(ctx context.Context, in *sysin.IdsInp) (err error)
 	CollectSourceStatus(ctx context.Context, in *sysin.CollectStatusInp) (err error)

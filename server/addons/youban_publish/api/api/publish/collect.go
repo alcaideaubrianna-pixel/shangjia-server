@@ -36,6 +36,11 @@ type IntroFeeChannelRuleDeleteReq struct {
 	Id     int64 `json:"id"`
 }
 type IntroFeeChannelRuleDeleteRes struct{}
+type IntroFeeChannelBlacklistReq struct {
+	g.Meta `path:"/publish/collect/intro-fee/channel-rule/blacklist" method:"post" tags:"上架插件" summary:"设置介绍费频道黑名单"`
+	sysin.IntroFeeChannelBlacklistInp
+}
+type IntroFeeChannelBlacklistRes struct{}
 
 type CollectConfigReq struct {
 	g.Meta `path:"/publish/collect/config" method:"get" tags:"上架插件" summary:"采集总开关配置"`

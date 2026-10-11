@@ -296,6 +296,9 @@ func (c *cPublishAdmin) IntroFeeChannelRuleSave(ctx context.Context, req *publis
 func (c *cPublishAdmin) IntroFeeChannelRuleDelete(ctx context.Context, req *publish.AdminIntroFeeChannelRuleDeleteReq) (*publish.AdminIntroFeeChannelRuleDeleteRes, error) {
 	return &publish.AdminIntroFeeChannelRuleDeleteRes{}, service.SysPublish().AdminIntroFeeChannelRuleDelete(ctx, req.Id)
 }
+func (c *cPublishAdmin) IntroFeeChannelBlacklist(ctx context.Context, req *publish.AdminIntroFeeChannelBlacklistReq) (*publish.AdminIntroFeeChannelBlacklistRes, error) {
+	return &publish.AdminIntroFeeChannelBlacklistRes{}, service.SysPublish().AdminIntroFeeChannelBlacklist(ctx, &req.IntroFeeChannelBlacklistInp)
+}
 
 func (c *cPublishAdmin) BotDelete(ctx context.Context, req *publish.AdminBotDeleteReq) (res *publish.AdminBotDeleteRes, err error) {
 	if err = service.SysPublish().AdminBotDelete(ctx, &req.BotDeleteInp); err != nil {
