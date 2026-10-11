@@ -75,12 +75,17 @@ func (h *accountMediaTaskHandler) HandleAccountTask(ctx context.Context, client 
 		if accountMediaReferenceExpired(thumbErr) {
 			if renewed, refreshErr := refreshAccountTaskMedia(ctx, client, provider, task, refreshed); refreshErr == nil {
 				refreshed = renewed
+				task.Media = refreshed
+				result.Media = refreshed
 				thumbPath, thumbErr = transferAccountTaskMediaThumb(ctx, client, task.AccountID, refreshed)
 			}
 		}
 		if thumbErr == nil {
 			defer os.Remove(thumbPath)
 			result.PosterURL, result.PosterPath, thumbErr = provider.StoreMediaPoster(ctx, task, thumbPath)
+			if thumbErr == nil {
+				result.Media.PosterURL = result.PosterURL
+			}
 		}
 		if thumbErr != nil {
 			g.Log().Warningf(ctx, "Telegram视频缩略图处理失败，继续使用FFmpeg兜底 fileId:%s err:%v", refreshed.FileID, thumbErr)
