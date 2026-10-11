@@ -799,6 +799,11 @@ func collectEventRuleMapsToRecords(list []g.Map) []gdb.Record {
 
 func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record) (bool, string, error) {
 	ruleSourceID := collectRuleSourceID(event, rule)
+	if suffix, ok, err := s.resolveIntroFeeChannelSuffix(ctx, event, rule); err != nil {
+		return false, "", err
+	} else if ok {
+		rule["intro_fee_suffix"] = gvar.New(suffix)
+	}
 	decision := buildCollectRuleDecision(event, content, rule)
 	if decision.Skipped || !decision.Matched {
 		s.appendCollectEventLogForRecord(ctx, event, "rule", "skipped", decision.Reason, fmt.Sprintf("rule=%d", rule["id"].Int64()))

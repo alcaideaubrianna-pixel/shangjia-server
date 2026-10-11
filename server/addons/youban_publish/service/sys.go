@@ -320,7 +320,6 @@ type ISysPublish interface {
 	IntroFeeChannelRuleList(ctx context.Context, in *sysin.IntroFeeChannelRuleListInp) (list []*sysin.IntroFeeChannelRuleItem, totalCount int, err error)
 	IntroFeeChannelRuleSave(ctx context.Context, in *sysin.IntroFeeChannelRuleSaveInp) (int64, error)
 	IntroFeeChannelRuleDelete(ctx context.Context, id int64) error
-	CollectBotChannelHistory(ctx context.Context, in *sysin.BotChannelCacheListInp) (list []*sysin.BotChannelCacheModel, totalCount int, err error)
 	CollectSourceSave(ctx context.Context, in *sysin.CollectSourceSaveInp) (id int64, err error)
 	CollectSourceDelete(ctx context.Context, in *sysin.IdsInp) (err error)
 	CollectSourceStatus(ctx context.Context, in *sysin.CollectStatusInp) (err error)

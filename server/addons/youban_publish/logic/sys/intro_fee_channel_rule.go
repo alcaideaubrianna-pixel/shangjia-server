@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -10,6 +11,32 @@ import (
 )
 
 const introFeeChannelRuleTable = "hg_youban_publish_intro_fee_channel_rule"
+
+func (s *sSysPublish) resolveIntroFeeChannelSuffix(ctx context.Context, event gdb.Record, rule gdb.Record) (string, bool, error) {
+	chatID := strings.TrimSpace(event["source_chat_id"].String())
+	if chatID == "" {
+		return "", false, nil
+	}
+	botID := event["bot_id"].Int64()
+	if botID == 0 {
+		botID = rule["bot_id"].Int64()
+	}
+	mod := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).
+		Fields("suffix").Where("tenant_id", event["tenant_id"]).Where("rule_id", rule["id"]).Where("channel_id", chatID).Where("status", 1).WhereNull("deleted_at")
+	if botID > 0 {
+		mod = mod.Where("bot_id", botID)
+	} else {
+		mod = mod.Where("bot_id", 0)
+	}
+	row, err := mod.OrderDesc("id").Limit(1).One()
+	if err != nil {
+		return "", false, gerror.Wrap(err, "读取介绍费频道后缀规则失败")
+	}
+	if row.IsEmpty() {
+		return "", false, nil
+	}
+	return strings.TrimSpace(row["suffix"].String()), true, nil
+}
 
 func (s *sSysPublish) IntroFeeChannelRuleList(ctx context.Context, in *sysin.IntroFeeChannelRuleListInp) (list []*sysin.IntroFeeChannelRuleItem, totalCount int, err error) {
 	account, err := s.currentAccount(ctx)
