@@ -47,12 +47,6 @@ func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	if err := s.recoverPendingCollectMedia(ctx, mediaBatchSize); err != nil {
 		g.Log().Warningf(ctx, "恢复待处理采集媒体任务失败：%+v", err)
 	}
-	if err := s.recoverBotCollectMedia(ctx, mediaBatchSize); err != nil {
-		g.Log().Warningf(ctx, "恢复BOT采集媒体任务失败：%+v", err)
-	}
-	if err := s.ignoreCollectNoticeEvents(ctx, 500); err != nil {
-		g.Log().Warningf(ctx, "清理采集通知消息失败：%+v", err)
-	}
 	if err := s.recoverCollectHistoryTasks(ctx, 20); err != nil {
 		g.Log().Warningf(ctx, "恢复历史采集任务失败：%+v", err)
 	}
@@ -147,6 +141,16 @@ func (s *sSysPublish) recoverBotCollectMedia(ctx context.Context, limit int) err
 		g.Log().Infof(ctx, "BOT媒体事件恢复完成 count:%d", requeued)
 	}
 	return nil
+}
+
+// RepairBotCollectMedia exposes the one-shot historical repair for the CLI.
+func RepairBotCollectMedia(ctx context.Context, limit int) error {
+	return NewSysPublish().recoverBotCollectMedia(ctx, limit)
+}
+
+// IgnoreCollectNoticeEvents exposes the one-shot notification cleanup for the CLI.
+func IgnoreCollectNoticeEvents(ctx context.Context, limit int) error {
+	return NewSysPublish().ignoreCollectNoticeEvents(ctx, limit)
 }
 
 func (s *sSysPublish) ignoreStaleCollectEventsForDisabledSources(ctx context.Context, limit int) error {

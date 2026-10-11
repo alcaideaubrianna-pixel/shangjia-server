@@ -167,6 +167,18 @@ func handleUpgradeFix(ctx context.Context, args map[string]string) (err error) {
 			return repairErr
 		}
 		g.Log().Infof(ctx, "Bot媒体组修复完成 dryRun:%t groups:%d events:%d media:%d requeued:%d groupedIds:%v", strings.TrimSpace(args["apply"]) != "1", result.Groups, result.Events, result.Media, result.Requeued, result.GroupedIDs)
+	case "collectBotMediaRepair":
+		limit, _ := strconv.Atoi(args["limit"])
+		if limit <= 0 {
+			limit = 1000
+		}
+		err = publishsys.RepairBotCollectMedia(ctx, limit)
+	case "collectNoticeCleanup":
+		limit, _ := strconv.Atoi(args["limit"])
+		if limit <= 0 {
+			limit = 1000
+		}
+		err = publishsys.IgnoreCollectNoticeEvents(ctx, limit)
 	case "collectProfileMediaRebuild":
 		profileIDs := make([]int64, 0)
 		for _, value := range strings.Split(args["a2"], ",") {
