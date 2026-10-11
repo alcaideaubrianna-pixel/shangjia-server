@@ -57,11 +57,43 @@ func (s *sSysPublish) AdminRelayChannelCreate(ctx context.Context, in *sysin.Rel
 		return nil, gerror.New("relay 频道缺少 access hash")
 	}
 	target := "-100" + strconv.FormatInt(channel.ID, 10)
-	_, err = g.DB().Model("hg_youban_publish_relay_channel").Ctx(ctx).Data(g.Map{"tenant_id": in.TenantId, "tg_account_id": in.TgAccountId, "channel_id": strconv.FormatInt(channel.ID, 10), "target_chat_id": target, "title": channel.Title, "status": relayChannelStatusDisabled, "health_status": relayChannelHealthUnknown, "bot_permission_status": relayBotPermissionUnknown, "updated_at": time.Now()}).Insert()
+	permissionStatus := relayBotPermissionUnknown
+	if strings.TrimSpace(in.BotUsername) != "" {
+		bot, resolveErr := resolveRelayBot(ctx, client.API(), in.BotUsername)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		inputChannel := &tg.InputChannel{ChannelID: channel.ID, AccessHash: accessHash}
+		if _, err = client.API().ChannelsInviteToChannel(ctx, &tg.ChannelsInviteToChannelRequest{Channel: inputChannel, Users: []tg.InputUserClass{bot}}); err != nil && !strings.Contains(strings.ToUpper(err.Error()), "ALREADY") {
+			return nil, gerror.Wrap(err, "邀请 relay Bot 失败")
+		}
+		if _, err = client.API().ChannelsEditAdmin(ctx, &tg.ChannelsEditAdminRequest{Channel: inputChannel, UserID: bot, AdminRights: tg.ChatAdminRights{PostMessages: true, EditMessages: true, DeleteMessages: true, ChangeInfo: true, Other: true}, Rank: "relay"}); err != nil {
+			return nil, gerror.Wrap(err, "设置 relay Bot 权限失败")
+		}
+		permissionStatus = relayBotPermissionReady
+	}
+	_, err = g.DB().Model("hg_youban_publish_relay_channel").Ctx(ctx).Data(g.Map{"tenant_id": in.TenantId, "tg_account_id": in.TgAccountId, "channel_id": strconv.FormatInt(channel.ID, 10), "target_chat_id": target, "title": channel.Title, "status": relayChannelStatusDisabled, "health_status": relayChannelHealthUnknown, "bot_permission_status": permissionStatus, "updated_at": time.Now()}).Insert()
 	if err != nil {
 		return nil, gerror.Wrap(err, "保存 relay 频道失败")
 	}
-	return &sysin.RelayChannelModel{TenantId: in.TenantId, TgAccountId: in.TgAccountId, TargetChatId: target, Title: channel.Title, Status: relayChannelStatusDisabled}, nil
+	return &sysin.RelayChannelModel{TenantId: in.TenantId, TgAccountId: in.TgAccountId, TargetChatId: target, Title: channel.Title, Status: relayChannelStatusDisabled, BotPermissionStatus: permissionStatus}, nil
+}
+
+func resolveRelayBot(ctx context.Context, api *tg.Client, username string) (*tg.InputUser, error) {
+	username = strings.TrimPrefix(strings.TrimSpace(username), "@")
+	result, err := api.ContactsResolveUsername(ctx, &tg.ContactsResolveUsernameRequest{Username: username})
+	if err != nil {
+		return nil, gerror.Wrap(err, "解析 relay Bot 失败")
+	}
+	for _, item := range result.GetUsers() {
+		if user, ok := item.(*tg.User); ok && user.Bot {
+			hash, ok := user.GetAccessHash()
+			if ok {
+				return &tg.InputUser{UserID: user.ID, AccessHash: hash}, nil
+			}
+		}
+	}
+	return nil, gerror.New("relay Bot 不存在或不是 Bot")
 }
 func (s *sSysPublish) AdminRelayChannelSave(ctx context.Context, in *sysin.RelayChannelSaveInp) error {
 	status := strings.TrimSpace(in.Status)
