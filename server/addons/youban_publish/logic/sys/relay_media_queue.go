@@ -8,6 +8,32 @@ import (
 	"time"
 )
 
+func (s *sSysPublish) prepareRelayMedia(ctx context.Context, media *telegramMediaItem, purpose string) ([]*telegramSentMessage, error) {
+	if media == nil {
+		return nil, gerror.New("relay 媒体为空")
+	}
+	if ready, err := relayReadyMedia(ctx, media.TenantId, media.Id, purpose, "original"); err != nil || ready != nil {
+		return nil, err
+	}
+	if err := s.enqueueRelayMedia(ctx, media, purpose); err != nil {
+		return nil, err
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if ready, err := relayReadyMedia(ctx, media.TenantId, media.Id, purpose, "original"); err != nil {
+			return nil, err
+		} else if ready != nil {
+			return []*telegramSentMessage{{MessageId: ready.MessageId, TgFileId: ready.RelayChatId}}, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+	return nil, gerror.New("relay 媒体上传等待超时")
+}
+
 type relayMediaTaskPayload struct {
 	Media   telegramMediaItem `json:"media"`
 	Purpose string            `json:"purpose"`
@@ -34,6 +60,6 @@ func (s *sSysPublish) handleRelayMediaTask(ctx context.Context, task *asynq.Task
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 		return err
 	}
-	_, err := s.prepareRelayMedia(ctx, &payload.Media, payload.Purpose)
+	_, err := s.uploadRelayMediaNow(ctx, &payload.Media, payload.Purpose)
 	return err
 }

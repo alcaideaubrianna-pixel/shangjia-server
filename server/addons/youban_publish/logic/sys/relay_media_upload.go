@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func (s *sSysPublish) prepareRelayMedia(ctx context.Context, media *telegramMediaItem, purpose string) ([]*telegramSentMessage, error) {
+func (s *sSysPublish) uploadRelayMediaNow(ctx context.Context, media *telegramMediaItem, purpose string) ([]*telegramSentMessage, error) {
 	channel, err := chooseRelayChannel(ctx, media.TenantId)
 	if err != nil || channel == nil {
 		return nil, err
