@@ -717,7 +717,10 @@ type AdminProfileImageSearchReq struct {
 
 type AdminProfileImageSearchRes struct {
 	form.PageRes
-	List []*sysin.NoteModel `json:"list" dc:"笔记列表"`
+	List         []*sysin.NoteModel `json:"list" dc:"笔记列表"`
+	Progress     int                `json:"progress" dc:"搜索进度"`
+	ProgressText string             `json:"progressText" dc:"搜索进度文本"`
+	TraceID      string             `json:"traceId" dc:"搜索追踪号"`
 }
 
 type AdminTgMessageRepairStartReq struct {
@@ -1094,7 +1097,10 @@ type MyProfileImageSearchReq struct {
 
 type MyProfileImageSearchRes struct {
 	form.PageRes
-	List []*sysin.NoteModel `json:"list" dc:"笔记列表"`
+	List         []*sysin.NoteModel `json:"list" dc:"笔记列表"`
+	Progress     int                `json:"progress" dc:"搜索进度"`
+	ProgressText string             `json:"progressText" dc:"搜索进度文本"`
+	TraceID      string             `json:"traceId" dc:"搜索追踪号"`
 }
 
 type MyNoteListReq struct {
