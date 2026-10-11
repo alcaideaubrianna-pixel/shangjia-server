@@ -21,7 +21,7 @@ const introFeeChannelRuleCacheTTL = 10 * time.Minute
 const introFeeChannelCandidateScanLimit = 2000
 
 func introFeeChannelRuleCacheKey(tenant, account, rule, bot int64, channel string) string {
-	return fmt.Sprintf("youban_publish:intro_fee_rule:%d:%d:%d:%d:%s", tenant, account, rule, bot, channel)
+	return fmt.Sprintf("youban_publish:intro_fee_rule:v2:%d:%d:%d:%d:%s", tenant, account, rule, bot, channel)
 }
 
 func (s *sSysPublish) resolveIntroFeeChannelSuffix(ctx context.Context, event gdb.Record, rule gdb.Record) (string, bool, error) {
@@ -44,11 +44,14 @@ func (s *sSysPublish) resolveIntroFeeChannelSuffix(ctx context.Context, event gd
 	mod := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).
 		Fields("suffix").Where("tenant_id", event["tenant_id"]).WhereIn("account_id", []int64{accountID, 0}).Where("rule_id", rule["id"]).WhereIn("channel_id", tgChannelCacheLookupIds(chatID)).Where("status", 1).WhereNull("deleted_at")
 	if botID > 0 {
-		mod = mod.Where("bot_id", botID)
+		// A rule-scoped suffix may be global (bot_id=0), BOT-scoped, or
+		// account-scoped. Keep all applicable scopes and prefer the narrowest
+		// one through the ordering below.
+		mod = mod.WhereIn("bot_id", []int64{botID, 0})
 	} else {
 		mod = mod.Where("bot_id", 0)
 	}
-	row, err := mod.OrderDesc("account_id").OrderDesc("id").Limit(1).One()
+	row, err := mod.OrderDesc("account_id").OrderDesc("bot_id").OrderDesc("id").Limit(1).One()
 	if err != nil {
 		return "", false, gerror.Wrap(err, "读取介绍费频道后缀规则失败")
 	}
