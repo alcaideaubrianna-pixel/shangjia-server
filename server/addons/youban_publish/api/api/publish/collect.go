@@ -16,6 +16,14 @@ type CollectSourceListRes struct {
 	form.PageRes
 	List []*sysin.CollectSourceModel `json:"list" dc:"采集源列表"`
 }
+type IntroFeeChannelRuleListReq struct { g.Meta `path:"/publish/collect/intro-fee/channel-rule/list" method:"get" tags:"上架插件" summary:"介绍费频道后缀规则列表"`; sysin.IntroFeeChannelRuleListInp }
+type IntroFeeChannelRuleListRes struct { form.PageRes; List []*sysin.IntroFeeChannelRuleItem `json:"list"` }
+type IntroFeeChannelRuleSaveReq struct { g.Meta `path:"/publish/collect/intro-fee/channel-rule/save" method:"post" tags:"上架插件" summary:"保存介绍费频道后缀规则"`; sysin.IntroFeeChannelRuleSaveInp }
+type IntroFeeChannelRuleSaveRes struct { Id int64 `json:"id"` }
+type IntroFeeChannelRuleDeleteReq struct { g.Meta `path:"/publish/collect/intro-fee/channel-rule/delete" method:"post" tags:"上架插件" summary:"删除介绍费频道后缀规则"`; Id int64 `json:"id"` }
+type IntroFeeChannelRuleDeleteRes struct{}
+type CollectBotChannelHistoryReq struct { g.Meta `path:"/publish/collect/bot/channel/history" method:"get" tags:"上架插件" summary:"Bot历史频道"`; sysin.BotChannelCacheListInp }
+type CollectBotChannelHistoryRes struct { form.PageRes; List []*sysin.BotChannelCacheModel `json:"list"` }
 
 type CollectConfigReq struct {
 	g.Meta `path:"/publish/collect/config" method:"get" tags:"上架插件" summary:"采集总开关配置"`
