@@ -311,6 +311,38 @@ type AdminChannelListRes struct {
 	List []*sysin.ChannelModel `json:"list" dc:"频道列表"`
 }
 
+type AdminRelayChannelListReq struct {
+	g.Meta `path:"/publish/relay/channel/list" method:"get" tags:"上架插件管理端" summary:"中转频道列表"`
+	sysin.RelayChannelListInp
+}
+
+type AdminRelayChannelListRes struct {
+	List []*sysin.RelayChannelModel `json:"list" dc:"中转频道列表"`
+}
+
+type AdminRelayChannelCreateReq struct {
+	g.Meta `path:"/publish/relay/channel/create" method:"post" tags:"上架插件管理端" summary:"创建中转频道"`
+	sysin.RelayChannelCreateInp
+}
+
+type AdminRelayChannelCreateRes struct {
+	*sysin.RelayChannelModel
+}
+
+type AdminRelayChannelSaveReq struct {
+	g.Meta `path:"/publish/relay/channel/save" method:"post" tags:"上架插件管理端" summary:"保存中转频道"`
+	sysin.RelayChannelSaveInp
+}
+
+type AdminRelayChannelSaveRes struct{}
+
+type AdminRelayChannelStatusReq struct {
+	g.Meta `path:"/publish/relay/channel/status" method:"post" tags:"上架插件管理端" summary:"切换中转频道"`
+	sysin.RelayChannelStatusInp
+}
+
+type AdminRelayChannelStatusRes struct{}
+
 type AdminChannelSaveReq struct {
 	g.Meta `path:"/publish/admin/channel/save" method:"post" tags:"上架插件管理端" summary:"新增或编辑频道"`
 	sysin.ChannelSaveInp

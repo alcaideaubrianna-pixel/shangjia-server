@@ -415,6 +415,32 @@ func (c *cPublishAdmin) ChannelList(ctx context.Context, req *publish.AdminChann
 	return
 }
 
+func (c *cPublishAdmin) RelayChannelList(ctx context.Context, req *publish.AdminRelayChannelListReq) (res *publish.AdminRelayChannelListRes, err error) {
+	list, err := service.SysPublish().AdminRelayChannelList(ctx, &req.RelayChannelListInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.AdminRelayChannelListRes{List: list}, nil
+}
+
+func (c *cPublishAdmin) RelayChannelCreate(ctx context.Context, req *publish.AdminRelayChannelCreateReq) (res *publish.AdminRelayChannelCreateRes, err error) {
+	item, err := service.SysPublish().AdminRelayChannelCreate(ctx, &req.RelayChannelCreateInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.AdminRelayChannelCreateRes{RelayChannelModel: item}, nil
+}
+
+func (c *cPublishAdmin) RelayChannelSave(ctx context.Context, req *publish.AdminRelayChannelSaveReq) (res *publish.AdminRelayChannelSaveRes, err error) {
+	err = service.SysPublish().AdminRelayChannelSave(ctx, &req.RelayChannelSaveInp)
+	return &publish.AdminRelayChannelSaveRes{}, err
+}
+
+func (c *cPublishAdmin) RelayChannelStatus(ctx context.Context, req *publish.AdminRelayChannelStatusReq) (res *publish.AdminRelayChannelStatusRes, err error) {
+	err = service.SysPublish().AdminRelayChannelStatus(ctx, &req.RelayChannelStatusInp)
+	return &publish.AdminRelayChannelStatusRes{}, err
+}
+
 func (c *cPublishAdmin) ChannelSave(ctx context.Context, req *publish.AdminChannelSaveReq) (res *publish.AdminChannelSaveRes, err error) {
 	if err = service.SysPublish().AdminChannelSave(ctx, &req.ChannelSaveInp); err != nil {
 		return nil, err
