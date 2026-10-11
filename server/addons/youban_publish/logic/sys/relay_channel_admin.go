@@ -118,6 +118,16 @@ func (s *sSysPublish) AdminRelayChannelStatus(ctx context.Context, in *sysin.Rel
 	}
 	data := g.Map{"status": in.Status, "updated_at": time.Now()}
 	if in.Status == relayChannelStatusEnabled {
+		var current relayChannelRecord
+		if err := g.DB().Model("hg_youban_publish_relay_channel").Ctx(ctx).WherePri(in.Id).Scan(&current); err != nil {
+			return gerror.Wrap(err, "读取 relay 频道权限失败")
+		}
+		if current.Id == 0 {
+			return gerror.New("relay 频道不存在")
+		}
+		if current.BotPermissionStatus != relayBotPermissionReady {
+			return gerror.New("relay Bot 管理员权限未就绪，不能启用频道")
+		}
 		data["health_status"] = relayChannelHealthReady
 	}
 	_, err := g.DB().Model("hg_youban_publish_relay_channel").Ctx(ctx).WherePri(in.Id).Data(data).Update()
