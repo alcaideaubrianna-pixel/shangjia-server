@@ -48,6 +48,9 @@ func (s *sSysPublish) resolveIntroFeeChannelSuffix(ctx context.Context, event gd
 	if err != nil {
 		return "", false, gerror.Wrap(err, "读取介绍费频道后缀规则失败")
 	}
+	if row.IsEmpty() && botID > 0 {
+		row, err = g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Fields("suffix").Where("tenant_id", event["tenant_id"]).Where("rule_id", 0).Where("bot_id", botID).WhereIn("channel_id", tgChannelCacheLookupIds(chatID)).Where("status", 1).WhereNull("deleted_at").OrderDesc("id").Limit(1).One()
+	}
 	if row.IsEmpty() {
 		_ = cache.Instance().Set(ctx, key, "__none__", time.Minute)
 		return "", false, nil
@@ -161,7 +164,7 @@ func (s *sSysPublish) AdminIntroFeeChannelRuleSave(ctx context.Context, in *sysi
 	if err != nil {
 		return 0, err
 	}
-	if in == nil || in.BotId <= 0 || in.RuleId <= 0 || strings.TrimSpace(in.ChannelId) == "" {
+	if in == nil || in.BotId <= 0 || strings.TrimSpace(in.ChannelId) == "" {
 		return 0, gerror.New("机器人、规则和频道ID不能为空")
 	}
 	channelID := canonicalCollectSourceChatID(in.ChannelId)
