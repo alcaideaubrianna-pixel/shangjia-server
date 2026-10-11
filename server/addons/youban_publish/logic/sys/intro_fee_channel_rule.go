@@ -83,7 +83,24 @@ func (s *sSysPublish) IntroFeeChannelRuleList(ctx context.Context, in *sysin.Int
 		mod = mod.Where("(channel_id LIKE ? OR channel_title LIKE ? OR channel_username LIKE ?)", like, like, like)
 	}
 	err = mod.Page(in.Page, in.PerPage).OrderDesc("updated_at").ScanAndCount(&list, &totalCount, false)
+	s.fillIntroFeeChannelBlacklist(ctx, account.TenantId, account.Id, list)
 	return
+}
+
+func (s *sSysPublish) fillIntroFeeChannelBlacklist(ctx context.Context, tenantID, accountID int64, list []*sysin.IntroFeeChannelRuleItem) {
+	for _, row := range list {
+		if row == nil || row.ChannelId == "" {
+			continue
+		}
+		mod := g.DB().Model(publishCollectSourceTable).Ctx(ctx).Where("tenant_id", tenantID).WhereIn("source_chat_id", tgChannelCacheLookupIds(row.ChannelId))
+		if accountID > 0 {
+			mod = mod.Where("account_id", accountID)
+		}
+		var value int
+		if err := mod.Fields("channel_blacklisted").OrderDesc("id").Limit(1).Scan(&value); err == nil {
+			row.Blacklisted = value != 0
+		}
+	}
 }
 
 // introFeeChannelRuleCandidates combines configured rules with channels already
@@ -132,6 +149,7 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 		seen[id] = struct{}{}
 		configured = append(configured, &sysin.IntroFeeChannelRuleItem{RuleId: ruleID, BotId: botID, ChannelId: id, ChannelTitle: candidate.ChatTitle, ChannelUsername: candidate.ChatUsername, LastSeenAt: candidate.LastSeenAt, Configured: false})
 	}
+	s.fillIntroFeeChannelBlacklist(ctx, tenantID, accountID, configured)
 	if keyword = strings.TrimSpace(keyword); keyword != "" {
 		filtered := configured[:0]
 		lower := strings.ToLower(keyword)
@@ -230,6 +248,7 @@ func (s *sSysPublish) AdminIntroFeeChannelRuleList(ctx context.Context, in *sysi
 		mod = mod.Where("(channel_id LIKE ? OR channel_title LIKE ? OR channel_username LIKE ?)", like, like, like)
 	}
 	err = mod.Page(in.Page, in.PerPage).OrderDesc("updated_at").ScanAndCount(&list, &totalCount, false)
+	s.fillIntroFeeChannelBlacklist(ctx, admin.TenantId, 0, list)
 	return
 }
 
