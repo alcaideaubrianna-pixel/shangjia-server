@@ -193,3 +193,19 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_collect_account_channel_status" ON "hg_youba
 
 ALTER TABLE "hg_youban_publish_collect_source" ADD COLUMN IF NOT EXISTS "channel_id" bigint NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_source_channel_id" ON "hg_youban_publish_collect_source" ("tenant_id","account_id","channel_id","status");
+
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_channel_profile" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "source_id" bigint NOT NULL DEFAULT 0,
+  "rule_id" bigint NOT NULL DEFAULT 0,
+  "channel_id" varchar(128) NOT NULL DEFAULT '',
+  "profile_id" bigint NOT NULL DEFAULT 0,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL,
+  "deleted_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_collect_channel_profile" ON "hg_youban_publish_collect_channel_profile" ("tenant_id","account_id","rule_id","channel_id","profile_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_channel_profile_list" ON "hg_youban_publish_collect_channel_profile" ("tenant_id","account_id","rule_id","channel_id","updated_at") WHERE "deleted_at" IS NULL;

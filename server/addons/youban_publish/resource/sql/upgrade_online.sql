@@ -87,3 +87,19 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_intro_fee_channel_rule` (
  `suffix` varchar(255) NOT NULL DEFAULT '', `status` tinyint NOT NULL DEFAULT 1, `last_seen_at` datetime NULL, `created_at` datetime NULL, `updated_at` datetime NULL, `deleted_at` datetime NULL,
  PRIMARY KEY (`id`), UNIQUE KEY `uk_ybp_intro_fee_channel_rule` (`tenant_id`,`rule_id`,`bot_id`,`channel_id`), KEY `idx_ybp_intro_fee_channel_rule_lookup` (`tenant_id`,`rule_id`,`bot_id`,`channel_id`,`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_channel_profile` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `tenant_id` bigint(20) NOT NULL DEFAULT 0,
+  `account_id` bigint(20) NOT NULL DEFAULT 0,
+  `source_id` bigint(20) NOT NULL DEFAULT 0,
+  `rule_id` bigint(20) NOT NULL DEFAULT 0,
+  `channel_id` varchar(128) NOT NULL DEFAULT '',
+  `profile_id` bigint(20) NOT NULL DEFAULT 0,
+  `created_at` datetime DEFAULT NULL,
+  `updated_at` datetime DEFAULT NULL,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_collect_channel_profile` (`tenant_id`,`account_id`,`rule_id`,`channel_id`,`profile_id`),
+  KEY `idx_ybp_collect_channel_profile_list` (`tenant_id`,`account_id`,`rule_id`,`channel_id`,`updated_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='采集频道资料计数索引';

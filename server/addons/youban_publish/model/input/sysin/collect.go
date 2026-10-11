@@ -368,6 +368,7 @@ type IntroFeeChannelRuleItem struct {
 	ChannelStatus   string      `json:"channelStatus"`
 	BotStatus       string      `json:"botStatus"`
 	AccountStatus   string      `json:"accountStatus"`
+	ProfileCount    int         `json:"profileCount"`
 }
 type IntroFeeChannelRuleSaveInp struct {
 	Id        int64  `json:"id"`
@@ -402,6 +403,22 @@ type IntroFeeChannelBlacklistInp struct {
 	BotId       int64  `json:"botId"`
 	ChannelId   string `json:"channelId"`
 	Blacklisted int    `json:"blacklisted"`
+}
+
+type IntroFeeChannelPurgeInp struct {
+	Id        int64  `json:"id"`
+	AccountId int64  `json:"accountId"`
+	RuleId    int64  `json:"ruleId"`
+	BotId     int64  `json:"botId"`
+	ChannelId string `json:"channelId"`
+	Preview   bool   `json:"preview"`
+}
+
+type IntroFeeChannelPurgeModel struct {
+	ProfileCount int `json:"profileCount"`
+	JobCount     int `json:"jobCount"`
+	MessageCount int `json:"messageCount"`
+	Queued       int `json:"queued"`
 }
 
 func (in *CollectRuleSaveInp) Filter(ctx context.Context) error {

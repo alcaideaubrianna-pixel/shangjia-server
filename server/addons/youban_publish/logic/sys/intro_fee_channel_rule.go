@@ -164,28 +164,24 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 	if err := sourceModel.Fields("source_chat_id, title AS chat_title, source_username AS chat_username, last_event_at AS last_message_at").OrderDesc("updated_at").Limit(introFeeChannelCandidateScanLimit).Scan(&sourceRows); err != nil {
 		return nil, 0, err
 	}
-	// BOT sources are aggregate sources and may not have source_chat_id. In
-	// that case recover historical chats from events, but only through the
-	// current rule's source binding. The source_id predicate keeps this bounded
-	// and prevents channels from unrelated rules leaking into the dialog.
-	if ruleID > 0 {
-		var historicalRows []struct {
-			ChatId     string      `orm:"source_chat_id"`
-			LastSeenAt *gtime.Time `orm:"last_seen_at"`
-		}
-		eventModel := g.DB().Model(publishCollectEventTable+" e").Ctx(ctx).
-			Where("e.tenant_id", tenantID).
-			WhereNot("e.source_chat_id", "").
-			Where("EXISTS (SELECT 1 FROM "+pdao.YoubanPublishCollectSourceRule.Table()+" sr JOIN "+publishCollectSourceTable+" s ON s.id=sr.source_id WHERE sr.rule_id=? AND sr.status=1 AND sr.tenant_id=? AND s.id=e.source_id AND s.account_id=? AND s.deleted_at IS NULL)", ruleID, tenantID, accountID).
-			Group("e.source_chat_id").
-			Fields("e.source_chat_id, MAX(e.received_at) AS last_seen_at").
-			OrderDesc("last_seen_at").Limit(introFeeChannelCandidateScanLimit)
-		if err := eventModel.Scan(&historicalRows); err != nil {
-			return nil, 0, err
-		}
-		for _, historical := range historicalRows {
-			sourceRows = append(sourceRows, sourceCandidate{ChatId: historical.ChatId, LastSeenAt: historical.LastSeenAt})
-		}
+	// Aggregate BOT sources have no source_chat_id. Their compact
+	// channel/profile index replaces the former collect_event history scan.
+	var indexedRows []struct {
+		ChatId       string      `orm:"channel_id"`
+		ProfileCount int         `orm:"profile_count"`
+		LastSeenAt   *gtime.Time `orm:"last_seen_at"`
+	}
+	if err := g.DB().Model(publishCollectChannelProfileTable).Ctx(ctx).
+		Fields("channel_id,COUNT(DISTINCT profile_id) AS profile_count,MAX(updated_at) AS last_seen_at").
+		Where("tenant_id", tenantID).Where("account_id", accountID).Where("rule_id", ruleID).WhereNull("deleted_at").
+		Group("channel_id").OrderDesc("last_seen_at").Limit(introFeeChannelCandidateScanLimit).Scan(&indexedRows); err != nil {
+		return nil, 0, gerror.Wrap(err, "读取频道资料索引失败")
+	}
+	profileCountByChannel := make(map[string]int, len(indexedRows))
+	for _, indexed := range indexedRows {
+		id := canonicalCollectSourceChatID(indexed.ChatId)
+		profileCountByChannel[id] += indexed.ProfileCount
+		sourceRows = append(sourceRows, sourceCandidate{ChatId: id, LastSeenAt: indexed.LastSeenAt})
 	}
 	scopedChatIDs := make([]string, 0, len(sourceRows)*2)
 	for _, source := range sourceRows {
@@ -353,6 +349,7 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 		if row.ChannelLink == "" && row.ChannelUsername != "" {
 			row.ChannelLink = "https://t.me/" + strings.TrimPrefix(row.ChannelUsername, "@")
 		}
+		row.ProfileCount = profileCountByChannel[canonicalCollectSourceChatID(row.ChannelId)]
 	}
 	s.fillIntroFeeChannelBlacklist(ctx, tenantID, accountID, configured)
 	if keyword = strings.TrimSpace(keyword); keyword != "" {

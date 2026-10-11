@@ -2197,3 +2197,28 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_account_channel" (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_collect_account_channel" ON "hg_youban_publish_collect_account_channel" ("tenant_id","account_id","channel_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_account_channel_status" ON "hg_youban_publish_collect_account_channel" ("tenant_id","account_id","status","id");
+
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_channel_profile" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "source_id" bigint NOT NULL DEFAULT 0,
+  "rule_id" bigint NOT NULL DEFAULT 0,
+  "channel_id" varchar(128) NOT NULL DEFAULT '',
+  "profile_id" bigint NOT NULL DEFAULT 0,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL,
+  "deleted_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_collect_channel_profile" ON "hg_youban_publish_collect_channel_profile" ("tenant_id","account_id","rule_id","channel_id","profile_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_channel_profile_list" ON "hg_youban_publish_collect_channel_profile" ("tenant_id","account_id","rule_id","channel_id","updated_at") WHERE "deleted_at" IS NULL;
+INSERT INTO "hg_youban_publish_collect_channel_profile" ("tenant_id","account_id","source_id","rule_id","channel_id","profile_id","created_at","updated_at")
+SELECT d."tenant_id",d."account_id",d."source_id",d."rule_id",
+  CASE WHEN e."source_chat_id" LIKE '-100%' THEN e."source_chat_id" ELSE '-100' || e."source_chat_id" END,
+  d."profile_id",COALESCE(d."created_at",CURRENT_TIMESTAMP),COALESCE(d."updated_at",CURRENT_TIMESTAMP)
+FROM "hg_youban_publish_collect_dispatch" d
+JOIN "hg_youban_publish_collect_event" e ON e."id"=d."event_id" AND e."tenant_id"=d."tenant_id" AND e."account_id"=d."account_id"
+WHERE d."profile_id">0 AND e."source_chat_id"<>'' AND d."rule_id">0
+ON CONFLICT ("tenant_id","account_id","rule_id","channel_id","profile_id") DO UPDATE SET
+  "source_id"=EXCLUDED."source_id","updated_at"=GREATEST("hg_youban_publish_collect_channel_profile"."updated_at",EXCLUDED."updated_at");

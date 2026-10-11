@@ -142,7 +142,14 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 		status, _ := strconv.Atoi(parts[5])
 		owner := s.collectRuleOwnerAccount(ctx, account, ruleID)
 		if action == "channeldelete" {
-			if err := publishService.SysPublish().BotIntroFeeChannelRuleDelete(ctx, rowID, ruleID, owner.TenantId, owner.AccountId); err != nil {
+			item, err := s.collectRuleChannelItem(ctx, botId, owner, ruleID, rowID, parts[4])
+			if err != nil {
+				return true, err
+			}
+			if item == nil {
+				return true, s.sendCollectManageNotice(ctx, botId, chatId, "频道不存在或已被清理。")
+			}
+			if _, err = publishService.SysPublish().BotIntroFeeChannelPurge(ctx, &publishsysin.IntroFeeChannelPurgeInp{Id: rowID, RuleId: ruleID, BotId: botId, ChannelId: item.ChannelId}, owner.TenantId, owner.AccountId); err != nil {
 				return true, err
 			}
 			return true, s.showCollectRuleChannels(ctx, botId, chatId, owner, ruleID, 1)

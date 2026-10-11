@@ -122,6 +122,7 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	backgroundMux.HandleFunc(tgTaskTypeCollectTrigger, s.handleCollectTriggerTask)
 	backgroundMux.HandleFunc(tgTaskTypeChannelMemberSync, s.handleChannelMemberSyncTask)
 	backgroundMux.HandleFunc(tgTaskTypeCollectSourceDown, s.handleCollectSourceDownTask)
+	backgroundMux.HandleFunc(tgTaskTypeCollectChannelPurge, s.handleCollectChannelPurgeTask)
 	backgroundMux.HandleFunc(tgTaskTypeCollectSourceDelete, s.handleCollectSourceDeleteTask)
 	backgroundMux.HandleFunc(tgTaskTypeBotMediaRepair, s.handleBotMediaRepairTask)
 	backgroundMux.HandleFunc(tgTaskTypeAttemptTimeout, s.handleTelegramAttemptTimeoutTask)
@@ -442,6 +443,14 @@ func (s *sSysPublish) handleCollectSourceDownTask(ctx context.Context, task *asy
 	}
 	_, err = s.ExecuteCollectSourceDown(ctx, payload.SourceId, payload.TenantId, payload.AccountId, payload.DeleteProfiles)
 	return err
+}
+
+func (s *sSysPublish) handleCollectChannelPurgeTask(ctx context.Context, task *asynq.Task) error {
+	payload, err := decodeCollectChannelPurgeQueuePayload(task)
+	if err != nil {
+		return err
+	}
+	return s.ExecuteCollectChannelPurge(ctx, payload)
 }
 
 func (s *sSysPublish) handleCollectSourceDeleteTask(ctx context.Context, task *asynq.Task) error {

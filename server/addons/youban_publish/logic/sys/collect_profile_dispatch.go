@@ -102,6 +102,13 @@ func (s *sSysPublish) submitCollectProfileDispatch(ctx context.Context, dispatch
 	}).Update(); err != nil {
 		return gerror.Wrap(err, "更新采集分发资料失败")
 	}
+	dispatch, queryErr := pdao.YoubanPublishCollectDispatch.Ctx(ctx).Fields("rule_id,source_id").Where("id", dispatchId).One()
+	if queryErr != nil {
+		return gerror.Wrap(queryErr, "读取采集分发索引参数失败")
+	}
+	if err = indexCollectChannelProfile(ctx, event["tenant_id"].Int64(), event["account_id"].Int64(), dispatch["source_id"].Int64(), dispatch["rule_id"].Int64(), profileId, event["source_chat_id"].String()); err != nil {
+		return err
+	}
 	meta := telegramProfilePublishMeta{
 		CollectEventId:         event["id"].Int64(),
 		CollectSourceId:        event["source_id"].Int64(),

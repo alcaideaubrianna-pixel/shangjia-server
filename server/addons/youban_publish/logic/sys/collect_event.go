@@ -344,7 +344,25 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 	if source["channel_blacklisted"].Int() != 0 {
 		return s.ignoreCollectEvent(ctx, eventId, "采集频道已禁用", "source")
 	}
-	if channelID := source["channel_id"].Int64(); channelID > 0 {
+	channelID := source["channel_id"].Int64()
+	if channelID <= 0 {
+		var channel struct {
+			ID int64 `json:"id"`
+		}
+		lookupErr := pdao.YoubanPublishCollectChannel.Ctx(ctx).
+			Fields(pdao.YoubanPublishCollectChannel.Columns().Id).
+			Where(pdao.YoubanPublishCollectChannel.Columns().TenantId, tenantId).
+			WhereIn(pdao.YoubanPublishCollectChannel.Columns().TelegramChatId, tgChannelCacheLookupIds(event["source_chat_id"].String())).
+			WhereNull(pdao.YoubanPublishCollectChannel.Columns().DeletedAt).
+			OrderDesc(pdao.YoubanPublishCollectChannel.Columns().Id).
+			Limit(1).
+			Scan(&channel)
+		if lookupErr != nil {
+			return gerror.Wrap(lookupErr, "读取事件采集频道失败")
+		}
+		channelID = channel.ID
+	}
+	if channelID > 0 {
 		if botID := source["bot_id"].Int64(); botID > 0 {
 			var botRelation struct {
 				Status string `json:"status"`

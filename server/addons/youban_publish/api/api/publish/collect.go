@@ -41,6 +41,13 @@ type IntroFeeChannelBlacklistReq struct {
 	sysin.IntroFeeChannelBlacklistInp
 }
 type IntroFeeChannelBlacklistRes struct{}
+type IntroFeeChannelPurgeReq struct {
+	g.Meta `path:"/intro-fee/channel-rule/purge" method:"post" tags:"采集规则" summary:"删除并下架频道资料"`
+	sysin.IntroFeeChannelPurgeInp
+}
+type IntroFeeChannelPurgeRes struct {
+	*sysin.IntroFeeChannelPurgeModel
+}
 
 type CollectConfigReq struct {
 	g.Meta `path:"/publish/collect/config" method:"get" tags:"上架插件" summary:"采集总开关配置"`

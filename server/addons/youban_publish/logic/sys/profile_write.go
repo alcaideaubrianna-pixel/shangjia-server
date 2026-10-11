@@ -283,6 +283,9 @@ func (s *sSysPublish) deleteProfiles(ctx context.Context, in *sysin.ProfileDelet
 		if _, txErr := tx.Model(dao.ContentProfile.Table()).Ctx(ctx).WhereIn(columns.Id, ids).Unscoped().Delete(); txErr != nil {
 			return gerror.Wrap(txErr, "删除资料失败")
 		}
+		if _, txErr := tx.Model(publishCollectChannelProfileTable).Ctx(ctx).WhereIn("profile_id", ids).Delete(); txErr != nil {
+			return gerror.Wrap(txErr, "清理频道资料计数失败")
+		}
 		return nil
 	}); err != nil {
 		return err

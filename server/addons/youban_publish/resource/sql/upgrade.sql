@@ -944,3 +944,19 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_relay_media` (
   PRIMARY KEY (`id`), UNIQUE KEY `uk_ybp_relay_media_key` (`tenant_id`,`media_id`,`purpose`,`media_version`),
   KEY `idx_ybp_relay_media_ready` (`tenant_id`,`media_id`,`purpose`,`status`), KEY `idx_ybp_relay_media_lease` (`status`,`lease_until`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Telegram中转媒体索引';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_channel_profile` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `tenant_id` bigint(20) NOT NULL DEFAULT 0,
+  `account_id` bigint(20) NOT NULL DEFAULT 0,
+  `source_id` bigint(20) NOT NULL DEFAULT 0,
+  `rule_id` bigint(20) NOT NULL DEFAULT 0,
+  `channel_id` varchar(128) NOT NULL DEFAULT '',
+  `profile_id` bigint(20) NOT NULL DEFAULT 0,
+  `created_at` datetime DEFAULT NULL,
+  `updated_at` datetime DEFAULT NULL,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_collect_channel_profile` (`tenant_id`,`account_id`,`rule_id`,`channel_id`,`profile_id`),
+  KEY `idx_ybp_collect_channel_profile_list` (`tenant_id`,`account_id`,`rule_id`,`channel_id`,`updated_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='采集频道资料计数索引';

@@ -323,6 +323,8 @@ type ISysPublish interface {
 	AdminIntroFeeChannelRuleList(ctx context.Context, in *sysin.AdminIntroFeeChannelRuleListInp) (list []*sysin.IntroFeeChannelRuleItem, totalCount int, err error)
 	AdminIntroFeeChannelRuleSave(ctx context.Context, in *sysin.AdminIntroFeeChannelRuleSaveInp) (int64, error)
 	AdminIntroFeeChannelRuleDelete(ctx context.Context, id int64) error
+	IntroFeeChannelPurge(ctx context.Context, in *sysin.IntroFeeChannelPurgeInp) (*sysin.IntroFeeChannelPurgeModel, error)
+	AdminIntroFeeChannelPurge(ctx context.Context, in *sysin.IntroFeeChannelPurgeInp) (*sysin.IntroFeeChannelPurgeModel, error)
 	IntroFeeChannelBlacklist(ctx context.Context, in *sysin.IntroFeeChannelBlacklistInp) error
 	AdminIntroFeeChannelBlacklist(ctx context.Context, in *sysin.IntroFeeChannelBlacklistInp) error
 	CollectSourceSave(ctx context.Context, in *sysin.CollectSourceSaveInp) (id int64, err error)
@@ -346,6 +348,7 @@ type ISysPublish interface {
 	BotIntroFeeChannelRuleSave(ctx context.Context, in *sysin.IntroFeeChannelRuleSaveInp, tenantId, accountId int64) (int64, error)
 	BotIntroFeeChannelRuleList(ctx context.Context, in *sysin.IntroFeeChannelRuleListInp, tenantId, accountId int64) (list []*sysin.IntroFeeChannelRuleItem, total int, err error)
 	BotIntroFeeChannelRuleDelete(ctx context.Context, id, ruleId, tenantId, accountId int64) error
+	BotIntroFeeChannelPurge(ctx context.Context, in *sysin.IntroFeeChannelPurgeInp, tenantId, accountId int64) (*sysin.IntroFeeChannelPurgeModel, error)
 	CollectRuleDelete(ctx context.Context, in *sysin.IdsInp) (err error)
 	CollectEventList(ctx context.Context, in *sysin.CollectEventListInp) (list []*sysin.CollectEventModel, totalCount int, err error)
 	CollectEventLogList(ctx context.Context, in *sysin.CollectEventLogListInp) (list []*sysin.CollectEventLogModel, totalCount int, err error)
