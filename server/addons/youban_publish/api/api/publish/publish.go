@@ -188,6 +188,26 @@ type AdminBotSaveReq struct {
 }
 
 type AdminBotSaveRes struct{}
+type AdminIntroFeeChannelRuleListReq struct {
+	g.Meta `path:"/publish/admin/bot/intro-fee/channel-rule/list" method:"get" tags:"上架插件管理端" summary:"机器人介绍费频道规则列表"`
+	sysin.AdminIntroFeeChannelRuleListInp
+}
+type AdminIntroFeeChannelRuleListRes struct {
+	form.PageRes
+	List []*sysin.IntroFeeChannelRuleItem `json:"list"`
+}
+type AdminIntroFeeChannelRuleSaveReq struct {
+	g.Meta `path:"/publish/admin/bot/intro-fee/channel-rule/save" method:"post" tags:"上架插件管理端" summary:"保存机器人介绍费频道规则"`
+	sysin.AdminIntroFeeChannelRuleSaveInp
+}
+type AdminIntroFeeChannelRuleSaveRes struct {
+	Id int64 `json:"id"`
+}
+type AdminIntroFeeChannelRuleDeleteReq struct {
+	g.Meta `path:"/publish/admin/bot/intro-fee/channel-rule/delete" method:"post" tags:"上架插件管理端"`
+	Id     int64 `json:"id"`
+}
+type AdminIntroFeeChannelRuleDeleteRes struct{}
 
 type AdminBotDeleteReq struct {
 	g.Meta `path:"/publish/admin/bot/delete" method:"post" tags:"上架插件管理端" summary:"删除Bot"`

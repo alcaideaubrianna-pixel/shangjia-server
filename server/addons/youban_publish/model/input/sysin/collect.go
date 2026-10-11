@@ -370,6 +370,20 @@ type IntroFeeChannelRuleSaveInp struct {
 	Suffix    string `json:"suffix"`
 	Status    int    `json:"status"`
 }
+type AdminIntroFeeChannelRuleListInp struct {
+	form.PageReq
+	BotId   int64  `json:"botId"`
+	RuleId  int64  `json:"ruleId"`
+	Keyword string `json:"keyword"`
+}
+type AdminIntroFeeChannelRuleSaveInp struct {
+	Id        int64  `json:"id"`
+	BotId     int64  `json:"botId"`
+	RuleId    int64  `json:"ruleId"`
+	ChannelId string `json:"channelId"`
+	Suffix    string `json:"suffix"`
+	Status    int    `json:"status"`
+}
 
 func (in *CollectRuleSaveInp) Filter(ctx context.Context) error {
 	in.Name = strings.TrimSpace(in.Name)
