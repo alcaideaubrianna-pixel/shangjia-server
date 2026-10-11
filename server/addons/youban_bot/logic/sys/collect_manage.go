@@ -24,6 +24,21 @@ func (s *sSysBot) collectManageAllowed(ctx context.Context, account *botProfileA
 	return err == nil && status != nil && status.IsVip
 }
 
+func (s *sSysBot) collectRuleOwnerAccount(ctx context.Context, account *botProfileAccount, ruleID int64) *botProfileAccount {
+	if account == nil || account.AccountType != "admin" || ruleID <= 0 {
+		return account
+	}
+	var owner struct {
+		AccountId int64 `json:"accountId"`
+	}
+	if err := g.DB().Model("hg_youban_publish_collect_rule").Ctx(ctx).Fields("account_id").Where("id", ruleID).Where("tenant_id", account.TenantId).WhereNull("deleted_at").Scan(&owner); err != nil || owner.AccountId <= 0 || owner.AccountId == account.AccountId {
+		return account
+	}
+	resolved := *account
+	resolved.AccountId = owner.AccountId
+	return &resolved
+}
+
 // handleCollectManageCallback provides the BOT entry point for collection-source
 // management. Business mutations are delegated to existing publish services;
 // this handler currently implements paginated browsing and safe action prompts.
@@ -37,6 +52,23 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 		action = parts[1]
 	}
 	switch action {
+	case "channelapprove", "channelreject":
+		if account.AccountType != "admin" || len(parts) < 3 {
+			return true, nil
+		}
+		relationID, _ := strconv.ParseInt(parts[2], 10, 64)
+		sourceID, err := publishService.SysPublish().BotCollectChannelApproval(ctx, relationID, account.TenantId, account.AccountId, action == "channelapprove")
+		if err != nil {
+			return true, err
+		}
+		if action == "channelapprove" {
+			buttons := [][]models.InlineKeyboardButton{
+				{{Text: "配置介绍费后缀", CallbackData: fmt.Sprintf("cm:config:%d", sourceID)}},
+				{{Text: "暂不设置", CallbackData: "cm:list:1"}},
+			}
+			return true, s.sendCollectManageMarkup(ctx, botId, chatId, "已允许采集该频道。是否现在配置介绍费后缀？", buttons)
+		}
+		return true, s.sendCollectManageNotice(ctx, botId, chatId, "已拒绝采集该频道，后续消息将直接忽略。")
 	case "approve", "reject":
 		if account.AccountType != "admin" || len(parts) < 3 {
 			return true, nil
@@ -46,7 +78,11 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 			return true, err
 		}
 		if action == "approve" {
-			return true, s.sendCollectManageNotice(ctx, botId, chatId, "已允许采集该频道。介绍费后缀可在采集配置的规则中继续修改。")
+			buttons := [][]models.InlineKeyboardButton{
+				{{Text: "配置介绍费后缀", CallbackData: fmt.Sprintf("cm:config:%d", sourceID)}},
+				{{Text: "暂不设置", CallbackData: "cm:list:1"}},
+			}
+			return true, s.sendCollectManageMarkup(ctx, botId, chatId, "已允许采集该频道。是否现在配置介绍费后缀？", buttons)
 		}
 		return true, s.sendCollectManageNotice(ctx, botId, chatId, "已拒绝采集该频道，后续消息将直接忽略。")
 	case "list":
@@ -79,25 +115,53 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 			return true, nil
 		}
 		ruleID, _ := strconv.ParseInt(parts[2], 10, 64)
-		return true, s.showCollectRuleEditor(ctx, botId, chatId, account, ruleID)
+		return true, s.showCollectRuleEditor(ctx, botId, chatId, s.collectRuleOwnerAccount(ctx, account, ruleID), ruleID)
+	case "channels":
+		if account.AccountType != "admin" || len(parts) < 3 {
+			return true, nil
+		}
+		ruleID, _ := strconv.ParseInt(parts[2], 10, 64)
+		return true, s.showCollectRuleChannels(ctx, botId, chatId, s.collectRuleOwnerAccount(ctx, account, ruleID), ruleID)
+	case "addchannel":
+		if account.AccountType != "admin" || len(parts) < 3 {
+			return true, nil
+		}
+		ruleID, _ := strconv.ParseInt(parts[2], 10, 64)
+		owner := s.collectRuleOwnerAccount(ctx, account, ruleID)
+		return true, s.startProfileSessionByIds(ctx, botId, telegramUserIdFromCtx(ctx), chatId, account, "collect_channel_add", "waiting_value", ruleID, "", map[string]interface{}{"ruleId": ruleID, "botId": botId, "accountId": owner.AccountId}, "请输入：频道ID 后缀\n例如：-1001234567890 新后缀")
+	case "channeledit":
+		if account.AccountType != "admin" || len(parts) < 4 {
+			return true, nil
+		}
+		ruleID, _ := strconv.ParseInt(parts[2], 10, 64)
+		channelID := strings.TrimSpace(parts[3])
+		if ruleID <= 0 || channelID == "" {
+			return true, nil
+		}
+		rowID := int64(0)
+		if len(parts) > 4 {
+			rowID, _ = strconv.ParseInt(parts[4], 10, 64)
+		}
+		owner := s.collectRuleOwnerAccount(ctx, account, ruleID)
+		return true, s.startProfileSessionByIds(ctx, botId, telegramUserIdFromCtx(ctx), chatId, account, "collect_channel_add", "waiting_value", ruleID, "", map[string]interface{}{"ruleId": ruleID, "botId": botId, "accountId": owner.AccountId, "channelId": channelID, "id": rowID}, "请输入新的后缀\n例如：新后缀")
 	case "ruleswitch":
 		if account.AccountType != "admin" || len(parts) < 4 {
 			return true, nil
 		}
 		ruleID, _ := strconv.ParseInt(parts[2], 10, 64)
-		return true, s.toggleCollectRuleField(ctx, botId, chatId, account, ruleID, parts[3])
+		return true, s.toggleCollectRuleField(ctx, botId, chatId, s.collectRuleOwnerAccount(ctx, account, ruleID), ruleID, parts[3])
 	case "edit":
 		if account.AccountType != "admin" || len(parts) < 4 {
 			return true, nil
 		}
 		ruleID, _ := strconv.ParseInt(parts[2], 10, 64)
-		return true, s.showCollectRuleField(ctx, botId, chatId, account, ruleID, parts[3])
+		return true, s.showCollectRuleField(ctx, botId, chatId, s.collectRuleOwnerAccount(ctx, account, ruleID), ruleID, parts[3])
 	case "editstart":
 		if account.AccountType != "admin" || len(parts) < 4 {
 			return true, nil
 		}
 		ruleID, _ := strconv.ParseInt(parts[2], 10, 64)
-		return true, s.startCollectRuleEdit(ctx, botId, chatId, account, ruleID, parts[3])
+		return true, s.startCollectRuleEdit(ctx, botId, chatId, s.collectRuleOwnerAccount(ctx, account, ruleID), ruleID, parts[3])
 	case "editconfirm":
 		session := s.activeProfileSessionByIds(ctx, botId, telegramUserIdFromCtx(ctx), chatId)
 		if session == nil || session.Scene != "collect_rule_edit" {
@@ -230,7 +294,11 @@ func (s *sSysBot) sendCollectManageNotice(ctx context.Context, botId int64, chat
 // publish service in the admin flow, keeping BOT and HTTP paths consistent.
 func (s *sSysBot) showCollectSourceConfig(ctx context.Context, botId int64, chatId string, account *botProfileAccount, sourceID int64) error {
 	var src publishsysin.CollectSourceModel
-	if err := g.DB().Model("hg_youban_publish_collect_source").Ctx(ctx).Where("id", sourceID).Where("tenant_id", account.TenantId).Where("account_id", account.AccountId).WhereNull("deleted_at").Scan(&src); err != nil {
+	mod := g.DB().Model("hg_youban_publish_collect_source").Ctx(ctx).Where("id", sourceID).Where("tenant_id", account.TenantId).WhereNull("deleted_at")
+	if account.AccountType != "admin" {
+		mod = mod.Where("account_id", account.AccountId)
+	}
+	if err := mod.Scan(&src); err != nil {
 		return err
 	}
 	var bindings []struct {
@@ -248,7 +316,8 @@ func (s *sSysBot) showCollectSourceConfig(ctx context.Context, botId int64, chat
 	text := fmt.Sprintf("采集配置：%s\n规则数量：%d", src.Title, len(src.RuleIds))
 	buttons := make([][]models.InlineKeyboardButton, 0, len(src.RuleIds)+1)
 	for _, rid := range src.RuleIds {
-		rule, err := publishService.SysPublish().BotCollectRuleView(ctx, rid, account.TenantId, account.AccountId)
+		owner := s.collectRuleOwnerAccount(ctx, account, rid)
+		rule, err := publishService.SysPublish().BotCollectRuleView(ctx, rid, owner.TenantId, owner.AccountId)
 		if err != nil || rule == nil {
 			continue
 		}
@@ -280,11 +349,58 @@ func (s *sSysBot) showCollectRuleEditor(ctx context.Context, botId int64, chatId
 		{{Text: fmt.Sprintf("文本替换（%d条）", len(r.Replacements)), CallbackData: fmt.Sprintf("cm:edit:%d:replace", ruleID)}},
 		{{Text: "费用清理 · " + onOff(r.TruncateIntroFeeEnabled), CallbackData: fmt.Sprintf("cm:ruleswitch:%d:fee", ruleID)}},
 		{{Text: "介绍费后缀 · " + onOff(r.IntroFeeSuffixEnabled), CallbackData: fmt.Sprintf("cm:edit:%d:intro_suffix", ruleID)}},
+		{{Text: "频道后缀配置", CallbackData: fmt.Sprintf("cm:channels:%d", ruleID)}},
+		{{Text: "添加频道后缀", CallbackData: fmt.Sprintf("cm:addchannel:%d", ruleID)}},
 		{{Text: "前置文案 · " + onOff(r.HeaderEnabled), CallbackData: fmt.Sprintf("cm:edit:%d:header", ruleID)}},
 		{{Text: "后置文案 · " + onOff(r.FooterEnabled), CallbackData: fmt.Sprintf("cm:edit:%d:footer", ruleID)}},
 		{{Text: "返回采集配置", CallbackData: "cm:list:1"}},
 		{{Text: "返回资料管理", CallbackData: "cm:back"}},
 	}
+	row, err := s.botById(ctx, botId)
+	if err != nil {
+		return err
+	}
+	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, text, "HTML", false, &models.InlineKeyboardMarkup{InlineKeyboard: buttons})
+	return err
+}
+
+func (s *sSysBot) showCollectRuleChannels(ctx context.Context, botId int64, chatId string, account *botProfileAccount, ruleID int64) error {
+	in := &publishsysin.IntroFeeChannelRuleListInp{RuleId: ruleID, BotId: botId, IncludeCandidates: true}
+	in.Page = 1
+	in.PerPage = 20
+	rows, total, err := publishService.SysPublish().BotIntroFeeChannelRuleList(ctx, in, account.TenantId, account.AccountId)
+	if err != nil {
+		return err
+	}
+	lines := []string{fmt.Sprintf("频道后缀配置（共 %d 个）", total)}
+	buttons := make([][]models.InlineKeyboardButton, 0, len(rows)+2)
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		name := row.ChannelTitle
+		if name == "" {
+			name = row.ChannelId
+		}
+		if row.ChannelLink != "" {
+			name += " · " + row.ChannelLink
+		}
+		suffix := row.Suffix
+		if suffix == "" {
+			suffix = "未配置"
+		}
+		status := row.AccountStatus
+		if status == "" {
+			status = "待配置"
+		}
+		lines = append(lines, fmt.Sprintf("%s（%s） · %s · %s", name, row.ChannelId, suffix, status))
+		buttons = append(buttons, []models.InlineKeyboardButton{{Text: "修改 " + row.ChannelId, CallbackData: fmt.Sprintf("cm:channeledit:%d:%s:%d", ruleID, row.ChannelId, row.Id)}})
+	}
+	buttons = append(buttons, []models.InlineKeyboardButton{{Text: "返回规则", CallbackData: fmt.Sprintf("cm:rule:%d", ruleID)}})
+	return s.sendCollectManageMarkup(ctx, botId, chatId, strings.Join(lines, "\n"), buttons)
+}
+
+func (s *sSysBot) sendCollectManageMarkup(ctx context.Context, botId int64, chatId, text string, buttons [][]models.InlineKeyboardButton) error {
 	row, err := s.botById(ctx, botId)
 	if err != nil {
 		return err
@@ -391,20 +507,27 @@ func (s *sSysBot) startCollectRuleEdit(ctx context.Context, botId int64, chatId 
 		example = "原文>替换,原文A>替换B"
 	}
 	prompt := fmt.Sprintf("规则：%s\n配置项：%s\n\n当前配置：\n<blockquote>%s</blockquote>\n\n请发送新配置，多个内容使用逗号分隔。\n例如：%s\n\n发送 /cancel 取消。", html.EscapeString(r.Name), html.EscapeString(collectRuleFieldLabel(field)), html.EscapeString(value), html.EscapeString(example))
-	return s.startProfileSessionByIds(ctx, botId, telegramUserIdFromCtx(ctx), chatId, account, "collect_rule_edit", field, ruleID, "", map[string]interface{}{"field": field}, prompt)
+	return s.startProfileSessionByIds(ctx, botId, telegramUserIdFromCtx(ctx), chatId, account, "collect_rule_edit", field, ruleID, "", map[string]interface{}{"field": field, "accountId": account.AccountId}, prompt)
 }
 
 func (s *sSysBot) handleCollectRuleEditSession(ctx context.Context, botId int64, chatId string, account *botProfileAccount, session *profileSessionRow, text string) error {
-	r, err := publishService.SysPublish().BotCollectRuleView(ctx, session.ProfileId, account.TenantId, account.AccountId)
+	var payload struct {
+		Field     string `json:"field"`
+		AccountId int64  `json:"accountId"`
+	}
+	_ = json.Unmarshal([]byte(session.PayloadJson), &payload)
+	ownerAccountID := payload.AccountId
+	if ownerAccountID <= 0 {
+		ownerAccountID = account.AccountId
+	}
+	owner := *account
+	owner.AccountId = ownerAccountID
+	r, err := publishService.SysPublish().BotCollectRuleView(ctx, session.ProfileId, owner.TenantId, owner.AccountId)
 	if err != nil {
 		return err
 	}
-	var payload struct {
-		Field string `json:"field"`
-	}
-	_ = json.Unmarshal([]byte(session.PayloadJson), &payload)
 	if session.Step != "confirming" {
-		payloadJSON, _ := json.Marshal(map[string]string{"field": payload.Field, "draft": text})
+		payloadJSON, _ := json.Marshal(map[string]interface{}{"field": payload.Field, "draft": text, "accountId": ownerAccountID})
 		_, err = g.DB().Model(profileSessionTable).Ctx(ctx).Where("id", session.Id).Data(g.Map{"payload_json": string(payloadJSON), "updated_at": gtime.Now()}).Update()
 		if err != nil {
 			return err
@@ -443,11 +566,11 @@ func (s *sSysBot) handleCollectRuleEditSession(ctx context.Context, botId int64,
 			in.Replacements = append(in.Replacements, publishsysin.CollectRuleReplaceModel{From: strings.TrimSpace(p[0]), To: strings.TrimSpace(p[1])})
 		}
 	}
-	if _, err = publishService.SysPublish().BotCollectRuleSave(ctx, in, account.TenantId, account.AccountId); err != nil {
+	if _, err = publishService.SysPublish().BotCollectRuleSave(ctx, in, owner.TenantId, owner.AccountId); err != nil {
 		return err
 	}
 	_ = s.completeProfileSession(ctx, session.Id)
-	return s.showCollectRuleEditor(ctx, botId, chatId, account, session.ProfileId)
+	return s.showCollectRuleEditor(ctx, botId, chatId, &owner, session.ProfileId)
 }
 
 func splitCollectBotValues(text string) []string {

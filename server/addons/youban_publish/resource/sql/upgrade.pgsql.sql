@@ -97,6 +97,75 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_collect_source_channel_rule"
   ON "hg_youban_publish_collect_source" ("tenant_id", "account_id", "source_chat_id", "channel_blacklisted");
 
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_source_bot_scope" ON "hg_youban_publish_collect_source" ("bot_id", "bot_collect_scope", "source_chat_id", "status");
+ALTER TABLE "hg_youban_publish_collect_source" ADD COLUMN IF NOT EXISTS "channel_id" bigint NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_source_channel_id" ON "hg_youban_publish_collect_source" ("tenant_id", "account_id", "channel_id", "status");
+
+-- Historical channel backfill. Run this maintenance migration outside the
+-- interactive online-upgrade path because it reads and updates existing data.
+UPDATE "hg_youban_publish_intro_fee_channel_rule" r SET "account_id"=cr."account_id"
+FROM "hg_youban_publish_collect_rule" cr
+WHERE r."account_id"=0 AND r."rule_id"=cr."id" AND r."tenant_id"=cr."tenant_id";
+
+INSERT INTO "hg_youban_publish_collect_channel" ("tenant_id","telegram_chat_id","chat_type","title","username","is_broadcast","is_megagroup","last_message_at","last_seen_at","status","created_at","updated_at")
+SELECT DISTINCT ON ("tenant_id", CASE WHEN "chat_id" ~ '^[0-9]{10,}$' THEN '-100'||"chat_id" ELSE "chat_id" END)
+  "tenant_id",CASE WHEN "chat_id" ~ '^[0-9]{10,}$' THEN '-100'||"chat_id" ELSE "chat_id" END,
+  "chat_type","chat_title","chat_username","is_broadcast","is_megagroup","last_message_at","last_message_at",'active',COALESCE("created_at",NOW()),COALESCE("updated_at",NOW())
+FROM "hg_youban_publish_bot_channel_cache"
+WHERE COALESCE("chat_id",'') <> ''
+ORDER BY "tenant_id", CASE WHEN "chat_id" ~ '^[0-9]{10,}$' THEN '-100'||"chat_id" ELSE "chat_id" END, "last_message_at" DESC NULLS LAST, "id" DESC
+ON CONFLICT ("tenant_id","telegram_chat_id") DO UPDATE SET
+  "chat_type"=EXCLUDED."chat_type", "title"=EXCLUDED."title", "username"=EXCLUDED."username",
+  "is_broadcast"=EXCLUDED."is_broadcast", "is_megagroup"=EXCLUDED."is_megagroup",
+  "last_message_at"=EXCLUDED."last_message_at", "last_seen_at"=EXCLUDED."last_seen_at", "updated_at"=EXCLUDED."updated_at";
+
+INSERT INTO "hg_youban_publish_collect_channel" ("tenant_id","telegram_chat_id","chat_type","title","username","status","created_at","updated_at")
+SELECT DISTINCT ON ("tenant_id", CASE WHEN "source_chat_id" ~ '^[0-9]{10,}$' THEN '-100'||"source_chat_id" ELSE "source_chat_id" END)
+  "tenant_id",CASE WHEN "source_chat_id" ~ '^[0-9]{10,}$' THEN '-100'||"source_chat_id" ELSE "source_chat_id" END,
+  'channel',COALESCE(NULLIF("title",''),"source_chat_id"),COALESCE("source_username",''),'active',COALESCE("created_at",NOW()),COALESCE("updated_at",NOW())
+FROM "hg_youban_publish_collect_source"
+WHERE COALESCE("source_chat_id",'') <> '' AND "deleted_at" IS NULL
+ORDER BY "tenant_id", CASE WHEN "source_chat_id" ~ '^[0-9]{10,}$' THEN '-100'||"source_chat_id" ELSE "source_chat_id" END, "updated_at" DESC NULLS LAST, "id" DESC
+ON CONFLICT ("tenant_id","telegram_chat_id") DO UPDATE SET
+  "title"=CASE WHEN "hg_youban_publish_collect_channel"."title"='' THEN EXCLUDED."title" ELSE "hg_youban_publish_collect_channel"."title" END,
+  "username"=CASE WHEN "hg_youban_publish_collect_channel"."username"='' THEN EXCLUDED."username" ELSE "hg_youban_publish_collect_channel"."username" END,
+  "updated_at"=GREATEST(COALESCE("hg_youban_publish_collect_channel"."updated_at",EXCLUDED."updated_at"),EXCLUDED."updated_at");
+
+INSERT INTO "hg_youban_publish_collect_bot_channel" ("tenant_id","bot_id","channel_id","status","first_seen_at","last_seen_at","created_at","updated_at")
+SELECT c."tenant_id", c."bot_id", ch."id", 'discovered', MIN(c."created_at"), MAX(c."last_message_at"), MIN(c."created_at"), MAX(c."updated_at")
+FROM "hg_youban_publish_bot_channel_cache" c
+JOIN "hg_youban_publish_collect_channel" ch ON ch."tenant_id"=c."tenant_id" AND regexp_replace(ch."telegram_chat_id", '^-100', '')=regexp_replace(c."chat_id", '^-100', '')
+GROUP BY c."tenant_id", c."bot_id", ch."id"
+ON CONFLICT ("tenant_id","bot_id","channel_id") DO UPDATE SET "last_seen_at"=EXCLUDED."last_seen_at", "updated_at"=EXCLUDED."updated_at";
+
+UPDATE "hg_youban_publish_collect_source" s
+SET "channel_id"=ch."id"
+FROM "hg_youban_publish_collect_channel" ch
+WHERE s."channel_id"=0 AND s."tenant_id"=ch."tenant_id" AND regexp_replace(s."source_chat_id", '^-100', '')=regexp_replace(ch."telegram_chat_id", '^-100', '') AND s."source_chat_id"<>'';
+
+INSERT INTO "hg_youban_publish_collect_account_channel" ("tenant_id","account_id","channel_id","source_id","collect_enabled","status","approval_status","created_at","updated_at")
+SELECT s."tenant_id",s."account_id",s."channel_id",s."id",s."collect_enabled",
+  CASE WHEN s."collect_enabled"=1 AND s."status"=1 THEN 'enabled' ELSE 'disabled' END,
+  CASE WHEN s."collect_enabled"=1 AND s."status"=1 THEN 'approved' ELSE 'pending' END,
+  COALESCE(s."created_at",NOW()),COALESCE(s."updated_at",NOW())
+FROM "hg_youban_publish_collect_source" s
+WHERE s."channel_id">0
+ON CONFLICT ("tenant_id","account_id","channel_id") DO UPDATE SET
+  "source_id"=EXCLUDED."source_id", "collect_enabled"=EXCLUDED."collect_enabled", "updated_at"=EXCLUDED."updated_at";
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_intro_fee_channel_rule" (
+  "id" BIGSERIAL PRIMARY KEY, "tenant_id" bigint NOT NULL DEFAULT 0, "account_id" bigint NOT NULL DEFAULT 0,
+  "rule_id" bigint NOT NULL DEFAULT 0, "bot_id" bigint NOT NULL DEFAULT 0, "channel_id" varchar(128) NOT NULL DEFAULT '',
+  "channel_title" varchar(255) NOT NULL DEFAULT '', "channel_username" varchar(128) NOT NULL DEFAULT '',
+  "suffix" varchar(255) NOT NULL DEFAULT '', "status" smallint NOT NULL DEFAULT 1, "last_seen_at" timestamp DEFAULT NULL,
+  "created_at" timestamp DEFAULT NULL, "updated_at" timestamp DEFAULT NULL, "deleted_at" timestamp DEFAULT NULL
+);
+ALTER TABLE "hg_youban_publish_intro_fee_channel_rule" ADD COLUMN IF NOT EXISTS "account_id" bigint NOT NULL DEFAULT 0;
+UPDATE "hg_youban_publish_intro_fee_channel_rule" r SET "account_id"=cr."account_id"
+FROM "hg_youban_publish_collect_rule" cr
+WHERE r."account_id"=0 AND r."rule_id"=cr."id" AND r."tenant_id"=cr."tenant_id";
+DROP INDEX IF EXISTS "uk_ybp_intro_fee_channel_rule";
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_intro_fee_channel_rule" ON "hg_youban_publish_intro_fee_channel_rule" ("tenant_id", "account_id", "rule_id", "bot_id", "channel_id") WHERE "deleted_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_ybp_intro_fee_channel_rule_lookup_v2" ON "hg_youban_publish_intro_fee_channel_rule" ("tenant_id", "account_id", "rule_id", "bot_id", "channel_id", "status");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_bot_channel_cache" (
   "id" BIGSERIAL PRIMARY KEY,
@@ -116,6 +185,71 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_bot_channel_cache" (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_bot_channel_cache_bot_chat" ON "hg_youban_publish_bot_channel_cache" ("tenant_id", "bot_id", "chat_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_bot_channel_cache_list" ON "hg_youban_publish_bot_channel_cache" ("tenant_id", "bot_id", "last_message_at", "id");
+
+-- Canonical channel metadata shared by BOT and account collection.
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_channel" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "telegram_chat_id" varchar(128) NOT NULL DEFAULT '',
+  "chat_type" varchar(32) NOT NULL DEFAULT '',
+  "title" varchar(255) NOT NULL DEFAULT '',
+  "username" varchar(128) NOT NULL DEFAULT '',
+  "invite_link" varchar(512) NOT NULL DEFAULT '',
+  "about" text,
+  "photo_file_id" varchar(255) NOT NULL DEFAULT '',
+  "is_broadcast" smallint NOT NULL DEFAULT 0,
+  "is_megagroup" smallint NOT NULL DEFAULT 0,
+  "last_message_id" bigint NOT NULL DEFAULT 0,
+  "last_message_at" timestamp DEFAULT NULL,
+  "last_seen_at" timestamp DEFAULT NULL,
+  "status" varchar(16) NOT NULL DEFAULT 'active',
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL,
+  "deleted_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_collect_channel_tenant_chat" ON "hg_youban_publish_collect_channel" ("tenant_id", "telegram_chat_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_channel_search" ON "hg_youban_publish_collect_channel" ("tenant_id", "status", "title", "username");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_bot_channel" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "bot_id" bigint NOT NULL DEFAULT 0,
+  "channel_id" bigint NOT NULL DEFAULT 0,
+  "status" varchar(16) NOT NULL DEFAULT 'discovered',
+  "bot_role" varchar(32) NOT NULL DEFAULT 'unknown',
+  "first_seen_at" timestamp DEFAULT NULL,
+  "last_seen_at" timestamp DEFAULT NULL,
+  "removed_at" timestamp DEFAULT NULL,
+  "removed_reason" varchar(255) NOT NULL DEFAULT '',
+  "last_update_id" bigint NOT NULL DEFAULT 0,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL,
+  "deleted_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_collect_bot_channel" ON "hg_youban_publish_collect_bot_channel" ("tenant_id", "bot_id", "channel_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_bot_channel_status" ON "hg_youban_publish_collect_bot_channel" ("tenant_id", "bot_id", "status", "last_seen_at");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_account_channel" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "channel_id" bigint NOT NULL DEFAULT 0,
+  "source_id" bigint NOT NULL DEFAULT 0,
+  "collect_enabled" smallint NOT NULL DEFAULT 0,
+  "status" varchar(16) NOT NULL DEFAULT 'pending',
+  "approval_status" varchar(16) NOT NULL DEFAULT 'pending',
+  "approved_at" timestamp DEFAULT NULL,
+  "disabled_at" timestamp DEFAULT NULL,
+  "disabled_reason" varchar(255) NOT NULL DEFAULT '',
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL,
+  "deleted_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_collect_account_channel" ON "hg_youban_publish_collect_account_channel" ("tenant_id", "account_id", "channel_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_account_channel_status" ON "hg_youban_publish_collect_account_channel" ("tenant_id", "account_id", "status", "id");
+
+ALTER TABLE "hg_youban_publish_collect_source" ADD COLUMN IF NOT EXISTS "channel_id" bigint NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_source_channel_id" ON "hg_youban_publish_collect_source" ("tenant_id", "account_id", "channel_id", "status");
 
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "collect_event_id" bigint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "collect_source_id" bigint NOT NULL DEFAULT 0;

@@ -2024,6 +2024,42 @@ func (s *sSysBot) consumeProfileSessionText(ctx context.Context, botId int64, ms
 		return s.completeProfileSession(ctx, session.Id)
 	case "collect_rule_edit":
 		return s.handleCollectRuleEditSession(ctx, botId, chatId, account, session, text)
+	case "collect_channel_add":
+		parts := strings.Fields(strings.TrimSpace(text))
+		var payload struct {
+			RuleId    int64  `json:"ruleId"`
+			BotId     int64  `json:"botId"`
+			AccountId int64  `json:"accountId"`
+			Id        int64  `json:"id"`
+			ChannelId string `json:"channelId"`
+		}
+		if err := json.Unmarshal([]byte(session.PayloadJson), &payload); err != nil || payload.RuleId <= 0 {
+			return gerror.New("频道规则会话已失效")
+		}
+		channelID := payload.ChannelId
+		suffix := ""
+		if channelID != "" {
+			if len(parts) == 0 {
+				return s.sendMessageOnly(ctx, botId, chatId, "请输入新的后缀")
+			}
+			suffix = strings.TrimSpace(text)
+		} else {
+			if len(parts) < 2 {
+				return s.sendMessageOnly(ctx, botId, chatId, "格式不正确，请输入：频道ID 后缀")
+			}
+			channelID = parts[0]
+			suffix = strings.Join(parts[1:], " ")
+		}
+		ownerAccountID := payload.AccountId
+		if ownerAccountID <= 0 {
+			ownerAccountID = account.AccountId
+		}
+		_, err := publishService.SysPublish().BotIntroFeeChannelRuleSave(ctx, &publishsysin.IntroFeeChannelRuleSaveInp{Id: payload.Id, RuleId: payload.RuleId, BotId: payload.BotId, ChannelId: channelID, Suffix: suffix, Status: 1}, account.TenantId, ownerAccountID)
+		if err != nil {
+			return err
+		}
+		_ = s.completeProfileSession(ctx, session.Id)
+		return s.sendMessageOnly(ctx, botId, chatId, "频道后缀已保存，可在频道后缀配置中继续查看和修改。")
 	case "cancel_queue":
 		_ = s.completeProfileSession(ctx, session.Id)
 		if strings.TrimSpace(text) == "全部" {

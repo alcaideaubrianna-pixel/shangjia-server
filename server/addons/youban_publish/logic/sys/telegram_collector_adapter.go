@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"html"
 	"net/url"
 	"strconv"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -19,8 +21,10 @@ import (
 	"github.com/gotd/td/tg"
 
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
+	botsysin "hotgo/addons/youban_bot/model/input/sysin"
 	botService "hotgo/addons/youban_bot/service"
 	pdao "hotgo/addons/youban_publish/internal/dao"
+	pdo "hotgo/addons/youban_publish/internal/model/do"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/cache"
 )
@@ -812,6 +816,13 @@ func (s *sSysPublish) ingestCollectorBotDelivery(ctx context.Context, delivery *
 	if source.IsEmpty() {
 		return nil
 	}
+	allowed, err := s.ensureBotCollectChannelApproval(ctx, source, delivery)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return nil
+	}
 	blocked, err := s.collectMessageFromAccountPublishChannel(ctx, source["tenant_id"].Int64(), 0, delivery.SourceChatID)
 	if err != nil {
 		return gerror.Wrap(err, "检查Bot采集上架频道过滤失败")
@@ -823,6 +834,58 @@ func (s *sSysPublish) ingestCollectorBotDelivery(ctx context.Context, delivery *
 	message.BotId = source["bot_id"].Int64()
 	_, err = s.ingestAndProcessCollectMessage(ctx, message)
 	return err
+}
+
+func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, source gdb.Record, delivery *collectorin.CollectorDelivery) (bool, error) {
+	tenantID, accountID, botID := source["tenant_id"].Int64(), source["account_id"].Int64(), source["bot_id"].Int64()
+	chatID := normalizeTelegramChannelChatID(delivery.SourceChatID)
+	if tenantID <= 0 || accountID <= 0 || botID <= 0 || chatID == "" {
+		return false, nil
+	}
+	now := gtime.Now()
+	var channel struct {
+		Id    int64  `json:"id"`
+		Title string `json:"title"`
+	}
+	if err := pdao.YoubanPublishCollectChannel.Ctx(ctx).Fields("id,title").Where("tenant_id", tenantID).WhereIn("telegram_chat_id", tgChannelCacheLookupIds(chatID)).Scan(&channel); err != nil {
+		return false, err
+	}
+	if channel.Id <= 0 {
+		if err := s.upsertCollectChannel(ctx, tenantID, chatID, "channel", chatID, "", 1, 0, delivery.SourceMessageID, now, now); err != nil {
+			return false, gerror.Wrap(err, "记录BOT采集频道失败")
+		}
+		if err := pdao.YoubanPublishCollectChannel.Ctx(ctx).Fields("id,title").Where("tenant_id", tenantID).Where("telegram_chat_id", chatID).Scan(&channel); err != nil || channel.Id <= 0 {
+			return false, err
+		}
+	} else {
+		_, _ = pdao.YoubanPublishCollectChannel.Ctx(ctx).Where("id", channel.Id).Data(g.Map{"last_message_id": delivery.SourceMessageID, "last_message_at": now, "last_seen_at": now, "updated_at": now}).Update()
+	}
+	_ = s.touchCollectBotChannel(ctx, tenantID, botID, chatID, now)
+	var relation struct {
+		Id             int64  `json:"id"`
+		CollectEnabled int    `json:"collectEnabled"`
+		Status         string `json:"status"`
+	}
+	if err := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Fields("id,collect_enabled,status").Where("tenant_id", tenantID).Where("account_id", accountID).Where("channel_id", channel.Id).Scan(&relation); err != nil {
+		return false, gerror.Wrap(err, "读取BOT采集频道审批状态失败")
+	}
+	if relation.Id > 0 {
+		return relation.CollectEnabled == 1 && relation.Status == sysin.CollectAccountChannelEnabled, nil
+	}
+	relationID, err := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Data(pdo.YoubanPublishCollectAccountChannel{
+		TenantId: tenantID, AccountId: accountID, ChannelId: channel.Id, SourceId: source["id"].Int64(),
+		CollectEnabled: 0, Status: sysin.CollectAccountChannelPending, ApprovalStatus: "pending",
+	}).InsertAndGetId()
+	if err != nil {
+		return false, gerror.Wrap(err, "创建BOT采集频道审批记录失败")
+	}
+	title := firstNonEmpty(strings.TrimSpace(channel.Title), chatID)
+	text := "发现新的 BOT 采集频道\n频道：" + html.EscapeString(title) + "\n频道 ID：" + html.EscapeString(chatID) + "\n当前状态：待管理员确认"
+	buttons := [][]botsysin.NotifyButton{{{Label: "允许采集", Data: fmt.Sprintf("cm:channelapprove:%d", relationID)}, {Label: "拒绝采集", Data: fmt.Sprintf("cm:channelreject:%d", relationID)}}}
+	if notifyErr := botService.SysBot().NotifySuperAdminsWithButtons(ctx, botID, "collect_source", text, buttons); notifyErr != nil {
+		g.Log().Warningf(ctx, "通知BOT采集频道审批失败 relationId:%d err:%+v", relationID, notifyErr)
+	}
+	return false, nil
 }
 
 func (s *sSysPublish) ingestCollectorAccountDelivery(ctx context.Context, delivery *collectorin.CollectorDelivery) error {

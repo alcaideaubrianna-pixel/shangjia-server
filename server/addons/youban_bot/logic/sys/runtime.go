@@ -14,6 +14,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	publishService "hotgo/addons/youban_publish/service"
 	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
 	"hotgo/internal/library/cache"
 )
@@ -52,6 +53,11 @@ func (s *sSysBot) handleUpdate(ctx context.Context, botId int64, update *models.
 	}
 	if update.MyChatMember != nil {
 		chatID := fmt.Sprintf("%d", update.MyChatMember.Chat.ID)
+		memberStatus := string(update.MyChatMember.NewChatMember.Type)
+		role := memberStatus
+		if err := publishService.SysPublish().BotChannelMembershipChanged(ctx, botId, chatID, memberStatus, role, update.ID); err != nil {
+			g.Log().Warningf(ctx, "同步Bot频道成员状态失败 botId:%d chatId:%s err:%+v", botId, chatID, err)
+		}
 		_, _ = cache.Instance().Remove(ctx, "youban_publish:official_bot_chat_unavailable:"+chatID)
 		g.Log().Infof(ctx, "Bot群成员状态更新，已清除官方Bot不可用缓存 botId:%d chatId:%s", botId, chatID)
 		return nil

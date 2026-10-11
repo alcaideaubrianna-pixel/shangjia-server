@@ -10,6 +10,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 
+	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/cache"
 )
@@ -227,6 +228,37 @@ func (s *sSysPublish) resolveBotChannelDisplays(ctx context.Context, tenantId, b
 	if len(pending) == 0 {
 		return result, nil
 	}
+	// The canonical channel table is shared by BOT and account collection. Prefer
+	// it so every consumer sees the same title, username and link metadata.
+	var canonicalRows []struct {
+		ChatId     string `json:"chatId"`
+		Title      string `json:"title"`
+		Username   string `json:"username"`
+		InviteLink string `json:"inviteLink"`
+	}
+	if err := pdao.YoubanPublishCollectChannel.Ctx(ctx).Safe().
+		Fields("telegram_chat_id AS chat_id,title,username,invite_link").
+		Where("tenant_id", tenantId).WhereIn("telegram_chat_id", uniqueStrings(func() []string {
+		ids := make([]string, 0, len(pending)*2)
+		for _, id := range pending {
+			ids = append(ids, tgChannelCacheLookupIds(id)...)
+		}
+		return ids
+	}())).WhereNull("deleted_at").Scan(&canonicalRows); err == nil {
+		for _, row := range canonicalRows {
+			item := telegramChannelDisplay{Title: strings.TrimSpace(row.Title), Username: strings.TrimSpace(row.Username)}
+			if item.Empty() {
+				continue
+			}
+			for _, id := range tgChannelCacheLookupIds(row.ChatId) {
+				id = normalizeTelegramChannelChatID(id)
+				result[id] = item
+				cacheKey := collectedChannelDisplayCacheKey(tenantId, botId, id)
+				telegramChannelDisplayLocalCacheSet(cacheKey, item)
+				_ = cache.Instance().Set(ctx, cacheKey, item, collectedChannelDisplayCacheTTL)
+			}
+		}
+	}
 	lookupIds := make([]string, 0, len(pending)*2)
 	for _, channelId := range pending {
 		lookupIds = append(lookupIds, tgChannelCacheLookupIds(channelId)...)
@@ -253,6 +285,9 @@ func (s *sSysPublish) resolveBotChannelDisplays(ctx context.Context, tenantId, b
 		}
 		for _, id := range tgChannelCacheLookupIds(row.ChatId) {
 			id = normalizeTelegramChannelChatID(id)
+			if _, exists := result[id]; exists {
+				continue
+			}
 			result[id] = item
 			cacheKey := collectedChannelDisplayCacheKey(tenantId, botId, id)
 			telegramChannelDisplayLocalCacheSet(cacheKey, item)

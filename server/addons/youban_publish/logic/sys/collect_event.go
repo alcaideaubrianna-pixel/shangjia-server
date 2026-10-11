@@ -341,6 +341,37 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 	if source.IsEmpty() {
 		return s.ignoreCollectEvent(ctx, eventId, "采集源不存在", "source")
 	}
+	if source["channel_blacklisted"].Int() != 0 {
+		return s.ignoreCollectEvent(ctx, eventId, "采集频道已禁用", "source")
+	}
+	if channelID := source["channel_id"].Int64(); channelID > 0 {
+		if botID := source["bot_id"].Int64(); botID > 0 {
+			var botRelation struct {
+				Status string `json:"status"`
+			}
+			if relationErr := pdao.YoubanPublishCollectBotChannel.Ctx(ctx).
+				Fields(pdao.YoubanPublishCollectBotChannel.Columns().Status).
+				Where(pdao.YoubanPublishCollectBotChannel.Columns().TenantId, tenantId).
+				Where(pdao.YoubanPublishCollectBotChannel.Columns().BotId, botID).
+				Where(pdao.YoubanPublishCollectBotChannel.Columns().ChannelId, channelID).
+				Scan(&botRelation); relationErr != nil {
+				return gerror.Wrap(relationErr, "读取BOT频道关系失败")
+			} else if botRelation.Status == sysin.CollectBotChannelRemoved {
+				return s.ignoreCollectEvent(ctx, eventId, "机器人已被移出采集频道", "source")
+			}
+		}
+		var channelRelation struct {
+			CollectEnabled int    `json:"collectEnabled"`
+			Status         string `json:"status"`
+		}
+		if relationErr := g.DB().Model("hg_youban_publish_collect_account_channel").Ctx(ctx).
+			Fields("collect_enabled,status").Where("tenant_id", tenantId).Where("account_id", accountId).
+			Where("channel_id", channelID).WhereNull("deleted_at").Scan(&channelRelation); relationErr == nil && channelRelation.Status != "" {
+			if channelRelation.CollectEnabled != 1 || channelRelation.Status != sysin.CollectAccountChannelEnabled {
+				return s.ignoreCollectEvent(ctx, eventId, "采集频道未启用或机器人已移除", "source")
+			}
+		}
+	}
 	event["source_name_snapshot"] = source["title"]
 	event["source_username_snapshot"] = source["source_username"]
 	if err = s.ensureTenantVipFeature(ctx, tenantId, sysin.TenantVipFeatureCollectSource); err != nil {

@@ -4,8 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
-	"html"
 	"strings"
 	"time"
 
@@ -15,8 +13,8 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
-	botsysin "hotgo/addons/youban_bot/model/input/sysin"
-	botService "hotgo/addons/youban_bot/service"
+	pdao "hotgo/addons/youban_publish/internal/dao"
+	pdo "hotgo/addons/youban_publish/internal/model/do"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
@@ -30,7 +28,7 @@ func (s *sSysPublish) cacheBotMessage(ctx context.Context, tenantId, botId int64
 	if chatType != "private" && chatType != "channel" && chatType != "group" && chatType != "supergroup" {
 		return nil
 	}
-	chatId := g.NewVar(msg.Chat.ID).String()
+	chatId := normalizeTelegramChannelChatID(g.NewVar(msg.Chat.ID).String())
 	title := strings.TrimSpace(msg.Chat.Title)
 	if title == "" {
 		title = strings.TrimSpace(msg.Chat.Username)
@@ -53,6 +51,11 @@ func (s *sSysPublish) cacheBotMessage(ctx context.Context, tenantId, botId int64
 		"is_broadcast": isBroadcast, "is_megagroup": isMegagroup,
 		"last_message_text": strings.TrimSpace(telegramMessageText(msg)), "last_message_at": lastAt, "updated_at": now,
 	}
+	// Keep the canonical channel directory in sync. This is intentionally
+	// best-effort during the rolling migration: old installations may not have
+	// the new table yet, while the legacy cache remains authoritative.
+	_ = s.upsertCollectChannel(ctx, tenantId, chatId, chatType, title, strings.TrimSpace(msg.Chat.Username), isBroadcast, isMegagroup, int64(msg.ID), lastAt, now)
+	_ = s.touchCollectBotChannel(ctx, tenantId, botId, chatId, now)
 	var exists struct {
 		Id int64 `json:"id"`
 	}
@@ -66,19 +69,56 @@ func (s *sSysPublish) cacheBotMessage(ctx context.Context, tenantId, botId int64
 	data["message_count"] = 1
 	data["created_at"] = now
 	_, err := g.DB().Model(publishBotChannelCacheTable).Safe().Ctx(ctx).Data(data).Insert()
-	if err == nil {
-		var source struct {
-			Id        int64  `json:"id"`
-			AccountId int64  `json:"account_id"`
-			Title     string `json:"title"`
-		}
-		if scanErr := g.DB().Model(publishCollectSourceTable).Safe().Ctx(ctx).Fields("id,account_id,title").Where("tenant_id", tenantId).Where("bot_id", botId).Where("source_chat_id", chatId).WhereNull("deleted_at").Scan(&source); scanErr == nil && source.Id > 0 {
-			if title == "" {
-				title = chatId
-			}
-			text := "发现新的 BOT 采集频道\n频道：" + html.EscapeString(title) + "\n频道 ID：" + html.EscapeString(chatId) + "\n当前状态：待管理员确认"
-			_ = botService.SysBot().NotifySuperAdminsWithButtons(ctx, botId, "collect_source", text, [][]botsysin.NotifyButton{{{Label: "允许采集", Data: fmt.Sprintf("cm:approve:%d", source.Id)}, {Label: "拒绝采集", Data: fmt.Sprintf("cm:reject:%d", source.Id)}}})
-		}
+	return err
+}
+
+func (s *sSysPublish) upsertCollectChannel(ctx context.Context, tenantID int64, chatID, chatType, title, username string, broadcast, megagroup int, messageID int64, messageAt, now *gtime.Time) error {
+	chatID = normalizeTelegramChannelChatID(chatID)
+	if tenantID <= 0 || strings.TrimSpace(chatID) == "" {
+		return nil
+	}
+	data := pdo.YoubanPublishCollectChannel{TenantId: tenantID, TelegramChatId: chatID, ChatType: chatType, Title: title, Username: username, IsBroadcast: broadcast, IsMegagroup: megagroup, LastMessageId: messageID, LastMessageAt: messageAt, LastSeenAt: now, Status: sysin.CollectChannelStatusActive}
+	_, err := pdao.YoubanPublishCollectChannel.Ctx(ctx).Safe().Data(data).OnConflict("tenant_id,telegram_chat_id").OnDuplicate("chat_type,title,username,is_broadcast,is_megagroup,last_message_id,last_message_at,last_seen_at,updated_at,status,deleted_at").Save()
+	return err
+}
+
+func (s *sSysPublish) touchCollectBotChannel(ctx context.Context, tenantID, botID int64, chatID string, now *gtime.Time) error {
+	var channel struct {
+		Id int64 `json:"id"`
+	}
+	if err := pdao.YoubanPublishCollectChannel.Ctx(ctx).Fields("id").Where("tenant_id", tenantID).WhereIn("telegram_chat_id", tgChannelCacheLookupIds(chatID)).Scan(&channel); err != nil || channel.Id <= 0 {
+		return err
+	}
+	data := pdo.YoubanPublishCollectBotChannel{TenantId: tenantID, BotId: botID, ChannelId: channel.Id, Status: sysin.CollectBotChannelDiscovered, FirstSeenAt: now, LastSeenAt: now}
+	_, err := pdao.YoubanPublishCollectBotChannel.Ctx(ctx).Data(data).OnConflict("tenant_id,bot_id,channel_id").OnDuplicate("status,last_seen_at,updated_at").Save()
+	if err != nil {
+		return err
+	}
+	// Receiving a message proves the BOT is present again. Clear stale removal
+	// metadata while preserving the account's independent enable/disable state.
+	botCols := pdao.YoubanPublishCollectBotChannel.Columns()
+	_, err = pdao.YoubanPublishCollectBotChannel.Ctx(ctx).
+		Fields(botCols.Status, botCols.LastSeenAt, botCols.RemovedAt, botCols.RemovedReason).
+		Where(botCols.TenantId, tenantID).
+		Where(botCols.BotId, botID).
+		Where(botCols.ChannelId, channel.Id).
+		Data(pdo.YoubanPublishCollectBotChannel{
+			Status:        sysin.CollectBotChannelDiscovered,
+			LastSeenAt:    now,
+			RemovedAt:     nil,
+			RemovedReason: "",
+		}).Update()
+	if err != nil {
+		return err
+	}
+	var sources []struct {
+		Id int64 `json:"id"`
+	}
+	if err = g.DB().Model(publishCollectSourceTable).Ctx(ctx).Fields("id").Where("tenant_id", tenantID).Where("bot_id", botID).WhereIn("source_chat_id", tgChannelCacheLookupIds(chatID)).WhereNull("deleted_at").Scan(&sources); err != nil {
+		return err
+	}
+	for _, source := range sources {
+		_, _ = g.DB().Model(publishCollectSourceTable).Ctx(ctx).Where("id", source.Id).Where("channel_id", 0).Data(g.Map{"channel_id": channel.Id, "updated_at": now}).Update()
 	}
 	return err
 }

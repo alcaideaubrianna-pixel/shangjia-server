@@ -359,11 +359,15 @@ type IntroFeeChannelRuleItem struct {
 	ChannelId       string      `json:"channelId"`
 	ChannelTitle    string      `json:"channelTitle"`
 	ChannelUsername string      `json:"channelUsername"`
+	ChannelLink     string      `json:"channelLink"`
 	Suffix          string      `json:"suffix"`
 	Status          int         `json:"status"`
 	Configured      bool        `json:"configured"`
 	Blacklisted     bool        `json:"blacklisted"`
 	LastSeenAt      *gtime.Time `json:"lastSeenAt"`
+	ChannelStatus   string      `json:"channelStatus"`
+	BotStatus       string      `json:"botStatus"`
+	AccountStatus   string      `json:"accountStatus"`
 }
 type IntroFeeChannelRuleSaveInp struct {
 	Id        int64  `json:"id"`
@@ -375,6 +379,7 @@ type IntroFeeChannelRuleSaveInp struct {
 }
 type AdminIntroFeeChannelRuleListInp struct {
 	form.PageReq
+	AccountId         int64  `json:"accountId"`
 	BotId             int64  `json:"botId"`
 	RuleId            int64  `json:"ruleId"`
 	Keyword           string `json:"keyword"`
@@ -382,6 +387,7 @@ type AdminIntroFeeChannelRuleListInp struct {
 }
 type AdminIntroFeeChannelRuleSaveInp struct {
 	Id        int64  `json:"id"`
+	AccountId int64  `json:"accountId"`
 	BotId     int64  `json:"botId"`
 	RuleId    int64  `json:"ruleId"`
 	ChannelId string `json:"channelId"`
@@ -390,8 +396,12 @@ type AdminIntroFeeChannelRuleSaveInp struct {
 }
 
 type IntroFeeChannelBlacklistInp struct {
-	Id          int64 `json:"id"`
-	Blacklisted int   `json:"blacklisted"`
+	Id          int64  `json:"id"`
+	AccountId   int64  `json:"accountId"`
+	RuleId      int64  `json:"ruleId"`
+	BotId       int64  `json:"botId"`
+	ChannelId   string `json:"channelId"`
+	Blacklisted int    `json:"blacklisted"`
 }
 
 func (in *CollectRuleSaveInp) Filter(ctx context.Context) error {
