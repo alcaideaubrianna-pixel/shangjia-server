@@ -340,10 +340,9 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 		Where(enabledCollectSourceExistsSQL("e")).
 		Group("e.source_id,e.source_chat_id").
 		OrderAsc("e.source_id,e.source_chat_id")
-	// Count on the grouped model directly.  Passing Fields("1") makes GoFrame
-	// quote the literal as a column name ("1"), which PostgreSQL rejects and
-	// prevents the recovery loop from requeueing stalled collect events.
-	sourceCount, err := sourceModel.Clone().Count()
+	// Count a single grouped column. GoFrame otherwise includes every selected
+	// field in COUNT(...), producing PostgreSQL's invalid COUNT(bigint, varchar).
+	sourceCount, err := sourceModel.Clone().Fields("e.source_id").Count()
 	if err != nil {
 		return gerror.Wrap(err, "统计待恢复采集源失败")
 	}
