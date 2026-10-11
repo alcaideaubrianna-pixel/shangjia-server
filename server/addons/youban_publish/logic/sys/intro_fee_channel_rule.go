@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -9,9 +10,16 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/library/cache"
+	"time"
 )
 
 const introFeeChannelRuleTable = "hg_youban_publish_intro_fee_channel_rule"
+const introFeeChannelRuleCacheTTL = 10 * time.Minute
+
+func introFeeChannelRuleCacheKey(tenant, rule, bot int64, channel string) string {
+	return fmt.Sprintf("youban_publish:intro_fee_rule:%d:%d:%d:%s", tenant, rule, bot, channel)
+}
 
 func (s *sSysPublish) resolveIntroFeeChannelSuffix(ctx context.Context, event gdb.Record, rule gdb.Record) (string, bool, error) {
 	chatID := canonicalCollectSourceChatID(event["source_chat_id"].String())
@@ -21,6 +29,13 @@ func (s *sSysPublish) resolveIntroFeeChannelSuffix(ctx context.Context, event gd
 	botID := event["bot_id"].Int64()
 	if botID == 0 {
 		botID = rule["bot_id"].Int64()
+	}
+	key := introFeeChannelRuleCacheKey(event["tenant_id"].Int64(), rule["id"].Int64(), botID, chatID)
+	if value, cacheErr := cache.Instance().Get(ctx, key); cacheErr == nil && !value.IsNil() {
+		if value.String() == "__none__" {
+			return "", false, nil
+		}
+		return value.String(), true, nil
 	}
 	mod := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).
 		Fields("suffix").Where("tenant_id", event["tenant_id"]).Where("rule_id", rule["id"]).WhereIn("channel_id", tgChannelCacheLookupIds(chatID)).Where("status", 1).WhereNull("deleted_at")
@@ -34,9 +49,15 @@ func (s *sSysPublish) resolveIntroFeeChannelSuffix(ctx context.Context, event gd
 		return "", false, gerror.Wrap(err, "读取介绍费频道后缀规则失败")
 	}
 	if row.IsEmpty() {
+		_ = cache.Instance().Set(ctx, key, "__none__", time.Minute)
 		return "", false, nil
 	}
-	return strings.TrimSpace(row["suffix"].String()), true, nil
+	suffix := strings.TrimSpace(row["suffix"].String())
+	if suffix == "" {
+		return "", false, nil
+	}
+	_ = cache.Instance().Set(ctx, key, suffix, introFeeChannelRuleCacheTTL)
+	return suffix, true, nil
 }
 
 func (s *sSysPublish) IntroFeeChannelRuleList(ctx context.Context, in *sysin.IntroFeeChannelRuleListInp) (list []*sysin.IntroFeeChannelRuleItem, totalCount int, err error) {
@@ -78,6 +99,7 @@ func (s *sSysPublish) IntroFeeChannelRuleSave(ctx context.Context, in *sysin.Int
 	}
 	if in.Id > 0 {
 		_, err = g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Where("id", in.Id).Where("tenant_id", account.TenantId).WhereNull("deleted_at").Data(data).Update()
+		_, _ = cache.Instance().Remove(ctx, introFeeChannelRuleCacheKey(account.TenantId, in.RuleId, in.BotId, in.ChannelId))
 		return in.Id, err
 	}
 	if existing, queryErr := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Where("tenant_id", account.TenantId).Where("rule_id", in.RuleId).Where("bot_id", in.BotId).WhereIn("channel_id", tgChannelCacheLookupIds(in.ChannelId)).One(); queryErr != nil {
@@ -85,6 +107,7 @@ func (s *sSysPublish) IntroFeeChannelRuleSave(ctx context.Context, in *sysin.Int
 	} else if !existing.IsEmpty() {
 		id := existing["id"].Int64()
 		_, err = g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Where("id", id).Data(g.Map{"suffix": data["suffix"], "status": data["status"], "deleted_at": nil, "updated_at": now}).Update()
+		_, _ = cache.Instance().Remove(ctx, introFeeChannelRuleCacheKey(account.TenantId, in.RuleId, in.BotId, in.ChannelId))
 		return id, err
 	}
 	data["created_at"] = now
