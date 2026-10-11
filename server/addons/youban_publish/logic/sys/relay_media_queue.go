@@ -48,6 +48,22 @@ func (s *sSysPublish) prepareRelayMediaSet(ctx context.Context, media []*telegra
 	if len(media) == 0 {
 		return nil, gerror.New("relay 媒体组为空")
 	}
+	readyRefs := make([]*telegramSentMessage, len(media))
+	allReady := true
+	for i, item := range media {
+		ref, err := relayReadyMedia(ctx, item.TenantId, item.Id, purpose, "original")
+		if err != nil {
+			return nil, err
+		}
+		if ref == nil {
+			allReady = false
+			break
+		}
+		readyRefs[i] = &telegramSentMessage{MessageId: ref.MessageId, TgFileId: ref.RelayChatId}
+	}
+	if allReady {
+		return readyRefs, nil
+	}
 	body, err := json.Marshal(relayMediaGroupTaskPayload{Media: media, Purpose: purpose})
 	if err != nil {
 		return nil, err
