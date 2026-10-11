@@ -115,6 +115,10 @@
           />
         </n-tab-pane>
 
+        <n-tab-pane name="relay" tab="中转频道">
+          <RelayChannelPanel :tenant-id="Number(channelQuery.tenantId || 0)" />
+        </n-tab-pane>
+
         <n-tab-pane name="profiles" tab="笔记资料">
           <ProfilePanel />
         </n-tab-pane>
@@ -635,6 +639,7 @@
   import PublishRecordPanel from './components/publish-record-panel.vue';
   import NoticePage from '@/views/apply/notice/index.vue';
   import TgObservePanel from './components/tg-observe-panel.vue';
+  import RelayChannelPanel from './components/relay-channel-panel.vue';
   import {
     AccountDelete,
     AccountList,
