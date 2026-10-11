@@ -50,6 +50,7 @@ func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload co
 		eventModel = eventModel.Where("e.id", payload.EventId)
 	}
 	rows, err := eventModel.
+		Fields("e.*").
 		OrderAsc("e.source_chat_id").
 		OrderAsc("e.source_message_id").
 		OrderAsc("e.id").
