@@ -85,6 +85,7 @@ func (s *sLazySheepTGGo) StartPushQueueLoop(ctx context.Context) {
 		if err := s.ensurePushLogTable(ctx); err != nil {
 			g.Log().Warningf(ctx, "初始化推送日志表失败 err:%+v", err)
 		}
+		go s.runPushLogRetentionCleaner(ctx)
 		if err := s.ensurePushDedupTable(ctx); err != nil {
 			g.Log().Warningf(ctx, "初始化推送去重表失败 err:%+v", err)
 		}

@@ -144,6 +144,82 @@ func TestUpgradeSafeSqlIncludesProfileCycleDueIndex(t *testing.T) {
 	}
 }
 
+func TestTaskLogRetentionIndexesStayOutOfInteractiveUpgrade(t *testing.T) {
+	tests := []struct {
+		name       string
+		install    string
+		heavyIndex string
+		online     string
+		indexes    []string
+		existing   []string
+		pgsqlOnly  []string
+	}{
+		{
+			name:       "mysql",
+			install:    "addons/youban_publish/resource/sql/install.sql",
+			heavyIndex: "addons/youban_publish/resource/sql/heavy_indexes.sql",
+			online:     "addons/youban_publish/resource/sql/upgrade_online.sql",
+			indexes: []string{
+				"idx_ybp_import_run_log_created",
+				"idx_ybp_collect_event_log_created",
+				"idx_ybp_collect_history_log_created",
+				"idx_ybp_cycle_run_log_created",
+				"idx_lazysheep_tggo_push_log_created",
+			},
+			existing: []string{"idx_ybp_tg_job_log_created"},
+		},
+		{
+			name:       "pgsql",
+			install:    "addons/youban_publish/resource/sql/install.pgsql.sql",
+			heavyIndex: "addons/youban_publish/resource/sql/heavy_indexes.pgsql.sql",
+			online:     "addons/youban_publish/resource/sql/upgrade_online.pgsql.sql",
+			indexes: []string{
+				"idx_ybp_import_run_log_created",
+				"idx_ybp_collect_event_log_created",
+				"idx_ybp_collect_history_log_created",
+				"idx_ybp_cycle_run_log_created",
+				"idx_lazysheep_tggo_push_log_created",
+			},
+			existing:  []string{"idx_ybp_tg_job_log_created"},
+			pgsqlOnly: []string{"idx_lazysheep_tggo_webhook_log_created"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			installSQL := readSqlFile(test.install)
+			heavySQL := readSqlFile(test.heavyIndex)
+			onlineSQL := readSqlFile(test.online)
+			for _, index := range test.indexes {
+				if index != "idx_lazysheep_tggo_push_log_created" && !strings.Contains(installSQL, index) {
+					t.Errorf("fresh install schema does not include task-log index %q", index)
+				}
+				if !strings.Contains(heavySQL, index) {
+					t.Errorf("heavy index migration does not include task-log index %q", index)
+				}
+				if strings.Contains(onlineSQL, index) {
+					t.Errorf("interactive online upgrade unexpectedly includes heavy task-log index %q", index)
+				}
+			}
+			for _, index := range test.existing {
+				if !strings.Contains(installSQL, index) {
+					t.Errorf("base schema does not include existing task-log index %q", index)
+				}
+				if strings.Contains(onlineSQL, index) {
+					t.Errorf("interactive online upgrade unexpectedly includes task-log index %q", index)
+				}
+			}
+			for _, index := range test.pgsqlOnly {
+				if !strings.Contains(heavySQL, index) {
+					t.Errorf("PostgreSQL heavy index maintenance does not include task-log index %q", index)
+				}
+				if strings.Contains(onlineSQL, index) {
+					t.Errorf("interactive online upgrade unexpectedly includes heavy task-log index %q", index)
+				}
+			}
+		})
+	}
+}
+
 func TestMessagePushSchemaIsOwnedByInstallAndMigrationSql(t *testing.T) {
 	tests := []struct {
 		name    string
