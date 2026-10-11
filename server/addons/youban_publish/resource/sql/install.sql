@@ -256,6 +256,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_event_media` (
   `file_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '文件访问地址',
   `storage_path` varchar(1024) NOT NULL DEFAULT '' COMMENT '存储路径',
   `poster_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '封面地址',
+  `poster_storage_path` varchar(1024) NOT NULL DEFAULT '' COMMENT '封面存储路径',
   `source_kind` varchar(32) NOT NULL DEFAULT '' COMMENT 'TG来源媒体类型',
   `source_media_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'TG媒体ID',
   `source_access_hash` bigint(20) NOT NULL DEFAULT '0' COMMENT 'TG媒体访问哈希',
@@ -333,7 +334,8 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_event_log` (
   PRIMARY KEY (`id`),
   KEY `idx_ybp_collect_event_log_event` (`event_id`,`id`),
   KEY `idx_ybp_collect_event_log_owner` (`tenant_id`,`account_id`,`created_at`),
-  KEY `idx_ybp_collect_event_log_stage` (`event_id`,`stage`,`status`)
+  KEY `idx_ybp_collect_event_log_stage` (`event_id`,`stage`,`status`),
+  KEY `idx_ybp_collect_event_log_created` (`created_at`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴采集事件日志';
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_content` (
@@ -484,7 +486,8 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_history_log` (
   `meta_json` text COMMENT '上下文JSON',
   `created_at` datetime DEFAULT NULL COMMENT '创建时间',
   PRIMARY KEY (`id`),
-  KEY `idx_ybp_collect_history_log_task` (`task_id`,`id`)
+  KEY `idx_ybp_collect_history_log_task` (`task_id`,`id`),
+  KEY `idx_ybp_collect_history_log_created` (`created_at`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴历史采集日志';
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_account_follow` (
@@ -730,7 +733,8 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_import_run_log` (
   `context` longtext COMMENT '上下文JSON',
   `created_at` datetime DEFAULT NULL COMMENT '创建时间',
   PRIMARY KEY (`id`),
-  KEY `idx_ybp_import_run_log_run` (`run_id`,`id`)
+  KEY `idx_ybp_import_run_log_run` (`run_id`,`id`),
+  KEY `idx_ybp_import_run_log_created` (`created_at`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架旧站导入执行日志';
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_material_import_task` (
@@ -1728,7 +1732,8 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_cycle_run_log` (
   `context_json` json DEFAULT NULL COMMENT '上下文',
   `created_at` datetime DEFAULT NULL,
   PRIMARY KEY (`id`),
-  KEY `idx_ybp_cycle_run_log_run` (`run_id`,`id`)
+  KEY `idx_ybp_cycle_run_log_run` (`run_id`,`id`),
+  KEY `idx_ybp_cycle_run_log_created` (`created_at`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='上架循环执行日志';
 ALTER TABLE `hg_youban_publish_cycle_run_log` ADD COLUMN IF NOT EXISTS `channel_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '频道ID' AFTER `profile_id`;
 DELETE FROM `hg_youban_publish_cycle_run_log`;
@@ -2019,6 +2024,16 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_image_quota_ledger` (
   PRIMARY KEY (`id`), UNIQUE KEY `uk_ybp_image_quota_ledger_ref` (`reference_key`),
   KEY `idx_ybp_image_quota_ledger_tenant` (`tenant_id`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_relay_media` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT, `tenant_id` bigint(20) NOT NULL DEFAULT '0', `media_id` bigint(20) NOT NULL DEFAULT '0',
+  `profile_id` bigint(20) NOT NULL DEFAULT '0', `purpose` varchar(16) NOT NULL DEFAULT 'display', `media_version` varchar(128) NOT NULL DEFAULT '',
+  `relay_channel_id` bigint(20) NOT NULL DEFAULT '0', `relay_chat_id` varchar(128) NOT NULL DEFAULT '', `message_id` bigint(20) NOT NULL DEFAULT '0',
+  `file_id` varchar(1024) NOT NULL DEFAULT '', `status` varchar(16) NOT NULL DEFAULT 'uploading', `lease_token` varchar(128) NOT NULL DEFAULT '',
+  `lease_until` datetime DEFAULT NULL, `last_error` text, `expires_at` datetime DEFAULT NULL, `created_at` datetime DEFAULT NULL, `updated_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`), UNIQUE KEY `uk_ybp_relay_media_key` (`tenant_id`,`media_id`,`purpose`,`media_version`),
+  KEY `idx_ybp_relay_media_ready` (`tenant_id`,`media_id`,`purpose`,`status`), KEY `idx_ybp_relay_media_lease` (`status`,`lease_until`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Telegram中转媒体索引';
 ALTER TABLE `hg_youban_publish_channel` ADD COLUMN IF NOT EXISTS `anti_scan_mode` varchar(32) NOT NULL DEFAULT 'lightweight';
 ALTER TABLE `hg_youban_publish_channel` ADD COLUMN IF NOT EXISTS `anti_scan_background_url` varchar(1024) NOT NULL DEFAULT '';
 ALTER TABLE `hg_youban_publish_channel` ADD COLUMN IF NOT EXISTS `anti_scan_background_name` varchar(255) NOT NULL DEFAULT '';

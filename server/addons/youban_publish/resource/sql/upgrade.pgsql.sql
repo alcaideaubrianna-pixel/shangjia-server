@@ -25,6 +25,8 @@ ALTER TABLE "hg_youban_publish_collect_rule"
 ALTER TABLE "hg_youban_publish_collect_event_media"
   ADD COLUMN IF NOT EXISTS "download_duration_ms" bigint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_collect_event_media"
+  ADD COLUMN IF NOT EXISTS "poster_storage_path" varchar(1024) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_collect_event_media"
   ADD COLUMN IF NOT EXISTS "download_bytes" bigint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_collect_event_media"
   ADD COLUMN IF NOT EXISTS "download_attempts" integer NOT NULL DEFAULT 0;
@@ -966,3 +968,27 @@ ALTER TABLE "hg_youban_publish_collect_dispatch" ADD COLUMN IF NOT EXISTS "sourc
 ALTER TABLE "hg_youban_publish_collect_dispatch" ADD COLUMN IF NOT EXISTS "source_username_snapshot" varchar(128) NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_collect_dispatch" ADD COLUMN IF NOT EXISTS "source_chat_id_snapshot" varchar(128) NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_collect_dispatch" ADD COLUMN IF NOT EXISTS "source_message_id_snapshot" bigint NOT NULL DEFAULT 0;
+
+-- Relay media cache: Telegram messages uploaded once and copied to publish targets.
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_relay_media" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "media_id" bigint NOT NULL DEFAULT 0,
+  "profile_id" bigint NOT NULL DEFAULT 0,
+  "purpose" varchar(16) NOT NULL DEFAULT 'display',
+  "media_version" varchar(128) NOT NULL DEFAULT '',
+  "relay_channel_id" bigint NOT NULL DEFAULT 0,
+  "relay_chat_id" varchar(128) NOT NULL DEFAULT '',
+  "message_id" bigint NOT NULL DEFAULT 0,
+  "file_id" varchar(1024) NOT NULL DEFAULT '',
+  "status" varchar(16) NOT NULL DEFAULT 'uploading',
+  "lease_token" varchar(128) NOT NULL DEFAULT '',
+  "lease_until" timestamp DEFAULT NULL,
+  "last_error" text,
+  "expires_at" timestamp DEFAULT NULL,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_relay_media_key" ON "hg_youban_publish_relay_media" ("tenant_id", "media_id", "purpose", "media_version");
+CREATE INDEX IF NOT EXISTS "idx_ybp_relay_media_ready" ON "hg_youban_publish_relay_media" ("tenant_id", "media_id", "purpose", "status");
+CREATE INDEX IF NOT EXISTS "idx_ybp_relay_media_lease" ON "hg_youban_publish_relay_media" ("status", "lease_until", "id");
