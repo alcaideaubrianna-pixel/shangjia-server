@@ -16,6 +16,8 @@ import (
 )
 
 type sSysPublish struct {
+	accountClientsMu      sync.RWMutex
+	accountClients        map[int64]*telegram.Client
 	runtimeCancel         context.CancelFunc
 	runtimeDone           chan struct{}
 	runtimeMu             publishRuntimeMutex
@@ -52,6 +54,7 @@ type sSysPublish struct {
 
 func NewSysPublish() *sSysPublish {
 	return &sSysPublish{
+		accountClients:        make(map[int64]*telegram.Client),
 		tgLogins:              make(map[string]*telegramLoginRuntime),
 		telegramChannelLocks:  make(map[string]*publishRuntimeMutex),
 		collectGroupTimers:    make(map[int64]*time.Timer),

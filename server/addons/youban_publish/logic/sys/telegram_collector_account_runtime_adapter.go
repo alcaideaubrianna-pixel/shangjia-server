@@ -137,11 +137,17 @@ func (w *accountCollectWorker) NewAccountRuntimeClient(ctx context.Context, disp
 
 func (w *accountCollectWorker) StartAccountRuntime(ctx context.Context, client *telegram.Client) {
 	w.setClient(client)
+	w.service.accountClientsMu.Lock()
+	w.service.accountClients[w.tgAccountId] = client
+	w.service.accountClientsMu.Unlock()
 	w.service.closeAccountCollectCircuit(w.tgAccountId)
 }
 
 func (w *accountCollectWorker) StopAccountRuntime() {
 	w.setClient(nil)
+	w.service.accountClientsMu.Lock()
+	delete(w.service.accountClients, w.tgAccountId)
+	w.service.accountClientsMu.Unlock()
 	w.clearListenerGroups()
 }
 
