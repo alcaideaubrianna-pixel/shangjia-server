@@ -103,6 +103,9 @@ func (s *sSysPublish) AdminRelayChannelSave(ctx context.Context, in *sysin.Relay
 	if status != relayChannelStatusEnabled && status != relayChannelStatusDisabled {
 		return gerror.New("relay 频道状态不合法")
 	}
+	if status == relayChannelStatusEnabled {
+		return gerror.New("启用 relay 频道必须通过状态接口完成 Bot 权限校验")
+	}
 	data := g.Map{"tenant_id": in.TenantId, "tg_account_id": in.TgAccountId, "target_chat_id": strings.TrimSpace(in.TargetChatId), "title": in.Title, "status": status, "health_status": relayChannelHealthUnknown, "bot_permission_status": relayBotPermissionUnknown, "updated_at": time.Now()}
 	m := g.DB().Model("hg_youban_publish_relay_channel").Ctx(ctx)
 	if in.Id > 0 {

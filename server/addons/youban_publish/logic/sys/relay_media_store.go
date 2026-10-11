@@ -21,6 +21,24 @@ type relayMediaRef struct {
 	FileId         string `json:"fileId"`
 }
 
+// relayAvailableForTenant prevents ordinary publishing from entering the relay
+// queue when the tenant has no enabled and healthy relay channel.
+func relayAvailableForTenant(ctx context.Context, tenantId int64) (bool, error) {
+	if tenantId <= 0 {
+		return false, nil
+	}
+	count, err := g.DB().Model("hg_youban_publish_relay_channel").Ctx(ctx).
+		Where("tenant_id", tenantId).
+		Where("status", relayChannelStatusEnabled).
+		Where("health_status", relayChannelHealthReady).
+		Where("(cooldown_until IS NULL OR cooldown_until < ?)", time.Now()).
+		Count()
+	if err != nil {
+		return false, gerror.Wrap(err, "检查 relay 频道可用性失败")
+	}
+	return count > 0, nil
+}
+
 func relayLeaseToken() string {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
