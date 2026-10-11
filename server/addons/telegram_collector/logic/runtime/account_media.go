@@ -70,6 +70,16 @@ func (h *accountMediaTaskHandler) HandleAccountTask(ctx context.Context, client 
 	if result.Media.FileID == "" {
 		result.Media = refreshed
 	}
+	if refreshed.Type == sysin.MediaKindVideo && strings.TrimSpace(refreshed.SourceThumbSize) != "" {
+		thumbPath, thumbErr := transferAccountTaskMediaThumb(ctx, client, task.AccountID, refreshed)
+		if thumbErr == nil {
+			defer os.Remove(thumbPath)
+			result.PosterURL, result.PosterPath, thumbErr = provider.StoreMediaPoster(ctx, task, thumbPath)
+		}
+		if thumbErr != nil {
+			g.Log().Warningf(ctx, "Telegram视频缩略图处理失败，继续使用FFmpeg兜底 fileId:%s err:%v", refreshed.FileID, thumbErr)
+		}
+	}
 	return result, nil
 }
 
@@ -96,6 +106,15 @@ func downloadAccountTaskMedia(ctx context.Context, client *telegram.Client, prov
 
 func transferAccountTaskMedia(ctx context.Context, client *telegram.Client, accountID int64, media sysin.CollectorMediaItem) (string, error) {
 	location, ok := accountMediaLocation(media)
+	return transferAccountTaskMediaLocation(ctx, client, accountID, media, location, ok, accountMediaExtension(media))
+}
+
+func transferAccountTaskMediaThumb(ctx context.Context, client *telegram.Client, accountID int64, media sysin.CollectorMediaItem) (string, error) {
+	location, ok := accountMediaThumbLocation(media)
+	return transferAccountTaskMediaLocation(ctx, client, accountID, media, location, ok, ".jpg")
+}
+
+func transferAccountTaskMediaLocation(ctx context.Context, client *telegram.Client, accountID int64, media sysin.CollectorMediaItem, location tg.InputFileLocationClass, ok bool, extension string) (string, error) {
 	if !ok {
 		return "", gerror.New("Telegram媒体缺少有效下载元数据")
 	}
@@ -103,7 +122,7 @@ func transferAccountTaskMedia(ctx context.Context, client *telegram.Client, acco
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", gerror.Wrap(err, "创建Telegram媒体临时目录失败")
 	}
-	file, err := os.CreateTemp(dir, "account-media-*"+accountMediaExtension(media))
+	file, err := os.CreateTemp(dir, "account-media-*"+extension)
 	if err != nil {
 		return "", gerror.Wrap(err, "创建Telegram媒体临时文件失败")
 	}
@@ -201,6 +220,16 @@ func accountMediaLocation(media sysin.CollectorMediaItem) (tg.InputFileLocationC
 		return &tg.InputPhotoFileLocation{ID: media.SourceMediaID, AccessHash: media.SourceAccessHash, FileReference: media.SourceFileReference, ThumbSize: thumb}, true
 	}
 	return &tg.InputDocumentFileLocation{ID: media.SourceMediaID, AccessHash: media.SourceAccessHash, FileReference: media.SourceFileReference}, true
+}
+
+func accountMediaThumbLocation(media sysin.CollectorMediaItem) (tg.InputFileLocationClass, bool) {
+	if !accountMediaMetadataValid(media) || strings.TrimSpace(media.SourceThumbSize) == "" {
+		return nil, false
+	}
+	if !strings.EqualFold(strings.TrimSpace(media.SourceKind), "document") {
+		return nil, false
+	}
+	return &tg.InputDocumentFileLocation{ID: media.SourceMediaID, AccessHash: media.SourceAccessHash, FileReference: media.SourceFileReference, ThumbSize: media.SourceThumbSize}, true
 }
 
 func parseAccountMediaFileID(fileID string) (string, int, bool) {

@@ -53,6 +53,7 @@ type AccountTaskCompletionHandler interface {
 type AccountMediaProvider interface {
 	ResolvePeer(ctx context.Context, tenantID, accountID int64, chatID string, client *telegram.Client) (tg.InputPeerClass, error)
 	StoreMedia(ctx context.Context, task *sysin.AccountTask, localPath string) (*sysin.AccountMediaDownloadResult, error)
+	StoreMediaPoster(ctx context.Context, task *sysin.AccountTask, localPath string) (fileURL string, storagePath string, err error)
 }
 
 type IAccountHistory interface {

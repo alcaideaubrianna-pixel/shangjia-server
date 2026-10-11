@@ -64,6 +64,7 @@ func (h *publishCollectorAccountTaskHandler) HandleAccountTaskCompletion(ctx con
 	}
 	data := g.Map{
 		"cache_status": "ready", "file_url": result.FileURL, "storage_path": result.StoragePath,
+		"poster_url": strings.TrimSpace(result.PosterURL), "poster_storage_path": normalizeStoredMediaPath(result.PosterPath),
 		"source_file_id": result.Media.FileID, "source_kind": result.Media.SourceKind,
 		"source_media_id": result.Media.SourceMediaID, "source_access_hash": result.Media.SourceAccessHash,
 		"source_file_reference": result.Media.SourceFileReference, "source_thumb_size": result.Media.SourceThumbSize,
@@ -727,6 +728,18 @@ func (p *publishCollectorAccountMediaProvider) StoreMedia(ctx context.Context, t
 	return &collectorin.AccountMediaDownloadResult{
 		AttachmentID: attachment.Id, FileURL: item.FileURL, StoragePath: item.StoragePath, Media: item,
 	}, nil
+}
+
+func (p *publishCollectorAccountMediaProvider) StoreMediaPoster(ctx context.Context, task *collectorin.AccountTask, localPath string) (string, string, error) {
+	if p == nil || p.publish == nil || task == nil {
+		return "", "", gerror.New("Telegram账号媒体封面存储参数无效")
+	}
+	ctx = collectMediaRuntimeContext(ctx, task.MediaOwnerAccountID)
+	attachment, err := p.publish.uploadCollectMediaToStorage(ctx, "image", localPath)
+	if err != nil {
+		return "", "", err
+	}
+	return strings.TrimSpace(attachment.FileUrl), normalizeStoredMediaPath(attachment.Path), nil
 }
 
 func collectorMediaItemFromCollect(item collectMediaItem) collectorin.CollectorMediaItem {
