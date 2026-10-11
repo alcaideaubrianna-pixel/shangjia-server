@@ -44,6 +44,7 @@ var items = []item{
 	{Key: "youbanPublish.queue.accountBusyTimeoutSeconds", EnvKeys: []string{"YOUBAN_PUBLISH_ACCOUNT_BUSY_TIMEOUT_SECONDS"}},
 	{Key: "youbanPublish.queue.mediaConcurrency", EnvKeys: []string{"YOUBAN_PUBLISH_MEDIA_WORKER_CONCURRENCY"}},
 	{Key: "youbanPublish.queue.mediaBulkConcurrency", EnvKeys: []string{"YOUBAN_PUBLISH_MEDIA_BULK_CONCURRENCY"}},
+	{Key: "youbanPublish.queue.relayConcurrency", EnvKeys: []string{"YOUBAN_PUBLISH_RELAY_CONCURRENCY"}},
 	{Key: "youbanPublish.queue.mediaBulkShards", EnvKeys: []string{"YOUBAN_PUBLISH_MEDIA_BULK_SHARDS"}},
 	{Key: "youbanPublish.queue.mediaRealtimeWeight", EnvKeys: []string{"YOUBAN_PUBLISH_MEDIA_REALTIME_WEIGHT"}},
 	{Key: "youbanPublish.queue.mediaBulkWeight", EnvKeys: []string{"YOUBAN_PUBLISH_MEDIA_BULK_WEIGHT"}},
@@ -67,6 +68,8 @@ var items = []item{
 	{Key: "youbanPublish.collect.materialVerifyWindowSeconds", EnvKeys: []string{"YOUBAN_PUBLISH_MATERIAL_VERIFY_WINDOW_SECONDS"}},
 	{Key: "youbanPublish.mediaFileCache.cosDownloadMode", EnvKeys: []string{"YOUBAN_PUBLISH_MEDIA_CACHE_DOWNLOAD_MODE"}},
 	{Key: "youbanPublish.mediaFileCache.workerCdnBaseUrl", EnvKeys: []string{"YOUBAN_PUBLISH_MEDIA_CACHE_WORKER_CDN_BASE_URL"}},
+	// Dedicated COS download endpoint used by publish/media workers. Keep the
+	// older workerCdnBaseUrl variable for compatibility with existing deploys.
 	{Key: "youbanPublish.mediaFileCache.cosDownloadCdnBaseUrl", EnvKeys: []string{"YOUBAN_PUBLISH_COS_DOWNLOAD_CDN_URL"}},
 	{Key: "youbanPublish.mediaFileCache.fallbackCdnBaseUrl", EnvKeys: []string{"YOUBAN_PUBLISH_MEDIA_CACHE_FALLBACK_CDN_BASE_URL"}},
 	{Key: "youbanPublish.mediaSearch.pgvector.enabled", EnvKeys: []string{"YOUBAN_PUBLISH_MEDIA_SEARCH_PGVECTOR_ENABLED"}},

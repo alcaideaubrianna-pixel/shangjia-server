@@ -32,6 +32,7 @@ type sSysPublish struct {
 	mediaQueueServer      *asynq.Server
 	mediaBulkQueueServer  *asynq.Server
 	mediaProcessServer    *asynq.Server
+	relayQueueServer      *asynq.Server
 	autoDeleteQueueServer *asynq.Server
 	attemptTimeoutServer  *asynq.Server
 	backgroundQueueServer *asynq.Server
@@ -40,7 +41,6 @@ type sSysPublish struct {
 	duplicateQueueServer  *asynq.Server
 	historyQueueServer    *asynq.Server
 	mattingQueueServer    *asynq.Server
-	relayQueueServer      *asynq.Server
 
 	telegramChannelMu    publishRuntimeMutex
 	telegramChannelLocks map[string]*publishRuntimeMutex
