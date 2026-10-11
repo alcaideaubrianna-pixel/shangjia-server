@@ -38,7 +38,7 @@ func relayAvailableForTenant(ctx context.Context, tenantId int64) (bool, error) 
 	count, err := dao.YoubanPublishRelayChannel.Ctx(ctx).
 		Where("tenant_id", tenantId).
 		Where("status", relayChannelStatusEnabled).
-		Where("health_status", relayChannelHealthReady).
+		Where("(health_status = ? OR (health_status = ? AND cooldown_until < ?))", relayChannelHealthReady, relayChannelHealthCooldown, time.Now()).
 		Where("(cooldown_until IS NULL OR cooldown_until < ?)", time.Now()).
 		Count()
 	if err != nil {
@@ -162,5 +162,5 @@ func markRelayChannelFailure(ctx context.Context, id int64, cause error, cooldow
 	if cooldown > 0 {
 		status = relayChannelHealthCooldown
 	}
-	_, _ = dao.YoubanPublishRelayChannel.Ctx(ctx).WherePri(id).Data(do.YoubanPublishRelayChannel{HealthStatus: status, LastError: cause.Error()}).Update()
+	_, _ = dao.YoubanPublishRelayChannel.Ctx(ctx).WherePri(id).Data(do.YoubanPublishRelayChannel{HealthStatus: status, CooldownUntil: gtime.New(time.Now().Add(cooldown)), LastError: cause.Error()}).Update()
 }
