@@ -49,7 +49,8 @@ type sGateway struct {
 	mediaClients           map[string]*tgbot.Bot
 	webhookAuditAt         time.Time
 	queueMu                sync.Mutex
-	queue                  *asynq.Server
+	interactiveQueue       *asynq.Server
+	bulkQueue              *asynq.Server
 	queueCli               *asynq.Client
 	loadBindingsForClient  func(context.Context) (map[string][]service.BotBinding, error)
 	runtimeConfigForClient func(context.Context) (*service.RuntimeConfig, error)
@@ -464,7 +465,8 @@ func (s *sGateway) submitUpdate(ctx context.Context, key string, update *models.
 
 func updateNeedsImmediateDispatch(update *models.Update) bool {
 	// Inline queries must be answered within Telegram's short response window.
-	// Callback queries can be processed by the durable queue like messages.
+	// Callback queries and private messages use the dedicated durable
+	// interactive queue so channel traffic cannot starve them.
 	return update != nil && update.InlineQuery != nil
 }
 

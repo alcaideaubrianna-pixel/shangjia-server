@@ -19,9 +19,11 @@ import (
 )
 
 const (
-	tgGatewayQueueName      = "youban_tg_bot_gateway_update"
-	tgGatewayTaskType       = "youban_tg_bot_gateway:update"
-	tgGatewayEnqueueTimeout = 5 * time.Second
+	tgGatewayInteractiveQueueName = "youban_tg_bot_gateway_interactive"
+	tgGatewayBulkQueueName        = "youban_tg_bot_gateway_bulk"
+	tgGatewayLegacyQueueName      = "youban_tg_bot_gateway_update"
+	tgGatewayTaskType             = "youban_tg_bot_gateway:update"
+	tgGatewayEnqueueTimeout       = 5 * time.Second
 )
 
 type gatewayUpdatePayload struct {
@@ -31,26 +33,39 @@ type gatewayUpdatePayload struct {
 
 func (s *sGateway) startUpdateQueue(ctx context.Context) {
 	s.queueMu.Lock()
-	if s.queue != nil {
+	if s.interactiveQueue != nil || s.bulkQueue != nil {
 		s.queueMu.Unlock()
 		return
 	}
 	redisOpt := gatewayRedisOption(ctx)
-	server := asynq.NewServer(redisOpt, asynq.Config{
-		Concurrency: gatewayQueueConcurrency(ctx),
-		Queues:      map[string]int{tgGatewayQueueName: 1},
+	interactiveServer := asynq.NewServer(redisOpt, asynq.Config{
+		Concurrency: gatewayInteractiveQueueConcurrency(ctx),
+		Queues:      map[string]int{tgGatewayInteractiveQueueName: 1},
+	})
+	bulkServer := asynq.NewServer(redisOpt, asynq.Config{
+		Concurrency: gatewayBulkQueueConcurrency(ctx),
+		Queues: map[string]int{
+			tgGatewayBulkQueueName:   10,
+			tgGatewayLegacyQueueName: 1,
+		},
 	})
 	if s.queueCli == nil {
 		s.queueCli = asynq.NewClient(redisOpt)
 	}
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(tgGatewayTaskType, s.handleUpdateTask)
-	s.queue = server
+	s.interactiveQueue = interactiveServer
+	s.bulkQueue = bulkServer
 	s.queueMu.Unlock()
-	g.Log().Infof(ctx, "启动TG Bot Gateway异步更新队列 concurrency:%d", gatewayQueueConcurrency(ctx))
+	g.Log().Infof(ctx, "启动TG Bot Gateway异步更新队列 interactiveConcurrency:%d bulkConcurrency:%d", gatewayInteractiveQueueConcurrency(ctx), gatewayBulkQueueConcurrency(ctx))
 	go func() {
-		if err := server.Run(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
-			g.Log().Errorf(ctx, "TG Bot Gateway异步更新队列停止：%+v", err)
+		if err := interactiveServer.Run(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
+			g.Log().Errorf(ctx, "TG Bot Gateway交互更新队列停止：%+v", err)
+		}
+	}()
+	go func() {
+		if err := bulkServer.Run(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
+			g.Log().Errorf(ctx, "TG Bot Gateway批量更新队列停止：%+v", err)
 		}
 	}()
 }
@@ -72,8 +87,16 @@ func (s *sGateway) updateQueueClient(ctx context.Context) *asynq.Client {
 	return s.queueCli
 }
 
-func gatewayQueueConcurrency(ctx context.Context) int {
+func gatewayBulkQueueConcurrency(ctx context.Context) int {
 	concurrency := g.Cfg().MustGet(ctx, "youbanTgBotGateway.queue.concurrency", 8).Int()
+	if concurrency < 1 {
+		return 1
+	}
+	return concurrency
+}
+
+func gatewayInteractiveQueueConcurrency(ctx context.Context) int {
+	concurrency := g.Cfg().MustGet(ctx, "youbanTgBotGateway.queue.interactiveConcurrency", 16).Int()
 	if concurrency < 1 {
 		return 1
 	}
@@ -82,11 +105,14 @@ func gatewayQueueConcurrency(ctx context.Context) int {
 
 func (s *sGateway) stopUpdateQueue() {
 	s.queueMu.Lock()
-	server, client := s.queue, s.queueCli
-	s.queue, s.queueCli = nil, nil
+	interactiveServer, bulkServer, client := s.interactiveQueue, s.bulkQueue, s.queueCli
+	s.interactiveQueue, s.bulkQueue, s.queueCli = nil, nil, nil
 	s.queueMu.Unlock()
-	if server != nil {
-		server.Shutdown()
+	if interactiveServer != nil {
+		interactiveServer.Shutdown()
+	}
+	if bulkServer != nil {
+		bulkServer.Shutdown()
 	}
 	if client != nil {
 		_ = client.Close()
@@ -115,8 +141,13 @@ func (s *sGateway) enqueueUpdateBody(ctx context.Context, key string, body []byt
 	client := s.updateQueueClient(ctx)
 	enqueueCtx, cancel := context.WithTimeout(ctx, tgGatewayEnqueueTimeout)
 	defer cancel()
+	queueName := tgGatewayBulkQueueName
+	var update models.Update
+	if unmarshalErr := json.Unmarshal(body, &update); unmarshalErr == nil && updateNeedsInteractiveQueue(&update) {
+		queueName = tgGatewayInteractiveQueueName
+	}
 	_, err = client.EnqueueContext(enqueueCtx, asynq.NewTask(tgGatewayTaskType, payload),
-		asynq.Queue(tgGatewayQueueName),
+		asynq.Queue(queueName),
 		asynq.MaxRetry(10),
 		asynq.Timeout(2*time.Minute),
 		asynq.Unique(5*time.Minute),
@@ -128,6 +159,21 @@ func (s *sGateway) enqueueUpdateBody(ctx context.Context, key string, body []byt
 		return nil
 	}
 	return err
+}
+
+func updateNeedsInteractiveQueue(update *models.Update) bool {
+	if update == nil {
+		return false
+	}
+	if update.CallbackQuery != nil || update.InlineQuery != nil {
+		return true
+	}
+	for _, message := range []*models.Message{update.Message, update.EditedMessage} {
+		if message != nil && message.Chat.Type == "private" {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *sGateway) observeDuplicateUpdate(ctx context.Context, key string, updateID int64) {
