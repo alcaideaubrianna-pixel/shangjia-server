@@ -116,7 +116,10 @@ func (s *sSysPublish) recoverBotCollectMedia(ctx context.Context, limit int) err
 		WhereNull("e."+e.ProcessedAt).
 		WhereLTE("e."+e.UpdatedAt, deadline).
 		Where(enabledCollectSourceExistsSQL("e"))
-	model = model.Where("EXISTS (SELECT 1 FROM "+pdao.YoubanPublishCollectEventMedia.Table()+" m WHERE m.event_id=e."+e.Id+" AND m.cache_status IN (?,?)", collectMediaCachePending, collectMediaCacheDownloading)
+	// Keep ordering and pagination on the outer event query. GoFrame may attach
+	// later Order/Limit calls to an EXISTS expression when its predicate is
+	// built inline, producing invalid PostgreSQL SQL (ORDER inside EXISTS).
+	model = model.Where("e."+e.Id+" IN (SELECT m.event_id FROM "+pdao.YoubanPublishCollectEventMedia.Table()+" m WHERE m.cache_status IN (?,?))", collectMediaCachePending, collectMediaCacheDownloading)
 	rows, err := model.OrderAsc("e." + e.UpdatedAt).Limit(limit).All()
 	if err != nil {
 		return gerror.Wrap(err, "读取待恢复BOT媒体事件失败")
