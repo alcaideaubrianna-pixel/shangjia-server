@@ -94,6 +94,7 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 		Queues:         map[string]int{tgQueueNameMatting: 1},
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
+	relayServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{Concurrency: g.Cfg().MustGet(ctx, "youbanPublish.queue.relayConcurrency", 4).Int(), Queues: map[string]int{tgQueueNameRelay: 1}, RetryDelayFunc: telegramQueueRetryDelay})
 	g.Log().Infof(ctx, "启动上架插件后台队列，自动删除独立并发：%d", telegramAutoDeleteConcurrency(ctx))
 	s.autoDeleteQueueServer = autoDeleteServer
 	s.attemptTimeoutServer = attemptTimeoutServer
@@ -103,6 +104,7 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	s.duplicateQueueServer = duplicateServer
 	s.historyQueueServer = historyServer
 	s.mattingQueueServer = mattingServer
+	s.relayQueueServer = relayServer
 	s.tgQueueMu.Unlock()
 
 	backgroundMux := asynq.NewServeMux()
@@ -123,6 +125,13 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	backgroundMux.HandleFunc(tgTaskTypeCollectSourceDelete, s.handleCollectSourceDeleteTask)
 	backgroundMux.HandleFunc(tgTaskTypeBotMediaRepair, s.handleBotMediaRepairTask)
 	backgroundMux.HandleFunc(tgTaskTypeAttemptTimeout, s.handleTelegramAttemptTimeoutTask)
+	relayMux := asynq.NewServeMux()
+	relayMux.HandleFunc(tgTaskTypeRelayMedia, s.handleRelayMediaTask)
+	go func() {
+		if err := relayServer.Run(relayMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
+			g.Log().Errorf(ctx, "启动 relay 媒体队列失败：%+v", err)
+		}
+	}()
 	cycleMux := asynq.NewServeMux()
 	cycleMux.HandleFunc(tgTaskTypeCycleRun, s.handleCycleRunTask)
 	cycleMux.HandleFunc(tgTaskTypeCycleReschedule, s.handleCycleRescheduleTask)

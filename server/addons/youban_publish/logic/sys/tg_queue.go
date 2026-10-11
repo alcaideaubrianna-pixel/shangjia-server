@@ -63,6 +63,8 @@ const (
 	tgTaskTypeDuplicateScan         = "youban_publish:profile:duplicate_scan"
 	tgTaskTypeMatting               = "youban_publish:anti_scan:matting"
 	tgTaskTypeAttemptTimeout        = "youban_publish:tg:attempt_timeout"
+	tgTaskTypeRelayMedia            = "youban_publish:relay:media"
+	tgQueueNameRelay                = "youban_publish_relay"
 )
 
 const collectMediaMaxBulkQueueShards = 16
