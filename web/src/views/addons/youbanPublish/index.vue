@@ -116,7 +116,7 @@
         </n-tab-pane>
 
         <n-tab-pane name="relay" tab="中转频道">
-          <RelayChannelPanel :tenant-id="Number(channelQuery.tenantId || 0)" />
+          <RelayChannelPanel :tenant-id="Number(channelQuery.tenantId || 0)" :tenant-options="tenantOptionsWithAll.filter((item) => item.value)" />
         </n-tab-pane>
 
         <n-tab-pane name="profiles" tab="笔记资料">
