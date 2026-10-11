@@ -22,6 +22,10 @@ type relayMediaRef struct {
 	FileId         string `json:"fileId"`
 }
 
+func relayLeaseAvailable(status string, leaseUntil, now time.Time) bool {
+	return status == "uploading" && !leaseUntil.IsZero() && leaseUntil.After(now)
+}
+
 // relayAvailableForTenant prevents ordinary publishing from entering the relay
 // queue when the tenant has no enabled and healthy relay channel.
 func relayAvailableForTenant(ctx context.Context, tenantId int64) (bool, error) {
@@ -82,7 +86,7 @@ func claimRelayMedia(ctx context.Context, tenantId, mediaId int64, purpose, vers
 	if err := model.Where("tenant_id", tenantId).Where("media_id", mediaId).Where("purpose", purpose).Where("media_version", version).Scan(&state); err != nil {
 		return "", gerror.Wrap(err, "读取 relay 媒体租约失败")
 	}
-	if state.Status == "uploading" && !state.LeaseUntil.IsZero() && state.LeaseUntil.After(now) {
+	if relayLeaseAvailable(state.Status, state.LeaseUntil, now) {
 		return "", nil
 	}
 	data := g.Map{"status": "uploading", "lease_token": token, "lease_until": until, "updated_at": now}
