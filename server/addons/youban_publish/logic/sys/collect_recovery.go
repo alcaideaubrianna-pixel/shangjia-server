@@ -47,6 +47,9 @@ func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	if err := s.recoverPendingCollectMedia(ctx, mediaBatchSize); err != nil {
 		g.Log().Warningf(ctx, "恢复待处理采集媒体任务失败：%+v", err)
 	}
+	if err := s.recoverBotCollectMedia(ctx, mediaBatchSize); err != nil {
+		g.Log().Warningf(ctx, "恢复BOT采集媒体任务失败：%+v", err)
+	}
 	if err := s.recoverCollectHistoryTasks(ctx, 20); err != nil {
 		g.Log().Warningf(ctx, "恢复历史采集任务失败：%+v", err)
 	}
@@ -62,6 +65,50 @@ func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	if err := s.recoverCollectPublishTasks(ctx, 100); err != nil {
 		g.Log().Warningf(ctx, "恢复采集推送任务失败：%+v", err)
 	}
+}
+
+// recoverBotCollectMedia is deliberately event-scoped. Older source-scoped
+// recovery can keep a busy BOT source alive without ever putting a particular
+// media group back on the media queue. Re-enqueueing each stale BOT event
+// lets the normal BOT downloader resume the group independently.
+func (s *sSysPublish) recoverBotCollectMedia(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		limit = 1000
+	}
+	e := pdao.YoubanPublishCollectEvent.Columns()
+	deadline := gtime.Now().Add(-collectEventRecoverAfter)
+	model := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
+		Fields("e.*").
+		Where("e."+e.SourceType, sysin.CollectSourceTypeBot).
+		WhereIn("e."+e.Status, []string{sysin.CollectEventStatusMediaPending, sysin.CollectEventStatusMediaReady, sysin.CollectEventStatusGroupCollect, sysin.CollectEventStatusPending, sysin.CollectEventStatusFailed}).
+		WhereNull("e."+e.ProcessedAt).
+		WhereLTE("e."+e.UpdatedAt, deadline).
+		Where(enabledCollectSourceExistsSQL("e"))
+	model = model.Where("EXISTS (SELECT 1 FROM "+pdao.YoubanPublishCollectEventMedia.Table()+" m WHERE m.event_id=e."+e.Id+" AND m.cache_status IN (?,?)", collectMediaCachePending, collectMediaCacheDownloading)
+	rows, err := model.OrderAsc("e." + e.UpdatedAt).Limit(limit).All()
+	if err != nil {
+		return gerror.Wrap(err, "读取待恢复BOT媒体事件失败")
+	}
+	requeued := 0
+	for _, row := range rows {
+		payload := collectMediaQueuePayloadFromEvent(row)
+		if payload.EventId <= 0 || payload.TenantId <= 0 || payload.SourceId <= 0 {
+			continue
+		}
+		queued, enqueueErr := s.enqueueCollectMediaCacheDeferred(ctx, payload, 0)
+		if enqueueErr != nil {
+			g.Log().Warningf(ctx, "BOT媒体事件重新入队失败 eventId:%d err:%+v", payload.EventId, enqueueErr)
+			continue
+		}
+		if queued {
+			requeued++
+			g.Log().Infof(ctx, "BOT媒体事件已按事件重新入队 eventId:%d sourceId:%d", payload.EventId, payload.SourceId)
+		}
+	}
+	if requeued > 0 {
+		g.Log().Infof(ctx, "BOT媒体事件恢复完成 count:%d", requeued)
+	}
+	return nil
 }
 
 func (s *sSysPublish) ignoreStaleCollectEventsForDisabledSources(ctx context.Context, limit int) error {
