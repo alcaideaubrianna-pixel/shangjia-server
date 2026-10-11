@@ -121,7 +121,44 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 			return true, nil
 		}
 		ruleID, _ := strconv.ParseInt(parts[2], 10, 64)
-		return true, s.showCollectRuleChannels(ctx, botId, chatId, s.collectRuleOwnerAccount(ctx, account, ruleID), ruleID)
+		page := 1
+		if len(parts) > 3 {
+			page, _ = strconv.Atoi(parts[3])
+		}
+		return true, s.showCollectRuleChannels(ctx, botId, chatId, s.collectRuleOwnerAccount(ctx, account, ruleID), ruleID, page)
+	case "channel":
+		if account.AccountType != "admin" || len(parts) < 5 {
+			return true, nil
+		}
+		ruleID, _ := strconv.ParseInt(parts[2], 10, 64)
+		rowID, _ := strconv.ParseInt(parts[3], 10, 64)
+		return true, s.showCollectRuleChannel(ctx, botId, chatId, s.collectRuleOwnerAccount(ctx, account, ruleID), ruleID, rowID, parts[4])
+	case "channelstatus", "channeldelete":
+		if account.AccountType != "admin" || len(parts) < 6 {
+			return true, nil
+		}
+		ruleID, _ := strconv.ParseInt(parts[2], 10, 64)
+		rowID, _ := strconv.ParseInt(parts[3], 10, 64)
+		status, _ := strconv.Atoi(parts[5])
+		owner := s.collectRuleOwnerAccount(ctx, account, ruleID)
+		if action == "channeldelete" {
+			if err := publishService.SysPublish().BotIntroFeeChannelRuleDelete(ctx, rowID, ruleID, owner.TenantId, owner.AccountId); err != nil {
+				return true, err
+			}
+			return true, s.showCollectRuleChannels(ctx, botId, chatId, owner, ruleID, 1)
+		}
+		item, err := s.collectRuleChannelItem(ctx, botId, owner, ruleID, rowID, parts[4])
+		if err != nil {
+			return true, err
+		}
+		if item == nil || !item.Configured {
+			return true, s.sendCollectManageNotice(ctx, botId, chatId, "请先配置该频道的后缀。")
+		}
+		_, err = publishService.SysPublish().BotIntroFeeChannelRuleSave(ctx, &publishsysin.IntroFeeChannelRuleSaveInp{Id: rowID, RuleId: ruleID, BotId: botId, ChannelId: item.ChannelId, Suffix: item.Suffix, Status: status}, owner.TenantId, owner.AccountId)
+		if err != nil {
+			return true, err
+		}
+		return true, s.showCollectRuleChannel(ctx, botId, chatId, owner, ruleID, rowID, parts[4])
 	case "addchannel":
 		if account.AccountType != "admin" || len(parts) < 3 {
 			return true, nil
@@ -348,9 +385,7 @@ func (s *sSysBot) showCollectRuleEditor(ctx context.Context, botId int64, chatId
 		{{Text: fmt.Sprintf("删除文本（%d条）", len(r.DeleteTexts)), CallbackData: fmt.Sprintf("cm:edit:%d:delete_text", ruleID)}},
 		{{Text: fmt.Sprintf("文本替换（%d条）", len(r.Replacements)), CallbackData: fmt.Sprintf("cm:edit:%d:replace", ruleID)}},
 		{{Text: "费用清理 · " + onOff(r.TruncateIntroFeeEnabled), CallbackData: fmt.Sprintf("cm:ruleswitch:%d:fee", ruleID)}},
-		{{Text: "介绍费后缀 · " + onOff(r.IntroFeeSuffixEnabled), CallbackData: fmt.Sprintf("cm:edit:%d:intro_suffix", ruleID)}},
-		{{Text: "频道后缀配置", CallbackData: fmt.Sprintf("cm:channels:%d", ruleID)}},
-		{{Text: "添加频道后缀", CallbackData: fmt.Sprintf("cm:addchannel:%d", ruleID)}},
+		{{Text: "介绍费后缀 · " + onOff(r.IntroFeeSuffixEnabled), CallbackData: fmt.Sprintf("cm:channels:%d:1", ruleID)}},
 		{{Text: "前置文案 · " + onOff(r.HeaderEnabled), CallbackData: fmt.Sprintf("cm:edit:%d:header", ruleID)}},
 		{{Text: "后置文案 · " + onOff(r.FooterEnabled), CallbackData: fmt.Sprintf("cm:edit:%d:footer", ruleID)}},
 		{{Text: "返回采集配置", CallbackData: "cm:list:1"}},
@@ -364,16 +399,20 @@ func (s *sSysBot) showCollectRuleEditor(ctx context.Context, botId int64, chatId
 	return err
 }
 
-func (s *sSysBot) showCollectRuleChannels(ctx context.Context, botId int64, chatId string, account *botProfileAccount, ruleID int64) error {
+func (s *sSysBot) showCollectRuleChannels(ctx context.Context, botId int64, chatId string, account *botProfileAccount, ruleID int64, page int) error {
+	if page < 1 {
+		page = 1
+	}
 	in := &publishsysin.IntroFeeChannelRuleListInp{RuleId: ruleID, BotId: botId, IncludeCandidates: true}
-	in.Page = 1
-	in.PerPage = 20
+	in.Page = page
+	in.PerPage = 8
 	rows, total, err := publishService.SysPublish().BotIntroFeeChannelRuleList(ctx, in, account.TenantId, account.AccountId)
 	if err != nil {
 		return err
 	}
-	lines := []string{fmt.Sprintf("频道后缀配置（共 %d 个）", total)}
-	buttons := make([][]models.InlineKeyboardButton, 0, len(rows)+2)
+	pages := (total + in.PerPage - 1) / in.PerPage
+	lines := []string{fmt.Sprintf("介绍费后缀\n频道列表 · 第 %d/%d 页 · 共 %d 个", page, max(1, pages), total)}
+	buttons := make([][]models.InlineKeyboardButton, 0, len(rows)+4)
 	for _, row := range rows {
 		if row == nil {
 			continue
@@ -389,15 +428,81 @@ func (s *sSysBot) showCollectRuleChannels(ctx context.Context, botId int64, chat
 		if suffix == "" {
 			suffix = "未配置"
 		}
-		status := row.AccountStatus
-		if status == "" {
-			status = "待配置"
+		status := "待配置"
+		if row.Configured {
+			status = "已启用"
+			if row.Status != 1 {
+				status = "已禁用"
+			}
 		}
-		lines = append(lines, fmt.Sprintf("%s（%s） · %s · %s", name, row.ChannelId, suffix, status))
-		buttons = append(buttons, []models.InlineKeyboardButton{{Text: "修改 " + row.ChannelId, CallbackData: fmt.Sprintf("cm:channeledit:%d:%s:%d", ruleID, row.ChannelId, row.Id)}})
+		lines = append(lines, fmt.Sprintf("%s（%s）\n后缀：%s · 状态：%s", html.EscapeString(name), html.EscapeString(row.ChannelId), html.EscapeString(suffix), status))
+		buttons = append(buttons, []models.InlineKeyboardButton{{Text: name + " · " + status, CallbackData: fmt.Sprintf("cm:channel:%d:%d:%s", ruleID, row.Id, row.ChannelId)}})
 	}
+	nav := make([]models.InlineKeyboardButton, 0, 2)
+	if page > 1 {
+		nav = append(nav, models.InlineKeyboardButton{Text: "上一页", CallbackData: fmt.Sprintf("cm:channels:%d:%d", ruleID, page-1)})
+	}
+	if page < pages {
+		nav = append(nav, models.InlineKeyboardButton{Text: "下一页", CallbackData: fmt.Sprintf("cm:channels:%d:%d", ruleID, page+1)})
+	}
+	if len(nav) > 0 {
+		buttons = append(buttons, nav)
+	}
+	buttons = append(buttons, []models.InlineKeyboardButton{{Text: "添加频道", CallbackData: fmt.Sprintf("cm:addchannel:%d", ruleID)}})
 	buttons = append(buttons, []models.InlineKeyboardButton{{Text: "返回规则", CallbackData: fmt.Sprintf("cm:rule:%d", ruleID)}})
 	return s.sendCollectManageMarkup(ctx, botId, chatId, strings.Join(lines, "\n"), buttons)
+}
+
+func (s *sSysBot) showCollectRuleChannel(ctx context.Context, botId int64, chatId string, account *botProfileAccount, ruleID, rowID int64, channelID string) error {
+	item, err := s.collectRuleChannelItem(ctx, botId, account, ruleID, rowID, channelID)
+	if err != nil {
+		return err
+	}
+	if item == nil {
+		return s.sendCollectManageNotice(ctx, botId, chatId, "频道不存在或已被删除。")
+	}
+	name := item.ChannelTitle
+	if name == "" {
+		name = item.ChannelId
+	}
+	status := "待配置"
+	if item.Configured {
+		status = "已启用"
+		if item.Status != 1 {
+			status = "已禁用"
+		}
+	}
+	suffix := item.Suffix
+	if suffix == "" {
+		suffix = "未配置"
+	}
+	text := fmt.Sprintf("频道：%s\nID：%s\n后缀：%s\n状态：%s", html.EscapeString(name), html.EscapeString(item.ChannelId), html.EscapeString(suffix), status)
+	buttons := [][]models.InlineKeyboardButton{{{Text: "编辑后缀", CallbackData: fmt.Sprintf("cm:channeledit:%d:%s:%d", ruleID, item.ChannelId, item.Id)}}}
+	if item.Configured {
+		if item.Status == 1 {
+			buttons = append(buttons, []models.InlineKeyboardButton{{Text: "禁用", CallbackData: fmt.Sprintf("cm:channelstatus:%d:%d:%s:2", ruleID, item.Id, item.ChannelId)}})
+		} else {
+			buttons = append(buttons, []models.InlineKeyboardButton{{Text: "启用", CallbackData: fmt.Sprintf("cm:channelstatus:%d:%d:%s:1", ruleID, item.Id, item.ChannelId)}})
+		}
+		buttons = append(buttons, []models.InlineKeyboardButton{{Text: "删除", CallbackData: fmt.Sprintf("cm:channeldelete:%d:%d:%s:0", ruleID, item.Id, item.ChannelId)}})
+	}
+	buttons = append(buttons, []models.InlineKeyboardButton{{Text: "返回频道列表", CallbackData: fmt.Sprintf("cm:channels:%d:1", ruleID)}})
+	return s.sendCollectManageMarkup(ctx, botId, chatId, text, buttons)
+}
+
+func (s *sSysBot) collectRuleChannelItem(ctx context.Context, botId int64, account *botProfileAccount, ruleID, rowID int64, channelID string) (*publishsysin.IntroFeeChannelRuleItem, error) {
+	in := &publishsysin.IntroFeeChannelRuleListInp{RuleId: ruleID, BotId: botId, IncludeCandidates: true}
+	in.Page, in.PerPage = 1, 100
+	rows, _, err := publishService.SysPublish().BotIntroFeeChannelRuleList(ctx, in, account.TenantId, account.AccountId)
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		if row != nil && (row.Id == rowID && rowID > 0 || row.ChannelId == channelID) {
+			return row, nil
+		}
+	}
+	return nil, nil
 }
 
 func (s *sSysBot) sendCollectManageMarkup(ctx context.Context, botId int64, chatId, text string, buttons [][]models.InlineKeyboardButton) error {

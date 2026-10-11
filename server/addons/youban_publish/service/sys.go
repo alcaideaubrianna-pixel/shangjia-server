@@ -345,6 +345,7 @@ type ISysPublish interface {
 	BotChannelMembershipChanged(ctx context.Context, botId int64, chatId, status, role string, updateId int64) error
 	BotIntroFeeChannelRuleSave(ctx context.Context, in *sysin.IntroFeeChannelRuleSaveInp, tenantId, accountId int64) (int64, error)
 	BotIntroFeeChannelRuleList(ctx context.Context, in *sysin.IntroFeeChannelRuleListInp, tenantId, accountId int64) (list []*sysin.IntroFeeChannelRuleItem, total int, err error)
+	BotIntroFeeChannelRuleDelete(ctx context.Context, id, ruleId, tenantId, accountId int64) error
 	CollectRuleDelete(ctx context.Context, in *sysin.IdsInp) (err error)
 	CollectEventList(ctx context.Context, in *sysin.CollectEventListInp) (list []*sysin.CollectEventModel, totalCount int, err error)
 	CollectEventLogList(ctx context.Context, in *sysin.CollectEventLogListInp) (list []*sysin.CollectEventLogModel, totalCount int, err error)

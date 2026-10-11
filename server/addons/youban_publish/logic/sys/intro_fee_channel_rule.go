@@ -414,7 +414,11 @@ func (s *sSysPublish) BotIntroFeeChannelRuleSave(ctx context.Context, in *sysin.
 		return 0, gerror.New("介绍费规则不存在或无权访问")
 	}
 	now := gtime.Now()
-	data := g.Map{"tenant_id": tenantId, "account_id": accountId, "rule_id": in.RuleId, "bot_id": in.BotId, "channel_id": canonicalCollectSourceChatID(in.ChannelId), "suffix": strings.TrimSpace(in.Suffix), "status": 1, "updated_at": now}
+	status := in.Status
+	if status == 0 {
+		status = 1
+	}
+	data := g.Map{"tenant_id": tenantId, "account_id": accountId, "rule_id": in.RuleId, "bot_id": in.BotId, "channel_id": canonicalCollectSourceChatID(in.ChannelId), "suffix": strings.TrimSpace(in.Suffix), "status": status, "updated_at": now}
 	if in.Id > 0 {
 		result, updateErr := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).
 			Where("id", in.Id).Where("tenant_id", tenantId).WhereIn("account_id", []int64{accountId, 0}).
@@ -441,6 +445,26 @@ func (s *sSysPublish) BotIntroFeeChannelRuleSave(ctx context.Context, in *sysin.
 	}
 	id, err := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Data(data).InsertAndGetId()
 	return id, err
+}
+
+func (s *sSysPublish) BotIntroFeeChannelRuleDelete(ctx context.Context, id, ruleId, tenantId, accountId int64) error {
+	if id <= 0 || !s.introFeeRuleOwned(ctx, tenantId, accountId, ruleId) {
+		return gerror.New("频道后缀规则不存在或无权删除")
+	}
+	result, err := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).
+		Where("id", id).Where("tenant_id", tenantId).WhereIn("account_id", []int64{accountId, 0}).
+		Where("rule_id", ruleId).WhereNull("deleted_at").Data(g.Map{"deleted_at": gtime.Now()}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "删除频道后缀规则失败")
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return gerror.Wrap(err, "检查频道后缀规则删除结果失败")
+	}
+	if rows == 0 {
+		return gerror.New("频道后缀规则不存在或无权删除")
+	}
+	return nil
 }
 
 func (s *sSysPublish) BotIntroFeeChannelRuleList(ctx context.Context, in *sysin.IntroFeeChannelRuleListInp, tenantId, accountId int64) ([]*sysin.IntroFeeChannelRuleItem, int, error) {
