@@ -383,6 +383,17 @@ func (s *sSysPublish) ExecuteCycleRun(ctx context.Context, runId int64) error {
 		return err
 	}
 	if len(items) == 0 {
+		if channel.Mode == "batch" && run.CursorId > 0 && run.QueuedCount < channel.BatchSize {
+			// The tail of a batch is allowed to wrap to the beginning of the
+			// published sequence so every scheduled run fills its configured size.
+			items, err = s.channelCyclePage(ctx, channel, 0, pageLimit)
+			if err != nil {
+				s.failChannelCycleRun(ctx, run.Id, run.ChannelId, err)
+				return err
+			}
+		}
+	}
+	if len(items) == 0 {
 		return s.beginChannelCycleDispatch(ctx, run)
 	}
 	lastCursor := run.CursorId
