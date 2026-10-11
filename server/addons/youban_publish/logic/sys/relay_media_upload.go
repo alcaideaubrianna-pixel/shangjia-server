@@ -50,7 +50,7 @@ func (s *sSysPublish) uploadRelayMediaNow(ctx context.Context, media *telegramMe
 	return messages, nil
 }
 
-func (s *sSysPublish) prepareRelayMediaSet(ctx context.Context, media []*telegramMediaItem, purpose string) ([]*telegramSentMessage, error) {
+func (s *sSysPublish) uploadRelayMediaSetNow(ctx context.Context, media []*telegramMediaItem, purpose string) ([]*telegramSentMessage, error) {
 	if len(media) == 0 || media[0] == nil || media[0].TenantId <= 0 {
 		return nil, gerror.New("relay 媒体组参数无效")
 	}

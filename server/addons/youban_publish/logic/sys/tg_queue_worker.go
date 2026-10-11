@@ -127,6 +127,7 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	backgroundMux.HandleFunc(tgTaskTypeAttemptTimeout, s.handleTelegramAttemptTimeoutTask)
 	relayMux := asynq.NewServeMux()
 	relayMux.HandleFunc(tgTaskTypeRelayMedia, s.handleRelayMediaTask)
+	relayMux.HandleFunc(tgTaskTypeRelayMediaGroup, s.handleRelayMediaGroupTask)
 	go func() {
 		if err := relayServer.Run(relayMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
 			g.Log().Errorf(ctx, "启动 relay 媒体队列失败：%+v", err)
