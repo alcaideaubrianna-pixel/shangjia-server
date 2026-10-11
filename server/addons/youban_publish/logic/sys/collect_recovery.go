@@ -50,6 +50,9 @@ func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	if err := s.recoverBotCollectMedia(ctx, mediaBatchSize); err != nil {
 		g.Log().Warningf(ctx, "恢复BOT采集媒体任务失败：%+v", err)
 	}
+	if err := s.ignoreCollectNoticeEvents(ctx, 500); err != nil {
+		g.Log().Warningf(ctx, "清理采集通知消息失败：%+v", err)
+	}
 	if err := s.recoverCollectHistoryTasks(ctx, 20); err != nil {
 		g.Log().Warningf(ctx, "恢复历史采集任务失败：%+v", err)
 	}
@@ -65,6 +68,41 @@ func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	if err := s.recoverCollectPublishTasks(ctx, 100); err != nil {
 		g.Log().Warningf(ctx, "恢复采集推送任务失败：%+v", err)
 	}
+}
+
+// Submission/duplicate notices are terminal and must never enter media or
+// publish processing. Clean up old pending rows as well as new ones so a
+// backlog cannot consume the collection queues.
+func (s *sSysPublish) ignoreCollectNoticeEvents(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		limit = 500
+	}
+	e := pdao.YoubanPublishCollectEvent.Columns()
+	rows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).Fields(e.Id, e.RawText).
+		WhereIn(e.Status, []string{sysin.CollectEventStatusPending, sysin.CollectEventStatusGroupCollect, sysin.CollectEventStatusWaitingOrder, sysin.CollectEventStatusPrechecked, sysin.CollectEventStatusMediaPending}).
+		WhereNull(e.ProcessedAt).OrderAsc(e.UpdatedAt).Limit(limit).All()
+	if err != nil {
+		return gerror.Wrap(err, "读取采集通知事件失败")
+	}
+	ids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		if profileMessageIgnoredNotice(row[e.RawText].String()) {
+			ids = append(ids, row[e.Id].Int64())
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	now := gtime.Now()
+	_, err = pdao.YoubanPublishCollectEvent.Ctx(ctx).WhereIn(e.Id, ids).Data(g.Map{
+		e.Status: sysin.CollectEventStatusIgnored, e.ErrorMessage: "删除关键字忽略:投稿/重复通知", e.ProcessedAt: now, e.UpdatedAt: now,
+	}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "标记采集通知事件失败")
+	}
+	_, _ = pdao.YoubanPublishCollectEventMedia.Ctx(ctx).WhereIn("event_id", ids).Data(g.Map{"cache_status": collectMediaCacheCanceled, "error_message": "删除关键字忽略:投稿/重复通知", "updated_at": now}).Update()
+	g.Log().Infof(ctx, "已忽略采集通知事件 count:%d", len(ids))
+	return nil
 }
 
 // recoverBotCollectMedia is deliberately event-scoped. Older source-scoped
