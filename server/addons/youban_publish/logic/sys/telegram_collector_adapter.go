@@ -64,12 +64,17 @@ func (h *publishCollectorAccountTaskHandler) HandleAccountTaskCompletion(ctx con
 	}
 	data := g.Map{
 		"cache_status": "ready", "file_url": result.FileURL, "storage_path": result.StoragePath,
-		"poster_url": strings.TrimSpace(result.PosterURL), "poster_storage_path": normalizeStoredMediaPath(result.PosterPath),
 		"source_file_id": result.Media.FileID, "source_kind": result.Media.SourceKind,
 		"source_media_id": result.Media.SourceMediaID, "source_access_hash": result.Media.SourceAccessHash,
 		"source_file_reference": result.Media.SourceFileReference, "source_thumb_size": result.Media.SourceThumbSize,
 		"source_mime_type": result.Media.SourceMimeType, "source_dc_id": result.Media.SourceDCID,
 		"source_size": result.Media.SourceSize, "error_message": "", "updated_at": gtime.Now(),
+	}
+	if posterURL := strings.TrimSpace(result.PosterURL); posterURL != "" {
+		data["poster_url"] = posterURL
+	}
+	if posterPath := normalizeStoredMediaPath(result.PosterPath); posterPath != "" {
+		data["poster_storage_path"] = posterPath
 	}
 	if _, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).Where(mediaCols.Id, mediaID).Update(data); err != nil {
 		return gerror.Wrapf(err, "异步账号媒体结果回写失败 mediaId:%d", mediaID)
@@ -735,6 +740,15 @@ func (p *publishCollectorAccountMediaProvider) StoreMediaPoster(ctx context.Cont
 		return "", "", gerror.New("Telegram账号媒体封面存储参数无效")
 	}
 	ctx = collectMediaRuntimeContext(ctx, task.MediaOwnerAccountID)
+	md5Value, mediaSize, mimeType, err := calculateTelegramMediaFingerprint(localPath, "image", "image/jpeg")
+	if err != nil {
+		return "", "", err
+	}
+	if cached, ok, cacheErr := lookupTelegramCollectorMediaCache(ctx, "image", md5Value, mediaSize, mimeType); cacheErr != nil {
+		return "", "", cacheErr
+	} else if ok {
+		return telegramCollectorMediaCacheURL(cached), normalizeStoredMediaPath(cached.StoragePath), nil
+	}
 	attachment, err := p.publish.uploadCollectMediaToStorage(ctx, "image", localPath)
 	if err != nil {
 		return "", "", err

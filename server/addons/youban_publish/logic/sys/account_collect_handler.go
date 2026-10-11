@@ -57,6 +57,7 @@ func gotdCollectMedia(msg *tg.Message, chatId string) []collectMediaItem {
 				MimeType:      doc.MimeType,
 				DCID:          doc.DCID,
 				Size:          doc.Size,
+				ThumbSize:     gotdLargestDocumentThumbSizeType(doc),
 			}
 		}
 	default:
@@ -74,6 +75,38 @@ func gotdCollectMedia(msg *tg.Message, chatId string) []collectMediaItem {
 		result.SourceSize = meta.Size
 	}
 	return []collectMediaItem{result}
+}
+
+func gotdLargestDocumentThumbSizeType(document *tg.Document) string {
+	if document == nil || len(document.Thumbs) == 0 {
+		return ""
+	}
+	bestType := ""
+	bestScore := -1
+	for _, item := range document.Thumbs {
+		sizeType, score := gotdPhotoSizeScore(item)
+		if sizeType != "" && score >= bestScore {
+			bestType, bestScore = sizeType, score
+		}
+	}
+	return bestType
+}
+
+func gotdPhotoSizeScore(item tg.PhotoSizeClass) (string, int) {
+	switch size := item.(type) {
+	case *tg.PhotoSize:
+		return strings.TrimSpace(size.Type), maxInt(size.W*size.H, size.Size)
+	case *tg.PhotoSizeProgressive:
+		score := size.W * size.H
+		for _, value := range size.Sizes {
+			score = maxInt(score, value)
+		}
+		return strings.TrimSpace(size.Type), score
+	case *tg.PhotoCachedSize:
+		return strings.TrimSpace(size.Type), maxInt(size.W*size.H, len(size.Bytes))
+	default:
+		return "", -1
+	}
 }
 
 func gotdLargestPhotoSizeType(photo *tg.Photo) string {
