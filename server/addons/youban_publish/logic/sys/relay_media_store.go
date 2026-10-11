@@ -40,13 +40,18 @@ func relayReadyMedia(ctx context.Context, tenantId, mediaId int64, purpose, vers
 }
 
 func claimRelayMedia(ctx context.Context, tenantId, mediaId int64, purpose, version string, lease time.Duration) (string, error) {
+	if ready, err := relayReadyMedia(ctx, tenantId, mediaId, purpose, version); err != nil {
+		return "", err
+	} else if ready != nil {
+		return "", nil
+	}
 	token := relayLeaseToken()
 	now := time.Now()
 	until := now.Add(lease)
 	_, err := g.DB().Model("hg_youban_publish_relay_media").Ctx(ctx).Data(g.Map{
 		"tenant_id": tenantId, "media_id": mediaId, "purpose": purpose, "media_version": version,
 		"status": "uploading", "lease_token": token, "lease_until": until, "updated_at": now,
-	}).OnConflict("(tenant_id,media_id,purpose,media_version) DO UPDATE SET status='uploading', lease_token=EXCLUDED.lease_token, lease_until=EXCLUDED.lease_until, updated_at=EXCLUDED.updated_at WHERE hg_youban_publish_relay_media.status <> 'ready' AND (hg_youban_publish_relay_media.lease_until IS NULL OR hg_youban_publish_relay_media.lease_until < NOW())").Insert()
+	}).OnConflict("tenant_id,media_id,purpose,media_version").OnDuplicate(g.Map{"status": "uploading", "lease_token": token, "lease_until": until, "updated_at": now}).Save()
 	if err != nil {
 		return "", gerror.Wrap(err, "申请 relay 媒体租约失败")
 	}
