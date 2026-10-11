@@ -9,6 +9,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/cache"
 	"time"
@@ -125,11 +126,42 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 		row.Configured = true
 		seen[canonicalCollectSourceChatID(row.ChannelId)] = struct{}{}
 	}
+	// For a rule-scoped dialog, historical candidates must come from sources
+	// explicitly bound to this rule; never mix in other account/BOT channels.
+	var sourceCandidates []struct {
+		ChatId       string      `orm:"source_chat_id"`
+		ChatTitle    string      `orm:"chat_title"`
+		ChatUsername string      `orm:"chat_username"`
+		LastSeenAt   *gtime.Time `orm:"last_message_at"`
+	}
+	sourceModel := g.DB().Model(publishCollectSourceTable).Ctx(ctx).
+		Where("tenant_id", tenantID).WhereNot("source_chat_id", "").WhereNull("deleted_at")
+	if accountID > 0 {
+		sourceModel = sourceModel.Where("account_id", accountID)
+	}
+	if botID > 0 {
+		sourceModel = sourceModel.Where("bot_id", botID)
+	}
+	if ruleID > 0 {
+		sourceModel = sourceModel.Where("EXISTS (SELECT 1 FROM "+pdao.YoubanPublishCollectSourceRule.Table()+" sr WHERE sr.source_id="+publishCollectSourceTable+".id AND sr.rule_id=? AND sr.tenant_id=? AND sr.status=1)", ruleID, tenantID)
+	}
+	if err := sourceModel.Fields("source_chat_id, title AS chat_title, source_username AS chat_username, last_event_at AS last_message_at").OrderDesc("updated_at").Limit(2000).Scan(&sourceCandidates); err != nil {
+		return nil, 0, err
+	}
+	scopedChatIDs := make([]string, 0, len(sourceCandidates)*2)
+	for _, source := range sourceCandidates {
+		scopedChatIDs = append(scopedChatIDs, tgChannelCacheLookupIds(source.ChatId)...)
+	}
+	scopedChatIDs = uniqueStrings(scopedChatIDs)
 	cacheModel := g.DB().Model(publishBotChannelCacheTable).Ctx(ctx).Where("tenant_id", tenantID)
 	if botID > 0 {
 		cacheModel = cacheModel.Where("bot_id", botID)
 	}
-	if botID == 0 {
+	if len(scopedChatIDs) > 0 {
+		cacheModel = cacheModel.WhereIn("chat_id", scopedChatIDs)
+	} else if ruleID > 0 {
+		cacheModel = cacheModel.Where("1=0")
+	} else if botID == 0 {
 		cacheModel = cacheModel.WhereIn("chat_id", g.DB().Model(publishCollectSourceTable).Ctx(ctx).Fields("source_chat_id").Where("tenant_id", tenantID).Where("account_id", accountID).WhereNull("deleted_at"))
 	}
 	var candidates []struct {
@@ -145,31 +177,7 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 	// ids as candidates as well, and let the cache query below provide titles when
 	// available. This keeps the channel-rule dialog useful for already collected
 	// material after a cache rebuild or migration.
-	var eventCandidates []struct {
-		ChatId string `orm:"source_chat_id"`
-	}
-	eventModel := g.DB().Model(publishCollectEventTable+" e").Ctx(ctx).
-		Where("e.tenant_id", tenantID).
-		WhereNot("e.source_chat_id", "").
-		WhereNull("e.deleted_at")
-	if botID > 0 {
-		eventModel = eventModel.InnerJoin(publishCollectSourceTable+" s", "s.id=e.source_id").
-			Where("s.tenant_id", tenantID).
-			Where("s.bot_id", botID).
-			WhereNull("s.deleted_at")
-		if accountID > 0 {
-			eventModel = eventModel.Where("s.account_id", accountID)
-		}
-	} else if accountID > 0 {
-		eventModel = eventModel.InnerJoin(publishCollectSourceTable+" s", "s.id=e.source_id").
-			Where("s.tenant_id", tenantID).
-			Where("s.account_id", accountID).
-			WhereNull("s.deleted_at")
-	}
-	if err := eventModel.Fields("e.source_chat_id").Group("e.source_chat_id").Scan(&eventCandidates); err != nil {
-		return nil, 0, err
-	}
-	for _, eventCandidate := range eventCandidates {
+	for _, eventCandidate := range sourceCandidates {
 		id := canonicalCollectSourceChatID(eventCandidate.ChatId)
 		if id == "" {
 			continue
@@ -179,7 +187,7 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 			ChatTitle    string      `orm:"chat_title"`
 			ChatUsername string      `orm:"chat_username"`
 			LastSeenAt   *gtime.Time `orm:"last_message_at"`
-		}{ChatId: id})
+		}{ChatId: id, ChatTitle: eventCandidate.ChatTitle, ChatUsername: eventCandidate.ChatUsername, LastSeenAt: eventCandidate.LastSeenAt})
 	}
 	for _, candidate := range candidates {
 		id := canonicalCollectSourceChatID(candidate.ChatId)
