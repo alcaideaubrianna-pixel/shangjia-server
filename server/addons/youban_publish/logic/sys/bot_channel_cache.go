@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"html"
 	"strings"
 	"time"
 
@@ -13,6 +15,8 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	botsysin "hotgo/addons/youban_bot/model/input/sysin"
+	botService "hotgo/addons/youban_bot/service"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
@@ -62,6 +66,20 @@ func (s *sSysPublish) cacheBotMessage(ctx context.Context, tenantId, botId int64
 	data["message_count"] = 1
 	data["created_at"] = now
 	_, err := g.DB().Model(publishBotChannelCacheTable).Safe().Ctx(ctx).Data(data).Insert()
+	if err == nil {
+		var source struct {
+			Id        int64  `json:"id"`
+			AccountId int64  `json:"account_id"`
+			Title     string `json:"title"`
+		}
+		if scanErr := g.DB().Model(publishCollectSourceTable).Safe().Ctx(ctx).Fields("id,account_id,title").Where("tenant_id", tenantId).Where("bot_id", botId).Where("source_chat_id", chatId).WhereNull("deleted_at").Scan(&source); scanErr == nil && source.Id > 0 {
+			if title == "" {
+				title = chatId
+			}
+			text := "发现新的 BOT 采集频道\n频道：" + html.EscapeString(title) + "\n频道 ID：" + html.EscapeString(chatId) + "\n当前状态：待管理员确认"
+			_ = botService.SysBot().NotifySuperAdminsWithButtons(ctx, botId, "collect_source", text, [][]botsysin.NotifyButton{{{Label: "允许采集", Data: fmt.Sprintf("cm:approve:%d", source.Id)}, {Label: "拒绝采集", Data: fmt.Sprintf("cm:reject:%d", source.Id)}}})
+		}
+	}
 	return err
 }
 
@@ -96,6 +114,26 @@ func (s *sSysPublish) AdminBotChannelCacheList(ctx context.Context, in *sysin.Bo
 		return nil, 0, gerror.Wrap(err, "获取Bot频道缓存失败")
 	}
 	return list, totalCount, nil
+}
+
+func (s *sSysPublish) CollectBotChannelHistory(ctx context.Context, in *sysin.BotChannelCacheListInp) (list []*sysin.BotChannelCacheModel, totalCount int, err error) {
+	account, err := s.currentAccount(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	if in == nil {
+		in = &sysin.BotChannelCacheListInp{}
+	}
+	mod := g.DB().Model(publishBotChannelCacheTable+" c").Safe().Ctx(ctx).
+		Where("c.tenant_id", account.TenantId).Where("c.bot_id", in.BotId).
+		Where("c.is_broadcast", 1).
+		Fields("c.id,c.bot_id,c.chat_id AS channel_id,c.chat_title AS channel_title,c.chat_username AS channel_username,c.chat_type,c.is_broadcast,c.is_megagroup,c.message_count,c.last_message_at")
+	if in.Keyword != "" {
+		like := "%" + strings.TrimSpace(in.Keyword) + "%"
+		mod = mod.Where("(c.chat_id LIKE ? OR c.chat_title LIKE ? OR c.chat_username LIKE ?)", like, like, like)
+	}
+	err = mod.Page(in.Page, in.PerPage).OrderDesc("c.last_message_at").ScanAndCount(&list, &totalCount, false)
+	return
 }
 
 var _ gdb.Record

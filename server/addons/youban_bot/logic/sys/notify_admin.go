@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 
@@ -13,9 +14,10 @@ import (
 )
 
 const (
-	superNotifyRegister = "register"
-	superNotifyError    = "error"
-	superNotifyBind     = "bind"
+	superNotifyRegister      = "register"
+	superNotifyError         = "error"
+	superNotifyBind          = "bind"
+	superNotifyCollectSource = "collect_source"
 )
 
 func (s *sSysBot) notifySuperAdmins(ctx context.Context, botId int64, scene string, text string) error {
@@ -70,6 +72,49 @@ func (s *sSysBot) notifySuperAdmins(ctx context.Context, botId int64, scene stri
 func (s *sSysBot) NotifySuperAdmins(ctx context.Context, botId int64, scene string, text string) error {
 	return s.notifySuperAdmins(ctx, botId, scene, text)
 }
+func (s *sSysBot) NotifySuperAdminsWithButtons(ctx context.Context, botId int64, scene string, text string, buttons [][]sysin.NotifyButton) error {
+	if strings.TrimSpace(text) == "" || !s.superNotifyEnabled(ctx, scene) {
+		return nil
+	}
+	ids := s.superNotifyTelegramUserIds(ctx)
+	if len(ids) == 0 {
+		return nil
+	}
+	row, err := s.botById(ctx, botId)
+	if err != nil {
+		if botId == 0 {
+			row, err = s.officialBot(ctx)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	markup := &models.InlineKeyboardMarkup{}
+	for _, group := range buttons {
+		line := make([]models.InlineKeyboardButton, 0, len(group))
+		for _, b := range group {
+			if strings.TrimSpace(b.Label) != "" && strings.TrimSpace(b.Data) != "" {
+				line = append(line, models.InlineKeyboardButton{Text: b.Label, CallbackData: b.Data})
+			}
+		}
+		if len(line) > 0 {
+			markup.InlineKeyboard = append(markup.InlineKeyboard, line)
+		}
+	}
+	var users []struct {
+		ChatId string `json:"chat_id"`
+	}
+	err = g.DB().Model(userTable+" u").Safe().Ctx(ctx).Fields("u.chat_id").Where("u.bot_id", row.Id).WhereIn("u.telegram_user_id", ids).Where("u.status", 1).Where("EXISTS (SELECT 1 FROM "+accountBindTbl+" ab WHERE ab.telegram_user_id=u.telegram_user_id AND ab.app=? AND ab.status=1 AND ab.deleted_at IS NULL)", sysin.BotAppAdmin).Scan(&users)
+	if err != nil {
+		return gerror.Wrap(err, "读取Bot超级通知管理员失败")
+	}
+	for _, user := range users {
+		if strings.TrimSpace(user.ChatId) != "" {
+			_, _ = s.sendMessageWithMarkup(ctx, row.BotToken, user.ChatId, text, "HTML", false, markup)
+		}
+	}
+	return nil
+}
 
 func (s *sSysBot) superNotifyEnabled(ctx context.Context, scene string) bool {
 	values := s.superNotifyConfig(ctx)
@@ -80,6 +125,11 @@ func (s *sSysBot) superNotifyEnabled(ctx context.Context, scene string) bool {
 		return configBool(values["enableError"])
 	case superNotifyBind:
 		return configBool(values["enableBind"])
+	case superNotifyCollectSource:
+		if _, ok := values["enableCollectSource"]; !ok {
+			return true
+		}
+		return configBool(values["enableCollectSource"])
 	default:
 		return false
 	}

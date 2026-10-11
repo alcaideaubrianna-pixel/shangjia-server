@@ -141,6 +141,46 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 	if err := cacheModel.Fields("chat_id,chat_title,chat_username,last_message_at").OrderDesc("last_message_at").Scan(&candidates); err != nil {
 		return nil, 0, err
 	}
+	// Historical events can predate bot_channel_cache. Include their source chat
+	// ids as candidates as well, and let the cache query below provide titles when
+	// available. This keeps the channel-rule dialog useful for already collected
+	// material after a cache rebuild or migration.
+	var eventCandidates []struct {
+		ChatId string `orm:"source_chat_id"`
+	}
+	eventModel := g.DB().Model(publishCollectEventTable+" e").Ctx(ctx).
+		Where("e.tenant_id", tenantID).
+		WhereNot("e.source_chat_id", "").
+		WhereNull("e.deleted_at")
+	if botID > 0 {
+		eventModel = eventModel.InnerJoin(publishCollectSourceTable+" s", "s.id=e.source_id").
+			Where("s.tenant_id", tenantID).
+			Where("s.bot_id", botID).
+			WhereNull("s.deleted_at")
+		if accountID > 0 {
+			eventModel = eventModel.Where("s.account_id", accountID)
+		}
+	} else if accountID > 0 {
+		eventModel = eventModel.InnerJoin(publishCollectSourceTable+" s", "s.id=e.source_id").
+			Where("s.tenant_id", tenantID).
+			Where("s.account_id", accountID).
+			WhereNull("s.deleted_at")
+	}
+	if err := eventModel.Fields("e.source_chat_id").Group("e.source_chat_id").Scan(&eventCandidates); err != nil {
+		return nil, 0, err
+	}
+	for _, eventCandidate := range eventCandidates {
+		id := canonicalCollectSourceChatID(eventCandidate.ChatId)
+		if id == "" {
+			continue
+		}
+		candidates = append(candidates, struct {
+			ChatId       string      `orm:"chat_id"`
+			ChatTitle    string      `orm:"chat_title"`
+			ChatUsername string      `orm:"chat_username"`
+			LastSeenAt   *gtime.Time `orm:"last_message_at"`
+		}{ChatId: id})
+	}
 	for _, candidate := range candidates {
 		id := canonicalCollectSourceChatID(candidate.ChatId)
 		if id == "" {
