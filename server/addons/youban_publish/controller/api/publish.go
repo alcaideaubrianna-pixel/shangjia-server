@@ -2,11 +2,13 @@ package api
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/gogf/gf/v2/encoding/gjson"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
+	"github.com/gogf/gf/v2/os/gctx"
 
 	"hotgo/addons/youban_publish/api/api/publish"
 	"hotgo/addons/youban_publish/model/input/sysin"
@@ -888,6 +890,9 @@ func (c *cPublishAdmin) ProfileImageSearch(ctx context.Context, req *publish.Adm
 	res = new(publish.AdminProfileImageSearchRes)
 	res.List = list
 	res.PageRes.Pack(req, totalCount)
+	res.Progress = 100
+	res.ProgressText = fmt.Sprintf("关联搜索完成，共匹配 %d 个资料", totalCount)
+	res.TraceID = gctx.CtxId(ctx)
 	return
 }
 
@@ -1331,6 +1336,9 @@ func (c *cPublish) MyProfileImageSearch(ctx context.Context, req *publish.MyProf
 	res = new(publish.MyProfileImageSearchRes)
 	res.List = list
 	res.PageRes.Pack(req, totalCount)
+	res.Progress = 100
+	res.ProgressText = fmt.Sprintf("关联搜索完成，共匹配 %d 个资料", totalCount)
+	res.TraceID = gctx.CtxId(ctx)
 	return
 }
 

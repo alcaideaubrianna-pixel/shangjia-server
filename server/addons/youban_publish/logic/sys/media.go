@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/corona10/goimagehash"
 	"github.com/gogf/gf/v2/database/gdb"
@@ -20,6 +21,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
+	"github.com/gogf/gf/v2/net/gtrace"
 	"github.com/gogf/gf/v2/os/gtime"
 
 	publishmodel "hotgo/addons/youban_publish/model"
@@ -394,15 +396,21 @@ func (s *sSysPublish) AdminProfileImageSearch(ctx context.Context, in *sysin.Pro
 }
 
 func (s *sSysPublish) profileImageSearch(ctx context.Context, in *sysin.ProfileImageSearchInp, file *ghttp.UploadFile, scope *publishmodel.MediaSearchScope, viewer *sysin.AccountModel) (list []*sysin.NoteModel, totalCount int, err error) {
+	startedAt := time.Now()
+	traceID := gtrace.GetTraceID(ctx)
 	normalizeProfileImageSearchInput(in)
 	if scope == nil || len(scope.Partitions) == 0 || len(scope.AccountIds) == 0 {
 		return []*sysin.NoteModel{}, 0, nil
 	}
+	stageStartedAt := time.Now()
 	fingerprint, err := uploadImageFingerprint(file)
+	g.Log().Infof(ctx, "图片搜索阶段 trace_id:%s stage:fingerprint duration_ms:%d md5:%s has_phash:%t", traceID, time.Since(stageStartedAt).Milliseconds(), fingerprintMD5ForLog(fingerprint), fingerprint != nil && fingerprint.PHash != nil)
 	if err != nil {
 		return nil, 0, err
 	}
+	stageStartedAt = time.Now()
 	matches, totalCount, err := s.findSimilarProfileMatchesByFingerprint(ctx, fingerprint, in, scope)
+	g.Log().Infof(ctx, "图片搜索阶段 trace_id:%s stage:candidate_query duration_ms:%d matches:%d", traceID, time.Since(stageStartedAt).Milliseconds(), len(matches))
 	if err != nil {
 		return nil, 0, err
 	}
@@ -413,14 +421,27 @@ func (s *sSysPublish) profileImageSearch(ctx context.Context, in *sysin.ProfileI
 	if len(profileIds) == 0 {
 		return []*sysin.NoteModel{}, totalCount, nil
 	}
+	stageStartedAt = time.Now()
 	list, err = s.profileImageSearchNotesByScope(ctx, profileIds, scope, viewer, "")
+	g.Log().Infof(ctx, "图片搜索阶段 trace_id:%s stage:result_assemble duration_ms:%d profiles:%d", traceID, time.Since(stageStartedAt).Milliseconds(), len(profileIds))
 	if err != nil {
 		return nil, 0, err
 	}
 	if err = s.attachProfileImageSearchMatches(ctx, list, matches); err != nil {
 		return nil, 0, err
 	}
+	g.Log().Infof(ctx, "图片搜索完成 trace_id:%s total_duration_ms:%d matched_profiles:%d total:%d", traceID, time.Since(startedAt).Milliseconds(), len(list), totalCount)
 	return list, totalCount, nil
+}
+
+func fingerprintMD5ForLog(fingerprint *mediaFingerprint) string {
+	if fingerprint == nil || fingerprint.MD5 == "" {
+		return ""
+	}
+	if len(fingerprint.MD5) > 8 {
+		return fingerprint.MD5[:8]
+	}
+	return fingerprint.MD5
 }
 
 func normalizeProfileImageSearchInput(in *sysin.ProfileImageSearchInp) {
