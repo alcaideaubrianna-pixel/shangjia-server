@@ -21,7 +21,25 @@ func (c *cPublish) CollectSourceList(ctx context.Context, req *publish.CollectSo
 	res.PageRes.Pack(req, totalCount)
 	return
 }
-
+func (c *cPublish) IntroFeeChannelRuleList(ctx context.Context, req *publish.IntroFeeChannelRuleListReq) (*publish.IntroFeeChannelRuleListRes, error) {
+	list, total, err := service.SysPublish().IntroFeeChannelRuleList(ctx, &req.IntroFeeChannelRuleListInp)
+	if err != nil {
+		return nil, err
+	}
+	res := &publish.IntroFeeChannelRuleListRes{List: list}
+	res.PageRes.Pack(req, total)
+	return res, nil
+}
+func (c *cPublish) IntroFeeChannelRuleSave(ctx context.Context, req *publish.IntroFeeChannelRuleSaveReq) (*publish.IntroFeeChannelRuleSaveRes, error) {
+	id, err := service.SysPublish().IntroFeeChannelRuleSave(ctx, &req.IntroFeeChannelRuleSaveInp)
+	return &publish.IntroFeeChannelRuleSaveRes{Id: id}, err
+}
+func (c *cPublish) IntroFeeChannelRuleDelete(ctx context.Context, req *publish.IntroFeeChannelRuleDeleteReq) (*publish.IntroFeeChannelRuleDeleteRes, error) {
+	return &publish.IntroFeeChannelRuleDeleteRes{}, service.SysPublish().IntroFeeChannelRuleDelete(ctx, req.Id)
+}
+func (c *cPublish) IntroFeeChannelBlacklist(ctx context.Context, req *publish.IntroFeeChannelBlacklistReq) (*publish.IntroFeeChannelBlacklistRes, error) {
+	return &publish.IntroFeeChannelBlacklistRes{}, service.SysPublish().IntroFeeChannelBlacklist(ctx, &req.IntroFeeChannelBlacklistInp)
+}
 func (c *cPublish) CollectConfig(ctx context.Context, req *publish.CollectConfigReq) (res *publish.CollectConfigRes, err error) {
 	data, err := service.SysPublish().CollectConfig(ctx)
 	if err != nil {

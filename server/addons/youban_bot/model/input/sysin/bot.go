@@ -524,6 +524,10 @@ type NotifyRichInp struct {
 	SourceMessageIds []int  `json:"sourceMessageIds" dc:"来源消息ID列表"`
 	SourceHasMedia   bool   `json:"sourceHasMedia" dc:"是否包含媒体"`
 }
+type NotifyButton struct {
+	Label string `json:"label"`
+	Data  string `json:"data"`
+}
 
 func NormalizeApp(app string) string {
 	app = strings.TrimSpace(app)

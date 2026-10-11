@@ -12,6 +12,7 @@ import (
 )
 
 type ISysPublish interface {
+	BackfillCollectedSourceMetadata(ctx context.Context, lastId int64, batchSize int) (scanned, updated int, nextId int64, err error)
 	AdminRelayChannelList(ctx context.Context, in *sysin.RelayChannelListInp) (list []*sysin.RelayChannelModel, err error)
 	AdminRelayChannelSave(ctx context.Context, in *sysin.RelayChannelSaveInp) (err error)
 	AdminRelayChannelStatus(ctx context.Context, in *sysin.RelayChannelStatusInp) (err error)
@@ -316,6 +317,14 @@ type ISysPublish interface {
 	CollectConfigSave(ctx context.Context, in *sysin.CollectConfigSaveInp) (err error)
 	CollectStats(ctx context.Context) (res *sysin.CollectStatsModel, err error)
 	CollectSourceList(ctx context.Context, in *sysin.CollectSourceListInp) (list []*sysin.CollectSourceModel, totalCount int, err error)
+	IntroFeeChannelRuleList(ctx context.Context, in *sysin.IntroFeeChannelRuleListInp) (list []*sysin.IntroFeeChannelRuleItem, totalCount int, err error)
+	IntroFeeChannelRuleSave(ctx context.Context, in *sysin.IntroFeeChannelRuleSaveInp) (int64, error)
+	IntroFeeChannelRuleDelete(ctx context.Context, id int64) error
+	AdminIntroFeeChannelRuleList(ctx context.Context, in *sysin.AdminIntroFeeChannelRuleListInp) (list []*sysin.IntroFeeChannelRuleItem, totalCount int, err error)
+	AdminIntroFeeChannelRuleSave(ctx context.Context, in *sysin.AdminIntroFeeChannelRuleSaveInp) (int64, error)
+	AdminIntroFeeChannelRuleDelete(ctx context.Context, id int64) error
+	IntroFeeChannelBlacklist(ctx context.Context, in *sysin.IntroFeeChannelBlacklistInp) error
+	AdminIntroFeeChannelBlacklist(ctx context.Context, in *sysin.IntroFeeChannelBlacklistInp) error
 	CollectSourceSave(ctx context.Context, in *sysin.CollectSourceSaveInp) (id int64, err error)
 	CollectSourceDelete(ctx context.Context, in *sysin.IdsInp) (err error)
 	CollectSourceStatus(ctx context.Context, in *sysin.CollectStatusInp) (err error)
@@ -331,6 +340,7 @@ type ISysPublish interface {
 	CollectRuleSave(ctx context.Context, in *sysin.CollectRuleSaveInp) (id int64, err error)
 	BotCollectRuleView(ctx context.Context, ruleId, tenantId, accountId int64) (res *sysin.CollectRuleModel, err error)
 	BotCollectRuleSave(ctx context.Context, in *sysin.CollectRuleSaveInp, tenantId, accountId int64) (id int64, err error)
+	BotCollectSourceApproval(ctx context.Context, sourceId, tenantId, accountId int64, approved bool) error
 	CollectRuleDelete(ctx context.Context, in *sysin.IdsInp) (err error)
 	CollectEventList(ctx context.Context, in *sysin.CollectEventListInp) (list []*sysin.CollectEventModel, totalCount int, err error)
 	CollectEventLogList(ctx context.Context, in *sysin.CollectEventLogListInp) (list []*sysin.CollectEventLogModel, totalCount int, err error)

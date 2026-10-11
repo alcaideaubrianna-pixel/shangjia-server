@@ -37,6 +37,18 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 		action = parts[1]
 	}
 	switch action {
+	case "approve", "reject":
+		if account.AccountType != "admin" || len(parts) < 3 {
+			return true, nil
+		}
+		sourceID, _ := strconv.ParseInt(parts[2], 10, 64)
+		if err := publishService.SysPublish().BotCollectSourceApproval(ctx, sourceID, account.TenantId, account.AccountId, action == "approve"); err != nil {
+			return true, err
+		}
+		if action == "approve" {
+			return true, s.sendCollectManageNotice(ctx, botId, chatId, "已允许采集该频道。介绍费后缀可在采集配置的规则中继续修改。")
+		}
+		return true, s.sendCollectManageNotice(ctx, botId, chatId, "已拒绝采集该频道，后续消息将直接忽略。")
 	case "list":
 		page := 1
 		if len(parts) > 2 {

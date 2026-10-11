@@ -9,9 +9,8 @@ import (
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/library/tasklog"
 )
-
-const collectEventLogRetentionDays = 3
 
 func (s *sSysPublish) CollectEventLogList(ctx context.Context, in *sysin.CollectEventLogListInp) (list []*sysin.CollectEventLogModel, totalCount int, err error) {
 	account, err := s.currentAccount(ctx)
@@ -27,7 +26,7 @@ func (s *sSysPublish) CollectEventLogList(ctx context.Context, in *sysin.Collect
 		LeftJoin(eventTable+" e", "e.id=l.event_id").
 		Where("l.tenant_id", account.TenantId).
 		Where("l.account_id", account.Id).
-		WhereGTE("l.created_at", gtime.Now().Add(-collectEventLogRetentionDays*24*time.Hour))
+		WhereGTE("l.created_at", gtime.Now().Add(-time.Duration(tasklog.RetentionDays())*24*time.Hour))
 	if in.SourceId > 0 {
 		mod = mod.Where("e.source_id", in.SourceId)
 	}

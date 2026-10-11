@@ -243,7 +243,18 @@ func managedMediaObjectPath(raw string) string {
 }
 
 func mediaFileCacheWorkerURL(ctx context.Context, objectPath string) string {
-	return mediaFileCacheCDNURL(ctx, "youbanPublish.mediaFileCache.workerCdnBaseUrl", objectPath)
+	return mediaFileCacheCDNURL(ctx, "youbanPublish.mediaFileCache.cosDownloadCdnBaseUrl", objectPath)
+}
+
+func mediaFileCacheWorkerBaseURL(ctx context.Context) string {
+	base := strings.TrimSpace(os.Getenv("YOUBAN_PUBLISH_COS_DOWNLOAD_CDN_URL"))
+	if base == "" {
+		base = g.Cfg().MustGet(ctx, "youbanPublish.mediaFileCache.cosDownloadCdnBaseUrl", "").String()
+	}
+	if base == "" {
+		base = g.Cfg().MustGet(ctx, "youbanPublish.mediaFileCache.workerCdnBaseUrl", "").String()
+	}
+	return strings.TrimRight(strings.TrimSpace(base), "/")
 }
 
 func mediaFileCacheFallbackURL(ctx context.Context, objectPath string) string {
@@ -255,6 +266,15 @@ func mediaFileCacheCDNURL(ctx context.Context, configKey string, objectPath stri
 		return strings.TrimRight(override, "/") + "/" + strings.TrimLeft(objectPath, "/")
 	}
 	base := strings.TrimRight(g.Cfg().MustGet(ctx, configKey, "").String(), "/")
+	if base == "" && configKey == "youbanPublish.mediaFileCache.cosDownloadCdnBaseUrl" {
+		// The explicit environment variable is intentionally checked here as a
+		// second line of defense for standalone workers that start before the
+		// config overlay is loaded.
+		base = strings.TrimRight(strings.TrimSpace(os.Getenv("YOUBAN_PUBLISH_COS_DOWNLOAD_CDN_URL")), "/")
+	}
+	if base == "" && configKey == "youbanPublish.mediaFileCache.cosDownloadCdnBaseUrl" {
+		base = strings.TrimRight(g.Cfg().MustGet(ctx, "youbanPublish.mediaFileCache.workerCdnBaseUrl", "").String(), "/")
+	}
 	if base == "" {
 		return ""
 	}
@@ -285,7 +305,7 @@ func mediaFileCacheSourceDownloader(ctx context.Context, source mediaFileCacheSo
 }
 
 func mediaFileCacheIsWorkerURL(ctx context.Context, source string) bool {
-	workerBase := strings.TrimSpace(g.Cfg().MustGet(ctx, "youbanPublish.mediaFileCache.workerCdnBaseUrl", "").String())
+	workerBase := mediaFileCacheWorkerBaseURL(ctx)
 	workerURL, workerErr := url.Parse(workerBase)
 	sourceURL, sourceErr := url.Parse(strings.TrimSpace(source))
 	return workerErr == nil && sourceErr == nil && workerURL.Hostname() != "" &&
@@ -306,7 +326,7 @@ func mediaFileCachePreferWorkerURL(ctx context.Context, source string) string {
 	if !runtime.PushWorker && !runtime.MediaWorker && !runtime.BackgroundWorker {
 		return source
 	}
-	workerBase := strings.TrimSpace(g.Cfg().MustGet(ctx, "youbanPublish.mediaFileCache.workerCdnBaseUrl", "").String())
+	workerBase := mediaFileCacheWorkerBaseURL(ctx)
 	fallbackBase := strings.TrimSpace(g.Cfg().MustGet(ctx, "youbanPublish.mediaFileCache.fallbackCdnBaseUrl", "").String())
 	return rewriteMediaFileCacheBaseURL(source, fallbackBase, workerBase)
 }

@@ -936,7 +936,7 @@ func (s *sSysPublish) messageTemplateForwardSource(ctx context.Context, tgAccoun
 		Where("j.account_id", tgAccountId).
 		Where("j.status", sysin.MessagePushStatusSent).
 		Where("j.operation_no LIKE ?", "message_push%:"+templateHash).
-		Where("EXISTS (SELECT 1 FROM "+publishTgJobLogTable+" l WHERE l.job_id=j.id AND l.action=? AND l.status=?)", "message_push", sysin.MessagePushStatusSent).
+		Where("EXISTS (SELECT 1 FROM "+publishTgMessageTable+" m WHERE m.job_id=j.id AND m.status=? AND m.tg_message_id>0)", sysin.MessagePushStatusSent).
 		OrderDesc("j.id").
 		Limit(10).
 		Scan(&jobs)

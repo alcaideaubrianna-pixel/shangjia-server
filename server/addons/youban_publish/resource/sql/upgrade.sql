@@ -50,6 +50,12 @@ ALTER TABLE `hg_youban_publish_collect_source`
   ADD COLUMN `history_collect_days` int(11) NOT NULL DEFAULT '30' COMMENT '账号历史采集天数' AFTER `history_collect_mode`;
 
 ALTER TABLE `hg_youban_publish_collect_source`
+  ADD COLUMN `channel_suffix` text NOT NULL COMMENT '频道采集后缀' AFTER `history_collect_days`;
+
+ALTER TABLE `hg_youban_publish_collect_source`
+  ADD COLUMN `channel_blacklisted` tinyint(1) NOT NULL DEFAULT '0' COMMENT '频道采集黑名单' AFTER `channel_suffix`;
+
+ALTER TABLE `hg_youban_publish_collect_source`
   ADD KEY `idx_ybp_collect_source_bot_scope` (`bot_id`,`bot_collect_scope`,`source_chat_id`,`status`);
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_bot_channel_cache` (

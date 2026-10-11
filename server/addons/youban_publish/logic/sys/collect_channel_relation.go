@@ -150,15 +150,16 @@ func syncCollectRuleChannelsTx(ctx context.Context, tx gdb.TX, tenantId, account
 	if len(channelIds) > 0 {
 		validCount, err := tx.Model(pdao.YoubanPublishChannel.Table()).Ctx(ctx).
 			Where("tenant_id", tenantId).
-			Where("account_id", accountId).
 			WhereIn("id", channelIds).
 			Where("status", 1).
 			WhereNull("deleted_at").Count()
 		if err != nil {
+			g.Log().Warningf(ctx, "采集规则目标频道校验查询失败 tenantId:%d accountId:%d ruleId:%d channelIds:%v err:%+v", tenantId, accountId, ruleId, channelIds, err)
 			return gerror.Wrap(err, "校验采集规则目标频道失败")
 		}
 		if validCount != len(channelIds) {
-			return gerror.New("采集规则包含不存在、停用或不属于当前账号的目标频道")
+			g.Log().Warningf(ctx, "采集规则目标频道不合法 tenantId:%d accountId:%d ruleId:%d channelIds:%v validCount:%d", tenantId, accountId, ruleId, channelIds, validCount)
+			return gerror.New("采集规则包含不存在、停用或不属于当前租户的目标频道")
 		}
 	}
 	if _, err := tx.Model(collectRuleChannelTable).Ctx(ctx).Where("rule_id", ruleId).Delete(); err != nil {

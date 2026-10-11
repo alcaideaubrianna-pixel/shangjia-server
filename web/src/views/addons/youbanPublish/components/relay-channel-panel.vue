@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
-import { NButton, NForm, NFormItem, NInput, NInputNumber, NSpace, NSwitch, NTag } from 'naive-ui';
 import { RelayChannelList, RelayChannelSave, RelayChannelStatus } from '@/api/addons/youbanPublish';
 
 const props = defineProps<{ tenantId: number; tenantOptions?: Array<{ label: string; value: number }> }>();
@@ -16,19 +15,20 @@ onMounted(load);
 
 <template>
   <n-space vertical>
-  <n-select v-model:value="selectedTenantId" :options="props.tenantOptions || []" placeholder="选择租户" @update:value="load" />
-  <n-form inline :model="form">
-    <n-form-item label="协议账号"><n-input-number v-model:value="form.tgAccountId" :min="1" /></n-form-item>
-    <n-form-item label="频道 Chat ID"><n-input v-model:value="form.targetChatId" placeholder="-100..." /></n-form-item>
-    <n-form-item label="名称"><n-input v-model:value="form.title" /></n-form-item>
-    <n-button type="primary" :loading="loading" @click="save">添加中转频道</n-button>
-  </n-form>
-  <n-space vertical>
-    <n-space v-for="row in rows" :key="row.id" align="center">
-      <span>{{ row.title || row.targetChatId }}</span>
-      <n-tag :type="row.healthStatus === 'ready' ? 'success' : 'warning'">{{ row.healthStatus }}</n+      </n-tag>
-      <n-switch :value="row.status === 'enabled'" @update:value="toggle(row)" />
+    <n-select v-model:value="selectedTenantId" :options="props.tenantOptions || []" placeholder="选择租户" @update:value="load" />
+    <n-form inline :model="form">
+      <n-form-item label="协议账号"><n-input-number v-model:value="form.tgAccountId" :min="1" /></n-form-item>
+      <n-form-item label="频道 Chat ID"><n-input v-model:value="form.targetChatId" placeholder="-100..." /></n-form-item>
+      <n-form-item label="名称"><n-input v-model:value="form.title" /></n-form-item>
+      <n-button type="primary" :loading="loading" @click="save">添加中转频道</n-button>
+    </n-form>
+    <n-space vertical>
+      <n-space v-for="row in rows" :key="row.id" align="center">
+        <n-switch :value="row.status === 'enabled'" @update:value="toggle(row)" />
+        <span>{{ row.title || row.targetChatId }}</span>
+        <n-tag :type="row.healthStatus === 'ready' ? 'success' : 'warning'">{{ row.healthStatus }}
+        </n-tag>
+      </n-space>
     </n-space>
-  </n-space>
   </n-space>
 </template>

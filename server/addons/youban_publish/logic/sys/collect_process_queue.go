@@ -369,12 +369,14 @@ func nextCollectProcessDelay(ctx context.Context, payload collectProcessQueuePay
 }
 
 func collectProcessEventModel(ctx context.Context, payload collectProcessQueuePayload) *gdb.Model {
-	model := pdao.YoubanPublishCollectEvent.Ctx(ctx).
-		Where("tenant_id", payload.TenantId).
-		Where("account_id", payload.AccountId).
-		Where("source_id", payload.SourceId)
+	model := g.DB().Model(publishCollectEventTable+" e").Ctx(ctx).
+		InnerJoin(publishCollectSourceTable+" s", "s.id=e.source_id AND s.tenant_id=e.tenant_id").
+		Where("e.tenant_id", payload.TenantId).
+		Where("e.account_id", payload.AccountId).
+		Where("e.source_id", payload.SourceId).
+		Where("s.channel_blacklisted", 0)
 	if chatID := canonicalCollectSourceChatID(payload.SourceChatId); chatID != "" {
-		model = model.WhereIn("source_chat_id", tgChannelCacheLookupIds(chatID))
+		model = model.WhereIn("e.source_chat_id", tgChannelCacheLookupIds(chatID))
 	}
 	return model
 }

@@ -274,7 +274,13 @@ func (s *sLazySheepTGGo) ensureWebhookLogTable(ctx context.Context) error {
 				updated_at TIMESTAMP NULL
 			)
 		`)
-		return err
+		if err != nil {
+			return err
+		}
+		if _, err = g.DB().Exec(ctx, "CREATE INDEX IF NOT EXISTS idx_lazysheep_tggo_webhook_log_created ON hg_addon_lazysheep_tggo_webhook_log (created_at, id)"); err != nil {
+			return gerror.Wrap(err, "创建Webhook日志保留索引失败")
+		}
+		return nil
 	case consts.DBMysql, "":
 		_, err := g.DB().Exec(ctx, "CREATE TABLE IF NOT EXISTS `hg_addon_lazysheep_tggo_webhook_log` ("+
 			"`id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,"+
@@ -469,6 +475,9 @@ func (s *sLazySheepTGGo) ensurePushLogTable(ctx context.Context) error {
 		if _, err = g.DB().Exec(ctx, "CREATE INDEX IF NOT EXISTS hg_addon_lazysheep_tggo_push_log_chat_time ON hg_addon_lazysheep_tggo_push_log (bot_key, chat_id, created_at)"); err != nil {
 			return gerror.Wrap(err, "创建推送日志会话时间索引失败")
 		}
+		if _, err = g.DB().Exec(ctx, "CREATE INDEX IF NOT EXISTS idx_lazysheep_tggo_push_log_created ON hg_addon_lazysheep_tggo_push_log (created_at, id)"); err != nil {
+			return gerror.Wrap(err, "创建推送日志保留索引失败")
+		}
 		return nil
 	case consts.DBMysql, "":
 		_, err := g.DB().Exec(ctx, "CREATE TABLE IF NOT EXISTS `hg_addon_lazysheep_tggo_push_log` ("+
@@ -487,6 +496,7 @@ func (s *sLazySheepTGGo) ensurePushLogTable(ctx context.Context) error {
 			"`created_at` DATETIME DEFAULT NULL,"+
 			"PRIMARY KEY (`id`),"+
 			"KEY `chat_time` (`bot_key`,`chat_id`,`created_at`),"+
+			"KEY `idx_lazysheep_tggo_push_log_created` (`created_at`,`id`),"+
 			"KEY `task_id` (`task_id`),"+
 			"KEY `note_id` (`note_id`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='TG采集推送日志'")
 		return err

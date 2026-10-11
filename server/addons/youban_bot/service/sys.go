@@ -66,6 +66,7 @@ type ISysBot interface {
 	AdminBroadcastTaskList(ctx context.Context, in *sysin.BroadcastTaskListInp) (list []*sysin.BroadcastTaskModel, totalCount int, err error)
 	AdminBroadcastRecipientList(ctx context.Context, in *sysin.BroadcastRecipientListInp) (list []*sysin.BroadcastRecipientModel, totalCount int, err error)
 	NotifySuperAdmins(ctx context.Context, botId int64, scene string, text string) (err error)
+	NotifySuperAdminsWithButtons(ctx context.Context, botId int64, scene string, text string, buttons [][]sysin.NotifyButton) (err error)
 	LoginCodeStart(ctx context.Context, in *sysin.CodeStartInp) (res *sysin.CodeStartModel, err error)
 	LoginCodeStatus(ctx context.Context, in *sysin.CodeStatusInp) (res *sysin.CodeStatusModel, err error)
 	BindCodeStart(ctx context.Context) (res *sysin.CodeStartModel, err error)

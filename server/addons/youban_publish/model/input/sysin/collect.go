@@ -345,6 +345,55 @@ type CollectRuleSaveInp struct {
 	Status                  int                       `json:"status" dc:"状态"`
 }
 
+type IntroFeeChannelRuleListInp struct {
+	form.PageReq
+	RuleId            int64  `json:"ruleId"`
+	BotId             int64  `json:"botId"`
+	Keyword           string `json:"keyword"`
+	IncludeCandidates bool   `json:"includeCandidates"`
+}
+type IntroFeeChannelRuleItem struct {
+	Id              int64       `json:"id"`
+	RuleId          int64       `json:"ruleId"`
+	BotId           int64       `json:"botId"`
+	ChannelId       string      `json:"channelId"`
+	ChannelTitle    string      `json:"channelTitle"`
+	ChannelUsername string      `json:"channelUsername"`
+	Suffix          string      `json:"suffix"`
+	Status          int         `json:"status"`
+	Configured      bool        `json:"configured"`
+	Blacklisted     bool        `json:"blacklisted"`
+	LastSeenAt      *gtime.Time `json:"lastSeenAt"`
+}
+type IntroFeeChannelRuleSaveInp struct {
+	Id        int64  `json:"id"`
+	RuleId    int64  `json:"ruleId"`
+	BotId     int64  `json:"botId"`
+	ChannelId string `json:"channelId"`
+	Suffix    string `json:"suffix"`
+	Status    int    `json:"status"`
+}
+type AdminIntroFeeChannelRuleListInp struct {
+	form.PageReq
+	BotId             int64  `json:"botId"`
+	RuleId            int64  `json:"ruleId"`
+	Keyword           string `json:"keyword"`
+	IncludeCandidates bool   `json:"includeCandidates"`
+}
+type AdminIntroFeeChannelRuleSaveInp struct {
+	Id        int64  `json:"id"`
+	BotId     int64  `json:"botId"`
+	RuleId    int64  `json:"ruleId"`
+	ChannelId string `json:"channelId"`
+	Suffix    string `json:"suffix"`
+	Status    int    `json:"status"`
+}
+
+type IntroFeeChannelBlacklistInp struct {
+	Id          int64 `json:"id"`
+	Blacklisted int   `json:"blacklisted"`
+}
+
 func (in *CollectRuleSaveInp) Filter(ctx context.Context) error {
 	in.Name = strings.TrimSpace(in.Name)
 	in.TargetChannelIds = uniquePositiveInt64(in.TargetChannelIds)
