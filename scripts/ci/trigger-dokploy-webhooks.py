@@ -121,6 +121,10 @@ def dokploy_request(path, payload=None, query=None, timeout=DEFAULT_TIMEOUT_SECO
         body = response.read()
         if not 200 <= response.status < 300:
             raise RuntimeError(f"Dokploy API {path} returned HTTP {response.status}")
+    # Dokploy deploy/redeploy endpoints may return an empty 2xx body while
+    # the asynchronous rollout has already been accepted.
+    if not body.strip():
+        return {}
     try:
         result = json.loads(body.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
@@ -333,7 +337,7 @@ def main(argv=None):
         print(f"triggering {name} ({args.version})", flush=True)
         try:
             expected_image = pin_target_image(target, args.version)
-            if target["direct_deploy"]:
+            if target.get("direct_deploy"):
                 deploy_direct(target)
             else:
                 trigger(target, args.version)
@@ -350,7 +354,7 @@ def main(argv=None):
             if str(error).startswith("running container image mismatch"):
                 try:
                     print(f"retrying {name} after runtime image mismatch", file=sys.stderr, flush=True)
-                    if target["direct_deploy"]:
+                    if target.get("direct_deploy"):
                         deploy_direct(target)
                     else:
                         trigger(target, args.version)

@@ -23,6 +23,7 @@ class TriggerDokployWebhooksTest(unittest.TestCase):
                 "xiaohuiji-api",
                 "xiaohuiji-account",
                 "xiaohuiji-scheduler",
+                "xiaohuiji-collect-process-worker",
                 "xiaohuiji-publish-worker-app2",
                 "xiaohuiji-worker-app4",
                 "xiaohuiji-worker-app3",
