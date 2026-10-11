@@ -17,6 +17,8 @@ DEFAULT_RETRIES = 3
 DEFAULT_HEALTH_RETRIES = 60
 DEFAULT_REVISION_CONFIRMATIONS = 5
 DEFAULT_RUNTIME_RETRIES = 60
+RETRY_HEALTH_RETRIES = 24
+RETRY_RUNTIME_RETRIES = 12
 
 
 def load_targets(path):
@@ -292,6 +294,17 @@ def wait_until_healthy(target, revision="", retries=DEFAULT_HEALTH_RETRIES,
     raise RuntimeError(f"health check failed after {retries} attempts: {last_error}")
 
 
+def is_retryable_rollout_error(error):
+    message = str(error)
+    return (
+        message.startswith("running container image mismatch")
+        or (
+            message.startswith("health check failed")
+            and "revision is" in message
+        )
+    )
+
+
 def send_telegram(text):
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
     chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
@@ -347,19 +360,27 @@ def main(argv=None):
             # valid rollout look stuck for the full health-check window.
             wait_until_healthy(target, args.revision or args.version)
         except (urllib.error.URLError, TimeoutError, RuntimeError) as error:
-            # A webhook can be accepted while Dokploy fails later during the
-            # image pull (for example a transient GHCR EOF). Re-trigger once
-            # after a runtime image mismatch instead of accepting the stale
-            # container and failing the whole rollout without recovery.
-            if str(error).startswith("running container image mismatch"):
+            # A webhook can be accepted while image extraction or the public
+            # Traefik route remains on the previous task. Re-trigger once when
+            # the immutable runtime or public revision has not converged.
+            if is_retryable_rollout_error(error):
                 try:
-                    print(f"retrying {name} after runtime image mismatch", file=sys.stderr, flush=True)
+                    print(
+                        f"retrying {name} after rollout did not converge: {error}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
                     if target.get("direct_deploy"):
                         deploy_direct(target)
                     else:
                         trigger(target, args.version)
-                    wait_for_running_image(target, expected_image, retries=12)
-                    wait_until_healthy(target, args.revision or args.version)
+                    wait_for_running_image(
+                        target, expected_image, retries=RETRY_RUNTIME_RETRIES,
+                    )
+                    wait_until_healthy(
+                        target, args.revision or args.version,
+                        retries=RETRY_HEALTH_RETRIES,
+                    )
                 except (urllib.error.URLError, TimeoutError, RuntimeError) as retry_error:
                     error = retry_error
                 else:
