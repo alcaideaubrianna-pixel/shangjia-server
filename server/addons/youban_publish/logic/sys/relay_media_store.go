@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+	hglock "hotgo/internal/library/hgrds/lock"
 )
 
 type relayMediaRef struct {
@@ -40,6 +42,11 @@ func relayReadyMedia(ctx context.Context, tenantId, mediaId int64, purpose, vers
 }
 
 func claimRelayMedia(ctx context.Context, tenantId, mediaId int64, purpose, version string, lease time.Duration) (string, error) {
+	lock := hglock.NewConfig(lease).Mutex(fmt.Sprintf("youban_publish:relay:claim:%d:%d:%s:%s", tenantId, mediaId, purpose, version))
+	if err := lock.Lock(ctx); err != nil {
+		return "", gerror.Wrap(err, "获取 relay 媒体租约锁失败")
+	}
+	defer func() { _ = lock.Unlock(context.Background()) }()
 	if ready, err := relayReadyMedia(ctx, tenantId, mediaId, purpose, version); err != nil {
 		return "", err
 	} else if ready != nil {
