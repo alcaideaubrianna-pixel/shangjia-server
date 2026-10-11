@@ -84,7 +84,7 @@ func (s *sSysPublish) autoDeleteBackfillMessages(ctx context.Context, cursorId i
 	}
 	var messages []autoDeleteBackfillMessage
 	err := g.DB().Model(telegramBotMessageSourceTable+" m").Safe().Ctx(ctx).
-		Fields("m.id,m.received_bot_id,m.chat_id,m.message_id,m.message_text").
+		Fields("m.id,m.tenant_id,m.received_bot_id,m.chat_id,m.message_id,m.message_text").
 		WhereGT("m.id", cursorId).
 		Where("m.message_text != ''").
 		WhereNull("m.deleted_at").
@@ -125,8 +125,11 @@ func (s *sSysPublish) autoDeleteBackfillMessages(ctx context.Context, cursorId i
 	rows := make([]autoDeleteBackfillMessage, 0, len(messages))
 	for _, message := range messages {
 		for _, channel := range channelMap[message.ChatId] {
+			// 消息和频道必须属于同一租户，避免相同 chat_id 或历史脏数据跨租户入队。
+			if message.TenantId <= 0 || channel.TenantId != message.TenantId {
+				continue
+			}
 			item := message
-			item.TenantId = channel.TenantId
 			item.ChannelId = channel.Id
 			rows = append(rows, item)
 		}
