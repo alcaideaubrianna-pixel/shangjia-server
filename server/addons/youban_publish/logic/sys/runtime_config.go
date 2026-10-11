@@ -47,6 +47,10 @@ func loadPublishRuntimeConfig(ctx context.Context) publishRuntimeConfig {
 			values = append(values, publishRuntimeRoleBackgroundWorker)
 		case runrole.Account:
 			values = append(values, publishRuntimeRoleAccount)
+		case runrole.CollectorWorker:
+			// 采集 Worker 负责消费采集分组、媒体窗口和发布前处理队列。
+			// Telegram Collector 插件与本插件使用同一运行角色，必须同时启用后台队列。
+			values = append(values, publishRuntimeRoleBackgroundWorker)
 		case runrole.Scheduler:
 			values = append(values, publishRuntimeRoleScheduler)
 		case runrole.Runtime:
