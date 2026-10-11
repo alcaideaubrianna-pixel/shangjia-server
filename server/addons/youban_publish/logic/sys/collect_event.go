@@ -325,8 +325,12 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		return gerror.Wrap(err, "读取采集事件失败")
 	}
 	if event.IsEmpty() {
-		g.Log().Warningf(ctx, "采集事件不存在，跳过处理 eventId:%d tenantId:%d accountId:%d", eventId, tenantId, accountId)
-		return gerror.New("采集事件不存在")
+		// Queue tasks can outlive an event that was cleared, deduplicated, or
+		// removed during recovery. This is a terminal/idempotent condition:
+		// returning an error makes Asynq retry the same stale task indefinitely
+		// and starves keyword-delete and other background consumers.
+		g.Log().Infof(ctx, "陈旧采集事件任务已丢弃 eventId:%d tenantId:%d accountId:%d", eventId, tenantId, accountId)
+		return nil
 	}
 	g.Log().Debugf(ctx, "采集事件开始处理 eventId:%d sourceId:%d sourceMessageId:%d groupedId:%s status:%s media:%d", eventId, event["source_id"].Int64(), event["source_message_id"].Int64(), event["source_grouped_id"].String(), event["status"].String(), event["media_count"].Int())
 	source, err := pdao.YoubanPublishCollectSource.Ctx(ctx).
