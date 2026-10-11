@@ -268,14 +268,16 @@ func (s *sSysPublish) processCollectSourceTask(ctx context.Context, payload coll
 	}
 	if !reserved {
 		g.Log().Debugf(ctx, "采集源任务命中跨节点节流，丢弃重复任务 sourceId:%d", payload.SourceId)
-		return 0, false, false, nil
+		// Do not drop the task while leaving its schedule reservation alive.
+		// A short retry keeps the source self-healing under contention.
+		return collectProcessMinimumDelay, true, false, nil
 	}
 	executed, err := s.processCollectSourceWindowWithLock(ctx, payload)
 	if err != nil {
 		return 0, false, false, err
 	}
 	if !executed {
-		return 0, false, false, nil
+		return collectProcessMinimumDelay, true, false, nil
 	}
 	delay, pending, err = nextCollectProcessDelay(ctx, payload)
 	if err != nil {

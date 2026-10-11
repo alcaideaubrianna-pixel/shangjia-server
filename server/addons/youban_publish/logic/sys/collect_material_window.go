@@ -18,7 +18,10 @@ import (
 )
 
 const (
-	collectMaterialGroupingDelay           = 3 * time.Minute
+	// Grouping starts immediately. The only waiting window is the five-minute
+	// verification window; a display message without a match is published when
+	// that window expires.
+	collectMaterialGroupingDelay           = 0
 	collectMaterialVerifyWindowDefault     = 5 * time.Minute
 	collectMaterialVerifyRetryDelay        = time.Minute
 	collectMaterialWaitingVerifyRetryDelay = 10 * time.Second
