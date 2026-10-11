@@ -24,6 +24,11 @@ type RelayChannelStatusReq struct {
 	sysin.RelayChannelStatusInp
 }
 type RelayChannelStatusRes struct{}
+type RelayChannelCreateReq struct {
+	g.Meta `path:"/publish/relay/channel/create" method:"post" tags:"上架插件后台" summary:"创建Relay频道"`
+	sysin.RelayChannelCreateInp
+}
+type RelayChannelCreateRes struct{ *sysin.RelayChannelModel }
 
 type TenantListReq struct {
 	g.Meta `path:"/publish/tenant/list" method:"get" tags:"上架插件后台" summary:"租户列表"`

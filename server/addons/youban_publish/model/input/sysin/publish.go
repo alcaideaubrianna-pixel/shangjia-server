@@ -1741,3 +1741,10 @@ type RelayChannelModel struct {
 	InFlightCount       int    `json:"inFlightCount"`
 	LastError           string `json:"lastError"`
 }
+type RelayChannelCreateInp struct {
+	TenantId    int64  `json:"tenantId"`
+	TgAccountId int64  `json:"tgAccountId"`
+	Title       string `json:"title"`
+	About       string `json:"about"`
+	BotUsername string `json:"botUsername"`
+}

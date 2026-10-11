@@ -28,6 +28,10 @@ func (c *cPublishServer) RelayChannelStatus(ctx context.Context, req *publish.Re
 	err := service.SysPublish().AdminRelayChannelStatus(ctx, &req.RelayChannelStatusInp)
 	return &publish.RelayChannelStatusRes{}, err
 }
+func (c *cPublishServer) RelayChannelCreate(ctx context.Context, req *publish.RelayChannelCreateReq) (*publish.RelayChannelCreateRes, error) {
+	res, err := service.SysPublish().AdminRelayChannelCreate(ctx, &req.RelayChannelCreateInp)
+	return &publish.RelayChannelCreateRes{RelayChannelModel: res}, err
+}
 
 func (c *cPublishServer) TenantList(ctx context.Context, req *publish.TenantListReq) (res *publish.TenantListRes, err error) {
 	list, totalCount, err := service.SysPublish().AdminTenantList(ctx, &req.TenantListInp)
