@@ -179,7 +179,7 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 		if relayMessages, relayErr := s.prepareRelayMedia(ctx, media, purpose); relayErr == nil && len(relayMessages) > 0 {
 			ref := relayMessages[0]
 			cloned := *media
-			cloned.TgFileId = telegramCopyMediaFileId(ref.TgFileId, ref.MessageId)
+			cloned.TgFileId = telegramCopyMediaFileId(ref.TgFileId, int(ref.MessageId))
 			if copied, copyErr := s.copyTelegramSingleMedia(ctx, bot, chatId, purpose, caption, &cloned, telegramCopyMediaRef{ChatId: ref.TgFileId, MessageId: int(ref.MessageId)}); copyErr == nil {
 				return copied, nil
 			}

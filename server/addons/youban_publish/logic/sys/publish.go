@@ -2,10 +2,12 @@ package sys
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gotd/td/telegram"
 	"github.com/hibiken/asynq"
 
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
