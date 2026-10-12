@@ -156,6 +156,16 @@ type CollectSourceTriggerModel struct {
 	FailedCount    int `json:"failedCount" dc:"失败数量"`
 }
 
+type CollectChannelApprovalModel struct {
+	SourceId      int64  `json:"sourceId"`
+	RuleId        int64  `json:"ruleId"`
+	BotId         int64  `json:"botId"`
+	AccountId     int64  `json:"accountId"`
+	ChannelId     string `json:"channelId"`
+	ChannelTitle  string `json:"channelTitle"`
+	DefaultSuffix string `json:"defaultSuffix"`
+}
+
 type CollectSourceResetInp struct {
 	Id int64 `json:"id" v:"required|min:1#采集源ID不能为空|采集源ID不能为空" dc:"采集源ID"`
 }
@@ -370,6 +380,7 @@ type IntroFeeChannelRuleItem struct {
 	BotStatus       string      `json:"botStatus"`
 	AccountStatus   string      `json:"accountStatus"`
 	ProfileCount    int         `json:"profileCount"`
+	UpdatedAt       *gtime.Time `json:"updatedAt"`
 }
 type IntroFeeChannelRuleSaveInp struct {
 	Id        int64  `json:"id"`

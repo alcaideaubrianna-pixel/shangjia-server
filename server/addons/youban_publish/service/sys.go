@@ -343,7 +343,7 @@ type ISysPublish interface {
 	BotCollectRuleView(ctx context.Context, ruleId, tenantId, accountId int64) (res *sysin.CollectRuleModel, err error)
 	BotCollectRuleSave(ctx context.Context, in *sysin.CollectRuleSaveInp, tenantId, accountId int64) (id int64, err error)
 	BotCollectSourceApproval(ctx context.Context, sourceId, tenantId, accountId int64, approved bool) error
-	BotCollectChannelApproval(ctx context.Context, relationId, tenantId, operatorAccountId int64, approved bool) (sourceId int64, err error)
+	BotCollectChannelApproval(ctx context.Context, relationId, tenantId, operatorAccountId int64, approved bool) (res *sysin.CollectChannelApprovalModel, err error)
 	BotChannelMembershipChanged(ctx context.Context, botId int64, chatId, status, role string, updateId int64) error
 	BotIntroFeeChannelRuleSave(ctx context.Context, in *sysin.IntroFeeChannelRuleSaveInp, tenantId, accountId int64) (int64, error)
 	BotIntroFeeChannelRuleList(ctx context.Context, in *sysin.IntroFeeChannelRuleListInp, tenantId, accountId int64) (list []*sysin.IntroFeeChannelRuleItem, total int, err error)

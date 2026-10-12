@@ -131,27 +131,49 @@ func (s *sSysPublish) AdminBotChannelCacheList(ctx context.Context, in *sysin.Bo
 	if in == nil {
 		in = &sysin.BotChannelCacheListInp{}
 	}
-	mod := g.DB().Model(publishBotChannelCacheTable+" c").Safe().Ctx(ctx).
-		LeftJoin(publishBotTable+" b", "b.id=c.bot_id").
-		Where("c.tenant_id", account.TenantId).WhereNull("b.deleted_at").
-		Fields("c.id,c.bot_id,b.bot_username,c.chat_id AS channel_id,c.chat_title AS channel_title,c.chat_username AS channel_username,c.chat_type,CASE WHEN c.chat_type='private' THEN 1 ELSE 0 END AS is_private,c.is_broadcast,c.is_megagroup,c.message_count,c.last_message_text,c.last_message_at,c.created_at,c.updated_at")
+	channelTable := pdao.YoubanPublishCollectChannel.Table()
+	relationTable := pdao.YoubanPublishCollectBotChannel.Table()
+	normalizedChatID := "REPLACE(ch.telegram_chat_id, '-100', '')"
+	mod := g.DB().Model(relationTable+" r").Safe().Ctx(ctx).
+		InnerJoin(channelTable+" ch", "ch.id=r.channel_id AND ch.tenant_id=r.tenant_id AND ch.deleted_at IS NULL").
+		LeftJoin(publishBotTable+" b", "b.id=r.bot_id AND b.deleted_at IS NULL").
+		Where("r.tenant_id", account.TenantId).WhereNull("r.deleted_at").
+		WhereNot("ch.chat_type", "private")
 	if in.BotId > 0 {
-		mod = mod.Where("c.bot_id", in.BotId)
+		mod = mod.Where("r.bot_id", in.BotId)
 	}
 	if keyword := strings.TrimSpace(in.Keyword); keyword != "" {
 		like := "%" + keyword + "%"
-		mod = mod.Where("(c.chat_id LIKE ? OR c.chat_title LIKE ? OR c.chat_username LIKE ? OR b.bot_username LIKE ?)", like, like, like, like)
+		mod = mod.Where("(ch.telegram_chat_id LIKE ? OR ch.title LIKE ? OR ch.username LIKE ?)", like, like, like)
 	}
 	switch strings.ToLower(strings.TrimSpace(in.Type)) {
-	case "private":
-		mod = mod.Where("c.chat_type", "private")
 	case "channel":
-		mod = mod.Where("c.is_broadcast", 1)
+		mod = mod.Where("ch.is_broadcast", 1)
 	case "group":
-		mod = mod.Where("c.is_megagroup", 1)
+		mod = mod.Where("ch.is_megagroup", 1)
 	}
-	if err = mod.Page(in.Page, in.PerPage).OrderDesc("c.last_message_at").OrderDesc("c.id").ScanAndCount(&list, &totalCount, false); err != nil {
+	countValue, countErr := mod.Clone().Fields("COUNT(DISTINCT CONCAT(r.bot_id, ':', " + normalizedChatID + "))").Value()
+	if countErr != nil {
+		return nil, 0, gerror.Wrap(countErr, "统计Bot频道列表失败")
+	}
+	totalCount = countValue.Int()
+	fields := "MIN(r.id) AS id,r.bot_id,MAX(b.bot_username) AS bot_username,MIN(ch.telegram_chat_id) AS channel_id," +
+		"COALESCE(NULLIF(MAX(CASE WHEN ch.title<>ch.telegram_chat_id THEN ch.title ELSE '' END),''),MAX(NULLIF(ch.title,''))) AS channel_title," +
+		"MAX(NULLIF(ch.username,'')) AS channel_username,MAX(NULLIF(ch.invite_link,'')) AS channel_link," +
+		"MAX(ch.chat_type) AS chat_type,MAX(ch.is_broadcast) AS is_broadcast,MAX(ch.is_megagroup) AS is_megagroup," +
+		"CASE WHEN MAX(CASE WHEN r.status<> 'bot_removed' THEN 1 ELSE 0 END)=1 THEN 'active' ELSE 'bot_removed' END AS membership_status," +
+		"CASE WHEN MAX(ch.is_broadcast)=1 OR MAX(CASE WHEN LOWER(r.bot_role) IN ('administrator','creator','owner') THEN 1 ELSE 0 END)=1 THEN 'administrator' ELSE 'member' END AS bot_role," +
+		"MIN(COALESCE(r.first_seen_at,r.created_at)) AS first_seen_at,MAX(r.removed_at) AS removed_at," +
+		"MIN(r.created_at) AS created_at,MAX(r.updated_at) AS updated_at"
+	if err = mod.Fields(fields).Group("r.bot_id,"+normalizedChatID).
+		Page(in.Page, in.PerPage).OrderDesc("updated_at").OrderDesc("id").Scan(&list); err != nil {
 		return nil, 0, gerror.Wrap(err, "获取Bot频道缓存失败")
+	}
+	for _, item := range list {
+		if item == nil || strings.TrimSpace(item.ChannelLink) != "" || strings.TrimSpace(item.ChannelUsername) == "" {
+			continue
+		}
+		item.ChannelLink = "https://t.me/" + strings.TrimPrefix(strings.TrimSpace(item.ChannelUsername), "@")
 	}
 	return list, totalCount, nil
 }

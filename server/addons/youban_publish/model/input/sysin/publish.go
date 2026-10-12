@@ -1150,21 +1150,26 @@ type BotChannelCacheListInp struct {
 }
 
 type BotChannelCacheModel struct {
-	Id              int64       `json:"id" dc:"ID"`
-	BotId           int64       `json:"botId" dc:"Bot ID"`
-	BotUsername     string      `json:"botUsername" dc:"Bot用户名"`
-	ChannelId       string      `json:"channelId" dc:"频道/群聊ID"`
-	ChannelTitle    string      `json:"channelTitle" dc:"频道/群聊名称"`
-	ChannelUsername string      `json:"channelUsername" dc:"频道/群聊用户名"`
-	ChatType        string      `json:"chatType" dc:"聊天类型"`
-	IsPrivate       int         `json:"isPrivate" dc:"是否私聊"`
-	IsBroadcast     int         `json:"isBroadcast" dc:"是否频道"`
-	IsMegagroup     int         `json:"isMegagroup" dc:"是否群聊"`
-	MessageCount    int         `json:"messageCount" dc:"消息数"`
-	LastMessageText string      `json:"lastMessageText" dc:"最后消息"`
-	LastMessageAt   *gtime.Time `json:"lastMessageAt" dc:"最后消息时间"`
-	CreatedAt       *gtime.Time `json:"createdAt" dc:"创建时间"`
-	UpdatedAt       *gtime.Time `json:"updatedAt" dc:"更新时间"`
+	Id               int64       `json:"id" dc:"ID"`
+	BotId            int64       `json:"botId" dc:"Bot ID"`
+	BotUsername      string      `json:"botUsername" dc:"Bot用户名"`
+	ChannelId        string      `json:"channelId" dc:"频道/群聊ID"`
+	ChannelTitle     string      `json:"channelTitle" dc:"频道/群聊名称"`
+	ChannelUsername  string      `json:"channelUsername" dc:"频道/群聊用户名"`
+	ChannelLink      string      `json:"channelLink" dc:"频道/群聊链接"`
+	ChatType         string      `json:"chatType" dc:"聊天类型"`
+	IsPrivate        int         `json:"isPrivate" dc:"是否私聊"`
+	IsBroadcast      int         `json:"isBroadcast" dc:"是否频道"`
+	IsMegagroup      int         `json:"isMegagroup" dc:"是否群聊"`
+	MessageCount     int         `json:"messageCount" dc:"消息数"`
+	LastMessageText  string      `json:"lastMessageText" dc:"最后消息"`
+	LastMessageAt    *gtime.Time `json:"lastMessageAt" dc:"最后消息时间"`
+	MembershipStatus string      `json:"membershipStatus" dc:"BOT成员状态"`
+	BotRole          string      `json:"botRole" dc:"BOT身份"`
+	FirstSeenAt      *gtime.Time `json:"firstSeenAt" dc:"首次添加时间"`
+	RemovedAt        *gtime.Time `json:"removedAt" dc:"移除时间"`
+	CreatedAt        *gtime.Time `json:"createdAt" dc:"创建时间"`
+	UpdatedAt        *gtime.Time `json:"updatedAt" dc:"更新时间"`
 }
 
 type BotModel struct {

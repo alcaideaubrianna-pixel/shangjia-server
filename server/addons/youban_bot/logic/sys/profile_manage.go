@@ -2026,13 +2026,7 @@ func (s *sSysBot) consumeProfileSessionText(ctx context.Context, botId int64, ms
 		return s.handleCollectRuleEditSession(ctx, botId, chatId, account, session, text)
 	case "collect_channel_add":
 		parts := strings.Fields(strings.TrimSpace(text))
-		var payload struct {
-			RuleId    int64  `json:"ruleId"`
-			BotId     int64  `json:"botId"`
-			AccountId int64  `json:"accountId"`
-			Id        int64  `json:"id"`
-			ChannelId string `json:"channelId"`
-		}
+		var payload collectChannelSuffixPayload
 		if err := json.Unmarshal([]byte(session.PayloadJson), &payload); err != nil || payload.RuleId <= 0 {
 			return gerror.New("频道规则会话已失效")
 		}
@@ -2050,16 +2044,24 @@ func (s *sSysBot) consumeProfileSessionText(ctx context.Context, botId int64, ms
 			channelID = parts[0]
 			suffix = strings.Join(parts[1:], " ")
 		}
-		ownerAccountID := payload.AccountId
-		if ownerAccountID <= 0 {
-			ownerAccountID = account.AccountId
+		if suffix == "" {
+			return s.sendMessageOnly(ctx, botId, chatId, "频道后缀不能为空，请重新输入")
 		}
-		_, err := publishService.SysPublish().BotIntroFeeChannelRuleSave(ctx, &publishsysin.IntroFeeChannelRuleSaveInp{Id: payload.Id, RuleId: payload.RuleId, BotId: payload.BotId, ChannelId: channelID, Suffix: suffix, Status: 1}, account.TenantId, ownerAccountID)
-		if err != nil {
+		payload.ChannelId = channelID
+		payload.Draft = suffix
+		payloadJSON, _ := json.Marshal(payload)
+		if _, err := g.DB().Model(profileSessionTable).Ctx(ctx).Where("id", session.Id).Data(g.Map{"step": "confirming", "payload_json": string(payloadJSON), "updated_at": gtime.Now()}).Update(); err != nil {
 			return err
 		}
-		_ = s.completeProfileSession(ctx, session.Id)
-		return s.sendMessageOnly(ctx, botId, chatId, "频道后缀已保存，可在频道后缀配置中继续查看和修改。")
+		name := strings.TrimSpace(payload.ChannelTitle)
+		if name == "" {
+			name = channelID
+		}
+		buttons := [][]models.InlineKeyboardButton{
+			{{Text: "确认保存", CallbackData: "cm:channelsuffixconfirm"}},
+			{{Text: "取消，使用默认后缀", CallbackData: "cm:channelsuffixcancel"}},
+		}
+		return s.sendCollectManageMarkup(ctx, botId, chatId, fmt.Sprintf("频道：%s\n新后缀：%s\n\n确认保存吗？", html.EscapeString(name), html.EscapeString(suffix)), buttons)
 	case "cancel_queue":
 		_ = s.completeProfileSession(ctx, session.Id)
 		if strings.TrimSpace(text) == "全部" {

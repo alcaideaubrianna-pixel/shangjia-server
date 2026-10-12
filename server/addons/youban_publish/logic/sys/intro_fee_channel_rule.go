@@ -88,7 +88,7 @@ func (s *sSysPublish) IntroFeeChannelRuleList(ctx context.Context, in *sysin.Int
 	}
 	if kw := strings.TrimSpace(in.Keyword); kw != "" {
 		like := "%" + kw + "%"
-		mod = mod.Where("(channel_id LIKE ? OR channel_title LIKE ? OR channel_username LIKE ?)", like, like, like)
+		mod = mod.Where("(channel_id LIKE ? OR channel_title LIKE ? OR channel_username LIKE ? OR suffix LIKE ?)", like, like, like, like)
 	}
 	err = mod.Page(in.Page, in.PerPage).OrderDesc("updated_at").ScanAndCount(&list, &totalCount, false)
 	s.fillIntroFeeChannelBlacklist(ctx, account.TenantId, account.Id, list)
@@ -398,7 +398,7 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 		filtered := configured[:0]
 		lower := strings.ToLower(keyword)
 		for _, row := range configured {
-			if strings.Contains(strings.ToLower(row.ChannelId+row.ChannelTitle+row.ChannelUsername), lower) {
+			if strings.Contains(strings.ToLower(row.ChannelId+row.ChannelTitle+row.ChannelUsername+row.Suffix), lower) {
 				filtered = append(filtered, row)
 			}
 		}
@@ -406,10 +406,30 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 	}
 	sort.SliceStable(configured, func(i, j int) bool {
 		left, right := configured[i], configured[j]
-		if left == nil || left.LastSeenAt == nil {
+		if left == nil {
 			return false
 		}
-		if right == nil || right.LastSeenAt == nil {
+		if right == nil {
+			return true
+		}
+		if left.Configured != right.Configured {
+			return left.Configured
+		}
+		if left.Configured {
+			if left.UpdatedAt == nil {
+				return false
+			}
+			if right.UpdatedAt == nil {
+				return true
+			}
+			if !left.UpdatedAt.Equal(right.UpdatedAt) {
+				return left.UpdatedAt.After(right.UpdatedAt)
+			}
+		}
+		if left.LastSeenAt == nil {
+			return false
+		}
+		if right.LastSeenAt == nil {
 			return true
 		}
 		return left.LastSeenAt.After(right.LastSeenAt)
@@ -605,7 +625,7 @@ func (s *sSysPublish) AdminIntroFeeChannelRuleList(ctx context.Context, in *sysi
 	}
 	if kw := strings.TrimSpace(in.Keyword); kw != "" {
 		like := "%" + kw + "%"
-		mod = mod.Where("(channel_id LIKE ? OR channel_title LIKE ? OR channel_username LIKE ?)", like, like, like)
+		mod = mod.Where("(channel_id LIKE ? OR channel_title LIKE ? OR channel_username LIKE ? OR suffix LIKE ?)", like, like, like, like)
 	}
 	err = mod.Page(in.Page, in.PerPage).OrderDesc("updated_at").ScanAndCount(&list, &totalCount, false)
 	s.fillIntroFeeChannelBlacklist(ctx, admin.TenantId, 0, list)

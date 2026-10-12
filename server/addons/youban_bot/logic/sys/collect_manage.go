@@ -16,6 +16,17 @@ import (
 	publishService "hotgo/addons/youban_publish/service"
 )
 
+type collectChannelSuffixPayload struct {
+	RuleId        int64  `json:"ruleId"`
+	BotId         int64  `json:"botId"`
+	AccountId     int64  `json:"accountId"`
+	Id            int64  `json:"id"`
+	ChannelId     string `json:"channelId"`
+	ChannelTitle  string `json:"channelTitle"`
+	DefaultSuffix string `json:"defaultSuffix"`
+	Draft         string `json:"draft"`
+}
+
 func (s *sSysBot) collectManageAllowed(ctx context.Context, account *botProfileAccount) bool {
 	if account == nil || account.AccountId <= 0 || account.TenantId <= 0 {
 		return false
@@ -57,16 +68,12 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 			return true, nil
 		}
 		relationID, _ := strconv.ParseInt(parts[2], 10, 64)
-		sourceID, err := publishService.SysPublish().BotCollectChannelApproval(ctx, relationID, account.TenantId, account.AccountId, action == "channelapprove")
+		approval, err := publishService.SysPublish().BotCollectChannelApproval(ctx, relationID, account.TenantId, account.AccountId, action == "channelapprove")
 		if err != nil {
 			return true, err
 		}
 		if action == "channelapprove" {
-			buttons := [][]models.InlineKeyboardButton{
-				{{Text: "配置介绍费后缀", CallbackData: fmt.Sprintf("cm:config:%d", sourceID)}},
-				{{Text: "暂不设置", CallbackData: "cm:list:1"}},
-			}
-			return true, s.sendCollectManageMarkup(ctx, botId, chatId, "已允许采集该频道。是否现在配置介绍费后缀？", buttons)
+			return true, s.startApprovedChannelSuffixSession(ctx, botId, chatId, account, approval)
 		}
 		return true, s.sendCollectManageNotice(ctx, botId, chatId, "已拒绝采集该频道，后续消息将直接忽略。")
 	case "approve", "reject":
@@ -227,6 +234,25 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 		}
 		_ = s.completeProfileSession(ctx, session.Id)
 		return true, s.showCollectRuleField(ctx, botId, chatId, account, session.ProfileId, session.Step)
+	case "channelsuffixconfirm":
+		session := s.activeProfileSessionByIds(ctx, botId, telegramUserIdFromCtx(ctx), chatId)
+		if session == nil || session.Scene != "collect_channel_add" {
+			return true, nil
+		}
+		return true, s.confirmCollectChannelSuffix(ctx, botId, chatId, account, session)
+	case "channelsuffixcancel":
+		session := s.activeProfileSessionByIds(ctx, botId, telegramUserIdFromCtx(ctx), chatId)
+		if session == nil || session.Scene != "collect_channel_add" {
+			return true, nil
+		}
+		var payload collectChannelSuffixPayload
+		_ = json.Unmarshal([]byte(session.PayloadJson), &payload)
+		_ = s.completeProfileSession(ctx, session.Id)
+		defaultSuffix := strings.TrimSpace(payload.DefaultSuffix)
+		if defaultSuffix == "" {
+			defaultSuffix = "未设置"
+		}
+		return true, s.sendCollectManageNotice(ctx, botId, chatId, "已取消频道后缀设置，将使用规则默认后缀："+defaultSuffix)
 	case "toggle":
 		if len(parts) < 3 {
 			return true, nil
@@ -250,6 +276,48 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 		return true, s.showProfileMenuToChat(ctx, botId, chatId, "已返回资料管理，请选择操作：")
 	}
 	return true, nil
+}
+
+func (s *sSysBot) startApprovedChannelSuffixSession(ctx context.Context, botId int64, chatId string, account *botProfileAccount, approval *publishsysin.CollectChannelApprovalModel) error {
+	if approval == nil || approval.RuleId <= 0 || strings.TrimSpace(approval.ChannelId) == "" {
+		return s.sendCollectManageNotice(ctx, botId, chatId, "已允许采集该频道。当前采集规则不可用，可稍后在频道后缀配置中设置后缀。")
+	}
+	payload := collectChannelSuffixPayload{
+		RuleId: approval.RuleId, BotId: approval.BotId, AccountId: approval.AccountId,
+		ChannelId: approval.ChannelId, ChannelTitle: approval.ChannelTitle, DefaultSuffix: approval.DefaultSuffix,
+	}
+	if err := s.startProfileSessionByIds(ctx, botId, telegramUserIdFromCtx(ctx), chatId, account, "collect_channel_add", "waiting_value", approval.RuleId, "", payload, ""); err != nil {
+		return err
+	}
+	defaultSuffix := strings.TrimSpace(approval.DefaultSuffix)
+	if defaultSuffix == "" {
+		defaultSuffix = "未设置"
+	}
+	name := strings.TrimSpace(approval.ChannelTitle)
+	if name == "" {
+		name = approval.ChannelId
+	}
+	text := fmt.Sprintf("已允许采集频道：%s\n当前规则默认后缀：%s\n\n请直接发送该频道的新后缀，例如：哈哈哈\n取消后将继续使用规则默认后缀。", html.EscapeString(name), html.EscapeString(defaultSuffix))
+	buttons := [][]models.InlineKeyboardButton{{{Text: "取消，使用默认后缀", CallbackData: "cm:channelsuffixcancel"}}}
+	return s.sendCollectManageMarkup(ctx, botId, chatId, text, buttons)
+}
+
+func (s *sSysBot) confirmCollectChannelSuffix(ctx context.Context, botId int64, chatId string, account *botProfileAccount, session *profileSessionRow) error {
+	var payload collectChannelSuffixPayload
+	if json.Unmarshal([]byte(session.PayloadJson), &payload) != nil || payload.RuleId <= 0 || strings.TrimSpace(payload.ChannelId) == "" || strings.TrimSpace(payload.Draft) == "" {
+		return s.sendCollectManageNotice(ctx, botId, chatId, "频道后缀设置已失效，请重新操作。")
+	}
+	ownerAccountID := payload.AccountId
+	if ownerAccountID <= 0 {
+		ownerAccountID = account.AccountId
+	}
+	if _, err := publishService.SysPublish().BotIntroFeeChannelRuleSave(ctx, &publishsysin.IntroFeeChannelRuleSaveInp{
+		Id: payload.Id, RuleId: payload.RuleId, BotId: payload.BotId, ChannelId: payload.ChannelId, Suffix: strings.TrimSpace(payload.Draft), Status: 1,
+	}, account.TenantId, ownerAccountID); err != nil {
+		return err
+	}
+	_ = s.completeProfileSession(ctx, session.Id)
+	return s.sendCollectManageNotice(ctx, botId, chatId, "频道后缀已保存："+strings.TrimSpace(payload.Draft))
 }
 
 func (s *sSysBot) showCollectSourceList(ctx context.Context, botId int64, chatId string, account *botProfileAccount, page int) error {
