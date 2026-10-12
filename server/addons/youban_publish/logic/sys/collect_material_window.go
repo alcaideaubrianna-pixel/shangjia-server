@@ -354,7 +354,13 @@ func (s *sSysPublish) findStoredCollectDisplayEvent(ctx context.Context, verify 
 		Where("material_role", collectMaterialRoleDisplay).
 		Where("source_message_id < ?", messageID).
 		Where("COALESCE(received_at,created_at) BETWEEN ? AND ?", verifyAt.Add(-collectMaterialVerifyWindow()), verifyAt).
-		WhereIn("status", collectMaterialMutableStatuses()).
+		// A display event can already be processed when the verify message is
+		// delivered.  It is still a valid parent as long as it is inside the
+		// bounded window.  Restrict this to terminal display states; unrelated
+		// in-flight rows must not be stolen by a late verify event.
+		Where("(status IN (?) OR (status IN (?, ?) AND material_group_status IN (?, ?)))",
+			collectMaterialMutableStatuses(), sysin.CollectEventStatusProcessed,
+			sysin.CollectEventStatusDispatched, "complete", "paired").
 		OrderDesc("source_message_id").OrderDesc("id").Limit(1).One()
 	if err != nil {
 		return nil, gerror.Wrap(err, "回看验证资料前序展示组失败")
@@ -398,10 +404,17 @@ func (s *sSysPublish) bindCollectMaterialPair(ctx context.Context, display gdb.R
 	now := gtime.Now()
 	paired := false
 	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		result, txErr := tx.Model(pdao.YoubanPublishCollectEvent.Table()).Ctx(ctx).
+		displayStatus := strings.TrimSpace(display["status"].String())
+		displayGroupStatus := strings.TrimSpace(display["material_group_status"].String())
+		displayCanReattach := (displayStatus == sysin.CollectEventStatusProcessed || displayStatus == sysin.CollectEventStatusDispatched) &&
+			(displayGroupStatus == "complete" || displayGroupStatus == "paired")
+		displayQuery := tx.Model(pdao.YoubanPublishCollectEvent.Table()).Ctx(ctx).
 			Where("id", display["id"].Int64()).
-			Where("material_role", collectMaterialRolePending).
-			WhereIn("status", collectMaterialMutableStatuses()).
+			Where("(material_role = ? OR (material_role = ? AND ?))", collectMaterialRolePending, collectMaterialRoleDisplay, displayCanReattach)
+		if !displayCanReattach {
+			displayQuery = displayQuery.WhereIn("status", collectMaterialMutableStatuses())
+		}
+		result, txErr := displayQuery.
 			Data(g.Map{"material_role": collectMaterialRoleDisplay, "material_group_status": "paired", "updated_at": now}).Update()
 		if txErr != nil {
 			return gerror.Wrap(txErr, "绑定资料展示组失败")
