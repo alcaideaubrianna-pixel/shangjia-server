@@ -151,15 +151,7 @@ func (s *sSysPublish) waitTelegramDeliveryWebhook(ctx context.Context, attempt t
 	if affected == 0 {
 		current, readErr := s.telegramAttemptById(ctx, attempt.Id)
 		if readErr == nil && current.Status == telegramAttemptStatusConfirmed {
-			phase := telegramSendPhaseDisplayConfirmed
-			if attempt.Phase == "verify" {
-				phase = telegramSendPhaseVerifyConfirmed
-			}
-			_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-				Where("id", attempt.JobId).WhereIn("status", []string{"sending", "unknown"}).
-				Data(g.Map{"status": "failed_retry", "send_phase": phase, "dispatch_status": tgDispatchStatusIdle,
-					"next_retry_at": nil, "error_message": "", "updated_at": gtime.Now()}).Update()
-			_ = s.enqueueTelegramJobDirectWithUnique(ctx, attempt.JobId, 0, false)
+			g.Log().Infof(ctx, "TG发送Attempt已由并发流程确认，跳过重试 attemptId:%d jobId:%d phase:%s", attempt.Id, attempt.JobId, attempt.Phase)
 		}
 		return nil
 	}
