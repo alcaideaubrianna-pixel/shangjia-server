@@ -1,6 +1,10 @@
 package sys
 
-import "testing"
+import (
+	"testing"
+
+	"hotgo/addons/youban_publish/model/input/sysin"
+)
 
 func TestParseAIOpsTelegramMessageURL(t *testing.T) {
 	tests := []struct {
@@ -18,6 +22,37 @@ func TestParseAIOpsTelegramMessageURL(t *testing.T) {
 		if ref.Username != test.username || ref.ChatId != test.chat || ref.MessageId != test.message {
 			t.Fatalf("parse %q = %+v", test.raw, ref)
 		}
+	}
+}
+
+func TestParseAIOpsTelegramMessageContextInput(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     *sysin.AIOpsTelegramMessageContextInp
+		username  string
+		chatId    string
+		messageId int64
+	}{
+		{name: "url", input: &sysin.AIOpsTelegramMessageContextInp{URL: "https://t.me/demo/12?single"}, username: "demo", messageId: 12},
+		{name: "chat and message", input: &sysin.AIOpsTelegramMessageContextInp{ChatId: "4204753279", MessageId: 13}, chatId: "-1004204753279", messageId: 13},
+		{name: "message only", input: &sysin.AIOpsTelegramMessageContextInp{MessageId: 14}, messageId: 14},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ref, _, err := parseAIOpsTelegramMessageContextInput(test.input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ref.Username != test.username || ref.ChatId != test.chatId || ref.MessageId != test.messageId {
+				t.Fatalf("unexpected ref: %+v", ref)
+			}
+		})
+	}
+}
+
+func TestParseAIOpsTelegramMessageContextInputRequiresTarget(t *testing.T) {
+	if _, _, err := parseAIOpsTelegramMessageContextInput(&sysin.AIOpsTelegramMessageContextInp{}); err == nil {
+		t.Fatal("empty input unexpectedly succeeded")
 	}
 }
 

@@ -18,10 +18,15 @@ type aiOpsTelegramMessageRef struct {
 	MessageId int64
 }
 
-func (s *sSysPublish) AIOpsTelegramMessageContext(ctx context.Context, messageURL string) (*sysin.AIOpsTelegramMessageContextModel, error) {
-	ref, err := parseAIOpsTelegramMessageURL(messageURL)
+func (s *sSysPublish) AIOpsTelegramMessageContext(ctx context.Context, in *sysin.AIOpsTelegramMessageContextInp) (*sysin.AIOpsTelegramMessageContextModel, error) {
+	ref, messageURL, err := parseAIOpsTelegramMessageContextInput(in)
 	if err != nil {
 		return nil, err
+	}
+	if ref.Username == "" && ref.ChatId == "" {
+		if err = ensureAIOpsTelegramMessageIdUnique(ctx, ref.MessageId); err != nil {
+			return nil, err
+		}
 	}
 	result := &sysin.AIOpsTelegramMessageContextModel{
 		MessageURL: messageURL, MessageUsername: ref.Username, MessageChatId: ref.ChatId, MessageId: ref.MessageId,
@@ -49,9 +54,10 @@ func (s *sSysPublish) AIOpsTelegramMessageContext(ctx context.Context, messageUR
 
 func (s *sSysPublish) resolveAIOpsPublishedMessage(ctx context.Context, ref aiOpsTelegramMessageRef, result *sysin.AIOpsTelegramMessageContextModel) error {
 	mod := g.DB().Model("hg_youban_publish_tg_message m").Ctx(ctx).
-		Fields("m.job_id,m.profile_id,j.status AS job_status,j.send_phase,j.dispatch_status,j.error_message,j.last_dispatch_error,j.operation_no,j.channel_id,j.collect_event_id,j.collect_source_id,j.collect_source_chat_id,j.collect_source_message_id,c.channel_title").
+		Fields("m.job_id,m.profile_id,j.tenant_id,j.account_id,j.status AS job_status,j.send_phase,j.dispatch_status,j.error_message,j.last_dispatch_error,j.operation_no,j.channel_id,j.collect_event_id,j.collect_source_id,j.collect_source_chat_id,j.collect_source_message_id,c.channel_title,a.nickname AS account_name").
 		LeftJoin("hg_youban_publish_tg_job j", "j.id=m.job_id").
 		LeftJoin("hg_youban_publish_channel c", "c.id=j.channel_id").
+		LeftJoin(publishAccountTable+" a", "a.id=j.account_id AND a.deleted_at IS NULL").
 		Where("m.tg_message_id", ref.MessageId).
 		WhereNull("m.deleted_at")
 	if ref.Username != "" {
@@ -68,6 +74,7 @@ func (s *sSysPublish) resolveAIOpsPublishedMessage(ctx context.Context, ref aiOp
 	}
 	result.Found, result.MatchType = true, "published_message"
 	result.JobId, result.ProfileId = row["job_id"].Int64(), row["profile_id"].Int64()
+	result.TenantId, result.AccountId, result.AccountName = row["tenant_id"].Int64(), row["account_id"].Int64(), row["account_name"].String()
 	result.JobStatus, result.ChannelId = row["job_status"].String(), row["channel_id"].Int64()
 	result.JobSendPhase, result.JobDispatchStatus = row["send_phase"].String(), row["dispatch_status"].String()
 	result.JobError, result.JobDispatchError, result.OperationNo = row["error_message"].String(), row["last_dispatch_error"].String(), row["operation_no"].String()
@@ -80,9 +87,10 @@ func (s *sSysPublish) resolveAIOpsPublishedMessage(ctx context.Context, ref aiOp
 
 func (s *sSysPublish) resolveAIOpsCollectedMessage(ctx context.Context, ref aiOpsTelegramMessageRef, result *sysin.AIOpsTelegramMessageContextModel) error {
 	mod := g.DB().Model("hg_youban_publish_collect_event e").Ctx(ctx).
-		Fields("e.id,e.source_id,e.source_chat_id,e.source_message_id,e.status,d.profile_id,d.rule_id").
+		Fields("e.id,e.source_id,e.source_chat_id,e.source_message_id,e.status,d.profile_id,d.rule_id,s.tenant_id,s.account_id,a.nickname AS account_name").
 		LeftJoin("hg_youban_publish_collect_source s", "s.id=e.source_id").
 		LeftJoin("hg_youban_publish_collect_dispatch d", "d.event_id=e.id").
+		LeftJoin(publishAccountTable+" a", "a.id=s.account_id AND a.deleted_at IS NULL").
 		Where("e.source_message_id", ref.MessageId)
 	if ref.Username != "" {
 		mod = mod.Where("LOWER(TRIM(LEADING '@' FROM s.source_username))", strings.ToLower(ref.Username))
@@ -101,17 +109,31 @@ func (s *sSysPublish) resolveAIOpsCollectedMessage(ctx context.Context, ref aiOp
 	result.CollectSourceId = row["source_id"].Int64()
 	result.CollectSourceChatId, result.CollectSourceMessageId = row["source_chat_id"].String(), row["source_message_id"].Int64()
 	result.ProfileId, result.CollectRuleId = row["profile_id"].Int64(), row["rule_id"].Int64()
+	result.TenantId, result.AccountId, result.AccountName = row["tenant_id"].Int64(), row["account_id"].Int64(), row["account_name"].String()
 	return nil
 }
 
 func (s *sSysPublish) fillAIOpsCollectionContext(ctx context.Context, result *sysin.AIOpsTelegramMessageContextModel) error {
 	if result.ProfileId > 0 {
-		profile, err := g.DB().Model("hg_content_profile").Safe().Ctx(ctx).
-			Fields("profile_no,status").Where("id", result.ProfileId).One()
+		profile, err := g.DB().Model("hg_content_profile p").Ctx(ctx).
+			Fields("p.profile_no,p.status,p.source_type,ps.tenant_id,ps.account_id,a.nickname AS account_name").
+			LeftJoin(publishProfileStateTable+" ps", "ps.profile_id=p.id AND ps.deleted_at IS NULL").
+			LeftJoin(publishAccountTable+" a", "a.id=ps.account_id AND a.deleted_at IS NULL").
+			Where("p.id", result.ProfileId).WhereNull("p.deleted_at").One()
 		if err != nil {
 			return gerror.Wrap(err, "读取资料失败")
 		}
 		result.ProfileNo, result.ProfileStatus = profile["profile_no"].String(), profile["status"].Int()
+		result.SourceType = profile["source_type"].String()
+		if result.TenantId <= 0 {
+			result.TenantId = profile["tenant_id"].Int64()
+		}
+		if result.AccountId <= 0 {
+			result.AccountId = profile["account_id"].Int64()
+		}
+		if result.AccountName == "" {
+			result.AccountName = profile["account_name"].String()
+		}
 	}
 	if result.ProfileId > 0 && (result.CollectEventId <= 0 || result.CollectRuleId <= 0 || result.CollectSourceId <= 0) {
 		dispatch, err := g.DB().Model("hg_youban_publish_collect_dispatch").Ctx(ctx).
@@ -159,6 +181,7 @@ func (s *sSysPublish) fillAIOpsCollectionContext(ctx context.Context, result *sy
 			result.CollectSourceChatId = source["source_chat_id"].String()
 		}
 	}
+	result.IsCollected = result.CollectEventId > 0 || result.CollectSourceId > 0 || result.SourceType == "youban_collect"
 	result.CollectSourceURL = collectedTelegramMessageURL(
 		result.CollectSourceChatId, result.CollectSourceUsername, result.CollectSourceMessageId,
 	)
@@ -181,6 +204,43 @@ func (s *sSysPublish) fillAIOpsCollectionContext(ctx context.Context, result *sy
 		result.Diagnosis = "采集组已配对，但验证媒体记录缺失，请检查媒体缓存链路"
 	default:
 		result.Diagnosis = "未发现验证媒体，请检查采集组窗口决策和媒体缓存阶段"
+	}
+	return nil
+}
+
+func parseAIOpsTelegramMessageContextInput(in *sysin.AIOpsTelegramMessageContextInp) (aiOpsTelegramMessageRef, string, error) {
+	if in == nil {
+		return aiOpsTelegramMessageRef{}, "", gerror.New("消息查询参数不能为空")
+	}
+	if rawURL := strings.TrimSpace(in.URL); rawURL != "" {
+		ref, err := parseAIOpsTelegramMessageURL(rawURL)
+		return ref, rawURL, err
+	}
+	if in.MessageId <= 0 {
+		return aiOpsTelegramMessageRef{}, "", gerror.New("消息地址或消息ID不能为空")
+	}
+	ref := aiOpsTelegramMessageRef{ChatId: normalizeTelegramChannelChatID(in.ChatId), MessageId: in.MessageId}
+	return ref, "", nil
+}
+
+func ensureAIOpsTelegramMessageIdUnique(ctx context.Context, messageId int64) error {
+	row, err := g.DB().Model(publishTgMessageTable).Ctx(ctx).
+		Fields("COUNT(DISTINCT target_chat_id) AS chat_count").Where("tg_message_id", messageId).One()
+	if err != nil {
+		return gerror.Wrap(err, "校验Telegram消息ID失败")
+	}
+	if row["chat_count"].Int() > 1 {
+		return gerror.New("消息ID在多个频道中存在，请同时提供chatId或完整消息链接")
+	}
+	if row["chat_count"].Int() == 0 {
+		collected, collectErr := g.DB().Model("hg_youban_publish_collect_event").Ctx(ctx).
+			Fields("COUNT(DISTINCT source_chat_id) AS chat_count").Where("source_message_id", messageId).One()
+		if collectErr != nil {
+			return gerror.Wrap(collectErr, "校验采集消息ID失败")
+		}
+		if collected["chat_count"].Int() > 1 {
+			return gerror.New("消息ID在多个采集来源中存在，请同时提供chatId或完整消息链接")
+		}
 	}
 	return nil
 }

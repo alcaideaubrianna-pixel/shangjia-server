@@ -39,6 +39,15 @@ type ProfileRepublishRes struct {
 	Message string `json:"message"`
 }
 
+type ProfileOfflineReq struct {
+	g.Meta     `path:"/profile/offline" method:"post" tags:"AI运维" summary:"批量下架资料并清理TG消息"`
+	ProfileIds []int64 `json:"profileIds" v:"required#资料ID不能为空"`
+}
+
+type ProfileOfflineRes struct {
+	Message string `json:"message"`
+}
+
 type ProfileDeleteReq struct {
 	g.Meta     `path:"/profile/delete" method:"post" tags:"AI运维" summary:"批量下架并删除指定账号的可管理资料"`
 	TenantId   int64   `json:"tenantId" v:"min:1#租户ID不能为空"`
@@ -55,9 +64,18 @@ type ProfileDeleteRes struct {
 
 type TelegramMessageContextReq struct {
 	g.Meta `path:"/telegram/message/context" method:"get" tags:"AI运维" summary:"按Telegram消息地址查询资料采集链路"`
-	URL    string `json:"url" v:"required#消息地址不能为空" dc:"Telegram消息地址"`
+	sysin.AIOpsTelegramMessageContextInp
 }
 
 type TelegramMessageContextRes struct {
 	*sysin.AIOpsTelegramMessageContextModel
+}
+
+type TelegramMessageOfflineReq struct {
+	g.Meta `path:"/telegram/message/offline" method:"post" tags:"AI运维" summary:"按消息或资料精确下架并清理TG消息"`
+	sysin.AIOpsTelegramOfflineInp
+}
+
+type TelegramMessageOfflineRes struct {
+	*sysin.AIOpsTelegramOfflineResult
 }
