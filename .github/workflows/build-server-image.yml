@@ -39,6 +39,7 @@ jobs:
         run: |
           owner="${GITHUB_REPOSITORY_OWNER,,}"
           echo "server=ghcr.io/${owner}/youban-server" >> "$GITHUB_OUTPUT"
+          echo "tencent=hkccr.ccs.tencentyun.com/testaaaaa/xiaohuiji" >> "$GITHUB_OUTPUT"
           echo "branch_tag=feat-railway-runtime-ci-split" >> "$GITHUB_OUTPUT"
           echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
@@ -51,6 +52,13 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to Tencent Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: hkccr.ccs.tencentyun.com
+          username: ${{ secrets.TENCENT_REGISTRY_USERNAME }}
+          password: ${{ secrets.TENCENT_REGISTRY_PASSWORD }}
 
       - name: Docker metadata
         id: server_meta
@@ -70,7 +78,10 @@ jobs:
           platforms: linux/amd64
           build-args: |
             GIT_REVISION=${{ github.sha }}
-          tags: ${{ steps.server_meta.outputs.tags }}
+          tags: |
+            ${{ steps.server_meta.outputs.tags }}
+            ${{ steps.image.outputs.tencent }}:latest
+            ${{ steps.image.outputs.tencent }}:${{ steps.image.outputs.short_sha }}
           labels: ${{ steps.server_meta.outputs.labels }}
           cache-from: type=gha,scope=server
           cache-to: type=gha,mode=max,scope=server
