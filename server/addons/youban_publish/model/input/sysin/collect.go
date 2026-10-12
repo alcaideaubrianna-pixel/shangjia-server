@@ -290,6 +290,7 @@ type CollectRuleModel struct {
 	Name                    string                    `json:"name" dc:"名称"`
 	GlobalEnabled           int                       `json:"globalEnabled" dc:"全局应用"`
 	TargetChannelIds        []int64                   `json:"targetChannelIds" dc:"目标频道ID"`
+	TargetChannelNames      []string                  `json:"targetChannelNames" dc:"目标频道名称"`
 	ReviewEnabled           int                       `json:"reviewEnabled" dc:"审核开关"`
 	DedupeEnabled           int                       `json:"dedupeEnabled" dc:"去重开关"`
 	DedupeDays              int                       `json:"dedupeDays" dc:"去重天数"`
