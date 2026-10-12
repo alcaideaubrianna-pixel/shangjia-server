@@ -318,6 +318,8 @@ func (s *sSysPublish) recordTelegramAttemptMessages(ctx context.Context, attempt
 			"message_id": message.MessageId, "source": source, "created_at": gtime.Now(),
 		}).OnConflict("attempt_id,message_id").OnDuplicate("source").Save()
 		if err != nil {
+			g.Log().Errorf(ctx, "TG消息已返回但记录发送审计失败 attempt_id:%d job_id:%d phase:%s chat_id:%s message_id:%d source:%s err:%v",
+				attempt.Id, attempt.JobId, attempt.Phase, attempt.TargetChatId, message.MessageId, source, err)
 			return gerror.Wrap(err, "记录TG Attempt消息失败")
 		}
 	}
