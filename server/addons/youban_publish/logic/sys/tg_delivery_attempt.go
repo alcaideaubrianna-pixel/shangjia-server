@@ -13,6 +13,8 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/util/guid"
+
+	"hotgo/internal/library/hgrds/lock"
 )
 
 const (
@@ -48,6 +50,11 @@ type telegramDeliveryAttempt struct {
 }
 
 func (s *sSysPublish) beginTelegramDeliveryAttempt(ctx context.Context, job telegramJobRecord, phase string, expectedCount int) (telegramDeliveryAttempt, error) {
+	mutex := lock.NewConfig(30*time.Second, 100*time.Millisecond).Mutex(fmt.Sprintf("youban_publish:tg_attempt:%d:%s:%d", job.Id, phase, 0))
+	if err := mutex.Lock(ctx); err != nil {
+		return telegramDeliveryAttempt{}, gerror.Wrap(err, "获取TG发送Attempt锁失败")
+	}
+	defer func() { _ = mutex.Unlock(context.Background()) }()
 	var attempt telegramDeliveryAttempt
 	value, err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
 		Fields("COALESCE(MAX(attempt_no),0)").
