@@ -435,7 +435,7 @@ func (s *sSysBot) showCollectRuleChannels(ctx context.Context, botId int64, chat
 		if suffix == "" {
 			suffix = "未配置"
 		}
-		status := "待配置"
+		status := "使用默认后缀"
 		if row.Configured {
 			status = "已启用"
 			if row.Status != 1 {

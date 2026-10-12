@@ -125,7 +125,15 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 		perPage = 20
 	}
 	configured := make([]*sysin.IntroFeeChannelRuleItem, 0)
-	if err := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Where("tenant_id", tenantID).WhereIn("account_id", []int64{accountID, 0}).Where("rule_id", ruleID).Where("bot_id", botID).WhereNull("deleted_at").OrderDesc("account_id").OrderDesc("updated_at").Limit(introFeeChannelCandidateScanLimit).Scan(&configured); err != nil {
+	configuredModel := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).
+		Where("tenant_id", tenantID).WhereIn("account_id", []int64{accountID, 0}).
+		Where("rule_id", ruleID).WhereNull("deleted_at")
+	if botID > 0 {
+		configuredModel = configuredModel.WhereIn("bot_id", []int64{botID, 0})
+	} else {
+		configuredModel = configuredModel.Where("bot_id", 0)
+	}
+	if err := configuredModel.OrderDesc("account_id").OrderDesc("bot_id").OrderDesc("updated_at").Limit(introFeeChannelCandidateScanLimit).Scan(&configured); err != nil {
 		return nil, 0, err
 	}
 	seen := make(map[string]struct{}, len(configured))
@@ -144,13 +152,14 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 	// bound to this rule. The compact source/source_rule tables are the
 	// historical index; do not broaden the result with all account/BOT chats.
 	type sourceCandidate struct {
+		BotId        int64       `orm:"bot_id"`
 		ChatId       string      `orm:"source_chat_id"`
 		ChatTitle    string      `orm:"chat_title"`
 		ChatUsername string      `orm:"chat_username"`
 		LastSeenAt   *gtime.Time `orm:"last_message_at"`
 	}
 	sourceModel := g.DB().Model(publishCollectSourceTable).Ctx(ctx).
-		Where("tenant_id", tenantID).WhereNot("source_chat_id", "").WhereNull("deleted_at")
+		Where("tenant_id", tenantID).WhereNull("deleted_at")
 	if accountID > 0 {
 		sourceModel = sourceModel.Where("account_id", accountID)
 	}
@@ -161,7 +170,7 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 		sourceModel = sourceModel.Where("EXISTS (SELECT 1 FROM "+pdao.YoubanPublishCollectSourceRule.Table()+" sr WHERE sr.source_id="+publishCollectSourceTable+".id AND sr.rule_id=? AND sr.tenant_id=? AND sr.status=1)", ruleID, tenantID)
 	}
 	var sourceRows []sourceCandidate
-	if err := sourceModel.Fields("source_chat_id, title AS chat_title, source_username AS chat_username, last_event_at AS last_message_at").OrderDesc("updated_at").Limit(introFeeChannelCandidateScanLimit).Scan(&sourceRows); err != nil {
+	if err := sourceModel.Fields("bot_id,source_chat_id,title AS chat_title,source_username AS chat_username,last_event_at AS last_message_at").OrderDesc("updated_at").Limit(introFeeChannelCandidateScanLimit).Scan(&sourceRows); err != nil {
 		return nil, 0, err
 	}
 	// Aggregate BOT sources have no source_chat_id. Their compact
@@ -184,15 +193,42 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 		sourceRows = append(sourceRows, sourceCandidate{ChatId: id, LastSeenAt: indexed.LastSeenAt})
 	}
 	scopedChatIDs := make([]string, 0, len(sourceRows)*2)
+	boundBotIDs := make([]int64, 0, len(sourceRows))
+	aggregateBotSource := false
 	for _, source := range sourceRows {
 		scopedChatIDs = append(scopedChatIDs, tgChannelCacheLookupIds(source.ChatId)...)
+		if source.BotId > 0 {
+			boundBotIDs = append(boundBotIDs, source.BotId)
+			if strings.TrimSpace(source.ChatId) == "" {
+				aggregateBotSource = true
+			}
+		}
+	}
+	// Configured rows are always in scope. Aggregate BOT sources intentionally
+	// have no source_chat_id, so their configured channel IDs must seed the
+	// bounded cache lookup used to recover historical titles and usernames.
+	for _, row := range configured {
+		if row != nil {
+			scopedChatIDs = append(scopedChatIDs, tgChannelCacheLookupIds(row.ChannelId)...)
+		}
 	}
 	scopedChatIDs = uniqueStrings(scopedChatIDs)
 	cacheModel := g.DB().Model(publishBotChannelCacheTable).Ctx(ctx).Where("tenant_id", tenantID)
+	effectiveBotID := botID
+	boundBotIDs = uniqueIds(boundBotIDs)
+	if effectiveBotID == 0 && len(boundBotIDs) == 1 {
+		effectiveBotID = boundBotIDs[0]
+	}
 	if botID > 0 {
 		cacheModel = cacheModel.Where("bot_id", botID)
+	} else if len(boundBotIDs) > 0 {
+		cacheModel = cacheModel.WhereIn("bot_id", boundBotIDs)
 	}
-	if len(scopedChatIDs) > 0 {
+	cacheModel = cacheModel.WhereGT("message_count", 0).WhereNot("chat_type", "private")
+	if aggregateBotSource {
+		// Aggregate BOT sources own every channel/group that has sent this BOT
+		// a message. The BOT cache is the compact history index for this list.
+	} else if len(scopedChatIDs) > 0 {
 		cacheModel = cacheModel.WhereIn("chat_id", scopedChatIDs)
 	} else if ruleID > 0 {
 		// No source is bound to this rule; configured rows above are still
@@ -219,14 +255,16 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 	canonicalModel := g.DB().Model(pdao.YoubanPublishCollectChannel.Table()).Ctx(ctx).
 		Where("hg_youban_publish_collect_channel.tenant_id", tenantID).
 		Where("hg_youban_publish_collect_channel.status", "active").WhereNull("hg_youban_publish_collect_channel.deleted_at")
-	if botID > 0 {
+	if effectiveBotID > 0 {
 		canonicalModel = canonicalModel.InnerJoin(pdao.YoubanPublishCollectBotChannel.Table()+" bc", "bc.channel_id=hg_youban_publish_collect_channel.id AND bc.tenant_id=hg_youban_publish_collect_channel.tenant_id").
-			Where("bc.bot_id", botID).Where("bc.status", "!=", sysin.CollectBotChannelRemoved).WhereNull("bc.deleted_at")
+			Where("bc.bot_id", effectiveBotID).Where("bc.status", "!=", sysin.CollectBotChannelRemoved).WhereNull("bc.deleted_at")
 	} else if accountID > 0 {
 		canonicalModel = canonicalModel.InnerJoin(pdao.YoubanPublishCollectAccountChannel.Table()+" ac", "ac.channel_id=hg_youban_publish_collect_channel.id AND ac.tenant_id=hg_youban_publish_collect_channel.tenant_id").
 			Where("ac.account_id", accountID).WhereNull("ac.deleted_at")
 	}
-	if len(scopedChatIDs) > 0 {
+	if aggregateBotSource {
+		// The BOT/channel relation above provides the bounded candidate set.
+	} else if len(scopedChatIDs) > 0 {
 		canonicalModel = canonicalModel.WhereIn("hg_youban_publish_collect_channel.telegram_chat_id", scopedChatIDs)
 	} else if ruleID > 0 {
 		canonicalModel = canonicalModel.Where("1=0")
@@ -299,18 +337,22 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 			Fields("id,telegram_chat_id,status,title,username,invite_link").
 			Where("tenant_id", tenantID).WhereIn("telegram_chat_id", uniqueStrings(lookupIDs)).WhereNull("deleted_at").Scan(&channels)
 		for _, channel := range channels {
-			channelByID[canonicalCollectSourceChatID(channel.TelegramChatId)] = channel
+			key := canonicalCollectSourceChatID(channel.TelegramChatId)
+			current, exists := channelByID[key]
+			if !exists || introFeeChannelDisplayScore(channel.Title, channel.Username, channel.InviteLink) > introFeeChannelDisplayScore(current.Title, current.Username, current.InviteLink) {
+				channelByID[key] = channel
+			}
 			channelPKs = append(channelPKs, channel.Id)
 		}
 	}
 	botStatusByChannel := make(map[int64]string, len(channels))
 	accountStatusByChannel := make(map[int64]string, len(channels))
-	if len(channelPKs) > 0 && botID > 0 {
+	if len(channelPKs) > 0 && effectiveBotID > 0 {
 		var relations []struct {
 			ChannelId int64  `json:"channelId"`
 			Status    string `json:"status"`
 		}
-		_ = pdao.YoubanPublishCollectBotChannel.Ctx(ctx).Fields("channel_id,status").Where("tenant_id", tenantID).Where("bot_id", botID).WhereIn("channel_id", channelPKs).Scan(&relations)
+		_ = pdao.YoubanPublishCollectBotChannel.Ctx(ctx).Fields("channel_id,status").Where("tenant_id", tenantID).Where("bot_id", effectiveBotID).WhereIn("channel_id", channelPKs).Scan(&relations)
 		for _, relation := range relations {
 			botStatusByChannel[relation.ChannelId] = relation.Status
 		}
@@ -382,6 +424,20 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 		end = total
 	}
 	return configured[start:end], total, nil
+}
+
+func introFeeChannelDisplayScore(title, username, inviteLink string) int {
+	score := 0
+	if strings.TrimSpace(title) != "" {
+		score += 4
+	}
+	if strings.TrimSpace(username) != "" {
+		score += 2
+	}
+	if strings.TrimSpace(inviteLink) != "" {
+		score++
+	}
+	return score
 }
 
 func (s *sSysPublish) IntroFeeChannelRuleSave(ctx context.Context, in *sysin.IntroFeeChannelRuleSaveInp) (int64, error) {
