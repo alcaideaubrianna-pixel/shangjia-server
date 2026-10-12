@@ -39,7 +39,7 @@ jobs:
         run: |
           owner="${GITHUB_REPOSITORY_OWNER,,}"
           echo "server=ghcr.io/${owner}/youban-server" >> "$GITHUB_OUTPUT"
-          echo "tencent=hkccr.ccs.tencentyun.com/testaaaaa/xiaohuiji" >> "$GITHUB_OUTPUT"
+          echo "tencent=sgccr.ccs.tencentyun.com/xxxx/xxxx" >> "$GITHUB_OUTPUT"
           echo "branch_tag=feat-railway-runtime-ci-split" >> "$GITHUB_OUTPUT"
           echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
@@ -56,7 +56,7 @@ jobs:
       - name: Login to Tencent Container Registry
         uses: docker/login-action@v3
         with:
-          registry: hkccr.ccs.tencentyun.com
+          registry: sgccr.ccs.tencentyun.com
           username: ${{ secrets.TENCENT_REGISTRY_USERNAME }}
           password: ${{ secrets.TENCENT_REGISTRY_PASSWORD }}
 
