@@ -29,6 +29,15 @@ func TestCollectMaterialMutableStatusesExcludeTerminalEvents(t *testing.T) {
 	}
 }
 
+func TestCollectMaterialEventRequiresVerifyForBotOnly(t *testing.T) {
+	if !collectMaterialEventRequiresVerify(gdb.Record{"source_type": gvar.New(sysin.CollectSourceTypeBot)}) {
+		t.Fatal("BOT collection must require verification media")
+	}
+	if collectMaterialEventRequiresVerify(gdb.Record{"source_type": gvar.New(sysin.CollectSourceTypeAccount)}) {
+		t.Fatal("account collection keeps the configured five-minute fallback")
+	}
+}
+
 func TestFindCollectVerifyEventUsesOneFollowingVideoGroup(t *testing.T) {
 	receivedAt := gtime.NewFromTime(time.Now().Add(-4 * time.Minute))
 	rows := []gdb.Record{
@@ -39,6 +48,34 @@ func TestFindCollectVerifyEventUsesOneFollowingVideoGroup(t *testing.T) {
 	}
 	if got := (&sSysPublish{}).findCollectVerifyEvent(rows, collectMaterialEventViews(rows, collectTestMediaByEvent(rows)), 0); got != 2 {
 		t.Fatalf("verify event index=%d, want 2", got)
+	}
+}
+
+func TestTargetedRequeuePairsFollowingVerifyContext(t *testing.T) {
+	displayAt := time.Now().Add(-time.Hour)
+	rows := []gdb.Record{
+		{
+			"id": gvar.New(4871529), "source_message_id": gvar.New(21459),
+			"material_role": gvar.New(collectMaterialRolePending), "raw_text": gvar.New("昵称：A1"),
+			"received_at": gvar.New(displayAt),
+		},
+		{
+			"id": gvar.New(4871536), "source_message_id": gvar.New(21464),
+			"material_role": gvar.New(collectMaterialRolePending), "raw_text": gvar.New(""),
+			"received_at": gvar.New(displayAt.Add(7 * time.Second)),
+		},
+	}
+	mediaByEvent := map[int64][]collectMediaItem{
+		4871529: {{Type: "photo", FileId: "display-photo"}},
+		4871536: {{Type: "video", FileId: "verify-video"}},
+	}
+	views := collectMaterialEventViews(rows, mediaByEvent)
+	if got := NewSysPublish().findCollectVerifyEvent(rows, views, 0); got != 1 {
+		t.Fatalf("targeted requeue verify index=%d, want 1", got)
+	}
+	processEventIDs := map[int64]struct{}{4871529: {}}
+	if _, ok := processEventIDs[4871536]; ok {
+		t.Fatal("verification context must not become an independent processing target")
 	}
 }
 

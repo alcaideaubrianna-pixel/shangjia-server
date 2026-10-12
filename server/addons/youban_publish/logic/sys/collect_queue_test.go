@@ -171,6 +171,17 @@ func TestCollectProcessTaskBodyPreservesEvent(t *testing.T) {
 	}
 }
 
+func TestCollectProcessQueueSeparatesRealtimeFromBacklog(t *testing.T) {
+	realtime := collectProcessQueueName(collectProcessQueuePayload{TenantId: 2, AccountId: 3, SourceId: 4, EventId: 100})
+	backlog := collectProcessQueueName(collectProcessQueuePayload{TenantId: 2, AccountId: 3, SourceId: 4})
+	if realtime != tgQueueNameCollectProcessRealtime {
+		t.Fatalf("realtime queue = %s, want %s", realtime, tgQueueNameCollectProcessRealtime)
+	}
+	if backlog == realtime {
+		t.Fatalf("backlog queue must be isolated from realtime: %s", backlog)
+	}
+}
+
 func TestCollectProcessTaskBodyPreservesSourceChat(t *testing.T) {
 	body, err := collectProcessTaskBody(collectProcessQueuePayload{
 		TenantId: 2, AccountId: 3, SourceId: 4, SourceChatId: "-1003981090528", EventId: 100,

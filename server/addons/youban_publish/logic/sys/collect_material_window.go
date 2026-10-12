@@ -79,6 +79,46 @@ func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload co
 	return nil
 }
 
+// processTargetCollectEventWindow processes one realtime event with only the
+// forward context required to pair a verification message. It deliberately
+// avoids the source backlog so old events cannot delay realtime ingestion.
+func (s *sSysPublish) processTargetCollectEventWindow(ctx context.Context, payload collectProcessQueuePayload, target gdb.Record) error {
+	if target.IsEmpty() || target["id"].Int64() <= 0 {
+		return gerror.New("目标采集事件不存在")
+	}
+	messageID := target["source_message_id"].Int64()
+	if messageID <= 0 {
+		return gerror.Newf("目标采集事件消息ID无效 eventId:%d", target["id"].Int64())
+	}
+	eventAt := target["received_at"].GTime()
+	if eventAt == nil || eventAt.IsZero() {
+		eventAt = target["created_at"].GTime()
+	}
+	if eventAt == nil || eventAt.IsZero() {
+		return gerror.Newf("目标采集事件时间无效 eventId:%d", target["id"].Int64())
+	}
+
+	now := gtime.Now()
+	rows, err := collectProcessEventModel(ctx, payload).
+		WhereIn("e.status", collectProcessWindowStatuses()).
+		Where("((e.status <> ? AND (e.material_role IS NULL OR e.material_role = '' OR e.material_role IN (?,?))) OR (e.status = ? AND e.material_role = ? AND e.error_message = ?))", sysin.CollectEventStatusIgnored, collectMaterialRolePending, collectMaterialRoleDisplay, sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage).
+		Where("(e.processed_at IS NULL AND (e.material_group_status IS NULL OR e.material_group_status <> ? OR e.updated_at <= ?)) OR (e.status = ? AND e.material_role = ? AND e.error_message = ? AND e.updated_at <= ?)", collectMaterialGroupWaitingVerify, now.Add(-collectMaterialWaitingVerifyRetryDelay), sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage, now.Add(-collectMaterialVerifyRetryDelay)).
+		Where("e.source_message_id >= ?", messageID).
+		Where("COALESCE(e.received_at,e.created_at) <= ?", eventAt.Add(collectMaterialVerifyWindowDefault)).
+		Fields("e.*").
+		OrderAsc("e.source_message_id").
+		OrderAsc("e.id").
+		Limit(collectMaterialWindowLookahead + 1).
+		All()
+	if err != nil {
+		return gerror.Wrap(err, "读取目标采集事件验证窗口失败")
+	}
+	if len(rows) == 0 || rows[0]["id"].Int64() != target["id"].Int64() {
+		return gerror.Newf("目标采集事件当前不可处理 eventId:%d status:%s role:%s", target["id"].Int64(), target["status"].String(), strings.TrimSpace(target["material_role"].String()))
+	}
+	return s.processCollectMessageWindow(ctx, payload, target["source_chat_id"].String(), rows, map[int64]struct{}{target["id"].Int64(): {}})
+}
+
 func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload collectProcessQueuePayload, chatID string, rows []gdb.Record, processEventIds map[int64]struct{}) error {
 	sort.SliceStable(rows, func(i, j int) bool {
 		left := rows[i]["source_message_id"].Int64()
@@ -144,6 +184,13 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 				}
 				continue
 			}
+			if collectMaterialEventRequiresVerify(event) {
+				if err = s.ignoreCollectEvent(ctx, event["id"].Int64(), "BOT资料在5分钟窗口内未匹配到验证视频", "group"); err != nil {
+					return err
+				}
+				s.appendCollectEventLogForRecord(ctx, event, "group", "missing_verify", "BOT资料缺少验证视频，已停止入库和推送", "")
+				continue
+			}
 			claimed, claimErr := s.markCollectMaterialRole(ctx, event["id"].Int64(), collectMaterialRoleDisplay, 0, "complete")
 			if claimErr != nil {
 				return claimErr
@@ -207,6 +254,10 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 		}
 	}
 	return nil
+}
+
+func collectMaterialEventRequiresVerify(event gdb.Record) bool {
+	return strings.EqualFold(strings.TrimSpace(event["source_type"].String()), sysin.CollectSourceTypeBot)
 }
 
 func shouldResumeClassifiedDisplayEvent(event gdb.Record) bool {

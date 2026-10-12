@@ -50,7 +50,7 @@ func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
 
 func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	s.tgQueueMu.Lock()
-	if s.autoDeleteQueueServer != nil || s.attemptTimeoutServer != nil || s.backgroundQueueServer != nil || s.cycleQueueServer != nil {
+	if s.autoDeleteQueueServer != nil || s.attemptTimeoutServer != nil || s.collectRealtimeServer != nil || s.backgroundQueueServer != nil || s.cycleQueueServer != nil {
 		s.tgQueueMu.Unlock()
 		return
 	}
@@ -62,6 +62,11 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	attemptTimeoutServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
 		Concurrency:    4,
 		Queues:         map[string]int{tgQueueNameAttemptTimeout: 1},
+		RetryDelayFunc: telegramQueueRetryDelay,
+	})
+	collectRealtimeServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
+		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.collectRealtimeConcurrency", 16).Int(),
+		Queues:         map[string]int{tgQueueNameCollectProcessRealtime: 1},
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
 	server := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
@@ -98,6 +103,7 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	g.Log().Infof(ctx, "启动上架插件后台队列，自动删除独立并发：%d", telegramAutoDeleteConcurrency(ctx))
 	s.autoDeleteQueueServer = autoDeleteServer
 	s.attemptTimeoutServer = attemptTimeoutServer
+	s.collectRealtimeServer = collectRealtimeServer
 	s.backgroundQueueServer = server
 	s.cycleQueueServer = cycleServer
 	s.profileQueueServer = profileServer
@@ -143,6 +149,8 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	autoDeleteMux.HandleFunc(tgTaskTypeAutoDeleteBackfill, s.handleTelegramAutoDeleteBackfillTask)
 	attemptTimeoutMux := asynq.NewServeMux()
 	attemptTimeoutMux.HandleFunc(tgTaskTypeAttemptTimeout, s.handleTelegramAttemptTimeoutTask)
+	collectRealtimeMux := asynq.NewServeMux()
+	collectRealtimeMux.HandleFunc(tgTaskTypeCollectProcess, s.handleCollectProcessTask)
 	profileMux := asynq.NewServeMux()
 	profileMux.HandleFunc(tgTaskTypeProfileMaintenance, s.handleProfileMaintenanceTask)
 	profileMux.HandleFunc(tgTaskTypeProfileSubmit, s.handleProfileSubmitTask)
@@ -157,6 +165,11 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	go func() {
 		if err := attemptTimeoutServer.Run(attemptTimeoutMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
 			g.Log().Errorf(ctx, "启动TG Attempt超时队列失败：%+v", err)
+		}
+	}()
+	go func() {
+		if err := collectRealtimeServer.Run(collectRealtimeMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
+			g.Log().Errorf(ctx, "启动实时采集处理队列失败：%+v", err)
 		}
 	}()
 	go func() {
@@ -287,6 +300,7 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	mediaProcessServer := s.mediaProcessServer
 	autoDeleteServer := s.autoDeleteQueueServer
 	attemptTimeoutServer := s.attemptTimeoutServer
+	collectRealtimeServer := s.collectRealtimeServer
 	backgroundServer := s.backgroundQueueServer
 	cycleServer := s.cycleQueueServer
 	profileServer := s.profileQueueServer
@@ -301,6 +315,7 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	s.mediaProcessServer = nil
 	s.autoDeleteQueueServer = nil
 	s.attemptTimeoutServer = nil
+	s.collectRealtimeServer = nil
 	s.backgroundQueueServer = nil
 	s.cycleQueueServer = nil
 	s.profileQueueServer = nil
@@ -329,6 +344,9 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	}
 	if attemptTimeoutServer != nil {
 		attemptTimeoutServer.Shutdown()
+	}
+	if collectRealtimeServer != nil {
+		collectRealtimeServer.Shutdown()
 	}
 	if backgroundServer != nil {
 		backgroundServer.Shutdown()

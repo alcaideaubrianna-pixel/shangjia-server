@@ -35,6 +35,7 @@ type sSysPublish struct {
 	relayQueueServer      *asynq.Server
 	autoDeleteQueueServer *asynq.Server
 	attemptTimeoutServer  *asynq.Server
+	collectRealtimeServer *asynq.Server
 	backgroundQueueServer *asynq.Server
 	cycleQueueServer      *asynq.Server
 	profileQueueServer    *asynq.Server

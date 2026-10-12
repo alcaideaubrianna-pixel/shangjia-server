@@ -267,7 +267,14 @@ func (s *sSysPublish) processCollectSourceTask(ctx context.Context, payload coll
 		return 0, false, true, nil
 	}
 	if payload.EventId > 0 {
-		if err = s.processCollectSourceWindow(ctx, payload); err != nil {
+		event, readErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).WherePri(payload.EventId).One()
+		if readErr != nil {
+			return 0, false, false, gerror.Wrap(readErr, "读取实时采集事件失败")
+		}
+		if event.IsEmpty() {
+			return 0, false, true, nil
+		}
+		if err = s.processTargetCollectEventWindow(ctx, payload, event); err != nil {
 			var retryErr *collectProcessRetryError
 			if errors.As(err, &retryErr) {
 				return retryErr.delay, true, false, nil
