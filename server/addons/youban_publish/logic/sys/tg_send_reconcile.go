@@ -149,15 +149,13 @@ func (s *sSysPublish) reconcileUnknownTelegramJob(ctx context.Context, job teleg
 	if err != nil {
 		return s.releaseUnknownTelegramJobClaim(ctx, job.Id, err)
 	}
-	phase := telegramSendPhaseCleanupConfirmed
-	if job.SendPhase == telegramSendPhaseVerifySending {
-		phase = telegramSendPhaseDisplayConfirmed
-	}
-	message := "历史待对账任务已停止主动扫描频道，移到队列尾部重新发送"
+	// A timeout is an ambiguous Telegram result: the request may have been
+	// accepted even though the HTTP response was lost. Never turn this state
+	// back into failed_retry, because doing so can send the same media twice.
+	message := "Telegram发送结果未确认，已停止自动重发；等待Webhook或人工对账"
 	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Where("status", "unknown").Data(g.Map{
-		"status": "failed_retry", "send_phase": phase, "dispatch_status": tgDispatchStatusIdle,
-		"retry_count": job.RetryCount + 1, "reconcile_count": 0, "next_retry_at": nil,
-		"error_message": message, "updated_at": gtime.Now(),
+		"status": "unknown", "dispatch_status": tgDispatchStatusProcessing,
+		"next_retry_at": nil, "error_message": message, "updated_at": gtime.Now(),
 	}).Update()
 	if err != nil {
 		return gerror.Wrap(err, "迁移历史TG待对账任务失败")
@@ -166,9 +164,9 @@ func (s *sSysPublish) reconcileUnknownTelegramJob(ctx context.Context, job teleg
 	if affected == 0 {
 		return nil
 	}
-	observeTelegramReconcile(ctx, "legacy_requeued")
-	s.appendTelegramJobLog(ctx, job, "reconcile", "retired", message)
-	return s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 0, false)
+	observeTelegramReconcile(ctx, "awaiting_confirmation")
+	s.appendTelegramJobLog(ctx, job, "reconcile", "unknown", message)
+	return nil
 }
 
 func (s *sSysPublish) claimUnknownTelegramJob(ctx context.Context, jobId int64) (bool, error) {

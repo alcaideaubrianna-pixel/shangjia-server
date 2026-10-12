@@ -81,6 +81,11 @@ func (s *sSysPublish) beginTelegramDeliveryAttempt(ctx context.Context, job tele
 	if err != nil {
 		return attempt, gerror.Wrap(err, "创建TG发送Attempt失败")
 	}
+	// Keep a durable job-level audit entry for every Bot send attempt, including
+	// attempts whose HTTP response later times out and has no Telegram message ID.
+	s.appendTelegramJobLog(ctx, job, "publish", "attempt_started", fmt.Sprintf(
+		"TG发送Attempt已创建 attemptId:%d phase:%s attemptNo:%d expectedCount:%d chat:%s",
+		attempt.Id, phase, attempt.AttemptNo, expectedCount, attempt.TargetChatId))
 	g.Log().Infof(ctx, "TG发送Attempt已创建 attemptId:%d jobId:%d profileId:%d channelId:%d botId:%d chat:%s phase:%s attemptNo:%d expectedCount:%d", attempt.Id, job.Id, job.ProfileId, job.ChannelId, job.BotId, attempt.TargetChatId, phase, attempt.AttemptNo, expectedCount)
 	return attempt, nil
 }
@@ -167,6 +172,10 @@ func (s *sSysPublish) waitTelegramDeliveryWebhook(ctx context.Context, attempt t
 		Data(g.Map{"status": "unknown", "dispatch_status": tgDispatchStatusProcessing, "next_retry_at": deadline, "error_message": "等待Telegram Webhook确认", "updated_at": gtime.Now()}).Update()
 	if err != nil {
 		return gerror.Wrap(err, "设置TG任务等待Webhook失败")
+	}
+	if job, jobErr := s.telegramJobById(ctx, attempt.JobId); jobErr == nil {
+		s.appendTelegramJobLog(ctx, job, "publish", "awaiting_webhook",
+			fmt.Sprintf("TG发送响应不确定，等待Webhook确认 attemptId:%d phase:%s cause:%v", attempt.Id, attempt.Phase, cause))
 	}
 	_, err = s.enqueueTelegramAttemptTimeout(ctx, attempt.Id, telegramAttemptWebhookWait)
 	g.Log().Warningf(ctx, "TG发送响应不确定，等待Webhook确认 attemptId:%d jobId:%d channelId:%d botId:%d chat:%s phase:%s deadline:%s cause:%v", attempt.Id, attempt.JobId, attempt.ChannelId, attempt.BotId, attempt.TargetChatId, attempt.Phase, deadline.String(), cause)
@@ -391,7 +400,10 @@ func (s *sSysPublish) matchTelegramVerifyAttempt(ctx context.Context, attempts [
 	matched := make([]*telegramDeliveryAttempt, 0, 1)
 	for index := range attempts {
 		attempt := &attempts[index]
-		if attempt.Phase != "verify" || attempt.Status == telegramAttemptStatusRetryWait && (attempt.WebhookDeadline == nil || gtime.Now().Sub(attempt.WebhookDeadline) > telegramAttemptLateGrace) {
+		// A retry_wait attempt represents an ambiguous send. Keep it eligible
+		// for late webhook reconciliation; it must never be retried merely
+		// because the original HTTP request timed out.
+		if attempt.Phase != "verify" || attempt.Status == telegramAttemptStatusRetryWait && attempt.WebhookDeadline == nil {
 			continue
 		}
 		job, err := s.telegramJobById(ctx, attempt.JobId)
