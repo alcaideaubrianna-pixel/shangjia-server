@@ -22,7 +22,7 @@ permissions:
 
 concurrency:
   group: build-server-image-${{ github.ref }}
-  # Never cancel a rollout after only some production services were updated.
+  # Keep builds for the same branch serialized.
   cancel-in-progress: false
 
 jobs:
@@ -79,19 +79,6 @@ jobs:
         run: |
           echo "### Published server image" >> "$GITHUB_STEP_SUMMARY"
           echo '${{ steps.server_meta.outputs.tags }}' >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Trigger enabled Dokploy targets
-        timeout-minutes: 20
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.YOUBAN_TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.YOUBAN_TELEGRAM_CHAT_ID }}
-          DOKPLOY_URL: ${{ secrets.DOKPLOY_URL }}
-          DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
-        run: |
-          python3 -u scripts/ci/trigger-dokploy-webhooks.py \
-            --config deploy/dokploy-targets.json \
-            --version "sha-${GITHUB_SHA::7}" \
-            --revision "${GITHUB_SHA}"
 
       - name: Notify Telegram build success
         if: ${{ success() }}
