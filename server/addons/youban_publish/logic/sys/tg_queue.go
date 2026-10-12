@@ -717,7 +717,12 @@ func (s *sSysPublish) enqueueTelegramTaskWithQueue(ctx context.Context, taskType
 	if delay > 0 {
 		options = append(options, asynq.ProcessIn(delay))
 	}
-	info, err := client.EnqueueContext(ctx, task, options...)
+	// Queue submission must never hold an HTTP/API request indefinitely when
+	// Redis or an Asynq Lua script is slow. Telegram deletion itself remains in
+	// the existing worker; this timeout only bounds the enqueue operation.
+	enqueueCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	info, err := client.EnqueueContext(enqueueCtx, task, options...)
 	if errors.Is(err, asynq.ErrDuplicateTask) {
 		return nil
 	}
