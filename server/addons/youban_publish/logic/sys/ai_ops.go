@@ -56,6 +56,46 @@ func (s *sSysPublish) AIOpsRepublishProfiles(ctx context.Context, in *sysin.Prof
 	return result, nil
 }
 
+func (s *sSysPublish) AIOpsOfflineProfiles(ctx context.Context, profileIds []int64) (*sysin.ProfileStatusModel, error) {
+	ids := uniqueIds(profileIds)
+	if len(ids) == 0 || len(ids) > 100 {
+		return nil, gerror.New("单次只能下架1到100条资料")
+	}
+	// Keep the AI operation on the same tenant/account-aware path as the
+	// normal offline action. Passing zero here silently skipped
+	// enqueueProfileDownRun, leaving Telegram messages visible.
+	var owners []struct {
+		ProfileId int64 `json:"profile_id"`
+		TenantId  int64 `json:"tenant_id"`
+		AccountId int64 `json:"account_id"`
+	}
+	if err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
+		Fields("profile_id,tenant_id,account_id").WhereIn("profile_id", ids).
+		WhereNull("deleted_at").Scan(&owners); err != nil {
+		return nil, gerror.Wrap(err, "读取资料归属失败")
+	}
+	groups := make(map[[2]int64][]int64)
+	for _, owner := range owners {
+		if owner.ProfileId > 0 && owner.TenantId > 0 && owner.AccountId > 0 {
+			key := [2]int64{owner.TenantId, owner.AccountId}
+			groups[key] = append(groups[key], owner.ProfileId)
+		}
+	}
+	if len(groups) == 0 {
+		return nil, gerror.New("资料归属信息不存在")
+	}
+	var result *sysin.ProfileStatusModel
+	var err error
+	for owner, groupIds := range groups {
+		result, err = s.updateProfileStatus(ctx, &sysin.ProfileStatusInp{Ids: uniqueIds(groupIds), Status: 2}, owner[0], owner[1])
+		if err != nil {
+			return nil, err
+		}
+	}
+	g.Log().Info(ctx, "AI运维资料下架", g.Map{"profileIds": ids, "result": result, "error": err})
+	return result, err
+}
+
 func (s *sSysPublish) AIOpsDeleteImportedProfiles(ctx context.Context, tenantId, accountId int64, profileIds []int64, dryRun bool) ([]int64, error) {
 	ids := uniqueIds(profileIds)
 	if tenantId <= 0 || accountId <= 0 {
