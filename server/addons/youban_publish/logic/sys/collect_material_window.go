@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,6 +34,25 @@ const (
 	collectMaterialGroupCollecting         = "group_collecting"
 	collectMaterialGroupWaitingVerify      = "waiting_verify"
 )
+
+// collectMaterialVerifyWindow is the single source of truth for display/verify pairing.
+// It keeps the production default at five minutes while allowing operations to tune
+// the window without rebuilding the service.
+func collectMaterialVerifyWindow() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("YOUBAN_COLLECT_VERIFY_WINDOW"))
+	if raw == "" {
+		return collectMaterialVerifyWindowDefault
+	}
+	if seconds, err := strconv.Atoi(raw); err == nil {
+		if seconds > 0 {
+			return time.Duration(seconds) * time.Second
+		}
+	}
+	if duration, err := time.ParseDuration(raw); err == nil && duration > 0 {
+		return duration
+	}
+	return collectMaterialVerifyWindowDefault
+}
 
 func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload collectProcessQueuePayload) error {
 	if payload.SourceId <= 0 || payload.TenantId <= 0 || payload.AccountId <= 0 {
@@ -104,7 +125,7 @@ func (s *sSysPublish) processTargetCollectEventWindow(ctx context.Context, paylo
 		Where("((e.status <> ? AND (e.material_role IS NULL OR e.material_role = '' OR e.material_role IN (?,?))) OR (e.status = ? AND e.material_role = ? AND e.error_message = ?))", sysin.CollectEventStatusIgnored, collectMaterialRolePending, collectMaterialRoleDisplay, sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage).
 		Where("(e.processed_at IS NULL AND (e.material_group_status IS NULL OR e.material_group_status <> ? OR e.updated_at <= ?)) OR (e.status = ? AND e.material_role = ? AND e.error_message = ? AND e.updated_at <= ?)", collectMaterialGroupWaitingVerify, now.Add(-collectMaterialWaitingVerifyRetryDelay), sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage, now.Add(-collectMaterialVerifyRetryDelay)).
 		Where("e.source_message_id >= ?", messageID).
-		Where("COALESCE(e.received_at,e.created_at) <= ?", eventAt.Add(collectMaterialVerifyWindowDefault)).
+		Where("COALESCE(e.received_at,e.created_at) <= ?", eventAt.Add(collectMaterialVerifyWindow())).
 		Fields("e.*").
 		OrderAsc("e.source_message_id").
 		OrderAsc("e.id").
@@ -178,7 +199,7 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 				}
 				continue
 			}
-			if !collectMaterialEventIngestOlderThan(event, collectMaterialVerifyWindowDefault) {
+			if !collectMaterialEventIngestOlderThan(event, collectMaterialVerifyWindow()) {
 				if err = s.markCollectMaterialWaitingVerify(ctx, event["id"].Int64()); err != nil {
 					return err
 				}
@@ -240,7 +261,7 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 				}
 				continue
 			}
-			if !collectMaterialEventIngestOlderThan(event, collectMaterialVerifyWindowDefault) {
+			if !collectMaterialEventIngestOlderThan(event, collectMaterialVerifyWindow()) {
 				continue
 			}
 			if err = s.ignoreCollectEvent(ctx, event["id"].Int64(), collectMaterialVerifyUnmatchedMessage, "group"); err != nil {
@@ -332,7 +353,7 @@ func (s *sSysPublish) findStoredCollectDisplayEvent(ctx context.Context, verify 
 		Where("source_chat_id", verify["source_chat_id"].String()).
 		Where("material_role", collectMaterialRoleDisplay).
 		Where("source_message_id < ?", messageID).
-		Where("COALESCE(received_at,created_at) BETWEEN ? AND ?", verifyAt.Add(-collectMaterialVerifyWindowDefault), verifyAt).
+		Where("COALESCE(received_at,created_at) BETWEEN ? AND ?", verifyAt.Add(-collectMaterialVerifyWindow()), verifyAt).
 		WhereIn("status", collectMaterialMutableStatuses()).
 		OrderDesc("source_message_id").OrderDesc("id").Limit(1).One()
 	if err != nil {

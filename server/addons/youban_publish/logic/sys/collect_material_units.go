@@ -53,7 +53,7 @@ func pairCollectMaterialMessages(messages []collectMaterialMessageView) []collec
 				displayAt := messages[lastDisplayIndex].MessageAt
 				verifyAt := message.MessageAt
 				withinWindow := displayAt.IsZero() || verifyAt.IsZero() ||
-					(!verifyAt.Before(displayAt) && verifyAt.Sub(displayAt) <= collectMaterialVerifyWindowDefault)
+					(!verifyAt.Before(displayAt) && verifyAt.Sub(displayAt) <= collectMaterialVerifyWindow())
 				if withinWindow {
 					pairs = append(pairs, collectMaterialPair{DisplayIndex: lastDisplayIndex, VerifyIndex: index})
 				}
