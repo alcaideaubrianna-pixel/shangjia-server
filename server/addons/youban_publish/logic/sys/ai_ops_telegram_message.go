@@ -61,7 +61,7 @@ func (s *sSysPublish) resolveAIOpsPublishedMessage(ctx context.Context, ref aiOp
 		Where("m.tg_message_id", ref.MessageId).
 		WhereNull("m.deleted_at")
 	if ref.Username != "" {
-		mod = mod.Where("LOWER(TRIM(LEADING '@' FROM c.channel_username))", strings.ToLower(ref.Username))
+		mod = mod.Where("LOWER(TRIM(LEADING '@' FROM c.channel_username)) = ?", strings.ToLower(ref.Username))
 	} else {
 		mod = mod.Where("m.target_chat_id", ref.ChatId)
 	}

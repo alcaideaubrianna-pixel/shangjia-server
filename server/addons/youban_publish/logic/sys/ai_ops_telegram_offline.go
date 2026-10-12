@@ -124,7 +124,7 @@ func (s *sSysPublish) resolveAIOpsOfflineMessage(ctx context.Context, ref aiOpsT
 	if ref.Username != "" {
 		mod = mod.LeftJoin(publishTgJobTable+" j", "j.id=m.job_id").
 			LeftJoin(publishChannelTable+" c", "c.id=j.channel_id").
-			Where("LOWER(TRIM(LEADING '@' FROM c.channel_username))", strings.ToLower(ref.Username))
+			Where("LOWER(TRIM(LEADING '@' FROM c.channel_username)) = ?", strings.ToLower(ref.Username))
 	} else {
 		mod = mod.Where("m.target_chat_id", ref.ChatId)
 	}
