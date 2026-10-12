@@ -29,6 +29,9 @@ jobs:
   build:
     if: github.ref == 'refs/heads/feat/railway-runtime-ci-split'
     runs-on: ubuntu-latest
+    outputs:
+      short_sha: ${{ steps.image.outputs.short_sha }}
+      server_image: ${{ steps.image.outputs.server }}
 
     steps:
       - name: Checkout
@@ -126,3 +129,70 @@ jobs:
             -d "chat_id=${TELEGRAM_CHAT_ID}" \
             -d "parse_mode=HTML" \
             --data-urlencode "text=${text}" || echo "telegram notify failed"
+
+  # SAE deployment is deliberately opt-in and currently limited to Web.  The
+  # worker applications must not be restarted automatically until their
+  # production DB/Redis cutover has been verified; running two publish
+  # consumers during migration can duplicate Telegram messages.
+  deploy-sae-web:
+    name: Deploy Web to Alibaba Cloud SAE
+    needs: build
+    if: >-
+      needs.build.result == 'success' &&
+      vars.SAE_AUTO_DEPLOY == 'true' &&
+      vars.SAE_WEB_APP_ID != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      ALIBABA_CLOUD_ACCESS_KEY_ID: ${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_ID }}
+      ALIBABA_CLOUD_ACCESS_KEY_SECRET: ${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_SECRET }}
+      ALIBABA_CLOUD_REGION_ID: ${{ vars.SAE_REGION_ID || 'ap-southeast-1' }}
+      SAE_APP_ID: ${{ vars.SAE_WEB_APP_ID }}
+      IMAGE_URL: ${{ needs.build.outputs.server_image }}:sha-${{ needs.build.outputs.short_sha }}
+    steps:
+      - name: Install Alibaba Cloud CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location \
+            https://aliyuncli.alicdn.com/aliyun-cli-linux-latest-amd64.tgz \
+            | tar -xz -C /tmp
+          sudo install -m 0755 /tmp/aliyun /usr/local/bin/aliyun
+          aliyun version
+
+      - name: Deploy immutable image to SAE
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$ALIBABA_CLOUD_ACCESS_KEY_ID"
+          test -n "$ALIBABA_CLOUD_ACCESS_KEY_SECRET"
+          test -n "$SAE_APP_ID"
+          aliyun configure set \
+            --profile github-actions \
+            --mode AK \
+            --region "$ALIBABA_CLOUD_REGION_ID" \
+            --access-key-id "$ALIBABA_CLOUD_ACCESS_KEY_ID" \
+            --access-key-secret "$ALIBABA_CLOUD_ACCESS_KEY_SECRET"
+          export ALIBABACLOUD_PROFILE=github-actions
+          aliyun sae DeployApplication \
+            --RegionId "$ALIBABA_CLOUD_REGION_ID" \
+            --AppId "$SAE_APP_ID" \
+            --ImageUrl "$IMAGE_URL"
+
+      - name: Verify SAE Web health
+        shell: bash
+        env:
+          HEALTH_URL: ${{ vars.SAE_WEB_HEALTH_URL }}
+        run: |
+          set -euo pipefail
+          test -n "$HEALTH_URL"
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error --max-time 10 "$HEALTH_URL" >/dev/null; then
+              echo "SAE Web health check passed"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "SAE Web health check failed: $HEALTH_URL" >&2
+          exit 1
