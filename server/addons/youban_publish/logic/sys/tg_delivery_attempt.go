@@ -3,7 +3,6 @@ package sys
 import (
 	"context"
 	"crypto/sha256"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -14,8 +13,6 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/util/guid"
-
-	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
 const (
@@ -208,64 +205,25 @@ func (s *sSysPublish) handleTelegramAttemptTimeout(ctx context.Context, attemptI
 	if err = s.cleanupTelegramAttemptMessages(ctx, attempt); err != nil {
 		g.Log().Warningf(ctx, "清理TG Attempt已知消息失败 attemptId:%d err:%+v", attempt.Id, err)
 	}
-	phase := telegramSendPhaseCleanupConfirmed
-	if attempt.Phase == "verify" {
-		phase = telegramSendPhaseDisplayConfirmed
-	}
 	job, err := s.telegramJobById(ctx, attempt.JobId)
 	if err != nil {
 		return err
 	}
+	phase := telegramSendPhaseCleanupConfirmed
 	if attempt.Phase == "verify" {
-		cause := gerror.Newf("Telegram Bot验证资料发送结果未在%d秒内确认", int(telegramAttemptWebhookWait/time.Second))
-		_, fallbackErr := s.sendTelegramJobMediaByAccount(ctx, job, "verify", "", nil, cause)
-		if errors.Is(fallbackErr, errTelegramMediaFallbackQueued) {
-			g.Log().Warningf(ctx, "TG验证资料确认超时，已切换协议号发送 attemptId:%d jobId:%d channelId:%d", attempt.Id, job.Id, job.ChannelId)
-			return nil
-		}
-		if fallbackErr != nil {
-			g.Log().Warningf(ctx, "TG验证资料确认超时，协议号降级不可用，继续队列重试 attemptId:%d jobId:%d err:%+v", attempt.Id, job.Id, fallbackErr)
-		}
+		phase = telegramSendPhaseDisplayConfirmed
 	}
-	g.Log().Warningf(ctx, "TG发送Attempt确认超时 attemptId:%d jobId:%d profileId:%d channelId:%d botId:%d chat:%s phase:%s attemptNo:%d", attempt.Id, job.Id, job.ProfileId, job.ChannelId, job.BotId, attempt.TargetChatId, attempt.Phase, attempt.AttemptNo)
-	withinRound := (attempt.AttemptNo-1)%telegramAttemptMaxRetries + 1
-	status := "failed_retry"
-	dispatchStatus := tgDispatchStatusIdle
-	retryCount := job.RetryCount
-	delay := time.Duration(0)
-	message := fmt.Sprintf("Telegram发送结果未在%d秒内确认，准备本轮第%d次重试", int(telegramAttemptWebhookWait/time.Second), withinRound+1)
-	if withinRound >= telegramAttemptMaxRetries {
-		conf, confErr := s.telegramPublishConfig(ctx, job.TenantId, job.AccountId)
-		if confErr != nil {
-			conf = defaultPublishConfig()
-		}
-		decision := telegramJobFailureNextStateWithConfig(gerror.New("Telegram Webhook确认超时"), job.RetryCount, conf)
-		status, dispatchStatus, retryCount, delay = decision.Status, decision.DispatchStatus, decision.RetryCount, decision.RetryDelay
-		message = "Telegram发送结果连续无法确认，任务已移到队列尾部"
-		if status == "failed" {
-			message = "Telegram发送结果连续无法确认，已达到最大重试次数"
-		}
-	}
-	nextRetryAt := interface{}(nil)
-	if delay > 0 {
-		nextRetryAt = gtime.Now().Add(delay)
-	}
+	message := fmt.Sprintf("Telegram发送结果未在%d秒内确认，已暂停自动重试，等待发送审计补偿", int(telegramAttemptWebhookWait/time.Second))
+	g.Log().Warningf(ctx, "TG发送结果不确定，禁止自动重发 attemptId:%d jobId:%d profileId:%d channelId:%d botId:%d chat:%s phase:%s attemptNo:%d", attempt.Id, job.Id, job.ProfileId, job.ChannelId, job.BotId, attempt.TargetChatId, attempt.Phase, attempt.AttemptNo)
 	_, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id", attempt.JobId).Where("status", "unknown").
-		Data(g.Map{"status": status, "send_phase": phase, "dispatch_status": dispatchStatus,
-			"retry_count": retryCount, "next_retry_at": nextRetryAt,
+		Data(g.Map{"status": "unknown", "send_phase": phase, "dispatch_status": tgDispatchStatusProcessing,
+			"next_retry_at": nil,
 			"error_message": message, "updated_at": gtime.Now()}).Update()
 	if err != nil {
 		return gerror.Wrap(err, "恢复TG Attempt超时任务失败")
 	}
-	if status == "failed" {
-		observeTelegramPublishFailure(ctx, "webhook_timeout")
-		return s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusFailed)
-	}
-	if delay < telegramAttemptLateGrace {
-		delay = telegramAttemptLateGrace
-	}
-	return s.enqueueTelegramJobDirectWithUnique(ctx, attempt.JobId, delay, false)
+	return nil
 }
 
 func (s *sSysPublish) cleanupTelegramAttemptMessages(ctx context.Context, attempt telegramDeliveryAttempt) error {
