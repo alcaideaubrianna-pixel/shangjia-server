@@ -372,7 +372,7 @@ func cachedRemoteMediaFileWithMetaSourceAndDownloader(ctx context.Context, key s
 		}
 		return filePath, nil
 	}
-	value, err, _ := mediaFileCacheDownloadGroup.Do(key, func() (interface{}, error) {
+	resultCh := mediaFileCacheDownloadGroup.DoChan(key, func() (interface{}, error) {
 		if fileExists(filePath) {
 			if err := touchMediaFileCacheMeta(metaPath, key, metaSource, filePath); err != nil {
 				g.Log().Warningf(ctx, "更新媒体缓存访问时间失败 path:%s err:%+v", filePath, err)
@@ -391,10 +391,15 @@ func cachedRemoteMediaFileWithMetaSourceAndDownloader(ctx context.Context, key s
 		scheduleMediaFileCachePrune(ctx)
 		return filePath, nil
 	})
-	if err != nil {
-		return "", err
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case result := <-resultCh:
+		if result.Err != nil {
+			return "", result.Err
+		}
+		return result.Val.(string), nil
 	}
-	return value.(string), nil
 }
 
 func cachedGeneratedMediaFile(ctx context.Context, key string, source string, ext string, generate func(string) error) (string, error) {
@@ -412,7 +417,7 @@ func cachedGeneratedMediaFile(ctx context.Context, key string, source string, ex
 		_ = touchMediaFileCacheMeta(metaPath, key, source, filePath)
 		return filePath, nil
 	}
-	value, err, _ := mediaFileCacheGenerateGroup.Do(key, func() (interface{}, error) {
+	resultCh := mediaFileCacheGenerateGroup.DoChan(key, func() (interface{}, error) {
 		if fileExists(filePath) {
 			_ = touchMediaFileCacheMeta(metaPath, key, source, filePath)
 			return filePath, nil
@@ -436,10 +441,15 @@ func cachedGeneratedMediaFile(ctx context.Context, key string, source string, ex
 		scheduleMediaFileCachePrune(ctx)
 		return filePath, nil
 	})
-	if err != nil {
-		return "", err
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case result := <-resultCh:
+		if result.Err != nil {
+			return "", result.Err
+		}
+		return result.Val.(string), nil
 	}
-	return value.(string), nil
 }
 
 func downloadMediaFileCache(ctx context.Context, source string, filePath string) error {
