@@ -499,6 +499,10 @@ func downloadMediaFileCacheWithClient(ctx context.Context, client *http.Client, 
 		return gerror.Wrap(err, "创建远程媒体下载请求失败")
 	}
 	req.Header.Set("User-Agent", "youban-server/media-cache")
+	// Object storage and CDN recovery requests are server-to-server requests.
+	// Never forward browser origin headers: some legacy buckets reject them.
+	req.Header.Del("Origin")
+	req.Header.Del("Referer")
 	if client == nil {
 		client = &http.Client{Timeout: 2 * time.Minute}
 	}

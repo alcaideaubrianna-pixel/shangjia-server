@@ -166,6 +166,7 @@ type mediaProcessQueuePayload struct {
 
 type botMediaRepairQueuePayload struct {
 	ProfileId int64 `json:"profileId"`
+	JobId     int64 `json:"jobId,omitempty"`
 }
 
 type importQueuePayload struct {

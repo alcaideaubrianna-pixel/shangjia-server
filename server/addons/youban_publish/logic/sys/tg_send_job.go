@@ -448,7 +448,11 @@ func isTelegramMediaSourceUnavailableError(err error) bool {
 	}
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "下载远程媒体失败：http 404") ||
-		strings.Contains(message, "下载远程媒体失败: http 404")
+		strings.Contains(message, "下载远程媒体失败: http 404") ||
+		strings.Contains(message, "下载远程媒体失败：http 403") ||
+		strings.Contains(message, "下载远程媒体失败: http 403") ||
+		strings.Contains(message, "下载远程媒体失败：http 451") ||
+		strings.Contains(message, "下载远程媒体失败: http 451")
 }
 
 func isTelegramBotMediaProcessingError(err error) bool {
@@ -669,10 +673,10 @@ func (s *sSysPublish) failTelegramMediaFallbackJob(ctx context.Context, job tele
 		return err
 	}
 	if isTelegramMediaSourceUnavailableError(cause) {
-		queued, repairErr := s.AIOpsQueueBotMediaRepair(ctx, []int64{job.ProfileId}, 1)
+		repairErr := s.enqueueProfileMediaRepairTask(ctx, job.ProfileId, job.Id)
 		if repairErr != nil {
 			g.Log().Warningf(ctx, "TG媒体源失效后提交Bot媒体恢复失败 jobId:%d profileId:%d err:%+v", job.Id, job.ProfileId, repairErr)
-		} else if len(queued) > 0 {
+		} else {
 			s.appendTelegramJobLog(ctx, job, "media_repair", "queued", "Telegram临时媒体地址失效，已提交媒体持久化恢复并重新上架")
 			g.Log().Infof(ctx, "TG媒体源失效后已提交Bot媒体恢复 jobId:%d profileId:%d", job.Id, job.ProfileId)
 		}

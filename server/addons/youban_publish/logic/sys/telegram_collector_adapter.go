@@ -903,9 +903,10 @@ func (p *publishCollectorAccountMediaProvider) StoreMedia(ctx context.Context, t
 	if err != nil {
 		return nil, err
 	}
-	if cached, ok, cacheErr := lookupTelegramCollectorMediaCache(ctx, task.Media.Type, md5Value, mediaSize, mimeType); cacheErr != nil {
+	forceRefresh := strings.HasPrefix(task.TaskKey, "profile-media-refresh:")
+	if cached, ok, cacheErr := lookupTelegramCollectorMediaCache(ctx, task.Media.Type, md5Value, mediaSize, mimeType); !forceRefresh && cacheErr != nil {
 		return nil, cacheErr
-	} else if ok {
+	} else if !forceRefresh && ok {
 		task.Media.FileURL = telegramCollectorMediaCacheURL(cached)
 		task.Media.StoragePath = cached.StoragePath
 		task.Media.FileMD5 = md5Value

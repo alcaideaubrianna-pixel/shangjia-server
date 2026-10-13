@@ -12,6 +12,8 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/hibiken/asynq"
+
+	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
 const terminalPublishRecoveryDelay = 10 * time.Minute
@@ -113,26 +115,34 @@ func (s *sSysPublish) handleTerminalPublishRecoveryTask(ctx context.Context, tas
 		}
 		return err
 	}
-	operationNo := terminalPublishRecoveryOperationNo(job)
-	count, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("operation_no", operationNo).Where("profile_id", job.ProfileId).Where("channel_id", job.ChannelId).Count()
+	transitioned, err := s.transitionTelegramJob(ctx, telegramJobTransition{
+		JobId: job.Id,
+		From:  []string{telegramJobStatusFailed},
+		To:    telegramJobStatusPending,
+		Additional: g.Map{
+			"retry_count":         0,
+			"error_message":       "",
+			"last_dispatch_error": "",
+		},
+	})
 	if err != nil {
-		return gerror.Wrap(err, "检查终态失败补偿任务幂等状态失败")
+		observeTelegramPublishRecovery(ctx, "failed")
+		return gerror.Wrap(err, "恢复终态失败任务失败")
 	}
-	if count > 0 {
+	if !transitioned {
 		observeTelegramPublishRecovery(ctx, "idempotent")
 		return nil
 	}
-	if err = s.submitProfilePublish(ctx, job.ProfileId, job.TenantId, job.AccountId, 0, operationNo, []int64{job.ChannelId}, false); err != nil {
-		if errors.Is(err, errPublishProfileUnavailable) {
-			observeTelegramPublishRecovery(ctx, "unavailable")
-			return nil
-		}
+	if err = s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusPending); err != nil {
 		observeTelegramPublishRecovery(ctx, "failed")
-		return gerror.Wrap(err, "重新提交终态失败资料失败")
+		return err
+	}
+	if err = s.enqueueTelegramJob(ctx, job.Id, 0); err != nil {
+		observeTelegramPublishRecovery(ctx, "failed")
+		return gerror.Wrap(err, "重新提交终态失败任务失败")
 	}
 	observeTelegramPublishRecovery(ctx, "requeued")
-	g.Log().Info(ctx, "终态失败资料已自动重新上架", g.Map{"sourceJobId": job.Id, "profileId": job.ProfileId, "channelId": job.ChannelId, "operationNo": operationNo})
+	g.Log().Info(ctx, "终态失败任务已从原发送阶段恢复", g.Map{"jobId": job.Id, "profileId": job.ProfileId, "channelId": job.ChannelId, "sendPhase": job.SendPhase})
 	return nil
 }
 

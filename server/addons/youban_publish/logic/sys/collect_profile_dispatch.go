@@ -77,7 +77,7 @@ func (s *sSysPublish) resumeCollectProfileDispatch(ctx context.Context, dispatch
 			From: []string{telegramJobStatusFailed},
 			To:   telegramJobStatusPending,
 			Additional: g.Map{
-				"retry_count": 0, "error_message": "", "last_dispatch_error": "", "send_phase": "",
+				"retry_count": 0, "error_message": "", "last_dispatch_error": "",
 			},
 		}); txErr != nil {
 			return gerror.Wrap(txErr, "恢复采集TG发送任务失败")

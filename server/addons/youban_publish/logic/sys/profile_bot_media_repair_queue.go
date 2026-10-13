@@ -54,11 +54,15 @@ func (s *sSysPublish) AIOpsQueueBotMediaRepair(ctx context.Context, profileIds [
 }
 
 func (s *sSysPublish) enqueueBotMediaRepairTask(ctx context.Context, profileId int64) error {
+	return s.enqueueProfileMediaRepairTask(ctx, profileId, 0)
+}
+
+func (s *sSysPublish) enqueueProfileMediaRepairTask(ctx context.Context, profileId, jobId int64) error {
 	client, err := s.telegramQueueClient(ctx)
 	if err != nil {
 		return err
 	}
-	body, err := json.Marshal(botMediaRepairQueuePayload{ProfileId: profileId})
+	body, err := json.Marshal(botMediaRepairQueuePayload{ProfileId: profileId, JobId: jobId})
 	if err != nil {
 		return err
 	}
@@ -79,6 +83,9 @@ func (s *sSysPublish) handleBotMediaRepairTask(ctx context.Context, task *asynq.
 		return gerror.New("Bot媒体恢复任务缺少profileId")
 	}
 	result, err := s.rebuildBotProfileMedia(ctx, []int64{payload.ProfileId}, false)
+	if err == nil && result.Recoverable == 0 {
+		err = s.rebuildCollectedProfileMedia(ctx, payload.ProfileId, payload.JobId)
+	}
 	if err != nil {
 		if isBotMediaPermanentlyUnavailableError(err) {
 			if quarantineErr := s.quarantineProfileWithUnavailableMedia(ctx, payload.ProfileId, err.Error()); quarantineErr != nil {
@@ -96,7 +103,11 @@ func (s *sSysPublish) handleBotMediaRepairTask(ctx context.Context, task *asynq.
 	if !complete {
 		return gerror.Newf("Bot资料媒体恢复后仍不完整 profileId:%d", payload.ProfileId)
 	}
-	if result.Requeued > 0 {
+	if payload.JobId > 0 {
+		if err = s.resumeRepairedTelegramJob(ctx, payload.JobId); err != nil {
+			return err
+		}
+	} else if result.Requeued > 0 {
 		if _, err = s.AIOpsRepublishProfiles(ctx, &sysin.ProfileStatusInp{Ids: []int64{payload.ProfileId}, Status: 1}); err != nil {
 			return err
 		}
