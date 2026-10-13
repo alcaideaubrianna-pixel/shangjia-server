@@ -71,6 +71,19 @@ func TestTelegramAutoDeleteTaskResult(t *testing.T) {
 	}
 }
 
+func TestTelegramAutoDeleteFallbackTaskKey(t *testing.T) {
+	taskKey := telegramAutoDeleteFallbackTaskKey(338, 522499)
+	channelID, messageID, ok := parseTelegramAutoDeleteFallbackTaskKey(taskKey)
+	if !ok || channelID != 338 || messageID != 522499 {
+		t.Fatalf("parseTelegramAutoDeleteFallbackTaskKey(%q) = %d, %d, %t", taskKey, channelID, messageID, ok)
+	}
+	for _, invalid := range []string{"", "message-delete-fallback:1", "auto-delete-fallback:338", "auto-delete-fallback:0:1", "auto-delete-fallback:338:bad"} {
+		if _, _, valid := parseTelegramAutoDeleteFallbackTaskKey(invalid); valid {
+			t.Fatalf("invalid task key accepted: %q", invalid)
+		}
+	}
+}
+
 func TestChannelBotPermissionSummaryRequiresSendAndDelete(t *testing.T) {
 	raw := encodeChannelBotPermissionStates([]*sysin.ChannelCheckBotModel{{
 		BotId:             1,
