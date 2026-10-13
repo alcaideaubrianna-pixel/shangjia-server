@@ -874,13 +874,16 @@ func (s *sSysPublish) tgRepairChannelById(ctx context.Context, tenantId int64, c
 }
 
 func (s *sSysPublish) ensureTgRepairJob(ctx context.Context, task gdb.Record, channel tgMessageRepairChannel, targetChatId string) (int64, error) {
+	profileId := task["profile_id"].Int64()
+	operationNo := tgMessageRepairOperationNo(profileId, channel.Id)
 	var existing struct {
 		Id int64 `json:"id"`
 	}
 	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Fields("id").
-		Where("profile_id", task["profile_id"].Int64()).
+		Where("profile_id", profileId).
 		Where("channel_id", channel.Id).
+		Where("operation_no", operationNo).
 		Scan(&existing); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			err = nil
@@ -889,11 +892,6 @@ func (s *sSysPublish) ensureTgRepairJob(ctx context.Context, task gdb.Record, ch
 		}
 	}
 	if existing.Id > 0 {
-		now := gtime.Now()
-		data := telegramJobStateUpdateData("sent", 0, now)
-		data["error_message"] = ""
-		data["sent_at"] = now
-		_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", existing.Id).Data(data).Update()
 		return existing.Id, nil
 	}
 	botId := firstPositiveId(decodeBotIds(channel.BotIdJson))
@@ -905,15 +903,20 @@ func (s *sSysPublish) ensureTgRepairJob(ctx context.Context, task gdb.Record, ch
 	data["tenant_id"] = task["tenant_id"].Int64()
 	data["merchant_id"] = task["tenant_id"].Int64()
 	data["account_id"] = task["account_id"].Int64()
-	data["profile_id"] = task["profile_id"].Int64()
+	data["profile_id"] = profileId
 	data["channel_id"] = channel.Id
 	data["bot_id"] = botId
 	data["target_chat_id"] = targetChatId
+	data["operation_no"] = operationNo
 	data["retry_count"] = 0
 	data["error_message"] = ""
 	data["sent_at"] = now
 	data["created_at"] = now
 	return g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Data(data).InsertAndGetId()
+}
+
+func tgMessageRepairOperationNo(profileId int64, channelId int64) string {
+	return fmt.Sprintf("message_repair:%d:%d", profileId, channelId)
 }
 
 func (s *sSysPublish) ensureTgRepairMessage(ctx context.Context, task gdb.Record, jobId int64, item tgMessageRepairCacheRow) error {
