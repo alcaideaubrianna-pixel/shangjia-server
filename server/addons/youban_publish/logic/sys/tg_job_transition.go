@@ -2,10 +2,12 @@ package sys
 
 import (
 	"context"
+	"database/sql"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -35,10 +37,12 @@ var telegramJobAllowedTransitions = map[string]map[string]struct{}{
 		telegramJobStatusSent: {}, telegramJobStatusFailed: {}, telegramJobStatusSuperseded: {},
 	},
 	telegramJobStatusConfirming: {
-		telegramJobStatusRetryWait: {}, telegramJobStatusSent: {}, telegramJobStatusFailed: {}, telegramJobStatusSuperseded: {},
+		telegramJobStatusSending: {}, telegramJobStatusRetryWait: {}, telegramJobStatusSent: {},
+		telegramJobStatusFailed: {}, telegramJobStatusSuperseded: {},
 	},
 	telegramJobStatusFailed: {
-		telegramJobStatusRetryWait: {}, telegramJobStatusSent: {}, telegramJobStatusSuperseded: {},
+		telegramJobStatusPending: {}, telegramJobStatusSending: {}, telegramJobStatusRetryWait: {},
+		telegramJobStatusSent: {}, telegramJobStatusSuperseded: {},
 	},
 	telegramJobStatusSent: {
 		telegramJobStatusSuperseded: {},
@@ -46,12 +50,14 @@ var telegramJobAllowedTransitions = map[string]map[string]struct{}{
 }
 
 type telegramJobTransition struct {
-	JobId        int64
-	From         []string
-	To           string
-	RetryDelay   time.Duration
-	ErrorMessage string
-	Additional   g.Map
+	JobId         int64
+	From          []string
+	To            string
+	RetryDelay    time.Duration
+	ErrorMessage  string
+	Additional    g.Map
+	SendPhases    []string
+	UpdatedBefore *gtime.Time
 }
 
 func validateTelegramJobTransition(from []string, to string) error {
@@ -84,8 +90,9 @@ func (s *sSysPublish) transitionTelegramJob(ctx context.Context, in telegramJobT
 	if err != nil {
 		return false, err
 	}
-	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("id", in.JobId).WhereIn("status", from).Data(data).Update()
+	model := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("id", in.JobId).WhereIn("status", from)
+	result, err := transitionTelegramJobModel(model, in, data)
 	if err != nil {
 		return false, gerror.Wrapf(err, "TG任务状态迁移失败：%s -> %s", strings.Join(from, ","), in.To)
 	}
@@ -94,6 +101,59 @@ func (s *sSysPublish) transitionTelegramJob(ctx context.Context, in telegramJobT
 		return false, gerror.Wrap(err, "确认TG任务状态迁移结果失败")
 	}
 	return affected > 0, nil
+}
+
+func (s *sSysPublish) transitionTelegramJobTx(ctx context.Context, tx gdb.TX, in telegramJobTransition) (bool, error) {
+	if in.JobId <= 0 {
+		return false, gerror.New("TG任务ID不能为空")
+	}
+	from, data, err := telegramJobTransitionUpdate(in)
+	if err != nil {
+		return false, err
+	}
+	model := tx.Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("id", in.JobId).WhereIn("status", from)
+	result, err := transitionTelegramJobModel(model, in, data)
+	if err != nil {
+		return false, gerror.Wrapf(err, "事务内TG任务状态迁移失败：%s -> %s", strings.Join(from, ","), in.To)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, gerror.Wrap(err, "确认事务内TG任务状态迁移结果失败")
+	}
+	return affected > 0, nil
+}
+
+func (s *sSysPublish) transitionTelegramJobsTx(ctx context.Context, tx gdb.TX, jobIds []int64, in telegramJobTransition) (int64, error) {
+	jobIds = uniqueIds(jobIds)
+	if len(jobIds) == 0 {
+		return 0, nil
+	}
+	from, data, err := telegramJobTransitionUpdate(in)
+	if err != nil {
+		return 0, err
+	}
+	model := tx.Model(publishTgJobTable).Safe().Ctx(ctx).
+		WhereIn("id", jobIds).WhereIn("status", from)
+	result, err := transitionTelegramJobModel(model, in, data)
+	if err != nil {
+		return 0, gerror.Wrapf(err, "事务内批量TG任务状态迁移失败：%s -> %s", strings.Join(from, ","), in.To)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, gerror.Wrap(err, "确认事务内批量TG任务状态迁移结果失败")
+	}
+	return affected, nil
+}
+
+func transitionTelegramJobModel(model *gdb.Model, in telegramJobTransition, data g.Map) (sql.Result, error) {
+	if len(in.SendPhases) > 0 {
+		model = model.WhereIn("send_phase", in.SendPhases)
+	}
+	if in.UpdatedBefore != nil {
+		model = model.WhereLTE("updated_at", in.UpdatedBefore)
+	}
+	return model.Data(data).Update()
 }
 
 func (s *sSysPublish) transitionTelegramJobs(ctx context.Context, jobIds []int64, in telegramJobTransition) (int64, error) {
@@ -105,8 +165,9 @@ func (s *sSysPublish) transitionTelegramJobs(ctx context.Context, jobIds []int64
 	if err != nil {
 		return 0, err
 	}
-	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		WhereIn("id", jobIds).WhereIn("status", from).Data(data).Update()
+	model := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		WhereIn("id", jobIds).WhereIn("status", from)
+	result, err := transitionTelegramJobModel(model, in, data)
 	if err != nil {
 		return 0, gerror.Wrapf(err, "批量TG任务状态迁移失败：%s -> %s", strings.Join(from, ","), in.To)
 	}

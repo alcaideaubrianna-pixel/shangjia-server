@@ -352,11 +352,12 @@ func (s *sSysPublish) cleanupPartialAccountMediaSend(ctx context.Context, client
 	s.appendTelegramJobLog(ctx, job, "account", "cleanup_started", fmt.Sprintf("协议号发送部分成功，开始清理 purpose:%s messages:%d error:%v", purpose, len(messages), sendErr))
 	if err := s.deletePartialAccountMessages(ctx, client, job, channel, messages); err != nil {
 		s.appendTelegramJobLog(ctx, job, "account", "cleanup_failed", err.Error())
-		_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-			Where("id", job.Id).
-			Where("status", "sending").
-			Data(g.Map{"status": "unknown", "dispatch_status": tgDispatchStatusIdle, "error_message": err.Error(), "updated_at": gtime.Now()}).
-			Update()
+		_, _ = s.transitionTelegramJob(ctx, telegramJobTransition{
+			JobId:        job.Id,
+			From:         []string{telegramJobStatusSending},
+			To:           telegramJobStatusConfirming,
+			ErrorMessage: err.Error(),
+		})
 		s.enqueueTelegramMessageDeleteFallback(ctx, job, "协议号半组消息同步清理失败", err)
 		return &telegramPartialSendCleanupRetryError{cause: gerror.Wrap(err, "协议号半组消息清理失败，等待删除兜底完成")}
 	}

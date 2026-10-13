@@ -167,8 +167,13 @@ func (s *sSysPublish) waitTelegramDeliveryWebhook(ctx context.Context, attempt t
 			if attempt.Phase == "verify" {
 				phase = telegramSendPhaseVerifyConfirmed
 			}
-			_, err := tx.Model(publishTgJobTable).Where("id", attempt.JobId).Where("status", "sending").Where("send_phase", phase).
-				Data(g.Map{"status": "failed_retry", "dispatch_status": tgDispatchStatusIdle, "next_retry_at": nil, "error_message": ""}).Update()
+			_, err := s.transitionTelegramJobTx(ctx, tx, telegramJobTransition{
+				JobId:      attempt.JobId,
+				From:       []string{telegramJobStatusSending},
+				To:         telegramJobStatusRetryWait,
+				SendPhases: []string{phase},
+				Additional: g.Map{"error_message": ""},
+			})
 			return err
 		}
 		if current.Status != telegramAttemptStatusSending && current.Status != telegramAttemptStatusWaiting {
@@ -182,8 +187,16 @@ func (s *sSysPublish) waitTelegramDeliveryWebhook(ctx context.Context, attempt t
 		if attempt.Phase == "verify" {
 			dispatchStatus = tgDispatchStatusIdle
 		}
-		_, err := tx.Model(publishTgJobTable).Where("id", attempt.JobId).Where("status", "sending").
-			Data(g.Map{"status": "unknown", "dispatch_status": dispatchStatus, "next_retry_at": deadline, "error_message": "等待Telegram Webhook确认", "updated_at": gtime.Now()}).Update()
+		_, err := s.transitionTelegramJobTx(ctx, tx, telegramJobTransition{
+			JobId:        attempt.JobId,
+			From:         []string{telegramJobStatusSending},
+			To:           telegramJobStatusConfirming,
+			ErrorMessage: "等待Telegram Webhook确认",
+			Additional: g.Map{
+				"dispatch_status": dispatchStatus,
+				"next_retry_at":   deadline,
+			},
+		})
 		return err
 	})
 	if err != nil {
@@ -548,8 +561,16 @@ func (s *sSysPublish) confirmTelegramAttemptFromWebhook(ctx context.Context, att
 			Data(g.Map{"send_phase": phase}).Update(); err != nil {
 			return err
 		}
-		if _, err := tx.Model(publishTgJobTable).Where("id", job.Id).WhereIn("status", []string{"unknown", "pending", "failed_retry", "failed"}).WhereIn("send_phase", []string{sendingPhase, phase, telegramSendPhaseDisplayConfirmed}).
-			Data(g.Map{"status": "failed_retry", "send_phase": phase, "dispatch_status": tgDispatchStatusIdle, "next_retry_at": nil, "error_message": ""}).Update(); err != nil {
+		if _, err := s.transitionTelegramJobTx(ctx, tx, telegramJobTransition{
+			JobId: job.Id,
+			From: []string{
+				telegramJobStatusConfirming, telegramJobStatusPending,
+				telegramJobStatusRetryWait, telegramJobStatusFailed,
+			},
+			To:         telegramJobStatusRetryWait,
+			SendPhases: []string{sendingPhase, phase, telegramSendPhaseDisplayConfirmed},
+			Additional: g.Map{"send_phase": phase, "error_message": ""},
+		}); err != nil {
 			return err
 		}
 		_, err := tx.Model(publishTgAttemptTable).Where("id", attempt.Id).

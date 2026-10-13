@@ -293,17 +293,15 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 		// before the account fallback starts. With no messages for this phase,
 		// it is safe to claim the job for the fallback instead of abandoning it.
 		if job.Status == "unknown" && messageCount == 0 {
-			result, updateErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-				Where("id", job.Id).Where("status", "unknown").
-				Data(g.Map{"status": "sending", "dispatch_status": tgDispatchStatusProcessing, "updated_at": gtime.Now()}).Update()
+			transitioned, updateErr := s.transitionTelegramJob(ctx, telegramJobTransition{
+				JobId: job.Id,
+				From:  []string{telegramJobStatusConfirming},
+				To:    telegramJobStatusSending,
+			})
 			if updateErr != nil {
 				return gerror.Wrap(updateErr, "恢复协议号媒体降级任务状态失败")
 			}
-			rowsAffected, rowsErr := result.RowsAffected()
-			if rowsErr != nil {
-				return gerror.Wrap(rowsErr, "确认协议号媒体降级任务状态失败")
-			}
-			if rowsAffected == 0 {
+			if !transitioned {
 				return gerror.New("协议号媒体降级任务正在被其他发送流程处理")
 			}
 			job.Status = "sending"

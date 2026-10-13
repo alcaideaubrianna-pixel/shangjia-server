@@ -394,22 +394,18 @@ func (s *sSysPublish) supersedeExpiredMessagePushPlanJobs(ctx context.Context, l
 	if len(ids) == 0 {
 		return nil
 	}
-	now := gtime.Now()
-	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		WhereIn("id", ids).
-		WhereIn("status", []string{"pending", "sending", "failed_retry", "unknown"}).
-		Data(g.Map{
-			"status":              "superseded",
-			"dispatch_status":     tgDispatchStatusDone,
-			"next_retry_at":       nil,
-			"error_message":       expiredMessagePushPlanJobMessage,
-			"last_dispatch_error": expiredMessagePushPlanJobMessage,
-			"updated_at":          now,
-		}).Update()
+	affected, err := s.transitionTelegramJobs(ctx, ids, telegramJobTransition{
+		From: []string{
+			telegramJobStatusPending, telegramJobStatusSending,
+			telegramJobStatusRetryWait, telegramJobStatusConfirming,
+		},
+		To:           telegramJobStatusSuperseded,
+		ErrorMessage: expiredMessagePushPlanJobMessage,
+		Additional:   g.Map{"last_dispatch_error": expiredMessagePushPlanJobMessage},
+	})
 	if err != nil {
 		return gerror.Wrap(err, "终止过期历史消息计划任务失败")
 	}
-	affected, _ := result.RowsAffected()
 	if affected > 0 {
 		g.Log().Infof(ctx, "已终止过期历史消息计划任务：%d条", affected)
 	}
@@ -434,32 +430,29 @@ func (s *sSysPublish) requeueStaleTelegramSendingJob(ctx context.Context, job te
 	now := gtime.Now()
 	status := "failed_retry"
 	message := "TG推送任务长时间处于发送中，已自动重新投递"
-	nextRetryAt := any(nil)
 	reconcileCount := job.ReconcileCount
 	if job.SendPhase == telegramSendPhaseDisplaySending || job.SendPhase == telegramSendPhaseVerifySending {
-		status = "unknown"
+		status = telegramJobStatusConfirming
 		message = "服务中断时TG发送结果不确定，已进入频道消息对账"
-		nextRetryAt = now.Add(telegramUnknownReconcileDelay)
 		reconcileCount = 0
 	}
-	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("id", job.Id).
-		Where("status", "sending").
-		WhereLTE("updated_at", now.Add(-telegramSendingJobRecoverAfter)).
-		Data(g.Map{
-			"status":          status,
-			"dispatch_status": tgDispatchStatusIdle,
-			"next_retry_at":   nextRetryAt,
-			"error_message":   message,
-			"reconcile_count": reconcileCount,
-			"updated_at":      now,
-		}).
-		Update()
+	retryDelay := time.Duration(0)
+	if status == telegramJobStatusConfirming {
+		retryDelay = telegramUnknownReconcileDelay
+	}
+	transitioned, err := s.transitionTelegramJob(ctx, telegramJobTransition{
+		JobId:         job.Id,
+		From:          []string{telegramJobStatusSending},
+		To:            status,
+		RetryDelay:    retryDelay,
+		ErrorMessage:  message,
+		UpdatedBefore: now.Add(-telegramSendingJobRecoverAfter),
+		Additional:    g.Map{"reconcile_count": reconcileCount},
+	})
 	if err != nil {
 		return gerror.Wrap(err, "重置卡住的TG推送任务失败")
 	}
-	affected, _ := result.RowsAffected()
-	if affected == 0 {
+	if !transitioned {
 		return nil
 	}
 	s.appendTelegramJobLog(ctx, job, "publish", status, message)

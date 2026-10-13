@@ -179,8 +179,8 @@ func (s *sSysPublish) reconcileUnknownTelegramJob(ctx context.Context, job teleg
 	}
 	message := "Telegram发送结果未确认，已停止自动重发；等待Webhook确认"
 	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Where("status", "unknown").Data(g.Map{
-		"status": "unknown", "dispatch_status": dispatchStatus,
-		"next_retry_at": nil, "error_message": message, "updated_at": gtime.Now(),
+		"dispatch_status": dispatchStatus,
+		"next_retry_at":   nil, "error_message": message, "updated_at": gtime.Now(),
 	}).Update()
 	if err != nil {
 		return gerror.Wrap(err, "迁移历史TG待对账任务失败")

@@ -60,15 +60,26 @@ func (s *sSysPublish) resumeCollectProfileDispatch(ctx context.Context, dispatch
 			}).Update(); txErr != nil {
 			return gerror.Wrap(txErr, "恢复采集分发状态失败")
 		}
-		if _, txErr := tx.Model(publishTgJobTable).Ctx(ctx).
+		jobIDValues, txErr := tx.Model(publishTgJobTable).Ctx(ctx).
+			Fields("id").
 			Where("profile_id", profileID).
 			Where("operation_no", fmt.Sprintf("collect:%d", dispatchID)).
 			Where("status", "failed").
-			Data(g.Map{
-				"status": "pending", "dispatch_status": tgDispatchStatusIdle,
-				"retry_count": 0, "error_message": "", "last_dispatch_error": "",
-				"next_retry_at": nil, "send_phase": "", "updated_at": gtime.Now(),
-			}).Update(); txErr != nil {
+			Array()
+		if txErr != nil {
+			return gerror.Wrap(txErr, "读取待恢复采集TG任务失败")
+		}
+		jobIDs := make([]int64, 0, len(jobIDValues))
+		for _, value := range jobIDValues {
+			jobIDs = append(jobIDs, value.Int64())
+		}
+		if _, txErr := s.transitionTelegramJobsTx(ctx, tx, jobIDs, telegramJobTransition{
+			From: []string{telegramJobStatusFailed},
+			To:   telegramJobStatusPending,
+			Additional: g.Map{
+				"retry_count": 0, "error_message": "", "last_dispatch_error": "", "send_phase": "",
+			},
+		}); txErr != nil {
 			return gerror.Wrap(txErr, "恢复采集TG发送任务失败")
 		}
 		return nil
