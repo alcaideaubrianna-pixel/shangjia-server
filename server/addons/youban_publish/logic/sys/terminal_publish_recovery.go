@@ -121,6 +121,7 @@ func (s *sSysPublish) handleTerminalPublishRecoveryTask(ctx context.Context, tas
 		To:    telegramJobStatusPending,
 		Additional: g.Map{
 			"retry_count":         0,
+			"next_retry_at":       nil,
 			"error_message":       "",
 			"last_dispatch_error": "",
 		},

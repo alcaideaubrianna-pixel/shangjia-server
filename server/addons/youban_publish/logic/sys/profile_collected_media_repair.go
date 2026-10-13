@@ -145,7 +145,7 @@ func (s *sSysPublish) resumeRepairedTelegramJob(ctx context.Context, jobID int64
 	}
 	transitioned, err := s.transitionTelegramJob(ctx, telegramJobTransition{
 		JobId: job.Id, From: []string{telegramJobStatusFailed}, To: telegramJobStatusPending,
-		Additional: g.Map{"retry_count": 0, "error_message": "", "last_dispatch_error": ""},
+		Additional: g.Map{"retry_count": 0, "next_retry_at": nil, "error_message": "", "last_dispatch_error": ""},
 	})
 	if err != nil || !transitioned {
 		return err
