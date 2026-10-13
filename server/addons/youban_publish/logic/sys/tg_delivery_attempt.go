@@ -152,6 +152,10 @@ func (s *sSysPublish) confirmTelegramDeliveryAttempt(ctx context.Context, attemp
 }
 
 func (s *sSysPublish) waitTelegramDeliveryWebhook(ctx context.Context, attempt telegramDeliveryAttempt, cause error) error {
+	dispatchStatus := tgDispatchStatusProcessing
+	if attempt.Phase == "verify" {
+		dispatchStatus = tgDispatchStatusIdle
+	}
 	deadline := gtime.Now().Add(telegramAttemptWebhookWait)
 	result, err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
 		Where("id", attempt.Id).Where("status", telegramAttemptStatusSending).
@@ -169,7 +173,7 @@ func (s *sSysPublish) waitTelegramDeliveryWebhook(ctx context.Context, attempt t
 	}
 	_, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id", attempt.JobId).Where("status", "sending").
-		Data(g.Map{"status": "unknown", "dispatch_status": tgDispatchStatusProcessing, "next_retry_at": deadline, "error_message": "等待Telegram Webhook确认", "updated_at": gtime.Now()}).Update()
+		Data(g.Map{"status": "unknown", "dispatch_status": dispatchStatus, "next_retry_at": deadline, "error_message": "等待Telegram Webhook确认", "updated_at": gtime.Now()}).Update()
 	if err != nil {
 		return gerror.Wrap(err, "设置TG任务等待Webhook失败")
 	}
@@ -210,22 +214,22 @@ func (s *sSysPublish) handleTelegramAttemptTimeout(ctx context.Context, attemptI
 	if affected == 0 {
 		return nil
 	}
-	if err = s.cleanupTelegramAttemptMessages(ctx, attempt); err != nil {
-		g.Log().Warningf(ctx, "清理TG Attempt已知消息失败 attemptId:%d err:%+v", attempt.Id, err)
-	}
+	// Preserve partial confirmations so a late Webhook can complete the attempt.
 	job, err := s.telegramJobById(ctx, attempt.JobId)
 	if err != nil {
 		return err
 	}
 	phase := telegramSendPhaseCleanupConfirmed
+	dispatchStatus := tgDispatchStatusProcessing
 	if attempt.Phase == "verify" {
 		phase = telegramSendPhaseDisplayConfirmed
+		dispatchStatus = tgDispatchStatusIdle
 	}
 	message := fmt.Sprintf("Telegram发送结果未在%d秒内确认，已暂停自动重试，等待发送审计补偿", int(telegramAttemptWebhookWait/time.Second))
 	g.Log().Warningf(ctx, "TG发送结果不确定，禁止自动重发 attemptId:%d jobId:%d profileId:%d channelId:%d botId:%d chat:%s phase:%s attemptNo:%d", attempt.Id, job.Id, job.ProfileId, job.ChannelId, job.BotId, attempt.TargetChatId, attempt.Phase, attempt.AttemptNo)
 	_, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id", attempt.JobId).Where("status", "unknown").
-		Data(g.Map{"status": "unknown", "send_phase": phase, "dispatch_status": tgDispatchStatusProcessing,
+		Data(g.Map{"status": "unknown", "send_phase": phase, "dispatch_status": dispatchStatus,
 			"next_retry_at": nil,
 			"error_message": message, "updated_at": gtime.Now()}).Update()
 	if err != nil {
@@ -306,12 +310,18 @@ func (s *sSysPublish) matchTelegramDeliveryAttempt(ctx context.Context, botId in
 	}
 	chatId := normalizeTelegramChannelChatID(strconv.FormatInt(msg.Chat.ID, 10))
 	var attempts []telegramDeliveryAttempt
+	window := time.Minute
+	limit := 4
+	if telegramTextHasInternalDeliveryMarker(text) {
+		window = 24 * time.Hour
+		limit = 1000
+	}
 	if err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
 		Where("bot_id", botId).Where("target_chat_id", chatId).
 		WhereIn("status", []string{telegramAttemptStatusSending, telegramAttemptStatusWaiting, telegramAttemptStatusRetryWait}).
 		Where("status <> ? OR webhook_deadline IS NOT NULL", telegramAttemptStatusRetryWait).
-		WhereGTE("created_at", gtime.Now().Add(-time.Minute)).
-		OrderDesc("id").Limit(4).Scan(&attempts); err != nil {
+		WhereGTE("created_at", gtime.Now().Add(-window)).
+		OrderDesc("id").Limit(limit).Scan(&attempts); err != nil {
 		g.Log().Warningf(ctx, "匹配TG Webhook Attempt失败 bot:%d chat:%s message:%d err:%+v", botId, chatId, msg.ID, err)
 		return
 	}
@@ -335,12 +345,12 @@ func (s *sSysPublish) matchTelegramDeliveryAttempt(ctx context.Context, botId in
 			break
 		}
 		candidate := &attempts[i]
-		if candidate.Phase == "display" && strings.Contains(text, telegramAttemptMarker(candidate.AttemptToken)) {
+		if strings.Contains(text, telegramAttemptMarker(candidate.AttemptToken)) {
 			matched = candidate
 			break
 		}
 	}
-	if matched == nil {
+	if matched == nil && !telegramTextHasInternalDeliveryMarker(text) {
 		matched = s.matchTelegramVerifyAttempt(ctx, attempts, msg)
 	}
 	if matched == nil {

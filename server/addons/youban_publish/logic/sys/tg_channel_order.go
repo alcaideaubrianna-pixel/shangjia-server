@@ -40,6 +40,7 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 	}
 	mod := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).Unscoped().
 		Where("j.id <> ?", job.Id).
+		Where(telegramWebhookDetachedJobSQL("j.")).
 		Where(`(
 			(j.status = 'sending' AND j.updated_at > ?) OR
 			(j.status IN ('pending', 'failed_retry', 'unknown') AND j.dispatch_status = ? AND j.dispatched_at > ?) OR
@@ -137,6 +138,7 @@ func (s *sSysPublish) telegramChannelHasDispatchCapacity(ctx context.Context, jo
 		Where("tenant_id", job.TenantId).
 		Where("channel_id", job.ChannelId).
 		Where("id <> ?", job.Id).
+		Where(telegramWebhookDetachedJobSQL("")).
 		Where(`(
 			status = 'sending' OR
 			(status IN ('pending', 'failed_retry', 'unknown') AND dispatch_status IN (?, ?))
@@ -185,4 +187,10 @@ func (s *sSysPublish) postponeTelegramJobForCollectPushPause(ctx context.Context
 		g.Log().Warningf(ctx, "采集推送暂停后唤醒频道下一条TG任务失败 jobId:%d channelId:%d err:%+v", job.Id, job.ChannelId, wakeErr)
 	}
 	return nil
+}
+
+// Verification uncertainty is reconciled by Webhook without occupying the
+// channel sender. Display uncertainty still preserves the ordering barrier.
+func telegramWebhookDetachedJobSQL(prefix string) string {
+	return fmt.Sprintf("NOT (%sstatus = 'unknown' AND COALESCE(%ssend_phase, '') IN ('display_confirmed', 'verify_sending'))", prefix, prefix)
 }

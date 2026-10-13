@@ -17,6 +17,7 @@ func (s *sSysPublish) collectTelegramJobHasPreviousActive(ctx context.Context, j
 	}
 	mod := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
 		Where("j.id <> ?", job.Id).
+		Where(telegramWebhookDetachedJobSQL("j.")).
 		Where("j.collect_source_id", job.CollectSourceId).
 		Where("j.collect_source_chat_id", strings.TrimSpace(job.CollectSourceChatId)).
 		Where("j.collect_source_message_id < ?", job.CollectSourceMessageId).

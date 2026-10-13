@@ -170,9 +170,13 @@ func (s *sSysPublish) reconcileUnknownTelegramJob(ctx context.Context, job teleg
 	// A timeout is an ambiguous Telegram result: the request may have been
 	// accepted even though the HTTP response was lost. Never turn this state
 	// back into failed_retry, because doing so can send the same media twice.
-	message := "Telegram发送结果未确认，已停止自动重发；等待Webhook或人工对账"
+	dispatchStatus := tgDispatchStatusProcessing
+	if telegramSendPhaseHasDisplay(job.SendPhase) {
+		dispatchStatus = tgDispatchStatusIdle
+	}
+	message := "Telegram发送结果未确认，已停止自动重发；等待Webhook确认"
 	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Where("status", "unknown").Data(g.Map{
-		"status": "unknown", "dispatch_status": tgDispatchStatusProcessing,
+		"status": "unknown", "dispatch_status": dispatchStatus,
 		"next_retry_at": nil, "error_message": message, "updated_at": gtime.Now(),
 	}).Update()
 	if err != nil {
