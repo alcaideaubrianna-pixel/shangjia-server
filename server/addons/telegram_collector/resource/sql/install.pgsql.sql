@@ -140,6 +140,7 @@ CREATE TABLE IF NOT EXISTS "hg_tg_collector_account_task" (
 
 CREATE INDEX IF NOT EXISTS "idx_tg_collector_account_task_claim" ON "hg_tg_collector_account_task" ("account_id", "status", "priority", "next_run_at", "lease_until", "id");
 CREATE INDEX IF NOT EXISTS "idx_tg_collector_account_task_recovery" ON "hg_tg_collector_account_task" ("status", "lease_until", "next_run_at", "id");
+CREATE INDEX IF NOT EXISTS "idx_tg_collector_account_task_pending_expiry" ON "hg_tg_collector_account_task" ("task_type", "status", "updated_at", "id");
 
 ALTER TABLE "hg_tg_collector_account_task" ADD COLUMN IF NOT EXISTS "history_task_id" BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE "hg_tg_collector_account_task" ADD COLUMN IF NOT EXISTS "media_owner_account_id" BIGINT NOT NULL DEFAULT 0;

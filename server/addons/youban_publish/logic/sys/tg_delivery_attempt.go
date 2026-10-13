@@ -187,17 +187,13 @@ func (s *sSysPublish) waitTelegramDeliveryWebhook(ctx context.Context, attempt t
 			Data(g.Map{"status": telegramAttemptStatusWaiting, "webhook_deadline": deadline, "error_message": cause.Error(), "updated_at": gtime.Now()}).Update(); err != nil {
 			return err
 		}
-		dispatchStatus := tgDispatchStatusProcessing
-		if attempt.Phase == "verify" {
-			dispatchStatus = tgDispatchStatusIdle
-		}
 		_, err := s.transitionTelegramJobTx(ctx, tx, telegramJobTransition{
 			JobId:        attempt.JobId,
 			From:         []string{telegramJobStatusSending},
 			To:           telegramJobStatusConfirming,
 			ErrorMessage: "等待Telegram Webhook确认",
 			Additional: g.Map{
-				"dispatch_status": dispatchStatus,
+				"dispatch_status": telegramAttemptWaitingDispatchStatus(),
 				"next_retry_at":   deadline,
 			},
 		})
@@ -214,10 +210,26 @@ func (s *sSysPublish) waitTelegramDeliveryWebhook(ctx context.Context, attempt t
 	return err
 }
 
+func telegramAttemptWaitingDispatchStatus() string {
+	return tgDispatchStatusProcessing
+}
+
 func (s *sSysPublish) telegramAttemptById(ctx context.Context, attemptId int64) (telegramDeliveryAttempt, error) {
 	var attempt telegramDeliveryAttempt
 	err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).Where("id", attemptId).Scan(&attempt)
 	return attempt, err
+}
+
+func (s *sSysPublish) activeTelegramDeliveryAttempt(ctx context.Context, jobID int64, phase string) (telegramDeliveryAttempt, error) {
+	var attempt telegramDeliveryAttempt
+	err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
+		Where("job_id", jobID).Where("phase", phase).Where("chunk_index", 0).
+		WhereIn("status", []string{telegramAttemptStatusSending, telegramAttemptStatusWaiting, telegramAttemptStatusRetryWait}).
+		OrderDesc("id").Limit(1).Scan(&attempt)
+	if err != nil {
+		return attempt, gerror.Wrap(err, "读取TG活动发送Attempt失败")
+	}
+	return attempt, nil
 }
 
 func (s *sSysPublish) telegramJobHasWaitingAttempt(ctx context.Context, jobId int64) (bool, error) {
@@ -252,6 +264,7 @@ func (s *sSysPublish) handleTelegramAttemptTimeout(ctx context.Context, attemptI
 			return nil
 		}
 		g.Log().Warningf(ctx, "提交验证视频协议号对账失败 attemptId:%d jobId:%d err:%+v", attempt.Id, job.Id, err)
+		return s.failTelegramMediaFallbackJob(ctx, job, err)
 	}
 	// Preserve partial confirmations so a late Webhook can still complete the attempt.
 	phase := telegramSendPhaseCleanupConfirmed

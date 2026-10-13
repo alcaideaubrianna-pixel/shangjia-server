@@ -24,6 +24,11 @@ func TestPublishAccountTaskHandlersRegistered(t *testing.T) {
 			t.Fatalf("Telegram account task handler is not registered: %s", taskType)
 		}
 	}
+	for _, taskType := range []string{collectorin.AccountTaskTypeMessageReconcile, collectorin.AccountTaskTypeMessageMediaFallback} {
+		if collectorservice.AccountTaskFailureHandlerFor(taskType) == nil {
+			t.Fatalf("Telegram account task failure handler is not registered: %s", taskType)
+		}
+	}
 }
 
 func TestAccountTaskFinalAttempt(t *testing.T) {
@@ -97,6 +102,52 @@ func TestParseMessageReconcileTaskKey(t *testing.T) {
 		}
 		if err != nil || jobID != test.jobID || attemptID != test.attemptID {
 			t.Fatalf("parseMessageReconcileTaskKey(%q) = (%d, %d, %v)", test.key, jobID, attemptID, err)
+		}
+	}
+}
+
+func TestParseMessageMediaFallbackTaskKey(t *testing.T) {
+	for _, test := range []struct {
+		key     string
+		jobID   int64
+		purpose string
+		wantErr bool
+	}{
+		{key: "message-media-fallback:12:verify", jobID: 12, purpose: "verify"},
+		{key: "message-media-fallback:13:display", jobID: 13, purpose: "display"},
+		{key: "message-media-fallback:0:verify", wantErr: true},
+		{key: "message-media-fallback:12:other", wantErr: true},
+		{key: "message-media-fallback:12", wantErr: true},
+	} {
+		jobID, purpose, err := parseMessageMediaFallbackTaskKey(test.key)
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("parseMessageMediaFallbackTaskKey(%q) expected error", test.key)
+			}
+			continue
+		}
+		if err != nil || jobID != test.jobID || purpose != test.purpose {
+			t.Fatalf("parseMessageMediaFallbackTaskKey(%q) = (%d, %q, %v)", test.key, jobID, purpose, err)
+		}
+	}
+}
+
+func TestAccountFallbackPhaseConfirmedPreventsDuplicateSend(t *testing.T) {
+	tests := []struct {
+		phase   string
+		purpose string
+		want    bool
+	}{
+		{phase: telegramSendPhaseDisplayConfirmed, purpose: "display", want: true},
+		{phase: telegramSendPhaseVerifySending, purpose: "display", want: true},
+		{phase: telegramSendPhaseVerifyConfirmed, purpose: "display", want: true},
+		{phase: telegramSendPhaseVerifyConfirmed, purpose: "verify", want: true},
+		{phase: telegramSendPhaseDisplayConfirmed, purpose: "verify", want: false},
+		{phase: telegramSendPhaseDisplaySending, purpose: "display", want: false},
+	}
+	for _, test := range tests {
+		if got := accountFallbackPhaseConfirmed(test.phase, test.purpose); got != test.want {
+			t.Fatalf("accountFallbackPhaseConfirmed(%q, %q) = %v, want %v", test.phase, test.purpose, got, test.want)
 		}
 	}
 }

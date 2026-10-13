@@ -144,6 +144,66 @@ func TestAccountTaskPersistenceIntegration(t *testing.T) {
 		t.Fatalf("recovery status=%s err=%v", recoveryRow[columns.Status].String(), err)
 	}
 
+	crashedID, err := service.Submit(ctx, &sysin.AccountTaskSubmit{
+		TenantID: seed, AccountID: seed, TaskType: sysin.AccountTaskTypeHistoryPage,
+		TaskKey: fmt.Sprintf("integration-crashed-final:%d", seed), Priority: 2, HistoryTaskID: seed, MaxAttempts: 1,
+	})
+	if err != nil {
+		t.Fatalf("submit final-attempt recovery task: %v", err)
+	}
+	crashedTasks, err := service.Claim(ctx, lease, 1, time.Millisecond)
+	if err != nil || len(crashedTasks) != 1 || crashedTasks[0].ID != crashedID {
+		t.Fatalf("claim final-attempt recovery tasks=%+v err=%v", crashedTasks, err)
+	}
+	time.Sleep(5 * time.Millisecond)
+	if _, err = service.RecoverExpired(ctx, 10); err != nil {
+		t.Fatalf("recover final-attempt task: %v", err)
+	}
+	crashed, err := service.Get(ctx, crashedID)
+	if err != nil || crashed.Status != sysin.AccountTaskStatusFinalizing {
+		t.Fatalf("crashed final-attempt task=%+v err=%v", crashed, err)
+	}
+
+	oldPendingID, err := service.Submit(ctx, &sysin.AccountTaskSubmit{
+		TenantID: seed, AccountID: seed, TaskType: sysin.AccountTaskTypeMessageMediaFallback,
+		TaskKey: fmt.Sprintf("message-media-fallback:%d:verify", seed), Priority: 100, MaxAttempts: 3,
+	})
+	if err != nil {
+		t.Fatalf("submit old pending task: %v", err)
+	}
+	_, err = g.DB().Exec(ctx, "UPDATE "+dao.TgCollectorAccountTask.Table()+" SET "+columns.UpdatedAt+"=? WHERE "+columns.Id+"=?", time.Now().Add(-time.Hour), oldPendingID)
+	if err != nil {
+		t.Fatalf("age pending task: %v", err)
+	}
+	expired, err := service.ExpirePending(ctx, sysin.AccountTaskTypeMessageMediaFallback, time.Now().Add(-45*time.Minute), 10)
+	if err != nil || expired != 1 {
+		t.Fatalf("expire pending count=%d err=%v", expired, err)
+	}
+	oldPending, err := service.Get(ctx, oldPendingID)
+	if err != nil || oldPending.Status != sysin.AccountTaskStatusFinalizing {
+		t.Fatalf("expired pending task=%+v err=%v", oldPending, err)
+	}
+
+	finalizingID, err := dao.TgCollectorAccountTask.Ctx(ctx).Data(g.Map{
+		columns.TenantId: seed, columns.AccountId: seed, columns.TaskType: sysin.AccountTaskTypeMessageReconcile,
+		columns.TaskKey: fmt.Sprintf("message-reconcile:%d:%d", seed, seed), columns.Status: sysin.AccountTaskStatusFinalizing,
+		columns.MaxAttempts: 3, columns.ErrorMessage: "send failed",
+	}).InsertAndGetId()
+	if err != nil {
+		t.Fatalf("insert finalizing task: %v", err)
+	}
+	finalizing, err := service.ListFinalizing(ctx, 10)
+	if err != nil || len(finalizing) != 1 || finalizing[0].ID != finalizingID {
+		t.Fatalf("list finalizing tasks=%+v err=%v", finalizing, err)
+	}
+	if err = service.FinalizeFailure(ctx, finalizingID); err != nil {
+		t.Fatalf("finalize failed task: %v", err)
+	}
+	finalized, err := service.Get(ctx, finalizingID)
+	if err != nil || finalized.Status != sysin.AccountTaskStatusDead {
+		t.Fatalf("finalized task=%+v err=%v", finalized, err)
+	}
+
 	t.Cleanup(func() {
 		_, _ = dao.TgCollectorAccountTask.Ctx(ctx).Where(columns.TenantId, seed).Delete()
 		_, _ = g.DB().Exec(ctx, "SELECT 1")

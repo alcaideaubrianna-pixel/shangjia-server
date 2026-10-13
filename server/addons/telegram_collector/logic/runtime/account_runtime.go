@@ -135,6 +135,22 @@ func (r *accountRuntime) recoverAndObserveAccountTasks(ctx context.Context) {
 	} else if recovered > 0 {
 		g.Log().Infof(ctx, "已恢复超时Telegram账号任务 count:%d", recovered)
 	}
+	for taskType, policy := range collectorservice.AccountTaskPolicies() {
+		expired, expireErr := tasks.ExpirePending(ctx, taskType, time.Now().Add(-policy.PendingTTL), 100)
+		if expireErr != nil {
+			g.Log().Warningf(ctx, "终止超过业务期限的Telegram账号任务失败 type:%s err:%+v", taskType, expireErr)
+		} else if expired > 0 {
+			g.Log().Warningf(ctx, "Telegram账号任务超过业务期限，已进入失败收尾 type:%s count:%d ttl:%s", taskType, expired, policy.PendingTTL)
+		}
+	}
+	finalizing, err := tasks.ListFinalizing(ctx, 100)
+	if err != nil {
+		g.Log().Warningf(ctx, "读取待收尾Telegram账号任务失败：%+v", err)
+	} else {
+		for _, task := range finalizing {
+			finalizeAccountTaskFailure(ctx, task)
+		}
+	}
 	stats, err := tasks.ActiveStatusStats(ctx)
 	if err != nil {
 		g.Log().Warningf(ctx, "统计Telegram账号任务状态失败：%+v", err)

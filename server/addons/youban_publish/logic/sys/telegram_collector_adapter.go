@@ -40,6 +40,30 @@ type publishCollectorAccountTaskHandler struct{ publish *sSysPublish }
 
 type publishCollectorAccountMediaProvider struct{ publish *sSysPublish }
 
+func (h *publishCollectorAccountTaskHandler) HandleAccountTaskFailure(ctx context.Context, task *collectorin.AccountTask, cause error) error {
+	if h == nil || h.publish == nil || task == nil {
+		return nil
+	}
+	var jobID int64
+	var err error
+	switch task.TaskType {
+	case collectorin.AccountTaskTypeMessageReconcile:
+		jobID, _, err = parseMessageReconcileTaskKey(task.TaskKey)
+	case collectorin.AccountTaskTypeMessageMediaFallback:
+		jobID, _, err = parseMessageMediaFallbackTaskKey(task.TaskKey)
+	default:
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	job, err := h.publish.telegramJobById(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	return h.publish.failTelegramMediaFallbackJob(ctx, job, cause)
+}
+
 func (h *publishCollectorAccountTaskHandler) HandleAccountTaskCompletion(ctx context.Context, task *collectorin.AccountTask, result *collectorin.AccountMediaDownloadResult) error {
 	if h == nil || h.publish == nil || task == nil || result == nil || task.TaskType != collectorin.AccountTaskTypeMediaDownload {
 		return nil
@@ -259,35 +283,22 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 			g.Log().Warningf(ctx, "协议号媒体降级任务上下文结束 taskId:%d tgAccountId:%d totalDuration:%s err:%+v", task.ID, task.AccountID, time.Since(startedAt).Round(time.Millisecond), err)
 		}
 	}()
-	const prefix = "message-media-fallback:"
-	parts := strings.Split(strings.TrimPrefix(task.TaskKey, prefix), ":")
-	if len(parts) != 2 || !strings.HasPrefix(task.TaskKey, prefix) {
-		return gerror.New("媒体降级发送账号任务参数无效")
-	}
-	jobID, err = strconv.ParseInt(parts[0], 10, 64)
-	if err != nil || jobID <= 0 || (parts[1] != "display" && parts[1] != "verify") {
-		return gerror.New("媒体降级发送账号任务参数无效")
+	jobID, purpose, err := parseMessageMediaFallbackTaskKey(task.TaskKey)
+	if err != nil {
+		return err
 	}
 	job, err := s.telegramJobById(ctx, jobID)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if err == nil || !accountTaskFinalAttempt(task) {
-			return
-		}
-		if failErr := s.failTelegramMediaFallbackJob(ctx, job, err); failErr != nil {
-			g.Log().Warningf(ctx, "协议号媒体任务最终失败后释放频道失败 taskId:%d jobId:%d err:%+v", task.ID, job.Id, failErr)
-		}
-	}()
-	stage("读取任务与Job", "purpose", parts[1], "jobStatus", job.Status)
+	stage("读取任务与Job", "purpose", purpose, "jobStatus", job.Status)
 	if job.Status != "sending" {
-		messageCount, countErr := s.telegramJobSentMessageCount(ctx, job.Id, parts[1])
+		messageCount, countErr := s.telegramJobSentMessageCount(ctx, job.Id, purpose)
 		if countErr != nil {
 			return countErr
 		}
 		if mediaFallbackTaskCanSkip(job.Status, messageCount) {
-			g.Log().Infof(ctx, "协议号媒体降级任务幂等完成 taskId:%d jobId:%d tgAccountId:%d purpose:%s messageCount:%d", task.ID, job.Id, task.AccountID, parts[1], messageCount)
+			g.Log().Infof(ctx, "协议号媒体降级任务幂等完成 taskId:%d jobId:%d tgAccountId:%d purpose:%s messageCount:%d", task.ID, job.Id, task.AccountID, purpose, messageCount)
 			return nil
 		}
 		// Reconciliation may conservatively move a Bot-failed job to unknown
@@ -306,16 +317,16 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 				return gerror.New("协议号媒体降级任务正在被其他发送流程处理")
 			}
 			job.Status = "sending"
-			g.Log().Infof(ctx, "协议号媒体降级任务从未知状态恢复发送 taskId:%d jobId:%d purpose:%s", task.ID, job.Id, parts[1])
+			g.Log().Infof(ctx, "协议号媒体降级任务从未知状态恢复发送 taskId:%d jobId:%d purpose:%s", task.ID, job.Id, purpose)
 		}
 		if job.Status != "sending" {
-			stateErr := gerror.Newf("协议号媒体降级任务状态异常，拒绝静默完成：jobId=%d status=%s sendPhase=%s purpose=%s messageCount=%d", job.Id, job.Status, job.SendPhase, parts[1], messageCount)
+			stateErr := gerror.Newf("协议号媒体降级任务状态异常，拒绝静默完成：jobId=%d status=%s sendPhase=%s purpose=%s messageCount=%d", job.Id, job.Status, job.SendPhase, purpose, messageCount)
 			g.Log().Warningf(ctx, "协议号媒体降级任务拒绝静默完成 taskId:%d tgAccountId:%d err:%+v", task.ID, task.AccountID, stateErr)
 			s.appendTelegramJobLog(ctx, job, "account_fallback", "failed", stateErr.Error())
 			return stateErr
 		}
 	}
-	g.Log().Infof(ctx, "协议号媒体降级任务开始执行 taskId:%d jobId:%d tgAccountId:%d purpose:%s attempt:%d/%d", task.ID, job.Id, task.AccountID, parts[1], task.AttemptCount, task.MaxAttempts)
+	g.Log().Infof(ctx, "协议号媒体降级任务开始执行 taskId:%d jobId:%d tgAccountId:%d purpose:%s attempt:%d/%d", task.ID, job.Id, task.AccountID, purpose, task.AttemptCount, task.MaxAttempts)
 	channel, err := s.messagePushChannelFromJob(ctx, job)
 	if err != nil {
 		return err
@@ -324,11 +335,11 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 		return gerror.New("媒体降级发送账号任务与目标频道账号不一致")
 	}
 	stage("读取频道")
-	media, err := s.telegramJobMedia(ctx, job, parts[1])
+	media, err := s.telegramJobMedia(ctx, job, purpose)
 	if err != nil {
 		return err
 	}
-	if parts[1] == "display" {
+	if purpose == "display" {
 		media, err = s.selectTelegramDisplayMediaForTenant(ctx, job, media)
 		if err != nil {
 			return err
@@ -336,7 +347,7 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 	}
 	stage("读取并选择媒体", "mediaCount", len(media))
 	var verifyMedia []*telegramMediaItem
-	if parts[1] == "display" {
+	if purpose == "display" {
 		verifyMedia, err = s.telegramJobMedia(ctx, job, "verify")
 		if err != nil {
 			return err
@@ -344,7 +355,7 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 	}
 	stage("读取验证媒体", "verifyMediaCount", len(verifyMedia))
 	caption := ""
-	if parts[1] == "display" {
+	if purpose == "display" {
 		caption, err = s.telegramJobCaption(ctx, job)
 		if err != nil {
 			return err
@@ -355,47 +366,112 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 		return err
 	}
 	stage("媒体内容保护与缩略图准备", "mediaCount", len(media), "verifyMediaCount", len(verifyMedia))
-	caption = telegramCaptionWithJobMarker(caption, job.Id, parts[1])
-	peer, err := messagePushInputPeer(channel)
-	if err != nil {
-		return err
-	}
-	messages, err := s.sendMessageTemplateWithTgClient(ctx, client, peer, caption, media, nil, task.AccountID, "")
-	if err != nil {
-		if cleanupErr := s.cleanupPartialAccountMediaSend(ctx, client, job, channel, parts[1], messages, err); cleanupErr != nil {
-			return cleanupErr
+	var messages []*telegramSentMessage
+	phaseConfirmed := accountFallbackPhaseConfirmed(job.SendPhase, purpose)
+	if !phaseConfirmed {
+		messages, err = s.sendAccountFallbackPhase(ctx, client, channel, job, task.AccountID, purpose, caption, media)
+		if err != nil {
+			return err
 		}
-		return gerror.Wrap(err, "协议号媒体降级发送失败")
+		stage("发送并确认媒体", "purpose", purpose, "messageCount", len(messages))
+	} else {
+		stage("跳过已确认媒体阶段", "purpose", purpose, "sendPhase", job.SendPhase)
 	}
-	stage("发送展示媒体", "messageCount", len(messages))
-	if err = s.confirmTelegramMediaPhase(ctx, job, "account", parts[1], media, messages); err != nil {
-		return err
-	}
-	stage("保存展示消息")
-	if parts[1] == "display" {
+	if purpose == "display" {
 		if len(verifyMedia) == 0 {
 			g.Log().Infof(ctx, "协议号媒体降级任务发送成功 taskId:%d jobId:%d tgAccountId:%d displayMessages:%d verifyMessages:0", task.ID, job.Id, task.AccountID, len(messages))
 			return s.finalizeTelegramMediaDelivery(ctx, job, false, true)
 		}
-		// 验证资料必须保持纯媒体，不附加对账 marker，避免干扰公群采集器。
-		verifyCaption := ""
-		verifyMessages, err := s.sendMessageTemplateWithTgClient(ctx, client, peer, verifyCaption, verifyMedia, nil, task.AccountID, "")
-		if err != nil {
-			if cleanupErr := s.cleanupPartialAccountMediaSend(ctx, client, job, channel, "verify", verifyMessages, err); cleanupErr != nil {
-				return cleanupErr
+		var verifyMessages []*telegramSentMessage
+		if job.SendPhase != telegramSendPhaseVerifyConfirmed {
+			verifyMessages, err = s.sendAccountFallbackPhase(ctx, client, channel, job, task.AccountID, "verify", "", verifyMedia)
+			if err != nil {
+				return err
 			}
-			return gerror.Wrap(err, "协议号验证媒体降级发送失败")
+			stage("发送并确认验证媒体", "messageCount", len(verifyMessages))
 		}
-		stage("发送验证媒体", "messageCount", len(verifyMessages))
-		if err = s.confirmTelegramMediaPhase(ctx, job, "account", "verify", verifyMedia, verifyMessages); err != nil {
-			return err
-		}
-		stage("保存验证消息")
 		g.Log().Infof(ctx, "协议号媒体降级任务发送成功 taskId:%d jobId:%d tgAccountId:%d displayMessages:%d verifyMessages:%d", task.ID, job.Id, task.AccountID, len(messages), len(verifyMessages))
 		return s.finalizeTelegramMediaDelivery(ctx, job, true, true)
 	}
 	g.Log().Infof(ctx, "协议号验证媒体降级任务发送成功 taskId:%d jobId:%d tgAccountId:%d verifyMessages:%d", task.ID, job.Id, task.AccountID, len(messages))
 	return s.finalizeTelegramMediaDelivery(ctx, job, true, true)
+}
+
+func accountFallbackPhaseConfirmed(sendPhase, purpose string) bool {
+	return purpose == "display" && telegramSendPhaseHasDisplay(sendPhase) ||
+		purpose == "verify" && sendPhase == telegramSendPhaseVerifyConfirmed
+}
+
+func (s *sSysPublish) sendAccountFallbackPhase(ctx context.Context, client *telegram.Client, channel *messagePushChannel, job telegramJobRecord, accountID int64, purpose, caption string, media []*telegramMediaItem) ([]*telegramSentMessage, error) {
+	attempt, messages, err := s.prepareAccountFallbackAttempt(ctx, client, channel, job, purpose, len(media))
+	if err != nil {
+		return nil, err
+	}
+	if len(messages) == 0 {
+		peer, peerErr := messagePushInputPeer(channel)
+		if peerErr != nil {
+			return nil, peerErr
+		}
+		caption = telegramCaptionWithJobMarker(caption, job.Id, purpose) + telegramAttemptMarker(attempt.AttemptToken)
+		messages, err = s.sendMessageTemplateWithTgClient(ctx, client, peer, caption, media, nil, accountID, "")
+		if err != nil {
+			if cleanupErr := s.cleanupPartialAccountMediaSend(ctx, client, job, channel, purpose, messages, err); cleanupErr != nil {
+				return nil, cleanupErr
+			}
+			return nil, gerror.Wrap(err, "协议号媒体降级发送失败")
+		}
+	}
+	bindAccountFallbackMessagesToMedia(messages, media)
+	if err = s.confirmTelegramMediaPhase(ctx, job, "account", purpose, media, messages); err != nil {
+		return nil, err
+	}
+	if err = s.confirmTelegramDeliveryAttempt(ctx, attempt, messages, true); err != nil {
+		return nil, telegramDeliveryUncertainError(err)
+	}
+	return messages, nil
+}
+
+func (s *sSysPublish) prepareAccountFallbackAttempt(ctx context.Context, client *telegram.Client, channel *messagePushChannel, job telegramJobRecord, purpose string, expectedCount int) (telegramDeliveryAttempt, []*telegramSentMessage, error) {
+	attempt, err := s.activeTelegramDeliveryAttempt(ctx, job.Id, purpose)
+	if err != nil {
+		return attempt, nil, err
+	}
+	if attempt.Id <= 0 {
+		attempt, err = s.beginTelegramDeliveryAttempt(ctx, job, purpose, expectedCount)
+		if err != nil {
+			return attempt, nil, err
+		}
+	}
+	messages, err := findTelegramAttemptMessages(ctx, client, channel, attempt)
+	if err != nil {
+		return attempt, nil, err
+	}
+	if len(messages) > 0 {
+		g.Log().Infof(ctx, "协议号发送前对账命中已有消息，跳过重复发送 jobId:%d attemptId:%d purpose:%s messages:%d", job.Id, attempt.Id, purpose, len(messages))
+	}
+	return attempt, messages, nil
+}
+
+func bindAccountFallbackMessagesToMedia(messages []*telegramSentMessage, media []*telegramMediaItem) {
+	for index, message := range messages {
+		if message == nil || message.MediaId > 0 || index >= len(media) || media[index] == nil {
+			continue
+		}
+		message.MediaId = media[index].Id
+	}
+}
+
+func parseMessageMediaFallbackTaskKey(taskKey string) (int64, string, error) {
+	const prefix = "message-media-fallback:"
+	parts := strings.Split(strings.TrimPrefix(taskKey, prefix), ":")
+	if !strings.HasPrefix(taskKey, prefix) || len(parts) != 2 {
+		return 0, "", gerror.New("媒体降级发送账号任务参数无效")
+	}
+	jobID, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || jobID <= 0 || (parts[1] != "display" && parts[1] != "verify") {
+		return 0, "", gerror.New("媒体降级发送账号任务参数无效")
+	}
+	return jobID, parts[1], nil
 }
 
 func validateTelegramMediaSendResult(purpose string, media []*telegramMediaItem, messages []*telegramSentMessage) error {
@@ -450,14 +526,6 @@ func (s *sSysPublish) handleMessageReconcileAccountTask(ctx context.Context, cli
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if err == nil || !accountTaskFinalAttempt(task) {
-			return
-		}
-		if failErr := s.failTelegramMediaFallbackJob(ctx, job, err); failErr != nil {
-			g.Log().Warningf(ctx, "协议号对账最终失败后释放频道失败 taskId:%d jobId:%d err:%+v", task.ID, job.Id, failErr)
-		}
-	}()
 	attempt, err := s.telegramAttemptById(ctx, attemptID)
 	if err != nil || attempt.Id <= 0 || attempt.JobId != job.Id || attempt.Phase != "verify" {
 		return gerror.New("验证视频对账Attempt不存在或不匹配")

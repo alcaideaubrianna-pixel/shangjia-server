@@ -37,6 +37,9 @@ type IAccountTasks interface {
 	Complete(ctx context.Context, taskID int64, lease *sysin.AccountLease, result *sysin.AccountMediaDownloadResult) error
 	Fail(ctx context.Context, in *sysin.AccountTaskFailure) error
 	RecoverExpired(ctx context.Context, limit int) (int, error)
+	ExpirePending(ctx context.Context, taskType string, before time.Time, limit int) (int, error)
+	ListFinalizing(ctx context.Context, limit int) ([]*sysin.AccountTask, error)
+	FinalizeFailure(ctx context.Context, taskID int64) error
 	ActiveStatusStats(ctx context.Context) ([]sysin.AccountTaskStatusStat, error)
 }
 
@@ -48,6 +51,14 @@ type AccountTaskHandler interface {
 // task is marked completed. Returning an error keeps the task retryable.
 type AccountTaskCompletionHandler interface {
 	HandleAccountTaskCompletion(ctx context.Context, task *sysin.AccountTask, result *sysin.AccountMediaDownloadResult) error
+}
+
+type AccountTaskFailureHandler interface {
+	HandleAccountTaskFailure(ctx context.Context, task *sysin.AccountTask, cause error) error
+}
+
+type AccountTaskPolicy struct {
+	PendingTTL time.Duration
 }
 
 type AccountMediaProvider interface {
@@ -107,6 +118,8 @@ var localDeliveryHandler DeliveryHandler
 var localAccountTasks IAccountTasks
 var accountTaskHandlers = map[string]AccountTaskHandler{}
 var accountTaskCompletionHandlers = map[string]AccountTaskCompletionHandler{}
+var accountTaskFailureHandlers = map[string]AccountTaskFailureHandler{}
+var accountTaskPolicies = map[string]AccountTaskPolicy{}
 var localAccountRuntime IAccountRuntime
 var localAccountRuntimeProvider AccountRuntimeProvider
 var localAccountMediaProvider AccountMediaProvider
@@ -152,6 +165,30 @@ func RegisterAccountTaskCompletionHandler(taskType string, handler AccountTaskCo
 
 func AccountTaskCompletionHandlerFor(taskType string) AccountTaskCompletionHandler {
 	return accountTaskCompletionHandlers[taskType]
+}
+
+func RegisterAccountTaskFailureHandler(taskType string, handler AccountTaskFailureHandler) {
+	if taskType != "" && handler != nil {
+		accountTaskFailureHandlers[taskType] = handler
+	}
+}
+
+func AccountTaskFailureHandlerFor(taskType string) AccountTaskFailureHandler {
+	return accountTaskFailureHandlers[taskType]
+}
+
+func RegisterAccountTaskPolicy(taskType string, policy AccountTaskPolicy) {
+	if taskType != "" && policy.PendingTTL > 0 {
+		accountTaskPolicies[taskType] = policy
+	}
+}
+
+func AccountTaskPolicies() map[string]AccountTaskPolicy {
+	policies := make(map[string]AccountTaskPolicy, len(accountTaskPolicies))
+	for taskType, policy := range accountTaskPolicies {
+		policies[taskType] = policy
+	}
+	return policies
 }
 
 func AccountMedia() AccountMediaProvider              { return localAccountMediaProvider }

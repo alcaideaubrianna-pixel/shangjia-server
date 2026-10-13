@@ -644,16 +644,24 @@ func (s *sSysPublish) failTelegramMediaFallbackJob(ctx context.Context, job tele
 		return gerror.Wrap(err, "终止协议号媒体失败任务失败")
 	}
 	if !transitioned {
-		return nil
+		status, statusErr := s.telegramJobCurrentStatus(ctx, job.Id)
+		if statusErr != nil {
+			return statusErr
+		}
+		if status != telegramJobStatusFailed {
+			return nil
+		}
 	}
-	observeTelegramPublishFailure(ctx, "media_fallback")
-	if !isTelegramMediaSourceUnavailableError(cause) {
-		s.enqueueTerminalPublishRecoveryBestEffort(ctx, job, cause)
+	if transitioned {
+		observeTelegramPublishFailure(ctx, "media_fallback")
+		if !isTelegramMediaSourceUnavailableError(cause) {
+			s.enqueueTerminalPublishRecoveryBestEffort(ctx, job, cause)
+		}
+		if recordErr := s.upsertPublishJobRecord(ctx, job, "failed", message); recordErr != nil {
+			g.Log().Warningf(ctx, "更新协议号媒体失败记录失败 jobId:%d err:%+v", job.Id, recordErr)
+		}
+		s.appendTelegramJobLog(ctx, job, "account_fallback", "failed", message)
 	}
-	if recordErr := s.upsertPublishJobRecord(ctx, job, "failed", message); recordErr != nil {
-		g.Log().Warningf(ctx, "更新协议号媒体失败记录失败 jobId:%d err:%+v", job.Id, recordErr)
-	}
-	s.appendTelegramJobLog(ctx, job, "account_fallback", "failed", message)
 	if job.CollectEventId > 0 {
 		_ = s.markCollectDispatchFailedByProfile(ctx, job.ProfileId, job.CollectEventId, message)
 	}

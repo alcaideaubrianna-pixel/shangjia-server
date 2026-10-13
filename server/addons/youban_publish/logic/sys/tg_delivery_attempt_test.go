@@ -2,9 +2,14 @@ package sys
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 	"time"
+
+	_ "github.com/gogf/gf/contrib/drivers/pgsql/v2"
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 )
 
 func TestTelegramMediaSendTimeoutsFitPublishTaskDeadline(t *testing.T) {
@@ -56,6 +61,49 @@ func TestTelegramAttemptMarkerStableAndDistinct(t *testing.T) {
 func TestTelegramWebhookDetachedJobSQLKeepsOrderingBarrier(t *testing.T) {
 	if got := telegramWebhookDetachedJobSQL("j."); got != "1=1" {
 		t.Fatalf("telegramWebhookDetachedJobSQL() = %q, want ordering barrier predicate", got)
+	}
+}
+
+func TestTelegramAttemptWaitingKeepsChannelOrderingBarrier(t *testing.T) {
+	for _, phase := range []string{"display", "verify"} {
+		if got := telegramAttemptWaitingDispatchStatus(); got != tgDispatchStatusProcessing {
+			t.Fatalf("phase %s dispatch status = %q, want processing", phase, got)
+		}
+	}
+}
+
+func TestTelegramUnknownProcessingBlocksNextChannelJobIntegration(t *testing.T) {
+	if os.Getenv("YOUBAN_PUBLISH_INTEGRATION") != "1" {
+		t.Skip("set YOUBAN_PUBLISH_INTEGRATION=1 to run local PostgreSQL integration test")
+	}
+	ctx := context.Background()
+	seed := time.Now().UnixNano()
+	now := gtime.Now()
+	olderID, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Data(g.Map{
+		"operation_no": "ordering-old", "tenant_id": seed, "channel_id": seed,
+		"status": telegramJobStatusConfirming, "dispatch_status": tgDispatchStatusProcessing,
+		"dispatched_at": now, "created_at": now, "updated_at": now,
+	}).InsertAndGetId()
+	if err != nil {
+		t.Fatalf("insert earlier uncertain job: %v", err)
+	}
+	time.Sleep(time.Millisecond)
+	newerID, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Data(g.Map{
+		"operation_no": "ordering-new", "tenant_id": seed, "channel_id": seed,
+		"status": telegramJobStatusPending, "dispatch_status": tgDispatchStatusIdle,
+		"created_at": gtime.Now(), "updated_at": gtime.Now(),
+	}).InsertAndGetId()
+	if err != nil {
+		t.Fatalf("insert later pending job: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).WhereIn("id", []int64{olderID, newerID}).Delete()
+	})
+	blocked, err := new(sSysPublish).telegramChannelHasEarlierActiveJob(ctx, telegramJobRecord{
+		Id: newerID, TenantId: seed, ChannelId: seed, CreatedAt: gtime.Now(),
+	})
+	if err != nil || !blocked {
+		t.Fatalf("earlier uncertain job must block next channel job: blocked=%v err=%v", blocked, err)
 	}
 }
 
