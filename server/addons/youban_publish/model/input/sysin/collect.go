@@ -376,9 +376,7 @@ type IntroFeeChannelRuleItem struct {
 	Configured      bool        `json:"configured"`
 	Blacklisted     bool        `json:"blacklisted"`
 	LastSeenAt      *gtime.Time `json:"lastSeenAt"`
-	ChannelStatus   string      `json:"channelStatus"`
-	BotStatus       string      `json:"botStatus"`
-	AccountStatus   string      `json:"accountStatus"`
+	BlockReason     string      `json:"blockReason"`
 	ProfileCount    int         `json:"profileCount"`
 	UpdatedAt       *gtime.Time `json:"updatedAt"`
 }

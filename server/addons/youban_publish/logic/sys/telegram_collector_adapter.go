@@ -2,8 +2,10 @@ package sys
 
 import (
 	"context"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"net/url"
@@ -847,7 +849,7 @@ func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, sourc
 		Id    int64  `json:"id"`
 		Title string `json:"title"`
 	}
-	if err := pdao.YoubanPublishCollectChannel.Ctx(ctx).Fields("id,title").Where("tenant_id", tenantID).WhereIn("telegram_chat_id", tgChannelCacheLookupIds(chatID)).Scan(&channel); err != nil {
+	if err := pdao.YoubanPublishCollectChannel.Ctx(ctx).Fields("id,title").Where("tenant_id", tenantID).WhereIn("telegram_chat_id", tgChannelCacheLookupIds(chatID)).Scan(&channel); !collectOptionalRecordScanSucceeded(err) {
 		return false, err
 	}
 	if channel.Id <= 0 {
@@ -865,27 +867,50 @@ func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, sourc
 		Id             int64  `json:"id"`
 		CollectEnabled int    `json:"collectEnabled"`
 		Status         string `json:"status"`
+		ApprovalStatus string `json:"approvalStatus"`
 	}
-	if err := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Fields("id,collect_enabled,status").Where("tenant_id", tenantID).Where("account_id", accountID).Where("channel_id", channel.Id).Scan(&relation); err != nil {
+	if err := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Fields("id,collect_enabled,status,approval_status").Where("tenant_id", tenantID).Where("account_id", accountID).Where("channel_id", channel.Id).Scan(&relation); !collectOptionalRecordScanSucceeded(err) {
 		return false, gerror.Wrap(err, "读取BOT采集频道审批状态失败")
 	}
 	if relation.Id > 0 {
-		return relation.CollectEnabled == 1 && relation.Status == sysin.CollectAccountChannelEnabled, nil
+		return botCollectChannelRelationEnabled(relation.CollectEnabled, relation.Status, relation.ApprovalStatus), nil
 	}
 	relationID, err := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Data(pdo.YoubanPublishCollectAccountChannel{
 		TenantId: tenantID, AccountId: accountID, ChannelId: channel.Id, SourceId: source["id"].Int64(),
-		CollectEnabled: 0, Status: sysin.CollectAccountChannelPending, ApprovalStatus: "pending",
+		CollectEnabled: 1, Status: sysin.CollectAccountChannelEnabled, ApprovalStatus: "approved", ApprovedAt: now,
 	}).InsertAndGetId()
 	if err != nil {
+		// A concurrent delivery may have created the relation; respect its decision.
+		lookupErr := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Fields("id,collect_enabled,status,approval_status").Where("tenant_id", tenantID).Where("account_id", accountID).Where("channel_id", channel.Id).Scan(&relation)
+		if lookupErr == nil && relation.Id > 0 {
+			return botCollectChannelRelationEnabled(relation.CollectEnabled, relation.Status, relation.ApprovalStatus), nil
+		}
 		return false, gerror.Wrap(err, "创建BOT采集频道审批记录失败")
 	}
 	title := firstNonEmpty(strings.TrimSpace(channel.Title), chatID)
-	text := "发现新的 BOT 采集频道\n频道：" + html.EscapeString(title) + "\n频道 ID：" + html.EscapeString(chatID) + "\n当前状态：待管理员确认"
+	text := "发现新的 BOT 采集频道\n频道：" + html.EscapeString(title) + "\n频道 ID：" + html.EscapeString(chatID) + "\n当前状态：默认允许采集"
 	buttons := [][]botsysin.NotifyButton{{{Label: "允许采集", Data: fmt.Sprintf("cm:channelapprove:%d", relationID)}, {Label: "拒绝采集", Data: fmt.Sprintf("cm:channelreject:%d", relationID)}}}
 	if notifyErr := botService.SysBot().NotifySuperAdminsWithButtons(ctx, botID, "collect_source", text, buttons); notifyErr != nil {
 		g.Log().Warningf(ctx, "通知BOT采集频道审批失败 relationId:%d err:%+v", relationID, notifyErr)
 	}
-	return false, nil
+	return true, nil
+}
+
+func collectOptionalRecordScanSucceeded(err error) bool {
+	return err == nil || errors.Is(err, sql.ErrNoRows)
+}
+
+func botCollectChannelRelationEnabled(collectEnabled int, status, approvalStatus string) bool {
+	status = strings.ToLower(strings.TrimSpace(status))
+	approvalStatus = strings.ToLower(strings.TrimSpace(approvalStatus))
+	if status == sysin.CollectAccountChannelDisabled || approvalStatus == "rejected" {
+		return false
+	}
+	// Missing and legacy pending relations follow the default-enabled policy.
+	if status == "" || status == sysin.CollectAccountChannelPending {
+		return true
+	}
+	return collectEnabled == 1 && (status == sysin.CollectAccountChannelEnabled || status == "approved")
 }
 
 func (s *sSysPublish) ingestCollectorAccountDelivery(ctx context.Context, delivery *collectorin.CollectorDelivery) error {

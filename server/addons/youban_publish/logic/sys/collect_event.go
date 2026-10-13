@@ -381,11 +381,14 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		var channelRelation struct {
 			CollectEnabled int    `json:"collectEnabled"`
 			Status         string `json:"status"`
+			ApprovalStatus string `json:"approvalStatus"`
 		}
 		if relationErr := g.DB().Model("hg_youban_publish_collect_account_channel").Ctx(ctx).
-			Fields("collect_enabled,status").Where("tenant_id", tenantId).Where("account_id", accountId).
-			Where("channel_id", channelID).WhereNull("deleted_at").Scan(&channelRelation); relationErr == nil && channelRelation.Status != "" {
-			if channelRelation.CollectEnabled != 1 || channelRelation.Status != sysin.CollectAccountChannelEnabled {
+			Fields("collect_enabled,status,approval_status").Where("tenant_id", tenantId).Where("account_id", accountId).
+			Where("channel_id", channelID).WhereNull("deleted_at").Scan(&channelRelation); !collectOptionalRecordScanSucceeded(relationErr) {
+			return gerror.Wrap(relationErr, "读取频道采集状态失败")
+		} else {
+			if !botCollectChannelRelationEnabled(channelRelation.CollectEnabled, channelRelation.Status, channelRelation.ApprovalStatus) {
 				return s.ignoreCollectEvent(ctx, eventId, "采集频道未启用或机器人已移除", "source")
 			}
 		}
