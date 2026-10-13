@@ -122,6 +122,9 @@ func (s *sSysPublish) rebuildCollectedProfileMedia(ctx context.Context, profileI
 		}).Update(); err != nil {
 			return gerror.Wrap(err, "回写资料媒体失败")
 		}
+		if err = s.enqueueMediaProcess(ctx, target["id"].Int64(), 0); err != nil {
+			return gerror.Wrap(err, "提交恢复媒体处理任务失败")
+		}
 		recovered++
 	}
 	if recovered == 0 {
