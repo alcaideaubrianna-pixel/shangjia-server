@@ -15,6 +15,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/util/guid"
 
+	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/hgrds/lock"
 )
 
@@ -230,22 +231,39 @@ func (s *sSysPublish) handleTelegramAttemptTimeout(ctx context.Context, attemptI
 		return err
 	}
 	phase := telegramSendPhaseCleanupConfirmed
-	dispatchStatus := tgDispatchStatusProcessing
 	if attempt.Phase == "verify" {
 		phase = telegramSendPhaseDisplayConfirmed
-		dispatchStatus = tgDispatchStatusIdle
 	}
-	message := fmt.Sprintf("Telegram发送结果未在%d秒内确认，已暂停自动重试，等待发送审计补偿", int(telegramAttemptWebhookWait/time.Second))
+	message := fmt.Sprintf("Telegram发送结果未在%d秒内确认，已停止自动重试，请人工核对频道消息", int(telegramAttemptWebhookWait/time.Second))
 	g.Log().Warningf(ctx, "TG发送结果不确定，禁止自动重发 attemptId:%d jobId:%d profileId:%d channelId:%d botId:%d chat:%s phase:%s attemptNo:%d", attempt.Id, job.Id, job.ProfileId, job.ChannelId, job.BotId, attempt.TargetChatId, attempt.Phase, attempt.AttemptNo)
-	_, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+	result, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id", attempt.JobId).Where("status", "unknown").
-		Data(g.Map{"status": "unknown", "send_phase": phase, "dispatch_status": dispatchStatus,
+		Data(g.Map{"status": "failed", "send_phase": phase, "dispatch_status": tgDispatchStatusDone,
 			"next_retry_at": nil,
 			"error_message": message, "updated_at": gtime.Now()}).Update()
 	if err != nil {
 		return gerror.Wrap(err, "恢复TG Attempt超时任务失败")
 	}
-	return nil
+	affected, err = result.RowsAffected()
+	if err != nil {
+		return gerror.Wrap(err, "确认TG Attempt超时任务结果失败")
+	}
+	if affected == 0 {
+		return nil
+	}
+	job.Status = "failed"
+	job.ErrorMessage = message
+	if recordErr := s.upsertPublishJobRecord(ctx, job, "failed", message); recordErr != nil {
+		g.Log().Warningf(ctx, "同步TG Attempt超时发布记录失败 jobId:%d err:%+v", job.Id, recordErr)
+	}
+	s.appendTelegramJobLog(ctx, job, "reconcile", "failed", message)
+	if job.CollectEventId > 0 {
+		_ = s.markCollectDispatchFailedByProfile(ctx, job.ProfileId, job.CollectEventId, message)
+	}
+	if err = s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusFailed); err != nil {
+		return err
+	}
+	return s.wakeNextTelegramChannelJob(ctx, job)
 }
 
 func (s *sSysPublish) cleanupTelegramAttemptMessages(ctx context.Context, attempt telegramDeliveryAttempt) error {
@@ -531,7 +549,7 @@ func (s *sSysPublish) confirmTelegramAttemptFromWebhook(ctx context.Context, att
 			Data(g.Map{"send_phase": phase}).Update(); err != nil {
 			return err
 		}
-		if _, err := tx.Model(publishTgJobTable).Where("id", job.Id).WhereIn("status", []string{"unknown", "pending", "failed_retry"}).WhereIn("send_phase", []string{sendingPhase, phase, telegramSendPhaseDisplayConfirmed}).
+		if _, err := tx.Model(publishTgJobTable).Where("id", job.Id).WhereIn("status", []string{"unknown", "pending", "failed_retry", "failed"}).WhereIn("send_phase", []string{sendingPhase, phase, telegramSendPhaseDisplayConfirmed}).
 			Data(g.Map{"status": "failed_retry", "send_phase": phase, "dispatch_status": tgDispatchStatusIdle, "next_retry_at": nil, "error_message": ""}).Update(); err != nil {
 			return err
 		}

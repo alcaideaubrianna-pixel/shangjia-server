@@ -98,6 +98,45 @@ func (s *sSysPublish) upsertPublishJobRecord(ctx context.Context, job telegramJo
 	return nil
 }
 
+func publishRecordStatusFromJob(status string) string {
+	switch strings.TrimSpace(status) {
+	case "sent":
+		return "success"
+	case "pending", "sending", "failed_retry", "failed", "superseded", "unknown":
+		return strings.TrimSpace(status)
+	default:
+		return "pending"
+	}
+}
+
+// reconcilePublishJobRecords repairs the denormalized operator-facing record
+// when a job reached a terminal state through recovery or replacement paths.
+func (s *sSysPublish) reconcilePublishJobRecords(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		limit = 500
+	}
+	var jobs []telegramJobRecord
+	err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
+		InnerJoin(publishSuccessRecordTable+" r", "r.job_id=j.id").
+		Fields("j.id,j.task_id,j.operation_no,j.tenant_id,j.account_id,j.profile_id,j.channel_id,j.bot_id,j.target_chat_id,j.status,j.error_message").
+		Where("(j.status='sent' AND r.status<>'success') OR (j.status IN ('failed','superseded','unknown') AND r.status<>j.status)").
+		OrderAsc("j.updated_at").Limit(limit).Scan(&jobs)
+	if err != nil {
+		return gerror.Wrap(err, "读取待修复发布记录失败")
+	}
+	for _, job := range jobs {
+		status := publishRecordStatusFromJob(job.Status)
+		message := strings.TrimSpace(job.ErrorMessage)
+		if job.Status == "sent" {
+			message = s.publishSuccessRecordMessage(ctx, job)
+		}
+		if err = s.upsertPublishJobRecord(ctx, job, status, message); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func isFullPushActiveRecord(action string, status string) bool {
 	return action == publishSuccessTypeFull && (status == "pending" || status == "sending")
 }
@@ -207,6 +246,10 @@ func publishJobRecordMessage(action string, status string) string {
 		return "TG资料发送失败，等待重试"
 	case "failed":
 		return "TG资料发送失败"
+	case "unknown":
+		return "TG发送结果待人工确认"
+	case "superseded":
+		return "TG任务已被新操作替换"
 	case "success", "sent":
 		return publishSuccessRecordMessage(action)
 	default:

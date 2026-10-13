@@ -13,14 +13,25 @@ func (s *sSysPublish) deleteTelegramJobMessagesForResubmit(ctx context.Context, 
 }
 
 func (s *sSysPublish) markTelegramJobSuperseded(ctx context.Context, jobId int64) error {
+	job, err := s.telegramJobById(ctx, jobId)
+	if err != nil {
+		return err
+	}
 	now := gtime.Now()
-	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id", jobId).
 		Data(telegramJobStateUpdateData("superseded", 0, now)).Update()
 	if err != nil {
 		return gerror.Wrap(err, "废弃TG推送任务失败")
 	}
-	return nil
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return gerror.Wrap(err, "确认TG推送任务废弃结果失败")
+	}
+	if affected == 0 {
+		return nil
+	}
+	return s.upsertPublishJobRecord(ctx, job, "superseded", "")
 }
 
 func (s *sSysPublish) supersedeTelegramJobAndCompleteOperation(ctx context.Context, job telegramJobRecord) error {

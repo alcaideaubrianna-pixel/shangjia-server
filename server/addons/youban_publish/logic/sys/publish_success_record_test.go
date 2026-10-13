@@ -43,6 +43,33 @@ func TestBoundPublishSuccessRecordMessage(t *testing.T) {
 	}
 }
 
+func TestPublishRecordStatusFromJob(t *testing.T) {
+	tests := map[string]string{
+		"sent":         "success",
+		"pending":      "pending",
+		"sending":      "sending",
+		"failed_retry": "failed_retry",
+		"failed":       "failed",
+		"superseded":   "superseded",
+		"unknown":      "unknown",
+		"unexpected":   "pending",
+	}
+	for input, want := range tests {
+		if got := publishRecordStatusFromJob(input); got != want {
+			t.Fatalf("publishRecordStatusFromJob(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestPublishJobRecordMessageTerminalStates(t *testing.T) {
+	if got := publishJobRecordMessage(publishSuccessTypeCollect, "superseded"); got != "TG任务已被新操作替换" {
+		t.Fatalf("superseded message = %q", got)
+	}
+	if got := publishJobRecordMessage(publishSuccessTypeCollect, "unknown"); got != "TG发送结果待人工确认" {
+		t.Fatalf("unknown message = %q", got)
+	}
+}
+
 func TestIsFullPushActiveRecord(t *testing.T) {
 	tests := []struct {
 		name   string
