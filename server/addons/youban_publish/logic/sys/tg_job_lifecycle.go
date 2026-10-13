@@ -5,7 +5,6 @@ import (
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
-	"github.com/gogf/gf/v2/os/gtime"
 )
 
 func (s *sSysPublish) deleteTelegramJobMessagesForResubmit(ctx context.Context, job telegramResubmitJob) error {
@@ -17,18 +16,18 @@ func (s *sSysPublish) markTelegramJobSuperseded(ctx context.Context, jobId int64
 	if err != nil {
 		return err
 	}
-	now := gtime.Now()
-	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("id", jobId).
-		Data(telegramJobStateUpdateData("superseded", 0, now)).Update()
+	transitioned, err := s.transitionTelegramJob(ctx, telegramJobTransition{
+		JobId: jobId,
+		From: []string{
+			telegramJobStatusPending, telegramJobStatusSending, telegramJobStatusRetryWait,
+			telegramJobStatusConfirming, telegramJobStatusFailed, telegramJobStatusSent,
+		},
+		To: telegramJobStatusSuperseded,
+	})
 	if err != nil {
 		return gerror.Wrap(err, "废弃TG推送任务失败")
 	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return gerror.Wrap(err, "确认TG推送任务废弃结果失败")
-	}
-	if affected == 0 {
+	if !transitioned {
 		return nil
 	}
 	return s.upsertPublishJobRecord(ctx, job, "superseded", "")

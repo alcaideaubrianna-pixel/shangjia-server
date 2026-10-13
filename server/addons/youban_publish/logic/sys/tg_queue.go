@@ -263,13 +263,16 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 		if isMessagePushOperationNo(job.OperationNo) {
 			message = "快速推送目标已失效，任务自动终止"
 		}
-		data := telegramJobStateUpdateData("superseded", 0, gtime.Now())
-		data["error_message"] = message
-		data["last_dispatch_error"] = message
-		_, updateErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-			Where("id", jobId).
-			WhereIn("status", []string{"pending", "failed_retry", "unknown", "sending"}).
-			Data(data).Update()
+		_, updateErr := s.transitionTelegramJob(ctx, telegramJobTransition{
+			JobId: jobId,
+			From: []string{
+				telegramJobStatusPending, telegramJobStatusRetryWait,
+				telegramJobStatusConfirming, telegramJobStatusSending,
+			},
+			To:           telegramJobStatusSuperseded,
+			ErrorMessage: message,
+			Additional:   g.Map{"last_dispatch_error": message},
+		})
 		if updateErr != nil {
 			return gerror.Wrap(updateErr, "终止无效频道TG任务失败")
 		}

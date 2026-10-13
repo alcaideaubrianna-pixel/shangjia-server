@@ -16,22 +16,19 @@ import (
 
 func (s *sSysPublish) lockTelegramJob(ctx context.Context, jobId int64) (telegramJobRecord, bool, error) {
 	var job telegramJobRecord
-	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("id", jobId).
-		WhereIn("status", []string{"pending", "failed_retry"}).
-		Data(g.Map{
-			"status":          "sending",
-			"dispatch_status": tgDispatchStatusProcessing,
-			"error_message":   "",
-			"sent_at":         nil,
-			"updated_at":      gtime.Now(),
-		}).
-		Update()
+	transitioned, err := s.transitionTelegramJob(ctx, telegramJobTransition{
+		JobId: jobId,
+		From:  []string{telegramJobStatusPending, telegramJobStatusRetryWait},
+		To:    telegramJobStatusSending,
+		Additional: g.Map{
+			"error_message": "",
+			"sent_at":       nil,
+		},
+	})
 	if err != nil {
 		return job, false, gerror.Wrap(err, "锁定TG任务失败")
 	}
-	affected, _ := result.RowsAffected()
-	if affected == 0 {
+	if !transitioned {
 		return job, false, nil
 	}
 	if err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).

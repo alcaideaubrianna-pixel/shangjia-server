@@ -150,19 +150,17 @@ func (s *sSysPublish) reconcileRecoveredCycleJob(ctx context.Context, recoveryJo
 		return nil
 	}
 	message := "原循环任务已由自动补偿任务成功替代"
-	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("id", source.Id).Where("status", "failed").Data(g.Map{
-		"status":              "superseded",
-		"dispatch_status":     tgDispatchStatusDone,
-		"next_retry_at":       nil,
-		"last_dispatch_error": message,
-		"updated_at":          gtime.Now(),
-	}).Update()
+	transitioned, err := s.transitionTelegramJob(ctx, telegramJobTransition{
+		JobId:        source.Id,
+		From:         []string{telegramJobStatusFailed},
+		To:           telegramJobStatusSuperseded,
+		ErrorMessage: message,
+		Additional:   g.Map{"last_dispatch_error": message},
+	})
 	if err != nil {
 		return gerror.Wrap(err, "回写循环源任务补偿状态失败")
 	}
-	affected, _ := result.RowsAffected()
-	if affected == 0 {
+	if !transitioned {
 		return nil
 	}
 	if err = s.reconcileCycleRunStatus(ctx, source.OperationNo); err != nil {

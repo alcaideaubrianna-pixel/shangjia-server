@@ -143,15 +143,18 @@ func (s *sSysPublish) markTelegramJobUnknown(ctx context.Context, job telegramJo
 		causeMessage = cause.Error()
 	}
 	message := "Telegram 返回结果不确定，已暂停重发并等待频道消息对账：" + causeMessage
-	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Where("status", "sending").Data(g.Map{
-		"status": "unknown", "dispatch_status": tgDispatchStatusIdle, "next_retry_at": gtime.Now().Add(telegramUnknownReconcileDelay),
-		"error_message": message, "reconcile_count": 0, "updated_at": gtime.Now(),
-	}).Update()
+	transitioned, err := s.transitionTelegramJob(ctx, telegramJobTransition{
+		JobId:        job.Id,
+		From:         []string{telegramJobStatusSending},
+		To:           telegramJobStatusConfirming,
+		RetryDelay:   telegramUnknownReconcileDelay,
+		ErrorMessage: message,
+		Additional:   g.Map{"reconcile_count": 0},
+	})
 	if err != nil {
 		return gerror.Wrap(err, "标记TG任务待对账失败")
 	}
-	affected, _ := result.RowsAffected()
-	if affected == 0 {
+	if !transitioned {
 		return nil
 	}
 	s.appendTelegramJobLog(ctx, job, "publish", "unknown", message)

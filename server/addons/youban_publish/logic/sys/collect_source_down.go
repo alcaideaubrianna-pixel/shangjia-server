@@ -248,17 +248,15 @@ func (s *sSysPublish) supersedeCollectSourcePendingJobs(ctx context.Context, tas
 	for _, job := range jobs {
 		jobIds = append(jobIds, job.Id)
 	}
-	_, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		WhereIn("id", uniqueIds(jobIds)).
-		Data(g.Map{
-			"status":              "superseded",
-			"dispatch_status":     tgDispatchStatusDone,
-			"next_retry_at":       nil,
-			"error_message":       collectSourceDownMessage,
-			"last_dispatch_error": collectSourceDownMessage,
-			"updated_at":          gtime.Now(),
-		}).
-		Update()
+	_, err = s.transitionTelegramJobs(ctx, jobIds, telegramJobTransition{
+		From: []string{
+			telegramJobStatusPending, telegramJobStatusSending,
+			telegramJobStatusRetryWait, telegramJobStatusConfirming,
+		},
+		To:           telegramJobStatusSuperseded,
+		ErrorMessage: collectSourceDownMessage,
+		Additional:   g.Map{"last_dispatch_error": collectSourceDownMessage},
+	})
 	if err != nil {
 		return gerror.Wrap(err, "废弃采集源待发送任务失败")
 	}

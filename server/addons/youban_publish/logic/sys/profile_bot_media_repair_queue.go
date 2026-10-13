@@ -126,16 +126,20 @@ func (s *sSysPublish) quarantineProfileWithUnavailableMedia(ctx context.Context,
 		return err
 	}
 	for _, job := range jobs {
-		result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-			Where("id", job.Id).
-			WhereIn("status", []string{"pending", "sending", "failed_retry", "unknown"}).
-			Data(g.Map{"status": "failed", "dispatch_status": tgDispatchStatusDone, "next_retry_at": nil,
-				"error_message": message, "last_dispatch_error": message, "updated_at": now}).Update()
+		transitioned, err := s.transitionTelegramJob(ctx, telegramJobTransition{
+			JobId: job.Id,
+			From: []string{
+				telegramJobStatusPending, telegramJobStatusSending,
+				telegramJobStatusRetryWait, telegramJobStatusConfirming,
+			},
+			To:           telegramJobStatusFailed,
+			ErrorMessage: message,
+			Additional:   g.Map{"last_dispatch_error": message},
+		})
 		if err != nil {
 			return err
 		}
-		affected, _ := result.RowsAffected()
-		if affected == 0 {
+		if !transitioned {
 			continue
 		}
 		s.appendTelegramJobLog(ctx, job, "media_repair", "failed", message)

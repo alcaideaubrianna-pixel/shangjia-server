@@ -433,20 +433,18 @@ func (s *sSysPublish) completeMessagePushJob(ctx context.Context, job telegramJo
 	if err := s.saveTelegramSentMessages(ctx, job, messages); err != nil {
 		return err
 	}
-	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("id", job.Id).
-		WhereIn("status", messagePushActiveStatuses()).
-		Data(g.Map{
-			"status":          sysin.MessagePushStatusSent,
-			"dispatch_status": tgDispatchStatusDone,
-			"error_message":   "",
-			"sent_at":         gtime.Now(),
-			"updated_at":      gtime.Now(),
-		}).Update()
+	transitioned, err := s.transitionTelegramJob(ctx, telegramJobTransition{
+		JobId: job.Id,
+		From:  messagePushActiveStatuses(),
+		To:    telegramJobStatusSent,
+		Additional: g.Map{
+			"sent_at": gtime.Now(),
+		},
+	})
 	if err != nil {
 		return gerror.Wrap(err, errorMessage)
 	}
-	if affected, affectedErr := result.RowsAffected(); affectedErr == nil && affected == 0 {
+	if !transitioned {
 		return nil
 	}
 	if recordErr := s.appendPublishSuccessRecord(ctx, job); recordErr != nil {
@@ -1106,14 +1104,22 @@ func (s *sSysPublish) handleMessagePushQueuedJobError(ctx context.Context, job t
 		s.clearTelegramBotCache()
 	}
 	decision := telegramJobFailureNextState(err, job.RetryCount)
-	result, _ := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("id", job.Id).
-		WhereIn("status", messagePushActiveStatuses()).
-		Data(telegramJobFailureUpdateData(decision, gtime.Now())).Update()
-	if result != nil {
-		if affected, affectedErr := result.RowsAffected(); affectedErr == nil && affected == 0 {
-			return nil
-		}
+	transitioned, transitionErr := s.transitionTelegramJob(ctx, telegramJobTransition{
+		JobId:        job.Id,
+		From:         messagePushActiveStatuses(),
+		To:           decision.Status,
+		RetryDelay:   decision.RetryDelay,
+		ErrorMessage: decision.Message,
+		Additional: g.Map{
+			"retry_count":         decision.RetryCount,
+			"last_dispatch_error": decision.Message,
+		},
+	})
+	if transitionErr != nil {
+		return transitionErr
+	}
+	if !transitioned {
+		return nil
 	}
 	if recordErr := s.upsertPublishJobRecord(ctx, job, decision.Status, decision.Message); recordErr != nil {
 		g.Log().Warningf(ctx, "更新快速推送失败记录失败 jobId:%d status:%s err:%+v", job.Id, decision.Status, recordErr)
@@ -1226,19 +1232,17 @@ func messagePushTemplateIdFromOperationNo(operationNo string) (int64, error) {
 func (s *sSysPublish) failMessagePushJob(ctx context.Context, job telegramJobRecord, message string) {
 	updated := true
 	if job.Id > 0 {
-		result, _ := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-			Where("id", job.Id).
-			WhereIn("status", messagePushActiveStatuses()).
-			Data(g.Map{
-				"status":          sysin.MessagePushStatusFailed,
-				"dispatch_status": tgDispatchStatusDone,
-				"error_message":   message,
-				"updated_at":      gtime.Now(),
-			}).Update()
-		if result != nil {
-			if affected, affectedErr := result.RowsAffected(); affectedErr == nil {
-				updated = affected > 0
-			}
+		transitioned, transitionErr := s.transitionTelegramJob(ctx, telegramJobTransition{
+			JobId:        job.Id,
+			From:         messagePushActiveStatuses(),
+			To:           telegramJobStatusFailed,
+			ErrorMessage: message,
+		})
+		if transitionErr != nil {
+			g.Log().Warningf(ctx, "更新快速推送失败状态失败 jobId:%d err:%+v", job.Id, transitionErr)
+			updated = false
+		} else {
+			updated = transitioned
 		}
 	}
 	if !updated {
@@ -1282,13 +1286,12 @@ func (s *sSysPublish) supersedeOlderMessagePushJobs(ctx context.Context, job tel
 		ids = append(ids, oldJob.Id)
 	}
 	message := "已由新的快速推送任务替代"
-	data := telegramJobStateUpdateData("superseded", 0, gtime.Now())
-	data["error_message"] = message
-	data["last_dispatch_error"] = message
-	if _, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		WhereIn("id", ids).
-		WhereIn("status", messagePushActiveStatuses()).
-		Data(data).Update(); err != nil {
+	if _, err = s.transitionTelegramJobs(ctx, ids, telegramJobTransition{
+		From:         messagePushActiveStatuses(),
+		To:           telegramJobStatusSuperseded,
+		ErrorMessage: message,
+		Additional:   g.Map{"last_dispatch_error": message},
+	}); err != nil {
 		return gerror.Wrap(err, "废弃旧快速推送任务失败")
 	}
 	if _, err = g.DB().Model(publishSuccessRecordTable).Safe().Ctx(ctx).

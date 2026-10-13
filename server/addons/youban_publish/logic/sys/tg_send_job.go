@@ -590,14 +590,21 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 		conf = defaultPublishConfig()
 	}
 	decision := telegramJobFailureNextStateWithConfig(err, job.RetryCount, conf)
-	result, updateErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("id", job.Id).Where("status", "sending").
-		Data(telegramJobFailureUpdateData(decision, gtime.Now())).Update()
+	transitioned, updateErr := s.transitionTelegramJob(ctx, telegramJobTransition{
+		JobId:        job.Id,
+		From:         []string{telegramJobStatusSending},
+		To:           decision.Status,
+		RetryDelay:   decision.RetryDelay,
+		ErrorMessage: decision.Message,
+		Additional: g.Map{
+			"retry_count":         decision.RetryCount,
+			"last_dispatch_error": decision.Message,
+		},
+	})
 	if updateErr != nil {
 		return gerror.Wrap(updateErr, "更新TG失败任务状态失败")
 	}
-	affected, _ := result.RowsAffected()
-	if affected == 0 {
+	if !transitioned {
 		return nil
 	}
 	if recordErr := s.upsertPublishJobRecord(ctx, job, decision.Status, decision.Message); recordErr != nil {
@@ -626,22 +633,17 @@ func (s *sSysPublish) failTelegramMediaFallbackJob(ctx context.Context, job tele
 	if cause != nil {
 		message += "：" + cause.Error()
 	}
-	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("id", job.Id).
-		WhereIn("status", []string{"sending", "unknown"}).
-		Data(g.Map{
-			"status":              "failed",
-			"dispatch_status":     tgDispatchStatusDone,
-			"next_retry_at":       nil,
-			"error_message":       message,
-			"last_dispatch_error": message,
-			"updated_at":          gtime.Now(),
-		}).Update()
+	transitioned, err := s.transitionTelegramJob(ctx, telegramJobTransition{
+		JobId:        job.Id,
+		From:         []string{telegramJobStatusSending, telegramJobStatusConfirming},
+		To:           telegramJobStatusFailed,
+		ErrorMessage: message,
+		Additional:   g.Map{"last_dispatch_error": message},
+	})
 	if err != nil {
 		return gerror.Wrap(err, "终止协议号媒体失败任务失败")
 	}
-	affected, _ := result.RowsAffected()
-	if affected == 0 {
+	if !transitioned {
 		return nil
 	}
 	observeTelegramPublishFailure(ctx, "media_fallback")
@@ -678,18 +680,21 @@ func (s *sSysPublish) switchTelegramJobToNextBot(ctx context.Context, job telegr
 	if nextBotId <= 0 || nextBotId == job.BotId {
 		return false, nil
 	}
-	now := gtime.Now()
-	_, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Data(g.Map{
-		"bot_id":          nextBotId,
-		"status":          "pending",
-		"dispatch_status": tgDispatchStatusIdle,
-		"retry_count":     job.RetryCount + 1,
-		"next_retry_at":   nil,
-		"error_message":   "",
-		"updated_at":      now,
-	}).Update()
+	transitioned, err := s.transitionTelegramJob(ctx, telegramJobTransition{
+		JobId: job.Id,
+		From:  []string{telegramJobStatusSending},
+		To:    telegramJobStatusPending,
+		Additional: g.Map{
+			"bot_id":        nextBotId,
+			"retry_count":   job.RetryCount + 1,
+			"error_message": "",
+		},
+	})
 	if err != nil {
 		return false, gerror.Wrap(err, "切换备用BOT失败")
+	}
+	if !transitioned {
+		return false, nil
 	}
 	job.BotId = nextBotId
 	if err = s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusPending); err != nil {
@@ -730,18 +735,16 @@ func (s *sSysPublish) completeTelegramJobLockedByProfile(ctx context.Context, jo
 		return err
 	}
 	sentAt := gtime.Now()
-	data := telegramJobStateUpdateData("sent", 0, sentAt)
-	data["error_message"] = ""
-	data["sent_at"] = sentAt
-	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("id", job.Id).
-		Where("status", "sending").
-		Data(data).Update()
+	transitioned, err := s.transitionTelegramJob(ctx, telegramJobTransition{
+		JobId:      job.Id,
+		From:       []string{telegramJobStatusSending},
+		To:         telegramJobStatusSent,
+		Additional: g.Map{"sent_at": sentAt},
+	})
 	if err != nil {
 		return gerror.Wrap(err, "更新TG任务状态失败")
 	}
-	affected, _ := result.RowsAffected()
-	if affected == 0 {
+	if !transitioned {
 		s.appendTelegramJobLog(ctx, job, "publish", "skipped", "TG发送完成时任务已不再发送中，跳过成功标记")
 		return nil
 	}

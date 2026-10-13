@@ -236,19 +236,18 @@ func (s *sSysPublish) handleTelegramAttemptTimeout(ctx context.Context, attemptI
 	}
 	message := fmt.Sprintf("Telegram发送结果未在%d秒内确认，已停止自动重试，请人工核对频道消息", int(telegramAttemptWebhookWait/time.Second))
 	g.Log().Warningf(ctx, "TG发送结果不确定，禁止自动重发 attemptId:%d jobId:%d profileId:%d channelId:%d botId:%d chat:%s phase:%s attemptNo:%d", attempt.Id, job.Id, job.ProfileId, job.ChannelId, job.BotId, attempt.TargetChatId, attempt.Phase, attempt.AttemptNo)
-	result, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("id", attempt.JobId).Where("status", "unknown").
-		Data(g.Map{"status": "failed", "send_phase": phase, "dispatch_status": tgDispatchStatusDone,
-			"next_retry_at": nil,
-			"error_message": message, "updated_at": gtime.Now()}).Update()
+	transitioned, transitionErr := s.transitionTelegramJob(ctx, telegramJobTransition{
+		JobId:        attempt.JobId,
+		From:         []string{telegramJobStatusConfirming},
+		To:           telegramJobStatusFailed,
+		ErrorMessage: message,
+		Additional:   g.Map{"send_phase": phase},
+	})
+	err = transitionErr
 	if err != nil {
 		return gerror.Wrap(err, "恢复TG Attempt超时任务失败")
 	}
-	affected, err = result.RowsAffected()
-	if err != nil {
-		return gerror.Wrap(err, "确认TG Attempt超时任务结果失败")
-	}
-	if affected == 0 {
+	if !transitioned {
 		return nil
 	}
 	job.Status = "failed"
