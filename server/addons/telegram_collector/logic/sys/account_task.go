@@ -481,6 +481,7 @@ func (s *sAccountTasks) ActiveStatusStats(ctx context.Context) ([]sysin.AccountT
 			sysin.AccountTaskStatusPending,
 			sysin.AccountTaskStatusProcessing,
 			sysin.AccountTaskStatusFailedRetry,
+			sysin.AccountTaskStatusFinalizing,
 		}).
 		Group(columns.Status).
 		Scan(&rows); err != nil {

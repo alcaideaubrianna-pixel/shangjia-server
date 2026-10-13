@@ -42,7 +42,7 @@ func TestAccountTaskTerminal(t *testing.T) {
 			t.Fatalf("status %q should be terminal", status)
 		}
 	}
-	for _, status := range []string{sysin.AccountTaskStatusPending, sysin.AccountTaskStatusProcessing, sysin.AccountTaskStatusFailedRetry} {
+	for _, status := range []string{sysin.AccountTaskStatusPending, sysin.AccountTaskStatusProcessing, sysin.AccountTaskStatusFailedRetry, sysin.AccountTaskStatusFinalizing} {
 		if accountTaskTerminal(status) {
 			t.Fatalf("status %q should not be terminal", status)
 		}

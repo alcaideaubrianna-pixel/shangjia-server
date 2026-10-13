@@ -29,6 +29,13 @@ func TestPublishAccountTaskHandlersRegistered(t *testing.T) {
 			t.Fatalf("Telegram account task failure handler is not registered: %s", taskType)
 		}
 	}
+	policies := collectorservice.AccountTaskPolicies()
+	if got := policies[collectorin.AccountTaskTypeMessageReconcile].PendingTTL; got != 15*time.Minute {
+		t.Fatalf("message reconcile pending TTL = %s, want 15m", got)
+	}
+	if got := policies[collectorin.AccountTaskTypeMessageMediaFallback].PendingTTL; got != 45*time.Minute {
+		t.Fatalf("message media fallback pending TTL = %s, want 45m", got)
+	}
 }
 
 func TestAccountTaskFinalAttempt(t *testing.T) {

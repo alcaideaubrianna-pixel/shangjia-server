@@ -156,18 +156,23 @@ func finalizeAccountTaskFailure(ctx context.Context, task *sysin.AccountTask) {
 	if task == nil {
 		return
 	}
-	handler := collectorservice.AccountTaskFailureHandlerFor(task.TaskType)
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 	defer cancel()
-	if handler != nil {
-		if err := handler.HandleAccountTaskFailure(cleanupCtx, task, gerror.New(task.ErrorMessage)); err != nil {
-			g.Log().Warningf(cleanupCtx, "Telegram账号任务终态失败回调执行失败，稍后重试 taskId:%d type:%s err:%+v", task.ID, task.TaskType, err)
-			return
-		}
+	if err := handleAccountTaskFinalFailure(cleanupCtx, task); err != nil {
+		g.Log().Warningf(cleanupCtx, "Telegram账号任务终态失败回调执行失败，稍后重试 taskId:%d type:%s err:%+v", task.ID, task.TaskType, err)
+		return
 	}
 	if err := collectorservice.AccountTasks().FinalizeFailure(cleanupCtx, task.ID); err != nil {
 		g.Log().Warningf(cleanupCtx, "Telegram账号任务终态确认失败，稍后重试 taskId:%d type:%s err:%+v", task.ID, task.TaskType, err)
 	}
+}
+
+func handleAccountTaskFinalFailure(ctx context.Context, task *sysin.AccountTask) error {
+	handler := collectorservice.AccountTaskFailureHandlerFor(task.TaskType)
+	if handler == nil {
+		return nil
+	}
+	return handler.HandleAccountTaskFailure(ctx, task, gerror.New(task.ErrorMessage))
 }
 
 func keepAccountTaskLeaseAlive(ctx context.Context, cancel context.CancelFunc, lease *sysin.AccountLease) func() {

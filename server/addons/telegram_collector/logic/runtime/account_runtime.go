@@ -21,6 +21,7 @@ import (
 const accountRuntimeSyncInterval = 15 * time.Second
 const accountRuntimeOperationConcurrency = 4
 const accountRuntimePriorityOperationConcurrency = 1
+const accountTaskFinalizationConcurrency = 8
 
 type accountRuntime struct {
 	mu      sync.Mutex
@@ -147,9 +148,7 @@ func (r *accountRuntime) recoverAndObserveAccountTasks(ctx context.Context) {
 	if err != nil {
 		g.Log().Warningf(ctx, "读取待收尾Telegram账号任务失败：%+v", err)
 	} else {
-		for _, task := range finalizing {
-			finalizeAccountTaskFailure(ctx, task)
-		}
+		finalizeAccountTaskFailures(ctx, finalizing)
 	}
 	stats, err := tasks.ActiveStatusStats(ctx)
 	if err != nil {
@@ -174,6 +173,27 @@ func (r *accountRuntime) recoverAndObserveAccountTasks(ctx context.Context) {
 			age.Record(ctx, seconds, attributes)
 		}
 	}
+}
+
+func finalizeAccountTaskFailures(ctx context.Context, tasks []*sysin.AccountTask) {
+	if len(tasks) == 0 {
+		return
+	}
+	semaphore := make(chan struct{}, accountTaskFinalizationConcurrency)
+	var workers sync.WaitGroup
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		workers.Add(1)
+		semaphore <- struct{}{}
+		go func(task *sysin.AccountTask) {
+			defer workers.Done()
+			defer func() { <-semaphore }()
+			finalizeAccountTaskFailure(ctx, task)
+		}(task)
+	}
+	workers.Wait()
 }
 
 func (r *accountRuntime) sync(ctx context.Context) {

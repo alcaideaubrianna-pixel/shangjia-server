@@ -184,6 +184,22 @@ func TestAccountTaskPersistenceIntegration(t *testing.T) {
 		t.Fatalf("expired pending task=%+v err=%v", oldPending, err)
 	}
 
+	futureRun := time.Now().Add(time.Hour)
+	futureID, err := service.Submit(ctx, &sysin.AccountTaskSubmit{
+		TenantID: seed, AccountID: seed, TaskType: sysin.AccountTaskTypeMessageMediaFallback,
+		TaskKey: fmt.Sprintf("message-media-fallback:%d:display", seed), Priority: 100, MaxAttempts: 3, NextRunAt: &futureRun,
+	})
+	if err != nil {
+		t.Fatalf("submit future pending task: %v", err)
+	}
+	_, err = g.DB().Exec(ctx, "UPDATE "+dao.TgCollectorAccountTask.Table()+" SET "+columns.UpdatedAt+"=? WHERE "+columns.Id+"=?", time.Now().Add(-time.Hour), futureID)
+	if err != nil {
+		t.Fatalf("age future pending task: %v", err)
+	}
+	if expired, err = service.ExpirePending(ctx, sysin.AccountTaskTypeMessageMediaFallback, time.Now().Add(-45*time.Minute), 10); err != nil || expired != 0 {
+		t.Fatalf("future pending task must not expire count=%d err=%v", expired, err)
+	}
+
 	finalizingID, err := dao.TgCollectorAccountTask.Ctx(ctx).Data(g.Map{
 		columns.TenantId: seed, columns.AccountId: seed, columns.TaskType: sysin.AccountTaskTypeMessageReconcile,
 		columns.TaskKey: fmt.Sprintf("message-reconcile:%d:%d", seed, seed), columns.Status: sysin.AccountTaskStatusFinalizing,
