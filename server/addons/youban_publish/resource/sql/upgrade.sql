@@ -960,3 +960,17 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_channel_profile` (
   UNIQUE KEY `uk_ybp_collect_channel_profile` (`tenant_id`,`account_id`,`rule_id`,`channel_id`,`profile_id`),
   KEY `idx_ybp_collect_channel_profile_list` (`tenant_id`,`account_id`,`rule_id`,`channel_id`,`updated_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='采集频道资料计数索引';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_outbox` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `job_id` bigint(20) NOT NULL COMMENT 'TG任务ID', `event_type` varchar(64) NOT NULL COMMENT '事件类型',
+  `dedupe_key` varchar(160) NOT NULL COMMENT '幂等键', `status` varchar(16) NOT NULL DEFAULT 'pending' COMMENT '投递状态',
+  `available_at` datetime NOT NULL COMMENT '可投递时间', `lease_owner` varchar(160) NOT NULL DEFAULT '' COMMENT '租约持有者',
+  `lease_expires_at` datetime DEFAULT NULL COMMENT '租约过期时间', `attempt_count` int(11) NOT NULL DEFAULT '0' COMMENT '投递次数',
+  `last_error` varchar(255) NOT NULL DEFAULT '' COMMENT '最后错误', `delivered_at` datetime DEFAULT NULL COMMENT '投递完成时间',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间', `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`), UNIQUE KEY `uk_ybp_tg_outbox_dedupe` (`dedupe_key`),
+  KEY `idx_ybp_tg_outbox_due` (`status`,`available_at`,`id`),
+  KEY `idx_ybp_tg_outbox_lease` (`status`,`lease_expires_at`,`id`),
+  KEY `idx_ybp_tg_outbox_job` (`job_id`,`event_type`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='TG任务事务Outbox';

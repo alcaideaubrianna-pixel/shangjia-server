@@ -752,6 +752,19 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_collect_order" ON "hg_youban_publish_
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_cycle_channel_status_op" ON "hg_youban_publish_tg_job" ("channel_id", "status", "operation_no", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_profile_channel_chat" ON "hg_youban_publish_tg_job" ("tenant_id", "profile_id", "target_chat_id", "status", "id");
 
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_outbox" (
+  "id" BIGSERIAL PRIMARY KEY, "job_id" bigint NOT NULL, "event_type" varchar(64) NOT NULL,
+  "dedupe_key" varchar(160) NOT NULL, "status" varchar(16) NOT NULL DEFAULT 'pending',
+  "available_at" timestamp NOT NULL, "lease_owner" varchar(160) NOT NULL DEFAULT '',
+  "lease_expires_at" timestamp DEFAULT NULL, "attempt_count" integer NOT NULL DEFAULT 0,
+  "last_error" varchar(255) NOT NULL DEFAULT '', "delivered_at" timestamp DEFAULT NULL,
+  "created_at" timestamp DEFAULT NULL, "updated_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_outbox_dedupe" ON "hg_youban_publish_tg_outbox" ("dedupe_key");
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_outbox_due" ON "hg_youban_publish_tg_outbox" ("available_at", "id") WHERE "status" = 'pending';
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_outbox_lease" ON "hg_youban_publish_tg_outbox" ("lease_expires_at", "id") WHERE "status" = 'processing';
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_outbox_job" ON "hg_youban_publish_tg_outbox" ("job_id", "event_type", "id");
+
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_queue_stat" (
   "id" BIGSERIAL PRIMARY KEY,
   "stat_time" timestamp DEFAULT NULL,

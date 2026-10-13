@@ -131,6 +131,19 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_attempt_message" (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_attempt_message" ON "hg_youban_publish_tg_attempt_message" ("attempt_id", "message_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_attempt_message_job" ON "hg_youban_publish_tg_attempt_message" ("job_id", "attempt_id");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_outbox" (
+  "id" BIGSERIAL PRIMARY KEY, "job_id" bigint NOT NULL, "event_type" varchar(64) NOT NULL,
+  "dedupe_key" varchar(160) NOT NULL, "status" varchar(16) NOT NULL DEFAULT 'pending',
+  "available_at" timestamp NOT NULL, "lease_owner" varchar(160) NOT NULL DEFAULT '',
+  "lease_expires_at" timestamp DEFAULT NULL, "attempt_count" integer NOT NULL DEFAULT 0,
+  "last_error" varchar(255) NOT NULL DEFAULT '', "delivered_at" timestamp DEFAULT NULL,
+  "created_at" timestamp DEFAULT NULL, "updated_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_outbox_dedupe" ON "hg_youban_publish_tg_outbox" ("dedupe_key");
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_outbox_due" ON "hg_youban_publish_tg_outbox" ("available_at", "id") WHERE "status" = 'pending';
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_outbox_lease" ON "hg_youban_publish_tg_outbox" ("lease_expires_at", "id") WHERE "status" = 'processing';
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_outbox_job" ON "hg_youban_publish_tg_outbox" ("job_id", "event_type", "id");
 ALTER TABLE "hg_youban_publish_account" ADD COLUMN IF NOT EXISTS "last_active_at" timestamp DEFAULT NULL;
 UPDATE "hg_youban_publish_account" SET "last_active_at" = NOW() WHERE "last_active_at" IS NULL;
 ALTER TABLE "hg_youban_publish_collect_source" ADD COLUMN IF NOT EXISTS "channel_suffix" text NOT NULL DEFAULT '';

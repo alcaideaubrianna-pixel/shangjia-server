@@ -114,6 +114,9 @@ func (s *sSysPublish) prepareProfilePublishJobs(ctx context.Context, profileId, 
 			if createErr != nil {
 				return createErr
 			}
+			if createErr = s.ensureTelegramJobOutboxTx(ctx, tx, jobId, 0); createErr != nil {
+				return createErr
+			}
 			jobIds = append(jobIds, jobId)
 		}
 		return nil
@@ -131,11 +134,10 @@ func (s *sSysPublish) enqueuePreparedProfileJobs(ctx context.Context, jobIds []i
 		} else if recordErr := s.upsertPublishJobRecord(ctx, job, "pending", ""); recordErr != nil {
 			g.Log().Warningf(ctx, "保存资料待发送记录失败 jobId:%d err:%+v", jobId, recordErr)
 		}
-		if err := s.enqueueTelegramJob(ctx, jobId, 0); err != nil {
+		if err := s.dispatchTelegramJobOutboxByJob(ctx, jobId); err != nil {
 			message := "Redis调度失败，等待数据库调度器恢复：" + err.Error()
-			_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", jobId).Data(g.Map{
-				"dispatch_status": tgDispatchStatusIdle, "last_dispatch_error": message, "updated_at": gtime.Now(),
-			}).Update()
+			_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", jobId).
+				Data(g.Map{"last_dispatch_error": message, "updated_at": gtime.Now()}).Update()
 			g.Log().Warningf(ctx, "资料TG任务入队失败，等待数据库调度器恢复 jobId:%d operatorId:%d err:%+v", jobId, operatorId, err)
 		}
 	}

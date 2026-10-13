@@ -1184,6 +1184,20 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_job` (
   KEY `idx_ybp_tg_job_collect_order` (`channel_id`,`target_chat_id`,`collect_source_id`,`collect_source_chat_id`,`collect_source_message_id`,`status`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴TG发布任务';
 
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_outbox` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `job_id` bigint(20) NOT NULL COMMENT 'TG任务ID', `event_type` varchar(64) NOT NULL COMMENT '事件类型',
+  `dedupe_key` varchar(160) NOT NULL COMMENT '幂等键', `status` varchar(16) NOT NULL DEFAULT 'pending' COMMENT '投递状态',
+  `available_at` datetime NOT NULL COMMENT '可投递时间', `lease_owner` varchar(160) NOT NULL DEFAULT '' COMMENT '租约持有者',
+  `lease_expires_at` datetime DEFAULT NULL COMMENT '租约过期时间', `attempt_count` int(11) NOT NULL DEFAULT '0' COMMENT '投递次数',
+  `last_error` varchar(255) NOT NULL DEFAULT '' COMMENT '最后错误', `delivered_at` datetime DEFAULT NULL COMMENT '投递完成时间',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间', `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`), UNIQUE KEY `uk_ybp_tg_outbox_dedupe` (`dedupe_key`),
+  KEY `idx_ybp_tg_outbox_due` (`status`,`available_at`,`id`),
+  KEY `idx_ybp_tg_outbox_lease` (`status`,`lease_expires_at`,`id`),
+  KEY `idx_ybp_tg_outbox_job` (`job_id`,`event_type`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='TG任务事务Outbox';
+
 ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID' AFTER `task_id`, ADD COLUMN `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '兼容旧版本商家ID' AFTER `tenant_id`;
 ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN `operation_no` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG操作号' AFTER `task_id`;
 ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN `collect_event_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '采集事件ID' AFTER `target_chat_id`, ADD COLUMN `collect_source_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '采集源ID' AFTER `collect_event_id`, ADD COLUMN `collect_source_chat_id` varchar(128) NOT NULL DEFAULT '' COMMENT '采集来源Chat ID' AFTER `collect_source_id`, ADD COLUMN `collect_source_message_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '采集来源消息ID' AFTER `collect_source_chat_id`;
