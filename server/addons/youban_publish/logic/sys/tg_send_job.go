@@ -21,7 +21,7 @@ import (
 
 const (
 	telegramDisplaySendTimeout = 90 * time.Second
-	telegramVerifySendTimeout  = 30 * time.Second
+	telegramVerifySendTimeout  = 60 * time.Second // 封面最多30秒，给验证视频发送保留30秒
 )
 
 var (

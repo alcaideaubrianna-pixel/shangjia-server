@@ -1,6 +1,12 @@
 package sys
 
-import "testing"
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+)
 
 func TestValidateTelegramMediaPurpose(t *testing.T) {
 	tests := []struct {
@@ -57,5 +63,39 @@ func TestTelegramMediaSetWithoutCopyRefs(t *testing.T) {
 	}
 	if media[0].TgFileId == "" || media[0].ForceUpload {
 		t.Fatal("source media must not be mutated")
+	}
+}
+
+func TestTelegramVideoPreviewLocalPoster(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "original.jpg")
+	if err := os.WriteFile(path, []byte("original-telegram-poster"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	media := &telegramMediaItem{MediaType: "video", PosterStoragePath: path, FileUrl: "invalid-video-source"}
+	file, closer, err := telegramVideoPreview(context.Background(), media, "thumbnail")
+	if err != nil || file == nil || closer == nil {
+		t.Fatalf("original poster not reused: %v", err)
+	}
+	_ = closer.Close()
+}
+
+func TestTelegramVideoPreviewFailureIsOptional(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	file, closer, err := telegramVideoPreview(ctx, &telegramMediaItem{MediaType: "video", FileUrl: "https://%invalid"}, "thumbnail")
+	if err != nil || file != nil || closer != nil {
+		t.Fatalf("missing preview must not stop video: %v", err)
+	}
+	if ctx.Err() != nil {
+		t.Fatal("preview canceled sending context")
+	}
+}
+
+func TestTelegramVideoPreviewParentCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, _, err := telegramVideoPreview(ctx, &telegramMediaItem{MediaType: "video"}, "thumbnail")
+	if err == nil {
+		t.Fatal("parent cancellation must not be swallowed")
 	}
 }

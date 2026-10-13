@@ -814,7 +814,25 @@ func telegramVideoThumbnail(ctx context.Context, media *telegramMediaItem) (mode
 	return telegramVideoPreview(ctx, media, "thumbnail")
 }
 
+// 封面是可选媒体。仅取消封面子任务，不能把本地失败传成发送结果不确定。
 func telegramVideoPreview(ctx context.Context, media *telegramMediaItem, kind string) (models.InputFile, io.Closer, error) {
+	previewCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	file, closer, err := prepareTelegramVideoPreview(previewCtx, media, kind)
+	if err == nil && previewCtx.Err() == nil {
+		return file, closer, nil
+	}
+	if closer != nil {
+		_ = closer.Close()
+	}
+	if ctx.Err() != nil {
+		return nil, nil, ctx.Err()
+	}
+	g.Log().Warningf(ctx, "TG视频可选预览图准备失败，继续发送视频 kind:%s err:%v timeout:%v", kind, err, previewCtx.Err())
+	return nil, nil, nil
+}
+
+func prepareTelegramVideoPreview(ctx context.Context, media *telegramMediaItem, kind string) (models.InputFile, io.Closer, error) {
 	if media == nil || media.MediaType != "video" {
 		return nil, nil, nil
 	}
@@ -864,13 +882,14 @@ func cachedTelegramVideoPosterFile(ctx context.Context, media *telegramMediaItem
 		}
 	}
 	if source := strings.TrimSpace(media.PosterUrl); strings.HasPrefix(strings.ToLower(source), "http") && !isLocalTelegramURL(source) {
-		poster := &telegramMediaItem{
-			Id:          media.Id,
-			MediaType:   "image",
-			FileUrl:     source,
-			StoragePath: managedMediaObjectPath(source),
-		}
-		posterPath, posterCleanup, posterErr := cachedTelegramMediaFile(ctx, poster)
+		// 原消息封面已有可访问地址，直接读取；不要先访问存储代理，
+		// 否则代理故障会耗尽预算，导致可用的原图被跳过。
+		posterCtx, cancelPoster := context.WithTimeout(ctx, 5*time.Second)
+		posterPath, posterErr := cachedRemoteMediaFileWithMetaSourceAndDownloader(
+			posterCtx, stableMediaFileCacheKey(normalizedMediaCacheSource(source)),
+			source, source, ".jpg", downloadMediaFileCache)
+		cancelPoster()
+		var posterCleanup func()
 		if posterErr == nil && strings.TrimSpace(posterPath) != "" {
 			return posterPath, posterCleanup, nil
 		}
