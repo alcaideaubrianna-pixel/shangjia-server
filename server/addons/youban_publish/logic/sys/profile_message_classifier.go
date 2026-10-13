@@ -43,6 +43,7 @@ func profileMessageIgnoredNotice(text string) bool {
 }
 
 func classifyProfileMessage(text string, media []collectMediaItem) profileMessageClassification {
+	text = stripTelegramAttemptMarkers(text)
 	text = strings.TrimSpace(text)
 	if profileMessageIgnoredNotice(text) {
 		return profileMessageClassification{Kind: profileMessageKindIgnore}

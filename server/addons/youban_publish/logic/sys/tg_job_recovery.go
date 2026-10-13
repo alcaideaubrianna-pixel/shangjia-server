@@ -257,6 +257,7 @@ func (s *sSysPublish) recoverPendingIdleTelegramJobs(ctx context.Context, limit 
 		) AS channel_rank
 		FROM ` + publishTgJobTable + ` j
 		WHERE j.status IN ('pending', 'failed_retry', 'unknown')
+            AND ` + telegramWebhookDetachedJobSQL("j.") + `
 			AND (j.dispatch_status = ? OR j.dispatch_status = '')
 			AND ` + telegramActiveChannelConditionForAlias("j") + `
 			AND ` + messagePushPlanRecoveryConditionSQL("j") + `

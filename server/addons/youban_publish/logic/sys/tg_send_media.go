@@ -30,7 +30,7 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 		observeTelegramMediaPurposeViolation(ctx, "send")
 		return nil, err
 	}
-	if len(media) > 1 && media[0] != nil && media[0].TenantId > 0 && !telegramMediaSetHasCopyRef(media) && !telegramMediaSetRequiresUpload(media) {
+	if purpose != "verify" && len(media) > 1 && media[0] != nil && media[0].TenantId > 0 && !telegramMediaSetHasCopyRef(media) && !telegramMediaSetRequiresUpload(media) {
 		relayAvailable, relayAvailabilityErr := relayAvailableForTenant(ctx, media[0].TenantId)
 		if relayAvailabilityErr != nil {
 			g.Log().Warningf(ctx, "检查 relay 频道失败，回退原有上传链路 tenant:%d err:%+v", media[0].TenantId, relayAvailabilityErr)

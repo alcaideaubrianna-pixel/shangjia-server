@@ -83,10 +83,10 @@ func TestTelegramVerifyMediaMatchRequiresKnownUniqueID(t *testing.T) {
 	}
 }
 
-func TestTelegramVerifyFreshUploadUsesMediaTypeFallback(t *testing.T) {
+func TestTelegramVerifyFreshUploadRequiresMarker(t *testing.T) {
 	media := []*telegramMediaItem{{MediaType: "photo"}}
-	if !telegramVerifyMediaMatches(media, "image", "new-file") {
-		t.Fatal("fresh upload should match the sole short-lived attempt by normalized media type")
+	if telegramVerifyMediaMatches(media, "image", "new-file") {
+		t.Fatal("unmarked fresh upload must not match by media type alone")
 	}
 }
 

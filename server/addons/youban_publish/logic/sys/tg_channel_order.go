@@ -90,6 +90,7 @@ func (s *sSysPublish) wakeNextTelegramChannelJob(ctx context.Context, job telegr
 		Where("tenant_id", job.TenantId).
 		Where("channel_id", job.ChannelId).
 		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
+		Where(telegramWebhookDetachedJobSQL("")).
 		Where("(dispatch_status = ? OR dispatch_status = '')", tgDispatchStatusIdle).
 		Where("(next_retry_at IS NULL OR next_retry_at <= ?)", now).
 		Order(gdb.Raw(telegramJobEffectivePrioritySQL("") + " ASC")).OrderAsc("id").

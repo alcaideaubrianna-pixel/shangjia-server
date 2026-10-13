@@ -333,8 +333,7 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	if err != nil {
 		return err
 	}
-	// 验证资料必须是纯媒体消息：不能携带业务文案或任何不可见标记，
-	// 否则公群采集器可能把 caption 当作资料正文处理。
+	// 标记必须附着于验证媒体；采集分类前移除内部标记。
 	verifyCaption := telegramAttemptMarker(verifyAttempt.AttemptToken)
 	g.Log().Infof(ctx, "TG验证资料开始Bot发送 jobId:%d botId:%d chat:%s media:%s", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(verifyMedia))
 	verifySendCtx, cancelVerifySend := context.WithTimeout(ctx, telegramVerifySendTimeout)

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-telegram/bot/models"
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -152,37 +153,46 @@ func (s *sSysPublish) confirmTelegramDeliveryAttempt(ctx context.Context, attemp
 }
 
 func (s *sSysPublish) waitTelegramDeliveryWebhook(ctx context.Context, attempt telegramDeliveryAttempt, cause error) error {
-	dispatchStatus := tgDispatchStatusProcessing
-	if attempt.Phase == "verify" {
-		dispatchStatus = tgDispatchStatusIdle
-	}
 	deadline := gtime.Now().Add(telegramAttemptWebhookWait)
-	result, err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
-		Where("id", attempt.Id).Where("status", telegramAttemptStatusSending).
-		Data(g.Map{"status": telegramAttemptStatusWaiting, "webhook_deadline": deadline, "error_message": cause.Error(), "updated_at": gtime.Now()}).Update()
-	if err != nil {
-		return gerror.Wrap(err, "设置TG Attempt等待Webhook失败")
-	}
-	affected, _ := result.RowsAffected()
-	if affected == 0 {
-		current, readErr := s.telegramAttemptById(ctx, attempt.Id)
-		if readErr == nil && current.Status == telegramAttemptStatusConfirmed {
-			g.Log().Infof(ctx, "TG发送Attempt已由并发流程确认，跳过重试 attemptId:%d jobId:%d phase:%s", attempt.Id, attempt.JobId, attempt.Phase)
+	confirmed := false
+	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		var current telegramDeliveryAttempt
+		if err := tx.Model(publishTgAttemptTable).Where("id", attempt.Id).LockUpdate().Scan(&current); err != nil {
+			return err
 		}
-		return nil
-	}
-	_, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("id", attempt.JobId).Where("status", "sending").
-		Data(g.Map{"status": "unknown", "dispatch_status": dispatchStatus, "next_retry_at": deadline, "error_message": "等待Telegram Webhook确认", "updated_at": gtime.Now()}).Update()
+		confirmed = current.Status == telegramAttemptStatusConfirmed
+		if confirmed {
+			phase := telegramSendPhaseDisplayConfirmed
+			if attempt.Phase == "verify" {
+				phase = telegramSendPhaseVerifyConfirmed
+			}
+			_, err := tx.Model(publishTgJobTable).Where("id", attempt.JobId).Where("status", "sending").Where("send_phase", phase).
+				Data(g.Map{"status": "failed_retry", "dispatch_status": tgDispatchStatusIdle, "next_retry_at": nil, "error_message": ""}).Update()
+			return err
+		}
+		if current.Status != telegramAttemptStatusSending && current.Status != telegramAttemptStatusWaiting {
+			return gerror.New("TG发送Attempt状态已变化，不能等待Webhook")
+		}
+		if _, err := tx.Model(publishTgAttemptTable).Where("id", attempt.Id).
+			Data(g.Map{"status": telegramAttemptStatusWaiting, "webhook_deadline": deadline, "error_message": cause.Error(), "updated_at": gtime.Now()}).Update(); err != nil {
+			return err
+		}
+		dispatchStatus := tgDispatchStatusProcessing
+		if attempt.Phase == "verify" {
+			dispatchStatus = tgDispatchStatusIdle
+		}
+		_, err := tx.Model(publishTgJobTable).Where("id", attempt.JobId).Where("status", "sending").
+			Data(g.Map{"status": "unknown", "dispatch_status": dispatchStatus, "next_retry_at": deadline, "error_message": "等待Telegram Webhook确认", "updated_at": gtime.Now()}).Update()
+		return err
+	})
 	if err != nil {
 		return gerror.Wrap(err, "设置TG任务等待Webhook失败")
 	}
-	if job, jobErr := s.telegramJobById(ctx, attempt.JobId); jobErr == nil {
-		s.appendTelegramJobLog(ctx, job, "publish", "awaiting_webhook",
-			fmt.Sprintf("TG发送响应不确定，等待Webhook确认 attemptId:%d phase:%s cause:%v", attempt.Id, attempt.Phase, cause))
+	if confirmed {
+		return s.enqueueTelegramJobDirectWithUnique(ctx, attempt.JobId, 0, false)
 	}
 	_, err = s.enqueueTelegramAttemptTimeout(ctx, attempt.Id, telegramAttemptWebhookWait)
-	g.Log().Warningf(ctx, "TG发送响应不确定，等待Webhook确认 attemptId:%d jobId:%d channelId:%d botId:%d chat:%s phase:%s deadline:%s cause:%v", attempt.Id, attempt.JobId, attempt.ChannelId, attempt.BotId, attempt.TargetChatId, attempt.Phase, deadline.String(), cause)
+	g.Log().Warningf(ctx, "TG发送响应不确定，等待Webhook确认 attemptId:%d jobId:%d phase:%s cause:%v", attempt.Id, attempt.JobId, attempt.Phase, cause)
 	return err
 }
 
@@ -331,7 +341,7 @@ func (s *sSysPublish) matchTelegramDeliveryAttempt(ctx context.Context, botId in
 		err := g.DB().Model(telegramBotMessageSourceTable+" source").Safe().Ctx(ctx).
 			LeftJoin(publishTgAttemptTable+" attempt", "attempt.id=source.matched_attempt_id").
 			Fields("attempt.*").
-			Where("source.chat_id", chatId).Where("source.media_group_id", msg.MediaGroupID).
+			Where("attempt.bot_id", botId).Where("source.chat_id", chatId).Where("source.media_group_id", msg.MediaGroupID).
 			WhereGT("source.matched_attempt_id", 0).
 			WhereIn("attempt.status", []string{telegramAttemptStatusSending, telegramAttemptStatusWaiting, telegramAttemptStatusRetryWait}).
 			Where("attempt.status <> ? OR attempt.webhook_deadline IS NOT NULL", telegramAttemptStatusRetryWait).
@@ -354,6 +364,9 @@ func (s *sSysPublish) matchTelegramDeliveryAttempt(ctx context.Context, botId in
 		matched = s.matchTelegramVerifyAttempt(ctx, attempts, msg)
 	}
 	if matched == nil {
+		return
+	}
+	if matched.Phase == "verify" && telegramMessageFileId(msg) == "" {
 		return
 	}
 	if matched.Status == telegramAttemptStatusRetryWait {
@@ -472,7 +485,7 @@ func telegramVerifyMediaMatches(media []*telegramMediaItem, messageType, fileUni
 		}
 		// A known unique ID is authoritative. Fresh uploads do not have one yet,
 		// so they additionally rely on the sole active Attempt and short window.
-		if item.TgFileUniqueId == "" || fileUniqueId != "" && item.TgFileUniqueId == fileUniqueId {
+		if fileUniqueId != "" && item.TgFileUniqueId != "" && item.TgFileUniqueId == fileUniqueId {
 			return true
 		}
 	}
@@ -499,26 +512,62 @@ func (s *sSysPublish) confirmLateTelegramAttempt(ctx context.Context, attempt te
 }
 
 func (s *sSysPublish) confirmTelegramAttemptFromWebhook(ctx context.Context, attempt telegramDeliveryAttempt, job telegramJobRecord, count int) {
-	result, err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
-		Where("id", attempt.Id).WhereIn("status", []string{telegramAttemptStatusSending, telegramAttemptStatusWaiting}).
-		Data(g.Map{"status": telegramAttemptStatusConfirmed, "confirmed_count": count, "webhook_deadline": nil, "updated_at": gtime.Now()}).Update()
+	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		var current telegramDeliveryAttempt
+		if err := tx.Model(publishTgAttemptTable).Where("id", attempt.Id).LockUpdate().Scan(&current); err != nil {
+			return err
+		}
+		if current.Status != telegramAttemptStatusSending && current.Status != telegramAttemptStatusWaiting && current.Status != telegramAttemptStatusConfirmed {
+			return nil
+		}
+		phase := telegramSendPhaseDisplayConfirmed
+		sendingPhase := telegramSendPhaseDisplaySending
+		if attempt.Phase == "verify" {
+			phase = telegramSendPhaseVerifyConfirmed
+			sendingPhase = telegramSendPhaseVerifySending
+		}
+		// Preserve the active sender: its successful response must not delete webhook-confirmed media.
+		if _, err := tx.Model(publishTgJobTable).Where("id", job.Id).Where("status", "sending").Where("send_phase", sendingPhase).
+			Data(g.Map{"send_phase": phase}).Update(); err != nil {
+			return err
+		}
+		if _, err := tx.Model(publishTgJobTable).Where("id", job.Id).WhereIn("status", []string{"unknown", "pending", "failed_retry"}).WhereIn("send_phase", []string{sendingPhase, phase, telegramSendPhaseDisplayConfirmed}).
+			Data(g.Map{"status": "failed_retry", "send_phase": phase, "dispatch_status": tgDispatchStatusIdle, "next_retry_at": nil, "error_message": ""}).Update(); err != nil {
+			return err
+		}
+		_, err := tx.Model(publishTgAttemptTable).Where("id", attempt.Id).
+			Data(g.Map{"status": telegramAttemptStatusConfirmed, "confirmed_count": count, "webhook_deadline": nil, "updated_at": gtime.Now()}).Update()
+		return err
+	})
 	if err != nil {
-		g.Log().Warningf(ctx, "确认TG Webhook Attempt失败 attemptId:%d err:%+v", attempt.Id, err)
+		g.Log().Warningf(ctx, "确认TG Webhook失败 attemptId:%d jobId:%d err:%+v", attempt.Id, job.Id, err)
 		return
 	}
-	affected, _ := result.RowsAffected()
-	if affected == 0 {
-		return
-	}
-	phase := telegramSendPhaseDisplayConfirmed
-	if attempt.Phase == "verify" {
-		phase = telegramSendPhaseVerifyConfirmed
-	}
-	_, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("id", job.Id).WhereIn("status", []string{"unknown", "pending", "failed_retry"}).
-		Data(g.Map{"status": "failed_retry", "send_phase": phase, "dispatch_status": tgDispatchStatusIdle,
-			"next_retry_at": nil, "error_message": "", "updated_at": gtime.Now()}).Update()
-	if err == nil {
+	if current, err := s.telegramJobById(ctx, job.Id); err == nil && current.Status == "failed_retry" {
 		_ = s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 0, false)
+	}
+}
+
+// Strip only complete internal attempt markers, preserving user text and malformed input.
+func stripTelegramAttemptMarkers(text string) string {
+	for {
+		start := strings.Index(text, "\u2063")
+		if start < 0 {
+			return text
+		}
+		end := strings.Index(text[start:], "\u2064")
+		if end < 0 {
+			return text
+		}
+		candidate := text[start : start+end+len("\u2064")]
+		bits := []rune(strings.TrimSuffix(strings.TrimPrefix(candidate, "\u2063"), "\u2064"))
+		valid := len(bits) == 64
+		for _, bit := range bits {
+			valid = valid && (bit == '\u200b' || bit == '\u200c')
+		}
+		if !valid {
+			return text
+		}
+		text = text[:start] + text[start+end+len("\u2064"):]
 	}
 }
