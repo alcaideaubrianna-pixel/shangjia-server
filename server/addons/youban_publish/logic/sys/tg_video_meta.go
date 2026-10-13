@@ -109,9 +109,6 @@ func (s *sSysPublish) prepareTelegramMediaItemForSend(ctx context.Context, media
 		media.TgThumbFileId = ""
 	}
 	mediaType := strings.ToLower(strings.TrimSpace(media.MediaType))
-	if mediaType == "video" && !telegramVideoUsesReusableFileIdWithCover(media) {
-		_ = s.telegramVideoMeta(ctx, media)
-	}
 	if telegramMediaRequiresSanitizedUpload(media) {
 		media.TgThumbFileId = ""
 		if isTelegramImageMedia(mediaType) {

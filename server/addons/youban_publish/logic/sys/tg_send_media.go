@@ -110,7 +110,7 @@ relayGroupDone:
 				allMessages = append(allMessages, fallbackMessages...)
 				continue
 			}
-			return allMessages, err
+			return allMessages, telegramPreparationError(err)
 		}
 		g.Log().Infof(ctx, "TG媒体组准备完成 purpose:%s chunk:%d/%d media:%d antiScan:%d duration:%s", purpose, chunkIndex+1, len(chunks), len(chunk), telegramAntiScanMediaCount(chunk), time.Since(prepareStartedAt).Round(time.Millisecond))
 		if len(group) == 0 {
@@ -127,6 +127,8 @@ relayGroupDone:
 			if err == nil {
 				msgs, err = bot.SendMediaGroup(ctx, &tgbot.SendMediaGroupParams{ChatID: chatId, Media: group})
 				closeTelegramMediaFiles(closers)
+			} else {
+				err = telegramPreparationError(err)
 			}
 		}
 		if err != nil {
@@ -234,21 +236,23 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 				return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, &cloned, replyMarkup...)
 			}
 		}
-		return nil, err
+		return nil, telegramPreparationError(err)
 	}
 	if closer != nil {
 		defer closer.Close()
 	}
 	switch media.MediaType {
 	case "video":
+		previewCtx, cancelPreview := context.WithTimeout(ctx, 30*time.Second)
+		defer cancelPreview()
 		reuseWithCover := telegramVideoUsesReusableFileIdWithCover(media)
 		var thumbnail models.InputFile
 		var cover models.InputFile
 		var thumbnailCloser io.Closer
 		if reuseWithCover {
-			cover, thumbnailCloser, err = telegramVideoPreview(ctx, media, "cover")
+			cover, thumbnailCloser, err = telegramVideoPreviewWithBudget(ctx, previewCtx, media, "cover")
 		} else if !telegramMediaUsesReusableFileId(media) {
-			thumbnail, thumbnailCloser, err = telegramVideoPreview(ctx, media, "thumbnail")
+			thumbnail, thumbnailCloser, err = telegramVideoPreviewWithBudget(ctx, previewCtx, media, "thumbnail")
 		}
 		if err != nil {
 			return nil, err
@@ -258,8 +262,8 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 		}
 		g.Log().Infof(ctx, "TG单媒体准备完成 purpose:%s mediaId:%d type:%s antiScan:%t duration:%s", purpose, media.Id, media.MediaType, media.AntiScanEnabled, time.Since(prepareStartedAt).Round(time.Millisecond))
 		videoMeta := telegramVideoMeta{}
-		if !reuseWithCover {
-			videoMeta = s.telegramVideoMeta(ctx, media)
+		if !reuseWithCover && previewCtx.Err() == nil {
+			videoMeta = s.telegramVideoMeta(previewCtx, media)
 		}
 		params := &tgbot.SendVideoParams{
 			ChatID:            chatId,
@@ -520,9 +524,11 @@ func (s *sSysPublish) telegramInputMediaItem(ctx context.Context, item *telegram
 	if item.MediaType != "video" {
 		return &models.InputMediaPhoto{Media: source, Caption: caption, ParseMode: telegramMediaParseMode(caption), MediaAttachment: attachment}, closers, nil
 	}
+	previewCtx, cancelPreview := context.WithTimeout(ctx, 30*time.Second)
+	defer cancelPreview()
 	var thumbnail models.InputFile
 	if !telegramMediaUsesReusableFileId(item) {
-		thumbnail, closer, err = telegramVideoThumbnail(ctx, item)
+		thumbnail, closer, err = telegramVideoPreviewWithBudget(ctx, previewCtx, item, "thumbnail")
 		if err != nil {
 			closeTelegramMediaFiles(closers)
 			return nil, nil, err
@@ -532,7 +538,9 @@ func (s *sSysPublish) telegramInputMediaItem(ctx context.Context, item *telegram
 		}
 	}
 	video := &models.InputMediaVideo{Media: source, Thumbnail: thumbnail, Caption: caption, ParseMode: telegramMediaParseMode(caption), SupportsStreaming: true, MediaAttachment: attachment}
-	applyTelegramInputMediaVideoMeta(video, s.telegramVideoMeta(ctx, item))
+	if previewCtx.Err() == nil {
+		applyTelegramInputMediaVideoMeta(video, s.telegramVideoMeta(previewCtx, item))
+	}
 	return video, closers, nil
 }
 
@@ -818,6 +826,10 @@ func telegramVideoThumbnail(ctx context.Context, media *telegramMediaItem) (mode
 func telegramVideoPreview(ctx context.Context, media *telegramMediaItem, kind string) (models.InputFile, io.Closer, error) {
 	previewCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+	return telegramVideoPreviewWithBudget(ctx, previewCtx, media, kind)
+}
+
+func telegramVideoPreviewWithBudget(ctx, previewCtx context.Context, media *telegramMediaItem, kind string) (models.InputFile, io.Closer, error) {
 	file, closer, err := prepareTelegramVideoPreview(previewCtx, media, kind)
 	if err == nil && previewCtx.Err() == nil {
 		return file, closer, nil

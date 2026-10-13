@@ -75,12 +75,30 @@ func telegramJobPhaseMarker(jobId int64, purpose string) string {
 	return marker.String()
 }
 
+// telegramMediaPreparationError identifies failures before a Telegram request.
+// Unwrap preserves cancellation and existing retry classifications.
+type telegramMediaPreparationError struct{ cause error }
+
+func (e *telegramMediaPreparationError) Error() string { return e.cause.Error() }
+func (e *telegramMediaPreparationError) Unwrap() error { return e.cause }
+
+func telegramPreparationError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &telegramMediaPreparationError{cause: err}
+}
+
 func isTelegramAmbiguousDeliveryError(err error) bool {
 	if err == nil {
 		return false
 	}
 	if errors.Is(err, errTelegramDeliveryUncertain) {
 		return true
+	}
+	var preparationErr *telegramMediaPreparationError
+	if errors.As(err, &preparationErr) {
+		return false
 	}
 	message := strings.ToLower(err.Error())
 	// Media preparation/download failures happen before Telegram accepts a

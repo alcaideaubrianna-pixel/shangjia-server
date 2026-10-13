@@ -372,10 +372,10 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 					return telegramDeliveryUncertainError(saveErr)
 				}
 			}
-			if cleanupErr := s.deleteTelegramMessageSetLockedByChannel(ctx, job, "验证资料推送失败，清理本次已发送消息"); cleanupErr != nil {
+			if cleanupErr := s.deleteTelegramMessagePurposeSetLockedByChannel(ctx, job, "verify", "验证资料推送失败，仅清理本次验证消息"); cleanupErr != nil {
 				return cleanupErr
 			}
-			if phaseErr := s.updateTelegramJobSendPhase(ctx, job.Id, ""); phaseErr != nil {
+			if phaseErr := s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseDisplayConfirmed); phaseErr != nil {
 				return phaseErr
 			}
 		}
