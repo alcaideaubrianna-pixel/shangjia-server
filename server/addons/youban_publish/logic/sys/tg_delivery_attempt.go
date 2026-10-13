@@ -15,6 +15,8 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/util/guid"
 
+	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
+	collectorservice "hotgo/addons/telegram_collector/service"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/hgrds/lock"
 )
@@ -149,7 +151,9 @@ func (s *sSysPublish) confirmTelegramDeliveryAttempt(ctx context.Context, attemp
 		data["response_received"] = 1
 	}
 	_, err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
-		Where("id", attempt.Id).WhereIn("status", []string{telegramAttemptStatusSending, telegramAttemptStatusWaiting}).Data(data).Update()
+		Where("id", attempt.Id).
+		WhereIn("status", []string{telegramAttemptStatusSending, telegramAttemptStatusWaiting, telegramAttemptStatusRetryWait, telegramAttemptStatusConfirmed}).
+		Data(data).Update()
 	return err
 }
 
@@ -238,11 +242,18 @@ func (s *sSysPublish) handleTelegramAttemptTimeout(ctx context.Context, attemptI
 	if affected == 0 {
 		return nil
 	}
-	// Preserve partial confirmations so a late Webhook can complete the attempt.
 	job, err := s.telegramJobById(ctx, attempt.JobId)
 	if err != nil {
 		return err
 	}
+	if attempt.Phase == "verify" {
+		if err = s.enqueueTelegramAttemptReconcile(ctx, job, attempt); err == nil {
+			s.appendTelegramJobLog(ctx, job, "reconcile", "queued", "验证视频未收到Webhook确认，已提交协议号对账")
+			return nil
+		}
+		g.Log().Warningf(ctx, "提交验证视频协议号对账失败 attemptId:%d jobId:%d err:%+v", attempt.Id, job.Id, err)
+	}
+	// Preserve partial confirmations so a late Webhook can still complete the attempt.
 	phase := telegramSendPhaseCleanupConfirmed
 	if attempt.Phase == "verify" {
 		phase = telegramSendPhaseDisplayConfirmed
@@ -276,6 +287,23 @@ func (s *sSysPublish) handleTelegramAttemptTimeout(ctx context.Context, attemptI
 		return err
 	}
 	return s.wakeNextTelegramChannelJob(ctx, job)
+}
+
+func (s *sSysPublish) enqueueTelegramAttemptReconcile(ctx context.Context, job telegramJobRecord, attempt telegramDeliveryAttempt) error {
+	channel, err := s.messagePushChannelFromJob(ctx, job)
+	if err != nil {
+		return err
+	}
+	if channel.TgAccountId <= 0 {
+		return gerror.New("目标频道未绑定协议号，无法对账验证视频")
+	}
+	_, err = collectorservice.AccountTasks().Submit(ctx, &collectorin.AccountTaskSubmit{
+		TenantID: job.TenantId, AccountID: channel.TgAccountId,
+		TaskType: collectorin.AccountTaskTypeMessageReconcile,
+		TaskKey:  fmt.Sprintf("message-reconcile:%d:%d", job.Id, attempt.Id),
+		Priority: collectorin.EventPriorityUrgent, MaxAttempts: 3,
+	})
+	return gerror.Wrap(err, "提交验证视频协议号对账失败")
 }
 
 func (s *sSysPublish) cleanupTelegramAttemptMessages(ctx context.Context, attempt telegramDeliveryAttempt) error {

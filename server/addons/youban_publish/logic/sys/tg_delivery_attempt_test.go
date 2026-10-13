@@ -53,6 +53,12 @@ func TestTelegramAttemptMarkerStableAndDistinct(t *testing.T) {
 	}
 }
 
+func TestTelegramWebhookDetachedJobSQLKeepsOrderingBarrier(t *testing.T) {
+	if got := telegramWebhookDetachedJobSQL("j."); got != "1=1" {
+		t.Fatalf("telegramWebhookDetachedJobSQL() = %q, want ordering barrier predicate", got)
+	}
+}
+
 func TestTelegramAttemptMarkerSurvivesCaptionComposition(t *testing.T) {
 	marker := telegramAttemptMarker("attempt-caption")
 	caption := telegramCaptionWithJobMarker("资料标题", 42, "display") + marker

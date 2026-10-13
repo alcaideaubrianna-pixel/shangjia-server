@@ -190,8 +190,8 @@ func (s *sSysPublish) postponeTelegramJobForCollectPushPause(ctx context.Context
 	return nil
 }
 
-// Verification uncertainty is reconciled by Webhook without occupying the
-// channel sender. Display uncertainty still preserves the ordering barrier.
-func telegramWebhookDetachedJobSQL(prefix string) string {
-	return fmt.Sprintf("NOT (%sstatus = 'unknown' AND COALESCE(%ssend_phase, '') IN ('display_confirmed', 'verify_sending'))", prefix, prefix)
+// Ambiguous sends remain an ordering barrier until Webhook or account
+// reconciliation confirms the message or moves the job to a terminal state.
+func telegramWebhookDetachedJobSQL(_ string) string {
+	return "1=1"
 }

@@ -23,6 +23,7 @@ import (
 	"github.com/gotd/td/tg"
 
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
+	collectorservice "hotgo/addons/telegram_collector/service"
 	botsysin "hotgo/addons/youban_bot/model/input/sysin"
 	botService "hotgo/addons/youban_bot/service"
 	pdao "hotgo/addons/youban_publish/internal/dao"
@@ -440,20 +441,141 @@ func (s *sSysPublish) telegramJobSentMessageCount(ctx context.Context, jobID int
 	return count, nil
 }
 
-func (s *sSysPublish) handleMessageReconcileAccountTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) error {
-	const prefix = "message-reconcile:"
-	jobID, err := strconv.ParseInt(strings.TrimPrefix(task.TaskKey, prefix), 10, 64)
-	if err != nil || jobID <= 0 || !strings.HasPrefix(task.TaskKey, prefix) {
+func (s *sSysPublish) handleMessageReconcileAccountTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) (err error) {
+	jobID, attemptID, err := parseMessageReconcileTaskKey(task.TaskKey)
+	if err != nil {
 		return gerror.New("消息对账账号任务参数无效")
 	}
 	job, err := s.telegramJobById(ctx, jobID)
 	if err != nil {
 		return err
 	}
-	if job.Status != "unknown" {
+	defer func() {
+		if err == nil || !accountTaskFinalAttempt(task) {
+			return
+		}
+		if failErr := s.failTelegramMediaFallbackJob(ctx, job, err); failErr != nil {
+			g.Log().Warningf(ctx, "协议号对账最终失败后释放频道失败 taskId:%d jobId:%d err:%+v", task.ID, job.Id, failErr)
+		}
+	}()
+	attempt, err := s.telegramAttemptById(ctx, attemptID)
+	if err != nil || attempt.Id <= 0 || attempt.JobId != job.Id || attempt.Phase != "verify" {
+		return gerror.New("验证视频对账Attempt不存在或不匹配")
+	}
+	if job.Status == telegramJobStatusSending &&
+		job.SendPhase == telegramSendPhaseVerifyConfirmed &&
+		attempt.Status == telegramAttemptStatusConfirmed {
+		return s.finalizeTelegramMediaDelivery(ctx, job, true, true)
+	}
+	if job.Status != telegramJobStatusConfirming {
 		return nil
 	}
-	return s.reconcileUnknownTelegramJob(ctx, job)
+	channel, err := s.messagePushChannelFromJob(ctx, job)
+	if err != nil {
+		return err
+	}
+	if task.AccountID != channel.TgAccountId {
+		return gerror.New("验证视频对账账号与目标频道不一致")
+	}
+	messages, err := findTelegramAttemptMessages(ctx, client, channel, attempt)
+	if err != nil {
+		return err
+	}
+	if len(messages) == 0 {
+		if !accountTaskFinalAttempt(task) {
+			return gerror.New("协议号暂未找到Bot验证视频，等待后重试对账")
+		}
+		_, err = collectorservice.AccountTasks().Submit(ctx, &collectorin.AccountTaskSubmit{
+			TenantID: job.TenantId, AccountID: channel.TgAccountId,
+			TaskType: collectorin.AccountTaskTypeMessageMediaFallback,
+			TaskKey:  fmt.Sprintf("message-media-fallback:%d:verify", job.Id),
+			Priority: collectorin.EventPriorityUrgent, MaxAttempts: 5,
+		})
+		if err == nil {
+			s.appendTelegramJobLog(ctx, job, "account_fallback", "queued", "协议号未找到Bot验证视频，已提交协议号补发")
+		}
+		return err
+	}
+	if err = s.saveTelegramSentMessages(ctx, job, messages); err != nil {
+		return err
+	}
+	if err = s.confirmTelegramDeliveryAttempt(ctx, attempt, messages, false); err != nil {
+		return err
+	}
+	transitioned, err := s.transitionTelegramJob(ctx, telegramJobTransition{
+		JobId: job.Id, From: []string{telegramJobStatusConfirming}, To: telegramJobStatusSending,
+		Additional: g.Map{"send_phase": telegramSendPhaseVerifyConfirmed, "error_message": ""},
+	})
+	if err != nil {
+		return err
+	}
+	if !transitioned {
+		// A late Webhook may have advanced this job concurrently. The persisted
+		// messages and confirmed Attempt make this reconciliation idempotent.
+		return nil
+	}
+	job.Status = telegramJobStatusSending
+	return s.finalizeTelegramMediaDelivery(ctx, job, true, true)
+}
+
+func parseMessageReconcileTaskKey(taskKey string) (int64, int64, error) {
+	const prefix = "message-reconcile:"
+	parts := strings.Split(strings.TrimPrefix(taskKey, prefix), ":")
+	if !strings.HasPrefix(taskKey, prefix) || len(parts) != 2 {
+		return 0, 0, gerror.New("消息对账账号任务参数无效")
+	}
+	jobID, jobErr := strconv.ParseInt(parts[0], 10, 64)
+	attemptID, attemptErr := strconv.ParseInt(parts[1], 10, 64)
+	if jobErr != nil || attemptErr != nil || jobID <= 0 || attemptID <= 0 {
+		return 0, 0, gerror.New("消息对账账号任务参数无效")
+	}
+	return jobID, attemptID, nil
+}
+
+func findTelegramAttemptMessages(ctx context.Context, client *telegram.Client, channel *messagePushChannel, attempt telegramDeliveryAttempt) ([]*telegramSentMessage, error) {
+	peer, err := messagePushInputPeer(channel)
+	if err != nil {
+		return nil, err
+	}
+	res, err := client.API().MessagesGetHistory(ctx, &tg.MessagesGetHistoryRequest{Peer: peer, Limit: 100})
+	if err != nil {
+		return nil, gerror.Wrap(err, "协议号读取频道最近消息失败")
+	}
+	return selectTelegramAttemptMessages(tgHistoryMessages(res), attempt)
+}
+
+func selectTelegramAttemptMessages(history []*tg.Message, attempt telegramDeliveryAttempt) ([]*telegramSentMessage, error) {
+	marker := telegramAttemptMarker(attempt.AttemptToken)
+	var groupedID int64
+	for _, message := range history {
+		if message != nil && strings.Contains(message.Message, marker) {
+			groupedID, _ = message.GetGroupedID()
+			if groupedID == 0 {
+				if attempt.ExpectedCount > 1 {
+					return nil, gerror.Newf("协议号找到的验证消息不完整：expected=%d actual=1", attempt.ExpectedCount)
+				}
+				return []*telegramSentMessage{{MessageId: int64(message.ID), Purpose: attempt.Phase}}, nil
+			}
+			break
+		}
+	}
+	if groupedID == 0 {
+		return nil, nil
+	}
+	messages := make([]*telegramSentMessage, 0, attempt.ExpectedCount)
+	for _, message := range history {
+		if message == nil {
+			continue
+		}
+		id, ok := message.GetGroupedID()
+		if ok && id == groupedID {
+			messages = append(messages, &telegramSentMessage{MessageId: int64(message.ID), MediaGroupId: strconv.FormatInt(groupedID, 10), Purpose: attempt.Phase})
+		}
+	}
+	if len(messages) != attempt.ExpectedCount {
+		return nil, gerror.Newf("协议号找到的验证媒体组不完整：expected=%d actual=%d", attempt.ExpectedCount, len(messages))
+	}
+	return messages, nil
 }
 
 func (s *sSysPublish) handleMessagePushInlineAccountTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) (err error) {
