@@ -88,7 +88,7 @@ func (s *sSysPublish) upsertPublishJobRecord(ctx context.Context, job telegramJo
 		"status":         status,
 		"message":        message,
 		"created_at":     gtime.Now(),
-	}).OnConflict("job_id").OnDuplicateEx("id", "created_at").Save()
+	}).OnConflict("job_id").OnDuplicateEx("id", "created_at", "status").Save()
 	if err != nil {
 		return gerror.Wrap(err, "保存发布记录失败")
 	}
@@ -109,34 +109,6 @@ func publishRecordStatusFromJob(status string) string {
 	}
 }
 
-// reconcilePublishJobRecords repairs the denormalized operator-facing record
-// when a job reached a terminal state through recovery or replacement paths.
-func (s *sSysPublish) reconcilePublishJobRecords(ctx context.Context, limit int) error {
-	if limit <= 0 {
-		limit = 500
-	}
-	var jobs []telegramJobRecord
-	err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
-		InnerJoin(publishSuccessRecordTable+" r", "r.job_id=j.id").
-		Fields("j.id,j.task_id,j.operation_no,j.tenant_id,j.account_id,j.profile_id,j.channel_id,j.bot_id,j.target_chat_id,j.status,j.error_message").
-		Where("(j.status='sent' AND r.status<>'success') OR (j.status IN ('failed','superseded','unknown') AND r.status<>j.status)").
-		OrderAsc("j.updated_at").Limit(limit).Scan(&jobs)
-	if err != nil {
-		return gerror.Wrap(err, "读取待修复发布记录失败")
-	}
-	for _, job := range jobs {
-		status := publishRecordStatusFromJob(job.Status)
-		message := strings.TrimSpace(job.ErrorMessage)
-		if job.Status == "sent" {
-			message = s.publishSuccessRecordMessage(ctx, job)
-		}
-		if err = s.upsertPublishJobRecord(ctx, job, status, message); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func isFullPushActiveRecord(action string, status string) bool {
 	return action == publishSuccessTypeFull && (status == "pending" || status == "sending")
 }
@@ -151,7 +123,7 @@ func (s *sSysPublish) compactFullPushActiveRecords(ctx context.Context, tenantId
 	mod := g.DB().Model(publishSuccessRecordTable).Safe().Ctx(ctx).
 		Where("tenant_id", tenantId).
 		Where("operation_no >= ? AND operation_no < ?", batchNo+":", batchNo+";").
-		WhereIn("status", []string{"pending", "sending"})
+		Where("job_id IN (SELECT id FROM "+publishTgJobTable+" WHERE status IN (?, ?))", telegramJobStatusPending, telegramJobStatusSending)
 	if keepJobId <= 0 {
 		var latest struct {
 			JobId int64 `json:"job_id"`

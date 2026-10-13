@@ -1294,12 +1294,6 @@ func (s *sSysPublish) supersedeOlderMessagePushJobs(ctx context.Context, job tel
 	}); err != nil {
 		return gerror.Wrap(err, "废弃旧快速推送任务失败")
 	}
-	if _, err = g.DB().Model(publishSuccessRecordTable).Safe().Ctx(ctx).
-		WhereIn("job_id", ids).
-		Data(g.Map{"status": "superseded", "message": message}).
-		Update(); err != nil {
-		return gerror.Wrap(err, "更新旧快速推送记录失败")
-	}
 	return nil
 }
 

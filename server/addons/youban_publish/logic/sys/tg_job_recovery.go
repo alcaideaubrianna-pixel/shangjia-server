@@ -83,9 +83,6 @@ func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 	if err := s.recoverProfilePublishOperationStates(ctx, 100); err != nil {
 		g.Log().Warningf(ctx, "恢复资料上架状态失败：%+v", err)
 	}
-	if err := s.reconcilePublishJobRecords(ctx, 500); err != nil {
-		g.Log().Warningf(ctx, "修复发布记录状态失败：%+v", err)
-	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -114,9 +111,6 @@ func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 			}
 			if err := s.recoverProfilePublishOperationStates(ctx, 100); err != nil {
 				g.Log().Warningf(ctx, "恢复资料上架状态失败：%+v", err)
-			}
-			if err := s.reconcilePublishJobRecords(ctx, 500); err != nil {
-				g.Log().Warningf(ctx, "修复发布记录状态失败：%+v", err)
 			}
 		}
 	}
