@@ -71,12 +71,16 @@ func (s *sSysPublish) rebuildCollectedProfileMedia(ctx context.Context, profileI
 		if rowsErr != nil {
 			return rowsErr
 		}
-		var source *collectEventMediaRow
+		matching := make([]*collectEventMediaRow, 0, len(rows))
 		for _, row := range rows {
-			if row != nil && row.MediaType == target["media_type"].String() && row.SortIndex == target["sort_index"].Int() {
-				source = row
-				break
+			if row != nil && collectMediaTypesEquivalent(row.MediaType, target["media_type"].String()) {
+				matching = append(matching, row)
 			}
+		}
+		position := target["sort_index"].Int() - 1
+		var source *collectEventMediaRow
+		if position >= 0 && position < len(matching) {
+			source = matching[position]
 		}
 		if source == nil || strings.TrimSpace(source.SourceMessageRef) == "" {
 			continue
@@ -124,6 +128,14 @@ func (s *sSysPublish) rebuildCollectedProfileMedia(ctx context.Context, profileI
 		return gerror.New("资料没有可恢复的Telegram原始媒体")
 	}
 	return nil
+}
+
+func collectMediaTypesEquivalent(source, target string) bool {
+	source, target = strings.ToLower(strings.TrimSpace(source)), strings.ToLower(strings.TrimSpace(target))
+	if source == target {
+		return true
+	}
+	return (source == "photo" && target == "image") || (source == "image" && target == "photo")
 }
 
 func (s *sSysPublish) resumeRepairedTelegramJob(ctx context.Context, jobID int64) error {
