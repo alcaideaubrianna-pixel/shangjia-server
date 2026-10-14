@@ -88,7 +88,7 @@ func (s *sSysPublish) upsertPublishJobRecord(ctx context.Context, job telegramJo
 		"status":         status,
 		"message":        message,
 		"created_at":     gtime.Now(),
-	}).OnConflict("job_id").OnDuplicateEx("id", "created_at", "status").Save()
+	}).OnConflict("job_id").OnDuplicateEx("id", "created_at").Save()
 	if err != nil {
 		return gerror.Wrap(err, "保存发布记录失败")
 	}

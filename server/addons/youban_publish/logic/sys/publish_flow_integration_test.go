@@ -81,6 +81,17 @@ func TestLocalFullAndCyclePublishFlow(t *testing.T) {
 		if displayErr != nil || verifyErr != nil || len(displayMedia)+len(verifyMedia) == 0 {
 			t.Fatalf("read latest profile media: display=%d verify=%d displayErr=%v verifyErr=%v", len(displayMedia), len(verifyMedia), displayErr, verifyErr)
 		}
+		if err = service.upsertPublishJobRecord(ctx, job, "pending", "TG资料等待推送"); err != nil {
+			t.Fatalf("create pending publish record: %v", err)
+		}
+		if err = service.upsertPublishJobRecord(ctx, job, "success", "TG资料推送成功"); err != nil {
+			t.Fatalf("promote publish record to success: %v", err)
+		}
+		record, recordErr := g.DB().Model(publishSuccessRecordTable).Safe().Ctx(ctx).
+			Fields("status,message").Where("job_id", job.Id).One()
+		if recordErr != nil || record["status"].String() != "success" || record["message"].String() != "TG资料推送成功" {
+			t.Fatalf("publish record was not promoted: record=%v err=%v", record, recordErr)
+		}
 		_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 			WhereNull("task_id").Where("profile_id", profile.ProfileId).Where("operation_no", operationNo).
 			Data(g.Map{"status": "sent", "dispatch_status": tgDispatchStatusDone}).Update()
