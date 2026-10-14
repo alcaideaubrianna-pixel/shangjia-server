@@ -51,21 +51,26 @@ func (scanMediaMessageHandler) Handle(ctx context.Context, bot *sSysBot, event *
 	}
 	userId := fmt.Sprintf("%d", event.Msg.From.ID)
 	groupId := strings.TrimSpace(event.Msg.MediaGroupID)
+	traceId := ""
 	if groupId != "" {
-		if err = bot.acknowledgeScanMediaGroup(ctx, event.BotId, userId, event.Msg); err != nil {
+		if traceId, err = bot.acknowledgeScanMediaGroup(ctx, event.BotId, userId, event.Msg); err != nil {
 			return true, err
 		}
 		if bot.scanMediaGroupResolved(ctx, event.BotId, userId, groupId) {
 			return true, nil
 		}
-	} else if err = bot.acknowledgeScanMedia(ctx, event.BotId, userId, event.Msg); err != nil {
-		return true, err
+	} else {
+		if traceId, err = bot.acknowledgeScanMedia(ctx, event.BotId, userId, event.Msg); err != nil {
+			return true, err
+		}
 	}
+	ctx = withScanTrace(ctx, traceId)
+	g.Log().Info(ctx, "Bot扫图请求开始", g.Map{"traceId": traceId, "botId": event.BotId, "userId": userId, "groupId": groupId, "messageId": event.Msg.ID})
 	lookupStartedAt := time.Now()
 	note, _, lookupErr := bot.lookupForwardedScanProfile(ctx, event.BotId, account, event.Msg)
 	if lookupErr != nil {
 		g.Log().Warning(ctx, "Bot转发资料快捷查询失败，降级扫图", g.Map{
-			"botId": event.BotId, "tenantId": account.TenantId, "accountId": account.AccountId, "err": lookupErr,
+			"traceId": traceId, "botId": event.BotId, "tenantId": account.TenantId, "accountId": account.AccountId, "err": lookupErr,
 		})
 	}
 	if note != nil && note.Id > 0 {

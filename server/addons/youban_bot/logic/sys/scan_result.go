@@ -33,19 +33,22 @@ func (s *sSysBot) searchScanMediaAndReply(ctx context.Context, botId int64, chat
 		return gerror.New("扫图搜索参数不完整")
 	}
 	searchStartedAt := time.Now()
+	traceId := scanTraceId(ctx)
 	list, total, err := publishService.SysPublish().BotProfileMediaSearch(ctx, &publishsysin.BotMediaSearchInp{
 		TenantId:    account.TenantId,
 		AccountId:   account.AccountId,
 		AccountType: account.AccountType,
+		TraceId:     traceId,
 		Items:       items,
 		Threshold:   12,
 	})
 	observeScanStage(ctx, botId, "fingerprint_search", searchStartedAt, err)
+	g.Log().Info(ctx, "Bot扫图搜索完成", g.Map{"traceId": traceId, "botId": botId, "accountId": account.AccountId, "durationMs": time.Since(searchStartedAt).Milliseconds(), "total": total, "err": err})
 	if err != nil {
 		return s.replyBotError(ctx, botId, chatId, "扫图搜索", err)
 	}
 	if len(list) == 0 {
-		return s.sendMessageOnly(ctx, botId, chatId, "未找到相似资料。")
+		return s.sendMessageOnly(ctx, botId, chatId, fmt.Sprintf("未找到相似资料。\n（追踪号 %s）", traceId))
 	}
 	token := strings.ToUpper(grand.S(10))
 	state := &scanResultState{TenantId: account.TenantId, AccountId: account.AccountId, AccountType: account.AccountType}
@@ -81,12 +84,13 @@ func (s *sSysBot) searchScanMediaAndReply(ctx context.Context, botId int64, chat
 	if total > len(state.ProfileIds) {
 		text = fmt.Sprintf("找到 %d 条相似资料，最多展示 %d 条，请选择要查看的资料：", total, len(state.ProfileIds))
 	}
+	text += fmt.Sprintf("\n（追踪号 %s）", traceId)
 	row, err := s.botById(ctx, botId)
 	if err != nil {
 		return err
 	}
 	g.Log().Info(ctx, "Bot扫图结果已组装", g.Map{
-		"botId": botId, "accountId": account.AccountId, "resultTotal": len(state.ProfileIds), "sourceLinkTotal": sourceLinkTotal,
+		"traceId": traceId, "botId": botId, "accountId": account.AccountId, "resultTotal": len(state.ProfileIds), "sourceLinkTotal": sourceLinkTotal,
 	})
 	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, html.EscapeString(text), "HTML", false, &models.InlineKeyboardMarkup{InlineKeyboard: buttons})
 	return err

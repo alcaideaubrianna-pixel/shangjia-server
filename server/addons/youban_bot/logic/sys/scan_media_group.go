@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/util/grand"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/cache"
@@ -22,6 +23,7 @@ type scanMediaGroupPending struct {
 	ChatId    string                      `json:"chatId"`
 	UserId    string                      `json:"userId"`
 	CreatedAt int64                       `json:"createdAt"`
+	TraceId   string                      `json:"traceId"`
 	Items     []*sysin.BotMediaSearchItem `json:"items"`
 }
 
@@ -47,7 +49,10 @@ func (s *sSysBot) collectScanMediaGroup(ctx context.Context, botId int64, userId
 		}
 	}
 	if isFirst {
-		pending = &scanMediaGroupPending{BotId: botId, ChatId: fmt.Sprintf("%d", msg.Chat.ID), UserId: userId, CreatedAt: time.Now().Unix()}
+		pending = &scanMediaGroupPending{BotId: botId, ChatId: fmt.Sprintf("%d", msg.Chat.ID), UserId: userId, CreatedAt: time.Now().Unix(), TraceId: scanTraceId(ctx)}
+	}
+	if pending.TraceId == "" {
+		pending.TraceId = scanTraceId(ctx)
 	}
 	pending.Items = append(pending.Items, items...)
 	data, err := json.Marshal(pending)
@@ -81,51 +86,87 @@ func scanMediaGroupLockKey(botId int64, userId string, groupId string) string {
 
 // acknowledgeScanMedia gives single-media scans the same immediate feedback
 // as albums. The message id makes retries/webhook redelivery idempotent.
-func (s *sSysBot) acknowledgeScanMedia(ctx context.Context, botId int64, userId string, msg *models.Message) error {
+func (s *sSysBot) acknowledgeScanMedia(ctx context.Context, botId int64, userId string, msg *models.Message) (string, error) {
 	if msg == nil {
-		return nil
+		return "", nil
 	}
 	key := fmt.Sprintf("youban_bot:scan_ack:%d:%s:%d", botId, strings.TrimSpace(userId), msg.ID)
 	value, err := cache.Instance().Get(ctx, key)
 	if err == nil && value != nil && !value.IsNil() {
-		return nil
+		if traceId := normalizeScanTraceId(value.String()); traceId != "" {
+			return traceId, nil
+		}
 	}
-	if err := cache.Instance().Set(ctx, key, 1, scanMediaGroupTTL); err != nil {
-		return err
+	traceId := newScanTraceId()
+	if err := cache.Instance().Set(ctx, key, traceId, scanMediaGroupTTL); err != nil {
+		return "", err
 	}
-	if err := s.sendMessageOnly(ctx, botId, fmt.Sprintf("%d", msg.Chat.ID), "已收到，正在查询，请稍候…"); err != nil {
+	if err := s.sendMessageOnly(ctx, botId, fmt.Sprintf("%d", msg.Chat.ID), scanAcknowledgement(traceId)); err != nil {
 		_, _ = cache.Instance().Remove(ctx, key)
-		return err
+		return "", err
 	}
-	return nil
+	return traceId, nil
 }
 
 // acknowledgeScanMediaGroup gives immediate feedback before Telegram file
 // resolution or fingerprint calculation starts. The distributed lock prevents
 // concurrent album updates from sending the acknowledgement more than once.
-func (s *sSysBot) acknowledgeScanMediaGroup(ctx context.Context, botId int64, userId string, msg *models.Message) error {
+func (s *sSysBot) acknowledgeScanMediaGroup(ctx context.Context, botId int64, userId string, msg *models.Message) (string, error) {
 	if msg == nil || strings.TrimSpace(msg.MediaGroupID) == "" {
-		return nil
+		return "", nil
 	}
 	lockCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	lock := hglock.NewConfig(10*time.Second, 50*time.Millisecond).Mutex(scanMediaGroupLockKey(botId, userId, msg.MediaGroupID))
 	if err := lock.Lock(lockCtx); err != nil {
-		return nil
+		return "", nil
 	}
 	defer func() { _ = lock.Unlock(context.Background()) }()
 	ackKey := scanMediaGroupAckKey(botId, userId, msg.MediaGroupID)
 	if value, err := cache.Instance().Get(ctx, ackKey); err == nil && value != nil && !value.IsNil() {
-		return nil
+		if traceId := normalizeScanTraceId(value.String()); traceId != "" {
+			return traceId, nil
+		}
 	}
-	if err := cache.Instance().Set(ctx, ackKey, 1, scanMediaGroupTTL); err != nil {
-		return err
+	traceId := newScanTraceId()
+	if err := cache.Instance().Set(ctx, ackKey, traceId, scanMediaGroupTTL); err != nil {
+		return "", err
 	}
-	if err := s.sendMessageOnly(ctx, botId, fmt.Sprintf("%d", msg.Chat.ID), "已收到，正在查询，请稍候…"); err != nil {
+	if err := s.sendMessageOnly(ctx, botId, fmt.Sprintf("%d", msg.Chat.ID), scanAcknowledgement(traceId)); err != nil {
 		_, _ = cache.Instance().Remove(ctx, ackKey)
-		return err
+		return "", err
 	}
-	return nil
+	return traceId, nil
+}
+
+type scanTraceContextKey struct{}
+
+func newScanTraceId() string {
+	return strings.ToUpper(grand.S(8))
+}
+
+func normalizeScanTraceId(value string) string {
+	value = strings.ToUpper(strings.TrimSpace(value))
+	if len(value) != 8 {
+		return ""
+	}
+	return value
+}
+
+func withScanTrace(ctx context.Context, traceId string) context.Context {
+	return context.WithValue(ctx, scanTraceContextKey{}, normalizeScanTraceId(traceId))
+}
+
+func scanTraceId(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	value, _ := ctx.Value(scanTraceContextKey{}).(string)
+	return normalizeScanTraceId(value)
+}
+
+func scanAcknowledgement(traceId string) string {
+	return fmt.Sprintf("已收到，正在查询，请稍候…\n（追踪号 %s）", traceId)
 }
 
 func (s *sSysBot) scanMediaGroupResolved(ctx context.Context, botId int64, userId string, groupId string) bool {
@@ -161,6 +202,7 @@ func (s *sSysBot) finishScanMediaGroup(botId int64, userId string, groupId strin
 	if err = json.Unmarshal([]byte(value.String()), &pending); err != nil || len(pending.Items) == 0 {
 		return
 	}
+	ctx = withScanTrace(ctx, pending.TraceId)
 	_, _ = cache.Instance().Remove(ctx, key)
 	account, err := s.boundProfileAccountByUser(ctx, parseTelegramUserId(userId))
 	if err != nil {
@@ -172,7 +214,7 @@ func (s *sSysBot) finishScanMediaGroup(botId int64, userId string, groupId strin
 	if err = s.searchScanMediaAndReply(ctx, botId, pending.ChatId, account, pending.Items); err != nil {
 		observeScanStage(ctx, botId, "group_total", startedAt, err)
 		observeScanRequest(ctx, botId, "failed")
-		g.Log().Warningf(ctx, "处理扫图媒体组失败 botId:%d userId:%s err:%+v", botId, userId, err)
+		g.Log().Warningf(ctx, "处理扫图媒体组失败 traceId:%s botId:%d userId:%s err:%+v", pending.TraceId, botId, userId, err)
 		return
 	}
 	observeScanStage(ctx, botId, "group_total", startedAt, nil)

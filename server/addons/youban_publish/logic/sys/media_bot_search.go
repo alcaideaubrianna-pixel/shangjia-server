@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
+	"golang.org/x/sync/errgroup"
 
 	publishmodel "hotgo/addons/youban_publish/model"
 	"hotgo/addons/youban_publish/model/input/sysin"
@@ -15,11 +17,24 @@ import (
 
 const botMediaSearchMaxResults = 20
 
+const (
+	botMediaSearchTimeout   = 45 * time.Second
+	botMediaColdItemTimeout = 12 * time.Second
+	botMediaColdConcurrency = 4
+)
+
 type botMediaSearchCandidate struct {
 	ProfileId  int64
 	Distance   int
 	MatchCount int
 }
+
+type botMediaColdFingerprintResult struct {
+	fingerprint *mediaFingerprint
+	err         error
+}
+
+type botMediaColdFingerprintLoader func(context.Context, string, string) (*mediaFingerprint, bool, error)
 
 func (s *sSysPublish) EnsureBotMediaSearchAccess(ctx context.Context, tenantId int64) error {
 	return s.ensureTenantVipFeature(ctx, tenantId, sysin.TenantVipFeatureSimilarMedia)
@@ -29,6 +44,13 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 	if in == nil || in.TenantId <= 0 || in.AccountId <= 0 {
 		return nil, 0, gerror.New("上架账号信息不完整")
 	}
+	searchCtx, cancelSearch := context.WithTimeout(ctx, botMediaSearchTimeout)
+	defer cancelSearch()
+	ctx = searchCtx
+	startedAt := time.Now()
+	defer func() {
+		g.Log().Info(ctx, "Bot扫图服务完成", g.Map{"traceId": in.TraceId, "tenantId": in.TenantId, "accountId": in.AccountId, "items": len(in.Items), "durationMs": time.Since(startedAt).Milliseconds()})
+	}()
 	if err := s.ensureTenantVipFeature(ctx, in.TenantId, sysin.TenantVipFeatureSimilarMedia); err != nil {
 		return nil, 0, err
 	}
@@ -79,18 +101,21 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 			return list, total, nil
 		}
 	}
-	// Cold fingerprints are intentionally processed one by one. As soon as one
-	// image finds a profile, later images are never downloaded or decoded.
+	// Download and decode cold fingerprints concurrently, then search them in
+	// the original message order so concurrency cannot change result priority.
+	coldResults := loadBotMediaColdFingerprints(ctx, in.TraceId, coldItems, cachedTelegramImageFingerprint)
 	var lastHashErr error
 	coldProcessed := false
-	for _, item := range coldItems {
-		fingerprint, _, hashErr := cachedTelegramImageFingerprint(ctx, item.FileUniqueId, item.FileUrl)
-		if hashErr != nil {
-			lastHashErr = hashErr
+	for _, result := range coldResults {
+		if result.err != nil {
+			lastHashErr = result.err
+			if ctx.Err() != nil {
+				break
+			}
 			continue
 		}
 		coldProcessed = true
-		list, total, found, searchErr := s.botMediaSearchFingerprint(ctx, fingerprint, searchIn, searchScope, seenHashes)
+		list, total, found, searchErr := s.botMediaSearchFingerprint(ctx, result.fingerprint, searchIn, searchScope, seenHashes)
 		if searchErr != nil {
 			return nil, 0, searchErr
 		}
@@ -102,6 +127,35 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 		return nil, 0, lastHashErr
 	}
 	return []*sysin.NoteModel{}, 0, nil
+}
+
+func loadBotMediaColdFingerprints(ctx context.Context, traceId string, items []*sysin.BotMediaSearchItem, loader botMediaColdFingerprintLoader) []botMediaColdFingerprintResult {
+	results := make([]botMediaColdFingerprintResult, len(items))
+	if len(items) == 0 || loader == nil {
+		return results
+	}
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.SetLimit(botMediaColdConcurrency)
+	for index, item := range items {
+		index, item := index, item
+		group.Go(func() error {
+			if item == nil {
+				return nil
+			}
+			startedAt := time.Now()
+			itemCtx, cancelItem := context.WithTimeout(groupCtx, botMediaColdItemTimeout)
+			fingerprint, cacheHit, err := loader(itemCtx, item.FileUniqueId, item.FileUrl)
+			cancelItem()
+			results[index] = botMediaColdFingerprintResult{fingerprint: fingerprint, err: err}
+			g.Log().Info(ctx, "Bot扫图冷媒体处理完成", g.Map{
+				"traceId": traceId, "fileUniqueId": item.FileUniqueId, "cacheHit": cacheHit,
+				"durationMs": time.Since(startedAt).Milliseconds(), "err": err,
+			})
+			return nil
+		})
+	}
+	_ = group.Wait()
+	return results
 }
 
 func (s *sSysPublish) botMediaSearchFingerprint(ctx context.Context, fingerprint *mediaFingerprint, searchIn *sysin.ProfileImageSearchInp, searchScope *publishmodel.MediaSearchScope, seenHashes map[string]struct{}) ([]*sysin.NoteModel, int, bool, error) {

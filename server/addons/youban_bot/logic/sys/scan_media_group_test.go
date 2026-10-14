@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -61,5 +62,24 @@ func TestHasScanMediaKeepsSingleImageEligible(t *testing.T) {
 	msg := &models.Message{Photo: []models.PhotoSize{{FileID: "photo"}}}
 	if !hasScanMedia(msg) {
 		t.Fatal("single image must remain eligible for scan")
+	}
+}
+
+func TestScanTraceIdRoundTrip(t *testing.T) {
+	traceId := newScanTraceId()
+	if len(traceId) != 8 || traceId != strings.ToUpper(traceId) {
+		t.Fatalf("unexpected scan trace id: %q", traceId)
+	}
+	if got := scanTraceId(withScanTrace(context.Background(), traceId)); got != traceId {
+		t.Fatalf("scan trace id round trip: got %q, want %q", got, traceId)
+	}
+	if acknowledgement := scanAcknowledgement(traceId); !strings.Contains(acknowledgement, traceId) {
+		t.Fatalf("acknowledgement does not contain trace id: %q", acknowledgement)
+	}
+}
+
+func TestNormalizeScanTraceIdRejectsLegacyAcknowledgementValue(t *testing.T) {
+	if got := normalizeScanTraceId("1"); got != "" {
+		t.Fatalf("legacy acknowledgement value must not become a trace id: %q", got)
 	}
 }

@@ -628,6 +628,7 @@ type BotMediaSearchInp struct {
 	TenantId    int64                 `json:"tenantId" dc:"租户ID"`
 	AccountId   int64                 `json:"accountId" dc:"绑定账号ID"`
 	AccountType string                `json:"accountType" dc:"账号类型：admin/uploader"`
+	TraceId     string                `json:"traceId" dc:"扫图业务追踪号"`
 	Items       []*BotMediaSearchItem `json:"items" dc:"待搜索媒体"`
 	Threshold   int                   `json:"threshold" dc:"相似度阈值"`
 }
