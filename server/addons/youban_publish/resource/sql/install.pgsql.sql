@@ -2236,3 +2236,14 @@ JOIN "hg_youban_publish_collect_event" e ON e."id"=d."event_id" AND e."tenant_id
 WHERE d."profile_id">0 AND e."source_chat_id"<>'' AND d."rule_id">0
 ON CONFLICT ("tenant_id","account_id","rule_id","channel_id","profile_id") DO UPDATE SET
   "source_id"=EXCLUDED."source_id","updated_at"=GREATEST("hg_youban_publish_collect_channel_profile"."updated_at",EXCLUDED."updated_at");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_delivery_step" (
+  "id" BIGSERIAL PRIMARY KEY, "job_id" bigint NOT NULL DEFAULT 0,
+  "step_key" varchar(32) NOT NULL DEFAULT '', "status" varchar(32) NOT NULL DEFAULT 'pending',
+  "attempt_id" bigint NOT NULL DEFAULT 0, "retry_count" integer NOT NULL DEFAULT 0,
+  "next_retry_at" timestamp DEFAULT NULL, "error_message" text,
+  "started_at" timestamp DEFAULT NULL, "confirmed_at" timestamp DEFAULT NULL,
+  "created_at" timestamp DEFAULT NULL, "updated_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_delivery_step_job" ON "hg_youban_publish_tg_delivery_step" ("job_id", "step_key");
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_delivery_step_recovery" ON "hg_youban_publish_tg_delivery_step" ("status", "next_retry_at", "id");

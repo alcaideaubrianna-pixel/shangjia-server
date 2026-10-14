@@ -134,6 +134,9 @@ func (s *sSysPublish) updateTelegramJobSendPhase(ctx context.Context, jobId int6
 	if affected == 0 {
 		return gerror.New("TG任务已不在发送状态，停止更新发送阶段")
 	}
+	if projectionErr := s.projectTelegramDeliverySteps(ctx, jobId, phase); projectionErr != nil {
+		g.Log().Warningf(ctx, "投影TG发送步骤失败 jobId:%d phase:%s err:%+v", jobId, phase, projectionErr)
+	}
 	return nil
 }
 

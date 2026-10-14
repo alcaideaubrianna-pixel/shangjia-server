@@ -222,3 +222,14 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_channel_profile" (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_collect_channel_profile" ON "hg_youban_publish_collect_channel_profile" ("tenant_id","account_id","rule_id","channel_id","profile_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_channel_profile_list" ON "hg_youban_publish_collect_channel_profile" ("tenant_id","account_id","rule_id","channel_id","updated_at") WHERE "deleted_at" IS NULL;
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_delivery_step" (
+  "id" BIGSERIAL PRIMARY KEY, "job_id" bigint NOT NULL DEFAULT 0,
+  "step_key" varchar(32) NOT NULL DEFAULT '', "status" varchar(32) NOT NULL DEFAULT 'pending',
+  "attempt_id" bigint NOT NULL DEFAULT 0, "retry_count" integer NOT NULL DEFAULT 0,
+  "next_retry_at" timestamp DEFAULT NULL, "error_message" text,
+  "started_at" timestamp DEFAULT NULL, "confirmed_at" timestamp DEFAULT NULL,
+  "created_at" timestamp DEFAULT NULL, "updated_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_delivery_step_job" ON "hg_youban_publish_tg_delivery_step" ("job_id", "step_key");
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_delivery_step_recovery" ON "hg_youban_publish_tg_delivery_step" ("status", "next_retry_at", "id");

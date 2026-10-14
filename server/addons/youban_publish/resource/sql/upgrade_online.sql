@@ -103,3 +103,14 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_channel_profile` (
   UNIQUE KEY `uk_ybp_collect_channel_profile` (`tenant_id`,`account_id`,`rule_id`,`channel_id`,`profile_id`),
   KEY `idx_ybp_collect_channel_profile_list` (`tenant_id`,`account_id`,`rule_id`,`channel_id`,`updated_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='采集频道资料计数索引';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_delivery_step` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT, `job_id` bigint(20) NOT NULL DEFAULT 0,
+  `step_key` varchar(32) NOT NULL DEFAULT '', `status` varchar(32) NOT NULL DEFAULT 'pending',
+  `attempt_id` bigint(20) NOT NULL DEFAULT 0, `retry_count` int(11) NOT NULL DEFAULT 0,
+  `next_retry_at` datetime DEFAULT NULL, `error_message` text,
+  `started_at` datetime DEFAULT NULL, `confirmed_at` datetime DEFAULT NULL,
+  `created_at` datetime DEFAULT NULL, `updated_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`), UNIQUE KEY `uk_ybp_tg_delivery_step_job` (`job_id`,`step_key`),
+  KEY `idx_ybp_tg_delivery_step_recovery` (`status`,`next_retry_at`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='TG发布步骤状态';
