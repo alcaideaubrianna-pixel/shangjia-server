@@ -3,10 +3,8 @@ package sys
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
-	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -41,32 +39,20 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 	mod := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).Unscoped().
 		Where("j.id <> ?", job.Id).
 		Where(telegramWebhookDetachedJobSQL("j.")).
-		Where(`(
-			(j.status = 'sending' AND j.updated_at > ?) OR
-			(j.status IN ('pending', 'failed_retry', 'unknown') AND j.dispatch_status = ? AND j.dispatched_at > ?) OR
-			(j.status IN ('pending', 'failed_retry', 'unknown') AND j.dispatch_status = ? AND j.updated_at > ?)
-		)`,
-			gtime.Now().Add(-telegramSendingJobRecoverAfter),
-			tgDispatchStatusQueued,
-			gtime.Now().Add(-telegramDispatchJobRecoverAfter),
-			tgDispatchStatusProcessing,
-			gtime.Now().Add(-telegramDispatchJobRecoverAfter),
-		)
+		WhereIn("j.status", []string{
+			telegramJobStatusPending, telegramJobStatusRetryWait,
+			telegramJobStatusConfirming, telegramJobStatusSending,
+		})
 	if job.ChannelId > 0 {
 		mod = mod.Where("j.channel_id", job.ChannelId)
 	} else {
 		mod = mod.Where("j.target_chat_id", normalizeTelegramChannelChatID(job.TargetChatId))
 	}
-	if job.CollectSourceId > 0 && job.CollectSourceMessageId > 0 && strings.TrimSpace(job.CollectSourceChatId) != "" {
-		mod = mod.Where(
-			`j.collect_source_id = ? AND j.collect_source_chat_id = ? AND j.collect_source_message_id > 0 AND j.collect_source_message_id < ?`,
-			job.CollectSourceId,
-			strings.TrimSpace(job.CollectSourceChatId),
-			job.CollectSourceMessageId,
-		)
-	} else {
-		mod = mod.Where(`(j.created_at < ? OR (j.created_at = ? AND j.id < ?))`, createdAt, createdAt, job.Id)
-	}
+	// A destination channel is a single ordered stream. Source message IDs are
+	// only comparable within one source channel, so using them here lets jobs
+	// from another collection source bypass an older job between its display
+	// and verification phases.
+	mod = mod.Where(`(j.created_at < ? OR (j.created_at = ? AND j.id < ?))`, createdAt, createdAt, job.Id)
 	if isTelegramUrgentJob(job) {
 		mod = mod.Where("j.priority <= ?", tgJobPriorityUrgent)
 	}
@@ -93,7 +79,7 @@ func (s *sSysPublish) wakeNextTelegramChannelJob(ctx context.Context, job telegr
 		Where(telegramWebhookDetachedJobSQL("")).
 		Where("(dispatch_status = ? OR dispatch_status = '')", tgDispatchStatusIdle).
 		Where("(next_retry_at IS NULL OR next_retry_at <= ?)", now).
-		Order(gdb.Raw(telegramJobEffectivePrioritySQL("") + " ASC")).OrderAsc("id").
+		OrderAsc("created_at").OrderAsc("id").
 		Limit(telegramChannelActiveJobLimit).
 		Scan(&nextJobs)
 	if err != nil {

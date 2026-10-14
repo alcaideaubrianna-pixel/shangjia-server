@@ -159,6 +159,15 @@ func TestAccountFallbackPhaseConfirmedPreventsDuplicateSend(t *testing.T) {
 	}
 }
 
+func TestTelegramMediaPurposeLabel(t *testing.T) {
+	if got := telegramMediaPurposeLabel("display"); got != "展示资料" {
+		t.Fatalf("display label = %q", got)
+	}
+	if got := telegramMediaPurposeLabel("verify"); got != "验证视频" {
+		t.Fatalf("verify label = %q", got)
+	}
+}
+
 func TestSelectTelegramAttemptMessages(t *testing.T) {
 	attempt := telegramDeliveryAttempt{AttemptToken: "verify-attempt", Phase: "verify"}
 	marker := telegramAttemptMarker(attempt.AttemptToken)

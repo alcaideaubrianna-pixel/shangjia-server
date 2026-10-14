@@ -556,17 +556,14 @@ func (s *sSysPublish) handleMessageReconcileAccountTask(ctx context.Context, cli
 		if !accountTaskFinalAttempt(task) {
 			return gerror.New("协议号暂未找到Bot发送消息，等待后重试对账")
 		}
-		if attempt.Phase == "display" {
-			return gerror.New("协议号最终未找到Bot展示消息，拒绝自动重发以避免重复推送")
-		}
 		_, err = collectorservice.AccountTasks().Submit(ctx, &collectorin.AccountTaskSubmit{
 			TenantID: job.TenantId, AccountID: channel.TgAccountId,
 			TaskType: collectorin.AccountTaskTypeMessageMediaFallback,
-			TaskKey:  fmt.Sprintf("message-media-fallback:%d:verify", job.Id),
+			TaskKey:  fmt.Sprintf("message-media-fallback:%d:%s", job.Id, attempt.Phase),
 			Priority: collectorin.EventPriorityUrgent, MaxAttempts: 5,
 		})
 		if err == nil {
-			s.appendTelegramJobLog(ctx, job, "account_fallback", "queued", "协议号未找到Bot验证视频，已提交协议号补发")
+			s.appendTelegramJobLog(ctx, job, "account_fallback", "queued", fmt.Sprintf("协议号未找到Bot%s消息，已提交协议号补发", telegramMediaPurposeLabel(attempt.Phase)))
 		}
 		return err
 	}
@@ -600,6 +597,13 @@ func (s *sSysPublish) handleMessageReconcileAccountTask(ctx context.Context, cli
 		return s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 0, false)
 	}
 	return s.finalizeTelegramMediaDelivery(ctx, job, true, true)
+}
+
+func telegramMediaPurposeLabel(purpose string) string {
+	if purpose == "verify" {
+		return "验证视频"
+	}
+	return "展示资料"
 }
 
 func parseMessageReconcileTaskKey(taskKey string) (int64, int64, error) {
