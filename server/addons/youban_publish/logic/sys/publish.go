@@ -18,30 +18,32 @@ import (
 )
 
 type sSysPublish struct {
-	accountClientsMu      sync.RWMutex
-	accountClients        map[int64]*telegram.Client
-	runtimeCancel         context.CancelFunc
-	runtimeDone           chan struct{}
-	runtimeMu             publishRuntimeMutex
-	tgLoginMu             publishRuntimeMutex
-	tgLogins              map[string]*telegramLoginRuntime
-	tgQueueMu             publishRuntimeMutex
-	tgQueueClient         *asynq.Client
-	tgQueueServer         *asynq.Server
-	tgBulkQueueServer     *asynq.Server
-	mediaQueueServer      *asynq.Server
-	mediaBulkQueueServer  *asynq.Server
-	mediaProcessServer    *asynq.Server
-	relayQueueServer      *asynq.Server
-	autoDeleteQueueServer *asynq.Server
-	attemptTimeoutServer  *asynq.Server
-	collectRealtimeServer *asynq.Server
-	backgroundQueueServer *asynq.Server
-	cycleQueueServer      *asynq.Server
-	profileQueueServer    *asynq.Server
-	duplicateQueueServer  *asynq.Server
-	historyQueueServer    *asynq.Server
-	mattingQueueServer    *asynq.Server
+	accountClientsMu          sync.RWMutex
+	accountClients            map[int64]*telegram.Client
+	runtimeCancel             context.CancelFunc
+	runtimeDone               chan struct{}
+	runtimeMu                 publishRuntimeMutex
+	tgLoginMu                 publishRuntimeMutex
+	tgLogins                  map[string]*telegramLoginRuntime
+	tgQueueMu                 publishRuntimeMutex
+	tgQueueClient             *asynq.Client
+	tgQueueServer             *asynq.Server
+	tgBulkQueueServer         *asynq.Server
+	mediaQueueServer          *asynq.Server
+	mediaBulkQueueServer      *asynq.Server
+	mediaProcessServer        *asynq.Server
+	relayQueueServer          *asynq.Server
+	autoDeleteQueueServer     *asynq.Server
+	attemptTimeoutServer      *asynq.Server
+	collectRealtimeServer     *asynq.Server
+	backgroundQueueServer     *asynq.Server
+	materialImportPullServer  *asynq.Server
+	materialImportMediaServer *asynq.Server
+	cycleQueueServer          *asynq.Server
+	profileQueueServer        *asynq.Server
+	duplicateQueueServer      *asynq.Server
+	historyQueueServer        *asynq.Server
+	mattingQueueServer        *asynq.Server
 
 	telegramChannelMu    publishRuntimeMutex
 	telegramChannelLocks map[string]*publishRuntimeMutex

@@ -160,6 +160,8 @@ func telegramObserveQueueNames(ctx context.Context) []string {
 		tgQueueNameAutoDelete:             {},
 		tgQueueNameAttemptTimeout:         {},
 		tgQueueNameBackground:             {},
+		tgQueueNameMaterialImportPull:     {},
+		tgQueueNameMaterialImportMedia:    {},
 		tgQueueNameCycle:                  {},
 		tgQueueNameCollectProcessRealtime: {},
 		tgQueueNameCollectProcess:         {},

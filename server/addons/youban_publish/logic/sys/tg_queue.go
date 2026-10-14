@@ -30,6 +30,8 @@ const (
 	tgQueueNameAutoDelete             = "youban_publish_auto_delete"
 	tgQueueNameAttemptTimeout         = "youban_publish_attempt_timeout"
 	tgQueueNameBackground             = "youban_publish_background"
+	tgQueueNameMaterialImportPull     = "youban_publish_material_import_pull"
+	tgQueueNameMaterialImportMedia    = "youban_publish_material_import_media"
 	tgQueueNameCycle                  = "youban_publish_cycle"
 	tgQueueNameCollectProcessRealtime = "youban_publish_collect_process_realtime"
 	tgQueueNameCollectProcess         = "youban_publish_collect_process"

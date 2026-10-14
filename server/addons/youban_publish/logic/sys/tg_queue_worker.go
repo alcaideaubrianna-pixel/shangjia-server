@@ -50,7 +50,7 @@ func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
 
 func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	s.tgQueueMu.Lock()
-	if s.autoDeleteQueueServer != nil || s.attemptTimeoutServer != nil || s.collectRealtimeServer != nil || s.backgroundQueueServer != nil || s.cycleQueueServer != nil {
+	if s.autoDeleteQueueServer != nil || s.attemptTimeoutServer != nil || s.collectRealtimeServer != nil || s.backgroundQueueServer != nil || s.materialImportPullServer != nil || s.materialImportMediaServer != nil || s.cycleQueueServer != nil {
 		s.tgQueueMu.Unlock()
 		return
 	}
@@ -72,6 +72,16 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	server := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
 		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.backgroundConcurrency", 4).Int(),
 		Queues:         collectProcessWorkerQueues(),
+		RetryDelayFunc: telegramQueueRetryDelay,
+	})
+	materialImportPullServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
+		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.materialImportPullConcurrency", 8).Int(),
+		Queues:         map[string]int{tgQueueNameMaterialImportPull: 1},
+		RetryDelayFunc: telegramQueueRetryDelay,
+	})
+	materialImportMediaServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
+		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.materialImportMediaConcurrency", 4).Int(),
+		Queues:         map[string]int{tgQueueNameMaterialImportMedia: 1},
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
 	cycleServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
@@ -105,6 +115,8 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	s.attemptTimeoutServer = attemptTimeoutServer
 	s.collectRealtimeServer = collectRealtimeServer
 	s.backgroundQueueServer = server
+	s.materialImportPullServer = materialImportPullServer
+	s.materialImportMediaServer = materialImportMediaServer
 	s.cycleQueueServer = cycleServer
 	s.profileQueueServer = profileServer
 	s.duplicateQueueServer = duplicateServer
@@ -132,6 +144,8 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	backgroundMux.HandleFunc(tgTaskTypeCollectSourceDelete, s.handleCollectSourceDeleteTask)
 	backgroundMux.HandleFunc(tgTaskTypeBotMediaRepair, s.handleBotMediaRepairTask)
 	backgroundMux.HandleFunc(tgTaskTypeAttemptTimeout, s.handleTelegramAttemptTimeoutTask)
+	materialImportMux := asynq.NewServeMux()
+	materialImportMux.HandleFunc(tgTaskTypeMaterialImport, s.handleMaterialImportTask)
 	relayMux := asynq.NewServeMux()
 	relayMux.HandleFunc(tgTaskTypeRelayMedia, s.handleRelayMediaTask)
 	relayMux.HandleFunc(tgTaskTypeRelayMediaGroup, s.handleRelayMediaGroupTask)
@@ -175,6 +189,16 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	go func() {
 		if err := server.Run(backgroundMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
 			g.Log().Errorf(ctx, "启动上架插件后台队列失败：%+v", err)
+		}
+	}()
+	go func() {
+		if err := materialImportPullServer.Run(materialImportMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
+			g.Log().Errorf(ctx, "启动资料导入拉取队列失败：%+v", err)
+		}
+	}()
+	go func() {
+		if err := materialImportMediaServer.Run(materialImportMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
+			g.Log().Errorf(ctx, "启动资料导入媒体队列失败：%+v", err)
 		}
 	}()
 	go func() {
@@ -302,6 +326,8 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	attemptTimeoutServer := s.attemptTimeoutServer
 	collectRealtimeServer := s.collectRealtimeServer
 	backgroundServer := s.backgroundQueueServer
+	materialImportPullServer := s.materialImportPullServer
+	materialImportMediaServer := s.materialImportMediaServer
 	cycleServer := s.cycleQueueServer
 	profileServer := s.profileQueueServer
 	duplicateServer := s.duplicateQueueServer
@@ -317,6 +343,8 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	s.attemptTimeoutServer = nil
 	s.collectRealtimeServer = nil
 	s.backgroundQueueServer = nil
+	s.materialImportPullServer = nil
+	s.materialImportMediaServer = nil
 	s.cycleQueueServer = nil
 	s.profileQueueServer = nil
 	s.duplicateQueueServer = nil
@@ -350,6 +378,12 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	}
 	if backgroundServer != nil {
 		backgroundServer.Shutdown()
+	}
+	if materialImportPullServer != nil {
+		materialImportPullServer.Shutdown()
+	}
+	if materialImportMediaServer != nil {
+		materialImportMediaServer.Shutdown()
 	}
 	if cycleServer != nil {
 		cycleServer.Shutdown()
