@@ -28,6 +28,7 @@ const (
 	collectMaterialVerifyRetryDelay        = time.Minute
 	collectMaterialWaitingVerifyRetryDelay = 10 * time.Second
 	collectMaterialWindowLookahead         = 256
+	collectMaterialWindowMaxScan           = 10000
 	collectMaterialWindowExecutionTimeout  = 90 * time.Second
 	collectMaterialRolePending             = "pending"
 	collectMaterialRoleDisplay             = "display"
@@ -76,7 +77,7 @@ func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload co
 		OrderAsc("e.source_chat_id").
 		OrderAsc("e.source_message_id").
 		OrderAsc("e.id").
-		Limit(batchSize + collectMaterialWindowLookahead).
+		Limit(batchSize + collectMaterialWindowMaxScan).
 		All()
 	if err != nil {
 		return gerror.Wrap(err, "读取采集源消息窗口失败")
@@ -93,7 +94,7 @@ func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload co
 		chatID := strings.TrimSpace(row["source_chat_id"].String())
 		byChat[chatID] = append(byChat[chatID], row)
 	}
-	windowTruncated := len(rows) >= batchSize+collectMaterialWindowLookahead
+	windowTruncated := len(rows) >= batchSize+collectMaterialWindowMaxScan
 	for chatID, chatRows := range byChat {
 		if err := s.processCollectMessageWindow(ctx, payload, chatID, chatRows, processEventIds, windowTruncated); err != nil {
 			return err
@@ -121,26 +122,50 @@ func (s *sSysPublish) processTargetCollectEventWindow(ctx context.Context, paylo
 		return gerror.Newf("目标采集事件时间无效 eventId:%d", target["id"].Int64())
 	}
 
-	now := gtime.Now()
-	rows, err := collectProcessEventModel(ctx, payload).
-		WhereIn("e.status", collectProcessWindowStatuses()).
-		Where("((e.status <> ? AND (e.material_role IS NULL OR e.material_role = '' OR e.material_role IN (?,?))) OR (e.status = ? AND e.material_role = ? AND e.error_message = ?))", sysin.CollectEventStatusIgnored, collectMaterialRolePending, collectMaterialRoleDisplay, sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage).
-		Where("(e.processed_at IS NULL AND (e.material_group_status IS NULL OR e.material_group_status <> ? OR e.updated_at <= ?)) OR (e.status = ? AND e.material_role = ? AND e.error_message = ? AND e.updated_at <= ?)", collectMaterialGroupWaitingVerify, now.Add(-collectMaterialWaitingVerifyRetryDelay), sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage, now.Add(-collectMaterialVerifyRetryDelay)).
-		Where("e.source_message_id >= ?", messageID).
-		Where("COALESCE(e.received_at,e.created_at) <= ?", eventAt.Add(collectMaterialVerifyWindow())).
-		Fields("e.*").
-		OrderAsc("e.source_message_id").
-		OrderAsc("e.id").
-		Limit(collectMaterialWindowLookahead + 1).
-		All()
+	rows, windowTruncated, err := s.loadTargetCollectMaterialWindow(ctx, payload, target, eventAt)
 	if err != nil {
 		return gerror.Wrap(err, "读取目标采集事件验证窗口失败")
 	}
 	if len(rows) == 0 || rows[0]["id"].Int64() != target["id"].Int64() {
 		return gerror.Newf("目标采集事件当前不可处理 eventId:%d status:%s role:%s", target["id"].Int64(), target["status"].String(), strings.TrimSpace(target["material_role"].String()))
 	}
-	windowTruncated := len(rows) >= collectMaterialWindowLookahead+1
 	return s.processCollectMessageWindow(ctx, payload, target["source_chat_id"].String(), rows, map[int64]struct{}{target["id"].Int64(): {}}, windowTruncated)
+}
+
+func (s *sSysPublish) loadTargetCollectMaterialWindow(ctx context.Context, payload collectProcessQueuePayload, target gdb.Record, eventAt *gtime.Time) (gdb.Result, bool, error) {
+	const pageSize = collectMaterialWindowLookahead
+	var (
+		rows          = make(gdb.Result, 0, pageSize)
+		cursorMessage int64
+		cursorID      int64
+	)
+	now := gtime.Now()
+	for len(rows) < collectMaterialWindowMaxScan {
+		if err := ctx.Err(); err != nil {
+			return nil, false, err
+		}
+		model := collectProcessEventModel(ctx, payload).
+			WhereIn("e.status", collectProcessWindowStatuses()).
+			Where("((e.status <> ? AND (e.material_role IS NULL OR e.material_role = '' OR e.material_role IN (?,?))) OR (e.status = ? AND e.material_role = ? AND e.error_message = ?))", sysin.CollectEventStatusIgnored, collectMaterialRolePending, collectMaterialRoleDisplay, sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage).
+			Where("(e.processed_at IS NULL AND (e.material_group_status IS NULL OR e.material_group_status <> ? OR e.updated_at <= ?)) OR (e.status = ? AND e.material_role = ? AND e.error_message = ? AND e.updated_at <= ?)", collectMaterialGroupWaitingVerify, now.Add(-collectMaterialWaitingVerifyRetryDelay), sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage, now.Add(-collectMaterialVerifyRetryDelay)).
+			Where("e.source_message_id >= ?", target["source_message_id"].Int64()).
+			Where("COALESCE(e.received_at,e.created_at) <= ?", eventAt.Add(collectMaterialVerifyWindow()))
+		if cursorMessage > 0 {
+			model = model.Where("(e.source_message_id > ? OR (e.source_message_id = ? AND e.id > ?))", cursorMessage, cursorMessage, cursorID)
+		}
+		page, err := model.Fields("e.*").OrderAsc("e.source_message_id").OrderAsc("e.id").Limit(pageSize).All()
+		if err != nil {
+			return nil, false, err
+		}
+		rows = append(rows, page...)
+		if len(page) < pageSize {
+			return rows, false, nil
+		}
+		last := page[len(page)-1]
+		cursorMessage = last["source_message_id"].Int64()
+		cursorID = last["id"].Int64()
+	}
+	return rows, true, gerror.Newf("验证窗口事件超过安全扫描上限 eventId:%d limit:%d", target["id"].Int64(), collectMaterialWindowMaxScan)
 }
 
 func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload collectProcessQueuePayload, chatID string, rows []gdb.Record, processEventIds map[int64]struct{}, windowTruncated bool) error {

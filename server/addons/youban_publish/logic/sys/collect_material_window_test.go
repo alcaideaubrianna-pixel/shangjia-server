@@ -315,4 +315,15 @@ func TestCollectMaterialWindowHasBoundedExecution(t *testing.T) {
 	if collectMaterialWindowLookahead < 100 || collectMaterialWindowLookahead > 1000 {
 		t.Fatalf("unexpected material window lookahead: %d", collectMaterialWindowLookahead)
 	}
+	if collectMaterialWindowMaxScan < collectMaterialWindowLookahead || collectMaterialWindowMaxScan > 10000 {
+		t.Fatalf("unexpected material window scan limit: %d", collectMaterialWindowMaxScan)
+	}
+}
+
+func TestAllCollectRepairSuspendedStatusesAreBlockedFromReplay(t *testing.T) {
+	for _, status := range collectRepairSuspendedStatuses {
+		if !isCollectRepairSuspended(status) {
+			t.Fatalf("repair status %q must remain suspended", status)
+		}
+	}
 }

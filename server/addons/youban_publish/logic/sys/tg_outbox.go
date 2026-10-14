@@ -20,6 +20,7 @@ const (
 	telegramOutboxProcessing   = "processing"
 	telegramOutboxDelivered    = "delivered"
 	telegramOutboxLeaseTTL     = 30 * time.Second
+	telegramOutboxQueryTimeout = 5 * time.Second
 )
 
 type telegramJobOutboxRecord struct {
@@ -186,13 +187,38 @@ func (s *sSysPublish) dispatchDueTelegramJobOutbox(ctx context.Context, limit in
 	if limit <= 0 {
 		limit = 100
 	}
-	now := gtime.Now()
+	rows, err := s.dueTelegramJobOutboxRows(ctx, limit, gtime.Now())
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		if err = s.dispatchTelegramJobOutbox(ctx, row); err != nil {
+			g.Log().Warningf(ctx, "投递TG任务Outbox失败 outboxId:%d jobId:%d err:%+v", row.Id, row.JobId, err)
+		}
+	}
+	return nil
+}
+
+func (s *sSysPublish) dueTelegramJobOutboxRows(ctx context.Context, limit int, now *gtime.Time) ([]telegramJobOutboxRecord, error) {
+	queryCtx, cancelQuery := context.WithTimeout(ctx, telegramOutboxQueryTimeout)
+	defer cancelQuery()
+	if strings.EqualFold(strings.TrimSpace(g.DB().GetConfig().Type), "pgsql") {
+		query := telegramDueOutboxPostgresSQL()
+		var rows []telegramJobOutboxRecord
+		if err := g.DB().GetScan(queryCtx, &rows, query,
+			telegramOutboxEventPublish, now, telegramOutboxPending, telegramOutboxProcessing, now, limit,
+		); err != nil {
+			return nil, gerror.Wrap(err, "读取每频道待投递TG任务Outbox失败")
+		}
+		return rows, nil
+	}
+
 	candidateLimit := limit * 10
 	if candidateLimit > 2000 {
 		candidateLimit = 2000
 	}
 	var candidates []telegramJobOutboxRecord
-	err := g.DB().Model(publishTgOutboxTable+" o").Safe().Ctx(ctx).
+	err := g.DB().Model(publishTgOutboxTable+" o").Safe().Ctx(queryCtx).
 		LeftJoin(publishTgJobTable+" j", "j.id=o.job_id").
 		Fields("o.id,o.job_id,o.attempt_count,o.available_at,j.tenant_id,j.channel_id,j.target_chat_id").
 		Where("o.event_type", telegramOutboxEventPublish).
@@ -200,15 +226,25 @@ func (s *sSysPublish) dispatchDueTelegramJobOutbox(ctx context.Context, limit in
 		Where("o.status = ? OR (o.status = ? AND o.lease_expires_at <= ?)", telegramOutboxPending, telegramOutboxProcessing, now).
 		OrderAsc("o.available_at").OrderAsc("o.id").Limit(candidateLimit).Scan(&candidates)
 	if err != nil {
-		return gerror.Wrap(err, "读取待投递TG任务Outbox失败")
+		return nil, gerror.Wrap(err, "读取待投递TG任务Outbox失败")
 	}
-	rows := fairTelegramOutboxRows(candidates, limit)
-	for _, row := range rows {
-		if err = s.dispatchTelegramJobOutbox(ctx, row); err != nil {
-			g.Log().Warningf(ctx, "投递TG任务Outbox失败 outboxId:%d jobId:%d err:%+v", row.Id, row.JobId, err)
-		}
-	}
-	return nil
+	return fairTelegramOutboxRows(candidates, limit), nil
+}
+
+func telegramDueOutboxPostgresSQL() string {
+	channelKey := "CASE WHEN j.channel_id > 0 THEN j.channel_id::text ELSE 'chat:' || REPLACE(COALESCE(j.target_chat_id,''), '-100', '') END"
+	return `SELECT id,job_id,attempt_count,available_at,tenant_id,channel_id,target_chat_id
+	FROM (
+		SELECT DISTINCT ON (j.tenant_id, ` + channelKey + `)
+			o.id,o.job_id,o.attempt_count,o.available_at,j.tenant_id,j.channel_id,j.target_chat_id
+		FROM ` + publishTgOutboxTable + ` o
+		JOIN ` + publishTgJobTable + ` j ON j.id=o.job_id
+		WHERE o.event_type=? AND o.available_at<=?
+			AND (o.status=? OR (o.status=? AND o.lease_expires_at<=?))
+		ORDER BY j.tenant_id, ` + channelKey + `, o.available_at, o.id
+	) channel_heads
+	ORDER BY available_at,id
+	LIMIT ?`
 }
 
 func fairTelegramOutboxRows(candidates []telegramJobOutboxRecord, limit int) []telegramJobOutboxRecord {

@@ -1,6 +1,7 @@
 package sys
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -19,6 +20,21 @@ func TestTelegramJobOutboxRecordFromRecordAllowsMissingLegacyOutbox(t *testing.T
 	row := telegramJobOutboxRecordFromRecord(record)
 	if row.Id != 12 || row.JobId != 34 {
 		t.Fatalf("unexpected outbox record: %+v", row)
+	}
+}
+
+func TestTelegramDueOutboxPostgresSQLSelectsChannelHeads(t *testing.T) {
+	query := telegramDueOutboxPostgresSQL()
+	for _, fragment := range []string{"DISTINCT ON", "j.tenant_id", "j.channel_id", "target_chat_id", "ORDER BY available_at,id"} {
+		if !strings.Contains(query, fragment) {
+			t.Fatalf("channel-head query missing %q: %s", fragment, query)
+		}
+	}
+}
+
+func TestTelegramOutboxQueryTimeoutIsBounded(t *testing.T) {
+	if telegramOutboxQueryTimeout <= 0 || telegramOutboxQueryTimeout > 5*time.Second {
+		t.Fatalf("unexpected outbox query timeout: %s", telegramOutboxQueryTimeout)
 	}
 }
 

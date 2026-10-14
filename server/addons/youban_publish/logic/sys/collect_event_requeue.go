@@ -50,7 +50,7 @@ func RequeueCollectEventsBestEffort(ctx context.Context, eventIDs []int64) (int,
 		}
 		// Maintenance replay must never enter the realtime window: it may
 		// ingest a display group without verification after the timeout.
-		if event["status"].String() == CollectRepairSuspendedStatus || event["material_role"].String() != collectMaterialRoleDisplay {
+		if isCollectRepairSuspended(event["status"].String()) || event["material_role"].String() != collectMaterialRoleDisplay {
 			failed = append(failed, eventID)
 			g.Log().Warningf(ctx, "采集事件未确认展示组，拒绝重放 eventId:%d", eventID)
 			continue
