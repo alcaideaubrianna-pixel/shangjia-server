@@ -81,7 +81,10 @@ func (s *sAccountTasks) Submit(ctx context.Context, in *sysin.AccountTaskSubmit)
 		}
 	}
 	var row entity.TgCollectorAccountTask
-	if err = dao.TgCollectorAccountTask.Ctx(ctx).
+	// Submit must provide read-after-write consistency. Production uses read/write
+	// splitting, so an immediate replica read can miss the row just inserted and
+	// falsely fail every downstream media download.
+	if err = dao.TgCollectorAccountTask.Ctx(ctx).Master().
 		Fields(columns.Id).
 		Where(columns.TenantId, in.TenantID).
 		Where(columns.TaskKey, in.TaskKey).
