@@ -54,24 +54,25 @@ func (s *sSysPublish) AIOpsQueueBotMediaRepair(ctx context.Context, profileIds [
 }
 
 func (s *sSysPublish) enqueueBotMediaRepairTask(ctx context.Context, profileId int64) error {
-	return s.enqueueProfileMediaRepairTask(ctx, profileId, 0)
+	_, err := s.enqueueProfileMediaRepairTask(ctx, profileId, 0)
+	return err
 }
 
-func (s *sSysPublish) enqueueProfileMediaRepairTask(ctx context.Context, profileId, jobId int64) error {
+func (s *sSysPublish) enqueueProfileMediaRepairTask(ctx context.Context, profileId, jobId int64) (bool, error) {
 	client, err := s.telegramQueueClient(ctx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	body, err := json.Marshal(botMediaRepairQueuePayload{ProfileId: profileId, JobId: jobId})
 	if err != nil {
-		return err
+		return false, err
 	}
 	_, err = client.EnqueueContext(ctx, asynq.NewTask(tgTaskTypeBotMediaRepair, body),
 		asynq.Queue(tgQueueNameBackground), asynq.MaxRetry(5), asynq.Timeout(30*time.Minute), asynq.Unique(24*time.Hour))
 	if errors.Is(err, asynq.ErrDuplicateTask) {
-		return nil
+		return false, nil
 	}
-	return err
+	return err == nil, err
 }
 
 func (s *sSysPublish) handleBotMediaRepairTask(ctx context.Context, task *asynq.Task) error {

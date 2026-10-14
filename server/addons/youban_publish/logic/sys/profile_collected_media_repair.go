@@ -53,6 +53,7 @@ func (s *sSysPublish) rebuildCollectedProfileMedia(ctx context.Context, profileI
 		return gerror.Wrap(err, "读取待恢复资料媒体失败")
 	}
 	recovered := 0
+	usedSourceMedia := make(map[int64]map[int64]struct{})
 	for _, target := range media {
 		purpose := strings.TrimSpace(target["purpose"].String())
 		if targetPurpose != "" && purpose != targetPurpose {
@@ -71,18 +72,17 @@ func (s *sSysPublish) rebuildCollectedProfileMedia(ctx context.Context, profileI
 		if rowsErr != nil {
 			return rowsErr
 		}
-		matching := make([]*collectEventMediaRow, 0, len(rows))
-		for _, row := range rows {
-			if row != nil && collectMediaTypesEquivalent(row.MediaType, target["media_type"].String()) {
-				matching = append(matching, row)
-			}
+		used := usedSourceMedia[eventID]
+		if used == nil {
+			used = make(map[int64]struct{})
+			usedSourceMedia[eventID] = used
 		}
-		position := target["sort_index"].Int() - 1
-		var source *collectEventMediaRow
-		if position >= 0 && position < len(matching) {
-			source = matching[position]
+		source := nextCompatibleCollectMedia(rows, target["media_type"].String(), used)
+		if source == nil {
+			continue
 		}
-		if source == nil || strings.TrimSpace(source.SourceMessageRef) == "" {
+		used[source.Id] = struct{}{}
+		if strings.TrimSpace(source.SourceMessageRef) == "" {
 			continue
 		}
 		item := collectorMediaItemFromCollect(collectMediaRowsToItems([]*collectEventMediaRow{source}, purpose)[0])
@@ -129,6 +129,18 @@ func (s *sSysPublish) rebuildCollectedProfileMedia(ctx context.Context, profileI
 	}
 	if recovered == 0 {
 		return gerror.New("资料没有可恢复的Telegram原始媒体")
+	}
+	return nil
+}
+
+func nextCompatibleCollectMedia(rows []*collectEventMediaRow, mediaType string, used map[int64]struct{}) *collectEventMediaRow {
+	for _, row := range rows {
+		if row == nil || !collectMediaTypesEquivalent(row.MediaType, mediaType) {
+			continue
+		}
+		if _, exists := used[row.Id]; !exists {
+			return row
+		}
 	}
 	return nil
 }
