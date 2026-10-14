@@ -26,6 +26,7 @@ import (
 	collectorservice "hotgo/addons/telegram_collector/service"
 	botsysin "hotgo/addons/youban_bot/model/input/sysin"
 	botService "hotgo/addons/youban_bot/service"
+	publishconsts "hotgo/addons/youban_publish/consts"
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	pdo "hotgo/addons/youban_publish/internal/model/do"
 	"hotgo/addons/youban_publish/model/input/sysin"
@@ -110,6 +111,16 @@ func (h *publishCollectorAccountTaskHandler) HandleAccountTaskCompletion(ctx con
 	if _, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).Where(mediaCols.Id, mediaID).Update(data); err != nil {
 		return gerror.Wrapf(err, "异步账号媒体结果回写失败 mediaId:%d", mediaID)
 	}
+	pendingCount, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
+		Where(mediaCols.EventId, eventID).
+		WhereNot(mediaCols.CacheStatus, collectMediaCacheReady).
+		Count()
+	if err != nil {
+		return gerror.Wrapf(err, "检查异步账号媒体组完成状态失败 mediaId:%d eventId:%d", mediaID, eventID)
+	}
+	if pendingCount > 0 {
+		return nil
+	}
 	event, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).WherePri(eventID).One()
 	if err != nil {
 		return gerror.Wrapf(err, "读取异步账号媒体事件失败 mediaId:%d eventId:%d", mediaID, eventID)
@@ -117,10 +128,24 @@ func (h *publishCollectorAccountTaskHandler) HandleAccountTaskCompletion(ctx con
 	if event.IsEmpty() {
 		return gerror.Newf("异步账号媒体事件不存在 mediaId:%d eventId:%d", mediaID, eventID)
 	}
-	// The original media-cache task can still hold its Asynq unique key when an
-	// account download finishes asynchronously. Completion must bypass that key
-	// so the event is resumed immediately instead of waiting for recovery.
-	if _, err = h.publish.enqueueCollectMediaCacheDeferred(ctx, collectMediaQueuePayloadFromEvent(event), 0); err != nil {
+	if cache.Initialized() && g.Cfg().MustGet(ctx, "cache.adapter").String() == "redis" {
+		key := fmt.Sprintf("%s%d", publishconsts.CollectMediaCompletionKeyPrefix, eventID)
+		reserved, reserveErr := cache.Instance().SetIfNotExist(ctx, key, 1, 5*time.Minute)
+		if reserveErr != nil {
+			g.Log().Warningf(ctx, "采集媒体完成投递去重缓存不可用，放行任务 eventId:%d err:%+v", eventID, reserveErr)
+		} else if !reserved {
+			return nil
+		}
+	}
+	// The original media-cache task can still hold its Asynq unique key when the
+	// final account download finishes. Resume once after the whole group is ready.
+	payload := collectMediaQueuePayloadFromEvent(event)
+	payload.Reason = "account_completion"
+	if _, err = h.publish.enqueueCollectMediaCacheDeferred(ctx, payload, 0); err != nil {
+		if cache.Initialized() && g.Cfg().MustGet(ctx, "cache.adapter").String() == "redis" {
+			key := fmt.Sprintf("%s%d", publishconsts.CollectMediaCompletionKeyPrefix, eventID)
+			_, _ = cache.Instance().Remove(ctx, key)
+		}
 		return gerror.Wrapf(err, "异步账号媒体完成后重新投递事件失败 mediaId:%d eventId:%d", mediaID, eventID)
 	}
 	return nil

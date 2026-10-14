@@ -22,6 +22,36 @@ groups:
           summary: "采集媒体待处理数量持续过高"
           description: "媒体待处理事件数为 {{ $value }}，已持续 10 分钟"
 
+      - alert: YoubanCollectMediaQueueAmplification
+        expr: '{__name__="xiaohuiji.collect.media_queue_amplification_ratio"} > 1.2'
+        for: 2m
+        labels:
+          severity: CRIT
+          category: collect
+        annotations:
+          summary: "采集媒体队列出现重复任务放大"
+          description: "媒体队列任务数是唯一事件数的 {{ $value }} 倍"
+
+      - alert: YoubanCollectMediaEventDuplicated
+        expr: '{__name__="xiaohuiji.collect.media_queue_max_event_duplicates"} > 2'
+        for: 1m
+        labels:
+          severity: CRIT
+          category: collect
+        annotations:
+          summary: "单个采集事件重复投递"
+          description: "单个 event_id 最大任务副本数为 {{ $value }}"
+
+      - alert: YoubanCollectMediaQueueOldestPendingHigh
+        expr: '{__name__="xiaohuiji.collect.media_queue_oldest_pending_age_seconds"} > 120'
+        for: 2m
+        labels:
+          severity: CRIT
+          category: collect
+        annotations:
+          summary: "采集媒体任务等待超过 2 分钟"
+          description: "最老媒体任务已等待 {{ $value }} 秒"
+
       - alert: YoubanCollectMediaAccountConcurrencyFull
         expr: 'sum by (tenant_id, tg_account_id) (increase({__name__="xiaohuiji.collect.media_scheduler_events",action="account_concurrency_full"}[5m])) > 20'
         for: 5m

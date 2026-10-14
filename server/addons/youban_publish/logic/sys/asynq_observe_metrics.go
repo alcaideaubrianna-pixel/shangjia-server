@@ -267,12 +267,18 @@ func (s *sSysPublish) observeCollectQueueInvariants(ctx context.Context, inspect
 		g.Log().Warningf(ctx, "读取采集处理队列任务指标失败：%+v", err)
 		return
 	}
+	mediaQueueStats, mediaErr := collectMediaAsynqQueueStats(ctx, inspector)
+	if mediaErr != nil {
+		healthGauge.Record(ctx, 0)
+		g.Log().Warningf(ctx, "读取采集媒体队列任务指标失败：%+v", mediaErr)
+		return
+	}
 	missingMediaTasks := 0
 	if len(stats.StaleMediaEventIDs) > 0 {
-		mediaTaskEventIDs, mediaErr := collectMediaAsynqTaskEventIDs(ctx, inspector)
-		if mediaErr != nil {
+		mediaTaskEventIDs, taskErr := collectMediaAsynqTaskEventIDs(ctx, inspector)
+		if taskErr != nil {
 			healthGauge.Record(ctx, 0)
-			g.Log().Warningf(ctx, "读取采集媒体队列任务指标失败：%+v", mediaErr)
+			g.Log().Warningf(ctx, "核对超时采集媒体任务失败：%+v", taskErr)
 			return
 		}
 		for _, eventID := range stats.StaleMediaEventIDs {
@@ -282,6 +288,7 @@ func (s *sSysPublish) observeCollectQueueInvariants(ctx context.Context, inspect
 		}
 	}
 	recordCollectQueueDatabaseStats(ctx, stats, processTasks, missingMediaTasks)
+	recordCollectMediaQueueStats(ctx, mediaQueueStats)
 	healthGauge.Record(ctx, 1)
 }
 
@@ -370,6 +377,75 @@ func countCollectProcessAsynqTasks(inspector *asynq.Inspector) (int, error) {
 		total += info.Pending + info.Active + info.Scheduled + info.Retry
 	}
 	return total, nil
+}
+
+type collectMediaAsynqStats struct {
+	PendingTasks  int
+	SampledTasks  int
+	UniqueEvents  int
+	MaxDuplicates int
+	OldestAge     time.Duration
+	EventIDs      map[int64]struct{}
+}
+
+func collectMediaAsynqQueueStats(ctx context.Context, inspector *asynq.Inspector) (collectMediaAsynqStats, error) {
+	const samplePerQueueState = 100
+	queues := collectMediaRealtimeWorkerQueues()
+	for queue := range collectMediaBulkWorkerQueues(ctx) {
+		queues[queue] = 1
+	}
+	stats := collectMediaAsynqStats{EventIDs: make(map[int64]struct{})}
+	eventCounts := make(map[int64]int)
+	for queue := range queues {
+		info, err := inspector.GetQueueInfo(queue)
+		if err != nil {
+			if isAsynqQueueNotFound(err) {
+				continue
+			}
+			return stats, err
+		}
+		stats.PendingTasks += info.Pending + info.Active + info.Scheduled + info.Retry
+		if info.Latency > stats.OldestAge {
+			stats.OldestAge = info.Latency
+		}
+		for _, list := range []func(string, ...asynq.ListOption) ([]*asynq.TaskInfo, error){
+			inspector.ListPendingTasks,
+			inspector.ListActiveTasks,
+			inspector.ListScheduledTasks,
+			inspector.ListRetryTasks,
+		} {
+			tasks, err := list(queue, asynq.Page(1), asynq.PageSize(samplePerQueueState))
+			if err != nil {
+				if isAsynqQueueNotFound(err) {
+					continue
+				}
+				return stats, err
+			}
+			for _, task := range tasks {
+				if payload, ok := collectMediaPayloadFromTaskInfo(task); ok {
+					stats.SampledTasks++
+					stats.EventIDs[payload.EventId] = struct{}{}
+					eventCounts[payload.EventId]++
+				}
+			}
+		}
+	}
+	stats.UniqueEvents = len(stats.EventIDs)
+	for _, count := range eventCounts {
+		if count > stats.MaxDuplicates {
+			stats.MaxDuplicates = count
+		}
+	}
+	return stats, nil
+}
+
+func recordCollectMediaQueueStats(ctx context.Context, stats collectMediaAsynqStats) {
+	recordInt64Gauge(ctx, "xiaohuiji.collect.media_queue_pending_tasks", stats.PendingTasks)
+	recordInt64Gauge(ctx, "xiaohuiji.collect.media_queue_sampled_tasks", stats.SampledTasks)
+	recordInt64Gauge(ctx, "xiaohuiji.collect.media_queue_unique_events", stats.UniqueEvents)
+	recordInt64Gauge(ctx, "xiaohuiji.collect.media_queue_max_event_duplicates", stats.MaxDuplicates)
+	recordFloat64Gauge(ctx, "xiaohuiji.collect.media_queue_amplification_ratio", collectQueueAmplificationRatio(stats.SampledTasks, stats.UniqueEvents))
+	recordInt64Gauge(ctx, "xiaohuiji.collect.media_queue_oldest_pending_age_seconds", max(0, int(stats.OldestAge.Seconds())))
 }
 
 func collectMediaAsynqTaskEventIDs(ctx context.Context, inspector *asynq.Inspector) (map[int64]struct{}, error) {

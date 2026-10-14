@@ -41,6 +41,16 @@ func reserveCollectMediaRecovery(ctx context.Context, eventID int64) bool {
 	return ok
 }
 
+func releaseCollectMediaRecovery(ctx context.Context, eventID int64) {
+	if eventID <= 0 || !cache.Initialized() || g.Cfg().MustGet(ctx, "cache.adapter").String() != "redis" {
+		return
+	}
+	key := fmt.Sprintf("%s%d", publishconsts.CollectMediaRecoveryKeyPrefix, eventID)
+	if _, err := cache.Instance().Remove(ctx, key); err != nil {
+		g.Log().Warningf(ctx, "释放采集媒体恢复去重缓存失败 eventId:%d err:%+v", eventID, err)
+	}
+}
+
 func (s *sSysPublish) runCollectRecovery(ctx context.Context) {
 	time.Sleep(12 * time.Second)
 	s.recoverCollectOnce(ctx)
@@ -209,11 +219,16 @@ func (s *sSysPublish) recoverBotCollectMedia(ctx context.Context, limit int) err
 	requeued := 0
 	for _, row := range rows {
 		payload := collectMediaQueuePayloadFromEvent(row)
+		payload.Reason = "bot_recovery"
 		if payload.EventId <= 0 || payload.TenantId <= 0 || payload.SourceId <= 0 {
+			continue
+		}
+		if !reserveCollectMediaRecovery(ctx, payload.EventId) {
 			continue
 		}
 		queued, enqueueErr := s.enqueueCollectMediaCacheDeferred(ctx, payload, 0)
 		if enqueueErr != nil {
+			releaseCollectMediaRecovery(ctx, payload.EventId)
 			g.Log().Warningf(ctx, "BOT媒体事件重新入队失败 eventId:%d err:%+v", payload.EventId, enqueueErr)
 			continue
 		}
@@ -389,6 +404,7 @@ func (s *sSysPublish) recoverPendingCollectMedia(ctx context.Context, limit int)
 			continue
 		}
 		payload := collectMediaQueuePayloadFromEvent(row)
+		payload.Reason = "recovery"
 		if payload.EventId <= 0 || payload.TenantId <= 0 || payload.AccountId <= 0 || payload.SourceId <= 0 {
 			continue
 		}
@@ -400,6 +416,7 @@ func (s *sSysPublish) recoverPendingCollectMedia(ctx context.Context, limit int)
 		// unique task otherwise prevents this media event from being requeued.
 		enqueued, enqueueErr := s.enqueueCollectMediaCacheDeferred(ctx, payload, 0)
 		if enqueueErr != nil {
+			releaseCollectMediaRecovery(ctx, payload.EventId)
 			g.Log().Warningf(ctx, "恢复待处理采集媒体任务投递失败 eventId:%d sourceId:%d err:%+v", payload.EventId, payload.SourceId, enqueueErr)
 			continue
 		}

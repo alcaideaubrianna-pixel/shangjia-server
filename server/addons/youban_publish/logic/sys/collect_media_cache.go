@@ -207,6 +207,15 @@ func (s *sSysPublish) ExecuteCollectMediaCache(ctx context.Context, payload coll
 		g.Log().Warningf(ctx, "采集媒体任务对应事件不存在，跳过历史任务 eventId:%d tenantId:%d accountId:%d sourceId:%d", payload.EventId, payload.TenantId, payload.AccountId, payload.SourceId)
 		return nil
 	}
+	payload.TenantId = event["tenant_id"].Int64()
+	payload.AccountId = event["account_id"].Int64()
+	payload.SourceId = event["source_id"].Int64()
+	payload.TgAccountId = event["tg_account_id"].Int64()
+	ownerLease, err := s.acquireCollectMediaOwnerSlots(ctx, payload)
+	if err != nil {
+		return err
+	}
+	defer ownerLease.release()
 	if event["source_type"].String() == sysin.CollectSourceTypeAccount {
 		accountIntervalStartedAt := time.Now()
 		s.waitCollectMediaAccountInterval(ctx, payload.TenantId, payload.TgAccountId)

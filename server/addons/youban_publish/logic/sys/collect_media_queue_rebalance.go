@@ -201,7 +201,9 @@ func collectMediaRebalancePayloads(ctx context.Context, eventIDs map[int64]struc
 			return nil, gerror.Wrap(err, "读取待重排媒体事件失败")
 		}
 		for _, row := range rows {
-			payloads = append(payloads, collectMediaQueuePayloadFromEvent(row))
+			payload := collectMediaQueuePayloadFromEvent(row)
+			payload.Reason = "rebalance"
+			payloads = append(payloads, payload)
 		}
 	}
 	return payloads, nil
@@ -216,7 +218,7 @@ func fairCollectMediaQueuePayloads(payloads []collectMediaQueuePayload) []collec
 			realtime = append(realtime, payload)
 			continue
 		}
-		key := collectMediaAccountKey(payload.TenantId, payload.TgAccountId)
+		key := collectMediaAccountKey(payload.TenantId, collectMediaQueueShardKey(payload))
 		if _, exists := bulkByAccount[key]; !exists {
 			accountOrder = append(accountOrder, key)
 		}

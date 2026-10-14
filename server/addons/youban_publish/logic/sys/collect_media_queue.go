@@ -13,12 +13,13 @@ import (
 )
 
 type collectMediaQueuePayload struct {
-	EventId     int64 `json:"eventId"`
-	TenantId    int64 `json:"tenantId"`
-	AccountId   int64 `json:"accountId"`
-	SourceId    int64 `json:"sourceId"`
-	TgAccountId int64 `json:"tgAccountId"`
-	Bulk        bool  `json:"bulk,omitempty"`
+	EventId     int64  `json:"eventId"`
+	TenantId    int64  `json:"tenantId"`
+	AccountId   int64  `json:"accountId"`
+	SourceId    int64  `json:"sourceId"`
+	TgAccountId int64  `json:"tgAccountId"`
+	Bulk        bool   `json:"bulk,omitempty"`
+	Reason      string `json:"reason,omitempty"`
 }
 
 const (
@@ -57,10 +58,20 @@ func collectMediaQueuePayloadFromEvent(event gdb.Record) collectMediaQueuePayloa
 }
 
 func collectMediaQueueName(ctx context.Context, payload collectMediaQueuePayload) string {
+	shardKey := collectMediaQueueShardKey(payload)
 	if !payload.Bulk {
-		return collectMediaRealtimeQueueName(int(payload.TgAccountId % int64(collectMediaMaxBulkQueueShards)))
+		return collectMediaRealtimeQueueName(int(shardKey % int64(collectMediaMaxBulkQueueShards)))
 	}
-	return collectMediaBulkQueueName(int(payload.TgAccountId % int64(collectMediaBulkQueueShards(ctx))))
+	return collectMediaBulkQueueName(int(shardKey % int64(collectMediaBulkQueueShards(ctx))))
+}
+
+func collectMediaQueueShardKey(payload collectMediaQueuePayload) int64 {
+	if payload.TgAccountId > 0 {
+		return payload.TgAccountId
+	}
+	// BOT sources do not own a Telegram account. Source ID is stable and
+	// prevents all BOT traffic from collapsing into shard zero.
+	return payload.SourceId
 }
 
 func (s *sSysPublish) enqueueCollectMediaCache(ctx context.Context, payload collectMediaQueuePayload, delay time.Duration) error {
@@ -109,10 +120,16 @@ func decodeMediaProcessQueuePayload(task *asynq.Task) (mediaProcessQueuePayload,
 }
 
 func (s *sSysPublish) enqueueCollectMediaCacheTask(ctx context.Context, payload collectMediaQueuePayload, delay time.Duration) (bool, error) {
+	if payload.Reason == "" {
+		payload.Reason = "pipeline"
+	}
 	return s.enqueueCollectMediaCacheTaskWithUnique(ctx, payload, delay, true)
 }
 
 func (s *sSysPublish) enqueueCollectMediaCacheDeferred(ctx context.Context, payload collectMediaQueuePayload, delay time.Duration) (bool, error) {
+	if payload.Reason == "" {
+		payload.Reason = "deferred"
+	}
 	return s.enqueueCollectMediaCacheTaskWithUnique(ctx, payload, delay, false)
 }
 
@@ -142,7 +159,13 @@ func (s *sSysPublish) enqueueCollectMediaCacheTaskWithUnique(ctx context.Context
 	}
 	_, err = client.EnqueueContext(ctx, task, options...)
 	if errors.Is(err, asynq.ErrDuplicateTask) || errors.Is(err, asynq.ErrTaskIDConflict) {
+		observeCollectMediaEnqueue(ctx, payload.Reason, "duplicate")
 		return false, nil
+	}
+	if err != nil {
+		observeCollectMediaEnqueue(ctx, payload.Reason, "error")
+	} else {
+		observeCollectMediaEnqueue(ctx, payload.Reason, "success")
 	}
 	return err == nil, err
 }
