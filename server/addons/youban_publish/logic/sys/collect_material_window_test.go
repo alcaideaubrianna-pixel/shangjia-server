@@ -250,3 +250,69 @@ func TestPairCollectMaterialMessagesAcceptsVerifyAtFiveMinuteBoundary(t *testing
 		t.Fatalf("verification at five-minute boundary must pair: %+v", pairs)
 	}
 }
+
+func TestPairCollectMaterialMessagesMultipleAdjacentGroups(t *testing.T) {
+	base := time.Now().Add(-time.Minute)
+	views := []collectMaterialMessageView{
+		{RawText: "昵称：A", Media: []collectMediaItem{{Type: "photo", FileId: "p1"}}, MessageAt: base},
+		{Media: []collectMediaItem{{Type: "video", FileId: "v1"}}, MessageAt: base.Add(time.Second)},
+		{RawText: "昵称：B", Media: []collectMediaItem{{Type: "photo", FileId: "p2"}}, MessageAt: base.Add(2 * time.Second)},
+		{Media: []collectMediaItem{{Type: "video", FileId: "v2"}}, MessageAt: base.Add(3 * time.Second)},
+	}
+	want := []collectMaterialPair{{DisplayIndex: 0, VerifyIndex: 1}, {DisplayIndex: 2, VerifyIndex: 3}}
+	got := pairCollectMaterialMessages(views)
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("pairs=%+v want=%+v", got, want)
+	}
+}
+
+func TestPairCollectMaterialMessagesFindsVerifyAfterHeavyWindowNoise(t *testing.T) {
+	base := time.Now().Add(-time.Minute)
+	views := []collectMaterialMessageView{{
+		RawText: "昵称：A", Media: []collectMediaItem{{Type: "photo", FileId: "p"}}, MessageAt: base,
+	}}
+	for index := 0; index < 100; index++ {
+		views = append(views, collectMaterialMessageView{RawText: "✅提交成功！", MessageAt: base.Add(time.Duration(index+1) * time.Second)})
+	}
+	views = append(views, collectMaterialMessageView{
+		Media: []collectMediaItem{{Type: "video", FileId: "verify"}}, MessageAt: base.Add(2 * time.Minute),
+	})
+	got := pairCollectMaterialMessages(views)
+	if len(got) != 1 || got[0].DisplayIndex != 0 || got[0].VerifyIndex != 101 {
+		t.Fatalf("verification after noisy messages was not paired: %+v", got)
+	}
+}
+
+func TestPairCollectMaterialMessagesRejectsOutOfOrderVerifyTimestamp(t *testing.T) {
+	base := time.Now().Add(-time.Minute)
+	views := []collectMaterialMessageView{
+		{RawText: "昵称：A", Media: []collectMediaItem{{Type: "photo", FileId: "p"}}, MessageAt: base},
+		{Media: []collectMediaItem{{Type: "video", FileId: "v"}}, MessageAt: base.Add(-time.Second)},
+	}
+	if got := pairCollectMaterialMessages(views); len(got) != 0 {
+		t.Fatalf("older verification must not pair with a later display: %+v", got)
+	}
+}
+
+func TestCollectMaterialShouldWaitForVerify(t *testing.T) {
+	oldEvent := gdb.Record{"created_at": gvar.New(time.Now().Add(-collectMaterialVerifyWindow() - time.Minute))}
+	freshEvent := gdb.Record{"created_at": gvar.New(time.Now())}
+	if !collectMaterialShouldWaitForVerify(oldEvent, true) {
+		t.Fatal("a truncated scan must never finalize a display without verification")
+	}
+	if collectMaterialShouldWaitForVerify(oldEvent, false) {
+		t.Fatal("an exhausted verification window may continue without verification")
+	}
+	if !collectMaterialShouldWaitForVerify(freshEvent, false) {
+		t.Fatal("a fresh display must wait for verification")
+	}
+}
+
+func TestCollectMaterialWindowHasBoundedExecution(t *testing.T) {
+	if collectMaterialWindowExecutionTimeout <= 0 || collectMaterialWindowExecutionTimeout > 2*time.Minute {
+		t.Fatalf("unexpected material window timeout: %s", collectMaterialWindowExecutionTimeout)
+	}
+	if collectMaterialWindowLookahead < 100 || collectMaterialWindowLookahead > 1000 {
+		t.Fatalf("unexpected material window lookahead: %d", collectMaterialWindowLookahead)
+	}
+}

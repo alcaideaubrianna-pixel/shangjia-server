@@ -173,6 +173,16 @@ func handleUpgradeFix(ctx context.Context, args map[string]string) (err error) {
 			limit = 1000
 		}
 		err = publishsys.RepairBotCollectMedia(ctx, limit)
+	case "collectEventRequeueByID":
+		eventIds, parseErr := fix.ParseMaterialImportRepairGroupIDs(args["a2"])
+		if parseErr != nil || len(eventIds) == 0 {
+			return gerror.New("collectEventRequeueByID 需要通过 a2 传入逗号分隔的采集事件ID")
+		}
+		count, requeueErr := publishsys.RequeueCollectEvents(ctx, eventIds)
+		if requeueErr != nil {
+			return requeueErr
+		}
+		g.Log().Infof(ctx, "采集事件重投完成 events:%d", count)
 	case "collectMediaStaleRepair":
 		limit, _ := strconv.Atoi(args["limit"])
 		if limit <= 0 {

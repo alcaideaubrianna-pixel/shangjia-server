@@ -83,7 +83,7 @@ func (s *sSysPublish) enqueueCollectProcessTask(ctx context.Context, payload col
 	options := []asynq.Option{
 		asynq.Queue(collectProcessQueueName(payload)),
 		asynq.MaxRetry(collectProcessTaskMaxRetry),
-		asynq.Timeout(30 * time.Minute),
+		asynq.Timeout(2 * time.Minute),
 	}
 	if unique {
 		reserved, reserveErr := reserveCollectProcessSchedule(ctx, payload, uniqueTTL)
@@ -230,7 +230,7 @@ func (s *sSysPublish) processCollectSourceWindowWithLock(ctx context.Context, pa
 		return false, nil
 	}
 	key := fmt.Sprintf("youban_publish:collect:source:%d:%d:%s", payload.TenantId, payload.AccountId, collectProcessPartition(payload))
-	distributedLock := lock.NewConfig(15*time.Minute, time.Second).Mutex(key)
+	distributedLock := lock.NewConfig(2*time.Minute, time.Second).Mutex(key)
 	if err = distributedLock.TryLock(ctx); err != nil {
 		if errors.Is(err, lock.ErrLockFailed) {
 			g.Log().Debugf(ctx, "采集源已有任务执行，本任务主动让出 sourceId:%d", payload.SourceId)
@@ -259,6 +259,9 @@ func collectProcessSourceEnabled(ctx context.Context, payload collectProcessQueu
 }
 
 func (s *sSysPublish) processCollectSourceTask(ctx context.Context, payload collectProcessQueuePayload) (delay time.Duration, pending bool, removeSchedule bool, err error) {
+	windowCtx, cancelWindow := context.WithTimeout(ctx, collectMaterialWindowExecutionTimeout)
+	defer cancelWindow()
+	ctx = windowCtx
 	enabled, err := collectProcessSourceEnabled(ctx, payload)
 	if err != nil {
 		return 0, false, false, err

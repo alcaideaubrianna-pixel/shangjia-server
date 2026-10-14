@@ -30,6 +30,25 @@ func TestTelegramMediaFallbackRecoveryIsPromptAndUnambiguous(t *testing.T) {
 	}
 }
 
+func TestTelegramMediaFallbackRecoveryBackoffIsBounded(t *testing.T) {
+	tests := []struct {
+		attempt int
+		want    time.Duration
+	}{
+		{attempt: 0, want: 2 * time.Minute},
+		{attempt: 1, want: 4 * time.Minute},
+		{attempt: 2, want: 8 * time.Minute},
+		{attempt: 3, want: 16 * time.Minute},
+		{attempt: 4, want: 30 * time.Minute},
+		{attempt: 20, want: 30 * time.Minute},
+	}
+	for _, test := range tests {
+		if got := telegramMediaFallbackRecoveryDelay(test.attempt); got != test.want {
+			t.Fatalf("attempt %d delay = %s, want %s", test.attempt, got, test.want)
+		}
+	}
+}
+
 func TestTelegramChannelBusyDelayBackoff(t *testing.T) {
 	initial := telegramChannelBusyDelayDuration(3, 10, 0)
 	busy := telegramChannelBusyDelayDuration(3, 10, 20)
@@ -68,5 +87,17 @@ func TestMessagePushPlanRecoveryConditionExcludesExpiredPlanJobs(t *testing.T) {
 	}
 	if messagePushPlanJobExpireAfter != 30*time.Minute {
 		t.Fatalf("unexpected message push plan expiration: %s", messagePushPlanJobExpireAfter)
+	}
+}
+
+func TestFairPendingTelegramJobsSelectsOnePerChannel(t *testing.T) {
+	candidates := []telegramJobRecord{
+		{Id: 1, TenantId: 1, ChannelId: 10},
+		{Id: 2, TenantId: 1, ChannelId: 10},
+		{Id: 3, TenantId: 1, ChannelId: 20},
+	}
+	jobs := fairPendingTelegramJobs(candidates, 10)
+	if len(jobs) != 2 || jobs[0].Id != 1 || jobs[1].Id != 3 {
+		t.Fatalf("unexpected fair candidates: %+v", jobs)
 	}
 }

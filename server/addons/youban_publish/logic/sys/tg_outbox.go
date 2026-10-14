@@ -23,9 +23,13 @@ const (
 )
 
 type telegramJobOutboxRecord struct {
-	Id          int64       `json:"id"`
-	JobId       int64       `json:"jobId"`
-	AvailableAt *gtime.Time `json:"availableAt"`
+	Id           int64       `json:"id"`
+	JobId        int64       `json:"jobId"`
+	AttemptCount int         `json:"attemptCount"`
+	AvailableAt  *gtime.Time `json:"availableAt"`
+	TenantId     int64       `json:"tenantId"`
+	ChannelId    int64       `json:"channelId"`
+	TargetChatId string      `json:"targetChatId"`
 }
 
 // ensureTelegramJobOutboxTx persists the initial queue intent in the same
@@ -86,9 +90,10 @@ func telegramJobOutboxRecordFromRecord(record gdb.Record) telegramJobOutboxRecor
 		return telegramJobOutboxRecord{}
 	}
 	return telegramJobOutboxRecord{
-		Id:          record["id"].Int64(),
-		JobId:       record["job_id"].Int64(),
-		AvailableAt: record["available_at"].GTime(),
+		Id:           record["id"].Int64(),
+		JobId:        record["job_id"].Int64(),
+		AttemptCount: record["attempt_count"].Int(),
+		AvailableAt:  record["available_at"].GTime(),
 	}
 }
 
@@ -125,10 +130,10 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 	}
 	job, err := s.telegramJobById(ctx, row.JobId)
 	if err != nil {
-		return s.releaseTelegramOutbox(ctx, row.Id, owner, err.Error())
+		return s.releaseTelegramOutbox(ctx, row.Id, owner, row.AttemptCount, err.Error())
 	}
 	if telegramOutboxJobStillNeedsDispatch(job.Status, job.DispatchStatus) {
-		return s.releaseTelegramOutbox(ctx, row.Id, owner, "频道发送槽繁忙，等待再次调度")
+		return s.releaseTelegramOutbox(ctx, row.Id, owner, row.AttemptCount, "频道发送槽繁忙，等待再次调度")
 	}
 	_, err = g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
 		Where("id", row.Id).Where("status", telegramOutboxProcessing).Where("lease_owner", owner).
@@ -149,13 +154,13 @@ func telegramOutboxJobStillNeedsDispatch(status, dispatchStatus string) bool {
 		(dispatchStatus == "" || dispatchStatus == tgDispatchStatusIdle)
 }
 
-func (s *sSysPublish) releaseTelegramOutbox(ctx context.Context, outboxId int64, owner, message string) error {
+func (s *sSysPublish) releaseTelegramOutbox(ctx context.Context, outboxId int64, owner string, attemptCount int, message string) error {
 	_, err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
 		Where("id", outboxId).Where("status", telegramOutboxProcessing).Where("lease_owner", owner).
 		Data(g.Map{
 			"status": telegramOutboxPending, "lease_owner": "", "lease_expires_at": nil,
 			"attempt_count": gdb.Raw("attempt_count + 1"), "last_error": boundPublishSuccessRecordMessage(message),
-			"available_at": gtime.Now().Add(3 * time.Second), "updated_at": gtime.Now(),
+			"available_at": gtime.Now().Add(telegramOutboxRetryDelay(attemptCount)), "updated_at": gtime.Now(),
 		}).Update()
 	if err != nil {
 		return gerror.Wrap(err, "释放TG任务Outbox租约失败")
@@ -163,26 +168,67 @@ func (s *sSysPublish) releaseTelegramOutbox(ctx context.Context, outboxId int64,
 	return nil
 }
 
+func telegramOutboxRetryDelay(attemptCount int) time.Duration {
+	if attemptCount < 0 {
+		attemptCount = 0
+	}
+	delay := 3 * time.Second
+	for i := 0; i < attemptCount && delay < time.Minute; i++ {
+		delay *= 2
+	}
+	if delay > time.Minute {
+		return time.Minute
+	}
+	return delay
+}
+
 func (s *sSysPublish) dispatchDueTelegramJobOutbox(ctx context.Context, limit int) error {
 	if limit <= 0 {
 		limit = 100
 	}
 	now := gtime.Now()
-	var rows []telegramJobOutboxRecord
-	err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
-		Where("event_type", telegramOutboxEventPublish).
-		Where("available_at <= ?", now).
-		Where("status = ? OR (status = ? AND lease_expires_at <= ?)", telegramOutboxPending, telegramOutboxProcessing, now).
-		OrderAsc("available_at").OrderAsc("id").Limit(limit).Scan(&rows)
+	candidateLimit := limit * 10
+	if candidateLimit > 2000 {
+		candidateLimit = 2000
+	}
+	var candidates []telegramJobOutboxRecord
+	err := g.DB().Model(publishTgOutboxTable+" o").Safe().Ctx(ctx).
+		LeftJoin(publishTgJobTable+" j", "j.id=o.job_id").
+		Fields("o.id,o.job_id,o.attempt_count,o.available_at,j.tenant_id,j.channel_id,j.target_chat_id").
+		Where("o.event_type", telegramOutboxEventPublish).
+		Where("o.available_at <= ?", now).
+		Where("o.status = ? OR (o.status = ? AND o.lease_expires_at <= ?)", telegramOutboxPending, telegramOutboxProcessing, now).
+		OrderAsc("o.available_at").OrderAsc("o.id").Limit(candidateLimit).Scan(&candidates)
 	if err != nil {
 		return gerror.Wrap(err, "读取待投递TG任务Outbox失败")
 	}
+	rows := fairTelegramOutboxRows(candidates, limit)
 	for _, row := range rows {
 		if err = s.dispatchTelegramJobOutbox(ctx, row); err != nil {
 			g.Log().Warningf(ctx, "投递TG任务Outbox失败 outboxId:%d jobId:%d err:%+v", row.Id, row.JobId, err)
 		}
 	}
 	return nil
+}
+
+func fairTelegramOutboxRows(candidates []telegramJobOutboxRecord, limit int) []telegramJobOutboxRecord {
+	if limit <= 0 || len(candidates) == 0 {
+		return nil
+	}
+	rows := make([]telegramJobOutboxRecord, 0, min(limit, len(candidates)))
+	seen := make(map[string]struct{}, len(candidates))
+	for _, row := range candidates {
+		key := fmt.Sprintf("%d:%d:%s", row.TenantId, row.ChannelId, normalizeTelegramChannelChatID(row.TargetChatId))
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		rows = append(rows, row)
+		if len(rows) >= limit {
+			break
+		}
+	}
+	return rows
 }
 
 func (s *sSysPublish) runTelegramOutboxDispatcher(ctx context.Context) {

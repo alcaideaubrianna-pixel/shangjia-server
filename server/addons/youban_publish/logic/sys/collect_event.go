@@ -306,7 +306,7 @@ func (s *sSysPublish) CollectEventClear(ctx context.Context, in *sysin.CollectEv
 }
 
 func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, tenantId int64, accountId int64) error {
-	eventLock := lock.NewConfig(15*time.Minute, time.Second).Mutex(fmt.Sprintf("youban_publish:collect:event:%d", eventId))
+	eventLock := lock.NewConfig(2*time.Minute, time.Second).Mutex(fmt.Sprintf("youban_publish:collect:event:%d", eventId))
 	if lockErr := eventLock.TryLock(ctx); lockErr != nil {
 		if errors.Is(lockErr, lock.ErrLockFailed) {
 			g.Log().Debugf(ctx, "采集事件已有实例处理，跳过本次执行 eventId:%d", eventId)

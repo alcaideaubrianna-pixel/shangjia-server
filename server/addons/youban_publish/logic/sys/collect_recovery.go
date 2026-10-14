@@ -50,6 +50,9 @@ func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	if err := s.recoverInvalidReadyCollectMedia(ctx, mediaBatchSize); err != nil {
 		g.Log().Warningf(ctx, "恢复无持久化文件的采集媒体失败：%+v", err)
 	}
+	if err := s.recoverLegacyMissingVerifyCollectEvents(ctx, min(mediaBatchSize, 20)); err != nil {
+		g.Log().Warningf(ctx, "恢复历史缺少验证视频的采集事件失败：%+v", err)
+	}
 	if err := s.recoverPendingCollectMedia(ctx, mediaBatchSize); err != nil {
 		g.Log().Warningf(ctx, "恢复待处理采集媒体任务失败：%+v", err)
 	}
@@ -349,6 +352,7 @@ func (s *sSysPublish) recoverPendingCollectMedia(ctx context.Context, limit int)
 	}
 	rows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
 		Where("e."+eventCols.Status, sysin.CollectEventStatusMediaPending).
+		WhereNot("e."+eventCols.SourceType, sysin.CollectSourceTypeBot).
 		WhereNull("e."+eventCols.ProcessedAt).
 		Where(enabledCollectSourceExistsSQL("e")).
 		Where("EXISTS (SELECT 1 FROM "+mediaTable+" m WHERE m.event_id=e."+eventCols.Id+" AND m.cache_status=? AND (m.next_retry_at IS NULL OR m.next_retry_at<=?))", collectMediaCachePending, now).
@@ -394,6 +398,67 @@ func (s *sSysPublish) recoverPendingCollectMedia(ctx context.Context, limit int)
 	}
 	if recovered > 0 {
 		g.Log().Infof(ctx, "已重新投递待处理采集媒体任务 count:%d", recovered)
+	}
+	return nil
+}
+
+const legacyCollectMissingVerifyMessage = "BOT资料在5分钟窗口内未匹配到验证视频"
+
+// recoverLegacyMissingVerifyCollectEvents reopens only records terminated by
+// the retired mandatory-verification policy. The normal process pipeline owns
+// media caching, deduplication and dispatch after this bounded repair.
+func (s *sSysPublish) recoverLegacyMissingVerifyCollectEvents(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		limit = 100
+	}
+	e := pdao.YoubanPublishCollectEvent.Columns()
+	rows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+		Fields(e.Id, e.TenantId, e.AccountId, e.SourceId, e.SourceChatId).
+		Where(e.SourceType, sysin.CollectSourceTypeBot).
+		Where(e.Status, sysin.CollectEventStatusIgnored).
+		Where(e.ErrorMessage, legacyCollectMissingVerifyMessage).
+		OrderAsc(e.Id).Limit(limit).All()
+	if err != nil {
+		return gerror.Wrap(err, "读取历史缺少验证视频事件失败")
+	}
+	for _, row := range rows {
+		eventID := row[e.Id].Int64()
+		if eventID <= 0 {
+			continue
+		}
+		changed := false
+		err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+			result, txErr := tx.Model(pdao.YoubanPublishCollectEvent.Table()).Ctx(ctx).
+				Where(e.Id, eventID).Where(e.Status, sysin.CollectEventStatusIgnored).
+				Where(e.ErrorMessage, legacyCollectMissingVerifyMessage).
+				Data(g.Map{e.Status: sysin.CollectEventStatusGroupCollect, "material_role": collectMaterialRoleDisplay,
+					"material_parent_event_id": 0, "material_group_status": "complete",
+					e.ErrorMessage: "", e.ProcessedAt: nil, e.UpdatedAt: gtime.Now()}).Update()
+			if txErr != nil {
+				return txErr
+			}
+			affected, _ := result.RowsAffected()
+			if affected == 0 {
+				return nil
+			}
+			changed = true
+			_, txErr = tx.Model(pdao.YoubanPublishCollectEventMedia.Table()).Ctx(ctx).
+				Where("event_id", eventID).Where("cache_status", collectMediaCacheCanceled).
+				Data(g.Map{"cache_status": collectMediaCachePending, "error_message": "", "next_retry_at": nil, "updated_at": gtime.Now()}).Update()
+			return txErr
+		})
+		if err != nil {
+			return gerror.Wrapf(err, "恢复历史缺少验证视频事件失败 eventId:%d", eventID)
+		}
+		if !changed {
+			continue
+		}
+		if err = s.enqueueCollectProcess(ctx, collectProcessQueuePayload{
+			EventId: eventID, TenantId: row[e.TenantId].Int64(), AccountId: row[e.AccountId].Int64(),
+			SourceId: row[e.SourceId].Int64(), SourceChatId: row[e.SourceChatId].String(),
+		}, 0); err != nil {
+			return gerror.Wrapf(err, "重新投递历史缺少验证视频事件失败 eventId:%d", eventID)
+		}
 	}
 	return nil
 }

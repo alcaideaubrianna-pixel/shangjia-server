@@ -2,6 +2,7 @@ package sys
 
 import (
 	"testing"
+	"time"
 
 	"github.com/gogf/gf/v2/container/gvar"
 	"github.com/gogf/gf/v2/database/gdb"
@@ -18,6 +19,27 @@ func TestTelegramJobOutboxRecordFromRecordAllowsMissingLegacyOutbox(t *testing.T
 	row := telegramJobOutboxRecordFromRecord(record)
 	if row.Id != 12 || row.JobId != 34 {
 		t.Fatalf("unexpected outbox record: %+v", row)
+	}
+}
+
+func TestTelegramOutboxRetryDelayIsBounded(t *testing.T) {
+	if got := telegramOutboxRetryDelay(0); got != 3*time.Second {
+		t.Fatalf("initial retry delay = %s", got)
+	}
+	if got := telegramOutboxRetryDelay(100); got != time.Minute {
+		t.Fatalf("maximum retry delay = %s", got)
+	}
+}
+
+func TestFairTelegramOutboxRowsSelectsOnePerChannel(t *testing.T) {
+	candidates := []telegramJobOutboxRecord{
+		{Id: 1, TenantId: 1, ChannelId: 10},
+		{Id: 2, TenantId: 1, ChannelId: 10},
+		{Id: 3, TenantId: 1, ChannelId: 20},
+	}
+	rows := fairTelegramOutboxRows(candidates, 10)
+	if len(rows) != 2 || rows[0].Id != 1 || rows[1].Id != 3 {
+		t.Fatalf("unexpected fair outbox rows: %+v", rows)
 	}
 }
 

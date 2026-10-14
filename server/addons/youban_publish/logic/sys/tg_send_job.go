@@ -25,9 +25,11 @@ const (
 )
 
 var (
-	errTelegramJobSuperseded       = errors.New("TG推送任务已废弃")
-	errTelegramDeliveryUncertain   = errors.New("Telegram发送结果待对账")
-	errTelegramMediaFallbackQueued = errors.New("Telegram媒体降级任务已提交")
+	errTelegramJobSuperseded              = errors.New("TG推送任务已废弃")
+	errTelegramDeliveryUncertain          = errors.New("Telegram发送结果待对账")
+	errTelegramMediaFallbackQueued        = errors.New("Telegram媒体降级任务已提交")
+	errTelegramMediaFallbackSubmitDelayed = errors.New("Telegram媒体降级任务等待重新提交")
+	errTelegramMediaFallbackUnavailable   = errors.New("Telegram媒体降级不可用")
 )
 
 func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) error {
@@ -551,6 +553,10 @@ func (s *sSysPublish) sendTelegramJobMediaByAccount(ctx context.Context, job tel
 	})
 	err = s.submitTelegramMediaFallback(ctx, job, channel.TgAccountId, purpose)
 	if err != nil {
+		if errors.Is(err, errTelegramMediaFallbackSubmitDelayed) {
+			g.Log().Warningf(ctx, "协议号媒体降级任务暂未提交，等待自动恢复 jobId:%d purpose:%s err:%+v", job.Id, purpose, err)
+			return nil, errTelegramMediaFallbackQueued
+		}
 		return nil, gerror.Wrap(err, "提交协议号媒体降级任务失败")
 	}
 	s.appendTelegramJobLog(ctx, job, "account_fallback", "queued", fmt.Sprintf("Bot媒体发送失败，已提交账号服务常驻客户端发送 purpose:%s reason:%v", purpose, botErr))
@@ -577,6 +583,7 @@ func (s *sSysPublish) submitTelegramMediaFallback(ctx context.Context, job teleg
 		Data(g.Map{
 			"last_dispatch_error": telegramMediaFallbackReason(purpose),
 			"next_retry_at":       gtime.Now().Add(telegramMediaFallbackRecoverAfter),
+			"reconcile_count":     0,
 			"updated_at":          gtime.Now(),
 		}).Update()
 	if err != nil {
@@ -598,6 +605,7 @@ func (s *sSysPublish) submitTelegramMediaFallback(ctx context.Context, job teleg
 		// Ownership already belongs to the account fallback. Keep the marker so
 		// the recovery loop retries task creation without reopening Bot delivery.
 		g.Log().Warningf(ctx, "提交协议号媒体降级任务失败，等待自动恢复 jobId:%d purpose:%s err:%+v", job.Id, purpose, err)
+		return gerror.Wrap(errTelegramMediaFallbackSubmitDelayed, err.Error())
 	}
 	return nil
 }
@@ -674,6 +682,9 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 
 func (s *sSysPublish) failTelegramMediaFallbackJob(ctx context.Context, job telegramJobRecord, cause error) error {
 	message := "协议号媒体发送已达最大重试次数"
+	if errors.Is(cause, errTelegramMediaFallbackUnavailable) {
+		message = "协议号媒体降级不可用"
+	}
 	if cause != nil {
 		message += "：" + cause.Error()
 	}
@@ -698,7 +709,7 @@ func (s *sSysPublish) failTelegramMediaFallbackJob(ctx context.Context, job tele
 	}
 	if transitioned {
 		observeTelegramPublishFailure(ctx, "media_fallback")
-		if !isTelegramMediaSourceUnavailableError(cause) {
+		if !isTelegramMediaSourceUnavailableError(cause) && !errors.Is(cause, errTelegramMediaFallbackUnavailable) {
 			s.enqueueTerminalPublishRecoveryBestEffort(ctx, job, cause)
 		}
 		if recordErr := s.upsertPublishJobRecord(ctx, job, "failed", message); recordErr != nil {

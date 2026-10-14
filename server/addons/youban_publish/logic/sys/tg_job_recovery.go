@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -18,6 +19,7 @@ const (
 	telegramPendingJobRecoverAfter    = 30 * time.Second
 	telegramDispatchJobRecoverAfter   = 5 * time.Minute
 	telegramMediaFallbackRecoverAfter = 2 * time.Minute
+	telegramMediaFallbackMaxBackoff   = 30 * time.Minute
 	messagePushPlanJobExpireAfter     = 30 * time.Minute
 )
 
@@ -154,15 +156,59 @@ func (s *sSysPublish) recoverStaleTelegramMediaFallbackJobs(ctx context.Context,
 			continue
 		}
 		channel, channelErr := s.messagePushChannelFromJob(ctx, job)
-		if channelErr != nil || channel.TgAccountId <= 0 {
+		if channelErr != nil {
 			g.Log().Warningf(ctx, "恢复协议号媒体降级任务缺少可用账号 jobId:%d purpose:%s err:%+v", job.Id, purpose, channelErr)
+			if deferErr := s.deferTelegramMediaFallbackRecovery(ctx, job); deferErr != nil {
+				g.Log().Warningf(ctx, "延后协议号媒体降级恢复失败 jobId:%d purpose:%s err:%+v", job.Id, purpose, deferErr)
+			}
+			continue
+		}
+		if channel == nil || channel.TgAccountId <= 0 {
+			cause := gerror.Wrap(errTelegramMediaFallbackUnavailable, "频道未绑定可用协议号")
+			if failErr := s.failTelegramMediaFallbackJob(ctx, job, cause); failErr != nil {
+				g.Log().Warningf(ctx, "终止不可恢复的协议号媒体降级任务失败 jobId:%d purpose:%s err:%+v", job.Id, purpose, failErr)
+			}
 			continue
 		}
 		if submitErr := s.submitTelegramMediaFallback(ctx, job, channel.TgAccountId, purpose); submitErr != nil {
 			g.Log().Warningf(ctx, "重新提交协议号媒体降级任务失败 jobId:%d purpose:%s err:%+v", job.Id, purpose, submitErr)
+			if deferErr := s.deferTelegramMediaFallbackRecovery(ctx, job); deferErr != nil {
+				g.Log().Warningf(ctx, "延后协议号媒体降级恢复失败 jobId:%d purpose:%s err:%+v", job.Id, purpose, deferErr)
+			}
 			continue
 		}
 		s.appendTelegramJobLog(ctx, job, "account_fallback", "requeued", "协议号媒体降级任务超时，已幂等重新提交")
+	}
+	return nil
+}
+
+func telegramMediaFallbackRecoveryDelay(attempt int) time.Duration {
+	if attempt < 0 {
+		attempt = 0
+	}
+	delay := telegramMediaFallbackRecoverAfter
+	for i := 0; i < attempt && delay < telegramMediaFallbackMaxBackoff; i++ {
+		delay *= 2
+	}
+	if delay > telegramMediaFallbackMaxBackoff {
+		return telegramMediaFallbackMaxBackoff
+	}
+	return delay
+}
+
+func (s *sSysPublish) deferTelegramMediaFallbackRecovery(ctx context.Context, job telegramJobRecord) error {
+	attempt := job.ReconcileCount + 1
+	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("id", job.Id).
+		Where("status", telegramJobStatusSending).
+		WhereLike("last_dispatch_error", telegramMediaFallbackMarker+"%").
+		Data(g.Map{
+			"reconcile_count": attempt,
+			"next_retry_at":   gtime.Now().Add(telegramMediaFallbackRecoveryDelay(attempt)),
+			"updated_at":      gtime.Now(),
+		}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "更新协议号媒体降级恢复时间失败")
 	}
 	return nil
 }
@@ -377,31 +423,30 @@ func (s *sSysPublish) recoverPendingIdleTelegramJobs(ctx context.Context, limit 
 	now := gtime.Now()
 	nowText := telegramRecoveryTimeText(now)
 	deadline := telegramRecoveryTimeText(now.Add(-telegramPendingJobRecoverAfter))
-	var jobs []telegramJobRecord
-	query := `WITH eligible_jobs AS (
-		SELECT j.*, ROW_NUMBER() OVER (
-			PARTITION BY j.tenant_id, j.channel_id
-			ORDER BY ` + telegramJobEffectivePrioritySQL("j") + ` ASC, j.id ASC
-		) AS channel_rank
-		FROM ` + publishTgJobTable + ` j
-		WHERE j.status IN ('pending', 'failed_retry', 'unknown')
-            AND ` + telegramWebhookDetachedJobSQL("j.") + `
-			AND (j.dispatch_status = ? OR j.dispatch_status = '')
-			AND ` + telegramActiveChannelConditionForAlias("j") + `
-			AND ` + messagePushPlanRecoveryConditionSQL("j") + `
-			AND (j.next_retry_at IS NULL OR j.next_retry_at <= ?)
-			AND j.updated_at <= ?
-	)
-	SELECT * FROM eligible_jobs
-	WHERE channel_rank <= ?
-	ORDER BY updated_at ASC, id ASC
-	LIMIT ?`
-	err := g.DB().GetScan(ctx, &jobs, query, tgDispatchStatusIdle, telegramRecoveryTimeText(now.Add(-messagePushPlanJobExpireAfter)), nowText, deadline, telegramChannelActiveJobLimit, limit)
+	candidateLimit := limit * 10
+	if candidateLimit < 100 {
+		candidateLimit = 100
+	}
+	if candidateLimit > 2000 {
+		candidateLimit = 2000
+	}
+	var candidates []telegramJobRecord
+	err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
+		WhereIn("j.status", []string{"pending", "failed_retry", "unknown"}).
+		Where(telegramWebhookDetachedJobSQL("j.")).
+		Where("(j.dispatch_status = ? OR j.dispatch_status = '')", tgDispatchStatusIdle).
+		Where(telegramActiveChannelConditionForAlias("j")).
+		Where(messagePushPlanRecoveryConditionSQL("j"), telegramRecoveryTimeText(now.Add(-messagePushPlanJobExpireAfter))).
+		Where("(j.next_retry_at IS NULL OR j.next_retry_at <= ?)", nowText).
+		WhereLTE("j.updated_at", deadline).
+		Order(gdb.Raw(telegramJobEffectivePrioritySQL("j") + " ASC")).
+		OrderAsc("j.id").Limit(candidateLimit).Scan(&candidates)
 	if err != nil {
 		observeErr = err
 		return gerror.Wrap(err, "读取待入队TG推送任务失败")
 	}
-	scanned = len(jobs)
+	jobs := fairPendingTelegramJobs(candidates, limit)
+	scanned = len(candidates)
 	if len(jobs) > 0 {
 		g.Log().Infof(ctx, "恢复待入队TG推送任务：%d条", len(jobs))
 	}
@@ -414,6 +459,26 @@ func (s *sSysPublish) recoverPendingIdleTelegramJobs(ctx context.Context, limit 
 		}
 	}
 	return nil
+}
+
+func fairPendingTelegramJobs(candidates []telegramJobRecord, limit int) []telegramJobRecord {
+	if limit <= 0 || len(candidates) == 0 {
+		return nil
+	}
+	jobs := make([]telegramJobRecord, 0, min(limit, len(candidates)))
+	seen := make(map[string]struct{}, len(candidates))
+	for _, job := range candidates {
+		key := fmt.Sprintf("%d:%d:%s", job.TenantId, job.ChannelId, normalizeTelegramChannelChatID(job.TargetChatId))
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		jobs = append(jobs, job)
+		if len(jobs) >= limit {
+			break
+		}
+	}
+	return jobs
 }
 
 func telegramRecoveryTimeText(value *gtime.Time) string {

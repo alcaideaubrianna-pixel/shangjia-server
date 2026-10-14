@@ -27,7 +27,8 @@ const (
 	collectMaterialVerifyWindowDefault     = 5 * time.Minute
 	collectMaterialVerifyRetryDelay        = time.Minute
 	collectMaterialWaitingVerifyRetryDelay = 10 * time.Second
-	collectMaterialWindowLookahead         = 32
+	collectMaterialWindowLookahead         = 256
+	collectMaterialWindowExecutionTimeout  = 90 * time.Second
 	collectMaterialRolePending             = "pending"
 	collectMaterialRoleDisplay             = "display"
 	collectMaterialRoleVerify              = "verify"
@@ -92,8 +93,9 @@ func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload co
 		chatID := strings.TrimSpace(row["source_chat_id"].String())
 		byChat[chatID] = append(byChat[chatID], row)
 	}
+	windowTruncated := len(rows) >= batchSize+collectMaterialWindowLookahead
 	for chatID, chatRows := range byChat {
-		if err := s.processCollectMessageWindow(ctx, payload, chatID, chatRows, processEventIds); err != nil {
+		if err := s.processCollectMessageWindow(ctx, payload, chatID, chatRows, processEventIds, windowTruncated); err != nil {
 			return err
 		}
 	}
@@ -137,10 +139,11 @@ func (s *sSysPublish) processTargetCollectEventWindow(ctx context.Context, paylo
 	if len(rows) == 0 || rows[0]["id"].Int64() != target["id"].Int64() {
 		return gerror.Newf("目标采集事件当前不可处理 eventId:%d status:%s role:%s", target["id"].Int64(), target["status"].String(), strings.TrimSpace(target["material_role"].String()))
 	}
-	return s.processCollectMessageWindow(ctx, payload, target["source_chat_id"].String(), rows, map[int64]struct{}{target["id"].Int64(): {}})
+	windowTruncated := len(rows) >= collectMaterialWindowLookahead+1
+	return s.processCollectMessageWindow(ctx, payload, target["source_chat_id"].String(), rows, map[int64]struct{}{target["id"].Int64(): {}}, windowTruncated)
 }
 
-func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload collectProcessQueuePayload, chatID string, rows []gdb.Record, processEventIds map[int64]struct{}) error {
+func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload collectProcessQueuePayload, chatID string, rows []gdb.Record, processEventIds map[int64]struct{}, windowTruncated bool) error {
 	sort.SliceStable(rows, func(i, j int) bool {
 		left := rows[i]["source_message_id"].Int64()
 		right := rows[j]["source_message_id"].Int64()
@@ -199,7 +202,7 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 				}
 				continue
 			}
-			if !collectMaterialEventIngestOlderThan(event, collectMaterialVerifyWindow()) {
+			if collectMaterialShouldWaitForVerify(event, windowTruncated) {
 				if err = s.markCollectMaterialWaitingVerify(ctx, event["id"].Int64()); err != nil {
 					return err
 				}
@@ -268,6 +271,10 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 		}
 	}
 	return nil
+}
+
+func collectMaterialShouldWaitForVerify(event gdb.Record, windowTruncated bool) bool {
+	return windowTruncated || !collectMaterialEventIngestOlderThan(event, collectMaterialVerifyWindow())
 }
 
 func shouldResumeClassifiedDisplayEvent(event gdb.Record) bool {
