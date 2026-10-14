@@ -49,6 +49,18 @@ func TestTelegramReusableFileFallbackTriesURLBeforeUpload(t *testing.T) {
 	}
 }
 
+func TestTelegramMediaGroupFallbackTriesURLBeforeUpload(t *testing.T) {
+	media := []*telegramMediaItem{{TgFileId: "BAAC-cached", FileUrl: "https://cdn.example/video.mp4"}}
+	urlStage := telegramMediaSetWithoutReusableFileID(media)
+	if len(urlStage) != 1 || urlStage[0].TgFileId != "" || urlStage[0].ForceUpload || telegramMediaRemoteURL(urlStage[0]) == "" {
+		t.Fatalf("media group URL stage is invalid: %+v", urlStage)
+	}
+	uploadStage := telegramMediaSetForcedUpload(urlStage)
+	if len(uploadStage) != 1 || !uploadStage[0].ForceUpload || telegramMediaRemoteURL(uploadStage[0]) != "" {
+		t.Fatalf("media group upload stage is invalid: %+v", uploadStage)
+	}
+}
+
 func TestValidateTelegramMediaPurpose(t *testing.T) {
 	tests := []struct {
 		name    string

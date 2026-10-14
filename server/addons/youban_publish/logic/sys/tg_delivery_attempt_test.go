@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"os"
 	"strings"
@@ -13,6 +14,25 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 )
+
+func TestTelegramAttemptMessageSnapshotPreservesProjectionMetadata(t *testing.T) {
+	want := telegramSentMessage{
+		MessageId: 101, MediaGroupId: "group-1", Purpose: "display", MediaId: 202,
+		TgFileId: "file-id", TgFileUniqueId: "unique-id", AssetHash: "asset-hash",
+		ProtectedHashKey: "protected-key", ProtectedPHash: 303, ProtectedDHash: 404,
+	}
+	payload, err := json.Marshal(&want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got telegramSentMessage
+	if err = json.Unmarshal(payload, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("attempt message snapshot = %+v, want %+v", got, want)
+	}
+}
 
 func TestTelegramOptionalAttemptScanTreatsMissingRowAsCacheMiss(t *testing.T) {
 	if !telegramOptionalAttemptScanSucceeded(nil) {

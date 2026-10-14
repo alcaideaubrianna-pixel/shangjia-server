@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -57,7 +58,8 @@ type telegramDeliveryAttempt struct {
 }
 
 type telegramAttemptMessageRecord struct {
-	MessageId int64 `json:"messageId" orm:"message_id"`
+	MessageId      int64  `json:"messageId" orm:"message_id"`
+	MessagePayload string `json:"messagePayload" orm:"message_payload"`
 }
 
 func (s *sSysPublish) beginTelegramDeliveryAttempt(ctx context.Context, job telegramJobRecord, phase string, expectedCount int) (telegramDeliveryAttempt, error) {
@@ -147,6 +149,9 @@ func telegramTextHasInternalDeliveryMarker(text string) bool {
 }
 
 func (s *sSysPublish) confirmTelegramDeliveryAttempt(ctx context.Context, attempt telegramDeliveryAttempt, messages []*telegramSentMessage, response bool) error {
+	// Persist the authoritative Telegram response first. If the subsequent
+	// attempt update fails, recovery must still see this durable evidence and
+	// repair projections without calling Telegram again.
 	if err := s.recordTelegramAttemptMessages(ctx, attempt, messages, "response"); err != nil {
 		return err
 	}
@@ -158,19 +163,16 @@ func (s *sSysPublish) confirmTelegramDeliveryAttempt(ctx context.Context, attemp
 	if response {
 		data["response_received"] = 1
 	}
-	result, err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
+	_, err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
 		Where("id", attempt.Id).
 		WhereIn("status", []string{telegramAttemptStatusSending, telegramAttemptStatusWaiting, telegramAttemptStatusRetryWait, telegramAttemptStatusConfirmed}).
 		Data(data).Update()
-	if err == nil {
-		affected, _ := result.RowsAffected()
-		if affected == 0 {
-			return nil
-		}
-		attempt.Status = telegramAttemptStatusConfirmed
-		s.projectTelegramDeliveryAttempt(ctx, attempt, "")
+	if err != nil {
+		return err
 	}
-	return err
+	attempt.Status = telegramAttemptStatusConfirmed
+	s.projectTelegramDeliveryAttempt(ctx, attempt, "")
+	return nil
 }
 
 // restoreConfirmedTelegramResponse repairs local projections after Telegram
@@ -180,7 +182,7 @@ func (s *sSysPublish) restoreConfirmedTelegramResponse(ctx context.Context, job 
 	var attempt telegramDeliveryAttempt
 	if err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
 		Where("job_id", job.Id).Where("phase", phase).
-		Where("status", telegramAttemptStatusConfirmed).Where("response_received", 1).
+		Where("(response_received = ? OR EXISTS (SELECT 1 FROM "+publishTgAttemptMessageTable+" response WHERE response.attempt_id="+publishTgAttemptTable+".id AND response.source='response'))", 1).
 		OrderDesc("id").Limit(1).Scan(&attempt); err != nil {
 		return false, gerror.Wrap(err, "读取TG已确认响应失败")
 	}
@@ -189,7 +191,7 @@ func (s *sSysPublish) restoreConfirmedTelegramResponse(ctx context.Context, job 
 	}
 	var rows []*telegramAttemptMessageRecord
 	if err := g.DB().Model(publishTgAttemptMessageTable).Safe().Ctx(ctx).
-		Fields("message_id").Where("attempt_id", attempt.Id).OrderAsc("id").Scan(&rows); err != nil {
+		Fields("message_id,message_payload").Where("attempt_id", attempt.Id).OrderAsc("id").Scan(&rows); err != nil {
 		return true, gerror.Wrap(err, "读取TG已确认消息失败")
 	}
 	if len(rows) == 0 {
@@ -201,8 +203,19 @@ func (s *sSysPublish) restoreConfirmedTelegramResponse(ctx context.Context, job 
 		if row == nil || row.MessageId <= 0 {
 			continue
 		}
-		message := &telegramSentMessage{MessageId: row.MessageId, Purpose: phase}
-		if mediaIndex < len(media) {
+		message := &telegramSentMessage{}
+		if strings.TrimSpace(row.MessagePayload) != "" {
+			if err := json.Unmarshal([]byte(row.MessagePayload), message); err != nil {
+				return true, gerror.Wrap(err, "解析TG已确认消息快照失败")
+			}
+		}
+		message.MessageId = row.MessageId
+		if strings.TrimSpace(message.Purpose) == "" {
+			message.Purpose = phase
+		}
+		// Legacy audit rows only contain message_id. Keep the old positional
+		// fallback solely for those rows; new response rows restore exact data.
+		if strings.TrimSpace(row.MessagePayload) == "" && mediaIndex < len(media) {
 			item := media[mediaIndex]
 			if item != nil {
 				message.MediaId = item.Id
@@ -222,6 +235,13 @@ func (s *sSysPublish) restoreConfirmedTelegramResponse(ctx context.Context, job 
 	if err := s.updateTelegramJobSendPhase(ctx, job.Id, confirmedPhase); err != nil {
 		return true, err
 	}
+	if err := s.updateTelegramMediaFileIds(ctx, messages); err != nil {
+		g.Log().Warningf(ctx, "恢复TG远端成功响应file_id失败 jobId:%d attemptId:%d err:%+v", job.Id, attempt.Id, err)
+	}
+	_, _ = g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).Where("id", attempt.Id).Data(g.Map{
+		"status": telegramAttemptStatusConfirmed, "response_received": 1,
+		"confirmed_count": len(messages), "webhook_deadline": nil, "error_message": "", "updated_at": gtime.Now(),
+	}).Update()
 	g.Log().Infof(ctx, "TG远端成功响应本地投影已恢复 jobId:%d attemptId:%d phase:%s messages:%d", job.Id, attempt.Id, phase, len(messages))
 	return true, nil
 }
@@ -452,14 +472,24 @@ func (s *sSysPublish) abandonTelegramDeliveryAttempt(ctx context.Context, attemp
 }
 
 func (s *sSysPublish) recordTelegramAttemptMessages(ctx context.Context, attempt telegramDeliveryAttempt, messages []*telegramSentMessage, source string) error {
+	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		return recordTelegramAttemptMessagesTx(ctx, tx, attempt, messages, source)
+	})
+}
+
+func recordTelegramAttemptMessagesTx(ctx context.Context, tx gdb.TX, attempt telegramDeliveryAttempt, messages []*telegramSentMessage, source string) error {
 	for _, message := range messages {
 		if message == nil || message.MessageId <= 0 {
 			continue
 		}
-		_, err := g.DB().Model(publishTgAttemptMessageTable).Safe().Ctx(ctx).Data(g.Map{
+		payload, marshalErr := json.Marshal(message)
+		if marshalErr != nil {
+			return gerror.Wrap(marshalErr, "序列化TG Attempt消息失败")
+		}
+		_, err := tx.Model(publishTgAttemptMessageTable).Data(g.Map{
 			"attempt_id": attempt.Id, "job_id": attempt.JobId, "target_chat_id": attempt.TargetChatId,
-			"message_id": message.MessageId, "source": source, "created_at": gtime.Now(),
-		}).OnConflict("attempt_id,message_id").OnDuplicate("source").Save()
+			"message_id": message.MessageId, "message_payload": string(payload), "source": source, "created_at": gtime.Now(),
+		}).OnConflict("attempt_id,message_id").OnDuplicate("source,message_payload").Save()
 		if err != nil {
 			g.Log().Errorf(ctx, "TG消息已返回但记录发送审计失败 attempt_id:%d job_id:%d phase:%s chat_id:%s message_id:%d source:%s err:%v",
 				attempt.Id, attempt.JobId, attempt.Phase, attempt.TargetChatId, message.MessageId, source, err)

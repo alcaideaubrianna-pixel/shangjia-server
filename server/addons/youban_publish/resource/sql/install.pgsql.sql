@@ -2117,7 +2117,7 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_tg_attempt_channel" ON "hg_youban_publish_tg
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_attempt_message" (
   "id" BIGSERIAL PRIMARY KEY, "attempt_id" bigint NOT NULL DEFAULT 0, "job_id" bigint NOT NULL DEFAULT 0,
   "target_chat_id" varchar(128) NOT NULL DEFAULT '', "message_id" bigint NOT NULL DEFAULT 0,
-  "source" varchar(16) NOT NULL DEFAULT '', "created_at" timestamp DEFAULT NULL
+  "message_payload" text NOT NULL DEFAULT '', "source" varchar(16) NOT NULL DEFAULT '', "created_at" timestamp DEFAULT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_attempt_message" ON "hg_youban_publish_tg_attempt_message" ("attempt_id", "message_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_attempt_message_job" ON "hg_youban_publish_tg_attempt_message" ("job_id", "attempt_id");

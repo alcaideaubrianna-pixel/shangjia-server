@@ -122,8 +122,17 @@ relayGroupDone:
 			Media:  group,
 		})
 		closeTelegramMediaFiles(closers)
-		if err != nil && telegramMediaSetCanFallbackToUpload(chunk, err) {
-			group, closers, err = s.telegramInputMediaGroup(ctx, telegramMediaSetWithoutTgFileId(chunk), chunkCaption)
+		if err != nil && telegramMediaSetCanFallbackFromFileIDToURL(chunk, err) {
+			group, closers, err = s.telegramInputMediaGroup(ctx, telegramMediaSetWithoutReusableFileID(chunk), chunkCaption)
+			if err == nil {
+				msgs, err = bot.SendMediaGroup(ctx, &tgbot.SendMediaGroupParams{ChatID: chatId, Media: group})
+				closeTelegramMediaFiles(closers)
+			} else {
+				err = telegramPreparationError(err)
+			}
+		}
+		if err != nil && telegramMediaSetCanFallbackToUpload(telegramMediaSetWithoutReusableFileID(chunk), err) {
+			group, closers, err = s.telegramInputMediaGroup(ctx, telegramMediaSetForcedUpload(chunk), chunkCaption)
 			if err == nil {
 				msgs, err = bot.SendMediaGroup(ctx, &tgbot.SendMediaGroupParams{ChatID: chatId, Media: group})
 				closeTelegramMediaFiles(closers)
@@ -621,6 +630,10 @@ func telegramMediaSetHasCopyRef(media []*telegramMediaItem) bool {
 }
 
 func telegramMediaSetWithoutTgFileId(media []*telegramMediaItem) []*telegramMediaItem {
+	return telegramMediaSetForcedUpload(media)
+}
+
+func telegramMediaSetForcedUpload(media []*telegramMediaItem) []*telegramMediaItem {
 	list := make([]*telegramMediaItem, 0, len(media))
 	for _, item := range media {
 		if item == nil {
@@ -631,6 +644,24 @@ func telegramMediaSetWithoutTgFileId(media []*telegramMediaItem) []*telegramMedi
 		cloned.TgFileId = ""
 		cloned.TgThumbFileId = ""
 		cloned.ForceUpload = true
+		list = append(list, &cloned)
+	}
+	return list
+}
+
+func telegramMediaSetWithoutReusableFileID(media []*telegramMediaItem) []*telegramMediaItem {
+	list := make([]*telegramMediaItem, 0, len(media))
+	for _, item := range media {
+		if item == nil {
+			list = append(list, item)
+			continue
+		}
+		cloned := *item
+		if telegramMediaUsesReusableFileId(item) {
+			cloned.TgFileId = ""
+			cloned.TgThumbFileId = ""
+			cloned.ForceUpload = false
+		}
 		list = append(list, &cloned)
 	}
 	return list
@@ -849,6 +880,18 @@ func telegramMediaSetCanFallbackToUpload(media []*telegramMediaItem, err error) 
 	}
 	for _, item := range media {
 		if telegramMediaCanFallbackToUpload(item, err) {
+			return true
+		}
+	}
+	return false
+}
+
+func telegramMediaSetCanFallbackFromFileIDToURL(media []*telegramMediaItem, err error) bool {
+	if isTelegramAmbiguousDeliveryError(err) || (!isTelegramInvalidReusableFileError(err) && !isTelegramPhotoTooLargeError(err)) {
+		return false
+	}
+	for _, item := range media {
+		if telegramMediaUsesReusableFileId(item) {
 			return true
 		}
 	}
