@@ -205,13 +205,6 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 				}
 				continue
 			}
-			if collectMaterialEventRequiresVerify(event) {
-				if err = s.ignoreCollectEvent(ctx, event["id"].Int64(), "BOT资料在5分钟窗口内未匹配到验证视频", "group"); err != nil {
-					return err
-				}
-				s.appendCollectEventLogForRecord(ctx, event, "group", "missing_verify", "BOT资料缺少验证视频，已停止入库和推送", "")
-				continue
-			}
 			claimed, claimErr := s.markCollectMaterialRole(ctx, event["id"].Int64(), collectMaterialRoleDisplay, 0, "complete")
 			if claimErr != nil {
 				return claimErr
@@ -275,10 +268,6 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 		}
 	}
 	return nil
-}
-
-func collectMaterialEventRequiresVerify(event gdb.Record) bool {
-	return strings.EqualFold(strings.TrimSpace(event["source_type"].String()), sysin.CollectSourceTypeBot)
 }
 
 func shouldResumeClassifiedDisplayEvent(event gdb.Record) bool {

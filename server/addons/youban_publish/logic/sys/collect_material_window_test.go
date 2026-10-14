@@ -29,15 +29,6 @@ func TestCollectMaterialMutableStatusesExcludeTerminalEvents(t *testing.T) {
 	}
 }
 
-func TestCollectMaterialEventRequiresVerifyForBotOnly(t *testing.T) {
-	if !collectMaterialEventRequiresVerify(gdb.Record{"source_type": gvar.New(sysin.CollectSourceTypeBot)}) {
-		t.Fatal("BOT collection must require verification media")
-	}
-	if collectMaterialEventRequiresVerify(gdb.Record{"source_type": gvar.New(sysin.CollectSourceTypeAccount)}) {
-		t.Fatal("account collection keeps the configured five-minute fallback")
-	}
-}
-
 func TestFindCollectVerifyEventUsesOneFollowingVideoGroup(t *testing.T) {
 	receivedAt := gtime.NewFromTime(time.Now().Add(-4 * time.Minute))
 	rows := []gdb.Record{

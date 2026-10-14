@@ -55,14 +55,15 @@ func (s *sSysPublish) dispatchTelegramJobOutboxByJob(ctx context.Context, jobId 
 	if jobId <= 0 {
 		return nil
 	}
-	var row telegramJobOutboxRecord
-	if err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
+	record, err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
 		Where("job_id", jobId).Where("event_type", telegramOutboxEventPublish).
 		WhereNot("status", telegramOutboxDelivered).
 		Where("available_at <= ?", gtime.Now()).
-		OrderAsc("id").Limit(1).Scan(&row); err != nil {
+		OrderAsc("id").Limit(1).One()
+	if err != nil {
 		return gerror.Wrap(err, "读取TG任务Outbox失败")
 	}
+	row := telegramJobOutboxRecordFromRecord(record)
 	if row.Id <= 0 {
 		// A future outbox row is dispatched by the background dispatcher when it
 		// becomes due. Only jobs created before the outbox migration may bypass it.
@@ -78,6 +79,17 @@ func (s *sSysPublish) dispatchTelegramJobOutboxByJob(ctx context.Context, jobId 
 		return s.enqueueTelegramJobDirect(ctx, jobId, 0)
 	}
 	return s.dispatchTelegramJobOutbox(ctx, row)
+}
+
+func telegramJobOutboxRecordFromRecord(record gdb.Record) telegramJobOutboxRecord {
+	if record.IsEmpty() {
+		return telegramJobOutboxRecord{}
+	}
+	return telegramJobOutboxRecord{
+		Id:          record["id"].Int64(),
+		JobId:       record["job_id"].Int64(),
+		AvailableAt: record["available_at"].GTime(),
+	}
 }
 
 func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegramJobOutboxRecord) error {
