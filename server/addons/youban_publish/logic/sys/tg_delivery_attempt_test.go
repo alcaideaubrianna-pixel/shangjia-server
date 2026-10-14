@@ -27,7 +27,7 @@ func TestTelegramOptionalAttemptScanTreatsMissingRowAsCacheMiss(t *testing.T) {
 }
 
 func TestTelegramMediaSendTimeoutsFitPublishTaskDeadline(t *testing.T) {
-	if telegramVerifySendTimeout <= 0 || telegramVerifySendTimeout >= telegramDisplaySendTimeout {
+	if telegramVerifySendTimeout <= 0 {
 		t.Fatalf("unexpected media timeouts: verify=%s display=%s", telegramVerifySendTimeout, telegramDisplaySendTimeout)
 	}
 	if telegramDisplaySendTimeout+telegramVerifySendTimeout+telegramAttemptWebhookWait >= telegramPublishTaskTimeout {

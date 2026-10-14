@@ -55,9 +55,9 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 	// from another collection source bypass an older job between its display
 	// and verification phases.
 	mod = mod.Where(`(j.created_at < ? OR (j.created_at = ? AND j.id < ?))`, createdAt, createdAt, job.Id)
-	if isTelegramUrgentJob(job) {
-		mod = mod.Where("j.priority <= ?", tgJobPriorityUrgent)
-	}
+	// Priority never bypasses the destination channel's ordered stream.
+	// Urgent jobs may win across different channels, but cannot overtake an
+	// older display/verification operation on this channel.
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}

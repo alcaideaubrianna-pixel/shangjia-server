@@ -155,14 +155,28 @@ func (s *sSysPublish) recoverFailedJobsMissingVerification(ctx context.Context, 
 		Fields("j.*").
 		Where("j.status", telegramJobStatusFailed).
 		Where("j.send_phase", telegramSendPhaseDisplayConfirmed).
+		Where(telegramActiveChannelConditionForAlias("j")).
 		Where("EXISTS (SELECT 1 FROM " + publishMediaTable + " media WHERE media.profile_id=j.profile_id AND media.purpose='verify' AND media.deleted_at IS NULL)").
+		Where("EXISTS (SELECT 1 FROM " + publishTgMessageTable + " display WHERE display.job_id=j.id AND display.purpose='display' AND display.status='sent' AND display.deleted_at IS NULL)").
 		Where("NOT EXISTS (SELECT 1 FROM " + publishTgMessageTable + " message WHERE message.job_id=j.id AND message.purpose='verify' AND message.status='sent' AND message.deleted_at IS NULL)").
+		Where("NOT EXISTS (SELECT 1 FROM " + publishTgJobTable + " newer WHERE newer.tenant_id=j.tenant_id AND newer.profile_id=j.profile_id AND newer.channel_id=j.channel_id AND newer.id>j.id)").
 		OrderAsc("j.updated_at").OrderAsc("j.id").Limit(limit).Scan(&jobs)
 	if err != nil {
 		return gerror.Wrap(err, "读取缺少验证视频的终态TG任务失败")
 	}
 	now := gtime.Now()
 	for _, job := range jobs {
+		allowed, allowedErr := s.canSendTelegramJob(ctx, job)
+		if allowedErr != nil {
+			g.Log().Warningf(ctx, "校验缺失验证视频TG任务失败 jobId:%d err:%+v", job.Id, allowedErr)
+			continue
+		}
+		if !allowed {
+			if supersedeErr := s.supersedeTelegramJobAndCompleteOperation(ctx, job); supersedeErr != nil {
+				g.Log().Warningf(ctx, "废弃不可发布的验证视频恢复任务失败 jobId:%d err:%+v", job.Id, supersedeErr)
+			}
+			continue
+		}
 		result, updateErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 			Where("id", job.Id).
 			Where("status", telegramJobStatusFailed).
@@ -185,7 +199,7 @@ func (s *sSysPublish) recoverFailedJobsMissingVerification(ctx context.Context, 
 		job.Status = telegramJobStatusRetryWait
 		job.DispatchStatus = tgDispatchStatusIdle
 		s.appendTelegramJobLog(ctx, job, "verify_recovery", "queued", "展示已确认，验证视频已重新进入频道顺序队列")
-		if enqueueErr := s.enqueueTelegramJob(ctx, job.Id, 0); enqueueErr != nil {
+		if enqueueErr := s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 0, false); enqueueErr != nil {
 			g.Log().Warningf(ctx, "重新投递缺失验证视频TG任务失败 jobId:%d err:%+v", job.Id, enqueueErr)
 		}
 	}
@@ -516,8 +530,7 @@ func (s *sSysPublish) recoverPendingIdleTelegramJobs(ctx context.Context, limit 
 		Where(messagePushPlanRecoveryConditionSQL("j"), telegramRecoveryTimeText(now.Add(-messagePushPlanJobExpireAfter))).
 		Where("(j.next_retry_at IS NULL OR j.next_retry_at <= ?)", nowText).
 		WhereLTE("j.updated_at", deadline).
-		Order(gdb.Raw(telegramJobEffectivePrioritySQL("j") + " ASC")).
-		OrderAsc("j.id").Limit(candidateLimit).Scan(&candidates)
+		OrderAsc("j.created_at").OrderAsc("j.id").Limit(candidateLimit).Scan(&candidates)
 	if err != nil {
 		observeErr = err
 		return gerror.Wrap(err, "读取待入队TG推送任务失败")
