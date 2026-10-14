@@ -367,8 +367,12 @@ func (s *sGateway) observeBotCounts(ctx context.Context, configured int) {
 	gauge.Record(ctx, int64(running), metric.WithAttributes(attribute.String("state", "running")))
 }
 
+func gatewayRuntimeSignature(mode string, conf *service.RuntimeConfig) string {
+	return mode + "\n" + strings.TrimSpace(conf.WebhookBaseURL) + "\n" + strings.TrimSpace(conf.ProxyURL) + "\n" + strings.TrimSpace(conf.RuntimeServerURL) + "\n" + strings.TrimSpace(conf.MediaServerURL) + "\n" + strings.Join(allowedUpdates(), ",")
+}
+
 func (s *sGateway) ensure(ctx context.Context, key, token, mode string, conf *service.RuntimeConfig) error {
-	signature := mode + "\n" + strings.TrimSpace(conf.WebhookBaseURL) + "\n" + strings.TrimSpace(conf.ProxyURL) + "\n" + strings.TrimSpace(conf.RuntimeServerURL) + "\n" + strings.Join(allowedUpdates(), ",")
+	signature := gatewayRuntimeSignature(mode, conf)
 	s.mu.Lock()
 	current := s.runtimes[key]
 	s.mu.Unlock()

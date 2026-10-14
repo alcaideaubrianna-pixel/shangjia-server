@@ -171,6 +171,15 @@ func TestMediaClientUsesDedicatedCache(t *testing.T) {
 	}
 }
 
+func TestGatewayRuntimeSignatureIncludesMediaEndpoint(t *testing.T) {
+	base := &service.RuntimeConfig{RuntimeServerURL: "https://api.telegram.org", MediaServerURL: "http://old-bot-api.internal"}
+	changed := *base
+	changed.MediaServerURL = "http://new-bot-api.internal"
+	if gatewayRuntimeSignature("webhook", base) == gatewayRuntimeSignature("webhook", &changed) {
+		t.Fatal("gateway runtime signature ignored media endpoint change")
+	}
+}
+
 func TestRuntimeModeForSystem(t *testing.T) {
 	tests := []struct {
 		name       string
