@@ -456,7 +456,7 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 		if row.IsEmpty() || row["id"].Int64() <= 0 || !shouldRecoverCollectEvent(row) {
 			continue
 		}
-		if row["status"].String() == sysin.CollectEventStatusMediaPending && !s.collectEventHasDueMedia(ctx, row["id"].Int64()) {
+		if row["status"].String() == sysin.CollectEventStatusMediaPending && !s.collectEventMediaCanResume(ctx, row["id"].Int64()) {
 			continue
 		}
 		claimData := g.Map{"updated_at": gtime.Now()}
@@ -500,23 +500,50 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 	return nil
 }
 
+// RecoverCollectEvents runs one bounded recovery pass through the normal
+// collection queue. It is intended for operational repair tooling.
+func (s *sSysPublish) RecoverCollectEvents(ctx context.Context, limit int) error {
+	return s.recoverCollectEvents(ctx, limit)
+}
+
 func enabledCollectSourceExistsSQL(ownerAlias string) string {
 	return "EXISTS (SELECT 1 FROM " + pdao.YoubanPublishCollectSource.Table() + " s WHERE s.id=" + ownerAlias + ".source_id AND s.tenant_id=" + ownerAlias + ".tenant_id AND s.account_id=" + ownerAlias + ".account_id AND s.collect_enabled=1 AND s.status=1 AND s.deleted_at IS NULL)"
 }
 
-func (s *sSysPublish) collectEventHasDueMedia(ctx context.Context, eventId int64) bool {
+func (s *sSysPublish) collectEventMediaCanResume(ctx context.Context, eventId int64) bool {
 	if eventId <= 0 {
 		return false
 	}
 	cols := pdao.YoubanPublishCollectEventMedia.Columns()
-	row, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
-		Fields(cols.Id).
+	rows, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
+		Fields(cols.CacheStatus, cols.NextRetryAt, cols.StoragePath, cols.FileUrl, cols.BackupChatId, cols.BackupMessageId).
 		Where(cols.EventId, eventId).
-		Where(cols.CacheStatus, collectMediaCachePending).
-		Where("(next_retry_at IS NULL OR next_retry_at <= ?)", gtime.Now()).
-		Limit(1).
-		One()
-	return err == nil && !row.IsEmpty()
+		All()
+	if err != nil || len(rows) == 0 {
+		return false
+	}
+	now := gtime.Now()
+	for _, row := range rows {
+		status := strings.TrimSpace(row[cols.CacheStatus].String())
+		if status == collectMediaCacheReady &&
+			(strings.TrimSpace(row[cols.StoragePath].String()) != "" || strings.TrimSpace(row[cols.FileUrl].String()) != "" ||
+				(strings.TrimSpace(row[cols.BackupChatId].String()) != "" && row[cols.BackupMessageId].Int64() > 0)) {
+			continue
+		}
+		if status == collectMediaCacheReady {
+			continue
+		}
+		if status == collectMediaCachePending {
+			nextRetryAt := row[cols.NextRetryAt].GTime()
+			if nextRetryAt == nil || !nextRetryAt.After(now) {
+				continue
+			}
+		}
+		return false
+	}
+	// A crash can happen after the last media row becomes ready but before the
+	// parent event is re-enqueued. That state is immediately safe to resume.
+	return true
 }
 
 func shouldRecoverCollectEvent(row gdb.Record) bool {

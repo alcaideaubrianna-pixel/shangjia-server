@@ -142,10 +142,7 @@ func (s *sSysPublish) upsertCollectEventMedia(ctx context.Context, event gdb.Rec
 			continue
 		}
 		mediaKey := strings.TrimSpace(item.Type) + ":" + sourceKey
-		status := collectMediaCacheReady
-		if strings.HasPrefix(strings.TrimSpace(item.FileId), "gotd:") && item.StoragePath == "" && item.FileUrl == "" {
-			status = collectMediaCachePending
-		}
+		status := collectMediaInitialCacheStatus(item)
 		mediaCols := pdao.YoubanPublishCollectEventMedia.Columns()
 		existing, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
 			Fields(mediaCols.Id, mediaCols.SortIndex, mediaCols.CacheStatus).
@@ -217,6 +214,13 @@ func (s *sSysPublish) upsertCollectEventMedia(ctx context.Context, event gdb.Rec
 		sortIndex++
 	}
 	return s.syncCollectEventMediaSnapshot(ctx, eventId)
+}
+
+func collectMediaInitialCacheStatus(item collectMediaItem) string {
+	if strings.TrimSpace(item.StoragePath) != "" || strings.TrimSpace(item.FileUrl) != "" {
+		return collectMediaCacheReady
+	}
+	return collectMediaCachePending
 }
 
 func (s *sSysPublish) collectEventMediaRows(ctx context.Context, eventId int64) ([]*collectEventMediaRow, error) {

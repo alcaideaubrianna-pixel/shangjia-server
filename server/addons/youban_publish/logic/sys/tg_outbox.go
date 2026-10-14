@@ -59,11 +59,22 @@ func (s *sSysPublish) dispatchTelegramJobOutboxByJob(ctx context.Context, jobId 
 	if err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
 		Where("job_id", jobId).Where("event_type", telegramOutboxEventPublish).
 		WhereNot("status", telegramOutboxDelivered).
+		Where("available_at <= ?", gtime.Now()).
 		OrderAsc("id").Limit(1).Scan(&row); err != nil {
 		return gerror.Wrap(err, "读取TG任务Outbox失败")
 	}
 	if row.Id <= 0 {
-		// Compatibility for jobs created by older code paths during migration.
+		// A future outbox row is dispatched by the background dispatcher when it
+		// becomes due. Only jobs created before the outbox migration may bypass it.
+		count, countErr := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
+			Where("job_id", jobId).Where("event_type", telegramOutboxEventPublish).
+			WhereNot("status", telegramOutboxDelivered).Count()
+		if countErr != nil {
+			return gerror.Wrap(countErr, "检查TG任务Outbox失败")
+		}
+		if count > 0 {
+			return nil
+		}
 		return s.enqueueTelegramJobDirect(ctx, jobId, 0)
 	}
 	return s.dispatchTelegramJobOutbox(ctx, row)
@@ -86,11 +97,10 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 	if affected == 0 {
 		return nil
 	}
-	delay := time.Duration(0)
-	if row.AvailableAt != nil && row.AvailableAt.After(now) {
-		delay = row.AvailableAt.Sub(now)
-	}
-	if err = s.enqueueTelegramJobDirect(ctx, row.JobId, delay); err != nil {
+	// available_at is a database wall-clock timestamp. The caller only selects
+	// due rows, so do not convert it back to a Go duration: PostgreSQL timestamp
+	// values can otherwise acquire an eight-hour offset when locations differ.
+	if err = s.enqueueTelegramJobDirect(ctx, row.JobId, 0); err != nil {
 		message := boundPublishSuccessRecordMessage(err.Error())
 		_, _ = g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
 			Where("id", row.Id).Where("status", telegramOutboxProcessing).Where("lease_owner", owner).
@@ -176,6 +186,24 @@ func (s *sSysPublish) runTelegramOutboxDispatcher(ctx context.Context) {
 		case <-ticker.C:
 		}
 	}
+}
+
+// RecoverTelegramDispatch runs one bounded scheduler pass. It is used by
+// operational repair tooling and never sends Telegram messages itself.
+func (s *sSysPublish) RecoverTelegramDispatch(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		limit = 100
+	}
+	if err := s.dispatchDueTelegramJobOutbox(ctx, limit); err != nil {
+		return err
+	}
+	return s.recoverPendingIdleTelegramJobs(ctx, limit)
+}
+
+// RecoverTelegramJobDispatch immediately schedules one existing job through
+// the normal idempotent queue path.
+func (s *sSysPublish) RecoverTelegramJobDispatch(ctx context.Context, jobId int64) error {
+	return s.enqueueTelegramJobDirect(ctx, jobId, 0)
 }
 
 func telegramOutboxOwner() string {

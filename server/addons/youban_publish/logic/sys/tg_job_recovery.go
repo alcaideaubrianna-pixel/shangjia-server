@@ -12,7 +12,10 @@ import (
 )
 
 const (
-	telegramSendingJobRecoverAfter  = telegramPublishTaskTimeout + 2*time.Minute
+	telegramSendingJobRecoverAfter = telegramPublishTaskTimeout + 2*time.Minute
+	// Before an attempt is created no Telegram API call has been made. This
+	// state can therefore be recovered sooner and safely without reconciliation.
+	telegramPreAttemptRecoverAfter  = 2 * time.Minute
 	telegramPendingJobRecoverAfter  = 30 * time.Second
 	telegramDispatchJobRecoverAfter = 5 * time.Minute
 	messagePushPlanJobExpireAfter   = 30 * time.Minute
@@ -68,6 +71,9 @@ func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 	if err := s.requeueExpiredTelegramAttempts(ctx, 100); err != nil {
 		g.Log().Warningf(ctx, "重新投递过期TG发送Attempt失败：%+v", err)
 	}
+	if err := s.recoverStaleSendingTelegramAttempts(ctx, 100); err != nil {
+		g.Log().Warningf(ctx, "恢复中断的TG发送Attempt失败：%+v", err)
+	}
 	if err := s.recoverTerminalTelegramAttempts(ctx, 500); err != nil {
 		g.Log().Warningf(ctx, "收敛TG发送Attempt状态失败：%+v", err)
 	}
@@ -88,6 +94,9 @@ func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if err := s.recoverStaleSendingTelegramAttempts(ctx, 100); err != nil {
+				g.Log().Warningf(ctx, "恢复中断的TG发送Attempt失败：%+v", err)
+			}
 			if err := s.requeueExpiredTelegramAttempts(ctx, 100); err != nil {
 				g.Log().Warningf(ctx, "重新投递过期TG发送Attempt失败：%+v", err)
 			}
@@ -114,6 +123,54 @@ func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 			}
 		}
 	}
+}
+
+func (s *sSysPublish) recoverStaleSendingTelegramAttempts(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		limit = 100
+	}
+	var attempts []telegramDeliveryAttempt
+	err := g.DB().Model(publishTgAttemptTable+" attempt").Safe().Ctx(ctx).
+		InnerJoin(publishTgJobTable+" job", "job.id=attempt.job_id").
+		Fields("attempt.*").
+		Where("attempt.status", telegramAttemptStatusSending).
+		Where("attempt.updated_at <= ?", gtime.Now().Add(-telegramPublishTaskTimeout)).
+		WhereIn("job.status", []string{telegramJobStatusSending, telegramJobStatusConfirming}).
+		OrderAsc("attempt.updated_at").OrderAsc("attempt.id").Limit(limit).Scan(&attempts)
+	if err != nil {
+		return gerror.Wrap(err, "读取中断的TG发送Attempt失败")
+	}
+	for _, attempt := range attempts {
+		deadline := gtime.Now()
+		result, updateErr := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
+			Where("id", attempt.Id).Where("status", telegramAttemptStatusSending).
+			Where("updated_at <= ?", gtime.Now().Add(-telegramPublishTaskTimeout)).
+			Data(g.Map{
+				"status": telegramAttemptStatusWaiting, "webhook_deadline": deadline,
+				"error_message": "发送进程中断，等待Webhook或协议号对账", "updated_at": gtime.Now(),
+			}).Update()
+		if updateErr != nil {
+			g.Log().Warningf(ctx, "标记中断TG Attempt待对账失败 attemptId:%d err:%+v", attempt.Id, updateErr)
+			continue
+		}
+		affected, _ := result.RowsAffected()
+		if affected == 0 {
+			continue
+		}
+		_, updateErr = s.transitionTelegramJob(ctx, telegramJobTransition{
+			JobId: attempt.JobId, From: []string{telegramJobStatusSending}, To: telegramJobStatusConfirming,
+			ErrorMessage: "发送进程中断，等待Telegram结果对账",
+			Additional:   g.Map{"dispatch_status": tgDispatchStatusProcessing, "next_retry_at": deadline},
+		})
+		if updateErr != nil {
+			g.Log().Warningf(ctx, "标记中断TG任务待对账失败 attemptId:%d jobId:%d err:%+v", attempt.Id, attempt.JobId, updateErr)
+			continue
+		}
+		if _, updateErr = s.enqueueTelegramAttemptTimeout(ctx, attempt.Id, 0); updateErr != nil {
+			g.Log().Warningf(ctx, "投递中断TG Attempt对账失败 attemptId:%d err:%+v", attempt.Id, updateErr)
+		}
+	}
+	return nil
 }
 
 func (s *sSysPublish) requeueExpiredTelegramAttempts(ctx context.Context, limit int) error {
@@ -336,12 +393,13 @@ func (s *sSysPublish) recoverStaleTelegramSendingJobs(ctx context.Context, limit
 	}
 	now := gtime.Now()
 	deadline := telegramRecoveryTimeText(now.Add(-telegramSendingJobRecoverAfter))
+	preAttemptDeadline := telegramRecoveryTimeText(now.Add(-telegramPreAttemptRecoverAfter))
 	var jobs []telegramJobRecord
 	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("status", "sending").
 		Where(telegramActiveChannelCondition()).
 		Where(messagePushPlanRecoveryConditionSQL(publishTgJobTable), telegramRecoveryTimeText(now.Add(-messagePushPlanJobExpireAfter))).
-		WhereLTE("updated_at", deadline).
+		Where(`(updated_at <= ? OR (updated_at <= ? AND NOT EXISTS (SELECT 1 FROM `+publishTgAttemptTable+` a WHERE a.job_id=`+publishTgJobTable+`.id) AND COALESCE(send_phase, '') NOT IN (?, ?)))`, deadline, preAttemptDeadline, telegramSendPhaseDisplaySending, telegramSendPhaseVerifySending).
 		OrderAsc("updated_at").
 		Limit(limit).
 		Scan(&jobs)
@@ -424,6 +482,14 @@ func (s *sSysPublish) requeueStaleTelegramSendingJob(ctx context.Context, job te
 	now := gtime.Now()
 	status := "failed_retry"
 	message := "TG推送任务长时间处于发送中，已自动重新投递"
+	attemptCount, err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
+		Where("job_id", job.Id).Count()
+	if err != nil {
+		return gerror.Wrap(err, "检查TG发送Attempt失败")
+	}
+	if attemptCount == 0 {
+		message = "TG推送在创建发送Attempt前中断，已安全重新投递"
+	}
 	reconcileCount := job.ReconcileCount
 	if job.SendPhase == telegramSendPhaseDisplaySending || job.SendPhase == telegramSendPhaseVerifySending {
 		status = telegramJobStatusConfirming
