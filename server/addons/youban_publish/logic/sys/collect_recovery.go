@@ -44,6 +44,9 @@ func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	if err := s.recoverStaleCollectMediaRows(ctx, mediaBatchSize); err != nil {
 		g.Log().Warningf(ctx, "恢复超时采集媒体失败：%+v", err)
 	}
+	if err := s.recoverInvalidReadyCollectMedia(ctx, mediaBatchSize); err != nil {
+		g.Log().Warningf(ctx, "恢复无持久化文件的采集媒体失败：%+v", err)
+	}
 	if err := s.recoverPendingCollectMedia(ctx, mediaBatchSize); err != nil {
 		g.Log().Warningf(ctx, "恢复待处理采集媒体任务失败：%+v", err)
 	}
@@ -62,6 +65,59 @@ func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	if err := s.recoverCollectPublishTasks(ctx, 100); err != nil {
 		g.Log().Warningf(ctx, "恢复采集推送任务失败：%+v", err)
 	}
+}
+
+// recoverInvalidReadyCollectMedia repairs legacy rows that treated a Telegram
+// file_id as a durable cache. They must re-enter the normal download queue;
+// otherwise the parent event can remain in media_pending indefinitely.
+func (s *sSysPublish) recoverInvalidReadyCollectMedia(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		limit = 1000
+	}
+	mediaCols := pdao.YoubanPublishCollectEventMedia.Columns()
+	rows, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).As("m").
+		Fields("m."+mediaCols.Id).
+		Where("m."+mediaCols.CacheStatus, collectMediaCacheReady).
+		Where("COALESCE(TRIM(m." + mediaCols.StoragePath + "), '') = ''").
+		Where("COALESCE(TRIM(m." + mediaCols.FileUrl + "), '') = ''").
+		Where("NOT (COALESCE(TRIM(m." + mediaCols.BackupChatId + "), '') <> '' AND m." + mediaCols.BackupMessageId + " > 0)").
+		Where(enabledCollectSourceExistsSQL("m")).
+		OrderAsc("m." + mediaCols.Id).
+		Limit(limit).
+		All()
+	if err != nil {
+		return gerror.Wrap(err, "读取无持久化文件的采集媒体失败")
+	}
+	ids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		if id := row[mediaCols.Id].Int64(); id > 0 {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	now := gtime.Now()
+	result, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
+		WhereIn(mediaCols.Id, ids).
+		Where(mediaCols.CacheStatus, collectMediaCacheReady).
+		Where("COALESCE(TRIM(" + mediaCols.StoragePath + "), '') = ''").
+		Where("COALESCE(TRIM(" + mediaCols.FileUrl + "), '') = ''").
+		Where("NOT (COALESCE(TRIM(" + mediaCols.BackupChatId + "), '') <> '' AND " + mediaCols.BackupMessageId + " > 0)").
+		Data(g.Map{
+			mediaCols.CacheStatus:   collectMediaCachePending,
+			collectMediaNextRetryAt: nil,
+			mediaCols.ErrorMessage:  "历史媒体缺少持久化文件，已自动恢复下载",
+			mediaCols.UpdatedAt:     now,
+		}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "重置无持久化文件的采集媒体失败")
+	}
+	affected, _ := result.RowsAffected()
+	if affected > 0 {
+		g.Log().Warningf(ctx, "已恢复无持久化文件的采集媒体 count:%d", affected)
+	}
+	return nil
 }
 
 // Submission/duplicate notices are terminal and must never enter media or
