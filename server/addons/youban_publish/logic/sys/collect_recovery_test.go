@@ -1,6 +1,7 @@
 package sys
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -8,6 +9,27 @@ import (
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/os/gtime"
 )
+
+func TestCollectEventFailureRecoveryRulesStayConsistent(t *testing.T) {
+	for _, message := range collectEventTerminalFailureMessages {
+		row := gdb.Record{
+			"status":        gvar.New("failed"),
+			"error_message": gvar.New("媒体处理失败: " + message),
+		}
+		if shouldRecoverCollectEvent(row) {
+			t.Fatalf("terminal failure %q must not be recovered", message)
+		}
+	}
+	for _, message := range collectEventRecoverableFailureMessages {
+		row := gdb.Record{
+			"status":        gvar.New("failed"),
+			"error_message": gvar.New("处理失败: " + strings.ToUpper(message)),
+		}
+		if !shouldRecoverCollectEvent(row) {
+			t.Fatalf("transient failure %q must remain recoverable", message)
+		}
+	}
+}
 
 func TestCollectEventMediaRecordsCanResume(t *testing.T) {
 	now := gtime.Now()

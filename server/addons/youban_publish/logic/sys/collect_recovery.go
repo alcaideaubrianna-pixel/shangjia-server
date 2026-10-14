@@ -11,6 +11,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
+	pdo "hotgo/addons/youban_publish/internal/model/do"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/tasklog"
 )
@@ -51,6 +52,9 @@ func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	}
 	if err := s.recoverPendingCollectMedia(ctx, mediaBatchSize); err != nil {
 		g.Log().Warningf(ctx, "恢复待处理采集媒体任务失败：%+v", err)
+	}
+	if err := s.recoverBotCollectMedia(ctx, mediaBatchSize); err != nil {
+		g.Log().Warningf(ctx, "恢复BOT采集媒体事件失败：%+v", err)
 	}
 	if err := s.recoverCollectHistoryTasks(ctx, 20); err != nil {
 		g.Log().Warningf(ctx, "恢复历史采集任务失败：%+v", err)
@@ -194,6 +198,15 @@ func (s *sSysPublish) recoverBotCollectMedia(ctx context.Context, limit int) err
 			continue
 		}
 		if queued {
+			status := row[e.Status].String()
+			if _, updateErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+				Where(e.Id, payload.EventId).
+				Where(e.Status, status).
+				WhereLTE(e.UpdatedAt, deadline).
+				Data(pdo.YoubanPublishCollectEvent{Status: status}).Update(); updateErr != nil {
+				g.Log().Warningf(ctx, "更新BOT媒体事件恢复心跳失败 eventId:%d err:%+v", payload.EventId, updateErr)
+				continue
+			}
 			requeued++
 			g.Log().Infof(ctx, "BOT媒体事件已按事件重新入队 eventId:%d sourceId:%d", payload.EventId, payload.SourceId)
 		}
@@ -497,10 +510,10 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 		limit = 100
 	}
 	deadline := gtime.Now().Add(-collectEventRecoverAfter)
-	statuses := []string{sysin.CollectEventStatusPending, sysin.CollectEventStatusGroupCollect, sysin.CollectEventStatusWaitingOrder, sysin.CollectEventStatusPrechecked, sysin.CollectEventStatusMediaPending, sysin.CollectEventStatusMediaReady, sysin.CollectEventStatusFailed}
+	activeStatuses := []string{sysin.CollectEventStatusPending, sysin.CollectEventStatusGroupCollect, sysin.CollectEventStatusWaitingOrder, sysin.CollectEventStatusPrechecked, sysin.CollectEventStatusMediaPending, sysin.CollectEventStatusMediaReady}
 	rows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
 		Fields("e.*").
-		WhereIn("e.status", statuses).
+		WhereIn("e.status", activeStatuses).
 		WhereLTE("e.updated_at", deadline).
 		Where(enabledCollectSourceExistsSQL("e")).
 		OrderAsc("e.updated_at").
@@ -509,6 +522,17 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 		All()
 	if err != nil {
 		return gerror.Wrap(err, "读取待恢复采集事件失败")
+	}
+	if len(rows) < limit {
+		failedRows, failedErr := recoverableFailedCollectEventModel(ctx, deadline).
+			OrderAsc("e.updated_at").
+			OrderAsc("e.id").
+			Limit(limit - len(rows)).
+			All()
+		if failedErr != nil {
+			return gerror.Wrap(failedErr, "读取待恢复失败采集事件失败")
+		}
+		rows = append(rows, failedRows...)
 	}
 	for _, row := range rows {
 		if row.IsEmpty() || row["id"].Int64() <= 0 || !shouldRecoverCollectEvent(row) {
@@ -563,6 +587,24 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 		}
 	}
 	return nil
+}
+
+func recoverableFailedCollectEventModel(ctx context.Context, deadline *gtime.Time) *gdb.Model {
+	model := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
+		Fields("e.*").
+		Where("e.status", sysin.CollectEventStatusFailed).
+		WhereLTE("e.updated_at", deadline).
+		Where(enabledCollectSourceExistsSQL("e"))
+	for _, message := range collectEventTerminalFailureMessages {
+		model = model.Where("LOWER(COALESCE(e.error_message, '')) NOT LIKE ?", "%"+strings.ToLower(message)+"%")
+	}
+	patterns := make([]string, 0, len(collectEventRecoverableFailureMessages))
+	args := make([]interface{}, 0, len(collectEventRecoverableFailureMessages))
+	for _, message := range collectEventRecoverableFailureMessages {
+		patterns = append(patterns, "LOWER(COALESCE(e.error_message, '')) LIKE ?")
+		args = append(args, "%"+strings.ToLower(message)+"%")
+	}
+	return model.Where("("+strings.Join(patterns, " OR ")+")", args...)
 }
 
 // RecoverCollectEvents runs one bounded recovery pass through the normal
@@ -627,23 +669,35 @@ func shouldRecoverCollectEvent(row gdb.Record) bool {
 		return false
 	}
 	message := strings.ToLower(row["error_message"].String())
-	for _, terminal := range []string{
-		"未找到原消息",
-		"无法刷新文件引用",
-		"缺少原消息引用",
-		"缺少下载元数据",
-	} {
+	for _, terminal := range collectEventTerminalFailureMessages {
 		if strings.Contains(message, strings.ToLower(terminal)) {
 			return false
 		}
 	}
-	return strings.Contains(message, "app_id") ||
-		strings.Contains(message, "资料指纹索引正在初始化") ||
-		strings.Contains(message, "账号采集媒体") ||
-		strings.Contains(message, "媒体") ||
-		strings.Contains(message, "上一条采集资料") ||
-		strings.Contains(message, "验证视频暂未匹配到前序资料")
+	for _, recoverable := range collectEventRecoverableFailureMessages {
+		if strings.Contains(message, strings.ToLower(recoverable)) {
+			return true
+		}
+	}
+	return false
 }
+
+var (
+	collectEventTerminalFailureMessages = []string{
+		"未找到原消息",
+		"无法刷新文件引用",
+		"缺少原消息引用",
+		"缺少下载元数据",
+	}
+	collectEventRecoverableFailureMessages = []string{
+		"app_id",
+		"资料指纹索引正在初始化",
+		"账号采集媒体",
+		"媒体",
+		"上一条采集资料",
+		"验证视频暂未匹配到前序资料",
+	}
+)
 
 func (s *sSysPublish) recoverCollectPublishTasks(ctx context.Context, limit int) error {
 	if limit <= 0 {
