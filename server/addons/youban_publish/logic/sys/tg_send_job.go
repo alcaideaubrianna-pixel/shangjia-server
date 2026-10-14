@@ -225,7 +225,11 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	if job.SendPhase == telegramSendPhaseVerifyConfirmed && len(verifyMedia) > 0 {
 		return nil
 	}
-	bot, err := s.telegramBot(ctx, botToken)
+	// Publishing media must use the dedicated client. The regular gateway
+	// client has a 35-second request timeout intended for interactive Bot API
+	// calls, which can abort sendMediaGroup before the phase-specific 60/90
+	// second delivery deadline and leave the channel head blocked.
+	bot, err := s.telegramMediaBot(ctx, botToken)
 	if err != nil {
 		return err
 	}

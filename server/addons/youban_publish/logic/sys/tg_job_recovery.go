@@ -15,12 +15,16 @@ import (
 )
 
 const (
-	telegramSendingJobRecoverAfter    = telegramPublishTaskTimeout + 2*time.Minute
-	telegramPendingJobRecoverAfter    = 30 * time.Second
-	telegramDispatchJobRecoverAfter   = 5 * time.Minute
-	telegramMediaFallbackRecoverAfter = 2 * time.Minute
-	telegramMediaFallbackMaxBackoff   = 30 * time.Minute
-	messagePushPlanJobExpireAfter     = 30 * time.Minute
+	telegramSendingJobRecoverAfter = telegramPublishTaskTimeout + 2*time.Minute
+	// A media send has its own 60/90 second deadline. Recover its attempt
+	// independently of the five-minute queue task timeout so an interrupted
+	// worker cannot hold the channel ordering barrier for several minutes.
+	telegramSendingAttemptRecoverAfter = 2 * time.Minute
+	telegramPendingJobRecoverAfter     = 30 * time.Second
+	telegramDispatchJobRecoverAfter    = 5 * time.Minute
+	telegramMediaFallbackRecoverAfter  = 2 * time.Minute
+	telegramMediaFallbackMaxBackoff    = 30 * time.Minute
+	messagePushPlanJobExpireAfter      = 30 * time.Minute
 )
 
 const expiredMessagePushPlanJobMessage = "历史消息计划任务已过期，系统自动终止"
@@ -226,7 +230,7 @@ func (s *sSysPublish) recoverStaleSendingTelegramAttempts(ctx context.Context, l
 		InnerJoin(publishTgJobTable+" job", "job.id=attempt.job_id").
 		Fields("attempt.*").
 		Where("attempt.status", telegramAttemptStatusSending).
-		Where("attempt.updated_at <= ?", gtime.Now().Add(-telegramPublishTaskTimeout)).
+		Where("attempt.updated_at <= ?", gtime.Now().Add(-telegramSendingAttemptRecoverAfter)).
 		WhereIn("job.status", telegramAttemptRecoverableJobStatuses()).
 		OrderAsc("attempt.updated_at").OrderAsc("attempt.id").Limit(limit).Scan(&attempts)
 	if err != nil {
