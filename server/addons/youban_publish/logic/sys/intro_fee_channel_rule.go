@@ -441,7 +441,7 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 		}
 		sourceFound, sourceEnabled := false, false
 		for _, source := range collectionSources {
-			if canonicalCollectSourceChatID(source.ChatId) == canonicalCollectSourceChatID(row.ChannelId) || source.BotId > 0 && source.BotId == row.BotId && strings.TrimSpace(source.ChatId) == "" {
+			if introFeeCollectionSourceMatchesChannel(source.ChatId, source.BotId, row.ChannelId, row.BotId) {
 				sourceFound = true
 				sourceEnabled = sourceEnabled || source.Status == 1 && source.CollectEnabled == 1
 			}
@@ -513,6 +513,19 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 		end = total
 	}
 	return configured[start:end], total, nil
+}
+
+func introFeeCollectionSourceMatchesChannel(sourceChatID string, sourceBotID int64, channelID string, ruleBotID int64) bool {
+	if canonicalCollectSourceChatID(sourceChatID) == canonicalCollectSourceChatID(channelID) {
+		return true
+	}
+	if strings.TrimSpace(sourceChatID) != "" || sourceBotID <= 0 {
+		return false
+	}
+	// bot_id=0 is the global suffix scope. An aggregate BOT source bound to
+	// the collection rule therefore covers the channel candidates discovered
+	// through that BOT, while an explicit BOT scope remains isolated.
+	return ruleBotID == 0 || sourceBotID == ruleBotID
 }
 
 func introFeeChannelDisplayScore(title, username, inviteLink string) int {
