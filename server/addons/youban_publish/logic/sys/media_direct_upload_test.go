@@ -52,7 +52,7 @@ func TestDirectUploadBucketRegionFromConfigAllowsCDNPublicURL(t *testing.T) {
 		"",
 		"",
 		"https://youbanyue01-1442821378.cos.ap-hongkong.myqcloud.com",
-		"https://img.yuebanby.com",
+		"https://cos.xiao-feiji.cc",
 	)
 	if err != nil {
 		t.Fatalf("directUploadBucketRegionFromConfig returned error: %v", err)
@@ -66,7 +66,7 @@ func TestDirectUploadBucketRegionFromConfigSupportsLegacySwappedURLs(t *testing.
 	bucket, region, err := directUploadBucketRegionFromConfig(
 		"",
 		"",
-		"https://img.yuebanby.com",
+		"https://cos.xiao-feiji.cc",
 		"https://youbanyue01-1442821378.cos.ap-hongkong.myqcloud.com",
 	)
 	if err != nil || bucket != "youbanyue01-1442821378" || region != "ap-hongkong" {
@@ -78,8 +78,8 @@ func TestDirectUploadBucketRegionFromExplicitConfig(t *testing.T) {
 	bucket, region, err := directUploadBucketRegionFromConfig(
 		"youbanyue01-1442821378",
 		"ap-hongkong",
-		"https://img.yuebanby.com",
-		"https://img.yuebanby.com",
+		"https://cos.xiao-feiji.cc",
+		"https://cos.xiao-feiji.cc",
 	)
 	if err != nil || bucket != "youbanyue01-1442821378" || region != "ap-hongkong" {
 		t.Fatalf("unexpected result: bucket=%q region=%q err=%v", bucket, region, err)

@@ -9,8 +9,8 @@ func TestNormalizeTelegramContentStoragePathLocal(t *testing.T) {
 		want string
 	}{
 		{name: "content path", raw: "telegram/content/prod/persistent/image/a.jpg", want: "telegram/content/prod/persistent/image/a.jpg"},
-		{name: "content URL", raw: "https://img.yuebanby.com/telegram/content/prod/persistent/image/a.jpg", want: "telegram/content/prod/persistent/image/a.jpg"},
-		{name: "resource URL rejected", raw: "https://img.yuebanby.com/telegram/resource/5938241648133344942?kind=origin", want: ""},
+		{name: "content URL", raw: "https://cos.xiao-feiji.cc/telegram/content/prod/persistent/image/a.jpg", want: "telegram/content/prod/persistent/image/a.jpg"},
+		{name: "resource URL rejected", raw: "https://cos.xiao-feiji.cc/telegram/resource/5938241648133344942?kind=origin", want: ""},
 		{name: "local path rejected", raw: "vf_admin/upload_path/telegram_lazy_media/1/file.jpg", want: ""},
 	}
 	for _, test := range tests {
