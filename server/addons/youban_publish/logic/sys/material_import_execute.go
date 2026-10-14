@@ -86,7 +86,7 @@ func (s *sSysPublish) executeMaterialImport(ctx context.Context, task *sysin.Mat
 }
 
 func (s *sSysPublish) executeMaterialImportPull(ctx context.Context, task *sysin.MaterialImportTaskModel) error {
-	_, err := collectorservice.AccountTasks().Submit(ctx, &collectorin.AccountTaskSubmit{
+	accountTaskID, err := collectorservice.AccountTasks().Submit(ctx, &collectorin.AccountTaskSubmit{
 		TenantID: task.TenantId, AccountID: task.TgAccountId,
 		TaskType: collectorin.AccountTaskTypeMaterialImportHistoryPage,
 		TaskKey:  fmt.Sprintf("material-import:%d:offset:%d", task.Id, task.PullOffsetId),
@@ -95,6 +95,10 @@ func (s *sSysPublish) executeMaterialImportPull(ctx context.Context, task *sysin
 	if err != nil {
 		return gerror.Wrap(err, "提交资料导入账号任务失败")
 	}
+	if accountTaskID <= 0 {
+		return gerror.Newf("提交资料导入账号任务失败：未返回任务ID importTaskId:%d offsetId:%d", task.Id, task.PullOffsetId)
+	}
+	g.Log().Infof(ctx, "资料导入拉取任务已提交 importTaskId:%d accountTaskId:%d tgAccountId:%d offsetId:%d", task.Id, accountTaskID, task.TgAccountId, task.PullOffsetId)
 	return nil
 }
 

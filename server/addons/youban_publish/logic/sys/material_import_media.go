@@ -463,7 +463,23 @@ func (s *sSysPublish) materialImportMarkGroupDiscarded(ctx context.Context, id i
 }
 
 func (s *sSysPublish) materialImportTaskByPrimary(ctx context.Context, taskId int64) (*sysin.MaterialImportTaskModel, error) {
-	return s.materialImportTaskById(ctx, taskId, 0)
+	if err := ensureMaterialImportTaskChannelColumn(ctx); err != nil {
+		return nil, err
+	}
+	row, err := s.materialImportTaskBaseQuery(ctx, 0, nil).
+		Master().
+		Fields("t.*,ta.display_name AS tg_account_nickname,ta.telegram_username AS tg_account_username,a.nickname AS account_name,tn.name AS tenant_name").
+		Where("t.id", taskId).
+		Limit(1).
+		One()
+	if err != nil {
+		return nil, gerror.Wrap(err, "从主库读取资料导入任务失败")
+	}
+	task := materialImportTaskModelFromRecord(row)
+	if task == nil {
+		return nil, gerror.New("资料导入任务不存在")
+	}
+	return task, nil
 }
 
 func (s *sSysPublish) materialImportEnsureNotCanceled(ctx context.Context, taskId int64) error {
@@ -513,41 +529,25 @@ func (s *sSysPublish) materialImportMarkFailed(ctx context.Context, taskId int64
 func (s *sSysPublish) refreshMaterialImportTaskStats(ctx context.Context, taskId int64) error {
 	groupCols := pdao.YoubanPublishMaterialImportGroup.Columns()
 	taskCols := pdao.YoubanPublishMaterialImportTask.Columns()
-	total, err := pdao.YoubanPublishMaterialImportGroup.Ctx(ctx).Where(groupCols.TaskId, taskId).Count()
-	if err != nil {
-		return err
-	}
-	done, err := pdao.YoubanPublishMaterialImportGroup.Ctx(ctx).Where(groupCols.TaskId, taskId).Where(groupCols.Status, sysin.MaterialImportStatusSuccess).Count()
-	if err != nil {
-		return err
-	}
-	mediaTotalValue, err := pdao.YoubanPublishMaterialImportGroup.Ctx(ctx).
+	stats, err := pdao.YoubanPublishMaterialImportGroup.Ctx(ctx).
 		Where(groupCols.TaskId, taskId).
-		Fields("COALESCE(SUM(media_total),0)").
-		Value()
-	if err != nil {
-		return err
-	}
-	mediaDoneValue, err := pdao.YoubanPublishMaterialImportGroup.Ctx(ctx).
-		Where(groupCols.TaskId, taskId).
-		Fields("COALESCE(SUM(media_done),0)").
-		Value()
-	if err != nil {
-		return err
-	}
-	mediaFailedValue, err := pdao.YoubanPublishMaterialImportGroup.Ctx(ctx).
-		Where(groupCols.TaskId, taskId).
-		Fields("COALESCE(SUM(media_failed),0)").
-		Value()
+		Fields(
+			"COUNT(*) AS group_total",
+			fmt.Sprintf("SUM(CASE WHEN %s='%s' THEN 1 ELSE 0 END) AS group_done", groupCols.Status, sysin.MaterialImportStatusSuccess),
+			"COALESCE(SUM(media_total),0) AS media_total",
+			"COALESCE(SUM(media_done),0) AS media_done",
+			"COALESCE(SUM(media_failed),0) AS media_failed",
+		).
+		One()
 	if err != nil {
 		return err
 	}
 	_, err = pdao.YoubanPublishMaterialImportTask.Ctx(ctx).Where(taskCols.Id, taskId).Data(g.Map{
-		taskCols.GroupTotal:  total,
-		taskCols.GroupDone:   done,
-		taskCols.MediaTotal:  mediaTotalValue.Int(),
-		taskCols.MediaDone:   mediaDoneValue.Int(),
-		taskCols.MediaFailed: mediaFailedValue.Int(),
+		taskCols.GroupTotal:  stats["group_total"].Int(),
+		taskCols.GroupDone:   stats["group_done"].Int(),
+		taskCols.MediaTotal:  stats["media_total"].Int(),
+		taskCols.MediaDone:   stats["media_done"].Int(),
+		taskCols.MediaFailed: stats["media_failed"].Int(),
 	}).Update()
 	return err
 }
