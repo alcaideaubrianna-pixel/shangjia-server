@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"strings"
@@ -33,7 +34,8 @@ func (s *sSysBot) searchScanMediaAndReply(ctx context.Context, botId int64, chat
 		return gerror.New("扫图搜索参数不完整")
 	}
 	searchStartedAt := time.Now()
-	traceId := scanTraceId(ctx)
+	traceId := ensureScanTraceId(scanTraceId(ctx))
+	ctx = withScanTrace(ctx, traceId)
 	list, total, err := publishService.SysPublish().BotProfileMediaSearch(ctx, &publishsysin.BotMediaSearchInp{
 		TenantId:    account.TenantId,
 		AccountId:   account.AccountId,
@@ -45,7 +47,7 @@ func (s *sSysBot) searchScanMediaAndReply(ctx context.Context, botId int64, chat
 	observeScanStage(ctx, botId, "fingerprint_search", searchStartedAt, err)
 	g.Log().Info(ctx, "Bot扫图搜索完成", g.Map{"traceId": traceId, "botId": botId, "accountId": account.AccountId, "durationMs": time.Since(searchStartedAt).Milliseconds(), "total": total, "err": err})
 	if err != nil {
-		return s.replyBotError(ctx, botId, chatId, "扫图搜索", err)
+		return s.replyBotError(ctx, botId, chatId, "扫图搜索", scanSearchUserError(traceId, err))
 	}
 	if len(list) == 0 {
 		return s.sendMessageOnly(ctx, botId, chatId, fmt.Sprintf("未找到相似资料。\n（追踪号 %s）", traceId))
@@ -93,6 +95,17 @@ func (s *sSysBot) searchScanMediaAndReply(ctx context.Context, botId int64, chat
 		"traceId": traceId, "botId": botId, "accountId": account.AccountId, "resultTotal": len(state.ProfileIds), "sourceLinkTotal": sourceLinkTotal,
 	})
 	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, html.EscapeString(text), "HTML", false, &models.InlineKeyboardMarkup{InlineKeyboard: buttons})
+	return err
+}
+
+func scanSearchUserError(traceId string, err error) error {
+	if err == nil {
+		return nil
+	}
+	message := strings.ToLower(err.Error())
+	if errors.Is(err, context.DeadlineExceeded) || strings.Contains(message, "context deadline exceeded") {
+		return gerror.Newf("扫图搜索超时，请重新发送图片后再试。\n（追踪号 %s）", ensureScanTraceId(traceId))
+	}
 	return err
 }
 

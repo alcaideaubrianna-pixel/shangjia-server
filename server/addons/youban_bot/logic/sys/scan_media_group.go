@@ -154,7 +154,7 @@ func normalizeScanTraceId(value string) string {
 }
 
 func withScanTrace(ctx context.Context, traceId string) context.Context {
-	return context.WithValue(ctx, scanTraceContextKey{}, normalizeScanTraceId(traceId))
+	return context.WithValue(ctx, scanTraceContextKey{}, ensureScanTraceId(traceId))
 }
 
 func scanTraceId(ctx context.Context) string {
@@ -166,7 +166,14 @@ func scanTraceId(ctx context.Context) string {
 }
 
 func scanAcknowledgement(traceId string) string {
-	return fmt.Sprintf("已收到，正在查询，请稍候…\n（追踪号 %s）", traceId)
+	return fmt.Sprintf("已收到，正在查询，请稍候…\n（追踪号 %s）", ensureScanTraceId(traceId))
+}
+
+func ensureScanTraceId(traceId string) string {
+	if traceId = normalizeScanTraceId(traceId); traceId != "" {
+		return traceId
+	}
+	return newScanTraceId()
 }
 
 func (s *sSysBot) scanMediaGroupResolved(ctx context.Context, botId int64, userId string, groupId string) bool {

@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -81,5 +82,22 @@ func TestScanTraceIdRoundTrip(t *testing.T) {
 func TestNormalizeScanTraceIdRejectsLegacyAcknowledgementValue(t *testing.T) {
 	if got := normalizeScanTraceId("1"); got != "" {
 		t.Fatalf("legacy acknowledgement value must not become a trace id: %q", got)
+	}
+}
+
+func TestEnsureScanTraceIdGeneratesForLegacyEmptyValue(t *testing.T) {
+	traceId := ensureScanTraceId("")
+	if len(traceId) != 8 {
+		t.Fatalf("generated trace id length: got %d, want 8", len(traceId))
+	}
+	if got := scanTraceId(withScanTrace(context.Background(), "")); len(got) != 8 {
+		t.Fatalf("context trace id length: got %d, want 8", len(got))
+	}
+}
+
+func TestScanSearchUserErrorHidesDatabaseTimeout(t *testing.T) {
+	err := scanSearchUserError("TRACE123", fmt.Errorf("BEGIN: %w", context.DeadlineExceeded))
+	if got := err.Error(); !strings.Contains(got, "TRACE123") || strings.Contains(got, "BEGIN") {
+		t.Fatalf("unexpected user error: %q", got)
 	}
 }

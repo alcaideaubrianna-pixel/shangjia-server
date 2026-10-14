@@ -159,6 +159,9 @@ func loadBotMediaColdFingerprints(ctx context.Context, traceId string, items []*
 }
 
 func (s *sSysPublish) botMediaSearchFingerprint(ctx context.Context, fingerprint *mediaFingerprint, searchIn *sysin.ProfileImageSearchInp, searchScope *publishmodel.MediaSearchScope, seenHashes map[string]struct{}) ([]*sysin.NoteModel, int, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, 0, false, err
+	}
 	if fingerprint == nil || fingerprint.PHash == nil {
 		return nil, 0, false, nil
 	}
