@@ -117,7 +117,10 @@ func (h *publishCollectorAccountTaskHandler) HandleAccountTaskCompletion(ctx con
 	if event.IsEmpty() {
 		return gerror.Newf("异步账号媒体事件不存在 mediaId:%d eventId:%d", mediaID, eventID)
 	}
-	if err = h.publish.enqueueCollectMediaCache(ctx, collectMediaQueuePayloadFromEvent(event), 0); err != nil {
+	// The original media-cache task can still hold its Asynq unique key when an
+	// account download finishes asynchronously. Completion must bypass that key
+	// so the event is resumed immediately instead of waiting for recovery.
+	if _, err = h.publish.enqueueCollectMediaCacheDeferred(ctx, collectMediaQueuePayloadFromEvent(event), 0); err != nil {
 		return gerror.Wrapf(err, "异步账号媒体完成后重新投递事件失败 mediaId:%d eventId:%d", mediaID, eventID)
 	}
 	return nil

@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -10,9 +11,11 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	publishconsts "hotgo/addons/youban_publish/consts"
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	pdo "hotgo/addons/youban_publish/internal/model/do"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/library/cache"
 	"hotgo/internal/library/tasklog"
 )
 
@@ -21,8 +24,22 @@ const (
 	collectEventRecoverAfter   = 10 * time.Second
 	// A single media item is capped at 15 minutes. Leave a small commit grace
 	// period, then reclaim abandoned downloading rows instead of waiting 35m.
-	collectMediaRecoverAfter = 20 * time.Minute
+	collectMediaRecoverAfter     = 20 * time.Minute
+	collectMediaRecoveryDedupTTL = 30 * time.Minute
 )
+
+func reserveCollectMediaRecovery(ctx context.Context, eventID int64) bool {
+	if eventID <= 0 || !cache.Initialized() || g.Cfg().MustGet(ctx, "cache.adapter").String() != "redis" {
+		return true
+	}
+	key := fmt.Sprintf("%s%d", publishconsts.CollectMediaRecoveryKeyPrefix, eventID)
+	ok, err := cache.Instance().SetIfNotExist(ctx, key, 1, collectMediaRecoveryDedupTTL)
+	if err != nil {
+		g.Log().Warningf(ctx, "采集媒体恢复去重缓存不可用，放行任务 eventId:%d err:%+v", eventID, err)
+		return true
+	}
+	return ok
+}
 
 func (s *sSysPublish) runCollectRecovery(ctx context.Context) {
 	time.Sleep(12 * time.Second)
@@ -373,6 +390,10 @@ func (s *sSysPublish) recoverPendingCollectMedia(ctx context.Context, limit int)
 		}
 		payload := collectMediaQueuePayloadFromEvent(row)
 		if payload.EventId <= 0 || payload.TenantId <= 0 || payload.AccountId <= 0 || payload.SourceId <= 0 {
+			continue
+		}
+		if !reserveCollectMediaRecovery(ctx, payload.EventId) {
+			observeCollectMediaScheduler(ctx, "recovery_duplicate_skipped", payload.TenantId, payload.TgAccountId)
 			continue
 		}
 		// Recovery must bypass Asynq's 24-hour unique key. A lost or stuck
