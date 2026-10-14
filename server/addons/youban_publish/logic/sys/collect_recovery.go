@@ -18,7 +18,9 @@ import (
 const (
 	collectHistoryRecoverAfter = 2 * time.Minute
 	collectEventRecoverAfter   = 10 * time.Second
-	collectMediaRecoverAfter   = 35 * time.Minute
+	// A single media item is capped at 15 minutes. Leave a small commit grace
+	// period, then reclaim abandoned downloading rows instead of waiting 35m.
+	collectMediaRecoverAfter = 20 * time.Minute
 )
 
 func (s *sSysPublish) runCollectRecovery(ctx context.Context) {

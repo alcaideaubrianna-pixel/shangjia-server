@@ -12,6 +12,24 @@ func TestTelegramSendingRecoveryStartsAfterTaskTimeout(t *testing.T) {
 	}
 }
 
+func TestTelegramMediaFallbackRecoveryIsPromptAndUnambiguous(t *testing.T) {
+	if telegramMediaFallbackRecoverAfter > 2*time.Minute {
+		t.Fatalf("fallback recovery is too slow: %s", telegramMediaFallbackRecoverAfter)
+	}
+	for _, purpose := range []string{"display", "verify"} {
+		reason := telegramMediaFallbackReason(purpose)
+		if !telegramMediaFallbackJob(reason) {
+			t.Fatalf("fallback marker was not recognized: %s", reason)
+		}
+		if got := telegramMediaFallbackPurpose(reason); got != purpose {
+			t.Fatalf("fallback purpose = %q, want %q", got, purpose)
+		}
+	}
+	if telegramMediaFallbackJob("network timeout") {
+		t.Fatal("ordinary send errors must not enter fallback recovery")
+	}
+}
+
 func TestTelegramChannelBusyDelayBackoff(t *testing.T) {
 	initial := telegramChannelBusyDelayDuration(3, 10, 0)
 	busy := telegramChannelBusyDelayDuration(3, 10, 20)

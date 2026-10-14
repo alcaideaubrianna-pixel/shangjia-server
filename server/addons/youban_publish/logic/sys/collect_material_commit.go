@@ -633,7 +633,7 @@ func (s *sSysPublish) commitCollectPreparedProfile(ctx context.Context, event gd
 				return gerror.Wrap(txErr, "写入采集资料媒体失败")
 			}
 		}
-		if rule["dedupe_enabled"].Int() == 1 && !wasExisting {
+		if collectRuleDedupeEnabled(rule) && !wasExisting {
 			if txErr = attachProfileFingerprintsTx(ctx, tx, tenantId, accountId, profileId, fingerprints); txErr != nil {
 				return txErr
 			}

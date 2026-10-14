@@ -166,6 +166,28 @@ func TestCollectDedupeMediaFingerprintsAreIndependentFromProfileText(t *testing.
 	}
 }
 
+func TestCollectRuleDedupeStrictlyFollowsSwitch(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		value   interface{}
+		enabled bool
+	}{
+		{name: "enabled", value: 1, enabled: true},
+		{name: "disabled", value: 2, enabled: false},
+		{name: "unset", value: nil, enabled: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rule := gdb.Record{}
+			if tc.value != nil {
+				rule["dedupe_enabled"] = gvar.New(tc.value)
+			}
+			if got := collectRuleDedupeEnabled(rule); got != tc.enabled {
+				t.Fatalf("dedupe enabled = %t, want %t", got, tc.enabled)
+			}
+		})
+	}
+}
+
 func TestCollectMediaPHashReadsMetadata(t *testing.T) {
 	item := collectMediaItem{
 		Type:      "photo",

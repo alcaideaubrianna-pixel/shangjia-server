@@ -20,6 +20,21 @@ func TestAccountTaskCanReviveMessageDeleteFallback(t *testing.T) {
 	}
 }
 
+func TestAccountTaskCompletedRevivalIsLimitedToIdempotentChecks(t *testing.T) {
+	for _, taskType := range []string{
+		sysin.AccountTaskTypeMessageReconcile,
+		sysin.AccountTaskTypeMessageMediaFallback,
+		sysin.AccountTaskTypeManagedBotUsernameCheck,
+	} {
+		if !accountTaskCanReviveCompleted(taskType) {
+			t.Fatalf("completed task %s must be revivable", taskType)
+		}
+	}
+	if accountTaskCanReviveCompleted(sysin.AccountTaskTypeMessagePushInline) {
+		t.Fatal("non-idempotent inline pushes must not revive after completion")
+	}
+}
+
 func TestAccountTaskPersistenceIntegration(t *testing.T) {
 	if os.Getenv("YOUBAN_TELEGRAM_COLLECTOR_INTEGRATION") != "1" {
 		t.Skip("set YOUBAN_TELEGRAM_COLLECTOR_INTEGRATION=1 to run database integration test")

@@ -990,7 +990,7 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 // grouping is already complete before this function runs, so a hit ends the
 // current group and never mutates or republishes the existing profile.
 func (s *sSysPublish) findCollectRuleDuplicate(ctx context.Context, event, rule gdb.Record, fingerprints []profileFingerprint) (*profileFingerprintDuplicateError, error) {
-	if rule["dedupe_enabled"].Int() != 1 {
+	if !collectRuleDedupeEnabled(rule) {
 		return nil, nil
 	}
 	ready, err := profileFingerprintBackfillReady(ctx)
@@ -1001,6 +1001,11 @@ func (s *sSysPublish) findCollectRuleDuplicate(ctx context.Context, event, rule 
 		return nil, newCollectProcessRetryError(15*time.Second, "资料指纹索引正在初始化")
 	}
 	return s.findProfileFingerprintDuplicate(ctx, event["tenant_id"].Int64(), event["account_id"].Int64(), fingerprints, 0)
+}
+
+func collectRuleDedupeEnabled(rule gdb.Record) bool {
+	value := rule["dedupe_enabled"]
+	return value != nil && value.Int() == 1
 }
 
 func (s *sSysPublish) resumeExistingCollectDispatch(ctx context.Context, dispatch gdb.Record, event gdb.Record, content *collectContentResult, rule gdb.Record, text string) (bool, string, error) {

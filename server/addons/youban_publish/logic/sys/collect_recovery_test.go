@@ -45,3 +45,12 @@ func TestCollectEventMediaRecordsCanResume(t *testing.T) {
 		})
 	}
 }
+
+func TestCollectMediaRecoveryFollowsItemTimeout(t *testing.T) {
+	if collectMediaRecoverAfter <= 15*time.Minute {
+		t.Fatalf("media recovery %s must leave commit grace after item timeout", collectMediaRecoverAfter)
+	}
+	if collectMediaRecoverAfter > 20*time.Minute {
+		t.Fatalf("media recovery is too slow: %s", collectMediaRecoverAfter)
+	}
+}

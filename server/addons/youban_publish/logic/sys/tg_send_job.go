@@ -549,17 +549,49 @@ func (s *sSysPublish) sendTelegramJobMediaByAccount(ctx context.Context, job tel
 		"jobId": job.Id, "channelId": job.ChannelId, "tgAccountId": channel.TgAccountId,
 		"purpose": purpose, "mediaCount": len(media), "media": telegramMediaDebugSummary(media), "reason": botErr.Error(),
 	})
-	_, err = collectorservice.AccountTasks().Submit(ctx, &collectorin.AccountTaskSubmit{
-		TenantID: job.TenantId, AccountID: channel.TgAccountId,
-		TaskType: collectorin.AccountTaskTypeMessageMediaFallback,
-		TaskKey:  fmt.Sprintf("message-media-fallback:%d:%s", job.Id, purpose),
-		Priority: collectorin.EventPriorityUrgent, MaxAttempts: 5,
-	})
+	err = s.submitTelegramMediaFallback(ctx, job, channel.TgAccountId, purpose)
 	if err != nil {
 		return nil, gerror.Wrap(err, "提交协议号媒体降级任务失败")
 	}
 	s.appendTelegramJobLog(ctx, job, "account_fallback", "queued", fmt.Sprintf("Bot媒体发送失败，已提交账号服务常驻客户端发送 purpose:%s reason:%v", purpose, botErr))
 	return nil, errTelegramMediaFallbackQueued
+}
+
+const telegramMediaFallbackMarker = "awaiting_account_fallback:"
+
+func telegramMediaFallbackReason(purpose string) string {
+	return telegramMediaFallbackMarker + strings.TrimSpace(purpose)
+}
+
+func telegramMediaFallbackPurpose(reason string) string {
+	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(reason), telegramMediaFallbackMarker))
+}
+
+func (s *sSysPublish) submitTelegramMediaFallback(ctx context.Context, job telegramJobRecord, tgAccountID int64, purpose string) error {
+	purpose = strings.TrimSpace(purpose)
+	if job.Id <= 0 || tgAccountID <= 0 || (purpose != "display" && purpose != "verify") {
+		return gerror.New("协议号媒体降级任务参数不完整")
+	}
+	if _, err := collectorservice.AccountTasks().Submit(ctx, &collectorin.AccountTaskSubmit{
+		TenantID: job.TenantId, AccountID: tgAccountID,
+		TaskType: collectorin.AccountTaskTypeMessageMediaFallback,
+		TaskKey:  fmt.Sprintf("message-media-fallback:%d:%s", job.Id, purpose),
+		Priority: collectorin.EventPriorityUrgent, MaxAttempts: 5,
+	}); err != nil {
+		return err
+	}
+	if _, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("id", job.Id).Where("status", telegramJobStatusSending).
+		Data(g.Map{
+			"last_dispatch_error": telegramMediaFallbackReason(purpose),
+			"next_retry_at":       gtime.Now().Add(telegramMediaFallbackRecoverAfter),
+			"updated_at":          gtime.Now(),
+		}).Update(); err != nil {
+		// The durable account task is already queued. Do not turn this into a Bot
+		// retry and risk sending the same media through two transports.
+		g.Log().Warningf(ctx, "标记协议号媒体降级等待状态失败 jobId:%d purpose:%s err:%+v", job.Id, purpose, err)
+	}
+	return nil
 }
 
 func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJobRecord, err error) error {

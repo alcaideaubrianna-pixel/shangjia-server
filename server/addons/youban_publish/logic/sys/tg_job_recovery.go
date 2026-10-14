@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -13,10 +14,11 @@ import (
 )
 
 const (
-	telegramSendingJobRecoverAfter  = telegramPublishTaskTimeout + 2*time.Minute
-	telegramPendingJobRecoverAfter  = 30 * time.Second
-	telegramDispatchJobRecoverAfter = 5 * time.Minute
-	messagePushPlanJobExpireAfter   = 30 * time.Minute
+	telegramSendingJobRecoverAfter    = telegramPublishTaskTimeout + 2*time.Minute
+	telegramPendingJobRecoverAfter    = 30 * time.Second
+	telegramDispatchJobRecoverAfter   = 5 * time.Minute
+	telegramMediaFallbackRecoverAfter = 2 * time.Minute
+	messagePushPlanJobExpireAfter     = 30 * time.Minute
 )
 
 const expiredMessagePushPlanJobMessage = "历史消息计划任务已过期，系统自动终止"
@@ -53,6 +55,9 @@ func (s *sSysPublish) recoverInterruptedTelegramJobs(ctx context.Context, limit 
 	if err = s.recoverStaleTelegramDispatchJobs(ctx, limit); err != nil {
 		return err
 	}
+	if err = s.recoverStaleTelegramMediaFallbackJobs(ctx, limit); err != nil {
+		return err
+	}
 	return s.recoverStaleTelegramSendingJobs(ctx, limit)
 }
 
@@ -65,6 +70,9 @@ func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 	}
 	if err := s.recoverStaleTelegramSendingJobs(ctx, 100); err != nil {
 		g.Log().Warningf(ctx, "恢复卡住的TG推送任务失败：%+v", err)
+	}
+	if err := s.recoverStaleTelegramMediaFallbackJobs(ctx, 100); err != nil {
+		g.Log().Warningf(ctx, "恢复协议号媒体降级任务失败：%+v", err)
 	}
 	if err := s.requeueExpiredTelegramAttempts(ctx, 100); err != nil {
 		g.Log().Warningf(ctx, "重新投递过期TG发送Attempt失败：%+v", err)
@@ -113,6 +121,9 @@ func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 			if err := s.recoverStaleTelegramSendingJobs(ctx, 100); err != nil {
 				g.Log().Warningf(ctx, "恢复卡住的TG推送任务失败：%+v", err)
 			}
+			if err := s.recoverStaleTelegramMediaFallbackJobs(ctx, 100); err != nil {
+				g.Log().Warningf(ctx, "恢复协议号媒体降级任务失败：%+v", err)
+			}
 			if err := s.recoverMissingProfilePublishOperationStates(ctx, 100); err != nil {
 				g.Log().Warningf(ctx, "补建资料上架状态失败：%+v", err)
 			}
@@ -121,6 +132,43 @@ func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 			}
 		}
 	}
+}
+
+func (s *sSysPublish) recoverStaleTelegramMediaFallbackJobs(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		limit = 100
+	}
+	var jobs []telegramJobRecord
+	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("status", telegramJobStatusSending).
+		WhereLike("last_dispatch_error", telegramMediaFallbackMarker+"%").
+		WhereNotNull("next_retry_at").
+		WhereLTE("next_retry_at", gtime.Now()).
+		OrderAsc("next_retry_at").OrderAsc("id").Limit(limit).Scan(&jobs)
+	if err != nil {
+		return gerror.Wrap(err, "读取超时协议号媒体降级任务失败")
+	}
+	for _, job := range jobs {
+		purpose := telegramMediaFallbackPurpose(job.LastDispatchError)
+		if purpose != "display" && purpose != "verify" {
+			continue
+		}
+		channel, channelErr := s.messagePushChannelFromJob(ctx, job)
+		if channelErr != nil || channel.TgAccountId <= 0 {
+			g.Log().Warningf(ctx, "恢复协议号媒体降级任务缺少可用账号 jobId:%d purpose:%s err:%+v", job.Id, purpose, channelErr)
+			continue
+		}
+		if submitErr := s.submitTelegramMediaFallback(ctx, job, channel.TgAccountId, purpose); submitErr != nil {
+			g.Log().Warningf(ctx, "重新提交协议号媒体降级任务失败 jobId:%d purpose:%s err:%+v", job.Id, purpose, submitErr)
+			continue
+		}
+		s.appendTelegramJobLog(ctx, job, "account_fallback", "requeued", "协议号媒体降级任务超时，已幂等重新提交")
+	}
+	return nil
+}
+
+func telegramMediaFallbackJob(reason string) bool {
+	return strings.HasPrefix(strings.TrimSpace(reason), telegramMediaFallbackMarker)
 }
 
 func (s *sSysPublish) recoverStaleSendingTelegramAttempts(ctx context.Context, limit int) error {

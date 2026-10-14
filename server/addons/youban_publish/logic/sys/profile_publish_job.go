@@ -9,6 +9,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	iservice "hotgo/internal/service"
@@ -216,6 +217,16 @@ func (s *sSysPublish) completeProfileTelegramOperation(ctx context.Context, job 
 	}
 	if pending > 0 {
 		return false, nil
+	}
+	sent, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("profile_id", job.ProfileId).
+		Where("operation_no", job.OperationNo).
+		Where("status", telegramJobStatusSent).Count()
+	if err != nil {
+		return false, gerror.Wrap(err, "统计资料成功TG任务失败")
+	}
+	if sent == 0 {
+		return false, s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusFailed)
 	}
 	isCurrent, err := s.profilePublishOperationIsCurrent(ctx, job)
 	if err != nil {
