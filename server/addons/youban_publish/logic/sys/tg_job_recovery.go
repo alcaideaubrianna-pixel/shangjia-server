@@ -423,7 +423,10 @@ func (s *sSysPublish) recoverStaleTelegramDispatchJobs(ctx context.Context, limi
 		if affected == 0 {
 			continue
 		}
-		if enqueueErr := s.enqueueTelegramJob(ctx, job.Id, 0); enqueueErr != nil {
+		// The stale Asynq task can still hold its uniqueness key after the task
+		// itself disappeared. A recovery enqueue must create a fresh task; the
+		// database transition in the worker remains the delivery idempotency gate.
+		if enqueueErr := s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 0, false); enqueueErr != nil {
 			g.Log().Warningf(ctx, "重新入队调度中断TG任务失败 job:%d err:%+v", job.Id, enqueueErr)
 		}
 	}
