@@ -29,6 +29,14 @@ func (s *sSysBot) collectScanMediaGroup(ctx context.Context, botId int64, userId
 	if msg == nil {
 		return nil
 	}
+	lockCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	lock := hglock.NewConfig(10*time.Second, 50*time.Millisecond).Mutex(scanMediaGroupLockKey(botId, userId, msg.MediaGroupID))
+	if err := lock.Lock(lockCtx); err != nil {
+		return err
+	}
+	defer func() { _ = lock.Unlock(context.Background()) }()
+
 	key := scanMediaGroupKey(botId, userId, msg.MediaGroupID)
 	pending := &scanMediaGroupPending{}
 	value, _ := cache.Instance().Get(ctx, key)
@@ -126,28 +134,23 @@ func (s *sSysBot) scanMediaGroupResolved(ctx context.Context, botId int64, userI
 }
 
 func (s *sSysBot) claimScanMediaGroupResolved(ctx context.Context, botId int64, userId string, groupId string) (bool, error) {
-	lockCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-	lock := hglock.NewConfig(10*time.Second, 50*time.Millisecond).Mutex(scanMediaGroupLockKey(botId, userId, groupId))
-	if err := lock.Lock(lockCtx); err != nil {
-		return false, nil
-	}
-	defer func() { _ = lock.Unlock(context.Background()) }()
-	if s.scanMediaGroupResolved(ctx, botId, userId, groupId) {
-		return false, nil
-	}
-	if err := cache.Instance().Set(ctx, scanMediaGroupResolvedKey(botId, userId, groupId), 1, scanMediaGroupTTL); err != nil {
-		return false, err
-	}
-	return true, nil
+	return claimScanMediaGroupOnce(ctx, scanMediaGroupResolvedKey(botId, userId, groupId), cache.Instance().SetIfNotExist)
+}
+
+func claimScanMediaGroupOnce(ctx context.Context, key string, setIfNotExist func(context.Context, interface{}, interface{}, time.Duration) (bool, error)) (bool, error) {
+	return setIfNotExist(ctx, key, 1, scanMediaGroupTTL)
 }
 
 func (s *sSysBot) finishScanMediaGroup(botId int64, userId string, groupId string) {
 	time.Sleep(1500 * time.Millisecond)
 	ctx := context.Background()
 	key := scanMediaGroupKey(botId, userId, groupId)
-	if s.scanMediaGroupResolved(ctx, botId, userId, groupId) {
-		_, _ = cache.Instance().Remove(ctx, key)
+	claimed, err := s.claimScanMediaGroupResolved(ctx, botId, userId, groupId)
+	if err != nil {
+		g.Log().Warningf(ctx, "领取扫图媒体组失败 botId:%d userId:%s groupId:%s err:%+v", botId, userId, groupId, err)
+		return
+	}
+	if !claimed {
 		return
 	}
 	value, err := cache.Instance().Get(ctx, key)
