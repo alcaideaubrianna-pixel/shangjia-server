@@ -760,6 +760,9 @@ func (s *sSysPublish) completeTelegramJobLockedByProfile(ctx context.Context, jo
 		s.appendTelegramJobLog(ctx, job, "publish", "skipped", "TG发送完成时任务已不再发送中，跳过成功标记")
 		return nil
 	}
+	if stepErr := s.projectTelegramDeliveryStep(ctx, job.Id, telegramDeliveryStepFinalize, telegramDeliveryStepSucceeded, 0, "", sentAt); stepErr != nil {
+		g.Log().Warningf(ctx, "投影TG完成步骤失败 jobId:%d err:%+v", job.Id, stepErr)
+	}
 	job.SentAt = sentAt
 	if attemptErr := s.supersedeOpenTelegramAttempts(ctx, job.Id); attemptErr != nil {
 		g.Log().Warningf(ctx, "关闭TG任务遗留Attempt失败 jobId:%d err:%+v", job.Id, attemptErr)

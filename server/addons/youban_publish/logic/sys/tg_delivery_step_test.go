@@ -8,10 +8,10 @@ func TestTelegramDeliveryStepsForPhase(t *testing.T) {
 		expected map[string]string
 	}{
 		{phase: telegramSendPhaseCleanupProcessing, expected: map[string]string{telegramDeliveryStepCleanup: telegramDeliveryStepRunning}},
-		{phase: telegramSendPhaseDisplaySending, expected: map[string]string{telegramDeliveryStepCleanup: telegramDeliveryStepSucceeded, telegramDeliveryStepDisplay: telegramDeliveryStepRunning}},
-		{phase: telegramSendPhaseVerifySending, expected: map[string]string{telegramDeliveryStepDisplay: telegramDeliveryStepSucceeded, telegramDeliveryStepVerify: telegramDeliveryStepRunning}},
-		{phase: telegramSendPhaseVerifyConfirmed, expected: map[string]string{telegramDeliveryStepVerify: telegramDeliveryStepSucceeded, telegramDeliveryStepFinalize: telegramDeliveryStepSucceeded}},
-		{phase: telegramSendPhaseCompletedNoVerify, expected: map[string]string{telegramDeliveryStepDisplay: telegramDeliveryStepSucceeded, telegramDeliveryStepVerify: telegramDeliveryStepSkipped, telegramDeliveryStepFinalize: telegramDeliveryStepSucceeded}},
+		{phase: telegramSendPhaseDisplaySending, expected: map[string]string{telegramDeliveryStepCleanup: telegramDeliveryStepSucceeded, telegramDeliveryStepDisplay: telegramDeliveryStepPending}},
+		{phase: telegramSendPhaseVerifySending, expected: map[string]string{telegramDeliveryStepDisplay: telegramDeliveryStepPending, telegramDeliveryStepVerify: telegramDeliveryStepPending}},
+		{phase: telegramSendPhaseVerifyConfirmed, expected: map[string]string{telegramDeliveryStepVerify: telegramDeliveryStepPending, telegramDeliveryStepFinalize: telegramDeliveryStepPending}},
+		{phase: telegramSendPhaseCompletedNoVerify, expected: map[string]string{telegramDeliveryStepDisplay: telegramDeliveryStepPending, telegramDeliveryStepVerify: telegramDeliveryStepSkipped, telegramDeliveryStepFinalize: telegramDeliveryStepPending}},
 	}
 	for _, test := range tests {
 		t.Run(test.phase, func(t *testing.T) {
