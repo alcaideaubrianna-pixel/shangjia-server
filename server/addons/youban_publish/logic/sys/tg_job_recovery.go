@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -12,10 +13,7 @@ import (
 )
 
 const (
-	telegramSendingJobRecoverAfter = telegramPublishTaskTimeout + 2*time.Minute
-	// Before an attempt is created no Telegram API call has been made. This
-	// state can therefore be recovered sooner and safely without reconciliation.
-	telegramPreAttemptRecoverAfter  = 2 * time.Minute
+	telegramSendingJobRecoverAfter  = telegramPublishTaskTimeout + 2*time.Minute
 	telegramPendingJobRecoverAfter  = 30 * time.Second
 	telegramDispatchJobRecoverAfter = 5 * time.Minute
 	messagePushPlanJobExpireAfter   = 30 * time.Minute
@@ -142,28 +140,51 @@ func (s *sSysPublish) recoverStaleSendingTelegramAttempts(ctx context.Context, l
 	}
 	for _, attempt := range attempts {
 		deadline := gtime.Now()
-		result, updateErr := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
-			Where("id", attempt.Id).Where("status", telegramAttemptStatusSending).
-			Where("updated_at <= ?", gtime.Now().Add(-telegramPublishTaskTimeout)).
-			Data(g.Map{
-				"status": telegramAttemptStatusWaiting, "webhook_deadline": deadline,
-				"error_message": "发送进程中断，等待Webhook或协议号对账", "updated_at": gtime.Now(),
-			}).Update()
+		updated := false
+		updateErr := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+			var currentAttempt telegramDeliveryAttempt
+			if err := tx.Model(publishTgAttemptTable).Where("id", attempt.Id).LockUpdate().Scan(&currentAttempt); err != nil {
+				return err
+			}
+			if currentAttempt.Id <= 0 || currentAttempt.Status != telegramAttemptStatusSending {
+				return nil
+			}
+			var job telegramJobRecord
+			if err := tx.Model(publishTgJobTable).Where("id", currentAttempt.JobId).LockUpdate().Scan(&job); err != nil {
+				return err
+			}
+			if job.Id <= 0 || job.Status != telegramJobStatusSending && job.Status != telegramJobStatusConfirming {
+				return nil
+			}
+			if _, err := tx.Model(publishTgAttemptTable).Where("id", currentAttempt.Id).
+				Where("status", telegramAttemptStatusSending).
+				Data(g.Map{
+					"status": telegramAttemptStatusWaiting, "webhook_deadline": deadline,
+					"error_message": "发送进程中断，等待Webhook或协议号对账", "updated_at": gtime.Now(),
+				}).Update(); err != nil {
+				return err
+			}
+			if job.Status == telegramJobStatusSending {
+				transitioned, err := s.transitionTelegramJobTx(ctx, tx, telegramJobTransition{
+					JobId: currentAttempt.JobId, From: []string{telegramJobStatusSending}, To: telegramJobStatusConfirming,
+					ErrorMessage: "发送进程中断，等待Telegram结果对账",
+					Additional:   g.Map{"dispatch_status": tgDispatchStatusProcessing, "next_retry_at": deadline},
+				})
+				if err != nil {
+					return err
+				}
+				if !transitioned {
+					return gerror.New("TG任务状态已变化，取消Attempt恢复")
+				}
+			}
+			updated = true
+			return nil
+		})
 		if updateErr != nil {
 			g.Log().Warningf(ctx, "标记中断TG Attempt待对账失败 attemptId:%d err:%+v", attempt.Id, updateErr)
 			continue
 		}
-		affected, _ := result.RowsAffected()
-		if affected == 0 {
-			continue
-		}
-		_, updateErr = s.transitionTelegramJob(ctx, telegramJobTransition{
-			JobId: attempt.JobId, From: []string{telegramJobStatusSending}, To: telegramJobStatusConfirming,
-			ErrorMessage: "发送进程中断，等待Telegram结果对账",
-			Additional:   g.Map{"dispatch_status": tgDispatchStatusProcessing, "next_retry_at": deadline},
-		})
-		if updateErr != nil {
-			g.Log().Warningf(ctx, "标记中断TG任务待对账失败 attemptId:%d jobId:%d err:%+v", attempt.Id, attempt.JobId, updateErr)
+		if !updated {
 			continue
 		}
 		if _, updateErr = s.enqueueTelegramAttemptTimeout(ctx, attempt.Id, 0); updateErr != nil {
@@ -393,13 +414,12 @@ func (s *sSysPublish) recoverStaleTelegramSendingJobs(ctx context.Context, limit
 	}
 	now := gtime.Now()
 	deadline := telegramRecoveryTimeText(now.Add(-telegramSendingJobRecoverAfter))
-	preAttemptDeadline := telegramRecoveryTimeText(now.Add(-telegramPreAttemptRecoverAfter))
 	var jobs []telegramJobRecord
 	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("status", "sending").
 		Where(telegramActiveChannelCondition()).
 		Where(messagePushPlanRecoveryConditionSQL(publishTgJobTable), telegramRecoveryTimeText(now.Add(-messagePushPlanJobExpireAfter))).
-		Where(`(updated_at <= ? OR (updated_at <= ? AND NOT EXISTS (SELECT 1 FROM `+publishTgAttemptTable+` a WHERE a.job_id=`+publishTgJobTable+`.id) AND COALESCE(send_phase, '') NOT IN (?, ?)))`, deadline, preAttemptDeadline, telegramSendPhaseDisplaySending, telegramSendPhaseVerifySending).
+		WhereLTE("updated_at", deadline).
 		OrderAsc("updated_at").
 		Limit(limit).
 		Scan(&jobs)
