@@ -58,6 +58,7 @@ type telegramProfilePublishMeta struct {
 	CollectSourceId        int64
 	CollectSourceChatId    string
 	CollectSourceMessageId int64
+	InitialSendPhase       string
 }
 
 func (s *sSysPublish) submitProfilePublishWithMeta(ctx context.Context, profileId, tenantId, accountId, operatorId int64, operationNo string, channelIds []int64, requireOnline bool, meta telegramProfilePublishMeta) error {
@@ -114,6 +115,13 @@ func (s *sSysPublish) prepareProfilePublishJobs(ctx context.Context, profileId, 
 			jobId, createErr := s.ensureTelegramProfileJobWithMetaTx(ctx, tx, source, channel, operationNo, meta)
 			if createErr != nil {
 				return createErr
+			}
+			if strings.TrimSpace(meta.InitialSendPhase) != "" {
+				if _, createErr = tx.Model(publishTgJobTable).Safe().Ctx(ctx).
+					Where("id", jobId).Where("status", telegramJobStatusPending).
+					Data(g.Map{"send_phase": strings.TrimSpace(meta.InitialSendPhase), "updated_at": gtime.Now()}).Update(); createErr != nil {
+					return gerror.Wrap(createErr, "设置TG任务初始发送阶段失败")
+				}
 			}
 			if createErr = s.ensureTelegramJobOutboxTx(ctx, tx, jobId, 0); createErr != nil {
 				return createErr

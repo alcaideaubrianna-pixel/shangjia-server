@@ -25,7 +25,7 @@ const (
 
 var telegramJobAllowedTransitions = map[string]map[string]struct{}{
 	telegramJobStatusPending: {
-		telegramJobStatusSending: {}, telegramJobStatusRetryWait: {}, telegramJobStatusSent: {},
+		telegramJobStatusSending: {}, telegramJobStatusRetryWait: {}, telegramJobStatusConfirming: {}, telegramJobStatusSent: {},
 		telegramJobStatusFailed: {}, telegramJobStatusSuperseded: {},
 	},
 	telegramJobStatusSending: {
@@ -33,7 +33,7 @@ var telegramJobAllowedTransitions = map[string]map[string]struct{}{
 		telegramJobStatusSent: {}, telegramJobStatusFailed: {}, telegramJobStatusSuperseded: {},
 	},
 	telegramJobStatusRetryWait: {
-		telegramJobStatusPending: {}, telegramJobStatusSending: {}, telegramJobStatusRetryWait: {},
+		telegramJobStatusPending: {}, telegramJobStatusSending: {}, telegramJobStatusRetryWait: {}, telegramJobStatusConfirming: {},
 		telegramJobStatusSent: {}, telegramJobStatusFailed: {}, telegramJobStatusSuperseded: {},
 	},
 	telegramJobStatusConfirming: {

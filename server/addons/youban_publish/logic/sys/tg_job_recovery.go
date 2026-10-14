@@ -227,7 +227,7 @@ func (s *sSysPublish) recoverStaleSendingTelegramAttempts(ctx context.Context, l
 		Fields("attempt.*").
 		Where("attempt.status", telegramAttemptStatusSending).
 		Where("attempt.updated_at <= ?", gtime.Now().Add(-telegramPublishTaskTimeout)).
-		WhereIn("job.status", []string{telegramJobStatusSending, telegramJobStatusConfirming}).
+		WhereIn("job.status", telegramAttemptRecoverableJobStatuses()).
 		OrderAsc("attempt.updated_at").OrderAsc("attempt.id").Limit(limit).Scan(&attempts)
 	if err != nil {
 		return gerror.Wrap(err, "读取中断的TG发送Attempt失败")
@@ -247,7 +247,7 @@ func (s *sSysPublish) recoverStaleSendingTelegramAttempts(ctx context.Context, l
 			if err := tx.Model(publishTgJobTable).Where("id", currentAttempt.JobId).LockUpdate().Scan(&job); err != nil {
 				return err
 			}
-			if job.Id <= 0 || job.Status != telegramJobStatusSending && job.Status != telegramJobStatusConfirming {
+			if job.Id <= 0 || !telegramAttemptRecoverableJobStatus(job.Status) {
 				return nil
 			}
 			if _, err := tx.Model(publishTgAttemptTable).Where("id", currentAttempt.Id).
@@ -258,9 +258,9 @@ func (s *sSysPublish) recoverStaleSendingTelegramAttempts(ctx context.Context, l
 				}).Update(); err != nil {
 				return err
 			}
-			if job.Status == telegramJobStatusSending {
+			if job.Status != telegramJobStatusConfirming {
 				transitioned, err := s.transitionTelegramJobTx(ctx, tx, telegramJobTransition{
-					JobId: currentAttempt.JobId, From: []string{telegramJobStatusSending}, To: telegramJobStatusConfirming,
+					JobId: currentAttempt.JobId, From: []string{job.Status}, To: telegramJobStatusConfirming,
 					ErrorMessage: "发送进程中断，等待Telegram结果对账",
 					Additional:   g.Map{"dispatch_status": tgDispatchStatusProcessing, "next_retry_at": deadline},
 				})
@@ -288,6 +288,24 @@ func (s *sSysPublish) recoverStaleSendingTelegramAttempts(ctx context.Context, l
 		}
 	}
 	return nil
+}
+
+func telegramAttemptRecoverableJobStatuses() []string {
+	return []string{
+		telegramJobStatusPending,
+		telegramJobStatusSending,
+		telegramJobStatusRetryWait,
+		telegramJobStatusConfirming,
+	}
+}
+
+func telegramAttemptRecoverableJobStatus(status string) bool {
+	for _, candidate := range telegramAttemptRecoverableJobStatuses() {
+		if status == candidate {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *sSysPublish) requeueExpiredTelegramAttempts(ctx context.Context, limit int) error {

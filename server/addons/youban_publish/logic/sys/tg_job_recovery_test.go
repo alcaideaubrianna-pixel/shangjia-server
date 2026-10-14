@@ -12,6 +12,29 @@ func TestTelegramSendingRecoveryStartsAfterTaskTimeout(t *testing.T) {
 	}
 }
 
+func TestStaleSendingAttemptRecoveryCoversResetJobs(t *testing.T) {
+	for _, status := range []string{
+		telegramJobStatusPending,
+		telegramJobStatusSending,
+		telegramJobStatusRetryWait,
+		telegramJobStatusConfirming,
+	} {
+		if !telegramAttemptRecoverableJobStatus(status) {
+			t.Fatalf("stale sending attempt under %s job must be recoverable", status)
+		}
+		if status != telegramJobStatusConfirming {
+			if err := validateTelegramJobTransition([]string{status}, telegramJobStatusConfirming); err != nil {
+				t.Fatalf("%s job cannot enter confirmation safely: %v", status, err)
+			}
+		}
+	}
+	for _, status := range []string{telegramJobStatusSent, telegramJobStatusFailed, telegramJobStatusSuperseded} {
+		if telegramAttemptRecoverableJobStatus(status) {
+			t.Fatalf("terminal %s job must not be recovered", status)
+		}
+	}
+}
+
 func TestTelegramMediaFallbackRecoveryIsPromptAndUnambiguous(t *testing.T) {
 	if telegramMediaFallbackRecoverAfter > 2*time.Minute {
 		t.Fatalf("fallback recovery is too slow: %s", telegramMediaFallbackRecoverAfter)
