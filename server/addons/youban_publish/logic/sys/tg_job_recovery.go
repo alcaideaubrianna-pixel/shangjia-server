@@ -707,6 +707,11 @@ func (s *sSysPublish) requeueStaleTelegramSendingJob(ctx context.Context, job te
 	now := gtime.Now()
 	status := "failed_retry"
 	message := "TG推送任务长时间处于发送中，已自动重新投递"
+	var latestAttempt telegramDeliveryAttempt
+	if err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
+		Where("job_id", job.Id).OrderDesc("id").Limit(1).Scan(&latestAttempt); err != nil {
+		return gerror.Wrap(err, "读取最新TG发送Attempt失败")
+	}
 	attemptCount, err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
 		Where("job_id", job.Id).Count()
 	if err != nil {
@@ -716,7 +721,11 @@ func (s *sSysPublish) requeueStaleTelegramSendingJob(ctx context.Context, job te
 		message = "TG推送在创建发送Attempt前中断，已安全重新投递"
 	}
 	reconcileCount := job.ReconcileCount
-	if job.SendPhase == telegramSendPhaseDisplaySending || job.SendPhase == telegramSendPhaseVerifySending {
+	if telegramAttemptHasDefinitivePermanentFailure(latestAttempt) {
+		decision := telegramJobFailureNextState(gerror.New(latestAttempt.ErrorMessage), job.RetryCount)
+		status = decision.Status
+		message = decision.Message
+	} else if job.SendPhase == telegramSendPhaseDisplaySending || job.SendPhase == telegramSendPhaseVerifySending {
 		status = telegramJobStatusConfirming
 		message = "服务中断时TG发送结果不确定，已进入频道消息对账"
 		reconcileCount = 0
@@ -741,8 +750,23 @@ func (s *sSysPublish) requeueStaleTelegramSendingJob(ctx context.Context, job te
 		return nil
 	}
 	s.appendTelegramJobLog(ctx, job, "publish", status, message)
-	if err = s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusPending); err != nil {
+	projectedStatus := sysin.PublishTaskStatusPending
+	if status == telegramJobStatusFailed {
+		projectedStatus = sysin.PublishTaskStatusFailed
+	}
+	if err = s.updateProfilePublishOperationState(ctx, job, projectedStatus); err != nil {
 		return err
 	}
+	if status == telegramJobStatusFailed {
+		return nil
+	}
 	return s.enqueueTelegramJob(ctx, job.Id, 0)
+}
+
+func telegramAttemptHasDefinitivePermanentFailure(attempt telegramDeliveryAttempt) bool {
+	if attempt.Id <= 0 || attempt.Status != telegramAttemptStatusRetryWait ||
+		attempt.ResponseReceived != 0 || strings.TrimSpace(attempt.ErrorMessage) == "" {
+		return false
+	}
+	return telegramJobFailureNextState(gerror.New(attempt.ErrorMessage), 0).Status == telegramJobStatusFailed
 }

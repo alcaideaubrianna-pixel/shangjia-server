@@ -55,6 +55,7 @@ type telegramDeliveryAttempt struct {
 	Status           string      `json:"status"`
 	ResponseReceived int         `json:"responseReceived" orm:"response_received"`
 	WebhookDeadline  *gtime.Time `json:"webhookDeadline"`
+	ErrorMessage     string      `json:"errorMessage" orm:"error_message"`
 }
 
 type telegramAttemptMessageRecord struct {

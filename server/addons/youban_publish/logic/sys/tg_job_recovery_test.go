@@ -44,6 +44,20 @@ func TestStaleSendingAttemptRecoveryCoversResetJobs(t *testing.T) {
 	}
 }
 
+func TestStaleSendingPermanentAttemptDoesNotEnterUnknown(t *testing.T) {
+	attempt := telegramDeliveryAttempt{
+		Id: 1, Status: telegramAttemptStatusRetryWait,
+		ErrorMessage: "bad request, Bad Request: chat not found",
+	}
+	if !telegramAttemptHasDefinitivePermanentFailure(attempt) {
+		t.Fatal("a concrete chat-not-found response must terminate instead of entering unknown reconciliation")
+	}
+	attempt.ErrorMessage = "context deadline exceeded"
+	if telegramAttemptHasDefinitivePermanentFailure(attempt) {
+		t.Fatal("an ambiguous timeout must remain eligible for reconciliation")
+	}
+}
+
 func TestTelegramMediaFallbackRecoveryIsPromptAndUnambiguous(t *testing.T) {
 	if telegramMediaFallbackRecoverAfter > 2*time.Minute {
 		t.Fatalf("fallback recovery is too slow: %s", telegramMediaFallbackRecoverAfter)
