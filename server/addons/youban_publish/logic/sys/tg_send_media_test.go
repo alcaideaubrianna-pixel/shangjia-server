@@ -2,11 +2,52 @@ package sys
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
+
+func TestTelegramMediaRemoteURLSelection(t *testing.T) {
+	media := &telegramMediaItem{FileUrl: "https://cdn.example/media/video.mp4"}
+	if got := telegramMediaRemoteURL(media); got != media.FileUrl {
+		t.Fatalf("remote URL = %q, want %q", got, media.FileUrl)
+	}
+	media.ForceUpload = true
+	if got := telegramMediaRemoteURL(media); got != "" {
+		t.Fatalf("forced upload must reject URL, got %q", got)
+	}
+	media.ForceUpload = false
+	media.AntiScanEnabled = true
+	if got := telegramMediaRemoteURL(media); got != "" {
+		t.Fatalf("sanitized media must reject original URL, got %q", got)
+	}
+}
+
+func TestTelegramRemoteURLFallbackIsDeterministic(t *testing.T) {
+	media := &telegramMediaItem{FileUrl: "https://cdn.example/media/video.mp4"}
+	if !telegramMediaCanFallbackToUpload(media, errors.New("Bad Request: failed to get HTTP URL content")) {
+		t.Fatal("explicit Telegram URL rejection should fall back to multipart")
+	}
+	for _, err := range []error{context.DeadlineExceeded, errors.New("unexpected EOF"), errors.New("connection reset by peer")} {
+		if telegramMediaCanFallbackToUpload(media, err) {
+			t.Fatalf("ambiguous delivery must not retry upload: %v", err)
+		}
+	}
+}
+
+func TestTelegramReusableFileFallbackTriesURLBeforeUpload(t *testing.T) {
+	media := &telegramMediaItem{TgFileId: "BAAC-cached", FileUrl: "https://cdn.example/media/video.mp4"}
+	fallback := telegramMediaFallbackCandidate(media)
+	if fallback.TgFileId != "" || fallback.ForceUpload || telegramMediaRemoteURL(fallback) == "" {
+		t.Fatalf("file_id fallback should preserve URL stage: %+v", fallback)
+	}
+	fallback = telegramMediaFallbackCandidate(fallback)
+	if !fallback.ForceUpload {
+		t.Fatalf("URL fallback should force multipart upload: %+v", fallback)
+	}
+}
 
 func TestValidateTelegramMediaPurpose(t *testing.T) {
 	tests := []struct {

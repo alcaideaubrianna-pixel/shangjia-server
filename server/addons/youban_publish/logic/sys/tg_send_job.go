@@ -21,7 +21,7 @@ import (
 
 const (
 	telegramDisplaySendTimeout = 90 * time.Second
-	telegramVerifySendTimeout  = 60 * time.Second // 封面最多30秒，给验证视频发送保留30秒
+	telegramVerifySendTimeout  = 5 * time.Minute
 )
 
 var (
@@ -30,6 +30,7 @@ var (
 	errTelegramMediaFallbackQueued        = errors.New("Telegram媒体降级任务已提交")
 	errTelegramMediaFallbackSubmitDelayed = errors.New("Telegram媒体降级任务等待重新提交")
 	errTelegramMediaFallbackUnavailable   = errors.New("Telegram媒体降级不可用")
+	errTelegramRemoteConfirmed            = errors.New("Telegram已发送成功，等待修复本地投影")
 )
 
 func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) error {
@@ -241,76 +242,79 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	}
 	messages := make([]*telegramSentMessage, 0)
 	if !telegramSendPhaseHasDisplay(job.SendPhase) {
-		expectedCount := len(displayMedia)
-		if expectedCount == 0 {
-			expectedCount = 1
+		restored, restoreErr := s.restoreConfirmedTelegramResponse(ctx, job, "display", displayMedia)
+		if restoreErr != nil {
+			return gerror.Wrap(errTelegramRemoteConfirmed, restoreErr.Error())
 		}
-		attempt, attemptErr := s.beginTelegramDeliveryAttempt(ctx, job, "display", expectedCount)
-		if attemptErr != nil {
-			return attemptErr
-		}
-		if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseDisplaySending); err != nil {
-			return err
-		}
-		displayCaption := telegramCaptionWithJobMarker(caption, job.Id, "display") + telegramAttemptMarker(attempt.AttemptToken)
-		g.Log().Infof(ctx, "TG展示资料开始Bot发送 jobId:%d botId:%d chat:%s media:%s", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(displayMedia))
-		displaySendCtx, cancelDisplaySend := context.WithTimeout(ctx, telegramDisplaySendTimeout)
-		displaySendStartedAt := time.Now()
-		messages, err = s.sendTelegramDisplayPart(displaySendCtx, bot, job.TargetChatId, displayCaption, displayMedia)
-		cancelDisplaySend()
-		displaySendDuration := time.Since(displaySendStartedAt)
-		observeTelegramMediaSend(ctx, "display", err, displaySendDuration)
-		g.Log().Infof(ctx, "TG展示资料Bot发送结束 jobId:%d profileId:%d channelId:%d botId:%d chat:%s duration:%s messages:%d messageIds:%v err:%v", job.Id, job.ProfileId, job.ChannelId, job.BotId, job.TargetChatId, displaySendDuration.Round(time.Millisecond), len(messages), telegramSentMessageIDs(messages), err)
-		if err != nil && len(messages) == 0 && shouldFallbackTelegramMediaToAccount(err) {
-			g.Log().Warningf(ctx, "Bot展示媒体发送失败，命中媒体降级条件 jobId:%d botId:%d chat:%s media:%s err:%+v", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(displayMedia), err)
-			messages, err = s.sendTelegramJobMediaByAccount(ctx, job, "display", displayCaption, displayMedia, err)
-		}
-		if err != nil {
-			if errors.Is(err, errTelegramMediaFallbackQueued) {
+		if restored {
+			job.SendPhase = telegramSendPhaseDisplayConfirmed
+		} else {
+			expectedCount := len(displayMedia)
+			if expectedCount == 0 {
+				expectedCount = 1
+			}
+			attempt, attemptErr := s.beginTelegramDeliveryAttempt(ctx, job, "display", expectedCount)
+			if attemptErr != nil {
+				return attemptErr
+			}
+			if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseDisplaySending); err != nil {
 				return err
 			}
-			if !isTelegramMediaSizeLimitError(err) {
-				logTelegramBotMediaSendFailure(ctx, job, "展示", displayMedia, err)
+			displayCaption := telegramCaptionWithJobMarker(caption, job.Id, "display") + telegramAttemptMarker(attempt.AttemptToken)
+			g.Log().Infof(ctx, "TG展示资料开始Bot发送 jobId:%d botId:%d chat:%s media:%s", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(displayMedia))
+			displaySendCtx, cancelDisplaySend := context.WithTimeout(ctx, telegramDisplaySendTimeout)
+			displaySendStartedAt := time.Now()
+			messages, err = s.sendTelegramDisplayPart(displaySendCtx, bot, job.TargetChatId, displayCaption, displayMedia)
+			cancelDisplaySend()
+			displaySendDuration := time.Since(displaySendStartedAt)
+			observeTelegramMediaSend(ctx, "display", err, displaySendDuration)
+			g.Log().Infof(ctx, "TG展示资料Bot发送结束 jobId:%d profileId:%d channelId:%d botId:%d chat:%s duration:%s messages:%d messageIds:%v err:%v", job.Id, job.ProfileId, job.ChannelId, job.BotId, job.TargetChatId, displaySendDuration.Round(time.Millisecond), len(messages), telegramSentMessageIDs(messages), err)
+			if err != nil && len(messages) == 0 && shouldFallbackTelegramMediaToAccount(err) {
+				g.Log().Warningf(ctx, "Bot展示媒体发送失败，命中媒体降级条件 jobId:%d botId:%d chat:%s media:%s err:%+v", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(displayMedia), err)
+				messages, err = s.sendTelegramJobMediaByAccount(ctx, job, "display", displayCaption, displayMedia, err)
 			}
-			if isTelegramAmbiguousDeliveryError(err) {
-				if len(messages) > 0 {
-					_ = s.saveTelegramSentMessages(ctx, job, messages)
+			if err != nil {
+				if errors.Is(err, errTelegramMediaFallbackQueued) {
+					return err
 				}
-				_ = s.recordTelegramAttemptMessages(ctx, attempt, messages, "response")
-				if waitErr := s.waitTelegramDeliveryWebhook(ctx, attempt, err); waitErr != nil {
-					return waitErr
+				if !isTelegramMediaSizeLimitError(err) {
+					logTelegramBotMediaSendFailure(ctx, job, "展示", displayMedia, err)
 				}
-				return errTelegramAwaitingWebhook
+				if isTelegramAmbiguousDeliveryError(err) {
+					if len(messages) > 0 {
+						_ = s.saveTelegramSentMessages(ctx, job, messages)
+					}
+					_ = s.recordTelegramAttemptMessages(ctx, attempt, messages, "response")
+					if waitErr := s.waitTelegramDeliveryWebhook(ctx, attempt, err); waitErr != nil {
+						return waitErr
+					}
+					return errTelegramAwaitingWebhook
+				}
+				s.abandonTelegramDeliveryAttempt(ctx, attempt, messages, err)
+				_ = s.cleanupTelegramSentMessages(ctx, bot, job.TargetChatId, messages, "展示资料分片推送失败")
+				return gerror.Wrapf(err, "TG展示资料推送失败，job:%d，channel:%d，chat:%s", job.Id, job.ChannelId, job.TargetChatId)
 			}
-			s.abandonTelegramDeliveryAttempt(ctx, attempt, messages, err)
-			_ = s.cleanupTelegramSentMessages(ctx, bot, job.TargetChatId, messages, "展示资料分片推送失败")
-			return gerror.Wrapf(err, "TG展示资料推送失败，job:%d，channel:%d，chat:%s", job.Id, job.ChannelId, job.TargetChatId)
-		}
-		if err = validateTelegramMediaSendResult("display", displayMedia, messages); err != nil {
-			_ = s.cleanupTelegramSentMessages(ctx, bot, job.TargetChatId, messages, "展示媒体发送结果不完整")
-			return err
-		}
-		if err = s.saveTelegramSentMessages(ctx, job, messages); err != nil {
-			_ = s.recordTelegramAttemptMessages(ctx, attempt, messages, "response")
-			if waitErr := s.waitTelegramDeliveryWebhook(ctx, attempt, telegramDeliveryUncertainError(err)); waitErr != nil {
-				return waitErr
+			if err = validateTelegramMediaSendResult("display", displayMedia, messages); err != nil {
+				_ = s.cleanupTelegramSentMessages(ctx, bot, job.TargetChatId, messages, "展示媒体发送结果不完整")
+				return err
 			}
-			return errTelegramAwaitingWebhook
-		}
-		if err = s.updateTelegramMediaFileIds(ctx, messages); err != nil {
-			g.Log().Warningf(ctx, "更新TG展示媒体file_id失败 job:%d err:%+v", job.Id, err)
-		}
-		if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseDisplayConfirmed); err != nil {
-			_ = s.recordTelegramAttemptMessages(ctx, attempt, messages, "response")
-			if waitErr := s.waitTelegramDeliveryWebhook(ctx, attempt, telegramDeliveryUncertainError(err)); waitErr != nil {
-				return waitErr
+			// A successful Bot API response with message IDs is authoritative. Confirm
+			// the remote delivery before updating local projections so a database
+			// failure can only trigger projection repair, never Telegram reconciliation.
+			if err = s.confirmTelegramDeliveryAttempt(ctx, attempt, messages, true); err != nil {
+				return gerror.Wrap(errTelegramRemoteConfirmed, err.Error())
 			}
-			return errTelegramAwaitingWebhook
+			if err = s.saveTelegramSentMessages(ctx, job, messages); err != nil {
+				return gerror.Wrap(errTelegramRemoteConfirmed, err.Error())
+			}
+			if err = s.updateTelegramMediaFileIds(ctx, messages); err != nil {
+				g.Log().Warningf(ctx, "更新TG展示媒体file_id失败 job:%d err:%+v", job.Id, err)
+			}
+			if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseDisplayConfirmed); err != nil {
+				return gerror.Wrap(errTelegramRemoteConfirmed, err.Error())
+			}
+			job.SendPhase = telegramSendPhaseDisplayConfirmed
 		}
-		if err = s.confirmTelegramDeliveryAttempt(ctx, attempt, messages, true); err != nil {
-			return telegramDeliveryUncertainError(err)
-		}
-		job.SendPhase = telegramSendPhaseDisplayConfirmed
 	}
 	if stillSending, err := s.telegramJobStillSending(ctx, job.Id); err != nil {
 		return err
@@ -321,6 +325,11 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	if len(verifyMedia) == 0 {
 		g.Log().Infof(ctx, "TG任务无验证资料，跳过验证发送 jobId:%d channelId:%d", job.Id, job.ChannelId)
 		return s.finalizeTelegramMediaDelivery(ctx, job, false, false)
+	}
+	if restored, restoreErr := s.restoreConfirmedTelegramResponse(ctx, job, "verify", verifyMedia); restoreErr != nil {
+		return gerror.Wrap(errTelegramRemoteConfirmed, restoreErr.Error())
+	} else if restored {
+		return nil
 	}
 	// Always give the Bot API the first chance to upload videos without a
 	// reusable file_id. The account fallback requires channel-admin access and
@@ -394,22 +403,14 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 		_ = s.cleanupTelegramSentMessages(ctx, bot, job.TargetChatId, verifyMessages, "验证媒体发送结果不完整")
 		return err
 	}
+	if err = s.confirmTelegramDeliveryAttempt(ctx, verifyAttempt, verifyMessages, true); err != nil {
+		return gerror.Wrap(errTelegramRemoteConfirmed, err.Error())
+	}
 	if err = s.saveTelegramSentMessages(ctx, job, verifyMessages); err != nil {
-		_ = s.recordTelegramAttemptMessages(ctx, verifyAttempt, verifyMessages, "response")
-		if waitErr := s.waitTelegramDeliveryWebhook(ctx, verifyAttempt, telegramDeliveryUncertainError(err)); waitErr != nil {
-			return waitErr
-		}
-		return errTelegramAwaitingWebhook
+		return gerror.Wrap(errTelegramRemoteConfirmed, err.Error())
 	}
 	if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseVerifyConfirmed); err != nil {
-		_ = s.recordTelegramAttemptMessages(ctx, verifyAttempt, verifyMessages, "response")
-		if waitErr := s.waitTelegramDeliveryWebhook(ctx, verifyAttempt, telegramDeliveryUncertainError(err)); waitErr != nil {
-			return waitErr
-		}
-		return errTelegramAwaitingWebhook
-	}
-	if err = s.confirmTelegramDeliveryAttempt(ctx, verifyAttempt, verifyMessages, true); err != nil {
-		return telegramDeliveryUncertainError(err)
+		return gerror.Wrap(errTelegramRemoteConfirmed, err.Error())
 	}
 	return s.updateTelegramMediaFileIds(ctx, verifyMessages)
 }
@@ -615,6 +616,20 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 		return nil
 	}
 	if errors.Is(err, errTelegramAwaitingWebhook) {
+		return nil
+	}
+	if errors.Is(err, errTelegramRemoteConfirmed) {
+		transitioned, transitionErr := s.transitionTelegramJob(ctx, telegramJobTransition{
+			JobId: job.Id, From: []string{telegramJobStatusSending}, To: telegramJobStatusRetryWait,
+			RetryDelay: 2 * time.Second, ErrorMessage: err.Error(),
+			Additional: g.Map{"last_dispatch_error": err.Error()},
+		})
+		if transitionErr != nil {
+			return gerror.Wrap(transitionErr, "安排TG本地投影修复失败")
+		}
+		if transitioned {
+			return s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 2*time.Second, false)
+		}
 		return nil
 	}
 	if !telegramSendPhaseIsCleanup(job.SendPhase) && !isTelegramAccountBusyError(err) && isTelegramAmbiguousDeliveryError(err) {

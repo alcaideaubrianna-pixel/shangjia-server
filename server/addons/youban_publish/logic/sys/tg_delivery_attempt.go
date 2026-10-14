@@ -39,20 +39,25 @@ const (
 var errTelegramAwaitingWebhook = gerror.New("等待Telegram Webhook确认")
 
 type telegramDeliveryAttempt struct {
-	Id              int64       `json:"id"`
-	JobId           int64       `json:"jobId"`
-	TenantId        int64       `json:"tenantId"`
-	BotId           int64       `json:"botId"`
-	ChannelId       int64       `json:"channelId"`
-	TargetChatId    string      `json:"targetChatId"`
-	Phase           string      `json:"phase"`
-	ChunkIndex      int         `json:"chunkIndex"`
-	AttemptNo       int         `json:"attemptNo"`
-	AttemptToken    string      `json:"attemptToken"`
-	ExpectedCount   int         `json:"expectedCount"`
-	ConfirmedCount  int         `json:"confirmedCount"`
-	Status          string      `json:"status"`
-	WebhookDeadline *gtime.Time `json:"webhookDeadline"`
+	Id               int64       `json:"id"`
+	JobId            int64       `json:"jobId"`
+	TenantId         int64       `json:"tenantId"`
+	BotId            int64       `json:"botId"`
+	ChannelId        int64       `json:"channelId"`
+	TargetChatId     string      `json:"targetChatId"`
+	Phase            string      `json:"phase"`
+	ChunkIndex       int         `json:"chunkIndex"`
+	AttemptNo        int         `json:"attemptNo"`
+	AttemptToken     string      `json:"attemptToken"`
+	ExpectedCount    int         `json:"expectedCount"`
+	ConfirmedCount   int         `json:"confirmedCount"`
+	Status           string      `json:"status"`
+	ResponseReceived int         `json:"responseReceived" orm:"response_received"`
+	WebhookDeadline  *gtime.Time `json:"webhookDeadline"`
+}
+
+type telegramAttemptMessageRecord struct {
+	MessageId int64 `json:"messageId" orm:"message_id"`
 }
 
 func (s *sSysPublish) beginTelegramDeliveryAttempt(ctx context.Context, job telegramJobRecord, phase string, expectedCount int) (telegramDeliveryAttempt, error) {
@@ -166,6 +171,59 @@ func (s *sSysPublish) confirmTelegramDeliveryAttempt(ctx context.Context, attemp
 		s.projectTelegramDeliveryAttempt(ctx, attempt, "")
 	}
 	return err
+}
+
+// restoreConfirmedTelegramResponse repairs local projections after Telegram
+// already returned message IDs. It must never call Telegram or start a new
+// delivery attempt.
+func (s *sSysPublish) restoreConfirmedTelegramResponse(ctx context.Context, job telegramJobRecord, phase string, media []*telegramMediaItem) (bool, error) {
+	var attempt telegramDeliveryAttempt
+	if err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
+		Where("job_id", job.Id).Where("phase", phase).
+		Where("status", telegramAttemptStatusConfirmed).Where("response_received", 1).
+		OrderDesc("id").Limit(1).Scan(&attempt); err != nil {
+		return false, gerror.Wrap(err, "读取TG已确认响应失败")
+	}
+	if attempt.Id <= 0 {
+		return false, nil
+	}
+	var rows []*telegramAttemptMessageRecord
+	if err := g.DB().Model(publishTgAttemptMessageTable).Safe().Ctx(ctx).
+		Fields("message_id").Where("attempt_id", attempt.Id).OrderAsc("id").Scan(&rows); err != nil {
+		return true, gerror.Wrap(err, "读取TG已确认消息失败")
+	}
+	if len(rows) == 0 {
+		return true, gerror.New("TG响应已确认但消息审计为空")
+	}
+	messages := make([]*telegramSentMessage, 0, len(rows))
+	mediaIndex := 0
+	for _, row := range rows {
+		if row == nil || row.MessageId <= 0 {
+			continue
+		}
+		message := &telegramSentMessage{MessageId: row.MessageId, Purpose: phase}
+		if mediaIndex < len(media) {
+			item := media[mediaIndex]
+			if item != nil {
+				message.MediaId = item.Id
+				message.AssetHash = item.AssetHash
+			}
+			mediaIndex++
+		}
+		messages = append(messages, message)
+	}
+	if err := s.saveTelegramSentMessages(ctx, job, messages); err != nil {
+		return true, err
+	}
+	confirmedPhase := telegramSendPhaseDisplayConfirmed
+	if phase == "verify" {
+		confirmedPhase = telegramSendPhaseVerifyConfirmed
+	}
+	if err := s.updateTelegramJobSendPhase(ctx, job.Id, confirmedPhase); err != nil {
+		return true, err
+	}
+	g.Log().Infof(ctx, "TG远端成功响应本地投影已恢复 jobId:%d attemptId:%d phase:%s messages:%d", job.Id, attempt.Id, phase, len(messages))
+	return true, nil
 }
 
 func (s *sSysPublish) waitTelegramDeliveryWebhook(ctx context.Context, attempt telegramDeliveryAttempt, cause error) error {

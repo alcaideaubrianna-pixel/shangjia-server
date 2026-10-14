@@ -102,7 +102,10 @@ func collectProcessWorkerQueues() map[string]int {
 	return queues
 }
 
-const telegramPublishTaskTimeout = 5 * time.Minute
+// A display send and a verification video can each legitimately consume their
+// own network timeout. Keep the task deadline above their combined budget so
+// the worker cannot cancel verification before the five-minute send timeout.
+const telegramPublishTaskTimeout = 15 * time.Minute
 
 func collectMediaBulkQueueName(shard int) string {
 	if shard < 0 {
