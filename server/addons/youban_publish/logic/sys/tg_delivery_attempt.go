@@ -3,6 +3,8 @@ package sys
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -239,10 +241,17 @@ func (s *sSysPublish) activeTelegramDeliveryAttempt(ctx context.Context, jobID i
 		Where("job_id", jobID).Where("phase", phase).Where("chunk_index", 0).
 		WhereIn("status", []string{telegramAttemptStatusSending, telegramAttemptStatusWaiting, telegramAttemptStatusRetryWait}).
 		OrderDesc("id").Limit(1).Scan(&attempt)
+	if telegramOptionalAttemptScanSucceeded(err) {
+		return attempt, nil
+	}
 	if err != nil {
 		return attempt, gerror.Wrap(err, "读取TG活动发送Attempt失败")
 	}
 	return attempt, nil
+}
+
+func telegramOptionalAttemptScanSucceeded(err error) bool {
+	return err == nil || errors.Is(err, sql.ErrNoRows)
 }
 
 func (s *sSysPublish) telegramJobHasWaitingAttempt(ctx context.Context, jobId int64) (bool, error) {

@@ -39,10 +39,12 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 	mod := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).Unscoped().
 		Where("j.id <> ?", job.Id).
 		Where(telegramWebhookDetachedJobSQL("j.")).
-		WhereIn("j.status", []string{
-			telegramJobStatusPending, telegramJobStatusRetryWait,
+		Where(`(
+			j.status IN (?, ?, ?, ?) OR
+			(j.status = ? AND j.send_phase = ?)
+		)`, telegramJobStatusPending, telegramJobStatusRetryWait,
 			telegramJobStatusConfirming, telegramJobStatusSending,
-		})
+			telegramJobStatusFailed, telegramSendPhaseDisplayConfirmed)
 	if job.ChannelId > 0 {
 		mod = mod.Where("j.channel_id", job.ChannelId)
 	} else {

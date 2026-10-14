@@ -89,6 +89,9 @@ func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 	if err := s.recoverTerminalTelegramAttempts(ctx, 500); err != nil {
 		g.Log().Warningf(ctx, "收敛TG发送Attempt状态失败：%+v", err)
 	}
+	if err := s.recoverFailedJobsMissingVerification(ctx, 500); err != nil {
+		g.Log().Warningf(ctx, "恢复缺少验证视频的终态TG任务失败：%+v", err)
+	}
 	if err := s.recoverPendingIdleTelegramJobs(ctx, 500); err != nil {
 		g.Log().Warningf(ctx, "恢复待入队TG推送任务失败：%+v", err)
 	}
@@ -115,6 +118,9 @@ func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 			if err := s.recoverTerminalTelegramAttempts(ctx, 500); err != nil {
 				g.Log().Warningf(ctx, "收敛TG发送Attempt状态失败：%+v", err)
 			}
+			if err := s.recoverFailedJobsMissingVerification(ctx, 500); err != nil {
+				g.Log().Warningf(ctx, "恢复缺少验证视频的终态TG任务失败：%+v", err)
+			}
 			if err := s.supersedeExpiredMessagePushPlanJobs(ctx, 1000); err != nil {
 				g.Log().Warningf(ctx, "终止过期历史消息计划任务失败：%+v", err)
 			}
@@ -138,6 +144,52 @@ func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 			}
 		}
 	}
+}
+
+func (s *sSysPublish) recoverFailedJobsMissingVerification(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		limit = 100
+	}
+	var jobs []telegramJobRecord
+	err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
+		Fields("j.*").
+		Where("j.status", telegramJobStatusFailed).
+		Where("j.send_phase", telegramSendPhaseDisplayConfirmed).
+		Where("EXISTS (SELECT 1 FROM " + publishMediaTable + " media WHERE media.profile_id=j.profile_id AND media.purpose='verify' AND media.deleted_at IS NULL)").
+		Where("NOT EXISTS (SELECT 1 FROM " + publishTgMessageTable + " message WHERE message.job_id=j.id AND message.purpose='verify' AND message.status='sent' AND message.deleted_at IS NULL)").
+		OrderAsc("j.updated_at").OrderAsc("j.id").Limit(limit).Scan(&jobs)
+	if err != nil {
+		return gerror.Wrap(err, "读取缺少验证视频的终态TG任务失败")
+	}
+	now := gtime.Now()
+	for _, job := range jobs {
+		result, updateErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+			Where("id", job.Id).
+			Where("status", telegramJobStatusFailed).
+			Where("send_phase", telegramSendPhaseDisplayConfirmed).
+			Data(g.Map{
+				"status":              telegramJobStatusRetryWait,
+				"dispatch_status":     tgDispatchStatusIdle,
+				"next_retry_at":       now,
+				"error_message":       "",
+				"last_dispatch_error": "展示已确认，自动恢复缺失的验证视频",
+				"updated_at":          now,
+			}).Update()
+		if updateErr != nil {
+			return gerror.Wrapf(updateErr, "恢复缺少验证视频的终态TG任务失败 jobId:%d", job.Id)
+		}
+		affected, _ := result.RowsAffected()
+		if affected == 0 {
+			continue
+		}
+		job.Status = telegramJobStatusRetryWait
+		job.DispatchStatus = tgDispatchStatusIdle
+		s.appendTelegramJobLog(ctx, job, "verify_recovery", "queued", "展示已确认，验证视频已重新进入频道顺序队列")
+		if enqueueErr := s.enqueueTelegramJob(ctx, job.Id, 0); enqueueErr != nil {
+			g.Log().Warningf(ctx, "重新投递缺失验证视频TG任务失败 jobId:%d err:%+v", job.Id, enqueueErr)
+		}
+	}
+	return nil
 }
 
 func (s *sSysPublish) recoverStaleTelegramMediaFallbackJobs(ctx context.Context, limit int) error {

@@ -2,6 +2,8 @@ package sys
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -11,6 +13,18 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 )
+
+func TestTelegramOptionalAttemptScanTreatsMissingRowAsCacheMiss(t *testing.T) {
+	if !telegramOptionalAttemptScanSucceeded(nil) {
+		t.Fatal("nil error should be accepted")
+	}
+	if !telegramOptionalAttemptScanSucceeded(sql.ErrNoRows) {
+		t.Fatal("sql.ErrNoRows should create a new delivery attempt")
+	}
+	if telegramOptionalAttemptScanSucceeded(errors.New("database unavailable")) {
+		t.Fatal("database errors must not be swallowed")
+	}
+}
 
 func TestTelegramMediaSendTimeoutsFitPublishTaskDeadline(t *testing.T) {
 	if telegramVerifySendTimeout <= 0 || telegramVerifySendTimeout >= telegramDisplaySendTimeout {
