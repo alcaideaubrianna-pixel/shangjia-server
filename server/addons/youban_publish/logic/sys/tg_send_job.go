@@ -572,24 +572,32 @@ func (s *sSysPublish) submitTelegramMediaFallback(ctx context.Context, job teleg
 	if job.Id <= 0 || tgAccountID <= 0 || (purpose != "display" && purpose != "verify") {
 		return gerror.New("协议号媒体降级任务参数不完整")
 	}
-	if _, err := collectorservice.AccountTasks().Submit(ctx, &collectorin.AccountTaskSubmit{
-		TenantID: job.TenantId, AccountID: tgAccountID,
-		TaskType: collectorin.AccountTaskTypeMessageMediaFallback,
-		TaskKey:  fmt.Sprintf("message-media-fallback:%d:%s", job.Id, purpose),
-		Priority: collectorin.EventPriorityUrgent, MaxAttempts: 5,
-	}); err != nil {
-		return err
-	}
-	if _, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id", job.Id).Where("status", telegramJobStatusSending).
 		Data(g.Map{
 			"last_dispatch_error": telegramMediaFallbackReason(purpose),
 			"next_retry_at":       gtime.Now().Add(telegramMediaFallbackRecoverAfter),
 			"updated_at":          gtime.Now(),
-		}).Update(); err != nil {
-		// The durable account task is already queued. Do not turn this into a Bot
-		// retry and risk sending the same media through two transports.
-		g.Log().Warningf(ctx, "标记协议号媒体降级等待状态失败 jobId:%d purpose:%s err:%+v", job.Id, purpose, err)
+		}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "标记协议号媒体降级等待状态失败")
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return gerror.Wrap(err, "确认协议号媒体降级等待状态失败")
+	}
+	if affected == 0 {
+		return gerror.New("TG任务已不在发送状态，取消协议号媒体降级提交")
+	}
+	if _, err = collectorservice.AccountTasks().Submit(ctx, &collectorin.AccountTaskSubmit{
+		TenantID: job.TenantId, AccountID: tgAccountID,
+		TaskType: collectorin.AccountTaskTypeMessageMediaFallback,
+		TaskKey:  fmt.Sprintf("message-media-fallback:%d:%s", job.Id, purpose),
+		Priority: collectorin.EventPriorityUrgent, MaxAttempts: 5,
+	}); err != nil {
+		// Ownership already belongs to the account fallback. Keep the marker so
+		// the recovery loop retries task creation without reopening Bot delivery.
+		g.Log().Warningf(ctx, "提交协议号媒体降级任务失败，等待自动恢复 jobId:%d purpose:%s err:%+v", job.Id, purpose, err)
 	}
 	return nil
 }
