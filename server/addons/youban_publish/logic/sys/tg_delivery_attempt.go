@@ -183,7 +183,7 @@ func (s *sSysPublish) restoreConfirmedTelegramResponse(ctx context.Context, job 
 	if err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
 		Where("job_id", job.Id).Where("phase", phase).
 		Where("(response_received = ? OR EXISTS (SELECT 1 FROM "+publishTgAttemptMessageTable+" response WHERE response.attempt_id="+publishTgAttemptTable+".id AND response.source='response'))", 1).
-		OrderDesc("id").Limit(1).Scan(&attempt); err != nil {
+		OrderDesc("id").Limit(1).Scan(&attempt); !telegramOptionalAttemptScanSucceeded(err) {
 		return false, gerror.Wrap(err, "读取TG已确认响应失败")
 	}
 	if attempt.Id <= 0 {

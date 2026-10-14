@@ -46,6 +46,12 @@ func TestTelegramOptionalAttemptScanTreatsMissingRowAsCacheMiss(t *testing.T) {
 	}
 }
 
+func TestRestoreConfirmedTelegramResponseTreatsMissingAttemptAsUnconfirmed(t *testing.T) {
+	if !telegramOptionalAttemptScanSucceeded(sql.ErrNoRows) {
+		t.Fatal("missing confirmed response must allow the initial Telegram send")
+	}
+}
+
 func TestTelegramMediaSendTimeoutsFitPublishTaskDeadline(t *testing.T) {
 	if telegramVerifySendTimeout <= 0 {
 		t.Fatalf("unexpected media timeouts: verify=%s display=%s", telegramVerifySendTimeout, telegramDisplaySendTimeout)
