@@ -273,12 +273,12 @@ func (s *sSysPublish) handleTelegramAttemptTimeout(ctx context.Context, attemptI
 	if err != nil {
 		return err
 	}
-	if attempt.Phase == "verify" {
+	if attempt.Phase == "display" || attempt.Phase == "verify" {
 		if err = s.enqueueTelegramAttemptReconcile(ctx, job, attempt); err == nil {
-			s.appendTelegramJobLog(ctx, job, "reconcile", "queued", "验证视频未收到Webhook确认，已提交协议号对账")
+			s.appendTelegramJobLog(ctx, job, "reconcile", "queued", "Telegram发送未收到Webhook确认，已提交协议号对账")
 			return nil
 		}
-		g.Log().Warningf(ctx, "提交验证视频协议号对账失败 attemptId:%d jobId:%d err:%+v", attempt.Id, job.Id, err)
+		g.Log().Warningf(ctx, "提交Telegram消息协议号对账失败 attemptId:%d jobId:%d phase:%s err:%+v", attempt.Id, job.Id, attempt.Phase, err)
 		return s.failTelegramMediaFallbackJob(ctx, job, err)
 	}
 	// Preserve partial confirmations so a late Webhook can still complete the attempt.

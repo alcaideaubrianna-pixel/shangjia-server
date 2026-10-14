@@ -527,8 +527,8 @@ func (s *sSysPublish) handleMessageReconcileAccountTask(ctx context.Context, cli
 		return err
 	}
 	attempt, err := s.telegramAttemptById(ctx, attemptID)
-	if err != nil || attempt.Id <= 0 || attempt.JobId != job.Id || attempt.Phase != "verify" {
-		return gerror.New("验证视频对账Attempt不存在或不匹配")
+	if err != nil || attempt.Id <= 0 || attempt.JobId != job.Id || (attempt.Phase != "display" && attempt.Phase != "verify") {
+		return gerror.New("Telegram消息对账Attempt不存在或不匹配")
 	}
 	if job.Status == telegramJobStatusSending &&
 		job.SendPhase == telegramSendPhaseVerifyConfirmed &&
@@ -543,7 +543,7 @@ func (s *sSysPublish) handleMessageReconcileAccountTask(ctx context.Context, cli
 		return err
 	}
 	if task.AccountID != channel.TgAccountId {
-		return gerror.New("验证视频对账账号与目标频道不一致")
+		return gerror.New("Telegram消息对账账号与目标频道不一致")
 	}
 	messages, err := findTelegramAttemptMessages(ctx, client, channel, attempt)
 	if err != nil {
@@ -551,7 +551,10 @@ func (s *sSysPublish) handleMessageReconcileAccountTask(ctx context.Context, cli
 	}
 	if len(messages) == 0 {
 		if !accountTaskFinalAttempt(task) {
-			return gerror.New("协议号暂未找到Bot验证视频，等待后重试对账")
+			return gerror.New("协议号暂未找到Bot发送消息，等待后重试对账")
+		}
+		if attempt.Phase == "display" {
+			return gerror.New("协议号最终未找到Bot展示消息，拒绝自动重发以避免重复推送")
 		}
 		_, err = collectorservice.AccountTasks().Submit(ctx, &collectorin.AccountTaskSubmit{
 			TenantID: job.TenantId, AccountID: channel.TgAccountId,
@@ -570,9 +573,15 @@ func (s *sSysPublish) handleMessageReconcileAccountTask(ctx context.Context, cli
 	if err = s.confirmTelegramDeliveryAttempt(ctx, attempt, messages, false); err != nil {
 		return err
 	}
+	confirmedPhase := telegramSendPhaseDisplayConfirmed
+	nextStatus := telegramJobStatusRetryWait
+	if attempt.Phase == "verify" {
+		confirmedPhase = telegramSendPhaseVerifyConfirmed
+		nextStatus = telegramJobStatusSending
+	}
 	transitioned, err := s.transitionTelegramJob(ctx, telegramJobTransition{
-		JobId: job.Id, From: []string{telegramJobStatusConfirming}, To: telegramJobStatusSending,
-		Additional: g.Map{"send_phase": telegramSendPhaseVerifyConfirmed, "error_message": ""},
+		JobId: job.Id, From: []string{telegramJobStatusConfirming}, To: nextStatus,
+		Additional: g.Map{"send_phase": confirmedPhase, "error_message": ""},
 	})
 	if err != nil {
 		return err
@@ -582,7 +591,11 @@ func (s *sSysPublish) handleMessageReconcileAccountTask(ctx context.Context, cli
 		// messages and confirmed Attempt make this reconciliation idempotent.
 		return nil
 	}
-	job.Status = telegramJobStatusSending
+	job.Status = nextStatus
+	job.SendPhase = confirmedPhase
+	if attempt.Phase == "display" {
+		return s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 0, false)
+	}
 	return s.finalizeTelegramMediaDelivery(ctx, job, true, true)
 }
 

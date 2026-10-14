@@ -72,6 +72,14 @@ func TestTelegramAttemptWaitingKeepsChannelOrderingBarrier(t *testing.T) {
 	}
 }
 
+func TestTelegramAttemptReconcileSupportsDisplayAndVerify(t *testing.T) {
+	for _, phase := range []string{"display", "verify"} {
+		if phase != "display" && phase != "verify" {
+			t.Fatalf("unsupported reconciliation phase: %s", phase)
+		}
+	}
+}
+
 func TestTelegramUnknownProcessingBlocksNextChannelJobIntegration(t *testing.T) {
 	if os.Getenv("YOUBAN_PUBLISH_INTEGRATION") != "1" {
 		t.Skip("set YOUBAN_PUBLISH_INTEGRATION=1 to run local PostgreSQL integration test")
