@@ -220,6 +220,22 @@ func TestTaskLogRetentionIndexesStayOutOfInteractiveUpgrade(t *testing.T) {
 	}
 }
 
+func TestTelegramAttemptRecoveryIndexUsesConcurrentMaintenance(t *testing.T) {
+	const index = "idx_ybp_tg_attempt_sending_recovery"
+	installSQL := readSqlFile("addons/youban_publish/resource/sql/install.pgsql.sql")
+	heavySQL := readSqlFile("addons/youban_publish/resource/sql/heavy_indexes.pgsql.sql")
+	onlineSQL := readSqlFile("addons/youban_publish/resource/sql/upgrade_online.pgsql.sql")
+	if !strings.Contains(installSQL, index) {
+		t.Fatalf("fresh PostgreSQL install does not include %s", index)
+	}
+	if !strings.Contains(heavySQL, "CREATE INDEX CONCURRENTLY IF NOT EXISTS \""+index+"\"") {
+		t.Fatalf("maintenance SQL does not build %s concurrently", index)
+	}
+	if strings.Contains(onlineSQL, index) {
+		t.Fatalf("interactive upgrade must not build large recovery index %s", index)
+	}
+}
+
 func TestMessagePushSchemaIsOwnedByInstallAndMigrationSql(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -456,8 +456,15 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 		if row.IsEmpty() || row["id"].Int64() <= 0 || !shouldRecoverCollectEvent(row) {
 			continue
 		}
-		if row["status"].String() == sysin.CollectEventStatusMediaPending && !s.collectEventMediaCanResume(ctx, row["id"].Int64()) {
-			continue
+		if row["status"].String() == sysin.CollectEventStatusMediaPending {
+			canResume, mediaErr := s.collectEventMediaCanResume(ctx, row["id"].Int64())
+			if mediaErr != nil {
+				g.Log().Warningf(ctx, "检查采集事件媒体恢复条件失败 event:%d err:%+v", row["id"].Int64(), mediaErr)
+				continue
+			}
+			if !canResume {
+				continue
+			}
 		}
 		claimData := g.Map{"updated_at": gtime.Now()}
 		if row["status"].String() == sysin.CollectEventStatusFailed {
@@ -510,19 +517,26 @@ func enabledCollectSourceExistsSQL(ownerAlias string) string {
 	return "EXISTS (SELECT 1 FROM " + pdao.YoubanPublishCollectSource.Table() + " s WHERE s.id=" + ownerAlias + ".source_id AND s.tenant_id=" + ownerAlias + ".tenant_id AND s.account_id=" + ownerAlias + ".account_id AND s.collect_enabled=1 AND s.status=1 AND s.deleted_at IS NULL)"
 }
 
-func (s *sSysPublish) collectEventMediaCanResume(ctx context.Context, eventId int64) bool {
+func (s *sSysPublish) collectEventMediaCanResume(ctx context.Context, eventId int64) (bool, error) {
 	if eventId <= 0 {
-		return false
+		return false, nil
 	}
 	cols := pdao.YoubanPublishCollectEventMedia.Columns()
 	rows, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
 		Fields(cols.CacheStatus, cols.NextRetryAt, cols.StoragePath, cols.FileUrl, cols.BackupChatId, cols.BackupMessageId).
 		Where(cols.EventId, eventId).
 		All()
-	if err != nil || len(rows) == 0 {
+	if err != nil {
+		return false, gerror.Wrapf(err, "读取采集事件媒体失败 event:%d", eventId)
+	}
+	return collectEventMediaRecordsCanResume(rows, gtime.Now()), nil
+}
+
+func collectEventMediaRecordsCanResume(rows gdb.Result, now *gtime.Time) bool {
+	if len(rows) == 0 || now == nil {
 		return false
 	}
-	now := gtime.Now()
+	cols := pdao.YoubanPublishCollectEventMedia.Columns()
 	for _, row := range rows {
 		status := strings.TrimSpace(row[cols.CacheStatus].String())
 		if status == collectMediaCacheReady &&

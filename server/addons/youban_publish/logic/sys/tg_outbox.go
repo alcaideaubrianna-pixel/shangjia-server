@@ -200,10 +200,10 @@ func (s *sSysPublish) RecoverTelegramDispatch(ctx context.Context, limit int) er
 	return s.recoverPendingIdleTelegramJobs(ctx, limit)
 }
 
-// RecoverTelegramJobDispatch immediately schedules one existing job through
-// the normal idempotent queue path.
+// RecoverTelegramJobDispatch schedules one existing job through its Outbox,
+// preserving available_at and the normal idempotent queue path.
 func (s *sSysPublish) RecoverTelegramJobDispatch(ctx context.Context, jobId int64) error {
-	return s.enqueueTelegramJobDirect(ctx, jobId, 0)
+	return s.dispatchTelegramJobOutboxByJob(ctx, jobId)
 }
 
 func telegramOutboxOwner() string {
