@@ -969,12 +969,10 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 	if err != nil {
 		var duplicate *profileFingerprintDuplicateError
 		if errors.As(err, &duplicate) {
-			reason := duplicate.Error()
-			_, _ = pdao.YoubanPublishCollectDispatch.Ctx(ctx).Where("id", dispatchId).Data(g.Map{
-				"status": sysin.CollectDispatchStatusSkipped, "error_message": reason,
-				"finished_at": gtime.Now(), "updated_at": gtime.Now(),
-			}).Update()
-			s.appendCollectEventLogForRecord(ctx, event, "dedupe", "skipped", reason, fmt.Sprintf("rule=%d", rule["id"].Int64()))
+			reason, skipErr := s.skipCollectProfileDispatchDuplicate(ctx, dispatchId, event, rule, duplicate)
+			if skipErr != nil {
+				return false, "", skipErr
+			}
 			return false, reason, nil
 		}
 		_ = s.markCollectDispatchFailed(ctx, dispatchId, err.Error())
@@ -1029,6 +1027,14 @@ func (s *sSysPublish) resumeExistingCollectDispatch(ctx context.Context, dispatc
 		return true, "", nil
 	case collectDispatchResumeSubmit:
 		if err := s.resumeCollectProfileDispatch(ctx, dispatch, event, content, rule, text); err != nil {
+			var duplicate *profileFingerprintDuplicateError
+			if errors.As(err, &duplicate) {
+				reason, skipErr := s.skipCollectProfileDispatchDuplicate(ctx, dispatch["id"].Int64(), event, rule, duplicate)
+				if skipErr != nil {
+					return false, "", skipErr
+				}
+				return false, reason, nil
+			}
 			return false, "", err
 		}
 		return true, "", nil
