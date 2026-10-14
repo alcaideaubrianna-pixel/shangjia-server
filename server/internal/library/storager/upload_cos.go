@@ -7,6 +7,7 @@ package storager
 
 import (
 	"context"
+	"hotgo/internal/model"
 	"io"
 	"os"
 	"path/filepath"
@@ -28,18 +29,23 @@ type CosDrive struct {
 }
 
 func newCosClient() (*cos.Client, error) {
-	if strings.TrimSpace(config.CosBucketURL) == "" {
+	return NewCosClientWithConfig(config)
+}
+
+// NewCosClientWithConfig creates a COS client bound to an immutable config snapshot.
+func NewCosClientWithConfig(cfg *model.UploadConfig) (*cos.Client, error) {
+	if cfg == nil || strings.TrimSpace(cfg.CosBucketURL) == "" {
 		return nil, gerror.New("COS存储驱动必须配置Bucket访问域名!")
 	}
 
-	bucketURL, err := url.Parse(strings.TrimSpace(config.CosBucketURL))
+	bucketURL, err := url.Parse(strings.TrimSpace(cfg.CosBucketURL))
 	if err != nil {
 		return nil, gerror.Wrap(err, "COS Bucket访问域名配置不正确")
 	}
 	return cos.NewClient(&cos.BaseURL{BucketURL: bucketURL}, &http.Client{
 		Transport: &cos.AuthorizationTransport{
-			SecretID:  config.CosSecretId,
-			SecretKey: config.CosSecretKey,
+			SecretID:  cfg.CosSecretId,
+			SecretKey: cfg.CosSecretKey,
 		},
 	}), nil
 }

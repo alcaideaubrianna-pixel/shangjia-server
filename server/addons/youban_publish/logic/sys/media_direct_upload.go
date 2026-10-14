@@ -2,6 +2,8 @@ package sys
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 	"net/url"
 	"strings"
@@ -20,7 +22,9 @@ import (
 	"hotgo/internal/library/cache"
 	"hotgo/internal/library/contexts"
 	"hotgo/internal/library/storager"
+	"hotgo/internal/model"
 	basesysin "hotgo/internal/model/input/sysin"
+	isc "hotgo/internal/service"
 )
 
 const directUploadSessionPrefix = "youban_publish:cos_direct_upload:"
@@ -36,6 +40,9 @@ type mediaDirectUploadSession struct {
 	FileName     string
 	FileSize     int64
 	ContentType  string
+	Bucket       string
+	Region       string
+	ConfigDigest string
 	Media        sysin.MediaUploadInp
 	AttachmentId int64
 	MediaId      int64
@@ -80,7 +87,11 @@ func (s *sSysPublish) createMediaDirectUpload(ctx context.Context, in *sysin.Med
 	if in == nil {
 		return nil, gerror.New("直传参数不能为空")
 	}
-	if storager.GetConfig().Drive != consts.UploadDriveCos {
+	cfg, err := loadDirectUploadConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.Drive != consts.UploadDriveCos {
 		return nil, gerror.New("当前存储未启用腾讯COS直传")
 	}
 	if err := in.MediaUploadInp.Filter(ctx); err != nil {
@@ -92,7 +103,6 @@ func (s *sSysPublish) createMediaDirectUpload(ctx context.Context, in *sysin.Med
 	if in.FileSize <= 0 {
 		return nil, gerror.New("文件大小不合法")
 	}
-	cfg := storager.GetConfig()
 	if in.MediaType == "video" && cfg.FileSize > 0 && in.FileSize > cfg.FileSize*1024*1024 {
 		return nil, gerror.Newf("视频大小不能超过%vMB", cfg.FileSize)
 	}
@@ -113,9 +123,13 @@ func (s *sSysPublish) createMediaDirectUpload(ctx context.Context, in *sysin.Med
 	if err != nil {
 		return nil, err
 	}
-	key := storager.GenFullPath(storager.GetConfig().CosPath, "."+ext)
+	key := storager.GenFullPath(cfg.CosPath, "."+ext)
 	sessionId := grand.S(40)
-	session := &mediaDirectUploadSession{TenantId: tenantId, AccountId: accountId, UserId: contexts.GetUserId(ctx), Module: contexts.GetModule(ctx), Key: key, FileName: in.FileName, FileSize: in.FileSize, ContentType: in.ContentType, Media: in.MediaUploadInp}
+	session := &mediaDirectUploadSession{
+		TenantId: tenantId, AccountId: accountId, UserId: contexts.GetUserId(ctx), Module: contexts.GetModule(ctx),
+		Key: key, FileName: in.FileName, FileSize: in.FileSize, ContentType: in.ContentType,
+		Bucket: bucket, Region: region, ConfigDigest: directUploadConfigDigest(cfg), Media: in.MediaUploadInp,
+	}
 	if err = cache.Instance().Set(ctx, directUploadSessionPrefix+sessionId, session, directUploadSessionTTL); err != nil {
 		return nil, gerror.Wrap(err, "创建直传会话失败")
 	}
@@ -143,6 +157,10 @@ func (s *sSysPublish) signMediaDirectUpload(ctx context.Context, in *sysin.Media
 		return nil, err
 	}
 	if err = verifyDirectUploadIdentity(ctx, session, admin); err != nil {
+		return nil, err
+	}
+	cfg, err := validateDirectUploadConfig(ctx, session)
+	if err != nil {
 		return nil, err
 	}
 	method := strings.ToUpper(strings.TrimSpace(in.Method))
@@ -176,11 +194,11 @@ func (s *sSysPublish) signMediaDirectUpload(ctx context.Context, in *sysin.Media
 			headers.Add(key, value)
 		}
 	}
-	client, err := storager.NewCosClient()
+	client, err := storager.NewCosClientWithConfig(cfg)
 	if err != nil {
 		return nil, err
 	}
-	sign := client.Object.GetSignature(ctx, method, requestKey, storager.GetConfig().CosSecretId, storager.GetConfig().CosSecretKey, 5*time.Minute, &cos.PresignedURLOptions{Query: &query, Header: &headers})
+	sign := client.Object.GetSignature(ctx, method, requestKey, cfg.CosSecretId, cfg.CosSecretKey, 5*time.Minute, &cos.PresignedURLOptions{Query: &query, Header: &headers})
 	if sign == "" {
 		return nil, gerror.New("生成COS上传签名失败")
 	}
@@ -232,16 +250,24 @@ func (s *sSysPublish) completeMediaDirectUpload(ctx context.Context, in *sysin.M
 	if err = verifyDirectUploadIdentity(ctx, session, admin); err != nil {
 		return nil, err
 	}
+	cfg, err := validateDirectUploadConfig(ctx, session)
+	if err != nil {
+		return nil, err
+	}
 	logStage("session")
 	if session.MediaId > 0 {
 		return s.mediaViewById(ctx, session.MediaId)
 	}
-	client, err := storager.NewCosClient()
+	client, err := storager.NewCosClientWithConfig(cfg)
 	if err != nil {
 		return nil, err
 	}
 	head, err := client.Object.Head(ctx, session.Key, nil)
 	if err != nil {
+		g.Log().Warning(ctx, "COS直传文件校验失败", g.Map{
+			"sessionId": in.SessionId, "bucket": session.Bucket, "region": session.Region,
+			"key": session.Key, "tenantId": session.TenantId, "accountId": session.AccountId, "error": err.Error(),
+		})
 		return nil, gerror.Wrap(err, "校验COS直传文件失败")
 	}
 	if head.ContentLength != session.FileSize {
@@ -284,6 +310,43 @@ func (s *sSysPublish) completeMediaDirectUpload(ctx context.Context, in *sysin.M
 		g.Log().Warningf(ctx, "直传媒体处理任务入队失败 media_id:%d err:%+v", media.Id, err)
 	}
 	return media, nil
+}
+
+func loadDirectUploadConfig(ctx context.Context) (*model.UploadConfig, error) {
+	cfg, err := isc.SysConfig().GetUpload(ctx)
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取COS直传配置失败")
+	}
+	if cfg == nil {
+		return nil, gerror.New("COS直传配置不存在")
+	}
+	return cfg, nil
+}
+
+func validateDirectUploadConfig(ctx context.Context, session *mediaDirectUploadSession) (*model.UploadConfig, error) {
+	cfg, err := loadDirectUploadConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	bucket, region, err := directUploadBucketRegionFromConfig(cfg.CosBucket, cfg.CosRegion, cfg.CosBucketURL, cfg.CosPublicURL)
+	if err != nil {
+		return nil, err
+	}
+	if session.ConfigDigest == "" || session.ConfigDigest != directUploadConfigDigest(cfg) || session.Bucket != bucket || session.Region != region {
+		return nil, gerror.New("COS存储配置已更新，请重新选择文件上传")
+	}
+	return cfg, nil
+}
+
+func directUploadConfigDigest(cfg *model.UploadConfig) string {
+	if cfg == nil {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(strings.Join([]string{
+		strings.TrimSpace(cfg.Drive), strings.TrimSpace(cfg.CosBucket), strings.TrimSpace(cfg.CosRegion),
+		strings.TrimSpace(cfg.CosBucketURL), strings.TrimSpace(cfg.CosSecretId), strings.TrimSpace(cfg.CosSecretKey),
+	}, "\x00")))
+	return hex.EncodeToString(sum[:])
 }
 
 func loadMediaDirectUploadSession(ctx context.Context, sessionId string) (*mediaDirectUploadSession, error) {

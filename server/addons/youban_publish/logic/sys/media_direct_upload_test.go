@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"hotgo/internal/library/storager"
+	"hotgo/internal/model"
 )
 
 func TestDirectUploadBucketRegion(t *testing.T) {
@@ -91,5 +92,26 @@ func TestDirectUploadExtensionUsesStoragerFormat(t *testing.T) {
 	}
 	if ext := storager.Ext("example.MP4"); ext != "mp4" || !storager.IsVideoType(ext) {
 		t.Fatalf("expected MP4 extension to pass video validation, got %q", ext)
+	}
+}
+
+func TestDirectUploadConfigDigestChangesWithBucketOrCredentials(t *testing.T) {
+	base := &model.UploadConfig{
+		Drive: "cos", CosBucket: "bucket-1", CosRegion: "ap-singapore",
+		CosBucketURL: "https://bucket-1.cos.ap-singapore.myqcloud.com",
+		CosSecretId:  "secret-id", CosSecretKey: "secret-key",
+	}
+	if directUploadConfigDigest(base) == "" {
+		t.Fatal("expected non-empty config digest")
+	}
+	changedBucket := *base
+	changedBucket.CosBucket = "bucket-2"
+	if directUploadConfigDigest(base) == directUploadConfigDigest(&changedBucket) {
+		t.Fatal("bucket change must invalidate direct upload session")
+	}
+	changedSecret := *base
+	changedSecret.CosSecretKey = "rotated-secret-key"
+	if directUploadConfigDigest(base) == directUploadConfigDigest(&changedSecret) {
+		t.Fatal("credential change must invalidate direct upload session")
 	}
 }
