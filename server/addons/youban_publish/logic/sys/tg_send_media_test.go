@@ -27,8 +27,14 @@ func TestTelegramMediaRemoteURLSelection(t *testing.T) {
 
 func TestTelegramRemoteURLFallbackIsDeterministic(t *testing.T) {
 	media := &telegramMediaItem{FileUrl: "https://cdn.example/media/video.mp4"}
-	if !telegramMediaCanFallbackToUpload(media, errors.New("Bad Request: failed to get HTTP URL content")) {
-		t.Fatal("explicit Telegram URL rejection should fall back to multipart")
+	for _, message := range []string{
+		"Bad Request: failed to get HTTP URL content",
+		`Bad Request: failed to send message #1 with the error message "WEBPAGE_CURL_FAILED"`,
+		`Bad Request: failed to send message #1 with the error message "WEBPAGE_MEDIA_EMPTY"`,
+	} {
+		if !telegramMediaCanFallbackToUpload(media, errors.New(message)) {
+			t.Fatalf("explicit Telegram URL rejection should fall back to multipart: %s", message)
+		}
 	}
 	for _, err := range []error{context.DeadlineExceeded, errors.New("unexpected EOF"), errors.New("connection reset by peer")} {
 		if telegramMediaCanFallbackToUpload(media, err) {

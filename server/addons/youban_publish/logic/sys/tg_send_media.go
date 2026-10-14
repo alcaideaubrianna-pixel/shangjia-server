@@ -849,6 +849,8 @@ func isTelegramRemoteURLRejectedError(err error) bool {
 	message := strings.ToLower(err.Error())
 	for _, part := range []string{
 		"failed to get http url content",
+		"webpage_curl_failed",
+		"webpage_media_empty",
 		"wrong file identifier/http url specified",
 		"wrong type of the web page content",
 		"wrong content type",
