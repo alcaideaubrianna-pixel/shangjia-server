@@ -30,3 +30,22 @@ func TestTelegramDeliveryStepsForPhase(t *testing.T) {
 		})
 	}
 }
+
+func TestTelegramDeliveryStepForAttempt(t *testing.T) {
+	tests := []struct {
+		phase, attemptStatus string
+		step, status         string
+	}{
+		{phase: "display", attemptStatus: telegramAttemptStatusSending, step: telegramDeliveryStepDisplay, status: telegramDeliveryStepRunning},
+		{phase: "verify", attemptStatus: telegramAttemptStatusWaiting, step: telegramDeliveryStepVerify, status: telegramDeliveryStepConfirming},
+		{phase: "verify", attemptStatus: telegramAttemptStatusConfirmed, step: telegramDeliveryStepVerify, status: telegramDeliveryStepSucceeded},
+		{phase: "display", attemptStatus: telegramAttemptStatusRetryWait, step: telegramDeliveryStepDisplay, status: telegramDeliveryStepRetryWait},
+		{phase: "cleanup", attemptStatus: telegramAttemptStatusSending},
+	}
+	for _, test := range tests {
+		step, status := telegramDeliveryStepForAttempt(telegramDeliveryAttempt{Phase: test.phase, Status: test.attemptStatus})
+		if step != test.step || status != test.status {
+			t.Fatalf("phase=%s attempt=%s got=(%s,%s), want=(%s,%s)", test.phase, test.attemptStatus, step, status, test.step, test.status)
+		}
+	}
+}

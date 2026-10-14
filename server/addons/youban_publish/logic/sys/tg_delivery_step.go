@@ -17,10 +17,13 @@ const (
 	telegramDeliveryStepVerify   = "verify"
 	telegramDeliveryStepFinalize = "finalize"
 
-	telegramDeliveryStepPending   = "pending"
-	telegramDeliveryStepRunning   = "running"
-	telegramDeliveryStepSucceeded = "succeeded"
-	telegramDeliveryStepSkipped   = "skipped"
+	telegramDeliveryStepPending    = "pending"
+	telegramDeliveryStepRunning    = "running"
+	telegramDeliveryStepConfirming = "confirming"
+	telegramDeliveryStepSucceeded  = "succeeded"
+	telegramDeliveryStepRetryWait  = "retry_wait"
+	telegramDeliveryStepCanceled   = "canceled"
+	telegramDeliveryStepSkipped    = "skipped"
 )
 
 type telegramDeliveryStepProjection struct {
@@ -88,13 +91,68 @@ func (s *sSysPublish) projectTelegramDeliverySteps(ctx context.Context, jobId in
 		if step.Status == telegramDeliveryStepSucceeded || step.Status == telegramDeliveryStepSkipped {
 			data["confirmed_at"] = now
 		}
+		duplicateFields := "status,updated_at"
+		if step.Status == telegramDeliveryStepRunning {
+			duplicateFields += ",started_at"
+		}
+		if step.Status == telegramDeliveryStepSucceeded || step.Status == telegramDeliveryStepSkipped {
+			duplicateFields += ",confirmed_at"
+		}
 		if _, err := g.DB().Model(publishTgDeliveryStepTable).Safe().Ctx(ctx).
 			Data(data).
 			OnConflict("job_id,step_key").
-			OnDuplicate("status,started_at,confirmed_at,updated_at").
+			OnDuplicate(duplicateFields).
 			Save(); err != nil {
 			return gerror.Wrapf(err, "投影TG发送步骤失败 jobId:%d step:%s", jobId, step.StepKey)
 		}
 	}
 	return nil
+}
+
+func telegramDeliveryStepForAttempt(attempt telegramDeliveryAttempt) (string, string) {
+	stepKey := strings.TrimSpace(attempt.Phase)
+	if stepKey != telegramDeliveryStepDisplay && stepKey != telegramDeliveryStepVerify {
+		return "", ""
+	}
+	status := map[string]string{
+		telegramAttemptStatusSending:    telegramDeliveryStepRunning,
+		telegramAttemptStatusWaiting:    telegramDeliveryStepConfirming,
+		telegramAttemptStatusConfirmed:  telegramDeliveryStepSucceeded,
+		telegramAttemptStatusRetryWait:  telegramDeliveryStepRetryWait,
+		telegramAttemptStatusSuperseded: telegramDeliveryStepCanceled,
+	}[strings.TrimSpace(attempt.Status)]
+	return stepKey, status
+}
+
+func (s *sSysPublish) projectTelegramDeliveryAttempt(ctx context.Context, attempt telegramDeliveryAttempt, message string) {
+	stepKey, status := telegramDeliveryStepForAttempt(attempt)
+	if attempt.Id <= 0 || attempt.JobId <= 0 || stepKey == "" || status == "" {
+		return
+	}
+	now := gtime.Now()
+	data := g.Map{
+		"job_id": attempt.JobId, "step_key": stepKey, "status": status,
+		"attempt_id": attempt.Id, "error_message": strings.TrimSpace(message),
+		"created_at": now, "updated_at": now,
+	}
+	if status == telegramDeliveryStepRunning {
+		data["started_at"] = now
+	}
+	if status == telegramDeliveryStepSucceeded {
+		data["confirmed_at"] = now
+	}
+	duplicateFields := "status,attempt_id,error_message,updated_at"
+	if status == telegramDeliveryStepRunning {
+		duplicateFields += ",started_at"
+	}
+	if status == telegramDeliveryStepSucceeded {
+		duplicateFields += ",confirmed_at"
+	}
+	if _, err := g.DB().Model(publishTgDeliveryStepTable).Safe().Ctx(ctx).
+		Data(data).
+		OnConflict("job_id,step_key").
+		OnDuplicate(duplicateFields).
+		Save(); err != nil {
+		g.Log().Warningf(ctx, "投影TG Attempt步骤失败 jobId:%d attemptId:%d step:%s status:%s err:%+v", attempt.JobId, attempt.Id, stepKey, status, err)
+	}
 }

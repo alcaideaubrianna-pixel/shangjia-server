@@ -187,6 +187,8 @@ func (s *sSysPublish) recoverStaleSendingTelegramAttempts(ctx context.Context, l
 		if !updated {
 			continue
 		}
+		attempt.Status = telegramAttemptStatusWaiting
+		s.projectTelegramDeliveryAttempt(ctx, attempt, "发送进程中断，等待Webhook或协议号对账")
 		if _, updateErr = s.enqueueTelegramAttemptTimeout(ctx, attempt.Id, 0); updateErr != nil {
 			g.Log().Warningf(ctx, "投递中断TG Attempt对账失败 attemptId:%d err:%+v", attempt.Id, updateErr)
 		}
