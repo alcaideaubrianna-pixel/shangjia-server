@@ -6,7 +6,7 @@ INSERT INTO "hg_admin_menu" (
 )
 SELECT
   root."id", 'Bot 管理', 'youbanBot', 'youbanBot', 'icon-park-outline:robot-one', 2,
-  '', '', '', '/addons/youbanBot/index', 1, '', 0,
+  '', '', '', '/addons/youbanBot/index', 0, '', 0,
   0, '', 1, 2, 0, 2, 'tr_' || root."id"::text || ' ',
   34, '全局机器人插件后台', 1, NOW(), NOW()
 FROM (SELECT "id" FROM "hg_admin_menu" WHERE "name" = 'addons' LIMIT 1) root
@@ -22,7 +22,7 @@ SET "title" = 'Bot 管理',
     "permissions" = '',
     "permission_name" = '',
     "component" = '/addons/youbanBot/index',
-    "always_show" = 1,
+    "always_show" = 0,
     "active_menu" = '',
     "is_root" = 0,
     "is_frame" = 0,
@@ -78,18 +78,18 @@ INSERT INTO "hg_admin_menu" (
   "sort", "remark", "status", "created_at", "updated_at"
 )
 SELECT
-  parent."id", '推送记录', 'youbanBotBroadcastRecords', 'broadcast-records', '', 2,
+  parent."id", '推送记录权限', 'youbanBotBroadcastRecords', '', '', 3,
   '', '/youban_bot/bot/broadcast/list,/youban_bot/bot/broadcast/recipient/list', '',
-  '/addons/youbanBot/broadcast-records', 0, 'youbanBot', 0, 0, '', 0, 2, 0, 3,
+  '', 0, 'youbanBot', 0, 0, '', 0, 1, 0, 3,
   parent."tree" || 'tr_' || parent."id"::text || ' ', 9, '全局Bot推送记录', 1, NOW(), NOW()
 FROM (SELECT "id", "tree" FROM "hg_admin_menu" WHERE "name" = 'youbanBot' LIMIT 1) parent
 WHERE NOT EXISTS (SELECT 1 FROM "hg_admin_menu" WHERE "name" = 'youbanBotBroadcastRecords');
 
 UPDATE "hg_admin_menu"
-SET "title" = '推送记录', "path" = 'broadcast-records',
+SET "title" = '推送记录权限', "path" = '', "type" = 3, "always_show" = 0,
     "permissions" = '/youban_bot/bot/broadcast/list,/youban_bot/bot/broadcast/recipient/list',
-    "component" = '/addons/youbanBot/broadcast-records', "active_menu" = 'youbanBot',
-    "hidden" = 2, "status" = 1, "updated_at" = NOW()
+    "component" = '', "active_menu" = 'youbanBot',
+    "hidden" = 1, "status" = 1, "updated_at" = NOW()
 WHERE "name" = 'youbanBotBroadcastRecords';
 
 INSERT INTO "hg_admin_role_menu" ("role_id", "menu_id")

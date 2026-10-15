@@ -31,12 +31,15 @@ func (s *sSysBot) handleRelayCommand(ctx context.Context, cfg *entity.YoubanBotR
 		return err
 	}
 	if cmd.Name == "/help" {
-		text := relayPublicHelp
-		if admin {
-			text = relayAdminHelp
+		if !admin {
+			return s.relayReply(ctx, cfg.BotId, msg, "仅配置的管理员可以查看双向机器人帮助。")
 		}
-		return s.relayReply(ctx, cfg.BotId, msg, text)
+		if msg.Chat.Type != models.ChatTypePrivate {
+			return s.relayReply(ctx, cfg.BotId, msg, "请在机器人私聊中查看管理帮助。")
+		}
+		return s.relayReply(ctx, cfg.BotId, msg, relayAdminHelp)
 	}
+
 	if !admin {
 		return s.relayReply(ctx, cfg.BotId, msg, "仅配置的管理员可以执行此命令。")
 	}
@@ -116,7 +119,11 @@ func (s *sSysBot) executeRelayCommand(ctx context.Context, cfg *entity.YoubanBot
 		if cfg.BlockLinks == 1 {
 			jump = "开启"
 		}
-		return fmt.Sprintf("双向功能：启用\n屏蔽跳转：%s\n附加管理员：%d\n双向绑定：%d", jump, admins, bindings), nil
+		state := "停用"
+		if cfg.Enabled == 1 {
+			state = "启用"
+		}
+		return fmt.Sprintf("双向功能：%s\n屏蔽跳转：%s\n附加管理员：%d\n双向绑定：%d", state, jump, admins, bindings), nil
 	case "绑定列表", "屏蔽列表", "黑名单":
 		return s.relayCommandList(ctx, cfg.BotId, cmd)
 	}

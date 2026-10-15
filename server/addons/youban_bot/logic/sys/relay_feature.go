@@ -60,6 +60,13 @@ func (f *relayGatewayFeature) Menus(ctx context.Context, bc gatewayservice.BotCo
 			}
 			cfg, err := f.bot.relayScope(ctx, binding.ReferenceID)
 			if err == nil && cfg != nil {
+				filtered := items[:0]
+				for _, item := range items {
+					if item.Command != "help" {
+						filtered = append(filtered, item)
+					}
+				}
+				items = filtered
 				items = append(items, gatewayservice.MenuItem{Command: "help", Description: "双向聊天帮助", Order: 90}, gatewayservice.MenuItem{Command: "id", Description: "查看聊天ID", Order: 91})
 			}
 			return gatewayservice.FeatureMenus{Managed: true, Items: items}, nil

@@ -41,7 +41,7 @@ func TestRelayMissingMigrationDoesNotDisableMainBot(t *testing.T) {
 	}
 	feature := &relayGatewayFeature{bot: s}
 	menus, err := feature.Menus(ctx, gatewayservice.BotContext{Bindings: []gatewayservice.BotBinding{{Owner: "youban_bot", ReferenceID: 1}}})
-	if err != nil || !relayMenuHas(menus, "start") || relayMenuHas(menus, "help") {
+	if err != nil || !relayMenuHas(menus, "start") || !relayMenuHas(menus, "help") {
 		t.Fatalf("main Bot menu hijacked: %+v %v", menus, err)
 	}
 }
@@ -65,7 +65,15 @@ func TestRelayHelpOnlyBelongsToConfiguredBot(t *testing.T) {
 		if !relayMenuHas(menus, "start") {
 			t.Fatal("main start command lost")
 		}
-		if id == 1 && relayMenuHas(menus, "help") {
+		for _, item := range menus.Items {
+			if item.Command == "help" && ((id == 1 && item.Description != "主机器人帮助") || (id == 2 && item.Description != "双向聊天帮助")) {
+				t.Fatalf("wrong scoped help: %+v", item)
+			}
+		}
+		if !relayMenuHas(menus, "relayadmin") {
+			t.Fatal("management command missing")
+		}
+		if id == 1 && !relayMenuHas(menus, "help") {
 			t.Fatalf("help registered on main Bot: %+v", menus)
 		}
 		if id == 2 && (!menus.Managed || !relayMenuHas(menus, "help") || !relayMenuHas(menus, "id")) {
