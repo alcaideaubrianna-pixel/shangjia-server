@@ -83,6 +83,8 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 		searchItems = append(searchItems, &cloned)
 	}
 	seenHashes := make(map[string]struct{}, len(searchItems))
+	notesById := make(map[int64]*sysin.NoteModel)
+	orderedProfileIds := make([]int64, 0, botMediaSearchMaxResults)
 	coldItems := make([]*sysin.BotMediaSearchItem, 0, len(searchItems))
 	// First search every fingerprint already available in Redis. This phase does
 	// not download Telegram media and usually resolves forwarded/published media
@@ -93,13 +95,11 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 			coldItems = append(coldItems, item)
 			continue
 		}
-		list, total, found, searchErr := s.botMediaSearchFingerprint(ctx, fingerprint, searchIn, searchScope, seenHashes)
+		list, _, _, searchErr := s.botMediaSearchFingerprint(ctx, fingerprint, searchIn, searchScope, seenHashes)
 		if searchErr != nil {
 			return nil, 0, searchErr
 		}
-		if found {
-			return list, total, nil
-		}
+		orderedProfileIds = mergeBotMediaSearchNotes(notesById, orderedProfileIds, list)
 	}
 	// Download and decode cold fingerprints concurrently, then search them in
 	// the original message order so concurrency cannot change result priority.
@@ -115,18 +115,38 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 			continue
 		}
 		coldProcessed = true
-		list, total, found, searchErr := s.botMediaSearchFingerprint(ctx, result.fingerprint, searchIn, searchScope, seenHashes)
+		list, _, _, searchErr := s.botMediaSearchFingerprint(ctx, result.fingerprint, searchIn, searchScope, seenHashes)
 		if searchErr != nil {
 			return nil, 0, searchErr
 		}
-		if found {
-			return list, total, nil
-		}
+		orderedProfileIds = mergeBotMediaSearchNotes(notesById, orderedProfileIds, list)
 	}
-	if lastHashErr != nil && !coldProcessed {
+	if lastHashErr != nil && !coldProcessed && len(orderedProfileIds) == 0 {
 		return nil, 0, lastHashErr
 	}
-	return []*sysin.NoteModel{}, 0, nil
+	total := len(orderedProfileIds)
+	if len(orderedProfileIds) > botMediaSearchMaxResults {
+		orderedProfileIds = orderedProfileIds[:botMediaSearchMaxResults]
+	}
+	list := make([]*sysin.NoteModel, 0, len(orderedProfileIds))
+	for _, profileId := range orderedProfileIds {
+		list = append(list, notesById[profileId])
+	}
+	return list, total, nil
+}
+
+func mergeBotMediaSearchNotes(notesById map[int64]*sysin.NoteModel, orderedProfileIds []int64, list []*sysin.NoteModel) []int64 {
+	for _, note := range list {
+		if note == nil || note.Id <= 0 {
+			continue
+		}
+		if _, exists := notesById[note.Id]; exists {
+			continue
+		}
+		notesById[note.Id] = note
+		orderedProfileIds = append(orderedProfileIds, note.Id)
+	}
+	return orderedProfileIds
 }
 
 func loadBotMediaColdFingerprints(ctx context.Context, traceId string, items []*sysin.BotMediaSearchItem, loader botMediaColdFingerprintLoader) []botMediaColdFingerprintResult {

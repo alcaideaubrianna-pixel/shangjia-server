@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"reflect"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -14,6 +15,15 @@ import (
 func TestBotMediaSearchResultLimitIsBounded(t *testing.T) {
 	if botMediaSearchMaxResults <= 0 || botMediaSearchMaxResults > 20 {
 		t.Fatalf("unexpected bot media search result limit: %d", botMediaSearchMaxResults)
+	}
+}
+
+func TestMergeBotMediaSearchNotesDeduplicatesProfiles(t *testing.T) {
+	notesById := make(map[int64]*sysin.NoteModel)
+	ids := mergeBotMediaSearchNotes(notesById, nil, []*sysin.NoteModel{{ProfileModel: sysin.ProfileModel{Id: 11}}, {ProfileModel: sysin.ProfileModel{Id: 22}}, {ProfileModel: sysin.ProfileModel{Id: 11}}, nil})
+	ids = mergeBotMediaSearchNotes(notesById, ids, []*sysin.NoteModel{{ProfileModel: sysin.ProfileModel{Id: 22}}, {ProfileModel: sysin.ProfileModel{Id: 33}}})
+	if !reflect.DeepEqual(ids, []int64{11, 22, 33}) {
+		t.Fatalf("merged profile ids: got %v", ids)
 	}
 }
 
