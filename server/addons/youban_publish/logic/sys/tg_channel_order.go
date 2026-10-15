@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -59,7 +60,10 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 	if job.ChannelId > 0 {
 		mod = mod.Where("j.channel_id", job.ChannelId)
 	} else {
-		mod = mod.Where("j.target_chat_id", normalizeTelegramChannelChatID(job.TargetChatId))
+		mod = mod.Where(
+			"REPLACE(COALESCE(j.target_chat_id, ''), '-100', '') = ?",
+			telegramChannelOrderChatKey(job.TargetChatId),
+		)
 	}
 	// A destination channel is a single ordered stream. Source message IDs are
 	// only comparable within one source channel, so using them here lets jobs
@@ -77,6 +81,10 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 		return false, gerror.Wrap(err, "检查频道前序TG任务失败")
 	}
 	return !earlier.IsEmpty(), nil
+}
+
+func telegramChannelOrderChatKey(chatID string) string {
+	return strings.TrimPrefix(normalizeTelegramChannelChatID(chatID), "-100")
 }
 
 func telegramJobRequiresChannelCompletionPriority(sendPhase string) bool {

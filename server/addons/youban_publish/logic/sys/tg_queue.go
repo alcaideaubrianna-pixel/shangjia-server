@@ -303,6 +303,10 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 		data["next_retry_at"] = nil
 	}
 	reserved, err := s.withTelegramChannelDispatchLease(ctx, job, func() (bool, error) {
+		hasEarlier, orderErr := s.telegramChannelHasEarlierActiveJob(ctx, job)
+		if orderErr != nil || hasEarlier {
+			return false, orderErr
+		}
 		hasCapacity, capacityErr := s.telegramChannelHasDispatchCapacity(ctx, job)
 		if capacityErr != nil || !hasCapacity {
 			return false, capacityErr

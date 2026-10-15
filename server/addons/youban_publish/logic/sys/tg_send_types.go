@@ -76,6 +76,7 @@ type telegramJobRecord struct {
 	DispatchedAt           *gtime.Time `json:"dispatchedAt"`
 	DispatchCount          int         `json:"dispatchCount"`
 	LastDispatchError      string      `json:"lastDispatchError"`
+	NextRetryAt            *gtime.Time `json:"nextRetryAt"`
 	SendPhase              string      `json:"sendPhase"`
 	ReconcileCount         int         `json:"reconcileCount"`
 	ErrorMessage           string      `json:"errorMessage"`

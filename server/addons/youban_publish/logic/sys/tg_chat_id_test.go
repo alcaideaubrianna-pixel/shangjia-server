@@ -16,6 +16,16 @@ func TestNormalizeTelegramChannelChatID(t *testing.T) {
 	}
 }
 
+func TestTelegramChannelOrderChatKeyTreatsLegacyIDsAsSameChannel(t *testing.T) {
+	const rawID = "3715905169"
+	if got := telegramChannelOrderChatKey(rawID); got != rawID {
+		t.Fatalf("legacy channel key=%q, want %q", got, rawID)
+	}
+	if got := telegramChannelOrderChatKey("-100" + rawID); got != rawID {
+		t.Fatalf("prefixed channel key=%q, want %q", got, rawID)
+	}
+}
+
 func TestTelegramChannelLookupIDsAcceptBothForms(t *testing.T) {
 	for _, input := range []string{"123456789012", "-100123456789012"} {
 		got := tgChannelCacheLookupIds(input)

@@ -21,6 +21,10 @@ const (
 	telegramOutboxDelivered    = "delivered"
 	telegramOutboxLeaseTTL     = 30 * time.Second
 	telegramOutboxQueryTimeout = 5 * time.Second
+
+	telegramOutboxDecisionWait     = "wait"
+	telegramOutboxDecisionDispatch = "dispatch"
+	telegramOutboxDecisionComplete = "complete"
 )
 
 type telegramJobOutboxRecord struct {
@@ -99,6 +103,18 @@ func telegramJobOutboxRecordFromRecord(record gdb.Record) telegramJobOutboxRecor
 }
 
 func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegramJobOutboxRecord) error {
+	decision, err := s.telegramOutboxJobDispatchDecision(ctx, row.JobId, gtime.Now())
+	if err != nil {
+		return err
+	}
+	switch decision {
+	case telegramOutboxDecisionComplete:
+		return s.completeTelegramOutbox(ctx, row.Id)
+	case telegramOutboxDecisionWait:
+		// A later channel job keeps its durable pending intent. Do not lease it,
+		// increment attempts, or move available_at while the real head is active.
+		return nil
+	}
 	owner := telegramOutboxOwner()
 	now := gtime.Now()
 	result, err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
@@ -146,6 +162,58 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 		return gerror.Wrap(err, "确认TG任务Outbox投递失败")
 	}
 	return nil
+}
+
+func (s *sSysPublish) completeTelegramOutbox(ctx context.Context, outboxId int64) error {
+	if outboxId <= 0 {
+		return nil
+	}
+	_, err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
+		Where("id", outboxId).WhereNot("status", telegramOutboxDelivered).
+		Data(g.Map{
+			"status": telegramOutboxDelivered, "lease_owner": "", "lease_expires_at": nil,
+			"delivered_at": gtime.Now(), "last_error": "", "updated_at": gtime.Now(),
+		}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "收口TG任务Outbox失败")
+	}
+	return nil
+}
+
+func (s *sSysPublish) telegramOutboxJobDispatchDecision(ctx context.Context, jobId int64, now *gtime.Time) (string, error) {
+	if jobId <= 0 {
+		return telegramOutboxDecisionComplete, nil
+	}
+	var job telegramJobRecord
+	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Fields("id,tenant_id,channel_id,target_chat_id,status,dispatch_status,next_retry_at,send_phase,created_at").
+		Where("id", jobId).Scan(&job); err != nil {
+		return "", gerror.Wrap(err, "读取TG任务Outbox关联任务失败")
+	}
+	if job.Id <= 0 {
+		return telegramOutboxDecisionComplete, nil
+	}
+	if !telegramOutboxJobStillNeedsDispatch(job.Status, job.DispatchStatus) {
+		return telegramOutboxDecisionComplete, nil
+	}
+	if now == nil {
+		now = gtime.Now()
+	}
+	hasEarlier, err := s.telegramChannelHasEarlierActiveJob(ctx, job)
+	if err != nil {
+		return "", err
+	}
+	return telegramOutboxDispatchDecision(job.Status, job.DispatchStatus, job.NextRetryAt, now, hasEarlier), nil
+}
+
+func telegramOutboxDispatchDecision(status, dispatchStatus string, nextRetryAt, now *gtime.Time, hasEarlier bool) string {
+	if !telegramOutboxJobStillNeedsDispatch(status, dispatchStatus) {
+		return telegramOutboxDecisionComplete
+	}
+	if hasEarlier || (nextRetryAt != nil && now != nil && nextRetryAt.After(now)) {
+		return telegramOutboxDecisionWait
+	}
+	return telegramOutboxDecisionDispatch
 }
 
 func telegramOutboxJobStillNeedsDispatch(status, dispatchStatus string) bool {
@@ -206,7 +274,8 @@ func (s *sSysPublish) dueTelegramJobOutboxRows(ctx context.Context, limit int, n
 		query := telegramDueOutboxPostgresSQL()
 		var rows []telegramJobOutboxRecord
 		if err := g.DB().GetScan(queryCtx, &rows, query,
-			telegramOutboxEventPublish, now, telegramOutboxPending, telegramOutboxProcessing, now, limit,
+			now, telegramOutboxEventPublish, now,
+			telegramOutboxPending, telegramOutboxProcessing, now, limit,
 		); err != nil {
 			return nil, gerror.Wrap(err, "读取每频道待投递TG任务Outbox失败")
 		}
@@ -228,22 +297,56 @@ func (s *sSysPublish) dueTelegramJobOutboxRows(ctx context.Context, limit int, n
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取待投递TG任务Outbox失败")
 	}
-	return fairTelegramOutboxRows(candidates, limit), nil
+	fairRows := fairTelegramOutboxRows(candidates, candidateLimit)
+	rows := make([]telegramJobOutboxRecord, 0, min(limit, len(fairRows)))
+	for _, row := range fairRows {
+		decision, checkErr := s.telegramOutboxJobDispatchDecision(queryCtx, row.JobId, now)
+		if checkErr != nil {
+			return nil, checkErr
+		}
+		if decision != telegramOutboxDecisionDispatch {
+			continue
+		}
+		rows = append(rows, row)
+		if len(rows) >= limit {
+			break
+		}
+	}
+	return rows, nil
 }
 
 func telegramDueOutboxPostgresSQL() string {
 	channelKey := "CASE WHEN j.channel_id > 0 THEN j.channel_id::text ELSE 'chat:' || REPLACE(COALESCE(j.target_chat_id,''), '-100', '') END"
-	return `SELECT id,job_id,attempt_count,available_at,tenant_id,channel_id,target_chat_id
-	FROM (
+	return `WITH channel_job_heads AS (
 		SELECT DISTINCT ON (j.tenant_id, ` + channelKey + `)
-			o.id,o.job_id,o.attempt_count,o.available_at,j.tenant_id,j.channel_id,j.target_chat_id
-		FROM ` + publishTgOutboxTable + ` o
-		JOIN ` + publishTgJobTable + ` j ON j.id=o.job_id
-		WHERE o.event_type=? AND o.available_at<=?
-			AND (o.status=? OR (o.status=? AND o.lease_expires_at<=?))
-		ORDER BY j.tenant_id, ` + channelKey + `, o.available_at, o.id
-	) channel_heads
-	ORDER BY available_at,id
+			j.id AS job_id,j.tenant_id,j.channel_id,j.target_chat_id,j.status,j.dispatch_status,j.next_retry_at,j.created_at
+		FROM ` + publishTgJobTable + ` j
+		WHERE j.status IN ('pending','failed_retry','unknown','sending')
+		ORDER BY j.tenant_id, ` + channelKey + `, j.created_at, j.id
+	)
+	SELECT o.id,o.job_id,o.attempt_count,o.available_at,h.tenant_id,h.channel_id,h.target_chat_id
+	FROM channel_job_heads h
+	JOIN ` + publishTgOutboxTable + ` o ON o.job_id=h.job_id
+	WHERE h.status IN ('pending','failed_retry','unknown')
+		AND COALESCE(h.dispatch_status,'') IN ('','idle')
+		AND (h.next_retry_at IS NULL OR h.next_retry_at<=?)
+		AND NOT EXISTS (
+			SELECT 1 FROM ` + publishTgJobTable + ` failed_head
+			WHERE failed_head.tenant_id=h.tenant_id
+				AND (
+					(h.channel_id>0 AND failed_head.channel_id=h.channel_id) OR
+					(h.channel_id<=0 AND failed_head.channel_id<=0 AND
+						REPLACE(COALESCE(failed_head.target_chat_id,''),'-100','')=
+						REPLACE(COALESCE(h.target_chat_id,''),'-100',''))
+				)
+				AND failed_head.status='failed'
+				AND failed_head.send_phase='display_confirmed'
+				AND (failed_head.created_at<h.created_at OR
+					(failed_head.created_at=h.created_at AND failed_head.id<h.job_id))
+		)
+		AND o.event_type=? AND o.available_at<=?
+		AND (o.status=? OR (o.status=? AND o.lease_expires_at<=?))
+	ORDER BY o.available_at,o.id
 	LIMIT ?`
 }
 

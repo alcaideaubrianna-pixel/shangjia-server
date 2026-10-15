@@ -1,12 +1,17 @@
 package sys
 
 import (
+	"context"
+	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gogf/gf/v2/container/gvar"
 	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 )
 
 func TestTelegramJobOutboxRecordFromRecordAllowsMissingLegacyOutbox(t *testing.T) {
@@ -25,16 +30,36 @@ func TestTelegramJobOutboxRecordFromRecordAllowsMissingLegacyOutbox(t *testing.T
 
 func TestTelegramDueOutboxPostgresSQLSelectsChannelHeads(t *testing.T) {
 	query := telegramDueOutboxPostgresSQL()
-	for _, fragment := range []string{"DISTINCT ON", "j.tenant_id", "j.channel_id", "target_chat_id", "ORDER BY available_at,id"} {
+	for _, fragment := range []string{
+		"WITH channel_job_heads AS", "DISTINCT ON", "j.tenant_id", "j.channel_id", "target_chat_id",
+		"j.status IN ('pending','failed_retry','unknown','sending')",
+		"ORDER BY j.tenant_id", "j.created_at, j.id",
+		"h.status IN ('pending','failed_retry','unknown')",
+		"COALESCE(h.dispatch_status,'') IN ('','idle')",
+		"h.next_retry_at IS NULL OR h.next_retry_at<=?",
+		"failed_head.status='failed'",
+		"failed_head.send_phase='display_confirmed'",
+		"REPLACE(COALESCE(failed_head.target_chat_id,''),'-100','')=",
+		"REPLACE(COALESCE(h.target_chat_id,''),'-100','')",
+		"failed_head.created_at<h.created_at",
+		"o.status=? OR (o.status=? AND o.lease_expires_at<=?)",
+		"ORDER BY o.available_at,o.id",
+	} {
 		if !strings.Contains(query, fragment) {
 			t.Fatalf("channel-head query missing %q: %s", fragment, query)
 		}
 	}
+	if got := strings.Count(query, "?"); got != 7 {
+		t.Fatalf("channel-head query placeholder count=%d, want 7: %s", got, query)
+	}
 }
 
-func TestTelegramOutboxQueryTimeoutIsBounded(t *testing.T) {
+func TestTelegramOutboxTimeoutsAreBounded(t *testing.T) {
 	if telegramOutboxQueryTimeout <= 0 || telegramOutboxQueryTimeout > 5*time.Second {
 		t.Fatalf("unexpected outbox query timeout: %s", telegramOutboxQueryTimeout)
+	}
+	if telegramOutboxLeaseTTL <= telegramOutboxQueryTimeout || telegramOutboxLeaseTTL > time.Minute {
+		t.Fatalf("unexpected outbox lease TTL: %s", telegramOutboxLeaseTTL)
 	}
 }
 
@@ -81,5 +106,127 @@ func TestTelegramOutboxJobStillNeedsDispatch(t *testing.T) {
 				t.Fatalf("telegramOutboxJobStillNeedsDispatch(%q, %q)=%t, want %t", test.status, test.dispatchStatus, got, test.want)
 			}
 		})
+	}
+}
+
+func TestTelegramOutboxDispatchDecisionRequiresDueIdleHead(t *testing.T) {
+	now := gtime.New(time.Now())
+	past := gtime.New(now.Add(-time.Second))
+	future := gtime.New(now.Add(time.Second))
+	tests := []struct {
+		name           string
+		status         string
+		dispatchStatus string
+		nextRetryAt    *gtime.Time
+		hasEarlier     bool
+		want           string
+	}{
+		{name: "pending channel head", status: telegramJobStatusPending, dispatchStatus: tgDispatchStatusIdle, want: telegramOutboxDecisionDispatch},
+		{name: "retry channel head due", status: telegramJobStatusRetryWait, dispatchStatus: "", nextRetryAt: past, want: telegramOutboxDecisionDispatch},
+		{name: "unknown channel head", status: telegramJobStatusConfirming, dispatchStatus: tgDispatchStatusIdle, want: telegramOutboxDecisionDispatch},
+		{name: "later outbox stays pending", status: telegramJobStatusPending, dispatchStatus: tgDispatchStatusIdle, hasEarlier: true, want: telegramOutboxDecisionWait},
+		{name: "retry not due", status: telegramJobStatusRetryWait, dispatchStatus: tgDispatchStatusIdle, nextRetryAt: future, want: telegramOutboxDecisionWait},
+		{name: "already queued completes outbox", status: telegramJobStatusPending, dispatchStatus: tgDispatchStatusQueued, want: telegramOutboxDecisionComplete},
+		{name: "already processing completes outbox", status: telegramJobStatusPending, dispatchStatus: tgDispatchStatusProcessing, want: telegramOutboxDecisionComplete},
+		{name: "terminal sent completes outbox", status: telegramJobStatusSent, dispatchStatus: tgDispatchStatusDone, want: telegramOutboxDecisionComplete},
+		{name: "terminal failed completes outbox", status: telegramJobStatusFailed, dispatchStatus: tgDispatchStatusDone, want: telegramOutboxDecisionComplete},
+		{name: "superseded completes outbox", status: telegramJobStatusSuperseded, dispatchStatus: tgDispatchStatusDone, want: telegramOutboxDecisionComplete},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := telegramOutboxDispatchDecision(test.status, test.dispatchStatus, test.nextRetryAt, now, test.hasEarlier)
+			if got != test.want {
+				t.Fatalf("telegramOutboxDispatchDecision()=%q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestTelegramDueOutboxChannelHeadAndLeaseIntegration(t *testing.T) {
+	if os.Getenv("YOUBAN_PUBLISH_INTEGRATION") != "1" {
+		t.Skip("set YOUBAN_PUBLISH_INTEGRATION=1 to run local PostgreSQL integration test")
+	}
+	ctx := context.Background()
+	seed := time.Now().UnixNano()
+	now := gtime.Now()
+	old := now.Add(-24 * time.Hour)
+
+	insertJob := func(channelOffset int64, status, dispatchStatus, sendPhase string, createdAt *gtime.Time) int64 {
+		t.Helper()
+		id, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Data(g.Map{
+			"operation_no": fmt.Sprintf("outbox-integration-%d-%d", seed, channelOffset),
+			"tenant_id":    seed, "channel_id": seed + channelOffset,
+			"target_chat_id": fmt.Sprintf("-100%d", seed+channelOffset),
+			"status":         status, "dispatch_status": dispatchStatus, "send_phase": sendPhase,
+			"created_at": createdAt, "updated_at": now,
+		}).InsertAndGetId()
+		if err != nil {
+			t.Fatalf("insert job: %v", err)
+		}
+		return id
+	}
+	insertOutbox := func(jobId int64, status string, leaseExpiresAt *gtime.Time, attemptCount int) int64 {
+		t.Helper()
+		id, err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).Data(g.Map{
+			"job_id": jobId, "event_type": telegramOutboxEventPublish,
+			"dedupe_key": fmt.Sprintf("outbox-integration-%d-%d", seed, jobId),
+			"status":     status, "attempt_count": attemptCount,
+			"available_at": old, "lease_expires_at": leaseExpiresAt,
+			"created_at": now, "updated_at": now,
+		}).InsertAndGetId()
+		if err != nil {
+			t.Fatalf("insert outbox: %v", err)
+		}
+		return id
+	}
+
+	queuedHead := insertJob(1, telegramJobStatusPending, tgDispatchStatusQueued, "", old)
+	laterSameChannel := insertJob(1, telegramJobStatusPending, tgDispatchStatusIdle, "", now)
+	expiredLeaseHead := insertJob(2, telegramJobStatusPending, tgDispatchStatusIdle, "", old)
+	activeLeaseHead := insertJob(3, telegramJobStatusPending, tgDispatchStatusIdle, "", old)
+	failedDisplayHead := insertJob(4, telegramJobStatusFailed, tgDispatchStatusDone, telegramSendPhaseDisplayConfirmed, old)
+	laterAfterFailedDisplay := insertJob(4, telegramJobStatusPending, tgDispatchStatusIdle, "", now)
+	unknownHead := insertJob(5, telegramJobStatusConfirming, tgDispatchStatusIdle, "", old)
+
+	jobIDs := []int64{queuedHead, laterSameChannel, expiredLeaseHead, activeLeaseHead, failedDisplayHead, laterAfterFailedDisplay, unknownHead}
+	outboxIDs := []int64{
+		insertOutbox(queuedHead, telegramOutboxPending, nil, 0),
+		insertOutbox(laterSameChannel, telegramOutboxPending, nil, 7),
+		insertOutbox(expiredLeaseHead, telegramOutboxProcessing, now.Add(-time.Second), 1),
+		insertOutbox(activeLeaseHead, telegramOutboxProcessing, now.Add(time.Minute), 2),
+		insertOutbox(failedDisplayHead, telegramOutboxDelivered, nil, 0),
+		insertOutbox(laterAfterFailedDisplay, telegramOutboxPending, nil, 3),
+		insertOutbox(unknownHead, telegramOutboxPending, nil, 0),
+	}
+	t.Cleanup(func() {
+		_, _ = g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).WhereIn("id", outboxIDs).Delete()
+		_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Unscoped().WhereIn("id", jobIDs).Delete()
+	})
+
+	rows, err := new(sSysPublish).dueTelegramJobOutboxRows(ctx, 100, now)
+	if err != nil {
+		t.Fatalf("read due outbox rows: %v", err)
+	}
+	selected := make(map[int64]bool, len(rows))
+	for _, row := range rows {
+		selected[row.JobId] = true
+	}
+	if !selected[expiredLeaseHead] || !selected[unknownHead] {
+		t.Fatalf("expired lease and unknown channel heads must be selected: %+v", selected)
+	}
+	for _, blocked := range []int64{queuedHead, laterSameChannel, activeLeaseHead, failedDisplayHead, laterAfterFailedDisplay} {
+		if selected[blocked] {
+			t.Fatalf("blocked job %d must not be selected: %+v", blocked, selected)
+		}
+	}
+
+	decision, err := new(sSysPublish).telegramOutboxJobDispatchDecision(ctx, laterSameChannel, now)
+	if err != nil || decision != telegramOutboxDecisionWait {
+		t.Fatalf("later channel job decision=%q err=%v", decision, err)
+	}
+	attemptCount, err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
+		Where("job_id", laterSameChannel).Value("attempt_count")
+	if err != nil || attemptCount.Int() != 7 {
+		t.Fatalf("waiting outbox attempt_count=%d err=%v, want 7", attemptCount.Int(), err)
 	}
 }
