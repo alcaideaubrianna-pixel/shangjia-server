@@ -165,7 +165,7 @@ func (s *sSysBot) syncFeatureDefaults(ctx context.Context) error {
 		if count > 0 {
 			continue
 		}
-		_, err = g.DB().Model(featureTable).Safe().Ctx(ctx).Data(g.Map{"feature_key": feature.Key(), "name": feature.Description(), "command": strings.TrimPrefix(feature.Command(), "/"), "description": feature.Description(), "config_json": normalizeFeatureConfigJson(feature.Key(), ""), "sort": (index + 1) * 10, "status": 1, "created_at": gtime.Now(), "updated_at": gtime.Now()}).Insert()
+		_, err = g.DB().Model(featureTable).Safe().Ctx(ctx).Data(g.Map{"feature_key": feature.Key(), "name": feature.Description(), "command": strings.TrimPrefix(feature.Command(), "/"), "description": feature.Description(), "config_json": normalizeFeatureConfigJson(feature.Key(), ""), "sort": (index + 1) * 10, "status": featureDefaultStatus(feature), "created_at": gtime.Now(), "updated_at": gtime.Now()}).Insert()
 		if err != nil {
 			return gerror.Wrap(err, "写入Bot插件默认配置失败")
 		}
@@ -245,7 +245,7 @@ func (s *sSysBot) dispatchFeature(ctx context.Context, botId int64, msg *models.
 	command, args := botCommandAndArgs(text)
 	labelText := strings.TrimSpace(text)
 	for _, feature := range botFeatures {
-		if feature == nil {
+		if feature == nil || feature.Key() == (relayFeature{}).Key() {
 			continue
 		}
 		row, enabled := s.featureConfig(ctx, feature.Key())
@@ -448,6 +448,9 @@ func (s *sSysBot) featureConfigValue(ctx context.Context, key string, field stri
 }
 
 func (s *sSysBot) featureMenuVisible(ctx context.Context, key string) bool {
+	if key == (relayFeature{}).Key() {
+		return false
+	} // Configuration-only globally; commands are scoped by Gateway to explicitly enabled Bots.
 	row, enabled := s.featureConfig(ctx, key)
 	if !enabled {
 		return false

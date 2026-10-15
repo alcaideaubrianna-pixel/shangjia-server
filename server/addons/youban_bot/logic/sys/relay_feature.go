@@ -17,7 +17,7 @@ import (
 type relayFeature struct{}
 
 func (relayFeature) Key() string         { return consts.RelayFeatureKey }
-func (relayFeature) Command() string     { return "help" }
+func (relayFeature) Command() string     { return "" }
 func (relayFeature) Description() string { return "双向机器人" }
 func (relayFeature) Handle(ctx context.Context, s *sSysBot, fc *botFeatureContext) (bool, error) {
 	return s.handleRelayUpdate(ctx, fc.BotId, &models.Update{Message: fc.Msg})
@@ -43,7 +43,16 @@ type relayGatewayFeature struct{ bot *sSysBot }
 
 func (f *relayGatewayFeature) Key() string   { return consts.RelayFeatureKey }
 func (f *relayGatewayFeature) Priority() int { return 1000 }
-func (f *relayGatewayFeature) Menus(context.Context, gatewayservice.BotContext) (gatewayservice.FeatureMenus, error) {
+func (f *relayGatewayFeature) Menus(ctx context.Context, bc gatewayservice.BotContext) (gatewayservice.FeatureMenus, error) {
+	for _, binding := range bc.Bindings {
+		if binding.Owner == "youban_bot" {
+			cfg, err := f.bot.relayScope(ctx, binding.ReferenceID)
+			if err != nil || cfg == nil {
+				return gatewayservice.FeatureMenus{}, nil
+			}
+			return gatewayservice.FeatureMenus{Managed: true, Items: []gatewayservice.MenuItem{{Command: "help", Description: "双向聊天帮助", Order: 90}, {Command: "id", Description: "查看聊天ID", Order: 91}}}, nil
+		}
+	}
 	return gatewayservice.FeatureMenus{}, nil
 }
 func (f *relayGatewayFeature) HandleUpdate(ctx context.Context, bc gatewayservice.BotContext, update *models.Update) (bool, error) {
