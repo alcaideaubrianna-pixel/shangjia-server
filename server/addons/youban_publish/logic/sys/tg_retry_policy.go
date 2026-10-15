@@ -307,6 +307,7 @@ func isTelegramPermanentSendError(err error) bool {
 		"unauthorized",
 		"message caption is too long",
 		"caption is too long",
+		"tg任务缺少完整展示发送证据",
 	}
 	for _, part := range permanentParts {
 		if strings.Contains(message, part) {

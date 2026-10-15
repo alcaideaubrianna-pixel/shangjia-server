@@ -241,6 +241,15 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 		s.appendTelegramJobLog(ctx, job, "publish", "superseded", "TG展示资料发送前任务已废弃，停止推送")
 		return errTelegramJobSuperseded
 	}
+	if telegramSendPhaseHasDisplay(job.SendPhase) && len(verifyMedia) > 0 {
+		displayConfirmed, evidenceErr := s.telegramDisplayDeliveryConfirmed(ctx, job.Id, telegramDisplayExpectedCount(len(displayMedia)))
+		if evidenceErr != nil {
+			return evidenceErr
+		}
+		if !displayConfirmed {
+			return gerror.New("TG任务缺少完整展示发送证据，禁止孤立发送验证资料")
+		}
+	}
 	messages := make([]*telegramSentMessage, 0)
 	if !telegramSendPhaseHasDisplay(job.SendPhase) {
 		restored, restoreErr := s.restoreConfirmedTelegramResponse(ctx, job, "display", displayMedia)
@@ -250,10 +259,7 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 		if restored {
 			job.SendPhase = telegramSendPhaseDisplayConfirmed
 		} else {
-			expectedCount := len(displayMedia)
-			if expectedCount == 0 {
-				expectedCount = 1
-			}
+			expectedCount := telegramDisplayExpectedCount(len(displayMedia))
 			attempt, attemptErr := s.beginTelegramDeliveryAttempt(ctx, job, "display", expectedCount)
 			if attemptErr != nil {
 				return attemptErr

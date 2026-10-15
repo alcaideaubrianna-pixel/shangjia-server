@@ -67,10 +67,12 @@ func TestTelegramUnknownRecoveryAction(t *testing.T) {
 		name             string
 		phase            string
 		verifyMediaCount int
+		displayConfirmed bool
 		want             string
 	}{
 		{name: "display response not confirmed", phase: telegramSendPhaseDisplaySending, verifyMediaCount: 1, want: telegramUnknownRecoveryWait},
-		{name: "display confirmed resumes verify", phase: telegramSendPhaseDisplayConfirmed, verifyMediaCount: 1, want: telegramUnknownRecoveryResumeVerify},
+		{name: "display confirmed resumes verify", phase: telegramSendPhaseDisplayConfirmed, verifyMediaCount: 1, displayConfirmed: true, want: telegramUnknownRecoveryResumeVerify},
+		{name: "display phase without evidence waits", phase: telegramSendPhaseDisplayConfirmed, verifyMediaCount: 1, want: telegramUnknownRecoveryWait},
 		{name: "verify sending without confirmation waits", phase: telegramSendPhaseVerifySending, verifyMediaCount: 1, want: telegramUnknownRecoveryWait},
 		{name: "verify confirmed completes", phase: telegramSendPhaseVerifyConfirmed, verifyMediaCount: 1, want: telegramUnknownRecoveryComplete},
 		{name: "display only completes", phase: telegramSendPhaseDisplayConfirmed, verifyMediaCount: 0, want: telegramUnknownRecoveryComplete},
@@ -78,10 +80,16 @@ func TestTelegramUnknownRecoveryAction(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := telegramUnknownRecoveryAction(test.phase, test.verifyMediaCount); got != test.want {
+			if got := telegramUnknownRecoveryAction(test.phase, test.verifyMediaCount, test.displayConfirmed); got != test.want {
 				t.Fatalf("recovery action = %q, want %q", got, test.want)
 			}
 		})
+	}
+	if got := telegramDisplayExpectedCount(0); got != 1 {
+		t.Fatalf("text-only display expected count = %d, want 1", got)
+	}
+	if got := telegramDisplayExpectedCount(3); got != 3 {
+		t.Fatalf("media display expected count = %d, want 3", got)
 	}
 }
 

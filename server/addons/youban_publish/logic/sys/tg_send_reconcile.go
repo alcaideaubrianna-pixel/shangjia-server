@@ -354,7 +354,7 @@ const (
 	telegramUnknownRecoveryComplete     = "complete"
 )
 
-func telegramUnknownRecoveryAction(sendPhase string, verifyMediaCount int) string {
+func telegramUnknownRecoveryAction(sendPhase string, verifyMediaCount int, displayConfirmed bool) string {
 	if sendPhase == telegramSendPhaseVerifyConfirmed {
 		return telegramUnknownRecoveryComplete
 	}
@@ -362,9 +362,57 @@ func telegramUnknownRecoveryAction(sendPhase string, verifyMediaCount int) strin
 		return telegramUnknownRecoveryWait
 	}
 	if verifyMediaCount > 0 {
+		if !displayConfirmed {
+			return telegramUnknownRecoveryWait
+		}
 		return telegramUnknownRecoveryResumeVerify
 	}
 	return telegramUnknownRecoveryComplete
+}
+
+func telegramDisplayExpectedCount(mediaCount int) int {
+	if mediaCount > 0 {
+		return mediaCount
+	}
+	return 1
+}
+
+// telegramDisplayDeliveryConfirmed treats send_phase as a projection only.
+// Verification may continue only when the display response has durable,
+// complete evidence. This prevents legacy/corrupt display_confirmed jobs from
+// emitting orphan verification videos after recovery.
+func (s *sSysPublish) telegramDisplayDeliveryConfirmed(ctx context.Context, jobId int64, expectedCount int) (bool, error) {
+	if jobId <= 0 || expectedCount <= 0 {
+		return false, nil
+	}
+	messageCount, err := g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).
+		Where("job_id", jobId).Where("purpose", "display").Where("status", "sent").WhereNull("deleted_at").Count()
+	if err != nil {
+		return false, gerror.Wrap(err, "读取TG展示消息投影失败")
+	}
+	if messageCount >= expectedCount {
+		return true, nil
+	}
+	var attempts []telegramDeliveryAttempt
+	if err = g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
+		Where("job_id", jobId).Where("phase", "display").Where("status", telegramAttemptStatusConfirmed).
+		Where("response_received", 1).OrderDesc("id").Scan(&attempts); err != nil {
+		return false, gerror.Wrap(err, "读取TG展示确认Attempt失败")
+	}
+	for _, attempt := range attempts {
+		if attempt.ExpectedCount < expectedCount || attempt.ConfirmedCount < expectedCount {
+			continue
+		}
+		auditCount, countErr := g.DB().Model(publishTgAttemptMessageTable).Safe().Ctx(ctx).
+			Where("attempt_id", attempt.Id).Where("source", "response").Count()
+		if countErr != nil {
+			return false, gerror.Wrap(countErr, "读取TG展示响应审计失败")
+		}
+		if auditCount >= expectedCount {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // recoverConfirmedUnknownTelegramJob repairs local state strictly from a
@@ -412,7 +460,11 @@ func (s *sSysPublish) recoverConfirmedUnknownTelegramJob(ctx context.Context, jo
 		}
 	}
 
-	action := telegramUnknownRecoveryAction(job.SendPhase, len(verifyMedia))
+	displayConfirmed, evidenceErr := s.telegramDisplayDeliveryConfirmed(ctx, job.Id, telegramDisplayExpectedCount(len(displayMedia)))
+	if evidenceErr != nil {
+		return false, evidenceErr
+	}
+	action := telegramUnknownRecoveryAction(job.SendPhase, len(verifyMedia), displayConfirmed)
 	switch action {
 	case telegramUnknownRecoveryResumeVerify:
 		transitioned, transitionErr := s.transitionTelegramJob(ctx, telegramJobTransition{
