@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/gogf/gf/v2/net/ghttp"
 )
 
 func TestTelegramMediaRemoteURLSelection(t *testing.T) {
@@ -187,6 +189,57 @@ func TestTelegramVideoPreviewLocalPoster(t *testing.T) {
 		t.Fatalf("original poster not reused: %v", err)
 	}
 	_ = closer.Close()
+}
+
+func TestPersistGeneratedTelegramVideoPosterUpdatesReusableSource(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "generated.jpg")
+	if err := os.WriteFile(path, []byte("generated-poster"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	media := &telegramMediaItem{Id: 91, MediaType: "video"}
+	uploaded := false
+	saved := false
+	err := persistGeneratedTelegramVideoPosterWith(context.Background(), media, path,
+		func(_ context.Context, upload *ghttp.UploadFile) (string, string, error) {
+			uploaded = upload != nil && upload.FileHeader != nil
+			return "https://img.example/generated.jpg", "poster/generated.jpg", nil
+		},
+		func(_ context.Context, mediaId int64, posterURL, storagePath string) error {
+			saved = mediaId == media.Id && posterURL != "" && storagePath != ""
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !uploaded || !saved {
+		t.Fatalf("poster persistence incomplete uploaded=%t saved=%t", uploaded, saved)
+	}
+	if media.PosterUrl != "https://img.example/generated.jpg" || media.PosterStoragePath != "poster/generated.jpg" {
+		t.Fatalf("media poster was not updated: %+v", media)
+	}
+}
+
+func TestPersistGeneratedTelegramVideoPosterDoesNotPublishPartialState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "generated.jpg")
+	if err := os.WriteFile(path, []byte("generated-poster"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	media := &telegramMediaItem{Id: 92, MediaType: "video"}
+	err := persistGeneratedTelegramVideoPosterWith(context.Background(), media, path,
+		func(_ context.Context, _ *ghttp.UploadFile) (string, string, error) {
+			return "https://img.example/generated.jpg", "poster/generated.jpg", nil
+		},
+		func(_ context.Context, _ int64, _, _ string) error {
+			return errors.New("database unavailable")
+		},
+	)
+	if err == nil {
+		t.Fatal("database failure must be reported to the optional persistence caller")
+	}
+	if media.PosterUrl != "" || media.PosterStoragePath != "" {
+		t.Fatalf("failed persistence leaked partial state: %+v", media)
+	}
 }
 
 func TestTelegramVideoPreviewFailureIsOptional(t *testing.T) {

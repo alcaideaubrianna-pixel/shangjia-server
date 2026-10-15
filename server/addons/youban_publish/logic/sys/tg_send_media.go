@@ -15,7 +15,12 @@ import (
 	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/net/ghttp"
 	"golang.org/x/sync/errgroup"
+
+	"hotgo/addons/youban_publish/internal/dao"
+	"hotgo/addons/youban_publish/internal/model/do"
+	"hotgo/utility/file"
 )
 
 const telegramMediaGroupMaxItems = 10
@@ -1064,7 +1069,71 @@ func cachedTelegramVideoPosterFile(ctx context.Context, media *telegramMediaItem
 	if err != nil {
 		return "", nil, gerror.Wrapf(err, "生成TG视频预览图失败 mediaId:%d path:%s", media.Id, videoPath)
 	}
+	if persistErr := persistGeneratedTelegramVideoPoster(ctx, media, thumbPath); persistErr != nil {
+		// The generated local preview is still valid for this send. Persistence
+		// is an optimization and must not turn an optional thumbnail into a
+		// channel-blocking failure.
+		g.Log().Warningf(ctx, "保存TG视频预览图失败，继续使用本地预览图 mediaId:%d err:%+v", media.Id, persistErr)
+	}
 	return thumbPath, func() { _ = os.Remove(thumbPath) }, nil
+}
+
+func persistGeneratedTelegramVideoPoster(ctx context.Context, media *telegramMediaItem, posterPath string) error {
+	return persistGeneratedTelegramVideoPosterWith(ctx, media, posterPath,
+		func(ctx context.Context, upload *ghttp.UploadFile) (string, string, error) {
+			attachment, err := uploadMediaPoster(ctx, upload)
+			if err != nil {
+				return "", "", err
+			}
+			return normalizeMediaFileURL(posterFileUrl(attachment), posterStoragePath(attachment)),
+				normalizeStoredMediaPath(posterStoragePath(attachment)), nil
+		},
+		func(ctx context.Context, mediaId int64, posterURL, storagePath string) error {
+			columns := dao.YoubanPublishMedia.Columns()
+			_, err := dao.YoubanPublishMedia.Ctx(ctx).
+				Where(columns.Id, mediaId).
+				Where(columns.MediaType, "video").
+				Data(do.YoubanPublishMedia{PosterUrl: posterURL, PosterStoragePath: storagePath}).
+				Update()
+			return err
+		},
+	)
+}
+
+func persistGeneratedTelegramVideoPosterWith(
+	ctx context.Context,
+	media *telegramMediaItem,
+	posterPath string,
+	upload func(context.Context, *ghttp.UploadFile) (string, string, error),
+	save func(context.Context, int64, string, string) error,
+) error {
+	if media == nil || media.Id <= 0 || strings.TrimSpace(posterPath) == "" {
+		return nil
+	}
+	if upload == nil || save == nil {
+		return gerror.New("视频预览图持久化依赖不能为空")
+	}
+	content, err := os.ReadFile(posterPath)
+	if err != nil {
+		return gerror.Wrap(err, "读取生成的视频预览图失败")
+	}
+	header, err := file.NewMultipartFileHeader(filepath.Base(posterPath), content)
+	if err != nil {
+		return gerror.Wrap(err, "创建视频预览图上传文件失败")
+	}
+	posterURL, storagePath, err := upload(ctx, &ghttp.UploadFile{FileHeader: header})
+	if err != nil {
+		return gerror.Wrap(err, "上传视频预览图到存储失败")
+	}
+	if strings.TrimSpace(posterURL) == "" && strings.TrimSpace(storagePath) == "" {
+		return gerror.New("上传视频预览图未返回存储地址")
+	}
+	if err = save(ctx, media.Id, posterURL, storagePath); err != nil {
+		return gerror.Wrap(err, "保存视频预览图地址失败")
+	}
+	media.PosterUrl = posterURL
+	media.PosterStoragePath = storagePath
+	return nil
 }
 
 func generateTelegramVideoThumbnail(ctx context.Context, videoPath string) (string, error) {
