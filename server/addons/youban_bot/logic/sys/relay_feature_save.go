@@ -18,6 +18,7 @@ import (
 // Keep feature metadata and per-Bot configuration atomic. Toggling the global
 // plugin switch must not overwrite newer settings changed by Telegram commands.
 func (s *sSysBot) persistRelayFeature(ctx context.Context, in *sysin.FeatureSaveInp, data g.Map) error {
+	data[dao.YoubanBotFeature.Columns().Command] = ""
 	return dao.YoubanBotFeature.Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		c := dao.YoubanBotFeature.Columns()
 		var old *botFeatureRow

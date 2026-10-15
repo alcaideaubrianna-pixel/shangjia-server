@@ -167,6 +167,17 @@ func (s *sSysBot) syncFeatureDefaults(ctx context.Context) error {
 			return gerror.Wrap(err, "同步Bot插件默认配置失败")
 		}
 		if count > 0 {
+			if feature.Key() == (relayFeature{}).Key() {
+				result, err := g.DB().Model(featureTable).Safe().Ctx(ctx).Where("feature_key", feature.Key()).WhereNull("deleted_at").WhereNot("command", "").Data(g.Map{"command": ""}).Update()
+				if err != nil {
+					return gerror.Wrap(err, "清理双向配置插件历史命令失败")
+				}
+				affected, err := result.RowsAffected()
+				if err != nil {
+					return err
+				}
+				changed = changed || affected > 0
+			}
 			continue
 		}
 		_, err = g.DB().Model(featureTable).Safe().Ctx(ctx).Data(g.Map{"feature_key": feature.Key(), "name": feature.Description(), "command": strings.TrimPrefix(feature.Command(), "/"), "description": feature.Description(), "config_json": normalizeFeatureConfigJson(feature.Key(), ""), "sort": (index + 1) * 10, "status": featureDefaultStatus(feature), "created_at": gtime.Now(), "updated_at": gtime.Now()}).Insert()

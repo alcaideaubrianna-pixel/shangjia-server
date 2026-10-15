@@ -132,3 +132,25 @@ func relayMenuHas(m gatewayservice.FeatureMenus, command string) bool {
 	}
 	return false
 }
+
+func TestRelayLegacyGlobalHelpCommandIsCleared(t *testing.T) {
+	ctx := relayTestDatabase(t)
+	relayTestBaseTable(t, ctx, featureTable)
+	if _, err := dao.YoubanBotFeature.Ctx(ctx).Data(do.YoubanBotFeature{FeatureKey: consts.RelayFeatureKey, Command: "help", Status: 1, ConfigJson: "{}"}).Insert(); err != nil {
+		t.Fatal(err)
+	}
+	s := NewSysBot()
+	if err := s.syncFeatureDefaults(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var row *botFeatureRow
+	if err := dao.YoubanBotFeature.Ctx(ctx).Where(dao.YoubanBotFeature.Columns().FeatureKey, consts.RelayFeatureKey).Scan(&row); err != nil {
+		t.Fatal(err)
+	}
+	if row.Command != "" || row.Status != 1 || row.ConfigJson != "{}" {
+		t.Fatalf("legacy cleanup changed settings or kept help: %+v", row)
+	}
+	if err := s.syncFeatureDefaults(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
