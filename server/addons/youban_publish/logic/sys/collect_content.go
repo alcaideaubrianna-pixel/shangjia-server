@@ -137,11 +137,27 @@ func (s *sSysPublish) ensureCollectContent(ctx context.Context, event gdb.Record
 			contentCols.CreatedAt:      now,
 			contentCols.UpdatedAt:      now,
 		}).InsertAndGetId()
-		if err != nil {
+		if err == nil {
+			result.Id = contentId
+			return result, nil
+		}
+		if !isUniqueConstraintError(err) {
 			return nil, gerror.Wrap(err, "创建采集内容池失败")
 		}
-		result.Id = contentId
-		return result, nil
+		// Another worker may create the same content after the initial lookup.
+		// Re-read the winner and continue through the normal duplicate update so
+		// recovery remains idempotent instead of failing the collect event.
+		content, err = contentDao.Ctx(ctx).
+			Where(contentCols.TenantId, event["tenant_id"].Int64()).
+			Where(contentCols.AccountId, event["account_id"].Int64()).
+			Where(contentCols.DedupeKey, result.DedupeKey).
+			One()
+		if err != nil {
+			return nil, gerror.Wrap(err, "并发创建采集内容池后读取失败")
+		}
+		if content.IsEmpty() {
+			return nil, gerror.New("并发创建采集内容池后记录不存在")
+		}
 	}
 	result.Id = content["id"].Int64()
 	result.PreviousSeenAt = content["last_seen_at"].GTime()

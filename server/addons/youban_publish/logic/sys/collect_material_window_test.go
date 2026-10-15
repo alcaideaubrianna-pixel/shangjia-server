@@ -96,6 +96,24 @@ func TestFindCollectDisplayEventRepairsAlreadyPairedVerify(t *testing.T) {
 	}
 }
 
+func TestFindCollectDisplayEventPrefersNearestDisplayOverStaleParent(t *testing.T) {
+	receivedAt := gtime.NewFromTime(time.Now().Add(-4 * time.Minute))
+	rows := []gdb.Record{
+		{"id": gvar.New(10), "source_message_id": gvar.New(200), "material_role": gvar.New("display"), "raw_text": gvar.New("昵称：旧资料"), "received_at": gvar.New(receivedAt)},
+		{"id": gvar.New(11), "source_message_id": gvar.New(210), "material_role": gvar.New("display"), "raw_text": gvar.New("昵称：相邻资料"), "received_at": gvar.New(receivedAt)},
+		{"id": gvar.New(12), "source_message_id": gvar.New(220), "material_role": gvar.New("verify"), "material_parent_event_id": gvar.New(10), "raw_text": gvar.New(""), "received_at": gvar.New(receivedAt)},
+	}
+	mediaByEvent := map[int64][]collectMediaItem{
+		10: {{Type: "photo", FileId: "old-display"}},
+		11: {{Type: "photo", FileId: "nearest-display"}},
+		12: {{Type: "video", FileId: "verify"}},
+	}
+	got := (&sSysPublish{}).findCollectDisplayEvent(rows, collectMaterialEventViews(rows, mediaByEvent), 2)
+	if got != 1 {
+		t.Fatalf("display event index=%d, want nearest display index 1", got)
+	}
+}
+
 func TestFindCollectVerifyEventAcceptsUnmatchedVerifyRetry(t *testing.T) {
 	receivedAt := gtime.NewFromTime(time.Now().Add(-6 * time.Minute))
 	rows := []gdb.Record{

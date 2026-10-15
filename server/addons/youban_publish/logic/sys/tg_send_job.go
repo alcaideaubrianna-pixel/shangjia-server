@@ -20,8 +20,9 @@ import (
 )
 
 const (
-	telegramDisplaySendTimeout = 90 * time.Second
-	telegramVerifySendTimeout  = 5 * time.Minute
+	telegramBotMediaSendTimeout = 10 * time.Minute
+	telegramDisplaySendTimeout  = telegramBotMediaSendTimeout
+	telegramVerifySendTimeout   = telegramBotMediaSendTimeout
 )
 
 var (
@@ -226,7 +227,7 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	if job.SendPhase == telegramSendPhaseVerifyConfirmed && len(verifyMedia) > 0 {
 		return nil
 	}
-	bot, err := s.telegramBot(ctx, botToken)
+	bot, err := s.telegramMediaBot(ctx, botToken)
 	if err != nil {
 		return err
 	}
@@ -262,6 +263,7 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 			}
 			displayCaption := telegramCaptionWithJobMarker(caption, job.Id, "display") + telegramAttemptMarker(attempt.AttemptToken)
 			g.Log().Infof(ctx, "TG展示资料开始Bot发送 jobId:%d botId:%d chat:%s media:%s", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(displayMedia))
+			stopAttemptHeartbeat := s.startTelegramAttemptHeartbeat(attempt.Id)
 			displaySendCtx, cancelDisplaySend := context.WithTimeout(ctx, telegramDisplaySendTimeout)
 			displaySendStartedAt := time.Now()
 			messages, err = s.sendTelegramDisplayPart(displaySendCtx, bot, job.TargetChatId, displayCaption, displayMedia)
@@ -273,6 +275,7 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 				g.Log().Warningf(ctx, "Bot展示媒体发送失败，命中媒体降级条件 jobId:%d botId:%d chat:%s media:%s err:%+v", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(displayMedia), err)
 				messages, err = s.sendTelegramJobMediaByAccount(ctx, job, "display", displayCaption, displayMedia, err)
 			}
+			stopAttemptHeartbeat()
 			if err != nil {
 				if errors.Is(err, errTelegramMediaFallbackQueued) {
 					return err
@@ -347,6 +350,7 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	// 标记必须附着于验证媒体；采集分类前移除内部标记。
 	verifyCaption := telegramAttemptMarker(verifyAttempt.AttemptToken)
 	g.Log().Infof(ctx, "TG验证资料开始Bot发送 jobId:%d botId:%d chat:%s media:%s", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(verifyMedia))
+	stopAttemptHeartbeat := s.startTelegramAttemptHeartbeat(verifyAttempt.Id)
 	verifySendCtx, cancelVerifySend := context.WithTimeout(ctx, telegramVerifySendTimeout)
 	verifySendStartedAt := time.Now()
 	verifyMessages, err := s.sendTelegramVerifyPart(verifySendCtx, bot, job.TargetChatId, verifyCaption, verifyMedia)
@@ -358,6 +362,7 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 		g.Log().Warningf(ctx, "Bot验证媒体发送失败，命中媒体降级条件 jobId:%d botId:%d chat:%s media:%s err:%+v", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(verifyMedia), err)
 		verifyMessages, err = s.sendTelegramJobMediaByAccount(ctx, job, "verify", verifyCaption, verifyMedia, err)
 	}
+	stopAttemptHeartbeat()
 	if err != nil {
 		if errors.Is(err, errTelegramMediaFallbackQueued) {
 			return err

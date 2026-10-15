@@ -45,6 +45,17 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 		)`, telegramJobStatusPending, telegramJobStatusRetryWait,
 			telegramJobStatusConfirming, telegramJobStatusSending,
 			telegramJobStatusFailed, telegramSendPhaseDisplayConfirmed)
+	// Once a display is visible in Telegram, finish that operation before
+	// returning it behind untouched historical backlog. Earlier operations that
+	// have also started still block it, preserving media/verification ordering.
+	if telegramJobRequiresChannelCompletionPriority(job.SendPhase) {
+		mod = mod.Where(`(
+			j.status IN (?, ?) OR
+			j.send_phase IN (?, ?, ?)
+		)`, telegramJobStatusSending, telegramJobStatusConfirming,
+			telegramSendPhaseDisplaySending, telegramSendPhaseDisplayConfirmed,
+			telegramSendPhaseVerifySending)
+	}
 	if job.ChannelId > 0 {
 		mod = mod.Where("j.channel_id", job.ChannelId)
 	} else {
@@ -66,6 +77,12 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 		return false, gerror.Wrap(err, "检查频道前序TG任务失败")
 	}
 	return !earlier.IsEmpty(), nil
+}
+
+func telegramJobRequiresChannelCompletionPriority(sendPhase string) bool {
+	return telegramSendPhaseHasDisplay(sendPhase) &&
+		sendPhase != telegramSendPhaseVerifyConfirmed &&
+		sendPhase != telegramSendPhaseCompletedNoVerify
 }
 
 func (s *sSysPublish) wakeNextTelegramChannelJob(ctx context.Context, job telegramJobRecord) error {

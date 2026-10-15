@@ -352,6 +352,9 @@ func (s *sSysPublish) sendMessageTemplateByBot(ctx context.Context, job telegram
 		return nil, err
 	}
 	bot, err := s.telegramBot(ctx, token)
+	if len(media) > 0 {
+		bot, err = s.telegramMediaBot(ctx, token)
+	}
 	if err != nil {
 		return nil, err
 	}

@@ -11,6 +11,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/internal/library/cache"
 )
 
@@ -81,19 +82,20 @@ func (s *sSysPublish) telegramJobMedia(ctx context.Context, job telegramJobRecor
 		mediaType := record["media_type"].String()
 		assetHash := telegramMediaCacheAssetHash(mediaType, asset.Hash, posterUrl, posterStoragePath, record["tg_thumb_file_id"].String())
 		item := &telegramMediaItem{
-			Id:                record["id"].Int64(),
-			AttachmentId:      asset.AttachmentId,
-			MediaType:         mediaType,
-			MustSend:          record["must_send"].Bool(),
-			Purpose:           record["purpose"].String(),
-			FileUrl:           normalizeMediaFileURL(asset.FileUrl, asset.StoragePath),
-			PosterUrl:         posterUrl,
-			StoragePath:       asset.StoragePath,
-			PosterStoragePath: posterStoragePath,
-			TgFileId:          media.ValidTgFileIdForHash(assetHash),
-			TgThumbFileId:     "",
-			AssetHash:         assetHash,
-			SortIndex:         record["sort_index"].Int(),
+			Id:                      record["id"].Int64(),
+			AttachmentId:            asset.AttachmentId,
+			MediaType:               mediaType,
+			MustSend:                record["must_send"].Bool(),
+			Purpose:                 record["purpose"].String(),
+			FileUrl:                 normalizeMediaFileURL(asset.FileUrl, asset.StoragePath),
+			PosterUrl:               posterUrl,
+			StoragePath:             asset.StoragePath,
+			PosterStoragePath:       posterStoragePath,
+			TgFileId:                media.ValidTgFileIdForHash(assetHash),
+			TgThumbFileId:           "",
+			AssetHash:               assetHash,
+			SortIndex:               record["sort_index"].Int(),
+			CollectedFileIdEligible: strings.TrimSpace(media.EditStatus) != mediaEditStatusEdited,
 		}
 		if item.TgFileId != "" {
 			item.TgThumbFileId = record["tg_thumb_file_id"].String()
@@ -120,7 +122,67 @@ func (s *sSysPublish) telegramJobMedia(ctx context.Context, job telegramJobRecor
 	if len(records) > 0 && len(rows) == 0 {
 		return nil, gerror.New("媒体文件地址为空")
 	}
+	if err = s.applySameBotCollectFileIDs(ctx, job, purpose, rows); err != nil {
+		return nil, err
+	}
 	return rows, nil
+}
+
+type sameBotCollectFile struct {
+	MediaType    string `orm:"media_type"`
+	SourceFileId string `orm:"source_file_id"`
+}
+
+func (s *sSysPublish) applySameBotCollectFileIDs(ctx context.Context, job telegramJobRecord, purpose string, media []*telegramMediaItem) error {
+	if job.CollectEventId <= 0 || job.BotId <= 0 || len(media) == 0 {
+		return nil
+	}
+	var sources []sameBotCollectFile
+	eventTable := pdao.YoubanPublishCollectEvent.Table()
+	mediaTable := pdao.YoubanPublishCollectEventMedia.Table()
+	mod := g.DB().Model(eventTable+" e").Safe().Ctx(ctx).
+		InnerJoin(mediaTable+" em", "em.event_id=e.id").
+		Fields("em.media_type,em.source_file_id").
+		Where("e.source_type", "bot").Where("e.bot_id", job.BotId).
+		Where("e.material_role", purpose).
+		WhereNot("em.source_file_id", "").
+		OrderAsc("e.id").OrderAsc("em.id")
+	if purpose == "verify" {
+		mod = mod.Where("e.material_parent_event_id", job.CollectEventId)
+	} else {
+		mod = mod.Where("e.id", job.CollectEventId)
+	}
+	if err := mod.Scan(&sources); err != nil {
+		return gerror.Wrap(err, "读取同Bot采集媒体File ID失败")
+	}
+	applySameBotCollectFileIDs(media, sources)
+	return nil
+}
+
+func applySameBotCollectFileIDs(media []*telegramMediaItem, sources []sameBotCollectFile) {
+	byType := make(map[string][]string)
+	for _, source := range sources {
+		mediaType := listenerTelegramMediaType(source.MediaType)
+		fileId := strings.TrimSpace(source.SourceFileId)
+		if fileId != "" && telegramFileIDMatchesMediaType(mediaType, fileId) {
+			byType[mediaType] = append(byType[mediaType], fileId)
+		}
+	}
+	for _, item := range media {
+		if item == nil {
+			continue
+		}
+		mediaType := listenerTelegramMediaType(item.MediaType)
+		candidates := byType[mediaType]
+		if len(candidates) == 0 {
+			continue
+		}
+		fileId := candidates[0]
+		byType[mediaType] = candidates[1:]
+		if item.CollectedFileIdEligible && strings.TrimSpace(item.TgFileId) == "" {
+			item.TgFileId = fileId
+		}
+	}
 }
 
 type telegramMediaSlot struct {

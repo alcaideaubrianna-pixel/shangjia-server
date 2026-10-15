@@ -296,6 +296,7 @@ func (s *sSysPublish) recoverStaleSendingTelegramAttempts(ctx context.Context, l
 		InnerJoin(publishTgJobTable+" job", "job.id=attempt.job_id").
 		Fields("attempt.*").
 		Where("attempt.status", telegramAttemptStatusSending).
+		Where("NOT EXISTS (SELECT 1 FROM "+publishTgAttemptMessageTable+" response WHERE response.attempt_id=attempt.id AND response.source='response')").
 		Where("attempt.updated_at <= ?", gtime.Now().Add(-telegramSendingAttemptRecoverAfter)).
 		WhereIn("job.status", telegramAttemptRecoverableJobStatuses()).
 		OrderAsc("attempt.updated_at").OrderAsc("attempt.id").Limit(limit).Scan(&attempts)

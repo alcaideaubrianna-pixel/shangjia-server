@@ -13,11 +13,11 @@ func TestTelegramSendingRecoveryStartsAfterTaskTimeout(t *testing.T) {
 }
 
 func TestTelegramSendingAttemptRecoveryFollowsMediaDeadline(t *testing.T) {
-	if telegramSendingAttemptRecoverAfter <= telegramDisplaySendTimeout {
-		t.Fatalf("attempt recovery %s must allow the display deadline %s", telegramSendingAttemptRecoverAfter, telegramDisplaySendTimeout)
-	}
 	if telegramSendingAttemptRecoverAfter >= telegramPublishTaskTimeout {
 		t.Fatalf("attempt recovery %s must not wait for queue task timeout %s", telegramSendingAttemptRecoverAfter, telegramPublishTaskTimeout)
+	}
+	if 2*telegramAttemptHeartbeatInterval >= telegramSendingAttemptRecoverAfter {
+		t.Fatalf("attempt heartbeat %s must be shorter than recovery threshold %s", telegramAttemptHeartbeatInterval, telegramSendingAttemptRecoverAfter)
 	}
 }
 

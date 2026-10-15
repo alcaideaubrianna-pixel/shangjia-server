@@ -25,6 +25,33 @@ func TestTelegramMediaRemoteURLSelection(t *testing.T) {
 	}
 }
 
+func TestApplySameBotCollectFileIDs(t *testing.T) {
+	media := []*telegramMediaItem{
+		{MediaType: "image", CollectedFileIdEligible: true},
+		{MediaType: "image", CollectedFileIdEligible: false},
+		{MediaType: "video", CollectedFileIdEligible: true},
+	}
+	sources := []sameBotCollectFile{
+		{MediaType: "photo", SourceFileId: "AgAC-first"},
+		{MediaType: "photo", SourceFileId: "AgAC-edited"},
+		{MediaType: "video", SourceFileId: "BAAC-video"},
+	}
+	applySameBotCollectFileIDs(media, sources)
+	if media[0].TgFileId != "AgAC-first" {
+		t.Fatalf("same Bot photo file_id not reused: %+v", media[0])
+	}
+	if media[1].TgFileId != "" {
+		t.Fatalf("edited media must not reuse collected file_id: %+v", media[1])
+	}
+	if media[2].TgFileId != "BAAC-video" {
+		t.Fatalf("same Bot video file_id not reused: %+v", media[2])
+	}
+	media[0].AntiScanEnabled = true
+	if telegramMediaUsesReusableFileId(media[0]) {
+		t.Fatal("anti-scan media must upload processed bytes instead of reusing collected file_id")
+	}
+}
+
 func TestTelegramRemoteURLFallbackIsDeterministic(t *testing.T) {
 	media := &telegramMediaItem{FileUrl: "https://cdn.example/media/video.mp4"}
 	for _, message := range []string{

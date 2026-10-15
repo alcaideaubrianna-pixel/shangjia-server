@@ -25,16 +25,17 @@ import (
 )
 
 const (
-	publishTgAttemptTable           = "hg_youban_publish_tg_attempt"
-	publishTgAttemptMessageTable    = "hg_youban_publish_tg_attempt_message"
-	telegramAttemptStatusSending    = "sending"
-	telegramAttemptStatusWaiting    = "awaiting_webhook"
-	telegramAttemptStatusConfirmed  = "confirmed"
-	telegramAttemptStatusRetryWait  = "retry_wait"
-	telegramAttemptStatusSuperseded = "superseded"
-	telegramAttemptWebhookWait      = 15 * time.Second
-	telegramAttemptLateGrace        = 15 * time.Second
-	telegramAttemptMaxRetries       = 3
+	publishTgAttemptTable            = "hg_youban_publish_tg_attempt"
+	publishTgAttemptMessageTable     = "hg_youban_publish_tg_attempt_message"
+	telegramAttemptStatusSending     = "sending"
+	telegramAttemptStatusWaiting     = "awaiting_webhook"
+	telegramAttemptStatusConfirmed   = "confirmed"
+	telegramAttemptStatusRetryWait   = "retry_wait"
+	telegramAttemptStatusSuperseded  = "superseded"
+	telegramAttemptHeartbeatInterval = 30 * time.Second
+	telegramAttemptWebhookWait       = 15 * time.Second
+	telegramAttemptLateGrace         = 15 * time.Second
+	telegramAttemptMaxRetries        = 3
 )
 
 var errTelegramAwaitingWebhook = gerror.New("等待Telegram Webhook确认")
@@ -160,7 +161,7 @@ func (s *sSysPublish) confirmTelegramDeliveryAttempt(ctx context.Context, attemp
 	if attempt.ExpectedCount == 0 {
 		count = 0
 	}
-	data := g.Map{"status": telegramAttemptStatusConfirmed, "confirmed_count": count, "webhook_deadline": nil, "updated_at": gtime.Now()}
+	data := g.Map{"status": telegramAttemptStatusConfirmed, "confirmed_count": count, "webhook_deadline": nil, "error_message": "", "updated_at": gtime.Now()}
 	if response {
 		data["response_received"] = 1
 	}
@@ -174,6 +175,35 @@ func (s *sSysPublish) confirmTelegramDeliveryAttempt(ctx context.Context, attemp
 	attempt.Status = telegramAttemptStatusConfirmed
 	s.projectTelegramDeliveryAttempt(ctx, attempt, "")
 	return nil
+}
+
+// startTelegramAttemptHeartbeat prevents recovery from mistaking a live,
+// long-running Telegram request for an interrupted worker. Recovery remains
+// available shortly after the process actually stops because heartbeats cease.
+func (s *sSysPublish) startTelegramAttemptHeartbeat(attemptId int64) func() {
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(telegramAttemptHeartbeatInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				updateCtx, updateCancel := context.WithTimeout(ctx, 10*time.Second)
+				_, _ = g.DB().Model(publishTgAttemptTable).Safe().Ctx(updateCtx).
+					Where("id", attemptId).Where("status", telegramAttemptStatusSending).
+					Data(g.Map{"updated_at": gtime.Now()}).Update()
+				updateCancel()
+			}
+		}
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
 }
 
 // restoreConfirmedTelegramResponse repairs local projections after Telegram

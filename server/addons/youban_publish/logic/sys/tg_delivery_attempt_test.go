@@ -53,7 +53,7 @@ func TestRestoreConfirmedTelegramResponseTreatsMissingAttemptAsUnconfirmed(t *te
 }
 
 func TestTelegramMediaSendTimeoutsFitPublishTaskDeadline(t *testing.T) {
-	if telegramVerifySendTimeout <= 0 {
+	if telegramDisplaySendTimeout != 10*time.Minute || telegramVerifySendTimeout != 10*time.Minute {
 		t.Fatalf("unexpected media timeouts: verify=%s display=%s", telegramVerifySendTimeout, telegramDisplaySendTimeout)
 	}
 	if telegramDisplaySendTimeout+telegramVerifySendTimeout+telegramAttemptWebhookWait >= telegramPublishTaskTimeout {
@@ -116,6 +116,19 @@ func TestTelegramAttemptReconcileSupportsDisplayAndVerify(t *testing.T) {
 	for _, phase := range []string{"display", "verify"} {
 		if phase != "display" && phase != "verify" {
 			t.Fatalf("unsupported reconciliation phase: %s", phase)
+		}
+	}
+}
+
+func TestTelegramJobRequiresChannelCompletionPriority(t *testing.T) {
+	for _, phase := range []string{telegramSendPhaseDisplayConfirmed, telegramSendPhaseVerifySending} {
+		if !telegramJobRequiresChannelCompletionPriority(phase) {
+			t.Fatalf("phase %s must finish before untouched channel backlog", phase)
+		}
+	}
+	for _, phase := range []string{"", telegramSendPhaseCleanupConfirmed, telegramSendPhaseDisplaySending, telegramSendPhaseVerifyConfirmed, telegramSendPhaseCompletedNoVerify} {
+		if telegramJobRequiresChannelCompletionPriority(phase) {
+			t.Fatalf("phase %s must keep normal channel ordering", phase)
 		}
 	}
 }

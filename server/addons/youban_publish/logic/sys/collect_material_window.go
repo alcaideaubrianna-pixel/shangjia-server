@@ -393,6 +393,14 @@ func (s *sSysPublish) findCollectDisplayEvent(rows []gdb.Record, views []collect
 	if verifyIndex < 0 || verifyIndex >= len(rows) {
 		return -1
 	}
+	// The current source window is authoritative. A persisted parent may have
+	// been selected by an earlier partial recovery window before a closer
+	// display event became eligible for processing.
+	for _, pair := range pairCollectMaterialMessages(views) {
+		if pair.VerifyIndex == verifyIndex {
+			return pair.DisplayIndex
+		}
+	}
 	verify := rows[verifyIndex]
 	parentID := verify["material_parent_event_id"].Int64()
 	if parentID > 0 {
@@ -400,11 +408,6 @@ func (s *sSysPublish) findCollectDisplayEvent(rows []gdb.Record, views []collect
 			if row["id"].Int64() == parentID {
 				return index
 			}
-		}
-	}
-	for _, pair := range pairCollectMaterialMessages(views) {
-		if pair.VerifyIndex == verifyIndex {
-			return pair.DisplayIndex
 		}
 	}
 	return -1
@@ -422,9 +425,17 @@ func (s *sSysPublish) bindCollectMaterialPair(ctx context.Context, display gdb.R
 	if display["id"].Int64() <= 0 || verify["id"].Int64() <= 0 {
 		return false, nil
 	}
+	canonical, err := s.isCanonicalCollectMaterialPair(ctx, display, verify)
+	if err != nil {
+		return false, err
+	}
+	if !canonical {
+		g.Log().Infof(ctx, "采集资料组已存在更近的展示消息，拒绝错误绑定 chat:%s displayEventId:%d verifyEventId:%d", strings.TrimSpace(display["source_chat_id"].String()), display["id"].Int64(), verify["id"].Int64())
+		return false, nil
+	}
 	now := gtime.Now()
 	paired := false
-	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		displayStatus := strings.TrimSpace(display["status"].String())
 		displayGroupStatus := strings.TrimSpace(display["material_group_status"].String())
 		displayCanReattach := (displayStatus == sysin.CollectEventStatusProcessed || displayStatus == sysin.CollectEventStatusDispatched) &&
@@ -483,6 +494,54 @@ func (s *sSysPublish) bindCollectMaterialPair(ctx context.Context, display gdb.R
 	g.Log().Infof(ctx, "采集资料组绑定完成 chat:%s displayEventId:%d verifyEventId:%d", strings.TrimSpace(display["source_chat_id"].String()), display["id"].Int64(), verify["id"].Int64())
 	s.appendCollectEventLogForRecord(ctx, display, "group", "paired", "展示资料与验证资料已在同一窗口配对", fmt.Sprintf(`{"verifyEventId":%d}`, verify["id"].Int64()))
 	return true, nil
+}
+
+// isCanonicalCollectMaterialPair validates against every persisted event in
+// the proposed range, including terminal and temporarily ignored rows. Normal
+// processing windows intentionally filter those rows, but that filter must not
+// allow an older display to steal a verification video from a closer display.
+func (s *sSysPublish) isCanonicalCollectMaterialPair(ctx context.Context, display, verify gdb.Record) (bool, error) {
+	displayMessageID := display["source_message_id"].Int64()
+	verifyMessageID := verify["source_message_id"].Int64()
+	if displayMessageID <= 0 || verifyMessageID <= displayMessageID {
+		return false, nil
+	}
+	for _, field := range []string{"tenant_id", "account_id", "tg_account_id", "source_id", "source_chat_id"} {
+		if display[field].String() != verify[field].String() {
+			return false, nil
+		}
+	}
+	rows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+		Where("tenant_id", verify["tenant_id"].Int64()).
+		Where("account_id", verify["account_id"].Int64()).
+		Where("tg_account_id", verify["tg_account_id"].Int64()).
+		Where("source_id", verify["source_id"].Int64()).
+		Where("source_chat_id", verify["source_chat_id"].String()).
+		WhereBetween("source_message_id", displayMessageID, verifyMessageID).
+		Fields("id,raw_text,source_message_id,received_at,created_at").
+		OrderAsc("source_message_id").OrderAsc("id").
+		Limit(collectMaterialWindowMaxScan + 1).
+		All()
+	if err != nil {
+		return false, gerror.Wrap(err, "校验资料验证组最近展示消息失败")
+	}
+	if len(rows) == 0 || len(rows) > collectMaterialWindowMaxScan {
+		return false, nil
+	}
+	eventIDs := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		eventIDs = append(eventIDs, row["id"].Int64())
+	}
+	mediaByEvent, err := s.collectEventMediaItemsByEvent(ctx, eventIDs)
+	if err != nil {
+		return false, err
+	}
+	for _, pair := range pairCollectMaterialMessages(collectMaterialEventViews(rows, mediaByEvent)) {
+		if rows[pair.VerifyIndex]["id"].Int64() == verify["id"].Int64() {
+			return rows[pair.DisplayIndex]["id"].Int64() == display["id"].Int64(), nil
+		}
+	}
+	return false, nil
 }
 
 func (s *sSysPublish) markCollectMaterialRole(ctx context.Context, eventID int64, role string, parentID int64, status string) (bool, error) {

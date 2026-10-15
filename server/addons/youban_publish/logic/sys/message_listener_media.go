@@ -33,7 +33,7 @@ func (s *sSysPublish) listenerNotifyMedia(ctx context.Context, plan accountListe
 	if err != nil {
 		return true, err
 	}
-	bot, err := s.telegramBot(ctx, botToken)
+	bot, err := s.telegramMediaBot(ctx, botToken)
 	if err != nil {
 		return true, err
 	}

@@ -1015,7 +1015,11 @@ func (s *sSysPublish) resumeExistingCollectDispatch(ctx context.Context, dispatc
 		if collectContentHasVerification(content) {
 			switch dispatch["status"].String() {
 			case sysin.CollectDispatchStatusPending:
-				if _, err := s.upgradeCollectDispatchProfileVerification(ctx, dispatch, event, content, rule, text); err != nil {
+				profileID, err := s.upgradeCollectDispatchProfileVerification(ctx, dispatch, event, content, rule, text)
+				if err != nil {
+					return false, "", err
+				}
+				if err = s.queueSentCollectDispatchVerification(ctx, event, profileID); err != nil {
 					return false, "", err
 				}
 			case sysin.CollectDispatchStatusSent:
@@ -1071,21 +1075,36 @@ func (s *sSysPublish) upgradeCollectDispatchProfileVerification(ctx context.Cont
 }
 
 func (s *sSysPublish) upgradeSentCollectDispatchVerification(ctx context.Context, dispatch, event gdb.Record, content *collectContentResult, rule gdb.Record, text string) error {
-	dispatchID := dispatch["id"].Int64()
-	if dispatchID <= 0 {
-		return gerror.New("历史验证视频修复缺少分发ID")
-	}
 	profileID, err := s.upgradeCollectDispatchProfileVerification(ctx, dispatch, event, content, rule, text)
 	if err != nil {
 		return err
 	}
-	channelMap, err := collectDispatchChannelMap(ctx, []int64{dispatchID})
-	if err != nil {
-		return err
+	return s.queueSentCollectDispatchVerification(ctx, event, profileID)
+}
+
+func (s *sSysPublish) queueSentCollectDispatchVerification(ctx context.Context, event gdb.Record, profileID int64) error {
+	if profileID <= 0 {
+		return gerror.New("历史验证视频修复缺少资料ID")
 	}
-	channelIDs := channelMap[dispatchID]
+	channelValues, err := pdao.YoubanPublishTgJob.Ctx(ctx).
+		Fields("channel_id").
+		Where("profile_id", profileID).
+		Where("collect_event_id", event["id"].Int64()).
+		Where("status", telegramJobStatusSent).
+		Where("send_phase", telegramSendPhaseCompletedNoVerify).
+		Array()
+	if err != nil {
+		return gerror.Wrap(err, "读取历史资料已发送频道失败")
+	}
+	channelIDs := make([]int64, 0, len(channelValues))
+	for _, value := range channelValues {
+		if channelID := value.Int64(); channelID > 0 {
+			channelIDs = append(channelIDs, channelID)
+		}
+	}
+	channelIDs = uniqueIds(channelIDs)
 	if len(channelIDs) == 0 {
-		return gerror.New("历史验证视频修复没有可推送频道")
+		return nil
 	}
 	operationNo := lateVerificationRepairOperationNo(event["id"].Int64(), profileID)
 	meta := telegramProfilePublishMeta{

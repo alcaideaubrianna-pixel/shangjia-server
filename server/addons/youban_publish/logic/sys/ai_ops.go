@@ -6,8 +6,54 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 
+	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
+
+// AIOpsQueueCollectVerification creates verify-only jobs for profiles whose
+// display messages were already confirmed by Telegram.
+func (s *sSysPublish) AIOpsQueueCollectVerification(ctx context.Context, eventIds []int64, dryRun bool) (int, error) {
+	eventIds = uniqueIds(eventIds)
+	if len(eventIds) == 0 {
+		return 0, gerror.New("展示采集事件ID不能为空")
+	}
+	processed := 0
+	for _, eventId := range eventIds {
+		event, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).Where("id", eventId).One()
+		if err != nil {
+			return processed, gerror.Wrapf(err, "读取展示采集事件失败 eventId:%d", eventId)
+		}
+		if event.IsEmpty() || event["material_role"].String() != collectMaterialRoleDisplay {
+			return processed, gerror.Newf("采集事件不是展示资料 eventId:%d", eventId)
+		}
+		dispatch, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).Where("event_id", eventId).One()
+		if err != nil {
+			return processed, gerror.Wrapf(err, "读取采集分发失败 eventId:%d", eventId)
+		}
+		profileId := dispatch["profile_id"].Int64()
+		if profileId <= 0 {
+			return processed, gerror.Newf("展示采集事件没有关联资料 eventId:%d", eventId)
+		}
+		verifyCount, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+			Where("profile_id", profileId).
+			Where("purpose", "verify").
+			Where("media_type", "video").
+			WhereNull("deleted_at").Count()
+		if err != nil {
+			return processed, gerror.Wrapf(err, "读取资料验证视频失败 profileId:%d", profileId)
+		}
+		if verifyCount == 0 {
+			return processed, gerror.Newf("资料没有可用验证视频 profileId:%d", profileId)
+		}
+		if !dryRun {
+			if err = s.queueSentCollectDispatchVerification(ctx, event, profileId); err != nil {
+				return processed, err
+			}
+		}
+		processed++
+	}
+	return processed, nil
+}
 
 func (s *sSysPublish) AIOpsRebuildProfileMedia(ctx context.Context, profileIds []int64, dryRun bool) (*sysin.CollectProfileMediaRebuildResult, error) {
 	profileIds = uniqueIds(profileIds)

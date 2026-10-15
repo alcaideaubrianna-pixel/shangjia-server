@@ -265,7 +265,7 @@ func (s *sSysPublish) sendDownChannelProfileLockedByChannel(ctx context.Context,
 	if err != nil {
 		return s.handleDownChannelTelegramJobError(ctx, job, err)
 	}
-	bot, err := s.telegramBot(ctx, botToken)
+	bot, err := s.telegramMediaBot(ctx, botToken)
 	if err != nil {
 		return s.handleDownChannelTelegramJobError(ctx, job, err)
 	}
