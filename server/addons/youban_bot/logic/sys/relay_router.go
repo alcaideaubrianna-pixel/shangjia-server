@@ -38,7 +38,7 @@ func (s *sSysBot) handleRelayUpdate(ctx context.Context, botID int64, update *mo
 	if msg.Chat.Type != models.ChatTypePrivate && msg.Chat.Type != models.ChatTypeGroup && msg.Chat.Type != models.ChatTypeSupergroup {
 		return false, nil
 	}
-	cfg, err := s.relayScope(ctx, botID)
+	cfg, err := s.relayIdentity(ctx, botID)
 	if err != nil {
 		g.Log().Warningf(ctx, "双向功能配置不可用，保留原Bot处理 botId:%d err:%+v", botID, err)
 		return false, nil
@@ -63,6 +63,27 @@ func (s *sSysBot) handleRelayUpdate(ctx context.Context, botID int64, update *mo
 	if err = s.relayResolvePendingAdmins(ctx, botID, msg); err != nil {
 		return true, err
 	}
+	command, _ := botCommandAndArgs(msg.Text)
+	if command == "start" {
+		return true, s.relayWelcome(ctx, cfg, msg)
+	}
+	if s.relayMainMenuInput(ctx, msg.Text) {
+		return true, s.relayReply(ctx, botID, msg, "这里是双向聊天机器人。管理请到主机器人发送 /relayadmin；聊天帮助请联系管理员。")
+	}
+	active, state, err := s.relayRuntimeState(ctx, cfg)
+	if err != nil {
+		return true, err
+	}
+	parsed := parseRelayCommand(msg.Text)
+	if !active && (parsed.Name == "/help" || parsed.Name == "/id") {
+		return true, s.handleRelayCommand(ctx, cfg, msg, parsed)
+	}
+	if !active {
+		if msg.Chat.Type != models.ChatTypePrivate && parsed.Name == "" {
+			return true, nil
+		}
+		return true, s.relayReply(ctx, botID, msg, "当前双向聊天不可用："+state+"。请联系管理员。")
+	}
 	binding, err := relayBindingByChat(ctx, botID, source)
 	if err != nil {
 		return true, err
@@ -73,7 +94,7 @@ func (s *sSysBot) handleRelayUpdate(ctx context.Context, botID int64, update *mo
 	}
 	// Telegram service messages are not copyable business content.
 	if !relayMessageHasContent(msg) {
-		return false, nil
+		return true, nil
 	}
 	target := ""
 	if binding != nil {
@@ -99,10 +120,17 @@ func (s *sSysBot) handleRelayUpdate(ctx context.Context, botID int64, update *mo
 		if err = s.storeTelegramMessage(ctx, botID, msg); err != nil {
 			return true, err
 		}
-		return true, s.handleRelayCommand(ctx, cfg, msg, cmd)
+		err := s.handleRelayCommand(ctx, cfg, msg, cmd)
+		if err != nil {
+			return true, err
+		}
+		return true, nil
 	}
 	if binding == nil {
-		return false, nil
+		if msg.Chat.Type == models.ChatTypePrivate {
+			return true, s.relayReply(ctx, botID, msg, "你尚未绑定聊天对象，请联系管理员。可发送 /id 查看用户ID。")
+		}
+		return true, nil
 	}
 	// Commands owned by other plugins remain commands, never ordinary relay content.
 	if strings.HasPrefix(strings.TrimSpace(msg.Text), "/") {
@@ -170,6 +198,11 @@ func (s *sSysBot) enqueueRelayMessage(ctx context.Context, cfg *entity.YoubanBot
 			c := dao.YoubanBotRelayDelivery.Columns()
 			if _, err := dao.YoubanBotRelayDelivery.Ctx(ctx).Data(data).OnConflict(c.BotId, c.SourceChatId, c.SourceMessageId, c.Kind, c.TargetChatId).InsertIgnore(); err != nil {
 				return gerror.Wrap(err, "保存聊天投递任务失败")
+			}
+		}
+		if binding != nil && !command && reason == "" && !strings.HasPrefix(strings.TrimSpace(msg.Text), "/") {
+			if err := s.enqueueRelayFirstUse(ctx, cfg, msg, binding); err != nil {
+				return err
 			}
 		}
 		return nil

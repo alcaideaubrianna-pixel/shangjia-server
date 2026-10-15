@@ -14,19 +14,41 @@ func featureDefaultStatus(feature botFeature) int {
 	return 1
 }
 
-// Optional relay failures must not stop the main Bot. No message is claimed
-// until a shared, enabled configuration positively identifies this Bot.
-func (s *sSysBot) relayScope(ctx context.Context, botID int64) (*entity.YoubanBotRelayConfig, error) {
-	enabled, err := s.relayPluginEnabled(ctx)
-	if err != nil || !enabled {
-		return nil, err
-	}
+// A saved configuration determines identity even while switches are disabled.
+func (s *sSysBot) relayIdentity(ctx context.Context, botID int64) (*entity.YoubanBotRelayConfig, error) {
 	cfg, err := relayConfig(ctx, botID)
+	if err != nil || cfg == nil {
+		return cfg, err
+	}
+	bot, err := s.botById(ctx, botID)
 	if err != nil {
 		return nil, err
 	}
-	if cfg == nil || cfg.Enabled != 1 {
+	if bot.IsDefault == 1 {
 		return nil, nil
 	}
 	return cfg, nil
+}
+func (s *sSysBot) relayRuntimeState(ctx context.Context, cfg *entity.YoubanBotRelayConfig) (bool, string, error) {
+	bot, err := s.botById(ctx, cfg.BotId)
+	if err != nil {
+		return false, "", err
+	}
+	if bot.IsDefault == 1 {
+		return false, "默认主机器人不可用于双向聊天", nil
+	}
+	if bot.Status != 1 {
+		return false, "Bot本身已停用", nil
+	}
+	enabled, err := s.relayPluginEnabled(ctx)
+	if err != nil {
+		return false, "", err
+	}
+	if !enabled {
+		return false, "全局双向插件已停用", nil
+	}
+	if cfg.Enabled != 1 {
+		return false, "此Bot的双向功能已停用", nil
+	}
+	return true, "运行中", nil
 }

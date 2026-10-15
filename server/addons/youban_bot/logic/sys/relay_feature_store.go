@@ -16,7 +16,7 @@ import (
 func (s *sSysBot) enabledAndDisabledRelayBots(ctx context.Context) ([]*sysin.BotModel, error) {
 	var rows []*sysin.BotModel
 	c := dao.YoubanBotBot.Columns()
-	err := dao.YoubanBotBot.Ctx(ctx).Fields(c.Id, c.BotName, c.BotUsername, c.Status).OrderAsc(c.Id).Scan(&rows)
+	err := dao.YoubanBotBot.Ctx(ctx).Fields(c.Id, c.BotName, c.BotUsername, c.Status, c.IsDefault).OrderAsc(c.Id).Scan(&rows)
 	return rows, gerror.Wrap(err, "读取双向Bot选项失败")
 }
 func (s *sSysBot) relayKeywords(ctx context.Context, botID int64) ([]string, error) {

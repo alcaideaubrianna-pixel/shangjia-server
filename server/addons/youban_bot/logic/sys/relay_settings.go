@@ -82,6 +82,9 @@ func (s *sSysBot) adminRelaySaveSettings(ctx context.Context, in *sysin.RelaySet
 	if err != nil {
 		return err
 	}
+	if bot.IsDefault == 1 {
+		return gerror.New("默认主机器人不能配置为双向机器人，请选择独立Bot")
+	}
 	if in.AuditGroupId != "" {
 		if err = s.validateRelayAuditGroup(ctx, bot.BotToken, in.BotId, in.AuditGroupId); err != nil {
 			return err
