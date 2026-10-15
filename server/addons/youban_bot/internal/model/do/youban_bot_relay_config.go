@@ -21,4 +21,7 @@ type YoubanBotRelayConfig struct {
 	AuditGroupId  any         //
 	CreatedAt     *gtime.Time //
 	UpdatedAt     *gtime.Time //
+	TenantId      any         //
+	AccountId     any         //
+	SourceBotId   any         //
 }

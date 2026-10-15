@@ -12,7 +12,6 @@ import (
 	"hotgo/addons/youban_bot/internal/dao"
 	"hotgo/addons/youban_bot/internal/model/do"
 	"hotgo/addons/youban_bot/internal/model/entity"
-	"hotgo/addons/youban_bot/model/input/sysin"
 
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -35,14 +34,12 @@ func (s *sSysBot) enqueueRelayFirstUse(ctx context.Context, cfg *entity.YoubanBo
 			recipients[a.UserId] = true
 		}
 	}
-	var owners []*entity.YoubanBotAccountBind
-	if err := dao.YoubanBotAccountBind.Ctx(ctx).Where(do.YoubanBotAccountBind{AccountId: cfg.OwnerId, App: sysin.BotAppAdmin, Status: 1}).Scan(&owners); err != nil {
+	owners, err := s.relayOwnerTelegramIDs(ctx, cfg)
+	if err != nil {
 		return err
 	}
-	for _, owner := range owners {
-		if id, err := strconv.ParseInt(owner.TelegramUserId, 10, 64); err == nil && id > 0 {
-			recipients[owner.TelegramUserId] = true
-		}
+	for _, id := range owners {
+		recipients[id] = true
 	}
 	source := strconv.FormatInt(msg.Chat.ID, 10)
 	name := firstNonEmpty(strings.TrimSpace(msg.From.FirstName+" "+msg.From.LastName), source)

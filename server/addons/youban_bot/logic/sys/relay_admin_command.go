@@ -15,6 +15,20 @@ import (
 )
 
 func (s *sSysBot) relayAdminCommand(ctx context.Context, cfg *entity.YoubanBotRelayConfig, cmd relayCommand) (string, error) {
+	if cmd.Name == "删除管理员" {
+		if !sysin.RelayIdentityValid(cmd.Args) {
+			return "", gerror.New("格式：删除管理员 用户ID或@用户名")
+		}
+		c := dao.YoubanBotRelayAdmin.Columns()
+		q := dao.YoubanBotRelayAdmin.Ctx(ctx).Where(c.BotId, cfg.BotId)
+		if strings.HasPrefix(cmd.Args, "@") {
+			q = q.Where(c.Username, strings.ToLower(cmd.Args))
+		} else {
+			q = q.Where(c.UserId, cmd.Args)
+		}
+		_, err := q.Delete()
+		return "附加管理员已移除；租户账户所有者权限不受影响。", err
+	}
 	if cmd.Name == "添加管理员" {
 		if !sysin.RelayIdentityValid(cmd.Args) || strings.HasPrefix(cmd.Args, "-") {
 			return "", gerror.New("格式：添加管理员 用户ID或@用户名")
@@ -34,7 +48,7 @@ func (s *sSysBot) relayAdminCommand(ctx context.Context, cfg *entity.YoubanBotRe
 	if err := dao.YoubanBotRelayAdmin.Ctx(ctx).Where(do.YoubanBotRelayAdmin{BotId: cfg.BotId}).OrderAsc(dao.YoubanBotRelayAdmin.Columns().Id).Scan(&admins); err != nil {
 		return "", err
 	}
-	lines := []string{"<b>附加管理员</b>", "默认管理员：首次保存配置的后台账号（需绑定TG账号）。"}
+	lines := []string{"<b>附加管理员</b>", "默认管理员：当前配置所属租户账户（需绑定上架端TG账号）。"}
 	for i, a := range admins {
 		if i >= 50 {
 			lines = append(lines, "其余管理员请在后台查看。")

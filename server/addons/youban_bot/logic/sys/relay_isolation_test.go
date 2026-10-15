@@ -56,7 +56,7 @@ func TestRelayHelpOnlyBelongsToConfiguredBot(t *testing.T) {
 	if _, err := dao.YoubanBotFeature.Ctx(ctx).Data(do.YoubanBotFeature{FeatureKey: consts.RelayFeatureKey, Status: 1, ConfigJson: "{}"}).Insert(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := dao.YoubanBotRelayConfig.Ctx(ctx).Data(do.YoubanBotRelayConfig{BotId: 2, OwnerId: 99, Enabled: 1}).Insert(); err != nil {
+	if _, err := dao.YoubanBotRelayConfig.Ctx(ctx).Data(do.YoubanBotRelayConfig{BotId: 2, TenantId: 1, AccountId: 99, SourceBotId: 1, OwnerId: 99, Enabled: 1}).Insert(); err != nil {
 		t.Fatal(err)
 	}
 	s := NewSysBot()

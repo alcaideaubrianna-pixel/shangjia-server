@@ -59,6 +59,9 @@ func relayFilterReason(cfg *entity.YoubanBotRelayConfig, rules []*entity.YoubanB
 }
 
 func (s *sSysBot) AdminRelayRuleList(ctx context.Context, in *sysin.RelayListInp) ([]*entity.YoubanBotRelayRule, int, error) {
+	if err := s.relayCheckAccess(ctx, in.BotId); err != nil {
+		return nil, 0, err
+	}
 	if err := in.Filter(); err != nil {
 		return nil, 0, err
 	}

@@ -92,6 +92,7 @@ type ISysPublish interface {
 	AIOpsTelegramMessageOffline(ctx context.Context, in *sysin.AIOpsTelegramOfflineInp) (*sysin.AIOpsTelegramOfflineResult, error)
 	ServerMediaList(ctx context.Context, in *sysin.MediaListInp) (list []*sysin.MediaModel, err error)
 	ServerMediaDelete(ctx context.Context, in *sysin.MediaDeleteInp) (err error)
+	RelayOwnedBots(ctx context.Context, tenantID, accountID, botID int64, lock bool) ([]*sysin.RelayOwnedBotModel, error)
 	ServerBotList(ctx context.Context, in *sysin.BotListInp) (list []*sysin.BotModel, totalCount int, err error)
 	ServerBotSave(ctx context.Context, in *sysin.BotSaveInp) (err error)
 	ServerBotDelete(ctx context.Context, in *sysin.BotDeleteInp) (err error)

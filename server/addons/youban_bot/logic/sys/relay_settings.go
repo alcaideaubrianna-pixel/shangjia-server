@@ -14,8 +14,6 @@ import (
 	"hotgo/addons/youban_bot/internal/model/do"
 	"hotgo/addons/youban_bot/internal/model/entity"
 	"hotgo/addons/youban_bot/model/input/sysin"
-	"hotgo/internal/library/contexts"
-	"hotgo/internal/model/input/form"
 )
 
 func relayConfig(ctx context.Context, botID int64) (*entity.YoubanBotRelayConfig, error) {
@@ -25,33 +23,30 @@ func relayConfig(ctx context.Context, botID int64) (*entity.YoubanBotRelayConfig
 }
 
 func (s *sSysBot) AdminRelayBotList(ctx context.Context, in *sysin.BotListInp) ([]*sysin.RelayBotModel, int, error) {
-	if in == nil {
-		in = &sysin.BotListInp{}
-	}
-	in.Page, in.PerPage, _ = form.CalPage(in.Page, in.PerPage)
-	bots, total, err := s.AdminBotList(ctx, in)
+	account, err := s.relayAccount(ctx)
 	if err != nil {
 		return nil, 0, err
 	}
-	list := make([]*sysin.RelayBotModel, 0, len(bots))
-	for _, bot := range bots {
-		cfg, err := relayConfig(ctx, bot.Id)
-		if err != nil {
-			return nil, 0, err
-		}
-		item := &sysin.RelayBotModel{Id: bot.Id, BotName: bot.BotName, BotUsername: bot.BotUsername, Status: bot.Status}
-		if cfg != nil {
-			item.Enabled = cfg.Enabled
-			item.BlockLinks = cfg.BlockLinks
-			item.AuditDatabase = cfg.AuditDatabase
-			item.AuditGroupId = cfg.AuditGroupId
-		}
-		list = append(list, item)
+	var cfg *entity.YoubanBotRelayConfig
+	err = dao.YoubanBotRelayConfig.Ctx(ctx).Where(do.YoubanBotRelayConfig{TenantId: account.TenantId, AccountId: account.AccountId}).Scan(&cfg)
+	if err != nil {
+		return nil, 0, err
 	}
-	return list, total, nil
+	if cfg == nil {
+		return []*sysin.RelayBotModel{}, 0, nil
+	}
+	bot, err := s.botById(ctx, cfg.BotId)
+	if err != nil {
+		return nil, 0, err
+	}
+	return []*sysin.RelayBotModel{{Id: bot.Id, BotName: bot.BotName, BotUsername: bot.BotUsername, Status: bot.Status, Enabled: cfg.Enabled, BlockLinks: cfg.BlockLinks, AuditDatabase: cfg.AuditDatabase, AuditGroupId: cfg.AuditGroupId}}, 1, nil
+
 }
 
 func (s *sSysBot) AdminRelaySettings(ctx context.Context, in *sysin.RelayBotInp) (*sysin.RelaySettingsModel, error) {
+	if err := s.relayCheckAccess(ctx, in.BotId); err != nil {
+		return nil, err
+	}
 	if err := in.Filter(); err != nil {
 		return nil, err
 	}
@@ -74,9 +69,8 @@ func (s *sSysBot) adminRelaySaveSettings(ctx context.Context, in *sysin.RelaySet
 	if err := in.Filter(); err != nil {
 		return err
 	}
-	ownerID := contexts.GetUserId(ctx)
-	if ownerID <= 0 {
-		return gerror.New("请先登录")
+	if err := s.relayCheckAccess(ctx, in.BotId); err != nil {
+		return err
 	}
 	bot, err := s.botById(ctx, in.BotId)
 	if err != nil {
@@ -111,8 +105,7 @@ func (s *sSysBot) adminRelaySaveSettings(ctx context.Context, in *sysin.RelaySet
 		}
 		data := do.YoubanBotRelayConfig{BotId: in.BotId, Enabled: in.Enabled, BlockLinks: in.BlockLinks, AuditDatabase: in.AuditDatabase, AuditGroupId: in.AuditGroupId}
 		if cfg == nil {
-			data.OwnerId = ownerID
-			_, err = dao.YoubanBotRelayConfig.Ctx(ctx).Data(data).Insert()
+			return gerror.New("请通过主机器人创建租户账户双向配置")
 		} else {
 			_, err = dao.YoubanBotRelayConfig.Ctx(ctx).WherePri(cfg.Id).Data(data).Update()
 		}
@@ -188,22 +181,16 @@ func (s *sSysBot) validateRelayAuditGroup(ctx context.Context, token string, bot
 	return nil
 }
 
-// Owner authorization follows the existing backend account binding, never a username.
+// Tenant/account identity is resolved through the same binding as collection management.
 func (s *sSysBot) relayIsAdmin(ctx context.Context, cfg *entity.YoubanBotRelayConfig, userID int64) (bool, error) {
-	if userID <= 0 {
+	if userID <= 0 || !relayOwned(cfg) {
 		return false, nil
 	}
-	id := strconv.FormatInt(userID, 10)
-	var owner *struct {
-		Id int64 `json:"id"`
-	}
-	err := dao.YoubanBotAccountBind.Ctx(ctx).Fields(dao.YoubanBotAccountBind.Columns().Id).Where(do.YoubanBotAccountBind{AccountId: cfg.OwnerId, App: sysin.BotAppAdmin, TelegramUserId: id, Status: 1}).Scan(&owner)
-	if err != nil {
-		return false, gerror.Wrap(err, "检查默认管理员失败")
-	}
-	if owner != nil && owner.Id > 0 {
+	account, err := s.relayBoundAccount(ctx, userID)
+	if err == nil && account.TenantId == cfg.TenantId && account.AccountId == cfg.AccountId {
 		return true, nil
 	}
-	n, err := dao.YoubanBotRelayAdmin.Ctx(ctx).Where(do.YoubanBotRelayAdmin{BotId: cfg.BotId, UserId: id}).Count()
+	// Explicit delegated administrators belong to this configuration's unique Bot.
+	n, err := dao.YoubanBotRelayAdmin.Ctx(ctx).Where(do.YoubanBotRelayAdmin{BotId: cfg.BotId, UserId: strconv.FormatInt(userID, 10)}).Count()
 	return n > 0, gerror.Wrap(err, "检查双向管理员失败")
 }

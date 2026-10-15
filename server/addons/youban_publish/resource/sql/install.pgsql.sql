@@ -2247,3 +2247,8 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_delivery_step" (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_delivery_step_job" ON "hg_youban_publish_tg_delivery_step" ("job_id", "step_key");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_delivery_step_recovery" ON "hg_youban_publish_tg_delivery_step" ("status", "next_retry_at", "id");
+
+ALTER TABLE hg_youban_publish_bot ADD COLUMN IF NOT EXISTS account_id bigint NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS idx_ybp_bot_account ON hg_youban_publish_bot(tenant_id,account_id,created_by,status);
+
+ALTER TABLE hg_youban_publish_bot ADD COLUMN IF NOT EXISTS bot_type varchar(32) NOT NULL DEFAULT 'normal';

@@ -92,7 +92,6 @@ type BotRefreshModel struct {
 }
 
 type FeatureListInp struct {
-	BotId int64 `json:"botId" dc:"双向配置Bot"`
 	form.PageReq
 	Keyword string `json:"keyword" dc:"关键词"`
 	Status  int    `json:"status" dc:"状态"`

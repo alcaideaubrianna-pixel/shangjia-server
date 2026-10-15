@@ -30,12 +30,24 @@ func (s *sSysBot) relayIdentity(ctx context.Context, botID int64) (*entity.Youba
 	return cfg, nil
 }
 func (s *sSysBot) relayRuntimeState(ctx context.Context, cfg *entity.YoubanBotRelayConfig) (bool, string, error) {
+	if !relayOwned(cfg) {
+		return false, "旧配置未归属租户账户，已隔离停用", nil
+	}
 	bot, err := s.botById(ctx, cfg.BotId)
 	if err != nil {
 		return false, "", err
 	}
 	if bot.IsDefault == 1 {
 		return false, "默认主机器人不可用于双向聊天", nil
+	}
+	if cfg.SourceBotId > 0 {
+		valid, err := s.relaySourceBotValid(ctx, cfg)
+		if err != nil {
+			return false, "", err
+		}
+		if !valid {
+			return false, "后台Bot已停用、删除、变更归属或更换Token，请在后台检查", nil
+		}
 	}
 	if bot.Status != 1 {
 		return false, "Bot本身已停用", nil

@@ -14,6 +14,9 @@ import (
 )
 
 func (s *sSysBot) AdminRelayBindingList(ctx context.Context, in *sysin.RelayListInp) ([]*entity.YoubanBotRelayBinding, int, error) {
+	if err := s.relayCheckAccess(ctx, in.BotId); err != nil {
+		return nil, 0, err
+	}
 	if err := in.Filter(); err != nil {
 		return nil, 0, err
 	}
