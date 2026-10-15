@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync"
 
+	"hotgo/addons/youban_bot/internal/model/entity"
+
 	"hotgo/addons/youban_bot/model/input/sysin"
 )
 
@@ -45,6 +47,17 @@ func TriggerAccountBoundHooks(ctx context.Context, event *AccountBoundEvent) []e
 }
 
 type ISysBot interface {
+	AdminRelaySwitch(ctx context.Context, in *sysin.RelaySwitchInp) error
+	AdminRelayBotList(ctx context.Context, in *sysin.BotListInp) ([]*sysin.RelayBotModel, int, error)
+	AdminRelaySettings(ctx context.Context, in *sysin.RelayBotInp) (*sysin.RelaySettingsModel, error)
+	AdminRelaySaveSettings(ctx context.Context, in *sysin.RelaySettingsInp) error
+	AdminRelayBindingList(ctx context.Context, in *sysin.RelayListInp) ([]*entity.YoubanBotRelayBinding, int, error)
+	AdminRelayBind(ctx context.Context, in *sysin.RelayBindingInp) error
+	AdminRelayUnbind(ctx context.Context, in *sysin.RelayDeleteInp) error
+	AdminRelayRuleList(ctx context.Context, in *sysin.RelayListInp) ([]*entity.YoubanBotRelayRule, int, error)
+	AdminRelaySaveRule(ctx context.Context, in *sysin.RelayRuleInp) error
+	AdminRelayDeleteRule(ctx context.Context, in *sysin.RelayDeleteInp) error
+	AdminRelayRecordList(ctx context.Context, in *sysin.RelayListInp) ([]*entity.YoubanBotRelayDelivery, int, error)
 	StartRuntime(ctx context.Context)
 	StopRuntime()
 	AdminBotList(ctx context.Context, in *sysin.BotListInp) (list []*sysin.BotModel, totalCount int, err error)

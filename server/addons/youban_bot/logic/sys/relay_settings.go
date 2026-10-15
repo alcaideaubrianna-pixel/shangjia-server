@@ -1,0 +1,211 @@
+package sys
+
+import (
+	"context"
+	"strconv"
+	"strings"
+
+	tgbot "github.com/go-telegram/bot"
+	"github.com/go-telegram/bot/models"
+	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/errors/gerror"
+
+	"hotgo/addons/youban_bot/internal/dao"
+	"hotgo/addons/youban_bot/internal/model/do"
+	"hotgo/addons/youban_bot/internal/model/entity"
+	"hotgo/addons/youban_bot/model/input/sysin"
+	"hotgo/internal/library/contexts"
+	"hotgo/internal/model/input/form"
+)
+
+func relayConfig(ctx context.Context, botID int64) (*entity.YoubanBotRelayConfig, error) {
+	var row *entity.YoubanBotRelayConfig
+	err := dao.YoubanBotRelayConfig.Ctx(ctx).Where(dao.YoubanBotRelayConfig.Columns().BotId, botID).Scan(&row)
+	return row, gerror.Wrap(err, "读取双向机器人设置失败")
+}
+
+func (s *sSysBot) AdminRelayBotList(ctx context.Context, in *sysin.BotListInp) ([]*sysin.RelayBotModel, int, error) {
+	if in == nil {
+		in = &sysin.BotListInp{}
+	}
+	in.Page, in.PerPage, _ = form.CalPage(in.Page, in.PerPage)
+	bots, total, err := s.AdminBotList(ctx, in)
+	if err != nil {
+		return nil, 0, err
+	}
+	list := make([]*sysin.RelayBotModel, 0, len(bots))
+	for _, bot := range bots {
+		cfg, err := relayConfig(ctx, bot.Id)
+		if err != nil {
+			return nil, 0, err
+		}
+		item := &sysin.RelayBotModel{Id: bot.Id, BotName: bot.BotName, BotUsername: bot.BotUsername, Status: bot.Status}
+		if cfg != nil {
+			item.Enabled = cfg.Enabled
+			item.BlockLinks = cfg.BlockLinks
+			item.AuditDatabase = cfg.AuditDatabase
+			item.AuditGroupId = cfg.AuditGroupId
+		}
+		list = append(list, item)
+	}
+	return list, total, nil
+}
+
+func (s *sSysBot) AdminRelaySettings(ctx context.Context, in *sysin.RelayBotInp) (*sysin.RelaySettingsModel, error) {
+	if err := in.Filter(); err != nil {
+		return nil, err
+	}
+	if _, err := s.botById(ctx, in.BotId); err != nil {
+		return nil, err
+	}
+	cfg, err := relayConfig(ctx, in.BotId)
+	if err != nil {
+		return nil, err
+	}
+	if cfg == nil {
+		cfg = &entity.YoubanBotRelayConfig{BotId: in.BotId, AuditDatabase: 1}
+	}
+	admins := make([]*entity.YoubanBotRelayAdmin, 0)
+	err = dao.YoubanBotRelayAdmin.Ctx(ctx).Where(dao.YoubanBotRelayAdmin.Columns().BotId, in.BotId).OrderAsc(dao.YoubanBotRelayAdmin.Columns().Id).Scan(&admins)
+	return &sysin.RelaySettingsModel{YoubanBotRelayConfig: cfg, Admins: admins}, gerror.Wrap(err, "读取双向机器人管理员失败")
+}
+
+func (s *sSysBot) AdminRelaySaveSettings(ctx context.Context, in *sysin.RelaySettingsInp) error {
+	if err := in.Filter(); err != nil {
+		return err
+	}
+	ownerID := contexts.GetUserId(ctx)
+	if ownerID <= 0 {
+		return gerror.New("请先登录")
+	}
+	bot, err := s.botById(ctx, in.BotId)
+	if err != nil {
+		return err
+	}
+	if in.AuditGroupId != "" {
+		if err = s.validateRelayAuditGroup(ctx, bot.BotToken, in.BotId, in.AuditGroupId); err != nil {
+			return err
+		}
+	}
+	admins, err := s.resolveRelayAdmins(ctx, in.BotId, in.Admins)
+	if err != nil {
+		return err
+	}
+	return dao.YoubanBotRelayConfig.Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		var cfg *entity.YoubanBotRelayConfig
+		err := dao.YoubanBotRelayConfig.Ctx(ctx).Where(dao.YoubanBotRelayConfig.Columns().BotId, in.BotId).LockUpdate().Scan(&cfg)
+		if err != nil {
+			return err
+		}
+		if in.AuditGroupId != "" {
+			n, err := dao.YoubanBotRelayEndpoint.Ctx(ctx).Where(do.YoubanBotRelayEndpoint{BotId: in.BotId, ChatId: in.AuditGroupId}).Count()
+			if err != nil {
+				return err
+			}
+			if n > 0 {
+				return gerror.New("审计群不能作为双向绑定对象")
+			}
+		}
+		data := do.YoubanBotRelayConfig{BotId: in.BotId, Enabled: in.Enabled, BlockLinks: in.BlockLinks, AuditDatabase: in.AuditDatabase, AuditGroupId: in.AuditGroupId}
+		if cfg == nil {
+			data.OwnerId = ownerID
+			_, err = dao.YoubanBotRelayConfig.Ctx(ctx).Data(data).Insert()
+		} else {
+			_, err = dao.YoubanBotRelayConfig.Ctx(ctx).WherePri(cfg.Id).Data(data).Update()
+		}
+		if err != nil {
+			return gerror.Wrap(err, "保存双向机器人设置失败")
+		}
+		if _, err = dao.YoubanBotRelayAdmin.Ctx(ctx).Where(dao.YoubanBotRelayAdmin.Columns().BotId, in.BotId).Delete(); err != nil {
+			return gerror.Wrap(err, "更新双向管理员失败")
+		}
+		for _, admin := range admins {
+			if _, err = dao.YoubanBotRelayAdmin.Ctx(ctx).Data(admin).Insert(); err != nil {
+				return gerror.Wrap(err, "保存双向管理员失败")
+			}
+		}
+		return nil
+	})
+}
+
+func (s *sSysBot) resolveRelayAdmins(ctx context.Context, botID int64, values []string) ([]do.YoubanBotRelayAdmin, error) {
+	list := make([]do.YoubanBotRelayAdmin, 0, len(values))
+	seen := map[string]bool{}
+	for _, value := range values {
+		userID, username := "", strings.ToLower(value)
+		if strings.HasPrefix(value, "@") {
+			peer, err := s.relayKnownUser(ctx, botID, value)
+			if err != nil {
+				return nil, err
+			}
+			if peer != nil {
+				userID = peer.ID
+			}
+		} else {
+			id, err := strconv.ParseInt(value, 10, 64)
+			if err != nil || id <= 0 {
+				return nil, gerror.New("管理员必须是用户，不能是群聊")
+			}
+			userID = strconv.FormatInt(id, 10)
+		}
+		key := username
+		if userID != "" {
+			key = userID
+		}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		list = append(list, do.YoubanBotRelayAdmin{BotId: botID, UserId: userID, Username: username})
+	}
+	return list, nil
+}
+
+func (s *sSysBot) validateRelayAuditGroup(ctx context.Context, token string, botID int64, groupID string) error {
+	bot, err := s.relayBot(ctx, token)
+	if err != nil {
+		return err
+	}
+	chat, err := bot.GetChat(ctx, &tgbot.GetChatParams{ChatID: groupID})
+	if err != nil {
+		return gerror.Wrap(err, "无法访问审计群，请先添加机器人")
+	}
+	if chat.Type != models.ChatTypeSupergroup || !chat.IsForum {
+		return gerror.New("审计目标必须是已开启话题的超级群")
+	}
+	member, err := bot.GetChatMember(ctx, &tgbot.GetChatMemberParams{ChatID: groupID, UserID: bot.ID()})
+	if err != nil {
+		return gerror.Wrap(err, "检查审计群权限失败")
+	}
+	if member == nil || member.Administrator == nil || !member.Administrator.CanManageTopics {
+		return gerror.New("请授予机器人审计群管理员及管理话题权限")
+	}
+	n, err := dao.YoubanBotRelayEndpoint.Ctx(ctx).Where(do.YoubanBotRelayEndpoint{BotId: botID, ChatId: groupID}).Count()
+	if err != nil {
+		return gerror.Wrap(err, "检查审计群绑定失败")
+	}
+	if n > 0 {
+		return gerror.New("审计群不能同时作为双向绑定对象")
+	}
+	return nil
+}
+
+// Owner authorization follows the existing backend account binding, never a username.
+func (s *sSysBot) relayIsAdmin(ctx context.Context, cfg *entity.YoubanBotRelayConfig, userID int64) (bool, error) {
+	if userID <= 0 {
+		return false, nil
+	}
+	id := strconv.FormatInt(userID, 10)
+	var owner *struct {
+		Id int64 `json:"id"`
+	}
+	err := dao.YoubanBotAccountBind.Ctx(ctx).Fields(dao.YoubanBotAccountBind.Columns().Id).Where(do.YoubanBotAccountBind{AccountId: cfg.OwnerId, App: sysin.BotAppAdmin, TelegramUserId: id, Status: 1}).Scan(&owner)
+	if err != nil {
+		return false, gerror.Wrap(err, "检查默认管理员失败")
+	}
+	if owner != nil && owner.Id > 0 {
+		return true, nil
+	}
+	n, err := dao.YoubanBotRelayAdmin.Ctx(ctx).Where(do.YoubanBotRelayAdmin{BotId: cfg.BotId, UserId: id}).Count()
+	return n > 0, gerror.Wrap(err, "检查双向管理员失败")
+}
