@@ -240,6 +240,32 @@ func TestTelegramJobRequiresChannelCompletionPriority(t *testing.T) {
 	}
 }
 
+func TestTelegramChannelBlockingStatusesExcludeTerminalJobs(t *testing.T) {
+	statuses := make(map[string]struct{})
+	for _, status := range telegramChannelBlockingJobStatuses() {
+		statuses[status] = struct{}{}
+	}
+	for _, status := range []string{
+		telegramJobStatusPending,
+		telegramJobStatusRetryWait,
+		telegramJobStatusConfirming,
+		telegramJobStatusSending,
+	} {
+		if _, ok := statuses[status]; !ok {
+			t.Fatalf("active status %q must preserve channel ordering", status)
+		}
+	}
+	for _, status := range []string{
+		telegramJobStatusFailed,
+		telegramJobStatusSent,
+		telegramJobStatusSuperseded,
+	} {
+		if _, ok := statuses[status]; ok {
+			t.Fatalf("terminal status %q must not block the channel", status)
+		}
+	}
+}
+
 func TestTelegramUnknownProcessingBlocksNextChannelJobIntegration(t *testing.T) {
 	if os.Getenv("YOUBAN_PUBLISH_INTEGRATION") != "1" {
 		t.Skip("set YOUBAN_PUBLISH_INTEGRATION=1 to run local PostgreSQL integration test")
