@@ -5,18 +5,18 @@
 package dao
 
 import (
-	"hotgo/addons/youban_publish/internal/dao/internal"
+	"hotgo/addons/youban_two_way_bot/internal/dao/internal"
 )
 
-// youbanBotRegistryDao is the data access object for the table hg_youban_bot_registry.
+// youbanTwoWayBotBotDao is the data access object for the table hg_youban_two_way_bot_bot.
 // You can define custom methods on it to extend its functionality as needed.
-type youbanBotRegistryDao struct {
-	*internal.YoubanBotRegistryDao
+type youbanTwoWayBotBotDao struct {
+	*internal.YoubanTwoWayBotBotDao
 }
 
 var (
-	// YoubanBotRegistry is a globally accessible object for table hg_youban_bot_registry operations.
-	YoubanBotRegistry = youbanBotRegistryDao{internal.NewYoubanBotRegistryDao()}
+	// YoubanTwoWayBotBot is a globally accessible object for table hg_youban_two_way_bot_bot operations.
+	YoubanTwoWayBotBot = youbanTwoWayBotBotDao{internal.NewYoubanTwoWayBotBotDao()}
 )
 
 // Add your custom methods and functionality below.

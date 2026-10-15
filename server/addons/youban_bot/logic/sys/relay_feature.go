@@ -32,10 +32,14 @@ func (f *relayGatewayFeature) Key() string   { return consts.RelayFeatureKey }
 func (f *relayGatewayFeature) Priority() int { return 1000 }
 func (f *relayGatewayFeature) Menus(ctx context.Context, bc gatewayservice.BotContext) (gatewayservice.FeatureMenus, error) {
 	for _, binding := range bc.Bindings {
-		if binding.Owner == "youban_bot" || binding.Owner == "youban_two_way_bot" {
-			if binding.Owner == "youban_two_way_bot" {
-				return gatewayservice.FeatureMenus{Managed: true, Items: []gatewayservice.MenuItem{{Command: "help", Description: "双向管理帮助（仅管理员）", Order: 1}, {Command: "id", Description: "查看聊天ID", Order: 2}}}, nil
+		if binding.Owner == relayTwoWayBotOwner {
+			cfg, err := f.bot.relayIdentity(ctx, binding.ReferenceID)
+			if err != nil || cfg == nil || cfg.Enabled != 1 {
+				return gatewayservice.FeatureMenus{}, err
 			}
+			return gatewayservice.FeatureMenus{Managed: true, Items: []gatewayservice.MenuItem{{Command: "start", Description: "开始双向聊天", Order: 0}, {Command: "help", Description: "双向管理帮助（仅管理员）", Order: 1}, {Command: "id", Description: "查看聊天ID", Order: 2}}}, nil
+		}
+		if binding.Owner == "youban_bot" {
 			items := make([]gatewayservice.MenuItem, 0)
 			for i, feature := range botFeatures {
 				if feature == nil || !f.bot.featureMenuVisible(ctx, feature.Key()) {
@@ -46,10 +50,6 @@ func (f *relayGatewayFeature) Menus(ctx context.Context, bc gatewayservice.BotCo
 					items = append(items, gatewayservice.MenuItem{Command: cmd, Description: f.bot.featureDescription(ctx, feature), Order: i})
 				}
 			}
-			cfg, err := f.bot.relayIdentity(ctx, binding.ReferenceID)
-			if err == nil && cfg != nil {
-				items = []gatewayservice.MenuItem{{Command: "start", Description: "开始双向聊天", Order: 0}, {Command: "help", Description: "双向管理帮助（仅管理员）", Order: 1}, {Command: "id", Description: "查看聊天ID", Order: 2}}
-			}
 			return gatewayservice.FeatureMenus{Managed: true, Items: items}, nil
 		}
 	}
@@ -57,16 +57,18 @@ func (f *relayGatewayFeature) Menus(ctx context.Context, bc gatewayservice.BotCo
 }
 func (f *relayGatewayFeature) HandleUpdate(ctx context.Context, bc gatewayservice.BotContext, update *models.Update) (bool, error) {
 	for _, binding := range bc.Bindings {
-		if binding.Owner == "youban_bot" || binding.Owner == "youban_two_way_bot" {
-
+		if binding.Owner == "youban_bot" {
 			if update != nil && update.CallbackQuery != nil {
 				if handled, err := f.bot.handleRelayManagementCallback(ctx, binding.ReferenceID, update.CallbackQuery); handled || err != nil {
 					return handled, err
 				}
-				cfg, err := f.bot.relayIdentity(ctx, binding.ReferenceID)
-				if binding.Owner == "youban_bot" && err == nil && cfg != nil {
-					return true, f.bot.relayExpiredButton(ctx, binding.ReferenceID, update.CallbackQuery)
-				}
+			}
+			return false, nil
+		}
+		if binding.Owner == relayTwoWayBotOwner {
+			cfg, err := f.bot.relayIdentity(ctx, binding.ReferenceID)
+			if err != nil || cfg == nil || cfg.Enabled != 1 {
+				return false, err
 			}
 			handled, err := f.bot.handleRelayUpdate(ctx, binding.ReferenceID, update)
 			if handled && err != nil && update != nil && update.Message != nil {

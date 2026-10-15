@@ -33,22 +33,18 @@ type BotListInp struct {
 }
 
 type BotModel struct {
-	TenantId     int64       `json:"tenantId"`
-	AccountId    int64       `json:"accountId"`
-	BotType      string      `json:"botType"`
-	SupergroupId string      `json:"supergroupId"`
-	Id           int64       `json:"id" dc:"ID"`
-	BotName      string      `json:"botName" dc:"Bot名称"`
-	BotUsername  string      `json:"botUsername" dc:"Bot用户名"`
-	BotToken     string      `json:"botToken" dc:"Bot Token"`
-	IsOfficial   int         `json:"isOfficial" dc:"是否官方Bot"`
-	IsDefault    int         `json:"isDefault" dc:"是否默认官方Bot"`
-	Remark       string      `json:"remark" dc:"备注"`
-	RunMode      string      `json:"runMode" dc:"运行模式:auto/webhook/polling"`
-	WebhookUrl   string      `json:"webhookUrl" dc:"Webhook地址"`
-	Status       int         `json:"status" dc:"状态"`
-	CreatedAt    *gtime.Time `json:"createdAt" dc:"创建时间"`
-	UpdatedAt    *gtime.Time `json:"updatedAt" dc:"更新时间"`
+	Id          int64       `json:"id" dc:"ID"`
+	BotName     string      `json:"botName" dc:"Bot名称"`
+	BotUsername string      `json:"botUsername" dc:"Bot用户名"`
+	BotToken    string      `json:"botToken" dc:"Bot Token"`
+	IsOfficial  int         `json:"isOfficial" dc:"是否官方Bot"`
+	IsDefault   int         `json:"isDefault" dc:"是否默认官方Bot"`
+	Remark      string      `json:"remark" dc:"备注"`
+	RunMode     string      `json:"runMode" dc:"运行模式:auto/webhook/polling"`
+	WebhookUrl  string      `json:"webhookUrl" dc:"Webhook地址"`
+	Status      int         `json:"status" dc:"状态"`
+	CreatedAt   *gtime.Time `json:"createdAt" dc:"创建时间"`
+	UpdatedAt   *gtime.Time `json:"updatedAt" dc:"更新时间"`
 }
 
 type BotSaveInp struct {

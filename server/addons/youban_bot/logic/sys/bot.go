@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	botTable                = "hg_youban_bot_registry"
+	botTable                = "hg_youban_bot_bot"
 	featureTable            = "hg_youban_bot_feature"
 	authCodeTable           = "hg_youban_bot_auth_code"
 	accountBindTbl          = "hg_youban_bot_account_bind"

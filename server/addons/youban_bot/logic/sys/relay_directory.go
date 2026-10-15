@@ -86,7 +86,7 @@ func (s *sSysBot) relayResolvePeer(ctx context.Context, botID int64, identity st
 }
 
 func (s *sSysBot) relayValidatePeer(ctx context.Context, botID int64, peer *relayPeer) error {
-	row, err := s.botById(ctx, botID)
+	row, err := s.relayBotById(ctx, botID)
 	if err != nil {
 		return err
 	}
@@ -140,7 +140,7 @@ func (s *sSysBot) relayVerifyUsername(ctx context.Context, botID int64, identity
 	if !strings.HasPrefix(identity, "@") {
 		return nil
 	}
-	row, err := s.botById(ctx, botID)
+	row, err := s.relayBotById(ctx, botID)
 	if err != nil {
 		return err
 	}

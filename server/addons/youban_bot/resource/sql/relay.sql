@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS hg_youban_bot_relay_config (
  id bigint NOT NULL AUTO_INCREMENT PRIMARY KEY,
- bot_id bigint NOT NULL UNIQUE, tenant_id bigint NOT NULL DEFAULT 0, account_id bigint NOT NULL DEFAULT 0, enabled integer NOT NULL DEFAULT 0, block_links integer NOT NULL DEFAULT 0, audit_database integer NOT NULL DEFAULT 1, audit_group_id varchar(64) NOT NULL DEFAULT '',
+ bot_id bigint NOT NULL UNIQUE, owner_id bigint NOT NULL, enabled integer NOT NULL DEFAULT 0, block_links integer NOT NULL DEFAULT 0, audit_database integer NOT NULL DEFAULT 1, audit_group_id varchar(64) NOT NULL DEFAULT '',
  created_at datetime, updated_at datetime
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -41,3 +41,13 @@ CREATE TABLE IF NOT EXISTS hg_youban_bot_relay_delivery (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE INDEX idx_ybb_relay_delivery_ready ON hg_youban_bot_relay_delivery (status,available_at,id);
+
+ALTER TABLE hg_youban_bot_relay_config ADD COLUMN tenant_id bigint NOT NULL DEFAULT 0;
+ALTER TABLE hg_youban_bot_relay_config ADD COLUMN account_id bigint NOT NULL DEFAULT 0;
+ALTER TABLE hg_youban_bot_relay_config ADD COLUMN owner_scope varchar(80) GENERATED ALWAYS AS (CASE WHEN tenant_id>0 AND account_id>0 THEN CONCAT(tenant_id, ':', account_id) ELSE NULL END) STORED;
+CREATE INDEX idx_ybb_relay_account ON hg_youban_bot_relay_config(owner_scope);
+UPDATE hg_youban_bot_relay_config SET enabled=0 WHERE (tenant_id=0 OR account_id=0) AND enabled<>0;
+
+ALTER TABLE hg_youban_bot_relay_config ADD COLUMN source_bot_id bigint NOT NULL DEFAULT 0;
+ALTER TABLE hg_youban_bot_relay_config ADD COLUMN source_bot_scope bigint GENERATED ALWAYS AS (NULLIF(source_bot_id,0)) STORED;
+CREATE UNIQUE INDEX uk_ybb_relay_source_bot ON hg_youban_bot_relay_config(source_bot_scope);

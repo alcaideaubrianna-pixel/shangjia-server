@@ -11,12 +11,12 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 
 	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
+	twdao "hotgo/addons/youban_two_way_bot/internal/dao"
 	"hotgo/addons/youban_two_way_bot/internal/model/entity"
 	"hotgo/addons/youban_two_way_bot/service"
 )
 
 type sSysTwoWayBot struct {
-	creation      *botCreationHooks
 	runtimeMu     sync.Mutex
 	runtimeCancel context.CancelFunc
 	runtimeDone   chan struct{}
@@ -50,6 +50,32 @@ func (p *twoWayBotGatewayProvider) ListEnabledBots(ctx context.Context) ([]gatew
 	return items, nil
 }
 
+func (p *twoWayBotGatewayProvider) ListOwnedBots(ctx context.Context, tenantID, accountID, referenceID int64, lock bool) ([]gatewayservice.OwnedBot, error) {
+	if tenantID <= 0 || accountID <= 0 {
+		return nil, gerror.New("租户账户无效")
+	}
+	c := twdao.YoubanTwoWayBotBot.Columns()
+	mod := twdao.YoubanTwoWayBotBot.Ctx(ctx).
+		Where(c.TenantId, tenantID).
+		Where(c.AccountId, accountID).
+		WhereNull(c.DeletedAt)
+	if referenceID > 0 {
+		mod = mod.Where(c.Id, referenceID)
+	}
+	if lock {
+		mod = mod.LockUpdate()
+	}
+	var rows []*entity.YoubanTwoWayBotBot
+	if err := mod.OrderAsc(c.Id).Scan(&rows); err != nil {
+		return nil, gerror.Wrap(err, "读取账户双向机器人失败")
+	}
+	items := make([]gatewayservice.OwnedBot, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, gatewayservice.OwnedBot{ReferenceID: row.Id, TenantID: row.TenantId, AccountID: row.AccountId, Name: row.Name, Username: row.BotUsername, Token: row.BotToken, Status: row.Status})
+	}
+	return items, nil
+}
+
 func (p *twoWayBotGatewayProvider) HandleUpdate(ctx context.Context, binding gatewayservice.BotBinding, update *models.Update) error {
 	row, err := p.twoWayBot.botById(ctx, binding.ReferenceID, binding.TenantID)
 	if err != nil {
@@ -74,9 +100,9 @@ func (p *cooperationGatewayProvider) ListEnabledBots(ctx context.Context) ([]gat
 	}
 	err := g.DB().Model("hg_youban_two_way_bot_cooperation_config").As("cc").
 		Fields("cc.id,cc.tenant_id,pb.bot_token").
-		InnerJoin("hg_youban_bot_registry pb", "pb.id=cc.bot_id").
+		InnerJoin("hg_youban_publish_bot pb", "pb.id=cc.bot_id").
 		Where("cc.status", 1).WhereNull("cc.deleted_at").WhereNull("pb.deleted_at").
-		Where("pb.bot_type <> ?", "two_way").Where("pb.status", 1).
+		Where("NOT EXISTS (SELECT 1 FROM hg_youban_two_way_bot_bot tw WHERE tw.bot_token=pb.bot_token AND tw.status=1 AND tw.deleted_at IS NULL)").
 		Scan(&rows)
 	if err != nil {
 		return nil, err
@@ -96,7 +122,7 @@ func (p *cooperationGatewayProvider) HandleUpdate(ctx context.Context, binding g
 	if err != nil {
 		return err
 	}
-	_, err = p.twoWayBot.handleCooperationPrivateMessage(ctx, bot, &entity.YoubanBotRegistry{Id: -binding.ReferenceID, TenantId: binding.TenantID, BotToken: binding.Token}, update.Message)
+	_, err = p.twoWayBot.handleCooperationPrivateMessage(ctx, bot, &entity.YoubanTwoWayBotBot{Id: -binding.ReferenceID, TenantId: binding.TenantID, BotToken: binding.Token}, update.Message)
 	return err
 }
 

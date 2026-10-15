@@ -24,6 +24,22 @@ type BotBinding struct {
 	Token       string
 }
 
+// OwnedBot describes a Bot managed by a provider without making addons import
+// each other's DAO or service packages.
+type OwnedBot struct {
+	ReferenceID int64
+	TenantID    int64
+	AccountID   int64
+	Name        string
+	Username    string
+	Token       string
+	Status      int
+}
+
+type OwnedBotProvider interface {
+	ListOwnedBots(ctx context.Context, tenantID, accountID, referenceID int64, lock bool) ([]OwnedBot, error)
+}
+
 type Provider interface {
 	Name() string
 	ListEnabledBots(ctx context.Context) ([]BotBinding, error)
@@ -75,6 +91,17 @@ func Providers() []Provider {
 		items = append(items, provider)
 	}
 	return items
+}
+
+func ProviderOwnedBots(ctx context.Context, owner string, tenantID, accountID, referenceID int64, lock bool) ([]OwnedBot, error) {
+	providersMu.RLock()
+	provider := providers[owner]
+	providersMu.RUnlock()
+	directory, ok := provider.(OwnedBotProvider)
+	if !ok {
+		return nil, nil
+	}
+	return directory.ListOwnedBots(ctx, tenantID, accountID, referenceID, lock)
 }
 
 func RegisterConfigProvider(provider ConfigProvider) { configProvider = provider }

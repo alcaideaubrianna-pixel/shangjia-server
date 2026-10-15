@@ -257,7 +257,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_ai_ops_repair_plan" (
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_ai_ops_repair_plan" ON "hg_youban_publish_ai_ops_repair_plan" ("plan_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_ai_ops_repair_plan_status" ON "hg_youban_publish_ai_ops_repair_plan" ("status", "expires_at", "id");
 
-ALTER TABLE hg_youban_bot_registry ADD COLUMN IF NOT EXISTS account_id bigint NOT NULL DEFAULT 0;
-CREATE INDEX IF NOT EXISTS idx_ybp_bot_account ON hg_youban_bot_registry(tenant_id,account_id,created_by,status);
+ALTER TABLE hg_youban_publish_bot ADD COLUMN IF NOT EXISTS account_id bigint NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS idx_ybp_bot_account ON hg_youban_publish_bot(tenant_id,account_id,created_by,status);
 
-ALTER TABLE hg_youban_bot_registry ADD COLUMN IF NOT EXISTS bot_type varchar(32) NOT NULL DEFAULT 'normal';
+ALTER TABLE hg_youban_publish_bot ADD COLUMN IF NOT EXISTS bot_type varchar(32) NOT NULL DEFAULT 'normal';

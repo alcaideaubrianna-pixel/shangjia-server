@@ -7,7 +7,6 @@ package cmd
 
 import (
 	"context"
-	"hotgo/utility/botregistry"
 	"strconv"
 	"strings"
 
@@ -44,16 +43,6 @@ var (
 			switch method {
 			case "fix":
 				err = handleUpgradeFix(ctx, args)
-			case "botRegistry":
-				if args["apply"] == "1" {
-					err = botregistry.Upgrade(ctx)
-				} else {
-					var plan []botregistry.SourceCount
-					plan, err = botregistry.Plan(ctx)
-					if err == nil {
-						g.Log().Info(ctx, "统一Bot迁移预览", plan)
-					}
-				}
 			case "publishMigration":
 				g.Log().Info(ctx, "开始执行上架系统独立迁移脚本")
 				err = install.ExecMaintenanceSql(ctx, install.MigrationSqlFiles())

@@ -45,7 +45,7 @@ type cooperationChannelRuntime struct {
 	AccessHash   string `json:"accessHash"`
 }
 
-func (s *sSysTwoWayBot) handleCooperationPrivateMessage(ctx context.Context, bot *tgbot.Bot, row *entity.YoubanBotRegistry, msg *models.Message) (bool, error) {
+func (s *sSysTwoWayBot) handleCooperationPrivateMessage(ctx context.Context, bot *tgbot.Bot, row *entity.YoubanTwoWayBotBot, msg *models.Message) (bool, error) {
 	config, err := cooperationConfigByToken(ctx, row.BotToken)
 	if err != nil || config == nil {
 		return false, err
@@ -94,7 +94,7 @@ func cooperationSubmissionSessionKey(botId, userId int64) string {
 
 func cooperationConfigByToken(ctx context.Context, token string) (*cooperationConfigRuntime, error) {
 	var row *cooperationConfigRuntime
-	err := g.DB().Model(twdao.YoubanTwoWayBotCooperationConfig.Table()).As("cc").Fields("cc.id,cc.tenant_id,cc.bot_id,cc.two_way_bot_id,cc.review_required,cc.notification_type").InnerJoin("hg_youban_bot_registry pb", "pb.id=cc.bot_id").Where("pb.bot_token", strings.TrimSpace(token)).Where("cc.status", 1).WhereNull("cc.deleted_at").WhereNull("pb.deleted_at").Scan(&row)
+	err := g.DB().Model(twdao.YoubanTwoWayBotCooperationConfig.Table()).As("cc").Fields("cc.id,cc.tenant_id,cc.bot_id,cc.two_way_bot_id,cc.review_required,cc.notification_type").InnerJoin("hg_youban_publish_bot pb", "pb.id=cc.bot_id").Where("pb.bot_token", strings.TrimSpace(token)).Where("cc.status", 1).WhereNull("cc.deleted_at").WhereNull("pb.deleted_at").Scan(&row)
 	return row, err
 }
 
@@ -191,7 +191,7 @@ func (s *sSysTwoWayBot) createCooperationApplication(ctx context.Context, config
 	return id, config.ReviewRequired, nil
 }
 
-func (s *sSysTwoWayBot) notifyCooperationReview(ctx context.Context, row *entity.YoubanBotRegistry, bot *tgbot.Bot, applicationId int64, config *cooperationConfigRuntime, submitted *cooperationResolvedBot, applicant *models.User) error {
+func (s *sSysTwoWayBot) notifyCooperationReview(ctx context.Context, row *entity.YoubanTwoWayBotBot, bot *tgbot.Bot, applicationId int64, config *cooperationConfigRuntime, submitted *cooperationResolvedBot, applicant *models.User) error {
 	if config.NotificationType == "official" {
 		return s.notifyCooperationOfficialAdmin(ctx, config, applicationId, submitted, applicant)
 	}
@@ -235,7 +235,7 @@ func (s *sSysTwoWayBot) notifyCooperationReview(ctx context.Context, row *entity
 	return err
 }
 
-func (s *sSysTwoWayBot) cooperationReviewTopicThreadId(ctx context.Context, bot *tgbot.Bot, row *entity.YoubanBotRegistry, configId int64) (int, error) {
+func (s *sSysTwoWayBot) cooperationReviewTopicThreadId(ctx context.Context, bot *tgbot.Bot, row *entity.YoubanTwoWayBotBot, configId int64) (int, error) {
 	value, err := cache.Instance().GetOrSetFuncLock(ctx, cooperationReviewTopicCacheKey(configId), func(ctx context.Context) (interface{}, error) {
 		topic, createErr := bot.CreateForumTopic(ctx, &tgbot.CreateForumTopicParams{ChatID: row.SupergroupId, Name: "合作申请"})
 		if createErr != nil {
@@ -323,7 +323,7 @@ func cooperationApplicantButton(applicant *models.User) models.InlineKeyboardBut
 	return models.InlineKeyboardButton{Text: cooperationApplicantNickname(applicant), URL: fmt.Sprintf("tg://user?id=%d", applicant.ID)}
 }
 
-func (s *sSysTwoWayBot) handleCooperationCallback(ctx context.Context, bot *tgbot.Bot, row *entity.YoubanBotRegistry, query *models.CallbackQuery) (bool, error) {
+func (s *sSysTwoWayBot) handleCooperationCallback(ctx context.Context, bot *tgbot.Bot, row *entity.YoubanTwoWayBotBot, query *models.CallbackQuery) (bool, error) {
 	if query == nil || !strings.HasPrefix(query.Data, "coop:") {
 		return false, nil
 	}
@@ -735,7 +735,7 @@ func (s *sSysTwoWayBot) cooperationApplicantNotificationToken(ctx context.Contex
 		}
 	}
 	var token string
-	if err := g.DB().Model("hg_youban_bot_registry").Fields("bot_token").Where("id", config.BotId).Where("tenant_id", app.TenantId).WhereNull("deleted_at").Scan(&token); err != nil {
+	if err := g.DB().Model("hg_youban_publish_bot").Fields("bot_token").Where("id", config.BotId).Where("tenant_id", app.TenantId).WhereNull("deleted_at").Scan(&token); err != nil {
 		return "", err
 	}
 	if token = strings.TrimSpace(token); token == "" {

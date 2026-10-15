@@ -1364,10 +1364,27 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_daily_stat` (
   KEY `idx_ybp_daily_stat_date` (`stat_date`,`account_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴每日上架统计';
 
--- Bot identity schema is maintained by utility/botregistry.
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_bot` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID，0表示全局默认',
+  `bot_name` varchar(128) NOT NULL DEFAULT '' COMMENT 'Bot名称',
+  `bot_username` varchar(128) NOT NULL DEFAULT '' COMMENT 'Bot用户名',
+  `bot_token` varchar(255) NOT NULL DEFAULT '' COMMENT 'Bot Token',
+  `remark` varchar(500) NOT NULL DEFAULT '' COMMENT '备注',
+  `status` tinyint(1) NOT NULL DEFAULT '1' COMMENT '状态',
+  `created_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '创建人',
+  `updated_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '更新人',
+  `deleted_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '删除人',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_ybp_bot_tenant` (`tenant_id`,`status`,`id`),
+  KEY `idx_ybp_bot_status` (`status`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架Bot配置';
 
-ALTER TABLE `hg_youban_bot_registry` ADD COLUMN `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID，0表示全局默认' AFTER `id`;
-ALTER TABLE `hg_youban_bot_registry` ADD KEY `idx_ybp_bot_tenant` (`tenant_id`,`status`,`id`);
+ALTER TABLE `hg_youban_publish_bot` ADD COLUMN `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID，0表示全局默认' AFTER `id`;
+ALTER TABLE `hg_youban_publish_bot` ADD KEY `idx_ybp_bot_tenant` (`tenant_id`,`status`,`id`);
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_login` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
@@ -2214,7 +2231,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_ai_ops_repair_plan` (
   PRIMARY KEY (`id`), UNIQUE KEY `uk_ybp_ai_ops_repair_plan` (`plan_id`), KEY `idx_ybp_ai_ops_repair_plan_status` (`status`,`expires_at`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI运维修复计划审计';
 
-ALTER TABLE hg_youban_bot_registry ADD COLUMN account_id bigint NOT NULL DEFAULT 0;
-CREATE INDEX idx_ybp_bot_account ON hg_youban_bot_registry(tenant_id,account_id,created_by,status);
+ALTER TABLE hg_youban_publish_bot ADD COLUMN account_id bigint NOT NULL DEFAULT 0;
+CREATE INDEX idx_ybp_bot_account ON hg_youban_publish_bot(tenant_id,account_id,created_by,status);
 
-ALTER TABLE hg_youban_bot_registry ADD COLUMN bot_type varchar(32) NOT NULL DEFAULT 'normal';
+ALTER TABLE hg_youban_publish_bot ADD COLUMN bot_type varchar(32) NOT NULL DEFAULT 'normal';

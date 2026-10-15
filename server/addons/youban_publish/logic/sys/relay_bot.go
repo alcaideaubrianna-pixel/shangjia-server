@@ -16,8 +16,8 @@ func (s *sSysPublish) RelayOwnedBots(ctx context.Context, tenantID, accountID, b
 	if tenantID <= 0 || accountID <= 0 {
 		return nil, gerror.New("租户账户无效")
 	}
-	c := dao.YoubanBotRegistry.Columns()
-	q := dao.YoubanBotRegistry.Ctx(ctx).Where(c.TenantId, tenantID).Where(c.AccountId, accountID).Where(c.Status, 1).Where(c.BotType, consts.PublishBotTypeTwoWay)
+	c := dao.YoubanPublishBot.Columns()
+	q := dao.YoubanPublishBot.Ctx(ctx).Where(c.TenantId, tenantID).Where(c.AccountId, accountID).Where(c.CreatedBy, accountID).Where(c.Status, 1).Where(c.BotType, consts.PublishBotTypeTwoWay)
 	ac := dao.YoubanPublishAccount.Columns()
 	q = q.Where("EXISTS (SELECT 1 FROM "+dao.YoubanPublishAccount.Table()+" owner_account WHERE owner_account."+ac.Id+"=? AND owner_account."+ac.TenantId+"=? AND owner_account."+ac.Status+"=1 AND owner_account."+ac.DeletedAt+" IS NULL)", accountID, tenantID)
 	if botID > 0 {

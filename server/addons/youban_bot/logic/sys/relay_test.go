@@ -255,7 +255,7 @@ func TestRelaySenderPreservesMediaAndAuditAttribution(t *testing.T) {
 	ctx := relayTestDatabase(t)
 	db, _ := gdb.Instance()
 
-	baseDDL, err := os.ReadFile("../../../../utility/botregistry/schema.pgsql.sql")
+	baseDDL, err := os.ReadFile("../../resource/sql/install.pgsql.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,13 +270,13 @@ func TestRelaySenderPreservesMediaAndAuditAttribution(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := db.Exec(ctx, `DELETE FROM hg_youban_bot_registry`); err != nil {
+	if _, err := db.Exec(ctx, `DELETE FROM hg_youban_bot_bot WHERE id=1`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(ctx, `INSERT INTO hg_youban_bot_registry (id,bot_user_id,bot_token,bot_name,bot_type,tenant_id,account_id,status) VALUES (1,'123','123:fake','Test','two_way',1,1,1)`); err != nil {
+	if _, err := db.Exec(ctx, `INSERT INTO hg_youban_bot_bot (id,bot_token,bot_name,status) VALUES (1,'123:fake','Test',1)`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := dao.YoubanBotRelayConfig.Ctx(ctx).Data(do.YoubanBotRelayConfig{BotId: 1, TenantId: 1, AccountId: 1, Enabled: 1, AuditGroupId: "-100999"}).Insert(); err != nil {
+	if _, err := dao.YoubanBotRelayConfig.Ctx(ctx).Data(do.YoubanBotRelayConfig{BotId: 1, TenantId: 1, AccountId: 1, SourceBotId: 1, OwnerId: 1, Enabled: 1, AuditGroupId: "-100999"}).Insert(); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := dao.YoubanBotRelayBinding.Ctx(ctx).Data(do.YoubanBotRelayBinding{Id: 10, BotId: 1, PairKey: "12:13", LeftChatId: "12", RightChatId: "13", LeftName: "A", RightName: "B"}).Insert(); err != nil {

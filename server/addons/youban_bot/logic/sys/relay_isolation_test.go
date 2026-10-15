@@ -10,6 +10,7 @@ import (
 	"hotgo/addons/youban_bot/consts"
 	"hotgo/addons/youban_bot/internal/dao"
 	"hotgo/addons/youban_bot/internal/model/do"
+	publishsysin "hotgo/addons/youban_publish/model/input/sysin"
 	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
 )
 
@@ -49,20 +50,30 @@ func TestRelayMissingMigrationDoesNotDisableMainBot(t *testing.T) {
 func TestRelayHelpOnlyBelongsToConfiguredBot(t *testing.T) {
 	ctx := relayTestDatabase(t)
 	relayTestBaseTable(t, ctx, botTable)
-	if _, err := dao.YoubanBotRegistry.Ctx(ctx).Data(do.YoubanBotRegistry{Id: 2, BotName: "Relay", BotUserId: "456", BotType: "two_way", TenantId: 1, AccountId: 99, Status: 1}).Insert(); err != nil {
+	if _, err := dao.YoubanBotBot.Ctx(ctx).Data(do.YoubanBotBot{Id: 2, BotName: "Relay", Status: 1}).Insert(); err != nil {
 		t.Fatal(err)
 	}
 	relayTestBaseTable(t, ctx, featureTable)
 	if _, err := dao.YoubanBotFeature.Ctx(ctx).Data(do.YoubanBotFeature{FeatureKey: consts.RelayFeatureKey, Status: 1, ConfigJson: "{}"}).Insert(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := dao.YoubanBotRelayConfig.Ctx(ctx).Data(do.YoubanBotRelayConfig{BotId: 2, TenantId: 1, AccountId: 99, Enabled: 1}).Insert(); err != nil {
+	if _, err := dao.YoubanBotRelayConfig.Ctx(ctx).Data(do.YoubanBotRelayConfig{BotId: 2, TenantId: 1, AccountId: 99, SourceBotId: 1, OwnerId: 99, Enabled: 1}).Insert(); err != nil {
 		t.Fatal(err)
 	}
 	s := NewSysBot()
+	s.relayOwnedBots = func(_ context.Context, tenantID, accountID, botID int64, _ bool) ([]*publishsysin.RelayOwnedBotModel, error) {
+		if tenantID != 1 || accountID != 99 || botID != 2 {
+			return nil, nil
+		}
+		return []*publishsysin.RelayOwnedBotModel{{BotModel: publishsysin.BotModel{Id: 2, TenantId: 1, BotName: "Relay", BotToken: "2:test", Status: 1}, AccountId: 99, CreatedBy: 99}}, nil
+	}
 	feature := &relayGatewayFeature{bot: s}
 	for _, id := range []int64{1, 2} {
-		menus, err := feature.Menus(ctx, gatewayservice.BotContext{Bindings: []gatewayservice.BotBinding{{Owner: "youban_bot", ReferenceID: id}}})
+		owner := "youban_bot"
+		if id == 2 {
+			owner = relayTwoWayBotOwner
+		}
+		menus, err := feature.Menus(ctx, gatewayservice.BotContext{Bindings: []gatewayservice.BotBinding{{Owner: owner, ReferenceID: id}}})
 		if err != nil {
 			t.Fatal(err)
 		}

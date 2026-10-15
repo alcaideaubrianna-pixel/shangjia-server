@@ -26,10 +26,20 @@ func (p *botGatewayProvider) ListEnabledBots(ctx context.Context) ([]gatewayserv
 		if row == nil || strings.TrimSpace(row.BotToken) == "" {
 			continue
 		}
-		if row.BotType != "main" {
-			continue
+		cfg, readErr := relayConfig(ctx, row.Id)
+		if readErr == nil && relayOwned(cfg) && cfg.SourceBotId > 0 {
+			valid, checkErr := p.bot.relaySourceBotValid(ctx, cfg)
+			if checkErr != nil {
+				return nil, checkErr
+			}
+			if !valid {
+				continue
+			}
 		}
-		tenantID := row.TenantId
+		tenantID := int64(0)
+		if readErr == nil && relayOwned(cfg) {
+			tenantID = cfg.TenantId
+		}
 		bindings = append(bindings, gatewayservice.BotBinding{
 			Owner:       p.Name(),
 			TenantID:    tenantID,
