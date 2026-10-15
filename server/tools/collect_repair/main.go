@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	_ "github.com/gogf/gf/contrib/drivers/pgsql/v2"
 	_ "github.com/gogf/gf/contrib/nosql/redis/v2"
@@ -25,27 +26,34 @@ import (
 )
 
 type options struct {
-	profileIDs        string
-	sourceID          int64
-	allSuspended      bool
-	concurrency       int
-	replayConcurrency int
-	apply             bool
-	audit             bool
-	download          bool
-	date              string
-	tenantID          int64
-	accountID         int64
-	limit             int
-	report            string
-	sshHost           string
-	sshIdentity       string
-	dbPort            int
-	redisPort         int
-	eventIDs          string
-	verifyOnly        bool
-	dryRun            bool
-	continueOnError   bool
+	profileIDs           string
+	sourceID             int64
+	allSuspended         bool
+	concurrency          int
+	replayConcurrency    int
+	apply                bool
+	audit                bool
+	download             bool
+	date                 string
+	tenantID             int64
+	accountID            int64
+	limit                int
+	report               string
+	sshHost              string
+	sshIdentity          string
+	dbPort               int
+	redisPort            int
+	eventIDs             string
+	verifyOnly           bool
+	dryRun               bool
+	continueOnError      bool
+	misbindingAudit      bool
+	misbindingApply      bool
+	misbindingRepublish  bool
+	misbindingSince      string
+	misbindingUntil      string
+	cleanupWait          time.Duration
+	recoverIgnoredVerify bool
 }
 
 func main() { os.Exit(mainExit()) }
@@ -73,6 +81,13 @@ func mainExit() int {
 	flag.IntVar(&opts.concurrency, "concurrency", 8, "parallel media preparation workers (1-32); publishing remains ordered")
 	flag.IntVar(&opts.replayConcurrency, "replay-concurrency", 1, "parallel account replay lanes (1-32); each account remains ordered")
 	flag.BoolVar(&opts.apply, "apply", false, "decode all media again, then release complete suspended pairs and replay")
+	flag.BoolVar(&opts.misbindingAudit, "misbinding-audit", false, "audit historical verification-video misbindings; never changes data")
+	flag.BoolVar(&opts.misbindingApply, "misbinding-apply", false, "apply only unambiguous historical verification-video repairs")
+	flag.BoolVar(&opts.misbindingRepublish, "misbinding-republish", false, "after repair, wait for cleanup and republish to the exact original channels")
+	flag.StringVar(&opts.misbindingSince, "misbinding-since", "2026-10-14 00:00:00", "Shanghai start time for historical misbinding scan")
+	flag.StringVar(&opts.misbindingUntil, "misbinding-until", "2026-10-16 00:00:00", "Shanghai exclusive end time for historical misbinding scan")
+	flag.DurationVar(&opts.cleanupWait, "cleanup-wait", 30*time.Minute, "maximum total wait for Telegram cleanup before republishing")
+	flag.BoolVar(&opts.recoverIgnoredVerify, "recover-ignored-verify", false, "canonically pair and enqueue ignored verification videos")
 	flag.Parse()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -100,6 +115,26 @@ func mainExit() int {
 }
 
 func run(ctx context.Context, opts options) error {
+	if opts.recoverIgnoredVerify {
+		envconfig.Apply(ctx)
+		cache.SetAdapter(ctx)
+		service.SysConfig().InitConfig(ctx)
+		processed, failed, err := publishsys.NewSysPublish().AIOpsRecoverIgnoredCollectVerifications(ctx, opts.sourceID, opts.limit, opts.dryRun)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("ignored verification recovery: processed=%d failed=%d dry-run=%v failedIds=%v\n", processed, len(failed), opts.dryRun, failed)
+		return nil
+	}
+	if opts.misbindingAudit || opts.misbindingApply {
+		if opts.misbindingRepublish && !opts.misbindingApply {
+			return fmt.Errorf("misbinding-republish requires misbinding-apply")
+		}
+		envconfig.Apply(ctx)
+		cache.SetAdapter(ctx)
+		service.SysConfig().InitConfig(ctx)
+		return runMisbindingRepair(ctx, opts)
+	}
 	if opts.profileIDs != "" {
 		ids, err := parseEventIDs(opts.profileIDs)
 		if err != nil {

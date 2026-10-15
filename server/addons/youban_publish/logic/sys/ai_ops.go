@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -9,6 +10,86 @@ import (
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
+
+// AIOpsRecoverIgnoredCollectVerifications re-enters only verification videos
+// that the realtime classifier previously marked as unmatched. Pair selection
+// still goes through the canonical runtime matcher before any queue is written.
+func (s *sSysPublish) AIOpsRecoverIgnoredCollectVerifications(ctx context.Context, sourceID int64, limit int, dryRun bool) (int, []int64, error) {
+	if sourceID <= 0 || limit <= 0 || limit > 5000 {
+		return 0, nil, gerror.New("验证恢复范围不合法")
+	}
+	rows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+		Where("source_id", sourceID).
+		Where("status", sysin.CollectEventStatusIgnored).
+		Where("material_role", collectMaterialRoleVerify).
+		Where("error_message", collectMaterialVerifyUnmatchedMessage).
+		OrderAsc("id").Limit(limit + 1).All()
+	if err != nil {
+		return 0, nil, gerror.Wrap(err, "读取待恢复验证事件失败")
+	}
+	if len(rows) > limit {
+		return 0, nil, gerror.Newf("待恢复验证事件超过安全上限%d", limit)
+	}
+	processed := 0
+	failed := make([]int64, 0)
+	for _, verify := range rows {
+		verifyID := verify["id"].Int64()
+		display, findErr := s.findStoredCollectDisplayEvent(ctx, verify)
+		if findErr != nil || display.IsEmpty() {
+			failed = append(failed, verifyID)
+			continue
+		}
+		canonical, canonicalErr := s.isCanonicalCollectMaterialPair(ctx, display, verify)
+		if canonicalErr != nil || !canonical {
+			failed = append(failed, verifyID)
+			continue
+		}
+		if dryRun {
+			processed++
+			continue
+		}
+		paired, pairErr := s.bindCollectMaterialPair(ctx, display, verify)
+		if pairErr != nil || !paired {
+			failed = append(failed, verifyID)
+			continue
+		}
+		if processErr := s.processCollectEvent(ctx, verifyID, verify["tenant_id"].Int64(), verify["account_id"].Int64()); processErr != nil && !isCollectProcessRetryError(processErr) {
+			failed = append(failed, verifyID)
+			continue
+		}
+		processed++
+	}
+	return processed, failed, nil
+}
+
+// AIOpsRepublishProfileChannels republishes one repaired profile to the exact
+// channels that contained its previous publication. operationNo must be stable
+// so rerunning an interrupted repair cannot create duplicate jobs.
+func (s *sSysPublish) AIOpsRepublishProfileChannels(ctx context.Context, profileId int64, channelIds []int64, operationNo string) error {
+	channelIds = uniqueIds(channelIds)
+	operationNo = strings.TrimSpace(operationNo)
+	if profileId <= 0 || len(channelIds) == 0 {
+		return gerror.New("资料ID和原发布频道不能为空")
+	}
+	if !strings.HasPrefix(operationNo, "verify-misbinding-repair:") {
+		return gerror.New("历史验证修复操作号不合法")
+	}
+	profile, err := s.profilePublishSource(ctx, profileId, 0, 0, false)
+	if err != nil {
+		return err
+	}
+	complete, err := collectProfileMediaComplete(ctx, profileId)
+	if err != nil {
+		return err
+	}
+	if !complete {
+		return gerror.Newf("资料%d媒体尚未恢复完整，禁止重新上架", profileId)
+	}
+	// Do not call updateProfileStatus here: its online branch creates another
+	// default-channel operation. The explicit operation below becomes the sole
+	// publication and the normal sent projection restores the online state.
+	return s.submitProfilePublish(ctx, profileId, profile["tenant_id"].Int64(), profile["account_id"].Int64(), 0, operationNo, channelIds, false)
+}
 
 // AIOpsQueueCollectVerification creates verify-only jobs for profiles whose
 // display messages were already confirmed by Telegram.

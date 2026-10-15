@@ -19,3 +19,43 @@
 报告包括候选、媒体哈希、完整性及未匹配事件 ID，不包含媒体地址和原文。运行中断或失败可能已解除某组挂起；重新启动前必须核查该组派发状态，禁止直接重复提交。
 
 `-audit` 为限定范围的只读扫描和解码；`-audit -download` 补缓存但不解除挂起。`-event-ids ... -dry-run=false` 为已绑定展示组的重放入口。
+
+## 历史验证视频错绑修复
+
+必须先生成只读报告：
+
+```sh
+/tmp/collect-repair \
+  -misbinding-audit \
+  -source-id 351 \
+  -misbinding-since '2026-10-14 00:00:00' \
+  -misbinding-until '2026-10-16 00:00:00' \
+  -limit 500 \
+  -report /tmp/verification-misbinding-audit.json
+```
+
+报告将候选分为 `safe`、`manual`、`skip`。只有同时满足以下条件的 `safe` 项才允许自动处理：
+
+- 目标展示事件及目标资料都只有一个验证候选；
+- 验证视频全部缓存完成；
+- 目标资料尚无验证视频；
+- 旧资料有另一条独立验证视频，且当前没有使用候选视频；
+- 目标资料存在历史成功发布频道。
+
+确认报告后执行修复、统一下架和原频道重新上架：
+
+```sh
+/tmp/collect-repair \
+  -misbinding-apply \
+  -misbinding-republish \
+  -source-id 351 \
+  -misbinding-since '2026-10-14 00:00:00' \
+  -misbinding-until '2026-10-16 00:00:00' \
+  -limit 500 \
+  -cleanup-wait 30m \
+  -report /tmp/verification-misbinding-apply.json
+```
+
+首次执行应通过 `-event-ids <验证事件ID>` 选择一个 `safe` 候选验证完整闭环，再扩大处理范围。
+
+每条重绑在独立事务中完成并写入事件审计日志。工具先通过统一清理队列下架全部历史消息，确认该资料不再存在 `sent` 消息后，才按历史成功发布频道重新上架。重新上架使用稳定操作号 `verify-misbinding-repair:<event>:profile:<profile>`，中断后重复运行不会创建重复任务。清理超时的资料保持下架并记录错误，不会抢先重新发布。

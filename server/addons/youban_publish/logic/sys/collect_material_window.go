@@ -285,6 +285,16 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 			if !collectMaterialEventIngestOlderThan(event, collectMaterialVerifyWindow()) {
 				continue
 			}
+			// Persist the classification before marking the event ignored. The
+			// bounded retry query only admits ignored verification events; leaving
+			// this as pending makes a valid video permanently unrecoverable.
+			claimed, claimErr := s.markCollectMaterialRole(ctx, event["id"].Int64(), collectMaterialRoleVerify, 0, "unmatched")
+			if claimErr != nil {
+				return claimErr
+			}
+			if !claimed && strings.TrimSpace(event["material_role"].String()) != collectMaterialRoleVerify {
+				continue
+			}
 			if err = s.ignoreCollectEvent(ctx, event["id"].Int64(), collectMaterialVerifyUnmatchedMessage, "group"); err != nil {
 				return err
 			}
@@ -330,6 +340,7 @@ func collectMaterialMutableStatuses() []string {
 
 func collectMaterialEventNeedsPairRepair(event gdb.Record) bool {
 	return event["status"].String() == sysin.CollectEventStatusIgnored &&
+		strings.TrimSpace(event["material_role"].String()) == collectMaterialRoleVerify &&
 		strings.TrimSpace(event["error_message"].String()) == collectMaterialVerifyUnmatchedMessage
 }
 

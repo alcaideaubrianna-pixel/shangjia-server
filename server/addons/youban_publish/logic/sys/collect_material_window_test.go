@@ -125,6 +125,21 @@ func TestFindCollectVerifyEventAcceptsUnmatchedVerifyRetry(t *testing.T) {
 	}
 }
 
+func TestUnmatchedVerificationRetryRequiresPersistedVerifyRole(t *testing.T) {
+	pending := gdb.Record{
+		"material_role": gvar.New(collectMaterialRolePending),
+		"status":        gvar.New(sysin.CollectEventStatusIgnored),
+		"error_message": gvar.New(collectMaterialVerifyUnmatchedMessage),
+	}
+	if collectMaterialEventNeedsPairRepair(pending) {
+		t.Fatal("pending ignored event must not silently enter verify recovery")
+	}
+	pending["material_role"] = gvar.New(collectMaterialRoleVerify)
+	if !collectMaterialEventNeedsPairRepair(pending) {
+		t.Fatal("persisted verify role must keep an unmatched video recoverable")
+	}
+}
+
 func collectTestMediaByEvent(rows []gdb.Record) map[int64][]collectMediaItem {
 	result := make(map[int64][]collectMediaItem, len(rows))
 	for _, row := range rows {
