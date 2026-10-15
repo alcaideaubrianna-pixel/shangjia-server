@@ -22,6 +22,7 @@ import (
 	"github.com/go-telegram/bot/models"
 	_ "github.com/gogf/gf/contrib/drivers/sqlite/v2"
 	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/frame/g"
 )
 
 func relayTestDatabase(t *testing.T) context.Context {
@@ -81,6 +82,9 @@ func relayTestDatabase(t *testing.T) context.Context {
 		if _, err = db.Exec(context.Background(), statement); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if err := g.DB().GetCore().ClearTableFieldsAll(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 	return context.Background()
 }
