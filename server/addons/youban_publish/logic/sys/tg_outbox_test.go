@@ -34,6 +34,7 @@ func TestTelegramDueOutboxPostgresSQLSelectsChannelHeads(t *testing.T) {
 		"WITH channel_job_heads AS", "DISTINCT ON", "j.tenant_id", "j.channel_id", "target_chat_id",
 		"j.status IN ('pending','failed_retry','unknown','confirming','sending')",
 		"j.status='failed' AND j.send_phase='display_confirmed'",
+		"channel_display.job_id=j.id", "channel_display.purpose='display'",
 		"ORDER BY j.tenant_id", "j.created_at, j.id",
 		"h.status IN ('pending','failed_retry','unknown')",
 		"COALESCE(h.dispatch_status,'') IN ('','idle')",
@@ -183,8 +184,16 @@ func TestTelegramDueOutboxChannelHeadAndLeaseIntegration(t *testing.T) {
 	failedDisplayHead := insertJob(4, telegramJobStatusFailed, tgDispatchStatusDone, telegramSendPhaseDisplayConfirmed, old)
 	laterAfterFailedDisplay := insertJob(4, telegramJobStatusPending, tgDispatchStatusIdle, "", now)
 	unknownHead := insertJob(5, telegramJobStatusConfirming, tgDispatchStatusIdle, "", old)
+	invalidFailedDisplayHead := insertJob(6, telegramJobStatusFailed, tgDispatchStatusDone, telegramSendPhaseDisplayConfirmed, old)
+	laterAfterInvalidFailedDisplay := insertJob(6, telegramJobStatusPending, tgDispatchStatusIdle, "", now)
+	if _, err := g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).Data(g.Map{
+		"job_id": failedDisplayHead, "tenant_id": seed, "target_chat_id": fmt.Sprintf("-100%d", seed+4),
+		"tg_message_id": seed, "purpose": "display", "status": "sent", "created_at": now, "updated_at": now,
+	}).Insert(); err != nil {
+		t.Fatalf("insert confirmed display evidence: %v", err)
+	}
 
-	jobIDs := []int64{queuedHead, laterSameChannel, expiredLeaseHead, activeLeaseHead, failedDisplayHead, laterAfterFailedDisplay, unknownHead}
+	jobIDs := []int64{queuedHead, laterSameChannel, expiredLeaseHead, activeLeaseHead, failedDisplayHead, laterAfterFailedDisplay, unknownHead, invalidFailedDisplayHead, laterAfterInvalidFailedDisplay}
 	outboxIDs := []int64{
 		insertOutbox(queuedHead, telegramOutboxPending, nil, 0),
 		insertOutbox(laterSameChannel, telegramOutboxPending, nil, 7),
@@ -193,9 +202,12 @@ func TestTelegramDueOutboxChannelHeadAndLeaseIntegration(t *testing.T) {
 		insertOutbox(failedDisplayHead, telegramOutboxDelivered, nil, 0),
 		insertOutbox(laterAfterFailedDisplay, telegramOutboxPending, nil, 3),
 		insertOutbox(unknownHead, telegramOutboxPending, nil, 0),
+		insertOutbox(invalidFailedDisplayHead, telegramOutboxDelivered, nil, 0),
+		insertOutbox(laterAfterInvalidFailedDisplay, telegramOutboxPending, nil, 0),
 	}
 	t.Cleanup(func() {
 		_, _ = g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).WhereIn("id", outboxIDs).Delete()
+		_, _ = g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).Unscoped().Where("job_id", failedDisplayHead).Delete()
 		_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Unscoped().WhereIn("id", jobIDs).Delete()
 	})
 
@@ -207,8 +219,8 @@ func TestTelegramDueOutboxChannelHeadAndLeaseIntegration(t *testing.T) {
 	for _, row := range rows {
 		selected[row.JobId] = true
 	}
-	if !selected[expiredLeaseHead] || !selected[unknownHead] {
-		t.Fatalf("expired lease and unknown channel heads must be selected: %+v", selected)
+	if !selected[expiredLeaseHead] || !selected[unknownHead] || !selected[laterAfterInvalidFailedDisplay] {
+		t.Fatalf("expired lease, unknown and successor of invalid failed display must be selected: %+v", selected)
 	}
 	for _, blocked := range []int64{queuedHead, laterSameChannel, activeLeaseHead, failedDisplayHead, laterAfterFailedDisplay} {
 		if selected[blocked] {
