@@ -2,8 +2,12 @@ package sys
 
 import (
 	"context"
+	"crypto/md5"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
+	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"strings"
@@ -43,6 +47,7 @@ type mediaDirectUploadSession struct {
 	Bucket       string
 	Region       string
 	ConfigDigest string
+	FileMD5      string
 	Media        sysin.MediaUploadInp
 	AttachmentId int64
 	MediaId      int64
@@ -123,8 +128,11 @@ func (s *sSysPublish) createMediaDirectUpload(ctx context.Context, in *sysin.Med
 	if err != nil {
 		return nil, err
 	}
-	key := storager.GenFullPath(cfg.CosPath, "."+ext)
 	sessionId := grand.S(40)
+	key, err := storager.GenStagingPath(cfg.CosPath, sessionId, ext)
+	if err != nil {
+		return nil, err
+	}
 	session := &mediaDirectUploadSession{
 		TenantId: tenantId, AccountId: accountId, UserId: contexts.GetUserId(ctx), Module: contexts.GetModule(ctx),
 		Key: key, FileName: in.FileName, FileSize: in.FileSize, ContentType: in.ContentType,
@@ -274,6 +282,33 @@ func (s *sSysPublish) completeMediaDirectUpload(ctx context.Context, in *sysin.M
 		return nil, gerror.Newf("COS文件大小不匹配，预期:%d 实际:%d", session.FileSize, head.ContentLength)
 	}
 	logStage("cos_head")
+	if session.FileMD5 == "" {
+		session.FileMD5, err = directUploadObjectMD5(ctx, client, session.Key)
+		if err != nil {
+			return nil, err
+		}
+		finalKey, pathErr := storager.GenContentPath(cfg.CosPath, session.FileMD5, storager.Ext(session.FileName))
+		if pathErr != nil {
+			return nil, pathErr
+		}
+		if finalKey != session.Key {
+			stagingKey := session.Key
+			if err = promoteDirectUploadObject(ctx, client, cfg, stagingKey, finalKey); err != nil {
+				return nil, err
+			}
+			session.Key = finalKey
+			if err = cache.Instance().Set(ctx, directUploadSessionPrefix+in.SessionId, session, directUploadSessionTTL); err != nil {
+				return nil, err
+			}
+			if _, deleteErr := client.Object.Delete(ctx, stagingKey); deleteErr != nil {
+				g.Log().Warningf(ctx, "删除COS直传临时对象失败 key:%s err:%+v", stagingKey, deleteErr)
+			}
+		}
+		if err = cache.Instance().Set(ctx, directUploadSessionPrefix+in.SessionId, session, directUploadSessionTTL); err != nil {
+			return nil, err
+		}
+	}
+	logStage("content_promote")
 	attachment := new(basesysin.AttachmentListModel)
 	if session.AttachmentId > 0 {
 		if err = dao.SysAttachment.Ctx(ctx).WherePri(session.AttachmentId).Scan(&attachment.SysAttachment); err != nil {
@@ -281,7 +316,7 @@ func (s *sSysPublish) completeMediaDirectUpload(ctx context.Context, in *sysin.M
 		}
 	}
 	if attachment.Id <= 0 {
-		stored, writeErr := storager.WriteDirectUploadAttachment(ctx, session.FileName, session.FileSize, session.Key)
+		stored, writeErr := storager.WriteDirectUploadAttachment(ctx, session.FileName, session.FileSize, session.FileMD5, session.Key)
 		if writeErr != nil {
 			return nil, gerror.Wrap(writeErr, "保存直传附件失败")
 		}
@@ -310,6 +345,46 @@ func (s *sSysPublish) completeMediaDirectUpload(ctx context.Context, in *sysin.M
 		g.Log().Warningf(ctx, "直传媒体处理任务入队失败 media_id:%d err:%+v", media.Id, err)
 	}
 	return media, nil
+}
+
+func directUploadObjectMD5(ctx context.Context, client *cos.Client, key string) (string, error) {
+	response, err := client.Object.Get(ctx, key, nil)
+	if err != nil {
+		return "", gerror.Wrap(err, "读取COS直传文件失败")
+	}
+	defer response.Body.Close()
+	hash := md5.New()
+	if _, err = io.Copy(hash, response.Body); err != nil {
+		return "", gerror.Wrap(err, "校验COS直传文件MD5失败")
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func promoteDirectUploadObject(ctx context.Context, client *cos.Client, cfg *model.UploadConfig, sourceKey, targetKey string) error {
+	if _, err := client.Object.Head(ctx, targetKey, nil); err == nil {
+		return nil
+	} else if !cos.IsNotFoundError(err) {
+		return gerror.Wrap(err, "检查COS内容对象失败")
+	}
+	bucketURL, err := url.Parse(strings.TrimSpace(cfg.CosBucketURL))
+	if err != nil || bucketURL.Host == "" {
+		return gerror.New("COS Bucket访问域名配置不正确")
+	}
+	contentType := mime.TypeByExtension("." + storager.Ext(targetKey))
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	_, _, err = client.Object.Copy(ctx, targetKey, fmt.Sprintf("%s/%s", bucketURL.Host, strings.TrimLeft(sourceKey, "/")), &cos.ObjectCopyOptions{
+		ObjectCopyHeaderOptions: &cos.ObjectCopyHeaderOptions{
+			CacheControl:          "public, max-age=31536000, immutable",
+			ContentType:           contentType,
+			XCosMetadataDirective: "Replaced",
+		},
+	})
+	if err != nil {
+		return gerror.Wrap(err, "归档COS直传文件失败")
+	}
+	return nil
 }
 
 func loadDirectUploadConfig(ctx context.Context) (*model.UploadConfig, error) {

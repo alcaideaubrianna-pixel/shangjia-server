@@ -99,7 +99,7 @@ func DownloadCosObjectToFile(ctx context.Context, objectPath, targetPath string)
 }
 
 // Upload 上传到腾讯云cos对象存储
-func (d *CosDrive) Upload(ctx context.Context, file *ghttp.UploadFile) (fullPath string, err error) {
+func (d *CosDrive) Upload(ctx context.Context, file *ghttp.UploadFile, meta *FileMeta) (fullPath string, err error) {
 	if config.CosPath == "" {
 		err = gerror.New("COS存储驱动必须配置存储路径!")
 		return
@@ -121,7 +121,10 @@ func (d *CosDrive) Upload(ctx context.Context, file *ghttp.UploadFile) (fullPath
 		return "", err
 	}
 
-	fullPath = GenFullPath(config.CosPath, gfile.Ext(file.Filename))
+	fullPath, err = GenContentPath(config.CosPath, meta.Md5, meta.Ext)
+	if err != nil {
+		return "", err
+	}
 	opt := &cos.ObjectPutOptions{
 		ObjectPutHeaderOptions: &cos.ObjectPutHeaderOptions{
 			CacheControl: "public, max-age=31536000, immutable",
@@ -144,7 +147,10 @@ func (d *CosDrive) CreateMultipart(ctx context.Context, in *CheckMultipartParams
 		return nil, err
 	}
 
-	fullPath := GenFullPath(config.CosPath, gfile.Ext(in.meta.Filename))
+	fullPath, err := GenContentPath(config.CosPath, in.meta.Md5, in.meta.Ext)
+	if err != nil {
+		return nil, err
+	}
 	opt := &cos.InitiateMultipartUploadOptions{
 		ObjectPutHeaderOptions: &cos.ObjectPutHeaderOptions{
 			CacheControl: "public, max-age=31536000, immutable",

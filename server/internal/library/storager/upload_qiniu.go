@@ -9,7 +9,6 @@ import (
 	"context"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/net/ghttp"
-	"github.com/gogf/gf/v2/os/gfile"
 	"github.com/qiniu/go-sdk/v7/auth/qbox"
 	"github.com/qiniu/go-sdk/v7/storage"
 )
@@ -19,7 +18,7 @@ type QiNiuDrive struct {
 }
 
 // Upload 上传到七牛云对象存储
-func (d *QiNiuDrive) Upload(ctx context.Context, file *ghttp.UploadFile) (fullPath string, err error) {
+func (d *QiNiuDrive) Upload(ctx context.Context, file *ghttp.UploadFile, meta *FileMeta) (fullPath string, err error) {
 	if config.QiNiuPath == "" {
 		err = gerror.New("七牛云存储驱动必须配置存储路径!")
 		return
@@ -51,7 +50,10 @@ func (d *QiNiuDrive) Upload(ctx context.Context, file *ghttp.UploadFile) (fullPa
 		return
 	}
 
-	fullPath = GenFullPath(config.QiNiuPath, gfile.Ext(file.Filename))
+	fullPath, err = GenContentPath(config.QiNiuPath, meta.Md5, meta.Ext)
+	if err != nil {
+		return "", err
+	}
 	err = storage.NewFormUploader(&cfg).Put(ctx, &storage.PutRet{}, token, fullPath, f2, file.Size, &storage.PutExtra{})
 	return
 }
