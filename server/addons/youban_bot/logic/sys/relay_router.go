@@ -66,6 +66,15 @@ func (s *sSysBot) handleRelayUpdate(ctx context.Context, botID int64, update *mo
 	if err = s.relayResolvePendingAdmins(ctx, botID, msg); err != nil {
 		return true, err
 	}
+	activatedBinding, err := s.relayResolvePendingBindings(ctx, botID, msg)
+	if err != nil {
+		return true, err
+	}
+	if activatedBinding != nil {
+		if err = s.enqueueRelayBindingActivated(ctx, cfg, msg, activatedBinding); err != nil {
+			return true, err
+		}
+	}
 	command, _ := botCommandAndArgs(msg.Text)
 	if command == "start" {
 		return true, s.relayWelcome(ctx, cfg, msg)

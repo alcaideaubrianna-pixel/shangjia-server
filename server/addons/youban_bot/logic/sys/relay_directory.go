@@ -2,14 +2,17 @@ package sys
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 
 	"hotgo/addons/youban_bot/internal/dao"
 	"hotgo/addons/youban_bot/internal/model/do"
+	"hotgo/addons/youban_bot/internal/model/entity"
 
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 )
 
@@ -17,6 +20,33 @@ type relayPeer struct {
 	ID   string
 	Name string
 	Kind string
+}
+
+var errRelayPeerNotFound = errors.New("未找到聊天对象")
+
+func relayPendingUsername(identity string) string {
+	identity = strings.TrimSpace(identity)
+	if !strings.HasPrefix(identity, "@") {
+		return ""
+	}
+	username := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(identity, "@")))
+	if username == "" {
+		return ""
+	}
+	return "@" + username
+}
+
+func relayPeerPending(peer *relayPeer) bool {
+	return peer != nil && strings.HasPrefix(peer.ID, "@")
+}
+
+func (s *sSysBot) relayResolvePeerOrPending(ctx context.Context, botID int64, identity string) (*relayPeer, error) {
+	peer, err := s.relayResolvePeer(ctx, botID, identity)
+	if err == nil || relayPendingUsername(identity) == "" || !errors.Is(err, errRelayPeerNotFound) {
+		return peer, err
+	}
+	pending := relayPendingUsername(identity)
+	return &relayPeer{ID: pending, Name: pending, Kind: "pending_user"}, nil
 }
 
 func (s *sSysBot) relayKnownUser(ctx context.Context, botID int64, identity string) (*relayPeer, error) {
@@ -82,7 +112,7 @@ func (s *sSysBot) relayResolvePeer(ctx context.Context, botID int64, identity st
 		}
 		return &relayPeer{ID: groups[0].ChatId, Name: firstNonEmpty(groups[0].ChatTitle, groups[0].ChatId), Kind: "group"}, nil
 	}
-	return nil, gerror.New("未找到聊天对象，请先让用户私聊当前Bot，或将当前Bot添加到群中并发送消息")
+	return nil, gerror.Wrap(errRelayPeerNotFound, "未找到聊天对象，请先让用户私聊当前Bot，或将当前Bot添加到群中并发送消息")
 }
 
 func (s *sSysBot) relayValidatePeer(ctx context.Context, botID int64, peer *relayPeer) error {
@@ -127,6 +157,46 @@ func (s *sSysBot) relayResolvePendingAdmins(ctx context.Context, botID int64, ms
 	c := dao.YoubanBotRelayAdmin.Columns()
 	_, err := dao.YoubanBotRelayAdmin.Ctx(ctx).Where(c.BotId, botID).Where(c.UserId, "").Where(c.Username, "@"+strings.ToLower(msg.From.Username)).Data(do.YoubanBotRelayAdmin{UserId: strconv.FormatInt(msg.From.ID, 10)}).Update()
 	return gerror.Wrap(err, "确认双向管理员身份失败")
+}
+
+func (s *sSysBot) relayResolvePendingBindings(ctx context.Context, botID int64, msg *models.Message) (*entity.YoubanBotRelayBinding, error) {
+	if msg.From == nil || msg.From.IsBot || msg.From.Username == "" || msg.Chat.Type != models.ChatTypePrivate {
+		return nil, nil
+	}
+	pending := "@" + strings.ToLower(msg.From.Username)
+	actual := strconv.FormatInt(msg.From.ID, 10)
+	var activated *entity.YoubanBotRelayBinding
+	err := dao.YoubanBotRelayBinding.Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		var endpoint *entity.YoubanBotRelayEndpoint
+		if err := dao.YoubanBotRelayEndpoint.Ctx(ctx).Where(do.YoubanBotRelayEndpoint{BotId: botID, ChatId: pending}).Scan(&endpoint); err != nil || endpoint == nil {
+			return err
+		}
+		var occupied *entity.YoubanBotRelayEndpoint
+		if err := dao.YoubanBotRelayEndpoint.Ctx(ctx).Where(do.YoubanBotRelayEndpoint{BotId: botID, ChatId: actual}).Scan(&occupied); err != nil {
+			return err
+		}
+		if occupied != nil && occupied.BindingId != endpoint.BindingId {
+			return gerror.New("该用户已有其他绑定，请管理员先解绑")
+		}
+		if err := dao.YoubanBotRelayBinding.Ctx(ctx).Where(do.YoubanBotRelayBinding{Id: endpoint.BindingId, BotId: botID}).Scan(&activated); err != nil || activated == nil {
+			return err
+		}
+		name := firstNonEmpty(strings.TrimSpace(msg.From.FirstName+" "+msg.From.LastName), "@"+msg.From.Username, actual)
+		if activated.LeftChatId == pending {
+			activated.LeftChatId, activated.LeftName = actual, name
+		} else if activated.RightChatId == pending {
+			activated.RightChatId, activated.RightName = actual, name
+		} else {
+			return nil
+		}
+		activated.PairKey = relayPairKey(activated.LeftChatId, activated.RightChatId)
+		if _, err := dao.YoubanBotRelayBinding.Ctx(ctx).WherePri(activated.Id).Data(do.YoubanBotRelayBinding{PairKey: activated.PairKey, LeftChatId: activated.LeftChatId, RightChatId: activated.RightChatId, LeftName: activated.LeftName, RightName: activated.RightName}).Update(); err != nil {
+			return gerror.Wrap(err, "激活待确认绑定失败")
+		}
+		_, err := dao.YoubanBotRelayEndpoint.Ctx(ctx).WherePri(endpoint.Id).Data(do.YoubanBotRelayEndpoint{ChatId: actual}).Update()
+		return gerror.Wrap(err, "激活待确认绑定端点失败")
+	})
+	return activated, err
 }
 
 func (s *sSysBot) relayBot(ctx context.Context, token string) (*tgbot.Bot, error) {

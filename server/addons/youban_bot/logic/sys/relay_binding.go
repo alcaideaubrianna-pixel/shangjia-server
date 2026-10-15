@@ -42,11 +42,11 @@ func (s *sSysBot) adminRelayBind(ctx context.Context, in *sysin.RelayBindingInp)
 	if cfg == nil {
 		return gerror.New("请先保存双向机器人设置")
 	}
-	left, err := s.relayResolvePeer(ctx, in.BotId, in.Left)
+	left, err := s.relayResolvePeerOrPending(ctx, in.BotId, in.Left)
 	if err != nil {
 		return err
 	}
-	right, err := s.relayResolvePeer(ctx, in.BotId, in.Right)
+	right, err := s.relayResolvePeerOrPending(ctx, in.BotId, in.Right)
 	if err != nil {
 		return err
 	}
@@ -57,6 +57,9 @@ func (s *sSysBot) adminRelayBind(ctx context.Context, in *sysin.RelayBindingInp)
 		return gerror.New("审计群不能作为双向绑定对象")
 	}
 	for _, peer := range []*relayPeer{left, right} {
+		if relayPeerPending(peer) {
+			continue
+		}
 		if err = s.relayValidatePeer(ctx, in.BotId, peer); err != nil {
 			return err
 		}

@@ -90,7 +90,7 @@ func (relayManagementFeature) Handle(ctx context.Context, s *sSysBot, fc *botFea
 			return true, err
 		}
 		lines := []string{fmt.Sprintf("<b>双向机器人 #%d</b> · %s\n实际状态：%s", botID, state, html.EscapeString(runtimeState))}
-		for _, action := range []string{"启用", "停用", "当前设置", "绑定列表", "屏蔽列表", "黑名单", "屏蔽跳转 开启", "屏蔽跳转 关闭", "绑定", "解绑", "添加管理员", "删除管理员", "管理员列表", "屏蔽关键词", "删除关键词", "屏蔽用户", "解除屏蔽用户", "审计设置", "聊天存档 开启", "聊天存档 关闭", "转发群", "关闭转发", "同步后台Bot"} {
+		for _, action := range []string{"启用", "停用", "当前设置", "私聊用户", "群聊列表", "绑定列表", "屏蔽列表", "黑名单", "屏蔽跳转 开启", "屏蔽跳转 关闭", "绑定", "解绑", "添加管理员", "删除管理员", "管理员列表", "屏蔽关键词", "删除关键词", "屏蔽用户", "解除屏蔽用户", "审计设置", "聊天存档 开启", "聊天存档 关闭", "转发群", "关闭转发", "同步后台Bot"} {
 			lines = append(lines, "<code>"+prefix+" "+action+"</code>")
 		}
 		lines = append(lines, "绑定和屏蔽命令可直接追加，例如：", "<code>"+prefix+" 绑定 @alice @bob</code>", "<code>"+prefix+" 屏蔽 关键词</code>", "使用审计设置、聊天存档和转发群按钮配置聊天记录管理。", "返回：<code>/relayadmin</code>")
@@ -153,7 +153,7 @@ func (relayManagementFeature) Handle(ctx context.Context, s *sSysBot, fc *botFea
 		return reply(html.EscapeString(err.Error()))
 	}
 	fields := strings.Fields(command)
-	if len(fields) > 0 && (fields[0] == "绑定列表" || fields[0] == "屏蔽列表" || fields[0] == "黑名单") {
+	if len(fields) > 0 && (fields[0] == "绑定列表" || fields[0] == "屏蔽列表" || fields[0] == "黑名单" || fields[0] == "私聊用户" || fields[0] == "群聊列表") {
 		page := 1
 		if len(fields) > 1 {
 			page, _ = strconv.Atoi(fields[1])

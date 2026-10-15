@@ -17,7 +17,7 @@ type relayCommand struct {
 
 func parseRelayCommand(text string) relayCommand {
 	text = strings.TrimSpace(text)
-	for _, name := range []string{"添加管理员", "删除管理员", "管理员列表", "确认解绑", "解除屏蔽用户", "解除屏蔽群", "解除屏蔽@", "删除屏蔽", "屏蔽跳转", "屏蔽用户", "屏蔽群", "屏蔽@", "绑定列表", "屏蔽列表", "当前设置", "黑名单", "解绑", "绑定", "屏蔽"} {
+	for _, name := range []string{"添加管理员", "删除管理员", "管理员列表", "确认解绑", "解除屏蔽用户", "解除屏蔽群", "解除屏蔽@", "删除屏蔽", "屏蔽跳转", "屏蔽用户", "屏蔽群", "屏蔽@", "绑定列表", "屏蔽列表", "私聊用户", "群聊列表", "当前设置", "黑名单", "解绑", "绑定", "屏蔽"} {
 		if !strings.HasPrefix(text, name) {
 			continue
 		}

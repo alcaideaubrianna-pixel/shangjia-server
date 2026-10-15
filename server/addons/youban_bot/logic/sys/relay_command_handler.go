@@ -96,7 +96,9 @@ func (s *sSysBot) executeRelayCommand(ctx context.Context, cfg *entity.YoubanBot
 		if err = s.AdminRelayBind(ctx, &sysin.RelayBindingInp{RelayBotInp: base, Left: left, Right: right}); err != nil {
 			return "", err
 		}
-		return "双向绑定成功。", nil
+		return "双向绑定已记录。尚未启动机器人的用户名会在首次发送 /start 后自动确认并生效。", nil
+	case "私聊用户", "群聊列表":
+		return s.relayDirectoryList(ctx, cfg.BotId, cmd.Name, cmd.Args)
 	case "添加管理员", "删除管理员", "管理员列表":
 		return s.relayAdminCommand(ctx, cfg, cmd)
 	case "解绑":

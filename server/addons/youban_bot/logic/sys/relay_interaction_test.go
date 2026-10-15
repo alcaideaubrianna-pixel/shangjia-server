@@ -228,6 +228,39 @@ func TestRelayPendingAdminStartConfirmsIdentity(t *testing.T) {
 	}
 }
 
+func TestRelayPendingBindingStartActivatesAndNotifiesAdmin(t *testing.T) {
+	ctx, s, texts := relayInteractionFixture(t)
+	if _, err := dao.YoubanBotRelayAdmin.Ctx(ctx).Data(do.YoubanBotRelayAdmin{BotId: 1, UserId: "21", Username: "@admin"}).Insert(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dao.YoubanBotRelayBinding.Ctx(ctx).Data(do.YoubanBotRelayBinding{Id: 20, BotId: 1, PairKey: "13:@alice", LeftChatId: "13", RightChatId: "@alice", LeftName: "Bob", RightName: "@alice"}).Insert(); err != nil {
+		t.Fatal(err)
+	}
+	for _, endpoint := range []string{"13", "@alice"} {
+		if _, err := dao.YoubanBotRelayEndpoint.Ctx(ctx).Data(do.YoubanBotRelayEndpoint{BotId: 1, BindingId: 20, ChatId: endpoint}).Insert(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	msg := &models.Message{ID: 1, Text: "/start", From: &models.User{ID: 12, Username: "Alice", FirstName: "Alice"}, Chat: models.Chat{ID: 12, Type: models.ChatTypePrivate}}
+	handled, err := s.handleRelayUpdate(ctx, 1, &models.Update{Message: msg})
+	if !handled || err != nil {
+		t.Fatal("pending binding activation failed", handled, err)
+	}
+	<-texts
+	binding, err := relayBindingByChat(ctx, 1, "12")
+	if err != nil || binding == nil || binding.RightChatId != "12" || strings.Contains(binding.PairKey, "@") {
+		t.Fatalf("pending binding was not activated: %+v %v", binding, err)
+	}
+	count, err := dao.YoubanBotRelayEndpoint.Ctx(ctx).Where(do.YoubanBotRelayEndpoint{BotId: 1, ChatId: "@alice"}).Count()
+	if err != nil || count != 0 {
+		t.Fatal("pending endpoint still exists", count, err)
+	}
+	count, err = dao.YoubanBotRelayDelivery.Ctx(ctx).Where(do.YoubanBotRelayDelivery{BotId: 1, BindingId: 20, Kind: consts.RelayKindNotice, TargetChatId: "21"}).Count()
+	if err != nil || count != 1 {
+		t.Fatal("activation notice missing", count, err)
+	}
+}
+
 func TestRelayManagementButtonsRecheckPermissions(t *testing.T) {
 	ctx, s, texts := relayInteractionFixture(t)
 	if _, err := dao.YoubanBotRelayAdmin.Ctx(ctx).Data(do.YoubanBotRelayAdmin{BotId: 1, UserId: "12", Username: "12"}).Insert(); err != nil {

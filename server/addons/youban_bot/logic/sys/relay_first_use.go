@@ -67,6 +67,49 @@ func (s *sSysBot) enqueueRelayFirstUse(ctx context.Context, cfg *entity.YoubanBo
 	return nil
 }
 
+func (s *sSysBot) enqueueRelayBindingActivated(ctx context.Context, cfg *entity.YoubanBotRelayConfig, msg *models.Message, binding *entity.YoubanBotRelayBinding) error {
+	if msg.From == nil || binding == nil {
+		return nil
+	}
+	var admins []*entity.YoubanBotRelayAdmin
+	if err := dao.YoubanBotRelayAdmin.Ctx(ctx).Where(dao.YoubanBotRelayAdmin.Columns().BotId, cfg.BotId).Scan(&admins); err != nil {
+		return err
+	}
+	recipients := map[string]bool{}
+	for _, admin := range admins {
+		if id, err := strconv.ParseInt(admin.UserId, 10, 64); err == nil && id > 0 {
+			recipients[admin.UserId] = true
+		}
+	}
+	owners, err := s.relayOwnerTelegramIDs(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	for _, id := range owners {
+		recipients[id] = true
+	}
+	source := strconv.FormatInt(msg.From.ID, 10)
+	name := firstNonEmpty(strings.TrimSpace(msg.From.FirstName+" "+msg.From.LastName), "@"+msg.From.Username, source)
+	text := fmt.Sprintf("<b>待确认绑定已生效</b>\nBot ID：<code>%d</code>\n用户：%s @%s\n用户ID：<code>%s</code>\n绑定：%s ↔ %s\n用户首次使用机器人，系统已自动确认绑定。", cfg.BotId, html.EscapeString(name), html.EscapeString(msg.From.Username), source, html.EscapeString(binding.LeftName), html.EscapeString(binding.RightName))
+	raw, err := json.Marshal(struct {
+		Text string `json:"text"`
+	}{Text: text})
+	if err != nil {
+		return err
+	}
+	for recipient := range recipients {
+		if recipient == source {
+			continue
+		}
+		data := do.YoubanBotRelayDelivery{BotId: cfg.BotId, BindingId: binding.Id, SourceChatId: source, SourceMessageId: -1000000000 - binding.Id, TargetChatId: recipient, Kind: consts.RelayKindNotice, PairKey: binding.PairKey, RawJson: string(raw), Status: consts.RelayPending, AvailableAt: gtime.Now()}
+		c := dao.YoubanBotRelayDelivery.Columns()
+		if _, err := dao.YoubanBotRelayDelivery.Ctx(ctx).Data(data).OnConflict(c.BotId, c.SourceChatId, c.SourceMessageId, c.Kind, c.TargetChatId).InsertIgnore(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *sSysBot) sendRelayFirstUse(ctx context.Context, bot *tgbot.Bot, cfg *entity.YoubanBotRelayConfig, row *entity.YoubanBotRelayDelivery) ([]int, string, error) {
 	count, err := dao.YoubanBotRelayBinding.Ctx(ctx).Where(do.YoubanBotRelayBinding{Id: row.BindingId, BotId: cfg.BotId}).Count()
 	if err != nil {

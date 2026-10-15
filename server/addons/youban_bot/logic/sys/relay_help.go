@@ -22,6 +22,7 @@ const relayAdminHelp = `<b>双向机器人 · 管理帮助</b>
 <b>一、绑定管理</b>
 创建双向绑定：
 <code>绑定 @alice @bob</code>
+对方尚未启动机器人时也会先记录；首次发送 <code>/start</code> 后自动确认并生效，同时通知管理员。
 兼容连接写法：
 <code>绑定@alice-@bob</code>
 绑定群聊与用户：
@@ -87,6 +88,8 @@ const relayAdminHelp = `<b>双向机器人 · 管理帮助</b>
 
 <b>六、状态与帮助</b>
 <code>当前设置</code>
+<code>私聊用户</code>
+<code>群聊列表</code>
 <code>/help</code>
 <code>/id</code>
 
