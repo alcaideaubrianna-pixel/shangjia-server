@@ -30,6 +30,41 @@ func TestTelegramSendingAttemptRecoveryFollowsMediaDeadline(t *testing.T) {
 	}
 }
 
+func TestTelegramPreAttemptRecoveryIsPrompt(t *testing.T) {
+	if telegramPreAttemptRecoverAfter > 2*time.Minute {
+		t.Fatalf("pre-attempt recovery is too slow: %s", telegramPreAttemptRecoverAfter)
+	}
+	if telegramPreAttemptRecoverAfter >= telegramSendingJobRecoverAfter {
+		t.Fatalf("pre-attempt recovery %s must be earlier than ambiguous sending recovery %s", telegramPreAttemptRecoverAfter, telegramSendingJobRecoverAfter)
+	}
+}
+
+func TestTelegramPreAttemptPhasesExcludeExternalSend(t *testing.T) {
+	phases := telegramPreAttemptPhases()
+	want := map[string]bool{
+		"": true, telegramSendPhaseCleanupProcessing: true, telegramSendPhaseCleanupConfirmed: true,
+	}
+	for _, phase := range phases {
+		if !want[phase] {
+			t.Fatalf("unsafe phase included in pre-attempt recovery: %q", phase)
+		}
+		delete(want, phase)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing pre-attempt recovery phases: %+v", want)
+	}
+	for _, unsafe := range []string{
+		telegramSendPhaseDisplaySending, telegramSendPhaseDisplayConfirmed,
+		telegramSendPhaseVerifySending, telegramSendPhaseVerifyConfirmed,
+	} {
+		for _, phase := range phases {
+			if phase == unsafe {
+				t.Fatalf("external-send phase %q must require evidence reconciliation", phase)
+			}
+		}
+	}
+}
+
 func TestStaleSendingAttemptRecoveryCoversResetJobs(t *testing.T) {
 	for _, status := range []string{
 		telegramJobStatusPending,

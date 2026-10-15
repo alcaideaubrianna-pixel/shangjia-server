@@ -233,6 +233,68 @@ func TestTelegramUnknownProcessingBlocksNextChannelJobIntegration(t *testing.T) 
 	}
 }
 
+func TestTelegramAPISuccessCommitsAttemptMessageAndPhaseIntegration(t *testing.T) {
+	if os.Getenv("YOUBAN_PUBLISH_INTEGRATION") != "1" {
+		t.Skip("set YOUBAN_PUBLISH_INTEGRATION=1 to run local PostgreSQL integration test")
+	}
+	ctx := context.Background()
+	seed := time.Now().UnixNano()
+	jobID, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Data(g.Map{
+		"operation_no": "attempt-atomic-integration", "tenant_id": seed,
+		"account_id": seed, "profile_id": seed, "channel_id": seed, "bot_id": seed,
+		"target_chat_id": "-1001234567890", "status": telegramJobStatusSending,
+		"dispatch_status": tgDispatchStatusProcessing, "send_phase": telegramSendPhaseCleanupConfirmed,
+	}).InsertAndGetId()
+	if err != nil {
+		t.Fatalf("insert job: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = g.DB().Model(publishTgAttemptMessageTable).Safe().Ctx(ctx).
+			WhereIn("attempt_id", g.DB().Model(publishTgAttemptTable).Fields("id").Where("job_id", jobID)).Delete()
+		_, _ = g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).Unscoped().Where("job_id", jobID).Delete()
+		_, _ = g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).Where("job_id", jobID).Delete()
+		_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Unscoped().Where("id", jobID).Delete()
+	})
+
+	job, err := new(sSysPublish).telegramJobById(ctx, jobID)
+	if err != nil {
+		t.Fatalf("load job: %v", err)
+	}
+	attempt, err := new(sSysPublish).prepareTelegramDeliveryAttempt(ctx, job, "display", 1, telegramSendPhaseDisplaySending)
+	if err != nil {
+		t.Fatalf("prepare attempt: %v", err)
+	}
+	phase, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", jobID).Value("send_phase")
+	if err != nil || phase.String() != telegramSendPhaseDisplaySending {
+		t.Fatalf("prepared phase=%q err=%v", phase.String(), err)
+	}
+	message := &telegramSentMessage{MessageId: seed, Purpose: "display"}
+	if err = new(sSysPublish).confirmTelegramAPISuccess(ctx, job, attempt, []*telegramSentMessage{message}, telegramSendPhaseDisplayConfirmed); err != nil {
+		t.Fatalf("confirm API success: %v", err)
+	}
+	var confirmed telegramDeliveryAttempt
+	if err = g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).Where("id", attempt.Id).Scan(&confirmed); err != nil {
+		t.Fatalf("load confirmed attempt: %v", err)
+	}
+	if confirmed.Status != telegramAttemptStatusConfirmed || confirmed.ResponseReceived != 1 || confirmed.ConfirmedCount != 1 {
+		t.Fatalf("unexpected confirmed attempt: %+v", confirmed)
+	}
+	phase, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", jobID).Value("send_phase")
+	if err != nil || phase.String() != telegramSendPhaseDisplayConfirmed {
+		t.Fatalf("confirmed phase=%q err=%v", phase.String(), err)
+	}
+	messageCount, err := g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).
+		Where("job_id", jobID).Where("tg_message_id", seed).Count()
+	if err != nil || messageCount != 1 {
+		t.Fatalf("message projection count=%d err=%v", messageCount, err)
+	}
+	auditCount, err := g.DB().Model(publishTgAttemptMessageTable).Safe().Ctx(ctx).
+		Where("attempt_id", attempt.Id).Where("message_id", seed).Where("source", "response").Count()
+	if err != nil || auditCount != 1 {
+		t.Fatalf("attempt audit count=%d err=%v", auditCount, err)
+	}
+}
+
 func TestTelegramAttemptMarkerSurvivesCaptionComposition(t *testing.T) {
 	marker := telegramAttemptMarker("attempt-caption")
 	caption := telegramCaptionWithJobMarker("资料标题", 42, "display") + marker

@@ -4,10 +4,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"sort"
 	"strings"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -236,19 +236,33 @@ func telegramMediaCacheAssetHash(mediaType string, assetHash string, posterUrl s
 }
 
 func (s *sSysPublish) saveTelegramSentMessages(ctx context.Context, job telegramJobRecord, messages []*telegramSentMessage) error {
-	now := gtime.Now()
+	if err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		return saveTelegramSentMessagesTx(ctx, tx, job, messages)
+	}); err != nil {
+		return err
+	}
+	s.cacheTelegramSentMessageMetadata(ctx, job, messages)
+	return nil
+}
+
+func saveTelegramSentMessagesTx(ctx context.Context, tx gdb.TX, job telegramJobRecord, messages []*telegramSentMessage) error {
 	for _, item := range messages {
 		if item == nil || item.MessageId <= 0 {
 			continue
 		}
-		if err := s.ensureTelegramMediaGroupPurpose(ctx, job, item); err != nil {
-			observeTelegramMediaPurposeViolation(ctx, "persist")
-			return err
+		if strings.TrimSpace(item.MediaGroupId) != "" && (item.Purpose == "display" || item.Purpose == "verify") {
+			exists, err := tx.Model(publishTgMessageTable).
+				Where("job_id", job.Id).Where("media_group_id", item.MediaGroupId).
+				WhereNot("purpose", item.Purpose).WhereIn("purpose", []string{"display", "verify"}).Count()
+			if err != nil {
+				return gerror.Wrap(err, "校验TG媒体组用途失败")
+			}
+			if exists > 0 {
+				observeTelegramMediaPurposeViolation(ctx, "persist")
+				return gerror.New("展示资料与验证资料禁止合并发送")
+			}
 		}
-		if isProtectedTelegramPublishPurpose(item.Purpose) {
-			_ = cache.Instance().Set(ctx, telegramPublishMessageCacheKey(job.TargetChatId, int(item.MessageId)), 1, autoDeletePublishMessageCacheTTL)
-		}
-		_, err := g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).Data(g.Map{
+		_, err := tx.Model(publishTgMessageTable).Data(g.Map{
 			"job_id":            job.Id,
 			"tenant_id":         job.TenantId,
 			"account_id":        job.AccountId,
@@ -262,13 +276,20 @@ func (s *sSysPublish) saveTelegramSentMessages(ctx context.Context, job telegram
 			"tg_file_id":        item.TgFileId,
 			"tg_file_unique_id": item.TgFileUniqueId,
 			"status":            "sent",
-			"sent_at":           now,
+			"sent_at":           gtime.Now(),
 			"deleted_at":        nil,
-			"created_at":        now,
-			"updated_at":        now,
-		}).OnConflict("job_id,tg_message_id").OnDuplicate("status,tg_file_id,tg_file_unique_id,sent_at,deleted_at,updated_at").Save()
+		}).OnConflict("job_id,tg_message_id").OnDuplicate("status,tg_file_id,tg_file_unique_id,sent_at,deleted_at").Save()
 		if err != nil {
 			return gerror.Wrap(err, "保存TG消息记录失败")
+		}
+	}
+	return nil
+}
+
+func (s *sSysPublish) cacheTelegramSentMessageMetadata(ctx context.Context, job telegramJobRecord, messages []*telegramSentMessage) {
+	for _, item := range messages {
+		if item != nil && item.MessageId > 0 && isProtectedTelegramPublishPurpose(item.Purpose) {
+			_ = cache.Instance().Set(ctx, telegramPublishMessageCacheKey(job.TargetChatId, int(item.MessageId)), 1, autoDeletePublishMessageCacheTTL)
 		}
 	}
 	storedHashes := make(map[string]telegramAntiScanHash)
@@ -289,34 +310,6 @@ func (s *sSysPublish) saveTelegramSentMessages(ctx context.Context, job telegram
 			g.Log().Warningf(ctx, "保存防扫图搜索指纹失败 jobId:%d mediaId:%d err:%+v", job.Id, item.MediaId, err)
 		}
 	}
-	return nil
-}
-
-func (s *sSysPublish) confirmTelegramMediaPhase(ctx context.Context, job telegramJobRecord, transport, purpose string, media []*telegramMediaItem, messages []*telegramSentMessage) error {
-	if err := validateTelegramMediaSendResult(purpose, media, messages); err != nil {
-		s.appendTelegramJobLog(ctx, job, transport, "incomplete", err.Error())
-		return err
-	}
-	for _, message := range messages {
-		if message != nil {
-			message.Purpose = purpose
-		}
-	}
-	if err := s.saveTelegramSentMessages(ctx, job, messages); err != nil {
-		return telegramDeliveryUncertainError(err)
-	}
-	if err := s.updateTelegramMediaFileIds(ctx, messages); err != nil {
-		g.Log().Warningf(ctx, "TG媒体file_id更新失败 transport:%s jobId:%d purpose:%s err:%+v", transport, job.Id, purpose, err)
-	}
-	phase := telegramSendPhaseDisplayConfirmed
-	if purpose == "verify" {
-		phase = telegramSendPhaseVerifyConfirmed
-	}
-	if err := s.updateTelegramJobSendPhase(ctx, job.Id, phase); err != nil {
-		return telegramDeliveryUncertainError(err)
-	}
-	s.appendTelegramJobLog(ctx, job, transport, "confirmed", fmt.Sprintf("媒体阶段确认完成 purpose:%s expected:%d confirmed:%d", purpose, len(media), len(messages)))
-	return nil
 }
 
 // finalizeTelegramMediaDelivery owns the terminal phase transition shared by
@@ -331,25 +324,6 @@ func (s *sSysPublish) finalizeTelegramMediaDelivery(ctx context.Context, job tel
 		return nil
 	}
 	return s.completeTelegramJobAndWakeChannel(ctx, job)
-}
-
-func (s *sSysPublish) ensureTelegramMediaGroupPurpose(ctx context.Context, job telegramJobRecord, item *telegramSentMessage) error {
-	if item == nil || strings.TrimSpace(item.MediaGroupId) == "" || (item.Purpose != "display" && item.Purpose != "verify") {
-		return nil
-	}
-	exists, err := g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).
-		Where("job_id", job.Id).
-		Where("media_group_id", item.MediaGroupId).
-		WhereNot("purpose", item.Purpose).
-		WhereIn("purpose", []string{"display", "verify"}).
-		Count()
-	if err != nil {
-		return gerror.Wrap(err, "校验TG媒体组用途失败")
-	}
-	if exists > 0 {
-		return gerror.New("展示资料与验证资料禁止合并发送")
-	}
-	return nil
 }
 
 func (s *sSysPublish) appendTelegramJobLog(ctx context.Context, job telegramJobRecord, action string, status string, message string) {

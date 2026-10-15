@@ -22,6 +22,7 @@ const (
 	// independently of the five-minute queue task timeout so an interrupted
 	// worker cannot hold the channel ordering barrier for several minutes.
 	telegramSendingAttemptRecoverAfter = 2 * time.Minute
+	telegramPreAttemptRecoverAfter     = 2 * time.Minute
 	telegramPendingJobRecoverAfter     = 30 * time.Second
 	telegramDispatchJobRecoverAfter    = 5 * time.Minute
 	telegramMediaFallbackRecoverAfter  = 2 * time.Minute
@@ -105,6 +106,9 @@ func (s *sSysPublish) runTelegramJobRecoveryCycle(ctx context.Context) {
 	if err := s.supersedeExpiredMessagePushPlanJobs(ctx, 1000); err != nil {
 		g.Log().Warningf(ctx, "终止过期历史消息计划任务失败：%+v", err)
 	}
+	if err := s.recoverStalePreAttemptTelegramJobs(ctx, 200); err != nil {
+		g.Log().Warningf(ctx, "恢复发送Attempt创建前中断的TG任务失败：%+v", err)
+	}
 	if err := s.recoverStaleTelegramSendingJobs(ctx, 100); err != nil {
 		g.Log().Warningf(ctx, "恢复卡住的TG推送任务失败：%+v", err)
 	}
@@ -138,6 +142,58 @@ func (s *sSysPublish) runTelegramJobRecoveryCycle(ctx context.Context) {
 	if err := s.recoverProfilePublishOperationStates(ctx, 100); err != nil {
 		g.Log().Warningf(ctx, "恢复资料上架状态失败：%+v", err)
 	}
+}
+
+// recoverStalePreAttemptTelegramJobs handles the only sending states that are
+// safe to retry without reconciliation: cleanup started/completed, but no
+// Telegram delivery Attempt was ever created. No external send can have
+// happened through the unified delivery path in this state.
+func (s *sSysPublish) recoverStalePreAttemptTelegramJobs(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		limit = 100
+	}
+	now := gtime.Now()
+	var jobs []telegramJobRecord
+	err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
+		Fields("j.*").
+		Where("j.status", telegramJobStatusSending).
+		WhereIn("j.send_phase", telegramPreAttemptPhases()).
+		WhereLTE("j.updated_at", now.Add(-telegramPreAttemptRecoverAfter)).
+		Where(telegramActiveChannelConditionForAlias("j")).
+		Where("NOT EXISTS (SELECT 1 FROM " + publishTgAttemptTable + " attempt WHERE attempt.job_id=j.id)").
+		OrderAsc("j.updated_at").OrderAsc("j.id").Limit(limit).Scan(&jobs)
+	if err != nil {
+		return gerror.Wrap(err, "读取发送Attempt创建前中断的TG任务失败")
+	}
+	for _, job := range jobs {
+		transitioned, transitionErr := s.transitionTelegramJob(ctx, telegramJobTransition{
+			JobId: job.Id, From: []string{telegramJobStatusSending}, To: telegramJobStatusRetryWait,
+			SendPhases: telegramPreAttemptPhases(), UpdatedBefore: now.Add(-telegramPreAttemptRecoverAfter),
+			ErrorMessage: "TG任务在发送前中断，已安全重新投递",
+			Additional: g.Map{
+				"dispatch_status":     tgDispatchStatusIdle,
+				"next_retry_at":       now,
+				"last_dispatch_error": "TG任务在发送前中断，已安全重新投递",
+			},
+		})
+		if transitionErr != nil {
+			g.Log().Warningf(ctx, "恢复发送前中断TG任务失败 jobId:%d err:%+v", job.Id, transitionErr)
+			continue
+		}
+		if !transitioned {
+			continue
+		}
+		job.Status = telegramJobStatusRetryWait
+		s.appendTelegramJobLog(ctx, job, "recovery", "queued", "发送Attempt尚未创建，已安全重新投递")
+		if enqueueErr := s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 0, false); enqueueErr != nil {
+			g.Log().Warningf(ctx, "重新投递发送前中断TG任务失败 jobId:%d err:%+v", job.Id, enqueueErr)
+		}
+	}
+	return nil
+}
+
+func telegramPreAttemptPhases() []string {
+	return []string{"", telegramSendPhaseCleanupProcessing, telegramSendPhaseCleanupConfirmed}
 }
 
 func (s *sSysPublish) recoverFailedJobsMissingVerification(ctx context.Context, limit int) error {

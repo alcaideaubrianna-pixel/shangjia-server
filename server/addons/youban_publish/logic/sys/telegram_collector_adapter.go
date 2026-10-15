@@ -449,12 +449,21 @@ func (s *sSysPublish) sendAccountFallbackPhase(ctx context.Context, client *tele
 		}
 	}
 	bindAccountFallbackMessagesToMedia(messages, media)
-	if err = s.confirmTelegramMediaPhase(ctx, job, "account", purpose, media, messages); err != nil {
+	if err = validateTelegramMediaSendResult(purpose, media, messages); err != nil {
+		s.appendTelegramJobLog(ctx, job, "account", "incomplete", err.Error())
 		return nil, err
 	}
-	if err = s.confirmTelegramDeliveryAttempt(ctx, attempt, messages, true); err != nil {
+	confirmedPhase := telegramSendPhaseDisplayConfirmed
+	if purpose == "verify" {
+		confirmedPhase = telegramSendPhaseVerifyConfirmed
+	}
+	if err = s.confirmTelegramAPISuccess(ctx, job, attempt, messages, confirmedPhase); err != nil {
 		return nil, telegramDeliveryUncertainError(err)
 	}
+	if err = s.updateTelegramMediaFileIds(ctx, messages); err != nil {
+		g.Log().Warningf(ctx, "协议号媒体file_id更新失败 jobId:%d purpose:%s err:%+v", job.Id, purpose, err)
+	}
+	s.appendTelegramJobLog(ctx, job, "account", "confirmed", fmt.Sprintf("媒体阶段确认完成 purpose:%s expected:%d confirmed:%d", purpose, len(media), len(messages)))
 	return messages, nil
 }
 

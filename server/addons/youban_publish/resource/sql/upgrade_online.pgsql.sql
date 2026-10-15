@@ -124,6 +124,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_attempt_token" ON "hg_youban_publis
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_attempt_scope" ON "hg_youban_publish_tg_attempt" ("job_id", "phase", "chunk_index", "attempt_no");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_attempt_waiting" ON "hg_youban_publish_tg_attempt" ("status", "webhook_deadline", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_attempt_channel" ON "hg_youban_publish_tg_attempt" ("target_chat_id", "status", "created_at", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_sending_recovery" ON "hg_youban_publish_tg_job" ("updated_at", "id") WHERE "status" = 'sending';
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_attempt_message" (
   "id" BIGSERIAL PRIMARY KEY, "attempt_id" bigint NOT NULL DEFAULT 0, "job_id" bigint NOT NULL DEFAULT 0,
   "target_chat_id" varchar(128) NOT NULL DEFAULT '', "message_id" bigint NOT NULL DEFAULT 0,

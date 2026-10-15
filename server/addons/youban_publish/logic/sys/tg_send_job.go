@@ -260,12 +260,9 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 			job.SendPhase = telegramSendPhaseDisplayConfirmed
 		} else {
 			expectedCount := telegramDisplayExpectedCount(len(displayMedia))
-			attempt, attemptErr := s.beginTelegramDeliveryAttempt(ctx, job, "display", expectedCount)
+			attempt, attemptErr := s.prepareTelegramDeliveryAttempt(ctx, job, "display", expectedCount, telegramSendPhaseDisplaySending)
 			if attemptErr != nil {
 				return attemptErr
-			}
-			if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseDisplaySending); err != nil {
-				return err
 			}
 			displayCaption := telegramCaptionWithJobMarker(caption, job.Id, "display") + telegramAttemptMarker(attempt.AttemptToken)
 			g.Log().Infof(ctx, "TG展示资料开始Bot发送 jobId:%d botId:%d chat:%s media:%s", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(displayMedia))
@@ -307,20 +304,14 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 				_ = s.cleanupTelegramSentMessages(ctx, bot, job.TargetChatId, messages, "展示媒体发送结果不完整")
 				return err
 			}
-			// A successful Bot API response with message IDs is authoritative. Confirm
-			// the remote delivery before updating local projections so a database
-			// failure can only trigger projection repair, never Telegram reconciliation.
-			if err = s.confirmTelegramDeliveryAttempt(ctx, attempt, messages, true); err != nil {
-				return gerror.Wrap(errTelegramRemoteConfirmed, err.Error())
-			}
-			if err = s.saveTelegramSentMessages(ctx, job, messages); err != nil {
+			// A successful Bot API response with message IDs is authoritative. Commit
+			// its evidence and projections together; only a failed local commit enters
+			// reconciliation, and the external send is never retried directly.
+			if err = s.confirmTelegramAPISuccess(ctx, job, attempt, messages, telegramSendPhaseDisplayConfirmed); err != nil {
 				return gerror.Wrap(errTelegramRemoteConfirmed, err.Error())
 			}
 			if err = s.updateTelegramMediaFileIds(ctx, messages); err != nil {
 				g.Log().Warningf(ctx, "更新TG展示媒体file_id失败 job:%d err:%+v", job.Id, err)
-			}
-			if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseDisplayConfirmed); err != nil {
-				return gerror.Wrap(errTelegramRemoteConfirmed, err.Error())
 			}
 			job.SendPhase = telegramSendPhaseDisplayConfirmed
 		}
@@ -346,10 +337,7 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	if telegramVerifyMediaNeedsAccountUpload(verifyMedia) {
 		g.Log().Infof(ctx, "TG验证资料无可复用file_id，先尝试Bot本地上传 jobId:%d channelId:%d media:%s", job.Id, job.ChannelId, telegramMediaDebugSummary(verifyMedia))
 	}
-	if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseVerifySending); err != nil {
-		return err
-	}
-	verifyAttempt, err := s.beginTelegramDeliveryAttempt(ctx, job, "verify", len(verifyMedia))
+	verifyAttempt, err := s.prepareTelegramDeliveryAttempt(ctx, job, "verify", len(verifyMedia), telegramSendPhaseVerifySending)
 	if err != nil {
 		return err
 	}
@@ -414,13 +402,7 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 		_ = s.cleanupTelegramSentMessages(ctx, bot, job.TargetChatId, verifyMessages, "验证媒体发送结果不完整")
 		return err
 	}
-	if err = s.confirmTelegramDeliveryAttempt(ctx, verifyAttempt, verifyMessages, true); err != nil {
-		return gerror.Wrap(errTelegramRemoteConfirmed, err.Error())
-	}
-	if err = s.saveTelegramSentMessages(ctx, job, verifyMessages); err != nil {
-		return gerror.Wrap(errTelegramRemoteConfirmed, err.Error())
-	}
-	if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseVerifyConfirmed); err != nil {
+	if err = s.confirmTelegramAPISuccess(ctx, job, verifyAttempt, verifyMessages, telegramSendPhaseVerifyConfirmed); err != nil {
 		return gerror.Wrap(errTelegramRemoteConfirmed, err.Error())
 	}
 	return s.updateTelegramMediaFileIds(ctx, verifyMessages)
@@ -630,18 +612,10 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 		return nil
 	}
 	if errors.Is(err, errTelegramRemoteConfirmed) {
-		transitioned, transitionErr := s.transitionTelegramJob(ctx, telegramJobTransition{
-			JobId: job.Id, From: []string{telegramJobStatusSending}, To: telegramJobStatusRetryWait,
-			RetryDelay: 2 * time.Second, ErrorMessage: err.Error(),
-			Additional: g.Map{"last_dispatch_error": err.Error()},
-		})
-		if transitionErr != nil {
-			return gerror.Wrap(transitionErr, "安排TG本地投影修复失败")
-		}
-		if transitioned {
-			return s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 2*time.Second, false)
-		}
-		return nil
+		// Telegram returned message IDs, but the atomic local confirmation did
+		// not commit. Never retry the external call from this state: reconcile
+		// the marker from channel history and only repair local projections.
+		return s.markTelegramJobUnknown(ctx, job, err)
 	}
 	if !telegramSendPhaseIsCleanup(job.SendPhase) && !isTelegramAccountBusyError(err) && isTelegramAmbiguousDeliveryError(err) {
 		return s.markTelegramJobUnknown(ctx, job, err)
