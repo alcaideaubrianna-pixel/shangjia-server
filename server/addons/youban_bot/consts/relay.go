@@ -18,6 +18,7 @@ const (
 	RelayStored      = "stored"
 	RelayCancelled   = "cancelled"
 	RelayKindChat    = "relay"
+	RelayKindNotice  = "first_use"
 	RelayKindAudit   = "audit"
 	RelayKindArchive = "archive"
 )
@@ -28,7 +29,7 @@ var RelayRuleOptions = []*model.Option{dict.GenDefaultOption(RelayRuleUser, "用
 var RelayDeliveryStatusOptions = []*model.Option{
 	dict.GenInfoOption(RelayPending, "待发送"), dict.GenPrimaryOption(RelaySending, "发送中"), dict.GenSuccessOption(RelaySent, "已发送"), dict.GenErrorOption(RelayFailed, "发送失败"), dict.GenWarningOption(RelayUncertain, "结果不确定"), dict.GenDefaultOption(RelayCancelled, "已取消"), dict.GenInfoOption(RelayStored, "已存档"),
 }
-var RelayDeliveryKindOptions = []*model.Option{dict.GenDefaultOption(RelayKindChat, "双向传递"), dict.GenInfoOption(RelayKindAudit, "审计转发"), dict.GenInfoOption(RelayKindArchive, "聊天存档")}
+var RelayDeliveryKindOptions = []*model.Option{dict.GenInfoOption(RelayKindNotice, "首次使用通知"), dict.GenDefaultOption(RelayKindChat, "双向传递"), dict.GenInfoOption(RelayKindAudit, "审计转发"), dict.GenInfoOption(RelayKindArchive, "聊天存档")}
 
 func init() {
 	dict.RegisterEnums("YoubanBotRelayDeliveryStatusOptions", "聊天投递状态", RelayDeliveryStatusOptions)

@@ -17,6 +17,7 @@ import (
 func TestRelayHelpRequiresConfiguredAdminAndPrivateChat(t *testing.T) {
 	ctx := relayTestDatabase(t)
 	relayTestBaseTable(t, ctx, botTable)
+	relayTestBaseTable(t, ctx, featureTable)
 	relayTestBaseTable(t, ctx, "hg_youban_bot_account_bind")
 	if _, err := dao.YoubanBotBot.Ctx(ctx).Data(do.YoubanBotBot{Id: 1, BotToken: "123:fake", BotName: "Test", Status: 1}).Insert(); err != nil {
 		t.Fatal(err)

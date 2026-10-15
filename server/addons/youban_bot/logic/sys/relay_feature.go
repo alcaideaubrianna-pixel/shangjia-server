@@ -28,7 +28,7 @@ func (relayFeature) ConfigSchema() []*sysin.FeatureConfigSchema {
 	return []*sysin.FeatureConfigSchema{
 		{Field: "botId", Label: "应用到Bot", Component: "select", Default: 0, Placeholder: "保存将把当前表单应用到所选Bot"},
 		{Field: "enabled", Label: "双向功能", Component: "switch", Default: 0},
-		{Field: "admins", Label: "添加管理员", Component: "textarea", Default: "", Placeholder: "每行一个用户ID或@用户名；当前后台账号默认具有管理权限"},
+		{Field: "admins", Label: "添加管理员", Component: "textarea", Default: "", Placeholder: "每行一个用户ID或@用户名；@用户名需先到此Bot私聊发送 /start 确认身份。默认管理员为首次保存配置的后台账号，其TG账号需已绑定；所有管理员需先私聊此Bot才能接收通知"},
 		{Field: "keywords", Label: "屏蔽词", Component: "textarea", Default: "", Placeholder: "每行一个关键词；保存后替换所选Bot的关键词列表"},
 		{Field: "bindings", Label: "双向列表", Component: "textarea", Default: "", Placeholder: "每行一对对象，空格分隔，如：@alice @bob；使用群ID时也用空格。保存后替换所选Bot的绑定列表"},
 		{Field: "blacklistUsers", Label: "黑名单用户", Component: "textarea", Default: "", Placeholder: "每行一个用户ID或@用户名；保存后替换所选Bot的用户黑名单"},
@@ -58,16 +58,9 @@ func (f *relayGatewayFeature) Menus(ctx context.Context, bc gatewayservice.BotCo
 					items = append(items, gatewayservice.MenuItem{Command: cmd, Description: f.bot.featureDescription(ctx, feature), Order: i})
 				}
 			}
-			cfg, err := f.bot.relayScope(ctx, binding.ReferenceID)
+			cfg, err := f.bot.relayIdentity(ctx, binding.ReferenceID)
 			if err == nil && cfg != nil {
-				filtered := items[:0]
-				for _, item := range items {
-					if item.Command != "help" {
-						filtered = append(filtered, item)
-					}
-				}
-				items = filtered
-				items = append(items, gatewayservice.MenuItem{Command: "help", Description: "双向聊天帮助", Order: 90}, gatewayservice.MenuItem{Command: "id", Description: "查看聊天ID", Order: 91})
+				items = []gatewayservice.MenuItem{{Command: "start", Description: "开始双向聊天", Order: 0}, {Command: "help", Description: "双向管理帮助（仅管理员）", Order: 1}, {Command: "id", Description: "查看聊天ID", Order: 2}}
 			}
 			return gatewayservice.FeatureMenus{Managed: true, Items: items}, nil
 		}
@@ -77,7 +70,20 @@ func (f *relayGatewayFeature) Menus(ctx context.Context, bc gatewayservice.BotCo
 func (f *relayGatewayFeature) HandleUpdate(ctx context.Context, bc gatewayservice.BotContext, update *models.Update) (bool, error) {
 	for _, binding := range bc.Bindings {
 		if binding.Owner == "youban_bot" {
-			return f.bot.handleRelayUpdate(ctx, binding.ReferenceID, update)
+			if update != nil && update.CallbackQuery != nil {
+				if handled, err := f.bot.handleRelayManagementCallback(ctx, binding.ReferenceID, update.CallbackQuery); handled || err != nil {
+					return handled, err
+				}
+				cfg, err := f.bot.relayIdentity(ctx, binding.ReferenceID)
+				if err == nil && cfg != nil {
+					return true, f.bot.relayExpiredButton(ctx, binding.ReferenceID, update.CallbackQuery)
+				}
+			}
+			handled, err := f.bot.handleRelayUpdate(ctx, binding.ReferenceID, update)
+			if handled && err != nil && update != nil && update.Message != nil {
+				return true, f.bot.relayInteractionError(ctx, binding.ReferenceID, update.Message, err)
+			}
+			return handled, err
 		}
 	}
 	return false, nil
@@ -140,6 +146,9 @@ func (s *sSysBot) relayFeatureSchema(ctx context.Context, model *sysin.FeatureMo
 	for _, field := range model.ConfigSchema {
 		if field.Field == "botId" {
 			for _, bot := range bots {
+				if bot.IsDefault == 1 {
+					continue
+				}
 				field.Options = append(field.Options, &sysin.FeatureConfigOption{Label: bot.BotName + " @" + bot.BotUsername, Value: bot.Id})
 			}
 		}

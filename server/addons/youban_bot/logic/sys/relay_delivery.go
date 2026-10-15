@@ -209,7 +209,7 @@ func (s *sSysBot) sendRelayDeliveries(ctx context.Context, rows []*entity.Youban
 	if err != nil {
 		return nil, consts.RelayCancelled, err
 	}
-	if cfg == nil || cfg.Enabled != 1 || botRow.Status != 1 {
+	if cfg == nil || cfg.Enabled != 1 || botRow.Status != 1 || botRow.IsDefault == 1 {
 		return nil, consts.RelayCancelled, nil
 	}
 	if first.Kind == consts.RelayKindAudit && cfg.AuditGroupId != first.TargetChatId {
@@ -233,6 +233,9 @@ func (s *sSysBot) sendRelayDeliveries(ctx context.Context, rows []*entity.Youban
 	bot, err := s.relayBot(ctx, botRow.BotToken)
 	if err != nil {
 		return nil, relayRetryStatus(first.Attempts), err
+	}
+	if first.Kind == consts.RelayKindNotice {
+		return s.sendRelayFirstUse(ctx, bot, cfg, first)
 	}
 	threadID := 0
 	if first.Kind == consts.RelayKindAudit {

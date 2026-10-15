@@ -48,8 +48,21 @@ func (s *sSysBot) handleRelayCommand(ctx context.Context, cfg *entity.YoubanBotR
 	}
 	var result string
 	err = relayMutate(ctx, cfg.BotId, func(ctx context.Context) error {
-		var execErr error
-		result, execErr = s.executeRelayCommand(ctx, cfg, cmd)
+		current, execErr := relayConfig(ctx, cfg.BotId)
+		if execErr != nil {
+			return execErr
+		}
+		if current == nil {
+			return gerror.New("双向配置已移除")
+		}
+		allowed, execErr := s.relayIsAdmin(ctx, current, userID)
+		if execErr != nil {
+			return execErr
+		}
+		if !allowed {
+			return gerror.New("管理员权限已变化")
+		}
+		result, execErr = s.executeRelayCommand(ctx, current, cmd)
 		return execErr
 	})
 	if err != nil {
@@ -83,7 +96,11 @@ func (s *sSysBot) executeRelayCommand(ctx context.Context, cfg *entity.YoubanBot
 			return "", err
 		}
 		return "双向绑定成功。", nil
+	case "添加管理员", "管理员列表":
+		return s.relayAdminCommand(ctx, cfg, cmd)
 	case "解绑":
+		return "请确认解除绑定：\n<code>确认解绑 " + html.EscapeString(cmd.Args) + "</code>\n取消操作请忽略本提示。", nil
+	case "确认解绑":
 		peer, err := s.relayResolvePeer(ctx, cfg.BotId, cmd.Args)
 		if err != nil {
 			return "", err
@@ -119,11 +136,15 @@ func (s *sSysBot) executeRelayCommand(ctx context.Context, cfg *entity.YoubanBot
 		if cfg.BlockLinks == 1 {
 			jump = "开启"
 		}
+		_, runtimeState, err := s.relayRuntimeState(ctx, cfg)
+		if err != nil {
+			return "", err
+		}
 		state := "停用"
 		if cfg.Enabled == 1 {
 			state = "启用"
 		}
-		return fmt.Sprintf("双向功能：%s\n屏蔽跳转：%s\n附加管理员：%d\n双向绑定：%d", state, jump, admins, bindings), nil
+		return fmt.Sprintf("双向功能：%s\n实际状态：%s\n屏蔽跳转：%s\n附加管理员：%d\n双向绑定：%d", state, runtimeState, jump, admins, bindings), nil
 	case "绑定列表", "屏蔽列表", "黑名单":
 		return s.relayCommandList(ctx, cfg.BotId, cmd)
 	}

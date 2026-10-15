@@ -48,6 +48,10 @@ func TestRelayMissingMigrationDoesNotDisableMainBot(t *testing.T) {
 
 func TestRelayHelpOnlyBelongsToConfiguredBot(t *testing.T) {
 	ctx := relayTestDatabase(t)
+	relayTestBaseTable(t, ctx, botTable)
+	if _, err := dao.YoubanBotBot.Ctx(ctx).Data(do.YoubanBotBot{Id: 2, BotName: "Relay", Status: 1}).Insert(); err != nil {
+		t.Fatal(err)
+	}
 	relayTestBaseTable(t, ctx, featureTable)
 	if _, err := dao.YoubanBotFeature.Ctx(ctx).Data(do.YoubanBotFeature{FeatureKey: consts.RelayFeatureKey, Status: 1, ConfigJson: "{}"}).Insert(); err != nil {
 		t.Fatal(err)
@@ -66,11 +70,11 @@ func TestRelayHelpOnlyBelongsToConfiguredBot(t *testing.T) {
 			t.Fatal("main start command lost")
 		}
 		for _, item := range menus.Items {
-			if item.Command == "help" && ((id == 1 && item.Description != "主机器人帮助") || (id == 2 && item.Description != "双向聊天帮助")) {
+			if item.Command == "help" && ((id == 1 && item.Description != "主机器人帮助") || (id == 2 && item.Description != "双向管理帮助（仅管理员）")) {
 				t.Fatalf("wrong scoped help: %+v", item)
 			}
 		}
-		if !relayMenuHas(menus, "relayadmin") {
+		if id == 1 && !relayMenuHas(menus, "relayadmin") {
 			t.Fatal("management command missing")
 		}
 		if id == 1 && !relayMenuHas(menus, "help") {

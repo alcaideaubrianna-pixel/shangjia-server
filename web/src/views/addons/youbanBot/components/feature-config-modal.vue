@@ -12,6 +12,13 @@
     <n-alert v-if="relayError || form.configError" type="error">{{
       relayError || form.configError
     }}</n-alert>
+    <n-alert v-if="form.featureKey === 'two_way_relay'" type="info" class="mb-4">
+      请为双向聊天选择独立
+      Bot，默认主机器人不可使用。首次保存配置的后台账号为默认管理员，该账号需已绑定 TG。 使用
+      @用户名添加管理员后，对方需到所选 Bot 私聊发送 /start 确认身份；所有管理员都需先私聊此 Bot
+      才能接收绑定用户首次使用通知。 全局插件、Bot
+      状态和双向功能均启用后才会传递消息。保存列表将替换该 Bot 的对应配置。
+    </n-alert>
     <n-form
       :disabled="relayLoading"
       :model="form"

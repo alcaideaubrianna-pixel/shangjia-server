@@ -56,6 +56,12 @@ func (s *sSysBot) AdminBotSave(ctx context.Context, in *sysin.BotSaveInp) (err e
 			return err
 		}
 	}
+	if in.Id > 0 && in.IsDefault == 1 {
+		cfg, readErr := relayConfig(ctx, in.Id)
+		if readErr == nil && cfg != nil {
+			return gerror.New("该Bot已配置为双向机器人，不能设置为默认主机器人")
+		}
+	}
 	botToken := strings.TrimSpace(in.BotToken)
 	if botToken == "" && old != nil {
 		botToken = old.BotToken

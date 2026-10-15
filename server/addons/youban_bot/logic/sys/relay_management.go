@@ -20,15 +20,30 @@ type relayManagementFeature struct{}
 func (relayManagementFeature) Key() string         { return "relay_management" }
 func (relayManagementFeature) Command() string     { return "relayadmin" }
 func (relayManagementFeature) Description() string { return "双向机器人管理" }
-func (relayManagementFeature) Handle(ctx context.Context, s *sSysBot, fc *botFeatureContext) (bool, error) {
+func (relayManagementFeature) Handle(ctx context.Context, s *sSysBot, fc *botFeatureContext) (handled bool, resultErr error) {
+	defer func() {
+		if resultErr != nil && fc.Msg != nil {
+			resultErr = s.relayInteractionError(ctx, fc.BotId, fc.Msg, resultErr)
+		}
+	}()
 	if fc.Msg == nil || fc.Msg.From == nil {
 		return true, nil
 	}
-	reply := func(text string) (bool, error) { return true, s.reply(ctx, fc.BotId, fmt.Sprint(fc.Msg.Chat.ID), text) }
+	reply := func(text string) (bool, error) { return true, s.relayManagementReply(ctx, fc.BotId, fc.Msg, text) }
 	if fc.Msg.Chat.Type != models.ChatTypePrivate {
 		return reply("请在机器人私聊中使用双向机器人管理。")
 	}
 	args := strings.Fields(fc.Args)
+	if page, ok := relayManagementPage(args); ok {
+		if page < 1 {
+			return reply("页码不正确，请返回 /relayadmin")
+		}
+		text, err := s.relayManagementListPage(ctx, fc.Msg.From.ID, page)
+		if err != nil {
+			return true, err
+		}
+		return reply(text)
+	}
 	if len(args) == 0 {
 		text, err := s.relayManagementList(ctx, fc.Msg.From.ID)
 		if err != nil {
@@ -61,13 +76,24 @@ func (relayManagementFeature) Handle(ctx context.Context, s *sSysBot, fc *botFea
 			state = "启用"
 		}
 		prefix := fmt.Sprintf("/relayadmin %d", botID)
-		lines := []string{fmt.Sprintf("<b>双向机器人 #%d</b> · %s", botID, state)}
-		for _, action := range []string{"启用", "停用", "当前设置", "绑定列表", "屏蔽列表", "黑名单", "屏蔽跳转 开启", "屏蔽跳转 关闭"} {
+		_, runtimeState, err := s.relayRuntimeState(ctx, cfg)
+		if err != nil {
+			return true, err
+		}
+		lines := []string{fmt.Sprintf("<b>双向机器人 #%d</b> · %s\n实际状态：%s", botID, state, html.EscapeString(runtimeState))}
+		for _, action := range []string{"启用", "停用", "当前设置", "绑定列表", "屏蔽列表", "黑名单", "屏蔽跳转 开启", "屏蔽跳转 关闭", "绑定", "解绑", "添加管理员", "管理员列表", "屏蔽关键词", "删除关键词", "屏蔽用户", "解除屏蔽用户", "审计设置", "聊天存档 开启", "聊天存档 关闭", "转发群", "关闭转发"} {
 			lines = append(lines, "<code>"+prefix+" "+action+"</code>")
 		}
-		lines = append(lines, "绑定和屏蔽命令可直接追加，例如：", "<code>"+prefix+" 绑定 @alice @bob</code>", "<code>"+prefix+" 屏蔽 关键词</code>", "添加管理员、审计和转发群配置请在后台 BOT 管理的双向机器人插件中设置。")
+		lines = append(lines, "绑定和屏蔽命令可直接追加，例如：", "<code>"+prefix+" 绑定 @alice @bob</code>", "<code>"+prefix+" 屏蔽 关键词</code>", "使用审计设置、聊天存档和转发群按钮配置聊天记录管理。", "返回：<code>/relayadmin</code>")
 		return reply(strings.Join(lines, "\n"))
 	}
+	if prompt := relayManagementActionPrompt(botID, command); prompt != "" {
+		return reply(prompt)
+	}
+	if command == "启用" || command == "停用" || strings.HasPrefix(command, "解绑 ") || command == "关闭转发" {
+		return reply("请确认操作：\n<code>" + fmt.Sprintf("/relayadmin %d 确认 ", botID) + html.EscapeString(command) + "</code>\n取消：<code>" + fmt.Sprintf("/relayadmin %d", botID) + "</code>")
+	}
+	command = strings.TrimPrefix(command, "确认 ")
 	var result string
 	err = relayMutate(ctx, botID, func(ctx context.Context) error {
 		current, err := relayConfig(ctx, botID)
@@ -90,12 +116,23 @@ func (relayManagementFeature) Handle(ctx context.Context, s *sSysBot, fc *botFea
 				enabled = 1
 			}
 			_, err := dao.YoubanBotRelayConfig.Ctx(ctx).WherePri(current.Id).Data(do.YoubanBotRelayConfig{Enabled: enabled}).Update()
-			result = "双向机器人已" + command + "。"
+			_, state, stateErr := s.relayRuntimeState(ctx, &entity.YoubanBotRelayConfig{BotId: current.BotId, Enabled: enabled})
+			if stateErr != nil {
+				return stateErr
+			}
+			result = "双向功能开关已" + command + "。\n实际状态：" + state
 			return err
+		}
+		if handled, text, auditErr := s.relayManagementAudit(ctx, current, command); handled {
+			result = text
+			return auditErr
 		}
 		cmd := parseRelayCommand(command)
 		if cmd.Name == "" || strings.HasPrefix(cmd.Name, "/") {
 			return gerror.New("未识别的管理操作，请发送 /relayadmin BotID 查看菜单")
+		}
+		if cmd.Name == "解绑" {
+			cmd.Name = "确认解绑"
 		}
 		result, err = s.executeRelayCommand(ctx, current, cmd)
 		return err
@@ -103,21 +140,40 @@ func (relayManagementFeature) Handle(ctx context.Context, s *sSysBot, fc *botFea
 	if err != nil {
 		return reply(html.EscapeString(err.Error()))
 	}
-	return reply(result)
+	fields := strings.Fields(command)
+	if len(fields) > 0 && (fields[0] == "绑定列表" || fields[0] == "屏蔽列表" || fields[0] == "黑名单") {
+		page := 1
+		if len(fields) > 1 {
+			page, _ = strconv.Atoi(fields[1])
+		}
+		if page > 1 {
+			result += fmt.Sprintf("\n上一页：<code>/relayadmin %d %s %d</code>", botID, fields[0], page-1)
+		}
+		result += fmt.Sprintf("\n下一页：<code>/relayadmin %d %s %d</code>", botID, fields[0], page+1)
+	}
+	return reply(result + fmt.Sprintf("\n\n返回：<code>/relayadmin %d</code>", botID))
 }
 
 func (s *sSysBot) relayManagementList(ctx context.Context, userID int64) (string, error) {
+	return s.relayManagementListPage(ctx, userID, 1)
+}
+func (s *sSysBot) relayManagementListPage(ctx context.Context, userID int64, page int) (string, error) {
 	var configs []*entity.YoubanBotRelayConfig
 	if err := dao.YoubanBotRelayConfig.Ctx(ctx).OrderAsc(dao.YoubanBotRelayConfig.Columns().BotId).Scan(&configs); err != nil {
 		return "", gerror.Wrap(err, "双向机器人配置不可用，请检查数据库迁移")
 	}
-	lines := []string{"<b>双向机器人管理</b>"}
+	lines := []string{fmt.Sprintf("<b>双向机器人管理</b> · 第%d页", page)}
+	visible := 0
 	for _, cfg := range configs {
 		allowed, err := s.relayIsAdmin(ctx, cfg, userID)
 		if err != nil {
 			return "", err
 		}
 		if !allowed {
+			continue
+		}
+		visible++
+		if visible <= (page-1)*8 || visible > page*8 {
 			continue
 		}
 		bot, err := s.botById(ctx, cfg.BotId)
@@ -128,10 +184,23 @@ func (s *sSysBot) relayManagementList(ctx context.Context, userID int64) (string
 		if cfg.Enabled == 1 {
 			state = "启用"
 		}
-		lines = append(lines, fmt.Sprintf("%s @%s · %s\n<code>/relayadmin %d</code>", html.EscapeString(bot.BotName), html.EscapeString(bot.BotUsername), state, cfg.BotId))
+		_, runtimeState, err := s.relayRuntimeState(ctx, cfg)
+		if err != nil {
+			return "", err
+		}
+		lines = append(lines, fmt.Sprintf("%s @%s · 开关%s · %s\n<code>/relayadmin %d</code>", html.EscapeString(bot.BotName), html.EscapeString(bot.BotUsername), state, html.EscapeString(runtimeState), cfg.BotId))
 	}
-	if len(lines) == 1 {
+	if page > 1 {
+		lines = append(lines, fmt.Sprintf("上一页：<code>/relayadmin 列表 %d</code>", page-1))
+	}
+	if visible > page*8 {
+		lines = append(lines, fmt.Sprintf("下一页：<code>/relayadmin 列表 %d</code>", page+1))
+	}
+	if visible == 0 {
 		lines = append(lines, "暂无可管理的双向机器人。请在后台 BOT 管理的双向机器人插件中配置，并添加管理员。")
+	}
+	if page > 1 {
+		lines = append(lines, "返回首页：<code>/relayadmin</code>")
 	}
 	return strings.Join(lines, "\n\n"), nil
 }
