@@ -2248,6 +2248,26 @@ func (s *sSysBot) consumeProfileSessionMessageLocked(ctx context.Context, botId 
 	}
 	g.Log().Infof(ctx, "Bot资料处理阶段 trace:%s stage:media_resolved elapsed_ms:%d media_count:%d", trace, time.Since(startedAt).Milliseconds(), len(media))
 	draft := decodeProfileCreateDraft(session.PayloadJson)
+	if session.Step == "waiting_display" && strings.TrimSpace(msg.MediaGroupID) == "" && profileShouldStageEarlyVerify(text, media) {
+		pendingVerify := draft.PendingVerify
+		if pendingVerify == nil {
+			pendingVerify = &profilePendingMediaGroup{
+				SessionId: session.Id,
+				BotId:     botId,
+				ChatId:    chatId,
+				Purpose:   "verify",
+				CreatedAt: time.Now().Unix(),
+			}
+		}
+		pendingVerify.UpdatedAt = time.Now().UnixNano()
+		pendingVerify.Media = appendProfileGroupMedia(pendingVerify.Media, msg.ID, media)
+		draft.PendingVerify = pendingVerify
+		if err := s.updateProfileSession(ctx, session.Id, session.Step, draft); err != nil {
+			return gerror.Wrap(err, "暂存提前到达的验证视频失败")
+		}
+		g.Log().Infof(ctx, "Bot资料验证视频早于展示组到达，已暂存 trace:%s message_id:%d media_count:%d", trace, msg.ID, len(pendingVerify.Media))
+		return nil
+	}
 	if session.Step == "waiting_display" && draft.PendingGroup != nil && strings.TrimSpace(msg.MediaGroupID) == "" && (strings.TrimSpace(text) != "" || len(media) > 0) {
 		pendingVerify := &profilePendingMediaGroup{SessionId: session.Id, BotId: botId, ChatId: chatId, Purpose: "verify", Text: strings.TrimSpace(text), Media: media, CreatedAt: time.Now().Unix(), UpdatedAt: time.Now().UnixNano()}
 		draft.PendingVerify = pendingVerify
@@ -2262,6 +2282,18 @@ func (s *sSysBot) consumeProfileSessionMessageLocked(ctx context.Context, botId 
 		return s.collectProfileMediaGroup(ctx, account, session, msg, text, media)
 	}
 	return s.consumeProfileCreatePart(ctx, botId, chatId, account, session, strings.TrimSpace(text), media)
+}
+
+func profileShouldStageEarlyVerify(text string, media []*publishsysin.MessageTemplateMediaInp) bool {
+	if strings.TrimSpace(text) != "" || len(media) == 0 {
+		return false
+	}
+	for _, item := range media {
+		if item == nil || strings.TrimSpace(item.MediaType) != "video" {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *sSysBot) reserveProfileMediaGroup(ctx context.Context, session *profileSessionRow, msg *models.Message, text string) error {
