@@ -60,6 +60,12 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 	if config.PushWorker {
 		s.startTelegramPushWorker(ctx)
 	}
+	if telegramRecoveryRuntimeEnabled(config) {
+		// Telegram recovery belongs with the worker that owns delivery state.
+		// Keeping it on Scheduler made every channel unrecoverable whenever the
+		// scheduler role was stopped independently of the push workers.
+		go s.runTelegramJobRecovery(ctx)
+	}
 	if config.MediaWorker {
 		s.startTelegramMediaWorker(ctx)
 	}
@@ -82,6 +88,10 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 	}
 }
 
+func telegramRecoveryRuntimeEnabled(config publishRuntimeConfig) bool {
+	return config.PushWorker
+}
+
 func (s *sSysPublish) startPublishSchedulers(ctx context.Context) {
 	if err := s.backfillPublishSuccessRecords(ctx, 5000); err != nil {
 		g.Log().Warningf(ctx, "补写成功发布记录失败：%+v", err)
@@ -91,7 +101,6 @@ func (s *sSysPublish) startPublishSchedulers(ctx context.Context) {
 	go s.runMessagePushPlanScheduler(ctx)
 	go s.runFullPushBatchScheduler(ctx)
 	go s.runTelegramObserveStatsRefresher(ctx)
-	go s.runTelegramJobRecovery(ctx)
 	go s.runTelegramOutboxDispatcher(ctx)
 	go s.runCollectRecovery(ctx)
 	go s.runProfileFingerprintBackfill(ctx)

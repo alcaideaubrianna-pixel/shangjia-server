@@ -23,7 +23,6 @@ import (
 	"github.com/gotd/td/tg"
 
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
-	collectorservice "hotgo/addons/telegram_collector/service"
 	botsysin "hotgo/addons/youban_bot/model/input/sysin"
 	botService "hotgo/addons/youban_bot/service"
 	publishconsts "hotgo/addons/youban_publish/consts"
@@ -578,19 +577,15 @@ func (s *sSysPublish) handleMessageReconcileAccountTask(ctx context.Context, cli
 		return err
 	}
 	if len(messages) == 0 {
-		if !accountTaskFinalAttempt(task) {
-			return gerror.New("协议号暂未找到Bot发送消息，等待后重试对账")
+		if reconcileErr := telegramMissingReconcileMessagesError(attempt.Phase, accountTaskFinalAttempt(task)); !errors.Is(reconcileErr, errTelegramMediaFallbackUnavailable) {
+			return reconcileErr
 		}
-		_, err = collectorservice.AccountTasks().Submit(ctx, &collectorin.AccountTaskSubmit{
-			TenantID: job.TenantId, AccountID: channel.TgAccountId,
-			TaskType: collectorin.AccountTaskTypeMessageMediaFallback,
-			TaskKey:  fmt.Sprintf("message-media-fallback:%d:%s", job.Id, attempt.Phase),
-			Priority: collectorin.EventPriorityUrgent, MaxAttempts: 5,
-		})
-		if err == nil {
-			s.appendTelegramJobLog(ctx, job, "account_fallback", "queued", fmt.Sprintf("协议号未找到Bot%s消息，已提交协议号补发", telegramMediaPurposeLabel(attempt.Phase)))
-		}
-		return err
+		// An ambiguous Bot API call cannot be proved unsuccessful merely because
+		// the account history window no longer contains its marker. Blindly
+		// falling back here can duplicate an already delivered media group and
+		// break channel ordering. Stop this job and release the channel instead;
+		// operators may explicitly republish it after inspecting Telegram.
+		return s.failTelegramMediaFallbackJob(ctx, job, telegramMissingReconcileMessagesError(attempt.Phase, true))
 	}
 	if err = s.saveTelegramSentMessages(ctx, job, messages); err != nil {
 		return err
@@ -622,6 +617,14 @@ func (s *sSysPublish) handleMessageReconcileAccountTask(ctx context.Context, cli
 		return s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 0, false)
 	}
 	return s.finalizeTelegramMediaDelivery(ctx, job, true, true)
+}
+
+func telegramMissingReconcileMessagesError(phase string, finalAttempt bool) error {
+	if !finalAttempt {
+		return gerror.New("协议号暂未找到Bot发送消息，等待后重试对账")
+	}
+	return gerror.Wrapf(errTelegramMediaFallbackUnavailable,
+		"协议号最终未找到Bot%s消息，结果仍不确定，已禁止自动补发", telegramMediaPurposeLabel(phase))
 }
 
 func telegramMediaPurposeLabel(purpose string) string {

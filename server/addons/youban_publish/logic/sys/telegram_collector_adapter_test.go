@@ -1,6 +1,7 @@
 package sys
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -110,6 +111,15 @@ func TestParseMessageReconcileTaskKey(t *testing.T) {
 		if err != nil || jobID != test.jobID || attemptID != test.attemptID {
 			t.Fatalf("parseMessageReconcileTaskKey(%q) = (%d, %d, %v)", test.key, jobID, attemptID, err)
 		}
+	}
+}
+
+func TestTelegramMissingReconcileMessagesNeverFallsBackBlindly(t *testing.T) {
+	if err := telegramMissingReconcileMessagesError("display", false); err == nil || errors.Is(err, errTelegramMediaFallbackUnavailable) {
+		t.Fatalf("non-final reconciliation should retry lookup only: %v", err)
+	}
+	if err := telegramMissingReconcileMessagesError("verify", true); !errors.Is(err, errTelegramMediaFallbackUnavailable) {
+		t.Fatalf("final ambiguous reconciliation must stop without media resend: %v", err)
 	}
 }
 

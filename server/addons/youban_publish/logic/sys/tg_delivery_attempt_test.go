@@ -46,9 +46,66 @@ func TestTelegramOptionalAttemptScanTreatsMissingRowAsCacheMiss(t *testing.T) {
 	}
 }
 
+func TestTelegramConfirmedAttemptRequiresCompleteAudit(t *testing.T) {
+	attempt := telegramDeliveryAttempt{ExpectedCount: 3}
+	if len([]*telegramAttemptMessageRecord{{}, {}}) >= attempt.ExpectedCount {
+		t.Fatal("partial attempt audit must not be treated as a complete Telegram response")
+	}
+	if len([]*telegramAttemptMessageRecord{{}, {}, {}}) < attempt.ExpectedCount {
+		t.Fatal("complete attempt audit should satisfy the expected response count")
+	}
+}
+
 func TestRestoreConfirmedTelegramResponseTreatsMissingAttemptAsUnconfirmed(t *testing.T) {
 	if !telegramOptionalAttemptScanSucceeded(sql.ErrNoRows) {
 		t.Fatal("missing confirmed response must allow the initial Telegram send")
+	}
+}
+
+func TestTelegramUnknownRecoveryAction(t *testing.T) {
+	tests := []struct {
+		name             string
+		phase            string
+		verifyMediaCount int
+		want             string
+	}{
+		{name: "display response not confirmed", phase: telegramSendPhaseDisplaySending, verifyMediaCount: 1, want: telegramUnknownRecoveryWait},
+		{name: "display confirmed resumes verify", phase: telegramSendPhaseDisplayConfirmed, verifyMediaCount: 1, want: telegramUnknownRecoveryResumeVerify},
+		{name: "verify sending without confirmation waits", phase: telegramSendPhaseVerifySending, verifyMediaCount: 1, want: telegramUnknownRecoveryWait},
+		{name: "verify confirmed completes", phase: telegramSendPhaseVerifyConfirmed, verifyMediaCount: 1, want: telegramUnknownRecoveryComplete},
+		{name: "display only completes", phase: telegramSendPhaseDisplayConfirmed, verifyMediaCount: 0, want: telegramUnknownRecoveryComplete},
+		{name: "legacy display only completes", phase: telegramSendPhaseCompletedNoVerify, verifyMediaCount: 0, want: telegramUnknownRecoveryComplete},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := telegramUnknownRecoveryAction(test.phase, test.verifyMediaCount); got != test.want {
+				t.Fatalf("recovery action = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestTelegramUnknownAttemptRecoveryAction(t *testing.T) {
+	tests := []struct {
+		name       string
+		attempt    telegramDeliveryAttempt
+		auditCount int
+		want       string
+	}{
+		{name: "missing attempt retries before Telegram call", want: telegramUnknownAttemptRetry},
+		{name: "live sending reconciles", attempt: telegramDeliveryAttempt{Id: 1, Status: telegramAttemptStatusSending}, want: telegramUnknownAttemptReconcile},
+		{name: "webhook wait reconciles", attempt: telegramDeliveryAttempt{Id: 1, Status: telegramAttemptStatusWaiting}, want: telegramUnknownAttemptReconcile},
+		{name: "ambiguous timeout reconciles", attempt: telegramDeliveryAttempt{Id: 1, Status: telegramAttemptStatusRetryWait, ErrorMessage: "context deadline exceeded"}, want: telegramUnknownAttemptReconcile},
+		{name: "interrupted sender reconciles", attempt: telegramDeliveryAttempt{Id: 1, Status: telegramAttemptStatusRetryWait, ErrorMessage: "发送进程中断，等待Webhook或协议号对账"}, want: telegramUnknownAttemptReconcile},
+		{name: "partial response reconciles", attempt: telegramDeliveryAttempt{Id: 1, Status: telegramAttemptStatusRetryWait, ErrorMessage: "生成防扫图候选文件失败"}, auditCount: 1, want: telegramUnknownAttemptReconcile},
+		{name: "pre-send failure retries", attempt: telegramDeliveryAttempt{Id: 1, Status: telegramAttemptStatusRetryWait, ErrorMessage: "生成防扫图候选文件失败"}, want: telegramUnknownAttemptRetry},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := telegramUnknownAttemptRecoveryAction(test.attempt, test.auditCount); got != test.want {
+				t.Fatalf("recovery action = %q, want %q", got, test.want)
+			}
+		})
 	}
 }
 

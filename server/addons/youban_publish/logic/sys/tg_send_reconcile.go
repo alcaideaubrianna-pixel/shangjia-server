@@ -108,7 +108,10 @@ func isTelegramAmbiguousDeliveryError(err error) bool {
 			return false
 		}
 	}
-	for _, part := range []string{"context deadline exceeded", "client.timeout exceeded", "closed pipe", "broken pipe", "goaway", "cannot rewind body", "connection reset", "unexpected eof"} {
+	for _, part := range []string{
+		"context deadline exceeded", "client.timeout exceeded", "closed pipe", "broken pipe", "goaway",
+		"cannot rewind body", "connection reset", "unexpected eof", "发送进程中断", "等待webhook或协议号对账",
+	} {
 		if strings.Contains(message, part) {
 			return true
 		}
@@ -124,15 +127,22 @@ func telegramDeliveryUncertainError(err error) error {
 }
 
 func (s *sSysPublish) updateTelegramJobSendPhase(ctx context.Context, jobId int64, phase string) error {
+	return s.updateTelegramJobSendPhaseFromStatuses(ctx, jobId, phase, telegramJobStatusSending)
+}
+
+func (s *sSysPublish) updateTelegramJobSendPhaseFromStatuses(ctx context.Context, jobId int64, phase string, statuses ...string) error {
+	if len(statuses) == 0 {
+		return gerror.New("TG任务发送阶段来源状态不能为空")
+	}
 	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("id", jobId).Where("status", "sending").
+		Where("id", jobId).WhereIn("status", statuses).
 		Data(g.Map{"send_phase": phase, "updated_at": gtime.Now()}).Update()
 	if err != nil {
 		return gerror.Wrap(err, "更新TG发送阶段失败")
 	}
 	affected, _ := result.RowsAffected()
 	if affected == 0 {
-		return gerror.New("TG任务已不在发送状态，停止更新发送阶段")
+		return gerror.New("TG任务状态已变化，停止更新发送阶段")
 	}
 	if projectionErr := s.projectTelegramDeliverySteps(ctx, jobId, phase); projectionErr != nil {
 		g.Log().Warningf(ctx, "投影TG发送步骤失败 jobId:%d phase:%s err:%+v", jobId, phase, projectionErr)
@@ -173,6 +183,23 @@ func (s *sSysPublish) reconcileUnknownTelegramJob(ctx context.Context, job teleg
 	if err != nil {
 		return s.releaseUnknownTelegramJobClaim(ctx, job.Id, err)
 	}
+	handled, recoverErr := s.recoverConfirmedUnknownTelegramJob(ctx, job)
+	if recoverErr != nil {
+		if errors.Is(recoverErr, errTelegramAttemptAuditIncomplete) {
+			return s.reconcileIncompleteUnknownTelegramAttempt(ctx, job, recoverErr)
+		}
+		return s.releaseUnknownTelegramJobClaim(ctx, job.Id, recoverErr)
+	}
+	if handled {
+		return nil
+	}
+	handled, recoverErr = s.recoverUnconfirmedUnknownTelegramJob(ctx, job)
+	if recoverErr != nil {
+		return s.releaseUnknownTelegramJobClaim(ctx, job.Id, recoverErr)
+	}
+	if handled {
+		return nil
+	}
 	// A timeout is an ambiguous Telegram result: the request may have been
 	// accepted even though the HTTP response was lost. Never turn this state
 	// back into failed_retry, because doing so can send the same media twice.
@@ -195,6 +222,245 @@ func (s *sSysPublish) reconcileUnknownTelegramJob(ctx context.Context, job teleg
 	observeTelegramReconcile(ctx, "awaiting_confirmation")
 	s.appendTelegramJobLog(ctx, job, "reconcile", "unknown", message)
 	return nil
+}
+
+const (
+	telegramUnknownAttemptReconcile = "reconcile"
+	telegramUnknownAttemptRetry     = "retry"
+)
+
+func telegramUnknownAttemptRecoveryAction(attempt telegramDeliveryAttempt, auditCount int) string {
+	if attempt.Id <= 0 {
+		return telegramUnknownAttemptRetry
+	}
+	if attempt.Status != telegramAttemptStatusRetryWait {
+		return telegramUnknownAttemptReconcile
+	}
+	if auditCount > 0 || isTelegramAmbiguousDeliveryError(errors.New(attempt.ErrorMessage)) {
+		return telegramUnknownAttemptReconcile
+	}
+	return telegramUnknownAttemptRetry
+}
+
+func (s *sSysPublish) unknownTelegramJobAttempt(ctx context.Context, job telegramJobRecord) (telegramDeliveryAttempt, int, error) {
+	phase := "display"
+	if telegramSendPhaseHasDisplay(job.SendPhase) {
+		phase = "verify"
+	}
+	attempt, err := s.activeTelegramDeliveryAttempt(ctx, job.Id, phase)
+	if err != nil || attempt.Id <= 0 {
+		return attempt, 0, err
+	}
+	count, err := g.DB().Model(publishTgAttemptMessageTable).Safe().Ctx(ctx).
+		Where("attempt_id", attempt.Id).Count()
+	if err != nil {
+		return attempt, 0, gerror.Wrap(err, "读取TG Attempt消息审计数量失败")
+	}
+	return attempt, count, nil
+}
+
+func (s *sSysPublish) latestUnknownTelegramJobAttempt(ctx context.Context, job telegramJobRecord) (telegramDeliveryAttempt, error) {
+	phase := "display"
+	if telegramSendPhaseHasDisplay(job.SendPhase) {
+		phase = "verify"
+	}
+	var attempt telegramDeliveryAttempt
+	err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
+		Where("job_id", job.Id).Where("phase", phase).Where("chunk_index", 0).
+		OrderDesc("id").Limit(1).Scan(&attempt)
+	if telegramOptionalAttemptScanSucceeded(err) {
+		return attempt, nil
+	}
+	return attempt, gerror.Wrap(err, "读取TG最新发送Attempt失败")
+}
+
+// recoverUnconfirmedUnknownTelegramJob distinguishes failures known to have
+// happened before Telegram accepted a request from ambiguous remote results.
+// Only the former may be retried automatically; every ambiguous result must be
+// reconciled by the bound account first to prevent duplicate media.
+func (s *sSysPublish) recoverUnconfirmedUnknownTelegramJob(ctx context.Context, job telegramJobRecord) (bool, error) {
+	attempt, auditCount, err := s.unknownTelegramJobAttempt(ctx, job)
+	if err != nil {
+		return false, err
+	}
+	switch telegramUnknownAttemptRecoveryAction(attempt, auditCount) {
+	case telegramUnknownAttemptReconcile:
+		if err = s.enqueueTelegramAttemptReconcile(ctx, job, attempt); err != nil {
+			return true, s.failTelegramMediaFallbackJob(ctx, job,
+				gerror.Wrap(err, "TG发送结果不确定且无法提交协议号对账"))
+		}
+		s.appendTelegramJobLog(ctx, job, "reconcile", "queued", "TG发送结果不确定，已提交协议号对账，禁止直接重发")
+		return true, nil
+
+	case telegramUnknownAttemptRetry:
+		phase := telegramSendPhaseCleanupConfirmed
+		if attempt.Phase == "verify" {
+			phase = telegramSendPhaseDisplayConfirmed
+		}
+		if attempt.Id <= 0 && job.SendPhase == telegramSendPhaseVerifySending {
+			phase = telegramSendPhaseDisplayConfirmed
+		}
+		if attempt.Id > 0 {
+			result, updateErr := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
+				Where("id", attempt.Id).Where("status", telegramAttemptStatusRetryWait).
+				Data(g.Map{"status": telegramAttemptStatusSuperseded, "webhook_deadline": nil, "updated_at": gtime.Now()}).Update()
+			if updateErr != nil {
+				return true, gerror.Wrap(updateErr, "关闭TG调用前失败Attempt失败")
+			}
+			affected, _ := result.RowsAffected()
+			if affected == 0 {
+				return true, nil
+			}
+		}
+		transitioned, transitionErr := s.transitionTelegramJob(ctx, telegramJobTransition{
+			JobId: job.Id, From: []string{telegramJobStatusConfirming}, To: telegramJobStatusRetryWait,
+			Additional: g.Map{
+				"send_phase": phase, "error_message": "", "last_dispatch_error": "",
+			},
+		})
+		if transitionErr != nil {
+			return true, transitionErr
+		}
+		if !transitioned {
+			return true, nil
+		}
+		s.appendTelegramJobLog(ctx, job, "reconcile", "retry", "TG请求前准备失败且无远端消息证据，已安全重新排队")
+		return true, s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 0, false)
+	default:
+		return false, nil
+	}
+}
+
+func (s *sSysPublish) reconcileIncompleteUnknownTelegramAttempt(ctx context.Context, job telegramJobRecord, cause error) error {
+	attempt, err := s.latestUnknownTelegramJobAttempt(ctx, job)
+	if err != nil {
+		return s.releaseUnknownTelegramJobClaim(ctx, job.Id, err)
+	}
+	if attempt.Id <= 0 {
+		return s.failTelegramMediaFallbackJob(ctx, job,
+			gerror.Wrap(cause, "TG响应已确认但审计不完整且找不到活动Attempt"))
+	}
+	if err = s.enqueueTelegramAttemptReconcile(ctx, job, attempt); err != nil {
+		return s.failTelegramMediaFallbackJob(ctx, job,
+			gerror.Wrap(err, "TG响应审计不完整且无法提交协议号对账"))
+	}
+	s.appendTelegramJobLog(ctx, job, "reconcile", "queued", "TG响应审计不完整，已提交协议号补全对账，禁止重复发送")
+	return nil
+}
+
+const (
+	telegramUnknownRecoveryWait         = "wait"
+	telegramUnknownRecoveryResumeVerify = "resume_verify"
+	telegramUnknownRecoveryComplete     = "complete"
+)
+
+func telegramUnknownRecoveryAction(sendPhase string, verifyMediaCount int) string {
+	if sendPhase == telegramSendPhaseVerifyConfirmed {
+		return telegramUnknownRecoveryComplete
+	}
+	if sendPhase != telegramSendPhaseDisplayConfirmed && sendPhase != telegramSendPhaseCompletedNoVerify {
+		return telegramUnknownRecoveryWait
+	}
+	if verifyMediaCount > 0 {
+		return telegramUnknownRecoveryResumeVerify
+	}
+	return telegramUnknownRecoveryComplete
+}
+
+// recoverConfirmedUnknownTelegramJob repairs local state strictly from a
+// confirmed Telegram response. It never sends media to Telegram. Once the
+// display projection is restored, verification resumes through the normal
+// ordered queue so an old uncertain job cannot be sent twice.
+func (s *sSysPublish) recoverConfirmedUnknownTelegramJob(ctx context.Context, job telegramJobRecord) (bool, error) {
+	displayMedia, err := s.telegramJobMedia(ctx, job, "display")
+	if err != nil {
+		return false, err
+	}
+	displayMedia, err = s.selectTelegramDisplayMediaForTenant(ctx, job, displayMedia)
+	if err != nil {
+		return false, err
+	}
+	verifyMedia, err := s.telegramJobMedia(ctx, job, "verify")
+	if err != nil {
+		return false, err
+	}
+
+	if !telegramSendPhaseHasDisplay(job.SendPhase) {
+		restored, restoreErr := s.restoreConfirmedTelegramResponse(ctx, job, "display", displayMedia)
+		if restoreErr != nil {
+			return false, restoreErr
+		}
+		if !restored {
+			return false, nil
+		}
+		job, err = s.telegramJobById(ctx, job.Id)
+		if err != nil {
+			return false, err
+		}
+	}
+
+	if len(verifyMedia) > 0 && job.SendPhase != telegramSendPhaseVerifyConfirmed {
+		restored, restoreErr := s.restoreConfirmedTelegramResponse(ctx, job, "verify", verifyMedia)
+		if restoreErr != nil {
+			return false, restoreErr
+		}
+		if restored {
+			job, err = s.telegramJobById(ctx, job.Id)
+			if err != nil {
+				return false, err
+			}
+		}
+	}
+
+	action := telegramUnknownRecoveryAction(job.SendPhase, len(verifyMedia))
+	switch action {
+	case telegramUnknownRecoveryResumeVerify:
+		transitioned, transitionErr := s.transitionTelegramJob(ctx, telegramJobTransition{
+			JobId: job.Id, From: []string{telegramJobStatusConfirming}, To: telegramJobStatusRetryWait,
+			Additional: g.Map{
+				"send_phase":          telegramSendPhaseDisplayConfirmed,
+				"error_message":       "",
+				"last_dispatch_error": "",
+			},
+		})
+		if transitionErr != nil {
+			return false, transitionErr
+		}
+		if !transitioned {
+			return true, nil
+		}
+		s.appendTelegramJobLog(ctx, job, "reconcile", "confirmed", "TG展示资料已确认，继续按频道顺序推送验证资料")
+		return true, s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 0, false)
+
+	case telegramUnknownRecoveryComplete:
+		phase := job.SendPhase
+		if len(verifyMedia) == 0 {
+			phase = telegramSendPhaseCompletedNoVerify
+			if err = s.updateTelegramJobSendPhaseFromStatuses(ctx, job.Id, phase, telegramJobStatusConfirming); err != nil {
+				return false, err
+			}
+		}
+		transitioned, transitionErr := s.transitionTelegramJob(ctx, telegramJobTransition{
+			JobId: job.Id, From: []string{telegramJobStatusConfirming}, To: telegramJobStatusSending,
+			Additional: g.Map{
+				"send_phase":          phase,
+				"error_message":       "",
+				"last_dispatch_error": "",
+			},
+		})
+		if transitionErr != nil {
+			return false, transitionErr
+		}
+		if !transitioned {
+			return true, nil
+		}
+		job.Status = telegramJobStatusSending
+		job.SendPhase = phase
+		s.appendTelegramJobLog(ctx, job, "reconcile", "confirmed", "TG远端发送结果已确认，完成本地任务投影")
+		return true, s.completeTelegramJob(ctx, job)
+	default:
+		return false, nil
+	}
 }
 
 func (s *sSysPublish) claimUnknownTelegramJob(ctx context.Context, jobId int64) (bool, error) {

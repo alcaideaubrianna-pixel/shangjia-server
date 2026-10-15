@@ -38,7 +38,10 @@ const (
 	telegramAttemptMaxRetries        = 3
 )
 
-var errTelegramAwaitingWebhook = gerror.New("等待Telegram Webhook确认")
+var (
+	errTelegramAwaitingWebhook        = gerror.New("等待Telegram Webhook确认")
+	errTelegramAttemptAuditIncomplete = gerror.New("TG响应消息审计不完整")
+)
 
 type telegramDeliveryAttempt struct {
 	Id               int64       `json:"id"`
@@ -213,7 +216,7 @@ func (s *sSysPublish) restoreConfirmedTelegramResponse(ctx context.Context, job 
 	var attempt telegramDeliveryAttempt
 	if err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
 		Where("job_id", job.Id).Where("phase", phase).
-		Where("(response_received = ? OR EXISTS (SELECT 1 FROM "+publishTgAttemptMessageTable+" response WHERE response.attempt_id="+publishTgAttemptTable+".id AND response.source='response'))", 1).
+		Where("(status = ? OR response_received = ? OR EXISTS (SELECT 1 FROM "+publishTgAttemptMessageTable+" response WHERE response.attempt_id="+publishTgAttemptTable+".id AND response.source='response'))", telegramAttemptStatusConfirmed, 1).
 		OrderDesc("id").Limit(1).Scan(&attempt); !telegramOptionalAttemptScanSucceeded(err) {
 		return false, gerror.Wrap(err, "读取TG已确认响应失败")
 	}
@@ -227,6 +230,10 @@ func (s *sSysPublish) restoreConfirmedTelegramResponse(ctx context.Context, job 
 	}
 	if len(rows) == 0 {
 		return true, gerror.New("TG响应已确认但消息审计为空")
+	}
+	if attempt.ExpectedCount > 0 && len(rows) < attempt.ExpectedCount {
+		return true, gerror.Wrapf(errTelegramAttemptAuditIncomplete,
+			"expected:%d actual:%d attemptId:%d", attempt.ExpectedCount, len(rows), attempt.Id)
 	}
 	messages := make([]*telegramSentMessage, 0, len(rows))
 	mediaIndex := 0
@@ -263,7 +270,8 @@ func (s *sSysPublish) restoreConfirmedTelegramResponse(ctx context.Context, job 
 	if phase == "verify" {
 		confirmedPhase = telegramSendPhaseVerifyConfirmed
 	}
-	if err := s.updateTelegramJobSendPhase(ctx, job.Id, confirmedPhase); err != nil {
+	if err := s.updateTelegramJobSendPhaseFromStatuses(ctx, job.Id, confirmedPhase,
+		telegramJobStatusSending, telegramJobStatusConfirming); err != nil {
 		return true, err
 	}
 	if err := s.updateTelegramMediaFileIds(ctx, messages); err != nil {

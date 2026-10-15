@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
+	hglock "hotgo/internal/library/hgrds/lock"
 )
 
 const (
@@ -70,7 +72,36 @@ func (s *sSysPublish) recoverInterruptedTelegramJobs(ctx context.Context, limit 
 func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
-	time.Sleep(15 * time.Second)
+	startup := time.NewTimer(15 * time.Second)
+	defer startup.Stop()
+	select {
+	case <-ctx.Done():
+		return
+	case <-startup.C:
+	}
+	s.runTelegramJobRecoveryCycle(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.runTelegramJobRecoveryCycle(ctx)
+		}
+	}
+}
+
+func (s *sSysPublish) runTelegramJobRecoveryCycle(ctx context.Context) {
+	lockCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	distributedLock := hglock.NewConfig(2*time.Minute, 100*time.Millisecond).Mutex("youban_publish:telegram:job_recovery")
+	if err := distributedLock.TryLock(lockCtx); err != nil {
+		if !errors.Is(err, hglock.ErrLockFailed) && ctx.Err() == nil {
+			g.Log().Warningf(ctx, "获取TG推送恢复任务锁失败：%+v", err)
+		}
+		return
+	}
+	defer func() { _ = distributedLock.Unlock(context.Background()) }()
+
 	if err := s.supersedeExpiredMessagePushPlanJobs(ctx, 1000); err != nil {
 		g.Log().Warningf(ctx, "终止过期历史消息计划任务失败：%+v", err)
 	}
@@ -103,46 +134,6 @@ func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 	}
 	if err := s.recoverProfilePublishOperationStates(ctx, 100); err != nil {
 		g.Log().Warningf(ctx, "恢复资料上架状态失败：%+v", err)
-	}
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if err := s.recoverStaleSendingTelegramAttempts(ctx, 100); err != nil {
-				g.Log().Warningf(ctx, "恢复中断的TG发送Attempt失败：%+v", err)
-			}
-			if err := s.requeueExpiredTelegramAttempts(ctx, 100); err != nil {
-				g.Log().Warningf(ctx, "重新投递过期TG发送Attempt失败：%+v", err)
-			}
-			if err := s.recoverTerminalTelegramAttempts(ctx, 500); err != nil {
-				g.Log().Warningf(ctx, "收敛TG发送Attempt状态失败：%+v", err)
-			}
-			if err := s.recoverFailedJobsMissingVerification(ctx, 500); err != nil {
-				g.Log().Warningf(ctx, "恢复缺少验证视频的终态TG任务失败：%+v", err)
-			}
-			if err := s.supersedeExpiredMessagePushPlanJobs(ctx, 1000); err != nil {
-				g.Log().Warningf(ctx, "终止过期历史消息计划任务失败：%+v", err)
-			}
-			if err := s.recoverPendingIdleTelegramJobs(ctx, 500); err != nil {
-				g.Log().Warningf(ctx, "恢复待入队TG推送任务失败：%+v", err)
-			}
-			if err := s.recoverStaleTelegramDispatchJobs(ctx, 200); err != nil {
-				g.Log().Warningf(ctx, "恢复调度中断TG推送任务失败：%+v", err)
-			}
-			if err := s.recoverStaleTelegramSendingJobs(ctx, 100); err != nil {
-				g.Log().Warningf(ctx, "恢复卡住的TG推送任务失败：%+v", err)
-			}
-			if err := s.recoverStaleTelegramMediaFallbackJobs(ctx, 100); err != nil {
-				g.Log().Warningf(ctx, "恢复协议号媒体降级任务失败：%+v", err)
-			}
-			if err := s.recoverMissingProfilePublishOperationStates(ctx, 100); err != nil {
-				g.Log().Warningf(ctx, "补建资料上架状态失败：%+v", err)
-			}
-			if err := s.recoverProfilePublishOperationStates(ctx, 100); err != nil {
-				g.Log().Warningf(ctx, "恢复资料上架状态失败：%+v", err)
-			}
-		}
 	}
 }
 
