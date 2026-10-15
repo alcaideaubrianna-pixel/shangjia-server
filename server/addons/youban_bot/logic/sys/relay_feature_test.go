@@ -42,6 +42,11 @@ func relayTestBaseTable(t *testing.T, ctx context.Context, name string) {
 	if _, err = db.Exec(ctx, "DELETE FROM "+name); err != nil {
 		t.Fatal(err)
 	}
+	// SQLite schemas share the default group name while each test uses a new file.
+	// Invalidate metadata cached before this test created its tables.
+	if err := db.GetCore().ClearTableFieldsAll(ctx); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestRelayFeatureListsUseAuthoritativeBotSettings(t *testing.T) {

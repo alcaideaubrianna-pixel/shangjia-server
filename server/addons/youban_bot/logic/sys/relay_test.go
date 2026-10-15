@@ -28,7 +28,7 @@ func relayTestDatabase(t *testing.T) context.Context {
 	t.Helper()
 	before := gdb.GetConfig("default")
 	t.Cleanup(func() { gdb.SetConfigGroup("default", before) })
-	database := filepath.Join(t.TempDir(), "relay.sqlite")
+	database := filepath.Join(relaySQLiteDirectory, "relay.sqlite")
 	if link := os.Getenv("YOUBAN_RELAY_TEST_PG"); link != "" {
 		if !strings.Contains(link, "127.0.0.1") || !strings.HasSuffix(link, "/youban_relay_test") {
 			t.Fatal("test database must be local and named youban_relay_test")
@@ -57,18 +57,21 @@ func relayTestDatabase(t *testing.T) context.Context {
 		return context.Background()
 	}
 	gdb.SetConfigGroup("default", gdb.ConfigGroup{{Type: "sqlite", Name: database}})
-	db, err := gdb.New(gdb.ConfigNode{Type: "sqlite", Name: database})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Configure the singleton through SetConfig; use its own instance for the migration.
-	db, err = gdb.Instance()
+	// GoFrame's frame-level DB singleton retains its initial SQLite schema path.
+	// Reuse one process-scoped file, resetting tables between tests, so both the
+	// frame singleton and gdb instances address the same temporary database.
+	db, err := gdb.Instance()
 	if err != nil {
 		t.Fatal(err)
 	}
 	ddl, err := os.ReadFile("../../resource/sql/relay.pgsql.sql")
 	if err != nil {
 		t.Fatal(err)
+	}
+	for _, name := range []string{"config", "admin", "binding", "endpoint", "rule", "audit_topic", "delivery"} {
+		if _, err := db.Exec(context.Background(), "DROP TABLE IF EXISTS hg_youban_bot_relay_"+name); err != nil {
+			t.Fatal(err)
+		}
 	}
 	sql := strings.ReplaceAll(string(ddl), "bigserial PRIMARY KEY", "integer PRIMARY KEY AUTOINCREMENT")
 	for _, statement := range strings.Split(sql, ";") {
@@ -258,6 +261,9 @@ func TestRelaySenderPreservesMediaAndAuditAttribution(t *testing.T) {
 		statement = strings.ReplaceAll(statement, "bigserial PRIMARY KEY", "integer PRIMARY KEY AUTOINCREMENT")
 	}
 	if _, err := db.Exec(ctx, statement); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.GetCore().ClearTableFieldsAll(ctx); err != nil {
 		t.Fatal(err)
 	}
 
