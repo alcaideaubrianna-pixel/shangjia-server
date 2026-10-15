@@ -321,7 +321,7 @@ func telegramDueOutboxPostgresSQL() string {
 		SELECT DISTINCT ON (j.tenant_id, ` + channelKey + `)
 			j.id AS job_id,j.tenant_id,j.channel_id,j.target_chat_id,j.status,j.dispatch_status,j.next_retry_at,j.created_at
 		FROM ` + publishTgJobTable + ` j
-		WHERE j.status IN ('pending','failed_retry','unknown','sending')
+		WHERE ` + telegramChannelBlockingJobSQL("j") + `
 		ORDER BY j.tenant_id, ` + channelKey + `, j.created_at, j.id
 	)
 	SELECT o.id,o.job_id,o.attempt_count,o.available_at,h.tenant_id,h.channel_id,h.target_chat_id
@@ -330,20 +330,6 @@ func telegramDueOutboxPostgresSQL() string {
 	WHERE h.status IN ('pending','failed_retry','unknown')
 		AND COALESCE(h.dispatch_status,'') IN ('','idle')
 		AND (h.next_retry_at IS NULL OR h.next_retry_at<=?)
-		AND NOT EXISTS (
-			SELECT 1 FROM ` + publishTgJobTable + ` failed_head
-			WHERE failed_head.tenant_id=h.tenant_id
-				AND (
-					(h.channel_id>0 AND failed_head.channel_id=h.channel_id) OR
-					(h.channel_id<=0 AND failed_head.channel_id<=0 AND
-						REPLACE(COALESCE(failed_head.target_chat_id,''),'-100','')=
-						REPLACE(COALESCE(h.target_chat_id,''),'-100',''))
-				)
-				AND failed_head.status='failed'
-				AND failed_head.send_phase='display_confirmed'
-				AND (failed_head.created_at<h.created_at OR
-					(failed_head.created_at=h.created_at AND failed_head.id<h.job_id))
-		)
 		AND o.event_type=? AND o.available_at<=?
 		AND (o.status=? OR (o.status=? AND o.lease_expires_at<=?))
 	ORDER BY o.available_at,o.id

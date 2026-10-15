@@ -687,15 +687,22 @@ func (s *sSysPublish) recoverPendingIdleTelegramJobs(ctx context.Context, limit 
 		candidateLimit = 2000
 	}
 	var candidates []telegramJobRecord
-	err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
-		WhereIn("j.status", []string{"pending", "failed_retry", "unknown"}).
-		Where(telegramWebhookDetachedJobSQL("j.")).
-		Where("(j.dispatch_status = ? OR j.dispatch_status = '')", tgDispatchStatusIdle).
-		Where(telegramActiveChannelConditionForAlias("j")).
-		Where(messagePushPlanRecoveryConditionSQL("j"), telegramRecoveryTimeText(now.Add(-messagePushPlanJobExpireAfter))).
-		Where("(j.next_retry_at IS NULL OR j.next_retry_at <= ?)", nowText).
-		WhereLTE("j.updated_at", deadline).
-		OrderAsc("j.created_at").OrderAsc("j.id").Limit(candidateLimit).Scan(&candidates)
+	var err error
+	if strings.EqualFold(strings.TrimSpace(g.DB().GetConfig().Type), "pgsql") {
+		err = g.DB().GetScan(ctx, &candidates, telegramPendingRecoveryPostgresSQL(),
+			telegramRecoveryTimeText(now.Add(-messagePushPlanJobExpireAfter)), nowText, deadline, candidateLimit)
+	} else {
+		err = g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
+			WhereIn("j.status", []string{"pending", "failed_retry", "unknown"}).
+			Where(telegramWebhookDetachedJobSQL("j.")).
+			Where("(j.dispatch_status = ? OR j.dispatch_status = '')", tgDispatchStatusIdle).
+			Where(telegramPendingRecoveryChannelHeadSQL("j", "earlier")).
+			Where(telegramActiveChannelConditionForAlias("j")).
+			Where(messagePushPlanRecoveryConditionSQL("j"), telegramRecoveryTimeText(now.Add(-messagePushPlanJobExpireAfter))).
+			Where("(j.next_retry_at IS NULL OR j.next_retry_at <= ?)", nowText).
+			WhereLTE("j.updated_at", deadline).
+			OrderAsc("j.created_at").OrderAsc("j.id").Limit(candidateLimit).Scan(&candidates)
+	}
 	if err != nil {
 		observeErr = err
 		return gerror.Wrap(err, "读取待入队TG推送任务失败")
@@ -714,6 +721,48 @@ func (s *sSysPublish) recoverPendingIdleTelegramJobs(ctx context.Context, limit 
 		}
 	}
 	return nil
+}
+
+func telegramPendingRecoveryPostgresSQL() string {
+	channelKey := "CASE WHEN j.channel_id > 0 THEN j.channel_id::text ELSE 'chat:' || REPLACE(COALESCE(j.target_chat_id,''), '-100', '') END"
+	return `WITH channel_heads AS (
+		SELECT DISTINCT ON (j.tenant_id, ` + channelKey + `)
+			j.id,j.task_id,j.operation_no,j.tenant_id,j.account_id,j.profile_id,j.channel_id,j.bot_id,
+			j.push_mode,j.status,j.target_chat_id,j.collect_event_id,j.collect_source_id,j.collect_source_chat_id,
+			j.collect_source_message_id,j.retry_count,j.priority,j.asynq_task_id,j.queue_name,j.dispatch_status,
+			j.dispatched_at,j.dispatch_count,j.last_dispatch_error,j.next_retry_at,j.send_phase,j.reconcile_count,
+			j.error_message,j.sent_at,j.cycle_enabled,j.cycle_days,j.cycle_publish_time,j.next_cycle_at,j.created_at,j.updated_at
+		FROM ` + publishTgJobTable + ` j
+		WHERE ` + telegramChannelBlockingJobSQL("j") + `
+		ORDER BY j.tenant_id, ` + channelKey + `, j.created_at, j.id
+	)
+	SELECT h.* FROM channel_heads h
+	WHERE h.status IN ('pending','failed_retry','unknown')
+		AND COALESCE(h.dispatch_status,'') IN ('','idle')
+		AND ` + telegramActiveChannelConditionForAlias("h") + `
+		AND ` + messagePushPlanRecoveryConditionSQL("h") + `
+		AND (h.next_retry_at IS NULL OR h.next_retry_at<=?)
+		AND h.updated_at<=?
+	ORDER BY h.created_at,h.id
+	LIMIT ?`
+}
+
+// telegramPendingRecoveryChannelHeadSQL keeps heavily backlogged channels from
+// consuming the global candidate limit with jobs that cannot run yet.
+func telegramPendingRecoveryChannelHeadSQL(jobAlias, earlierAlias string) string {
+	return `NOT EXISTS (
+		SELECT 1 FROM ` + publishTgJobTable + ` ` + earlierAlias + `
+		WHERE ` + earlierAlias + `.tenant_id=` + jobAlias + `.tenant_id
+			AND (
+				(` + jobAlias + `.channel_id>0 AND ` + earlierAlias + `.channel_id=` + jobAlias + `.channel_id) OR
+				(` + jobAlias + `.channel_id<=0 AND ` + earlierAlias + `.channel_id<=0 AND
+					REPLACE(COALESCE(` + earlierAlias + `.target_chat_id,''),'-100','')=
+					REPLACE(COALESCE(` + jobAlias + `.target_chat_id,''),'-100',''))
+			)
+			AND ` + telegramChannelBlockingJobSQL(earlierAlias) + `
+			AND (` + earlierAlias + `.created_at<` + jobAlias + `.created_at OR
+				(` + earlierAlias + `.created_at=` + jobAlias + `.created_at AND ` + earlierAlias + `.id<` + jobAlias + `.id))
+	)`
 }
 
 func fairPendingTelegramJobs(candidates []telegramJobRecord, limit int) []telegramJobRecord {

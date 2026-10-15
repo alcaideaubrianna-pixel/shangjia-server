@@ -40,7 +40,7 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 	mod := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).Unscoped().
 		Where("j.id <> ?", job.Id).
 		Where(telegramWebhookDetachedJobSQL("j.")).
-		WhereIn("j.status", telegramChannelBlockingJobStatuses())
+		Where(telegramChannelBlockingJobSQL("j"))
 	// Once a display is visible in Telegram, finish that operation before
 	// returning it behind untouched historical backlog. Earlier operations that
 	// have also started still block it, preserving media/verification ordering.
@@ -85,6 +85,13 @@ func telegramChannelBlockingJobStatuses() []string {
 		telegramJobStatusConfirming,
 		telegramJobStatusSending,
 	}
+}
+
+func telegramChannelBlockingJobSQL(alias string) string {
+	if alias != "" {
+		alias += "."
+	}
+	return fmt.Sprintf("(%[1]sstatus IN ('pending','failed_retry','unknown','confirming','sending') OR (%[1]sstatus='failed' AND %[1]ssend_phase='display_confirmed'))", alias)
 }
 
 func telegramChannelOrderChatKey(chatID string) string {

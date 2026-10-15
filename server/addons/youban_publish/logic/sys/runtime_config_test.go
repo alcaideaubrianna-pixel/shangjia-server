@@ -64,11 +64,11 @@ func TestParsePublishRuntimeRoles(t *testing.T) {
 	}
 }
 
-func TestTelegramRecoveryRunsWithPushWorkerNotScheduler(t *testing.T) {
-	if telegramRecoveryRuntimeEnabled(publishRuntimeConfig{Scheduler: true}) {
-		t.Fatal("scheduler-only runtime must not own Telegram delivery recovery")
+func TestTelegramDeliveryRuntimeRunsWithPushWorkerNotScheduler(t *testing.T) {
+	if telegramDeliveryRuntimeEnabled(publishRuntimeConfig{Scheduler: true}) {
+		t.Fatal("scheduler-only runtime must not own Telegram delivery recovery or Outbox dispatch")
 	}
-	if !telegramRecoveryRuntimeEnabled(publishRuntimeConfig{PushWorker: true}) {
-		t.Fatal("push worker must own Telegram delivery recovery")
+	if !telegramDeliveryRuntimeEnabled(publishRuntimeConfig{PushWorker: true}) {
+		t.Fatal("push worker must own Telegram delivery recovery and Outbox dispatch")
 	}
 }

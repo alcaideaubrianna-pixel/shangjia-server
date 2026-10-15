@@ -1,10 +1,146 @@
 package sys
 
 import (
+	"context"
+	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 )
+
+func TestTelegramPendingRecoverySelectsChannelHeadsBeforeLimit(t *testing.T) {
+	query := telegramPendingRecoveryChannelHeadSQL("j", "earlier")
+	for _, fragment := range []string{
+		"NOT EXISTS", "earlier.tenant_id=j.tenant_id", "j.channel_id>0",
+		"earlier.channel_id=j.channel_id", "REPLACE(COALESCE(earlier.target_chat_id,''),'-100','')",
+		"earlier.status IN ('pending','failed_retry','unknown','confirming','sending')",
+		"earlier.status='failed' AND earlier.send_phase='display_confirmed'",
+		"earlier.created_at<j.created_at", "earlier.id<j.id",
+	} {
+		if !strings.Contains(query, fragment) {
+			t.Fatalf("channel-head recovery query missing %q: %s", fragment, query)
+		}
+	}
+}
+
+func TestTelegramPendingRecoveryPostgresSelectsHeadsBeforeDueFilters(t *testing.T) {
+	query := telegramPendingRecoveryPostgresSQL()
+	for _, fragment := range []string{
+		"WITH channel_heads AS", "DISTINCT ON", "j.status IN ('pending','failed_retry','unknown','confirming','sending')",
+		"j.status='failed' AND j.send_phase='display_confirmed'",
+		"ORDER BY j.tenant_id", "j.created_at, j.id", "h.status IN ('pending','failed_retry','unknown')",
+		"COALESCE(h.dispatch_status,'') IN ('','idle')", "h.next_retry_at IS NULL OR h.next_retry_at<=?",
+		"h.updated_at<=?", "ORDER BY h.created_at,h.id", "LIMIT ?",
+	} {
+		if !strings.Contains(query, fragment) {
+			t.Fatalf("PostgreSQL channel-head recovery query missing %q: %s", fragment, query)
+		}
+	}
+	if got := strings.Count(query, "?"); got != 4 {
+		t.Fatalf("PostgreSQL channel-head recovery placeholders=%d, want 4: %s", got, query)
+	}
+}
+
+func TestTelegramPendingRecoveryProductionSnapshot(t *testing.T) {
+	if os.Getenv("YOUBAN_PUBLISH_REPLAY") != "1" {
+		t.Skip("set YOUBAN_PUBLISH_REPLAY=1 to run against an isolated production snapshot")
+	}
+	ctx := context.Background()
+	now := gtime.Now()
+	var jobs []telegramJobRecord
+	err := g.DB().GetScan(ctx, &jobs, telegramPendingRecoveryPostgresSQL(),
+		telegramRecoveryTimeText(now.Add(-messagePushPlanJobExpireAfter)),
+		telegramRecoveryTimeText(now), telegramRecoveryTimeText(now), 2000)
+	if err != nil {
+		t.Fatalf("query production snapshot channel heads: %v", err)
+	}
+	if len(jobs) == 0 {
+		t.Fatal("production snapshot returned no recoverable channel heads")
+	}
+	channels := make(map[string]struct{}, len(jobs))
+	for _, job := range jobs {
+		key := telegramPendingJobChannelKey(job)
+		if _, exists := channels[key]; exists {
+			t.Fatalf("production snapshot returned multiple recovery jobs for channel %s", key)
+		}
+		channels[key] = struct{}{}
+		hasEarlier, checkErr := new(sSysPublish).telegramChannelHasEarlierActiveJob(ctx, job)
+		if checkErr != nil {
+			t.Fatalf("check earlier active job %d: %v", job.Id, checkErr)
+		}
+		if hasEarlier {
+			t.Fatalf("recovery selected non-head job %d for channel %s", job.Id, key)
+		}
+	}
+	t.Logf("validated %d real recoverable channel heads", len(jobs))
+}
+
+func TestTelegramDeliveryOrderingProductionSnapshot(t *testing.T) {
+	if os.Getenv("YOUBAN_PUBLISH_REPLAY") != "1" {
+		t.Skip("set YOUBAN_PUBLISH_REPLAY=1 to run against an isolated production snapshot")
+	}
+	ctx := context.Background()
+	assertSnapshotCount(t, ctx, "normal jobs with orphan verification", `
+		SELECT COUNT(1) FROM (
+			SELECT j.id
+			FROM hg_youban_publish_tg_job j
+			JOIN hg_youban_publish_tg_message m ON m.job_id=j.id AND m.deleted_at IS NULL
+			WHERE j.operation_no NOT LIKE 'verify-repair:%'
+			GROUP BY j.id
+			HAVING COUNT(*) FILTER (WHERE m.purpose='verify') > 0
+				AND COUNT(*) FILTER (WHERE m.purpose='display') = 0
+		) orphan`, 0)
+	assertSnapshotCount(t, ctx, "jobs with verification before display completion", `
+		SELECT COUNT(1) FROM (
+			SELECT job_id
+			FROM hg_youban_publish_tg_message
+			WHERE deleted_at IS NULL
+			GROUP BY job_id
+			HAVING MIN(tg_message_id) FILTER (WHERE purpose='verify') <=
+				MAX(tg_message_id) FILTER (WHERE purpose='display')
+		) inverted`, 0)
+	assertSnapshotCount(t, ctx, "normal verification attempts without confirmed display", `
+		SELECT COUNT(DISTINCT verify.job_id)
+		FROM hg_youban_publish_tg_attempt verify
+		JOIN hg_youban_publish_tg_job job ON job.id=verify.job_id
+		WHERE verify.phase='verify'
+			AND job.operation_no NOT LIKE 'verify-repair:%'
+			AND NOT EXISTS (
+				SELECT 1 FROM hg_youban_publish_tg_attempt display
+				WHERE display.job_id=verify.job_id
+					AND display.phase='display' AND display.status='confirmed'
+			)`, 0)
+	assertSnapshotCount(t, ctx, "channels with more than one active delivery slot", `
+		SELECT COUNT(1) FROM (
+			SELECT tenant_id,
+				CASE WHEN channel_id>0 THEN channel_id::text
+				ELSE 'chat:' || REPLACE(COALESCE(target_chat_id,''),'-100','') END channel_key
+			FROM hg_youban_publish_tg_job
+			WHERE status IN ('sending','confirming')
+				OR (status IN ('pending','failed_retry','unknown') AND dispatch_status IN ('queued','processing'))
+			GROUP BY tenant_id,channel_key
+			HAVING COUNT(*) > 1
+		) concurrent`, 0)
+}
+
+func assertSnapshotCount(t *testing.T, ctx context.Context, name, query string, want int) {
+	t.Helper()
+	value, err := g.DB().GetValue(ctx, query)
+	if err != nil {
+		t.Fatalf("audit %s: %v", name, err)
+	}
+	if got := value.Int(); got != want {
+		t.Fatalf("%s=%d, want %d", name, got, want)
+	}
+}
+
+func telegramPendingJobChannelKey(job telegramJobRecord) string {
+	return fmt.Sprintf("%d:%d:%s", job.TenantId, job.ChannelId, normalizeTelegramChannelChatID(job.TargetChatId))
+}
 
 func TestTelegramSendingRecoveryStartsAfterTaskTimeout(t *testing.T) {
 	if telegramSendingJobRecoverAfter <= telegramPublishTaskTimeout {
