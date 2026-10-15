@@ -84,7 +84,7 @@ func remoteMediaURLIsVideo(value string) bool {
 		return false
 	}
 	switch strings.ToLower(filepath.Ext(parsed.Path)) {
-	case ".3gp", ".avi", ".m4v", ".mkv", ".mov", ".mp4", ".mpeg", ".mpg", ".webm", ".wmv":
+	case ".3gp", ".avi", ".flv", ".m4v", ".mkv", ".mov", ".mp4", ".mpeg", ".mpg", ".webm", ".wmv":
 		return true
 	default:
 		return false

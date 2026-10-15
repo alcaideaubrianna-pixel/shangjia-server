@@ -826,7 +826,17 @@ func telegramMediaRemoteURL(media *telegramMediaItem) string {
 	if err != nil || parsed.Scheme != "https" || strings.TrimSpace(parsed.Host) == "" {
 		return ""
 	}
+	// Telegram only guarantees MPEG-4 for video messages. Other containers
+	// must pass through local normalization or they can render as documents.
+	if strings.EqualFold(strings.TrimSpace(media.MediaType), "video") && telegramVideoURLNeedsNormalization(parsed.Path) {
+		return ""
+	}
 	return parsed.String()
+}
+
+func telegramVideoURLNeedsNormalization(path string) bool {
+	ext := strings.ToLower(filepath.Ext(strings.TrimSpace(path)))
+	return ext != "" && ext != ".mp4"
 }
 
 func telegramMediaCanUseRemoteURL(media *telegramMediaItem) bool {

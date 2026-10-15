@@ -10,7 +10,7 @@ import (
 )
 
 func TestTelegramMediaRemoteURLSelection(t *testing.T) {
-	media := &telegramMediaItem{FileUrl: "https://cdn.example/media/video.mp4"}
+	media := &telegramMediaItem{MediaType: "video", FileUrl: "https://cdn.example/media/video.mp4"}
 	if got := telegramMediaRemoteURL(media); got != media.FileUrl {
 		t.Fatalf("remote URL = %q, want %q", got, media.FileUrl)
 	}
@@ -22,6 +22,30 @@ func TestTelegramMediaRemoteURLSelection(t *testing.T) {
 	media.AntiScanEnabled = true
 	if got := telegramMediaRemoteURL(media); got != "" {
 		t.Fatalf("sanitized media must reject original URL, got %q", got)
+	}
+}
+
+func TestTelegramNonMP4VideoDoesNotUseRemoteURL(t *testing.T) {
+	for _, ext := range []string{"mov", "m4v", "mkv", "webm", "avi", "wmv", "mpg", "mpeg", "flv", "3gp"} {
+		media := &telegramMediaItem{MediaType: "video", FileUrl: "https://cdn.example/media/verify." + ext}
+		if got := telegramMediaRemoteURL(media); got != "" {
+			t.Fatalf(".%s video bypassed compatibility conversion: %q", ext, got)
+		}
+	}
+	media := &telegramMediaItem{MediaType: "video", FileUrl: "https://cdn.example/media/verify.mp4"}
+	if got := telegramMediaRemoteURL(media); got == "" {
+		t.Fatal("MP4 video should retain the CDN URL fast path")
+	}
+}
+
+func TestTelegramVideoPathNormalizationSelection(t *testing.T) {
+	for _, name := range []string{"verify.mov", "verify.MKV", "verify.webm", "verify.avi"} {
+		if !telegramVideoPathNeedsNormalization(name) {
+			t.Fatalf("non-MP4 video %q must be normalized", name)
+		}
+	}
+	if telegramVideoPathNeedsNormalization("verify.MP4") {
+		t.Fatal("MP4 should not be transcoded solely because of extension case")
 	}
 }
 

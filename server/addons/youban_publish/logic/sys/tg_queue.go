@@ -19,15 +19,17 @@ import (
 const (
 	// tgQueueNameMediaLegacy is read only by the one-time migration. It is
 	// intentionally not registered by any worker.
-	tgQueueNameMediaLegacy            = "youban_publish_media"
-	tgQueueNameUrgent                 = "youban_publish_tg_urgent"
-	tgQueueNameDefault                = "youban_publish_tg"
-	tgQueueNameBulk                   = "youban_publish_tg_bulk"
-	tgQueueNameMediaRealtime          = "youban_publish_media_realtime"
-	tgQueueNameMediaRealtimePrefix    = "youban_publish_media_realtime_"
-	tgQueueNameMediaProcess           = "youban_publish_media_process"
-	tgQueueNameMediaBulkPrefix        = "youban_publish_media_bulk_"
-	tgQueueNameAutoDelete             = "youban_publish_auto_delete"
+	tgQueueNameMediaLegacy         = "youban_publish_media"
+	tgQueueNameUrgent              = "youban_publish_tg_urgent"
+	tgQueueNameDefault             = "youban_publish_tg"
+	tgQueueNameBulk                = "youban_publish_tg_bulk"
+	tgQueueNameMediaRealtime       = "youban_publish_media_realtime"
+	tgQueueNameMediaRealtimePrefix = "youban_publish_media_realtime_"
+	tgQueueNameMediaProcess        = "youban_publish_media_process"
+	tgQueueNameMediaBulkPrefix     = "youban_publish_media_bulk_"
+	// Keep realtime deletion isolated from explicitly requested historical work.
+	tgQueueNameAutoDeleteRealtime     = "youban_publish_auto_delete_realtime"
+	tgQueueNameAutoDeleteBackfill     = "youban_publish_auto_delete_backfill"
 	tgQueueNameAttemptTimeout         = "youban_publish_attempt_timeout"
 	tgQueueNameBackground             = "youban_publish_background"
 	tgQueueNameMaterialImportPull     = "youban_publish_material_import_pull"
@@ -161,7 +163,11 @@ type autoDeleteQueuePayload struct {
 }
 
 type autoDeleteBackfillQueuePayload struct {
-	CursorId int64 `json:"cursorId"`
+	CursorId    int64  `json:"cursorId"`
+	StartAt     string `json:"startAt"`
+	EndAt       string `json:"endAt"`
+	Scanned     int    `json:"scanned"`
+	MaxMessages int    `json:"maxMessages"`
 }
 
 type mediaProcessQueuePayload struct {
@@ -359,7 +365,7 @@ func (s *sSysPublish) enqueueTelegramAutoDelete(ctx context.Context, payload aut
 	}
 	task := asynq.NewTask(tgTaskTypeAutoDelete, body)
 	_, err = client.EnqueueContext(ctx, task,
-		asynq.Queue(tgQueueNameAutoDelete),
+		asynq.Queue(tgQueueNameAutoDeleteRealtime),
 		asynq.MaxRetry(10),
 		asynq.Timeout(time.Minute),
 		asynq.Unique(2*time.Minute),
@@ -370,17 +376,17 @@ func (s *sSysPublish) enqueueTelegramAutoDelete(ctx context.Context, payload aut
 	return err
 }
 
-func (s *sSysPublish) enqueueTelegramAutoDeleteBackfill(ctx context.Context, cursorId int64, delay time.Duration) error {
+func (s *sSysPublish) enqueueTelegramAutoDeleteBackfill(ctx context.Context, payload autoDeleteBackfillQueuePayload, delay time.Duration) error {
 	client, err := s.telegramQueueClient(ctx)
 	if err != nil {
 		return err
 	}
-	body, err := json.Marshal(autoDeleteBackfillQueuePayload{CursorId: cursorId})
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameAutoDelete),
+		asynq.Queue(tgQueueNameAutoDeleteBackfill),
 		asynq.MaxRetry(10),
 		asynq.Timeout(2 * time.Minute),
 		asynq.Unique(10 * time.Minute),
@@ -389,6 +395,34 @@ func (s *sSysPublish) enqueueTelegramAutoDeleteBackfill(ctx context.Context, cur
 		options = append(options, asynq.ProcessIn(delay))
 	}
 	_, err = client.EnqueueContext(ctx, asynq.NewTask(tgTaskTypeAutoDeleteBackfill, body), options...)
+	if errors.Is(err, asynq.ErrDuplicateTask) {
+		return nil
+	}
+	return err
+}
+
+func (s *sSysPublish) enqueueTelegramAutoDeleteBackfillDelete(ctx context.Context, payload autoDeleteQueuePayload, delay time.Duration) error {
+	if payload.ChannelId <= 0 || payload.MessageId <= 0 || strings.TrimSpace(payload.ChatId) == "" {
+		return nil
+	}
+	client, err := s.telegramQueueClient(ctx)
+	if err != nil {
+		return err
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	options := []asynq.Option{
+		asynq.Queue(tgQueueNameAutoDeleteBackfill),
+		asynq.MaxRetry(5),
+		asynq.Timeout(time.Minute),
+		asynq.Unique(24 * time.Hour),
+	}
+	if delay > 0 {
+		options = append(options, asynq.ProcessIn(delay))
+	}
+	_, err = client.EnqueueContext(ctx, asynq.NewTask(tgTaskTypeAutoDelete, body), options...)
 	if errors.Is(err, asynq.ErrDuplicateTask) {
 		return nil
 	}

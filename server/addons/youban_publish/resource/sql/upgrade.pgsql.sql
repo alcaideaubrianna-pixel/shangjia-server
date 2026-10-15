@@ -1194,3 +1194,4 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_ai_ops_repair_plan" (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_ai_ops_repair_plan" ON "hg_youban_publish_ai_ops_repair_plan" ("plan_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_ai_ops_repair_plan_status" ON "hg_youban_publish_ai_ops_repair_plan" ("status", "expires_at", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_bot_message_source_received" ON "hg_youban_publish_bot_message_source" ("received_at", "id");

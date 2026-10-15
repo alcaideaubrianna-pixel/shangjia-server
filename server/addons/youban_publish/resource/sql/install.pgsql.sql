@@ -2090,6 +2090,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_bot_message_source" (
   CONSTRAINT "uk_ybp_bot_message_source" UNIQUE ("chat_id", "message_id")
 );
 CREATE INDEX IF NOT EXISTS "idx_ybp_bot_message_source_chat_time" ON "hg_youban_publish_bot_message_source" ("chat_id", "received_at");
+CREATE INDEX IF NOT EXISTS "idx_ybp_bot_message_source_received" ON "hg_youban_publish_bot_message_source" ("received_at", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_bot_message_source_reply" ON "hg_youban_publish_bot_message_source" ("reply_job_id", "reply_profile_id", "reply_to_message_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_bot_message_source_profile_time" ON "hg_youban_publish_bot_message_source" ("tenant_id", "reply_profile_id", "received_at" DESC, "id" DESC);
 CREATE INDEX IF NOT EXISTS "idx_ybp_bot_message_source_sender" ON "hg_youban_publish_bot_message_source" ("sender_user_id", "sender_chat_id");

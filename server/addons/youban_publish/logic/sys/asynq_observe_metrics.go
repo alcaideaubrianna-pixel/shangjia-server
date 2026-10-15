@@ -157,7 +157,8 @@ func observeQueuedJobsWithoutConsumer(ctx context.Context, servers []*asynq.Serv
 
 func telegramObserveQueueNames(ctx context.Context) []string {
 	set := map[string]struct{}{
-		tgQueueNameAutoDelete:             {},
+		tgQueueNameAutoDeleteRealtime:     {},
+		tgQueueNameAutoDeleteBackfill:     {},
 		tgQueueNameAttemptTimeout:         {},
 		tgQueueNameBackground:             {},
 		tgQueueNameMaterialImportPull:     {},

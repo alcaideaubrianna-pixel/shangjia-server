@@ -50,13 +50,18 @@ func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
 
 func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	s.tgQueueMu.Lock()
-	if s.autoDeleteQueueServer != nil || s.attemptTimeoutServer != nil || s.collectRealtimeServer != nil || s.backgroundQueueServer != nil || s.materialImportPullServer != nil || s.materialImportMediaServer != nil || s.cycleQueueServer != nil {
+	if s.autoDeleteQueueServer != nil || s.autoDeleteBackfillServer != nil || s.attemptTimeoutServer != nil || s.collectRealtimeServer != nil || s.backgroundQueueServer != nil || s.materialImportPullServer != nil || s.materialImportMediaServer != nil || s.cycleQueueServer != nil {
 		s.tgQueueMu.Unlock()
 		return
 	}
 	autoDeleteServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
 		Concurrency:    telegramAutoDeleteConcurrency(ctx),
-		Queues:         map[string]int{tgQueueNameAutoDelete: 1},
+		Queues:         map[string]int{tgQueueNameAutoDeleteRealtime: 1},
+		RetryDelayFunc: telegramQueueRetryDelay,
+	})
+	autoDeleteBackfillServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
+		Concurrency:    1,
+		Queues:         map[string]int{tgQueueNameAutoDeleteBackfill: 1},
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
 	attemptTimeoutServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
@@ -112,6 +117,7 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	relayServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{Concurrency: g.Cfg().MustGet(ctx, "youbanPublish.queue.relayConcurrency", 4).Int(), Queues: map[string]int{tgQueueNameRelay: 1}, RetryDelayFunc: telegramQueueRetryDelay})
 	g.Log().Infof(ctx, "启动上架插件后台队列，自动删除独立并发：%d", telegramAutoDeleteConcurrency(ctx))
 	s.autoDeleteQueueServer = autoDeleteServer
+	s.autoDeleteBackfillServer = autoDeleteBackfillServer
 	s.attemptTimeoutServer = attemptTimeoutServer
 	s.collectRealtimeServer = collectRealtimeServer
 	s.backgroundQueueServer = server
@@ -160,7 +166,9 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	cycleMux.HandleFunc(tgTaskTypeCycleRefresh, s.handleCycleRefreshTask)
 	autoDeleteMux := asynq.NewServeMux()
 	autoDeleteMux.HandleFunc(tgTaskTypeAutoDelete, s.handleTelegramAutoDeleteTask)
-	autoDeleteMux.HandleFunc(tgTaskTypeAutoDeleteBackfill, s.handleTelegramAutoDeleteBackfillTask)
+	autoDeleteBackfillMux := asynq.NewServeMux()
+	autoDeleteBackfillMux.HandleFunc(tgTaskTypeAutoDelete, s.handleTelegramAutoDeleteTask)
+	autoDeleteBackfillMux.HandleFunc(tgTaskTypeAutoDeleteBackfill, s.handleTelegramAutoDeleteBackfillTask)
 	attemptTimeoutMux := asynq.NewServeMux()
 	attemptTimeoutMux.HandleFunc(tgTaskTypeAttemptTimeout, s.handleTelegramAttemptTimeoutTask)
 	collectRealtimeMux := asynq.NewServeMux()
@@ -174,6 +182,11 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	go func() {
 		if err := autoDeleteServer.Run(autoDeleteMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
 			g.Log().Errorf(ctx, "启动上架插件TG自动删除队列失败：%+v", err)
+		}
+	}()
+	go func() {
+		if err := autoDeleteBackfillServer.Run(autoDeleteBackfillMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
+			g.Log().Errorf(ctx, "启动历史自动删除低优先级队列失败：%+v", err)
 		}
 	}()
 	go func() {
@@ -323,6 +336,7 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	mediaBulkServer := s.mediaBulkQueueServer
 	mediaProcessServer := s.mediaProcessServer
 	autoDeleteServer := s.autoDeleteQueueServer
+	autoDeleteBackfillServer := s.autoDeleteBackfillServer
 	attemptTimeoutServer := s.attemptTimeoutServer
 	collectRealtimeServer := s.collectRealtimeServer
 	backgroundServer := s.backgroundQueueServer
@@ -340,6 +354,7 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	s.mediaBulkQueueServer = nil
 	s.mediaProcessServer = nil
 	s.autoDeleteQueueServer = nil
+	s.autoDeleteBackfillServer = nil
 	s.attemptTimeoutServer = nil
 	s.collectRealtimeServer = nil
 	s.backgroundQueueServer = nil
@@ -369,6 +384,9 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	}
 	if autoDeleteServer != nil {
 		autoDeleteServer.Shutdown()
+	}
+	if autoDeleteBackfillServer != nil {
+		autoDeleteBackfillServer.Shutdown()
 	}
 	if attemptTimeoutServer != nil {
 		attemptTimeoutServer.Shutdown()

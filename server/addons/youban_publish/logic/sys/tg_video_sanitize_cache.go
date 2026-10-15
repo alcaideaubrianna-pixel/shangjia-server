@@ -23,13 +23,74 @@ const (
 )
 
 var (
-	telegramVideoSanitizeGroup singleflight.Group
-	telegramVideoSanitizeSlot  = make(chan struct{}, 1)
-	telegramVideoSanitizePrune struct {
+	telegramVideoSanitizeGroup  singleflight.Group
+	telegramVideoSanitizeSlot   = make(chan struct{}, 1)
+	telegramVideoNormalizeGroup singleflight.Group
+	telegramVideoNormalizeSlot  = make(chan struct{}, 2)
+	telegramVideoSanitizePrune  struct {
 		sync.Mutex
 		lastAt time.Time
 	}
 )
+
+func cachedTelegramVideoNormalize(ctx context.Context, ffmpegPath string, path string) (string, error) {
+	cacheKey, _, err := telegramVideoSanitizeCacheKey(path)
+	if err != nil {
+		return "", err
+	}
+	cacheKey += "-telegram-mp4"
+	cacheDir := filepath.Join(os.TempDir(), telegramVideoSanitizeCacheDir)
+	if err = os.MkdirAll(cacheDir, 0o755); err != nil {
+		return "", gerror.Wrap(err, "创建视频兼容格式缓存目录失败")
+	}
+	pruneTelegramVideoSanitizeCache(cacheDir)
+	cachePath := filepath.Join(cacheDir, cacheKey+".mp4")
+	value, err, _ := telegramVideoNormalizeGroup.Do(cacheKey, func() (any, error) {
+		if info, statErr := os.Stat(cachePath); statErr == nil && info.Size() > 0 {
+			_ = os.Chtimes(cachePath, time.Now(), time.Now())
+			return cachePath, nil
+		}
+		select {
+		case telegramVideoNormalizeSlot <- struct{}{}:
+			defer func() { <-telegramVideoNormalizeSlot }()
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+		temp, createErr := os.CreateTemp(cacheDir, ".normalize-*.mp4")
+		if createErr != nil {
+			return "", gerror.Wrap(createErr, "创建视频兼容格式临时文件失败")
+		}
+		tempPath := temp.Name()
+		_ = temp.Close()
+		_ = os.Remove(tempPath)
+		cmdCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+		defer cancel()
+		output, runErr := exec.CommandContext(cmdCtx, ffmpegPath,
+			"-hide_banner", "-loglevel", "error", "-y", "-i", path,
+			"-map", "0:v:0", "-map", "0:a:0?", "-map_metadata", "-1",
+			"-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2:in_range=auto:out_range=tv,format=yuv420p",
+			"-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
+			"-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", tempPath,
+		).CombinedOutput()
+		if runErr != nil {
+			_ = os.Remove(tempPath)
+			return "", gerror.Wrapf(runErr, "转换Telegram兼容视频失败：%s", ellipsisString(strings.TrimSpace(string(output)), 500))
+		}
+		if info, statErr := os.Stat(tempPath); statErr != nil || info.Size() <= 0 {
+			_ = os.Remove(tempPath)
+			return "", gerror.New("转换Telegram兼容视频未生成有效文件")
+		}
+		if renameErr := os.Rename(tempPath, cachePath); renameErr != nil {
+			_ = os.Remove(tempPath)
+			return "", gerror.Wrap(renameErr, "保存视频兼容格式缓存失败")
+		}
+		return cachePath, nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return cloneTelegramVideoSanitizeFile(value.(string), ".mp4")
+}
 
 func cachedTelegramVideoSanitize(ctx context.Context, ffmpegPath string, path string) (string, error) {
 	cacheKey, ext, err := telegramVideoSanitizeCacheKey(path)

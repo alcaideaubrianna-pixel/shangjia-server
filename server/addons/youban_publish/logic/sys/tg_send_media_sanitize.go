@@ -431,12 +431,34 @@ func compressTelegramPhotoForUpload(ctx context.Context, path string) (string, e
 }
 
 func prepareTelegramVideoUploadFile(ctx context.Context, path string, cleanup func()) (string, func(), error) {
+	if telegramVideoPathNeedsNormalization(path) {
+		normalizedPath, err := normalizeTelegramVideo(ctx, path)
+		if err != nil {
+			if cleanup != nil {
+				cleanup()
+			}
+			return "", nil, err
+		}
+		return normalizedPath, chainCleanup(cleanup, func() { _ = os.Remove(normalizedPath) }), nil
+	}
 	cleanPath, err := stripTelegramVideoMetadata(ctx, path)
 	if err != nil {
 		g.Log().Warningf(ctx, "清理视频元数据失败，使用原视频发送 path:%s err:%+v", path, err)
 		return path, cleanup, nil
 	}
 	return cleanPath, chainCleanup(cleanup, func() { _ = os.Remove(cleanPath) }), nil
+}
+
+func telegramVideoPathNeedsNormalization(path string) bool {
+	return !strings.EqualFold(filepath.Ext(strings.TrimSpace(path)), ".mp4")
+}
+
+func normalizeTelegramVideo(ctx context.Context, path string) (string, error) {
+	ffmpegPath, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		return "", gerror.New("ffmpeg 未安装，无法转换Telegram兼容视频")
+	}
+	return cachedTelegramVideoNormalize(ctx, ffmpegPath, path)
 }
 
 func stripTelegramVideoMetadata(ctx context.Context, path string) (string, error) {

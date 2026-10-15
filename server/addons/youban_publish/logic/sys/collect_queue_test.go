@@ -33,7 +33,7 @@ func TestMediaProcessQueueIsIsolatedFromCollectionDownloads(t *testing.T) {
 
 func TestCriticalBackgroundQueuesAreObservable(t *testing.T) {
 	queues := telegramObserveQueueNames(context.Background())
-	for _, queue := range []string{tgQueueNameAutoDelete, tgQueueNameAttemptTimeout, tgQueueNameCollectProcess, tgQueueNameCycle} {
+	for _, queue := range []string{tgQueueNameAutoDeleteRealtime, tgQueueNameAutoDeleteBackfill, tgQueueNameAttemptTimeout, tgQueueNameCollectProcess, tgQueueNameCycle} {
 		if !slices.Contains(queues, queue) {
 			t.Fatalf("critical queue %s must be observable: %v", queue, queues)
 		}
