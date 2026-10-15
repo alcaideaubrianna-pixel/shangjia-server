@@ -3,18 +3,17 @@ package sys
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
 
-	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
 	"hotgo/addons/youban_bot/model/input/sysin"
+	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
 )
 
 const featureCacheTTL = 30 * time.Second
@@ -50,8 +49,13 @@ func (s *sSysBot) AdminFeatureList(ctx context.Context, in *sysin.FeatureListInp
 			item.UpdatedAt = row.UpdatedAt.String()
 		}
 		if row.FeatureKey == (relayFeature{}).Key() {
-			if err = s.relayFeatureSchema(ctx, item); err != nil {
-				return nil, 0, err
+			if in.BotId > 0 {
+				item.ConfigValues["botId"] = in.BotId
+			}
+			if loadErr := s.relayFeatureSchema(ctx, item); loadErr != nil {
+				item.ConfigError = "双向配置读取失败，请检查数据库迁移；仍可停用插件"
+				item.ConfigValues["revision"] = ""
+				g.Log().Warningf(ctx, "读取双向配置失败: %+v", loadErr)
 			}
 		}
 		list = append(list, item)
@@ -330,54 +334,7 @@ func (s *sSysBot) featureDescription(ctx context.Context, feature botFeature) st
 }
 
 func (s *sSysBot) syncAllTelegramBotMenus(ctx context.Context) error {
-	bots, err := s.enabledBots(ctx)
-	if err != nil {
-		return err
-	}
-	errorsList := make([]error, 0)
-	for _, item := range bots {
-		if item != nil && strings.TrimSpace(item.BotToken) != "" {
-			if err = s.syncTelegramBotMenu(ctx, item.BotToken); err != nil {
-				g.Log().Warningf(ctx, "同步Telegram菜单失败 botId:%d username:%s err:%+v", item.Id, item.BotUsername, err)
-				errorsList = append(errorsList, fmt.Errorf("bot %s: %w", firstNonEmpty(item.BotUsername, fmt.Sprintf("%d", item.Id)), err))
-				continue
-			}
-			g.Log().Infof(ctx, "同步Telegram菜单成功 botId:%d username:%s", item.Id, item.BotUsername)
-		}
-	}
-	return errors.Join(errorsList...)
-}
-
-func (s *sSysBot) syncTelegramBotMenu(ctx context.Context, botToken string) error {
-	bot, err := s.telegramBot(ctx, botToken)
-	if err != nil {
-		return err
-	}
-	commands := make([]models.BotCommand, 0, len(botFeatures))
-	for _, feature := range botFeatures {
-		if feature == nil {
-			continue
-		}
-		if !s.featureMenuVisible(ctx, feature.Key()) {
-			continue
-		}
-		cmd := strings.TrimPrefix(s.featureCommand(ctx, feature), "/")
-		if cmd == "" {
-			continue
-		}
-		commands = append(commands, models.BotCommand{Command: cmd, Description: s.featureDescription(ctx, feature)})
-	}
-	callCtx, cancel := telegramAPICtx()
-	defer cancel()
-	if len(commands) == 0 {
-		_, err = bot.DeleteMyCommands(callCtx, &tgbot.DeleteMyCommandsParams{Scope: &models.BotCommandScopeDefault{}})
-		return err
-	}
-	if _, err = bot.SetMyCommands(callCtx, &tgbot.SetMyCommandsParams{Commands: commands, Scope: &models.BotCommandScopeDefault{}}); err != nil {
-		return err
-	}
-	_, err = bot.SetChatMenuButton(callCtx, &tgbot.SetChatMenuButtonParams{MenuButton: &models.MenuButtonCommands{Type: models.MenuButtonTypeCommands}})
-	return err
+	return gatewayservice.Gateway().Refresh(ctx)
 }
 
 func featureMenuSchema() *sysin.FeatureConfigSchema {

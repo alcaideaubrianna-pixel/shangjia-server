@@ -43,7 +43,12 @@ func (s *sSysBot) handleRelayCommand(ctx context.Context, cfg *entity.YoubanBotR
 	if msg.Chat.Type != models.ChatTypePrivate {
 		return s.relayReply(ctx, cfg.BotId, msg, "请在机器人私聊中执行管理命令。")
 	}
-	result, err := s.executeRelayCommand(ctx, cfg, cmd)
+	var result string
+	err = relayMutate(ctx, cfg.BotId, func(ctx context.Context) error {
+		var execErr error
+		result, execErr = s.executeRelayCommand(ctx, cfg, cmd)
+		return execErr
+	})
 	if err != nil {
 		return s.relayReply(ctx, cfg.BotId, msg, html.EscapeString(err.Error()))
 	}

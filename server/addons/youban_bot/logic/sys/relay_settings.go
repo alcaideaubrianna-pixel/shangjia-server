@@ -70,7 +70,7 @@ func (s *sSysBot) AdminRelaySettings(ctx context.Context, in *sysin.RelayBotInp)
 	return &sysin.RelaySettingsModel{YoubanBotRelayConfig: cfg, Admins: admins}, gerror.Wrap(err, "读取双向机器人管理员失败")
 }
 
-func (s *sSysBot) AdminRelaySaveSettings(ctx context.Context, in *sysin.RelaySettingsInp) error {
+func (s *sSysBot) adminRelaySaveSettings(ctx context.Context, in *sysin.RelaySettingsInp) error {
 	if err := in.Filter(); err != nil {
 		return err
 	}
@@ -134,13 +134,8 @@ func (s *sSysBot) resolveRelayAdmins(ctx context.Context, botID int64, values []
 	for _, value := range values {
 		userID, username := "", strings.ToLower(value)
 		if strings.HasPrefix(value, "@") {
-			peer, err := s.relayKnownUser(ctx, botID, value)
-			if err != nil {
-				return nil, err
-			}
-			if peer != nil {
-				userID = peer.ID
-			}
+			// Resolve only from a fresh private update, never from historical usernames.
+
 		} else {
 			id, err := strconv.ParseInt(value, 10, 64)
 			if err != nil || id <= 0 {

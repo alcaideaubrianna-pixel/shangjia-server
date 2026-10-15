@@ -37,6 +37,9 @@ func relayPendingFilter(ctx context.Context, cfg *entity.YoubanBotRelayConfig, r
 			if m.Status == consts.RelayCancelled && m.ErrorMessage != "" {
 				return "媒体组包含已拦截消息，整组未传递。", nil
 			}
+			if m.Status == consts.RelaySent || m.Status == consts.RelayCancelled {
+				continue
+			}
 			var msg models.Message
 			if err := json.Unmarshal([]byte(m.RawJson), &msg); err != nil {
 				return "", err

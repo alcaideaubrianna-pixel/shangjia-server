@@ -6,9 +6,19 @@
     title="插件配置"
     positive-text="保存"
     negative-text="取消"
+    :positive-button-props="{ disabled: relayLoading || !!relayError }"
     @positive-click="emit('save')"
   >
-    <n-form :model="form" label-placement="left" label-width="110" class="feature-config-form">
+    <n-alert v-if="relayError || form.configError" type="error">{{
+      relayError || form.configError
+    }}</n-alert>
+    <n-form
+      :disabled="relayLoading"
+      :model="form"
+      label-placement="left"
+      label-width="110"
+      class="feature-config-form"
+    >
       <n-alert
         v-if="form.featureKey === 'inline_promotion'"
         type="info"
@@ -174,8 +184,8 @@
 </template>
 
 <script setup lang="ts">
-  import { computed, onMounted, ref } from 'vue';
-  import { BotList, UserList } from '@/api/addons/youbanBot';
+  import { computed, onMounted, ref, watch } from 'vue';
+  import { BotList, UserList, FeatureList } from '@/api/addons/youbanBot';
   import UploadImage from '@/components/Upload/uploadImage.vue';
   import TelegramRichEditor from '@/components/TelegramRichEditor/index.vue';
   import MarkdownEditor from '@/components/MarkdownEditor/index.vue';
@@ -183,6 +193,34 @@
   const props = defineProps<{ show: boolean; form: Record<string, any>; statusOptions: any[] }>();
   const form = computed(() => props.form);
   const emit = defineEmits<{ (e: 'update:show', value: boolean): void; (e: 'save'): void }>();
+
+  const relayLoading = ref(false);
+  const relayError = ref('');
+  let relayRequest = 0;
+  watch(
+    () => [props.show, props.form.featureKey, props.form.configValues?.botId],
+    async ([show, key, botId]) => {
+      const request = ++relayRequest;
+      relayLoading.value = false;
+      relayError.value = '';
+      if (!show || key !== 'two_way_relay' || !botId) return;
+      relayLoading.value = true;
+      form.value.configValues.revision = '';
+      try {
+        const res: any = await FeatureList({ page: 1, perPage: 200, botId });
+        if (request !== relayRequest) return;
+        const row = res?.list?.find((item: any) => item.featureKey === key);
+        if (!row || row.configError || !row.configValues?.revision)
+          throw new Error('配置加载失败，请重新选择Bot');
+        form.value.configValues = row.configValues;
+        form.value.configError = '';
+      } catch (error) {
+        if (request === relayRequest) relayError.value = '配置加载失败，请重新选择Bot后保存';
+      } finally {
+        if (request === relayRequest) relayLoading.value = false;
+      }
+    }
+  );
 
   const adminUsers = ref<any[]>([]);
   const superBots = ref<any[]>([]);

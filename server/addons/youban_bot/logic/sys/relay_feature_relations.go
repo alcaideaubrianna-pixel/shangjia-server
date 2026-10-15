@@ -24,7 +24,7 @@ func (s *sSysBot) relayFeatureRelations(ctx context.Context, botID int64, model 
 	}
 	model.ConfigValues["bindings"] = strings.Join(pairs, "\n")
 	var rules []*entity.YoubanBotRelayRule
-	if err := dao.YoubanBotRelayRule.Ctx(ctx).Where(dao.YoubanBotRelayRule.Columns().BotId, botID).WhereIn(dao.YoubanBotRelayRule.Columns().Kind, []string{consts.RelayRuleUser, consts.RelayRuleGroup}).Scan(&rules); err != nil {
+	if err := dao.YoubanBotRelayRule.Ctx(ctx).Where(dao.YoubanBotRelayRule.Columns().BotId, botID).WhereIn(dao.YoubanBotRelayRule.Columns().Kind, []string{consts.RelayRuleUser, consts.RelayRuleGroup}).OrderAsc(dao.YoubanBotRelayRule.Columns().Id).Scan(&rules); err != nil {
 		return gerror.Wrap(err, "读取插件黑名单失败")
 	}
 	users, groups := []string{}, []string{}

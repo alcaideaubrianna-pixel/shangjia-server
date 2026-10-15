@@ -70,13 +70,23 @@ func (s *sSysBot) relayDeliveryTick(ctx context.Context) error {
 	if err := recoverRelayDeliveries(ctx); err != nil {
 		return err
 	}
-	var next *entity.YoubanBotRelayDelivery
-	if err = dao.YoubanBotRelayDelivery.Ctx(ctx).Where(c.Status, consts.RelayPending).WhereLTE(c.AvailableAt, gtime.Now()).OrderAsc(c.Id).Scan(&next); err != nil || next == nil {
+	var candidates []*entity.YoubanBotRelayDelivery
+	if err = dao.YoubanBotRelayDelivery.Ctx(ctx).As("candidate").Where("candidate."+c.Status, consts.RelayPending).WhereLTE("candidate."+c.AvailableAt, gtime.Now()).Where(relayNoPredecessorSQL(), consts.RelayPending, consts.RelaySending).OrderAsc("candidate." + c.Id).Limit(100).Scan(&candidates); err != nil {
 		return err
 	}
-	rows, token, err := claimRelayDeliveries(ctx, next)
-	if err != nil || len(rows) == 0 {
-		return err
+	var rows []*entity.YoubanBotRelayDelivery
+	var token string
+	for _, next := range candidates {
+		rows, token, err = claimRelayDeliveries(ctx, next)
+		if err != nil {
+			return err
+		}
+		if len(rows) > 0 {
+			break
+		}
+	}
+	if len(rows) == 0 {
+		return nil
 	}
 	sendCtx, cancel := context.WithTimeout(ctx, relaySendTimeout)
 	defer cancel()
@@ -118,8 +128,34 @@ func claimRelayDeliveries(ctx context.Context, next *entity.YoubanBotRelayDelive
 	rows := make([]*entity.YoubanBotRelayDelivery, 0)
 	token := guid.S()
 	err := dao.YoubanBotRelayDelivery.Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		// A persistent configuration row serializes claim decisions across workers and replicas.
+		// The sending row remains the conversation barrier after this transaction commits.
+		var owner *entity.YoubanBotRelayConfig
+		if err := dao.YoubanBotRelayConfig.Ctx(ctx).Where(dao.YoubanBotRelayConfig.Columns().BotId, next.BotId).LockUpdate().Scan(&owner); err != nil {
+			return err
+		}
+		if owner == nil {
+			return nil
+		}
 		c := dao.YoubanBotRelayDelivery.Columns()
-		mod := dao.YoubanBotRelayDelivery.Ctx(ctx).Where(c.Status, consts.RelayPending)
+		var current *entity.YoubanBotRelayDelivery
+		if err := dao.YoubanBotRelayDelivery.Ctx(ctx).WherePri(next.Id).Where(c.Status, consts.RelayPending).WhereLTE(c.AvailableAt, gtime.Now()).Scan(&current); err != nil {
+			return err
+		}
+		if current == nil {
+			return nil
+		}
+		count, err := dao.YoubanBotRelayDelivery.Ctx(ctx).
+			Where(do.YoubanBotRelayDelivery{BotId: next.BotId, PairKey: next.PairKey, TargetChatId: next.TargetChatId, Kind: next.Kind}).
+			WhereIn(c.Status, []string{consts.RelayPending, consts.RelaySending}).WhereLT(c.Id, next.Id).Count()
+		if err != nil {
+			return err
+		}
+		if count > 0 {
+			return nil
+		}
+
+		mod := dao.YoubanBotRelayDelivery.Ctx(ctx).Where(c.Status, consts.RelayPending).WhereLTE(c.AvailableAt, gtime.Now())
 		if next.MediaGroupId == "" {
 			mod = mod.WherePri(next.Id)
 		} else {
@@ -127,6 +163,22 @@ func claimRelayDeliveries(ctx context.Context, next *entity.YoubanBotRelayDelive
 		}
 		if err := mod.OrderAsc(c.SourceMessageId).Limit(100).LockUpdate().Scan(&rows); err != nil {
 			return err
+		}
+		if len(rows) > 1 {
+			var barrier *entity.YoubanBotRelayDelivery
+			q := dao.YoubanBotRelayDelivery.Ctx(ctx).Where(do.YoubanBotRelayDelivery{BotId: next.BotId, PairKey: next.PairKey, TargetChatId: next.TargetChatId, Kind: next.Kind}).WhereIn(c.Status, []string{consts.RelayPending, consts.RelaySending}).WhereGT(c.Id, next.Id)
+			if err := q.Where("("+c.MediaGroupId+" <> ? OR "+c.SourceChatId+" <> ? OR "+c.Status+" = ? OR "+c.AvailableAt+" > ?)", next.MediaGroupId, next.SourceChatId, consts.RelaySending, gtime.Now()).OrderAsc(c.Id).Scan(&barrier); err != nil {
+				return err
+			}
+			if barrier != nil {
+				prefix := rows[:0]
+				for _, row := range rows {
+					if row.Id < barrier.Id {
+						prefix = append(prefix, row)
+					}
+				}
+				rows = prefix
+			}
 		}
 		for _, row := range rows {
 			row.Attempts++
@@ -267,4 +319,11 @@ func (s *sSysBot) relayDeliveryLoop(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// Exclude blocked conversations in SQL so a busy/retrying session cannot starve others.
+func relayNoPredecessorSQL() string {
+	c := dao.YoubanBotRelayDelivery.Columns()
+	return fmt.Sprintf("NOT EXISTS (SELECT 1 FROM %s predecessor WHERE predecessor.%s=candidate.%s AND predecessor.%s=candidate.%s AND predecessor.%s=candidate.%s AND predecessor.%s=candidate.%s AND predecessor.%s<candidate.%s AND predecessor.%s IN (?,?))",
+		dao.YoubanBotRelayDelivery.Table(), c.BotId, c.BotId, c.PairKey, c.PairKey, c.TargetChatId, c.TargetChatId, c.Kind, c.Kind, c.Id, c.Id, c.Status)
 }

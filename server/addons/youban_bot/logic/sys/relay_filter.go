@@ -76,7 +76,7 @@ func (s *sSysBot) AdminRelayRuleList(ctx context.Context, in *sysin.RelayListInp
 	return list, total, gerror.Wrap(err, "读取屏蔽规则失败")
 }
 
-func (s *sSysBot) AdminRelaySaveRule(ctx context.Context, in *sysin.RelayRuleInp) error {
+func (s *sSysBot) adminRelaySaveRule(ctx context.Context, in *sysin.RelayRuleInp) error {
 	if err := in.Filter(); err != nil {
 		return err
 	}
@@ -105,7 +105,7 @@ func (s *sSysBot) AdminRelaySaveRule(ctx context.Context, in *sysin.RelayRuleInp
 	return gerror.Wrap(err, "保存屏蔽规则失败")
 }
 
-func (s *sSysBot) AdminRelayDeleteRule(ctx context.Context, in *sysin.RelayDeleteInp) error {
+func (s *sSysBot) adminRelayDeleteRule(ctx context.Context, in *sysin.RelayDeleteInp) error {
 	if err := in.RelayBotInp.Filter(); err != nil {
 		return err
 	}
