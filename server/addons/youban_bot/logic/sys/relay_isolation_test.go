@@ -31,9 +31,13 @@ func TestRelayMissingMigrationDoesNotDisableMainBot(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := NewSysBot()
-	handled, err := s.handleRelayUpdate(ctx, 1, relayIsolationUpdate())
-	if handled || err != nil {
-		t.Fatalf("optional migration failure hijacked main Bot: handled=%v err=%v", handled, err)
+	for _, text := range []string{"管理后台", "/start", "/start invite_example"} {
+		update := relayIsolationUpdate()
+		update.Message.Text = text
+		handled, err := s.handleRelayUpdate(ctx, 1, update)
+		if handled || err != nil {
+			t.Fatalf("main Bot %q blocked: handled=%v err=%v", text, handled, err)
+		}
 	}
 	feature := &relayGatewayFeature{bot: s}
 	menus, err := feature.Menus(ctx, gatewayservice.BotContext{Bindings: []gatewayservice.BotBinding{{Owner: "youban_bot", ReferenceID: 1}}})
