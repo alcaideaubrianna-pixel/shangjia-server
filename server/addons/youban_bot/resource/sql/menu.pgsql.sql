@@ -47,7 +47,7 @@ INSERT INTO "hg_admin_menu" (
 )
 SELECT
   parent."id", 'Bot 配置', 'youbanBotConfig', '', '', 3, '',
-  '/youban_bot/bot/list,/youban_bot/bot/save,/youban_bot/bot/delete,/youban_bot/bot/refresh,/youban_bot/bot/restart,/youban_bot/bot/feature/list,/youban_bot/bot/feature/save,/youban_bot/bot/user/list,/youban_bot/bot/user/superAdmin,/youban_bot/bot/message/list,/youban_bot/bot/message/send',
+  '/youban_bot/bot/list,/youban_bot/bot/save,/youban_bot/bot/delete,/youban_bot/bot/refresh,/youban_bot/bot/restart,/youban_bot/bot/feature/list,/youban_bot/bot/feature/save,/youban_bot/bot/user/list,/youban_bot/bot/user/superAdmin,/youban_bot/bot/message/list,/youban_bot/bot/message/send,/youban_bot/relay/bots,/youban_bot/relay/settings,/youban_bot/relay/saveSettings,/youban_bot/relay/bindings,/youban_bot/relay/bind,/youban_bot/relay/unbind,/youban_bot/relay/rules,/youban_bot/relay/saveRule,/youban_bot/relay/deleteRule,/youban_bot/relay/records,/youban_bot/relay/switch',
   '', '', 0, 'youbanBot', 0, 0, '', 0, 1, 0, 3,
   parent."tree" || 'tr_' || parent."id"::text || ' ',
   10, '全局机器人按钮权限', 1, NOW(), NOW()
@@ -58,7 +58,7 @@ UPDATE "hg_admin_menu"
 SET "pid" = parent."id",
     "title" = 'Bot 配置',
     "type" = 3,
-    "permissions" = '/youban_bot/bot/list,/youban_bot/bot/save,/youban_bot/bot/delete,/youban_bot/bot/refresh,/youban_bot/bot/restart,/youban_bot/bot/feature/list,/youban_bot/bot/feature/save,/youban_bot/bot/user/list,/youban_bot/bot/user/superAdmin,/youban_bot/bot/message/list,/youban_bot/bot/message/send',
+    "permissions" = '/youban_bot/bot/list,/youban_bot/bot/save,/youban_bot/bot/delete,/youban_bot/bot/refresh,/youban_bot/bot/restart,/youban_bot/bot/feature/list,/youban_bot/bot/feature/save,/youban_bot/bot/user/list,/youban_bot/bot/user/superAdmin,/youban_bot/bot/message/list,/youban_bot/bot/message/send,/youban_bot/relay/bots,/youban_bot/relay/settings,/youban_bot/relay/saveSettings,/youban_bot/relay/bindings,/youban_bot/relay/bind,/youban_bot/relay/unbind,/youban_bot/relay/rules,/youban_bot/relay/saveRule,/youban_bot/relay/deleteRule,/youban_bot/relay/records,/youban_bot/relay/switch',
     "component" = '',
     "active_menu" = 'youbanBot',
     "hidden" = 1,

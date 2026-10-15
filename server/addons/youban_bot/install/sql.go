@@ -15,12 +15,14 @@ import (
 var mysqlSqlFiles = []string{
 	"addons/youban_bot/resource/sql/install.sql",
 	"addons/youban_bot/resource/sql/upgrade.sql",
+	"addons/youban_bot/resource/sql/relay.sql",
 	"addons/youban_bot/resource/sql/menu.sql",
 }
 
 var pgsqlSqlFiles = []string{
 	"addons/youban_bot/resource/sql/install.pgsql.sql",
 	"addons/youban_bot/resource/sql/upgrade.pgsql.sql",
+	"addons/youban_bot/resource/sql/relay.pgsql.sql",
 	"addons/youban_bot/resource/sql/menu.pgsql.sql",
 }
 

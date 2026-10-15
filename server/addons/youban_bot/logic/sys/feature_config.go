@@ -49,6 +49,11 @@ func (s *sSysBot) AdminFeatureList(ctx context.Context, in *sysin.FeatureListInp
 		if row.UpdatedAt != nil {
 			item.UpdatedAt = row.UpdatedAt.String()
 		}
+		if row.FeatureKey == (relayFeature{}).Key() {
+			if err = s.relayFeatureSchema(ctx, item); err != nil {
+				return nil, 0, err
+			}
+		}
 		list = append(list, item)
 	}
 	return
@@ -112,12 +117,15 @@ func (s *sSysBot) AdminFeatureSave(ctx context.Context, in *sysin.FeatureSaveInp
 		data, _ := json.Marshal(config)
 		in.ConfigJson = string(data)
 	}
+
 	status := in.Status
 	if status == 0 {
 		status = 1
 	}
 	data := g.Map{"name": strings.TrimSpace(in.Name), "command": strings.TrimPrefix(strings.TrimSpace(in.Command), "/"), "description": strings.TrimSpace(in.Description), "config_json": strings.TrimSpace(in.ConfigJson), "sort": in.Sort, "status": status, "updated_at": gtime.Now()}
-	if in.Id > 0 {
+	if featureKey == (relayFeature{}).Key() {
+		err = s.persistRelayFeature(ctx, in, data)
+	} else if in.Id > 0 {
 		_, err = g.DB().Model(featureTable).Safe().Ctx(ctx).Where("id", in.Id).Where("feature_key", featureKey).Data(data).Update()
 	} else {
 		data["feature_key"] = featureKey
