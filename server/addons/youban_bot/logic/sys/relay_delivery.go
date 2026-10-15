@@ -60,13 +60,14 @@ func (s *sSysBot) stopRelayRuntime() {
 }
 
 func (s *sSysBot) relayDeliveryTick(ctx context.Context) error {
-	c := dao.YoubanBotRelayDelivery.Columns()
-	// An expired send may already have reached Telegram. Do not blindly send it again.
-	if err := recoverRelayDeliveries(ctx); err != nil {
-		return err
-	}
 	enabled, err := s.relayPluginEnabled(ctx)
 	if err != nil || !enabled {
+		return err
+	}
+	c := dao.YoubanBotRelayDelivery.Columns()
+	// Disabled optional plugins must not touch migration-dependent tables.
+	// An expired send may already have reached Telegram. Do not blindly resend it.
+	if err := recoverRelayDeliveries(ctx); err != nil {
 		return err
 	}
 	var next *entity.YoubanBotRelayDelivery

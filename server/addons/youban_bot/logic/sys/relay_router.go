@@ -16,6 +16,7 @@ import (
 	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 )
 
@@ -37,18 +38,12 @@ func (s *sSysBot) handleRelayUpdate(ctx context.Context, botID int64, update *mo
 	if msg.Chat.Type != models.ChatTypePrivate && msg.Chat.Type != models.ChatTypeGroup && msg.Chat.Type != models.ChatTypeSupergroup {
 		return false, nil
 	}
-	enabled, err := s.relayPluginEnabled(ctx)
+	cfg, err := s.relayScope(ctx, botID)
 	if err != nil {
-		return true, err
-	}
-	if !enabled {
+		g.Log().Warningf(ctx, "双向功能配置不可用，保留原Bot处理 botId:%d err:%+v", botID, err)
 		return false, nil
 	}
-	cfg, err := relayConfig(ctx, botID)
-	if err != nil {
-		return true, err
-	}
-	if cfg == nil || cfg.Enabled != 1 {
+	if cfg == nil {
 		return false, nil
 	}
 	row, err := s.botById(ctx, botID)
