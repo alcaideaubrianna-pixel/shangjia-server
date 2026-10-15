@@ -86,4 +86,5 @@ type telegramJobRecord struct {
 	CyclePublishTime       string      `json:"cyclePublishTime"`
 	NextCycleAt            *gtime.Time `json:"nextCycleAt"`
 	CreatedAt              *gtime.Time `json:"createdAt"`
+	VerifyMediaCount       int         `json:"verifyMediaCount"`
 }

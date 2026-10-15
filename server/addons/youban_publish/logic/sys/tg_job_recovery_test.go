@@ -12,6 +12,15 @@ func TestTelegramSendingRecoveryStartsAfterTaskTimeout(t *testing.T) {
 	}
 }
 
+func TestTelegramFailedDisplayRecoveryMessage(t *testing.T) {
+	if got := telegramFailedDisplayRecoveryMessage(0); !strings.Contains(got, "无验证媒体") {
+		t.Fatalf("display-only recovery message = %q", got)
+	}
+	if got := telegramFailedDisplayRecoveryMessage(2); !strings.Contains(got, "验证视频") {
+		t.Fatalf("verified recovery message = %q", got)
+	}
+}
+
 func TestTelegramSendingAttemptRecoveryFollowsMediaDeadline(t *testing.T) {
 	if telegramSendingAttemptRecoverAfter >= telegramPublishTaskTimeout {
 		t.Fatalf("attempt recovery %s must not wait for queue task timeout %s", telegramSendingAttemptRecoverAfter, telegramPublishTaskTimeout)

@@ -123,6 +123,9 @@ func (s *sSysPublish) runTelegramJobRecoveryCycle(ctx context.Context) {
 	if err := s.recoverFailedJobsMissingVerification(ctx, 500); err != nil {
 		g.Log().Warningf(ctx, "恢复缺少验证视频的终态TG任务失败：%+v", err)
 	}
+	if err := s.recoverExpiredTelegramOutboxDispatches(ctx, 200); err != nil {
+		g.Log().Warningf(ctx, "恢复Outbox入队确认中断的TG任务失败：%+v", err)
+	}
 	if err := s.recoverPendingIdleTelegramJobs(ctx, 500); err != nil {
 		g.Log().Warningf(ctx, "恢复待入队TG推送任务失败：%+v", err)
 	}
@@ -143,14 +146,12 @@ func (s *sSysPublish) recoverFailedJobsMissingVerification(ctx context.Context, 
 	}
 	var jobs []telegramJobRecord
 	err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
-		Fields("j.*").
+		Fields("j.*", "(SELECT COUNT(1) FROM "+publishMediaTable+" media WHERE media.profile_id=j.profile_id AND media.purpose='verify' AND media.deleted_at IS NULL) AS verify_media_count").
 		Where("j.status", telegramJobStatusFailed).
 		Where("j.send_phase", telegramSendPhaseDisplayConfirmed).
 		Where(telegramActiveChannelConditionForAlias("j")).
-		Where("EXISTS (SELECT 1 FROM " + publishMediaTable + " media WHERE media.profile_id=j.profile_id AND media.purpose='verify' AND media.deleted_at IS NULL)").
 		Where("EXISTS (SELECT 1 FROM " + publishTgMessageTable + " display WHERE display.job_id=j.id AND display.purpose='display' AND display.status='sent' AND display.deleted_at IS NULL)").
 		Where("NOT EXISTS (SELECT 1 FROM " + publishTgMessageTable + " message WHERE message.job_id=j.id AND message.purpose='verify' AND message.status='sent' AND message.deleted_at IS NULL)").
-		Where("NOT EXISTS (SELECT 1 FROM " + publishTgJobTable + " newer WHERE newer.tenant_id=j.tenant_id AND newer.profile_id=j.profile_id AND newer.channel_id=j.channel_id AND newer.id>j.id)").
 		OrderAsc("j.updated_at").OrderAsc("j.id").Limit(limit).Scan(&jobs)
 	if err != nil {
 		return gerror.Wrap(err, "读取缺少验证视频的终态TG任务失败")
@@ -168,6 +169,7 @@ func (s *sSysPublish) recoverFailedJobsMissingVerification(ctx context.Context, 
 			}
 			continue
 		}
+		recoveryMessage := telegramFailedDisplayRecoveryMessage(job.VerifyMediaCount)
 		result, updateErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 			Where("id", job.Id).
 			Where("status", telegramJobStatusFailed).
@@ -177,7 +179,7 @@ func (s *sSysPublish) recoverFailedJobsMissingVerification(ctx context.Context, 
 				"dispatch_status":     tgDispatchStatusIdle,
 				"next_retry_at":       now,
 				"error_message":       "",
-				"last_dispatch_error": "展示已确认，自动恢复缺失的验证视频",
+				"last_dispatch_error": recoveryMessage,
 				"updated_at":          now,
 			}).Update()
 		if updateErr != nil {
@@ -189,9 +191,92 @@ func (s *sSysPublish) recoverFailedJobsMissingVerification(ctx context.Context, 
 		}
 		job.Status = telegramJobStatusRetryWait
 		job.DispatchStatus = tgDispatchStatusIdle
-		s.appendTelegramJobLog(ctx, job, "verify_recovery", "queued", "展示已确认，验证视频已重新进入频道顺序队列")
+		s.appendTelegramJobLog(ctx, job, "verify_recovery", "queued", recoveryMessage)
 		if enqueueErr := s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 0, false); enqueueErr != nil {
 			g.Log().Warningf(ctx, "重新投递缺失验证视频TG任务失败 jobId:%d err:%+v", job.Id, enqueueErr)
+		}
+	}
+	return nil
+}
+
+func telegramFailedDisplayRecoveryMessage(verifyMediaCount int) string {
+	if verifyMediaCount > 0 {
+		return "展示已确认，验证视频已重新进入频道顺序队列"
+	}
+	return "展示已确认且无验证媒体，已重新进入完成队列"
+}
+
+func (s *sSysPublish) recoverExpiredTelegramOutboxDispatches(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		limit = 100
+	}
+	now := gtime.Now()
+	type expiredDispatch struct {
+		OutboxId     int64 `json:"outboxId"`
+		JobId        int64 `json:"jobId"`
+		AttemptCount int   `json:"attemptCount"`
+	}
+	var rows []expiredDispatch
+	err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
+		InnerJoin(publishTgOutboxTable+" o", "o.job_id=j.id").
+		Fields("o.id AS outbox_id,o.job_id,o.attempt_count").
+		Where("o.event_type", telegramOutboxEventPublish).
+		Where("o.status", telegramOutboxProcessing).
+		WhereLTE("o.lease_expires_at", now).
+		WhereIn("j.status", []string{telegramJobStatusPending, telegramJobStatusRetryWait, telegramJobStatusConfirming}).
+		Where("j.dispatch_status", tgDispatchStatusQueued).
+		Where(telegramActiveChannelConditionForAlias("j")).
+		OrderAsc("o.lease_expires_at").OrderAsc("j.id").Limit(limit).Scan(&rows)
+	if err != nil {
+		return gerror.Wrap(err, "读取Outbox入队确认中断的TG任务失败")
+	}
+	for _, row := range rows {
+		recovered := false
+		transactionErr := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+			outboxResult, updateErr := tx.Model(publishTgOutboxTable).Safe().Ctx(ctx).
+				Where("id", row.OutboxId).
+				Where("status", telegramOutboxProcessing).
+				WhereLTE("lease_expires_at", now).
+				Data(g.Map{
+					"status": telegramOutboxPending, "lease_owner": "", "lease_expires_at": nil,
+					"available_at": now, "last_error": "Outbox入队确认超时，已自动恢复", "updated_at": now,
+				}).Update()
+			if updateErr != nil {
+				return updateErr
+			}
+			outboxAffected, _ := outboxResult.RowsAffected()
+			if outboxAffected == 0 {
+				return nil
+			}
+			jobResult, updateErr := tx.Model(publishTgJobTable).Safe().Ctx(ctx).
+				Where("id", row.JobId).
+				Where("dispatch_status", tgDispatchStatusQueued).
+				Data(g.Map{
+					"dispatch_status": tgDispatchStatusIdle,
+					"next_retry_at":   now, "last_dispatch_error": "Outbox入队确认超时，已自动恢复",
+					"updated_at": now,
+				}).Update()
+			if updateErr != nil {
+				return updateErr
+			}
+			jobAffected, _ := jobResult.RowsAffected()
+			if jobAffected == 0 {
+				return gerror.Newf("TG任务已离开待入队状态 jobId:%d", row.JobId)
+			}
+			recovered = true
+			return nil
+		})
+		if transactionErr != nil {
+			g.Log().Warningf(ctx, "原子恢复Outbox入队确认中断任务失败 jobId:%d outboxId:%d err:%+v", row.JobId, row.OutboxId, transactionErr)
+			continue
+		}
+		if !recovered {
+			continue
+		}
+		if dispatchErr := s.dispatchTelegramJobOutbox(ctx, telegramJobOutboxRecord{
+			Id: row.OutboxId, JobId: row.JobId, AttemptCount: row.AttemptCount, AvailableAt: now,
+		}); dispatchErr != nil {
+			g.Log().Warningf(ctx, "重新调度Outbox入队确认中断任务失败 jobId:%d outboxId:%d err:%+v", row.JobId, row.OutboxId, dispatchErr)
 		}
 	}
 	return nil
