@@ -15,6 +15,7 @@ MCP 客户端使用 stdio 启动上述命令即可。
 ## 工具
 
 - `collect_diagnose_message`：按 Telegram 消息链接或 Chat ID/消息 ID 查询完整链路，只读。
+- `resolve_profile_by_message`：按消息链接或 Chat ID/消息 ID 返回资料编号、是否采集、采集来源、规则和事件状态，只读。
 - `collect_preview_repair`：预演修复范围，生成15分钟有效的确认令牌，不修改业务数据。
 - `collect_apply_repair`：使用计划 ID 和确认令牌执行一次修复。
 
