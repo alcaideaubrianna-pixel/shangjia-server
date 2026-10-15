@@ -83,7 +83,7 @@ func (s *sSysBot) adminRelaySaveRule(ctx context.Context, in *sysin.RelayRuleInp
 	if err := in.Filter(); err != nil {
 		return err
 	}
-	if _, err := s.botById(ctx, in.BotId); err != nil {
+	if _, err := s.relayBotById(ctx, in.BotId); err != nil {
 		return err
 	}
 	value, label := strings.ToLower(in.Value), in.Value

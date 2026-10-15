@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS hg_youban_bot_relay_config (
  id bigserial PRIMARY KEY,
- bot_id bigint NOT NULL UNIQUE, tenant_id bigint NOT NULL DEFAULT 0, account_id bigint NOT NULL DEFAULT 0, enabled integer NOT NULL DEFAULT 0, block_links integer NOT NULL DEFAULT 0, audit_database integer NOT NULL DEFAULT 1, audit_group_id varchar(64) NOT NULL DEFAULT '',
+ bot_id bigint NOT NULL UNIQUE, tenant_id bigint NOT NULL DEFAULT 0, account_id bigint NOT NULL DEFAULT 0, source_bot_id bigint NOT NULL DEFAULT 0, owner_id bigint NOT NULL, enabled integer NOT NULL DEFAULT 0, block_links integer NOT NULL DEFAULT 0, audit_database integer NOT NULL DEFAULT 1, audit_group_id varchar(64) NOT NULL DEFAULT '',
  created_at timestamp, updated_at timestamp
 );
 
@@ -41,3 +41,12 @@ CREATE TABLE IF NOT EXISTS hg_youban_bot_relay_delivery (
 );
 
 CREATE INDEX IF NOT EXISTS idx_ybb_relay_delivery_ready ON hg_youban_bot_relay_delivery (status,available_at,id);
+
+ALTER TABLE hg_youban_bot_relay_config ADD COLUMN IF NOT EXISTS tenant_id bigint NOT NULL DEFAULT 0;
+ALTER TABLE hg_youban_bot_relay_config ADD COLUMN IF NOT EXISTS account_id bigint NOT NULL DEFAULT 0;
+DROP INDEX IF EXISTS uk_ybb_relay_account;
+CREATE INDEX IF NOT EXISTS idx_ybb_relay_account ON hg_youban_bot_relay_config(tenant_id,account_id) WHERE tenant_id > 0 AND account_id > 0;
+UPDATE hg_youban_bot_relay_config SET enabled=0 WHERE (tenant_id=0 OR account_id=0) AND enabled<>0;
+
+ALTER TABLE hg_youban_bot_relay_config ADD COLUMN IF NOT EXISTS source_bot_id bigint NOT NULL DEFAULT 0;
+CREATE UNIQUE INDEX IF NOT EXISTS uk_ybb_relay_source_bot ON hg_youban_bot_relay_config(source_bot_id) WHERE source_bot_id > 0;

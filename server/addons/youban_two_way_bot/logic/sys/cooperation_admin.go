@@ -111,7 +111,7 @@ func (s *sSysTwoWayBot) cooperationConfigModel(ctx context.Context, tenantId int
 		BotName     string `json:"botName"`
 		BotUsername string `json:"botUsername"`
 	}
-	_ = g.DB().Model("hg_youban_bot_registry").Ctx(ctx).Fields("bot_name", "bot_username").Where("id", row.BotId).Scan(&bot)
+	_ = g.DB().Model("hg_youban_publish_bot").Ctx(ctx).Fields("bot_name", "bot_username").Where("id", row.BotId).Scan(&bot)
 	channelColumns := twdao.YoubanTwoWayBotCooperationChannel.Columns()
 	var channelRows []struct {
 		ChannelId int64 `json:"channelId"`
@@ -268,7 +268,7 @@ func cooperationPublishBotIdByToken(ctx context.Context, tenantId int64, token s
 	var row struct {
 		Id int64 `json:"id"`
 	}
-	err := g.DB().Model("hg_youban_bot_registry").Ctx(ctx).
+	err := g.DB().Model("hg_youban_publish_bot").Ctx(ctx).
 		Fields("id").
 		Where("tenant_id", tenantId).
 		Where("bot_token", strings.TrimSpace(token)).

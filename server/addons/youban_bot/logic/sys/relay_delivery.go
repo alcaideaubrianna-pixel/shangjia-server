@@ -205,14 +205,14 @@ func (s *sSysBot) sendRelayDeliveries(ctx context.Context, rows []*entity.Youban
 	if err != nil {
 		return nil, relayRetryStatus(first.Attempts), err
 	}
-	botRow, err := s.botById(ctx, first.BotId)
+	botRow, err := s.relayBotById(ctx, first.BotId)
 	if err != nil {
 		return nil, consts.RelayCancelled, err
 	}
 	if !relayOwned(cfg) || cfg.Enabled != 1 || botRow.Status != 1 || botRow.IsDefault == 1 {
 		return nil, consts.RelayCancelled, nil
 	}
-	if cfg.BotId > 0 {
+	if cfg.SourceBotId > 0 {
 		valid, err := s.relaySourceBotValid(ctx, cfg)
 		if err != nil {
 			return nil, relayRetryStatus(first.Attempts), err

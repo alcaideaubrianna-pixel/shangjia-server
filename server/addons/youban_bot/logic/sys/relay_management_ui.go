@@ -12,7 +12,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 )
 
-var relayManagementCommands = regexp.MustCompile(`<code>/relayadmin([^<]*)</code>`)
+var relayManagementCommands = regexp.MustCompile(`<code>/relayadmin([^<]*)</code>([^\n]*)`)
 
 func (s *sSysBot) relayManagementReply(ctx context.Context, botID int64, msg *models.Message, text string) error {
 	row, err := s.botById(ctx, botID)
@@ -27,6 +27,9 @@ func (s *sSysBot) relayManagementReply(ctx context.Context, botID int64, msg *mo
 	for _, match := range relayManagementCommands.FindAllStringSubmatch(text, -1) {
 		args := strings.TrimSpace(match[1])
 		label := args
+		if suffix := strings.TrimSpace(match[2]); suffix != "" {
+			label = strings.TrimSpace(strings.TrimPrefix(suffix, "·"))
+		}
 		if args == "" {
 			label = "返回Bot列表"
 		} else if fields := strings.Fields(args); len(fields) > 0 {

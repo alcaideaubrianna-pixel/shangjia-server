@@ -12,12 +12,14 @@ import (
 type YoubanBotRelayConfig struct {
 	Id            int64       `json:"id"            orm:"id"             ` //
 	BotId         int64       `json:"botId"         orm:"bot_id"         ` //
-	TenantId      int64       `json:"tenantId"      orm:"tenant_id"      ` //
-	AccountId     int64       `json:"accountId"     orm:"account_id"     ` //
+	OwnerId       int64       `json:"ownerId"       orm:"owner_id"       ` //
 	Enabled       int         `json:"enabled"       orm:"enabled"        ` //
 	BlockLinks    int         `json:"blockLinks"    orm:"block_links"    ` //
 	AuditDatabase int         `json:"auditDatabase" orm:"audit_database" ` //
 	AuditGroupId  string      `json:"auditGroupId"  orm:"audit_group_id" ` //
 	CreatedAt     *gtime.Time `json:"createdAt"     orm:"created_at"     ` //
 	UpdatedAt     *gtime.Time `json:"updatedAt"     orm:"updated_at"     ` //
+	TenantId      int64       `json:"tenantId"      orm:"tenant_id"      ` //
+	AccountId     int64       `json:"accountId"     orm:"account_id"     ` //
+	SourceBotId   int64       `json:"sourceBotId"   orm:"source_bot_id"  ` //
 }

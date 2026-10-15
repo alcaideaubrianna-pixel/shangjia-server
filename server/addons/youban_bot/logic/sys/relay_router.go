@@ -49,7 +49,7 @@ func (s *sSysBot) handleRelayUpdate(ctx context.Context, botID int64, update *mo
 	if !relayOwned(cfg) {
 		return true, s.relayReply(ctx, botID, msg, "此双向机器人尚未完成租户账户归属迁移，已停用。请联系管理员核对后台Bot归属后迁移；不会继续传递消息。")
 	}
-	row, err := s.botById(ctx, botID)
+	row, err := s.relayBotById(ctx, botID)
 	if err != nil {
 		return false, err
 	}
@@ -67,18 +67,6 @@ func (s *sSysBot) handleRelayUpdate(ctx context.Context, botID int64, update *mo
 		return true, err
 	}
 	command, _ := botCommandAndArgs(msg.Text)
-	if command == "start" && row.SupergroupId != "" {
-		return false, nil
-	}
-	if row.SupergroupId != "" && command != "help" && command != "id" && parseRelayCommand(msg.Text).Name == "" {
-		binding, err := relayBindingByChat(ctx, botID, source)
-		if err != nil {
-			return true, err
-		}
-		if binding == nil {
-			return false, nil
-		}
-	}
 	if command == "start" {
 		return true, s.relayWelcome(ctx, cfg, msg)
 	}

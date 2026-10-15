@@ -73,7 +73,7 @@ func (s *sSysBot) handleRelayCommand(ctx context.Context, cfg *entity.YoubanBotR
 }
 
 func (s *sSysBot) relayReply(ctx context.Context, botID int64, msg *models.Message, text string) error {
-	row, err := s.botById(ctx, botID)
+	row, err := s.relayBotById(ctx, botID)
 	if err != nil {
 		return err
 	}

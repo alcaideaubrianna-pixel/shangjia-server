@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 
 	"hotgo/addons/youban_bot/consts"
@@ -13,15 +14,16 @@ import (
 	"hotgo/addons/youban_bot/model/input/sysin"
 	publishsysin "hotgo/addons/youban_publish/model/input/sysin"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 )
 
 func TestRelayTenantAccountIsolation(t *testing.T) {
 	ctx, s, _ := relayInteractionFixture(t)
-	if _, err := dao.YoubanBotRegistry.Ctx(ctx).Data(do.YoubanBotRegistry{Id: 2, BotToken: "456:other", BotUserId: "456", BotType: "two_way", TenantId: 2, AccountId: 99, Status: 1}).Insert(); err != nil {
+	if _, err := dao.YoubanBotBot.Ctx(ctx).Data(do.YoubanBotBot{Id: 2, BotToken: "456:other", Status: 1}).Insert(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := dao.YoubanBotRelayConfig.Ctx(ctx).Data(do.YoubanBotRelayConfig{BotId: 2, TenantId: 2, AccountId: 99, Enabled: 1}).Insert(); err != nil {
+	if _, err := dao.YoubanBotRelayConfig.Ctx(ctx).Data(do.YoubanBotRelayConfig{BotId: 2, TenantId: 2, AccountId: 99, SourceBotId: 2, OwnerId: 99, Enabled: 1}).Insert(); err != nil {
 		t.Fatal(err)
 	}
 	s.relayAccountForUser = func(_ context.Context, id int64) (*botProfileAccount, error) {
@@ -122,6 +124,99 @@ func TestRelayLegacyConfigurationCannotBeClaimed(t *testing.T) {
 	}
 }
 
+func TestRelayBackendBindingUniqueAndRollback(t *testing.T) {
+	if os.Getenv("YOUBAN_RELAY_TEST_PG") == "" {
+		t.Skip("requires PostgreSQL row locks")
+	}
+	ctx, s, _ := relayInteractionFixture(t)
+	db, _ := gdb.Instance()
+	if _, err := db.Exec(ctx, "SELECT setval(pg_get_serial_sequence('hg_youban_bot_bot','id'), (SELECT COALESCE(MAX(id),1) FROM hg_youban_bot_bot))"); err != nil {
+		t.Fatal(err)
+	}
+	source := &publishsysin.RelayOwnedBotModel{BotModel: publishsysin.BotModel{BotType: "two_way", Id: 50, TenantId: 3, BotToken: "789:tenant", BotName: "Tenant", Status: 1}, AccountId: 300, CreatedBy: 300}
+	account := &botProfileAccount{TenantId: 3, AccountId: 300, App: "api"}
+	normal := *source
+	normal.BotType = "normal"
+	if _, err := s.relayAttachBackendBot(ctx, account, &normal); err == nil {
+		t.Fatal("ordinary Bot accepted as dedicated two-way Bot")
+	}
+
+	id, err := s.relayAttachBackendBot(ctx, account, source)
+	if err != nil || id <= 0 {
+		t.Fatal("account binding failed", id, err)
+	}
+	cfg, err := relayConfig(ctx, id)
+	if err != nil || cfg.TenantId != 3 || cfg.AccountId != 300 || cfg.SourceBotId != 50 || cfg.Enabled != 0 {
+		t.Fatal("binding lost ownership or defaulted enabled", cfg, err)
+	}
+	if _, err := s.relayAttachBackendBot(ctx, account, source); err == nil {
+		t.Fatal("same account created second configuration")
+	}
+	if _, err := s.relayAttachBackendBot(ctx, &botProfileAccount{TenantId: 4, AccountId: 400}, source); err == nil {
+		t.Fatal("other tenant's backend Bot accepted")
+	}
+	var wg sync.WaitGroup
+	errors := make(chan error, 2)
+	for i := int64(5); i <= 6; i++ {
+		wg.Add(1)
+		go func(i int64) {
+			defer wg.Done()
+			_, err := s.relayAttachBackendBot(ctx, &botProfileAccount{TenantId: i, AccountId: i * 100}, &publishsysin.RelayOwnedBotModel{BotModel: publishsysin.BotModel{BotType: "two_way", Id: 51, TenantId: i, BotToken: "790:race", Status: 1}, AccountId: i * 100, CreatedBy: i * 100})
+			errors <- err
+		}(i)
+	}
+	wg.Wait()
+	close(errors)
+	wins := 0
+	for err := range errors {
+		if err == nil {
+			wins++
+		}
+	}
+	if wins != 1 {
+		t.Fatal("same backend Bot acquired by multiple accounts", wins)
+	}
+
+}
+
+func TestRelayAccountMigrationIsIdempotent(t *testing.T) {
+	if os.Getenv("YOUBAN_RELAY_TEST_PG") == "" {
+		t.Skip("requires PostgreSQL migration")
+	}
+	ctx := relayTestDatabase(t)
+	db, _ := gdb.Instance()
+	if _, err := dao.YoubanBotRelayConfig.Ctx(ctx).Data(do.YoubanBotRelayConfig{BotId: 10, OwnerId: 99, Enabled: 1}).Insert(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dao.YoubanBotRelayConfig.Ctx(ctx).Data(do.YoubanBotRelayConfig{BotId: 11, TenantId: 1, AccountId: 99, SourceBotId: 1, OwnerId: 99, Enabled: 1}).Insert(); err != nil {
+		t.Fatal(err)
+	}
+	sql, err := os.ReadFile("../../resource/sql/relay.pgsql.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		for _, statement := range strings.Split(string(sql), ";") {
+			if strings.TrimSpace(statement) != "" {
+				if _, err := db.Exec(ctx, statement); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+	}
+	old, err := relayConfig(ctx, 10)
+	if err != nil || old.Enabled != 0 || old.OwnerId != 99 {
+		t.Fatal("legacy migration destroyed data or kept enabled", old, err)
+	}
+	owned, err := relayConfig(ctx, 11)
+	if err != nil || owned.Enabled != 1 {
+		t.Fatal("migration disabled valid owned config", owned, err)
+	}
+	if _, err := dao.YoubanBotRelayConfig.Ctx(ctx).Data(do.YoubanBotRelayConfig{BotId: 12, TenantId: 1, AccountId: 99, SourceBotId: 1, OwnerId: 99}).Insert(); err == nil {
+		t.Fatal("DB accepted duplicate tenant account config")
+	}
+}
+
 func TestRelayOnlyOwnBackendBotsAreSelectable(t *testing.T) {
 	ctx, s, _ := relayInteractionFixture(t)
 	requested := false
@@ -140,11 +235,11 @@ func TestRelayOnlyOwnBackendBotsAreSelectable(t *testing.T) {
 		return []*publishsysin.RelayOwnedBotModel{{BotModel: publishsysin.BotModel{BotType: "two_way", Id: 8, TenantId: 1, BotName: "Own", BotUsername: "own_bot", Status: 1}, AccountId: 99, CreatedBy: 99}}, nil
 	}
 	text, err = s.relayBackendBotChoices(ctx, &botProfileAccount{TenantId: 1, AccountId: 99})
-	if err != nil || !strings.Contains(text, "绑定后台Bot 8") {
+	if err != nil || !strings.Contains(text, "请选择列表中的双向机器人按钮") {
 		t.Fatal("own backend Bot not selectable", text, err)
 	}
 	// Source ownership/status changes immediately stop delivery and management.
-	if _, err := dao.YoubanBotRegistry.Ctx(ctx).WherePri(1).Data(do.YoubanBotRegistry{Status: 2}).Update(); err != nil {
+	if _, err := dao.YoubanBotRelayConfig.Ctx(ctx).Where(dao.YoubanBotRelayConfig.Columns().BotId, 1).Data(do.YoubanBotRelayConfig{SourceBotId: 8}).Update(); err != nil {
 		t.Fatal(err)
 	}
 	s.relayOwnedBots = func(context.Context, int64, int64, int64, bool) ([]*publishsysin.RelayOwnedBotModel, error) {
@@ -155,7 +250,7 @@ func TestRelayOnlyOwnBackendBotsAreSelectable(t *testing.T) {
 		t.Fatal(err)
 	}
 	active, state, err := s.relayRuntimeState(ctx, cfg)
-	if err != nil || active || !strings.Contains(state, "后台Bot") {
+	if err != nil || active || !strings.Contains(state, "双向机器人") {
 		t.Fatal("source deletion did not stop runtime", active, state, err)
 	}
 	if err := s.relayCheckAccess(relayActorContext(ctx, 12), 1); err == nil {

@@ -49,7 +49,7 @@ func (s *sSysBot) relayWelcome(ctx context.Context, cfg *entity.YoubanBotRelayCo
 			text += "\n\n若你刚被添加为 @用户名管理员，发送本命令后会自动确认当前身份。未获得权限时，请联系配置人员核对用户名或改用用户ID。"
 		}
 	}
-	row, err := s.botById(ctx, cfg.BotId)
+	row, err := s.relayBotById(ctx, cfg.BotId)
 	if err != nil {
 		return err
 	}

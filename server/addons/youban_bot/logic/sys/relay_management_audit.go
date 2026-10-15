@@ -45,7 +45,7 @@ func (s *sSysBot) relayManagementAudit(ctx context.Context, cfg *entity.YoubanBo
 		if len(fields) != 2 || !sysin.RelayIdentityValid(fields[1]) || !strings.HasPrefix(fields[1], "-") {
 			return true, "", gerror.New("请填写开启话题的超级群ID，例如：转发群 -1001234567890")
 		}
-		bot, err := s.botById(ctx, cfg.BotId)
+		bot, err := s.relayBotById(ctx, cfg.BotId)
 		if err != nil {
 			return true, "", err
 		}

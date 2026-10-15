@@ -576,10 +576,6 @@
             clearable
             placeholder="不选表示全局默认"
         /></n-form-item>
-        <n-form-item label="账户归属" v-if="botForm.botType === 'two_way'">
-<n-select v-model:value="botForm.accountId" :options="botAccountOptions" filterable placeholder="请选择所属租户账户" />
-</n-form-item>
-        <n-form-item label="Bot用途"><n-select v-model:value="botForm.botType" :options="botTypeOptions" /></n-form-item>
         <n-form-item label="Bot名称"
           ><n-input v-model:value="botForm.botName" clearable
         /></n-form-item>
@@ -630,7 +626,6 @@
 
 <script lang="ts" setup>
   import { computed, h, nextTick, onMounted, reactive, ref } from 'vue';
-  import { useDictStore } from '@/store/modules/dict';
   import { NButton, NPopover, NSpace, NTag, useDialog, useMessage } from 'naive-ui';
   import ChannelMemberPanel from './components/channel-member-panel.vue';
   import ActivityPanel from './components/activity-panel.vue';
@@ -814,10 +809,6 @@
   const resetPasswordForm = reactive({ id: 0, username: '', password: '' });
   const resetPasswordResult = reactive({ password: '' });
   const botForm = reactive(newBotForm());
- const botAccountOptions=computed(()=>accounts.value.filter(item=>item.tenantId===botForm.tenantId).map(item=>({label:`${item.nickname || item.username} (${item.username})`,value:item.id})));
-  const botDict = useDictStore();
-  const botTypeOptions = computed(() => botDict.getOptions('YoubanPublishBotTypeOptions'));
-  botDict.loadOptions(['YoubanPublishBotTypeOptions']);
   const tagForm = reactive(newTagForm());
   const telegramConfig = reactive(newTelegramConfig());
   const collectConfig = reactive(newCollectConfig());
@@ -1901,7 +1892,7 @@
   }
 
   function newBotForm() {
-    return { id: 0, tenantId: 0, accountId:0, botType: 'normal', botName: '', botToken: '', remark: '', status: 1 };
+    return { id: 0, tenantId: 0, botName: '', botToken: '', remark: '', status: 1 };
   }
 
   function newTagForm() {

@@ -1418,7 +1418,7 @@ func (s *sSysPublish) defaultMessagePushBotId(ctx context.Context) (int64, error
 	var row struct {
 		Id int64 `json:"id"`
 	}
-	if err := g.DB().Model("hg_youban_bot_registry").Safe().Ctx(ctx).
+	if err := g.DB().Model("hg_youban_bot_bot").Safe().Ctx(ctx).
 		Fields("id").Where("is_default", 1).Where("status", 1).WhereNull("deleted_at").
 		OrderAsc("id").Scan(&row); err != nil {
 		return 0, gerror.Wrap(err, "读取默认推送机器人失败")

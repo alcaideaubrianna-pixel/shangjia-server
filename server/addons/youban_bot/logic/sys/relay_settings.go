@@ -35,7 +35,7 @@ func (s *sSysBot) AdminRelayBotList(ctx context.Context, in *sysin.BotListInp) (
 	if cfg == nil {
 		return []*sysin.RelayBotModel{}, 0, nil
 	}
-	bot, err := s.botById(ctx, cfg.BotId)
+	bot, err := s.relayBotById(ctx, cfg.BotId)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -50,7 +50,7 @@ func (s *sSysBot) AdminRelaySettings(ctx context.Context, in *sysin.RelayBotInp)
 	if err := in.Filter(); err != nil {
 		return nil, err
 	}
-	if _, err := s.botById(ctx, in.BotId); err != nil {
+	if _, err := s.relayBotById(ctx, in.BotId); err != nil {
 		return nil, err
 	}
 	cfg, err := relayConfig(ctx, in.BotId)
@@ -72,7 +72,7 @@ func (s *sSysBot) adminRelaySaveSettings(ctx context.Context, in *sysin.RelaySet
 	if err := s.relayCheckAccess(ctx, in.BotId); err != nil {
 		return err
 	}
-	bot, err := s.botById(ctx, in.BotId)
+	bot, err := s.relayBotById(ctx, in.BotId)
 	if err != nil {
 		return err
 	}

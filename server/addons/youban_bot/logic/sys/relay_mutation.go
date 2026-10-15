@@ -11,8 +11,8 @@ import (
 
 // Stable Bot rows also serialize edits before a relay configuration has been created.
 func relayLockBot(ctx context.Context, botID int64) error {
-	var bot *entity.YoubanBotRegistry
-	if err := dao.YoubanBotRegistry.Ctx(ctx).WherePri(botID).LockUpdate().Scan(&bot); err != nil {
+	var bot *entity.YoubanBotBot
+	if err := dao.YoubanBotBot.Ctx(ctx).WherePri(botID).LockUpdate().Scan(&bot); err != nil {
 		return err
 	}
 	if bot == nil {
@@ -21,7 +21,7 @@ func relayLockBot(ctx context.Context, botID int64) error {
 	return nil
 }
 func relayMutate(ctx context.Context, botID int64, fn func(context.Context) error) error {
-	return dao.YoubanBotRegistry.Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+	return dao.YoubanBotBot.Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		if err := relayLockBot(ctx, botID); err != nil {
 			return err
 		}

@@ -1,7 +1,30 @@
--- Bot identity schema is maintained by utility/botregistry.
+CREATE TABLE IF NOT EXISTS "hg_youban_two_way_bot_bot" (
+  "id" bigserial PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "tg_account_id" bigint NOT NULL DEFAULT 0,
+  "name" varchar(128) NOT NULL DEFAULT '',
+  "welcome_message" varchar(1000) NOT NULL DEFAULT '',
+  "bot_token" varchar(255) NOT NULL DEFAULT '',
+  "bot_user_id" varchar(64) NOT NULL DEFAULT '',
+  "bot_username" varchar(128) NOT NULL DEFAULT '',
+  "supergroup_id" varchar(64) NOT NULL DEFAULT '',
+  "supergroup_access_hash" varchar(128) NOT NULL DEFAULT '',
+  "supergroup_title" varchar(128) NOT NULL DEFAULT '',
+  "invite_link" varchar(512) NOT NULL DEFAULT '',
+  "setup_status" varchar(32) NOT NULL DEFAULT 'pending',
+  "webhook_status" varchar(32) NOT NULL DEFAULT 'pending',
+  "status" integer NOT NULL DEFAULT 1,
+  "error_message" varchar(1024) NOT NULL DEFAULT '',
+  "last_setup_at" timestamp,
+  "last_webhook_at" timestamp,
+  "created_at" timestamp,
+  "updated_at" timestamp,
+  "deleted_at" timestamp
+);
 
-CREATE INDEX IF NOT EXISTS "idx_ybtwb_bot_tenant" ON "hg_youban_bot_registry" ("tenant_id", "status", "id");
-CREATE INDEX IF NOT EXISTS "idx_ybtwb_bot_tg_account" ON "hg_youban_bot_registry" ("tenant_id", "tg_account_id");
+CREATE INDEX IF NOT EXISTS "idx_ybtwb_bot_tenant" ON "hg_youban_two_way_bot_bot" ("tenant_id", "status", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybtwb_bot_tg_account" ON "hg_youban_two_way_bot_bot" ("tenant_id", "tg_account_id");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_two_way_bot_topic" (
   "id" bigserial PRIMARY KEY,

@@ -14,12 +14,14 @@ type YoubanBotRelayConfig struct {
 	g.Meta        `orm:"table:hg_youban_bot_relay_config, do:true"`
 	Id            any         //
 	BotId         any         //
-	TenantId      any         //
-	AccountId     any         //
+	OwnerId       any         //
 	Enabled       any         //
 	BlockLinks    any         //
 	AuditDatabase any         //
 	AuditGroupId  any         //
 	CreatedAt     *gtime.Time //
 	UpdatedAt     *gtime.Time //
+	TenantId      any         //
+	AccountId     any         //
+	SourceBotId   any         //
 }

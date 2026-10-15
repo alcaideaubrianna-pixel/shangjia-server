@@ -1,5 +1,5 @@
-ALTER TABLE `hg_youban_bot_registry` ADD COLUMN `is_official` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否官方Bot' AFTER `bot_token`;
-ALTER TABLE `hg_youban_bot_registry` ADD COLUMN `is_default` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否默认官方Bot' AFTER `is_official`;
+ALTER TABLE `hg_youban_bot_bot` ADD COLUMN `is_official` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否官方Bot' AFTER `bot_token`;
+ALTER TABLE `hg_youban_bot_bot` ADD COLUMN `is_default` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否默认官方Bot' AFTER `is_official`;
 CREATE TABLE IF NOT EXISTS `hg_youban_bot_user` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'ID',
   `bot_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'Bot ID',
@@ -60,8 +60,8 @@ CREATE TABLE IF NOT EXISTS `hg_youban_bot_channel_cache` (
   KEY `idx_ybbcc_last` (`bot_id`,`last_message_at`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴全局Bot频道缓存';
 
-ALTER TABLE `hg_youban_bot_registry` ADD COLUMN `run_mode` varchar(32) NOT NULL DEFAULT 'auto' COMMENT '运行模式' AFTER `is_default`;
-ALTER TABLE `hg_youban_bot_registry` ADD COLUMN `webhook_url` varchar(500) NOT NULL DEFAULT '' COMMENT 'Webhook地址' AFTER `run_mode`;
+ALTER TABLE `hg_youban_bot_bot` ADD COLUMN `run_mode` varchar(32) NOT NULL DEFAULT 'auto' COMMENT '运行模式' AFTER `is_default`;
+ALTER TABLE `hg_youban_bot_bot` ADD COLUMN `webhook_url` varchar(500) NOT NULL DEFAULT '' COMMENT 'Webhook地址' AFTER `run_mode`;
 ALTER TABLE `hg_youban_bot_user` ADD COLUMN `is_super_admin` tinyint(1) NOT NULL DEFAULT '0' COMMENT '超级管理员' AFTER `status`;
 
 ALTER TABLE `hg_youban_bot_account_bind` DROP INDEX `uk_ybbab_account`;
