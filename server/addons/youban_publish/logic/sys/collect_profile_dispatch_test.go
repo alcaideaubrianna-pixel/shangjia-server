@@ -43,12 +43,23 @@ func TestCollectContentHasVerificationRequiresVerifyVideo(t *testing.T) {
 	}
 }
 
-func TestLateVerificationRepairOperationIsStableAndNotManualRepublish(t *testing.T) {
-	operationNo := lateVerificationRepairOperationNo(123, 456)
-	if operationNo != "verify-repair:123:profile:456" {
+func TestLateVerificationRepairOperationIsStableFullRepublish(t *testing.T) {
+	operationNo := lateVerificationRepublishOperationNo(123, 456)
+	if operationNo != "verify-misbinding-repair:123:profile:456" {
 		t.Fatalf("unexpected operation number: %s", operationNo)
 	}
-	if isManualProfilePublishOperation(operationNo) {
-		t.Fatal("late verification repair must not replace existing display messages")
+	if !isManualProfilePublishOperation(operationNo) {
+		t.Fatal("late verification repair must replace the complete publication")
+	}
+}
+
+func TestShouldQueueLateVerificationOnlyForOnlineProfile(t *testing.T) {
+	if !shouldQueueLateVerification(1) {
+		t.Fatal("online profile must allow late verification")
+	}
+	for _, status := range []int{0, 2, 3} {
+		if shouldQueueLateVerification(status) {
+			t.Fatalf("offline status %d must not trigger historical republish", status)
+		}
 	}
 }

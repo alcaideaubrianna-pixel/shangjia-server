@@ -4,6 +4,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
 func TestAIOpsRepairConfirmTokenIsStableAndBoundToPlan(t *testing.T) {
@@ -51,6 +53,27 @@ func TestCollectProcessOutboxRecoveryBatchSizeSupportsLargeBacklog(t *testing.T)
 	got := collectProcessOutboxRecoveryBatchSize(t.Context())
 	if got < 1000 || got > 10000 {
 		t.Fatalf("unexpected recovery batch size: %d", got)
+	}
+}
+
+func TestAIOpsRepairActionsIncludeProfileAndVerificationOperations(t *testing.T) {
+	for _, action := range []string{
+		"repair_missing_verification", "offline_profiles", "republish_profiles", "delete_profiles",
+	} {
+		if _, ok := aiOpsRepairActions[action]; !ok {
+			t.Fatalf("missing controlled operation %q", action)
+		}
+	}
+}
+
+func TestPreviewMissingVerificationRejectsUnboundedRange(t *testing.T) {
+	service := NewSysPublish()
+	_, _, _, err := service.previewAIOpsMissingVerificationEvents(t.Context(), &sysin.AIOpsRepairPlanInp{
+		StartAt: "2026-10-15T00:00:00+08:00",
+		EndAt:   "2026-10-18T00:00:00+08:00",
+	}, 100)
+	if err == nil {
+		t.Fatal("range over 48 hours must be rejected before querying the database")
 	}
 }
 

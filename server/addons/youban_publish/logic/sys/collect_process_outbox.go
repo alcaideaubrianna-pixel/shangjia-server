@@ -13,6 +13,8 @@ import (
 
 const collectProcessOutboxTable = "hg_youban_publish_collect_process_outbox"
 
+const collectProcessOutboxLease = 5 * time.Minute
+
 func collectProcessOutboxRecoveryBatchSize(ctx context.Context) int {
 	batchSize := g.Cfg().MustGet(ctx, "youbanPublish.collect.processOutboxRecoveryBatchSize", 5000).Int()
 	if batchSize < 100 {
@@ -91,7 +93,7 @@ func (s *sSysPublish) dispatchDueCollectProcessOutbox(ctx context.Context, limit
 	for _, row := range rows {
 		claimed, claimErr := g.DB().Model(collectProcessOutboxTable).Ctx(ctx).Where("id", row["id"].Int64()).
 			Where("status = ? OR (status = ? AND lease_expires_at <= ?)", "pending", "processing", now).
-			Data(g.Map{"status": "processing", "lease_owner": owner, "lease_expires_at": now.Add(time.Minute), "updated_at": gtime.Now()}).Update()
+			Data(g.Map{"status": "processing", "lease_owner": owner, "lease_expires_at": now.Add(collectProcessOutboxLease), "updated_at": gtime.Now()}).Update()
 		if claimErr != nil {
 			g.Log().Warningf(ctx, "领取采集处理Outbox失败 id:%d err:%+v", row["id"].Int64(), claimErr)
 			continue
@@ -106,8 +108,9 @@ func (s *sSysPublish) dispatchDueCollectProcessOutbox(ctx context.Context, limit
 		}
 		queued, queueErr := s.enqueueCollectProcessTaskWithOutbox(ctx, payload, 0, false, false)
 		if queueErr == nil && queued {
-			_, _ = g.DB().Model(collectProcessOutboxTable).Ctx(ctx).Where("id", row["id"].Int64()).Where("lease_owner", owner).
-				Data(g.Map{"status": "pending", "lease_owner": "", "lease_expires_at": nil, "available_at": gtime.Now().Add(time.Minute), "updated_at": gtime.Now()}).Update()
+			// Keep the row leased until the worker marks it delivered. Updating it
+			// back to pending here can overwrite a fast worker's delivered state
+			// and cause a duplicate recovery dispatch.
 			continue
 		}
 		message := "任务未入队"

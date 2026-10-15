@@ -91,8 +91,9 @@ func (s *sSysPublish) AIOpsRepublishProfileChannels(ctx context.Context, profile
 	return s.submitProfilePublish(ctx, profileId, profile["tenant_id"].Int64(), profile["account_id"].Int64(), 0, operationNo, channelIds, false)
 }
 
-// AIOpsQueueCollectVerification creates verify-only jobs for profiles whose
-// display messages were already confirmed by Telegram.
+// AIOpsQueueCollectVerification republishes the complete profile after its
+// verification media is restored. The legacy method name is retained for API
+// compatibility; it never creates a verification-only Telegram job.
 func (s *sSysPublish) AIOpsQueueCollectVerification(ctx context.Context, eventIds []int64, dryRun bool) (int, error) {
 	eventIds = uniqueIds(eventIds)
 	if len(eventIds) == 0 {
@@ -127,7 +128,7 @@ func (s *sSysPublish) AIOpsQueueCollectVerification(ctx context.Context, eventId
 			return processed, gerror.Newf("资料没有可用验证视频 profileId:%d", profileId)
 		}
 		if !dryRun {
-			if err = s.queueSentCollectDispatchVerification(ctx, event, profileId); err != nil {
+			if err = s.republishSentCollectDispatchWithVerification(ctx, event, profileId); err != nil {
 				return processed, err
 			}
 		}

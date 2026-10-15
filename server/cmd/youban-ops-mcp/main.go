@@ -35,15 +35,44 @@ type messageContextInput struct {
 }
 
 type repairPlanInput struct {
-	Action   string  `json:"action" jsonschema:"recover_verifications, requeue_events, or queue_verification"`
-	SourceID int64   `json:"sourceId,omitempty" jsonschema:"Collection source ID"`
-	EventIDs []int64 `json:"eventIds,omitempty" jsonschema:"Explicit collection event IDs"`
-	Limit    int     `json:"limit,omitempty" jsonschema:"Maximum candidates, up to 1000"`
+	Action     string   `json:"action" jsonschema:"Controlled operation action"`
+	SourceID   int64    `json:"sourceId,omitempty" jsonschema:"Collection source ID"`
+	EventIDs   []int64  `json:"eventIds,omitempty" jsonschema:"Explicit collection event IDs"`
+	ProfileIDs []int64  `json:"profileIds,omitempty" jsonschema:"Explicit profile IDs"`
+	ProfileNos []string `json:"profileNos,omitempty" jsonschema:"Explicit profile numbers"`
+	TenantID   int64    `json:"tenantId,omitempty" jsonschema:"Tenant ID required when deleting profiles"`
+	AccountID  int64    `json:"accountId,omitempty" jsonschema:"Account ID required when deleting profiles"`
+	StartAt    string   `json:"startAt,omitempty" jsonschema:"RFC3339 range start"`
+	EndAt      string   `json:"endAt,omitempty" jsonschema:"RFC3339 range end"`
+	Limit      int      `json:"limit,omitempty" jsonschema:"Maximum candidates, up to 1000"`
 }
 
 type repairApplyInput struct {
 	PlanID       string `json:"planId" jsonschema:"Plan ID returned by collect_preview_repair"`
 	ConfirmToken string `json:"confirmToken" jsonschema:"Confirmation token returned by collect_preview_repair"`
+}
+
+type profileOperationPreviewInput struct {
+	Operation  string   `json:"operation" jsonschema:"offline, republish, or delete"`
+	ProfileIDs []int64  `json:"profileIds,omitempty" jsonschema:"Profile IDs"`
+	ProfileNos []string `json:"profileNos,omitempty" jsonschema:"Profile numbers"`
+	TenantID   int64    `json:"tenantId,omitempty" jsonschema:"Tenant ID required for delete"`
+	AccountID  int64    `json:"accountId,omitempty" jsonschema:"Account ID required for delete"`
+}
+
+type missingVerificationPreviewInput struct {
+	SourceID int64  `json:"sourceId,omitempty" jsonschema:"Optional collection source ID"`
+	StartAt  string `json:"startAt" jsonschema:"RFC3339 range start, inclusive"`
+	EndAt    string `json:"endAt" jsonschema:"RFC3339 range end, exclusive"`
+	Limit    int    `json:"limit,omitempty" jsonschema:"Maximum candidates, up to 1000"`
+}
+
+type repairStatusInput struct {
+	PlanID string `json:"planId" jsonschema:"Operation plan ID"`
+}
+
+type profileMediaInput struct {
+	ProfileIDs []int64 `json:"profileIds" jsonschema:"One to twenty profile IDs"`
 }
 
 type structuredOutput struct {
@@ -94,6 +123,34 @@ func main() {
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "collect_apply_repair", Description: "Apply a previously previewed repair plan exactly once",
 		Annotations: &mcp.ToolAnnotations{Title: "Apply collection repair", ReadOnlyHint: readOnly, DestructiveHint: &destructive, IdempotentHint: true},
+	}, client.applyRepair)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "profile_preview_operation", Description: "Preview a bounded profile offline, republish, or delete operation and return a confirmation token",
+		Annotations: &mcp.ToolAnnotations{Title: "Preview profile operation", ReadOnlyHint: true, IdempotentHint: false},
+	}, client.previewProfileOperation)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "profile_apply_operation", Description: "Apply a previously previewed profile operation exactly once",
+		Annotations: &mcp.ToolAnnotations{Title: "Apply profile operation", ReadOnlyHint: readOnly, DestructiveHint: &destructive, IdempotentHint: true},
+	}, client.applyRepair)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "verification_preview_missing", Description: "Preview collected profiles eligible for complete replacement republish after verification recovery",
+		Annotations: &mcp.ToolAnnotations{Title: "Preview missing verification repair", ReadOnlyHint: true, IdempotentHint: false},
+	}, client.previewMissingVerification)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "verification_apply_repair", Description: "Recover verification media and replace the complete profile publication exactly once",
+		Annotations: &mcp.ToolAnnotations{Title: "Repair missing verification", ReadOnlyHint: readOnly, DestructiveHint: &destructive, IdempotentHint: true},
+	}, client.applyRepair)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "ops_plan_status", Description: "Read the current result of an operations plan",
+		Annotations: &mcp.ToolAnnotations{Title: "Get operation status", ReadOnlyHint: true, IdempotentHint: true},
+	}, client.repairStatus)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "profile_media_preview", Description: "Inspect whether profile media can be rebuilt without changing data",
+		Annotations: &mcp.ToolAnnotations{Title: "Preview profile media repair", ReadOnlyHint: true, IdempotentHint: true},
+	}, client.previewProfileMedia)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "profile_media_apply", Description: "Rebuild recoverable media for explicitly selected profiles",
+		Annotations: &mcp.ToolAnnotations{Title: "Repair profile media", ReadOnlyHint: readOnly, DestructiveHint: &destructive, IdempotentHint: true},
 	}, client.applyRepair)
 	if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
 		log.Fatal(err)
@@ -147,6 +204,38 @@ func (c *apiClient) previewRepair(ctx context.Context, _ *mcp.CallToolRequest, i
 func (c *apiClient) applyRepair(ctx context.Context, _ *mcp.CallToolRequest, input repairApplyInput) (*mcp.CallToolResult, structuredOutput, error) {
 	data, err := c.call(ctx, http.MethodPost, "/api/youban_publish/ai-ops/repair/apply", input)
 	return nil, structuredOutput{Data: data}, err
+}
+
+func (c *apiClient) previewProfileOperation(ctx context.Context, _ *mcp.CallToolRequest, input profileOperationPreviewInput) (*mcp.CallToolResult, structuredOutput, error) {
+	action := map[string]string{"offline": "offline_profiles", "republish": "republish_profiles", "delete": "delete_profiles"}[strings.ToLower(strings.TrimSpace(input.Operation))]
+	if action == "" {
+		return nil, structuredOutput{}, fmt.Errorf("operation must be offline, republish, or delete")
+	}
+	limit := 100
+	if action == "republish_profiles" {
+		limit = 20
+	}
+	return c.previewRepair(ctx, nil, repairPlanInput{
+		Action: action, ProfileIDs: input.ProfileIDs, ProfileNos: input.ProfileNos,
+		TenantID: input.TenantID, AccountID: input.AccountID, Limit: limit,
+	})
+}
+
+func (c *apiClient) previewMissingVerification(ctx context.Context, _ *mcp.CallToolRequest, input missingVerificationPreviewInput) (*mcp.CallToolResult, structuredOutput, error) {
+	return c.previewRepair(ctx, nil, repairPlanInput{
+		Action: "repair_missing_verification", SourceID: input.SourceID,
+		StartAt: input.StartAt, EndAt: input.EndAt, Limit: input.Limit,
+	})
+}
+
+func (c *apiClient) repairStatus(ctx context.Context, _ *mcp.CallToolRequest, input repairStatusInput) (*mcp.CallToolResult, structuredOutput, error) {
+	query := url.Values{"planId": []string{input.PlanID}}
+	data, err := c.call(ctx, http.MethodGet, "/api/youban_publish/ai-ops/repair/status?"+query.Encode(), nil)
+	return nil, structuredOutput{Data: data}, err
+}
+
+func (c *apiClient) previewProfileMedia(ctx context.Context, _ *mcp.CallToolRequest, input profileMediaInput) (*mcp.CallToolResult, structuredOutput, error) {
+	return c.previewRepair(ctx, nil, repairPlanInput{Action: "repair_profile_media", ProfileIDs: input.ProfileIDs, Limit: 20})
 }
 
 func (c *apiClient) call(ctx context.Context, method, path string, body any) (map[string]any, error) {

@@ -93,3 +93,33 @@ func TestMapInt64(t *testing.T) {
 		t.Fatalf("json.Number conversion = %d", got)
 	}
 }
+
+func TestPreviewProfileOperationUsesControlledPlan(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body repairPlanInput
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		if body.Action != "delete_profiles" || body.TenantID != 2 || body.AccountID != 3 {
+			t.Errorf("unexpected plan: %+v", body)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"planId": "plan-1"}})
+	}))
+	defer server.Close()
+
+	client := &apiClient{baseURL: server.URL, token: "test-token", client: server.Client()}
+	_, _, err := client.previewProfileOperation(context.Background(), nil, profileOperationPreviewInput{
+		Operation: "delete", ProfileIDs: []int64{10}, TenantID: 2, AccountID: 3,
+	})
+	if err != nil {
+		t.Fatalf("previewProfileOperation() error = %v", err)
+	}
+}
+
+func TestPreviewProfileOperationRejectsUnknownOperation(t *testing.T) {
+	client := &apiClient{}
+	if _, _, err := client.previewProfileOperation(context.Background(), nil, profileOperationPreviewInput{Operation: "purge"}); err == nil {
+		t.Fatal("unknown destructive operation must be rejected")
+	}
+}

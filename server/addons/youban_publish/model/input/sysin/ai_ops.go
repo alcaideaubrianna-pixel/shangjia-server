@@ -1,19 +1,44 @@
 package sysin
 
 type AIOpsRepairPlanInp struct {
-	Action   string  `json:"action" dc:"修复动作：recover_verifications/requeue_events/queue_verification"`
-	SourceId int64   `json:"sourceId" dc:"采集源ID"`
-	EventIds []int64 `json:"eventIds" dc:"采集事件ID"`
-	Limit    int     `json:"limit" dc:"最大影响条数"`
+	Action     string   `json:"action" dc:"受控运维动作"`
+	SourceId   int64    `json:"sourceId" dc:"采集源ID"`
+	EventIds   []int64  `json:"eventIds" dc:"采集事件ID"`
+	ProfileIds []int64  `json:"profileIds" dc:"资料ID"`
+	ProfileNos []string `json:"profileNos" dc:"资料编号"`
+	TenantId   int64    `json:"tenantId" dc:"租户ID，删除资料时必填"`
+	AccountId  int64    `json:"accountId" dc:"账号ID，删除资料时必填"`
+	StartAt    string   `json:"startAt" dc:"筛选开始时间，RFC3339"`
+	EndAt      string   `json:"endAt" dc:"筛选结束时间，RFC3339"`
+	Limit      int      `json:"limit" dc:"最大影响条数"`
 }
 
 type AIOpsRepairPlanModel struct {
-	PlanId       string  `json:"planId"`
-	Action       string  `json:"action"`
-	Candidates   int     `json:"candidates"`
-	EventIds     []int64 `json:"eventIds"`
-	ConfirmToken string  `json:"confirmToken"`
-	ExpiresAt    string  `json:"expiresAt"`
+	PlanId         string  `json:"planId"`
+	Action         string  `json:"action"`
+	Candidates     int     `json:"candidates"`
+	EventIds       []int64 `json:"eventIds"`
+	ProfileIds     []int64 `json:"profileIds"`
+	VerifyEventIds []int64 `json:"verifyEventIds"`
+	ConfirmToken   string  `json:"confirmToken"`
+	ExpiresAt      string  `json:"expiresAt"`
+}
+
+type AIOpsRepairPlanStatusInp struct {
+	PlanId string `json:"planId" dc:"修复计划ID"`
+}
+
+type AIOpsRepairPlanStatusModel struct {
+	PlanId     string  `json:"planId"`
+	Action     string  `json:"action"`
+	Status     string  `json:"status"`
+	Candidates int     `json:"candidates"`
+	Applied    int     `json:"applied"`
+	Failed     []int64 `json:"failed"`
+	Message    string  `json:"message"`
+	ExpiresAt  string  `json:"expiresAt"`
+	StartedAt  string  `json:"startedAt"`
+	FinishedAt string  `json:"finishedAt"`
 }
 
 type AIOpsRepairApplyInp struct {

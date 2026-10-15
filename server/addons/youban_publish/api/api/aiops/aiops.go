@@ -93,3 +93,12 @@ type RepairApplyReq struct {
 }
 
 type RepairApplyRes struct{ *sysin.AIOpsRepairApplyModel }
+
+type RepairStatusReq struct {
+	g.Meta `path:"/repair/status" method:"get" tags:"AI运维" summary:"查询受控运维计划状态"`
+	sysin.AIOpsRepairPlanStatusInp
+}
+
+type RepairStatusRes struct {
+	*sysin.AIOpsRepairPlanStatusModel
+}

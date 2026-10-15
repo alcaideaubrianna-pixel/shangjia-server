@@ -1023,7 +1023,7 @@ func (s *sSysPublish) resumeExistingCollectDispatch(ctx context.Context, dispatc
 				if err != nil {
 					return false, "", err
 				}
-				if err = s.queueSentCollectDispatchVerification(ctx, event, profileID); err != nil {
+				if err = s.republishSentCollectDispatchWithVerification(ctx, event, profileID); err != nil {
 					return false, "", err
 				}
 			case sysin.CollectDispatchStatusSent:
@@ -1083,12 +1083,27 @@ func (s *sSysPublish) upgradeSentCollectDispatchVerification(ctx context.Context
 	if err != nil {
 		return err
 	}
-	return s.queueSentCollectDispatchVerification(ctx, event, profileID)
+	return s.republishSentCollectDispatchWithVerification(ctx, event, profileID)
 }
 
-func (s *sSysPublish) queueSentCollectDispatchVerification(ctx context.Context, event gdb.Record, profileID int64) error {
+// republishSentCollectDispatchWithVerification replaces every previous channel
+// publication with the complete profile. Historical verification repair must
+// never append a standalone video because that breaks profile ordering.
+func (s *sSysPublish) republishSentCollectDispatchWithVerification(ctx context.Context, event gdb.Record, profileID int64) error {
 	if profileID <= 0 {
 		return gerror.New("历史验证视频修复缺少资料ID")
+	}
+	profile, err := g.DB().Model("hg_content_profile").Ctx(ctx).
+		Fields("status").Where("id", profileID).WhereNull("deleted_at").One()
+	if err != nil {
+		return gerror.Wrap(err, "读取历史验证修复资料状态失败")
+	}
+	if profile.IsEmpty() {
+		return gerror.Newf("历史验证修复资料不存在 profileId:%d", profileID)
+	}
+	if !shouldQueueLateVerification(profile["status"].Int()) {
+		g.Log().Infof(ctx, "资料已下架，仅恢复验证媒体不补发频道消息 profileId:%d eventId:%d", profileID, event["id"].Int64())
+		return nil
 	}
 	channelValues, err := pdao.YoubanPublishTgJob.Ctx(ctx).
 		Fields("channel_id").
@@ -1110,27 +1125,30 @@ func (s *sSysPublish) queueSentCollectDispatchVerification(ctx context.Context, 
 	if len(channelIDs) == 0 {
 		return nil
 	}
-	operationNo := lateVerificationRepairOperationNo(event["id"].Int64(), profileID)
+	operationNo := lateVerificationRepublishOperationNo(event["id"].Int64(), profileID)
 	meta := telegramProfilePublishMeta{
 		CollectEventId: event["id"].Int64(), CollectSourceId: event["source_id"].Int64(),
 		CollectSourceChatId:    strings.TrimSpace(event["source_chat_id"].String()),
 		CollectSourceMessageId: event["source_message_id"].Int64(),
-		InitialSendPhase:       telegramSendPhaseDisplayConfirmed,
 	}
 	jobIDs, err := s.prepareProfilePublishJobs(ctx, profileID, event["tenant_id"].Int64(), event["account_id"].Int64(), operationNo, channelIDs, false, meta)
 	if err != nil {
-		return gerror.Wrap(err, "创建历史验证视频补发任务失败")
+		return gerror.Wrap(err, "创建历史验证资料完整重发任务失败")
 	}
 	if len(jobIDs) == 0 {
 		return nil
 	}
 	s.enqueuePreparedProfileJobs(ctx, jobIDs, event["account_id"].Int64())
-	s.appendCollectEventLogForRecord(ctx, event, "verify", "repair_queued", "历史资料已补充验证视频并创建仅验证补发任务", fmt.Sprintf("profileId=%d operationNo=%s", profileID, operationNo))
+	s.appendCollectEventLogForRecord(ctx, event, "verify", "republish_queued", "历史资料已补充验证视频并创建完整重发任务", fmt.Sprintf("profileId=%d operationNo=%s", profileID, operationNo))
 	return nil
 }
 
-func lateVerificationRepairOperationNo(eventID, profileID int64) string {
-	return fmt.Sprintf("verify-repair:%d:profile:%d", eventID, profileID)
+func shouldQueueLateVerification(profileStatus int) bool {
+	return profileStatus == 1
+}
+
+func lateVerificationRepublishOperationNo(eventID, profileID int64) string {
+	return fmt.Sprintf("verify-misbinding-repair:%d:profile:%d", eventID, profileID)
 }
 
 func (s *sSysPublish) classifyCollectEvent(ctx context.Context, event gdb.Record, content *collectContentResult) (profileMessageClassification, error) {

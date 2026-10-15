@@ -87,3 +87,11 @@ func (c *cAIOps) RepairApply(ctx context.Context, req *aiops.RepairApplyReq) (*a
 	}
 	return &aiops.RepairApplyRes{AIOpsRepairApplyModel: result}, nil
 }
+
+func (c *cAIOps) RepairStatus(ctx context.Context, req *aiops.RepairStatusReq) (*aiops.RepairStatusRes, error) {
+	result, err := service.SysPublish().AIOpsRepairPlanStatus(ctx, &req.AIOpsRepairPlanStatusInp)
+	if err != nil {
+		return nil, err
+	}
+	return &aiops.RepairStatusRes{AIOpsRepairPlanStatusModel: result}, nil
+}
