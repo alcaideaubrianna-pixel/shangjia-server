@@ -329,7 +329,7 @@
       checkedValue: 1,
       uncheckedValue: 2,
       onUpdateValue: async (value: number) => {
-        await FeatureSave({ ...row, status: value });
+        await FeatureSave({ ...row, status: value, statusOnly: true });
         message.success('插件状态已更新');
         await loadFeatures();
       },

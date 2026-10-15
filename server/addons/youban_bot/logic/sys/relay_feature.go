@@ -2,7 +2,9 @@ package sys
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -46,11 +48,28 @@ func (f *relayGatewayFeature) Priority() int { return 1000 }
 func (f *relayGatewayFeature) Menus(ctx context.Context, bc gatewayservice.BotContext) (gatewayservice.FeatureMenus, error) {
 	for _, binding := range bc.Bindings {
 		if binding.Owner == "youban_bot" {
-			cfg, err := f.bot.relayScope(ctx, binding.ReferenceID)
-			if err != nil || cfg == nil {
-				return gatewayservice.FeatureMenus{}, nil
+			items := make([]gatewayservice.MenuItem, 0)
+			for i, feature := range botFeatures {
+				if feature == nil || !f.bot.featureMenuVisible(ctx, feature.Key()) {
+					continue
+				}
+				cmd := strings.TrimPrefix(f.bot.featureCommand(ctx, feature), "/")
+				if cmd != "" {
+					items = append(items, gatewayservice.MenuItem{Command: cmd, Description: f.bot.featureDescription(ctx, feature), Order: i})
+				}
 			}
-			return gatewayservice.FeatureMenus{Managed: true, Items: []gatewayservice.MenuItem{{Command: "help", Description: "双向聊天帮助", Order: 90}, {Command: "id", Description: "查看聊天ID", Order: 91}}}, nil
+			cfg, err := f.bot.relayScope(ctx, binding.ReferenceID)
+			if err == nil && cfg != nil {
+				filtered := items[:0]
+				for _, item := range items {
+					if item.Command != "help" {
+						filtered = append(filtered, item)
+					}
+				}
+				items = filtered
+				items = append(items, gatewayservice.MenuItem{Command: "help", Description: "双向聊天帮助", Order: 90}, gatewayservice.MenuItem{Command: "id", Description: "查看聊天ID", Order: 91})
+			}
+			return gatewayservice.FeatureMenus{Managed: true, Items: items}, nil
 		}
 	}
 	return gatewayservice.FeatureMenus{}, nil
@@ -156,6 +175,10 @@ func (s *sSysBot) relayFeatureSchema(ctx context.Context, model *sysin.FeatureMo
 	if err := s.relayFeatureRelations(ctx, in.BotId, model); err != nil {
 		return err
 	}
+	delete(model.ConfigValues, "revision")
+	model.ConfigValues["loadedBotId"] = in.BotId
+	snapshot, _ := json.Marshal(model.ConfigValues)
+	model.ConfigValues["revision"] = fmt.Sprintf("%x", sha256.Sum256(snapshot))
 	relayFeatureJSON(model)
 	return nil
 }

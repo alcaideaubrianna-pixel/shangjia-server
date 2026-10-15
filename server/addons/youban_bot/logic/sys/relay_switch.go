@@ -10,7 +10,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 )
 
-func (s *sSysBot) AdminRelaySwitch(ctx context.Context, in *sysin.RelaySwitchInp) error {
+func (s *sSysBot) adminRelaySwitch(ctx context.Context, in *sysin.RelaySwitchInp) error {
 	if err := in.Filter(); err != nil {
 		return err
 	}

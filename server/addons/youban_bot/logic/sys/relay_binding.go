@@ -28,7 +28,7 @@ func (s *sSysBot) AdminRelayBindingList(ctx context.Context, in *sysin.RelayList
 	return list, total, gerror.Wrap(err, "读取双向绑定失败")
 }
 
-func (s *sSysBot) AdminRelayBind(ctx context.Context, in *sysin.RelayBindingInp) error {
+func (s *sSysBot) adminRelayBind(ctx context.Context, in *sysin.RelayBindingInp) error {
 	if err := in.Filter(); err != nil {
 		return err
 	}
@@ -97,7 +97,7 @@ func (s *sSysBot) AdminRelayBind(ctx context.Context, in *sysin.RelayBindingInp)
 	})
 }
 
-func (s *sSysBot) AdminRelayUnbind(ctx context.Context, in *sysin.RelayDeleteInp) error {
+func (s *sSysBot) adminRelayUnbind(ctx context.Context, in *sysin.RelayDeleteInp) error {
 	if err := in.RelayBotInp.Filter(); err != nil {
 		return err
 	}

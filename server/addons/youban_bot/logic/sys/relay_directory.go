@@ -53,6 +53,9 @@ func (s *sSysBot) relayResolvePeer(ctx context.Context, botID int64, identity st
 			return nil, err
 		}
 		if user != nil {
+			if err := s.relayVerifyUsername(ctx, botID, identity, user.ID); err != nil {
+				return nil, err
+			}
 			return user, nil
 		}
 	}
@@ -74,6 +77,9 @@ func (s *sSysBot) relayResolvePeer(ctx context.Context, botID int64, identity st
 		return nil, gerror.New("群用户名存在冲突，请使用群ID")
 	}
 	if len(groups) == 1 {
+		if err := s.relayVerifyUsername(ctx, botID, identity, groups[0].ChatId); err != nil {
+			return nil, err
+		}
 		return &relayPeer{ID: groups[0].ChatId, Name: firstNonEmpty(groups[0].ChatTitle, groups[0].ChatId), Kind: "group"}, nil
 	}
 	return nil, gerror.New("未找到聊天对象，请先让用户私聊当前Bot，或将当前Bot添加到群中并发送消息")
@@ -128,4 +134,26 @@ func (s *sSysBot) relayBot(ctx context.Context, token string) (*tgbot.Bot, error
 		return s.relayClientForToken(ctx, token)
 	}
 	return s.telegramBot(ctx, token)
+}
+
+func (s *sSysBot) relayVerifyUsername(ctx context.Context, botID int64, identity, id string) error {
+	if !strings.HasPrefix(identity, "@") {
+		return nil
+	}
+	row, err := s.botById(ctx, botID)
+	if err != nil {
+		return err
+	}
+	bot, err := s.relayBot(ctx, row.BotToken)
+	if err != nil {
+		return err
+	}
+	chat, err := bot.GetChat(ctx, &tgbot.GetChatParams{ChatID: id})
+	if err != nil {
+		return gerror.Wrap(err, "无法确认当前用户名，请使用聊天ID")
+	}
+	if chat == nil || !strings.EqualFold(chat.Username, strings.TrimPrefix(identity, "@")) {
+		return gerror.New("用户名已变化，请让对象重新发送消息或使用聊天ID")
+	}
+	return nil
 }

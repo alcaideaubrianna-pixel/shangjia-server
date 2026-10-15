@@ -92,12 +92,14 @@ type BotRefreshModel struct {
 }
 
 type FeatureListInp struct {
+	BotId int64 `json:"botId" dc:"双向配置Bot"`
 	form.PageReq
 	Keyword string `json:"keyword" dc:"关键词"`
 	Status  int    `json:"status" dc:"状态"`
 }
 
 type FeatureModel struct {
+	ConfigError  string                 `json:"configError" dc:"配置加载错误"`
 	Id           int64                  `json:"id" dc:"ID"`
 	FeatureKey   string                 `json:"featureKey" dc:"功能Key"`
 	Name         string                 `json:"name" dc:"功能名称"`
@@ -127,6 +129,7 @@ type FeatureConfigSchema struct {
 }
 
 type FeatureSaveInp struct {
+	StatusOnly  bool   `json:"statusOnly" dc:"仅修改插件状态"`
 	Id          int64  `json:"id" dc:"ID"`
 	FeatureKey  string `json:"featureKey" dc:"功能Key"`
 	Name        string `json:"name" dc:"功能名称"`

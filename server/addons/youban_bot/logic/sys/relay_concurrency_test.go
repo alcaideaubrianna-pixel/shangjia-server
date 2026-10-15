@@ -21,6 +21,9 @@ func TestRelayPostgresAlbumClaimIsExclusive(t *testing.T) {
 		t.Skip("requires local PostgreSQL row locks")
 	}
 	ctx := relayTestDatabase(t)
+	if _, err := dao.YoubanBotRelayConfig.Ctx(ctx).Data(do.YoubanBotRelayConfig{BotId: 1, OwnerId: 99}).Insert(); err != nil {
+		t.Fatal(err)
+	}
 	for i := 1; i <= 5; i++ {
 		_, err := dao.YoubanBotRelayDelivery.Ctx(ctx).Data(do.YoubanBotRelayDelivery{BotId: 1, SourceChatId: "12", SourceMessageId: i, MediaGroupId: "album", TargetChatId: "13", Kind: consts.RelayKindChat, RawJson: "{}", Status: consts.RelayPending, AvailableAt: gtime.Now()}).Insert()
 		if err != nil {

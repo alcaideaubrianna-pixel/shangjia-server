@@ -152,6 +152,8 @@ func registerBotFeature(feature botFeature) {
 func init() {
 	registerBotFeature(relayFeature{})
 	registerBotFeature(startFeature{})
+	registerBotFeature(helpFeature{})
+	registerBotFeature(relayManagementFeature{})
 	registerBotFeature(inlinePromotionFeature{})
 	registerBotFeature(loginFeature{})
 	registerBotFeature(bindFeature{})
