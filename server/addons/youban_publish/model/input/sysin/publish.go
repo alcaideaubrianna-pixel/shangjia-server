@@ -1174,6 +1174,7 @@ type BotChannelCacheModel struct {
 }
 
 type BotModel struct {
+	AccountId   int64       `json:"accountId"`
 	BotType     string      `json:"botType" dc:"Bot用途：normal普通机器人，two_way双向机器人"`
 	Id          int64       `json:"id" dc:"ID"`
 	TenantId    int64       `json:"tenantId" dc:"租户ID，0表示全局"`
@@ -1187,6 +1188,7 @@ type BotModel struct {
 }
 
 type BotSaveInp struct {
+	AccountId   int64  `json:"accountId"`
 	BotType     string `json:"botType" dc:"Bot用途：normal普通机器人，two_way双向机器人"`
 	Id          int64  `json:"id" dc:"ID"`
 	TenantId    int64  `json:"tenantId" dc:"租户ID，0表示全局"`

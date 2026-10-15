@@ -49,14 +49,14 @@ func TestRelayMissingMigrationDoesNotDisableMainBot(t *testing.T) {
 func TestRelayHelpOnlyBelongsToConfiguredBot(t *testing.T) {
 	ctx := relayTestDatabase(t)
 	relayTestBaseTable(t, ctx, botTable)
-	if _, err := dao.YoubanBotBot.Ctx(ctx).Data(do.YoubanBotBot{Id: 2, BotName: "Relay", Status: 1}).Insert(); err != nil {
+	if _, err := dao.YoubanBotRegistry.Ctx(ctx).Data(do.YoubanBotRegistry{Id: 2, BotName: "Relay", BotUserId: "456", BotType: "two_way", TenantId: 1, AccountId: 99, Status: 1}).Insert(); err != nil {
 		t.Fatal(err)
 	}
 	relayTestBaseTable(t, ctx, featureTable)
 	if _, err := dao.YoubanBotFeature.Ctx(ctx).Data(do.YoubanBotFeature{FeatureKey: consts.RelayFeatureKey, Status: 1, ConfigJson: "{}"}).Insert(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := dao.YoubanBotRelayConfig.Ctx(ctx).Data(do.YoubanBotRelayConfig{BotId: 2, TenantId: 1, AccountId: 99, SourceBotId: 1, OwnerId: 99, Enabled: 1}).Insert(); err != nil {
+	if _, err := dao.YoubanBotRelayConfig.Ctx(ctx).Data(do.YoubanBotRelayConfig{BotId: 2, TenantId: 1, AccountId: 99, Enabled: 1}).Insert(); err != nil {
 		t.Fatal(err)
 	}
 	s := NewSysBot()

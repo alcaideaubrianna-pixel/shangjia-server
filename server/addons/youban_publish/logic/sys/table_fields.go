@@ -22,7 +22,7 @@ var (
 	publishTgQueueStatTable         = pdao.YoubanPublishTgQueueStat.Table()
 	publishTgChannelStatTable       = pdao.YoubanPublishTgChannelStat.Table()
 	publishTgBotStatTable           = pdao.YoubanPublishTgBotStat.Table()
-	publishBotTable                 = pdao.YoubanPublishBot.Table()
+	publishBotTable                 = pdao.YoubanBotRegistry.Table()
 	publishTgLoginTable             = pdao.YoubanPublishTgLogin.Table()
 	publishTgAccountTable           = "hg_youban_publish_tg_account"
 	publishChannelTable             = "hg_youban_publish_channel"

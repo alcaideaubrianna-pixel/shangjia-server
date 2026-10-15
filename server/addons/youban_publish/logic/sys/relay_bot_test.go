@@ -28,7 +28,7 @@ func TestRelayOwnedBotsRequireTenantAccountAndCreator(t *testing.T) {
 	db := g.DB()
 	// Roll back all fixture DDL and rows. The table uses the real DAO schema.
 	err := db.Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		if _, err := tx.Exec("CREATE TEMP TABLE hg_youban_publish_bot (id bigint PRIMARY KEY,tenant_id bigint,account_id bigint,created_by bigint,status int,bot_type varchar(32) DEFAULT 'two_way',bot_name text,bot_username text,bot_token text,remark text,created_at timestamp,updated_at timestamp,deleted_at timestamp) ON COMMIT DROP"); err != nil {
+		if _, err := tx.Exec("CREATE TEMP TABLE hg_youban_bot_registry (id bigint PRIMARY KEY,tenant_id bigint,account_id bigint,created_by bigint,status int,bot_type varchar(32) DEFAULT 'two_way',bot_name text,bot_username text,bot_token text,remark text,created_at timestamp,updated_at timestamp,deleted_at timestamp) ON COMMIT DROP"); err != nil {
 			return err
 		}
 		if _, err := tx.Exec("CREATE TEMP TABLE hg_youban_publish_account(id bigint,tenant_id bigint,status int,deleted_at timestamp) ON COMMIT DROP"); err != nil {
@@ -40,13 +40,13 @@ func TestRelayOwnedBotsRequireTenantAccountAndCreator(t *testing.T) {
 		if err := db.GetCore().ClearTableFieldsAll(ctx); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(`INSERT INTO hg_youban_publish_bot(id,tenant_id,account_id,created_by,status) VALUES(1,10,100,100,1),(2,10,101,101,1),(3,11,100,100,1),(4,10,100,999,1),(5,10,100,100,2),(6,10,0,100,1)`); err != nil {
+		if _, err := tx.Exec(`INSERT INTO hg_youban_bot_registry(id,tenant_id,account_id,created_by,status) VALUES(1,10,100,100,1),(2,10,101,101,1),(3,11,100,100,1),(4,10,100,999,1),(5,10,100,100,2),(6,10,0,100,1)`); err != nil {
 			return err
 		}
-		if _, err := tx.Exec("INSERT INTO hg_youban_publish_bot(id,tenant_id,account_id,created_by,status,bot_type)VALUES(8,10,100,100,1,'normal')"); err != nil {
+		if _, err := tx.Exec("INSERT INTO hg_youban_bot_registry(id,tenant_id,account_id,created_by,status,bot_type)VALUES(8,10,100,100,1,'normal')"); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(`INSERT INTO hg_youban_publish_bot(id,tenant_id,account_id,created_by,status,deleted_at)VALUES(7,10,100,100,1,NOW())`); err != nil {
+		if _, err := tx.Exec(`INSERT INTO hg_youban_bot_registry(id,tenant_id,account_id,created_by,status,deleted_at)VALUES(7,10,100,100,1,NOW())`); err != nil {
 			return err
 		}
 		s := &sSysPublish{}
@@ -54,7 +54,7 @@ func TestRelayOwnedBotsRequireTenantAccountAndCreator(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if len(rows) != 1 || rows[0].Id != 1 {
+		if len(rows) != 2 || rows[0].Id != 1 || rows[1].Id != 4 {
 			t.Fatalf("cross tenant/account/creator or inactive Bot leaked: %+v", rows)
 		}
 		rows, err = s.RelayOwnedBots(ctx, 10, 100, 2, true)

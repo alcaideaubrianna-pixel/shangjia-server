@@ -2,6 +2,7 @@ package install
 
 import (
 	"context"
+	"hotgo/utility/botregistry"
 	"strings"
 	"time"
 
@@ -43,6 +44,9 @@ const publishInstallLockKey = "youban_publish:install"
 const publishMaintenanceLockTTL = 6 * time.Hour
 
 func Install(ctx context.Context) error {
+	if err := botregistry.EnsureSchema(ctx); err != nil {
+		return err
+	}
 	if err := syncStaticResources(ctx); err != nil {
 		return gerror.Wrap(err, "同步默认静态资源失败")
 	}
@@ -53,6 +57,9 @@ func Install(ctx context.Context) error {
 }
 
 func Upgrade(ctx context.Context) error {
+	if err := botregistry.EnsureSchema(ctx); err != nil {
+		return err
+	}
 	if err := syncStaticResources(ctx); err != nil {
 		return gerror.Wrap(err, "同步默认静态资源失败")
 	}

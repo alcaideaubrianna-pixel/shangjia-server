@@ -11,13 +11,14 @@ import (
 
 	"hotgo/addons/youban_bot/model/input/sysin"
 	"hotgo/internal/library/contexts"
+	"hotgo/utility/botregistry"
 )
 
 func (s *sSysBot) AdminBotList(ctx context.Context, in *sysin.BotListInp) (list []*sysin.BotModel, totalCount int, err error) {
 	if in == nil {
 		in = &sysin.BotListInp{}
 	}
-	mod := g.DB().Model(botTable).Safe().Ctx(ctx).WhereNull("deleted_at")
+	mod := g.DB().Model(botTable).Safe().Ctx(ctx).WhereNull("deleted_at").Where("bot_type", "main")
 	if in.Status > 0 {
 		mod = mod.Where("status", in.Status)
 	}
@@ -55,6 +56,9 @@ func (s *sSysBot) AdminBotSave(ctx context.Context, in *sysin.BotSaveInp) (err e
 		if err != nil {
 			return err
 		}
+	}
+	if old != nil && old.BotType != "main" {
+		return gerror.New("请从所属账户后台管理该Bot")
 	}
 	if in.Id > 0 && in.IsDefault == 1 {
 		cfg, readErr := relayConfig(ctx, in.Id)
@@ -111,7 +115,12 @@ func (s *sSysBot) AdminBotSave(ctx context.Context, in *sysin.BotSaveInp) (err e
 	if in.IsDefault == 1 {
 		isDefault = 1
 	}
+	botUserID, idErr := botregistry.TelegramID(botToken)
+	if idErr != nil {
+		return idErr
+	}
 	data := g.Map{
+		"bot_user_id": botUserID, "bot_type": "main",
 		"bot_name": botName, "bot_username": botUsername, "bot_token": botToken,
 		"is_official": isOfficial, "is_default": isDefault, "remark": strings.TrimSpace(in.Remark),
 		"run_mode": normalizeRunMode(in.RunMode), "webhook_url": strings.TrimSpace(in.WebhookUrl),

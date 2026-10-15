@@ -927,24 +927,10 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_daily_stat" (
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_daily_stat_account_date" ON "hg_youban_publish_daily_stat" ("tenant_id", "account_id", "stat_date");
 CREATE INDEX IF NOT EXISTS "idx_ybp_daily_stat_date" ON "hg_youban_publish_daily_stat" ("stat_date", "account_id");
 
-CREATE TABLE IF NOT EXISTS "hg_youban_publish_bot" (
-  "id" BIGSERIAL PRIMARY KEY,
-  "tenant_id" bigint NOT NULL DEFAULT 0,
-  "bot_name" varchar(128) NOT NULL DEFAULT '',
-  "bot_username" varchar(128) NOT NULL DEFAULT '',
-  "bot_token" varchar(255) NOT NULL DEFAULT '',
-  "remark" varchar(500) NOT NULL DEFAULT '',
-  "status" smallint NOT NULL DEFAULT 1,
-  "created_by" bigint NOT NULL DEFAULT 0,
-  "updated_by" bigint NOT NULL DEFAULT 0,
-  "deleted_by" bigint NOT NULL DEFAULT 0,
-  "created_at" timestamp DEFAULT NULL,
-  "updated_at" timestamp DEFAULT NULL,
-  "deleted_at" timestamp DEFAULT NULL
-);
-ALTER TABLE "hg_youban_publish_bot" ADD COLUMN IF NOT EXISTS "tenant_id" bigint NOT NULL DEFAULT 0;
-CREATE INDEX IF NOT EXISTS "idx_ybp_bot_tenant" ON "hg_youban_publish_bot" ("tenant_id", "status", "id");
-CREATE INDEX IF NOT EXISTS "idx_ybp_bot_status" ON "hg_youban_publish_bot" ("status", "id");
+-- Bot identity schema is maintained by utility/botregistry.
+ALTER TABLE "hg_youban_bot_registry" ADD COLUMN IF NOT EXISTS "tenant_id" bigint NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS "idx_ybp_bot_tenant" ON "hg_youban_bot_registry" ("tenant_id", "status", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_bot_status" ON "hg_youban_bot_registry" ("status", "id");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_login" (
   "id" BIGSERIAL PRIMARY KEY,
@@ -2268,7 +2254,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_ai_ops_repair_plan" (
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_ai_ops_repair_plan" ON "hg_youban_publish_ai_ops_repair_plan" ("plan_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_ai_ops_repair_plan_status" ON "hg_youban_publish_ai_ops_repair_plan" ("status", "expires_at", "id");
 
-ALTER TABLE hg_youban_publish_bot ADD COLUMN IF NOT EXISTS account_id bigint NOT NULL DEFAULT 0;
-CREATE INDEX IF NOT EXISTS idx_ybp_bot_account ON hg_youban_publish_bot(tenant_id,account_id,created_by,status);
+ALTER TABLE hg_youban_bot_registry ADD COLUMN IF NOT EXISTS account_id bigint NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS idx_ybp_bot_account ON hg_youban_bot_registry(tenant_id,account_id,created_by,status);
 
-ALTER TABLE hg_youban_publish_bot ADD COLUMN IF NOT EXISTS bot_type varchar(32) NOT NULL DEFAULT 'normal';
+ALTER TABLE hg_youban_bot_registry ADD COLUMN IF NOT EXISTS bot_type varchar(32) NOT NULL DEFAULT 'normal';

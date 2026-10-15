@@ -19,7 +19,7 @@ func TestRelayHelpRequiresConfiguredAdminAndPrivateChat(t *testing.T) {
 	relayTestBaseTable(t, ctx, botTable)
 	relayTestBaseTable(t, ctx, featureTable)
 	relayTestBaseTable(t, ctx, "hg_youban_bot_account_bind")
-	if _, err := dao.YoubanBotBot.Ctx(ctx).Data(do.YoubanBotBot{Id: 1, BotToken: "123:fake", BotName: "Test", Status: 1}).Insert(); err != nil {
+	if _, err := dao.YoubanBotRegistry.Ctx(ctx).Data(do.YoubanBotRegistry{Id: 1, BotToken: "123:fake", BotUserId: "123", BotName: "Test", BotType: "two_way", TenantId: 1, AccountId: 99, Status: 1}).Insert(); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := dao.YoubanBotRelayAdmin.Ctx(ctx).Data(do.YoubanBotRelayAdmin{BotId: 1, UserId: "12", Username: ""}).Insert(); err != nil {
@@ -41,7 +41,7 @@ func TestRelayHelpRequiresConfiguredAdminAndPrivateChat(t *testing.T) {
 	}
 	s := NewSysBot()
 	s.relayClientForToken = func(context.Context, string) (*tgbot.Bot, error) { return client, nil }
-	cfg := &entity.YoubanBotRelayConfig{BotId: 1, TenantId: 1, AccountId: 99, SourceBotId: 1, OwnerId: 99}
+	cfg := &entity.YoubanBotRelayConfig{BotId: 1, TenantId: 1, AccountId: 99}
 	for _, tc := range []struct {
 		user int64
 		chat models.ChatType
@@ -61,7 +61,7 @@ func TestRelayHelpRequiresConfiguredAdminAndPrivateChat(t *testing.T) {
 			t.Fatalf("unauthorized help disclosure: %s", text)
 		}
 	}
-	if _, err := dao.YoubanBotRelayConfig.Ctx(ctx).Data(do.YoubanBotRelayConfig{BotId: 1, TenantId: 1, AccountId: 99, SourceBotId: 1, OwnerId: 99, Enabled: 1}).Insert(); err != nil {
+	if _, err := dao.YoubanBotRelayConfig.Ctx(ctx).Data(do.YoubanBotRelayConfig{BotId: 1, TenantId: 1, AccountId: 99, Enabled: 1}).Insert(); err != nil {
 		t.Fatal(err)
 	}
 }

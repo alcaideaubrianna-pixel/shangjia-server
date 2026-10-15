@@ -16,18 +16,22 @@ func featureDefaultStatus(feature botFeature) int {
 
 // A saved configuration determines identity even while switches are disabled.
 func (s *sSysBot) relayIdentity(ctx context.Context, botID int64) (*entity.YoubanBotRelayConfig, error) {
-	cfg, err := relayConfig(ctx, botID)
-	if err != nil || cfg == nil {
-		return cfg, err
-	}
 	bot, err := s.botById(ctx, botID)
 	if err != nil {
 		return nil, err
 	}
-	if bot.IsDefault == 1 {
+	if bot.BotType != "two_way" || bot.IsDefault == 1 {
 		return nil, nil
 	}
-	return cfg, nil
+	cfg, err := relayConfig(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
+	if cfg != nil {
+		return cfg, nil
+	}
+	// Identity alone is enough to recognize a dedicated Bot; actual settings are initialized by its owner.
+	return &entity.YoubanBotRelayConfig{BotId: botID, TenantId: bot.TenantId, AccountId: bot.AccountId}, nil
 }
 func (s *sSysBot) relayRuntimeState(ctx context.Context, cfg *entity.YoubanBotRelayConfig) (bool, string, error) {
 	if !relayOwned(cfg) {
@@ -40,7 +44,7 @@ func (s *sSysBot) relayRuntimeState(ctx context.Context, cfg *entity.YoubanBotRe
 	if bot.IsDefault == 1 {
 		return false, "默认主机器人不可用于双向聊天", nil
 	}
-	if cfg.SourceBotId > 0 {
+	if cfg.BotId > 0 {
 		valid, err := s.relaySourceBotValid(ctx, cfg)
 		if err != nil {
 			return false, "", err

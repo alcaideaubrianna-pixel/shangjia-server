@@ -1,25 +1,4 @@
-CREATE TABLE IF NOT EXISTS `hg_youban_bot_bot` (
-  `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'ID',
-  `bot_name` varchar(128) NOT NULL DEFAULT '' COMMENT 'Bot名称',
-  `bot_username` varchar(128) NOT NULL DEFAULT '' COMMENT 'Bot用户名',
-  `bot_token` varchar(255) NOT NULL DEFAULT '' COMMENT 'Bot Token',
-  `is_official` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否官方Bot',
-  `is_default` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否默认官方Bot',
-  `run_mode` varchar(32) NOT NULL DEFAULT 'auto' COMMENT '运行模式',
-  `webhook_url` varchar(500) NOT NULL DEFAULT '' COMMENT 'Webhook地址',
-  `remark` varchar(500) NOT NULL DEFAULT '' COMMENT '备注',
-  `status` tinyint(4) NOT NULL DEFAULT '1' COMMENT '状态',
-  `created_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '创建人',
-  `updated_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '更新人',
-  `deleted_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '删除人',
-  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
-  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
-  `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
-  PRIMARY KEY (`id`),
-  KEY `idx_ybb_bot_username` (`bot_username`),
-  KEY `idx_ybb_bot_official` (`is_official`,`is_default`,`status`,`id`),
-  KEY `idx_ybb_bot_status` (`status`,`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴全局Bot';
+-- Bot identity schema is maintained by utility/botregistry.
 
 CREATE TABLE IF NOT EXISTS `hg_youban_bot_feature` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'ID',

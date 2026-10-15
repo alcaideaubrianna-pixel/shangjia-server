@@ -107,17 +107,11 @@ func (relayManagementFeature) Handle(ctx context.Context, s *sSysBot, fc *botFea
 			return true, err
 		}
 		lines := []string{fmt.Sprintf("<b>双向机器人 #%d</b> · %s\n实际状态：%s", botID, state, html.EscapeString(runtimeState))}
-		for _, action := range []string{"启用", "停用", "当前设置", "绑定列表", "屏蔽列表", "黑名单", "屏蔽跳转 开启", "屏蔽跳转 关闭", "绑定", "解绑", "添加管理员", "删除管理员", "管理员列表", "屏蔽关键词", "删除关键词", "屏蔽用户", "解除屏蔽用户", "审计设置", "聊天存档 开启", "聊天存档 关闭", "转发群", "关闭转发", "同步后台Bot"} {
+		for _, action := range []string{"启用", "停用", "当前设置", "绑定列表", "屏蔽列表", "黑名单", "屏蔽跳转 开启", "屏蔽跳转 关闭", "绑定", "解绑", "添加管理员", "删除管理员", "管理员列表", "屏蔽关键词", "删除关键词", "屏蔽用户", "解除屏蔽用户", "审计设置", "聊天存档 开启", "聊天存档 关闭", "转发群", "关闭转发"} {
 			lines = append(lines, "<code>"+prefix+" "+action+"</code>")
 		}
 		lines = append(lines, "绑定和屏蔽命令可直接追加，例如：", "<code>"+prefix+" 绑定 @alice @bob</code>", "<code>"+prefix+" 屏蔽 关键词</code>", "使用审计设置、聊天存档和转发群按钮配置聊天记录管理。", "返回：<code>/relayadmin</code>")
 		return reply(strings.Join(lines, "\n"))
-	}
-	if command == "同步后台Bot" {
-		if err := s.relaySyncBackendBot(ctx, account, cfg); err != nil {
-			return reply(html.EscapeString(err.Error()))
-		}
-		return reply(fmt.Sprintf("已同步后台Bot信息。返回：<code>/relayadmin %d</code>", botID))
 	}
 	if err := s.relayCheckAccess(ctx, cfg.BotId); err != nil {
 		return reply(html.EscapeString(err.Error()))
@@ -151,7 +145,7 @@ func (relayManagementFeature) Handle(ctx context.Context, s *sSysBot, fc *botFea
 				enabled = 1
 			}
 			_, err := dao.YoubanBotRelayConfig.Ctx(ctx).WherePri(current.Id).Data(do.YoubanBotRelayConfig{Enabled: enabled}).Update()
-			_, state, stateErr := s.relayRuntimeState(ctx, &entity.YoubanBotRelayConfig{BotId: current.BotId, Enabled: enabled})
+			_, state, stateErr := s.relayRuntimeState(ctx, &entity.YoubanBotRelayConfig{BotId: current.BotId, TenantId: current.TenantId, AccountId: current.AccountId, Enabled: enabled})
 			if stateErr != nil {
 				return stateErr
 			}
@@ -197,9 +191,26 @@ func (s *sSysBot) relayManagementListPage(ctx context.Context, userID int64, pag
 	if err != nil {
 		return "", gerror.New("请先绑定租户账户")
 	}
-	var configs []*entity.YoubanBotRelayConfig
-	if err := relayAccountConfigQuery(ctx, account).OrderAsc(dao.YoubanBotRelayConfig.Columns().BotId).Scan(&configs); err != nil {
-		return "", gerror.Wrap(err, "读取当前账户的双向配置失败")
+	bots, err := s.relayOwnedBackendBots(ctx, account.TenantId, account.AccountId, 0, false)
+	if err != nil {
+		return "", err
+	}
+	configs := make([]*entity.YoubanBotRelayConfig, 0, len(bots))
+	for _, bot := range bots {
+		cfg, err := relayConfig(ctx, bot.Id)
+		if err != nil {
+			return "", err
+		}
+		if cfg == nil {
+			if _, err := s.relayBindBackendBot(ctx, account, bot.Id); err != nil {
+				return "", err
+			}
+			cfg, err = relayConfig(ctx, bot.Id)
+		}
+		if err != nil {
+			return "", err
+		}
+		configs = append(configs, cfg)
 	}
 	lines := []string{fmt.Sprintf("<b>双向机器人管理</b> · 第%d页", page)}
 	visible := 0

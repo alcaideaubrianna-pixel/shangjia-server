@@ -115,7 +115,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_delivery_step` (
   KEY `idx_ybp_tg_delivery_step_recovery` (`status`,`next_retry_at`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='TG发布步骤状态';
 
-ALTER TABLE hg_youban_publish_bot ADD COLUMN account_id bigint NOT NULL DEFAULT 0;
-CREATE INDEX idx_ybp_bot_account ON hg_youban_publish_bot(tenant_id,account_id,created_by,status);
+ALTER TABLE hg_youban_bot_registry ADD COLUMN account_id bigint NOT NULL DEFAULT 0;
+CREATE INDEX idx_ybp_bot_account ON hg_youban_bot_registry(tenant_id,account_id,created_by,status);
 
-ALTER TABLE hg_youban_publish_bot ADD COLUMN bot_type varchar(32) NOT NULL DEFAULT 'normal';
+ALTER TABLE hg_youban_bot_registry ADD COLUMN bot_type varchar(32) NOT NULL DEFAULT 'normal';

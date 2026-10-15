@@ -55,7 +55,7 @@ func TestRelayClaimRespectsConversationBarrier(t *testing.T) {
 		t.Skip("requires PostgreSQL row locks")
 	}
 	ctx := relayTestDatabase(t)
-	if _, err := dao.YoubanBotRelayConfig.Ctx(ctx).Data(do.YoubanBotRelayConfig{BotId: 1, TenantId: 1, AccountId: 99, SourceBotId: 1, OwnerId: 99}).Insert(); err != nil {
+	if _, err := dao.YoubanBotRelayConfig.Ctx(ctx).Data(do.YoubanBotRelayConfig{BotId: 1, TenantId: 1, AccountId: 99}).Insert(); err != nil {
 		t.Fatal(err)
 	}
 	insert := func(pair string, delay time.Duration) *entity.YoubanBotRelayDelivery {

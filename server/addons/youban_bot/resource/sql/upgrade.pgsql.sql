@@ -1,5 +1,5 @@
-ALTER TABLE hg_youban_bot_bot ADD COLUMN IF NOT EXISTS is_official smallint NOT NULL DEFAULT 0;
-ALTER TABLE hg_youban_bot_bot ADD COLUMN IF NOT EXISTS is_default smallint NOT NULL DEFAULT 0;
+ALTER TABLE hg_youban_bot_registry ADD COLUMN IF NOT EXISTS is_official smallint NOT NULL DEFAULT 0;
+ALTER TABLE hg_youban_bot_registry ADD COLUMN IF NOT EXISTS is_default smallint NOT NULL DEFAULT 0;
 CREATE TABLE IF NOT EXISTS hg_youban_bot_user (
   id bigserial PRIMARY KEY,
   bot_id bigint NOT NULL DEFAULT 0,
@@ -57,8 +57,8 @@ CREATE TABLE IF NOT EXISTS hg_youban_bot_channel_cache (
 CREATE UNIQUE INDEX IF NOT EXISTS uk_ybbcc_bot_chat ON hg_youban_bot_channel_cache (bot_id,chat_id);
 CREATE INDEX IF NOT EXISTS idx_ybbcc_last ON hg_youban_bot_channel_cache (bot_id,last_message_at,id);
 
-ALTER TABLE hg_youban_bot_bot ADD COLUMN IF NOT EXISTS run_mode varchar(32) NOT NULL DEFAULT 'auto';
-ALTER TABLE hg_youban_bot_bot ADD COLUMN IF NOT EXISTS webhook_url varchar(500) NOT NULL DEFAULT '';
+ALTER TABLE hg_youban_bot_registry ADD COLUMN IF NOT EXISTS run_mode varchar(32) NOT NULL DEFAULT 'auto';
+ALTER TABLE hg_youban_bot_registry ADD COLUMN IF NOT EXISTS webhook_url varchar(500) NOT NULL DEFAULT '';
 ALTER TABLE hg_youban_bot_user ADD COLUMN IF NOT EXISTS is_super_admin smallint NOT NULL DEFAULT 0;
 
 DROP INDEX IF EXISTS uk_ybbab_account;

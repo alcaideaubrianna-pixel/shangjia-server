@@ -67,6 +67,18 @@ func (s *sSysBot) handleRelayUpdate(ctx context.Context, botID int64, update *mo
 		return true, err
 	}
 	command, _ := botCommandAndArgs(msg.Text)
+	if command == "start" && row.SupergroupId != "" {
+		return false, nil
+	}
+	if row.SupergroupId != "" && command != "help" && command != "id" && parseRelayCommand(msg.Text).Name == "" {
+		binding, err := relayBindingByChat(ctx, botID, source)
+		if err != nil {
+			return true, err
+		}
+		if binding == nil {
+			return false, nil
+		}
+	}
 	if command == "start" {
 		return true, s.relayWelcome(ctx, cfg, msg)
 	}
