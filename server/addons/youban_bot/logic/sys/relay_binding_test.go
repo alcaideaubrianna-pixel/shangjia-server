@@ -32,7 +32,7 @@ func TestRelayFourKindsAndConcurrentBindingConflict(t *testing.T) {
 		relayTestBaseTable(t, ctx, table)
 	}
 	db, _ := gdb.Instance()
-	if _, err := db.Exec(ctx, `INSERT INTO hg_youban_bot_bot(id,bot_token,bot_name,status)VALUES(1,'123:fake','Test',1)`); err != nil {
+	if _, err := db.Exec(ctx, `INSERT INTO hg_youban_bot_registry(id,bot_token,bot_name,status)VALUES(1,'123:fake','Test',1)`); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []int{12, 13, 14} {
@@ -45,7 +45,7 @@ func TestRelayFourKindsAndConcurrentBindingConflict(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := dao.YoubanBotRelayConfig.Ctx(ctx).Data(do.YoubanBotRelayConfig{BotId: 1, TenantId: 1, AccountId: 99, SourceBotId: 1, OwnerId: 99, Enabled: 1}).Insert(); err != nil {
+	if _, err := dao.YoubanBotRelayConfig.Ctx(ctx).Data(do.YoubanBotRelayConfig{BotId: 1, TenantId: 1, AccountId: 99, Enabled: 1}).Insert(); err != nil {
 		t.Fatal(err)
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

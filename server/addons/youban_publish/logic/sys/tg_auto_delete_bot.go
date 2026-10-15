@@ -75,9 +75,9 @@ func (s *sSysPublish) autoDeleteBotById(ctx context.Context, id int64, tenantId 
 	if ok && now.Before(item.ExpireAt) && item.Bot != nil && item.Bot.Id > 0 {
 		return item.Bot, nil
 	}
-	columns := pdao.YoubanPublishBot.Columns()
+	columns := pdao.YoubanBotRegistry.Columns()
 	var bot *sysin.BotModel
-	err := pdao.YoubanPublishBot.Ctx(ctx).
+	err := pdao.YoubanBotRegistry.Ctx(ctx).
 		Where(columns.Id, id).
 		Where(columns.TenantId, tenantId).
 		Where(columns.Status, 1).

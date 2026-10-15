@@ -32,13 +32,13 @@ func relayInteractionFixture(t *testing.T) (context.Context, *sSysBot, <-chan st
 	if _, err := db.Exec(ctx, "CREATE UNIQUE INDEX IF NOT EXISTS test_relay_user_unique ON hg_youban_bot_user(bot_id,telegram_user_id)"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := dao.YoubanBotBot.Ctx(ctx).Data(do.YoubanBotBot{Id: 1, BotToken: "123:fake", BotName: "Relay", Status: 1}).Insert(); err != nil {
+	if _, err := dao.YoubanBotRegistry.Ctx(ctx).Data(do.YoubanBotRegistry{Id: 1, BotToken: "123:fake", BotUserId: "123", BotName: "Relay", BotType: "two_way", TenantId: 1, AccountId: 99, Status: 1}).Insert(); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := dao.YoubanBotFeature.Ctx(ctx).Data(do.YoubanBotFeature{FeatureKey: consts.RelayFeatureKey, Status: 1, ConfigJson: "{}"}).Insert(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := dao.YoubanBotRelayConfig.Ctx(ctx).Data(do.YoubanBotRelayConfig{BotId: 1, TenantId: 1, AccountId: 99, SourceBotId: 1, OwnerId: 99, Enabled: 1, AuditDatabase: 1}).Insert(); err != nil {
+	if _, err := dao.YoubanBotRelayConfig.Ctx(ctx).Data(do.YoubanBotRelayConfig{BotId: 1, TenantId: 1, AccountId: 99, Enabled: 1, AuditDatabase: 1}).Insert(); err != nil {
 		t.Fatal(err)
 	}
 	texts := make(chan string, 50)
@@ -98,7 +98,7 @@ func TestRelayDedicatedBotIdentityAndOldMenus(t *testing.T) {
 	if err != nil || count != 0 {
 		t.Fatal("menu input was forwarded", count, err)
 	}
-	if _, err := dao.YoubanBotBot.Ctx(ctx).WherePri(1).Data(do.YoubanBotBot{IsDefault: 1}).Update(); err != nil {
+	if _, err := dao.YoubanBotRegistry.Ctx(ctx).WherePri(1).Data(do.YoubanBotRegistry{IsDefault: 1}).Update(); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := s.relayIdentity(ctx, 1)
@@ -120,7 +120,7 @@ func TestRelayFirstUseOutboxDedupAndPermission(t *testing.T) {
 	if _, err := dao.YoubanBotAccountBind.Ctx(ctx).Data(do.YoubanBotAccountBind{Id: 99, AccountId: 99, App: "api", TelegramUserId: "23", Status: 1}).Insert(); err != nil {
 		t.Fatal(err)
 	}
-	cfg := &entity.YoubanBotRelayConfig{BotId: 1, TenantId: 1, AccountId: 99, SourceBotId: 1, OwnerId: 99, Enabled: 1}
+	cfg := &entity.YoubanBotRelayConfig{BotId: 1, TenantId: 1, AccountId: 99, Enabled: 1}
 	binding := &entity.YoubanBotRelayBinding{Id: 10, BotId: 1, PairKey: "12:13", LeftChatId: "12", RightChatId: "13", LeftName: "A", RightName: "B"}
 	if _, err := dao.YoubanBotRelayBinding.Ctx(ctx).Data(do.YoubanBotRelayBinding{Id: 10, BotId: 1, PairKey: "12:13", LeftChatId: "12", RightChatId: "13", LeftName: "A", RightName: "B"}).Insert(); err != nil {
 		t.Fatal(err)
@@ -188,7 +188,7 @@ func TestRelayFirstUseConcurrentDedup(t *testing.T) {
 	if _, err := dao.YoubanBotRelayAdmin.Ctx(ctx).Data(do.YoubanBotRelayAdmin{BotId: 1, UserId: "21", Username: "21"}).Insert(); err != nil {
 		t.Fatal(err)
 	}
-	cfg := &entity.YoubanBotRelayConfig{BotId: 1, TenantId: 1, AccountId: 99, SourceBotId: 1, OwnerId: 99}
+	cfg := &entity.YoubanBotRelayConfig{BotId: 1, TenantId: 1, AccountId: 99}
 	binding := &entity.YoubanBotRelayBinding{Id: 10, PairKey: "12:13"}
 	msg := &models.Message{ID: 2, Chat: models.Chat{ID: 12, Type: models.ChatTypePrivate}, From: &models.User{ID: 12}}
 	var wg sync.WaitGroup
@@ -277,7 +277,7 @@ func TestRelayBlockedAndCommandMessagesDoNotNotify(t *testing.T) {
 	if _, err := dao.YoubanBotRelayAdmin.Ctx(ctx).Data(do.YoubanBotRelayAdmin{BotId: 1, UserId: "21", Username: "21"}).Insert(); err != nil {
 		t.Fatal(err)
 	}
-	cfg := &entity.YoubanBotRelayConfig{BotId: 1, TenantId: 1, AccountId: 99, SourceBotId: 1, OwnerId: 99, Enabled: 1, AuditDatabase: 1}
+	cfg := &entity.YoubanBotRelayConfig{BotId: 1, TenantId: 1, AccountId: 99, Enabled: 1, AuditDatabase: 1}
 	binding := &entity.YoubanBotRelayBinding{Id: 10, BotId: 1, PairKey: "12:13", LeftChatId: "12", RightChatId: "13"}
 	msg := &models.Message{ID: 1, Text: "/help", Chat: models.Chat{ID: 12, Type: models.ChatTypePrivate}, From: &models.User{ID: 12}}
 	if err := s.enqueueRelayMessage(ctx, cfg, "Relay", msg, binding, "13", "", true); err != nil {

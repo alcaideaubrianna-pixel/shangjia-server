@@ -126,6 +126,7 @@ func (p *publishBotGatewayProvider) ListEnabledBots(ctx context.Context) ([]gate
 	if err := g.DB().Model(publishBotTable).Safe().Ctx(ctx).
 		Fields("id", "tenant_id", "bot_token").
 		Where("status", 1).
+		Where("bot_type", "normal").
 		WhereNull("deleted_at").
 		Scan(&rows); err != nil {
 		return nil, err

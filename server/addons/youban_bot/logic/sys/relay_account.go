@@ -21,7 +21,7 @@ func relayActorContext(ctx context.Context, userID int64) context.Context {
 	return context.WithValue(ctx, relayActorKey{}, userID)
 }
 func relayOwned(cfg *entity.YoubanBotRelayConfig) bool {
-	return cfg != nil && cfg.TenantId > 0 && cfg.AccountId > 0 && cfg.SourceBotId > 0
+	return cfg != nil && cfg.TenantId > 0 && cfg.AccountId > 0 && cfg.BotId > 0
 }
 func (s *sSysBot) relayAccount(ctx context.Context) (*botProfileAccount, error) {
 	if id, ok := ctx.Value(relayActorKey{}).(int64); ok && id > 0 {
@@ -48,7 +48,7 @@ func (s *sSysBot) relayCheckAccess(ctx context.Context, botID int64) error {
 	if !relayOwned(cfg) {
 		return gerror.New("双向配置未归属租户账户，请创建自己的双向机器人；旧配置需人工迁移")
 	}
-	if cfg.SourceBotId > 0 {
+	if cfg.BotId > 0 {
 		valid, err := s.relaySourceBotValid(ctx, cfg)
 		if err != nil {
 			return err

@@ -56,7 +56,7 @@ func (s *sSysTwoWayBot) runRuntime(ctx context.Context) {
 }
 
 func (s *sSysTwoWayBot) updateWebhookStatus(ctx context.Context, id int64, status string, message string) error {
-	_, err := twdao.YoubanTwoWayBotBot.Ctx(ctx).WherePri(id).Data(g.Map{
+	_, err := twdao.YoubanBotRegistry.Ctx(ctx).WherePri(id).Data(g.Map{
 		"webhook_status":  status,
 		"error_message":   message,
 		"last_webhook_at": gtime.Now(),
@@ -68,11 +68,11 @@ func (s *sSysTwoWayBot) updateWebhookStatus(ctx context.Context, id int64, statu
 	return nil
 }
 
-func (s *sSysTwoWayBot) enabledBots(ctx context.Context) ([]*entity.YoubanTwoWayBotBot, error) {
-	columns := twdao.YoubanTwoWayBotBot.Columns()
-	var rows []*entity.YoubanTwoWayBotBot
-	err := twdao.YoubanTwoWayBotBot.Ctx(ctx).
-		Where(columns.Status, sysin.TwoWayBotStatusEnabled).
+func (s *sSysTwoWayBot) enabledBots(ctx context.Context) ([]*entity.YoubanBotRegistry, error) {
+	columns := twdao.YoubanBotRegistry.Columns()
+	var rows []*entity.YoubanBotRegistry
+	err := twdao.YoubanBotRegistry.Ctx(ctx).
+		Where(columns.Status, sysin.TwoWayBotStatusEnabled).Where(columns.BotType, "two_way").
 		WhereNull(columns.DeletedAt).
 		Scan(&rows)
 	if err != nil {
@@ -81,12 +81,12 @@ func (s *sSysTwoWayBot) enabledBots(ctx context.Context) ([]*entity.YoubanTwoWay
 	return rows, nil
 }
 
-func (s *sSysTwoWayBot) botByToken(ctx context.Context, token string) (*entity.YoubanTwoWayBotBot, error) {
-	columns := twdao.YoubanTwoWayBotBot.Columns()
-	var row *entity.YoubanTwoWayBotBot
-	err := twdao.YoubanTwoWayBotBot.Ctx(ctx).
+func (s *sSysTwoWayBot) botByToken(ctx context.Context, token string) (*entity.YoubanBotRegistry, error) {
+	columns := twdao.YoubanBotRegistry.Columns()
+	var row *entity.YoubanBotRegistry
+	err := twdao.YoubanBotRegistry.Ctx(ctx).
 		Where(columns.BotToken, strings.TrimSpace(token)).
-		Where(columns.Status, sysin.TwoWayBotStatusEnabled).
+		Where(columns.Status, sysin.TwoWayBotStatusEnabled).Where(columns.BotType, "two_way").
 		WhereNull(columns.DeletedAt).
 		OrderDesc(columns.Id).
 		Scan(&row)

@@ -167,6 +167,7 @@ func (s *sSysPublish) AdminBotCreate(ctx context.Context, in *sysin.BotCreateInp
 		"tenant_id":    current.TenantId,
 		"bot_name":     name,
 		"bot_type":     botType,
+		"bot_user_id":  fmt.Sprintf("%d", createdID),
 		"bot_username": botUsername,
 		"bot_token":    token,
 		"remark":       strings.TrimSpace(in.Remark),

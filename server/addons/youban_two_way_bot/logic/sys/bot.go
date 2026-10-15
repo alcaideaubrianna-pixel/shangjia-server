@@ -16,6 +16,7 @@ import (
 )
 
 type sSysTwoWayBot struct {
+	creation      *botCreationHooks
 	runtimeMu     sync.Mutex
 	runtimeCancel context.CancelFunc
 	runtimeDone   chan struct{}
@@ -73,9 +74,9 @@ func (p *cooperationGatewayProvider) ListEnabledBots(ctx context.Context) ([]gat
 	}
 	err := g.DB().Model("hg_youban_two_way_bot_cooperation_config").As("cc").
 		Fields("cc.id,cc.tenant_id,pb.bot_token").
-		InnerJoin("hg_youban_publish_bot pb", "pb.id=cc.bot_id").
+		InnerJoin("hg_youban_bot_registry pb", "pb.id=cc.bot_id").
 		Where("cc.status", 1).WhereNull("cc.deleted_at").WhereNull("pb.deleted_at").
-		Where("NOT EXISTS (SELECT 1 FROM hg_youban_two_way_bot_bot tw WHERE tw.bot_token=pb.bot_token AND tw.status=1 AND tw.deleted_at IS NULL)").
+		Where("pb.bot_type <> ?", "two_way").Where("pb.status", 1).
 		Scan(&rows)
 	if err != nil {
 		return nil, err
@@ -95,7 +96,7 @@ func (p *cooperationGatewayProvider) HandleUpdate(ctx context.Context, binding g
 	if err != nil {
 		return err
 	}
-	_, err = p.twoWayBot.handleCooperationPrivateMessage(ctx, bot, &entity.YoubanTwoWayBotBot{Id: -binding.ReferenceID, TenantId: binding.TenantID, BotToken: binding.Token}, update.Message)
+	_, err = p.twoWayBot.handleCooperationPrivateMessage(ctx, bot, &entity.YoubanBotRegistry{Id: -binding.ReferenceID, TenantId: binding.TenantID, BotToken: binding.Token}, update.Message)
 	return err
 }
 

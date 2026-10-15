@@ -23,7 +23,7 @@ func TestRelayPostgresAlbumClaimIsExclusive(t *testing.T) {
 		t.Skip("requires local PostgreSQL row locks")
 	}
 	ctx := relayTestDatabase(t)
-	if _, err := dao.YoubanBotRelayConfig.Ctx(ctx).Data(do.YoubanBotRelayConfig{BotId: 1, TenantId: 1, AccountId: 99, SourceBotId: 1, OwnerId: 99}).Insert(); err != nil {
+	if _, err := dao.YoubanBotRelayConfig.Ctx(ctx).Data(do.YoubanBotRelayConfig{BotId: 1, TenantId: 1, AccountId: 99}).Insert(); err != nil {
 		t.Fatal(err)
 	}
 	for i := 1; i <= 5; i++ {
@@ -105,7 +105,7 @@ func TestRelayOwnerIdentityAndPendingAdmin(t *testing.T) {
 		}
 		return nil, fmt.Errorf("unbound")
 	}
-	cfg := &entity.YoubanBotRelayConfig{BotId: 1, TenantId: 1, AccountId: 99, SourceBotId: 1, OwnerId: 99}
+	cfg := &entity.YoubanBotRelayConfig{BotId: 1, TenantId: 1, AccountId: 99}
 	ok, err := s.relayIsAdmin(ctx, cfg, 12)
 	if err != nil || !ok {
 		t.Fatalf("owner not admin: %t %v", ok, err)

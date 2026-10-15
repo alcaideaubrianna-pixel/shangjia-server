@@ -212,7 +212,7 @@ func (s *sSysBot) sendRelayDeliveries(ctx context.Context, rows []*entity.Youban
 	if !relayOwned(cfg) || cfg.Enabled != 1 || botRow.Status != 1 || botRow.IsDefault == 1 {
 		return nil, consts.RelayCancelled, nil
 	}
-	if cfg.SourceBotId > 0 {
+	if cfg.BotId > 0 {
 		valid, err := s.relaySourceBotValid(ctx, cfg)
 		if err != nil {
 			return nil, relayRetryStatus(first.Attempts), err

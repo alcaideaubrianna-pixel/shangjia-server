@@ -26,7 +26,7 @@ func (s *sSysBot) relayBackendBotChoices(ctx context.Context, account *botProfil
 	if len(bots) == 0 {
 		return "请先在后台创建自己的双向机器人，再回到这里发送 /relayadmin。这里只能绑定、配置当前租户账户自己创建的Bot。", nil
 	}
-	lines := []string{"请选择自己在后台创建的Bot绑定双向配置（每个租户账户一份）："}
+	lines := []string{"请选择自己在后台创建的双向机器人："}
 	for i, bot := range bots {
 		if i >= 20 {
 			lines = append(lines, "其余Bot请在后台查看ID，再发送 /relayadmin 绑定后台Bot ID。")
@@ -63,10 +63,10 @@ func (s *sSysBot) relayBindBackendBot(ctx context.Context, account *botProfileAc
 // Backend deletion, disabling, token rotation and ownership changes take effect
 // before routing/sending; the mirror is only a Gateway/directory adapter.
 func (s *sSysBot) relaySourceBotValid(ctx context.Context, cfg *entity.YoubanBotRelayConfig) (bool, error) {
-	if cfg.SourceBotId <= 0 {
+	if cfg == nil || cfg.BotId <= 0 {
 		return false, nil
 	}
-	sources, err := s.relayOwnedBackendBots(ctx, cfg.TenantId, cfg.AccountId, cfg.SourceBotId, false)
+	sources, err := s.relayOwnedBackendBots(ctx, cfg.TenantId, cfg.AccountId, cfg.BotId, false)
 	if err != nil {
 		return false, err
 	}
@@ -79,7 +79,7 @@ func (s *sSysBot) relaySourceBotValid(ctx context.Context, cfg *entity.YoubanBot
 	if err != nil {
 		return false, err
 	}
-	return source.BotToken == bot.BotToken, nil
+	return source.Id == bot.Id && bot.BotType == "two_way" && bot.IsDefault != 1, nil
 }
 
 func relayAccountConfigQuery(ctx context.Context, account *botProfileAccount) *gdb.Model {
@@ -91,34 +91,4 @@ func (s *sSysBot) relayOwnedBackendBots(ctx context.Context, tenantID, accountID
 		return s.relayOwnedBots(ctx, tenantID, accountID, botID, lock)
 	}
 	return publishservice.SysPublish().RelayOwnedBots(ctx, tenantID, accountID, botID, lock)
-}
-
-func (s *sSysBot) relaySyncBackendBot(ctx context.Context, account *botProfileAccount, cfg *entity.YoubanBotRelayConfig) error {
-	if !relayOwned(cfg) || account == nil || cfg.TenantId != account.TenantId || cfg.AccountId != account.AccountId {
-		return gerror.New("无权同步其他账户的Bot")
-	}
-	err := relayMutate(ctx, cfg.BotId, func(ctx context.Context) error {
-		sources, err := s.relayOwnedBackendBots(ctx, account.TenantId, account.AccountId, cfg.SourceBotId, true)
-		if err != nil {
-			return err
-		}
-		if len(sources) != 1 {
-			return gerror.New("后台Bot已停用、删除或不再属于当前账户，请先在后台检查")
-		}
-		source := sources[0]
-		bot, err := s.botById(ctx, cfg.BotId)
-		if err != nil {
-			return err
-		}
-		if strings.Split(bot.BotToken, ":")[0] != strings.Split(source.BotToken, ":")[0] {
-			return gerror.New("后台Token对应另一个Bot，不能将旧会话迁移给另一个机器人")
-		}
-		_, err = dao.YoubanBotBot.Ctx(ctx).WherePri(cfg.BotId).Data(do.YoubanBotBot{BotToken: source.BotToken, BotName: source.BotName, BotUsername: source.BotUsername}).Update()
-		return err
-	})
-	if err == nil {
-		s.clearTelegramBotCache()
-		_ = gatewayservice.Gateway().Refresh(ctx)
-	}
-	return err
 }

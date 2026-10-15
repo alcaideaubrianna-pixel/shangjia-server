@@ -233,7 +233,7 @@ func (s *sSysBot) OfficialBotToken(ctx context.Context) (string, error) {
 
 func (s *sSysBot) enabledBots(ctx context.Context) ([]*sysin.BotModel, error) {
 	var rows []*sysin.BotModel
-	if err := g.DB().Model(botTable).Safe().Ctx(ctx).Where("status", 1).WhereNull("deleted_at").OrderAsc("id").Scan(&rows); err != nil {
+	if err := g.DB().Model(botTable).Safe().Ctx(ctx).Where("status", 1).Where("bot_type", "main").WhereNull("deleted_at").OrderAsc("id").Scan(&rows); err != nil {
 		return nil, gerror.Wrap(err, "读取Bot配置失败")
 	}
 	return rows, nil

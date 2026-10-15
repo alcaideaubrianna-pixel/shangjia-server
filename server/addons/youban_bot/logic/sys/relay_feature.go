@@ -32,7 +32,10 @@ func (f *relayGatewayFeature) Key() string   { return consts.RelayFeatureKey }
 func (f *relayGatewayFeature) Priority() int { return 1000 }
 func (f *relayGatewayFeature) Menus(ctx context.Context, bc gatewayservice.BotContext) (gatewayservice.FeatureMenus, error) {
 	for _, binding := range bc.Bindings {
-		if binding.Owner == "youban_bot" {
+		if binding.Owner == "youban_bot" || binding.Owner == "youban_two_way_bot" {
+			if binding.Owner == "youban_two_way_bot" {
+				return gatewayservice.FeatureMenus{Managed: true, Items: []gatewayservice.MenuItem{{Command: "help", Description: "双向管理帮助（仅管理员）", Order: 1}, {Command: "id", Description: "查看聊天ID", Order: 2}}}, nil
+			}
 			items := make([]gatewayservice.MenuItem, 0)
 			for i, feature := range botFeatures {
 				if feature == nil || !f.bot.featureMenuVisible(ctx, feature.Key()) {
@@ -54,14 +57,14 @@ func (f *relayGatewayFeature) Menus(ctx context.Context, bc gatewayservice.BotCo
 }
 func (f *relayGatewayFeature) HandleUpdate(ctx context.Context, bc gatewayservice.BotContext, update *models.Update) (bool, error) {
 	for _, binding := range bc.Bindings {
-		if binding.Owner == "youban_bot" {
+		if binding.Owner == "youban_bot" || binding.Owner == "youban_two_way_bot" {
 
 			if update != nil && update.CallbackQuery != nil {
 				if handled, err := f.bot.handleRelayManagementCallback(ctx, binding.ReferenceID, update.CallbackQuery); handled || err != nil {
 					return handled, err
 				}
 				cfg, err := f.bot.relayIdentity(ctx, binding.ReferenceID)
-				if err == nil && cfg != nil {
+				if binding.Owner == "youban_bot" && err == nil && cfg != nil {
 					return true, f.bot.relayExpiredButton(ctx, binding.ReferenceID, update.CallbackQuery)
 				}
 			}

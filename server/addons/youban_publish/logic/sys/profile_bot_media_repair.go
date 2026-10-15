@@ -157,7 +157,7 @@ func (s *sSysPublish) findBotProfileMediaDirectSource(ctx context.Context, media
 		return nil, "", err
 	}
 	var source botProfileMediaSource
-	if err = g.DB().Model("hg_youban_bot_bot").Ctx(ctx).
+	if err = g.DB().Model("hg_youban_bot_registry").Ctx(ctx).
 		Fields("id AS bot_id,bot_token").Where("bot_token", token).OrderDesc("id").Limit(1).Scan(&source); err != nil {
 		return nil, "", gerror.Wrap(err, "读取历史Bot下载凭证失败")
 	}
@@ -231,7 +231,7 @@ func (s *sSysPublish) findBotProfileMediaSource(ctx context.Context, media gdb.R
 		var source botProfileMediaSource
 		if err = g.DB().Model("hg_youban_bot_message m").Safe().Ctx(ctx).
 			Fields("m.bot_id,m.raw_json,b.bot_token").
-			LeftJoin("hg_youban_bot_bot b", "b.id=m.bot_id AND b.deleted_at IS NULL").
+			LeftJoin("hg_youban_bot_registry b", "b.id=m.bot_id AND b.deleted_at IS NULL").
 			Where("m.chat_id", chatID).Where("m.message_id", messageID).Scan(&source); err != nil {
 			return nil, gerror.Wrap(err, "读取Bot原始媒体消息失败")
 		}
@@ -262,7 +262,7 @@ func (s *sSysPublish) findBotProfileMediaSource(ctx context.Context, media gdb.R
 		var messages []*botProfileMediaSource
 		if err := g.DB().Model("hg_youban_bot_message m").Safe().Ctx(ctx).
 			Fields("m.bot_id,m.raw_json,b.bot_token").
-			LeftJoin("hg_youban_bot_bot b", "b.id=m.bot_id AND b.deleted_at IS NULL").
+			LeftJoin("hg_youban_bot_registry b", "b.id=m.bot_id AND b.deleted_at IS NULL").
 			Where("m.bot_id", session.BotID).Where("m.chat_id", session.ChatID).
 			WhereBetween("m.created_at", session.CreatedAt.Add(-time.Minute), session.UpdatedAt.Add(time.Minute)).
 			OrderAsc("m.message_id").Scan(&messages); err != nil {

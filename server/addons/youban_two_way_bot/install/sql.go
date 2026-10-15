@@ -2,6 +2,7 @@ package install
 
 import (
 	"context"
+	"hotgo/utility/botregistry"
 	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -28,6 +29,9 @@ func Install(ctx context.Context) error { return execSql(ctx) }
 func Upgrade(ctx context.Context) error { return execSql(ctx) }
 
 func execSql(ctx context.Context) (err error) {
+	if err := botregistry.EnsureSchema(ctx); err != nil {
+		return err
+	}
 	for _, file := range sqlFiles() {
 		if err = execSqlFile(ctx, file); err != nil {
 			return gerror.Wrapf(err, "执行双向机器人 SQL 失败：%s", file)

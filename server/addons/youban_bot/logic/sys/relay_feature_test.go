@@ -20,6 +20,12 @@ func relayTestBaseTable(t *testing.T, ctx context.Context, name string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if name == botTable {
+		ddl, err = os.ReadFile("../../../../utility/botregistry/schema.pgsql.sql")
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	prefix := "CREATE TABLE IF NOT EXISTS " + name + " ("
 	start := strings.Index(string(ddl), prefix)
 	if start < 0 {

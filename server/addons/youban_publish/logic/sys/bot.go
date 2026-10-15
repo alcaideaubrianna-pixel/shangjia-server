@@ -2,6 +2,9 @@ package sys
 
 import (
 	"context"
+	"hotgo/addons/youban_publish/internal/dao"
+	"hotgo/addons/youban_publish/internal/model/entity"
+	"hotgo/utility/botregistry"
 	"net"
 	"net/http"
 	"net/url"
@@ -30,7 +33,7 @@ func (s *sSysPublish) AdminBotList(ctx context.Context, in *sysin.BotListInp) (l
 		return nil, 0, err
 	}
 	mod := g.DB().Model(publishBotTable).Safe().Ctx(ctx).
-		Where("tenant_id", current.TenantId).
+		Where("tenant_id", current.TenantId).Where("(account_id=? OR (account_id=0 AND bot_type=?))", current.Id, "normal").
 		WhereNull("deleted_at")
 	if in.Status > 0 {
 		mod = mod.Where("status", in.Status)
@@ -62,7 +65,17 @@ func (s *sSysPublish) ServerBotSave(ctx context.Context, in *sysin.BotSaveInp) (
 	if in.TenantId <= 0 {
 		return gerror.New("请选择账号归属")
 	}
-	return s.saveBot(ctx, in, in.TenantId, contexts.GetUserId(ctx), 0)
+	if in.AccountId > 0 {
+		c := dao.YoubanPublishAccount.Columns()
+		n, err := dao.YoubanPublishAccount.Ctx(ctx).Where(c.Id, in.AccountId).Where(c.TenantId, in.TenantId).Where(c.Status, 1).Count()
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return gerror.New("请选择该租户下有效的账户归属")
+		}
+	}
+	return s.saveBot(ctx, in, in.TenantId, contexts.GetUserId(ctx), in.AccountId)
 }
 
 func (s *sSysPublish) ServerBotDelete(ctx context.Context, in *sysin.BotDeleteInp) (err error) {
@@ -134,6 +147,9 @@ func (s *sSysPublish) saveBot(ctx context.Context, in *sysin.BotSaveInp, tenantI
 	if botType == "" {
 		botType = consts.PublishBotTypeNormal
 	}
+	if botType == consts.PublishBotTypeTwoWay && accountId <= 0 {
+		return gerror.New("双向机器人必须指定所属租户账户")
+	}
 	if botType != consts.PublishBotTypeNormal && botType != consts.PublishBotTypeTwoWay {
 		return gerror.New("Bot用途不合法")
 	}
@@ -163,7 +179,28 @@ func (s *sSysPublish) saveBot(ctx context.Context, in *sysin.BotSaveInp, tenantI
 	if botName == "" {
 		botName = telegramBotDisplayName(tgUser)
 	}
+	botUserID, idErr := botregistry.TelegramID(botToken)
+	if idErr != nil {
+		return idErr
+	}
+	if in.Id > 0 {
+		var old *entity.YoubanBotRegistry
+		if err := dao.YoubanBotRegistry.Ctx(ctx).WherePri(in.Id).Scan(&old); err != nil {
+			return err
+		}
+		if old == nil || old.BotType == "main" || (accountId > 0 && ((old.AccountId != accountId && !(old.AccountId == 0 && old.BotType == "normal")) || old.TenantId != tenantId)) {
+			return gerror.New("无权编辑该Bot")
+		}
+		if old.BotType != botType && old.SupergroupId != "" {
+			return gerror.New("已配置管理群的双向机器人不能改为其他用途")
+		}
+		if old.BotUserId != botUserID {
+			return gerror.New("不能把现有Bot更换为另一个机器人，请新增Bot")
+		}
+	}
 	data := g.Map{
+		"bot_user_id":  botUserID,
+		"account_id":   accountId,
 		"tenant_id":    tenantId,
 		"bot_name":     botName,
 		"bot_type":     botType,
@@ -216,7 +253,7 @@ func (s *sSysPublish) AdminBotDelete(ctx context.Context, in *sysin.BotDeleteInp
 	if err = s.ensureBotsBelongTenant(ctx, in.Ids, current.TenantId); err != nil {
 		return err
 	}
-	if _, err = g.DB().Model(publishBotTable).Safe().Ctx(ctx).WhereIn("id", in.Ids).Where("tenant_id", current.TenantId).Data(g.Map{
+	if _, err = g.DB().Model(publishBotTable).Safe().Ctx(ctx).WhereIn("id", in.Ids).Where("tenant_id", current.TenantId).Where("account_id", current.Id).Data(g.Map{
 		"deleted_by": current.Id,
 		"deleted_at": gtime.Now(),
 	}).Update(); err != nil {
@@ -247,7 +284,7 @@ func (s *sSysPublish) refreshBots(ctx context.Context, ids []int64, tenantId int
 		WhereIn("id", ids).
 		WhereNull("deleted_at")
 	if tenantId > 0 {
-		mod = mod.Where("tenant_id", tenantId)
+		mod = mod.Where("tenant_id", tenantId).Where("(account_id=? OR (account_id=0 AND bot_type=?))", operatorId, "normal")
 	}
 	if err = mod.Scan(&bots); err != nil {
 		return nil, gerror.Wrap(err, "读取Bot配置失败")
