@@ -23,6 +23,11 @@ func TestRelayFourKindsAndConcurrentBindingConflict(t *testing.T) {
 		t.Skip("requires PostgreSQL row locks")
 	}
 	ctx := relayTestDatabase(t)
+	ctx = relayActorContext(ctx, 99)
+	relayTestBaseTable(t, ctx, "hg_youban_bot_account_bind")
+	if _, err := dao.YoubanBotRelayAdmin.Ctx(ctx).Data(do.YoubanBotRelayAdmin{BotId: 1, UserId: "99", Username: "99"}).Insert(); err != nil {
+		t.Fatal(err)
+	}
 	for _, table := range []string{botTable, userTable, channelCacheTable} {
 		relayTestBaseTable(t, ctx, table)
 	}
@@ -40,7 +45,7 @@ func TestRelayFourKindsAndConcurrentBindingConflict(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := dao.YoubanBotRelayConfig.Ctx(ctx).Data(do.YoubanBotRelayConfig{BotId: 1, OwnerId: 99, Enabled: 1}).Insert(); err != nil {
+	if _, err := dao.YoubanBotRelayConfig.Ctx(ctx).Data(do.YoubanBotRelayConfig{BotId: 1, TenantId: 1, AccountId: 99, SourceBotId: 1, OwnerId: 99, Enabled: 1}).Insert(); err != nil {
 		t.Fatal(err)
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -63,6 +68,7 @@ func TestRelayFourKindsAndConcurrentBindingConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := NewSysBot()
+	s.relayOwnedBots = relayTestOwnedBackendBots
 	s.relayClientForToken = func(context.Context, string) (*tgbot.Bot, error) { return client, nil }
 	base := sysin.RelayBotInp{BotId: 1}
 	for _, pair := range [][2]string{{"12", "13"}, {"12", "-1001"}, {"-1001", "12"}, {"-1001", "-1002"}} {

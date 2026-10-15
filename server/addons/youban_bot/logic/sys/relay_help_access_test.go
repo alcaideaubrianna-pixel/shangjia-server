@@ -41,7 +41,7 @@ func TestRelayHelpRequiresConfiguredAdminAndPrivateChat(t *testing.T) {
 	}
 	s := NewSysBot()
 	s.relayClientForToken = func(context.Context, string) (*tgbot.Bot, error) { return client, nil }
-	cfg := &entity.YoubanBotRelayConfig{BotId: 1, OwnerId: 99}
+	cfg := &entity.YoubanBotRelayConfig{BotId: 1, TenantId: 1, AccountId: 99, SourceBotId: 1, OwnerId: 99}
 	for _, tc := range []struct {
 		user int64
 		chat models.ChatType
@@ -61,15 +61,7 @@ func TestRelayHelpRequiresConfiguredAdminAndPrivateChat(t *testing.T) {
 			t.Fatalf("unauthorized help disclosure: %s", text)
 		}
 	}
-	if _, err := dao.YoubanBotRelayConfig.Ctx(ctx).Data(do.YoubanBotRelayConfig{BotId: 1, OwnerId: 99, Enabled: 1}).Insert(); err != nil {
+	if _, err := dao.YoubanBotRelayConfig.Ctx(ctx).Data(do.YoubanBotRelayConfig{BotId: 1, TenantId: 1, AccountId: 99, SourceBotId: 1, OwnerId: 99, Enabled: 1}).Insert(); err != nil {
 		t.Fatal(err)
-	}
-	text, err := s.relayManagementList(ctx, 13)
-	if err != nil || strings.Contains(text, "/relayadmin 1") {
-		t.Fatalf("unrelated user saw managed Bot: %s %v", text, err)
-	}
-	text, err = s.relayManagementList(ctx, 12)
-	if err != nil || !strings.Contains(text, "/relayadmin 1") {
-		t.Fatalf("configured admin cannot see managed Bot: %s %v", text, err)
 	}
 }

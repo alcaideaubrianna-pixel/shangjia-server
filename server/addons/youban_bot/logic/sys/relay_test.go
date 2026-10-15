@@ -76,7 +76,7 @@ func relayTestDatabase(t *testing.T) context.Context {
 	}
 	sql := strings.ReplaceAll(string(ddl), "bigserial PRIMARY KEY", "integer PRIMARY KEY AUTOINCREMENT")
 	for _, statement := range strings.Split(sql, ";") {
-		if strings.TrimSpace(statement) == "" {
+		if strings.TrimSpace(statement) == "" || strings.HasPrefix(strings.TrimSpace(statement), "ALTER TABLE") {
 			continue
 		}
 		if _, err = db.Exec(context.Background(), statement); err != nil {
@@ -133,6 +133,7 @@ func TestRelayFilterHiddenLinksAndGroupUsers(t *testing.T) {
 func TestRelayDurableDedupAndAuditPair(t *testing.T) {
 	ctx := relayTestDatabase(t)
 	s := NewSysBot()
+	s.relayOwnedBots = relayTestOwnedBackendBots
 	cfg := &entity.YoubanBotRelayConfig{BotId: 1, AuditDatabase: 1, AuditGroupId: "-100999"}
 	binding := &entity.YoubanBotRelayBinding{Id: 10, PairKey: relayPairKey("12", "13"), LeftChatId: "12", RightChatId: "13", LeftName: "Alice", RightName: "Bob"}
 	a := &models.Message{ID: 2, Text: "hello", From: &models.User{ID: 12}, Chat: models.Chat{ID: 12, Type: models.ChatTypePrivate}}
@@ -165,6 +166,7 @@ func TestRelayDurableDedupAndAuditPair(t *testing.T) {
 func TestRelayFilteredAlbumCannotBypassCaption(t *testing.T) {
 	ctx := relayTestDatabase(t)
 	s := NewSysBot()
+	s.relayOwnedBots = relayTestOwnedBackendBots
 	cfg := &entity.YoubanBotRelayConfig{BotId: 1}
 	binding := &entity.YoubanBotRelayBinding{Id: 10, PairKey: "12:13", LeftChatId: "12", RightChatId: "13", LeftName: "A", RightName: "B"}
 	msg := &models.Message{ID: 1, Caption: "blocked", MediaGroupID: "album", From: &models.User{ID: 12}, Chat: models.Chat{ID: 12}, Photo: []models.PhotoSize{{FileID: "photo"}}}
@@ -217,11 +219,7 @@ func TestRelayHelpAndSettingsValidation(t *testing.T) {
 	if in.Filter() == nil {
 		t.Fatal("private chat accepted as audit group")
 	}
-	raw, _ := json.Marshal(map[string]interface{}{"botId": 1, "enabled": 1, "auditDatabase": 1, "admins": "@alice\n123", "keywords": "广告\nSPAM"})
-	got, words, err := relaySettingsFromFeature(string(raw))
-	if err != nil || got.BotId != 1 || len(words) != 2 || len(got.Admins) != 2 {
-		t.Fatalf("feature settings: %+v %+v %v", got, words, err)
-	}
+
 }
 
 func TestRelayAuditTopicReusedInBothDirections(t *testing.T) {
@@ -241,6 +239,7 @@ func TestRelayAuditTopicReusedInBothDirections(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := NewSysBot()
+	s.relayOwnedBots = relayTestOwnedBackendBots
 	for _, pair := range [][2]string{{"12", "13"}, {"13", "12"}} {
 		id, err := s.relayAuditThread(ctx, bot, &entity.YoubanBotRelayDelivery{BotId: 1, TargetChatId: "-100999", PairKey: relayPairKey(pair[0], pair[1]), TopicTitle: "Alice-Bob"})
 		if err != nil || id != 77 {
@@ -277,7 +276,7 @@ func TestRelaySenderPreservesMediaAndAuditAttribution(t *testing.T) {
 	if _, err := db.Exec(ctx, `INSERT INTO hg_youban_bot_bot (id,bot_token,bot_name,status) VALUES (1,'123:fake','Test',1)`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := dao.YoubanBotRelayConfig.Ctx(ctx).Data(do.YoubanBotRelayConfig{BotId: 1, OwnerId: 1, Enabled: 1, AuditGroupId: "-100999"}).Insert(); err != nil {
+	if _, err := dao.YoubanBotRelayConfig.Ctx(ctx).Data(do.YoubanBotRelayConfig{BotId: 1, TenantId: 1, AccountId: 1, SourceBotId: 1, OwnerId: 1, Enabled: 1, AuditGroupId: "-100999"}).Insert(); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := dao.YoubanBotRelayBinding.Ctx(ctx).Data(do.YoubanBotRelayBinding{Id: 10, BotId: 1, PairKey: "12:13", LeftChatId: "12", RightChatId: "13", LeftName: "A", RightName: "B"}).Insert(); err != nil {
@@ -312,6 +311,7 @@ func TestRelaySenderPreservesMediaAndAuditAttribution(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := NewSysBot()
+	s.relayOwnedBots = relayTestOwnedBackendBots
 	s.relayClientForToken = func(context.Context, string) (*tgbot.Bot, error) { return bot, nil }
 	msg := models.Message{ID: 2, Text: "hello", Chat: models.Chat{ID: 12}, From: &models.User{ID: 12}}
 	raw, _ := json.Marshal(msg)

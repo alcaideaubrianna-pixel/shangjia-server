@@ -49,15 +49,11 @@ func (s *sSysBot) AdminFeatureList(ctx context.Context, in *sysin.FeatureListInp
 			item.UpdatedAt = row.UpdatedAt.String()
 		}
 		if row.FeatureKey == (relayFeature{}).Key() {
-			if in.BotId > 0 {
-				item.ConfigValues["botId"] = in.BotId
-			}
-			if loadErr := s.relayFeatureSchema(ctx, item); loadErr != nil {
-				item.ConfigError = "双向配置读取失败，请检查数据库迁移；仍可停用插件"
-				item.ConfigValues["revision"] = ""
-				g.Log().Warningf(ctx, "读取双向配置失败: %+v", loadErr)
-			}
+			item.Command = ""
+			item.ConfigJson = "{}"
+			item.ConfigValues = map[string]interface{}{}
 		}
+
 		list = append(list, item)
 	}
 	return
@@ -168,7 +164,7 @@ func (s *sSysBot) syncFeatureDefaults(ctx context.Context) error {
 		}
 		if count > 0 {
 			if feature.Key() == (relayFeature{}).Key() {
-				result, err := g.DB().Model(featureTable).Safe().Ctx(ctx).Where("feature_key", feature.Key()).WhereNull("deleted_at").WhereNot("command", "").Data(g.Map{"command": ""}).Update()
+				result, err := g.DB().Model(featureTable).Safe().Ctx(ctx).Where("feature_key", feature.Key()).WhereNull("deleted_at").Where("(command <> ? OR config_json <> ?)", "", "{}").Data(g.Map{"command": "", "config_json": "{}"}).Update()
 				if err != nil {
 					return gerror.Wrap(err, "清理双向配置插件历史命令失败")
 				}
@@ -362,6 +358,9 @@ func appendFeatureMenuSchema(list []*sysin.FeatureConfigSchema) []*sysin.Feature
 }
 
 func featureConfigSchema(key string) []*sysin.FeatureConfigSchema {
+	if key == (relayFeature{}).Key() {
+		return []*sysin.FeatureConfigSchema{}
+	}
 	for _, feature := range botFeatures {
 		if feature != nil && feature.Key() == key {
 			if provider, ok := feature.(botFeatureConfigProvider); ok {

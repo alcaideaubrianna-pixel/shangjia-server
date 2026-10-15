@@ -23,6 +23,7 @@ func (s *sSysBot) handleRelayCommand(ctx context.Context, cfg *entity.YoubanBotR
 	if msg.From != nil {
 		userID = msg.From.ID
 	}
+	ctx = relayActorContext(ctx, userID)
 	if cmd.Name == "/id" {
 		return s.relayReply(ctx, cfg.BotId, msg, fmt.Sprintf("用户ID：<code>%d</code>\n聊天ID：<code>%d</code>", userID, msg.Chat.ID))
 	}
@@ -96,7 +97,7 @@ func (s *sSysBot) executeRelayCommand(ctx context.Context, cfg *entity.YoubanBot
 			return "", err
 		}
 		return "双向绑定成功。", nil
-	case "添加管理员", "管理员列表":
+	case "添加管理员", "删除管理员", "管理员列表":
 		return s.relayAdminCommand(ctx, cfg, cmd)
 	case "解绑":
 		return "请确认解除绑定：\n<code>确认解绑 " + html.EscapeString(cmd.Args) + "</code>\n取消操作请忽略本提示。", nil

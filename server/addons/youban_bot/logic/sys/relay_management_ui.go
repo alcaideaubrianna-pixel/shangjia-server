@@ -75,7 +75,7 @@ func (s *sSysBot) handleRelayManagementCallback(ctx context.Context, botID int64
 func relayManagementActionPrompt(botID int64, action string) string {
 	prefix := fmt.Sprintf("/relayadmin %d ", botID)
 	examples := map[string]string{
-		"绑定": "绑定 @alice @bob", "转发群": "转发群 -1001234567890", "解绑": "解绑 @alice", "添加管理员": "添加管理员 123456789", "屏蔽关键词": "屏蔽 广告", "删除关键词": "删除屏蔽 广告", "屏蔽用户": "屏蔽用户 123456789", "解除屏蔽用户": "解除屏蔽用户 123456789",
+		"绑定": "绑定 @alice @bob", "转发群": "转发群 -1001234567890", "解绑": "解绑 @alice", "添加管理员": "添加管理员 123456789", "删除管理员": "删除管理员 123456789", "屏蔽关键词": "屏蔽 广告", "删除关键词": "删除屏蔽 广告", "屏蔽用户": "屏蔽用户 123456789", "解除屏蔽用户": "解除屏蔽用户 123456789",
 	}
 	example, ok := examples[action]
 	if !ok {

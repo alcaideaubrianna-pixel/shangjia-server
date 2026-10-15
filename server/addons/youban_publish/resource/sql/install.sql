@@ -2230,3 +2230,8 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_ai_ops_repair_plan` (
   `created_at` datetime DEFAULT NULL, `updated_at` datetime DEFAULT NULL,
   PRIMARY KEY (`id`), UNIQUE KEY `uk_ybp_ai_ops_repair_plan` (`plan_id`), KEY `idx_ybp_ai_ops_repair_plan_status` (`status`,`expires_at`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI运维修复计划审计';
+
+ALTER TABLE hg_youban_publish_bot ADD COLUMN account_id bigint NOT NULL DEFAULT 0;
+CREATE INDEX idx_ybp_bot_account ON hg_youban_publish_bot(tenant_id,account_id,created_by,status);
+
+ALTER TABLE hg_youban_publish_bot ADD COLUMN bot_type varchar(32) NOT NULL DEFAULT 'normal';

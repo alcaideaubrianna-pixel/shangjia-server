@@ -1174,6 +1174,7 @@ type BotChannelCacheModel struct {
 }
 
 type BotModel struct {
+	BotType     string      `json:"botType" dc:"Bot用途：normal普通机器人，two_way双向机器人"`
 	Id          int64       `json:"id" dc:"ID"`
 	TenantId    int64       `json:"tenantId" dc:"租户ID，0表示全局"`
 	BotName     string      `json:"botName" dc:"Bot名称"`
@@ -1186,6 +1187,7 @@ type BotModel struct {
 }
 
 type BotSaveInp struct {
+	BotType     string `json:"botType" dc:"Bot用途：normal普通机器人，two_way双向机器人"`
 	Id          int64  `json:"id" dc:"ID"`
 	TenantId    int64  `json:"tenantId" dc:"租户ID，0表示全局"`
 	BotName     string `json:"botName" dc:"Bot名称"`
@@ -1196,6 +1198,7 @@ type BotSaveInp struct {
 }
 
 type BotCreateInp struct {
+	BotType     string `json:"botType" dc:"Bot用途：normal普通机器人，two_way双向机器人"`
 	BotName     string `json:"botName" v:"required#Bot名称不能为空" dc:"Bot名称"`
 	BotUsername string `json:"botUsername" v:"required#Bot用户名不能为空" dc:"Bot用户名"`
 	Remark      string `json:"remark" dc:"备注"`

@@ -30,6 +30,9 @@ type YoubanBotRelayConfigColumns struct {
 	AuditGroupId  string //
 	CreatedAt     string //
 	UpdatedAt     string //
+	TenantId      string //
+	AccountId     string //
+	SourceBotId   string //
 }
 
 // youbanBotRelayConfigColumns holds the columns for the table hg_youban_bot_relay_config.
@@ -43,6 +46,9 @@ var youbanBotRelayConfigColumns = YoubanBotRelayConfigColumns{
 	AuditGroupId:  "audit_group_id",
 	CreatedAt:     "created_at",
 	UpdatedAt:     "updated_at",
+	TenantId:      "tenant_id",
+	AccountId:     "account_id",
+	SourceBotId:   "source_bot_id",
 }
 
 // NewYoubanBotRelayConfigDao creates and returns a new DAO object for table data access.

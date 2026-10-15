@@ -62,6 +62,12 @@ func (s *sSysBot) AdminBotSave(ctx context.Context, in *sysin.BotSaveInp) (err e
 			return gerror.New("该Bot已配置为双向机器人，不能设置为默认主机器人")
 		}
 	}
+	if in.Id > 0 {
+		cfg, readErr := relayConfig(ctx, in.Id)
+		if readErr == nil && relayOwned(cfg) {
+			return gerror.New("租户账户的双向Bot请从所属账户的双向机器人管理中操作")
+		}
+	}
 	botToken := strings.TrimSpace(in.BotToken)
 	if botToken == "" && old != nil {
 		botToken = old.BotToken
@@ -140,6 +146,13 @@ func (s *sSysBot) AdminBotDelete(ctx context.Context, in *sysin.BotDeleteInp) (e
 	if in == nil || len(in.Ids) == 0 {
 		return gerror.New("请选择要删除的数据")
 	}
+	for _, id := range in.Ids {
+		cfg, readErr := relayConfig(ctx, id)
+		if readErr == nil && relayOwned(cfg) {
+			return gerror.New("不能从全局Bot管理删除租户账户的双向Bot")
+		}
+	}
+
 	_, err = g.DB().Model(botTable).Safe().Ctx(ctx).WhereIn("id", uniqueIds(in.Ids)).Data(g.Map{"deleted_by": contexts.GetUserId(ctx), "deleted_at": gtime.Now()}).Update()
 	if err != nil {
 		return gerror.Wrap(err, "删除Bot配置失败")

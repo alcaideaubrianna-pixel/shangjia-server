@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"hotgo/addons/youban_bot/internal/dao"
 	"hotgo/addons/youban_bot/internal/model/do"
 	"hotgo/addons/youban_bot/internal/model/entity"
+	publishsysin "hotgo/addons/youban_publish/model/input/sysin"
 	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
 
 	tgbot "github.com/go-telegram/bot"
@@ -36,7 +38,7 @@ func relayInteractionFixture(t *testing.T) (context.Context, *sSysBot, <-chan st
 	if _, err := dao.YoubanBotFeature.Ctx(ctx).Data(do.YoubanBotFeature{FeatureKey: consts.RelayFeatureKey, Status: 1, ConfigJson: "{}"}).Insert(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := dao.YoubanBotRelayConfig.Ctx(ctx).Data(do.YoubanBotRelayConfig{BotId: 1, OwnerId: 99, Enabled: 1, AuditDatabase: 1}).Insert(); err != nil {
+	if _, err := dao.YoubanBotRelayConfig.Ctx(ctx).Data(do.YoubanBotRelayConfig{BotId: 1, TenantId: 1, AccountId: 99, SourceBotId: 1, OwnerId: 99, Enabled: 1, AuditDatabase: 1}).Insert(); err != nil {
 		t.Fatal(err)
 	}
 	texts := make(chan string, 50)
@@ -56,6 +58,17 @@ func relayInteractionFixture(t *testing.T) (context.Context, *sSysBot, <-chan st
 		t.Fatal(err)
 	}
 	s := NewSysBot()
+	s.relayOwnedBots = relayTestOwnedBackendBots
+	s.relayAccountForUser = func(ctx context.Context, id int64) (*botProfileAccount, error) {
+		if id == 12 {
+			return &botProfileAccount{TenantId: 1, AccountId: 99, App: "api"}, nil
+		}
+		if id == 23 {
+			return &botProfileAccount{TenantId: 1, AccountId: 99, App: "api"}, nil
+		}
+		return nil, fmt.Errorf("unbound")
+	}
+
 	s.relayClientForToken = func(context.Context, string) (*tgbot.Bot, error) { return client, nil }
 	return ctx, s, texts
 }
@@ -104,10 +117,10 @@ func TestRelayFirstUseOutboxDedupAndPermission(t *testing.T) {
 	if _, err := dao.YoubanBotRelayAdmin.Ctx(ctx).Data(do.YoubanBotRelayAdmin{BotId: 1, UserId: "", Username: "@pending"}).Insert(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := dao.YoubanBotAccountBind.Ctx(ctx).Data(do.YoubanBotAccountBind{Id: 99, AccountId: 99, App: "admin", TelegramUserId: "23", Status: 1}).Insert(); err != nil {
+	if _, err := dao.YoubanBotAccountBind.Ctx(ctx).Data(do.YoubanBotAccountBind{Id: 99, AccountId: 99, App: "api", TelegramUserId: "23", Status: 1}).Insert(); err != nil {
 		t.Fatal(err)
 	}
-	cfg := &entity.YoubanBotRelayConfig{BotId: 1, OwnerId: 99, Enabled: 1}
+	cfg := &entity.YoubanBotRelayConfig{BotId: 1, TenantId: 1, AccountId: 99, SourceBotId: 1, OwnerId: 99, Enabled: 1}
 	binding := &entity.YoubanBotRelayBinding{Id: 10, BotId: 1, PairKey: "12:13", LeftChatId: "12", RightChatId: "13", LeftName: "A", RightName: "B"}
 	if _, err := dao.YoubanBotRelayBinding.Ctx(ctx).Data(do.YoubanBotRelayBinding{Id: 10, BotId: 1, PairKey: "12:13", LeftChatId: "12", RightChatId: "13", LeftName: "A", RightName: "B"}).Insert(); err != nil {
 		t.Fatal(err)
@@ -175,7 +188,7 @@ func TestRelayFirstUseConcurrentDedup(t *testing.T) {
 	if _, err := dao.YoubanBotRelayAdmin.Ctx(ctx).Data(do.YoubanBotRelayAdmin{BotId: 1, UserId: "21", Username: "21"}).Insert(); err != nil {
 		t.Fatal(err)
 	}
-	cfg := &entity.YoubanBotRelayConfig{BotId: 1, OwnerId: 99}
+	cfg := &entity.YoubanBotRelayConfig{BotId: 1, TenantId: 1, AccountId: 99, SourceBotId: 1, OwnerId: 99}
 	binding := &entity.YoubanBotRelayBinding{Id: 10, PairKey: "12:13"}
 	msg := &models.Message{ID: 2, Chat: models.Chat{ID: 12, Type: models.ChatTypePrivate}, From: &models.User{ID: 12}}
 	var wg sync.WaitGroup
@@ -240,6 +253,9 @@ func TestRelayManagementButtonsRecheckPermissions(t *testing.T) {
 	if _, err := dao.YoubanBotRelayAdmin.Ctx(ctx).Where(do.YoubanBotRelayAdmin{BotId: 1, UserId: "12"}).Delete(); err != nil {
 		t.Fatal(err)
 	}
+	s.relayAccountForUser = func(context.Context, int64) (*botProfileAccount, error) {
+		return &botProfileAccount{TenantId: 2, AccountId: 100, App: "api"}, nil
+	}
 	q.Data = "rm:1 确认 停用"
 	handled, err = s.handleRelayManagementCallback(ctx, 1, q)
 	if !handled || err != nil {
@@ -247,7 +263,7 @@ func TestRelayManagementButtonsRecheckPermissions(t *testing.T) {
 	}
 	<-texts
 	text = <-texts
-	if !strings.Contains(text, "仅该双向机器人配置的管理员") {
+	if !strings.Contains(text, "无权管理其他租户账户") {
 		t.Fatal("stale button bypassed permission", text)
 	}
 	cfg, err = relayConfig(ctx, 1)
@@ -261,7 +277,7 @@ func TestRelayBlockedAndCommandMessagesDoNotNotify(t *testing.T) {
 	if _, err := dao.YoubanBotRelayAdmin.Ctx(ctx).Data(do.YoubanBotRelayAdmin{BotId: 1, UserId: "21", Username: "21"}).Insert(); err != nil {
 		t.Fatal(err)
 	}
-	cfg := &entity.YoubanBotRelayConfig{BotId: 1, OwnerId: 99, Enabled: 1, AuditDatabase: 1}
+	cfg := &entity.YoubanBotRelayConfig{BotId: 1, TenantId: 1, AccountId: 99, SourceBotId: 1, OwnerId: 99, Enabled: 1, AuditDatabase: 1}
 	binding := &entity.YoubanBotRelayBinding{Id: 10, BotId: 1, PairKey: "12:13", LeftChatId: "12", RightChatId: "13"}
 	msg := &models.Message{ID: 1, Text: "/help", Chat: models.Chat{ID: 12, Type: models.ChatTypePrivate}, From: &models.User{ID: 12}}
 	if err := s.enqueueRelayMessage(ctx, cfg, "Relay", msg, binding, "13", "", true); err != nil {
@@ -309,4 +325,15 @@ func TestRelayAuditControlsStayOutOfDedicatedHelp(t *testing.T) {
 			t.Fatal("audit controls leaked into relay help", word)
 		}
 	}
+}
+
+func relayTestOwnedBackendBots(ctx context.Context, tenantID, accountID, sourceID int64, lock bool) ([]*publishsysin.RelayOwnedBotModel, error) {
+	if sourceID <= 0 {
+		sourceID = 1
+	}
+	token := "123:fake"
+	if sourceID == 2 {
+		token = "456:other"
+	}
+	return []*publishsysin.RelayOwnedBotModel{{BotModel: publishsysin.BotModel{BotType: "two_way", Id: sourceID, TenantId: tenantID, BotToken: token, Status: 1}, AccountId: accountID, CreatedBy: accountID}}, nil
 }

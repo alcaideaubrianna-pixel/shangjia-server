@@ -32,7 +32,7 @@ func Upgrade(ctx context.Context) error { return execSql(ctx) }
 func execSql(ctx context.Context) (err error) {
 	for _, file := range sqlFiles() {
 		if err = execSqlFile(ctx, file); err != nil {
-			return gerror.Wrapf(err, "执行全局机器人 SQL 失败：%s", file)
+			return gerror.Wrapf(err, "执行全局机器人 SQL 失败：%s；%s", file, gerror.Current(err).Error())
 		}
 	}
 	return nil
@@ -59,7 +59,7 @@ func execSqlFile(ctx context.Context, path string) (err error) {
 			if isIgnorableSqlError(err) {
 				continue
 			}
-			return gerror.Wrapf(err, "执行 SQL 失败：%s 第 %d 段", path, index+1)
+			return gerror.Wrapf(err, "执行 SQL 失败：%s 第 %d 段：%s", path, index+1, err.Error())
 		}
 	}
 	return nil

@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	publishsysin "hotgo/addons/youban_publish/model/input/sysin"
 	"regexp"
 	"strings"
 	"sync"
@@ -36,6 +37,8 @@ var sixDigitRegexp = regexp.MustCompile(`\b\d{6}\b`)
 
 type sSysBot struct {
 	relayClientForToken   func(context.Context, string) (*tgbot.Bot, error)
+	relayAccountForUser   func(context.Context, int64) (*botProfileAccount, error)
+	relayOwnedBots        func(context.Context, int64, int64, int64, bool) ([]*publishsysin.RelayOwnedBotModel, error)
 	relayMu               sync.Mutex
 	relayCancel           context.CancelFunc
 	relayDone             chan struct{}

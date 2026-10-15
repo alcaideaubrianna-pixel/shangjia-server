@@ -46,6 +46,9 @@ func (s *sSysBot) handleRelayUpdate(ctx context.Context, botID int64, update *mo
 	if cfg == nil {
 		return false, nil
 	}
+	if !relayOwned(cfg) {
+		return true, s.relayReply(ctx, botID, msg, "此双向机器人尚未完成租户账户归属迁移，已停用。请联系管理员核对后台Bot归属后迁移；不会继续传递消息。")
+	}
 	row, err := s.botById(ctx, botID)
 	if err != nil {
 		return false, err
@@ -221,6 +224,9 @@ func relayTopicTitle(value string) string {
 }
 
 func (s *sSysBot) AdminRelayRecordList(ctx context.Context, in *sysin.RelayListInp) ([]*entity.YoubanBotRelayDelivery, int, error) {
+	if err := s.relayCheckAccess(ctx, in.BotId); err != nil {
+		return nil, 0, err
+	}
 	if err := in.Filter(); err != nil {
 		return nil, 0, err
 	}

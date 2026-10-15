@@ -47,7 +47,7 @@ INSERT INTO "hg_admin_menu" (
 )
 SELECT
   parent."id", 'Bot 配置', 'youbanBotConfig', '', '', 3, '',
-  '/youban_bot/bot/list,/youban_bot/bot/save,/youban_bot/bot/delete,/youban_bot/bot/refresh,/youban_bot/bot/restart,/youban_bot/bot/feature/list,/youban_bot/bot/feature/save,/youban_bot/bot/user/list,/youban_bot/bot/user/superAdmin,/youban_bot/bot/message/list,/youban_bot/bot/message/send,/youban_bot/relay/bots,/youban_bot/relay/settings,/youban_bot/relay/saveSettings,/youban_bot/relay/bindings,/youban_bot/relay/bind,/youban_bot/relay/unbind,/youban_bot/relay/rules,/youban_bot/relay/saveRule,/youban_bot/relay/deleteRule,/youban_bot/relay/records,/youban_bot/relay/switch',
+  '/youban_bot/bot/list,/youban_bot/bot/save,/youban_bot/bot/delete,/youban_bot/bot/refresh,/youban_bot/bot/restart,/youban_bot/bot/feature/list,/youban_bot/bot/feature/save,/youban_bot/bot/user/list,/youban_bot/bot/user/superAdmin,/youban_bot/bot/message/list,/youban_bot/bot/message/send',
   '', '', 0, 'youbanBot', 0, 0, '', 0, 1, 0, 3,
   parent."tree" || 'tr_' || parent."id"::text || ' ',
   10, '全局机器人按钮权限', 1, NOW(), NOW()
@@ -58,7 +58,7 @@ UPDATE "hg_admin_menu"
 SET "pid" = parent."id",
     "title" = 'Bot 配置',
     "type" = 3,
-    "permissions" = '/youban_bot/bot/list,/youban_bot/bot/save,/youban_bot/bot/delete,/youban_bot/bot/refresh,/youban_bot/bot/restart,/youban_bot/bot/feature/list,/youban_bot/bot/feature/save,/youban_bot/bot/user/list,/youban_bot/bot/user/superAdmin,/youban_bot/bot/message/list,/youban_bot/bot/message/send,/youban_bot/relay/bots,/youban_bot/relay/settings,/youban_bot/relay/saveSettings,/youban_bot/relay/bindings,/youban_bot/relay/bind,/youban_bot/relay/unbind,/youban_bot/relay/rules,/youban_bot/relay/saveRule,/youban_bot/relay/deleteRule,/youban_bot/relay/records,/youban_bot/relay/switch',
+    "permissions" = '/youban_bot/bot/list,/youban_bot/bot/save,/youban_bot/bot/delete,/youban_bot/bot/refresh,/youban_bot/bot/restart,/youban_bot/bot/feature/list,/youban_bot/bot/feature/save,/youban_bot/bot/user/list,/youban_bot/bot/user/superAdmin,/youban_bot/bot/message/list,/youban_bot/bot/message/send',
     "component" = '',
     "active_menu" = 'youbanBot',
     "hidden" = 1,
@@ -70,6 +70,38 @@ SET "pid" = parent."id",
     "updated_at" = NOW()
 FROM (SELECT "id", "tree" FROM "hg_admin_menu" WHERE "name" = 'youbanBot' LIMIT 1) parent
 WHERE "hg_admin_menu"."name" = 'youbanBotConfig';
+
+INSERT INTO "hg_admin_menu" (
+  "pid", "title", "name", "path", "icon", "type", "redirect", "permissions",
+  "permission_name", "component", "always_show", "active_menu", "is_root",
+  "is_frame", "frame_src", "keep_alive", "hidden", "affix", "level", "tree",
+  "sort", "remark", "status", "created_at", "updated_at"
+)
+SELECT
+  parent."id", '双向机器人权限', 'youbanBotRelayConfig', '', '', 3, '',
+  '/youban_bot/relay/bots,/youban_bot/relay/settings,/youban_bot/relay/saveSettings,/youban_bot/relay/bindings,/youban_bot/relay/bind,/youban_bot/relay/unbind,/youban_bot/relay/rules,/youban_bot/relay/saveRule,/youban_bot/relay/deleteRule,/youban_bot/relay/records,/youban_bot/relay/switch',
+  '', '', 0, 'youbanBot', 0, 0, '', 0, 1, 0, 3,
+  parent."tree" || 'tr_' || parent."id"::text || ' ',
+  10, '全局机器人按钮权限', 1, NOW(), NOW()
+FROM (SELECT "id", "tree" FROM "hg_admin_menu" WHERE "name" = 'youbanBot' LIMIT 1) parent
+WHERE NOT EXISTS (SELECT 1 FROM "hg_admin_menu" WHERE "name" = 'youbanBotRelayConfig');
+
+UPDATE "hg_admin_menu"
+SET "pid" = parent."id",
+    "title" = '双向机器人权限',
+    "type" = 3,
+    "permissions" = '/youban_bot/relay/bots,/youban_bot/relay/settings,/youban_bot/relay/saveSettings,/youban_bot/relay/bindings,/youban_bot/relay/bind,/youban_bot/relay/unbind,/youban_bot/relay/rules,/youban_bot/relay/saveRule,/youban_bot/relay/deleteRule,/youban_bot/relay/records,/youban_bot/relay/switch',
+    "component" = '',
+    "active_menu" = 'youbanBot',
+    "hidden" = 1,
+    "level" = 3,
+    "tree" = parent."tree" || 'tr_' || parent."id"::text || ' ',
+    "sort" = 10,
+    "remark" = '全局机器人按钮权限',
+    "status" = 1,
+    "updated_at" = NOW()
+FROM (SELECT "id", "tree" FROM "hg_admin_menu" WHERE "name" = 'youbanBot' LIMIT 1) parent
+WHERE "hg_admin_menu"."name" = 'youbanBotRelayConfig';
 
 INSERT INTO "hg_admin_menu" (
   "pid", "title", "name", "path", "icon", "type", "redirect", "permissions",
@@ -95,7 +127,7 @@ WHERE "name" = 'youbanBotBroadcastRecords';
 INSERT INTO "hg_admin_role_menu" ("role_id", "menu_id")
 SELECT r."id", m."id"
 FROM "hg_admin_role" r
-JOIN "hg_admin_menu" m ON m."name" IN ('youbanBot', 'youbanBotConfig', 'youbanBotBroadcastRecords')
+JOIN "hg_admin_menu" m ON m."name" IN ('youbanBot', 'youbanBotConfig', 'youbanBotRelayConfig', 'youbanBotBroadcastRecords')
 WHERE r."id" IN (1, 2)
   AND NOT EXISTS (
     SELECT 1 FROM "hg_admin_role_menu" rm WHERE rm."role_id" = r."id" AND rm."menu_id" = m."id"

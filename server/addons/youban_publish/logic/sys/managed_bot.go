@@ -13,6 +13,7 @@ import (
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
 	collectorservice "hotgo/addons/telegram_collector/service"
 	botService "hotgo/addons/youban_bot/service"
+	"hotgo/addons/youban_publish/consts"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
 
@@ -91,6 +92,13 @@ func (s *sSysPublish) AdminBotCreate(ctx context.Context, in *sysin.BotCreateInp
 	if err != nil {
 		return nil, err
 	}
+	botType := strings.TrimSpace(in.BotType)
+	if botType == "" {
+		botType = consts.PublishBotTypeTwoWay
+	}
+	if botType != consts.PublishBotTypeNormal && botType != consts.PublishBotTypeTwoWay {
+		return nil, gerror.New("Bot用途不合法")
+	}
 	name := strings.TrimSpace(in.BotName)
 	if name == "" {
 		return nil, gerror.New("Bot名称不能为空")
@@ -158,11 +166,13 @@ func (s *sSysPublish) AdminBotCreate(ctx context.Context, in *sysin.BotCreateInp
 	id, err := g.DB().Model(publishBotTable).Safe().Ctx(ctx).Data(g.Map{
 		"tenant_id":    current.TenantId,
 		"bot_name":     name,
+		"bot_type":     botType,
 		"bot_username": botUsername,
 		"bot_token":    token,
 		"remark":       strings.TrimSpace(in.Remark),
 		"status":       status,
 		"created_by":   current.Id,
+		"account_id":   current.Id,
 		"created_at":   now,
 		"updated_by":   current.Id,
 		"updated_at":   now,

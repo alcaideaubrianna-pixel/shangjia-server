@@ -19,4 +19,7 @@ type YoubanBotRelayConfig struct {
 	AuditGroupId  string      `json:"auditGroupId"  orm:"audit_group_id" ` //
 	CreatedAt     *gtime.Time `json:"createdAt"     orm:"created_at"     ` //
 	UpdatedAt     *gtime.Time `json:"updatedAt"     orm:"updated_at"     ` //
+	TenantId      int64       `json:"tenantId"      orm:"tenant_id"      ` //
+	AccountId     int64       `json:"accountId"     orm:"account_id"     ` //
+	SourceBotId   int64       `json:"sourceBotId"   orm:"source_bot_id"  ` //
 }

@@ -6,26 +6,15 @@
     title="插件配置"
     positive-text="保存"
     negative-text="取消"
-    :positive-button-props="{ disabled: relayLoading || !!relayError }"
     @positive-click="emit('save')"
   >
-    <n-alert v-if="relayError || form.configError" type="error">{{
-      relayError || form.configError
-    }}</n-alert>
+    <n-alert v-if="form.configError" type="error">{{ form.configError }}</n-alert>
     <n-alert v-if="form.featureKey === 'two_way_relay'" type="info" class="mb-4">
-      请为双向聊天选择独立
-      Bot，默认主机器人不可使用。首次保存配置的后台账号为默认管理员，该账号需已绑定 TG。 使用
-      @用户名添加管理员后，对方需到所选 Bot 私聊发送 /start 确认身份；所有管理员都需先私聊此 Bot
-      才能接收绑定用户首次使用通知。 全局插件、Bot
-      状态和双向功能均启用后才会传递消息。保存列表将替换该 Bot 的对应配置。
+      此处仅控制双向机器人全局开关。每个租户账户的
+      Bot、管理员、绑定、屏蔽规则和审计设置，请在绑定上架账号后，到主机器人发送 /relayadmin
+      独立管理。
     </n-alert>
-    <n-form
-      :disabled="relayLoading"
-      :model="form"
-      label-placement="left"
-      label-width="110"
-      class="feature-config-form"
-    >
+    <n-form :model="form" label-placement="left" label-width="110" class="feature-config-form">
       <n-alert
         v-if="form.featureKey === 'inline_promotion'"
         type="info"
@@ -191,8 +180,8 @@
 </template>
 
 <script setup lang="ts">
-  import { computed, onMounted, ref, watch } from 'vue';
-  import { BotList, UserList, FeatureList } from '@/api/addons/youbanBot';
+  import { computed, onMounted, ref } from 'vue';
+  import { BotList, UserList } from '@/api/addons/youbanBot';
   import UploadImage from '@/components/Upload/uploadImage.vue';
   import TelegramRichEditor from '@/components/TelegramRichEditor/index.vue';
   import MarkdownEditor from '@/components/MarkdownEditor/index.vue';
@@ -200,34 +189,6 @@
   const props = defineProps<{ show: boolean; form: Record<string, any>; statusOptions: any[] }>();
   const form = computed(() => props.form);
   const emit = defineEmits<{ (e: 'update:show', value: boolean): void; (e: 'save'): void }>();
-
-  const relayLoading = ref(false);
-  const relayError = ref('');
-  let relayRequest = 0;
-  watch(
-    () => [props.show, props.form.featureKey, props.form.configValues?.botId],
-    async ([show, key, botId]) => {
-      const request = ++relayRequest;
-      relayLoading.value = false;
-      relayError.value = '';
-      if (!show || key !== 'two_way_relay' || !botId) return;
-      relayLoading.value = true;
-      form.value.configValues.revision = '';
-      try {
-        const res: any = await FeatureList({ page: 1, perPage: 200, botId });
-        if (request !== relayRequest) return;
-        const row = res?.list?.find((item: any) => item.featureKey === key);
-        if (!row || row.configError || !row.configValues?.revision)
-          throw new Error('配置加载失败，请重新选择Bot');
-        form.value.configValues = row.configValues;
-        form.value.configError = '';
-      } catch (error) {
-        if (request === relayRequest) relayError.value = '配置加载失败，请重新选择Bot后保存';
-      } finally {
-        if (request === relayRequest) relayLoading.value = false;
-      }
-    }
-  );
 
   const adminUsers = ref<any[]>([]);
   const superBots = ref<any[]>([]);
