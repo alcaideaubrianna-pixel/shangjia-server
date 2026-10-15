@@ -79,3 +79,17 @@ type TelegramMessageOfflineReq struct {
 type TelegramMessageOfflineRes struct {
 	*sysin.AIOpsTelegramOfflineResult
 }
+
+type RepairPlanReq struct {
+	g.Meta `path:"/repair/plan" method:"post" tags:"AI运维" summary:"预演采集修复并生成确认令牌"`
+	sysin.AIOpsRepairPlanInp
+}
+
+type RepairPlanRes struct{ *sysin.AIOpsRepairPlanModel }
+
+type RepairApplyReq struct {
+	g.Meta `path:"/repair/apply" method:"post" tags:"AI运维" summary:"执行已确认的采集修复计划"`
+	sysin.AIOpsRepairApplyInp
+}
+
+type RepairApplyRes struct{ *sysin.AIOpsRepairApplyModel }

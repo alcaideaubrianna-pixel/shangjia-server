@@ -68,6 +68,9 @@ func (s *sSysPublish) runCollectRecovery(ctx context.Context) {
 
 func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	mediaBatchSize := collectMediaRecoveryBatchSize(ctx)
+	if err := s.dispatchDueCollectProcessOutbox(ctx, collectProcessOutboxRecoveryBatchSize(ctx)); err != nil {
+		g.Log().Warningf(ctx, "恢复采集处理Outbox失败：%+v", err)
+	}
 	if err := s.cleanupCollectEventsOlderThan(ctx, tasklog.RetentionDays(), 1000); err != nil {
 		g.Log().Warningf(ctx, "清理过期采集事件失败：%+v", err)
 	}

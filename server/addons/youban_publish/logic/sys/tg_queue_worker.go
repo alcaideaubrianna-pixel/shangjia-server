@@ -521,7 +521,14 @@ func (s *sSysPublish) handleCollectProcessTask(ctx context.Context, task *asynq.
 	delay, pending, removeSchedule, err := s.processCollectSourceTask(ctx, payload)
 	if err != nil || !pending {
 		if err == nil && removeSchedule {
-			return s.reconcileCollectProcessSchedule(ctx, payload)
+			err = s.reconcileCollectProcessSchedule(ctx, payload)
+			if err == nil {
+				completeCollectProcessOutbox(ctx, payload.EventId)
+			}
+			return err
+		}
+		if err == nil {
+			completeCollectProcessOutbox(ctx, payload.EventId)
 		}
 		return err
 	}

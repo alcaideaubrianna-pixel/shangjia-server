@@ -71,3 +71,19 @@ func (c *cAIOps) TelegramMessageOffline(ctx context.Context, req *aiops.Telegram
 	}
 	return &aiops.TelegramMessageOfflineRes{AIOpsTelegramOfflineResult: result}, nil
 }
+
+func (c *cAIOps) RepairPlan(ctx context.Context, req *aiops.RepairPlanReq) (*aiops.RepairPlanRes, error) {
+	result, err := service.SysPublish().AIOpsCreateRepairPlan(ctx, &req.AIOpsRepairPlanInp)
+	if err != nil {
+		return nil, err
+	}
+	return &aiops.RepairPlanRes{AIOpsRepairPlanModel: result}, nil
+}
+
+func (c *cAIOps) RepairApply(ctx context.Context, req *aiops.RepairApplyReq) (*aiops.RepairApplyRes, error) {
+	result, err := service.SysPublish().AIOpsApplyRepairPlan(ctx, &req.AIOpsRepairApplyInp)
+	if err != nil {
+		return nil, err
+	}
+	return &aiops.RepairApplyRes{AIOpsRepairApplyModel: result}, nil
+}

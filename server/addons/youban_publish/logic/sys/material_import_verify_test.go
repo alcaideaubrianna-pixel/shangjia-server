@@ -54,10 +54,31 @@ func TestCollectMaterialUnitsPairDisplayAndVerify(t *testing.T) {
 	}
 }
 
-func TestCollectMaterialUnitsPairAcrossIgnoredMessages(t *testing.T) {
+func TestCollectMaterialUnitsPairMultipleVerifyGroups(t *testing.T) {
+	units := []*collectMaterialUnit{
+		{RawText: "昵称：A100", MessageId: 151, Messages: []int{151}, Media: []collectMediaItem{{Type: "photo", FileId: "photo-1"}}},
+		{MessageId: 152, Messages: []int{152}, Media: []collectMediaItem{{Type: "video", FileId: "video-1"}}},
+		{MessageId: 153, Messages: []int{153, 154}, Media: []collectMediaItem{{Type: "video", FileId: "video-2"}, {Type: "video", FileId: "video-3"}}},
+	}
+	paired := pairCollectMaterialUnits(units)
+	if len(paired) != 1 {
+		t.Fatalf("paired units=%d, want 1", len(paired))
+	}
+	verifyCount := 0
+	for _, media := range paired[0].Media {
+		if media.Purpose == collectMaterialRoleVerify {
+			verifyCount++
+		}
+	}
+	if verifyCount != 3 {
+		t.Fatalf("verify media=%d, want 3", verifyCount)
+	}
+}
+
+func TestCollectMaterialUnitsPairAcrossKnownAutoDeleteMessages(t *testing.T) {
 	units := []*collectMaterialUnit{
 		{RawText: "昵称：A200\n城市：北京", MessageId: 200, Media: []collectMediaItem{{Type: "image", FileId: "photo-1"}}},
-		{RawText: "随手发的一条干扰消息", MessageId: 201},
+		{RawText: "✅提交成功！", MessageId: 201},
 		{MessageId: 202, Media: []collectMediaItem{{Type: "video", FileId: "verify-1"}}},
 		{RawText: "昵称：A201\n城市：上海", MessageId: 203, Media: []collectMediaItem{{Type: "image", FileId: "photo-2"}}},
 		{MessageId: 204, Media: []collectMediaItem{{Type: "video", FileId: "verify-2"}}},

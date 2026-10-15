@@ -33,9 +33,21 @@ func (s *sSysPublish) rebuildCollectedProfileMedia(ctx context.Context, profileI
 	if err != nil || display.IsEmpty() {
 		return gerror.Wrap(err, "读取展示采集事件失败")
 	}
-	verify, err := s.pairedCollectVerifyEvent(ctx, dispatch.EventID)
+	verifies, err := s.pairedCollectVerifyEvents(ctx, dispatch.EventID)
 	if err != nil {
 		return err
+	}
+	displayRows, err := s.collectEventMediaRows(ctx, dispatch.EventID)
+	if err != nil {
+		return err
+	}
+	verifyRows := make([]*collectEventMediaRow, 0)
+	for _, verify := range verifies {
+		rows, rowsErr := s.collectEventMediaRows(ctx, verify["id"].Int64())
+		if rowsErr != nil {
+			return rowsErr
+		}
+		verifyRows = append(verifyRows, rows...)
 	}
 	targetPurpose := ""
 	if jobID > 0 {
@@ -53,29 +65,27 @@ func (s *sSysPublish) rebuildCollectedProfileMedia(ctx context.Context, profileI
 		return gerror.Wrap(err, "读取待恢复资料媒体失败")
 	}
 	recovered := 0
-	usedSourceMedia := make(map[int64]map[int64]struct{})
+	usedSourceMedia := make(map[string]map[int64]struct{})
 	for _, target := range media {
 		purpose := strings.TrimSpace(target["purpose"].String())
 		if targetPurpose != "" && purpose != targetPurpose {
 			continue
 		}
-		eventID := dispatch.EventID
+		var rows []*collectEventMediaRow
 		if purpose == "verify" {
-			if verify.IsEmpty() {
+			if len(verifyRows) == 0 {
 				continue
 			}
-			eventID = verify["id"].Int64()
+			rows = verifyRows
 		} else if purpose != "display" {
 			continue
+		} else {
+			rows = displayRows
 		}
-		rows, rowsErr := s.collectEventMediaRows(ctx, eventID)
-		if rowsErr != nil {
-			return rowsErr
-		}
-		used := usedSourceMedia[eventID]
+		used := usedSourceMedia[purpose]
 		if used == nil {
 			used = make(map[int64]struct{})
-			usedSourceMedia[eventID] = used
+			usedSourceMedia[purpose] = used
 		}
 		source := nextCompatibleCollectMedia(rows, target["media_type"].String(), used)
 		if source == nil {

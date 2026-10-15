@@ -64,8 +64,20 @@ func (s *sSysPublish) enqueueCollectProcessDeferred(ctx context.Context, payload
 }
 
 func (s *sSysPublish) enqueueCollectProcessTask(ctx context.Context, payload collectProcessQueuePayload, delay time.Duration, unique bool) (bool, error) {
+	return s.enqueueCollectProcessTaskWithOutbox(ctx, payload, delay, unique, true)
+}
+
+func (s *sSysPublish) enqueueCollectProcessTaskWithOutbox(ctx context.Context, payload collectProcessQueuePayload, delay time.Duration, unique, persist bool) (bool, error) {
 	if payload.TenantId <= 0 || payload.AccountId <= 0 || payload.SourceId <= 0 {
 		return false, nil
+	}
+	if persist {
+		if err := ensureCollectProcessOutbox(ctx, payload, delay); err != nil {
+			if !isMissingCollectProcessOutboxError(err) {
+				return false, err
+			}
+			g.Log().Warningf(ctx, "采集处理Outbox尚未迁移，临时沿用Redis任务 eventId:%d err:%+v", payload.EventId, err)
+		}
 	}
 	client, err := s.telegramQueueClient(ctx)
 	if err != nil {

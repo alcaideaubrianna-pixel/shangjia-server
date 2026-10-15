@@ -463,15 +463,19 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 			g.Log().Warningf(ctx, "验证资料已完成但没有父展示事件 eventId:%d", eventId)
 			return nil
 		}
-		g.Log().Infof(ctx, "验证资料媒体已完成，回流处理父展示事件 verifyEventId:%d parentEventId:%d", eventId, parentEventId)
-		if err = s.processCollectEvent(ctx, parentEventId, tenantId, accountId); err != nil {
-			g.Log().Warningf(ctx, "验证资料回流父展示事件失败，将重新排队 verifyEventId:%d parentEventId:%d err:%+v", eventId, parentEventId, err)
-			if enqueueErr := s.enqueueCollectProcess(ctx, collectProcessQueuePayload{
-				EventId: parentEventId, TenantId: tenantId, AccountId: accountId,
-				SourceId: event["source_id"].Int64(), SourceChatId: event["source_chat_id"].String(),
-			}, 30*time.Second); enqueueErr != nil {
-				return enqueueErr
-			}
+		parent, parentErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).WherePri(parentEventId).One()
+		if parentErr != nil {
+			return gerror.Wrap(parentErr, "读取验证资料父展示事件失败")
+		}
+		if parent.IsEmpty() {
+			return nil
+		}
+		g.Log().Infof(ctx, "验证资料媒体已完成，调度父展示资料静默截止任务 verifyEventId:%d parentEventId:%d", eventId, parentEventId)
+		if err = s.scheduleCollectDisplaySettlement(ctx, collectProcessQueuePayload{
+			EventId: parentEventId, TenantId: tenantId, AccountId: accountId,
+			SourceId: event["source_id"].Int64(), SourceChatId: event["source_chat_id"].String(),
+		}, parent, s.collectDisplayRetryDelay(ctx, parent)); err != nil {
+			return err
 		}
 		return nil
 	}

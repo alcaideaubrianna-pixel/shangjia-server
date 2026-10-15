@@ -71,11 +71,11 @@ func (s *sSysPublish) completeTargetCollectEvent(ctx context.Context, payload co
 	if err != nil {
 		return gerror.Wrap(err, "重新读取展示采集事件失败")
 	}
-	verify, err := s.pairedCollectVerifyEvent(ctx, payload.EventId)
+	verifies, err := s.pairedCollectVerifyEvents(ctx, payload.EventId)
 	if err != nil {
 		return err
 	}
-	if !verify.IsEmpty() {
+	for _, verify := range verifies {
 		ready, readyErr := s.collectEventMediaReady(ctx, verify["id"].Int64())
 		if readyErr != nil {
 			return gerror.Wrap(readyErr, "验证视频完整性检查失败")
@@ -102,10 +102,7 @@ func (s *sSysPublish) completeTargetCollectEvent(ctx context.Context, payload co
 			return gerror.Newf("验证组没有视频 eventId:%d", payload.EventId)
 		}
 	}
-	events := []gdb.Record{display}
-	if !verify.IsEmpty() {
-		events = append(events, verify)
-	}
+	events := append([]gdb.Record{display}, verifies...)
 	for _, event := range events {
 		changed, cacheErr := s.cacheCollectEventStructuredMedia(ctx, event)
 		if cacheErr != nil {

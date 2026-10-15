@@ -80,13 +80,11 @@ func (s *sSysPublish) RepairCollectReviewMedia(ctx context.Context, reviewIds []
 
 func (s *sSysPublish) repairCollectReviewEventMedia(ctx context.Context, rootEvent gdb.Record) (bool, error) {
 	events := []gdb.Record{rootEvent}
-	verify, err := s.pairedCollectVerifyEvent(ctx, rootEvent["id"].Int64())
+	verifies, err := s.pairedCollectVerifyEvents(ctx, rootEvent["id"].Int64())
 	if err != nil {
 		return false, err
 	}
-	if !verify.IsEmpty() {
-		events = append(events, verify)
-	}
+	events = append(events, verifies...)
 	queued := false
 	rootQueued := false
 	for _, event := range events {

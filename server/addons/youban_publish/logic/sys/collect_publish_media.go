@@ -36,20 +36,20 @@ func (s *sSysPublish) canonicalCollectProfileMedia(ctx context.Context, event gd
 	}
 
 	verifyItems := make([]collectMediaItem, 0)
-	verify, err := s.pairedCollectVerifyEvent(ctx, event["id"].Int64())
+	verifies, err := s.pairedCollectVerifyEvents(ctx, event["id"].Int64())
 	if err != nil {
 		return nil, err
 	}
-	if !verify.IsEmpty() {
+	for _, verify := range verifies {
 		rows, rowErr := s.collectEventMediaRows(ctx, verify["id"].Int64())
 		if rowErr != nil {
 			return nil, rowErr
 		}
 		if len(rows) > 0 {
-			verifyItems = mergeCollectMediaEnrichment(
+			verifyItems = mergeCollectMediaItems(verifyItems, mergeCollectMediaEnrichment(
 				collectMediaRowsToItems(rows, collectMaterialRoleVerify),
 				collectMediaWithPurpose(content.Media, collectMaterialRoleVerify),
-			)
+			))
 		}
 	}
 	if len(verifyItems) == 0 {

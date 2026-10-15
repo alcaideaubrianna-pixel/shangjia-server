@@ -1,5 +1,34 @@
 package sysin
 
+type AIOpsRepairPlanInp struct {
+	Action   string  `json:"action" dc:"修复动作：recover_verifications/requeue_events/queue_verification"`
+	SourceId int64   `json:"sourceId" dc:"采集源ID"`
+	EventIds []int64 `json:"eventIds" dc:"采集事件ID"`
+	Limit    int     `json:"limit" dc:"最大影响条数"`
+}
+
+type AIOpsRepairPlanModel struct {
+	PlanId       string  `json:"planId"`
+	Action       string  `json:"action"`
+	Candidates   int     `json:"candidates"`
+	EventIds     []int64 `json:"eventIds"`
+	ConfirmToken string  `json:"confirmToken"`
+	ExpiresAt    string  `json:"expiresAt"`
+}
+
+type AIOpsRepairApplyInp struct {
+	PlanId       string `json:"planId"`
+	ConfirmToken string `json:"confirmToken"`
+}
+
+type AIOpsRepairApplyModel struct {
+	PlanId  string  `json:"planId"`
+	Status  string  `json:"status"`
+	Applied int     `json:"applied"`
+	Failed  []int64 `json:"failed"`
+	Message string  `json:"message"`
+}
+
 type AIOpsTelegramMessageRefInp struct {
 	ChatId    string `json:"chatId" dc:"Telegram频道Chat ID"`
 	MessageId int64  `json:"messageId" dc:"Telegram消息ID"`

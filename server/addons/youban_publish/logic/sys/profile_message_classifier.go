@@ -32,6 +32,19 @@ func profileMessageIgnoredNotice(text string) bool {
 		"❌重复投稿",
 		"✅提交成功",
 		"收录失败",
+		"收录成功",
+		"✅收录成功",
+		"信息投稿推送成功",
+		"信息已存在请勿重复提交",
+		"⚠提交失败",
+		"❌提交失败",
+		"❌上架被拒绝",
+		"❌录入失败",
+		"❌未收录",
+		"⚠️采集失败",
+		"⚠️未找到待配对",
+		"✅内容已自动转发",
+		"✅视频已自动转发",
 		"视频收录成功",
 		"全网无纠纷，认准唯一客服",
 	} {
@@ -39,7 +52,7 @@ func profileMessageIgnoredNotice(text string) bool {
 			return true
 		}
 	}
-	return strings.Contains(normalized, "投稿已自动审核通过并成功分发")
+	return normalized == "验证视频" || strings.Contains(normalized, "投稿已自动审核通过并成功分发")
 }
 
 func classifyProfileMessage(text string, media []collectMediaItem) profileMessageClassification {
@@ -48,7 +61,7 @@ func classifyProfileMessage(text string, media []collectMediaItem) profileMessag
 	if profileMessageIgnoredNotice(text) {
 		return profileMessageClassification{Kind: profileMessageKindIgnore}
 	}
-	if len(media) > 0 && profileMessageAllMediaType(media, "video") && !profileMessageHasProfileText(text) {
+	if len(media) > 0 && profileMessageHasMediaType(media, "video") && !profileMessageHasProfileText(text) {
 		return profileMessageClassification{
 			Kind:  profileMessageKindVerify,
 			Media: media,
@@ -94,4 +107,13 @@ func profileMessageAllMediaType(items []collectMediaItem, mediaType string) bool
 		}
 	}
 	return true
+}
+
+func profileMessageHasMediaType(items []collectMediaItem, mediaType string) bool {
+	for _, item := range items {
+		if strings.EqualFold(strings.TrimSpace(item.Type), mediaType) {
+			return true
+		}
+	}
+	return false
 }
