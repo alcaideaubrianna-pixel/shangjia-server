@@ -110,7 +110,8 @@ func isTelegramAmbiguousDeliveryError(err error) bool {
 	}
 	for _, part := range []string{
 		"context deadline exceeded", "client.timeout exceeded", "closed pipe", "broken pipe", "goaway",
-		"cannot rewind body", "connection reset", "unexpected eof", "发送进程中断", "等待webhook或协议号对账",
+		"cannot rewind body", "connection reset", "unexpected eof", "error decode response body for method",
+		"发送进程中断", "等待webhook或协议号对账",
 	} {
 		if strings.Contains(message, part) {
 			return true

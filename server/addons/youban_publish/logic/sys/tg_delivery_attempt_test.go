@@ -98,6 +98,28 @@ func TestTelegramAttemptPhaseTransition(t *testing.T) {
 	}
 }
 
+func TestTelegramAttemptPhaseMode(t *testing.T) {
+	tests := []struct {
+		name                   string
+		current                string
+		advancePhase           bool
+		wantAdvance, wantRetry bool
+	}{
+		{name: "first send", current: telegramSendPhaseCleanupConfirmed, advancePhase: true, wantAdvance: true},
+		{name: "retry sending phase", current: telegramSendPhaseDisplaySending, advancePhase: true, wantRetry: true},
+		{name: "begin existing phase", current: telegramSendPhaseDisplaySending, wantRetry: true},
+		{name: "wrong phase", current: telegramSendPhaseVerifySending, advancePhase: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			advance, retry := telegramAttemptPhaseMode(test.current, telegramSendPhaseCleanupConfirmed, telegramSendPhaseDisplaySending, test.advancePhase)
+			if advance != test.wantAdvance || retry != test.wantRetry {
+				t.Fatalf("phase mode = (%v, %v), want (%v, %v)", advance, retry, test.wantAdvance, test.wantRetry)
+			}
+		})
+	}
+}
+
 func TestRestoreConfirmedTelegramResponseTreatsMissingAttemptAsUnconfirmed(t *testing.T) {
 	if !telegramOptionalAttemptScanSucceeded(sql.ErrNoRows) {
 		t.Fatal("missing confirmed response must allow the initial Telegram send")
