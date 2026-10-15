@@ -56,6 +56,48 @@ func TestTelegramConfirmedAttemptRequiresCompleteAudit(t *testing.T) {
 	}
 }
 
+func TestTelegramAttemptPhaseTransition(t *testing.T) {
+	tests := []struct {
+		name          string
+		phase         string
+		from          string
+		sending       string
+		confirmed     string
+		shouldBeValid bool
+	}{
+		{
+			name: "display", phase: "display",
+			from: telegramSendPhaseCleanupConfirmed, sending: telegramSendPhaseDisplaySending,
+			confirmed: telegramSendPhaseDisplayConfirmed, shouldBeValid: true,
+		},
+		{
+			name: "verify", phase: "verify",
+			from: telegramSendPhaseDisplayConfirmed, sending: telegramSendPhaseVerifySending,
+			confirmed: telegramSendPhaseVerifyConfirmed, shouldBeValid: true,
+		},
+		{name: "unknown", phase: "cleanup"},
+		{name: "empty", phase: ""},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			from, sending, confirmed, err := telegramAttemptPhaseTransition(test.phase)
+			if !test.shouldBeValid {
+				if err == nil {
+					t.Fatalf("phase %q must be rejected", test.phase)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("phase %q: %v", test.phase, err)
+			}
+			if from != test.from || sending != test.sending || confirmed != test.confirmed {
+				t.Fatalf("phase %q transition = (%q, %q, %q), want (%q, %q, %q)",
+					test.phase, from, sending, confirmed, test.from, test.sending, test.confirmed)
+			}
+		})
+	}
+}
+
 func TestRestoreConfirmedTelegramResponseTreatsMissingAttemptAsUnconfirmed(t *testing.T) {
 	if !telegramOptionalAttemptScanSucceeded(sql.ErrNoRows) {
 		t.Fatal("missing confirmed response must allow the initial Telegram send")
@@ -260,7 +302,14 @@ func TestTelegramAPISuccessCommitsAttemptMessageAndPhaseIntegration(t *testing.T
 	if err != nil {
 		t.Fatalf("load job: %v", err)
 	}
-	attempt, err := new(sSysPublish).prepareTelegramDeliveryAttempt(ctx, job, "display", 1, telegramSendPhaseDisplaySending)
+	if _, err = new(sSysPublish).prepareTelegramDeliveryAttempt(ctx, job, "verify", 1, true); err == nil {
+		t.Fatal("verify attempt must not start before display is confirmed")
+	}
+	attemptCount, err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).Where("job_id", jobID).Count()
+	if err != nil || attemptCount != 0 {
+		t.Fatalf("rejected phase must not persist an attempt: count=%d err=%v", attemptCount, err)
+	}
+	attempt, err := new(sSysPublish).prepareTelegramDeliveryAttempt(ctx, job, "display", 1, true)
 	if err != nil {
 		t.Fatalf("prepare attempt: %v", err)
 	}
@@ -269,7 +318,29 @@ func TestTelegramAPISuccessCommitsAttemptMessageAndPhaseIntegration(t *testing.T
 		t.Fatalf("prepared phase=%q err=%v", phase.String(), err)
 	}
 	message := &telegramSentMessage{MessageId: seed, Purpose: "display"}
-	if err = new(sSysPublish).confirmTelegramAPISuccess(ctx, job, attempt, []*telegramSentMessage{message}, telegramSendPhaseDisplayConfirmed); err != nil {
+	if _, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", jobID).
+		Data(g.Map{"send_phase": telegramSendPhaseVerifySending}).Update(); err != nil {
+		t.Fatalf("set mismatched phase: %v", err)
+	}
+	if err = new(sSysPublish).confirmTelegramAPISuccess(ctx, job, attempt, []*telegramSentMessage{message}); err == nil {
+		t.Fatal("API success must not confirm against a mismatched job phase")
+	}
+	var unconfirmed telegramDeliveryAttempt
+	if err = g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).Where("id", attempt.Id).Scan(&unconfirmed); err != nil {
+		t.Fatalf("load rolled back attempt: %v", err)
+	}
+	if unconfirmed.Status != telegramAttemptStatusSending || unconfirmed.ResponseReceived != 0 {
+		t.Fatalf("failed phase CAS must roll back attempt confirmation: %+v", unconfirmed)
+	}
+	auditCount, err := g.DB().Model(publishTgAttemptMessageTable).Safe().Ctx(ctx).Where("attempt_id", attempt.Id).Count()
+	if err != nil || auditCount != 0 {
+		t.Fatalf("failed phase CAS must roll back response audit: count=%d err=%v", auditCount, err)
+	}
+	if _, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", jobID).
+		Data(g.Map{"send_phase": telegramSendPhaseDisplaySending}).Update(); err != nil {
+		t.Fatalf("restore display sending phase: %v", err)
+	}
+	if err = new(sSysPublish).confirmTelegramAPISuccess(ctx, job, attempt, []*telegramSentMessage{message}); err != nil {
 		t.Fatalf("confirm API success: %v", err)
 	}
 	var confirmed telegramDeliveryAttempt
@@ -288,7 +359,7 @@ func TestTelegramAPISuccessCommitsAttemptMessageAndPhaseIntegration(t *testing.T
 	if err != nil || messageCount != 1 {
 		t.Fatalf("message projection count=%d err=%v", messageCount, err)
 	}
-	auditCount, err := g.DB().Model(publishTgAttemptMessageTable).Safe().Ctx(ctx).
+	auditCount, err = g.DB().Model(publishTgAttemptMessageTable).Safe().Ctx(ctx).
 		Where("attempt_id", attempt.Id).Where("message_id", seed).Where("source", "response").Count()
 	if err != nil || auditCount != 1 {
 		t.Fatalf("attempt audit count=%d err=%v", auditCount, err)

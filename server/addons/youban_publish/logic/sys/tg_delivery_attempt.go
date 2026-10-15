@@ -68,27 +68,38 @@ type telegramAttemptMessageRecord struct {
 }
 
 func (s *sSysPublish) beginTelegramDeliveryAttempt(ctx context.Context, job telegramJobRecord, phase string, expectedCount int) (telegramDeliveryAttempt, error) {
-	return s.prepareTelegramDeliveryAttempt(ctx, job, phase, expectedCount, "")
+	return s.prepareTelegramDeliveryAttempt(ctx, job, phase, expectedCount, false)
 }
 
 // prepareTelegramDeliveryAttempt persists the delivery evidence before the
-// external Telegram call. When sendingPhase is provided, the job phase and the
+// external Telegram call. When advancePhase is true, the job phase and the
 // Attempt are committed together so recovery never has to guess whether the
 // API was called.
-func (s *sSysPublish) prepareTelegramDeliveryAttempt(ctx context.Context, job telegramJobRecord, phase string, expectedCount int, sendingPhase string) (telegramDeliveryAttempt, error) {
+func (s *sSysPublish) prepareTelegramDeliveryAttempt(ctx context.Context, job telegramJobRecord, phase string, expectedCount int, advancePhase bool) (telegramDeliveryAttempt, error) {
+	fromPhase, sendingPhase, _, err := telegramAttemptPhaseTransition(phase)
+	if err != nil {
+		return telegramDeliveryAttempt{}, err
+	}
 	mutex := lock.NewConfig(30*time.Second, 100*time.Millisecond).Mutex(fmt.Sprintf("youban_publish:tg_attempt:%d:%s:%d", job.Id, phase, 0))
 	if err := mutex.Lock(ctx); err != nil {
 		return telegramDeliveryAttempt{}, gerror.Wrap(err, "获取TG发送Attempt锁失败")
 	}
 	defer func() { _ = mutex.Unlock(context.Background()) }()
 	var attempt telegramDeliveryAttempt
-	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		var current telegramJobRecord
 		if scanErr := tx.Model(publishTgJobTable).Where("id", job.Id).LockUpdate().Scan(&current); scanErr != nil {
 			return gerror.Wrap(scanErr, "锁定TG任务发送阶段失败")
 		}
 		if current.Id <= 0 || current.Status != telegramJobStatusSending {
 			return errTelegramJobSuperseded
+		}
+		expectedCurrentPhase := sendingPhase
+		if advancePhase {
+			expectedCurrentPhase = fromPhase
+		}
+		if current.SendPhase != expectedCurrentPhase {
+			return gerror.Newf("TG任务阶段不允许创建%s Attempt current:%s expected:%s", phase, current.SendPhase, expectedCurrentPhase)
 		}
 		if _, updateErr := tx.Model(publishTgAttemptTable).
 			Where("job_id", job.Id).Where("phase", phase).Where("status", telegramAttemptStatusRetryWait).
@@ -126,8 +137,9 @@ func (s *sSysPublish) prepareTelegramDeliveryAttempt(ctx context.Context, job te
 		if valueErr != nil {
 			return gerror.Wrap(valueErr, "创建TG发送Attempt失败")
 		}
-		if strings.TrimSpace(sendingPhase) != "" {
-			result, updateErr := tx.Model(publishTgJobTable).Where("id", job.Id).Where("status", telegramJobStatusSending).
+		if advancePhase {
+			result, updateErr := tx.Model(publishTgJobTable).Where("id", job.Id).
+				Where("status", telegramJobStatusSending).Where("send_phase", fromPhase).
 				Data(g.Map{"send_phase": sendingPhase}).Update()
 			if updateErr != nil {
 				return gerror.Wrap(updateErr, "更新TG任务发送阶段失败")
@@ -155,12 +167,16 @@ func (s *sSysPublish) prepareTelegramDeliveryAttempt(ctx context.Context, job te
 // the local message projection and the completed delivery phase. A confirmed
 // Bot API response never enters reconciliation; retries only repair optional
 // projections such as cached file IDs.
-func (s *sSysPublish) confirmTelegramAPISuccess(ctx context.Context, job telegramJobRecord, attempt telegramDeliveryAttempt, messages []*telegramSentMessage, confirmedPhase string) error {
+func (s *sSysPublish) confirmTelegramAPISuccess(ctx context.Context, job telegramJobRecord, attempt telegramDeliveryAttempt, messages []*telegramSentMessage) error {
+	_, sendingPhase, confirmedPhase, err := telegramAttemptPhaseTransition(attempt.Phase)
+	if err != nil {
+		return err
+	}
 	count := len(messages)
 	if attempt.ExpectedCount == 0 {
 		count = 0
 	}
-	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		var current telegramDeliveryAttempt
 		if scanErr := tx.Model(publishTgAttemptTable).Where("id", attempt.Id).LockUpdate().Scan(&current); scanErr != nil {
 			return gerror.Wrap(scanErr, "锁定TG发送Attempt失败")
@@ -186,7 +202,8 @@ func (s *sSysPublish) confirmTelegramAPISuccess(ctx context.Context, job telegra
 		}).Update(); updateErr != nil {
 			return gerror.Wrap(updateErr, "确认TG发送Attempt失败")
 		}
-		result, updateErr := tx.Model(publishTgJobTable).Where("id", job.Id).Where("status", telegramJobStatusSending).
+		result, updateErr := tx.Model(publishTgJobTable).Where("id", job.Id).
+			Where("status", telegramJobStatusSending).Where("send_phase", sendingPhase).
 			Data(g.Map{"send_phase": confirmedPhase, "error_message": ""}).Update()
 		if updateErr != nil {
 			return gerror.Wrap(updateErr, "确认TG任务发送阶段失败")
@@ -205,6 +222,17 @@ func (s *sSysPublish) confirmTelegramAPISuccess(ctx context.Context, job telegra
 	s.projectTelegramDeliveryAttempt(ctx, attempt, "")
 	s.cacheTelegramSentMessageMetadata(ctx, job, messages)
 	return nil
+}
+
+func telegramAttemptPhaseTransition(phase string) (fromPhase, sendingPhase, confirmedPhase string, err error) {
+	switch strings.TrimSpace(phase) {
+	case "display":
+		return telegramSendPhaseCleanupConfirmed, telegramSendPhaseDisplaySending, telegramSendPhaseDisplayConfirmed, nil
+	case "verify":
+		return telegramSendPhaseDisplayConfirmed, telegramSendPhaseVerifySending, telegramSendPhaseVerifyConfirmed, nil
+	default:
+		return "", "", "", gerror.Newf("TG发送Attempt阶段不合法 phase:%s", phase)
+	}
 }
 
 func (s *sSysPublish) supersedeOpenTelegramAttempts(ctx context.Context, jobId int64) error {

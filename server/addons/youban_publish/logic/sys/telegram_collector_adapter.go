@@ -453,11 +453,7 @@ func (s *sSysPublish) sendAccountFallbackPhase(ctx context.Context, client *tele
 		s.appendTelegramJobLog(ctx, job, "account", "incomplete", err.Error())
 		return nil, err
 	}
-	confirmedPhase := telegramSendPhaseDisplayConfirmed
-	if purpose == "verify" {
-		confirmedPhase = telegramSendPhaseVerifyConfirmed
-	}
-	if err = s.confirmTelegramAPISuccess(ctx, job, attempt, messages, confirmedPhase); err != nil {
+	if err = s.confirmTelegramAPISuccess(ctx, job, attempt, messages); err != nil {
 		return nil, telegramDeliveryUncertainError(err)
 	}
 	if err = s.updateTelegramMediaFileIds(ctx, messages); err != nil {

@@ -260,7 +260,7 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 			job.SendPhase = telegramSendPhaseDisplayConfirmed
 		} else {
 			expectedCount := telegramDisplayExpectedCount(len(displayMedia))
-			attempt, attemptErr := s.prepareTelegramDeliveryAttempt(ctx, job, "display", expectedCount, telegramSendPhaseDisplaySending)
+			attempt, attemptErr := s.prepareTelegramDeliveryAttempt(ctx, job, "display", expectedCount, true)
 			if attemptErr != nil {
 				return attemptErr
 			}
@@ -307,7 +307,7 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 			// A successful Bot API response with message IDs is authoritative. Commit
 			// its evidence and projections together; only a failed local commit enters
 			// reconciliation, and the external send is never retried directly.
-			if err = s.confirmTelegramAPISuccess(ctx, job, attempt, messages, telegramSendPhaseDisplayConfirmed); err != nil {
+			if err = s.confirmTelegramAPISuccess(ctx, job, attempt, messages); err != nil {
 				return gerror.Wrap(errTelegramRemoteConfirmed, err.Error())
 			}
 			if err = s.updateTelegramMediaFileIds(ctx, messages); err != nil {
@@ -337,7 +337,7 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	if telegramVerifyMediaNeedsAccountUpload(verifyMedia) {
 		g.Log().Infof(ctx, "TG验证资料无可复用file_id，先尝试Bot本地上传 jobId:%d channelId:%d media:%s", job.Id, job.ChannelId, telegramMediaDebugSummary(verifyMedia))
 	}
-	verifyAttempt, err := s.prepareTelegramDeliveryAttempt(ctx, job, "verify", len(verifyMedia), telegramSendPhaseVerifySending)
+	verifyAttempt, err := s.prepareTelegramDeliveryAttempt(ctx, job, "verify", len(verifyMedia), true)
 	if err != nil {
 		return err
 	}
@@ -402,7 +402,7 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 		_ = s.cleanupTelegramSentMessages(ctx, bot, job.TargetChatId, verifyMessages, "验证媒体发送结果不完整")
 		return err
 	}
-	if err = s.confirmTelegramAPISuccess(ctx, job, verifyAttempt, verifyMessages, telegramSendPhaseVerifyConfirmed); err != nil {
+	if err = s.confirmTelegramAPISuccess(ctx, job, verifyAttempt, verifyMessages); err != nil {
 		return gerror.Wrap(errTelegramRemoteConfirmed, err.Error())
 	}
 	return s.updateTelegramMediaFileIds(ctx, verifyMessages)
