@@ -91,7 +91,12 @@ func telegramChannelBlockingJobSQL(alias string) string {
 	if alias != "" {
 		alias += "."
 	}
-	return fmt.Sprintf("(%[1]sstatus IN ('pending','failed_retry','unknown','confirming','sending') OR (%[1]sstatus='failed' AND %[1]ssend_phase='display_confirmed'))", alias)
+	return fmt.Sprintf(`(%[1]sstatus IN ('pending','failed_retry','unknown','confirming','sending') OR
+		(%[1]sstatus='failed' AND %[1]ssend_phase='display_confirmed' AND EXISTS (
+			SELECT 1 FROM %[2]s channel_display
+			WHERE channel_display.job_id=%[1]sid AND channel_display.purpose='display'
+				AND channel_display.status='sent' AND channel_display.deleted_at IS NULL
+		)))`, alias, publishTgMessageTable)
 }
 
 func telegramChannelOrderChatKey(chatID string) string {

@@ -19,6 +19,7 @@ func TestTelegramPendingRecoverySelectsChannelHeadsBeforeLimit(t *testing.T) {
 		"earlier.channel_id=j.channel_id", "REPLACE(COALESCE(earlier.target_chat_id,''),'-100','')",
 		"earlier.status IN ('pending','failed_retry','unknown','confirming','sending')",
 		"earlier.status='failed' AND earlier.send_phase='display_confirmed'",
+		"channel_display.job_id=earlier.id", "channel_display.purpose='display'",
 		"earlier.created_at<j.created_at", "earlier.id<j.id",
 	} {
 		if !strings.Contains(query, fragment) {
@@ -32,6 +33,7 @@ func TestTelegramPendingRecoveryPostgresSelectsHeadsBeforeDueFilters(t *testing.
 	for _, fragment := range []string{
 		"WITH channel_heads AS", "DISTINCT ON", "j.status IN ('pending','failed_retry','unknown','confirming','sending')",
 		"j.status='failed' AND j.send_phase='display_confirmed'",
+		"channel_display.job_id=j.id", "channel_display.purpose='display'",
 		"ORDER BY j.tenant_id", "j.created_at, j.id", "h.status IN ('pending','failed_retry','unknown')",
 		"COALESCE(h.dispatch_status,'') IN ('','idle')", "h.next_retry_at IS NULL OR h.next_retry_at<=?",
 		"h.updated_at<=?", "ORDER BY h.created_at,h.id", "LIMIT ?",
