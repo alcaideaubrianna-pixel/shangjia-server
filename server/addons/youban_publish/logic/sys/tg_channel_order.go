@@ -166,7 +166,11 @@ func (s *sSysPublish) withTelegramChannelDispatchLease(ctx context.Context, job 
 		Mutex(telegramChannelDispatchKey(job.TenantId, job.ChannelId))
 	if err := lease.TryLock(ctx); err != nil {
 		if gerror.Is(err, hglock.ErrLockFailed) {
-			return false, nil
+			// Lock contention or an unavailable Redis lock backend is not a
+			// successful enqueue. Returning nil here silently stranded the
+			// Outbox in pending/idle forever. Let the caller record the error,
+			// release the lease, and retry with backoff.
+			return false, gerror.Wrap(err, "获取频道任务调度租约失败，稍后重试")
 		}
 		return false, gerror.Wrap(err, "获取频道任务调度租约失败")
 	}
