@@ -101,10 +101,7 @@ func lookupTelegramCollectorMediaCache(ctx context.Context, mediaType string, md
 	return entry, true, nil
 }
 
-func acquireTelegramCollectorMediaCache(ctx context.Context, mediaType, storagePath, md5Value string, size int64, mimeType string) (*telegramCollectorMediaCacheState, error) {
-	if !collectorservice.Collector().Enabled(ctx) {
-		return nil, nil
-	}
+func acquireTelegramCollectorMediaCache(ctx context.Context, mediaType, storagePath, fileURL, md5Value string, size int64, mimeType string) (*telegramCollectorMediaCacheState, error) {
 	md5Value = strings.TrimSpace(md5Value)
 	mimeType = strings.TrimSpace(mimeType)
 	localPath := ""
@@ -131,8 +128,15 @@ func acquireTelegramCollectorMediaCache(ctx context.Context, mediaType, storageP
 			mimeType = mime.TypeByExtension(strings.ToLower(filepath.Ext(localPath)))
 		}
 	}
-	if md5Value == "" || size <= 0 {
-		return nil, nil
+	if md5Value == "" {
+		value, err := mediaSourceMD5(ctx, storagePath, fileURL, mediaType)
+		if err != nil {
+			return nil, err
+		}
+		md5Value = value
+	}
+	if !collectorservice.Collector().Enabled(ctx) || size <= 0 {
+		return &telegramCollectorMediaCacheState{MD5: md5Value, Size: size, MimeType: mimeType}, nil
 	}
 	fingerprint := collectorservice.BuildMediaFingerprint(md5Value, size, telegramCollectorMediaKind(mediaType), mimeType)
 	entry, ready, err := collectorservice.Collector().MediaCache(ctx, fingerprint)
@@ -269,7 +273,7 @@ func (s *sSysPublish) prepareCollectMaterialSnapshot(ctx context.Context, event 
 				mediaSize = item.SourceSize
 			}
 			mediaMD5 := strings.TrimSpace(item.FileMd5)
-			cacheState, cacheErr := acquireTelegramCollectorMediaCache(ctx, mediaType, storagePath, mediaMD5, mediaSize, item.SourceMimeType)
+			cacheState, cacheErr := acquireTelegramCollectorMediaCache(ctx, mediaType, storagePath, fileURL, mediaMD5, mediaSize, item.SourceMimeType)
 			if cacheErr != nil {
 				return nil, cacheErr
 			}
@@ -321,7 +325,7 @@ func (s *sSysPublish) prepareCollectMaterialSnapshot(ctx context.Context, event 
 			}
 			if assets == nil {
 				var assetErr error
-				assets, assetErr = processMediaAssetMetadata(ctx, mediaType, storagePath, fileURL, item.PosterUrl, "")
+				assets, assetErr = processMediaAssetMetadata(ctx, mediaType, storagePath, fileURL, item.PosterUrl, "", mediaMD5)
 				if assetErr != nil {
 					releaseTelegramCollectorMediaCache(ctx, cacheState, assetErr)
 					return nil, gerror.Wrap(assetErr, "处理采集媒体指纹失败")
@@ -343,6 +347,12 @@ func (s *sSysPublish) prepareCollectMaterialSnapshot(ctx context.Context, event 
 						return nil, gerror.Wrap(saveErr, "保存Telegram采集媒体复用索引失败")
 					}
 				}
+			}
+			if mediaMD5 == "" && assets != nil {
+				mediaMD5 = assets.MD5
+			}
+			if mediaMD5 == "" {
+				return nil, gerror.New("采集媒体MD5为空，等待重新处理")
 			}
 			preparedMedia := collectPreparedMedia{
 				EventMediaId:      item.EventMediaId,

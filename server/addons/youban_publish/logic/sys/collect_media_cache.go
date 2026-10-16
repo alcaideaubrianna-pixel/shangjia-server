@@ -630,6 +630,8 @@ func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, even
 			if strings.TrimSpace(result.item.FileId) == "" {
 				result.item = items[index]
 			}
+			result.item.FileMd5 = firstNonEmpty(cached.Item.FileMd5, result.item.FileMd5)
+			result.item.FilePhash = firstNonEmpty(cached.Item.FilePhash, result.item.FilePhash)
 			result.item.FileUrl = cached.FileUrl
 			result.item.StoragePath = cached.Path
 			if strings.TrimSpace(result.item.PosterUrl) == "" {
@@ -650,6 +652,8 @@ func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, even
 				"source_mime_type":      result.item.SourceMimeType,
 				"source_dc_id":          result.item.SourceDCId,
 				"source_size":           result.item.SourceSize,
+				"file_md5":              result.item.FileMd5,
+				"file_phash":            result.item.FilePhash,
 				"file_url":              result.item.FileUrl,
 				"storage_path":          result.item.StoragePath,
 				"backup_chat_id":        "",
