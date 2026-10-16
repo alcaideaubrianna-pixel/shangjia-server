@@ -11,8 +11,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 
 	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
-	twdao "hotgo/addons/youban_two_way_bot/internal/dao"
-	"hotgo/addons/youban_two_way_bot/internal/model/entity"
+	twowaymodel "hotgo/addons/youban_two_way_bot/model"
 	"hotgo/addons/youban_two_way_bot/service"
 )
 
@@ -54,19 +53,18 @@ func (p *twoWayBotGatewayProvider) ListOwnedBots(ctx context.Context, tenantID, 
 	if tenantID <= 0 || accountID <= 0 {
 		return nil, gerror.New("租户账户无效")
 	}
-	c := twdao.YoubanTwoWayBotBot.Columns()
-	mod := twdao.YoubanTwoWayBotBot.Ctx(ctx).
-		Where(c.TenantId, tenantID).
-		Where(c.AccountId, accountID).
-		WhereNull(c.DeletedAt)
+	mod := publishTwoWayBots(ctx).
+		Where("tenant_id", tenantID).
+		Where("account_id", accountID).
+		WhereNull("deleted_at")
 	if referenceID > 0 {
-		mod = mod.Where(c.Id, referenceID)
+		mod = mod.Where("id", referenceID)
 	}
 	if lock {
 		mod = mod.LockUpdate()
 	}
-	var rows []*entity.YoubanTwoWayBotBot
-	if err := mod.OrderAsc(c.Id).Scan(&rows); err != nil {
+	var rows []*twowaymodel.BotRuntime
+	if err := mod.OrderAsc("id").Scan(&rows); err != nil {
 		return nil, gerror.Wrap(err, "读取账户双向机器人失败")
 	}
 	items := make([]gatewayservice.OwnedBot, 0, len(rows))
@@ -102,7 +100,7 @@ func (p *cooperationGatewayProvider) ListEnabledBots(ctx context.Context) ([]gat
 		Fields("cc.id,cc.tenant_id,pb.bot_token").
 		InnerJoin("hg_youban_publish_bot pb", "pb.id=cc.bot_id").
 		Where("cc.status", 1).WhereNull("cc.deleted_at").WhereNull("pb.deleted_at").
-		Where("NOT EXISTS (SELECT 1 FROM hg_youban_two_way_bot_bot tw WHERE tw.bot_token=pb.bot_token AND tw.status=1 AND tw.deleted_at IS NULL)").
+		Where("pb.bot_type<>?", "two_way").
 		Scan(&rows)
 	if err != nil {
 		return nil, err
@@ -122,7 +120,7 @@ func (p *cooperationGatewayProvider) HandleUpdate(ctx context.Context, binding g
 	if err != nil {
 		return err
 	}
-	_, err = p.twoWayBot.handleCooperationPrivateMessage(ctx, bot, &entity.YoubanTwoWayBotBot{Id: -binding.ReferenceID, TenantId: binding.TenantID, BotToken: binding.Token}, update.Message)
+	_, err = p.twoWayBot.handleCooperationPrivateMessage(ctx, bot, &twowaymodel.BotRuntime{Id: -binding.ReferenceID, TenantId: binding.TenantID, BotToken: binding.Token}, update.Message)
 	return err
 }
 

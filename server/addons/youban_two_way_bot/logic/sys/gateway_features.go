@@ -10,7 +10,7 @@ import (
 	"github.com/go-telegram/bot/models"
 
 	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
-	"hotgo/addons/youban_two_way_bot/internal/model/entity"
+	twowaymodel "hotgo/addons/youban_two_way_bot/model"
 	"hotgo/internal/library/cache"
 )
 
@@ -160,11 +160,11 @@ func gatewayReplyKeyboard(ctx context.Context, bot gatewayservice.BotContext) *m
 	}
 	return &models.ReplyKeyboardMarkup{Keyboard: rows, IsPersistent: true, ResizeKeyboard: true, InputFieldPlaceholder: "请选择功能或发送消息"}
 }
-func (f *cooperationGatewayFeature) botRow(ctx context.Context, bot gatewayservice.BotContext, config *cooperationConfigRuntime) (*entity.YoubanTwoWayBotBot, error) {
+func (f *cooperationGatewayFeature) botRow(ctx context.Context, bot gatewayservice.BotContext, config *cooperationConfigRuntime) (*twowaymodel.BotRuntime, error) {
 	if binding, ok := twoWayBinding(bot); ok {
 		return f.twoWayBot.botById(ctx, binding.ReferenceID, binding.TenantID)
 	}
-	return &entity.YoubanTwoWayBotBot{Id: -config.Id, TenantId: config.TenantId, BotToken: bot.Token}, nil
+	return &twowaymodel.BotRuntime{Id: -config.Id, TenantId: config.TenantId, BotToken: bot.Token}, nil
 }
 
 func twoWayBinding(bot gatewayservice.BotContext) (gatewayservice.BotBinding, bool) {

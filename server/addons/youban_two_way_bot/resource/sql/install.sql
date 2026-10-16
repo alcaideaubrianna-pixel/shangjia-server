@@ -1,30 +1,17 @@
-CREATE TABLE IF NOT EXISTS `hg_youban_two_way_bot_bot` (
-  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT 'ID',
-  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
-  `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '创建账号ID',
-  `tg_account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'TG协议号ID',
-  `name` varchar(128) NOT NULL DEFAULT '' COMMENT '名称',
-  `welcome_message` varchar(1000) NOT NULL DEFAULT '' COMMENT '欢迎语',
-  `bot_token` varchar(255) NOT NULL DEFAULT '' COMMENT 'Bot Token',
-  `bot_user_id` varchar(64) NOT NULL DEFAULT '' COMMENT 'Bot用户ID',
-  `bot_username` varchar(128) NOT NULL DEFAULT '' COMMENT 'Bot用户名',
-  `supergroup_id` varchar(64) NOT NULL DEFAULT '' COMMENT '管理群ID',
-  `supergroup_access_hash` varchar(128) NOT NULL DEFAULT '' COMMENT '管理群AccessHash',
-  `supergroup_title` varchar(128) NOT NULL DEFAULT '' COMMENT '管理群名称',
-  `invite_link` varchar(512) NOT NULL DEFAULT '' COMMENT '邀请链接',
-  `setup_status` varchar(32) NOT NULL DEFAULT 'pending' COMMENT '初始化状态',
-  `webhook_status` varchar(32) NOT NULL DEFAULT 'pending' COMMENT 'Webhook状态',
-  `status` tinyint(1) NOT NULL DEFAULT '1' COMMENT '状态',
-  `error_message` varchar(1024) NOT NULL DEFAULT '' COMMENT '错误信息',
-  `last_setup_at` datetime DEFAULT NULL COMMENT '最后初始化时间',
-  `last_webhook_at` datetime DEFAULT NULL COMMENT '最后Webhook时间',
-  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
-  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
-  `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
-  PRIMARY KEY (`id`),
-  KEY `idx_ybtwb_bot_tenant` (`tenant_id`,`status`,`id`),
-  KEY `idx_ybtwb_bot_tg_account` (`tenant_id`,`tg_account_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='双向机器人';
+ALTER TABLE `hg_youban_publish_bot` ADD COLUMN IF NOT EXISTS `account_id` bigint(20) NOT NULL DEFAULT 0;
+ALTER TABLE `hg_youban_publish_bot` ADD COLUMN IF NOT EXISTS `bot_type` varchar(32) NOT NULL DEFAULT 'normal';
+ALTER TABLE `hg_youban_publish_bot` ADD COLUMN IF NOT EXISTS `tg_account_id` bigint(20) NOT NULL DEFAULT 0;
+ALTER TABLE `hg_youban_publish_bot` ADD COLUMN IF NOT EXISTS `bot_user_id` varchar(64) NOT NULL DEFAULT '';
+ALTER TABLE `hg_youban_publish_bot` ADD COLUMN IF NOT EXISTS `supergroup_id` varchar(64) NOT NULL DEFAULT '';
+ALTER TABLE `hg_youban_publish_bot` ADD COLUMN IF NOT EXISTS `supergroup_access_hash` varchar(128) NOT NULL DEFAULT '';
+ALTER TABLE `hg_youban_publish_bot` ADD COLUMN IF NOT EXISTS `supergroup_title` varchar(128) NOT NULL DEFAULT '';
+ALTER TABLE `hg_youban_publish_bot` ADD COLUMN IF NOT EXISTS `invite_link` varchar(512) NOT NULL DEFAULT '';
+ALTER TABLE `hg_youban_publish_bot` ADD COLUMN IF NOT EXISTS `setup_status` varchar(32) NOT NULL DEFAULT 'pending';
+ALTER TABLE `hg_youban_publish_bot` ADD COLUMN IF NOT EXISTS `webhook_status` varchar(32) NOT NULL DEFAULT 'pending';
+ALTER TABLE `hg_youban_publish_bot` ADD COLUMN IF NOT EXISTS `error_message` varchar(1024) NOT NULL DEFAULT '';
+ALTER TABLE `hg_youban_publish_bot` ADD COLUMN IF NOT EXISTS `last_setup_at` datetime NULL;
+ALTER TABLE `hg_youban_publish_bot` ADD COLUMN IF NOT EXISTS `last_webhook_at` datetime NULL;
+ALTER TABLE `hg_youban_publish_bot` ADD COLUMN IF NOT EXISTS `welcome_message` varchar(1000) NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS `hg_youban_two_way_bot_topic` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT 'ID',

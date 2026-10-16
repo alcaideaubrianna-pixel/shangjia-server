@@ -15,6 +15,7 @@ import (
 
 	twdao "hotgo/addons/youban_two_way_bot/internal/dao"
 	"hotgo/addons/youban_two_way_bot/internal/model/entity"
+	twowaymodel "hotgo/addons/youban_two_way_bot/model"
 	"hotgo/internal/library/cache"
 )
 
@@ -75,7 +76,7 @@ func inputFile(fileId string) models.InputFile {
 	return &models.InputFileString{Data: strings.TrimSpace(fileId)}
 }
 
-func (s *sSysTwoWayBot) enqueueMediaGroup(ctx context.Context, bot *tgbot.Bot, row *entity.YoubanTwoWayBotBot, item twoWayMediaGroupItem, msg *models.Message) error {
+func (s *sSysTwoWayBot) enqueueMediaGroup(ctx context.Context, bot *tgbot.Bot, row *twowaymodel.BotRuntime, item twoWayMediaGroupItem, msg *models.Message) error {
 	if msg == nil {
 		return gerror.New("Telegram媒体组消息为空")
 	}
@@ -103,7 +104,7 @@ func (s *sSysTwoWayBot) enqueueMediaGroup(ctx context.Context, bot *tgbot.Bot, r
 	return nil
 }
 
-func (s *sSysTwoWayBot) flushMediaGroup(ctx context.Context, bot *tgbot.Bot, row *entity.YoubanTwoWayBotBot, direction string, groupId string) error {
+func (s *sSysTwoWayBot) flushMediaGroup(ctx context.Context, bot *tgbot.Bot, row *twowaymodel.BotRuntime, direction string, groupId string) error {
 	_, _ = cache.Instance().Remove(ctx, mediaGroupFlushCacheKey(row.Id, direction, groupId))
 	var rows []*entity.YoubanTwoWayBotMessage
 	err := twdao.YoubanTwoWayBotMessage.Ctx(ctx).
@@ -212,7 +213,7 @@ func inputMediaFromMessage(message *models.Message) (models.InputMedia, error) {
 	return nil, gerror.New("当前媒体类型不支持媒体组重新发送")
 }
 
-func (s *sSysTwoWayBot) topicByUser(ctx context.Context, row *entity.YoubanTwoWayBotBot, userId string) (*entity.YoubanTwoWayBotTopic, error) {
+func (s *sSysTwoWayBot) topicByUser(ctx context.Context, row *twowaymodel.BotRuntime, userId string) (*entity.YoubanTwoWayBotTopic, error) {
 	var topic *entity.YoubanTwoWayBotTopic
 	err := twdao.YoubanTwoWayBotTopic.Ctx(ctx).
 		Where("tenant_id", row.TenantId).
@@ -226,7 +227,7 @@ func (s *sSysTwoWayBot) topicByUser(ctx context.Context, row *entity.YoubanTwoWa
 	return topic, nil
 }
 
-func (s *sSysTwoWayBot) topicByThread(ctx context.Context, row *entity.YoubanTwoWayBotBot, threadId int64) (*entity.YoubanTwoWayBotTopic, error) {
+func (s *sSysTwoWayBot) topicByThread(ctx context.Context, row *twowaymodel.BotRuntime, threadId int64) (*entity.YoubanTwoWayBotTopic, error) {
 	var topic *entity.YoubanTwoWayBotTopic
 	err := twdao.YoubanTwoWayBotTopic.Ctx(ctx).
 		Where("tenant_id", row.TenantId).

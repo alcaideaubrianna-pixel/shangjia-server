@@ -11,7 +11,6 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"hotgo/addons/youban_bot/internal/dao"
 	"hotgo/addons/youban_bot/internal/model/do"
-	"hotgo/addons/youban_bot/internal/model/entity"
 )
 
 // Management has its own main-Bot command; it never registers relay /help globally.
@@ -128,7 +127,9 @@ func (relayManagementFeature) Handle(ctx context.Context, s *sSysBot, fc *botFea
 				enabled = 1
 			}
 			_, err := dao.YoubanBotRelayConfig.Ctx(ctx).WherePri(current.Id).Data(do.YoubanBotRelayConfig{Enabled: enabled}).Update()
-			_, state, stateErr := s.relayRuntimeState(ctx, &entity.YoubanBotRelayConfig{BotId: current.BotId, Enabled: enabled})
+			stateConfig := *current
+			stateConfig.Enabled = enabled
+			_, state, stateErr := s.relayRuntimeState(ctx, &stateConfig)
 			if stateErr != nil {
 				return stateErr
 			}

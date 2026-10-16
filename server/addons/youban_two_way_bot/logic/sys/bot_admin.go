@@ -10,8 +10,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
-	twdao "hotgo/addons/youban_two_way_bot/internal/dao"
-	"hotgo/addons/youban_two_way_bot/internal/model/entity"
+	twowaymodel "hotgo/addons/youban_two_way_bot/model"
 	"hotgo/addons/youban_two_way_bot/model/input/sysin"
 )
 
@@ -23,20 +22,20 @@ func (s *sSysTwoWayBot) AdminBotList(ctx context.Context, in *sysin.BotListInp) 
 	if in == nil {
 		in = &sysin.BotListInp{}
 	}
-	columns := twdao.YoubanTwoWayBotBot.Columns()
-	mod := twdao.YoubanTwoWayBotBot.Ctx(ctx).
-		Where(columns.TenantId, account.TenantId).
-		WhereNull(columns.DeletedAt)
+	mod := publishTwoWayBots(ctx).
+		Where("tenant_id", account.TenantId).
+		Where("account_id", account.Id).
+		WhereNull("deleted_at")
 	if strings.TrimSpace(in.Keyword) != "" {
 		keyword := "%" + strings.TrimSpace(in.Keyword) + "%"
-		mod = mod.WhereLike(columns.Name, keyword).WhereOrLike(columns.BotUsername, keyword)
+		mod = mod.Where("(bot_name LIKE ? OR bot_username LIKE ?)", keyword, keyword)
 	}
 	if in.Status != nil &&
 		(*in.Status == sysin.TwoWayBotStatusEnabled || *in.Status == sysin.TwoWayBotStatusDisabled) {
-		mod = mod.Where(columns.Status, *in.Status)
+		mod = mod.Where("status", *in.Status)
 	}
-	var rows []*entity.YoubanTwoWayBotBot
-	if err = mod.Page(in.GetPage(), in.GetPerPage()).OrderDesc(columns.Id).ScanAndCount(&rows, &totalCount, false); err != nil {
+	var rows []*twowaymodel.BotRuntime
+	if err = mod.Page(in.GetPage(), in.GetPerPage()).OrderDesc("id").ScanAndCount(&rows, &totalCount, false); err != nil {
 		return nil, 0, gerror.Wrap(err, "读取双向机器人失败")
 	}
 	tgAccountNames, err := loadTgAccountNames(ctx, rows)
@@ -64,9 +63,9 @@ func (s *sSysTwoWayBot) AdminBotSave(ctx context.Context, in *sysin.BotSaveInp) 
 	if err = ensureTgAccountBelongsTenant(ctx, in.TgAccountId, account.TenantId); err != nil {
 		return err
 	}
-	var old *entity.YoubanTwoWayBotBot
+	var old *twowaymodel.BotRuntime
 	if in.Id > 0 {
-		old, err = s.botById(ctx, in.Id, account.TenantId)
+		old, err = s.botByAccount(ctx, in.Id, account.TenantId, account.Id)
 		if err != nil {
 			return err
 		}
@@ -137,7 +136,8 @@ func (s *sSysTwoWayBot) AdminBotSave(ctx context.Context, in *sysin.BotSaveInp) 
 		"tenant_id":              account.TenantId,
 		"account_id":             account.Id,
 		"tg_account_id":          in.TgAccountId,
-		"name":                   name,
+		"bot_name":               name,
+		"bot_type":               "two_way",
 		"welcome_message":        in.WelcomeMessage,
 		"bot_token":              token,
 		"bot_user_id":            botUserId,
@@ -153,12 +153,14 @@ func (s *sSysTwoWayBot) AdminBotSave(ctx context.Context, in *sysin.BotSaveInp) 
 		"updated_at":             now,
 	}
 	if in.Id > 0 {
-		if _, err = twdao.YoubanTwoWayBotBot.Ctx(ctx).WherePri(in.Id).Where("tenant_id", account.TenantId).Data(data).Update(); err != nil {
+		if _, err = g.DB().Model(publishBotTable).Safe().Ctx(ctx).WherePri(in.Id).Where("tenant_id", account.TenantId).Where("account_id", account.Id).Where("bot_type", "two_way").Data(data).Update(); err != nil {
 			return gerror.Wrap(err, "更新双向机器人失败")
 		}
 	} else {
 		data["created_at"] = now
-		if in.Id, err = twdao.YoubanTwoWayBotBot.Ctx(ctx).Data(data).InsertAndGetId(); err != nil {
+		data["account_id"] = account.Id
+		data["created_by"] = account.Id
+		if in.Id, err = g.DB().Model(publishBotTable).Safe().Ctx(ctx).Data(data).InsertAndGetId(); err != nil {
 			return gerror.Wrap(err, "创建双向机器人失败")
 		}
 	}
@@ -176,15 +178,16 @@ func (s *sSysTwoWayBot) AdminBotSettings(ctx context.Context, in *sysin.BotSetti
 	if err != nil {
 		return err
 	}
-	columns := twdao.YoubanTwoWayBotBot.Columns()
-	result, err := twdao.YoubanTwoWayBotBot.Ctx(ctx).
-		Where(columns.Id, in.Id).
-		Where(columns.TenantId, account.TenantId).
-		WhereNull(columns.DeletedAt).
+	result, err := g.DB().Model(publishBotTable).Safe().Ctx(ctx).
+		Where("id", in.Id).
+		Where("tenant_id", account.TenantId).
+		Where("account_id", account.Id).
+		Where("bot_type", "two_way").
+		WhereNull("deleted_at").
 		Data(g.Map{
-			columns.Name:           in.Name,
-			columns.WelcomeMessage: in.WelcomeMessage,
-			columns.UpdatedAt:      gtime.Now(),
+			"bot_name":        in.Name,
+			"welcome_message": in.WelcomeMessage,
+			"updated_at":      gtime.Now(),
 		}).Update()
 	if err != nil {
 		return gerror.Wrap(err, "保存双向机器人设置失败")
@@ -204,9 +207,11 @@ func (s *sSysTwoWayBot) AdminBotDelete(ctx context.Context, in *sysin.BotDeleteI
 	if err != nil {
 		return err
 	}
-	_, err = twdao.YoubanTwoWayBotBot.Ctx(ctx).
+	_, err = g.DB().Model(publishBotTable).Safe().Ctx(ctx).
 		WhereIn("id", in.Ids).
 		Where("tenant_id", account.TenantId).
+		Where("account_id", account.Id).
+		Where("bot_type", "two_way").
 		Data(g.Map{"deleted_at": gtime.Now(), "updated_at": gtime.Now()}).
 		Update()
 	if err != nil {
@@ -220,6 +225,9 @@ func (s *sSysTwoWayBot) AdminBotRefreshWebhook(ctx context.Context, in *sysin.Bo
 	if err != nil {
 		return err
 	}
+	if _, err = s.botByAccount(ctx, in.Id, account.TenantId, account.Id); err != nil {
+		return err
+	}
 	return s.refreshWebhookById(ctx, in.Id, account.TenantId)
 }
 
@@ -228,7 +236,7 @@ func (s *sSysTwoWayBot) AdminBotSetup(ctx context.Context, in *sysin.BotActionIn
 	if err != nil {
 		return err
 	}
-	row, err := s.botById(ctx, in.Id, account.TenantId)
+	row, err := s.botByAccount(ctx, in.Id, account.TenantId, account.Id)
 	if err != nil {
 		return err
 	}
@@ -273,17 +281,11 @@ func (s *sSysTwoWayBot) validateBotToken(ctx context.Context, token string) (use
 	return fmt.Sprintf("%d", user.ID), username, displayName, nil
 }
 
-func (s *sSysTwoWayBot) botById(ctx context.Context, id int64, tenantId int64) (*entity.YoubanTwoWayBotBot, error) {
+func (s *sSysTwoWayBot) botById(ctx context.Context, id int64, tenantId int64) (*twowaymodel.BotRuntime, error) {
 	if id <= 0 {
 		return nil, gerror.New("请选择机器人")
 	}
-	columns := twdao.YoubanTwoWayBotBot.Columns()
-	var row *entity.YoubanTwoWayBotBot
-	err := twdao.YoubanTwoWayBotBot.Ctx(ctx).
-		Where(columns.Id, id).
-		Where(columns.TenantId, tenantId).
-		WhereNull(columns.DeletedAt).
-		Scan(&row)
+	row, err := scanPublishTwoWayBot(ctx, id, tenantId)
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取双向机器人失败")
 	}
@@ -293,7 +295,18 @@ func (s *sSysTwoWayBot) botById(ctx context.Context, id int64, tenantId int64) (
 	return row, nil
 }
 
-func loadTgAccountNames(ctx context.Context, rows []*entity.YoubanTwoWayBotBot) (map[int64]string, error) {
+func (s *sSysTwoWayBot) botByAccount(ctx context.Context, id, tenantID, accountID int64) (*twowaymodel.BotRuntime, error) {
+	row, err := s.botById(ctx, id, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	if row.AccountId != accountID {
+		return nil, gerror.New("双向机器人不存在")
+	}
+	return row, nil
+}
+
+func loadTgAccountNames(ctx context.Context, rows []*twowaymodel.BotRuntime) (map[int64]string, error) {
 	ids := make([]int64, 0, len(rows))
 	seen := map[int64]struct{}{}
 	for _, row := range rows {
@@ -336,7 +349,7 @@ func loadTgAccountNames(ctx context.Context, rows []*entity.YoubanTwoWayBotBot) 
 	return out, nil
 }
 
-func botModel(row *entity.YoubanTwoWayBotBot, tgAccountName string) *sysin.BotModel {
+func botModel(row *twowaymodel.BotRuntime, tgAccountName string) *sysin.BotModel {
 	if row == nil {
 		return nil
 	}
