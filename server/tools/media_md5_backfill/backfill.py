@@ -17,6 +17,15 @@ import psycopg2
 import requests
 
 STOP = threading.Event()
+HTTP_LOCAL = threading.local()
+
+
+def stream_request(source):
+    # Reuse TLS connections within each worker; no response content is cached.
+    if not hasattr(HTTP_LOCAL, 'session'):
+        HTTP_LOCAL.session = requests.Session()
+    return HTTP_LOCAL.session.get(source, stream=True, timeout=(10, 30),
+                                  headers={'Accept-Encoding': 'identity'})
 
 
 def fingerprint(row, bandwidth, max_bytes):
@@ -28,8 +37,7 @@ def fingerprint(row, bandwidth, max_bytes):
     total = 0
     started = time.monotonic()
     try:
-        with requests.get(source, stream=True, timeout=(10, 30),
-                          headers={'Accept-Encoding': 'identity'}) as response:
+        with stream_request(source) as response:
             if response.status_code != 200:
                 return media_id, None, 0, 'http_' + str(response.status_code)
             content_type = response.headers.get('Content-Type', '').lower()

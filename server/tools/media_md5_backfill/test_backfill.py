@@ -14,12 +14,12 @@ class Response:
 
 class FingerprintTests(unittest.TestCase):
     def test_original_stream_digest(self):
-        with patch.object(backfill.requests, 'get', return_value=Response()):
+        with patch.object(backfill, 'stream_request', return_value=Response()):
             result = backfill.fingerprint((1,'https://test/video.mp4','',14,'video'),1e9,1024)
         self.assertEqual(result, (1,hashlib.md5(b'original-video').hexdigest(),14,None))
 
     def test_size_mismatch_never_writes_digest(self):
-        with patch.object(backfill.requests, 'get', return_value=Response()):
+        with patch.object(backfill, 'stream_request', return_value=Response()):
             result = backfill.fingerprint((1,'https://test/video.mp4','',99,'video'),1e9,1024)
         self.assertIsNone(result[1])
         self.assertEqual(result[3], 'size_mismatch')
@@ -27,13 +27,13 @@ class FingerprintTests(unittest.TestCase):
     def test_error_response_never_hashes_error_page(self):
         response = Response()
         response.status_code = 403
-        with patch.object(backfill.requests, 'get', return_value=response):
+        with patch.object(backfill, 'stream_request', return_value=response):
             result = backfill.fingerprint((1,'https://test/video.mp4','',0,'video'),1e9,1024)
         self.assertEqual(result[3], 'http_403')
         self.assertIsNone(result[1])
 
     def test_exception_audit_does_not_contain_url(self):
-        with patch.object(backfill.requests, 'get', side_effect=ValueError('secret-signed-url')):
+        with patch.object(backfill, 'stream_request', side_effect=ValueError('secret-signed-url')):
             result = backfill.fingerprint((1,'https://test/video.mp4','',0,'video'),1e9,1024)
         self.assertEqual(result[3], 'ValueError')
         self.assertNotIn('secret', str(result))
