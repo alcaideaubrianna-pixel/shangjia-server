@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"strings"
 	"time"
@@ -187,6 +188,12 @@ func (s *sSysPublish) sendTelegramJobLockedByChannel(ctx context.Context, jobId 
 		return err
 	}
 	ctx = telegramPublishJobTraceContext(ctx, job)
+	bounded, cancelBudget, budgetErr := s.telegramSendBudgetContext(ctx, job)
+	if budgetErr != nil {
+		return budgetErr
+	}
+	defer cancelBudget()
+	ctx = bounded
 	step = beginTelegramPublishStage(ctx, "job.can_send")
 	allowed, err := s.canSendTelegramJob(ctx, job)
 	step.End(err, g.Map{"allowed": allowed})
@@ -554,9 +561,17 @@ func isTelegramBotMediaProcessingError(err error) bool {
 }
 
 func shouldFallbackTelegramMediaToAccount(err error) bool {
-	return isTelegramMediaSizeLimitError(err) ||
+	return isTelegramAPITimeout(err) || isTelegramMediaSizeLimitError(err) ||
 		isTelegramMediaSourceUnavailableError(err) ||
 		isTelegramBotMediaProcessingError(err)
+}
+
+func isTelegramAPITimeout(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return false
+	}
+	var timeout net.Error
+	return errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &timeout) && timeout.Timeout())
 }
 
 func telegramMediaDebugSummary(media []*telegramMediaItem) string {
@@ -629,6 +644,12 @@ func (s *sSysPublish) sendTelegramVerifyPart(ctx context.Context, bot *tgbot.Bot
 }
 
 func (s *sSysPublish) sendTelegramJobMediaByAccount(ctx context.Context, job telegramJobRecord, purpose string, caption string, media []*telegramMediaItem, botErr error) (resultMessages []*telegramSentMessage, resultErr error) {
+	if isTelegramAPITimeout(botErr) {
+		// Queue the handoff even when the HTTP request consumed its context.
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+	}
 	ctx = telegramPublishJobTraceContext(ctx, job)
 	stage := beginTelegramPublishStage(ctx, "account_fallback.submit", g.Map{"purpose": purpose, "mediaCount": len(media), "botError": telegramPublishLogError(botErr)})
 	defer stage.Finish(&resultErr)
@@ -713,6 +734,9 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 	if errors.Is(err, errTelegramAwaitingWebhook) {
 		beginTelegramPublishStage(ctx, "job.error_decision").End(nil, g.Map{"decision": "await_ambiguous_delivery"})
 		return nil
+	}
+	if errors.Is(err, errTelegramAttemptNeedsReconcile) {
+		return s.markTelegramJobUnknown(ctx, job, err)
 	}
 	if errors.Is(err, errTelegramRemoteConfirmed) {
 		beginTelegramPublishStage(ctx, "job.error_decision").End(nil, g.Map{"decision": "repair_local_projection", "apiConfirmed": true, "resend": false})

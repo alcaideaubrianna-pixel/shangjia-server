@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -121,7 +122,7 @@ func TestTelegramAttemptPhaseMode(t *testing.T) {
 }
 
 func TestTelegramSupersededAttemptCanResume(t *testing.T) {
-	if !telegramSupersededAttemptCanResume(telegramAttemptStatusSuperseded) {
+	if !telegramSupersededAttemptCanResume(telegramDeliveryAttempt{Status: telegramAttemptStatusSuperseded, ErrorMessage: "下载远程媒体失败：HTTP 404"}, 0) {
 		t.Fatal("superseded attempt must allow a fresh retry attempt")
 	}
 	for _, status := range []string{
@@ -130,9 +131,27 @@ func TestTelegramSupersededAttemptCanResume(t *testing.T) {
 		telegramAttemptStatusRetryWait,
 		telegramAttemptStatusConfirmed,
 	} {
-		if telegramSupersededAttemptCanResume(status) {
+		if telegramSupersededAttemptCanResume(telegramDeliveryAttempt{Status: status, ErrorMessage: "下载远程媒体失败：HTTP 404"}, 0) {
 			t.Fatalf("active or confirmed attempt must not resume as superseded: %s", status)
 		}
+	}
+	for _, tc := range []struct {
+		name    string
+		attempt telegramDeliveryAttempt
+		audit   int
+	}{
+		{"production126_interrupted", telegramDeliveryAttempt{Id: 1402451, Status: telegramAttemptStatusSuperseded, ErrorMessage: "发送进程中断，等待Webhook或协议号对账"}, 0},
+		{"production127_interrupted", telegramDeliveryAttempt{Id: 1402711, Status: telegramAttemptStatusSuperseded, ErrorMessage: "发送进程中断，等待Webhook或协议号对账"}, 0},
+		{"production128_interrupted", telegramDeliveryAttempt{Id: 1402453, Status: telegramAttemptStatusSuperseded, ErrorMessage: "发送进程中断，等待Webhook或协议号对账"}, 0},
+		{"production249_missing_evidence", telegramDeliveryAttempt{Id: 1411604, Status: telegramAttemptStatusSuperseded}, 0},
+		{"response_received", telegramDeliveryAttempt{Status: telegramAttemptStatusSuperseded, ResponseReceived: 1, ErrorMessage: "下载远程媒体失败：HTTP 404"}, 0},
+		{"audit_exists", telegramDeliveryAttempt{Status: telegramAttemptStatusSuperseded, ErrorMessage: "下载远程媒体失败：HTTP 404"}, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if telegramSupersededAttemptCanResume(tc.attempt, tc.audit) {
+				t.Fatal("uncertain or confirmed delivery must not be replayed")
+			}
+		})
 	}
 }
 
@@ -187,6 +206,9 @@ func TestTelegramUnknownAttemptRecoveryAction(t *testing.T) {
 		{name: "interrupted sender reconciles", attempt: telegramDeliveryAttempt{Id: 1, Status: telegramAttemptStatusRetryWait, ErrorMessage: "发送进程中断，等待Webhook或协议号对账"}, want: telegramUnknownAttemptReconcile},
 		{name: "partial response reconciles", attempt: telegramDeliveryAttempt{Id: 1, Status: telegramAttemptStatusRetryWait, ErrorMessage: "生成防扫图候选文件失败"}, auditCount: 1, want: telegramUnknownAttemptReconcile},
 		{name: "pre-send failure retries", attempt: telegramDeliveryAttempt{Id: 1, Status: telegramAttemptStatusRetryWait, ErrorMessage: "生成防扫图候选文件失败"}, want: telegramUnknownAttemptRetry},
+		{name: "missing error cannot prove no delivery", attempt: telegramDeliveryAttempt{Id: 1, Status: telegramAttemptStatusRetryWait}, want: telegramUnknownAttemptReconcile},
+		{name: "response must never resend", attempt: telegramDeliveryAttempt{Id: 1, Status: telegramAttemptStatusRetryWait, ResponseReceived: 1, ErrorMessage: "生成防扫图候选文件失败"}, want: telegramUnknownAttemptReconcile},
+		{name: "confirmed count must never resend", attempt: telegramDeliveryAttempt{Id: 1, Status: telegramAttemptStatusRetryWait, ConfirmedCount: 1, ErrorMessage: "生成防扫图候选文件失败"}, want: telegramUnknownAttemptReconcile},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -427,6 +449,27 @@ func TestTelegramAPISuccessCommitsAttemptMessageAndPhaseIntegration(t *testing.T
 		Where("attempt_id", attempt.Id).Where("message_id", seed).Where("source", "response").Count()
 	if err != nil || auditCount != 1 {
 		t.Fatalf("attempt audit count=%d err=%v", auditCount, err)
+	}
+	// Production Baihuage3 job 2080209: a definite 429 left a retry_wait
+	// verification Attempt while the job rolled back to display_confirmed.
+	oldVerifyID, err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).Data(g.Map{
+		"job_id": jobID, "tenant_id": seed, "bot_id": seed, "channel_id": seed,
+		"target_chat_id": "-1001234567890", "phase": "verify", "chunk_index": 0,
+		"attempt_no": 1, "attempt_token": fmt.Sprintf("rate-limit-%d", seed),
+		"expected_count": 1, "confirmed_count": 0, "response_received": 0,
+		"status": telegramAttemptStatusRetryWait,
+		"error_message": "too many requests, Too Many Requests: retry after 16: retry_after 16",
+	}).InsertAndGetId()
+	if err != nil {
+		t.Fatalf("insert rate-limited verification: %v", err)
+	}
+	verification, err := new(sSysPublish).prepareTelegramDeliveryAttempt(ctx, job, "verify", 1, true)
+	if err != nil || verification.Id == oldVerifyID || verification.AttemptNo != 2 {
+		t.Fatalf("rolled-back verification must resume: attempt=%+v err=%v", verification, err)
+	}
+	oldStatus, err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).Where("id", oldVerifyID).Value("status")
+	if err != nil || oldStatus.String() != telegramAttemptStatusSuperseded {
+		t.Fatalf("rejected attempt must retire atomically: status=%v err=%v", oldStatus, err)
 	}
 }
 

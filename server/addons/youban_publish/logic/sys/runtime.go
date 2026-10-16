@@ -68,6 +68,7 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 		// Keeping it on Scheduler made every channel unrecoverable whenever the
 		// scheduler role was stopped independently of the push workers.
 		go s.runTelegramJobRecovery(ctx)
+		go s.runTelegramSendWatchdog(ctx)
 	}
 	if config.MediaWorker {
 		s.startTelegramMediaWorker(ctx)

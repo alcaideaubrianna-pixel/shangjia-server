@@ -736,8 +736,14 @@ ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "last_dispatch_e
 UPDATE "hg_youban_publish_tg_job" SET "tenant_id" = "merchant_id" WHERE "tenant_id" = 0 AND "merchant_id" > 0;
 DROP INDEX IF EXISTS "uk_ybp_tg_job_task_channel";
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_task_channel" ON "hg_youban_publish_tg_job" ("task_id", "channel_id", "id");
-CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_job_operation_channel" ON "hg_youban_publish_tg_job" ("task_id", "operation_no", "channel_id") WHERE "operation_no" <> '';
-CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_job_profile_operation_channel" ON "hg_youban_publish_tg_job" ("profile_id", "operation_no", "channel_id") WHERE "task_id" IS NULL AND "profile_id" > 0 AND "operation_no" <> '';
+ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "send_deadline_at" timestamp NULL;
+ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "timeout_parent_job_id" bigint NULL;
+ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "timeout_cleanup_at" timestamp NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_job_operation_generation" ON "hg_youban_publish_tg_job" ("task_id", "operation_no", "channel_id", COALESCE("timeout_parent_job_id",0)) WHERE "operation_no" <> '';
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_job_profile_operation_generation" ON "hg_youban_publish_tg_job" ("profile_id", "operation_no", "channel_id", COALESCE("timeout_parent_job_id",0)) WHERE "task_id" IS NULL AND "profile_id" > 0 AND "operation_no" <> '';
+CREATE UNIQUE INDEX IF NOT EXISTS "uq_tg_job_timeout_parent" ON "hg_youban_publish_tg_job" ("timeout_parent_job_id") WHERE "timeout_parent_job_id" IS NOT NULL;
+CREATE INDEX IF NOT EXISTS "idx_tg_job_send_deadline" ON "hg_youban_publish_tg_job" ("send_deadline_at","id") WHERE "status" IN ('pending','sending','failed_retry','unknown') AND "send_deadline_at" IS NOT NULL;
+CREATE INDEX IF NOT EXISTS "idx_tg_job_timeout_cleanup" ON "hg_youban_publish_tg_job" ("timeout_cleanup_at","id") WHERE "send_phase"='timeout_cancelled' AND "timeout_cleanup_at" IS NOT NULL;
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_status_retry" ON "hg_youban_publish_tg_job" ("status", "next_retry_at", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_sending_recovery" ON "hg_youban_publish_tg_job" ("updated_at", "id") WHERE "status" = 'sending';
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_task" ON "hg_youban_publish_tg_job" ("task_id");

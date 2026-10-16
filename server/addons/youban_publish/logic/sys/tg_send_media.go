@@ -606,11 +606,14 @@ func telegramInputFile(ctx context.Context, media *telegramMediaItem) (models.In
 		return nil, nil, gerror.New("媒体文件为空")
 	}
 	if source := strings.TrimSpace(media.TgFileId); source != "" && !telegramMediaRequiresSanitizedUpload(media) {
+		g.Log().Infof(ctx, "TG实际媒体输入 jobId:%d mediaId:%d purpose:%s mode:file_id antiScan:%t", media.JobId, media.Id, media.Purpose, media.AntiScanEnabled)
 		return &models.InputFileString{Data: source}, nil, nil
 	}
 	if source := telegramMediaRemoteURL(media); source != "" {
+		g.Log().Infof(ctx, "TG实际媒体输入 jobId:%d mediaId:%d purpose:%s mode:url antiScan:%t", media.JobId, media.Id, media.Purpose, media.AntiScanEnabled)
 		return &models.InputFileString{Data: source}, nil, nil
 	}
+	g.Log().Infof(ctx, "TG实际媒体输入 jobId:%d mediaId:%d purpose:%s mode:multipart antiScan:%t", media.JobId, media.Id, media.Purpose, media.AntiScanEnabled)
 	path, cleanup, err := cachedTelegramMediaFile(ctx, media)
 	if err != nil {
 		return nil, nil, err

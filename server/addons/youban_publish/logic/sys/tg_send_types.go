@@ -87,4 +87,7 @@ type telegramJobRecord struct {
 	NextCycleAt            *gtime.Time `json:"nextCycleAt"`
 	CreatedAt              *gtime.Time `json:"createdAt"`
 	VerifyMediaCount       int         `json:"verifyMediaCount"`
+	SendDeadlineAt         *gtime.Time `json:"sendDeadlineAt"`
+	TimeoutParentJobId     int64       `json:"timeoutParentJobId"`
+	TimeoutCleanupAt       *gtime.Time `json:"timeoutCleanupAt"`
 }

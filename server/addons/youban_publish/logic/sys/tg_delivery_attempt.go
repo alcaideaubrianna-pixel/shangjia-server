@@ -41,6 +41,7 @@ const (
 var (
 	errTelegramAwaitingWebhook        = gerror.New("等待Telegram Webhook确认")
 	errTelegramAttemptAuditIncomplete = gerror.New("TG响应消息审计不完整")
+	errTelegramAttemptNeedsReconcile  = gerror.New("TG发送Attempt结果不明确，必须先对账")
 )
 
 type telegramDeliveryAttempt struct {
@@ -59,6 +60,7 @@ type telegramDeliveryAttempt struct {
 	Status           string      `json:"status"`
 	ResponseReceived int         `json:"responseReceived" orm:"response_received"`
 	WebhookDeadline  *gtime.Time `json:"webhookDeadline"`
+	CreatedAt        *gtime.Time `json:"createdAt"`
 	ErrorMessage     string      `json:"errorMessage" orm:"error_message"`
 }
 
@@ -108,7 +110,10 @@ func (s *sSysPublish) prepareTelegramDeliveryAttempt(ctx context.Context, job te
 			}
 			return gerror.Newf("TG任务阶段不允许创建%s Attempt current:%s expected:%s", phase, current.SendPhase, expectedCurrentPhase)
 		}
-		if resumeSendingPhase && advancePhase {
+		// A definite API rejection may roll the job back to fromPhase while
+		// retaining its retry_wait Attempt. Retire that Attempt under the same
+		// lock before advancing again; otherwise it blocks every later retry.
+		if advancePhase {
 			var retryAttempt telegramDeliveryAttempt
 			if scanErr := tx.Model(publishTgAttemptTable).
 				Where("job_id", job.Id).Where("phase", phase).Where("status", telegramAttemptStatusRetryWait).
@@ -116,23 +121,30 @@ func (s *sSysPublish) prepareTelegramDeliveryAttempt(ctx context.Context, job te
 				OrderDesc("id").Limit(1).LockUpdate().Scan(&retryAttempt); !telegramOptionalAttemptScanSucceeded(scanErr) {
 				return gerror.Wrap(scanErr, "读取可重试TG发送Attempt失败")
 			}
-			if retryAttempt.Id <= 0 {
+			if retryAttempt.Id <= 0 && resumeSendingPhase {
 				var latestAttempt telegramDeliveryAttempt
 				if scanErr := tx.Model(publishTgAttemptTable).
 					Where("job_id", job.Id).Where("phase", phase).
 					OrderDesc("id").Limit(1).LockUpdate().Scan(&latestAttempt); !telegramOptionalAttemptScanSucceeded(scanErr) {
 					return gerror.Wrap(scanErr, "读取最近TG发送Attempt失败")
 				}
-				if latestAttempt.Id <= 0 || !telegramSupersededAttemptCanResume(latestAttempt.Status) {
+				auditCount, countErr := tx.Model(publishTgAttemptMessageTable).Where("attempt_id", latestAttempt.Id).Count()
+				if countErr != nil {
+					return gerror.Wrap(countErr, "读取历史TG发送Attempt审计失败")
+				}
+				if latestAttempt.Id > 0 && latestAttempt.Status == telegramAttemptStatusSuperseded && !telegramSupersededAttemptCanResume(latestAttempt, auditCount) {
+					return gerror.Wrapf(errTelegramAttemptNeedsReconcile, "历史Attempt不能证明未发送 attemptId:%d", latestAttempt.Id)
+				}
+				if latestAttempt.Id <= 0 || !telegramSupersededAttemptCanResume(latestAttempt, auditCount) {
 					return gerror.Newf("TG任务%s阶段没有可重试Attempt jobId:%d", phase, job.Id)
 				}
-			} else {
+			} else if retryAttempt.Id > 0 {
 				auditCount, countErr := tx.Model(publishTgAttemptMessageTable).Where("attempt_id", retryAttempt.Id).Count()
 				if countErr != nil {
 					return gerror.Wrap(countErr, "读取TG发送Attempt审计失败")
 				}
 				if telegramUnknownAttemptRecoveryAction(retryAttempt, auditCount) != telegramUnknownAttemptRetry {
-					return gerror.Newf("TG任务%s阶段发送结果不明确，必须先对账 attemptId:%d", phase, retryAttempt.Id)
+					return gerror.Wrapf(errTelegramAttemptNeedsReconcile, "TG任务%s阶段 attemptId:%d", phase, retryAttempt.Id)
 				}
 				result, updateErr := tx.Model(publishTgAttemptTable).Where("id", retryAttempt.Id).
 					Where("status", telegramAttemptStatusRetryWait).
@@ -204,8 +216,11 @@ func (s *sSysPublish) prepareTelegramDeliveryAttempt(ctx context.Context, job te
 	return attempt, nil
 }
 
-func telegramSupersededAttemptCanResume(status string) bool {
-	return strings.TrimSpace(status) == telegramAttemptStatusSuperseded
+func telegramSupersededAttemptCanResume(attempt telegramDeliveryAttempt, auditCount int) bool {
+	return attempt.Status == telegramAttemptStatusSuperseded && auditCount == 0 &&
+		attempt.ResponseReceived == 0 && attempt.ConfirmedCount == 0 &&
+		strings.TrimSpace(attempt.ErrorMessage) != "" &&
+		!isTelegramAmbiguousDeliveryError(errors.New(attempt.ErrorMessage))
 }
 
 func telegramAttemptPhaseMode(currentPhase, fromPhase, sendingPhase string, advancePhase bool) (advanceJobPhase, resumeSendingPhase bool) {
@@ -220,6 +235,10 @@ func telegramAttemptPhaseMode(currentPhase, fromPhase, sendingPhase string, adva
 // Bot API response never enters reconciliation; retries only repair optional
 // projections such as cached file IDs.
 func (s *sSysPublish) confirmTelegramAPISuccess(ctx context.Context, job telegramJobRecord, attempt telegramDeliveryAttempt, messages []*telegramSentMessage) (resultErr error) {
+	// A received response remains evidence even when the request's deadline
+	// expired concurrently. Persist it with a separate, bounded commit budget.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
 	stage := beginTelegramPublishStage(ctx, "api_success.confirm", g.Map{"attemptId": attempt.Id, "purpose": attempt.Phase, "messageIds": telegramSentMessageIDs(messages)})
 	defer stage.Finish(&resultErr)
 	_, sendingPhase, confirmedPhase, err := telegramAttemptPhaseTransition(attempt.Phase)
@@ -231,7 +250,25 @@ func (s *sSysPublish) confirmTelegramAPISuccess(ctx context.Context, job telegra
 		count = 0
 	}
 	step := beginTelegramPublishStage(ctx, "api_success.commit_transaction", g.Map{"attemptId": attempt.Id})
+	var duplicateMessages []*telegramSentMessage
+	cancelled := false
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		// Shared lock order with timeout cancellation: Job, then Attempt.
+		var lockedJob telegramJobRecord
+		if err := tx.Model(publishTgJobTable).Where("id", job.Id).LockUpdate().Scan(&lockedJob); err != nil {
+			return err
+		}
+		if lockedJob.SendPhase == telegramSendPhaseTimeoutCancelled {
+			cancelled = true
+			if err := recordTelegramAttemptMessagesTx(ctx, tx, attempt, messages, "response"); err != nil {
+				return err
+			}
+			if err := saveTelegramSentMessagesTx(ctx, tx, job, messages); err != nil {
+				return err
+			}
+			_, err := tx.Model(publishTgJobTable).Where("id", job.Id).Data(g.Map{"timeout_cleanup_at": gtime.Now()}).Update()
+			return err
+		}
 		var current telegramDeliveryAttempt
 		if scanErr := tx.Model(publishTgAttemptTable).Where("id", attempt.Id).LockUpdate().Scan(&current); scanErr != nil {
 			return gerror.Wrap(scanErr, "锁定TG发送Attempt失败")
@@ -240,6 +277,18 @@ func (s *sSysPublish) confirmTelegramAPISuccess(ctx context.Context, job telegra
 			return gerror.New("TG发送Attempt不存在")
 		}
 		if current.Status == telegramAttemptStatusConfirmed {
+			for _, message := range messages {
+				if message == nil {
+					continue
+				}
+				n, err := tx.Model(publishTgAttemptMessageTable).Where("attempt_id", attempt.Id).Where("message_id", message.MessageId).Count()
+				if err != nil {
+					return err
+				}
+				if n == 0 {
+					duplicateMessages = append(duplicateMessages, message)
+				}
+			}
 			return nil
 		}
 		if current.Status != telegramAttemptStatusSending && current.Status != telegramAttemptStatusWaiting && current.Status != telegramAttemptStatusRetryWait {
@@ -277,6 +326,14 @@ func (s *sSysPublish) confirmTelegramAPISuccess(ctx context.Context, job telegra
 	step.End(err, g.Map{"localCommitted": err == nil})
 	if err != nil {
 		return err
+	}
+	if len(duplicateMessages) > 0 {
+		if err := s.enqueueTelegramDuplicateMessages(ctx, job, duplicateMessages); err != nil {
+			return err
+		}
+	}
+	if cancelled {
+		return errTelegramJobSuperseded
 	}
 	attempt.Status = telegramAttemptStatusConfirmed
 	attempt.ResponseReceived = 1
@@ -350,7 +407,7 @@ func (s *sSysPublish) confirmTelegramDeliveryAttempt(ctx context.Context, attemp
 	}
 	_, err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
 		Where("id", attempt.Id).
-		WhereIn("status", []string{telegramAttemptStatusSending, telegramAttemptStatusWaiting, telegramAttemptStatusRetryWait, telegramAttemptStatusConfirmed}).
+		WhereIn("status", []string{telegramAttemptStatusSending, telegramAttemptStatusWaiting, telegramAttemptStatusRetryWait, telegramAttemptStatusConfirmed, telegramAttemptStatusSuperseded}).
 		Data(data).Update()
 	if err != nil {
 		return err
@@ -740,7 +797,7 @@ func (s *sSysPublish) matchTelegramDeliveryAttempt(ctx context.Context, botId in
 	}
 	if err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
 		Where("bot_id", botId).Where("target_chat_id", chatId).
-		WhereIn("status", []string{telegramAttemptStatusSending, telegramAttemptStatusWaiting, telegramAttemptStatusRetryWait}).
+		WhereIn("status", []string{telegramAttemptStatusSending, telegramAttemptStatusWaiting, telegramAttemptStatusRetryWait, telegramAttemptStatusConfirmed, telegramAttemptStatusSuperseded}).
 		Where("status <> ? OR webhook_deadline IS NOT NULL", telegramAttemptStatusRetryWait).
 		WhereGTE("created_at", gtime.Now().Add(-window)).
 		OrderDesc("id").Limit(limit).Scan(&attempts); err != nil {
@@ -755,7 +812,7 @@ func (s *sSysPublish) matchTelegramDeliveryAttempt(ctx context.Context, botId in
 			Fields("attempt.*").
 			Where("attempt.bot_id", botId).Where("source.chat_id", chatId).Where("source.media_group_id", msg.MediaGroupID).
 			WhereGT("source.matched_attempt_id", 0).
-			WhereIn("attempt.status", []string{telegramAttemptStatusSending, telegramAttemptStatusWaiting, telegramAttemptStatusRetryWait}).
+			WhereIn("attempt.status", []string{telegramAttemptStatusSending, telegramAttemptStatusWaiting, telegramAttemptStatusRetryWait, telegramAttemptStatusConfirmed, telegramAttemptStatusSuperseded}).
 			Where("attempt.status <> ? OR attempt.webhook_deadline IS NOT NULL", telegramAttemptStatusRetryWait).
 			OrderDesc("source.id").Limit(1).Scan(&grouped)
 		if err == nil && grouped.Id > 0 {
@@ -773,9 +830,42 @@ func (s *sSysPublish) matchTelegramDeliveryAttempt(ctx context.Context, botId in
 		}
 	}
 	if matched == nil && !telegramTextHasInternalDeliveryMarker(text) {
-		matched = s.matchTelegramVerifyAttempt(ctx, attempts, msg)
+		active := make([]telegramDeliveryAttempt, 0, len(attempts))
+		for _, attempt := range attempts {
+			if attempt.Status != telegramAttemptStatusConfirmed && attempt.Status != telegramAttemptStatusSuperseded {
+				active = append(active, attempt)
+			}
+		}
+		matched = s.matchTelegramVerifyAttempt(ctx, active, msg)
 	}
 	if matched == nil {
+		return
+	}
+	if matched.Status == telegramAttemptStatusConfirmed || matched.Status == telegramAttemptStatusSuperseded {
+		// Retain album anchoring even for duplicates, so captionless followers
+		// of this same album can be deleted by their exact IDs as they arrive.
+		if _, err := g.DB().Model(telegramBotMessageSourceTable).Safe().Ctx(ctx).
+			Where("chat_id", chatId).Where("message_id", msg.ID).Where("matched_attempt_id", 0).
+			Data(g.Map{"matched_attempt_id": matched.Id, "process_status": "matched"}).Update(); err != nil {
+			return
+		}
+		job, err := s.telegramJobById(ctx, matched.JobId)
+		if err != nil {
+			return
+		}
+		if job.SendPhase != telegramSendPhaseTimeoutCancelled {
+			if matched.Status != telegramAttemptStatusConfirmed {
+				return
+			}
+			n, err := g.DB().Model(publishTgAttemptMessageTable).Safe().Ctx(ctx).
+				Where("attempt_id", matched.Id).Where("message_id", msg.ID).Count()
+			if err != nil || n > 0 {
+				return
+			}
+		}
+		if err := s.enqueueTelegramDuplicateMessages(ctx, job, []*telegramSentMessage{{MessageId: int64(msg.ID), Purpose: matched.Phase}}); err != nil {
+			g.Log().Warningf(ctx, "TG迟到重复消息清理提交失败 jobId:%d attemptId:%d messageId:%d err:%+v", job.Id, matched.Id, msg.ID, err)
+		}
 		return
 	}
 	if matched.Phase == "verify" && telegramMessageFileId(msg) == "" {

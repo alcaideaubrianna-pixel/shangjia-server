@@ -29,7 +29,9 @@ import (
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	pdo "hotgo/addons/youban_publish/internal/model/do"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	idao "hotgo/internal/dao"
 	"hotgo/internal/library/cache"
+	"hotgo/utility/dbtime"
 )
 
 type publishCollectorDeliveryHandler struct {
@@ -319,6 +321,9 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 		return err
 	}
 	stage("读取任务与Job", "purpose", purpose, "jobStatus", job.Status)
+	if job.Status == telegramJobStatusSuperseded {
+		return nil
+	}
 	if job.Status != "sending" {
 		messageCount, countErr := s.telegramJobSentMessageCount(ctx, job.Id, purpose)
 		if countErr != nil {
@@ -353,6 +358,12 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 			return stateErr
 		}
 	}
+	bounded, cancelBudget, budgetErr := s.telegramSendBudgetContext(ctx, job)
+	if budgetErr != nil {
+		return budgetErr
+	}
+	defer cancelBudget()
+	ctx = bounded
 	g.Log().Infof(ctx, "协议号媒体降级任务开始执行 taskId:%d jobId:%d tgAccountId:%d purpose:%s attempt:%d/%d", task.ID, job.Id, task.AccountID, purpose, task.AttemptCount, task.MaxAttempts)
 	channel, err := s.messagePushChannelFromJob(ctx, job)
 	if err != nil {
@@ -582,6 +593,19 @@ func (s *sSysPublish) handleMessageReconcileAccountTask(ctx context.Context, cli
 		return err
 	}
 	if len(messages) == 0 {
+		if attempt.ResponseReceived == 0 && attempt.CreatedAt != nil && time.Since(dbtime.FromTimestamp(attempt.CreatedAt).Time) >= 5*time.Minute {
+			changed, err := s.transitionTelegramJob(ctx, telegramJobTransition{
+				JobId: job.Id, From: []string{telegramJobStatusConfirming}, To: telegramJobStatusSending,
+			})
+			if err != nil {
+				return err
+			}
+			if !changed {
+				return nil
+			}
+			g.Log().Warningf(ctx, "TG结果不明确超过5分钟，按补偿策略切换协议号 jobId:%d attemptId:%d phase:%s", job.Id, attempt.Id, attempt.Phase)
+			return s.submitTelegramMediaFallback(ctx, job, channel.TgAccountId, attempt.Phase)
+		}
 		if reconcileErr := telegramMissingReconcileMessagesError(attempt.Phase, accountTaskFinalAttempt(task)); !errors.Is(reconcileErr, errTelegramMediaFallbackUnavailable) {
 			return reconcileErr
 		}
@@ -1076,8 +1100,85 @@ func (s *sSysPublish) ingestCollectorBotDelivery(ctx context.Context, delivery *
 	}
 	message := collectorDeliveryMessage(delivery, source["tenant_id"].Int64(), source["account_id"].Int64(), source["id"].Int64(), sysin.CollectSourceTypeBot)
 	message.BotId = source["bot_id"].Int64()
+	if collectorDeliveryIsEdit(delivery.RawUpdate) {
+		return s.updateCollectedBotMessage(ctx, message)
+	}
 	_, err = s.ingestAndProcessCollectMessage(ctx, message)
 	return err
+}
+
+func collectorDeliveryIsEdit(raw []byte) bool {
+	var update struct {
+		EditedChannelPost json.RawMessage `json:"edited_channel_post"`
+		EditedMessage     json.RawMessage `json:"edited_message"`
+	}
+	if json.Unmarshal(raw, &update) != nil {
+		return false
+	}
+	return (len(update.EditedChannelPost) > 0 && string(update.EditedChannelPost) != "null") ||
+		(len(update.EditedMessage) > 0 && string(update.EditedMessage) != "null")
+}
+
+// Edits are updates, never new collection input. In particular, an edited
+// member of a historical album must not replace its complete media set.
+func (s *sSysPublish) updateCollectedBotMessage(ctx context.Context, message *CollectMessage) error {
+	event, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+		Where("tenant_id", message.TenantId).Where("account_id", message.AccountId).
+		Where("source_id", message.SourceId).Where("source_unique_key", message.SourceUniqueKey).One()
+	if err != nil {
+		return gerror.Wrap(err, "查找编辑消息对应采集事件失败")
+	}
+	if event.IsEmpty() {
+		g.Log().Infof(ctx, "忽略无来源资料的编辑消息 sourceId:%d chat:%s messageId:%d", message.SourceId, message.SourceChatId, message.SourceMessageId)
+		return nil
+	}
+	dispatches, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
+		Where("event_id", event["id"].Int64()).WhereGT("profile_id", 0).All()
+	if err != nil {
+		return gerror.Wrap(err, "查找编辑消息对应资料失败")
+	}
+	if len(dispatches) == 0 {
+		g.Log().Infof(ctx, "忽略未生成资料的编辑消息 eventId:%d sourceId:%d messageId:%d", event["id"].Int64(), message.SourceId, message.SourceMessageId)
+		return nil
+	}
+	// Refresh identity only; do not replay pairing, reset its waiting window,
+	// replace album members, or enqueue a new publication.
+	if err = s.upsertCollectEventMedia(ctx, event, normalizeCollectMediaItems(message.Media)); err != nil {
+		return err
+	}
+	if strings.TrimSpace(message.RawText) == "" {
+		return nil
+	}
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		for _, dispatch := range dispatches {
+			rule, ruleErr := pdao.YoubanPublishCollectRule.Ctx(ctx).WherePri(dispatch["rule_id"].Int64()).One()
+			if ruleErr != nil {
+				return ruleErr
+			}
+			if rule.IsEmpty() {
+				return gerror.New("编辑来源资料的采集规则不存在")
+			}
+			cols := idao.ContentProfile.Columns()
+			if _, updateErr := tx.Model(idao.ContentProfile.Table()).
+				Where(cols.Id, dispatch["profile_id"].Int64()).
+				Where("EXISTS (SELECT 1 FROM "+publishProfileStateTable+" ps WHERE ps.profile_id=? AND ps.tenant_id=? AND ps.account_id=? AND ps.deleted_at IS NULL)", dispatch["profile_id"].Int64(), message.TenantId, message.AccountId).
+				Data(g.Map{cols.PlainText: normalizeCollectRuleBody(message.RawText, rule)}).Update(); updateErr != nil {
+				return updateErr
+			}
+		}
+		_, updateErr := tx.Model(pdao.YoubanPublishCollectEvent.Table()).Where("id", event["id"].Int64()).
+			Data(g.Map{"raw_text": message.RawText, "text_hash": collectHash(message.RawText)}).Update()
+		return updateErr
+	})
+	if err != nil {
+		return err
+	}
+	for _, dispatch := range dispatches {
+		if err := s.syncProfileNoteIndex(ctx, dispatch["profile_id"].Int64()); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, source gdb.Record, delivery *collectorin.CollectorDelivery) (bool, error) {

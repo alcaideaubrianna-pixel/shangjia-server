@@ -13,7 +13,7 @@ import (
 	hglock "hotgo/internal/library/hgrds/lock"
 )
 
-const telegramChannelLeaseTTL = telegramPublishTaskTimeout + 2*time.Minute
+const telegramChannelLeaseTTL = telegramSendBudget + 30*time.Second
 
 func (s *sSysPublish) withTelegramChannelLock(ctx context.Context, chatId string, fn func() error) error {
 	key := telegramChannelLockKey(chatId)
@@ -42,6 +42,10 @@ func (s *sSysPublish) releaseTelegramChannelLease(ctx context.Context, lease *hg
 	if lease == nil {
 		return
 	}
+	// A canceled send context must not leave the channel locked for the full
+	// task timeout. Unlock still compares the lease token before deleting it.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	defer cancel()
 	if err := lease.Unlock(ctx); err != nil && !gerror.Is(err, hglock.ErrNotExist) {
 		g.Log().Warningf(ctx, "释放TG频道发送令牌失败：%+v", err)
 	}

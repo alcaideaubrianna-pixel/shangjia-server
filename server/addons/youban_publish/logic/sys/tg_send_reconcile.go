@@ -96,6 +96,9 @@ func isTelegramAmbiguousDeliveryError(err error) bool {
 	if errors.Is(err, errTelegramDeliveryUncertain) {
 		return true
 	}
+	if errors.Is(err, errTelegramAttemptNeedsReconcile) {
+		return true
+	}
 	var preparationErr *telegramMediaPreparationError
 	if errors.As(err, &preparationErr) {
 		return false
@@ -237,7 +240,8 @@ func telegramUnknownAttemptRecoveryAction(attempt telegramDeliveryAttempt, audit
 	if attempt.Status != telegramAttemptStatusRetryWait {
 		return telegramUnknownAttemptReconcile
 	}
-	if auditCount > 0 || isTelegramAmbiguousDeliveryError(errors.New(attempt.ErrorMessage)) {
+	if auditCount > 0 || attempt.ResponseReceived != 0 || attempt.ConfirmedCount > 0 ||
+		strings.TrimSpace(attempt.ErrorMessage) == "" || isTelegramAmbiguousDeliveryError(errors.New(attempt.ErrorMessage)) {
 		return telegramUnknownAttemptReconcile
 	}
 	return telegramUnknownAttemptRetry
@@ -249,8 +253,16 @@ func (s *sSysPublish) unknownTelegramJobAttempt(ctx context.Context, job telegra
 		phase = "verify"
 	}
 	attempt, err := s.activeTelegramDeliveryAttempt(ctx, job.Id, phase)
-	if err != nil || attempt.Id <= 0 {
+	if err != nil {
 		return attempt, 0, err
+	}
+	if attempt.Id <= 0 {
+		// A superseded row is still delivery evidence. Ignoring it here would
+		// classify an interrupted historical send as "no API call happened".
+		attempt, err = s.latestUnknownTelegramJobAttempt(ctx, job)
+		if err != nil || attempt.Id <= 0 {
+			return attempt, 0, err
+		}
 	}
 	count, err := g.DB().Model(publishTgAttemptMessageTable).Safe().Ctx(ctx).
 		Where("attempt_id", attempt.Id).Count()
