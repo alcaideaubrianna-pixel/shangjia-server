@@ -31,8 +31,12 @@ func (relayFeature) ConfigSchema() []*sysin.FeatureConfigSchema {
 // The existing Bot binding is reused; no second polling client or Bot token is introduced.
 type relayGatewayFeature struct{ bot *sSysBot }
 
-func (f *relayGatewayFeature) Key() string   { return consts.RelayFeatureKey }
-func (f *relayGatewayFeature) Priority() int { return 1000 }
+func (f *relayGatewayFeature) Key() string { return consts.RelayFeatureKey }
+
+// Run before the dedicated two-way UI feature so pending relay usernames can
+// be activated by /start. Unbound messages return false and keep the original
+// two-way provider/feature flow unchanged.
+func (f *relayGatewayFeature) Priority() int { return 50 }
 func (f *relayGatewayFeature) Menus(ctx context.Context, bc gatewayservice.BotContext) (gatewayservice.FeatureMenus, error) {
 	for _, binding := range bc.Bindings {
 		if binding.Owner == relayTwoWayBotOwner {
