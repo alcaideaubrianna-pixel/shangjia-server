@@ -199,6 +199,8 @@ def main():
     state.close()
     print(json.dumps(dict(event='stopped' if STOP.is_set() else 'complete',last_id=cursor_id,
                           attempted=attempted,applied=applied,failed=failed)), flush=True)
+    if STOP.is_set():
+        raise SystemExit(130)
 
 
 if __name__ == '__main__':
