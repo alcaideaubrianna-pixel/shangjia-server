@@ -3227,6 +3227,19 @@ func (s *sSysBot) handleChannelTextCommand(ctx context.Context, botId int64, msg
 }
 
 func (s *sSysBot) handleChannelCallback(ctx context.Context, botId int64, chatId string, telegramUserId string, account *botProfileAccount, data string, query *models.CallbackQuery) (bool, error) {
+	// Restoration is scoped to the bound account by the publish service, so a
+	// notification recipient need not have the general admin channel menu.
+	if strings.HasPrefix(data, "ch:pr:") {
+		parts := strings.Split(data, ":")
+		if len(parts) != 4 {
+			return true, s.sendMessageOnly(ctx, botId, chatId, "恢复参数无效")
+		}
+		err := publishService.SysPublish().BotChannelPermissionResume(ctx, &publishsysin.BotChannelActionInp{TenantId: account.TenantId, AccountId: account.AccountId, ChannelId: parseInt64(parts[2])}, parts[3])
+		if err != nil {
+			return true, s.replyBotError(ctx, botId, chatId, "频道权限检查", err)
+		}
+		return true, s.sendMessageOnly(ctx, botId, chatId, "权限检查通过，频道已恢复推送，积压任务将按原顺序继续。")
+	}
 	if account.AccountType != "admin" {
 		return true, s.sendMessageOnly(ctx, botId, chatId, "频道管理仅管理员可用。")
 	}

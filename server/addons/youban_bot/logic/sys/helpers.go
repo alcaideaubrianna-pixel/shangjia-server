@@ -495,7 +495,19 @@ func (s *sSysBot) NotifyAccount(ctx context.Context, in *sysin.NotifyAccountInp)
 		if chatId == "" {
 			continue
 		}
-		_, err = s.sendMessage(ctx, row.BotToken, chatId, in.Text, firstNonEmpty(in.ParseMode, "HTML"), in.DisableNotice)
+		var markup models.ReplyMarkup
+		if len(in.Buttons) > 0 {
+			keyboard := &models.InlineKeyboardMarkup{}
+			for _, line := range in.Buttons {
+				buttons := []models.InlineKeyboardButton{}
+				for _, button := range line {
+					buttons = append(buttons, models.InlineKeyboardButton{Text: button.Label, CallbackData: button.Data})
+				}
+				keyboard.InlineKeyboard = append(keyboard.InlineKeyboard, buttons)
+			}
+			markup = keyboard
+		}
+		_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, in.Text, firstNonEmpty(in.ParseMode, "HTML"), in.DisableNotice, markup)
 		if err != nil {
 			lastErr = err
 			if shouldMarkBotOffline(err) {

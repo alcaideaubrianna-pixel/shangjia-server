@@ -260,6 +260,9 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 		return err
 	}
 	ctx = telegramPublishJobTraceContext(ctx, job)
+	if paused, pauseErr := s.postponePermissionPausedJob(ctx, job); pauseErr != nil || paused {
+		return pauseErr
+	}
 	step := beginTelegramPublishStage(ctx, "dispatch.account_availability")
 	tgAccountId, available, checkErr := s.telegramJobAccountCanPublish(ctx, job)
 	step.End(checkErr, g.Map{"tgAccountId": tgAccountId, "available": available})

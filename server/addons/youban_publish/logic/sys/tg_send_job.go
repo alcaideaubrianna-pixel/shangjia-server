@@ -121,6 +121,11 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) (resultE
 			g.Log().Warningf(ctx, "释放频道发送槽位后唤醒下一条TG任务失败 jobId:%d channelId:%d err:%+v", targetJob.Id, targetJob.ChannelId, wakeErr)
 		}
 	}()
+	// Recheck under the send lease: another worker may have opened the circuit
+	// between enqueueing this job and acquiring the channel.
+	if paused, pauseErr := s.postponePermissionPausedJob(ctx, targetJob); pauseErr != nil || paused {
+		return pauseErr
+	}
 	step = beginTelegramPublishStage(ctx, "channel.publish_interval")
 	delay, delayErr := s.telegramPublishIntervalDelay(ctx, targetJob)
 	step.End(delayErr, g.Map{"delayMs": delay.Milliseconds()})
@@ -804,6 +809,11 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 	}
 	if !transitioned {
 		return nil
+	}
+	if decision.Status == "failed" {
+		if circuitErr := s.recordChannelPermissionFailure(ctx, job, err); circuitErr != nil {
+			g.Log().Warningf(ctx, "记录频道权限熔断失败 jobId:%d channelId:%d err:%+v", job.Id, job.ChannelId, circuitErr)
+		}
 	}
 	if recordErr := s.upsertPublishJobRecord(ctx, job, decision.Status, decision.Message); recordErr != nil {
 		g.Log().Warningf(ctx, "更新发布失败记录失败 jobId:%d status:%s err:%+v", job.Id, decision.Status, recordErr)

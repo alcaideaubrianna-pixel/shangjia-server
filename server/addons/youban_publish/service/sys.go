@@ -281,6 +281,7 @@ type ISysPublish interface {
 	BotChannelList(ctx context.Context, in *sysin.ChannelListInp) (list []*sysin.ChannelModel, totalCount int, err error)
 	BotChannelCycleSave(ctx context.Context, in *sysin.BotChannelCycleSaveInp) (err error)
 	BotChannelFullPush(ctx context.Context, in *sysin.BotChannelActionInp) (res *sysin.ChannelFullPushModel, err error)
+	BotChannelPermissionResume(ctx context.Context, in *sysin.BotChannelActionInp, generation string) error
 	BotChannelClearQueue(ctx context.Context, in *sysin.BotChannelActionInp) (res *sysin.ChannelClearQueueModel, err error)
 	AdminProfileList(ctx context.Context, in *sysin.ProfileListInp) (list []*sysin.ProfileModel, totalCount int, err error)
 	AdminProfileView(ctx context.Context, in *sysin.ProfileViewInp) (res *sysin.ProfileViewModel, err error)

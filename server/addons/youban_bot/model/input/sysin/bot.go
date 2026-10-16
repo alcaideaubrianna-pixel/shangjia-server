@@ -488,16 +488,17 @@ type NotifyInp struct {
 }
 
 type NotifyAccountInp struct {
-	BotId               int64  `json:"botId" dc:"指定Bot ID"`
-	BotStrategy         string `json:"botStrategy" dc:"Bot策略：official/bound/explicit"`
-	FallbackBoundBot    bool   `json:"fallbackBoundBot" dc:"官方Bot不可达时是否降级绑定Bot"`
-	IgnoreFeatureSwitch bool   `json:"ignoreFeatureSwitch" dc:"是否忽略普通通知功能开关"`
-	RequireDelivery     bool   `json:"requireDelivery" dc:"无可用会话时是否返回错误"`
-	App                 string `json:"app" dc:"应用：admin/api"`
-	AccountId           int64  `json:"accountId" dc:"系统账号ID"`
-	Text                string `json:"text" dc:"消息内容"`
-	ParseMode           string `json:"parseMode" dc:"解析模式"`
-	DisableNotice       bool   `json:"disableNotice" dc:"是否静默"`
+	Buttons             [][]NotifyButton `json:"buttons,omitempty" dc:"通知操作按钮"`
+	BotId               int64            `json:"botId" dc:"指定Bot ID"`
+	BotStrategy         string           `json:"botStrategy" dc:"Bot策略：official/bound/explicit"`
+	FallbackBoundBot    bool             `json:"fallbackBoundBot" dc:"官方Bot不可达时是否降级绑定Bot"`
+	IgnoreFeatureSwitch bool             `json:"ignoreFeatureSwitch" dc:"是否忽略普通通知功能开关"`
+	RequireDelivery     bool             `json:"requireDelivery" dc:"无可用会话时是否返回错误"`
+	App                 string           `json:"app" dc:"应用：admin/api"`
+	AccountId           int64            `json:"accountId" dc:"系统账号ID"`
+	Text                string           `json:"text" dc:"消息内容"`
+	ParseMode           string           `json:"parseMode" dc:"解析模式"`
+	DisableNotice       bool             `json:"disableNotice" dc:"是否静默"`
 }
 
 type NotifyAccountsInp struct {
