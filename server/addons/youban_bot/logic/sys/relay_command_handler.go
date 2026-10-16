@@ -150,6 +150,12 @@ func (s *sSysBot) executeRelayCommand(ctx context.Context, cfg *entity.YoubanBot
 		return fmt.Sprintf("双向功能：%s\n实际状态：%s\n屏蔽跳转：%s\n附加管理员：%d\n双向绑定：%d", state, runtimeState, jump, admins, bindings), nil
 	case "绑定列表", "屏蔽列表", "黑名单":
 		return s.relayCommandList(ctx, cfg.BotId, cmd)
+	case "审计设置", "聊天存档", "转发群", "关闭转发":
+		handled, result, err := s.relayManagementAudit(ctx, cfg, strings.TrimSpace(cmd.Name+" "+cmd.Args))
+		if !handled {
+			return "", gerror.New("未识别的审计命令")
+		}
+		return result, err
 	}
 	kind, value, remove := consts.RelayRuleKeyword, cmd.Args, false
 	switch cmd.Name {
