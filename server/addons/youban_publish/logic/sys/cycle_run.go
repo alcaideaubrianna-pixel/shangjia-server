@@ -399,14 +399,23 @@ func (s *sSysPublish) ExecuteCycleRun(ctx context.Context, runId int64) error {
 	lastCursor := run.CursorId
 	queued := 0
 	for _, item := range items {
-		if item.Id > lastCursor {
-			lastCursor = item.Id
-		}
 		created, enqueueErr := s.enqueueChannelCycleProfile(ctx, run.Id, item)
 		if enqueueErr != nil {
+			if errors.Is(enqueueErr, errTelegramPublishPermissionPaused) {
+				if updateErr := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+					return finishPermissionPausedCycleRunTx(ctx, tx, run, lastCursor, queued)
+				}); updateErr != nil {
+					return updateErr
+				}
+				s.appendChannelCycleRunLog(ctx, run, "info", "permission_paused", enqueueErr.Error(), nil)
+				return nil
+			}
 			err = enqueueErr
 			s.failChannelCycleRun(ctx, run.Id, run.ChannelId, err)
 			return err
+		}
+		if item.Id > lastCursor {
+			lastCursor = item.Id
 		}
 		if created {
 			queued++
@@ -424,6 +433,22 @@ func (s *sSysPublish) ExecuteCycleRun(ctx context.Context, runId int64) error {
 		return nil
 	}
 	return s.enqueueCycleRun(ctx, run.Id, time.Second)
+}
+
+func finishPermissionPausedCycleRunTx(ctx context.Context, tx gdb.TX, run cycleRunRecord, cursor int64, queued int) error {
+	result, err := tx.Model(publishCycleRunTable).Safe().Ctx(ctx).Where("id", run.Id).Where("status", cycleRunStatusRunning).
+		Data(g.Map{"status": cycleRunStatusSkipped, "stage": "finished", "cursor_id": cursor, "queued_count": run.QueuedCount + queued,
+			"error_message": errTelegramPublishPermissionPaused.Error(), "finished_at": gtime.Now()}).Update()
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil || affected == 0 {
+		return err
+	}
+	_, err = tx.Model(publishChannelTable).Safe().Ctx(ctx).Where("id", run.ChannelId).Where("cycle_active_run_id", run.Id).
+		Data(g.Map{"cycle_active_run_id": 0, "cycle_last_error_message": errTelegramPublishPermissionPaused.Error(), "cycle_last_run_at": gtime.Now()}).Update()
+	return err
 }
 
 func scheduledBatchCycleRun(run cycleRunRecord) bool {

@@ -62,6 +62,15 @@ type telegramProfilePublishMeta struct {
 	InitialSendPhase       string
 }
 
+var errTelegramPublishPermissionPaused = gerror.New("目标频道推送已因权限错误暂停，资料已保留，请恢复频道权限后主动重新上架")
+
+func profilePublishPreparationError(channelCount int, jobIds []int64) error {
+	if channelCount > 0 && len(jobIds) == 0 {
+		return errTelegramPublishPermissionPaused
+	}
+	return nil
+}
+
 func (s *sSysPublish) submitProfilePublishWithMeta(ctx context.Context, profileId, tenantId, accountId, operatorId int64, operationNo string, channelIds []int64, requireOnline bool, meta telegramProfilePublishMeta) error {
 	var jobIds []int64
 	var err error
@@ -142,7 +151,9 @@ func (s *sSysPublish) prepareProfilePublishJobs(ctx context.Context, profileId, 
 	if err != nil {
 		return nil, err
 	}
-	return jobIds, nil
+	// Report the skip only after committing the failed UI projection. Returning
+	// this from the transaction would roll that projection back to pending.
+	return jobIds, profilePublishPreparationError(len(channels), jobIds)
 }
 
 func (s *sSysPublish) enqueuePreparedProfileJobs(ctx context.Context, jobIds []int64, operatorId int64) {

@@ -62,11 +62,11 @@ func (s *sSysPublish) submitDuePublishTasks(ctx context.Context) error {
 		}
 		operationNo := fmt.Sprintf("scheduled:%d:%d", item.ProfileId, item.PublishAt.TimestampNano())
 		if err = s.submitProfilePublish(ctx, item.ProfileId, item.TenantId, item.AccountId, item.AccountId, operationNo, nil, false); err != nil {
-			if errors.Is(err, errNoTelegramPublishChannels) {
+			if errors.Is(err, errNoTelegramPublishChannels) || errors.Is(err, errTelegramPublishPermissionPaused) {
 				if clearErr := s.clearInvalidScheduledPublish(ctx, item); clearErr != nil {
 					g.Log().Warningf(ctx, "清除无频道定时上架计划失败 tenantId:%d accountId:%d profileId:%d publishAt:%s err:%+v", item.TenantId, item.AccountId, item.ProfileId, item.PublishAt.String(), clearErr)
 				} else {
-					g.Log().Warningf(ctx, "定时上架资料未配置可推送频道，已终止本次计划 tenantId:%d accountId:%d profileId:%d publishAt:%s", item.TenantId, item.AccountId, item.ProfileId, item.PublishAt.String())
+					g.Log().Warningf(ctx, "定时上架资料无可推送频道，已终止本次计划 tenantId:%d accountId:%d profileId:%d publishAt:%s reason:%s", item.TenantId, item.AccountId, item.ProfileId, item.PublishAt.String(), err.Error())
 				}
 				continue
 			}

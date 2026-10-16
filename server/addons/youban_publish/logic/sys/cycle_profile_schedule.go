@@ -452,6 +452,7 @@ func (s *sSysPublish) profileCycleDueRows(ctx context.Context, limit int) ([]pro
 			"COALESCE(c.cycle_publish_enabled,0) AS channel_enabled,COALESCE(c.cycle_publish_days,0) AS channel_days,"+
 			"COALESCE(c.cycle_publish_time,'') AS channel_publish_time,COALESCE(c.cycle_publish_mode,'time') AS channel_mode,COALESCE(c.status,0) AS channel_status,COALESCE(c.publish_direction,'') AS publish_direction").
 		Where("j.cycle_enabled", 1).WhereIn("j.status", []string{"sent", "superseded"}).WhereNotNull("j.next_cycle_at").
+		Where("NOT EXISTS (SELECT 1 FROM "+channelPermissionCircuitTable+" pc WHERE pc.tenant_id=j.tenant_id AND pc.channel_id=j.channel_id AND pc.paused=1)").
 		WhereLTE("j.next_cycle_at", gtime.Now()).OrderAsc("j.next_cycle_at").OrderAsc("j.id").Limit(limit).Scan(&rows)
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取到期资料循环计划失败")
@@ -523,6 +524,11 @@ func (s *sSysPublish) dispatchDueProfileCycle(ctx context.Context, row profileCy
 	}
 	operationNo := dueProfileCycleOperationNo(row.JobId, row.DispatchCount+1, row.ProfileId, row.ChannelId)
 	err = s.submitProfilePublish(ctx, row.ProfileId, row.TenantId, row.AccountId, 0, operationNo, []int64{row.ChannelId}, true)
+	if errors.Is(err, errTelegramPublishPermissionPaused) {
+		_, updateErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", row.JobId).
+			Data(g.Map{"next_cycle_at": gtime.Now().Add(time.Hour), "last_dispatch_error": err.Error()}).Update()
+		return false, updateErr
+	}
 	if err == nil {
 		return true, nil
 	}

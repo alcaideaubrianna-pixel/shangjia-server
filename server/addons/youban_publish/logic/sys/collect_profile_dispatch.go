@@ -148,6 +148,16 @@ func (s *sSysPublish) submitCollectProfileDispatch(ctx context.Context, dispatch
 		CollectSourceMessageId: event["source_message_id"].Int64(),
 	}
 	if err := s.submitProfilePublishWithMeta(ctx, profileId, event["tenant_id"].Int64(), event["account_id"].Int64(), event["account_id"].Int64(), operationNo, channelIds, false, meta); err != nil {
+		if errors.Is(err, errTelegramPublishPermissionPaused) {
+			_, updateErr := pdao.YoubanPublishCollectDispatch.Ctx(ctx).Where("id", dispatchId).Data(g.Map{
+				"status": sysin.CollectDispatchStatusSkipped, "error_message": err.Error(), "finished_at": gtime.Now(),
+			}).Update()
+			if updateErr != nil {
+				return gerror.Wrap(updateErr, "记录采集分发权限暂停失败")
+			}
+			s.appendCollectEventLogForRecord(ctx, event, "dispatch", "skipped", err.Error(), fmt.Sprintf("profileId=%d", profileId))
+			return nil
+		}
 		_ = s.markCollectDispatchFailed(ctx, dispatchId, err.Error())
 		return gerror.Wrap(err, "创建采集TG发送任务失败")
 	}

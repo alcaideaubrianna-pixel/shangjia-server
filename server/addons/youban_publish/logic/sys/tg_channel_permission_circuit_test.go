@@ -202,6 +202,36 @@ func TestTelegramPermissionCircuitLocalPostgres(t *testing.T) {
 		if err != nil || newJob != 0 {
 			t.Fatalf("paused creation must not create a job: id=%d err=%v", newJob, err)
 		}
+		if !errors.Is(profilePublishPreparationError(1, nil), errTelegramPublishPermissionPaused) {
+			t.Fatal("zero jobs on a permission-paused channel must not report successful submission")
+		}
+		for _, statement := range []string{
+			"CREATE TEMP TABLE " + publishCycleRunTable + " (id bigint PRIMARY KEY,status text,stage text,cursor_id bigint,queued_count int,error_message text,finished_at timestamp,updated_at timestamp)",
+			"CREATE TEMP TABLE " + publishChannelTable + " (id bigint PRIMARY KEY,cycle_active_run_id bigint,cycle_last_error_message text,cycle_last_run_at timestamp,updated_at timestamp)",
+			"INSERT INTO " + publishCycleRunTable + " (id,status,cursor_id,queued_count) VALUES (900,'running',10,3)",
+			"INSERT INTO " + publishChannelTable + " (id,cycle_active_run_id) VALUES (40,900)",
+		} {
+			if _, err = tx.Exec(statement); err != nil {
+				return err
+			}
+		}
+		run := cycleRunRecord{Id: 900, ChannelId: 40, QueuedCount: 3}
+		if err = finishPermissionPausedCycleRunTx(ctx, tx, run, 11, 1); err != nil {
+			return err
+		}
+		// Redelivery must not overwrite the successful prefix or count the
+		// blocked profile as queued. The channel ownership clears atomically.
+		if err = finishPermissionPausedCycleRunTx(ctx, tx, run, 99, 9); err != nil {
+			return err
+		}
+		row, err = tx.GetOne("SELECT status,cursor_id,queued_count FROM " + publishCycleRunTable + " WHERE id=900")
+		if err != nil || row["status"].String() != cycleRunStatusSkipped || row["cursor_id"].Int() != 11 || row["queued_count"].Int() != 4 {
+			t.Fatalf("paused cycle lost its real submitted prefix: %v %v", row, err)
+		}
+		row, err = tx.GetOne("SELECT cycle_active_run_id FROM " + publishChannelTable + " WHERE id=40")
+		if err != nil || row["cycle_active_run_id"].Int64() != 0 {
+			t.Fatalf("paused cycle still occupies the channel: %v %v", row, err)
+		}
 		count, err := tx.Model(publishTgJobTable).Where("channel_id", 40).Where("status", "superseded").Count()
 		if err != nil || count != 200 {
 			t.Fatalf("cancellation must be bounded to 200: count=%d err=%v", count, err)
