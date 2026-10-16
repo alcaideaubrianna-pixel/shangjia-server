@@ -766,16 +766,19 @@ func (s *sSysBot) resolveTelegramMessageMedia(ctx context.Context, botId int64, 
 	name := ""
 	thumbFileId := ""
 	fileUniqueId := ""
+	var fileSize int64
 	if len(msg.Photo) > 0 {
 		photo := scanPhotoSize(msg.Photo)
 		mediaType = "image"
 		fileId = strings.TrimSpace(photo.FileID)
 		fileUniqueId = strings.TrimSpace(photo.FileUniqueID)
+		fileSize = int64(photo.FileSize)
 		name = firstNonEmpty(fileUniqueId, fmt.Sprintf("photo_%d", msg.ID))
 	} else if msg.Video != nil {
 		mediaType = "video"
 		fileId = strings.TrimSpace(msg.Video.FileID)
 		fileUniqueId = strings.TrimSpace(msg.Video.FileUniqueID)
+		fileSize = int64(msg.Video.FileSize)
 		name = firstNonEmpty(msg.Video.FileName, fileUniqueId, fmt.Sprintf("video_%d", msg.ID))
 		if msg.Video.Thumbnail != nil {
 			thumbFileId = strings.TrimSpace(msg.Video.Thumbnail.FileID)
@@ -815,6 +818,7 @@ func (s *sSysBot) resolveTelegramMessageMedia(ctx context.Context, botId int64, 
 		}
 	}
 	return []*publishsysin.MessageTemplateMediaInp{{
+		Size:           fileSize,
 		MediaType:      mediaType,
 		Name:           name,
 		FileUrl:        fileURL,

@@ -35,6 +35,7 @@ type MessageTemplateListInp struct {
 }
 
 type MessageTemplateMediaInp struct {
+	Size                  int64  `json:"size" dc:"当前媒体文件大小（字节），0表示未知"`
 	Id                    int64  `json:"id" dc:"ID"`
 	SourceMessageRecordId int64  `json:"sourceMessageRecordId" dc:"来源TG消息记录ID"`
 	MediaType             string `json:"mediaType" dc:"媒体类型"`

@@ -167,6 +167,26 @@ func accountMessageMedia(message *tg.Message, chatID string) []sysin.CollectorMe
 		item.SourceAccessHash = photo.AccessHash
 		item.SourceFileReference = append([]byte(nil), photo.FileReference...)
 		item.SourceThumbSize = accountLargestPhotoSizeType(photo)
+		// 大小必须对应实际选中的照片规格，不能用面积或其他规格的大小。
+		for _, size := range photo.Sizes {
+			sizeType, _ := accountPhotoSizeScore(size)
+			if sizeType != item.SourceThumbSize {
+				continue
+			}
+			switch value := size.(type) {
+			case *tg.PhotoSize:
+				item.SourceSize = int64(value.Size)
+			case *tg.PhotoSizeProgressive:
+				for _, bytes := range value.Sizes {
+					if int64(bytes) > item.SourceSize {
+						item.SourceSize = int64(bytes)
+					}
+				}
+			case *tg.PhotoCachedSize:
+				item.SourceSize = int64(len(value.Bytes))
+			}
+			break
+		}
 		item.SourceDCID = photo.DCID
 	case *tg.MessageMediaDocument:
 		item.Type = sysin.MediaKindFile
