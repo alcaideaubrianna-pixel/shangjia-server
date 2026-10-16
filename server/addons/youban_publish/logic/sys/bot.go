@@ -360,7 +360,18 @@ func (s *sSysPublish) telegramBot(ctx context.Context, botToken string) (*tgbot.
 	return gatewayservice.Gateway().Client(ctx, botToken)
 }
 
+// telegramMediaBot is the publishing client; getFile must use telegramDownloadBot.
 func (s *sSysPublish) telegramMediaBot(ctx context.Context, botToken string) (*tgbot.Bot, error) {
+	botToken = strings.TrimSpace(botToken)
+	if botToken == "" {
+		return nil, gerror.New("Telegram Bot Token未配置")
+	}
+	return gatewayservice.Gateway().SendClient(ctx, botToken)
+}
+
+// telegramDownloadBot keeps getFile/file download configuration independent
+// from publishing. Never use this client for sendVideo/sendMediaGroup.
+func (s *sSysPublish) telegramDownloadBot(ctx context.Context, botToken string) (*tgbot.Bot, error) {
 	botToken = strings.TrimSpace(botToken)
 	if botToken == "" {
 		return nil, gerror.New("Telegram Bot Token未配置")

@@ -99,6 +99,11 @@ func (s *sSysPublish) telegramJobMedia(ctx context.Context, job telegramJobRecor
 			SortIndex:               record["sort_index"].Int(),
 			CollectedFileIdEligible: strings.TrimSpace(media.EditStatus) != mediaEditStatusEdited,
 		}
+		// The stored size describes the original asset. Edited files may differ;
+		// their final size is checked after processing, before multipart upload.
+		if strings.TrimSpace(media.EditStatus) != mediaEditStatusEdited {
+			item.Size = record[pdao.YoubanPublishMedia.Columns().Size].Int64()
+		}
 		if item.TgFileId != "" {
 			item.TgThumbFileId = record["tg_thumb_file_id"].String()
 		}

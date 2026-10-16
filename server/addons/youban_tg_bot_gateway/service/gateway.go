@@ -55,6 +55,8 @@ type IGateway interface {
 	Webhook(ctx context.Context, key string, body []byte, secret string) error
 	Client(ctx context.Context, token string) (*tgbot.Bot, error)
 	MediaClient(ctx context.Context, token string) (*tgbot.Bot, error)
+	// SendClient follows the runtime endpoint; MediaClient is reserved for downloads.
+	SendClient(ctx context.Context, token string) (*tgbot.Bot, error)
 	Probe(ctx context.Context, token string) (*models.User, error)
 }
 

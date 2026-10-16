@@ -274,6 +274,7 @@ func isTelegramPermanentSendError(err error) bool {
 	}
 	message := strings.ToLower(err.Error())
 	permanentParts := []string{
+		strings.ToLower(telegramMediaUploadSizeError),
 		// These errors cannot recover by retrying the same job. Keep history,
 		// but move the job to a terminal state so it cannot starve a channel.
 		"bot配置不存在",
@@ -346,6 +347,7 @@ func isTelegramMediaSizeLimitError(err error) bool {
 	}
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "file is too big") ||
+		strings.Contains(message, strings.ToLower(telegramMediaUploadSizeError)) ||
 		strings.Contains(message, "file too large") ||
 		strings.Contains(message, "request_file_too_big")
 }

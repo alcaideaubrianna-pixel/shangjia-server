@@ -22,6 +22,7 @@ import (
 var gatewayObserveMeter = otel.Meter("hotgo/addons/youban_tg_bot_gateway")
 
 const telegramMediaRequestTimeout = 10 * time.Minute
+const telegramMediaSendRequestTimeout = 5 * time.Minute
 
 type botRuntime struct {
 	cancel        context.CancelFunc
@@ -61,10 +62,24 @@ func NewGateway() *sGateway {
 }
 
 func (s *sGateway) MediaClient(ctx context.Context, token string) (*tgbot.Bot, error) {
+	return s.mediaClient(ctx, token, false)
+}
+
+// SendClient uses the same Bot API owner as webhook/control operations, but
+// keeps the media timeout. A download endpoint must never redirect publishing.
+func (s *sGateway) SendClient(ctx context.Context, token string) (*tgbot.Bot, error) {
+	return s.mediaClient(ctx, token, true)
+}
+
+func (s *sGateway) mediaClient(ctx context.Context, token string, sending bool) (*tgbot.Bot, error) {
 	token = strings.TrimSpace(token)
 	key := tokenKey(token)
+	cacheKey := key
+	if sending {
+		cacheKey += ":send"
+	}
 	s.mu.Lock()
-	client := s.mediaClients[key]
+	client := s.mediaClients[cacheKey]
 	s.mu.Unlock()
 	if client != nil {
 		return client, nil
@@ -90,23 +105,35 @@ func (s *sGateway) MediaClient(ctx context.Context, token string) (*tgbot.Bot, e
 	if err != nil {
 		return nil, err
 	}
+	timeout := telegramMediaRequestTimeout
+	if sending {
+		timeout = telegramMediaSendRequestTimeout
+	}
 	clientFactory := func(token, proxyURL, serverURL string, handler tgbot.HandlerFunc) (*tgbot.Bot, error) {
-		return newBotWithTimeout(token, proxyURL, serverURL, handler, telegramMediaRequestTimeout)
+		return newBotWithTimeout(token, proxyURL, serverURL, handler, timeout)
 	}
 	if s.newMediaClientForToken != nil {
 		clientFactory = s.newMediaClientForToken
 	}
-	client, err = clientFactory(token, conf.ProxyURL, conf.MediaServerURL, nil)
+	serverURL := conf.MediaServerURL
+	operation := "download"
+	if sending {
+		serverURL = conf.RuntimeServerURL
+		operation = "send"
+	}
+	client, err = clientFactory(token, conf.ProxyURL, serverURL, nil)
 	if err != nil {
 		return nil, err
 	}
 	s.mu.Lock()
-	if cached := s.mediaClients[key]; cached != nil {
+	if cached := s.mediaClients[cacheKey]; cached != nil {
 		client = cached
 	} else {
-		s.mediaClients[key] = client
+		s.mediaClients[cacheKey] = client
 	}
 	s.mu.Unlock()
+	// Never log the token or endpoint URL (which can contain credentials).
+	g.Log().Info(ctx, "TG媒体客户端已创建", g.Map{"botKey": key, "operation": operation, "usesRuntimeEndpoint": sending, "timeoutSeconds": int(timeout.Seconds())})
 	return client, nil
 }
 
@@ -289,6 +316,7 @@ func (s *sGateway) sync(ctx context.Context) error {
 			delete(s.runtimes, key)
 			delete(s.clients, key)
 			delete(s.mediaClients, key)
+			delete(s.mediaClients, key+":send")
 		}
 	}
 	s.mu.Unlock()
@@ -474,6 +502,7 @@ func (s *sGateway) ensure(ctx context.Context, key, token, mode string, conf *se
 	s.mu.Lock()
 	s.runtimes[key], s.clients[key] = runtime, client
 	delete(s.mediaClients, key)
+	delete(s.mediaClients, key+":send")
 	s.mu.Unlock()
 	return nil
 }

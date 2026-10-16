@@ -625,6 +625,12 @@ func telegramInputFile(ctx context.Context, media *telegramMediaItem) (models.In
 	if strings.TrimSpace(path) == "" {
 		return nil, nil, gerror.New("媒体文件地址为空")
 	}
+	if err = validateTelegramMediaUploadSize(media, path); err != nil {
+		if cleanup != nil {
+			cleanup()
+		}
+		return nil, nil, telegramPreparationError(err)
+	}
 	file, err := os.Open(path)
 	if err != nil {
 		if cleanup != nil {
@@ -839,6 +845,12 @@ func telegramInputMediaSource(ctx context.Context, media *telegramMediaItem) (st
 	if strings.TrimSpace(path) == "" {
 		return "", nil, nil, gerror.New("媒体文件地址为空")
 	}
+	if err = validateTelegramMediaUploadSize(media, path); err != nil {
+		if cleanup != nil {
+			cleanup()
+		}
+		return "", nil, nil, telegramPreparationError(err)
+	}
 	file, err := os.Open(path)
 	if err != nil {
 		if cleanup != nil {
@@ -859,6 +871,9 @@ func telegramMediaRequiresSanitizedUpload(media *telegramMediaItem) bool {
 
 func telegramMediaRemoteURL(media *telegramMediaItem) string {
 	if media == nil || media.ForceUpload || telegramMediaRequiresSanitizedUpload(media) {
+		return ""
+	}
+	if !telegramMediaWithinURLSizeLimit(media) {
 		return ""
 	}
 	raw := strings.TrimSpace(media.FileUrl)
