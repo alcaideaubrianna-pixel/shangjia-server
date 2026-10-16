@@ -90,11 +90,21 @@ func (s *sSysBot) handleRelayUpdateWithIdentity(ctx context.Context, botID int64
 			return true, err
 		}
 	}
+	// Resolve the configured endpoint before handling the keyboard label. A
+	// bound user/group enters the custom relay path; an unbound chat remains on
+	// the original two-way Bot flow.
+	binding, err := relayBindingByChat(ctx, configBotID, source)
+	if err != nil {
+		return true, err
+	}
 	command, _ := botCommandAndArgs(msg.Text)
 	if command == "start" {
 		return true, s.relayWelcome(ctx, cfg, msg)
 	}
 	if s.relayMainMenuInput(ctx, msg.Text) {
+		if binding != nil && strings.TrimSpace(msg.Text) == "双向聊天" {
+			return true, s.relayReply(ctx, botID, msg, "已进入双向聊天，请直接发送消息。")
+		}
 		return true, s.relayReply(ctx, botID, msg, "这里是双向聊天机器人。管理请到主机器人发送 /relayadmin；聊天帮助请联系管理员。")
 	}
 	active, state, err := s.relayRuntimeState(ctx, cfg)
@@ -110,10 +120,6 @@ func (s *sSysBot) handleRelayUpdateWithIdentity(ctx context.Context, botID int64
 			return true, nil
 		}
 		return true, s.relayReply(ctx, botID, msg, "当前双向聊天不可用："+state+"。请联系管理员。")
-	}
-	binding, err := relayBindingByChat(ctx, configBotID, source)
-	if err != nil {
-		return true, err
 	}
 	cmd := parseRelayCommand(msg.Text)
 	if cmd.Name == "" && strings.TrimSpace(msg.Text) == (relayFeature{}).Description() {
