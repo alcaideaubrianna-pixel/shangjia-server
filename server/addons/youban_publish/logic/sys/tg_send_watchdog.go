@@ -259,9 +259,30 @@ func (s *sSysPublish) cleanupTelegramSendTimeout(ctx context.Context, job telegr
 }
 
 func telegramTimeoutUnresolvedAttemptCount(tx gdb.TX, jobID int64) (int, error) {
-	return tx.Model(publishTgAttemptTable+" a").
-		Where("a.job_id", jobID).Where("a.status", telegramAttemptStatusSuperseded).
-		Where("a.response_received", 0).Count()
+	var attempts []telegramDeliveryAttempt
+	if err := tx.Model(publishTgAttemptTable).
+		Fields("id,status,response_received,confirmed_count,error_message").
+		Where("job_id", jobID).Where("status", telegramAttemptStatusSuperseded).
+		Where("response_received", 0).Scan(&attempts); err != nil {
+		return 0, err
+	}
+	unresolved := 0
+	for _, attempt := range attempts {
+		// Reuse the retry classifier: a retired, definite rejection with no
+		// delivery evidence is not an outstanding remote send.
+		if !telegramSupersededAttemptCanResume(attempt, 0) {
+			unresolved++
+			continue
+		}
+		auditCount, err := tx.Model(publishTgAttemptMessageTable).Where("attempt_id", attempt.Id).Count()
+		if err != nil {
+			return 0, err
+		}
+		if auditCount > 0 {
+			unresolved++
+		}
+	}
+	return unresolved, nil
 }
 
 func (s *sSysPublish) recoverTelegramSendTimeouts(ctx context.Context) {

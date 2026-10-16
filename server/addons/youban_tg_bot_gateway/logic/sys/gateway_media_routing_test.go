@@ -28,6 +28,7 @@ func mediaRoutingTestGateway(conf *service.RuntimeConfig) *sGateway {
 }
 
 func TestMediaRoutingSeparatesSendingAndDownloading(t *testing.T) {
+	t.Setenv("YOUBAN_TELEGRAM_RUNTIME_SEND_BOTS", "*")
 	const token = "123456:routing-test"
 	var sendCount, downloadCount atomic.Int32
 	sendServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -116,6 +117,7 @@ func TestMediaRoutingSeparatesSendingAndDownloading(t *testing.T) {
 }
 
 func TestMediaRoutingDefaultSenderUsesOfficialEndpoint(t *testing.T) {
+	t.Setenv("YOUBAN_TELEGRAM_RUNTIME_SEND_BOTS", "*")
 	gateway := mediaRoutingTestGateway(&service.RuntimeConfig{MediaServerURL: "http://local-download.internal"})
 	var endpoints []string
 	gateway.newMediaClientForToken = func(_, _, endpoint string, _ tgbot.HandlerFunc) (*tgbot.Bot, error) {
@@ -130,5 +132,31 @@ func TestMediaRoutingDefaultSenderUsesOfficialEndpoint(t *testing.T) {
 	}
 	if len(endpoints) != 2 || endpoints[0] != "" || endpoints[1] != "http://local-download.internal" {
 		t.Fatalf("download endpoint redirected the default sender: %v", endpoints)
+	}
+}
+
+func TestMediaRoutingMigrationRequiresExplicitSelection(t *testing.T) {
+	bindings := []service.BotBinding{{Owner: "youban_publish", ReferenceID: 43}}
+	for _, test := range []struct {
+		selection string
+		want      bool
+	}{
+		{"", false}, {"43", false}, {"other:43", false}, {"youban_publish:44", false},
+		{"youban_publish:43", true}, {"other:1, youban_publish:43", true}, {"*", true},
+	} {
+		if got := telegramRuntimeSendSelected(bindings, test.selection); got != test.want {
+			t.Fatalf("selection=%q got=%t", test.selection, got)
+		}
+	}
+	t.Setenv("YOUBAN_TELEGRAM_RUNTIME_SEND_BOTS", "")
+	gateway := mediaRoutingTestGateway(&service.RuntimeConfig{RuntimeServerURL: "http://new-runtime", MediaServerURL: "http://existing-media"})
+	gateway.newMediaClientForToken = func(_, _, endpoint string, _ tgbot.HandlerFunc) (*tgbot.Bot, error) {
+		if endpoint != "http://existing-media" {
+			t.Fatalf("deployment silently migrated Bot: %s", endpoint)
+		}
+		return new(tgbot.Bot), nil
+	}
+	if _, err := gateway.SendClient(context.Background(), "123456:routing-test"); err != nil {
+		t.Fatal(err)
 	}
 }

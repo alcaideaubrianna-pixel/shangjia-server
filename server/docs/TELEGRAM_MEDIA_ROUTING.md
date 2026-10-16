@@ -2,11 +2,11 @@
 
 ## 入口
 
-- `Gateway.SendClient`：发布、验证视频、监听通知和消息模板发送。跟随 `YOUBAN_TELEGRAM_RUNTIME_API_URL`；为空时走官方 API。HTTP 请求期限 5 分钟，外层任务取消仍然有效。
+- `Gateway.SendClient`：发布、验证视频、监听通知和消息模板发送。默认保持原媒体发送入口，避免部署时隐式迁移全部 Bot。通过 `YOUBAN_TELEGRAM_RUNTIME_SEND_BOTS=youban_publish:43` 选择指定 Bot 后，跟随 `YOUBAN_TELEGRAM_RUNTIME_API_URL`（为空时走官方 API）。逗号分隔多个 `owner:id`；`*` 表示明确开启全量迁移。HTTP 请求期限 5 分钟，外层任务取消仍然有效。
 - `Gateway.MediaClient`：仅用于 `getFile` 与下载。继续读取 `YOUBAN_TELEGRAM_BOT_API_URL`（为空时读取后台 `botApiServerUrl`）。下载客户端期限保留 10 分钟，现有逐次 getFile 超时和重试保持不变。
 - Bot 扫图/资料导入保留现有下载入口；协议号下载、COS 缓存、图片处理和防扫图流程保持不变。
 
-`BOT_API_URL` 不再控制发布发送。需要回退到自建发送时，必须连同 Bot runtime 的归属一起安排切换，不能在某次发送超时后临时切换入口重发。
+未选中的 Bot 保持原 `BOT_API_URL` 发送行为；选中的 Bot 使用 runtime 入口。该选择在客户端创建时缓存，修改 ENV 后需要重启相关角色。回退时必须连同 Bot runtime 的归属一起安排切换，不能在某次发送超时后临时切换入口重发。
 
 ## 发送选择
 
@@ -21,7 +21,7 @@
 ## 上线检查
 
 - 本提交只修改代码，不执行 `logOut`、`close`、webhook 更换或线上配置变更。
-- 确认所有角色的 runtime URL 一致、Bot webhook 正常。runtime URL 为空/官方时，新发送请求会从原自建媒体入口迁至官方。
+- 确认所有角色的 runtime URL 和灰度选择一致、Bot webhook 正常。默认不迁移；仅显式选中的 Bot 在 runtime URL 为空/官方时迁至官方。
 - 同一个 Bot 的官方/自建会话归属需要先验证。不要因下载超过 20MB 就自动对生产 Bot 执行 `logOut`；大文件协议号下载复用现有能力。保留自建下载的 Bot 应先在测试 Bot 上验证完整收发，必要时独立划分采集 Bot 与发布 Bot。
 - 先灰度一个测试 Bot，验证小视频 URL、20～50MB multipart、file_id、防扫图、媒体组和大文件下载，再更新 Publish、Background、Account/Web 等实际发送角色。
 - 观察日志中的 `operation:send/download`、`usesRuntimeEndpoint`、关联 jobId、API 耗时和 Attempt 结果；不得记录 Token 或签名媒体 URL。

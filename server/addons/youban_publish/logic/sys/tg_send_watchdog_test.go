@@ -58,7 +58,9 @@ func TestTelegramSendWatchdogLocalPostgres(t *testing.T) {
 		}
 		for _, ddl := range []string{
 			"ALTER TABLE " + publishTgJobTable + " ADD COLUMN push_mode text DEFAULT ''",
-			"CREATE TEMP TABLE " + publishTgAttemptTable + " (id bigint,job_id bigint,status text,webhook_deadline timestamp,response_received int DEFAULT 0,expected_count int DEFAULT 2)",
+			"CREATE UNIQUE INDEX uk_ybp_tg_job_operation_channel ON " + publishTgJobTable + "(task_id,operation_no,channel_id) WHERE operation_no<>''",
+			"CREATE UNIQUE INDEX uk_ybp_tg_job_profile_operation_channel ON " + publishTgJobTable + "(profile_id,operation_no,channel_id) WHERE task_id IS NULL AND profile_id>0 AND operation_no<>''",
+			"CREATE TEMP TABLE " + publishTgAttemptTable + " (id bigint,job_id bigint,status text,webhook_deadline timestamp,response_received int DEFAULT 0,expected_count int DEFAULT 2,confirmed_count int DEFAULT 0,error_message text DEFAULT '')",
 			"CREATE TEMP TABLE " + publishTgAttemptMessageTable + " (attempt_id bigint,message_id bigint)",
 			"CREATE TEMP TABLE " + publishTgOutboxTable + " (job_id bigint,status text,lease_owner text,lease_expires_at timestamp,last_error text,delivered_at timestamp,updated_at timestamp)",
 			"CREATE TEMP TABLE hg_content_profile(id bigint,status int,visibility text,deleted_at timestamp)",
@@ -127,6 +129,18 @@ func TestTelegramSendWatchdogLocalPostgres(t *testing.T) {
 		}
 		if n, err := telegramTimeoutUnresolvedAttemptCount(tx, 100); err != nil || n != 0 {
 			t.Fatalf("explicit response should release gate: %d %v", n, err)
+		}
+		if _, err := tx.Exec("INSERT INTO " + publishTgAttemptTable + "(id,job_id,status,error_message) VALUES(2,100,'superseded','Too Many Requests: retry after 5')"); err != nil {
+			return err
+		}
+		if n, err := telegramTimeoutUnresolvedAttemptCount(tx, 100); err != nil || n != 0 {
+			t.Fatalf("definite rejection must not hold cleanup: %d %v", n, err)
+		}
+		if _, err := tx.Exec("INSERT INTO " + publishTgAttemptMessageTable + " VALUES(2,13)"); err != nil {
+			return err
+		}
+		if n, err := telegramTimeoutUnresolvedAttemptCount(tx, 100); err != nil || n != 1 {
+			t.Fatalf("audit evidence must override rejection text: %d %v", n, err)
 		}
 		// Three tail generations are allowed; the fourth expiry must stop.
 		for retry := 1; retry <= telegramSendMaxRetries; retry++ {
