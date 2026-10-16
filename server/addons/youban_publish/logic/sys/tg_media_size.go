@@ -9,6 +9,24 @@ import (
 
 const telegramMediaUploadSizeError = "媒体超过官方Bot API上传限制"
 
+// Check the entire phase before sending any chunk so an oversized later item
+// cannot cause partial Bot delivery followed by a duplicate account handoff.
+func validateTelegramMediaSetKnownUploadSize(media []*telegramMediaItem) error {
+	for _, item := range media {
+		if item == nil || (strings.TrimSpace(item.TgFileId) != "" && !item.ForceUpload && !telegramMediaRequiresSanitizedUpload(item)) {
+			continue
+		}
+		limit := int64(50_000_000)
+		if telegramMediaIsPhoto(item) {
+			limit = 10_000_000
+		}
+		if item.Size > limit {
+			return gerror.Newf("%s，切换协议号整组发送 mediaId:%d sizeBytes:%d limitBytes:%d", telegramMediaUploadSizeError, item.Id, item.Size, limit)
+		}
+	}
+	return nil
+}
+
 // Conservative decimal limits leave margin below Telegram's documented MB
 // limits. Unknown legacy sizes retain URL-first delivery with deterministic
 // rejection fallback; never issue HEAD requests on the publishing hot path.

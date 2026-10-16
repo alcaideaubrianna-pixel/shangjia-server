@@ -30,6 +30,31 @@ func TestTelegramMediaURLSizeLimits(t *testing.T) {
 	}
 }
 
+func TestTelegramMediaSetOversizeHandoffBeforeSending(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		item      *telegramMediaItem
+		wantError bool
+	}{
+		{"unknown", &telegramMediaItem{MediaType: "video"}, false},
+		{"video boundary", &telegramMediaItem{MediaType: "video", Size: 50_000_000}, false},
+		{"oversized video", &telegramMediaItem{MediaType: "video", Size: 50_000_001}, true},
+		{"oversized photo", &telegramMediaItem{MediaType: "image", Size: 10_000_001}, true},
+		{"reuse", &telegramMediaItem{MediaType: "video", Size: 100_000_000, TgFileId: "cached"}, false},
+		{"forced upload", &telegramMediaItem{MediaType: "video", Size: 100_000_000, TgFileId: "cached", ForceUpload: true}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateTelegramMediaSetKnownUploadSize([]*telegramMediaItem{{MediaType: "image", Size: 100}, tc.item})
+			if (err != nil) != tc.wantError {
+				t.Fatalf("unexpected handoff decision: %v", err)
+			}
+			if err != nil && !shouldFallbackTelegramMediaToAccount(telegramPreparationError(err)) {
+				t.Fatalf("oversize must use existing account fallback: %v", err)
+			}
+		})
+	}
+}
+
 func TestTelegramMediaUploadChecksActualSize(t *testing.T) {
 	file, err := os.CreateTemp(t.TempDir(), "upload-*")
 	if err != nil {
