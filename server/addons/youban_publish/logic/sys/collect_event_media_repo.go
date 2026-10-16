@@ -182,6 +182,15 @@ func (s *sSysPublish) upsertCollectEventMedia(ctx context.Context, event gdb.Rec
 			mediaCols.UpdatedAt:        gtime.Now(),
 		}
 		if !existing.IsEmpty() && existing[mediaCols.CacheStatus].String() == collectMediaCacheReady {
+			if strings.TrimSpace(item.FileMd5) == "" {
+				delete(data, "file_md5")
+			}
+			if strings.TrimSpace(item.FilePhash) == "" {
+				delete(data, "file_phash")
+			}
+			if strings.TrimSpace(item.DebugMetaJson) == "" {
+				delete(data, mediaCols.MetaJson)
+			}
 			if strings.TrimSpace(item.FileUrl) == "" {
 				delete(data, mediaCols.FileUrl)
 			}

@@ -215,6 +215,9 @@ func (s *sSysPublish) enrichCollectContentMediaMetadata(ctx context.Context, res
 	changed := false
 	for index := range result.Media {
 		item := &result.Media[index]
+		if reusedPublishedCollectMetadata(*item) != nil {
+			continue
+		}
 		mediaType := collectPublishMediaType(item.Type)
 		if mediaType == "" || strings.TrimSpace(item.FilePhash) != "" {
 			continue

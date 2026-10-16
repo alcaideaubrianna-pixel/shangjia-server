@@ -493,6 +493,9 @@ func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, even
 			items[index].FileUrl = row.FileUrl
 			items[index].StoragePath = row.StoragePath
 			items[index].PosterUrl = row.PosterUrl
+			items[index].FileMd5 = row.FileMd5
+			items[index].FilePhash = row.FilePhash
+			items[index].DebugMetaJson = row.MetaJson
 			changed = true
 			continue
 		}
@@ -698,12 +701,18 @@ func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, even
 }
 
 func (s *sSysPublish) reuseCollectMediaCache(ctx context.Context, row *collectEventMediaRow) (bool, error) {
-	if row == nil || strings.TrimSpace(row.SourceChatId) == "" || row.SourceMessageId <= 0 || strings.TrimSpace(row.SourceMediaKey) == "" {
+	if row == nil || strings.TrimSpace(row.SourceChatId) == "" || row.SourceMessageId <= 0 {
+		return false, nil
+	}
+	if reused, err := s.reusePublishedCollectMedia(ctx, row); reused || err != nil {
+		return reused, err
+	}
+	if strings.TrimSpace(row.SourceMediaKey) == "" {
 		return false, nil
 	}
 	cols := pdao.YoubanPublishCollectEventMedia.Columns()
 	candidates, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
-		Fields(cols.FileUrl, cols.StoragePath, cols.PosterUrl, "file_md5", "file_phash").
+		Fields(cols.FileUrl, cols.StoragePath, cols.PosterUrl, cols.MetaJson, "file_md5", "file_phash").
 		Where(cols.SourceChatId, row.SourceChatId).
 		Where(cols.SourceMessageId, row.SourceMessageId).
 		Where(cols.SourceMediaKey, row.SourceMediaKey).
@@ -728,6 +737,7 @@ func (s *sSysPublish) reuseCollectMediaCache(ctx context.Context, row *collectEv
 			cols.FileUrl:      fileURL,
 			cols.StoragePath:  storagePath,
 			cols.PosterUrl:    strings.TrimSpace(candidate[cols.PosterUrl].String()),
+			cols.MetaJson:     candidate[cols.MetaJson].String(),
 			cols.CacheStatus:  collectMediaCacheReady,
 			cols.ErrorMessage: "",
 			cols.UpdatedAt:    gtime.Now(),
@@ -744,6 +754,7 @@ func (s *sSysPublish) reuseCollectMediaCache(ctx context.Context, row *collectEv
 		row.ErrorMessage = ""
 		row.FileMd5 = strings.TrimSpace(candidate["file_md5"].String())
 		row.FilePhash = strings.TrimSpace(candidate["file_phash"].String())
+		row.MetaJson = candidate[cols.MetaJson].String()
 		g.Log().Infof(ctx, "复用采集媒体缓存 mediaId:%d sourceChatId:%s sourceMessageId:%d sourceMediaKey:%s", row.Id, row.SourceChatId, row.SourceMessageId, row.SourceMediaKey)
 		return true, nil
 	}

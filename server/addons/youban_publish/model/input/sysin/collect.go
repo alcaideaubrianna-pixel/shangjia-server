@@ -436,7 +436,11 @@ type IntroFeeChannelPurgeModel struct {
 func (in *CollectRuleSaveInp) Filter(ctx context.Context) error {
 	in.Name = strings.TrimSpace(in.Name)
 	in.TargetChannelIds = uniquePositiveInt64(in.TargetChannelIds)
-	in.Keywords = trimCollectInputValues(in.Keywords)
+	keywords, err := NormalizeCollectKeywords(in.Keywords)
+	if err != nil {
+		return err
+	}
+	in.Keywords = keywords
 	in.Tags = trimCollectInputValues(in.Tags)
 	in.DeleteLineTexts = trimCollectInputValues(in.DeleteLineTexts)
 	in.DeleteTexts = trimCollectInputValues(in.DeleteTexts)

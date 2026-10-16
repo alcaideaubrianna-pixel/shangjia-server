@@ -273,15 +273,19 @@ func (s *sSysPublish) prepareCollectMaterialSnapshot(ctx context.Context, event 
 				mediaSize = item.SourceSize
 			}
 			mediaMD5 := strings.TrimSpace(item.FileMd5)
-			cacheState, cacheErr := acquireTelegramCollectorMediaCache(ctx, mediaType, storagePath, fileURL, mediaMD5, mediaSize, item.SourceMimeType)
-			if cacheErr != nil {
-				return nil, cacheErr
+			assets := reusedPublishedCollectMetadata(item)
+			var cacheState *telegramCollectorMediaCacheState
+			if assets == nil {
+				var cacheErr error
+				cacheState, cacheErr = acquireTelegramCollectorMediaCache(ctx, mediaType, storagePath, fileURL, mediaMD5, mediaSize, item.SourceMimeType)
+				if cacheErr != nil {
+					return nil, cacheErr
+				}
 			}
 			if cacheState != nil {
 				mediaMD5 = cacheState.MD5
 				mediaSize = cacheState.Size
 			}
-			var assets *mediaAssetMetadata
 			if cacheState != nil && cacheState.Entry != nil {
 				cachedPath := strings.TrimSpace(cacheState.Entry.StoragePath)
 				cachedURL := telegramCollectorMediaCacheURL(cacheState.Entry)

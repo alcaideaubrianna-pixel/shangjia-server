@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
+	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
 type collectRulePrecheckResult struct {
@@ -46,20 +47,25 @@ func precheckCollectRuleText(rawText string, mediaCount int, rule gdb.Record) co
 	if blockedText := matchCollectTerms(rawText, collectRuleStrings(rule, "blocked_texts")); blockedText != "" {
 		return skippedCollectRulePrecheck("屏蔽文本:" + blockedText)
 	}
+	// Explicit keywords are required even for full matching and captionless media.
+	keywords := collectRuleStrings(rule, "keywords")
+	matchedKeywords := make([]string, 0, len(keywords))
+	for _, keyword := range keywords {
+		if sysin.MatchCollectKeyword(rawText, keyword) {
+			matchedKeywords = append(matchedKeywords, keyword)
+		}
+	}
+	if len(keywords) > 0 && len(matchedKeywords) == 0 {
+		return skippedCollectRulePrecheck("未命中关键词")
+	}
 	if rawText == "" && mediaCount > 0 {
 		return collectRulePrecheckResult{
 			Matched:   true,
 			MatchJSON: collectMatchJSON(nil, nil),
 		}
 	}
-	matchedKeywords := []string(nil)
 	matchedTags := []string(nil)
 	if rule["full_match_enabled"].Int() != 1 {
-		keywords := collectRuleStrings(rule, "keywords")
-		matchedKeywords = matchedCollectTerms(rawText, keywords)
-		if len(keywords) > 0 && len(matchedKeywords) == 0 {
-			return skippedCollectRulePrecheck("未命中关键词")
-		}
 		tags := collectRuleStrings(rule, "tags")
 		matchedTags = matchedCollectTags(rawText, tags)
 		if len(tags) > 0 && len(matchedTags) == 0 {

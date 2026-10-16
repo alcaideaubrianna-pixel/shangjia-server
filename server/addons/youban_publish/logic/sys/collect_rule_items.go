@@ -112,6 +112,16 @@ func attachCollectRuleItems(ctx context.Context, rules []gdb.Record) error {
 }
 
 func collectRuleStrings(rule gdb.Record, key string) []string {
+	if key == "keywords" {
+		// Do not case-fold regexes when deduplicating (\d differs from \D).
+		values := make([]string, 0)
+		for _, value := range gconv.Strings(rule[key].Interface()) {
+			if value = strings.TrimSpace(value); value != "" {
+				values = append(values, value)
+			}
+		}
+		return values
+	}
 	return trimCollectValues(gconv.Strings(rule[key].Interface()))
 }
 
