@@ -2,15 +2,18 @@ package sys
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/database/gredis"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 
 	"hotgo/internal/consts"
 	hglock "hotgo/internal/library/hgrds/lock"
+	"hotgo/utility/ownedlease"
 )
 
 const telegramChannelLeaseTTL = telegramSendBudget + 30*time.Second
@@ -38,7 +41,67 @@ func (s *sSysPublish) tryTelegramChannelLease(ctx context.Context, chatId string
 	return lease, true, nil
 }
 
-func (s *sSysPublish) releaseTelegramChannelLease(ctx context.Context, lease *hglock.Lock) {
+type telegramChannelLease interface {
+	Unlock(context.Context) error
+}
+
+type telegramPublishLeaseOwner struct {
+	Kind     string `json:"kind"`
+	JobId    int64  `json:"jobId"`
+	TenantId int64  `json:"tenantId"`
+}
+
+// Only a durable, complete send is reclaimable. In-flight, uncertain, failed,
+// cleanup and legacy leases retain their original expiry protection.
+func telegramCompletedLeaseRecoverable(owner telegramPublishLeaseOwner, job telegramJobRecord, chatId string) bool {
+	return owner.Kind == "telegram_publish_v1" && owner.JobId > 0 && owner.TenantId > 0 &&
+		job.Id == owner.JobId && job.TenantId == owner.TenantId &&
+		normalizeTelegramChannelChatID(job.TargetChatId) == normalizeTelegramChannelChatID(chatId) &&
+		!isDownTelegramOperationNo(job.OperationNo) && !isMessagePushOperationNo(job.OperationNo) &&
+		job.Status == telegramJobStatusSent &&
+		(job.SendPhase == telegramSendPhaseVerifyConfirmed || job.SendPhase == telegramSendPhaseCompletedNoVerify)
+}
+
+func (s *sSysPublish) tryTelegramPublishChannelLease(ctx context.Context, job telegramJobRecord) (telegramChannelLease, bool, error) {
+	return tryTelegramPublishChannelLease(ctx, job, s.telegramJobById)
+}
+
+func tryTelegramPublishChannelLease(ctx context.Context, job telegramJobRecord, lookup func(context.Context, int64) (telegramJobRecord, error), clients ...*gredis.Redis) (telegramChannelLease, bool, error) {
+	key := telegramChannelLockKey(job.TargetChatId)
+	ownerJSON, _ := json.Marshal(telegramPublishLeaseOwner{Kind: "telegram_publish_v1", JobId: job.Id, TenantId: job.TenantId})
+	lease := ownedlease.New(key, string(ownerJSON), telegramChannelLeaseTTL, clients...)
+	ok, err := lease.TryAcquire(ctx)
+	if err != nil || ok {
+		return lease, ok, err
+	}
+	snapshot, err := ownedlease.Inspect(ctx, key, clients...)
+	if err != nil {
+		return nil, false, gerror.Wrap(err, "读取频道发送租约归属失败")
+	}
+	var owner telegramPublishLeaseOwner
+	if json.Unmarshal([]byte(snapshot.Owner), &owner) != nil || owner.Kind != "telegram_publish_v1" || owner.JobId <= 0 || owner.TenantId != job.TenantId {
+		return nil, false, nil
+	}
+	previous, err := lookup(ctx, owner.JobId)
+	if err != nil {
+		return nil, false, err
+	}
+	beginTelegramPublishStage(ctx, "channel.send_lease.owner").End(nil, g.Map{
+		"ownerJobId": previous.Id, "ownerStatus": previous.Status, "ownerSendPhase": previous.SendPhase,
+	})
+	if !telegramCompletedLeaseRecoverable(owner, previous, job.TargetChatId) {
+		return nil, false, nil
+	}
+	released, err := ownedlease.ReleaseObserved(ctx, key, snapshot, clients...)
+	if err != nil || !released {
+		return nil, false, err
+	}
+	g.Log().Infof(ctx, "自动释放已完成TG任务遗留发送租约 previousJobId:%d nextJobId:%d chat:%s", previous.Id, job.Id, job.TargetChatId)
+	ok, err = lease.TryAcquire(ctx)
+	return lease, ok, err
+}
+
+func (s *sSysPublish) releaseTelegramChannelLease(ctx context.Context, lease telegramChannelLease) {
 	if lease == nil {
 		return
 	}

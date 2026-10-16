@@ -76,7 +76,7 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) (resultE
 		return s.reconcileUnknownTelegramJob(ctx, targetJob)
 	}
 	step = beginTelegramPublishStage(ctx, "channel.send_lease.acquire")
-	lease, ok, err := s.tryTelegramChannelLease(ctx, targetJob.TargetChatId)
+	lease, ok, err := s.tryTelegramPublishChannelLease(ctx, targetJob)
 	step.End(err, g.Map{"acquired": ok, "leaseTtlMs": telegramChannelLeaseTTL.Milliseconds()})
 	if err != nil {
 		return err
