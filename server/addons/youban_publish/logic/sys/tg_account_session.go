@@ -13,6 +13,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gfile"
 	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/gogf/gf/v2/util/guid"
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/tg"
 
@@ -30,7 +31,7 @@ func (s *sSysPublish) refreshAdminTgAccountSession(ctx context.Context, id int64
 	}
 	runtime := collectorservice.AccountRuntime()
 	if runtime == nil {
-		return sysin.PublishTgAccountStatusFailed, "Telegram账号运行时未启动"
+		return refreshTgAccountViaTask(ctx, id, tenantId, operatorId, collectorservice.AccountTasks().SubmitAndWait)
 	}
 
 	// Refresh is a user-triggered health probe. Execute it through the
@@ -45,7 +46,7 @@ func (s *sSysPublish) refreshAdminTgAccountSession(ctx context.Context, id int64
 		return probeErr
 	})
 	if !used {
-		return sysin.PublishTgAccountStatusFailed, "Telegram账号运行时未就绪"
+		return refreshTgAccountViaTask(ctx, id, tenantId, operatorId, collectorservice.AccountTasks().SubmitAndWait)
 	}
 	if err != nil {
 		if isTelegramPermanentAccountAuthError(err) {
@@ -63,6 +64,38 @@ func (s *sSysPublish) refreshAdminTgAccountSession(ctx context.Context, id int64
 	return sysin.PublishTgAccountStatusAuthorized, "Telegram账号连接正常"
 }
 
+// Web replicas do not own Telegram connections. Route their probes to the
+// account owner through the existing durable task executor.
+func refreshTgAccountViaTask(ctx context.Context, id, tenantId, operatorId int64, submit func(context.Context, *collectorin.AccountTaskSubmit, time.Duration) (*collectorin.AccountTask, error)) (string, string) {
+	probeCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	if err := probeCtx.Err(); err != nil {
+		return sysin.PublishTgAccountStatusFailed, "TG账号状态刷新已取消，请稍后重试"
+	}
+	task, err := submit(probeCtx, &collectorin.AccountTaskSubmit{
+		TenantID: tenantId, AccountID: id, TaskType: collectorin.AccountTaskTypeTgAccountRefresh,
+		// The suffix prevents an earlier completed probe from being reused.
+		TaskKey:  fmt.Sprintf("tg-account-refresh:%d:%d:%d:%s", id, tenantId, operatorId, guid.S()),
+		Priority: tgJobPriorityUrgent, MaxAttempts: 1,
+	}, 250*time.Millisecond)
+	if err != nil {
+		if probeCtx.Err() != nil {
+			return sysin.PublishTgAccountStatusFailed, "TG账号状态刷新等待超时，请稍后重试"
+		}
+		return sysin.PublishTgAccountStatusFailed, err.Error()
+	}
+	if task == nil {
+		return sysin.PublishTgAccountStatusFailed, "TG账号状态刷新未返回结果"
+	}
+	if task.Status != collectorin.AccountTaskStatusCompleted {
+		if isTelegramPermanentAccountAuthError(gerror.New(task.ErrorMessage)) {
+			return sysin.PublishTgAccountStatusExpired, telegramPermanentAccountAuthMessage(gerror.New(task.ErrorMessage))
+		}
+		return sysin.PublishTgAccountStatusFailed, firstNonEmpty(task.ErrorMessage, "TG账号状态刷新失败，请稍后重试")
+	}
+	return sysin.PublishTgAccountStatusAuthorized, "Telegram账号连接正常"
+}
+
 func (s *sSysPublish) handleTgAccountRefreshTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) error {
 	var id, tenantId, operatorId int64
 	if task == nil || task.TaskKey == "" {
@@ -70,6 +103,12 @@ func (s *sSysPublish) handleTgAccountRefreshTask(ctx context.Context, client *te
 	}
 	if _, err := fmt.Sscanf(task.TaskKey, "tg-account-refresh:%d:%d:%d", &id, &tenantId, &operatorId); err != nil || id <= 0 || tenantId <= 0 {
 		return gerror.New("TG账号刷新任务参数无效")
+	}
+	if id != task.AccountID || tenantId != task.TenantID {
+		return gerror.New("TG账号刷新任务归属不匹配")
+	}
+	if client == nil {
+		return gerror.New("Telegram客户端未就绪")
 	}
 	user, err := client.Self(ctx)
 	if err != nil {
