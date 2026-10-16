@@ -19,6 +19,10 @@ func TestTerminalPublishRecoveryEligible(t *testing.T) {
 		{name: "skip message push", job: func() telegramJobRecord { job := base; job.OperationNo = "message_push:1"; return job }(), err: errors.New("timeout"), want: false},
 		{name: "skip recursive recovery", job: func() telegramJobRecord { job := base; job.OperationNo = "auto-recover:11:22"; return job }(), err: errors.New("timeout"), want: false},
 		{name: "skip incomplete job", job: telegramJobRecord{}, err: errors.New("timeout"), want: false},
+		{name: "never replay ambiguous display", job: func() telegramJobRecord { job := base; job.SendPhase = telegramSendPhaseDisplaySending; return job }(), err: errors.New("timeout"), want: false},
+		{name: "never resume isolated verification", job: func() telegramJobRecord { job := base; job.SendPhase = telegramSendPhaseDisplayConfirmed; return job }(), err: errors.New("timeout"), want: false},
+		{name: "never resend ambiguous verification", job: func() telegramJobRecord { job := base; job.SendPhase = telegramSendPhaseVerifySending; return job }(), err: errors.New("timeout"), want: false},
+		{name: "never resend confirmed verification", job: func() telegramJobRecord { job := base; job.SendPhase = telegramSendPhaseVerifyConfirmed; return job }(), err: errors.New("timeout"), want: false},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

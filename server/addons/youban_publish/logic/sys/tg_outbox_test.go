@@ -36,8 +36,6 @@ func TestTelegramDueOutboxPostgresSQLSelectsChannelHeads(t *testing.T) {
 	for _, fragment := range []string{
 		"WITH active_jobs AS MATERIALIZED", "channel_job_heads AS", "DISTINCT ON", "j.tenant_id", "j.channel_id", "target_chat_id",
 		"j.status IN ('pending','failed_retry','confirming','sending')",
-		"j.status='failed' AND j.send_phase='display_confirmed'",
-		"channel_display.job_id=j.id", "channel_display.purpose='display'",
 		"FROM active_jobs j", "WHERE (EXISTS", "c.id=h.channel_id",
 		"ORDER BY j.tenant_id", "j.created_at, j.id",
 		"h.status IN ('pending','failed_retry','unknown')",

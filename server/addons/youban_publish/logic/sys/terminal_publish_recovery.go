@@ -39,6 +39,11 @@ func terminalPublishRecoverySourceJobID(operationNo string) int64 {
 }
 
 func terminalPublishRecoveryEligible(job telegramJobRecord, cause error) bool {
+	// Once display was published, recovering only the remaining phase can
+	// interleave with newer jobs. Repair these records through a full relist.
+	if job.SendPhase == telegramSendPhaseDisplaySending || telegramSendPhaseHasDisplay(job.SendPhase) {
+		return false
+	}
 	if job.Id <= 0 || job.ProfileId <= 0 || job.ChannelId <= 0 || isMessagePushOperationNo(job.OperationNo) {
 		return false
 	}
@@ -102,6 +107,23 @@ func (s *sSysPublish) handleTerminalPublishRecoveryTask(ctx context.Context, tas
 	}
 	if !current {
 		observeTelegramPublishRecovery(ctx, "superseded")
+		return nil
+	}
+	// Recovery is never a new user instruction to publish a withdrawn profile.
+	_, err = s.profilePublishSource(ctx, job.ProfileId, job.TenantId, job.AccountId, true)
+	if errors.Is(err, errPublishProfileUnavailable) {
+		return s.supersedeTelegramJobAndCompleteOperation(ctx, job)
+	}
+	if err != nil {
+		return err
+	}
+	active, err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
+		Where("id", job.ChannelId).Where("tenant_id", job.TenantId).
+		Where("status", 1).WhereNull("deleted_at").Count()
+	if err != nil {
+		return gerror.Wrap(err, "校验终态补偿频道失败")
+	}
+	if active == 0 {
 		return nil
 	}
 	complete, err := collectProfileMediaComplete(ctx, job.ProfileId)

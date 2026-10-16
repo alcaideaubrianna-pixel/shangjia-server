@@ -99,12 +99,9 @@ func telegramChannelBlockingJobStateSQL(alias string) string {
 	if alias != "" {
 		alias += "."
 	}
-	return fmt.Sprintf(`(%[1]sstatus IN ('pending','failed_retry','confirming','sending') OR
-		(%[1]sstatus='failed' AND %[1]ssend_phase='display_confirmed' AND EXISTS (
-			SELECT 1 FROM %[2]s channel_display
-			WHERE channel_display.job_id=%[1]sid AND channel_display.purpose='display'
-				AND channel_display.status='sent' AND channel_display.deleted_at IS NULL
-		)))`, alias, publishTgMessageTable)
+	// Terminal jobs must never become unschedulable channel heads. Retrying a
+	// failed display later would also send verification apart from its display.
+	return fmt.Sprintf(`%sstatus IN ('pending','failed_retry','confirming','sending')`, alias)
 }
 
 func telegramChannelAvailableAccountSQL(alias string) string {

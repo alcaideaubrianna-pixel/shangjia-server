@@ -128,8 +128,8 @@ func (s *sSysPublish) runTelegramJobRecoveryCycle(ctx context.Context) {
 	if err := s.recoverTerminalTelegramAttempts(ctx, 500); err != nil {
 		g.Log().Warningf(ctx, "收敛TG发送Attempt状态失败：%+v", err)
 	}
-	if err := s.recoverFailedJobsMissingVerification(ctx, 500); err != nil {
-		g.Log().Warningf(ctx, "恢复缺少验证视频的终态TG任务失败：%+v", err)
+	if err := s.detachFailedTelegramDisplayJobs(ctx, 500); err != nil {
+		g.Log().Warningf(ctx, "释放展示后失败的历史TG任务失败：%+v", err)
 	}
 	if err := s.recoverExpiredTelegramOutboxDispatches(ctx, 200); err != nil {
 		g.Log().Warningf(ctx, "恢复Outbox入队确认中断的TG任务失败：%+v", err)
@@ -231,71 +231,69 @@ func telegramPreAttemptPhases() []string {
 	return []string{"", telegramSendPhaseCleanupProcessing, telegramSendPhaseCleanupConfirmed}
 }
 
-func (s *sSysPublish) recoverFailedJobsMissingVerification(ctx context.Context, limit int) error {
+func (s *sSysPublish) detachFailedTelegramDisplayJobs(ctx context.Context, limit int) error {
+	// A large legacy batch must not occupy the shared recovery loop forever.
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
 	if limit <= 0 {
 		limit = 100
 	}
 	var jobs []telegramJobRecord
 	err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
-		Fields("j.*", "(SELECT COUNT(1) FROM "+publishMediaTable+" media WHERE media.profile_id=j.profile_id AND media.purpose='verify' AND media.deleted_at IS NULL) AS verify_media_count").
+		Fields("j.*").
 		Where("j.status", telegramJobStatusFailed).
 		Where("j.send_phase", telegramSendPhaseDisplayConfirmed).
-		Where(telegramActiveChannelConditionForAlias("j")).
-		Where("EXISTS (SELECT 1 FROM " + publishTgMessageTable + " display WHERE display.job_id=j.id AND display.purpose='display' AND display.status='sent' AND display.deleted_at IS NULL)").
-		Where("NOT EXISTS (SELECT 1 FROM " + publishTgMessageTable + " message WHERE message.job_id=j.id AND message.purpose='verify' AND message.status='sent' AND message.deleted_at IS NULL)").
+		Where("COALESCE(j.last_dispatch_error,'') <> ?", telegramFailedDisplayDetachedMessage).
+		Where("j.next_retry_at IS NULL OR j.next_retry_at <= ?", gtime.Now()).
 		OrderAsc("j.updated_at").OrderAsc("j.id").Limit(limit).Scan(&jobs)
 	if err != nil {
 		return gerror.Wrap(err, "读取缺少验证视频的终态TG任务失败")
 	}
-	now := gtime.Now()
 	for _, job := range jobs {
-		allowed, allowedErr := s.canSendTelegramJob(ctx, job)
-		if allowedErr != nil {
-			g.Log().Warningf(ctx, "校验缺失验证视频TG任务失败 jobId:%d err:%+v", job.Id, allowedErr)
-			continue
-		}
-		if !allowed {
-			if supersedeErr := s.supersedeTelegramJobAndCompleteOperation(ctx, job); supersedeErr != nil {
-				g.Log().Warningf(ctx, "废弃不可发布的验证视频恢复任务失败 jobId:%d err:%+v", job.Id, supersedeErr)
+		// Preserve the original error and all delivery evidence. This is terminal
+		// metadata repair, never permission to resend an old verification video.
+		var affected int64
+		updateErr := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+			result, err := tx.Model(publishTgJobTable).Safe().Ctx(ctx).
+				Where("id", job.Id).
+				Where("status", telegramJobStatusFailed).
+				Where("send_phase", telegramSendPhaseDisplayConfirmed).
+				Where("COALESCE(last_dispatch_error,'') <> ?", telegramFailedDisplayDetachedMessage).
+				Data(g.Map{
+					"dispatch_status": tgDispatchStatusDone, "next_retry_at": nil,
+					"last_dispatch_error": telegramFailedDisplayDetachedMessage, "updated_at": gtime.Now(),
+				}).Update()
+			if err != nil {
+				return err
 			}
-			continue
-		}
-		recoveryMessage := telegramFailedDisplayRecoveryMessage(job.VerifyMediaCount)
-		result, updateErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-			Where("id", job.Id).
-			Where("status", telegramJobStatusFailed).
-			Where("send_phase", telegramSendPhaseDisplayConfirmed).
-			Data(g.Map{
-				"status":              telegramJobStatusRetryWait,
-				"dispatch_status":     tgDispatchStatusIdle,
-				"next_retry_at":       now,
-				"error_message":       "",
-				"last_dispatch_error": recoveryMessage,
-				"updated_at":          now,
-			}).Update()
+			affected, err = result.RowsAffected()
+			if err != nil || affected == 0 {
+				return err
+			}
+			_, err = tx.Model(publishTgOutboxTable).Safe().Ctx(ctx).
+				Where("job_id", job.Id).Where("event_type", telegramOutboxEventPublish).
+				WhereNot("status", telegramOutboxDelivered).
+				Data(g.Map{
+					"status": telegramOutboxDelivered, "lease_owner": "", "lease_expires_at": nil,
+					"last_error": telegramFailedDisplayDetachedMessage, "delivered_at": gtime.Now(), "updated_at": gtime.Now(),
+				}).Update()
+			return err
+		})
 		if updateErr != nil {
 			return gerror.Wrapf(updateErr, "恢复缺少验证视频的终态TG任务失败 jobId:%d", job.Id)
 		}
-		affected, _ := result.RowsAffected()
 		if affected == 0 {
 			continue
 		}
-		job.Status = telegramJobStatusRetryWait
-		job.DispatchStatus = tgDispatchStatusIdle
-		s.appendTelegramJobLog(ctx, job, "verify_recovery", "queued", recoveryMessage)
-		if enqueueErr := s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 0, false); enqueueErr != nil {
-			g.Log().Warningf(ctx, "重新投递缺失验证视频TG任务失败 jobId:%d err:%+v", job.Id, enqueueErr)
+		s.appendTelegramJobLog(ctx, job, "verify_recovery", "failed", telegramFailedDisplayDetachedMessage)
+		if wakeErr := s.wakeNextTelegramChannelJob(ctx, job); wakeErr != nil {
+			g.Log().Warningf(ctx, "释放历史失败任务后唤醒频道失败 jobId:%d err:%+v", job.Id, wakeErr)
 		}
 	}
 	return nil
 }
 
-func telegramFailedDisplayRecoveryMessage(verifyMediaCount int) string {
-	if verifyMediaCount > 0 {
-		return "展示已确认，验证视频已重新进入频道顺序队列"
-	}
-	return "展示已确认且无验证媒体，已重新进入完成队列"
-}
+const telegramFailedDisplayDetachedMessage = "展示后失败的历史任务已释放频道，禁止孤立补发验证；问题资料需整组重新上架"
 
 func (s *sSysPublish) recoverExpiredTelegramOutboxDispatches(ctx context.Context, limit int) error {
 	if limit <= 0 {
