@@ -33,6 +33,7 @@ const telegramPhotoMaxDimensionRatio = 20.0
 var errBackgroundReplacementDocument = errors.New("document image skips anti-scan processing")
 
 func (s *sSysPublish) prepareTelegramMediaUploadFile(ctx context.Context, media *telegramMediaItem, path string, cleanup func()) (resultPath string, resultCleanup func(), resultErr error) {
+	ctx = telegramPublishMediaTraceContext(ctx, media)
 	stage := beginTelegramPublishStage(ctx, "media.upload.prepare", telegramPublishMediaLogFields(media))
 	defer stage.Finish(&resultErr)
 	path = strings.TrimSpace(path)
@@ -434,7 +435,9 @@ func compressTelegramPhotoForUpload(ctx context.Context, path string) (string, e
 
 func prepareTelegramVideoUploadFile(ctx context.Context, path string, cleanup func()) (string, func(), error) {
 	if telegramVideoPathNeedsNormalization(path) {
+		step := beginTelegramPublishStage(ctx, "media.video.normalize", g.Map{"inputExtension": strings.ToLower(filepath.Ext(path))})
 		normalizedPath, err := normalizeTelegramVideo(ctx, path)
+		step.End(err)
 		if err != nil {
 			if cleanup != nil {
 				cleanup()
@@ -443,7 +446,9 @@ func prepareTelegramVideoUploadFile(ctx context.Context, path string, cleanup fu
 		}
 		return normalizedPath, chainCleanup(cleanup, func() { _ = os.Remove(normalizedPath) }), nil
 	}
+	step := beginTelegramPublishStage(ctx, "media.video.strip_metadata")
 	cleanPath, err := stripTelegramVideoMetadata(ctx, path)
+	step.End(err, g.Map{"fallbackToOriginal": err != nil})
 	if err != nil {
 		g.Log().Warningf(ctx, "清理视频元数据失败，使用原视频发送 path:%s err:%+v", path, err)
 		return path, cleanup, nil

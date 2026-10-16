@@ -20,6 +20,23 @@ import (
 
 type telegramPublishTraceContextKey struct{}
 
+// Attach media identity to nested diagnostic stages without changing deadlines
+// or mutating the parent context shared by concurrent media preparation.
+func telegramPublishMediaTraceContext(ctx context.Context, media *telegramMediaItem) context.Context {
+	base, enabled := ctx.Value(telegramPublishTraceContextKey{}).(g.Map)
+	if !enabled {
+		return ctx
+	}
+	fields := g.Map{}
+	for key, value := range base {
+		fields[key] = value
+	}
+	for key, value := range telegramPublishMediaLogFields(media) {
+		fields[key] = value
+	}
+	return context.WithValue(ctx, telegramPublishTraceContextKey{}, fields)
+}
+
 // This context is diagnostic only: no leases, task states or retry decisions
 // depend on it. jobId joins executions across queues; executionId distinguishes
 // retries and concurrent consumers even when the incoming trace is reused.
@@ -183,5 +200,7 @@ func telegramPublishMediaLogFields(media *telegramMediaItem) g.Map {
 	}
 	return g.Map{"mediaId": media.Id, "mediaType": media.MediaType, "purpose": media.Purpose,
 		"inputMode": mode, "sourceHost": host, "antiScanEnabled": media.AntiScanEnabled,
-		"antiScanMode": media.AntiScanMode, "forceUpload": media.ForceUpload}
+		"antiScanMode": media.AntiScanMode, "forceUpload": media.ForceUpload,
+		"sizeBytes": media.Size, "hasPoster": strings.TrimSpace(media.PosterUrl) != "" || strings.TrimSpace(media.PosterStoragePath) != "",
+		"hasFileId": strings.TrimSpace(media.TgFileId) != ""}
 }

@@ -318,9 +318,15 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 		}
 		applyTelegramSendVideoMeta(params, videoMeta)
 		sendStartedAt := time.Now()
-		step = beginTelegramPublishStage(ctx, "api.sendVideo", telegramPublishMediaLogFields(media))
+		step = beginTelegramPublishStage(ctx, "api.sendVideo", telegramPublishMediaLogFields(media), g.Map{
+			"hasThumbnail": thumbnail != nil, "hasCover": cover != nil,
+			"videoWidth": videoMeta.Width, "videoHeight": videoMeta.Height, "videoDuration": videoMeta.Duration})
 		msg, err := bot.SendVideo(ctx, params)
-		step.End(err, g.Map{"responseReceived": msg != nil})
+		messageId := 0
+		if msg != nil {
+			messageId = msg.ID
+		}
+		step.End(err, g.Map{"responseReceived": msg != nil, "messageId": messageId})
 		if err != nil && telegramMediaCanFallbackToUpload(media, err) {
 			return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, telegramMediaFallbackCandidate(media), replyMarkup...)
 		}
@@ -1049,7 +1055,9 @@ func prepareTelegramVideoPreview(ctx context.Context, media *telegramMediaItem, 
 	if media == nil || media.MediaType != "video" {
 		return nil, nil, nil
 	}
+	step := beginTelegramPublishStage(ctx, "media.video.poster.resolve", telegramPublishMediaLogFields(media), g.Map{"previewKind": kind})
 	thumbPath, cleanupThumb, err := cachedTelegramVideoPosterFile(ctx, media)
+	step.End(err, g.Map{"posterAvailable": strings.TrimSpace(thumbPath) != ""})
 	if err != nil {
 		if cleanupThumb != nil {
 			cleanupThumb()
@@ -1060,14 +1068,18 @@ func prepareTelegramVideoPreview(ctx context.Context, media *telegramMediaItem, 
 		return nil, nil, nil
 	}
 	if media.AntiScanEnabled {
+		step = beginTelegramPublishStage(ctx, "media.video.poster.protection", telegramPublishMediaLogFields(media), g.Map{"previewKind": kind})
 		protectedPath, protectedCleanup, protectErr := NewSysPublish().prepareTelegramAntiScanUploadFile(ctx, media, thumbPath, cleanupThumb, kind)
+		step.End(protectErr)
 		if protectErr != nil {
 			return nil, nil, gerror.Wrap(protectErr, "处理TG视频缩略图防扫图失败")
 		}
 		thumbPath = protectedPath
 		cleanupThumb = protectedCleanup
 	}
+	step = beginTelegramPublishStage(ctx, "media.video.poster.open", telegramPublishMediaLogFields(media))
 	file, err := os.Open(thumbPath)
+	step.End(err)
 	if err != nil {
 		if cleanupThumb != nil {
 			cleanupThumb()
@@ -1079,6 +1091,7 @@ func prepareTelegramVideoPreview(ctx context.Context, media *telegramMediaItem, 
 }
 
 func cachedTelegramVideoPosterFile(ctx context.Context, media *telegramMediaItem) (string, func(), error) {
+	ctx = telegramPublishMediaTraceContext(ctx, media)
 	if media == nil {
 		return "", nil, nil
 	}
@@ -1098,9 +1111,11 @@ func cachedTelegramVideoPosterFile(ctx context.Context, media *telegramMediaItem
 		// 原消息封面已有可访问地址，直接读取；不要先访问存储代理，
 		// 否则代理故障会耗尽预算，导致可用的原图被跳过。
 		posterCtx, cancelPoster := context.WithTimeout(ctx, 5*time.Second)
+		step := beginTelegramPublishStage(posterCtx, "media.video.poster.download", telegramPublishMediaLogFields(media))
 		posterPath, posterErr := cachedRemoteMediaFileWithMetaSourceAndDownloader(
 			posterCtx, stableMediaFileCacheKey(normalizedMediaCacheSource(source)),
 			source, source, ".jpg", downloadMediaFileCache)
+		step.End(posterErr)
 		cancelPoster()
 		var posterCleanup func()
 		if posterErr == nil && strings.TrimSpace(posterPath) != "" {
@@ -1115,14 +1130,19 @@ func cachedTelegramVideoPosterFile(ctx context.Context, media *telegramMediaItem
 	if err != nil || strings.TrimSpace(videoPath) == "" {
 		return "", cleanup, err
 	}
+	step := beginTelegramPublishStage(ctx, "media.video.poster.generate")
 	thumbPath, err := generateTelegramVideoThumbnail(ctx, videoPath)
+	step.End(err)
 	if cleanup != nil {
 		cleanup()
 	}
 	if err != nil {
 		return "", nil, gerror.Wrapf(err, "生成TG视频预览图失败 mediaId:%d path:%s", media.Id, videoPath)
 	}
-	if persistErr := persistGeneratedTelegramVideoPoster(ctx, media, thumbPath); persistErr != nil {
+	step = beginTelegramPublishStage(ctx, "media.video.poster.persist")
+	persistErr := persistGeneratedTelegramVideoPoster(ctx, media, thumbPath)
+	step.End(persistErr)
+	if persistErr != nil {
 		// The generated local preview is still valid for this send. Persistence
 		// is an optimization and must not turn an optional thumbnail into a
 		// channel-blocking failure.
