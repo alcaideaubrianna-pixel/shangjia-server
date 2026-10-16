@@ -145,7 +145,7 @@ func (s *sSysPublish) upsertCollectEventMedia(ctx context.Context, event gdb.Rec
 		status := collectMediaInitialCacheStatus(item)
 		mediaCols := pdao.YoubanPublishCollectEventMedia.Columns()
 		existing, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
-			Fields(mediaCols.Id, mediaCols.SortIndex, mediaCols.CacheStatus).
+			Fields(mediaCols.Id, mediaCols.SortIndex, mediaCols.CacheStatus, mediaCols.MetaJson).
 			Where(mediaCols.EventId, eventId).
 			Where(mediaCols.SourceMediaKey, mediaKey).
 			One()
@@ -190,6 +190,8 @@ func (s *sSysPublish) upsertCollectEventMedia(ctx context.Context, event gdb.Rec
 			}
 			if strings.TrimSpace(item.DebugMetaJson) == "" {
 				delete(data, mediaCols.MetaJson)
+			} else {
+				data[mediaCols.MetaJson] = mergeCollectMediaRetryMetadata(existing[mediaCols.MetaJson].String(), item.DebugMetaJson)
 			}
 			if strings.TrimSpace(item.FileUrl) == "" {
 				delete(data, mediaCols.FileUrl)

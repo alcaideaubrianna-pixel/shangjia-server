@@ -791,7 +791,7 @@ func (s *sSysPublish) updateCollectEventMediaItems(ctx context.Context, rows []*
 			cols.UpdatedAt:          gtime.Now(),
 		}
 		if strings.TrimSpace(item.DebugMetaJson) != "" {
-			data[cols.MetaJson] = item.DebugMetaJson
+			data[cols.MetaJson] = mergeCollectMediaRetryMetadata(row.MetaJson, item.DebugMetaJson)
 		}
 		if ref, ok := telegramCopyMediaRefFromFileId(item.FileId); ok {
 			data[cols.BackupChatId] = ref.ChatId
