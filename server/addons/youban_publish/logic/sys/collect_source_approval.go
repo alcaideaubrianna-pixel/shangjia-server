@@ -47,7 +47,7 @@ func (s *sSysPublish) BotCollectSourceApproval(ctx context.Context, sourceId, te
 	return nil
 }
 
-func (s *sSysPublish) BotCollectChannelApproval(ctx context.Context, relationId, tenantId, operatorAccountId int64, approved bool) (*sysin.CollectChannelApprovalModel, error) {
+func (s *sSysPublish) BotCollectChannelView(ctx context.Context, relationId, tenantId, operatorAccountId int64) (*sysin.CollectChannelApprovalModel, error) {
 	if relationId <= 0 || tenantId <= 0 || operatorAccountId <= 0 {
 		return nil, gerror.New("频道审批参数不完整")
 	}
@@ -59,17 +59,27 @@ func (s *sSysPublish) BotCollectChannelApproval(ctx context.Context, relationId,
 		AccountId    int64  `json:"accountId"`
 		ChannelId    string `json:"channelId"`
 		ChannelTitle string `json:"channelTitle"`
+		Username     string `json:"username"`
+		InviteLink   string `json:"inviteLink"`
 	}
 	if err := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).As("ac").
 		InnerJoin(pdao.YoubanPublishCollectSource.Table()+" s", "s.id=ac.source_id AND s.tenant_id=ac.tenant_id AND s.deleted_at IS NULL").
 		InnerJoin(pdao.YoubanPublishCollectChannel.Table()+" ch", "ch.id=ac.channel_id AND ch.tenant_id=ac.tenant_id AND ch.deleted_at IS NULL").
 		LeftJoin(pdao.YoubanPublishCollectSourceRule.Table()+" sr", "sr.source_id=s.id AND sr.tenant_id=s.tenant_id AND sr.status=1").
-		Fields("ac.id,ac.source_id,sr.rule_id,s.bot_id,s.account_id,ch.telegram_chat_id AS channel_id,ch.title AS channel_title").
+		Fields("ac.id,ac.source_id,sr.rule_id,s.bot_id,s.account_id,ch.telegram_chat_id AS channel_id,ch.title AS channel_title,ch.username,ch.invite_link").
 		Where("ac.id", relationId).Where("ac.tenant_id", tenantId).Scan(&relation); err != nil {
 		return nil, gerror.Wrap(err, "读取频道审批记录失败")
 	}
 	if relation.Id <= 0 {
 		return nil, gerror.New("频道审批记录不存在或已失效")
+	}
+	return &sysin.CollectChannelApprovalModel{SourceId: relation.SourceId, RuleId: relation.RuleId, BotId: relation.BotId, AccountId: relation.AccountId, ChannelId: relation.ChannelId, ChannelTitle: relation.ChannelTitle, ChannelLink: collectChannelPublicLink(relation.Username, relation.InviteLink)}, nil
+}
+
+func (s *sSysPublish) BotCollectChannelApproval(ctx context.Context, relationId, tenantId, operatorAccountId int64, approved bool) (*sysin.CollectChannelApprovalModel, error) {
+	relation, err := s.BotCollectChannelView(ctx, relationId, tenantId, operatorAccountId)
+	if err != nil {
+		return nil, err
 	}
 	status := sysin.CollectAccountChannelDisabled
 	approval := "rejected"
@@ -78,7 +88,7 @@ func (s *sSysPublish) BotCollectChannelApproval(ctx context.Context, relationId,
 		approval = "approved"
 	}
 	now := gtime.Now()
-	_, err := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Where("id", relation.Id).Data(g.Map{
+	_, err = pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Where("id", relationId).Where("tenant_id", tenantId).Data(g.Map{
 		"collect_enabled": introFeeBoolToInt(approved), "status": status, "approval_status": approval,
 		"approved_at": gdbNil(approved), "disabled_at": gdbNil(!approved), "updated_at": now,
 	}).Update()
@@ -86,7 +96,7 @@ func (s *sSysPublish) BotCollectChannelApproval(ctx context.Context, relationId,
 		return nil, gerror.Wrap(err, "更新频道审批状态失败")
 	}
 	s.refreshCollectSourceCache(ctx)
-	res := &sysin.CollectChannelApprovalModel{SourceId: relation.SourceId, RuleId: relation.RuleId, BotId: relation.BotId, AccountId: relation.AccountId, ChannelId: relation.ChannelId, ChannelTitle: relation.ChannelTitle}
+	res := &sysin.CollectChannelApprovalModel{SourceId: relation.SourceId, RuleId: relation.RuleId, BotId: relation.BotId, AccountId: relation.AccountId, ChannelId: relation.ChannelId, ChannelTitle: relation.ChannelTitle, ChannelLink: relation.ChannelLink}
 	if approved && relation.RuleId > 0 {
 		if rule, ruleErr := s.BotCollectRuleView(ctx, relation.RuleId, tenantId, relation.AccountId); ruleErr == nil && rule != nil {
 			res.DefaultSuffix = strings.TrimSpace(rule.IntroFeeSuffix)

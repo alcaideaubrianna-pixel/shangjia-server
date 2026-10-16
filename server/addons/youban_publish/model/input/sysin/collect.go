@@ -157,6 +157,7 @@ type CollectSourceTriggerModel struct {
 }
 
 type CollectChannelApprovalModel struct {
+	ChannelLink   string `json:"channelLink"`
 	SourceId      int64  `json:"sourceId"`
 	RuleId        int64  `json:"ruleId"`
 	BotId         int64  `json:"botId"`

@@ -23,6 +23,7 @@ type collectChannelSuffixPayload struct {
 	Id            int64  `json:"id"`
 	ChannelId     string `json:"channelId"`
 	ChannelTitle  string `json:"channelTitle"`
+	ChannelLink   string `json:"channelLink"`
 	DefaultSuffix string `json:"defaultSuffix"`
 	Draft         string `json:"draft"`
 }
@@ -63,11 +64,21 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 		action = parts[1]
 	}
 	switch action {
-	case "channelapprove", "channelreject":
+	case "channelactioncancel":
+		return true, s.sendCollectManageNotice(ctx, botId, chatId, "已取消操作，频道采集状态和后缀保持不变。")
+	case "channelapprove", "channelreject", "channelrejectconfirm":
 		if account.AccountType != "admin" || len(parts) < 3 {
 			return true, nil
 		}
 		relationID, _ := strconv.ParseInt(parts[2], 10, 64)
+		if action == "channelreject" {
+			channel, err := publishService.SysPublish().BotCollectChannelView(ctx, relationID, account.TenantId, account.AccountId)
+			if err != nil {
+				return true, err
+			}
+			text := fmt.Sprintf("确认禁用频道采集？\n频道：%s\n频道 ID：%s%s\n\n确认后不再采集该频道的新消息。已有资料、已推送消息和后缀配置保留。", html.EscapeString(firstNonEmpty(channel.ChannelTitle, channel.ChannelId)), html.EscapeString(channel.ChannelId), collectManageChannelLinkLine(channel.ChannelLink))
+			return true, s.sendCollectManageMarkup(ctx, botId, chatId, text, [][]models.InlineKeyboardButton{{{Text: "确认禁用", CallbackData: fmt.Sprintf("cm:channelrejectconfirm:%d", relationID)}, {Text: "取消", CallbackData: "cm:channelactioncancel"}}})
+		}
 		approval, err := publishService.SysPublish().BotCollectChannelApproval(ctx, relationID, account.TenantId, account.AccountId, action == "channelapprove")
 		if err != nil {
 			return true, err
@@ -75,7 +86,7 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 		if action == "channelapprove" {
 			return true, s.startApprovedChannelSuffixSession(ctx, botId, chatId, account, approval)
 		}
-		return true, s.sendCollectManageNotice(ctx, botId, chatId, "已拒绝采集该频道，后续消息将直接忽略。")
+		return true, s.sendCollectManageNotice(ctx, botId, chatId, fmt.Sprintf("频道采集已禁用\n频道：%s\n频道 ID：%s%s\n操作原因：管理员主动禁用采集\n后续新消息将不再采集；已有资料和已推送消息保留。", html.EscapeString(firstNonEmpty(approval.ChannelTitle, approval.ChannelId)), html.EscapeString(approval.ChannelId), collectManageChannelLinkLine(approval.ChannelLink)))
 	case "approve", "reject":
 		if account.AccountType != "admin" || len(parts) < 3 {
 			return true, nil
@@ -91,7 +102,7 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 			}
 			return true, s.sendCollectManageMarkup(ctx, botId, chatId, "已允许采集该频道。是否现在配置介绍费后缀？", buttons)
 		}
-		return true, s.sendCollectManageNotice(ctx, botId, chatId, "已拒绝采集该频道，后续消息将直接忽略。")
+		return true, s.sendCollectManageNotice(ctx, botId, chatId, "已禁用该频道采集。后续新消息将不再采集；已有资料和已推送消息保留。")
 	case "list":
 		page := 1
 		if len(parts) > 2 {
@@ -140,7 +151,7 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 		ruleID, _ := strconv.ParseInt(parts[2], 10, 64)
 		rowID, _ := strconv.ParseInt(parts[3], 10, 64)
 		return true, s.showCollectRuleChannel(ctx, botId, chatId, s.collectRuleOwnerAccount(ctx, account, ruleID), ruleID, rowID, parts[4])
-	case "channelstatus", "channeldelete", "channeldeleteconfirm":
+	case "channelstatus", "channelstatusconfirm", "channeldelete", "channeldeleteconfirm":
 		if account.AccountType != "admin" || len(parts) < 6 {
 			return true, nil
 		}
@@ -156,8 +167,12 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 			if item == nil {
 				return true, s.sendCollectManageNotice(ctx, botId, chatId, "频道不存在或已被清理。")
 			}
+			preview, err := publishService.SysPublish().BotIntroFeeChannelPurge(ctx, &publishsysin.IntroFeeChannelPurgeInp{Id: rowID, RuleId: ruleID, BotId: botId, ChannelId: item.ChannelId, Preview: true}, owner.TenantId, owner.AccountId)
+			if err != nil {
+				return true, err
+			}
 			return true, s.sendCollectManageMarkup(ctx, botId, chatId,
-				fmt.Sprintf("确认删除并下架频道：%s？\n该操作会禁用采集、删除关联资料、清理已推送消息和后缀计数，且不可恢复。", html.EscapeString(item.ChannelTitle)),
+				collectChannelDeleteDetails(item, preview)+"\n\n确认后将禁用该频道采集、删除以上代理资料及其已推送消息，并清理频道后缀和计数。此操作不可恢复。",
 				[][]models.InlineKeyboardButton{{
 					{Text: "确认删除并下架", CallbackData: fmt.Sprintf("cm:channeldeleteconfirm:%d:%d:%s:0", ruleID, rowID, item.ChannelId)},
 					{Text: "取消", CallbackData: fmt.Sprintf("cm:channel:%d:%d:%s", ruleID, rowID, item.ChannelId)},
@@ -175,7 +190,7 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 			if err != nil {
 				return true, err
 			}
-			return true, s.sendCollectManageNotice(ctx, botId, chatId, fmt.Sprintf("删除并下架任务已开始，频道已立即禁用，后台正在清理 %d 条资料和 %d 条已推送消息。完成后会再次通知。", res.ProfileCount, res.MessageCount))
+			return true, s.sendCollectManageNotice(ctx, botId, chatId, collectChannelDeleteNotice(item, res))
 		}
 		item, err := s.collectRuleChannelItem(ctx, botId, owner, ruleID, rowID, parts[4])
 		if err != nil {
@@ -183,6 +198,10 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 		}
 		if item == nil || !item.Configured {
 			return true, s.sendCollectManageNotice(ctx, botId, chatId, "请先配置该频道的后缀。")
+		}
+		if action == "channelstatus" && status == 2 {
+			text := fmt.Sprintf("确认禁用频道采集？\n频道：%s\n频道 ID：%s%s\n\n确认后不再采集该频道的新消息。已有资料、已推送消息和后缀配置保留。", html.EscapeString(firstNonEmpty(item.ChannelTitle, item.ChannelId)), html.EscapeString(item.ChannelId), collectManageChannelLinkLine(item.ChannelLink))
+			return true, s.sendCollectManageMarkup(ctx, botId, chatId, text, [][]models.InlineKeyboardButton{{{Text: "确认禁用", CallbackData: fmt.Sprintf("cm:channelstatusconfirm:%d:%d:%s:2", ruleID, rowID, item.ChannelId)}, {Text: "取消", CallbackData: "cm:channelactioncancel"}}})
 		}
 		_, err = publishService.SysPublish().BotIntroFeeChannelRuleSave(ctx, &publishsysin.IntroFeeChannelRuleSaveInp{Id: rowID, RuleId: ruleID, BotId: botId, ChannelId: item.ChannelId, Suffix: item.Suffix, Status: status}, owner.TenantId, owner.AccountId)
 		if err != nil {
@@ -196,7 +215,7 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 		ruleID, _ := strconv.ParseInt(parts[2], 10, 64)
 		owner := s.collectRuleOwnerAccount(ctx, account, ruleID)
 		return true, s.startProfileSessionByIds(ctx, botId, telegramUserIdFromCtx(ctx), chatId, account, "collect_channel_add", "waiting_value", ruleID, "", map[string]interface{}{"ruleId": ruleID, "botId": botId, "accountId": owner.AccountId}, "请输入：频道ID 后缀\n例如：-1001234567890 新后缀")
-	case "channeledit":
+	case "channeledit", "channelinput":
 		if account.AccountType != "admin" || len(parts) < 4 {
 			return true, nil
 		}
@@ -210,7 +229,29 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 			rowID, _ = strconv.ParseInt(parts[4], 10, 64)
 		}
 		owner := s.collectRuleOwnerAccount(ctx, account, ruleID)
-		return true, s.startProfileSessionByIds(ctx, botId, telegramUserIdFromCtx(ctx), chatId, account, "collect_channel_add", "waiting_value", ruleID, "", map[string]interface{}{"ruleId": ruleID, "botId": botId, "accountId": owner.AccountId, "channelId": channelID, "id": rowID}, "请输入新的后缀\n例如：新后缀")
+		item, err := s.collectRuleChannelItem(ctx, botId, owner, ruleID, rowID, channelID)
+		if err != nil {
+			return true, err
+		}
+		if item == nil {
+			return true, s.sendCollectManageNotice(ctx, botId, chatId, "频道不存在或已失效，请刷新频道列表后重试。")
+		}
+		if !item.Configured && strings.TrimSpace(item.Suffix) == "" {
+			rule, err := publishService.SysPublish().BotCollectRuleView(ctx, ruleID, owner.TenantId, owner.AccountId)
+			if err != nil {
+				return true, err
+			}
+			if rule != nil {
+				item.Suffix = rule.IntroFeeSuffix
+			}
+		}
+		if action == "channeledit" {
+			text := fmt.Sprintf("确认修改频道后缀？\n频道：%s\n频道 ID：%s%s\n当前后缀：%s\n\n继续后请输入新后缀，预览并再次确认保存后才会生效。", html.EscapeString(firstNonEmpty(item.ChannelTitle, item.ChannelId)), html.EscapeString(item.ChannelId), collectManageChannelLinkLine(item.ChannelLink), html.EscapeString(firstNonEmpty(item.Suffix, "未配置")))
+			return true, s.sendCollectManageMarkup(ctx, botId, chatId, text, [][]models.InlineKeyboardButton{{{Text: "确认修改", CallbackData: fmt.Sprintf("cm:channelinput:%d:%s:%d", ruleID, item.ChannelId, item.Id)}, {Text: "取消", CallbackData: "cm:channelactioncancel"}}})
+		}
+		payload := collectChannelSuffixPayload{RuleId: ruleID, BotId: botId, AccountId: owner.AccountId, ChannelId: item.ChannelId, ChannelTitle: item.ChannelTitle, ChannelLink: item.ChannelLink, Id: item.Id, DefaultSuffix: item.Suffix}
+		prompt := fmt.Sprintf("修改频道后缀\n频道：%s\n频道 ID：%s%s\n当前后缀：%s\n\n请发送新的频道后缀，例如：北京代理。\n发送后会显示预览，确认保存后才生效。\n发送 /cancel 取消修改。", html.EscapeString(firstNonEmpty(item.ChannelTitle, item.ChannelId)), html.EscapeString(item.ChannelId), collectManageChannelLinkLine(item.ChannelLink), html.EscapeString(firstNonEmpty(item.Suffix, "未配置")))
+		return true, s.startProfileSessionByIds(ctx, botId, telegramUserIdFromCtx(ctx), chatId, account, "collect_channel_add", "waiting_value", ruleID, "", payload, prompt)
 	case "ruleswitch":
 		if account.AccountType != "admin" || len(parts) < 4 {
 			return true, nil
@@ -261,14 +302,8 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 		if session == nil || session.Scene != "collect_channel_add" {
 			return true, nil
 		}
-		var payload collectChannelSuffixPayload
-		_ = json.Unmarshal([]byte(session.PayloadJson), &payload)
 		_ = s.completeProfileSession(ctx, session.Id)
-		defaultSuffix := strings.TrimSpace(payload.DefaultSuffix)
-		if defaultSuffix == "" {
-			defaultSuffix = "未设置"
-		}
-		return true, s.sendCollectManageNotice(ctx, botId, chatId, "已取消频道后缀设置，将使用规则默认后缀："+defaultSuffix)
+		return true, s.sendCollectManageNotice(ctx, botId, chatId, "已取消修改，频道采集状态和当前后缀保持不变。")
 	case "toggle":
 		if len(parts) < 3 {
 			return true, nil
@@ -300,7 +335,7 @@ func (s *sSysBot) startApprovedChannelSuffixSession(ctx context.Context, botId i
 	}
 	payload := collectChannelSuffixPayload{
 		RuleId: approval.RuleId, BotId: approval.BotId, AccountId: approval.AccountId,
-		ChannelId: approval.ChannelId, ChannelTitle: approval.ChannelTitle, DefaultSuffix: approval.DefaultSuffix,
+		ChannelId: approval.ChannelId, ChannelTitle: approval.ChannelTitle, ChannelLink: approval.ChannelLink, DefaultSuffix: approval.DefaultSuffix,
 	}
 	if err := s.startProfileSessionByIds(ctx, botId, telegramUserIdFromCtx(ctx), chatId, account, "collect_channel_add", "waiting_value", approval.RuleId, "", payload, ""); err != nil {
 		return err
@@ -313,8 +348,8 @@ func (s *sSysBot) startApprovedChannelSuffixSession(ctx context.Context, botId i
 	if name == "" {
 		name = approval.ChannelId
 	}
-	text := fmt.Sprintf("已允许采集频道：%s\n当前规则默认后缀：%s\n\n请直接发送该频道的新后缀，例如：哈哈哈\n取消后将继续使用规则默认后缀。", html.EscapeString(name), html.EscapeString(defaultSuffix))
-	buttons := [][]models.InlineKeyboardButton{{{Text: "取消，使用默认后缀", CallbackData: "cm:channelsuffixcancel"}}}
+	text := fmt.Sprintf("修改频道后缀\n频道：%s%s\n当前规则默认后缀：%s\n\n请发送新的频道后缀，例如：北京代理。\n发送后会显示预览，确认保存后才生效。取消修改不影响当前配置。", html.EscapeString(name), collectManageChannelLinkLine(approval.ChannelLink), html.EscapeString(defaultSuffix))
+	buttons := [][]models.InlineKeyboardButton{{{Text: "取消修改", CallbackData: "cm:channelsuffixcancel"}}}
 	return s.sendCollectManageMarkup(ctx, botId, chatId, text, buttons)
 }
 
@@ -333,7 +368,7 @@ func (s *sSysBot) confirmCollectChannelSuffix(ctx context.Context, botId int64, 
 		return err
 	}
 	_ = s.completeProfileSession(ctx, session.Id)
-	return s.sendCollectManageNotice(ctx, botId, chatId, "频道后缀已保存："+strings.TrimSpace(payload.Draft))
+	return s.sendCollectManageNotice(ctx, botId, chatId, fmt.Sprintf("频道后缀已保存\n频道：%s\n频道 ID：%s%s\n新后缀：%s\n采集状态：已开启\n后续新采集资料将使用此后缀。", html.EscapeString(firstNonEmpty(payload.ChannelTitle, payload.ChannelId)), html.EscapeString(payload.ChannelId), collectManageChannelLinkLine(payload.ChannelLink), html.EscapeString(strings.TrimSpace(payload.Draft))))
 }
 
 func (s *sSysBot) showCollectSourceList(ctx context.Context, botId int64, chatId string, account *botProfileAccount, page int) error {
@@ -441,7 +476,10 @@ func (s *sSysBot) showCollectSourceConfig(ctx context.Context, botId int64, chat
 	if len(src.RuleIds) == 0 {
 		return s.sendCollectManageNotice(ctx, botId, chatId, "当前采集源未绑定专属规则，请先在后台完成配置。")
 	}
-	text := fmt.Sprintf("采集配置：%s\n规则数量：%d", src.Title, len(src.RuleIds))
+	if len(src.RuleIds) == 1 {
+		return s.showCollectRuleEditor(ctx, botId, chatId, s.collectRuleOwnerAccount(ctx, account, src.RuleIds[0]), src.RuleIds[0])
+	}
+	text := fmt.Sprintf("采集配置：%s\n该采集源绑定了 %d 条规则，请选择要配置的规则。", html.EscapeString(src.Title), len(src.RuleIds))
 	buttons := make([][]models.InlineKeyboardButton, 0, len(src.RuleIds)+1)
 	for _, rid := range src.RuleIds {
 		owner := s.collectRuleOwnerAccount(ctx, account, rid)
@@ -449,7 +487,7 @@ func (s *sSysBot) showCollectSourceConfig(ctx context.Context, botId int64, chat
 		if err != nil || rule == nil {
 			continue
 		}
-		text += fmt.Sprintf("\n\n规则：%s", rule.Name)
+		text += fmt.Sprintf("\n\n规则：%s", html.EscapeString(rule.Name))
 		label := "修改配置"
 		if len(src.RuleIds) > 1 {
 			label += " · " + rule.Name
@@ -470,7 +508,7 @@ func (s *sSysBot) showCollectRuleEditor(ctx context.Context, botId int64, chatId
 	if err != nil {
 		return err
 	}
-	text := fmt.Sprintf("规则：%s\n请选择要编辑的配置项：", r.Name)
+	text := fmt.Sprintf("采集配置\n规则：%s\n请选择要修改的配置项：", html.EscapeString(r.Name))
 	buttons := [][]models.InlineKeyboardButton{
 		{{Text: fmt.Sprintf("删除整行（%d条）", len(r.DeleteLineTexts)), CallbackData: fmt.Sprintf("cm:edit:%d:delete_line", ruleID)}},
 		{{Text: fmt.Sprintf("删除文本（%d条）", len(r.DeleteTexts)), CallbackData: fmt.Sprintf("cm:edit:%d:delete_text", ruleID)}},
@@ -567,7 +605,7 @@ func (s *sSysBot) showCollectRuleChannel(ctx context.Context, botId int64, chatI
 	if suffix == "" {
 		suffix = "未配置"
 	}
-	text := fmt.Sprintf("频道：%s\nID：%s\n后缀：%s\n状态：%s", html.EscapeString(name), html.EscapeString(item.ChannelId), html.EscapeString(suffix), status)
+	text := fmt.Sprintf("频道：%s\n频道 ID：%s%s\n后缀：%s\n状态：%s", html.EscapeString(name), html.EscapeString(item.ChannelId), collectManageChannelLinkLine(item.ChannelLink), html.EscapeString(suffix), status)
 	buttons := [][]models.InlineKeyboardButton{{{Text: "编辑后缀", CallbackData: fmt.Sprintf("cm:channeledit:%d:%s:%d", ruleID, item.ChannelId, item.Id)}}}
 	if item.Configured {
 		if item.Status == 1 {
@@ -584,14 +622,20 @@ func (s *sSysBot) showCollectRuleChannel(ctx context.Context, botId int64, chatI
 func (s *sSysBot) collectRuleChannelItem(ctx context.Context, botId int64, account *botProfileAccount, ruleID, rowID int64, channelID string) (*publishsysin.IntroFeeChannelRuleItem, error) {
 	in := &publishsysin.IntroFeeChannelRuleListInp{RuleId: ruleID, BotId: botId, IncludeCandidates: true}
 	in.Page, in.PerPage = 1, 100
-	rows, _, err := publishService.SysPublish().BotIntroFeeChannelRuleList(ctx, in, account.TenantId, account.AccountId)
-	if err != nil {
-		return nil, err
-	}
-	for _, row := range rows {
-		if row != nil && (row.Id == rowID && rowID > 0 || row.ChannelId == channelID) {
-			return row, nil
+	for {
+		rows, total, err := publishService.SysPublish().BotIntroFeeChannelRuleList(ctx, in, account.TenantId, account.AccountId)
+		if err != nil {
+			return nil, err
 		}
+		for _, row := range rows {
+			if row != nil && (row.Id == rowID && rowID > 0 || row.ChannelId == channelID) {
+				return row, nil
+			}
+		}
+		if len(rows) == 0 || in.Page*in.PerPage >= total {
+			break
+		}
+		in.Page++
 	}
 	return nil, nil
 }
@@ -800,4 +844,25 @@ func (s *sSysBot) toggleCollectRuleField(ctx context.Context, botId int64, chatI
 		return err
 	}
 	return s.showCollectRuleEditor(ctx, botId, chatId, account, ruleID)
+}
+
+func collectChannelDeleteDetails(item *publishsysin.IntroFeeChannelRuleItem, res *publishsysin.IntroFeeChannelPurgeModel) string {
+	name := firstNonEmpty(item.ChannelTitle, item.ChannelId)
+	suffix := firstNonEmpty(item.Suffix, "未配置")
+	return fmt.Sprintf("删除频道代理资料并下架\n操作原因：管理员主动删除该频道的代理资料\n频道：%s\n频道 ID：%s%s\n频道后缀：%s\n关联代理资料：%d 条\n已推送消息：%d 条", html.EscapeString(name), html.EscapeString(item.ChannelId), collectManageChannelLinkLine(item.ChannelLink), html.EscapeString(suffix), res.ProfileCount, res.MessageCount)
+}
+
+func collectChannelDeleteNotice(item *publishsysin.IntroFeeChannelRuleItem, res *publishsysin.IntroFeeChannelPurgeModel) string {
+	status := "已完成。该频道采集已禁用，频道后缀和计数已清理，无关联代理资料或已推送消息需要删除。"
+	if res.Queued == 1 {
+		status = "任务已提交，该频道采集已禁用。后台正在删除上述代理资料及其已推送消息，完成后会再次通知。"
+	}
+	return collectChannelDeleteDetails(item, res) + "\n状态：" + status
+}
+
+func collectManageChannelLinkLine(link string) string {
+	if strings.TrimSpace(link) == "" {
+		return ""
+	}
+	return "\n频道链接：" + html.EscapeString(strings.TrimSpace(link))
 }

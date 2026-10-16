@@ -2059,9 +2059,9 @@ func (s *sSysBot) consumeProfileSessionText(ctx context.Context, botId int64, ms
 		}
 		buttons := [][]models.InlineKeyboardButton{
 			{{Text: "确认保存", CallbackData: "cm:channelsuffixconfirm"}},
-			{{Text: "取消，使用默认后缀", CallbackData: "cm:channelsuffixcancel"}},
+			{{Text: "取消修改", CallbackData: "cm:channelsuffixcancel"}},
 		}
-		return s.sendCollectManageMarkup(ctx, botId, chatId, fmt.Sprintf("频道：%s\n新后缀：%s\n\n确认保存吗？", html.EscapeString(name), html.EscapeString(suffix)), buttons)
+		return s.sendCollectManageMarkup(ctx, botId, chatId, fmt.Sprintf("确认修改频道后缀\n频道：%s%s\n新后缀：%s\n\n保存后将开启该频道采集，后续新采集资料使用此后缀。确认保存吗？", html.EscapeString(name), collectManageChannelLinkLine(payload.ChannelLink), html.EscapeString(suffix)), buttons)
 	case "cancel_queue":
 		_ = s.completeProfileSession(ctx, session.Id)
 		if strings.TrimSpace(text) == "全部" {

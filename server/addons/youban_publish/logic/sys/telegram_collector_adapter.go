@@ -15,6 +15,7 @@ import (
 
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
+	"github.com/gogf/gf/v2/container/gvar"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -1218,6 +1219,14 @@ func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, sourc
 	if relation.Id > 0 {
 		return botCollectChannelRelationEnabled(relation.CollectEnabled, relation.Status, relation.ApprovalStatus), nil
 	}
+	rules, ruleErr := pdao.YoubanPublishCollectRule.Ctx(ctx).As("r").
+		InnerJoin(pdao.YoubanPublishCollectSourceRule.Table()+" sr", "sr.rule_id=r.id AND sr.tenant_id=r.tenant_id AND sr.status=1").
+		Fields("r.id,r.name,r.intro_fee_suffix,r.bot_id").Where("sr.source_id", source["id"].Int64()).
+		Where("r.tenant_id", tenantID).Where("r.account_id", accountID).
+		Where("r.status", 1).Where("r.intro_fee_suffix_enabled", 1).All()
+	if ruleErr != nil {
+		return false, gerror.Wrap(ruleErr, "读取新频道默认后缀失败")
+	}
 	relationID, err := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Data(pdo.YoubanPublishCollectAccountChannel{
 		TenantId: tenantID, AccountId: accountID, ChannelId: channel.Id, SourceId: source["id"].Int64(),
 		CollectEnabled: 1, Status: sysin.CollectAccountChannelEnabled, ApprovalStatus: "approved", ApprovedAt: now,
@@ -1231,10 +1240,29 @@ func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, sourc
 		return false, gerror.Wrap(err, "创建BOT采集频道审批记录失败")
 	}
 	title := firstNonEmpty(strings.TrimSpace(channel.Title), chatID)
-	text := "发现新的 BOT 采集频道\n频道：" + html.EscapeString(title) + "\n频道 ID：" + html.EscapeString(chatID) + "\n当前状态：默认允许采集"
-	buttons := [][]botsysin.NotifyButton{{{Label: "允许采集", Data: fmt.Sprintf("cm:channelapprove:%d", relationID)}, {Label: "拒绝采集", Data: fmt.Sprintf("cm:channelreject:%d", relationID)}}}
-	if notifyErr := botService.SysBot().NotifySuperAdminsWithButtons(ctx, botID, "collect_source", text, buttons); notifyErr != nil {
-		g.Log().Warningf(ctx, "通知BOT采集频道审批失败 relationId:%d err:%+v", relationID, notifyErr)
+	linkLine := collectChannelLinkLine(s.collectChannelDisplayLink(ctx, tenantID, chatID))
+	if len(rules) == 0 {
+		text := "发现新的 BOT 采集频道\n频道：" + html.EscapeString(title) + "\n频道 ID：" + html.EscapeString(chatID) + linkLine + "\n采集状态：默认开启"
+		buttons := [][]botsysin.NotifyButton{{{Label: "允许采集", Data: fmt.Sprintf("cm:channelapprove:%d", relationID)}, {Label: "禁用", Data: fmt.Sprintf("cm:channelreject:%d", relationID)}}}
+		if notifyErr := botService.SysBot().NotifySuperAdminsWithButtons(ctx, botID, "collect_source", text, buttons); notifyErr != nil {
+			g.Log().Warningf(ctx, "通知BOT采集频道失败 relationId:%d err:%+v", relationID, notifyErr)
+		}
+	}
+	for _, rule := range rules {
+		suffix := strings.TrimSpace(rule["intro_fee_suffix"].String())
+		if configured, found, suffixErr := s.resolveIntroFeeChannelSuffix(ctx, gdb.Record{"tenant_id": source["tenant_id"], "account_id": source["account_id"], "bot_id": source["bot_id"], "source_chat_id": gvar.New(chatID)}, rule); suffixErr != nil {
+			return false, suffixErr
+		} else if found {
+			suffix = configured
+		}
+		if suffix == "" {
+			suffix = "未设置"
+		}
+		text := fmt.Sprintf("发现新的代理采集频道\n频道：%s\n频道 ID：%s%s\n采集规则：%s\n频道后缀：%s\n采集状态：默认开启\n后续新采集资料将使用上述后缀，可通过下方按钮禁用采集或修改后缀。", html.EscapeString(title), html.EscapeString(chatID), linkLine, html.EscapeString(rule["name"].String()), html.EscapeString(suffix))
+		buttons := [][]botsysin.NotifyButton{{{Label: "禁用", Data: fmt.Sprintf("cm:channelreject:%d", relationID)}, {Label: "修改后缀", Data: fmt.Sprintf("cm:channeledit:%d:%s:0", rule["id"].Int64(), chatID)}}}
+		if notifyErr := botService.SysBot().NotifySuperAdminsWithButtons(ctx, botID, "collect_source", text, buttons); notifyErr != nil {
+			g.Log().Warningf(ctx, "通知BOT代理采集频道失败 relationId:%d err:%+v", relationID, notifyErr)
+		}
 	}
 	return true, nil
 }
