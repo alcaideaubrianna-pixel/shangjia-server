@@ -2,12 +2,9 @@ package sys
 
 import (
 	"context"
-	"strconv"
 	"strings"
 
 	"hotgo/addons/youban_bot/consts"
-	"hotgo/addons/youban_bot/internal/dao"
-	"hotgo/addons/youban_bot/internal/model/do"
 	"hotgo/addons/youban_bot/model/input/sysin"
 	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
 
@@ -73,22 +70,12 @@ func (f *relayGatewayFeature) HandleUpdate(ctx context.Context, bc gatewayservic
 			return false, nil
 		}
 		if binding.Owner == relayTwoWayBotOwner {
-			// The dedicated two-way provider owns the original chat/topic flow.
-			// This extension may consume only its explicit management commands;
-			// ordinary messages must continue to the original provider.
-			if update != nil && update.Message != nil && isOriginalTwoWayMenuInput(update.Message.Text) {
-				return false, nil
-			}
-			if update != nil && update.Message != nil && !relayGatewayCommand(update.Message.Text) {
-				bound, boundErr := f.bot.relayGatewayEndpointBound(ctx, binding.ReferenceID, update.Message)
-				if boundErr != nil || !bound {
-					return false, boundErr
-				}
-			}
 			cfg, err := f.bot.relaySourceIdentity(ctx, binding.ReferenceID)
 			if err != nil || cfg == nil || cfg.Enabled != 1 {
 				return false, err
 			}
+			// Enabling the Bot switches its entire update path to relay mode.
+			// When disabled, the original two-way provider remains untouched.
 			handled, err := f.bot.handleRelaySourceUpdate(ctx, binding.ReferenceID, update)
 			if handled && err != nil && update != nil && update.Message != nil {
 				return true, f.bot.relayInteractionError(ctx, binding.ReferenceID, update.Message, err)
@@ -97,41 +84,6 @@ func (f *relayGatewayFeature) HandleUpdate(ctx context.Context, bc gatewayservic
 		}
 	}
 	return false, nil
-}
-
-func isOriginalTwoWayMenuInput(text string) bool {
-	return strings.TrimSpace(text) == "双向聊天"
-}
-
-// relayGatewayEndpointBound keeps the original two-way provider in control of
-// unbound chats while allowing configured relay endpoints to use the extension.
-// Username endpoints are accepted for /start activation; subsequent messages
-// use the resolved Telegram chat ID. Group endpoints use the chat ID directly.
-func (s *sSysBot) relayGatewayEndpointBound(ctx context.Context, botID int64, msg *models.Message) (bool, error) {
-	if msg == nil || msg.Chat.ID == 0 {
-		return false, nil
-	}
-	c := dao.YoubanBotRelayEndpoint.Columns()
-	chatID := strconv.FormatInt(msg.Chat.ID, 10)
-	var endpoint struct{ Id int64 }
-	if err := dao.YoubanBotRelayEndpoint.Ctx(ctx).
-		Where(c.BotId, botID).
-		Where(c.ChatId, chatID).
-		Scan(&endpoint); err != nil {
-		return false, err
-	}
-	if endpoint.Id > 0 {
-		return true, nil
-	}
-	if msg.From == nil || msg.From.Username == "" || msg.Chat.Type != models.ChatTypePrivate {
-		return false, nil
-	}
-	if err := dao.YoubanBotRelayEndpoint.Ctx(ctx).
-		Where(do.YoubanBotRelayEndpoint{BotId: botID, ChatId: "@" + strings.ToLower(msg.From.Username)}).
-		Scan(&endpoint); err != nil {
-		return false, err
-	}
-	return endpoint.Id > 0, nil
 }
 
 func relayGatewayCommand(text string) bool {

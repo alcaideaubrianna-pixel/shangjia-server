@@ -102,7 +102,7 @@ func (s *sSysBot) handleRelayUpdateWithIdentity(ctx context.Context, botID int64
 		return true, s.relayWelcome(ctx, cfg, msg)
 	}
 	if s.relayMainMenuInput(ctx, msg.Text) {
-		if binding != nil && strings.TrimSpace(msg.Text) == "双向聊天" {
+		if cfg.Enabled == 1 && strings.TrimSpace(msg.Text) == "双向聊天" {
 			return true, s.relayReply(ctx, botID, msg, "已进入双向聊天，请直接发送消息。")
 		}
 		return true, s.relayReply(ctx, botID, msg, "这里是双向聊天机器人。管理请到主机器人发送 /relayadmin；聊天帮助请联系管理员。")
