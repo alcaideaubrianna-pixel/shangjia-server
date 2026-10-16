@@ -4,6 +4,8 @@
 
 依赖 Python 3、psycopg2、requests。数据库服务器已有依赖，使用 postgres 本地 peer 认证，无需导出密码。默认 dry-run，必须显式传 `--apply` 才写库。
 
+生产代码部署目标为阿里云 SAE；数据库和回填任务继续位于腾讯云，仅通过 SSH server2 管理。下载使用 256 KiB 分块流式 MD5，媒体缓存占用为 0，不保存图片或视频。systemd 限制内存 512 MiB、禁用 swap，单个审计文件限制 256 MiB，低于 1 GiB 缓存要求。
+
 线上目录：`/var/lib/postgresql/media-md5-backfill-20261016`。
 
 ```sh
@@ -19,10 +21,12 @@ sudo -u postgres python3 /var/lib/postgresql/media-md5-backfill-20261016/backfil
 
 下载有连接/读取/总时限、单文件大小上限，检查 HTTP 状态、内容类型和已知文件大小。大小不符、地址失效、无 HTTP 原文件的记录写入本地 SQLite 重试清单。日志只含 ID、摘要和错误类型。`SIGTERM`/`SIGINT` 可停止，重跑可续传。
 
+任务先处理 `id>4000000` 的较新媒体，断点保存于 `recent.sqlite`，完成后自动从 `full.sqlite` 继续旧区段。旧文件 404 只记失败清单，绝不写入错误内容的摘要。服务开机自启，意外退出自动恢复。
+
 检查进度：
 
 ```sh
-sudo -u postgres python3 -c "import sqlite3; c=sqlite3.connect('/var/lib/postgresql/media-md5-backfill-20261016/full.sqlite'); print(c.execute('select status,count(*) from audit group by status').fetchall()); print(c.execute('select * from checkpoint').fetchall())"
+sudo -u postgres python3 -c "import sqlite3; c=sqlite3.connect('/var/lib/postgresql/media-md5-backfill-20261016/recent.sqlite'); print(c.execute('select status,count(*) from audit group by status').fetchall()); print(c.execute('select * from checkpoint').fetchall())"
 ```
 
 修复范围：媒体原文件 MD5 + 媒体向量指纹表。历史采集事件指纹、资料聚合去重签名和缺失 pHash 不在此脚本内，不使用 URL 跨租户批量关联。现有扫图结果缓存最多等待原 TTL 生效；本脚本不会清空 Redis。新增采集提交仍通过现有链路同步事件和资料指纹。
