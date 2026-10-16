@@ -66,5 +66,8 @@ func (s *sSysBot) relayInteractionError(ctx context.Context, botID int64, msg *m
 	if err := s.relayReply(ctx, botID, msg, "操作暂未完成，请稍后重试；持续失败请联系管理员检查配置。已发送的聊天消息请勿反复重发。"); err != nil {
 		return err
 	}
-	return cause
+	// The fallback reply acknowledges the update. Returning the original cause
+	// would make the gateway retry the same Telegram update and send this reply
+	// repeatedly.
+	return nil
 }

@@ -8,7 +8,7 @@ import (
 	"hotgo/addons/youban_bot/internal/model/entity"
 	botsysin "hotgo/addons/youban_bot/model/input/sysin"
 	publishsysin "hotgo/addons/youban_publish/model/input/sysin"
-	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
+	publishservice "hotgo/addons/youban_publish/service"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -24,18 +24,7 @@ func (s *sSysBot) relayOwnedBackendBots(ctx context.Context, tenantID, accountID
 	if s.relayOwnedBots != nil {
 		return s.relayOwnedBots(ctx, tenantID, accountID, botID, lock)
 	}
-	bots, err := gatewayservice.ProviderOwnedBots(ctx, relayTwoWayBotOwner, tenantID, accountID, botID, lock)
-	if err != nil {
-		return nil, err
-	}
-	items := make([]*publishsysin.RelayOwnedBotModel, 0, len(bots))
-	for _, bot := range bots {
-		items = append(items, &publishsysin.RelayOwnedBotModel{
-			BotModel:  publishsysin.BotModel{Id: bot.ReferenceID, TenantId: bot.TenantID, BotName: bot.Name, BotUsername: bot.Username, BotToken: bot.Token, BotType: "two_way", Status: bot.Status},
-			AccountId: bot.AccountID, CreatedBy: bot.AccountID,
-		})
-	}
-	return items, nil
+	return publishservice.SysPublish().RelayOwnedBots(ctx, tenantID, accountID, botID, lock)
 }
 
 func (s *sSysBot) relaySourceBot(ctx context.Context, cfg *entity.YoubanBotRelayConfig) (*publishsysin.RelayOwnedBotModel, error) {
