@@ -3,8 +3,6 @@ package sys
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -67,7 +65,7 @@ func (s *sGateway) MediaClient(ctx context.Context, token string) (*tgbot.Bot, e
 	return s.mediaClient(ctx, token, false)
 }
 
-// SendClient keeps legacy routing until a Bot is explicitly selected for migration.
+// SendClient always uses the official API; local Bot Server is download-only.
 func (s *sGateway) SendClient(ctx context.Context, token string) (*tgbot.Bot, error) {
 	return s.mediaClient(ctx, token, true)
 }
@@ -118,12 +116,11 @@ func (s *sGateway) mediaClient(ctx context.Context, token string, sending bool) 
 	}
 	serverURL := conf.MediaServerURL
 	operation := "download"
-	usesRuntimeEndpoint := sending && telegramRuntimeSendSelected(loaded[key], os.Getenv("YOUBAN_TELEGRAM_RUNTIME_SEND_BOTS"))
 	if sending {
 		operation = "send"
-		if usesRuntimeEndpoint {
-			serverURL = conf.RuntimeServerURL
-		}
+		// An empty endpoint selects the SDK's official Telegram API URL.
+		// Neither the download nor runtime endpoint may redirect media sends.
+		serverURL = ""
 	}
 	client, err = clientFactory(token, conf.ProxyURL, serverURL, nil)
 	if err != nil {
@@ -137,23 +134,8 @@ func (s *sGateway) mediaClient(ctx context.Context, token string, sending bool) 
 	}
 	s.mu.Unlock()
 	// Never log the token or endpoint URL (which can contain credentials).
-	g.Log().Info(ctx, "TG媒体客户端已创建", g.Map{"botKey": key, "operation": operation, "usesRuntimeEndpoint": usesRuntimeEndpoint, "timeoutSeconds": int(timeout.Seconds())})
+	g.Log().Info(ctx, "TG媒体客户端已创建", g.Map{"botKey": key, "operation": operation, "usesOfficialSendEndpoint": sending, "timeoutSeconds": int(timeout.Seconds())})
 	return client, nil
-}
-
-func telegramRuntimeSendSelected(bindings []service.BotBinding, selection string) bool {
-	for _, candidate := range strings.Split(selection, ",") {
-		candidate = strings.TrimSpace(candidate)
-		if candidate == "*" {
-			return true
-		}
-		for _, binding := range bindings {
-			if binding.ReferenceID > 0 && candidate == fmt.Sprintf("%s:%d", binding.Owner, binding.ReferenceID) {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func (s *sGateway) StartRuntime(ctx context.Context) {

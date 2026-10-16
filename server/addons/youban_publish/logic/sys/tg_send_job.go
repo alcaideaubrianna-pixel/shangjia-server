@@ -561,7 +561,15 @@ func isTelegramBotMediaProcessingError(err error) bool {
 }
 
 func shouldFallbackTelegramMediaToAccount(err error) bool {
-	return isTelegramAPITimeout(err) || isTelegramMediaSizeLimitError(err) ||
+	// Timeout hands ownership to the account queue. Its existing Attempt must
+	// be reconciled before the account sends; never start a parallel sender.
+	if isTelegramAPITimeout(err) {
+		return true
+	}
+	if isTelegramAmbiguousDeliveryError(err) {
+		return false
+	}
+	return isTelegramMediaSizeLimitError(err) ||
 		isTelegramMediaSourceUnavailableError(err) ||
 		isTelegramBotMediaProcessingError(err)
 }

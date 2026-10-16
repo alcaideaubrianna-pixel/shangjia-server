@@ -100,6 +100,9 @@ func TestTelegramMediaLargeVideoRetainsFileIDPriority(t *testing.T) {
 func TestTelegramMediaTimeoutNeverTriggersUploadFallback(t *testing.T) {
 	media := &telegramMediaItem{MediaType: "video", FileUrl: "https://cdn.example/video.mp4", Size: 1}
 	for _, err := range []error{context.DeadlineExceeded, context.Canceled, errors.New("unexpected EOF")} {
+		if !errors.Is(err, context.DeadlineExceeded) && shouldFallbackTelegramMediaToAccount(err) {
+			t.Fatalf("uncertain send must not hand off to account: %v", err)
+		}
 		if telegramMediaCanFallbackToUpload(media, err) || telegramMediaSetCanFallbackToUpload([]*telegramMediaItem{media}, err) {
 			t.Fatalf("unknown delivery would be sent twice: %v", err)
 		}

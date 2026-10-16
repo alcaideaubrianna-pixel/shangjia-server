@@ -75,6 +75,14 @@ func TestMediaRoutingSeparatesSendingAndDownloading(t *testing.T) {
 	}))
 	defer downloadServer.Close()
 	gateway := mediaRoutingTestGateway(&service.RuntimeConfig{RuntimeServerURL: sendServer.URL, MediaServerURL: downloadServer.URL})
+	gateway.newMediaClientForToken = func(token, proxyURL, endpoint string, handler tgbot.HandlerFunc) (*tgbot.Bot, error) {
+		if endpoint == "" {
+			endpoint = sendServer.URL // Stand in for the official API without external requests.
+		} else if endpoint != downloadServer.URL {
+			t.Fatalf("unexpected endpoint: %s", endpoint)
+		}
+		return newBotWithTimeout(token, proxyURL, endpoint, handler, telegramMediaSendRequestTimeout)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	sender, err := gateway.SendClient(ctx, token)
@@ -135,24 +143,12 @@ func TestMediaRoutingDefaultSenderUsesOfficialEndpoint(t *testing.T) {
 	}
 }
 
-func TestMediaRoutingMigrationRequiresExplicitSelection(t *testing.T) {
-	bindings := []service.BotBinding{{Owner: "youban_publish", ReferenceID: 43}}
-	for _, test := range []struct {
-		selection string
-		want      bool
-	}{
-		{"", false}, {"43", false}, {"other:43", false}, {"youban_publish:44", false},
-		{"youban_publish:43", true}, {"other:1, youban_publish:43", true}, {"*", true},
-	} {
-		if got := telegramRuntimeSendSelected(bindings, test.selection); got != test.want {
-			t.Fatalf("selection=%q got=%t", test.selection, got)
-		}
-	}
+func TestMediaRoutingSenderIgnoresLocalRuntimeEndpoint(t *testing.T) {
 	t.Setenv("YOUBAN_TELEGRAM_RUNTIME_SEND_BOTS", "")
 	gateway := mediaRoutingTestGateway(&service.RuntimeConfig{RuntimeServerURL: "http://new-runtime", MediaServerURL: "http://existing-media"})
 	gateway.newMediaClientForToken = func(_, _, endpoint string, _ tgbot.HandlerFunc) (*tgbot.Bot, error) {
-		if endpoint != "http://existing-media" {
-			t.Fatalf("deployment silently migrated Bot: %s", endpoint)
+		if endpoint != "" {
+			t.Fatalf("media sender must use official API: %s", endpoint)
 		}
 		return new(tgbot.Bot), nil
 	}
