@@ -76,7 +76,7 @@ func TestRelayTenantAccountIsolation(t *testing.T) {
 }
 
 func TestRelayMutationAcceptsSourceBotID(t *testing.T) {
-	ctx, _, _ := relayInteractionFixture(t)
+	ctx, s, _ := relayInteractionFixture(t)
 	columns := dao.YoubanBotRelayConfig.Columns()
 	if _, err := dao.YoubanBotRelayConfig.Ctx(ctx).
 		Where(columns.BotId, 1).
@@ -85,9 +85,31 @@ func TestRelayMutationAcceptsSourceBotID(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	config, err := relayConfig(ctx, 20)
+	config, err := relayConfigByIdentity(ctx, 20)
 	if err != nil || config == nil || config.BotId != 1 || config.SourceBotId != 20 {
 		t.Fatalf("source Bot ID did not resolve legacy config: %+v %v", config, err)
+	}
+	if mainConfig, err := s.relayIdentity(ctx, 20); err != nil || mainConfig != nil {
+		t.Fatalf("source Bot ID leaked into main Bot identity: %+v %v", mainConfig, err)
+	}
+	requestedBotID := int64(0)
+	s.relayOwnedBots = func(_ context.Context, tenantID, accountID, botID int64, lock bool) ([]*publishsysin.RelayOwnedBotModel, error) {
+		requestedBotID = botID
+		return []*publishsysin.RelayOwnedBotModel{{BotModel: publishsysin.BotModel{BotType: "two_way", Id: 20, TenantId: tenantID, Status: 1}, AccountId: accountID, CreatedBy: accountID}}, nil
+	}
+	if _, err = s.relaySourceBot(ctx, config); err != nil || requestedBotID != 20 {
+		t.Fatalf("source lookup used config ID instead of source Bot ID: requested=%d err=%v", requestedBotID, err)
+	}
+	ensured, err := s.relayEnsureConfig(ctx, &botProfileAccount{TenantId: 1, AccountId: 99}, 20)
+	if err != nil || ensured.BotId != 1 || ensured.SourceBotId != 20 {
+		t.Fatalf("ensure migrated config identity online: %+v %v", ensured, err)
+	}
+	if _, err = dao.YoubanBotRelayBinding.Ctx(ctx).Data(do.YoubanBotRelayBinding{BotId: 1, PairKey: "12:13", LeftChatId: "12", RightChatId: "13", LeftName: "A", RightName: "B"}).Insert(); err != nil {
+		t.Fatal(err)
+	}
+	list, total, err := s.AdminRelayBindingList(relayActorContext(ctx, 12), &sysin.RelayListInp{BotId: 20})
+	if err != nil || total != 1 {
+		t.Fatalf("source Bot ID did not resolve config child rows: total=%d rows=%d err=%v", total, len(list), err)
 	}
 	if os.Getenv("YOUBAN_RELAY_TEST_PG") == "" {
 		return

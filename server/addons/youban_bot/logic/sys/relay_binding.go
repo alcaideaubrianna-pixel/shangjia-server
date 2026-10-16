@@ -14,9 +14,11 @@ import (
 )
 
 func (s *sSysBot) AdminRelayBindingList(ctx context.Context, in *sysin.RelayListInp) ([]*entity.YoubanBotRelayBinding, int, error) {
-	if err := s.relayCheckAccess(ctx, in.BotId); err != nil {
+	botID, err := s.relayCanonicalBotID(ctx, in.BotId)
+	if err != nil {
 		return nil, 0, err
 	}
+	in.BotId = botID
 	if err := in.Filter(); err != nil {
 		return nil, 0, err
 	}
@@ -27,7 +29,7 @@ func (s *sSysBot) AdminRelayBindingList(ctx context.Context, in *sysin.RelayList
 	if in.Keyword != "" {
 		mod = mod.Where("("+c.LeftName+" LIKE ? OR "+c.RightName+" LIKE ?)", "%"+in.Keyword+"%", "%"+in.Keyword+"%")
 	}
-	err := mod.Page(in.Page, in.PerPage).OrderDesc(c.Id).ScanAndCount(&list, &total, false)
+	err = mod.Page(in.Page, in.PerPage).OrderDesc(c.Id).ScanAndCount(&list, &total, false)
 	return list, total, gerror.Wrap(err, "读取双向绑定失败")
 }
 

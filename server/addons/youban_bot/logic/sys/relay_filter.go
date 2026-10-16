@@ -59,9 +59,11 @@ func relayFilterReason(cfg *entity.YoubanBotRelayConfig, rules []*entity.YoubanB
 }
 
 func (s *sSysBot) AdminRelayRuleList(ctx context.Context, in *sysin.RelayListInp) ([]*entity.YoubanBotRelayRule, int, error) {
-	if err := s.relayCheckAccess(ctx, in.BotId); err != nil {
+	botID, err := s.relayCanonicalBotID(ctx, in.BotId)
+	if err != nil {
 		return nil, 0, err
 	}
+	in.BotId = botID
 	if err := in.Filter(); err != nil {
 		return nil, 0, err
 	}
@@ -75,7 +77,7 @@ func (s *sSysBot) AdminRelayRuleList(ctx context.Context, in *sysin.RelayListInp
 	if in.Keyword != "" {
 		mod = mod.WhereLike(c.Label, "%"+in.Keyword+"%")
 	}
-	err := mod.Page(in.Page, in.PerPage).OrderDesc(c.Id).ScanAndCount(&list, &total, false)
+	err = mod.Page(in.Page, in.PerPage).OrderDesc(c.Id).ScanAndCount(&list, &total, false)
 	return list, total, gerror.Wrap(err, "读取屏蔽规则失败")
 }
 

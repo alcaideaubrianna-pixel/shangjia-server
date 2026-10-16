@@ -32,6 +32,24 @@ func (s *sSysBot) relayIdentity(ctx context.Context, botID int64) (*entity.Youba
 	}
 	return cfg, nil
 }
+
+func (s *sSysBot) relaySourceIdentity(ctx context.Context, botID int64) (*entity.YoubanBotRelayConfig, error) {
+	cfg, err := relayConfigByIdentity(ctx, botID)
+	if err != nil || cfg == nil {
+		return cfg, err
+	}
+	if !relayOwned(cfg) {
+		return cfg, nil
+	}
+	bot, err := s.relaySourceBot(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if bot == nil {
+		return nil, nil
+	}
+	return cfg, nil
+}
 func (s *sSysBot) relayRuntimeState(ctx context.Context, cfg *entity.YoubanBotRelayConfig) (bool, string, error) {
 	if !relayOwned(cfg) {
 		return false, "旧配置未归属租户账户，已隔离停用", nil

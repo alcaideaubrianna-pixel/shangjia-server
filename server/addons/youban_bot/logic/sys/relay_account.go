@@ -41,7 +41,7 @@ func (s *sSysBot) relayAccount(ctx context.Context) (*botProfileAccount, error) 
 	return &botProfileAccount{TenantId: capability.TenantId, AccountId: capability.AccountId, App: sysin.BotAppApi}, nil
 }
 func (s *sSysBot) relayCheckAccess(ctx context.Context, botID int64) error {
-	cfg, err := relayConfig(ctx, botID)
+	cfg, err := relayConfigByIdentity(ctx, botID)
 	if err != nil {
 		return err
 	}
@@ -75,6 +75,20 @@ func (s *sSysBot) relayCheckAccess(ctx context.Context, botID int64) error {
 		return gerror.New("无权管理其他租户账户的双向机器人")
 	}
 	return nil
+}
+
+func (s *sSysBot) relayCanonicalBotID(ctx context.Context, botID int64) (int64, error) {
+	if err := s.relayCheckAccess(ctx, botID); err != nil {
+		return 0, err
+	}
+	cfg, err := relayConfigByIdentity(ctx, botID)
+	if err != nil {
+		return 0, err
+	}
+	if cfg == nil || cfg.BotId <= 0 {
+		return 0, gerror.New("双向机器人配置不存在")
+	}
+	return cfg.BotId, nil
 }
 func (s *sSysBot) relayOwnerTelegramIDs(ctx context.Context, cfg *entity.YoubanBotRelayConfig) ([]string, error) {
 	if !relayOwned(cfg) {

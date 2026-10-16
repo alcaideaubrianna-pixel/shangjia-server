@@ -33,7 +33,7 @@ func (f *relayGatewayFeature) Priority() int { return 1000 }
 func (f *relayGatewayFeature) Menus(ctx context.Context, bc gatewayservice.BotContext) (gatewayservice.FeatureMenus, error) {
 	for _, binding := range bc.Bindings {
 		if binding.Owner == relayTwoWayBotOwner {
-			cfg, err := f.bot.relayIdentity(ctx, binding.ReferenceID)
+			cfg, err := f.bot.relaySourceIdentity(ctx, binding.ReferenceID)
 			if err != nil || cfg == nil || cfg.Enabled != 1 {
 				return gatewayservice.FeatureMenus{}, err
 			}
@@ -66,11 +66,11 @@ func (f *relayGatewayFeature) HandleUpdate(ctx context.Context, bc gatewayservic
 			return false, nil
 		}
 		if binding.Owner == relayTwoWayBotOwner {
-			cfg, err := f.bot.relayIdentity(ctx, binding.ReferenceID)
+			cfg, err := f.bot.relaySourceIdentity(ctx, binding.ReferenceID)
 			if err != nil || cfg == nil || cfg.Enabled != 1 {
 				return false, err
 			}
-			handled, err := f.bot.handleRelayUpdate(ctx, binding.ReferenceID, update)
+			handled, err := f.bot.handleRelaySourceUpdate(ctx, binding.ReferenceID, update)
 			if handled && err != nil && update != nil && update.Message != nil {
 				return true, f.bot.relayInteractionError(ctx, binding.ReferenceID, update.Message, err)
 			}

@@ -20,7 +20,13 @@ func relayConfig(ctx context.Context, botID int64) (*entity.YoubanBotRelayConfig
 	var row *entity.YoubanBotRelayConfig
 	columns := dao.YoubanBotRelayConfig.Columns()
 	err := dao.YoubanBotRelayConfig.Ctx(ctx).Where(columns.BotId, botID).Scan(&row)
+	return row, gerror.Wrap(err, "读取双向机器人设置失败")
+}
+
+func relayConfigByIdentity(ctx context.Context, botID int64) (*entity.YoubanBotRelayConfig, error) {
+	row, err := relayConfig(ctx, botID)
 	if err == nil && row == nil {
+		columns := dao.YoubanBotRelayConfig.Columns()
 		err = dao.YoubanBotRelayConfig.Ctx(ctx).Where(columns.SourceBotId, botID).Scan(&row)
 	}
 	return row, gerror.Wrap(err, "读取双向机器人设置失败")
@@ -48,16 +54,18 @@ func (s *sSysBot) AdminRelayBotList(ctx context.Context, in *sysin.BotListInp) (
 }
 
 func (s *sSysBot) AdminRelaySettings(ctx context.Context, in *sysin.RelayBotInp) (*sysin.RelaySettingsModel, error) {
-	if err := s.relayCheckAccess(ctx, in.BotId); err != nil {
+	botID, err := s.relayCanonicalBotID(ctx, in.BotId)
+	if err != nil {
 		return nil, err
 	}
+	in.BotId = botID
 	if err := in.Filter(); err != nil {
 		return nil, err
 	}
 	if _, err := s.relayBotById(ctx, in.BotId); err != nil {
 		return nil, err
 	}
-	cfg, err := relayConfig(ctx, in.BotId)
+	cfg, err := relayConfig(ctx, botID)
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +73,7 @@ func (s *sSysBot) AdminRelaySettings(ctx context.Context, in *sysin.RelayBotInp)
 		cfg = &entity.YoubanBotRelayConfig{BotId: in.BotId, AuditDatabase: 1}
 	}
 	admins := make([]*entity.YoubanBotRelayAdmin, 0)
-	err = dao.YoubanBotRelayAdmin.Ctx(ctx).Where(dao.YoubanBotRelayAdmin.Columns().BotId, in.BotId).OrderAsc(dao.YoubanBotRelayAdmin.Columns().Id).Scan(&admins)
+	err = dao.YoubanBotRelayAdmin.Ctx(ctx).Where(dao.YoubanBotRelayAdmin.Columns().BotId, botID).OrderAsc(dao.YoubanBotRelayAdmin.Columns().Id).Scan(&admins)
 	return &sysin.RelaySettingsModel{YoubanBotRelayConfig: cfg, Admins: admins}, gerror.Wrap(err, "读取双向机器人管理员失败")
 }
 

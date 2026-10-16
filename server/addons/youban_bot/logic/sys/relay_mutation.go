@@ -36,38 +36,50 @@ func relayMutate(ctx context.Context, botID int64, fn func(context.Context) erro
 	})
 }
 func (s *sSysBot) AdminRelaySaveSettings(ctx context.Context, in *sysin.RelaySettingsInp) error {
-	if err := s.relayCheckAccess(ctx, in.BotId); err != nil {
+	botID, err := s.relayCanonicalBotID(ctx, in.BotId)
+	if err != nil {
 		return err
 	}
-	return relayMutate(ctx, in.BotId, func(ctx context.Context) error { return s.adminRelaySaveSettings(ctx, in) })
+	in.BotId = botID
+	return relayMutate(ctx, botID, func(ctx context.Context) error { return s.adminRelaySaveSettings(ctx, in) })
 }
 func (s *sSysBot) AdminRelayBind(ctx context.Context, in *sysin.RelayBindingInp) error {
-	if err := s.relayCheckAccess(ctx, in.BotId); err != nil {
+	botID, err := s.relayCanonicalBotID(ctx, in.BotId)
+	if err != nil {
 		return err
 	}
-	return relayMutate(ctx, in.BotId, func(ctx context.Context) error { return s.adminRelayBind(ctx, in) })
+	in.BotId = botID
+	return relayMutate(ctx, botID, func(ctx context.Context) error { return s.adminRelayBind(ctx, in) })
 }
 func (s *sSysBot) AdminRelayUnbind(ctx context.Context, in *sysin.RelayDeleteInp) error {
-	if err := s.relayCheckAccess(ctx, in.BotId); err != nil {
+	botID, err := s.relayCanonicalBotID(ctx, in.BotId)
+	if err != nil {
 		return err
 	}
-	return relayMutate(ctx, in.BotId, func(ctx context.Context) error { return s.adminRelayUnbind(ctx, in) })
+	in.BotId = botID
+	return relayMutate(ctx, botID, func(ctx context.Context) error { return s.adminRelayUnbind(ctx, in) })
 }
 func (s *sSysBot) AdminRelaySaveRule(ctx context.Context, in *sysin.RelayRuleInp) error {
-	if err := s.relayCheckAccess(ctx, in.BotId); err != nil {
+	botID, err := s.relayCanonicalBotID(ctx, in.BotId)
+	if err != nil {
 		return err
 	}
-	return relayMutate(ctx, in.BotId, func(ctx context.Context) error { return s.adminRelaySaveRule(ctx, in) })
+	in.BotId = botID
+	return relayMutate(ctx, botID, func(ctx context.Context) error { return s.adminRelaySaveRule(ctx, in) })
 }
 func (s *sSysBot) AdminRelayDeleteRule(ctx context.Context, in *sysin.RelayDeleteInp) error {
-	if err := s.relayCheckAccess(ctx, in.BotId); err != nil {
+	botID, err := s.relayCanonicalBotID(ctx, in.BotId)
+	if err != nil {
 		return err
 	}
-	return relayMutate(ctx, in.BotId, func(ctx context.Context) error { return s.adminRelayDeleteRule(ctx, in) })
+	in.BotId = botID
+	return relayMutate(ctx, botID, func(ctx context.Context) error { return s.adminRelayDeleteRule(ctx, in) })
 }
 func (s *sSysBot) AdminRelaySwitch(ctx context.Context, in *sysin.RelaySwitchInp) error {
-	if err := s.relayCheckAccess(ctx, in.BotId); err != nil {
+	botID, err := s.relayCanonicalBotID(ctx, in.BotId)
+	if err != nil {
 		return err
 	}
-	return relayMutate(ctx, in.BotId, func(ctx context.Context) error { return s.adminRelaySwitch(ctx, in) })
+	in.BotId = botID
+	return relayMutate(ctx, botID, func(ctx context.Context) error { return s.adminRelaySwitch(ctx, in) })
 }

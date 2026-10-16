@@ -28,6 +28,14 @@ func (s *sSysBot) relayPluginEnabled(ctx context.Context) (bool, error) {
 }
 
 func (s *sSysBot) handleRelayUpdate(ctx context.Context, botID int64, update *models.Update) (bool, error) {
+	return s.handleRelayUpdateWithIdentity(ctx, botID, update, false)
+}
+
+func (s *sSysBot) handleRelaySourceUpdate(ctx context.Context, botID int64, update *models.Update) (bool, error) {
+	return s.handleRelayUpdateWithIdentity(ctx, botID, update, true)
+}
+
+func (s *sSysBot) handleRelayUpdateWithIdentity(ctx context.Context, botID int64, update *models.Update, sourceIdentity bool) (bool, error) {
 	if update == nil || update.Message == nil {
 		return false, nil
 	}
@@ -38,7 +46,13 @@ func (s *sSysBot) handleRelayUpdate(ctx context.Context, botID int64, update *mo
 	if msg.Chat.Type != models.ChatTypePrivate && msg.Chat.Type != models.ChatTypeGroup && msg.Chat.Type != models.ChatTypeSupergroup {
 		return false, nil
 	}
-	cfg, err := s.relayIdentity(ctx, botID)
+	var cfg *entity.YoubanBotRelayConfig
+	var err error
+	if sourceIdentity {
+		cfg, err = s.relaySourceIdentity(ctx, botID)
+	} else {
+		cfg, err = s.relayIdentity(ctx, botID)
+	}
 	if err != nil {
 		g.Log().Warningf(ctx, "双向功能配置不可用，保留原Bot处理 botId:%d err:%+v", botID, err)
 		return false, nil
@@ -60,13 +74,14 @@ func (s *sSysBot) handleRelayUpdate(ctx context.Context, botID int64, update *mo
 	if source == cfg.AuditGroupId {
 		return true, nil
 	} // Audit traffic must never re-enter business routing.
-	if err = s.relayObserveChat(ctx, botID, msg); err != nil {
+	configBotID := cfg.BotId
+	if err = s.relayObserveChat(ctx, configBotID, msg); err != nil {
 		return true, err
 	}
-	if err = s.relayResolvePendingAdmins(ctx, botID, msg); err != nil {
+	if err = s.relayResolvePendingAdmins(ctx, configBotID, msg); err != nil {
 		return true, err
 	}
-	activatedBinding, err := s.relayResolvePendingBindings(ctx, botID, msg)
+	activatedBinding, err := s.relayResolvePendingBindings(ctx, configBotID, msg)
 	if err != nil {
 		return true, err
 	}
@@ -96,7 +111,7 @@ func (s *sSysBot) handleRelayUpdate(ctx context.Context, botID int64, update *mo
 		}
 		return true, s.relayReply(ctx, botID, msg, "当前双向聊天不可用："+state+"。请联系管理员。")
 	}
-	binding, err := relayBindingByChat(ctx, botID, source)
+	binding, err := relayBindingByChat(ctx, configBotID, source)
 	if err != nil {
 		return true, err
 	}
@@ -116,7 +131,7 @@ func (s *sSysBot) handleRelayUpdate(ctx context.Context, botID int64, update *mo
 		}
 	}
 	var rules []*entity.YoubanBotRelayRule
-	if err = dao.YoubanBotRelayRule.Ctx(ctx).Where(dao.YoubanBotRelayRule.Columns().BotId, botID).Scan(&rules); err != nil {
+	if err = dao.YoubanBotRelayRule.Ctx(ctx).Where(dao.YoubanBotRelayRule.Columns().BotId, configBotID).Scan(&rules); err != nil {
 		return true, gerror.Wrap(err, "读取消息屏蔽规则失败")
 	}
 	reason := ""
@@ -233,9 +248,11 @@ func relayTopicTitle(value string) string {
 }
 
 func (s *sSysBot) AdminRelayRecordList(ctx context.Context, in *sysin.RelayListInp) ([]*entity.YoubanBotRelayDelivery, int, error) {
-	if err := s.relayCheckAccess(ctx, in.BotId); err != nil {
+	botID, err := s.relayCanonicalBotID(ctx, in.BotId)
+	if err != nil {
 		return nil, 0, err
 	}
+	in.BotId = botID
 	if err := in.Filter(); err != nil {
 		return nil, 0, err
 	}
@@ -246,6 +263,6 @@ func (s *sSysBot) AdminRelayRecordList(ctx context.Context, in *sysin.RelayListI
 	if in.Kind != "" {
 		mod = mod.Where(c.Kind, in.Kind)
 	}
-	err := mod.OrderDesc(c.Id).Page(in.Page, in.PerPage).ScanAndCount(&list, &total, false)
+	err = mod.OrderDesc(c.Id).Page(in.Page, in.PerPage).ScanAndCount(&list, &total, false)
 	return list, total, gerror.Wrap(err, "读取聊天审计记录失败")
 }
