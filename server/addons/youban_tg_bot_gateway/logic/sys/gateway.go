@@ -69,7 +69,9 @@ func (s *sGateway) MediaClient(ctx context.Context, token string) (*tgbot.Bot, e
 	if client != nil {
 		return client, nil
 	}
-	loadBindings := s.loadBindings
+	loadBindings := func(ctx context.Context) (map[string][]service.BotBinding, error) {
+		return loadClientBindings(ctx, key, service.Providers())
+	}
 	if s.loadBindingsForClient != nil {
 		loadBindings = s.loadBindingsForClient
 	}
@@ -189,7 +191,9 @@ func (s *sGateway) Client(ctx context.Context, token string) (*tgbot.Bot, error)
 	if client != nil {
 		return client, nil
 	}
-	loadBindings := s.loadBindings
+	loadBindings := func(ctx context.Context) (map[string][]service.BotBinding, error) {
+		return loadClientBindings(ctx, key, service.Providers())
+	}
 	if s.loadBindingsForClient != nil {
 		loadBindings = s.loadBindingsForClient
 	}
@@ -328,6 +332,31 @@ func (s *sGateway) auditLocalWebhooks(ctx context.Context, proxyURL, serverURL s
 	if configured > 0 || failures > 0 {
 		g.Log().Warningf(ctx, "本地TG Bot API Webhook审计异常 configured:%d failed:%d bots:%d", configured, failures, len(tokens))
 	}
+}
+
+// Client lookup must not depend on unrelated providers being healthy.
+func loadClientBindings(ctx context.Context, key string, providers []service.Provider) (map[string][]service.BotBinding, error) {
+	var providerErr error
+	for _, provider := range providers {
+		items, err := provider.ListEnabledBots(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			providerErr = gerror.Wrapf(err, "读取Bot提供方失败 provider:%s", provider.Name())
+			continue
+		}
+		for _, item := range items {
+			item.Token = strings.TrimSpace(item.Token)
+			if item.Token != "" && tokenKey(item.Token) == key {
+				return map[string][]service.BotBinding{key: {item}}, nil
+			}
+		}
+	}
+	if providerErr != nil {
+		return nil, providerErr
+	}
+	return nil, gerror.New("TG Bot Gateway未找到已启用的Bot")
 }
 
 func (s *sGateway) loadBindings(ctx context.Context) (map[string][]service.BotBinding, error) {

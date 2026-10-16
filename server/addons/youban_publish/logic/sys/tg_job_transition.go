@@ -203,5 +203,13 @@ func telegramJobTransitionUpdate(in telegramJobTransition) ([]string, g.Map, err
 		}
 		data[field] = value
 	}
+	// This summary is varchar(512), unlike the full error_message text field.
+	// An oversized driver error must never prevent a sending job from settling.
+	if message, ok := data["last_dispatch_error"].(string); ok {
+		characters := []rune(message)
+		if len(characters) > 512 {
+			data["last_dispatch_error"] = string(characters[:509]) + "..."
+		}
+	}
 	return from, data, nil
 }

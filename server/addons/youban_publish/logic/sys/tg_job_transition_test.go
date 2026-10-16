@@ -1,11 +1,29 @@
 package sys
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
 )
+
+func TestTelegramJobTransitionLongDispatchError(t *testing.T) {
+	message := strings.Repeat("数据库错误", 200)
+	_, data, err := telegramJobTransitionUpdate(telegramJobTransition{
+		From: []string{telegramJobStatusSending}, To: telegramJobStatusRetryWait,
+		ErrorMessage: message, Additional: g.Map{"last_dispatch_error": message},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := data["last_dispatch_error"].(string); len([]rune(got)) > 512 {
+		t.Fatalf("dispatch error exceeds varchar(512): %d", len([]rune(got)))
+	}
+	if data["error_message"] != message {
+		t.Fatal("full error must remain available in text field")
+	}
+}
 
 func TestValidateTelegramJobTransition(t *testing.T) {
 	tests := []struct {

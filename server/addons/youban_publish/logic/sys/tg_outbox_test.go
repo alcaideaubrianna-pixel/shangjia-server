@@ -143,6 +143,29 @@ func TestTelegramOutboxDispatchDecisionRequiresDueIdleHead(t *testing.T) {
 	}
 }
 
+func TestTelegramOutboxDispatchDecisionPostgresWallClock(t *testing.T) {
+	location := time.FixedZone("CST", 8*60*60)
+	now := gtime.NewFromTime(time.Date(2026, 10, 16, 15, 20, 0, 0, location))
+	for _, test := range []struct {
+		name string
+		hour int
+		want string
+	}{
+		{"overdue_database_timestamp", 14, telegramOutboxDecisionDispatch},
+		{"future_database_timestamp", 16, telegramOutboxDecisionWait},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			// PostgreSQL timestamp without time zone carries UTC from lib/pq,
+			// but its stored calendar fields represent application local time.
+			retryAt := gtime.NewFromTime(time.Date(2026, 10, 16, test.hour, 54, 54, 409178000, time.UTC))
+			got := telegramOutboxDispatchDecision("pending", "idle", retryAt, now, false)
+			if got != test.want {
+				t.Fatalf("decision=%s want=%s retry=%s now=%s", got, test.want, retryAt, now)
+			}
+		})
+	}
+}
+
 func TestTelegramDueOutboxChannelHeadAndLeaseIntegration(t *testing.T) {
 	if os.Getenv("YOUBAN_PUBLISH_INTEGRATION") != "1" {
 		t.Skip("set YOUBAN_PUBLISH_INTEGRATION=1 to run local PostgreSQL integration test")

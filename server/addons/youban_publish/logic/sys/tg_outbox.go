@@ -137,8 +137,13 @@ func telegramJobOutboxRecordFromRecord(record gdb.Record) telegramJobOutboxRecor
 	}
 }
 
-func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegramJobOutboxRecord) error {
+func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegramJobOutboxRecord) (resultErr error) {
+	ctx = telegramPublishTraceContext(ctx, row.JobId, g.Map{"outboxId": row.Id, "outboxAttemptCount": row.AttemptCount})
+	stage := beginTelegramPublishStage(ctx, "outbox.dispatch")
+	defer stage.Finish(&resultErr)
+	step := beginTelegramPublishStage(ctx, "outbox.decision")
 	decision, err := s.telegramOutboxJobDispatchDecision(ctx, row.JobId, gtime.Now())
+	step.End(err, g.Map{"decision": decision})
 	if err != nil {
 		return err
 	}
@@ -152,6 +157,7 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 	}
 	owner := telegramOutboxOwner()
 	now := gtime.Now()
+	step = beginTelegramPublishStage(ctx, "outbox.lease.acquire")
 	result, err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
 		Where("id", row.Id).
 		Where("status = ? OR (status = ? AND lease_expires_at <= ?)", telegramOutboxPending, telegramOutboxProcessing, now).
@@ -159,10 +165,12 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 			"status": telegramOutboxProcessing, "lease_owner": owner,
 			"lease_expires_at": now.Add(telegramOutboxLeaseTTL), "updated_at": now,
 		}).Update()
+	step.End(err)
 	if err != nil {
 		return gerror.Wrap(err, "领取TG任务Outbox失败")
 	}
 	affected, _ := result.RowsAffected()
+	beginTelegramPublishStage(ctx, "outbox.lease.result").End(nil, g.Map{"affectedRows": affected, "acquired": affected > 0})
 	if affected == 0 {
 		return nil
 	}
@@ -185,6 +193,7 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 		return s.releaseTelegramOutbox(ctx, row.Id, owner, row.AttemptCount, err.Error())
 	}
 	if telegramOutboxJobStillNeedsDispatch(job.Status, job.DispatchStatus) {
+		beginTelegramPublishStage(ctx, "outbox.deferred").End(nil, g.Map{"reason": "still_needs_dispatch", "jobStatus": job.Status, "dispatchStatus": job.DispatchStatus})
 		return s.releaseTelegramOutbox(ctx, row.Id, owner, row.AttemptCount, "频道发送槽繁忙，等待再次调度")
 	}
 	_, err = g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
@@ -238,6 +247,10 @@ func (s *sSysPublish) telegramOutboxJobDispatchDecision(ctx context.Context, job
 	if err != nil {
 		return "", err
 	}
+	beginTelegramPublishStage(ctx, "outbox.decision.inputs").End(nil, g.Map{
+		"hasEarlier": hasEarlier, "nextRetryAt": job.NextRetryAt, "now": now,
+		"createdAt": job.CreatedAt, "jobStatus": job.Status, "dispatchStatus": job.DispatchStatus,
+	})
 	return telegramOutboxDispatchDecision(job.Status, job.DispatchStatus, job.NextRetryAt, now, hasEarlier), nil
 }
 
@@ -245,7 +258,16 @@ func telegramOutboxDispatchDecision(status, dispatchStatus string, nextRetryAt, 
 	if !telegramOutboxJobStillNeedsDispatch(status, dispatchStatus) {
 		return telegramOutboxDecisionComplete
 	}
-	if hasEarlier || (nextRetryAt != nil && now != nil && nextRetryAt.After(now)) {
+	// PostgreSQL timestamp without time zone preserves calendar fields but
+	// lib/pq attaches UTC. Compare those fields in the application's clock,
+	// otherwise an expired local retry is treated as eight hours in the future.
+	retryInFuture := false
+	if nextRetryAt != nil && now != nil {
+		value := nextRetryAt.Time
+		retryTime := time.Date(value.Year(), value.Month(), value.Day(), value.Hour(), value.Minute(), value.Second(), value.Nanosecond(), now.Time.Location())
+		retryInFuture = retryTime.After(now.Time)
+	}
+	if hasEarlier || retryInFuture {
 		return telegramOutboxDecisionWait
 	}
 	return telegramOutboxDecisionDispatch
