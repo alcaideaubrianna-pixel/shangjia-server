@@ -30,6 +30,9 @@ func TestTelegramPendingRecoverySelectsChannelHeadsBeforeLimit(t *testing.T) {
 
 func TestTelegramPendingRecoveryPostgresSelectsHeadsBeforeDueFilters(t *testing.T) {
 	query := telegramPendingRecoveryPostgresSQL()
+	if strings.Count(query, "(") != strings.Count(query, ")") {
+		t.Fatalf("PostgreSQL recovery query has unbalanced parentheses: %s", query)
+	}
 	for _, fragment := range []string{
 		"WITH channel_heads AS", "DISTINCT ON", "j.status IN ('pending','failed_retry','confirming','sending')",
 		"j.status='failed' AND j.send_phase='display_confirmed'",

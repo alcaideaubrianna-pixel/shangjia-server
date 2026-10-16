@@ -716,7 +716,11 @@ func (s *sSysPublish) recoverPendingIdleTelegramJobs(ctx context.Context, limit 
 		if job.Id <= 0 {
 			continue
 		}
-		if err = s.enqueueTelegramJob(ctx, job.Id, 0); err != nil {
+		if err = s.rearmTelegramJobOutbox(ctx, job.Id, 0); err != nil {
+			g.Log().Warningf(ctx, "重新激活待入队TG任务Outbox失败 job:%d err:%+v", job.Id, err)
+			continue
+		}
+		if err = s.dispatchTelegramJobOutboxByJob(ctx, job.Id); err != nil {
 			g.Log().Warningf(ctx, "恢复待入队TG推送任务失败 job:%d err:%+v", job.Id, err)
 		}
 	}

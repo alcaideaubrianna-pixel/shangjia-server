@@ -60,6 +60,41 @@ func (s *sSysPublish) ensureTelegramJobOutboxTx(ctx context.Context, tx gdb.TX, 
 	return nil
 }
 
+// rearmTelegramJobOutbox restores the durable queue intent after a worker
+// returns a previously delivered job to idle. A delivered Outbox row only
+// proves transport handoff; it is not terminal while the Job still needs work.
+func (s *sSysPublish) rearmTelegramJobOutbox(ctx context.Context, jobId int64, delay time.Duration) error {
+	if jobId <= 0 {
+		return nil
+	}
+	now := gtime.Now()
+	result, err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
+		Where("job_id", jobId).Where("event_type", telegramOutboxEventPublish).
+		Where("status", telegramOutboxDelivered).
+		Data(g.Map{
+			"status": telegramOutboxPending, "available_at": now.Add(delay),
+			"lease_owner": "", "lease_expires_at": nil, "delivered_at": nil,
+			"last_error": "", "updated_at": now,
+		}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "重新激活TG任务Outbox失败")
+	}
+	affected, _ := result.RowsAffected()
+	if affected > 0 {
+		return nil
+	}
+	_, err = g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).InsertIgnore(g.Map{
+		"job_id": jobId, "event_type": telegramOutboxEventPublish,
+		"dedupe_key": fmt.Sprintf("telegram-job:%d:initial", jobId),
+		"status":     telegramOutboxPending, "available_at": now.Add(delay),
+		"created_at": now, "updated_at": now,
+	})
+	if err != nil {
+		return gerror.Wrap(err, "补建TG任务Outbox失败")
+	}
+	return nil
+}
+
 func (s *sSysPublish) dispatchTelegramJobOutboxByJob(ctx context.Context, jobId int64) error {
 	if jobId <= 0 {
 		return nil
@@ -377,10 +412,10 @@ func (s *sSysPublish) RecoverTelegramDispatch(ctx context.Context, limit int) er
 	if limit <= 0 {
 		limit = 100
 	}
-	if err := s.dispatchDueTelegramJobOutbox(ctx, limit); err != nil {
+	if err := s.recoverPendingIdleTelegramJobs(ctx, limit); err != nil {
 		return err
 	}
-	return s.recoverPendingIdleTelegramJobs(ctx, limit)
+	return s.dispatchDueTelegramJobOutbox(ctx, limit)
 }
 
 // RecoverTelegramJobDispatch schedules one existing job through its Outbox,

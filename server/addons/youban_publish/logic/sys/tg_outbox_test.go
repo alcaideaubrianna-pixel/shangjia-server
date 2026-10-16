@@ -30,6 +30,9 @@ func TestTelegramJobOutboxRecordFromRecordAllowsMissingLegacyOutbox(t *testing.T
 
 func TestTelegramDueOutboxPostgresSQLSelectsChannelHeads(t *testing.T) {
 	query := telegramDueOutboxPostgresSQL()
+	if strings.Count(query, "(") != strings.Count(query, ")") {
+		t.Fatalf("channel-head query has unbalanced parentheses: %s", query)
+	}
 	for _, fragment := range []string{
 		"WITH channel_job_heads AS", "DISTINCT ON", "j.tenant_id", "j.channel_id", "target_chat_id",
 		"j.status IN ('pending','failed_retry','confirming','sending')",
@@ -186,6 +189,7 @@ func TestTelegramDueOutboxChannelHeadAndLeaseIntegration(t *testing.T) {
 	unknownHead := insertJob(5, telegramJobStatusConfirming, tgDispatchStatusIdle, "", old)
 	invalidFailedDisplayHead := insertJob(6, telegramJobStatusFailed, tgDispatchStatusDone, telegramSendPhaseDisplayConfirmed, old)
 	laterAfterInvalidFailedDisplay := insertJob(6, telegramJobStatusPending, tgDispatchStatusIdle, "", now)
+	deliveredIdleHead := insertJob(7, telegramJobStatusPending, tgDispatchStatusIdle, "", old)
 	if _, err := g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).Data(g.Map{
 		"job_id": failedDisplayHead, "tenant_id": seed, "target_chat_id": fmt.Sprintf("-100%d", seed+4),
 		"tg_message_id": seed, "purpose": "display", "status": "sent", "created_at": now, "updated_at": now,
@@ -193,7 +197,7 @@ func TestTelegramDueOutboxChannelHeadAndLeaseIntegration(t *testing.T) {
 		t.Fatalf("insert confirmed display evidence: %v", err)
 	}
 
-	jobIDs := []int64{queuedHead, laterSameChannel, expiredLeaseHead, activeLeaseHead, failedDisplayHead, laterAfterFailedDisplay, unknownHead, invalidFailedDisplayHead, laterAfterInvalidFailedDisplay}
+	jobIDs := []int64{queuedHead, laterSameChannel, expiredLeaseHead, activeLeaseHead, failedDisplayHead, laterAfterFailedDisplay, unknownHead, invalidFailedDisplayHead, laterAfterInvalidFailedDisplay, deliveredIdleHead}
 	outboxIDs := []int64{
 		insertOutbox(queuedHead, telegramOutboxPending, nil, 0),
 		insertOutbox(laterSameChannel, telegramOutboxPending, nil, 7),
@@ -204,6 +208,7 @@ func TestTelegramDueOutboxChannelHeadAndLeaseIntegration(t *testing.T) {
 		insertOutbox(unknownHead, telegramOutboxPending, nil, 0),
 		insertOutbox(invalidFailedDisplayHead, telegramOutboxDelivered, nil, 0),
 		insertOutbox(laterAfterInvalidFailedDisplay, telegramOutboxPending, nil, 0),
+		insertOutbox(deliveredIdleHead, telegramOutboxDelivered, nil, 0),
 	}
 	t.Cleanup(func() {
 		_, _ = g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).WhereIn("id", outboxIDs).Delete()
@@ -236,5 +241,14 @@ func TestTelegramDueOutboxChannelHeadAndLeaseIntegration(t *testing.T) {
 		Where("job_id", laterSameChannel).Value("attempt_count")
 	if err != nil || attemptCount.Int() != 7 {
 		t.Fatalf("waiting outbox attempt_count=%d err=%v, want 7", attemptCount.Int(), err)
+	}
+
+	if err = new(sSysPublish).rearmTelegramJobOutbox(ctx, deliveredIdleHead, 0); err != nil {
+		t.Fatalf("rearm delivered idle Outbox: %v", err)
+	}
+	status, err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
+		Where("job_id", deliveredIdleHead).Value("status")
+	if err != nil || status.String() != telegramOutboxPending {
+		t.Fatalf("rearmed Outbox status=%q err=%v, want %q", status.String(), err, telegramOutboxPending)
 	}
 }

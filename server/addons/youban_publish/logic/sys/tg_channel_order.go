@@ -101,7 +101,7 @@ func telegramChannelBlockingJobSQL(alias string) string {
 			SELECT 1 FROM %[2]s channel_display
 			WHERE channel_display.job_id=%[1]sid AND channel_display.purpose='display'
 				AND channel_display.status='sent' AND channel_display.deleted_at IS NULL
-		)))`, alias, publishTgMessageTable, accountCondition)
+		))))`, alias, publishTgMessageTable, accountCondition)
 }
 
 func telegramChannelOrderChatKey(chatID string) string {
@@ -199,7 +199,7 @@ func (s *sSysPublish) postponeTelegramJobForChannelOrder(ctx context.Context, jo
 	if err != nil {
 		return gerror.Wrap(err, "延后TG频道顺序任务失败")
 	}
-	return nil
+	return s.rearmTelegramJobOutbox(ctx, job.Id, 3*time.Second)
 }
 
 func (s *sSysPublish) postponeTelegramJobForCollectPushPause(ctx context.Context, job telegramJobRecord) error {
@@ -216,6 +216,9 @@ func (s *sSysPublish) postponeTelegramJobForCollectPushPause(ctx context.Context
 		Update()
 	if err != nil {
 		return gerror.Wrap(err, "延后采集推送任务失败")
+	}
+	if err = s.rearmTelegramJobOutbox(ctx, job.Id, 30*time.Second); err != nil {
+		return err
 	}
 	s.appendTelegramJobLog(ctx, job, "publish", "paused", "采集推送已暂停，任务保留等待恢复")
 	if wakeErr := s.wakeNextTelegramChannelJob(ctx, job); wakeErr != nil {
