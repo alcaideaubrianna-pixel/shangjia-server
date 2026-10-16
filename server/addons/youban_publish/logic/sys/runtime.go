@@ -45,6 +45,9 @@ func (s *sSysPublish) StopRuntime() {
 	}
 	s.stopCollectGroupedEventTimers()
 	s.stopTelegramQueueWorker()
+	s.tgQueueMu.Lock()
+	s.telegramOutboxStarted = false
+	s.tgQueueMu.Unlock()
 }
 
 func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
@@ -59,13 +62,16 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 	defer heartbeatTicker.Stop()
 	if config.PushWorker {
 		s.startTelegramPushWorker(ctx)
+		// The durable outbox dispatcher belongs to the push worker lifecycle.
+		// Starting it here makes its ownership explicit and prevents it from
+		// silently disappearing when another runtime role is changed.
+		s.startTelegramOutboxDispatcher(ctx)
 	}
 	if telegramDeliveryRuntimeEnabled(config) {
 		// Telegram recovery belongs with the worker that owns delivery state.
 		// Keeping it on Scheduler made every channel unrecoverable whenever the
 		// scheduler role was stopped independently of the push workers.
 		go s.runTelegramJobRecovery(ctx)
-		go s.runTelegramOutboxDispatcher(ctx)
 	}
 	if config.MediaWorker {
 		s.startTelegramMediaWorker(ctx)

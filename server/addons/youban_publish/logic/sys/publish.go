@@ -26,6 +26,7 @@ type sSysPublish struct {
 	tgLoginMu                 publishRuntimeMutex
 	tgLogins                  map[string]*telegramLoginRuntime
 	tgQueueMu                 publishRuntimeMutex
+	telegramOutboxStarted     bool
 	tgQueueClient             *asynq.Client
 	tgQueueServer             *asynq.Server
 	tgBulkQueueServer         *asynq.Server

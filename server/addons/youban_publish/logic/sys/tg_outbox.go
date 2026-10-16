@@ -399,14 +399,45 @@ func (s *sSysPublish) runTelegramOutboxDispatcher(ctx context.Context) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
-		if err := s.dispatchDueTelegramJobOutbox(ctx, 100); err != nil {
-			g.Log().Warningf(ctx, "调度TG任务Outbox失败：%+v", err)
-		}
+		s.runTelegramOutboxPass(ctx)
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 		}
+	}
+}
+
+func (s *sSysPublish) startTelegramOutboxDispatcher(ctx context.Context) {
+	s.tgQueueMu.Lock()
+	if s.telegramOutboxStarted {
+		s.tgQueueMu.Unlock()
+		return
+	}
+	s.telegramOutboxStarted = true
+	s.tgQueueMu.Unlock()
+	go func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				g.Log().Errorf(ctx, "TG Outbox调度器异常退出，正在自动恢复：%v", recovered)
+				s.tgQueueMu.Lock()
+				s.telegramOutboxStarted = false
+				s.tgQueueMu.Unlock()
+				if ctx.Err() == nil {
+					time.Sleep(time.Second)
+					s.startTelegramOutboxDispatcher(ctx)
+				}
+			}
+		}()
+		s.runTelegramOutboxDispatcher(ctx)
+	}()
+}
+
+func (s *sSysPublish) runTelegramOutboxPass(ctx context.Context) {
+	passCtx, cancel := context.WithTimeout(ctx, telegramOutboxQueryTimeout+telegramOutboxLeaseTTL)
+	defer cancel()
+	if err := s.dispatchDueTelegramJobOutbox(passCtx, 100); err != nil {
+		g.Log().Warningf(ctx, "调度TG任务Outbox失败：%+v", err)
 	}
 }
 
