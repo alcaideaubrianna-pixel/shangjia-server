@@ -278,6 +278,9 @@ func (s *sSysPublish) completeMediaDirectUpload(ctx context.Context, in *sysin.M
 		})
 		return nil, gerror.Wrap(err, "校验COS直传文件失败")
 	}
+	if head.Body != nil {
+		_ = head.Body.Close()
+	}
 	if head.ContentLength != session.FileSize {
 		return nil, gerror.Newf("COS文件大小不匹配，预期:%d 实际:%d", session.FileSize, head.ContentLength)
 	}
@@ -293,7 +296,7 @@ func (s *sSysPublish) completeMediaDirectUpload(ctx context.Context, in *sysin.M
 		}
 		if finalKey != session.Key {
 			stagingKey := session.Key
-			if err = promoteDirectUploadObject(ctx, client, cfg, stagingKey, finalKey); err != nil {
+			if err = promoteDirectUploadObject(ctx, client, cfg, stagingKey, finalKey, session.FileSize); err != nil {
 				return nil, err
 			}
 			session.Key = finalKey
@@ -360,8 +363,14 @@ func directUploadObjectMD5(ctx context.Context, client *cos.Client, key string) 
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
-func promoteDirectUploadObject(ctx context.Context, client *cos.Client, cfg *model.UploadConfig, sourceKey, targetKey string) error {
-	if _, err := client.Object.Head(ctx, targetKey, nil); err == nil {
+func promoteDirectUploadObject(ctx context.Context, client *cos.Client, cfg *model.UploadConfig, sourceKey, targetKey string, expectedSize int64) error {
+	if existing, err := client.Object.Head(ctx, targetKey, nil); err == nil {
+		if existing.Body != nil {
+			_ = existing.Body.Close()
+		}
+		if err = validateDirectUploadObjectSize(existing.ContentLength, expectedSize); err != nil {
+			return err
+		}
 		return nil
 	} else if !cos.IsNotFoundError(err) {
 		return gerror.Wrap(err, "检查COS内容对象失败")
@@ -383,6 +392,13 @@ func promoteDirectUploadObject(ctx context.Context, client *cos.Client, cfg *mod
 	})
 	if err != nil {
 		return gerror.Wrap(err, "归档COS直传文件失败")
+	}
+	return nil
+}
+
+func validateDirectUploadObjectSize(actual, expected int64) error {
+	if expected <= 0 || actual != expected {
+		return gerror.Newf("COS内容对象大小不匹配，预期:%d 实际:%d", expected, actual)
 	}
 	return nil
 }

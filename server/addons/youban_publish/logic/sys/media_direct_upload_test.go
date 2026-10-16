@@ -95,6 +95,23 @@ func TestDirectUploadExtensionUsesStoragerFormat(t *testing.T) {
 	}
 }
 
+func TestValidateDirectUploadObjectSize(t *testing.T) {
+	if err := validateDirectUploadObjectSize(1024, 1024); err != nil {
+		t.Fatalf("matching object size returned error: %v", err)
+	}
+	for _, test := range []struct {
+		actual   int64
+		expected int64
+	}{
+		{actual: 1023, expected: 1024},
+		{actual: 1024, expected: 0},
+	} {
+		if err := validateDirectUploadObjectSize(test.actual, test.expected); err == nil {
+			t.Fatalf("accepted object size actual=%d expected=%d", test.actual, test.expected)
+		}
+	}
+}
+
 func TestDirectUploadConfigDigestChangesWithBucketOrCredentials(t *testing.T) {
 	base := &model.UploadConfig{
 		Drive: "cos", CosBucket: "bucket-1", CosRegion: "ap-singapore",
