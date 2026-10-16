@@ -18,6 +18,7 @@ import (
 	publishmodel "hotgo/addons/youban_publish/model"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/cache"
+	"hotgo/utility/scantrace"
 )
 
 type mediaPHashBucketCandidateRow struct {
@@ -76,7 +77,10 @@ func (s *sSysPublish) cachedProfileFingerprintSearchCandidates(ctx context.Conte
 		return []publishProfilePHashDistance{}, nil
 	}
 	cacheKey := mediaPHashSearchCacheKey(ctx, queryHash.GetHash(), fingerprint.MD5, in, scope, candidateProfileIds)
-	if value, err := cache.Instance().Get(ctx, cacheKey); err == nil && !value.IsNil() {
+	finish := scantrace.Begin(ctx, "query.cache_get")
+	value, cacheErr := cache.Instance().Get(ctx, cacheKey)
+	finish(cacheErr)
+	if cacheErr == nil && !value.IsNil() {
 		var cached []publishProfilePHashDistance
 		if scanErr := value.Scan(&cached); scanErr == nil {
 			return cached, nil
@@ -86,7 +90,9 @@ func (s *sSysPublish) cachedProfileFingerprintSearchCandidates(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
-	_ = cache.Instance().Set(ctx, cacheKey, items, mediaPHashBucketResultTTL)
+	finish = scantrace.Begin(ctx, "query.cache_set")
+	cacheErr = cache.Instance().Set(ctx, cacheKey, items, mediaPHashBucketResultTTL)
+	finish(cacheErr)
 	return items, nil
 }
 
@@ -126,7 +132,9 @@ func (s *sSysPublish) profileFingerprintSearchCandidatesExactFirst(ctx context.C
 	}
 	if fingerprint.MD5 != "" {
 		startedAt := time.Now()
+		finish := scantrace.Begin(ctx, "query.md5")
 		exact, err := mediaMD5CandidateMatches(ctx, fingerprint.MD5, scope, candidateProfileIds)
+		finish(err)
 		observeBotMediaSearchStage(ctx, "md5_query", startedAt, err)
 		if err != nil {
 			return nil, err
@@ -138,6 +146,7 @@ func (s *sSysPublish) profileFingerprintSearchCandidatesExactFirst(ctx context.C
 	startedAt := time.Now()
 	var exact []publishProfilePHashDistance
 	var err error
+	finish := scantrace.Begin(ctx, "query.phash_exact")
 	if isPostgresDatabase() {
 		exact, err = mediaPHashExactCandidateMatches(ctx, fingerprint.PHash, scope, candidateProfileIds)
 	} else {
@@ -146,6 +155,7 @@ func (s *sSysPublish) profileFingerprintSearchCandidatesExactFirst(ctx context.C
 		exact, err = s.profilePHashSearchCandidates(ctx, fingerprint.PHash, &exactInput, scope, candidateProfileIds)
 	}
 	observeBotMediaSearchStage(ctx, "phash_exact", startedAt, err)
+	finish(err)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +163,9 @@ func (s *sSysPublish) profileFingerprintSearchCandidatesExactFirst(ctx context.C
 		return exact, nil
 	}
 	startedAt = time.Now()
+	finish = scantrace.Begin(ctx, "query.phash_approx")
 	items, err := s.profilePHashSearchCandidates(ctx, fingerprint.PHash, in, scope, candidateProfileIds)
+	finish(err)
 	observeBotMediaSearchStage(ctx, "phash_approx", startedAt, err)
 	return items, err
 }

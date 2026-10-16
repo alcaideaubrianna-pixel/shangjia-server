@@ -12,6 +12,7 @@ import (
 	botsysin "hotgo/addons/youban_bot/model/input/sysin"
 	publishsysin "hotgo/addons/youban_publish/model/input/sysin"
 	publishService "hotgo/addons/youban_publish/service"
+	"hotgo/utility/scantrace"
 )
 
 type scanFeature struct{}
@@ -67,7 +68,9 @@ func (scanMediaMessageHandler) Handle(ctx context.Context, bot *sSysBot, event *
 		return true, err
 	}
 	resolveStartedAt := time.Now()
+	finish := scantrace.Begin(ctx, "telegram.resolve")
 	media, err := bot.resolveTelegramMessageMedia(ctx, event.BotId, botTokenForEvent(ctx, bot, event.BotId), event.Msg)
+	finish(err)
 	observeScanStage(ctx, event.BotId, "telegram_resolve", resolveStartedAt, err)
 	if err != nil {
 		_ = bot.completeScanMediaGroupItem(ctx, event.BotId, userId, batchId, nil)

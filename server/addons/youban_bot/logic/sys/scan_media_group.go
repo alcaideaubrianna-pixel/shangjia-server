@@ -14,6 +14,7 @@ import (
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/cache"
 	hglock "hotgo/internal/library/hgrds/lock"
+	"hotgo/utility/scantrace"
 )
 
 const scanMediaGroupTTL = 2 * time.Minute
@@ -216,7 +217,9 @@ func normalizeScanTraceId(value string) string {
 }
 
 func withScanTrace(ctx context.Context, traceId string) context.Context {
-	return context.WithValue(ctx, scanTraceContextKey{}, ensureScanTraceId(traceId))
+	traceId = ensureScanTraceId(traceId)
+	ctx = scantrace.With(ctx, g.Map{"traceId": traceId})
+	return context.WithValue(ctx, scanTraceContextKey{}, traceId)
 }
 
 func scanTraceId(ctx context.Context) string {

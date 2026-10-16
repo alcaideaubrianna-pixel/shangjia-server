@@ -13,6 +13,7 @@ import (
 
 	publishmodel "hotgo/addons/youban_publish/model"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/utility/scantrace"
 )
 
 const botMediaSearchMaxResults = 20
@@ -40,28 +41,38 @@ func (s *sSysPublish) EnsureBotMediaSearchAccess(ctx context.Context, tenantId i
 	return s.ensureTenantVipFeature(ctx, tenantId, sysin.TenantVipFeatureSimilarMedia)
 }
 
-func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMediaSearchInp) ([]*sysin.NoteModel, int, error) {
+func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMediaSearchInp) (notes []*sysin.NoteModel, count int, resultErr error) {
 	if in == nil || in.TenantId <= 0 || in.AccountId <= 0 {
 		return nil, 0, gerror.New("上架账号信息不完整")
 	}
 	searchCtx, cancelSearch := context.WithTimeout(ctx, botMediaSearchTimeout)
 	defer cancelSearch()
 	ctx = searchCtx
+	ctx = scantrace.With(ctx, g.Map{"traceId": in.TraceId, "tenantId": in.TenantId, "accountId": in.AccountId, "items": len(in.Items)})
+	finish := scantrace.Begin(ctx, "search.total")
+	defer func() { finish(resultErr) }()
 	startedAt := time.Now()
 	defer func() {
 		g.Log().Info(ctx, "Bot扫图服务完成", g.Map{"traceId": in.TraceId, "tenantId": in.TenantId, "accountId": in.AccountId, "items": len(in.Items), "durationMs": time.Since(startedAt).Milliseconds()})
 	}()
-	if err := s.ensureTenantVipFeature(ctx, in.TenantId, sysin.TenantVipFeatureSimilarMedia); err != nil {
+	step := scantrace.Begin(ctx, "access.check")
+	accessErr := s.ensureTenantVipFeature(ctx, in.TenantId, sysin.TenantVipFeatureSimilarMedia)
+	step(accessErr)
+	if err := accessErr; err != nil {
 		return nil, 0, err
 	}
+	step = scantrace.Begin(ctx, "scope.accounts")
 	accountIds, err := s.botMediaSearchAccountIds(ctx, in)
+	step(err)
 	if err != nil {
 		return nil, 0, err
 	}
 	if len(accountIds) == 0 {
 		return []*sysin.NoteModel{}, 0, nil
 	}
+	step = scantrace.Begin(ctx, "scope.partitions")
 	searchScope, err := s.mediaSearchScopeByAccountIds(ctx, accountIds)
+	step(err)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -90,7 +101,9 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 	// not download Telegram media and usually resolves forwarded/published media
 	// immediately.
 	for _, item := range searchItems {
+		step = scantrace.Begin(ctx, "fingerprint.cache")
 		fingerprint, ok := telegramImageFingerprintFromCache(ctx, item.FileUniqueId)
+		step(nil)
 		if !ok {
 			coldItems = append(coldItems, item)
 			continue
@@ -164,7 +177,10 @@ func loadBotMediaColdFingerprints(ctx context.Context, traceId string, items []*
 			}
 			startedAt := time.Now()
 			itemCtx, cancelItem := context.WithTimeout(groupCtx, botMediaColdItemTimeout)
+			itemCtx = scantrace.With(itemCtx, g.Map{"itemIndex": index})
+			finish := scantrace.Begin(itemCtx, "fingerprint.cold")
 			fingerprint, cacheHit, err := loader(itemCtx, item.FileUniqueId, item.FileUrl)
+			finish(err)
 			cancelItem()
 			results[index] = botMediaColdFingerprintResult{fingerprint: fingerprint, err: err}
 			g.Log().Info(ctx, "Bot扫图冷媒体处理完成", g.Map{
@@ -178,7 +194,9 @@ func loadBotMediaColdFingerprints(ctx context.Context, traceId string, items []*
 	return results
 }
 
-func (s *sSysPublish) botMediaSearchFingerprint(ctx context.Context, fingerprint *mediaFingerprint, searchIn *sysin.ProfileImageSearchInp, searchScope *publishmodel.MediaSearchScope, seenHashes map[string]struct{}) ([]*sysin.NoteModel, int, bool, error) {
+func (s *sSysPublish) botMediaSearchFingerprint(ctx context.Context, fingerprint *mediaFingerprint, searchIn *sysin.ProfileImageSearchInp, searchScope *publishmodel.MediaSearchScope, seenHashes map[string]struct{}) (notes []*sysin.NoteModel, count int, matched bool, resultErr error) {
+	finish := scantrace.Begin(ctx, "fingerprint.search")
+	defer func() { finish(resultErr) }()
 	if err := ctx.Err(); err != nil {
 		return nil, 0, false, err
 	}
