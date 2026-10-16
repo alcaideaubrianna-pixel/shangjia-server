@@ -58,6 +58,13 @@ func (s *sSysPublish) telegramVideoMeta(ctx context.Context, media *telegramMedi
 		beginTelegramPublishStage(ctx, "media.video.metadata.cache").End(nil, g.Map{"cacheSource": "media"})
 		return telegramVideoMeta{Width: media.VideoWidth, Height: media.VideoHeight, Duration: media.VideoDuration}
 	}
+	// Telegram already owns the video metadata when sending its file_id. Do not
+	// turn a reuse request into a database lookup, download or ffprobe operation.
+	// Forced/sanitized uploads and copy references still use the normal path.
+	if telegramMediaUsesReusableFileId(media) {
+		beginTelegramPublishStage(ctx, "media.video.metadata.cache").End(nil, g.Map{"cacheSource": "telegram_file_id"})
+		return telegramVideoMeta{}
+	}
 	step := beginTelegramPublishStage(ctx, "media.video.metadata.schema")
 	schemaErr := ensureAttachmentVideoMetaSchema(ctx)
 	step.End(schemaErr)

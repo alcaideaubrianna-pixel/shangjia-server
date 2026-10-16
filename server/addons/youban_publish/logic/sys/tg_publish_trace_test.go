@@ -3,11 +3,55 @@ package sys
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 )
+
+func TestTelegramPublishTimingConcurrentAndIsolated(t *testing.T) {
+	ctx := telegramPublishTraceContext(context.Background(), 42)
+	timing := ctx.Value(telegramPublishTimingContextKey{}).(*telegramPublishTiming)
+	mediaCtx := telegramPublishMediaTraceContext(ctx, &telegramMediaItem{Id: 1})
+	if mediaCtx.Value(telegramPublishTimingContextKey{}) != timing {
+		t.Fatal("nested media lost execution timing")
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < 32; i++ {
+		wg.Add(1)
+		go func() { defer wg.Done(); timing.record("api.sendVideo", 2, nil); _ = timing.snapshot() }()
+	}
+	wg.Wait()
+	timing.record("job.deferred", 0, []g.Map{{"reason": "channel_lease_busy"}})
+	snapshot := timing.snapshot()
+	if snapshot["stageDurationMs"].(map[string]int64)["api.sendVideo"] != 64 || snapshot["stageCounts"].(map[string]int)["api.sendVideo"] != 32 || snapshot["deferredReason"] != "channel_lease_busy" {
+		t.Fatalf("lost timings: %+v", snapshot)
+	}
+	snapshot["stageDurationMs"].(map[string]int64)["api.sendVideo"] = -1
+	if timing.snapshot()["stageDurationMs"].(map[string]int64)["api.sendVideo"] != 64 {
+		t.Fatal("snapshot mutated shared state")
+	}
+	other := telegramPublishTraceContext(context.Background(), 43)
+	if other.Value(telegramPublishTimingContextKey{}) == timing {
+		t.Fatal("different executions share timing")
+	}
+}
+
+func TestTelegramPublishTimingEndOnlyOnce(t *testing.T) {
+	ctx := telegramPublishTraceContext(context.Background(), 42)
+	step := beginTelegramPublishStage(ctx, "api.sendVideo")
+	step.End(nil)
+	step.End(nil)
+	counts := ctx.Value(telegramPublishTimingContextKey{}).(*telegramPublishTiming).snapshot()["stageCounts"].(map[string]int)
+	if counts["api.sendVideo"] != 1 {
+		t.Fatalf("duplicate completion: %+v", counts)
+	}
+	if telegramPublishTimestampAge(nil) != 0 || telegramPublishTimestampAge(gtime.New(time.Now().Add(time.Hour))) != 0 {
+		t.Fatal("missing/future timestamp should not produce negative age")
+	}
+}
 
 func TestTelegramPublishMediaTraceIsolation(t *testing.T) {
 	parent, cancel := context.WithTimeout(context.Background(), time.Minute)

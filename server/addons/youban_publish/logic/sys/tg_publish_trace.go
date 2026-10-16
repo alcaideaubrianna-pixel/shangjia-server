@@ -8,17 +8,88 @@ import (
 	"regexp"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/gtrace"
 	"github.com/gogf/gf/v2/os/gctx"
+	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/util/guid"
 	"github.com/hibiken/asynq"
 )
 
 type telegramPublishTraceContextKey struct{}
+type telegramPublishTimingContextKey struct{}
+
+func telegramPublishTimestampAge(timestamp *gtime.Time) int64 {
+	if timestamp == nil {
+		return 0
+	}
+	age := time.Since(timestamp.Time).Milliseconds()
+	if age < 0 {
+		return 0
+	}
+	return age
+}
+
+// Per execution diagnostics only; never persisted or used for scheduling.
+type telegramPublishTiming struct {
+	mu        sync.Mutex
+	durations map[string]int64
+	counts    map[string]int
+	reason    string
+}
+
+func (t *telegramPublishTiming) record(stage string, elapsed int64, fields []g.Map) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.durations[stage] += elapsed
+	t.counts[stage]++
+	if stage == "job.deferred" {
+		for _, f := range fields {
+			if reason, ok := f["reason"].(string); ok {
+				t.reason = reason
+			}
+		}
+	}
+}
+
+func (t *telegramPublishTiming) snapshot() g.Map {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	durations, counts := map[string]int64{}, map[string]int{}
+	for k, v := range t.durations {
+		durations[k] = v
+	}
+	for k, v := range t.counts {
+		counts[k] = v
+	}
+	// Stages are nested: stage totals must not be summed as wall-clock time.
+	return g.Map{"stageDurationMs": durations, "stageCounts": counts, "deferredReason": t.reason}
+}
+
+func logTelegramPublishSummary(ctx context.Context, started time.Time, err error) {
+	timing, ok := ctx.Value(telegramPublishTimingContextKey{}).(*telegramPublishTiming)
+	if !ok {
+		return
+	}
+	data := timing.snapshot()
+	if base, ok := ctx.Value(telegramPublishTraceContextKey{}).(g.Map); ok {
+		for k, v := range base {
+			data[k] = v
+		}
+	}
+	data["log_type"], data["event"] = "telegram_publish_summary", "execution_finished"
+	data["executionDurationMs"] = time.Since(started).Milliseconds()
+	// A nil return can mean deferred, superseded or fallback queued, not sent.
+	data["returnedError"] = err != nil
+	if err != nil {
+		data["error"] = telegramPublishLogError(err)
+	}
+	g.Log().Info(ctx, "TG推送耗时汇总", data)
+}
 
 // Attach media identity to nested diagnostic stages without changing deadlines
 // or mutating the parent context shared by concurrent media preparation.
@@ -48,6 +119,7 @@ func telegramPublishTraceContext(ctx context.Context, jobId int64, fields ...g.M
 			base[key] = value
 		}
 	} else {
+		ctx = context.WithValue(ctx, telegramPublishTimingContextKey{}, &telegramPublishTiming{durations: map[string]int64{}, counts: map[string]int{}})
 		instance, _ := os.Hostname()
 		taskId, _ := asynq.GetTaskID(ctx)
 		queueName, _ := asynq.GetQueueName(ctx)
@@ -70,6 +142,8 @@ func telegramPublishJobTraceContext(ctx context.Context, job telegramJobRecord) 
 		"tenantId": job.TenantId, "accountId": job.AccountId, "profileId": job.ProfileId,
 		"channelId": job.ChannelId, "botId": job.BotId, "targetChatId": job.TargetChatId,
 		"jobStatus": job.Status, "dispatchStatus": job.DispatchStatus, "sendPhase": job.SendPhase,
+		"jobAgeMs":      telegramPublishTimestampAge(job.CreatedAt),
+		"dispatchAgeMs": telegramPublishTimestampAge(job.DispatchedAt),
 	})
 }
 
@@ -115,6 +189,9 @@ func (s *telegramPublishStage) End(err error, fields ...g.Map) {
 		return
 	}
 	s.timer.Stop()
+	if timing, ok := s.ctx.Value(telegramPublishTimingContextKey{}).(*telegramPublishTiming); ok {
+		timing.record(s.fields["stage"].(string), time.Since(s.started).Milliseconds(), fields)
+	}
 	event := "end"
 	if err != nil {
 		event = "error"

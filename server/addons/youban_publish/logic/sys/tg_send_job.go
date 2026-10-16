@@ -37,6 +37,14 @@ var (
 
 func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) (resultErr error) {
 	ctx = telegramPublishTraceContext(ctx, jobId)
+	started := time.Now()
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			logTelegramPublishSummary(ctx, started, fmt.Errorf("panic: %v", recovered))
+			panic(recovered)
+		}
+		logTelegramPublishSummary(ctx, started, resultErr)
+	}()
 	stage := beginTelegramPublishStage(ctx, "job.execute")
 	defer stage.Finish(&resultErr)
 	step := beginTelegramPublishStage(ctx, "job.load")
