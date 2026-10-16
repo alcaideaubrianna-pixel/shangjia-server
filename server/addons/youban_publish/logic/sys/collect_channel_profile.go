@@ -31,10 +31,14 @@ func collectChannelProfileIDs(ctx context.Context, tenantID, accountID, ruleID i
 	var rows []struct {
 		ProfileID int64 `json:"profileId"`
 	}
-	err := g.DB().Model(publishCollectChannelProfileTable).Ctx(ctx).
+	mod := g.DB().Model(publishCollectChannelProfileTable).Ctx(ctx).
 		Fields("DISTINCT profile_id").Where("tenant_id", tenantID).Where("account_id", accountID).
-		Where("rule_id", ruleID).WhereIn("channel_id", tgChannelCacheLookupIds(channelID)).
-		WhereNull("deleted_at").WhereGT("profile_id", 0).Scan(&rows)
+		WhereIn("channel_id", tgChannelCacheLookupIds(channelID)).
+		WhereNull("deleted_at").WhereGT("profile_id", 0)
+	if ruleID > 0 {
+		mod = mod.Where("rule_id", ruleID)
+	}
+	err := mod.Scan(&rows)
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取频道关联资料失败")
 	}

@@ -9,23 +9,27 @@ import (
 	"strings"
 
 	"github.com/go-telegram/bot/models"
+	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/gogf/gf/v2/util/grand"
 
 	publishsysin "hotgo/addons/youban_publish/model/input/sysin"
 	publishService "hotgo/addons/youban_publish/service"
 )
 
 type collectChannelSuffixPayload struct {
-	RuleId        int64  `json:"ruleId"`
-	BotId         int64  `json:"botId"`
-	AccountId     int64  `json:"accountId"`
-	Id            int64  `json:"id"`
-	ChannelId     string `json:"channelId"`
-	ChannelTitle  string `json:"channelTitle"`
-	ChannelLink   string `json:"channelLink"`
-	DefaultSuffix string `json:"defaultSuffix"`
-	Draft         string `json:"draft"`
+	ConfirmationToken string `json:"confirmationToken"`
+	RuleId            int64  `json:"ruleId"`
+	BotId             int64  `json:"botId"`
+	AccountId         int64  `json:"accountId"`
+	Id                int64  `json:"id"`
+	ChannelId         string `json:"channelId"`
+	ChannelTitle      string `json:"channelTitle"`
+	ChannelLink       string `json:"channelLink"`
+	DefaultSuffix     string `json:"defaultSuffix"`
+	Draft             string `json:"draft"`
 }
 
 func (s *sSysBot) collectManageAllowed(ctx context.Context, account *botProfileAccount) bool {
@@ -186,7 +190,7 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 			if item == nil {
 				return true, s.sendCollectManageNotice(ctx, botId, chatId, "频道不存在或已被清理。")
 			}
-			res, err := publishService.SysPublish().BotIntroFeeChannelPurge(ctx, &publishsysin.IntroFeeChannelPurgeInp{Id: rowID, RuleId: ruleID, BotId: botId, ChannelId: item.ChannelId}, owner.TenantId, owner.AccountId)
+			res, err := publishService.SysPublish().BotIntroFeeChannelPurge(ctx, &publishsysin.IntroFeeChannelPurgeInp{Id: rowID, RuleId: ruleID, BotId: botId, ChannelId: item.ChannelId, NotifyChatId: chatId}, owner.TenantId, owner.AccountId)
 			if err != nil {
 				return true, err
 			}
@@ -293,16 +297,27 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 		return true, s.showCollectRuleField(ctx, botId, chatId, account, session.ProfileId, session.Step)
 	case "channelsuffixconfirm":
 		session := s.activeProfileSessionByIds(ctx, botId, telegramUserIdFromCtx(ctx), chatId)
-		if session == nil || session.Scene != "collect_channel_add" {
-			return true, nil
+		if !collectChannelSuffixSessionMatches(session, parts, action == "channelsuffixconfirm") {
+			return true, s.sendCollectManageNotice(ctx, botId, chatId, "确认已失效，请使用最新的后缀预览重新操作。")
 		}
 		return true, s.confirmCollectChannelSuffix(ctx, botId, chatId, account, session)
 	case "channelsuffixcancel":
 		session := s.activeProfileSessionByIds(ctx, botId, telegramUserIdFromCtx(ctx), chatId)
-		if session == nil || session.Scene != "collect_channel_add" {
-			return true, nil
+		if !collectChannelSuffixSessionMatches(session, parts, false) {
+			return true, s.sendCollectManageNotice(ctx, botId, chatId, "该按钮已失效，当前操作未取消。")
 		}
-		_ = s.completeProfileSession(ctx, session.Id)
+		result, err := g.DB().Model(profileSessionTable).Ctx(ctx).Where("id", session.Id).Where("status", profileSessionStatusActive).
+			Where("payload_json", session.PayloadJson).Data(g.Map{"status": profileSessionStatusCanceled}).Update()
+		if err != nil {
+			return true, err
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return true, err
+		}
+		if n == 0 {
+			return true, s.sendCollectManageNotice(ctx, botId, chatId, "该按钮已失效，当前操作未取消。")
+		}
 		return true, s.sendCollectManageNotice(ctx, botId, chatId, "已取消修改，频道采集状态和当前后缀保持不变。")
 	case "toggle":
 		if len(parts) < 3 {
@@ -334,7 +349,7 @@ func (s *sSysBot) startApprovedChannelSuffixSession(ctx context.Context, botId i
 		return s.sendCollectManageNotice(ctx, botId, chatId, "已允许采集该频道。当前采集规则不可用，可稍后在频道后缀配置中设置后缀。")
 	}
 	payload := collectChannelSuffixPayload{
-		RuleId: approval.RuleId, BotId: approval.BotId, AccountId: approval.AccountId,
+		ConfirmationToken: grand.S(12), RuleId: approval.RuleId, BotId: approval.BotId, AccountId: approval.AccountId,
 		ChannelId: approval.ChannelId, ChannelTitle: approval.ChannelTitle, ChannelLink: approval.ChannelLink, DefaultSuffix: approval.DefaultSuffix,
 	}
 	if err := s.startProfileSessionByIds(ctx, botId, telegramUserIdFromCtx(ctx), chatId, account, "collect_channel_add", "waiting_value", approval.RuleId, "", payload, ""); err != nil {
@@ -349,7 +364,11 @@ func (s *sSysBot) startApprovedChannelSuffixSession(ctx context.Context, botId i
 		name = approval.ChannelId
 	}
 	text := fmt.Sprintf("修改频道后缀\n频道：%s%s\n当前规则默认后缀：%s\n\n请发送新的频道后缀，例如：北京代理。\n发送后会显示预览，确认保存后才生效。取消修改不影响当前配置。", html.EscapeString(name), collectManageChannelLinkLine(approval.ChannelLink), html.EscapeString(defaultSuffix))
-	buttons := [][]models.InlineKeyboardButton{{{Text: "取消修改", CallbackData: "cm:channelsuffixcancel"}}}
+	session := s.activeProfileSessionByIds(ctx, botId, telegramUserIdFromCtx(ctx), chatId)
+	if session == nil {
+		return gerror.New("后缀修改会话创建失败，请重试")
+	}
+	buttons := [][]models.InlineKeyboardButton{{{Text: "取消修改", CallbackData: fmt.Sprintf("cm:channelsuffixcancel:%d:%s", session.Id, payload.ConfirmationToken)}}}
 	return s.sendCollectManageMarkup(ctx, botId, chatId, text, buttons)
 }
 
@@ -362,12 +381,24 @@ func (s *sSysBot) confirmCollectChannelSuffix(ctx context.Context, botId int64, 
 	if ownerAccountID <= 0 {
 		ownerAccountID = account.AccountId
 	}
-	if _, err := publishService.SysPublish().BotIntroFeeChannelRuleSave(ctx, &publishsysin.IntroFeeChannelRuleSaveInp{
-		Id: payload.Id, RuleId: payload.RuleId, BotId: payload.BotId, ChannelId: payload.ChannelId, Suffix: strings.TrimSpace(payload.Draft), Status: 1,
-	}, account.TenantId, ownerAccountID); err != nil {
+	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		var locked profileSessionRow
+		if err := g.DB().Model(profileSessionTable).Ctx(ctx).Where("id", session.Id).LockUpdate().Scan(&locked); err != nil {
+			return err
+		}
+		if locked.Status != profileSessionStatusActive || locked.Step != "confirming" || locked.PayloadJson != session.PayloadJson {
+			return gerror.New("确认已失效，请使用最新的后缀预览重新操作")
+		}
+		if _, err := publishService.SysPublish().BotIntroFeeChannelRuleSave(ctx, &publishsysin.IntroFeeChannelRuleSaveInp{
+			Id: payload.Id, RuleId: payload.RuleId, BotId: payload.BotId, ChannelId: payload.ChannelId, Suffix: strings.TrimSpace(payload.Draft), Status: 1,
+		}, account.TenantId, ownerAccountID); err != nil {
+			return err
+		}
+		return s.completeProfileSession(ctx, session.Id)
+	})
+	if err != nil {
 		return err
 	}
-	_ = s.completeProfileSession(ctx, session.Id)
 	return s.sendCollectManageNotice(ctx, botId, chatId, fmt.Sprintf("频道后缀已保存\n频道：%s\n频道 ID：%s%s\n新后缀：%s\n采集状态：已开启\n后续新采集资料将使用此后缀。", html.EscapeString(firstNonEmpty(payload.ChannelTitle, payload.ChannelId)), html.EscapeString(payload.ChannelId), collectManageChannelLinkLine(payload.ChannelLink), html.EscapeString(strings.TrimSpace(payload.Draft))))
 }
 
@@ -849,7 +880,7 @@ func (s *sSysBot) toggleCollectRuleField(ctx context.Context, botId int64, chatI
 func collectChannelDeleteDetails(item *publishsysin.IntroFeeChannelRuleItem, res *publishsysin.IntroFeeChannelPurgeModel) string {
 	name := firstNonEmpty(item.ChannelTitle, item.ChannelId)
 	suffix := firstNonEmpty(item.Suffix, "未配置")
-	return fmt.Sprintf("删除频道代理资料并下架\n操作原因：管理员主动删除该频道的代理资料\n频道：%s\n频道 ID：%s%s\n频道后缀：%s\n关联代理资料：%d 条\n已推送消息：%d 条", html.EscapeString(name), html.EscapeString(item.ChannelId), collectManageChannelLinkLine(item.ChannelLink), html.EscapeString(suffix), res.ProfileCount, res.MessageCount)
+	return fmt.Sprintf("删除频道代理资料并下架\n操作原因：管理员主动删除该频道的代理资料\n处理范围：当前账户下该来源频道的全部规则和 BOT\n频道：%s\n频道 ID：%s%s\n频道后缀：%s\n关联代理资料：%d 条\n已推送消息：%d 条", html.EscapeString(name), html.EscapeString(item.ChannelId), collectManageChannelLinkLine(item.ChannelLink), html.EscapeString(suffix), res.ProfileCount, res.MessageCount)
 }
 
 func collectChannelDeleteNotice(item *publishsysin.IntroFeeChannelRuleItem, res *publishsysin.IntroFeeChannelPurgeModel) string {
@@ -865,4 +896,19 @@ func collectManageChannelLinkLine(link string) string {
 		return ""
 	}
 	return "\n频道链接：" + html.EscapeString(strings.TrimSpace(link))
+}
+
+func collectChannelSuffixSessionMatches(session *profileSessionRow, parts []string, requireDraft bool) bool {
+	if session == nil || len(parts) != 4 || session.Scene != "collect_channel_add" || session.Status != profileSessionStatusActive {
+		return false
+	}
+	id, err := strconv.ParseInt(parts[2], 10, 64)
+	if err != nil || id != session.Id {
+		return false
+	}
+	var payload collectChannelSuffixPayload
+	if json.Unmarshal([]byte(session.PayloadJson), &payload) != nil || payload.ConfirmationToken == "" || payload.ConfirmationToken != parts[3] {
+		return false
+	}
+	return !requireDraft || (session.Step == "confirming" && strings.TrimSpace(payload.Draft) != "")
 }

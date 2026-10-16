@@ -1880,6 +1880,16 @@ func (s *sSysBot) startProfileSessionByIds(ctx context.Context, botId int64, tel
 	if payload != nil {
 		payloadText = gjson.MustEncodeString(payload)
 	}
+	if scene == "collect_channel_add" {
+		var suffixPayload collectChannelSuffixPayload
+		if err := json.Unmarshal([]byte(payloadText), &suffixPayload); err != nil {
+			return gerror.Wrap(err, "读取频道后缀会话失败")
+		}
+		if suffixPayload.ConfirmationToken == "" {
+			suffixPayload.ConfirmationToken = grand.S(12)
+		}
+		payloadText = gjson.MustEncodeString(suffixPayload)
+	}
 	now := gtime.Now()
 	_, err := g.DB().Model(profileSessionTable).Safe().Ctx(ctx).Data(g.Map{"bot_id": botId, "telegram_user_id": telegramUserId, "chat_id": chatId, "app": account.App, "account_id": account.AccountId, "tenant_id": account.TenantId, "scene": scene, "step": step, "profile_id": profileId, "profile_no": profileNo, "payload_json": payloadText, "expires_at": now.Add(30 * time.Minute), "status": profileSessionStatusActive, "created_at": now, "updated_at": now}).Insert()
 	if err != nil {
@@ -1909,7 +1919,19 @@ func (s *sSysBot) sendProfileSessionPrompt(ctx context.Context, botId int64, cha
 	default:
 		buttons = append(buttons, []models.InlineKeyboardButton{{Text: "返回资料管理", CallbackData: "pf:menu"}})
 	}
-	buttons = append(buttons, []models.InlineKeyboardButton{{Text: "取消当前操作", CallbackData: "pf:cancel"}})
+	cancelData := "pf:cancel"
+	if scene == "collect_channel_add" {
+		session := s.activeProfileSessionByIds(ctx, botId, telegramUserIdFromCtx(ctx), chatId)
+		if session == nil || session.Scene != scene {
+			return gerror.New("频道后缀会话已失效，请重新操作")
+		}
+		var payload collectChannelSuffixPayload
+		if err := json.Unmarshal([]byte(session.PayloadJson), &payload); err != nil {
+			return err
+		}
+		cancelData = fmt.Sprintf("cm:channelsuffixcancel:%d:%s", session.Id, payload.ConfirmationToken)
+	}
+	buttons = append(buttons, []models.InlineKeyboardButton{{Text: "取消当前操作", CallbackData: cancelData}})
 	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, text, "HTML", false, &models.InlineKeyboardMarkup{InlineKeyboard: buttons})
 	return err
 }
@@ -2049,17 +2071,27 @@ func (s *sSysBot) consumeProfileSessionText(ctx context.Context, botId int64, ms
 		}
 		payload.ChannelId = channelID
 		payload.Draft = suffix
+		payload.ConfirmationToken = grand.S(12)
 		payloadJSON, _ := json.Marshal(payload)
-		if _, err := g.DB().Model(profileSessionTable).Ctx(ctx).Where("id", session.Id).Data(g.Map{"step": "confirming", "payload_json": string(payloadJSON), "updated_at": gtime.Now()}).Update(); err != nil {
+		result, err := g.DB().Model(profileSessionTable).Ctx(ctx).Where("id", session.Id).Where("status", profileSessionStatusActive).
+			Where("payload_json", session.PayloadJson).Data(g.Map{"step": "confirming", "payload_json": string(payloadJSON)}).Update()
+		if err != nil {
 			return err
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return s.sendCollectManageNotice(ctx, botId, chatId, "后缀修改会话已变更，请重新输入。")
 		}
 		name := strings.TrimSpace(payload.ChannelTitle)
 		if name == "" {
 			name = channelID
 		}
 		buttons := [][]models.InlineKeyboardButton{
-			{{Text: "确认保存", CallbackData: "cm:channelsuffixconfirm"}},
-			{{Text: "取消修改", CallbackData: "cm:channelsuffixcancel"}},
+			{{Text: "确认保存", CallbackData: fmt.Sprintf("cm:channelsuffixconfirm:%d:%s", session.Id, payload.ConfirmationToken)}},
+			{{Text: "取消修改", CallbackData: fmt.Sprintf("cm:channelsuffixcancel:%d:%s", session.Id, payload.ConfirmationToken)}},
 		}
 		return s.sendCollectManageMarkup(ctx, botId, chatId, fmt.Sprintf("确认修改频道后缀\n频道：%s%s\n新后缀：%s\n\n保存后将开启该频道采集，后续新采集资料使用此后缀。确认保存吗？", html.EscapeString(name), collectManageChannelLinkLine(payload.ChannelLink), html.EscapeString(suffix)), buttons)
 	case "cancel_queue":

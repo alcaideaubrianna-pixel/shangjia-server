@@ -417,12 +417,13 @@ type IntroFeeChannelBlacklistInp struct {
 }
 
 type IntroFeeChannelPurgeInp struct {
-	Id        int64  `json:"id"`
-	AccountId int64  `json:"accountId"`
-	RuleId    int64  `json:"ruleId"`
-	BotId     int64  `json:"botId"`
-	ChannelId string `json:"channelId"`
-	Preview   bool   `json:"preview"`
+	NotifyChatId string `json:"-"`
+	Id           int64  `json:"id"`
+	AccountId    int64  `json:"accountId"`
+	RuleId       int64  `json:"ruleId"`
+	BotId        int64  `json:"botId"`
+	ChannelId    string `json:"channelId"`
+	Preview      bool   `json:"preview"`
 }
 
 type IntroFeeChannelPurgeModel struct {
