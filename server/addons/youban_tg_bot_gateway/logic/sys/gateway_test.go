@@ -46,9 +46,17 @@ func (f *failingGatewayFeature) HandleUpdate(context.Context, service.BotContext
 	return false, errors.New("feature failed")
 }
 
-type recordingGatewayProvider struct{ called bool }
+type recordingGatewayProvider struct {
+	name   string
+	called bool
+}
 
-func (p *recordingGatewayProvider) Name() string { return "recording-test-provider" }
+func (p *recordingGatewayProvider) Name() string {
+	if p.name != "" {
+		return p.name
+	}
+	return "recording-test-provider"
+}
 func (p *recordingGatewayProvider) ListEnabledBots(context.Context) ([]service.BotBinding, error) {
 	return nil, nil
 }

@@ -261,15 +261,23 @@ func (s *sGateway) sync(ctx context.Context) error {
 	s.mu.Unlock()
 	s.scheduleLocalWebhookAudit(ctx, conf, bindings)
 	mode := runtimeMode(ctx, conf)
+	var syncErr error
 	for key, items := range bindings {
 		if len(items) == 0 {
 			continue
 		}
 		if err = s.ensure(ctx, key, items[0].Token, mode, conf); err != nil {
-			return err
+			if syncErr == nil {
+				syncErr = gerror.Wrapf(err, "同步Bot运行时失败 key:%s", key)
+			}
+			g.Log().Warningf(ctx, "同步Bot运行时失败，继续同步其他Bot key:%s err:%+v", key, err)
+			continue
 		}
 		if err = s.syncMenu(ctx, key, items[0].Token, items); err != nil {
-			return err
+			if syncErr == nil {
+				syncErr = gerror.Wrapf(err, "同步Bot菜单失败 key:%s", key)
+			}
+			g.Log().Warningf(ctx, "同步Bot菜单失败，继续同步其他Bot key:%s err:%+v", key, err)
 		}
 	}
 	s.mu.Lock()
@@ -285,7 +293,7 @@ func (s *sGateway) sync(ctx context.Context) error {
 	}
 	s.mu.Unlock()
 	s.observeBotCounts(ctx, len(bindings))
-	return nil
+	return syncErr
 }
 
 func (s *sGateway) scheduleLocalWebhookAudit(ctx context.Context, conf *service.RuntimeConfig, bindings map[string][]service.BotBinding) {
@@ -360,12 +368,38 @@ func loadClientBindings(ctx context.Context, key string, providers []service.Pro
 }
 
 func (s *sGateway) loadBindings(ctx context.Context) (map[string][]service.BotBinding, error) {
+	s.mu.Lock()
+	previous := cloneBindings(s.bindings)
+	s.mu.Unlock()
+	return loadProviderBindings(ctx, service.Providers(), previous)
+}
+
+// A provider is an addon boundary. Keep its last known bindings when that
+// addon is temporarily unavailable so it cannot take unrelated Bots offline.
+func loadProviderBindings(ctx context.Context, providers []service.Provider, previous map[string][]service.BotBinding) (map[string][]service.BotBinding, error) {
 	bindings := map[string][]service.BotBinding{}
-	for _, provider := range service.Providers() {
+	succeeded := 0
+	var firstErr error
+	for _, provider := range providers {
 		items, listErr := provider.ListEnabledBots(ctx)
 		if listErr != nil {
-			return nil, listErr
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			if firstErr == nil {
+				firstErr = gerror.Wrapf(listErr, "读取Bot提供方失败 provider:%s", provider.Name())
+			}
+			for key, oldItems := range previous {
+				for _, item := range oldItems {
+					if item.Owner == provider.Name() {
+						bindings[key] = append(bindings[key], item)
+					}
+				}
+			}
+			g.Log().Warningf(ctx, "读取Bot提供方失败，保留已有绑定 provider:%s err:%+v", provider.Name(), listErr)
+			continue
 		}
+		succeeded++
 		for _, item := range items {
 			item.Token = strings.TrimSpace(item.Token)
 			if item.Token == "" {
@@ -375,7 +409,18 @@ func (s *sGateway) loadBindings(ctx context.Context) (map[string][]service.BotBi
 			bindings[key] = append(bindings[key], item)
 		}
 	}
+	if succeeded == 0 && firstErr != nil {
+		return nil, firstErr
+	}
 	return bindings, nil
+}
+
+func cloneBindings(source map[string][]service.BotBinding) map[string][]service.BotBinding {
+	cloned := make(map[string][]service.BotBinding, len(source))
+	for key, items := range source {
+		cloned[key] = append([]service.BotBinding(nil), items...)
+	}
+	return cloned
 }
 
 func (s *sGateway) observeBotCounts(ctx context.Context, configured int) {

@@ -36,3 +36,37 @@ func TestClientBindingsIsolateUnrelatedProviderFailure(t *testing.T) {
 		t.Fatalf("cancellation ignored: %v", err)
 	}
 }
+
+func TestProviderBindingsIsolateFailureAndKeepPreviousBindings(t *testing.T) {
+	broken := &clientLookupProvider{
+		recordingGatewayProvider: recordingGatewayProvider{},
+		err:                      errors.New("missing addon column"),
+	}
+	healthy := &clientLookupProvider{
+		recordingGatewayProvider: recordingGatewayProvider{},
+		items:                    []service.BotBinding{{Owner: "publish", ReferenceID: 7, Token: "123:publish"}},
+	}
+	broken.recordingGatewayProvider.name = "two-way"
+	healthy.recordingGatewayProvider.name = "publish"
+	previous := map[string][]service.BotBinding{
+		tokenKey("456:relay"): {{Owner: "two-way", ReferenceID: 9, Token: "456:relay"}},
+	}
+
+	bindings, err := loadProviderBindings(context.Background(), []service.Provider{broken, healthy}, previous)
+	if err != nil {
+		t.Fatalf("loadProviderBindings() error = %v", err)
+	}
+	if len(bindings[tokenKey("123:publish")]) != 1 {
+		t.Fatal("healthy publish binding was not loaded")
+	}
+	if len(bindings[tokenKey("456:relay")]) != 1 {
+		t.Fatal("failed provider's previous binding was not retained")
+	}
+}
+
+func TestProviderBindingsFailsWhenEveryProviderFails(t *testing.T) {
+	broken := &clientLookupProvider{err: errors.New("database unavailable")}
+	if _, err := loadProviderBindings(context.Background(), []service.Provider{broken}, nil); err == nil {
+		t.Fatal("all-provider failure must be reported")
+	}
+}
