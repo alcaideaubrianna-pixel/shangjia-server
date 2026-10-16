@@ -62,10 +62,6 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 	defer heartbeatTicker.Stop()
 	if config.PushWorker {
 		s.startTelegramPushWorker(ctx)
-		// The durable outbox dispatcher belongs to the push worker lifecycle.
-		// Starting it here makes its ownership explicit and prevents it from
-		// silently disappearing when another runtime role is changed.
-		s.startTelegramOutboxDispatcher(ctx)
 	}
 	if telegramDeliveryRuntimeEnabled(config) {
 		// Telegram recovery belongs with the worker that owns delivery state.

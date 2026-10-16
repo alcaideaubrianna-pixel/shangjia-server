@@ -30,6 +30,10 @@ func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
 	s.tgQueueServer = server
 	s.tgBulkQueueServer = bulkServer
 	s.tgQueueMu.Unlock()
+	// The outbox dispatcher is part of the publish worker contract. Start it
+	// from the same lifecycle entry point as the Asynq consumers so a role
+	// parser or runtime branch cannot leave durable jobs stranded in pending.
+	s.startTelegramOutboxDispatcher(ctx)
 
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(tgTaskTypePublish, s.handleTelegramPublishTask)
