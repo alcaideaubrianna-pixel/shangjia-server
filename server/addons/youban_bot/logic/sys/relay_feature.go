@@ -35,8 +35,8 @@ func (f *relayGatewayFeature) Key() string { return consts.RelayFeatureKey }
 
 // Run before the dedicated two-way UI feature so pending relay usernames can
 // be activated by /start. Unbound messages return false and keep the original
-// two-way provider/feature flow unchanged.
-func (f *relayGatewayFeature) Priority() int { return 50 }
+// two-way provider/feature flow unchanged. Gateway priorities are descending.
+func (f *relayGatewayFeature) Priority() int { return 150 }
 func (f *relayGatewayFeature) Menus(ctx context.Context, bc gatewayservice.BotContext) (gatewayservice.FeatureMenus, error) {
 	for _, binding := range bc.Bindings {
 		if binding.Owner == relayTwoWayBotOwner {
