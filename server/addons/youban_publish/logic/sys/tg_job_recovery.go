@@ -103,6 +103,9 @@ func (s *sSysPublish) runTelegramJobRecoveryCycle(ctx context.Context) {
 		return
 	}
 	defer func() { _ = distributedLock.Unlock(context.Background()) }()
+	if err := s.maintainPermissionPausedBacklog(ctx); err != nil {
+		g.Log().Warningf(ctx, "清理频道权限暂停积压失败：%+v", err)
+	}
 	if err := s.retryChannelPermissionNotifications(ctx); err != nil {
 		g.Log().Warningf(ctx, "恢复频道权限暂停通知失败：%+v", err)
 	}

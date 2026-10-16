@@ -21,6 +21,53 @@ import (
 
 const channelPermissionCircuitTable = "hg_youban_publish_channel_permission_circuit"
 const channelPermissionPauseMessage = "频道连续10次权限错误，推送已暂停，请在机器人检查权限后恢复"
+const channelPermissionCancelledMessage = "频道权限暂停，历史未发送任务已终止；如需补投请主动重新上架"
+
+// The same row lock is used by pause/resume, including the first pause.
+// Returning zero from job creation deliberately does not persist deferred work.
+func lockChannelPermissionCreationTx(ctx context.Context, tx gdb.TX, tenantId, channelId int64) (bool, error) {
+	if _, err := tx.Model(channelPermissionCircuitTable).Safe().Ctx(ctx).InsertIgnore(g.Map{"tenant_id": tenantId, "channel_id": channelId}); err != nil {
+		return false, gerror.Wrap(err, "初始化频道权限状态失败")
+	}
+	row, err := tx.Model(channelPermissionCircuitTable).Safe().Ctx(ctx).Where("tenant_id", tenantId).Where("channel_id", channelId).LockUpdate().One()
+	return row["paused"].Int() == 1, err
+}
+
+// Only untouched jobs can be discarded without reconciling Telegram first.
+// Keep all delivery evidence, including soft-deleted messages, out of pruning.
+func permissionUntouchedJobSQL() string {
+	return "NOT EXISTS (SELECT 1 FROM " + publishTgAttemptTable + " a WHERE a.job_id=" + publishTgJobTable + ".id) AND NOT EXISTS (SELECT 1 FROM " + publishTgMessageTable + " m WHERE m.job_id=" + publishTgJobTable + ".id) AND COALESCE(send_phase,'') IN ('','cleanup_confirmed')"
+}
+
+func cancelPermissionBacklogTx(ctx context.Context, tx gdb.TX, tenantId, channelId int64, onlyJob ...int64) error {
+	mod := tx.Model(publishTgJobTable).Safe().Ctx(ctx).Where("tenant_id", tenantId).Where("channel_id", channelId).
+		WhereIn("status", []string{telegramJobStatusPending, telegramJobStatusRetryWait}).Where(permissionUntouchedJobSQL()).
+		Where("LOWER(TRIM(operation_no)) NOT LIKE ?", "down:%").
+		Where("operation_no NOT LIKE ?", "message_push:%").Where("operation_no NOT LIKE ?", "message_push_plan:%")
+	if len(onlyJob) > 0 {
+		mod = mod.Where("id", onlyJob[0])
+	}
+	var jobs []telegramJobRecord
+	if err := mod.Fields("id").OrderAsc("id").Limit(200).LockUpdate().Scan(&jobs); err != nil {
+		return err
+	}
+	ids := make([]int64, 0, len(jobs))
+	for _, job := range jobs {
+		ids = append(ids, job.Id)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	_, err := tx.Model(publishTgJobTable).Safe().Ctx(ctx).WhereIn("id", ids).
+		Data(g.Map{"status": telegramJobStatusSuperseded, "dispatch_status": tgDispatchStatusDone, "next_retry_at": nil, "last_dispatch_error": channelPermissionCancelledMessage}).Update()
+	if err != nil {
+		return err
+	}
+	_, err = tx.Model(publishTgOutboxTable).Safe().Ctx(ctx).Where("event_type", telegramOutboxEventPublish).
+		WhereIn("job_id", ids).
+		Data(g.Map{"status": telegramOutboxDelivered, "lease_owner": "", "lease_expires_at": nil, "delivered_at": gtime.Now()}).Update()
+	return err
+}
 
 type channelPermissionCircuit struct {
 	TenantId   int64
@@ -62,7 +109,7 @@ func telegramChannelPermissionStreak(jobs []telegramJobRecord) bool {
 }
 
 func (s *sSysPublish) channelPermissionCircuit(ctx context.Context, job telegramJobRecord) (*channelPermissionCircuit, error) {
-	if job.ChannelId <= 0 || job.TenantId <= 0 || isMessagePushOperationNo(job.OperationNo) {
+	if job.ChannelId <= 0 || job.TenantId <= 0 || isMessagePushOperationNo(job.OperationNo) || isDownTelegramOperationNo(job.OperationNo) {
 		return nil, nil
 	}
 	var row *channelPermissionCircuit
@@ -83,7 +130,7 @@ func (s *sSysPublish) postponePermissionPausedJob(ctx context.Context, job teleg
 	if err != nil {
 		return false, gerror.Wrap(err, "读取频道权限暂停状态失败，请确认数据库迁移已执行")
 	}
-	if row == nil || row.Paused != 1 {
+	if row == nil || (row.Paused != 1 && row.ResumedAt == nil) {
 		return false, nil
 	}
 	parked := false
@@ -98,9 +145,29 @@ func (s *sSysPublish) postponePermissionPausedJob(ctx context.Context, job teleg
 func parkPermissionPausedJobTx(ctx context.Context, tx gdb.TX, job telegramJobRecord, generation string) (bool, error) {
 	// Serialize parking with resume. Otherwise a stale worker can move an
 	// Outbox back into the future immediately after the owner resumes it.
-	row, err := tx.Model(channelPermissionCircuitTable).Safe().Ctx(ctx).Where("tenant_id", job.TenantId).Where("channel_id", job.ChannelId).Where("generation", generation).Where("paused", 1).LockUpdate().One()
+	row, err := tx.Model(channelPermissionCircuitTable).Safe().Ctx(ctx).Where("tenant_id", job.TenantId).Where("channel_id", job.ChannelId).Where("generation", generation).LockUpdate().One()
 	if err != nil || row.IsEmpty() {
 		return false, err
+	}
+	if row["paused"].Int() != 1 {
+		if row["resumed_at"].IsNil() {
+			return false, nil
+		}
+		old, err := tx.Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Where("created_at <= ?", row["resumed_at"]).Where(permissionUntouchedJobSQL()).Count()
+		if err != nil || old == 0 {
+			return false, err
+		}
+		return true, cancelPermissionBacklogTx(ctx, tx, job.TenantId, job.ChannelId, job.Id)
+	}
+	if err := cancelPermissionBacklogTx(ctx, tx, job.TenantId, job.ChannelId, job.Id); err != nil {
+		return false, err
+	}
+	current, err := tx.Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Fields("status,last_dispatch_error").One()
+	if err != nil {
+		return false, err
+	}
+	if current["status"].String() == telegramJobStatusSuperseded && current["last_dispatch_error"].String() == channelPermissionCancelledMessage {
+		return true, nil
 	}
 	result, err := tx.Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Where("tenant_id", job.TenantId).Where("channel_id", job.ChannelId).
 		WhereIn("status", []string{telegramJobStatusPending, telegramJobStatusRetryWait}).
@@ -123,7 +190,7 @@ func parkPermissionPausedJobTx(ctx context.Context, tx gdb.TX, job telegramJobRe
 // Called only after a successful sending -> failed transition, so redelivery
 // of the same worker task cannot count as another permission failure.
 func (s *sSysPublish) recordChannelPermissionFailure(ctx context.Context, job telegramJobRecord, cause error) error {
-	if !isTelegramPermissionCircuitError(cause) || telegramSendPhaseIsCleanup(job.SendPhase) || isMessagePushOperationNo(job.OperationNo) {
+	if !isTelegramPermissionCircuitError(cause) || telegramSendPhaseIsCleanup(job.SendPhase) || isMessagePushOperationNo(job.OperationNo) || isDownTelegramOperationNo(job.OperationNo) {
 		return nil
 	}
 	row, err := s.channelPermissionCircuit(ctx, job)
@@ -163,7 +230,7 @@ func channelPermissionRecentJobs(ctx context.Context, mod *gdb.Model, job telegr
 	mod = mod.Safe().Ctx(ctx).
 		Fields("id,status,error_message,send_phase").Where("tenant_id", job.TenantId).Where("channel_id", job.ChannelId).
 		WhereIn("status", []string{"sent", "failed", "failed_retry", "unknown"}).
-		Where("dispatch_count > 0").Where("operation_no NOT LIKE ?", "message_push:%").Where("operation_no NOT LIKE ?", "message_push_plan:%")
+		Where("dispatch_count > 0").Where("LOWER(TRIM(operation_no)) NOT LIKE ?", "down:%").Where("operation_no NOT LIKE ?", "message_push:%").Where("operation_no NOT LIKE ?", "message_push_plan:%")
 	if row != nil && row.ResumedAt != nil {
 		mod = mod.Where("updated_at > ?", row.ResumedAt)
 	}
@@ -191,12 +258,9 @@ func pauseChannelPermissionTx(ctx context.Context, tx gdb.TX, job telegramJobRec
 	if err != nil || changed == 0 {
 		return err
 	}
-	// Preserve every pending job. Only their scheduling is parked; collection
-	// and deletion are independent and remain enabled.
-	_, err = tx.Model(publishTgJobTable).Safe().Ctx(ctx).Where("tenant_id", job.TenantId).Where("channel_id", job.ChannelId).
-		WhereIn("status", []string{"pending", "failed_retry"}).
-		Data(g.Map{"next_retry_at": gtime.Now().Add(time.Hour), "last_dispatch_error": channelPermissionPauseMessage}).Update()
-	return err
+	// Bound the initial transaction too. Remaining backlog is handled by the
+	// enqueue/send gates and the recovery batch, never an unbounded update.
+	return cancelPermissionBacklogTx(ctx, tx, job.TenantId, job.ChannelId)
 }
 
 func (s *sSysPublish) notifyChannelPermissionCircuit(ctx context.Context, expected *channelPermissionCircuit) error {
@@ -213,7 +277,7 @@ func (s *sSysPublish) notifyChannelPermissionCircuit(ctx context.Context, expect
 	}
 	err = botservice.SysBot().NotifyAccount(ctx, &botin.NotifyAccountInp{BotStrategy: "official", FallbackBoundBot: true, RequireDelivery: true, IgnoreFeatureSwitch: true,
 		App: "api", AccountId: row.AccountId,
-		Text:    fmt.Sprintf("频道推送已暂停\n频道：%s\n连续10次发送出现频道不存在或权限不足错误。请先将推送 Bot 添加为管理员并开启发布消息权限，再点击恢复。采集、删除和积压任务保留。", html.EscapeString(channel.ChannelTitle)),
+		Text:    fmt.Sprintf("频道推送已暂停\n频道：%s\n连续10次发送出现频道不存在或权限不足错误。请先将推送 Bot 添加为管理员并开启发布消息权限，再点击恢复。采集与资料保留，暂停期间不新增发送任务；历史未发送任务不会自动补投，调度记录最长保留一个月。", html.EscapeString(channel.ChannelTitle)),
 		Buttons: [][]botin.NotifyButton{{{Label: "检查权限并恢复推送", Data: fmt.Sprintf("ch:pr:%d:%s", row.ChannelId, row.Generation)}}},
 	})
 	if err != nil {

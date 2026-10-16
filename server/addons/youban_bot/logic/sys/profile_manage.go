@@ -3238,7 +3238,7 @@ func (s *sSysBot) handleChannelCallback(ctx context.Context, botId int64, chatId
 		if err != nil {
 			return true, s.replyBotError(ctx, botId, chatId, "频道权限检查", err)
 		}
-		return true, s.sendMessageOnly(ctx, botId, chatId, "权限检查通过，频道已恢复推送，积压任务将按原顺序继续。")
+		return true, s.sendMessageOnly(ctx, botId, chatId, "权限检查通过，频道已恢复推送。后续新资料将正常发送；历史未发送资料不会自动补投，如需补投请主动重新上架。")
 	}
 	if account.AccountType != "admin" {
 		return true, s.sendMessageOnly(ctx, botId, chatId, "频道管理仅管理员可用。")

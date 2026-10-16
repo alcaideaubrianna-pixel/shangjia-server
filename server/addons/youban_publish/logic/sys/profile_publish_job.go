@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"sort"
 	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -107,6 +108,8 @@ func (s *sSysPublish) prepareProfilePublishJobs(ctx context.Context, profileId, 
 		operationNo = newTelegramOperationNo("profile", profileId)
 	}
 	jobIds := make([]int64, 0, len(channels))
+	// Creation locks channel circuit rows; always acquire them in ID order.
+	sort.Slice(channels, func(i, j int) bool { return channels[i].Id < channels[j].Id })
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		if txErr := s.beginProfilePublishOperationTx(ctx, tx, source["tenant_id"].Int64(), source["account_id"].Int64(), profileId, operationNo); txErr != nil {
 			return txErr
@@ -115,6 +118,9 @@ func (s *sSysPublish) prepareProfilePublishJobs(ctx context.Context, profileId, 
 			jobId, createErr := s.ensureTelegramProfileJobWithMetaTx(ctx, tx, source, channel, operationNo, meta)
 			if createErr != nil {
 				return createErr
+			}
+			if jobId == 0 { // Permission-paused channels keep profiles, not new queue intents.
+				continue
 			}
 			if strings.TrimSpace(meta.InitialSendPhase) != "" {
 				if _, createErr = tx.Model(publishTgJobTable).Safe().Ctx(ctx).
@@ -127,6 +133,9 @@ func (s *sSysPublish) prepareProfilePublishJobs(ctx context.Context, profileId, 
 				return createErr
 			}
 			jobIds = append(jobIds, jobId)
+		}
+		if len(channels) > 0 && len(jobIds) == 0 {
+			return s.writeProfilePublishOperationStateTx(ctx, tx, source["tenant_id"].Int64(), source["account_id"].Int64(), profileId, operationNo, sysin.PublishTaskStatusFailed, true)
 		}
 		return nil
 	})
@@ -167,6 +176,10 @@ func (s *sSysPublish) ensureTelegramProfileJobWithMeta(ctx context.Context, sour
 }
 
 func (s *sSysPublish) ensureTelegramProfileJobWithMetaTx(ctx context.Context, tx gdb.TX, source gdb.Record, channel telegramJobChannel, operationNo string, meta telegramProfilePublishMeta) (int64, error) {
+	paused, err := lockChannelPermissionCreationTx(ctx, tx, source["tenant_id"].Int64(), channel.Id)
+	if err != nil || paused {
+		return 0, err
+	}
 	existing, err := tx.Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("profile_id", source["profile_id"].Int64()).
 		Where("operation_no", operationNo).

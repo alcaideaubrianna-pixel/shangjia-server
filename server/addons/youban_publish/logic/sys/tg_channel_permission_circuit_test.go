@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gogf/gf/v2/container/gvar"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/os/gtime"
 	"hotgo/addons/youban_publish/model/input/sysin"
@@ -62,7 +63,10 @@ func TestTelegramPermissionCircuitLocalPostgres(t *testing.T) {
 			return err
 		}
 		for _, sql := range []string{
-			"CREATE TEMP TABLE " + publishTgJobTable + " (id bigint PRIMARY KEY,tenant_id bigint,channel_id bigint,status text,dispatch_status text,last_dispatch_error text,next_retry_at timestamp,updated_at timestamp,dispatch_count int DEFAULT 1,operation_no text DEFAULT '',error_message text DEFAULT 'Bad Request: chat not found',send_phase text DEFAULT '')",
+			"CREATE TEMP TABLE " + publishTgJobTable + " (id bigint PRIMARY KEY,tenant_id bigint,channel_id bigint,status text,dispatch_status text,last_dispatch_error text,next_retry_at timestamp,updated_at timestamp,created_at timestamp DEFAULT NOW(),dispatch_count int DEFAULT 1,operation_no text DEFAULT '',error_message text DEFAULT 'Bad Request: chat not found',send_phase text DEFAULT '')",
+			"CREATE TEMP TABLE " + publishTgAttemptTable + " (id bigint,job_id bigint)",
+			"CREATE TEMP TABLE " + publishTgMessageTable + " (id bigint,job_id bigint)",
+			"INSERT INTO " + publishTgAttemptTable + " VALUES (1,1)",
 			"CREATE TEMP TABLE " + publishTgOutboxTable + " (id bigserial PRIMARY KEY,job_id bigint,status text,event_type text DEFAULT 'telegram_job.publish',dedupe_key text UNIQUE,available_at timestamp,updated_at timestamp,created_at timestamp,lease_owner text,lease_expires_at timestamp,delivered_at timestamp)",
 			"INSERT INTO " + publishTgJobTable + " (id,tenant_id,channel_id,status,dispatch_status,last_dispatch_error,next_retry_at,updated_at) VALUES (1,1,20,'pending','idle','',NULL,NULL),(2,1,20,'unknown','idle','',NULL,NULL),(3,2,20,'pending','idle','',NULL,NULL),(4,1,21,'pending','idle','',NULL,NULL),(5,1,20,'failed','done','',NULL,NULL)",
 			"INSERT INTO " + publishTgOutboxTable + " (id,job_id,status,available_at,dedupe_key) VALUES (1,1,'pending',NOW()+interval '1 hour','telegram-job:1:initial'),(2,3,'pending',NOW()+interval '1 hour','telegram-job:3:initial')",
@@ -175,6 +179,76 @@ func TestTelegramPermissionCircuitLocalPostgres(t *testing.T) {
 		}
 		if parked {
 			t.Fatal("late worker parked job after resume")
+		}
+		// Long-term pause: no new job, no hourly transport retry, and a
+		// bounded batch of only untouched publishing jobs is cancelled.
+		for _, statement := range []string{
+			"CREATE TEMP TABLE " + publishSuccessRecordTable + " (job_id bigint)",
+			"INSERT INTO " + publishTgJobTable + " (id,tenant_id,channel_id,status,created_at) SELECT 1000+n,1,40,'pending',NOW()-interval '2 months' FROM generate_series(1,250) n",
+			"INSERT INTO " + publishTgJobTable + " (id,tenant_id,channel_id,status,operation_no) VALUES (2001,1,40,'pending','down:1:1'),(2002,2,40,'pending','profile:other'),(2003,1,40,'unknown','profile:unknown'),(2004,1,40,'pending','profile:evidence')",
+			"INSERT INTO " + publishTgAttemptTable + " VALUES (2,2004)",
+			"INSERT INTO " + publishTgOutboxTable + " (id,job_id,status,dedupe_key) VALUES (1001,1001,'pending','old-job-1001')",
+			"INSERT INTO " + publishSuccessRecordTable + " VALUES (1001)",
+		} {
+			if _, err = tx.Exec(statement); err != nil {
+				return err
+			}
+		}
+		longJob := telegramJobRecord{Id: 3000, TenantId: 1, ChannelId: 40}
+		if err = pauseChannelPermissionTx(ctx, tx, longJob, 77, "long-pause", nil); err != nil {
+			return err
+		}
+		newJob, err := (&sSysPublish{}).ensureTelegramProfileJobWithMetaTx(ctx, tx, gdb.Record{"tenant_id": gvar.New(1)}, telegramJobChannel{Id: 40}, "new-profile", telegramProfilePublishMeta{})
+		if err != nil || newJob != 0 {
+			t.Fatalf("paused creation must not create a job: id=%d err=%v", newJob, err)
+		}
+		count, err := tx.Model(publishTgJobTable).Where("channel_id", 40).Where("status", "superseded").Count()
+		if err != nil || count != 200 {
+			t.Fatalf("cancellation must be bounded to 200: count=%d err=%v", count, err)
+		}
+		row, err = tx.GetOne("SELECT status FROM " + publishTgOutboxTable + " WHERE job_id=1001")
+		if err != nil || row["status"].String() != telegramOutboxDelivered {
+			t.Fatalf("cancelled outbox is still retrying: %v %v", row, err)
+		}
+		for _, id := range []int64{2001, 2002, 2003, 2004} {
+			row, err = tx.GetOne("SELECT status FROM "+publishTgJobTable+" WHERE id=?", id)
+			if err != nil || row["status"].String() == "superseded" {
+				t.Fatalf("deletion, other tenant or evidence was cancelled: id=%d err=%v", id, err)
+			}
+		}
+		if err = resumeChannelPermissionTx(ctx, tx, &sysin.BotChannelActionInp{TenantId: 1, AccountId: 77, ChannelId: 40}, "long-pause"); err != nil {
+			return err
+		}
+		parked, err = parkPermissionPausedJobTx(ctx, tx, telegramJobRecord{Id: 1250, TenantId: 1, ChannelId: 40}, "long-pause")
+		if err != nil || !parked {
+			t.Fatalf("resume must not send untouched historical backlog: parked=%v err=%v", parked, err)
+		}
+		if _, err = tx.Exec("INSERT INTO " + publishTgJobTable + " (id,tenant_id,channel_id,status,created_at) VALUES (3001,1,40,'pending',NOW()+interval '1 hour')"); err != nil {
+			return err
+		}
+		parked, err = parkPermissionPausedJobTx(ctx, tx, telegramJobRecord{Id: 3001, TenantId: 1, ChannelId: 40}, "long-pause")
+		if err != nil || parked {
+			t.Fatalf("new post-resume jobs must proceed: parked=%v err=%v", parked, err)
+		}
+		if _, err = tx.Exec("UPDATE " + publishTgJobTable + " SET updated_at=NOW()-interval '33 days' WHERE id=1001"); err != nil {
+			return err
+		}
+		if err = prunePermissionCancelledJobsTx(ctx, tx, gtime.New(time.Now().AddDate(0, -1, 0))); err != nil {
+			return err
+		}
+		for _, table := range []string{publishTgJobTable, publishTgOutboxTable, publishSuccessRecordTable} {
+			key := "job_id"
+			if table == publishTgJobTable {
+				key = "id"
+			}
+			count, err = tx.Model(table).Where(key, 1001).Count()
+			if err != nil || count != 0 {
+				t.Fatalf("expired schedule survived: table=%s count=%d err=%v", table, count, err)
+			}
+		}
+		count, err = tx.Model(publishTgJobTable).Where("id", 1002).Count()
+		if err != nil || count != 1 {
+			t.Fatalf("recent cancellation must retain its month: %d %v", count, err)
 		}
 		return nil
 	})
