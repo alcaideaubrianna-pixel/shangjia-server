@@ -77,9 +77,20 @@ func (s *sSysBot) relayEnsureConfig(ctx context.Context, account *botProfileAcco
 		if err = dao.YoubanBotRelayConfig.Ctx(ctx).Where(dao.YoubanBotRelayConfig.Columns().BotId, twoWayBotID).Scan(&config); err != nil {
 			return err
 		}
+		if config == nil {
+			if err = dao.YoubanBotRelayConfig.Ctx(ctx).Where(dao.YoubanBotRelayConfig.Columns().SourceBotId, twoWayBotID).Scan(&config); err != nil {
+				return err
+			}
+		}
 		if config != nil {
 			if config.TenantId != account.TenantId || config.AccountId != account.AccountId {
 				return gerror.New("该双向机器人已属于其他租户账户")
+			}
+			if config.BotId != twoWayBotID {
+				if err = migrateRelayBotID(ctx, config.BotId, twoWayBotID); err != nil {
+					return err
+				}
+				config.BotId = twoWayBotID
 			}
 			return nil
 		}
@@ -93,6 +104,33 @@ func (s *sSysBot) relayEnsureConfig(ctx context.Context, account *botProfileAcco
 		return dao.YoubanBotRelayConfig.Ctx(ctx).Where(dao.YoubanBotRelayConfig.Columns().BotId, twoWayBotID).Scan(&config)
 	})
 	return config, err
+}
+
+func migrateRelayBotID(ctx context.Context, oldBotID, newBotID int64) error {
+	if oldBotID <= 0 || newBotID <= 0 || oldBotID == newBotID {
+		return nil
+	}
+	updates := []struct {
+		model  *gdb.Model
+		column string
+	}{
+		{dao.YoubanBotRelayAdmin.Ctx(ctx), dao.YoubanBotRelayAdmin.Columns().BotId},
+		{dao.YoubanBotRelayAuditTopic.Ctx(ctx), dao.YoubanBotRelayAuditTopic.Columns().BotId},
+		{dao.YoubanBotRelayBinding.Ctx(ctx), dao.YoubanBotRelayBinding.Columns().BotId},
+		{dao.YoubanBotRelayDelivery.Ctx(ctx), dao.YoubanBotRelayDelivery.Columns().BotId},
+		{dao.YoubanBotRelayEndpoint.Ctx(ctx), dao.YoubanBotRelayEndpoint.Columns().BotId},
+		{dao.YoubanBotRelayRule.Ctx(ctx), dao.YoubanBotRelayRule.Columns().BotId},
+	}
+	for _, update := range updates {
+		if _, err := update.model.Where(update.column, oldBotID).Data(update.column, newBotID).Update(); err != nil {
+			return gerror.Wrap(err, "迁移双向机器人关联数据失败")
+		}
+	}
+	c := dao.YoubanBotRelayConfig.Columns()
+	if _, err := dao.YoubanBotRelayConfig.Ctx(ctx).Where(c.BotId, oldBotID).Data(c.BotId, newBotID).Update(); err != nil {
+		return gerror.Wrap(err, "迁移双向机器人设置失败")
+	}
+	return nil
 }
 
 // relayAttachBackendBot remains an idempotent compatibility boundary for old
