@@ -294,6 +294,9 @@ func (s *sSysPublish) dispatchDueTelegramJobOutbox(ctx context.Context, limit in
 	if err != nil {
 		return err
 	}
+	if len(rows) > 0 {
+		g.Log().Infof(ctx, "TG Outbox dispatcher selected jobs:%d", len(rows))
+	}
 	for _, row := range rows {
 		if err = s.dispatchTelegramJobOutbox(ctx, row); err != nil {
 			g.Log().Warningf(ctx, "投递TG任务Outbox失败 outboxId:%d jobId:%d err:%+v", row.Id, row.JobId, err)
@@ -416,6 +419,7 @@ func (s *sSysPublish) startTelegramOutboxDispatcher(ctx context.Context) {
 	}
 	s.telegramOutboxStarted = true
 	s.tgQueueMu.Unlock()
+	g.Log().Info(ctx, "TG Outbox dispatcher started")
 	go func() {
 		defer func() {
 			if recovered := recover(); recovered != nil {
