@@ -31,7 +31,7 @@ func (s *sSysPublish) handleMediaProcessTask(ctx context.Context, task *asynq.Ta
 		return nil
 	}
 	status := strings.TrimSpace(media["processing_status"].String())
-	if status == mediaProcessingReady {
+	if status == mediaProcessingReady && strings.TrimSpace(media["md5"].String()) != "" {
 		return nil
 	}
 	_, err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
@@ -54,6 +54,7 @@ func (s *sSysPublish) handleMediaProcessTask(ctx context.Context, task *asynq.Ta
 		fileURL,
 		media["poster_url"].String(),
 		media["name"].String(),
+		media["md5"].String(),
 	)
 	if processErr != nil {
 		_, _ = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Where("id", payload.MediaId).Data(g.Map{
@@ -67,6 +68,7 @@ func (s *sSysPublish) handleMediaProcessTask(ctx context.Context, task *asynq.Ta
 		"processing_status": mediaProcessingReady,
 		"processing_error":  "",
 		"perceptual_hash":   metadata.PerceptualHash,
+		"md5":               metadata.MD5,
 		"updated_at":        gtime.Now(),
 	}
 	if metadata.PosterURL != "" {

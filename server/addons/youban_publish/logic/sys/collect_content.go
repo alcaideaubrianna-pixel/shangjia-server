@@ -226,12 +226,15 @@ func (s *sSysPublish) enrichCollectContentMediaMetadata(ctx context.Context, res
 		if storagePath == "" && strings.TrimSpace(item.FileUrl) == "" {
 			continue
 		}
-		assets, err := processMediaAssetMetadata(ctx, mediaType, storagePath, item.FileUrl, item.PosterUrl, "")
+		assets, err := processMediaAssetMetadata(ctx, mediaType, storagePath, item.FileUrl, item.PosterUrl, "", item.FileMd5)
 		if err != nil || assets == nil || strings.TrimSpace(assets.PerceptualHash) == "" {
 			if err != nil {
 				g.Log().Warningf(ctx, "采集资料媒体 PHash 计算失败 mediaType:%s storagePath:%s err:%v", mediaType, storagePath, err)
 			}
 			continue
+		}
+		if strings.TrimSpace(item.FileMd5) == "" {
+			item.FileMd5 = assets.MD5
 		}
 		item.FilePhash = strings.TrimSpace(assets.PerceptualHash)
 		changed = true
