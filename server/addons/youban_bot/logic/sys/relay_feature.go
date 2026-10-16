@@ -66,6 +66,12 @@ func (f *relayGatewayFeature) HandleUpdate(ctx context.Context, bc gatewayservic
 			return false, nil
 		}
 		if binding.Owner == relayTwoWayBotOwner {
+			// The dedicated two-way provider owns the original chat/topic flow.
+			// This extension may consume only its explicit management commands;
+			// ordinary messages must continue to the original provider.
+			if update != nil && update.Message != nil && !relayGatewayCommand(update.Message.Text) {
+				return false, nil
+			}
 			cfg, err := f.bot.relaySourceIdentity(ctx, binding.ReferenceID)
 			if err != nil || cfg == nil || cfg.Enabled != 1 {
 				return false, err
@@ -78,4 +84,22 @@ func (f *relayGatewayFeature) HandleUpdate(ctx context.Context, bc gatewayservic
 		}
 	}
 	return false, nil
+}
+
+func relayGatewayCommand(text string) bool {
+	command := parseRelayCommand(text)
+	if command.Name == "/help" || command.Name == "/id" {
+		return true
+	}
+	for _, name := range []string{
+		"绑定", "解绑", "确认解绑", "绑定列表", "添加管理员", "删除管理员", "管理员列表",
+		"屏蔽", "删除屏蔽", "屏蔽用户", "解除屏蔽用户", "屏蔽群", "解除屏蔽群",
+		"屏蔽列表", "黑名单", "屏蔽跳转", "当前设置", "私聊用户", "群聊列表",
+		"审计设置", "聊天存档", "转发群", "关闭转发",
+	} {
+		if command.Name == name {
+			return true
+		}
+	}
+	return false
 }

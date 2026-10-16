@@ -18,6 +18,19 @@ func relayIsolationUpdate() *models.Update {
 	return &models.Update{Message: &models.Message{ID: 1, Text: "管理后台", From: &models.User{ID: 12}, Chat: models.Chat{ID: 12, Type: models.ChatTypePrivate}}}
 }
 
+func TestRelayGatewayDoesNotClaimOriginalTwoWayMessages(t *testing.T) {
+	for _, text := range []string{"/start", "hello", "管理后台", "照片说明", ""} {
+		if relayGatewayCommand(text) {
+			t.Fatalf("original two-way message was claimed: %q", text)
+		}
+	}
+	for _, text := range []string{"/help", "/id", "绑定 @alice @bob", "屏蔽 广告", "当前设置"} {
+		if !relayGatewayCommand(text) {
+			t.Fatalf("extension command was not claimed: %q", text)
+		}
+	}
+}
+
 func TestRelayMissingMigrationDoesNotDisableMainBot(t *testing.T) {
 	ctx := relayTestDatabase(t)
 	relayTestBaseTable(t, ctx, featureTable)
