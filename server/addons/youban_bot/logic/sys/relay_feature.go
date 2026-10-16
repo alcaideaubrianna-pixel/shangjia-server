@@ -76,6 +76,9 @@ func (f *relayGatewayFeature) HandleUpdate(ctx context.Context, bc gatewayservic
 			// The dedicated two-way provider owns the original chat/topic flow.
 			// This extension may consume only its explicit management commands;
 			// ordinary messages must continue to the original provider.
+			if update != nil && update.Message != nil && isOriginalTwoWayMenuInput(update.Message.Text) {
+				return false, nil
+			}
 			if update != nil && update.Message != nil && !relayGatewayCommand(update.Message.Text) {
 				bound, boundErr := f.bot.relayGatewayEndpointBound(ctx, binding.ReferenceID, update.Message)
 				if boundErr != nil || !bound {
@@ -94,6 +97,10 @@ func (f *relayGatewayFeature) HandleUpdate(ctx context.Context, bc gatewayservic
 		}
 	}
 	return false, nil
+}
+
+func isOriginalTwoWayMenuInput(text string) bool {
+	return strings.TrimSpace(text) == "双向聊天"
 }
 
 // relayGatewayEndpointBound keeps the original two-way provider in control of
