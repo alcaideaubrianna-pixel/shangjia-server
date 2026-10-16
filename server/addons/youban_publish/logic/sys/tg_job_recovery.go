@@ -912,8 +912,11 @@ func telegramActiveChannelCondition() string {
 }
 
 func telegramActiveChannelConditionForAlias(jobTable string) string {
-	publishChannelCondition := "EXISTS (SELECT 1 FROM " + publishChannelTable + " c WHERE c.id=" + jobTable + ".channel_id AND c.tenant_id=" + jobTable + ".tenant_id AND c.status=1 AND c.deleted_at IS NULL)"
-	messagePushChannelCondition := "((" + jobTable + ".operation_no LIKE 'message_push:%' OR " + jobTable + ".operation_no LIKE 'message_push_plan:%') AND EXISTS (SELECT 1 FROM " + publishTgChannelTable + " tc WHERE tc.id=" + jobTable + ".channel_id AND tc.tenant_id=" + jobTable + ".tenant_id AND tc.tg_account_id=" + jobTable + ".account_id AND REPLACE(tc.channel_id, '-100', '') = REPLACE(" + jobTable + ".target_chat_id, '-100', '')))"
+	publishChannelCondition := "EXISTS (SELECT 1 FROM " + publishChannelTable + " c INNER JOIN " + publishTgAccountTable + " a ON a.id=c.tg_account_id AND a.tenant_id=c.tenant_id AND a.status='authorized' AND NULLIF(BTRIM(a.session_key), '') IS NOT NULL AND a.deleted_at IS NULL WHERE c.id=" + jobTable + ".channel_id AND c.tenant_id=" + jobTable + ".tenant_id AND c.status=1 AND c.deleted_at IS NULL)"
+	messagePushChannelCondition := "((" + jobTable + ".operation_no LIKE 'message_push:%' OR " + jobTable + ".operation_no LIKE 'message_push_plan:%') AND EXISTS (SELECT 1 FROM " + publishTgChannelTable + " tc INNER JOIN " + publishTgAccountTable + " a ON a.id=tc.tg_account_id AND a.tenant_id=tc.tenant_id AND a.status='authorized' AND NULLIF(BTRIM(a.session_key), '') IS NOT NULL AND a.deleted_at IS NULL WHERE tc.id=" + jobTable + ".channel_id AND tc.tenant_id=" + jobTable + ".tenant_id AND REPLACE(tc.channel_id, '-100', '') = REPLACE(" + jobTable + ".target_chat_id, '-100', '')))"
+	// An expired protocol account must not be continuously re-enqueued. Keep
+	// its jobs durable and eligible for a later login-triggered rescan, while
+	// excluding them from the active recovery/dispatch loops in the meantime.
 	return "(" + publishChannelCondition + " OR " + messagePushChannelCondition + ")"
 }
 

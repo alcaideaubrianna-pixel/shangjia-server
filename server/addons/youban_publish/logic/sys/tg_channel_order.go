@@ -91,12 +91,17 @@ func telegramChannelBlockingJobSQL(alias string) string {
 	if alias != "" {
 		alias += "."
 	}
-	return fmt.Sprintf(`(%[1]sstatus IN ('pending','failed_retry','unknown','confirming','sending') OR
+	// Unknown jobs are reconciled independently. They must not hold the normal
+	// channel queue hostage while waiting for a webhook or account fallback.
+	// Jobs tied to an unavailable protocol account are likewise left durable but
+	// excluded until the account is authorized again.
+	accountCondition := fmt.Sprintf(`(EXISTS (SELECT 1 FROM %[3]s c INNER JOIN %[4]s a ON a.id=c.tg_account_id AND a.tenant_id=c.tenant_id AND a.status='authorized' AND NULLIF(BTRIM(a.session_key), '') IS NOT NULL AND a.deleted_at IS NULL WHERE c.id=%[1]schannel_id AND c.tenant_id=%[1]stenant_id AND c.status=1 AND c.deleted_at IS NULL) OR EXISTS (SELECT 1 FROM %[5]s tc INNER JOIN %[4]s a ON a.id=tc.tg_account_id AND a.tenant_id=tc.tenant_id AND a.status='authorized' AND NULLIF(BTRIM(a.session_key), '') IS NOT NULL AND a.deleted_at IS NULL WHERE tc.id=%[1]schannel_id AND tc.tenant_id=%[1]stenant_id))`, alias, publishTgMessageTable, publishChannelTable, publishTgAccountTable, publishTgChannelTable)
+	return fmt.Sprintf(`(%[3]s AND (%[1]sstatus IN ('pending','failed_retry','confirming','sending') OR
 		(%[1]sstatus='failed' AND %[1]ssend_phase='display_confirmed' AND EXISTS (
 			SELECT 1 FROM %[2]s channel_display
 			WHERE channel_display.job_id=%[1]sid AND channel_display.purpose='display'
 				AND channel_display.status='sent' AND channel_display.deleted_at IS NULL
-		)))`, alias, publishTgMessageTable)
+		)))`, alias, publishTgMessageTable, accountCondition)
 }
 
 func telegramChannelOrderChatKey(chatID string) string {

@@ -50,6 +50,18 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) error {
 	if targetJob.CollectSourceId > 0 && !s.collectPushEnabled(ctx) {
 		return s.postponeTelegramJobForCollectPushPause(ctx, targetJob)
 	}
+	// An uncertain Telegram result belongs to the reconciliation lane. It must
+	// not acquire the normal channel lease or delay the next publish operation;
+	// the attempt timeout/reconcile worker is the only owner allowed to settle
+	// this job.
+	if targetJob.Status == telegramJobStatusConfirming {
+		if waiting, waitErr := s.telegramJobHasWaitingAttempt(ctx, targetJob.Id); waitErr != nil {
+			return waitErr
+		} else if waiting {
+			return nil
+		}
+		return s.reconcileUnknownTelegramJob(ctx, targetJob)
+	}
 	lease, ok, err := s.tryTelegramChannelLease(ctx, targetJob.TargetChatId)
 	if err != nil {
 		return err
@@ -88,14 +100,6 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) error {
 	targetJob, err = s.telegramJobById(ctx, jobId)
 	if err != nil {
 		return err
-	}
-	if targetJob.Status == "unknown" {
-		if waiting, waitErr := s.telegramJobHasWaitingAttempt(ctx, targetJob.Id); waitErr != nil {
-			return waitErr
-		} else if waiting {
-			return nil
-		}
-		return s.reconcileUnknownTelegramJob(ctx, targetJob)
 	}
 	if isDownTelegramOperationNo(targetJob.OperationNo) {
 		return s.sendQueuedDownChannelTelegramJob(ctx, jobId)

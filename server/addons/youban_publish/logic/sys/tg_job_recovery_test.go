@@ -17,7 +17,7 @@ func TestTelegramPendingRecoverySelectsChannelHeadsBeforeLimit(t *testing.T) {
 	for _, fragment := range []string{
 		"NOT EXISTS", "earlier.tenant_id=j.tenant_id", "j.channel_id>0",
 		"earlier.channel_id=j.channel_id", "REPLACE(COALESCE(earlier.target_chat_id,''),'-100','')",
-		"earlier.status IN ('pending','failed_retry','unknown','confirming','sending')",
+		"earlier.status IN ('pending','failed_retry','confirming','sending')",
 		"earlier.status='failed' AND earlier.send_phase='display_confirmed'",
 		"channel_display.job_id=earlier.id", "channel_display.purpose='display'",
 		"earlier.created_at<j.created_at", "earlier.id<j.id",
@@ -31,7 +31,7 @@ func TestTelegramPendingRecoverySelectsChannelHeadsBeforeLimit(t *testing.T) {
 func TestTelegramPendingRecoveryPostgresSelectsHeadsBeforeDueFilters(t *testing.T) {
 	query := telegramPendingRecoveryPostgresSQL()
 	for _, fragment := range []string{
-		"WITH channel_heads AS", "DISTINCT ON", "j.status IN ('pending','failed_retry','unknown','confirming','sending')",
+		"WITH channel_heads AS", "DISTINCT ON", "j.status IN ('pending','failed_retry','confirming','sending')",
 		"j.status='failed' AND j.send_phase='display_confirmed'",
 		"channel_display.job_id=j.id", "channel_display.purpose='display'",
 		"ORDER BY j.tenant_id", "j.created_at, j.id", "h.status IN ('pending','failed_retry','unknown')",
@@ -302,6 +302,9 @@ func TestTelegramActiveChannelConditionSupportsMessagePushTargets(t *testing.T) 
 	}
 	if !strings.Contains(condition, publishChannelTable) {
 		t.Fatalf("active channel condition does not validate publish channels")
+	}
+	if !strings.Contains(condition, "status='authorized'") || !strings.Contains(condition, "session_key") {
+		t.Fatalf("active channel condition must exclude unavailable protocol accounts: %s", condition)
 	}
 }
 
