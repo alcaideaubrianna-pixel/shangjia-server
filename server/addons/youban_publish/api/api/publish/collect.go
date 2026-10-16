@@ -42,7 +42,7 @@ type IntroFeeChannelBlacklistReq struct {
 }
 type IntroFeeChannelBlacklistRes struct{}
 type IntroFeeChannelPurgeReq struct {
-	g.Meta `path:"/intro-fee/channel-rule/purge" method:"post" tags:"采集规则" summary:"删除并下架频道资料"`
+	g.Meta `path:"/publish/collect/intro-fee/channel-rule/purge" method:"post" tags:"采集规则" summary:"删除并下架频道资料"`
 	sysin.IntroFeeChannelPurgeInp
 }
 type IntroFeeChannelPurgeRes struct {

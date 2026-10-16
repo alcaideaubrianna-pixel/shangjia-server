@@ -140,7 +140,7 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 		ruleID, _ := strconv.ParseInt(parts[2], 10, 64)
 		rowID, _ := strconv.ParseInt(parts[3], 10, 64)
 		return true, s.showCollectRuleChannel(ctx, botId, chatId, s.collectRuleOwnerAccount(ctx, account, ruleID), ruleID, rowID, parts[4])
-	case "channelstatus", "channeldelete":
+	case "channelstatus", "channeldelete", "channeldeleteconfirm":
 		if account.AccountType != "admin" || len(parts) < 6 {
 			return true, nil
 		}
@@ -156,10 +156,26 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 			if item == nil {
 				return true, s.sendCollectManageNotice(ctx, botId, chatId, "频道不存在或已被清理。")
 			}
-			if _, err = publishService.SysPublish().BotIntroFeeChannelPurge(ctx, &publishsysin.IntroFeeChannelPurgeInp{Id: rowID, RuleId: ruleID, BotId: botId, ChannelId: item.ChannelId}, owner.TenantId, owner.AccountId); err != nil {
+			return true, s.sendCollectManageMarkup(ctx, botId, chatId,
+				fmt.Sprintf("确认删除并下架频道：%s？\n该操作会禁用采集、删除关联资料、清理已推送消息和后缀计数，且不可恢复。", html.EscapeString(item.ChannelTitle)),
+				[][]models.InlineKeyboardButton{{
+					{Text: "确认删除并下架", CallbackData: fmt.Sprintf("cm:channeldeleteconfirm:%d:%d:%s:0", ruleID, rowID, item.ChannelId)},
+					{Text: "取消", CallbackData: fmt.Sprintf("cm:channel:%d:%d:%s", ruleID, rowID, item.ChannelId)},
+				}})
+		}
+		if action == "channeldeleteconfirm" {
+			item, err := s.collectRuleChannelItem(ctx, botId, owner, ruleID, rowID, parts[4])
+			if err != nil {
 				return true, err
 			}
-			return true, s.showCollectRuleChannels(ctx, botId, chatId, owner, ruleID, 1)
+			if item == nil {
+				return true, s.sendCollectManageNotice(ctx, botId, chatId, "频道不存在或已被清理。")
+			}
+			res, err := publishService.SysPublish().BotIntroFeeChannelPurge(ctx, &publishsysin.IntroFeeChannelPurgeInp{Id: rowID, RuleId: ruleID, BotId: botId, ChannelId: item.ChannelId}, owner.TenantId, owner.AccountId)
+			if err != nil {
+				return true, err
+			}
+			return true, s.sendCollectManageNotice(ctx, botId, chatId, fmt.Sprintf("删除并下架任务已开始，频道已立即禁用，后台正在清理 %d 条资料和 %d 条已推送消息。完成后会再次通知。", res.ProfileCount, res.MessageCount))
 		}
 		item, err := s.collectRuleChannelItem(ctx, botId, owner, ruleID, rowID, parts[4])
 		if err != nil {
@@ -559,7 +575,7 @@ func (s *sSysBot) showCollectRuleChannel(ctx context.Context, botId int64, chatI
 		} else {
 			buttons = append(buttons, []models.InlineKeyboardButton{{Text: "启用", CallbackData: fmt.Sprintf("cm:channelstatus:%d:%d:%s:1", ruleID, item.Id, item.ChannelId)}})
 		}
-		buttons = append(buttons, []models.InlineKeyboardButton{{Text: "删除", CallbackData: fmt.Sprintf("cm:channeldelete:%d:%d:%s:0", ruleID, item.Id, item.ChannelId)}})
+		buttons = append(buttons, []models.InlineKeyboardButton{{Text: "删除并下架", CallbackData: fmt.Sprintf("cm:channeldelete:%d:%d:%s:0", ruleID, item.Id, item.ChannelId)}})
 	}
 	buttons = append(buttons, []models.InlineKeyboardButton{{Text: "返回频道列表", CallbackData: fmt.Sprintf("cm:channels:%d:1", ruleID)}})
 	return s.sendCollectManageMarkup(ctx, botId, chatId, text, buttons)

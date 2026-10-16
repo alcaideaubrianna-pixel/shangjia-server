@@ -162,6 +162,7 @@ func (s *sSysPublish) disableCollectChannel(ctx context.Context, tenantID, accou
 }
 
 func (s *sSysPublish) ExecuteCollectChannelPurge(ctx context.Context, payload collectChannelPurgeQueuePayload) error {
+	channelTitle := s.collectChannelDisplayName(ctx, payload.TenantID, payload.ChannelID)
 	profileIDs, err := collectChannelProfileIDs(ctx, payload.TenantID, payload.AccountID, payload.RuleID, payload.ChannelID)
 	if err != nil {
 		return err
@@ -197,7 +198,21 @@ func (s *sSysPublish) ExecuteCollectChannelPurge(ctx context.Context, payload co
 			}
 		}
 	}
-	return s.finishCollectChannelPurge(ctx, payload.TenantID, payload.AccountID, payload.RuleID, payload.BotID, payload.ChannelID)
+	if err = s.finishCollectChannelPurge(ctx, payload.TenantID, payload.AccountID, payload.RuleID, payload.BotID, payload.ChannelID); err != nil {
+		return err
+	}
+	if notifyErr := botService.SysBot().NotifySuperAdmins(ctx, payload.BotID, "collect_source", collectChannelPurgeCompletedNotifyText(channelTitle, payload.ChannelID, len(profileIDs), len(jobs))); notifyErr != nil {
+		g.Log().Warningf(ctx, "发送频道删除下架完成BOT通知失败 tenantId:%d accountId:%d ruleId:%d channelId:%s err:%+v", payload.TenantID, payload.AccountID, payload.RuleID, payload.ChannelID, notifyErr)
+	}
+	return nil
+}
+
+func collectChannelPurgeCompletedNotifyText(title, channelID string, profileCount, messageCount int) string {
+	if strings.TrimSpace(title) == "" {
+		title = channelID
+	}
+	return fmt.Sprintf("采集频道删除并下架\n频道：%s\n频道 ID：%s\n已处理资料：%d 条\n已清理推送任务：%d 条\n状态：已完成，后缀配置和资料计数已清理",
+		html.EscapeString(title), html.EscapeString(channelID), profileCount, messageCount)
 }
 
 func (s *sSysPublish) finishCollectChannelPurge(ctx context.Context, tenantID, accountID, ruleID, botID int64, channelID string) error {
