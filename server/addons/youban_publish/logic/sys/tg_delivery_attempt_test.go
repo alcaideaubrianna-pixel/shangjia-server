@@ -120,6 +120,22 @@ func TestTelegramAttemptPhaseMode(t *testing.T) {
 	}
 }
 
+func TestTelegramSupersededAttemptCanResume(t *testing.T) {
+	if !telegramSupersededAttemptCanResume(telegramAttemptStatusSuperseded) {
+		t.Fatal("superseded attempt must allow a fresh retry attempt")
+	}
+	for _, status := range []string{
+		telegramAttemptStatusSending,
+		telegramAttemptStatusWaiting,
+		telegramAttemptStatusRetryWait,
+		telegramAttemptStatusConfirmed,
+	} {
+		if telegramSupersededAttemptCanResume(status) {
+			t.Fatalf("active or confirmed attempt must not resume as superseded: %s", status)
+		}
+	}
+}
+
 func TestRestoreConfirmedTelegramResponseTreatsMissingAttemptAsUnconfirmed(t *testing.T) {
 	if !telegramOptionalAttemptScanSucceeded(sql.ErrNoRows) {
 		t.Fatal("missing confirmed response must allow the initial Telegram send")
