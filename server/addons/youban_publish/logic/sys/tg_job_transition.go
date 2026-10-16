@@ -79,7 +79,10 @@ func validateTelegramJobTransition(from []string, to string) error {
 
 // transitionTelegramJob is the only write primitive for business status.
 // Callers may still update lease/phase metadata directly when status is unchanged.
-func (s *sSysPublish) transitionTelegramJob(ctx context.Context, in telegramJobTransition) (bool, error) {
+func (s *sSysPublish) transitionTelegramJob(ctx context.Context, in telegramJobTransition) (changed bool, resultErr error) {
+	stage := beginTelegramPublishStage(ctx, "job.state_transition", g.Map{"jobId": in.JobId, "fromStatus": in.From, "toStatus": in.To, "requiredPhases": in.SendPhases})
+	defer stage.Finish(&resultErr)
+	// The result is logged at the write boundary, including CAS misses.
 	if in.JobId <= 0 {
 		return false, gerror.New("TG任务ID不能为空")
 	}
@@ -93,10 +96,12 @@ func (s *sSysPublish) transitionTelegramJob(ctx context.Context, in telegramJobT
 	model := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id", in.JobId).WhereIn("status", from)
 	result, err := transitionTelegramJobModel(model, in, data)
+	stage.End(err)
 	if err != nil {
 		return false, gerror.Wrapf(err, "TG任务状态迁移失败：%s -> %s", strings.Join(from, ","), in.To)
 	}
 	affected, err := result.RowsAffected()
+	beginTelegramPublishStage(ctx, "job.state_transition_result").End(err, g.Map{"jobId": in.JobId, "fromStatus": in.From, "toStatus": in.To, "affectedRows": affected})
 	if err != nil {
 		return false, gerror.Wrap(err, "确认TG任务状态迁移结果失败")
 	}

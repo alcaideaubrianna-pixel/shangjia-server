@@ -32,7 +32,9 @@ const telegramPhotoMaxDimensionRatio = 20.0
 
 var errBackgroundReplacementDocument = errors.New("document image skips anti-scan processing")
 
-func (s *sSysPublish) prepareTelegramMediaUploadFile(ctx context.Context, media *telegramMediaItem, path string, cleanup func()) (string, func(), error) {
+func (s *sSysPublish) prepareTelegramMediaUploadFile(ctx context.Context, media *telegramMediaItem, path string, cleanup func()) (resultPath string, resultCleanup func(), resultErr error) {
+	stage := beginTelegramPublishStage(ctx, "media.upload.prepare", telegramPublishMediaLogFields(media))
+	defer stage.Finish(&resultErr)
 	path = strings.TrimSpace(path)
 	if path == "" || media == nil {
 		return path, cleanup, nil

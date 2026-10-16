@@ -248,7 +248,10 @@ func (s *sSysPublish) enqueueTelegramJobDirect(ctx context.Context, jobId int64,
 	return s.enqueueTelegramJobDirectWithUnique(ctx, jobId, delay, true)
 }
 
-func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jobId int64, delay time.Duration, unique bool) error {
+func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jobId int64, delay time.Duration, unique bool) (resultErr error) {
+	ctx = telegramPublishTraceContext(ctx, jobId)
+	stage := beginTelegramPublishStage(ctx, "dispatch.enqueue", g.Map{"delayMs": delay.Milliseconds(), "unique": unique})
+	defer stage.Finish(&resultErr)
 	if jobId <= 0 {
 		return nil
 	}
@@ -256,7 +259,10 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 	if err != nil {
 		return err
 	}
+	ctx = telegramPublishJobTraceContext(ctx, job)
+	step := beginTelegramPublishStage(ctx, "dispatch.account_availability")
 	tgAccountId, available, checkErr := s.telegramJobAccountCanPublish(ctx, job)
+	step.End(checkErr, g.Map{"tgAccountId": tgAccountId, "available": available})
 	if checkErr != nil {
 		return checkErr
 	} else if !available {
@@ -309,11 +315,15 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 		data["next_retry_at"] = nil
 	}
 	reserved, err := s.withTelegramChannelDispatchLease(ctx, job, func() (bool, error) {
+		step := beginTelegramPublishStage(ctx, "dispatch.channel_order")
 		hasEarlier, orderErr := s.telegramChannelHasEarlierActiveJob(ctx, job)
+		step.End(orderErr, g.Map{"hasEarlier": hasEarlier})
 		if orderErr != nil || hasEarlier {
 			return false, orderErr
 		}
+		step = beginTelegramPublishStage(ctx, "dispatch.channel_capacity")
 		hasCapacity, capacityErr := s.telegramChannelHasDispatchCapacity(ctx, job)
+		step.End(capacityErr, g.Map{"hasCapacity": hasCapacity})
 		if capacityErr != nil || !hasCapacity {
 			return false, capacityErr
 		}
@@ -328,6 +338,7 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 		affected, _ := result.RowsAffected()
 		return affected > 0, nil
 	})
+	beginTelegramPublishStage(ctx, "dispatch.reserve_result").End(err, g.Map{"reserved": reserved, "targetQueue": queueName})
 	if err != nil {
 		return gerror.Wrap(err, "锁定TG任务入队状态失败")
 	}
@@ -736,7 +747,10 @@ func (s *sSysPublish) enqueueTelegramAttemptTimeout(ctx context.Context, attempt
 	return err == nil, err
 }
 
-func (s *sSysPublish) enqueueTelegramTaskWithQueue(ctx context.Context, taskType string, jobId int64, delay time.Duration, unique bool, queueName string) error {
+func (s *sSysPublish) enqueueTelegramTaskWithQueue(ctx context.Context, taskType string, jobId int64, delay time.Duration, unique bool, queueName string) (resultErr error) {
+	ctx = telegramPublishTraceContext(ctx, jobId)
+	stage := beginTelegramPublishStage(ctx, "queue.enqueue", g.Map{"taskType": taskType, "targetQueue": queueName, "delayMs": delay.Milliseconds()})
+	defer stage.Finish(&resultErr)
 	if jobId <= 0 {
 		return nil
 	}
@@ -768,18 +782,22 @@ func (s *sSysPublish) enqueueTelegramTaskWithQueue(ctx context.Context, taskType
 	// the existing worker; this timeout only bounds the enqueue operation.
 	enqueueCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
+	step := beginTelegramPublishStage(ctx, "queue.redis_enqueue", g.Map{"targetQueue": queueName})
 	info, err := client.EnqueueContext(enqueueCtx, task, options...)
+	step.End(err, g.Map{"duplicate": errors.Is(err, asynq.ErrDuplicateTask)})
 	if errors.Is(err, asynq.ErrDuplicateTask) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", jobId).Data(g.Map{
+	step = beginTelegramPublishStage(ctx, "queue.save_task_id", g.Map{"enqueuedTaskId": info.ID, "targetQueue": queueName})
+	_, saveErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", jobId).Data(g.Map{
 		"asynq_task_id": info.ID,
 		"queue_name":    queueName,
 		"updated_at":    time.Now(),
 	}).Update()
+	step.End(saveErr)
 	return nil
 }
 

@@ -75,17 +75,23 @@ func (s *sSysPublish) beginTelegramDeliveryAttempt(ctx context.Context, job tele
 // external Telegram call. When advancePhase is true, the job phase and the
 // Attempt are committed together so recovery never has to guess whether the
 // API was called.
-func (s *sSysPublish) prepareTelegramDeliveryAttempt(ctx context.Context, job telegramJobRecord, phase string, expectedCount int, advancePhase bool) (telegramDeliveryAttempt, error) {
+func (s *sSysPublish) prepareTelegramDeliveryAttempt(ctx context.Context, job telegramJobRecord, phase string, expectedCount int, advancePhase bool) (result telegramDeliveryAttempt, resultErr error) {
+	stage := beginTelegramPublishStage(ctx, "attempt.prepare", g.Map{"purpose": phase, "expectedCount": expectedCount})
+	defer stage.Finish(&resultErr)
 	fromPhase, sendingPhase, _, err := telegramAttemptPhaseTransition(phase)
 	if err != nil {
 		return telegramDeliveryAttempt{}, err
 	}
 	mutex := lock.NewConfig(30*time.Second, 100*time.Millisecond).Mutex(fmt.Sprintf("youban_publish:tg_attempt:%d:%s:%d", job.Id, phase, 0))
-	if err := mutex.Lock(ctx); err != nil {
-		return telegramDeliveryAttempt{}, gerror.Wrap(err, "获取TG发送Attempt锁失败")
+	step := beginTelegramPublishStage(ctx, "attempt.lock.acquire", g.Map{"purpose": phase})
+	lockErr := mutex.Lock(ctx)
+	step.End(lockErr)
+	if lockErr != nil {
+		return telegramDeliveryAttempt{}, gerror.Wrap(lockErr, "获取TG发送Attempt锁失败")
 	}
 	defer func() { _ = mutex.Unlock(context.Background()) }()
 	var attempt telegramDeliveryAttempt
+	step = beginTelegramPublishStage(ctx, "attempt.create_transaction", g.Map{"purpose": phase})
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		var current telegramJobRecord
 		if scanErr := tx.Model(publishTgJobTable).Where("id", job.Id).LockUpdate().Scan(&current); scanErr != nil {
@@ -182,10 +188,13 @@ func (s *sSysPublish) prepareTelegramDeliveryAttempt(ctx context.Context, job te
 		}
 		return nil
 	})
+	step.End(err, g.Map{"attemptId": attempt.Id})
 	if err != nil {
 		return attempt, err
 	}
+	step = beginTelegramPublishStage(ctx, "attempt.project", g.Map{"attemptId": attempt.Id})
 	s.projectTelegramDeliveryAttempt(ctx, attempt, "")
+	step.End(nil)
 	// Keep a durable job-level audit entry for every Bot send attempt, including
 	// attempts whose HTTP response later times out and has no Telegram message ID.
 	s.appendTelegramJobLog(ctx, job, "publish", "attempt_started", fmt.Sprintf(
@@ -210,7 +219,9 @@ func telegramAttemptPhaseMode(currentPhase, fromPhase, sendingPhase string, adva
 // the local message projection and the completed delivery phase. A confirmed
 // Bot API response never enters reconciliation; retries only repair optional
 // projections such as cached file IDs.
-func (s *sSysPublish) confirmTelegramAPISuccess(ctx context.Context, job telegramJobRecord, attempt telegramDeliveryAttempt, messages []*telegramSentMessage) error {
+func (s *sSysPublish) confirmTelegramAPISuccess(ctx context.Context, job telegramJobRecord, attempt telegramDeliveryAttempt, messages []*telegramSentMessage) (resultErr error) {
+	stage := beginTelegramPublishStage(ctx, "api_success.confirm", g.Map{"attemptId": attempt.Id, "purpose": attempt.Phase, "messageIds": telegramSentMessageIDs(messages)})
+	defer stage.Finish(&resultErr)
 	_, sendingPhase, confirmedPhase, err := telegramAttemptPhaseTransition(attempt.Phase)
 	if err != nil {
 		return err
@@ -219,6 +230,7 @@ func (s *sSysPublish) confirmTelegramAPISuccess(ctx context.Context, job telegra
 	if attempt.ExpectedCount == 0 {
 		count = 0
 	}
+	step := beginTelegramPublishStage(ctx, "api_success.commit_transaction", g.Map{"attemptId": attempt.Id})
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		var current telegramDeliveryAttempt
 		if scanErr := tx.Model(publishTgAttemptTable).Where("id", attempt.Id).LockUpdate().Scan(&current); scanErr != nil {
@@ -233,11 +245,17 @@ func (s *sSysPublish) confirmTelegramAPISuccess(ctx context.Context, job telegra
 		if current.Status != telegramAttemptStatusSending && current.Status != telegramAttemptStatusWaiting && current.Status != telegramAttemptStatusRetryWait {
 			return gerror.Newf("TG发送Attempt状态不可确认 status:%s", current.Status)
 		}
-		if err := recordTelegramAttemptMessagesTx(ctx, tx, attempt, messages, "response"); err != nil {
-			return err
+		auditStage := beginTelegramPublishStage(ctx, "api_success.write_audit", g.Map{"attemptId": attempt.Id})
+		auditErr := recordTelegramAttemptMessagesTx(ctx, tx, attempt, messages, "response")
+		auditStage.End(auditErr)
+		if auditErr != nil {
+			return auditErr
 		}
-		if err := saveTelegramSentMessagesTx(ctx, tx, job, messages); err != nil {
-			return err
+		messageStage := beginTelegramPublishStage(ctx, "api_success.write_messages", g.Map{"attemptId": attempt.Id})
+		messageErr := saveTelegramSentMessagesTx(ctx, tx, job, messages)
+		messageStage.End(messageErr)
+		if messageErr != nil {
+			return messageErr
 		}
 		if _, updateErr := tx.Model(publishTgAttemptTable).Where("id", attempt.Id).Data(g.Map{
 			"status": telegramAttemptStatusConfirmed, "confirmed_count": count,
@@ -256,14 +274,19 @@ func (s *sSysPublish) confirmTelegramAPISuccess(ctx context.Context, job telegra
 		}
 		return nil
 	})
+	step.End(err, g.Map{"localCommitted": err == nil})
 	if err != nil {
 		return err
 	}
 	attempt.Status = telegramAttemptStatusConfirmed
 	attempt.ResponseReceived = 1
 	attempt.ConfirmedCount = count
+	step = beginTelegramPublishStage(ctx, "api_success.project_attempt", g.Map{"attemptId": attempt.Id})
 	s.projectTelegramDeliveryAttempt(ctx, attempt, "")
+	step.End(nil)
+	step = beginTelegramPublishStage(ctx, "api_success.cache_metadata", g.Map{"attemptId": attempt.Id})
 	s.cacheTelegramSentMessageMetadata(ctx, job, messages)
+	step.End(nil)
 	return nil
 }
 

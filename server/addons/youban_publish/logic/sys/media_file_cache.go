@@ -96,7 +96,9 @@ func (e *mediaFileCacheHTTPStatusError) Error() string {
 	return "下载远程媒体失败：HTTP " + strconv.Itoa(e.statusCode)
 }
 
-func cachedTelegramMediaFile(ctx context.Context, media *telegramMediaItem) (string, func(), error) {
+func cachedTelegramMediaFile(ctx context.Context, media *telegramMediaItem) (resultPath string, resultCleanup func(), resultErr error) {
+	stage := beginTelegramPublishStage(ctx, "media.cache.resolve", telegramPublishMediaLogFields(media))
+	defer stage.Finish(&resultErr)
 	if media == nil {
 		return "", nil, gerror.New("媒体文件为空")
 	}
@@ -122,7 +124,9 @@ func cachedTelegramMediaFile(ctx context.Context, media *telegramMediaItem) (str
 	var lastErr error
 	for index, source := range sources {
 		downloader := mediaFileCacheSourceDownloader(ctx, source)
+		step := beginTelegramPublishStage(ctx, "media.cache.download", g.Map{"mediaId": media.Id, "sourceIndex": index, "sourceRole": source.Role, "sourceHost": mediaFileCacheSourceHost(source.URL)})
 		path, sourceErr := cachedRemoteMediaFileWithMetaSourceAndDownloader(ctx, source.CacheKey, source.URL, source.URL, mediaFileCacheExt(media, source.URL), downloader)
+		step.End(sourceErr)
 		if sourceErr == nil {
 			observeMediaFileCacheSource(ctx, source.Role, "success", "ok")
 			if index > 0 {

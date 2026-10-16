@@ -198,6 +198,8 @@ func (s *sSysPublish) recoverStalePreAttemptTelegramJobs(ctx context.Context, li
 		return gerror.Wrap(err, "读取发送Attempt创建前中断的TG任务失败")
 	}
 	for _, job := range jobs {
+		jobCtx := telegramPublishJobTraceContext(ctx, job)
+		step := beginTelegramPublishStage(jobCtx, "recovery.pre_attempt", g.Map{"reason": "stale_cleanup_without_attempt", "staleAfterMs": telegramPreAttemptRecoverAfter.Milliseconds()})
 		transitioned, transitionErr := s.transitionTelegramJob(ctx, telegramJobTransition{
 			JobId: job.Id, From: []string{telegramJobStatusSending}, To: telegramJobStatusRetryWait,
 			SendPhases: telegramPreAttemptPhases(), UpdatedBefore: now.Add(-telegramPreAttemptRecoverAfter),
@@ -208,6 +210,7 @@ func (s *sSysPublish) recoverStalePreAttemptTelegramJobs(ctx context.Context, li
 				"last_dispatch_error": "TG任务在发送前中断，已安全重新投递",
 			},
 		})
+		step.End(transitionErr, g.Map{"transitioned": transitioned})
 		if transitionErr != nil {
 			g.Log().Warningf(ctx, "恢复发送前中断TG任务失败 jobId:%d err:%+v", job.Id, transitionErr)
 			continue

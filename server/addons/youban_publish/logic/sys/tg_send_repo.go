@@ -67,9 +67,11 @@ func (s *sSysPublish) telegramJobMedia(ctx context.Context, job telegramJobRecor
 		Where("profile_id", job.ProfileId).
 		Where("purpose", purpose).
 		WhereNull("deleted_at")
+	step := beginTelegramPublishStage(ctx, "media.query", g.Map{"purpose": purpose})
 	records, err := mod.
 		OrderAsc("sort_index").OrderAsc("id").
 		All()
+	step.End(err, g.Map{"rowCount": len(records)})
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取TG媒体失败")
 	}
@@ -122,7 +124,10 @@ func (s *sSysPublish) telegramJobMedia(ctx context.Context, job telegramJobRecor
 	if len(records) > 0 && len(rows) == 0 {
 		return nil, gerror.New("媒体文件地址为空")
 	}
-	if err = s.applySameBotCollectFileIDs(ctx, job, purpose, rows); err != nil {
+	step = beginTelegramPublishStage(ctx, "media.collect_file_ids", g.Map{"purpose": purpose, "mediaCount": len(rows)})
+	err = s.applySameBotCollectFileIDs(ctx, job, purpose, rows)
+	step.End(err)
+	if err != nil {
 		return nil, err
 	}
 	return rows, nil

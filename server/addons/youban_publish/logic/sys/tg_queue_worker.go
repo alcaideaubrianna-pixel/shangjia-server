@@ -427,16 +427,25 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	}
 }
 
-func (s *sSysPublish) handleTelegramPublishTask(ctx context.Context, task *asynq.Task) error {
+func (s *sSysPublish) handleTelegramPublishTask(ctx context.Context, task *asynq.Task) (err error) {
+	ctx = telegramPublishTraceContext(ctx, 0, g.Map{"taskType": task.Type()})
 	payload, err := decodeTelegramQueuePayload(task)
 	if err != nil {
+		beginTelegramPublishStage(ctx, "queue.decode_payload").End(err)
 		return err
 	}
+	ctx = telegramPublishTraceContext(ctx, payload.JobId)
+	stage := beginTelegramPublishStage(ctx, "queue.consume")
+	defer stage.Finish(&err)
+	jobStage := beginTelegramPublishStage(ctx, "queue.load_job")
 	job, jobErr := s.telegramJobById(ctx, payload.JobId)
+	jobStage.End(jobErr)
 	if jobErr != nil {
 		return jobErr
 	}
+	ctx = telegramPublishJobTraceContext(ctx, job)
 	if delay, enabled := s.telegramPublishWindowDelay(ctx, job.TenantId, job.AccountId); enabled && delay > 0 {
+		beginTelegramPublishStage(ctx, "queue.deferred").End(nil, g.Map{"reason": "publish_window", "delayMs": delay.Milliseconds()})
 		return &tgRetryAfterError{after: delay, err: errTelegramPublishWindowBlocked}
 	}
 	return s.SendTelegramJob(ctx, payload.JobId)
