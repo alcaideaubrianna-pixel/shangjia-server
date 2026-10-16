@@ -18,7 +18,11 @@ import (
 
 func relayConfig(ctx context.Context, botID int64) (*entity.YoubanBotRelayConfig, error) {
 	var row *entity.YoubanBotRelayConfig
-	err := dao.YoubanBotRelayConfig.Ctx(ctx).Where(dao.YoubanBotRelayConfig.Columns().BotId, botID).Scan(&row)
+	columns := dao.YoubanBotRelayConfig.Columns()
+	err := dao.YoubanBotRelayConfig.Ctx(ctx).Where(columns.BotId, botID).Scan(&row)
+	if err == nil && row == nil {
+		err = dao.YoubanBotRelayConfig.Ctx(ctx).Where(columns.SourceBotId, botID).Scan(&row)
+	}
 	return row, gerror.Wrap(err, "读取双向机器人设置失败")
 }
 

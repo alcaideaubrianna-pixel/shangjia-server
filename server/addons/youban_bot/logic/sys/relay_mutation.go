@@ -9,20 +9,27 @@ import (
 	"hotgo/addons/youban_bot/model/input/sysin"
 )
 
-// Stable Bot rows also serialize edits before a relay configuration has been created.
-func relayLockBot(ctx context.Context, botID int64) error {
-	var bot *entity.YoubanBotBot
-	if err := dao.YoubanBotBot.Ctx(ctx).WherePri(botID).LockUpdate().Scan(&bot); err != nil {
+// Lock the relay configuration itself. The management Bot ID may be either the
+// current source Bot ID or a legacy relay Bot ID during migration.
+func relayLockConfig(ctx context.Context, botID int64) error {
+	columns := dao.YoubanBotRelayConfig.Columns()
+	var config *entity.YoubanBotRelayConfig
+	if err := dao.YoubanBotRelayConfig.Ctx(ctx).Where(columns.BotId, botID).LockUpdate().Scan(&config); err != nil {
 		return err
 	}
-	if bot == nil {
-		return gerror.New("Bot不存在")
+	if config == nil {
+		if err := dao.YoubanBotRelayConfig.Ctx(ctx).Where(columns.SourceBotId, botID).LockUpdate().Scan(&config); err != nil {
+			return err
+		}
+	}
+	if config == nil {
+		return gerror.New("双向机器人配置不存在")
 	}
 	return nil
 }
 func relayMutate(ctx context.Context, botID int64, fn func(context.Context) error) error {
-	return dao.YoubanBotBot.Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		if err := relayLockBot(ctx, botID); err != nil {
+	return dao.YoubanBotRelayConfig.Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if err := relayLockConfig(ctx, botID); err != nil {
 			return err
 		}
 		return fn(ctx)

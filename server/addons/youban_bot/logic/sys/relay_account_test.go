@@ -75,6 +75,32 @@ func TestRelayTenantAccountIsolation(t *testing.T) {
 	}
 }
 
+func TestRelayMutationAcceptsSourceBotID(t *testing.T) {
+	ctx, _, _ := relayInteractionFixture(t)
+	columns := dao.YoubanBotRelayConfig.Columns()
+	if _, err := dao.YoubanBotRelayConfig.Ctx(ctx).
+		Where(columns.BotId, 1).
+		Data(do.YoubanBotRelayConfig{SourceBotId: 20}).
+		Update(); err != nil {
+		t.Fatal(err)
+	}
+
+	config, err := relayConfig(ctx, 20)
+	if err != nil || config == nil || config.BotId != 1 || config.SourceBotId != 20 {
+		t.Fatalf("source Bot ID did not resolve legacy config: %+v %v", config, err)
+	}
+	if os.Getenv("YOUBAN_RELAY_TEST_PG") == "" {
+		return
+	}
+	called := false
+	if err = relayMutate(ctx, 20, func(context.Context) error {
+		called = true
+		return nil
+	}); err != nil || !called {
+		t.Fatalf("source Bot ID mutation failed: called=%t err=%v", called, err)
+	}
+}
+
 func TestRelayGlobalPluginCannotOverwriteAccountConfig(t *testing.T) {
 	if os.Getenv("YOUBAN_RELAY_TEST_PG") == "" {
 		t.Skip("requires PostgreSQL row locks")
