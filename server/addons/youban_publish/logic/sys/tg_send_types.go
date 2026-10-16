@@ -91,4 +91,5 @@ type telegramJobRecord struct {
 	SendDeadlineAt         *gtime.Time `json:"sendDeadlineAt"`
 	TimeoutParentJobId     int64       `json:"timeoutParentJobId"`
 	TimeoutCleanupAt       *gtime.Time `json:"timeoutCleanupAt"`
+	TimeoutRetryCount      int         `json:"timeoutRetryCount"`
 }

@@ -58,7 +58,8 @@ func TestTelegramSendWatchdogLocalPostgres(t *testing.T) {
 		}
 		for _, ddl := range []string{
 			"ALTER TABLE " + publishTgJobTable + " ADD COLUMN push_mode text DEFAULT ''",
-			"CREATE TEMP TABLE " + publishTgAttemptTable + " (id bigint,job_id bigint,status text,webhook_deadline timestamp)",
+			"CREATE TEMP TABLE " + publishTgAttemptTable + " (id bigint,job_id bigint,status text,webhook_deadline timestamp,response_received int DEFAULT 0,expected_count int DEFAULT 2)",
+			"CREATE TEMP TABLE " + publishTgAttemptMessageTable + " (attempt_id bigint,message_id bigint)",
 			"CREATE TEMP TABLE " + publishTgOutboxTable + " (job_id bigint,status text,lease_owner text,lease_expires_at timestamp,last_error text,delivered_at timestamp,updated_at timestamp)",
 			"CREATE TEMP TABLE hg_content_profile(id bigint,status int,visibility text,deleted_at timestamp)",
 			"CREATE TEMP TABLE " + publishChannelTable + " (id bigint,tenant_id bigint,status int,deleted_at timestamp)",
@@ -78,7 +79,7 @@ func TestTelegramSendWatchdogLocalPostgres(t *testing.T) {
 			"INSERT INTO " + publishProfileStateTable + "(tenant_id,account_id,profile_id,publish_operation_no) VALUES(1,1,1,'collect:1')",
 			"INSERT INTO " + publishTgJobTable + "(id,tenant_id,account_id,profile_id,channel_id,operation_no,status,send_phase,send_deadline_at,collect_event_id) VALUES(100,1,1,1,1,'collect:1','sending','display_confirmed',LOCALTIMESTAMP - interval '1 minute',77)",
 			"SELECT setval(pg_get_serial_sequence('" + publishTgJobTable + "','id'),100)",
-			"INSERT INTO " + publishTgAttemptTable + " VALUES(1,100,'sending',LOCALTIMESTAMP)",
+			"INSERT INTO " + publishTgAttemptTable + "(id,job_id,status,webhook_deadline) VALUES(1,100,'sending',LOCALTIMESTAMP)",
 		} {
 			if _, err := tx.Exec(sql); err != nil {
 				return err
@@ -105,6 +106,69 @@ func TestTelegramSendWatchdogLocalPostgres(t *testing.T) {
 		}
 		if again != 0 {
 			t.Fatal("repeated watchdog created another replacement")
+		}
+		if n, err := telegramTimeoutUnresolvedAttemptCount(tx, 100); err != nil || n != 1 {
+			t.Fatalf("unknown send must hold replacement: %d %v", n, err)
+		}
+		if _, err := tx.Exec("INSERT INTO " + publishTgAttemptMessageTable + " VALUES(1,11)"); err != nil {
+			return err
+		}
+		if n, err := telegramTimeoutUnresolvedAttemptCount(tx, 100); err != nil || n != 1 {
+			t.Fatalf("partial album must hold replacement: %d %v", n, err)
+		}
+		if _, err := tx.Exec("INSERT INTO " + publishTgAttemptMessageTable + " VALUES(1,12)"); err != nil {
+			return err
+		}
+		if n, err := telegramTimeoutUnresolvedAttemptCount(tx, 100); err != nil || n != 1 {
+			t.Fatalf("message count alone cannot prove sender completion: %d %v", n, err)
+		}
+		if _, err := tx.Exec("UPDATE " + publishTgAttemptTable + " SET response_received=1 WHERE id=1"); err != nil {
+			return err
+		}
+		if n, err := telegramTimeoutUnresolvedAttemptCount(tx, 100); err != nil || n != 0 {
+			t.Fatalf("explicit response should release gate: %d %v", n, err)
+		}
+		// Three tail generations are allowed; the fourth expiry must stop.
+		for retry := 1; retry <= telegramSendMaxRetries; retry++ {
+			if tail.TimeoutRetryCount != retry {
+				t.Fatalf("retry counter reset: %+v", tail)
+			}
+			if _, err := tx.Model(publishTgJobTable).Where("id", tail.Id).Data(map[string]interface{}{
+				"status": telegramJobStatusSending, "send_phase": "display_sending",
+				"send_deadline_at": gdb.Raw("LOCALTIMESTAMP - interval '1 minute'"),
+			}).Update(); err != nil {
+				return err
+			}
+			_, next, err := s.expireTelegramSendTx(ctx, tx, tail.Id)
+			if err != nil {
+				return err
+			}
+			if retry == telegramSendMaxRetries {
+				if next != 0 {
+					t.Fatal("created a fourth retry")
+				}
+			} else {
+				if next <= tail.Id {
+					t.Fatal("missing next retry")
+				}
+				if err := tx.Model(publishTgJobTable).Where("id", next).Scan(&tail); err != nil {
+					return err
+				}
+			}
+		}
+		claimed, err := tx.GetAll(telegramTimeoutCleanupClaimSQL, time.Now().Add(time.Minute), time.Now().Add(2*time.Minute))
+		if err != nil {
+			return err
+		}
+		if len(claimed) != 4 {
+			t.Fatalf("expected four expired generations, got %d", len(claimed))
+		}
+		againClaimed, err := tx.GetAll(telegramTimeoutCleanupClaimSQL, time.Now(), time.Now().Add(2*time.Minute))
+		if err != nil {
+			return err
+		}
+		if len(againClaimed) != 0 {
+			t.Fatal("leased cleanup jobs were claimed again")
 		}
 		return nil
 	})

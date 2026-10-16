@@ -739,6 +739,7 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_task_channel" ON "hg_youban_publish_t
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "send_deadline_at" timestamp NULL;
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "timeout_parent_job_id" bigint NULL;
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "timeout_cleanup_at" timestamp NULL;
+ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "timeout_retry_count" integer NOT NULL DEFAULT 0;
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_job_operation_generation" ON "hg_youban_publish_tg_job" ("task_id", "operation_no", "channel_id", COALESCE("timeout_parent_job_id",0)) WHERE "operation_no" <> '';
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_job_profile_operation_generation" ON "hg_youban_publish_tg_job" ("profile_id", "operation_no", "channel_id", COALESCE("timeout_parent_job_id",0)) WHERE "task_id" IS NULL AND "profile_id" > 0 AND "operation_no" <> '';
 CREATE UNIQUE INDEX IF NOT EXISTS "uq_tg_job_timeout_parent" ON "hg_youban_publish_tg_job" ("timeout_parent_job_id") WHERE "timeout_parent_job_id" IS NOT NULL;

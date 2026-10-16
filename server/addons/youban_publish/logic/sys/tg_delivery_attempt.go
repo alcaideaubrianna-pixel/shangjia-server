@@ -266,6 +266,10 @@ func (s *sSysPublish) confirmTelegramAPISuccess(ctx context.Context, job telegra
 			if err := saveTelegramSentMessagesTx(ctx, tx, job, messages); err != nil {
 				return err
 			}
+			if _, err := tx.Model(publishTgAttemptTable).Where("id", attempt.Id).
+				Data(g.Map{"response_received": 1, "confirmed_count": count}).Update(); err != nil {
+				return err
+			}
 			_, err := tx.Model(publishTgJobTable).Where("id", job.Id).Data(g.Map{"timeout_cleanup_at": gtime.Now()}).Update()
 			return err
 		}

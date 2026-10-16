@@ -3,17 +3,20 @@ package sys
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/utility/dbtime"
 )
 
 const (
 	telegramSendBudget                = 10 * time.Minute
+	telegramSendMaxRetries            = 3
 	telegramSendPhaseTimeoutCancelled = "timeout_cancelled"
 	telegramSendTimeoutMessage        = "频道发送超过10分钟，旧任务已取消，整组资料移至队尾；迟到消息只删除不补发"
 )
@@ -96,6 +99,11 @@ func (s *sSysPublish) expireTelegramSendTx(ctx context.Context, tx gdb.TX, id in
 	if eligible == 0 {
 		return
 	}
+	if old.TimeoutRetryCount >= telegramSendMaxRetries {
+		_, err = tx.Model(publishTgJobTable).Where("id", old.Id).
+			Data(g.Map{"error_message": "发送超时重试已达3次，停止自动重新上架，等待人工处理"}).Update()
+		return
+	}
 	// Retain the original operation and collection provenance. The fresh ID and
 	// creation time place the whole publication behind all existing channel jobs.
 	data := g.Map{
@@ -107,6 +115,7 @@ func (s *sSysPublish) expireTelegramSendTx(ctx context.Context, tx gdb.TX, id in
 		"status": telegramJobStatusFailed, "dispatch_status": tgDispatchStatusIdle, "priority": 0,
 		"send_phase":            "timeout_wait_cleanup",
 		"timeout_parent_job_id": old.Id,
+		"timeout_retry_count":   old.TimeoutRetryCount + 1,
 		"cycle_enabled":         old.CycleEnabled, "cycle_days": old.CycleDays, "cycle_publish_time": old.CyclePublishTime,
 	}
 	// Preserve NULL task IDs: zero participates in a different unique index.
@@ -142,53 +151,117 @@ func (s *sSysPublish) runTelegramSendWatchdog(ctx context.Context) {
 	}
 }
 
+var telegramTimeoutCleanupClaimSQL = `WITH candidates AS (
+ SELECT id FROM ` + publishTgJobTable + ` WHERE send_phase='timeout_cancelled'
+ AND timeout_cleanup_at<=? ORDER BY timeout_cleanup_at,id
+ LIMIT 40 FOR UPDATE SKIP LOCKED
+ ) UPDATE ` + publishTgJobTable + ` j SET timeout_cleanup_at=?
+ FROM candidates c WHERE j.id=c.id RETURNING j.*`
+
 func (s *sSysPublish) cleanupTelegramSendTimeouts(ctx context.Context) {
 	var jobs []telegramJobRecord
-	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("send_phase", telegramSendPhaseTimeoutCancelled).
-		WhereLTE("timeout_cleanup_at", gtime.Now()).OrderAsc("timeout_cleanup_at").Limit(10).Scan(&jobs); err != nil {
+	// Claim a bounded batch across replicas; a crashed worker releases it by expiry.
+	now := gtime.Now()
+	if err := g.DB().GetScan(ctx, &jobs, telegramTimeoutCleanupClaimSQL, now, now.Add(2*time.Minute)); err != nil {
 		g.Log().Warningf(ctx, "TG超时清理扫描失败 err:%+v", err)
 		return
 	}
+	var workers sync.WaitGroup
+	slots := make(chan struct{}, 8)
 	for _, job := range jobs {
-		cleanupCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		err := s.deleteTelegramMessageSet(cleanupCtx, job, telegramSendTimeoutMessage)
-		cancel()
-		if err == nil {
-			remaining, countErr := g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).
-				Where("job_id", job.Id).WhereIn("status", []string{"sent", "undeletable"}).Count()
-			if countErr != nil {
-				err = countErr
-			} else if remaining > 0 {
-				err = gerror.New("旧消息尚未确认删除，等待协议号删除完成")
-			}
+		if ctx.Err() != nil {
+			break
 		}
-		if err != nil {
-			_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).
-				Where("timeout_cleanup_at", job.TimeoutCleanupAt).Data(g.Map{"timeout_cleanup_at": gtime.Now().Add(time.Minute)}).Update()
-			g.Log().Warningf(ctx, "TG超时清理失败 jobId:%d channelId:%d err:%+v", job.Id, job.ChannelId, err)
-			continue
-		}
-		err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-			var tail telegramJobRecord
-			if err := tx.Model(publishTgJobTable).Where("timeout_parent_job_id", job.Id).LockUpdate().Scan(&tail); !telegramOptionalAttemptScanSucceeded(err) {
-				return err
-			}
-			if tail.Id > 0 && tail.Status == telegramJobStatusFailed && tail.SendPhase == "timeout_wait_cleanup" {
-				if _, err := s.transitionTelegramJobTx(ctx, tx, telegramJobTransition{JobId: tail.Id, From: []string{telegramJobStatusFailed}, To: telegramJobStatusPending, Additional: g.Map{"next_retry_at": nil, "send_phase": ""}}); err != nil {
-					return err
-				}
-				if err := s.ensureTelegramJobOutboxTx(ctx, tx, tail.Id, 0); err != nil {
-					return err
-				}
-			}
-			_, err := tx.Model(publishTgJobTable).Where("id", job.Id).Where("timeout_cleanup_at", job.TimeoutCleanupAt).Data(g.Map{"timeout_cleanup_at": nil}).Update()
-			return err
+		slots <- struct{}{}
+		workers.Add(1)
+		go func(job telegramJobRecord) {
+			defer workers.Done()
+			defer func() { <-slots }()
+			s.cleanupTelegramSendTimeout(ctx, job)
+		}(job)
+	}
+	workers.Wait()
+}
+
+func (s *sSysPublish) cleanupTelegramSendTimeout(ctx context.Context, job telegramJobRecord) {
+	cleanupCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	// Do not spend all cleanup workers waiting for a busy in-process channel lock.
+	lock := s.telegramChannelLock(job.TargetChatId)
+	var err error
+	if !lock.TryLock() {
+		err = gerror.New("频道正在处理其他操作，稍后重试清理")
+	} else {
+		err = s.withTelegramChannelDBLock(cleanupCtx, telegramChannelLockKey(job.TargetChatId), func() error {
+			return s.deleteTelegramMessageSetLockedByChannel(cleanupCtx, job, telegramSendTimeoutMessage)
 		})
-		if err != nil {
-			g.Log().Warningf(ctx, "TG超时清理后重新入队失败 jobId:%d err:%+v", job.Id, err)
+		lock.Unlock()
+	}
+	cancel()
+	if err == nil {
+		remaining, countErr := g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).
+			Where("job_id", job.Id).WhereIn("status", []string{"sent", "undeletable"}).Count()
+		if countErr != nil {
+			err = countErr
+		} else if remaining > 0 {
+			err = gerror.New("旧消息尚未确认删除，等待协议号删除完成")
 		}
 	}
+	if err != nil {
+		_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).
+			Where("timeout_cleanup_at", job.TimeoutCleanupAt).Data(g.Map{"timeout_cleanup_at": gtime.Now().Add(time.Minute)}).Update()
+		g.Log().Warningf(ctx, "TG超时清理失败 jobId:%d channelId:%d err:%+v", job.Id, job.ChannelId, err)
+		return
+	}
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		// A late response changes this timestamp. Do not activate the replacement
+		// from an obsolete cleanup snapshot; the next pass must delete it first.
+		current, err := tx.Model(publishTgJobTable).Where("id", job.Id).
+			Where("timeout_cleanup_at", job.TimeoutCleanupAt).LockUpdate().One()
+		if err != nil {
+			return err
+		}
+		if current.IsEmpty() {
+			return nil
+		}
+		remaining, err := tx.Model(publishTgMessageTable).Where("job_id", job.Id).
+			WhereIn("status", []string{"sent", "undeletable"}).Count()
+		if err != nil {
+			return err
+		}
+		if remaining > 0 {
+			return gerror.New("清理期间收到新消息，暂不重新入队")
+		}
+		unresolved, err := telegramTimeoutUnresolvedAttemptCount(tx, job.Id)
+		if err != nil {
+			return err
+		}
+		if unresolved > 0 {
+			return gerror.New("旧发送仍缺少完整确认，已清理已知消息，等待对账或人工补偿；不自动重新上架")
+		}
+		var tail telegramJobRecord
+		if err := tx.Model(publishTgJobTable).Where("timeout_parent_job_id", job.Id).LockUpdate().Scan(&tail); !telegramOptionalAttemptScanSucceeded(err) {
+			return err
+		}
+		if tail.Id > 0 && tail.Status == telegramJobStatusFailed && tail.SendPhase == "timeout_wait_cleanup" {
+			if _, err := s.transitionTelegramJobTx(ctx, tx, telegramJobTransition{JobId: tail.Id, From: []string{telegramJobStatusFailed}, To: telegramJobStatusPending, Additional: g.Map{"next_retry_at": nil, "send_phase": ""}}); err != nil {
+				return err
+			}
+			if err := s.ensureTelegramJobOutboxTx(ctx, tx, tail.Id, 0); err != nil {
+				return err
+			}
+		}
+		_, err = tx.Model(publishTgJobTable).Where("id", job.Id).Where("timeout_cleanup_at", job.TimeoutCleanupAt).Data(g.Map{"timeout_cleanup_at": nil}).Update()
+		return err
+	})
+	if err != nil {
+		g.Log().Warningf(ctx, "TG超时清理后重新入队失败 jobId:%d err:%+v", job.Id, err)
+	}
+}
+
+func telegramTimeoutUnresolvedAttemptCount(tx gdb.TX, jobID int64) (int, error) {
+	return tx.Model(publishTgAttemptTable+" a").
+		Where("a.job_id", jobID).Where("a.status", telegramAttemptStatusSuperseded).
+		Where("a.response_received", 0).Count()
 }
 
 func (s *sSysPublish) recoverTelegramSendTimeouts(ctx context.Context) {
@@ -236,6 +309,14 @@ func (s *sSysPublish) recoverTelegramSendTimeouts(ctx context.Context) {
 			g.Log().Warningf(ctx, "TG频道超时已隔离 jobId:%d replacementJobId:%d channelId:%d phase:%s action:timeout_requeue", old.Id, replacement, old.ChannelId, old.SendPhase)
 			if err = s.wakeNextTelegramChannelJob(ctx, old); err != nil {
 				g.Log().Errorf(ctx, "TG超时释放后唤醒频道失败 jobId:%d channelId:%d err:%+v", old.Id, old.ChannelId, err)
+			}
+		} else if old.TimeoutRetryCount >= telegramSendMaxRetries && old.Status != telegramJobStatusSuperseded {
+			if err := s.updateProfilePublishOperationState(ctx, old, sysin.PublishTaskStatusFailed); err != nil {
+				g.Log().Warningf(ctx, "TG超时重试耗尽状态回写失败 jobId:%d err:%+v", old.Id, err)
+			}
+			g.Log().Warningf(ctx, "TG发送超时重试已达上限 jobId:%d channelId:%d retryCount:%d action:manual_repair", old.Id, old.ChannelId, old.TimeoutRetryCount)
+			if err := s.wakeNextTelegramChannelJob(ctx, old); err != nil {
+				g.Log().Warningf(ctx, "TG重试耗尽后唤醒频道失败 jobId:%d err:%+v", old.Id, err)
 			}
 		}
 	}
