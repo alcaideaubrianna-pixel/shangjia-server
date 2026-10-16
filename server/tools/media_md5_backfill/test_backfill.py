@@ -38,6 +38,16 @@ class FingerprintTests(unittest.TestCase):
         self.assertEqual(result[3], 'ValueError')
         self.assertNotIn('secret', str(result))
 
+    def test_stop_skips_queued_downloads(self):
+        backfill.STOP.set()
+        try:
+            with patch.object(backfill, 'stream_request') as download:
+                result = backfill.fingerprint((1,'https://test/video.mp4','',0,'video'),1e9,1024)
+                download.assert_not_called()
+                self.assertEqual(result[3], 'interrupted')
+        finally:
+            backfill.STOP.clear()
+
     def test_no_remote_original(self):
         self.assertEqual(backfill.fingerprint((1,'','local/missing',0,'image'),1e9,1024)[3], 'no_remote_original')
 

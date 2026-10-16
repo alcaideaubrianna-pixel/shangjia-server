@@ -30,6 +30,8 @@ def stream_request(source):
 
 def fingerprint(row, bandwidth, max_bytes):
     media_id, url, path, size, media_type = row
+    if STOP.is_set():
+        return media_id, None, 0, 'interrupted'
     source = url if urlparse(url or '').scheme in ('http', 'https') else path
     if urlparse(source or '').scheme not in ('http', 'https'):
         return media_id, None, 0, 'no_remote_original'
