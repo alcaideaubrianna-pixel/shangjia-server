@@ -105,7 +105,8 @@ func cachedRemoteImageMD5(ctx context.Context, imageURL string) (*mediaFingerpri
 	}
 	cacheKey := mediaFileCacheKey(nil, imageURL)
 	cacheExt := mediaFileCacheExt(&telegramMediaItem{MediaType: "image", FileUrl: imageURL}, imageURL)
-	path, err := cachedRemoteMediaFile(ctx, cacheKey, imageURL, cacheExt)
+	effectiveSource := mediaFileCachePreferWorkerURL(ctx, imageURL)
+	path, err := cachedRemoteMediaFile(ctx, cacheKey, effectiveSource, cacheExt)
 	if err != nil {
 		return nil, err
 	}
