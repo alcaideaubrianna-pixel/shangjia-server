@@ -230,7 +230,7 @@ func (s *sSysPublish) telegramOutboxJobDispatchDecision(ctx context.Context, job
 	}
 	var job telegramJobRecord
 	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Fields("id,tenant_id,channel_id,target_chat_id,status,dispatch_status,next_retry_at,send_phase,created_at").
+		Fields("id,tenant_id,channel_id,target_chat_id,status,dispatch_status,next_retry_at,send_phase,created_at,operation_no,priority").
 		Where("id", jobId).Scan(&job); err != nil {
 		return "", gerror.Wrap(err, "读取TG任务Outbox关联任务失败")
 	}
@@ -378,14 +378,14 @@ func (s *sSysPublish) dueTelegramJobOutboxRows(ctx context.Context, limit int, n
 func telegramDueOutboxPostgresSQL() string {
 	channelKey := "CASE WHEN j.channel_id > 0 THEN j.channel_id::text ELSE 'chat:' || REPLACE(COALESCE(j.target_chat_id,''), '-100', '') END"
 	return `WITH active_jobs AS MATERIALIZED (
-		SELECT j.id,j.tenant_id,j.channel_id,j.target_chat_id,j.status,j.dispatch_status,j.next_retry_at,j.created_at
+		SELECT j.id,j.tenant_id,j.channel_id,j.target_chat_id,j.status,j.dispatch_status,j.next_retry_at,j.created_at,j.operation_no,j.send_phase
 		FROM ` + publishTgJobTable + ` j
 		WHERE ` + telegramChannelBlockingJobStateSQL("j") + `
 	), channel_job_heads AS (
 		SELECT DISTINCT ON (j.tenant_id, ` + channelKey + `)
 			j.id AS job_id,j.tenant_id,j.channel_id,j.target_chat_id,j.status,j.dispatch_status,j.next_retry_at,j.created_at
 		FROM active_jobs j
-		ORDER BY j.tenant_id, ` + channelKey + `, j.created_at, j.id
+		ORDER BY j.tenant_id, ` + channelKey + `, ` + telegramChannelScheduleOrderSQL("j") + `
 	)
 	SELECT o.id,o.job_id,o.attempt_count,o.available_at,h.tenant_id,h.channel_id,h.target_chat_id
 	FROM channel_job_heads h
