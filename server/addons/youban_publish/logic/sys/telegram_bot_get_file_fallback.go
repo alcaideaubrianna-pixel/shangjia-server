@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -96,7 +97,7 @@ func telegramOfficialMediaBot(botToken string, conf *model.TelegramConfig) (*tgb
 	)
 }
 
-func telegramBotGetFileWithFallback(ctx context.Context, botID int64, botToken string, localBot *tgbot.Bot, conf *model.TelegramConfig, fileID string) (*tgbot.Bot, *models.File, string, int, error) {
+func telegramBotGetFileWithFallback(ctx context.Context, botID int64, botToken string, localBot *tgbot.Bot, conf *model.TelegramConfig, fileID string, sourceSize int64) (*tgbot.Bot, *models.File, string, int, error) {
 	release, err := acquireTelegramBotGetFileSlot(ctx, botID)
 	if err != nil {
 		return nil, nil, "", 0, err
@@ -114,20 +115,32 @@ func telegramBotGetFileWithFallback(ctx context.Context, botID int64, botToken s
 		})
 		return officialBot, file, "official", attempts, getErr
 	}
-	if !telegramBotGetFileCircuitOpen(botID, time.Now()) {
-		file, attempts, localErr := telegramBotGetFileWithBoundedRetry(ctx, func(requestCtx context.Context) (*models.File, error) {
+	localAttempts := 0
+	localFailure := "自建Bot API暂处于熔断等待"
+	circuitOpen := telegramBotGetFileCircuitOpen(botID, time.Now())
+	if !circuitOpen {
+		file, attempts, localErr := telegramBotGetFileWithRetryPolicy(ctx, 1, 2*time.Minute, func(requestCtx context.Context) (*models.File, error) {
 			return localBot.GetFile(requestCtx, &tgbot.GetFileParams{FileID: fileID})
 		})
+		localAttempts = attempts
 		recordTelegramBotGetFileResult(botID, localErr, time.Now())
 		if localErr == nil {
 			return localBot, file, localEndpoint, attempts, nil
 		}
+		localFailure = strings.ReplaceAll(localErr.Error(), botToken, "[REDACTED]")
 		if !isRetryableTelegramBotRequestError(localErr) {
-			return nil, nil, localEndpoint, attempts, localErr
+			return nil, nil, localEndpoint, attempts, gerror.New(localFailure)
 		}
 		observeTelegramBotGetFileFallback(ctx, "local_failed", botID)
 	} else {
 		observeTelegramBotGetFileFallback(ctx, "circuit_open", botID)
+	}
+
+	if !telegramBotOfficialFallbackAllowed(sourceSize) {
+		if circuitOpen {
+			return nil, nil, localEndpoint, 0, newCollectMediaFairnessRetryError(localFailure, telegramBotGetFileCircuitCooldown)
+		}
+		return nil, nil, localEndpoint, localAttempts, newCollectMediaRetryError(localFailure+"；大文件或未知大小媒体等待自建接口重试", 30*time.Second)
 	}
 
 	officialBot, err := telegramOfficialMediaBot(botToken, conf)
@@ -142,5 +155,14 @@ func telegramBotGetFileWithFallback(ctx context.Context, botID int64, botToken s
 	} else {
 		observeTelegramBotGetFileFallback(ctx, "official_failed", botID)
 	}
-	return officialBot, file, "official", attempts, err
+	if err != nil {
+		message := localFailure + "；官方回退失败: " + strings.ReplaceAll(err.Error(), botToken, "[REDACTED]")
+		return nil, nil, "official", localAttempts + attempts, newCollectMediaRetryError(message, 30*time.Second)
+	}
+	return officialBot, file, "official", localAttempts + attempts, nil
+}
+
+// 未知大小不冒险回退，官方 getFile 的下载限制为 20 MB。
+func telegramBotOfficialFallbackAllowed(sourceSize int64) bool {
+	return sourceSize > 0 && sourceSize <= 20*1024*1024
 }

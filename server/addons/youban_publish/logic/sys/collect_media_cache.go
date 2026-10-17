@@ -529,7 +529,11 @@ func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, even
 				}
 				defer releaseGlobalSlot()
 			}
-			itemTimeout := time.Duration(g.Cfg().MustGet(ctx, "youbanPublish.collect.mediaItemTimeoutSeconds", int(collectMediaDefaultItemTimeout/time.Second)).Int()) * time.Second
+			defaultItemTimeout := collectMediaDefaultItemTimeout
+			if event["source_type"].String() == sysin.CollectSourceTypeBot {
+				defaultItemTimeout = 10 * time.Minute
+			}
+			itemTimeout := time.Duration(g.Cfg().MustGet(ctx, "youbanPublish.collect.mediaItemTimeoutSeconds", int(defaultItemTimeout/time.Second)).Int()) * time.Second
 			if itemTimeout < 30*time.Second {
 				itemTimeout = 30 * time.Second
 			}
@@ -564,6 +568,7 @@ func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, even
 			}
 			s.appendCollectEventLogForRecord(ctx, event, "media", "downloading", logMessage, fmt.Sprintf("mediaId=%d sourceMessageId=%d sourceFileId=%s", row.Id, row.SourceMessageId, row.SourceFileId))
 			var cached *collectDownloadedMedia
+			var err error
 			if sourceType == sysin.CollectSourceTypeBot {
 				cached, err = s.downloadBotTelegramMedia(itemCtx, event["tenant_id"].Int64(), event["bot_id"].Int64(), items[index])
 			} else {
@@ -1002,7 +1007,7 @@ func (s *sSysPublish) downloadBotTelegramMediaWithToken(ctx context.Context, bot
 	}
 	endpoint := telegramBotAPIEndpoint(conf.BotApiServerUrl)
 	getFileStartedAt := time.Now()
-	bot, file, endpoint, attempts, err := telegramBotGetFileWithFallback(ctx, botId, botToken, bot, conf, fileID)
+	bot, file, endpoint, attempts, err := telegramBotGetFileWithFallback(ctx, botId, botToken, bot, conf, fileID, item.SourceSize)
 	if err != nil {
 		observeTelegramBotGetFile(ctx, endpoint, "error", time.Since(getFileStartedAt))
 		return nil, gerror.Wrapf(err, "读取Bot媒体文件信息失败，已尝试%d次", attempts)

@@ -10,19 +10,23 @@ import (
 
 const (
 	telegramBotGetFileAttempts       = 3
-	telegramBotGetFileAttemptTimeout = 4 * time.Second
+	telegramBotGetFileAttemptTimeout = 30 * time.Second
 )
 
 var telegramBotGetFileDelays = []time.Duration{250 * time.Millisecond, 750 * time.Millisecond}
 
 func telegramBotGetFileWithBoundedRetry(ctx context.Context, request func(context.Context) (*models.File, error)) (*models.File, int, error) {
+	return telegramBotGetFileWithRetryPolicy(ctx, telegramBotGetFileAttempts, telegramBotGetFileAttemptTimeout, request)
+}
+
+func telegramBotGetFileWithRetryPolicy(ctx context.Context, maxAttempts int, timeout time.Duration, request func(context.Context) (*models.File, error)) (*models.File, int, error) {
 	var file *models.File
 	var err error
-	for attempt := 1; attempt <= telegramBotGetFileAttempts; attempt++ {
-		attemptCtx, cancel := context.WithTimeout(ctx, telegramBotGetFileAttemptTimeout)
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		attemptCtx, cancel := context.WithTimeout(ctx, timeout)
 		file, err = request(attemptCtx)
 		cancel()
-		if err == nil || !isRetryableTelegramBotRequestError(err) || attempt == telegramBotGetFileAttempts || ctx.Err() != nil {
+		if err == nil || !isRetryableTelegramBotRequestError(err) || attempt == maxAttempts || ctx.Err() != nil {
 			return file, attempt, err
 		}
 		timer := time.NewTimer(telegramBotGetFileDelays[attempt-1])
@@ -33,7 +37,7 @@ func telegramBotGetFileWithBoundedRetry(ctx context.Context, request func(contex
 		case <-timer.C:
 		}
 	}
-	return file, telegramBotGetFileAttempts, err
+	return file, maxAttempts, err
 }
 
 func isRetryableTelegramBotRequestError(err error) bool {

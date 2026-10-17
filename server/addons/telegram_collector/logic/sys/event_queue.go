@@ -265,7 +265,7 @@ func collectorBotMessageKey(sourceID int64, chatID string, messageID int64, grou
 func collectorBotMediaItems(message *models.Message) []sysin.CollectorMediaItem {
 	items := make([]sysin.CollectorMediaItem, 0, 2)
 	seen := make(map[string]struct{}, 4)
-	appendItem := func(mediaType, fileID, fileUniqueID string) {
+	appendItem := func(mediaType, fileID, fileUniqueID string, size int64, mime string) {
 		fileID = strings.TrimSpace(fileID)
 		fileUniqueID = strings.TrimSpace(fileUniqueID)
 		if fileID == "" {
@@ -283,24 +283,24 @@ func collectorBotMediaItems(message *models.Message) []sysin.CollectorMediaItem 
 		if fileUniqueID != "" {
 			seen["unique:"+fileUniqueID] = struct{}{}
 		}
-		items = append(items, sysin.CollectorMediaItem{Type: mediaType, FileID: fileID})
+		items = append(items, sysin.CollectorMediaItem{Type: mediaType, FileID: fileID, SourceSize: size, SourceMimeType: mime})
 	}
 	if len(message.Photo) > 0 {
 		photo := message.Photo[len(message.Photo)-1]
-		appendItem("photo", photo.FileID, photo.FileUniqueID)
+		appendItem("photo", photo.FileID, photo.FileUniqueID, int64(photo.FileSize), "image/jpeg")
 	}
 	if message.Video != nil {
-		appendItem("video", message.Video.FileID, message.Video.FileUniqueID)
+		appendItem("video", message.Video.FileID, message.Video.FileUniqueID, int64(message.Video.FileSize), message.Video.MimeType)
 	}
 	if message.Animation != nil {
-		appendItem("video", message.Animation.FileID, message.Animation.FileUniqueID)
+		appendItem("video", message.Animation.FileID, message.Animation.FileUniqueID, int64(message.Animation.FileSize), message.Animation.MimeType)
 	}
 	if message.Document != nil {
 		mediaType := "document"
 		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(message.Document.MimeType)), "video/") {
 			mediaType = "video"
 		}
-		appendItem(mediaType, message.Document.FileID, message.Document.FileUniqueID)
+		appendItem(mediaType, message.Document.FileID, message.Document.FileUniqueID, int64(message.Document.FileSize), message.Document.MimeType)
 	}
 	return items
 }

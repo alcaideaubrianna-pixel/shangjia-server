@@ -481,3 +481,11 @@ func TestCollectorMediaCacheDatabaseFallbackIntegration(t *testing.T) {
 		_, _ = g.DB().Exec(ctx, "SELECT 1")
 	})
 }
+
+func TestCollectorBotMediaItemsPreservesDownloadMetadata(t *testing.T) {
+	message := &models.Message{Video: &models.Video{FileID: "large-video", FileUniqueID: "large-unique", FileSize: 32 * 1024 * 1024, MimeType: "video/mp4"}}
+	items := collectorBotMediaItems(message)
+	if len(items) != 1 || items[0].SourceSize != 32*1024*1024 || items[0].SourceMimeType != "video/mp4" {
+		t.Fatalf("items=%+v", items)
+	}
+}
