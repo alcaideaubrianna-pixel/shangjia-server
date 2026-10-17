@@ -45,6 +45,8 @@ type collectProcessQueuePayload struct {
 	SourceId     int64  `json:"sourceId"`
 	SourceChatId string `json:"sourceChatId,omitempty"`
 	TenantId     int64  `json:"tenantId"`
+	OutboxOwner  string `json:"outboxOwner,omitempty"`
+	Recovery     bool   `json:"recovery,omitempty"`
 }
 
 const (
@@ -77,6 +79,8 @@ func (s *sSysPublish) enqueueCollectProcessTaskWithOutbox(ctx context.Context, p
 				return false, err
 			}
 			g.Log().Warningf(ctx, "采集处理Outbox尚未迁移，临时沿用Redis任务 eventId:%d err:%+v", payload.EventId, err)
+		} else if payload.EventId > 0 {
+			return true, nil // Only the durable dispatcher creates event tasks.
 		}
 	}
 	client, err := s.telegramQueueClient(ctx)
@@ -97,7 +101,9 @@ func (s *sSysPublish) enqueueCollectProcessTaskWithOutbox(ctx context.Context, p
 		asynq.MaxRetry(collectProcessTaskMaxRetry),
 		asynq.Timeout(2 * time.Minute),
 	}
-	if unique {
+	if payload.OutboxOwner != "" {
+		options = append(options, asynq.TaskID("collect-"+payload.OutboxOwner))
+	} else if unique {
 		reserved, reserveErr := reserveCollectProcessSchedule(ctx, payload, uniqueTTL)
 		if reserveErr != nil {
 			return false, reserveErr
@@ -174,6 +180,10 @@ func reserveCollectProcessSchedule(ctx context.Context, payload collectProcessQu
 }
 
 func (s *sSysPublish) reconcileCollectProcessSchedule(ctx context.Context, payload collectProcessQueuePayload) error {
+	if payload.EventId > 0 {
+		removeCollectProcessSchedule(ctx, payload)
+		return nil
+	}
 	removeCollectProcessSchedule(ctx, payload)
 	enabled, err := collectProcessSourceEnabled(ctx, payload)
 	if err != nil || !enabled {
@@ -219,6 +229,8 @@ func collectProcessTaskBody(payload collectProcessQueuePayload) ([]byte, error) 
 		EventId:      payload.EventId,
 		SourceId:     payload.SourceId,
 		SourceChatId: payload.SourceChatId,
+		OutboxOwner:  payload.OutboxOwner,
+		Recovery:     payload.Recovery,
 	})
 }
 
@@ -264,6 +276,7 @@ func collectProcessSourceEnabled(ctx context.Context, payload collectProcessQueu
 		Where("tenant_id", payload.TenantId).
 		Where("account_id", payload.AccountId).
 		Where("collect_enabled", 1).
+		Where(pdao.YoubanPublishCollectSource.Columns().ChannelBlacklisted, 0).
 		Where("status", 1).
 		WhereNull("deleted_at").
 		Count()
@@ -289,7 +302,25 @@ func (s *sSysPublish) processCollectSourceTask(ctx context.Context, payload coll
 		if event.IsEmpty() {
 			return 0, false, true, nil
 		}
-		if err = s.processTargetCollectEventWindow(ctx, payload, event); err != nil {
+		if !collectProcessEventMatchesPayload(event, payload) {
+			return 0, false, false, gerror.New("采集事件与任务归属不一致")
+		}
+		if collectProcessEventFinished(event) {
+			return 0, false, true, nil
+		}
+		if event["processed_at"].GTime() != nil && event["status"].String() != sysin.CollectEventStatusIgnored {
+			cols := pdao.YoubanPublishCollectEvent.Columns()
+			if _, clearErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).WherePri(payload.EventId).Where(cols.Status, event["status"].String()).Data(cols.ProcessedAt, nil).Update(); clearErr != nil {
+				return 0, false, false, gerror.Wrap(clearErr, "清理未完成事件的历史完成时间失败")
+			}
+		}
+		var processErr error
+		if event["material_role"].String() == collectMaterialRoleVerify && event["material_parent_event_id"].Int64() > 0 {
+			processErr = s.processCollectEvent(ctx, payload.EventId, payload.TenantId, payload.AccountId)
+		} else {
+			processErr = s.processTargetCollectEventWindow(ctx, payload, event)
+		}
+		if err = processErr; err != nil {
 			var retryErr *collectProcessRetryError
 			if errors.As(err, &retryErr) {
 				return retryErr.delay, true, false, nil
@@ -444,4 +475,35 @@ func collectLocalWindowRemaining(value *gtime.Time, window time.Duration) time.D
 		return window
 	}
 	return window - elapsed
+}
+
+// Terminal events can still have stale tasks in Redis. Completing these tasks
+// is idempotent; returning an error would retry them up to 1000 times.
+func collectProcessEventFinished(event gdb.Record) bool {
+	status := event["status"].String()
+	switch status {
+	case sysin.CollectEventStatusProcessed, sysin.CollectEventStatusDispatched:
+		return true
+	case sysin.CollectEventStatusFailed:
+		return !shouldRecoverCollectEvent(event)
+	case sysin.CollectEventStatusIgnored:
+		return event["material_role"].String() != collectMaterialRoleVerify || event["error_message"].String() != collectMaterialVerifyUnmatchedMessage
+	}
+	return false
+}
+
+func collectProcessEventMatchesPayload(event gdb.Record, payload collectProcessQueuePayload) bool {
+	return event["tenant_id"].Int64() == payload.TenantId && event["account_id"].Int64() == payload.AccountId && event["source_id"].Int64() == payload.SourceId
+}
+
+// Serialize legacy and v2 tasks for the same event, including queue migration.
+func lockCollectProcessEvent(ctx context.Context, payload collectProcessQueuePayload) (func(), error) {
+	if payload.EventId <= 0 {
+		return func() {}, nil
+	}
+	mutex := lock.NewConfig(2*time.Minute, time.Second).Mutex(fmt.Sprintf("youban_publish:collect:process:event:%d:%d", payload.TenantId, payload.EventId))
+	if err := mutex.TryLock(ctx); err != nil {
+		return nil, err
+	}
+	return func() { _ = mutex.Unlock(context.Background()) }, nil
 }

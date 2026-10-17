@@ -677,6 +677,7 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 			continue
 		}
 		queued, processErr := s.enqueueCollectProcessDeferred(ctx, collectProcessQueuePayload{
+			Recovery:     true,
 			EventId:      row["id"].Int64(),
 			SourceId:     row["source_id"].Int64(),
 			SourceChatId: row["source_chat_id"].String(),

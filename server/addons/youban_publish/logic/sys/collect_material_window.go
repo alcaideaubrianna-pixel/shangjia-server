@@ -117,7 +117,7 @@ func (s *sSysPublish) processTargetCollectEventWindow(ctx context.Context, paylo
 		return gerror.Wrap(err, "读取目标采集事件验证窗口失败")
 	}
 	if len(rows) == 0 || rows[0]["id"].Int64() != target["id"].Int64() {
-		return gerror.Newf("目标采集事件当前不可处理 eventId:%d status:%s role:%s", target["id"].Int64(), target["status"].String(), strings.TrimSpace(target["material_role"].String()))
+		return newCollectProcessRetryError(collectMaterialWaitingVerifyRetryDelay, "目标采集事件等待状态或静默期更新")
 	}
 	return s.processCollectMessageWindow(ctx, payload, target["source_chat_id"].String(), rows, map[int64]struct{}{target["id"].Int64(): {}}, windowTruncated)
 }

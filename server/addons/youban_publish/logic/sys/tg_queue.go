@@ -77,8 +77,19 @@ const collectMediaMaxBulkQueueShards = 16
 
 const collectProcessQueueShards = 16
 
+const (
+	tgQueueNameCollectProcessRealtimeV2 = "youban_publish_collect_process_realtime_v2"
+	tgQueueNameCollectProcessRecoveryV2 = "youban_publish_collect_process_recovery_v2"
+)
+
 func collectProcessQueueName(payload collectProcessQueuePayload) string {
 	if payload.EventId > 0 {
+		if payload.OutboxOwner != "" {
+			if payload.Recovery {
+				return tgQueueNameCollectProcessRecoveryV2
+			}
+			return tgQueueNameCollectProcessRealtimeV2
+		}
 		return tgQueueNameCollectProcessRealtime
 	}
 	hash := fnv.New32a()
@@ -101,6 +112,8 @@ func collectProcessWorkerQueues() map[string]int {
 		queues[queue] = 1
 	}
 	queues[tgQueueNameBackground] = 1
+	queues[tgQueueNameCollectProcessRealtime] = 1
+	queues[tgQueueNameCollectProcessRecoveryV2] = 4
 	return queues
 }
 

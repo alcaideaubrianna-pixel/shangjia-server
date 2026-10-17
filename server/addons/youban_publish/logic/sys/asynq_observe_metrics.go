@@ -157,19 +157,21 @@ func observeQueuedJobsWithoutConsumer(ctx context.Context, servers []*asynq.Serv
 
 func telegramObserveQueueNames(ctx context.Context) []string {
 	set := map[string]struct{}{
-		tgQueueNameAutoDeleteRealtime:     {},
-		tgQueueNameAutoDeleteBackfill:     {},
-		tgQueueNameAttemptTimeout:         {},
-		tgQueueNameBackground:             {},
-		tgQueueNameMaterialImportPull:     {},
-		tgQueueNameMaterialImportMedia:    {},
-		tgQueueNameCycle:                  {},
-		tgQueueNameCollectProcessRealtime: {},
-		tgQueueNameCollectProcess:         {},
-		tgQueueNameHistory:                {},
-		tgQueueNameMediaProcess:           {},
-		tgQueueNameMatting:                {},
-		tgQueueNameProfileMaintenance:     {},
+		tgQueueNameAutoDeleteRealtime:       {},
+		tgQueueNameAutoDeleteBackfill:       {},
+		tgQueueNameAttemptTimeout:           {},
+		tgQueueNameBackground:               {},
+		tgQueueNameMaterialImportPull:       {},
+		tgQueueNameMaterialImportMedia:      {},
+		tgQueueNameCycle:                    {},
+		tgQueueNameCollectProcessRealtime:   {},
+		tgQueueNameCollectProcessRealtimeV2: {},
+		tgQueueNameCollectProcessRecoveryV2: {},
+		tgQueueNameCollectProcess:           {},
+		tgQueueNameHistory:                  {},
+		tgQueueNameMediaProcess:             {},
+		tgQueueNameMatting:                  {},
+		tgQueueNameProfileMaintenance:       {},
 	}
 	for queue := range telegramPublishForegroundQueueWeights(ctx) {
 		set[queue] = struct{}{}

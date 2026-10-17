@@ -75,7 +75,7 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	})
 	collectRealtimeServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
 		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.collectRealtimeConcurrency", 16).Int(),
-		Queues:         map[string]int{tgQueueNameCollectProcessRealtime: 1},
+		Queues:         map[string]int{tgQueueNameCollectProcessRealtimeV2: 1},
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
 	server := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
@@ -550,17 +550,31 @@ func (s *sSysPublish) handleCollectProcessTask(ctx context.Context, task *asynq.
 	if err != nil {
 		return err
 	}
+	unlock, lockErr := lockCollectProcessEvent(ctx, payload)
+	if lockErr != nil {
+		return newCollectProcessRetryError(10*time.Second, "采集事件正在处理，稍后重试")
+	}
+	defer unlock()
+	if payload.OutboxOwner != "" {
+		current, readErr := g.DB().Model(collectProcessOutboxTable).Ctx(ctx).Where("event_id", payload.EventId).Where("status", "processing").Where("lease_owner", payload.OutboxOwner).Count()
+		if readErr != nil {
+			return readErr
+		}
+		if current == 0 {
+			return nil
+		} // Superseded by a newer durable schedule.
+	}
 	delay, pending, removeSchedule, err := s.processCollectSourceTask(ctx, payload)
 	if err != nil || !pending {
 		if err == nil && removeSchedule {
 			err = s.reconcileCollectProcessSchedule(ctx, payload)
 			if err == nil {
-				completeCollectProcessOutbox(ctx, payload.EventId)
+				completeCollectProcessOutbox(ctx, payload)
 			}
 			return err
 		}
 		if err == nil {
-			completeCollectProcessOutbox(ctx, payload.EventId)
+			completeCollectProcessOutbox(ctx, payload)
 		}
 		return err
 	}

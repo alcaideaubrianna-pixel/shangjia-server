@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"github.com/gogf/gf/v2/util/guid"
 	"strings"
 	"time"
 
@@ -40,6 +41,9 @@ func ensureCollectProcessOutbox(ctx context.Context, payload collectProcessQueue
             ON CONFLICT (event_id) DO UPDATE SET tenant_id=EXCLUDED.tenant_id,account_id=EXCLUDED.account_id,
             source_id=EXCLUDED.source_id,source_chat_id=EXCLUDED.source_chat_id,status='pending',
             available_at=EXCLUDED.available_at,lease_owner='',lease_expires_at=NULL,last_error='',updated_at=EXCLUDED.updated_at`
+		if payload.Recovery && payload.OutboxOwner == "" {
+			query += ` WHERE ` + collectProcessOutboxTable + `.status='delivered'`
+		}
 	} else {
 		query = `INSERT INTO ` + collectProcessOutboxTable + `
             (event_id,tenant_id,account_id,source_id,source_chat_id,status,available_at,created_at,updated_at)
@@ -62,11 +66,12 @@ func isMissingCollectProcessOutboxError(err error) bool {
 		strings.Contains(message, "undefined table") || strings.Contains(message, "no such table")
 }
 
-func completeCollectProcessOutbox(ctx context.Context, eventID int64) {
-	if eventID <= 0 {
+func completeCollectProcessOutbox(ctx context.Context, payload collectProcessQueuePayload) {
+	eventID := payload.EventId
+	if eventID <= 0 || payload.OutboxOwner == "" {
 		return
 	}
-	if _, err := g.DB().Model(collectProcessOutboxTable).Ctx(ctx).Where("event_id", eventID).Data(g.Map{
+	if _, err := g.DB().Model(collectProcessOutboxTable).Ctx(ctx).Where("event_id", eventID).Where("status", "processing").Where("lease_owner", payload.OutboxOwner).Data(g.Map{
 		"status": "delivered", "lease_owner": "", "lease_expires_at": nil,
 		"delivered_at": gtime.Now(), "updated_at": gtime.Now(),
 	}).Update(); err != nil {
@@ -79,19 +84,44 @@ func (s *sSysPublish) dispatchDueCollectProcessOutbox(ctx context.Context, limit
 		limit = 500
 	}
 	now := gtime.Now()
-	rows, err := g.DB().Model(collectProcessOutboxTable).Ctx(ctx).
-		Where("available_at <= ?", now).
-		Where("status = ? OR (status = ? AND lease_expires_at <= ?)", "pending", "processing", now).
-		OrderAsc("available_at").OrderAsc("id").Limit(limit).All()
+	model := g.DB().Model(collectProcessOutboxTable).Ctx(ctx)
+	if strings.EqualFold(g.DB().GetConfig().Type, "pgsql") {
+		model = model.Fields("*, updated_at::text AS claim_version")
+	}
+	model = model.Where("available_at <= ?", now).
+		Where("status = ? OR (status = ? AND lease_expires_at <= ?)", "pending", "processing", now)
+	// Reserve part of each scan for fresh events so an expired historical batch
+	// cannot monopolize dispatch. Unused realtime capacity goes to recovery.
+	cutoff := now.Add(-10 * time.Minute)
+	realtimeLimit := limit / 5
+	if realtimeLimit < 1 {
+		realtimeLimit = 1
+	}
+	rows, err := model.Clone().WhereGTE("created_at", cutoff).OrderAsc("available_at").OrderAsc("id").Limit(realtimeLimit).All()
+	if err == nil && len(rows) < limit {
+		older, readErr := model.Clone().WhereLT("created_at", cutoff).OrderAsc("available_at").OrderAsc("id").Limit(limit - len(rows)).All()
+		err = readErr
+		rows = append(rows, older...)
+	}
 	if err != nil {
 		if isMissingCollectProcessOutboxError(err) {
 			return nil
 		}
 		return gerror.Wrap(err, "读取到期采集处理Outbox失败")
 	}
-	owner := "collect-outbox-" + gtime.Now().Format("YmdHis.u")
 	for _, row := range rows {
-		claimed, claimErr := g.DB().Model(collectProcessOutboxTable).Ctx(ctx).Where("id", row["id"].Int64()).
+		owner := row["lease_owner"].String()
+		if owner == "" {
+			owner = "realtime-" + guid.S()
+			if row["created_at"].GTime() != nil && time.Since(row["created_at"].Time()) > 10*time.Minute {
+				owner = "recovery-" + guid.S()
+			}
+		}
+		claimModel := g.DB().Model(collectProcessOutboxTable).Ctx(ctx).Where("id", row["id"].Int64())
+		if version, ok := row["claim_version"]; ok {
+			claimModel = claimModel.Where("updated_at::text = ?", version.String())
+		}
+		claimed, claimErr := claimModel.
 			Where("status = ? OR (status = ? AND lease_expires_at <= ?)", "pending", "processing", now).
 			Data(g.Map{"status": "processing", "lease_owner": owner, "lease_expires_at": now.Add(collectProcessOutboxLease), "updated_at": gtime.Now()}).Update()
 		if claimErr != nil {
@@ -103,7 +133,9 @@ func (s *sSysPublish) dispatchDueCollectProcessOutbox(ctx context.Context, limit
 			continue
 		}
 		payload := collectProcessQueuePayload{
-			EventId: row["event_id"].Int64(), TenantId: row["tenant_id"].Int64(), AccountId: row["account_id"].Int64(),
+			OutboxOwner: owner,
+			Recovery:    strings.HasPrefix(owner, "recovery-") || (!strings.HasPrefix(owner, "realtime-") && row["created_at"].GTime() != nil && time.Since(row["created_at"].Time()) > 10*time.Minute),
+			EventId:     row["event_id"].Int64(), TenantId: row["tenant_id"].Int64(), AccountId: row["account_id"].Int64(),
 			SourceId: row["source_id"].Int64(), SourceChatId: row["source_chat_id"].String(),
 		}
 		queued, queueErr := s.enqueueCollectProcessTaskWithOutbox(ctx, payload, 0, false, false)
@@ -111,6 +143,10 @@ func (s *sSysPublish) dispatchDueCollectProcessOutbox(ctx context.Context, limit
 			// Keep the row leased until the worker marks it delivered. Updating it
 			// back to pending here can overwrite a fast worker's delivered state
 			// and cause a duplicate recovery dispatch.
+			continue
+		}
+		if queueErr == nil && !queued {
+			// Stable task ID already exists. Keep its owner valid while queued.
 			continue
 		}
 		message := "任务未入队"
