@@ -28,6 +28,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_note_index_plain_text_trgm" ON 
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_content_profile_source_uuid" ON "hg_content_profile" ("source_note_uuid") WHERE "deleted_at" IS NULL;
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_media_phash_lsh_lookup" ON "hg_youban_publish_media_phash_lsh" ("tenant_id", "media_type", "bucket_pos", "bucket_value", "account_id", "profile_id", "media_id") INCLUDE ("hash_value");
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_tg_message_file_unique" ON "hg_youban_publish_tg_message" ("tg_file_unique_id", "account_id", "id" DESC) WHERE "tg_file_unique_id" <> '' AND "deleted_at" IS NULL;
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_tg_message_reply_scope" ON "hg_youban_publish_tg_message" ("tenant_id", "account_id", "target_chat_id", "tg_message_id", "id" DESC) WHERE "deleted_at" IS NULL AND "status" = 'sent';
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_tg_attempt_sending_recovery" ON "hg_youban_publish_tg_attempt" ("updated_at", "id") WHERE "status" = 'sending';
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_tg_job_sending_recovery" ON "hg_youban_publish_tg_job" ("updated_at", "id") WHERE "status" = 'sending';
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_profile_state_dashboard" ON "hg_youban_publish_profile_state" ("tenant_id", "publish_task_status", "profile_id") WHERE "deleted_at" IS NULL;
