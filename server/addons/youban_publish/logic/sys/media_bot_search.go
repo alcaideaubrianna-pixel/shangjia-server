@@ -9,6 +9,7 @@ import (
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gctx"
 	"golang.org/x/sync/errgroup"
 
 	publishmodel "hotgo/addons/youban_publish/model"
@@ -48,12 +49,13 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 	searchCtx, cancelSearch := context.WithTimeout(ctx, botMediaSearchTimeout)
 	defer cancelSearch()
 	ctx = searchCtx
-	ctx = scantrace.With(ctx, g.Map{"traceId": in.TraceId, "tenantId": in.TenantId, "accountId": in.AccountId, "items": len(in.Items)})
+	requestID := gctx.CtxId(ctx)
+	ctx = scantrace.With(ctx, g.Map{"requestId": requestID, "queryId": in.TraceId, "tenantId": in.TenantId, "accountId": in.AccountId, "items": len(in.Items)})
 	finish := scantrace.Begin(ctx, "search.total")
 	defer func() { finish(resultErr) }()
 	startedAt := time.Now()
 	defer func() {
-		g.Log().Info(ctx, "Bot扫图服务完成", g.Map{"traceId": in.TraceId, "tenantId": in.TenantId, "accountId": in.AccountId, "items": len(in.Items), "durationMs": time.Since(startedAt).Milliseconds()})
+		g.Log().Info(ctx, "Bot扫图服务完成", g.Map{"requestId": requestID, "queryId": in.TraceId, "tenantId": in.TenantId, "accountId": in.AccountId, "items": len(in.Items), "durationMs": time.Since(startedAt).Milliseconds()})
 	}()
 	step := scantrace.Begin(ctx, "access.check")
 	accessErr := s.ensureTenantVipFeature(ctx, in.TenantId, sysin.TenantVipFeatureSimilarMedia)
@@ -177,14 +179,15 @@ func loadBotMediaColdFingerprints(ctx context.Context, traceId string, items []*
 			}
 			startedAt := time.Now()
 			itemCtx, cancelItem := context.WithTimeout(groupCtx, botMediaColdItemTimeout)
-			itemCtx = scantrace.With(itemCtx, g.Map{"itemIndex": index})
+			itemCtx = scantrace.With(itemCtx, g.Map{"requestId": gctx.CtxId(ctx), "queryId": traceId, "itemIndex": index})
 			finish := scantrace.Begin(itemCtx, "fingerprint.cold")
 			fingerprint, cacheHit, err := loader(itemCtx, item.FileUniqueId, item.FileUrl)
 			finish(err)
 			cancelItem()
 			results[index] = botMediaColdFingerprintResult{fingerprint: fingerprint, err: err}
 			g.Log().Info(ctx, "Bot扫图冷媒体处理完成", g.Map{
-				"traceId": traceId, "fileUniqueId": item.FileUniqueId, "cacheHit": cacheHit,
+				"requestId": gctx.CtxId(ctx), "queryId": traceId, "stage": "fingerprint_cold",
+				"fileUniqueId": item.FileUniqueId, "cacheHit": cacheHit,
 				"durationMs": time.Since(startedAt).Milliseconds(), "err": err,
 			})
 			return nil
