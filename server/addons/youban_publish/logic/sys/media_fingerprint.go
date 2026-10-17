@@ -38,13 +38,17 @@ func cachedTelegramImageFingerprint(ctx context.Context, fileUniqueId string, im
 	if fingerprint, ok := telegramImageFingerprintFromCache(ctx, fileUniqueId); ok {
 		return fingerprint, true, nil
 	}
-	fingerprint, err := cachedRemoteImageFingerprint(ctx, imageURL)
+	fingerprint, err := cachedRemoteImageMD5(ctx, imageURL)
 	if err != nil {
 		return nil, false, err
 	}
-	if fileUniqueId != "" && fingerprint != nil && fingerprint.PHash != nil {
+	if fileUniqueId != "" && fingerprint != nil && fingerprint.MD5 != "" {
+		var pHash uint64
+		if fingerprint.PHash != nil {
+			pHash = fingerprint.PHash.GetHash()
+		}
 		_ = cache.Instance().Set(ctx, botMediaFingerprintCacheKey(fileUniqueId), cachedBotMediaFingerprint{
-			MD5: fingerprint.MD5, PHash: fingerprint.PHash.GetHash(),
+			MD5: fingerprint.MD5, PHash: pHash,
 		}, botMediaFingerprintCacheTTL)
 	}
 	return fingerprint, false, nil
@@ -60,12 +64,14 @@ func telegramImageFingerprintFromCache(ctx context.Context, fileUniqueId string)
 		return nil, false
 	}
 	var stored cachedBotMediaFingerprint
-	if err = value.Scan(&stored); err != nil || stored.PHash == 0 {
+	if err = value.Scan(&stored); err != nil || (stored.MD5 == "" && stored.PHash == 0) {
 		return nil, false
 	}
-	return &mediaFingerprint{
-		MD5: stored.MD5, PHash: goimagehash.NewImageHash(stored.PHash, goimagehash.PHash),
-	}, true
+	fingerprint := &mediaFingerprint{MD5: stored.MD5}
+	if stored.PHash != 0 {
+		fingerprint.PHash = goimagehash.NewImageHash(stored.PHash, goimagehash.PHash)
+	}
+	return fingerprint, true
 }
 
 func botMediaFingerprintCacheKey(fileUniqueId string) string {
@@ -90,6 +96,24 @@ func uploadImageFingerprint(file *ghttp.UploadFile) (*mediaFingerprint, error) {
 		return nil, err
 	}
 	return &mediaFingerprint{MD5: md5Hex(content), PHash: hash}, nil
+}
+
+func cachedRemoteImageMD5(ctx context.Context, imageURL string) (*mediaFingerprint, error) {
+	imageURL = strings.TrimSpace(imageURL)
+	if imageURL == "" {
+		return nil, gerror.New("请发送要搜索的图片")
+	}
+	cacheKey := mediaFileCacheKey(nil, imageURL)
+	cacheExt := mediaFileCacheExt(&telegramMediaItem{MediaType: "image", FileUrl: imageURL}, imageURL)
+	path, err := cachedRemoteMediaFile(ctx, cacheKey, imageURL, cacheExt)
+	if err != nil {
+		return nil, err
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取缓存图片失败")
+	}
+	return &mediaFingerprint{MD5: md5Hex(content)}, nil
 }
 
 func cachedRemoteImageFingerprint(ctx context.Context, imageURL string) (*mediaFingerprint, error) {
