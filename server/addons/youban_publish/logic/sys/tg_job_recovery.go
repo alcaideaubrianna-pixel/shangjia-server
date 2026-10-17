@@ -745,7 +745,7 @@ func telegramPendingRecoveryPostgresSQL() string {
 			j.error_message,j.sent_at,j.cycle_enabled,j.cycle_days,j.cycle_publish_time,j.next_cycle_at,j.created_at,j.updated_at
 		FROM ` + publishTgJobTable + ` j
 		WHERE ` + telegramChannelBlockingJobSQL("j") + `
-		ORDER BY j.tenant_id, ` + channelKey + `, j.created_at, j.id
+		ORDER BY j.tenant_id, ` + channelKey + `, ` + telegramChannelScheduleOrderSQL("j") + `
 	)
 	SELECT h.* FROM channel_heads h
 	WHERE h.status IN ('pending','failed_retry','unknown')
@@ -771,8 +771,7 @@ func telegramPendingRecoveryChannelHeadSQL(jobAlias, earlierAlias string) string
 					REPLACE(COALESCE(` + jobAlias + `.target_chat_id,''),'-100',''))
 			)
 			AND ` + telegramChannelBlockingJobSQL(earlierAlias) + `
-			AND (` + earlierAlias + `.created_at<` + jobAlias + `.created_at OR
-				(` + earlierAlias + `.created_at=` + jobAlias + `.created_at AND ` + earlierAlias + `.id<` + jobAlias + `.id))
+			AND ` + telegramChannelSchedulePrecedesSQL(earlierAlias, jobAlias) + `
 	)`
 }
 

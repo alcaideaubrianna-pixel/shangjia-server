@@ -38,6 +38,7 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 		createdAt = current["created_at"].GTime()
 	}
 	mod := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).Unscoped().
+		Where("j.tenant_id", job.TenantId).
 		Where("j.id <> ?", job.Id).
 		Where(telegramWebhookDetachedJobSQL("j.")).
 		Where(telegramChannelBlockingJobSQL("j"))
@@ -64,10 +65,9 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 	// only comparable within one source channel, so using them here lets jobs
 	// from another collection source bypass an older job between its display
 	// and verification phases.
-	mod = mod.Where(`(j.created_at < ? OR (j.created_at = ? AND j.id < ?))`, createdAt, createdAt, job.Id)
-	// Priority never bypasses the destination channel's ordered stream.
-	// Urgent jobs may win across different channels, but cannot overtake an
-	// older display/verification operation on this channel.
+	mod = mod.Where("EXISTS (SELECT 1 FROM "+publishTgJobTable+" current_job WHERE current_job.id=? AND "+telegramChannelSchedulePrecedesSQL("j", "current_job")+")", job.Id)
+	// Interactive publications may overtake untouched work, but never a
+	// started display/verification operation. Use the same ordering as Outbox.
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
@@ -127,14 +127,14 @@ func (s *sSysPublish) wakeNextTelegramChannelJob(ctx context.Context, job telegr
 	}
 	now := gtime.Now()
 	var nextJobs []telegramJobRecord
-	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+	err := g.DB().Model(publishTgJobTable).As("j").Safe().Ctx(ctx).
 		Where("tenant_id", job.TenantId).
 		Where("channel_id", job.ChannelId).
 		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
 		Where(telegramWebhookDetachedJobSQL("")).
 		Where("(dispatch_status = ? OR dispatch_status = '')", tgDispatchStatusIdle).
 		Where("(next_retry_at IS NULL OR next_retry_at <= ?)", now).
-		OrderAsc("created_at").OrderAsc("id").
+		Order(telegramChannelScheduleOrderSQL("j")).
 		Limit(telegramChannelActiveJobLimit).
 		Scan(&nextJobs)
 	if err != nil {
