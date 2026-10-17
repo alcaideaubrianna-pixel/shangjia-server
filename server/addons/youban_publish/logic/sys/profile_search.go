@@ -16,7 +16,11 @@ import (
 )
 
 var (
-	profileSearchNoRegexp   = regexp.MustCompile(`^[A-Z][0-9]{5}$`)
+	// Profile numbers use an uppercase alpha-numeric prefix followed by a
+	// numeric sequence (for example KK12426 and FNLZ1468974). Keep these on
+	// the exact-match path so PostgreSQL can use the profile_no index instead
+	// of scanning text fields with leading-wildcard LIKE predicates.
+	profileSearchNoRegexp   = regexp.MustCompile(`^[A-Z][A-Z0-9]{0,8}[0-9]$`)
 	profileSearchMarkRegexp = regexp.MustCompile(`^(.+?)([0-9]{3,})$`)
 )
 
