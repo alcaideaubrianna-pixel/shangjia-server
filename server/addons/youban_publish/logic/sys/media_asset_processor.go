@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/corona10/goimagehash"
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
@@ -113,11 +114,23 @@ func (s *sSysPublish) ProcessMediaAssets(ctx context.Context, in *sysin.MediaAss
 }
 
 func (s *sSysPublish) saveMediaRecordAndIndex(ctx context.Context, data g.Map, errorMessage string) (int64, error) {
-	mediaId, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Data(data).InsertAndGetId()
+	return s.saveMediaDataAndIndex(ctx, 0, data, errorMessage)
+}
+
+func (s *sSysPublish) saveMediaDataAndIndex(ctx context.Context, mediaId int64, data g.Map, errorMessage string) (int64, error) {
+	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		var err error
+		if mediaId > 0 {
+			_, err = tx.Model(publishMediaTable).Safe().Ctx(ctx).Where("id", mediaId).Data(data).Update()
+		} else {
+			mediaId, err = tx.Model(publishMediaTable).Safe().Ctx(ctx).Data(data).InsertAndGetId()
+		}
+		if err != nil {
+			return gerror.Wrap(err, errorMessage)
+		}
+		return s.syncMediaPHashBucketByMediaId(ctx, mediaId)
+	})
 	if err != nil {
-		return 0, gerror.Wrap(err, errorMessage)
-	}
-	if err = s.syncMediaPHashBucketByMediaId(ctx, mediaId); err != nil {
 		return 0, err
 	}
 	return mediaId, nil
@@ -130,7 +143,7 @@ func processMediaPipeline(ctx context.Context, source mediaPipelineSource) (*med
 		cacheKey = mediaPipelineCacheKey(source)
 		if value, err := cache.Instance().Get(ctx, cacheKey); err == nil && !value.IsNil() {
 			cached := &mediaPipelineCacheResult{}
-			if scanErr := value.Scan(cached); scanErr == nil && cached.MD5 != "" && (source.MD5 == "" || source.MD5 == cached.MD5) {
+			if scanErr := value.Scan(cached); scanErr == nil && mediaPipelineCacheComplete(source, cached) {
 				return &mediaPipelineResult{
 					MD5:            cached.MD5,
 					Processed:      cached.Processed,
@@ -225,6 +238,19 @@ func processMediaPipeline(ctx context.Context, source mediaPipelineSource) (*med
 		}, 24*time.Hour)
 	}
 	return result, nil
+}
+
+// Older caches can contain an MD5 without the image fingerprint. Do not allow
+// those entries to bypass the common processor and persist another empty pHash.
+func mediaPipelineCacheComplete(source mediaPipelineSource, cached *mediaPipelineCacheResult) bool {
+	if cached == nil || cached.MD5 == "" || (source.MD5 != "" && source.MD5 != cached.MD5) {
+		return false
+	}
+	if isTelegramImageMedia(source.MediaType) || isTelegramVideoMedia(source.MediaType) {
+		_, valid := parseUploadPHash(cached.PerceptualHash)
+		return cached.Processed && valid
+	}
+	return true
 }
 
 func resolveMediaLocalPath(raw string) (string, error) {

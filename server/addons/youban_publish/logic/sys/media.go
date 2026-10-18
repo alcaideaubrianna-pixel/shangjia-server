@@ -710,27 +710,17 @@ func (s *sSysPublish) saveMediaAttachment(ctx context.Context, task gdb.Record, 
 		data["original_file_url"] = normalizeMediaFileURL(existing["file_url"].String(), existing["storage_path"].String())
 		data["original_storage_path"] = normalizeStoredMediaPath(existing["storage_path"].String())
 	}
-	if mediaId > 0 {
-		_, err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Where("id", mediaId).Data(data).Update()
-	} else {
+	if mediaId <= 0 {
 		data["created_by"] = contexts.GetUserId(ctx)
 		data["created_at"] = now
-		mediaId, err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Data(data).InsertAndGetId()
 	}
+	mediaId, err = s.saveMediaDataAndIndex(ctx, mediaId, data, "保存任务媒体失败")
 	if err != nil {
-		return nil, gerror.Wrap(err, "保存任务媒体失败")
+		return nil, err
 	}
 	if in.MediaId > 0 {
 		if cacheErr := invalidateAntiScanMediaSegmentCache(ctx, mediaId); cacheErr != nil {
 			return nil, cacheErr
-		}
-	}
-	// Fresh direct uploads do not have a pHash yet. The media worker computes
-	// it and refreshes the bucket; querying and deleting an empty bucket here
-	// only adds several database round trips to the upload-complete request.
-	if strings.TrimSpace(perceptualHash) != "" {
-		if err = s.syncMediaPHashBucketByMediaId(ctx, mediaId); err != nil {
-			return nil, err
 		}
 	}
 	if syncProfileProjection && task["profile_id"].Int64() > 0 {

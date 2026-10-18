@@ -43,7 +43,7 @@ func (s *sSysPublish) syncMediaPHashBucketByMediaId(ctx context.Context, mediaId
 		return nil
 	}
 	row, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
-		Fields("id,tenant_id,account_id,profile_id,media_type,perceptual_hash,deleted_at").
+		Fields("id,tenant_id,account_id,profile_id,media_type,perceptual_hash,md5,deleted_at").
 		Where("id", mediaId).
 		One()
 	if err != nil {
@@ -105,6 +105,9 @@ func (s *sSysPublish) deleteMediaPHashBucketByMediaId(ctx context.Context, media
 func (s *sSysPublish) replaceMediaPHashBucketByMediaRow(ctx context.Context, media gdb.Record) error {
 	mediaId := media["id"].Int64()
 	hash := strings.TrimSpace(media["perceptual_hash"].String())
+	if parsed, valid := parseUploadPHash(hash); valid {
+		hash = fmt.Sprintf("%016x", parsed.GetHash())
+	}
 	buckets := mediaPHashBucketValues(hash)
 	if mediaId <= 0 || len(buckets) == 0 {
 		return s.deleteMediaPHashBucketByMediaId(ctx, mediaId)
@@ -346,14 +349,14 @@ func mediaPHashBucketCandidateRowsWithScopes(ctx context.Context, normalizedHash
 }
 
 func mediaPHashBucketCandidateRowsWithScopesUncached(ctx context.Context, normalizedHash string, threshold int, scopes []mediaPHashBucketScopePart, profileIds []int64, mediaType string, excludeProfileId int64) ([]mediaPHashBucketCandidateRow, error) {
-	if err := ensureMediaPHashAliasBucketTable(ctx); err != nil {
-		return nil, err
-	}
 	scopes = mediaPHashBucketValidScopes(scopes)
 	profileIds = uniqueIds(profileIds)
 	if len(scopes) == 0 {
 		g.Log().Warning(ctx, "跳过无租户账号范围的pHash候选查询")
 		return []mediaPHashBucketCandidateRow{}, nil
+	}
+	if err := ensureMediaPHashAliasBucketTable(ctx); err != nil {
+		return nil, err
 	}
 	if mediaPHashLshReady(ctx) && threshold < mediaPHashLshBlockCount*(mediaPHashLshMaxQueryRadius+1) {
 		rows, err := mediaPHashLshCandidateRowsWithScopes(ctx, normalizedHash, threshold, scopes, profileIds, mediaType, excludeProfileId)
@@ -564,17 +567,20 @@ func (s *sSysPublish) saveAntiScanSearchFingerprint(ctx context.Context, job tel
 	}
 	hash := fmt.Sprintf("%016x", item.ProtectedPHash)
 	buckets := mediaPHashLshBucketValues(hash)
-	now := gtime.Now()
-	for _, bucket := range buckets {
-		_, err := g.DB().Model(publishMediaPHashAliasBucketTable).Safe().Ctx(ctx).Data(g.Map{
-			"tenant_id": job.TenantId, "account_id": job.AccountId, "profile_id": job.ProfileId,
-			"media_id": item.MediaId, "media_type": "image", "fingerprint_key": antiScanSearchFingerprintKey(item.ProtectedHashKey, item.ProtectedPHash),
-			"hash_value": hash, "bucket_pos": bucket.Pos, "bucket_value": bucket.Value,
-			"created_at": now, "updated_at": now,
-		}).OnConflict("media_id,fingerprint_key,bucket_pos").OnDuplicate("hash_value,bucket_value,updated_at").Save()
-		if err != nil {
-			return gerror.Wrap(err, "写入防扫图搜索指纹失败")
+	if err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		for _, bucket := range buckets {
+			_, err := tx.Model(publishMediaPHashAliasBucketTable).Safe().Ctx(ctx).Data(g.Map{
+				"tenant_id": job.TenantId, "account_id": job.AccountId, "profile_id": job.ProfileId,
+				"media_id": item.MediaId, "media_type": "image", "fingerprint_key": antiScanSearchFingerprintKey(item.ProtectedHashKey, item.ProtectedPHash),
+				"hash_value": hash, "bucket_pos": bucket.Pos, "bucket_value": bucket.Value,
+			}).OnConflict("media_id,fingerprint_key,bucket_pos").OnDuplicate("hash_value,bucket_value").Save()
+			if err != nil {
+				return gerror.Wrap(err, "写入防扫图搜索指纹失败")
+			}
 		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	return bumpMediaPHashBucketVersion(ctx, job.TenantId, job.AccountId)
 }

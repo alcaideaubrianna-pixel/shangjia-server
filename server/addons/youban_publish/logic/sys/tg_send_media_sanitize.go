@@ -51,7 +51,22 @@ func (s *sSysPublish) prepareTelegramMediaUploadFile(ctx context.Context, media 
 	}
 }
 
-func (s *sSysPublish) prepareTelegramAntiScanUploadFile(ctx context.Context, media *telegramMediaItem, sourcePath string, cleanup func(), kind string) (string, func(), error) {
+func (s *sSysPublish) prepareTelegramAntiScanUploadFile(ctx context.Context, media *telegramMediaItem, sourcePath string, cleanup func(), kind string) (resultPath string, resultCleanup func(), resultErr error) {
+	// Every successful branch (including background replacement and cache reuse)
+	// must index the final upload bytes before they can be sent. A failed index
+	// write is a preparation failure and uses the existing job retry mechanism.
+	defer func() {
+		if resultErr != nil || resultPath == "" {
+			return
+		}
+		if err := s.indexTelegramGeneratedMedia(ctx, media, resultPath, kind); err != nil {
+			if resultCleanup != nil {
+				resultCleanup()
+			}
+			resultPath, resultCleanup, resultErr = "", nil, err
+		}
+	}()
+
 	if kind == "image" && media.AntiScanMode == "background_replace" && media.AntiScanBackgroundURL != "" {
 		startedAt := time.Now()
 		path, generatedCleanup, err := s.prepareTelegramBackgroundReplacement(ctx, media, sourcePath)
@@ -624,4 +639,34 @@ func fileSize(path string) (int64, error) {
 		return 0, err
 	}
 	return info.Size(), nil
+}
+
+// indexTelegramGeneratedMedia records the final file, after upload resizing or
+// JPEG conversion. The stored media owns the search scope, not the publishing
+// account: shared-source media can be published by another authorized account.
+func (s *sSysPublish) indexTelegramGeneratedMedia(ctx context.Context, media *telegramMediaItem, path, kind string) error {
+	if media == nil {
+		return gerror.New("生成媒体信息为空")
+	}
+	hash, err := telegramAntiScanFileHash(path)
+	if err != nil {
+		return gerror.Wrap(err, "计算生成媒体搜索指纹失败")
+	}
+	media.ProtectedHashKey = telegramAntiScanHistoryKey(media, kind)
+	media.ProtectedPHash, media.ProtectedDHash = hash.PHash, hash.DHash
+	// Preview-only inputs have no persisted source media.
+	if media.Id <= 0 {
+		return nil
+	}
+	owner, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+		Fields("tenant_id,account_id,profile_id").Where("id", media.Id).WhereNull("deleted_at").One()
+	if err != nil {
+		return gerror.Wrap(err, "读取生成媒体归属失败")
+	}
+	if owner.IsEmpty() || owner["tenant_id"].Int64() <= 0 || owner["account_id"].Int64() <= 0 || owner["profile_id"].Int64() <= 0 {
+		return gerror.New("生成媒体原始资料已失效，无法建立搜索索引")
+	}
+	return s.saveAntiScanSearchFingerprint(ctx, telegramJobRecord{
+		TenantId: owner["tenant_id"].Int64(), AccountId: owner["account_id"].Int64(), ProfileId: owner["profile_id"].Int64(),
+	}, &telegramSentMessage{MediaId: media.Id, ProtectedHashKey: media.ProtectedHashKey, ProtectedPHash: hash.PHash})
 }

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/hibiken/asynq"
@@ -31,8 +32,10 @@ func (s *sSysPublish) handleMediaProcessTask(ctx context.Context, task *asynq.Ta
 		return nil
 	}
 	status := strings.TrimSpace(media["processing_status"].String())
-	if status == mediaProcessingReady && strings.TrimSpace(media["md5"].String()) != "" {
-		return nil
+	if status == mediaProcessingReady && mediaProcessingFingerprintsComplete(media) {
+		// A prior attempt may have committed the metadata but failed to index it.
+		// Retry the projection and wakeup without downloading the file again.
+		return s.completeMediaProcessingProjection(ctx, payload.MediaId, media["profile_id"].Int64())
 	}
 	_, err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 		Where("id", payload.MediaId).
@@ -77,16 +80,32 @@ func (s *sSysPublish) handleMediaProcessTask(ctx context.Context, task *asynq.Ta
 	if metadata.PosterStoragePath != "" {
 		data["poster_storage_path"] = metadata.PosterStoragePath
 	}
-	if _, err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Where("id", payload.MediaId).Data(data).Update(); err != nil {
+	if _, err = s.saveMediaDataAndIndex(ctx, payload.MediaId, data, "保存媒体处理结果失败"); err != nil {
 		return err
 	}
-	if err = s.syncMediaPHashBucketByMediaId(ctx, payload.MediaId); err != nil {
+	return s.completeMediaProcessingProjection(ctx, payload.MediaId, media["profile_id"].Int64())
+}
+
+func mediaProcessingFingerprintsComplete(media gdb.Record) bool {
+	if strings.TrimSpace(media["md5"].String()) == "" {
+		return false
+	}
+	kind := media["media_type"].String()
+	if isTelegramImageMedia(kind) || isTelegramVideoMedia(kind) {
+		_, valid := parseUploadPHash(media["perceptual_hash"].String())
+		return valid
+	}
+	return true
+}
+
+func (s *sSysPublish) completeMediaProcessingProjection(ctx context.Context, mediaId, profileId int64) error {
+	if err := s.syncMediaPHashBucketByMediaId(ctx, mediaId); err != nil {
 		return err
 	}
-	if err = s.refreshProfileFingerprintProjection(ctx, media["profile_id"].Int64()); err != nil {
+	if err := s.refreshProfileFingerprintProjection(ctx, profileId); err != nil {
 		return err
 	}
-	return s.wakeProfileTelegramJobs(ctx, media["profile_id"].Int64())
+	return s.wakeProfileTelegramJobs(ctx, profileId)
 }
 
 func (s *sSysPublish) wakeProfileTelegramJobs(ctx context.Context, profileId int64) error {

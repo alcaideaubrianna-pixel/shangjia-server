@@ -74,6 +74,8 @@ func handleUpgradeFix(ctx context.Context, args map[string]string) (err error) {
 		fix.UpdateAdminMenuTree(ctx)
 	case "mediaPHashBucket":
 		err = fix.BackfillYoubanPublishMediaPHashBucket(ctx)
+	case "mediaSearchIndexRepair":
+		err = fix.RepairYoubanPublishMediaSearchIndexes(ctx, args)
 	case "mediaPHashMissing":
 		err = fix.BackfillYoubanPublishMediaMissingPHash(ctx)
 	case "noteIndex":

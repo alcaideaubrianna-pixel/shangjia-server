@@ -20,3 +20,21 @@ func TestDownloadableMediaSource(t *testing.T) {
 		})
 	}
 }
+
+func TestMissingMediaPHashVideoUsesOnlyPreview(t *testing.T) {
+	row := mediaPHashMissingRow{MediaType: "video", StoragePath: "large.mp4", FileURL: "https://example.test/large.mp4", PosterStoragePath: "preview.jpg", PosterURL: "https://example.test/preview.jpg"}
+	candidates := missingMediaPHashCandidates(row)
+	if len(candidates) != 2 {
+		t.Fatalf("expected two preview sources, got %+v", candidates)
+	}
+	for _, item := range candidates {
+		if item.mediaType != "image" || item.localPath == row.StoragePath || item.fileURL == row.FileURL {
+			t.Fatalf("video body candidate: %+v", item)
+		}
+	}
+	row.PosterStoragePath = ""
+	row.PosterURL = ""
+	if candidates = missingMediaPHashCandidates(row); len(candidates) != 0 {
+		t.Fatalf("must not download video without preview: %+v", candidates)
+	}
+}

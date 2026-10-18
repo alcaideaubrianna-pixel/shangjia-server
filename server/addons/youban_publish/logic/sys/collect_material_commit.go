@@ -542,7 +542,22 @@ func (s *sSysPublish) commitCollectPreparedProfile(ctx context.Context, event gd
 	}
 	var profileId int64
 	wasExisting := false
-	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) (resultErr error) {
+		// Keep collected media and their search projections in one transaction.
+		// This also repairs indexes when an idempotent retry reuses the profile.
+		defer func() {
+			if resultErr != nil || profileId <= 0 {
+				return
+			}
+			if resultErr = s.deleteMediaPHashBucketByProfileId(ctx, profileId); resultErr != nil {
+				return
+			}
+			if resultErr = s.syncMediaPHashBucketsByProfileId(ctx, profileId); resultErr != nil {
+				return
+			}
+			resultErr = s.syncProfileNoteIndex(ctx, profileId)
+		}()
+
 		columns := dao.ContentProfile.Columns()
 		existing, txErr := tx.Model(dao.ContentProfile.Table()).Ctx(ctx).
 			Fields(columns.Id, columns.SourceKey, columns.HasVerificationVideo, columns.ImageCount, columns.VideoCount,
@@ -662,26 +677,6 @@ func (s *sSysPublish) commitCollectPreparedProfile(ctx context.Context, event gd
 		return 0, err
 	}
 	warmProfileFingerprintCache(ctx, tenantId, accountId, profileId, cacheFingerprints)
-	if err = s.deleteMediaPHashBucketByProfileId(ctx, profileId); err != nil {
-		return 0, err
-	}
-	var mediaRows []struct {
-		Id int64 `json:"id"`
-	}
-	if err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
-		Fields("id").Where("profile_id", profileId).WhereNull("deleted_at").
-		Where("perceptual_hash IS NOT NULL").Where("perceptual_hash <> ''").
-		Scan(&mediaRows); err != nil {
-		return 0, gerror.Wrap(err, "读取采集资料媒体索引失败")
-	}
-	for _, mediaRow := range mediaRows {
-		if err = s.syncMediaPHashBucketByMediaId(ctx, mediaRow.Id); err != nil {
-			return 0, err
-		}
-	}
-	if err = s.syncProfileNoteIndex(ctx, profileId); err != nil {
-		return 0, err
-	}
 	iservice.SysContent().ClearHomeProfileCardsCache(ctx)
 	return profileId, nil
 }

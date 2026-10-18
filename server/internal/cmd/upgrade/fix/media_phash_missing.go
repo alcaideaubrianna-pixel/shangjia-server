@@ -107,6 +107,26 @@ func backfillMediaPHash(ctx context.Context, row mediaPHashMissingRow) error {
 }
 
 func processMissingMediaPHash(ctx context.Context, row mediaPHashMissingRow) (*sysin.MediaAssetsModel, error) {
+	candidates := missingMediaPHashCandidates(row)
+	var lastErr error
+	for _, item := range candidates {
+		assets, err := processMissingMediaCandidate(ctx, item)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if assets != nil && validMediaSearchRepairHash(assets.PerceptualHash) {
+			return assets, nil
+		}
+		lastErr = gerror.New("候选媒体未返回合法感知哈希")
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, gerror.New("媒体没有可用的图片或视频预览图")
+}
+
+func missingMediaPHashCandidates(row mediaPHashMissingRow) []mediaPHashCandidate {
 	mediaType := strings.ToLower(strings.TrimSpace(row.MediaType))
 	candidates := make([]mediaPHashCandidate, 0, 4)
 	if mediaType == "video" {
@@ -116,6 +136,7 @@ func processMissingMediaPHash(ctx context.Context, row mediaPHashMissingRow) (*s
 		if url := downloadableMediaSource(row.PosterURL); url != "" {
 			candidates = append(candidates, mediaPHashCandidate{mediaType: "image", fileURL: url})
 		}
+		return candidates
 	}
 	if path := strings.TrimSpace(row.StoragePath); path != "" && !isRemoteMediaSource(path) {
 		candidates = append(candidates, mediaPHashCandidate{mediaType: mediaType, localPath: path})
@@ -123,22 +144,7 @@ func processMissingMediaPHash(ctx context.Context, row mediaPHashMissingRow) (*s
 	if fileURL := downloadableMediaSource(row.FileURL); fileURL != "" {
 		candidates = append(candidates, mediaPHashCandidate{mediaType: mediaType, fileURL: fileURL, posterURL: downloadableMediaSource(row.PosterURL)})
 	}
-	var lastErr error
-	for _, item := range candidates {
-		assets, err := processMissingMediaCandidate(ctx, item)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		if assets != nil && len(strings.TrimSpace(assets.PerceptualHash)) == 16 {
-			return assets, nil
-		}
-		lastErr = gerror.New("候选媒体未返回合法感知哈希")
-	}
-	if lastErr != nil {
-		return nil, lastErr
-	}
-	return nil, gerror.New("媒体没有可用的远程地址或本地路径")
+	return candidates
 }
 
 func processMissingMediaCandidate(ctx context.Context, item mediaPHashCandidate) (*sysin.MediaAssetsModel, error) {
