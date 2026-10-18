@@ -60,6 +60,22 @@ func (s *sSysPublish) resolveIntroFeeChannelSuffix(ctx context.Context, event gd
 		row, err = g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Fields("suffix").Where("tenant_id", event["tenant_id"]).WhereIn("account_id", []int64{accountID, 0}).Where("rule_id", 0).Where("bot_id", botID).WhereIn("channel_id", tgChannelCacheLookupIds(chatID)).Where("status", 1).WhereNull("deleted_at").OrderDesc("account_id").OrderDesc("id").Limit(1).One()
 	}
 	if row.IsEmpty() {
+		// A source-level suffix is the default for this source. Rule/channel
+		// overrides above remain independent, so multiple rules bound to the
+		// same channel can still use different suffixes.
+		if sourceID := event["source_id"].Int64(); sourceID > 0 {
+			row, err = g.DB().Model(pdao.YoubanPublishCollectSource.Table()).Ctx(ctx).
+				Fields("channel_suffix").Where("id", sourceID).
+				Where("tenant_id", event["tenant_id"]).WhereNull("deleted_at").One()
+			if err != nil {
+				return "", false, gerror.Wrap(err, "读取采集来源默认后缀失败")
+			}
+			if !row.IsEmpty() && strings.TrimSpace(row["channel_suffix"].String()) != "" {
+				suffix := strings.TrimSpace(row["channel_suffix"].String())
+				_ = cache.Instance().Set(ctx, key, suffix, introFeeChannelRuleCacheTTL)
+				return suffix, true, nil
+			}
+		}
 		_ = cache.Instance().Set(ctx, key, "__none__", time.Minute)
 		return "", false, nil
 	}
