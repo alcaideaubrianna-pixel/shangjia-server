@@ -38,7 +38,7 @@ func cachedTelegramImageFingerprint(ctx context.Context, fileUniqueId string, im
 	if fingerprint, ok := telegramImageFingerprintFromCache(ctx, fileUniqueId); ok {
 		return fingerprint, true, nil
 	}
-	fingerprint, err := cachedRemoteImageMD5(ctx, imageURL)
+	fingerprint, err := cachedRemoteImageFingerprint(ctx, imageURL)
 	if err != nil {
 		return nil, false, err
 	}
@@ -64,7 +64,7 @@ func telegramImageFingerprintFromCache(ctx context.Context, fileUniqueId string)
 		return nil, false
 	}
 	var stored cachedBotMediaFingerprint
-	if err = value.Scan(&stored); err != nil || (stored.MD5 == "" && stored.PHash == 0) {
+	if err = value.Scan(&stored); err != nil || stored.PHash == 0 {
 		return nil, false
 	}
 	fingerprint := &mediaFingerprint{MD5: stored.MD5}
