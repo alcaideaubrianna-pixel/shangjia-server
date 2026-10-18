@@ -77,6 +77,26 @@ func TestTelegramDeliveryAvailabilityLocalPostgres(t *testing.T) {
 				t.Fatalf("%s: Outbox did not select channel head", test.name)
 			}
 		}
+		// Bot delivery must also survive an expired or unbound protocol account.
+		for _, accountID := range []int64{84, 0} {
+			if _, err := tx.Exec("UPDATE " + publishChannelTable + " SET tg_account_id=?", accountID); err != nil {
+				return err
+			}
+			if _, err := tx.Exec("UPDATE " + publishTgJobTable + " SET bot_id=80,push_mode='bot'"); err != nil {
+				return err
+			}
+			_, available, err := checkTelegramJobDeliveryAvailability(ctx, db, telegramJobRecord{Id: 1, TenantId: 87, ChannelId: 256})
+			if !available || err != nil {
+				t.Fatalf("Bot with protocol account %d: available=%v err=%v", accountID, available, err)
+			}
+			rows, err := tx.GetAll(telegramDueOutboxPostgresSQL(), time.Now(), "publish", time.Now(), "pending", "processing", time.Now(), 10)
+			if err != nil {
+				return err
+			}
+			if len(rows) != 1 {
+				t.Fatalf("Bot with protocol account %d: Outbox blocked", accountID)
+			}
+		}
 		for _, id := range []int64{81, 83} {
 			_, err := checkTelegramProtocolAccount(ctx, db, 87, id)
 			if !errors.Is(err, errTelegramPublishAccountMissing) {
