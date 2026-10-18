@@ -17,6 +17,8 @@ DEFAULT_RETRIES = 3
 DEFAULT_HEALTH_RETRIES = 60
 DEFAULT_REVISION_CONFIRMATIONS = 5
 DEFAULT_RUNTIME_RETRIES = 60
+RETRY_HEALTH_RETRIES = 24
+RETRY_RUNTIME_RETRIES = 12
 
 
 def load_targets(path):
@@ -56,9 +58,11 @@ def load_targets(path):
             if not str(target.get(field, "")).strip():
                 raise ValueError(f"enabled target {name} requires {field}")
         webhook = str(target.get("webhook", "")).strip()
-        parsed = urllib.parse.urlparse(webhook)
-        if parsed.scheme != "https" or not parsed.netloc:
-            raise ValueError(f"enabled target {name} requires an HTTPS webhook")
+        direct_deploy = target.get("directDeploy") is True
+        if not direct_deploy:
+            parsed = urllib.parse.urlparse(webhook)
+            if parsed.scheme != "https" or not parsed.netloc:
+                raise ValueError(f"enabled target {name} requires an HTTPS webhook")
         wait_seconds = target.get("waitSeconds", 10)
         if not isinstance(wait_seconds, int) or wait_seconds < 0:
             raise ValueError(f"target {name} waitSeconds must be a non-negative integer")
@@ -70,6 +74,7 @@ def load_targets(path):
         enabled.append({
             "name": name,
             "webhook": webhook,
+            "direct_deploy": direct_deploy,
             "order": order,
             "wait_seconds": wait_seconds,
             "health_url": health_url,
@@ -118,6 +123,10 @@ def dokploy_request(path, payload=None, query=None, timeout=DEFAULT_TIMEOUT_SECO
         body = response.read()
         if not 200 <= response.status < 300:
             raise RuntimeError(f"Dokploy API {path} returned HTTP {response.status}")
+    # Dokploy deploy/redeploy endpoints may return an empty 2xx body while
+    # the asynchronous rollout has already been accepted.
+    if not body.strip():
+        return {}
     try:
         result = json.loads(body.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
@@ -202,6 +211,13 @@ def trigger(target, version, retries=DEFAULT_RETRIES, sleep=time.sleep):
     raise RuntimeError(f"webhook failed after {retries} attempts: {last_error}")
 
 
+def deploy_direct(target):
+    dokploy_request("application.deploy", {
+        "applicationId": target["application_id"],
+        "title": f"CI deploy {target['name']}",
+    })
+
+
 def read_health(url):
     request = urllib.request.Request(
         url,
@@ -278,6 +294,17 @@ def wait_until_healthy(target, revision="", retries=DEFAULT_HEALTH_RETRIES,
     raise RuntimeError(f"health check failed after {retries} attempts: {last_error}")
 
 
+def is_retryable_rollout_error(error):
+    message = str(error)
+    return (
+        message.startswith("running container image mismatch")
+        or (
+            message.startswith("health check failed")
+            and "revision is" in message
+        )
+    )
+
+
 def send_telegram(text):
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
     chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
@@ -323,23 +350,37 @@ def main(argv=None):
         print(f"triggering {name} ({args.version})", flush=True)
         try:
             expected_image = pin_target_image(target, args.version)
-            trigger(target, args.version)
+            if target.get("direct_deploy"):
+                deploy_direct(target)
+            else:
+                trigger(target, args.version)
             wait_for_running_image(target, expected_image)
             # Only probe the public endpoint after every running task is on the
             # immutable image. Otherwise a load-balanced old replica can make a
             # valid rollout look stuck for the full health-check window.
             wait_until_healthy(target, args.revision or args.version)
         except (urllib.error.URLError, TimeoutError, RuntimeError) as error:
-            # A webhook can be accepted while Dokploy fails later during the
-            # image pull (for example a transient GHCR EOF). Re-trigger once
-            # after a runtime image mismatch instead of accepting the stale
-            # container and failing the whole rollout without recovery.
-            if str(error).startswith("running container image mismatch"):
+            # A webhook can be accepted while image extraction or the public
+            # Traefik route remains on the previous task. Re-trigger once when
+            # the immutable runtime or public revision has not converged.
+            if is_retryable_rollout_error(error):
                 try:
-                    print(f"retrying {name} after runtime image mismatch", file=sys.stderr, flush=True)
-                    trigger(target, args.version)
-                    wait_for_running_image(target, expected_image, retries=12)
-                    wait_until_healthy(target, args.revision or args.version)
+                    print(
+                        f"retrying {name} after rollout did not converge: {error}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    if target.get("direct_deploy"):
+                        deploy_direct(target)
+                    else:
+                        trigger(target, args.version)
+                    wait_for_running_image(
+                        target, expected_image, retries=RETRY_RUNTIME_RETRIES,
+                    )
+                    wait_until_healthy(
+                        target, args.revision or args.version,
+                        retries=RETRY_HEALTH_RETRIES,
+                    )
                 except (urllib.error.URLError, TimeoutError, RuntimeError) as retry_error:
                     error = retry_error
                 else:

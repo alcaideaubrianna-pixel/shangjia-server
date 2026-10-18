@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"hotgo/internal/library/storager"
+	"hotgo/internal/model"
 )
 
 func TestDirectUploadBucketRegion(t *testing.T) {
@@ -51,7 +52,7 @@ func TestDirectUploadBucketRegionFromConfigAllowsCDNPublicURL(t *testing.T) {
 		"",
 		"",
 		"https://youbanyue01-1442821378.cos.ap-hongkong.myqcloud.com",
-		"https://img.yuebanby.com",
+		"https://cos.xiao-feiji.cc",
 	)
 	if err != nil {
 		t.Fatalf("directUploadBucketRegionFromConfig returned error: %v", err)
@@ -65,7 +66,7 @@ func TestDirectUploadBucketRegionFromConfigSupportsLegacySwappedURLs(t *testing.
 	bucket, region, err := directUploadBucketRegionFromConfig(
 		"",
 		"",
-		"https://img.yuebanby.com",
+		"https://cos.xiao-feiji.cc",
 		"https://youbanyue01-1442821378.cos.ap-hongkong.myqcloud.com",
 	)
 	if err != nil || bucket != "youbanyue01-1442821378" || region != "ap-hongkong" {
@@ -77,8 +78,8 @@ func TestDirectUploadBucketRegionFromExplicitConfig(t *testing.T) {
 	bucket, region, err := directUploadBucketRegionFromConfig(
 		"youbanyue01-1442821378",
 		"ap-hongkong",
-		"https://img.yuebanby.com",
-		"https://img.yuebanby.com",
+		"https://cos.xiao-feiji.cc",
+		"https://cos.xiao-feiji.cc",
 	)
 	if err != nil || bucket != "youbanyue01-1442821378" || region != "ap-hongkong" {
 		t.Fatalf("unexpected result: bucket=%q region=%q err=%v", bucket, region, err)
@@ -91,5 +92,43 @@ func TestDirectUploadExtensionUsesStoragerFormat(t *testing.T) {
 	}
 	if ext := storager.Ext("example.MP4"); ext != "mp4" || !storager.IsVideoType(ext) {
 		t.Fatalf("expected MP4 extension to pass video validation, got %q", ext)
+	}
+}
+
+func TestValidateDirectUploadObjectSize(t *testing.T) {
+	if err := validateDirectUploadObjectSize(1024, 1024); err != nil {
+		t.Fatalf("matching object size returned error: %v", err)
+	}
+	for _, test := range []struct {
+		actual   int64
+		expected int64
+	}{
+		{actual: 1023, expected: 1024},
+		{actual: 1024, expected: 0},
+	} {
+		if err := validateDirectUploadObjectSize(test.actual, test.expected); err == nil {
+			t.Fatalf("accepted object size actual=%d expected=%d", test.actual, test.expected)
+		}
+	}
+}
+
+func TestDirectUploadConfigDigestChangesWithBucketOrCredentials(t *testing.T) {
+	base := &model.UploadConfig{
+		Drive: "cos", CosBucket: "bucket-1", CosRegion: "ap-singapore",
+		CosBucketURL: "https://bucket-1.cos.ap-singapore.myqcloud.com",
+		CosSecretId:  "secret-id", CosSecretKey: "secret-key",
+	}
+	if directUploadConfigDigest(base) == "" {
+		t.Fatal("expected non-empty config digest")
+	}
+	changedBucket := *base
+	changedBucket.CosBucket = "bucket-2"
+	if directUploadConfigDigest(base) == directUploadConfigDigest(&changedBucket) {
+		t.Fatal("bucket change must invalidate direct upload session")
+	}
+	changedSecret := *base
+	changedSecret.CosSecretKey = "rotated-secret-key"
+	if directUploadConfigDigest(base) == directUploadConfigDigest(&changedSecret) {
+		t.Fatal("credential change must invalidate direct upload session")
 	}
 }

@@ -944,3 +944,52 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_relay_media` (
   PRIMARY KEY (`id`), UNIQUE KEY `uk_ybp_relay_media_key` (`tenant_id`,`media_id`,`purpose`,`media_version`),
   KEY `idx_ybp_relay_media_ready` (`tenant_id`,`media_id`,`purpose`,`status`), KEY `idx_ybp_relay_media_lease` (`status`,`lease_until`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Telegram中转媒体索引';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_channel_profile` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `tenant_id` bigint(20) NOT NULL DEFAULT 0,
+  `account_id` bigint(20) NOT NULL DEFAULT 0,
+  `source_id` bigint(20) NOT NULL DEFAULT 0,
+  `rule_id` bigint(20) NOT NULL DEFAULT 0,
+  `channel_id` varchar(128) NOT NULL DEFAULT '',
+  `profile_id` bigint(20) NOT NULL DEFAULT 0,
+  `created_at` datetime DEFAULT NULL,
+  `updated_at` datetime DEFAULT NULL,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_collect_channel_profile` (`tenant_id`,`account_id`,`rule_id`,`channel_id`,`profile_id`),
+  KEY `idx_ybp_collect_channel_profile_list` (`tenant_id`,`account_id`,`rule_id`,`channel_id`,`updated_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='采集频道资料计数索引';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_outbox` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `job_id` bigint(20) NOT NULL COMMENT 'TG任务ID', `event_type` varchar(64) NOT NULL COMMENT '事件类型',
+  `dedupe_key` varchar(160) NOT NULL COMMENT '幂等键', `status` varchar(16) NOT NULL DEFAULT 'pending' COMMENT '投递状态',
+  `available_at` datetime NOT NULL COMMENT '可投递时间', `lease_owner` varchar(160) NOT NULL DEFAULT '' COMMENT '租约持有者',
+  `lease_expires_at` datetime DEFAULT NULL COMMENT '租约过期时间', `attempt_count` int(11) NOT NULL DEFAULT '0' COMMENT '投递次数',
+  `last_error` varchar(255) NOT NULL DEFAULT '' COMMENT '最后错误', `delivered_at` datetime DEFAULT NULL COMMENT '投递完成时间',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间', `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`), UNIQUE KEY `uk_ybp_tg_outbox_dedupe` (`dedupe_key`),
+  KEY `idx_ybp_tg_outbox_due` (`status`,`available_at`,`id`),
+  KEY `idx_ybp_tg_outbox_lease` (`status`,`lease_expires_at`,`id`),
+  KEY `idx_ybp_tg_outbox_job` (`job_id`,`event_type`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='TG任务事务Outbox';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_process_outbox` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT, `event_id` bigint NOT NULL, `tenant_id` bigint NOT NULL DEFAULT 0,
+  `account_id` bigint NOT NULL DEFAULT 0, `source_id` bigint NOT NULL DEFAULT 0, `source_chat_id` varchar(128) NOT NULL DEFAULT '',
+  `status` varchar(16) NOT NULL DEFAULT 'pending', `available_at` datetime NOT NULL, `lease_owner` varchar(128) NOT NULL DEFAULT '',
+  `lease_expires_at` datetime DEFAULT NULL, `attempt_count` int NOT NULL DEFAULT 0, `last_error` text,
+  `delivered_at` datetime DEFAULT NULL, `created_at` datetime DEFAULT NULL, `updated_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`), UNIQUE KEY `uk_ybp_collect_process_outbox_event` (`event_id`),
+  KEY `idx_ybp_collect_process_outbox_due` (`status`,`available_at`,`id`), KEY `idx_ybp_collect_process_outbox_lease` (`status`,`lease_expires_at`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='采集处理持久化Outbox';
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_ai_ops_repair_plan` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT, `plan_id` varchar(64) NOT NULL, `action` varchar(64) NOT NULL,
+  `payload_json` text NOT NULL, `status` varchar(16) NOT NULL DEFAULT 'pending', `candidate_count` int NOT NULL DEFAULT 0,
+  `applied_count` int NOT NULL DEFAULT 0, `failed_ids_json` text, `confirm_token_hash` varchar(128) NOT NULL DEFAULT '',
+  `error_message` text, `expires_at` datetime NOT NULL, `started_at` datetime DEFAULT NULL, `finished_at` datetime DEFAULT NULL,
+  `created_at` datetime DEFAULT NULL, `updated_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`), UNIQUE KEY `uk_ybp_ai_ops_repair_plan` (`plan_id`), KEY `idx_ybp_ai_ops_repair_plan_status` (`status`,`expires_at`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI运维修复计划审计';
+ALTER TABLE `hg_youban_publish_bot_message_source` ADD INDEX IF NOT EXISTS `idx_ybp_bot_message_source_received` (`received_at`,`id`);

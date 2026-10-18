@@ -4,10 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/hibiken/asynq"
+
+	pdao "hotgo/addons/youban_publish/internal/dao"
+	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
 const tgTaskTypeMaterialImport = "youban_publish:material_import"
@@ -29,8 +33,12 @@ func (s *sSysPublish) enqueueMaterialImportTask(ctx context.Context, taskId int6
 		return err
 	}
 	task := asynq.NewTask(tgTaskTypeMaterialImport, body)
+	queueName, err := s.materialImportQueueName(ctx, taskId)
+	if err != nil {
+		return err
+	}
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameBackground),
+		asynq.Queue(queueName),
 		asynq.MaxRetry(0),
 		asynq.Timeout(6 * time.Hour),
 	}
@@ -42,6 +50,25 @@ func (s *sSysPublish) enqueueMaterialImportTask(ctx context.Context, taskId int6
 		return nil
 	}
 	return err
+}
+
+func (s *sSysPublish) materialImportQueueName(ctx context.Context, taskId int64) (string, error) {
+	cols := pdao.YoubanPublishMaterialImportTask.Columns()
+	value, err := pdao.YoubanPublishMaterialImportTask.Ctx(ctx).
+		Where(cols.Id, taskId).
+		Fields(cols.Stage).
+		Value()
+	if err != nil {
+		return "", gerror.Wrap(err, "读取资料导入任务阶段失败")
+	}
+	return materialImportQueueNameByStage(value.String()), nil
+}
+
+func materialImportQueueNameByStage(stage string) string {
+	if strings.TrimSpace(stage) == sysin.MaterialImportStageMedia {
+		return tgQueueNameMaterialImportMedia
+	}
+	return tgQueueNameMaterialImportPull
 }
 
 func decodeMaterialImportQueuePayload(task *asynq.Task) (materialImportQueuePayload, error) {

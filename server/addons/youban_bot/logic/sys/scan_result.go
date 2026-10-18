@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	publishsysin "hotgo/addons/youban_publish/model/input/sysin"
 	publishService "hotgo/addons/youban_publish/service"
 	"hotgo/internal/library/cache"
+	"hotgo/utility/scantrace"
 )
 
 const scanResultTTL = 10 * time.Minute
@@ -28,24 +30,35 @@ type scanResultState struct {
 	ProfileIds  []int64 `json:"profileIds"`
 }
 
-func (s *sSysBot) searchScanMediaAndReply(ctx context.Context, botId int64, chatId string, account *botProfileAccount, items []*publishsysin.BotMediaSearchItem) error {
+func (s *sSysBot) searchScanMediaAndReply(ctx context.Context, botId int64, chatId string, account *botProfileAccount, items []*publishsysin.BotMediaSearchItem) (resultErr error) {
 	if account == nil || len(items) == 0 {
 		return gerror.New("扫图搜索参数不完整")
 	}
 	searchStartedAt := time.Now()
+	traceId := ensureScanTraceId(scanTraceId(ctx))
+	ctx = withScanTrace(ctx, traceId)
+	ctx = scantrace.With(ctx, g.Map{"botId": botId, "tenantId": account.TenantId, "accountId": account.AccountId, "items": len(items)})
+	finish := scantrace.Begin(ctx, "request.total")
+	defer func() { finish(resultErr) }()
 	list, total, err := publishService.SysPublish().BotProfileMediaSearch(ctx, &publishsysin.BotMediaSearchInp{
 		TenantId:    account.TenantId,
 		AccountId:   account.AccountId,
 		AccountType: account.AccountType,
+		TraceId:     traceId,
 		Items:       items,
 		Threshold:   12,
 	})
 	observeScanStage(ctx, botId, "fingerprint_search", searchStartedAt, err)
+	g.Log().Info(ctx, "Bot扫图搜索完成", g.Map{"traceId": traceId, "botId": botId, "accountId": account.AccountId, "durationMs": time.Since(searchStartedAt).Milliseconds(), "total": total, "err": err})
 	if err != nil {
-		return s.replyBotError(ctx, botId, chatId, "扫图搜索", err)
+		step := scantrace.Begin(ctx, "reply.error")
+		defer func() { step(resultErr) }()
+		return s.replyBotError(ctx, botId, chatId, "扫图搜索", scanSearchUserError(traceId, err))
 	}
 	if len(list) == 0 {
-		return s.sendMessageOnly(ctx, botId, chatId, "未找到相似资料。")
+		step := scantrace.Begin(ctx, "reply.empty")
+		defer func() { step(resultErr) }()
+		return s.sendMessageOnly(ctx, botId, chatId, fmt.Sprintf("未找到相似资料。\n（追踪号 %s）", traceId))
 	}
 	token := strings.ToUpper(grand.S(10))
 	state := &scanResultState{TenantId: account.TenantId, AccountId: account.AccountId, AccountType: account.AccountType}
@@ -74,21 +87,38 @@ func (s *sSysBot) searchScanMediaAndReply(ctx context.Context, botId int64, chat
 	if err != nil {
 		return err
 	}
-	if err = cache.Instance().Set(ctx, scanResultKey(token), string(data), scanResultTTL); err != nil {
+	step := scantrace.Begin(ctx, "result.cache")
+	err = cache.Instance().Set(ctx, scanResultKey(token), string(data), scanResultTTL)
+	step(err)
+	if err != nil {
 		return err
 	}
 	text := fmt.Sprintf("找到 %d 条相似资料，请选择要查看的资料：", total)
 	if total > len(state.ProfileIds) {
 		text = fmt.Sprintf("找到 %d 条相似资料，最多展示 %d 条，请选择要查看的资料：", total, len(state.ProfileIds))
 	}
+	text += fmt.Sprintf("\n（追踪号 %s）", traceId)
 	row, err := s.botById(ctx, botId)
 	if err != nil {
 		return err
 	}
 	g.Log().Info(ctx, "Bot扫图结果已组装", g.Map{
-		"botId": botId, "accountId": account.AccountId, "resultTotal": len(state.ProfileIds), "sourceLinkTotal": sourceLinkTotal,
+		"traceId": traceId, "botId": botId, "accountId": account.AccountId, "resultTotal": len(state.ProfileIds), "sourceLinkTotal": sourceLinkTotal,
 	})
+	step = scantrace.Begin(ctx, "reply.results")
 	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, html.EscapeString(text), "HTML", false, &models.InlineKeyboardMarkup{InlineKeyboard: buttons})
+	step(err)
+	return err
+}
+
+func scanSearchUserError(traceId string, err error) error {
+	if err == nil {
+		return nil
+	}
+	message := strings.ToLower(err.Error())
+	if errors.Is(err, context.DeadlineExceeded) || strings.Contains(message, "context deadline exceeded") {
+		return gerror.Newf("扫图搜索超时，请重新发送图片后再试。\n（追踪号 %s）", ensureScanTraceId(traceId))
+	}
 	return err
 }
 

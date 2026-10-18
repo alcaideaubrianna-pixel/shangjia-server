@@ -9,7 +9,6 @@ import (
 	"context"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/net/ghttp"
-	"github.com/gogf/gf/v2/os/gfile"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/minio/minio-go/v7/pkg/s3utils"
@@ -22,7 +21,7 @@ type MinioDrive struct {
 }
 
 // Upload 上传到minio对象存储
-func (d *MinioDrive) Upload(ctx context.Context, file *ghttp.UploadFile) (fullPath string, err error) {
+func (d *MinioDrive) Upload(ctx context.Context, file *ghttp.UploadFile, meta *FileMeta) (fullPath string, err error) {
 	if config.MinioPath == "" {
 		err = gerror.New("minio存储驱动必须配置存储路径!")
 		return
@@ -41,7 +40,10 @@ func (d *MinioDrive) Upload(ctx context.Context, file *ghttp.UploadFile) (fullPa
 		return
 	}
 
-	fullPath = GenFullPath(config.MinioPath, gfile.Ext(file.Filename))
+	fullPath, err = GenContentPath(config.MinioPath, meta.Md5, meta.Ext)
+	if err != nil {
+		return "", err
+	}
 	if err = s3utils.CheckValidObjectName(fullPath); err != nil {
 		return
 	}

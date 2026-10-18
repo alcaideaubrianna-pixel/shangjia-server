@@ -39,6 +39,15 @@ type ProfileRepublishRes struct {
 	Message string `json:"message"`
 }
 
+type ProfileOfflineReq struct {
+	g.Meta     `path:"/profile/offline" method:"post" tags:"AI运维" summary:"批量下架资料并清理TG消息"`
+	ProfileIds []int64 `json:"profileIds" v:"required#资料ID不能为空"`
+}
+
+type ProfileOfflineRes struct {
+	Message string `json:"message"`
+}
+
 type ProfileDeleteReq struct {
 	g.Meta     `path:"/profile/delete" method:"post" tags:"AI运维" summary:"批量下架并删除指定账号的可管理资料"`
 	TenantId   int64   `json:"tenantId" v:"min:1#租户ID不能为空"`
@@ -55,9 +64,41 @@ type ProfileDeleteRes struct {
 
 type TelegramMessageContextReq struct {
 	g.Meta `path:"/telegram/message/context" method:"get" tags:"AI运维" summary:"按Telegram消息地址查询资料采集链路"`
-	URL    string `json:"url" v:"required#消息地址不能为空" dc:"Telegram消息地址"`
+	sysin.AIOpsTelegramMessageContextInp
 }
 
 type TelegramMessageContextRes struct {
 	*sysin.AIOpsTelegramMessageContextModel
+}
+
+type TelegramMessageOfflineReq struct {
+	g.Meta `path:"/telegram/message/offline" method:"post" tags:"AI运维" summary:"按消息或资料精确下架并清理TG消息"`
+	sysin.AIOpsTelegramOfflineInp
+}
+
+type TelegramMessageOfflineRes struct {
+	*sysin.AIOpsTelegramOfflineResult
+}
+
+type RepairPlanReq struct {
+	g.Meta `path:"/repair/plan" method:"post" tags:"AI运维" summary:"预演采集修复并生成确认令牌"`
+	sysin.AIOpsRepairPlanInp
+}
+
+type RepairPlanRes struct{ *sysin.AIOpsRepairPlanModel }
+
+type RepairApplyReq struct {
+	g.Meta `path:"/repair/apply" method:"post" tags:"AI运维" summary:"执行已确认的采集修复计划"`
+	sysin.AIOpsRepairApplyInp
+}
+
+type RepairApplyRes struct{ *sysin.AIOpsRepairApplyModel }
+
+type RepairStatusReq struct {
+	g.Meta `path:"/repair/status" method:"get" tags:"AI运维" summary:"查询受控运维计划状态"`
+	sysin.AIOpsRepairPlanStatusInp
+}
+
+type RepairStatusRes struct {
+	*sysin.AIOpsRepairPlanStatusModel
 }

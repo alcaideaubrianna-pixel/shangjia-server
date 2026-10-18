@@ -18,6 +18,7 @@ var (
 	// Keep this table name explicit. The recovery query is also used during
 	// startup, before all generated DAO metadata is guaranteed to be loaded.
 	publishTgJobTable               = "hg_youban_publish_tg_job"
+	publishTgOutboxTable            = "hg_youban_publish_tg_outbox"
 	publishTgQueueStatTable         = pdao.YoubanPublishTgQueueStat.Table()
 	publishTgChannelStatTable       = pdao.YoubanPublishTgChannelStat.Table()
 	publishTgBotStatTable           = pdao.YoubanPublishTgBotStat.Table()

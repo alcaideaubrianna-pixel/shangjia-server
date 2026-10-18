@@ -93,11 +93,12 @@ func (s *sSysPublish) serverDashboardPublishTaskTrend(ctx context.Context, dateR
 		Status string `json:"status"`
 		Count  int    `json:"count"`
 	}
-	err := g.DB().Model(publishSuccessRecordTable).Safe().Ctx(ctx).
-		Fields("DATE(created_at) AS date", "status", "COUNT(*) AS count").
-		WhereGTE("created_at", dateRange.Start+" 00:00:00").
-		WhereLT("created_at", dashboardRangeEndExclusive(dateRange.End)).
-		Group("DATE(created_at),status").
+	err := g.DB().Model(publishSuccessRecordTable+" l").Safe().Ctx(ctx).
+		LeftJoin(publishTgJobTable+" j", "j.id=l.job_id").
+		Fields("DATE(l.created_at) AS date", publishRecordStatusExpression+" AS status", "COUNT(*) AS count").
+		WhereGTE("l.created_at", dateRange.Start+" 00:00:00").
+		WhereLT("l.created_at", dashboardRangeEndExclusive(dateRange.End)).
+		Group("DATE(l.created_at)," + publishRecordStatusExpression).
 		Scan(&rows)
 	if err != nil {
 		return nil, nil, gerror.Wrap(err, "统计后台任务趋势失败")
@@ -177,13 +178,14 @@ func (s *sSysPublish) serverDashboardPublishFailureTop(ctx context.Context, date
 		Message string `json:"message"`
 		Count   int    `json:"count"`
 	}
-	err := g.DB().Model(publishSuccessRecordTable).Safe().Ctx(ctx).
-		Fields("message", "COUNT(*) AS count").
-		Where("status", "failed").
-		WhereNot("message", "").
-		WhereGTE("created_at", dateRange.Start+" 00:00:00").
-		WhereLT("created_at", dashboardRangeEndExclusive(dateRange.End)).
-		Group("message").OrderDesc("count").Limit(10).Scan(&rows)
+	err := g.DB().Model(publishSuccessRecordTable+" l").Safe().Ctx(ctx).
+		LeftJoin(publishTgJobTable+" j", "j.id=l.job_id").
+		Fields(publishRecordMessageExpression+" AS message", "COUNT(*) AS count").
+		Where(publishRecordStatusExpression+" = ?", "failed").
+		Where(publishRecordMessageExpression+" <> ''").
+		WhereGTE("l.created_at", dateRange.Start+" 00:00:00").
+		WhereLT("l.created_at", dashboardRangeEndExclusive(dateRange.End)).
+		Group(publishRecordMessageExpression).OrderDesc("count").Limit(10).Scan(&rows)
 	if err != nil {
 		return nil, gerror.Wrap(err, "统计发布失败Top10失败")
 	}
@@ -202,9 +204,10 @@ func (s *sSysPublish) serverDashboardProfilePublishTop(ctx context.Context, date
 		Count     int    `json:"count"`
 	}
 	err := g.DB().Model(publishSuccessRecordTable+" r").Safe().Ctx(ctx).
+		InnerJoin(publishTgJobTable+" j", "j.id=r.job_id").
 		LeftJoin(dao.ContentProfile.Table()+" p", "p.id=r.profile_id").
 		Fields("r.profile_id", "p.profile_no", "p.title", "COUNT(*) AS count").
-		WhereIn("r.status", []string{"success", "sent"}).WhereGT("r.profile_id", 0).
+		Where("j.status", telegramJobStatusSent).WhereGT("r.profile_id", 0).
 		WhereGTE("r.created_at", dateRange.Start+" 00:00:00").
 		WhereLT("r.created_at", dashboardRangeEndExclusive(dateRange.End)).
 		Group("r.profile_id,p.profile_no,p.title").OrderDesc("count").Limit(10).Scan(&rows)

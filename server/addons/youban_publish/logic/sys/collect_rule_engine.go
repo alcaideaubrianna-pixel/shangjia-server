@@ -40,7 +40,11 @@ func buildCollectRuleDecision(event gdb.Record, content *collectContentResult, r
 		rawText = content.RawText
 		mediaCount = content.MediaCount
 	}
-	matchJSON := precheckCollectRuleText(rawText, mediaCount, rule).MatchJSON
+	precheck := precheckCollectRuleText(rawText, mediaCount, rule)
+	if !precheck.Matched {
+		return &collectRuleDecision{Skipped: true, Reason: precheck.Reason, MatchJSON: precheck.MatchJSON}
+	}
+	matchJSON := precheck.MatchJSON
 	if strings.TrimSpace(rawText) == "" {
 		return &collectRuleDecision{
 			Matched:   true,

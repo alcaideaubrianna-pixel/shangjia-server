@@ -37,6 +37,11 @@ func (c *cPublish) IntroFeeChannelRuleSave(ctx context.Context, req *publish.Int
 func (c *cPublish) IntroFeeChannelRuleDelete(ctx context.Context, req *publish.IntroFeeChannelRuleDeleteReq) (*publish.IntroFeeChannelRuleDeleteRes, error) {
 	return &publish.IntroFeeChannelRuleDeleteRes{}, service.SysPublish().IntroFeeChannelRuleDelete(ctx, req.Id)
 }
+
+func (c *cPublish) IntroFeeChannelPurge(ctx context.Context, req *publish.IntroFeeChannelPurgeReq) (*publish.IntroFeeChannelPurgeRes, error) {
+	result, err := service.SysPublish().IntroFeeChannelPurge(ctx, &req.IntroFeeChannelPurgeInp)
+	return &publish.IntroFeeChannelPurgeRes{IntroFeeChannelPurgeModel: result}, err
+}
 func (c *cPublish) IntroFeeChannelBlacklist(ctx context.Context, req *publish.IntroFeeChannelBlacklistReq) (*publish.IntroFeeChannelBlacklistRes, error) {
 	return &publish.IntroFeeChannelBlacklistRes{}, service.SysPublish().IntroFeeChannelBlacklist(ctx, &req.IntroFeeChannelBlacklistInp)
 }

@@ -17,6 +17,7 @@ import (
 	"hotgo/utility/format"
 	"hotgo/utility/url"
 	"hotgo/utility/validate"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -31,7 +32,7 @@ import (
 // UploadDrive 存储驱动
 type UploadDrive interface {
 	// Upload 上传
-	Upload(ctx context.Context, file *ghttp.UploadFile) (fullPath string, err error)
+	Upload(ctx context.Context, file *ghttp.UploadFile, meta *FileMeta) (fullPath string, err error)
 	// CreateMultipart 创建分片事件
 	CreateMultipart(ctx context.Context, in *CheckMultipartParams) (res *MultipartProgress, err error)
 	// UploadPart 上传分片
@@ -95,7 +96,7 @@ func DoUpload(ctx context.Context, typ string, file *ghttp.UploadFile) (result *
 	}
 
 	// 上传到驱动
-	fullPath, err := New(config.Drive).Upload(ctx, file)
+	fullPath, err := New(config.Drive).Upload(ctx, file, meta)
 	if err != nil {
 		return
 	}
@@ -216,6 +217,36 @@ func GenFullPath(basePath, ext string) string {
 	return basePath + gtime.Date() + "/" + strings.ToLower(fileName)
 }
 
+// GenContentPath returns the canonical object path for verified file content.
+// The digest prefix keeps local-storage directories and object listings bounded.
+func GenContentPath(basePath, md5Value, ext string) (string, error) {
+	md5Value = strings.ToLower(strings.TrimSpace(md5Value))
+	if len(md5Value) != 32 {
+		return "", gerror.New("文件MD5不合法")
+	}
+	for _, char := range md5Value {
+		if !strings.ContainsRune("0123456789abcdef", char) {
+			return "", gerror.New("文件MD5不合法")
+		}
+	}
+	ext = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(ext)), ".")
+	if ext == "" || strings.ContainsAny(ext, `/\\`) {
+		return "", gerror.New("文件后缀不合法")
+	}
+	return path.Join(strings.TrimSpace(basePath), md5Value[:2], md5Value+"."+ext), nil
+}
+
+// GenStagingPath returns an untrusted direct-upload path. Staging objects are
+// promoted to a verified content path only after the server computes the MD5.
+func GenStagingPath(basePath, sessionId, ext string) (string, error) {
+	sessionId = strings.ToLower(strings.TrimSpace(sessionId))
+	ext = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(ext)), ".")
+	if sessionId == "" || strings.ContainsAny(sessionId, `/\\`) || ext == "" || strings.ContainsAny(ext, `/\\`) {
+		return "", gerror.New("临时对象路径参数不合法")
+	}
+	return path.Join(strings.TrimSpace(basePath), "staging", sessionId+"."+ext), nil
+}
+
 // write 写入附件记录
 func write(ctx context.Context, meta *FileMeta, fullPath string) (models *entity.SysAttachment, err error) {
 	models = &entity.SysAttachment{
@@ -244,11 +275,12 @@ func write(ctx context.Context, meta *FileMeta, fullPath string) (models *entity
 }
 
 // WriteDirectUploadAttachment records an object that was uploaded directly to the active storage drive.
-func WriteDirectUploadAttachment(ctx context.Context, fileName string, size int64, fullPath string) (*entity.SysAttachment, error) {
+func WriteDirectUploadAttachment(ctx context.Context, fileName string, size int64, md5Value string, fullPath string) (*entity.SysAttachment, error) {
 	meta := &FileMeta{
 		Filename: fileName,
 		Size:     size,
 		Ext:      Ext(fileName),
+		Md5:      normalizeMultipartDigest(md5Value),
 	}
 	meta.Kind = GetFileKind(meta.Ext)
 	meta.MimeType = GetFileMimeType(meta.Ext)
@@ -343,7 +375,7 @@ func CheckMultipart(ctx context.Context, in *CheckMultipartParams) (res *CheckMu
 }
 
 func normalizeMultipartDigest(value string) string {
-	value = strings.TrimSpace(value)
+	value = strings.ToLower(strings.TrimSpace(value))
 	if len(value) > 32 {
 		return value[:32]
 	}

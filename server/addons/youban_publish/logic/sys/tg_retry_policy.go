@@ -274,6 +274,7 @@ func isTelegramPermanentSendError(err error) bool {
 	}
 	message := strings.ToLower(err.Error())
 	permanentParts := []string{
+		strings.ToLower(telegramMediaUploadSizeError),
 		// These errors cannot recover by retrying the same job. Keep history,
 		// but move the job to a terminal state so it cannot starve a channel.
 		"bot配置不存在",
@@ -299,6 +300,10 @@ func isTelegramPermanentSendError(err error) bool {
 		"can't use file of type video as photo",
 		"can't use file of type photo as video",
 		"file_reference_expired",
+		"wrong file identifier",
+		"file_id_invalid",
+		"file reference expired",
+		"file_reference_invalid",
 		"webpage_curl_failed",
 		"webpage_media_empty",
 		"账号推送暂不支持远程媒体地址",
@@ -307,6 +312,7 @@ func isTelegramPermanentSendError(err error) bool {
 		"unauthorized",
 		"message caption is too long",
 		"caption is too long",
+		"tg任务缺少完整展示发送证据",
 	}
 	for _, part := range permanentParts {
 		if strings.Contains(message, part) {
@@ -341,6 +347,7 @@ func isTelegramMediaSizeLimitError(err error) bool {
 	}
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "file is too big") ||
+		strings.Contains(message, strings.ToLower(telegramMediaUploadSizeError)) ||
 		strings.Contains(message, "file too large") ||
 		strings.Contains(message, "request_file_too_big")
 }

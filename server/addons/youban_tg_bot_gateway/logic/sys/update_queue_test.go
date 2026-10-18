@@ -35,7 +35,33 @@ func TestGatewayUpdatePayloadRoundTrip(t *testing.T) {
 }
 
 func TestGatewayQueueConcurrencyHasSafeMinimum(t *testing.T) {
-	if gatewayQueueConcurrency(context.Background()) < 1 {
-		t.Fatal("gateway queue concurrency must be positive")
+	if gatewayBulkQueueConcurrency(context.Background()) < 1 {
+		t.Fatal("gateway bulk queue concurrency must be positive")
+	}
+	if gatewayInteractiveQueueConcurrency(context.Background()) < 1 {
+		t.Fatal("gateway interactive queue concurrency must be positive")
+	}
+}
+
+func TestGatewayInteractiveQueueClassification(t *testing.T) {
+	tests := []struct {
+		name   string
+		update *models.Update
+		want   bool
+	}{
+		{name: "callback", update: &models.Update{CallbackQuery: &models.CallbackQuery{ID: "callback"}}, want: true},
+		{name: "inline", update: &models.Update{InlineQuery: &models.InlineQuery{ID: "inline"}}, want: true},
+		{name: "private message", update: &models.Update{Message: &models.Message{Chat: models.Chat{Type: "private"}}}, want: true},
+		{name: "edited private message", update: &models.Update{EditedMessage: &models.Message{Chat: models.Chat{Type: "private"}}}, want: true},
+		{name: "channel post", update: &models.Update{ChannelPost: &models.Message{Chat: models.Chat{Type: "channel"}}}, want: false},
+		{name: "group message", update: &models.Update{Message: &models.Message{Chat: models.Chat{Type: "supergroup"}}}, want: false},
+		{name: "nil", update: nil, want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := updateNeedsInteractiveQueue(test.update); got != test.want {
+				t.Fatalf("updateNeedsInteractiveQueue() = %t, want %t", got, test.want)
+			}
+		})
 	}
 }

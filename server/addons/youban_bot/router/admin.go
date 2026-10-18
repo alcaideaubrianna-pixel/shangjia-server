@@ -16,6 +16,6 @@ func Admin(ctx context.Context, group *ghttp.RouterGroup) {
 	prefix := addons.RouterPrefix(ctx, consts.AppAdmin, global.GetSkeleton().Name)
 	group.Group(prefix, func(group *ghttp.RouterGroup) {
 		group.Middleware(service.Middleware().AdminAuth)
-		group.Bind(sys.Bot)
+		group.Bind(sys.Bot, sys.Relay)
 	})
 }

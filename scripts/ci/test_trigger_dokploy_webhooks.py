@@ -23,6 +23,7 @@ class TriggerDokployWebhooksTest(unittest.TestCase):
                 "xiaohuiji-api",
                 "xiaohuiji-account",
                 "xiaohuiji-scheduler",
+                "xiaohuiji-collect-process-worker",
                 "xiaohuiji-publish-worker-app2",
                 "xiaohuiji-worker-app4",
                 "xiaohuiji-worker-app3",
@@ -144,6 +145,58 @@ class TriggerDokployWebhooksTest(unittest.TestCase):
     def test_revision_matches_short_or_prefixed_revision(self):
         self.assertTrue(MODULE.revision_matches("1234567890abcdef", "sha-1234567"))
         self.assertFalse(MODULE.revision_matches("7654321", "sha-1234567"))
+
+    def test_only_runtime_or_revision_drift_is_retryable(self):
+        self.assertTrue(MODULE.is_retryable_rollout_error(
+            RuntimeError("running container image mismatch: ['old']"),
+        ))
+        self.assertTrue(MODULE.is_retryable_rollout_error(
+            RuntimeError(
+                "health check failed after 60 attempts: "
+                "revision is 'old', expected 'new'"
+            ),
+        ))
+        self.assertFalse(MODULE.is_retryable_rollout_error(
+            RuntimeError(
+                "health check failed after 60 attempts: "
+                "unexpected HTTP status 503"
+            ),
+        ))
+
+    def test_main_redeploys_when_public_revision_does_not_converge(self):
+        target = {
+            "application_id": "app-1",
+            "direct_deploy": False,
+            "health_url": "https://example.com/readyz",
+            "name": "api",
+        }
+        revision_error = RuntimeError(
+            "health check failed after 60 attempts: "
+            "revision is 'old', expected '1234567'"
+        )
+        with mock.patch.object(MODULE, "load_targets", return_value=[target]), \
+                mock.patch.object(
+                    MODULE, "pin_target_image", return_value="registry/server:sha-1234567",
+                ), \
+                mock.patch.object(MODULE, "trigger") as trigger, \
+                mock.patch.object(MODULE, "wait_for_running_image") as wait_runtime, \
+                mock.patch.object(
+                    MODULE, "wait_until_healthy", side_effect=[revision_error, None],
+                ) as wait_health, \
+                mock.patch.object(MODULE, "send_telegram"):
+            result = MODULE.main([
+                "--config", "unused.json", "--version", "sha-1234567",
+                "--revision", "1234567890",
+            ])
+
+        self.assertEqual(0, result)
+        self.assertEqual(2, trigger.call_count)
+        self.assertEqual(2, wait_runtime.call_count)
+        self.assertEqual(2, wait_health.call_count)
+        self.assertEqual(
+            MODULE.RETRY_HEALTH_RETRIES,
+            wait_health.call_args_list[1].kwargs["retries"],
+        )
 
     def test_main_skips_when_every_target_is_disabled(self):
         path = self.write_config([

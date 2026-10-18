@@ -32,7 +32,10 @@ const telegramPhotoMaxDimensionRatio = 20.0
 
 var errBackgroundReplacementDocument = errors.New("document image skips anti-scan processing")
 
-func (s *sSysPublish) prepareTelegramMediaUploadFile(ctx context.Context, media *telegramMediaItem, path string, cleanup func()) (string, func(), error) {
+func (s *sSysPublish) prepareTelegramMediaUploadFile(ctx context.Context, media *telegramMediaItem, path string, cleanup func()) (resultPath string, resultCleanup func(), resultErr error) {
+	ctx = telegramPublishMediaTraceContext(ctx, media)
+	stage := beginTelegramPublishStage(ctx, "media.upload.prepare", telegramPublishMediaLogFields(media))
+	defer stage.Finish(&resultErr)
 	path = strings.TrimSpace(path)
 	if path == "" || media == nil {
 		return path, cleanup, nil
@@ -431,12 +434,38 @@ func compressTelegramPhotoForUpload(ctx context.Context, path string) (string, e
 }
 
 func prepareTelegramVideoUploadFile(ctx context.Context, path string, cleanup func()) (string, func(), error) {
+	if telegramVideoPathNeedsNormalization(path) {
+		step := beginTelegramPublishStage(ctx, "media.video.normalize", g.Map{"inputExtension": strings.ToLower(filepath.Ext(path))})
+		normalizedPath, err := normalizeTelegramVideo(ctx, path)
+		step.End(err)
+		if err != nil {
+			if cleanup != nil {
+				cleanup()
+			}
+			return "", nil, err
+		}
+		return normalizedPath, chainCleanup(cleanup, func() { _ = os.Remove(normalizedPath) }), nil
+	}
+	step := beginTelegramPublishStage(ctx, "media.video.strip_metadata")
 	cleanPath, err := stripTelegramVideoMetadata(ctx, path)
+	step.End(err, g.Map{"fallbackToOriginal": err != nil})
 	if err != nil {
 		g.Log().Warningf(ctx, "清理视频元数据失败，使用原视频发送 path:%s err:%+v", path, err)
 		return path, cleanup, nil
 	}
 	return cleanPath, chainCleanup(cleanup, func() { _ = os.Remove(cleanPath) }), nil
+}
+
+func telegramVideoPathNeedsNormalization(path string) bool {
+	return !strings.EqualFold(filepath.Ext(strings.TrimSpace(path)), ".mp4")
+}
+
+func normalizeTelegramVideo(ctx context.Context, path string) (string, error) {
+	ffmpegPath, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		return "", gerror.New("ffmpeg 未安装，无法转换Telegram兼容视频")
+	}
+	return cachedTelegramVideoNormalize(ctx, ffmpegPath, path)
 }
 
 func stripTelegramVideoMetadata(ctx context.Context, path string) (string, error) {

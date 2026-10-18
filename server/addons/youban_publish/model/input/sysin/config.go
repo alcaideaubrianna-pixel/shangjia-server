@@ -4,6 +4,7 @@ import (
 	"context"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -92,12 +93,49 @@ type GlobalAutoDeleteKeywordsViewModel struct {
 }
 
 type GlobalAutoDeleteKeywordsSaveInp struct {
-	Keywords []string `json:"keywords"`
+	Keywords        []string `json:"keywords"`
+	BackfillEnabled int      `json:"backfillEnabled"`
+	BackfillStartAt string   `json:"backfillStartAt"`
+	BackfillEndAt   string   `json:"backfillEndAt"`
 }
 
 func (in *GlobalAutoDeleteKeywordsSaveInp) Filter(ctx context.Context) error {
 	in.Keywords = uniqueStringsConfig(in.Keywords)
+	if in.BackfillEnabled == 0 {
+		in.BackfillStartAt = ""
+		in.BackfillEndAt = ""
+		return nil
+	}
+	if in.BackfillEnabled != 1 {
+		return gerror.New("历史回填开关值不合法")
+	}
+	start, err := parseAutoDeleteBackfillTime(in.BackfillStartAt)
+	if err != nil {
+		return gerror.New("历史回填开始时间格式不正确")
+	}
+	end, err := parseAutoDeleteBackfillTime(in.BackfillEndAt)
+	if err != nil {
+		return gerror.New("历史回填结束时间格式不正确")
+	}
+	if !end.After(start) {
+		return gerror.New("历史回填结束时间必须晚于开始时间")
+	}
+	if end.Sub(start) > 3*time.Hour {
+		return gerror.New("历史回填时间区间不能超过3小时")
+	}
+	in.BackfillStartAt = start.Format(time.RFC3339)
+	in.BackfillEndAt = end.Format(time.RFC3339)
 	return nil
+}
+
+func parseAutoDeleteBackfillTime(value string) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	for _, layout := range []string{time.RFC3339, "2006-01-02 15:04:05"} {
+		if parsed, err := time.ParseInLocation(layout, value, time.Local); err == nil {
+			return parsed, nil
+		}
+	}
+	return time.Time{}, gerror.New("invalid time")
 }
 
 func (in *AutoDeleteConfigSaveInp) Filter(ctx context.Context) error {

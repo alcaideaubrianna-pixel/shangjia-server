@@ -50,23 +50,40 @@ type ffprobeVideoMetaResult struct {
 }
 
 func (s *sSysPublish) telegramVideoMeta(ctx context.Context, media *telegramMediaItem) telegramVideoMeta {
+	ctx = telegramPublishMediaTraceContext(ctx, media)
 	if media == nil || strings.TrimSpace(media.MediaType) != "video" {
 		return telegramVideoMeta{}
 	}
 	if media.VideoWidth > 0 && media.VideoHeight > 0 {
+		beginTelegramPublishStage(ctx, "media.video.metadata.cache").End(nil, g.Map{"cacheSource": "media"})
 		return telegramVideoMeta{Width: media.VideoWidth, Height: media.VideoHeight, Duration: media.VideoDuration}
 	}
-	if err := ensureAttachmentVideoMetaSchema(ctx); err != nil {
+	// Telegram already owns the video metadata when sending its file_id. Do not
+	// turn a reuse request into a database lookup, download or ffprobe operation.
+	// Forced/sanitized uploads and copy references still use the normal path.
+	if telegramMediaUsesReusableFileId(media) {
+		beginTelegramPublishStage(ctx, "media.video.metadata.cache").End(nil, g.Map{"cacheSource": "telegram_file_id"})
+		return telegramVideoMeta{}
+	}
+	step := beginTelegramPublishStage(ctx, "media.video.metadata.schema")
+	schemaErr := ensureAttachmentVideoMetaSchema(ctx)
+	step.End(schemaErr)
+	if err := schemaErr; err != nil {
 		g.Log().Warningf(ctx, "检查资源视频元数据字段失败: %+v", err)
 		return telegramVideoMeta{}
 	}
-	if meta, ok := attachmentVideoMetaFromCache(ctx, media); ok {
+	step = beginTelegramPublishStage(ctx, "media.video.metadata.cache")
+	cachedMeta, cached := attachmentVideoMetaFromCache(ctx, media)
+	step.End(nil, g.Map{"cacheSource": "attachment", "cacheHit": cached})
+	if meta, ok := cachedMeta, cached; ok {
 		media.VideoWidth = meta.Width
 		media.VideoHeight = meta.Height
 		media.VideoDuration = meta.Duration
 		return meta
 	}
+	step = beginTelegramPublishStage(ctx, "media.video.metadata.prepare_file")
 	localPath, cleanup, err := telegramVideoMetaProbePath(ctx, media)
+	step.End(err, g.Map{"fileAvailable": strings.TrimSpace(localPath) != ""})
 	if cleanup != nil {
 		defer cleanup()
 	}
@@ -77,7 +94,9 @@ func (s *sSysPublish) telegramVideoMeta(ctx context.Context, media *telegramMedi
 	if strings.TrimSpace(localPath) == "" {
 		return telegramVideoMeta{}
 	}
+	step = beginTelegramPublishStage(ctx, "media.video.metadata.ffprobe")
 	meta, err := probeLocalVideoMeta(ctx, localPath)
+	step.End(err, g.Map{"videoWidth": meta.Width, "videoHeight": meta.Height, "videoDuration": meta.Duration})
 	if err != nil {
 		g.Log().Warningf(ctx, "读取视频元数据失败 mediaId:%d attachmentId:%d path:%s err:%+v", media.Id, media.AttachmentId, localPath, err)
 		return telegramVideoMeta{}
@@ -88,7 +107,10 @@ func (s *sSysPublish) telegramVideoMeta(ctx context.Context, media *telegramMedi
 	media.VideoWidth = meta.Width
 	media.VideoHeight = meta.Height
 	media.VideoDuration = meta.Duration
-	if err = saveAttachmentVideoMeta(ctx, media, meta); err != nil {
+	step = beginTelegramPublishStage(ctx, "media.video.metadata.save")
+	err = saveAttachmentVideoMeta(ctx, media, meta)
+	step.End(err)
+	if err != nil {
 		g.Log().Warningf(ctx, "缓存视频元数据失败 mediaId:%d attachmentId:%d path:%s err:%+v", media.Id, media.AttachmentId, media.StoragePath, err)
 	}
 	return meta
@@ -109,9 +131,6 @@ func (s *sSysPublish) prepareTelegramMediaItemForSend(ctx context.Context, media
 		media.TgThumbFileId = ""
 	}
 	mediaType := strings.ToLower(strings.TrimSpace(media.MediaType))
-	if mediaType == "video" && !telegramVideoUsesReusableFileIdWithCover(media) {
-		_ = s.telegramVideoMeta(ctx, media)
-	}
 	if telegramMediaRequiresSanitizedUpload(media) {
 		media.TgThumbFileId = ""
 		if isTelegramImageMedia(mediaType) {

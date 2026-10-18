@@ -89,3 +89,44 @@ func TestProfileMediaGroupPurposeUsesFirstAndSecondGroup(t *testing.T) {
 		t.Fatalf("waiting verify purpose = %q, want verify", got)
 	}
 }
+
+func TestProfileShouldStageEarlyVerify(t *testing.T) {
+	tests := []struct {
+		name  string
+		text  string
+		media []*publishsysin.MessageTemplateMediaInp
+		want  bool
+	}{
+		{
+			name:  "standalone verify video arrives before display group",
+			media: []*publishsysin.MessageTemplateMediaInp{{MediaType: "video", TgFileId: "verify"}},
+			want:  true,
+		},
+		{
+			name:  "captioned video can be display content",
+			text:  "资料正文",
+			media: []*publishsysin.MessageTemplateMediaInp{{MediaType: "video", TgFileId: "display"}},
+			want:  false,
+		},
+		{
+			name:  "standalone image is not verify media",
+			media: []*publishsysin.MessageTemplateMediaInp{{MediaType: "image", TgFileId: "image"}},
+			want:  false,
+		},
+		{
+			name: "mixed media group is not standalone verify media",
+			media: []*publishsysin.MessageTemplateMediaInp{
+				{MediaType: "video", TgFileId: "video"},
+				{MediaType: "image", TgFileId: "image"},
+			},
+			want: false,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := profileShouldStageEarlyVerify(test.text, test.media); got != test.want {
+				t.Fatalf("profileShouldStageEarlyVerify() = %t, want %t", got, test.want)
+			}
+		})
+	}
+}

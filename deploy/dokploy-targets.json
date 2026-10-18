@@ -32,6 +32,15 @@
       "serverId": "O1C4Nk9JMWZxnLU4bnWba"
     },
     {
+      "name": "xiaohuiji-collect-process-worker",
+      "enabled": true,
+      "directDeploy": true,
+      "order": 35,
+      "applicationId": "j98OM8sssFQ12EdAB4rJL",
+      "appName": "xiaohuiji-collect-process-worker",
+      "serverId": "O1C4Nk9JMWZxnLU4bnWba"
+    },
+    {
       "name": "xiaohuiji-worker-app2",
       "webhook": "https://dokploy.xiao-feiji.cc/api/deploy/KJ8yT6qx7P2mV4nR9cW3sL5u",
       "enabled": false,

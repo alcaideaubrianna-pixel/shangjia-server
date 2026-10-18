@@ -22,13 +22,17 @@ permissions:
 
 concurrency:
   group: build-server-image-${{ github.ref }}
-  # Never cancel a rollout after only some production services were updated.
+  # Keep builds for the same branch serialized.
   cancel-in-progress: false
 
 jobs:
   build:
     if: github.ref == 'refs/heads/feat/railway-runtime-ci-split'
     runs-on: ubuntu-latest
+    outputs:
+      short_sha: ${{ steps.image.outputs.short_sha }}
+      server_image: ${{ steps.image.outputs.server }}
+      acr_image: ${{ steps.image.outputs.acr_vpc }}
 
     steps:
       - name: Checkout
@@ -39,6 +43,9 @@ jobs:
         run: |
           owner="${GITHUB_REPOSITORY_OWNER,,}"
           echo "server=ghcr.io/${owner}/youban-server" >> "$GITHUB_OUTPUT"
+          echo "tencent=sgccr.ccs.tencentyun.com/xxxx/xxxx" >> "$GITHUB_OUTPUT"
+          echo "acr_public=xxxxxx-registry.ap-southeast-1.cr.aliyuncs.com/xiaohuiji/youban-server" >> "$GITHUB_OUTPUT"
+          echo "acr_vpc=xxxxxx-registry-vpc.ap-southeast-1.cr.aliyuncs.com/xiaohuiji/youban-server" >> "$GITHUB_OUTPUT"
           echo "branch_tag=feat-railway-runtime-ci-split" >> "$GITHUB_OUTPUT"
           echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
@@ -51,6 +58,50 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to Tencent Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: sgccr.ccs.tencentyun.com
+          username: ${{ secrets.TENCENT_REGISTRY_USERNAME }}
+          password: ${{ secrets.TENCENT_REGISTRY_PASSWORD }}
+
+      - name: Login to Alibaba Cloud Container Registry
+        shell: bash
+        env:
+          ALIBABA_CLOUD_ACCESS_KEY_ID: ${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_ID }}
+          ALIBABA_CLOUD_ACCESS_KEY_SECRET: ${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_SECRET }}
+          ACR_INSTANCE_ID: cri-wx0a7j1fo37ad8mo
+          ACR_REGISTRY: xxxxxx-registry.ap-southeast-1.cr.aliyuncs.com
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location \
+            https://aliyuncli.alicdn.com/aliyun-cli-linux-latest-amd64.tgz \
+            | tar -xz -C /tmp
+          sudo install -m 0755 /tmp/aliyun /usr/local/bin/aliyun
+          aliyun configure set \
+            --profile github-actions \
+            --mode AK \
+            --region ap-southeast-1 \
+            --access-key-id "$ALIBABA_CLOUD_ACCESS_KEY_ID" \
+            --access-key-secret "$ALIBABA_CLOUD_ACCESS_KEY_SECRET"
+          runner_cidr="$(curl --fail --silent --show-error https://api.ipify.org)/32"
+          printf '%s' "$runner_cidr" > /tmp/acr-runner-cidr
+          aliyun --profile github-actions cr CreateInstanceEndpointAclPolicy \
+            --RegionId ap-southeast-1 \
+            --InstanceId "$ACR_INSTANCE_ID" \
+            --EndpointType internet \
+            --Entry "$runner_cidr" \
+            --Comment "GitHub Actions ${GITHUB_RUN_ID}" \
+            --ModuleName Registry
+          token_json=$(aliyun --profile github-actions cr GetAuthorizationToken \
+            --RegionId ap-southeast-1 \
+            --InstanceId "$ACR_INSTANCE_ID")
+          username=$(jq -r '.TempUsername' <<<"$token_json")
+          token=$(jq -r '.AuthorizationToken' <<<"$token_json")
+          test -n "$username"
+          test -n "$token"
+          printf '%s' "$token" | docker login "$ACR_REGISTRY" --username "$username" --password-stdin
 
       - name: Docker metadata
         id: server_meta
@@ -70,28 +121,37 @@ jobs:
           platforms: linux/amd64
           build-args: |
             GIT_REVISION=${{ github.sha }}
-          tags: ${{ steps.server_meta.outputs.tags }}
+          tags: |
+            ${{ steps.server_meta.outputs.tags }}
+            ${{ steps.image.outputs.tencent }}:latest
+            ${{ steps.image.outputs.tencent }}:${{ steps.image.outputs.short_sha }}
+            ${{ steps.image.outputs.acr_public }}:latest
+            ${{ steps.image.outputs.acr_public }}:${{ steps.image.outputs.short_sha }}
           labels: ${{ steps.server_meta.outputs.labels }}
           cache-from: type=gha,scope=server
           cache-to: type=gha,mode=max,scope=server
+
+      - name: Remove temporary ACR allowlist entry
+        if: ${{ always() }}
+        shell: bash
+        env:
+          ACR_INSTANCE_ID: cri-wx0a7j1fo37ad8mo
+        run: |
+          if [ ! -s /tmp/acr-runner-cidr ]; then
+            exit 0
+          fi
+          aliyun --profile github-actions cr DeleteInstanceEndpointAclPolicy \
+            --RegionId ap-southeast-1 \
+            --InstanceId "$ACR_INSTANCE_ID" \
+            --EndpointType internet \
+            --Entry "$(cat /tmp/acr-runner-cidr)" \
+            --ModuleName Registry || true
 
       - name: Image summary
         run: |
           echo "### Published server image" >> "$GITHUB_STEP_SUMMARY"
           echo '${{ steps.server_meta.outputs.tags }}' >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Trigger enabled Dokploy targets
-        timeout-minutes: 20
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.YOUBAN_TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.YOUBAN_TELEGRAM_CHAT_ID }}
-          DOKPLOY_URL: ${{ secrets.DOKPLOY_URL }}
-          DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
-        run: |
-          python3 -u scripts/ci/trigger-dokploy-webhooks.py \
-            --config deploy/dokploy-targets.json \
-            --version "sha-${GITHUB_SHA::7}" \
-            --revision "${GITHUB_SHA}"
+          echo '${{ steps.image.outputs.acr_public }}:${{ steps.image.outputs.short_sha }}' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Notify Telegram build success
         if: ${{ success() }}
@@ -128,3 +188,72 @@ jobs:
             -d "chat_id=${TELEGRAM_CHAT_ID}" \
             -d "parse_mode=HTML" \
             --data-urlencode "text=${text}" || echo "telegram notify failed"
+
+  # SAE deployment is deliberately opt-in and currently limited to Web.  The
+  # worker applications must not be restarted automatically until their
+  # production DB/Redis cutover has been verified; running two publish
+  # consumers during migration can duplicate Telegram messages.
+  deploy-sae-web:
+    name: Deploy Web to Alibaba Cloud SAE
+    needs: build
+    if: >-
+      needs.build.result == 'success' &&
+      vars.SAE_AUTO_DEPLOY == 'true' &&
+      vars.SAE_WEB_APP_ID != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      ALIBABA_CLOUD_ACCESS_KEY_ID: ${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_ID }}
+      ALIBABA_CLOUD_ACCESS_KEY_SECRET: ${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_SECRET }}
+      ALIBABA_CLOUD_REGION_ID: ${{ vars.SAE_REGION_ID || 'ap-southeast-1' }}
+      SAE_APP_ID: ${{ vars.SAE_WEB_APP_ID }}
+      IMAGE_URL: ${{ needs.build.outputs.acr_image }}:${{ needs.build.outputs.short_sha }}
+      ACR_INSTANCE_ID: cri-wx0a7j1fo37ad8mo
+    steps:
+      - name: Install Alibaba Cloud CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location \
+            https://aliyuncli.alicdn.com/aliyun-cli-linux-latest-amd64.tgz \
+            | tar -xz -C /tmp
+          sudo install -m 0755 /tmp/aliyun /usr/local/bin/aliyun
+          aliyun version
+
+      - name: Deploy immutable image to SAE
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$ALIBABA_CLOUD_ACCESS_KEY_ID"
+          test -n "$ALIBABA_CLOUD_ACCESS_KEY_SECRET"
+          test -n "$SAE_APP_ID"
+          aliyun configure set \
+            --profile github-actions \
+            --mode AK \
+            --region "$ALIBABA_CLOUD_REGION_ID" \
+            --access-key-id "$ALIBABA_CLOUD_ACCESS_KEY_ID" \
+            --access-key-secret "$ALIBABA_CLOUD_ACCESS_KEY_SECRET"
+          export ALIBABACLOUD_PROFILE=github-actions
+          aliyun sae DeployApplication \
+            --RegionId "$ALIBABA_CLOUD_REGION_ID" \
+            --AppId "$SAE_APP_ID" \
+            --AcrInstanceId "$ACR_INSTANCE_ID" \
+            --ImageUrl "$IMAGE_URL"
+
+      - name: Verify SAE Web health
+        shell: bash
+        env:
+          HEALTH_URL: ${{ vars.SAE_WEB_HEALTH_URL }}
+        run: |
+          set -euo pipefail
+          test -n "$HEALTH_URL"
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error --max-time 10 "$HEALTH_URL" >/dev/null; then
+              echo "SAE Web health check passed"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "SAE Web health check failed: $HEALTH_URL" >&2
+          exit 1

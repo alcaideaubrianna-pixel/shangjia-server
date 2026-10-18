@@ -165,8 +165,12 @@ func (s *sSysConfig) GlobalAutoDeleteKeywordsSave(ctx context.Context, in *sysin
 	if err = s.updateConfigGroup(ctx, publishConfigGroupAutoDelete, g.Map{"keywords": raw}); err != nil {
 		return err
 	}
-	if err = (&sSysPublish{}).enqueueTelegramAutoDeleteBackfill(ctx, 0, 0); err != nil {
-		return gerror.Wrap(err, "启动历史关键字消息清理任务失败")
+	if in.BackfillEnabled == 1 {
+		if err = (&sSysPublish{}).enqueueTelegramAutoDeleteBackfill(ctx, autoDeleteBackfillQueuePayload{
+			StartAt: in.BackfillStartAt, EndAt: in.BackfillEndAt, MaxMessages: autoDeleteBackfillMaxMessages,
+		}, 0); err != nil {
+			return gerror.Wrap(err, "启动历史关键字消息清理任务失败")
+		}
 	}
 	return nil
 }

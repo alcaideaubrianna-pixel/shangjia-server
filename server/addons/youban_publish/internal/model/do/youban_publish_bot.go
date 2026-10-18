@@ -13,6 +13,7 @@ import (
 type YoubanPublishBot struct {
 	g.Meta      `orm:"table:hg_youban_publish_bot, do:true"`
 	Id          any         //
+	TenantId    any         //
 	BotName     any         //
 	BotUsername any         //
 	BotToken    any         //
@@ -24,5 +25,6 @@ type YoubanPublishBot struct {
 	CreatedAt   *gtime.Time //
 	UpdatedAt   *gtime.Time //
 	DeletedAt   *gtime.Time //
-	TenantId    any         //
+	AccountId   any         //
+	BotType     any         //
 }

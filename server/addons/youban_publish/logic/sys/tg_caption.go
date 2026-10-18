@@ -43,11 +43,15 @@ func limitTelegramMediaCaption(caption string) string {
 }
 
 func (s *sSysPublish) telegramJobCaption(ctx context.Context, job telegramJobRecord) (string, error) {
+	step := beginTelegramPublishStage(ctx, "caption.profile_source")
 	row, err := s.profilePublishSource(ctx, job.ProfileId, job.TenantId, job.AccountId, false)
+	step.End(err)
 	if err != nil {
 		return "", err
 	}
+	step = beginTelegramPublishStage(ctx, "caption.account_setting")
 	setting, err := s.accountSetting(ctx, row["tenant_id"].Int64(), row["account_id"].Int64())
+	step.End(err)
 	if err != nil {
 		return "", err
 	}

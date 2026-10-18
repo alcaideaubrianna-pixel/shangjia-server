@@ -2,15 +2,7 @@ package sys
 
 import (
 	"context"
-	"crypto/sha256"
-	"crypto/tls"
-	"encoding/hex"
 	"encoding/json"
-	"errors"
-	"net"
-	"net/http"
-	"net/url"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -23,7 +15,6 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
-	"golang.org/x/net/proxy"
 
 	"hotgo/addons/youban_tg_bot_gateway/service"
 )
@@ -31,6 +22,7 @@ import (
 var gatewayObserveMeter = otel.Meter("hotgo/addons/youban_tg_bot_gateway")
 
 const telegramMediaRequestTimeout = 10 * time.Minute
+const telegramMediaSendRequestTimeout = 5 * time.Minute
 
 type botRuntime struct {
 	cancel        context.CancelFunc
@@ -49,7 +41,8 @@ type sGateway struct {
 	mediaClients           map[string]*tgbot.Bot
 	webhookAuditAt         time.Time
 	queueMu                sync.Mutex
-	queue                  *asynq.Server
+	interactiveQueue       *asynq.Server
+	bulkQueue              *asynq.Server
 	queueCli               *asynq.Client
 	loadBindingsForClient  func(context.Context) (map[string][]service.BotBinding, error)
 	runtimeConfigForClient func(context.Context) (*service.RuntimeConfig, error)
@@ -69,15 +62,30 @@ func NewGateway() *sGateway {
 }
 
 func (s *sGateway) MediaClient(ctx context.Context, token string) (*tgbot.Bot, error) {
+	return s.mediaClient(ctx, token, false)
+}
+
+// SendClient always uses the official API; local Bot Server is download-only.
+func (s *sGateway) SendClient(ctx context.Context, token string) (*tgbot.Bot, error) {
+	return s.mediaClient(ctx, token, true)
+}
+
+func (s *sGateway) mediaClient(ctx context.Context, token string, sending bool) (*tgbot.Bot, error) {
 	token = strings.TrimSpace(token)
 	key := tokenKey(token)
+	cacheKey := key
+	if sending {
+		cacheKey += ":send"
+	}
 	s.mu.Lock()
-	client := s.mediaClients[key]
+	client := s.mediaClients[cacheKey]
 	s.mu.Unlock()
 	if client != nil {
 		return client, nil
 	}
-	loadBindings := s.loadBindings
+	loadBindings := func(ctx context.Context) (map[string][]service.BotBinding, error) {
+		return loadClientBindings(ctx, key, service.Providers())
+	}
 	if s.loadBindingsForClient != nil {
 		loadBindings = s.loadBindingsForClient
 	}
@@ -96,23 +104,37 @@ func (s *sGateway) MediaClient(ctx context.Context, token string) (*tgbot.Bot, e
 	if err != nil {
 		return nil, err
 	}
+	timeout := telegramMediaRequestTimeout
+	if sending {
+		timeout = telegramMediaSendRequestTimeout
+	}
 	clientFactory := func(token, proxyURL, serverURL string, handler tgbot.HandlerFunc) (*tgbot.Bot, error) {
-		return newBotWithTimeout(token, proxyURL, serverURL, handler, telegramMediaRequestTimeout)
+		return newBotWithTimeout(token, proxyURL, serverURL, handler, timeout)
 	}
 	if s.newMediaClientForToken != nil {
 		clientFactory = s.newMediaClientForToken
 	}
-	client, err = clientFactory(token, conf.ProxyURL, conf.MediaServerURL, nil)
+	serverURL := conf.MediaServerURL
+	operation := "download"
+	if sending {
+		operation = "send"
+		// An empty endpoint selects the SDK's official Telegram API URL.
+		// Neither the download nor runtime endpoint may redirect media sends.
+		serverURL = ""
+	}
+	client, err = clientFactory(token, conf.ProxyURL, serverURL, nil)
 	if err != nil {
 		return nil, err
 	}
 	s.mu.Lock()
-	if cached := s.mediaClients[key]; cached != nil {
+	if cached := s.mediaClients[cacheKey]; cached != nil {
 		client = cached
 	} else {
-		s.mediaClients[key] = client
+		s.mediaClients[cacheKey] = client
 	}
 	s.mu.Unlock()
+	// Never log the token or endpoint URL (which can contain credentials).
+	g.Log().Info(ctx, "TG媒体客户端已创建", g.Map{"botKey": key, "operation": operation, "usesOfficialSendEndpoint": sending, "timeoutSeconds": int(timeout.Seconds())})
 	return client, nil
 }
 
@@ -197,7 +219,9 @@ func (s *sGateway) Client(ctx context.Context, token string) (*tgbot.Bot, error)
 	if client != nil {
 		return client, nil
 	}
-	loadBindings := s.loadBindings
+	loadBindings := func(ctx context.Context) (map[string][]service.BotBinding, error) {
+		return loadClientBindings(ctx, key, service.Providers())
+	}
 	if s.loadBindingsForClient != nil {
 		loadBindings = s.loadBindingsForClient
 	}
@@ -265,15 +289,23 @@ func (s *sGateway) sync(ctx context.Context) error {
 	s.mu.Unlock()
 	s.scheduleLocalWebhookAudit(ctx, conf, bindings)
 	mode := runtimeMode(ctx, conf)
+	var syncErr error
 	for key, items := range bindings {
 		if len(items) == 0 {
 			continue
 		}
 		if err = s.ensure(ctx, key, items[0].Token, mode, conf); err != nil {
-			return err
+			if syncErr == nil {
+				syncErr = gerror.Wrapf(err, "同步Bot运行时失败 key:%s", key)
+			}
+			g.Log().Warningf(ctx, "同步Bot运行时失败，继续同步其他Bot key:%s err:%+v", key, err)
+			continue
 		}
 		if err = s.syncMenu(ctx, key, items[0].Token, items); err != nil {
-			return err
+			if syncErr == nil {
+				syncErr = gerror.Wrapf(err, "同步Bot菜单失败 key:%s", key)
+			}
+			g.Log().Warningf(ctx, "同步Bot菜单失败，继续同步其他Bot key:%s err:%+v", key, err)
 		}
 	}
 	s.mu.Lock()
@@ -285,11 +317,12 @@ func (s *sGateway) sync(ctx context.Context) error {
 			delete(s.runtimes, key)
 			delete(s.clients, key)
 			delete(s.mediaClients, key)
+			delete(s.mediaClients, key+":send")
 		}
 	}
 	s.mu.Unlock()
 	s.observeBotCounts(ctx, len(bindings))
-	return nil
+	return syncErr
 }
 
 func (s *sGateway) scheduleLocalWebhookAudit(ctx context.Context, conf *service.RuntimeConfig, bindings map[string][]service.BotBinding) {
@@ -338,13 +371,64 @@ func (s *sGateway) auditLocalWebhooks(ctx context.Context, proxyURL, serverURL s
 	}
 }
 
+// Client lookup must not depend on unrelated providers being healthy.
+func loadClientBindings(ctx context.Context, key string, providers []service.Provider) (map[string][]service.BotBinding, error) {
+	var providerErr error
+	for _, provider := range providers {
+		items, err := provider.ListEnabledBots(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			providerErr = gerror.Wrapf(err, "读取Bot提供方失败 provider:%s", provider.Name())
+			continue
+		}
+		for _, item := range items {
+			item.Token = strings.TrimSpace(item.Token)
+			if item.Token != "" && tokenKey(item.Token) == key {
+				return map[string][]service.BotBinding{key: {item}}, nil
+			}
+		}
+	}
+	if providerErr != nil {
+		return nil, providerErr
+	}
+	return nil, gerror.New("TG Bot Gateway未找到已启用的Bot")
+}
+
 func (s *sGateway) loadBindings(ctx context.Context) (map[string][]service.BotBinding, error) {
+	s.mu.Lock()
+	previous := cloneBindings(s.bindings)
+	s.mu.Unlock()
+	return loadProviderBindings(ctx, service.Providers(), previous)
+}
+
+// A provider is an addon boundary. Keep its last known bindings when that
+// addon is temporarily unavailable so it cannot take unrelated Bots offline.
+func loadProviderBindings(ctx context.Context, providers []service.Provider, previous map[string][]service.BotBinding) (map[string][]service.BotBinding, error) {
 	bindings := map[string][]service.BotBinding{}
-	for _, provider := range service.Providers() {
+	succeeded := 0
+	var firstErr error
+	for _, provider := range providers {
 		items, listErr := provider.ListEnabledBots(ctx)
 		if listErr != nil {
-			return nil, listErr
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			if firstErr == nil {
+				firstErr = gerror.Wrapf(listErr, "读取Bot提供方失败 provider:%s", provider.Name())
+			}
+			for key, oldItems := range previous {
+				for _, item := range oldItems {
+					if item.Owner == provider.Name() {
+						bindings[key] = append(bindings[key], item)
+					}
+				}
+			}
+			g.Log().Warningf(ctx, "读取Bot提供方失败，保留已有绑定 provider:%s err:%+v", provider.Name(), listErr)
+			continue
 		}
+		succeeded++
 		for _, item := range items {
 			item.Token = strings.TrimSpace(item.Token)
 			if item.Token == "" {
@@ -354,7 +438,18 @@ func (s *sGateway) loadBindings(ctx context.Context) (map[string][]service.BotBi
 			bindings[key] = append(bindings[key], item)
 		}
 	}
+	if succeeded == 0 && firstErr != nil {
+		return nil, firstErr
+	}
 	return bindings, nil
+}
+
+func cloneBindings(source map[string][]service.BotBinding) map[string][]service.BotBinding {
+	cloned := make(map[string][]service.BotBinding, len(source))
+	for key, items := range source {
+		cloned[key] = append([]service.BotBinding(nil), items...)
+	}
+	return cloned
 }
 
 func (s *sGateway) observeBotCounts(ctx context.Context, configured int) {
@@ -366,8 +461,12 @@ func (s *sGateway) observeBotCounts(ctx context.Context, configured int) {
 	gauge.Record(ctx, int64(running), metric.WithAttributes(attribute.String("state", "running")))
 }
 
+func gatewayRuntimeSignature(mode string, conf *service.RuntimeConfig) string {
+	return mode + "\n" + strings.TrimSpace(conf.WebhookBaseURL) + "\n" + strings.TrimSpace(conf.ProxyURL) + "\n" + strings.TrimSpace(conf.RuntimeServerURL) + "\n" + strings.TrimSpace(conf.MediaServerURL) + "\n" + strings.Join(allowedUpdates(), ",")
+}
+
 func (s *sGateway) ensure(ctx context.Context, key, token, mode string, conf *service.RuntimeConfig) error {
-	signature := mode + "\n" + strings.TrimSpace(conf.WebhookBaseURL) + "\n" + strings.TrimSpace(conf.ProxyURL) + "\n" + strings.TrimSpace(conf.RuntimeServerURL) + "\n" + strings.Join(allowedUpdates(), ",")
+	signature := gatewayRuntimeSignature(mode, conf)
 	s.mu.Lock()
 	current := s.runtimes[key]
 	s.mu.Unlock()
@@ -404,6 +503,7 @@ func (s *sGateway) ensure(ctx context.Context, key, token, mode string, conf *se
 	s.mu.Lock()
 	s.runtimes[key], s.clients[key] = runtime, client
 	delete(s.mediaClients, key)
+	delete(s.mediaClients, key+":send")
 	s.mu.Unlock()
 	return nil
 }
@@ -464,285 +564,7 @@ func (s *sGateway) submitUpdate(ctx context.Context, key string, update *models.
 
 func updateNeedsImmediateDispatch(update *models.Update) bool {
 	// Inline queries must be answered within Telegram's short response window.
-	// Callback queries can be processed by the durable queue like messages.
+	// Callback queries and private messages use the dedicated durable
+	// interactive queue so channel traffic cannot starve them.
 	return update != nil && update.InlineQuery != nil
-}
-
-func (s *sGateway) dispatch(ctx context.Context, key string, update *models.Update) error {
-	dispatchStartedAt := time.Now()
-	if update != nil && update.InlineQuery != nil {
-		g.Log().Infof(ctx, "TG链路 gateway_inline_dispatch_start key:%s updateId:%d queryId:%s", key, update.ID, update.InlineQuery.ID)
-		defer func() {
-			g.Log().Infof(ctx, "TG链路 gateway_inline_dispatch_end key:%s updateId:%d queryId:%s duration:%s", key, update.ID, update.InlineQuery.ID, time.Since(dispatchStartedAt))
-		}()
-	}
-	if update != nil && update.CallbackQuery != nil {
-		query := update.CallbackQuery
-		g.Log().Infof(ctx, "TG链路 gateway_callback_dispatch_start key:%s updateId:%d callbackId:%s userId:%d data:%s", key, update.ID, query.ID, query.From.ID, strings.TrimSpace(query.Data))
-		defer func() {
-			g.Log().Infof(ctx, "TG链路 gateway_callback_dispatch_end key:%s updateId:%d callbackId:%s duration:%s", key, update.ID, query.ID, time.Since(dispatchStartedAt))
-		}()
-	}
-	s.mu.Lock()
-	bindings := append([]service.BotBinding(nil), s.bindings[key]...)
-	s.mu.Unlock()
-	if len(bindings) == 0 {
-		loaded, err := s.loadBindings(ctx)
-		if err != nil {
-			return err
-		}
-		s.mu.Lock()
-		s.bindings = loaded
-		bindings = append(bindings, s.bindings[key]...)
-		s.mu.Unlock()
-	}
-	if update != nil && update.InlineQuery != nil {
-		for _, binding := range bindings {
-			g.Log().Infof(ctx, "TG链路 gateway_inline_binding key:%s updateId:%d owner:%s reference:%d tenant:%d", key, update.ID, binding.Owner, binding.ReferenceID, binding.TenantID)
-		}
-		if len(bindings) == 0 {
-			g.Log().Warningf(ctx, "TG链路 gateway_inline_no_binding key:%s updateId:%d queryId:%s", key, update.ID, update.InlineQuery.ID)
-		}
-	}
-	if update != nil && update.CallbackQuery != nil && len(bindings) == 0 {
-		g.Log().Warningf(ctx, "TG链路 gateway_callback_no_binding key:%s updateId:%d callbackId:%s userId:%d data:%s", key, update.ID, update.CallbackQuery.ID, update.CallbackQuery.From.ID, strings.TrimSpace(update.CallbackQuery.Data))
-	}
-	logGatewayUpdate(ctx, update, len(bindings))
-	botCtx := service.BotContext{Key: key, Bindings: bindings}
-	if len(bindings) > 0 {
-		botCtx.Token = bindings[0].Token
-	}
-	var featureErrors []error
-	for _, feature := range service.Features() {
-		if update != nil && update.InlineQuery != nil {
-			g.Log().Infof(ctx, "TG链路 gateway_inline_feature_start updateId:%d feature:%s", update.ID, feature.Key())
-		}
-		handled, featureErr := feature.HandleUpdate(ctx, botCtx, update)
-		if update != nil && update.InlineQuery != nil {
-			g.Log().Infof(ctx, "TG链路 gateway_inline_feature_end updateId:%d feature:%s handled:%t err:%v", update.ID, feature.Key(), handled, featureErr)
-		}
-		if featureErr != nil {
-			featureErrors = append(featureErrors, gerror.Wrapf(featureErr, "TG Bot附加功能处理失败 feature:%s", feature.Key()))
-			continue
-		}
-		if handled {
-			g.Log().Infof(ctx, "TG Bot Gateway更新已由功能消费 update:%d feature:%s", update.ID, feature.Key())
-			counter, _ := gatewayObserveMeter.Int64Counter("xiaohuiji.tg.gateway_updates_dispatched")
-			counter.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "handled")))
-			return nil
-		}
-	}
-	providers := map[string]service.Provider{}
-	for _, provider := range service.Providers() {
-		providers[provider.Name()] = provider
-	}
-	for _, binding := range bindings {
-		provider := providers[binding.Owner]
-		if provider == nil {
-			continue
-		}
-		if update != nil && update.InlineQuery != nil {
-			g.Log().Infof(ctx, "TG链路 gateway_inline_provider_start updateId:%d provider:%s reference:%d", update.ID, binding.Owner, binding.ReferenceID)
-		}
-		if err := provider.HandleUpdate(ctx, binding, update); err != nil {
-			if update != nil && update.InlineQuery != nil {
-				g.Log().Warningf(ctx, "TG链路 gateway_inline_provider_error updateId:%d provider:%s reference:%d err:%+v", update.ID, binding.Owner, binding.ReferenceID, err)
-			}
-			return err
-		}
-		if update != nil && update.InlineQuery != nil {
-			g.Log().Infof(ctx, "TG链路 gateway_inline_provider_end updateId:%d provider:%s reference:%d", update.ID, binding.Owner, binding.ReferenceID)
-		}
-		g.Log().Infof(ctx, "TG Bot Gateway更新已分发 update:%d provider:%s reference:%d", update.ID, binding.Owner, binding.ReferenceID)
-	}
-	if len(featureErrors) > 0 {
-		return errors.Join(featureErrors...)
-	}
-	counter, _ := gatewayObserveMeter.Int64Counter("xiaohuiji.tg.gateway_updates_dispatched")
-	counter.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "provider_dispatch")))
-	return nil
-}
-
-func (s *sGateway) syncMenu(ctx context.Context, key, token string, bindings []service.BotBinding) error {
-	items := make([]service.MenuItem, 0)
-	managed := false
-	botCtx := service.BotContext{Key: key, Token: token, Bindings: bindings}
-	for _, feature := range service.Features() {
-		menus, err := feature.Menus(ctx, botCtx)
-		if err != nil {
-			return gerror.Wrapf(err, "读取Bot功能菜单失败 feature:%s", feature.Key())
-		}
-		managed = managed || menus.Managed
-		items = append(items, menus.Items...)
-	}
-	if !managed {
-		return nil
-	}
-	commands, signature, err := normalizeMenuItems(items)
-	if err != nil {
-		return err
-	}
-	s.mu.Lock()
-	runtime := s.runtimes[key]
-	client := s.clients[key]
-	if runtime != nil && runtime.menuSignature == signature {
-		s.mu.Unlock()
-		return nil
-	}
-	s.mu.Unlock()
-	if client == nil {
-		return gerror.New("TG Bot Gateway客户端不存在")
-	}
-	if len(commands) == 0 {
-		if _, err = client.DeleteMyCommands(ctx, &tgbot.DeleteMyCommandsParams{Scope: &models.BotCommandScopeDefault{}}); err != nil {
-			return gerror.Wrap(err, "清理TG Bot菜单失败")
-		}
-	} else if _, err = client.SetMyCommands(ctx, &tgbot.SetMyCommandsParams{Commands: commands, Scope: &models.BotCommandScopeDefault{}}); err != nil {
-		return gerror.Wrap(err, "设置TG Bot菜单失败")
-	}
-	if _, err = client.SetChatMenuButton(ctx, &tgbot.SetChatMenuButtonParams{MenuButton: &models.MenuButtonCommands{Type: models.MenuButtonTypeCommands}}); err != nil {
-		return gerror.Wrap(err, "设置TG Bot底部菜单失败")
-	}
-	s.mu.Lock()
-	if current := s.runtimes[key]; current != nil {
-		current.menuSignature = signature
-	}
-	s.mu.Unlock()
-	return nil
-}
-
-func normalizeMenuItems(items []service.MenuItem) ([]models.BotCommand, string, error) {
-	sort.SliceStable(items, func(i, j int) bool {
-		if items[i].Order == items[j].Order {
-			return items[i].Command < items[j].Command
-		}
-		return items[i].Order < items[j].Order
-	})
-	seen := make(map[string]string, len(items))
-	commands := make([]models.BotCommand, 0, len(items))
-	signatureParts := make([]string, 0, len(items))
-	for _, item := range items {
-		command := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(item.Command), "/"))
-		description := strings.TrimSpace(item.Description)
-		if command == "" || description == "" {
-			continue
-		}
-		if existing, ok := seen[command]; ok {
-			if existing != description {
-				return nil, "", gerror.Newf("TG Bot菜单命令冲突：/%s", command)
-			}
-			continue
-		}
-		seen[command] = description
-		commands = append(commands, models.BotCommand{Command: command, Description: description})
-		signatureParts = append(signatureParts, command+"="+description)
-	}
-	return commands, strings.Join(signatureParts, "\n"), nil
-}
-
-func runtimeMode(ctx context.Context, conf *service.RuntimeConfig) string {
-	systemMode := strings.ToLower(strings.TrimSpace(g.Cfg().MustGet(ctx, "system.mode", "develop").String()))
-	return runtimeModeForSystem(systemMode, conf)
-}
-
-func runtimeModeForSystem(systemMode string, conf *service.RuntimeConfig) string {
-	if conf == nil {
-		return "pull"
-	}
-	mode := strings.ToLower(strings.TrimSpace(conf.Mode))
-	if mode == "polling" {
-		mode = "pull"
-	}
-	if mode == "" || mode == "auto" {
-		switch strings.ToLower(strings.TrimSpace(systemMode)) {
-		case "", "develop", "testing", "not-set":
-			return "pull"
-		}
-		if publicWebhook(conf.WebhookBaseURL) {
-			return "webhook"
-		}
-		return "pull"
-	}
-	if mode == "webhook" && !publicWebhook(conf.WebhookBaseURL) {
-		return "pull"
-	}
-	return mode
-}
-func publicWebhook(value string) bool {
-	value = strings.ToLower(strings.TrimSpace(value))
-	return strings.HasPrefix(value, "https://") && !strings.Contains(value, "localhost") && !strings.Contains(value, "127.0.0.1") && !strings.Contains(value, "0.0.0.0")
-}
-func tokenKey(token string) string {
-	sum := sha256.Sum256([]byte(strings.TrimSpace(token)))
-	return hex.EncodeToString(sum[:12])
-}
-func allowedUpdates() []string {
-	return []string{
-		models.AllowedUpdateMessage,
-		models.AllowedUpdateEditedMessage,
-		models.AllowedUpdateChannelPost,
-		models.AllowedUpdateEditedChannelPost,
-		models.AllowedUpdateCallbackQuery,
-		models.AllowedUpdateInlineQuery,
-		models.AllowedUpdateMessageReaction,
-		models.AllowedUpdateMyChatMember,
-	}
-}
-
-func newBot(token, proxyURL, serverURL string, handler tgbot.HandlerFunc) (*tgbot.Bot, error) {
-	return newBotWithTimeout(token, proxyURL, serverURL, handler, 35*time.Second)
-}
-
-func newBotWithTimeout(token, proxyURL, serverURL string, handler tgbot.HandlerFunc, timeout time.Duration) (*tgbot.Bot, error) {
-	client, err := httpClient(proxyURL)
-	if err != nil {
-		return nil, err
-	}
-	client.Timeout = timeout
-	options := []tgbot.Option{
-		tgbot.WithHTTPClient(timeout, client),
-		tgbot.WithSkipGetMe(),
-		tgbot.WithAllowedUpdates(tgbot.AllowedUpdates(allowedUpdates())),
-		tgbot.WithDefaultHandler(handler),
-	}
-	if serverURL = strings.TrimRight(strings.TrimSpace(serverURL), "/"); serverURL != "" {
-		parsed, parseErr := url.Parse(serverURL)
-		if parseErr != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-			return nil, gerror.New("TG Bot API Server URL配置无效")
-		}
-		options = append(options, tgbot.WithServerURL(serverURL))
-	}
-	return tgbot.New(token, options...)
-}
-func httpClient(proxyURL string) (*http.Client, error) {
-	// Telegram occasionally sends HTTP/2 GOAWAY while a request body is in
-	// flight. HTTP/1.1 avoids reusing that drained connection and lets the
-	// existing queue retry policy handle transient network failures cleanly.
-	transport := &http.Transport{
-		ForceAttemptHTTP2: false,
-		TLSNextProto:      make(map[string]func(string, *tls.Conn) http.RoundTripper),
-	}
-	proxyURL = strings.TrimSpace(proxyURL)
-	if proxyURL == "" {
-		return &http.Client{Timeout: 35 * time.Second, Transport: transport}, nil
-	}
-	parsed, err := url.Parse(proxyURL)
-	if err != nil {
-		return nil, err
-	}
-	switch strings.ToLower(parsed.Scheme) {
-	case "http", "https":
-		transport.Proxy = http.ProxyURL(parsed)
-	case "socks5", "socks5h":
-		dialer, dialErr := proxy.FromURL(parsed, proxy.Direct)
-		if dialErr != nil {
-			return nil, dialErr
-		}
-		transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
-			return dialer.Dial(network, address)
-		}
-	default:
-		return nil, errors.New("仅支持 http/https/socks5 代理")
-	}
-	return &http.Client{Timeout: 35 * time.Second, Transport: transport}, nil
 }

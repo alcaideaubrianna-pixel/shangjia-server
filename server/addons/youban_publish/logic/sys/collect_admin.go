@@ -10,6 +10,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	"hotgo/addons/youban_publish/consts"
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
@@ -89,6 +90,13 @@ func (s *sSysPublish) CollectSourceSave(ctx context.Context, in *sysin.CollectSo
 		}
 		if !botExists {
 			return 0, gerror.New("Bot采集机器人不存在、已停用或不属于当前账号")
+		}
+		bot, botErr := s.getBotById(ctx, in.BotId, account.TenantId)
+		if botErr != nil {
+			return 0, botErr
+		}
+		if bot.BotType == consts.PublishBotTypeTwoWay {
+			return 0, gerror.New("双向机器人不能用于频道采集，请选择普通机器人")
 		}
 	}
 	now := gtime.Now()
@@ -276,20 +284,24 @@ func (s *sSysPublish) fillCollectSourceChannelTitles(ctx context.Context, list [
 	channelIds := make([]string, 0, len(list))
 	wanted := map[string]struct{}{}
 	for _, item := range list {
-		if item == nil || item.SourceType != sysin.CollectSourceTypeAccount || item.TgAccountId <= 0 || strings.TrimSpace(item.SourceChatId) == "" {
+		if item == nil || strings.TrimSpace(item.SourceChatId) == "" {
 			continue
 		}
 		tenantIds = append(tenantIds, item.TenantId)
-		tgAccountIds = append(tgAccountIds, item.TgAccountId)
+		if item.SourceType == sysin.CollectSourceTypeAccount && item.TgAccountId > 0 {
+			tgAccountIds = append(tgAccountIds, item.TgAccountId)
+		}
 		for _, channelId := range tgChannelCacheLookupIds(item.SourceChatId) {
 			channelIds = append(channelIds, channelId)
-			wanted[collectSourceChannelKey(item.TgAccountId, channelId)] = struct{}{}
+			if item.TgAccountId > 0 {
+				wanted[collectSourceChannelKey(item.TgAccountId, channelId)] = struct{}{}
+			}
 		}
 	}
 	tenantIds = uniqueIds(tenantIds)
 	tgAccountIds = uniqueIds(tgAccountIds)
 	channelIds = uniqueStrings(channelIds)
-	if len(tenantIds) == 0 || len(tgAccountIds) == 0 || len(channelIds) == 0 {
+	if len(tenantIds) == 0 || len(channelIds) == 0 {
 		return nil
 	}
 	var rows []struct {
@@ -298,13 +310,15 @@ func (s *sSysPublish) fillCollectSourceChannelTitles(ctx context.Context, list [
 		ChannelTitle    string `json:"channelTitle"`
 		ChannelUsername string `json:"channelUsername"`
 	}
-	if err := g.DB().Model(publishTgChannelTable).Safe().Ctx(ctx).
-		Fields("tg_account_id,channel_id,channel_title,channel_username").
-		WhereIn("tenant_id", tenantIds).
-		WhereIn("tg_account_id", tgAccountIds).
-		WhereIn("channel_id", channelIds).
-		Scan(&rows); err != nil {
-		return gerror.Wrap(err, "读取采集源频道缓存失败")
+	if len(tgAccountIds) > 0 {
+		if err := g.DB().Model(publishTgChannelTable).Safe().Ctx(ctx).
+			Fields("tg_account_id,channel_id,channel_title,channel_username").
+			WhereIn("tenant_id", tenantIds).
+			WhereIn("tg_account_id", tgAccountIds).
+			WhereIn("channel_id", channelIds).
+			Scan(&rows); err != nil {
+			return gerror.Wrap(err, "读取采集源频道缓存失败")
+		}
 	}
 	cacheMap := make(map[string]collectSourceChannelCacheValue, len(rows))
 	for _, row := range rows {
@@ -314,12 +328,20 @@ func (s *sSysPublish) fillCollectSourceChannelTitles(ctx context.Context, list [
 		}
 		cacheMap[key] = collectSourceChannelCacheValue{Title: row.ChannelTitle, Username: row.ChannelUsername}
 	}
+	sharedCache, err := collectSourceSharedChannelCache(ctx, tenantIds, channelIds)
+	if err != nil {
+		return err
+	}
 	for _, item := range list {
 		if item == nil {
 			continue
 		}
-		if cache, ok := collectSourceChannelCache(item.TgAccountId, item.SourceChatId, cacheMap); ok {
-			if strings.TrimSpace(cache.Title) != "" {
+		cache, ok := collectSourceChannelCache(item.TgAccountId, item.SourceChatId, cacheMap)
+		if !ok {
+			cache, ok = collectSourceSharedChannel(item.SourceChatId, sharedCache)
+		}
+		if ok {
+			if strings.TrimSpace(cache.Title) != "" && collectSourceTitleNeedsEnrichment(item.Title, item.SourceChatId) {
 				item.Title = cache.Title
 			}
 			if strings.TrimSpace(cache.Username) != "" {
@@ -328,6 +350,61 @@ func (s *sSysPublish) fillCollectSourceChannelTitles(ctx context.Context, list [
 		}
 	}
 	return nil
+}
+
+func collectSourceTitleNeedsEnrichment(title, channelID string) bool {
+	title = strings.TrimSpace(title)
+	return title == "" || canonicalCollectSourceChatID(title) == canonicalCollectSourceChatID(channelID)
+}
+
+func collectSourceSharedChannelCache(ctx context.Context, tenantIDs []int64, channelIDs []string) (map[string]collectSourceChannelCacheValue, error) {
+	result := make(map[string]collectSourceChannelCacheValue)
+	var canonicalRows []struct {
+		ChannelId       string `json:"channelId"`
+		ChannelTitle    string `json:"channelTitle"`
+		ChannelUsername string `json:"channelUsername"`
+	}
+	if err := pdao.YoubanPublishCollectChannel.Ctx(ctx).
+		Fields("telegram_chat_id AS channel_id,title AS channel_title,username AS channel_username").
+		WhereIn("tenant_id", tenantIDs).WhereIn("telegram_chat_id", channelIDs).WhereNull("deleted_at").
+		Scan(&canonicalRows); err != nil {
+		return nil, gerror.Wrap(err, "读取通用采集频道失败")
+	}
+	for _, row := range canonicalRows {
+		mergeCollectSourceSharedChannel(result, row.ChannelId, row.ChannelTitle, row.ChannelUsername)
+	}
+	var botRows []struct {
+		ChannelId       string `json:"channelId"`
+		ChannelTitle    string `json:"channelTitle"`
+		ChannelUsername string `json:"channelUsername"`
+	}
+	if err := g.DB().Model(publishBotChannelCacheTable).Safe().Ctx(ctx).
+		Fields("chat_id AS channel_id,chat_title AS channel_title,chat_username AS channel_username").
+		WhereIn("tenant_id", tenantIDs).WhereIn("chat_id", channelIDs).
+		Scan(&botRows); err != nil {
+		return nil, gerror.Wrap(err, "读取BOT采集频道缓存失败")
+	}
+	for _, row := range botRows {
+		mergeCollectSourceSharedChannel(result, row.ChannelId, row.ChannelTitle, row.ChannelUsername)
+	}
+	return result, nil
+}
+
+func mergeCollectSourceSharedChannel(cache map[string]collectSourceChannelCacheValue, channelID, title, username string) {
+	key := canonicalCollectSourceChatID(channelID)
+	current := cache[key]
+	if strings.TrimSpace(current.Title) == "" {
+		current.Title = strings.TrimSpace(title)
+	}
+	if strings.TrimSpace(current.Username) == "" {
+		current.Username = strings.TrimSpace(username)
+	}
+	cache[key] = current
+}
+
+func collectSourceSharedChannel(channelID string, cache map[string]collectSourceChannelCacheValue) (collectSourceChannelCacheValue, bool) {
+	value, ok := cache[canonicalCollectSourceChatID(channelID)]
+	return value, ok
 }
 
 func collectSourceChannelKey(tgAccountId int64, channelId string) string {

@@ -234,3 +234,4 @@ ALTER TABLE `hg_youban_publish_message_media` ADD COLUMN IF NOT EXISTS `original
 ALTER TABLE `hg_youban_publish_message_media` ADD COLUMN IF NOT EXISTS `original_storage_path` varchar(1024) NOT NULL DEFAULT '' COMMENT '原始存储路径';
 ALTER TABLE `hg_youban_publish_message_media` ADD COLUMN IF NOT EXISTS `edit_status` varchar(16) NOT NULL DEFAULT 'raw' COMMENT '编辑状态：raw/edited';
 UPDATE `hg_youban_publish_message_media` SET `original_file_url` = `file_url`, `original_storage_path` = `storage_path` WHERE `original_file_url` = '' AND `original_storage_path` = '';
+ALTER TABLE `hg_youban_publish_bot_message_source` ADD INDEX IF NOT EXISTS `idx_ybp_bot_message_source_received` (`received_at`,`id`);

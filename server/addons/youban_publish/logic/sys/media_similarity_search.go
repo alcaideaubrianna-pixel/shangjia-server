@@ -18,6 +18,7 @@ import (
 	publishmodel "hotgo/addons/youban_publish/model"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/cache"
+	"hotgo/utility/scantrace"
 )
 
 type mediaPHashBucketCandidateRow struct {
@@ -76,7 +77,10 @@ func (s *sSysPublish) cachedProfileFingerprintSearchCandidates(ctx context.Conte
 		return []publishProfilePHashDistance{}, nil
 	}
 	cacheKey := mediaPHashSearchCacheKey(ctx, queryHash.GetHash(), fingerprint.MD5, in, scope, candidateProfileIds)
-	if value, err := cache.Instance().Get(ctx, cacheKey); err == nil && !value.IsNil() {
+	finish := scantrace.Begin(ctx, "query.cache_get")
+	value, cacheErr := cache.Instance().Get(ctx, cacheKey)
+	finish(cacheErr)
+	if cacheErr == nil && !value.IsNil() {
 		var cached []publishProfilePHashDistance
 		if scanErr := value.Scan(&cached); scanErr == nil {
 			return cached, nil
@@ -86,7 +90,9 @@ func (s *sSysPublish) cachedProfileFingerprintSearchCandidates(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
-	_ = cache.Instance().Set(ctx, cacheKey, items, mediaPHashBucketResultTTL)
+	finish = scantrace.Begin(ctx, "query.cache_set")
+	cacheErr = cache.Instance().Set(ctx, cacheKey, items, mediaPHashBucketResultTTL)
+	finish(cacheErr)
 	return items, nil
 }
 
@@ -126,7 +132,9 @@ func (s *sSysPublish) profileFingerprintSearchCandidatesExactFirst(ctx context.C
 	}
 	if fingerprint.MD5 != "" {
 		startedAt := time.Now()
+		finish := scantrace.Begin(ctx, "query.md5")
 		exact, err := mediaMD5CandidateMatches(ctx, fingerprint.MD5, scope, candidateProfileIds)
+		finish(err)
 		observeBotMediaSearchStage(ctx, "md5_query", startedAt, err)
 		if err != nil {
 			return nil, err
@@ -138,6 +146,7 @@ func (s *sSysPublish) profileFingerprintSearchCandidatesExactFirst(ctx context.C
 	startedAt := time.Now()
 	var exact []publishProfilePHashDistance
 	var err error
+	finish := scantrace.Begin(ctx, "query.phash_exact")
 	if isPostgresDatabase() {
 		exact, err = mediaPHashExactCandidateMatches(ctx, fingerprint.PHash, scope, candidateProfileIds)
 	} else {
@@ -146,6 +155,7 @@ func (s *sSysPublish) profileFingerprintSearchCandidatesExactFirst(ctx context.C
 		exact, err = s.profilePHashSearchCandidates(ctx, fingerprint.PHash, &exactInput, scope, candidateProfileIds)
 	}
 	observeBotMediaSearchStage(ctx, "phash_exact", startedAt, err)
+	finish(err)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +163,9 @@ func (s *sSysPublish) profileFingerprintSearchCandidatesExactFirst(ctx context.C
 		return exact, nil
 	}
 	startedAt = time.Now()
+	finish = scantrace.Begin(ctx, "query.phash_approx")
 	items, err := s.profilePHashSearchCandidates(ctx, fingerprint.PHash, in, scope, candidateProfileIds)
+	finish(err)
 	observeBotMediaSearchStage(ctx, "phash_approx", startedAt, err)
 	return items, err
 }
@@ -183,6 +195,35 @@ func mediaPHashExactCandidateMatches(ctx context.Context, queryHash *goimagehash
 	}
 	items := make([]publishProfilePHashDistance, 0, len(rows))
 	for _, row := range rows {
+		items = append(items, publishProfilePHashDistance{ProfileId: row.ProfileId, Distance: 0, MediaId: row.MediaId, MediaType: row.MediaType})
+	}
+	// Anti-scan output is deliberately stored as an alias fingerprint because it
+	// is generated after the source media row is created.  Include it in the
+	// exact phase so a user searching the generated image gets a zero-distance
+	// hit instead of falling through to an approximate match.
+	if err := ensureMediaPHashAliasBucketTable(ctx); err != nil {
+		return nil, err
+	}
+	alias := fmt.Sprintf("%016x", queryHash.GetHash())
+	aliasMod := g.DB().Model(publishMediaPHashAliasBucketTable+" a").Safe().Ctx(ctx).
+		Fields("a.media_id,a.profile_id,a.account_id,a.tenant_id,a.media_type").
+		Where("a.hash_value", alias).
+		Where("a.media_type", "image")
+	if scopeSQL, scopeArgs := mediaPHashBucketScopeSQL("a", scope.Partitions); scopeSQL != "" {
+		aliasMod = aliasMod.Where("("+scopeSQL+")", scopeArgs...)
+	} else {
+		return mediaPHashDeduplicateProfiles(items), nil
+	}
+	if len(candidateProfileIds) > 0 {
+		aliasMod = aliasMod.WhereIn("a.profile_id", uniqueIds(candidateProfileIds))
+	}
+	aliasMod = aliasMod.Where("EXISTS (SELECT 1 FROM hg_content_profile p WHERE p.id=a.profile_id AND p.deleted_at IS NULL)").
+		Where("EXISTS (SELECT 1 FROM hg_youban_publish_profile_state ps WHERE ps.profile_id=a.profile_id AND ps.account_id=a.account_id AND ps.tenant_id=a.tenant_id AND ps.deleted_at IS NULL)")
+	aliasRows := make([]mediaPHashBucketCandidateRow, 0)
+	if err := aliasMod.Group("a.media_id,a.profile_id,a.account_id,a.tenant_id,a.media_type").Scan(&aliasRows); err != nil {
+		return nil, gerror.Wrap(err, "查询防扫图pHash精确匹配失败")
+	}
+	for _, row := range aliasRows {
 		items = append(items, publishProfilePHashDistance{ProfileId: row.ProfileId, Distance: 0, MediaId: row.MediaId, MediaType: row.MediaType})
 	}
 	return mediaPHashDeduplicateProfiles(items), nil

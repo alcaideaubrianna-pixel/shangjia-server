@@ -10,7 +10,6 @@ import (
 	"github.com/aliyun/aliyun-oss-go-sdk/oss"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/net/ghttp"
-	"github.com/gogf/gf/v2/os/gfile"
 )
 
 // OssDrive 阿里云oss驱动
@@ -18,7 +17,7 @@ type OssDrive struct {
 }
 
 // Upload 上传到阿里云oss
-func (d *OssDrive) Upload(ctx context.Context, file *ghttp.UploadFile) (fullPath string, err error) {
+func (d *OssDrive) Upload(ctx context.Context, file *ghttp.UploadFile, meta *FileMeta) (fullPath string, err error) {
 	if config.OssPath == "" {
 		err = gerror.New("OSS存储驱动必须配置存储路径!")
 		return
@@ -41,7 +40,10 @@ func (d *OssDrive) Upload(ctx context.Context, file *ghttp.UploadFile) (fullPath
 		return
 	}
 
-	fullPath = GenFullPath(config.OssPath, gfile.Ext(file.Filename))
+	fullPath, err = GenContentPath(config.OssPath, meta.Md5, meta.Ext)
+	if err != nil {
+		return "", err
+	}
 	err = bucket.PutObject(fullPath, f2)
 	return
 }

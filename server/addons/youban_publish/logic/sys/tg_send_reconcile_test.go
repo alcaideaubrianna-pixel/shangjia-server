@@ -20,7 +20,15 @@ func TestTelegramJobPhaseMarkerStableAndDistinct(t *testing.T) {
 }
 
 func TestTelegramAmbiguousDeliveryError(t *testing.T) {
-	for _, message := range []string{"context deadline exceeded", "HTTP/2 GOAWAY", "cannot rewind body after connection loss", "closed pipe"} {
+	for _, message := range []string{
+		"context deadline exceeded",
+		"HTTP/2 GOAWAY",
+		"cannot rewind body after connection loss",
+		"closed pipe",
+		"error decode response body for method sendMediaGroup, error code: 524, invalid character 'e' looking for beginning of value",
+		"error decode response body for method sendMediaGroup, error code: 502, invalid character 'e' looking for beginning of value",
+		"发送进程中断，等待Webhook或协议号对账",
+	} {
 		if !isTelegramAmbiguousDeliveryError(errors.New(message)) {
 			t.Fatalf("expected ambiguous error: %s", message)
 		}

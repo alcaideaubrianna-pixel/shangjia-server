@@ -13,6 +13,7 @@ import (
 	"github.com/gogf/gf/v2/os/gfile"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/util/gconv"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -25,11 +26,8 @@ type LocalDrive struct {
 }
 
 // Upload 上传到本地
-func (d *LocalDrive) Upload(ctx context.Context, file *ghttp.UploadFile) (fullPath string, err error) {
-	var (
-		sp      = g.Cfg().MustGet(ctx, "server.serverRoot")
-		nowDate = gtime.Date()
-	)
+func (d *LocalDrive) Upload(ctx context.Context, file *ghttp.UploadFile, meta *FileMeta) (fullPath string, err error) {
+	sp := g.Cfg().MustGet(ctx, "server.serverRoot")
 
 	if sp.IsEmpty() {
 		err = gerror.New("本地上传驱动必须配置静态路径!")
@@ -41,15 +39,41 @@ func (d *LocalDrive) Upload(ctx context.Context, file *ghttp.UploadFile) (fullPa
 		return
 	}
 
-	// 包含静态文件夹的路径
-	fullDirPath := strings.Trim(sp.String(), "/") + "/" + config.LocalPath + nowDate
-	fileName, err := file.Save(fullDirPath, true)
+	fullPath, err = GenContentPath(config.LocalPath, meta.Md5, meta.Ext)
 	if err != nil {
-		return
+		return "", err
 	}
-	// 不含静态文件夹的路径
-	fullPath = config.LocalPath + nowDate + "/" + fileName
-	return
+	targetPath := filepath.Join(strings.TrimRight(sp.String(), "/"), filepath.FromSlash(fullPath))
+	if err = os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		return "", gerror.Wrap(err, "创建本地上传目录失败")
+	}
+	if gfile.Exists(targetPath) {
+		return fullPath, nil
+	}
+	source, err := file.Open()
+	if err != nil {
+		return "", gerror.Wrap(err, "读取上传文件失败")
+	}
+	defer source.Close()
+	target, err := os.CreateTemp(filepath.Dir(targetPath), ".upload-*.part")
+	if err != nil {
+		return "", gerror.Wrap(err, "创建本地上传文件失败")
+	}
+	partPath := target.Name()
+	_, copyErr := io.Copy(target, source)
+	closeErr := target.Close()
+	if copyErr != nil || closeErr != nil {
+		_ = os.Remove(partPath)
+		if copyErr != nil {
+			return "", gerror.Wrap(copyErr, "保存本地上传文件失败")
+		}
+		return "", gerror.Wrap(closeErr, "关闭本地上传文件失败")
+	}
+	if err = os.Rename(partPath, targetPath); err != nil {
+		_ = os.Remove(partPath)
+		return "", gerror.Wrap(err, "写入本地上传文件失败")
+	}
+	return fullPath, nil
 }
 
 // CreateMultipart 创建分片事件
@@ -74,7 +98,7 @@ func (d *LocalDrive) UploadPart(ctx context.Context, in *UploadPartParams) (res 
 		return
 	}
 
-	spStr := strings.Trim(sp.String(), "/") + "/"
+	spStr := strings.TrimRight(sp.String(), "/") + "/"
 
 	if config.LocalPath == "" {
 		err = gerror.New("本地上传驱动必须配置本地存储路径!")
@@ -106,16 +130,45 @@ func (d *LocalDrive) UploadPart(ctx context.Context, in *UploadPartParams) (res 
 		}
 
 		// 合并文件
-		finalDirPath := GenFullPath(config.LocalPath, gfile.Ext(in.mp.Meta.Filename))
-		if err = MergePartFile(partFilePath, spStr+finalDirPath); err != nil {
-			err = gerror.Newf("合并分片文件出错:%v", err.Error())
-			return nil, err
+		finalDirPath, pathErr := GenContentPath(config.LocalPath, in.mp.Meta.Md5, in.mp.Meta.Ext)
+		if pathErr != nil {
+			return nil, pathErr
+		}
+		if err = os.MkdirAll(filepath.Dir(spStr+finalDirPath), 0o755); err != nil {
+			return nil, gerror.Wrap(err, "创建本地分片上传目录失败")
+		}
+		finalPath := filepath.Clean(spStr + finalDirPath)
+		if gfile.Exists(finalPath) {
+			if err = os.RemoveAll(partFilePath); err != nil {
+				return nil, gerror.Wrap(err, "删除临时分片失败")
+			}
+		} else {
+			merged, createErr := os.CreateTemp(filepath.Dir(finalPath), ".multipart-*.part")
+			if createErr != nil {
+				return nil, gerror.Wrap(createErr, "创建分片合并临时文件失败")
+			}
+			mergedPath := merged.Name()
+			if closeErr := merged.Close(); closeErr != nil {
+				_ = os.Remove(mergedPath)
+				return nil, gerror.Wrap(closeErr, "关闭分片合并临时文件失败")
+			}
+			if err = MergePartFile(partFilePath, mergedPath); err != nil {
+				_ = os.Remove(mergedPath)
+				err = gerror.Newf("合并分片文件出错:%v", err.Error())
+				return nil, err
+			}
+			if err = os.Rename(mergedPath, finalPath); err != nil {
+				_ = os.Remove(mergedPath)
+				return nil, gerror.Wrap(err, "写入分片上传文件失败")
+			}
 		}
 
 		// 删除临时分片
-		if err = os.RemoveAll(partFilePath); err != nil {
-			err = gerror.Newf("删除临时分片文件出错:%v", err.Error())
-			return nil, err
+		if gfile.Exists(partFilePath) {
+			if err = os.RemoveAll(partFilePath); err != nil {
+				err = gerror.Newf("删除临时分片文件出错:%v", err.Error())
+				return nil, err
+			}
 		}
 
 		// 写入附件记录

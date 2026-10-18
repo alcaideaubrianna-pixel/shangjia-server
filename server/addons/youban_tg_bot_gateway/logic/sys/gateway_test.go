@@ -46,9 +46,17 @@ func (f *failingGatewayFeature) HandleUpdate(context.Context, service.BotContext
 	return false, errors.New("feature failed")
 }
 
-type recordingGatewayProvider struct{ called bool }
+type recordingGatewayProvider struct {
+	name   string
+	called bool
+}
 
-func (p *recordingGatewayProvider) Name() string { return "recording-test-provider" }
+func (p *recordingGatewayProvider) Name() string {
+	if p.name != "" {
+		return p.name
+	}
+	return "recording-test-provider"
+}
 func (p *recordingGatewayProvider) ListEnabledBots(context.Context) ([]service.BotBinding, error) {
 	return nil, nil
 }
@@ -168,6 +176,15 @@ func TestMediaClientUsesDedicatedCache(t *testing.T) {
 	}
 	if factoryCalls != 1 {
 		t.Fatalf("media client factory calls = %d, want 1", factoryCalls)
+	}
+}
+
+func TestGatewayRuntimeSignatureIncludesMediaEndpoint(t *testing.T) {
+	base := &service.RuntimeConfig{RuntimeServerURL: "https://api.telegram.org", MediaServerURL: "http://old-bot-api.internal"}
+	changed := *base
+	changed.MediaServerURL = "http://new-bot-api.internal"
+	if gatewayRuntimeSignature("webhook", base) == gatewayRuntimeSignature("webhook", &changed) {
+		t.Fatal("gateway runtime signature ignored media endpoint change")
 	}
 }
 

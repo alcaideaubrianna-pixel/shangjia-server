@@ -98,6 +98,17 @@ func (s *sSysPublish) upsertPublishJobRecord(ctx context.Context, job telegramJo
 	return nil
 }
 
+func publishRecordStatusFromJob(status string) string {
+	switch strings.TrimSpace(status) {
+	case "sent":
+		return "success"
+	case "pending", "sending", "failed_retry", "failed", "superseded", "unknown":
+		return strings.TrimSpace(status)
+	default:
+		return "pending"
+	}
+}
+
 func isFullPushActiveRecord(action string, status string) bool {
 	return action == publishSuccessTypeFull && (status == "pending" || status == "sending")
 }
@@ -112,7 +123,7 @@ func (s *sSysPublish) compactFullPushActiveRecords(ctx context.Context, tenantId
 	mod := g.DB().Model(publishSuccessRecordTable).Safe().Ctx(ctx).
 		Where("tenant_id", tenantId).
 		Where("operation_no >= ? AND operation_no < ?", batchNo+":", batchNo+";").
-		WhereIn("status", []string{"pending", "sending"})
+		Where("job_id IN (SELECT id FROM "+publishTgJobTable+" WHERE status IN (?, ?))", telegramJobStatusPending, telegramJobStatusSending)
 	if keepJobId <= 0 {
 		var latest struct {
 			JobId int64 `json:"job_id"`
@@ -207,6 +218,10 @@ func publishJobRecordMessage(action string, status string) string {
 		return "TG资料发送失败，等待重试"
 	case "failed":
 		return "TG资料发送失败"
+	case "unknown":
+		return "TG发送结果待人工确认"
+	case "superseded":
+		return "TG任务已被新操作替换"
 	case "success", "sent":
 		return publishSuccessRecordMessage(action)
 	default:

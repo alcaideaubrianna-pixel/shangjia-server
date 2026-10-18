@@ -58,7 +58,7 @@ func (s *sAccountTasks) Submit(ctx context.Context, in *sysin.AccountTaskSubmit)
 	}
 	if accountTaskCanRevive(in.TaskType) {
 		terminalStatuses := []string{sysin.AccountTaskStatusDead, sysin.AccountTaskStatusCancelled}
-		if in.TaskType == sysin.AccountTaskTypeMessageReconcile || in.TaskType == sysin.AccountTaskTypeManagedBotUsernameCheck {
+		if accountTaskCanReviveCompleted(in.TaskType) {
 			terminalStatuses = append(terminalStatuses, sysin.AccountTaskStatusCompleted)
 		}
 		revive := g.Map{
@@ -81,7 +81,10 @@ func (s *sAccountTasks) Submit(ctx context.Context, in *sysin.AccountTaskSubmit)
 		}
 	}
 	var row entity.TgCollectorAccountTask
-	if err = dao.TgCollectorAccountTask.Ctx(ctx).
+	// Submit must provide read-after-write consistency. Production uses read/write
+	// splitting, so an immediate replica read can miss the row just inserted and
+	// falsely fail every downstream media download.
+	if err = dao.TgCollectorAccountTask.Ctx(ctx).Master().
 		Fields(columns.Id).
 		Where(columns.TenantId, in.TenantID).
 		Where(columns.TaskKey, in.TaskKey).
@@ -89,6 +92,17 @@ func (s *sAccountTasks) Submit(ctx context.Context, in *sysin.AccountTaskSubmit)
 		return 0, gerror.Wrap(err, "读取Telegram账号任务失败")
 	}
 	return row.Id, nil
+}
+
+func accountTaskCanReviveCompleted(taskType string) bool {
+	switch taskType {
+	case sysin.AccountTaskTypeMessageReconcile,
+		sysin.AccountTaskTypeMessageMediaFallback,
+		sysin.AccountTaskTypeManagedBotUsernameCheck:
+		return true
+	default:
+		return false
+	}
 }
 
 func accountTaskCanRevive(taskType string) bool {
@@ -169,6 +183,9 @@ func (s *sAccountTasks) WaitTerminal(ctx context.Context, taskID int64, pollInte
 		task, err := s.Get(ctx, taskID)
 		if err != nil {
 			return nil, err
+		}
+		if task == nil {
+			return nil, gerror.Newf("Telegram账号任务不存在 taskId:%d", taskID)
 		}
 		if accountTaskTerminal(task.Status) {
 			return task, nil
@@ -306,7 +323,7 @@ func (s *sAccountTasks) Fail(ctx context.Context, in *sysin.AccountTaskFailure) 
 		nextRunAt = gtime.Now().Add(5 * time.Second)
 	}
 	if row.AttemptCount >= row.MaxAttempts {
-		status = sysin.AccountTaskStatusDead
+		status = sysin.AccountTaskStatusFinalizing
 		nextRunAt = nil
 	}
 	errorMessage := "Telegram账号任务执行失败"
@@ -353,7 +370,7 @@ func (s *sAccountTasks) RecoverExpired(ctx context.Context, limit int) (int, err
 		status := sysin.AccountTaskStatusFailedRetry
 		var nextRunAt any = now
 		if row.AttemptCount >= row.MaxAttempts {
-			status = sysin.AccountTaskStatusDead
+			status = sysin.AccountTaskStatusFinalizing
 			nextRunAt = nil
 		}
 		result, err := dao.TgCollectorAccountTask.Ctx(ctx).
@@ -372,6 +389,90 @@ func (s *sAccountTasks) RecoverExpired(ctx context.Context, limit int) (int, err
 		recovered += int(affected)
 	}
 	return recovered, nil
+}
+
+func (s *sAccountTasks) ExpirePending(ctx context.Context, taskType string, before time.Time, limit int) (int, error) {
+	if strings.TrimSpace(taskType) == "" {
+		return 0, gerror.New("Telegram账号任务类型不能为空")
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	columns := dao.TgCollectorAccountTask.Columns()
+	var ids []int64
+	if err := dao.TgCollectorAccountTask.Ctx(ctx).
+		Fields(columns.Id).
+		Where(columns.TaskType, taskType).
+		WhereIn(columns.Status, []string{sysin.AccountTaskStatusPending, sysin.AccountTaskStatusFailedRetry}).
+		WhereLT(columns.UpdatedAt, before).
+		Where("("+columns.NextRunAt+" IS NULL OR "+columns.NextRunAt+"<=?)", gtime.Now()).
+		OrderAsc(columns.UpdatedAt + "," + columns.Id).
+		Limit(limit).
+		Scan(&ids); err != nil {
+		return 0, gerror.Wrap(err, "读取超时未执行Telegram账号任务失败")
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	result, err := dao.TgCollectorAccountTask.Ctx(ctx).
+		WhereIn(columns.Id, ids).
+		Where(columns.TaskType, taskType).
+		WhereIn(columns.Status, []string{sysin.AccountTaskStatusPending, sysin.AccountTaskStatusFailedRetry}).
+		WhereLT(columns.UpdatedAt, before).
+		Where("("+columns.NextRunAt+" IS NULL OR "+columns.NextRunAt+"<=?)", gtime.Now()).
+		Data(g.Map{
+			columns.Status:       sysin.AccountTaskStatusFinalizing,
+			columns.NextRunAt:    nil,
+			columns.ErrorMessage: "账号任务超过业务等待期限，已进入失败收尾",
+			columns.UpdatedAt:    gtime.Now(),
+		}).Update()
+	if err != nil {
+		return 0, gerror.Wrap(err, "终止超时未执行Telegram账号任务失败")
+	}
+	affected, _ := result.RowsAffected()
+	return int(affected), nil
+}
+
+func (s *sAccountTasks) ListFinalizing(ctx context.Context, limit int) ([]*sysin.AccountTask, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	columns := dao.TgCollectorAccountTask.Columns()
+	var rows []*entity.TgCollectorAccountTask
+	if err := dao.TgCollectorAccountTask.Ctx(ctx).
+		Where(columns.Status, sysin.AccountTaskStatusFinalizing).
+		OrderAsc(columns.UpdatedAt + "," + columns.Id).
+		Limit(limit).
+		Scan(&rows); err != nil {
+		return nil, gerror.Wrap(err, "读取待收尾Telegram账号任务失败")
+	}
+	tasks := make([]*sysin.AccountTask, 0, len(rows))
+	for _, row := range rows {
+		if row != nil {
+			tasks = append(tasks, accountTaskModel(row))
+		}
+	}
+	return tasks, nil
+}
+
+func (s *sAccountTasks) FinalizeFailure(ctx context.Context, taskID int64) error {
+	if taskID <= 0 {
+		return gerror.New("Telegram账号任务ID无效")
+	}
+	columns := dao.TgCollectorAccountTask.Columns()
+	result, err := dao.TgCollectorAccountTask.Ctx(ctx).
+		WherePri(taskID).
+		Where(columns.Status, sysin.AccountTaskStatusFinalizing).
+		Data(g.Map{columns.Status: sysin.AccountTaskStatusDead, columns.CompletedAt: gtime.Now(), columns.UpdatedAt: gtime.Now()}).
+		Update()
+	if err != nil {
+		return gerror.Wrap(err, "完成Telegram账号任务失败收尾失败")
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return gerror.New("Telegram账号任务状态已变化，拒绝完成失败收尾")
+	}
+	return nil
 }
 
 func (s *sAccountTasks) ActiveStatusStats(ctx context.Context) ([]sysin.AccountTaskStatusStat, error) {
@@ -394,6 +495,7 @@ func (s *sAccountTasks) ActiveStatusStats(ctx context.Context) ([]sysin.AccountT
 			sysin.AccountTaskStatusPending,
 			sysin.AccountTaskStatusProcessing,
 			sysin.AccountTaskStatusFailedRetry,
+			sysin.AccountTaskStatusFinalizing,
 		}).
 		Group(columns.Status).
 		Scan(&rows); err != nil {

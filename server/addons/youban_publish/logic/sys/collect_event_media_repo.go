@@ -142,13 +142,10 @@ func (s *sSysPublish) upsertCollectEventMedia(ctx context.Context, event gdb.Rec
 			continue
 		}
 		mediaKey := strings.TrimSpace(item.Type) + ":" + sourceKey
-		status := collectMediaCacheReady
-		if strings.HasPrefix(strings.TrimSpace(item.FileId), "gotd:") && item.StoragePath == "" && item.FileUrl == "" {
-			status = collectMediaCachePending
-		}
+		status := collectMediaInitialCacheStatus(item)
 		mediaCols := pdao.YoubanPublishCollectEventMedia.Columns()
 		existing, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
-			Fields(mediaCols.Id, mediaCols.SortIndex, mediaCols.CacheStatus).
+			Fields(mediaCols.Id, mediaCols.SortIndex, mediaCols.CacheStatus, mediaCols.MetaJson).
 			Where(mediaCols.EventId, eventId).
 			Where(mediaCols.SourceMediaKey, mediaKey).
 			One()
@@ -185,6 +182,17 @@ func (s *sSysPublish) upsertCollectEventMedia(ctx context.Context, event gdb.Rec
 			mediaCols.UpdatedAt:        gtime.Now(),
 		}
 		if !existing.IsEmpty() && existing[mediaCols.CacheStatus].String() == collectMediaCacheReady {
+			if strings.TrimSpace(item.FileMd5) == "" {
+				delete(data, "file_md5")
+			}
+			if strings.TrimSpace(item.FilePhash) == "" {
+				delete(data, "file_phash")
+			}
+			if strings.TrimSpace(item.DebugMetaJson) == "" {
+				delete(data, mediaCols.MetaJson)
+			} else {
+				data[mediaCols.MetaJson] = mergeCollectMediaRetryMetadata(existing[mediaCols.MetaJson].String(), item.DebugMetaJson)
+			}
 			if strings.TrimSpace(item.FileUrl) == "" {
 				delete(data, mediaCols.FileUrl)
 			}
@@ -217,6 +225,13 @@ func (s *sSysPublish) upsertCollectEventMedia(ctx context.Context, event gdb.Rec
 		sortIndex++
 	}
 	return s.syncCollectEventMediaSnapshot(ctx, eventId)
+}
+
+func collectMediaInitialCacheStatus(item collectMediaItem) string {
+	if strings.TrimSpace(item.StoragePath) != "" || strings.TrimSpace(item.FileUrl) != "" {
+		return collectMediaCacheReady
+	}
+	return collectMediaCachePending
 }
 
 func (s *sSysPublish) collectEventMediaRows(ctx context.Context, eventId int64) ([]*collectEventMediaRow, error) {

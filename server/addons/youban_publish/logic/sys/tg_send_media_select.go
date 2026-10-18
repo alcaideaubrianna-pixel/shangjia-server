@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"fmt"
+	"github.com/gogf/gf/v2/frame/g"
 	"hash/fnv"
 	"sort"
 	"strings"
@@ -11,7 +12,9 @@ import (
 )
 
 func (s *sSysPublish) selectTelegramDisplayMediaForTenant(ctx context.Context, job telegramJobRecord, media []*telegramMediaItem) ([]*telegramMediaItem, error) {
+	step := beginTelegramPublishStage(ctx, "media.vip_policy", g.Map{"tenantId": job.TenantId})
 	status, err := s.tenantVipStatus(ctx, job.TenantId)
+	step.End(err)
 	if err != nil {
 		return nil, err
 	}

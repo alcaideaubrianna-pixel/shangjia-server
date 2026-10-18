@@ -5,6 +5,31 @@ import (
 	"testing"
 )
 
+func TestNormalizePublishBotType(t *testing.T) {
+	for _, tt := range []struct {
+		name, requested, current, want string
+		wantErr                        bool
+	}{
+		{"create defaults to normal", "", "", "normal", false},
+		{"create normal", "normal", "", "normal", false},
+		{"create cannot silently enable two way", "two_way", "", "", true},
+		{"normal cannot opt into two way here", "two_way", "normal", "", true},
+		{"ordinary edits preserve normal", "", "normal", "normal", false},
+		{"ordinary edits preserve configured two way", "", "two_way", "two_way", false},
+		{"configured two way remains editable", "two_way", "two_way", "two_way", false},
+		{"explicitly return to normal", "normal", "two_way", "normal", false},
+		{"trim request", " normal ", "", "normal", false},
+		{"invalid type rejected", "invalid", "normal", "", true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := normalizePublishBotType(tt.requested, tt.current)
+			if got != tt.want || (err != nil) != tt.wantErr {
+				t.Fatalf("got %q, %v; want %q, error=%t", got, err, tt.want, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestManagedBotUsernameCheckTaskKey(t *testing.T) {
 	key := managedBotUsernameCheckTaskKey(21, "Example_Bot")
 	accountID, username, err := parseManagedBotUsernameCheckTaskKey(key)

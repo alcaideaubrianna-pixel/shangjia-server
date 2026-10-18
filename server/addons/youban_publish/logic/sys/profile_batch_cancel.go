@@ -9,7 +9,6 @@ import (
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
-	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/hibiken/asynq"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
@@ -94,22 +93,18 @@ func (s *sSysPublish) AdminProfileBatchCancel(ctx context.Context, in *sysin.Adm
 		ids = append(ids, job.Id)
 	}
 	if len(ids) > 0 {
-		result, updateErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-			WhereIn("id", ids).
-			WhereIn("status", []string{"pending", "failed_retry", "unknown", "sending"}).
-			Data(g.Map{
-				"status":              "superseded",
-				"dispatch_status":     tgDispatchStatusDone,
-				"next_retry_at":       nil,
-				"error_message":       adminBatchTextCancelMessage,
-				"last_dispatch_error": adminBatchTextCancelMessage,
-				"updated_at":          gtime.Now(),
-			}).
-			Update()
+		affected, updateErr := s.transitionTelegramJobs(ctx, ids, telegramJobTransition{
+			From: []string{
+				telegramJobStatusPending, telegramJobStatusRetryWait,
+				telegramJobStatusConfirming, telegramJobStatusSending,
+			},
+			To:           telegramJobStatusSuperseded,
+			ErrorMessage: adminBatchTextCancelMessage,
+			Additional:   g.Map{"last_dispatch_error": adminBatchTextCancelMessage},
+		})
 		if updateErr != nil {
 			return nil, gerror.Wrap(updateErr, "取消批量发布任务失败")
 		}
-		affected, _ := result.RowsAffected()
 		res.Canceled = int(affected)
 	}
 	var canceledJobs []telegramJobRecord

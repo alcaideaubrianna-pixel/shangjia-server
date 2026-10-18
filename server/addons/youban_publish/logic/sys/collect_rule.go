@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"strconv"
 	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -127,6 +128,9 @@ func fillCollectRuleDetails(ctx context.Context, list []*sysin.CollectRuleModel)
 			item.TargetChannelIds = channelMap[item.Id]
 		}
 	}
+	if err = fillCollectRuleChannelNames(ctx, list); err != nil {
+		return err
+	}
 	itemMap, err := collectRuleItemMap(ctx, ruleIds)
 	if err != nil {
 		return err
@@ -151,6 +155,48 @@ func fillCollectRuleDetails(ctx context.Context, list []*sysin.CollectRuleModel)
 		item.Replacements = make([]sysin.CollectRuleReplaceModel, 0, len(config.Replacements))
 		for _, replacement := range config.Replacements {
 			item.Replacements = append(item.Replacements, sysin.CollectRuleReplaceModel{From: replacement.From, To: replacement.To})
+		}
+	}
+	return nil
+}
+
+func fillCollectRuleChannelNames(ctx context.Context, list []*sysin.CollectRuleModel) error {
+	channelIDs := make([]int64, 0)
+	for _, item := range list {
+		if item != nil {
+			channelIDs = append(channelIDs, item.TargetChannelIds...)
+		}
+	}
+	channelIDs = uniqueIds(channelIDs)
+	if len(channelIDs) == 0 {
+		return nil
+	}
+	var channels []struct {
+		Id       int64  `json:"id"`
+		Title    string `json:"title"`
+		Username string `json:"username"`
+		Target   string `json:"target"`
+	}
+	if err := pdao.YoubanPublishChannel.Ctx(ctx).
+		Fields("id,channel_title AS title,channel_username AS username,target_chat_id AS target").
+		WhereIn("id", channelIDs).WhereNull("deleted_at").Scan(&channels); err != nil {
+		return gerror.Wrap(err, "读取采集规则目标频道失败")
+	}
+	names := make(map[int64]string, len(channels))
+	for _, channel := range channels {
+		names[channel.Id] = firstNonEmpty(
+			strings.TrimSpace(channel.Title),
+			strings.TrimPrefix(strings.TrimSpace(channel.Username), "@"),
+			strings.TrimSpace(channel.Target),
+		)
+	}
+	for _, item := range list {
+		if item == nil {
+			continue
+		}
+		item.TargetChannelNames = make([]string, 0, len(item.TargetChannelIds))
+		for _, channelID := range item.TargetChannelIds {
+			item.TargetChannelNames = append(item.TargetChannelNames, firstNonEmpty(names[channelID], strconv.FormatInt(channelID, 10)))
 		}
 	}
 	return nil

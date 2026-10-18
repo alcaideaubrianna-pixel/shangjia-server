@@ -32,3 +32,17 @@ func TestInviteUsageTableSql(t *testing.T) {
 		})
 	}
 }
+
+func TestMenuPermissionsFitExistingColumn(t *testing.T) {
+	for _, path := range []string{"addons/youban_bot/resource/sql/menu.sql", "addons/youban_bot/resource/sql/menu.pgsql.sql"} {
+		content := readSqlFile(path)
+		if !strings.Contains(content, "youbanBotRelayConfig") {
+			t.Fatalf("missing separate relay permissions: %s", path)
+		}
+		for _, literal := range strings.Split(content, "'") {
+			if strings.HasPrefix(literal, "/youban_bot/") && len(literal) > 512 {
+				t.Fatalf("permissions exceed varchar(512) in %s: %d", path, len(literal))
+			}
+		}
+	}
+}

@@ -12,6 +12,7 @@ import (
 	publishmodel "hotgo/addons/youban_publish/model"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/cache"
+	"hotgo/utility/scantrace"
 )
 
 const profileImageSearchResultTTL = 30 * time.Second
@@ -37,7 +38,9 @@ func (s *sSysPublish) profileImageSearchNotesByScope(ctx context.Context, profil
 	} else {
 		return []*sysin.NoteModel{}, nil
 	}
+	finish := scantrace.Begin(ctx, "profiles.query")
 	rows, err := base.Fields(profileImageSearchListFields()).WhereIn("p.id", profileIds).All()
+	finish(err)
 	if err != nil {
 		return nil, gerror.Wrap(err, "获取图片搜索资料失败")
 	}
@@ -49,19 +52,33 @@ func (s *sSysPublish) profileImageSearchNotesByScope(ctx context.Context, profil
 		}
 		profiles = append(profiles, item)
 	}
-	if err = s.ensureProfileListUUID(ctx, profiles); err != nil {
+	finish = scantrace.Begin(ctx, "profiles.uuid")
+	err = s.ensureProfileListUUID(ctx, profiles)
+	finish(err)
+	if err != nil {
 		return nil, err
 	}
-	if err = s.applyProfileOwnerNames(ctx, profiles); err != nil {
+	finish = scantrace.Begin(ctx, "profiles.owners")
+	err = s.applyProfileOwnerNames(ctx, profiles)
+	finish(err)
+	if err != nil {
 		return nil, err
 	}
-	if err = s.applyProfileTagNames(ctx, profiles); err != nil {
+	finish = scantrace.Begin(ctx, "profiles.tags")
+	err = s.applyProfileTagNames(ctx, profiles)
+	finish(err)
+	if err != nil {
 		return nil, err
 	}
-	if err = s.applyProfileCollectionMetadata(ctx, profiles); err != nil {
+	finish = scantrace.Begin(ctx, "profiles.sources")
+	err = s.applyProfileCollectionMetadata(ctx, profiles)
+	finish(err)
+	if err != nil {
 		return nil, err
 	}
+	finish = scantrace.Begin(ctx, "profiles.covers")
 	mediaBuckets, err := s.mediaCoverListByProfileModels(ctx, profiles)
+	finish(err)
 	if err != nil {
 		return nil, err
 	}

@@ -21,56 +21,64 @@ type YoubanPublishCollectSourceDao struct {
 
 // YoubanPublishCollectSourceColumns defines and stores column names for the table hg_youban_publish_collect_source.
 type YoubanPublishCollectSourceColumns struct {
-	Id              string // 主键
-	TenantId        string // 租户ID
-	AccountId       string // 所属账号ID
-	SourceType      string // 来源类型
-	Title           string // 采集源名称
-	SourceChatId    string // 来源频道/群聊ID
-	SourceUsername  string // 来源用户名
-	TgAccountId     string // 协议号ID
-	BotId           string // 机器人ID
-	FollowAccountId string // 关注账号ID
-	CollectEnabled  string // 是否开启采集
-	Status          string // 状态
-	EventTotal      string // 事件总数
-	SuccessTotal    string // 成功数
-	FailedTotal     string // 失败数
-	LastEventAt     string // 最后事件时间
-	Remark          string // 备注
-	CreatedBy       string // 创建人
-	UpdatedBy       string // 更新人
-	DeletedBy       string // 删除人
-	CreatedAt       string // 创建时间
-	UpdatedAt       string // 更新时间
-	DeletedAt       string // 删除时间
+	Id                 string //
+	TenantId           string //
+	AccountId          string //
+	SourceType         string //
+	Title              string //
+	SourceChatId       string //
+	SourceUsername     string //
+	TgAccountId        string //
+	BotId              string //
+	BotCollectScope    string //
+	FollowAccountId    string //
+	CollectEnabled     string //
+	Status             string //
+	EventTotal         string //
+	SuccessTotal       string //
+	FailedTotal        string //
+	LastEventAt        string //
+	Remark             string //
+	CreatedBy          string //
+	UpdatedBy          string //
+	DeletedBy          string //
+	CreatedAt          string //
+	UpdatedAt          string //
+	DeletedAt          string //
+	ChannelId          string //
+	ChannelBlacklisted string //
+	ChannelSuffix      string //
 }
 
 // youbanPublishCollectSourceColumns holds the columns for the table hg_youban_publish_collect_source.
 var youbanPublishCollectSourceColumns = YoubanPublishCollectSourceColumns{
-	Id:              "id",
-	TenantId:        "tenant_id",
-	AccountId:       "account_id",
-	SourceType:      "source_type",
-	Title:           "title",
-	SourceChatId:    "source_chat_id",
-	SourceUsername:  "source_username",
-	TgAccountId:     "tg_account_id",
-	BotId:           "bot_id",
-	FollowAccountId: "follow_account_id",
-	CollectEnabled:  "collect_enabled",
-	Status:          "status",
-	EventTotal:      "event_total",
-	SuccessTotal:    "success_total",
-	FailedTotal:     "failed_total",
-	LastEventAt:     "last_event_at",
-	Remark:          "remark",
-	CreatedBy:       "created_by",
-	UpdatedBy:       "updated_by",
-	DeletedBy:       "deleted_by",
-	CreatedAt:       "created_at",
-	UpdatedAt:       "updated_at",
-	DeletedAt:       "deleted_at",
+	Id:                 "id",
+	TenantId:           "tenant_id",
+	AccountId:          "account_id",
+	SourceType:         "source_type",
+	Title:              "title",
+	SourceChatId:       "source_chat_id",
+	SourceUsername:     "source_username",
+	TgAccountId:        "tg_account_id",
+	BotId:              "bot_id",
+	BotCollectScope:    "bot_collect_scope",
+	FollowAccountId:    "follow_account_id",
+	CollectEnabled:     "collect_enabled",
+	Status:             "status",
+	EventTotal:         "event_total",
+	SuccessTotal:       "success_total",
+	FailedTotal:        "failed_total",
+	LastEventAt:        "last_event_at",
+	Remark:             "remark",
+	CreatedBy:          "created_by",
+	UpdatedBy:          "updated_by",
+	DeletedBy:          "deleted_by",
+	CreatedAt:          "created_at",
+	UpdatedAt:          "updated_at",
+	DeletedAt:          "deleted_at",
+	ChannelId:          "channel_id",
+	ChannelBlacklisted: "channel_blacklisted",
+	ChannelSuffix:      "channel_suffix",
 }
 
 // NewYoubanPublishCollectSourceDao creates and returns a new DAO object for table data access.

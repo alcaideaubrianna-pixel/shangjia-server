@@ -1,30 +1,18 @@
-CREATE TABLE IF NOT EXISTS "hg_youban_two_way_bot_bot" (
-  "id" bigserial PRIMARY KEY,
-  "tenant_id" bigint NOT NULL DEFAULT 0,
-  "account_id" bigint NOT NULL DEFAULT 0,
-  "tg_account_id" bigint NOT NULL DEFAULT 0,
-  "name" varchar(128) NOT NULL DEFAULT '',
-  "welcome_message" varchar(1000) NOT NULL DEFAULT '',
-  "bot_token" varchar(255) NOT NULL DEFAULT '',
-  "bot_user_id" varchar(64) NOT NULL DEFAULT '',
-  "bot_username" varchar(128) NOT NULL DEFAULT '',
-  "supergroup_id" varchar(64) NOT NULL DEFAULT '',
-  "supergroup_access_hash" varchar(128) NOT NULL DEFAULT '',
-  "supergroup_title" varchar(128) NOT NULL DEFAULT '',
-  "invite_link" varchar(512) NOT NULL DEFAULT '',
-  "setup_status" varchar(32) NOT NULL DEFAULT 'pending',
-  "webhook_status" varchar(32) NOT NULL DEFAULT 'pending',
-  "status" integer NOT NULL DEFAULT 1,
-  "error_message" varchar(1024) NOT NULL DEFAULT '',
-  "last_setup_at" timestamp,
-  "last_webhook_at" timestamp,
-  "created_at" timestamp,
-  "updated_at" timestamp,
-  "deleted_at" timestamp
-);
-
-CREATE INDEX IF NOT EXISTS "idx_ybtwb_bot_tenant" ON "hg_youban_two_way_bot_bot" ("tenant_id", "status", "id");
-CREATE INDEX IF NOT EXISTS "idx_ybtwb_bot_tg_account" ON "hg_youban_two_way_bot_bot" ("tenant_id", "tg_account_id");
+ALTER TABLE "hg_youban_publish_bot" ADD COLUMN IF NOT EXISTS "account_id" bigint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_bot" ADD COLUMN IF NOT EXISTS "bot_type" varchar(32) NOT NULL DEFAULT 'normal';
+ALTER TABLE "hg_youban_publish_bot" ADD COLUMN IF NOT EXISTS "tg_account_id" bigint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_bot" ADD COLUMN IF NOT EXISTS "bot_user_id" varchar(64) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_bot" ADD COLUMN IF NOT EXISTS "supergroup_id" varchar(64) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_bot" ADD COLUMN IF NOT EXISTS "supergroup_access_hash" varchar(128) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_bot" ADD COLUMN IF NOT EXISTS "supergroup_title" varchar(128) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_bot" ADD COLUMN IF NOT EXISTS "invite_link" varchar(512) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_bot" ADD COLUMN IF NOT EXISTS "setup_status" varchar(32) NOT NULL DEFAULT 'pending';
+ALTER TABLE "hg_youban_publish_bot" ADD COLUMN IF NOT EXISTS "webhook_status" varchar(32) NOT NULL DEFAULT 'pending';
+ALTER TABLE "hg_youban_publish_bot" ADD COLUMN IF NOT EXISTS "error_message" varchar(1024) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_bot" ADD COLUMN IF NOT EXISTS "last_setup_at" timestamp;
+ALTER TABLE "hg_youban_publish_bot" ADD COLUMN IF NOT EXISTS "last_webhook_at" timestamp;
+ALTER TABLE "hg_youban_publish_bot" ADD COLUMN IF NOT EXISTS "welcome_message" varchar(1000) NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS "idx_ybtwb_publish_owner" ON "hg_youban_publish_bot" ("tenant_id","account_id","bot_type","status","id");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_two_way_bot_topic" (
   "id" bigserial PRIMARY KEY,

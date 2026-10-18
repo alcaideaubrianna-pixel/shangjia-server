@@ -19,53 +19,58 @@ import (
 const (
 	// tgQueueNameMediaLegacy is read only by the one-time migration. It is
 	// intentionally not registered by any worker.
-	tgQueueNameMediaLegacy          = "youban_publish_media"
-	tgQueueNameUrgent               = "youban_publish_tg_urgent"
-	tgQueueNameDefault              = "youban_publish_tg"
-	tgQueueNameBulk                 = "youban_publish_tg_bulk"
-	tgQueueNameMediaRealtime        = "youban_publish_media_realtime"
-	tgQueueNameMediaRealtimePrefix  = "youban_publish_media_realtime_"
-	tgQueueNameMediaProcess         = "youban_publish_media_process"
-	tgQueueNameMediaBulkPrefix      = "youban_publish_media_bulk_"
-	tgQueueNameAutoDelete           = "youban_publish_auto_delete"
-	tgQueueNameAttemptTimeout       = "youban_publish_attempt_timeout"
-	tgQueueNameBackground           = "youban_publish_background"
-	tgQueueNameCycle                = "youban_publish_cycle"
-	tgQueueNameCollectProcess       = "youban_publish_collect_process"
-	tgQueueNameCollectProcessPrefix = "youban_publish_collect_process_"
-	tgQueueNameHistory              = "youban_publish_history"
-	tgQueueNameProfileMaintenance   = "youban_publish_profile_maintenance"
-	tgQueueNameDuplicateScan        = "youban_publish_duplicate_scan"
-	tgQueueNameMatting              = "youban_publish_matting"
-	tgTaskTypePublish               = "youban_publish:tg:publish"
-	tgTaskTypeCleanup               = "youban_publish:tg:cleanup"
-	tgTaskTypeAutoDelete            = "youban_publish:tg:auto_delete"
-	tgTaskTypeAutoDeleteBackfill    = "youban_publish:tg:auto_delete_backfill"
-	tgTaskTypeImport                = "youban_publish:import:legacy"
-	tgTaskTypeRepair                = "youban_publish:tg:message_repair"
-	tgTaskTypeImportMatch           = "youban_publish:import:tg_match"
-	tgTaskTypeImportSync            = "youban_publish:import:tg_sync"
-	tgTaskTypeDown                  = "youban_publish:profile:down"
-	tgTaskTypeCycleRun              = "youban_publish:cycle:run"
-	tgTaskTypeCycleReschedule       = "youban_publish:cycle:reschedule"
-	tgTaskTypeCycleRefresh          = "youban_publish:cycle:refresh"
-	tgTaskTypeCollectMedia          = "youban_publish:collect:media_cache"
-	tgTaskTypeMediaProcess          = "youban_publish:media:process"
-	tgTaskTypeCollectProcess        = "youban_publish:collect:process"
-	tgTaskTypeCollectHistory        = "youban_publish:collect:history"
-	tgTaskTypeCollectTrigger        = "youban_publish:collect:trigger"
-	tgTaskTypeCollectSourceDelete   = "youban_publish:collect:source_delete"
-	tgTaskTypeChannelMemberSync     = "youban_publish:tg:channel_member_sync"
-	tgTaskTypeBotMediaRepair        = "youban_publish:bot:media_repair"
-	tgTaskTypeProfileMaintenance    = "youban_publish:profile:maintenance"
-	tgTaskTypeProfileSubmit         = "youban_publish:profile:submit"
-	tgTaskTypePublishRecovery       = "youban_publish:profile:publish_recovery"
-	tgTaskTypeDuplicateScan         = "youban_publish:profile:duplicate_scan"
-	tgTaskTypeMatting               = "youban_publish:anti_scan:matting"
-	tgTaskTypeAttemptTimeout        = "youban_publish:tg:attempt_timeout"
-	tgTaskTypeRelayMedia            = "youban_publish:relay:media"
-	tgTaskTypeRelayMediaGroup       = "youban_publish:relay:media_group"
-	tgQueueNameRelay                = "youban_publish_relay"
+	tgQueueNameMediaLegacy         = "youban_publish_media"
+	tgQueueNameUrgent              = "youban_publish_tg_urgent"
+	tgQueueNameDefault             = "youban_publish_tg"
+	tgQueueNameBulk                = "youban_publish_tg_bulk"
+	tgQueueNameMediaRealtime       = "youban_publish_media_realtime"
+	tgQueueNameMediaRealtimePrefix = "youban_publish_media_realtime_"
+	tgQueueNameMediaProcess        = "youban_publish_media_process"
+	tgQueueNameMediaBulkPrefix     = "youban_publish_media_bulk_"
+	// Keep realtime deletion isolated from explicitly requested historical work.
+	tgQueueNameAutoDeleteRealtime     = "youban_publish_auto_delete_realtime"
+	tgQueueNameAutoDeleteBackfill     = "youban_publish_auto_delete_backfill"
+	tgQueueNameAttemptTimeout         = "youban_publish_attempt_timeout"
+	tgQueueNameBackground             = "youban_publish_background"
+	tgQueueNameMaterialImportPull     = "youban_publish_material_import_pull"
+	tgQueueNameMaterialImportMedia    = "youban_publish_material_import_media"
+	tgQueueNameCycle                  = "youban_publish_cycle"
+	tgQueueNameCollectProcessRealtime = "youban_publish_collect_process_realtime"
+	tgQueueNameCollectProcess         = "youban_publish_collect_process"
+	tgQueueNameCollectProcessPrefix   = "youban_publish_collect_process_"
+	tgQueueNameHistory                = "youban_publish_history"
+	tgQueueNameProfileMaintenance     = "youban_publish_profile_maintenance"
+	tgQueueNameDuplicateScan          = "youban_publish_duplicate_scan"
+	tgQueueNameMatting                = "youban_publish_matting"
+	tgTaskTypePublish                 = "youban_publish:tg:publish"
+	tgTaskTypeCleanup                 = "youban_publish:tg:cleanup"
+	tgTaskTypeAutoDelete              = "youban_publish:tg:auto_delete"
+	tgTaskTypeAutoDeleteBackfill      = "youban_publish:tg:auto_delete_backfill"
+	tgTaskTypeImport                  = "youban_publish:import:legacy"
+	tgTaskTypeRepair                  = "youban_publish:tg:message_repair"
+	tgTaskTypeImportMatch             = "youban_publish:import:tg_match"
+	tgTaskTypeImportSync              = "youban_publish:import:tg_sync"
+	tgTaskTypeDown                    = "youban_publish:profile:down"
+	tgTaskTypeCycleRun                = "youban_publish:cycle:run"
+	tgTaskTypeCycleReschedule         = "youban_publish:cycle:reschedule"
+	tgTaskTypeCycleRefresh            = "youban_publish:cycle:refresh"
+	tgTaskTypeCollectMedia            = "youban_publish:collect:media_cache"
+	tgTaskTypeMediaProcess            = "youban_publish:media:process"
+	tgTaskTypeCollectProcess          = "youban_publish:collect:process"
+	tgTaskTypeCollectHistory          = "youban_publish:collect:history"
+	tgTaskTypeCollectTrigger          = "youban_publish:collect:trigger"
+	tgTaskTypeCollectSourceDelete     = "youban_publish:collect:source_delete"
+	tgTaskTypeChannelMemberSync       = "youban_publish:tg:channel_member_sync"
+	tgTaskTypeBotMediaRepair          = "youban_publish:bot:media_repair"
+	tgTaskTypeProfileMaintenance      = "youban_publish:profile:maintenance"
+	tgTaskTypeProfileSubmit           = "youban_publish:profile:submit"
+	tgTaskTypePublishRecovery         = "youban_publish:profile:publish_recovery"
+	tgTaskTypeDuplicateScan           = "youban_publish:profile:duplicate_scan"
+	tgTaskTypeMatting                 = "youban_publish:anti_scan:matting"
+	tgTaskTypeAttemptTimeout          = "youban_publish:tg:attempt_timeout"
+	tgTaskTypeRelayMedia              = "youban_publish:relay:media"
+	tgTaskTypeRelayMediaGroup         = "youban_publish:relay:media_group"
+	tgQueueNameRelay                  = "youban_publish_relay"
 )
 
 const collectMediaMaxBulkQueueShards = 16
@@ -73,6 +78,9 @@ const collectMediaMaxBulkQueueShards = 16
 const collectProcessQueueShards = 16
 
 func collectProcessQueueName(payload collectProcessQueuePayload) string {
+	if payload.EventId > 0 {
+		return tgQueueNameCollectProcessRealtime
+	}
 	hash := fnv.New32a()
 	_, _ = hash.Write([]byte(fmt.Sprintf("%d:%d", payload.TenantId, payload.AccountId)))
 	return fmt.Sprintf("%s%02d", tgQueueNameCollectProcessPrefix, hash.Sum32()%collectProcessQueueShards)
@@ -96,7 +104,9 @@ func collectProcessWorkerQueues() map[string]int {
 	return queues
 }
 
-const telegramPublishTaskTimeout = 5 * time.Minute
+// A display send and a verification video can each consume the full media
+// request timeout. Keep the task deadline above their combined budget.
+const telegramPublishTaskTimeout = 25 * time.Minute
 
 func collectMediaBulkQueueName(shard int) string {
 	if shard < 0 {
@@ -153,7 +163,11 @@ type autoDeleteQueuePayload struct {
 }
 
 type autoDeleteBackfillQueuePayload struct {
-	CursorId int64 `json:"cursorId"`
+	CursorId    int64  `json:"cursorId"`
+	StartAt     string `json:"startAt"`
+	EndAt       string `json:"endAt"`
+	Scanned     int    `json:"scanned"`
+	MaxMessages int    `json:"maxMessages"`
 }
 
 type mediaProcessQueuePayload struct {
@@ -162,6 +176,7 @@ type mediaProcessQueuePayload struct {
 
 type botMediaRepairQueuePayload struct {
 	ProfileId int64 `json:"profileId"`
+	JobId     int64 `json:"jobId,omitempty"`
 }
 
 type importQueuePayload struct {
@@ -233,7 +248,10 @@ func (s *sSysPublish) enqueueTelegramJobDirect(ctx context.Context, jobId int64,
 	return s.enqueueTelegramJobDirectWithUnique(ctx, jobId, delay, true)
 }
 
-func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jobId int64, delay time.Duration, unique bool) error {
+func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jobId int64, delay time.Duration, unique bool) (resultErr error) {
+	ctx = telegramPublishTraceContext(ctx, jobId)
+	stage := beginTelegramPublishStage(ctx, "dispatch.enqueue", g.Map{"delayMs": delay.Milliseconds(), "unique": unique})
+	defer stage.Finish(&resultErr)
 	if jobId <= 0 {
 		return nil
 	}
@@ -241,8 +259,17 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 	if err != nil {
 		return err
 	}
+	ctx = telegramPublishJobTraceContext(ctx, job)
+	if paused, pauseErr := s.postponePermissionPausedJob(ctx, job); pauseErr != nil || paused {
+		return pauseErr
+	}
+	step := beginTelegramPublishStage(ctx, "dispatch.account_availability")
 	tgAccountId, available, checkErr := s.telegramJobAccountCanPublish(ctx, job)
+	step.End(checkErr, g.Map{"tgAccountId": tgAccountId, "available": available})
 	if checkErr != nil {
+		if errors.Is(checkErr, errTelegramPublishAccountMissing) {
+			return s.failTelegramMissingAccountJob(ctx, job, checkErr)
+		}
 		return checkErr
 	} else if !available {
 		return s.pauseTelegramJobsForUnavailableAccount(ctx, tgAccountId, "TG账号当前未授权或会话不可用")
@@ -259,13 +286,16 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 		if isMessagePushOperationNo(job.OperationNo) {
 			message = "快速推送目标已失效，任务自动终止"
 		}
-		data := telegramJobStateUpdateData("superseded", 0, gtime.Now())
-		data["error_message"] = message
-		data["last_dispatch_error"] = message
-		_, updateErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-			Where("id", jobId).
-			WhereIn("status", []string{"pending", "failed_retry", "unknown", "sending"}).
-			Data(data).Update()
+		_, updateErr := s.transitionTelegramJob(ctx, telegramJobTransition{
+			JobId: jobId,
+			From: []string{
+				telegramJobStatusPending, telegramJobStatusRetryWait,
+				telegramJobStatusConfirming, telegramJobStatusSending,
+			},
+			To:           telegramJobStatusSuperseded,
+			ErrorMessage: message,
+			Additional:   g.Map{"last_dispatch_error": message},
+		})
 		if updateErr != nil {
 			return gerror.Wrap(updateErr, "终止无效频道TG任务失败")
 		}
@@ -291,7 +321,15 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 		data["next_retry_at"] = nil
 	}
 	reserved, err := s.withTelegramChannelDispatchLease(ctx, job, func() (bool, error) {
+		step := beginTelegramPublishStage(ctx, "dispatch.channel_order")
+		hasEarlier, orderErr := s.telegramChannelHasEarlierActiveJob(ctx, job)
+		step.End(orderErr, g.Map{"hasEarlier": hasEarlier})
+		if orderErr != nil || hasEarlier {
+			return false, orderErr
+		}
+		step = beginTelegramPublishStage(ctx, "dispatch.channel_capacity")
 		hasCapacity, capacityErr := s.telegramChannelHasDispatchCapacity(ctx, job)
+		step.End(capacityErr, g.Map{"hasCapacity": hasCapacity})
 		if capacityErr != nil || !hasCapacity {
 			return false, capacityErr
 		}
@@ -306,6 +344,7 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 		affected, _ := result.RowsAffected()
 		return affected > 0, nil
 	})
+	beginTelegramPublishStage(ctx, "dispatch.reserve_result").End(err, g.Map{"reserved": reserved, "targetQueue": queueName})
 	if err != nil {
 		return gerror.Wrap(err, "锁定TG任务入队状态失败")
 	}
@@ -343,7 +382,7 @@ func (s *sSysPublish) enqueueTelegramAutoDelete(ctx context.Context, payload aut
 	}
 	task := asynq.NewTask(tgTaskTypeAutoDelete, body)
 	_, err = client.EnqueueContext(ctx, task,
-		asynq.Queue(tgQueueNameAutoDelete),
+		asynq.Queue(tgQueueNameAutoDeleteRealtime),
 		asynq.MaxRetry(10),
 		asynq.Timeout(time.Minute),
 		asynq.Unique(2*time.Minute),
@@ -354,17 +393,17 @@ func (s *sSysPublish) enqueueTelegramAutoDelete(ctx context.Context, payload aut
 	return err
 }
 
-func (s *sSysPublish) enqueueTelegramAutoDeleteBackfill(ctx context.Context, cursorId int64, delay time.Duration) error {
+func (s *sSysPublish) enqueueTelegramAutoDeleteBackfill(ctx context.Context, payload autoDeleteBackfillQueuePayload, delay time.Duration) error {
 	client, err := s.telegramQueueClient(ctx)
 	if err != nil {
 		return err
 	}
-	body, err := json.Marshal(autoDeleteBackfillQueuePayload{CursorId: cursorId})
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameAutoDelete),
+		asynq.Queue(tgQueueNameAutoDeleteBackfill),
 		asynq.MaxRetry(10),
 		asynq.Timeout(2 * time.Minute),
 		asynq.Unique(10 * time.Minute),
@@ -373,6 +412,34 @@ func (s *sSysPublish) enqueueTelegramAutoDeleteBackfill(ctx context.Context, cur
 		options = append(options, asynq.ProcessIn(delay))
 	}
 	_, err = client.EnqueueContext(ctx, asynq.NewTask(tgTaskTypeAutoDeleteBackfill, body), options...)
+	if errors.Is(err, asynq.ErrDuplicateTask) {
+		return nil
+	}
+	return err
+}
+
+func (s *sSysPublish) enqueueTelegramAutoDeleteBackfillDelete(ctx context.Context, payload autoDeleteQueuePayload, delay time.Duration) error {
+	if payload.ChannelId <= 0 || payload.MessageId <= 0 || strings.TrimSpace(payload.ChatId) == "" {
+		return nil
+	}
+	client, err := s.telegramQueueClient(ctx)
+	if err != nil {
+		return err
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	options := []asynq.Option{
+		asynq.Queue(tgQueueNameAutoDeleteBackfill),
+		asynq.MaxRetry(5),
+		asynq.Timeout(time.Minute),
+		asynq.Unique(24 * time.Hour),
+	}
+	if delay > 0 {
+		options = append(options, asynq.ProcessIn(delay))
+	}
+	_, err = client.EnqueueContext(ctx, asynq.NewTask(tgTaskTypeAutoDelete, body), options...)
 	if errors.Is(err, asynq.ErrDuplicateTask) {
 		return nil
 	}
@@ -686,7 +753,10 @@ func (s *sSysPublish) enqueueTelegramAttemptTimeout(ctx context.Context, attempt
 	return err == nil, err
 }
 
-func (s *sSysPublish) enqueueTelegramTaskWithQueue(ctx context.Context, taskType string, jobId int64, delay time.Duration, unique bool, queueName string) error {
+func (s *sSysPublish) enqueueTelegramTaskWithQueue(ctx context.Context, taskType string, jobId int64, delay time.Duration, unique bool, queueName string) (resultErr error) {
+	ctx = telegramPublishTraceContext(ctx, jobId)
+	stage := beginTelegramPublishStage(ctx, "queue.enqueue", g.Map{"taskType": taskType, "targetQueue": queueName, "delayMs": delay.Milliseconds()})
+	defer stage.Finish(&resultErr)
 	if jobId <= 0 {
 		return nil
 	}
@@ -713,18 +783,27 @@ func (s *sSysPublish) enqueueTelegramTaskWithQueue(ctx context.Context, taskType
 	if delay > 0 {
 		options = append(options, asynq.ProcessIn(delay))
 	}
-	info, err := client.EnqueueContext(ctx, task, options...)
+	// Queue submission must never hold an HTTP/API request indefinitely when
+	// Redis or an Asynq Lua script is slow. Telegram deletion itself remains in
+	// the existing worker; this timeout only bounds the enqueue operation.
+	enqueueCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	step := beginTelegramPublishStage(ctx, "queue.redis_enqueue", g.Map{"targetQueue": queueName})
+	info, err := client.EnqueueContext(enqueueCtx, task, options...)
+	step.End(err, g.Map{"duplicate": errors.Is(err, asynq.ErrDuplicateTask)})
 	if errors.Is(err, asynq.ErrDuplicateTask) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", jobId).Data(g.Map{
+	step = beginTelegramPublishStage(ctx, "queue.save_task_id", g.Map{"enqueuedTaskId": info.ID, "targetQueue": queueName})
+	_, saveErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", jobId).Data(g.Map{
 		"asynq_task_id": info.ID,
 		"queue_name":    queueName,
 		"updated_at":    time.Now(),
 	}).Update()
+	step.End(saveErr)
 	return nil
 }
 

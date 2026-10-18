@@ -9,27 +9,42 @@ import (
 
 	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/util/grand"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/cache"
 	hglock "hotgo/internal/library/hgrds/lock"
+	"hotgo/utility/scantrace"
 )
 
 const scanMediaGroupTTL = 2 * time.Minute
+
+const scanMediaBatchQuietPeriod = 1500 * time.Millisecond
 
 type scanMediaGroupPending struct {
 	BotId     int64                       `json:"botId"`
 	ChatId    string                      `json:"chatId"`
 	UserId    string                      `json:"userId"`
 	CreatedAt int64                       `json:"createdAt"`
+	UpdatedAt int64                       `json:"updatedAt"`
+	Active    int                         `json:"active"`
+	TraceId   string                      `json:"traceId"`
 	Items     []*sysin.BotMediaSearchItem `json:"items"`
 }
 
-func (s *sSysBot) collectScanMediaGroup(ctx context.Context, botId int64, userId string, msg *models.Message, items []*sysin.BotMediaSearchItem) error {
+func (s *sSysBot) beginScanMediaGroupItem(ctx context.Context, botId int64, userId string, batchId string, msg *models.Message) error {
 	if msg == nil {
 		return nil
 	}
-	key := scanMediaGroupKey(botId, userId, msg.MediaGroupID)
+	lockCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	lock := hglock.NewConfig(10*time.Second, 50*time.Millisecond).Mutex(scanMediaGroupLockKey(botId, userId, batchId))
+	if err := lock.Lock(lockCtx); err != nil {
+		return err
+	}
+	defer func() { _ = lock.Unlock(context.Background()) }()
+
+	key := scanMediaGroupKey(botId, userId, batchId)
 	pending := &scanMediaGroupPending{}
 	value, _ := cache.Instance().Get(ctx, key)
 	isFirst := true
@@ -39,9 +54,13 @@ func (s *sSysBot) collectScanMediaGroup(ctx context.Context, botId int64, userId
 		}
 	}
 	if isFirst {
-		pending = &scanMediaGroupPending{BotId: botId, ChatId: fmt.Sprintf("%d", msg.Chat.ID), UserId: userId, CreatedAt: time.Now().Unix()}
+		pending = &scanMediaGroupPending{BotId: botId, ChatId: fmt.Sprintf("%d", msg.Chat.ID), UserId: userId, CreatedAt: time.Now().Unix(), TraceId: scanTraceId(ctx)}
 	}
-	pending.Items = append(pending.Items, items...)
+	if pending.TraceId == "" {
+		pending.TraceId = scanTraceId(ctx)
+	}
+	pending.Active++
+	pending.UpdatedAt = time.Now().UnixMilli()
 	data, err := json.Marshal(pending)
 	if err != nil {
 		return err
@@ -50,9 +69,66 @@ func (s *sSysBot) collectScanMediaGroup(ctx context.Context, botId int64, userId
 		return err
 	}
 	if isFirst {
-		go s.finishScanMediaGroup(botId, userId, msg.MediaGroupID)
+		go s.finishScanMediaGroup(botId, userId, batchId)
 	}
 	return nil
+}
+
+func (s *sSysBot) completeScanMediaGroupItem(ctx context.Context, botId int64, userId string, batchId string, items []*sysin.BotMediaSearchItem) error {
+	lockCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	lock := hglock.NewConfig(10*time.Second, 50*time.Millisecond).Mutex(scanMediaGroupLockKey(botId, userId, batchId))
+	if err := lock.Lock(lockCtx); err != nil {
+		return err
+	}
+	defer func() { _ = lock.Unlock(context.Background()) }()
+
+	key := scanMediaGroupKey(botId, userId, batchId)
+	value, err := cache.Instance().Get(ctx, key)
+	if err != nil || value == nil || value.IsNil() {
+		return err
+	}
+	var pending scanMediaGroupPending
+	if err = json.Unmarshal([]byte(value.String()), &pending); err != nil {
+		return err
+	}
+	pending.Items = append(pending.Items, items...)
+	if pending.Active > 0 {
+		pending.Active--
+	}
+	pending.UpdatedAt = time.Now().UnixMilli()
+	data, err := json.Marshal(&pending)
+	if err != nil {
+		return err
+	}
+	return cache.Instance().Set(ctx, key, string(data), scanMediaGroupTTL)
+}
+
+func scanMediaBatchSessionKey(botId int64, userId string) string {
+	return fmt.Sprintf("youban_bot:scan_batch:%d:%s", botId, strings.TrimSpace(userId))
+}
+
+func (s *sSysBot) scanMediaBatch(ctx context.Context, botId int64, userId string) (string, error) {
+	lockCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	lock := hglock.NewConfig(10*time.Second, 50*time.Millisecond).Mutex(scanMediaBatchSessionKey(botId, userId) + ":lock")
+	if err := lock.Lock(lockCtx); err != nil {
+		return "", err
+	}
+	defer func() { _ = lock.Unlock(context.Background()) }()
+
+	key := scanMediaBatchSessionKey(botId, userId)
+	if value, err := cache.Instance().Get(ctx, key); err == nil && value != nil && !value.IsNil() {
+		batchId := strings.TrimSpace(value.String())
+		if batchId != "" && !s.scanMediaGroupResolved(ctx, botId, userId, batchId) {
+			return batchId, nil
+		}
+	}
+	batchId := strings.ToUpper(grand.S(12))
+	if err := cache.Instance().Set(ctx, key, batchId, scanMediaGroupTTL); err != nil {
+		return "", err
+	}
+	return batchId, nil
 }
 
 func scanMediaGroupKey(botId int64, userId string, groupId string) string {
@@ -73,51 +149,96 @@ func scanMediaGroupLockKey(botId int64, userId string, groupId string) string {
 
 // acknowledgeScanMedia gives single-media scans the same immediate feedback
 // as albums. The message id makes retries/webhook redelivery idempotent.
-func (s *sSysBot) acknowledgeScanMedia(ctx context.Context, botId int64, userId string, msg *models.Message) error {
+func (s *sSysBot) acknowledgeScanMedia(ctx context.Context, botId int64, userId string, msg *models.Message) (string, error) {
 	if msg == nil {
-		return nil
+		return "", nil
 	}
 	key := fmt.Sprintf("youban_bot:scan_ack:%d:%s:%d", botId, strings.TrimSpace(userId), msg.ID)
 	value, err := cache.Instance().Get(ctx, key)
 	if err == nil && value != nil && !value.IsNil() {
-		return nil
+		if traceId := normalizeScanTraceId(value.String()); traceId != "" {
+			return traceId, nil
+		}
 	}
-	if err := cache.Instance().Set(ctx, key, 1, scanMediaGroupTTL); err != nil {
-		return err
+	traceId := newScanTraceId()
+	if err := cache.Instance().Set(ctx, key, traceId, scanMediaGroupTTL); err != nil {
+		return "", err
 	}
-	if err := s.sendMessageOnly(ctx, botId, fmt.Sprintf("%d", msg.Chat.ID), "已收到，正在查询，请稍候…"); err != nil {
+	if err := s.sendMessageOnly(ctx, botId, fmt.Sprintf("%d", msg.Chat.ID), scanAcknowledgement(traceId)); err != nil {
 		_, _ = cache.Instance().Remove(ctx, key)
-		return err
+		return "", err
 	}
-	return nil
+	return traceId, nil
 }
 
 // acknowledgeScanMediaGroup gives immediate feedback before Telegram file
 // resolution or fingerprint calculation starts. The distributed lock prevents
 // concurrent album updates from sending the acknowledgement more than once.
-func (s *sSysBot) acknowledgeScanMediaGroup(ctx context.Context, botId int64, userId string, msg *models.Message) error {
-	if msg == nil || strings.TrimSpace(msg.MediaGroupID) == "" {
-		return nil
+func (s *sSysBot) acknowledgeScanMediaGroup(ctx context.Context, botId int64, userId string, batchId string, msg *models.Message) (string, error) {
+	if msg == nil || strings.TrimSpace(batchId) == "" {
+		return "", nil
 	}
 	lockCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	lock := hglock.NewConfig(10*time.Second, 50*time.Millisecond).Mutex(scanMediaGroupLockKey(botId, userId, msg.MediaGroupID))
+	lock := hglock.NewConfig(10*time.Second, 50*time.Millisecond).Mutex(scanMediaGroupLockKey(botId, userId, batchId))
 	if err := lock.Lock(lockCtx); err != nil {
-		return nil
+		return "", nil
 	}
 	defer func() { _ = lock.Unlock(context.Background()) }()
-	ackKey := scanMediaGroupAckKey(botId, userId, msg.MediaGroupID)
+	ackKey := scanMediaGroupAckKey(botId, userId, batchId)
 	if value, err := cache.Instance().Get(ctx, ackKey); err == nil && value != nil && !value.IsNil() {
-		return nil
+		if traceId := normalizeScanTraceId(value.String()); traceId != "" {
+			return traceId, nil
+		}
 	}
-	if err := cache.Instance().Set(ctx, ackKey, 1, scanMediaGroupTTL); err != nil {
-		return err
+	traceId := newScanTraceId()
+	if err := cache.Instance().Set(ctx, ackKey, traceId, scanMediaGroupTTL); err != nil {
+		return "", err
 	}
-	if err := s.sendMessageOnly(ctx, botId, fmt.Sprintf("%d", msg.Chat.ID), "已收到，正在查询，请稍候…"); err != nil {
+	if err := s.sendMessageOnly(ctx, botId, fmt.Sprintf("%d", msg.Chat.ID), scanAcknowledgement(traceId)); err != nil {
 		_, _ = cache.Instance().Remove(ctx, ackKey)
-		return err
+		return "", err
 	}
-	return nil
+	return traceId, nil
+}
+
+type scanTraceContextKey struct{}
+
+func newScanTraceId() string {
+	return strings.ToUpper(grand.S(8))
+}
+
+func normalizeScanTraceId(value string) string {
+	value = strings.ToUpper(strings.TrimSpace(value))
+	if len(value) != 8 {
+		return ""
+	}
+	return value
+}
+
+func withScanTrace(ctx context.Context, traceId string) context.Context {
+	traceId = ensureScanTraceId(traceId)
+	ctx = scantrace.With(ctx, g.Map{"traceId": traceId})
+	return context.WithValue(ctx, scanTraceContextKey{}, traceId)
+}
+
+func scanTraceId(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	value, _ := ctx.Value(scanTraceContextKey{}).(string)
+	return normalizeScanTraceId(value)
+}
+
+func scanAcknowledgement(traceId string) string {
+	return fmt.Sprintf("已收到，正在查询，请稍候…\n（追踪号 %s）", ensureScanTraceId(traceId))
+}
+
+func ensureScanTraceId(traceId string) string {
+	if traceId = normalizeScanTraceId(traceId); traceId != "" {
+		return traceId
+	}
+	return newScanTraceId()
 }
 
 func (s *sSysBot) scanMediaGroupResolved(ctx context.Context, botId int64, userId string, groupId string) bool {
@@ -126,39 +247,53 @@ func (s *sSysBot) scanMediaGroupResolved(ctx context.Context, botId int64, userI
 }
 
 func (s *sSysBot) claimScanMediaGroupResolved(ctx context.Context, botId int64, userId string, groupId string) (bool, error) {
-	lockCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-	lock := hglock.NewConfig(10*time.Second, 50*time.Millisecond).Mutex(scanMediaGroupLockKey(botId, userId, groupId))
-	if err := lock.Lock(lockCtx); err != nil {
-		return false, nil
-	}
-	defer func() { _ = lock.Unlock(context.Background()) }()
-	if s.scanMediaGroupResolved(ctx, botId, userId, groupId) {
-		return false, nil
-	}
-	if err := cache.Instance().Set(ctx, scanMediaGroupResolvedKey(botId, userId, groupId), 1, scanMediaGroupTTL); err != nil {
-		return false, err
-	}
-	return true, nil
+	return claimScanMediaGroupOnce(ctx, scanMediaGroupResolvedKey(botId, userId, groupId), cache.Instance().SetIfNotExist)
+}
+
+func claimScanMediaGroupOnce(ctx context.Context, key string, setIfNotExist func(context.Context, interface{}, interface{}, time.Duration) (bool, error)) (bool, error) {
+	return setIfNotExist(ctx, key, 1, scanMediaGroupTTL)
 }
 
 func (s *sSysBot) finishScanMediaGroup(botId int64, userId string, groupId string) {
-	time.Sleep(1500 * time.Millisecond)
 	ctx := context.Background()
 	key := scanMediaGroupKey(botId, userId, groupId)
-	if s.scanMediaGroupResolved(ctx, botId, userId, groupId) {
-		_, _ = cache.Instance().Remove(ctx, key)
-		return
-	}
-	value, err := cache.Instance().Get(ctx, key)
-	if err != nil || value == nil || value.IsNil() {
-		return
-	}
 	var pending scanMediaGroupPending
-	if err = json.Unmarshal([]byte(value.String()), &pending); err != nil || len(pending.Items) == 0 {
-		return
+	for {
+		time.Sleep(scanMediaBatchQuietPeriod)
+		lock := hglock.NewConfig(10*time.Second, 50*time.Millisecond).Mutex(scanMediaGroupLockKey(botId, userId, groupId))
+		if err := lock.Lock(ctx); err != nil {
+			g.Log().Warningf(ctx, "锁定扫图媒体批次失败 botId:%d userId:%s batchId:%s err:%+v", botId, userId, groupId, err)
+			return
+		}
+		value, err := cache.Instance().Get(ctx, key)
+		if err != nil || value == nil || value.IsNil() {
+			_ = lock.Unlock(ctx)
+			return
+		}
+		if err = json.Unmarshal([]byte(value.String()), &pending); err != nil {
+			_ = lock.Unlock(ctx)
+			return
+		}
+		if pending.Active > 0 || (pending.UpdatedAt > 0 && time.Since(time.UnixMilli(pending.UpdatedAt)) < scanMediaBatchQuietPeriod) {
+			_ = lock.Unlock(ctx)
+			continue
+		}
+		claimed, claimErr := s.claimScanMediaGroupResolved(ctx, botId, userId, groupId)
+		if claimErr != nil {
+			_ = lock.Unlock(ctx)
+			g.Log().Warningf(ctx, "领取扫图媒体组失败 botId:%d userId:%s groupId:%s err:%+v", botId, userId, groupId, claimErr)
+			return
+		}
+		if claimed {
+			_, _ = cache.Instance().Remove(ctx, key)
+		}
+		_ = lock.Unlock(ctx)
+		if !claimed || len(pending.Items) == 0 {
+			return
+		}
+		break
 	}
-	_, _ = cache.Instance().Remove(ctx, key)
+	ctx = withScanTrace(ctx, pending.TraceId)
 	account, err := s.boundProfileAccountByUser(ctx, parseTelegramUserId(userId))
 	if err != nil {
 		observeScanRequest(ctx, botId, "failed")
@@ -169,7 +304,7 @@ func (s *sSysBot) finishScanMediaGroup(botId int64, userId string, groupId strin
 	if err = s.searchScanMediaAndReply(ctx, botId, pending.ChatId, account, pending.Items); err != nil {
 		observeScanStage(ctx, botId, "group_total", startedAt, err)
 		observeScanRequest(ctx, botId, "failed")
-		g.Log().Warningf(ctx, "处理扫图媒体组失败 botId:%d userId:%s err:%+v", botId, userId, err)
+		g.Log().Warningf(ctx, "处理扫图媒体组失败 traceId:%s botId:%d userId:%s err:%+v", pending.TraceId, botId, userId, err)
 		return
 	}
 	observeScanStage(ctx, botId, "group_total", startedAt, nil)

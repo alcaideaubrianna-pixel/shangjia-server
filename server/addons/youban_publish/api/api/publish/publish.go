@@ -208,6 +208,13 @@ type AdminIntroFeeChannelRuleDeleteReq struct {
 	Id     int64 `json:"id"`
 }
 type AdminIntroFeeChannelRuleDeleteRes struct{}
+type AdminIntroFeeChannelPurgeReq struct {
+	g.Meta `path:"/bot/intro-fee/channel-rule/purge" method:"post" tags:"采集机器人" summary:"删除并下架频道资料"`
+	sysin.IntroFeeChannelPurgeInp
+}
+type AdminIntroFeeChannelPurgeRes struct {
+	*sysin.IntroFeeChannelPurgeModel
+}
 type AdminIntroFeeChannelBlacklistReq struct {
 	g.Meta `path:"/publish/admin/bot/intro-fee/channel-rule/blacklist" method:"post" tags:"上架插件管理端" summary:"设置机器人介绍费频道黑名单"`
 	sysin.IntroFeeChannelBlacklistInp
@@ -310,6 +317,38 @@ type AdminChannelListRes struct {
 	form.PageRes
 	List []*sysin.ChannelModel `json:"list" dc:"频道列表"`
 }
+
+type AdminRelayChannelListReq struct {
+	g.Meta `path:"/publish/admin/relay/channel/list" method:"get" tags:"上架插件管理端" summary:"中转频道列表"`
+	sysin.RelayChannelListInp
+}
+
+type AdminRelayChannelListRes struct {
+	List []*sysin.RelayChannelModel `json:"list" dc:"中转频道列表"`
+}
+
+type AdminRelayChannelCreateReq struct {
+	g.Meta `path:"/publish/admin/relay/channel/create" method:"post" tags:"上架插件管理端" summary:"创建中转频道"`
+	sysin.RelayChannelCreateInp
+}
+
+type AdminRelayChannelCreateRes struct {
+	*sysin.RelayChannelModel
+}
+
+type AdminRelayChannelSaveReq struct {
+	g.Meta `path:"/publish/admin/relay/channel/save" method:"post" tags:"上架插件管理端" summary:"保存中转频道"`
+	sysin.RelayChannelSaveInp
+}
+
+type AdminRelayChannelSaveRes struct{}
+
+type AdminRelayChannelStatusReq struct {
+	g.Meta `path:"/publish/admin/relay/channel/status" method:"post" tags:"上架插件管理端" summary:"切换中转频道"`
+	sysin.RelayChannelStatusInp
+}
+
+type AdminRelayChannelStatusRes struct{}
 
 type AdminChannelSaveReq struct {
 	g.Meta `path:"/publish/admin/channel/save" method:"post" tags:"上架插件管理端" summary:"新增或编辑频道"`

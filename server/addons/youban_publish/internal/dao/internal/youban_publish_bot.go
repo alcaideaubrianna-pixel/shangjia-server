@@ -22,6 +22,7 @@ type YoubanPublishBotDao struct {
 // YoubanPublishBotColumns defines and stores column names for the table hg_youban_publish_bot.
 type YoubanPublishBotColumns struct {
 	Id          string //
+	TenantId    string //
 	BotName     string //
 	BotUsername string //
 	BotToken    string //
@@ -33,12 +34,14 @@ type YoubanPublishBotColumns struct {
 	CreatedAt   string //
 	UpdatedAt   string //
 	DeletedAt   string //
-	TenantId    string //
+	AccountId   string //
+	BotType     string //
 }
 
 // youbanPublishBotColumns holds the columns for the table hg_youban_publish_bot.
 var youbanPublishBotColumns = YoubanPublishBotColumns{
 	Id:          "id",
+	TenantId:    "tenant_id",
 	BotName:     "bot_name",
 	BotUsername: "bot_username",
 	BotToken:    "bot_token",
@@ -50,7 +53,8 @@ var youbanPublishBotColumns = YoubanPublishBotColumns{
 	CreatedAt:   "created_at",
 	UpdatedAt:   "updated_at",
 	DeletedAt:   "deleted_at",
-	TenantId:    "tenant_id",
+	AccountId:   "account_id",
+	BotType:     "bot_type",
 }
 
 // NewYoubanPublishBotDao creates and returns a new DAO object for table data access.

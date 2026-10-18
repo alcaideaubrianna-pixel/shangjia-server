@@ -9,6 +9,7 @@ type MediaAssetsInp struct {
 }
 
 type MediaAssetsModel struct {
+	MD5               string `json:"md5" dc:"原文件MD5"`
 	Processed         bool   `json:"processed" dc:"是否已处理"`
 	PerceptualHash    string `json:"perceptualHash" dc:"感知哈希"`
 	PosterUrl         string `json:"posterUrl" dc:"视频封面地址"`

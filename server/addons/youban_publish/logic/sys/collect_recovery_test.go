@@ -1,50 +1,78 @@
 package sys
 
-import "testing"
+import (
+	"strings"
+	"testing"
+	"time"
 
-func TestFairCollectRecoverySourceOffset(t *testing.T) {
-	tests := []struct {
-		name        string
-		sourceCount int
-		limit       int
-		round       int64
-		want        int
-	}{
-		{name: "first window", sourceCount: 157, limit: 100, round: 0, want: 0},
-		{name: "second window", sourceCount: 157, limit: 100, round: 1, want: 100},
-		{name: "wraps windows", sourceCount: 157, limit: 100, round: 2, want: 0},
-		{name: "short input", sourceCount: 2, limit: 100, round: 1, want: 0},
-		{name: "invalid limit", sourceCount: 157, limit: 0, round: 1, want: 0},
+	"github.com/gogf/gf/v2/container/gvar"
+	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/os/gtime"
+)
+
+func TestCollectEventFailureRecoveryRulesStayConsistent(t *testing.T) {
+	for _, message := range collectEventTerminalFailureMessages {
+		row := gdb.Record{
+			"status":        gvar.New("failed"),
+			"error_message": gvar.New("媒体处理失败: " + message),
+		}
+		if shouldRecoverCollectEvent(row) {
+			t.Fatalf("terminal failure %q must not be recovered", message)
+		}
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := fairCollectRecoverySourceOffset(tt.sourceCount, tt.limit, tt.round); got != tt.want {
-				t.Fatalf("fairCollectRecoverySourceOffset(%d, %d, %d) = %d, want %d", tt.sourceCount, tt.limit, tt.round, got, tt.want)
+	for _, message := range collectEventRecoverableFailureMessages {
+		row := gdb.Record{
+			"status":        gvar.New("failed"),
+			"error_message": gvar.New("处理失败: " + strings.ToUpper(message)),
+		}
+		if !shouldRecoverCollectEvent(row) {
+			t.Fatalf("transient failure %q must remain recoverable", message)
+		}
+	}
+}
+
+func TestCollectEventMediaRecordsCanResume(t *testing.T) {
+	now := gtime.Now()
+	row := func(status string, values map[string]interface{}) gdb.Record {
+		result := gdb.Record{"cache_status": gvar.New(status)}
+		for key, value := range values {
+			result[key] = gvar.New(value)
+		}
+		return result
+	}
+	tests := []struct {
+		name string
+		rows gdb.Result
+		want bool
+	}{
+		{name: "no media", rows: nil, want: false},
+		{name: "durable storage", rows: gdb.Result{row(collectMediaCacheReady, map[string]interface{}{"storage_path": "profiles/a.mp4"})}, want: true},
+		{name: "durable url", rows: gdb.Result{row(collectMediaCacheReady, map[string]interface{}{"file_url": "https://example.test/a.jpg"})}, want: true},
+		{name: "durable backup", rows: gdb.Result{row(collectMediaCacheReady, map[string]interface{}{"backup_chat_id": "-1001", "backup_message_id": int64(2)})}, want: true},
+		{name: "historical fake ready is repairable", rows: gdb.Result{row(collectMediaCacheReady, nil)}, want: true},
+		{name: "pending retry due", rows: gdb.Result{row(collectMediaCachePending, map[string]interface{}{"next_retry_at": now.Add(-time.Second)})}, want: true},
+		{name: "pending retry unscheduled", rows: gdb.Result{row(collectMediaCachePending, nil)}, want: true},
+		{name: "pending retry in future", rows: gdb.Result{row(collectMediaCachePending, map[string]interface{}{"next_retry_at": now.Add(time.Minute)})}, want: false},
+		{name: "download in progress", rows: gdb.Result{row(collectMediaCacheDownloading, nil)}, want: false},
+		{name: "mixed rows wait for future retry", rows: gdb.Result{
+			row(collectMediaCacheReady, map[string]interface{}{"storage_path": "profiles/a.mp4"}),
+			row(collectMediaCachePending, map[string]interface{}{"next_retry_at": now.Add(time.Minute)}),
+		}, want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := collectEventMediaRecordsCanResume(test.rows, now); got != test.want {
+				t.Fatalf("collectEventMediaRecordsCanResume()=%t, want %t", got, test.want)
 			}
 		})
 	}
 }
 
-func TestCollectRecoveryPerSourceLimit(t *testing.T) {
-	tests := []struct {
-		name        string
-		totalLimit  int
-		sourceCount int
-		want        int
-	}{
-		{name: "all candidates get one slot", totalLimit: 100, sourceCount: 100, want: 1},
-		{name: "quota shared across sources", totalLimit: 100, sourceCount: 25, want: 4},
-		{name: "quota capped for few sources", totalLimit: 100, sourceCount: 2, want: 10},
-		{name: "more sources than slots", totalLimit: 3, sourceCount: 10, want: 1},
-		{name: "invalid total limit", totalLimit: 0, sourceCount: 10, want: 1},
-		{name: "invalid source count", totalLimit: 100, sourceCount: 0, want: 1},
+func TestCollectMediaRecoveryFollowsItemTimeout(t *testing.T) {
+	if collectMediaRecoverAfter <= 15*time.Minute {
+		t.Fatalf("media recovery %s must leave commit grace after item timeout", collectMediaRecoverAfter)
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := collectRecoveryPerSourceLimit(tt.totalLimit, tt.sourceCount); got != tt.want {
-				t.Fatalf("collectRecoveryPerSourceLimit(%d, %d) = %d, want %d", tt.totalLimit, tt.sourceCount, got, tt.want)
-			}
-		})
+	if collectMediaRecoverAfter > 20*time.Minute {
+		t.Fatalf("media recovery is too slow: %s", collectMediaRecoverAfter)
 	}
 }

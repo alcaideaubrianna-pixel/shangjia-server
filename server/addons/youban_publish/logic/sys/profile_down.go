@@ -210,14 +210,22 @@ func (s *sSysPublish) createDownChannelTelegramJob(ctx context.Context, job tele
 		if existing["status"].String() == "sent" {
 			return existing["id"].Int64(), false, nil
 		}
-		_, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", existing["id"].Int64()).Data(g.Map{
-			"status": "sending", "dispatch_status": tgDispatchStatusProcessing,
-			"error_message": "", "updated_at": gtime.Now(),
-		}).Update()
+		if existing["status"].String() == telegramJobStatusSending {
+			return existing["id"].Int64(), true, nil
+		}
+		transitioned, transitionErr := s.transitionTelegramJob(ctx, telegramJobTransition{
+			JobId: existing["id"].Int64(),
+			From: []string{
+				telegramJobStatusPending, telegramJobStatusRetryWait, telegramJobStatusFailed,
+			},
+			To:         telegramJobStatusSending,
+			Additional: g.Map{"error_message": ""},
+		})
+		err = transitionErr
 		if err != nil {
 			return 0, false, gerror.Wrap(err, "重置下架频道TG任务失败")
 		}
-		return existing["id"].Int64(), true, nil
+		return existing["id"].Int64(), transitioned, nil
 	}
 	now := gtime.Now()
 	id, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Data(g.Map{
@@ -257,7 +265,7 @@ func (s *sSysPublish) sendDownChannelProfileLockedByChannel(ctx context.Context,
 	if err != nil {
 		return s.handleDownChannelTelegramJobError(ctx, job, err)
 	}
-	bot, err := s.telegramBot(ctx, botToken)
+	bot, err := s.telegramMediaBot(ctx, botToken)
 	if err != nil {
 		return s.handleDownChannelTelegramJobError(ctx, job, err)
 	}
@@ -296,12 +304,13 @@ func (s *sSysPublish) sendDownChannelProfileLockedByChannel(ctx context.Context,
 	if err = s.updateTelegramMediaFileIds(ctx, messages); err != nil {
 		return s.handleDownChannelTelegramJobError(ctx, job, err)
 	}
-	_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Data(g.Map{
-		"status":          "sent",
-		"dispatch_status": tgDispatchStatusDone,
-		"sent_at":         gtime.Now(),
-		"updated_at":      gtime.Now(),
-	}).Update()
+	sentAt := gtime.Now()
+	_, _ = s.transitionTelegramJob(ctx, telegramJobTransition{
+		JobId:      job.Id,
+		From:       []string{telegramJobStatusSending},
+		To:         telegramJobStatusSent,
+		Additional: g.Map{"sent_at": sentAt},
+	})
 	s.appendTelegramJobLog(ctx, job, "down_notify", "sent", s.telegramJobPublishMessage(ctx, job, fmt.Sprintf("资料下架通知已推送到下架频道，频道:%d", channelId)))
 	return nil
 }
@@ -323,30 +332,22 @@ func (s *sSysPublish) handleDownChannelTelegramJobError(ctx context.Context, job
 	if isTelegramAccountBusyError(cause) {
 		retryCount = job.RetryCount
 	}
-	status := "failed_retry"
-	dispatchStatus := tgDispatchStatusIdle
-	var nextRetryAt interface{} = gtime.Now().Add(policy.RetryDelay)
+	status := telegramJobStatusRetryWait
 	if policy.Permanent {
-		status = "failed"
-		dispatchStatus = tgDispatchStatusDone
-		nextRetryAt = nil
+		status = telegramJobStatusFailed
 	}
-	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("id", job.Id).
-		Where("status", "sending").
-		Data(g.Map{
-			"status":          status,
-			"dispatch_status": dispatchStatus,
-			"retry_count":     retryCount,
-			"next_retry_at":   nextRetryAt,
-			"error_message":   policy.Message,
-			"updated_at":      gtime.Now(),
-		}).Update()
+	transitioned, err := s.transitionTelegramJob(ctx, telegramJobTransition{
+		JobId:        job.Id,
+		From:         []string{telegramJobStatusSending},
+		To:           status,
+		RetryDelay:   policy.RetryDelay,
+		ErrorMessage: policy.Message,
+		Additional:   g.Map{"retry_count": retryCount},
+	})
 	if err != nil {
 		return gerror.Wrap(err, "更新下架频道TG失败任务状态失败")
 	}
-	affected, _ := result.RowsAffected()
-	if affected > 0 {
+	if transitioned {
 		s.appendTelegramJobLog(ctx, job, "down_notify", status, policy.Message)
 	}
 	return nil

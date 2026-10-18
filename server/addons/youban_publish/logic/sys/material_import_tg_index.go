@@ -186,28 +186,17 @@ func (s *sSysPublish) ensureMaterialImportTelegramJob(ctx context.Context, task 
 		Scan(&existing); !materialImportIndexLookupSucceeded(err) {
 		return 0, gerror.Wrap(err, "读取导入TG消息索引任务失败")
 	}
+	if existing.Id > 0 {
+		return existing.Id, nil
+	}
 	now := gtime.Now()
 	data := g.Map{
-		"task_id":        nil,
-		"tenant_id":      task.TenantId,
-		"merchant_id":    task.TenantId,
-		"account_id":     task.AccountId,
-		"profile_id":     profileId,
-		"channel_id":     channel.Id,
-		"bot_id":         botId,
-		"target_chat_id": channel.TargetChatId,
-		"status":         "sent",
-		"error_message":  "",
-		"sent_at":        group.MessageAt,
-		"updated_at":     now,
+		"task_id": nil, "tenant_id": task.TenantId, "merchant_id": task.TenantId,
+		"account_id": task.AccountId, "profile_id": profileId, "channel_id": channel.Id,
+		"bot_id": botId, "target_chat_id": channel.TargetChatId, "operation_no": operationNo,
+		"status": telegramJobStatusSent, "retry_count": 0, "error_message": "",
+		"sent_at": group.MessageAt, "created_at": now, "updated_at": now,
 	}
-	if existing.Id > 0 {
-		_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", existing.Id).Data(data).Update()
-		return existing.Id, gerror.Wrap(err, "更新导入TG消息索引任务失败")
-	}
-	data["operation_no"] = operationNo
-	data["retry_count"] = 0
-	data["created_at"] = now
 	id, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Data(data).InsertAndGetId()
 	return id, gerror.Wrap(err, "创建导入TG消息索引任务失败")
 }

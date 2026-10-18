@@ -8,6 +8,12 @@
     negative-text="取消"
     @positive-click="emit('save')"
   >
+    <n-alert v-if="form.configError" type="error">{{ form.configError }}</n-alert>
+    <n-alert v-if="form.featureKey === 'two_way_relay'" type="info" class="mb-4">
+      此处仅控制双向机器人全局开关。每个租户账户的
+      Bot、管理员、绑定、屏蔽规则和审计设置，请在绑定上架账号后，到主机器人发送 /relayadmin
+      独立管理。
+    </n-alert>
     <n-form :model="form" label-placement="left" label-width="110" class="feature-config-form">
       <n-alert
         v-if="form.featureKey === 'inline_promotion'"

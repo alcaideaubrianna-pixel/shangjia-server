@@ -171,7 +171,7 @@ func (s *sSysPublish) saveBotProfileMedia(ctx context.Context, profileId int64, 
 				"processing_status":      mediaProcessingUploaded,
 				"processing_error":       "",
 				"edit_status":            mediaEditStatusRaw,
-				"size":                   0,
+				"size":                   item.Size,
 				"sort_index":             sortIndex,
 				"status":                 1,
 				"created_by":             accountId,
@@ -387,18 +387,23 @@ func (s *sSysPublish) BotProfileCancelQueue(ctx context.Context, in *sysin.BotPr
 	if len(profileIds) > 0 {
 		mod = mod.WhereIn("profile_id", profileIds)
 	}
-	result, err := mod.Data(g.Map{
-		"status":              "superseded",
-		"dispatch_status":     tgDispatchStatusDone,
-		"next_retry_at":       nil,
-		"error_message":       "Bot取消资料推送队列",
-		"last_dispatch_error": "Bot取消资料推送队列",
-		"updated_at":          gtime.Now(),
-	}).Update()
+	values, err := mod.Fields("id").Array()
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取待取消资料推送队列失败")
+	}
+	jobIDs := make([]int64, 0, len(values))
+	for _, value := range values {
+		jobIDs = append(jobIDs, value.Int64())
+	}
+	affected, err := s.transitionTelegramJobs(ctx, jobIDs, telegramJobTransition{
+		From:         channelQueueClearStatuses(),
+		To:           telegramJobStatusSuperseded,
+		ErrorMessage: "Bot取消资料推送队列",
+		Additional:   g.Map{"last_dispatch_error": "Bot取消资料推送队列"},
+	})
 	if err != nil {
 		return nil, gerror.Wrap(err, "取消资料推送队列失败")
 	}
-	affected, _ := result.RowsAffected()
 	return &sysin.BotProfileQueueCancelModel{Cleared: int(affected)}, nil
 }
 

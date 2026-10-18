@@ -1,5 +1,97 @@
 package sysin
 
+type AIOpsRepairPlanInp struct {
+	Action     string   `json:"action" dc:"受控运维动作"`
+	SourceId   int64    `json:"sourceId" dc:"采集源ID"`
+	EventIds   []int64  `json:"eventIds" dc:"采集事件ID"`
+	ProfileIds []int64  `json:"profileIds" dc:"资料ID"`
+	ProfileNos []string `json:"profileNos" dc:"资料编号"`
+	TenantId   int64    `json:"tenantId" dc:"租户ID，删除资料时必填"`
+	AccountId  int64    `json:"accountId" dc:"账号ID，删除资料时必填"`
+	StartAt    string   `json:"startAt" dc:"筛选开始时间，RFC3339"`
+	EndAt      string   `json:"endAt" dc:"筛选结束时间，RFC3339"`
+	Limit      int      `json:"limit" dc:"最大影响条数"`
+}
+
+type AIOpsRepairPlanModel struct {
+	PlanId         string  `json:"planId"`
+	Action         string  `json:"action"`
+	Candidates     int     `json:"candidates"`
+	EventIds       []int64 `json:"eventIds"`
+	ProfileIds     []int64 `json:"profileIds"`
+	VerifyEventIds []int64 `json:"verifyEventIds"`
+	ConfirmToken   string  `json:"confirmToken"`
+	ExpiresAt      string  `json:"expiresAt"`
+}
+
+type AIOpsRepairPlanStatusInp struct {
+	PlanId string `json:"planId" dc:"修复计划ID"`
+}
+
+type AIOpsRepairPlanStatusModel struct {
+	PlanId     string  `json:"planId"`
+	Action     string  `json:"action"`
+	Status     string  `json:"status"`
+	Candidates int     `json:"candidates"`
+	Applied    int     `json:"applied"`
+	Failed     []int64 `json:"failed"`
+	Message    string  `json:"message"`
+	ExpiresAt  string  `json:"expiresAt"`
+	StartedAt  string  `json:"startedAt"`
+	FinishedAt string  `json:"finishedAt"`
+}
+
+type AIOpsRepairApplyInp struct {
+	PlanId       string `json:"planId"`
+	ConfirmToken string `json:"confirmToken"`
+}
+
+type AIOpsRepairApplyModel struct {
+	PlanId  string  `json:"planId"`
+	Status  string  `json:"status"`
+	Applied int     `json:"applied"`
+	Failed  []int64 `json:"failed"`
+	Message string  `json:"message"`
+}
+
+type AIOpsTelegramMessageRefInp struct {
+	ChatId    string `json:"chatId" dc:"Telegram频道Chat ID"`
+	MessageId int64  `json:"messageId" dc:"Telegram消息ID"`
+}
+
+type AIOpsTelegramOfflineInp struct {
+	URLs       []string                     `json:"urls" dc:"Telegram消息链接"`
+	Messages   []AIOpsTelegramMessageRefInp `json:"messages" dc:"Telegram频道和消息ID"`
+	ProfileIds []int64                      `json:"profileIds" dc:"资料ID"`
+	ProfileNos []string                     `json:"profileNos" dc:"资料编号"`
+}
+
+type AIOpsTelegramOfflineItem struct {
+	Target        string  `json:"target"`
+	Status        string  `json:"status"`
+	Message       string  `json:"message"`
+	ProfileId     int64   `json:"profileId"`
+	ProfileNo     string  `json:"profileNo"`
+	JobIds        []int64 `json:"jobIds"`
+	Offline       bool    `json:"offline"`
+	CleanupQueued bool    `json:"cleanupQueued"`
+}
+
+type AIOpsTelegramOfflineResult struct {
+	Total          int                         `json:"total"`
+	CleanupQueued  int                         `json:"cleanupQueued"`
+	AlreadyDeleted int                         `json:"alreadyDeleted"`
+	NotFound       int                         `json:"notFound"`
+	Failed         int                         `json:"failed"`
+	Items          []*AIOpsTelegramOfflineItem `json:"items"`
+}
+
+type AIOpsTelegramMessageContextInp struct {
+	URL       string `json:"url" dc:"Telegram消息地址"`
+	ChatId    string `json:"chatId" dc:"Telegram频道Chat ID"`
+	MessageId int64  `json:"messageId" dc:"Telegram消息ID"`
+}
+
 type AIOpsTelegramMessageContextModel struct {
 	Found                  bool   `json:"found"`
 	MatchType              string `json:"matchType"`
@@ -10,6 +102,11 @@ type AIOpsTelegramMessageContextModel struct {
 	ProfileId              int64  `json:"profileId"`
 	ProfileNo              string `json:"profileNo"`
 	ProfileStatus          int    `json:"profileStatus"`
+	TenantId               int64  `json:"tenantId"`
+	AccountId              int64  `json:"accountId"`
+	AccountName            string `json:"accountName"`
+	IsCollected            bool   `json:"isCollected"`
+	SourceType             string `json:"sourceType"`
 	JobId                  int64  `json:"jobId"`
 	JobStatus              string `json:"jobStatus"`
 	JobSendPhase           string `json:"jobSendPhase"`

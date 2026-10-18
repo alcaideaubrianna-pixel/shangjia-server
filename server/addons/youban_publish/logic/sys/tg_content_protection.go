@@ -57,12 +57,17 @@ func (s *sSysPublish) telegramChannelSendPolicy(ctx context.Context, job telegra
 		AntiScanBackgroundURL  string `orm:"anti_scan_background_url"`
 		TextObfuscationEnabled int    `orm:"text_obfuscation_enabled"`
 	}
-	if err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
+	step := beginTelegramPublishStage(ctx, "protection.channel_policy")
+	err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
 		Fields("anti_scan_enabled,anti_scan_mode,anti_scan_background_url,text_obfuscation_enabled").
-		Where("id", job.ChannelId).Where("tenant_id", job.TenantId).WhereNull("deleted_at").Scan(&channel); err != nil {
+		Where("id", job.ChannelId).Where("tenant_id", job.TenantId).WhereNull("deleted_at").Scan(&channel)
+	step.End(err)
+	if err != nil {
 		return policy, gerror.Wrap(err, "读取频道内容保护配置失败")
 	}
+	step = beginTelegramPublishStage(ctx, "protection.vip_policy")
 	vip, err := s.tenantVipStatus(ctx, job.TenantId)
+	step.End(err)
 	if err != nil {
 		return policy, err
 	}
@@ -87,6 +92,7 @@ func (s *sSysPublish) applyTelegramJobContentProtection(ctx context.Context, job
 	if err != nil {
 		return "", err
 	}
+	beginTelegramPublishStage(ctx, "protection.selected").End(nil, g.Map{"antiScanEnabled": policy.AntiScanEnabled, "antiScanMode": policy.AntiScanMode, "textObfuscationEnabled": policy.TextObfuscationEnabled})
 	if policy.TextObfuscationEnabled {
 		caption = obfuscateTelegramCaption(caption, job.Id)
 	}

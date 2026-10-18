@@ -1,0 +1,25 @@
+[Unit]
+Description=Youban media MD5 backfill, streaming without media cache
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=postgres
+Group=postgres
+WorkingDirectory=/var/lib/postgresql/media-md5-backfill-20261016
+ExecStart=/usr/bin/python3 -u /var/lib/postgresql/media-md5-backfill-20261016/backfill.py --apply --state /var/lib/postgresql/media-md5-backfill-20261016/recent.sqlite --after-id 4000000 --workers 2 --mbps 4 --batch-size 50 --limit 1500000
+ExecStart=/usr/bin/python3 -u /var/lib/postgresql/media-md5-backfill-20261016/backfill.py --apply --state /var/lib/postgresql/media-md5-backfill-20261016/full.sqlite --workers 2 --mbps 4 --batch-size 50 --limit 1500000
+Nice=15
+CPUQuota=50%
+MemoryMax=512M
+MemorySwapMax=0
+LimitFSIZE=256M
+TimeoutStartSec=infinity
+TimeoutStopSec=45
+Restart=on-failure
+RestartSec=30
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

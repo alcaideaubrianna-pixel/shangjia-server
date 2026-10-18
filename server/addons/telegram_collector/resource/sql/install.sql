@@ -158,6 +158,7 @@ ALTER TABLE `hg_tg_collector_account_task` ADD COLUMN IF NOT EXISTS `source_size
 ALTER TABLE `hg_tg_collector_account_task` ADD COLUMN IF NOT EXISTS `debug_meta_text` TEXT NOT NULL;
 ALTER TABLE `hg_tg_collector_account_task` ADD COLUMN IF NOT EXISTS `attachment_id` BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE `hg_tg_collector_account_task` ADD COLUMN IF NOT EXISTS `result_error_code` VARCHAR(64) NOT NULL DEFAULT '';
+ALTER TABLE `hg_tg_collector_account_task` ADD INDEX IF NOT EXISTS `idx_tg_collector_account_task_pending_expiry` (`task_type`, `status`, `updated_at`, `id`);
 DELETE FROM `hg_tg_collector_account_task` WHERE (`task_type`='history_page' AND `history_task_id`<=0) OR (`task_type`='media_download' AND `source_file_id`='');
 ALTER TABLE `hg_tg_collector_account_task` DROP COLUMN IF EXISTS `payload`;
 ALTER TABLE `hg_tg_collector_account_task` DROP COLUMN IF EXISTS `result`;

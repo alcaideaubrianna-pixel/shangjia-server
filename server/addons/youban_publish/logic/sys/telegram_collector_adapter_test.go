@@ -1,8 +1,11 @@
 package sys
 
 import (
+	"errors"
 	"testing"
 	"time"
+
+	"github.com/gotd/td/tg"
 
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
 	collectorservice "hotgo/addons/telegram_collector/service"
@@ -21,6 +24,18 @@ func TestPublishAccountTaskHandlersRegistered(t *testing.T) {
 		if collectorservice.AccountTaskHandlerFor(taskType) == nil {
 			t.Fatalf("Telegram account task handler is not registered: %s", taskType)
 		}
+	}
+	for _, taskType := range []string{collectorin.AccountTaskTypeMessageReconcile, collectorin.AccountTaskTypeMessageMediaFallback} {
+		if collectorservice.AccountTaskFailureHandlerFor(taskType) == nil {
+			t.Fatalf("Telegram account task failure handler is not registered: %s", taskType)
+		}
+	}
+	policies := collectorservice.AccountTaskPolicies()
+	if got := policies[collectorin.AccountTaskTypeMessageReconcile].PendingTTL; got != 15*time.Minute {
+		t.Fatalf("message reconcile pending TTL = %s, want 15m", got)
+	}
+	if got := policies[collectorin.AccountTaskTypeMessageMediaFallback].PendingTTL; got != 45*time.Minute {
+		t.Fatalf("message media fallback pending TTL = %s, want 45m", got)
 	}
 }
 
@@ -69,6 +84,143 @@ func TestParseMessagePushAccountTaskKey(t *testing.T) {
 		if err != nil || jobID != test.jobID || mode != test.mode {
 			t.Fatalf("parseMessagePushAccountTaskKey(%q) = (%d, %q, %v)", test.key, jobID, mode, err)
 		}
+	}
+}
+
+func TestParseMessageReconcileTaskKey(t *testing.T) {
+	tests := []struct {
+		key       string
+		jobID     int64
+		attemptID int64
+		wantErr   bool
+	}{
+		{key: "message-reconcile:123:456", jobID: 123, attemptID: 456},
+		{key: "message-reconcile:0:456", wantErr: true},
+		{key: "message-reconcile:123", wantErr: true},
+		{key: "message-reconcile:123:456:789", wantErr: true},
+		{key: "other:123:456", wantErr: true},
+	}
+	for _, test := range tests {
+		jobID, attemptID, err := parseMessageReconcileTaskKey(test.key)
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("parseMessageReconcileTaskKey(%q) expected error", test.key)
+			}
+			continue
+		}
+		if err != nil || jobID != test.jobID || attemptID != test.attemptID {
+			t.Fatalf("parseMessageReconcileTaskKey(%q) = (%d, %d, %v)", test.key, jobID, attemptID, err)
+		}
+	}
+}
+
+func TestTelegramMissingReconcileMessagesNeverFallsBackBlindly(t *testing.T) {
+	if err := telegramMissingReconcileMessagesError("display", false); err == nil || errors.Is(err, errTelegramMediaFallbackUnavailable) {
+		t.Fatalf("non-final reconciliation should retry lookup only: %v", err)
+	}
+	if err := telegramMissingReconcileMessagesError("verify", true); !errors.Is(err, errTelegramMediaFallbackUnavailable) {
+		t.Fatalf("final ambiguous reconciliation must stop without media resend: %v", err)
+	}
+}
+
+func TestParseMessageMediaFallbackTaskKey(t *testing.T) {
+	for _, test := range []struct {
+		key     string
+		jobID   int64
+		purpose string
+		wantErr bool
+	}{
+		{key: "message-media-fallback:12:verify", jobID: 12, purpose: "verify"},
+		{key: "message-media-fallback:13:display", jobID: 13, purpose: "display"},
+		{key: "message-media-fallback:0:verify", wantErr: true},
+		{key: "message-media-fallback:12:other", wantErr: true},
+		{key: "message-media-fallback:12", wantErr: true},
+	} {
+		jobID, purpose, err := parseMessageMediaFallbackTaskKey(test.key)
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("parseMessageMediaFallbackTaskKey(%q) expected error", test.key)
+			}
+			continue
+		}
+		if err != nil || jobID != test.jobID || purpose != test.purpose {
+			t.Fatalf("parseMessageMediaFallbackTaskKey(%q) = (%d, %q, %v)", test.key, jobID, purpose, err)
+		}
+	}
+}
+
+func TestAccountFallbackPhaseConfirmedPreventsDuplicateSend(t *testing.T) {
+	tests := []struct {
+		phase   string
+		purpose string
+		want    bool
+	}{
+		{phase: telegramSendPhaseDisplayConfirmed, purpose: "display", want: true},
+		{phase: telegramSendPhaseVerifySending, purpose: "display", want: true},
+		{phase: telegramSendPhaseVerifyConfirmed, purpose: "display", want: true},
+		{phase: telegramSendPhaseVerifyConfirmed, purpose: "verify", want: true},
+		{phase: telegramSendPhaseDisplayConfirmed, purpose: "verify", want: false},
+		{phase: telegramSendPhaseDisplaySending, purpose: "display", want: false},
+	}
+	for _, test := range tests {
+		if got := accountFallbackPhaseConfirmed(test.phase, test.purpose); got != test.want {
+			t.Fatalf("accountFallbackPhaseConfirmed(%q, %q) = %v, want %v", test.phase, test.purpose, got, test.want)
+		}
+	}
+}
+
+func TestTelegramMediaPurposeLabel(t *testing.T) {
+	if got := telegramMediaPurposeLabel("display"); got != "展示资料" {
+		t.Fatalf("display label = %q", got)
+	}
+	if got := telegramMediaPurposeLabel("verify"); got != "验证视频" {
+		t.Fatalf("verify label = %q", got)
+	}
+}
+
+func TestSelectTelegramAttemptMessages(t *testing.T) {
+	attempt := telegramDeliveryAttempt{AttemptToken: "verify-attempt", Phase: "verify"}
+	marker := telegramAttemptMarker(attempt.AttemptToken)
+	groupFirst := &tg.Message{ID: 11, Message: marker}
+	groupFirst.SetGroupedID(88)
+	groupSecond := &tg.Message{ID: 12}
+	groupSecond.SetGroupedID(88)
+	incompleteGroup := &tg.Message{ID: 11, Message: marker}
+	incompleteGroup.SetGroupedID(88)
+	tests := []struct {
+		name     string
+		history  []*tg.Message
+		expected int
+		want     int
+		wantErr  bool
+	}{
+		{name: "absent", expected: 1},
+		{name: "single", history: []*tg.Message{{ID: 9, Message: marker}}, expected: 1, want: 1},
+		{name: "group", history: []*tg.Message{groupFirst, groupSecond}, expected: 2, want: 2},
+		{name: "incomplete group", history: []*tg.Message{incompleteGroup}, expected: 2, wantErr: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			attempt.ExpectedCount = test.expected
+			messages, err := selectTelegramAttemptMessages(test.history, attempt)
+			if test.wantErr {
+				if err == nil {
+					t.Fatal("expected incomplete media group error")
+				}
+				return
+			}
+			if err != nil || len(messages) != test.want {
+				t.Fatalf("selectTelegramAttemptMessages() = (%d, %v), want %d", len(messages), err, test.want)
+			}
+		})
+	}
+}
+
+func TestSelectTelegramAttemptMessagesRejectsIncompleteSingleMessage(t *testing.T) {
+	attempt := telegramDeliveryAttempt{AttemptToken: "multi-verify", Phase: "verify", ExpectedCount: 2}
+	history := []*tg.Message{{ID: 9, Message: telegramAttemptMarker(attempt.AttemptToken)}}
+	if _, err := selectTelegramAttemptMessages(history, attempt); err == nil {
+		t.Fatal("expected an incomplete single-message verification error")
 	}
 }
 

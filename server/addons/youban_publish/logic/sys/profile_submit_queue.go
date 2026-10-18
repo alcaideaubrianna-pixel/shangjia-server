@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -60,6 +61,9 @@ func (s *sSysPublish) handleProfileSubmitTask(ctx context.Context, task *asynq.T
 	}
 	if publishAfterSave {
 		if err = s.submitProfilePublish(ctx, saved.Id, payload.TenantId, payload.AccountId, 0, "", nil, false); err != nil {
+			if errors.Is(err, errTelegramPublishPermissionPaused) {
+				return errors.Join(err, asynq.SkipRetry)
+			}
 			return gerror.Wrap(err, "后台提交资料上架失败")
 		}
 	}

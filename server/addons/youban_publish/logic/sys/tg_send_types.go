@@ -3,34 +3,36 @@ package sys
 import "github.com/gogf/gf/v2/os/gtime"
 
 type telegramMediaItem struct {
-	Id                    int64  `json:"id"`
-	AttachmentId          int64  `json:"attachmentId"`
-	MediaType             string `json:"mediaType"`
-	MustSend              bool   `json:"mustSend"`
-	Purpose               string `json:"purpose"`
-	FileUrl               string `json:"fileUrl"`
-	PosterUrl             string `json:"posterUrl"`
-	StoragePath           string `json:"storagePath"`
-	PosterStoragePath     string `json:"posterStoragePath"`
-	TgFileId              string `json:"tgFileId"`
-	TgFileUniqueId        string `json:"tgFileUniqueId"`
-	TgThumbFileId         string `json:"tgThumbFileId"`
-	AssetHash             string `json:"assetHash"`
-	SortIndex             int    `json:"sortIndex"`
-	VideoWidth            int    `json:"videoWidth"`
-	VideoHeight           int    `json:"videoHeight"`
-	VideoDuration         int    `json:"videoDuration"`
-	AntiScanEnabled       bool   `json:"antiScanEnabled"`
-	AntiScanSeed          int64  `json:"antiScanSeed"`
-	AntiScanMode          string `json:"antiScanMode"`
-	AntiScanBackgroundURL string `json:"antiScanBackgroundUrl"`
-	TenantId              int64  `json:"-"`
-	AccountId             int64  `json:"-"`
-	JobId                 int64  `json:"-"`
-	ForceUpload           bool   `json:"-"`
-	ProtectedHashKey      string `json:"-"`
-	ProtectedPHash        uint64 `json:"-"`
-	ProtectedDHash        uint64 `json:"-"`
+	Id                      int64  `json:"id"`
+	AttachmentId            int64  `json:"attachmentId"`
+	MediaType               string `json:"mediaType"`
+	Size                    int64  `json:"size,omitempty"`
+	MustSend                bool   `json:"mustSend"`
+	Purpose                 string `json:"purpose"`
+	FileUrl                 string `json:"fileUrl"`
+	PosterUrl               string `json:"posterUrl"`
+	StoragePath             string `json:"storagePath"`
+	PosterStoragePath       string `json:"posterStoragePath"`
+	TgFileId                string `json:"tgFileId"`
+	TgFileUniqueId          string `json:"tgFileUniqueId"`
+	TgThumbFileId           string `json:"tgThumbFileId"`
+	AssetHash               string `json:"assetHash"`
+	SortIndex               int    `json:"sortIndex"`
+	VideoWidth              int    `json:"videoWidth"`
+	VideoHeight             int    `json:"videoHeight"`
+	VideoDuration           int    `json:"videoDuration"`
+	AntiScanEnabled         bool   `json:"antiScanEnabled"`
+	AntiScanSeed            int64  `json:"antiScanSeed"`
+	AntiScanMode            string `json:"antiScanMode"`
+	AntiScanBackgroundURL   string `json:"antiScanBackgroundUrl"`
+	TenantId                int64  `json:"-"`
+	AccountId               int64  `json:"-"`
+	JobId                   int64  `json:"-"`
+	ForceUpload             bool   `json:"-"`
+	CollectedFileIdEligible bool   `json:"-"`
+	ProtectedHashKey        string `json:"-"`
+	ProtectedPHash          uint64 `json:"-"`
+	ProtectedDHash          uint64 `json:"-"`
 }
 
 type telegramSentMessage struct {
@@ -74,6 +76,8 @@ type telegramJobRecord struct {
 	DispatchStatus         string      `json:"dispatchStatus"`
 	DispatchedAt           *gtime.Time `json:"dispatchedAt"`
 	DispatchCount          int         `json:"dispatchCount"`
+	LastDispatchError      string      `json:"lastDispatchError"`
+	NextRetryAt            *gtime.Time `json:"nextRetryAt"`
 	SendPhase              string      `json:"sendPhase"`
 	ReconcileCount         int         `json:"reconcileCount"`
 	ErrorMessage           string      `json:"errorMessage"`
@@ -83,4 +87,9 @@ type telegramJobRecord struct {
 	CyclePublishTime       string      `json:"cyclePublishTime"`
 	NextCycleAt            *gtime.Time `json:"nextCycleAt"`
 	CreatedAt              *gtime.Time `json:"createdAt"`
+	VerifyMediaCount       int         `json:"verifyMediaCount"`
+	SendDeadlineAt         *gtime.Time `json:"sendDeadlineAt"`
+	TimeoutParentJobId     int64       `json:"timeoutParentJobId"`
+	TimeoutCleanupAt       *gtime.Time `json:"timeoutCleanupAt"`
+	TimeoutRetryCount      int         `json:"timeoutRetryCount"`
 }

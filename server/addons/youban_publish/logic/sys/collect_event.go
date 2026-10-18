@@ -306,7 +306,7 @@ func (s *sSysPublish) CollectEventClear(ctx context.Context, in *sysin.CollectEv
 }
 
 func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, tenantId int64, accountId int64) error {
-	eventLock := lock.NewConfig(15*time.Minute, time.Second).Mutex(fmt.Sprintf("youban_publish:collect:event:%d", eventId))
+	eventLock := lock.NewConfig(2*time.Minute, time.Second).Mutex(fmt.Sprintf("youban_publish:collect:event:%d", eventId))
 	if lockErr := eventLock.TryLock(ctx); lockErr != nil {
 		if errors.Is(lockErr, lock.ErrLockFailed) {
 			g.Log().Debugf(ctx, "采集事件已有实例处理，跳过本次执行 eventId:%d", eventId)
@@ -340,6 +340,58 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 	}
 	if source.IsEmpty() {
 		return s.ignoreCollectEvent(ctx, eventId, "采集源不存在", "source")
+	}
+	if source["channel_blacklisted"].Int() != 0 {
+		return s.ignoreCollectEvent(ctx, eventId, "采集频道已禁用", "source")
+	}
+	channelID := source["channel_id"].Int64()
+	if channelID <= 0 {
+		var channel struct {
+			ID int64 `json:"id"`
+		}
+		lookupErr := pdao.YoubanPublishCollectChannel.Ctx(ctx).
+			Fields(pdao.YoubanPublishCollectChannel.Columns().Id).
+			Where(pdao.YoubanPublishCollectChannel.Columns().TenantId, tenantId).
+			WhereIn(pdao.YoubanPublishCollectChannel.Columns().TelegramChatId, tgChannelCacheLookupIds(event["source_chat_id"].String())).
+			WhereNull(pdao.YoubanPublishCollectChannel.Columns().DeletedAt).
+			OrderDesc(pdao.YoubanPublishCollectChannel.Columns().Id).
+			Limit(1).
+			Scan(&channel)
+		if lookupErr != nil {
+			return gerror.Wrap(lookupErr, "读取事件采集频道失败")
+		}
+		channelID = channel.ID
+	}
+	if channelID > 0 {
+		if botID := source["bot_id"].Int64(); botID > 0 {
+			var botRelation struct {
+				Status string `json:"status"`
+			}
+			if relationErr := pdao.YoubanPublishCollectBotChannel.Ctx(ctx).
+				Fields(pdao.YoubanPublishCollectBotChannel.Columns().Status).
+				Where(pdao.YoubanPublishCollectBotChannel.Columns().TenantId, tenantId).
+				Where(pdao.YoubanPublishCollectBotChannel.Columns().BotId, botID).
+				Where(pdao.YoubanPublishCollectBotChannel.Columns().ChannelId, channelID).
+				Scan(&botRelation); relationErr != nil {
+				return gerror.Wrap(relationErr, "读取BOT频道关系失败")
+			} else if botRelation.Status == sysin.CollectBotChannelRemoved {
+				return s.ignoreCollectEvent(ctx, eventId, "机器人已被移出采集频道", "source")
+			}
+		}
+		var channelRelation struct {
+			CollectEnabled int    `json:"collectEnabled"`
+			Status         string `json:"status"`
+			ApprovalStatus string `json:"approvalStatus"`
+		}
+		if relationErr := g.DB().Model("hg_youban_publish_collect_account_channel").Ctx(ctx).
+			Fields("collect_enabled,status,approval_status").Where("tenant_id", tenantId).Where("account_id", accountId).
+			Where("channel_id", channelID).WhereNull("deleted_at").Scan(&channelRelation); !collectOptionalRecordScanSucceeded(relationErr) {
+			return gerror.Wrap(relationErr, "读取频道采集状态失败")
+		} else {
+			if !botCollectChannelRelationEnabled(channelRelation.CollectEnabled, channelRelation.Status, channelRelation.ApprovalStatus) {
+				return s.ignoreCollectEvent(ctx, eventId, "采集频道未启用或机器人已移除", "source")
+			}
+		}
 	}
 	event["source_name_snapshot"] = source["title"]
 	event["source_username_snapshot"] = source["source_username"]
@@ -411,15 +463,19 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 			g.Log().Warningf(ctx, "验证资料已完成但没有父展示事件 eventId:%d", eventId)
 			return nil
 		}
-		g.Log().Infof(ctx, "验证资料媒体已完成，回流处理父展示事件 verifyEventId:%d parentEventId:%d", eventId, parentEventId)
-		if err = s.processCollectEvent(ctx, parentEventId, tenantId, accountId); err != nil {
-			g.Log().Warningf(ctx, "验证资料回流父展示事件失败，将重新排队 verifyEventId:%d parentEventId:%d err:%+v", eventId, parentEventId, err)
-			if enqueueErr := s.enqueueCollectProcess(ctx, collectProcessQueuePayload{
-				EventId: parentEventId, TenantId: tenantId, AccountId: accountId,
-				SourceId: event["source_id"].Int64(), SourceChatId: event["source_chat_id"].String(),
-			}, 30*time.Second); enqueueErr != nil {
-				return enqueueErr
-			}
+		parent, parentErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).WherePri(parentEventId).One()
+		if parentErr != nil {
+			return gerror.Wrap(parentErr, "读取验证资料父展示事件失败")
+		}
+		if parent.IsEmpty() {
+			return nil
+		}
+		g.Log().Infof(ctx, "验证资料媒体已完成，调度父展示资料静默截止任务 verifyEventId:%d parentEventId:%d", eventId, parentEventId)
+		if err = s.scheduleCollectDisplaySettlement(ctx, collectProcessQueuePayload{
+			EventId: parentEventId, TenantId: tenantId, AccountId: accountId,
+			SourceId: event["source_id"].Int64(), SourceChatId: event["source_chat_id"].String(),
+		}, parent, s.collectDisplayRetryDelay(ctx, parent)); err != nil {
+			return err
 		}
 		return nil
 	}
@@ -652,9 +708,9 @@ func collectEventAlreadyMatched(status string) bool {
 
 func (s *sSysPublish) collectEventNeedsProfileRepair(ctx context.Context, eventId int64) (bool, error) {
 	row, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
-		Fields("id").
+		Fields("id,profile_id").
 		Where("event_id", eventId).
-		Where("profile_id <= 0").
+		Where("profile_id <= 0 OR (profile_id > 0 AND EXISTS (SELECT 1 FROM "+pdao.YoubanPublishCollectEvent.Table()+" verify_event WHERE verify_event.material_parent_event_id = ? AND verify_event.material_role = ?) AND EXISTS (SELECT 1 FROM hg_content_profile profile WHERE profile.id = "+pdao.YoubanPublishCollectDispatch.Table()+".profile_id AND profile.has_verification_video <> 1 AND profile.deleted_at IS NULL))", eventId, collectMaterialRoleVerify).
 		One()
 	if err != nil {
 		return false, gerror.Wrap(err, "检查采集资料回写状态失败")
@@ -917,12 +973,10 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 	if err != nil {
 		var duplicate *profileFingerprintDuplicateError
 		if errors.As(err, &duplicate) {
-			reason := duplicate.Error()
-			_, _ = pdao.YoubanPublishCollectDispatch.Ctx(ctx).Where("id", dispatchId).Data(g.Map{
-				"status": sysin.CollectDispatchStatusSkipped, "error_message": reason,
-				"finished_at": gtime.Now(), "updated_at": gtime.Now(),
-			}).Update()
-			s.appendCollectEventLogForRecord(ctx, event, "dedupe", "skipped", reason, fmt.Sprintf("rule=%d", rule["id"].Int64()))
+			reason, skipErr := s.skipCollectProfileDispatchDuplicate(ctx, dispatchId, event, rule, duplicate)
+			if skipErr != nil {
+				return false, "", skipErr
+			}
 			return false, reason, nil
 		}
 		_ = s.markCollectDispatchFailed(ctx, dispatchId, err.Error())
@@ -938,7 +992,7 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 // grouping is already complete before this function runs, so a hit ends the
 // current group and never mutates or republishes the existing profile.
 func (s *sSysPublish) findCollectRuleDuplicate(ctx context.Context, event, rule gdb.Record, fingerprints []profileFingerprint) (*profileFingerprintDuplicateError, error) {
-	if rule["dedupe_enabled"].Int() != 1 {
+	if !collectRuleDedupeEnabled(rule) {
 		return nil, nil
 	}
 	ready, err := profileFingerprintBackfillReady(ctx)
@@ -951,21 +1005,150 @@ func (s *sSysPublish) findCollectRuleDuplicate(ctx context.Context, event, rule 
 	return s.findProfileFingerprintDuplicate(ctx, event["tenant_id"].Int64(), event["account_id"].Int64(), fingerprints, 0)
 }
 
+func collectRuleDedupeEnabled(rule gdb.Record) bool {
+	value := rule["dedupe_enabled"]
+	return value != nil && value.Int() == 1
+}
+
 func (s *sSysPublish) resumeExistingCollectDispatch(ctx context.Context, dispatch gdb.Record, event gdb.Record, content *collectContentResult, rule gdb.Record, text string) (bool, string, error) {
 	if rule["review_enabled"].Int() == 1 && dispatch["review_id"].Int64() <= 0 {
 		return true, "", s.createCollectReview(ctx, event, content, rule, dispatch["id"].Int64(), text)
 	}
 	switch collectDispatchResumeActionForStatus(dispatch["status"].String()) {
 	case collectDispatchResumeNoop:
+		if collectContentHasVerification(content) {
+			switch dispatch["status"].String() {
+			case sysin.CollectDispatchStatusPending:
+				profileID, err := s.upgradeCollectDispatchProfileVerification(ctx, dispatch, event, content, rule, text)
+				if err != nil {
+					return false, "", err
+				}
+				if err = s.republishSentCollectDispatchWithVerification(ctx, event, profileID); err != nil {
+					return false, "", err
+				}
+			case sysin.CollectDispatchStatusSent:
+				if err := s.upgradeSentCollectDispatchVerification(ctx, dispatch, event, content, rule, text); err != nil {
+					return false, "", err
+				}
+			}
+		}
 		return true, "", nil
 	case collectDispatchResumeSubmit:
 		if err := s.resumeCollectProfileDispatch(ctx, dispatch, event, content, rule, text); err != nil {
+			var duplicate *profileFingerprintDuplicateError
+			if errors.As(err, &duplicate) {
+				reason, skipErr := s.skipCollectProfileDispatchDuplicate(ctx, dispatch["id"].Int64(), event, rule, duplicate)
+				if skipErr != nil {
+					return false, "", skipErr
+				}
+				return false, reason, nil
+			}
 			return false, "", err
 		}
 		return true, "", nil
 	default:
 		return false, "", gerror.Newf("采集分发状态不支持恢复：%s", dispatch["status"].String())
 	}
+}
+
+func collectContentHasVerification(content *collectContentResult) bool {
+	if content == nil {
+		return false
+	}
+	for _, item := range content.Media {
+		if strings.EqualFold(strings.TrimSpace(item.Purpose), collectMaterialRoleVerify) && strings.EqualFold(strings.TrimSpace(item.Type), "video") {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *sSysPublish) upgradeCollectDispatchProfileVerification(ctx context.Context, dispatch, event gdb.Record, content *collectContentResult, rule gdb.Record, text string) (int64, error) {
+	profileID := dispatch["profile_id"].Int64()
+	if profileID <= 0 {
+		return 0, gerror.New("历史验证视频修复缺少资料ID")
+	}
+	updatedProfileID, err := s.commitCollectMaterial(ctx, event, content, rule, text)
+	if err != nil {
+		return 0, gerror.Wrap(err, "补充历史资料验证视频失败")
+	}
+	if updatedProfileID != profileID {
+		return 0, gerror.Newf("历史验证视频修复命中了其他资料，原资料:%d 新资料:%d", profileID, updatedProfileID)
+	}
+	return profileID, nil
+}
+
+func (s *sSysPublish) upgradeSentCollectDispatchVerification(ctx context.Context, dispatch, event gdb.Record, content *collectContentResult, rule gdb.Record, text string) error {
+	profileID, err := s.upgradeCollectDispatchProfileVerification(ctx, dispatch, event, content, rule, text)
+	if err != nil {
+		return err
+	}
+	return s.republishSentCollectDispatchWithVerification(ctx, event, profileID)
+}
+
+// republishSentCollectDispatchWithVerification replaces every previous channel
+// publication with the complete profile. Historical verification repair must
+// never append a standalone video because that breaks profile ordering.
+func (s *sSysPublish) republishSentCollectDispatchWithVerification(ctx context.Context, event gdb.Record, profileID int64) error {
+	if profileID <= 0 {
+		return gerror.New("历史验证视频修复缺少资料ID")
+	}
+	profile, err := g.DB().Model("hg_content_profile").Ctx(ctx).
+		Fields("status").Where("id", profileID).WhereNull("deleted_at").One()
+	if err != nil {
+		return gerror.Wrap(err, "读取历史验证修复资料状态失败")
+	}
+	if profile.IsEmpty() {
+		return gerror.Newf("历史验证修复资料不存在 profileId:%d", profileID)
+	}
+	if !shouldQueueLateVerification(profile["status"].Int()) {
+		g.Log().Infof(ctx, "资料已下架，仅恢复验证媒体不补发频道消息 profileId:%d eventId:%d", profileID, event["id"].Int64())
+		return nil
+	}
+	channelValues, err := pdao.YoubanPublishTgJob.Ctx(ctx).
+		Fields("channel_id").
+		Where("profile_id", profileID).
+		Where("collect_event_id", event["id"].Int64()).
+		Where("status", telegramJobStatusSent).
+		Where("send_phase", telegramSendPhaseCompletedNoVerify).
+		Array()
+	if err != nil {
+		return gerror.Wrap(err, "读取历史资料已发送频道失败")
+	}
+	channelIDs := make([]int64, 0, len(channelValues))
+	for _, value := range channelValues {
+		if channelID := value.Int64(); channelID > 0 {
+			channelIDs = append(channelIDs, channelID)
+		}
+	}
+	channelIDs = uniqueIds(channelIDs)
+	if len(channelIDs) == 0 {
+		return nil
+	}
+	operationNo := lateVerificationRepublishOperationNo(event["id"].Int64(), profileID)
+	meta := telegramProfilePublishMeta{
+		CollectEventId: event["id"].Int64(), CollectSourceId: event["source_id"].Int64(),
+		CollectSourceChatId:    strings.TrimSpace(event["source_chat_id"].String()),
+		CollectSourceMessageId: event["source_message_id"].Int64(),
+	}
+	jobIDs, err := s.prepareProfilePublishJobs(ctx, profileID, event["tenant_id"].Int64(), event["account_id"].Int64(), operationNo, channelIDs, false, meta)
+	if err != nil {
+		return gerror.Wrap(err, "创建历史验证资料完整重发任务失败")
+	}
+	if len(jobIDs) == 0 {
+		return nil
+	}
+	s.enqueuePreparedProfileJobs(ctx, jobIDs, event["account_id"].Int64())
+	s.appendCollectEventLogForRecord(ctx, event, "verify", "republish_queued", "历史资料已补充验证视频并创建完整重发任务", fmt.Sprintf("profileId=%d operationNo=%s", profileID, operationNo))
+	return nil
+}
+
+func shouldQueueLateVerification(profileStatus int) bool {
+	return profileStatus == 1
+}
+
+func lateVerificationRepublishOperationNo(eventID, profileID int64) string {
+	return fmt.Sprintf("verify-misbinding-repair:%d:profile:%d", eventID, profileID)
 }
 
 func (s *sSysPublish) classifyCollectEvent(ctx context.Context, event gdb.Record, content *collectContentResult) (profileMessageClassification, error) {

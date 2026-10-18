@@ -21,6 +21,7 @@ import (
 const accountRuntimeSyncInterval = 15 * time.Second
 const accountRuntimeOperationConcurrency = 4
 const accountRuntimePriorityOperationConcurrency = 1
+const accountTaskFinalizationConcurrency = 8
 
 type accountRuntime struct {
 	mu      sync.Mutex
@@ -135,6 +136,20 @@ func (r *accountRuntime) recoverAndObserveAccountTasks(ctx context.Context) {
 	} else if recovered > 0 {
 		g.Log().Infof(ctx, "已恢复超时Telegram账号任务 count:%d", recovered)
 	}
+	for taskType, policy := range collectorservice.AccountTaskPolicies() {
+		expired, expireErr := tasks.ExpirePending(ctx, taskType, time.Now().Add(-policy.PendingTTL), 100)
+		if expireErr != nil {
+			g.Log().Warningf(ctx, "终止超过业务期限的Telegram账号任务失败 type:%s err:%+v", taskType, expireErr)
+		} else if expired > 0 {
+			g.Log().Warningf(ctx, "Telegram账号任务超过业务期限，已进入失败收尾 type:%s count:%d ttl:%s", taskType, expired, policy.PendingTTL)
+		}
+	}
+	finalizing, err := tasks.ListFinalizing(ctx, 100)
+	if err != nil {
+		g.Log().Warningf(ctx, "读取待收尾Telegram账号任务失败：%+v", err)
+	} else {
+		finalizeAccountTaskFailures(ctx, finalizing)
+	}
 	stats, err := tasks.ActiveStatusStats(ctx)
 	if err != nil {
 		g.Log().Warningf(ctx, "统计Telegram账号任务状态失败：%+v", err)
@@ -158,6 +173,27 @@ func (r *accountRuntime) recoverAndObserveAccountTasks(ctx context.Context) {
 			age.Record(ctx, seconds, attributes)
 		}
 	}
+}
+
+func finalizeAccountTaskFailures(ctx context.Context, tasks []*sysin.AccountTask) {
+	if len(tasks) == 0 {
+		return
+	}
+	semaphore := make(chan struct{}, accountTaskFinalizationConcurrency)
+	var workers sync.WaitGroup
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		workers.Add(1)
+		semaphore <- struct{}{}
+		go func(task *sysin.AccountTask) {
+			defer workers.Done()
+			defer func() { <-semaphore }()
+			finalizeAccountTaskFailure(ctx, task)
+		}(task)
+	}
+	workers.Wait()
 }
 
 func (r *accountRuntime) sync(ctx context.Context) {

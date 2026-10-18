@@ -18,29 +18,34 @@ import (
 )
 
 type sSysPublish struct {
-	accountClientsMu      sync.RWMutex
-	accountClients        map[int64]*telegram.Client
-	runtimeCancel         context.CancelFunc
-	runtimeDone           chan struct{}
-	runtimeMu             publishRuntimeMutex
-	tgLoginMu             publishRuntimeMutex
-	tgLogins              map[string]*telegramLoginRuntime
-	tgQueueMu             publishRuntimeMutex
-	tgQueueClient         *asynq.Client
-	tgQueueServer         *asynq.Server
-	tgBulkQueueServer     *asynq.Server
-	mediaQueueServer      *asynq.Server
-	mediaBulkQueueServer  *asynq.Server
-	mediaProcessServer    *asynq.Server
-	relayQueueServer      *asynq.Server
-	autoDeleteQueueServer *asynq.Server
-	attemptTimeoutServer  *asynq.Server
-	backgroundQueueServer *asynq.Server
-	cycleQueueServer      *asynq.Server
-	profileQueueServer    *asynq.Server
-	duplicateQueueServer  *asynq.Server
-	historyQueueServer    *asynq.Server
-	mattingQueueServer    *asynq.Server
+	accountClientsMu          sync.RWMutex
+	accountClients            map[int64]*telegram.Client
+	runtimeCancel             context.CancelFunc
+	runtimeDone               chan struct{}
+	runtimeMu                 publishRuntimeMutex
+	tgLoginMu                 publishRuntimeMutex
+	tgLogins                  map[string]*telegramLoginRuntime
+	tgQueueMu                 publishRuntimeMutex
+	telegramOutboxStarted     bool
+	tgQueueClient             *asynq.Client
+	tgQueueServer             *asynq.Server
+	tgBulkQueueServer         *asynq.Server
+	mediaQueueServer          *asynq.Server
+	mediaBulkQueueServer      *asynq.Server
+	mediaProcessServer        *asynq.Server
+	relayQueueServer          *asynq.Server
+	autoDeleteQueueServer     *asynq.Server
+	autoDeleteBackfillServer  *asynq.Server
+	attemptTimeoutServer      *asynq.Server
+	collectRealtimeServer     *asynq.Server
+	backgroundQueueServer     *asynq.Server
+	materialImportPullServer  *asynq.Server
+	materialImportMediaServer *asynq.Server
+	cycleQueueServer          *asynq.Server
+	profileQueueServer        *asynq.Server
+	duplicateQueueServer      *asynq.Server
+	historyQueueServer        *asynq.Server
+	mattingQueueServer        *asynq.Server
 
 	telegramChannelMu    publishRuntimeMutex
 	telegramChannelLocks map[string]*publishRuntimeMutex
@@ -78,6 +83,10 @@ func init() {
 	collectorservice.RegisterAccountTaskHandler(collectorin.AccountTaskTypeMessagePushInline, accountTaskHandler)
 	collectorservice.RegisterAccountTaskHandler(collectorin.AccountTaskTypeMessageReconcile, accountTaskHandler)
 	collectorservice.RegisterAccountTaskHandler(collectorin.AccountTaskTypeMessageMediaFallback, accountTaskHandler)
+	collectorservice.RegisterAccountTaskFailureHandler(collectorin.AccountTaskTypeMessageReconcile, accountTaskHandler)
+	collectorservice.RegisterAccountTaskFailureHandler(collectorin.AccountTaskTypeMessageMediaFallback, accountTaskHandler)
+	collectorservice.RegisterAccountTaskPolicy(collectorin.AccountTaskTypeMessageReconcile, collectorservice.AccountTaskPolicy{PendingTTL: 15 * time.Minute})
+	collectorservice.RegisterAccountTaskPolicy(collectorin.AccountTaskTypeMessageMediaFallback, collectorservice.AccountTaskPolicy{PendingTTL: 45 * time.Minute})
 	collectorservice.RegisterAccountTaskHandler(collectorin.AccountTaskTypeMessageDeleteFallback, accountTaskHandler)
 	collectorservice.RegisterAccountTaskHandler(collectorin.AccountTaskTypeChannelBotAttach, accountTaskHandler)
 	collectorservice.RegisterAccountTaskHandler(collectorin.AccountTaskTypeManagedBotUsernameCheck, accountTaskHandler)
@@ -119,6 +128,7 @@ func (p *publishBotGatewayProvider) ListEnabledBots(ctx context.Context) ([]gate
 	if err := g.DB().Model(publishBotTable).Safe().Ctx(ctx).
 		Fields("id", "tenant_id", "bot_token").
 		Where("status", 1).
+		Where("bot_type<>?", "two_way").
 		WhereNull("deleted_at").
 		Scan(&rows); err != nil {
 		return nil, err

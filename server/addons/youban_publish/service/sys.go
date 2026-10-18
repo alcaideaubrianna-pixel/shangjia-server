@@ -86,10 +86,16 @@ type ISysPublish interface {
 	AIOpsRebuildProfileMedia(ctx context.Context, profileIds []int64, dryRun bool) (*sysin.CollectProfileMediaRebuildResult, error)
 	AIOpsQueueBotMediaRepair(ctx context.Context, profileIds []int64, limit int) ([]int64, error)
 	AIOpsRepublishProfiles(ctx context.Context, in *sysin.ProfileStatusInp) (*sysin.ProfileStatusModel, error)
+	AIOpsOfflineProfiles(ctx context.Context, profileIds []int64) (*sysin.ProfileStatusModel, error)
 	AIOpsDeleteImportedProfiles(ctx context.Context, tenantId, accountId int64, profileIds []int64, dryRun bool) ([]int64, error)
-	AIOpsTelegramMessageContext(ctx context.Context, messageURL string) (*sysin.AIOpsTelegramMessageContextModel, error)
+	AIOpsTelegramMessageContext(ctx context.Context, in *sysin.AIOpsTelegramMessageContextInp) (*sysin.AIOpsTelegramMessageContextModel, error)
+	AIOpsTelegramMessageOffline(ctx context.Context, in *sysin.AIOpsTelegramOfflineInp) (*sysin.AIOpsTelegramOfflineResult, error)
+	AIOpsCreateRepairPlan(ctx context.Context, in *sysin.AIOpsRepairPlanInp) (*sysin.AIOpsRepairPlanModel, error)
+	AIOpsApplyRepairPlan(ctx context.Context, in *sysin.AIOpsRepairApplyInp) (*sysin.AIOpsRepairApplyModel, error)
+	AIOpsRepairPlanStatus(ctx context.Context, in *sysin.AIOpsRepairPlanStatusInp) (*sysin.AIOpsRepairPlanStatusModel, error)
 	ServerMediaList(ctx context.Context, in *sysin.MediaListInp) (list []*sysin.MediaModel, err error)
 	ServerMediaDelete(ctx context.Context, in *sysin.MediaDeleteInp) (err error)
+	RelayOwnedBots(ctx context.Context, tenantID, accountID, botID int64, lock bool) ([]*sysin.RelayOwnedBotModel, error)
 	ServerBotList(ctx context.Context, in *sysin.BotListInp) (list []*sysin.BotModel, totalCount int, err error)
 	ServerBotSave(ctx context.Context, in *sysin.BotSaveInp) (err error)
 	ServerBotDelete(ctx context.Context, in *sysin.BotDeleteInp) (err error)
@@ -275,6 +281,7 @@ type ISysPublish interface {
 	BotChannelList(ctx context.Context, in *sysin.ChannelListInp) (list []*sysin.ChannelModel, totalCount int, err error)
 	BotChannelCycleSave(ctx context.Context, in *sysin.BotChannelCycleSaveInp) (err error)
 	BotChannelFullPush(ctx context.Context, in *sysin.BotChannelActionInp) (res *sysin.ChannelFullPushModel, err error)
+	BotChannelPermissionResume(ctx context.Context, in *sysin.BotChannelActionInp, generation string) error
 	BotChannelClearQueue(ctx context.Context, in *sysin.BotChannelActionInp) (res *sysin.ChannelClearQueueModel, err error)
 	AdminProfileList(ctx context.Context, in *sysin.ProfileListInp) (list []*sysin.ProfileModel, totalCount int, err error)
 	AdminProfileView(ctx context.Context, in *sysin.ProfileViewInp) (res *sysin.ProfileViewModel, err error)
@@ -323,6 +330,8 @@ type ISysPublish interface {
 	AdminIntroFeeChannelRuleList(ctx context.Context, in *sysin.AdminIntroFeeChannelRuleListInp) (list []*sysin.IntroFeeChannelRuleItem, totalCount int, err error)
 	AdminIntroFeeChannelRuleSave(ctx context.Context, in *sysin.AdminIntroFeeChannelRuleSaveInp) (int64, error)
 	AdminIntroFeeChannelRuleDelete(ctx context.Context, id int64) error
+	IntroFeeChannelPurge(ctx context.Context, in *sysin.IntroFeeChannelPurgeInp) (*sysin.IntroFeeChannelPurgeModel, error)
+	AdminIntroFeeChannelPurge(ctx context.Context, in *sysin.IntroFeeChannelPurgeInp) (*sysin.IntroFeeChannelPurgeModel, error)
 	IntroFeeChannelBlacklist(ctx context.Context, in *sysin.IntroFeeChannelBlacklistInp) error
 	AdminIntroFeeChannelBlacklist(ctx context.Context, in *sysin.IntroFeeChannelBlacklistInp) error
 	CollectSourceSave(ctx context.Context, in *sysin.CollectSourceSaveInp) (id int64, err error)
@@ -341,6 +350,13 @@ type ISysPublish interface {
 	BotCollectRuleView(ctx context.Context, ruleId, tenantId, accountId int64) (res *sysin.CollectRuleModel, err error)
 	BotCollectRuleSave(ctx context.Context, in *sysin.CollectRuleSaveInp, tenantId, accountId int64) (id int64, err error)
 	BotCollectSourceApproval(ctx context.Context, sourceId, tenantId, accountId int64, approved bool) error
+	BotCollectChannelView(ctx context.Context, relationId, tenantId, operatorAccountId int64) (res *sysin.CollectChannelApprovalModel, err error)
+	BotCollectChannelApproval(ctx context.Context, relationId, tenantId, operatorAccountId int64, approved bool) (res *sysin.CollectChannelApprovalModel, err error)
+	BotChannelMembershipChanged(ctx context.Context, botId int64, chatId, status, role string, updateId int64) error
+	BotIntroFeeChannelRuleSave(ctx context.Context, in *sysin.IntroFeeChannelRuleSaveInp, tenantId, accountId int64) (int64, error)
+	BotIntroFeeChannelRuleList(ctx context.Context, in *sysin.IntroFeeChannelRuleListInp, tenantId, accountId int64) (list []*sysin.IntroFeeChannelRuleItem, total int, err error)
+	BotIntroFeeChannelRuleDelete(ctx context.Context, id, ruleId, tenantId, accountId int64) error
+	BotIntroFeeChannelPurge(ctx context.Context, in *sysin.IntroFeeChannelPurgeInp, tenantId, accountId int64) (*sysin.IntroFeeChannelPurgeModel, error)
 	CollectRuleDelete(ctx context.Context, in *sysin.IdsInp) (err error)
 	CollectEventList(ctx context.Context, in *sysin.CollectEventListInp) (list []*sysin.CollectEventModel, totalCount int, err error)
 	CollectEventLogList(ctx context.Context, in *sysin.CollectEventLogListInp) (list []*sysin.CollectEventLogModel, totalCount int, err error)

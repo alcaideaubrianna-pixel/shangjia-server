@@ -96,7 +96,9 @@ func (e *mediaFileCacheHTTPStatusError) Error() string {
 	return "下载远程媒体失败：HTTP " + strconv.Itoa(e.statusCode)
 }
 
-func cachedTelegramMediaFile(ctx context.Context, media *telegramMediaItem) (string, func(), error) {
+func cachedTelegramMediaFile(ctx context.Context, media *telegramMediaItem) (resultPath string, resultCleanup func(), resultErr error) {
+	stage := beginTelegramPublishStage(ctx, "media.cache.resolve", telegramPublishMediaLogFields(media))
+	defer stage.Finish(&resultErr)
 	if media == nil {
 		return "", nil, gerror.New("媒体文件为空")
 	}
@@ -122,7 +124,9 @@ func cachedTelegramMediaFile(ctx context.Context, media *telegramMediaItem) (str
 	var lastErr error
 	for index, source := range sources {
 		downloader := mediaFileCacheSourceDownloader(ctx, source)
+		step := beginTelegramPublishStage(ctx, "media.cache.download", g.Map{"mediaId": media.Id, "sourceIndex": index, "sourceRole": source.Role, "sourceHost": mediaFileCacheSourceHost(source.URL)})
 		path, sourceErr := cachedRemoteMediaFileWithMetaSourceAndDownloader(ctx, source.CacheKey, source.URL, source.URL, mediaFileCacheExt(media, source.URL), downloader)
+		step.End(sourceErr)
 		if sourceErr == nil {
 			observeMediaFileCacheSource(ctx, source.Role, "success", "ok")
 			if index > 0 {
@@ -372,7 +376,7 @@ func cachedRemoteMediaFileWithMetaSourceAndDownloader(ctx context.Context, key s
 		}
 		return filePath, nil
 	}
-	value, err, _ := mediaFileCacheDownloadGroup.Do(key, func() (interface{}, error) {
+	resultCh := mediaFileCacheDownloadGroup.DoChan(key, func() (interface{}, error) {
 		if fileExists(filePath) {
 			if err := touchMediaFileCacheMeta(metaPath, key, metaSource, filePath); err != nil {
 				g.Log().Warningf(ctx, "更新媒体缓存访问时间失败 path:%s err:%+v", filePath, err)
@@ -391,10 +395,15 @@ func cachedRemoteMediaFileWithMetaSourceAndDownloader(ctx context.Context, key s
 		scheduleMediaFileCachePrune(ctx)
 		return filePath, nil
 	})
-	if err != nil {
-		return "", err
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case result := <-resultCh:
+		if result.Err != nil {
+			return "", result.Err
+		}
+		return result.Val.(string), nil
 	}
-	return value.(string), nil
 }
 
 func cachedGeneratedMediaFile(ctx context.Context, key string, source string, ext string, generate func(string) error) (string, error) {
@@ -412,7 +421,7 @@ func cachedGeneratedMediaFile(ctx context.Context, key string, source string, ex
 		_ = touchMediaFileCacheMeta(metaPath, key, source, filePath)
 		return filePath, nil
 	}
-	value, err, _ := mediaFileCacheGenerateGroup.Do(key, func() (interface{}, error) {
+	resultCh := mediaFileCacheGenerateGroup.DoChan(key, func() (interface{}, error) {
 		if fileExists(filePath) {
 			_ = touchMediaFileCacheMeta(metaPath, key, source, filePath)
 			return filePath, nil
@@ -436,10 +445,15 @@ func cachedGeneratedMediaFile(ctx context.Context, key string, source string, ex
 		scheduleMediaFileCachePrune(ctx)
 		return filePath, nil
 	})
-	if err != nil {
-		return "", err
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case result := <-resultCh:
+		if result.Err != nil {
+			return "", result.Err
+		}
+		return result.Val.(string), nil
 	}
-	return value.(string), nil
 }
 
 func downloadMediaFileCache(ctx context.Context, source string, filePath string) error {
@@ -489,6 +503,10 @@ func downloadMediaFileCacheWithClient(ctx context.Context, client *http.Client, 
 		return gerror.Wrap(err, "创建远程媒体下载请求失败")
 	}
 	req.Header.Set("User-Agent", "youban-server/media-cache")
+	// Object storage and CDN recovery requests are server-to-server requests.
+	// Never forward browser origin headers: some legacy buckets reject them.
+	req.Header.Del("Origin")
+	req.Header.Del("Referer")
 	if client == nil {
 		client = &http.Client{Timeout: 2 * time.Minute}
 	}

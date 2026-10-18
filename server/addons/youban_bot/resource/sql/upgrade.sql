@@ -255,3 +255,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_bot_broadcast_recipient` (
   UNIQUE KEY `uk_ybbr_task_user` (`task_id`,`telegram_user_id`),
   KEY `idx_ybbr_task_status` (`task_id`,`status`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='全局Bot推送收件人明细';
+
+UPDATE `hg_youban_bot_feature` SET `command` = '', `updated_at` = NOW() WHERE `feature_key` = 'two_way_relay' AND `deleted_at` IS NULL AND `command` <> '';
+
+UPDATE hg_youban_bot_feature SET config_json='{}' WHERE feature_key='two_way_relay' AND deleted_at IS NULL;

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 container_name="${COS_CHECK_DB_CONTAINER:-youban-hotgo-postgres}"
-public_base="${COS_CHECK_PUBLIC_BASE:-https://img.yuebanby.com}"
+public_base="${COS_CHECK_PUBLIC_BASE:-https://cos.xiao-feiji.cc}"
 limit="${COS_CHECK_LIMIT:-10}"
 
 rows="$(docker exec "$container_name" sh -lc \

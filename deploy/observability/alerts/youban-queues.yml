@@ -164,6 +164,33 @@ groups:
         annotations:
           summary: "采集处理队列严重放大"
           description: "采集处理任务数是有效分区数的 {{ $value }} 倍，已可能造成跨租户饥饿"
+      - alert: YoubanCollectMediaQueueAmplification
+        expr: '{__name__="xiaohuiji.collect.media_queue_amplification_ratio"} > 1.2'
+        for: 2m
+        labels:
+          severity: CRIT
+          category: collect
+        annotations:
+          summary: "采集媒体队列出现重复任务放大"
+          description: "媒体队列任务数是唯一事件数的 {{ $value }} 倍，恢复或完成回调可能在重复投递"
+      - alert: YoubanCollectMediaEventDuplicated
+        expr: '{__name__="xiaohuiji.collect.media_queue_max_event_duplicates"} > 2'
+        for: 1m
+        labels:
+          severity: CRIT
+          category: collect
+        annotations:
+          summary: "单个采集事件存在多份媒体任务"
+          description: "单个 event_id 最大任务副本数为 {{ $value }}，应立即检查任务生产者"
+      - alert: YoubanCollectMediaQueueOldestPendingHigh
+        expr: '{__name__="xiaohuiji.collect.media_queue_oldest_pending_age_seconds"} > 120'
+        for: 2m
+        labels:
+          severity: CRIT
+          category: collect
+        annotations:
+          summary: "采集媒体队列等待超过 2 分钟"
+          description: "最老媒体任务已等待 {{ $value }} 秒，实时采集可能出现延迟"
       - alert: YoubanCollectMediaPendingStale
         expr: '{__name__="xiaohuiji.collect.media_pending_stale_events"} > 0'
         for: 2m

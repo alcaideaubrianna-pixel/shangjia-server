@@ -40,14 +40,14 @@ func (s *sSysPublish) profilePushChannels(ctx context.Context, profile *sysin.Pr
 		FirstPushAt *gtime.Time `orm:"first_push_at"`
 	}
 	var firstPushes []*firstPushRow
-	if err := g.DB().Model(publishSuccessRecordTable+" r").Safe().Ctx(ctx).
-		InnerJoin(publishTgJobTable+" j", "j.id=r.job_id AND j.sent_at IS NOT NULL").
-		Fields("r.channel_id,MIN(j.sent_at) AS first_push_at").
-		Where("r.tenant_id", profile.TenantId).
-		Where("r.profile_id", profile.Id).
-		Where("r.status", "success").
-		WhereIn("r.channel_id", channelIds).
-		Group("r.channel_id").
+	if err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
+		Fields("j.channel_id,MIN(j.sent_at) AS first_push_at").
+		Where("j.status", telegramJobStatusSent).
+		WhereNotNull("j.sent_at").
+		Where("j.tenant_id", profile.TenantId).
+		Where("j.profile_id", profile.Id).
+		WhereIn("j.channel_id", channelIds).
+		Group("j.channel_id").
 		Scan(&firstPushes); err != nil {
 		return nil, err
 	}

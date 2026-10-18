@@ -12,6 +12,8 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/hibiken/asynq"
+
+	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
 const terminalPublishRecoveryDelay = 10 * time.Minute
@@ -37,6 +39,11 @@ func terminalPublishRecoverySourceJobID(operationNo string) int64 {
 }
 
 func terminalPublishRecoveryEligible(job telegramJobRecord, cause error) bool {
+	// Once display was published, recovering only the remaining phase can
+	// interleave with newer jobs. Repair these records through a full relist.
+	if job.SendPhase == telegramSendPhaseDisplaySending || telegramSendPhaseHasDisplay(job.SendPhase) {
+		return false
+	}
 	if job.Id <= 0 || job.ProfileId <= 0 || job.ChannelId <= 0 || isMessagePushOperationNo(job.OperationNo) {
 		return false
 	}
@@ -102,6 +109,23 @@ func (s *sSysPublish) handleTerminalPublishRecoveryTask(ctx context.Context, tas
 		observeTelegramPublishRecovery(ctx, "superseded")
 		return nil
 	}
+	// Recovery is never a new user instruction to publish a withdrawn profile.
+	_, err = s.profilePublishSource(ctx, job.ProfileId, job.TenantId, job.AccountId, true)
+	if errors.Is(err, errPublishProfileUnavailable) {
+		return s.supersedeTelegramJobAndCompleteOperation(ctx, job)
+	}
+	if err != nil {
+		return err
+	}
+	active, err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
+		Where("id", job.ChannelId).Where("tenant_id", job.TenantId).
+		Where("status", 1).WhereNull("deleted_at").Count()
+	if err != nil {
+		return gerror.Wrap(err, "校验终态补偿频道失败")
+	}
+	if active == 0 {
+		return nil
+	}
 	complete, err := collectProfileMediaComplete(ctx, job.ProfileId)
 	if err != nil {
 		return err
@@ -113,26 +137,35 @@ func (s *sSysPublish) handleTerminalPublishRecoveryTask(ctx context.Context, tas
 		}
 		return err
 	}
-	operationNo := terminalPublishRecoveryOperationNo(job)
-	count, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("operation_no", operationNo).Where("profile_id", job.ProfileId).Where("channel_id", job.ChannelId).Count()
+	transitioned, err := s.transitionTelegramJob(ctx, telegramJobTransition{
+		JobId: job.Id,
+		From:  []string{telegramJobStatusFailed},
+		To:    telegramJobStatusPending,
+		Additional: g.Map{
+			"retry_count":         0,
+			"next_retry_at":       nil,
+			"error_message":       "",
+			"last_dispatch_error": "",
+		},
+	})
 	if err != nil {
-		return gerror.Wrap(err, "检查终态失败补偿任务幂等状态失败")
+		observeTelegramPublishRecovery(ctx, "failed")
+		return gerror.Wrap(err, "恢复终态失败任务失败")
 	}
-	if count > 0 {
+	if !transitioned {
 		observeTelegramPublishRecovery(ctx, "idempotent")
 		return nil
 	}
-	if err = s.submitProfilePublish(ctx, job.ProfileId, job.TenantId, job.AccountId, 0, operationNo, []int64{job.ChannelId}, false); err != nil {
-		if errors.Is(err, errPublishProfileUnavailable) {
-			observeTelegramPublishRecovery(ctx, "unavailable")
-			return nil
-		}
+	if err = s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusPending); err != nil {
 		observeTelegramPublishRecovery(ctx, "failed")
-		return gerror.Wrap(err, "重新提交终态失败资料失败")
+		return err
+	}
+	if err = s.enqueueTelegramJob(ctx, job.Id, 0); err != nil {
+		observeTelegramPublishRecovery(ctx, "failed")
+		return gerror.Wrap(err, "重新提交终态失败任务失败")
 	}
 	observeTelegramPublishRecovery(ctx, "requeued")
-	g.Log().Info(ctx, "终态失败资料已自动重新上架", g.Map{"sourceJobId": job.Id, "profileId": job.ProfileId, "channelId": job.ChannelId, "operationNo": operationNo})
+	g.Log().Info(ctx, "终态失败任务已从原发送阶段恢复", g.Map{"jobId": job.Id, "profileId": job.ProfileId, "channelId": job.ChannelId, "sendPhase": job.SendPhase})
 	return nil
 }
 
@@ -150,19 +183,17 @@ func (s *sSysPublish) reconcileRecoveredCycleJob(ctx context.Context, recoveryJo
 		return nil
 	}
 	message := "原循环任务已由自动补偿任务成功替代"
-	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("id", source.Id).Where("status", "failed").Data(g.Map{
-		"status":              "superseded",
-		"dispatch_status":     tgDispatchStatusDone,
-		"next_retry_at":       nil,
-		"last_dispatch_error": message,
-		"updated_at":          gtime.Now(),
-	}).Update()
+	transitioned, err := s.transitionTelegramJob(ctx, telegramJobTransition{
+		JobId:        source.Id,
+		From:         []string{telegramJobStatusFailed},
+		To:           telegramJobStatusSuperseded,
+		ErrorMessage: message,
+		Additional:   g.Map{"last_dispatch_error": message},
+	})
 	if err != nil {
 		return gerror.Wrap(err, "回写循环源任务补偿状态失败")
 	}
-	affected, _ := result.RowsAffected()
-	if affected == 0 {
+	if !transitioned {
 		return nil
 	}
 	if err = s.reconcileCycleRunStatus(ctx, source.OperationNo); err != nil {

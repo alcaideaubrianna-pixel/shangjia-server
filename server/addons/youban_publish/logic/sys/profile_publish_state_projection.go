@@ -229,6 +229,7 @@ func (s *sSysPublish) recoverProfilePublishOperationState(ctx context.Context, s
 			"SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed," +
 			"SUM(CASE WHEN status='sending' THEN 1 ELSE 0 END) AS sending," +
 			"SUM(CASE WHEN status IN ('pending','failed_retry','unknown') THEN 1 ELSE 0 END) AS pending," +
+			"SUM(CASE WHEN status='sent' THEN 1 ELSE 0 END) AS sent," +
 			"SUM(CASE WHEN status IN ('sent','superseded') THEN 1 ELSE 0 END) AS completed").
 		One()
 	if err != nil {
@@ -242,6 +243,8 @@ func (s *sSysPublish) recoverProfilePublishOperationState(ctx context.Context, s
 		return s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusPublishing)
 	case row["pending"].Int() > 0:
 		return s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusPending)
+	case row["completed"].Int() == total && row["sent"].Int() == 0:
+		return s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusFailed)
 	case row["completed"].Int() == total:
 		if !isCycleBatchOperation(job.OperationNo) {
 			if _, err = s.syncProfilePublishState(ctx, job.ProfileId, 1, consts.ContentVisibilityPublic, gtime.Now()); err != nil {

@@ -220,6 +220,42 @@ func TestTaskLogRetentionIndexesStayOutOfInteractiveUpgrade(t *testing.T) {
 	}
 }
 
+func TestTelegramAttemptRecoveryIndexUsesConcurrentMaintenance(t *testing.T) {
+	const index = "idx_ybp_tg_attempt_sending_recovery"
+	installSQL := readSqlFile("addons/youban_publish/resource/sql/install.pgsql.sql")
+	heavySQL := readSqlFile("addons/youban_publish/resource/sql/heavy_indexes.pgsql.sql")
+	onlineSQL := readSqlFile("addons/youban_publish/resource/sql/upgrade_online.pgsql.sql")
+	if !strings.Contains(installSQL, index) {
+		t.Fatalf("fresh PostgreSQL install does not include %s", index)
+	}
+	if !strings.Contains(heavySQL, "CREATE INDEX CONCURRENTLY IF NOT EXISTS \""+index+"\"") {
+		t.Fatalf("maintenance SQL does not build %s concurrently", index)
+	}
+	if strings.Contains(onlineSQL, index) {
+		t.Fatalf("interactive upgrade must not build large recovery index %s", index)
+	}
+}
+
+func TestTelegramDeliveryStepSchemaIsMigrated(t *testing.T) {
+	for _, path := range []string{
+		"addons/youban_publish/resource/sql/install.sql",
+		"addons/youban_publish/resource/sql/install.pgsql.sql",
+		"addons/youban_publish/resource/sql/upgrade_online.sql",
+		"addons/youban_publish/resource/sql/upgrade_online.pgsql.sql",
+	} {
+		sql := readSqlFile(path)
+		for _, required := range []string{
+			"hg_youban_publish_tg_delivery_step",
+			"uk_ybp_tg_delivery_step_job",
+			"idx_ybp_tg_delivery_step_recovery",
+		} {
+			if !strings.Contains(sql, required) {
+				t.Fatalf("TG delivery step migration %s does not contain %q", path, required)
+			}
+		}
+	}
+}
+
 func TestMessagePushSchemaIsOwnedByInstallAndMigrationSql(t *testing.T) {
 	tests := []struct {
 		name    string

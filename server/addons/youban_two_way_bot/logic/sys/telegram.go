@@ -13,10 +13,11 @@ import (
 
 	twdao "hotgo/addons/youban_two_way_bot/internal/dao"
 	"hotgo/addons/youban_two_way_bot/internal/model/entity"
+	twowaymodel "hotgo/addons/youban_two_way_bot/model"
 	"hotgo/internal/library/cache"
 )
 
-func (s *sSysTwoWayBot) handleTelegramUpdate(ctx context.Context, bot *tgbot.Bot, row *entity.YoubanTwoWayBotBot, update *models.Update) error {
+func (s *sSysTwoWayBot) handleTelegramUpdate(ctx context.Context, bot *tgbot.Bot, row *twowaymodel.BotRuntime, update *models.Update) error {
 	if row == nil || update == nil {
 		return nil
 	}
@@ -45,7 +46,7 @@ func (s *sSysTwoWayBot) handleTelegramUpdate(ctx context.Context, bot *tgbot.Bot
 	return nil
 }
 
-func (s *sSysTwoWayBot) handlePrivateMessage(ctx context.Context, bot *tgbot.Bot, row *entity.YoubanTwoWayBotBot, msg *models.Message) error {
+func (s *sSysTwoWayBot) handlePrivateMessage(ctx context.Context, bot *tgbot.Bot, row *twowaymodel.BotRuntime, msg *models.Message) error {
 	if msg.From == nil || msg.From.ID <= 0 {
 		return nil
 	}
@@ -100,7 +101,7 @@ func (s *sSysTwoWayBot) handlePrivateMessage(ctx context.Context, bot *tgbot.Bot
 	return nil
 }
 
-func (s *sSysTwoWayBot) handleTopicMessage(ctx context.Context, bot *tgbot.Bot, row *entity.YoubanTwoWayBotBot, msg *models.Message) error {
+func (s *sSysTwoWayBot) handleTopicMessage(ctx context.Context, bot *tgbot.Bot, row *twowaymodel.BotRuntime, msg *models.Message) error {
 	if msg.MessageThreadID <= 0 || msg.From == nil || msg.From.IsBot {
 		return nil
 	}
@@ -170,7 +171,7 @@ func (s *sSysTwoWayBot) handleTopicMessage(ctx context.Context, bot *tgbot.Bot, 
 	return nil
 }
 
-func (s *sSysTwoWayBot) ensureUserTopic(ctx context.Context, bot *tgbot.Bot, row *entity.YoubanTwoWayBotBot, user *models.User) (*entity.YoubanTwoWayBotTopic, error) {
+func (s *sSysTwoWayBot) ensureUserTopic(ctx context.Context, bot *tgbot.Bot, row *twowaymodel.BotRuntime, user *models.User) (*entity.YoubanTwoWayBotTopic, error) {
 	userId := fmt.Sprintf("%d", user.ID)
 	if threadId := cachedUserThread(ctx, row.Id, userId); threadId > 0 {
 		if topic, err := s.topicByUser(ctx, row, userId); err != nil {
@@ -223,7 +224,7 @@ func (s *sSysTwoWayBot) ensureUserTopic(ctx context.Context, bot *tgbot.Bot, row
 	return topic, nil
 }
 
-func (s *sSysTwoWayBot) handleAdminCommand(ctx context.Context, bot *tgbot.Bot, row *entity.YoubanTwoWayBotBot, topic *entity.YoubanTwoWayBotTopic, msg *models.Message, userId string) error {
+func (s *sSysTwoWayBot) handleAdminCommand(ctx context.Context, bot *tgbot.Bot, row *twowaymodel.BotRuntime, topic *entity.YoubanTwoWayBotTopic, msg *models.Message, userId string) error {
 	command := normalizeBotCommand(msg.Text)
 	threadId := int64(msg.MessageThreadID)
 	switch command {
@@ -295,12 +296,12 @@ func normalizeBotCommand(text string) string {
 	}
 }
 
-func (s *sSysTwoWayBot) sendTopicNotice(ctx context.Context, bot *tgbot.Bot, row *entity.YoubanTwoWayBotBot, threadId int, text string) error {
+func (s *sSysTwoWayBot) sendTopicNotice(ctx context.Context, bot *tgbot.Bot, row *twowaymodel.BotRuntime, threadId int, text string) error {
 	_, err := bot.SendMessage(ctx, &tgbot.SendMessageParams{ChatID: row.SupergroupId, MessageThreadID: threadId, Text: text})
 	return err
 }
 
-func (s *sSysTwoWayBot) isGroupAdmin(ctx context.Context, bot *tgbot.Bot, row *entity.YoubanTwoWayBotBot, userId int64) (bool, error) {
+func (s *sSysTwoWayBot) isGroupAdmin(ctx context.Context, bot *tgbot.Bot, row *twowaymodel.BotRuntime, userId int64) (bool, error) {
 	if userId <= 0 {
 		return false, nil
 	}
@@ -343,12 +344,12 @@ func (s *sSysTwoWayBot) isGroupAdmin(ctx context.Context, bot *tgbot.Bot, row *e
 	return ok, nil
 }
 
-func (s *sSysTwoWayBot) isUserBanned(ctx context.Context, row *entity.YoubanTwoWayBotBot, userId string) bool {
+func (s *sSysTwoWayBot) isUserBanned(ctx context.Context, row *twowaymodel.BotRuntime, userId string) bool {
 	value, err := cache.Instance().Get(ctx, bannedUserCacheKey(row.Id, userId))
 	return err == nil && value != nil && value.Bool()
 }
 
-func (s *sSysTwoWayBot) setTopicClosed(ctx context.Context, row *entity.YoubanTwoWayBotBot, threadId int64, closed bool) error {
+func (s *sSysTwoWayBot) setTopicClosed(ctx context.Context, row *twowaymodel.BotRuntime, threadId int64, closed bool) error {
 	closedValue := 0
 	if closed {
 		closedValue = 1
@@ -372,7 +373,7 @@ func (s *sSysTwoWayBot) touchTopic(ctx context.Context, topicId int64) error {
 	return err
 }
 
-func (s *sSysTwoWayBot) recordMessage(ctx context.Context, row *entity.YoubanTwoWayBotBot, direction string, userId string, threadId int64, sourceChatId string, sourceMessageId int, targetChatId string, targetMessageId int, mediaGroupId string, status string, message string) error {
+func (s *sSysTwoWayBot) recordMessage(ctx context.Context, row *twowaymodel.BotRuntime, direction string, userId string, threadId int64, sourceChatId string, sourceMessageId int, targetChatId string, targetMessageId int, mediaGroupId string, status string, message string) error {
 	now := gtime.Now()
 	_, err := twdao.YoubanTwoWayBotMessage.Ctx(ctx).Data(g.Map{
 		"tenant_id":         row.TenantId,
@@ -393,9 +394,9 @@ func (s *sSysTwoWayBot) recordMessage(ctx context.Context, row *entity.YoubanTwo
 	return err
 }
 
-func (s *sSysTwoWayBot) botByWebhookId(ctx context.Context, id int64) (*entity.YoubanTwoWayBotBot, error) {
-	var row *entity.YoubanTwoWayBotBot
-	err := twdao.YoubanTwoWayBotBot.Ctx(ctx).
+func (s *sSysTwoWayBot) botByWebhookId(ctx context.Context, id int64) (*twowaymodel.BotRuntime, error) {
+	var row *twowaymodel.BotRuntime
+	err := publishTwoWayBots(ctx).
 		Where("id", id).
 		WhereNull("deleted_at").
 		Scan(&row)

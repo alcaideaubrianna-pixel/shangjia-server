@@ -2,9 +2,11 @@ package sys
 
 import (
 	"context"
+	"crypto/md5"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,6 +29,7 @@ type mediaUploadAssets struct {
 }
 
 type mediaPipelineSource struct {
+	MD5        string
 	MediaType  string
 	LocalPath  string
 	FileURL    string
@@ -37,6 +40,7 @@ type mediaPipelineSource struct {
 }
 
 type mediaPipelineResult struct {
+	MD5            string
 	Processed      bool
 	PerceptualHash string
 	Poster         *videoPosterResult
@@ -45,6 +49,7 @@ type mediaPipelineResult struct {
 }
 
 type mediaAssetMetadata struct {
+	MD5               string
 	PerceptualHash    string
 	PosterURL         string
 	PosterStoragePath string
@@ -57,10 +62,16 @@ func processMediaAssetMetadata(
 	fileURL string,
 	posterURL string,
 	fileName string,
+	knownMD5 ...string,
 ) (*mediaAssetMetadata, error) {
 	fileURL = normalizeMediaFileURL(fileURL, storagePath)
 	posterURL = normalizeMediaFileURL(posterURL, "")
+	md5Value := ""
+	if len(knownMD5) > 0 {
+		md5Value = strings.TrimSpace(knownMD5[0])
+	}
 	pipelineResult, err := processMediaPipeline(ctx, mediaPipelineSource{
+		MD5:       md5Value,
 		MediaType: mediaType,
 		LocalPath: storagePath,
 		FileURL:   fileURL,
@@ -71,6 +82,7 @@ func processMediaAssetMetadata(
 		return &mediaAssetMetadata{}, err
 	}
 	return &mediaAssetMetadata{
+		MD5:               pipelineResult.MD5,
 		PerceptualHash:    pipelineResult.PerceptualHash,
 		PosterURL:         firstNonEmpty(pipelineResult.PosterURL, mediaPosterURL(pipelineResult.Poster)),
 		PosterStoragePath: firstNonEmpty(pipelineResult.PosterPath, mediaPosterStoragePathValue(pipelineResult.Poster)),
@@ -92,6 +104,7 @@ func (s *sSysPublish) ProcessMediaAssets(ctx context.Context, in *sysin.MediaAss
 		return &sysin.MediaAssetsModel{}, err
 	}
 	return &sysin.MediaAssetsModel{
+		MD5:               result.MD5,
 		Processed:         result.Processed,
 		PerceptualHash:    result.PerceptualHash,
 		PosterUrl:         firstNonEmpty(result.PosterURL, mediaPosterURL(result.Poster)),
@@ -117,8 +130,9 @@ func processMediaPipeline(ctx context.Context, source mediaPipelineSource) (*med
 		cacheKey = mediaPipelineCacheKey(source)
 		if value, err := cache.Instance().Get(ctx, cacheKey); err == nil && !value.IsNil() {
 			cached := &mediaPipelineCacheResult{}
-			if scanErr := value.Scan(cached); scanErr == nil {
+			if scanErr := value.Scan(cached); scanErr == nil && cached.MD5 != "" && (source.MD5 == "" || source.MD5 == cached.MD5) {
 				return &mediaPipelineResult{
+					MD5:            cached.MD5,
 					Processed:      cached.Processed,
 					PerceptualHash: cached.PerceptualHash,
 					PosterURL:      cached.PosterURL,
@@ -135,7 +149,18 @@ func processMediaPipeline(ctx context.Context, source mediaPipelineSource) (*med
 		if assets == nil {
 			return &mediaPipelineResult{}, nil
 		}
+		reader, openErr := source.UploadFile.Open()
+		if openErr != nil {
+			return nil, gerror.Wrap(openErr, "打开上传媒体计算MD5失败")
+		}
+		hash := md5.New()
+		_, hashErr := io.Copy(hash, reader)
+		_ = reader.Close()
+		if hashErr != nil {
+			return nil, gerror.Wrap(hashErr, "计算上传媒体MD5失败")
+		}
 		result := &mediaPipelineResult{
+			MD5:            hex.EncodeToString(hash.Sum(nil)),
 			Processed:      true,
 			PerceptualHash: assets.PerceptualHash,
 			Poster:         assets.Poster,
@@ -146,6 +171,15 @@ func processMediaPipeline(ctx context.Context, source mediaPipelineSource) (*med
 	}
 
 	result := &mediaPipelineResult{}
+	md5Value := strings.TrimSpace(source.MD5)
+	if md5Value == "" {
+		var fingerprintErr error
+		md5Value, fingerprintErr = mediaSourceMD5(ctx, source.LocalPath, source.FileURL, source.MediaType)
+		if fingerprintErr != nil {
+			return result, fingerprintErr
+		}
+	}
+	result.MD5 = md5Value
 	var lastErr error
 	localPath := strings.TrimSpace(source.LocalPath)
 	if localPath != "" {
@@ -183,6 +217,7 @@ func processMediaPipeline(ctx context.Context, source mediaPipelineSource) (*med
 	}
 	if cacheable && cacheKey != "" {
 		_ = cache.Instance().Set(ctx, cacheKey, mediaPipelineCacheResult{
+			MD5:            result.MD5,
 			Processed:      result.Processed,
 			PerceptualHash: result.PerceptualHash,
 			PosterURL:      result.PosterURL,
@@ -219,6 +254,7 @@ func resolveMediaLocalPath(raw string) (string, error) {
 }
 
 type mediaPipelineCacheResult struct {
+	MD5            string
 	Processed      bool
 	PerceptualHash string
 	PosterURL      string
@@ -245,7 +281,7 @@ func mediaPipelineCacheKey(source mediaPipelineSource) string {
 		}
 	}
 	sum := sha256.Sum256([]byte(strings.Join(parts, "|")))
-	return "youban_publish:media_pipeline:v2:" + hex.EncodeToString(sum[:])
+	return "youban_publish:media_pipeline:v3:" + hex.EncodeToString(sum[:])
 }
 
 // prepareStoredMediaAssets processes a media file that is already in local storage.
@@ -506,4 +542,24 @@ func remotePHashString(hash *goimagehash.ImageHash) string {
 		return ""
 	}
 	return strings.ToLower(fmt.Sprintf("%016x", hash.GetHash()))
+}
+
+// mediaSourceMD5 hashes the original file, never the image used as a video poster.
+func mediaSourceMD5(ctx context.Context, localPath, fileURL, mediaType string) (string, error) {
+	if localPath != "" {
+		resolved, err := resolveMediaLocalPath(localPath)
+		if err == nil && fileExists(resolved) {
+			return fileMD5(resolved)
+		}
+	}
+	source := normalizeMediaFileURL(fileURL, localPath)
+	if !strings.HasPrefix(source, "https://") && !strings.HasPrefix(source, "http://") {
+		return "", gerror.New("媒体原文件不可用，无法计算MD5")
+	}
+	media := &telegramMediaItem{MediaType: mediaType, FileUrl: source}
+	path, err := cachedRemoteMediaFile(ctx, mediaFileCacheKey(media, source), source, mediaFileCacheExt(media, source))
+	if err != nil {
+		return "", gerror.Wrap(err, "下载媒体原文件计算MD5失败")
+	}
+	return fileMD5(path)
 }

@@ -15,12 +15,12 @@ func TestIsFeiNiuMediaReady(t *testing.T) {
 	}{
 		{
 			name:        "image with origin url and no cos path",
-			displayPath: "https://img.yuebanby.com/telegram/resource/6047470543440645937?kind=origin",
+			displayPath: "https://cos.xiao-feiji.cc/telegram/resource/6047470543440645937?kind=origin",
 			want:        true,
 		},
 		{
 			name:        "video with origin url and no cos path",
-			displayPath: "https://img.yuebanby.com/telegram/resource/6047470543440645937?kind=origin",
+			displayPath: "https://cos.xiao-feiji.cc/telegram/resource/6047470543440645937?kind=origin",
 			want:        true,
 		},
 		{

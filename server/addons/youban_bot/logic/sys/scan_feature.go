@@ -12,6 +12,7 @@ import (
 	botsysin "hotgo/addons/youban_bot/model/input/sysin"
 	publishsysin "hotgo/addons/youban_publish/model/input/sysin"
 	publishService "hotgo/addons/youban_publish/service"
+	"hotgo/utility/scantrace"
 )
 
 type scanFeature struct{}
@@ -50,56 +51,38 @@ func (scanMediaMessageHandler) Handle(ctx context.Context, bot *sSysBot, event *
 		return true, bot.replyBotError(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.Chat.ID), "扫图搜索", err)
 	}
 	userId := fmt.Sprintf("%d", event.Msg.From.ID)
-	groupId := strings.TrimSpace(event.Msg.MediaGroupID)
-	if groupId != "" {
-		if err = bot.acknowledgeScanMediaGroup(ctx, event.BotId, userId, event.Msg); err != nil {
-			return true, err
-		}
-		if bot.scanMediaGroupResolved(ctx, event.BotId, userId, groupId) {
-			return true, nil
-		}
-	} else if err = bot.acknowledgeScanMedia(ctx, event.BotId, userId, event.Msg); err != nil {
+	batchId, err := bot.scanMediaBatch(ctx, event.BotId, userId)
+	if err != nil {
 		return true, err
 	}
-	lookupStartedAt := time.Now()
-	note, _, lookupErr := bot.lookupForwardedScanProfile(ctx, event.BotId, account, event.Msg)
-	if lookupErr != nil {
-		g.Log().Warning(ctx, "Bot转发资料快捷查询失败，降级扫图", g.Map{
-			"botId": event.BotId, "tenantId": account.TenantId, "accountId": account.AccountId, "err": lookupErr,
-		})
+	traceId, err := bot.acknowledgeScanMediaGroup(ctx, event.BotId, userId, batchId, event.Msg)
+	if err != nil {
+		return true, err
 	}
-	if note != nil && note.Id > 0 {
-		if groupId != "" {
-			claimed, claimErr := bot.claimScanMediaGroupResolved(ctx, event.BotId, userId, groupId)
-			if claimErr != nil {
-				return true, claimErr
-			}
-			if !claimed {
-				return true, nil
-			}
-		}
-		err = bot.sendProfileCard(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.Chat.ID), note, profileCardPurpose(account, note, "view"))
-		observeScanStage(ctx, event.BotId, "direct_reply", lookupStartedAt, err)
-		observeScanRequest(ctx, event.BotId, scanResultLabel(err, "direct"))
+	if bot.scanMediaGroupResolved(ctx, event.BotId, userId, batchId) {
+		return true, nil
+	}
+	ctx = withScanTrace(ctx, traceId)
+	g.Log().Info(ctx, "Bot扫图请求开始", g.Map{"traceId": traceId, "botId": event.BotId, "userId": userId, "batchId": batchId, "groupId": strings.TrimSpace(event.Msg.MediaGroupID), "messageId": event.Msg.ID})
+	if err = bot.beginScanMediaGroupItem(ctx, event.BotId, userId, batchId, event.Msg); err != nil {
 		return true, err
 	}
 	resolveStartedAt := time.Now()
+	finish := scantrace.Begin(ctx, "telegram.resolve")
 	media, err := bot.resolveTelegramMessageMedia(ctx, event.BotId, botTokenForEvent(ctx, bot, event.BotId), event.Msg)
+	finish(err)
 	observeScanStage(ctx, event.BotId, "telegram_resolve", resolveStartedAt, err)
 	if err != nil {
+		_ = bot.completeScanMediaGroupItem(ctx, event.BotId, userId, batchId, nil)
 		observeScanRequest(ctx, event.BotId, "failed")
 		return true, bot.replyBotError(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.Chat.ID), "扫图搜索", err)
 	}
 	items := scanSearchItems(media)
 	if len(items) == 0 {
+		_ = bot.completeScanMediaGroupItem(ctx, event.BotId, userId, batchId, nil)
 		return true, bot.sendMessageOnly(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.Chat.ID), "当前媒体没有可用的图片或视频预览图。")
 	}
-	if groupId != "" {
-		return true, bot.collectScanMediaGroup(ctx, event.BotId, userId, event.Msg, items)
-	}
-	err = bot.searchScanMediaAndReply(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.Chat.ID), account, items)
-	observeScanRequest(ctx, event.BotId, scanResultLabel(err, "fingerprint"))
-	return true, err
+	return true, bot.completeScanMediaGroupItem(ctx, event.BotId, userId, batchId, items)
 }
 
 func scanResultLabel(err error, success string) string {

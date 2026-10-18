@@ -261,6 +261,9 @@ func (s *sSysPublish) advanceFullPushBatch(ctx context.Context, batch fullPushBa
 			if queued > 0 {
 				batch.RetryCount = 0
 			}
+			if errors.Is(err, errTelegramPublishPermissionPaused) {
+				return s.failFullPushBatch(ctx, batch, err)
+			}
 			return s.retryFullPushBatch(ctx, batch, err)
 		}
 		lastProfileId = profile.ProfileId

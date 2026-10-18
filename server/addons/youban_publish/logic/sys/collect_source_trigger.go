@@ -325,19 +325,27 @@ func (s *sSysPublish) resetCollectSourceProfilesForDev(ctx context.Context, prof
 	if len(profileIds) == 0 {
 		return nil
 	}
-	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+	values, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Fields("id").
 		Where("tenant_id", tenantId).
 		WhereIn("profile_id", profileIds).
 		WhereIn("status", []string{"pending", "sending", "failed_retry", "failed", "sent"}).
-		Data(g.Map{
-			"status":          "superseded",
-			"dispatch_status": tgDispatchStatusDone,
-			"next_retry_at":   nil,
-			"error_message":   "开发模式重置采集源推送状态",
-			"updated_at":      gtime.Now(),
-		}).
-		Update()
+		Array()
 	if err != nil {
+		return gerror.Wrap(err, "读取待废弃采集源TG任务失败")
+	}
+	jobIDs := make([]int64, 0, len(values))
+	for _, value := range values {
+		jobIDs = append(jobIDs, value.Int64())
+	}
+	if _, err = s.transitionTelegramJobs(ctx, jobIDs, telegramJobTransition{
+		From: []string{
+			telegramJobStatusPending, telegramJobStatusSending, telegramJobStatusRetryWait,
+			telegramJobStatusFailed, telegramJobStatusSent,
+		},
+		To:           telegramJobStatusSuperseded,
+		ErrorMessage: "开发模式重置采集源推送状态",
+	}); err != nil {
 		return gerror.Wrap(err, "废弃采集源TG任务失败")
 	}
 	for _, profileId := range profileIds {

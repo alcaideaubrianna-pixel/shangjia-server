@@ -10,8 +10,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
-	twdao "hotgo/addons/youban_two_way_bot/internal/dao"
-	"hotgo/addons/youban_two_way_bot/internal/model/entity"
+	twowaymodel "hotgo/addons/youban_two_way_bot/model"
 	"hotgo/addons/youban_two_way_bot/model/input/sysin"
 )
 
@@ -56,7 +55,7 @@ func (s *sSysTwoWayBot) runRuntime(ctx context.Context) {
 }
 
 func (s *sSysTwoWayBot) updateWebhookStatus(ctx context.Context, id int64, status string, message string) error {
-	_, err := twdao.YoubanTwoWayBotBot.Ctx(ctx).WherePri(id).Data(g.Map{
+	_, err := g.DB().Model(publishBotTable).Safe().Ctx(ctx).WherePri(id).Where("bot_type", "two_way").Data(g.Map{
 		"webhook_status":  status,
 		"error_message":   message,
 		"last_webhook_at": gtime.Now(),
@@ -68,12 +67,11 @@ func (s *sSysTwoWayBot) updateWebhookStatus(ctx context.Context, id int64, statu
 	return nil
 }
 
-func (s *sSysTwoWayBot) enabledBots(ctx context.Context) ([]*entity.YoubanTwoWayBotBot, error) {
-	columns := twdao.YoubanTwoWayBotBot.Columns()
-	var rows []*entity.YoubanTwoWayBotBot
-	err := twdao.YoubanTwoWayBotBot.Ctx(ctx).
-		Where(columns.Status, sysin.TwoWayBotStatusEnabled).
-		WhereNull(columns.DeletedAt).
+func (s *sSysTwoWayBot) enabledBots(ctx context.Context) ([]*twowaymodel.BotRuntime, error) {
+	var rows []*twowaymodel.BotRuntime
+	err := publishTwoWayBots(ctx).
+		Where("status", sysin.TwoWayBotStatusEnabled).
+		WhereNull("deleted_at").
 		Scan(&rows)
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取双向机器人失败")
@@ -81,14 +79,13 @@ func (s *sSysTwoWayBot) enabledBots(ctx context.Context) ([]*entity.YoubanTwoWay
 	return rows, nil
 }
 
-func (s *sSysTwoWayBot) botByToken(ctx context.Context, token string) (*entity.YoubanTwoWayBotBot, error) {
-	columns := twdao.YoubanTwoWayBotBot.Columns()
-	var row *entity.YoubanTwoWayBotBot
-	err := twdao.YoubanTwoWayBotBot.Ctx(ctx).
-		Where(columns.BotToken, strings.TrimSpace(token)).
-		Where(columns.Status, sysin.TwoWayBotStatusEnabled).
-		WhereNull(columns.DeletedAt).
-		OrderDesc(columns.Id).
+func (s *sSysTwoWayBot) botByToken(ctx context.Context, token string) (*twowaymodel.BotRuntime, error) {
+	var row *twowaymodel.BotRuntime
+	err := publishTwoWayBots(ctx).
+		Where("bot_token", strings.TrimSpace(token)).
+		Where("status", sysin.TwoWayBotStatusEnabled).
+		WhereNull("deleted_at").
+		OrderDesc("id").
 		Scan(&row)
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取双向机器人失败")

@@ -19,8 +19,11 @@ import (
 )
 
 const (
-	telegramDeleteFallbackPriority = -10
-	telegramDeleteFallbackInterval = time.Minute
+	telegramDeleteFallbackPriority             = -10
+	telegramAutoDeleteFallbackPriority         = 100
+	telegramDeleteFallbackInterval             = time.Minute
+	telegramAutoDeleteFallbackTaskKeyPrefix    = "auto-delete-fallback:"
+	telegramMessageDeleteFallbackTaskKeyPrefix = "message-delete-fallback:"
 )
 
 type telegramDeleteFallbackRetryError struct {
@@ -100,6 +103,46 @@ func (s *sSysPublish) ensureTelegramDeleteFallbackAccountAvailable(ctx context.C
 	return nil
 }
 
+func (s *sSysPublish) enqueueTelegramAutoDeleteFallback(ctx context.Context, channel *autoDeleteChannel, messageID int, cause error) (bool, error) {
+	if channel == nil || channel.Id <= 0 || channel.TenantId <= 0 || channel.TgAccountId <= 0 || messageID <= 0 {
+		return false, gerror.New("频道未绑定有效协议号")
+	}
+	if err := s.ensureTelegramDeleteFallbackAccountAvailable(ctx, channel.TgAccountId); err != nil {
+		return false, err
+	}
+	taskKey := telegramAutoDeleteFallbackTaskKey(channel.Id, messageID)
+	_, err := collectorservice.AccountTasks().Submit(ctx, &collectorin.AccountTaskSubmit{
+		TenantID: channel.TenantId, AccountID: channel.TgAccountId,
+		TaskType: collectorin.AccountTaskTypeMessageDeleteFallback,
+		TaskKey:  taskKey, Priority: telegramAutoDeleteFallbackPriority, MaxAttempts: 3,
+	})
+	if err != nil {
+		return false, gerror.Wrap(err, "提交协议号实时删除任务失败")
+	}
+	g.Log().Warningf(ctx, "Bot删除失败，已切换协议号实时删除 channel:%d tgAccountId:%d chat:%s message:%d cause:%+v", channel.Id, channel.TgAccountId, channel.TargetChatId, messageID, cause)
+	return true, nil
+}
+
+func telegramAutoDeleteFallbackTaskKey(channelID int64, messageID int) string {
+	return fmt.Sprintf("%s%d:%d", telegramAutoDeleteFallbackTaskKeyPrefix, channelID, messageID)
+}
+
+func parseTelegramAutoDeleteFallbackTaskKey(taskKey string) (channelID int64, messageID int, ok bool) {
+	if !strings.HasPrefix(taskKey, telegramAutoDeleteFallbackTaskKeyPrefix) {
+		return 0, 0, false
+	}
+	parts := strings.Split(strings.TrimPrefix(taskKey, telegramAutoDeleteFallbackTaskKeyPrefix), ":")
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+	channelID, channelErr := strconv.ParseInt(parts[0], 10, 64)
+	messageID64, messageErr := strconv.ParseInt(parts[1], 10, 32)
+	if channelErr != nil || messageErr != nil || channelID <= 0 || messageID64 <= 0 {
+		return 0, 0, false
+	}
+	return channelID, int(messageID64), true
+}
+
 func (s *sSysPublish) cancelTelegramDeleteFallbackTasks(ctx context.Context, tgAccountIDs []int64, reason string) {
 	tgAccountIDs = uniqueIds(tgAccountIDs)
 	if len(tgAccountIDs) == 0 {
@@ -158,11 +201,16 @@ func telegramDeleteFallbackConfigInt(ctx context.Context, key string, fallback, 
 }
 
 func (s *sSysPublish) handleMessageDeleteFallbackAccountTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) error {
-	const prefix = "message-delete-fallback:"
-	if task == nil || !strings.HasPrefix(task.TaskKey, prefix) {
+	if task == nil {
 		return gerror.New("协议号删除兜底任务参数无效")
 	}
-	jobID, err := strconv.ParseInt(strings.TrimPrefix(task.TaskKey, prefix), 10, 64)
+	if channelID, messageID, ok := parseTelegramAutoDeleteFallbackTaskKey(task.TaskKey); ok {
+		return s.handleAutoDeleteFallbackAccountTask(ctx, client, task, channelID, messageID)
+	}
+	if !strings.HasPrefix(task.TaskKey, telegramMessageDeleteFallbackTaskKeyPrefix) {
+		return gerror.New("协议号删除兜底任务参数无效")
+	}
+	jobID, err := strconv.ParseInt(strings.TrimPrefix(task.TaskKey, telegramMessageDeleteFallbackTaskKeyPrefix), 10, 64)
 	if err != nil || jobID <= 0 {
 		return gerror.New("协议号删除兜底任务ID无效")
 	}
@@ -246,6 +294,47 @@ func (s *sSysPublish) handleMessageDeleteFallbackAccountTask(ctx context.Context
 	return nil
 }
 
+func (s *sSysPublish) handleAutoDeleteFallbackAccountTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask, channelID int64, messageID int) error {
+	channel, err := s.autoDeleteChannelById(ctx, channelID, task.TenantID)
+	if err != nil {
+		return err
+	}
+	if channel == nil || channel.TgAccountId != task.AccountID {
+		return gerror.New("协议号实时删除任务与频道绑定账号不一致")
+	}
+	targets, err := s.messagePushCachedTargets(ctx, task.AccountID, []string{channel.TargetChatId}, task.TenantID)
+	if err != nil {
+		return gerror.Wrap(err, "读取协议号实时删除目标失败")
+	}
+	if len(targets) == 0 {
+		return gerror.New("协议号实时删除目标不存在")
+	}
+	peer, err := messagePushInputPeer(targets[0])
+	if err != nil {
+		return err
+	}
+	inputChannel, ok := peer.(*tg.InputPeerChannel)
+	if !ok {
+		return gerror.New("协议号实时删除仅支持频道和超级群")
+	}
+	_, err = client.API().ChannelsDeleteMessages(ctx, &tg.ChannelsDeleteMessagesRequest{
+		Channel: &tg.InputChannel{ChannelID: inputChannel.ChannelID, AccessHash: inputChannel.AccessHash},
+		ID:      []int{messageID},
+	})
+	if err == nil {
+		s.appendAutoDeleteLogByValues(ctx, channel, 0, messageID, "", "success", "Bot删除失败，协议号已完成自动删除")
+		return nil
+	}
+	if delay, flood := tgerr.AsFloodWait(err); flood {
+		return &telegramDeleteFallbackRetryError{cause: gerror.Wrap(err, "协议号实时删除触发Telegram限流"), delay: delay + 5*time.Second}
+	}
+	if telegramDeleteFallbackPermanentError(err) {
+		s.appendAutoDeleteLogByValues(ctx, channel, 0, messageID, "", "failed", "协议号实时删除永久失败："+err.Error())
+		return nil
+	}
+	return &telegramDeleteFallbackRetryError{cause: gerror.Wrap(err, "协议号实时删除失败"), delay: telegramDeleteFallbackRetryDelay(task.AttemptCount)}
+}
+
 // cleanupPartialAccountMediaSend records messages already accepted by Telegram and
 // removes them with the same account before the failed send is allowed to retry.
 func (s *sSysPublish) cleanupPartialAccountMediaSend(ctx context.Context, client *telegram.Client, job telegramJobRecord, channel *messagePushChannel, purpose string, messages []*telegramSentMessage, sendErr error) error {
@@ -263,11 +352,12 @@ func (s *sSysPublish) cleanupPartialAccountMediaSend(ctx context.Context, client
 	s.appendTelegramJobLog(ctx, job, "account", "cleanup_started", fmt.Sprintf("协议号发送部分成功，开始清理 purpose:%s messages:%d error:%v", purpose, len(messages), sendErr))
 	if err := s.deletePartialAccountMessages(ctx, client, job, channel, messages); err != nil {
 		s.appendTelegramJobLog(ctx, job, "account", "cleanup_failed", err.Error())
-		_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-			Where("id", job.Id).
-			Where("status", "sending").
-			Data(g.Map{"status": "unknown", "dispatch_status": tgDispatchStatusIdle, "error_message": err.Error(), "updated_at": gtime.Now()}).
-			Update()
+		_, _ = s.transitionTelegramJob(ctx, telegramJobTransition{
+			JobId:        job.Id,
+			From:         []string{telegramJobStatusSending},
+			To:           telegramJobStatusConfirming,
+			ErrorMessage: err.Error(),
+		})
 		s.enqueueTelegramMessageDeleteFallback(ctx, job, "协议号半组消息同步清理失败", err)
 		return &telegramPartialSendCleanupRetryError{cause: gerror.Wrap(err, "协议号半组消息清理失败，等待删除兜底完成")}
 	}

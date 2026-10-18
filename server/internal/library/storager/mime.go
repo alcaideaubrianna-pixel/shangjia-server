@@ -100,6 +100,7 @@ var (
 		"avi":  "video/x-msvideo",
 		"wmv":  "video/x-ms-wmv",
 		"mpg":  "video/mpeg",
+		"mpeg": "video/mpeg",
 		"flv":  "video/x-flv",
 		"3gp":  "video/3gpp",
 	}

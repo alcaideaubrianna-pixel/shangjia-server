@@ -565,6 +565,12 @@ func (s *sSysPublish) materialImportTaskById(ctx context.Context, id int64, tena
 func (s *sSysPublish) materialImportGroupList(ctx context.Context, taskId int64) ([]*sysin.MaterialImportGroupModel, error) {
 	groupCols := pdao.YoubanPublishMaterialImportGroup.Columns()
 	rows, err := g.DB().Model(pdao.YoubanPublishMaterialImportGroup.Table()).Safe().Ctx(ctx).
+		Fields(
+			groupCols.Id, groupCols.TaskId, groupCols.Title, groupCols.Nickname, groupCols.ProfileNo,
+			groupCols.MediaTotal, groupCols.MediaDone, groupCols.MediaFailed,
+			groupCols.ProfileId, groupCols.TaskProfileId, groupCols.Status, groupCols.ErrorMessage,
+			groupCols.MessageAt, groupCols.CreatedAt, groupCols.UpdatedAt,
+		).
 		Where(groupCols.TaskId, taskId).
 		OrderAsc(groupCols.Id).
 		All()

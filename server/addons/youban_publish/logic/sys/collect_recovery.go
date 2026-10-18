@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -10,16 +11,45 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	publishconsts "hotgo/addons/youban_publish/consts"
 	pdao "hotgo/addons/youban_publish/internal/dao"
+	pdo "hotgo/addons/youban_publish/internal/model/do"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/library/cache"
 	"hotgo/internal/library/tasklog"
 )
 
 const (
 	collectHistoryRecoverAfter = 2 * time.Minute
 	collectEventRecoverAfter   = 10 * time.Second
-	collectMediaRecoverAfter   = 35 * time.Minute
+	// A single media item is capped at 15 minutes. Leave a small commit grace
+	// period, then reclaim abandoned downloading rows instead of waiting 35m.
+	collectMediaRecoverAfter     = 20 * time.Minute
+	collectMediaRecoveryDedupTTL = 30 * time.Minute
 )
+
+func reserveCollectMediaRecovery(ctx context.Context, eventID int64) bool {
+	if eventID <= 0 || !cache.Initialized() || g.Cfg().MustGet(ctx, "cache.adapter").String() != "redis" {
+		return true
+	}
+	key := fmt.Sprintf("%s%d", publishconsts.CollectMediaRecoveryKeyPrefix, eventID)
+	ok, err := cache.Instance().SetIfNotExist(ctx, key, 1, collectMediaRecoveryDedupTTL)
+	if err != nil {
+		g.Log().Warningf(ctx, "采集媒体恢复去重缓存不可用，放行任务 eventId:%d err:%+v", eventID, err)
+		return true
+	}
+	return ok
+}
+
+func releaseCollectMediaRecovery(ctx context.Context, eventID int64) {
+	if eventID <= 0 || !cache.Initialized() || g.Cfg().MustGet(ctx, "cache.adapter").String() != "redis" {
+		return
+	}
+	key := fmt.Sprintf("%s%d", publishconsts.CollectMediaRecoveryKeyPrefix, eventID)
+	if _, err := cache.Instance().Remove(ctx, key); err != nil {
+		g.Log().Warningf(ctx, "释放采集媒体恢复去重缓存失败 eventId:%d err:%+v", eventID, err)
+	}
+}
 
 func (s *sSysPublish) runCollectRecovery(ctx context.Context) {
 	time.Sleep(12 * time.Second)
@@ -38,14 +68,26 @@ func (s *sSysPublish) runCollectRecovery(ctx context.Context) {
 
 func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	mediaBatchSize := collectMediaRecoveryBatchSize(ctx)
+	if err := s.dispatchDueCollectProcessOutbox(ctx, collectProcessOutboxRecoveryBatchSize(ctx)); err != nil {
+		g.Log().Warningf(ctx, "恢复采集处理Outbox失败：%+v", err)
+	}
 	if err := s.cleanupCollectEventsOlderThan(ctx, tasklog.RetentionDays(), 1000); err != nil {
 		g.Log().Warningf(ctx, "清理过期采集事件失败：%+v", err)
 	}
 	if err := s.recoverStaleCollectMediaRows(ctx, mediaBatchSize); err != nil {
 		g.Log().Warningf(ctx, "恢复超时采集媒体失败：%+v", err)
 	}
+	if err := s.recoverInvalidReadyCollectMedia(ctx, mediaBatchSize); err != nil {
+		g.Log().Warningf(ctx, "恢复无持久化文件的采集媒体失败：%+v", err)
+	}
+	if err := s.recoverLegacyMissingVerifyCollectEvents(ctx, min(mediaBatchSize, 20)); err != nil {
+		g.Log().Warningf(ctx, "恢复历史缺少验证视频的采集事件失败：%+v", err)
+	}
 	if err := s.recoverPendingCollectMedia(ctx, mediaBatchSize); err != nil {
 		g.Log().Warningf(ctx, "恢复待处理采集媒体任务失败：%+v", err)
+	}
+	if err := s.recoverBotCollectMedia(ctx, mediaBatchSize); err != nil {
+		g.Log().Warningf(ctx, "恢复BOT采集媒体事件失败：%+v", err)
 	}
 	if err := s.recoverCollectHistoryTasks(ctx, 20); err != nil {
 		g.Log().Warningf(ctx, "恢复历史采集任务失败：%+v", err)
@@ -62,6 +104,165 @@ func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	if err := s.recoverCollectPublishTasks(ctx, 100); err != nil {
 		g.Log().Warningf(ctx, "恢复采集推送任务失败：%+v", err)
 	}
+}
+
+// recoverInvalidReadyCollectMedia repairs legacy rows that treated a Telegram
+// file_id as a durable cache. They must re-enter the normal download queue;
+// otherwise the parent event can remain in media_pending indefinitely.
+func (s *sSysPublish) recoverInvalidReadyCollectMedia(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		limit = 1000
+	}
+	mediaCols := pdao.YoubanPublishCollectEventMedia.Columns()
+	rows, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).As("m").
+		Fields("m."+mediaCols.Id).
+		Where("m."+mediaCols.CacheStatus, collectMediaCacheReady).
+		Where("COALESCE(TRIM(m." + mediaCols.StoragePath + "), '') = ''").
+		Where("COALESCE(TRIM(m." + mediaCols.FileUrl + "), '') = ''").
+		Where("NOT (COALESCE(TRIM(m." + mediaCols.BackupChatId + "), '') <> '' AND m." + mediaCols.BackupMessageId + " > 0)").
+		Where(enabledCollectSourceExistsSQL("m")).
+		OrderAsc("m." + mediaCols.Id).
+		Limit(limit).
+		All()
+	if err != nil {
+		return gerror.Wrap(err, "读取无持久化文件的采集媒体失败")
+	}
+	ids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		if id := row[mediaCols.Id].Int64(); id > 0 {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	now := gtime.Now()
+	result, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
+		WhereIn(mediaCols.Id, ids).
+		Where(mediaCols.CacheStatus, collectMediaCacheReady).
+		Where("COALESCE(TRIM(" + mediaCols.StoragePath + "), '') = ''").
+		Where("COALESCE(TRIM(" + mediaCols.FileUrl + "), '') = ''").
+		Where("NOT (COALESCE(TRIM(" + mediaCols.BackupChatId + "), '') <> '' AND " + mediaCols.BackupMessageId + " > 0)").
+		Data(g.Map{
+			mediaCols.CacheStatus:   collectMediaCachePending,
+			collectMediaNextRetryAt: nil,
+			mediaCols.ErrorMessage:  "历史媒体缺少持久化文件，已自动恢复下载",
+			mediaCols.UpdatedAt:     now,
+		}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "重置无持久化文件的采集媒体失败")
+	}
+	affected, _ := result.RowsAffected()
+	if affected > 0 {
+		g.Log().Warningf(ctx, "已恢复无持久化文件的采集媒体 count:%d", affected)
+	}
+	return nil
+}
+
+// Submission/duplicate notices are terminal and must never enter media or
+// publish processing. Clean up old pending rows as well as new ones so a
+// backlog cannot consume the collection queues.
+func (s *sSysPublish) ignoreCollectNoticeEvents(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		limit = 500
+	}
+	e := pdao.YoubanPublishCollectEvent.Columns()
+	rows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).Fields(e.Id, e.RawText).
+		WhereIn(e.Status, []string{sysin.CollectEventStatusPending, sysin.CollectEventStatusGroupCollect, sysin.CollectEventStatusWaitingOrder, sysin.CollectEventStatusPrechecked, sysin.CollectEventStatusMediaPending}).
+		WhereNull(e.ProcessedAt).OrderAsc(e.UpdatedAt).Limit(limit).All()
+	if err != nil {
+		return gerror.Wrap(err, "读取采集通知事件失败")
+	}
+	ids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		if profileMessageIgnoredNotice(row[e.RawText].String()) {
+			ids = append(ids, row[e.Id].Int64())
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	now := gtime.Now()
+	_, err = pdao.YoubanPublishCollectEvent.Ctx(ctx).WhereIn(e.Id, ids).Data(g.Map{
+		e.Status: sysin.CollectEventStatusIgnored, e.ErrorMessage: "删除关键字忽略:投稿/重复通知", e.ProcessedAt: now, e.UpdatedAt: now,
+	}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "标记采集通知事件失败")
+	}
+	_, _ = pdao.YoubanPublishCollectEventMedia.Ctx(ctx).WhereIn("event_id", ids).Data(g.Map{"cache_status": collectMediaCacheCanceled, "error_message": "删除关键字忽略:投稿/重复通知", "updated_at": now}).Update()
+	g.Log().Infof(ctx, "已忽略采集通知事件 count:%d", len(ids))
+	return nil
+}
+
+// recoverBotCollectMedia is deliberately event-scoped. Older source-scoped
+// recovery can keep a busy BOT source alive without ever putting a particular
+// media group back on the media queue. Re-enqueueing each stale BOT event
+// lets the normal BOT downloader resume the group independently.
+func (s *sSysPublish) recoverBotCollectMedia(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		limit = 1000
+	}
+	e := pdao.YoubanPublishCollectEvent.Columns()
+	deadline := gtime.Now().Add(-collectEventRecoverAfter)
+	model := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
+		Fields("e.*").
+		Where("e."+e.SourceType, sysin.CollectSourceTypeBot).
+		WhereIn("e."+e.Status, []string{sysin.CollectEventStatusMediaPending, sysin.CollectEventStatusMediaReady, sysin.CollectEventStatusGroupCollect, sysin.CollectEventStatusPending, sysin.CollectEventStatusFailed}).
+		WhereNull("e."+e.ProcessedAt).
+		WhereLTE("e."+e.UpdatedAt, deadline).
+		Where(enabledCollectSourceExistsSQL("e"))
+	// Keep ordering and pagination on the outer event query. GoFrame may attach
+	// later Order/Limit calls to an EXISTS expression when its predicate is
+	// built inline, producing invalid PostgreSQL SQL (ORDER inside EXISTS).
+	model = model.Where("e."+e.Id+" IN (SELECT m.event_id FROM "+pdao.YoubanPublishCollectEventMedia.Table()+" m WHERE m.cache_status IN (?,?))", collectMediaCachePending, collectMediaCacheDownloading)
+	rows, err := model.OrderAsc("e." + e.UpdatedAt).Limit(limit).All()
+	if err != nil {
+		return gerror.Wrap(err, "读取待恢复BOT媒体事件失败")
+	}
+	requeued := 0
+	for _, row := range rows {
+		payload := collectMediaQueuePayloadFromEvent(row)
+		payload.Reason = "bot_recovery"
+		if payload.EventId <= 0 || payload.TenantId <= 0 || payload.SourceId <= 0 {
+			continue
+		}
+		if !reserveCollectMediaRecovery(ctx, payload.EventId) {
+			continue
+		}
+		queued, enqueueErr := s.enqueueCollectMediaCacheDeferred(ctx, payload, 0)
+		if enqueueErr != nil {
+			releaseCollectMediaRecovery(ctx, payload.EventId)
+			g.Log().Warningf(ctx, "BOT媒体事件重新入队失败 eventId:%d err:%+v", payload.EventId, enqueueErr)
+			continue
+		}
+		if queued {
+			status := row[e.Status].String()
+			if _, updateErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+				Where(e.Id, payload.EventId).
+				Where(e.Status, status).
+				WhereLTE(e.UpdatedAt, deadline).
+				Data(pdo.YoubanPublishCollectEvent{Status: status}).Update(); updateErr != nil {
+				g.Log().Warningf(ctx, "更新BOT媒体事件恢复心跳失败 eventId:%d err:%+v", payload.EventId, updateErr)
+				continue
+			}
+			requeued++
+			g.Log().Infof(ctx, "BOT媒体事件已按事件重新入队 eventId:%d sourceId:%d", payload.EventId, payload.SourceId)
+		}
+	}
+	if requeued > 0 {
+		g.Log().Infof(ctx, "BOT媒体事件恢复完成 count:%d", requeued)
+	}
+	return nil
+}
+
+// RepairBotCollectMedia exposes the one-shot historical repair for the CLI.
+func RepairBotCollectMedia(ctx context.Context, limit int) error {
+	return NewSysPublish().recoverBotCollectMedia(ctx, limit)
+}
+
+// IgnoreCollectNoticeEvents exposes the one-shot notification cleanup for the CLI.
+func IgnoreCollectNoticeEvents(ctx context.Context, limit int) error {
+	return NewSysPublish().ignoreCollectNoticeEvents(ctx, limit)
 }
 
 func (s *sSysPublish) ignoreStaleCollectEventsForDisabledSources(ctx context.Context, limit int) error {
@@ -158,6 +359,21 @@ func (s *sSysPublish) recoverStaleCollectMediaRows(ctx context.Context, limit in
 	return nil
 }
 
+// RepairStaleCollectMedia performs the same bounded recovery as the runtime
+// watchdog, but runs synchronously for an operator after a deployment or
+// queue outage. It first normalizes timed-out downloads and then immediately
+// requeues the affected event-scoped media tasks.
+func RepairStaleCollectMedia(ctx context.Context, limit int) error {
+	service := NewSysPublish()
+	if limit <= 0 {
+		limit = 1000
+	}
+	if err := service.recoverStaleCollectMediaRows(ctx, limit); err != nil {
+		return err
+	}
+	return service.recoverPendingCollectMedia(ctx, limit)
+}
+
 func (s *sSysPublish) recoverPendingCollectMedia(ctx context.Context, limit int) error {
 	if limit <= 0 {
 		limit = 1000
@@ -171,6 +387,7 @@ func (s *sSysPublish) recoverPendingCollectMedia(ctx context.Context, limit int)
 	}
 	rows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
 		Where("e."+eventCols.Status, sysin.CollectEventStatusMediaPending).
+		WhereNot("e."+eventCols.SourceType, sysin.CollectSourceTypeBot).
 		WhereNull("e."+eventCols.ProcessedAt).
 		Where(enabledCollectSourceExistsSQL("e")).
 		Where("EXISTS (SELECT 1 FROM "+mediaTable+" m WHERE m.event_id=e."+eventCols.Id+" AND m.cache_status=? AND (m.next_retry_at IS NULL OR m.next_retry_at<=?))", collectMediaCachePending, now).
@@ -190,13 +407,19 @@ func (s *sSysPublish) recoverPendingCollectMedia(ctx context.Context, limit int)
 			continue
 		}
 		payload := collectMediaQueuePayloadFromEvent(row)
+		payload.Reason = "recovery"
 		if payload.EventId <= 0 || payload.TenantId <= 0 || payload.AccountId <= 0 || payload.SourceId <= 0 {
+			continue
+		}
+		if !reserveCollectMediaRecovery(ctx, payload.EventId) {
+			observeCollectMediaScheduler(ctx, "recovery_duplicate_skipped", payload.TenantId, payload.TgAccountId)
 			continue
 		}
 		// Recovery must bypass Asynq's 24-hour unique key. A lost or stuck
 		// unique task otherwise prevents this media event from being requeued.
 		enqueued, enqueueErr := s.enqueueCollectMediaCacheDeferred(ctx, payload, 0)
 		if enqueueErr != nil {
+			releaseCollectMediaRecovery(ctx, payload.EventId)
 			g.Log().Warningf(ctx, "恢复待处理采集媒体任务投递失败 eventId:%d sourceId:%d err:%+v", payload.EventId, payload.SourceId, enqueueErr)
 			continue
 		}
@@ -216,6 +439,67 @@ func (s *sSysPublish) recoverPendingCollectMedia(ctx context.Context, limit int)
 	}
 	if recovered > 0 {
 		g.Log().Infof(ctx, "已重新投递待处理采集媒体任务 count:%d", recovered)
+	}
+	return nil
+}
+
+const legacyCollectMissingVerifyMessage = "BOT资料在5分钟窗口内未匹配到验证视频"
+
+// recoverLegacyMissingVerifyCollectEvents reopens only records terminated by
+// the retired mandatory-verification policy. The normal process pipeline owns
+// media caching, deduplication and dispatch after this bounded repair.
+func (s *sSysPublish) recoverLegacyMissingVerifyCollectEvents(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		limit = 100
+	}
+	e := pdao.YoubanPublishCollectEvent.Columns()
+	rows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+		Fields(e.Id, e.TenantId, e.AccountId, e.SourceId, e.SourceChatId).
+		Where(e.SourceType, sysin.CollectSourceTypeBot).
+		Where(e.Status, sysin.CollectEventStatusIgnored).
+		Where(e.ErrorMessage, legacyCollectMissingVerifyMessage).
+		OrderAsc(e.Id).Limit(limit).All()
+	if err != nil {
+		return gerror.Wrap(err, "读取历史缺少验证视频事件失败")
+	}
+	for _, row := range rows {
+		eventID := row[e.Id].Int64()
+		if eventID <= 0 {
+			continue
+		}
+		changed := false
+		err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+			result, txErr := tx.Model(pdao.YoubanPublishCollectEvent.Table()).Ctx(ctx).
+				Where(e.Id, eventID).Where(e.Status, sysin.CollectEventStatusIgnored).
+				Where(e.ErrorMessage, legacyCollectMissingVerifyMessage).
+				Data(g.Map{e.Status: sysin.CollectEventStatusGroupCollect, "material_role": collectMaterialRoleDisplay,
+					"material_parent_event_id": 0, "material_group_status": "complete",
+					e.ErrorMessage: "", e.ProcessedAt: nil, e.UpdatedAt: gtime.Now()}).Update()
+			if txErr != nil {
+				return txErr
+			}
+			affected, _ := result.RowsAffected()
+			if affected == 0 {
+				return nil
+			}
+			changed = true
+			_, txErr = tx.Model(pdao.YoubanPublishCollectEventMedia.Table()).Ctx(ctx).
+				Where("event_id", eventID).Where("cache_status", collectMediaCacheCanceled).
+				Data(g.Map{"cache_status": collectMediaCachePending, "error_message": "", "next_retry_at": nil, "updated_at": gtime.Now()}).Update()
+			return txErr
+		})
+		if err != nil {
+			return gerror.Wrapf(err, "恢复历史缺少验证视频事件失败 eventId:%d", eventID)
+		}
+		if !changed {
+			continue
+		}
+		if err = s.enqueueCollectProcess(ctx, collectProcessQueuePayload{
+			EventId: eventID, TenantId: row[e.TenantId].Int64(), AccountId: row[e.AccountId].Int64(),
+			SourceId: row[e.SourceId].Int64(), SourceChatId: row[e.SourceChatId].String(),
+		}, 0); err != nil {
+			return gerror.Wrapf(err, "重新投递历史缺少验证视频事件失败 eventId:%d", eventID)
+		}
 	}
 	return nil
 }
@@ -332,175 +616,154 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 		limit = 100
 	}
 	deadline := gtime.Now().Add(-collectEventRecoverAfter)
-	statuses := []string{sysin.CollectEventStatusPending, sysin.CollectEventStatusGroupCollect, sysin.CollectEventStatusWaitingOrder, sysin.CollectEventStatusPrechecked, sysin.CollectEventStatusMediaPending, sysin.CollectEventStatusMediaReady, sysin.CollectEventStatusFailed}
-	sourceModel := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
-		Fields("e.source_id,e.source_chat_id").
-		WhereIn("e.status", statuses).
+	activeStatuses := []string{sysin.CollectEventStatusPending, sysin.CollectEventStatusGroupCollect, sysin.CollectEventStatusWaitingOrder, sysin.CollectEventStatusPrechecked, sysin.CollectEventStatusMediaPending, sysin.CollectEventStatusMediaReady}
+	rows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
+		Fields("e.*").
+		WhereIn("e.status", activeStatuses).
 		WhereLTE("e.updated_at", deadline).
 		Where(enabledCollectSourceExistsSQL("e")).
-		Group("e.source_id,e.source_chat_id").
-		OrderAsc("e.source_id,e.source_chat_id")
-	// Count on the grouped model directly.  Passing Fields("1") makes GoFrame
-	// quote the literal as a column name ("1"), which PostgreSQL rejects and
-	// prevents the recovery loop from requeueing stalled collect events.
-	sourceCount, err := sourceModel.Clone().Count()
+		OrderAsc("e.updated_at").
+		OrderAsc("e.id").
+		Limit(limit).
+		All()
 	if err != nil {
-		return gerror.Wrap(err, "统计待恢复采集源失败")
+		return gerror.Wrap(err, "读取待恢复采集事件失败")
 	}
-	sourceRows, err := sourceModel.Offset(fairCollectRecoverySourceOffset(sourceCount, limit, time.Now().Unix()/60)).Limit(limit).All()
-	if err != nil {
-		return gerror.Wrap(err, "读取待恢复采集源失败")
+	if len(rows) < limit {
+		failedRows, failedErr := recoverableFailedCollectEventModel(ctx, deadline).
+			OrderAsc("e.updated_at").
+			OrderAsc("e.id").
+			Limit(limit - len(rows)).
+			All()
+		if failedErr != nil {
+			return gerror.Wrap(failedErr, "读取待恢复失败采集事件失败")
+		}
+		rows = append(rows, failedRows...)
 	}
-	perSourceLimit := collectRecoveryPerSourceLimit(limit, len(sourceRows))
-	remaining := limit
-	for _, sourceRow := range sourceRows {
-		if remaining <= 0 {
-			break
+	for _, row := range rows {
+		if row.IsEmpty() || row["id"].Int64() <= 0 || !shouldRecoverCollectEvent(row) {
+			continue
 		}
-		sourceId := sourceRow["source_id"].Int64()
-		sourceChatId := sourceRow["source_chat_id"].String()
-		sourceLimit := perSourceLimit
-		if sourceLimit > remaining {
-			sourceLimit = remaining
-		}
-		rows, queryErr := s.collectRecoveryEventRows(ctx, sourceId, sourceChatId, statuses, deadline, sourceLimit)
-		if queryErr != nil {
-			return queryErr
-		}
-		sourceQueued := false
-		for _, row := range rows {
-			if row.IsEmpty() || row["id"].Int64() <= 0 || !shouldRecoverCollectEvent(row) {
+		if row["status"].String() == sysin.CollectEventStatusMediaPending {
+			canResume, mediaErr := s.collectEventMediaCanResume(ctx, row["id"].Int64())
+			if mediaErr != nil {
+				g.Log().Warningf(ctx, "检查采集事件媒体恢复条件失败 event:%d err:%+v", row["id"].Int64(), mediaErr)
 				continue
 			}
-			if row["status"].String() == sysin.CollectEventStatusMediaPending && !s.collectEventHasDueMedia(ctx, row["id"].Int64()) {
+			if !canResume {
 				continue
 			}
-			if row["status"].String() == sysin.CollectEventStatusFailed {
-				result, resetErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).
-					Where("id", row["id"].Int64()).
-					Where("status", sysin.CollectEventStatusFailed).
-					WhereLTE("updated_at", deadline).
-					Data(g.Map{
-						"status": sysin.CollectEventStatusPending, "error_message": "", "processed_at": nil, "updated_at": gtime.Now(),
-					}).Update()
-				if resetErr != nil {
-					g.Log().Warningf(ctx, "重置失败采集事件状态失败 event:%d err:%+v", row["id"].Int64(), resetErr)
-					continue
-				}
-				affected, _ := result.RowsAffected()
-				if affected == 0 {
-					continue
-				}
-			}
-			remaining--
-			if !sourceQueued {
-				queued, processErr := s.enqueueCollectProcessDeferred(ctx, collectProcessQueuePayload{
-					EventId:      row["id"].Int64(),
-					SourceId:     row["source_id"].Int64(),
-					SourceChatId: row["source_chat_id"].String(),
-					TenantId:     row["tenant_id"].Int64(),
-					AccountId:    row["account_id"].Int64(),
-				}, 0)
-				if processErr != nil {
-					g.Log().Warningf(ctx, "恢复采集源投递失败 source:%d event:%d err:%+v", sourceId, row["id"].Int64(), processErr)
-					continue
-				}
-				if !queued {
-					g.Log().Warningf(ctx, "恢复采集源任务未实际入队 source:%d event:%d", sourceId, row["id"].Int64())
-					continue
-				}
-				sourceQueued = true
-			}
-			if _, updateErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).
-				Where("id", row["id"].Int64()).
-				WhereLTE("updated_at", deadline).
-				Data(g.Map{"updated_at": gtime.Now()}).Update(); updateErr != nil {
-				g.Log().Warningf(ctx, "更新恢复采集事件心跳失败 event:%d err:%+v", row["id"].Int64(), updateErr)
-			}
+		}
+		claimData := g.Map{"updated_at": gtime.Now()}
+		if row["status"].String() == sysin.CollectEventStatusFailed {
+			claimData["status"] = sysin.CollectEventStatusPending
+			claimData["error_message"] = ""
+			claimData["processed_at"] = nil
+		}
+		claimResult, claimErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+			Where("id", row["id"].Int64()).
+			WhereLTE("updated_at", deadline).
+			Data(claimData).Update()
+		if claimErr != nil {
+			g.Log().Warningf(ctx, "抢占待恢复采集事件失败 event:%d err:%+v", row["id"].Int64(), claimErr)
+			continue
+		}
+		claimed, claimErr := claimResult.RowsAffected()
+		if claimErr != nil {
+			g.Log().Warningf(ctx, "确认待恢复采集事件抢占结果失败 event:%d err:%+v", row["id"].Int64(), claimErr)
+			continue
+		}
+		if claimed == 0 {
+			continue
+		}
+		queued, processErr := s.enqueueCollectProcessDeferred(ctx, collectProcessQueuePayload{
+			EventId:      row["id"].Int64(),
+			SourceId:     row["source_id"].Int64(),
+			SourceChatId: row["source_chat_id"].String(),
+			TenantId:     row["tenant_id"].Int64(),
+			AccountId:    row["account_id"].Int64(),
+		}, 0)
+		if processErr != nil {
+			g.Log().Warningf(ctx, "恢复采集事件投递失败 source:%d event:%d err:%+v", row["source_id"].Int64(), row["id"].Int64(), processErr)
+			continue
+		}
+		if !queued {
+			g.Log().Warningf(ctx, "恢复采集事件任务未实际入队 source:%d event:%d", row["source_id"].Int64(), row["id"].Int64())
+			continue
 		}
 	}
 	return nil
 }
 
-func fairCollectRecoverySourceOffset(sourceCount, limit int, round int64) int {
-	if sourceCount <= limit || limit <= 0 {
-		return 0
+func recoverableFailedCollectEventModel(ctx context.Context, deadline *gtime.Time) *gdb.Model {
+	model := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
+		Fields("e.*").
+		Where("e.status", sysin.CollectEventStatusFailed).
+		WhereLTE("e.updated_at", deadline).
+		Where(enabledCollectSourceExistsSQL("e"))
+	for _, message := range collectEventTerminalFailureMessages {
+		model = model.Where("LOWER(COALESCE(e.error_message, '')) NOT LIKE ?", "%"+strings.ToLower(message)+"%")
 	}
-	windowCount := (sourceCount + limit - 1) / limit
-	window := int(round % int64(windowCount))
-	if window < 0 {
-		window += windowCount
+	patterns := make([]string, 0, len(collectEventRecoverableFailureMessages))
+	args := make([]interface{}, 0, len(collectEventRecoverableFailureMessages))
+	for _, message := range collectEventRecoverableFailureMessages {
+		patterns = append(patterns, "LOWER(COALESCE(e.error_message, '')) LIKE ?")
+		args = append(args, "%"+strings.ToLower(message)+"%")
 	}
-	return window * limit
+	return model.Where("("+strings.Join(patterns, " OR ")+")", args...)
 }
 
-func collectRecoveryPerSourceLimit(totalLimit, sourceCount int) int {
-	if totalLimit <= 0 || sourceCount <= 0 {
-		return 1
-	}
-	quota := totalLimit / sourceCount
-	if quota < 1 {
-		return 1
-	}
-	if quota > 10 {
-		return 10
-	}
-	return quota
+// RecoverCollectEvents runs one bounded recovery pass through the normal
+// collection queue. It is intended for operational repair tooling.
+func (s *sSysPublish) RecoverCollectEvents(ctx context.Context, limit int) error {
+	return s.recoverCollectEvents(ctx, limit)
 }
 
 func enabledCollectSourceExistsSQL(ownerAlias string) string {
 	return "EXISTS (SELECT 1 FROM " + pdao.YoubanPublishCollectSource.Table() + " s WHERE s.id=" + ownerAlias + ".source_id AND s.tenant_id=" + ownerAlias + ".tenant_id AND s.account_id=" + ownerAlias + ".account_id AND s.collect_enabled=1 AND s.status=1 AND s.deleted_at IS NULL)"
 }
 
-func (s *sSysPublish) collectEventHasDueMedia(ctx context.Context, eventId int64) bool {
+func (s *sSysPublish) collectEventMediaCanResume(ctx context.Context, eventId int64) (bool, error) {
 	if eventId <= 0 {
+		return false, nil
+	}
+	cols := pdao.YoubanPublishCollectEventMedia.Columns()
+	rows, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
+		Fields(cols.CacheStatus, cols.NextRetryAt, cols.StoragePath, cols.FileUrl, cols.BackupChatId, cols.BackupMessageId).
+		Where(cols.EventId, eventId).
+		All()
+	if err != nil {
+		return false, gerror.Wrapf(err, "读取采集事件媒体失败 event:%d", eventId)
+	}
+	return collectEventMediaRecordsCanResume(rows, gtime.Now()), nil
+}
+
+func collectEventMediaRecordsCanResume(rows gdb.Result, now *gtime.Time) bool {
+	if len(rows) == 0 || now == nil {
 		return false
 	}
 	cols := pdao.YoubanPublishCollectEventMedia.Columns()
-	row, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
-		Fields(cols.Id).
-		Where(cols.EventId, eventId).
-		Where(cols.CacheStatus, collectMediaCachePending).
-		Where("(next_retry_at IS NULL OR next_retry_at <= ?)", gtime.Now()).
-		Limit(1).
-		One()
-	return err == nil && !row.IsEmpty()
-}
-
-func (s *sSysPublish) collectRecoveryEventRows(ctx context.Context, sourceId int64, sourceChatId string, statuses []string, deadline *gtime.Time, limit int) (gdb.Result, error) {
-	mediaRows, err := collectRecoveryEventModel(ctx, sourceId, sourceChatId).
-		Where("status", sysin.CollectEventStatusMediaPending).
-		WhereLTE("updated_at", deadline).
-		OrderAsc("updated_at").
-		Limit(limit).
-		All()
-	if err != nil {
-		return nil, gerror.Wrap(err, "读取待恢复采集媒体事件失败")
+	for _, row := range rows {
+		status := strings.TrimSpace(row[cols.CacheStatus].String())
+		if status == collectMediaCacheReady &&
+			(strings.TrimSpace(row[cols.StoragePath].String()) != "" || strings.TrimSpace(row[cols.FileUrl].String()) != "" ||
+				(strings.TrimSpace(row[cols.BackupChatId].String()) != "" && row[cols.BackupMessageId].Int64() > 0)) {
+			continue
+		}
+		if status == collectMediaCacheReady {
+			continue
+		}
+		if status == collectMediaCachePending {
+			nextRetryAt := row[cols.NextRetryAt].GTime()
+			if nextRetryAt == nil || !nextRetryAt.After(now) {
+				continue
+			}
+		}
+		return false
 	}
-	if len(mediaRows) >= limit {
-		return mediaRows, nil
-	}
-	otherRows, err := collectRecoveryEventModel(ctx, sourceId, sourceChatId).
-		WhereNot("status", sysin.CollectEventStatusMediaPending).
-		WhereIn("status", statuses).
-		WhereLTE("updated_at", deadline).
-		OrderAsc("updated_at").
-		Limit(limit - len(mediaRows)).
-		All()
-	if err != nil {
-		return nil, gerror.Wrap(err, "读取待恢复采集事件失败")
-	}
-	return append(mediaRows, otherRows...), nil
-}
-
-func collectRecoveryEventModel(ctx context.Context, sourceId int64, sourceChatId string) *gdb.Model {
-	model := pdao.YoubanPublishCollectEvent.Ctx(ctx).Where("source_id", sourceId)
-	if chatID := canonicalCollectSourceChatID(sourceChatId); chatID != "" {
-		model = model.WhereIn("source_chat_id", tgChannelCacheLookupIds(chatID))
-	} else {
-		model = model.Where("source_chat_id", "")
-	}
-	return model
+	// A crash can happen after the last media row becomes ready but before the
+	// parent event is re-enqueued. That state is immediately safe to resume.
+	return true
 }
 
 func shouldRecoverCollectEvent(row gdb.Record) bool {
@@ -512,23 +775,35 @@ func shouldRecoverCollectEvent(row gdb.Record) bool {
 		return false
 	}
 	message := strings.ToLower(row["error_message"].String())
-	for _, terminal := range []string{
-		"未找到原消息",
-		"无法刷新文件引用",
-		"缺少原消息引用",
-		"缺少下载元数据",
-	} {
+	for _, terminal := range collectEventTerminalFailureMessages {
 		if strings.Contains(message, strings.ToLower(terminal)) {
 			return false
 		}
 	}
-	return strings.Contains(message, "app_id") ||
-		strings.Contains(message, "资料指纹索引正在初始化") ||
-		strings.Contains(message, "账号采集媒体") ||
-		strings.Contains(message, "媒体") ||
-		strings.Contains(message, "上一条采集资料") ||
-		strings.Contains(message, "验证视频暂未匹配到前序资料")
+	for _, recoverable := range collectEventRecoverableFailureMessages {
+		if strings.Contains(message, strings.ToLower(recoverable)) {
+			return true
+		}
+	}
+	return false
 }
+
+var (
+	collectEventTerminalFailureMessages = []string{
+		"未找到原消息",
+		"无法刷新文件引用",
+		"缺少原消息引用",
+		"缺少下载元数据",
+	}
+	collectEventRecoverableFailureMessages = []string{
+		"app_id",
+		"资料指纹索引正在初始化",
+		"账号采集媒体",
+		"媒体",
+		"上一条采集资料",
+		"验证视频暂未匹配到前序资料",
+	}
+)
 
 func (s *sSysPublish) recoverCollectPublishTasks(ctx context.Context, limit int) error {
 	if limit <= 0 {

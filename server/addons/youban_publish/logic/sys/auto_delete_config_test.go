@@ -1,14 +1,91 @@
 package sys
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"hotgo/addons/youban_publish/model"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
+
+func TestGlobalAutoDeleteKeywordsBackfillDisabledByDefault(t *testing.T) {
+	in := &sysin.GlobalAutoDeleteKeywordsSaveInp{
+		Keywords:        []string{"异常提示"},
+		BackfillStartAt: "2026-10-15 00:00:00",
+		BackfillEndAt:   "2026-10-15 01:00:00",
+	}
+	if err := in.Filter(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if in.BackfillEnabled != 0 || in.BackfillStartAt != "" || in.BackfillEndAt != "" {
+		t.Fatalf("disabled backfill retained scheduling fields: %#v", in)
+	}
+}
+
+func TestGlobalAutoDeleteKeywordsBackfillRequiresBoundedRange(t *testing.T) {
+	tests := []struct {
+		name    string
+		startAt string
+		endAt   string
+		wantErr bool
+	}{
+		{name: "valid", startAt: "2026-10-15 00:00:00", endAt: "2026-10-15 03:00:00"},
+		{name: "missing start", endAt: "2026-10-15 01:00:00", wantErr: true},
+		{name: "reversed", startAt: "2026-10-15 02:00:00", endAt: "2026-10-15 01:00:00", wantErr: true},
+		{name: "over 3 hours", startAt: "2026-10-15 00:00:00", endAt: "2026-10-15 03:00:01", wantErr: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			in := &sysin.GlobalAutoDeleteKeywordsSaveInp{
+				BackfillEnabled: 1,
+				BackfillStartAt: test.startAt,
+				BackfillEndAt:   test.endAt,
+			}
+			err := in.Filter(context.Background())
+			if (err != nil) != test.wantErr {
+				t.Fatalf("Filter() error = %v, wantErr %t", err, test.wantErr)
+			}
+			if err == nil {
+				if _, parseErr := time.Parse(time.RFC3339, in.BackfillStartAt); parseErr != nil {
+					t.Fatalf("start time was not normalized: %q", in.BackfillStartAt)
+				}
+			}
+		})
+	}
+}
+
+func TestValidateAutoDeleteBackfillPayloadLimits(t *testing.T) {
+	valid := autoDeleteBackfillQueuePayload{
+		StartAt: "2026-10-15T00:00:00+08:00", EndAt: "2026-10-15T03:00:00+08:00",
+		MaxMessages: autoDeleteBackfillMaxMessages,
+	}
+	if _, _, err := validateAutoDeleteBackfillPayload(valid); err != nil {
+		t.Fatalf("valid payload rejected: %v", err)
+	}
+	overLimit := valid
+	overLimit.MaxMessages++
+	if _, _, err := validateAutoDeleteBackfillPayload(overLimit); err == nil {
+		t.Fatal("payload above hard scan limit was accepted")
+	}
+	overWindow := valid
+	overWindow.EndAt = "2026-10-15T03:00:01+08:00"
+	if _, _, err := validateAutoDeleteBackfillPayload(overWindow); err == nil {
+		t.Fatal("payload above hard time window was accepted")
+	}
+}
+
+func TestAutoDeleteQueuesAreIsolated(t *testing.T) {
+	if tgQueueNameAutoDeleteRealtime == tgQueueNameAutoDeleteBackfill {
+		t.Fatal("realtime and historical deletion must not share a queue")
+	}
+	if autoDeleteBackfillBatchSize > 20 || autoDeleteBackfillBatchInterval < 30*time.Second || autoDeleteBackfillDeleteSpacing < 2*time.Second {
+		t.Fatal("historical deletion throttle was relaxed")
+	}
+}
 
 func TestMarshalGlobalAutoDeleteKeywordsUsesJSON(t *testing.T) {
 	raw, err := marshalGlobalAutoDeleteKeywords([]string{"处理异常", "录入失败"})
@@ -68,6 +145,19 @@ func TestTelegramAutoDeleteTaskResult(t *testing.T) {
 	}
 	if err := telegramAutoDeleteTaskResult(nil, nil); err == nil {
 		t.Fatal("missing channel Bot must be returned to Asynq")
+	}
+}
+
+func TestTelegramAutoDeleteFallbackTaskKey(t *testing.T) {
+	taskKey := telegramAutoDeleteFallbackTaskKey(338, 522499)
+	channelID, messageID, ok := parseTelegramAutoDeleteFallbackTaskKey(taskKey)
+	if !ok || channelID != 338 || messageID != 522499 {
+		t.Fatalf("parseTelegramAutoDeleteFallbackTaskKey(%q) = %d, %d, %t", taskKey, channelID, messageID, ok)
+	}
+	for _, invalid := range []string{"", "message-delete-fallback:1", "auto-delete-fallback:338", "auto-delete-fallback:0:1", "auto-delete-fallback:338:bad"} {
+		if _, _, valid := parseTelegramAutoDeleteFallbackTaskKey(invalid); valid {
+			t.Fatalf("invalid task key accepted: %q", invalid)
+		}
 	}
 }
 

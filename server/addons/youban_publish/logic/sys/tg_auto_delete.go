@@ -162,8 +162,25 @@ func (s *sSysPublish) handleTelegramAutoDeleteTask(ctx context.Context, task *as
 		if botItem != nil && botItem.Id > 0 {
 			botId = botItem.Id
 		}
+		queued, fallbackErr := s.enqueueTelegramAutoDeleteFallback(ctx, channel, payload.MessageId, resultErr)
+		if queued {
+			s.appendAutoDeleteLogByValues(ctx, channel, botId, payload.MessageId, payload.Keyword, "fallback_queued", "Bot删除失败，已切换协议号删除")
+			return nil
+		}
+		if !isTelegramAutoDeleteRetryableError(resultErr) {
+			message := resultErr.Error()
+			if fallbackErr != nil {
+				message += "；协议号删除兜底不可用：" + fallbackErr.Error()
+			}
+			s.appendAutoDeleteLogByValues(ctx, channel, botId, payload.MessageId, payload.Keyword, "failed", message)
+			g.Log().Warningf(ctx, "频道自动删除永久失败，停止重试 channel:%d bot:%d message:%d err:%+v fallbackErr:%+v", channel.Id, botId, payload.MessageId, resultErr, fallbackErr)
+			return nil
+		}
+		if fallbackErr != nil {
+			resultErr = gerror.Wrapf(resultErr, "协议号删除兜底提交失败：%v", fallbackErr)
+		}
 		s.appendAutoDeleteLogByValues(ctx, channel, botId, payload.MessageId, payload.Keyword, "failed", resultErr.Error())
-		g.Log().Warningf(ctx, "频道自动删除失败，等待Asynq重试 channel:%d bot:%d message:%d err:%+v", channel.Id, botId, payload.MessageId, resultErr)
+		g.Log().Warningf(ctx, "频道自动删除瞬时失败，等待Asynq重试 channel:%d bot:%d message:%d err:%+v", channel.Id, botId, payload.MessageId, resultErr)
 		return resultErr
 	}
 	if err != nil {
@@ -231,7 +248,7 @@ func telegramPublishMessageCacheKey(chatId string, messageId int) string {
 func (s *sSysPublish) autoDeleteChannelById(ctx context.Context, channelId, tenantId int64) (*autoDeleteChannel, error) {
 	var channel *autoDeleteChannel
 	err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
-		Fields("id,tenant_id,bot_id_json,bot_permission_status_json,channel_title,target_chat_id,auto_delete_enabled").
+		Fields("id,tenant_id,tg_account_id,bot_id_json,bot_permission_status_json,channel_title,target_chat_id,auto_delete_enabled").
 		Where("id", channelId).
 		Where("tenant_id", tenantId).
 		WhereNull("deleted_at").
@@ -361,7 +378,7 @@ func (s *sSysPublish) autoDeleteChannel(ctx context.Context, chat models.Chat, t
 		mod = mod.Where("target_chat_id IN(?, ?)", chatId, positiveChatId)
 	}
 	var channel *autoDeleteChannel
-	if err := mod.Fields("id,tenant_id,bot_id_json,bot_permission_status_json,channel_title,target_chat_id,auto_delete_enabled").OrderDesc("id").Scan(&channel); err != nil {
+	if err := mod.Fields("id,tenant_id,tg_account_id,bot_id_json,bot_permission_status_json,channel_title,target_chat_id,auto_delete_enabled").OrderDesc("id").Scan(&channel); err != nil {
 		return nil, err
 	}
 	autoDeleteChannelCacheSet(ctx, cacheKey, channel)

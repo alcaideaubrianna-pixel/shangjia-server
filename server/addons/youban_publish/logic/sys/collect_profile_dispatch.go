@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -40,6 +41,10 @@ func (s *sSysPublish) resumeCollectProfileDispatch(ctx context.Context, dispatch
 	}
 	profileID, err := s.commitCollectMaterial(ctx, event, content, rule, text)
 	if err != nil {
+		var duplicate *profileFingerprintDuplicateError
+		if errors.As(err, &duplicate) {
+			return err
+		}
 		_ = s.markCollectDispatchFailed(ctx, dispatchID, err.Error())
 		return err
 	}
@@ -60,15 +65,26 @@ func (s *sSysPublish) resumeCollectProfileDispatch(ctx context.Context, dispatch
 			}).Update(); txErr != nil {
 			return gerror.Wrap(txErr, "恢复采集分发状态失败")
 		}
-		if _, txErr := tx.Model(publishTgJobTable).Ctx(ctx).
+		jobIDValues, txErr := tx.Model(publishTgJobTable).Ctx(ctx).
+			Fields("id").
 			Where("profile_id", profileID).
 			Where("operation_no", fmt.Sprintf("collect:%d", dispatchID)).
 			Where("status", "failed").
-			Data(g.Map{
-				"status": "pending", "dispatch_status": tgDispatchStatusIdle,
-				"retry_count": 0, "error_message": "", "last_dispatch_error": "",
-				"next_retry_at": nil, "send_phase": "", "updated_at": gtime.Now(),
-			}).Update(); txErr != nil {
+			Array()
+		if txErr != nil {
+			return gerror.Wrap(txErr, "读取待恢复采集TG任务失败")
+		}
+		jobIDs := make([]int64, 0, len(jobIDValues))
+		for _, value := range jobIDValues {
+			jobIDs = append(jobIDs, value.Int64())
+		}
+		if _, txErr := s.transitionTelegramJobsTx(ctx, tx, jobIDs, telegramJobTransition{
+			From: []string{telegramJobStatusFailed},
+			To:   telegramJobStatusPending,
+			Additional: g.Map{
+				"retry_count": 0, "next_retry_at": nil, "error_message": "", "last_dispatch_error": "",
+			},
+		}); txErr != nil {
 			return gerror.Wrap(txErr, "恢复采集TG发送任务失败")
 		}
 		return nil
@@ -81,6 +97,22 @@ func (s *sSysPublish) resumeCollectProfileDispatch(ctx context.Context, dispatch
 	}
 	g.Log().Infof(ctx, "采集分发已恢复并重新提交 profileId:%d eventId:%d dispatchId:%d", profileID, event["id"].Int64(), dispatchID)
 	return nil
+}
+
+func (s *sSysPublish) skipCollectProfileDispatchDuplicate(ctx context.Context, dispatchID int64, event, rule gdb.Record, duplicate *profileFingerprintDuplicateError) (string, error) {
+	if dispatchID <= 0 || event.IsEmpty() || rule.IsEmpty() || duplicate == nil {
+		return "", gerror.New("跳过重复采集分发参数不完整")
+	}
+	reason := duplicate.Error()
+	if _, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).Where("id", dispatchID).Data(g.Map{
+		"status": sysin.CollectDispatchStatusSkipped, "error_message": reason,
+		"finished_at": gtime.Now(), "updated_at": gtime.Now(),
+	}).Update(); err != nil {
+		return "", gerror.Wrap(err, "更新重复采集分发状态失败")
+	}
+	s.appendCollectEventLogForRecord(ctx, event, "dedupe", "skipped", reason, fmt.Sprintf("rule=%d", rule["id"].Int64()))
+	g.Log().Infof(ctx, "采集资料指纹命中，已跳过分发 eventId:%d ruleId:%d dispatchId:%d profileId:%d channelId:%d layer:%s cacheHit:%t", event["id"].Int64(), rule["id"].Int64(), dispatchID, duplicate.ProfileID, duplicate.ChannelID, duplicate.Layer, duplicate.CacheHit)
+	return reason, nil
 }
 
 func (s *sSysPublish) submitCollectProfileDispatch(ctx context.Context, dispatchId, profileId int64, event gdb.Record) error {
@@ -102,6 +134,13 @@ func (s *sSysPublish) submitCollectProfileDispatch(ctx context.Context, dispatch
 	}).Update(); err != nil {
 		return gerror.Wrap(err, "更新采集分发资料失败")
 	}
+	dispatch, queryErr := pdao.YoubanPublishCollectDispatch.Ctx(ctx).Fields("rule_id,source_id").Where("id", dispatchId).One()
+	if queryErr != nil {
+		return gerror.Wrap(queryErr, "读取采集分发索引参数失败")
+	}
+	if err = indexCollectChannelProfile(ctx, event["tenant_id"].Int64(), event["account_id"].Int64(), dispatch["source_id"].Int64(), dispatch["rule_id"].Int64(), profileId, event["source_chat_id"].String()); err != nil {
+		return err
+	}
 	meta := telegramProfilePublishMeta{
 		CollectEventId:         event["id"].Int64(),
 		CollectSourceId:        event["source_id"].Int64(),
@@ -109,6 +148,16 @@ func (s *sSysPublish) submitCollectProfileDispatch(ctx context.Context, dispatch
 		CollectSourceMessageId: event["source_message_id"].Int64(),
 	}
 	if err := s.submitProfilePublishWithMeta(ctx, profileId, event["tenant_id"].Int64(), event["account_id"].Int64(), event["account_id"].Int64(), operationNo, channelIds, false, meta); err != nil {
+		if errors.Is(err, errTelegramPublishPermissionPaused) {
+			_, updateErr := pdao.YoubanPublishCollectDispatch.Ctx(ctx).Where("id", dispatchId).Data(g.Map{
+				"status": sysin.CollectDispatchStatusSkipped, "error_message": err.Error(), "finished_at": gtime.Now(),
+			}).Update()
+			if updateErr != nil {
+				return gerror.Wrap(updateErr, "记录采集分发权限暂停失败")
+			}
+			s.appendCollectEventLogForRecord(ctx, event, "dispatch", "skipped", err.Error(), fmt.Sprintf("profileId=%d", profileId))
+			return nil
+		}
 		_ = s.markCollectDispatchFailed(ctx, dispatchId, err.Error())
 		return gerror.Wrap(err, "创建采集TG发送任务失败")
 	}

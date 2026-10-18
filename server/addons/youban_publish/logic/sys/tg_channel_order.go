@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -39,36 +38,36 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 		createdAt = current["created_at"].GTime()
 	}
 	mod := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).Unscoped().
+		Where("j.tenant_id", job.TenantId).
 		Where("j.id <> ?", job.Id).
-		Where(`(
-			(j.status = 'sending' AND j.updated_at > ?) OR
-			(j.status IN ('pending', 'failed_retry', 'unknown') AND j.dispatch_status = ? AND j.dispatched_at > ?) OR
-			(j.status IN ('pending', 'failed_retry', 'unknown') AND j.dispatch_status = ? AND j.updated_at > ?)
-		)`,
-			gtime.Now().Add(-telegramSendingJobRecoverAfter),
-			tgDispatchStatusQueued,
-			gtime.Now().Add(-telegramDispatchJobRecoverAfter),
-			tgDispatchStatusProcessing,
-			gtime.Now().Add(-telegramDispatchJobRecoverAfter),
-		)
+		Where(telegramWebhookDetachedJobSQL("j.")).
+		Where(telegramChannelBlockingJobSQL("j"))
+	// Once a display is visible in Telegram, finish that operation before
+	// returning it behind untouched historical backlog. Earlier operations that
+	// have also started still block it, preserving media/verification ordering.
+	if telegramJobRequiresChannelCompletionPriority(job.SendPhase) {
+		mod = mod.Where(`(
+			j.status IN (?, ?) OR
+			j.send_phase IN (?, ?, ?)
+		)`, telegramJobStatusSending, telegramJobStatusConfirming,
+			telegramSendPhaseDisplaySending, telegramSendPhaseDisplayConfirmed,
+			telegramSendPhaseVerifySending)
+	}
 	if job.ChannelId > 0 {
 		mod = mod.Where("j.channel_id", job.ChannelId)
 	} else {
-		mod = mod.Where("j.target_chat_id", normalizeTelegramChannelChatID(job.TargetChatId))
-	}
-	if job.CollectSourceId > 0 && job.CollectSourceMessageId > 0 && strings.TrimSpace(job.CollectSourceChatId) != "" {
 		mod = mod.Where(
-			`j.collect_source_id = ? AND j.collect_source_chat_id = ? AND j.collect_source_message_id > 0 AND j.collect_source_message_id < ?`,
-			job.CollectSourceId,
-			strings.TrimSpace(job.CollectSourceChatId),
-			job.CollectSourceMessageId,
+			"REPLACE(COALESCE(j.target_chat_id, ''), '-100', '') = ?",
+			telegramChannelOrderChatKey(job.TargetChatId),
 		)
-	} else {
-		mod = mod.Where(`(j.created_at < ? OR (j.created_at = ? AND j.id < ?))`, createdAt, createdAt, job.Id)
 	}
-	if isTelegramUrgentJob(job) {
-		mod = mod.Where("j.priority <= ?", tgJobPriorityUrgent)
-	}
+	// A destination channel is a single ordered stream. Source message IDs are
+	// only comparable within one source channel, so using them here lets jobs
+	// from another collection source bypass an older job between its display
+	// and verification phases.
+	mod = mod.Where("EXISTS (SELECT 1 FROM "+publishTgJobTable+" current_job WHERE current_job.id=? AND "+telegramChannelSchedulePrecedesSQL("j", "current_job")+")", job.Id)
+	// Interactive publications may overtake untouched work, but never a
+	// started display/verification operation. Use the same ordering as Outbox.
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
@@ -79,19 +78,81 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 	return !earlier.IsEmpty(), nil
 }
 
+func telegramChannelBlockingJobStatuses() []string {
+	return []string{
+		telegramJobStatusPending,
+		telegramJobStatusRetryWait,
+		telegramJobStatusConfirming,
+		telegramJobStatusSending,
+	}
+}
+
+func telegramChannelBlockingJobSQL(alias string) string {
+	// Unknown jobs are reconciled independently. They must not hold the normal
+	// channel queue hostage while waiting for a webhook or account fallback.
+	// Jobs tied to an unavailable protocol account are likewise left durable but
+	// excluded until the account is authorized again.
+	return fmt.Sprintf(`(%s AND %s)`, telegramChannelAvailableAccountSQL(alias), telegramChannelBlockingJobStateSQL(alias))
+}
+
+func telegramChannelBlockingJobStateSQL(alias string) string {
+	if alias != "" {
+		alias += "."
+	}
+	// Terminal jobs must never become unschedulable channel heads. Retrying a
+	// failed display later would also send verification apart from its display.
+	return fmt.Sprintf(`%sstatus IN ('pending','failed_retry','confirming','sending')`, alias)
+}
+
+func telegramChannelAvailableAccountSQL(alias string) string {
+	botAvailable := telegramJobAvailableBotSQL(alias)
+	missingAccount := telegramChannelMissingAccountSQL(alias)
+	if alias != "" {
+		alias += "."
+	}
+	return fmt.Sprintf(`(%[5]s OR %[6]s OR EXISTS (SELECT 1 FROM %[2]s c INNER JOIN %[3]s a ON a.id=c.tg_account_id AND a.tenant_id=c.tenant_id AND a.status='authorized' AND NULLIF(BTRIM(a.session_key), '') IS NOT NULL AND a.deleted_at IS NULL WHERE c.id=%[1]schannel_id AND c.tenant_id=%[1]stenant_id AND c.status=1 AND c.deleted_at IS NULL) OR EXISTS (SELECT 1 FROM %[4]s tc INNER JOIN %[3]s a ON a.id=tc.tg_account_id AND a.tenant_id=tc.tenant_id AND a.status='authorized' AND NULLIF(BTRIM(a.session_key), '') IS NOT NULL AND a.deleted_at IS NULL WHERE tc.id=%[1]schannel_id AND tc.tenant_id=%[1]stenant_id))`, alias, publishChannelTable, publishTgAccountTable, publishTgChannelTable, botAvailable, missingAccount)
+}
+
+// Untouched jobs with broken references must reach the gate once, so it can
+// expose a terminal configuration error instead of silently filtering them out.
+func telegramChannelMissingAccountSQL(alias string) string {
+	if alias != "" {
+		alias += "."
+	}
+	return fmt.Sprintf(`(COALESCE(%[1]ssend_phase,'')='' AND %[1]sstatus IN ('pending','failed_retry') AND EXISTS (SELECT 1 FROM %[2]s missing_channel WHERE missing_channel.id=%[1]schannel_id AND missing_channel.tenant_id=%[1]stenant_id AND missing_channel.deleted_at IS NULL AND missing_channel.status=1 AND NOT EXISTS (SELECT 1 FROM %[3]s missing_account WHERE missing_account.id=missing_channel.tg_account_id AND missing_account.tenant_id=missing_channel.tenant_id AND missing_account.deleted_at IS NULL)))`, alias, publishChannelTable, publishTgAccountTable)
+}
+
+func telegramJobAvailableBotSQL(alias string) string {
+	if alias != "" {
+		alias += "."
+	}
+	return fmt.Sprintf(`(COALESCE(%[1]spush_mode,'') <> 'account' AND EXISTS (SELECT 1 FROM %[2]s available_bot WHERE available_bot.id=%[1]sbot_id AND available_bot.tenant_id IN (0,%[1]stenant_id) AND available_bot.status=1 AND available_bot.deleted_at IS NULL AND NULLIF(BTRIM(available_bot.bot_token),'') IS NOT NULL))`, alias, publishBotTable)
+}
+
+func telegramChannelOrderChatKey(chatID string) string {
+	return strings.TrimPrefix(normalizeTelegramChannelChatID(chatID), "-100")
+}
+
+func telegramJobRequiresChannelCompletionPriority(sendPhase string) bool {
+	return telegramSendPhaseHasDisplay(sendPhase) &&
+		sendPhase != telegramSendPhaseVerifyConfirmed &&
+		sendPhase != telegramSendPhaseCompletedNoVerify
+}
+
 func (s *sSysPublish) wakeNextTelegramChannelJob(ctx context.Context, job telegramJobRecord) error {
 	if job.TenantId <= 0 || job.ChannelId <= 0 {
 		return nil
 	}
 	now := gtime.Now()
 	var nextJobs []telegramJobRecord
-	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+	err := g.DB().Model(publishTgJobTable).As("j").Safe().Ctx(ctx).
 		Where("tenant_id", job.TenantId).
 		Where("channel_id", job.ChannelId).
 		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
+		Where(telegramWebhookDetachedJobSQL("")).
 		Where("(dispatch_status = ? OR dispatch_status = '')", tgDispatchStatusIdle).
 		Where("(next_retry_at IS NULL OR next_retry_at <= ?)", now).
-		Order(gdb.Raw(telegramJobEffectivePrioritySQL("") + " ASC")).OrderAsc("id").
+		Order(telegramChannelScheduleOrderSQL("j")).
 		Limit(telegramChannelActiveJobLimit).
 		Scan(&nextJobs)
 	if err != nil {
@@ -120,7 +181,11 @@ func (s *sSysPublish) withTelegramChannelDispatchLease(ctx context.Context, job 
 		Mutex(telegramChannelDispatchKey(job.TenantId, job.ChannelId))
 	if err := lease.TryLock(ctx); err != nil {
 		if gerror.Is(err, hglock.ErrLockFailed) {
-			return false, nil
+			// Lock contention or an unavailable Redis lock backend is not a
+			// successful enqueue. Returning nil here silently stranded the
+			// Outbox in pending/idle forever. Let the caller record the error,
+			// release the lease, and retry with backoff.
+			return false, gerror.Wrap(err, "获取频道任务调度租约失败，稍后重试")
 		}
 		return false, gerror.Wrap(err, "获取频道任务调度租约失败")
 	}
@@ -137,6 +202,7 @@ func (s *sSysPublish) telegramChannelHasDispatchCapacity(ctx context.Context, jo
 		Where("tenant_id", job.TenantId).
 		Where("channel_id", job.ChannelId).
 		Where("id <> ?", job.Id).
+		Where(telegramWebhookDetachedJobSQL("")).
 		Where(`(
 			status = 'sending' OR
 			(status IN ('pending', 'failed_retry', 'unknown') AND dispatch_status IN (?, ?))
@@ -162,7 +228,7 @@ func (s *sSysPublish) postponeTelegramJobForChannelOrder(ctx context.Context, jo
 	if err != nil {
 		return gerror.Wrap(err, "延后TG频道顺序任务失败")
 	}
-	return nil
+	return s.rearmTelegramJobOutbox(ctx, job.Id, 3*time.Second)
 }
 
 func (s *sSysPublish) postponeTelegramJobForCollectPushPause(ctx context.Context, job telegramJobRecord) error {
@@ -180,9 +246,18 @@ func (s *sSysPublish) postponeTelegramJobForCollectPushPause(ctx context.Context
 	if err != nil {
 		return gerror.Wrap(err, "延后采集推送任务失败")
 	}
+	if err = s.rearmTelegramJobOutbox(ctx, job.Id, 30*time.Second); err != nil {
+		return err
+	}
 	s.appendTelegramJobLog(ctx, job, "publish", "paused", "采集推送已暂停，任务保留等待恢复")
 	if wakeErr := s.wakeNextTelegramChannelJob(ctx, job); wakeErr != nil {
 		g.Log().Warningf(ctx, "采集推送暂停后唤醒频道下一条TG任务失败 jobId:%d channelId:%d err:%+v", job.Id, job.ChannelId, wakeErr)
 	}
 	return nil
+}
+
+// Ambiguous sends remain an ordering barrier until Webhook or account
+// reconciliation confirms the message or moves the job to a terminal state.
+func telegramWebhookDetachedJobSQL(_ string) string {
+	return "1=1"
 }

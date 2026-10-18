@@ -104,7 +104,17 @@ func telegramBotGetFileWithFallback(ctx context.Context, botID int64, botToken s
 	defer release()
 
 	localEndpoint := telegramBotAPIEndpoint(conf.BotApiServerUrl)
-	if localEndpoint != "local" || !telegramBotGetFileCircuitOpen(botID, time.Now()) {
+	if localEndpoint != "local" {
+		officialBot, createErr := telegramOfficialMediaBot(botToken, conf)
+		if createErr != nil {
+			return nil, nil, "official", 0, gerror.Wrap(createErr, "创建官方Bot API媒体客户端失败")
+		}
+		file, attempts, getErr := telegramBotGetFileWithBoundedRetry(ctx, func(requestCtx context.Context) (*models.File, error) {
+			return officialBot.GetFile(requestCtx, &tgbot.GetFileParams{FileID: fileID})
+		})
+		return officialBot, file, "official", attempts, getErr
+	}
+	if !telegramBotGetFileCircuitOpen(botID, time.Now()) {
 		file, attempts, localErr := telegramBotGetFileWithBoundedRetry(ctx, func(requestCtx context.Context) (*models.File, error) {
 			return localBot.GetFile(requestCtx, &tgbot.GetFileParams{FileID: fileID})
 		})
@@ -112,7 +122,7 @@ func telegramBotGetFileWithFallback(ctx context.Context, botID int64, botToken s
 		if localErr == nil {
 			return localBot, file, localEndpoint, attempts, nil
 		}
-		if localEndpoint != "local" || !isRetryableTelegramBotRequestError(localErr) {
+		if !isRetryableTelegramBotRequestError(localErr) {
 			return nil, nil, localEndpoint, attempts, localErr
 		}
 		observeTelegramBotGetFileFallback(ctx, "local_failed", botID)

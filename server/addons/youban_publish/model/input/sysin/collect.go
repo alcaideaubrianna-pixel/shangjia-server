@@ -156,6 +156,17 @@ type CollectSourceTriggerModel struct {
 	FailedCount    int `json:"failedCount" dc:"失败数量"`
 }
 
+type CollectChannelApprovalModel struct {
+	ChannelLink   string `json:"channelLink"`
+	SourceId      int64  `json:"sourceId"`
+	RuleId        int64  `json:"ruleId"`
+	BotId         int64  `json:"botId"`
+	AccountId     int64  `json:"accountId"`
+	ChannelId     string `json:"channelId"`
+	ChannelTitle  string `json:"channelTitle"`
+	DefaultSuffix string `json:"defaultSuffix"`
+}
+
 type CollectSourceResetInp struct {
 	Id int64 `json:"id" v:"required|min:1#采集源ID不能为空|采集源ID不能为空" dc:"采集源ID"`
 }
@@ -290,6 +301,7 @@ type CollectRuleModel struct {
 	Name                    string                    `json:"name" dc:"名称"`
 	GlobalEnabled           int                       `json:"globalEnabled" dc:"全局应用"`
 	TargetChannelIds        []int64                   `json:"targetChannelIds" dc:"目标频道ID"`
+	TargetChannelNames      []string                  `json:"targetChannelNames" dc:"目标频道名称"`
 	ReviewEnabled           int                       `json:"reviewEnabled" dc:"审核开关"`
 	DedupeEnabled           int                       `json:"dedupeEnabled" dc:"去重开关"`
 	DedupeDays              int                       `json:"dedupeDays" dc:"去重天数"`
@@ -359,11 +371,14 @@ type IntroFeeChannelRuleItem struct {
 	ChannelId       string      `json:"channelId"`
 	ChannelTitle    string      `json:"channelTitle"`
 	ChannelUsername string      `json:"channelUsername"`
+	ChannelLink     string      `json:"channelLink"`
 	Suffix          string      `json:"suffix"`
 	Status          int         `json:"status"`
-	Configured      bool        `json:"configured"`
 	Blacklisted     bool        `json:"blacklisted"`
 	LastSeenAt      *gtime.Time `json:"lastSeenAt"`
+	BlockReason     string      `json:"blockReason"`
+	ProfileCount    int         `json:"profileCount"`
+	UpdatedAt       *gtime.Time `json:"updatedAt"`
 }
 type IntroFeeChannelRuleSaveInp struct {
 	Id        int64  `json:"id"`
@@ -375,6 +390,7 @@ type IntroFeeChannelRuleSaveInp struct {
 }
 type AdminIntroFeeChannelRuleListInp struct {
 	form.PageReq
+	AccountId         int64  `json:"accountId"`
 	BotId             int64  `json:"botId"`
 	RuleId            int64  `json:"ruleId"`
 	Keyword           string `json:"keyword"`
@@ -382,6 +398,7 @@ type AdminIntroFeeChannelRuleListInp struct {
 }
 type AdminIntroFeeChannelRuleSaveInp struct {
 	Id        int64  `json:"id"`
+	AccountId int64  `json:"accountId"`
 	BotId     int64  `json:"botId"`
 	RuleId    int64  `json:"ruleId"`
 	ChannelId string `json:"channelId"`
@@ -390,14 +407,39 @@ type AdminIntroFeeChannelRuleSaveInp struct {
 }
 
 type IntroFeeChannelBlacklistInp struct {
-	Id          int64 `json:"id"`
-	Blacklisted int   `json:"blacklisted"`
+	Id          int64  `json:"id"`
+	AccountId   int64  `json:"accountId"`
+	RuleId      int64  `json:"ruleId"`
+	BotId       int64  `json:"botId"`
+	ChannelId   string `json:"channelId"`
+	Blacklisted int    `json:"blacklisted"`
+}
+
+type IntroFeeChannelPurgeInp struct {
+	NotifyChatId string `json:"-"`
+	Id           int64  `json:"id"`
+	AccountId    int64  `json:"accountId"`
+	RuleId       int64  `json:"ruleId"`
+	BotId        int64  `json:"botId"`
+	ChannelId    string `json:"channelId"`
+	Preview      bool   `json:"preview"`
+}
+
+type IntroFeeChannelPurgeModel struct {
+	ProfileCount int `json:"profileCount"`
+	JobCount     int `json:"jobCount"`
+	MessageCount int `json:"messageCount"`
+	Queued       int `json:"queued"`
 }
 
 func (in *CollectRuleSaveInp) Filter(ctx context.Context) error {
 	in.Name = strings.TrimSpace(in.Name)
 	in.TargetChannelIds = uniquePositiveInt64(in.TargetChannelIds)
-	in.Keywords = trimCollectInputValues(in.Keywords)
+	keywords, err := NormalizeCollectKeywords(in.Keywords)
+	if err != nil {
+		return err
+	}
+	in.Keywords = keywords
 	in.Tags = trimCollectInputValues(in.Tags)
 	in.DeleteLineTexts = trimCollectInputValues(in.DeleteLineTexts)
 	in.DeleteTexts = trimCollectInputValues(in.DeleteTexts)

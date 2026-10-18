@@ -336,14 +336,7 @@ func (s *sSysPublish) AdminTgAccountDelete(ctx context.Context, in *sysin.TgAcco
 	if err = s.ensureTgAccountsBelongTenant(ctx, in.Ids, current.TenantId); err != nil {
 		return err
 	}
-	if _, err = g.DB().Model(publishTgAccountTable).Safe().Ctx(ctx).
-		WhereIn("id", in.Ids).
-		Where("tenant_id", current.TenantId).
-		Data(g.Map{
-			"deleted_by": current.Id,
-			"deleted_at": gtime.Now(),
-		}).
-		Update(); err != nil {
+	if err = removeTelegramAccountsWithReferenceCheck(ctx, in.Ids, current.TenantId, current.Id); err != nil {
 		return gerror.Wrap(err, "删除TG账号失败")
 	}
 	s.cancelTelegramDeleteFallbackTasks(ctx, in.Ids, "TG账号已删除，协议号删除任务已取消")
@@ -369,17 +362,48 @@ func (s *sSysPublish) serverTgAccountRemove(ctx context.Context, in *sysin.TgAcc
 		return gerror.New("请选择要删除的TG账号")
 	}
 	in.Ids = uniqueIds(in.Ids)
-	if _, err = g.DB().Model(publishTgAccountTable).Safe().Ctx(ctx).
-		WhereIn("id", in.Ids).
-		Data(g.Map{
-			"deleted_by": contexts.GetUserId(ctx),
-			"deleted_at": gtime.Now(),
-		}).
-		Update(); err != nil {
+	if err = removeTelegramAccountsWithReferenceCheck(ctx, in.Ids, 0, contexts.GetUserId(ctx)); err != nil {
 		return gerror.Wrap(err, errorMessage)
 	}
 	s.cancelTelegramDeleteFallbackTasks(ctx, in.Ids, "TG账号已删除或解绑，协议号删除任务已取消")
 	return nil
+}
+
+// A deleted session must not leave live channel/collection/Bot references.
+// Never guess a replacement account: the operator must migrate those first.
+func removeTelegramAccountsWithReferenceCheck(ctx context.Context, ids []int64, tenantID, operatorID int64) error {
+	return removeTelegramAccountsWithDB(ctx, g.DB(), ids, tenantID, operatorID)
+}
+
+func removeTelegramAccountsWithDB(ctx context.Context, db gdb.DB, ids []int64, tenantID, operatorID int64) error {
+	return db.Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		accounts := tx.Model(publishTgAccountTable).Safe().Ctx(ctx).WhereIn("id", ids).WhereNull("deleted_at")
+		if tenantID > 0 {
+			accounts = accounts.Where("tenant_id", tenantID)
+		}
+		rows, err := accounts.Fields("id,tenant_id").LockUpdate().All()
+		if err != nil {
+			return gerror.Wrap(err, "锁定待删除TG账号失败")
+		}
+		for _, row := range rows {
+			for _, reference := range []struct{ table, name string }{
+				{publishChannelTable, "上架频道"},
+				{publishCollectSourceTable, "采集配置"},
+				{publishBotTable, "机器人配置"},
+			} {
+				count, err := tx.Model(reference.table).Safe().Ctx(ctx).
+					Where("tenant_id", row["tenant_id"].Int64()).Where("tg_account_id", row["id"].Int64()).WhereNull("deleted_at").Count()
+				if err != nil {
+					return gerror.Wrap(err, "检查TG账号引用失败")
+				}
+				if count > 0 {
+					return gerror.Newf("TG账号%d仍被%d个%s引用，请先更换绑定账号，再删除或解绑", row["id"].Int64(), count, reference.name)
+				}
+			}
+		}
+		_, err = accounts.Data(g.Map{"deleted_by": operatorID, "deleted_at": gtime.Now()}).Update()
+		return err
+	})
 }
 
 func (s *sSysPublish) AdminTgAccountRefresh(ctx context.Context, in *sysin.TgAccountRefreshInp) (list []*sysin.TgAccountRefreshModel, err error) {

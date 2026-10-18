@@ -239,3 +239,7 @@ CREATE TABLE IF NOT EXISTS hg_youban_bot_broadcast_recipient (
   CONSTRAINT uk_ybbr_task_user UNIQUE (task_id,telegram_user_id)
 );
 CREATE INDEX IF NOT EXISTS idx_ybbr_task_status ON hg_youban_bot_broadcast_recipient (task_id,status,id);
+
+UPDATE "hg_youban_bot_feature" SET "command" = '', "updated_at" = NOW() WHERE "feature_key" = 'two_way_relay' AND "deleted_at" IS NULL AND "command" <> '';
+
+UPDATE hg_youban_bot_feature SET config_json='{}' WHERE feature_key='two_way_relay' AND deleted_at IS NULL;

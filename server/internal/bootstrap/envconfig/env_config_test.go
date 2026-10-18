@@ -2,6 +2,20 @@ package envconfig
 
 import "testing"
 
+func TestClusterEnvironmentMapping(t *testing.T) {
+	for _, item := range items {
+		if item.Key != "system.isCluster" {
+			continue
+		}
+		for _, envKey := range item.EnvKeys {
+			if envKey == "YOUBAN_CLUSTER_ENABLED" {
+				return
+			}
+		}
+	}
+	t.Fatal("missing YOUBAN_CLUSTER_ENABLED mapping")
+}
+
 func TestMediaFileCacheEnvironmentMappings(t *testing.T) {
 	want := map[string]string{
 		"youbanPublish.mediaFileCache.cosDownloadMode":       "YOUBAN_PUBLISH_MEDIA_CACHE_DOWNLOAD_MODE",

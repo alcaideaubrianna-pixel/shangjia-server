@@ -43,3 +43,23 @@ func TestCollectMediaRowsToItemsPreservesCacheAndSimilarityMetadata(t *testing.T
 		t.Fatalf("telegram metadata lost: %#v", item)
 	}
 }
+
+func TestCollectMediaInitialCacheStatusRequiresDurableAsset(t *testing.T) {
+	tests := []struct {
+		name string
+		item collectMediaItem
+		want string
+	}{
+		{name: "bot file id is temporary", item: collectMediaItem{FileId: "BAACAgQ-test"}, want: collectMediaCachePending},
+		{name: "gotd reference is temporary", item: collectMediaItem{FileId: "gotd:1:2"}, want: collectMediaCachePending},
+		{name: "storage path is durable", item: collectMediaItem{FileId: "BAACAgQ-test", StoragePath: "profiles/a.mp4"}, want: collectMediaCacheReady},
+		{name: "file url is durable", item: collectMediaItem{FileUrl: "https://example.test/a.jpg"}, want: collectMediaCacheReady},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := collectMediaInitialCacheStatus(test.item); got != test.want {
+				t.Fatalf("collectMediaInitialCacheStatus()=%q, want %q", got, test.want)
+			}
+		})
+	}
+}

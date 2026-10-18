@@ -91,6 +91,10 @@ func (s *sSysPublish) AdminBotCreate(ctx context.Context, in *sysin.BotCreateInp
 	if err != nil {
 		return nil, err
 	}
+	botType, err := normalizePublishBotType(in.BotType, "")
+	if err != nil {
+		return nil, err
+	}
 	name := strings.TrimSpace(in.BotName)
 	if name == "" {
 		return nil, gerror.New("Bot名称不能为空")
@@ -158,11 +162,13 @@ func (s *sSysPublish) AdminBotCreate(ctx context.Context, in *sysin.BotCreateInp
 	id, err := g.DB().Model(publishBotTable).Safe().Ctx(ctx).Data(g.Map{
 		"tenant_id":    current.TenantId,
 		"bot_name":     name,
+		"bot_type":     botType,
 		"bot_username": botUsername,
 		"bot_token":    token,
 		"remark":       strings.TrimSpace(in.Remark),
 		"status":       status,
 		"created_by":   current.Id,
+		"account_id":   current.Id,
 		"created_at":   now,
 		"updated_by":   current.Id,
 		"updated_at":   now,
@@ -175,6 +181,7 @@ func (s *sSysPublish) AdminBotCreate(ctx context.Context, in *sysin.BotCreateInp
 		g.Log().Warningf(ctx, "刷新TG Bot Gateway失败 bot:%d err:%+v", id, err)
 	}
 	return &sysin.BotModel{
+		BotType:     botType,
 		Id:          id,
 		TenantId:    current.TenantId,
 		BotName:     name,

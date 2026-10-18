@@ -61,6 +61,19 @@ func TestNormalizeProfileSearchKeyword(t *testing.T) {
 	}
 }
 
+func TestProfileNumberSearchAcceptsShortAlphaNumericNumbers(t *testing.T) {
+	for _, value := range []string{"KK12426", "AB1234567"} {
+		if !profileSearchNoRegexp.MatchString(value) {
+			t.Fatalf("profile number %q must use exact-match search", value)
+		}
+	}
+	for _, value := range []string{"KK124261234", "KK-12426", "12426", "ABCDEFGHIJK1"} {
+		if profileSearchNoRegexp.MatchString(value) {
+			t.Fatalf("keyword %q must not be treated as a profile number", value)
+		}
+	}
+}
+
 func TestParseProfilePublishMark(t *testing.T) {
 	for input, want := range map[string][2]string{
 		"001":     {"001", ""},

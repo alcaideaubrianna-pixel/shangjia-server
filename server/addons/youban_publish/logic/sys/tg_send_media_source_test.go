@@ -13,6 +13,8 @@ func TestIsTelegramMediaSourceUnavailableError(t *testing.T) {
 	}{
 		{name: "http 404", err: errors.New("下载远程媒体失败：HTTP 404"), want: true},
 		{name: "wrapped http 404", err: errors.New("TG展示资料推送失败: 下载远程媒体失败：HTTP 404"), want: true},
+		{name: "http 403", err: errors.New("下载远程媒体失败：HTTP 403"), want: true},
+		{name: "http 451", err: errors.New("下载远程媒体失败：HTTP 451"), want: true},
 		{name: "http 500", err: errors.New("下载远程媒体失败：HTTP 500"), want: false},
 		{name: "timeout", err: errors.New("下载远程媒体失败：context deadline exceeded"), want: false},
 		{name: "nil", err: nil, want: false},

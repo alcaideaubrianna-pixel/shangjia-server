@@ -214,6 +214,7 @@ func (s *sSysPublish) appendAutoDeleteLogByValues(ctx context.Context, channel *
 type autoDeleteChannel struct {
 	Id                      int64  `json:"id"`
 	TenantId                int64  `json:"tenantId"`
+	TgAccountId             int64  `json:"tgAccountId"`
 	BotIdJson               string `json:"botIdJson"`
 	BotPermissionStatusJson string `json:"botPermissionStatusJson"`
 	ChannelTitle            string `json:"channelTitle"`

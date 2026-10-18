@@ -19,6 +19,7 @@ import (
 	"github.com/gogf/gf/v2/net/ghttp"
 
 	"hotgo/internal/library/cache"
+	"hotgo/utility/scantrace"
 )
 
 const botMediaFingerprintCacheTTL = 90 * 24 * time.Hour
@@ -105,7 +106,9 @@ func cachedRemoteImageFingerprint(ctx context.Context, imageURL string) (*mediaF
 	}
 	cacheHit := fileExists(mediaFileCachePath(mediaFileCacheDir(ctx), cacheKey, cacheExt))
 	startedAt := time.Now()
+	finish := scantrace.Begin(ctx, "media.download")
 	path, err := cachedRemoteMediaFile(ctx, cacheKey, imageURL, cacheExt)
+	finish(err)
 	var size int64
 	if info, statErr := os.Stat(path); statErr == nil {
 		size = info.Size()
@@ -115,12 +118,16 @@ func cachedRemoteImageFingerprint(ctx context.Context, imageURL string) (*mediaF
 	if err != nil {
 		return nil, err
 	}
+	finish = scantrace.Begin(ctx, "media.read")
 	content, err := os.ReadFile(path)
+	finish(err)
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取缓存图片失败")
 	}
 	startedAt = time.Now()
+	finish = scantrace.Begin(ctx, "image.decode")
 	img, _, err := image.Decode(bytes.NewReader(content))
+	finish(err)
 	observeBotMediaSearchStage(ctx, "image_decode", startedAt, err)
 	if err != nil {
 		return nil, gerror.New("图片格式不支持，请上传 JPG、PNG 或 GIF")
@@ -129,7 +136,9 @@ func cachedRemoteImageFingerprint(ctx context.Context, imageURL string) (*mediaF
 	md5Value := md5Hex(content)
 	observeBotMediaSearchStage(ctx, "md5_compute", startedAt, nil)
 	startedAt = time.Now()
+	finish = scantrace.Begin(ctx, "image.phash")
 	hash, err := goimagehash.PerceptionHash(img)
+	finish(err)
 	observeBotMediaSearchStage(ctx, "phash_compute", startedAt, err)
 	if err != nil {
 		return nil, gerror.Wrap(err, "计算图片感知哈希失败")

@@ -64,8 +64,20 @@ func (s *sSysPublish) enqueueCollectProcessDeferred(ctx context.Context, payload
 }
 
 func (s *sSysPublish) enqueueCollectProcessTask(ctx context.Context, payload collectProcessQueuePayload, delay time.Duration, unique bool) (bool, error) {
+	return s.enqueueCollectProcessTaskWithOutbox(ctx, payload, delay, unique, true)
+}
+
+func (s *sSysPublish) enqueueCollectProcessTaskWithOutbox(ctx context.Context, payload collectProcessQueuePayload, delay time.Duration, unique, persist bool) (bool, error) {
 	if payload.TenantId <= 0 || payload.AccountId <= 0 || payload.SourceId <= 0 {
 		return false, nil
+	}
+	if persist {
+		if err := ensureCollectProcessOutbox(ctx, payload, delay); err != nil {
+			if !isMissingCollectProcessOutboxError(err) {
+				return false, err
+			}
+			g.Log().Warningf(ctx, "采集处理Outbox尚未迁移，临时沿用Redis任务 eventId:%d err:%+v", payload.EventId, err)
+		}
 	}
 	client, err := s.telegramQueueClient(ctx)
 	if err != nil {
@@ -83,7 +95,7 @@ func (s *sSysPublish) enqueueCollectProcessTask(ctx context.Context, payload col
 	options := []asynq.Option{
 		asynq.Queue(collectProcessQueueName(payload)),
 		asynq.MaxRetry(collectProcessTaskMaxRetry),
-		asynq.Timeout(30 * time.Minute),
+		asynq.Timeout(2 * time.Minute),
 	}
 	if unique {
 		reserved, reserveErr := reserveCollectProcessSchedule(ctx, payload, uniqueTTL)
@@ -111,6 +123,9 @@ func (s *sSysPublish) enqueueCollectProcessTask(ctx context.Context, payload col
 }
 
 func collectProcessScheduleKey(payload collectProcessQueuePayload) string {
+	if payload.EventId > 0 {
+		return fmt.Sprintf("%s%d:%d:event:%d", publishconsts.CollectProcessScheduleKeyPrefix, payload.TenantId, payload.AccountId, payload.EventId)
+	}
 	return fmt.Sprintf("%s%d:%d:%s", publishconsts.CollectProcessScheduleKeyPrefix, payload.TenantId, payload.AccountId, collectProcessPartition(payload))
 }
 
@@ -201,6 +216,7 @@ func collectProcessTaskBody(payload collectProcessQueuePayload) ([]byte, error) 
 	return json.Marshal(collectProcessQueuePayload{
 		TenantId:     payload.TenantId,
 		AccountId:    payload.AccountId,
+		EventId:      payload.EventId,
 		SourceId:     payload.SourceId,
 		SourceChatId: payload.SourceChatId,
 	})
@@ -226,7 +242,7 @@ func (s *sSysPublish) processCollectSourceWindowWithLock(ctx context.Context, pa
 		return false, nil
 	}
 	key := fmt.Sprintf("youban_publish:collect:source:%d:%d:%s", payload.TenantId, payload.AccountId, collectProcessPartition(payload))
-	distributedLock := lock.NewConfig(15*time.Minute, time.Second).Mutex(key)
+	distributedLock := lock.NewConfig(2*time.Minute, time.Second).Mutex(key)
 	if err = distributedLock.TryLock(ctx); err != nil {
 		if errors.Is(err, lock.ErrLockFailed) {
 			g.Log().Debugf(ctx, "采集源已有任务执行，本任务主动让出 sourceId:%d", payload.SourceId)
@@ -255,11 +271,31 @@ func collectProcessSourceEnabled(ctx context.Context, payload collectProcessQueu
 }
 
 func (s *sSysPublish) processCollectSourceTask(ctx context.Context, payload collectProcessQueuePayload) (delay time.Duration, pending bool, removeSchedule bool, err error) {
+	windowCtx, cancelWindow := context.WithTimeout(ctx, collectMaterialWindowExecutionTimeout)
+	defer cancelWindow()
+	ctx = windowCtx
 	enabled, err := collectProcessSourceEnabled(ctx, payload)
 	if err != nil {
 		return 0, false, false, err
 	}
 	if !enabled {
+		return 0, false, true, nil
+	}
+	if payload.EventId > 0 {
+		event, readErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).WherePri(payload.EventId).One()
+		if readErr != nil {
+			return 0, false, false, gerror.Wrap(readErr, "读取实时采集事件失败")
+		}
+		if event.IsEmpty() {
+			return 0, false, true, nil
+		}
+		if err = s.processTargetCollectEventWindow(ctx, payload, event); err != nil {
+			var retryErr *collectProcessRetryError
+			if errors.As(err, &retryErr) {
+				return retryErr.delay, true, false, nil
+			}
+			return 0, false, false, err
+		}
 		return 0, false, true, nil
 	}
 	reserved, err := reserveCollectProcessExecution(ctx, payload)
@@ -268,14 +304,16 @@ func (s *sSysPublish) processCollectSourceTask(ctx context.Context, payload coll
 	}
 	if !reserved {
 		g.Log().Debugf(ctx, "采集源任务命中跨节点节流，丢弃重复任务 sourceId:%d", payload.SourceId)
-		return 0, false, false, nil
+		// Do not drop the task while leaving its schedule reservation alive.
+		// A short retry keeps the source self-healing under contention.
+		return collectProcessMinimumDelay, true, false, nil
 	}
 	executed, err := s.processCollectSourceWindowWithLock(ctx, payload)
 	if err != nil {
 		return 0, false, false, err
 	}
 	if !executed {
-		return 0, false, false, nil
+		return collectProcessMinimumDelay, true, false, nil
 	}
 	delay, pending, err = nextCollectProcessDelay(ctx, payload)
 	if err != nil {
@@ -292,10 +330,10 @@ func nextCollectProcessDelay(ctx context.Context, payload collectProcessQueuePay
 	verifyDeadline := now.Add(-collectMaterialVerifyRetryDelay)
 	dueModel := collectProcessEventModel(ctx, payload)
 	due, err := dueModel.
-		Fields("id").
-		WhereIn("status", statuses).
-		Where("material_role IS NULL OR material_role = '' OR material_role IN (?,?) OR (status = ? AND material_role = ? AND error_message = ?)", collectMaterialRolePending, collectMaterialRoleDisplay, sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage).
-		Where("(processed_at IS NULL AND (material_group_status IS NULL OR material_group_status <> ?) AND created_at <= ?) OR (processed_at IS NULL AND material_group_status = ? AND updated_at <= ?) OR (status = ? AND material_role = ? AND error_message = ? AND updated_at <= ?)", collectMaterialGroupWaitingVerify, groupDeadline, collectMaterialGroupWaitingVerify, waitingVerifyDeadline, sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage, verifyDeadline).
+		Fields("e.id").
+		WhereIn("e.status", statuses).
+		Where("((e.status <> ? AND (e.material_role IS NULL OR e.material_role = '' OR e.material_role IN (?,?))) OR (e.status = ? AND e.material_role = ? AND e.error_message = ?))", sysin.CollectEventStatusIgnored, collectMaterialRolePending, collectMaterialRoleDisplay, sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage).
+		Where("(e.processed_at IS NULL AND (e.material_group_status IS NULL OR e.material_group_status <> ?) AND e.created_at <= ?) OR (e.processed_at IS NULL AND e.material_group_status = ? AND e.updated_at <= ?) OR (e.status = ? AND e.material_role = ? AND e.error_message = ? AND e.updated_at <= ?)", collectMaterialGroupWaitingVerify, groupDeadline, collectMaterialGroupWaitingVerify, waitingVerifyDeadline, sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage, verifyDeadline).
 		Limit(1).
 		One()
 	if err != nil {
@@ -305,35 +343,35 @@ func nextCollectProcessDelay(ctx context.Context, payload collectProcessQueuePay
 		return 0, true, nil
 	}
 	normal, err := collectProcessEventModel(ctx, payload).
-		Fields("created_at AS ready_from").
-		WhereIn("status", statuses).
-		Where("material_role IS NULL OR material_role = '' OR material_role = ?", collectMaterialRolePending).
-		Where("material_group_status IS NULL OR material_group_status <> ?", collectMaterialGroupWaitingVerify).
-		WhereNull("processed_at").
-		OrderAsc("ready_from").
+		Fields("e.created_at AS ready_from").
+		WhereIn("e.status", statuses).
+		Where("e.status <> ? AND (e.material_role IS NULL OR e.material_role = '' OR e.material_role = ?)", sysin.CollectEventStatusIgnored, collectMaterialRolePending).
+		Where("e.material_group_status IS NULL OR e.material_group_status <> ?", collectMaterialGroupWaitingVerify).
+		WhereNull("e.processed_at").
+		OrderAsc("e.created_at").
 		Limit(1).
 		One()
 	if err != nil {
 		return 0, false, gerror.Wrap(err, "读取采集源分组等待任务失败")
 	}
 	waitingVerify, err := collectProcessEventModel(ctx, payload).
-		Fields("updated_at AS ready_from").
-		WhereIn("status", statuses).
-		Where("material_role", collectMaterialRolePending).
-		Where("material_group_status", collectMaterialGroupWaitingVerify).
-		WhereNull("processed_at").
-		OrderAsc("updated_at").
+		Fields("e.updated_at AS ready_from").
+		WhereIn("e.status", statuses).
+		Where("e.material_role", collectMaterialRolePending).
+		Where("e.material_group_status", collectMaterialGroupWaitingVerify).
+		WhereNull("e.processed_at").
+		OrderAsc("e.updated_at").
 		Limit(1).
 		One()
 	if err != nil {
 		return 0, false, gerror.Wrap(err, "读取采集源验证配对等待任务失败")
 	}
 	verify, err := collectProcessEventModel(ctx, payload).
-		Fields("updated_at AS ready_from").
-		Where("status", sysin.CollectEventStatusIgnored).
-		Where("material_role", collectMaterialRoleVerify).
-		Where("error_message", collectMaterialVerifyUnmatchedMessage).
-		OrderAsc("updated_at").
+		Fields("e.updated_at AS ready_from").
+		Where("e.status", sysin.CollectEventStatusIgnored).
+		Where("e.material_role", collectMaterialRoleVerify).
+		Where("e.error_message", collectMaterialVerifyUnmatchedMessage).
+		OrderAsc("e.updated_at").
 		Limit(1).
 		One()
 	if err != nil {

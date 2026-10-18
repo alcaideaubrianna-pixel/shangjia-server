@@ -11,6 +11,7 @@ const (
 	AccountTaskStatusProcessing  = "processing"
 	AccountTaskStatusCompleted   = "completed"
 	AccountTaskStatusFailedRetry = "failed_retry"
+	AccountTaskStatusFinalizing  = "finalizing"
 	AccountTaskStatusDead        = "dead"
 	AccountTaskStatusCancelled   = "cancelled"
 

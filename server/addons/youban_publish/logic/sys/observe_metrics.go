@@ -182,6 +182,14 @@ func observeCollectMediaScheduler(ctx context.Context, action string, tenantID, 
 	counter.Add(ctx, 1, attrs)
 }
 
+func observeCollectMediaEnqueue(ctx context.Context, reason, result string) {
+	counter, _ := publishObserveMeter.Int64Counter("xiaohuiji.collect.media_queue_enqueues")
+	counter.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("reason", reason),
+		attribute.String("result", result),
+	))
+}
+
 func observeTelegramPublishRecovery(ctx context.Context, result string) {
 	counter, _ := publishObserveMeter.Int64Counter("xiaohuiji.tg.publish_recoveries")
 	counter.Add(ctx, 1, metric.WithAttributes(attribute.String("result", result)))

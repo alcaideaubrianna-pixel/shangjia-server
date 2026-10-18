@@ -220,3 +220,4 @@ ALTER TABLE "hg_youban_publish_message_media" ADD COLUMN IF NOT EXISTS "original
 ALTER TABLE "hg_youban_publish_message_media" ADD COLUMN IF NOT EXISTS "original_storage_path" varchar(1024) NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_message_media" ADD COLUMN IF NOT EXISTS "edit_status" varchar(16) NOT NULL DEFAULT 'raw';
 UPDATE "hg_youban_publish_message_media" SET "original_file_url" = "file_url", "original_storage_path" = "storage_path" WHERE "original_file_url" = '' AND "original_storage_path" = '';
+CREATE INDEX IF NOT EXISTS "idx_ybp_bot_message_source_received" ON "hg_youban_publish_bot_message_source" ("received_at", "id");

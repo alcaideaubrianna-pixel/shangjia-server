@@ -495,7 +495,19 @@ func (s *sSysBot) NotifyAccount(ctx context.Context, in *sysin.NotifyAccountInp)
 		if chatId == "" {
 			continue
 		}
-		_, err = s.sendMessage(ctx, row.BotToken, chatId, in.Text, firstNonEmpty(in.ParseMode, "HTML"), in.DisableNotice)
+		var markup models.ReplyMarkup
+		if len(in.Buttons) > 0 {
+			keyboard := &models.InlineKeyboardMarkup{}
+			for _, line := range in.Buttons {
+				buttons := []models.InlineKeyboardButton{}
+				for _, button := range line {
+					buttons = append(buttons, models.InlineKeyboardButton{Text: button.Label, CallbackData: button.Data})
+				}
+				keyboard.InlineKeyboard = append(keyboard.InlineKeyboard, buttons)
+			}
+			markup = keyboard
+		}
+		_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, in.Text, firstNonEmpty(in.ParseMode, "HTML"), in.DisableNotice, markup)
 		if err != nil {
 			lastErr = err
 			if shouldMarkBotOffline(err) {
@@ -766,16 +778,19 @@ func (s *sSysBot) resolveTelegramMessageMedia(ctx context.Context, botId int64, 
 	name := ""
 	thumbFileId := ""
 	fileUniqueId := ""
+	var fileSize int64
 	if len(msg.Photo) > 0 {
 		photo := scanPhotoSize(msg.Photo)
 		mediaType = "image"
 		fileId = strings.TrimSpace(photo.FileID)
 		fileUniqueId = strings.TrimSpace(photo.FileUniqueID)
+		fileSize = int64(photo.FileSize)
 		name = firstNonEmpty(fileUniqueId, fmt.Sprintf("photo_%d", msg.ID))
 	} else if msg.Video != nil {
 		mediaType = "video"
 		fileId = strings.TrimSpace(msg.Video.FileID)
 		fileUniqueId = strings.TrimSpace(msg.Video.FileUniqueID)
+		fileSize = int64(msg.Video.FileSize)
 		name = firstNonEmpty(msg.Video.FileName, fileUniqueId, fmt.Sprintf("video_%d", msg.ID))
 		if msg.Video.Thumbnail != nil {
 			thumbFileId = strings.TrimSpace(msg.Video.Thumbnail.FileID)
@@ -815,6 +830,7 @@ func (s *sSysBot) resolveTelegramMessageMedia(ctx context.Context, botId int64, 
 		}
 	}
 	return []*publishsysin.MessageTemplateMediaInp{{
+		Size:           fileSize,
 		MediaType:      mediaType,
 		Name:           name,
 		FileUrl:        fileURL,

@@ -39,29 +39,64 @@ func pairCollectMaterialMessages(messages []collectMaterialMessageView) []collec
 	pairs := make([]collectMaterialPair, 0)
 	lastDisplayIndex := -1
 	for index, message := range messages {
+		if collectMaterialSkippableMessage(message) {
+			continue
+		}
 		switch classifyProfileMessage(message.RawText, message.Media).Kind {
 		case profileMessageKindDisplay:
-			// A repeated profile text may be posted between a media group and its
-			// verification video. Keep the media-bearing group as the pairing
-			// candidate; a text-only display can start a pair only when no display
-			// is currently waiting.
-			if lastDisplayIndex < 0 || len(message.Media) > 0 {
-				lastDisplayIndex = index
-			}
+			// A new business record closes the previous context. Verification can
+			// only belong to the latest effective display record.
+			lastDisplayIndex = index
 		case profileMessageKindVerify:
 			if lastDisplayIndex >= 0 {
 				displayAt := messages[lastDisplayIndex].MessageAt
 				verifyAt := message.MessageAt
 				withinWindow := displayAt.IsZero() || verifyAt.IsZero() ||
-					(!verifyAt.Before(displayAt) && verifyAt.Sub(displayAt) <= collectMaterialVerifyWindowDefault)
+					(!verifyAt.Before(displayAt) && verifyAt.Sub(displayAt) <= collectMaterialVerifyWindow())
 				if withinWindow {
 					pairs = append(pairs, collectMaterialPair{DisplayIndex: lastDisplayIndex, VerifyIndex: index})
 				}
-				lastDisplayIndex = -1
 			}
+		default:
+			// Unknown business content is a hard boundary. Known collector notices
+			// were skipped above; keyword configuration must not affect pairing.
+			lastDisplayIndex = -1
 		}
 	}
 	return pairs
+}
+
+func collectMaterialSkippableMessage(message collectMaterialMessageView) bool {
+	if profileMessageIgnoredNotice(message.RawText) {
+		return true
+	}
+	if strings.TrimSpace(message.RawText) != "" {
+		return false
+	}
+	// Telegram may split a display album into several media-only events. A
+	// photo-only continuation cannot start a new profile and must not prevent
+	// the following verification group from reaching the current display.
+	return len(message.Media) == 0 || !profileMessageHasMediaType(message.Media, "video")
+}
+
+// collectMaterialContextClosed reports whether a later effective business
+// message has ended the display's verification context. Pure verification
+// groups and known collector notices keep the context open.
+func collectMaterialContextClosed(messages []collectMaterialMessageView, displayIndex int) bool {
+	if displayIndex < 0 || displayIndex >= len(messages) {
+		return false
+	}
+	for index := displayIndex + 1; index < len(messages); index++ {
+		message := messages[index]
+		if collectMaterialSkippableMessage(message) {
+			continue
+		}
+		if classifyProfileMessage(message.RawText, message.Media).Kind == profileMessageKindVerify {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func collectMaterialEventViews(rows []gdb.Record, mediaByEvent map[int64][]collectMediaItem) []collectMaterialMessageView {
@@ -128,9 +163,9 @@ func pairCollectMaterialUnits(units []*collectMaterialUnit) []*collectMaterialUn
 		}
 		views = append(views, collectMaterialMessageView{RawText: unit.RawText, Media: unit.Media, MessageAt: messageAt})
 	}
-	verifyByDisplay := make(map[int]int)
+	verifyByDisplay := make(map[int][]int)
 	for _, pair := range pairCollectMaterialMessages(views) {
-		verifyByDisplay[pair.DisplayIndex] = pair.VerifyIndex
+		verifyByDisplay[pair.DisplayIndex] = append(verifyByDisplay[pair.DisplayIndex], pair.VerifyIndex)
 	}
 	paired := make([]*collectMaterialUnit, 0, len(units))
 	for index, unit := range units {
@@ -142,7 +177,10 @@ func pairCollectMaterialUnits(units []*collectMaterialUnit) []*collectMaterialUn
 			continue
 		}
 		unit.RawText = classification.Text
-		if verifyIndex, ok := verifyByDisplay[index]; ok && verifyIndex < len(units) && units[verifyIndex] != nil {
+		for _, verifyIndex := range verifyByDisplay[index] {
+			if verifyIndex >= len(units) || units[verifyIndex] == nil {
+				continue
+			}
 			unit.Media = append(unit.Media, collectMediaItemsWithPurpose(units[verifyIndex].Media, collectMaterialRoleVerify)...)
 			unit.Messages = append(unit.Messages, units[verifyIndex].Messages...)
 		}

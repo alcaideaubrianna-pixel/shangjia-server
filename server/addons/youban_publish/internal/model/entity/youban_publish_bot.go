@@ -10,17 +10,19 @@ import (
 
 // YoubanPublishBot is the golang structure for table youban_publish_bot.
 type YoubanPublishBot struct {
-	Id          int64       `json:"id"          orm:"id"           description:""`
-	BotName     string      `json:"botName"     orm:"bot_name"     description:""`
-	BotUsername string      `json:"botUsername" orm:"bot_username" description:""`
-	BotToken    string      `json:"botToken"    orm:"bot_token"    description:""`
-	Remark      string      `json:"remark"      orm:"remark"       description:""`
-	Status      int         `json:"status"      orm:"status"       description:""`
-	CreatedBy   int64       `json:"createdBy"   orm:"created_by"   description:""`
-	UpdatedBy   int64       `json:"updatedBy"   orm:"updated_by"   description:""`
-	DeletedBy   int64       `json:"deletedBy"   orm:"deleted_by"   description:""`
-	CreatedAt   *gtime.Time `json:"createdAt"   orm:"created_at"   description:""`
-	UpdatedAt   *gtime.Time `json:"updatedAt"   orm:"updated_at"   description:""`
-	DeletedAt   *gtime.Time `json:"deletedAt"   orm:"deleted_at"   description:""`
-	TenantId    int64       `json:"tenantId"    orm:"tenant_id"    description:""`
+	Id          int64       `json:"id"          orm:"id"           ` //
+	TenantId    int64       `json:"tenantId"    orm:"tenant_id"    ` //
+	BotName     string      `json:"botName"     orm:"bot_name"     ` //
+	BotUsername string      `json:"botUsername" orm:"bot_username" ` //
+	BotToken    string      `json:"botToken"    orm:"bot_token"    ` //
+	Remark      string      `json:"remark"      orm:"remark"       ` //
+	Status      int         `json:"status"      orm:"status"       ` //
+	CreatedBy   int64       `json:"createdBy"   orm:"created_by"   ` //
+	UpdatedBy   int64       `json:"updatedBy"   orm:"updated_by"   ` //
+	DeletedBy   int64       `json:"deletedBy"   orm:"deleted_by"   ` //
+	CreatedAt   *gtime.Time `json:"createdAt"   orm:"created_at"   ` //
+	UpdatedAt   *gtime.Time `json:"updatedAt"   orm:"updated_at"   ` //
+	DeletedAt   *gtime.Time `json:"deletedAt"   orm:"deleted_at"   ` //
+	AccountId   int64       `json:"accountId"   orm:"account_id"   ` //
+	BotType     string      `json:"botType"     orm:"bot_type"     ` //
 }

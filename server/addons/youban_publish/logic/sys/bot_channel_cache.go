@@ -4,8 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
-	"html"
 	"strings"
 	"time"
 
@@ -15,8 +13,8 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
-	botsysin "hotgo/addons/youban_bot/model/input/sysin"
-	botService "hotgo/addons/youban_bot/service"
+	pdao "hotgo/addons/youban_publish/internal/dao"
+	pdo "hotgo/addons/youban_publish/internal/model/do"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
@@ -30,7 +28,7 @@ func (s *sSysPublish) cacheBotMessage(ctx context.Context, tenantId, botId int64
 	if chatType != "private" && chatType != "channel" && chatType != "group" && chatType != "supergroup" {
 		return nil
 	}
-	chatId := g.NewVar(msg.Chat.ID).String()
+	chatId := normalizeTelegramChannelChatID(g.NewVar(msg.Chat.ID).String())
 	title := strings.TrimSpace(msg.Chat.Title)
 	if title == "" {
 		title = strings.TrimSpace(msg.Chat.Username)
@@ -53,6 +51,11 @@ func (s *sSysPublish) cacheBotMessage(ctx context.Context, tenantId, botId int64
 		"is_broadcast": isBroadcast, "is_megagroup": isMegagroup,
 		"last_message_text": strings.TrimSpace(telegramMessageText(msg)), "last_message_at": lastAt, "updated_at": now,
 	}
+	// Keep the canonical channel directory in sync. This is intentionally
+	// best-effort during the rolling migration: old installations may not have
+	// the new table yet, while the legacy cache remains authoritative.
+	_ = s.upsertCollectChannel(ctx, tenantId, chatId, chatType, title, strings.TrimSpace(msg.Chat.Username), isBroadcast, isMegagroup, int64(msg.ID), lastAt, now)
+	_ = s.touchCollectBotChannel(ctx, tenantId, botId, chatId, now)
 	var exists struct {
 		Id int64 `json:"id"`
 	}
@@ -66,19 +69,56 @@ func (s *sSysPublish) cacheBotMessage(ctx context.Context, tenantId, botId int64
 	data["message_count"] = 1
 	data["created_at"] = now
 	_, err := g.DB().Model(publishBotChannelCacheTable).Safe().Ctx(ctx).Data(data).Insert()
-	if err == nil {
-		var source struct {
-			Id        int64  `json:"id"`
-			AccountId int64  `json:"account_id"`
-			Title     string `json:"title"`
-		}
-		if scanErr := g.DB().Model(publishCollectSourceTable).Safe().Ctx(ctx).Fields("id,account_id,title").Where("tenant_id", tenantId).Where("bot_id", botId).Where("source_chat_id", chatId).WhereNull("deleted_at").Scan(&source); scanErr == nil && source.Id > 0 {
-			if title == "" {
-				title = chatId
-			}
-			text := "发现新的 BOT 采集频道\n频道：" + html.EscapeString(title) + "\n频道 ID：" + html.EscapeString(chatId) + "\n当前状态：待管理员确认"
-			_ = botService.SysBot().NotifySuperAdminsWithButtons(ctx, botId, "collect_source", text, [][]botsysin.NotifyButton{{{Label: "允许采集", Data: fmt.Sprintf("cm:approve:%d", source.Id)}, {Label: "拒绝采集", Data: fmt.Sprintf("cm:reject:%d", source.Id)}}})
-		}
+	return err
+}
+
+func (s *sSysPublish) upsertCollectChannel(ctx context.Context, tenantID int64, chatID, chatType, title, username string, broadcast, megagroup int, messageID int64, messageAt, now *gtime.Time) error {
+	chatID = normalizeTelegramChannelChatID(chatID)
+	if tenantID <= 0 || strings.TrimSpace(chatID) == "" {
+		return nil
+	}
+	data := pdo.YoubanPublishCollectChannel{TenantId: tenantID, TelegramChatId: chatID, ChatType: chatType, Title: title, Username: username, IsBroadcast: broadcast, IsMegagroup: megagroup, LastMessageId: messageID, LastMessageAt: messageAt, LastSeenAt: now, Status: sysin.CollectChannelStatusActive}
+	_, err := pdao.YoubanPublishCollectChannel.Ctx(ctx).Safe().Data(data).OnConflict("tenant_id,telegram_chat_id").OnDuplicate("chat_type,title,username,is_broadcast,is_megagroup,last_message_id,last_message_at,last_seen_at,updated_at,status,deleted_at").Save()
+	return err
+}
+
+func (s *sSysPublish) touchCollectBotChannel(ctx context.Context, tenantID, botID int64, chatID string, now *gtime.Time) error {
+	var channel struct {
+		Id int64 `json:"id"`
+	}
+	if err := pdao.YoubanPublishCollectChannel.Ctx(ctx).Fields("id").Where("tenant_id", tenantID).WhereIn("telegram_chat_id", tgChannelCacheLookupIds(chatID)).Scan(&channel); err != nil || channel.Id <= 0 {
+		return err
+	}
+	data := pdo.YoubanPublishCollectBotChannel{TenantId: tenantID, BotId: botID, ChannelId: channel.Id, Status: sysin.CollectBotChannelDiscovered, FirstSeenAt: now, LastSeenAt: now}
+	_, err := pdao.YoubanPublishCollectBotChannel.Ctx(ctx).Data(data).OnConflict("tenant_id,bot_id,channel_id").OnDuplicate("status,last_seen_at,updated_at").Save()
+	if err != nil {
+		return err
+	}
+	// Receiving a message proves the BOT is present again. Clear stale removal
+	// metadata while preserving the account's independent enable/disable state.
+	botCols := pdao.YoubanPublishCollectBotChannel.Columns()
+	_, err = pdao.YoubanPublishCollectBotChannel.Ctx(ctx).
+		Fields(botCols.Status, botCols.LastSeenAt, botCols.RemovedAt, botCols.RemovedReason).
+		Where(botCols.TenantId, tenantID).
+		Where(botCols.BotId, botID).
+		Where(botCols.ChannelId, channel.Id).
+		Data(pdo.YoubanPublishCollectBotChannel{
+			Status:        sysin.CollectBotChannelDiscovered,
+			LastSeenAt:    now,
+			RemovedAt:     nil,
+			RemovedReason: "",
+		}).Update()
+	if err != nil {
+		return err
+	}
+	var sources []struct {
+		Id int64 `json:"id"`
+	}
+	if err = g.DB().Model(publishCollectSourceTable).Ctx(ctx).Fields("id").Where("tenant_id", tenantID).Where("bot_id", botID).WhereIn("source_chat_id", tgChannelCacheLookupIds(chatID)).WhereNull("deleted_at").Scan(&sources); err != nil {
+		return err
+	}
+	for _, source := range sources {
+		_, _ = g.DB().Model(publishCollectSourceTable).Ctx(ctx).Where("id", source.Id).Where("channel_id", 0).Data(g.Map{"channel_id": channel.Id, "updated_at": now}).Update()
 	}
 	return err
 }
@@ -91,27 +131,49 @@ func (s *sSysPublish) AdminBotChannelCacheList(ctx context.Context, in *sysin.Bo
 	if in == nil {
 		in = &sysin.BotChannelCacheListInp{}
 	}
-	mod := g.DB().Model(publishBotChannelCacheTable+" c").Safe().Ctx(ctx).
-		LeftJoin(publishBotTable+" b", "b.id=c.bot_id").
-		Where("c.tenant_id", account.TenantId).WhereNull("b.deleted_at").
-		Fields("c.id,c.bot_id,b.bot_username,c.chat_id AS channel_id,c.chat_title AS channel_title,c.chat_username AS channel_username,c.chat_type,CASE WHEN c.chat_type='private' THEN 1 ELSE 0 END AS is_private,c.is_broadcast,c.is_megagroup,c.message_count,c.last_message_text,c.last_message_at,c.created_at,c.updated_at")
+	channelTable := pdao.YoubanPublishCollectChannel.Table()
+	relationTable := pdao.YoubanPublishCollectBotChannel.Table()
+	normalizedChatID := "REPLACE(ch.telegram_chat_id, '-100', '')"
+	mod := g.DB().Model(relationTable+" r").Safe().Ctx(ctx).
+		InnerJoin(channelTable+" ch", "ch.id=r.channel_id AND ch.tenant_id=r.tenant_id AND ch.deleted_at IS NULL").
+		LeftJoin(publishBotTable+" b", "b.id=r.bot_id AND b.deleted_at IS NULL").
+		Where("r.tenant_id", account.TenantId).WhereNull("r.deleted_at").
+		WhereNot("ch.chat_type", "private")
 	if in.BotId > 0 {
-		mod = mod.Where("c.bot_id", in.BotId)
+		mod = mod.Where("r.bot_id", in.BotId)
 	}
 	if keyword := strings.TrimSpace(in.Keyword); keyword != "" {
 		like := "%" + keyword + "%"
-		mod = mod.Where("(c.chat_id LIKE ? OR c.chat_title LIKE ? OR c.chat_username LIKE ? OR b.bot_username LIKE ?)", like, like, like, like)
+		mod = mod.Where("(ch.telegram_chat_id LIKE ? OR ch.title LIKE ? OR ch.username LIKE ?)", like, like, like)
 	}
 	switch strings.ToLower(strings.TrimSpace(in.Type)) {
-	case "private":
-		mod = mod.Where("c.chat_type", "private")
 	case "channel":
-		mod = mod.Where("c.is_broadcast", 1)
+		mod = mod.Where("ch.is_broadcast", 1)
 	case "group":
-		mod = mod.Where("c.is_megagroup", 1)
+		mod = mod.Where("ch.is_megagroup", 1)
 	}
-	if err = mod.Page(in.Page, in.PerPage).OrderDesc("c.last_message_at").OrderDesc("c.id").ScanAndCount(&list, &totalCount, false); err != nil {
+	countValue, countErr := mod.Clone().Fields("COUNT(DISTINCT CONCAT(r.bot_id, ':', " + normalizedChatID + "))").Value()
+	if countErr != nil {
+		return nil, 0, gerror.Wrap(countErr, "统计Bot频道列表失败")
+	}
+	totalCount = countValue.Int()
+	fields := "MIN(r.id) AS id,r.bot_id,MAX(b.bot_username) AS bot_username,MIN(ch.telegram_chat_id) AS channel_id," +
+		"COALESCE(NULLIF(MAX(CASE WHEN ch.title<>ch.telegram_chat_id THEN ch.title ELSE '' END),''),MAX(NULLIF(ch.title,''))) AS channel_title," +
+		"MAX(NULLIF(ch.username,'')) AS channel_username,MAX(NULLIF(ch.invite_link,'')) AS channel_link," +
+		"MAX(ch.chat_type) AS chat_type,MAX(ch.is_broadcast) AS is_broadcast,MAX(ch.is_megagroup) AS is_megagroup," +
+		"CASE WHEN MAX(CASE WHEN r.status<> 'bot_removed' THEN 1 ELSE 0 END)=1 THEN 'active' ELSE 'bot_removed' END AS membership_status," +
+		"CASE WHEN MAX(ch.is_broadcast)=1 OR MAX(CASE WHEN LOWER(r.bot_role) IN ('administrator','creator','owner') THEN 1 ELSE 0 END)=1 THEN 'administrator' ELSE 'member' END AS bot_role," +
+		"MIN(COALESCE(r.first_seen_at,r.created_at)) AS first_seen_at,MAX(r.removed_at) AS removed_at," +
+		"MIN(r.created_at) AS created_at,MAX(r.updated_at) AS updated_at"
+	if err = mod.Fields(fields).Group("r.bot_id,"+normalizedChatID).
+		Page(in.Page, in.PerPage).OrderDesc("updated_at").OrderDesc("id").Scan(&list); err != nil {
 		return nil, 0, gerror.Wrap(err, "获取Bot频道缓存失败")
+	}
+	for _, item := range list {
+		if item == nil || strings.TrimSpace(item.ChannelLink) != "" || strings.TrimSpace(item.ChannelUsername) == "" {
+			continue
+		}
+		item.ChannelLink = "https://t.me/" + strings.TrimPrefix(strings.TrimSpace(item.ChannelUsername), "@")
 	}
 	return list, totalCount, nil
 }

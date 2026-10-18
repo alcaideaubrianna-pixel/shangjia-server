@@ -89,6 +89,9 @@ func generateVideoPosterAttachmentWithPHash(
 }
 
 func generateVideoPosterPath(ctx context.Context, videoPath string) (string, error) {
+	// 排队和两次截帧共享总预算，不能每次重新开始计时。
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 	ffmpegPath, err := exec.LookPath("ffmpeg")
 	if err != nil {
 		return "", gerror.New("ffmpeg 未安装，无法生成视频封面")
@@ -113,9 +116,11 @@ func generateVideoPosterPath(ctx context.Context, videoPath string) (string, err
 	var lastOutput []byte
 	var lastErr error
 	for _, args := range attempts {
-		cmdCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		lastOutput, lastErr = exec.CommandContext(cmdCtx, ffmpegPath, args...).CombinedOutput()
-		cancel()
+		if ctx.Err() != nil {
+			lastErr = ctx.Err()
+			break
+		}
+		lastOutput, lastErr = exec.CommandContext(ctx, ffmpegPath, args...).CombinedOutput()
 		if lastErr == nil && fileNonEmpty(outputPath) {
 			return outputPath, nil
 		}

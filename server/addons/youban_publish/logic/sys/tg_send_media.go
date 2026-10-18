@@ -15,22 +15,32 @@ import (
 	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/net/ghttp"
 	"golang.org/x/sync/errgroup"
+
+	"hotgo/addons/youban_publish/internal/dao"
+	"hotgo/addons/youban_publish/internal/model/do"
+	"hotgo/utility/file"
 )
 
 const telegramMediaGroupMaxItems = 10
 const telegramMediaPrepareConcurrency = 4
 
-func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, chatId string, purpose string, caption string, media []*telegramMediaItem, replyMarkup ...models.ReplyMarkup) ([]*telegramSentMessage, error) {
+func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, chatId string, purpose string, caption string, media []*telegramMediaItem, replyMarkup ...models.ReplyMarkup) (resultMessages []*telegramSentMessage, resultErr error) {
+	stage := beginTelegramPublishStage(ctx, "media.send_set", g.Map{"purpose": purpose, "mediaCount": len(media)})
+	defer stage.Finish(&resultErr)
 	if len(media) == 0 {
 		return nil, nil
+	}
+	if err := validateTelegramMediaSetKnownUploadSize(media); err != nil {
+		return nil, telegramPreparationError(err)
 	}
 	caption = limitTelegramMediaCaption(caption)
 	if err := validateTelegramMediaPurpose(purpose, media); err != nil {
 		observeTelegramMediaPurposeViolation(ctx, "send")
 		return nil, err
 	}
-	if len(media) > 1 && media[0] != nil && media[0].TenantId > 0 && !telegramMediaSetHasCopyRef(media) && !telegramMediaSetRequiresUpload(media) {
+	if purpose != "verify" && len(media) > 1 && media[0] != nil && media[0].TenantId > 0 && !telegramMediaSetHasCopyRef(media) && !telegramMediaSetRequiresUpload(media) && !telegramMediaSetCanUseRemoteURL(media) {
 		relayAvailable, relayAvailabilityErr := relayAvailableForTenant(ctx, media[0].TenantId)
 		if relayAvailabilityErr != nil {
 			g.Log().Warningf(ctx, "检查 relay 频道失败，回退原有上传链路 tenant:%d err:%+v", media[0].TenantId, relayAvailabilityErr)
@@ -99,7 +109,9 @@ relayGroupDone:
 			chunkCaption = caption
 		}
 		prepareStartedAt := time.Now()
+		step := beginTelegramPublishStage(ctx, "media.group.prepare", g.Map{"purpose": purpose, "chunkIndex": chunkIndex, "chunkCount": len(chunks), "mediaCount": len(chunk)})
 		group, closers, err := s.telegramInputMediaGroup(ctx, chunk, chunkCaption)
+		step.End(err)
 		if err != nil {
 			if isTelegramMediaSourceUnavailableError(err) && telegramMediaSetHasCopyRef(chunk) {
 				g.Log().Warningf(ctx, "TG媒体持久化源不可用，回退复制原消息并跳过本次防扫图 purpose:%s chat:%s media:%s err:%+v", purpose, chatId, telegramMediaDebugSummary(chunk), err)
@@ -110,23 +122,44 @@ relayGroupDone:
 				allMessages = append(allMessages, fallbackMessages...)
 				continue
 			}
-			return allMessages, err
+			return allMessages, telegramPreparationError(err)
 		}
 		g.Log().Infof(ctx, "TG媒体组准备完成 purpose:%s chunk:%d/%d media:%d antiScan:%d duration:%s", purpose, chunkIndex+1, len(chunks), len(chunk), telegramAntiScanMediaCount(chunk), time.Since(prepareStartedAt).Round(time.Millisecond))
 		if len(group) == 0 {
 			continue
 		}
 		sendStartedAt := time.Now()
+		step = beginTelegramPublishStage(ctx, "api.sendMediaGroup", g.Map{"purpose": purpose, "chunkIndex": chunkIndex, "inputMode": "primary"})
 		msgs, err := bot.SendMediaGroup(ctx, &tgbot.SendMediaGroupParams{
 			ChatID: chatId,
 			Media:  group,
 		})
+		step.End(err, g.Map{"messageCount": len(msgs)})
 		closeTelegramMediaFiles(closers)
-		if err != nil && telegramMediaSetHasReusableFileId(chunk) && (isTelegramInvalidReusableFileError(err) || isTelegramPhotoTooLargeError(err)) {
-			group, closers, err = s.telegramInputMediaGroup(ctx, telegramMediaSetWithoutTgFileId(chunk), chunkCaption)
+		if err != nil && telegramMediaSetCanFallbackFromFileIDToURL(chunk, err) {
+			step = beginTelegramPublishStage(ctx, "media.group.fallback_url", g.Map{"purpose": purpose, "chunkIndex": chunkIndex})
+			group, closers, err = s.telegramInputMediaGroup(ctx, telegramMediaSetWithoutReusableFileID(chunk), chunkCaption)
+			step.End(err)
 			if err == nil {
+				step = beginTelegramPublishStage(ctx, "api.sendMediaGroup", g.Map{"purpose": purpose, "chunkIndex": chunkIndex, "inputMode": "fallback_url"})
 				msgs, err = bot.SendMediaGroup(ctx, &tgbot.SendMediaGroupParams{ChatID: chatId, Media: group})
+				step.End(err, g.Map{"messageCount": len(msgs)})
 				closeTelegramMediaFiles(closers)
+			} else {
+				err = telegramPreparationError(err)
+			}
+		}
+		if err != nil && telegramMediaSetCanFallbackToUpload(telegramMediaSetWithoutReusableFileID(chunk), err) {
+			step = beginTelegramPublishStage(ctx, "media.group.fallback_upload", g.Map{"purpose": purpose, "chunkIndex": chunkIndex})
+			group, closers, err = s.telegramInputMediaGroup(ctx, telegramMediaSetForcedUpload(chunk), chunkCaption)
+			step.End(err)
+			if err == nil {
+				step = beginTelegramPublishStage(ctx, "api.sendMediaGroup", g.Map{"purpose": purpose, "chunkIndex": chunkIndex, "inputMode": "fallback_upload"})
+				msgs, err = bot.SendMediaGroup(ctx, &tgbot.SendMediaGroupParams{ChatID: chatId, Media: group})
+				step.End(err, g.Map{"messageCount": len(msgs)})
+				closeTelegramMediaFiles(closers)
+			} else {
+				err = telegramPreparationError(err)
 			}
 		}
 		if err != nil {
@@ -183,8 +216,10 @@ func validateTelegramMediaPurpose(purpose string, media []*telegramMediaItem) er
 	return nil
 }
 
-func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bot, chatId string, purpose string, caption string, media *telegramMediaItem, replyMarkup ...models.ReplyMarkup) ([]*telegramSentMessage, error) {
-	if media != nil && strings.TrimSpace(media.TgFileId) == "" && media.TenantId > 0 {
+func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bot, chatId string, purpose string, caption string, media *telegramMediaItem, replyMarkup ...models.ReplyMarkup) (resultMessages []*telegramSentMessage, resultErr error) {
+	stage := beginTelegramPublishStage(ctx, "media.send_single", telegramPublishMediaLogFields(media))
+	defer stage.Finish(&resultErr)
+	if media != nil && strings.TrimSpace(media.TgFileId) == "" && media.TenantId > 0 && !telegramMediaCanUseRemoteURL(media) {
 		if relay, err := relayReadyMedia(ctx, media.TenantId, media.Id, purpose, "original"); err == nil && relay != nil && relay.MessageId > 0 && strings.TrimSpace(relay.RelayChatId) != "" {
 			ref := telegramCopyMediaRef{ChatId: relay.RelayChatId, MessageId: int(relay.MessageId)}
 			cloned := *media
@@ -223,7 +258,9 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 		return messages, err
 	}
 	prepareStartedAt := time.Now()
+	step := beginTelegramPublishStage(ctx, "media.single.prepare_input", telegramPublishMediaLogFields(media))
 	input, closer, err := telegramSingleMediaInputFile(ctx, media)
+	step.End(err)
 	if err != nil {
 		if isTelegramMediaSourceUnavailableError(err) {
 			if _, ok := telegramCopyMediaRefFromFileId(media.TgFileId); ok {
@@ -234,22 +271,26 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 				return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, &cloned, replyMarkup...)
 			}
 		}
-		return nil, err
+		return nil, telegramPreparationError(err)
 	}
 	if closer != nil {
 		defer closer.Close()
 	}
 	switch media.MediaType {
 	case "video":
+		previewCtx, cancelPreview := context.WithTimeout(ctx, 30*time.Second)
+		defer cancelPreview()
 		reuseWithCover := telegramVideoUsesReusableFileIdWithCover(media)
 		var thumbnail models.InputFile
 		var cover models.InputFile
 		var thumbnailCloser io.Closer
+		step = beginTelegramPublishStage(ctx, "media.video.preview", telegramPublishMediaLogFields(media))
 		if reuseWithCover {
-			cover, thumbnailCloser, err = telegramVideoPreview(ctx, media, "cover")
+			cover, thumbnailCloser, err = telegramVideoPreviewWithBudget(ctx, previewCtx, media, "cover")
 		} else if !telegramMediaUsesReusableFileId(media) {
-			thumbnail, thumbnailCloser, err = telegramVideoPreview(ctx, media, "thumbnail")
+			thumbnail, thumbnailCloser, err = telegramVideoPreviewWithBudget(ctx, previewCtx, media, "thumbnail")
 		}
+		step.End(err)
 		if err != nil {
 			return nil, err
 		}
@@ -258,8 +299,10 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 		}
 		g.Log().Infof(ctx, "TG单媒体准备完成 purpose:%s mediaId:%d type:%s antiScan:%t duration:%s", purpose, media.Id, media.MediaType, media.AntiScanEnabled, time.Since(prepareStartedAt).Round(time.Millisecond))
 		videoMeta := telegramVideoMeta{}
-		if !reuseWithCover {
-			videoMeta = s.telegramVideoMeta(ctx, media)
+		if !reuseWithCover && previewCtx.Err() == nil {
+			step = beginTelegramPublishStage(ctx, "media.video.metadata", telegramPublishMediaLogFields(media))
+			videoMeta = s.telegramVideoMeta(previewCtx, media)
+			step.End(previewCtx.Err())
 		}
 		params := &tgbot.SendVideoParams{
 			ChatID:            chatId,
@@ -275,20 +318,19 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 		}
 		applyTelegramSendVideoMeta(params, videoMeta)
 		sendStartedAt := time.Now()
+		step = beginTelegramPublishStage(ctx, "api.sendVideo", telegramPublishMediaLogFields(media), g.Map{
+			"hasThumbnail": thumbnail != nil, "hasCover": cover != nil,
+			"videoWidth": videoMeta.Width, "videoHeight": videoMeta.Height, "videoDuration": videoMeta.Duration})
 		msg, err := bot.SendVideo(ctx, params)
-		if err != nil && strings.TrimSpace(media.TgFileId) != "" && (isTelegramInvalidReusableFileError(err) || isTelegramPhotoTooLargeError(err)) {
-			cloned := *media
-			cloned.TgFileId = ""
-			cloned.TgThumbFileId = ""
-			return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, &cloned, replyMarkup...)
+		messageId := 0
+		if msg != nil {
+			messageId = msg.ID
+		}
+		step.End(err, g.Map{"responseReceived": msg != nil, "messageId": messageId})
+		if err != nil && telegramMediaCanFallbackToUpload(media, err) {
+			return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, telegramMediaFallbackCandidate(media), replyMarkup...)
 		}
 		if err != nil {
-			if isTelegramPhotoTooLargeError(err) {
-				cloned := *media
-				cloned.TgFileId = ""
-				cloned.TgThumbFileId = ""
-				return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, &cloned, replyMarkup...)
-			}
 			return nil, err
 		}
 		g.Log().Infof(ctx, "TG单媒体发送完成 purpose:%s mediaId:%d type:%s duration:%s", purpose, media.Id, media.MediaType, time.Since(sendStartedAt).Round(time.Millisecond))
@@ -305,12 +347,11 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 		if len(replyMarkup) > 0 {
 			params.ReplyMarkup = replyMarkup[0]
 		}
+		step = beginTelegramPublishStage(ctx, "api.sendPhoto", telegramPublishMediaLogFields(media))
 		msg, err := bot.SendPhoto(ctx, params)
-		if err != nil && strings.TrimSpace(media.TgFileId) != "" && (isTelegramInvalidReusableFileError(err) || isTelegramPhotoTooLargeError(err)) {
-			cloned := *media
-			cloned.TgFileId = ""
-			cloned.TgThumbFileId = ""
-			return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, &cloned, replyMarkup...)
+		step.End(err, g.Map{"responseReceived": msg != nil})
+		if err != nil && telegramMediaCanFallbackToUpload(media, err) {
+			return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, telegramMediaFallbackCandidate(media), replyMarkup...)
 		}
 		if err != nil {
 			return nil, err
@@ -504,7 +545,9 @@ type telegramPreparedInputMedia struct {
 	closers []io.Closer
 }
 
-func (s *sSysPublish) telegramInputMediaItem(ctx context.Context, item *telegramMediaItem, caption string) (models.InputMedia, []io.Closer, error) {
+func (s *sSysPublish) telegramInputMediaItem(ctx context.Context, item *telegramMediaItem, caption string) (result models.InputMedia, resultClosers []io.Closer, resultErr error) {
+	stage := beginTelegramPublishStage(ctx, "media.prepare_item", telegramPublishMediaLogFields(item))
+	defer stage.Finish(&resultErr)
 	source, attachment, closer, err := telegramInputMediaSource(ctx, item)
 	if err != nil {
 		return nil, nil, err
@@ -520,9 +563,13 @@ func (s *sSysPublish) telegramInputMediaItem(ctx context.Context, item *telegram
 	if item.MediaType != "video" {
 		return &models.InputMediaPhoto{Media: source, Caption: caption, ParseMode: telegramMediaParseMode(caption), MediaAttachment: attachment}, closers, nil
 	}
+	previewCtx, cancelPreview := context.WithTimeout(ctx, 30*time.Second)
+	defer cancelPreview()
 	var thumbnail models.InputFile
 	if !telegramMediaUsesReusableFileId(item) {
-		thumbnail, closer, err = telegramVideoThumbnail(ctx, item)
+		step := beginTelegramPublishStage(ctx, "media.group.video_preview", telegramPublishMediaLogFields(item))
+		thumbnail, closer, err = telegramVideoPreviewWithBudget(ctx, previewCtx, item, "thumbnail")
+		step.End(err)
 		if err != nil {
 			closeTelegramMediaFiles(closers)
 			return nil, nil, err
@@ -532,7 +579,11 @@ func (s *sSysPublish) telegramInputMediaItem(ctx context.Context, item *telegram
 		}
 	}
 	video := &models.InputMediaVideo{Media: source, Thumbnail: thumbnail, Caption: caption, ParseMode: telegramMediaParseMode(caption), SupportsStreaming: true, MediaAttachment: attachment}
-	applyTelegramInputMediaVideoMeta(video, s.telegramVideoMeta(ctx, item))
+	if previewCtx.Err() == nil {
+		step := beginTelegramPublishStage(ctx, "media.group.video_metadata", telegramPublishMediaLogFields(item))
+		applyTelegramInputMediaVideoMeta(video, s.telegramVideoMeta(previewCtx, item))
+		step.End(previewCtx.Err())
+	}
 	return video, closers, nil
 }
 
@@ -564,8 +615,14 @@ func telegramInputFile(ctx context.Context, media *telegramMediaItem) (models.In
 		return nil, nil, gerror.New("媒体文件为空")
 	}
 	if source := strings.TrimSpace(media.TgFileId); source != "" && !telegramMediaRequiresSanitizedUpload(media) {
+		g.Log().Infof(ctx, "TG实际媒体输入 jobId:%d mediaId:%d purpose:%s mode:file_id antiScan:%t", media.JobId, media.Id, media.Purpose, media.AntiScanEnabled)
 		return &models.InputFileString{Data: source}, nil, nil
 	}
+	if source := telegramMediaRemoteURL(media); source != "" {
+		g.Log().Infof(ctx, "TG实际媒体输入 jobId:%d mediaId:%d purpose:%s mode:url antiScan:%t", media.JobId, media.Id, media.Purpose, media.AntiScanEnabled)
+		return &models.InputFileString{Data: source}, nil, nil
+	}
+	g.Log().Infof(ctx, "TG实际媒体输入 jobId:%d mediaId:%d purpose:%s mode:multipart antiScan:%t", media.JobId, media.Id, media.Purpose, media.AntiScanEnabled)
 	path, cleanup, err := cachedTelegramMediaFile(ctx, media)
 	if err != nil {
 		return nil, nil, err
@@ -576,6 +633,12 @@ func telegramInputFile(ctx context.Context, media *telegramMediaItem) (models.In
 	}
 	if strings.TrimSpace(path) == "" {
 		return nil, nil, gerror.New("媒体文件地址为空")
+	}
+	if err = validateTelegramMediaUploadSize(media, path); err != nil {
+		if cleanup != nil {
+			cleanup()
+		}
+		return nil, nil, telegramPreparationError(err)
 	}
 	file, err := os.Open(path)
 	if err != nil {
@@ -622,6 +685,10 @@ func telegramMediaSetHasCopyRef(media []*telegramMediaItem) bool {
 }
 
 func telegramMediaSetWithoutTgFileId(media []*telegramMediaItem) []*telegramMediaItem {
+	return telegramMediaSetForcedUpload(media)
+}
+
+func telegramMediaSetForcedUpload(media []*telegramMediaItem) []*telegramMediaItem {
 	list := make([]*telegramMediaItem, 0, len(media))
 	for _, item := range media {
 		if item == nil {
@@ -632,6 +699,24 @@ func telegramMediaSetWithoutTgFileId(media []*telegramMediaItem) []*telegramMedi
 		cloned.TgFileId = ""
 		cloned.TgThumbFileId = ""
 		cloned.ForceUpload = true
+		list = append(list, &cloned)
+	}
+	return list
+}
+
+func telegramMediaSetWithoutReusableFileID(media []*telegramMediaItem) []*telegramMediaItem {
+	list := make([]*telegramMediaItem, 0, len(media))
+	for _, item := range media {
+		if item == nil {
+			list = append(list, item)
+			continue
+		}
+		cloned := *item
+		if telegramMediaUsesReusableFileId(item) {
+			cloned.TgFileId = ""
+			cloned.TgThumbFileId = ""
+			cloned.ForceUpload = false
+		}
 		list = append(list, &cloned)
 	}
 	return list
@@ -755,6 +840,9 @@ func telegramInputMediaSource(ctx context.Context, media *telegramMediaItem) (st
 	if source := strings.TrimSpace(media.TgFileId); source != "" && !media.ForceUpload && !telegramMediaRequiresSanitizedUpload(media) {
 		return source, nil, nil, nil
 	}
+	if source := telegramMediaRemoteURL(media); source != "" {
+		return source, nil, nil, nil
+	}
 	path, cleanup, err := cachedTelegramMediaFile(ctx, media)
 	if err != nil {
 		return "", nil, nil, err
@@ -765,6 +853,12 @@ func telegramInputMediaSource(ctx context.Context, media *telegramMediaItem) (st
 	}
 	if strings.TrimSpace(path) == "" {
 		return "", nil, nil, gerror.New("媒体文件地址为空")
+	}
+	if err = validateTelegramMediaUploadSize(media, path); err != nil {
+		if cleanup != nil {
+			cleanup()
+		}
+		return "", nil, nil, telegramPreparationError(err)
 	}
 	file, err := os.Open(path)
 	if err != nil {
@@ -782,6 +876,127 @@ func telegramInputMediaSource(ctx context.Context, media *telegramMediaItem) (st
 
 func telegramMediaRequiresSanitizedUpload(media *telegramMediaItem) bool {
 	return media != nil && media.AntiScanEnabled
+}
+
+func telegramMediaRemoteURL(media *telegramMediaItem) string {
+	if media == nil || media.ForceUpload || telegramMediaRequiresSanitizedUpload(media) {
+		return ""
+	}
+	if !telegramMediaWithinURLSizeLimit(media) {
+		return ""
+	}
+	raw := strings.TrimSpace(media.FileUrl)
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme != "https" || strings.TrimSpace(parsed.Host) == "" {
+		return ""
+	}
+	// Telegram only guarantees MPEG-4 for video messages. Other containers
+	// must pass through local normalization or they can render as documents.
+	if strings.EqualFold(strings.TrimSpace(media.MediaType), "video") && telegramVideoURLNeedsNormalization(parsed.Path) {
+		return ""
+	}
+	return parsed.String()
+}
+
+func telegramVideoURLNeedsNormalization(path string) bool {
+	ext := strings.ToLower(filepath.Ext(strings.TrimSpace(path)))
+	return ext != "" && ext != ".mp4"
+}
+
+func telegramMediaCanUseRemoteURL(media *telegramMediaItem) bool {
+	return telegramMediaRemoteURL(media) != ""
+}
+
+func telegramMediaSetCanUseRemoteURL(media []*telegramMediaItem) bool {
+	for _, item := range media {
+		if telegramMediaCanUseRemoteURL(item) {
+			return true
+		}
+	}
+	return false
+}
+
+func isTelegramRemoteURLRejectedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	for _, part := range []string{
+		"failed to get http url content",
+		"webpage_curl_failed",
+		"webpage_media_empty",
+		"wrong file identifier/http url specified",
+		"wrong type of the web page content",
+		"wrong content type",
+		"file is too big",
+		"request entity too large",
+		"http 403",
+		"http 404",
+	} {
+		if strings.Contains(message, part) {
+			return true
+		}
+	}
+	return false
+}
+
+func telegramMediaCanFallbackToUpload(media *telegramMediaItem, err error) bool {
+	if media == nil || media.ForceUpload || isTelegramAmbiguousDeliveryError(err) {
+		return false
+	}
+	if telegramMediaUsesReusableFileId(media) {
+		return isTelegramInvalidReusableFileError(err) || isTelegramPhotoTooLargeError(err)
+	}
+	return telegramMediaCanUseRemoteURL(media) && (isTelegramRemoteURLRejectedError(err) || isTelegramPhotoTooLargeError(err))
+}
+
+func telegramMediaSetCanFallbackToUpload(media []*telegramMediaItem, err error) bool {
+	if isTelegramAmbiguousDeliveryError(err) {
+		return false
+	}
+	for _, item := range media {
+		if telegramMediaCanFallbackToUpload(item, err) {
+			return true
+		}
+	}
+	return false
+}
+
+func telegramMediaSetCanFallbackFromFileIDToURL(media []*telegramMediaItem, err error) bool {
+	if isTelegramAmbiguousDeliveryError(err) || (!isTelegramInvalidReusableFileError(err) && !isTelegramPhotoTooLargeError(err)) {
+		return false
+	}
+	for _, item := range media {
+		if telegramMediaUsesReusableFileId(item) {
+			return true
+		}
+	}
+	return false
+}
+
+func telegramMediaForcedUpload(media *telegramMediaItem) *telegramMediaItem {
+	if media == nil {
+		return nil
+	}
+	cloned := *media
+	cloned.TgFileId = ""
+	cloned.TgThumbFileId = ""
+	cloned.ForceUpload = true
+	return &cloned
+}
+
+func telegramMediaFallbackCandidate(media *telegramMediaItem) *telegramMediaItem {
+	if media == nil {
+		return nil
+	}
+	cloned := *media
+	if telegramMediaUsesReusableFileId(media) {
+		cloned.TgFileId = ""
+		cloned.TgThumbFileId = ""
+		cloned.ForceUpload = false
+		return &cloned
+	}
+	return telegramMediaForcedUpload(media)
 }
 
 type fileCleanupCloser struct {
@@ -814,11 +1029,35 @@ func telegramVideoThumbnail(ctx context.Context, media *telegramMediaItem) (mode
 	return telegramVideoPreview(ctx, media, "thumbnail")
 }
 
+// 封面是可选媒体。仅取消封面子任务，不能把本地失败传成发送结果不确定。
 func telegramVideoPreview(ctx context.Context, media *telegramMediaItem, kind string) (models.InputFile, io.Closer, error) {
+	previewCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	return telegramVideoPreviewWithBudget(ctx, previewCtx, media, kind)
+}
+
+func telegramVideoPreviewWithBudget(ctx, previewCtx context.Context, media *telegramMediaItem, kind string) (models.InputFile, io.Closer, error) {
+	file, closer, err := prepareTelegramVideoPreview(previewCtx, media, kind)
+	if err == nil && previewCtx.Err() == nil {
+		return file, closer, nil
+	}
+	if closer != nil {
+		_ = closer.Close()
+	}
+	if ctx.Err() != nil {
+		return nil, nil, ctx.Err()
+	}
+	g.Log().Warningf(ctx, "TG视频可选预览图准备失败，继续发送视频 kind:%s err:%v timeout:%v", kind, err, previewCtx.Err())
+	return nil, nil, nil
+}
+
+func prepareTelegramVideoPreview(ctx context.Context, media *telegramMediaItem, kind string) (models.InputFile, io.Closer, error) {
 	if media == nil || media.MediaType != "video" {
 		return nil, nil, nil
 	}
+	step := beginTelegramPublishStage(ctx, "media.video.poster.resolve", telegramPublishMediaLogFields(media), g.Map{"previewKind": kind})
 	thumbPath, cleanupThumb, err := cachedTelegramVideoPosterFile(ctx, media)
+	step.End(err, g.Map{"posterAvailable": strings.TrimSpace(thumbPath) != ""})
 	if err != nil {
 		if cleanupThumb != nil {
 			cleanupThumb()
@@ -829,14 +1068,18 @@ func telegramVideoPreview(ctx context.Context, media *telegramMediaItem, kind st
 		return nil, nil, nil
 	}
 	if media.AntiScanEnabled {
+		step = beginTelegramPublishStage(ctx, "media.video.poster.protection", telegramPublishMediaLogFields(media), g.Map{"previewKind": kind})
 		protectedPath, protectedCleanup, protectErr := NewSysPublish().prepareTelegramAntiScanUploadFile(ctx, media, thumbPath, cleanupThumb, kind)
+		step.End(protectErr)
 		if protectErr != nil {
 			return nil, nil, gerror.Wrap(protectErr, "处理TG视频缩略图防扫图失败")
 		}
 		thumbPath = protectedPath
 		cleanupThumb = protectedCleanup
 	}
+	step = beginTelegramPublishStage(ctx, "media.video.poster.open", telegramPublishMediaLogFields(media))
 	file, err := os.Open(thumbPath)
+	step.End(err)
 	if err != nil {
 		if cleanupThumb != nil {
 			cleanupThumb()
@@ -848,6 +1091,7 @@ func telegramVideoPreview(ctx context.Context, media *telegramMediaItem, kind st
 }
 
 func cachedTelegramVideoPosterFile(ctx context.Context, media *telegramMediaItem) (string, func(), error) {
+	ctx = telegramPublishMediaTraceContext(ctx, media)
 	if media == nil {
 		return "", nil, nil
 	}
@@ -864,13 +1108,16 @@ func cachedTelegramVideoPosterFile(ctx context.Context, media *telegramMediaItem
 		}
 	}
 	if source := strings.TrimSpace(media.PosterUrl); strings.HasPrefix(strings.ToLower(source), "http") && !isLocalTelegramURL(source) {
-		poster := &telegramMediaItem{
-			Id:          media.Id,
-			MediaType:   "image",
-			FileUrl:     source,
-			StoragePath: managedMediaObjectPath(source),
-		}
-		posterPath, posterCleanup, posterErr := cachedTelegramMediaFile(ctx, poster)
+		// 原消息封面已有可访问地址，直接读取；不要先访问存储代理，
+		// 否则代理故障会耗尽预算，导致可用的原图被跳过。
+		posterCtx, cancelPoster := context.WithTimeout(ctx, 5*time.Second)
+		step := beginTelegramPublishStage(posterCtx, "media.video.poster.download", telegramPublishMediaLogFields(media))
+		posterPath, posterErr := cachedRemoteMediaFileWithMetaSourceAndDownloader(
+			posterCtx, stableMediaFileCacheKey(normalizedMediaCacheSource(source)),
+			source, source, ".jpg", downloadMediaFileCache)
+		step.End(posterErr)
+		cancelPoster()
+		var posterCleanup func()
 		if posterErr == nil && strings.TrimSpace(posterPath) != "" {
 			return posterPath, posterCleanup, nil
 		}
@@ -883,14 +1130,83 @@ func cachedTelegramVideoPosterFile(ctx context.Context, media *telegramMediaItem
 	if err != nil || strings.TrimSpace(videoPath) == "" {
 		return "", cleanup, err
 	}
+	step := beginTelegramPublishStage(ctx, "media.video.poster.generate")
 	thumbPath, err := generateTelegramVideoThumbnail(ctx, videoPath)
+	step.End(err)
 	if cleanup != nil {
 		cleanup()
 	}
 	if err != nil {
 		return "", nil, gerror.Wrapf(err, "生成TG视频预览图失败 mediaId:%d path:%s", media.Id, videoPath)
 	}
+	step = beginTelegramPublishStage(ctx, "media.video.poster.persist")
+	persistErr := persistGeneratedTelegramVideoPoster(ctx, media, thumbPath)
+	step.End(persistErr)
+	if persistErr != nil {
+		// The generated local preview is still valid for this send. Persistence
+		// is an optimization and must not turn an optional thumbnail into a
+		// channel-blocking failure.
+		g.Log().Warningf(ctx, "保存TG视频预览图失败，继续使用本地预览图 mediaId:%d err:%+v", media.Id, persistErr)
+	}
 	return thumbPath, func() { _ = os.Remove(thumbPath) }, nil
+}
+
+func persistGeneratedTelegramVideoPoster(ctx context.Context, media *telegramMediaItem, posterPath string) error {
+	return persistGeneratedTelegramVideoPosterWith(ctx, media, posterPath,
+		func(ctx context.Context, upload *ghttp.UploadFile) (string, string, error) {
+			attachment, err := uploadMediaPoster(ctx, upload)
+			if err != nil {
+				return "", "", err
+			}
+			return normalizeMediaFileURL(posterFileUrl(attachment), posterStoragePath(attachment)),
+				normalizeStoredMediaPath(posterStoragePath(attachment)), nil
+		},
+		func(ctx context.Context, mediaId int64, posterURL, storagePath string) error {
+			columns := dao.YoubanPublishMedia.Columns()
+			_, err := dao.YoubanPublishMedia.Ctx(ctx).
+				Where(columns.Id, mediaId).
+				Where(columns.MediaType, "video").
+				Data(do.YoubanPublishMedia{PosterUrl: posterURL, PosterStoragePath: storagePath}).
+				Update()
+			return err
+		},
+	)
+}
+
+func persistGeneratedTelegramVideoPosterWith(
+	ctx context.Context,
+	media *telegramMediaItem,
+	posterPath string,
+	upload func(context.Context, *ghttp.UploadFile) (string, string, error),
+	save func(context.Context, int64, string, string) error,
+) error {
+	if media == nil || media.Id <= 0 || strings.TrimSpace(posterPath) == "" {
+		return nil
+	}
+	if upload == nil || save == nil {
+		return gerror.New("视频预览图持久化依赖不能为空")
+	}
+	content, err := os.ReadFile(posterPath)
+	if err != nil {
+		return gerror.Wrap(err, "读取生成的视频预览图失败")
+	}
+	header, err := file.NewMultipartFileHeader(filepath.Base(posterPath), content)
+	if err != nil {
+		return gerror.Wrap(err, "创建视频预览图上传文件失败")
+	}
+	posterURL, storagePath, err := upload(ctx, &ghttp.UploadFile{FileHeader: header})
+	if err != nil {
+		return gerror.Wrap(err, "上传视频预览图到存储失败")
+	}
+	if strings.TrimSpace(posterURL) == "" && strings.TrimSpace(storagePath) == "" {
+		return gerror.New("上传视频预览图未返回存储地址")
+	}
+	if err = save(ctx, media.Id, posterURL, storagePath); err != nil {
+		return gerror.Wrap(err, "保存视频预览图地址失败")
+	}
+	media.PosterUrl = posterURL
+	media.PosterStoragePath = storagePath
+	return nil
 }
 
 func generateTelegramVideoThumbnail(ctx context.Context, videoPath string) (string, error) {

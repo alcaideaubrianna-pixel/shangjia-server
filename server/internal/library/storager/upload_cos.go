@@ -7,6 +7,7 @@ package storager
 
 import (
 	"context"
+	"hotgo/internal/model"
 	"io"
 	"os"
 	"path/filepath"
@@ -28,18 +29,23 @@ type CosDrive struct {
 }
 
 func newCosClient() (*cos.Client, error) {
-	if strings.TrimSpace(config.CosBucketURL) == "" {
+	return NewCosClientWithConfig(config)
+}
+
+// NewCosClientWithConfig creates a COS client bound to an immutable config snapshot.
+func NewCosClientWithConfig(cfg *model.UploadConfig) (*cos.Client, error) {
+	if cfg == nil || strings.TrimSpace(cfg.CosBucketURL) == "" {
 		return nil, gerror.New("COS存储驱动必须配置Bucket访问域名!")
 	}
 
-	bucketURL, err := url.Parse(strings.TrimSpace(config.CosBucketURL))
+	bucketURL, err := url.Parse(strings.TrimSpace(cfg.CosBucketURL))
 	if err != nil {
 		return nil, gerror.Wrap(err, "COS Bucket访问域名配置不正确")
 	}
 	return cos.NewClient(&cos.BaseURL{BucketURL: bucketURL}, &http.Client{
 		Transport: &cos.AuthorizationTransport{
-			SecretID:  config.CosSecretId,
-			SecretKey: config.CosSecretKey,
+			SecretID:  cfg.CosSecretId,
+			SecretKey: cfg.CosSecretKey,
 		},
 	}), nil
 }
@@ -93,7 +99,7 @@ func DownloadCosObjectToFile(ctx context.Context, objectPath, targetPath string)
 }
 
 // Upload 上传到腾讯云cos对象存储
-func (d *CosDrive) Upload(ctx context.Context, file *ghttp.UploadFile) (fullPath string, err error) {
+func (d *CosDrive) Upload(ctx context.Context, file *ghttp.UploadFile, meta *FileMeta) (fullPath string, err error) {
 	if config.CosPath == "" {
 		err = gerror.New("COS存储驱动必须配置存储路径!")
 		return
@@ -115,7 +121,10 @@ func (d *CosDrive) Upload(ctx context.Context, file *ghttp.UploadFile) (fullPath
 		return "", err
 	}
 
-	fullPath = GenFullPath(config.CosPath, gfile.Ext(file.Filename))
+	fullPath, err = GenContentPath(config.CosPath, meta.Md5, meta.Ext)
+	if err != nil {
+		return "", err
+	}
 	opt := &cos.ObjectPutOptions{
 		ObjectPutHeaderOptions: &cos.ObjectPutHeaderOptions{
 			CacheControl: "public, max-age=31536000, immutable",
@@ -138,7 +147,10 @@ func (d *CosDrive) CreateMultipart(ctx context.Context, in *CheckMultipartParams
 		return nil, err
 	}
 
-	fullPath := GenFullPath(config.CosPath, gfile.Ext(in.meta.Filename))
+	fullPath, err := GenContentPath(config.CosPath, in.meta.Md5, in.meta.Ext)
+	if err != nil {
+		return nil, err
+	}
 	opt := &cos.InitiateMultipartUploadOptions{
 		ObjectPutHeaderOptions: &cos.ObjectPutHeaderOptions{
 			CacheControl: "public, max-age=31536000, immutable",

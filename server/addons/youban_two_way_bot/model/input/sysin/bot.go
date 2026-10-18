@@ -12,7 +12,7 @@ import (
 
 const (
 	TwoWayBotStatusEnabled  = 1
-	TwoWayBotStatusDisabled = 0
+	TwoWayBotStatusDisabled = 2
 
 	TwoWayBotSetupPending        = "pending"
 	TwoWayBotSetupManualRequired = "manual_required"

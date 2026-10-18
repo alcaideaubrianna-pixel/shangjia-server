@@ -3,18 +3,17 @@ package sys
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
 
-	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
 	"hotgo/addons/youban_bot/model/input/sysin"
+	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
 )
 
 const featureCacheTTL = 30 * time.Second
@@ -49,6 +48,12 @@ func (s *sSysBot) AdminFeatureList(ctx context.Context, in *sysin.FeatureListInp
 		if row.UpdatedAt != nil {
 			item.UpdatedAt = row.UpdatedAt.String()
 		}
+		if row.FeatureKey == (relayFeature{}).Key() {
+			item.Command = ""
+			item.ConfigJson = "{}"
+			item.ConfigValues = map[string]interface{}{}
+		}
+
 		list = append(list, item)
 	}
 	return
@@ -112,12 +117,15 @@ func (s *sSysBot) AdminFeatureSave(ctx context.Context, in *sysin.FeatureSaveInp
 		data, _ := json.Marshal(config)
 		in.ConfigJson = string(data)
 	}
+
 	status := in.Status
 	if status == 0 {
 		status = 1
 	}
 	data := g.Map{"name": strings.TrimSpace(in.Name), "command": strings.TrimPrefix(strings.TrimSpace(in.Command), "/"), "description": strings.TrimSpace(in.Description), "config_json": strings.TrimSpace(in.ConfigJson), "sort": in.Sort, "status": status, "updated_at": gtime.Now()}
-	if in.Id > 0 {
+	if featureKey == (relayFeature{}).Key() {
+		err = s.persistRelayFeature(ctx, in, data)
+	} else if in.Id > 0 {
 		_, err = g.DB().Model(featureTable).Safe().Ctx(ctx).Where("id", in.Id).Where("feature_key", featureKey).Data(data).Update()
 	} else {
 		data["feature_key"] = featureKey
@@ -155,9 +163,20 @@ func (s *sSysBot) syncFeatureDefaults(ctx context.Context) error {
 			return gerror.Wrap(err, "同步Bot插件默认配置失败")
 		}
 		if count > 0 {
+			if feature.Key() == (relayFeature{}).Key() {
+				result, err := g.DB().Model(featureTable).Safe().Ctx(ctx).Where("feature_key", feature.Key()).WhereNull("deleted_at").Where("(command <> ? OR config_json <> ?)", "", "{}").Data(g.Map{"command": "", "config_json": "{}"}).Update()
+				if err != nil {
+					return gerror.Wrap(err, "清理双向配置插件历史命令失败")
+				}
+				affected, err := result.RowsAffected()
+				if err != nil {
+					return err
+				}
+				changed = changed || affected > 0
+			}
 			continue
 		}
-		_, err = g.DB().Model(featureTable).Safe().Ctx(ctx).Data(g.Map{"feature_key": feature.Key(), "name": feature.Description(), "command": strings.TrimPrefix(feature.Command(), "/"), "description": feature.Description(), "config_json": normalizeFeatureConfigJson(feature.Key(), ""), "sort": (index + 1) * 10, "status": 1, "created_at": gtime.Now(), "updated_at": gtime.Now()}).Insert()
+		_, err = g.DB().Model(featureTable).Safe().Ctx(ctx).Data(g.Map{"feature_key": feature.Key(), "name": feature.Description(), "command": strings.TrimPrefix(feature.Command(), "/"), "description": feature.Description(), "config_json": normalizeFeatureConfigJson(feature.Key(), ""), "sort": (index + 1) * 10, "status": featureDefaultStatus(feature), "created_at": gtime.Now(), "updated_at": gtime.Now()}).Insert()
 		if err != nil {
 			return gerror.Wrap(err, "写入Bot插件默认配置失败")
 		}
@@ -237,7 +256,7 @@ func (s *sSysBot) dispatchFeature(ctx context.Context, botId int64, msg *models.
 	command, args := botCommandAndArgs(text)
 	labelText := strings.TrimSpace(text)
 	for _, feature := range botFeatures {
-		if feature == nil {
+		if feature == nil || feature.Key() == (relayFeature{}).Key() {
 			continue
 		}
 		row, enabled := s.featureConfig(ctx, feature.Key())
@@ -322,54 +341,7 @@ func (s *sSysBot) featureDescription(ctx context.Context, feature botFeature) st
 }
 
 func (s *sSysBot) syncAllTelegramBotMenus(ctx context.Context) error {
-	bots, err := s.enabledBots(ctx)
-	if err != nil {
-		return err
-	}
-	errorsList := make([]error, 0)
-	for _, item := range bots {
-		if item != nil && strings.TrimSpace(item.BotToken) != "" {
-			if err = s.syncTelegramBotMenu(ctx, item.BotToken); err != nil {
-				g.Log().Warningf(ctx, "同步Telegram菜单失败 botId:%d username:%s err:%+v", item.Id, item.BotUsername, err)
-				errorsList = append(errorsList, fmt.Errorf("bot %s: %w", firstNonEmpty(item.BotUsername, fmt.Sprintf("%d", item.Id)), err))
-				continue
-			}
-			g.Log().Infof(ctx, "同步Telegram菜单成功 botId:%d username:%s", item.Id, item.BotUsername)
-		}
-	}
-	return errors.Join(errorsList...)
-}
-
-func (s *sSysBot) syncTelegramBotMenu(ctx context.Context, botToken string) error {
-	bot, err := s.telegramBot(ctx, botToken)
-	if err != nil {
-		return err
-	}
-	commands := make([]models.BotCommand, 0, len(botFeatures))
-	for _, feature := range botFeatures {
-		if feature == nil {
-			continue
-		}
-		if !s.featureMenuVisible(ctx, feature.Key()) {
-			continue
-		}
-		cmd := strings.TrimPrefix(s.featureCommand(ctx, feature), "/")
-		if cmd == "" {
-			continue
-		}
-		commands = append(commands, models.BotCommand{Command: cmd, Description: s.featureDescription(ctx, feature)})
-	}
-	callCtx, cancel := telegramAPICtx()
-	defer cancel()
-	if len(commands) == 0 {
-		_, err = bot.DeleteMyCommands(callCtx, &tgbot.DeleteMyCommandsParams{Scope: &models.BotCommandScopeDefault{}})
-		return err
-	}
-	if _, err = bot.SetMyCommands(callCtx, &tgbot.SetMyCommandsParams{Commands: commands, Scope: &models.BotCommandScopeDefault{}}); err != nil {
-		return err
-	}
-	_, err = bot.SetChatMenuButton(callCtx, &tgbot.SetChatMenuButtonParams{MenuButton: &models.MenuButtonCommands{Type: models.MenuButtonTypeCommands}})
-	return err
+	return gatewayservice.Gateway().Refresh(ctx)
 }
 
 func featureMenuSchema() *sysin.FeatureConfigSchema {
@@ -386,6 +358,9 @@ func appendFeatureMenuSchema(list []*sysin.FeatureConfigSchema) []*sysin.Feature
 }
 
 func featureConfigSchema(key string) []*sysin.FeatureConfigSchema {
+	if key == (relayFeature{}).Key() {
+		return []*sysin.FeatureConfigSchema{}
+	}
 	for _, feature := range botFeatures {
 		if feature != nil && feature.Key() == key {
 			if provider, ok := feature.(botFeatureConfigProvider); ok {
@@ -440,6 +415,9 @@ func (s *sSysBot) featureConfigValue(ctx context.Context, key string, field stri
 }
 
 func (s *sSysBot) featureMenuVisible(ctx context.Context, key string) bool {
+	if key == (relayFeature{}).Key() {
+		return false
+	} // Configuration-only globally; commands are scoped by Gateway to explicitly enabled Bots.
 	row, enabled := s.featureConfig(ctx, key)
 	if !enabled {
 		return false

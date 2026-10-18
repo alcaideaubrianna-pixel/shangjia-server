@@ -628,6 +628,7 @@ type BotMediaSearchInp struct {
 	TenantId    int64                 `json:"tenantId" dc:"租户ID"`
 	AccountId   int64                 `json:"accountId" dc:"绑定账号ID"`
 	AccountType string                `json:"accountType" dc:"账号类型：admin/uploader"`
+	TraceId     string                `json:"traceId" dc:"扫图业务追踪号"`
 	Items       []*BotMediaSearchItem `json:"items" dc:"待搜索媒体"`
 	Threshold   int                   `json:"threshold" dc:"相似度阈值"`
 }
@@ -1150,24 +1151,30 @@ type BotChannelCacheListInp struct {
 }
 
 type BotChannelCacheModel struct {
-	Id              int64       `json:"id" dc:"ID"`
-	BotId           int64       `json:"botId" dc:"Bot ID"`
-	BotUsername     string      `json:"botUsername" dc:"Bot用户名"`
-	ChannelId       string      `json:"channelId" dc:"频道/群聊ID"`
-	ChannelTitle    string      `json:"channelTitle" dc:"频道/群聊名称"`
-	ChannelUsername string      `json:"channelUsername" dc:"频道/群聊用户名"`
-	ChatType        string      `json:"chatType" dc:"聊天类型"`
-	IsPrivate       int         `json:"isPrivate" dc:"是否私聊"`
-	IsBroadcast     int         `json:"isBroadcast" dc:"是否频道"`
-	IsMegagroup     int         `json:"isMegagroup" dc:"是否群聊"`
-	MessageCount    int         `json:"messageCount" dc:"消息数"`
-	LastMessageText string      `json:"lastMessageText" dc:"最后消息"`
-	LastMessageAt   *gtime.Time `json:"lastMessageAt" dc:"最后消息时间"`
-	CreatedAt       *gtime.Time `json:"createdAt" dc:"创建时间"`
-	UpdatedAt       *gtime.Time `json:"updatedAt" dc:"更新时间"`
+	Id               int64       `json:"id" dc:"ID"`
+	BotId            int64       `json:"botId" dc:"Bot ID"`
+	BotUsername      string      `json:"botUsername" dc:"Bot用户名"`
+	ChannelId        string      `json:"channelId" dc:"频道/群聊ID"`
+	ChannelTitle     string      `json:"channelTitle" dc:"频道/群聊名称"`
+	ChannelUsername  string      `json:"channelUsername" dc:"频道/群聊用户名"`
+	ChannelLink      string      `json:"channelLink" dc:"频道/群聊链接"`
+	ChatType         string      `json:"chatType" dc:"聊天类型"`
+	IsPrivate        int         `json:"isPrivate" dc:"是否私聊"`
+	IsBroadcast      int         `json:"isBroadcast" dc:"是否频道"`
+	IsMegagroup      int         `json:"isMegagroup" dc:"是否群聊"`
+	MessageCount     int         `json:"messageCount" dc:"消息数"`
+	LastMessageText  string      `json:"lastMessageText" dc:"最后消息"`
+	LastMessageAt    *gtime.Time `json:"lastMessageAt" dc:"最后消息时间"`
+	MembershipStatus string      `json:"membershipStatus" dc:"BOT成员状态"`
+	BotRole          string      `json:"botRole" dc:"BOT身份"`
+	FirstSeenAt      *gtime.Time `json:"firstSeenAt" dc:"首次添加时间"`
+	RemovedAt        *gtime.Time `json:"removedAt" dc:"移除时间"`
+	CreatedAt        *gtime.Time `json:"createdAt" dc:"创建时间"`
+	UpdatedAt        *gtime.Time `json:"updatedAt" dc:"更新时间"`
 }
 
 type BotModel struct {
+	BotType     string      `json:"botType" dc:"Bot用途：normal普通机器人，two_way双向机器人"`
 	Id          int64       `json:"id" dc:"ID"`
 	TenantId    int64       `json:"tenantId" dc:"租户ID，0表示全局"`
 	BotName     string      `json:"botName" dc:"Bot名称"`
@@ -1180,6 +1187,7 @@ type BotModel struct {
 }
 
 type BotSaveInp struct {
+	BotType     string `json:"botType" dc:"Bot用途：normal普通机器人，two_way双向机器人"`
 	Id          int64  `json:"id" dc:"ID"`
 	TenantId    int64  `json:"tenantId" dc:"租户ID，0表示全局"`
 	BotName     string `json:"botName" dc:"Bot名称"`
@@ -1190,6 +1198,7 @@ type BotSaveInp struct {
 }
 
 type BotCreateInp struct {
+	BotType     string `json:"botType" dc:"Bot用途：normal普通机器人，two_way双向机器人"`
 	BotName     string `json:"botName" v:"required#Bot名称不能为空" dc:"Bot名称"`
 	BotUsername string `json:"botUsername" v:"required#Bot用户名不能为空" dc:"Bot用户名"`
 	Remark      string `json:"remark" dc:"备注"`
@@ -1718,6 +1727,8 @@ type RelayChannelListInp struct {
 	TenantId int64 `json:"tenantId"`
 }
 type RelayChannelSaveInp struct {
+	AccessHash   int64  `json:"accessHash"`
+	BotUsername  string `json:"botUsername"`
 	Id           int64  `json:"id"`
 	TenantId     int64  `json:"tenantId"`
 	TgAccountId  int64  `json:"tgAccountId"`

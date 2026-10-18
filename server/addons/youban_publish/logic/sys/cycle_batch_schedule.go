@@ -151,11 +151,11 @@ func (s *sSysPublish) createScheduledBatchCycleRun(ctx context.Context, channel 
 }
 
 func (s *sSysPublish) batchCycleCandidateCount(ctx context.Context, tenantId, channelId, cursor int64) (int, error) {
-	sql := `(SELECT MIN(r.id) AS id
-		FROM hg_youban_publish_success_record r
-		WHERE r.tenant_id=? AND r.channel_id=? AND r.status='success'
-			AND ` + cycleProfileMediaAvailableSQL("r.profile_id") + `
-		GROUP BY r.profile_id) q`
+	sql := `(SELECT MIN(j.id) AS id
+		FROM hg_youban_publish_tg_job j
+		WHERE j.tenant_id=? AND j.channel_id=? AND j.status='sent'
+			AND ` + cycleProfileMediaAvailableSQL("j.profile_id") + `
+		GROUP BY j.profile_id) q`
 	return g.DB().Model(sql, tenantId, channelId).Safe().Ctx(ctx).WhereGT("id", cursor).Count()
 }
 

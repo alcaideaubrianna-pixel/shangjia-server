@@ -18,6 +18,7 @@ import (
 	botservice "hotgo/addons/youban_bot/service"
 	twdao "hotgo/addons/youban_two_way_bot/internal/dao"
 	"hotgo/addons/youban_two_way_bot/internal/model/entity"
+	twowaymodel "hotgo/addons/youban_two_way_bot/model"
 	"hotgo/addons/youban_two_way_bot/model/input/sysin"
 	"hotgo/internal/library/cache"
 )
@@ -45,7 +46,7 @@ type cooperationChannelRuntime struct {
 	AccessHash   string `json:"accessHash"`
 }
 
-func (s *sSysTwoWayBot) handleCooperationPrivateMessage(ctx context.Context, bot *tgbot.Bot, row *entity.YoubanTwoWayBotBot, msg *models.Message) (bool, error) {
+func (s *sSysTwoWayBot) handleCooperationPrivateMessage(ctx context.Context, bot *tgbot.Bot, row *twowaymodel.BotRuntime, msg *models.Message) (bool, error) {
 	config, err := cooperationConfigByToken(ctx, row.BotToken)
 	if err != nil || config == nil {
 		return false, err
@@ -191,7 +192,7 @@ func (s *sSysTwoWayBot) createCooperationApplication(ctx context.Context, config
 	return id, config.ReviewRequired, nil
 }
 
-func (s *sSysTwoWayBot) notifyCooperationReview(ctx context.Context, row *entity.YoubanTwoWayBotBot, bot *tgbot.Bot, applicationId int64, config *cooperationConfigRuntime, submitted *cooperationResolvedBot, applicant *models.User) error {
+func (s *sSysTwoWayBot) notifyCooperationReview(ctx context.Context, row *twowaymodel.BotRuntime, bot *tgbot.Bot, applicationId int64, config *cooperationConfigRuntime, submitted *cooperationResolvedBot, applicant *models.User) error {
 	if config.NotificationType == "official" {
 		return s.notifyCooperationOfficialAdmin(ctx, config, applicationId, submitted, applicant)
 	}
@@ -235,7 +236,7 @@ func (s *sSysTwoWayBot) notifyCooperationReview(ctx context.Context, row *entity
 	return err
 }
 
-func (s *sSysTwoWayBot) cooperationReviewTopicThreadId(ctx context.Context, bot *tgbot.Bot, row *entity.YoubanTwoWayBotBot, configId int64) (int, error) {
+func (s *sSysTwoWayBot) cooperationReviewTopicThreadId(ctx context.Context, bot *tgbot.Bot, row *twowaymodel.BotRuntime, configId int64) (int, error) {
 	value, err := cache.Instance().GetOrSetFuncLock(ctx, cooperationReviewTopicCacheKey(configId), func(ctx context.Context) (interface{}, error) {
 		topic, createErr := bot.CreateForumTopic(ctx, &tgbot.CreateForumTopicParams{ChatID: row.SupergroupId, Name: "合作申请"})
 		if createErr != nil {
@@ -323,7 +324,7 @@ func cooperationApplicantButton(applicant *models.User) models.InlineKeyboardBut
 	return models.InlineKeyboardButton{Text: cooperationApplicantNickname(applicant), URL: fmt.Sprintf("tg://user?id=%d", applicant.ID)}
 }
 
-func (s *sSysTwoWayBot) handleCooperationCallback(ctx context.Context, bot *tgbot.Bot, row *entity.YoubanTwoWayBotBot, query *models.CallbackQuery) (bool, error) {
+func (s *sSysTwoWayBot) handleCooperationCallback(ctx context.Context, bot *tgbot.Bot, row *twowaymodel.BotRuntime, query *models.CallbackQuery) (bool, error) {
 	if query == nil || !strings.HasPrefix(query.Data, "coop:") {
 		return false, nil
 	}

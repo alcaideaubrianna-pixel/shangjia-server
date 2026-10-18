@@ -230,15 +230,9 @@ func (s *sSysPublish) scanCollectHistory(ctx context.Context, client *telegram.C
 			"duplicate": stats.duplicates,
 			"failed":    stats.failed,
 		})
-		processPayload := collectProcessQueuePayload{
-			SourceId: task.SourceId, SourceChatId: task.SourceChatId,
-			TenantId: task.TenantId, AccountId: task.AccountId,
-		}
-		if processErr := s.enqueueCollectProcess(ctx, processPayload, 0); processErr != nil {
-			s.appendCollectHistoryLog(ctx, task.Id, task.TenantId, task.AccountId, "warn", "process", "历史消息页已落库，资料处理将在下一轮继续", g.Map{"error": processErr.Error()})
-		} else {
-			s.appendCollectHistoryLog(ctx, task.Id, task.TenantId, task.AccountId, "info", "process", "历史消息页已投递资料处理队列", g.Map{"offsetId": offsetID})
-		}
+		// IngestAccountMessage delivers every persisted event through the normal
+		// event-scoped collection queue. Do not enqueue an additional source-wide
+		// task here; it duplicates work and reintroduces source locks.
 		// Telegram history responses may contain service messages. FetchPage
 		// filters those records, so a short application page does not prove that
 		// the channel history is exhausted. Only an empty fetch (handled above)

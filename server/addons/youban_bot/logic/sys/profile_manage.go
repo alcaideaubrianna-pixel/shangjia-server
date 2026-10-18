@@ -1880,6 +1880,16 @@ func (s *sSysBot) startProfileSessionByIds(ctx context.Context, botId int64, tel
 	if payload != nil {
 		payloadText = gjson.MustEncodeString(payload)
 	}
+	if scene == "collect_channel_add" {
+		var suffixPayload collectChannelSuffixPayload
+		if err := json.Unmarshal([]byte(payloadText), &suffixPayload); err != nil {
+			return gerror.Wrap(err, "读取频道后缀会话失败")
+		}
+		if suffixPayload.ConfirmationToken == "" {
+			suffixPayload.ConfirmationToken = grand.S(12)
+		}
+		payloadText = gjson.MustEncodeString(suffixPayload)
+	}
 	now := gtime.Now()
 	_, err := g.DB().Model(profileSessionTable).Safe().Ctx(ctx).Data(g.Map{"bot_id": botId, "telegram_user_id": telegramUserId, "chat_id": chatId, "app": account.App, "account_id": account.AccountId, "tenant_id": account.TenantId, "scene": scene, "step": step, "profile_id": profileId, "profile_no": profileNo, "payload_json": payloadText, "expires_at": now.Add(30 * time.Minute), "status": profileSessionStatusActive, "created_at": now, "updated_at": now}).Insert()
 	if err != nil {
@@ -1909,7 +1919,19 @@ func (s *sSysBot) sendProfileSessionPrompt(ctx context.Context, botId int64, cha
 	default:
 		buttons = append(buttons, []models.InlineKeyboardButton{{Text: "返回资料管理", CallbackData: "pf:menu"}})
 	}
-	buttons = append(buttons, []models.InlineKeyboardButton{{Text: "取消当前操作", CallbackData: "pf:cancel"}})
+	cancelData := "pf:cancel"
+	if scene == "collect_channel_add" {
+		session := s.activeProfileSessionByIds(ctx, botId, telegramUserIdFromCtx(ctx), chatId)
+		if session == nil || session.Scene != scene {
+			return gerror.New("频道后缀会话已失效，请重新操作")
+		}
+		var payload collectChannelSuffixPayload
+		if err := json.Unmarshal([]byte(session.PayloadJson), &payload); err != nil {
+			return err
+		}
+		cancelData = fmt.Sprintf("cm:channelsuffixcancel:%d:%s", session.Id, payload.ConfirmationToken)
+	}
+	buttons = append(buttons, []models.InlineKeyboardButton{{Text: "取消当前操作", CallbackData: cancelData}})
 	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, text, "HTML", false, &models.InlineKeyboardMarkup{InlineKeyboard: buttons})
 	return err
 }
@@ -2024,6 +2046,54 @@ func (s *sSysBot) consumeProfileSessionText(ctx context.Context, botId int64, ms
 		return s.completeProfileSession(ctx, session.Id)
 	case "collect_rule_edit":
 		return s.handleCollectRuleEditSession(ctx, botId, chatId, account, session, text)
+	case "collect_channel_add":
+		parts := strings.Fields(strings.TrimSpace(text))
+		var payload collectChannelSuffixPayload
+		if err := json.Unmarshal([]byte(session.PayloadJson), &payload); err != nil || payload.RuleId <= 0 {
+			return gerror.New("频道规则会话已失效")
+		}
+		channelID := payload.ChannelId
+		suffix := ""
+		if channelID != "" {
+			if len(parts) == 0 {
+				return s.sendMessageOnly(ctx, botId, chatId, "请输入新的后缀")
+			}
+			suffix = strings.TrimSpace(text)
+		} else {
+			if len(parts) < 2 {
+				return s.sendMessageOnly(ctx, botId, chatId, "格式不正确，请输入：频道ID 后缀")
+			}
+			channelID = parts[0]
+			suffix = strings.Join(parts[1:], " ")
+		}
+		if suffix == "" {
+			return s.sendMessageOnly(ctx, botId, chatId, "频道后缀不能为空，请重新输入")
+		}
+		payload.ChannelId = channelID
+		payload.Draft = suffix
+		payload.ConfirmationToken = grand.S(12)
+		payloadJSON, _ := json.Marshal(payload)
+		result, err := g.DB().Model(profileSessionTable).Ctx(ctx).Where("id", session.Id).Where("status", profileSessionStatusActive).
+			Where("payload_json", session.PayloadJson).Data(g.Map{"step": "confirming", "payload_json": string(payloadJSON)}).Update()
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return s.sendCollectManageNotice(ctx, botId, chatId, "后缀修改会话已变更，请重新输入。")
+		}
+		name := strings.TrimSpace(payload.ChannelTitle)
+		if name == "" {
+			name = channelID
+		}
+		buttons := [][]models.InlineKeyboardButton{
+			{{Text: "确认保存", CallbackData: fmt.Sprintf("cm:channelsuffixconfirm:%d:%s", session.Id, payload.ConfirmationToken)}},
+			{{Text: "取消修改", CallbackData: fmt.Sprintf("cm:channelsuffixcancel:%d:%s", session.Id, payload.ConfirmationToken)}},
+		}
+		return s.sendCollectManageMarkup(ctx, botId, chatId, fmt.Sprintf("确认修改频道后缀\n频道：%s%s\n新后缀：%s\n\n保存后将开启该频道采集，后续新采集资料使用此后缀。确认保存吗？", html.EscapeString(name), collectManageChannelLinkLine(payload.ChannelLink), html.EscapeString(suffix)), buttons)
 	case "cancel_queue":
 		_ = s.completeProfileSession(ctx, session.Id)
 		if strings.TrimSpace(text) == "全部" {
@@ -2210,6 +2280,26 @@ func (s *sSysBot) consumeProfileSessionMessageLocked(ctx context.Context, botId 
 	}
 	g.Log().Infof(ctx, "Bot资料处理阶段 trace:%s stage:media_resolved elapsed_ms:%d media_count:%d", trace, time.Since(startedAt).Milliseconds(), len(media))
 	draft := decodeProfileCreateDraft(session.PayloadJson)
+	if session.Step == "waiting_display" && strings.TrimSpace(msg.MediaGroupID) == "" && profileShouldStageEarlyVerify(text, media) {
+		pendingVerify := draft.PendingVerify
+		if pendingVerify == nil {
+			pendingVerify = &profilePendingMediaGroup{
+				SessionId: session.Id,
+				BotId:     botId,
+				ChatId:    chatId,
+				Purpose:   "verify",
+				CreatedAt: time.Now().Unix(),
+			}
+		}
+		pendingVerify.UpdatedAt = time.Now().UnixNano()
+		pendingVerify.Media = appendProfileGroupMedia(pendingVerify.Media, msg.ID, media)
+		draft.PendingVerify = pendingVerify
+		if err := s.updateProfileSession(ctx, session.Id, session.Step, draft); err != nil {
+			return gerror.Wrap(err, "暂存提前到达的验证视频失败")
+		}
+		g.Log().Infof(ctx, "Bot资料验证视频早于展示组到达，已暂存 trace:%s message_id:%d media_count:%d", trace, msg.ID, len(pendingVerify.Media))
+		return nil
+	}
 	if session.Step == "waiting_display" && draft.PendingGroup != nil && strings.TrimSpace(msg.MediaGroupID) == "" && (strings.TrimSpace(text) != "" || len(media) > 0) {
 		pendingVerify := &profilePendingMediaGroup{SessionId: session.Id, BotId: botId, ChatId: chatId, Purpose: "verify", Text: strings.TrimSpace(text), Media: media, CreatedAt: time.Now().Unix(), UpdatedAt: time.Now().UnixNano()}
 		draft.PendingVerify = pendingVerify
@@ -2224,6 +2314,18 @@ func (s *sSysBot) consumeProfileSessionMessageLocked(ctx context.Context, botId 
 		return s.collectProfileMediaGroup(ctx, account, session, msg, text, media)
 	}
 	return s.consumeProfileCreatePart(ctx, botId, chatId, account, session, strings.TrimSpace(text), media)
+}
+
+func profileShouldStageEarlyVerify(text string, media []*publishsysin.MessageTemplateMediaInp) bool {
+	if strings.TrimSpace(text) != "" || len(media) == 0 {
+		return false
+	}
+	for _, item := range media {
+		if item == nil || strings.TrimSpace(item.MediaType) != "video" {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *sSysBot) reserveProfileMediaGroup(ctx context.Context, session *profileSessionRow, msg *models.Message, text string) error {
@@ -3125,6 +3227,19 @@ func (s *sSysBot) handleChannelTextCommand(ctx context.Context, botId int64, msg
 }
 
 func (s *sSysBot) handleChannelCallback(ctx context.Context, botId int64, chatId string, telegramUserId string, account *botProfileAccount, data string, query *models.CallbackQuery) (bool, error) {
+	// Restoration is scoped to the bound account by the publish service, so a
+	// notification recipient need not have the general admin channel menu.
+	if strings.HasPrefix(data, "ch:pr:") {
+		parts := strings.Split(data, ":")
+		if len(parts) != 4 {
+			return true, s.sendMessageOnly(ctx, botId, chatId, "恢复参数无效")
+		}
+		err := publishService.SysPublish().BotChannelPermissionResume(ctx, &publishsysin.BotChannelActionInp{TenantId: account.TenantId, AccountId: account.AccountId, ChannelId: parseInt64(parts[2])}, parts[3])
+		if err != nil {
+			return true, s.replyBotError(ctx, botId, chatId, "频道权限检查", err)
+		}
+		return true, s.sendMessageOnly(ctx, botId, chatId, "权限检查通过，频道已恢复推送。后续新资料将正常发送；历史未发送资料不会自动补投，如需补投请主动重新上架。")
+	}
 	if account.AccountType != "admin" {
 		return true, s.sendMessageOnly(ctx, botId, chatId, "频道管理仅管理员可用。")
 	}

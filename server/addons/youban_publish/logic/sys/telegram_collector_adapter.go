@@ -2,9 +2,12 @@ package sys
 
 import (
 	"context"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"html"
 	"net/url"
 	"strconv"
 	"strings"
@@ -12,6 +15,8 @@ import (
 
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
+	"github.com/gogf/gf/v2/container/gvar"
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -19,10 +24,15 @@ import (
 	"github.com/gotd/td/tg"
 
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
+	botsysin "hotgo/addons/youban_bot/model/input/sysin"
 	botService "hotgo/addons/youban_bot/service"
+	publishconsts "hotgo/addons/youban_publish/consts"
 	pdao "hotgo/addons/youban_publish/internal/dao"
+	pdo "hotgo/addons/youban_publish/internal/model/do"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	idao "hotgo/internal/dao"
 	"hotgo/internal/library/cache"
+	"hotgo/utility/dbtime"
 )
 
 type publishCollectorDeliveryHandler struct {
@@ -32,6 +42,30 @@ type publishCollectorDeliveryHandler struct {
 type publishCollectorAccountTaskHandler struct{ publish *sSysPublish }
 
 type publishCollectorAccountMediaProvider struct{ publish *sSysPublish }
+
+func (h *publishCollectorAccountTaskHandler) HandleAccountTaskFailure(ctx context.Context, task *collectorin.AccountTask, cause error) error {
+	if h == nil || h.publish == nil || task == nil {
+		return nil
+	}
+	var jobID int64
+	var err error
+	switch task.TaskType {
+	case collectorin.AccountTaskTypeMessageReconcile:
+		jobID, _, err = parseMessageReconcileTaskKey(task.TaskKey)
+	case collectorin.AccountTaskTypeMessageMediaFallback:
+		jobID, _, err = parseMessageMediaFallbackTaskKey(task.TaskKey)
+	default:
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	job, err := h.publish.telegramJobById(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	return h.publish.failTelegramMediaFallbackJob(ctx, job, cause)
+}
 
 func (h *publishCollectorAccountTaskHandler) HandleAccountTaskCompletion(ctx context.Context, task *collectorin.AccountTask, result *collectorin.AccountMediaDownloadResult) error {
 	if h == nil || h.publish == nil || task == nil || result == nil || task.TaskType != collectorin.AccountTaskTypeMediaDownload {
@@ -79,6 +113,16 @@ func (h *publishCollectorAccountTaskHandler) HandleAccountTaskCompletion(ctx con
 	if _, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).Where(mediaCols.Id, mediaID).Update(data); err != nil {
 		return gerror.Wrapf(err, "异步账号媒体结果回写失败 mediaId:%d", mediaID)
 	}
+	pendingCount, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
+		Where(mediaCols.EventId, eventID).
+		WhereNot(mediaCols.CacheStatus, collectMediaCacheReady).
+		Count()
+	if err != nil {
+		return gerror.Wrapf(err, "检查异步账号媒体组完成状态失败 mediaId:%d eventId:%d", mediaID, eventID)
+	}
+	if pendingCount > 0 {
+		return nil
+	}
 	event, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).WherePri(eventID).One()
 	if err != nil {
 		return gerror.Wrapf(err, "读取异步账号媒体事件失败 mediaId:%d eventId:%d", mediaID, eventID)
@@ -86,7 +130,24 @@ func (h *publishCollectorAccountTaskHandler) HandleAccountTaskCompletion(ctx con
 	if event.IsEmpty() {
 		return gerror.Newf("异步账号媒体事件不存在 mediaId:%d eventId:%d", mediaID, eventID)
 	}
-	if err = h.publish.enqueueCollectMediaCache(ctx, collectMediaQueuePayloadFromEvent(event), 0); err != nil {
+	if cache.Initialized() && g.Cfg().MustGet(ctx, "cache.adapter").String() == "redis" {
+		key := fmt.Sprintf("%s%d", publishconsts.CollectMediaCompletionKeyPrefix, eventID)
+		reserved, reserveErr := cache.Instance().SetIfNotExist(ctx, key, 1, 5*time.Minute)
+		if reserveErr != nil {
+			g.Log().Warningf(ctx, "采集媒体完成投递去重缓存不可用，放行任务 eventId:%d err:%+v", eventID, reserveErr)
+		} else if !reserved {
+			return nil
+		}
+	}
+	// The original media-cache task can still hold its Asynq unique key when the
+	// final account download finishes. Resume once after the whole group is ready.
+	payload := collectMediaQueuePayloadFromEvent(event)
+	payload.Reason = "account_completion"
+	if _, err = h.publish.enqueueCollectMediaCacheDeferred(ctx, payload, 0); err != nil {
+		if cache.Initialized() && g.Cfg().MustGet(ctx, "cache.adapter").String() == "redis" {
+			key := fmt.Sprintf("%s%d", publishconsts.CollectMediaCompletionKeyPrefix, eventID)
+			_, _ = cache.Instance().Remove(ctx, key)
+		}
 		return gerror.Wrapf(err, "异步账号媒体完成后重新投递事件失败 mediaId:%d eventId:%d", mediaID, eventID)
 	}
 	return nil
@@ -252,65 +313,59 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 			g.Log().Warningf(ctx, "协议号媒体降级任务上下文结束 taskId:%d tgAccountId:%d totalDuration:%s err:%+v", task.ID, task.AccountID, time.Since(startedAt).Round(time.Millisecond), err)
 		}
 	}()
-	const prefix = "message-media-fallback:"
-	parts := strings.Split(strings.TrimPrefix(task.TaskKey, prefix), ":")
-	if len(parts) != 2 || !strings.HasPrefix(task.TaskKey, prefix) {
-		return gerror.New("媒体降级发送账号任务参数无效")
-	}
-	jobID, err = strconv.ParseInt(parts[0], 10, 64)
-	if err != nil || jobID <= 0 || (parts[1] != "display" && parts[1] != "verify") {
-		return gerror.New("媒体降级发送账号任务参数无效")
+	jobID, purpose, err := parseMessageMediaFallbackTaskKey(task.TaskKey)
+	if err != nil {
+		return err
 	}
 	job, err := s.telegramJobById(ctx, jobID)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if err == nil || !accountTaskFinalAttempt(task) {
-			return
-		}
-		if failErr := s.failTelegramMediaFallbackJob(ctx, job, err); failErr != nil {
-			g.Log().Warningf(ctx, "协议号媒体任务最终失败后释放频道失败 taskId:%d jobId:%d err:%+v", task.ID, job.Id, failErr)
-		}
-	}()
-	stage("读取任务与Job", "purpose", parts[1], "jobStatus", job.Status)
+	stage("读取任务与Job", "purpose", purpose, "jobStatus", job.Status)
+	if job.Status == telegramJobStatusSuperseded {
+		return nil
+	}
 	if job.Status != "sending" {
-		messageCount, countErr := s.telegramJobSentMessageCount(ctx, job.Id, parts[1])
+		messageCount, countErr := s.telegramJobSentMessageCount(ctx, job.Id, purpose)
 		if countErr != nil {
 			return countErr
 		}
 		if mediaFallbackTaskCanSkip(job.Status, messageCount) {
-			g.Log().Infof(ctx, "协议号媒体降级任务幂等完成 taskId:%d jobId:%d tgAccountId:%d purpose:%s messageCount:%d", task.ID, job.Id, task.AccountID, parts[1], messageCount)
+			g.Log().Infof(ctx, "协议号媒体降级任务幂等完成 taskId:%d jobId:%d tgAccountId:%d purpose:%s messageCount:%d", task.ID, job.Id, task.AccountID, purpose, messageCount)
 			return nil
 		}
 		// Reconciliation may conservatively move a Bot-failed job to unknown
 		// before the account fallback starts. With no messages for this phase,
 		// it is safe to claim the job for the fallback instead of abandoning it.
 		if job.Status == "unknown" && messageCount == 0 {
-			result, updateErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-				Where("id", job.Id).Where("status", "unknown").
-				Data(g.Map{"status": "sending", "dispatch_status": tgDispatchStatusProcessing, "updated_at": gtime.Now()}).Update()
+			transitioned, updateErr := s.transitionTelegramJob(ctx, telegramJobTransition{
+				JobId: job.Id,
+				From:  []string{telegramJobStatusConfirming},
+				To:    telegramJobStatusSending,
+			})
 			if updateErr != nil {
 				return gerror.Wrap(updateErr, "恢复协议号媒体降级任务状态失败")
 			}
-			rowsAffected, rowsErr := result.RowsAffected()
-			if rowsErr != nil {
-				return gerror.Wrap(rowsErr, "确认协议号媒体降级任务状态失败")
-			}
-			if rowsAffected == 0 {
+			if !transitioned {
 				return gerror.New("协议号媒体降级任务正在被其他发送流程处理")
 			}
 			job.Status = "sending"
-			g.Log().Infof(ctx, "协议号媒体降级任务从未知状态恢复发送 taskId:%d jobId:%d purpose:%s", task.ID, job.Id, parts[1])
+			g.Log().Infof(ctx, "协议号媒体降级任务从未知状态恢复发送 taskId:%d jobId:%d purpose:%s", task.ID, job.Id, purpose)
 		}
 		if job.Status != "sending" {
-			stateErr := gerror.Newf("协议号媒体降级任务状态异常，拒绝静默完成：jobId=%d status=%s sendPhase=%s purpose=%s messageCount=%d", job.Id, job.Status, job.SendPhase, parts[1], messageCount)
+			stateErr := gerror.Newf("协议号媒体降级任务状态异常，拒绝静默完成：jobId=%d status=%s sendPhase=%s purpose=%s messageCount=%d", job.Id, job.Status, job.SendPhase, purpose, messageCount)
 			g.Log().Warningf(ctx, "协议号媒体降级任务拒绝静默完成 taskId:%d tgAccountId:%d err:%+v", task.ID, task.AccountID, stateErr)
 			s.appendTelegramJobLog(ctx, job, "account_fallback", "failed", stateErr.Error())
 			return stateErr
 		}
 	}
-	g.Log().Infof(ctx, "协议号媒体降级任务开始执行 taskId:%d jobId:%d tgAccountId:%d purpose:%s attempt:%d/%d", task.ID, job.Id, task.AccountID, parts[1], task.AttemptCount, task.MaxAttempts)
+	bounded, cancelBudget, budgetErr := s.telegramSendBudgetContext(ctx, job)
+	if budgetErr != nil {
+		return budgetErr
+	}
+	defer cancelBudget()
+	ctx = bounded
+	g.Log().Infof(ctx, "协议号媒体降级任务开始执行 taskId:%d jobId:%d tgAccountId:%d purpose:%s attempt:%d/%d", task.ID, job.Id, task.AccountID, purpose, task.AttemptCount, task.MaxAttempts)
 	channel, err := s.messagePushChannelFromJob(ctx, job)
 	if err != nil {
 		return err
@@ -319,11 +374,11 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 		return gerror.New("媒体降级发送账号任务与目标频道账号不一致")
 	}
 	stage("读取频道")
-	media, err := s.telegramJobMedia(ctx, job, parts[1])
+	media, err := s.telegramJobMedia(ctx, job, purpose)
 	if err != nil {
 		return err
 	}
-	if parts[1] == "display" {
+	if purpose == "display" {
 		media, err = s.selectTelegramDisplayMediaForTenant(ctx, job, media)
 		if err != nil {
 			return err
@@ -331,7 +386,7 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 	}
 	stage("读取并选择媒体", "mediaCount", len(media))
 	var verifyMedia []*telegramMediaItem
-	if parts[1] == "display" {
+	if purpose == "display" {
 		verifyMedia, err = s.telegramJobMedia(ctx, job, "verify")
 		if err != nil {
 			return err
@@ -339,7 +394,7 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 	}
 	stage("读取验证媒体", "verifyMediaCount", len(verifyMedia))
 	caption := ""
-	if parts[1] == "display" {
+	if purpose == "display" {
 		caption, err = s.telegramJobCaption(ctx, job)
 		if err != nil {
 			return err
@@ -350,47 +405,117 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 		return err
 	}
 	stage("媒体内容保护与缩略图准备", "mediaCount", len(media), "verifyMediaCount", len(verifyMedia))
-	caption = telegramCaptionWithJobMarker(caption, job.Id, parts[1])
-	peer, err := messagePushInputPeer(channel)
-	if err != nil {
-		return err
-	}
-	messages, err := s.sendMessageTemplateWithTgClient(ctx, client, peer, caption, media, nil, task.AccountID, "")
-	if err != nil {
-		if cleanupErr := s.cleanupPartialAccountMediaSend(ctx, client, job, channel, parts[1], messages, err); cleanupErr != nil {
-			return cleanupErr
+	var messages []*telegramSentMessage
+	phaseConfirmed := accountFallbackPhaseConfirmed(job.SendPhase, purpose)
+	if !phaseConfirmed {
+		messages, err = s.sendAccountFallbackPhase(ctx, client, channel, job, task.AccountID, purpose, caption, media)
+		if err != nil {
+			return err
 		}
-		return gerror.Wrap(err, "协议号媒体降级发送失败")
+		stage("发送并确认媒体", "purpose", purpose, "messageCount", len(messages))
+	} else {
+		stage("跳过已确认媒体阶段", "purpose", purpose, "sendPhase", job.SendPhase)
 	}
-	stage("发送展示媒体", "messageCount", len(messages))
-	if err = s.confirmTelegramMediaPhase(ctx, job, "account", parts[1], media, messages); err != nil {
-		return err
-	}
-	stage("保存展示消息")
-	if parts[1] == "display" {
+	if purpose == "display" {
 		if len(verifyMedia) == 0 {
 			g.Log().Infof(ctx, "协议号媒体降级任务发送成功 taskId:%d jobId:%d tgAccountId:%d displayMessages:%d verifyMessages:0", task.ID, job.Id, task.AccountID, len(messages))
 			return s.finalizeTelegramMediaDelivery(ctx, job, false, true)
 		}
-		// 验证资料必须保持纯媒体，不附加对账 marker，避免干扰公群采集器。
-		verifyCaption := ""
-		verifyMessages, err := s.sendMessageTemplateWithTgClient(ctx, client, peer, verifyCaption, verifyMedia, nil, task.AccountID, "")
-		if err != nil {
-			if cleanupErr := s.cleanupPartialAccountMediaSend(ctx, client, job, channel, "verify", verifyMessages, err); cleanupErr != nil {
-				return cleanupErr
+		var verifyMessages []*telegramSentMessage
+		if job.SendPhase != telegramSendPhaseVerifyConfirmed {
+			verifyMessages, err = s.sendAccountFallbackPhase(ctx, client, channel, job, task.AccountID, "verify", "", verifyMedia)
+			if err != nil {
+				return err
 			}
-			return gerror.Wrap(err, "协议号验证媒体降级发送失败")
+			stage("发送并确认验证媒体", "messageCount", len(verifyMessages))
 		}
-		stage("发送验证媒体", "messageCount", len(verifyMessages))
-		if err = s.confirmTelegramMediaPhase(ctx, job, "account", "verify", verifyMedia, verifyMessages); err != nil {
-			return err
-		}
-		stage("保存验证消息")
 		g.Log().Infof(ctx, "协议号媒体降级任务发送成功 taskId:%d jobId:%d tgAccountId:%d displayMessages:%d verifyMessages:%d", task.ID, job.Id, task.AccountID, len(messages), len(verifyMessages))
 		return s.finalizeTelegramMediaDelivery(ctx, job, true, true)
 	}
 	g.Log().Infof(ctx, "协议号验证媒体降级任务发送成功 taskId:%d jobId:%d tgAccountId:%d verifyMessages:%d", task.ID, job.Id, task.AccountID, len(messages))
 	return s.finalizeTelegramMediaDelivery(ctx, job, true, true)
+}
+
+func accountFallbackPhaseConfirmed(sendPhase, purpose string) bool {
+	return purpose == "display" && telegramSendPhaseHasDisplay(sendPhase) ||
+		purpose == "verify" && sendPhase == telegramSendPhaseVerifyConfirmed
+}
+
+func (s *sSysPublish) sendAccountFallbackPhase(ctx context.Context, client *telegram.Client, channel *messagePushChannel, job telegramJobRecord, accountID int64, purpose, caption string, media []*telegramMediaItem) ([]*telegramSentMessage, error) {
+	attempt, messages, err := s.prepareAccountFallbackAttempt(ctx, client, channel, job, purpose, len(media))
+	if err != nil {
+		return nil, err
+	}
+	if len(messages) == 0 {
+		peer, peerErr := messagePushInputPeer(channel)
+		if peerErr != nil {
+			return nil, peerErr
+		}
+		caption = telegramCaptionWithJobMarker(caption, job.Id, purpose) + telegramAttemptMarker(attempt.AttemptToken)
+		messages, err = s.sendMessageTemplateWithTgClient(ctx, client, peer, caption, media, nil, accountID, "")
+		if err != nil {
+			if cleanupErr := s.cleanupPartialAccountMediaSend(ctx, client, job, channel, purpose, messages, err); cleanupErr != nil {
+				return nil, cleanupErr
+			}
+			return nil, gerror.Wrap(err, "协议号媒体降级发送失败")
+		}
+	}
+	bindAccountFallbackMessagesToMedia(messages, media)
+	if err = validateTelegramMediaSendResult(purpose, media, messages); err != nil {
+		s.appendTelegramJobLog(ctx, job, "account", "incomplete", err.Error())
+		return nil, err
+	}
+	if err = s.confirmTelegramAPISuccess(ctx, job, attempt, messages); err != nil {
+		return nil, telegramDeliveryUncertainError(err)
+	}
+	if err = s.updateTelegramMediaFileIds(ctx, messages); err != nil {
+		g.Log().Warningf(ctx, "协议号媒体file_id更新失败 jobId:%d purpose:%s err:%+v", job.Id, purpose, err)
+	}
+	s.appendTelegramJobLog(ctx, job, "account", "confirmed", fmt.Sprintf("媒体阶段确认完成 purpose:%s expected:%d confirmed:%d", purpose, len(media), len(messages)))
+	return messages, nil
+}
+
+func (s *sSysPublish) prepareAccountFallbackAttempt(ctx context.Context, client *telegram.Client, channel *messagePushChannel, job telegramJobRecord, purpose string, expectedCount int) (telegramDeliveryAttempt, []*telegramSentMessage, error) {
+	attempt, err := s.activeTelegramDeliveryAttempt(ctx, job.Id, purpose)
+	if err != nil {
+		return attempt, nil, err
+	}
+	if attempt.Id <= 0 {
+		attempt, err = s.beginTelegramDeliveryAttempt(ctx, job, purpose, expectedCount)
+		if err != nil {
+			return attempt, nil, err
+		}
+	}
+	messages, err := findTelegramAttemptMessages(ctx, client, channel, attempt)
+	if err != nil {
+		return attempt, nil, err
+	}
+	if len(messages) > 0 {
+		g.Log().Infof(ctx, "协议号发送前对账命中已有消息，跳过重复发送 jobId:%d attemptId:%d purpose:%s messages:%d", job.Id, attempt.Id, purpose, len(messages))
+	}
+	return attempt, messages, nil
+}
+
+func bindAccountFallbackMessagesToMedia(messages []*telegramSentMessage, media []*telegramMediaItem) {
+	for index, message := range messages {
+		if message == nil || message.MediaId > 0 || index >= len(media) || media[index] == nil {
+			continue
+		}
+		message.MediaId = media[index].Id
+	}
+}
+
+func parseMessageMediaFallbackTaskKey(taskKey string) (int64, string, error) {
+	const prefix = "message-media-fallback:"
+	parts := strings.Split(strings.TrimPrefix(taskKey, prefix), ":")
+	if !strings.HasPrefix(taskKey, prefix) || len(parts) != 2 {
+		return 0, "", gerror.New("媒体降级发送账号任务参数无效")
+	}
+	jobID, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || jobID <= 0 || (parts[1] != "display" && parts[1] != "verify") {
+		return 0, "", gerror.New("媒体降级发送账号任务参数无效")
+	}
+	return jobID, parts[1], nil
 }
 
 func validateTelegramMediaSendResult(purpose string, media []*telegramMediaItem, messages []*telegramSentMessage) error {
@@ -436,20 +561,167 @@ func (s *sSysPublish) telegramJobSentMessageCount(ctx context.Context, jobID int
 	return count, nil
 }
 
-func (s *sSysPublish) handleMessageReconcileAccountTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) error {
-	const prefix = "message-reconcile:"
-	jobID, err := strconv.ParseInt(strings.TrimPrefix(task.TaskKey, prefix), 10, 64)
-	if err != nil || jobID <= 0 || !strings.HasPrefix(task.TaskKey, prefix) {
+func (s *sSysPublish) handleMessageReconcileAccountTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) (err error) {
+	jobID, attemptID, err := parseMessageReconcileTaskKey(task.TaskKey)
+	if err != nil {
 		return gerror.New("消息对账账号任务参数无效")
 	}
 	job, err := s.telegramJobById(ctx, jobID)
 	if err != nil {
 		return err
 	}
-	if job.Status != "unknown" {
+	attempt, err := s.telegramAttemptById(ctx, attemptID)
+	if err != nil || attempt.Id <= 0 || attempt.JobId != job.Id || (attempt.Phase != "display" && attempt.Phase != "verify") {
+		return gerror.New("Telegram消息对账Attempt不存在或不匹配")
+	}
+	if job.Status == telegramJobStatusSending &&
+		job.SendPhase == telegramSendPhaseVerifyConfirmed &&
+		attempt.Status == telegramAttemptStatusConfirmed {
+		return s.finalizeTelegramMediaDelivery(ctx, job, true, true)
+	}
+	if job.Status != telegramJobStatusConfirming {
 		return nil
 	}
-	return s.reconcileUnknownTelegramJob(ctx, job)
+	channel, err := s.messagePushChannelFromJob(ctx, job)
+	if err != nil {
+		return err
+	}
+	if task.AccountID != channel.TgAccountId {
+		return gerror.New("Telegram消息对账账号与目标频道不一致")
+	}
+	messages, err := findTelegramAttemptMessages(ctx, client, channel, attempt)
+	if err != nil {
+		return err
+	}
+	if len(messages) == 0 {
+		if attempt.ResponseReceived == 0 && attempt.CreatedAt != nil && time.Since(dbtime.FromTimestamp(attempt.CreatedAt).Time) >= 5*time.Minute {
+			changed, err := s.transitionTelegramJob(ctx, telegramJobTransition{
+				JobId: job.Id, From: []string{telegramJobStatusConfirming}, To: telegramJobStatusSending,
+			})
+			if err != nil {
+				return err
+			}
+			if !changed {
+				return nil
+			}
+			g.Log().Warningf(ctx, "TG结果不明确超过5分钟，按补偿策略切换协议号 jobId:%d attemptId:%d phase:%s", job.Id, attempt.Id, attempt.Phase)
+			return s.submitTelegramMediaFallback(ctx, job, channel.TgAccountId, attempt.Phase)
+		}
+		if reconcileErr := telegramMissingReconcileMessagesError(attempt.Phase, accountTaskFinalAttempt(task)); !errors.Is(reconcileErr, errTelegramMediaFallbackUnavailable) {
+			return reconcileErr
+		}
+		// An ambiguous Bot API call cannot be proved unsuccessful merely because
+		// the account history window no longer contains its marker. Blindly
+		// falling back here can duplicate an already delivered media group and
+		// break channel ordering. Stop this job and release the channel instead;
+		// operators may explicitly republish it after inspecting Telegram.
+		return s.failTelegramMediaFallbackJob(ctx, job, telegramMissingReconcileMessagesError(attempt.Phase, true))
+	}
+	if err = s.saveTelegramSentMessages(ctx, job, messages); err != nil {
+		return err
+	}
+	if err = s.confirmTelegramDeliveryAttempt(ctx, attempt, messages, false); err != nil {
+		return err
+	}
+	confirmedPhase := telegramSendPhaseDisplayConfirmed
+	nextStatus := telegramJobStatusRetryWait
+	if attempt.Phase == "verify" {
+		confirmedPhase = telegramSendPhaseVerifyConfirmed
+		nextStatus = telegramJobStatusSending
+	}
+	transitioned, err := s.transitionTelegramJob(ctx, telegramJobTransition{
+		JobId: job.Id, From: []string{telegramJobStatusConfirming}, To: nextStatus,
+		Additional: g.Map{"send_phase": confirmedPhase, "error_message": ""},
+	})
+	if err != nil {
+		return err
+	}
+	if !transitioned {
+		// A late Webhook may have advanced this job concurrently. The persisted
+		// messages and confirmed Attempt make this reconciliation idempotent.
+		return nil
+	}
+	job.Status = nextStatus
+	job.SendPhase = confirmedPhase
+	if attempt.Phase == "display" {
+		return s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 0, false)
+	}
+	return s.finalizeTelegramMediaDelivery(ctx, job, true, true)
+}
+
+func telegramMissingReconcileMessagesError(phase string, finalAttempt bool) error {
+	if !finalAttempt {
+		return gerror.New("协议号暂未找到Bot发送消息，等待后重试对账")
+	}
+	return gerror.Wrapf(errTelegramMediaFallbackUnavailable,
+		"协议号最终未找到Bot%s消息，结果仍不确定，已禁止自动补发", telegramMediaPurposeLabel(phase))
+}
+
+func telegramMediaPurposeLabel(purpose string) string {
+	if purpose == "verify" {
+		return "验证视频"
+	}
+	return "展示资料"
+}
+
+func parseMessageReconcileTaskKey(taskKey string) (int64, int64, error) {
+	const prefix = "message-reconcile:"
+	parts := strings.Split(strings.TrimPrefix(taskKey, prefix), ":")
+	if !strings.HasPrefix(taskKey, prefix) || len(parts) != 2 {
+		return 0, 0, gerror.New("消息对账账号任务参数无效")
+	}
+	jobID, jobErr := strconv.ParseInt(parts[0], 10, 64)
+	attemptID, attemptErr := strconv.ParseInt(parts[1], 10, 64)
+	if jobErr != nil || attemptErr != nil || jobID <= 0 || attemptID <= 0 {
+		return 0, 0, gerror.New("消息对账账号任务参数无效")
+	}
+	return jobID, attemptID, nil
+}
+
+func findTelegramAttemptMessages(ctx context.Context, client *telegram.Client, channel *messagePushChannel, attempt telegramDeliveryAttempt) ([]*telegramSentMessage, error) {
+	peer, err := messagePushInputPeer(channel)
+	if err != nil {
+		return nil, err
+	}
+	res, err := client.API().MessagesGetHistory(ctx, &tg.MessagesGetHistoryRequest{Peer: peer, Limit: 100})
+	if err != nil {
+		return nil, gerror.Wrap(err, "协议号读取频道最近消息失败")
+	}
+	return selectTelegramAttemptMessages(tgHistoryMessages(res), attempt)
+}
+
+func selectTelegramAttemptMessages(history []*tg.Message, attempt telegramDeliveryAttempt) ([]*telegramSentMessage, error) {
+	marker := telegramAttemptMarker(attempt.AttemptToken)
+	var groupedID int64
+	for _, message := range history {
+		if message != nil && strings.Contains(message.Message, marker) {
+			groupedID, _ = message.GetGroupedID()
+			if groupedID == 0 {
+				if attempt.ExpectedCount > 1 {
+					return nil, gerror.Newf("协议号找到的验证消息不完整：expected=%d actual=1", attempt.ExpectedCount)
+				}
+				return []*telegramSentMessage{{MessageId: int64(message.ID), Purpose: attempt.Phase}}, nil
+			}
+			break
+		}
+	}
+	if groupedID == 0 {
+		return nil, nil
+	}
+	messages := make([]*telegramSentMessage, 0, attempt.ExpectedCount)
+	for _, message := range history {
+		if message == nil {
+			continue
+		}
+		id, ok := message.GetGroupedID()
+		if ok && id == groupedID {
+			messages = append(messages, &telegramSentMessage{MessageId: int64(message.ID), MediaGroupId: strconv.FormatInt(groupedID, 10), Purpose: attempt.Phase})
+		}
+	}
+	if len(messages) != attempt.ExpectedCount {
+		return nil, gerror.Newf("协议号找到的验证媒体组不完整：expected=%d actual=%d", attempt.ExpectedCount, len(messages))
+	}
+	return messages, nil
 }
 
 func (s *sSysPublish) handleMessagePushInlineAccountTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) (err error) {
@@ -709,9 +981,10 @@ func (p *publishCollectorAccountMediaProvider) StoreMedia(ctx context.Context, t
 	if err != nil {
 		return nil, err
 	}
-	if cached, ok, cacheErr := lookupTelegramCollectorMediaCache(ctx, task.Media.Type, md5Value, mediaSize, mimeType); cacheErr != nil {
+	forceRefresh := strings.HasPrefix(task.TaskKey, "profile-media-refresh:")
+	if cached, ok, cacheErr := lookupTelegramCollectorMediaCache(ctx, task.Media.Type, md5Value, mediaSize, mimeType); !forceRefresh && cacheErr != nil {
 		return nil, cacheErr
-	} else if ok {
+	} else if !forceRefresh && ok {
 		task.Media.FileURL = telegramCollectorMediaCacheURL(cached)
 		task.Media.StoragePath = cached.StoragePath
 		task.Media.FileMD5 = md5Value
@@ -819,13 +1092,215 @@ func (s *sSysPublish) ingestCollectorBotDelivery(ctx context.Context, delivery *
 	if blocked {
 		return nil
 	}
+	allowed, err := s.ensureBotCollectChannelApproval(ctx, source, delivery)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return nil
+	}
 	message := collectorDeliveryMessage(delivery, source["tenant_id"].Int64(), source["account_id"].Int64(), source["id"].Int64(), sysin.CollectSourceTypeBot)
 	message.BotId = source["bot_id"].Int64()
+	if collectorDeliveryIsEdit(delivery.RawUpdate) {
+		return s.updateCollectedBotMessage(ctx, message)
+	}
 	_, err = s.ingestAndProcessCollectMessage(ctx, message)
 	return err
 }
 
+func collectorDeliveryIsEdit(raw []byte) bool {
+	var update struct {
+		EditedChannelPost json.RawMessage `json:"edited_channel_post"`
+		EditedMessage     json.RawMessage `json:"edited_message"`
+	}
+	if json.Unmarshal(raw, &update) != nil {
+		return false
+	}
+	return (len(update.EditedChannelPost) > 0 && string(update.EditedChannelPost) != "null") ||
+		(len(update.EditedMessage) > 0 && string(update.EditedMessage) != "null")
+}
+
+// Edits are updates, never new collection input. In particular, an edited
+// member of a historical album must not replace its complete media set.
+func (s *sSysPublish) updateCollectedBotMessage(ctx context.Context, message *CollectMessage) error {
+	event, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+		Where("tenant_id", message.TenantId).Where("account_id", message.AccountId).
+		Where("source_id", message.SourceId).Where("source_unique_key", message.SourceUniqueKey).One()
+	if err != nil {
+		return gerror.Wrap(err, "查找编辑消息对应采集事件失败")
+	}
+	if event.IsEmpty() {
+		g.Log().Infof(ctx, "忽略无来源资料的编辑消息 sourceId:%d chat:%s messageId:%d", message.SourceId, message.SourceChatId, message.SourceMessageId)
+		return nil
+	}
+	dispatches, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
+		Where("event_id", event["id"].Int64()).WhereGT("profile_id", 0).All()
+	if err != nil {
+		return gerror.Wrap(err, "查找编辑消息对应资料失败")
+	}
+	if len(dispatches) == 0 {
+		g.Log().Infof(ctx, "忽略未生成资料的编辑消息 eventId:%d sourceId:%d messageId:%d", event["id"].Int64(), message.SourceId, message.SourceMessageId)
+		return nil
+	}
+	// Refresh identity only; do not replay pairing, reset its waiting window,
+	// replace album members, or enqueue a new publication.
+	if err = s.upsertCollectEventMedia(ctx, event, normalizeCollectMediaItems(message.Media)); err != nil {
+		return err
+	}
+	if strings.TrimSpace(message.RawText) == "" {
+		return nil
+	}
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		for _, dispatch := range dispatches {
+			rule, ruleErr := pdao.YoubanPublishCollectRule.Ctx(ctx).WherePri(dispatch["rule_id"].Int64()).One()
+			if ruleErr != nil {
+				return ruleErr
+			}
+			if rule.IsEmpty() {
+				return gerror.New("编辑来源资料的采集规则不存在")
+			}
+			cols := idao.ContentProfile.Columns()
+			if _, updateErr := tx.Model(idao.ContentProfile.Table()).
+				Where(cols.Id, dispatch["profile_id"].Int64()).
+				Where("EXISTS (SELECT 1 FROM "+publishProfileStateTable+" ps WHERE ps.profile_id=? AND ps.tenant_id=? AND ps.account_id=? AND ps.deleted_at IS NULL)", dispatch["profile_id"].Int64(), message.TenantId, message.AccountId).
+				Data(g.Map{cols.PlainText: normalizeCollectRuleBody(message.RawText, rule)}).Update(); updateErr != nil {
+				return updateErr
+			}
+		}
+		_, updateErr := tx.Model(pdao.YoubanPublishCollectEvent.Table()).Where("id", event["id"].Int64()).
+			Data(g.Map{"raw_text": message.RawText, "text_hash": collectHash(message.RawText)}).Update()
+		return updateErr
+	})
+	if err != nil {
+		return err
+	}
+	for _, dispatch := range dispatches {
+		if err := s.syncProfileNoteIndex(ctx, dispatch["profile_id"].Int64()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, source gdb.Record, delivery *collectorin.CollectorDelivery) (bool, error) {
+	tenantID, accountID, botID := source["tenant_id"].Int64(), source["account_id"].Int64(), source["bot_id"].Int64()
+	chatID := normalizeTelegramChannelChatID(delivery.SourceChatID)
+	if tenantID <= 0 || accountID <= 0 || botID <= 0 || chatID == "" {
+		return false, nil
+	}
+	now := gtime.Now()
+	var channel struct {
+		Id    int64  `json:"id"`
+		Title string `json:"title"`
+	}
+	if err := pdao.YoubanPublishCollectChannel.Ctx(ctx).Fields("id,title").Where("tenant_id", tenantID).WhereIn("telegram_chat_id", tgChannelCacheLookupIds(chatID)).Scan(&channel); !collectOptionalRecordScanSucceeded(err) {
+		return false, err
+	}
+	if channel.Id <= 0 {
+		if err := s.upsertCollectChannel(ctx, tenantID, chatID, "channel", chatID, "", 1, 0, delivery.SourceMessageID, now, now); err != nil {
+			return false, gerror.Wrap(err, "记录BOT采集频道失败")
+		}
+		if err := pdao.YoubanPublishCollectChannel.Ctx(ctx).Fields("id,title").Where("tenant_id", tenantID).Where("telegram_chat_id", chatID).Scan(&channel); err != nil || channel.Id <= 0 {
+			return false, err
+		}
+	} else {
+		_, _ = pdao.YoubanPublishCollectChannel.Ctx(ctx).Where("id", channel.Id).Data(g.Map{"last_message_id": delivery.SourceMessageID, "last_message_at": now, "last_seen_at": now, "updated_at": now}).Update()
+	}
+	_ = s.touchCollectBotChannel(ctx, tenantID, botID, chatID, now)
+	var relation struct {
+		Id             int64  `json:"id"`
+		CollectEnabled int    `json:"collectEnabled"`
+		Status         string `json:"status"`
+		ApprovalStatus string `json:"approvalStatus"`
+	}
+	if err := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Fields("id,collect_enabled,status,approval_status").Where("tenant_id", tenantID).Where("account_id", accountID).Where("channel_id", channel.Id).Scan(&relation); !collectOptionalRecordScanSucceeded(err) {
+		return false, gerror.Wrap(err, "读取BOT采集频道审批状态失败")
+	}
+	if relation.Id > 0 {
+		return botCollectChannelRelationEnabled(relation.CollectEnabled, relation.Status, relation.ApprovalStatus), nil
+	}
+	// Queue before creating the discovery relation: a crash or send failure
+	// must not permanently lose the first-channel notification.
+	if err := s.enqueueCollectNotification(ctx, collectNotificationPayload{
+		ID:    fmt.Sprintf("discovery:%d:%d:%d:%s", tenantID, accountID, source["id"].Int64(), chatID),
+		BotID: botID, TenantID: tenantID, AccountID: accountID, SourceID: source["id"].Int64(), ChannelID: chatID,
+	}); err != nil {
+		return false, err
+	}
+	_, err := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Data(pdo.YoubanPublishCollectAccountChannel{
+		TenantId: tenantID, AccountId: accountID, ChannelId: channel.Id, SourceId: source["id"].Int64(),
+		CollectEnabled: 1, Status: sysin.CollectAccountChannelEnabled, ApprovalStatus: "approved", ApprovedAt: now,
+	}).InsertAndGetId()
+	if err != nil {
+		// A concurrent delivery may have created the relation; respect its decision.
+		lookupErr := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Fields("id,collect_enabled,status,approval_status").Where("tenant_id", tenantID).Where("account_id", accountID).Where("channel_id", channel.Id).Scan(&relation)
+		if lookupErr == nil && relation.Id > 0 {
+			return botCollectChannelRelationEnabled(relation.CollectEnabled, relation.Status, relation.ApprovalStatus), nil
+		}
+		return false, gerror.Wrap(err, "创建BOT采集频道审批记录失败")
+	}
+	return true, nil
+}
+
+func (s *sSysPublish) sendBotCollectChannelDiscovery(ctx context.Context, source gdb.Record, chatID string, relationID int64, notificationID string) error {
+	tenantID, accountID, botID := source["tenant_id"].Int64(), source["account_id"].Int64(), source["bot_id"].Int64()
+	rules, ruleErr := pdao.YoubanPublishCollectRule.Ctx(ctx).As("r").
+		InnerJoin(pdao.YoubanPublishCollectSourceRule.Table()+" sr", "sr.rule_id=r.id AND sr.tenant_id=r.tenant_id AND sr.status=1").
+		Fields("r.id,r.name,r.intro_fee_suffix,r.bot_id").Where("sr.source_id", source["id"].Int64()).
+		Where("r.tenant_id", tenantID).Where("r.account_id", accountID).
+		Where("r.status", 1).Where("r.intro_fee_suffix_enabled", 1).All()
+	if ruleErr != nil {
+		return gerror.Wrap(ruleErr, "读取新频道默认后缀失败")
+	}
+	title := firstNonEmpty(s.collectChannelDisplayName(ctx, tenantID, chatID), chatID)
+	linkLine := collectChannelLinkLine(s.collectChannelDisplayLink(ctx, tenantID, chatID))
+	if len(rules) == 0 {
+		text := "发现新的 BOT 采集频道\n频道：" + html.EscapeString(title) + "\n频道 ID：" + html.EscapeString(chatID) + linkLine + "\n采集状态：默认开启"
+		buttons := [][]botsysin.NotifyButton{{{Label: "允许采集", Data: fmt.Sprintf("cm:channelapprove:%d", relationID)}, {Label: "禁用", Data: fmt.Sprintf("cm:channelreject:%d", relationID)}}}
+		if notifyErr := botService.SysBot().NotifyCollectEvent(ctx, botID, "", notificationID+":plain", text, buttons); notifyErr != nil {
+			return notifyErr
+		}
+	}
+	for _, rule := range rules {
+		suffix := strings.TrimSpace(rule["intro_fee_suffix"].String())
+		if configured, found, suffixErr := s.resolveIntroFeeChannelSuffix(ctx, gdb.Record{"tenant_id": source["tenant_id"], "account_id": source["account_id"], "bot_id": source["bot_id"], "source_chat_id": gvar.New(chatID)}, rule); suffixErr != nil {
+			return suffixErr
+		} else if found {
+			suffix = configured
+		}
+		if suffix == "" {
+			suffix = "未设置"
+		}
+		text := fmt.Sprintf("发现新的代理采集频道\n频道：%s\n频道 ID：%s%s\n采集规则：%s\n频道后缀：%s\n采集状态：默认开启\n后续新采集资料将使用上述后缀，可通过下方按钮禁用采集或修改后缀。", html.EscapeString(title), html.EscapeString(chatID), linkLine, html.EscapeString(rule["name"].String()), html.EscapeString(suffix))
+		buttons := [][]botsysin.NotifyButton{{{Label: "禁用", Data: fmt.Sprintf("cm:channelreject:%d", relationID)}, {Label: "修改后缀", Data: fmt.Sprintf("cm:channeledit:%d:%s:0", rule["id"].Int64(), chatID)}}}
+		if notifyErr := botService.SysBot().NotifyCollectEvent(ctx, botID, "", fmt.Sprintf("%s:rule:%d", notificationID, rule["id"].Int64()), text, buttons); notifyErr != nil {
+			return notifyErr
+		}
+	}
+	return nil
+}
+
+func collectOptionalRecordScanSucceeded(err error) bool {
+	return err == nil || errors.Is(err, sql.ErrNoRows)
+}
+
+func botCollectChannelRelationEnabled(collectEnabled int, status, approvalStatus string) bool {
+	status = strings.ToLower(strings.TrimSpace(status))
+	approvalStatus = strings.ToLower(strings.TrimSpace(approvalStatus))
+	if status == sysin.CollectAccountChannelDisabled || approvalStatus == "rejected" {
+		return false
+	}
+	// Missing and legacy pending relations follow the default-enabled policy.
+	if status == "" || status == sysin.CollectAccountChannelPending {
+		return true
+	}
+	return collectEnabled == 1 && (status == sysin.CollectAccountChannelEnabled || status == "approved")
+}
+
 func (s *sSysPublish) ingestCollectorAccountDelivery(ctx context.Context, delivery *collectorin.CollectorDelivery) error {
+	if err := s.ensureAccountCollectChannelRelation(ctx, delivery); err != nil {
+		return err
+	}
 	blocked, err := s.collectMessageFromAccountPublishChannel(ctx, delivery.TenantID, delivery.TgAccountID, delivery.SourceChatID)
 	if err != nil {
 		return gerror.Wrap(err, "检查协议号采集上架频道过滤失败")
@@ -840,6 +1315,70 @@ func (s *sSysPublish) ingestCollectorAccountDelivery(ctx context.Context, delive
 	}
 	_, err = s.ingestAndProcessCollectMessage(ctx, message)
 	return err
+}
+
+func (s *sSysPublish) ensureAccountCollectChannelRelation(ctx context.Context, delivery *collectorin.CollectorDelivery) error {
+	if delivery == nil || delivery.SourceID <= 0 || delivery.TenantID <= 0 || delivery.AccountID <= 0 {
+		return nil
+	}
+	chatID := normalizeTelegramChannelChatID(delivery.SourceChatID)
+	if chatID == "" {
+		return nil
+	}
+	var source struct {
+		Id             int64  `json:"id"`
+		Title          string `json:"title"`
+		SourceUsername string `json:"sourceUsername"`
+		CollectEnabled int    `json:"collectEnabled"`
+		Status         int    `json:"status"`
+	}
+	if err := pdao.YoubanPublishCollectSource.Ctx(ctx).
+		Fields("id,title,source_username,collect_enabled,status").
+		Where("id", delivery.SourceID).Where("tenant_id", delivery.TenantID).
+		Where("account_id", delivery.AccountID).Scan(&source); err != nil {
+		return gerror.Wrap(err, "读取账户采集源频道信息失败")
+	}
+	if source.Id <= 0 {
+		return nil
+	}
+	now := gtime.Now()
+	if err := s.upsertCollectChannel(ctx, delivery.TenantID, chatID, "channel", strings.TrimSpace(source.Title), strings.TrimSpace(source.SourceUsername), 0, 0, delivery.SourceMessageID, now, now); err != nil {
+		return gerror.Wrap(err, "同步账户采集频道信息失败")
+	}
+	var channel struct {
+		Id int64 `json:"id"`
+	}
+	channelCols := pdao.YoubanPublishCollectChannel.Columns()
+	if err := pdao.YoubanPublishCollectChannel.Ctx(ctx).Fields(channelCols.Id).
+		Where(channelCols.TenantId, delivery.TenantID).
+		WhereIn(channelCols.TelegramChatId, tgChannelCacheLookupIds(chatID)).Scan(&channel); err != nil {
+		return gerror.Wrap(err, "读取账户采集频道关系失败")
+	}
+	if channel.Id <= 0 {
+		return gerror.New("账户采集频道关系创建失败")
+	}
+	sourceCols := pdao.YoubanPublishCollectSource.Columns()
+	if _, err := pdao.YoubanPublishCollectSource.Ctx(ctx).
+		Where(sourceCols.Id, source.Id).Where(sourceCols.ChannelId, 0).
+		Data(pdo.YoubanPublishCollectSource{ChannelId: channel.Id}).Update(); err != nil {
+		return gerror.Wrap(err, "回写账户采集频道关系失败")
+	}
+	enabled := source.CollectEnabled == 1 && source.Status == 1
+	relation := pdo.YoubanPublishCollectAccountChannel{
+		TenantId: delivery.TenantID, AccountId: delivery.AccountID, ChannelId: channel.Id, SourceId: source.Id,
+		CollectEnabled: introFeeBoolToInt(enabled), Status: sysin.CollectAccountChannelDisabled, ApprovalStatus: "approved",
+	}
+	if enabled {
+		relation.Status = sysin.CollectAccountChannelEnabled
+		relation.ApprovedAt = now
+	} else {
+		relation.DisabledAt = now
+	}
+	if _, err := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Data(relation).
+		OnConflict("tenant_id,account_id,channel_id").OnDuplicate("source_id,updated_at").Save(); err != nil {
+		return gerror.Wrap(err, "同步账户采集频道状态失败")
+	}
+	return nil
 }
 
 func collectorDeliveryMessage(delivery *collectorin.CollectorDelivery, tenantID, accountID, sourceID int64, sourceType string) *CollectMessage {

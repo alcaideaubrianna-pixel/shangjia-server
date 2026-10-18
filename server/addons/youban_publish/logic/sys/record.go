@@ -232,7 +232,7 @@ func (s *sSysPublish) publishRecordList(ctx context.Context, in *sysin.PublishRe
 	}
 	normalizePublishRecordPage(in, totalCount)
 	mod := s.publishRecordBaseModel(ctx, in, tenantId, accountId).Fields(
-		"l.id,l.job_id,l.task_id,l.tenant_id,l.account_id,l.profile_id,l.channel_id,l.bot_id,l.operation_no,l.target_chat_id,l.action,l.status,l.message,l.created_at",
+		"l.id,l.job_id,l.task_id,l.tenant_id,l.account_id,l.profile_id,l.channel_id,l.bot_id,l.operation_no,l.target_chat_id,l.action,"+publishRecordStatusExpression+" AS status,"+publishRecordMessageExpression+" AS message,l.created_at",
 		"p.title",
 		"a.nickname AS account_name",
 		"COALESCE(NULLIF(owner.username, ''), NULLIF(tn.name, '')) AS tenant_name",
@@ -307,9 +307,9 @@ func (s *sSysPublish) applyPublishRecordFilters(mod *gdb.Model, in *sysin.Publis
 	if in.Keyword != "" {
 		like := "%" + in.Keyword + "%"
 		if id, err := strconv.ParseInt(in.Keyword, 10, 64); err == nil && id > 0 {
-			mod = mod.Where("(p.title LIKE ? OR l.message LIKE ? OR c.channel_title LIKE ? OR b.bot_name LIKE ? OR b.bot_username LIKE ? OR a.nickname LIKE ? OR l.target_chat_id LIKE ? OR l.id=? OR l.job_id=? OR l.task_id=? OR l.profile_id=?)", like, like, like, like, like, like, like, id, id, id, id)
+			mod = mod.Where("(p.title LIKE ? OR l.message LIKE ? OR j.error_message LIKE ? OR c.channel_title LIKE ? OR b.bot_name LIKE ? OR b.bot_username LIKE ? OR a.nickname LIKE ? OR l.target_chat_id LIKE ? OR l.id=? OR l.job_id=? OR l.task_id=? OR l.profile_id=?)", like, like, like, like, like, like, like, like, id, id, id, id)
 		} else {
-			mod = mod.Where("(p.title LIKE ? OR l.message LIKE ? OR c.channel_title LIKE ? OR b.bot_name LIKE ? OR b.bot_username LIKE ? OR a.nickname LIKE ? OR l.target_chat_id LIKE ?)", like, like, like, like, like, like, like)
+			mod = mod.Where("(p.title LIKE ? OR l.message LIKE ? OR j.error_message LIKE ? OR c.channel_title LIKE ? OR b.bot_name LIKE ? OR b.bot_username LIKE ? OR a.nickname LIKE ? OR l.target_chat_id LIKE ?)", like, like, like, like, like, like, like, like)
 		}
 	}
 	return mod
@@ -318,17 +318,20 @@ func (s *sSysPublish) applyPublishRecordFilters(mod *gdb.Model, in *sysin.Publis
 func applyPublishRecordStatusFilter(mod *gdb.Model, status string) *gdb.Model {
 	switch status {
 	case "success", "sent":
-		return mod.Where("l.status", "success")
+		return mod.Where(publishRecordStatusExpression+" = ?", "success")
 	case "failed":
-		return mod.WhereIn("l.status", []string{"failed", "failed_retry"})
+		return mod.Where(publishRecordStatusExpression+" IN (?, ?)", "failed", "failed_retry")
 	case "pending":
-		return mod.WhereIn("l.status", []string{"pending", "sending"})
+		return mod.Where(publishRecordStatusExpression+" IN (?, ?)", "pending", "sending")
 	case "":
 		return mod
 	default:
-		return mod.Where("l.status", status)
+		return mod.Where(publishRecordStatusExpression+" = ?", status)
 	}
 }
+
+const publishRecordStatusExpression = "CASE WHEN j.id IS NULL THEN l.status WHEN j.status='sent' THEN 'success' ELSE j.status END"
+const publishRecordMessageExpression = "CASE WHEN j.status IN ('failed','failed_retry','unknown','superseded') AND COALESCE(j.error_message,'')<>'' THEN j.error_message ELSE l.message END"
 
 func (s *sSysPublish) publishRecordClear(ctx context.Context, tenantId int64, accountId int64) error {
 	mod := g.DB().Model(publishSuccessRecordTable).Safe().Ctx(ctx).Where("tenant_id", tenantId)

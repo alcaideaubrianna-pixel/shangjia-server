@@ -421,18 +421,28 @@ func (s *sSysPublish) tenantVipStatus(ctx context.Context, tenantId int64) (*sys
 		return nil, gerror.New("租户ID不能为空")
 	}
 	cacheKey := tenantVipCacheKey(tenantId)
-	if value, err := cache.Instance().Get(ctx, cacheKey); err == nil && !value.IsNil() {
+	step := beginTelegramPublishStage(ctx, "vip.cache.get", g.Map{"tenantId": tenantId})
+	value, cacheErr := cache.Instance().Get(ctx, cacheKey)
+	step.End(cacheErr, g.Map{"cacheHit": cacheErr == nil && value != nil && !value.IsNil()})
+	if cacheErr == nil && !value.IsNil() {
 		var cached sysin.TenantVipStatusModel
-		if scanErr := value.Scan(&cached); scanErr == nil && cached.TenantId > 0 {
+		step = beginTelegramPublishStage(ctx, "vip.cache.decode", g.Map{"tenantId": tenantId})
+		scanErr := value.Scan(&cached)
+		step.End(scanErr)
+		if scanErr == nil && cached.TenantId > 0 {
 			return normalizeTenantVipStatus(&cached, gtime.Now()), nil
 		}
 	}
+	step = beginTelegramPublishStage(ctx, "vip.database.load", g.Map{"tenantId": tenantId})
 	status, err := s.loadTenantVipStatus(ctx, tenantId)
+	step.End(err)
 	if err != nil {
 		return nil, err
 	}
 	status = normalizeTenantVipStatus(status, gtime.Now())
-	_ = cache.Instance().Set(ctx, cacheKey, status, tenantVipStatusCacheTTL(status, tenantVipCacheTTL, gtime.Now()))
+	step = beginTelegramPublishStage(ctx, "vip.cache.set", g.Map{"tenantId": tenantId})
+	cacheErr = cache.Instance().Set(ctx, cacheKey, status, tenantVipStatusCacheTTL(status, tenantVipCacheTTL, gtime.Now()))
+	step.End(cacheErr)
 	return status, nil
 }
 

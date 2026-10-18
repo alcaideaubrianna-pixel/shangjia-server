@@ -12,6 +12,7 @@ import (
 )
 
 const profileLifecycleLockTTL = 2 * time.Minute
+const profileLifecycleLockWait = 10 * time.Second
 
 func (s *sSysPublish) withProfileLifecycleLock(ctx context.Context, tenantId int64, profileId int64, fn func() error) error {
 	if tenantId <= 0 || profileId <= 0 {
@@ -19,7 +20,9 @@ func (s *sSysPublish) withProfileLifecycleLock(ctx context.Context, tenantId int
 	}
 	lock := hglock.NewConfig(profileLifecycleLockTTL, 200*time.Millisecond).
 		Mutex(fmt.Sprintf("youban_publish:profile_lifecycle:%d:%d", tenantId, profileId))
-	if err := lock.Lock(ctx); err != nil {
+	lockCtx, cancel := context.WithTimeout(ctx, profileLifecycleLockWait)
+	defer cancel()
+	if err := lock.Lock(lockCtx); err != nil {
 		return gerror.Wrap(err, "获取资料发布状态锁失败")
 	}
 	defer func() {

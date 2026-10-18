@@ -15,6 +15,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 	"golang.org/x/net/proxy"
 
+	"hotgo/addons/youban_publish/consts"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
 	"hotgo/internal/library/contexts"
@@ -61,7 +62,7 @@ func (s *sSysPublish) ServerBotSave(ctx context.Context, in *sysin.BotSaveInp) (
 	if in.TenantId <= 0 {
 		return gerror.New("请选择账号归属")
 	}
-	return s.saveBot(ctx, in, in.TenantId, contexts.GetUserId(ctx))
+	return s.saveBot(ctx, in, in.TenantId, contexts.GetUserId(ctx), 0)
 }
 
 func (s *sSysPublish) ServerBotDelete(ctx context.Context, in *sysin.BotDeleteInp) (err error) {
@@ -97,7 +98,7 @@ func (s *sSysPublish) AdminBotSave(ctx context.Context, in *sysin.BotSaveInp) (e
 	if err != nil {
 		return err
 	}
-	return s.saveBot(ctx, in, current.TenantId, current.Id)
+	return s.saveBot(ctx, in, current.TenantId, current.Id, current.Id)
 }
 
 func (s *sSysPublish) botList(ctx context.Context, in *sysin.BotListInp) (list []*sysin.BotModel, totalCount int, err error) {
@@ -121,7 +122,39 @@ func (s *sSysPublish) botList(ctx context.Context, in *sysin.BotListInp) (list [
 	return list, totalCount, nil
 }
 
-func (s *sSysPublish) saveBot(ctx context.Context, in *sysin.BotSaveInp, tenantId int64, operatorId int64) (err error) {
+// Only the dedicated two-way setup may opt a Bot into the two-way runtime.
+// Ordinary edits retain an existing type unless a change is explicitly requested.
+func normalizePublishBotType(requested, current string) (string, error) {
+	botType := strings.TrimSpace(requested)
+	current = strings.TrimSpace(current)
+	if botType == "" {
+		botType = current
+	}
+	if botType == "" {
+		botType = consts.PublishBotTypeNormal
+	}
+	if botType != consts.PublishBotTypeNormal && botType != consts.PublishBotTypeTwoWay {
+		return "", gerror.New("Bot用途不合法")
+	}
+	if botType == consts.PublishBotTypeTwoWay && current != consts.PublishBotTypeTwoWay {
+		return "", gerror.New("请通过双向机器人配置入口启用双向功能")
+	}
+	return botType, nil
+}
+
+func (s *sSysPublish) saveBot(ctx context.Context, in *sysin.BotSaveInp, tenantId int64, operatorId int64, accountId int64) (err error) {
+	currentType := ""
+	if in.Id > 0 {
+		old, err := s.getBotById(ctx, in.Id, tenantId)
+		if err != nil {
+			return err
+		}
+		currentType = old.BotType
+	}
+	botType, err := normalizePublishBotType(in.BotType, currentType)
+	if err != nil {
+		return err
+	}
 	botToken := strings.TrimSpace(in.BotToken)
 	if botToken == "" && in.Id <= 0 {
 		return gerror.New("Bot Token不能为空")
@@ -151,6 +184,7 @@ func (s *sSysPublish) saveBot(ctx context.Context, in *sysin.BotSaveInp, tenantI
 	data := g.Map{
 		"tenant_id":    tenantId,
 		"bot_name":     botName,
+		"bot_type":     botType,
 		"bot_username": strings.TrimPrefix(strings.TrimSpace(tgUser.Username), "@"),
 		"bot_token":    botToken,
 		"remark":       strings.TrimSpace(in.Remark),
@@ -173,6 +207,7 @@ func (s *sSysPublish) saveBot(ctx context.Context, in *sysin.BotSaveInp, tenantI
 		if tenantId <= 0 {
 			return gerror.New("请选择账号归属")
 		}
+		data["account_id"] = accountId
 		data["created_by"] = operatorId
 		data["created_at"] = gtime.Now()
 		_, err = g.DB().Model(publishBotTable).Safe().Ctx(ctx).Data(data).Insert()
@@ -343,7 +378,18 @@ func (s *sSysPublish) telegramBot(ctx context.Context, botToken string) (*tgbot.
 	return gatewayservice.Gateway().Client(ctx, botToken)
 }
 
+// telegramMediaBot is the publishing client; getFile must use telegramDownloadBot.
 func (s *sSysPublish) telegramMediaBot(ctx context.Context, botToken string) (*tgbot.Bot, error) {
+	botToken = strings.TrimSpace(botToken)
+	if botToken == "" {
+		return nil, gerror.New("Telegram Bot Token未配置")
+	}
+	return gatewayservice.Gateway().SendClient(ctx, botToken)
+}
+
+// telegramDownloadBot keeps getFile/file download configuration independent
+// from publishing. Never use this client for sendVideo/sendMediaGroup.
+func (s *sSysPublish) telegramDownloadBot(ctx context.Context, botToken string) (*tgbot.Bot, error) {
 	botToken = strings.TrimSpace(botToken)
 	if botToken == "" {
 		return nil, gerror.New("Telegram Bot Token未配置")

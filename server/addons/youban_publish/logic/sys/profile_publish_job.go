@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"sort"
 	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -9,6 +10,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	iservice "hotgo/internal/service"
@@ -57,6 +59,16 @@ type telegramProfilePublishMeta struct {
 	CollectSourceId        int64
 	CollectSourceChatId    string
 	CollectSourceMessageId int64
+	InitialSendPhase       string
+}
+
+var errTelegramPublishPermissionPaused = gerror.New("目标频道推送已因权限错误暂停，资料已保留，请恢复频道权限后主动重新上架")
+
+func profilePublishPreparationError(channelCount int, jobIds []int64) error {
+	if channelCount > 0 && len(jobIds) == 0 {
+		return errTelegramPublishPermissionPaused
+	}
+	return nil
 }
 
 func (s *sSysPublish) submitProfilePublishWithMeta(ctx context.Context, profileId, tenantId, accountId, operatorId int64, operationNo string, channelIds []int64, requireOnline bool, meta telegramProfilePublishMeta) error {
@@ -105,6 +117,8 @@ func (s *sSysPublish) prepareProfilePublishJobs(ctx context.Context, profileId, 
 		operationNo = newTelegramOperationNo("profile", profileId)
 	}
 	jobIds := make([]int64, 0, len(channels))
+	// Creation locks channel circuit rows; always acquire them in ID order.
+	sort.Slice(channels, func(i, j int) bool { return channels[i].Id < channels[j].Id })
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		if txErr := s.beginProfilePublishOperationTx(ctx, tx, source["tenant_id"].Int64(), source["account_id"].Int64(), profileId, operationNo); txErr != nil {
 			return txErr
@@ -114,14 +128,32 @@ func (s *sSysPublish) prepareProfilePublishJobs(ctx context.Context, profileId, 
 			if createErr != nil {
 				return createErr
 			}
+			if jobId == 0 { // Permission-paused channels keep profiles, not new queue intents.
+				continue
+			}
+			if strings.TrimSpace(meta.InitialSendPhase) != "" {
+				if _, createErr = tx.Model(publishTgJobTable).Safe().Ctx(ctx).
+					Where("id", jobId).Where("status", telegramJobStatusPending).
+					Data(g.Map{"send_phase": strings.TrimSpace(meta.InitialSendPhase), "updated_at": gtime.Now()}).Update(); createErr != nil {
+					return gerror.Wrap(createErr, "设置TG任务初始发送阶段失败")
+				}
+			}
+			if createErr = s.ensureTelegramJobOutboxTx(ctx, tx, jobId, 0); createErr != nil {
+				return createErr
+			}
 			jobIds = append(jobIds, jobId)
+		}
+		if len(channels) > 0 && len(jobIds) == 0 {
+			return s.writeProfilePublishOperationStateTx(ctx, tx, source["tenant_id"].Int64(), source["account_id"].Int64(), profileId, operationNo, sysin.PublishTaskStatusFailed, true)
 		}
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	return jobIds, nil
+	// Report the skip only after committing the failed UI projection. Returning
+	// this from the transaction would roll that projection back to pending.
+	return jobIds, profilePublishPreparationError(len(channels), jobIds)
 }
 
 func (s *sSysPublish) enqueuePreparedProfileJobs(ctx context.Context, jobIds []int64, operatorId int64) {
@@ -131,11 +163,10 @@ func (s *sSysPublish) enqueuePreparedProfileJobs(ctx context.Context, jobIds []i
 		} else if recordErr := s.upsertPublishJobRecord(ctx, job, "pending", ""); recordErr != nil {
 			g.Log().Warningf(ctx, "保存资料待发送记录失败 jobId:%d err:%+v", jobId, recordErr)
 		}
-		if err := s.enqueueTelegramJob(ctx, jobId, 0); err != nil {
+		if err := s.dispatchTelegramJobOutboxByJob(ctx, jobId); err != nil {
 			message := "Redis调度失败，等待数据库调度器恢复：" + err.Error()
-			_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", jobId).Data(g.Map{
-				"dispatch_status": tgDispatchStatusIdle, "last_dispatch_error": message, "updated_at": gtime.Now(),
-			}).Update()
+			_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", jobId).
+				Data(g.Map{"last_dispatch_error": message, "updated_at": gtime.Now()}).Update()
 			g.Log().Warningf(ctx, "资料TG任务入队失败，等待数据库调度器恢复 jobId:%d operatorId:%d err:%+v", jobId, operatorId, err)
 		}
 	}
@@ -156,6 +187,10 @@ func (s *sSysPublish) ensureTelegramProfileJobWithMeta(ctx context.Context, sour
 }
 
 func (s *sSysPublish) ensureTelegramProfileJobWithMetaTx(ctx context.Context, tx gdb.TX, source gdb.Record, channel telegramJobChannel, operationNo string, meta telegramProfilePublishMeta) (int64, error) {
+	paused, err := lockChannelPermissionCreationTx(ctx, tx, source["tenant_id"].Int64(), channel.Id)
+	if err != nil || paused {
+		return 0, err
+	}
 	existing, err := tx.Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("profile_id", source["profile_id"].Int64()).
 		Where("operation_no", operationNo).
@@ -214,6 +249,16 @@ func (s *sSysPublish) completeProfileTelegramOperation(ctx context.Context, job 
 	}
 	if pending > 0 {
 		return false, nil
+	}
+	sent, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("profile_id", job.ProfileId).
+		Where("operation_no", job.OperationNo).
+		Where("status", telegramJobStatusSent).Count()
+	if err != nil {
+		return false, gerror.Wrap(err, "统计资料成功TG任务失败")
+	}
+	if sent == 0 {
+		return false, s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusFailed)
 	}
 	isCurrent, err := s.profilePublishOperationIsCurrent(ctx, job)
 	if err != nil {
