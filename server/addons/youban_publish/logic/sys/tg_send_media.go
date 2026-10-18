@@ -21,6 +21,7 @@ import (
 	"hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/internal/model/do"
 	"hotgo/utility/file"
+	"hotgo/utility/telegramerror"
 )
 
 const telegramMediaGroupMaxItems = 10
@@ -917,27 +918,14 @@ func telegramMediaSetCanUseRemoteURL(media []*telegramMediaItem) bool {
 }
 
 func isTelegramRemoteURLRejectedError(err error) bool {
-	if err == nil {
-		return false
+	if telegramerror.IsRemoteURLRejected(err) {
+		return true
 	}
-	message := strings.ToLower(err.Error())
-	for _, part := range []string{
-		"failed to get http url content",
-		"webpage_curl_failed",
-		"webpage_media_empty",
-		"wrong file identifier/http url specified",
-		"wrong type of the web page content",
-		"wrong content type",
-		"file is too big",
-		"request entity too large",
-		"http 403",
-		"http 404",
-	} {
-		if strings.Contains(message, part) {
-			return true
-		}
+	message := ""
+	if err != nil {
+		message = strings.ToLower(err.Error())
 	}
-	return false
+	return strings.Contains(message, "http 403") || strings.Contains(message, "http 404")
 }
 
 func telegramMediaCanFallbackToUpload(media *telegramMediaItem, err error) bool {
