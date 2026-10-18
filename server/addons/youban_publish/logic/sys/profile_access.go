@@ -14,6 +14,18 @@ type profileOwnerGroup struct {
 	Ids       []int64
 }
 
+// profileWriteAccountScope keeps tenant isolation while allowing tenant admins
+// and explicitly shared uploaders to operate on another account's profiles.
+func profileWriteAccountScope(capability *sysin.AccountCapabilityModel) (int64, error) {
+	if capability == nil || capability.TenantId <= 0 || capability.AccountId <= 0 {
+		return 0, gerror.New("上架账号信息不完整")
+	}
+	if capability.AccountType == sysin.PublishAccountTypeAdmin || capability.SharedResourceEnabled == 1 {
+		return 0, nil
+	}
+	return capability.AccountId, nil
+}
+
 func (s *sSysPublish) editableProfileOwnerAccountId(ctx context.Context, id int64, uuid string, capability *sysin.AccountCapabilityModel) (int64, error) {
 	if capability == nil {
 		return 0, gerror.New("上架账号信息不完整")
@@ -29,12 +41,9 @@ func (s *sSysPublish) editableProfileOwnerAccountId(ctx context.Context, id int6
 }
 
 func (s *sSysPublish) profileOwnerGroups(ctx context.Context, inIds []int64, uuids []string, capability *sysin.AccountCapabilityModel) ([]profileOwnerGroup, error) {
-	if capability == nil {
-		return nil, gerror.New("上架账号信息不完整")
-	}
-	accountScope := capability.AccountId
-	if capability.SharedResourceEnabled == 1 {
-		accountScope = 0
+	accountScope, err := profileWriteAccountScope(capability)
+	if err != nil {
+		return nil, err
 	}
 	ids, err := s.allowedProfileTargetIds(ctx, inIds, uuids, capability.TenantId, accountScope)
 	if err != nil {
@@ -49,10 +58,18 @@ func (s *sSysPublish) profileOwnerGroups(ctx context.Context, inIds []int64, uui
 	}
 	grouped := make(map[int64][]int64)
 	for _, row := range rows {
-		if row.AccountId != capability.AccountId && capability.SharedResourceEnabled != 1 {
+		if accountScope > 0 && row.AccountId != accountScope {
 			continue
 		}
 		grouped[row.AccountId] = append(grouped[row.AccountId], row.ProfileId)
+	}
+	// Reject a mixed authorized/unauthorized request before any group is mutated.
+	allowed := 0
+	for _, profileIds := range grouped {
+		allowed += len(uniqueIds(profileIds))
+	}
+	if allowed != len(uniqueIds(ids)) {
+		return nil, gerror.New("资料不存在或无权操作")
 	}
 	groups := make([]profileOwnerGroup, 0, len(grouped))
 	for accountId, profileIds := range grouped {

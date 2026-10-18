@@ -68,13 +68,13 @@ func (s *sSysPublish) BotProfileStatus(ctx context.Context, in *sysin.BotProfile
 	if err != nil {
 		return nil, err
 	}
-	accountIds, err := s.sharedProfileAccountIds(ctx, capability)
+	accountScope, err := profileWriteAccountScope(capability)
 	if err != nil {
 		return nil, err
 	}
 	ids := append([]int64{}, in.Ids...)
 	for _, no := range in.Nos {
-		id, err := s.botResolveProfileIdByAccountIds(ctx, in.TenantId, accountIds, no, false)
+		id, err := s.botResolveProfileId(ctx, capability.TenantId, accountScope, no, false)
 		if err != nil {
 			return nil, err
 		}
@@ -312,18 +312,23 @@ func (s *sSysPublish) BotProfileEdit(ctx context.Context, in *sysin.BotProfileEd
 	if in == nil {
 		return nil, gerror.New("资料信息不能为空")
 	}
-	profileId, err := s.botResolveProfileId(ctx, in.TenantId, in.AccountId, in.ProfileNo, false)
+	capability, err := s.activeAccountCapability(ctx, in.TenantId, in.AccountId)
 	if err != nil {
 		return nil, err
 	}
-	current, err := s.profileView(ctx, profileId, in.TenantId, in.AccountId)
+	accountScope, err := profileWriteAccountScope(capability)
 	if err != nil {
 		return nil, err
 	}
-	ownerAccountId := in.AccountId
-	if ownerAccountId <= 0 {
-		ownerAccountId = current.AccountId
+	profileId, err := s.botResolveProfileId(ctx, capability.TenantId, accountScope, in.ProfileNo, false)
+	if err != nil {
+		return nil, err
 	}
+	current, err := s.profileView(ctx, profileId, capability.TenantId, accountScope)
+	if err != nil {
+		return nil, err
+	}
+	ownerAccountId := current.AccountId
 	if ownerAccountId <= 0 {
 		return nil, gerror.New("资料归属账号信息不完整")
 	}
@@ -335,11 +340,11 @@ func (s *sSysPublish) BotProfileEdit(ctx context.Context, in *sysin.BotProfileEd
 	if plainText == "" {
 		plainText = current.PlainText
 	}
-	if _, err = s.saveProfile(ctx, &sysin.ProfileSaveInp{Id: profileId, Title: title, PlainText: plainText, Status: current.Status, Visibility: current.Visibility, Province: current.Province, City: current.City, Tag: current.Tag, CustomerRemark: current.CustomerRemark}, in.TenantId, ownerAccountId); err != nil {
+	if _, err = s.saveProfile(ctx, &sysin.ProfileSaveInp{Id: profileId, Title: title, PlainText: plainText, Status: current.Status, Visibility: current.Visibility, Province: current.Province, City: current.City, Tag: current.Tag, CustomerRemark: current.CustomerRemark}, capability.TenantId, ownerAccountId); err != nil {
 		return nil, err
 	}
 	if len(in.DisplayMedia) > 0 || len(in.VerifyMedia) > 0 || strings.TrimSpace(in.VerifyText) != "" {
-		if err = s.replaceBotProfileMedia(ctx, profileId, in.TenantId, ownerAccountId, in.DisplayMedia, in.VerifyMedia); err != nil {
+		if err = s.replaceBotProfileMedia(ctx, profileId, capability.TenantId, ownerAccountId, in.DisplayMedia, in.VerifyMedia); err != nil {
 			return nil, err
 		}
 		if strings.TrimSpace(in.VerifyText) != "" {
@@ -363,7 +368,7 @@ func (s *sSysPublish) BotProfileEdit(ctx context.Context, in *sysin.BotProfileEd
 			return nil, gerror.Wrap(err, "更新资料编号失败")
 		}
 	}
-	return s.BotProfileView(ctx, &sysin.BotProfileViewInp{TenantId: in.TenantId, AccountId: in.AccountId, ProfileId: profileId})
+	return s.BotProfileView(ctx, &sysin.BotProfileViewInp{TenantId: capability.TenantId, AccountId: capability.AccountId, ProfileId: profileId})
 }
 
 func (s *sSysPublish) BotProfileCancelQueue(ctx context.Context, in *sysin.BotProfileQueueCancelInp) (res *sysin.BotProfileQueueCancelModel, err error) {

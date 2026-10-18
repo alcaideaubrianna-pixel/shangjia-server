@@ -24,6 +24,8 @@ import (
 const scanResultTTL = 10 * time.Minute
 
 type scanResultState struct {
+	BotId       int64   `json:"botId,omitempty"`
+	TraceId     string  `json:"traceId,omitempty"`
 	TenantId    int64   `json:"tenantId"`
 	AccountId   int64   `json:"accountId"`
 	AccountType string  `json:"accountType"`
@@ -61,7 +63,7 @@ func (s *sSysBot) searchScanMediaAndReply(ctx context.Context, botId int64, chat
 		return s.sendMessageOnly(ctx, botId, chatId, fmt.Sprintf("未找到相似资料。\n（追踪号 %s）", traceId))
 	}
 	token := strings.ToUpper(grand.S(10))
-	state := &scanResultState{TenantId: account.TenantId, AccountId: account.AccountId, AccountType: account.AccountType}
+	state := &scanResultState{BotId: botId, TraceId: traceId, TenantId: account.TenantId, AccountId: account.AccountId, AccountType: account.AccountType}
 	buttons := make([][]models.InlineKeyboardButton, 0, len(list))
 	sourceLinkTotal := 0
 	for _, note := range list {
@@ -170,17 +172,34 @@ func (s *sSysBot) handleScanCallback(ctx context.Context, botId int64, query *mo
 	if err != nil {
 		return true, s.replyBotError(ctx, botId, chatId, "扫图预览", err)
 	}
-	if account.TenantId != state.TenantId || account.AccountId != state.AccountId {
+	if account.TenantId != state.TenantId || account.AccountId != state.AccountId || (state.BotId > 0 && state.BotId != botId) {
 		return true, s.sendMessageOnly(ctx, botId, chatId, "扫图结果已失效，请重新发送媒体。")
 	}
+	ctx = withScanTrace(ctx, state.TraceId)
+	ctx = scantrace.With(ctx, g.Map{"botId": botId, "tenantId": account.TenantId, "accountId": account.AccountId, "profileId": profileId})
+	finish := scantrace.Begin(ctx, "result.view")
+	var viewErr error
+	defer func() { finish(viewErr) }()
+	step := scantrace.Begin(ctx, "result.profile")
 	note, err := publishService.SysPublish().BotProfileView(ctx, &publishsysin.BotProfileViewInp{TenantId: account.TenantId, AccountId: account.AccountId, AccountType: account.AccountType, ProfileId: profileId})
+	step(err)
+	viewErr = err
 	if err != nil {
 		return true, s.replyBotError(ctx, botId, chatId, "扫图预览", err)
 	}
-	if err = s.sendScanProfileContent(ctx, botId, chatId, note); err != nil {
-		return true, s.replyBotError(ctx, botId, chatId, "扫图预览", err)
+	// The management card must not wait for full albums/videos to be delivered.
+	purpose := profileCardPurpose(account, note, "view")
+	ctx = scantrace.With(ctx, g.Map{"cardPurpose": purpose, "accountType": account.AccountType, "profileAccountId": note.AccountId})
+	step = scantrace.Begin(ctx, "result.card")
+	viewErr = s.sendProfileCard(ctx, botId, chatId, note, purpose)
+	step(viewErr)
+	if viewErr != nil {
+		return true, s.replyBotError(ctx, botId, chatId, "扫图预览", viewErr)
 	}
-	return true, s.replyBotError(ctx, botId, chatId, "扫图预览", s.sendProfileCard(ctx, botId, chatId, note, profileCardPurpose(account, note, "view")))
+	step = scantrace.Begin(ctx, "result.media")
+	viewErr = s.sendScanProfileContent(ctx, botId, chatId, note)
+	step(viewErr)
+	return true, s.replyBotError(ctx, botId, chatId, "扫图预览", viewErr)
 }
 
 func (s *sSysBot) sendScanProfileContent(ctx context.Context, botId int64, chatId string, note *publishsysin.NoteModel) error {
@@ -199,7 +218,7 @@ func (s *sSysBot) sendScanProfileContent(ctx context.Context, botId int64, chatI
 	defer cancel()
 	caption := profilePreviewDisplayCaption(note)
 	if profileHasPurposeMedia(note.Media, "display") {
-		if err = s.sendProfileMediaPurpose(ctx, callCtx, bot, chatId, note.Media, "display", caption, true); err != nil {
+		if err = s.sendProfileMediaPurpose(ctx, callCtx, bot, chatId, note.Media, "display", caption, false); err != nil {
 			return err
 		}
 	} else if strings.TrimSpace(note.PlainText) != "" {
@@ -208,7 +227,7 @@ func (s *sSysBot) sendScanProfileContent(ctx context.Context, botId int64, chatI
 		}
 	}
 	if profileHasPurposeMedia(note.Media, "verify") {
-		if err = s.sendProfileMediaPurpose(ctx, callCtx, bot, chatId, note.Media, "verify", "验证资料", true); err != nil {
+		if err = s.sendProfileMediaPurpose(ctx, callCtx, bot, chatId, note.Media, "verify", "验证资料", false); err != nil {
 			return err
 		}
 	}
