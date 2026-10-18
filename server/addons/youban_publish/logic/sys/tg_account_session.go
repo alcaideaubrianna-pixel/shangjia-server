@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"html"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gfile"
@@ -135,15 +137,30 @@ func (s *sSysPublish) failTgAccountRefresh(ctx context.Context, id int64, tenant
 
 const tgAccountSessionExpiredMessage = "TG账号登录态已失效，请重新扫码登录"
 
+var errTelegramPublishAccountMissing = errors.New("推送账号配置缺失")
+
 // telegramAccountCanPublish is the single gate used before a Telegram publish
-// task enters Asynq. It prevents disabled/expired accounts from repeatedly
-// consuming queue capacity while their channel jobs remain pending.
+// task enters Asynq. Bot delivery does not require a protocol session; the
+// account fallback validates its own account when it is actually used.
 func (s *sSysPublish) telegramJobAccountCanPublish(ctx context.Context, job telegramJobRecord) (int64, bool, error) {
+	return checkTelegramJobDeliveryAvailability(ctx, g.DB(), job)
+}
+
+func checkTelegramJobDeliveryAvailability(ctx context.Context, db gdb.DB, job telegramJobRecord) (int64, bool, error) {
 	if job.TenantId <= 0 || job.ChannelId <= 0 {
 		return 0, false, nil
 	}
+	botAvailable, err := db.Model(publishTgJobTable+" availability_job").Safe().Ctx(ctx).
+		Where("availability_job.id", job.Id).
+		Where(telegramJobAvailableBotSQL("availability_job")).Exist()
+	if err != nil {
+		return 0, false, gerror.Wrap(err, "检查Bot发布状态失败")
+	}
+	if botAvailable {
+		return 0, true, nil
+	}
 	channelTable, hasSoftDelete := telegramJobChannelTable(job.OperationNo)
-	channelModel := g.DB().Model(channelTable).Safe().Ctx(ctx).
+	channelModel := db.Model(channelTable).Safe().Ctx(ctx).
 		Fields("tg_account_id").Where("id", job.ChannelId).Where("tenant_id", job.TenantId)
 	if hasSoftDelete {
 		channelModel = channelModel.WhereNull("deleted_at")
@@ -152,24 +169,65 @@ func (s *sSysPublish) telegramJobAccountCanPublish(ctx context.Context, job tele
 	if err != nil {
 		return 0, false, gerror.Wrap(err, "读取TG任务发送账号失败")
 	}
+	if channel.IsEmpty() {
+		return 0, false, gerror.Wrapf(errTelegramPublishAccountMissing, "推送频道不存在或已删除，channel:%d，请重新选择上架频道", job.ChannelId)
+	}
 	tgAccountId := channel["tg_account_id"].Int64()
 	if tgAccountId <= 0 {
-		return 0, false, nil
+		return 0, false, gerror.Wrapf(errTelegramPublishAccountMissing, "频道未配置可用Bot或协议号，channel:%d", job.ChannelId)
 	}
-	var account struct {
-		Status     string `orm:"status"`
-		SessionKey string `orm:"session_key"`
-	}
-	err = g.DB().Model(publishTgAccountTable).Safe().Ctx(ctx).
+	available, err := checkTelegramProtocolAccount(ctx, db, job.TenantId, tgAccountId)
+	return tgAccountId, available, err
+}
+
+func telegramProtocolAccountCanPublish(ctx context.Context, tenantID, tgAccountId int64) (bool, error) {
+	return checkTelegramProtocolAccount(ctx, g.DB(), tenantID, tgAccountId)
+}
+
+func checkTelegramProtocolAccount(ctx context.Context, db gdb.DB, tenantID, tgAccountId int64) (bool, error) {
+	account, err := db.Model(publishTgAccountTable).Safe().Ctx(ctx).
 		Fields("status,session_key").
 		Where("id", tgAccountId).
-		Where("tenant_id", job.TenantId).
+		Where("tenant_id", tenantID).
 		WhereNull("deleted_at").
-		Scan(&account)
+		One()
 	if err != nil {
-		return tgAccountId, false, gerror.Wrap(err, "检查TG账号发布状态失败")
+		return false, gerror.Wrap(err, "检查TG账号发布状态失败")
 	}
-	return tgAccountId, account.Status == sysin.PublishTgAccountStatusAuthorized && strings.TrimSpace(account.SessionKey) != "", nil
+	if account.IsEmpty() {
+		return false, gerror.Wrapf(errTelegramPublishAccountMissing, "TG账号不存在或已删除，account:%d，请更换频道绑定账号或配置可用Bot", tgAccountId)
+	}
+	return account["status"].String() == sysin.PublishTgAccountStatusAuthorized && strings.TrimSpace(account["session_key"].String()) != "", nil
+}
+
+// Only untouched jobs can be failed here. Ambiguous or partly delivered sends
+// retain their reconciliation/cleanup ownership instead of being resent.
+func (s *sSysPublish) failTelegramMissingAccountJob(ctx context.Context, job telegramJobRecord, cause error) error {
+	if job.SendPhase != "" || (job.Status != telegramJobStatusPending && job.Status != telegramJobStatusRetryWait) {
+		return cause
+	}
+	changed, err := s.transitionTelegramJob(ctx, telegramJobTransition{
+		JobId: job.Id, From: []string{telegramJobStatusPending, telegramJobStatusRetryWait},
+		To: telegramJobStatusFailed, ErrorMessage: cause.Error(),
+		SendPhases: []string{""},
+		Additional: g.Map{"last_dispatch_error": cause.Error()},
+	})
+	if err != nil {
+		return err
+	}
+	if !changed {
+		return nil
+	}
+	s.appendTelegramJobLog(ctx, job, "dispatch", "failed", cause.Error())
+	if err = s.upsertPublishJobRecord(ctx, job, "failed", cause.Error()); err != nil {
+		return err
+	}
+	if err = s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusFailed); err != nil {
+		return err
+	}
+	// Let the dispatcher select the next head on its next tick. Synchronously
+	// waking another broken job here could recurse through a large backlog.
+	return nil
 }
 
 func telegramJobChannelTable(operationNo string) (table string, hasSoftDelete bool) {

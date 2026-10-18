@@ -280,6 +280,9 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 	tgAccountId, available, checkErr := s.telegramJobAccountCanPublish(ctx, job)
 	step.End(checkErr, g.Map{"tgAccountId": tgAccountId, "available": available})
 	if checkErr != nil {
+		if errors.Is(checkErr, errTelegramPublishAccountMissing) {
+			return s.failTelegramMissingAccountJob(ctx, job, checkErr)
+		}
 		return checkErr
 	} else if !available {
 		return s.pauseTelegramJobsForUnavailableAccount(ctx, tgAccountId, "TG账号当前未授权或会话不可用")

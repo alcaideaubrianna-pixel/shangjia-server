@@ -122,20 +122,38 @@ func (s *sSysPublish) botList(ctx context.Context, in *sysin.BotListInp) (list [
 	return list, totalCount, nil
 }
 
-func (s *sSysPublish) saveBot(ctx context.Context, in *sysin.BotSaveInp, tenantId int64, operatorId int64, accountId int64) (err error) {
-	botType := strings.TrimSpace(in.BotType)
-	if botType == "" && in.Id > 0 {
-		old, err := s.getBotById(ctx, in.Id, tenantId)
-		if err != nil {
-			return err
-		}
-		botType = old.BotType
+// Only the dedicated two-way setup may opt a Bot into the two-way runtime.
+// Ordinary edits retain an existing type unless a change is explicitly requested.
+func normalizePublishBotType(requested, current string) (string, error) {
+	botType := strings.TrimSpace(requested)
+	current = strings.TrimSpace(current)
+	if botType == "" {
+		botType = current
 	}
 	if botType == "" {
 		botType = consts.PublishBotTypeNormal
 	}
 	if botType != consts.PublishBotTypeNormal && botType != consts.PublishBotTypeTwoWay {
-		return gerror.New("Bot用途不合法")
+		return "", gerror.New("Bot用途不合法")
+	}
+	if botType == consts.PublishBotTypeTwoWay && current != consts.PublishBotTypeTwoWay {
+		return "", gerror.New("请通过双向机器人配置入口启用双向功能")
+	}
+	return botType, nil
+}
+
+func (s *sSysPublish) saveBot(ctx context.Context, in *sysin.BotSaveInp, tenantId int64, operatorId int64, accountId int64) (err error) {
+	currentType := ""
+	if in.Id > 0 {
+		old, err := s.getBotById(ctx, in.Id, tenantId)
+		if err != nil {
+			return err
+		}
+		currentType = old.BotType
+	}
+	botType, err := normalizePublishBotType(in.BotType, currentType)
+	if err != nil {
+		return err
 	}
 	botToken := strings.TrimSpace(in.BotToken)
 	if botToken == "" && in.Id <= 0 {
