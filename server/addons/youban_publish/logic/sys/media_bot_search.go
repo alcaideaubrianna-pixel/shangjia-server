@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -20,7 +21,7 @@ const botMediaSearchMaxResults = 20
 
 const (
 	botMediaSearchTimeout   = 45 * time.Second
-	botMediaColdItemTimeout = 5 * time.Second
+	botMediaColdItemTimeout = 12 * time.Second
 	botMediaColdConcurrency = 4
 )
 
@@ -70,40 +71,6 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 	}
 	if len(accountIds) == 0 {
 		return []*sysin.NoteModel{}, 0, nil
-	}
-	// A reply to a published Telegram message is an exact reference. Resolve it
-	// before touching media URLs so quoted messages return immediately and never
-	// enter the image fingerprint pipeline. Scope the lookup by tenant and the
-	// account visibility derived above to prevent cross-tenant disclosure.
-	if in.ReplyMessageId > 0 && strings.TrimSpace(in.ReplyChatId) != "" {
-		chatID := normalizeTelegramChannelChatID(in.ReplyChatId)
-		var ref struct {
-			ProfileID int64 `orm:"profile_id"`
-		}
-		err = g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).
-			Fields("profile_id").
-			Where("tenant_id", in.TenantId).
-			WhereIn("account_id", accountIds).
-			Where("target_chat_id", chatID).
-			Where("tg_message_id", in.ReplyMessageId).
-			Where("status", "sent").WhereNull("deleted_at").
-			OrderDesc("id").Scan(&ref)
-		if err != nil {
-			return nil, 0, gerror.Wrap(err, "查询引用消息资料失败")
-		}
-		if ref.ProfileID > 0 {
-			scope, scopeErr := s.mediaSearchScopeByAccountIds(ctx, accountIds)
-			if scopeErr != nil {
-				return nil, 0, scopeErr
-			}
-			list, listErr := s.profileImageSearchNotesByScope(ctx, []int64{ref.ProfileID}, scope, nil, "")
-			if listErr != nil {
-				return nil, 0, listErr
-			}
-			if len(list) > 0 {
-				return list, 1, nil
-			}
-		}
 	}
 	step = scantrace.Begin(ctx, "scope.partitions")
 	searchScope, err := s.mediaSearchScopeByAccountIds(ctx, accountIds)
@@ -236,16 +203,21 @@ func (s *sSysPublish) botMediaSearchFingerprint(ctx context.Context, fingerprint
 	if err := ctx.Err(); err != nil {
 		return nil, 0, false, err
 	}
-	if fingerprint == nil || fingerprint.MD5 == "" {
+	if fingerprint == nil || fingerprint.PHash == nil {
 		return nil, 0, false, nil
 	}
-	hashKey := fingerprint.MD5
+	hashKey := fmt.Sprintf("%s:%016x", fingerprint.MD5, fingerprint.PHash.GetHash())
 	if _, exists := seenHashes[hashKey]; exists {
 		return nil, 0, false, nil
 	}
 	seenHashes[hashKey] = struct{}{}
-	matches, err := mediaMD5CandidateMatches(ctx, fingerprint.MD5, searchScope, nil)
+	fallbackCtx, cancelFallback := context.WithTimeout(ctx, 2*time.Second)
+	defer cancelFallback()
+	matches, err := s.cachedProfileFingerprintSearchCandidates(fallbackCtx, fingerprint, searchIn, searchScope, nil)
 	if err != nil {
+		if fallbackCtx.Err() != nil {
+			return []*sysin.NoteModel{}, 0, false, nil
+		}
 		return nil, 0, false, err
 	}
 	if len(matches) == 0 {
