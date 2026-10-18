@@ -10,6 +10,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	"hotgo/addons/youban_publish/consts"
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
@@ -89,6 +90,13 @@ func (s *sSysPublish) CollectSourceSave(ctx context.Context, in *sysin.CollectSo
 		}
 		if !botExists {
 			return 0, gerror.New("Bot采集机器人不存在、已停用或不属于当前账号")
+		}
+		bot, botErr := s.getBotById(ctx, in.BotId, account.TenantId)
+		if botErr != nil {
+			return 0, botErr
+		}
+		if bot.BotType == consts.PublishBotTypeTwoWay {
+			return 0, gerror.New("双向机器人不能用于频道采集，请选择普通机器人")
 		}
 	}
 	now := gtime.Now()

@@ -13,7 +13,6 @@ import (
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
 	collectorservice "hotgo/addons/telegram_collector/service"
 	botService "hotgo/addons/youban_bot/service"
-	"hotgo/addons/youban_publish/consts"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
 
@@ -92,12 +91,9 @@ func (s *sSysPublish) AdminBotCreate(ctx context.Context, in *sysin.BotCreateInp
 	if err != nil {
 		return nil, err
 	}
-	botType := strings.TrimSpace(in.BotType)
-	if botType == "" {
-		botType = consts.PublishBotTypeTwoWay
-	}
-	if botType != consts.PublishBotTypeNormal && botType != consts.PublishBotTypeTwoWay {
-		return nil, gerror.New("Bot用途不合法")
+	botType, err := normalizePublishBotType(in.BotType, "")
+	if err != nil {
+		return nil, err
 	}
 	name := strings.TrimSpace(in.BotName)
 	if name == "" {
@@ -185,6 +181,7 @@ func (s *sSysPublish) AdminBotCreate(ctx context.Context, in *sysin.BotCreateInp
 		g.Log().Warningf(ctx, "刷新TG Bot Gateway失败 bot:%d err:%+v", id, err)
 	}
 	return &sysin.BotModel{
+		BotType:     botType,
 		Id:          id,
 		TenantId:    current.TenantId,
 		BotName:     name,
