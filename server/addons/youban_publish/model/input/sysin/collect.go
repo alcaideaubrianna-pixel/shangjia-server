@@ -374,6 +374,7 @@ type IntroFeeChannelRuleItem struct {
 	ChannelLink     string      `json:"channelLink"`
 	Suffix          string      `json:"suffix"`
 	Status          int         `json:"status"`
+	Configured      bool        `json:"configured"`
 	Blacklisted     bool        `json:"blacklisted"`
 	LastSeenAt      *gtime.Time `json:"lastSeenAt"`
 	BlockReason     string      `json:"blockReason"`
