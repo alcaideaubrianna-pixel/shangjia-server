@@ -457,9 +457,10 @@ func normalizeProfileImageSearchInput(in *sysin.ProfileImageSearchInp) {
 		in.PerPage = 50
 	}
 	if in.Threshold <= 0 {
-		// Image search must be stricter than the detail-page similarity query.
-		// A 64-bit pHash threshold of 12 produces visible false positives.
-		in.Threshold = 8
+		// Telegram recompression commonly changes 12 pHash bits while retaining
+		// the same image. Keep this as the single-image default; callers can
+		// still provide a stricter threshold explicitly.
+		in.Threshold = 12
 	}
 	if in.Threshold > 32 {
 		in.Threshold = 32
