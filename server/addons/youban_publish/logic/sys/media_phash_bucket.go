@@ -354,7 +354,7 @@ func mediaPHashBucketCandidateRowsWithScopesUncached(ctx context.Context, normal
 		g.Log().Warning(ctx, "跳过无租户账号范围的pHash候选查询")
 		return []mediaPHashBucketCandidateRow{}, nil
 	}
-	if mediaPHashLshReady(ctx) && threshold <= 12 {
+	if mediaPHashLshReady(ctx) && threshold < mediaPHashLshBlockCount*(mediaPHashLshMaxQueryRadius+1) {
 		rows, err := mediaPHashLshCandidateRowsWithScopes(ctx, normalizedHash, threshold, scopes, profileIds, mediaType, excludeProfileId)
 		if err == nil {
 			return rows, nil

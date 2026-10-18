@@ -238,7 +238,7 @@ func (s *sSysPublish) botMediaSearchFingerprint(ctx context.Context, fingerprint
 	}
 	if err != nil {
 		if fallbackCtx.Err() != nil {
-			return []*sysin.NoteModel{}, 0, false, nil
+			return nil, 0, false, gerror.Wrap(fallbackCtx.Err(), "扫图相似查询超时，请稍后重试")
 		}
 		return nil, 0, false, err
 	}

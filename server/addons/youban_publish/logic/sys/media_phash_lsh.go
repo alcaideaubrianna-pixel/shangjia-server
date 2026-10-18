@@ -38,7 +38,7 @@ func markMediaPHashLshReady(ctx context.Context) error {
 
 func mediaPHashLshCells(hash string, threshold int) []mediaPHashLshCell {
 	value, ok := parseUploadPHash(hash)
-	if !ok || threshold < 0 || threshold > 12 {
+	if !ok || threshold < 0 || threshold >= mediaPHashLshBlockCount*(mediaPHashLshMaxQueryRadius+1) {
 		return nil
 	}
 	radius := threshold / mediaPHashLshBlockCount
