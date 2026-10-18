@@ -12,6 +12,9 @@ func TestIsInvalidTelegramMediaReference(t *testing.T) {
 	if !isInvalidTelegramMediaReference(errors.New("bad request: wrong file identifier/HTTP URL specified")) {
 		t.Fatal("expected invalid Telegram media reference to be detected")
 	}
+	if !isInvalidTelegramMediaReference(errors.New(`Bad Request: failed to send message #5 with the error message "WEBPAGE_CURL_FAILED"`)) {
+		t.Fatal("expected Telegram URL rejection to be detected")
+	}
 	if isInvalidTelegramMediaReference(errors.New("request timeout")) {
 		t.Fatal("unexpectedly classified timeout as invalid media reference")
 	}

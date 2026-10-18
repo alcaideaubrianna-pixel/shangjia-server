@@ -1550,6 +1550,7 @@ func isInvalidTelegramMediaReference(err error) bool {
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "wrong file identifier") || strings.Contains(message, "file identifier/ http url") ||
 		strings.Contains(message, "wrong remote file identifier") || strings.Contains(message, "failed to get http url content") ||
+		strings.Contains(message, "webpage_curl_failed") || strings.Contains(message, "webpage_media_empty") ||
 		strings.Contains(message, "wrong type of the web page content") || strings.Contains(message, "file is too big")
 }
 
