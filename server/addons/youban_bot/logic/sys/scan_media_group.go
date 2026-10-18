@@ -19,7 +19,9 @@ import (
 
 const scanMediaGroupTTL = 2 * time.Minute
 
-const scanMediaBatchQuietPeriod = 1500 * time.Millisecond
+const scanMediaBatchQuietPeriod = 300 * time.Millisecond
+
+const scanMediaBatchPollInterval = 50 * time.Millisecond
 
 type scanMediaGroupPending struct {
 	BotId     int64                       `json:"botId"`
@@ -259,7 +261,7 @@ func (s *sSysBot) finishScanMediaGroup(botId int64, userId string, groupId strin
 	key := scanMediaGroupKey(botId, userId, groupId)
 	var pending scanMediaGroupPending
 	for {
-		time.Sleep(scanMediaBatchQuietPeriod)
+		time.Sleep(scanMediaBatchPollInterval)
 		lock := hglock.NewConfig(10*time.Second, 50*time.Millisecond).Mutex(scanMediaGroupLockKey(botId, userId, groupId))
 		if err := lock.Lock(ctx); err != nil {
 			g.Log().Warningf(ctx, "锁定扫图媒体批次失败 botId:%d userId:%s batchId:%s err:%+v", botId, userId, groupId, err)

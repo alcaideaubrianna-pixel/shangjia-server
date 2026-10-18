@@ -390,7 +390,7 @@ func mediaPHashMinEqualNibbles(threshold int) int {
 
 func mediaPHashSearchCacheKey(ctx context.Context, queryHash uint64, md5Value string, in *sysin.ProfileImageSearchInp, scope *publishmodel.MediaSearchScope, candidateProfileIds []int64) string {
 	parts := []string{
-		fmt.Sprintf("youban_publish:profile_image_search:v8:%d", queryHash),
+		fmt.Sprintf("youban_publish:profile_image_search:v9:%d", queryHash),
 		"md5=" + strings.TrimSpace(strings.ToLower(md5Value)),
 		fmt.Sprintf("threshold=%d", in.Threshold),
 		fmt.Sprintf("scope=%s", mediaSearchScopeCacheKey(scope)),

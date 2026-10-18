@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"sort"
 	"strings"
@@ -468,7 +469,7 @@ func mediaPHashBucketCandidateCacheKey(ctx context.Context, normalizedHash strin
 	sort.Strings(scopeParts)
 	ids := uniqueIds(profileIds)
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-	return "youban_publish:media_phash_bucket:candidates:v5:" + mediaPHashHashKey(fmt.Sprintf("hash=%s|threshold=%d|scopes=%v|profiles=%v|type=%s|exclude=%d", normalizedHash, threshold, scopeParts, ids, strings.ToLower(strings.TrimSpace(mediaType)), excludeProfileId))
+	return "youban_publish:media_phash_bucket:candidates:v6:" + mediaPHashHashKey(fmt.Sprintf("hash=%s|threshold=%d|scopes=%v|profiles=%v|type=%s|exclude=%d", normalizedHash, threshold, scopeParts, ids, strings.ToLower(strings.TrimSpace(mediaType)), excludeProfileId))
 }
 
 func mediaPHashBucketBranchSQL(bucketPos int, bucketValue string, scopes []mediaPHashBucketScopePart, profileIds []int64, mediaType string, excludeProfileId int64) (string, []any) {
@@ -548,6 +549,12 @@ func ensureMediaPHashAliasBucketTable(ctx context.Context) error {
 	return nil
 }
 
+// Preserve all generated versions: the history key identifies the source,
+// while the generated pHash distinguishes successive anti-scan outputs.
+func antiScanSearchFingerprintKey(historyKey string, hash uint64) string {
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprintf("%s:%016x", historyKey, hash))))
+}
+
 func (s *sSysPublish) saveAntiScanSearchFingerprint(ctx context.Context, job telegramJobRecord, item *telegramSentMessage) error {
 	if item == nil || item.MediaId <= 0 || item.ProtectedPHash == 0 || strings.TrimSpace(item.ProtectedHashKey) == "" {
 		return nil
@@ -561,7 +568,7 @@ func (s *sSysPublish) saveAntiScanSearchFingerprint(ctx context.Context, job tel
 	for _, bucket := range buckets {
 		_, err := g.DB().Model(publishMediaPHashAliasBucketTable).Safe().Ctx(ctx).Data(g.Map{
 			"tenant_id": job.TenantId, "account_id": job.AccountId, "profile_id": job.ProfileId,
-			"media_id": item.MediaId, "media_type": "image", "fingerprint_key": item.ProtectedHashKey,
+			"media_id": item.MediaId, "media_type": "image", "fingerprint_key": antiScanSearchFingerprintKey(item.ProtectedHashKey, item.ProtectedPHash),
 			"hash_value": hash, "bucket_pos": bucket.Pos, "bucket_value": bucket.Value,
 			"created_at": now, "updated_at": now,
 		}).OnConflict("media_id,fingerprint_key,bucket_pos").OnDuplicate("hash_value,bucket_value,updated_at").Save()

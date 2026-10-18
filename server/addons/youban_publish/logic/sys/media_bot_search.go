@@ -19,6 +19,8 @@ import (
 
 const botMediaSearchMaxResults = 20
 
+const botMediaSearchMaxDistance = 12
+
 const (
 	botMediaSearchTimeout   = 45 * time.Second
 	botMediaColdItemTimeout = 12 * time.Second
@@ -79,7 +81,7 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 		return nil, 0, err
 	}
 	searchIn := &sysin.ProfileImageSearchInp{
-		Threshold: in.Threshold,
+		Threshold: botMediaSearchMaxDistance,
 	}
 	normalizeProfileImageSearchInput(searchIn)
 	searchItems := make([]*sysin.BotMediaSearchItem, 0, len(in.Items))
@@ -95,86 +97,167 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 		cloned.FileUrl = url
 		searchItems = append(searchItems, &cloned)
 	}
-	// Telegram album members are recompressed independently. A multi-image
-	// request can safely use the wider threshold because results are merged by
-	// profile and ranked by the number of matching members.
-	if len(searchItems) > 1 && searchIn.Threshold < 14 {
-		searchIn.Threshold = 14
+	// Reused Telegram files have a stable identity across bots. Consult the
+	// durable send ledger before downloading bytes or using approximate hashes.
+	fileIDs := make([]string, 0, len(searchItems))
+	for _, item := range searchItems {
+		if id := strings.TrimSpace(item.FileUniqueId); id != "" {
+			fileIDs = append(fileIDs, id)
+		}
 	}
-	seenHashes := make(map[string]struct{}, len(searchItems))
-	notesById := make(map[int64]*sysin.NoteModel)
-	matchCounts := make(map[int64]int)
-	orderedProfileIds := make([]int64, 0, botMediaSearchMaxResults)
+	direct, err := botMediaSentFileCandidates(ctx, fileIDs, searchScope)
+	if err != nil {
+		return nil, 0, err
+	}
+	matches := make([][]*botMediaSearchCandidate, 0, len(searchItems))
+	remaining := make([]*sysin.BotMediaSearchItem, 0, len(searchItems))
+	for _, item := range searchItems {
+		if candidates := direct[strings.TrimSpace(item.FileUniqueId)]; len(candidates) > 0 {
+			matches = append(matches, candidates)
+		} else {
+			remaining = append(remaining, item)
+		}
+	}
+	searchItems = remaining
+	fingerprints := make([]*mediaFingerprint, 0, len(searchItems))
 	coldItems := make([]*sysin.BotMediaSearchItem, 0, len(searchItems))
-	// First search every fingerprint already available in Redis. This phase does
-	// not download Telegram media and usually resolves forwarded/published media
-	// immediately.
 	for _, item := range searchItems {
 		step = scantrace.Begin(ctx, "fingerprint.cache")
 		fingerprint, ok := telegramImageFingerprintFromCache(ctx, item.FileUniqueId)
 		step(nil)
-		if !ok {
+		if ok {
+			fingerprints = append(fingerprints, fingerprint)
+		} else {
 			coldItems = append(coldItems, item)
-			continue
 		}
-		list, _, _, searchErr := s.botMediaSearchFingerprint(ctx, fingerprint, searchIn, searchScope, seenHashes)
-		if searchErr != nil {
-			return nil, 0, searchErr
-		}
-		orderedProfileIds = mergeBotMediaSearchNotes(notesById, orderedProfileIds, matchCounts, list)
 	}
-	// Download and decode cold fingerprints concurrently, then search them in
-	// the original message order so concurrency cannot change result priority.
-	coldResults := loadBotMediaColdFingerprints(ctx, in.TraceId, coldItems, cachedTelegramImageFingerprint)
 	var lastHashErr error
-	coldProcessed := false
-	for _, result := range coldResults {
+	for _, result := range loadBotMediaColdFingerprints(ctx, in.TraceId, coldItems, cachedTelegramImageFingerprint) {
 		if result.err != nil {
 			lastHashErr = result.err
-			if ctx.Err() != nil {
-				break
-			}
 			continue
 		}
-		coldProcessed = true
-		list, _, _, searchErr := s.botMediaSearchFingerprint(ctx, result.fingerprint, searchIn, searchScope, seenHashes)
-		if searchErr != nil {
-			return nil, 0, searchErr
-		}
-		orderedProfileIds = mergeBotMediaSearchNotes(notesById, orderedProfileIds, matchCounts, list)
+		fingerprints = append(fingerprints, result.fingerprint)
 	}
-	// Keep the first image's result immediately available, then promote profiles
-	// matched by more album members once all bounded searches finish.
-	sort.SliceStable(orderedProfileIds, func(i, j int) bool {
-		return matchCounts[orderedProfileIds[i]] > matchCounts[orderedProfileIds[j]]
-	})
-	if lastHashErr != nil && !coldProcessed && len(orderedProfileIds) == 0 {
+	if len(fingerprints) == 0 && len(matches) == 0 && lastHashErr != nil {
 		return nil, 0, lastHashErr
 	}
-	total := len(orderedProfileIds)
-	if len(orderedProfileIds) > botMediaSearchMaxResults {
-		orderedProfileIds = orderedProfileIds[:botMediaSearchMaxResults]
+	fingerprintMatches, err := loadBotMediaSearchCandidates(ctx, fingerprints, func(queryCtx context.Context, fingerprint *mediaFingerprint) ([]*botMediaSearchCandidate, error) {
+		return s.botMediaSearchFingerprintCandidates(queryCtx, fingerprint, searchIn, searchScope)
+	})
+	if err != nil {
+		return nil, 0, err
 	}
-	list := make([]*sysin.NoteModel, 0, len(orderedProfileIds))
-	for _, profileId := range orderedProfileIds {
-		list = append(list, notesById[profileId])
+	matches = append(matches, fingerprintMatches...)
+	profileIds := rankBotMediaSearchCandidates(matches)
+	total := len(profileIds)
+	if len(profileIds) > botMediaSearchMaxResults {
+		profileIds = profileIds[:botMediaSearchMaxResults]
 	}
-	return list, total, nil
+	if len(profileIds) == 0 {
+		return []*sysin.NoteModel{}, 0, nil
+	}
+	// Load permission-scoped profile details once after merging the album.
+	list, err := s.profileImageSearchNotesByScope(ctx, profileIds, searchScope, nil, "")
+	if err != nil {
+		return nil, 0, err
+	}
+	return orderBotMediaSearchNotes(list, profileIds), total, nil
 }
 
-func mergeBotMediaSearchNotes(notesById map[int64]*sysin.NoteModel, orderedProfileIds []int64, matchCounts map[int64]int, list []*sysin.NoteModel) []int64 {
-	for _, note := range list {
-		if note == nil || note.Id <= 0 {
-			continue
-		}
-		matchCounts[note.Id]++
-		if _, exists := notesById[note.Id]; exists {
-			continue
-		}
-		notesById[note.Id] = note
-		orderedProfileIds = append(orderedProfileIds, note.Id)
+func botMediaSentFileCandidates(ctx context.Context, fileIDs []string, scope *publishmodel.MediaSearchScope) (map[string][]*botMediaSearchCandidate, error) {
+	result := make(map[string][]*botMediaSearchCandidate)
+	if len(fileIDs) == 0 || scope == nil || len(scope.Partitions) == 0 {
+		return result, nil
 	}
-	return orderedProfileIds
+	finish := scantrace.Begin(ctx, "query.telegram_file")
+	mod := g.DB().Model(publishTgMessageTable+" m").Safe().Ctx(ctx).
+		Fields("m.tg_file_unique_id,m.profile_id").WhereIn("m.tg_file_unique_id", fileIDs).
+		Where("m.tg_file_unique_id <> ''").Where("m.status", "sent").WhereNull("m.deleted_at")
+	scopeSQL, scopeArgs := mediaPHashBucketScopeSQL("m", scope.Partitions)
+	if scopeSQL == "" {
+		finish(nil)
+		return result, nil
+	}
+	mod = mod.Where("("+scopeSQL+")", scopeArgs...).Where("EXISTS (SELECT 1 FROM hg_content_profile p WHERE p.id=m.profile_id AND p.deleted_at IS NULL)").Where("EXISTS (SELECT 1 FROM hg_youban_publish_profile_state ps WHERE ps.profile_id=m.profile_id AND ps.tenant_id=m.tenant_id AND ps.account_id=m.account_id AND ps.deleted_at IS NULL)")
+	rows, err := mod.Group("m.tg_file_unique_id,m.profile_id").Limit(botMediaSearchMaxResults * len(fileIDs)).All()
+	finish(err)
+	if err != nil {
+		return nil, gerror.Wrap(err, "按TG媒体标识查询已推送资料失败")
+	}
+	for _, row := range rows {
+		id := row["tg_file_unique_id"].String()
+		result[id] = append(result[id], &botMediaSearchCandidate{ProfileId: row["profile_id"].Int64(), Distance: 0, MatchCount: 1})
+	}
+	return result, nil
+}
+
+// Each slot belongs to one distinct input fingerprint, so matching several media
+// rows in a profile cannot inflate the number of matching album members.
+func rankBotMediaSearchCandidates(groups [][]*botMediaSearchCandidate) []int64 {
+	merged := make(map[int64]*botMediaSearchCandidate)
+	ids := make([]int64, 0)
+	for _, group := range groups {
+		seen := make(map[int64]bool)
+		for _, item := range group {
+			if item == nil || item.ProfileId <= 0 || item.Distance > botMediaSearchMaxDistance || seen[item.ProfileId] {
+				continue
+			}
+			seen[item.ProfileId] = true
+			candidate := merged[item.ProfileId]
+			if candidate == nil {
+				candidate = &botMediaSearchCandidate{ProfileId: item.ProfileId, Distance: item.Distance}
+				merged[item.ProfileId] = candidate
+				ids = append(ids, item.ProfileId)
+			}
+			candidate.MatchCount++
+			if item.Distance < candidate.Distance {
+				candidate.Distance = item.Distance
+			}
+		}
+	}
+	sort.SliceStable(ids, func(i, j int) bool {
+		a, b := merged[ids[i]], merged[ids[j]]
+		if a.MatchCount != b.MatchCount {
+			return a.MatchCount > b.MatchCount
+		}
+		return a.Distance < b.Distance
+	})
+	return ids
+}
+
+func loadBotMediaSearchCandidates(ctx context.Context, fingerprints []*mediaFingerprint, loader func(context.Context, *mediaFingerprint) ([]*botMediaSearchCandidate, error)) ([][]*botMediaSearchCandidate, error) {
+	unique := make([]*mediaFingerprint, 0, len(fingerprints))
+	seen := make(map[string]bool)
+	for _, fingerprint := range fingerprints {
+		if fingerprint == nil || (fingerprint.MD5 == "" && fingerprint.PHash == nil) {
+			continue
+		}
+		key := fingerprint.MD5
+		if fingerprint.PHash != nil {
+			key = fmt.Sprintf("%s:%016x", key, fingerprint.PHash.GetHash())
+		}
+		if !seen[key] {
+			seen[key] = true
+			unique = append(unique, fingerprint)
+		}
+	}
+	results := make([][]*botMediaSearchCandidate, len(unique))
+	group, queryCtx := errgroup.WithContext(ctx)
+	// Keep database fan-out small even for a ten-image Telegram album.
+	group.SetLimit(2)
+	for index, fingerprint := range unique {
+		index, fingerprint := index, fingerprint
+		group.Go(func() error {
+			items, err := loader(queryCtx, fingerprint)
+			results[index] = items
+			return err
+		})
+	}
+	if err := group.Wait(); err != nil {
+		return nil, err
+	}
+	return results, nil
 }
 
 func loadBotMediaColdFingerprints(ctx context.Context, traceId string, items []*sysin.BotMediaSearchItem, loader botMediaColdFingerprintLoader) []botMediaColdFingerprintResult {
@@ -210,23 +293,12 @@ func loadBotMediaColdFingerprints(ctx context.Context, traceId string, items []*
 	return results
 }
 
-func (s *sSysPublish) botMediaSearchFingerprint(ctx context.Context, fingerprint *mediaFingerprint, searchIn *sysin.ProfileImageSearchInp, searchScope *publishmodel.MediaSearchScope, seenHashes map[string]struct{}) (notes []*sysin.NoteModel, count int, matched bool, resultErr error) {
+func (s *sSysPublish) botMediaSearchFingerprintCandidates(ctx context.Context, fingerprint *mediaFingerprint, searchIn *sysin.ProfileImageSearchInp, searchScope *publishmodel.MediaSearchScope) (candidatesResult []*botMediaSearchCandidate, resultErr error) {
 	finish := scantrace.Begin(ctx, "fingerprint.search")
 	defer func() { finish(resultErr) }()
 	if err := ctx.Err(); err != nil {
-		return nil, 0, false, err
+		return nil, err
 	}
-	if fingerprint == nil || (fingerprint.MD5 == "" && fingerprint.PHash == nil) {
-		return nil, 0, false, nil
-	}
-	hashKey := fingerprint.MD5
-	if fingerprint.PHash != nil {
-		hashKey = fmt.Sprintf("%s:%016x", fingerprint.MD5, fingerprint.PHash.GetHash())
-	}
-	if _, exists := seenHashes[hashKey]; exists {
-		return nil, 0, false, nil
-	}
-	seenHashes[hashKey] = struct{}{}
 	fallbackCtx, cancelFallback := context.WithTimeout(ctx, 2*time.Second)
 	defer cancelFallback()
 	var matches []publishProfilePHashDistance
@@ -238,12 +310,12 @@ func (s *sSysPublish) botMediaSearchFingerprint(ctx context.Context, fingerprint
 	}
 	if err != nil {
 		if fallbackCtx.Err() != nil {
-			return nil, 0, false, gerror.Wrap(fallbackCtx.Err(), "扫图相似查询超时，请稍后重试")
+			return nil, gerror.Wrap(fallbackCtx.Err(), "扫图相似查询超时，请稍后重试")
 		}
-		return nil, 0, false, err
+		return nil, err
 	}
 	if len(matches) == 0 {
-		return nil, 0, false, nil
+		return nil, nil
 	}
 	candidates := make(map[int64]*botMediaSearchCandidate)
 	for _, item := range matches {
@@ -270,25 +342,7 @@ func (s *sSysPublish) botMediaSearchFingerprint(ctx context.Context, fingerprint
 		}
 		return ordered[i].Distance < ordered[j].Distance
 	})
-	total := len(ordered)
-	if len(ordered) > botMediaSearchMaxResults {
-		ordered = ordered[:botMediaSearchMaxResults]
-	}
-	profileIds := make([]int64, 0, len(ordered))
-	for _, item := range ordered {
-		profileIds = append(profileIds, item.ProfileId)
-	}
-	if len(profileIds) == 0 {
-		return []*sysin.NoteModel{}, total, false, nil
-	}
-	startedAt := time.Now()
-	list, err := s.profileImageSearchNotesByScope(ctx, profileIds, searchScope, nil, "")
-	observeBotMediaSearchStage(ctx, "profile_load", startedAt, err)
-	if err != nil {
-		return nil, 0, false, err
-	}
-	orderedNotes := orderBotMediaSearchNotes(list, profileIds)
-	return orderedNotes, total, len(orderedNotes) > 0, nil
+	return ordered, nil
 }
 
 func (s *sSysPublish) botMediaSearchAccountIds(ctx context.Context, in *sysin.BotMediaSearchInp) ([]int64, error) {

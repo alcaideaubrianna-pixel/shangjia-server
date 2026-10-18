@@ -101,3 +101,21 @@ func TestScanSearchUserErrorHidesDatabaseTimeout(t *testing.T) {
 		t.Fatalf("unexpected user error: %q", got)
 	}
 }
+
+func TestScanVideoResolvesThumbnailWithoutRequestingVideoFile(t *testing.T) {
+	msg := &models.Message{Video: &models.Video{FileID: "large-video", FileUniqueID: "stable-video", Thumbnail: &models.PhotoSize{FileID: "preview", FileUniqueID: "preview-id", Width: 320, Height: 240}}}
+	preview, err := scanMediaPreviewMessage(msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Video != nil || len(preview.Photo) != 1 || preview.Photo[0].FileID != "preview" {
+		t.Fatalf("video body could reach getFile: %+v", preview)
+	}
+	if msg.Video == nil || msg.Video.FileID != "large-video" {
+		t.Fatal("original message mutated")
+	}
+	msg.Video.Thumbnail = nil
+	if _, err = scanMediaPreviewMessage(msg); err == nil {
+		t.Fatal("video without thumbnail must not download body")
+	}
+}
