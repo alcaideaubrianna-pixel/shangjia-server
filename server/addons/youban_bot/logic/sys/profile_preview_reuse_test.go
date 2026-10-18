@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/go-telegram/bot/models"
 	publishService "hotgo/addons/youban_publish/service"
 	"net/http"
@@ -186,5 +187,249 @@ func TestProfilePreviewAlbumUsesRemoteURLsWithoutDownloading(t *testing.T) {
 	}, "display", "preview", false)
 	if err != nil || downloads != 0 {
 		t.Fatalf("downloads=%d err=%v", downloads, err)
+	}
+}
+
+func TestProfilePreviewRejectedAlbumRemainsGrouped(t *testing.T) {
+	for _, fallbackFails := range []bool{false, true} {
+		t.Run(fmt.Sprintf("fallbackFails=%t", fallbackFails), func(t *testing.T) {
+			var previous publishService.ISysPublish
+			func() {
+				defer func() { _ = recover() }()
+				previous = publishService.SysPublish()
+			}()
+			cache := &previewCacheStub{ISysPublish: previous, path: filepath.Join(t.TempDir(), "image.jpg")}
+			if err := os.WriteFile(cache.path, []byte("fixture image bytes"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			publishService.RegisterSysPublish(cache)
+			t.Cleanup(func() { publishService.RegisterSysPublish(previous) })
+			requests, uploads := 0, 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				if !strings.HasSuffix(r.URL.Path, "/sendMediaGroup") {
+					t.Errorf("album split into individual API: %s", r.URL.Path)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				if requests == 1 {
+					w.WriteHeader(http.StatusBadRequest)
+					_, _ = w.Write([]byte(`{"ok":false,"error_code":400,"description":"Bad Request: failed to send message #1 with the error message Wrong file identifier/HTTP URL specified"}`))
+					return
+				}
+				if err := r.ParseMultipartForm(1 << 20); err != nil {
+					t.Error(err)
+				}
+				var media []struct {
+					Media   string `json:"media"`
+					Caption string `json:"caption"`
+				}
+				if err := json.Unmarshal([]byte(r.FormValue("media")), &media); err != nil {
+					t.Error(err)
+				}
+				if len(media) != 4 {
+					t.Errorf("album size=%d want=4", len(media))
+				}
+				for index, item := range media {
+					if !strings.HasPrefix(item.Media, "attach://") {
+						t.Errorf("fallback did not upload: %s", item.Media)
+						continue
+					}
+					if r.MultipartForm == nil || len(r.MultipartForm.File[strings.TrimPrefix(item.Media, "attach://")]) != 1 {
+						t.Error("missing album attachment")
+					}
+					if (index == 0 && item.Caption != "preview") || (index > 0 && item.Caption != "") {
+						t.Errorf("caption order incorrect at %d", index)
+					}
+				}
+				if r.MultipartForm != nil {
+					uploads += len(r.MultipartForm.File)
+				}
+				if fallbackFails {
+					w.WriteHeader(http.StatusGatewayTimeout)
+					_, _ = w.Write([]byte(`{"ok":false,"error_code":504,"description":"Gateway timeout"}`))
+					return
+				}
+				_, _ = w.Write([]byte(`{"ok":true,"result":[{"message_id":1,"date":1,"chat":{"id":123,"type":"private"}}]}`))
+			}))
+			defer server.Close()
+			bot, err := tgbot.New("123:fake", tgbot.WithSkipGetMe(), tgbot.WithServerURL(server.URL))
+			if err != nil {
+				t.Fatal(err)
+			}
+			items := make([]*publishsysin.MediaModel, 0, 4)
+			for id := int64(4146259); id <= 4146262; id++ {
+				items = append(items, &publishsysin.MediaModel{Id: id, MediaType: "image", Purpose: "display", TgFileId: "stale-reference"})
+			}
+			err = NewSysBot().sendProfileMediaPurpose(context.Background(), context.Background(), bot, "123", items, "display", "preview", false)
+			if (err != nil) != fallbackFails || requests != 2 || uploads != 4 || cache.calls != 4 {
+				t.Fatalf("requests=%d uploads=%d cache=%d err=%v", requests, uploads, cache.calls, err)
+			}
+		})
+	}
+}
+
+func TestProfilePreviewAlbumFallbackOrder(t *testing.T) {
+	for _, mode := range []string{"http_success", "http_rejected", "http_timeout"} {
+		t.Run(mode, func(t *testing.T) {
+			var previous publishService.ISysPublish
+			func() {
+				defer func() { _ = recover() }()
+				previous = publishService.SysPublish()
+			}()
+			cache := &previewCacheStub{ISysPublish: previous, path: filepath.Join(t.TempDir(), "media.jpg")}
+			if err := os.WriteFile(cache.path, []byte("fixture"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			publishService.RegisterSysPublish(cache)
+			t.Cleanup(func() { publishService.RegisterSysPublish(previous) })
+			requests := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				if !strings.HasSuffix(r.URL.Path, "/sendMediaGroup") {
+					t.Errorf("album split: %s", r.URL.Path)
+				}
+				if strings.Contains(r.Header.Get("Content-Type"), "multipart/") {
+					if err := r.ParseMultipartForm(1 << 20); err != nil {
+						t.Error(err)
+					}
+				} else if err := r.ParseForm(); err != nil {
+					t.Error(err)
+				}
+				var media []struct {
+					Media   string `json:"media"`
+					Type    string `json:"type"`
+					Caption string `json:"caption"`
+				}
+				if err := json.Unmarshal([]byte(r.FormValue("media")), &media); err != nil {
+					t.Error(err)
+				}
+				if len(media) != 4 {
+					t.Errorf("group size=%d", len(media))
+					w.WriteHeader(500)
+					return
+				}
+				for i, item := range media {
+					want := fmt.Sprintf("file-%d", i)
+					if requests == 2 {
+						want = fmt.Sprintf("https://media.example.com/%d.jpg", i)
+					}
+					if requests <= 2 && item.Media != want {
+						t.Errorf("stage=%d index=%d source=%s", requests, i, item.Media)
+					}
+					if requests == 3 && !strings.HasPrefix(item.Media, "attach://") {
+						t.Error("upload stage missing attachment")
+					}
+					wantType := "photo"
+					if i == 1 {
+						wantType = "video"
+					}
+					if item.Type != wantType {
+						t.Errorf("media type/order changed at %d", i)
+					}
+					if (i == 0 && item.Caption != "original caption") || (i > 0 && item.Caption != "") {
+						t.Error("caption changed")
+					}
+				}
+				if requests < 3 && cache.calls != 0 {
+					t.Error("downloaded before URL rejection")
+				}
+				if requests == 3 && (r.MultipartForm == nil || len(r.MultipartForm.File) != 4) {
+					t.Error("missing uploaded group files")
+				}
+				w.Header().Set("Content-Type", "application/json")
+				if requests == 1 || (requests == 2 && mode == "http_rejected") {
+					w.WriteHeader(http.StatusBadRequest)
+					_, _ = w.Write([]byte(`{"ok":false,"error_code":400,"description":"Bad Request: Wrong file identifier/HTTP URL specified"}`))
+					return
+				}
+				if requests == 2 && mode == "http_timeout" {
+					w.WriteHeader(http.StatusGatewayTimeout)
+					_, _ = w.Write([]byte(`{"ok":false,"error_code":504,"description":"Gateway timeout"}`))
+					return
+				}
+				_, _ = w.Write([]byte(`{"ok":true,"result":[{"message_id":1,"date":1,"chat":{"id":123,"type":"private"}}]}`))
+			}))
+			defer server.Close()
+			bot, err := tgbot.New("123:fake", tgbot.WithSkipGetMe(), tgbot.WithServerURL(server.URL))
+			if err != nil {
+				t.Fatal(err)
+			}
+			items := make([]*publishsysin.MediaModel, 0, 4)
+			for i := 0; i < 4; i++ {
+				kind := "image"
+				if i == 1 {
+					kind = "video"
+				}
+				items = append(items, &publishsysin.MediaModel{Id: int64(4146259 + i), MediaType: kind, Purpose: "display", TgFileId: fmt.Sprintf("file-%d", i), FileUrl: fmt.Sprintf("https://media.example.com/%d.jpg", i)})
+			}
+			err = NewSysBot().sendProfileMediaPurpose(context.Background(), context.Background(), bot, "123", items, "display", "original caption", false)
+			wantRequests, wantDownloads := 2, 0
+			if mode == "http_rejected" {
+				wantRequests, wantDownloads = 3, 4
+			}
+			if (err != nil) != (mode == "http_timeout") || requests != wantRequests || cache.calls != wantDownloads {
+				t.Fatalf("requests=%d downloads=%d err=%v", requests, cache.calls, err)
+			}
+			if items[0].TgFileId != "file-0" {
+				t.Error("stored media mutated")
+			}
+		})
+	}
+}
+
+func TestProfilePreviewSingleReferenceFallsBackToHTTP(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if strings.Contains(r.Header.Get("Content-Type"), "multipart/") {
+			_ = r.ParseMultipartForm(1 << 20)
+		} else {
+			_ = r.ParseForm()
+		}
+		want := "stale-file"
+		if requests == 2 {
+			want = "https://media.example.com/photo.jpg"
+		}
+		if r.FormValue("photo") != want {
+			t.Errorf("photo=%s want=%s", r.FormValue("photo"), want)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if requests == 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"ok":false,"error_code":400,"description":"Bad Request: Wrong file identifier/HTTP URL specified"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":1,"date":1,"chat":{"id":123,"type":"private"}}}`))
+	}))
+	defer server.Close()
+	bot, err := tgbot.New("123:fake", tgbot.WithSkipGetMe(), tgbot.WithServerURL(server.URL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = NewSysBot().sendProfileMediaPurpose(context.Background(), context.Background(), bot, "123", []*publishsysin.MediaModel{{Id: 1, MediaType: "image", Purpose: "display", TgFileId: "stale-file", FileUrl: "https://media.example.com/photo.jpg"}}, "display", "caption", false)
+	if err != nil || requests != 2 {
+		t.Fatalf("requests=%d err=%v", requests, err)
+	}
+}
+
+func TestProfilePreviewPreparationFailureDoesNotSendPartialAlbum(t *testing.T) {
+	var previous publishService.ISysPublish
+	func() { defer func() { _ = recover() }(); previous = publishService.SysPublish() }()
+	cache := &previewCacheStub{ISysPublish: previous, path: filepath.Join(t.TempDir(), "missing.jpg")}
+	publishService.RegisterSysPublish(cache)
+	t.Cleanup(func() { publishService.RegisterSysPublish(previous) })
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests++; t.Error("sent incomplete album") }))
+	defer server.Close()
+	bot, err := tgbot.New("123:fake", tgbot.WithSkipGetMe(), tgbot.WithServerURL(server.URL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = NewSysBot().sendProfileMediaPurpose(context.Background(), context.Background(), bot, "123", []*publishsysin.MediaModel{
+		{Id: 1, MediaType: "image", Purpose: "display", TgFileId: "good-file"},
+		{Id: 2, MediaType: "image", Purpose: "display"},
+	}, "display", "caption", false)
+	if err == nil || requests != 0 {
+		t.Fatalf("requests=%d err=%v", requests, err)
 	}
 }

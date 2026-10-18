@@ -1297,6 +1297,9 @@ func (s *sSysBot) sendProfileMediaPurpose(ctx context.Context, callCtx context.C
 				_ = file.Close()
 			}
 		}(closers)
+		if prepareErr != nil {
+			return prepareErr
+		}
 		if len(group) == 0 {
 			if prepareErr != nil {
 				return prepareErr
@@ -1320,21 +1323,18 @@ func (s *sSysBot) sendProfileMediaPurpose(ctx context.Context, callCtx context.C
 		step(sendErr)
 		if err := sendErr; err != nil {
 			// An ambiguous network failure may already have delivered the album.
-			// Only a rejected media reference is safe to retry as individual files.
+			// Only a rejected media reference is safe to retry with uploaded files.
 			if !isInvalidTelegramMediaReference(err) {
 				return err
 			}
 			g.Log().Warningf(ctx, "Bot资料预览媒体组发送失败 chatId:%s purpose:%s group_start:%d group_count:%d elapsed_ms:%d err:%+v", chatId, purpose, start, len(group), time.Since(startedAt).Milliseconds(), err)
-			var lastErr error
-			for index, single := range group {
-				item := groupItems[index]
-				if sendErr := s.sendSingleProfileMediaWithFallback(ctx, callCtx, bot, chatId, item, groupCaptions[index], single); sendErr != nil {
-					lastErr = sendErr
-					g.Log().Warningf(ctx, "Bot资料预览单媒体发送失败 chatId:%s purpose:%s mediaId:%d err:%+v", chatId, purpose, item.Id, sendErr)
-				}
+			if forceUpload {
+				return err
 			}
-			if lastErr != nil {
-				return lastErr
+			// Preserve the album when references are rejected; never degrade it to
+			// individual messages, even if fallback preparation or upload fails.
+			if retryErr := s.sendProfileMediaGroupFallback(ctx, callCtx, bot, chatId, groupItems, groupCaptions, group, purpose); retryErr != nil {
+				return retryErr
 			}
 		}
 		if prepareErr != nil {
@@ -1343,6 +1343,72 @@ func (s *sSysBot) sendProfileMediaPurpose(ctx context.Context, callCtx context.C
 	}
 	g.Log().Infof(ctx, "Bot资料预览媒体发送完成 chatId:%s purpose:%s selected_count:%d elapsed_ms:%d", chatId, purpose, len(items), time.Since(startedAt).Milliseconds())
 	return nil
+}
+
+func (s *sSysBot) sendProfileMediaGroupFallback(ctx context.Context, callCtx context.Context, bot *tgbot.Bot, chatId string, items []*publishsysin.MediaModel, captions []string, original []models.InputMedia, purpose string) error {
+	// Replace available file IDs with HTTP URLs without mutating stored media.
+	// Keep existing inputs for media without a URL so the album stays complete.
+	httpGroup := append([]models.InputMedia(nil), original...)
+	changed := false
+	for index, item := range items {
+		input, ok, err := s.profilePreviewHTTPInput(ctx, item, captions[index])
+		if err != nil {
+			return err
+		}
+		if ok {
+			httpGroup[index] = input
+			changed = true
+		}
+	}
+	if changed {
+		step := scantrace.Begin(scantrace.With(ctx, g.Map{"purpose": purpose, "mediaCount": len(httpGroup), "sourceKind": "http"}), "result.media.send_group")
+		_, err := bot.SendMediaGroup(callCtx, &tgbot.SendMediaGroupParams{ChatID: chatId, Media: httpGroup})
+		step(err)
+		if err == nil || !isInvalidTelegramMediaReference(err) {
+			return err
+		}
+	}
+
+	group := make([]models.InputMedia, 0, len(items))
+	files := make([]*os.File, 0, len(items))
+	defer func() {
+		for _, file := range files {
+			_ = file.Close()
+		}
+	}()
+	for index, item := range items {
+		step := scantrace.Begin(scantrace.With(ctx, g.Map{"mediaId": item.Id, "purpose": purpose}), "result.media.fallback_prepare")
+		input, file, err := s.profilePreviewInputMediaWithUpload(ctx, item, captions[index], true)
+		step(err)
+		if file != nil {
+			files = append(files, file)
+		}
+		if err != nil {
+			return err
+		}
+		if input == nil {
+			return gerror.New("媒体组上传文件准备失败")
+		}
+		group = append(group, input)
+	}
+	step := scantrace.Begin(scantrace.With(ctx, g.Map{"purpose": purpose, "mediaCount": len(group), "upload": true}), "result.media.send_group")
+	_, err := bot.SendMediaGroup(callCtx, &tgbot.SendMediaGroupParams{ChatID: chatId, Media: group})
+	step(err)
+	return err
+}
+
+func (s *sSysBot) profilePreviewHTTPInput(ctx context.Context, media *publishsysin.MediaModel, caption string) (models.InputMedia, bool, error) {
+	if media == nil {
+		return nil, false, nil
+	}
+	copy := *media
+	copy.TgFileId = ""
+	source := profileMediaSource(ctx, s, &copy)
+	if !(strings.HasPrefix(source, "https://") || strings.HasPrefix(source, "http://")) || source == profileMediaSource(ctx, s, media) {
+		return nil, false, nil
+	}
+	input, _, err := s.profilePreviewInputMediaWithUpload(ctx, &copy, caption, false)
+	return input, input != nil, err
 }
 
 func telegramMediaIdKind(value string) string {
@@ -1447,13 +1513,23 @@ func (s *sSysBot) sendSingleProfileMediaWithFallback(ctx context.Context, callCt
 		}
 		return err
 	}
+	if httpInput, ok, prepareErr := s.profilePreviewHTTPInput(ctx, media, caption); prepareErr != nil {
+		return prepareErr
+	} else if ok {
+		step := scantrace.Begin(scantrace.With(ctx, g.Map{"mediaId": media.Id, "sourceKind": "http"}), "result.media.send_single_http")
+		err = s.sendSingleProfileMedia(callCtx, bot, chatId, httpInput)
+		step(err)
+		if err == nil || !isInvalidTelegramMediaReference(err) {
+			return err
+		}
+	}
 	g.Log().Warningf(ctx, "Bot资料预览单媒体引用失效，开始本地上传回退 chatId:%s mediaId:%d type:%s elapsed_ms:%d err:%+v", chatId, media.Id, media.MediaType, time.Since(startedAt).Milliseconds(), err)
 	step := scantrace.Begin(scantrace.With(ctx, g.Map{"mediaId": media.Id}), "result.media.fallback_prepare")
 	fallback, file, fallbackErr := s.profilePreviewInputMediaWithUpload(ctx, media, caption, true)
 	step(fallbackErr)
 	if fallbackErr != nil {
 		g.Log().Warningf(ctx, "Bot资料预览单媒体本地上传回退准备失败 chatId:%s mediaId:%d elapsed_ms:%d err:%+v", chatId, media.Id, time.Since(startedAt).Milliseconds(), fallbackErr)
-		return err
+		return fallbackErr
 	}
 	if file != nil {
 		defer file.Close()
@@ -1473,7 +1549,8 @@ func isInvalidTelegramMediaReference(err error) bool {
 	}
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "wrong file identifier") || strings.Contains(message, "file identifier/ http url") ||
-		strings.Contains(message, "wrong remote file identifier") || strings.Contains(message, "failed to get http url content")
+		strings.Contains(message, "wrong remote file identifier") || strings.Contains(message, "failed to get http url content") ||
+		strings.Contains(message, "wrong type of the web page content") || strings.Contains(message, "file is too big")
 }
 
 func telegramSafeUploadFilename(path string) string {
