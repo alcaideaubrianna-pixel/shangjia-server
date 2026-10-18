@@ -54,7 +54,7 @@ func (s *sSysPublish) introFeeChannelPurge(ctx context.Context, in *sysin.IntroF
 		return nil, gerror.New("介绍费规则不存在或无权操作")
 	}
 	channelID := normalizeChannelProfileID(in.ChannelId)
-	profileIDs, err := collectChannelProfileIDs(ctx, tenantID, accountID, 0, channelID)
+	profileIDs, err := collectChannelProfileIDs(ctx, tenantID, accountID, in.RuleId, channelID)
 	if err != nil {
 		return nil, err
 	}
@@ -187,7 +187,7 @@ func (s *sSysPublish) ExecuteCollectChannelPurge(ctx context.Context, payload co
 	profileIDs := uniqueIds(payload.ProfileIDs)
 	if payload.OperationID == "" {
 		var err error
-		profileIDs, err = collectChannelProfileIDs(ctx, payload.TenantID, payload.AccountID, 0, payload.ChannelID)
+		profileIDs, err = collectChannelProfileIDs(ctx, payload.TenantID, payload.AccountID, payload.RuleID, payload.ChannelID)
 		if err != nil {
 			return err
 		}

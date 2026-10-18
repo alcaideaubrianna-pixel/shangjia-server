@@ -7,6 +7,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/gogf/gf/v2/util/gconv"
 )
 
 const publishCollectChannelProfileTable = "hg_youban_publish_collect_channel_profile"
@@ -41,6 +42,24 @@ func collectChannelProfileIDs(ctx context.Context, tenantID, accountID, ruleID i
 	err := mod.Scan(&rows)
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取频道关联资料失败")
+	}
+	// The compact index stores source chat IDs, while the purge UI submits the
+	// internal publish-channel ID. Fall back to the authoritative TG job index
+	// for that case so historical publications remain operable.
+	if len(rows) == 0 {
+		if publishChannelID := gconv.Int64(channelID); publishChannelID > 0 {
+			jobModel := g.DB().Model("hg_youban_publish_tg_job").Ctx(ctx).
+				Fields("DISTINCT profile_id").Where("tenant_id", tenantID).
+				Where("account_id", accountID).Where("channel_id", publishChannelID).
+				WhereGT("profile_id", 0).WhereIn("status", []string{"pending", "sending", "sent", "failed", "unknown"})
+			if ruleID > 0 {
+				jobModel = jobModel.Where("profile_id IN (SELECT profile_id FROM "+publishCollectChannelProfileTable+
+					" WHERE tenant_id=? AND account_id=? AND rule_id=? AND deleted_at IS NULL)", tenantID, accountID, ruleID)
+			}
+			if err := jobModel.Scan(&rows); err != nil {
+				return nil, gerror.Wrap(err, "按发布任务读取频道关联资料失败")
+			}
+		}
 	}
 	ids := make([]int64, 0, len(rows))
 	for _, row := range rows {
