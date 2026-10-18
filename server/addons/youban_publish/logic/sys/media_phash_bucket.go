@@ -530,6 +530,20 @@ func ensureMediaPHashAliasBucketTable(ctx context.Context) error {
 	if _, err := g.DB().Exec(ctx, sql); err != nil {
 		return gerror.Wrap(err, "初始化防扫图搜索指纹表失败")
 	}
+	// Exact anti-scan lookups filter by the generated hash before applying the
+	// tenant/account scope. Keep this index independent of the LSH bucket index;
+	// otherwise a zero-distance query would still scan every bucket row.
+	indexSQL := `CREATE INDEX IF NOT EXISTS idx_ybp_phash_alias_exact ON hg_youban_publish_media_phash_alias_bucket (hash_value, tenant_id, account_id, profile_id, media_id)`
+	if strings.Contains(strings.ToLower(g.DB().GetConfig().Type), "mysql") {
+		indexSQL = `CREATE INDEX idx_ybp_phash_alias_exact ON hg_youban_publish_media_phash_alias_bucket (hash_value,tenant_id,account_id,profile_id,media_id)`
+		// MySQL has no portable IF NOT EXISTS for indexes. Ignore the duplicate
+		// index error so this initialization remains idempotent.
+		if _, indexErr := g.DB().Exec(ctx, indexSQL); indexErr != nil && !strings.Contains(strings.ToLower(indexErr.Error()), "duplicate") {
+			return gerror.Wrap(indexErr, "初始化防扫图精确索引失败")
+		}
+	} else if _, indexErr := g.DB().Exec(ctx, indexSQL); indexErr != nil {
+		return gerror.Wrap(indexErr, "初始化防扫图精确索引失败")
+	}
 	mediaPHashAliasTableState.ready = true
 	return nil
 }

@@ -197,6 +197,35 @@ func mediaPHashExactCandidateMatches(ctx context.Context, queryHash *goimagehash
 	for _, row := range rows {
 		items = append(items, publishProfilePHashDistance{ProfileId: row.ProfileId, Distance: 0, MediaId: row.MediaId, MediaType: row.MediaType})
 	}
+	// Anti-scan output is deliberately stored as an alias fingerprint because it
+	// is generated after the source media row is created.  Include it in the
+	// exact phase so a user searching the generated image gets a zero-distance
+	// hit instead of falling through to an approximate match.
+	if err := ensureMediaPHashAliasBucketTable(ctx); err != nil {
+		return nil, err
+	}
+	alias := fmt.Sprintf("%016x", queryHash.GetHash())
+	aliasMod := g.DB().Model(publishMediaPHashAliasBucketTable+" a").Safe().Ctx(ctx).
+		Fields("a.media_id,a.profile_id,a.account_id,a.tenant_id,a.media_type").
+		Where("a.hash_value", alias).
+		Where("a.media_type", "image")
+	if scopeSQL, scopeArgs := mediaPHashBucketScopeSQL("a", scope.Partitions); scopeSQL != "" {
+		aliasMod = aliasMod.Where("("+scopeSQL+")", scopeArgs...)
+	} else {
+		return mediaPHashDeduplicateProfiles(items), nil
+	}
+	if len(candidateProfileIds) > 0 {
+		aliasMod = aliasMod.WhereIn("a.profile_id", uniqueIds(candidateProfileIds))
+	}
+	aliasMod = aliasMod.Where("EXISTS (SELECT 1 FROM hg_content_profile p WHERE p.id=a.profile_id AND p.deleted_at IS NULL)").
+		Where("EXISTS (SELECT 1 FROM hg_youban_publish_profile_state ps WHERE ps.profile_id=a.profile_id AND ps.account_id=a.account_id AND ps.tenant_id=a.tenant_id AND ps.deleted_at IS NULL)")
+	aliasRows := make([]mediaPHashBucketCandidateRow, 0)
+	if err := aliasMod.Group("a.media_id,a.profile_id,a.account_id,a.tenant_id,a.media_type").Scan(&aliasRows); err != nil {
+		return nil, gerror.Wrap(err, "查询防扫图pHash精确匹配失败")
+	}
+	for _, row := range aliasRows {
+		items = append(items, publishProfilePHashDistance{ProfileId: row.ProfileId, Distance: 0, MediaId: row.MediaId, MediaType: row.MediaType})
+	}
 	return mediaPHashDeduplicateProfiles(items), nil
 }
 
