@@ -20,8 +20,9 @@ func TestBotMediaSearchResultLimitIsBounded(t *testing.T) {
 
 func TestMergeBotMediaSearchNotesDeduplicatesProfiles(t *testing.T) {
 	notesById := make(map[int64]*sysin.NoteModel)
-	ids := mergeBotMediaSearchNotes(notesById, nil, []*sysin.NoteModel{{ProfileModel: sysin.ProfileModel{Id: 11}}, {ProfileModel: sysin.ProfileModel{Id: 22}}, {ProfileModel: sysin.ProfileModel{Id: 11}}, nil})
-	ids = mergeBotMediaSearchNotes(notesById, ids, []*sysin.NoteModel{{ProfileModel: sysin.ProfileModel{Id: 22}}, {ProfileModel: sysin.ProfileModel{Id: 33}}})
+	counts := make(map[int64]int)
+	ids := mergeBotMediaSearchNotes(notesById, nil, counts, []*sysin.NoteModel{{ProfileModel: sysin.ProfileModel{Id: 11}}, {ProfileModel: sysin.ProfileModel{Id: 22}}, {ProfileModel: sysin.ProfileModel{Id: 11}}, nil})
+	ids = mergeBotMediaSearchNotes(notesById, ids, counts, []*sysin.NoteModel{{ProfileModel: sysin.ProfileModel{Id: 22}}, {ProfileModel: sysin.ProfileModel{Id: 33}}})
 	if !reflect.DeepEqual(ids, []int64{11, 22, 33}) {
 		t.Fatalf("merged profile ids: got %v", ids)
 	}

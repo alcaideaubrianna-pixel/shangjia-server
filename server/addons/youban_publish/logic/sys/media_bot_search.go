@@ -103,6 +103,7 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 	}
 	seenHashes := make(map[string]struct{}, len(searchItems))
 	notesById := make(map[int64]*sysin.NoteModel)
+	matchCounts := make(map[int64]int)
 	orderedProfileIds := make([]int64, 0, botMediaSearchMaxResults)
 	coldItems := make([]*sysin.BotMediaSearchItem, 0, len(searchItems))
 	// First search every fingerprint already available in Redis. This phase does
@@ -120,7 +121,7 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 		if searchErr != nil {
 			return nil, 0, searchErr
 		}
-		orderedProfileIds = mergeBotMediaSearchNotes(notesById, orderedProfileIds, list)
+		orderedProfileIds = mergeBotMediaSearchNotes(notesById, orderedProfileIds, matchCounts, list)
 	}
 	// Download and decode cold fingerprints concurrently, then search them in
 	// the original message order so concurrency cannot change result priority.
@@ -140,8 +141,13 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 		if searchErr != nil {
 			return nil, 0, searchErr
 		}
-		orderedProfileIds = mergeBotMediaSearchNotes(notesById, orderedProfileIds, list)
+		orderedProfileIds = mergeBotMediaSearchNotes(notesById, orderedProfileIds, matchCounts, list)
 	}
+	// Keep the first image's result immediately available, then promote profiles
+	// matched by more album members once all bounded searches finish.
+	sort.SliceStable(orderedProfileIds, func(i, j int) bool {
+		return matchCounts[orderedProfileIds[i]] > matchCounts[orderedProfileIds[j]]
+	})
 	if lastHashErr != nil && !coldProcessed && len(orderedProfileIds) == 0 {
 		return nil, 0, lastHashErr
 	}
@@ -156,11 +162,12 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 	return list, total, nil
 }
 
-func mergeBotMediaSearchNotes(notesById map[int64]*sysin.NoteModel, orderedProfileIds []int64, list []*sysin.NoteModel) []int64 {
+func mergeBotMediaSearchNotes(notesById map[int64]*sysin.NoteModel, orderedProfileIds []int64, matchCounts map[int64]int, list []*sysin.NoteModel) []int64 {
 	for _, note := range list {
 		if note == nil || note.Id <= 0 {
 			continue
 		}
+		matchCounts[note.Id]++
 		if _, exists := notesById[note.Id]; exists {
 			continue
 		}
