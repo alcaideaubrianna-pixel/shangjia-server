@@ -203,17 +203,26 @@ func (s *sSysPublish) botMediaSearchFingerprint(ctx context.Context, fingerprint
 	if err := ctx.Err(); err != nil {
 		return nil, 0, false, err
 	}
-	if fingerprint == nil || fingerprint.PHash == nil {
+	if fingerprint == nil || (fingerprint.MD5 == "" && fingerprint.PHash == nil) {
 		return nil, 0, false, nil
 	}
-	hashKey := fmt.Sprintf("%s:%016x", fingerprint.MD5, fingerprint.PHash.GetHash())
+	hashKey := fingerprint.MD5
+	if fingerprint.PHash != nil {
+		hashKey = fmt.Sprintf("%s:%016x", fingerprint.MD5, fingerprint.PHash.GetHash())
+	}
 	if _, exists := seenHashes[hashKey]; exists {
 		return nil, 0, false, nil
 	}
 	seenHashes[hashKey] = struct{}{}
 	fallbackCtx, cancelFallback := context.WithTimeout(ctx, 2*time.Second)
 	defer cancelFallback()
-	matches, err := s.cachedProfileFingerprintSearchCandidates(fallbackCtx, fingerprint, searchIn, searchScope, nil)
+	var matches []publishProfilePHashDistance
+	var err error
+	if fingerprint.PHash == nil {
+		matches, err = mediaMD5CandidateMatches(fallbackCtx, fingerprint.MD5, searchScope, nil)
+	} else {
+		matches, err = s.cachedProfileFingerprintSearchCandidates(fallbackCtx, fingerprint, searchIn, searchScope, nil)
+	}
 	if err != nil {
 		if fallbackCtx.Err() != nil {
 			return []*sysin.NoteModel{}, 0, false, nil
