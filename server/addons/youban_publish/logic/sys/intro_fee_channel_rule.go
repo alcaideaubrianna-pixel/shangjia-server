@@ -60,6 +60,22 @@ func (s *sSysPublish) resolveIntroFeeChannelSuffix(ctx context.Context, event gd
 		row, err = g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Fields("suffix").Where("tenant_id", event["tenant_id"]).WhereIn("account_id", []int64{accountID, 0}).Where("rule_id", 0).Where("bot_id", botID).WhereIn("channel_id", tgChannelCacheLookupIds(chatID)).Where("status", 1).WhereNull("deleted_at").OrderDesc("account_id").OrderDesc("id").Limit(1).One()
 	}
 	if row.IsEmpty() {
+		// A source may be used by several rules.  When a rule/channel override
+		// is absent, use that source's own default suffix for this event.
+		sourceModel := g.DB().Model(publishCollectSourceTable).Ctx(ctx).
+			Fields("channel_suffix").Where("tenant_id", event["tenant_id"]).
+			WhereIn("account_id", []int64{accountID, 0}).
+			WhereIn("source_chat_id", tgChannelCacheLookupIds(chatID)).
+			WhereNull("deleted_at").Where("channel_suffix != ''")
+		if botID > 0 {
+			sourceModel = sourceModel.WhereIn("bot_id", []int64{botID, 0})
+		}
+		row, err = sourceModel.OrderDesc("account_id").OrderDesc("bot_id").OrderDesc("updated_at").Limit(1).One()
+		if err != nil {
+			return "", false, gerror.Wrap(err, "读取采集来源默认后缀失败")
+		}
+	}
+	if row.IsEmpty() {
 		_ = cache.Instance().Set(ctx, key, "__none__", time.Minute)
 		return "", false, nil
 	}
