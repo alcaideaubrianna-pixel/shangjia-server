@@ -8,6 +8,8 @@ import (
 	"image/png"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -54,5 +56,69 @@ func TestTelegramFingerprintRebuildsMD5OnlyCache(t *testing.T) {
 	again, hit, err := cachedTelegramImageFingerprint(ctx, id, "http://127.0.0.1:1/must-not-download")
 	if err != nil || !hit || again.PHash == nil || again.PHash.GetHash() != fingerprint.PHash.GetHash() {
 		t.Fatalf("complete cache not reused: %+v hit=%v err=%v", again, hit, err)
+	}
+}
+
+// TestTelegramFingerprintHistoricalImages exercises the real Bot loader with
+// locally retained production images. Fixtures are opt-in and never committed.
+func TestTelegramFingerprintHistoricalImages(t *testing.T) {
+	root := os.Getenv("YOUBAN_SCAN_FIXTURE_ROOT")
+	if root == "" {
+		t.Skip("set YOUBAN_SCAN_FIXTURE_ROOT to the historical fixture directory")
+	}
+	ctx := context.Background()
+	if !cache.Initialized() {
+		cache.SetAdapter(ctx)
+	}
+	previous := cache.Instance().GetAdapter()
+	cache.Instance().SetAdapter(gcache.NewAdapterMemory())
+	defer cache.Instance().SetAdapter(previous)
+	cases := []struct {
+		name, pattern string
+		count         int
+	}{
+		{"EEKFQFFA", "other-all/ee*.jpg", 6},
+		{"JNAAUKWG", "other-all/jn*.jpg", 2},
+		{"GVJFGVCU", "gvj-all/*.jpg", 6},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			paths, err := filepath.Glob(filepath.Join(root, c.pattern))
+			if err != nil || len(paths) != c.count {
+				t.Fatalf("expected %d fixture images, got %d: %v", c.count, len(paths), err)
+			}
+			start := time.Now()
+			for _, path := range paths {
+				content, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				expected, err := imagePHashFromBytes(content)
+				if err != nil {
+					t.Fatal(err)
+				}
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(content) }))
+				id := c.name + filepath.Base(path)
+				key := botMediaFingerprintCacheKey(id)
+				if err := cache.Instance().Set(ctx, key, cachedBotMediaFingerprint{MD5: md5Hex(content)}, time.Minute); err != nil {
+					t.Fatal(err)
+				}
+				began := time.Now()
+				fingerprint, hit, err := cachedTelegramImageFingerprint(ctx, id, server.URL+"/"+filepath.Base(path))
+				server.Close()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if hit || fingerprint == nil || fingerprint.PHash == nil || fingerprint.PHash.GetHash() != expected.GetHash() || fingerprint.MD5 != md5Hex(content) {
+					t.Fatalf("incorrect fingerprint for %s: %+v", path, fingerprint)
+				}
+				t.Logf("%s phash=%016x duration=%s", filepath.Base(path), fingerprint.PHash.GetHash(), time.Since(began))
+				cached, hit, err := cachedTelegramImageFingerprint(ctx, id, "http://127.0.0.1:1/must-not-download")
+				if err != nil || !hit || cached.PHash == nil || cached.PHash.GetHash() != expected.GetHash() {
+					t.Fatalf("cache reuse failed for %s", path)
+				}
+			}
+			t.Logf("%s: %d images verified in %s (local HTTP, excludes database/Telegram)", c.name, len(paths), time.Since(start))
+		})
 	}
 }
