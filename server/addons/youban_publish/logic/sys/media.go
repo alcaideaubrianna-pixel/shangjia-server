@@ -22,7 +22,6 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
 	"github.com/gogf/gf/v2/net/gtrace"
-	"github.com/gogf/gf/v2/os/gctx"
 	"github.com/gogf/gf/v2/os/gtime"
 
 	publishmodel "hotgo/addons/youban_publish/model"
@@ -399,20 +398,19 @@ func (s *sSysPublish) AdminProfileImageSearch(ctx context.Context, in *sysin.Pro
 func (s *sSysPublish) profileImageSearch(ctx context.Context, in *sysin.ProfileImageSearchInp, file *ghttp.UploadFile, scope *publishmodel.MediaSearchScope, viewer *sysin.AccountModel) (list []*sysin.NoteModel, totalCount int, err error) {
 	startedAt := time.Now()
 	traceID := gtrace.GetTraceID(ctx)
-	requestID := gctx.CtxId(ctx)
 	normalizeProfileImageSearchInput(in)
 	if scope == nil || len(scope.Partitions) == 0 || len(scope.AccountIds) == 0 {
 		return []*sysin.NoteModel{}, 0, nil
 	}
 	stageStartedAt := time.Now()
 	fingerprint, err := uploadImageFingerprint(file)
-	g.Log().Info(ctx, "图片搜索阶段", g.Map{"requestId": requestID, "otelTraceId": traceID, "stage": "fingerprint", "durationMs": time.Since(stageStartedAt).Milliseconds(), "md5": fingerprintMD5ForLog(fingerprint), "hasPhash": fingerprint != nil && fingerprint.PHash != nil})
+	g.Log().Infof(ctx, "图片搜索阶段 trace_id:%s stage:fingerprint duration_ms:%d md5:%s has_phash:%t", traceID, time.Since(stageStartedAt).Milliseconds(), fingerprintMD5ForLog(fingerprint), fingerprint != nil && fingerprint.PHash != nil)
 	if err != nil {
 		return nil, 0, err
 	}
 	stageStartedAt = time.Now()
 	matches, totalCount, err := s.findSimilarProfileMatchesByFingerprint(ctx, fingerprint, in, scope)
-	g.Log().Info(ctx, "图片搜索阶段", g.Map{"requestId": requestID, "otelTraceId": traceID, "stage": "candidate_query", "durationMs": time.Since(stageStartedAt).Milliseconds(), "matches": len(matches)})
+	g.Log().Infof(ctx, "图片搜索阶段 trace_id:%s stage:candidate_query duration_ms:%d matches:%d", traceID, time.Since(stageStartedAt).Milliseconds(), len(matches))
 	if err != nil {
 		return nil, 0, err
 	}
@@ -425,14 +423,14 @@ func (s *sSysPublish) profileImageSearch(ctx context.Context, in *sysin.ProfileI
 	}
 	stageStartedAt = time.Now()
 	list, err = s.profileImageSearchNotesByScope(ctx, profileIds, scope, viewer, "")
-	g.Log().Info(ctx, "图片搜索阶段", g.Map{"requestId": requestID, "otelTraceId": traceID, "stage": "result_assemble", "durationMs": time.Since(stageStartedAt).Milliseconds(), "profiles": len(profileIds)})
+	g.Log().Infof(ctx, "图片搜索阶段 trace_id:%s stage:result_assemble duration_ms:%d profiles:%d", traceID, time.Since(stageStartedAt).Milliseconds(), len(profileIds))
 	if err != nil {
 		return nil, 0, err
 	}
 	if err = s.attachProfileImageSearchMatches(ctx, list, matches); err != nil {
 		return nil, 0, err
 	}
-	g.Log().Info(ctx, "图片搜索完成", g.Map{"requestId": requestID, "otelTraceId": traceID, "durationMs": time.Since(startedAt).Milliseconds(), "matchedProfiles": len(list), "total": totalCount})
+	g.Log().Infof(ctx, "图片搜索完成 trace_id:%s total_duration_ms:%d matched_profiles:%d total:%d", traceID, time.Since(startedAt).Milliseconds(), len(list), totalCount)
 	return list, totalCount, nil
 }
 

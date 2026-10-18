@@ -60,6 +60,22 @@ func (s *sSysPublish) resolveIntroFeeChannelSuffix(ctx context.Context, event gd
 		row, err = g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Fields("suffix").Where("tenant_id", event["tenant_id"]).WhereIn("account_id", []int64{accountID, 0}).Where("rule_id", 0).Where("bot_id", botID).WhereIn("channel_id", tgChannelCacheLookupIds(chatID)).Where("status", 1).WhereNull("deleted_at").OrderDesc("account_id").OrderDesc("id").Limit(1).One()
 	}
 	if row.IsEmpty() {
+		// A source may be used by several rules.  When a rule/channel override
+		// is absent, use that source's own default suffix for this event.
+		sourceModel := g.DB().Model(publishCollectSourceTable).Ctx(ctx).
+			Fields("channel_suffix").Where("tenant_id", event["tenant_id"]).
+			WhereIn("account_id", []int64{accountID, 0}).
+			WhereIn("source_chat_id", tgChannelCacheLookupIds(chatID)).
+			WhereNull("deleted_at").Where("channel_suffix != ''")
+		if botID > 0 {
+			sourceModel = sourceModel.WhereIn("bot_id", []int64{botID, 0})
+		}
+		row, err = sourceModel.OrderDesc("account_id").OrderDesc("bot_id").OrderDesc("updated_at").Limit(1).One()
+		if err != nil {
+			return "", false, gerror.Wrap(err, "读取采集来源默认后缀失败")
+		}
+	}
+	if row.IsEmpty() {
 		_ = cache.Instance().Set(ctx, key, "__none__", time.Minute)
 		return "", false, nil
 	}
@@ -168,7 +184,6 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 		if _, exists := seen[channelID]; exists {
 			continue
 		}
-		row.Configured = true
 		seen[channelID] = struct{}{}
 		deduplicated = append(deduplicated, row)
 	}
@@ -339,7 +354,7 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 			continue
 		}
 		seen[id] = struct{}{}
-		configured = append(configured, &sysin.IntroFeeChannelRuleItem{RuleId: ruleID, BotId: botID, ChannelId: id, ChannelTitle: candidate.ChatTitle, ChannelUsername: candidate.ChatUsername, LastSeenAt: candidate.LastSeenAt, Configured: false})
+		configured = append(configured, &sysin.IntroFeeChannelRuleItem{RuleId: ruleID, BotId: botID, ChannelId: id, ChannelTitle: candidate.ChatTitle, ChannelUsername: candidate.ChatUsername, LastSeenAt: candidate.LastSeenAt})
 	}
 	// Enrich all rows in three bounded queries. The dialog must not issue one
 	// query per channel because historical BOT lists can be large.
@@ -436,9 +451,6 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 		if row == nil {
 			continue
 		}
-		if row.Configured && row.Status == 2 {
-			row.BlockReason = "频道采集已禁用"
-		}
 		sourceFound, sourceEnabled := false, false
 		for _, source := range collectionSources {
 			if introFeeCollectionSourceMatchesChannel(source.ChatId, source.BotId, row.ChannelId, row.BotId) {
@@ -480,20 +492,6 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 		}
 		if right == nil {
 			return true
-		}
-		if left.Configured != right.Configured {
-			return left.Configured
-		}
-		if left.Configured {
-			if left.UpdatedAt == nil {
-				return false
-			}
-			if right.UpdatedAt == nil {
-				return true
-			}
-			if !left.UpdatedAt.Equal(right.UpdatedAt) {
-				return left.UpdatedAt.After(right.UpdatedAt)
-			}
 		}
 		if left.LastSeenAt == nil {
 			return false
