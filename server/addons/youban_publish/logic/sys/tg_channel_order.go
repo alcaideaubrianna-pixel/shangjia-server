@@ -105,10 +105,28 @@ func telegramChannelBlockingJobStateSQL(alias string) string {
 }
 
 func telegramChannelAvailableAccountSQL(alias string) string {
+	botAvailable := telegramJobAvailableBotSQL(alias)
+	missingAccount := telegramChannelMissingAccountSQL(alias)
 	if alias != "" {
 		alias += "."
 	}
-	return fmt.Sprintf(`(EXISTS (SELECT 1 FROM %[2]s c INNER JOIN %[3]s a ON a.id=c.tg_account_id AND a.tenant_id=c.tenant_id AND a.status='authorized' AND NULLIF(BTRIM(a.session_key), '') IS NOT NULL AND a.deleted_at IS NULL WHERE c.id=%[1]schannel_id AND c.tenant_id=%[1]stenant_id AND c.status=1 AND c.deleted_at IS NULL) OR EXISTS (SELECT 1 FROM %[4]s tc INNER JOIN %[3]s a ON a.id=tc.tg_account_id AND a.tenant_id=tc.tenant_id AND a.status='authorized' AND NULLIF(BTRIM(a.session_key), '') IS NOT NULL AND a.deleted_at IS NULL WHERE tc.id=%[1]schannel_id AND tc.tenant_id=%[1]stenant_id))`, alias, publishChannelTable, publishTgAccountTable, publishTgChannelTable)
+	return fmt.Sprintf(`(%[5]s OR %[6]s OR EXISTS (SELECT 1 FROM %[2]s c INNER JOIN %[3]s a ON a.id=c.tg_account_id AND a.tenant_id=c.tenant_id AND a.status='authorized' AND NULLIF(BTRIM(a.session_key), '') IS NOT NULL AND a.deleted_at IS NULL WHERE c.id=%[1]schannel_id AND c.tenant_id=%[1]stenant_id AND c.status=1 AND c.deleted_at IS NULL) OR EXISTS (SELECT 1 FROM %[4]s tc INNER JOIN %[3]s a ON a.id=tc.tg_account_id AND a.tenant_id=tc.tenant_id AND a.status='authorized' AND NULLIF(BTRIM(a.session_key), '') IS NOT NULL AND a.deleted_at IS NULL WHERE tc.id=%[1]schannel_id AND tc.tenant_id=%[1]stenant_id))`, alias, publishChannelTable, publishTgAccountTable, publishTgChannelTable, botAvailable, missingAccount)
+}
+
+// Untouched jobs with broken references must reach the gate once, so it can
+// expose a terminal configuration error instead of silently filtering them out.
+func telegramChannelMissingAccountSQL(alias string) string {
+	if alias != "" {
+		alias += "."
+	}
+	return fmt.Sprintf(`(COALESCE(%[1]ssend_phase,'')='' AND %[1]sstatus IN ('pending','failed_retry') AND EXISTS (SELECT 1 FROM %[2]s missing_channel WHERE missing_channel.id=%[1]schannel_id AND missing_channel.tenant_id=%[1]stenant_id AND missing_channel.deleted_at IS NULL AND missing_channel.status=1 AND NOT EXISTS (SELECT 1 FROM %[3]s missing_account WHERE missing_account.id=missing_channel.tg_account_id AND missing_account.tenant_id=missing_channel.tenant_id AND missing_account.deleted_at IS NULL)))`, alias, publishChannelTable, publishTgAccountTable)
+}
+
+func telegramJobAvailableBotSQL(alias string) string {
+	if alias != "" {
+		alias += "."
+	}
+	return fmt.Sprintf(`(COALESCE(%[1]spush_mode,'') <> 'account' AND EXISTS (SELECT 1 FROM %[2]s available_bot WHERE available_bot.id=%[1]sbot_id AND available_bot.tenant_id IN (0,%[1]stenant_id) AND available_bot.status=1 AND available_bot.deleted_at IS NULL AND NULLIF(BTRIM(available_bot.bot_token),'') IS NOT NULL))`, alias, publishBotTable)
 }
 
 func telegramChannelOrderChatKey(chatID string) string {

@@ -712,6 +712,13 @@ func (s *sSysPublish) submitTelegramMediaFallback(ctx context.Context, job teleg
 	if job.Id <= 0 || tgAccountID <= 0 || (purpose != "display" && purpose != "verify") {
 		return gerror.New("协议号媒体降级任务参数不完整")
 	}
+	available, accountErr := telegramProtocolAccountCanPublish(ctx, job.TenantId, tgAccountID)
+	if accountErr != nil {
+		return gerror.Wrap(accountErr, "协议号媒体降级不可用")
+	}
+	if !available {
+		return gerror.Newf("协议号媒体降级不可用，TG账号%d未授权或登录态为空，请重新登录", tgAccountID)
+	}
 	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id", job.Id).Where("status", telegramJobStatusSending).
 		Data(g.Map{

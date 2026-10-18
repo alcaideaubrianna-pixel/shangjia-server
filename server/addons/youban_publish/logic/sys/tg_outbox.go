@@ -378,12 +378,12 @@ func (s *sSysPublish) dueTelegramJobOutboxRows(ctx context.Context, limit int, n
 func telegramDueOutboxPostgresSQL() string {
 	channelKey := "CASE WHEN j.channel_id > 0 THEN j.channel_id::text ELSE 'chat:' || REPLACE(COALESCE(j.target_chat_id,''), '-100', '') END"
 	return `WITH active_jobs AS MATERIALIZED (
-		SELECT j.id,j.tenant_id,j.channel_id,j.target_chat_id,j.status,j.dispatch_status,j.next_retry_at,j.created_at,j.operation_no,j.send_phase
+		SELECT j.id,j.tenant_id,j.channel_id,j.target_chat_id,j.status,j.dispatch_status,j.next_retry_at,j.created_at,j.operation_no,j.send_phase,j.bot_id,j.push_mode
 		FROM ` + publishTgJobTable + ` j
 		WHERE ` + telegramChannelBlockingJobStateSQL("j") + `
 	), channel_job_heads AS (
 		SELECT DISTINCT ON (j.tenant_id, ` + channelKey + `)
-			j.id AS job_id,j.tenant_id,j.channel_id,j.target_chat_id,j.status,j.dispatch_status,j.next_retry_at,j.created_at
+			j.id AS job_id,j.tenant_id,j.channel_id,j.target_chat_id,j.status,j.dispatch_status,j.next_retry_at,j.created_at,j.bot_id,j.push_mode,j.send_phase
 		FROM active_jobs j
 		ORDER BY j.tenant_id, ` + channelKey + `, ` + telegramChannelScheduleOrderSQL("j") + `
 	)
