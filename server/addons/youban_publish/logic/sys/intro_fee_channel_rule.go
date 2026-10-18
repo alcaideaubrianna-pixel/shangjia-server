@@ -184,7 +184,6 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 		if _, exists := seen[channelID]; exists {
 			continue
 		}
-		row.Configured = true
 		seen[channelID] = struct{}{}
 		deduplicated = append(deduplicated, row)
 	}
@@ -355,7 +354,7 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 			continue
 		}
 		seen[id] = struct{}{}
-		configured = append(configured, &sysin.IntroFeeChannelRuleItem{RuleId: ruleID, BotId: botID, ChannelId: id, ChannelTitle: candidate.ChatTitle, ChannelUsername: candidate.ChatUsername, LastSeenAt: candidate.LastSeenAt, Configured: false})
+		configured = append(configured, &sysin.IntroFeeChannelRuleItem{RuleId: ruleID, BotId: botID, ChannelId: id, ChannelTitle: candidate.ChatTitle, ChannelUsername: candidate.ChatUsername, LastSeenAt: candidate.LastSeenAt})
 	}
 	// Enrich all rows in three bounded queries. The dialog must not issue one
 	// query per channel because historical BOT lists can be large.
@@ -452,9 +451,6 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 		if row == nil {
 			continue
 		}
-		if row.Configured && row.Status == 2 {
-			row.BlockReason = "频道采集已禁用"
-		}
 		sourceFound, sourceEnabled := false, false
 		for _, source := range collectionSources {
 			if introFeeCollectionSourceMatchesChannel(source.ChatId, source.BotId, row.ChannelId, row.BotId) {
@@ -496,20 +492,6 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 		}
 		if right == nil {
 			return true
-		}
-		if left.Configured != right.Configured {
-			return left.Configured
-		}
-		if left.Configured {
-			if left.UpdatedAt == nil {
-				return false
-			}
-			if right.UpdatedAt == nil {
-				return true
-			}
-			if !left.UpdatedAt.Equal(right.UpdatedAt) {
-				return left.UpdatedAt.After(right.UpdatedAt)
-			}
 		}
 		if left.LastSeenAt == nil {
 			return false

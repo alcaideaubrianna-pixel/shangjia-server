@@ -200,8 +200,8 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 		if err != nil {
 			return true, err
 		}
-		if item == nil || !item.Configured {
-			return true, s.sendCollectManageNotice(ctx, botId, chatId, "请先配置该频道的后缀。")
+		if item == nil {
+			return true, s.sendCollectManageNotice(ctx, botId, chatId, "频道不存在或已被清理。")
 		}
 		if action == "channelstatus" && status == 2 {
 			text := fmt.Sprintf("确认禁用频道采集？\n频道：%s\n频道 ID：%s%s\n\n确认后不再采集该频道的新消息。已有资料、已推送消息和后缀配置保留。", html.EscapeString(firstNonEmpty(item.ChannelTitle, item.ChannelId)), html.EscapeString(item.ChannelId), collectManageChannelLinkLine(item.ChannelLink))
@@ -240,7 +240,7 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 		if item == nil {
 			return true, s.sendCollectManageNotice(ctx, botId, chatId, "频道不存在或已失效，请刷新频道列表后重试。")
 		}
-		if !item.Configured && strings.TrimSpace(item.Suffix) == "" {
+		if strings.TrimSpace(item.Suffix) == "" {
 			rule, err := publishService.SysPublish().BotCollectRuleView(ctx, ruleID, owner.TenantId, owner.AccountId)
 			if err != nil {
 				return true, err
@@ -585,15 +585,9 @@ func (s *sSysBot) showCollectRuleChannels(ctx context.Context, botId int64, chat
 			name += " · " + row.ChannelLink
 		}
 		suffix := row.Suffix
-		if suffix == "" {
-			suffix = "未配置"
-		}
-		status := "使用默认后缀"
-		if row.Configured {
-			status = "已启用"
-			if row.Status != 1 {
-				status = "已禁用"
-			}
+		status := "已启用"
+		if row.Status != 1 {
+			status = "已禁用"
 		}
 		lines = append(lines, fmt.Sprintf("%s（%s）\n后缀：%s · 状态：%s", html.EscapeString(name), html.EscapeString(row.ChannelId), html.EscapeString(suffix), status))
 		buttons = append(buttons, []models.InlineKeyboardButton{{Text: name + " · " + status, CallbackData: fmt.Sprintf("cm:channel:%d:%d:%s", ruleID, row.Id, row.ChannelId)}})
@@ -625,27 +619,19 @@ func (s *sSysBot) showCollectRuleChannel(ctx context.Context, botId int64, chatI
 	if name == "" {
 		name = item.ChannelId
 	}
-	status := "待配置"
-	if item.Configured {
-		status = "已启用"
-		if item.Status != 1 {
-			status = "已禁用"
-		}
+	status := "已启用"
+	if item.Status != 1 {
+		status = "已禁用"
 	}
 	suffix := item.Suffix
-	if suffix == "" {
-		suffix = "未配置"
-	}
 	text := fmt.Sprintf("频道：%s\n频道 ID：%s%s\n后缀：%s\n状态：%s", html.EscapeString(name), html.EscapeString(item.ChannelId), collectManageChannelLinkLine(item.ChannelLink), html.EscapeString(suffix), status)
 	buttons := [][]models.InlineKeyboardButton{{{Text: "编辑后缀", CallbackData: fmt.Sprintf("cm:channeledit:%d:%s:%d", ruleID, item.ChannelId, item.Id)}}}
-	if item.Configured {
-		if item.Status == 1 {
-			buttons = append(buttons, []models.InlineKeyboardButton{{Text: "禁用", CallbackData: fmt.Sprintf("cm:channelstatus:%d:%d:%s:2", ruleID, item.Id, item.ChannelId)}})
-		} else {
-			buttons = append(buttons, []models.InlineKeyboardButton{{Text: "启用", CallbackData: fmt.Sprintf("cm:channelstatus:%d:%d:%s:1", ruleID, item.Id, item.ChannelId)}})
-		}
-		buttons = append(buttons, []models.InlineKeyboardButton{{Text: "删除并下架", CallbackData: fmt.Sprintf("cm:channeldelete:%d:%d:%s:0", ruleID, item.Id, item.ChannelId)}})
+	if item.Status == 1 {
+		buttons = append(buttons, []models.InlineKeyboardButton{{Text: "禁用", CallbackData: fmt.Sprintf("cm:channelstatus:%d:%d:%s:2", ruleID, item.Id, item.ChannelId)}})
+	} else {
+		buttons = append(buttons, []models.InlineKeyboardButton{{Text: "启用", CallbackData: fmt.Sprintf("cm:channelstatus:%d:%d:%s:1", ruleID, item.Id, item.ChannelId)}})
 	}
+	buttons = append(buttons, []models.InlineKeyboardButton{{Text: "删除并下架", CallbackData: fmt.Sprintf("cm:channeldelete:%d:%d:%s:0", ruleID, item.Id, item.ChannelId)}})
 	buttons = append(buttons, []models.InlineKeyboardButton{{Text: "返回频道列表", CallbackData: fmt.Sprintf("cm:channels:%d:1", ruleID)}})
 	return s.sendCollectManageMarkup(ctx, botId, chatId, text, buttons)
 }
