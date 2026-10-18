@@ -95,6 +95,12 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 		cloned.FileUrl = url
 		searchItems = append(searchItems, &cloned)
 	}
+	// Telegram album members are recompressed independently. A multi-image
+	// request can safely use the wider threshold because results are merged by
+	// profile and ranked by the number of matching members.
+	if len(searchItems) > 1 && searchIn.Threshold < 14 {
+		searchIn.Threshold = 14
+	}
 	seenHashes := make(map[string]struct{}, len(searchItems))
 	notesById := make(map[int64]*sysin.NoteModel)
 	orderedProfileIds := make([]int64, 0, botMediaSearchMaxResults)
