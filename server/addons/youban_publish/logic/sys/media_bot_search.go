@@ -211,8 +211,13 @@ func (s *sSysPublish) botMediaSearchFingerprint(ctx context.Context, fingerprint
 		return nil, 0, false, nil
 	}
 	seenHashes[hashKey] = struct{}{}
-	matches, err := s.cachedProfileFingerprintSearchCandidates(ctx, fingerprint, searchIn, searchScope, nil)
+	fallbackCtx, cancelFallback := context.WithTimeout(ctx, 2*time.Second)
+	defer cancelFallback()
+	matches, err := s.cachedProfileFingerprintSearchCandidates(fallbackCtx, fingerprint, searchIn, searchScope, nil)
 	if err != nil {
+		if fallbackCtx.Err() != nil {
+			return []*sysin.NoteModel{}, 0, false, nil
+		}
 		return nil, 0, false, err
 	}
 	if len(matches) == 0 {
