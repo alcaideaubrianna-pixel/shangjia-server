@@ -1,6 +1,8 @@
 package sys
 
 import (
+	"hotgo/utility/sensitive"
+
 	"context"
 	"fmt"
 	"net"
@@ -612,7 +614,7 @@ func (s *sSysBot) sendMessageWithMarkup(ctx context.Context, botToken, chatId, t
 	if err != nil {
 		return nil, err
 	}
-	params := &tgbot.SendMessageParams{ChatID: chatId, Text: text, ParseMode: models.ParseMode(parseMode), DisableNotification: disableNotice, ReplyMarkup: replyMarkup}
+	params := &tgbot.SendMessageParams{ChatID: chatId, Text: sensitive.Tokens(text), ParseMode: models.ParseMode(parseMode), DisableNotification: disableNotice, ReplyMarkup: replyMarkup}
 	callCtx, cancel := telegramAPICtx()
 	defer cancel()
 	return bot.SendMessage(callCtx, params)

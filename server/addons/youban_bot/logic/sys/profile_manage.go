@@ -1,6 +1,8 @@
 package sys
 
 import (
+	"hotgo/utility/sensitive"
+
 	"context"
 	"encoding/json"
 	"fmt"
@@ -2538,14 +2540,19 @@ func (s *sSysBot) consumeProfileCreatePart(ctx context.Context, botId int64, cha
 		}
 		draft.VerifyText = strings.TrimSpace(text)
 		draft.VerifyMedia = media
+		// Persist both parts before any network I/O so a transfer failure cannot
+		// discard verification media that arrived before the display group.
+		if err := s.updateProfileSession(ctx, session.Id, session.Step, draft); err != nil {
+			return err
+		}
 		persistedDisplay, err := s.persistTelegramMedia(ctx, account.AccountId, draft.DisplayMedia)
 		if err != nil {
-			g.Log().Warningf(ctx, "Bot资料展示媒体持久化失败 trace:%s media_count:%d err:%+v", trace, len(draft.DisplayMedia), err)
+			g.Log().Warningf(ctx, "Bot资料展示媒体持久化失败 trace:%s media_count:%d err:%+v", trace, len(draft.DisplayMedia), sensitive.Diagnostic(err.Error()))
 			return s.replyBotError(ctx, botId, chatId, "资料管理", gerror.Wrap(err, "展示资料保存失败，请重新发送"))
 		}
 		persistedVerify, err := s.persistTelegramMedia(ctx, account.AccountId, draft.VerifyMedia)
 		if err != nil {
-			g.Log().Warningf(ctx, "Bot资料验证媒体持久化失败 trace:%s media_count:%d err:%+v", trace, len(draft.VerifyMedia), err)
+			g.Log().Warningf(ctx, "Bot资料验证媒体持久化失败 trace:%s media_count:%d err:%+v", trace, len(draft.VerifyMedia), sensitive.Diagnostic(err.Error()))
 			return s.replyBotError(ctx, botId, chatId, "资料管理", gerror.Wrap(err, "验证资料保存失败，请重新发送"))
 		}
 		draft.DisplayMedia = persistedDisplay
@@ -2995,7 +3002,7 @@ func (s *sSysBot) finishProfileMediaGroup(botId int64, groupId string, account *
 	}
 	if consumeErr := s.consumeProfileCreatePart(ctx, botId, pending.ChatId, account, current, pending.Text, pending.Media); consumeErr != nil {
 		g.Log().Errorf(ctx, "Bot资料媒体组消费失败 trace:%s groupId:%s step:%s media_count:%d text_len:%d err:%+v", trace, groupId, current.Step, len(pending.Media), len(strings.TrimSpace(pending.Text)), consumeErr)
-		_ = s.reply(ctx, botId, pending.ChatId, "资料媒体组解析失败："+html.EscapeString(consumeErr.Error()))
+		_ = s.reply(ctx, botId, pending.ChatId, "资料媒体组解析失败："+html.EscapeString(botErrorMessage(consumeErr)))
 		return
 	}
 	g.Log().Infof(ctx, "Bot资料媒体组消费完成 trace:%s groupId:%s step:%s elapsed_ms:%d", trace, groupId, current.Step, time.Since(startedAt).Milliseconds())
@@ -3118,8 +3125,14 @@ func (s *sSysBot) finishPendingProfileVerifyGroup(botId int64, account *botProfi
 			verify := latestDraft.PendingVerify
 			if verify != nil && profileMediaGroupIdleWait(*verify, time.Now()) == 0 {
 				verify.Media = orderedProfileGroupMedia(verify.Media)
+				latestDraft.VerifyText = verify.Text
+				latestDraft.VerifyMedia = verify.Media
 				latestDraft.PendingVerify = nil
-				_ = s.updateProfileSession(ctx, sessionId, latest.Step, latestDraft)
+				if err = s.updateProfileSession(ctx, sessionId, latest.Step, latestDraft); err != nil {
+					_ = lock.Unlock(context.Background())
+					g.Log().Warningf(ctx, "Bot资料验证内容保存失败 trace:PF-%d err:%s", sessionId, sensitive.Diagnostic(err.Error()))
+					return
+				}
 				latest.PayloadJson = gjson.MustEncodeString(latestDraft)
 				err = s.consumeProfileCreatePart(ctx, botId, verify.ChatId, account, &latest, verify.Text, verify.Media)
 			}
@@ -3311,8 +3324,8 @@ func (s *sSysBot) replyBotError(ctx context.Context, botId int64, chatId string,
 	if err == nil {
 		return nil
 	}
-	g.Log().Warningf(ctx, "Bot业务处理失败 scope:%s botId:%d chatId:%s err:%+v", scope, botId, chatId, err)
-	return s.sendMessageOnly(ctx, botId, chatId, err.Error())
+	g.Log().Warningf(ctx, "Bot业务处理失败 scope:%s botId:%d chatId:%s err:%+v", scope, botId, chatId, sensitive.Diagnostic(err.Error()))
+	return s.sendMessageOnly(ctx, botId, chatId, botErrorMessage(err))
 }
 
 func (s *sSysBot) handleChannelTextCommand(ctx context.Context, botId int64, msg *models.Message, account *botProfileAccount, text string) error {
