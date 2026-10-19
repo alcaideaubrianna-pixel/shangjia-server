@@ -6,6 +6,8 @@ import (
 
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
+
+	"hotgo/internal/library/telegrammedia"
 )
 
 type RuntimeConfig struct {
@@ -13,6 +15,7 @@ type RuntimeConfig struct {
 	ProxyURL         string
 	RuntimeServerURL string
 	MediaServerURL   string
+	MediaFileURL     string
 	WebhookBaseURL   string
 	WebhookSecret    string
 }
@@ -55,8 +58,10 @@ type IGateway interface {
 	Webhook(ctx context.Context, key string, body []byte, secret string) error
 	Client(ctx context.Context, token string) (*tgbot.Bot, error)
 	MediaClient(ctx context.Context, token string) (*tgbot.Bot, error)
-	// SendClient follows the runtime endpoint; MediaClient is reserved for downloads.
+	// SendClient always uses the official endpoint. MediaClient is local-download infrastructure.
 	SendClient(ctx context.Context, token string) (*tgbot.Bot, error)
+	ResolveMedia(ctx context.Context, token string, in telegrammedia.Request) (telegrammedia.Resolved, error)
+	DownloadMedia(ctx context.Context, token string, in telegrammedia.Request, maxBytes int64) ([]byte, telegrammedia.Resolved, error)
 	Probe(ctx context.Context, token string) (*models.User, error)
 }
 

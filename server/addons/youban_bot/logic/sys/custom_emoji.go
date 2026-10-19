@@ -18,9 +18,11 @@ import (
 
 	botconsts "hotgo/addons/youban_bot/consts"
 	"hotgo/addons/youban_bot/model/input/sysin"
+	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
 	"hotgo/internal/library/cache"
 	"hotgo/internal/library/hgrds/lock"
 	"hotgo/internal/library/storager"
+	"hotgo/internal/library/telegrammedia"
 	isc "hotgo/internal/service"
 	fileutil "hotgo/utility/file"
 )
@@ -160,7 +162,7 @@ func (s *sSysBot) resolveMissingCustomEmojis(ctx context.Context, emojiIds []str
 		}
 		emojiId := strings.TrimSpace(sticker.CustomEmojiID)
 		returned[emojiId] = struct{}{}
-		item, persistErr := s.persistCustomEmoji(ctx, bot, token, sticker)
+		item, persistErr := s.persistCustomEmoji(ctx, token, sticker)
 		if persistErr != nil {
 			g.Log().Warning(ctx, "缓存Telegram自定义Emoji失败", g.Map{"emojiId": emojiId, "err": persistErr})
 			continue
@@ -176,24 +178,12 @@ func (s *sSysBot) resolveMissingCustomEmojis(ctx context.Context, emojiIds []str
 	return nil
 }
 
-func (s *sSysBot) persistCustomEmoji(ctx context.Context, bot *tgbot.Bot, token string, sticker *models.Sticker) (*sysin.CustomEmojiModel, error) {
-	file, err := retryTelegramTransient(ctx, "读取Telegram自定义Emoji文件", 3, func() (*models.File, error) {
-		callCtx, cancel := telegramAPICtx()
-		defer cancel()
-		return bot.GetFile(callCtx, &tgbot.GetFileParams{FileID: sticker.FileID})
-	})
+func (s *sSysBot) persistCustomEmoji(ctx context.Context, token string, sticker *models.Sticker) (*sysin.CustomEmojiModel, error) {
+	data, resolved, err := gatewayservice.Gateway().DownloadMedia(ctx, token, telegrammedia.Request{FileID: sticker.FileID, MediaType: "image", Size: int64(sticker.FileSize)}, 50*1024*1024)
 	if err != nil {
 		return nil, err
 	}
-	if file == nil || strings.TrimSpace(file.FilePath) == "" {
-		return nil, gerror.New("Telegram自定义Emoji文件地址为空")
-	}
-	data, err := retryTelegramTransient(ctx, "下载Telegram自定义Emoji文件", 3, func() ([]byte, error) {
-		return downloadTelegramAsset(ctx, telegramFileURL(token, file.FilePath))
-	})
-	if err != nil {
-		return nil, err
-	}
+	file := resolved.File
 	fileFormat, renderType, uploadType := customEmojiFormat(sticker, file.FilePath)
 	storedFormat := fileFormat
 	if renderType == "lottie" {

@@ -1,15 +1,12 @@
 package sys
 
 import (
-	"hotgo/utility/sensitive"
-
 	"context"
 	"fmt"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -23,14 +20,15 @@ import (
 
 	"hotgo/addons/youban_bot/model/input/sysin"
 	publishsysin "hotgo/addons/youban_publish/model/input/sysin"
-	publishservice "hotgo/addons/youban_publish/service"
 	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	"hotgo/internal/library/contexts"
+	"hotgo/internal/library/telegrammedia"
 	"hotgo/internal/library/token"
 	"hotgo/internal/model"
 	"hotgo/internal/model/entity"
+	"hotgo/utility/sensitive"
 )
 
 type telegramUserIdCtxKey struct{}
@@ -258,14 +256,6 @@ func (s *sSysBot) telegramBot(ctx context.Context, botToken string) (*tgbot.Bot,
 		return nil, gerror.New("Telegram Bot Token未配置")
 	}
 	return gatewayservice.Gateway().Client(ctx, botToken)
-}
-
-func (s *sSysBot) telegramMediaBot(ctx context.Context, botToken string) (*tgbot.Bot, error) {
-	botToken = strings.TrimSpace(botToken)
-	if botToken == "" {
-		return nil, gerror.New("Telegram Bot Token未配置")
-	}
-	return gatewayservice.Gateway().MediaClient(ctx, botToken)
 }
 
 func (s *sSysBot) clearTelegramBotCache() {}
@@ -801,24 +791,18 @@ func (s *sSysBot) resolveTelegramMessageMedia(ctx context.Context, botId int64, 
 	if fileId == "" {
 		return nil, nil
 	}
-	clientStartedAt := time.Now()
-	tgBot, err := s.telegramMediaBot(ctx, botToken)
-	if err != nil {
-		return nil, err
-	}
-	g.Log().Infof(ctx, "Bot媒体解析阶段完成 stage:client_init durationMs:%d", time.Since(clientStartedAt).Milliseconds())
 	var thumbURL string
 	var thumbErr error
 	thumbDone := make(chan struct{})
 	if thumbFileId != "" {
 		go func() {
-			thumbURL, thumbErr = s.telegramFileDownloadURL(ctx, botId, tgBot, botToken, thumbFileId)
+			thumbURL, thumbErr = s.resolveTelegramMediaURL(ctx, botId, botToken, telegrammedia.Request{FileID: thumbFileId, MediaType: "image"})
 			close(thumbDone)
 		}()
 	} else {
 		close(thumbDone)
 	}
-	fileURL, err := s.telegramFileDownloadURL(ctx, botId, tgBot, botToken, fileId)
+	fileURL, err := s.resolveTelegramMediaURL(ctx, botId, botToken, telegrammedia.Request{FileID: fileId, MediaType: mediaType, Size: fileSize})
 	if err != nil {
 		return nil, err
 	}
@@ -872,64 +856,14 @@ func scanPhotoSize(items []models.PhotoSize) models.PhotoSize {
 	return best
 }
 
-func (s *sSysBot) telegramFileDownloadURL(ctx context.Context, botId int64, tgBot *tgbot.Bot, botToken string, fileId string) (string, error) {
-	fileId = strings.TrimSpace(fileId)
-	if fileId == "" {
-		return "", nil
-	}
-	callCtx, cancel := telegramAPICtx()
-	defer cancel()
-	getFileStartedAt := time.Now()
-	file, attempts, err := telegramBotGetFileWithRetry(ctx, callCtx, fileId, func(requestCtx context.Context) (*models.File, error) {
-		return tgBot.GetFile(requestCtx, &tgbot.GetFileParams{FileID: fileId})
-	})
-	observeScanTelegramGetFile(ctx, botId, attempts, getFileStartedAt, err)
-	g.Log().Info(ctx, "Bot媒体解析阶段完成", g.Map{
-		"stage": "get_file", "fileId": fileId, "attempts": attempts,
-		"durationMs": time.Since(getFileStartedAt).Milliseconds(), "success": err == nil,
-	})
-	if err != nil {
-		if isRetryableTelegramBotGetFileError(err) {
-			g.Log().Warning(ctx, "Bot媒体解析临时网络故障重试耗尽", g.Map{"fileId": fileId, "attempts": attempts, "err": err})
-			return "", gerror.New("Telegram媒体服务暂时不可用，请稍后重试")
-		}
-		return "", err
-	}
-	if file == nil || strings.TrimSpace(file.FilePath) == "" {
-		return "", gerror.New("读取Telegram媒体文件地址失败")
-	}
-	filePath := strings.TrimSpace(file.FilePath)
-	if !filepath.IsAbs(filePath) {
-		return telegramFileURL(botToken, filePath), nil
-	}
-	conf, err := publishservice.SysConfig().GetTelegram(ctx)
-	if err != nil {
-		return "", gerror.Wrap(err, "读取Telegram本地文件服务配置失败")
-	}
-	return telegramLocalFileURL(filePath, conf.BotApiFileUrl)
-}
-
-func telegramFileURL(botToken string, filePath string) string {
-	filePath = strings.ReplaceAll(url.PathEscape(strings.TrimSpace(filePath)), "%2F", "/")
-	return "https://api.telegram.org/file/bot" + strings.TrimSpace(botToken) + "/" + filePath
-}
-
-func telegramLocalFileURL(filePath string, fileBaseURL string) (string, error) {
-	const localRoot = "/var/lib/telegram-bot-api/"
-	filePath = filepath.ToSlash(strings.TrimSpace(filePath))
-	relative := strings.TrimPrefix(filePath, localRoot)
-	if relative == filePath || relative == "" || strings.HasPrefix(relative, "../") {
-		return "", gerror.New("TG Bot API返回了不受支持的本地文件路径")
-	}
-	fileBaseURL = strings.TrimRight(strings.TrimSpace(fileBaseURL), "/")
-	if fileBaseURL == "" {
-		return "", gerror.New("TG Bot API本地模式缺少文件服务地址")
-	}
-	segments := strings.Split(relative, "/")
-	for i := range segments {
-		segments[i] = url.PathEscape(segments[i])
-	}
-	return fileBaseURL + "/" + strings.Join(segments, "/"), nil
+// Resolution is shared by profiles, quick push and scan previews. Preview
+// requests carry their own image type and never inherit a video's large size.
+func (s *sSysBot) resolveTelegramMediaURL(ctx context.Context, botId int64, token string, in telegrammedia.Request) (string, error) {
+	started := time.Now()
+	result, err := gatewayservice.Gateway().ResolveMedia(ctx, token, in)
+	observeScanTelegramGetFile(ctx, botId, result.Attempts, started, err)
+	g.Log().Info(ctx, "Bot媒体解析阶段完成", g.Map{"stage": "get_file", "endpoint": result.Endpoint, "attempts": result.Attempts, "durationMs": time.Since(started).Milliseconds(), "success": err == nil})
+	return result.URL, err
 }
 
 func isIgnorableTelegramError(err error) bool {

@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -24,6 +23,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"hotgo/internal/library/storager"
+	"hotgo/internal/library/telegrammedia"
 )
 
 const (
@@ -497,50 +497,15 @@ func isRetryableMediaFileCacheError(ctx context.Context, err error) bool {
 	return true
 }
 
+// Cache/worker retry scheduling remains here; all HTTP transfer and partial
+// file cleanup are owned by the shared media library.
 func downloadMediaFileCacheWithClient(ctx context.Context, client *http.Client, source string, filePath string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, source, nil)
-	if err != nil {
-		return gerror.Wrap(err, "创建远程媒体下载请求失败")
+	err := telegrammedia.DownloadFile(ctx, client, source, filePath, telegrammedia.TransferOptions{Attempts: 1})
+	var status *telegrammedia.HTTPStatusError
+	if errors.As(err, &status) {
+		return &mediaFileCacheHTTPStatusError{statusCode: status.StatusCode}
 	}
-	req.Header.Set("User-Agent", "youban-server/media-cache")
-	// Object storage and CDN recovery requests are server-to-server requests.
-	// Never forward browser origin headers: some legacy buckets reject them.
-	req.Header.Del("Origin")
-	req.Header.Del("Referer")
-	if client == nil {
-		client = &http.Client{Timeout: 2 * time.Minute}
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return gerror.Wrap(err, "下载远程媒体失败")
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return &mediaFileCacheHTTPStatusError{statusCode: resp.StatusCode}
-	}
-	if err = os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
-		return gerror.Wrap(err, "创建媒体缓存子目录失败")
-	}
-	partPath := filePath + ".part"
-	_ = os.Remove(partPath)
-	file, err := os.Create(partPath)
-	if err != nil {
-		return gerror.Wrap(err, "创建媒体缓存临时文件失败")
-	}
-	if _, err = io.Copy(file, resp.Body); err != nil {
-		_ = file.Close()
-		_ = os.Remove(partPath)
-		return gerror.Wrap(err, "保存媒体缓存临时文件失败")
-	}
-	if err = file.Close(); err != nil {
-		_ = os.Remove(partPath)
-		return gerror.Wrap(err, "关闭媒体缓存临时文件失败")
-	}
-	if err = os.Rename(partPath, filePath); err != nil {
-		_ = os.Remove(partPath)
-		return gerror.Wrap(err, "写入媒体缓存文件失败")
-	}
-	return nil
+	return err
 }
 
 func touchMediaFileCacheMeta(metaPath string, key string, source string, filePath string) error {

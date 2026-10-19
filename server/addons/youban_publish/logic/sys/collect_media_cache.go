@@ -6,15 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"mime"
-	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	tgbot "github.com/go-telegram/bot"
-	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -22,15 +19,17 @@ import (
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/tg"
 	"github.com/gotd/td/tgerr"
+
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
 	collectorservice "hotgo/addons/telegram_collector/service"
 	pdao "hotgo/addons/youban_publish/internal/dao"
-
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/addons/youban_publish/service"
+	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
 	"hotgo/internal/consts"
 	"hotgo/internal/library/contexts"
 	"hotgo/internal/library/hgrds/lock"
+	"hotgo/internal/library/telegrammedia"
 	"hotgo/internal/model"
 )
 
@@ -997,29 +996,22 @@ func (s *sSysPublish) downloadBotTelegramMediaWithToken(ctx context.Context, bot
 	if fileID == "" {
 		return nil, gerror.New("Bot采集媒体缺少File ID")
 	}
-	bot, err := s.telegramDownloadBot(ctx, botToken)
+	getFileStartedAt := time.Now()
+	resolved, err := gatewayservice.Gateway().ResolveMedia(ctx, botToken, telegrammedia.Request{FileID: fileID, MediaType: item.Type, Size: item.SourceSize})
+	endpoint := resolved.Endpoint
 	if err != nil {
-		return nil, gerror.Wrap(err, "创建Bot媒体下载客户端失败")
+		observeTelegramBotGetFile(ctx, endpoint, "error", time.Since(getFileStartedAt))
+		if endpoint == "local" && (telegrammedia.Retryable(err) || strings.Contains(err.Error(), "熔断等待")) {
+			return nil, newCollectMediaFairnessRetryError(err.Error(), 30*time.Second)
+		}
+		return nil, gerror.Wrapf(err, "读取Bot媒体文件信息失败，已尝试%d次", resolved.Attempts)
 	}
+	observeTelegramBotGetFile(ctx, endpoint, "success", time.Since(getFileStartedAt))
+	file := resolved.File
+	remoteSource := resolved.URL
 	conf, err := service.SysConfig().GetTelegram(ctx)
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取Bot媒体下载网络配置失败")
-	}
-	endpoint := telegramBotAPIEndpoint(conf.BotApiServerUrl)
-	getFileStartedAt := time.Now()
-	bot, file, endpoint, attempts, err := telegramBotGetFileWithFallback(ctx, botId, botToken, bot, conf, fileID, item.SourceSize)
-	if err != nil {
-		observeTelegramBotGetFile(ctx, endpoint, "error", time.Since(getFileStartedAt))
-		return nil, gerror.Wrapf(err, "读取Bot媒体文件信息失败，已尝试%d次", attempts)
-	}
-	observeTelegramBotGetFile(ctx, endpoint, "success", time.Since(getFileStartedAt))
-	if file == nil || strings.TrimSpace(file.FilePath) == "" {
-		return nil, gerror.New("Bot媒体文件路径为空")
-	}
-
-	remoteSource, err := botMediaDownloadSource(bot, file, conf.BotApiFileUrl)
-	if err != nil {
-		return nil, err
 	}
 	cacheSource := fmt.Sprintf("bot:%d:%s", botId, firstNonEmpty(file.FileUniqueID, fileID))
 	cacheKey := mediaFileCacheKey(&telegramMediaItem{
@@ -1032,9 +1024,11 @@ func (s *sSysPublish) downloadBotTelegramMediaWithToken(ctx context.Context, bot
 	if err != nil {
 		return nil, gerror.Wrap(err, "创建Bot媒体下载网络客户端失败")
 	}
+	client.Timeout = 2 * time.Minute
+	defer client.CloseIdleConnections()
 	path, err := cachedRemoteMediaFileWithMetaSourceAndDownloader(ctx, cacheKey, remoteSource, cacheSource, collectMediaExt(item.Type, ""), func(downloadCtx context.Context, source string, filePath string) error {
 		downloadStartedAt := time.Now()
-		downloadErr := downloadMediaFileCacheWithClient(downloadCtx, client, source, filePath)
+		downloadErr := telegrammedia.DownloadFile(downloadCtx, client, source, filePath)
 		observeTelegramBotFileDownload(downloadCtx, endpoint, downloadErr, time.Since(downloadStartedAt))
 		return downloadErr
 	})
@@ -1078,30 +1072,6 @@ func (s *sSysPublish) downloadBotTelegramMediaWithToken(ctx context.Context, bot
 		Path:         firstNonEmpty(item.StoragePath, item.FileUrl),
 		Item:         item,
 	}, nil
-}
-
-func botMediaDownloadSource(bot *tgbot.Bot, file *models.File, fileBaseURL string) (string, error) {
-	if file == nil {
-		return "", gerror.New("Bot媒体文件信息为空")
-	}
-	filePath := strings.TrimSpace(file.FilePath)
-	if !filepath.IsAbs(filePath) {
-		return bot.FileDownloadLink(file), nil
-	}
-	fileBaseURL = strings.TrimRight(strings.TrimSpace(fileBaseURL), "/")
-	if fileBaseURL == "" {
-		return "", gerror.New("TG Bot API本地模式缺少文件服务地址")
-	}
-	const localRoot = "/var/lib/telegram-bot-api/"
-	relative := strings.TrimPrefix(filepath.ToSlash(filePath), localRoot)
-	if relative == filePath || relative == "" || strings.HasPrefix(relative, "../") {
-		return "", gerror.New("TG Bot API返回了不受支持的本地文件路径")
-	}
-	segments := strings.Split(relative, "/")
-	for index := range segments {
-		segments[index] = url.PathEscape(segments[index])
-	}
-	return fileBaseURL + "/" + strings.Join(segments, "/"), nil
 }
 
 func collectMediaSourceGone(err error) bool {

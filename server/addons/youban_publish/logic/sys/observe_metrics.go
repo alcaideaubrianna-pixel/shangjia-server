@@ -13,27 +13,12 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
-func telegramBotAPIEndpoint(serverURL string) string {
-	if strings.TrimSpace(serverURL) == "" {
-		return "official"
-	}
-	return "local"
-}
-
 func observeTelegramBotGetFile(ctx context.Context, endpoint, result string, duration time.Duration) {
 	attrs := metric.WithAttributes(attribute.String("endpoint", endpoint), attribute.String("result", result))
 	counter, _ := publishObserveMeter.Int64Counter("xiaohuiji.tg.bot_api.get_file_requests")
 	histogram, _ := publishObserveMeter.Float64Histogram("xiaohuiji.tg.bot_api.get_file_duration_seconds")
 	counter.Add(ctx, 1, attrs)
 	histogram.Record(ctx, duration.Seconds(), attrs)
-}
-
-func observeTelegramBotGetFileFallback(ctx context.Context, action string, botID int64) {
-	counter, _ := publishObserveMeter.Int64Counter("xiaohuiji.tg.bot_api.get_file_fallback_events")
-	counter.Add(ctx, 1, metric.WithAttributes(
-		attribute.String("action", action),
-		attribute.Int64("bot_id", botID),
-	))
 }
 
 func observeTelegramBotFileDownload(ctx context.Context, endpoint string, err error, duration time.Duration) {

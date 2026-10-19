@@ -108,6 +108,7 @@ func init() {
 			ProxyURL:         conf.ProxyUrl,
 			RuntimeServerURL: conf.BotRuntimeApiUrl,
 			MediaServerURL:   conf.BotApiServerUrl,
+			MediaFileURL:     conf.BotApiFileUrl,
 			WebhookBaseURL:   conf.WebhookBaseUrl,
 			WebhookSecret:    conf.WebhookSecret,
 		}, nil

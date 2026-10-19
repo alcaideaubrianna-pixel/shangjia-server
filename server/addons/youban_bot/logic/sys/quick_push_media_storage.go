@@ -2,9 +2,11 @@ package sys
 
 import (
 	"context"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -13,6 +15,7 @@ import (
 	publishsysin "hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/consts"
 	"hotgo/internal/library/storager"
+	"hotgo/internal/library/telegrammedia"
 	"hotgo/internal/model"
 	isc "hotgo/internal/service"
 	fileutil "hotgo/utility/file"
@@ -26,6 +29,12 @@ func (s *sSysBot) persistTelegramMedia(ctx context.Context, operatorAccountId in
 	if len(media) == 0 {
 		return media, nil
 	}
+	client, err := telegramHTTPClient(telegramProxyUrl(ctx))
+	if err != nil {
+		return nil, gerror.New("创建Telegram媒体下载网络客户端失败")
+	}
+	client.Timeout = 2 * time.Minute
+	defer client.CloseIdleConnections()
 	uploadCtx := quickPushMediaUploadContext(ctx, operatorAccountId)
 	result := make([]*publishsysin.MessageTemplateMediaInp, len(media))
 	workerLimit := 4
@@ -46,7 +55,7 @@ func (s *sSysBot) persistTelegramMedia(ctx context.Context, operatorAccountId in
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }()
 			stored := *item
-			fileURL, storagePath, err := persistQuickPushMediaFile(uploadCtx, item.MediaType, item.Name, item.FileUrl)
+			fileURL, storagePath, err := persistQuickPushMediaFile(uploadCtx, client, item.MediaType, item.Name, item.FileUrl)
 			if err != nil {
 				errMu.Lock()
 				if firstErr == nil {
@@ -58,7 +67,7 @@ func (s *sSysBot) persistTelegramMedia(ctx context.Context, operatorAccountId in
 			stored.FileUrl = fileURL
 			stored.StoragePath = storagePath
 			if strings.TrimSpace(item.PosterUrl) != "" {
-				posterURL, posterPath, posterErr := persistQuickPushMediaFile(uploadCtx, "image", item.Name+"-poster", item.PosterUrl)
+				posterURL, posterPath, posterErr := persistQuickPushMediaFile(uploadCtx, client, "image", item.Name+"-poster", item.PosterUrl)
 				if posterErr != nil {
 					g.Log().Warningf(ctx, "Telegram媒体封面转存失败 name:%s err:%+v", item.Name, posterErr)
 					stored.PosterUrl = ""
@@ -89,8 +98,8 @@ func quickPushMediaUploadContext(ctx context.Context, operatorAccountId int64) c
 	})
 }
 
-func persistQuickPushMediaFile(ctx context.Context, mediaType string, name string, sourceURL string) (string, string, error) {
-	data, err := downloadTelegramAsset(ctx, sourceURL)
+func persistQuickPushMediaFile(ctx context.Context, client *http.Client, mediaType string, name string, sourceURL string) (string, string, error) {
+	data, err := telegrammedia.DownloadURL(ctx, client, sourceURL, profileCreateMaxMediaBytes)
 	if err != nil {
 		return "", "", err
 	}

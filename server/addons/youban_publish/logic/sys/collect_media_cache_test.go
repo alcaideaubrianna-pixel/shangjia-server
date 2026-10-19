@@ -9,6 +9,7 @@ import (
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
+	"hotgo/internal/library/telegrammedia"
 
 	"hotgo/addons/youban_publish/internal/model/entity"
 )
@@ -35,19 +36,19 @@ func TestTelegramCollectorMediaCacheURL(t *testing.T) {
 }
 
 func TestBotMediaDownloadSourceUsesLocalFileServer(t *testing.T) {
-	got, err := botMediaDownloadSource(nil, &models.File{FilePath: "/var/lib/telegram-bot-api/123/video/file 1.mp4"}, "http://10.3.4.11:18082/")
+	got, err := telegrammedia.FileURL(nil, &models.File{FilePath: "/var/lib/telegram-bot-api/123/video/file 1.mp4"}, "http://10.3.4.11:18082/")
 	if err != nil {
-		t.Fatalf("botMediaDownloadSource() error = %v", err)
+		t.Fatalf("telegrammedia.FileURL() error = %v", err)
 	}
 	if want := "http://10.3.4.11:18082/123/video/file%201.mp4"; got != want {
-		t.Fatalf("botMediaDownloadSource() = %q, want %q", got, want)
+		t.Fatalf("telegrammedia.FileURL() = %q, want %q", got, want)
 	}
 }
 
 func TestBotMediaDownloadSourceRequiresLocalFileServer(t *testing.T) {
-	_, err := botMediaDownloadSource(nil, &models.File{FilePath: "/var/lib/telegram-bot-api/123/video/file.mp4"}, "")
+	_, err := telegrammedia.FileURL(nil, &models.File{FilePath: "/var/lib/telegram-bot-api/123/video/file.mp4"}, "")
 	if err == nil {
-		t.Fatal("botMediaDownloadSource() expected missing file server error")
+		t.Fatal("telegrammedia.FileURL() expected missing file server error")
 	}
 }
 

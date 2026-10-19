@@ -2315,16 +2315,16 @@ func (s *sSysChat) telegramMessageAttachments(ctx context.Context, row *chatConv
 	var files []telegramIncomingFile
 	if len(msg.Photo) > 0 {
 		photo := msg.Photo[len(msg.Photo)-1]
-		files = append(files, telegramIncomingFile{FileID: photo.FileId, FileName: fmt.Sprintf("telegram_%d_%d.jpg", msg.Chat.Id, msg.MessageId), FileType: "image"})
+		files = append(files, telegramIncomingFile{FileID: photo.FileId, Size: photo.FileSize, FileName: fmt.Sprintf("telegram_%d_%d.jpg", msg.Chat.Id, msg.MessageId), FileType: "image"})
 	}
 	if msg.Video != nil {
-		files = append(files, telegramIncomingFile{FileID: msg.Video.FileId, FileName: fallbackString(msg.Video.FileName, fmt.Sprintf("telegram_%d_%d.mp4", msg.Chat.Id, msg.MessageId)), FileType: "video"})
+		files = append(files, telegramIncomingFile{FileID: msg.Video.FileId, Size: msg.Video.FileSize, FileName: fallbackString(msg.Video.FileName, fmt.Sprintf("telegram_%d_%d.mp4", msg.Chat.Id, msg.MessageId)), FileType: "video"})
 	}
 	if msg.Document != nil {
-		files = append(files, telegramIncomingFile{FileID: msg.Document.FileId, FileName: fallbackString(msg.Document.FileName, fmt.Sprintf("telegram_%d_%d", msg.Chat.Id, msg.MessageId)), FileType: attachmentTypeByMime(msg.Document.MimeType)})
+		files = append(files, telegramIncomingFile{FileID: msg.Document.FileId, Size: msg.Document.FileSize, FileName: fallbackString(msg.Document.FileName, fmt.Sprintf("telegram_%d_%d", msg.Chat.Id, msg.MessageId)), FileType: attachmentTypeByMime(msg.Document.MimeType)})
 	}
 	if msg.Animation != nil {
-		files = append(files, telegramIncomingFile{FileID: msg.Animation.FileId, FileName: fallbackString(msg.Animation.FileName, fmt.Sprintf("telegram_%d_%d.mp4", msg.Chat.Id, msg.MessageId)), FileType: "video"})
+		files = append(files, telegramIncomingFile{FileID: msg.Animation.FileId, Size: msg.Animation.FileSize, FileName: fallbackString(msg.Animation.FileName, fmt.Sprintf("telegram_%d_%d.mp4", msg.Chat.Id, msg.MessageId)), FileType: "video"})
 	}
 	if msg.Sticker != nil {
 		ext := ".webp"
@@ -2432,6 +2432,7 @@ func (s *sSysChat) telegramCustomEmojiFiles(ctx context.Context, botToken string
 
 type telegramIncomingFile struct {
 	FileID     string
+	Size       int64
 	FileName   string
 	FileType   string
 	ConvertTGS bool
@@ -2442,11 +2443,7 @@ func (s *sSysChat) saveTelegramFileAttachment(ctx context.Context, botToken stri
 	if strings.TrimSpace(file.FileID) == "" {
 		return nil, nil
 	}
-	bot, err := s.telegramBot(ctx, botToken)
-	if err != nil {
-		return nil, err
-	}
-	data, _, err := telegrammedia.Download(ctx, bot, file.FileID)
+	data, _, err := gatewayservice.Gateway().DownloadMedia(ctx, botToken, telegrammedia.Request{FileID: file.FileID, MediaType: file.FileType, Size: file.Size}, 50*1024*1024)
 	if err != nil {
 		return nil, gerror.Wrapf(err, "下载Telegram附件失败 fileId:%s", file.FileID)
 	}
