@@ -24,8 +24,10 @@ const (
 	collectEventRecoverAfter   = 10 * time.Second
 	// A single media item is capped at 15 minutes. Leave a small commit grace
 	// period, then reclaim abandoned downloading rows instead of waiting 35m.
-	collectMediaRecoverAfter     = 20 * time.Minute
-	collectMediaRecoveryDedupTTL = 30 * time.Minute
+	collectMediaRecoverAfter = 20 * time.Minute
+	// This guard only prevents concurrent recovery passes. It must not hide a
+	// lost queue task for the lifetime of the old task's uniqueness window.
+	collectMediaRecoveryDedupTTL = 2 * time.Minute
 )
 
 func reserveCollectMediaRecovery(ctx context.Context, eventID int64) bool {
@@ -236,6 +238,7 @@ func (s *sSysPublish) recoverBotCollectMedia(ctx context.Context, limit int) err
 			continue
 		}
 		if queued {
+			releaseCollectMediaRecovery(ctx, payload.EventId)
 			status := row[e.Status].String()
 			if _, updateErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).
 				Where(e.Id, payload.EventId).
@@ -247,6 +250,10 @@ func (s *sSysPublish) recoverBotCollectMedia(ctx context.Context, limit int) err
 			}
 			requeued++
 			g.Log().Infof(ctx, "BOT媒体事件已按事件重新入队 eventId:%d sourceId:%d", payload.EventId, payload.SourceId)
+		} else {
+			// A duplicate/empty enqueue result must not leave the recovery guard
+			// blocking the next pass. The database state is authoritative.
+			releaseCollectMediaRecovery(ctx, payload.EventId)
 		}
 	}
 	if requeued > 0 {
@@ -424,9 +431,11 @@ func (s *sSysPublish) recoverPendingCollectMedia(ctx context.Context, limit int)
 			continue
 		}
 		if !enqueued {
+			releaseCollectMediaRecovery(ctx, payload.EventId)
 			observeCollectMediaScheduler(ctx, "recovery_enqueue_skipped", payload.TenantId, payload.TgAccountId)
 			continue
 		}
+		releaseCollectMediaRecovery(ctx, payload.EventId)
 		observeCollectMediaScheduler(ctx, "recovery_reenqueued", payload.TenantId, payload.TgAccountId)
 		if _, updateErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).
 			Where(eventCols.Id, payload.EventId).
