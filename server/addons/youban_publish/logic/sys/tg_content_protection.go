@@ -621,6 +621,17 @@ func obfuscateTelegramText(value string, random *rand.Rand, synonymReplacements 
 		if err != nil {
 			return match
 		}
+		if parts[1] == "身高" {
+			// Preserve source decimals; rounding before perturbation could exceed
+			// the requested two-centimetre maximum increase.
+			result := number + float64(random.Intn(21))/10
+			precision := 1
+			if dot := strings.IndexByte(parts[3], '.'); dot >= 0 && len(parts[3])-dot-1 > precision {
+				precision = len(parts[3]) - dot - 1
+			}
+			formatted := strings.TrimRight(strings.TrimRight(strconv.FormatFloat(result, 'f', precision, 64), "0"), ".")
+			return parts[1] + parts[2] + formatted + parts[4]
+		}
 		rounded := int(math.Round(number))
 		minimum, maximum := telegramObfuscationNumberBounds(parts[1])
 		result := rounded + random.Intn(4)
