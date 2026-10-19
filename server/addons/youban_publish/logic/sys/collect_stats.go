@@ -73,7 +73,7 @@ FROM (
 CROSS JOIN (
     SELECT COUNT(*) AS rule_count
     FROM %s
-    WHERE %s=? AND %s=? AND %s=1 AND %s IS NULL
+    WHERE %s=? AND %s=? AND %s IS NULL
 ) rule_stats
 CROSS JOIN (
     SELECT COUNT(*) AS event_count,
@@ -94,7 +94,7 @@ CROSS JOIN (
     WHERE %s=? AND %s=?
 ) dispatch_stats`,
 		pdao.YoubanPublishCollectSource.Table(), sourceCols.TenantId, sourceCols.AccountId, sourceCols.CollectEnabled, sourceCols.Status, sourceCols.DeletedAt,
-		pdao.YoubanPublishCollectRule.Table(), ruleCols.TenantId, ruleCols.AccountId, ruleCols.Status, ruleCols.DeletedAt,
+		pdao.YoubanPublishCollectRule.Table(), ruleCols.TenantId, ruleCols.AccountId, ruleCols.DeletedAt,
 		eventCols.Status, pdao.YoubanPublishCollectEvent.Table(), eventCols.TenantId, eventCols.AccountId,
 		reviewCols.Status, pdao.YoubanPublishCollectReview.Table(), reviewCols.TenantId, reviewCols.AccountId,
 		dispatchCols.Status, dispatchCols.Status, dispatchCols.Status, dispatchCols.FinishedAt, pdao.YoubanPublishCollectDispatch.Table(), dispatchCols.TenantId, dispatchCols.AccountId,

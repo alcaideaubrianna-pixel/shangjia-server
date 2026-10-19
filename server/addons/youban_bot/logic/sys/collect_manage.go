@@ -498,7 +498,7 @@ func (s *sSysBot) showCollectSourceConfig(ctx context.Context, botId int64, chat
 	var bindings []struct {
 		RuleId int64 `json:"ruleId"`
 	}
-	if err := g.DB().Model("hg_youban_publish_collect_source_rule").Ctx(ctx).Where("source_id", sourceID).Where("tenant_id", account.TenantId).Where("status", 1).OrderAsc("sort").Scan(&bindings); err != nil {
+	if err := g.DB().Model("hg_youban_publish_collect_source_rule").Ctx(ctx).Where("source_id", sourceID).Where("tenant_id", account.TenantId).OrderAsc("sort").Scan(&bindings); err != nil {
 		return err
 	}
 	for _, b := range bindings {

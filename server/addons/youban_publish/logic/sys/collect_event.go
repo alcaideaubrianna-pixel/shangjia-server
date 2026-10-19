@@ -217,7 +217,7 @@ func (s *sSysPublish) fillCollectEventRouting(ctx context.Context, list []*sysin
 		RuleId   int64 `json:"ruleId"`
 	}
 	if err := pdao.YoubanPublishCollectSourceRule.Ctx(ctx).
-		WhereIn("source_id", sourceIds).Where("status", 1).
+		WhereIn("source_id", sourceIds).
 		Fields("source_id,rule_id").Scan(&bindings); err != nil {
 		return gerror.Wrap(err, "读取采集源目标规则失败")
 	}
@@ -231,7 +231,7 @@ func (s *sSysPublish) fillCollectEventRouting(ctx context.Context, list []*sysin
 	if len(ruleIds) > 0 {
 		if err := pdao.YoubanPublishCollectRule.Ctx(ctx).
 			Where("tenant_id", tenantId).Where("account_id", accountId).
-			WhereIn("id", ruleIds).Where("status", 1).WhereNull("deleted_at").
+			WhereIn("id", ruleIds).WhereNull("deleted_at").
 			Fields("id").Scan(&rules); err != nil {
 			return gerror.Wrap(err, "读取采集规则目标失败")
 		}
@@ -744,7 +744,7 @@ func (s *sSysPublish) collectEventRules(ctx context.Context, event gdb.Record, t
 	var bindRows []struct {
 		RuleId int64 `json:"ruleId"`
 	}
-	if err := pdao.YoubanPublishCollectSourceRule.Ctx(ctx).Where("source_id", sourceId).Where("status", 1).OrderAsc("sort").Scan(&bindRows); err != nil {
+	if err := pdao.YoubanPublishCollectSourceRule.Ctx(ctx).Where("source_id", sourceId).OrderAsc("sort").Scan(&bindRows); err != nil {
 		return nil, gerror.Wrap(err, "读取采集源绑定规则失败")
 	}
 	if len(bindRows) != 1 {
@@ -754,12 +754,12 @@ func (s *sSysPublish) collectEventRules(ctx context.Context, event gdb.Record, t
 	for _, row := range bindRows {
 		ruleIds = append(ruleIds, row.RuleId)
 	}
+	// 规则和绑定的历史 status 字段不再控制执行，启停由采集源统一控制。
 	// Global rules are account-wide text policies. Source matching, blocking,
 	// review, dedupe and target channels remain owned by the channel rule.
 	globalMod := pdao.YoubanPublishCollectRule.Ctx(ctx).
 		Where("tenant_id", tenantId).
 		Where("account_id", accountId).
-		Where("status", 1).
 		Where("global_enabled", 1).
 		WhereNull("deleted_at")
 	globalRows, err := globalMod.OrderAsc("sort").OrderAsc("id").All()
@@ -774,7 +774,7 @@ func (s *sSysPublish) collectEventRules(ctx context.Context, event gdb.Record, t
 	if len(ruleIds) > 0 {
 		boundRows, queryErr := pdao.YoubanPublishCollectRule.Ctx(ctx).
 			Where("tenant_id", tenantId).Where("account_id", accountId).
-			WhereIn("id", ruleIds).Where("status", 1).WhereNull("deleted_at").
+			WhereIn("id", ruleIds).WhereNull("deleted_at").
 			OrderAsc("sort").OrderAsc("id").All()
 		if queryErr != nil {
 			return nil, gerror.Wrap(queryErr, "读取采集源绑定规则失败")
@@ -788,7 +788,7 @@ func (s *sSysPublish) collectEventRules(ctx context.Context, event gdb.Record, t
 		}
 	}
 	if len(rows) != 1 {
-		return nil, gerror.Newf("采集源%d的专属规则不存在或已停用", sourceId)
+		return nil, gerror.Newf("采集源%d的专属规则不存在或已删除", sourceId)
 	}
 	rows[0][collectRuleSourceIDField] = gvar.New(sourceId)
 	if err = attachCollectRuleChannels(ctx, rows); err != nil {

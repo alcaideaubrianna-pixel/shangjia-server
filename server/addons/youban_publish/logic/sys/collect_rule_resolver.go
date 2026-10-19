@@ -60,7 +60,7 @@ func (s *sSysPublish) resolveCollectSourceContext(ctx context.Context, event gdb
 		Where("status", 1).
 		WhereIn("source_chat_id", lookupIDs).
 		WhereNull("deleted_at").
-		Where("EXISTS (SELECT 1 FROM "+pdao.YoubanPublishCollectSourceRule.Table()+" sr JOIN "+pdao.YoubanPublishCollectRule.Table()+" r ON r.id=sr.rule_id WHERE sr.source_id="+pdao.YoubanPublishCollectSource.Table()+".id AND sr.status=1 AND r.tenant_id=? AND r.account_id=? AND r.status=1 AND r.deleted_at IS NULL)", tenantID, accountID).
+		Where("EXISTS (SELECT 1 FROM "+pdao.YoubanPublishCollectSourceRule.Table()+" sr JOIN "+pdao.YoubanPublishCollectRule.Table()+" r ON r.id=sr.rule_id WHERE sr.source_id="+pdao.YoubanPublishCollectSource.Table()+".id AND r.tenant_id=? AND r.account_id=? AND r.deleted_at IS NULL)", tenantID, accountID).
 		OrderAsc("id").
 		Limit(2).
 		All()

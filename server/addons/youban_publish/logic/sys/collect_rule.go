@@ -31,9 +31,6 @@ func (s *sSysPublish) CollectRuleList(ctx context.Context, in *sysin.CollectRule
 	if in.GlobalEnabled > 0 {
 		mod = mod.Where("global_enabled", in.GlobalEnabled-1)
 	}
-	if in.Status > 0 {
-		mod = mod.Where("status", in.Status)
-	}
 	if keyword := strings.TrimSpace(in.Keyword); keyword != "" {
 		mod = mod.WhereLike("name", "%"+keyword+"%")
 	}
@@ -125,6 +122,7 @@ func fillCollectRuleDetails(ctx context.Context, list []*sysin.CollectRuleModel)
 	}
 	for _, item := range list {
 		if item != nil {
+			item.Status = 1 // 兼容旧客户端，规则启停由采集源统一控制。
 			item.TargetChannelIds = channelMap[item.Id]
 		}
 	}
@@ -301,6 +299,27 @@ func (s *sSysPublish) CollectRuleDelete(ctx context.Context, in *sysin.IdsInp) e
 	}
 	ids := uniqueIds(in.Ids)
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		ruleCols := pdao.YoubanPublishCollectRule.Columns()
+		// 先锁定当前账号的规则，再检查绑定；与绑定事务使用相同的规则行锁。
+		rows, queryErr := tx.Model(pdao.YoubanPublishCollectRule.Table()).Ctx(ctx).
+			Fields(ruleCols.Id).WhereIn(ruleCols.Id, ids).
+			Where(ruleCols.TenantId, account.TenantId).Where(ruleCols.AccountId, account.Id).
+			WhereNull(ruleCols.DeletedAt).OrderAsc(ruleCols.Id).LockUpdate().All()
+		if queryErr != nil {
+			return gerror.Wrap(queryErr, "读取待删除采集规则失败")
+		}
+		if len(rows) != len(ids) {
+			return gerror.New("采集规则不存在或无权删除")
+		}
+		bindCols := pdao.YoubanPublishCollectSourceRule.Columns()
+		bound, queryErr := tx.Model(pdao.YoubanPublishCollectSourceRule.Table()).Ctx(ctx).
+			WhereIn(bindCols.RuleId, ids).Exist()
+		if queryErr != nil {
+			return gerror.Wrap(queryErr, "检查采集规则绑定失败")
+		}
+		if bound {
+			return gerror.New("采集规则仍被采集源绑定，请通过采集源开关暂停采集，或删除采集源")
+		}
 		if _, txErr := tx.Model(collectRuleItemTable).Ctx(ctx).WhereIn("rule_id", ids).Delete(); txErr != nil {
 			return gerror.Wrap(txErr, "清理采集规则项失败")
 		}

@@ -209,7 +209,7 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 		sourceModel = sourceModel.Where("bot_id", botID)
 	}
 	if ruleID > 0 {
-		sourceModel = sourceModel.Where("EXISTS (SELECT 1 FROM "+pdao.YoubanPublishCollectSourceRule.Table()+" sr WHERE sr.source_id="+publishCollectSourceTable+".id AND sr.rule_id=? AND sr.tenant_id=? AND sr.status=1)", ruleID, tenantID)
+		sourceModel = sourceModel.Where("EXISTS (SELECT 1 FROM "+pdao.YoubanPublishCollectSourceRule.Table()+" sr WHERE sr.source_id="+publishCollectSourceTable+".id AND sr.rule_id=? AND sr.tenant_id=?)", ruleID, tenantID)
 	}
 	var sourceRows []sourceCandidate
 	if err := sourceModel.Fields("status,collect_enabled,bot_id,source_chat_id,title AS chat_title,source_username AS chat_username,last_event_at AS last_message_at").OrderDesc("updated_at").Limit(introFeeChannelCandidateScanLimit).Scan(&sourceRows); err != nil {

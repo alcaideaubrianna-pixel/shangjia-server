@@ -265,7 +265,7 @@ func (s *sSysPublish) fillCollectSourceRules(ctx context.Context, list []*sysin.
 		SourceId int64 `json:"sourceId"`
 		RuleId   int64 `json:"ruleId"`
 	}
-	if err := pdao.YoubanPublishCollectSourceRule.Ctx(ctx).WhereIn("source_id", sourceIds).Where("status", 1).OrderAsc("sort").Scan(&rows); err != nil {
+	if err := pdao.YoubanPublishCollectSourceRule.Ctx(ctx).WhereIn("source_id", sourceIds).OrderAsc("sort").Scan(&rows); err != nil {
 		return gerror.Wrap(err, "读取采集源规则失败")
 	}
 	ruleMap := map[int64][]int64{}
@@ -435,21 +435,22 @@ func (s *sSysPublish) saveCollectSourceRules(ctx context.Context, tx gdb.TX, ten
 	if err != nil {
 		return gerror.Wrap(err, "读取采集源账号失败")
 	}
-	valid, err := tx.Model(pdao.YoubanPublishCollectRule.Table()).Ctx(ctx).
-		Where("id", ruleIds[0]).Where("tenant_id", tenantId).Where("account_id", accountId.Int64()).
-		Where("global_enabled", 0).Where("status", 1).WhereNull("deleted_at").Exist()
+	ruleCols := pdao.YoubanPublishCollectRule.Columns()
+	rule, err := tx.Model(pdao.YoubanPublishCollectRule.Table()).Ctx(ctx).
+		Fields(ruleCols.Id).Where(ruleCols.Id, ruleIds[0]).Where(ruleCols.TenantId, tenantId).Where(ruleCols.AccountId, accountId.Int64()).
+		Where(ruleCols.GlobalEnabled, 0).WhereNull(ruleCols.DeletedAt).LockUpdate().One()
 	if err != nil {
 		return gerror.Wrap(err, "校验采集源专属规则失败")
 	}
-	if !valid {
-		return gerror.New("采集源只能绑定当前账号启用的专属规则")
+	if rule.IsEmpty() {
+		return gerror.New("采集源只能绑定当前账号的专属规则")
 	}
 	// A rule is source-specific. Older clients could submit an existing rule ID
 	// from the same account, which silently made multiple sources share one rule.
 	// Clone the rule (including its items) on conflict so existing clients remain
 	// compatible while each source gets an independent rule going forward.
 	otherSourceValue, err := tx.Model(pdao.YoubanPublishCollectSourceRule.Table()).Ctx(ctx).
-		Fields("source_id").Where("rule_id", ruleIds[0]).Where("status", 1).
+		Fields("source_id").Where("rule_id", ruleIds[0]).
 		Where("source_id !=", sourceId).Value()
 	if err != nil {
 		return gerror.Wrap(err, "检查采集规则是否已被其他来源使用失败")
@@ -506,6 +507,7 @@ func cloneCollectRuleTx(ctx context.Context, tx gdb.TX, tenantId, accountId, rul
 	data["tenant_id"] = tenantId
 	data["account_id"] = accountId
 	data["global_enabled"] = 0
+	data["status"] = 1
 	now := gtime.Now()
 	data["created_by"] = accountId
 	data["updated_by"] = accountId

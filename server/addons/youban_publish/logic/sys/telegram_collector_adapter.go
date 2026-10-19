@@ -1245,10 +1245,10 @@ func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, sourc
 func (s *sSysPublish) sendBotCollectChannelDiscovery(ctx context.Context, source gdb.Record, chatID string, relationID int64, notificationID string) error {
 	tenantID, accountID, botID := source["tenant_id"].Int64(), source["account_id"].Int64(), source["bot_id"].Int64()
 	rules, ruleErr := pdao.YoubanPublishCollectRule.Ctx(ctx).As("r").
-		InnerJoin(pdao.YoubanPublishCollectSourceRule.Table()+" sr", "sr.rule_id=r.id AND sr.tenant_id=r.tenant_id AND sr.status=1").
+		InnerJoin(pdao.YoubanPublishCollectSourceRule.Table()+" sr", "sr.rule_id=r.id AND sr.tenant_id=r.tenant_id").
 		Fields("r.id,r.name,r.intro_fee_suffix,r.bot_id").Where("sr.source_id", source["id"].Int64()).
 		Where("r.tenant_id", tenantID).Where("r.account_id", accountID).
-		Where("r.status", 1).Where("r.intro_fee_suffix_enabled", 1).All()
+		WhereNull("r.deleted_at").Where("r.intro_fee_suffix_enabled", 1).All()
 	if ruleErr != nil {
 		return gerror.Wrap(ruleErr, "读取新频道默认后缀失败")
 	}

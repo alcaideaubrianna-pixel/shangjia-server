@@ -65,7 +65,7 @@ func (s *sSysPublish) BotCollectChannelView(ctx context.Context, relationId, ten
 	if err := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).As("ac").
 		InnerJoin(pdao.YoubanPublishCollectSource.Table()+" s", "s.id=ac.source_id AND s.tenant_id=ac.tenant_id AND s.deleted_at IS NULL").
 		InnerJoin(pdao.YoubanPublishCollectChannel.Table()+" ch", "ch.id=ac.channel_id AND ch.tenant_id=ac.tenant_id AND ch.deleted_at IS NULL").
-		LeftJoin(pdao.YoubanPublishCollectSourceRule.Table()+" sr", "sr.source_id=s.id AND sr.tenant_id=s.tenant_id AND sr.status=1").
+		LeftJoin(pdao.YoubanPublishCollectSourceRule.Table()+" sr", "sr.source_id=s.id AND sr.tenant_id=s.tenant_id").
 		Fields("ac.id,ac.source_id,sr.rule_id,s.bot_id,s.account_id,ch.telegram_chat_id AS channel_id,ch.title AS channel_title,ch.username,ch.invite_link").
 		Where("ac.id", relationId).Where("ac.tenant_id", tenantId).Scan(&relation); err != nil {
 		return nil, gerror.Wrap(err, "读取频道审批记录失败")

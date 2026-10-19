@@ -287,7 +287,7 @@ type CollectRuleListInp struct {
 	form.PageReq
 	Keyword       string `json:"keyword" dc:"关键词"`
 	GlobalEnabled int    `json:"globalEnabled" dc:"全局开关"`
-	Status        int    `json:"status" dc:"状态"`
+	Status        int    `json:"status" dc:"兼容字段，规则不再独立启停"`
 }
 
 type CollectRuleViewInp struct {
@@ -323,7 +323,7 @@ type CollectRuleModel struct {
 	FooterEnabled           int                       `json:"footerEnabled" dc:"后置文案开关"`
 	FooterMarkdown          string                    `json:"footerMarkdown" dc:"后置文案"`
 	Sort                    int                       `json:"sort" dc:"排序"`
-	Status                  int                       `json:"status" dc:"状态"`
+	Status                  int                       `json:"status" dc:"兼容字段，规则不再独立启停"`
 	CreatedAt               *gtime.Time               `json:"createdAt" dc:"创建时间"`
 	UpdatedAt               *gtime.Time               `json:"updatedAt" dc:"更新时间"`
 }
@@ -354,7 +354,7 @@ type CollectRuleSaveInp struct {
 	FooterEnabled           int                       `json:"footerEnabled" dc:"后置文案开关"`
 	FooterMarkdown          string                    `json:"footerMarkdown" dc:"后置文案"`
 	Sort                    int                       `json:"sort" dc:"排序"`
-	Status                  int                       `json:"status" dc:"状态"`
+	Status                  int                       `json:"status" dc:"兼容字段，规则不再独立启停"`
 }
 
 type IntroFeeChannelRuleListInp struct {
@@ -464,9 +464,8 @@ func (in *CollectRuleSaveInp) Filter(ctx context.Context) error {
 	if in.DedupeDays > 3650 {
 		in.DedupeDays = 3650
 	}
-	if in.Status == 0 {
-		in.Status = 1
-	}
+	// 兼容旧客户端的 status 字段；规则不再独立启停，只通过采集源控制。
+	in.Status = 1
 	return nil
 }
 
