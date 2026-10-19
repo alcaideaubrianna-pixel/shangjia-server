@@ -94,8 +94,9 @@ func (s *sSysPublish) enqueueMediaProcess(ctx context.Context, mediaId int64, de
 	task := asynq.NewTask(tgTaskTypeMediaProcess, body)
 	options := []asynq.Option{
 		asynq.Queue(tgQueueNameMediaProcess),
-		asynq.MaxRetry(8),
-		asynq.Timeout(30 * time.Minute),
+		asynq.MaxRetry(mediaProcessMaxAttempts - 1),
+		asynq.Timeout(mediaProcessTaskTimeout),
+		asynq.TaskID(fmt.Sprintf("media-process:%d", mediaId)),
 		asynq.Unique(mediaProcessTaskUniqueTTL),
 	}
 	if delay > 0 {

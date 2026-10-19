@@ -2,6 +2,8 @@ package sys
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -15,6 +17,9 @@ const (
 	mediaProcessingProcessing = "processing"
 	mediaProcessingReady      = "ready"
 	mediaProcessingFailed     = "failed"
+	mediaProcessingRetry      = "retry"
+	mediaProcessMaxAttempts   = 3
+	mediaProcessTaskTimeout   = 10 * time.Minute
 )
 
 func (s *sSysPublish) handleMediaProcessTask(ctx context.Context, task *asynq.Task) error {
@@ -33,6 +38,13 @@ func (s *sSysPublish) handleMediaProcessTask(ctx context.Context, task *asynq.Ta
 	status := strings.TrimSpace(media["processing_status"].String())
 	if status == mediaProcessingReady && strings.TrimSpace(media["md5"].String()) != "" {
 		return nil
+	}
+	retryCount, _ := asynq.GetRetryCount(ctx)
+	if status == mediaProcessingFailed {
+		return asynq.SkipRetry
+	}
+	if retryCount >= mediaProcessMaxAttempts {
+		return s.finishMediaProcessFailure(ctx, payload.MediaId, media["profile_id"].Int64(), fmt.Errorf("媒体处理已达到%d次尝试上限", mediaProcessMaxAttempts), retryCount)
 	}
 	_, err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 		Where("id", payload.MediaId).
@@ -57,12 +69,7 @@ func (s *sSysPublish) handleMediaProcessTask(ctx context.Context, task *asynq.Ta
 		media["md5"].String(),
 	)
 	if processErr != nil {
-		_, _ = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Where("id", payload.MediaId).Data(g.Map{
-			"processing_status": mediaProcessingFailed,
-			"processing_error":  processErr.Error(),
-			"updated_at":        gtime.Now(),
-		}).Update()
-		return processErr
+		return s.finishMediaProcessFailure(ctx, payload.MediaId, media["profile_id"].Int64(), processErr, retryCount)
 	}
 	data := g.Map{
 		"processing_status": mediaProcessingReady,
@@ -89,6 +96,33 @@ func (s *sSysPublish) handleMediaProcessTask(ctx context.Context, task *asynq.Ta
 	return s.wakeProfileTelegramJobs(ctx, media["profile_id"].Int64())
 }
 
+func (s *sSysPublish) finishMediaProcessFailure(ctx context.Context, mediaId, profileId int64, processErr error, retryCount int) error {
+	// Persist the final state even when the worker's request deadline expired.
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	nextStatus := mediaProcessFailureStatus(cleanupCtx, processErr, retryCount)
+	if _, err := g.DB().Model(publishMediaTable).Safe().Ctx(cleanupCtx).Where("id", mediaId).Data(g.Map{
+		"processing_status": nextStatus, "processing_error": processErr.Error(), "updated_at": gtime.Now(),
+	}).Update(); err != nil {
+		return err
+	}
+	g.Log().Warningf(cleanupCtx, "媒体处理失败 mediaId:%d profileId:%d attempt:%d/%d status:%s err:%+v", mediaId, profileId, retryCount+1, mediaProcessMaxAttempts, nextStatus, processErr)
+	if nextStatus == mediaProcessingFailed {
+		if wakeErr := s.wakeProfileTelegramJobs(cleanupCtx, profileId); wakeErr != nil {
+			g.Log().Warningf(cleanupCtx, "媒体处理终止后唤醒推送失败 profileId:%d err:%+v", profileId, wakeErr)
+		}
+		return errors.Join(processErr, asynq.SkipRetry)
+	}
+	return processErr
+}
+
+func mediaProcessFailureStatus(ctx context.Context, err error, retryCount int) string {
+	if retryCount+1 < mediaProcessMaxAttempts && isRetryableMediaFileCacheError(ctx, err) {
+		return mediaProcessingRetry
+	}
+	return mediaProcessingFailed
+}
+
 func (s *sSysPublish) wakeProfileTelegramJobs(ctx context.Context, profileId int64) error {
 	if profileId <= 0 {
 		return nil
@@ -104,7 +138,7 @@ func (s *sSysPublish) wakeProfileTelegramJobs(ctx context.Context, profileId int
 		return err
 	}
 	for _, job := range jobs {
-		if err := s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 0, true); err != nil {
+		if err := s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 0, false); err != nil {
 			g.Log().Warningf(ctx, "媒体就绪唤醒TG任务失败 media_profile_id:%d job_id:%d err:%+v", profileId, job.Id, err)
 		}
 	}
@@ -116,10 +150,10 @@ func (s *sSysPublish) recoverMediaProcessTasks(ctx context.Context) {
 		Id int64 `json:"id"`
 	}
 	cutoff := gtime.Now().Add(-time.Minute)
+	processingCutoff := gtime.Now().Add(-mediaProcessTaskTimeout - time.Minute)
 	if err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
-		WhereIn("processing_status", []string{mediaProcessingUploaded, mediaProcessingProcessing}).
-		WhereLT("updated_at", cutoff).
-		WhereNull("deleted_at").Fields("id").Limit(200).Scan(&rows); err != nil {
+		Where("((processing_status = ? AND updated_at < ?) OR (processing_status = ? AND updated_at < ?))", mediaProcessingUploaded, cutoff, mediaProcessingProcessing, processingCutoff).
+		WhereNull("deleted_at").OrderAsc("updated_at").Fields("id").Limit(200).Scan(&rows); err != nil {
 		g.Log().Warningf(ctx, "恢复媒体异步处理任务查询失败 err:%+v", err)
 		return
 	}

@@ -1147,6 +1147,8 @@ func (s *sSysPublish) lockProfileMediaSyncTx(ctx context.Context, tx gdb.TX, pro
 }
 
 func (s *sSysPublish) syncOwnedMediaToProfile(ctx context.Context, tx gdb.TX, owner gdb.Record, profileId int64) error {
+	// This existing database field is absent from the legacy generated DAO.
+	const purposeColumn = "purpose"
 	var list []*sysin.MediaModel
 	if err := mediaOwnerScope(tx.Model(publishMediaTable).Ctx(ctx), owner).
 		Where("profile_id", profileId).
@@ -1158,11 +1160,18 @@ func (s *sSysPublish) syncOwnedMediaToProfile(ctx context.Context, tx gdb.TX, ow
 	}
 	if len(list) == 0 {
 		now := gtime.Now()
+		mediaColumns := dao.ContentMedia.Columns()
+		if _, err := tx.Model(dao.ContentMedia.Table()).Ctx(ctx).Unscoped().
+			Where(mediaColumns.ProfileId, profileId).WhereNull(mediaColumns.DeletedAt).
+			Data(g.Map{mediaColumns.DeletedAt: now, mediaColumns.UpdatedAt: now}).Update(); err != nil {
+			return gerror.Wrap(err, "清理资料空媒体投影失败")
+		}
 		profileColumns := dao.ContentProfile.Columns()
 		data := g.Map{
 			profileColumns.ImageCount:           0,
 			profileColumns.VideoCount:           0,
 			profileColumns.HasVerificationVideo: 0,
+			profileColumns.CoverMediaId:         nil,
 			profileColumns.UpdatedAt:            now,
 		}
 		if _, err := tx.Model(dao.ContentProfile.Table()).Ctx(ctx).Where(profileColumns.Id, profileId).Data(data).Update(); err != nil {
@@ -1176,7 +1185,7 @@ func (s *sSysPublish) syncOwnedMediaToProfile(ctx context.Context, tx gdb.TX, ow
 	videoCount := 0
 	hasVerificationVideo := 0
 	var coverMediaId int64
-	sourceAssetIds := make([]int64, 0, len(list))
+	activeMediaIds := make([]int64, 0, len(list))
 	for _, item := range list {
 		mediaType := item.MediaType
 		if mediaType == "" {
@@ -1199,9 +1208,6 @@ func (s *sSysPublish) syncOwnedMediaToProfile(ctx context.Context, tx gdb.TX, ow
 		if sourceAssetId <= 0 {
 			sourceAssetId = item.AttachmentId
 		}
-		if sourceAssetId > 0 {
-			sourceAssetIds = append(sourceAssetIds, sourceAssetId)
-		}
 		originalStoragePath := strings.TrimSpace(item.OriginalStoragePath)
 		if originalStoragePath == "" {
 			originalStoragePath = item.StoragePath
@@ -1210,6 +1216,7 @@ func (s *sSysPublish) syncOwnedMediaToProfile(ctx context.Context, tx gdb.TX, ow
 			mediaColumns.ProfileId:           profileId,
 			mediaColumns.SourceAssetId:       sourceAssetId,
 			mediaColumns.MediaType:           mediaType,
+			purposeColumn:                    item.Purpose,
 			mediaColumns.SortIndex:           item.SortIndex,
 			mediaColumns.OriginalStoragePath: originalStoragePath,
 			mediaColumns.DisplayStoragePath:  asset.StoragePath,
@@ -1222,11 +1229,17 @@ func (s *sSysPublish) syncOwnedMediaToProfile(ctx context.Context, tx gdb.TX, ow
 			mediaColumns.DeletedAt:           nil,
 			mediaColumns.UpdatedAt:           now,
 		}
-		existing, err := tx.Model(dao.ContentMedia.Table()).Ctx(ctx).Unscoped().
+		existingMod := tx.Model(dao.ContentMedia.Table()).Ctx(ctx).Unscoped().
 			Where(mediaColumns.ProfileId, profileId).
 			Where(mediaColumns.SourceAssetId, sourceAssetId).
-			Fields(mediaColumns.Id).
-			Value()
+			Where(mediaColumns.MediaType, mediaType).
+			Where(purposeColumn, item.Purpose).
+			Where(mediaColumns.SortIndex, item.SortIndex)
+		// Bot uploads have no attachment ID. Zero is not a media identity.
+		if sourceAssetId <= 0 {
+			existingMod = existingMod.Where(mediaColumns.OriginalStoragePath, originalStoragePath)
+		}
+		existing, err := existingMod.Fields(mediaColumns.Id).OrderAsc(mediaColumns.Id).Value()
 		if err != nil {
 			return gerror.Wrap(err, "检查资料媒体失败")
 		}
@@ -1237,6 +1250,7 @@ func (s *sSysPublish) syncOwnedMediaToProfile(ctx context.Context, tx gdb.TX, ow
 			if coverMediaId == 0 && mediaType == "image" {
 				coverMediaId = existing.Int64()
 			}
+			activeMediaIds = append(activeMediaIds, existing.Int64())
 			continue
 		}
 		data[mediaColumns.CreatedAt] = now
@@ -1247,12 +1261,13 @@ func (s *sSysPublish) syncOwnedMediaToProfile(ctx context.Context, tx gdb.TX, ow
 		if coverMediaId == 0 && mediaType == "image" {
 			coverMediaId = id
 		}
+		activeMediaIds = append(activeMediaIds, id)
 	}
 	staleMediaMod := tx.Model(dao.ContentMedia.Table()).Ctx(ctx).Unscoped().
 		Where(mediaColumns.ProfileId, profileId).
 		WhereNull(mediaColumns.DeletedAt)
-	if len(sourceAssetIds) > 0 {
-		staleMediaMod = staleMediaMod.WhereNotIn(mediaColumns.SourceAssetId, sourceAssetIds)
+	if len(activeMediaIds) > 0 {
+		staleMediaMod = staleMediaMod.WhereNotIn(mediaColumns.Id, activeMediaIds)
 	}
 	if _, err := staleMediaMod.Data(g.Map{
 		mediaColumns.DeletedAt: now,
