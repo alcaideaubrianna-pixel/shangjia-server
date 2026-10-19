@@ -210,6 +210,8 @@ func (s *sSysPublish) ExecuteCollectMediaCache(ctx context.Context, payload coll
 	payload.AccountId = event["account_id"].Int64()
 	payload.SourceId = event["source_id"].Int64()
 	payload.TgAccountId = event["tg_account_id"].Int64()
+	ctx = s.collectProgressContext(ctx, payload.EventId, 0)
+	reportCollectProgress(ctx, "waiting_owner", "等待租户或账号媒体处理配额")
 	ownerLease, err := s.acquireCollectMediaOwnerSlots(ctx, payload)
 	if err != nil {
 		return err
@@ -217,6 +219,7 @@ func (s *sSysPublish) ExecuteCollectMediaCache(ctx context.Context, payload coll
 	defer ownerLease.release()
 	if event["source_type"].String() == sysin.CollectSourceTypeAccount {
 		accountIntervalStartedAt := time.Now()
+		reportCollectProgress(ctx, "waiting_interval", "等待账号媒体下载节流间隔")
 		s.waitCollectMediaAccountInterval(ctx, payload.TenantId, payload.TgAccountId)
 		g.Log().Debugf(ctx, "采集媒体任务账号间隔等待完成 eventId:%d wait:%s", payload.EventId, time.Since(accountIntervalStartedAt).Round(time.Millisecond))
 	}
@@ -501,6 +504,8 @@ func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, even
 		downloadWait.Add(1)
 		go func(index int, row *collectEventMediaRow) {
 			defer downloadWait.Done()
+			ctx := s.collectProgressContext(ctx, event["id"].Int64(), row.Id)
+			reportCollectProgress(ctx, "waiting_slot", "等待组内或全局下载并发槽")
 			startedAt := time.Now()
 			result := downloadResult{index: index, row: row}
 			if fileSlots != nil {
@@ -571,6 +576,7 @@ func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, even
 			if sourceType == sysin.CollectSourceTypeBot {
 				cached, err = s.downloadBotTelegramMedia(itemCtx, event["tenant_id"].Int64(), event["bot_id"].Int64(), items[index])
 			} else {
+				reportCollectProgress(itemCtx, "account_download", "等待账号媒体任务完成下载和转存")
 				cached, err = s.downloadTelegramMedia(itemCtx, event["tenant_id"].Int64(), event["account_id"].Int64(), event["tg_account_id"].Int64(), row.Id, items[index])
 			}
 			if err != nil {
@@ -648,6 +654,7 @@ func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, even
 			if result.item.DebugMetaJson == "" {
 				result.item.DebugMetaJson = items[index].DebugMetaJson
 			}
+			reportCollectProgress(ctx, "persist", "写回本媒体的地址、指纹和缓存状态")
 			_, updateErr := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).Where("id", row.Id).Data(g.Map{
 				"source_file_id":        result.item.FileId,
 				"source_ref_type":       collectMediaRefType(result.item),
@@ -678,6 +685,7 @@ func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, even
 				results[index] = result
 				return
 			}
+			reportCollectProgress(ctx, "media_ready", "本媒体已写回；其余媒体状态见缓存进度")
 			g.Log().Debugf(ctx, "采集媒体下载结果已写回 eventId:%d mediaId:%d duration:%s size:%d", event["id"].Int64(), row.Id, time.Since(startedAt).Round(time.Millisecond), cachedSize)
 			results[index] = result
 		}(index, row)
@@ -996,6 +1004,7 @@ func (s *sSysPublish) downloadBotTelegramMediaWithToken(ctx context.Context, bot
 	if fileID == "" {
 		return nil, gerror.New("Bot采集媒体缺少File ID")
 	}
+	reportCollectProgress(ctx, "get_file", "获取TG文件信息及下载地址；包含API限流等待")
 	getFileStartedAt := time.Now()
 	resolved, err := gatewayservice.Gateway().ResolveMedia(ctx, botToken, telegrammedia.Request{FileID: fileID, MediaType: item.Type, Size: item.SourceSize})
 	endpoint := resolved.Endpoint
@@ -1026,6 +1035,7 @@ func (s *sSysPublish) downloadBotTelegramMediaWithToken(ctx context.Context, bot
 	}
 	client.Timeout = 2 * time.Minute
 	defer client.CloseIdleConnections()
+	reportCollectProgress(ctx, "download", "准备媒体缓存或下载文件")
 	path, err := cachedRemoteMediaFileWithMetaSourceAndDownloader(ctx, cacheKey, remoteSource, cacheSource, collectMediaExt(item.Type, ""), func(downloadCtx context.Context, source string, filePath string) error {
 		downloadStartedAt := time.Now()
 		downloadErr := telegrammedia.DownloadFile(downloadCtx, client, source, filePath)
@@ -1038,6 +1048,7 @@ func (s *sSysPublish) downloadBotTelegramMediaWithToken(ctx context.Context, bot
 	if strings.TrimSpace(path) == "" {
 		return nil, gerror.New("Bot媒体文件下载完成但缓存路径为空")
 	}
+	reportCollectProgress(ctx, "fingerprint", "计算文件MD5并检查可复用存储")
 	md5Value, mediaSize, mimeType, err := calculateTelegramMediaFingerprint(path, item.Type, item.SourceMimeType)
 	if err != nil {
 		return nil, err
@@ -1054,6 +1065,7 @@ func (s *sSysPublish) downloadBotTelegramMediaWithToken(ctx context.Context, bot
 		item.PosterUrl = cached.PosterURL
 		return &collectDownloadedMedia{FileUrl: item.FileUrl, Path: item.StoragePath, Item: item}, nil
 	}
+	reportCollectProgress(ctx, "upload", "上传媒体至云存储")
 	attachment, err := s.uploadCollectMediaToStorage(ctx, item.Type, path)
 	if err != nil {
 		return nil, gerror.Wrap(err, "Bot采集媒体上传云存储失败")

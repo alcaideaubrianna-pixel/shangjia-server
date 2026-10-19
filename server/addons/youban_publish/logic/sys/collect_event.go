@@ -63,6 +63,9 @@ func (s *sSysPublish) CollectEventList(ctx context.Context, in *sysin.CollectEve
 	if err = s.fillCollectEventMediaCache(ctx, list); err != nil {
 		return nil, 0, err
 	}
+	if err = s.fillCollectEventProgress(ctx, list); err != nil {
+		return nil, 0, gerror.Wrap(err, "读取采集处理阶段失败")
+	}
 	for _, item := range list {
 		item.IgnoreType = collectEventIgnoreType(item.Status, item.ErrorMessage)
 	}
@@ -501,12 +504,14 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		if err = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusMediaPending, "媒体缓存中"); err != nil {
 			return err
 		}
+		reportCollectProgress(ctx, "media_queued", "等待媒体工作线程执行缓存任务")
 		s.appendCollectEventLogForRecord(ctx, event, "media", "pending", "媒体等待缓存", "")
 		return s.enqueueCollectMediaCache(ctx, collectMediaQueuePayloadFromEvent(event), 0)
 	}
 	if !verifyReady {
 		return newCollectProcessRetryError(30*time.Second, "等待验证资料媒体缓存完成")
 	}
+	reportCollectProgress(ctx, "waiting_commit", "等待资料去重提交锁")
 	lockKeys := make([]string, 0, 1)
 	if sourceGroupKey := collectSourceGroupKey(event); sourceGroupKey != "" {
 		lockKeys = append(lockKeys, "source_group:"+sourceGroupKey)
@@ -535,6 +540,7 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusMediaReady, "")
 		s.appendCollectEventLogForRecord(ctx, event, "media", "ready", "媒体已就绪", "")
 	}
+	reportCollectProgress(ctx, "extract", "解析资料正文及合并验证内容")
 	content, err := s.ensureCollectContent(ctx, event)
 	if err != nil {
 		_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusFailed, err.Error())
@@ -566,6 +572,7 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 	}
 	matched := false
 	reasons := make([]string, 0, len(candidateRules))
+	reportCollectProgress(ctx, "commit", "按匹配规则保存资料并创建分发任务")
 	for _, rule := range candidateRules {
 		ruleMatched, skipReason, dispatchErr := s.dispatchCollectEventByRule(ctx, event, content, rule)
 		if dispatchErr != nil {

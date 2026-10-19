@@ -141,35 +141,57 @@ type CollectMediaBenchmarkModel struct {
 	Items           []*CollectMediaBenchmarkItem `json:"items" dc:"明细"`
 }
 
+type CollectMediaProgressModel struct {
+	Id          int64       `json:"id"`
+	Label       string      `json:"label"`
+	Attempts    int         `json:"attempts"`
+	Bytes       int64       `json:"bytes"`
+	UpdatedAt   *gtime.Time `json:"updatedAt"`
+	NextRetryAt *gtime.Time `json:"nextRetryAt"`
+	Message     string      `json:"message"`
+}
+
+type CollectEventProgressModel struct {
+	Media             []*CollectMediaProgressModel `json:"media"`
+	Stage             string                       `json:"stage" dc:"当前处理阶段"`
+	Label             string                       `json:"label" dc:"阶段名称"`
+	Message           string                       `json:"message" dc:"等待或处理原因"`
+	Since             *gtime.Time                  `json:"since" dc:"当前阶段开始时间"`
+	ElapsedSeconds    int64                        `json:"elapsedSeconds" dc:"当前阶段已耗时秒"`
+	NextRetryAt       *gtime.Time                  `json:"nextRetryAt" dc:"下次计划执行时间"`
+	NoProgressWarning bool                         `json:"noProgressWarning" dc:"阶段长时间未推进提醒，并非死锁判定"`
+}
+
 type CollectEventModel struct {
-	Id                 int64       `json:"id" dc:"ID"`
-	TenantId           int64       `json:"tenantId" dc:"租户ID"`
-	AccountId          int64       `json:"accountId" dc:"账号ID"`
-	SourceId           int64       `json:"sourceId" dc:"采集源ID"`
-	SourceTitle        string      `json:"sourceTitle" dc:"采集源名称"`
-	SourceType         string      `json:"sourceType" dc:"来源类型"`
-	BotId              int64       `json:"botId" dc:"机器人ID"`
-	TgAccountId        int64       `json:"tgAccountId" dc:"协议号ID"`
-	SourceChatId       string      `json:"sourceChatId" dc:"来源Chat ID"`
-	SourceMessageId    int64       `json:"sourceMessageId" dc:"来源消息ID"`
-	SourceGroupedId    string      `json:"sourceGroupedId" dc:"媒体组ID"`
-	SourceUniqueKey    string      `json:"sourceUniqueKey" dc:"来源唯一键"`
-	RawText            string      `json:"rawText" dc:"原始文本"`
-	MediaCount         int         `json:"mediaCount" dc:"媒体数"`
-	MediaCacheStatus   string      `json:"mediaCacheStatus" dc:"媒体缓存状态"`
-	MediaCacheMessage  string      `json:"mediaCacheMessage" dc:"媒体缓存说明"`
-	TextHash           string      `json:"textHash" dc:"文本哈希"`
-	DedupeKey          string      `json:"dedupeKey" dc:"去重键"`
-	Status             string      `json:"status" dc:"状态"`
-	IgnoreType         string      `json:"ignoreType" dc:"忽略类型"`
-	ErrorMessage       string      `json:"errorMessage" dc:"错误信息"`
-	TargetChannelIds   []int64     `json:"targetChannelIds" dc:"目标频道ID"`
-	TargetChannelNames []string    `json:"targetChannelNames" dc:"目标频道名称"`
-	ReviewStatus       string      `json:"reviewStatus" dc:"审核状态"`
-	DispatchStatus     string      `json:"dispatchStatus" dc:"分发状态"`
-	ReceivedAt         *gtime.Time `json:"receivedAt" dc:"接收时间"`
-	ProcessedAt        *gtime.Time `json:"processedAt" dc:"处理时间"`
-	CreatedAt          *gtime.Time `json:"createdAt" dc:"创建时间"`
+	Progress           *CollectEventProgressModel `json:"progress" dc:"处理阶段详情"`
+	Id                 int64                      `json:"id" dc:"ID"`
+	TenantId           int64                      `json:"tenantId" dc:"租户ID"`
+	AccountId          int64                      `json:"accountId" dc:"账号ID"`
+	SourceId           int64                      `json:"sourceId" dc:"采集源ID"`
+	SourceTitle        string                     `json:"sourceTitle" dc:"采集源名称"`
+	SourceType         string                     `json:"sourceType" dc:"来源类型"`
+	BotId              int64                      `json:"botId" dc:"机器人ID"`
+	TgAccountId        int64                      `json:"tgAccountId" dc:"协议号ID"`
+	SourceChatId       string                     `json:"sourceChatId" dc:"来源Chat ID"`
+	SourceMessageId    int64                      `json:"sourceMessageId" dc:"来源消息ID"`
+	SourceGroupedId    string                     `json:"sourceGroupedId" dc:"媒体组ID"`
+	SourceUniqueKey    string                     `json:"sourceUniqueKey" dc:"来源唯一键"`
+	RawText            string                     `json:"rawText" dc:"原始文本"`
+	MediaCount         int                        `json:"mediaCount" dc:"媒体数"`
+	MediaCacheStatus   string                     `json:"mediaCacheStatus" dc:"媒体缓存状态"`
+	MediaCacheMessage  string                     `json:"mediaCacheMessage" dc:"媒体缓存说明"`
+	TextHash           string                     `json:"textHash" dc:"文本哈希"`
+	DedupeKey          string                     `json:"dedupeKey" dc:"去重键"`
+	Status             string                     `json:"status" dc:"状态"`
+	IgnoreType         string                     `json:"ignoreType" dc:"忽略类型"`
+	ErrorMessage       string                     `json:"errorMessage" dc:"错误信息"`
+	TargetChannelIds   []int64                    `json:"targetChannelIds" dc:"目标频道ID"`
+	TargetChannelNames []string                   `json:"targetChannelNames" dc:"目标频道名称"`
+	ReviewStatus       string                     `json:"reviewStatus" dc:"审核状态"`
+	DispatchStatus     string                     `json:"dispatchStatus" dc:"分发状态"`
+	ReceivedAt         *gtime.Time                `json:"receivedAt" dc:"接收时间"`
+	ProcessedAt        *gtime.Time                `json:"processedAt" dc:"处理时间"`
+	CreatedAt          *gtime.Time                `json:"createdAt" dc:"创建时间"`
 }
 
 type CollectEventClearInp struct {

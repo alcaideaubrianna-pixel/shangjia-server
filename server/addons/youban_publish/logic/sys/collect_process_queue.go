@@ -323,6 +323,7 @@ func (s *sSysPublish) processCollectSourceTask(ctx context.Context, payload coll
 		if err = processErr; err != nil {
 			var retryErr *collectProcessRetryError
 			if errors.As(err, &retryErr) {
+				reportCollectProgress(ctx, "waiting", retryErr.message)
 				return retryErr.delay, true, false, nil
 			}
 			return 0, false, false, err

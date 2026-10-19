@@ -550,8 +550,10 @@ func (s *sSysPublish) handleCollectProcessTask(ctx context.Context, task *asynq.
 	if err != nil {
 		return err
 	}
+	ctx = s.collectProgressContext(ctx, payload.EventId, 0)
 	unlock, lockErr := lockCollectProcessEvent(ctx, payload)
 	if lockErr != nil {
+		reportCollectProgress(ctx, "waiting_lock", "已有工作线程持有事件处理锁，等待重试")
 		return newCollectProcessRetryError(10*time.Second, "采集事件正在处理，稍后重试")
 	}
 	defer unlock()
@@ -564,7 +566,11 @@ func (s *sSysPublish) handleCollectProcessTask(ctx context.Context, task *asynq.
 			return nil
 		} // Superseded by a newer durable schedule.
 	}
+	reportCollectProgress(ctx, "processing", "工作线程已开始执行，检查资料分组、验证配对与规则")
 	delay, pending, removeSchedule, err := s.processCollectSourceTask(ctx, payload)
+	if err != nil {
+		reportCollectProgress(ctx, "failed", err.Error())
+	}
 	if err != nil || !pending {
 		if err == nil && removeSchedule {
 			err = s.reconcileCollectProcessSchedule(ctx, payload)

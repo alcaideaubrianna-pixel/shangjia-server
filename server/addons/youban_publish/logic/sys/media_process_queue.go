@@ -51,15 +51,6 @@ func (s *sSysPublish) handleMediaProcessTask(ctx context.Context, task *asynq.Ta
 	if retryCount >= mediaProcessMaxAttempts {
 		return s.finishMediaProcessFailure(ctx, payload.MediaId, media["profile_id"].Int64(), fmt.Errorf("媒体处理已达到%d次尝试上限", mediaProcessMaxAttempts), retryCount)
 	}
-	retryCount, _ := asynq.GetRetryCount(ctx)
-	// Legacy workers wrote failed before every queue retry. Only versioned
-	// tasks use failed to mean the processing policy is exhausted.
-	if mediaProcessFailureIsTerminal(status, payload) {
-		return asynq.SkipRetry
-	}
-	if retryCount >= mediaProcessMaxAttempts {
-		return s.finishMediaProcessFailure(ctx, payload.MediaId, media["profile_id"].Int64(), fmt.Errorf("媒体处理已达到%d次尝试上限", mediaProcessMaxAttempts), retryCount)
-	}
 	_, err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 		Where("id", payload.MediaId).
 		Data(g.Map{"processing_status": mediaProcessingProcessing, "processing_started_at": gtime.Now(), "updated_at": gtime.Now()}).Update()
@@ -124,37 +115,6 @@ func (s *sSysPublish) completeMediaProcessingProjection(ctx context.Context, med
 		return err
 	}
 	return s.wakeProfileTelegramJobs(ctx, profileId)
-}
-
-func mediaProcessFailureIsTerminal(status string, payload mediaProcessQueuePayload) bool {
-	return status == mediaProcessingFailed && payload.RetryPolicyVersion > 0
-}
-
-func (s *sSysPublish) finishMediaProcessFailure(ctx context.Context, mediaId, profileId int64, processErr error, retryCount int) error {
-	// Persist the final state even when the worker's request deadline expired.
-	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
-	nextStatus := mediaProcessFailureStatus(cleanupCtx, processErr, retryCount)
-	if _, err := g.DB().Model(publishMediaTable).Safe().Ctx(cleanupCtx).Where("id", mediaId).Data(g.Map{
-		"processing_status": nextStatus, "processing_error": processErr.Error(), "updated_at": gtime.Now(),
-	}).Update(); err != nil {
-		return err
-	}
-	g.Log().Warningf(cleanupCtx, "媒体处理失败 mediaId:%d profileId:%d attempt:%d/%d status:%s err:%+v", mediaId, profileId, retryCount+1, mediaProcessMaxAttempts, nextStatus, processErr)
-	if nextStatus == mediaProcessingFailed {
-		if wakeErr := s.wakeProfileTelegramJobs(cleanupCtx, profileId); wakeErr != nil {
-			g.Log().Warningf(cleanupCtx, "媒体处理终止后唤醒推送失败 profileId:%d err:%+v", profileId, wakeErr)
-		}
-		return errors.Join(processErr, asynq.SkipRetry)
-	}
-	return processErr
-}
-
-func mediaProcessFailureStatus(ctx context.Context, err error, retryCount int) string {
-	if retryCount+1 < mediaProcessMaxAttempts && isRetryableMediaFileCacheError(ctx, err) {
-		return mediaProcessingRetry
-	}
-	return mediaProcessingFailed
 }
 
 func mediaProcessFailureIsTerminal(status string, payload mediaProcessQueuePayload) bool {
