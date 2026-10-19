@@ -184,7 +184,8 @@ type autoDeleteBackfillQueuePayload struct {
 }
 
 type mediaProcessQueuePayload struct {
-	MediaId int64 `json:"mediaId"`
+	MediaId            int64 `json:"mediaId"`
+	RetryPolicyVersion int   `json:"retryPolicyVersion,omitempty"`
 }
 
 type botMediaRepairQueuePayload struct {
