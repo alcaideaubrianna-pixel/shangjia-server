@@ -12,4 +12,5 @@ const (
 	DuplicateScanWorkKeyPrefix        = "youban_publish:duplicate_scan:work:"
 	DuplicateScanResultKeyPrefix      = "youban_publish:duplicate_scan:result:v4:"
 	PublishAccountActivityKeyPrefix   = "youban_publish:account:activity:"
+	MediaPHashScopeSizeKeyPrefix      = "youban_publish:media_phash_lsh:scope_size:"
 )

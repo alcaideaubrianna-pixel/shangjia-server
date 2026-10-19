@@ -34,6 +34,11 @@ type cachedBotMediaFingerprint struct {
 	PHash uint64 `json:"pHash"`
 }
 
+func (s *sSysPublish) BotMediaFingerprintCached(ctx context.Context, fileUniqueId string) bool {
+	_, ok := telegramImageFingerprintFromCache(ctx, fileUniqueId)
+	return ok
+}
+
 func cachedTelegramImageFingerprint(ctx context.Context, fileUniqueId string, imageURL string) (*mediaFingerprint, bool, error) {
 	if fingerprint, ok := telegramImageFingerprintFromCache(ctx, fileUniqueId); ok {
 		return fingerprint, true, nil

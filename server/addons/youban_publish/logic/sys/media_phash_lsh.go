@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -10,8 +11,11 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+	"golang.org/x/sync/singleflight"
 
+	publishconsts "hotgo/addons/youban_publish/consts"
 	"hotgo/internal/library/cache"
+	"hotgo/utility/scantrace"
 )
 
 const (
@@ -20,12 +24,15 @@ const (
 	mediaPHashLshBlockCount     = 4
 	mediaPHashLshBlockBits      = 16
 	mediaPHashLshMaxQueryRadius = 3
+	mediaPHashLshScopeScanLimit = 100000
 )
 
 type mediaPHashLshCell struct {
 	Pos   int
 	Value int
 }
+
+var mediaPHashLshScopeSizeGroup singleflight.Group
 
 func mediaPHashLshReady(ctx context.Context) bool {
 	value, err := cache.Instance().Get(ctx, mediaPHashLshReadyKey)
@@ -98,7 +105,11 @@ func mediaPHashLshBucketValues(hash string) []mediaPHashLshCell {
 }
 
 func mediaPHashLshCandidateRowsWithScopes(ctx context.Context, normalizedHash string, threshold int, scopes []mediaPHashBucketScopePart, profileIds []int64, mediaType string, excludeProfileId int64) ([]mediaPHashBucketCandidateRow, error) {
-	query, args, err := mediaPHashLshCandidateSQL(normalizedHash, threshold, scopes, profileIds, mediaType, excludeProfileId)
+	scanScope, err := mediaPHashLshScanSmallScope(ctx, scopes, profileIds, mediaType, excludeProfileId)
+	if err != nil {
+		return nil, err
+	}
+	query, args, err := mediaPHashLshCandidateSQLWithStrategy(normalizedHash, threshold, scopes, profileIds, mediaType, excludeProfileId, scanScope)
 	if err != nil {
 		return nil, err
 	}
@@ -106,6 +117,8 @@ func mediaPHashLshCandidateRowsWithScopes(ctx context.Context, normalizedHash st
 		return []mediaPHashBucketCandidateRow{}, nil
 	}
 	rows := make([]mediaPHashBucketCandidateRow, 0)
+	finish := scantrace.Begin(scantrace.With(ctx, g.Map{"scopeScan": scanScope}), "query.phash_candidates")
+	defer func() { finish(err) }()
 	if err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		if strings.EqualFold(g.DB().GetConfig().Type, "pgsql") {
 			if _, err = tx.Exec("SET LOCAL work_mem = '64MB'"); err != nil {
@@ -125,7 +138,49 @@ func mediaPHashLshCandidateRowsWithScopes(ctx context.Context, normalizedHash st
 	return rows, nil
 }
 
+// Only the query strategy is cached: estimates cannot add or remove matches.
+// EXPLAIN (without ANALYZE) consults planner statistics without scanning media.
+// Counting even a bounded scope first can consume the entire cold-query budget.
+func mediaPHashLshScanSmallScope(ctx context.Context, scopes []mediaPHashBucketScopePart, profileIds []int64, mediaType string, excludeProfileId int64) (bool, error) {
+	if len(mediaPHashBucketValidScopes(scopes)) == 0 {
+		return false, nil
+	}
+	branch, args := mediaPHashLshBranchSQL(1, nil, scopes, profileIds, mediaType, excludeProfileId)
+	key := publishconsts.MediaPHashScopeSizeKeyPrefix + mediaPHashHashKey(fmt.Sprint(scopes, profileIds, mediaType, excludeProfileId))
+	result, err, _ := mediaPHashLshScopeSizeGroup.Do(key, func() (interface{}, error) {
+		value, err := cache.Instance().GetOrSet(ctx, key, func(ctx context.Context) (interface{}, error) {
+			finish := scantrace.Begin(ctx, "query.phash_scope_estimate")
+			value, err := g.DB().GetValue(ctx, "EXPLAIN (FORMAT JSON) "+branch, args...)
+			finish(err)
+			if err != nil {
+				return nil, gerror.Wrap(err, "估算扫图指纹查询范围失败")
+			}
+			var plans []struct {
+				Plan struct {
+					Rows int64 `json:"Plan Rows"`
+				} `json:"Plan"`
+			}
+			if err := json.Unmarshal(value.Bytes(), &plans); err != nil || len(plans) != 1 {
+				return nil, gerror.New("解析扫图指纹查询范围失败")
+			}
+			return plans[0].Plan.Rows <= mediaPHashLshScopeScanLimit, nil
+		}, 30*time.Second)
+		if err != nil {
+			return nil, err
+		}
+		return value.Bool(), nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return result.(bool), nil
+}
+
 func mediaPHashLshCandidateSQL(normalizedHash string, threshold int, scopes []mediaPHashBucketScopePart, profileIds []int64, mediaType string, excludeProfileId int64) (string, []any, error) {
+	return mediaPHashLshCandidateSQLWithStrategy(normalizedHash, threshold, scopes, profileIds, mediaType, excludeProfileId, false)
+}
+
+func mediaPHashLshCandidateSQLWithStrategy(normalizedHash string, threshold int, scopes []mediaPHashBucketScopePart, profileIds []int64, mediaType string, excludeProfileId int64, scanScope bool) (string, []any, error) {
 	cells := mediaPHashLshCells(normalizedHash, threshold)
 	if len(cells) == 0 {
 		return "", nil, gerror.New("pHash LSH 查询参数无效")
@@ -142,9 +197,12 @@ func mediaPHashLshCandidateSQL(normalizedHash string, threshold int, scopes []me
 	branches := make([]string, 0, branchCapacity)
 	args := make([]any, 0, len(cells)+mediaPHashLshBlockCount*8)
 	for pos := 1; pos <= mediaPHashLshBlockCount; pos++ {
+		if scanScope && pos > 1 {
+			break
+		}
 		values := make([]int, 0)
 		for _, cell := range cells {
-			if cell.Pos == pos {
+			if !scanScope && cell.Pos == pos {
 				values = append(values, cell.Value)
 			}
 		}
@@ -203,10 +261,12 @@ LIMIT %d`, strings.Join(branches, " UNION ALL "), mediaSimilarLiveProfileIndexEx
 func mediaPHashLshBranchSQL(pos int, values []int, scopes []mediaPHashBucketScopePart, profileIds []int64, mediaType string, excludeProfileId int64) (string, []any) {
 	conds := []string{"b.bucket_pos = ?"}
 	args := []any{pos}
-	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(values)), ",")
-	conds = append(conds, "b.bucket_value IN ("+placeholders+")")
-	for _, value := range values {
-		args = append(args, value)
+	if len(values) > 0 {
+		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(values)), ",")
+		conds = append(conds, "b.bucket_value IN ("+placeholders+")")
+		for _, value := range values {
+			args = append(args, value)
+		}
 	}
 	if mediaType != "" {
 		condition, conditionArgs := mediaPHashBucketMediaTypeCondition("b.media_type", mediaType)

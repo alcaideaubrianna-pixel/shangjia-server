@@ -90,7 +90,7 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 			continue
 		}
 		url := normalizeBotMediaCacheURL(item.FileUrl)
-		if url == "" {
+		if url == "" && strings.TrimSpace(item.FileUniqueId) == "" {
 			continue
 		}
 		cloned := *item
@@ -145,8 +145,11 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 	fingerprintMatches, err := loadBotMediaSearchCandidates(ctx, fingerprints, func(queryCtx context.Context, fingerprint *mediaFingerprint) ([]*botMediaSearchCandidate, error) {
 		return s.botMediaSearchFingerprintCandidates(queryCtx, fingerprint, searchIn, searchScope)
 	})
-	if err != nil {
+	if err != nil && len(matches) == 0 {
 		return nil, 0, err
+	}
+	if err != nil {
+		g.Log().Warning(ctx, "部分扫图查询失败，保留已确认的媒体匹配", g.Map{"err": err, "matchedItems": len(matches)})
 	}
 	matches = append(matches, fingerprintMatches...)
 	profileIds := rankBotMediaSearchCandidates(matches)
@@ -243,19 +246,39 @@ func loadBotMediaSearchCandidates(ctx context.Context, fingerprints []*mediaFing
 		}
 	}
 	results := make([][]*botMediaSearchCandidate, len(unique))
-	group, queryCtx := errgroup.WithContext(ctx)
+	errors := make([]error, len(unique))
+	queryCtx, cancelQueries := context.WithTimeout(ctx, 2*time.Second)
+	defer cancelQueries()
+	group := new(errgroup.Group)
 	// Keep database fan-out small even for a ten-image Telegram album.
 	group.SetLimit(2)
 	for index, fingerprint := range unique {
 		index, fingerprint := index, fingerprint
 		group.Go(func() error {
-			items, err := loader(queryCtx, fingerprint)
-			results[index] = items
-			return err
+			itemCtx := scantrace.With(queryCtx, g.Map{"itemIndex": index})
+			items, err := loader(itemCtx, fingerprint)
+			if err == nil {
+				results[index] = items
+			}
+			errors[index] = err
+			// One failed album member must not cancel other valid matches.
+			return nil
 		})
 	}
-	if err := group.Wait(); err != nil {
-		return nil, err
+	_ = group.Wait()
+	var firstErr error
+	matched := false
+	for index, items := range results {
+		matched = matched || len(items) > 0
+		if errors[index] != nil {
+			if firstErr == nil {
+				firstErr = errors[index]
+			}
+			g.Log().Warning(ctx, "扫图单张候选查询失败", g.Map{"itemIndex": index, "err": errors[index]})
+		}
+	}
+	if firstErr != nil && !matched {
+		return nil, firstErr
 	}
 	return results, nil
 }

@@ -1,10 +1,44 @@
 package sys
 
 import (
+	"context"
 	"testing"
 
 	"github.com/go-telegram/bot/models"
+	publishService "hotgo/addons/youban_publish/service"
 )
+
+type scanFingerprintCacheService struct {
+	publishService.ISysPublish
+}
+
+func (*scanFingerprintCacheService) BotMediaFingerprintCached(context.Context, string) bool {
+	return true
+}
+
+func TestCachedScanMediaSkipsTelegramResolution(t *testing.T) {
+	var previous publishService.ISysPublish
+	func() {
+		defer func() { _ = recover() }()
+		previous = publishService.SysPublish()
+	}()
+	publishService.RegisterSysPublish(&scanFingerprintCacheService{ISysPublish: previous})
+	t.Cleanup(func() { publishService.RegisterSysPublish(previous) })
+	for _, message := range []*models.Message{
+		{Photo: []models.PhotoSize{{FileID: "photo", FileUniqueID: "stable-photo", FileSize: 100}}},
+		{Video: &models.Video{FileUniqueID: "stable-video", Thumbnail: &models.PhotoSize{FileID: "thumbnail"}}},
+	} {
+		// A missing token would fail if the cached path called Telegram getFile.
+		media, err := NewSysBot().resolveTelegramScanMedia(context.Background(), 0, "", message)
+		if err != nil {
+			t.Fatal(err)
+		}
+		items := scanSearchItems(media)
+		if len(items) != 1 || items[0].FileUniqueId != telegramMessageFileUniqueId(message) || items[0].FileUrl != "" {
+			t.Fatalf("cached scan media lost identity: %+v", items)
+		}
+	}
+}
 
 func TestForwardedChannelMessageRef(t *testing.T) {
 	msg := &models.Message{ForwardOrigin: &models.MessageOrigin{

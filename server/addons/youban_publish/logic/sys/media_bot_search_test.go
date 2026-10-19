@@ -115,6 +115,48 @@ func TestLoadBotMediaCandidatesDoesNotTurnTimeoutIntoEmptySuccess(t *testing.T) 
 	}
 }
 
+func TestLoadBotMediaCandidatesContinuesAfterOneTimeout(t *testing.T) {
+	var calls atomic.Int32
+	results, err := loadBotMediaSearchCandidates(context.Background(), []*mediaFingerprint{{MD5: "timeout"}, {MD5: "matching"}, {MD5: "later"}}, func(ctx context.Context, f *mediaFingerprint) ([]*botMediaSearchCandidate, error) {
+		calls.Add(1)
+		if f.MD5 == "timeout" {
+			return nil, context.DeadlineExceeded
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return []*botMediaSearchCandidate{{ProfileId: 101, Distance: 12}}, nil
+	})
+	if err != nil || calls.Load() != 3 || len(results) != 3 || len(results[1]) != 1 || len(results[2]) != 1 {
+		t.Fatalf("album queries were cancelled: calls=%d results=%v err=%v", calls.Load(), results, err)
+	}
+}
+
+func TestLoadBotMediaCandidatesIncompleteEmptyIsNotNoMatch(t *testing.T) {
+	results, err := loadBotMediaSearchCandidates(context.Background(), []*mediaFingerprint{{MD5: "timeout"}, {MD5: "empty"}}, func(_ context.Context, f *mediaFingerprint) ([]*botMediaSearchCandidate, error) {
+		if f.MD5 == "timeout" {
+			return nil, context.DeadlineExceeded
+		}
+		return nil, nil
+	})
+	if err == nil || results != nil {
+		t.Fatalf("incomplete search returned empty success: results=%v err=%v", results, err)
+	}
+}
+
+func TestLoadBotMediaCandidatesSharesAlbumDeadline(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	_, err := loadBotMediaSearchCandidates(ctx, []*mediaFingerprint{{MD5: "a"}, {MD5: "b"}, {MD5: "c"}, {MD5: "d"}}, func(ctx context.Context, _ *mediaFingerprint) ([]*botMediaSearchCandidate, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	if err == nil || time.Since(started) > time.Second {
+		t.Fatalf("album deadline was not respected: elapsed=%s err=%v", time.Since(started), err)
+	}
+}
+
 func TestRankBotMediaCandidatesRejectsDistanceAboveTwelve(t *testing.T) {
 	groups := [][]*botMediaSearchCandidate{
 		{{ProfileId: 676231, Distance: 14}, {ProfileId: 397235, Distance: 14}, {ProfileId: 11, Distance: 12}},

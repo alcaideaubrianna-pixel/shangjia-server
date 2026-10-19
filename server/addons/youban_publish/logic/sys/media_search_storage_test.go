@@ -21,6 +21,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -447,6 +448,40 @@ func TestMediaSearchStorageLocalPostgres(t *testing.T) {
 			}
 			if !hit {
 				t.Fatal("lost distance-12 candidate")
+			}
+			scopedSQL, scopedArgs, err := mediaPHashLshCandidateSQLWithStrategy("0000000000000000", 12, []mediaPHashBucketScopePart{{TenantId: 5, AccountIds: []int64{6}}}, nil, "image", 0, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var scoped []mediaPHashBucketCandidateRow
+			if err := tx.Raw(scopedSQL, scopedArgs...).Scan(&scoped); err != nil {
+				t.Fatal(err)
+			}
+			identity := func(rows []mediaPHashBucketCandidateRow) map[string]bool {
+				ids := make(map[string]bool)
+				for _, row := range rows {
+					ids[fmt.Sprintf("%d:%d:%s", row.MediaId, row.ProfileId, row.HashValue)] = true
+				}
+				return ids
+			}
+			if !reflect.DeepEqual(identity(found), identity(scoped)) {
+				t.Fatalf("scoped scan differs from LSH: lsh=%v scoped=%v", identity(found), identity(scoped))
+			}
+		})
+
+		t.Run("lsh_scope_strategy_uses_statistics", func(t *testing.T) {
+			if _, err := tx.Exec(`INSERT INTO hg_youban_publish_media_phash_lsh(tenant_id,account_id,profile_id,media_id,media_type,hash_value,bucket_pos,bucket_value)
+SELECT 77,6,101,10000000+n,'image','ffffffffffffffff',1,65535 FROM generate_series(1,?) n`, 2*mediaPHashLshScopeScanLimit); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tx.Exec("ANALYZE hg_youban_publish_media_phash_lsh"); err != nil {
+				t.Fatal(err)
+			}
+			for tenant, want := range map[int64]bool{77: false, 78: true} {
+				got, err := mediaPHashLshScanSmallScope(ctx, []mediaPHashBucketScopePart{{TenantId: tenant, AccountIds: []int64{6}}}, nil, "image", 0)
+				if err != nil || got != want {
+					t.Fatalf("tenant=%d scopeScan=%v want=%v err=%v", tenant, got, want, err)
+				}
 			}
 		})
 

@@ -1099,6 +1099,7 @@ ALTER TABLE "hg_youban_publish_bot_message_source" ADD COLUMN IF NOT EXISTS "mat
 ALTER TABLE "hg_youban_publish_bot_message_source" ADD COLUMN IF NOT EXISTS "process_status" varchar(16) NOT NULL DEFAULT 'pending';
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_bot_message_source_bot_update" ON "hg_youban_publish_bot_message_source" ("received_bot_id", "update_id") WHERE "update_id" > 0;
 CREATE INDEX IF NOT EXISTS "idx_ybp_bot_message_source_pending" ON "hg_youban_publish_bot_message_source" ("process_status", "received_at", "id") WHERE "process_status" = 'pending';
+CREATE INDEX IF NOT EXISTS "idx_ybp_bot_message_source_group_match" ON "hg_youban_publish_bot_message_source" ("chat_id", "media_group_id", "id" DESC) INCLUDE ("matched_attempt_id") WHERE "matched_attempt_id" > 0;
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_attempt" (
   "id" BIGSERIAL PRIMARY KEY, "job_id" bigint NOT NULL DEFAULT 0, "tenant_id" bigint NOT NULL DEFAULT 0,
   "bot_id" bigint NOT NULL DEFAULT 0, "channel_id" bigint NOT NULL DEFAULT 0, "target_chat_id" varchar(128) NOT NULL DEFAULT '',

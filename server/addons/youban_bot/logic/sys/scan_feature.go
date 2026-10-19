@@ -133,6 +133,15 @@ func (s *sSysBot) resolveTelegramScanMedia(ctx context.Context, botId int64, tok
 	if err != nil {
 		return nil, err
 	}
+	uniqueId := telegramMessageFileUniqueId(msg)
+	if publishService.SysPublish().BotMediaFingerprintCached(ctx, uniqueId) {
+		mediaType := "image"
+		if msg != nil && msg.Video != nil {
+			mediaType = "video"
+		}
+		// Cached fingerprints do not need a new Telegram getFile request or URL.
+		return []*publishsysin.MessageTemplateMediaInp{{MediaType: mediaType, TgFileUniqueId: uniqueId}}, nil
+	}
 	items, err := s.resolveTelegramMessageMedia(ctx, botId, token, preview)
 	if err != nil {
 		return nil, err
@@ -174,7 +183,7 @@ func scanSearchItems(media []*publishsysin.MessageTemplateMediaInp) []*publishsy
 		if mediaType == "video" {
 			url = strings.TrimSpace(item.PosterUrl)
 		}
-		if url == "" || (mediaType != "image" && mediaType != "video") {
+		if (url == "" && strings.TrimSpace(item.TgFileUniqueId) == "") || (mediaType != "image" && mediaType != "video") {
 			continue
 		}
 		items = append(items, &publishsysin.BotMediaSearchItem{
