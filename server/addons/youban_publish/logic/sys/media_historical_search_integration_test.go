@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/database/gredis"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gcache"
 	"hotgo/addons/youban_publish/model/input/sysin"
@@ -90,9 +91,19 @@ func TestBotSearchProductionFingerprintReplay(t *testing.T) {
 		}
 		cases = append(cases, replayCase{fmt.Sprintf("album_%d", size), indexes, fixture.Expected[size-1]})
 	}
-	for _, replay := range cases {
+	for caseIndex, replay := range cases {
 		t.Run(replay.name, func(t *testing.T) {
 			cache.Instance().SetAdapter(gcache.NewAdapterMemory())
+			if address := os.Getenv("YOUBAN_SCAN_TEST_REDIS_ADDRESS"); address != "" {
+				// Use an isolated temporary Redis, never production Redis. Separate
+				// databases preserve cold-query isolation without FLUSHDB.
+				client, err := gredis.New(&gredis.Config{Address: address, Db: caseIndex + 1})
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = client.Close(ctx) })
+				cache.Instance().SetAdapter(gcache.NewAdapterRedis(client))
+			}
 			g.DB().GetCache().SetAdapter(gcache.NewAdapterMemory())
 			if err := cache.Instance().Set(ctx, tenantFeaturePermissionCacheKey(fixture.TenantId), permissions, time.Minute); err != nil {
 				t.Fatal(err)

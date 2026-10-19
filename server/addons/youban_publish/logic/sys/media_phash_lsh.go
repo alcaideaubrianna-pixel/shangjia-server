@@ -148,7 +148,7 @@ func mediaPHashLshScanSmallScope(ctx context.Context, scopes []mediaPHashBucketS
 	branch, args := mediaPHashLshBranchSQL(1, nil, scopes, profileIds, mediaType, excludeProfileId)
 	key := publishconsts.MediaPHashScopeSizeKeyPrefix + mediaPHashHashKey(fmt.Sprint(scopes, profileIds, mediaType, excludeProfileId))
 	result, err, _ := mediaPHashLshScopeSizeGroup.Do(key, func() (interface{}, error) {
-		value, err := cache.Instance().GetOrSet(ctx, key, func(ctx context.Context) (interface{}, error) {
+		value, err := cache.Instance().GetOrSetFunc(ctx, key, func(ctx context.Context) (interface{}, error) {
 			finish := scantrace.Begin(ctx, "query.phash_scope_estimate")
 			value, err := g.DB().GetValue(ctx, "EXPLAIN (FORMAT JSON) "+branch, args...)
 			finish(err)

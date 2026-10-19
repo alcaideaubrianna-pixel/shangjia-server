@@ -7,6 +7,7 @@ import (
 	"github.com/corona10/goimagehash"
 	"github.com/gogf/gf/v2/container/gvar"
 	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/database/gredis"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gcache"
 	"github.com/gogf/gf/v2/os/gcfg"
@@ -470,6 +471,16 @@ func TestMediaSearchStorageLocalPostgres(t *testing.T) {
 		})
 
 		t.Run("lsh_scope_strategy_uses_statistics", func(t *testing.T) {
+			if address := os.Getenv("YOUBAN_SCAN_TEST_REDIS_ADDRESS"); address != "" {
+				client, err := gredis.New(&gredis.Config{Address: address})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer client.Close(ctx)
+				previous := cache.Instance().GetAdapter()
+				cache.Instance().SetAdapter(gcache.NewAdapterRedis(client))
+				defer cache.Instance().SetAdapter(previous)
+			}
 			if _, err := tx.Exec(`INSERT INTO hg_youban_publish_media_phash_lsh(tenant_id,account_id,profile_id,media_id,media_type,hash_value,bucket_pos,bucket_value)
 SELECT 77,6,101,10000000+n,'image','ffffffffffffffff',1,65535 FROM generate_series(1,?) n`, 2*mediaPHashLshScopeScanLimit); err != nil {
 				t.Fatal(err)
