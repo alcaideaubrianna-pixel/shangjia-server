@@ -26,3 +26,11 @@ type AdminCollectSourceOptionsRes struct {
 	List       []*sysin.CollectSourceOptionModel `json:"list" dc:"采集频道筛选选项"`
 	TotalCount int                               `json:"totalCount"`
 }
+
+type MyProfileFilterOptionsReq struct {
+	g.Meta `path:"/publish/note/filterOptions" method:"get" tags:"上架插件" summary:"资料账户和频道筛选选项"`
+	sysin.ProfileFilterOptionsInp
+}
+type MyProfileFilterOptionsRes struct {
+	*sysin.ProfileFilterOptionsModel
+}

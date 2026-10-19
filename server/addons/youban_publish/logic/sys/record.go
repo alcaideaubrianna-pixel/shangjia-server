@@ -27,7 +27,15 @@ func (s *sSysPublish) MyPublishRecordList(ctx context.Context, in *sysin.Publish
 	if err = in.Filter(ctx); err != nil {
 		return nil, 0, err
 	}
-	return s.publishRecordList(ctx, in, account.TenantId, account.Id)
+	owner, err := s.profileRecordAccountScope(ctx, account.TenantId, account.Id, in.ProfileId)
+	if err != nil {
+		return nil, 0, err
+	}
+	// Ignore caller account filters when widening a single authorized profile.
+	if owner == 0 {
+		in.AccountId = 0
+	}
+	return s.publishRecordList(ctx, in, account.TenantId, owner)
 }
 
 func (s *sSysPublish) AdminPublishRecordList(ctx context.Context, in *sysin.PublishRecordListInp) (list []*sysin.PublishRecordModel, totalCount int, err error) {
@@ -53,7 +61,14 @@ func (s *sSysPublish) MyInclusionRecordList(ctx context.Context, in *sysin.Inclu
 	if err != nil {
 		return nil, 0, err
 	}
-	return s.inclusionRecordList(ctx, in, account.TenantId, account.Id)
+	if in == nil || in.ProfileId <= 0 {
+		return nil, 0, gerror.New("资料ID不能为空")
+	}
+	owner, err := s.profileRecordAccountScope(ctx, account.TenantId, account.Id, in.ProfileId)
+	if err != nil {
+		return nil, 0, err
+	}
+	return s.inclusionRecordList(ctx, in, account.TenantId, owner)
 }
 
 func (s *sSysPublish) AdminInclusionRecordList(ctx context.Context, in *sysin.InclusionRecordListInp) ([]*sysin.InclusionRecordModel, int, error) {

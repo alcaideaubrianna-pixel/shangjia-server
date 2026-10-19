@@ -42,7 +42,7 @@ func TestProfileAdminOwnerGroupsLocalPostgres(t *testing.T) {
 			`CREATE TEMP TABLE hg_content_profile(id bigint PRIMARY KEY,profile_no text,deleted_at timestamp) ON COMMIT DROP`,
 			`CREATE TEMP TABLE hg_youban_publish_tenant(id bigint PRIMARY KEY) ON COMMIT DROP`,
 			`CREATE TEMP TABLE hg_youban_publish_account(id bigint PRIMARY KEY,tenant_id bigint,account_type text,status int,deleted_at timestamp) ON COMMIT DROP`,
-			`CREATE TEMP TABLE hg_youban_publish_account_setting(account_id bigint,tenant_id bigint,shared_resource_enabled int,telegram_binding_enabled int,group_push_enabled int,deleted_at timestamp) ON COMMIT DROP`,
+			`CREATE TEMP TABLE hg_youban_publish_account_setting(account_id bigint,tenant_id bigint,profile_detail_view_enabled int,shared_resource_enabled int,telegram_binding_enabled int,group_push_enabled int,deleted_at timestamp) ON COMMIT DROP`,
 			`INSERT INTO hg_content_profile VALUES(643999,'FNYA5991185',NULL),(1,'OWN1',NULL),(2,'OTHER2',NULL)`,
 			`INSERT INTO hg_youban_publish_account VALUES(8,7,'admin',1,NULL),(139,7,'uploader',1,NULL),(200,9,'uploader',1,NULL)`,
 			`INSERT INTO hg_youban_publish_profile_state VALUES(643999,7,139,NULL),(1,7,8,NULL),(2,9,200,NULL),(3,7,139,now())`,
@@ -99,7 +99,9 @@ func TestProfileAdminOwnerGroupsLocalPostgres(t *testing.T) {
 		if err := s.BotProfileDelete(ctx, 7, 8, &sysin.ProfileDeleteInp{Ids: []int64{2}}); err == nil {
 			t.Fatal("delete crossed tenant")
 		}
-		if _,err:=s.BotProfileStatus(ctx,&sysin.BotProfileStatusInp{TenantId:7,AccountId:139,AccountType:"admin",Nos:[]string{"OWN1"},Status:2});err==nil {t.Fatal("forged admin role accepted")}
+		if _, err := s.BotProfileStatus(ctx, &sysin.BotProfileStatusInp{TenantId: 7, AccountId: 139, AccountType: "admin", Nos: []string{"OWN1"}, Status: 2}); err == nil {
+			t.Fatal("forged admin role accepted")
+		}
 		return nil
 	})
 	if err != nil {

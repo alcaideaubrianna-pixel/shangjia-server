@@ -2281,3 +2281,5 @@ ALTER TABLE hg_youban_publish_bot ADD COLUMN IF NOT EXISTS account_id bigint NOT
 CREATE INDEX IF NOT EXISTS idx_ybp_bot_account ON hg_youban_publish_bot(tenant_id,account_id,created_by,status);
 
 ALTER TABLE hg_youban_publish_bot ADD COLUMN IF NOT EXISTS bot_type varchar(32) NOT NULL DEFAULT 'normal';
+
+ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "profile_detail_view_enabled" smallint NOT NULL DEFAULT 0;

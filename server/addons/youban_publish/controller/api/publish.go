@@ -226,6 +226,7 @@ func fillAccountSettingSaveInpFromRequest(ctx context.Context, in *sysin.Account
 	in.NumberSource = body.Get("numberSource", in.NumberSource).String()
 	in.CustomMarkText = body.Get("customMarkText", in.CustomMarkText).String()
 	in.MarkPosition = body.Get("markPosition", in.MarkPosition).String()
+	in.ProfileDetailViewEnabled = body.Get("profileDetailViewEnabled", in.ProfileDetailViewEnabled).Int()
 	in.SharedResourceEnabled = body.Get("sharedResourceEnabled", in.SharedResourceEnabled).Int()
 	in.TelegramBindingEnabled = body.Get("telegramBindingEnabled", in.TelegramBindingEnabled).Int()
 	in.GroupPushEnabled = body.Get("groupPushEnabled", in.GroupPushEnabled).Int()

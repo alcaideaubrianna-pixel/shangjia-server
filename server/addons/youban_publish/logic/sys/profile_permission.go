@@ -15,6 +15,7 @@ func markProfilePermission(item *sysin.ProfileModel, permission string) {
 	if permission == "" {
 		permission = sysin.ProfilePermissionVisitor
 	}
+	item.CanViewDetail = permission == sysin.ProfilePermissionCreator || permission == sysin.ProfilePermissionAdmin || permission == sysin.ProfilePermissionShared
 	item.Permission = permission
 	item.CanEdit = permission == sysin.ProfilePermissionCreator || permission == sysin.ProfilePermissionAdmin
 }

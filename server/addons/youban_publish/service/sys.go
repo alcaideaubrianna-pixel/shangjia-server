@@ -110,6 +110,7 @@ type ISysPublish interface {
 	ServerChannelRefresh(ctx context.Context, in *sysin.ChannelRefreshInp) (list []*sysin.ChannelRefreshModel, err error)
 	ServerDashboard(ctx context.Context, in *sysin.TrendInp) (res *sysin.ServerDashboardModel, err error)
 	AdminAccountList(ctx context.Context, in *sysin.AccountListInp) (list []*sysin.AccountModel, totalCount int, err error)
+	MyProfileFilterOptions(ctx context.Context, in *sysin.ProfileFilterOptionsInp) (*sysin.ProfileFilterOptionsModel, error)
 	AdminAccountOptions(ctx context.Context, in *sysin.AccountOptionsInp) (list []*sysin.AccountOptionModel, err error)
 	AdminCollectSourceOptions(ctx context.Context, keyword string, page, perPage int) (list []*sysin.CollectSourceOptionModel, totalCount int, err error)
 	AdminAccountSave(ctx context.Context, in *sysin.AccountSaveInp) (res *sysin.AccountSaveModel, err error)

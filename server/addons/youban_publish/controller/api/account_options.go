@@ -30,3 +30,11 @@ func (c *cPublishAdmin) CollectSourceOptions(ctx context.Context, req *publish.A
 	}
 	return &publish.AdminCollectSourceOptionsRes{List: list, TotalCount: totalCount}, nil
 }
+
+func (c *cPublish) ProfileFilterOptions(ctx context.Context, req *publish.MyProfileFilterOptionsReq) (*publish.MyProfileFilterOptionsRes, error) {
+	model, err := service.SysPublish().MyProfileFilterOptions(ctx, &req.ProfileFilterOptionsInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.MyProfileFilterOptionsRes{ProfileFilterOptionsModel: model}, nil
+}
