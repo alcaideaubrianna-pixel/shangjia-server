@@ -40,7 +40,9 @@ func (s *sSysPublish) handleMediaProcessTask(ctx context.Context, task *asynq.Ta
 		return nil
 	}
 	retryCount, _ := asynq.GetRetryCount(ctx)
-	if status == mediaProcessingFailed {
+	// Legacy workers wrote failed before every queue retry. Only versioned
+	// tasks use failed to mean the processing policy is exhausted.
+	if mediaProcessFailureIsTerminal(status, payload) {
 		return asynq.SkipRetry
 	}
 	if retryCount >= mediaProcessMaxAttempts {
@@ -94,6 +96,10 @@ func (s *sSysPublish) handleMediaProcessTask(ctx context.Context, task *asynq.Ta
 		return err
 	}
 	return s.wakeProfileTelegramJobs(ctx, media["profile_id"].Int64())
+}
+
+func mediaProcessFailureIsTerminal(status string, payload mediaProcessQueuePayload) bool {
+	return status == mediaProcessingFailed && payload.RetryPolicyVersion > 0
 }
 
 func (s *sSysPublish) finishMediaProcessFailure(ctx context.Context, mediaId, profileId int64, processErr error, retryCount int) error {
