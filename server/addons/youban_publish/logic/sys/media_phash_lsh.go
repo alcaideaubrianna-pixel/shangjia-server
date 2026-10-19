@@ -160,6 +160,7 @@ func mediaPHashLshCandidateSQL(normalizedHash string, threshold int, scopes []me
 			args = append(args, branchArgs...)
 		}
 	}
+	args = append(args, normalizedHash, threshold)
 	query := fmt.Sprintf(`
 WITH bucket_match AS (
 %s
@@ -167,6 +168,9 @@ WITH bucket_match AS (
 SELECT media_id, profile_id, account_id, tenant_id, media_type,
        hash_value, COUNT(*) AS bucket_hits
 FROM bucket_match
+-- Apply the exact distance before expensive live-media and permission joins.
+-- The same threshold is checked again by Go after candidate retrieval.
+WHERE bit_count((('x' || hash_value)::bit(64)) # (('x' || ?)::bit(64))) <= ?
 GROUP BY media_id, profile_id, account_id, tenant_id, media_type, hash_value
 )
 SELECT candidate.media_id, candidate.profile_id, candidate.account_id,

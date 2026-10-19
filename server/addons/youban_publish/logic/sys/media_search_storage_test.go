@@ -409,6 +409,47 @@ func TestMediaSearchStorageLocalPostgres(t *testing.T) {
 			}
 		})
 
+		t.Run("lsh_distance_filter_preserves_threshold_and_scope", func(t *testing.T) {
+			fixtures := []struct {
+				id, tenant int64
+				hash       string
+			}{
+				{990001, 5, "000f000f000f0000"}, // distance 12: included
+				{990002, 5, "000f000f000f0001"}, // distance 13: excluded, despite matching LSH buckets
+				{990003, 9, "000f000f000f0000"}, // same hash, another tenant
+			}
+			for _, item := range fixtures {
+				if _, err := tx.Exec(`INSERT INTO hg_youban_publish_media(id,tenant_id,account_id,profile_id,media_type,perceptual_hash) VALUES(?,?,6,101,'image',?)`, item.id, item.tenant, item.hash); err != nil {
+					t.Fatal(err)
+				}
+				for _, cell := range mediaPHashLshBucketValues(item.hash) {
+					if _, err := tx.Exec(`INSERT INTO hg_youban_publish_media_phash_lsh(tenant_id,account_id,profile_id,media_id,media_type,hash_value,bucket_pos,bucket_value) VALUES(?,6,101,?,'image',?,?,?)`, item.tenant, item.id, item.hash, cell.Pos, cell.Value); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			query, args, err := mediaPHashLshCandidateSQL("0000000000000000", 12, []mediaPHashBucketScopePart{{TenantId: 5, AccountIds: []int64{6}}}, nil, "image", 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var found []mediaPHashBucketCandidateRow
+			if err := tx.Raw(query, args...).Scan(&found); err != nil {
+				t.Fatal(err)
+			}
+			hit := false
+			for _, item := range found {
+				if item.MediaId == 990002 || item.MediaId == 990003 {
+					t.Fatalf("distance/scope violation: %+v", item)
+				}
+				if item.MediaId == 990001 {
+					hit = true
+				}
+			}
+			if !hit {
+				t.Fatal("lost distance-12 candidate")
+			}
+		})
+
 		return nil
 	})
 	if err != nil {

@@ -363,6 +363,11 @@ func mediaPHashBucketCandidateRowsWithScopesUncached(ctx context.Context, normal
 		if err == nil {
 			return rows, nil
 		}
+		// The expired request cannot run another query. Preserve the original
+		// LSH error rather than misreporting a timeout waiting for the legacy slot.
+		if ctx.Err() != nil {
+			return nil, gerror.Wrap(err, "pHash LSH查询超时")
+		}
 		g.Log().Warningf(ctx, "pHash LSH查询失败，回退旧分桶查询：%v", err)
 	}
 	if err := acquireMediaPHashLegacyQuerySlot(ctx); err != nil {
