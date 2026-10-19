@@ -3,11 +3,13 @@ package sys
 import (
 	"context"
 	"fmt"
+	"strings"
+
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
-	"strings"
 )
 
 func (s *sSysPublish) MyProfileFilterOptions(ctx context.Context, in *sysin.ProfileFilterOptionsInp) (*sysin.ProfileFilterOptionsModel, error) {
@@ -23,6 +25,10 @@ func (s *sSysPublish) MyProfileFilterOptions(ctx context.Context, in *sysin.Prof
 	if in != nil {
 		selected = in.AccountId
 	}
+	return s.profileFilterOptions(ctx, account, capability, selected)
+}
+
+func (s *sSysPublish) profileFilterOptions(ctx context.Context, account *sysin.AccountModel, capability *sysin.AccountCapabilityModel, selected int64) (*sysin.ProfileFilterOptionsModel, error) {
 	allIds, err := s.readableProfileAccountIds(ctx, capability, 0)
 	if err != nil {
 		return nil, err
@@ -56,7 +62,7 @@ func (s *sSysPublish) MyProfileFilterOptions(ctx context.Context, in *sysin.Prof
 		SourceChatId string
 		Label        string
 	}
-	if err = g.DB().Model(publishCollectSourceTable+" s").Safe().Ctx(ctx).
+	if err = g.DB().Model(publishCollectSourceTable+" s").Safe().Ctx(ctx).Unscoped().
 		Fields("s.id AS source_id,s.source_chat_id,s.title AS label").
 		Where("s.tenant_id", account.TenantId).WhereIn("s.account_id", ids).
 		Where("s.source_chat_id != ''").Scan(&legacy); err != nil {
@@ -71,7 +77,7 @@ func (s *sSysPublish) MyProfileFilterOptions(ctx context.Context, in *sysin.Prof
 		SourceChatId string
 		Label        string
 	}
-	if err = g.DB().Model(publishCollectSourceTable+" s").Safe().Ctx(ctx).
+	if err = g.DB().Model(publishCollectSourceTable+" s").Safe().Ctx(ctx).Unscoped().
 		InnerJoin(publishBotChannelCacheTable+" bc", "bc.tenant_id=s.tenant_id AND bc.bot_id=s.bot_id").
 		Fields("s.id AS source_id,bc.chat_id AS source_chat_id,bc.chat_title AS label").
 		Where("s.tenant_id", account.TenantId).WhereIn("s.account_id", ids).

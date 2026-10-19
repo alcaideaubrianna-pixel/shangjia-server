@@ -2,11 +2,13 @@ package sys
 
 import (
 	"context"
-	"github.com/gogf/gf/v2/database/gdb"
-	"github.com/gogf/gf/v2/frame/g"
-	"hotgo/addons/youban_publish/model/input/sysin"
 	"os"
 	"testing"
+
+	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/frame/g"
+
+	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
 func TestProfileDetailReadDoesNotGrantWrite(t *testing.T) {
@@ -138,6 +140,70 @@ func TestProfilePushChannelFilterLocalPostgres(t *testing.T) {
 					t.Fatalf("channel%d rows%+v", tc.channel, rows)
 				}
 			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestProfileFilterOptionsLocalPostgres(t *testing.T) {
+	if os.Getenv("YOUBAN_SCAN_STORAGE_PG") != "1" {
+		t.Skip("requires local PostgreSQL")
+	}
+	before := gdb.GetConfig("default")
+	t.Cleanup(func() { gdb.SetConfigGroup("default", before) })
+	gdb.SetConfigGroup("default", gdb.ConfigGroup{{Type: "pgsql", Host: "127.0.0.1", Port: "35432", User: os.Getenv("USER"), Name: "postgres"}})
+	err := g.DB().Transaction(context.Background(), func(ctx context.Context, tx gdb.TX) error {
+		for _, q := range []string{
+			`CREATE TEMP TABLE hg_youban_publish_account(id bigint PRIMARY KEY,tenant_id bigint,nickname text,status int,deleted_at timestamp) ON COMMIT DROP`,
+			`CREATE TEMP TABLE hg_youban_publish_collect_channel(id bigint PRIMARY KEY,tenant_id bigint,telegram_chat_id text,title text,deleted_at timestamp) ON COMMIT DROP`,
+			`CREATE TEMP TABLE hg_youban_publish_collect_account_channel(account_id bigint,tenant_id bigint,channel_id bigint,source_id bigint,deleted_at timestamp) ON COMMIT DROP`,
+			`CREATE TEMP TABLE hg_youban_publish_collect_source(id bigint PRIMARY KEY,tenant_id bigint,account_id bigint,source_chat_id text,title text,source_type text,bot_id bigint,bot_collect_scope text,deleted_at timestamp) ON COMMIT DROP`,
+			`CREATE TEMP TABLE hg_youban_publish_bot_channel_cache(tenant_id bigint,bot_id bigint,chat_id text,chat_title text,deleted_at timestamp) ON COMMIT DROP`,
+			`CREATE TEMP TABLE hg_youban_publish_channel(id bigint PRIMARY KEY,tenant_id bigint,channel_title text,publish_direction text,deleted_at timestamp) ON COMMIT DROP`,
+			`INSERT INTO hg_youban_publish_account VALUES(8,7,'本人',1,NULL),(9,7,'另一账户',1,NULL),(10,10,'其他租户',1,NULL)`,
+			`INSERT INTO hg_youban_publish_collect_channel VALUES(100,7,'-100100','关联频道',NULL)`,
+			`INSERT INTO hg_youban_publish_collect_account_channel VALUES(8,7,100,101,NULL)`,
+			`INSERT INTO hg_youban_publish_collect_source VALUES(102,7,9,'-100102','已删历史频道','account',0,'',now()),(103,7,9,'','Bot来源','bot',64,'all',NULL),(104,10,10,'-100104','禁止频道','account',0,'',NULL)`,
+			`INSERT INTO hg_youban_publish_bot_channel_cache VALUES(7,64,'-100103','Bot频道',NULL),(10,64,'-100999','跨租户缓存',NULL)`,
+			`INSERT INTO hg_youban_publish_channel VALUES(1,7,'推送频道','up',NULL),(2,10,'禁止推送频道','up',NULL)`,
+		} {
+			if _, e := tx.Exec(q); e != nil {
+				return e
+			}
+		}
+		s := NewSysPublish()
+		cap := &sysin.AccountCapabilityModel{TenantId: 7, AccountId: 8, AccountType: "uploader", ProfileDetailViewEnabled: 1}
+		account := &sysin.AccountModel{TenantId: 7, Id: 8}
+		for _, tc := range []struct {
+			selected int64
+			want     int
+		}{{0, 3}, {8, 1}, {9, 2}} {
+			res, e := s.profileFilterOptions(ctx, account, cap, tc.selected)
+			if e != nil {
+				return e
+			}
+			if len(res.Accounts) != 2 || len(res.SourceChannels) != tc.want || len(res.PushChannels) != 1 {
+				t.Fatalf("selected%d options%+v source%+v", tc.selected, res, res.SourceChannels)
+			}
+			for _, ch := range res.SourceChannels {
+				if ch.SourceId == 104 || ch.SourceChatId == "-100999" {
+					t.Fatal("cross tenant options")
+				}
+			}
+		}
+		if _, e := s.profileFilterOptions(ctx, account, cap, 10); e == nil {
+			t.Fatal("cross tenant account accepted")
+		}
+		cap.ProfileDetailViewEnabled = 0
+		res, e := s.profileFilterOptions(ctx, account, cap, 0)
+		if e != nil {
+			return e
+		}
+		if len(res.Accounts) != 1 || len(res.SourceChannels) != 1 {
+			t.Fatalf("revoked options %+v", res)
 		}
 		return nil
 	})
