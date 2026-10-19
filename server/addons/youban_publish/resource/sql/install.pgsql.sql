@@ -74,6 +74,7 @@ CREATE INDEX IF NOT EXISTS "idx_content_profile_weight_active" ON "hg_content_pr
 CREATE INDEX IF NOT EXISTS "idx_content_profile_cup_active" ON "hg_content_profile" ("cup_size") WHERE "deleted_at" IS NULL AND "cup_size" <> '';
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_profile_state" (
+	"random_media_config" text NOT NULL DEFAULT '',
   "id" BIGSERIAL PRIMARY KEY,
   "tenant_id" bigint NOT NULL DEFAULT 0,
   "account_id" bigint NOT NULL DEFAULT 0,
@@ -700,6 +701,7 @@ FROM (
 WHERE NOT EXISTS (SELECT 1 FROM "hg_youban_publish_tag");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_job" (
+	"display_media_selection" text NOT NULL DEFAULT '',
   "id" BIGSERIAL PRIMARY KEY, "task_id" bigint DEFAULT NULL, "operation_no" varchar(128) NOT NULL DEFAULT '', "tenant_id" bigint NOT NULL DEFAULT 0,
   "merchant_id" bigint NOT NULL DEFAULT 0, "account_id" bigint NOT NULL DEFAULT 0, "profile_id" bigint NOT NULL DEFAULT 0,
   "channel_id" bigint NOT NULL DEFAULT 0, "bot_id" bigint NOT NULL DEFAULT 0, "target_chat_id" varchar(128) NOT NULL DEFAULT '',

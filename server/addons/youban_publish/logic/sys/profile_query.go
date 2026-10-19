@@ -116,6 +116,9 @@ func (s *sSysPublish) profileView(ctx context.Context, profileId int64, tenantId
 	if res.ChannelIds, err = s.profileChannelIdsOrDefaults(ctx, res.TenantId, res.AccountId, res.Id); err != nil {
 		return nil, err
 	}
+	if err = s.loadProfileRandomMedia(ctx, res); err != nil {
+		return nil, err
+	}
 	return res, nil
 }
 
@@ -150,6 +153,9 @@ func (s *sSysPublish) profileViewBySelector(ctx context.Context, in *sysin.Profi
 		return nil, err
 	}
 	if res.ChannelIds, err = s.profileChannelIdsOrDefaults(ctx, res.TenantId, res.AccountId, res.Id); err != nil {
+		return nil, err
+	}
+	if err = s.loadProfileRandomMedia(ctx, res); err != nil {
 		return nil, err
 	}
 	return res, nil

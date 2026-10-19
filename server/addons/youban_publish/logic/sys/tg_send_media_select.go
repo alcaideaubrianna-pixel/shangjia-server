@@ -1,27 +1,13 @@
 package sys
 
 import (
-	"context"
 	"fmt"
-	"github.com/gogf/gf/v2/frame/g"
 	"hash/fnv"
 	"sort"
 	"strings"
-
-	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
-func (s *sSysPublish) selectTelegramDisplayMediaForTenant(ctx context.Context, job telegramJobRecord, media []*telegramMediaItem) ([]*telegramMediaItem, error) {
-	step := beginTelegramPublishStage(ctx, "media.vip_policy", g.Map{"tenantId": job.TenantId})
-	status, err := s.tenantVipStatus(ctx, job.TenantId)
-	step.End(err)
-	if err != nil {
-		return nil, err
-	}
-	randomEnabled := status.IsVip && containsString(status.Features, sysin.TenantVipFeatureRandomMedia)
-	return selectTelegramDisplayMedia(job, media, telegramMediaGroupMaxItems, randomEnabled), nil
-}
-
+// selectTelegramDisplayMedia is retained only for pre-upgrade jobs with delivery evidence.
 func selectTelegramDisplayMedia(job telegramJobRecord, media []*telegramMediaItem, maxItems int, randomEnabled bool) []*telegramMediaItem {
 	if maxItems <= 0 || len(media) <= maxItems {
 		return media

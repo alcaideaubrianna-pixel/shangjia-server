@@ -106,6 +106,9 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 			if err = s.upsertProfileStateTx(ctx, tx, profileId, tenantId, accountId, in.CustomerRemark, in.AntiScanEnabled, publishAt); err != nil {
 				return err
 			}
+			if err = saveProfileRandomMediaTx(ctx, tx, profileId, in.RandomMedia); err != nil {
+				return err
+			}
 			if !draftOnly && (isNewProfile || in.ChannelIds != nil) {
 				if err = replaceProfileChannelMappings(ctx, tx, tenantId, accountId, profileId, manualChannelIds); err != nil {
 					return err
