@@ -26,6 +26,7 @@ import (
 	gotdmessage "github.com/gotd/td/telegram/message"
 	gotdhtml "github.com/gotd/td/telegram/message/html"
 	"github.com/gotd/td/tg"
+	"github.com/gotd/td/tgerr"
 	_ "golang.org/x/image/webp"
 
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
@@ -58,6 +59,8 @@ type messagePushTgAccountOwner struct {
 type messageTemplateForwardSource struct {
 	Peer       tg.InputPeerClass
 	MessageIds []int
+	JobId      int64
+	ChatId     string
 }
 
 type messageTemplateForwardSourceJob struct {
@@ -541,8 +544,27 @@ func inlineDisplayMedia(template *sysin.MessageTemplateModel) []*telegramMediaIt
 }
 
 func (s *sSysPublish) sendMessageTemplateWithTgClient(ctx context.Context, client *telegram.Client, peer tg.InputPeerClass, caption string, media []*telegramMediaItem, source *messageTemplateForwardSource, tgAccountId int64, templateHash string) ([]*telegramSentMessage, error) {
+	return sendMessageTemplateWithForwardFallback(ctx, source, func() ([]*telegramSentMessage, error) {
+		return forwardMessageTemplateWithGotd(ctx, client, source.Peer, peer, source.MessageIds, media)
+	}, func() ([]*telegramSentMessage, error) {
+		sender := gotdmessage.NewSender(client.API())
+		return s.sendMessageTemplateWithGotd(ctx, sender.To(peer), caption, media)
+	}, tgAccountId, templateHash, peer)
+}
+
+// Only explicit RPC rejection proves forwarding did not send anything. In
+// particular CHANNEL_PRIVATE can refer to FromPeer, not just the target.
+func sendMessageTemplateWithForwardFallback(ctx context.Context, source *messageTemplateForwardSource, forward, upload func() ([]*telegramSentMessage, error), tgAccountId int64, templateHash string, target tg.InputPeerClass) ([]*telegramSentMessage, error) {
+	// Log peer identity only; access hashes are not needed for diagnosis.
+	var targetId int64
+	switch peer := target.(type) {
+	case *tg.InputPeerChannel:
+		targetId = peer.ChannelID
+	case *tg.InputPeerChat:
+		targetId = peer.ChatID
+	}
 	if source != nil && len(source.MessageIds) > 0 {
-		messages, forwardErr := forwardMessageTemplateWithGotd(ctx, client, source.Peer, peer, source.MessageIds, media)
+		messages, forwardErr := forward()
 		if forwardErr == nil && len(messages) > 0 {
 			return messages, nil
 		}
@@ -551,15 +573,19 @@ func (s *sSysPublish) sendMessageTemplateWithTgClient(ctx context.Context, clien
 				g.Log().Warningf(ctx, "复用TG历史消息触发Telegram限流，交给队列等待重试 tgAccountId:%d templateHash:%s wait:%s err:%v", tgAccountId, templateHash, delay, forwardErr)
 				return nil, forwardErr
 			}
-			if isTelegramChannelPermissionError(forwardErr) {
-				g.Log().Errorf(ctx, "TG目标频道权限异常，停止历史消息回退上传 tgAccountId:%d templateHash:%s err:%v", tgAccountId, templateHash, forwardErr)
+			if !tgerr.Is(forwardErr, "CHANNEL_PRIVATE", "CHANNEL_INVALID", "MESSAGE_ID_INVALID", "MSG_ID_INVALID", "CHAT_FORWARDS_RESTRICTED") {
+				g.Log().Warningf(ctx, "历史消息转发未安全确认拒绝，停止回退上传 tgAccountId:%d templateHash:%s sourceJobId:%d sourceChat:%s target:%d err:%v", tgAccountId, templateHash, source.JobId, source.ChatId, targetId, forwardErr)
 				return nil, forwardErr
 			}
-			g.Log().Warningf(ctx, "复用TG历史消息转发失败，回退上传 tgAccountId:%d templateHash:%s err:%v", tgAccountId, templateHash, forwardErr)
+			g.Log().Warningf(ctx, "复用TG历史消息被拒绝，回退模板上传 tgAccountId:%d templateHash:%s sourceJobId:%d sourceChat:%s target:%d err:%v", tgAccountId, templateHash, source.JobId, source.ChatId, targetId, forwardErr)
+		} else {
+			return nil, gerror.New("历史消息转发未返回消息编号，发送结果待确认")
 		}
 	}
-	sender := gotdmessage.NewSender(client.API())
-	return s.sendMessageTemplateWithGotd(ctx, sender.To(peer), caption, media)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return upload()
 }
 
 func messageTemplateRequiresSanitizedUpload(media []*telegramMediaItem) bool {
@@ -986,6 +1012,8 @@ func (s *sSysPublish) messageTemplateForwardSource(ctx context.Context, tgAccoun
 		return &messageTemplateForwardSource{
 			Peer:       peer,
 			MessageIds: messageIds,
+			JobId:      job.Id,
+			ChatId:     job.TargetChatId,
 		}, nil
 	}
 	return nil, nil
