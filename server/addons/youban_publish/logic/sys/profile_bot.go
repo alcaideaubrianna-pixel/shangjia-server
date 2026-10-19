@@ -141,14 +141,20 @@ func (s *sSysPublish) saveBotProfileMedia(ctx context.Context, profileId int64, 
 			}
 			fileURL := strings.TrimSpace(item.FileUrl)
 			storagePath := strings.TrimSpace(item.StoragePath)
+			attachment, err := botProfileMediaAttachment(ctx, storagePath, item.Size)
+			if err != nil {
+				return err
+			}
+			attachmentId := attachment["id"].Int64()
+			md5Value := firstNonEmpty(attachment["md5"].String(), strings.TrimSpace(item.AssetHash))
 			assetHash := mediaAssetHash(strings.TrimSpace(item.AssetHash), storagePath, fileURL)
 			data := g.Map{
 				"tenant_id":              tenantId,
 				"merchant_id":            tenantId,
 				"account_id":             accountId,
 				"profile_id":             profileId,
-				"attachment_id":          0,
-				"original_attachment_id": 0,
+				"attachment_id":          attachmentId,
+				"original_attachment_id": attachmentId,
 				"edited_attachment_id":   0,
 				"media_type":             mediaType,
 				"purpose":                purpose,
@@ -166,7 +172,7 @@ func (s *sSysPublish) saveBotProfileMedia(ctx context.Context, profileId int64, 
 				"original_storage_path":  storagePath,
 				"edited_storage_path":    "",
 				"mime_type":              "",
-				"md5":                    strings.TrimSpace(item.AssetHash),
+				"md5":                    md5Value,
 				"perceptual_hash":        "",
 				"processing_status":      mediaProcessingUploaded,
 				"processing_error":       "",
@@ -196,6 +202,22 @@ func (s *sSysPublish) saveBotProfileMedia(ctx context.Context, profileId int64, 
 		return err
 	}
 	return s.syncBotProfileMedia(ctx, profileId)
+}
+
+func botProfileMediaAttachment(ctx context.Context, storagePath string, size int64) (gdb.Record, error) {
+	storagePath = normalizeStoredMediaPath(storagePath)
+	if storagePath == "" || isAbsoluteMediaURL(storagePath) {
+		return gdb.Record{}, nil
+	}
+	mod := g.DB().Model(sysAttachmentTable).Safe().Ctx(ctx).Where("path", storagePath)
+	if size > 0 {
+		mod = mod.Where("size", size)
+	}
+	row, err := mod.Fields("id,md5").OrderDesc("id").One()
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取机器人媒体已有附件失败")
+	}
+	return row, nil
 }
 
 func (s *sSysPublish) syncBotProfileMedia(ctx context.Context, profileId int64) error {
