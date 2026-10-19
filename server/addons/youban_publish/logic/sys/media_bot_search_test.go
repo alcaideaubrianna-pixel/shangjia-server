@@ -8,6 +8,9 @@ import (
 	"time"
 
 	"github.com/corona10/goimagehash"
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gcfg"
+	"hotgo/internal/bootstrap/envconfig"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
@@ -175,5 +178,40 @@ func TestAntiScanSearchFingerprintVersionsDoNotOverwriteEachOther(t *testing.T) 
 	}
 	if first != antiScanSearchFingerprintKey("same-source-media", 0x1234) || len(first) > 64 {
 		t.Fatal("fingerprint key must be idempotent and fit the persisted field")
+	}
+}
+
+func TestBotMediaCandidateQueryTimeoutEnvironment(t *testing.T) {
+	ctx := context.Background()
+	adapter, ok := g.Cfg().GetAdapter().(*gcfg.AdapterFile)
+	if !ok {
+		t.Fatal("file configuration adapter required")
+	}
+	const key = "youbanPublish.mediaSearch.queryTimeoutSeconds"
+	original := g.Cfg().MustGet(ctx, key).Val()
+	t.Cleanup(func() { _ = adapter.Set(key, original) })
+	for _, tc := range []struct {
+		value string
+		want  time.Duration
+	}{
+		{"", 5 * time.Second}, {"7", 7 * time.Second}, {"0", 5 * time.Second}, {"-1", 5 * time.Second}, {"invalid", 5 * time.Second},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			t.Setenv("YOUBAN_PUBLISH_MEDIA_SEARCH_QUERY_TIMEOUT_SECONDS", tc.value)
+			envconfig.Apply(ctx)
+			if got := botMediaCandidateQueryTimeout(ctx); got != tc.want {
+				t.Fatalf("timeout=%s want=%s", got, tc.want)
+			}
+			_, err := loadBotMediaSearchCandidates(ctx, []*mediaFingerprint{{MD5: "deadline-probe"}}, func(queryCtx context.Context, _ *mediaFingerprint) ([]*botMediaSearchCandidate, error) {
+				deadline, ok := queryCtx.Deadline()
+				if !ok || time.Until(deadline) > tc.want || time.Until(deadline) < tc.want-time.Second {
+					t.Errorf("incorrect query deadline: %s", time.Until(deadline))
+				}
+				return nil, nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }

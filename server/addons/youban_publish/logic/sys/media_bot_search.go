@@ -229,6 +229,16 @@ func rankBotMediaSearchCandidates(groups [][]*botMediaSearchCandidate) []int64 {
 	return ids
 }
 
+// botMediaCandidateQueryTimeout bounds all album candidate queries together.
+// Invalid values retain the default; parent request deadlines still take priority.
+func botMediaCandidateQueryTimeout(ctx context.Context) time.Duration {
+	seconds := g.Cfg().MustGet(ctx, "youbanPublish.mediaSearch.queryTimeoutSeconds", 5).Int()
+	if seconds <= 0 || int64(seconds) > int64((1<<63-1)/time.Second) {
+		seconds = 5
+	}
+	return time.Duration(seconds) * time.Second
+}
+
 func loadBotMediaSearchCandidates(ctx context.Context, fingerprints []*mediaFingerprint, loader func(context.Context, *mediaFingerprint) ([]*botMediaSearchCandidate, error)) ([][]*botMediaSearchCandidate, error) {
 	unique := make([]*mediaFingerprint, 0, len(fingerprints))
 	seen := make(map[string]bool)
@@ -247,7 +257,7 @@ func loadBotMediaSearchCandidates(ctx context.Context, fingerprints []*mediaFing
 	}
 	results := make([][]*botMediaSearchCandidate, len(unique))
 	errors := make([]error, len(unique))
-	queryCtx, cancelQueries := context.WithTimeout(ctx, 2*time.Second)
+	queryCtx, cancelQueries := context.WithTimeout(ctx, botMediaCandidateQueryTimeout(ctx))
 	defer cancelQueries()
 	group := new(errgroup.Group)
 	// Keep database fan-out small even for a ten-image Telegram album.
@@ -322,7 +332,7 @@ func (s *sSysPublish) botMediaSearchFingerprintCandidates(ctx context.Context, f
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	fallbackCtx, cancelFallback := context.WithTimeout(ctx, 2*time.Second)
+	fallbackCtx, cancelFallback := context.WithTimeout(ctx, botMediaCandidateQueryTimeout(ctx))
 	defer cancelFallback()
 	var matches []publishProfilePHashDistance
 	var err error
