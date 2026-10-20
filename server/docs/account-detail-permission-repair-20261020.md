@@ -46,3 +46,13 @@ YOUBAN_SCAN_STORAGE_PG=1 go test ./addons/youban_publish/logic/sys \
 
 本地 PostgreSQL 测试覆盖重复规则、历史规则、Bot 缓存、两种 chat_id 形式、同名不同频道、
 跨规则查询、单规则兼容、无结果、同资料多条派发不重复、跨租户隔离。
+
+## 上线前定向升级确认
+
+2026-10-20，按用户要求通过 DBX 在 PostgreSQL_Xiaohuiji 执行独立事务：
+设置 lock_timeout=2s、statement_timeout=10s，再执行 ADD COLUMN IF NOT EXISTS。
+事务成功，字段原已存在，因此没有新增列或修改业务权限。独立回查确认字段仍为
+smallint NOT NULL DEFAULT 0，租户 78 / 账户 616 的权限仍为 1。
+
+可复用脚本：`addons/youban_publish/resource/sql/account_detail_view_permission.pgsql.sql`。
+该脚本只处理本功能字段，不替代整套历史迁移，也不自动开启任何账户权限。
