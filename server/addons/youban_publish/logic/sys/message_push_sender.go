@@ -896,6 +896,9 @@ func gotdSentMessagesFromUpdates(updates tg.UpdatesClass, media []*telegramMedia
 		if len(media) > 0 && media[0] != nil {
 			msg.MediaId = media[0].Id
 			msg.AssetHash = media[0].AssetHash
+			if media[0].Purpose != "" {
+				msg.Purpose = media[0].Purpose
+			}
 		}
 		return []*telegramSentMessage{msg}
 	}
@@ -915,9 +918,13 @@ func gotdSentMessagesFromUpdates(updates tg.UpdatesClass, media []*telegramMedia
 		index := len(messages)
 		mediaId := int64(0)
 		assetHash := ""
+		purpose := "display" // Text-only/template responses have no media purpose.
 		if index < len(media) && media[index] != nil {
 			mediaId = media[index].Id
 			assetHash = media[index].AssetHash
+			if media[index].Purpose != "" {
+				purpose = media[index].Purpose
+			}
 		}
 		groupedId := ""
 		if value, ok := msg.GetGroupedID(); ok && value > 0 {
@@ -926,7 +933,7 @@ func gotdSentMessagesFromUpdates(updates tg.UpdatesClass, media []*telegramMedia
 		messages = append(messages, &telegramSentMessage{
 			MessageId:    int64(msg.ID),
 			MediaGroupId: groupedId,
-			Purpose:      "display",
+			Purpose:      purpose,
 			MediaId:      mediaId,
 			AssetHash:    assetHash,
 		})

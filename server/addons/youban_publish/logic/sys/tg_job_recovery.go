@@ -176,11 +176,65 @@ func (s *sSysPublish) recoverConfirmedTelegramJobs(ctx context.Context, limit in
 		if job.Id <= 0 {
 			continue
 		}
+		if job.SendPhase == telegramSendPhaseVerifyConfirmed {
+			if repairErr := s.repairConfirmedTelegramVerifyPurpose(ctx, job.Id); repairErr != nil {
+				g.Log().Warningf(ctx, "修复已确认TG验证消息用途失败 jobId:%d err:%+v", job.Id, repairErr)
+				continue
+			}
+		}
 		if completeErr := s.completeTelegramJobAndWakeChannel(ctx, job); completeErr != nil {
 			g.Log().Warningf(ctx, "收口已确认TG任务失败 jobId:%d phase:%s err:%+v", job.Id, job.SendPhase, completeErr)
 		}
 	}
 	return nil
+}
+
+// Legacy account responses mislabeled verification messages as display. Repair
+// only the local projection supported by a complete, explicit verify response.
+// Never alter the response audit, resurrect deleted messages, or send again.
+func (s *sSysPublish) repairConfirmedTelegramVerifyPurpose(ctx context.Context, jobID int64) error {
+	var repaired int64
+	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if err := boundTelegramConfirmationTransaction(ctx, tx); err != nil {
+			return err
+		}
+		var err error
+		repaired, err = repairConfirmedTelegramVerifyPurposeTx(ctx, tx, jobID)
+		return err
+	})
+	if err == nil && repaired > 0 {
+		g.Log().Infof(ctx, "已确认TG验证消息用途已修复 jobId:%d count:%d", jobID, repaired)
+	}
+	return err
+}
+
+func repairConfirmedTelegramVerifyPurposeTx(ctx context.Context, tx gdb.TX, jobID int64) (int64, error) {
+	// Match the Job -> Attempt lock order used by delivery and timeout paths.
+	if _, err := tx.Query("SELECT id FROM "+publishTgJobTable+" WHERE id=? FOR UPDATE", jobID); err != nil {
+		return 0, err
+	}
+	result, err := tx.Exec(`UPDATE `+publishTgMessageTable+` m SET purpose='verify',updated_at=NOW()
+		FROM `+publishTgAttemptTable+` a
+		JOIN `+publishTgAttemptMessageTable+` am ON am.attempt_id=a.id
+		JOIN `+publishTgJobTable+` j ON j.id=a.job_id
+		WHERE j.id=? AND j.status='sending' AND j.send_phase='verify_confirmed'
+		AND a.phase='verify' AND a.status='confirmed' AND a.response_received=1
+		AND a.expected_count>0 AND a.confirmed_count=a.expected_count
+		AND (SELECT COUNT(*) FROM `+publishTgAttemptMessageTable+` audit WHERE audit.attempt_id=a.id)=a.expected_count
+		AND am.source='response' AND am.job_id=j.id AND am.target_chat_id=a.target_chat_id
+		AND m.job_id=j.id AND m.tenant_id=j.tenant_id AND m.profile_id=j.profile_id
+		AND m.target_chat_id=a.target_chat_id AND m.tg_message_id=am.message_id
+		AND m.purpose='display' AND m.status='sent' AND m.deleted_at IS NULL
+		AND EXISTS (SELECT 1 FROM `+publishMediaTable+` media
+			WHERE media.id=m.media_id AND media.profile_id=j.profile_id AND media.purpose='verify')
+		AND NOT EXISTS (SELECT 1 FROM `+publishTgAttemptMessageTable+` other
+			JOIN `+publishTgAttemptTable+` display_attempt ON display_attempt.id=other.attempt_id
+			WHERE other.job_id=j.id AND other.target_chat_id=m.target_chat_id
+			AND other.message_id=m.tg_message_id AND display_attempt.phase<>'verify')`, jobID)
+	if err != nil {
+		return 0, gerror.Wrap(err, "修复已确认TG验证消息用途失败")
+	}
+	return result.RowsAffected()
 }
 
 // recoverStalePreAttemptTelegramJobs handles the only sending states that are

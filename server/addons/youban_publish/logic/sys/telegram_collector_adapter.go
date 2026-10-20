@@ -534,6 +534,9 @@ func validateTelegramMediaSendResult(purpose string, media []*telegramMediaItem,
 	}
 	sentIDs := make(map[int64]struct{}, len(messages))
 	for _, item := range messages {
+		if item != nil && item.MessageId > 0 && item.Purpose != purpose {
+			return gerror.Newf("Telegram媒体发送结果用途不一致：期望%s，实际%s，消息%d", purpose, item.Purpose, item.MessageId)
+		}
 		if item != nil && item.MessageId > 0 && item.MediaId > 0 {
 			sentIDs[item.MediaId] = struct{}{}
 		}
