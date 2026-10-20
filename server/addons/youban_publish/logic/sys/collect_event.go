@@ -119,7 +119,7 @@ func collectEventIgnoreType(status, message string) string {
 	if status != sysin.CollectEventStatusIgnored {
 		return ""
 	}
-	if strings.Contains(message, "重复") {
+	if strings.Contains(message, "重复") || strings.HasPrefix(strings.TrimSpace(message), "资料库已存在相同资料") {
 		return sysin.CollectEventIgnoreTypeDedupe
 	}
 	return sysin.CollectEventIgnoreTypeMatch

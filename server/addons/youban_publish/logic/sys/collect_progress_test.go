@@ -18,6 +18,7 @@ func TestCollectProgressAgeDoesNotClaimDeadlock(t *testing.T) {
 		warn  bool
 	}{
 		{"get_file", 130 * time.Second, true}, {"download", 3 * time.Second, false}, {"scheduled", 10 * time.Minute, false}, {"finished", 10 * time.Minute, false}, {"claimed", 16 * time.Minute, true},
+		{"dedupe", 10 * time.Minute, false}, {"ignored", 10 * time.Minute, false},
 	} {
 		p := &sysin.CollectEventProgressModel{Stage: tc.stage, Since: gtime.New(now.Add(-tc.age))}
 		finishCollectProgress(p, now)
@@ -29,6 +30,33 @@ func TestCollectProgressAgeDoesNotClaimDeadlock(t *testing.T) {
 	finishCollectProgress(p, now)
 	if p.ElapsedSeconds != 0 {
 		t.Fatal("clock skew must not yield negative elapsed time")
+	}
+}
+
+func TestCollectProgressPreservesIgnoredOutcome(t *testing.T) {
+	now := gtime.New("2026-10-20 18:00:00").Time
+	for _, tc := range []struct {
+		name, reason, stage, label string
+	}{
+		{"production6120689", "资料库已存在相同资料 profileId:673495 channelId:228 layer:image_phash", "dedupe", "匹配重复"},
+		{"textHash", "资料库已存在相同资料 profileId:673488 channelId:228 layer:text_hash", "dedupe", "匹配重复"},
+		{"legacyDuplicate", "重复资料，已跳过", "dedupe", "匹配重复"},
+		{"ruleMismatch", "消息不是资料组或验证组", "ignored", "匹配忽略"},
+		{"emptyReason", "", "ignored", "匹配忽略"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			item := &sysin.CollectEventModel{Id: 6120689, Status: sysin.CollectEventStatusIgnored, ErrorMessage: tc.reason, ProcessedAt: gtime.New("2026-10-20 17:33:30")}
+			latest := &sysin.CollectEventProgressModel{Stage: "commit", Message: "按匹配规则保存资料并创建分发任务", Since: gtime.New("2026-10-20 17:33:29")}
+			outbox := gdb.Record{"event_id": gvar.New(item.Id), "status": gvar.New("pending"), "updated_at": gvar.New("2026-10-20 17:34:00"), "available_at": gvar.New("2026-10-20 17:34:10")}
+			p := collectEventProgressView(item, latest, outbox, now)
+			wantMessage := tc.reason
+			if wantMessage == "" {
+				wantMessage = tc.label
+			}
+			if p.Stage != tc.stage || p.Label != tc.label || p.Message != wantMessage || p.NoProgressWarning || p.NextRetryAt != nil || p.Since != item.ProcessedAt {
+				t.Fatalf("terminal outcome hidden by progress or outbox: %+v", p)
+			}
+		})
 	}
 }
 func TestCollectProgressReporterUsesCurrentContext(t *testing.T) {

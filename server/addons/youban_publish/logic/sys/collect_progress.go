@@ -50,6 +50,7 @@ func collectProgressLabel(stage string) string {
 		"waiting_slot": "等待下载并发槽", "get_file": "获取Telegram文件信息", "download": "下载媒体文件", "account_download": "账号媒体任务执行中",
 		"fingerprint": "计算媒体指纹", "upload": "上传云存储", "persist": "写回媒体结果", "media_queued": "等待媒体处理队列",
 		"media_ready": "单个媒体处理完成", "ready": "媒体已就绪，等待后续处理", "finished": "处理结束",
+		"dedupe": "匹配重复", "ignored": "匹配忽略",
 	}
 	if label := labels[stage]; label != "" {
 		return label
@@ -66,7 +67,7 @@ func finishCollectProgress(p *sysin.CollectEventProgressModel, now time.Time) {
 		}
 	}
 	// A slow phase is not proof of a deadlock. Expose its age without claiming it is stuck.
-	p.NoProgressWarning = p.ElapsedSeconds >= 120 && p.Stage != "finished" && p.Stage != "scheduled"
+	p.NoProgressWarning = p.ElapsedSeconds >= 120 && p.Stage != "finished" && p.Stage != "dedupe" && p.Stage != "ignored" && p.Stage != "scheduled"
 }
 
 func (s *sSysPublish) fillCollectEventProgress(ctx context.Context, list []*sysin.CollectEventModel) error {
@@ -182,7 +183,17 @@ func collectEventProgressView(item *sysin.CollectEventModel, latest *sysin.Colle
 		break
 	}
 	switch item.Status {
-	case sysin.CollectEventStatusProcessed, sysin.CollectEventStatusDispatched, sysin.CollectEventStatusIgnored:
+	case sysin.CollectEventStatusIgnored:
+		stage := "ignored"
+		message := sensitive.Diagnostic(item.ErrorMessage)
+		if collectEventIgnoreType(item.Status, item.ErrorMessage) == sysin.CollectEventIgnoreTypeDedupe {
+			stage = "dedupe"
+		}
+		if message == "" {
+			message = collectProgressLabel(stage)
+		}
+		p = &sysin.CollectEventProgressModel{Stage: stage, Message: message, Since: item.ProcessedAt}
+	case sysin.CollectEventStatusProcessed, sysin.CollectEventStatusDispatched:
 		p = &sysin.CollectEventProgressModel{Stage: "finished", Message: "采集事件已结束", Since: item.ProcessedAt}
 	case sysin.CollectEventStatusFailed:
 		p = &sysin.CollectEventProgressModel{Stage: "failed", Message: sensitive.Diagnostic(item.ErrorMessage), Since: p.Since}
