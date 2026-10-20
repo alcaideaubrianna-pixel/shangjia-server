@@ -2,6 +2,7 @@ package install
 
 import (
 	"context"
+	"regexp"
 	"strings"
 	"time"
 
@@ -190,9 +191,21 @@ func execSqlFile(ctx context.Context, tx gdb.TX, path string) (err error) {
 		if sql == "" {
 			continue
 		}
+		pgsql := strings.ToLower(g.DB().GetConfig().Type) == consts.DBPgsql
+		if pgsql {
+			exists, checkErr := postgresSchemaStatementExists(tx, sql)
+			if checkErr != nil {
+				return gerror.Wrapf(checkErr, "检查升级 SQL 结构失败：%s 第 %d 段", path, index+1)
+			}
+			if exists {
+				continue
+			}
+		}
 		startedAt := time.Now()
 		if _, err = tx.Exec(sql); err != nil {
-			if isIgnorableSqlError(err) {
+			// PostgreSQL aborts the transaction on any statement error. Returning
+			// success here would hide the failed migration or poison later SQL.
+			if !pgsql && isIgnorableSqlError(err) {
 				continue
 			}
 			return gerror.Wrapf(err, "执行 SQL 失败：%s 第 %d 段\n%s", path, index+1, sql)
@@ -203,6 +216,49 @@ func execSqlFile(ctx context.Context, tx gdb.TX, path string) (err error) {
 		}
 	}
 	return nil
+}
+
+// IF NOT EXISTS still acquires table locks in PostgreSQL. Avoid replaying
+// already-applied DDL while this upgrade transaction also touches live tables.
+// These patterns only recognize simple, trusted migration identifiers.
+var (
+	postgresSchemaIdentifier     = `(?:"[A-Za-z_][A-Za-z_0-9]*"|[A-Za-z_][A-Za-z_0-9]*)(?:\.(?:"[A-Za-z_][A-Za-z_0-9]*"|[A-Za-z_][A-Za-z_0-9]*))?`
+	postgresExistingIndex        = regexp.MustCompile(`(?is)^CREATE\s+(?:UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\s+(` + postgresSchemaIdentifier + `)\s+ON\s+(` + postgresSchemaIdentifier + `)\s*\(`)
+	postgresExistingColumn       = regexp.MustCompile(`(?is)^ALTER\s+TABLE\s+(` + postgresSchemaIdentifier + `)\s+ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\s+("[A-Za-z_][A-Za-z_0-9]*"|[A-Za-z_][A-Za-z_0-9]*)\s+`)
+	postgresMultipleAlterActions = regexp.MustCompile(`(?is),\s*(?:ADD|DROP|ALTER|RENAME)\s+`)
+)
+
+func postgresSchemaStatementExists(tx gdb.TX, statement string) (bool, error) {
+	if match := postgresExistingIndex.FindStringSubmatch(statement); match != nil {
+		indexName := match[1][strings.LastIndex(match[1], ".")+1:]
+		if strings.HasPrefix(indexName, `"`) {
+			indexName = strings.Trim(indexName, `"`)
+		} else {
+			indexName = strings.ToLower(indexName)
+		}
+		value, err := tx.GetValue(`SELECT EXISTS (SELECT 1 FROM pg_index x JOIN pg_class i ON i.oid=x.indexrelid WHERE i.relname=? AND x.indrelid=to_regclass(?) AND x.indisvalid AND x.indisready)`, indexName, match[2])
+		if err != nil {
+			return false, err
+		}
+		return value.Bool(), nil
+	}
+	if match := postgresExistingColumn.FindStringSubmatch(statement); match != nil {
+		if postgresMultipleAlterActions.MatchString(statement) {
+			return false, nil
+		}
+		column := match[2]
+		if strings.HasPrefix(column, `"`) {
+			column = strings.Trim(column, `"`)
+		} else {
+			column = strings.ToLower(column)
+		}
+		value, err := tx.GetValue(`SELECT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid=to_regclass(?) AND attname=? AND attnum>0 AND NOT attisdropped)`, match[1], column)
+		if err != nil {
+			return false, err
+		}
+		return value.Bool(), nil
+	}
+	return false, nil
 }
 
 func execMaintenanceSqlFile(ctx context.Context, path string) (err error) {

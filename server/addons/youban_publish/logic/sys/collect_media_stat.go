@@ -108,16 +108,11 @@ func (s *sSysPublish) recordCollectMediaPerformance(ctx context.Context, event g
 		"finished_at":        gtime.NewFromTime(finishedAt),
 		"updated_at":         gtime.Now(),
 	}
-	statModel := g.DB().Model("hg_youban_publish_collect_media_stat").Safe().Ctx(ctx).Where("event_id", event["id"].Int64())
-	if count, countErr := statModel.Count(); countErr == nil && count > 0 {
-		if _, updateErr := statModel.Data(data).Update(); updateErr != nil {
-			g.Log().Warningf(ctx, "更新采集媒体性能统计失败 eventId:%d err:%+v", event["id"].Int64(), updateErr)
-		}
-		return
-	}
-	data["created_at"] = gtime.Now()
-	if _, insertErr := g.DB().Model("hg_youban_publish_collect_media_stat").Safe().Ctx(ctx).Data(data).Insert(); insertErr != nil {
-		g.Log().Warningf(ctx, "新增采集媒体性能统计失败 eventId:%d err:%+v", event["id"].Int64(), insertErr)
+	// Concurrent completion/retry callbacks share one event. Upsert atomically
+	// rather than racing a COUNT followed by INSERT; retain its creation time.
+	if _, saveErr := g.DB().Model("hg_youban_publish_collect_media_stat").Safe().Ctx(ctx).
+		OnConflict("event_id").OnDuplicateEx("id", "created_at").Data(data).Save(); saveErr != nil {
+		g.Log().Warningf(ctx, "保存采集媒体性能统计失败 eventId:%d err:%+v", event["id"].Int64(), saveErr)
 	}
 }
 

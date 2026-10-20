@@ -593,7 +593,7 @@ func (s *sSysContent) listProfilesByFilter(ctx context.Context, in *sysin.Conten
 	case homeProfileFeedHot, homeProfileFeedRecommended:
 		mod = mod.LeftJoin(contentProfileStatsTable+" ps", "ps.profile_id="+aliasField("p", profileColumns.Id))
 		if len(in.RankProfileIds) > 0 {
-			mod = mod.OrderAsc(profileRankOrderExpression(aliasField("p", profileColumns.Id), in.RankProfileIds))
+			mod = applyProfileRankOrder(mod, aliasField("p", profileColumns.Id), in.RankProfileIds)
 		}
 		mod = mod.
 			OrderDesc(coalesceZero("ps.hot_score")).
@@ -647,6 +647,16 @@ func applyPublicProfileKeyword(mod *gdb.Model, keyword, profileNoColumn, titleCo
 		}
 	}
 	return mod.Where("("+strings.Join(conditions, " OR ")+")", args...), nil
+}
+
+func applyProfileRankOrder(mod *gdb.Model, idField string, ids []int64) *gdb.Model {
+	for _, id := range ids {
+		if id > 0 {
+			// A CASE expression is SQL, not an identifier to quote.
+			return mod.Order(gdb.Raw(profileRankOrderExpression(idField, ids) + " ASC"))
+		}
+	}
+	return mod
 }
 
 func profileRankOrderExpression(idField string, ids []int64) string {
