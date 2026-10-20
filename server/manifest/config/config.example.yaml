@@ -261,6 +261,9 @@ database:
   default:
     link: "pgsql:postgres:postgres@tcp(127.0.0.1:5432)/youban_hotgo"
     debug: true
+    maxOpen: 20 # 每实例；10 个生产实例合计 200，预留滚动发布与运维连接
+    maxIdle: 5
+    maxLifeTime: "10m"
     Prefix: "hg_"
   # FeiNiu_bot 只读数据源，用于资料增量导入
   feiniu:

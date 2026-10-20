@@ -60,6 +60,9 @@ func (s *sSysPublish) refreshTelegramObserveStats(ctx context.Context) error {
 	refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	return g.DB().Transaction(refreshCtx, func(ctx context.Context, tx gdb.TX) error {
+		if strings.ToLower(g.DB().GetConfig().Type) == consts.DBPgsql {
+			return s.refreshTelegramObserveStatsPostgres(ctx, tx)
+		}
 		if err := s.refreshTelegramQueueStats(ctx, tx); err != nil {
 			return err
 		}
@@ -91,23 +94,7 @@ func (s *sSysPublish) refreshTelegramQueueStats(ctx context.Context, tx gdb.TX) 
 }
 
 func (s *sSysPublish) refreshTelegramChannelStats(ctx context.Context, tx gdb.TX) error {
-	fields := `
-j.tenant_id,j.account_id,j.channel_id,j.target_chat_id,MAX(c.channel_title) AS channel_title,
-SUM(CASE WHEN j.status IN ('pending','failed_retry') AND (j.dispatch_status='' OR j.dispatch_status='idle') THEN 1 ELSE 0 END) AS pending_count,
-SUM(CASE WHEN j.dispatch_status='queued' THEN 1 ELSE 0 END) AS queued_count,
-SUM(CASE WHEN j.status='sending' THEN 1 ELSE 0 END) AS sending_count,
-SUM(CASE WHEN j.status='sent' THEN 1 ELSE 0 END) AS sent_count,
-SUM(CASE WHEN j.status='failed' THEN 1 ELSE 0 END) AS failed_count,
-SUM(CASE WHEN j.status='failed_retry' THEN 1 ELSE 0 END) AS retry_count,
-SUM(CASE WHEN j.error_message LIKE '%限流%' OR j.error_message LIKE '%Too Many Requests%' THEN 1 ELSE 0 END) AS rate_limit_count,
-MAX(j.sent_at) AS last_sent_at,
-MAX(CASE WHEN j.status IN ('failed','failed_retry') THEN j.updated_at ELSE NULL END) AS last_error_at,
-MAX(j.error_message) AS last_error_message`
-	rows, err := tx.Model(publishTgJobTable+" j").Safe().Ctx(ctx).
-		LeftJoin(publishChannelTable+" c", "c.id=j.channel_id").
-		Fields(fields).
-		Group("j.tenant_id,j.account_id,j.channel_id,j.target_chat_id").
-		All()
+	rows, err := tx.GetAll(telegramObserveChannelStatsSQL())
 	if err != nil {
 		return gerror.Wrap(err, "统计TG频道失败")
 	}
@@ -124,23 +111,7 @@ MAX(j.error_message) AS last_error_message`
 }
 
 func (s *sSysPublish) refreshTelegramBotStats(ctx context.Context, tx gdb.TX) error {
-	fields := `
-j.tenant_id,j.bot_id,MAX(b.bot_name) AS bot_name,MAX(b.bot_username) AS bot_username,
-SUM(CASE WHEN j.status IN ('pending','failed_retry') AND (j.dispatch_status='' OR j.dispatch_status='idle') THEN 1 ELSE 0 END) AS pending_count,
-SUM(CASE WHEN j.dispatch_status='queued' THEN 1 ELSE 0 END) AS queued_count,
-SUM(CASE WHEN j.status='sending' THEN 1 ELSE 0 END) AS sending_count,
-SUM(CASE WHEN j.status='sent' THEN 1 ELSE 0 END) AS sent_count,
-SUM(CASE WHEN j.status='failed' THEN 1 ELSE 0 END) AS failed_count,
-SUM(CASE WHEN j.status='failed_retry' THEN 1 ELSE 0 END) AS retry_count,
-SUM(CASE WHEN j.error_message LIKE '%限流%' OR j.error_message LIKE '%Too Many Requests%' THEN 1 ELSE 0 END) AS rate_limit_count,
-MAX(j.sent_at) AS last_sent_at,
-MAX(CASE WHEN j.status IN ('failed','failed_retry') THEN j.updated_at ELSE NULL END) AS last_error_at,
-MAX(j.error_message) AS last_error_message`
-	rows, err := tx.Model(publishTgJobTable+" j").Safe().Ctx(ctx).
-		LeftJoin(publishBotTable+" b", "b.id=j.bot_id").
-		Fields(fields).
-		Group("j.tenant_id,j.bot_id").
-		All()
+	rows, err := tx.GetAll(telegramObserveBotStatsSQL())
 	if err != nil {
 		return gerror.Wrap(err, "统计TG Bot失败")
 	}
@@ -198,4 +169,100 @@ func truncateTelegramObserveError(message string) string {
 		return message
 	}
 	return string(runes[:telegramObserveLastErrorMaxRunes])
+}
+
+// Aggregate jobs before joining metadata, so dimension lookups scale with groups, not job history.
+func telegramObserveChannelStatsSQL() string {
+	return `SELECT j.*,c.channel_title FROM (SELECT
+j.tenant_id,j.account_id,j.channel_id,j.target_chat_id,
+SUM(CASE WHEN j.status IN ('pending','failed_retry') AND (j.dispatch_status='' OR j.dispatch_status='idle') THEN 1 ELSE 0 END) AS pending_count,
+SUM(CASE WHEN j.dispatch_status='queued' THEN 1 ELSE 0 END) AS queued_count,
+SUM(CASE WHEN j.status='sending' THEN 1 ELSE 0 END) AS sending_count,
+SUM(CASE WHEN j.status='sent' THEN 1 ELSE 0 END) AS sent_count,
+SUM(CASE WHEN j.status='failed' THEN 1 ELSE 0 END) AS failed_count,
+SUM(CASE WHEN j.status='failed_retry' THEN 1 ELSE 0 END) AS retry_count,
+SUM(CASE WHEN j.error_message LIKE '%限流%' OR j.error_message LIKE '%Too Many Requests%' THEN 1 ELSE 0 END) AS rate_limit_count,
+MAX(j.sent_at) AS last_sent_at,
+MAX(CASE WHEN j.status IN ('failed','failed_retry') THEN j.updated_at ELSE NULL END) AS last_error_at,
+MAX(j.error_message) AS last_error_message FROM ` + publishTgJobTable + ` j GROUP BY j.tenant_id,j.account_id,j.channel_id,j.target_chat_id) j LEFT JOIN ` + publishChannelTable + ` c ON c.id=j.channel_id`
+}
+
+// Aggregate jobs before joining metadata, so dimension lookups scale with groups, not job history.
+func telegramObserveBotStatsSQL() string {
+	return `SELECT j.*,b.bot_name,b.bot_username FROM (SELECT
+j.tenant_id,j.bot_id,
+SUM(CASE WHEN j.status IN ('pending','failed_retry') AND (j.dispatch_status='' OR j.dispatch_status='idle') THEN 1 ELSE 0 END) AS pending_count,
+SUM(CASE WHEN j.dispatch_status='queued' THEN 1 ELSE 0 END) AS queued_count,
+SUM(CASE WHEN j.status='sending' THEN 1 ELSE 0 END) AS sending_count,
+SUM(CASE WHEN j.status='sent' THEN 1 ELSE 0 END) AS sent_count,
+SUM(CASE WHEN j.status='failed' THEN 1 ELSE 0 END) AS failed_count,
+SUM(CASE WHEN j.status='failed_retry' THEN 1 ELSE 0 END) AS retry_count,
+SUM(CASE WHEN j.error_message LIKE '%限流%' OR j.error_message LIKE '%Too Many Requests%' THEN 1 ELSE 0 END) AS rate_limit_count,
+MAX(j.sent_at) AS last_sent_at,
+MAX(CASE WHEN j.status IN ('failed','failed_retry') THEN j.updated_at ELSE NULL END) AS last_error_at,
+MAX(j.error_message) AS last_error_message FROM ` + publishTgJobTable + ` j GROUP BY j.tenant_id,j.bot_id) j LEFT JOIN ` + publishBotTable + ` b ON b.id=j.bot_id`
+}
+
+// GROUPING SETS reads job history once for all three exact statistics dimensions.
+func telegramObserveStatsPostgresSQL() string {
+	return `SELECT j.*,c.channel_title,b.bot_name,b.bot_username FROM (
+SELECT CASE WHEN GROUPING(COALESCE(NULLIF(queue_name,''),'youban_publish_tg'))=0 THEN 'queue'
+ WHEN GROUPING(channel_id)=0 THEN 'channel' ELSE 'bot' END AS stat_kind,
+tenant_id,account_id,channel_id,target_chat_id,bot_id,
+COALESCE(NULLIF(queue_name,''),'youban_publish_tg') AS queue_name,
+priority AS priority_level,status,COUNT(*) AS job_count,
+MIN(created_at) AS oldest_job_at,MAX(created_at) AS latest_job_at,
+SUM(CASE WHEN status IN ('pending','failed_retry') AND (dispatch_status='' OR dispatch_status='idle') THEN 1 ELSE 0 END) AS pending_count,
+SUM(CASE WHEN dispatch_status='queued' THEN 1 ELSE 0 END) AS queued_count,
+SUM(CASE WHEN status='sending' THEN 1 ELSE 0 END) AS sending_count,
+SUM(CASE WHEN status='sent' THEN 1 ELSE 0 END) AS sent_count,
+SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed_count,
+SUM(CASE WHEN status='failed_retry' THEN 1 ELSE 0 END) AS retry_count,
+SUM(CASE WHEN error_message LIKE '%限流%' OR error_message LIKE '%Too Many Requests%' THEN 1 ELSE 0 END) AS rate_limit_count,
+MAX(sent_at) AS last_sent_at,
+MAX(CASE WHEN status IN ('failed','failed_retry') THEN updated_at ELSE NULL END) AS last_error_at,
+MAX(error_message) AS last_error_message
+FROM ` + publishTgJobTable + `
+GROUP BY GROUPING SETS (
+ (COALESCE(NULLIF(queue_name,''),'youban_publish_tg'),priority,status),
+ (tenant_id,account_id,channel_id,target_chat_id),
+ (tenant_id,bot_id)
+)) j
+LEFT JOIN ` + publishChannelTable + ` c ON j.stat_kind='channel' AND c.id=j.channel_id
+LEFT JOIN ` + publishBotTable + ` b ON j.stat_kind='bot' AND b.id=j.bot_id`
+}
+
+func (s *sSysPublish) refreshTelegramObserveStatsPostgres(ctx context.Context, tx gdb.TX) error {
+	// A transaction-scoped nonblocking lease also covers scheduler rolling overlap.
+	locked, err := tx.GetValue("SELECT pg_try_advisory_xact_lock(hashtextextended(?,0))", "youban_publish:telegram-observe-stats")
+	if err != nil {
+		return gerror.Wrap(err, "获取TG统计刷新租约失败")
+	}
+	if !locked.Bool() {
+		return nil
+	}
+	rows, err := tx.GetAll(telegramObserveStatsPostgresSQL())
+	if err != nil {
+		return gerror.Wrap(err, "汇总TG观测统计失败")
+	}
+	for _, table := range []string{publishTgQueueStatTable, publishTgChannelStatTable, publishTgBotStatTable} {
+		if _, err = tx.Exec("DELETE FROM " + table); err != nil {
+			return gerror.Wrap(err, "清理TG观测统计失败")
+		}
+	}
+	now := gtime.Now()
+	for _, row := range rows {
+		switch row["stat_kind"].String() {
+		case "queue":
+			err = s.upsertTelegramQueueStat(ctx, tx, row, now)
+		case "channel":
+			err = s.upsertTelegramChannelStat(ctx, tx, row, now)
+		case "bot":
+			err = s.upsertTelegramBotStat(ctx, tx, row, now)
+		}
+		if err != nil {
+			return gerror.Wrap(err, "写入TG观测统计失败")
+		}
+	}
+	return nil
 }

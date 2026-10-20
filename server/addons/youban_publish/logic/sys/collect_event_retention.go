@@ -28,7 +28,7 @@ func (s *sSysPublish) cleanupCollectEventsOlderThan(ctx context.Context, days, l
 		Fields(eventCols.Id).
 		WhereIn(eventCols.Status, collectEventCleanupStatuses).
 		WhereLTE(eventCols.CreatedAt, cutoff).
-		OrderAsc(eventCols.Id).
+		OrderAsc(eventCols.CreatedAt + "," + eventCols.Id).
 		Limit(limit).
 		All()
 	if err != nil {
