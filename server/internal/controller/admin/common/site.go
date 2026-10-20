@@ -13,6 +13,7 @@ import (
 	"hotgo/internal/library/captcha"
 	"hotgo/internal/library/token"
 	"hotgo/internal/service"
+	"hotgo/utility/adminsecurity"
 	"hotgo/utility/validate"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -90,7 +91,12 @@ func (c *cSite) LoginConfig(ctx context.Context, _ *common.SiteLoginConfigReq) (
 		return
 	}
 
-	res.LoginConfig = login
+	// Do not mutate the shared cached login configuration (member APIs use it).
+	copy := *login
+	if adminsecurity.Enabled(ctx) {
+		copy.CaptchaSwitch = consts.StatusEnabled
+	}
+	res.LoginConfig = &copy
 	res.I18nSwitch = g.Cfg().MustGet(ctx, "system.i18n.switch", true).Bool()
 	res.DefaultLanguage = g.Cfg().MustGet(ctx, "system.i18n.defaultLanguage", consts.SysDefaultLanguage).String()
 	res.ProjectName = gi18n.T(ctx, "HotGo管理系统")
@@ -103,7 +109,15 @@ func (c *cSite) Captcha(ctx context.Context, _ *common.LoginCaptchaReq) (res *co
 	if err != nil {
 		return
 	}
-	cid, base64 := captcha.Generate(ctx, loginConf.CaptchaType)
+	var cid, base64 string
+	if adminsecurity.Enabled(ctx) {
+		cid, base64, err = adminsecurity.GenerateCaptcha(ctx, loginConf.CaptchaType)
+		if err != nil {
+			return nil, gerror.Wrap(err, "获取登录验证码失败，请稍后重试")
+		}
+	} else {
+		cid, base64 = captcha.Generate(ctx, loginConf.CaptchaType)
+	}
 	res = &common.LoginCaptchaRes{Cid: cid, Base64: base64}
 	return
 }
@@ -121,9 +135,20 @@ func (c *cSite) AccountLogin(ctx context.Context, req *common.AccountLoginReq) (
 		return
 	}
 
-	if !req.IsLock && login.CaptchaSwitch == consts.StatusEnabled {
+	canUnlock := false
+	if req.IsLock {
+		user, parseErr := token.ParseLoginUser(ghttp.RequestFromCtx(ctx))
+		canUnlock = parseErr == nil && user != nil && user.App == consts.AppAdmin && user.Username == req.Username
+	}
+	if !canUnlock && (login.CaptchaSwitch == consts.StatusEnabled || adminsecurity.Enabled(ctx)) {
 		// 校验 验证码
-		if !captcha.Verify(req.Cid, req.Code) {
+		valid := false
+		if adminsecurity.Enabled(ctx) {
+			valid = adminsecurity.VerifyCaptcha(ctx, req.Cid, req.Code)
+		} else {
+			valid = captcha.Verify(req.Cid, req.Code)
+		}
+		if !valid {
 			err = gerror.New("验证码错误")
 			return
 		}

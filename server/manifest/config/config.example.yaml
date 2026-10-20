@@ -31,6 +31,13 @@ system:
   addonsResourcePath: "resource"
 
 
+# 后台安全入口：默认关闭，仅影响管理后台；生产使用 HTTPS 和共享 Redis。
+# 通过 YOUBAN_ADMIN_ENTRY_PATH / YOUBAN_ADMIN_ENTRY_KEY 配置，勿将真实入口和密钥提交仓库。
+security:
+  admin:
+    entryPath: ""  # / 加16至128位随机字符；留空保留 /admin
+    entryKey: ""   # 至少32位随机签名密钥，所有 Web 实例一致
+
 # 统一默认日志配置
 defaultLogger: &defaultLogger
   level: "all"
