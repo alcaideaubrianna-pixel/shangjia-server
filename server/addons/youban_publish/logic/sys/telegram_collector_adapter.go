@@ -1085,6 +1085,13 @@ func (s *sSysPublish) ingestCollectorBotDelivery(ctx context.Context, delivery *
 	if source.IsEmpty() {
 		return nil
 	}
+	enabled, configErr := s.collectTenantEnabled(ctx, source["tenant_id"].Int64())
+	if configErr != nil {
+		return configErr
+	}
+	if !enabled {
+		return nil
+	}
 	blocked, err := s.collectMessageFromAccountPublishChannel(ctx, source["tenant_id"].Int64(), 0, delivery.SourceChatID)
 	if err != nil {
 		return gerror.Wrap(err, "检查Bot采集上架频道过滤失败")
@@ -1150,24 +1157,20 @@ func (s *sSysPublish) updateCollectedBotMessage(ctx context.Context, message *Co
 	if strings.TrimSpace(message.RawText) == "" {
 		return nil
 	}
-	rules, err := s.collectEventRules(ctx, event, message.TenantId, message.AccountId)
+	ruleIDs := make([]int64, 0, len(dispatches))
+	for _, dispatch := range dispatches {
+		ruleIDs = append(ruleIDs, dispatch["rule_id"].Int64())
+	}
+	rulesByID, err := s.collectHistoricalRules(ctx, event, message.TenantId, message.AccountId, ruleIDs)
 	if err != nil {
 		return gerror.Wrap(err, "读取编辑消息的完整采集规则失败")
-	}
-	rulesByID := make(map[int64]gdb.Record, len(rules))
-	for _, rule := range rules {
-		if suffix, ok, suffixErr := s.resolveIntroFeeChannelSuffix(ctx, event, rule); suffixErr != nil {
-			return suffixErr
-		} else if ok {
-			rule["intro_fee_suffix"] = gvar.New(suffix)
-		}
-		rulesByID[rule["id"].Int64()] = rule
 	}
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		for _, dispatch := range dispatches {
 			rule := rulesByID[dispatch["rule_id"].Int64()]
 			if rule.IsEmpty() {
-				return gerror.New("编辑来源资料的完整采集规则不存在或已停用")
+				g.Log().Warningf(ctx, "跳过已删除规则的来源消息编辑 eventId:%d dispatchId:%d ruleId:%d", event["id"].Int64(), dispatch["id"].Int64(), dispatch["rule_id"].Int64())
+				continue
 			}
 			cols := idao.ContentProfile.Columns()
 			if _, updateErr := tx.Model(idao.ContentProfile.Table()).
@@ -1339,6 +1342,13 @@ func botCollectChannelRelationEnabled(collectEnabled int, status, approvalStatus
 }
 
 func (s *sSysPublish) ingestCollectorAccountDelivery(ctx context.Context, delivery *collectorin.CollectorDelivery) error {
+	enabled, err := s.collectTenantEnabled(ctx, delivery.TenantID)
+	if err != nil {
+		return err
+	}
+	if !enabled {
+		return nil
+	}
 	if err := s.ensureAccountCollectChannelRelation(ctx, delivery); err != nil {
 		return err
 	}
