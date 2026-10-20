@@ -224,7 +224,6 @@
             <n-form-item label="S3 Endpoint" path="uploadR2Endpoint"><n-input v-model:value="formValue.uploadR2Endpoint" placeholder="https://<account-id>.r2.cloudflarestorage.com" /></n-form-item>
             <n-form-item label="Region" path="uploadR2Region"><n-input v-model:value="formValue.uploadR2Region" placeholder="auto" /></n-form-item>
             <n-form-item label="Bucket" path="uploadR2Bucket"><n-input v-model:value="formValue.uploadR2Bucket" /></n-form-item>
-            <n-form-item label="对象路径" path="uploadR2Path"><n-input v-model:value="formValue.uploadR2Path" /></n-form-item>
             <n-form-item label="公开访问域名" path="uploadR2PublicURL"><n-input v-model:value="formValue.uploadR2PublicURL" placeholder="https://cdn.example.com" /></n-form-item>
           </n-tab-pane>
 
@@ -394,7 +393,6 @@
     uploadR2Endpoint: '',
     uploadR2Region: 'auto',
     uploadR2Bucket: '',
-    uploadR2Path: '',
     uploadR2PublicURL: '',
     uploadMinioAccessKey: '',
     uploadMinioSecretKey: '',
