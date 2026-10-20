@@ -54,9 +54,10 @@ RUN cp manifest/config/config.example.yaml manifest/config/config.yaml
 RUN rm -rf resource/public/admin && mkdir -p resource/public/admin
 COPY --from=web-builder /src/web/dist/. ./resource/public/admin/
 
+ARG BUILD_VERSION=dev
 RUN rm -f internal/packed/packed.go \
     && gf pack resource,storage,manifest/config internal/packed/packed.go --keepPath=true \
-    && CGO_ENABLED=1 go build -trimpath -o /tmp/hotgo ./main.go \
+    && CGO_ENABLED=1 go build -trimpath -ldflags "-X hotgo/internal/consts.BuildVersion=${BUILD_VERSION}" -o /tmp/hotgo ./main.go \
     && chmod +x /tmp/hotgo
 
 

@@ -23,7 +23,7 @@ type cSite struct{}
 func (a *cSite) Index(ctx context.Context, _ *base.SiteIndexReq) (res *base.SiteIndexRes, err error) {
 	service.View().Render(ctx, model.View{Data: g.Map{
 		"name":    simple.AppName(ctx),
-		"version": consts.VersionApp,
+		"version": consts.BuildVersion,
 	}})
 
 	// err = gerror.New("这是一个测试错误")

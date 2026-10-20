@@ -9,3 +9,6 @@ package consts
 const (
 	VersionApp = "2.18.9"
 )
+
+// BuildVersion 应用构建号，由镜像构建时通过 ldflags 注入。
+var BuildVersion = "dev"

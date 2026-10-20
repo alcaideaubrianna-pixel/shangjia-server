@@ -29,6 +29,9 @@ jobs:
   build:
     if: github.ref == 'refs/heads/feat/railway-runtime-ci-split'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
     outputs:
       short_sha: ${{ steps.image.outputs.short_sha }}
       server_image: ${{ steps.image.outputs.server }}
@@ -48,6 +51,7 @@ jobs:
           echo "acr_vpc=xxxxxx-registry-vpc.ap-southeast-1.cr.aliyuncs.com/xiaohuiji/youban-server" >> "$GITHUB_OUTPUT"
           echo "branch_tag=feat-railway-runtime-ci-split" >> "$GITHUB_OUTPUT"
           echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          echo "build_version=${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -121,6 +125,7 @@ jobs:
           platforms: linux/amd64
           build-args: |
             GIT_REVISION=${{ github.sha }}
+            BUILD_VERSION=${{ steps.image.outputs.build_version }}
           tags: |
             ${{ steps.server_meta.outputs.tags }}
             ${{ steps.image.outputs.tencent }}:latest
@@ -130,6 +135,11 @@ jobs:
           labels: ${{ steps.server_meta.outputs.labels }}
           cache-from: type=gha,scope=server
           cache-to: type=gha,mode=max,scope=server
+
+      - name: Tag successful build
+        env:
+          BUILD_VERSION: ${{ steps.image.outputs.build_version }}
+        run: bash scripts/ci/tag-successful-build.sh
 
       - name: Remove temporary ACR allowlist entry
         if: ${{ always() }}
@@ -150,6 +160,7 @@ jobs:
       - name: Image summary
         run: |
           echo "### Published server image" >> "$GITHUB_STEP_SUMMARY"
+          echo 'Build / Git tag: ${{ steps.image.outputs.build_version }}' >> "$GITHUB_STEP_SUMMARY"
           echo '${{ steps.server_meta.outputs.tags }}' >> "$GITHUB_STEP_SUMMARY"
           echo '${{ steps.image.outputs.acr_public }}:${{ steps.image.outputs.short_sha }}' >> "$GITHUB_STEP_SUMMARY"
 
@@ -159,12 +170,13 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.YOUBAN_TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.YOUBAN_TELEGRAM_CHAT_ID }}
           IMAGE: ${{ steps.image.outputs.server }}:sha-${{ steps.image.outputs.short_sha }}
+          BUILD_VERSION: ${{ steps.image.outputs.build_version }}
         run: |
           if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
             echo "telegram secrets are not configured, skip"
             exit 0
           fi
-          text=$(printf '✅ <b>youban-server 构建成功</b>\n版本：%s / %s\n镜像：<code>%s</code>\n仓库：%s' "$GITHUB_REF_NAME" "${GITHUB_SHA::7}" "$IMAGE" "$GITHUB_REPOSITORY")
+          text=$(printf '✅ <b>youban-server 构建成功</b>\n版本：%s / %s\n镜像：<code>%s</code>\n仓库：%s' "$BUILD_VERSION" "${GITHUB_SHA::7}" "$IMAGE" "$GITHUB_REPOSITORY")
           curl --fail --show-error --silent \
             -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             -d "chat_id=${TELEGRAM_CHAT_ID}" \
