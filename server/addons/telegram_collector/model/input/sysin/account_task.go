@@ -28,6 +28,7 @@ const (
 	AccountTaskTypeManagedBotUsernameCheck   = "managed_bot_username_check"
 	AccountTaskTypeManagedBotCreate          = "managed_bot_create"
 	AccountTaskTypeChannelMemberSync         = "channel_member_sync"
+	AccountTaskTypeBotManager                = "bot_manager"
 	AccountTaskTypeTgAccountRefresh          = "tg_account_refresh"
 	AccountTaskTypeMessageRepair             = "message_repair"
 	AccountTaskTypeMessageRepairScan         = "message_repair_scan"

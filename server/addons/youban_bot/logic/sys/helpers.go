@@ -923,7 +923,7 @@ func (s *sSysBot) featureVisibleForTelegramUser(ctx context.Context, feature bot
 		return false
 	}
 	key := feature.Key()
-	if key != (adminFeature{}).Key() && key != (quickPushFeature{}).Key() && key != (profileFeature{}).Key() && key != (instantRegisterFeature{}).Key() && key != (collectManageFeature{}).Key() {
+	if key != (botManagerFeature{}).Key() && key != (adminFeature{}).Key() && key != (quickPushFeature{}).Key() && key != (profileFeature{}).Key() && key != (instantRegisterFeature{}).Key() && key != (collectManageFeature{}).Key() {
 		return true
 	}
 	if telegramUserId == "" {
@@ -937,7 +937,7 @@ func (s *sSysBot) featureVisibleForTelegramUser(ctx context.Context, feature bot
 		}
 		return allowed
 	}
-	if key == (profileFeature{}).Key() {
+	if key == (profileFeature{}).Key() || key == (botManagerFeature{}).Key() {
 		bind, err := s.bindingByTelegram(ctx, sysin.BotAppApi, telegramUserId)
 		if err != nil {
 			g.Log().Warningf(ctx, "判断资料管理菜单可见失败 telegramUserId:%s err:%+v", telegramUserId, err)

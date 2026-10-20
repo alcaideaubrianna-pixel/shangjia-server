@@ -36,6 +36,9 @@ const (
 var sixDigitRegexp = regexp.MustCompile(`\b\d{6}\b`)
 
 type sSysBot struct {
+	managerMu             sync.Mutex
+	managerCancel         context.CancelFunc
+	managerDone           chan struct{}
 	relayClientForToken   func(context.Context, string) (*tgbot.Bot, error)
 	relayAccountForUser   func(context.Context, int64) (*botProfileAccount, error)
 	relayOwnedBots        func(context.Context, int64, int64, int64, bool) ([]*publishsysin.RelayOwnedBotModel, error)
@@ -88,6 +91,7 @@ func (row *authCodeRow) statusModel() *sysin.CodeStatusModel {
 
 func init() {
 	bot := NewSysBot()
+	registerBotManagerAccountHandler(bot)
 	service.RegisterSysBot(bot)
 	gatewayservice.RegisterProvider(&botGatewayProvider{bot: bot})
 	gatewayservice.RegisterFeature(&relayGatewayFeature{bot: bot})
@@ -96,6 +100,7 @@ func init() {
 func NewSysBot() *sSysBot { return &sSysBot{} }
 
 func (s *sSysBot) StartRuntime(ctx context.Context) {
+	s.startBotManagerRuntime(ctx)
 	_ = s.syncAllTelegramBotMenus(ctx)
 	s.startTelegramMessageCleanup(ctx)
 	s.startPendingBroadcasts(ctx)
@@ -103,6 +108,7 @@ func (s *sSysBot) StartRuntime(ctx context.Context) {
 	s.startRelayRuntime(ctx)
 }
 func (s *sSysBot) StopRuntime() {
+	s.stopBotManagerRuntime()
 	s.stopTelegramMessageCleanup()
 	s.stopProfileSessionRecovery()
 	s.stopRelayRuntime()
@@ -157,6 +163,7 @@ func init() {
 	registerBotFeature(startFeature{})
 	registerBotFeature(helpFeature{})
 	registerBotFeature(relayManagementFeature{})
+	registerBotFeature(botManagerFeature{})
 	registerBotFeature(inlinePromotionFeature{})
 	registerBotFeature(loginFeature{})
 	registerBotFeature(bindFeature{})
