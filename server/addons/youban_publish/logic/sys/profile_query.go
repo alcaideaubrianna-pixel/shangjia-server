@@ -237,16 +237,22 @@ func (s *sSysPublish) adminNoteList(ctx context.Context, in *sysin.NoteListInp, 
 		return nil, err
 	}
 	logSlowAdminNoteListStage(ctx, "profile_query", startedAt, len(profiles), boolToInt(hasMore))
+	stageStartedAt := time.Now()
 	if err = s.ensureProfileListUUID(ctx, profiles); err != nil {
 		return nil, err
 	}
+	logSlowAdminNoteListStage(ctx, "profile_uuid", stageStartedAt, len(profiles), 0)
+	stageStartedAt = time.Now()
 	if err = s.applyProfileTagNames(ctx, profiles); err != nil {
 		return nil, err
 	}
+	logSlowAdminNoteListStage(ctx, "tag_names", stageStartedAt, len(profiles), 0)
+	stageStartedAt = time.Now()
 	if err = s.applyProfileCollectionMetadata(ctx, profiles); err != nil {
 		return nil, err
 	}
-	stageStartedAt := time.Now()
+	logSlowAdminNoteListStage(ctx, "collection_metadata", stageStartedAt, len(profiles), 0)
+	stageStartedAt = time.Now()
 	mediaBuckets, err := s.adminNoteCoverMediaByProfiles(ctx, profiles)
 	if err != nil {
 		return nil, err

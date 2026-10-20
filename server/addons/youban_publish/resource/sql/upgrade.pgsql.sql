@@ -665,6 +665,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_media_fingerprint" (
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_fingerprint_scope" ON "hg_youban_publish_media_fingerprint" ("tenant_id", "media_type", "deleted_at");
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_note_index" (
   "id" BIGSERIAL PRIMARY KEY,
+  "is_collected" boolean NOT NULL DEFAULT false,
   "tenant_id" bigint NOT NULL DEFAULT 0,
   "account_id" bigint NOT NULL DEFAULT 0,
   "profile_id" bigint NOT NULL DEFAULT 0,

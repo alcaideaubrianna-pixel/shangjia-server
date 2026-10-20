@@ -132,12 +132,12 @@ func applyNoteIndexFilters(mod *gdb.Model, in *sysin.ProfileListInp) *gdb.Model 
 	}
 	switch strings.TrimSpace(in.SourceScope) {
 	case "collected":
-		// note_index already joins content_profile as p. The profile source type is
-		// the canonical, indexed source of truth for collected materials; avoid a
-		// per-row collect_dispatch existence scan on the admin list path.
-		mod = mod.Where("p.source_type", collectProfileSourceType)
+		// Filter in the ordered read model, before joining profile/state rows.
+		// Filtering p.source_type after LIMIT-driven index scans can otherwise
+		// probe hundreds of thousands of unrelated profiles for an empty page.
+		mod = mod.Where("i."+noteIndexCollectedColumn, true)
 	case "manual":
-		mod = mod.Where("p.source_type != ? OR p.source_type IS NULL OR p.source_type = ''", collectProfileSourceType)
+		mod = mod.Where("i."+noteIndexCollectedColumn, false)
 	}
 	if tag := strings.TrimSpace(in.Tag); tag != "" {
 		mod = applyNoteIndexTagFilter(mod, splitProfileTagValues(tag))
