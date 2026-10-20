@@ -35,7 +35,7 @@ func (s *sSysPublish) CollectSourceProfileIds(ctx context.Context, in *sysin.Col
 	if source.IsEmpty() {
 		return nil, gerror.New("采集源不存在")
 	}
-	ids, err := s.collectSourceProfileIds(ctx, in.Id, account.TenantId, account.Id)
+	ids, err := s.collectSourceDownProfileIds(ctx, in.Id, account.TenantId, account.Id)
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +73,7 @@ func (s *sSysPublish) CollectSourceDown(ctx context.Context, in *sysin.CollectSo
 	if err != nil {
 		return nil, gerror.Wrap(err, "停止采集源失败")
 	}
-	profileIds, err := s.collectSourceProfileIds(ctx, in.Id, account.TenantId, account.Id)
+	profileIds, err := s.collectSourceDownProfileIds(ctx, in.Id, account.TenantId, account.Id)
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +119,7 @@ func (s *sSysPublish) BotCollectSourceDownAsync(ctx context.Context, sourceId, t
 }
 
 func (s *sSysPublish) ExecuteCollectSourceDown(ctx context.Context, sourceId int64, tenantId int64, accountId int64, deleteProfiles bool) (*sysin.CollectSourceDownModel, error) {
-	profileIds, err := s.collectSourceProfileIds(ctx, sourceId, tenantId, accountId)
+	profileIds, err := s.collectSourceDownProfileIds(ctx, sourceId, tenantId, accountId)
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +152,7 @@ func (s *sSysPublish) ExecuteCollectSourceDown(ctx context.Context, sourceId int
 	if err = s.finishCollectSourceDownProfiles(ctx, profileIds, tenantId); err != nil {
 		return nil, err
 	}
-	if err = s.finishCollectSourceDownDispatch(ctx, sourceId, profileIds, tenantId, accountId); err != nil {
+	if err = s.finishCollectSourceDownDispatch(ctx, profileIds, tenantId, accountId); err != nil {
 		return nil, err
 	}
 	if deleteProfiles {
@@ -190,8 +190,46 @@ func (s *sSysPublish) collectSourceProfileIds(ctx context.Context, sourceId int6
 	return uniqueIds(ids), nil
 }
 
+func (s *sSysPublish) collectSourceDownProfileIds(ctx context.Context, sourceId, tenantId, accountId int64) ([]int64, error) {
+	ids, err := s.collectSourceProfileIds(ctx, sourceId, tenantId, accountId)
+	if err != nil {
+		return nil, err
+	}
+	// Source configuration IDs are replaceable; the Telegram chat identity is
+	// not. Include proven historical profiles from the same owned source chat.
+	source, err := pdao.YoubanPublishCollectSource.Ctx(ctx).Unscoped().
+		Fields("source_chat_id").Where("id", sourceId).
+		Where("tenant_id", tenantId).Where("account_id", accountId).One()
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取下架采集源身份失败")
+	}
+	if !source.IsEmpty() && source["source_chat_id"].String() != "" {
+		historicalIDs, err := collectChannelProfileIDs(ctx, tenantId, accountId, 0, source["source_chat_id"].String())
+		if err != nil {
+			return nil, err
+		}
+		ids = append(ids, historicalIDs...)
+	}
+	return uniqueIds(ids), nil
+}
+
 func (s *sSysPublish) collectSourceDownPreview(ctx context.Context, sourceId int64, tenantId int64, accountId int64, taskIds []int64) (*sysin.CollectSourceDownModel, error) {
 	res := &sysin.CollectSourceDownModel{SourceId: sourceId, TaskCount: len(taskIds)}
+	if len(taskIds) > collectSourceDownDeleteBatchSize {
+		for start := 0; start < len(taskIds); start += collectSourceDownDeleteBatchSize {
+			end := start + collectSourceDownDeleteBatchSize
+			if end > len(taskIds) {
+				end = len(taskIds)
+			}
+			batch, err := s.collectSourceDownPreview(ctx, sourceId, tenantId, accountId, taskIds[start:end])
+			if err != nil {
+				return nil, err
+			}
+			res.JobCount += batch.JobCount
+			res.MessageCount += batch.MessageCount
+		}
+		return res, nil
+	}
 	if len(taskIds) == 0 {
 		return res, nil
 	}
@@ -220,6 +258,21 @@ func (s *sSysPublish) collectSourceDownPreview(ctx context.Context, sourceId int
 }
 
 func (s *sSysPublish) collectSourceDownJobs(ctx context.Context, taskIds []int64, tenantId int64) ([]telegramResubmitJob, error) {
+	if len(taskIds) > collectSourceDownDeleteBatchSize {
+		var result []telegramResubmitJob
+		for start := 0; start < len(taskIds); start += collectSourceDownDeleteBatchSize {
+			end := start + collectSourceDownDeleteBatchSize
+			if end > len(taskIds) {
+				end = len(taskIds)
+			}
+			batch, err := s.collectSourceDownJobs(ctx, taskIds[start:end], tenantId)
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, batch...)
+		}
+		return result, nil
+	}
 	var jobs []telegramResubmitJob
 	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("tenant_id", tenantId).
@@ -234,6 +287,18 @@ func (s *sSysPublish) collectSourceDownJobs(ctx context.Context, taskIds []int64
 }
 
 func (s *sSysPublish) supersedeCollectSourcePendingJobs(ctx context.Context, taskIds []int64, tenantId int64) error {
+	if len(taskIds) > collectSourceDownDeleteBatchSize {
+		for start := 0; start < len(taskIds); start += collectSourceDownDeleteBatchSize {
+			end := start + collectSourceDownDeleteBatchSize
+			if end > len(taskIds) {
+				end = len(taskIds)
+			}
+			if err := s.supersedeCollectSourcePendingJobs(ctx, taskIds[start:end], tenantId); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	if len(taskIds) == 0 {
 		return nil
 	}
@@ -267,6 +332,21 @@ func (s *sSysPublish) supersedeCollectSourcePendingJobs(ctx context.Context, tas
 }
 
 func (s *sSysPublish) collectSourcePendingDownJobs(ctx context.Context, taskIds []int64, tenantId int64) ([]telegramResubmitJob, error) {
+	if len(taskIds) > collectSourceDownDeleteBatchSize {
+		var result []telegramResubmitJob
+		for start := 0; start < len(taskIds); start += collectSourceDownDeleteBatchSize {
+			end := start + collectSourceDownDeleteBatchSize
+			if end > len(taskIds) {
+				end = len(taskIds)
+			}
+			batch, err := s.collectSourcePendingDownJobs(ctx, taskIds[start:end], tenantId)
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, batch...)
+		}
+		return result, nil
+	}
 	var jobs []telegramResubmitJob
 	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("tenant_id", tenantId).
@@ -281,15 +361,43 @@ func (s *sSysPublish) collectSourcePendingDownJobs(ctx context.Context, taskIds 
 }
 
 func (s *sSysPublish) finishCollectSourceDownProfiles(ctx context.Context, profileIds []int64, tenantId int64) error {
+	if len(profileIds) > collectSourceDownDeleteBatchSize {
+		for start := 0; start < len(profileIds); start += collectSourceDownDeleteBatchSize {
+			end := start + collectSourceDownDeleteBatchSize
+			if end > len(profileIds) {
+				end = len(profileIds)
+			}
+			if err := s.finishCollectSourceDownProfiles(ctx, profileIds[start:end], tenantId); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	if err := s.setProfilesOffline(ctx, profileIds, tenantId); err != nil {
 		return err
 	}
 	return s.refreshProfileNoteIndexes(ctx, profileIds)
 }
 
-func (s *sSysPublish) finishCollectSourceDownDispatch(ctx context.Context, sourceId int64, profileIds []int64, tenantId int64, accountId int64) error {
+func (s *sSysPublish) finishCollectSourceDownDispatch(ctx context.Context, profileIds []int64, tenantId int64, accountId int64) error {
+	if len(profileIds) > collectSourceDownDeleteBatchSize {
+		for start := 0; start < len(profileIds); start += collectSourceDownDeleteBatchSize {
+			end := start + collectSourceDownDeleteBatchSize
+			if end > len(profileIds) {
+				end = len(profileIds)
+			}
+			if err := s.finishCollectSourceDownDispatch(ctx, profileIds[start:end], tenantId, accountId); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if len(profileIds) == 0 {
+		return nil
+	}
+	// The selected profiles can belong to historical source IDs as well.
+	// Stop their old dispatch retries too, after the entire profile is offline.
 	_, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
-		Where("source_id", sourceId).
 		Where("tenant_id", tenantId).
 		Where("account_id", accountId).
 		WhereIn("profile_id", profileIds).

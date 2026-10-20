@@ -13,6 +13,7 @@ import (
 const tgTaskTypeCollectChannelPurge = "youban_publish:collect:channel_purge"
 
 type collectChannelPurgeQueuePayload struct {
+	AllRules     bool    `json:"allRules,omitempty"`
 	OperationID  string  `json:"operationId,omitempty"`
 	NotifyChatID string  `json:"notifyChatId,omitempty"`
 	ProfileIDs   []int64 `json:"profileIds,omitempty"`

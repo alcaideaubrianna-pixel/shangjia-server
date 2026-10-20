@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -18,6 +19,7 @@ import (
 const tgTaskTypeCollectNotification = "youban_publish:collect:notification"
 
 type collectChannelPurgeNotification struct {
+	RuleOnly     bool    `json:"ruleOnly,omitempty"`
 	Title        string  `json:"title"`
 	ChannelID    string  `json:"channelId"`
 	Link         string  `json:"link"`
@@ -129,11 +131,19 @@ func (s *sSysPublish) handleCollectNotificationTask(ctx context.Context, task *a
 
 func collectChannelPurgeProgressText(result collectChannelPurgeNotification, pending, blocked int) string {
 	if pending+blocked == 0 {
-		return collectChannelPurgeCompletedNotifyText(result.Title, result.ChannelID, result.Suffix, result.ProfileCount, result.MessageCount, len(result.JobIDs), 0, result.Link)
+		return collectChannelPurgeScopeText(collectChannelPurgeCompletedNotifyText(result.Title, result.ChannelID, result.Suffix, result.ProfileCount, result.MessageCount, len(result.JobIDs), 0, result.Link), result.RuleOnly)
 	}
 	cleaned := result.MessageCount - pending - blocked
 	if cleaned < 0 {
 		cleaned = 0
 	}
-	return fmt.Sprintf("频道代理资料已删除，消息清理未完成\n频道：%s\n频道 ID：%s%s\n原频道后缀：%s\n已删除代理资料：%d 条\n已清理推送消息：%d 条\n待清理消息：%d 条\nBOT 无法删除的消息：%d 条\n频道采集：已禁用\n状态：正在检查清理与补偿结果；无法补偿的消息需要恢复删除权限后处理。全部清理完成后会通知。", html.EscapeString(firstNonEmpty(result.Title, result.ChannelID)), html.EscapeString(result.ChannelID), collectChannelLinkLine(result.Link), html.EscapeString(result.Suffix), result.ProfileCount, cleaned, pending, blocked)
+	return collectChannelPurgeScopeText(fmt.Sprintf("频道代理资料已删除，消息清理未完成\n频道：%s\n频道 ID：%s%s\n原频道后缀：%s\n已删除代理资料：%d 条\n已清理推送消息：%d 条\n待清理消息：%d 条\nBOT 无法删除的消息：%d 条\n频道采集：已禁用\n状态：正在检查清理与补偿结果；无法补偿的消息需要恢复删除权限后处理。全部清理完成后会通知。", html.EscapeString(firstNonEmpty(result.Title, result.ChannelID)), html.EscapeString(result.ChannelID), collectChannelLinkLine(result.Link), html.EscapeString(result.Suffix), result.ProfileCount, cleaned, pending, blocked), result.RuleOnly)
+}
+
+func collectChannelPurgeScopeText(text string, ruleOnly bool) string {
+	if !ruleOnly {
+		return text
+	}
+	text = strings.ReplaceAll(text, "频道采集：已禁用", "当前规则的频道采集：已禁用；其他规则不受影响")
+	return strings.ReplaceAll(text, "当前账户专属后缀和资料计数：已清理", "当前规则的专属后缀：已清理，历史资料归属保留")
 }

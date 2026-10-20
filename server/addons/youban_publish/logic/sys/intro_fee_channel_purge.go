@@ -54,9 +54,18 @@ func (s *sSysPublish) introFeeChannelPurge(ctx context.Context, in *sysin.IntroF
 		return nil, gerror.New("介绍费规则不存在或无权操作")
 	}
 	channelID := normalizeChannelProfileID(in.ChannelId)
-	profileIDs, err := collectChannelProfileIDs(ctx, tenantID, accountID, in.RuleId, channelID)
+	queryRuleID := in.RuleId
+	if in.AllRules {
+		queryRuleID = 0
+	}
+	profileIDs, err := collectChannelProfileIDs(ctx, tenantID, accountID, queryRuleID, channelID)
 	if err != nil {
 		return nil, err
+	}
+	if !in.AllRules {
+		if err = validateCollectRulePurgeProfileScope(ctx, tenantID, accountID, in.RuleId, profileIDs); err != nil {
+			return nil, err
+		}
 	}
 	jobs, err := s.collectChannelPurgeJobs(ctx, tenantID, accountID, profileIDs)
 	if err != nil {
@@ -79,22 +88,27 @@ func (s *sSysPublish) introFeeChannelPurge(ctx context.Context, in *sysin.IntroF
 	if err != nil {
 		return nil, err
 	}
-	if err = s.disableCollectChannel(ctx, tenantID, accountID, in.BotId, channelID); err != nil {
+	if in.AllRules {
+		err = s.disableCollectChannel(ctx, tenantID, accountID, in.BotId, channelID)
+	} else {
+		err = disableCollectRuleChannel(ctx, tenantID, accountID, in.RuleId, channelID)
+	}
+	if err != nil {
 		return nil, err
 	}
 	if err = s.supersedeCollectSourcePendingJobs(ctx, profileIDs, tenantID); err != nil {
 		return nil, err
 	}
 	if len(profileIDs) > 0 {
-		if err = s.enqueueCollectChannelPurge(ctx, collectChannelPurgeQueuePayload{OperationID: guid.S(), NotifyChatID: in.NotifyChatId, ProfileIDs: profileIDs, JobIDs: jobIDs, MessageCount: result.MessageCount, Title: channelTitle, Link: s.collectChannelDisplayLink(ctx, tenantID, channelID), Suffix: suffix, TenantID: tenantID, AccountID: accountID, RuleID: in.RuleId, BotID: in.BotId, ChannelID: channelID}, 0); err != nil {
+		if err = s.enqueueCollectChannelPurge(ctx, collectChannelPurgeQueuePayload{AllRules: in.AllRules, OperationID: guid.S(), NotifyChatID: in.NotifyChatId, ProfileIDs: profileIDs, JobIDs: jobIDs, MessageCount: result.MessageCount, Title: channelTitle, Link: s.collectChannelDisplayLink(ctx, tenantID, channelID), Suffix: suffix, TenantID: tenantID, AccountID: accountID, RuleID: in.RuleId, BotID: in.BotId, ChannelID: channelID}, 0); err != nil {
 			return nil, gerror.Wrap(err, "投递频道下架任务失败")
 		}
 		result.Queued = 1
-	} else if err = s.finishCollectChannelPurge(ctx, tenantID, accountID, in.RuleId, in.BotId, channelID); err != nil {
+	} else if err = s.finishCollectChannelPurge(ctx, tenantID, accountID, queryRuleID, in.BotId, channelID); err != nil {
 		return nil, err
 	}
 	s.refreshCollectSourceCache(ctx)
-	if err := s.enqueueCollectNotification(ctx, collectNotificationPayload{ID: "purge-start:" + guid.S(), BotID: in.BotId, Text: collectChannelPurgeNotifyText(channelTitle, channelID, suffix, result, s.collectChannelDisplayLink(ctx, tenantID, channelID))}); err != nil {
+	if err := s.enqueueCollectNotification(ctx, collectNotificationPayload{ID: "purge-start:" + guid.S(), BotID: in.BotId, Text: collectChannelPurgeScopeText(collectChannelPurgeNotifyText(channelTitle, channelID, suffix, result, s.collectChannelDisplayLink(ctx, tenantID, channelID)), !in.AllRules)}); err != nil {
 		return nil, gerror.Wrap(err, "删除任务已提交，但状态通知入队失败")
 	}
 	return result, nil
@@ -187,7 +201,11 @@ func (s *sSysPublish) ExecuteCollectChannelPurge(ctx context.Context, payload co
 	profileIDs := uniqueIds(payload.ProfileIDs)
 	if payload.OperationID == "" {
 		var err error
-		profileIDs, err = collectChannelProfileIDs(ctx, payload.TenantID, payload.AccountID, payload.RuleID, payload.ChannelID)
+		queryRuleID := payload.RuleID
+		if payload.AllRules {
+			queryRuleID = 0
+		}
+		profileIDs, err = collectChannelProfileIDs(ctx, payload.TenantID, payload.AccountID, queryRuleID, payload.ChannelID)
 		if err != nil {
 			return err
 		}
@@ -196,6 +214,11 @@ func (s *sSysPublish) ExecuteCollectChannelPurge(ctx context.Context, payload co
 		payload.Link = s.collectChannelDisplayLink(ctx, payload.TenantID, payload.ChannelID)
 		payload.Suffix, err = s.collectChannelPurgeSuffix(ctx, payload.TenantID, payload.AccountID, payload.RuleID, payload.BotID, payload.ChannelID)
 		if err != nil {
+			return err
+		}
+	}
+	if !payload.AllRules {
+		if err := validateCollectRulePurgeProfileScope(ctx, payload.TenantID, payload.AccountID, payload.RuleID, profileIDs); err != nil {
 			return err
 		}
 	}
@@ -215,23 +238,27 @@ func (s *sSysPublish) ExecuteCollectChannelPurge(ctx context.Context, payload co
 		payload.MessageCount = pending + blocked
 	}
 	for _, job := range jobs {
-		if err := s.deleteTelegramMessageSet(ctx, job.telegramJobRecord(), introFeeChannelPurgeMessage); err != nil {
-			if queueErr := s.enqueueTelegramCleanupJob(ctx, job.Id, 0); queueErr != nil {
-				return queueErr
-			}
-			g.Log().Warningf(ctx, "频道TG消息清理失败，已交由清理队列重试 jobId:%d err:%+v", job.Id, err)
+		// Cleanup workers own Telegram I/O, retry and protocol-account fallback.
+		// Do not hold one bulk-operation worker on sequential remote deletes.
+		if err := s.enqueueTelegramCleanupJob(ctx, job.Id, 0); err != nil {
+			return err
 		}
 		if err := s.markTelegramJobSuperseded(ctx, job.Id); err != nil {
 			return err
 		}
 	}
-	if len(profileIDs) > 0 {
+	for batchStart := 0; batchStart < len(profileIDs); batchStart += collectSourceDownDeleteBatchSize {
+		batchEnd := batchStart + collectSourceDownDeleteBatchSize
+		if batchEnd > len(profileIDs) {
+			batchEnd = len(profileIDs)
+		}
+		batchIDs := profileIDs[batchStart:batchEnd]
 		// A retry must skip profiles already removed by a previous batch.
 		model, err := s.profileBaseModel(ctx, payload.TenantID, payload.AccountID)
 		if err != nil {
 			return err
 		}
-		existingRows, err := model.Fields("p.id").WhereIn("p.id", profileIDs).All()
+		existingRows, err := model.Fields("p.id").WhereIn("p.id", batchIDs).All()
 		if err != nil {
 			return err
 		}
@@ -255,15 +282,20 @@ func (s *sSysPublish) ExecuteCollectChannelPurge(ctx context.Context, payload co
 		}
 		cols := pdao.YoubanPublishCollectDispatch.Columns()
 		if _, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).Where(cols.TenantId, payload.TenantID).Where(cols.AccountId, payload.AccountID).
-			WhereIn(cols.ProfileId, profileIDs).Data(pdo.YoubanPublishCollectDispatch{Status: sysin.CollectDispatchStatusSkipped, ErrorMessage: introFeeChannelPurgeMessage}).Update(); err != nil {
+			WhereIn(cols.ProfileId, batchIDs).Data(pdo.YoubanPublishCollectDispatch{Status: sysin.CollectDispatchStatusSkipped, ErrorMessage: introFeeChannelPurgeMessage}).Update(); err != nil {
 			return err
 		}
 	}
-	if err := s.finishCollectChannelPurge(ctx, payload.TenantID, payload.AccountID, payload.RuleID, payload.BotID, payload.ChannelID); err != nil {
+	finishRuleID := payload.RuleID
+	if payload.AllRules {
+		finishRuleID = 0
+	}
+	if err := s.finishCollectChannelPurge(ctx, payload.TenantID, payload.AccountID, finishRuleID, payload.BotID, payload.ChannelID); err != nil {
 		return err
 	}
 	return s.enqueueCollectNotification(ctx, collectNotificationPayload{ID: "purge-completed:" + payload.OperationID, BotID: payload.BotID, ChatID: payload.NotifyChatID, TenantID: payload.TenantID, Purge: &collectChannelPurgeNotification{
-		Title: payload.Title, ChannelID: payload.ChannelID, Link: payload.Link, Suffix: payload.Suffix,
+		RuleOnly: !payload.AllRules,
+		Title:    payload.Title, ChannelID: payload.ChannelID, Link: payload.Link, Suffix: payload.Suffix,
 		ProfileCount: len(profileIDs), MessageCount: payload.MessageCount, JobIDs: payload.JobIDs,
 	}})
 }
@@ -291,13 +323,17 @@ func collectChannelPurgeCompletedNotifyText(title, channelID, suffix string, pro
 }
 
 func (s *sSysPublish) finishCollectChannelPurge(ctx context.Context, tenantID, accountID, ruleID, botID int64, channelID string) error {
+	if ruleID > 0 {
+		return disableCollectRuleChannel(ctx, tenantID, accountID, ruleID, channelID)
+	}
 	now := gtime.Now()
 	_, err := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Where("tenant_id", tenantID).Where("account_id", accountID).WhereIn("channel_id", tgChannelCacheLookupIds(channelID)).WhereNull("deleted_at").Data(g.Map{"deleted_at": now, "updated_at": now}).Update()
 	if err != nil {
 		return gerror.Wrap(err, "删除频道后缀配置失败")
 	}
-	_, err = g.DB().Model(publishCollectChannelProfileTable).Ctx(ctx).Where("tenant_id", tenantID).Where("account_id", accountID).WhereIn("channel_id", tgChannelCacheLookupIds(channelID)).Delete()
-	return gerror.Wrap(err, "清空频道资料计数失败")
+	// Profile deletion removes its index. Configuration cleanup must never
+	// erase the ownership evidence of any remaining profile.
+	return nil
 }
 
 func (s *sSysPublish) collectChannelPurgeSuffix(ctx context.Context, tenantID, accountID, ruleID, botID int64, channelID string) (string, error) {
@@ -352,9 +388,18 @@ func (s *sSysPublish) collectChannelPurgeJobs(ctx context.Context, tenantID, acc
 		return nil, nil
 	}
 	var jobs []telegramResubmitJob
-	err := g.DB().Model(publishTgJobTable).Ctx(ctx).Where("tenant_id", tenantID).Where("account_id", accountID).
-		WhereIn("profile_id", profileIDs).OrderAsc("id").Scan(&jobs)
-	return jobs, err
+	for start := 0; start < len(profileIDs); start += collectSourceDownDeleteBatchSize {
+		end := start + collectSourceDownDeleteBatchSize
+		if end > len(profileIDs) {
+			end = len(profileIDs)
+		}
+		var batch []telegramResubmitJob
+		if err := g.DB().Model(publishTgJobTable).Ctx(ctx).Where("tenant_id", tenantID).Where("account_id", accountID).WhereIn("profile_id", profileIDs[start:end]).OrderAsc("id").Scan(&batch); err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, batch...)
+	}
+	return jobs, nil
 }
 
 func (s *sSysPublish) collectChannelPurgeRemainingMessages(ctx context.Context, tenantID int64, jobIDs []int64) (pending, blocked int, err error) {
@@ -365,14 +410,24 @@ func (s *sSysPublish) collectChannelPurgeRemainingMessages(ctx context.Context, 
 		Status string
 		Total  int
 	}
-	err = g.DB().Model(publishTgMessageTable+" m").Ctx(ctx).
-		InnerJoin(publishTgJobTable+" j", "j.id=m.job_id").Fields("m.status,COUNT(*) AS total").
-		Where("j.tenant_id", tenantID).WhereIn("m.job_id", jobIDs).WhereIn("m.status", []string{"sent", "undeletable"}).Group("m.status").Scan(&rows)
-	for _, row := range rows {
-		if row.Status == "sent" {
-			pending = row.Total
-		} else {
-			blocked = row.Total
+	for start := 0; start < len(jobIDs); start += collectSourceDownDeleteBatchSize {
+		end := start + collectSourceDownDeleteBatchSize
+		if end > len(jobIDs) {
+			end = len(jobIDs)
+		}
+		rows = nil
+		err = g.DB().Model(publishTgMessageTable+" m").Ctx(ctx).
+			InnerJoin(publishTgJobTable+" j", "j.id=m.job_id").Fields("m.status,COUNT(*) AS total").
+			Where("j.tenant_id", tenantID).WhereIn("m.job_id", jobIDs[start:end]).WhereIn("m.status", []string{"sent", "undeletable"}).Group("m.status").Scan(&rows)
+		if err != nil {
+			return
+		}
+		for _, row := range rows {
+			if row.Status == "sent" {
+				pending += row.Total
+			} else {
+				blocked += row.Total
+			}
 		}
 	}
 	return

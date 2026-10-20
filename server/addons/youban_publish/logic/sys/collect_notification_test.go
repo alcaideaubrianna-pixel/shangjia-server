@@ -30,6 +30,12 @@ func TestCollectChannelPurgeProgressTruthful(t *testing.T) {
 			if !tc.success && !strings.Contains(text, "消息清理未完成") {
 				t.Fatal(text)
 			}
+			snapshot.RuleOnly = true
+			ruleText := collectChannelPurgeProgressText(snapshot, tc.pending, tc.blocked)
+			if !strings.Contains(ruleText, "其他规则不受影响") {
+				t.Fatalf("rule-only purge claims to disable the entire channel: %s", ruleText)
+			}
+			snapshot.RuleOnly = false
 		})
 	}
 }
@@ -46,5 +52,20 @@ func TestCollectChannelPurgeRetrySnapshot(t *testing.T) {
 	}
 	if decoded.OperationID != original.OperationID || decoded.NotifyChatID != original.NotifyChatID || len(decoded.ProfileIDs) != 2 || len(decoded.JobIDs) != 1 || decoded.MessageCount != 4 {
 		t.Fatalf("snapshot lost: %+v", decoded)
+	}
+	if decoded.AllRules {
+		t.Fatal("legacy/default payload widened to all rules")
+	}
+	original.AllRules = true
+	body, err = json.Marshal(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err = decodeCollectChannelPurgeQueuePayload(asynq.NewTask(tgTaskTypeCollectChannelPurge, body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !decoded.AllRules {
+		t.Fatal("explicit all-rule scope was lost on retry")
 	}
 }

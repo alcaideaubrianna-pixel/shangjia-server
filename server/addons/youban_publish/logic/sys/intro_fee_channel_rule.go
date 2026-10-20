@@ -115,7 +115,7 @@ func (s *sSysPublish) IntroFeeChannelRuleList(ctx context.Context, in *sysin.Int
 
 func (s *sSysPublish) fillIntroFeeChannelEffectiveStatus(ctx context.Context, tenantID, accountID, ruleID, botID int64, list []*sysin.IntroFeeChannelRuleItem) error {
 	for page := 1; ; page++ {
-		candidates, total, err := s.introFeeChannelRuleCandidates(ctx, tenantID, accountID, ruleID, botID, "", page, 100)
+		candidates, total, err := s.introFeeChannelRuleCandidatesWithCounts(ctx, tenantID, accountID, ruleID, botID, "", page, 100, false)
 		if err != nil {
 			return err
 		}
@@ -123,11 +123,12 @@ func (s *sSysPublish) fillIntroFeeChannelEffectiveStatus(ctx context.Context, te
 			for _, row := range list {
 				if row != nil && canonicalCollectSourceChatID(row.ChannelId) == canonicalCollectSourceChatID(candidate.ChannelId) {
 					row.Status, row.BlockReason, row.Blacklisted = candidate.Status, candidate.BlockReason, candidate.Blacklisted
+					row.ProfileCount = candidate.ProfileCount
 				}
 			}
 		}
 		if page*100 >= total {
-			return nil
+			return fillCollectChannelProfileCounts(ctx, tenantID, accountID, ruleID, list)
 		}
 	}
 }
@@ -155,6 +156,10 @@ func (s *sSysPublish) fillIntroFeeChannelBlacklist(ctx context.Context, tenantID
 // seen by this account/bot. It intentionally reads the compact source/cache
 // tables instead of scanning the message or event tables.
 func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantID, accountID, ruleID, botID int64, keyword string, page, perPage int) ([]*sysin.IntroFeeChannelRuleItem, int, error) {
+	return s.introFeeChannelRuleCandidatesWithCounts(ctx, tenantID, accountID, ruleID, botID, keyword, page, perPage, true)
+}
+
+func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Context, tenantID, accountID, ruleID, botID int64, keyword string, page, perPage int, includeCounts bool) ([]*sysin.IntroFeeChannelRuleItem, int, error) {
 	if page <= 0 {
 		page = 1
 	}
@@ -188,6 +193,16 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 		deduplicated = append(deduplicated, row)
 	}
 	configured = deduplicated
+	var disabledChannels []struct {
+		ChannelID string `orm:"channel_id"`
+	}
+	if err := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Fields("channel_id").Where("tenant_id", tenantID).Where("account_id", accountID).Where("rule_id", ruleID).WhereIn("bot_id", []int64{0, botID}).Where("status", 2).WhereNull("deleted_at").Scan(&disabledChannels); err != nil {
+		return nil, 0, err
+	}
+	disabledByChannel := map[string]bool{}
+	for _, row := range disabledChannels {
+		disabledByChannel[canonicalCollectSourceChatID(row.ChannelID)] = true
+	}
 	// A rule-scoped dialog must only contain channels belonging to sources
 	// bound to this rule. The compact source/source_rule tables are the
 	// historical index; do not broaden the result with all account/BOT chats.
@@ -471,6 +486,9 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 			row.BlockReason = "频道已加入黑名单"
 		}
 		row.Status = 1
+		if disabledByChannel[canonicalCollectSourceChatID(row.ChannelId)] {
+			row.BlockReason = "当前规则的频道采集已禁用"
+		}
 		if row.BlockReason != "" {
 			row.Status = 2
 		}
@@ -510,7 +528,32 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 	if end > total {
 		end = total
 	}
-	return configured[start:end], total, nil
+	pageRows := configured[start:end]
+	if includeCounts {
+		if err := fillCollectChannelProfileCounts(ctx, tenantID, accountID, ruleID, pageRows); err != nil {
+			return nil, 0, err
+		}
+	}
+	return pageRows, total, nil
+}
+
+func fillCollectChannelProfileCounts(ctx context.Context, tenantID, accountID, ruleID int64, rows []*sysin.IntroFeeChannelRuleItem) error {
+	channels := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if row != nil {
+			channels = append(channels, row.ChannelId)
+		}
+	}
+	counts, err := collectChannelProfileCounts(ctx, tenantID, accountID, ruleID, channels)
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		if row != nil {
+			row.ProfileCount = counts[canonicalCollectSourceChatID(row.ChannelId)]
+		}
+	}
+	return nil
 }
 
 func introFeeCollectionSourceMatchesChannel(sourceChatID string, sourceBotID int64, channelID string, ruleBotID int64) bool {
@@ -553,6 +596,12 @@ func (s *sSysPublish) saveIntroFeeChannelCollectionStatus(ctx context.Context, t
 		id, saveErr = save(ctx)
 		if saveErr != nil {
 			return saveErr
+		}
+		if in.Status == 1 {
+			// An explicit re-enable clears the rule-wide purge tombstone too.
+			if _, saveErr = tx.Model(introFeeChannelRuleTable).Ctx(ctx).Where("tenant_id", tenantID).Where("account_id", accountID).Where("rule_id", in.RuleId).Where("bot_id", 0).WhereIn("channel_id", tgChannelCacheLookupIds(in.ChannelId)).Where("status", 2).Data(g.Map{"status": 1}).Update(); saveErr != nil {
+				return saveErr
+			}
 		}
 		var channel struct{ Id int64 }
 		if queryErr := pdao.YoubanPublishCollectChannel.Ctx(ctx).Fields("id").Where("tenant_id", tenantID).WhereIn("telegram_chat_id", tgChannelCacheLookupIds(in.ChannelId)).Scan(&channel); !collectOptionalRecordScanSucceeded(queryErr) {

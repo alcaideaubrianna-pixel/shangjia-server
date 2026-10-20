@@ -138,6 +138,12 @@ func (s *sSysPublish) submitCollectProfileDispatch(ctx context.Context, dispatch
 	if queryErr != nil {
 		return gerror.Wrap(queryErr, "读取采集分发索引参数失败")
 	}
+	if disabled, gateErr := collectRuleChannelDisabled(ctx, event["tenant_id"].Int64(), event["account_id"].Int64(), dispatch["rule_id"].Int64(), event["bot_id"].Int64(), event["source_chat_id"].String()); gateErr != nil {
+		return gateErr
+	} else if disabled {
+		_, err = pdao.YoubanPublishCollectDispatch.Ctx(ctx).Where("id", dispatchId).Data(g.Map{"status": sysin.CollectDispatchStatusSkipped, "error_message": "当前规则的来源频道已下架禁用"}).Update()
+		return err
+	}
 	if err = indexCollectChannelProfile(ctx, event["tenant_id"].Int64(), event["account_id"].Int64(), dispatch["source_id"].Int64(), dispatch["rule_id"].Int64(), profileId, event["source_chat_id"].String()); err != nil {
 		return err
 	}

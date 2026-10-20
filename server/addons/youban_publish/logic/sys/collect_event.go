@@ -861,6 +861,11 @@ func collectEventRuleMapsToRecords(list []g.Map) []gdb.Record {
 }
 
 func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record) (bool, string, error) {
+	if disabled, err := collectRuleChannelDisabled(ctx, event["tenant_id"].Int64(), event["account_id"].Int64(), rule["id"].Int64(), event["bot_id"].Int64(), event["source_chat_id"].String()); err != nil {
+		return false, "", err
+	} else if disabled {
+		return false, "当前规则的来源频道已下架禁用", nil
+	}
 	ruleSourceID := collectRuleSourceID(event, rule)
 	if suffix, ok, err := s.resolveIntroFeeChannelSuffix(ctx, event, rule); err != nil {
 		return false, "", err

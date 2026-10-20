@@ -416,6 +416,7 @@ type IntroFeeChannelBlacklistInp struct {
 }
 
 type IntroFeeChannelPurgeInp struct {
+	AllRules     bool   `json:"allRules" dc:"明确为true时删除该来源频道全部规则的资料；默认仅当前规则"`
 	NotifyChatId string `json:"-"`
 	Id           int64  `json:"id"`
 	AccountId    int64  `json:"accountId"`
