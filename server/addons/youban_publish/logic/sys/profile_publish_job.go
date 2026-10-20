@@ -202,6 +202,18 @@ func (s *sSysPublish) ensureTelegramProfileJobWithMetaTx(ctx context.Context, tx
 	if jobId := existing["id"].Int64(); jobId > 0 {
 		return jobId, nil
 	}
+	// The caller's snapshot may predate a Bot removal or channel edit. Read
+	// transport configuration only after acquiring the shared creation gate.
+	var current *telegramJobChannel
+	if err := tx.Model(publishChannelTable).Safe().Ctx(ctx).Where("id", channel.Id).
+		Where("tenant_id", source["tenant_id"].Int64()).Where("status", 1).WhereNull("deleted_at").
+		Fields("id,bot_id_json,target_chat_id").Scan(&current); err != nil {
+		return 0, gerror.Wrap(err, "读取当前TG频道发送配置失败")
+	}
+	if current == nil {
+		return 0, gerror.New("目标频道已停用或删除，请刷新后重试")
+	}
+	channel = *current
 	botId, err := telegramChannelSenderBotId(channel)
 	if err != nil {
 		return 0, err

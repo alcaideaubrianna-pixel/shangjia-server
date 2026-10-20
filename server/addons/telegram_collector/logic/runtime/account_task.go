@@ -210,6 +210,8 @@ func retryDelay(err error) time.Duration {
 
 func accountTaskTimeout(taskType string) time.Duration {
 	switch taskType {
+	case sysin.AccountTaskTypeBotManager:
+		return 30 * time.Second
 	case sysin.AccountTaskTypeHistoryPage:
 		return 25 * time.Minute
 	case sysin.AccountTaskTypeMaterialImportHistoryPage:

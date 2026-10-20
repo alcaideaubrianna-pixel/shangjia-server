@@ -63,6 +63,9 @@ func (s *sSysBot) handleUpdate(ctx context.Context, botId int64, update *models.
 		return nil
 	}
 	if update.CallbackQuery != nil {
+		if handled, err := s.handleBotManagerCallback(ctx, botId, update.CallbackQuery); handled || err != nil {
+			return err
+		}
 		g.Log().Infof(ctx, "收到Telegram Callback botId:%d chatId:%s userId:%s data:%s", botId, callbackQueryChatId(update.CallbackQuery), callbackQueryUserId(update.CallbackQuery), strings.TrimSpace(update.CallbackQuery.Data))
 		if handled, err := s.handleInstantRegisterCallback(ctx, botId, update.CallbackQuery); handled || err != nil {
 			if err != nil {
@@ -97,6 +100,10 @@ func (s *sSysBot) handleUpdate(ctx context.Context, botId int64, update *models.
 	msg := botMessageFromUpdate(update)
 	if msg == nil {
 		return nil
+	}
+	// Credentials must never reach generic message logging, archival or scans.
+	if handled, err := s.handleBotManagerInput(ctx, botId, msg); handled || err != nil {
+		return err
 	}
 	userId := ""
 	if msg.From != nil {
