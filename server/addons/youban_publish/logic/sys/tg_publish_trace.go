@@ -173,7 +173,11 @@ func beginTelegramPublishStage(ctx context.Context, stage string, fields ...g.Ma
 	step.log("start", nil, nil)
 	// One warning per slow stage bounds log volume and adds no database/Redis
 	// traffic. Stop on every normal/error/panic exit; never cancel business work.
-	step.timer = time.AfterFunc(30*time.Second, func() {
+	warningAfter := 30 * time.Second
+	if strings.HasPrefix(stage, "api_success.") {
+		warningAfter = 2 * time.Second
+	}
+	step.timer = time.AfterFunc(warningAfter, func() {
 		if !step.ended.Load() {
 			step.log("slow", nil, nil)
 		}

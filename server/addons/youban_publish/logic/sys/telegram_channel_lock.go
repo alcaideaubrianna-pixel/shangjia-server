@@ -89,6 +89,7 @@ func tryTelegramPublishChannelLease(ctx context.Context, job telegramJobRecord, 
 	}
 	beginTelegramPublishStage(ctx, "channel.send_lease.owner").End(nil, g.Map{
 		"ownerJobId": previous.Id, "ownerStatus": previous.Status, "ownerSendPhase": previous.SendPhase,
+		"sameJob": previous.Id == job.Id, "ownerJobAgeMs": telegramPublishTimestampAge(previous.CreatedAt),
 	})
 	if !telegramCompletedLeaseRecoverable(owner, previous, job.TargetChatId) {
 		return nil, false, nil

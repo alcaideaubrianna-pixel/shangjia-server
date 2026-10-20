@@ -253,6 +253,9 @@ func (s *sSysPublish) confirmTelegramAPISuccess(ctx context.Context, job telegra
 	var duplicateMessages []*telegramSentMessage
 	cancelled := false
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if err := boundTelegramConfirmationTransaction(ctx, tx); err != nil {
+			return err
+		}
 		// Shared lock order with timeout cancellation: Job, then Attempt.
 		var lockedJob telegramJobRecord
 		if err := tx.Model(publishTgJobTable).Where("id", job.Id).LockUpdate().Scan(&lockedJob); err != nil {
@@ -349,6 +352,26 @@ func (s *sSysPublish) confirmTelegramAPISuccess(ctx context.Context, job telegra
 	s.cacheTelegramSentMessageMetadata(ctx, job, messages)
 	step.End(nil)
 	return nil
+}
+
+// The API has already succeeded. Bound server-side work as well as the Go
+// context so lock contention cannot keep this sender holding its channel lease.
+// Settings are transaction-local and never leak into pooled connections.
+func boundTelegramConfirmationTransaction(ctx context.Context, tx gdb.TX) error {
+	if tx.GetDB().GetConfig().Type != "pgsql" {
+		return nil
+	}
+	stage := beginTelegramPublishStage(ctx, "api_success.database_budget", nil)
+	row, err := tx.GetOne(`SELECT pg_backend_pid() AS backend_pid,
+		set_config('lock_timeout', CASE WHEN current_setting('lock_timeout')::interval = interval '0' OR current_setting('lock_timeout')::interval > interval '2 seconds' THEN '2s' ELSE current_setting('lock_timeout') END, true),
+		set_config('statement_timeout', CASE WHEN current_setting('statement_timeout')::interval = interval '0' OR current_setting('statement_timeout')::interval > interval '8 seconds' THEN '8s' ELSE current_setting('statement_timeout') END, true),
+		set_config('idle_in_transaction_session_timeout', CASE WHEN current_setting('idle_in_transaction_session_timeout')::interval = interval '0' OR current_setting('idle_in_transaction_session_timeout')::interval > interval '10 seconds' THEN '10s' ELSE current_setting('idle_in_transaction_session_timeout') END, true)`)
+	if err != nil {
+		stage.End(err)
+	} else {
+		stage.End(nil, g.Map{"databaseBackendPid": row["backend_pid"].Int(), "lockTimeoutMs": 2000, "statementTimeoutMs": 8000})
+	}
+	return gerror.Wrap(err, "设置TG确认事务执行时限失败")
 }
 
 func telegramAttemptPhaseTransition(phase string) (fromPhase, sendingPhase, confirmedPhase string, err error) {

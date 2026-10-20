@@ -261,9 +261,11 @@ func saveTelegramSentMessagesTx(ctx context.Context, tx gdb.TX, job telegramJobR
 			continue
 		}
 		if strings.TrimSpace(item.MediaGroupId) != "" && (item.Purpose == "display" || item.Purpose == "verify") {
+			stage := beginTelegramPublishStage(ctx, "api_success.message_group_check", g.Map{"jobId": job.Id, "messageId": item.MessageId, "mediaId": item.MediaId, "purpose": item.Purpose})
 			exists, err := tx.Model(publishTgMessageTable).
 				Where("job_id", job.Id).Where("media_group_id", item.MediaGroupId).
 				WhereNot("purpose", item.Purpose).WhereIn("purpose", []string{"display", "verify"}).Count()
+			stage.End(err)
 			if err != nil {
 				return gerror.Wrap(err, "校验TG媒体组用途失败")
 			}
@@ -272,6 +274,7 @@ func saveTelegramSentMessagesTx(ctx context.Context, tx gdb.TX, job telegramJobR
 				return gerror.New("展示资料与验证资料禁止合并发送")
 			}
 		}
+		stage := beginTelegramPublishStage(ctx, "api_success.message_upsert", g.Map{"jobId": job.Id, "messageId": item.MessageId, "mediaId": item.MediaId, "purpose": item.Purpose})
 		_, err := tx.Model(publishTgMessageTable).Data(g.Map{
 			"job_id":            job.Id,
 			"tenant_id":         job.TenantId,
@@ -289,6 +292,7 @@ func saveTelegramSentMessagesTx(ctx context.Context, tx gdb.TX, job telegramJobR
 			"sent_at":           gtime.Now(),
 			"deleted_at":        nil,
 		}).OnConflict("job_id,tg_message_id").OnDuplicate("status,tg_file_id,tg_file_unique_id,sent_at,deleted_at").Save()
+		stage.End(err)
 		if err != nil {
 			return gerror.Wrap(err, "保存TG消息记录失败")
 		}
