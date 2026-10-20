@@ -105,7 +105,6 @@ type UploadConfig struct {
 	R2Region    string `json:"uploadR2Region"`
 	R2Bucket    string `json:"uploadR2Bucket"`
 	R2PublicURL string `json:"uploadR2PublicURL"`
-	R2Path      string `json:"uploadR2Path"`
 }
 
 // GeoConfig 地理配置

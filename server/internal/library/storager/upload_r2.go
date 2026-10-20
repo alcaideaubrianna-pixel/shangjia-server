@@ -53,6 +53,23 @@ func R2GetObject(ctx context.Context, key string) (*minio.Object, error) {
 	return client.GetObject(ctx, config.R2Bucket, key, minio.GetObjectOptions{})
 }
 
+func R2CopyObject(ctx context.Context, sourceKey, targetKey string) error {
+	client, err := NewR2Client()
+	if err != nil {
+		return err
+	}
+	_, err = client.CopyObject(ctx, minio.CopyDestOptions{Bucket: config.R2Bucket, Object: targetKey}, minio.CopySrcOptions{Bucket: config.R2Bucket, Object: sourceKey})
+	return err
+}
+
+func R2DeleteObject(ctx context.Context, key string) error {
+	client, err := NewR2Client()
+	if err != nil {
+		return err
+	}
+	return client.RemoveObject(ctx, config.R2Bucket, key, minio.RemoveObjectOptions{})
+}
+
 func r2Options() (*minio.Options, error) {
 	if config == nil || strings.TrimSpace(config.R2Endpoint) == "" || config.R2Bucket == "" {
 		return nil, gerror.New("R2存储驱动缺少Endpoint或Bucket配置")
@@ -65,11 +82,11 @@ func r2Options() (*minio.Options, error) {
 }
 
 func (d *R2Drive) objectPath(meta *FileMeta) (string, error) {
-	return GenContentPath(config.R2Path, meta.Md5, meta.Ext)
+	return GenContentPath(config.CosPath, meta.Md5, meta.Ext)
 }
 
 func (d *R2Drive) Upload(ctx context.Context, file *ghttp.UploadFile, meta *FileMeta) (string, error) {
-	if strings.TrimSpace(config.R2Path) == "" {
+	if strings.TrimSpace(config.CosPath) == "" {
 		return "", gerror.New("R2存储驱动必须配置存储路径")
 	}
 	opts, err := r2Options()

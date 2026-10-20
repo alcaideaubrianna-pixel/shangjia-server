@@ -138,11 +138,7 @@ func (s *sSysPublish) createMediaDirectUpload(ctx context.Context, in *sysin.Med
 		}
 	}
 	sessionId := grand.S(40)
-	basePath := cfg.CosPath
-	if cfg.Drive == consts.UploadDriveR2 {
-		basePath = cfg.R2Path
-	}
-	key, err := storager.GenStagingPath(basePath, sessionId, ext)
+	key, err := storager.GenStagingPath(cfg.CosPath, sessionId, ext)
 	if err != nil {
 		return nil, err
 	}
@@ -326,12 +322,25 @@ func (s *sSysPublish) completeMediaDirectUpload(ctx context.Context, in *sysin.M
 		}
 	}
 	logStage("object_head")
-	/*
-		COS staging objects are promoted to the content-addressed key below.
-		R2 objects remain at the authenticated staging key for this first phase;
-		content validation still happens before the attachment is persisted.
-	*/
-	if cfg.Drive == consts.UploadDriveCos {
+	if cfg.Drive == consts.UploadDriveR2 {
+		finalKey, pathErr := storager.GenContentPath(cfg.CosPath, session.FileMD5, storager.Ext(session.FileName))
+		if pathErr != nil {
+			return nil, pathErr
+		}
+		if finalKey != session.Key {
+			if err = storager.R2CopyObject(ctx, session.Key, finalKey); err != nil {
+				return nil, gerror.Wrap(err, "归档R2直传文件失败")
+			}
+			stagingKey := session.Key
+			session.Key = finalKey
+			if err = cache.Instance().Set(ctx, directUploadSessionPrefix+in.SessionId, session, directUploadSessionTTL); err != nil {
+				return nil, err
+			}
+			if deleteErr := storager.R2DeleteObject(ctx, stagingKey); deleteErr != nil {
+				g.Log().Warningf(ctx, "删除R2直传临时对象失败 key:%s err:%+v", stagingKey, deleteErr)
+			}
+		}
+	} else {
 		client, clientErr := storager.NewCosClientWithConfig(cfg)
 		if clientErr != nil {
 			return nil, clientErr
@@ -470,7 +479,17 @@ func validateDirectUploadConfig(ctx context.Context, session *mediaDirectUploadS
 		return nil, err
 	}
 	var bucket, region string
-	if cfg.Drive == consts.UploadDriveR2 { bucket, region = cfg.R2Bucket, cfg.R2Region; if region == "" { region = "auto" } } else { bucket, region, err = directUploadBucketRegionFromConfig(cfg.CosBucket, cfg.CosRegion, cfg.CosBucketURL, cfg.CosPublicURL); if err != nil { return nil, err } }
+	if cfg.Drive == consts.UploadDriveR2 {
+		bucket, region = cfg.R2Bucket, cfg.R2Region
+		if region == "" {
+			region = "auto"
+		}
+	} else {
+		bucket, region, err = directUploadBucketRegionFromConfig(cfg.CosBucket, cfg.CosRegion, cfg.CosBucketURL, cfg.CosPublicURL)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if session.ConfigDigest == "" || session.ConfigDigest != directUploadConfigDigest(cfg) || session.Bucket != bucket || session.Region != region {
 		return nil, gerror.New("对象存储配置已更新，请重新选择文件上传")
 	}
