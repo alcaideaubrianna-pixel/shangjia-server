@@ -200,11 +200,11 @@ func (s *sSysPublish) ensureRelayBotWithClient(ctx context.Context, client *tele
 	if user.UserID != me.ID {
 		return gerror.New("Bot用户名对应身份与发布Bot不一致")
 	}
-	if _, err = client.API().ChannelsInviteToChannel(ctx, &tg.ChannelsInviteToChannelRequest{Channel: input, Users: []tg.InputUserClass{user}}); err != nil && !tgerr.Is(err, "USER_ALREADY_PARTICIPANT") {
-		if tgerr.Is(err, "USER_BOT") {
-			return gerror.New("Telegram 不允许协议账号通过 InviteToChannel 自动添加 Bot，请先在频道管理中手动添加并授予发布、删除消息权限")
-		}
-		return gerror.Wrap(err, "自动邀请发布Bot到中转频道失败")
+	if inviteErr := func() error {
+		_, inviteErr := client.API().ChannelsInviteToChannel(ctx, &tg.ChannelsInviteToChannelRequest{Channel: input, Users: []tg.InputUserClass{user}})
+		return inviteErr
+	}(); inviteErr != nil && !tgerr.Is(inviteErr, "USER_ALREADY_PARTICIPANT") && !tgerr.Is(inviteErr, "USER_BOT") {
+		return gerror.Wrap(inviteErr, "自动邀请发布Bot到中转频道失败")
 	}
 	if _, err = client.API().ChannelsEditAdmin(ctx, &tg.ChannelsEditAdminRequest{Channel: input, UserID: user, AdminRights: tg.ChatAdminRights{PostMessages: true, DeleteMessages: true}, Rank: "中转发布"}); err != nil && !tgerr.Is(err, "CHAT_NOT_MODIFIED") {
 		return gerror.Wrap(err, "授予中转Bot发布和清理权限失败")
