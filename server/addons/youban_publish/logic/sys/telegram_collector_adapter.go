@@ -1150,20 +1150,30 @@ func (s *sSysPublish) updateCollectedBotMessage(ctx context.Context, message *Co
 	if strings.TrimSpace(message.RawText) == "" {
 		return nil
 	}
+	rules, err := s.collectEventRules(ctx, event, message.TenantId, message.AccountId)
+	if err != nil {
+		return gerror.Wrap(err, "读取编辑消息的完整采集规则失败")
+	}
+	rulesByID := make(map[int64]gdb.Record, len(rules))
+	for _, rule := range rules {
+		if suffix, ok, suffixErr := s.resolveIntroFeeChannelSuffix(ctx, event, rule); suffixErr != nil {
+			return suffixErr
+		} else if ok {
+			rule["intro_fee_suffix"] = gvar.New(suffix)
+		}
+		rulesByID[rule["id"].Int64()] = rule
+	}
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		for _, dispatch := range dispatches {
-			rule, ruleErr := pdao.YoubanPublishCollectRule.Ctx(ctx).WherePri(dispatch["rule_id"].Int64()).One()
-			if ruleErr != nil {
-				return ruleErr
-			}
+			rule := rulesByID[dispatch["rule_id"].Int64()]
 			if rule.IsEmpty() {
-				return gerror.New("编辑来源资料的采集规则不存在")
+				return gerror.New("编辑来源资料的完整采集规则不存在或已停用")
 			}
 			cols := idao.ContentProfile.Columns()
 			if _, updateErr := tx.Model(idao.ContentProfile.Table()).
 				Where(cols.Id, dispatch["profile_id"].Int64()).
 				Where("EXISTS (SELECT 1 FROM "+publishProfileStateTable+" ps WHERE ps.profile_id=? AND ps.tenant_id=? AND ps.account_id=? AND ps.deleted_at IS NULL)", dispatch["profile_id"].Int64(), message.TenantId, message.AccountId).
-				Data(g.Map{cols.PlainText: normalizeCollectRuleBody(message.RawText, rule)}).Update(); updateErr != nil {
+				Data(g.Map{cols.PlainText: normalizeCollectedBotEditText(message.RawText, rule)}).Update(); updateErr != nil {
 				return updateErr
 			}
 		}
@@ -1180,6 +1190,15 @@ func (s *sSysPublish) updateCollectedBotMessage(ctx context.Context, message *Co
 		}
 	}
 	return nil
+}
+
+func normalizeCollectedBotEditText(rawText string, rule gdb.Record) string {
+	text := normalizeCollectRuleBody(rawText, rule)
+	if suffix := strings.TrimSpace(rule["intro_fee_suffix"].String()); suffix != "" {
+		amountText := normalizeCollectRuleBodyWithoutTruncate(rawText, rule)
+		text = applyCollectIntroFeeSuffix(text, amountText, suffix)
+	}
+	return strings.TrimSpace(text)
 }
 
 func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, source gdb.Record, delivery *collectorin.CollectorDelivery) (bool, error) {
