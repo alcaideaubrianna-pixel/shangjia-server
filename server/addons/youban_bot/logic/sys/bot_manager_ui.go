@@ -43,9 +43,10 @@ func (botManagerFeature) Handle(ctx context.Context, s *sSysBot, fc *botFeatureC
 		return true, err
 	}
 	if st.SyncedAt == nil {
-		if err := s.managerSync(ctx, st); err != nil {
+		if err := s.managerSyncFeedback(ctx, st, 0); err != nil {
 			return true, s.managerError(ctx, st, 0, err)
 		}
+		return true, nil
 	}
 	return true, s.managerList(ctx, st, 0, 1)
 }
@@ -73,6 +74,10 @@ func managerParseCommand(raw string) (managerCommand, error) {
 }
 func managerButton(label, action string, id, revision int64) models.InlineKeyboardButton {
 	return managerPageButton(label, action, id, 1, revision)
+}
+
+func managerSyncButtons() [][]models.InlineKeyboardButton {
+	return [][]models.InlineKeyboardButton{{managerButton("刷新机器人列表", "list", 0, 0)}}
 }
 func managerPageButton(label, action string, id int64, page int, revision int64) models.InlineKeyboardButton {
 	return models.InlineKeyboardButton{Text: label, CallbackData: fmt.Sprintf("bm:%s:%d:%d:%d", action, id, page, revision)}
@@ -107,9 +112,14 @@ func managerPage(page, total int) (int, int, int) {
 }
 
 func (s *sSysBot) managerSend(ctx context.Context, entryBot, userID int64, messageID int, text string, buttons [][]models.InlineKeyboardButton) error {
+	_, err := s.managerSendMessage(ctx, entryBot, userID, messageID, text, buttons)
+	return err
+}
+
+func (s *sSysBot) managerSendMessage(ctx context.Context, entryBot, userID int64, messageID int, text string, buttons [][]models.InlineKeyboardButton) (int, error) {
 	client, err := s.relayBot(ctx, s.replyBotToken(ctx, entryBot))
 	if err != nil {
-		return err
+		return 0, err
 	}
 	call, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -117,12 +127,15 @@ func (s *sSysBot) managerSend(ctx context.Context, entryBot, userID int64, messa
 	if messageID > 0 {
 		_, err = client.EditMessageText(call, &tgbot.EditMessageTextParams{ChatID: userID, MessageID: messageID, Text: sensitive.Tokens(text), ParseMode: models.ParseModeHTML, ReplyMarkup: markup})
 		if err != nil && strings.Contains(strings.ToLower(err.Error()), "message is not modified") {
-			return nil
+			return messageID, nil
 		}
-		return err
+		return messageID, err
 	}
-	_, err = client.SendMessage(call, &tgbot.SendMessageParams{ChatID: userID, Text: sensitive.Tokens(text), ParseMode: models.ParseModeHTML, ReplyMarkup: markup})
-	return err
+	message, err := client.SendMessage(call, &tgbot.SendMessageParams{ChatID: userID, Text: sensitive.Tokens(text), ParseMode: models.ParseModeHTML, ReplyMarkup: markup})
+	if err != nil {
+		return 0, err
+	}
+	return message.ID, nil
 }
 func (s *sSysBot) managerError(ctx context.Context, st *entity.YoubanBotManagerState, msgID int, err error) error {
 	return s.managerSend(ctx, st.EntryBotId, st.TelegramUserId, msgID, "操作未完成："+html.EscapeString(sensitive.Diagnostic(err.Error())), [][]models.InlineKeyboardButton{{managerButton("返回机器人列表", "list", 0, 0)}})
@@ -130,7 +143,7 @@ func (s *sSysBot) managerError(ctx context.Context, st *entity.YoubanBotManagerS
 
 func (s *sSysBot) managerList(ctx context.Context, st *entity.YoubanBotManagerState, msgID, page int) error {
 	c := dao.YoubanBotManaged.Columns()
-	q := dao.YoubanBotManaged.Ctx(ctx).Where(c.TenantId, st.TenantId).Where(c.AccountId, st.AccountId)
+	q := managerChannelBotsModel(ctx, st)
 	if st.Keyword != "" {
 		q = q.Where("("+c.BotName+" LIKE ? OR "+c.BotUsername+" LIKE ?)", "%"+st.Keyword+"%", "%"+strings.TrimPrefix(st.Keyword, "@")+"%")
 	}
@@ -143,9 +156,9 @@ func (s *sSysBot) managerList(ctx context.Context, st *entity.YoubanBotManagerSt
 	if err := q.OrderAsc(c.Id).Page(page, managerPageSize).Scan(&rows); err != nil {
 		return err
 	}
-	text := fmt.Sprintf("<b>🤖 机器人管理</b> · 第 %d 页\n免费功能，绑定账号即可使用。\n", page)
+	text := fmt.Sprintf("<b>🤖 上架频道机器人管理</b> · 第 %d 页\n显示上架频道中的全部机器人，不限于自己创建的机器人。\n", page)
 	if st.SyncedAt == nil {
-		text += "首次同步已提交，完成后会通知并返回列表。\n"
+		text += "尚未完成首次同步；同步完成会通知。\n"
 	} else {
 		text += "最近同步：" + st.SyncedAt.Format("m-d H:i") + "\n"
 	}
@@ -155,11 +168,7 @@ func (s *sSysBot) managerList(ctx context.Context, st *entity.YoubanBotManagerSt
 	buttons := [][]models.InlineKeyboardButton{}
 	for _, b := range rows {
 		label := firstNonEmpty(b.BotName, b.BotUsername)
-		state := "仅发现"
-		if b.BotToken != "" {
-			state = "已配置上架"
-		}
-		buttons = append(buttons, []models.InlineKeyboardButton{managerButton(label+" @"+b.BotUsername+" · "+state, "bot", b.Id, 0)})
+		buttons = append(buttons, []models.InlineKeyboardButton{managerButton(label+" @"+b.BotUsername, "bot", b.Id, 0)})
 	}
 	if total == 0 {
 		text += "暂无匹配机器人。可以添加上架 BOT，或同步频道中的机器人。\n"
@@ -167,7 +176,7 @@ func (s *sSysBot) managerList(ctx context.Context, st *entity.YoubanBotManagerSt
 	if pager := managerPager("list", 0, page, total, 0); len(pager) > 0 {
 		buttons = append(buttons, pager)
 	}
-	buttons = append(buttons, []models.InlineKeyboardButton{managerButton("➕ 添加上架 BOT", "add", 0, 0)}, []models.InlineKeyboardButton{managerButton("🔍 搜索机器人", "search", 0, 0), managerButton("🔄 同步机器人", "sync", 0, 0)}, []models.InlineKeyboardButton{managerButton("查看任务结果", "tasks", 0, 0), managerButton("返回", "exit", 0, 0)})
+	buttons = append(buttons, []models.InlineKeyboardButton{managerButton("➕ 添加上架 BOT", "add", 0, 0)}, []models.InlineKeyboardButton{managerButton("🔍 搜索机器人", "search", 0, 0), managerButton("🔄 同步机器人", "sync", 0, 0)}, []models.InlineKeyboardButton{managerButton("返回", "exit", 0, 0)})
 	return s.managerSend(ctx, st.EntryBotId, st.TelegramUserId, msgID, text, buttons)
 }
 
@@ -212,12 +221,10 @@ func (s *sSysBot) managerCallback(ctx context.Context, st *entity.YoubanBotManag
 		}
 		return s.replyWithMarkup(ctx, st.EntryBotId, fmt.Sprint(st.TelegramUserId), "已返回插件菜单。", s.replyKeyboard(context.WithValue(ctx, telegramUserIdCtxKey{}, fmt.Sprint(st.TelegramUserId))))
 	case "sync":
-		if err := s.managerSync(ctx, st); err != nil {
-			return err
-		}
-		return s.managerSend(ctx, st.EntryBotId, st.TelegramUserId, msgID, "同步任务已提交。你可以离开，完成后会通知；重复点击不会重复创建同步任务。", [][]models.InlineKeyboardButton{{managerButton("查看进度", "tasks", 0, 0), managerButton("返回列表", "list", 0, 0)}})
+		return s.managerSyncFeedback(ctx, st, msgID)
 	case "tasks":
-		return s.managerTasks(ctx, st, msgID, c.Page)
+		// Old messages may still contain this removed entry point.
+		return s.managerList(ctx, st, msgID, 1)
 	case "retry":
 		id, err := managerRetry(ctx, st, c.ID)
 		if err != nil {
@@ -253,11 +260,7 @@ func (s *sSysBot) managerCallback(ctx context.Context, st *entity.YoubanBotManag
 		}
 		st.DraftBotId = b.Id
 		st.Revision++
-		status := "仅发现，未配置上架Token"
-		if b.BotToken != "" {
-			status = "已配置上架"
-		}
-		return s.managerSend(ctx, st.EntryBotId, st.TelegramUserId, msgID, "<b>🤖 "+html.EscapeString(b.BotName)+"</b>\n@"+html.EscapeString(b.BotUsername)+"\n"+status, [][]models.InlineKeyboardButton{{managerButton("所在频道", "members", b.Id, 0)}, {managerButton("添加到频道", "select", b.Id, st.Revision)}, {managerButton("配置 / 更新 Token", "token", 0, 0)}, {managerButton("删除上架配置", "delete", b.Id, st.Revision)}, {managerButton("返回机器人列表", "list", 0, 0)}})
+		return s.managerSend(ctx, st.EntryBotId, st.TelegramUserId, msgID, "<b>🤖 "+html.EscapeString(b.BotName)+"</b>\n@"+html.EscapeString(b.BotUsername)+"\n可以查看所在频道、修改权限或移出频道，无需提供 Token。", [][]models.InlineKeyboardButton{{managerButton("所在频道", "members", b.Id, 0)}, {managerButton("添加到频道", "select", b.Id, st.Revision)}, {managerButton("返回机器人列表", "list", 0, 0)}})
 	case "select", "toggle", "all", "none":
 		return s.managerSelection(ctx, st, msgID, c)
 	case "confirm":
@@ -284,7 +287,7 @@ func (s *sSysBot) managerCallback(ctx context.Context, st *entity.YoubanBotManag
 	case "member", "rights", "flip", "saveRights", "remove", "doRemove":
 		return s.managerMemberAction(ctx, st, msgID, c)
 	case "delete", "doDelete":
-		return s.managerDelete(ctx, st, msgID, c)
+		return gerror.New("已移除删除上架配置入口；需要移出机器人，请从所在频道操作")
 	default:
 		return gerror.New("未识别的按钮，请重新打开机器人管理")
 	}
@@ -519,7 +522,7 @@ func (s *sSysBot) handleBotManagerInput(ctx context.Context, entryBot int64, msg
 }
 
 func (s *sSysBot) managerSubmitted(ctx context.Context, st *entity.YoubanBotManagerState, msgID int, taskID int64) error {
-	return s.managerSend(ctx, st.EntryBotId, st.TelegramUserId, msgID, fmt.Sprintf("任务 #%d 已提交，完成后通知你。可以返回继续操作。", taskID), [][]models.InlineKeyboardButton{{managerButton("查看进度", "tasks", 0, 0), managerButton("返回列表", "list", 0, 0)}})
+	return s.managerSend(ctx, st.EntryBotId, st.TelegramUserId, msgID, fmt.Sprintf("任务 #%d 已提交，完成后通知你。可以返回继续操作。", taskID), managerSyncButtons())
 }
 
 func (s *sSysBot) managerTasks(ctx context.Context, st *entity.YoubanBotManagerState, msgID, page int) error {
@@ -559,10 +562,28 @@ func (s *sSysBot) managerMembers(ctx context.Context, st *entity.YoubanBotManage
 		return err
 	}
 	c := dao.YoubanBotManagedMember.Columns()
-	q := dao.YoubanBotManagedMember.Ctx(ctx).Where(c.ManagedBotId, b.Id).Where(c.TenantId, st.TenantId).Where(c.AccountId, st.AccountId)
+	q := dao.YoubanBotManagedMember.Ctx(ctx).Where(c.ManagedBotId, b.Id).Where(c.TenantId, st.TenantId).Where(c.AccountId, st.AccountId).WhereIn(c.MemberStatus, []string{"admin", "member"})
 	total, err := q.Count()
 	if err != nil {
 		return err
+	}
+	if total == 0 {
+		channels, err := managerChannels(ctx, st)
+		if err != nil {
+			return err
+		}
+		needsSync := len(channels) == 0
+		for _, ch := range channels {
+			if ch.SyncStatus == "unavailable" {
+				continue
+			}
+			if ch.LastSyncedAt == nil || ch.SyncStatus != "success" || (b.CreatedAt != nil && ch.LastSyncedAt.Before(b.CreatedAt)) {
+				needsSync = true
+			}
+		}
+		if needsSync {
+			return s.managerSyncFeedback(ctx, st, msgID)
+		}
 	}
 	page, _, _ = managerPage(page, total)
 	var rows []*entity.YoubanBotManagedMember
@@ -581,7 +602,7 @@ func (s *sSysBot) managerMembers(ctx context.Context, st *entity.YoubanBotManage
 	if p := managerPager("members", botID, page, total, 0); len(p) > 0 {
 		buttons = append(buttons, p)
 	}
-	buttons = append(buttons, []models.InlineKeyboardButton{managerButton("返回机器人详情", "bot", botID, 0)})
+	buttons = append(buttons, []models.InlineKeyboardButton{managerButton("重新同步频道", "sync", 0, 0)}, []models.InlineKeyboardButton{managerButton("返回机器人详情", "bot", botID, 0)})
 	return s.managerSend(ctx, st.EntryBotId, st.TelegramUserId, msgID, "@"+html.EscapeString(b.BotUsername)+" 的频道关系（以最近成功同步为准）", buttons)
 }
 

@@ -30,14 +30,14 @@ func TestBotManagerPublishBridgePostgres(t *testing.T) {
 		statements := []string{
 			"CREATE TEMP TABLE hg_youban_publish_channel_permission_circuit(tenant_id bigint,channel_id bigint,paused int DEFAULT 0,PRIMARY KEY(tenant_id,channel_id)) ON COMMIT DROP",
 			"CREATE TEMP TABLE hg_youban_publish_account(id bigint PRIMARY KEY,tenant_id bigint,deleted_at timestamp) ON COMMIT DROP",
-			"CREATE TEMP TABLE hg_youban_publish_tg_account(id bigint PRIMARY KEY,tenant_id bigint,account_id bigint,deleted_at timestamp) ON COMMIT DROP",
+			"CREATE TEMP TABLE hg_youban_publish_tg_account(id bigint PRIMARY KEY,tenant_id bigint,account_id bigint,deleted_at timestamp,status text DEFAULT 'authorized',session_key text DEFAULT 'test') ON COMMIT DROP",
 			"CREATE TEMP TABLE hg_youban_publish_tg_channel(id bigint PRIMARY KEY,tenant_id bigint,tg_account_id bigint,channel_id text,access_hash text) ON COMMIT DROP",
 			"CREATE TEMP TABLE hg_youban_publish_channel(id bigint PRIMARY KEY,tenant_id bigint,tg_account_id bigint,target_chat_id text,channel_title text,channel_username text,publish_direction text,status int,bot_id_json text DEFAULT '[]',created_at timestamp,updated_at timestamp,deleted_at timestamp) ON COMMIT DROP",
 			"CREATE TEMP TABLE hg_youban_publish_bot(id bigserial PRIMARY KEY,tenant_id bigint,account_id bigint,bot_name text,bot_username text,bot_token text,status int,created_at timestamp,updated_at timestamp,deleted_at timestamp) ON COMMIT DROP",
 			"CREATE TEMP TABLE hg_youban_publish_tg_job(id bigint PRIMARY KEY,tenant_id bigint,channel_id bigint,bot_id bigint,status text) ON COMMIT DROP",
 			"CREATE TEMP TABLE hg_youban_publish_collect_source(id bigint PRIMARY KEY,bot_id bigint,deleted_at timestamp) ON COMMIT DROP",
 			"INSERT INTO hg_youban_publish_account VALUES(99,1,NULL),(100,1,NULL)",
-			"INSERT INTO hg_youban_publish_tg_account VALUES(7,1,99,NULL),(8,1,100,NULL)",
+			"INSERT INTO hg_youban_publish_tg_account(id,tenant_id,account_id,deleted_at) VALUES(7,1,99,NULL),(8,1,100,NULL)",
 			"INSERT INTO hg_youban_publish_tg_channel VALUES(1,1,7,'123','567'),(2,1,8,'124','568')",
 			"INSERT INTO hg_youban_publish_channel(id,tenant_id,tg_account_id,target_chat_id,channel_title,channel_username,publish_direction,status)VALUES(1,1,7,'-100123','Mine','mine','up',1),(2,1,8,'-100124','Other','other','up',1),(3,2,7,'-100125','Other tenant','other','up',1)",
 		}

@@ -189,6 +189,9 @@ func TestBotManagerChatSelectionAndDatabaseSearch(t *testing.T) {
 		t.Fatal(err)
 	}
 	restored.Keyword = "@city_bot"
+	if _, err := dao.YoubanBotManagedMember.Ctx(ctx).Data(do.YoubanBotManagedMember{TenantId: st.TenantId, AccountId: st.AccountId, ManagedBotId: 1, ChannelId: 1, MemberStatus: "admin"}).Insert(); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.managerList(ctx, restored, 0, 1); err != nil {
 		t.Fatal(err)
 	}

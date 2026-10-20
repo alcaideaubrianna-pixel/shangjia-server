@@ -32,6 +32,20 @@ func (s *sSysPublish) BotManagerCatalog(ctx context.Context, tenantId, accountId
 		AccessHash  string
 	}
 	if len(channels) > 0 {
+		accountErrors := make(map[int64]string)
+		for _, channel := range channels {
+			if _, checked := accountErrors[channel.TgAccountId]; !checked {
+				available, err := checkTelegramProtocolAccount(ctx, dao.YoubanPublishChannel.DB(), tenantId, channel.TgAccountId)
+				if err != nil {
+					return nil, nil, err
+				}
+				accountErrors[channel.TgAccountId] = ""
+				if !available {
+					accountErrors[channel.TgAccountId] = "协议号未登录或登录已失效，请重新登录后同步"
+				}
+			}
+			channel.AccountError = accountErrors[channel.TgAccountId]
+		}
 		if err := dao.YoubanPublishChannel.DB().Model(publishTgChannelTable).Ctx(ctx).Fields("tg_account_id,channel_id,access_hash").Where("tenant_id", tenantId).Scan(&caches); err != nil {
 			return nil, nil, err
 		}

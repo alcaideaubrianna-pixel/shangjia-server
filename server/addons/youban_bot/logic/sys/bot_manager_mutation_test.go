@@ -81,6 +81,48 @@ func (p managerMutationPublish) BotManagerApplyBinding(_ context.Context, in *pi
 	return p.apply(in)
 }
 
+func TestBotManagerDiscoveredBotRightsNeedNoToken(t *testing.T) {
+	ctx, s, st := managerTestDB(t)
+	managerTestChannel(t, ctx, 1, 1, 10, 1)
+	if _, err := dao.YoubanBotManaged.Ctx(ctx).Data(do.YoubanBotManaged{Id: 1, TenantId: 1, AccountId: 99, TelegramBotId: 1001, BotUsername: "external_bot", Status: 1}).Insert(); err != nil {
+		t.Fatal(err)
+	}
+	var ch entity.YoubanBotManagedChannel
+	_ = dao.YoubanBotManagedChannel.Ctx(ctx).WherePri(1).Scan(&ch)
+	previous := managerPreviousPublish()
+	t.Cleanup(func() { ps.RegisterSysPublish(previous) })
+	ps.RegisterSysPublish(managerMutationPublish{apply: func(*pi.BotManagerProjection) (int64, error) {
+		t.Fatal("rights management must not create publishing credentials")
+		return 0, nil
+	}})
+	edits := 0
+	rights := managerDefaultRights().telegram()
+	client := tg.NewClient(managerTestInvoker{invoke: func(_ context.Context, in bin.Encoder, out bin.Decoder) error {
+		switch request := in.(type) {
+		case *tg.ContactsResolveUsernameRequest:
+			u := &tg.User{ID: 1001, Bot: true, FirstName: "External", Username: "external_bot"}
+			u.SetAccessHash(123)
+			return managerTestResponse(out, &tg.ContactsResolvedPeer{Peer: &tg.PeerUser{UserID: 1001}, Users: []tg.UserClass{u}})
+		case *tg.ChannelsGetParticipantRequest:
+			return managerTestResponse(out, &tg.ChannelsChannelParticipant{Participant: &tg.ChannelParticipantAdmin{UserID: 1001, PromotedBy: 7, Date: 1, AdminRights: rights}})
+		case *tg.ChannelsEditAdminRequest:
+			edits++
+			rights = request.AdminRights
+			return managerTestResponse(out, &tg.Updates{})
+		case *tg.ChannelsGetFullChannelRequest:
+			return errors.New("refresh temporarily unavailable")
+		default:
+			return fmt.Errorf("unexpected RPC %T", in)
+		}
+	}})
+	if err := s.managerMutateChannel(ctx, client, st, &entity.YoubanBotManagerTask{Action: "rights", ManagedBotId: 1, RightsJson: managerJSON(managerDefaultRights())}, &ch, &tg.InputChannel{ChannelID: 1, AccessHash: 123}); err != nil {
+		t.Fatal(err)
+	}
+	if edits != 1 {
+		t.Fatal("tokenless Bot rights were not updated", edits)
+	}
+}
+
 func TestBotManagerRightsRevocationAndRefreshFailure(t *testing.T) {
 	for _, post := range []bool{false, true} {
 		for _, rpcFailure := range []bool{false, true} {

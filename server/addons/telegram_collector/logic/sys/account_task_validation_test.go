@@ -1,11 +1,51 @@
 package sys
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"strconv"
 	"strings"
 	"testing"
 
 	"hotgo/addons/telegram_collector/model/input/sysin"
 )
+
+// New task constants must pass the actual submission gate, not just have a
+// registered consumer. Reading the declarations prevents a hand-written test
+// list from silently omitting the next plugin task type.
+func TestValidateAccountTaskSubmitCoversDeclaredTypes(t *testing.T) {
+	f, err := parser.ParseFile(token.NewFileSet(), "../../model/input/sysin/account_task.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	ast.Inspect(f, func(node ast.Node) bool {
+		spec, ok := node.(*ast.ValueSpec)
+		if !ok || len(spec.Names) != 1 || len(spec.Values) != 1 || !strings.HasPrefix(spec.Names[0].Name, "AccountTaskType") {
+			return true
+		}
+		literal, ok := spec.Values[0].(*ast.BasicLit)
+		if !ok {
+			t.Fatalf("unsupported task constant declaration: %s", spec.Names[0].Name)
+		}
+		kind, err := strconv.Unquote(literal.Value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		count++
+		t.Run(kind, func(t *testing.T) {
+			in := &sysin.AccountTaskSubmit{TaskType: kind, TaskKey: "test:1", HistoryTaskID: 1, MediaOwnerAccountID: 1, Media: &sysin.CollectorMediaItem{FileID: "test-file"}}
+			if err := validateAccountTaskSubmit(in); err != nil {
+				t.Fatalf("declared task %s cannot be submitted: %v", spec.Names[0].Name, err)
+			}
+		})
+		return true
+	})
+	if count == 0 {
+		t.Fatal("no account task declarations found")
+	}
+}
 
 func TestValidateAccountTaskSubmitSupportsAllRegisteredTaskTypes(t *testing.T) {
 	tests := []struct {
@@ -19,6 +59,7 @@ func TestValidateAccountTaskSubmitSupportsAllRegisteredTaskTypes(t *testing.T) {
 		{name: "message push inline", in: &sysin.AccountTaskSubmit{TaskType: sysin.AccountTaskTypeMessagePushInline}},
 		{name: "message reconcile", in: &sysin.AccountTaskSubmit{TaskType: sysin.AccountTaskTypeMessageReconcile}},
 		{name: "managed bot username check", in: &sysin.AccountTaskSubmit{TaskType: sysin.AccountTaskTypeManagedBotUsernameCheck}},
+		{name: "bot manager", in: &sysin.AccountTaskSubmit{TaskType: sysin.AccountTaskTypeBotManager}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

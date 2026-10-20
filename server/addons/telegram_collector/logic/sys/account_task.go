@@ -153,6 +153,7 @@ func validateAccountTaskSubmit(in *sysin.AccountTaskSubmit) error {
 	case sysin.AccountTaskTypeManagedBotUsernameCheck:
 	case sysin.AccountTaskTypeManagedBotCreate:
 	case sysin.AccountTaskTypeChannelMemberSync:
+	case sysin.AccountTaskTypeBotManager:
 	case sysin.AccountTaskTypeTgAccountRefresh:
 	case sysin.AccountTaskTypeMessageRepair:
 	case sysin.AccountTaskTypeMessageRepairScan:
