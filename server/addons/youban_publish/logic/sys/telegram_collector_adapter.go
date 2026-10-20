@@ -594,7 +594,11 @@ func (s *sSysPublish) handleMessageReconcileAccountTask(ctx context.Context, cli
 		return err
 	}
 	if len(messages) == 0 {
-		if attempt.ResponseReceived == 0 && attempt.CreatedAt != nil && time.Since(dbtime.FromTimestamp(attempt.CreatedAt).Time) >= 5*time.Minute {
+		if attempt.ResponseReceived == 0 && attempt.CreatedAt != nil {
+			createdAt := dbtime.FromTimestamp(attempt.CreatedAt).Time
+			if delay := telegramReconcileRetryDelay(createdAt, time.Now()); delay > 0 {
+				return &telegramReconcileRetryError{delay: delay}
+			}
 			changed, err := s.transitionTelegramJob(ctx, telegramJobTransition{
 				JobId: job.Id, From: []string{telegramJobStatusConfirming}, To: telegramJobStatusSending,
 			})
@@ -604,7 +608,7 @@ func (s *sSysPublish) handleMessageReconcileAccountTask(ctx context.Context, cli
 			if !changed {
 				return nil
 			}
-			g.Log().Warningf(ctx, "TG结果不明确超过5分钟，按补偿策略切换协议号 jobId:%d attemptId:%d phase:%s", job.Id, attempt.Id, attempt.Phase)
+			g.Log().Warningf(ctx, "TG结果不明确超过%s，按补偿策略切换协议号 jobId:%d attemptId:%d phase:%s", telegramReconcileTakeoverWait, job.Id, attempt.Id, attempt.Phase)
 			return s.submitTelegramMediaFallback(ctx, job, channel.TgAccountId, attempt.Phase)
 		}
 		if reconcileErr := telegramMissingReconcileMessagesError(attempt.Phase, accountTaskFinalAttempt(task)); !errors.Is(reconcileErr, errTelegramMediaFallbackUnavailable) {
