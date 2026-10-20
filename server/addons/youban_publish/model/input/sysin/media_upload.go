@@ -14,10 +14,12 @@ type MediaDirectUploadCreateInp struct {
 }
 
 type MediaDirectUploadCreateModel struct {
+	Provider  string `json:"provider"`
 	SessionId string `json:"sessionId"`
 	Bucket    string `json:"bucket"`
 	Region    string `json:"region"`
 	Key       string `json:"key"`
+	UploadURL string `json:"uploadUrl,omitempty"`
 }
 
 type MediaDirectUploadSignInp struct {

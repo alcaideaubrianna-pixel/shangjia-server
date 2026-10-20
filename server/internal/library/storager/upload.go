@@ -63,6 +63,8 @@ func New(name ...string) UploadDrive {
 		drive = &QiNiuDrive{}
 	case consts.UploadDriveMinio:
 		drive = &MinioDrive{}
+	case consts.UploadDriveR2:
+		drive = &R2Drive{}
 	default:
 		panic(fmt.Sprintf("暂不支持的存储驱动:%v", driveType))
 	}
@@ -184,6 +186,8 @@ func LastUrl(ctx context.Context, fullPath, drive string) string {
 		return config.QiNiuDomain + "/" + fullPath
 	case consts.UploadDriveMinio:
 		return fmt.Sprintf("%s/%s/%s", config.MinioDomain, config.MinioBucket, fullPath)
+	case consts.UploadDriveR2:
+		return strings.TrimRight(config.R2PublicURL, "/") + "/" + strings.TrimLeft(fullPath, "/")
 	default:
 		return fullPath
 	}

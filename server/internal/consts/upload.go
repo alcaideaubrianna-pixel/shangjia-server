@@ -13,4 +13,5 @@ const (
 	UploadDriveOss    = "oss"    // 阿里云oss
 	UploadDriveQiNiu  = "qiniu"  // 七牛云对象存储
 	UploadDriveMinio  = "minio"  // minio对象存储
+	UploadDriveR2     = "r2"     // Cloudflare R2 S3对象存储
 )

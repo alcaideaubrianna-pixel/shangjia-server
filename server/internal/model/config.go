@@ -98,6 +98,13 @@ type UploadConfig struct {
 	MinioPath      string `json:"uploadMinioPath"`
 	MinioBucket    string `json:"uploadMinioBucket"`
 	MinioDomain    string `json:"uploadMinioDomain"`
+	// Cloudflare R2 S3配置
+	R2AccessKey string `json:"uploadR2AccessKey"`
+	R2SecretKey string `json:"uploadR2SecretKey"`
+	R2Endpoint  string `json:"uploadR2Endpoint"`
+	R2Region    string `json:"uploadR2Region"`
+	R2Bucket    string `json:"uploadR2Bucket"`
+	R2PublicURL string `json:"uploadR2PublicURL"`
 }
 
 // GeoConfig 地理配置
