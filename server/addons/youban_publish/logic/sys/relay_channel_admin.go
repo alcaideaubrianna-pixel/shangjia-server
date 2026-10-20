@@ -219,9 +219,6 @@ func (s *sSysPublish) AdminRelayChannelStatus(ctx context.Context, in *sysin.Rel
 		}
 		return nil
 	}
-	if row.BotId <= 0 {
-		return gerror.New("请先编辑中转频道并选择推送Bot")
-	}
 	if row.ChannelId == "" {
 		return gerror.New("频道创建尚未确认，请先检查创建任务")
 	}
