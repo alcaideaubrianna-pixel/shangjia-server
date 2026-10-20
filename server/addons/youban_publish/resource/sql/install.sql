@@ -509,6 +509,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_account_follow` (
   KEY `idx_ybp_account_follow_following` (`tenant_id`,`following_account_id`,`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴账号关注';
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_profile_state` (
+	`random_media_config` text,
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `tenant_id` bigint(20) NOT NULL DEFAULT '0',
   `account_id` bigint(20) NOT NULL DEFAULT '0',
@@ -594,6 +595,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_full_push_batch` (
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_note_index` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `is_collected` tinyint(1) NOT NULL DEFAULT '0',
   `tenant_id` bigint(20) NOT NULL DEFAULT '0',
   `account_id` bigint(20) NOT NULL DEFAULT '0',
   `profile_id` bigint(20) NOT NULL DEFAULT '0',
@@ -618,6 +620,8 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_note_index` (
   `deleted_at` datetime DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_ybp_note_index_scope_profile` (`tenant_id`,`account_id`,`profile_id`),
+  KEY `idx_ybp_note_index_tenant_source_created` (`tenant_id`,`is_collected`,`created_at`,`id`),
+  KEY `idx_ybp_note_index_account_source_created` (`account_id`,`is_collected`,`created_at`,`id`),
   KEY `idx_ybp_note_index_tenant_updated` (`tenant_id`,`updated_at`,`id`),
   KEY `idx_ybp_note_index_account_updated` (`account_id`,`updated_at`,`id`),
   KEY `idx_ybp_note_index_profile` (`profile_id`),
@@ -1149,6 +1153,7 @@ FROM (
 WHERE NOT EXISTS (SELECT 1 FROM `hg_youban_publish_tag`);
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_job` (
+	`display_media_selection` text,
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键', `task_id` bigint(20) DEFAULT NULL COMMENT '采集任务ID，普通资料推送为空',
   `operation_no` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG操作号',
   `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID', `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '兼容旧版本商家ID',

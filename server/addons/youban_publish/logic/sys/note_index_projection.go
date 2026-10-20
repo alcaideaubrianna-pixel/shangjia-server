@@ -12,7 +12,10 @@ import (
 	"hotgo/internal/dao"
 )
 
+const noteIndexCollectedColumn = "is_collected"
+
 type noteIndexSource struct {
+	IsCollected     bool        `orm:"is_collected"`
 	TenantId        int64       `orm:"tenant_id"`
 	AccountId       int64       `orm:"account_id"`
 	ProfileId       int64       `orm:"profile_id"`
@@ -86,7 +89,7 @@ func (s *sSysPublish) noteIndexSources(ctx context.Context, profileId int64) ([]
 		InnerJoin(publishProfileStateTable+" ps", "ps.profile_id=p.id AND ps.deleted_at IS NULL").
 		Where("p.id", profileId).
 		WhereNull("p.deleted_at").
-		Fields("ps.tenant_id,ps.account_id,p.id AS profile_id,p.source_note_uuid AS uuid,p.profile_no,p.title,p.summary,p.plain_text," + tag + " AS tag,p.province,p.city,p.status,p.visibility,p.review_status,COALESCE(ps.publish_task_status,'') AS task_status,p.published_at,p.updated_at AS source_updated_at,p.created_at,p.updated_at,p.deleted_at").
+		Fields("ps.tenant_id,ps.account_id,p.id AS profile_id,COALESCE(p.source_type='" + collectProfileSourceType + "',false) AS " + noteIndexCollectedColumn + ",p.source_note_uuid AS uuid,p.profile_no,p.title,p.summary,p.plain_text," + tag + " AS tag,p.province,p.city,p.status,p.visibility,p.review_status,COALESCE(ps.publish_task_status,'') AS task_status,p.published_at,p.updated_at AS source_updated_at,p.created_at,p.updated_at,p.deleted_at").
 		Scan(&rows)
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取资料索引源数据失败")
@@ -121,6 +124,7 @@ func upsertNoteIndex(ctx context.Context, row *noteIndexSource) error {
 		columns.UpdatedAt:       row.UpdatedAt,
 		columns.DeletedAt:       row.DeletedAt,
 	}
+	data[noteIndexCollectedColumn] = row.IsCollected
 	mod := pdao.YoubanPublishNoteIndex.Ctx(ctx).Data(data)
 	// The projection table may have been created by an older installation without
 	// a primary key. Declare the business unique key explicitly so Save does not

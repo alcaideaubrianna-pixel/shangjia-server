@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -139,7 +140,7 @@ func TestObfuscateTelegramCaptionKeepsHTMLAndLimitsNumberScope(t *testing.T) {
 		regexp.MustCompile(`体重[^0-9]{0,8}[\x{200B}\x{200C}\x{2060}\x{2063}]`).MatchString(first) {
 		t.Fatalf("invisible characters were inserted before height or weight: %s", first)
 	}
-	if !regexp.MustCompile(`身高[^0-9]{0,8}(175|176|177|178)([^0-9]|$)`).MatchString(first) {
+	if !regexp.MustCompile(`身高[^0-9]{0,8}(174\.[5-9]|175(?:\.[0-9])?|176(?:\.[0-5])?)([^0-9.]|$)`).MatchString(first) {
 		t.Fatalf("height perturbation exceeded expected range: %s", first)
 	}
 	if !regexp.MustCompile(`体重[^0-9]{0,8}(49|53)kg`).MatchString(first) {
@@ -151,17 +152,31 @@ func TestObfuscateTelegramHeightOnlyIncreases(t *testing.T) {
 	seen := make(map[string]bool)
 	for seed := int64(1); seed <= 20; seed++ {
 		result := obfuscateTelegramText("身高：180 体重：50kg", rand.New(rand.NewSource(seed)), make(map[string]string))
-		matched := regexp.MustCompile(`身高：(180|181|182|183)`).FindStringSubmatch(result)
+		matched := regexp.MustCompile(`身高：([0-9]+(?:\.[0-9]+)?)`).FindStringSubmatch(result)
 		if len(matched) != 2 {
 			t.Fatalf("height must only increase, seed:%d result:%s", seed, result)
 		}
 		seen[matched[1]] = true
+		height, err := strconv.ParseFloat(matched[1], 64)
+		if err != nil || height < 180 || height > 182 {
+			t.Fatalf("height increase must stay within two: %s", result)
+		}
 		if !strings.Contains(result, "体重：48kg") && !strings.Contains(result, "体重：52kg") {
 			t.Fatalf("weight must support both directions, seed:%d result:%s", seed, result)
 		}
 	}
 	if len(seen) < 3 {
 		t.Fatalf("height random increment produced too few variants: %#v", seen)
+	}
+}
+
+func TestObfuscateTelegramHeightPreservesDecimals(t *testing.T) {
+	for seed := int64(1); seed <= 100; seed++ {
+		result := obfuscateTelegramText("身高：174.55", rand.New(rand.NewSource(seed)), make(map[string]string))
+		value, err := strconv.ParseFloat(strings.TrimPrefix(result, "身高："), 64)
+		if err != nil || value < 174.55 || value > 176.55 || !strings.HasSuffix(result, "5") {
+			t.Fatalf("source decimals or increase range lost: %s", result)
+		}
 	}
 }
 

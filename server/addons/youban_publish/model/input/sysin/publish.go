@@ -542,6 +542,8 @@ type AdminProfileBatchCancelModel struct {
 }
 
 type ProfileModel struct {
+	RandomMedia *ProfileRandomMediaPolicy `json:"randomMedia,omitempty"`
+
 	Id                     int64       `json:"id" dc:"资料ID"`
 	NoteIndexId            int64       `json:"-" dc:"资料索引ID"`
 	Uuid                   string      `json:"uuid" dc:"资料UUID"`
@@ -636,6 +638,8 @@ type BotMediaSearchInp struct {
 }
 
 type ProfileSaveInp struct {
+	RandomMedia *ProfileRandomMediaPolicy `json:"randomMedia,omitempty"`
+
 	Id               int64                   `json:"id" dc:"资料ID"`
 	Uuid             string                  `json:"uuid" dc:"资料UUID"`
 	ChannelIds       []int64                 `json:"channelIds" dc:"推送频道ID列表"`
@@ -665,6 +669,11 @@ type ProfileMediaSaveItem struct {
 }
 
 func (in *ProfileSaveInp) Filter(ctx context.Context) error {
+	if in.RandomMedia != nil {
+		if err := in.RandomMedia.Filter(); err != nil {
+			return err
+		}
+	}
 	in.Title = strings.TrimSpace(in.Title)
 	in.Province = strings.TrimSpace(in.Province)
 	in.City = strings.TrimSpace(in.City)
