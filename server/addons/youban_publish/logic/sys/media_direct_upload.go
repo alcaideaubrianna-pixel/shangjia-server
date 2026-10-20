@@ -44,6 +44,7 @@ type mediaDirectUploadSession struct {
 	FileName     string
 	FileSize     int64
 	ContentType  string
+	Provider     string
 	Bucket       string
 	Region       string
 	ConfigDigest string
@@ -96,8 +97,8 @@ func (s *sSysPublish) createMediaDirectUpload(ctx context.Context, in *sysin.Med
 	if err != nil {
 		return nil, err
 	}
-	if cfg.Drive != consts.UploadDriveCos {
-		return nil, gerror.New("当前存储未启用腾讯COS直传")
+	if cfg.Drive != consts.UploadDriveCos && cfg.Drive != consts.UploadDriveR2 {
+		return nil, gerror.New("当前存储不支持媒体直传")
 	}
 	if err := in.MediaUploadInp.Filter(ctx); err != nil {
 		return nil, err
@@ -124,29 +125,50 @@ func (s *sSysPublish) createMediaDirectUpload(ctx context.Context, in *sysin.Med
 	if _, err := s.resolveMediaEditTask(ctx, &in.MediaUploadInp, tenantId, accountId); err != nil {
 		return nil, err
 	}
-	bucket, region, err := directUploadBucketRegionFromConfig(cfg.CosBucket, cfg.CosRegion, cfg.CosBucketURL, cfg.CosPublicURL)
-	if err != nil {
-		return nil, err
+	bucket, region := cfg.CosBucket, cfg.CosRegion
+	if cfg.Drive == consts.UploadDriveR2 {
+		bucket, region = cfg.R2Bucket, cfg.R2Region
+		if region == "" {
+			region = "auto"
+		}
+	} else {
+		bucket, region, err = directUploadBucketRegionFromConfig(cfg.CosBucket, cfg.CosRegion, cfg.CosBucketURL, cfg.CosPublicURL)
+		if err != nil {
+			return nil, err
+		}
 	}
 	sessionId := grand.S(40)
-	key, err := storager.GenStagingPath(cfg.CosPath, sessionId, ext)
+	basePath := cfg.CosPath
+	if cfg.Drive == consts.UploadDriveR2 {
+		basePath = cfg.R2Path
+	}
+	key, err := storager.GenStagingPath(basePath, sessionId, ext)
 	if err != nil {
 		return nil, err
 	}
 	session := &mediaDirectUploadSession{
 		TenantId: tenantId, AccountId: accountId, UserId: contexts.GetUserId(ctx), Module: contexts.GetModule(ctx),
-		Key: key, FileName: in.FileName, FileSize: in.FileSize, ContentType: in.ContentType,
+		Key: key, FileName: in.FileName, FileSize: in.FileSize, ContentType: in.ContentType, Provider: cfg.Drive,
 		Bucket: bucket, Region: region, ConfigDigest: directUploadConfigDigest(cfg), Media: in.MediaUploadInp,
 	}
 	if err = cache.Instance().Set(ctx, directUploadSessionPrefix+sessionId, session, directUploadSessionTTL); err != nil {
 		return nil, gerror.Wrap(err, "创建直传会话失败")
 	}
-	return &sysin.MediaDirectUploadCreateModel{
+	res := &sysin.MediaDirectUploadCreateModel{
+		Provider:  cfg.Drive,
 		SessionId: sessionId,
 		Bucket:    bucket,
 		Region:    region,
 		Key:       key,
-	}, nil
+	}
+	if cfg.Drive == consts.UploadDriveR2 {
+		uploadURL, signErr := storager.R2PresignedPutObject(ctx, key, 10*time.Minute)
+		if signErr != nil {
+			return nil, signErr
+		}
+		res.UploadURL = uploadURL.String()
+	}
+	return res, nil
 }
 
 func (s *sSysPublish) AdminMediaDirectUploadSign(ctx context.Context, in *sysin.MediaDirectUploadSignInp) (*sysin.MediaDirectUploadSignModel, error) {
@@ -266,49 +288,64 @@ func (s *sSysPublish) completeMediaDirectUpload(ctx context.Context, in *sysin.M
 	if session.MediaId > 0 {
 		return s.mediaViewById(ctx, session.MediaId)
 	}
-	client, err := storager.NewCosClientWithConfig(cfg)
-	if err != nil {
-		return nil, err
-	}
-	head, err := client.Object.Head(ctx, session.Key, nil)
-	if err != nil {
-		g.Log().Warning(ctx, "COS直传文件校验失败", g.Map{
-			"sessionId": in.SessionId, "bucket": session.Bucket, "region": session.Region,
-			"key": session.Key, "tenantId": session.TenantId, "accountId": session.AccountId, "error": err.Error(),
-		})
-		return nil, gerror.Wrap(err, "校验COS直传文件失败")
-	}
-	if head.Body != nil {
-		_ = head.Body.Close()
-	}
-	if head.ContentLength != session.FileSize {
-		return nil, gerror.Newf("COS文件大小不匹配，预期:%d 实际:%d", session.FileSize, head.ContentLength)
-	}
-	logStage("cos_head")
-	if session.FileMD5 == "" {
-		session.FileMD5, err = directUploadObjectMD5(ctx, client, session.Key)
+	if cfg.Drive == consts.UploadDriveR2 {
+		head, headErr := storager.R2HeadObject(ctx, session.Key)
+		if headErr != nil {
+			return nil, gerror.Wrap(headErr, "校验R2直传文件失败")
+		}
+		if head.Size != session.FileSize {
+			return nil, gerror.Newf("R2文件大小不匹配，预期:%d 实际:%d", session.FileSize, head.Size)
+		}
+		session.FileMD5, err = directUploadR2MD5(ctx, session.Key)
 		if err != nil {
 			return nil, err
+		}
+		if err = cache.Instance().Set(ctx, directUploadSessionPrefix+in.SessionId, session, directUploadSessionTTL); err != nil {
+			return nil, err
+		}
+	} else {
+		client, clientErr := storager.NewCosClientWithConfig(cfg)
+		if clientErr != nil {
+			return nil, clientErr
+		}
+		head, headErr := client.Object.Head(ctx, session.Key, nil)
+		if headErr != nil {
+			return nil, gerror.Wrap(headErr, "校验COS直传文件失败")
+		}
+		if head.Body != nil {
+			_ = head.Body.Close()
+		}
+		if head.ContentLength != session.FileSize {
+			return nil, gerror.Newf("COS文件大小不匹配，预期:%d 实际:%d", session.FileSize, head.ContentLength)
+		}
+		if session.FileMD5 == "" {
+			session.FileMD5, err = directUploadObjectMD5(ctx, client, session.Key)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	logStage("object_head")
+	/*
+		COS staging objects are promoted to the content-addressed key below.
+		R2 objects remain at the authenticated staging key for this first phase;
+		content validation still happens before the attachment is persisted.
+	*/
+	if cfg.Drive == consts.UploadDriveCos {
+		client, clientErr := storager.NewCosClientWithConfig(cfg)
+		if clientErr != nil {
+			return nil, clientErr
 		}
 		finalKey, pathErr := storager.GenContentPath(cfg.CosPath, session.FileMD5, storager.Ext(session.FileName))
 		if pathErr != nil {
 			return nil, pathErr
 		}
 		if finalKey != session.Key {
-			stagingKey := session.Key
-			if err = promoteDirectUploadObject(ctx, client, cfg, stagingKey, finalKey, session.FileSize); err != nil {
+			if err = promoteDirectUploadObject(ctx, client, cfg, session.Key, finalKey, session.FileSize); err != nil {
 				return nil, err
 			}
 			session.Key = finalKey
-			if err = cache.Instance().Set(ctx, directUploadSessionPrefix+in.SessionId, session, directUploadSessionTTL); err != nil {
-				return nil, err
-			}
-			if _, deleteErr := client.Object.Delete(ctx, stagingKey); deleteErr != nil {
-				g.Log().Warningf(ctx, "删除COS直传临时对象失败 key:%s err:%+v", stagingKey, deleteErr)
-			}
-		}
-		if err = cache.Instance().Set(ctx, directUploadSessionPrefix+in.SessionId, session, directUploadSessionTTL); err != nil {
-			return nil, err
+			_ = cache.Instance().Set(ctx, directUploadSessionPrefix+in.SessionId, session, directUploadSessionTTL)
 		}
 	}
 	logStage("content_promote")
@@ -348,6 +385,19 @@ func (s *sSysPublish) completeMediaDirectUpload(ctx context.Context, in *sysin.M
 		g.Log().Warningf(ctx, "直传媒体处理任务入队失败 media_id:%d err:%+v", media.Id, err)
 	}
 	return media, nil
+}
+
+func directUploadR2MD5(ctx context.Context, key string) (string, error) {
+	obj, err := storager.R2GetObject(ctx, key)
+	if err != nil {
+		return "", gerror.Wrap(err, "读取R2直传文件失败")
+	}
+	defer obj.Close()
+	hash := md5.New()
+	if _, err = io.Copy(hash, obj); err != nil {
+		return "", gerror.Wrap(err, "校验R2直传文件MD5失败")
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 func directUploadObjectMD5(ctx context.Context, client *cos.Client, key string) (string, error) {
@@ -419,12 +469,10 @@ func validateDirectUploadConfig(ctx context.Context, session *mediaDirectUploadS
 	if err != nil {
 		return nil, err
 	}
-	bucket, region, err := directUploadBucketRegionFromConfig(cfg.CosBucket, cfg.CosRegion, cfg.CosBucketURL, cfg.CosPublicURL)
-	if err != nil {
-		return nil, err
-	}
+	var bucket, region string
+	if cfg.Drive == consts.UploadDriveR2 { bucket, region = cfg.R2Bucket, cfg.R2Region; if region == "" { region = "auto" } } else { bucket, region, err = directUploadBucketRegionFromConfig(cfg.CosBucket, cfg.CosRegion, cfg.CosBucketURL, cfg.CosPublicURL); if err != nil { return nil, err } }
 	if session.ConfigDigest == "" || session.ConfigDigest != directUploadConfigDigest(cfg) || session.Bucket != bucket || session.Region != region {
-		return nil, gerror.New("COS存储配置已更新，请重新选择文件上传")
+		return nil, gerror.New("对象存储配置已更新，请重新选择文件上传")
 	}
 	return cfg, nil
 }
@@ -435,7 +483,7 @@ func directUploadConfigDigest(cfg *model.UploadConfig) string {
 	}
 	sum := sha256.Sum256([]byte(strings.Join([]string{
 		strings.TrimSpace(cfg.Drive), strings.TrimSpace(cfg.CosBucket), strings.TrimSpace(cfg.CosRegion),
-		strings.TrimSpace(cfg.CosBucketURL), strings.TrimSpace(cfg.CosSecretId), strings.TrimSpace(cfg.CosSecretKey),
+		strings.TrimSpace(cfg.CosBucketURL), strings.TrimSpace(cfg.CosSecretId), strings.TrimSpace(cfg.CosSecretKey), strings.TrimSpace(cfg.R2Endpoint), strings.TrimSpace(cfg.R2Bucket), strings.TrimSpace(cfg.R2AccessKey), strings.TrimSpace(cfg.R2SecretKey),
 	}, "\x00")))
 	return hex.EncodeToString(sum[:])
 }

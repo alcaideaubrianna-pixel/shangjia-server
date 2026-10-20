@@ -3,8 +3,10 @@ package storager
 import (
 	"context"
 	"mime"
+	"net/url"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/net/ghttp"
@@ -16,6 +18,40 @@ import (
 // The provider is deliberately separate from MinioDrive because R2 uses
 // region=auto and its public URL is configured independently.
 type R2Drive struct{}
+
+// NewR2Client creates a client from the current upload configuration.
+func NewR2Client() (*minio.Client, error) {
+	opts, err := r2Options()
+	if err != nil {
+		return nil, err
+	}
+	return minio.New(config.R2Endpoint, opts)
+}
+
+// R2PresignedPutObject returns a short-lived upload URL.
+func R2PresignedPutObject(ctx context.Context, key string, expiry time.Duration) (*url.URL, error) {
+	client, err := NewR2Client()
+	if err != nil {
+		return nil, gerror.Wrap(err, "初始化R2客户端失败")
+	}
+	return client.PresignedPutObject(ctx, config.R2Bucket, key, expiry)
+}
+
+func R2HeadObject(ctx context.Context, key string) (minio.ObjectInfo, error) {
+	client, err := NewR2Client()
+	if err != nil {
+		return minio.ObjectInfo{}, err
+	}
+	return client.StatObject(ctx, config.R2Bucket, key, minio.StatObjectOptions{})
+}
+
+func R2GetObject(ctx context.Context, key string) (*minio.Object, error) {
+	client, err := NewR2Client()
+	if err != nil {
+		return nil, err
+	}
+	return client.GetObject(ctx, config.R2Bucket, key, minio.GetObjectOptions{})
+}
 
 func r2Options() (*minio.Options, error) {
 	if config == nil || strings.TrimSpace(config.R2Endpoint) == "" || config.R2Bucket == "" {
