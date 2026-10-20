@@ -2,6 +2,7 @@ package sysin
 
 import (
 	"context"
+	publishconsts "hotgo/addons/youban_publish/consts"
 	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -11,9 +12,9 @@ import (
 )
 
 const (
-	CollectSourceTypeAccount = "account"
-	CollectSourceTypeBot     = "bot"
-	CollectSourceTypeFollow  = "follow"
+	CollectSourceTypeAccount = publishconsts.CollectSourceTypeAccount
+	CollectSourceTypeBot     = publishconsts.CollectSourceTypeBot
+	CollectSourceTypeFollow  = publishconsts.CollectSourceTypeFollow
 
 	CollectHistoryModeAll        = "all"
 	CollectHistoryModeRecentDays = "recent_days"

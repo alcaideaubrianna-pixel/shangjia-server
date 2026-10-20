@@ -1,15 +1,62 @@
 import { http } from '@/utils/http/axios';
 
-export function RelayChannelList(params = {}) {
-  return http.request({ url: '/youban_publish/publish/relay/channel/list', method: 'get', params });
+export interface RelayChannelModel {
+  id: number;
+  tenantId: number;
+  tgAccountId: number;
+  botId: number;
+  targetChatId: string;
+  title: string;
+  status: string;
+  healthStatus: string;
+  operationStatus: string;
+  cooldownUntil?: string;
+  capacity: number;
+  inFlightCount: number;
+  lastError: string;
+  taskId: number;
 }
 
-export function RelayChannelSave(params = {}) {
-  return http.request({ url: '/youban_publish/publish/relay/channel/save', method: 'POST', params });
+export interface RelayChannelSaveParams {
+  id?: number;
+  tenantId: number;
+  tgAccountId: number;
+  botId: number;
+  targetChatId: string;
+  title: string;
+  capacity: number;
 }
 
-export function RelayChannelStatus(params = {}) {
-  return http.request({ url: '/youban_publish/publish/relay/channel/status', method: 'POST', params });
+export function RelayChannelList(params: { tenantId: number }) {
+  return http.request<{ list: RelayChannelModel[] }>({
+    url: '/youban_publish/publish/relay/channel/list',
+    method: 'get',
+    params,
+  });
+}
+
+export function RelayChannelSave(params: RelayChannelSaveParams) {
+  return http.request({
+    url: '/youban_publish/publish/relay/channel/save',
+    method: 'POST',
+    params,
+  });
+}
+
+export function RelayChannelCreate(params: Omit<RelayChannelSaveParams, 'id' | 'targetChatId'>) {
+  return http.request<RelayChannelModel>({
+    url: '/youban_publish/publish/relay/channel/create',
+    method: 'POST',
+    params,
+  });
+}
+
+export function RelayChannelStatus(params: { id: number; status: 'enabled' | 'disabled' }) {
+  return http.request({
+    url: '/youban_publish/publish/relay/channel/status',
+    method: 'POST',
+    params,
+  });
 }
 
 export function TenantList(params = {}) {

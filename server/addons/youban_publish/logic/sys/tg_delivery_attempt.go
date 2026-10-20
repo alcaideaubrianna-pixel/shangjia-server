@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	relayconsts "hotgo/addons/youban_publish/consts"
 	"strconv"
 	"strings"
 	"time"
@@ -378,6 +379,8 @@ func telegramAttemptPhaseTransition(phase string) (fromPhase, sendingPhase, conf
 	switch strings.TrimSpace(phase) {
 	case "display":
 		return telegramSendPhaseCleanupConfirmed, telegramSendPhaseDisplaySending, telegramSendPhaseDisplayConfirmed, nil
+	case "package":
+		return relayconsts.RelaySendPhaseReady, relayconsts.RelaySendPhaseSending, relayconsts.RelaySendPhaseConfirmed, nil
 	case "verify":
 		return telegramSendPhaseDisplayConfirmed, telegramSendPhaseVerifySending, telegramSendPhaseVerifyConfirmed, nil
 	default:
@@ -536,12 +539,20 @@ func (s *sSysPublish) restoreConfirmedTelegramResponse(ctx context.Context, job 
 		}
 		messages = append(messages, message)
 	}
+	if phase == "package" {
+		if err := s.validateRestoredRelayMessages(ctx, job.Id, messages); err != nil {
+			return true, err
+		}
+	}
 	if err := s.saveTelegramSentMessages(ctx, job, messages); err != nil {
 		return true, err
 	}
 	confirmedPhase := telegramSendPhaseDisplayConfirmed
 	if phase == "verify" {
 		confirmedPhase = telegramSendPhaseVerifyConfirmed
+	}
+	if phase == "package" {
+		confirmedPhase = relayconsts.RelaySendPhaseConfirmed
 	}
 	if err := s.updateTelegramJobSendPhaseFromStatuses(ctx, job.Id, confirmedPhase,
 		telegramJobStatusSending, telegramJobStatusConfirming); err != nil {
@@ -571,6 +582,9 @@ func (s *sSysPublish) waitTelegramDeliveryWebhook(ctx context.Context, attempt t
 			phase := telegramSendPhaseDisplayConfirmed
 			if attempt.Phase == "verify" {
 				phase = telegramSendPhaseVerifyConfirmed
+			}
+			if attempt.Phase == "package" {
+				phase = relayconsts.RelaySendPhaseConfirmed
 			}
 			_, err := s.transitionTelegramJobTx(ctx, tx, telegramJobTransition{
 				JobId:      attempt.JobId,
@@ -672,7 +686,7 @@ func (s *sSysPublish) handleTelegramAttemptTimeout(ctx context.Context, attemptI
 	if err != nil {
 		return err
 	}
-	if attempt.Phase == "display" || attempt.Phase == "verify" {
+	if attempt.Phase == "display" || attempt.Phase == "verify" || attempt.Phase == "package" {
 		if err = s.enqueueTelegramAttemptReconcile(ctx, job, attempt); err == nil {
 			s.appendTelegramJobLog(ctx, job, "reconcile", "queued", "Telegram发送未收到Webhook确认，已提交协议号对账")
 			return nil
@@ -682,7 +696,7 @@ func (s *sSysPublish) handleTelegramAttemptTimeout(ctx context.Context, attemptI
 	}
 	// Preserve partial confirmations so a late Webhook can still complete the attempt.
 	phase := telegramSendPhaseCleanupConfirmed
-	if attempt.Phase == "verify" {
+	if attempt.Phase == "verify" || attempt.Phase == "package" {
 		phase = telegramSendPhaseDisplayConfirmed
 	}
 	message := fmt.Sprintf("Telegram发送结果未在%d秒内确认，已停止自动重试，请人工核对频道消息", int(telegramAttemptWebhookWait/time.Second))
@@ -798,10 +812,15 @@ func recordTelegramAttemptMessagesTx(ctx context.Context, tx gdb.TX, attempt tel
 		if marshalErr != nil {
 			return gerror.Wrap(marshalErr, "序列化TG Attempt消息失败")
 		}
+		duplicateFields := "source,message_payload"
+		if source == "partial_response" {
+			// A webhook may already have mapped this ID while the RPC was returning.
+			duplicateFields = "message_id"
+		}
 		_, err := tx.Model(publishTgAttemptMessageTable).Data(g.Map{
 			"attempt_id": attempt.Id, "job_id": attempt.JobId, "target_chat_id": attempt.TargetChatId,
 			"message_id": message.MessageId, "message_payload": string(payload), "source": source, "created_at": gtime.Now(),
-		}).OnConflict("attempt_id,message_id").OnDuplicate("source,message_payload").Save()
+		}).OnConflict("attempt_id,message_id").OnDuplicate(duplicateFields).Save()
 		if err != nil {
 			g.Log().Errorf(ctx, "TG消息已返回但记录发送审计失败 attempt_id:%d job_id:%d phase:%s chat_id:%s message_id:%d source:%s err:%v",
 				attempt.Id, attempt.JobId, attempt.Phase, attempt.TargetChatId, message.MessageId, source, err)
@@ -855,11 +874,27 @@ func (s *sSysPublish) matchTelegramDeliveryAttempt(ctx context.Context, botId in
 			matched = &grouped
 		}
 	}
+	packageMarkers := map[int64]string{}
+	if matched == nil {
+		var markerErr error
+		packageMarkers, markerErr = s.relayPackageAttemptMarkers(ctx, attempts)
+		if markerErr != nil {
+			g.Log().Warningf(ctx, "读取整包Webhook标记失败 bot:%d chat:%s err:%+v", botId, chatId, markerErr)
+			return
+		}
+	}
 	for i := range attempts {
 		if matched != nil {
 			break
 		}
 		candidate := &attempts[i]
+		if candidate.Phase == "package" {
+			if marker := packageMarkers[candidate.Id]; marker != "" && strings.Contains(text, marker) {
+				matched = candidate
+				break
+			}
+			continue
+		}
 		if strings.Contains(text, telegramAttemptMarker(candidate.AttemptToken)) {
 			matched = candidate
 			break
@@ -930,6 +965,13 @@ func (s *sSysPublish) matchTelegramDeliveryAttempt(ctx context.Context, botId in
 	}
 	sent := &telegramSentMessage{MessageId: int64(msg.ID), MediaGroupId: msg.MediaGroupID, Purpose: matched.Phase,
 		TgFileId: telegramMessageFileId(msg), TgFileUniqueId: telegramMessageFileUniqueId(msg)}
+	if matched.Phase == "package" {
+		mapped, mapErr := s.relayPackageWebhookMessage(ctx, *matched, msg)
+		if mapErr != nil || mapped == nil {
+			return
+		}
+		sent = mapped
+	}
 	if err = s.recordTelegramAttemptMessages(ctx, *matched, []*telegramSentMessage{sent}, "webhook"); err != nil {
 		g.Log().Warningf(ctx, "记录TG Webhook Attempt消息失败 attemptId:%d message:%d err:%+v", matched.Id, msg.ID, err)
 		return
@@ -947,6 +989,9 @@ func (s *sSysPublish) matchTelegramDeliveryAttempt(ctx context.Context, botId in
 		WhereIn("status", []string{telegramAttemptStatusSending, telegramAttemptStatusWaiting}).
 		Data(g.Map{"confirmed_count": count, "updated_at": gtime.Now()}).Update()
 	if count < matched.ExpectedCount {
+		return
+	}
+	if matched.Phase == "package" && !s.relayWebhookComplete(ctx, *matched) {
 		return
 	}
 	s.confirmTelegramAttemptFromWebhook(ctx, *matched, job, count)
@@ -1065,9 +1110,13 @@ func (s *sSysPublish) confirmTelegramAttemptFromWebhook(ctx context.Context, att
 		}
 		phase := telegramSendPhaseDisplayConfirmed
 		sendingPhase := telegramSendPhaseDisplaySending
-		if attempt.Phase == "verify" {
+		if attempt.Phase == "verify" || attempt.Phase == "package" {
 			phase = telegramSendPhaseVerifyConfirmed
 			sendingPhase = telegramSendPhaseVerifySending
+		}
+		if attempt.Phase == "package" {
+			phase = relayconsts.RelaySendPhaseConfirmed
+			sendingPhase = relayconsts.RelaySendPhaseSending
 		}
 		// Preserve the active sender: its successful response must not delete webhook-confirmed media.
 		if _, err := tx.Model(publishTgJobTable).Where("id", job.Id).Where("status", "sending").Where("send_phase", sendingPhase).

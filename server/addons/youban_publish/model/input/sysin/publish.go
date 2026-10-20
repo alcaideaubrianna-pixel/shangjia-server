@@ -8,6 +8,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	publishconsts "hotgo/addons/youban_publish/consts"
 	"hotgo/internal/consts"
 	"hotgo/internal/model/input/form"
 )
@@ -1750,6 +1751,8 @@ type RelayChannelListInp struct {
 	TenantId int64 `json:"tenantId"`
 }
 type RelayChannelSaveInp struct {
+	BotId        int64  `json:"botId"`
+	Capacity     int    `json:"capacity"`
 	AccessHash   int64  `json:"accessHash"`
 	BotUsername  string `json:"botUsername"`
 	Id           int64  `json:"id"`
@@ -1764,21 +1767,96 @@ type RelayChannelStatusInp struct {
 	Status string `json:"status"`
 }
 type RelayChannelModel struct {
-	Id                  int64  `json:"id"`
-	TenantId            int64  `json:"tenantId"`
-	TgAccountId         int64  `json:"tgAccountId"`
-	TargetChatId        string `json:"targetChatId"`
-	Title               string `json:"title"`
-	Status              string `json:"status"`
-	HealthStatus        string `json:"healthStatus"`
-	BotPermissionStatus string `json:"botPermissionStatus"`
-	InFlightCount       int    `json:"inFlightCount"`
-	LastError           string `json:"lastError"`
+	HealthStatusLabel        string      `json:"healthStatusLabel"`
+	BotPermissionStatusLabel string      `json:"botPermissionStatusLabel"`
+	OperationStatusLabel     string      `json:"operationStatusLabel"`
+	BotId                    int64       `json:"botId"`
+	Capacity                 int         `json:"capacity"`
+	OperationStatus          string      `json:"operationStatus"`
+	TaskId                   int64       `json:"taskId"`
+	CooldownUntil            *gtime.Time `json:"cooldownUntil"`
+	Id                       int64       `json:"id"`
+	TenantId                 int64       `json:"tenantId"`
+	TgAccountId              int64       `json:"tgAccountId"`
+	TargetChatId             string      `json:"targetChatId"`
+	Title                    string      `json:"title"`
+	Status                   string      `json:"status"`
+	HealthStatus             string      `json:"healthStatus"`
+	BotPermissionStatus      string      `json:"botPermissionStatus"`
+	InFlightCount            int         `json:"inFlightCount"`
+	LastError                string      `json:"lastError"`
 }
 type RelayChannelCreateInp struct {
+	BotId       int64  `json:"botId"`
+	Capacity    int    `json:"capacity"`
 	TenantId    int64  `json:"tenantId"`
 	TgAccountId int64  `json:"tgAccountId"`
 	Title       string `json:"title"`
 	About       string `json:"about"`
 	BotUsername string `json:"botUsername"`
+}
+
+func relayChannelInputCapacity(value int) (int, error) {
+	if value == 0 {
+		value = publishconsts.RelayDefaultCapacity
+	}
+	if value < 1 || value > publishconsts.RelayMaxCapacity {
+		return 0, gerror.New("中转频道并发容量必须在1到20之间")
+	}
+	return value, nil
+}
+func relayChannelInputOwner(tenantID, accountID, botID int64) error {
+	if tenantID <= 0 || accountID <= 0 || botID <= 0 {
+		return gerror.New("请选择租户、协议账号和推送Bot")
+	}
+	return nil
+}
+func (in *RelayChannelCreateInp) Filter(ctx context.Context) error {
+	if in == nil {
+		return gerror.New("中转频道参数不能为空")
+	}
+	in.Title = strings.TrimSpace(in.Title)
+	if in.Title == "" {
+		return gerror.New("中转频道名称不能为空")
+	}
+	if len([]rune(in.Title)) > 128 {
+		return gerror.New("中转频道名称不能超过128个字符")
+	}
+	if err := relayChannelInputOwner(in.TenantId, in.TgAccountId, in.BotId); err != nil {
+		return err
+	}
+	var err error
+	in.Capacity, err = relayChannelInputCapacity(in.Capacity)
+	return err
+}
+func (in *RelayChannelSaveInp) Filter(ctx context.Context) error {
+	if in == nil {
+		return gerror.New("中转频道参数不能为空")
+	}
+	if in.Id < 0 {
+		return gerror.New("中转频道编号不合法")
+	}
+	if err := relayChannelInputOwner(in.TenantId, in.TgAccountId, in.BotId); err != nil {
+		return err
+	}
+	in.TargetChatId = strings.TrimSpace(in.TargetChatId)
+	in.Title = strings.TrimSpace(in.Title)
+	if in.TargetChatId == "" {
+		return gerror.New("请选择中转频道")
+	}
+	if len([]rune(in.Title)) > 128 {
+		return gerror.New("中转频道名称不能超过128个字符")
+	}
+	if in.Status != "" && in.Status != publishconsts.RelayChannelStatusDisabled {
+		return gerror.New("请通过状态接口启用中转频道")
+	}
+	var err error
+	in.Capacity, err = relayChannelInputCapacity(in.Capacity)
+	return err
+}
+func (in *RelayChannelStatusInp) Filter(ctx context.Context) error {
+	if in == nil || in.Id <= 0 || (in.Status != publishconsts.RelayChannelStatusEnabled && in.Status != publishconsts.RelayChannelStatusDisabled) {
+		return gerror.New("中转频道状态不合法")
+	}
+	return nil
 }

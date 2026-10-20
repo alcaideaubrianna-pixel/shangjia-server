@@ -26,4 +26,10 @@ type YoubanPublishRelayChannel struct {
 	CreatedAt           *gtime.Time `json:"createdAt"           orm:"created_at"            ` //
 	UpdatedAt           *gtime.Time `json:"updatedAt"           orm:"updated_at"            ` //
 	DeletedAt           *gtime.Time `json:"deletedAt"           orm:"deleted_at"            ` //
+	AccessHash          string      `json:"accessHash"          orm:"access_hash"           ` //
+	BotId               int64       `json:"botId"               orm:"bot_id"                ` //
+	Capacity            int         `json:"capacity"            orm:"capacity"              ` //
+	OperationKind       string      `json:"operationKind"       orm:"operation_kind"        ` //
+	OperationStatus     string      `json:"operationStatus"     orm:"operation_status"      ` //
+	TaskId              int64       `json:"taskId"              orm:"task_id"               ` //
 }

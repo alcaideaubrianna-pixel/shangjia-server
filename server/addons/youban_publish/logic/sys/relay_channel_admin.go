@@ -2,164 +2,243 @@ package sys
 
 import (
 	"context"
+	relayconsts "hotgo/addons/youban_publish/consts"
+	coreconsts "hotgo/internal/consts"
+	"hotgo/internal/library/contexts"
+	"hotgo/internal/library/dict"
+	"strconv"
+	"strings"
+
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/gogf/gf/v2/util/guid"
 	"github.com/gotd/td/tg"
 	"hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/internal/model/do"
 	"hotgo/addons/youban_publish/model/input/sysin"
-	"strconv"
-	"strings"
 )
 
-func (s *sSysPublish) AdminRelayChannelList(ctx context.Context, in *sysin.RelayChannelListInp) (list []*sysin.RelayChannelModel, err error) {
-	list = []*sysin.RelayChannelModel{}
-	err = dao.YoubanPublishRelayChannel.Ctx(ctx).Where(dao.YoubanPublishRelayChannel.Columns().TenantId, in.TenantId).Order(dao.YoubanPublishRelayChannel.Columns().Id + " ASC").Scan(&list)
-	if err != nil {
-		return nil, gerror.Wrap(err, "读取 relay 频道失败")
+func (s *sSysPublish) AdminRelayChannelList(ctx context.Context, in *sysin.RelayChannelListInp) ([]*sysin.RelayChannelModel, error) {
+	tenantID := int64(0)
+	if in != nil {
+		tenantID = in.TenantId
 	}
-	return
-}
-
-func (s *sSysPublish) AdminRelayChannelCreate(ctx context.Context, in *sysin.RelayChannelCreateInp) (*sysin.RelayChannelModel, error) {
-	if strings.TrimSpace(in.Title) == "" {
-		return nil, gerror.New("relay 频道名称不能为空")
-	}
-	client, err := s.TelegramClient(ctx, in.TgAccountId)
+	tenantID, accountID, err := s.relayAdminScope(ctx, tenantID)
 	if err != nil {
 		return nil, err
 	}
-	updates, err := client.API().ChannelsCreateChannel(ctx, &tg.ChannelsCreateChannelRequest{Broadcast: true, Title: in.Title, About: in.About})
+	list := []*sysin.RelayChannelModel{}
+	c := dao.YoubanPublishRelayChannel.Columns()
+	q := dao.YoubanPublishRelayChannel.Ctx(ctx)
+	if tenantID > 0 {
+		q = q.Where(c.TenantId, tenantID)
+	}
+	if accountID > 0 {
+		q = q.WhereIn(c.TgAccountId, g.DB().Model(publishTgAccountTable).Safe().Ctx(ctx).Fields("id").Where("tenant_id", tenantID).Where("account_id", accountID).WhereNull("deleted_at"))
+	}
+	err = q.OrderDesc(c.Id).Limit(500).Scan(&list)
 	if err != nil {
-		return nil, gerror.Wrap(err, "创建 relay 频道失败")
+		return nil, gerror.Wrap(err, "读取中转频道失败")
 	}
-	var channel *tg.Channel
-	switch value := updates.(type) {
-	case *tg.Updates:
-		for _, item := range value.Chats {
-			if c, ok := item.(*tg.Channel); ok {
-				channel = c
-				break
-			}
+	ids := make([]int64, 0, len(list))
+	for _, row := range list {
+		row.HealthStatusLabel = dict.GetOptionLabel(relayconsts.RelayChannelHealthOptions, row.HealthStatus)
+		row.BotPermissionStatusLabel = dict.GetOptionLabel(relayconsts.RelayChannelHealthOptions, row.BotPermissionStatus)
+		row.OperationStatusLabel = dict.GetOptionLabel(relayconsts.RelayOperationStatusOptions, row.OperationStatus)
+		ids = append(ids, row.Id)
+		row.InFlightCount = 0
+	}
+	if len(ids) > 0 {
+		pc := dao.YoubanPublishRelayPackage.Columns()
+		var loads []struct {
+			RelayChannelId int64
+			Total          int
 		}
-	case *tg.UpdatesCombined:
-		for _, item := range value.Chats {
-			if c, ok := item.(*tg.Channel); ok {
-				channel = c
-				break
-			}
+		if err = dao.YoubanPublishRelayPackage.Ctx(ctx).Fields(pc.RelayChannelId+", COUNT(*) AS total").WhereIn(pc.RelayChannelId, ids).Where(pc.Status, relayconsts.RelayStatusPreparing).WhereGT(pc.LeaseUntil, gtime.Now()).Group(pc.RelayChannelId).Scan(&loads); err != nil {
+			return nil, err
+		}
+		counts := map[int64]int{}
+		for _, load := range loads {
+			counts[load.RelayChannelId] = load.Total
+		}
+		for _, row := range list {
+			row.InFlightCount = counts[row.Id]
 		}
 	}
-	if channel == nil {
-		return nil, gerror.New("创建 relay 频道成功但未读取频道信息")
+	return list, nil
+}
+
+// relayAdminScope separates system identities from tenant account identities.
+func (s *sSysPublish) relayAdminScope(ctx context.Context, tenantID int64) (int64, int64, error) {
+	user := contexts.GetUser(ctx)
+	if user == nil {
+		return 0, 0, gerror.New("请先登录")
 	}
-	accessHash, ok := channel.GetAccessHash()
-	if !ok {
-		return nil, gerror.New("relay 频道缺少 access hash")
+	switch user.App {
+	case coreconsts.AppAdmin:
+		return tenantID, 0, s.requireSystemSuperAdmin(ctx)
+	case coreconsts.AppApi:
+		account, err := s.currentAdminAccount(ctx)
+		if err != nil {
+			return 0, 0, err
+		}
+		if tenantID != 0 && tenantID != account.TenantId {
+			return 0, 0, gerror.New("无权操作其他租户的中转频道")
+		}
+		return account.TenantId, account.Id, nil
+	default:
+		return 0, 0, gerror.New("没有访问权限")
 	}
-	target := "-100" + strconv.FormatInt(channel.ID, 10)
-	permissionStatus := relayBotPermissionUnknown
-	if strings.TrimSpace(in.BotUsername) != "" {
-		bot, resolveErr := resolveRelayBot(ctx, client.API(), in.BotUsername)
-		if resolveErr != nil {
-			return nil, resolveErr
-		}
-		inputChannel := &tg.InputChannel{ChannelID: channel.ID, AccessHash: accessHash}
-		if _, err = client.API().ChannelsInviteToChannel(ctx, &tg.ChannelsInviteToChannelRequest{Channel: inputChannel, Users: []tg.InputUserClass{bot}}); err != nil && !strings.Contains(strings.ToUpper(err.Error()), "ALREADY") {
-			return nil, gerror.Wrap(err, "邀请 relay Bot 失败")
-		}
-		if _, err = client.API().ChannelsEditAdmin(ctx, &tg.ChannelsEditAdminRequest{Channel: inputChannel, UserID: bot, AdminRights: tg.ChatAdminRights{PostMessages: true, EditMessages: true, DeleteMessages: true, ChangeInfo: true, Other: true}, Rank: "relay"}); err != nil {
-			return nil, gerror.Wrap(err, "设置 relay Bot 权限失败")
-		}
-		permissionStatus = relayBotPermissionReady
-	}
-	_, err = dao.YoubanPublishRelayChannel.Ctx(ctx).Data(do.YoubanPublishRelayChannel{TenantId: in.TenantId, TgAccountId: in.TgAccountId, ChannelId: strconv.FormatInt(channel.ID, 10), TargetChatId: target, Title: channel.Title, Status: relayChannelStatusDisabled, HealthStatus: relayChannelHealthUnknown, BotPermissionStatus: permissionStatus}).Insert()
+}
+
+func (s *sSysPublish) validateRelayOwner(ctx context.Context, tenantID, accountID, botID int64) error {
+	_, ownerID, err := s.relayAdminScope(ctx, tenantID)
 	if err != nil {
-		return nil, gerror.Wrap(err, "保存 relay 频道失败")
+		return err
 	}
-	return &sysin.RelayChannelModel{TenantId: in.TenantId, TgAccountId: in.TgAccountId, TargetChatId: target, Title: channel.Title, Status: relayChannelStatusDisabled, BotPermissionStatus: permissionStatus}, nil
+	account, err := s.adminTgAccountById(ctx, accountID, tenantID)
+	if err != nil {
+		return err
+	}
+	if ownerID > 0 && account.AccountId != ownerID {
+		return gerror.New("无权操作该协议账号的中转频道")
+	}
+	if botID > 0 {
+		_, err = s.getBotById(ctx, botID, tenantID)
+	}
+	return err
+}
+
+func (s *sSysPublish) AdminRelayChannelCreate(ctx context.Context, in *sysin.RelayChannelCreateInp) (*sysin.RelayChannelModel, error) {
+	if err := in.Filter(ctx); err != nil {
+		return nil, err
+	}
+	if err := s.validateRelayOwner(ctx, in.TenantId, in.TgAccountId, in.BotId); err != nil {
+		return nil, err
+	}
+	id, err := dao.YoubanPublishRelayChannel.Ctx(ctx).Data(do.YoubanPublishRelayChannel{
+		TenantId: in.TenantId, TgAccountId: in.TgAccountId, BotId: in.BotId, Title: strings.TrimSpace(in.Title),
+		TargetChatId: "pending:" + guid.S(), Capacity: in.Capacity, Status: relayChannelStatusDisabled,
+		HealthStatus: relayChannelHealthUnknown, BotPermissionStatus: relayBotPermissionUnknown,
+		OperationKind: "create", OperationStatus: relayconsts.RelayStatusPending,
+	}).InsertAndGetId()
+	if err != nil {
+		return nil, gerror.Wrap(err, "保存中转频道创建任务失败")
+	}
+	if err = s.submitRelayControl(ctx, id); err != nil {
+		return nil, err
+	}
+	var row sysin.RelayChannelModel
+	err = dao.YoubanPublishRelayChannel.Ctx(ctx).WherePri(id).Scan(&row)
+	return &row, err
+}
+
+func (s *sSysPublish) AdminRelayChannelSave(ctx context.Context, in *sysin.RelayChannelSaveInp) error {
+	if err := in.Filter(ctx); err != nil {
+		return err
+	}
+	if err := s.validateRelayOwner(ctx, in.TenantId, in.TgAccountId, in.BotId); err != nil {
+		return err
+	}
+	// Access hashes come from the server-side cache; never trust JS numbers.
+	cached, err := s.tgChannelCacheByChannelId(ctx, in.TenantId, in.TgAccountId, strings.TrimPrefix(strings.TrimSpace(in.TargetChatId), "-100"))
+	if err != nil {
+		return err
+	}
+	channelID, err := strconv.ParseInt(cached.ChannelId, 10, 64)
+	if err != nil || channelID <= 0 || cached.AccessHash == "" {
+		return gerror.New("频道缓存无效，请先刷新协议账号频道")
+	}
+	data := do.YoubanPublishRelayChannel{TenantId: in.TenantId, TgAccountId: in.TgAccountId, BotId: in.BotId,
+		ChannelId: cached.ChannelId, TargetChatId: "-100" + cached.ChannelId, AccessHash: cached.AccessHash,
+		Title: firstNonEmpty(strings.TrimSpace(in.Title), cached.ChannelTitle), Capacity: in.Capacity, Status: relayChannelStatusDisabled,
+		HealthStatus: relayChannelHealthUnknown, BotPermissionStatus: relayBotPermissionUnknown, OperationKind: "check", OperationStatus: relayconsts.RelayStatusPending}
+	if in.Id > 0 {
+		var existing relayChannelRecord
+		if err = dao.YoubanPublishRelayChannel.Ctx(ctx).WherePri(in.Id).Scan(&existing); err != nil {
+			return err
+		}
+		if existing.Id == 0 || existing.TenantId != in.TenantId || existing.TgAccountId != in.TgAccountId || existing.TargetChatId != "-100"+cached.ChannelId {
+			return gerror.New("不能更改中转频道归属，请新增频道配置")
+		}
+		c := dao.YoubanPublishRelayChannel.Columns()
+		result, updateErr := dao.YoubanPublishRelayChannel.Ctx(ctx).WherePri(in.Id).WhereNotIn(c.OperationStatus, []string{relayconsts.RelayStatusPending, relayconsts.RelayStatusCreating, relayconsts.RelayStatusChecking}).Data(data).Update()
+		if updateErr != nil {
+			return updateErr
+		}
+		affected, updateErr := result.RowsAffected()
+		if updateErr != nil {
+			return updateErr
+		}
+		if affected == 0 {
+			return gerror.New("中转频道任务处理中，请稍后操作")
+		}
+	} else {
+		in.Id, err = dao.YoubanPublishRelayChannel.Ctx(ctx).Data(data).InsertAndGetId()
+		if err != nil {
+			return gerror.Wrap(err, "保存中转频道失败")
+		}
+	}
+	return s.submitRelayControl(ctx, in.Id)
+}
+
+func (s *sSysPublish) AdminRelayChannelStatus(ctx context.Context, in *sysin.RelayChannelStatusInp) error {
+	if err := in.Filter(ctx); err != nil {
+		return err
+	}
+	c := dao.YoubanPublishRelayChannel.Columns()
+	var row relayChannelRecord
+	if err := dao.YoubanPublishRelayChannel.Ctx(ctx).Where(c.Id, in.Id).Scan(&row); err != nil {
+		return err
+	}
+	if row.Id == 0 {
+		return gerror.New("中转频道不存在")
+	}
+	if err := s.validateRelayOwner(ctx, row.TenantId, row.TgAccountId, 0); err != nil {
+		return err
+	}
+	if row.OperationStatus == relayconsts.RelayStatusPending || row.OperationStatus == relayconsts.RelayStatusCreating || row.OperationStatus == relayconsts.RelayStatusChecking {
+		return gerror.New("中转频道任务处理中，请稍后操作")
+	}
+	if in.Status == relayChannelStatusDisabled {
+		result, err := dao.YoubanPublishRelayChannel.Ctx(ctx).Where(c.Id, in.Id).WhereNotIn(c.OperationStatus, []string{relayconsts.RelayStatusPending, relayconsts.RelayStatusCreating, relayconsts.RelayStatusChecking}).Data(do.YoubanPublishRelayChannel{Status: in.Status}).Update()
+		if err != nil {
+			return err
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if affected == 0 {
+			return gerror.New("中转频道任务处理中，请稍后操作")
+		}
+		return nil
+	}
+	if row.BotId <= 0 {
+		return gerror.New("请先编辑中转频道并选择推送Bot")
+	}
+	if row.ChannelId == "" {
+		return gerror.New("频道创建尚未确认，请先检查创建任务")
+	}
+	result, err := dao.YoubanPublishRelayChannel.Ctx(ctx).Where(c.Id, in.Id).WhereNotIn(c.OperationStatus, []string{relayconsts.RelayStatusPending, relayconsts.RelayStatusCreating, relayconsts.RelayStatusChecking}).Data(do.YoubanPublishRelayChannel{OperationKind: "enable", OperationStatus: relayconsts.RelayStatusPending}).Update()
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return gerror.New("中转频道任务处理中，请稍后操作")
+	}
+	return s.submitRelayControl(ctx, in.Id)
 }
 
 func resolveRelayBot(ctx context.Context, api *tg.Client, username string) (*tg.InputUser, error) {
-	username = strings.TrimPrefix(strings.TrimSpace(username), "@")
-	result, err := api.ContactsResolveUsername(ctx, &tg.ContactsResolveUsernameRequest{Username: username})
+	result, err := api.ContactsResolveUsername(ctx, &tg.ContactsResolveUsernameRequest{Username: strings.TrimPrefix(strings.TrimSpace(username), "@")})
 	if err != nil {
-		return nil, gerror.Wrap(err, "解析 relay Bot 失败")
+		return nil, gerror.Wrap(err, "解析中转Bot失败")
 	}
-	for _, item := range result.GetUsers() {
-		if user, ok := item.(*tg.User); ok && user.Bot {
-			hash, ok := user.GetAccessHash()
-			if ok {
-				return &tg.InputUser{UserID: user.ID, AccessHash: hash}, nil
-			}
-		}
-	}
-	return nil, gerror.New("relay Bot 不存在或不是 Bot")
-}
-func (s *sSysPublish) AdminRelayChannelSave(ctx context.Context, in *sysin.RelayChannelSaveInp) error {
-	status := strings.TrimSpace(in.Status)
-	if status == "" {
-		status = relayChannelStatusDisabled
-	}
-	if status != relayChannelStatusEnabled && status != relayChannelStatusDisabled {
-		return gerror.New("relay 频道状态不合法")
-	}
-	if status == relayChannelStatusEnabled {
-		return gerror.New("启用 relay 频道必须通过状态接口完成 Bot 权限校验")
-	}
-	target := strings.TrimSpace(in.TargetChatId)
-	channelIDText := strings.TrimPrefix(target, "-100")
-	channelID, err := strconv.ParseInt(channelIDText, 10, 64)
-	if err != nil || channelID <= 0 || in.AccessHash == 0 {
-		return gerror.New("已有频道缺少有效的频道标识或 access hash，请刷新频道缓存后重试")
-	}
-	if strings.TrimSpace(in.BotUsername) == "" {
-		return gerror.New("请选择推送 Bot")
-	}
-	client, err := s.TelegramClient(ctx, in.TgAccountId)
-	if err != nil {
-		return err
-	}
-	inputChannel := &tg.InputChannel{ChannelID: channelID, AccessHash: in.AccessHash}
-	if _, err = client.API().ChannelsGetChannels(ctx, []tg.InputChannelClass{inputChannel}); err != nil {
-		return gerror.Wrap(err, "协议账号无法访问该频道，请确认频道属于该账号且账号仍在线")
-	}
-	bot, err := resolveRelayBot(ctx, client.API(), in.BotUsername)
-	if err != nil {
-		return err
-	}
-	if _, err = client.API().ChannelsInviteToChannel(ctx, &tg.ChannelsInviteToChannelRequest{Channel: inputChannel, Users: []tg.InputUserClass{bot}}); err != nil && !strings.Contains(strings.ToUpper(err.Error()), "ALREADY") {
-		return gerror.Wrap(err, "邀请 relay Bot 失败")
-	}
-	if _, err = client.API().ChannelsEditAdmin(ctx, &tg.ChannelsEditAdminRequest{Channel: inputChannel, UserID: bot, AdminRights: tg.ChatAdminRights{PostMessages: true, EditMessages: true, DeleteMessages: true, ChangeInfo: true, Other: true}, Rank: "relay"}); err != nil {
-		return gerror.Wrap(err, "设置 relay Bot 权限失败")
-	}
-	data := do.YoubanPublishRelayChannel{TenantId: in.TenantId, TgAccountId: in.TgAccountId, ChannelId: strconv.FormatInt(channelID, 10), TargetChatId: target, Title: in.Title, Status: status, HealthStatus: relayChannelHealthUnknown, BotPermissionStatus: relayBotPermissionReady}
-	m := dao.YoubanPublishRelayChannel.Ctx(ctx)
-	if in.Id > 0 {
-		_, err := m.WherePri(in.Id).Data(data).Update()
-		return err
-	}
-	_, err = m.Data(data).Insert()
-	return err
-}
-func (s *sSysPublish) AdminRelayChannelStatus(ctx context.Context, in *sysin.RelayChannelStatusInp) error {
-	if in.Status != relayChannelStatusEnabled && in.Status != relayChannelStatusDisabled {
-		return gerror.New("relay 频道状态不合法")
-	}
-	data := do.YoubanPublishRelayChannel{Status: in.Status}
-	if in.Status == relayChannelStatusEnabled {
-		var current relayChannelRecord
-		if err := dao.YoubanPublishRelayChannel.Ctx(ctx).WherePri(in.Id).Scan(&current); err != nil {
-			return gerror.Wrap(err, "读取 relay 频道权限失败")
-		}
-		if current.Id == 0 {
-			return gerror.New("relay 频道不存在")
-		}
-		if current.BotPermissionStatus != relayBotPermissionReady {
-			return gerror.New("relay Bot 管理员权限未就绪，不能启用频道")
-		}
-		data.HealthStatus = relayChannelHealthReady
-	}
-	_, err := dao.YoubanPublishRelayChannel.Ctx(ctx).WherePri(in.Id).Data(data).Update()
-	return err
+	return resolvedBotInputUser(result)
 }

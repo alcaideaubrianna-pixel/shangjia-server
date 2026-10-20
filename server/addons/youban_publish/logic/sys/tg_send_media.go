@@ -41,7 +41,7 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 		observeTelegramMediaPurposeViolation(ctx, "send")
 		return nil, err
 	}
-	if purpose != "verify" && len(media) > 1 && media[0] != nil && media[0].TenantId > 0 && !telegramMediaSetHasCopyRef(media) && !telegramMediaSetRequiresUpload(media) && !telegramMediaSetCanUseRemoteURL(media) {
+	if ctx.Value(relayPackageContextKey{}) == nil && purpose != "verify" && len(media) > 1 && media[0] != nil && media[0].TenantId > 0 && !telegramMediaSetHasCopyRef(media) && !telegramMediaSetRequiresUpload(media) && !telegramMediaSetCanUseRemoteURL(media) {
 		relayAvailable, relayAvailabilityErr := relayAvailableForTenant(ctx, media[0].TenantId)
 		if relayAvailabilityErr != nil {
 			g.Log().Warningf(ctx, "检查 relay 频道失败，回退原有上传链路 tenant:%d err:%+v", media[0].TenantId, relayAvailabilityErr)
@@ -105,6 +105,19 @@ relayGroupDone:
 	allMessages := make([]*telegramSentMessage, 0, len(media))
 	chunks := splitTelegramMediaItems(media, telegramMediaGroupMaxItems)
 	for chunkIndex, chunk := range chunks {
+		if ctx.Value(relayPackageContextKey{}) != nil && len(chunk) == 1 {
+			chunkCaption := ""
+			if chunkIndex == 0 || purpose == "verify" {
+				chunkCaption = caption
+			}
+			sent, err := s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, chunkCaption, chunk[0], replyMarkup...)
+			allMessages = append(allMessages, sent...)
+			if err != nil {
+				return allMessages, err
+			}
+			continue
+		}
+
 		chunkCaption := ""
 		if chunkIndex == 0 || purpose == "verify" {
 			chunkCaption = caption
@@ -218,9 +231,15 @@ func validateTelegramMediaPurpose(purpose string, media []*telegramMediaItem) er
 }
 
 func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bot, chatId string, purpose string, caption string, media *telegramMediaItem, replyMarkup ...models.ReplyMarkup) (resultMessages []*telegramSentMessage, resultErr error) {
+	if media != nil && media.DeliveryMarker != "" {
+		caption = relayCaptionWithMarkers(caption, media.DeliveryMarker)
+		cloned := *media
+		cloned.DeliveryMarker = ""
+		media = &cloned
+	}
 	stage := beginTelegramPublishStage(ctx, "media.send_single", telegramPublishMediaLogFields(media))
 	defer stage.Finish(&resultErr)
-	if media != nil && strings.TrimSpace(media.TgFileId) == "" && media.TenantId > 0 && !telegramMediaCanUseRemoteURL(media) {
+	if ctx.Value(relayPackageContextKey{}) == nil && media != nil && strings.TrimSpace(media.TgFileId) == "" && media.TenantId > 0 && !telegramMediaCanUseRemoteURL(media) {
 		if relay, err := relayReadyMedia(ctx, media.TenantId, media.Id, purpose, "original"); err == nil && relay != nil && relay.MessageId > 0 && strings.TrimSpace(relay.RelayChatId) != "" {
 			ref := telegramCopyMediaRef{ChatId: relay.RelayChatId, MessageId: int(relay.MessageId)}
 			cloned := *media
@@ -520,7 +539,7 @@ func (s *sSysPublish) telegramInputMediaGroup(ctx context.Context, media []*tele
 			if index == 0 {
 				itemCaption = caption
 			}
-			input, closers, err := s.telegramInputMediaItem(prepareCtx, item, itemCaption)
+			input, closers, err := s.telegramInputMediaItem(prepareCtx, item, relayCaptionWithMarkers(itemCaption, item.DeliveryMarker))
 			if err != nil {
 				return err
 			}

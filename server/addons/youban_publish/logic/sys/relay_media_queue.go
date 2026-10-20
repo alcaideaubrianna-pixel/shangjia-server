@@ -12,8 +12,10 @@ func (s *sSysPublish) prepareRelayMedia(ctx context.Context, media *telegramMedi
 	if media == nil {
 		return nil, gerror.New("relay 媒体为空")
 	}
-	if ready, err := relayReadyMedia(ctx, media.TenantId, media.Id, purpose, "original"); err != nil || ready != nil {
+	if ready, err := relayReadyMedia(ctx, media.TenantId, media.Id, purpose, "original"); err != nil {
 		return nil, err
+	} else if ready != nil {
+		return []*telegramSentMessage{{MessageId: ready.MessageId, TgFileId: ready.RelayChatId}}, nil
 	}
 	if err := s.enqueueRelayMedia(ctx, media, purpose); err != nil {
 		return nil, err

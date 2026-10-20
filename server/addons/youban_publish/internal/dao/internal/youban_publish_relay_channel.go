@@ -37,6 +37,12 @@ type YoubanPublishRelayChannelColumns struct {
 	CreatedAt           string //
 	UpdatedAt           string //
 	DeletedAt           string //
+	AccessHash          string //
+	BotId               string //
+	Capacity            string //
+	OperationKind       string //
+	OperationStatus     string //
+	TaskId              string //
 }
 
 // youbanPublishRelayChannelColumns holds the columns for the table hg_youban_publish_relay_channel.
@@ -57,6 +63,12 @@ var youbanPublishRelayChannelColumns = YoubanPublishRelayChannelColumns{
 	CreatedAt:           "created_at",
 	UpdatedAt:           "updated_at",
 	DeletedAt:           "deleted_at",
+	AccessHash:          "access_hash",
+	BotId:               "bot_id",
+	Capacity:            "capacity",
+	OperationKind:       "operation_kind",
+	OperationStatus:     "operation_status",
+	TaskId:              "task_id",
 }
 
 // NewYoubanPublishRelayChannelDao creates and returns a new DAO object for table data access.

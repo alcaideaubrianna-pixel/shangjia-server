@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	relayconsts "hotgo/addons/youban_publish/consts"
 	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -41,7 +42,7 @@ func telegramDeliveryStepsForPhase(phase string) []telegramDeliveryStepProjectio
 	switch strings.TrimSpace(phase) {
 	case telegramSendPhaseCleanupProcessing:
 		statuses[telegramDeliveryStepCleanup] = telegramDeliveryStepRunning
-	case telegramSendPhaseCleanupConfirmed:
+	case relayconsts.RelaySendPhaseReady, relayconsts.RelaySendPhaseSending, relayconsts.RelaySendPhaseConfirmed, telegramSendPhaseCleanupConfirmed:
 		statuses[telegramDeliveryStepCleanup] = telegramDeliveryStepSucceeded
 	case telegramSendPhaseDisplaySending:
 		statuses[telegramDeliveryStepCleanup] = telegramDeliveryStepSucceeded
@@ -131,6 +132,15 @@ func telegramDeliveryStepForAttempt(attempt telegramDeliveryAttempt) (string, st
 }
 
 func (s *sSysPublish) projectTelegramDeliveryAttempt(ctx context.Context, attempt telegramDeliveryAttempt, message string) {
+	if attempt.Phase == "package" {
+		// Both projections belong to the same RPC and only confirm together.
+		for _, phase := range []string{telegramDeliveryStepDisplay, telegramDeliveryStepVerify} {
+			part := attempt
+			part.Phase = phase
+			s.projectTelegramDeliveryAttempt(ctx, part, message)
+		}
+		return
+	}
 	stepKey, status := telegramDeliveryStepForAttempt(attempt)
 	if attempt.Id <= 0 || attempt.JobId <= 0 || stepKey == "" || status == "" {
 		return

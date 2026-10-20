@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	relayconsts "hotgo/addons/youban_publish/consts"
 	"strconv"
 	"strings"
 	"time"
@@ -30,7 +31,7 @@ const (
 
 func telegramSendPhaseHasCleanup(phase string) bool {
 	switch strings.TrimSpace(phase) {
-	case telegramSendPhaseCleanupConfirmed,
+	case relayconsts.RelaySendPhaseReady, relayconsts.RelaySendPhaseSending, relayconsts.RelaySendPhaseConfirmed, telegramSendPhaseCleanupConfirmed,
 		telegramSendPhaseDisplaySending, telegramSendPhaseDisplayConfirmed,
 		telegramSendPhaseVerifySending, telegramSendPhaseVerifyConfirmed,
 		telegramSendPhaseCompletedNoVerify:
@@ -252,6 +253,9 @@ func (s *sSysPublish) unknownTelegramJobAttempt(ctx context.Context, job telegra
 	if telegramSendPhaseHasDisplay(job.SendPhase) {
 		phase = "verify"
 	}
+	if job.SendPhase == relayconsts.RelaySendPhaseSending || job.SendPhase == relayconsts.RelaySendPhaseConfirmed {
+		phase = "package"
+	}
 	attempt, err := s.activeTelegramDeliveryAttempt(ctx, job.Id, phase)
 	if err != nil {
 		return attempt, 0, err
@@ -276,6 +280,9 @@ func (s *sSysPublish) latestUnknownTelegramJobAttempt(ctx context.Context, job t
 	phase := "display"
 	if telegramSendPhaseHasDisplay(job.SendPhase) {
 		phase = "verify"
+	}
+	if job.SendPhase == relayconsts.RelaySendPhaseSending || job.SendPhase == relayconsts.RelaySendPhaseConfirmed {
+		phase = "package"
 	}
 	var attempt telegramDeliveryAttempt
 	err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
@@ -307,6 +314,9 @@ func (s *sSysPublish) recoverUnconfirmedUnknownTelegramJob(ctx context.Context, 
 
 	case telegramUnknownAttemptRetry:
 		phase := telegramSendPhaseCleanupConfirmed
+		if attempt.Phase == "package" || job.SendPhase == relayconsts.RelaySendPhaseSending {
+			phase = relayconsts.RelaySendPhaseReady
+		}
 		if attempt.Phase == "verify" {
 			phase = telegramSendPhaseDisplayConfirmed
 		}
@@ -433,6 +443,9 @@ func (s *sSysPublish) telegramDisplayDeliveryConfirmed(ctx context.Context, jobI
 // display projection is restored, verification resumes through the normal
 // ordered queue so an old uncertain job cannot be sent twice.
 func (s *sSysPublish) recoverConfirmedUnknownTelegramJob(ctx context.Context, job telegramJobRecord) (bool, error) {
+	if job.SendPhase == relayconsts.RelaySendPhaseSending || job.SendPhase == relayconsts.RelaySendPhaseConfirmed {
+		return s.restoreUnknownRelayPackage(ctx, job)
+	}
 	displayMedia, err := s.telegramJobMedia(ctx, job, "display")
 	if err != nil {
 		return false, err

@@ -3,6 +3,7 @@ package sys
 import "github.com/gogf/gf/v2/os/gtime"
 
 type telegramMediaItem struct {
+	DeliveryMarker          string `json:"deliveryMarker,omitempty"`
 	Id                      int64  `json:"id"`
 	AttachmentId            int64  `json:"attachmentId"`
 	MediaType               string `json:"mediaType"`
@@ -29,13 +30,14 @@ type telegramMediaItem struct {
 	AccountId               int64  `json:"-"`
 	JobId                   int64  `json:"-"`
 	ForceUpload             bool   `json:"-"`
-	CollectedFileIdEligible bool   `json:"-"`
+	CollectedFileIdEligible bool   `json:"collectedFileIdEligible,omitempty"`
 	ProtectedHashKey        string `json:"-"`
 	ProtectedPHash          uint64 `json:"-"`
 	ProtectedDHash          uint64 `json:"-"`
 }
 
 type telegramSentMessage struct {
+	RelaySourceId    int64
 	MessageId        int64
 	MediaGroupId     string
 	Purpose          string

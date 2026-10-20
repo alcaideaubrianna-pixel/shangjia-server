@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	relayconsts "hotgo/addons/youban_publish/consts"
 	"strings"
 	"time"
 
@@ -952,7 +953,7 @@ func (s *sSysPublish) requeueStaleTelegramSendingJob(ctx context.Context, job te
 		decision := telegramJobFailureNextState(gerror.New(latestAttempt.ErrorMessage), job.RetryCount)
 		status = decision.Status
 		message = decision.Message
-	} else if job.SendPhase == telegramSendPhaseDisplaySending || job.SendPhase == telegramSendPhaseVerifySending {
+	} else if job.SendPhase == telegramSendPhaseDisplaySending || job.SendPhase == telegramSendPhaseVerifySending || job.SendPhase == relayconsts.RelaySendPhaseSending {
 		status = telegramJobStatusConfirming
 		message = "服务中断时TG发送结果不确定，已进入频道消息对账"
 		reconcileCount = 0

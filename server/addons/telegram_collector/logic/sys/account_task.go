@@ -148,6 +148,7 @@ func validateAccountTaskSubmit(in *sysin.AccountTaskSubmit) error {
 	case sysin.AccountTaskTypeMessageReconcile:
 	case sysin.AccountTaskTypeMessageMediaFallback:
 	case sysin.AccountTaskTypeMessageDeleteFallback:
+	case sysin.AccountTaskTypeRelayControl, sysin.AccountTaskTypeRelayPrepare:
 	case sysin.AccountTaskTypeChannelBotAttach:
 	case sysin.AccountTaskTypeManagedBotUsernameCheck:
 	case sysin.AccountTaskTypeManagedBotCreate:

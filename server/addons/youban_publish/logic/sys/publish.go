@@ -88,6 +88,8 @@ func init() {
 	collectorservice.RegisterAccountTaskPolicy(collectorin.AccountTaskTypeMessageReconcile, collectorservice.AccountTaskPolicy{PendingTTL: 15 * time.Minute})
 	collectorservice.RegisterAccountTaskPolicy(collectorin.AccountTaskTypeMessageMediaFallback, collectorservice.AccountTaskPolicy{PendingTTL: 45 * time.Minute})
 	collectorservice.RegisterAccountTaskHandler(collectorin.AccountTaskTypeMessageDeleteFallback, accountTaskHandler)
+	collectorservice.RegisterAccountTaskHandler(collectorin.AccountTaskTypeRelayControl, accountTaskHandler)
+	collectorservice.RegisterAccountTaskHandler(collectorin.AccountTaskTypeRelayPrepare, accountTaskHandler)
 	collectorservice.RegisterAccountTaskHandler(collectorin.AccountTaskTypeChannelBotAttach, accountTaskHandler)
 	collectorservice.RegisterAccountTaskHandler(collectorin.AccountTaskTypeManagedBotUsernameCheck, accountTaskHandler)
 	collectorservice.RegisterAccountTaskHandler(collectorin.AccountTaskTypeManagedBotCreate, accountTaskHandler)

@@ -77,6 +77,14 @@ func (s *sSysPublish) uploadRelayMediaSetNow(ctx context.Context, media []*teleg
 	defer markRelayChannelUse(ctx, channel.Id, -len(media))
 	items := make([]*telegramMediaItem, 0, len(media))
 	tokens := make([]string, 0, len(media))
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		for i, token := range tokens {
+			// Successful completion has already cleared the token; only unfinished claims match.
+			_ = failRelayMedia(cleanupCtx, media[i].TenantId, media[i].Id, purpose, "original", token, gerror.New("中转媒体组准备结束，释放未完成租约"))
+		}
+	}()
 	for _, source := range media {
 		token, claimErr := claimRelayMedia(ctx, source.TenantId, source.Id, purpose, "original", 10*time.Minute)
 		if claimErr != nil || token == "" {

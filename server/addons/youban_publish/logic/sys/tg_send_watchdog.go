@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"fmt"
+	relayconsts "hotgo/addons/youban_publish/consts"
 	"sync"
 	"time"
 
@@ -57,6 +58,10 @@ func (s *sSysPublish) expireTelegramSendTx(ctx context.Context, tx gdb.TX, id in
 	}
 	// A complete, authoritative response needs only local projection repair.
 	if old.SendPhase == telegramSendPhaseVerifyConfirmed || old.SendPhase == telegramSendPhaseCompletedNoVerify {
+		return
+	}
+	if old.SendPhase == relayconsts.RelaySendPhaseSending {
+		_, err = s.transitionTelegramJobTx(ctx, tx, telegramJobTransition{JobId: old.Id, From: []string{old.Status}, To: telegramJobStatusFailed, ErrorMessage: "整包复制超过核实时限，已停止自动补发，请核对目标频道"})
 		return
 	}
 	changed, transitionErr := s.transitionTelegramJobTx(ctx, tx, telegramJobTransition{

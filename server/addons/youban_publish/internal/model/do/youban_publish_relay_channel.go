@@ -28,4 +28,10 @@ type YoubanPublishRelayChannel struct {
 	CreatedAt           *gtime.Time //
 	UpdatedAt           *gtime.Time //
 	DeletedAt           *gtime.Time //
+	AccessHash          any         //
+	BotId               any         //
+	Capacity            any         //
+	OperationKind       any         //
+	OperationStatus     any         //
+	TaskId              any         //
 }

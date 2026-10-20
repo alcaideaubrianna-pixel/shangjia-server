@@ -167,6 +167,10 @@ func (h *publishCollectorAccountTaskHandler) HandleAccountTask(ctx context.Conte
 		return nil, gerror.New("Telegram账号任务处理参数无效")
 	}
 	switch task.TaskType {
+	case collectorin.AccountTaskTypeRelayControl:
+		return nil, h.publish.handleRelayControlTask(ctx, client, task)
+	case collectorin.AccountTaskTypeRelayPrepare:
+		return nil, h.publish.handleRelayPrepareTask(ctx, client, task)
 	case collectorin.AccountTaskTypeChannelBotAttach:
 		const prefix = "channel-bot-attach:"
 		encoded := strings.TrimPrefix(task.TaskKey, prefix)
@@ -571,8 +575,11 @@ func (s *sSysPublish) handleMessageReconcileAccountTask(ctx context.Context, cli
 		return err
 	}
 	attempt, err := s.telegramAttemptById(ctx, attemptID)
-	if err != nil || attempt.Id <= 0 || attempt.JobId != job.Id || (attempt.Phase != "display" && attempt.Phase != "verify") {
+	if err != nil || attempt.Id <= 0 || attempt.JobId != job.Id || (attempt.Phase != "display" && attempt.Phase != "verify" && attempt.Phase != "package") {
 		return gerror.New("Telegram消息对账Attempt不存在或不匹配")
+	}
+	if attempt.Phase == "package" {
+		return s.reconcileRelayPackageWithClient(ctx, client, task, job, attempt)
 	}
 	if job.Status == telegramJobStatusSending &&
 		job.SendPhase == telegramSendPhaseVerifyConfirmed &&

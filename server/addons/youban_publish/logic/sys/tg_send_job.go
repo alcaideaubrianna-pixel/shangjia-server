@@ -217,6 +217,20 @@ func (s *sSysPublish) sendTelegramJobLockedByChannel(ctx context.Context, jobId 
 		s.appendTelegramJobLog(ctx, job, "publish", "skipped", "上架任务已下架或不可发布，跳过TG推送")
 		return s.supersedeTelegramJobAndCompleteOperation(ctx, job)
 	}
+	if relayPackageEnabled(ctx, job) {
+		relayErr := s.sendRelayPackageJob(ctx, job)
+		if errors.Is(relayErr, errTelegramMediaFallbackQueued) {
+			return nil
+		}
+		if relayErr != nil {
+			var current telegramJobRecord
+			if loadErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Master().Where("id", job.Id).Scan(&current); loadErr == nil && current.Id > 0 {
+				job = current
+			}
+			return s.handleTelegramJobError(ctx, job, relayErr)
+		}
+		return s.completeTelegramJob(ctx, job)
+	}
 	if !telegramSendPhaseHasCleanup(job.SendPhase) {
 		if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseCleanupProcessing); err != nil {
 			return s.handleTelegramJobError(ctx, job, err)
@@ -782,7 +796,7 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 		return s.supersedeTelegramJobAndCompleteOperation(ctx, job)
 	}
 	var tooMany *tgbot.TooManyRequestsError
-	if errors.As(err, &tooMany) {
+	if errors.As(err, &tooMany) && !relayPackageEnabled(ctx, job) {
 		if switched, switchErr := s.switchTelegramJobToNextBot(ctx, job, err); switchErr != nil {
 			return switchErr
 		} else if switched {
