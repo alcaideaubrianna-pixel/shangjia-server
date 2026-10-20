@@ -157,6 +157,18 @@ func (s *sSysBot) managerSync(ctx context.Context, st *entity.YoubanBotManagerSt
 			if _, err := managerNewTask(ctx, st, batch, "sync", 0, ch.Id, "{}"); err != nil {
 				return err
 			}
+			if c.AccountError != "" || c.AccessHash == "" || c.AccessHash == "0" {
+				reason := c.AccountError
+				if reason == "" {
+					reason = "频道缓存缺少访问凭据，请先刷新协议号频道缓存"
+				}
+				if _, err := dao.YoubanBotManagerTask.Ctx(ctx).Where(tc.BatchKey, batch).Where(tc.ChannelId, ch.Id).Data(do.YoubanBotManagerTask{Status: "failed", ErrorMessage: reason}).Update(); err != nil {
+					return err
+				}
+				if _, err := dao.YoubanBotManagedChannel.Ctx(ctx).WherePri(ch.Id).Data(do.YoubanBotManagedChannel{SyncStatus: "failed", ErrorMessage: reason}).Update(); err != nil {
+					return err
+				}
+			}
 		}
 		if len(channels) == 0 {
 			_, err = dao.YoubanBotManagerState.Ctx(ctx).WherePri(st.Id).Data(do.YoubanBotManagerState{SyncedAt: gtime.Now()}).Update()
@@ -169,17 +181,24 @@ func (s *sSysBot) managerSyncFeedback(ctx context.Context, st *entity.YoubanBotM
 	if err := s.managerSync(ctx, st); err != nil {
 		return err
 	}
-	c := dao.YoubanBotManagerTask.Columns()
-	n, err := dao.YoubanBotManagerTask.Ctx(ctx).Where(c.TenantId, st.TenantId).Where(c.AccountId, st.AccountId).
-		Where(c.Action, "sync").WhereIn(c.Status, []string{"pending", "submitted"}).Count()
+	cc := dao.YoubanBotManagedChannel.Columns()
+	available, err := dao.YoubanBotManagedChannel.Ctx(ctx).Where(cc.TenantId, st.TenantId).Where(cc.AccountId, st.AccountId).WhereNot(cc.SyncStatus, "unavailable").Count()
 	if err != nil {
 		return err
 	}
-	text := "没有可同步的上架频道，请先配置上架频道并绑定可访问频道的 Telegram 账号。"
-	if n > 0 {
-		text = fmt.Sprintf("正在同步 %d 个上架频道的管理员和机器人。完成后会通知并展示机器人列表；重复点击不会重复创建任务。", n)
+	if available == 0 {
+		return s.managerSend(ctx, st.EntryBotId, st.TelegramUserId, msgID, "没有可同步的上架频道，请先配置上架频道并绑定可访问频道的 Telegram 账号。", managerSyncButtons())
 	}
-	return s.managerSend(ctx, st.EntryBotId, st.TelegramUserId, msgID, text, managerSyncButtons())
+	c := dao.YoubanBotManagerTask.Columns()
+	var root *entity.YoubanBotManagerTask
+	err = dao.YoubanBotManagerTask.Ctx(ctx).Where(c.TenantId, st.TenantId).Where(c.AccountId, st.AccountId).Where(c.Action, "sync").OrderDesc(c.Id).Limit(1).Scan(&root)
+	if err != nil {
+		return err
+	}
+	if root == nil {
+		return s.managerSend(ctx, st.EntryBotId, st.TelegramUserId, msgID, "没有可同步的上架频道，请先配置上架频道并绑定可访问频道的 Telegram 账号。", managerSyncButtons())
+	}
+	return s.managerStartProgress(ctx, st, root)
 }
 
 func managerNewTask(ctx context.Context, st *entity.YoubanBotManagerState, batch, action string, botID, channelID int64, rights string) (int64, error) {

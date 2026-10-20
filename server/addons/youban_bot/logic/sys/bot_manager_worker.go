@@ -97,6 +97,15 @@ func (h *botManagerAccountHandler) HandleAccountTask(ctx context.Context, client
 	valid := false
 	for _, c := range catalog {
 		if c.Id == ch.PublishChannelId && c.TgAccountId == task.AccountID {
+			if c.AccountError != "" {
+				if row.Action == "sync" {
+					_, saveErr := dao.YoubanBotManagerTask.Ctx(ctx).WherePri(row.Id).WhereIn(dao.YoubanBotManagerTask.Columns().Status, []string{"pending", "submitted"}).Data(do.YoubanBotManagerTask{Status: "failed", ErrorMessage: c.AccountError}).Update()
+					if saveErr != nil {
+						return nil, saveErr
+					}
+				}
+				return nil, gerror.New(c.AccountError)
+			}
 			valid = true
 			break
 		}
@@ -110,7 +119,7 @@ func (h *botManagerAccountHandler) HandleAccountTask(ctx context.Context, client
 	}
 	started := time.Now()
 	if row.Action == "sync" {
-		err = h.bot.managerSyncChannel(ctx, client.API(), st, ch, peer)
+		err = h.bot.managerSyncChannel(ctx, client.API(), st, ch, peer, row.Id)
 	} else {
 		err = h.bot.managerMutateChannel(ctx, client.API(), st, row, ch, peer)
 	}
@@ -119,14 +128,22 @@ func (h *botManagerAccountHandler) HandleAccountTask(ctx context.Context, client
 		fields["error"] = sensitive.Diagnostic(err.Error())
 		g.Log().Warning(ctx, "机器人管理任务执行失败", fields)
 		if row.Action == "sync" {
-			_, _ = dao.YoubanBotManagedChannel.Ctx(ctx).WherePri(ch.Id).Data(do.YoubanBotManagedChannel{SyncStatus: "failed", ErrorMessage: sensitive.Diagnostic(err.Error())}).Update()
+			reason, permanent := managerPermanentSyncError(err)
+			if _, saveErr := dao.YoubanBotManagedChannel.Ctx(ctx).WherePri(ch.Id).Data(do.YoubanBotManagedChannel{SyncStatus: "failed", ErrorMessage: reason}).Update(); saveErr != nil {
+				return nil, saveErr
+			}
+			if permanent {
+				if _, saveErr := dao.YoubanBotManagerTask.Ctx(ctx).WherePri(row.Id).WhereIn(dao.YoubanBotManagerTask.Columns().Status, []string{"pending", "submitted"}).Data(do.YoubanBotManagerTask{Status: "failed", ErrorMessage: reason}).Update(); saveErr != nil {
+					return nil, saveErr
+				}
+			}
 		}
 		if delay, ok := tgerr.AsFloodWait(err); ok {
 			return nil, managerFloodWait{err, delay}
 		}
 		return nil, err
 	}
-	_, err = dao.YoubanBotManagerTask.Ctx(ctx).WherePri(row.Id).Data(do.YoubanBotManagerTask{Status: "success", ErrorMessage: ""}).Update()
+	_, err = dao.YoubanBotManagerTask.Ctx(ctx).WherePri(row.Id).WhereIn(dao.YoubanBotManagerTask.Columns().Status, []string{"pending", "submitted"}).Data(do.YoubanBotManagerTask{Status: "success", ErrorMessage: ""}).Update()
 	g.Log().Info(ctx, "机器人管理任务完成", fields)
 	return &ci.AccountMediaDownloadResult{}, err
 }
@@ -143,7 +160,7 @@ func managerInputChannel(ch *entity.YoubanBotManagedChannel) (*tg.InputChannel, 
 	return &tg.InputChannel{ChannelID: id, AccessHash: hash}, nil
 }
 
-func (s *sSysBot) managerSyncChannel(ctx context.Context, client *tg.Client, st *entity.YoubanBotManagerState, ch *entity.YoubanBotManagedChannel, peer *tg.InputChannel) error {
+func (s *sSysBot) managerSyncChannel(ctx context.Context, client *tg.Client, st *entity.YoubanBotManagerState, ch *entity.YoubanBotManagedChannel, peer *tg.InputChannel, taskIDs ...int64) error {
 	full, err := client.ChannelsGetFullChannel(ctx, peer)
 	if err != nil {
 		return err
@@ -228,6 +245,15 @@ func (s *sSysBot) managerSyncChannel(ctx context.Context, client *tg.Client, st 
 		}
 	}
 	return dao.YoubanBotManagedMember.Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if len(taskIDs) > 0 {
+			var active *entity.YoubanBotManagerTask
+			if err := dao.YoubanBotManagerTask.Ctx(ctx).WherePri(taskIDs[0]).LockUpdate().Scan(&active); err != nil {
+				return err
+			}
+			if active == nil || (active.Status != "pending" && active.Status != "submitted") {
+				return gerror.New("同步任务已结束，忽略迟到的频道数据")
+			}
+		}
 		bc := dao.YoubanBotManaged.Columns()
 		mc := dao.YoubanBotManagedMember.Columns()
 		seen := []int64{}
@@ -475,8 +501,12 @@ func (s *sSysBot) managerTick(ctx context.Context) error {
 		if _, err := dao.YoubanBotManagerTask.Ctx(ctx).WherePri(row.Id).Where(tc.Status, row.Status).Data(do.YoubanBotManagerTask{Status: row.Status}).Update(); err != nil {
 			return err
 		}
-		if row.AccountTaskId == 0 && row.CreatedAt != nil && time.Since(row.CreatedAt.Time) > 20*time.Minute {
-			if _, err := dao.YoubanBotManagerTask.Ctx(ctx).WherePri(row.Id).Where(tc.Status, "pending").Data(do.YoubanBotManagerTask{Status: "failed", ErrorMessage: "管理任务等待超过20分钟，请检查账户登录后重试"}).Update(); err != nil {
+		waitLimit := 20 * time.Minute
+		if row.Action == "sync" {
+			waitLimit = 2 * time.Minute
+		}
+		if row.AccountTaskId == 0 && row.CreatedAt != nil && time.Since(row.CreatedAt.Time) > waitLimit {
+			if _, err := dao.YoubanBotManagerTask.Ctx(ctx).WherePri(row.Id).Where(tc.Status, "pending").Data(do.YoubanBotManagerTask{Status: "failed", ErrorMessage: fmt.Sprintf("管理任务等待超过%d分钟，请检查账户登录后重试", int(waitLimit.Minutes()))}).Update(); err != nil {
 				return err
 			}
 			continue
@@ -519,6 +549,13 @@ func (s *sSysBot) managerTick(ctx context.Context) error {
 					reason = sensitive.Diagnostic(task.ErrorMessage)
 				}
 				if _, err := dao.YoubanBotManagerTask.Ctx(ctx).WherePri(row.Id).Where(tc.Status, "submitted").Data(do.YoubanBotManagerTask{Status: "failed", ErrorMessage: reason}).Update(); err != nil {
+					return err
+				}
+			}
+			if row.Action == "sync" && task != nil && row.CreatedAt != nil && time.Since(row.CreatedAt.Time) > 2*time.Minute {
+				// This is a read-only sync: abandon its manager row safely, even
+				// if the protocol worker later picks up the stale Account task.
+				if _, err := dao.YoubanBotManagerTask.Ctx(ctx).WherePri(row.Id).Where(tc.Status, "submitted").Data(do.YoubanBotManagerTask{Status: "failed", ErrorMessage: "协议号两分钟内未能完成同步，请检查是否在线、频道权限或任务繁忙后重试"}).Update(); err != nil {
 					return err
 				}
 			}
@@ -597,21 +634,34 @@ func (s *sSysBot) managerNotifyBatch(ctx context.Context, root *entity.YoubanBot
 	}
 	text := fmt.Sprintf("机器人管理处理完成：成功 %d 个，失败 %d 个。\n", success, len(tasks)-success)
 	if root.Action == "sync" {
+		text, err = managerSyncProgressText(ctx, root)
+		if err != nil {
+			return err
+		}
 		n, err := managerChannelBotsModel(ctx, st).Count()
 		if err != nil {
 			return err
 		}
-		text += fmt.Sprintf("当前上架频道共发现 %d 个不同机器人（不要求持有 Token）。\n", n)
+		text += fmt.Sprintf("\n当前上架频道共发现 %d 个不同机器人（不要求持有 Token）。\n", n)
 	}
 	for _, t := range tasks {
-		if t.Status == "failed" {
+		if t.Status == "failed" && root.Action != "sync" {
 			text += fmt.Sprintf("频道记录 #%d：%s\n", t.ChannelId, html.EscapeString(sensitive.Diagnostic(t.ErrorMessage)))
 		}
 		if len(text) > 2500 {
 			break
 		}
 	}
-	if err := s.managerSend(ctx, root.EntryBotId, root.TelegramUserId, 0, text, managerSyncButtons()); err != nil {
+	target := managerProgressTarget{}
+	if root.Action == "sync" {
+		// Cache is presentation-only; a missing pointer falls back to a normal notification.
+		target, _ = managerProgressLoad(ctx, root)
+	}
+	notifyErr := s.managerSend(ctx, root.EntryBotId, root.TelegramUserId, target.MessageID, text, managerSyncButtons())
+	if notifyErr != nil && target.MessageID > 0 && managerProgressMessageMissing(notifyErr) {
+		notifyErr = s.managerSend(ctx, root.EntryBotId, root.TelegramUserId, 0, text, managerSyncButtons())
+	}
+	if err := notifyErr; err != nil {
 		if isBroadcastBlocked(err) {
 			_, updateErr := dao.YoubanBotManagerTask.Ctx(ctx).Where(c.BatchKey, root.BatchKey).Data(do.YoubanBotManagerTask{Notified: 1}).Update()
 			return updateErr
@@ -643,6 +693,11 @@ func (s *sSysBot) runManagerNotifications(ctx context.Context) {
 			if err != nil && ctx.Err() == nil {
 				g.Log().Warningf(ctx, "机器人管理通知维护失败 err:%s", sensitive.Diagnostic(err.Error()))
 			}
+			progressCtx, progressCancel := context.WithTimeout(ctx, 10*time.Second)
+			if err := s.managerUpdateSyncProgress(progressCtx); err != nil && ctx.Err() == nil {
+				g.Log().Warningf(ctx, "机器人同步进度更新失败 err:%s", sensitive.Diagnostic(err.Error()))
+			}
+			progressCancel()
 		}
 	}
 }

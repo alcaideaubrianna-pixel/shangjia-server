@@ -7,4 +7,5 @@ const (
 	CustomEmojiFetchLockKey        = "youban_bot:custom_emoji:fetch_lock"
 	ReplyKeyboardUserPrefix        = "youban_bot:reply_keyboard:user:"
 	ManagerNotificationRetryPrefix = "youban_bot:manager_notification:retry:"
+	ManagerProgressPrefix          = "youban_bot:manager_progress:"
 )

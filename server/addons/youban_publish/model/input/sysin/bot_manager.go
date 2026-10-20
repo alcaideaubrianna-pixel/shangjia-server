@@ -8,6 +8,7 @@ type BotManagerChannel struct {
 	ChannelTitle    string
 	ChannelUsername string
 	AccessHash      string
+	AccountError    string
 }
 
 type BotManagerBot struct {

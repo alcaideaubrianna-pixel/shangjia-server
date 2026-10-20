@@ -112,9 +112,14 @@ func managerPage(page, total int) (int, int, int) {
 }
 
 func (s *sSysBot) managerSend(ctx context.Context, entryBot, userID int64, messageID int, text string, buttons [][]models.InlineKeyboardButton) error {
+	_, err := s.managerSendMessage(ctx, entryBot, userID, messageID, text, buttons)
+	return err
+}
+
+func (s *sSysBot) managerSendMessage(ctx context.Context, entryBot, userID int64, messageID int, text string, buttons [][]models.InlineKeyboardButton) (int, error) {
 	client, err := s.relayBot(ctx, s.replyBotToken(ctx, entryBot))
 	if err != nil {
-		return err
+		return 0, err
 	}
 	call, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -122,12 +127,15 @@ func (s *sSysBot) managerSend(ctx context.Context, entryBot, userID int64, messa
 	if messageID > 0 {
 		_, err = client.EditMessageText(call, &tgbot.EditMessageTextParams{ChatID: userID, MessageID: messageID, Text: sensitive.Tokens(text), ParseMode: models.ParseModeHTML, ReplyMarkup: markup})
 		if err != nil && strings.Contains(strings.ToLower(err.Error()), "message is not modified") {
-			return nil
+			return messageID, nil
 		}
-		return err
+		return messageID, err
 	}
-	_, err = client.SendMessage(call, &tgbot.SendMessageParams{ChatID: userID, Text: sensitive.Tokens(text), ParseMode: models.ParseModeHTML, ReplyMarkup: markup})
-	return err
+	message, err := client.SendMessage(call, &tgbot.SendMessageParams{ChatID: userID, Text: sensitive.Tokens(text), ParseMode: models.ParseModeHTML, ReplyMarkup: markup})
+	if err != nil {
+		return 0, err
+	}
+	return message.ID, nil
 }
 func (s *sSysBot) managerError(ctx context.Context, st *entity.YoubanBotManagerState, msgID int, err error) error {
 	return s.managerSend(ctx, st.EntryBotId, st.TelegramUserId, msgID, "操作未完成："+html.EscapeString(sensitive.Diagnostic(err.Error())), [][]models.InlineKeyboardButton{{managerButton("返回机器人列表", "list", 0, 0)}})
