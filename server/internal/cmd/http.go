@@ -18,6 +18,7 @@ import (
 	"hotgo/internal/router"
 	"hotgo/internal/service"
 	"hotgo/internal/websocket"
+	"hotgo/utility/adminsecurity"
 	"hotgo/utility/runrole"
 )
 
@@ -29,6 +30,14 @@ var (
 		Func: func(ctx context.Context, parser *gcmd.Parser) (err error) {
 			// 初始化http服务
 			s := g.Server()
+			adminEntry, err := adminsecurity.FromConfig(ctx)
+			if err != nil {
+				return err
+			}
+			if adminEntry.Path != "" {
+				s.BindHookHandler("/*any", ghttp.HookBeforeServe, adminEntry.BeforeServe)
+				s.BindMiddleware("/*any", adminsecurity.NewLoginLimiter(adminEntry.Prefix).Middleware)
+			}
 			registerHealthHandlers(s)
 			webRuntime := runrole.Enabled(ctx, runrole.Web)
 

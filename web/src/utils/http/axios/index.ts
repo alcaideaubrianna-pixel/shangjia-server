@@ -112,7 +112,8 @@ const transform: AxiosTransform = {
           maskClosable: false,
           onPositiveClick: () => {
             storage.clear();
-            window.location.href = LoginPath;
+            window.location.hash = LoginPath;
+            window.location.reload();
           },
           onNegativeClick: () => {},
         });
@@ -199,6 +200,10 @@ const transform: AxiosTransform = {
     const $dialog = window['$dialog'];
     const $message = window['$message'];
     const { response, code, message } = error || {};
+    if (response?.status === 404 && response.headers?.['x-admin-entry-required'] === '1') {
+      $message.error('后台入口凭证已失效，请重新打开您保存的安全入口地址');
+      return Promise.reject(error);
+    }
     // TODO 此处要根据后端接口返回格式修改
     const msg: string =
       response && response.data && response.data.message ? response.data.message : '';

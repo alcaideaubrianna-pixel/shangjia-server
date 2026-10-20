@@ -234,10 +234,16 @@
   }
 
   async function handleDemoAccountLogin(user: { username: string; password: string }) {
+    if (userStore.loginConfig?.loginCaptchaSwitch === 1) {
+      formInline.value.username = user.username;
+      formInline.value.pass = user.password;
+      message.info('已填入演示账号，请输入验证码后登录');
+      return;
+    }
     const params = {
       username: user.username,
       password: aesEcb.encrypt(user.password),
-      isLock: true,
+      isLock: false,
     };
     await handleLoginResp(userStore.login(params));
   }

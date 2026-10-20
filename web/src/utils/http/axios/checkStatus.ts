@@ -23,6 +23,9 @@ export function checkStatus(status: number, msg: string): void {
     case 408:
       $message.error('网络请求超时');
       break;
+    case 429:
+      $message.error('登录尝试过于频繁，请稍后重试');
+      break;
     case 500:
       $message.error('服务器错误,请稍候重试!');
       break;

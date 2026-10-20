@@ -15,6 +15,8 @@ type item struct {
 }
 
 var items = []item{
+	{Key: "security.admin.entryPath", EnvKeys: []string{"YOUBAN_ADMIN_ENTRY_PATH"}},
+	{Key: "security.admin.entryKey", EnvKeys: []string{"YOUBAN_ADMIN_ENTRY_KEY"}},
 	{Key: "system.appName", EnvKeys: []string{"GF_SYSTEM_APPNAME", "YOUBAN_APP_NAME", "APP_NAME"}},
 	{Key: "system.mode", EnvKeys: []string{"GF_SYSTEM_MODE", "YOUBAN_MODE", "APP_MODE", "MODE"}},
 	{Key: "system.debug", EnvKeys: []string{"GF_SYSTEM_DEBUG", "YOUBAN_DEBUG", "APP_DEBUG", "DEBUG"}},
