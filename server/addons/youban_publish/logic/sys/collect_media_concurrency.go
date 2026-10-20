@@ -21,6 +21,16 @@ type collectMediaConcurrencyLease struct {
 	locks []*lock.Lock
 }
 
+func (l *collectMediaConcurrencyLease) refresh(ctx context.Context) (bool, error) {
+	for _, lease := range l.locks {
+		owned, err := lease.Refresh(ctx)
+		if err != nil || !owned {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
 func (l *collectMediaConcurrencyLease) release() {
 	if l == nil {
 		return
@@ -59,7 +69,7 @@ func acquireCollectMediaOwnerSlot(ctx context.Context, kind string, tenantID, ow
 	start := int(eventID % int64(limit))
 	for offset := 0; offset < limit; offset++ {
 		slot := (start + offset) % limit
-		locker := lock.NewConfig(35*time.Minute, time.Second).Mutex(fmt.Sprintf("youban_publish:collect:media:%s:%d:%d:slot:%d", kind, tenantID, ownerID, slot))
+		locker := lock.NewConfig(collectMediaLeaseTTL, time.Second).WithoutWatchDog().Mutex(fmt.Sprintf("youban_publish:collect:media:%s:%d:%d:slot:%d", kind, tenantID, ownerID, slot))
 		err := locker.TryLock(ctx)
 		if err == nil {
 			return locker, nil

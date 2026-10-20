@@ -185,7 +185,7 @@ func (s *sSysPublish) ExecuteCollectMediaCache(ctx context.Context, payload coll
 	ctx = collectMediaRuntimeContext(ctx, payload.AccountId)
 	g.Log().Debugf(ctx, "采集媒体缓存任务开始 eventId:%d tenantId:%d accountId:%d sourceId:%d tgAccountId:%d", payload.EventId, payload.TenantId, payload.AccountId, payload.SourceId, payload.TgAccountId)
 	lockStartedAt := time.Now()
-	distributedLock := lock.NewConfig(35*time.Minute, time.Second).Mutex(fmt.Sprintf("youban_publish:collect:media:event:%d", payload.EventId))
+	distributedLock := lock.NewConfig(collectMediaLeaseTTL, time.Second).WithoutWatchDog().Mutex(fmt.Sprintf("youban_publish:collect:media:event:%d", payload.EventId))
 	if err := distributedLock.TryLock(ctx); err != nil {
 		if errors.Is(err, lock.ErrLockFailed) {
 			g.Log().Debugf(ctx, "采集媒体任务检测到重复执行，跳过当前任务 eventId:%d wait:%s", payload.EventId, time.Since(lockStartedAt).Round(time.Millisecond))
@@ -196,6 +196,13 @@ func (s *sSysPublish) ExecuteCollectMediaCache(ctx context.Context, payload coll
 	}
 	g.Log().Debugf(ctx, "采集媒体任务获取事件锁完成 eventId:%d wait:%s", payload.EventId, time.Since(lockStartedAt).Round(time.Millisecond))
 	defer func() { _ = distributedLock.Unlock(context.Background()) }()
+	ctx, stopEventLease := maintainCollectMediaLeases(ctx, payload.EventId, collectMediaLeaseRefreshInterval, distributedLock.Refresh)
+	defer stopEventLease()
+	defer func() {
+		if errors.Is(context.Cause(ctx), errCollectMediaLeaseLost) {
+			retErr = newCollectMediaRetryError("采集媒体执行租约已失效，等待安全接管", collectMediaLeaseTTL)
+		}
+	}()
 	readEventStartedAt := time.Now()
 	event, err := s.collectMediaCacheEvent(ctx, payload)
 	if err != nil {
@@ -217,6 +224,8 @@ func (s *sSysPublish) ExecuteCollectMediaCache(ctx context.Context, payload coll
 		return err
 	}
 	defer ownerLease.release()
+	ctx, stopOwnerLease := maintainCollectMediaLeases(ctx, payload.EventId, collectMediaLeaseRefreshInterval, ownerLease.refresh)
+	defer stopOwnerLease()
 	if event["source_type"].String() == sysin.CollectSourceTypeAccount {
 		accountIntervalStartedAt := time.Now()
 		reportCollectProgress(ctx, "waiting_interval", "等待账号媒体下载节流间隔")
