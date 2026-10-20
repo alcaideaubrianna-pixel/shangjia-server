@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -61,8 +62,54 @@ func TestBotManagerPublishBridgePostgres(t *testing.T) {
 			return err
 		}
 		projection.BotId = id
+		fresh := &sysin.BotManagerProjection{TenantId: 1, AccountId: 99, BotToken: "99999:first", BotUsername: "new_bot"}
+		freshId, err := s.BotManagerUpdateCredentials(ctx, fresh)
+		if err != nil || freshId <= 0 {
+			t.Fatal("new credentials did not establish canonical publishing record", freshId, err)
+		}
+		if _, err := tx.Exec("UPDATE hg_youban_publish_bot SET status=2 WHERE id=?", freshId); err != nil {
+			return err
+		}
+		fresh.BotToken = "99999:rotated"
+		if again, err := s.BotManagerUpdateCredentials(ctx, fresh); err != nil || again != freshId {
+			t.Fatal("new Bot rotation duplicated identity", again, err)
+		}
+		freshStatus, err := tx.Model(publishBotTable).Where("id", freshId).Value("status")
+		if err != nil || freshStatus.Int() != 2 {
+			t.Fatal("credential update unexpectedly enabled Bot", freshStatus, err)
+		}
+		credential := *projection
+		credential.BotToken = "12345:rotated"
+		if updated, err := s.BotManagerUpdateCredentials(ctx, &credential); err != nil || updated != id {
+			return err
+		}
+		stored, err := tx.Model(publishBotTable).Where("id", id).Value("bot_token")
+		if err != nil || stored.String() != credential.BotToken {
+			t.Fatal("rotation did not update publishing credentials", stored, err)
+		}
+		rollback := errors.New("registry persistence failed")
+		if err := db.Transaction(ctx, func(ctx context.Context, _ gdb.TX) error {
+			failed := credential
+			failed.BotToken = "12345:must-rollback"
+			if _, err := s.BotManagerUpdateCredentials(ctx, &failed); err != nil {
+				return err
+			}
+			return rollback
+		}); !errors.Is(err, rollback) {
+			t.Fatal(err)
+		}
+		stored, err = tx.Model(publishBotTable).Where("id", id).Value("bot_token")
+		if err != nil || stored.String() != credential.BotToken {
+			t.Fatal("registry rollback left credentials inconsistent", stored, err)
+		}
+		// A previously queued binding operation still carries the old Token.
+		// It must not roll back a successful rotation.
 		if again, err := s.BotManagerApplyBinding(ctx, projection); err != nil || again != id {
 			t.Fatalf("binding created duplicate Bot: %d %v", again, err)
+		}
+		stored, err = tx.Model(publishBotTable).Where("id", id).Value("bot_token")
+		if err != nil || stored.String() != credential.BotToken {
+			t.Fatal("queued binding reverted rotated Token", stored, err)
 		}
 		value, err := tx.Model(publishChannelTable).Where("id", 1).Value("bot_id_json")
 		if err != nil {

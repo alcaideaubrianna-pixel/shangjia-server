@@ -113,8 +113,16 @@ func (s *sSysBot) managerSync(ctx context.Context, st *entity.YoubanBotManagerSt
 			if err != nil || identity <= 0 {
 				continue
 			}
-			_, err = dao.YoubanBotManaged.Ctx(ctx).Data(do.YoubanBotManaged{TenantId: st.TenantId, AccountId: st.AccountId, TelegramBotId: identity, BotName: b.BotName, BotUsername: b.BotUsername, BotToken: b.BotToken, PublishBotId: b.Id, Status: 1}).OnConflict(bc.TenantId, bc.AccountId, bc.TelegramBotId).OnDuplicate(bc.BotName, bc.BotUsername, bc.BotToken, bc.PublishBotId).Save()
+			// Catalog snapshots must not overwrite a Token rotated concurrently.
+			// Existing publishing credentials are read live when mutating a Bot.
+			_, err = dao.YoubanBotManaged.Ctx(ctx).Data(do.YoubanBotManaged{TenantId: st.TenantId, AccountId: st.AccountId, TelegramBotId: identity, BotName: b.BotName, BotUsername: b.BotUsername, BotToken: b.BotToken, PublishBotId: b.Id, Status: 1}).OnConflict(bc.TenantId, bc.AccountId, bc.TelegramBotId).OnDuplicate(bc.BotName, bc.BotUsername, bc.PublishBotId).Save()
 			if err != nil {
+				return err
+			}
+			// Discovery can create identity-only rows before a Token is configured.
+			// Fill only an empty credential; concurrent rotations remain untouched.
+			if _, err := dao.YoubanBotManaged.Ctx(ctx).Where(bc.TenantId, st.TenantId).Where(bc.AccountId, st.AccountId).
+				Where(bc.TelegramBotId, identity).Where(bc.BotToken, "").Data(do.YoubanBotManaged{BotToken: b.BotToken}).Update(); err != nil {
 				return err
 			}
 		}

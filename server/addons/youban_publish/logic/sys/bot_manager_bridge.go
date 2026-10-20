@@ -125,6 +125,9 @@ func (s *sSysPublish) BotManagerApplyBinding(ctx context.Context, in *sysin.BotM
 			if botId == 0 {
 				botId, err = dao.YoubanPublishBot.Ctx(ctx).Data(data).InsertAndGetId()
 			} else {
+				// A queued operation may hold an older credential snapshot. Existing
+				// credentials change only through the explicit credential-save path.
+				data.BotToken = nil
 				_, err = dao.YoubanPublishBot.Ctx(ctx).WherePri(botId).Data(data).Update()
 			}
 			if err != nil {
@@ -215,6 +218,43 @@ func (s *sSysPublish) BotManagerValidateToken(ctx context.Context, tenantId, acc
 		return gerror.New("机器人已有其他账户的上架配置，不能接管")
 	}
 	return nil
+}
+
+// Credential persistence shares the caller's transaction with the registry.
+// Existing publishing rows remain authoritative; status and type are preserved.
+func (s *sSysPublish) BotManagerUpdateCredentials(ctx context.Context, in *sysin.BotManagerProjection) (int64, error) {
+	if in == nil || in.TenantId <= 0 || in.AccountId <= 0 || strings.TrimSpace(in.BotToken) == "" {
+		return 0, gerror.New("机器人凭据参数无效")
+	}
+	var botId int64
+	err := dao.YoubanPublishBot.Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		var owner *struct{ Id int64 }
+		if err := tx.Model(publishAccountTable).Where("id", in.AccountId).Where("tenant_id", in.TenantId).WhereNull("deleted_at").LockUpdate().Scan(&owner); err != nil {
+			return err
+		}
+		if owner == nil {
+			return gerror.New("上架账户已不存在")
+		}
+		if err := s.BotManagerValidateToken(ctx, in.TenantId, in.AccountId, in.BotToken); err != nil {
+			return err
+		}
+		c := dao.YoubanPublishBot.Columns()
+		identity := strings.Split(in.BotToken, ":")[0] + ":%"
+		v, err := dao.YoubanPublishBot.Ctx(ctx).Where(c.TenantId, in.TenantId).Where(c.AccountId, in.AccountId).WhereLike(c.BotToken, identity).OrderAsc(c.Id).Value(c.Id)
+		if err != nil {
+			return err
+		}
+		botId = v.Int64()
+		if botId == 0 {
+			botId, err = dao.YoubanPublishBot.Ctx(ctx).Data(do.YoubanPublishBot{TenantId: in.TenantId, AccountId: in.AccountId, BotToken: in.BotToken, BotName: in.BotName, BotUsername: in.BotUsername, Status: 1}).InsertAndGetId()
+			return err
+		}
+		_, err = dao.YoubanPublishBot.Ctx(ctx).Where(c.TenantId, in.TenantId).Where(c.AccountId, in.AccountId).
+			WhereLike(c.BotToken, strings.Split(in.BotToken, ":")[0]+":%").
+			Data(do.YoubanPublishBot{BotToken: in.BotToken, BotName: in.BotName, BotUsername: in.BotUsername}).Update()
+		return gerror.Wrap(err, "更新发送机器人凭据失败")
+	})
+	return botId, err
 }
 
 func (s *sSysPublish) BotManagerDelete(ctx context.Context, tenantId, accountId, botId int64) error {

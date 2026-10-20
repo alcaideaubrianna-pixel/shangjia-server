@@ -20,10 +20,16 @@ import (
 	"hotgo/addons/youban_bot/internal/dao"
 	"hotgo/addons/youban_bot/internal/model/do"
 	"hotgo/addons/youban_bot/internal/model/entity"
+	pi "hotgo/addons/youban_publish/model/input/sysin"
 	ps "hotgo/addons/youban_publish/service"
 )
 
 type managerTestPublish struct{ ps.ISysPublish }
+
+func (managerTestPublish) BotManagerUpdateCredentials(context.Context, *pi.BotManagerProjection) (int64, error) {
+	return 1, nil
+}
+func (managerTestPublish) BotManagerRefreshCredentials(context.Context) {}
 
 func (managerTestPublish) BotManagerValidateToken(context.Context, int64, int64, string) error {
 	return nil

@@ -215,10 +215,7 @@ func (s *sSysPublish) saveBot(ctx context.Context, in *sysin.BotSaveInp, tenantI
 	if err != nil {
 		return gerror.Wrap(err, "保存Bot配置失败")
 	}
-	s.clearTelegramBotCache()
-	if refreshErr := gatewayservice.Gateway().Refresh(ctx); refreshErr != nil {
-		g.Log().Warningf(ctx, "刷新TG Bot Gateway失败：%+v", refreshErr)
-	}
+	s.refreshTelegramBotRuntime(ctx)
 	return nil
 }
 
@@ -389,6 +386,18 @@ func (s *sSysPublish) telegramMediaBot(ctx context.Context, botToken string) (*t
 
 func (s *sSysPublish) clearTelegramBotCache() {
 	clearAutoDeleteBotLocalCache()
+}
+
+// Run after commit; keep the existing best-effort Gateway refresh policy.
+func (s *sSysPublish) BotManagerRefreshCredentials(ctx context.Context) {
+	s.refreshTelegramBotRuntime(ctx)
+}
+
+func (s *sSysPublish) refreshTelegramBotRuntime(ctx context.Context) {
+	s.clearTelegramBotCache()
+	if err := gatewayservice.Gateway().Refresh(ctx); err != nil {
+		g.Log().Warningf(ctx, "刷新TG Bot Gateway失败：%+v", err)
+	}
 }
 
 func telegramHTTPClient(proxyUrl string) (*http.Client, error) {

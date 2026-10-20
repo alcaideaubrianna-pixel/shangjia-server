@@ -22,6 +22,10 @@ type managerMutationPublish struct {
 	remove func(*pi.BotManagerProjection, func() error) error
 }
 
+func (p managerMutationPublish) BotManagerCatalog(context.Context, int64, int64) ([]*pi.BotManagerChannel, []*pi.BotManagerBot, error) {
+	return nil, []*pi.BotManagerBot{{Id: 1, BotToken: "1001:current"}}, nil
+}
+
 func (p managerMutationPublish) BotManagerRemoveFromChannel(_ context.Context, in *pi.BotManagerProjection, remove func() error) error {
 	return p.remove(in, remove)
 }

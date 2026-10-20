@@ -17,6 +17,8 @@ type ISysPublish interface {
 	BotManagerRemoveFromChannel(ctx context.Context, in *sysin.BotManagerProjection, remove func() error) error
 	BotManagerProtectChannel(ctx context.Context, in *sysin.BotManagerProjection, mutate func() error) error
 	BotManagerValidateToken(ctx context.Context, tenantId, accountId int64, token string) error
+	BotManagerUpdateCredentials(ctx context.Context, in *sysin.BotManagerProjection) (int64, error)
+	BotManagerRefreshCredentials(ctx context.Context)
 	BotManagerDelete(ctx context.Context, tenantId, accountId, botId int64) error
 	BackfillProfileOrigins(ctx context.Context, tenantId, accountId, lastId int64, limit int, apply bool) (*sysin.ProfileOriginBackfillResult, error)
 	BackfillCollectedSourceMetadata(ctx context.Context, lastId int64, batchSize int) (scanned, updated int, nextId int64, err error)

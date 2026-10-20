@@ -18,6 +18,7 @@ import (
 	"hotgo/addons/youban_bot/internal/dao"
 	"hotgo/addons/youban_bot/internal/model/do"
 	"hotgo/addons/youban_bot/internal/model/entity"
+	pi "hotgo/addons/youban_publish/model/input/sysin"
 	ps "hotgo/addons/youban_publish/service"
 	"hotgo/utility/sensitive"
 )
@@ -490,16 +491,21 @@ func (s *sSysBot) handleBotManagerInput(ctx context.Context, entryBot int64, msg
 		return true, s.managerError(ctx, st, 0, gerror.New("该机器人已属于其他账户，请联系管理员核对"))
 	}
 	err = dao.YoubanBotManaged.Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		if _, err := dao.YoubanBotManaged.Ctx(ctx).Data(do.YoubanBotManaged{TenantId: st.TenantId, AccountId: st.AccountId, TelegramBotId: identity.ID, BotName: telegramBotDisplayName(identity), BotUsername: identity.Username, BotToken: text, Status: 1}).OnConflict(bc.TenantId, bc.AccountId, bc.TelegramBotId).OnDuplicate(bc.BotName, bc.BotUsername, bc.BotToken).Save(); err != nil {
+		publishBotId, err := ps.SysPublish().BotManagerUpdateCredentials(ctx, &pi.BotManagerProjection{TenantId: st.TenantId, AccountId: st.AccountId, BotToken: text, BotName: telegramBotDisplayName(identity), BotUsername: identity.Username})
+		if err != nil {
+			return err
+		}
+		if _, err := dao.YoubanBotManaged.Ctx(ctx).Data(do.YoubanBotManaged{TenantId: st.TenantId, AccountId: st.AccountId, TelegramBotId: identity.ID, BotName: telegramBotDisplayName(identity), BotUsername: identity.Username, BotToken: text, PublishBotId: publishBotId, Status: 1}).OnConflict(bc.TenantId, bc.AccountId, bc.TelegramBotId).OnDuplicate(bc.BotName, bc.BotUsername, bc.BotToken, bc.PublishBotId).Save(); err != nil {
 			return err
 		}
 		// Re-adding a previously deleted Bot restores its existing owner-scoped ID.
-		_, err := tx.Exec("UPDATE "+dao.YoubanBotManaged.Table()+" SET "+bc.DeletedAt+"=NULL WHERE "+bc.TenantId+"=? AND "+bc.AccountId+"=? AND "+bc.TelegramBotId+"=?", st.TenantId, st.AccountId, identity.ID)
+		_, err = tx.Exec("UPDATE "+dao.YoubanBotManaged.Table()+" SET "+bc.DeletedAt+"=NULL WHERE "+bc.TenantId+"=? AND "+bc.AccountId+"=? AND "+bc.TelegramBotId+"=?", st.TenantId, st.AccountId, identity.ID)
 		return err
 	})
 	if err != nil {
 		return true, s.managerError(ctx, st, 0, gerror.New("保存机器人配置失败，请联系管理员检查数据库"))
 	}
+	ps.SysPublish().BotManagerRefreshCredentials(ctx)
 	var b entity.YoubanBotManaged
 	if err := dao.YoubanBotManaged.Ctx(ctx).Where(bc.TenantId, st.TenantId).Where(bc.AccountId, st.AccountId).Where(bc.TelegramBotId, identity.ID).Scan(&b); err != nil {
 		return true, err

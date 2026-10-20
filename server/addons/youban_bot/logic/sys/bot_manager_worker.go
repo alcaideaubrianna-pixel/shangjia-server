@@ -19,11 +19,13 @@ import (
 	"github.com/gotd/td/tgerr"
 	ci "hotgo/addons/telegram_collector/model/input/sysin"
 	cs "hotgo/addons/telegram_collector/service"
+	"hotgo/addons/youban_bot/consts"
 	"hotgo/addons/youban_bot/internal/dao"
 	"hotgo/addons/youban_bot/internal/model/do"
 	"hotgo/addons/youban_bot/internal/model/entity"
 	pi "hotgo/addons/youban_publish/model/input/sysin"
 	ps "hotgo/addons/youban_publish/service"
+	"hotgo/internal/library/cache"
 	"hotgo/utility/sensitive"
 )
 
@@ -259,6 +261,26 @@ func (s *sSysBot) managerMutateChannel(ctx context.Context, client *tg.Client, s
 	if err != nil {
 		return err
 	}
+	if b.PublishBotId > 0 && task.Action != "remove" {
+		_, bots, err := ps.SysPublish().BotManagerCatalog(ctx, st.TenantId, st.AccountId)
+		if err != nil {
+			return err
+		}
+		found := false
+		for _, current := range bots {
+			if current.Id == b.PublishBotId {
+				if !strings.HasPrefix(current.BotToken, strconv.FormatInt(b.TelegramBotId, 10)+":") {
+					return gerror.New("发送机器人身份已变化，请重新同步")
+				}
+				b.BotToken = current.BotToken
+				found = true
+				break
+			}
+		}
+		if !found {
+			return gerror.New("发送机器人已停用或删除，请重新配置")
+		}
+	}
 	resolved, err := client.ContactsResolveUsername(ctx, &tg.ContactsResolveUsernameRequest{Username: b.BotUsername})
 	if err != nil {
 		return err
@@ -390,6 +412,12 @@ func (s *sSysBot) startBotManagerRuntime(parent context.Context) {
 	done := s.managerDone
 	go func() {
 		defer close(done)
+		notificationsDone := make(chan struct{})
+		go func() {
+			defer close(notificationsDone)
+			s.runManagerNotifications(ctx)
+		}()
+		defer func() { <-notificationsDone }()
 		ticker := time.NewTicker(5 * time.Second)
 		var retryAfter time.Time
 		defer ticker.Stop()
@@ -474,67 +502,118 @@ func (s *sSysBot) managerTick(ctx context.Context) error {
 			}
 		}
 	}
-	return s.managerNotifyCompleted(ctx)
+	return nil
 }
 
 func (s *sSysBot) managerNotifyCompleted(ctx context.Context) error {
 	c := dao.YoubanBotManagerTask.Columns()
+	table := dao.YoubanBotManagerTask.Table()
+	firstInBatch := fmt.Sprintf("%s IN (SELECT MIN(%s) FROM %s WHERE %s=0 GROUP BY %s)", c.Id, c.Id, table, c.Notified, c.BatchKey)
+	noActive := fmt.Sprintf("NOT EXISTS (SELECT 1 FROM %s active WHERE active.%s=%s.%s AND active.%s IN ('pending','submitted'))", table, c.BatchKey, table, c.BatchKey, c.Status)
 	var roots []*entity.YoubanBotManagerTask
-	if err := dao.YoubanBotManagerTask.Ctx(ctx).Where(c.Notified, 0).WhereIn(c.Status, []string{"success", "failed"}).Where("NOT EXISTS (SELECT 1 FROM " + dao.YoubanBotManagerTask.Table() + " active WHERE active.batch_key=" + dao.YoubanBotManagerTask.Table() + ".batch_key AND active.status IN ('pending','submitted'))").OrderAsc(c.Id).Limit(20).Scan(&roots); err != nil {
+	if err := dao.YoubanBotManagerTask.Ctx(ctx).Where(c.Notified, 0).WhereIn(c.Status, []string{"success", "failed"}).Where(firstInBatch).Where(noActive).OrderAsc(c.UpdatedAt).OrderAsc(c.Id).Limit(20).Scan(&roots); err != nil {
 		return err
 	}
-	seen := map[string]bool{}
 	for _, root := range roots {
-		if seen[root.BatchKey] {
-			continue
-		}
-		seen[root.BatchKey] = true
-		var tasks []*entity.YoubanBotManagerTask
-		if err := dao.YoubanBotManagerTask.Ctx(ctx).Where(c.BatchKey, root.BatchKey).Scan(&tasks); err != nil {
+		// Rotate one root per batch, including batches currently in backoff.
+		if _, err := dao.YoubanBotManagerTask.Ctx(ctx).WherePri(root.Id).Data(do.YoubanBotManagerTask{Status: root.Status}).Update(); err != nil {
 			return err
 		}
-		complete, success := true, 0
-		for _, t := range tasks {
-			if t.Status == "pending" || t.Status == "submitted" {
-				complete = false
-			}
-			if t.Status == "success" {
-				success++
+		key := consts.ManagerNotificationRetryPrefix + root.BatchKey
+		if cache.Initialized() {
+			cooldown, err := cache.Instance().Get(ctx, key)
+			if err == nil && cooldown != nil && !cooldown.IsNil() {
+				continue
 			}
 		}
-		if !complete {
-			continue
-		}
-		st, err := s.managerState(ctx, root.EntryBotId, root.TelegramUserId)
-		if err != nil || st.TenantId != root.TenantId || st.AccountId != root.AccountId {
-			_, _ = dao.YoubanBotManagerTask.Ctx(ctx).Where(c.BatchKey, root.BatchKey).Data(do.YoubanBotManagerTask{Notified: 1}).Update()
-			continue
-		}
-		if root.Action == "sync" {
-			if _, err := dao.YoubanBotManagerState.Ctx(ctx).WherePri(st.Id).Data(do.YoubanBotManagerState{SyncedAt: gtime.Now()}).Update(); err != nil {
-				return err
+		call, cancel := context.WithTimeout(ctx, 12*time.Second)
+		err := s.managerNotifyBatch(call, root)
+		cancel()
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
 			}
-		}
-		text := fmt.Sprintf("机器人管理处理完成：成功 %d 个，失败 %d 个。\n", success, len(tasks)-success)
-		for _, t := range tasks {
-			if t.Status == "failed" {
-				text += fmt.Sprintf("频道记录 #%d：%s\n", t.ChannelId, html.EscapeString(sensitive.Diagnostic(t.ErrorMessage)))
+			g.Log().Warningf(ctx, "机器人管理批次通知失败 batch:%s err:%s", root.BatchKey, sensitive.Diagnostic(err.Error()))
+			if cache.Initialized() {
+				_ = cache.Instance().Set(ctx, key, true, time.Minute)
 			}
-			if len(text) > 2500 {
-				break
-			}
-		}
-		if err := s.managerSend(ctx, root.EntryBotId, root.TelegramUserId, 0, text, [][]models.InlineKeyboardButton{{managerButton("查看机器人列表", "list", 1, 0), managerButton("查看任务结果", "tasks", 1, 0)}}); err != nil {
-			return err
-		}
-		if root.Action == "sync" {
-			if err := s.managerList(ctx, st, 0, 1); err != nil {
-				return err
-			}
-		}
-		if _, err := dao.YoubanBotManagerTask.Ctx(ctx).Where(c.BatchKey, root.BatchKey).Data(do.YoubanBotManagerTask{Notified: 1}).Update(); err != nil {
-			return err
 		}
 	}
 	return nil
+}
+
+func (s *sSysBot) managerNotifyBatch(ctx context.Context, root *entity.YoubanBotManagerTask) error {
+	c := dao.YoubanBotManagerTask.Columns()
+	var tasks []*entity.YoubanBotManagerTask
+	if err := dao.YoubanBotManagerTask.Ctx(ctx).Where(c.BatchKey, root.BatchKey).Scan(&tasks); err != nil {
+		return err
+	}
+	complete, success := true, 0
+	for _, t := range tasks {
+		if t.Status == "pending" || t.Status == "submitted" {
+			complete = false
+		}
+		if t.Status == "success" {
+			success++
+		}
+	}
+	if !complete {
+		return nil
+	}
+	st, err := s.managerState(ctx, root.EntryBotId, root.TelegramUserId)
+	if err != nil {
+		return err
+	}
+	if st.TenantId != root.TenantId || st.AccountId != root.AccountId {
+		_, err := dao.YoubanBotManagerTask.Ctx(ctx).Where(c.BatchKey, root.BatchKey).Data(do.YoubanBotManagerTask{Notified: 1}).Update()
+		return err
+	}
+	if root.Action == "sync" {
+		if _, err := dao.YoubanBotManagerState.Ctx(ctx).WherePri(st.Id).Data(do.YoubanBotManagerState{SyncedAt: gtime.Now()}).Update(); err != nil {
+			return err
+		}
+	}
+	text := fmt.Sprintf("机器人管理处理完成：成功 %d 个，失败 %d 个。\n", success, len(tasks)-success)
+	for _, t := range tasks {
+		if t.Status == "failed" {
+			text += fmt.Sprintf("频道记录 #%d：%s\n", t.ChannelId, html.EscapeString(sensitive.Diagnostic(t.ErrorMessage)))
+		}
+		if len(text) > 2500 {
+			break
+		}
+	}
+	if err := s.managerSend(ctx, root.EntryBotId, root.TelegramUserId, 0, text, [][]models.InlineKeyboardButton{{managerButton("查看机器人列表", "list", 1, 0), managerButton("查看任务结果", "tasks", 1, 0)}}); err != nil {
+		if isBroadcastBlocked(err) {
+			_, updateErr := dao.YoubanBotManagerTask.Ctx(ctx).Where(c.BatchKey, root.BatchKey).Data(do.YoubanBotManagerTask{Notified: 1}).Update()
+			return updateErr
+		}
+		return err
+	}
+	if root.Action == "sync" {
+		if err := s.managerList(ctx, st, 0, 1); err != nil {
+			return err
+		}
+	}
+	if _, err := dao.YoubanBotManagerTask.Ctx(ctx).Where(c.BatchKey, root.BatchKey).Data(do.YoubanBotManagerTask{Notified: 1}).Update(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *sSysBot) runManagerNotifications(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			call, cancel := context.WithTimeout(ctx, 30*time.Second)
+			err := s.managerNotifyCompleted(call)
+			cancel()
+			if err != nil && ctx.Err() == nil {
+				g.Log().Warningf(ctx, "机器人管理通知维护失败 err:%s", sensitive.Diagnostic(err.Error()))
+			}
+		}
+	}
 }
