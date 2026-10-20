@@ -1,5 +1,7 @@
 # HotGo 项目开发规范
 
+线上调试与接手入口：[docs/production-debugging.md](docs/production-debugging.md)。包含 DBX、SSH server 2、SAE 角色、运维 MCP、常见故障定位及验证记录；操作前核对当前环境与用户授权范围。
+
 **生成或修改任何代码前，必须完整阅读本文档。**  
 本规范是项目唯一事实来源，所有新增代码必须严格对齐现有模块风格，不得自创新的代码模式。
 
