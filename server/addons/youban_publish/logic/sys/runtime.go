@@ -57,6 +57,7 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 	}
 	g.Log().Infof(ctx, "启动上架插件运行组件 roles:%v account:%t scheduler:%t pushWorker:%t mediaWorker:%t backgroundWorker:%t",
 		config.Roles, config.Account, config.Scheduler, config.PushWorker, config.MediaWorker, config.BackgroundWorker)
+	startRuntimeResourceObserver(ctx, config)
 	observePublishRuntimeHeartbeat(ctx, config)
 	heartbeatTicker := time.NewTicker(30 * time.Second)
 	defer heartbeatTicker.Stop()

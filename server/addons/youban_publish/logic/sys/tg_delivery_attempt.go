@@ -431,16 +431,25 @@ func (s *sSysPublish) startTelegramAttemptHeartbeat(attemptId int64) func() {
 		defer close(done)
 		ticker := time.NewTicker(telegramAttemptHeartbeatInterval)
 		defer ticker.Stop()
+		consecutiveFailures := 0
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
 				updateCtx, updateCancel := context.WithTimeout(ctx, 10*time.Second)
-				_, _ = g.DB().Model(publishTgAttemptTable).Safe().Ctx(updateCtx).
+				_, updateErr := g.DB().Model(publishTgAttemptTable).Safe().Ctx(updateCtx).
 					Where("id", attemptId).Where("status", telegramAttemptStatusSending).
 					Data(g.Map{"updated_at": gtime.Now()}).Update()
 				updateCancel()
+				if updateErr == nil {
+					consecutiveFailures = 0
+					continue
+				}
+				consecutiveFailures++
+				if consecutiveFailures == 1 || consecutiveFailures%3 == 0 {
+					g.Log().Warningf(context.Background(), "TG发送Attempt心跳更新失败 attemptId:%d consecutiveFailures:%d err:%+v", attemptId, consecutiveFailures, updateErr)
+				}
 			}
 		}
 	}()
