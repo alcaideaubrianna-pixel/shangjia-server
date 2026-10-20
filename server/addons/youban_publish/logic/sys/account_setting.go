@@ -49,6 +49,7 @@ func (s *sSysPublish) MyAccountSettingSave(ctx context.Context, in *sysin.Accoun
 	if settingErr != nil {
 		return nil, settingErr
 	}
+	in.ProfileDetailViewEnabled = current.ProfileDetailViewEnabled
 	in.SharedResourceEnabled = current.SharedResourceEnabled
 	in.TelegramBindingEnabled = current.TelegramBindingEnabled
 	in.GroupPushEnabled = current.GroupPushEnabled
@@ -82,6 +83,7 @@ func (s *sSysPublish) AdminAccountSettingSave(ctx context.Context, in *sysin.Acc
 		return nil, gerror.Wrap(err, "读取上架账号失败")
 	}
 	if target.AccountType != sysin.PublishAccountTypeUploader {
+		in.ProfileDetailViewEnabled = 0
 		in.SharedResourceEnabled = 0
 		in.TelegramBindingEnabled = 0
 		in.GroupPushEnabled = 0
@@ -152,20 +154,21 @@ func (s *sSysPublish) accountDisplayName(ctx context.Context, tenantId int64, ac
 func (s *sSysPublish) saveAccountSetting(ctx context.Context, tenantId int64, operatorId int64, in *sysin.AccountSettingSaveInp) error {
 	now := gtime.Now()
 	data := g.Map{
-		"tenant_id":                tenantId,
-		"account_id":               in.AccountId,
-		"enable_suffix":            in.EnableSuffix,
-		"suffix_content":           in.SuffixContent,
-		"enable_title_mark":        in.EnableTitleMark,
-		"mark_mode":                in.MarkMode,
-		"number_source":            in.NumberSource,
-		"custom_mark_text":         in.CustomMarkText,
-		"mark_position":            in.MarkPosition,
-		"shared_resource_enabled":  in.SharedResourceEnabled,
-		"telegram_binding_enabled": in.TelegramBindingEnabled,
-		"group_push_enabled":       in.GroupPushEnabled,
-		"updated_by":               operatorId,
-		"updated_at":               now,
+		"tenant_id":                   tenantId,
+		"account_id":                  in.AccountId,
+		"enable_suffix":               in.EnableSuffix,
+		"suffix_content":              in.SuffixContent,
+		"enable_title_mark":           in.EnableTitleMark,
+		"mark_mode":                   in.MarkMode,
+		"number_source":               in.NumberSource,
+		"custom_mark_text":            in.CustomMarkText,
+		"mark_position":               in.MarkPosition,
+		"profile_detail_view_enabled": in.ProfileDetailViewEnabled,
+		"shared_resource_enabled":     in.SharedResourceEnabled,
+		"telegram_binding_enabled":    in.TelegramBindingEnabled,
+		"group_push_enabled":          in.GroupPushEnabled,
+		"updated_by":                  operatorId,
+		"updated_at":                  now,
 	}
 	count, err := g.DB().Model(publishAccountSettingTable).Safe().Ctx(ctx).
 		Where("tenant_id", tenantId).
@@ -235,6 +238,7 @@ func fillAccountSettingModel(model *sysin.AccountSettingModel, row gdb.Record) {
 	model.NumberSource = strings.TrimSpace(row["number_source"].String())
 	model.CustomMarkText = strings.TrimSpace(row["custom_mark_text"].String())
 	model.MarkPosition = strings.TrimSpace(row["mark_position"].String())
+	model.ProfileDetailViewEnabled = row["profile_detail_view_enabled"].Int()
 	model.SharedResourceEnabled = row["shared_resource_enabled"].Int()
 	model.TelegramBindingEnabled = row["telegram_binding_enabled"].Int()
 	model.GroupPushEnabled = row["group_push_enabled"].Int()

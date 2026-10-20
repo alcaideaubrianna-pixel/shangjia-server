@@ -25,20 +25,21 @@ func (s *sSysPublish) CurrentAccount(ctx context.Context) (*sysin.CurrentAccount
 		capability.GroupPushEnabled = 1
 	}
 	return &sysin.CurrentAccountModel{
-		Id:                    account.Id,
-		TenantId:              account.TenantId,
-		ParentId:              account.ParentId,
-		AccountType:           account.AccountType,
-		Nickname:              account.Nickname,
-		Username:              account.Username,
-		Remark:                account.Remark,
-		Status:                account.Status,
-		CreatedAt:             account.CreatedAt,
-		UpdatedAt:             account.UpdatedAt,
-		Vip:                   vip,
-		GroupPushEnabled:      capability.GroupPushEnabled,
-		CycleFreeIntervalDays: maxConfigInt(ctx, "youbanPublish.cycle.freeIntervalDays", 15),
-		CycleFreeInactiveDays: maxConfigInt(ctx, "youbanPublish.cycle.freeInactiveDays", 7),
+		Id:                       account.Id,
+		TenantId:                 account.TenantId,
+		ParentId:                 account.ParentId,
+		AccountType:              account.AccountType,
+		Nickname:                 account.Nickname,
+		Username:                 account.Username,
+		Remark:                   account.Remark,
+		Status:                   account.Status,
+		CreatedAt:                account.CreatedAt,
+		UpdatedAt:                account.UpdatedAt,
+		Vip:                      vip,
+		GroupPushEnabled:         capability.GroupPushEnabled,
+		ProfileDetailViewEnabled: capability.ProfileDetailViewEnabled,
+		CycleFreeIntervalDays:    maxConfigInt(ctx, "youbanPublish.cycle.freeIntervalDays", 15),
+		CycleFreeInactiveDays:    maxConfigInt(ctx, "youbanPublish.cycle.freeInactiveDays", 7),
 	}, nil
 }
 

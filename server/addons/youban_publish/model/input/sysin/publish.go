@@ -216,17 +216,18 @@ type AccountSettingViewInp struct {
 }
 
 type AccountSettingSaveInp struct {
-	AccountId              int64  `json:"accountId" v:"required|min:1#账号ID不能为空|账号ID不能为空" dc:"账号ID"`
-	EnableSuffix           int    `json:"enableSuffix" dc:"是否启用发送后缀"`
-	SuffixContent          string `json:"suffixContent" dc:"发送后缀内容"`
-	EnableTitleMark        int    `json:"enableTitleMark" dc:"是否启用编号标识"`
-	MarkMode               string `json:"markMode" dc:"前缀模式：nickname/custom"`
-	NumberSource           string `json:"numberSource" dc:"编号来源：sequence/random"`
-	CustomMarkText         string `json:"customMarkText" dc:"自定义前缀"`
-	MarkPosition           string `json:"markPosition" dc:"显示位置：top/bottom/feeLine"`
-	SharedResourceEnabled  int    `json:"sharedResourceEnabled" dc:"是否允许上架账号管理租户共享资料"`
-	TelegramBindingEnabled int    `json:"telegramBindingEnabled" dc:"是否允许上架账号绑定并使用Telegram"`
-	GroupPushEnabled       int    `json:"groupPushEnabled" dc:"是否允许上架账号使用群聊推送"`
+	AccountId                int64  `json:"accountId" v:"required|min:1#账号ID不能为空|账号ID不能为空" dc:"账号ID"`
+	EnableSuffix             int    `json:"enableSuffix" dc:"是否启用发送后缀"`
+	SuffixContent            string `json:"suffixContent" dc:"发送后缀内容"`
+	EnableTitleMark          int    `json:"enableTitleMark" dc:"是否启用编号标识"`
+	MarkMode                 string `json:"markMode" dc:"前缀模式：nickname/custom"`
+	NumberSource             string `json:"numberSource" dc:"编号来源：sequence/random"`
+	CustomMarkText           string `json:"customMarkText" dc:"自定义前缀"`
+	MarkPosition             string `json:"markPosition" dc:"显示位置：top/bottom/feeLine"`
+	ProfileDetailViewEnabled int    `json:"profileDetailViewEnabled" dc:"是否允许只读查看租户资料详情"`
+	SharedResourceEnabled    int    `json:"sharedResourceEnabled" dc:"是否允许上架账号管理租户共享资料"`
+	TelegramBindingEnabled   int    `json:"telegramBindingEnabled" dc:"是否允许上架账号绑定并使用Telegram"`
+	GroupPushEnabled         int    `json:"groupPushEnabled" dc:"是否允许上架账号使用群聊推送"`
 }
 
 func (in *AccountSettingSaveInp) Filter(ctx context.Context) error {
@@ -259,6 +260,9 @@ func (in *AccountSettingSaveInp) Filter(ctx context.Context) error {
 	if in.EnableTitleMark != 0 && in.EnableTitleMark != 1 {
 		return gerror.New("编号标识开关不合法")
 	}
+	if in.ProfileDetailViewEnabled != 0 && in.ProfileDetailViewEnabled != 1 {
+		return gerror.New("资料详情权限开关不合法")
+	}
 	if in.SharedResourceEnabled != 0 && in.SharedResourceEnabled != 1 {
 		return gerror.New("共享资源开关不合法")
 	}
@@ -272,46 +276,49 @@ func (in *AccountSettingSaveInp) Filter(ctx context.Context) error {
 }
 
 type AccountSettingModel struct {
-	AccountId              int64       `json:"accountId" dc:"账号ID"`
-	EnableSuffix           int         `json:"enableSuffix" dc:"是否启用发送后缀"`
-	SuffixContent          string      `json:"suffixContent" dc:"发送后缀内容"`
-	EnableTitleMark        int         `json:"enableTitleMark" dc:"是否启用编号标识"`
-	MarkMode               string      `json:"markMode" dc:"前缀模式"`
-	NumberSource           string      `json:"numberSource" dc:"编号来源"`
-	CustomMarkText         string      `json:"customMarkText" dc:"自定义前缀"`
-	MarkPosition           string      `json:"markPosition" dc:"显示位置"`
-	PreviewMark            string      `json:"previewMark" dc:"编号标识预览"`
-	SharedResourceEnabled  int         `json:"sharedResourceEnabled" dc:"是否允许管理租户共享资料"`
-	TelegramBindingEnabled int         `json:"telegramBindingEnabled" dc:"是否允许绑定并使用Telegram"`
-	GroupPushEnabled       int         `json:"groupPushEnabled" dc:"是否允许使用群聊推送"`
-	CreatedAt              *gtime.Time `json:"createdAt" dc:"创建时间"`
-	UpdatedAt              *gtime.Time `json:"updatedAt" dc:"更新时间"`
+	AccountId                int64       `json:"accountId" dc:"账号ID"`
+	EnableSuffix             int         `json:"enableSuffix" dc:"是否启用发送后缀"`
+	SuffixContent            string      `json:"suffixContent" dc:"发送后缀内容"`
+	EnableTitleMark          int         `json:"enableTitleMark" dc:"是否启用编号标识"`
+	MarkMode                 string      `json:"markMode" dc:"前缀模式"`
+	NumberSource             string      `json:"numberSource" dc:"编号来源"`
+	CustomMarkText           string      `json:"customMarkText" dc:"自定义前缀"`
+	MarkPosition             string      `json:"markPosition" dc:"显示位置"`
+	PreviewMark              string      `json:"previewMark" dc:"编号标识预览"`
+	ProfileDetailViewEnabled int         `json:"profileDetailViewEnabled" dc:"是否允许只读查看租户资料详情"`
+	SharedResourceEnabled    int         `json:"sharedResourceEnabled" dc:"是否允许管理租户共享资料"`
+	TelegramBindingEnabled   int         `json:"telegramBindingEnabled" dc:"是否允许绑定并使用Telegram"`
+	GroupPushEnabled         int         `json:"groupPushEnabled" dc:"是否允许使用群聊推送"`
+	CreatedAt                *gtime.Time `json:"createdAt" dc:"创建时间"`
+	UpdatedAt                *gtime.Time `json:"updatedAt" dc:"更新时间"`
 }
 
 type AccountCapabilityModel struct {
-	AccountId              int64  `json:"accountId" dc:"账号ID"`
-	TenantId               int64  `json:"tenantId" dc:"租户ID"`
-	AccountType            string `json:"accountType" dc:"账号类型"`
-	SharedResourceEnabled  int    `json:"sharedResourceEnabled" dc:"是否允许管理租户共享资料"`
-	TelegramBindingEnabled int    `json:"telegramBindingEnabled" dc:"是否允许绑定并使用Telegram"`
-	GroupPushEnabled       int    `json:"groupPushEnabled" dc:"是否允许使用群聊推送"`
+	AccountId                int64  `json:"accountId" dc:"账号ID"`
+	TenantId                 int64  `json:"tenantId" dc:"租户ID"`
+	AccountType              string `json:"accountType" dc:"账号类型"`
+	ProfileDetailViewEnabled int    `json:"profileDetailViewEnabled" dc:"是否允许只读查看租户资料详情"`
+	SharedResourceEnabled    int    `json:"sharedResourceEnabled" dc:"是否允许管理租户共享资料"`
+	TelegramBindingEnabled   int    `json:"telegramBindingEnabled" dc:"是否允许绑定并使用Telegram"`
+	GroupPushEnabled         int    `json:"groupPushEnabled" dc:"是否允许使用群聊推送"`
 }
 
 type CurrentAccountModel struct {
-	Id                    int64                 `json:"id" dc:"账号ID"`
-	TenantId              int64                 `json:"tenantId" dc:"租户ID"`
-	ParentId              int64                 `json:"parentId" dc:"父账号ID"`
-	AccountType           string                `json:"accountType" dc:"账号类型"`
-	Nickname              string                `json:"nickname" dc:"账号名称"`
-	Username              string                `json:"username" dc:"用户名"`
-	Remark                string                `json:"remark" dc:"个人简介"`
-	Status                int                   `json:"status" dc:"状态"`
-	CreatedAt             *gtime.Time           `json:"createdAt" dc:"创建时间"`
-	UpdatedAt             *gtime.Time           `json:"updatedAt" dc:"更新时间"`
-	Vip                   *TenantVipStatusModel `json:"vip" dc:"会员状态"`
-	GroupPushEnabled      int                   `json:"groupPushEnabled" dc:"是否允许群聊推送"`
-	CycleFreeIntervalDays int                   `json:"cycleFreeIntervalDays" dc:"免费频道循环间隔天数"`
-	CycleFreeInactiveDays int                   `json:"cycleFreeInactiveDays" dc:"免费频道循环自动暂停天数"`
+	ProfileDetailViewEnabled int                   `json:"profileDetailViewEnabled" dc:"是否可只读查看租户资料详情"`
+	Id                       int64                 `json:"id" dc:"账号ID"`
+	TenantId                 int64                 `json:"tenantId" dc:"租户ID"`
+	ParentId                 int64                 `json:"parentId" dc:"父账号ID"`
+	AccountType              string                `json:"accountType" dc:"账号类型"`
+	Nickname                 string                `json:"nickname" dc:"账号名称"`
+	Username                 string                `json:"username" dc:"用户名"`
+	Remark                   string                `json:"remark" dc:"个人简介"`
+	Status                   int                   `json:"status" dc:"状态"`
+	CreatedAt                *gtime.Time           `json:"createdAt" dc:"创建时间"`
+	UpdatedAt                *gtime.Time           `json:"updatedAt" dc:"更新时间"`
+	Vip                      *TenantVipStatusModel `json:"vip" dc:"会员状态"`
+	GroupPushEnabled         int                   `json:"groupPushEnabled" dc:"是否允许群聊推送"`
+	CycleFreeIntervalDays    int                   `json:"cycleFreeIntervalDays" dc:"免费频道循环间隔天数"`
+	CycleFreeInactiveDays    int                   `json:"cycleFreeInactiveDays" dc:"免费频道循环自动暂停天数"`
 }
 
 type UpdateAccountPasswordInp struct {
@@ -505,6 +512,7 @@ type BotMediaCacheFileModel struct {
 }
 
 type ProfileListInp struct {
+	PushChannelId int64 `json:"pushChannelId" dc:"推送目标频道ID"`
 	form.PageReq
 	TenantId            int64  `json:"tenantId" dc:"租户ID"`
 	AccountId           int64  `json:"accountId" dc:"上架账号ID"`
@@ -581,6 +589,7 @@ type ProfileModel struct {
 	Status                 int         `json:"status" dc:"状态"`
 	ImageCount             int         `json:"imageCount" dc:"图片数"`
 	VideoCount             int         `json:"videoCount" dc:"视频数"`
+	CanViewDetail          bool        `json:"canViewDetail" dc:"是否可查看资料发布和收录详情"`
 	CanEdit                bool        `json:"canEdit" dc:"当前账号是否可编辑"`
 	Permission             string      `json:"permission" dc:"当前账号权限：creator/admin/visitor"`
 	PublishedAt            *gtime.Time `json:"publishedAt" dc:"发布时间"`

@@ -142,6 +142,7 @@ func applyNoteIndexFilters(mod *gdb.Model, in *sysin.ProfileListInp) *gdb.Model 
 	if tag := strings.TrimSpace(in.Tag); tag != "" {
 		mod = applyNoteIndexTagFilter(mod, splitProfileTagValues(tag))
 	}
+	mod = applyProfilePushChannelFilter(mod, in, "i.tenant_id", "i.profile_id")
 	return applyProfileKeywordSearch(mod, in.Keyword, noteIndexSearchFields())
 }
 

@@ -27,7 +27,7 @@ func (s *sSysPublish) MyProfileList(ctx context.Context, in *sysin.ProfileListIn
 	if err != nil {
 		return nil, 0, err
 	}
-	accountIds, err := s.sharedProfileAccountIds(ctx, capability)
+	accountIds, err := s.readableProfileAccountIds(ctx, capability, in.AccountId)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -52,7 +52,7 @@ func (s *sSysPublish) MyProfileView(ctx context.Context, in *sysin.ProfileViewIn
 		return nil, err
 	}
 	ownerScope := account.Id
-	if capability.SharedResourceEnabled == 1 {
+	if canReadTenantProfiles(capability) {
 		ownerScope = 0
 	}
 	profileId, err := s.resolveProfileViewId(ctx, in, account.TenantId, ownerScope)
@@ -173,15 +173,17 @@ func (s *sSysPublish) MyNoteList(ctx context.Context, in *sysin.NoteListInp) (li
 	if err != nil {
 		return nil, 0, err
 	}
-	accountIds, err := s.sharedProfileAccountIds(ctx, capability)
+	accountIds, err := s.readableProfileAccountIds(ctx, capability, in.AccountId)
 	if err != nil {
 		return nil, 0, err
 	}
 	in.TenantId, in.AccountId = account.TenantId, 0
-	list, totalCount, err = s.noteListByAccountIds(ctx, in, accountIds)
+	profiles, count, queryErr := s.profileListByAccountIds(ctx, &in.ProfileListInp, account.TenantId, accountIds)
+	list, totalCount, err = s.notesFromProfiles(ctx, profiles, count, queryErr)
 	for _, item := range list {
 		if item != nil {
 			markSharedProfilePermission(&item.ProfileModel, capability)
+			sanitizeProfileMediaOriginals(item.Media, item.CanEdit)
 		}
 	}
 	return

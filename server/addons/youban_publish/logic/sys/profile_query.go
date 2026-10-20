@@ -425,6 +425,7 @@ func (s *sSysPublish) applyProfileFilters(ctx context.Context, mod *gdb.Model, i
 
 func (s *sSysPublish) applyProfileNonKeywordFilters(ctx context.Context, mod *gdb.Model, in *sysin.ProfileListInp) *gdb.Model {
 	_ = ctx
+	mod = applyProfilePushChannelFilter(mod, in, "ps.tenant_id", "p.id")
 	if in == nil {
 		return mod
 	}
@@ -470,8 +471,8 @@ func (s *sSysPublish) applyProfileNonKeywordFilters(ctx context.Context, mod *gd
 		condition := "EXISTS (SELECT 1 FROM " + publishCollectDispatchTable + " d JOIN " + publishCollectEventTable + " e ON e.id=d.event_id WHERE d.profile_id=p.id AND d.source_id=?"
 		args := []interface{}{in.CollectSourceId}
 		if chatId := strings.TrimSpace(in.CollectSourceChatId); chatId != "" {
-			condition += " AND e.source_chat_id=?"
-			args = append(args, chatId)
+			condition += " AND e.source_chat_id IN (?,?)"
+			args = append(args, chatId, strings.TrimPrefix(chatId, "-100"))
 		}
 		mod = mod.Where(condition+")", args...)
 	}

@@ -59,13 +59,14 @@ func (s *sSysPublish) activeAccountCapability(ctx context.Context, tenantId, acc
 		mod = mod.Where("a."+accountColumns.TenantId, tenantId)
 	}
 	var capability *sysin.AccountCapabilityModel
-	if err := mod.Fields("a.id AS account_id,a.tenant_id,a.account_type,COALESCE(s.shared_resource_enabled,0) AS shared_resource_enabled,COALESCE(s.telegram_binding_enabled,0) AS telegram_binding_enabled,COALESCE(s.group_push_enabled,0) AS group_push_enabled").Scan(&capability); err != nil {
+	if err := mod.Fields("a.id AS account_id,a.tenant_id,a.account_type,COALESCE(s.profile_detail_view_enabled,0) AS profile_detail_view_enabled,COALESCE(s.shared_resource_enabled,0) AS shared_resource_enabled,COALESCE(s.telegram_binding_enabled,0) AS telegram_binding_enabled,COALESCE(s.group_push_enabled,0) AS group_push_enabled").Scan(&capability); err != nil {
 		return nil, gerror.Wrap(err, "读取上架账号权限失败")
 	}
 	if capability == nil || capability.AccountId <= 0 || capability.TenantId <= 0 {
 		return nil, gerror.New("绑定的上架账号不可用")
 	}
 	if capability.AccountType != sysin.PublishAccountTypeUploader {
+		capability.ProfileDetailViewEnabled = 0
 		capability.SharedResourceEnabled = 0
 		capability.TelegramBindingEnabled = 0
 		capability.GroupPushEnabled = 0
@@ -115,6 +116,9 @@ func sharedProfilePermission(capability *sysin.AccountCapabilityModel, profile *
 func markSharedProfilePermission(item *sysin.ProfileModel, capability *sysin.AccountCapabilityModel) {
 	permission := sharedProfilePermission(capability, item)
 	markProfilePermission(item, permission)
+	if item != nil {
+		item.CanViewDetail = permission != sysin.ProfilePermissionVisitor || (canReadTenantProfiles(capability) && item.TenantId == capability.TenantId)
+	}
 	if item != nil && permission == sysin.ProfilePermissionShared {
 		item.CanEdit = true
 	}
