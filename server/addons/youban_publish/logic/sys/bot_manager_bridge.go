@@ -56,6 +56,11 @@ func (s *sSysPublish) BotManagerApplyBinding(ctx context.Context, in *sysin.BotM
 	}
 	botId := in.BotId
 	err := dao.YoubanPublishChannel.Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		// Share the durable creation gate with every new profile job. Keep it
+		// through the unfinished-job check and binding commit, before remote RPCs.
+		if _, err := lockChannelPermissionCreationTx(ctx, tx, in.TenantId, in.ChannelId); err != nil {
+			return err
+		}
 		// Serialize compatibility Bot creation across different channels of one account.
 		var owner *struct{ Id int64 }
 		if err := tx.Model(publishAccountTable).Where("id", in.AccountId).Where("tenant_id", in.TenantId).WhereNull("deleted_at").LockUpdate().Scan(&owner); err != nil {
@@ -92,12 +97,12 @@ func (s *sSysPublish) BotManagerApplyBinding(ctx context.Context, in *sysin.BotM
 			return err
 		}
 		if in.Remove {
-			n, err := tx.Model(publishTgJobTable).Where("tenant_id", in.TenantId).Where("channel_id", in.ChannelId).Where("bot_id", botId).WhereIn("status", []string{telegramJobStatusSending, "unknown"}).Count()
+			n, err := botManagerUnfinishedJobs(ctx, in.TenantId, in.ChannelId, botId)
 			if err != nil {
 				return err
 			}
 			if n > 0 {
-				return gerror.New("机器人存在发送中或结果待确认的任务，请完成后再移出")
+				return gerror.New("该机器人还有未完成发布任务，请完成或取消后移出")
 			}
 		} else {
 			if strings.TrimSpace(in.BotToken) == "" {
@@ -197,7 +202,7 @@ func (s *sSysPublish) BotManagerProtectChannel(ctx context.Context, in *sysin.Bo
 	}
 	defer s.releaseTelegramChannelLease(ctx, lease)
 	// Queued jobs retain Bot IDs. Do not break their transport by removing it.
-	n, err := dao.YoubanPublishChannel.DB().Model(publishTgJobTable).Ctx(ctx).Where("tenant_id", in.TenantId).Where("channel_id", in.ChannelId).Where("bot_id", in.BotId).WhereNotIn("status", []string{"sent", "failed", "cancelled", "timeout_cancelled"}).Count()
+	n, err := botManagerUnfinishedJobs(ctx, in.TenantId, in.ChannelId, in.BotId)
 	if err != nil {
 		return err
 	}
@@ -205,6 +210,12 @@ func (s *sSysPublish) BotManagerProtectChannel(ctx context.Context, in *sysin.Bo
 		return gerror.New("该机器人还有未完成发布任务，请完成或取消后移出")
 	}
 	return mutate()
+}
+
+func botManagerUnfinishedJobs(ctx context.Context, tenantId, channelId, botId int64) (int, error) {
+	return dao.YoubanPublishChannel.DB().Model(publishTgJobTable).Ctx(ctx).
+		Where("tenant_id", tenantId).Where("channel_id", channelId).Where("bot_id", botId).
+		WhereNotIn("status", []string{telegramJobStatusSent, telegramJobStatusFailed, telegramJobStatusSuperseded, "cancelled", "timeout_cancelled"}).Count()
 }
 
 func (s *sSysPublish) BotManagerValidateToken(ctx context.Context, tenantId, accountId int64, token string) error {

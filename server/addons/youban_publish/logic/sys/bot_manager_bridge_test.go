@@ -28,6 +28,7 @@ func TestBotManagerPublishBridgePostgres(t *testing.T) {
 	db := g.DB()
 	err := db.Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		statements := []string{
+			"CREATE TEMP TABLE hg_youban_publish_channel_permission_circuit(tenant_id bigint,channel_id bigint,paused int DEFAULT 0,PRIMARY KEY(tenant_id,channel_id)) ON COMMIT DROP",
 			"CREATE TEMP TABLE hg_youban_publish_account(id bigint PRIMARY KEY,tenant_id bigint,deleted_at timestamp) ON COMMIT DROP",
 			"CREATE TEMP TABLE hg_youban_publish_tg_account(id bigint PRIMARY KEY,tenant_id bigint,account_id bigint,deleted_at timestamp) ON COMMIT DROP",
 			"CREATE TEMP TABLE hg_youban_publish_tg_channel(id bigint PRIMARY KEY,tenant_id bigint,tg_account_id bigint,channel_id text,access_hash text) ON COMMIT DROP",
