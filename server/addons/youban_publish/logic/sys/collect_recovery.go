@@ -834,6 +834,10 @@ func (s *sSysPublish) recoverCollectPublishTasks(ctx context.Context, limit int)
 		if eventErr != nil || event.IsEmpty() {
 			continue
 		}
+		rule, ruleErr := pdao.YoubanPublishCollectRule.Ctx(ctx).Where("id", row["rule_id"].Int64()).WhereNull("deleted_at").One()
+		if ruleErr != nil || rule.IsEmpty() {
+			continue
+		}
 		if err = s.submitCollectProfileDispatch(ctx, row["id"].Int64(), row["profile_id"].Int64(), event); err != nil {
 			g.Log().Warningf(ctx, "恢复采集资料TG任务失败 dispatch:%d err:%+v", row["id"].Int64(), err)
 			continue
