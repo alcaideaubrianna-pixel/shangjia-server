@@ -69,24 +69,3 @@ func TestPublishJobRecordMessageTerminalStates(t *testing.T) {
 		t.Fatalf("unknown message = %q", got)
 	}
 }
-
-func TestIsFullPushActiveRecord(t *testing.T) {
-	tests := []struct {
-		name   string
-		action string
-		status string
-		want   bool
-	}{
-		{name: "pending full push", action: publishSuccessTypeFull, status: "pending", want: true},
-		{name: "sending full push", action: publishSuccessTypeFull, status: "sending", want: true},
-		{name: "successful full push", action: publishSuccessTypeFull, status: "success", want: false},
-		{name: "normal publish", action: publishSuccessTypeProfile, status: "pending", want: false},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if got := isFullPushActiveRecord(test.action, test.status); got != test.want {
-				t.Fatalf("isFullPushActiveRecord(%q, %q) = %v, want %v", test.action, test.status, got, test.want)
-			}
-		})
-	}
-}

@@ -27,6 +27,7 @@ func (s *sSysPublish) publishRecordListFast(ctx context.Context, in *sysin.Publi
 	if in.Action != "" {
 		base = base.Where("l.action", in.Action)
 	}
+	base = applyPublishRecordVisibilityFilter(base)
 	countMod := base.Clone()
 	if in.Status != "" {
 		countMod = countMod.LeftJoin(publishTgJobTable+" j", "j.id=l.job_id")
