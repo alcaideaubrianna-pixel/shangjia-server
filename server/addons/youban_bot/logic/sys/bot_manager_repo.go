@@ -13,13 +13,14 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/util/guid"
+	ci "hotgo/addons/telegram_collector/model/input/sysin"
 	"hotgo/addons/youban_bot/internal/dao"
 	"hotgo/addons/youban_bot/internal/model/do"
 	"hotgo/addons/youban_bot/internal/model/entity"
 	pub "hotgo/addons/youban_publish/service"
 )
 
-const managerTaskType = "bot_manager"
+const managerTaskType = ci.AccountTaskTypeBotManager
 const managerPageSize = 10
 
 func managerIDs(raw string) []int64 {
@@ -85,7 +86,15 @@ func managerBot(ctx context.Context, st *entity.YoubanBotManagerState, id int64)
 	return row, nil
 }
 
-// Catalog refresh is explicit. Reopening menus and pagination read DB only.
+// Only show actual channel memberships, not the account's credential inventory.
+func managerChannelBotsModel(ctx context.Context, st *entity.YoubanBotManagerState) *gdb.Model {
+	bc, mc, cc := dao.YoubanBotManaged.Columns(), dao.YoubanBotManagedMember.Columns(), dao.YoubanBotManagedChannel.Columns()
+	return dao.YoubanBotManaged.Ctx(ctx).Where(bc.TenantId, st.TenantId).Where(bc.AccountId, st.AccountId).
+		Where("EXISTS (SELECT 1 FROM "+dao.YoubanBotManagedMember.Table()+" m JOIN "+dao.YoubanBotManagedChannel.Table()+" ch ON ch."+cc.Id+"=m."+mc.ChannelId+
+			" WHERE m."+mc.ManagedBotId+"="+dao.YoubanBotManaged.Table()+"."+bc.Id+" AND m."+mc.TenantId+"=? AND m."+mc.AccountId+"=? AND ch."+cc.TenantId+"=? AND ch."+cc.AccountId+"=? AND ch."+cc.SyncStatus+"<>'unavailable' AND m."+mc.MemberStatus+" IN ('admin','member'))", st.TenantId, st.AccountId, st.TenantId, st.AccountId)
+}
+
+// Full syncs are durable and deduplicated; missing channel data may request one.
 func (s *sSysBot) managerSync(ctx context.Context, st *entity.YoubanBotManagerState) error {
 	return dao.YoubanBotManagerState.Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		var locked entity.YoubanBotManagerState
@@ -154,6 +163,23 @@ func (s *sSysBot) managerSync(ctx context.Context, st *entity.YoubanBotManagerSt
 		}
 		return err
 	})
+}
+
+func (s *sSysBot) managerSyncFeedback(ctx context.Context, st *entity.YoubanBotManagerState, msgID int) error {
+	if err := s.managerSync(ctx, st); err != nil {
+		return err
+	}
+	c := dao.YoubanBotManagerTask.Columns()
+	n, err := dao.YoubanBotManagerTask.Ctx(ctx).Where(c.TenantId, st.TenantId).Where(c.AccountId, st.AccountId).
+		Where(c.Action, "sync").WhereIn(c.Status, []string{"pending", "submitted"}).Count()
+	if err != nil {
+		return err
+	}
+	text := "没有可同步的上架频道，请先配置上架频道并绑定可访问频道的 Telegram 账号。"
+	if n > 0 {
+		text = fmt.Sprintf("正在同步 %d 个上架频道的管理员和机器人。完成后会通知并展示机器人列表；重复点击不会重复创建任务。", n)
+	}
+	return s.managerSend(ctx, st.EntryBotId, st.TelegramUserId, msgID, text, managerSyncButtons())
 }
 
 func managerNewTask(ctx context.Context, st *entity.YoubanBotManagerState, batch, action string, botID, channelID int64, rights string) (int64, error) {

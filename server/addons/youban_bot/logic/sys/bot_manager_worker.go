@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/database/gdb"
 	"html"
 	"strconv"
@@ -219,8 +218,11 @@ func (s *sSysBot) managerSyncChannel(ctx context.Context, client *tg.Client, st 
 					}
 				}
 			}
+			if len(page.Participants) == 0 && offset < page.Count {
+				return gerror.New("频道成员分页数据不完整，请重新同步")
+			}
 			offset += len(page.Participants)
-			if len(page.Participants) < 100 {
+			if offset >= page.Count || len(page.Participants) == 0 {
 				break
 			}
 		}
@@ -232,6 +234,11 @@ func (s *sSysBot) managerSyncChannel(ctx context.Context, client *tg.Client, st 
 		for id, u := range users {
 			_, err := dao.YoubanBotManaged.Ctx(ctx).Data(do.YoubanBotManaged{TenantId: st.TenantId, AccountId: st.AccountId, TelegramBotId: id, BotName: strings.TrimSpace(u.FirstName + " " + u.LastName), BotUsername: u.Username, Status: 1}).OnConflict(bc.TenantId, bc.AccountId, bc.TelegramBotId).OnDuplicate(bc.BotName, bc.BotUsername).Save()
 			if err != nil {
+				return err
+			}
+			// Restore a formerly deleted discovery row if Telegram still reports it.
+			// Credentials are left untouched; discovery never invents a Token.
+			if _, err := tx.Exec("UPDATE "+dao.YoubanBotManaged.Table()+" SET "+bc.DeletedAt+"=NULL WHERE "+bc.TenantId+"=? AND "+bc.AccountId+"=? AND "+bc.TelegramBotId+"=?", st.TenantId, st.AccountId, id); err != nil {
 				return err
 			}
 			var b entity.YoubanBotManaged
@@ -325,7 +332,7 @@ func (s *sSysBot) managerMutateChannel(ctx context.Context, client *tg.Client, s
 	if task.Action != "attach" && task.Action != "rights" {
 		return gerror.New("不支持的机器人管理操作")
 	}
-	if b.BotToken == "" {
+	if task.Action == "attach" && b.BotToken == "" {
 		return gerror.New("尚未配置机器人Token")
 	}
 	if task.Action == "rights" && (!r.Post || !r.Edit || !r.Delete) {
@@ -340,7 +347,7 @@ func (s *sSysBot) managerSetRights(ctx context.Context, client *tg.Client, st *e
 	// Fail closed before revoking remote permission. A failed RPC leaves this
 	// channel unbound until the user restores posting permission explicitly.
 	projection.Remove = !r.Post
-	if projection.Remove {
+	if projection.Remove && (b.PublishBotId > 0 || b.BotToken != "") {
 		if _, err := ps.SysPublish().BotManagerApplyBinding(ctx, projection); err != nil {
 			return err
 		}
@@ -368,6 +375,12 @@ func (s *sSysBot) managerSetRights(ctx context.Context, client *tg.Client, st *e
 		return gerror.New("机器人权限复查未通过")
 	}
 	if !projection.Remove {
+		// Managing a discovered Bot's Telegram rights needs no Token. Do not
+		// manufacture a publishing credential/binding for somebody else's Bot.
+		if b.BotToken == "" && b.PublishBotId == 0 {
+			s.managerRefreshAfterMutation(ctx, client, st, ch, peer)
+			return nil
+		}
 		id, err := ps.SysPublish().BotManagerApplyBinding(ctx, projection)
 		if err != nil {
 			return err
@@ -481,9 +494,18 @@ func (s *sSysBot) managerTick(ctx context.Context) error {
 			next := time.Now().Add(2 * time.Second)
 			id, err := cs.AccountTasks().Submit(ctx, &ci.AccountTaskSubmit{TenantID: row.TenantId, AccountID: ch.TgAccountId, TaskType: managerTaskType, TaskKey: managerTaskKey(row.Id), Priority: -200, MaxAttempts: 3, NextRunAt: &next})
 			if err != nil {
-				return err
+				// Keep a durable diagnostic and rotate this row; one bad account
+				// must not prevent the other channels from being submitted.
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				if _, updateErr := dao.YoubanBotManagerTask.Ctx(ctx).WherePri(row.Id).Where(tc.Status, "pending").Data(do.YoubanBotManagerTask{ErrorMessage: sensitive.Diagnostic(err.Error())}).Update(); updateErr != nil {
+					return updateErr
+				}
+				g.Log().Warningf(ctx, "机器人管理任务提交失败 taskId:%d channelId:%d tgAccountId:%d err:%s", row.Id, ch.PublishChannelId, ch.TgAccountId, sensitive.Diagnostic(err.Error()))
+				continue
 			}
-			if _, err := dao.YoubanBotManagerTask.Ctx(ctx).WherePri(row.Id).Where(tc.Status, "pending").Data(do.YoubanBotManagerTask{AccountTaskId: id, Status: "submitted"}).Update(); err != nil {
+			if _, err := dao.YoubanBotManagerTask.Ctx(ctx).WherePri(row.Id).Where(tc.Status, "pending").Data(do.YoubanBotManagerTask{AccountTaskId: id, Status: "submitted", ErrorMessage: ""}).Update(); err != nil {
 				return err
 			}
 		} else {
@@ -568,12 +590,19 @@ func (s *sSysBot) managerNotifyBatch(ctx context.Context, root *entity.YoubanBot
 		_, err := dao.YoubanBotManagerTask.Ctx(ctx).Where(c.BatchKey, root.BatchKey).Data(do.YoubanBotManagerTask{Notified: 1}).Update()
 		return err
 	}
-	if root.Action == "sync" {
+	if root.Action == "sync" && success == len(tasks) {
 		if _, err := dao.YoubanBotManagerState.Ctx(ctx).WherePri(st.Id).Data(do.YoubanBotManagerState{SyncedAt: gtime.Now()}).Update(); err != nil {
 			return err
 		}
 	}
 	text := fmt.Sprintf("机器人管理处理完成：成功 %d 个，失败 %d 个。\n", success, len(tasks)-success)
+	if root.Action == "sync" {
+		n, err := managerChannelBotsModel(ctx, st).Count()
+		if err != nil {
+			return err
+		}
+		text += fmt.Sprintf("当前上架频道共发现 %d 个不同机器人（不要求持有 Token）。\n", n)
+	}
 	for _, t := range tasks {
 		if t.Status == "failed" {
 			text += fmt.Sprintf("频道记录 #%d：%s\n", t.ChannelId, html.EscapeString(sensitive.Diagnostic(t.ErrorMessage)))
@@ -582,7 +611,7 @@ func (s *sSysBot) managerNotifyBatch(ctx context.Context, root *entity.YoubanBot
 			break
 		}
 	}
-	if err := s.managerSend(ctx, root.EntryBotId, root.TelegramUserId, 0, text, [][]models.InlineKeyboardButton{{managerButton("查看机器人列表", "list", 1, 0), managerButton("查看任务结果", "tasks", 1, 0)}}); err != nil {
+	if err := s.managerSend(ctx, root.EntryBotId, root.TelegramUserId, 0, text, managerSyncButtons()); err != nil {
 		if isBroadcastBlocked(err) {
 			_, updateErr := dao.YoubanBotManagerTask.Ctx(ctx).Where(c.BatchKey, root.BatchKey).Data(do.YoubanBotManagerTask{Notified: 1}).Update()
 			return updateErr

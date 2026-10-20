@@ -112,3 +112,61 @@ func TestBotManagerTokenClaimUniqueness(t *testing.T) {
 		t.Fatal("two accounts claimed same Bot with different tokens")
 	}
 }
+
+func TestBotManagerSyncReadsEveryPageAndPreservesOnIncompletePage(t *testing.T) {
+	ctx, s, st := managerTestDB(t)
+	managerTestChannel(t, ctx, 1, 0, 0, 0)
+	var ch entity.YoubanBotManagedChannel
+	_ = dao.YoubanBotManagedChannel.Ctx(ctx).WherePri(1).Scan(&ch)
+	incomplete := false
+	pages := 0
+	client := tg.NewClient(managerTestInvoker{invoke: func(_ context.Context, in bin.Encoder, out bin.Decoder) error {
+		switch request := in.(type) {
+		case *tg.ChannelsGetFullChannelRequest:
+			full := &tg.ChannelFull{ID: 1, ChatPhoto: &tg.PhotoEmpty{}, NotifySettings: tg.PeerNotifySettings{}, Pts: 1}
+			full.SetAdminsCount(102)
+			return managerTestResponse(out, &tg.MessagesChatFull{FullChat: full})
+		case *tg.HelpGetAppConfigRequest:
+			return errors.New("optional config unavailable")
+		case *tg.ChannelsGetParticipantsRequest:
+			if _, ok := request.Filter.(*tg.ChannelParticipantsBots); ok {
+				return managerTestResponse(out, &tg.ChannelsChannelParticipants{})
+			}
+			pages++
+			page := &tg.ChannelsChannelParticipants{Count: 102}
+			// Deliberately short pages: the advertised count requires continuing.
+			if incomplete && request.Offset > 0 {
+				return managerTestResponse(out, page)
+			}
+			end := request.Offset + 51
+			if end > 102 {
+				end = 102
+			}
+			for i := request.Offset; i < end; i++ {
+				id := int64(1000 + i)
+				page.Participants = append(page.Participants, &tg.ChannelParticipantAdmin{UserID: id, PromotedBy: 7, Date: 1})
+				// One human administrator counts toward capacity but not Bot inventory.
+				page.Users = append(page.Users, &tg.User{ID: id, FirstName: "Admin", Bot: i != 0, Username: fmt.Sprintf("bot_%d", i)})
+			}
+			return managerTestResponse(out, page)
+		default:
+			return fmt.Errorf("unexpected RPC %T", in)
+		}
+	}})
+	peer := &tg.InputChannel{ChannelID: 1, AccessHash: 123}
+	if err := s.managerSyncChannel(ctx, client, st, &ch, peer); err != nil {
+		t.Fatal(err)
+	}
+	n, err := managerChannelBotsModel(ctx, st).Count()
+	if err != nil || n != 101 || pages != 2 {
+		t.Fatal("not all channel Bots were persisted", n, pages, err)
+	}
+	incomplete = true
+	if err := s.managerSyncChannel(ctx, client, st, &ch, peer); err == nil {
+		t.Fatal("incomplete pagination accepted as complete snapshot")
+	}
+	n, err = managerChannelBotsModel(ctx, st).Count()
+	if err != nil || n != 101 {
+		t.Fatal("incomplete sync erased valid Bot memberships", n, err)
+	}
+}
