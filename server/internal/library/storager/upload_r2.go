@@ -2,7 +2,6 @@ package storager
 
 import (
 	"context"
-	"io"
 	"mime"
 	"path/filepath"
 	"strings"
@@ -42,6 +41,9 @@ func (d *R2Drive) Upload(ctx context.Context, file *ghttp.UploadFile, meta *File
 		return "", err
 	}
 	client, err := minio.New(config.R2Endpoint, opts)
+	if err != nil {
+		return "", gerror.Wrap(err, "初始化R2客户端失败")
+	}
 	key, err := d.objectPath(meta)
 	if err != nil {
 		return "", err
@@ -65,6 +67,9 @@ func (d *R2Drive) CreateMultipart(ctx context.Context, in *CheckMultipartParams)
 		return nil, err
 	}
 	core, err := minio.NewCore(config.R2Endpoint, opts)
+	if err != nil {
+		return nil, gerror.Wrap(err, "初始化R2分片客户端失败")
+	}
 	key, err := d.objectPath(in.meta)
 	if err != nil {
 		return nil, err
@@ -87,6 +92,9 @@ func (d *R2Drive) UploadPart(ctx context.Context, in *UploadPartParams) (*Upload
 		return nil, err
 	}
 	core, err := minio.NewCore(config.R2Endpoint, opts)
+	if err != nil {
+		return nil, gerror.Wrap(err, "初始化R2分片客户端失败")
+	}
 	part, err := in.File.Open()
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取R2分片失败")
@@ -96,7 +104,15 @@ func (d *R2Drive) UploadPart(ctx context.Context, in *UploadPartParams) (*Upload
 	if err != nil {
 		return nil, gerror.Wrap(err, "上传R2分片失败")
 	}
+	for _, uploaded := range in.mp.UploadedIndex {
+		if uploaded == in.Index {
+			return &UploadPartModel{Progress: CalcUploadProgress(in.mp.UploadedIndex, in.mp.ShardCount)}, nil
+		}
+	}
 	in.mp.UploadedIndex = append(in.mp.UploadedIndex, in.Index)
+	if len(in.mp.UploadedIndex) > in.mp.ShardCount {
+		return nil, gerror.New("R2分片编号超过预期数量")
+	}
 	if len(in.mp.UploadedIndex) < in.mp.ShardCount {
 		_ = UpdateMultipartProgress(ctx, in.mp)
 		return &UploadPartModel{Progress: CalcUploadProgress(in.mp.UploadedIndex, in.mp.ShardCount)}, nil
@@ -109,6 +125,12 @@ func (d *R2Drive) UploadPart(ctx context.Context, in *UploadPartParams) (*Upload
 	for _, p := range listed.ObjectParts {
 		parts = append(parts, minio.CompletePart{PartNumber: p.PartNumber, ETag: p.ETag})
 	}
+	// S3 requires parts in ascending order and each expected part exactly once.
+	for i, part := range parts {
+		if part.PartNumber != i+1 {
+			return nil, gerror.New("R2分片编号不连续，无法合并")
+		}
+	}
 	if len(parts) != in.mp.ShardCount {
 		return nil, gerror.Newf("R2分片数量不完整，预期:%d 实际:%d", in.mp.ShardCount, len(parts))
 	}
@@ -118,5 +140,3 @@ func (d *R2Drive) UploadPart(ctx context.Context, in *UploadPartParams) (*Upload
 	_ = DelMultipartProgress(ctx, in.mp)
 	return &UploadPartModel{Progress: 100, Finish: true}, nil
 }
-
-var _ io.Reader
