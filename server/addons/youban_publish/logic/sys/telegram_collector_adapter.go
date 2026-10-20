@@ -1085,13 +1085,6 @@ func (s *sSysPublish) ingestCollectorBotDelivery(ctx context.Context, delivery *
 	if source.IsEmpty() {
 		return nil
 	}
-	enabled, configErr := s.collectTenantEnabled(ctx, source["tenant_id"].Int64())
-	if configErr != nil {
-		return configErr
-	}
-	if !enabled {
-		return nil
-	}
 	blocked, err := s.collectMessageFromAccountPublishChannel(ctx, source["tenant_id"].Int64(), 0, delivery.SourceChatID)
 	if err != nil {
 		return gerror.Wrap(err, "检查Bot采集上架频道过滤失败")
@@ -1342,13 +1335,6 @@ func botCollectChannelRelationEnabled(collectEnabled int, status, approvalStatus
 }
 
 func (s *sSysPublish) ingestCollectorAccountDelivery(ctx context.Context, delivery *collectorin.CollectorDelivery) error {
-	enabled, err := s.collectTenantEnabled(ctx, delivery.TenantID)
-	if err != nil {
-		return err
-	}
-	if !enabled {
-		return nil
-	}
 	if err := s.ensureAccountCollectChannelRelation(ctx, delivery); err != nil {
 		return err
 	}
