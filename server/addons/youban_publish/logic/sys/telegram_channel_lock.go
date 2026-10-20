@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -142,6 +143,9 @@ func (s *sSysPublish) withTelegramChannelDBLock(ctx context.Context, key string,
 	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		switch dbType {
 		case consts.DBPgsql:
+			if err := configureTelegramChannelLockTimeout(tx); err != nil {
+				return err
+			}
 			if _, err := tx.Exec("SELECT pg_advisory_xact_lock(hashtext(?))", key); err != nil {
 				return gerror.Wrap(err, "获取TG频道发送锁失败")
 			}
@@ -160,4 +164,17 @@ func (s *sSysPublish) withTelegramChannelDBLock(ctx context.Context, key string,
 			return fn()
 		}
 	})
+}
+
+// This transaction holds only the cross-instance channel lock while the callback
+// performs Telegram I/O. A short database idle timeout must not release the lock
+// before the existing send budget expires. LOCAL keeps ordinary transactions and
+// pooled connections on their configured timeout; zero (disabled) is preserved.
+func configureTelegramChannelLockTimeout(tx gdb.TX) error {
+	minimum := telegramChannelLeaseTTL.Milliseconds()
+	_, err := tx.Exec(`SELECT set_config('idle_in_transaction_session_timeout',
+		CASE WHEN setting::bigint > 0 AND setting::bigint < ?
+		THEN ? ELSE setting || 'ms' END, true)
+		FROM pg_settings WHERE name='idle_in_transaction_session_timeout'`, minimum, fmt.Sprintf("%dms", minimum))
+	return gerror.Wrap(err, "配置TG频道持锁事务超时失败")
 }
