@@ -1199,3 +1199,23 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_ai_ops_repair_plan_status" ON "hg_youban_pub
 CREATE INDEX IF NOT EXISTS "idx_ybp_bot_message_source_received" ON "hg_youban_publish_bot_message_source" ("received_at", "id");
 
 ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "profile_detail_view_enabled" smallint NOT NULL DEFAULT 0;
+
+-- Explicit maintenance only: keep live upgrade transactions free of historical cleanup.
+-- A bound rule is source-local. Global rules are account-level delete/replace policies only.
+UPDATE "hg_youban_publish_collect_rule" r
+SET "global_enabled" = 0, "updated_at" = CURRENT_TIMESTAMP
+WHERE r."global_enabled" = 1
+  AND EXISTS (
+    SELECT 1 FROM "hg_youban_publish_collect_source_rule" sr WHERE sr."rule_id" = r."id"
+  );
+
+DELETE FROM "hg_youban_publish_collect_source_rule" sr
+USING "hg_youban_publish_collect_source_rule" keep
+WHERE sr."source_id" = keep."source_id"
+  AND (sr."sort", sr."id") > (keep."sort", keep."id");
+
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_collect_source_single_rule"
+  ON "hg_youban_publish_collect_source_rule" ("source_id");
+
+ALTER TABLE "hg_youban_publish_account" ADD COLUMN IF NOT EXISTS "last_active_at" timestamp DEFAULT NULL;
+UPDATE "hg_youban_publish_account" SET "last_active_at" = NOW() WHERE "last_active_at" IS NULL;

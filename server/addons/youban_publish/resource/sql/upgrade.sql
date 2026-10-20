@@ -998,3 +998,19 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_ai_ops_repair_plan` (
 ALTER TABLE `hg_youban_publish_bot_message_source` ADD INDEX IF NOT EXISTS `idx_ybp_bot_message_source_received` (`received_at`,`id`);
 
 ALTER TABLE `hg_youban_publish_account_setting` ADD COLUMN IF NOT EXISTS `profile_detail_view_enabled` tinyint(1) NOT NULL DEFAULT 0 COMMENT '是否可只读查看租户资料详情';
+
+-- Explicit maintenance only: keep live upgrade transactions free of historical cleanup.
+-- A bound rule is source-local. Global rules are account-level delete/replace policies only.
+UPDATE `hg_youban_publish_collect_rule` r
+INNER JOIN `hg_youban_publish_collect_source_rule` sr ON sr.`rule_id` = r.`id`
+SET r.`global_enabled` = 0, r.`updated_at` = CURRENT_TIMESTAMP
+WHERE r.`global_enabled` = 1;
+
+DELETE sr
+FROM `hg_youban_publish_collect_source_rule` sr
+INNER JOIN `hg_youban_publish_collect_source_rule` keep
+  ON keep.`source_id` = sr.`source_id`
+ AND (keep.`sort` < sr.`sort` OR (keep.`sort` = sr.`sort` AND keep.`id` < sr.`id`));
+
+ALTER TABLE `hg_youban_publish_collect_source_rule`
+  ADD UNIQUE KEY `uk_ybp_collect_source_single_rule` (`source_id`);

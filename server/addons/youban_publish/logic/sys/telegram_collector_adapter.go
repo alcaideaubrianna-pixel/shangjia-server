@@ -1243,12 +1243,8 @@ func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, sourc
 }
 
 func (s *sSysPublish) sendBotCollectChannelDiscovery(ctx context.Context, source gdb.Record, chatID string, relationID int64, notificationID string) error {
-	tenantID, accountID, botID := source["tenant_id"].Int64(), source["account_id"].Int64(), source["bot_id"].Int64()
-	rules, ruleErr := pdao.YoubanPublishCollectRule.Ctx(ctx).As("r").
-		InnerJoin(pdao.YoubanPublishCollectSourceRule.Table()+" sr", "sr.rule_id=r.id AND sr.tenant_id=r.tenant_id").
-		Fields("r.id,r.name,r.intro_fee_suffix,r.bot_id").Where("sr.source_id", source["id"].Int64()).
-		Where("r.tenant_id", tenantID).Where("r.account_id", accountID).
-		WhereNull("r.deleted_at").Where("r.intro_fee_suffix_enabled", 1).All()
+	tenantID, botID := source["tenant_id"].Int64(), source["bot_id"].Int64()
+	rules, ruleErr := botCollectChannelDiscoveryRules(ctx, source)
 	if ruleErr != nil {
 		return gerror.Wrap(ruleErr, "读取新频道默认后缀失败")
 	}
@@ -1278,6 +1274,32 @@ func (s *sSysPublish) sendBotCollectChannelDiscovery(ctx context.Context, source
 		}
 	}
 	return nil
+}
+
+func botCollectChannelDiscoveryRules(ctx context.Context, source gdb.Record) ([]gdb.Record, error) {
+	cols := pdao.YoubanPublishCollectRule.Columns()
+	bindings := pdao.YoubanPublishCollectSourceRule.Columns()
+	rules, err := pdao.YoubanPublishCollectRule.Ctx(ctx).As("r").
+		InnerJoin(pdao.YoubanPublishCollectSourceRule.Table()+" sr", "sr."+bindings.RuleId+"=r."+cols.Id+" AND sr."+bindings.TenantId+"=r."+cols.TenantId).
+		Fields("r."+cols.Id, "r."+cols.Name).
+		Where("sr."+bindings.SourceId, source["id"].Int64()).
+		Where("r."+cols.TenantId, source["tenant_id"].Int64()).
+		Where("r."+cols.AccountId, source["account_id"].Int64()).
+		WhereNull("r." + cols.DeletedAt).All()
+	if err != nil {
+		return nil, err
+	}
+	if err = attachCollectRuleItems(ctx, rules); err != nil {
+		return nil, err
+	}
+	// Suffix configuration lives in rule items, not legacy columns on the rule.
+	result := make([]gdb.Record, 0, len(rules))
+	for _, rule := range rules {
+		if strings.TrimSpace(rule["intro_fee_suffix"].String()) != "" {
+			result = append(result, rule)
+		}
+	}
+	return result, nil
 }
 
 func collectOptionalRecordScanSucceeded(err error) bool {

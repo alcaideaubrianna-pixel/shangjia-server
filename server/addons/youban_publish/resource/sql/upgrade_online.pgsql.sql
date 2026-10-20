@@ -37,21 +37,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_collect_dedupe_source" ON "hg_youban_p
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_dedupe_source_owner" ON "hg_youban_publish_collect_dedupe_source" ("tenant_id", "account_id", "source_id", "entry_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_dedupe_source_dispatch" ON "hg_youban_publish_collect_dedupe_source" ("dispatch_id");
 
--- A bound rule is source-local. Global rules are account-level delete/replace policies only.
-UPDATE "hg_youban_publish_collect_rule" r
-SET "global_enabled" = 0, "updated_at" = CURRENT_TIMESTAMP
-WHERE r."global_enabled" = 1
-  AND EXISTS (
-    SELECT 1 FROM "hg_youban_publish_collect_source_rule" sr WHERE sr."rule_id" = r."id"
-  );
-
-DELETE FROM "hg_youban_publish_collect_source_rule" sr
-USING "hg_youban_publish_collect_source_rule" keep
-WHERE sr."source_id" = keep."source_id"
-  AND (sr."sort", sr."id") > (keep."sort", keep."id");
-
-CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_collect_source_single_rule"
-  ON "hg_youban_publish_collect_source_rule" ("source_id");
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_profile_fingerprint" (
   "id" BIGSERIAL PRIMARY KEY,
   "tenant_id" bigint NOT NULL DEFAULT 0,
@@ -147,7 +132,6 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_tg_outbox_due" ON "hg_youban_publish_tg_outb
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_outbox_lease" ON "hg_youban_publish_tg_outbox" ("lease_expires_at", "id") WHERE "status" = 'processing';
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_outbox_job" ON "hg_youban_publish_tg_outbox" ("job_id", "event_type", "id");
 ALTER TABLE "hg_youban_publish_account" ADD COLUMN IF NOT EXISTS "last_active_at" timestamp DEFAULT NULL;
-UPDATE "hg_youban_publish_account" SET "last_active_at" = NOW() WHERE "last_active_at" IS NULL;
 ALTER TABLE "hg_youban_publish_collect_source" ADD COLUMN IF NOT EXISTS "channel_suffix" text NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_collect_source" ADD COLUMN IF NOT EXISTS "channel_blacklisted" smallint NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_source_channel_rule" ON "hg_youban_publish_collect_source" ("tenant_id","account_id","source_chat_id","channel_blacklisted");

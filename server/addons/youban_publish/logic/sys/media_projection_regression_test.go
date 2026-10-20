@@ -10,10 +10,14 @@ import (
 )
 
 func TestBotMediaProjectionLocalPostgres(t *testing.T) {
-	if os.Getenv("YOUBAN_MEDIA_PROJECTION_LOCAL_PG") != "1" {
+	if os.Getenv("YOUBAN_MEDIA_PROJECTION_LOCAL_PG") != "1" && os.Getenv("YOUBAN_SQL_REVIEW_LOCAL_PG") != "1" {
 		t.Skip("requires isolated local PostgreSQL")
 	}
-	db, err := gdb.New(gdb.ConfigNode{Type: "pgsql", Host: "127.0.0.1", Port: "35432", User: os.Getenv("USER"), Name: "postgres"})
+	config := gdb.ConfigNode{Type: "pgsql", Host: "127.0.0.1", Port: "35432", User: os.Getenv("USER"), Name: "postgres"}
+	if os.Getenv("YOUBAN_SQL_REVIEW_LOCAL_PG") == "1" {
+		config.Port, config.User = "55484", "test"
+	}
+	db, err := gdb.New(config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -21,6 +25,7 @@ func TestBotMediaProjectionLocalPostgres(t *testing.T) {
 		for _, sql := range []string{
 			"CREATE TEMP TABLE hg_youban_publish_media (id bigint,profile_id bigint,media_type text,purpose text,sort_index int,attachment_id bigint DEFAULT 0,original_attachment_id bigint DEFAULT 0,original_storage_path text,storage_path text,file_url text,poster_storage_path text,md5 text,perceptual_hash text,deleted_at timestamp,updated_at timestamp)",
 			"CREATE TEMP TABLE hg_content_media (id bigserial PRIMARY KEY,profile_id bigint,source_asset_id bigint,media_type text,purpose text,sort_index int,original_storage_path text,display_storage_path text,preview_storage_path text,binary_md5 text,perceptual_hash text,process_status text,encrypt_status text,status int,deleted_at timestamp,created_at timestamp,updated_at timestamp)",
+			"CREATE UNIQUE INDEX uk_content_media_profile_asset ON hg_content_media(profile_id,source_asset_id)",
 			"CREATE TEMP TABLE hg_content_profile (id bigint,image_count int,video_count int,has_verification_video int,cover_media_id bigint,updated_at timestamp)",
 			"INSERT INTO hg_content_profile (id) VALUES (681235)",
 			// Two images and a verification video all lack attachment IDs.
@@ -87,6 +92,31 @@ func TestBotMediaProjectionLocalPostgres(t *testing.T) {
 		}
 		if row["n"].Int() != 0 || row["image_count"].Int() != 0 || row["video_count"].Int() != 0 || !row["cover_media_id"].IsNil() {
 			t.Fatalf("empty projection=%v", row)
+		}
+		// A real attachment retains its projection ID when reordered, moved
+		// to verification, or restored after deletion (the unique index is not partial).
+		if _, err = tx.Exec("INSERT INTO hg_youban_publish_media (id,profile_id,media_type,purpose,sort_index,original_attachment_id,storage_path) VALUES(4,681235,'video','display',1,99,'attached.mov')"); err != nil {
+			return err
+		}
+		if err = sync(); err != nil {
+			return err
+		}
+		original, err := tx.GetValue("SELECT id FROM hg_content_media WHERE source_asset_id=99")
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec("UPDATE hg_content_media SET deleted_at=NOW() WHERE source_asset_id=99; UPDATE hg_youban_publish_media SET purpose='verify',sort_index=8 WHERE id=4"); err != nil {
+			return err
+		}
+		if err = sync(); err != nil {
+			return err
+		}
+		row, err = tx.GetOne("SELECT id,purpose,sort_index,deleted_at FROM hg_content_media WHERE source_asset_id=99")
+		if err != nil {
+			return err
+		}
+		if row["id"].Int64() != original.Int64() || row["purpose"].String() != "verify" || row["sort_index"].Int() != 8 || !row["deleted_at"].IsNil() {
+			t.Fatalf("attachment identity changed: %v", row)
 		}
 		return nil
 	})

@@ -1220,15 +1220,24 @@ func (s *sSysPublish) syncOwnedMediaToProfile(ctx context.Context, tx gdb.TX, ow
 			mediaColumns.DeletedAt:           nil,
 			mediaColumns.UpdatedAt:           now,
 		}
-		existingMod := tx.Model(dao.ContentMedia.Table()).Ctx(ctx).Unscoped().
-			Where(mediaColumns.ProfileId, profileId).
-			Where(mediaColumns.SourceAssetId, sourceAssetId).
-			Where(mediaColumns.MediaType, mediaType).
-			Where(purposeColumn, item.Purpose).
-			Where(mediaColumns.SortIndex, item.SortIndex)
-		// Bot uploads have no attachment ID. Zero is not a media identity.
 		if sourceAssetId <= 0 {
-			existingMod = existingMod.Where(mediaColumns.OriginalStoragePath, originalStoragePath)
+			// NULL has no attachment identity and does not collide with other
+			// Bot uploads under UNIQUE(profile_id, source_asset_id).
+			data[mediaColumns.SourceAssetId] = nil
+		}
+		existingMod := tx.Model(dao.ContentMedia.Table()).Ctx(ctx).Unscoped().
+			Where(mediaColumns.ProfileId, profileId)
+		if sourceAssetId > 0 {
+			// Match the database unique key; purpose and sort order may change.
+			existingMod = existingMod.Where(mediaColumns.SourceAssetId, sourceAssetId)
+		} else {
+			// Also recognize old zero-valued projections so retries retain IDs.
+			existingMod = existingMod.
+				Where("("+mediaColumns.SourceAssetId+" IS NULL OR "+mediaColumns.SourceAssetId+"=0)").
+				Where(mediaColumns.MediaType, mediaType).
+				Where(purposeColumn, item.Purpose).
+				Where(mediaColumns.SortIndex, item.SortIndex).
+				Where(mediaColumns.OriginalStoragePath, originalStoragePath)
 		}
 		existing, err := existingMod.Fields(mediaColumns.Id).OrderAsc(mediaColumns.Id).Value()
 		if err != nil {
