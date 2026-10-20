@@ -408,10 +408,14 @@ func profileListFields() string {
 	return "p.id,p.source_note_uuid AS uuid,p.source_type,p.profile_no,p.title,p.summary,p.plain_text,p.province,p.city,p.is_virgin," + profileTagFieldExpr() + " AS tag,p.visibility,p.review_status,p.status,p.image_count,p.video_count,COALESCE(ps.customer_remark,p.admin_remark) AS customer_remark,p.published_at,p.created_at,p.updated_at,ps.tenant_id,ps.account_id,tenant.name AS tenant_name,a.nickname AS account_name,a.nickname,a.username,COALESCE(ps.anti_scan_enabled,0) AS anti_scan_enabled,COALESCE(ps.publish_task_status,'') AS task_status,'' AS tg_status,CASE WHEN EXISTS (SELECT 1 FROM " + publishProfileChannelTable + " pc WHERE pc.tenant_id=ps.tenant_id AND pc.profile_id=ps.profile_id AND pc.is_manual=1 AND pc.deleted_at IS NULL) OR EXISTS (SELECT 1 FROM " + publishChannelTable + " dc WHERE dc.tenant_id=ps.tenant_id AND dc.publish_direction='up' AND dc.status=1 AND dc.is_default_selected=1 AND dc.deleted_at IS NULL) THEN 1 ELSE 0 END AS tg_push_enabled"
 }
 
-func (s *sSysPublish) applyProfileFilters(ctx context.Context, mod *gdb.Model, in *sysin.ProfileListInp) *gdb.Model {
-	mod = s.applyProfileNonKeywordFilters(ctx, mod, in)
+func (s *sSysPublish) applyProfileFilters(ctx context.Context, mod *gdb.Model, in *sysin.ProfileListInp) (*gdb.Model, error) {
+	var err error
+	mod, err = s.applyProfileNonKeywordFilters(ctx, mod, in)
+	if err != nil {
+		return nil, err
+	}
 	if in == nil {
-		return mod
+		return mod, nil
 	}
 	if keyword := strings.TrimSpace(in.Keyword); keyword != "" {
 		terms := splitProfileSearchTerms(keyword)
@@ -420,14 +424,14 @@ func (s *sSysPublish) applyProfileFilters(ctx context.Context, mod *gdb.Model, i
 			mod = mod.Where(condition, args...)
 		}
 	}
-	return mod
+	return mod, nil
 }
 
-func (s *sSysPublish) applyProfileNonKeywordFilters(ctx context.Context, mod *gdb.Model, in *sysin.ProfileListInp) *gdb.Model {
+func (s *sSysPublish) applyProfileNonKeywordFilters(ctx context.Context, mod *gdb.Model, in *sysin.ProfileListInp) (*gdb.Model, error) {
 	_ = ctx
 	mod = applyProfilePushChannelFilter(mod, in, "ps.tenant_id", "p.id")
 	if in == nil {
-		return mod
+		return mod, nil
 	}
 	if in.Province != "" {
 		mod = mod.Where("p.province", strings.TrimSpace(in.Province))
@@ -468,6 +472,13 @@ func (s *sSysPublish) applyProfileNonKeywordFilters(ctx context.Context, mod *gd
 		mod = mod.Where("p.status", in.Status)
 	}
 	if in.CollectSourceId > 0 {
+		enabled, err := profileOriginEnabled(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if enabled {
+			return applyProfileOriginSourceFilter(mod, in), nil
+		}
 		condition := "EXISTS (SELECT 1 FROM " + publishCollectDispatchTable + " d JOIN " + publishCollectEventTable + " e ON e.id=d.event_id WHERE d.profile_id=p.id AND d.source_id=?"
 		args := []interface{}{in.CollectSourceId}
 		if chatId := strings.TrimSpace(in.CollectSourceChatId); chatId != "" {
@@ -476,7 +487,7 @@ func (s *sSysPublish) applyProfileNonKeywordFilters(ctx context.Context, mod *gd
 		}
 		mod = mod.Where(condition+")", args...)
 	}
-	return mod
+	return mod, nil
 }
 
 type profileCollectionMetadataRow struct {
@@ -599,6 +610,15 @@ func (s *sSysPublish) applyProfileCollectionMetadata(ctx context.Context, list [
 		}
 		if item.CollectSourceMessageId > 0 {
 			item.CollectSourceUrl = collectedTelegramMessageURL(item.CollectSourceChatId, item.CollectSourceUsername, item.CollectSourceMessageId)
+		}
+	}
+	origins, originErr := loadProfileOrigins(ctx, profileIds)
+	if originErr != nil {
+		return originErr
+	}
+	for _, item := range list {
+		if item != nil {
+			applyProfileOriginFields(item, origins[item.Id])
 		}
 	}
 	return nil

@@ -632,11 +632,14 @@ func (s *sSysPublish) commitCollectPreparedProfile(ctx context.Context, event gd
 				if mappingErr := replaceProfileChannelMappings(ctx, tx, tenantId, accountId, profileId, storedChannelIds); mappingErr != nil {
 					return mappingErr
 				}
-				return nil
+				return saveCollectProfileOriginTx(ctx, tx, profileId, event)
 			}
 			if _, txErr = tx.Model(dao.ContentProfile.Table()).Ctx(ctx).Where(columns.Id, profileId).Data(data).Update(); txErr != nil {
 				return gerror.Wrap(txErr, "更新采集资料失败")
 			}
+		}
+		if originErr := saveCollectProfileOriginTx(ctx, tx, profileId, event); originErr != nil {
+			return originErr
 		}
 		if mappingErr := replaceProfileChannelMappings(ctx, tx, tenantId, accountId, profileId, storedChannelIds); mappingErr != nil {
 			return mappingErr

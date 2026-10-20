@@ -12,6 +12,7 @@ import (
 )
 
 type ISysPublish interface {
+	BackfillProfileOrigins(ctx context.Context, tenantId, accountId, lastId int64, limit int, apply bool) (*sysin.ProfileOriginBackfillResult, error)
 	BackfillCollectedSourceMetadata(ctx context.Context, lastId int64, batchSize int) (scanned, updated int, nextId int64, err error)
 	AdminRelayChannelList(ctx context.Context, in *sysin.RelayChannelListInp) (list []*sysin.RelayChannelModel, err error)
 	AdminRelayChannelSave(ctx context.Context, in *sysin.RelayChannelSaveInp) (err error)

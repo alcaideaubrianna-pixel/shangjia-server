@@ -496,7 +496,10 @@ func (s *sSysPublish) profileImageSearchCandidateProfileIds(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	base = s.applyProfileFilters(ctx, base, &filters)
+	base, err = s.applyProfileFilters(ctx, base, &filters)
+	if err != nil {
+		return nil, err
+	}
 	if scopeSQL, scopeArgs := mediaPHashBucketScopeSQL("ps", scope.Partitions); scopeSQL != "" {
 		base = base.Where("("+scopeSQL+")", scopeArgs...)
 	} else {

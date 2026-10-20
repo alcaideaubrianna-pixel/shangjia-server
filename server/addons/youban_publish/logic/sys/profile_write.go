@@ -283,6 +283,9 @@ func (s *sSysPublish) deleteProfiles(ctx context.Context, in *sysin.ProfileDelet
 		if _, txErr := detachProfileFingerprintsTx(ctx, tx, ids); txErr != nil {
 			return txErr
 		}
+		if originErr := deleteProfileOriginsTx(ctx, tx, ids); originErr != nil {
+			return originErr
+		}
 		if _, txErr := tx.Model(dao.ContentProfile.Table()).Ctx(ctx).WhereIn(columns.Id, ids).Unscoped().Delete(); txErr != nil {
 			return gerror.Wrap(txErr, "删除资料失败")
 		}

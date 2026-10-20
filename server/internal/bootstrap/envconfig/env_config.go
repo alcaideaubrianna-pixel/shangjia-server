@@ -38,6 +38,7 @@ var items = []item{
 	{Key: "telemetry.serviceName", EnvKeys: []string{"YOUBAN_TELEMETRY_SERVICE_NAME", "OTEL_SERVICE_NAME"}},
 	{Key: "telemetry.sampleRatio", EnvKeys: []string{"YOUBAN_TELEMETRY_SAMPLE_RATIO"}},
 	{Key: "telemetry.metricsIntervalSeconds", EnvKeys: []string{"YOUBAN_TELEMETRY_METRICS_INTERVAL_SECONDS"}},
+	{Key: "youbanPublish.profileOriginEnabled", EnvKeys: []string{"YOUBAN_PUBLISH_PROFILE_ORIGIN_ENABLED"}},
 	{Key: "youbanPublish.queue.concurrency", EnvKeys: []string{"YOUBAN_PUBLISH_QUEUE_CONCURRENCY"}},
 	{Key: "youbanTgBotGateway.queue.concurrency", EnvKeys: []string{"YOUBAN_TG_BOT_GATEWAY_QUEUE_CONCURRENCY"}},
 	{Key: "youbanTgBotGateway.queue.interactiveConcurrency", EnvKeys: []string{"YOUBAN_TG_BOT_GATEWAY_INTERACTIVE_CONCURRENCY"}},

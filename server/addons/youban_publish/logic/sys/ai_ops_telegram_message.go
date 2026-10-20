@@ -40,6 +40,11 @@ func (s *sSysPublish) AIOpsTelegramMessageContext(ctx context.Context, in *sysin
 		}
 	}
 	if !result.Found {
+		if err = s.resolveAIOpsOriginMessage(ctx, ref, result); err != nil {
+			return nil, err
+		}
+	}
+	if !result.Found {
 		result.Diagnosis = "未找到消息映射；历史发送明细可能已按保留策略清理，或该消息不属于当前系统"
 		return result, nil
 	}
@@ -192,6 +197,35 @@ func (s *sSysPublish) fillAIOpsCollectionContext(ctx context.Context, result *sy
 			return gerror.Wrap(err, "读取采集规则失败")
 		}
 		result.CollectRuleName, result.CollectRuleStatus = rule["name"].String(), rule["status"].Int()
+	}
+	if result.ProfileId > 0 {
+		origins, originErr := loadProfileOrigins(ctx, []int64{result.ProfileId})
+		if originErr != nil {
+			return originErr
+		}
+		item := &sysin.ProfileModel{TenantId: result.TenantId, AccountId: result.AccountId, IsCollected: result.IsCollected,
+			CollectSourceId: result.CollectSourceId, CollectSourceChatId: result.CollectSourceChatId, CollectSourceMessageId: result.CollectSourceMessageId,
+			CollectSourceName: result.CollectSourceTitle, CollectSourceUsername: result.CollectSourceUsername,
+		}
+		applyProfileOriginFields(item, origins[result.ProfileId])
+		result.CollectMethod, result.OriginCompleteness, result.Origins = item.CollectMethod, item.OriginCompleteness, item.Origins
+		result.IsCollected = item.IsCollected
+		if result.CollectSourceTitle == "" {
+			result.CollectSourceTitle = item.CollectSourceName
+		}
+		if result.CollectSourceUsername == "" {
+			result.CollectSourceUsername = item.CollectSourceUsername
+		}
+		if result.CollectSourceChatId == "" {
+			result.CollectSourceChatId = item.CollectSourceChatId
+		}
+		if result.CollectSourceMessageId == 0 {
+			result.CollectSourceMessageId = item.CollectSourceMessageId
+		}
+		if result.CollectSourceId == 0 {
+			result.CollectSourceId = item.CollectSourceId
+		}
+		result.CollectSourceURL = collectedTelegramMessageURL(result.CollectSourceChatId, result.CollectSourceUsername, result.CollectSourceMessageId)
 	}
 	switch {
 	case result.VerifyMediaCount > 0 && result.SentVerifyCount > 0:

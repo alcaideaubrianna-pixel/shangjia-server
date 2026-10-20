@@ -47,6 +47,9 @@ func (s *sSysPublish) ServerProfilePurgeDeleted(ctx context.Context, in *sysin.P
 		if _, deleteErr := detachProfileFingerprintsTx(ctx, tx, profileIds); deleteErr != nil {
 			return deleteErr
 		}
+		if originErr := deleteProfileOriginsTx(ctx, tx, profileIds); originErr != nil {
+			return originErr
+		}
 		deleteTables := []string{
 			dao.ContentMedia.Table(),
 			dao.ContentSourceMap.Table(),
