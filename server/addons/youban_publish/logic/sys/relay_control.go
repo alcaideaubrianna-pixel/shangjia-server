@@ -132,12 +132,14 @@ func (s *sSysPublish) handleRelayControlTask(ctx context.Context, client *telegr
 			return err
 		}
 	}
-	botItem, err := s.getBotById(ctx, row.BotId, row.TenantId)
-	if err != nil {
-		return err
-	}
-	if err = s.ensureRelayBotWithClient(ctx, client, &row, botItem); err != nil {
-		return err
+	if row.BotId > 0 {
+		botItem, botErr := s.getBotById(ctx, row.BotId, row.TenantId)
+		if botErr != nil {
+			return botErr
+		}
+		if err = s.ensureRelayBotWithClient(ctx, client, &row, botItem); err != nil {
+			return err
+		}
 	}
 	status := row.Status
 	if row.OperationKind == "enable" {
@@ -199,6 +201,9 @@ func (s *sSysPublish) ensureRelayBotWithClient(ctx context.Context, client *tele
 		return gerror.New("Bot用户名对应身份与发布Bot不一致")
 	}
 	if _, err = client.API().ChannelsInviteToChannel(ctx, &tg.ChannelsInviteToChannelRequest{Channel: input, Users: []tg.InputUserClass{user}}); err != nil && !tgerr.Is(err, "USER_ALREADY_PARTICIPANT") {
+		if tgerr.Is(err, "USER_BOT") {
+			return gerror.New("Telegram 不允许协议账号通过 InviteToChannel 自动添加 Bot，请先在频道管理中手动添加并授予发布、删除消息权限")
+		}
 		return gerror.Wrap(err, "自动邀请发布Bot到中转频道失败")
 	}
 	if _, err = client.API().ChannelsEditAdmin(ctx, &tg.ChannelsEditAdminRequest{Channel: input, UserID: user, AdminRights: tg.ChatAdminRights{PostMessages: true, DeleteMessages: true}, Rank: "中转发布"}); err != nil && !tgerr.Is(err, "CHAT_NOT_MODIFIED") {

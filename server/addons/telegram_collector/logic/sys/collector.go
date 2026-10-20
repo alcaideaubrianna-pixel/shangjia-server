@@ -63,6 +63,9 @@ func (s *sCollector) IngestBotUpdate(ctx context.Context, bot collectorservice.B
 	if !collectorEnabled(ctx) {
 		return nil
 	}
+	if message := collectorUpdateMessage(update); message != nil && s.isRelayChannel(ctx, bot.Binding.TenantID, fmt.Sprintf("%d", message.Chat.ID)) {
+		return nil
+	}
 	raw, err := json.Marshal(update)
 	if err != nil {
 		return gerror.Wrap(err, "序列化Telegram采集事件失败")
@@ -108,6 +111,9 @@ func (s *sCollector) IngestAccountMessage(ctx context.Context, message *sysin.Ac
 		return gerror.New("Telegram账号采集消息归属不完整")
 	}
 	message.SourceChatID = strings.TrimSpace(message.SourceChatID)
+	if s.isRelayChannel(ctx, message.TenantID, message.SourceChatID) {
+		return nil
+	}
 	message.SourceUniqueKey = strings.TrimSpace(message.SourceUniqueKey)
 	if message.SourceChatID == "" || message.SourceMessageID <= 0 || message.SourceUniqueKey == "" {
 		return gerror.New("Telegram账号采集消息标识不完整")
@@ -150,6 +156,19 @@ func (s *sCollector) IngestAccountMessage(ctx context.Context, message *sysin.Ac
 		attribute.String("priority", "realtime"),
 	))
 	return nil
+}
+
+// Relay channels are an internal publishing transport and must never be fed
+// back into collection, regardless of which collector bot/account receives it.
+func (s *sCollector) isRelayChannel(ctx context.Context, tenantID int64, chatID string) bool {
+	chatID = strings.TrimSpace(chatID)
+	if tenantID <= 0 || chatID == "" {
+		return false
+	}
+	count, err := g.DB().Model("hg_youban_publish_relay_channel").Ctx(ctx).
+		Where("tenant_id", tenantID).Where("target_chat_id", chatID).
+		Where("deleted_at IS NULL").Count()
+	return err == nil && count > 0
 }
 
 func losslessRawUpdate(raw []byte) *gjson.Json {

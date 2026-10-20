@@ -1806,8 +1806,8 @@ func relayChannelInputCapacity(value int) (int, error) {
 	return value, nil
 }
 func relayChannelInputOwner(tenantID, accountID, botID int64) error {
-	if tenantID <= 0 || accountID <= 0 || botID <= 0 {
-		return gerror.New("请选择租户、协议账号和推送Bot")
+	if tenantID <= 0 || accountID <= 0 {
+		return gerror.New("请选择租户和协议账号")
 	}
 	return nil
 }
@@ -1816,9 +1816,6 @@ func (in *RelayChannelCreateInp) Filter(ctx context.Context) error {
 		return gerror.New("中转频道参数不能为空")
 	}
 	in.Title = strings.TrimSpace(in.Title)
-	if in.Title == "" {
-		return gerror.New("中转频道名称不能为空")
-	}
 	if len([]rune(in.Title)) > 128 {
 		return gerror.New("中转频道名称不能超过128个字符")
 	}

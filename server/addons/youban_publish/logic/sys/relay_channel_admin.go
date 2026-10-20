@@ -8,6 +8,7 @@ import (
 	"hotgo/internal/library/dict"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -111,6 +112,9 @@ func (s *sSysPublish) validateRelayOwner(ctx context.Context, tenantID, accountI
 }
 
 func (s *sSysPublish) AdminRelayChannelCreate(ctx context.Context, in *sysin.RelayChannelCreateInp) (*sysin.RelayChannelModel, error) {
+	if in != nil && strings.TrimSpace(in.Title) == "" {
+		in.Title = "资料中转 " + time.Now().Format("01021504")
+	}
 	if err := in.Filter(ctx); err != nil {
 		return nil, err
 	}
@@ -118,7 +122,7 @@ func (s *sSysPublish) AdminRelayChannelCreate(ctx context.Context, in *sysin.Rel
 		return nil, err
 	}
 	id, err := dao.YoubanPublishRelayChannel.Ctx(ctx).Data(do.YoubanPublishRelayChannel{
-		TenantId: in.TenantId, TgAccountId: in.TgAccountId, BotId: in.BotId, Title: strings.TrimSpace(in.Title),
+		TenantId: in.TenantId, TgAccountId: in.TgAccountId, BotId: 0, Title: strings.TrimSpace(in.Title),
 		TargetChatId: "pending:" + guid.S(), Capacity: in.Capacity, Status: relayChannelStatusDisabled,
 		HealthStatus: relayChannelHealthUnknown, BotPermissionStatus: relayBotPermissionUnknown,
 		OperationKind: "create", OperationStatus: relayconsts.RelayStatusPending,
