@@ -121,15 +121,7 @@ func applyNoteIndexFilters(mod *gdb.Model, in *sysin.ProfileListInp) *gdb.Model 
 	if in.Status > 0 {
 		mod = mod.Where("i.status", in.Status)
 	}
-	if in.CollectSourceId > 0 {
-		condition := "EXISTS (SELECT 1 FROM " + publishCollectDispatchTable + " d JOIN " + publishCollectEventTable + " e ON e.id=d.event_id WHERE d.profile_id=i.profile_id AND d.source_id=?"
-		args := []interface{}{in.CollectSourceId}
-		if chatId := strings.TrimSpace(in.CollectSourceChatId); chatId != "" {
-			condition += " AND e.source_chat_id=?"
-			args = append(args, chatId)
-		}
-		mod = mod.Where(condition+")", args...)
-	}
+	mod = applyProfileCollectionSourceFilter(mod, in, "i.profile_id")
 	switch strings.TrimSpace(in.SourceScope) {
 	case "collected":
 		// Filter in the ordered read model, before joining profile/state rows.

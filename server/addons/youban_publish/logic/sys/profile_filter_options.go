@@ -2,7 +2,6 @@ package sys
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -90,7 +89,10 @@ func (s *sSysPublish) profileFilterOptions(ctx context.Context, account *sysin.A
 	}
 	seen := map[string]bool{}
 	for _, row := range channels {
-		key := fmt.Sprintf("%d:%s", row.SourceId, row.SourceChatId)
+		key := canonicalCollectSourceChatID(row.SourceChatId)
+		if key == "" {
+			continue
+		}
 		if seen[key] {
 			continue
 		}
@@ -99,7 +101,9 @@ func (s *sSysPublish) profileFilterOptions(ctx context.Context, account *sysin.A
 		if label == "" {
 			label = row.SourceChatId
 		}
-		res.SourceChannels = append(res.SourceChannels, &sysin.CollectSourceOptionModel{Id: row.SourceId, SourceId: row.SourceId, SourceChatId: row.SourceChatId, Label: label})
+		// This is a channel filter, not a rule filter. SourceId=0 includes all
+		// rules for this chat while the profile query retains its account scope.
+		res.SourceChannels = append(res.SourceChannels, &sysin.CollectSourceOptionModel{Id: row.SourceId, SourceId: 0, SourceChatId: row.SourceChatId, Label: label})
 	}
 	// Push destinations are tenant-owned, including defaults shared by all accounts.
 	if err = g.DB().Model(publishChannelTable).Safe().Ctx(ctx).Fields("id AS value,channel_title AS label").Where("tenant_id", account.TenantId).Where("publish_direction", "up").WhereNull("deleted_at").OrderAsc("id").Scan(&res.PushChannels); err != nil {

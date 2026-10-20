@@ -467,16 +467,26 @@ func (s *sSysPublish) applyProfileNonKeywordFilters(ctx context.Context, mod *gd
 	if in.Status > 0 {
 		mod = mod.Where("p.status", in.Status)
 	}
-	if in.CollectSourceId > 0 {
-		condition := "EXISTS (SELECT 1 FROM " + publishCollectDispatchTable + " d JOIN " + publishCollectEventTable + " e ON e.id=d.event_id WHERE d.profile_id=p.id AND d.source_id=?"
-		args := []interface{}{in.CollectSourceId}
-		if chatId := strings.TrimSpace(in.CollectSourceChatId); chatId != "" {
-			condition += " AND e.source_chat_id IN (?,?)"
-			args = append(args, chatId, strings.TrimPrefix(chatId, "-100"))
-		}
-		mod = mod.Where(condition+")", args...)
+	return applyProfileCollectionSourceFilter(mod, in, "p.id")
+}
+
+// profileIDField is a fixed caller-owned SQL expression, never request data.
+func applyProfileCollectionSourceFilter(mod *gdb.Model, in *sysin.ProfileListInp, profileIDField string) *gdb.Model {
+	chatID := canonicalCollectSourceChatID(in.CollectSourceChatId)
+	if in.CollectSourceId <= 0 && chatID == "" {
+		return mod
 	}
-	return mod
+	condition := "EXISTS (SELECT 1 FROM " + publishCollectDispatchTable + " d JOIN " + publishCollectEventTable + " e ON e.id=d.event_id WHERE d.profile_id=" + profileIDField
+	args := []interface{}{}
+	if in.CollectSourceId > 0 {
+		condition += " AND d.source_id=?"
+		args = append(args, in.CollectSourceId)
+	}
+	if chatID != "" {
+		condition += " AND e.source_chat_id IN (?,?)"
+		args = append(args, chatID, "-100"+chatID)
+	}
+	return mod.Where(condition+")", args...)
 }
 
 type profileCollectionMetadataRow struct {

@@ -152,6 +152,18 @@ func (s *sSysPublish) accountDisplayName(ctx context.Context, tenantId int64, ac
 }
 
 func (s *sSysPublish) saveAccountSetting(ctx context.Context, tenantId int64, operatorId int64, in *sysin.AccountSettingSaveInp) error {
+	// Online migrations may run after this instance cached the old schema.
+	// Refresh before writing so ORM field filtering cannot silently drop permissions.
+	if err := g.DB().GetCore().ClearTableFields(ctx, publishAccountSettingTable); err != nil {
+		return gerror.Wrap(err, "刷新账号设置字段失败")
+	}
+	fields, err := g.DB().TableFields(ctx, publishAccountSettingTable)
+	if err != nil {
+		return gerror.Wrap(err, "读取账号设置字段失败")
+	}
+	if _, ok := fields["profile_detail_view_enabled"]; !ok {
+		return gerror.New("账号设置数据库尚未升级，请先完成数据库迁移")
+	}
 	now := gtime.Now()
 	data := g.Map{
 		"tenant_id":                   tenantId,
@@ -192,6 +204,16 @@ func (s *sSysPublish) saveAccountSetting(ctx context.Context, tenantId int64, op
 	}
 	if err != nil {
 		return gerror.Wrap(err, "保存账号推送设置失败")
+	}
+	saved, err := s.accountSetting(ctx, tenantId, in.AccountId)
+	if err != nil {
+		return err
+	}
+	if saved.ProfileDetailViewEnabled != in.ProfileDetailViewEnabled ||
+		saved.SharedResourceEnabled != in.SharedResourceEnabled ||
+		saved.TelegramBindingEnabled != in.TelegramBindingEnabled ||
+		saved.GroupPushEnabled != in.GroupPushEnabled {
+		return gerror.New("账号权限保存结果不一致，请刷新后重试")
 	}
 	return nil
 }

@@ -167,6 +167,7 @@ func TestProfileFilterOptionsLocalPostgres(t *testing.T) {
 			`INSERT INTO hg_youban_publish_collect_channel VALUES(100,7,'-100100','关联频道',NULL)`,
 			`INSERT INTO hg_youban_publish_collect_account_channel VALUES(8,7,100,101,NULL)`,
 			`INSERT INTO hg_youban_publish_collect_source VALUES(102,7,9,'-100102','已删历史频道','account',0,'',now()),(103,7,9,'','Bot来源','bot',64,'all',NULL),(104,10,10,'-100104','禁止频道','account',0,'',NULL)`,
+			`INSERT INTO hg_youban_publish_collect_source VALUES(105,7,9,'-100103','Bot频道','account',0,'',NULL),(106,7,9,'103','Bot频道','account',0,'',now()),(107,7,9,'-100107','Bot频道','account',0,'',NULL),(108,7,9,'','另一个Bot规则','bot',64,'all',NULL)`,
 			`INSERT INTO hg_youban_publish_bot_channel_cache VALUES(7,64,'-100103','Bot频道',NULL),(10,64,'-100999','跨租户缓存',NULL)`,
 			`INSERT INTO hg_youban_publish_channel VALUES(1,7,'推送频道','up',NULL),(2,10,'禁止推送频道','up',NULL)`,
 		} {
@@ -180,7 +181,7 @@ func TestProfileFilterOptionsLocalPostgres(t *testing.T) {
 		for _, tc := range []struct {
 			selected int64
 			want     int
-		}{{0, 3}, {8, 1}, {9, 2}} {
+		}{{0, 4}, {8, 1}, {9, 3}} {
 			res, e := s.profileFilterOptions(ctx, account, cap, tc.selected)
 			if e != nil {
 				return e
@@ -188,8 +189,14 @@ func TestProfileFilterOptionsLocalPostgres(t *testing.T) {
 			if len(res.Accounts) != 2 || len(res.SourceChannels) != tc.want || len(res.PushChannels) != 1 {
 				t.Fatalf("selected%d options%+v source%+v", tc.selected, res, res.SourceChannels)
 			}
+			seen := map[string]bool{}
 			for _, ch := range res.SourceChannels {
-				if ch.SourceId == 104 || ch.SourceChatId == "-100999" {
+				key := canonicalCollectSourceChatID(ch.SourceChatId)
+				if seen[key] || ch.SourceId != 0 {
+					t.Fatalf("duplicate channel or rule-scoped option: %+v", ch)
+				}
+				seen[key] = true
+				if ch.SourceChatId == "-100104" || ch.SourceChatId == "-100999" {
 					t.Fatal("cross tenant options")
 				}
 			}
