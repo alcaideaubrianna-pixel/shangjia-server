@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gogf/gf/v2/container/gvar"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -478,17 +479,24 @@ func (s *sSysPublish) approveCollectReview(ctx context.Context, reviewId int64, 
 	if err != nil {
 		return gerror.Wrap(err, "读取采集事件失败")
 	}
-	rule, err := pdao.YoubanPublishCollectRule.Ctx(ctx).
-		Where("id", review["rule_id"].Int64()).
-		Where("tenant_id", tenantId).
-		Where("account_id", accountId).
-		Where("status", 1).
-		WhereNull("deleted_at").One()
+	rules, err := s.collectEventRules(ctx, event, tenantId, accountId)
 	if err != nil {
-		return gerror.Wrap(err, "读取采集规则失败")
+		return gerror.Wrap(err, "读取审核资料的完整采集规则失败")
+	}
+	var rule gdb.Record
+	for _, candidate := range rules {
+		if candidate["id"].Int64() == review["rule_id"].Int64() {
+			rule = candidate
+			break
+		}
 	}
 	if event.IsEmpty() || rule.IsEmpty() {
 		return gerror.New("采集审核关联数据不存在或规则已停用")
+	}
+	if suffix, ok, suffixErr := s.resolveIntroFeeChannelSuffix(ctx, event, rule); suffixErr != nil {
+		return suffixErr
+	} else if ok {
+		rule["intro_fee_suffix"] = gvar.New(suffix)
 	}
 	text := strings.TrimSpace(review["raw_text"].String())
 	content, err := s.collectContentSnapshot(ctx, event)
