@@ -1104,6 +1104,9 @@ func (s *sSysPublish) discardCollectEventGroup(ctx context.Context, eventId int6
 		}
 	}
 	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if originErr := deleteProfileOriginsTx(ctx, tx, profileIds); originErr != nil {
+			return originErr
+		}
 		for _, profileId := range profileIds {
 			for _, table := range []string{
 				"hg_content_media",

@@ -38,7 +38,10 @@ func (s *sSysPublish) searchProfilePage(ctx context.Context, base *gdb.Model, in
 	if in == nil {
 		in = &sysin.ProfileListInp{}
 	}
-	mod := s.profileSearchModel(ctx, base, in)
+	mod, err := s.profileSearchModel(ctx, base, in)
+	if err != nil {
+		return nil, 0, err
+	}
 	return s.scanProfilePage(ctx, mod, in, fields, countErrMessage, listErrMessage, countCacheKeys...)
 }
 
@@ -46,16 +49,23 @@ func (s *sSysPublish) searchDistinctProfilePage(ctx context.Context, base *gdb.M
 	if in == nil {
 		in = &sysin.ProfileListInp{}
 	}
-	mod := s.profileSearchModel(ctx, base, in)
+	mod, err := s.profileSearchModel(ctx, base, in)
+	if err != nil {
+		return nil, 0, err
+	}
 	return s.scanDistinctProfilePage(ctx, mod, in, fields, countErrMessage, listErrMessage, countCacheKeys...)
 }
 
-func (s *sSysPublish) profileSearchModel(ctx context.Context, base *gdb.Model, in *sysin.ProfileListInp) *gdb.Model {
+func (s *sSysPublish) profileSearchModel(ctx context.Context, base *gdb.Model, in *sysin.ProfileListInp) (*gdb.Model, error) {
 	if in == nil {
 		in = &sysin.ProfileListInp{}
 	}
-	base = s.applyProfileNonKeywordFilters(ctx, base, in)
-	return applyProfileKeywordSearch(base, in.Keyword, profileTableSearchFields())
+	var err error
+	base, err = s.applyProfileNonKeywordFilters(ctx, base, in)
+	if err != nil {
+		return nil, err
+	}
+	return applyProfileKeywordSearch(base, in.Keyword, profileTableSearchFields()), nil
 }
 
 func profileSearchKeywordFields() []string {
