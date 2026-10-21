@@ -324,7 +324,7 @@ func (s *sAccountTasks) Fail(ctx context.Context, in *sysin.AccountTaskFailure) 
 	if in.RetryDelay <= 0 {
 		nextRunAt = gtime.Now().Add(5 * time.Second)
 	}
-	if row.AttemptCount >= row.MaxAttempts {
+	if !in.NotStarted && row.AttemptCount >= row.MaxAttempts {
 		status = sysin.AccountTaskStatusFinalizing
 		nextRunAt = nil
 	}
@@ -332,15 +332,20 @@ func (s *sAccountTasks) Fail(ctx context.Context, in *sysin.AccountTaskFailure) 
 	if in.Cause != nil {
 		errorMessage = in.Cause.Error()
 	}
+	data := g.Map{
+		columns.Status: status, columns.NextRunAt: nextRunAt, columns.LeaseOwner: "",
+		columns.LeaseEpoch: 0, columns.LeaseUntil: nil, columns.ErrorMessage: errorMessage, columns.UpdatedAt: gtime.Now(),
+	}
+	if in.NotStarted {
+		data[columns.AttemptCount] = max(0, row.AttemptCount-1)
+	}
 	updated, err := dao.TgCollectorAccountTask.Ctx(ctx).
 		WherePri(in.TaskID).
 		Where(columns.Status, sysin.AccountTaskStatusProcessing).
 		Where(columns.LeaseOwner, in.Lease.InstanceID).
 		Where(columns.LeaseEpoch, in.Lease.Epoch).
-		Data(g.Map{
-			columns.Status: status, columns.NextRunAt: nextRunAt, columns.LeaseOwner: "",
-			columns.LeaseEpoch: 0, columns.LeaseUntil: nil, columns.ErrorMessage: errorMessage, columns.UpdatedAt: gtime.Now(),
-		}).Update()
+		Where(columns.AttemptCount, row.AttemptCount).
+		Data(data).Update()
 	if err != nil {
 		return gerror.Wrap(err, "更新Telegram账号任务失败状态失败")
 	}

@@ -96,24 +96,30 @@ func processAccountTask(ctx context.Context, client *telegram.Client, lease *sys
 				Cause: gerror.New("Telegram账号任务处理器不存在：" + task.TaskType),
 			})
 		} else {
-			taskCtx, cancel := context.WithTimeout(ctx, accountTaskTimeout(task.TaskType))
+			taskCtx, cancel := context.WithCancel(ctx)
+			waitCtx, waitCancel := context.WithTimeout(taskCtx, 30*time.Second)
 			stopRenew := keepAccountTaskLeaseAlive(taskCtx, cancel, lease)
 			gate := operationGate
 			if task.TaskType == sysin.AccountTaskTypeMediaDownload {
 				gate = nil
 			}
 			waitStarted := time.Now()
-			gateErr := lockAccountTaskOperation(taskCtx, gate)
+			gateErr := lockAccountTaskOperation(waitCtx, gate)
+			waitCancel()
 			g.Log().Infof(ctx, "Telegram账号任务发送锁等待结束 taskId:%d tgAccountId:%d waitMs:%d err:%v", task.ID, task.AccountID, time.Since(waitStarted).Milliseconds(), gateErr)
 			var result *sysin.AccountMediaDownloadResult
 			handleErr := gateErr
+			var executionErr error
 			if gateErr == nil {
-				result, handleErr = handler.HandleAccountTask(taskCtx, client, task)
+				executionCtx, executionCancel := context.WithTimeout(taskCtx, accountTaskTimeout(task.TaskType))
+				result, handleErr = handler.HandleAccountTask(executionCtx, client, task)
+				executionErr = executionCtx.Err()
+				executionCancel()
 				if gate != nil {
 					gate.Unlock()
 				}
 			}
-			taskCtxErr := taskCtx.Err()
+			taskCtxErr := executionErr
 			stopRenew()
 			cancel()
 			if handleErr != nil && errors.Is(taskCtxErr, context.DeadlineExceeded) {
@@ -128,14 +134,14 @@ func processAccountTask(ctx context.Context, client *telegram.Client, lease *sys
 				err = collectorservice.AccountTasks().Complete(ctx, task.ID, lease, result)
 			} else {
 				g.Log().Warningf(ctx, "Telegram账号任务处理失败 taskId:%d type:%s tgAccountId:%d duration:%s err:%+v", task.ID, task.TaskType, task.AccountID, time.Since(startedAt).Round(time.Millisecond), handleErr)
-				if provider := collectorservice.AccountRuntimeProviderInstance(); provider != nil {
+				if provider := collectorservice.AccountRuntimeProviderInstance(); provider != nil && gateErr == nil {
 					provider.ObserveAccountTaskError(ctx, task, handleErr)
 				}
 				resultStatus = "failed"
 				err = collectorservice.AccountTasks().Fail(ctx, &sysin.AccountTaskFailure{
-					TaskID: task.ID, Lease: lease, Cause: handleErr, RetryDelay: retryDelay(handleErr),
+					TaskID: task.ID, Lease: lease, Cause: handleErr, RetryDelay: retryDelay(handleErr), NotStarted: gateErr != nil,
 				})
-				if err == nil && task.AttemptCount >= task.MaxAttempts {
+				if err == nil && gateErr == nil && task.AttemptCount >= task.MaxAttempts {
 					task.Status = sysin.AccountTaskStatusFinalizing
 					task.ErrorMessage = handleErr.Error()
 					finalizeAccountTaskFailure(ctx, task)

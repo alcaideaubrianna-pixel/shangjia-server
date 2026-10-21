@@ -484,14 +484,54 @@ func (s *sSysPublish) prepareAccountFallbackAttempt(ctx context.Context, client 
 	if err != nil {
 		return attempt, nil, err
 	}
+	pendingCleanup, err := g.DB().Model(publishTgDeliveryStepTable).Ctx(ctx).Where("job_id", job.Id).
+		Where("step_key", fmt.Sprintf("%s%d", telegramPartialCleanupCheckpoint, attempt.Id)).Where("status", telegramDeliveryStepRunning).Count()
+	if err != nil {
+		return attempt, nil, err
+	}
+	if pendingCleanup > 0 {
+		return s.resumePartialAccountAlbum(ctx, client, channel, job, attempt, expectedCount)
+	}
 	messages, err := findTelegramAttemptMessages(ctx, client, channel, attempt)
 	if err != nil {
+		var partial *telegramIncompleteAlbumError
+		if errors.As(err, &partial) && partial.expected <= telegramMediaGroupMaxItems && len(partial.messages) < partial.expected && attempt.CreatedAt != nil && time.Since(dbtime.FromTimestamp(attempt.CreatedAt).Time) >= telegramReconcileTakeoverWait {
+			if saveErr := s.saveTelegramSentMessages(ctx, job, partial.messages); saveErr != nil {
+				return attempt, nil, saveErr
+			}
+			if saveErr := s.projectTelegramDeliveryStep(ctx, job.Id, fmt.Sprintf("%s%d", telegramPartialCleanupCheckpoint, attempt.Id), telegramDeliveryStepRunning, attempt.Id, err.Error(), gtime.Now()); saveErr != nil {
+				return attempt, nil, saveErr
+			}
+			return s.resumePartialAccountAlbum(ctx, client, channel, job, attempt, expectedCount)
+		}
 		return attempt, nil, err
 	}
 	if len(messages) > 0 {
 		g.Log().Infof(ctx, "协议号发送前对账命中已有消息，跳过重复发送 jobId:%d attemptId:%d purpose:%s messages:%d", job.Id, attempt.Id, purpose, len(messages))
 	}
 	return attempt, messages, nil
+}
+
+const telegramPartialCleanupCheckpoint = "partial_album_cleanup:"
+
+func (s *sSysPublish) resumePartialAccountAlbum(ctx context.Context, client *telegram.Client, channel *messagePushChannel, job telegramJobRecord, attempt telegramDeliveryAttempt, expected int) (telegramDeliveryAttempt, []*telegramSentMessage, error) {
+	var messages []*telegramSentMessage
+	if err := g.DB().Model(publishTgMessageTable).Ctx(ctx).Fields("tg_message_id AS message_id,purpose,media_group_id").
+		Where("job_id", job.Id).Where("purpose", attempt.Phase).WhereIn("status", []string{"sent", "undeletable"}).Scan(&messages); err != nil {
+		return attempt, nil, gerror.Wrap(err, "读取待清理半组消息失败")
+	}
+	if err := s.cleanupPartialAccountMediaSend(ctx, client, job, channel, attempt.Phase, messages, gerror.New("恢复半组相册")); err != nil {
+		return attempt, nil, err
+	}
+	// Delete acknowledgment and the local deleted projection must both succeed
+	// before a different token can be created. Keep old evidence for late posts.
+	var next telegramDeliveryAttempt
+	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		var err error
+		next, err = replaceCleanedPartialAttemptTx(ctx, tx, job.Id, attempt.Id, expected)
+		return err
+	})
+	return next, nil, err
 }
 
 func (s *sSysPublish) accountFallbackDeliveryAttempt(ctx context.Context, job telegramJobRecord, purpose string, expectedCount int) (telegramDeliveryAttempt, error) {
@@ -755,14 +795,27 @@ func findTelegramAttemptMessagesPaged(ctx context.Context, attempt telegramDeliv
 			return matched, nil
 		}
 		matchErr = err
-		if len(messages) == 0 || offset == previousOffset {
-			break
+		if len(messages) == 0 {
+			return nil, matchErr
+		}
+		if offset == previousOffset {
+			return nil, gerror.New("Telegram对账分页未前进，禁止重发")
 		}
 		if attempt.CreatedAt != nil && oldestDate > 0 && int64(oldestDate) < dbtime.FromTimestamp(attempt.CreatedAt).Time.Unix()-60 {
-			break
+			return nil, matchErr
 		}
 	}
-	return nil, matchErr
+	return nil, gerror.New("Telegram对账达到500条上限，尚未覆盖发送时间，禁止重发")
+}
+
+type telegramIncompleteAlbumError struct {
+	messages []*telegramSentMessage
+	phase    string
+	expected int
+}
+
+func (e *telegramIncompleteAlbumError) Error() string {
+	return fmt.Sprintf("协议号找到的%s媒体组不完整：expected=%d actual=%d", telegramMediaPurposeLabel(e.phase), e.expected, len(e.messages))
 }
 
 func selectTelegramAttemptMessages(history []*tg.Message, attempt telegramDeliveryAttempt) ([]*telegramSentMessage, error) {
@@ -794,7 +847,7 @@ func selectTelegramAttemptMessages(history []*tg.Message, attempt telegramDelive
 		}
 	}
 	if len(messages) != attempt.ExpectedCount {
-		return nil, gerror.Newf("协议号找到的%s媒体组不完整：expected=%d actual=%d", telegramMediaPurposeLabel(attempt.Phase), attempt.ExpectedCount, len(messages))
+		return nil, &telegramIncompleteAlbumError{messages: messages, phase: attempt.Phase, expected: attempt.ExpectedCount}
 	}
 	return messages, nil
 }

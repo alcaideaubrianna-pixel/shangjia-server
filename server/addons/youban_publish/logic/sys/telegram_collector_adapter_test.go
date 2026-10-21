@@ -267,7 +267,7 @@ func TestFindTelegramAttemptMessagesPagingIsBounded(t *testing.T) {
 		}
 		return []*tg.Message{{ID: offset - 1}}, nil
 	})
-	if err != nil || calls != 5 {
+	if err == nil || calls != 5 {
 		t.Fatalf("paging limit: calls=%d err=%v", calls, err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -278,6 +278,22 @@ func TestFindTelegramAttemptMessagesPagingIsBounded(t *testing.T) {
 	})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled history lookup: %v", err)
+	}
+}
+
+func TestFindTelegramAttemptMessagesReturnsPartialEvidenceOnlyAfterHistoryEnd(t *testing.T) {
+	attempt := telegramDeliveryAttempt{AttemptToken: "partial", Phase: "display", ExpectedCount: 9}
+	message := &tg.Message{ID: 100, Message: telegramAttemptMarker(attempt.AttemptToken)}
+	message.SetGroupedID(88)
+	_, err := findTelegramAttemptMessagesPaged(context.Background(), attempt, func(_ context.Context, offset int) ([]*tg.Message, error) {
+		if offset == 0 {
+			return []*tg.Message{message}, nil
+		}
+		return nil, nil
+	})
+	var partial *telegramIncompleteAlbumError
+	if !errors.As(err, &partial) || len(partial.messages) != 1 {
+		t.Fatalf("partial evidence not retained: %v", err)
 	}
 }
 

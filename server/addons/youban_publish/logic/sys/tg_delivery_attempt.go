@@ -70,6 +70,58 @@ type telegramAttemptMessageRecord struct {
 	MessagePayload string `json:"messagePayload" orm:"message_payload"`
 }
 
+func replaceCleanedPartialAttemptTx(ctx context.Context, tx gdb.TX, jobID, attemptID int64, expected int) (telegramDeliveryAttempt, error) {
+	var job telegramJobRecord
+	if err := tx.Model(publishTgJobTable).Where("id", jobID).LockUpdate().Scan(&job); err != nil {
+		return telegramDeliveryAttempt{}, err
+	}
+	if job.Status != telegramJobStatusSending {
+		return telegramDeliveryAttempt{}, errTelegramJobSuperseded
+	}
+	var old telegramDeliveryAttempt
+	if err := tx.Model(publishTgAttemptTable).Where("id", attemptID).Where("job_id", jobID).LockUpdate().Scan(&old); err != nil {
+		return old, err
+	}
+	pending, err := tx.Model(publishTgDeliveryStepTable).Where("job_id", jobID).Where("step_key", fmt.Sprintf("%s%d", telegramPartialCleanupCheckpoint, old.Id)).Where("status", telegramDeliveryStepRunning).Count()
+	if err != nil {
+		return old, err
+	}
+	if pending == 0 || old.Status == telegramAttemptStatusConfirmed || old.Status == telegramAttemptStatusSuperseded {
+		return old, errTelegramAttemptNeedsReconcile
+	}
+	_, sendingPhase, _, err := telegramAttemptPhaseTransition(old.Phase)
+	if err != nil || job.SendPhase != sendingPhase || expected <= 0 {
+		return old, errTelegramAttemptNeedsReconcile
+	}
+	remaining, err := tx.Model(publishTgMessageTable).Where("job_id", jobID).Where("purpose", old.Phase).WhereNot("status", "deleted").Count()
+	if err != nil {
+		return old, err
+	}
+	if remaining != 0 {
+		return old, gerror.New("半组相册尚未全部确认删除，禁止重发")
+	}
+	last, err := tx.Model(publishTgAttemptTable).Where("job_id", jobID).Where("phase", old.Phase).Max("attempt_no")
+	if err != nil {
+		return old, err
+	}
+	if int(last) >= telegramAttemptMaxRetries {
+		return old, gerror.New("半组相册发送已达3次，停止自动重发")
+	}
+	if _, err = tx.Model(publishTgAttemptTable).Where("id", old.Id).Data(g.Map{"status": telegramAttemptStatusSuperseded, "webhook_deadline": nil}).Update(); err != nil {
+		return old, err
+	}
+	next := telegramDeliveryAttempt{JobId: jobID, TenantId: old.TenantId, BotId: old.BotId, ChannelId: old.ChannelId, TargetChatId: old.TargetChatId, Phase: old.Phase, AttemptNo: int(last) + 1, AttemptToken: guid.S(), ExpectedCount: expected, Status: telegramAttemptStatusSending, CreatedAt: gtime.Now()}
+	next.Id, err = tx.Model(publishTgAttemptTable).Data(g.Map{
+		"job_id": next.JobId, "tenant_id": next.TenantId, "bot_id": next.BotId, "channel_id": next.ChannelId,
+		"target_chat_id": next.TargetChatId, "phase": next.Phase, "chunk_index": 0, "attempt_no": next.AttemptNo,
+		"attempt_token": next.AttemptToken, "expected_count": expected, "confirmed_count": 0, "status": next.Status,
+	}).InsertAndGetId()
+	if err == nil {
+		_, err = tx.Model(publishTgDeliveryStepTable).Where("job_id", jobID).Where("step_key", fmt.Sprintf("%s%d", telegramPartialCleanupCheckpoint, old.Id)).Data(g.Map{"status": telegramDeliveryStepSucceeded}).Update()
+	}
+	return next, err
+}
+
 func (s *sSysPublish) beginTelegramDeliveryAttempt(ctx context.Context, job telegramJobRecord, phase string, expectedCount int) (telegramDeliveryAttempt, error) {
 	return s.prepareTelegramDeliveryAttempt(ctx, job, phase, expectedCount, false)
 }
@@ -177,7 +229,7 @@ func (s *sSysPublish) prepareTelegramDeliveryAttempt(ctx context.Context, job te
 			JobId: job.Id, TenantId: job.TenantId, BotId: job.BotId, ChannelId: job.ChannelId,
 			TargetChatId: normalizeTelegramChannelChatID(job.TargetChatId), Phase: phase,
 			AttemptNo: value.Int() + 1, AttemptToken: guid.S(), ExpectedCount: expectedCount,
-			Status: telegramAttemptStatusSending,
+			Status: telegramAttemptStatusSending, CreatedAt: gtime.Now(),
 		}
 		attempt.Id, valueErr = tx.Model(publishTgAttemptTable).Data(g.Map{
 			"job_id": attempt.JobId, "tenant_id": attempt.TenantId, "bot_id": attempt.BotId,

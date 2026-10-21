@@ -88,6 +88,7 @@ type AccountTaskFailure struct {
 	Lease      *AccountLease `json:"lease"`
 	Cause      error         `json:"-"`
 	RetryDelay time.Duration `json:"retryDelay"`
+	NotStarted bool          `json:"-"` // Only admission failed; no handler or Telegram call ran.
 }
 
 type AccountTaskStatusStat struct {
