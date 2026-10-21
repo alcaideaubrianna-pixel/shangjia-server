@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"testing"
 	"time"
 
@@ -18,6 +19,18 @@ import (
 func TestAccountFallbackStartsVerificationLocalPostgres(t *testing.T) {
 	if os.Getenv("YOUBAN_LOCAL_ACCOUNT_PHASE_PG") != "1" {
 		t.Skip("requires disposable local PostgreSQL at 127.0.0.1:35432")
+	}
+	// GoFrame caches default clients. Keep local configuration isolated from
+	// other tests even when the whole regression selection runs in one command.
+	if os.Getenv("YOUBAN_ACCOUNT_PHASE_TEST_CHILD") != "1" {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestAccountFallbackStartsVerificationLocalPostgres$", "-test.count=1")
+		cmd.Env = append(os.Environ(), "YOUBAN_ACCOUNT_PHASE_TEST_CHILD=1")
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("isolated phase regression: %v\n%s", err, output)
+		}
+		return
 	}
 	before := gdb.GetConfig("default")
 	redisBefore, _ := gredis.GetConfig()
