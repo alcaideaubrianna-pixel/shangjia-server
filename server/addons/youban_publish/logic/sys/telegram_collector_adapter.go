@@ -480,15 +480,9 @@ func (s *sSysPublish) sendAccountFallbackPhase(ctx context.Context, client *tele
 }
 
 func (s *sSysPublish) prepareAccountFallbackAttempt(ctx context.Context, client *telegram.Client, channel *messagePushChannel, job telegramJobRecord, purpose string, expectedCount int) (telegramDeliveryAttempt, []*telegramSentMessage, error) {
-	attempt, err := s.activeTelegramDeliveryAttempt(ctx, job.Id, purpose)
+	attempt, err := s.accountFallbackDeliveryAttempt(ctx, job, purpose, expectedCount)
 	if err != nil {
 		return attempt, nil, err
-	}
-	if attempt.Id <= 0 {
-		attempt, err = s.beginTelegramDeliveryAttempt(ctx, job, purpose, expectedCount)
-		if err != nil {
-			return attempt, nil, err
-		}
 	}
 	messages, err := findTelegramAttemptMessages(ctx, client, channel, attempt)
 	if err != nil {
@@ -498,6 +492,21 @@ func (s *sSysPublish) prepareAccountFallbackAttempt(ctx context.Context, client 
 		g.Log().Infof(ctx, "协议号发送前对账命中已有消息，跳过重复发送 jobId:%d attemptId:%d purpose:%s messages:%d", job.Id, attempt.Id, purpose, len(messages))
 	}
 	return attempt, messages, nil
+}
+
+func (s *sSysPublish) accountFallbackDeliveryAttempt(ctx context.Context, job telegramJobRecord, purpose string, expectedCount int) (telegramDeliveryAttempt, error) {
+	attempt, err := s.activeTelegramDeliveryAttempt(ctx, job.Id, purpose)
+	if err != nil {
+		return attempt, err
+	}
+	if attempt.Id <= 0 {
+		// A whole-display account fallback has no pre-created Bot verification
+		// Attempt. Advance the persisted phase and create its first Attempt in
+		// one transaction, exactly like the normal Bot delivery path. Do not use
+		// the stale job snapshot: display may have just been confirmed above.
+		attempt, err = s.prepareTelegramDeliveryAttempt(ctx, job, purpose, expectedCount, true)
+	}
+	return attempt, err
 }
 
 func bindAccountFallbackMessagesToMedia(messages []*telegramSentMessage, media []*telegramMediaItem) {
