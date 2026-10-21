@@ -135,3 +135,16 @@ func TestAccountTaskTimeoutForMessageReconcile(t *testing.T) {
 		t.Fatalf("message reconcile timeout = %s, want %s", got, 2*time.Minute)
 	}
 }
+
+func TestAccountTaskMediaFallbackDoesNotBlockControlOperations(t *testing.T) {
+	var gate sync.Mutex
+	if got := accountTaskOperationGate(sysin.AccountTaskTypeMessageMediaFallback, &gate); got != nil {
+		t.Fatal("media fallback must not hold the account control-operation gate")
+	}
+	if got := accountTaskOperationGate(sysin.AccountTaskTypeMediaDownload, &gate); got != nil {
+		t.Fatal("media download must not hold the account control-operation gate")
+	}
+	if got := accountTaskOperationGate(sysin.AccountTaskTypeMessageReconcile, &gate); got != &gate {
+		t.Fatal("reconciliation must retain the account control-operation gate")
+	}
+}

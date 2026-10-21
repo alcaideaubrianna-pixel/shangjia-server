@@ -99,10 +99,7 @@ func processAccountTask(ctx context.Context, client *telegram.Client, lease *sys
 			taskCtx, cancel := context.WithCancel(ctx)
 			waitCtx, waitCancel := context.WithTimeout(taskCtx, 30*time.Second)
 			stopRenew := keepAccountTaskLeaseAlive(taskCtx, cancel, lease)
-			gate := operationGate
-			if task.TaskType == sysin.AccountTaskTypeMediaDownload {
-				gate = nil
-			}
+			gate := accountTaskOperationGate(task.TaskType, operationGate)
 			waitStarted := time.Now()
 			gateErr := lockAccountTaskOperation(waitCtx, gate)
 			waitCancel()
@@ -164,6 +161,20 @@ func processAccountTask(ctx context.Context, client *telegram.Client, lease *sys
 		))
 	}
 	return true, len(tasks) > 0
+}
+
+// Media download/fallback work can spend minutes waiting on remote storage or
+// Telegram. It must not hold the account control-operation gate, otherwise one
+// slow media task blocks reconciliation and all subsequent account recovery
+// tasks. The account lease and per-task lease still provide ownership and
+// bounded concurrency.
+func accountTaskOperationGate(taskType string, gate *sync.Mutex) *sync.Mutex {
+	switch taskType {
+	case sysin.AccountTaskTypeMediaDownload, sysin.AccountTaskTypeMessageMediaFallback:
+		return nil
+	default:
+		return gate
+	}
 }
 
 // A queued operation must not block shutdown or enter its handler with an
