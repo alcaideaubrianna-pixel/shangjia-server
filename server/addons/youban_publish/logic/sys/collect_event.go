@@ -1243,6 +1243,9 @@ func (s *sSysPublish) createCollectReview(ctx context.Context, event gdb.Record,
 		return gerror.Wrap(err, "读取采集审核幂等记录失败")
 	}
 	if !existingReview.IsEmpty() {
+		if existingReview["status"].String() != sysin.CollectReviewStatusPending {
+			return nil
+		}
 		prepared, prepareErr := s.prepareCollectMaterial(ctx, event, content)
 		if prepareErr != nil {
 			return gerror.Wrap(prepareErr, "刷新采集审核媒体失败")
@@ -1291,12 +1294,25 @@ func (s *sSysPublish) createCollectReview(ctx context.Context, event gdb.Record,
 }
 
 func (s *sSysPublish) markCollectDispatchReviewing(ctx context.Context, dispatchId, reviewId int64) error {
-	_, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).Where("id", dispatchId).Data(g.Map{
-		"review_id":     reviewId,
-		"status":        sysin.CollectDispatchStatusReviewing,
-		"error_message": "",
-		"finished_at":   nil,
-		"updated_at":    gtime.Now(),
-	}).Update()
+	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		// Serialize with approval/rejection and recheck after acquiring the lock.
+		review, err := tx.Model(pdao.YoubanPublishCollectReview.Table()).Where("id", reviewId).Where("dispatch_id", dispatchId).LockUpdate().One()
+		if err != nil {
+			return err
+		}
+		if review.IsEmpty() || review["status"].String() != sysin.CollectReviewStatusPending {
+			return nil
+		}
+		_, err = tx.Model(pdao.YoubanPublishCollectDispatch.Table()).Where("id", dispatchId).
+			Where("(status IN (?,?) OR (status=? AND COALESCE(review_id,0)=0))", sysin.CollectDispatchStatusFailed, sysin.CollectDispatchStatusReviewing, sysin.CollectDispatchStatusPending).
+			Where("(COALESCE(review_id,0)=0 OR review_id=?)", reviewId).Data(g.Map{
+			"review_id":     reviewId,
+			"status":        sysin.CollectDispatchStatusReviewing,
+			"error_message": "",
+			"finished_at":   nil,
+			"updated_at":    gtime.Now(),
+		}).Update()
+		return err
+	})
 	return gerror.Wrap(err, "更新采集审核分发失败")
 }
