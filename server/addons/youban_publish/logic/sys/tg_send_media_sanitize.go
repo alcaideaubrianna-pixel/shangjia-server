@@ -221,10 +221,16 @@ func (s *sSysPublish) prepareTelegramBackgroundReplacement(ctx context.Context, 
 func shouldSkipBackgroundReplacement(data []byte) bool {
 	metrics, ok := backgroundReplacementDocumentMetrics(data)
 	if !ok {
-		return true
+		// Decode failures must reach the normal preparation error path, not be
+		// treated as documents and silently bypass background replacement.
+		return false
 	}
-	return metrics.WhitePercent >= 82 || metrics.HasTableGrid ||
-		(metrics.WhitePercent >= 42 && metrics.DarkPercent >= 2 && metrics.EdgePercent >= 7)
+	// Dark rows/columns also occur in ordinary photos (clothes, furniture,
+	// shadows). Only use them as document evidence on a predominantly white
+	// page; grid detection alone incorrectly skipped production portrait photos.
+	return metrics.WhitePercent >= 82 ||
+		(metrics.WhitePercent >= 42 && (metrics.HasTableGrid ||
+			(metrics.DarkPercent >= 2 && metrics.EdgePercent >= 7)))
 }
 
 type backgroundReplacementMetrics struct {

@@ -66,6 +66,36 @@ func TestShouldNotSkipWhiteStudioPortrait(t *testing.T) {
 	}
 }
 
+func TestShouldNotSkipPhotoWithDarkBands(t *testing.T) {
+	// Reproduce the production failure: broad dark regions create several
+	// "grid lines" even though this is a colored image without a white page.
+	img := image.NewRGBA(image.Rect(0, 0, 320, 240))
+	draw.Draw(img, img.Bounds(), &image.Uniform{C: color.RGBA{R: 170, G: 210, B: 230, A: 255}}, image.Point{}, draw.Src)
+	for _, y := range []int{20, 70, 120, 170} {
+		draw.Draw(img, image.Rect(0, y, 320, y+8), &image.Uniform{C: color.Gray{Y: 60}}, image.Point{}, draw.Src)
+	}
+	draw.Draw(img, image.Rect(150, 0, 160, 240), &image.Uniform{C: color.Gray{Y: 60}}, image.Point{}, draw.Src)
+	var out bytes.Buffer
+	if err := jpeg.Encode(&out, img, &jpeg.Options{Quality: 90}); err != nil {
+		t.Fatal(err)
+	}
+	metrics, ok := backgroundReplacementDocumentMetrics(out.Bytes())
+	if !ok || !metrics.HasTableGrid {
+		t.Fatalf("fixture must reproduce the old grid false positive: %+v", metrics)
+	}
+	if shouldSkipBackgroundReplacement(out.Bytes()) {
+		t.Fatalf("colored photo must remain eligible for matting: %+v", metrics)
+	}
+}
+
+func TestShouldNotSkipBackgroundReplacementInvalidImage(t *testing.T) {
+	for _, data := range [][]byte{nil, []byte("invalid image"), {0xff, 0xd8, 0xff}} {
+		if shouldSkipBackgroundReplacement(data) {
+			t.Fatal("invalid image must not bypass processing as a document")
+		}
+	}
+}
+
 func TestDocumentImageSkipsAllAntiScanProcessing(t *testing.T) {
 	data := encodeBackgroundReplacementTestImage(t, color.White)
 	source, err := os.CreateTemp("", "ybp-document-*.jpg")
