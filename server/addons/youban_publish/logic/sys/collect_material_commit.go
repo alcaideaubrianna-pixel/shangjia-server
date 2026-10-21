@@ -153,6 +153,18 @@ func acquireTelegramCollectorMediaCache(ctx context.Context, mediaType, storageP
 		return nil, err
 	}
 	if !claimed {
+		// Another worker may have completed between the initial read and claim.
+		entry, ready, err = collectorservice.Collector().MediaCache(ctx, fingerprint)
+		if err != nil {
+			return nil, err
+		}
+		if ready && entry != nil {
+			if telegramCollectorMediaCacheURL(entry) == "" {
+				return nil, gerror.New("Telegram媒体索引已完成但缺少有效资源地址")
+			}
+			state.Entry = entry
+			return state, nil
+		}
 		return nil, newCollectMediaRetryError("相同Telegram媒体正在由其他Worker处理，等待复用结果", 5*time.Second)
 	}
 	state.Claimed = true

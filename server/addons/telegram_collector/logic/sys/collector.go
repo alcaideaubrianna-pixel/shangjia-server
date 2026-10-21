@@ -342,8 +342,8 @@ func (s *sCollector) MediaCache(ctx context.Context, fingerprint string) (*sysin
 		value, err := cache.Instance().Get(ctx, consts.MediaCacheKey(fingerprint))
 		if err == nil && value != nil && !value.IsNil() && strings.TrimSpace(value.String()) != "" {
 			var entry sysin.MediaCacheEntry
-			if err = json.Unmarshal([]byte(value.String()), &entry); err == nil {
-				return &entry, entry.Status == sysin.MediaStatusReady, nil
+			if err = json.Unmarshal([]byte(value.String()), &entry); err == nil && entry.Status == sysin.MediaStatusReady {
+				return &entry, true, nil
 			}
 		}
 	}
@@ -378,7 +378,9 @@ func (s *sCollector) MediaCache(ctx context.Context, fingerprint string) (*sysin
 	if row.UpdatedAt != nil {
 		entry.UpdatedAt = row.UpdatedAt.Time
 	}
-	if cache.Initialized() {
+	// Only completed results may be cached: a delayed processing read must not
+	// overwrite SaveMediaReady's cache entry with a long-lived stale state.
+	if cache.Initialized() && entry.Status == sysin.MediaStatusReady {
 		if payload, marshalErr := json.Marshal(entry); marshalErr == nil {
 			_ = cache.Instance().Set(ctx, consts.MediaCacheKey(fingerprint), string(payload), time.Duration(consts.MediaCacheDefaultHours)*time.Hour)
 		}

@@ -1285,9 +1285,11 @@ func (s *sSysPublish) createCollectReview(ctx context.Context, event gdb.Record,
 	}
 	g.Log().Infof(ctx, "采集审核已创建 reviewId:%d eventId:%d dispatchId:%d ruleId:%d media:%d", reviewId, event["id"].Int64(), dispatchId, rule["id"].Int64(), mediaCount)
 	_, err = pdao.YoubanPublishCollectDispatch.Ctx(ctx).Where("id", dispatchId).Data(g.Map{
-		"review_id":  reviewId,
-		"status":     sysin.CollectDispatchStatusReviewing,
-		"updated_at": now,
+		"review_id":     reviewId,
+		"status":        sysin.CollectDispatchStatusReviewing,
+		"error_message": "",
+		"finished_at":   nil,
+		"updated_at":    now,
 	}).Update()
 	return gerror.Wrap(err, "更新采集审核分发失败")
 }
