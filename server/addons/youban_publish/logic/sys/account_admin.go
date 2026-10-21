@@ -11,6 +11,7 @@ import (
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/consts"
 	"hotgo/internal/library/contexts"
 	"hotgo/utility/charset"
 )
@@ -19,7 +20,16 @@ func (s *sSysPublish) ServerAccountList(ctx context.Context, in *sysin.AccountLi
 	if in == nil {
 		in = &sysin.AccountListInp{}
 	}
-	return s.accountList(ctx, in)
+	list, totalCount, err = s.accountList(ctx, in)
+	if err != nil {
+		return
+	}
+	user := contexts.GetUser(ctx)
+	canGenerate := user != nil && user.App == consts.AppAdmin && s.isSystemSuperAdmin(ctx)
+	for _, account := range list {
+		account.CanGenerateLoginLink = canGenerate
+	}
+	return
 }
 
 func (s *sSysPublish) ServerAccountSave(ctx context.Context, in *sysin.AccountSaveInp) (res *sysin.AccountSaveModel, err error) {

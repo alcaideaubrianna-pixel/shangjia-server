@@ -576,3 +576,11 @@ export function CmsAppDelete(params = {}) {
 export function CmsAppBindTenant(params = {}) {
   return http.request({ url: '/youban_open/cmsApp/bindTenant', method: 'POST', params });
 }
+
+export function AccountLoginLink(params: { id: number }) {
+  return http.request<{ token: string; expires: number }>({
+    url: '/youban_publish/publish/account/loginLink',
+    method: 'POST',
+    params,
+  });
+}

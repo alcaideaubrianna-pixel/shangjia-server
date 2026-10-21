@@ -106,26 +106,27 @@ type AccountListInp struct {
 }
 
 type AccountModel struct {
-	Id                 int64       `json:"id" dc:"ID"`
-	TenantId           int64       `json:"tenantId" dc:"租户ID"`
-	TenantName         string      `json:"tenantName" dc:"账号归属"`
-	ParentId           int64       `json:"parentId" dc:"父账号ID"`
-	AccountType        string      `json:"accountType" dc:"账号类型"`
-	Nickname           string      `json:"nickname" dc:"昵称"`
-	Username           string      `json:"username" dc:"用户名"`
-	TelegramUserId     string      `json:"telegramUserId" dc:"TG用户ID"`
-	TelegramUsername   string      `json:"telegramUsername" dc:"TG用户名"`
-	DailyPublishLimit  int         `json:"dailyPublishLimit" dc:"每日上架额度"`
-	CanDirectPublish   int         `json:"canDirectPublish" dc:"是否可直接发布"`
-	AllowedChannelJson string      `json:"allowedChannelJson" dc:"可发布频道JSON"`
-	AllowedRegionJson  string      `json:"allowedRegionJson" dc:"可发布地区JSON"`
-	DownCount          int         `json:"downCount" dc:"下架资料数量"`
-	LastLoginAt        *gtime.Time `json:"lastLoginAt" dc:"最后登录时间"`
-	Remark             string      `json:"remark" dc:"备注"`
-	Status             int         `json:"status" dc:"状态"`
-	UploadCount        int         `json:"uploadCount" dc:"上架资料数量"`
-	CreatedAt          *gtime.Time `json:"createdAt" dc:"创建时间"`
-	UpdatedAt          *gtime.Time `json:"updatedAt" dc:"更新时间"`
+	CanGenerateLoginLink bool        `json:"canGenerateLoginLink" orm:"-" dc:"当前操作者是否可生成登录链接"`
+	Id                   int64       `json:"id" dc:"ID"`
+	TenantId             int64       `json:"tenantId" dc:"租户ID"`
+	TenantName           string      `json:"tenantName" dc:"账号归属"`
+	ParentId             int64       `json:"parentId" dc:"父账号ID"`
+	AccountType          string      `json:"accountType" dc:"账号类型"`
+	Nickname             string      `json:"nickname" dc:"昵称"`
+	Username             string      `json:"username" dc:"用户名"`
+	TelegramUserId       string      `json:"telegramUserId" dc:"TG用户ID"`
+	TelegramUsername     string      `json:"telegramUsername" dc:"TG用户名"`
+	DailyPublishLimit    int         `json:"dailyPublishLimit" dc:"每日上架额度"`
+	CanDirectPublish     int         `json:"canDirectPublish" dc:"是否可直接发布"`
+	AllowedChannelJson   string      `json:"allowedChannelJson" dc:"可发布频道JSON"`
+	AllowedRegionJson    string      `json:"allowedRegionJson" dc:"可发布地区JSON"`
+	DownCount            int         `json:"downCount" dc:"下架资料数量"`
+	LastLoginAt          *gtime.Time `json:"lastLoginAt" dc:"最后登录时间"`
+	Remark               string      `json:"remark" dc:"备注"`
+	Status               int         `json:"status" dc:"状态"`
+	UploadCount          int         `json:"uploadCount" dc:"上架资料数量"`
+	CreatedAt            *gtime.Time `json:"createdAt" dc:"创建时间"`
+	UpdatedAt            *gtime.Time `json:"updatedAt" dc:"更新时间"`
 }
 
 type AccountSaveInp struct {

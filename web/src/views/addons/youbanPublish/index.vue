@@ -627,6 +627,7 @@
 <script lang="ts" setup>
   import { computed, h, nextTick, onMounted, reactive, ref } from 'vue';
   import { NButton, NPopover, NSpace, NTag, useDialog, useMessage } from 'naive-ui';
+  import AccountLoginLink from './components/account-login-link.vue';
   import ChannelMemberPanel from './components/channel-member-panel.vue';
   import ActivityPanel from './components/activity-panel.vue';
   import CloudResourceConfig from './components/cloud-resource-config.vue';
@@ -932,6 +933,9 @@
               actionButton('编辑', () => openAccountModal(row)),
               actionButton('会员记录', () => openAccountVipRecords(row)),
               actionButton('重置密码', () => openAccountResetPassword(row)),
+              row.canGenerateLoginLink
+                ? h(AccountLoginLink, { accountId: row.id, disabled: row.status !== 1 })
+                : null,
               dangerButton('删除', () => deleteAccount(row.id)),
             ],
           }

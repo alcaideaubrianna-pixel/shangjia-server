@@ -47,6 +47,7 @@ type ISysPublish interface {
 	AdminTenantList(ctx context.Context, in *sysin.TenantListInp) (list []*sysin.TenantModel, totalCount int, err error)
 	AdminTenantSave(ctx context.Context, in *sysin.TenantSaveInp) (res *sysin.TenantSaveModel, err error)
 	AdminTenantDelete(ctx context.Context, in *sysin.TenantDeleteInp) (err error)
+	ServerAccountLoginLink(ctx context.Context, in *sysin.AccountLoginLinkInp) (res *sysin.AccountLoginModel, err error)
 	ServerAccountList(ctx context.Context, in *sysin.AccountListInp) (list []*sysin.AccountModel, totalCount int, err error)
 	ServerAccountSave(ctx context.Context, in *sysin.AccountSaveInp) (res *sysin.AccountSaveModel, err error)
 	ServerAccountResetPassword(ctx context.Context, in *sysin.AccountResetPasswordInp) (res *sysin.AccountSaveModel, err error)
