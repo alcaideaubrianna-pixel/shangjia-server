@@ -87,6 +87,7 @@ func (s *sSysPublish) prepareTelegramAntiScanUploadFile(ctx context.Context, med
 	bestPath := ""
 	var bestCleanup func()
 	var bestHash telegramAntiScanHash
+	var lastCandidateErr error
 	for attempt := 0; attempt < telegramAntiScanCandidateAttempts; attempt++ {
 		var protectedPath string
 		var err error
@@ -96,14 +97,20 @@ func (s *sSysPublish) prepareTelegramAntiScanUploadFile(ctx context.Context, med
 			protectedPath, err = prepareTelegramAntiScanFile(ctx, media, sourcePath, attempt)
 		}
 		if err != nil {
+			lastCandidateErr = err
+			g.Log().Warningf(ctx, "防扫图候选生成失败 jobId:%d mediaId:%d kind:%s attempt:%d/%d err:%+v", media.JobId, media.Id, kind, attempt+1, telegramAntiScanCandidateAttempts, err)
 			continue
 		}
 		candidatePath, candidateCleanup, err := prepareTelegramPhotoUploadFile(ctx, protectedPath, nil)
 		if err != nil {
+			lastCandidateErr = err
+			g.Log().Warningf(ctx, "防扫图候选压缩失败 jobId:%d mediaId:%d kind:%s attempt:%d/%d err:%+v", media.JobId, media.Id, kind, attempt+1, telegramAntiScanCandidateAttempts, err)
 			continue
 		}
 		candidateHash, err := telegramAntiScanFileHash(candidatePath)
 		if err != nil {
+			lastCandidateErr = err
+			g.Log().Warningf(ctx, "防扫图候选计算指纹失败 jobId:%d mediaId:%d kind:%s attempt:%d/%d err:%+v", media.JobId, media.Id, kind, attempt+1, telegramAntiScanCandidateAttempts, err)
 			if candidateCleanup != nil {
 				candidateCleanup()
 			}
@@ -132,10 +139,16 @@ func (s *sSysPublish) prepareTelegramAntiScanUploadFile(ctx context.Context, med
 		}
 	}
 	if bestPath == "" {
-		if cleanup != nil {
-			cleanup()
-		}
-		return "", nil, gerror.New("生成防扫图候选文件失败")
+		// Anti-scan is an optional transformation. A transient provider,
+		// image decoder, or candidate scoring failure must not turn an
+		// otherwise usable media item into an Account retry loop. Reuse the
+		// canonical source through the normal photo preparation path; this
+		// still validates/rewrites oversized or unsupported images before the
+		// Telegram upload. If the source itself is unavailable, return that
+		// concrete preparation error instead of hiding it behind the
+		// anti-scan error.
+		g.Log().Warningf(ctx, "防扫图候选生成失败，降级使用原始图片 jobId:%d mediaId:%d kind:%s attempts:%d lastErr:%+v", media.JobId, media.Id, kind, telegramAntiScanCandidateAttempts, lastCandidateErr)
+		return prepareTelegramPhotoUploadFile(ctx, sourcePath, cleanup)
 	}
 	media.ProtectedHashKey = historyKey
 	media.ProtectedPHash = bestHash.PHash

@@ -272,7 +272,7 @@ func TestMediaSearchStorageLocalPostgres(t *testing.T) {
 			}
 
 		})
-		t.Run("generation_failure_blocks_upload_and_cleans_file", func(t *testing.T) {
+		t.Run("generation_failure_falls_back_to_source_upload", func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "document.jpg")
 			if err := os.WriteFile(path, encodeBackgroundReplacementTestImage(t, color.White), 0600); err != nil {
 				t.Fatal(err)
@@ -280,9 +280,10 @@ func TestMediaSearchStorageLocalPostgres(t *testing.T) {
 			cleaned := false
 			media := &telegramMediaItem{Id: 999999, MediaType: "image", AntiScanMode: "background_replace", AntiScanBackgroundURL: "unused"}
 			out, cleanup, err := service.prepareTelegramAntiScanUploadFile(ctx, media, path, func() { cleaned = true }, "image")
-			if err == nil || out != "" || cleanup != nil || !cleaned {
+			if err != nil || out == "" || cleanup == nil || cleaned {
 				t.Fatalf("out=%q err=%v cleaned=%v", out, err, cleaned)
 			}
+			cleanup()
 		})
 		t.Run("alias_bucket_failure_is_atomic", func(t *testing.T) {
 			if _, err := tx.Ctx(ctx).Exec("ALTER TABLE " + publishMediaPHashAliasBucketTable + " ADD CONSTRAINT reject_second CHECK(media_id<>501 OR bucket_pos<>2)"); err != nil {
