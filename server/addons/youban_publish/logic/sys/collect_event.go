@@ -1256,7 +1256,10 @@ func (s *sSysPublish) createCollectReview(ctx context.Context, event gdb.Record,
 				"media_count": prepared.Content.MediaCount,
 				"updated_at":  gtime.Now(),
 			}).Update()
-		return gerror.Wrap(updateErr, "刷新采集审核媒体数量失败")
+		if updateErr != nil {
+			return gerror.Wrap(updateErr, "刷新采集审核媒体数量失败")
+		}
+		return s.markCollectDispatchReviewing(ctx, dispatchId, existingReview["id"].Int64())
 	}
 	now := gtime.Now()
 	prepared, err := s.prepareCollectMaterial(ctx, event, content)
@@ -1284,12 +1287,16 @@ func (s *sSysPublish) createCollectReview(ctx context.Context, event gdb.Record,
 		return gerror.Wrap(err, "创建采集审核失败")
 	}
 	g.Log().Infof(ctx, "采集审核已创建 reviewId:%d eventId:%d dispatchId:%d ruleId:%d media:%d", reviewId, event["id"].Int64(), dispatchId, rule["id"].Int64(), mediaCount)
-	_, err = pdao.YoubanPublishCollectDispatch.Ctx(ctx).Where("id", dispatchId).Data(g.Map{
+	return s.markCollectDispatchReviewing(ctx, dispatchId, reviewId)
+}
+
+func (s *sSysPublish) markCollectDispatchReviewing(ctx context.Context, dispatchId, reviewId int64) error {
+	_, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).Where("id", dispatchId).Data(g.Map{
 		"review_id":     reviewId,
 		"status":        sysin.CollectDispatchStatusReviewing,
 		"error_message": "",
 		"finished_at":   nil,
-		"updated_at":    now,
+		"updated_at":    gtime.Now(),
 	}).Update()
 	return gerror.Wrap(err, "更新采集审核分发失败")
 }
