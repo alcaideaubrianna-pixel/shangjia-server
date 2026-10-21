@@ -16,10 +16,13 @@ func validateTelegramMediaSetKnownUploadSize(media []*telegramMediaItem) error {
 		if item == nil || (strings.TrimSpace(item.TgFileId) != "" && !item.ForceUpload && !telegramMediaRequiresSanitizedUpload(item)) {
 			continue
 		}
-		limit := int64(50_000_000)
 		if telegramMediaIsPhoto(item) {
-			limit = 10_000_000
+			// Original photo bytes are not upload bytes: the shared preparation
+			// path normalizes dimensions and compresses them before either API.
+			// Rejecting here bypasses that path and unnecessarily occupies Account.
+			continue
 		}
+		limit := int64(50_000_000)
 		if item.Size > limit {
 			return gerror.Newf("%s，切换协议号整组发送 mediaId:%d sizeBytes:%d limitBytes:%d", telegramMediaUploadSizeError, item.Id, item.Size, limit)
 		}

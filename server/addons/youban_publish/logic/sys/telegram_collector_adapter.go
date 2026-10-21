@@ -706,11 +706,63 @@ func findTelegramAttemptMessages(ctx context.Context, client *telegram.Client, c
 	if err != nil {
 		return nil, err
 	}
-	res, err := client.API().MessagesGetHistory(ctx, &tg.MessagesGetHistoryRequest{Peer: peer, Limit: 100})
-	if err != nil {
-		return nil, gerror.Wrap(err, "协议号读取频道最近消息失败")
+	historyCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	started := time.Now()
+	messages, err := findTelegramAttemptMessagesPaged(historyCtx, attempt, func(ctx context.Context, offset int) ([]*tg.Message, error) {
+		res, err := client.API().MessagesGetHistory(ctx, &tg.MessagesGetHistoryRequest{Peer: peer, Limit: 100, OffsetID: offset})
+		if err != nil {
+			return nil, gerror.Wrap(err, "协议号读取频道最近消息失败")
+		}
+		return tgHistoryMessages(res), nil
+	})
+	g.Log().Infof(ctx, "协议号发送对账结束 jobId:%d attemptId:%d phase:%s expected:%d actual:%d durationMs:%d err:%v", attempt.JobId, attempt.Id, attempt.Phase, attempt.ExpectedCount, len(messages), time.Since(started).Milliseconds(), err)
+	return messages, err
+}
+
+// An album can straddle the first history page. Never treat a truncated page
+// as evidence of a partial send. Bound both history work and network time.
+func findTelegramAttemptMessagesPaged(ctx context.Context, attempt telegramDeliveryAttempt, fetch func(context.Context, int) ([]*tg.Message, error)) ([]*telegramSentMessage, error) {
+	var history []*tg.Message
+	seen := make(map[int]bool)
+	offset := 0
+	var matchErr error
+	for page := 0; page < 5; page++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		messages, err := fetch(ctx, offset)
+		if err != nil {
+			return nil, err
+		}
+		previousOffset := offset
+		oldestDate := 0
+		for _, message := range messages {
+			if message == nil || message.ID <= 0 || seen[message.ID] {
+				continue
+			}
+			seen[message.ID] = true
+			history = append(history, message)
+			if offset == 0 || message.ID < offset {
+				offset = message.ID
+			}
+			if message.Date > 0 && (oldestDate == 0 || message.Date < oldestDate) {
+				oldestDate = message.Date
+			}
+		}
+		matched, err := selectTelegramAttemptMessages(history, attempt)
+		if err == nil && len(matched) > 0 {
+			return matched, nil
+		}
+		matchErr = err
+		if len(messages) == 0 || offset == previousOffset {
+			break
+		}
+		if attempt.CreatedAt != nil && oldestDate > 0 && int64(oldestDate) < dbtime.FromTimestamp(attempt.CreatedAt).Time.Unix()-60 {
+			break
+		}
 	}
-	return selectTelegramAttemptMessages(tgHistoryMessages(res), attempt)
+	return nil, matchErr
 }
 
 func selectTelegramAttemptMessages(history []*tg.Message, attempt telegramDeliveryAttempt) ([]*telegramSentMessage, error) {
@@ -721,7 +773,7 @@ func selectTelegramAttemptMessages(history []*tg.Message, attempt telegramDelive
 			groupedID, _ = message.GetGroupedID()
 			if groupedID == 0 {
 				if attempt.ExpectedCount > 1 {
-					return nil, gerror.Newf("协议号找到的验证消息不完整：expected=%d actual=1", attempt.ExpectedCount)
+					return nil, gerror.Newf("协议号找到的%s消息不完整：expected=%d actual=1", telegramMediaPurposeLabel(attempt.Phase), attempt.ExpectedCount)
 				}
 				return []*telegramSentMessage{{MessageId: int64(message.ID), Purpose: attempt.Phase}}, nil
 			}
@@ -742,7 +794,7 @@ func selectTelegramAttemptMessages(history []*tg.Message, attempt telegramDelive
 		}
 	}
 	if len(messages) != attempt.ExpectedCount {
-		return nil, gerror.Newf("协议号找到的验证媒体组不完整：expected=%d actual=%d", attempt.ExpectedCount, len(messages))
+		return nil, gerror.Newf("协议号找到的%s媒体组不完整：expected=%d actual=%d", telegramMediaPurposeLabel(attempt.Phase), attempt.ExpectedCount, len(messages))
 	}
 	return messages, nil
 }

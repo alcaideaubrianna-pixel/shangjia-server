@@ -1,6 +1,7 @@
 package sys
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -221,6 +222,62 @@ func TestSelectTelegramAttemptMessagesRejectsIncompleteSingleMessage(t *testing.
 	history := []*tg.Message{{ID: 9, Message: telegramAttemptMarker(attempt.AttemptToken)}}
 	if _, err := selectTelegramAttemptMessages(history, attempt); err == nil {
 		t.Fatal("expected an incomplete single-message verification error")
+	}
+}
+
+func TestFindTelegramAttemptMessagesAcrossHistoryPages(t *testing.T) {
+	attempt := telegramDeliveryAttempt{AttemptToken: "incident-nine", Phase: "display", ExpectedCount: 9}
+	first := make([]*tg.Message, 8)
+	for i := range first {
+		first[i] = &tg.Message{ID: 109 - i}
+		first[i].SetGroupedID(88)
+	}
+	first[0].Message = telegramAttemptMarker(attempt.AttemptToken)
+	last := &tg.Message{ID: 101}
+	last.SetGroupedID(88)
+	calls := 0
+	messages, err := findTelegramAttemptMessagesPaged(context.Background(), attempt, func(_ context.Context, offset int) ([]*tg.Message, error) {
+		calls++
+		if calls == 1 {
+			return first, nil
+		}
+		if offset != 102 {
+			t.Fatalf("history offset=%d, want 102", offset)
+		}
+		return []*tg.Message{last}, nil
+	})
+	if err != nil || len(messages) != 9 || calls != 2 {
+		t.Fatalf("paged album: messages=%d calls=%d err=%v", len(messages), calls, err)
+	}
+	_, err = findTelegramAttemptMessagesPaged(context.Background(), attempt, func(_ context.Context, _ int) ([]*tg.Message, error) {
+		return first, nil
+	})
+	if err == nil {
+		t.Fatal("actual eight-message album was accepted as nine")
+	}
+}
+
+func TestFindTelegramAttemptMessagesPagingIsBounded(t *testing.T) {
+	attempt := telegramDeliveryAttempt{AttemptToken: "missing", Phase: "display", ExpectedCount: 9}
+	calls := 0
+	_, err := findTelegramAttemptMessagesPaged(context.Background(), attempt, func(_ context.Context, offset int) ([]*tg.Message, error) {
+		calls++
+		if offset == 0 {
+			offset = 1000
+		}
+		return []*tg.Message{{ID: offset - 1}}, nil
+	})
+	if err != nil || calls != 5 {
+		t.Fatalf("paging limit: calls=%d err=%v", calls, err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = findTelegramAttemptMessagesPaged(ctx, attempt, func(context.Context, int) ([]*tg.Message, error) {
+		t.Fatal("cancelled history lookup issued a request")
+		return nil, nil
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled history lookup: %v", err)
 	}
 }
 

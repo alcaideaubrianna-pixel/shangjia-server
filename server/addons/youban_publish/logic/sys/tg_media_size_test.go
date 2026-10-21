@@ -2,12 +2,117 @@ package sys
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"image"
+	"image/png"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 
+	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 )
+
+func TestIncidentOversizedPhotoIsCompressedBeforeSizeDecision(t *testing.T) {
+	for _, originalSize := range []int64{45_859_302, 22_774_645, 16_181_637} {
+		file, err := os.CreateTemp(t.TempDir(), "incident-*.png")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = png.Encode(file, image.NewNRGBA(image.Rect(0, 0, 128, 128))); err != nil {
+			t.Fatal(err)
+		}
+		// Valid image with trailing metadata reproduces the original byte
+		// size without committing production media or allocating a huge image.
+		if err = file.Truncate(originalSize); err != nil {
+			t.Fatal(err)
+		}
+		if err = file.Close(); err != nil {
+			t.Fatal(err)
+		}
+		media := &telegramMediaItem{MediaType: "image", Size: originalSize}
+		if err = validateTelegramMediaSetKnownUploadSize([]*telegramMediaItem{media}); err != nil {
+			t.Fatalf("compression bypassed for %d bytes: %v", originalSize, err)
+		}
+		path, cleanup, err := NewSysPublish().prepareTelegramMediaUploadFile(context.Background(), media, file.Name(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = validateTelegramMediaUploadSize(media, path); err != nil {
+			t.Fatalf("processed upload rejected: %v", err)
+		}
+		if cleanup != nil {
+			cleanup()
+		}
+	}
+}
+
+func TestIncidentOversizedPhotoAlbumUsesBotAfterCompression(t *testing.T) {
+	var media []*telegramMediaItem
+	for i, size := range []int64{45_859_302, 22_774_645, 16_181_637} {
+		file, err := os.CreateTemp(t.TempDir(), "incident-*.png")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = png.Encode(file, image.NewNRGBA(image.Rect(0, 0, 128, 128))); err != nil {
+			t.Fatal(err)
+		}
+		if err = file.Truncate(size); err != nil {
+			t.Fatal(err)
+		}
+		if err = file.Close(); err != nil {
+			t.Fatal(err)
+		}
+		media = append(media, &telegramMediaItem{Id: int64(i + 1), MediaType: "image", Purpose: "display", Size: size, StoragePath: file.Name()})
+	}
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.URL.Path != "/botlocal-test/sendMediaGroup" {
+			t.Errorf("unexpected API: %s", r.URL.Path)
+		}
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Error(err)
+			w.WriteHeader(500)
+			return
+		}
+		defer r.MultipartForm.RemoveAll()
+		var inputs []struct{ Type, Media string }
+		if err := json.Unmarshal([]byte(r.FormValue("media")), &inputs); err != nil || len(inputs) != 3 {
+			t.Errorf("album input count=%d err=%v", len(inputs), err)
+		}
+		files := 0
+		for _, group := range r.MultipartForm.File {
+			for _, file := range group {
+				files++
+				if file.Size > telegramPhotoMaxUploadBytes {
+					t.Errorf("uploaded original instead of compressed photo: %d", file.Size)
+				}
+			}
+		}
+		if files != 3 {
+			t.Errorf("uploaded files=%d, want 3", files)
+		}
+		results := make([]map[string]any, 3)
+		for i := range results {
+			results[i] = map[string]any{"message_id": i + 1, "date": 1, "chat": map[string]any{"id": -1001, "type": "channel"}, "photo": []map[string]any{{"file_id": fmt.Sprint(i), "file_unique_id": fmt.Sprint(i), "width": 128, "height": 128}}}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": results})
+	}))
+	defer server.Close()
+	bot, err := tgbot.New("local-test", tgbot.WithSkipGetMe(), tgbot.WithServerURL(server.URL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sent, err := NewSysPublish().sendTelegramMediaSet(context.Background(), bot, "-1001", "display", "资料", media)
+	if err != nil || len(sent) != 3 || calls != 1 {
+		t.Fatalf("compressed album: sent=%d calls=%d err=%v", len(sent), calls, err)
+	}
+}
 
 func TestTelegramMediaURLSizeLimits(t *testing.T) {
 	for _, tc := range []struct {
@@ -39,7 +144,10 @@ func TestTelegramMediaSetOversizeHandoffBeforeSending(t *testing.T) {
 		{"unknown", &telegramMediaItem{MediaType: "video"}, false},
 		{"video boundary", &telegramMediaItem{MediaType: "video", Size: 50_000_000}, false},
 		{"oversized video", &telegramMediaItem{MediaType: "video", Size: 50_000_001}, true},
-		{"oversized photo", &telegramMediaItem{MediaType: "image", Size: 10_000_001}, true},
+		{"oversized photo is compressed before upload", &telegramMediaItem{MediaType: "image", Size: 10_000_001}, false},
+		{"M98925 protected photo", &telegramMediaItem{MediaType: "image", Size: 45_859_302, AntiScanEnabled: true, TgFileId: "cached"}, false},
+		{"N78120 photo", &telegramMediaItem{MediaType: "image", Size: 22_774_645}, false},
+		{"U73573 photo", &telegramMediaItem{MediaType: "image", Size: 16_181_637}, false},
 		{"reuse", &telegramMediaItem{MediaType: "video", Size: 100_000_000, TgFileId: "cached"}, false},
 		{"forced upload", &telegramMediaItem{MediaType: "video", Size: 100_000_000, TgFileId: "cached", ForceUpload: true}, true},
 	} {

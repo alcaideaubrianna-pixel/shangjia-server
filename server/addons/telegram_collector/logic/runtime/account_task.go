@@ -29,7 +29,7 @@ type accountTaskRetryDelay interface {
 
 var accountRuntimeMeter = otel.Meter("hotgo/addons/telegram_collector/runtime")
 
-func RunAccountTaskLoop(ctx context.Context, client *telegram.Client, lease *sysin.AccountLease, operationGate sync.Locker) {
+func RunAccountTaskLoop(ctx context.Context, client *telegram.Client, lease *sysin.AccountLease, operationGate *sync.Mutex) {
 	if client == nil || lease == nil {
 		return
 	}
@@ -47,7 +47,7 @@ func RunAccountTaskLoop(ctx context.Context, client *telegram.Client, lease *sys
 	workers.Wait()
 }
 
-func accountTaskWorkerLoop(ctx context.Context, client *telegram.Client, lease *sysin.AccountLease, operationGate sync.Locker, workerID int) {
+func accountTaskWorkerLoop(ctx context.Context, client *telegram.Client, lease *sysin.AccountLease, operationGate *sync.Mutex, workerID int) {
 	ticker := time.NewTicker(accountTaskPollInterval)
 	defer ticker.Stop()
 	for {
@@ -67,7 +67,7 @@ func accountTaskWorkerLoop(ctx context.Context, client *telegram.Client, lease *
 	}
 }
 
-func processAccountTask(ctx context.Context, client *telegram.Client, lease *sysin.AccountLease, operationGate sync.Locker) (bool, bool) {
+func processAccountTask(ctx context.Context, client *telegram.Client, lease *sysin.AccountLease, operationGate *sync.Mutex) (bool, bool) {
 	renewed, err := collectorservice.AccountLeaseManager().Renew(ctx, lease, 0)
 	if err != nil {
 		g.Log().Warningf(ctx, "续期Telegram账号任务租约失败 tgAccountId:%d err:%+v", lease.AccountID, err)
@@ -98,12 +98,20 @@ func processAccountTask(ctx context.Context, client *telegram.Client, lease *sys
 		} else {
 			taskCtx, cancel := context.WithTimeout(ctx, accountTaskTimeout(task.TaskType))
 			stopRenew := keepAccountTaskLeaseAlive(taskCtx, cancel, lease)
-			if operationGate != nil && task.TaskType != sysin.AccountTaskTypeMediaDownload {
-				operationGate.Lock()
+			gate := operationGate
+			if task.TaskType == sysin.AccountTaskTypeMediaDownload {
+				gate = nil
 			}
-			result, handleErr := handler.HandleAccountTask(taskCtx, client, task)
-			if operationGate != nil && task.TaskType != sysin.AccountTaskTypeMediaDownload {
-				operationGate.Unlock()
+			waitStarted := time.Now()
+			gateErr := lockAccountTaskOperation(taskCtx, gate)
+			g.Log().Infof(ctx, "Telegram账号任务发送锁等待结束 taskId:%d tgAccountId:%d waitMs:%d err:%v", task.ID, task.AccountID, time.Since(waitStarted).Milliseconds(), gateErr)
+			var result *sysin.AccountMediaDownloadResult
+			handleErr := gateErr
+			if gateErr == nil {
+				result, handleErr = handler.HandleAccountTask(taskCtx, client, task)
+				if gate != nil {
+					gate.Unlock()
+				}
 			}
 			taskCtxErr := taskCtx.Err()
 			stopRenew()
@@ -150,6 +158,37 @@ func processAccountTask(ctx context.Context, client *telegram.Client, lease *sys
 		))
 	}
 	return true, len(tasks) > 0
+}
+
+// A queued operation must not block shutdown or enter its handler with an
+// already expired context. Do not spawn a goroutine that could acquire the
+// mutex after the caller has returned.
+func lockAccountTaskOperation(ctx context.Context, gate *sync.Mutex) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if gate == nil {
+		return nil
+	}
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if gate.TryLock() {
+			if err := ctx.Err(); err != nil {
+				gate.Unlock()
+				return err
+			}
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 func finalizeAccountTaskFailure(ctx context.Context, task *sysin.AccountTask) {

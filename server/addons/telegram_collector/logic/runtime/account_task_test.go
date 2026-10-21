@@ -3,12 +3,50 @@ package runtime
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
 	"hotgo/addons/telegram_collector/model/input/sysin"
 	collectorservice "hotgo/addons/telegram_collector/service"
 )
+
+func TestAccountTaskOperationWaitHonorsCancellation(t *testing.T) {
+	var gate sync.Mutex
+	gate.Lock()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- lockAccountTaskOperation(ctx, &gate) }()
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("gate wait: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancelled task is still blocked on another send")
+	}
+	gate.Unlock()
+	if !gate.TryLock() {
+		t.Fatal("cancelled waiter acquired or leaked the gate")
+	}
+	gate.Unlock()
+}
+
+func TestAccountTaskOperationGateRejectsExpiredTask(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var gate sync.Mutex
+	for _, candidate := range []*sync.Mutex{nil, &gate} {
+		if err := lockAccountTaskOperation(ctx, candidate); !errors.Is(err, context.Canceled) {
+			t.Fatalf("expired task admitted: %v", err)
+		}
+	}
+	if err := lockAccountTaskOperation(context.Background(), &gate); err != nil {
+		t.Fatal(err)
+	}
+	gate.Unlock()
+}
 
 type testAccountTaskFailureHandler struct {
 	called chan error
