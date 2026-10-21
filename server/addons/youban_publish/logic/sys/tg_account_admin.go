@@ -337,7 +337,7 @@ func (s *sSysPublish) AdminTgAccountDelete(ctx context.Context, in *sysin.TgAcco
 		return err
 	}
 	if err = removeTelegramAccountsWithReferenceCheck(ctx, in.Ids, current.TenantId, current.Id); err != nil {
-		return gerror.Wrap(err, "删除TG账号失败")
+		return err
 	}
 	s.cancelTelegramDeleteFallbackTasks(ctx, in.Ids, "TG账号已删除，协议号删除任务已取消")
 	return nil
@@ -363,7 +363,7 @@ func (s *sSysPublish) serverTgAccountRemove(ctx context.Context, in *sysin.TgAcc
 	}
 	in.Ids = uniqueIds(in.Ids)
 	if err = removeTelegramAccountsWithReferenceCheck(ctx, in.Ids, 0, contexts.GetUserId(ctx)); err != nil {
-		return gerror.Wrap(err, errorMessage)
+		return err
 	}
 	s.cancelTelegramDeleteFallbackTasks(ctx, in.Ids, "TG账号已删除或解绑，协议号删除任务已取消")
 	return nil
@@ -402,7 +402,10 @@ func removeTelegramAccountsWithDB(ctx context.Context, db gdb.DB, ids []int64, t
 			}
 		}
 		_, err = accounts.Data(g.Map{"deleted_by": operatorID, "deleted_at": gtime.Now()}).Update()
-		return err
+		if err != nil {
+			return gerror.Wrap(err, "删除TG账号失败")
+		}
+		return nil
 	})
 }
 

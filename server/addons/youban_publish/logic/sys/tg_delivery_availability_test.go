@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/errors/gerror"
 )
 
 func TestTelegramDeliveryAvailabilityLocalPostgres(t *testing.T) {
@@ -79,7 +80,7 @@ func TestTelegramDeliveryAvailabilityLocalPostgres(t *testing.T) {
 		}
 		// Bot delivery must also survive an expired or unbound protocol account.
 		for _, accountID := range []int64{84, 0} {
-			if _, err := tx.Exec("UPDATE " + publishChannelTable + " SET tg_account_id=?", accountID); err != nil {
+			if _, err := tx.Exec("UPDATE "+publishChannelTable+" SET tg_account_id=?", accountID); err != nil {
 				return err
 			}
 			if _, err := tx.Exec("UPDATE " + publishTgJobTable + " SET bot_id=80,push_mode='bot'"); err != nil {
@@ -112,8 +113,13 @@ func TestTelegramDeliveryAvailabilityLocalPostgres(t *testing.T) {
 		if _, err := tx.Exec("UPDATE " + publishChannelTable + " SET tg_account_id=82"); err != nil {
 			return err
 		}
-		if err := removeTelegramAccountsWithDB(ctx, db, []int64{82}, 87, 628); err == nil || !strings.Contains(err.Error(), "上架频道") {
+		if err := removeTelegramAccountsWithDB(ctx, db, []int64{82}, 87, 628); err == nil || gerror.Current(err).Error() != "TG账号82仍被1个上架频道引用，请先更换绑定账号，再删除或解绑" {
 			t.Fatalf("referenced account deletion should fail: %v", err)
+		}
+		// Server delete/unbind uses tenantID=0 and must preserve the same
+		// actionable message consumed by the HTTP response middleware.
+		if err := removeTelegramAccountsWithDB(ctx, db, []int64{82}, 0, 628); err == nil || gerror.Current(err).Error() != "TG账号82仍被1个上架频道引用，请先更换绑定账号，再删除或解绑" {
+			t.Fatalf("server deletion lost reference message: %v", err)
 		}
 		row, err := tx.GetOne("SELECT deleted_at FROM " + publishTgAccountTable + " WHERE id=82")
 		if err != nil {
