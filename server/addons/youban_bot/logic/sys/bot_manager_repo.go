@@ -245,7 +245,7 @@ func managerRemaining(c *entity.YoubanBotManagedChannel) int {
 	}
 	return c.AdminLimit - c.AdminCount
 }
-func (s *sSysBot) managerAllocate(ctx context.Context, st *entity.YoubanBotManagerState, revision int64) (int64, error) {
+func (s *sSysBot) managerAllocate(ctx context.Context, st *entity.YoubanBotManagerState, revision int64, batch ...string) (int64, error) {
 	var taskID int64
 	err := dao.YoubanBotManagerState.Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		var current entity.YoubanBotManagerState
@@ -318,7 +318,11 @@ func (s *sSysBot) managerAllocate(ctx context.Context, st *entity.YoubanBotManag
 		if !existing[chosen.Id] && chosen.AdminLimit > 0 && chosen.AdminCount+reserved[chosen.Id] >= chosen.AdminLimit {
 			return gerror.New("频道管理员名额已被其他任务预留，请刷新后重试")
 		}
-		taskID, err = managerNewTask(ctx, &current, guid.S(), "attach", b.Id, chosen.Id, managerJSON(managerDefaultRights()))
+		batchKey := guid.S()
+		if len(batch) > 0 && batch[0] != "" {
+			batchKey = batch[0]
+		}
+		taskID, err = managerNewTask(ctx, &current, batchKey, "attach", b.Id, chosen.Id, managerJSON(managerDefaultRights()))
 		if err != nil {
 			return err
 		}

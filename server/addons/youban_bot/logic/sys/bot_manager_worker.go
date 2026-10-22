@@ -320,12 +320,21 @@ func (s *sSysBot) managerMutateChannel(ctx context.Context, client *tg.Client, s
 	}
 	var botUser *tg.User
 	for _, u := range resolved.Users {
-		if v, ok := u.(*tg.User); ok && v.Bot && v.ID == b.TelegramBotId {
+		if v, ok := u.(*tg.User); ok && v.Bot && (b.TelegramBotId == 0 || v.ID == b.TelegramBotId) {
 			botUser = v
 		}
 	}
 	if botUser == nil {
 		return gerror.New("机器人用户名身份已变化，请重新同步")
+	}
+	if b.TelegramBotId == 0 {
+		if _, err := dao.YoubanBotManaged.Ctx(ctx).WherePri(b.Id).Data(do.YoubanBotManaged{TelegramBotId: botUser.ID, BotName: strings.TrimSpace(botUser.FirstName + " " + botUser.LastName)}).Update(); err != nil {
+			return err
+		}
+		b.TelegramBotId = botUser.ID
+		if b.BotName == "" {
+			b.BotName = strings.TrimSpace(botUser.FirstName + " " + botUser.LastName)
+		}
 	}
 	hash, ok := botUser.GetAccessHash()
 	if !ok {
@@ -645,8 +654,20 @@ func (s *sSysBot) managerNotifyBatch(ctx context.Context, root *entity.YoubanBot
 		text += fmt.Sprintf("\n当前上架频道共发现 %d 个不同机器人（不要求持有 Token）。\n", n)
 	}
 	for _, t := range tasks {
+		if root.Action == "attach" && t.Status == "success" {
+			b, botErr := managerBot(ctx, st, t.ManagedBotId)
+			var ch entity.YoubanBotManagedChannel
+			chErr := dao.YoubanBotManagedChannel.Ctx(ctx).WherePri(t.ChannelId).Scan(&ch)
+			if botErr == nil && chErr == nil {
+				text += fmt.Sprintf("@%s → %s\n", html.EscapeString(b.BotUsername), html.EscapeString(ch.Title))
+			}
+		}
 		if t.Status == "failed" && root.Action != "sync" {
-			text += fmt.Sprintf("频道记录 #%d：%s\n", t.ChannelId, html.EscapeString(sensitive.Diagnostic(t.ErrorMessage)))
+			name := fmt.Sprintf("频道记录 #%d", t.ChannelId)
+			if b, e := managerBot(ctx, st, t.ManagedBotId); e == nil {
+				name = "@" + b.BotUsername
+			}
+			text += fmt.Sprintf("%s：%s\n", html.EscapeString(name), html.EscapeString(sensitive.Diagnostic(t.ErrorMessage)))
 		}
 		if len(text) > 2500 {
 			break
