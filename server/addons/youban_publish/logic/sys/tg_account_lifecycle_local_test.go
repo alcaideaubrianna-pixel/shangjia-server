@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/database/gredis"
 	"github.com/gogf/gf/v2/frame/g"
@@ -36,7 +37,7 @@ func TestAccountFallbackLifecycleLocalPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	redis := miniredis.RunT(t)
-	for _, scenario := range []string{"success", "restart_after_display", "restart_before_verify_response", "crash_after_verify_send", "display_commit_failure", "verify_commit_failure", "multi_media", "reject_premature_completion"} {
+	for _, scenario := range []string{"success", "restart_after_display", "restart_before_verify_response", "crash_after_verify_send", "display_commit_failure", "verify_commit_failure", "multi_media", "slow_bot_album", "reject_premature_completion"} {
 		t.Run(scenario, func(t *testing.T) {
 			schema := fmt.Sprintf("account_lifecycle_%d", time.Now().UnixNano())
 			if _, err := db.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
@@ -136,6 +137,15 @@ func runAccountLifecycleStage(t *testing.T, stage string) {
 		mustExec(`INSERT INTO hg_youban_publish_channel(id,tenant_id,status,publish_direction) VALUES(75,19,1,'up')`)
 		mustExec(`INSERT INTO hg_youban_publish_media(id,profile_id,media_type,purpose) VALUES(5151488,468643,'video','verify')`)
 		mustExec(`INSERT INTO hg_youban_publish_tg_job(id,tenant_id,account_id,profile_id,channel_id,target_chat_id,status,dispatch_status,send_phase,operation_no) VALUES(2249614,19,464,468643,75,'-1002563223375','sending','processing','cleanup_confirmed','cycle_batch:local-test')`)
+		if os.Getenv("YOUBAN_ACCOUNT_TEST_SCENARIO") == "slow_bot_album" {
+			// Model 600ms of database work per INSERT statement. The old
+			// nine audit + nine projection INSERTs exceed the production 10s
+			// confirmation deadline; batch writes pay this cost only twice.
+			mustExec(`CREATE FUNCTION test_slow_confirmation() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_sleep(0.6); RETURN NULL; END $$`)
+			for _, table := range []string{publishTgAttemptMessageTable, publishTgMessageTable} {
+				mustExec("CREATE TRIGGER slow_confirmation AFTER INSERT ON " + table + " FOR EACH STATEMENT EXECUTE FUNCTION test_slow_confirmation()")
+			}
+		}
 		return
 	}
 	job, err := s.telegramJobById(ctx, 2249614)
@@ -165,6 +175,9 @@ func runAccountLifecycleStage(t *testing.T, stage string) {
 		if scenario == "multi_media" {
 			messageCount = 9
 		}
+		if scenario == "slow_bot_album" {
+			messageCount = 10 // Nine display media followed by one verification video.
+		}
 		for sql, want := range map[string]int{
 			`SELECT count(*) FROM hg_youban_publish_tg_attempt WHERE job_id=2249614 AND status='confirmed' AND response_received=1`:       2,
 			`SELECT count(*) FROM hg_youban_publish_tg_attempt WHERE job_id=2249614`:                                                      2,
@@ -193,7 +206,19 @@ func runAccountLifecycleStage(t *testing.T, stage string) {
 			expected = 3
 		}
 	}
-	attempt, err := s.accountFallbackDeliveryAttempt(ctx, job, phase, expected)
+	if scenario == "slow_bot_album" {
+		if phase == "display" {
+			expected = 9
+		} else if job.SendPhase != telegramSendPhaseDisplayConfirmed {
+			t.Fatalf("verification started before durable display confirmation: %s", job.SendPhase)
+		}
+	}
+	var attempt telegramDeliveryAttempt
+	if scenario == "slow_bot_album" {
+		attempt, err = s.prepareTelegramDeliveryAttempt(ctx, job, phase, expected, true)
+	} else {
+		attempt, err = s.accountFallbackDeliveryAttempt(ctx, job, phase, expected)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,6 +242,9 @@ func runAccountLifecycleStage(t *testing.T, stage string) {
 	mediaID, messageID := int64(4928516), 41128
 	if phase == "verify" {
 		mediaID, messageID = 5151488, 41134
+		if scenario == "slow_bot_album" {
+			messageID = 41200 // Must not overlap the nine display message IDs.
+		}
 	}
 	media := make([]*telegramMediaItem, expected)
 	history := make([]*tg.Message, expected)
@@ -231,6 +259,25 @@ func runAccountLifecycleStage(t *testing.T, stage string) {
 	}
 	history[0].Message = telegramAttemptMarker(attempt.AttemptToken)
 	messages := gotdSentMessagesFromUpdates(updates, media)
+	if scenario == "slow_bot_album" {
+		// Simulate the Bot API response, then use the production response mapper
+		// and confirmation transaction. No Telegram network calls are made.
+		response := make([]*models.Message, expected)
+		for i := range media {
+			response[i] = &models.Message{ID: messageID + i}
+			if phase == "display" {
+				response[i].MediaGroupID = "display-album"
+			}
+			if phase == "verify" || i == expected-1 {
+				media[i].MediaType = "video"
+				response[i].Video = &models.Video{FileID: "video-file"}
+			} else {
+				media[i].MediaType = "image"
+				response[i].Photo = []models.PhotoSize{{FileID: "photo-file"}}
+			}
+		}
+		messages = telegramSentMessagesFromGroup(response, phase, media)
+	}
 	if v.Int() > 0 {
 		// The actual history matching used by account fallback after restart.
 		messages, err = selectTelegramAttemptMessages(history, attempt)
@@ -265,8 +312,15 @@ func runAccountLifecycleStage(t *testing.T, stage string) {
 		// Recovery is a new OS process using the same committed Attempt/receipt.
 		return
 	}
+	started := time.Now()
 	if err := s.confirmTelegramAPISuccess(ctx, job, attempt, messages); err != nil {
 		t.Fatal(err)
+	}
+	if scenario == "slow_bot_album" {
+		if elapsed := time.Since(started); elapsed >= 8*time.Second {
+			t.Fatalf("confirmation consumed deadline headroom: %s", elapsed)
+		}
+		t.Logf("%s confirmation with database latency completed in %s", phase, time.Since(started).Round(time.Millisecond))
 	}
 	if err := s.confirmTelegramAPISuccess(ctx, job, attempt, messages); err != nil {
 		t.Fatalf("confirmation replay: %v", err)
