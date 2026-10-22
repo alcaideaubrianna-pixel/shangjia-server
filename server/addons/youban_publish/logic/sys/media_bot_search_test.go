@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"sync/atomic"
 	"testing"
@@ -14,6 +15,42 @@ import (
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
+
+func TestBotMediaExactPhasePreservesLaterHitsAfterApproximateTimeout(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	items := []*mediaFingerprint{{MD5: "slow"}, {MD5: "later-exact"}, {MD5: "slow"}}
+	exactCalled := false
+	results, err := loadBotMediaSearchCandidatesExactFirst(ctx, items,
+		func(_ context.Context, unique []*mediaFingerprint) ([][]*botMediaSearchCandidate, error) {
+			exactCalled = true
+			if len(unique) != 2 {
+				t.Fatalf("deduplication lost: %d", len(unique))
+			}
+			return [][]*botMediaSearchCandidate{nil, {{ProfileId: 123}}}, nil
+		}, func(ctx context.Context, item *mediaFingerprint) ([]*botMediaSearchCandidate, error) {
+			if !exactCalled || item.MD5 != "slow" {
+				t.Error("exact phase skipped or exact hit queried again")
+			}
+			<-ctx.Done()
+			return nil, ctx.Err()
+		})
+	if !errors.Is(err, context.DeadlineExceeded) || !reflect.DeepEqual(rankBotMediaSearchCandidates(results), []int64{123}) {
+		t.Fatalf("confirmed hit lost: results=%v err=%v", results, err)
+	}
+}
+
+func TestBotMediaExactPhaseRejectsIncompleteEmpty(t *testing.T) {
+	results, err := loadBotMediaSearchCandidatesExactFirst(context.Background(), []*mediaFingerprint{{MD5: "a"}},
+		func(context.Context, []*mediaFingerprint) ([][]*botMediaSearchCandidate, error) { return nil, nil },
+		func(context.Context, *mediaFingerprint) ([]*botMediaSearchCandidate, error) {
+			t.Fatal("invalid exact response accepted")
+			return nil, nil
+		})
+	if err == nil || len(results) != 0 {
+		t.Fatalf("results=%v err=%v", results, err)
+	}
+}
 
 func TestBotMediaSearchResultLimitIsBounded(t *testing.T) {
 	if botMediaSearchMaxResults <= 0 || botMediaSearchMaxResults > 20 {
@@ -130,7 +167,7 @@ func TestLoadBotMediaCandidatesContinuesAfterOneTimeout(t *testing.T) {
 		}
 		return []*botMediaSearchCandidate{{ProfileId: 101, Distance: 12}}, nil
 	})
-	if err != nil || calls.Load() != 3 || len(results) != 3 || len(results[1]) != 1 || len(results[2]) != 1 {
+	if !errors.Is(err, context.DeadlineExceeded) || calls.Load() != 3 || len(results) != 3 || len(results[1]) != 1 || len(results[2]) != 1 {
 		t.Fatalf("album queries were cancelled: calls=%d results=%v err=%v", calls.Load(), results, err)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/go-telegram/bot/models"
+	publishsysin "hotgo/addons/youban_publish/model/input/sysin"
 	publishService "hotgo/addons/youban_publish/service"
 )
 
@@ -29,11 +30,10 @@ func TestCachedScanMediaSkipsTelegramResolution(t *testing.T) {
 		{Video: &models.Video{FileUniqueID: "stable-video", Thumbnail: &models.PhotoSize{FileID: "thumbnail"}}},
 	} {
 		// A missing token would fail if the cached path called Telegram getFile.
-		media, err := NewSysBot().resolveTelegramScanMedia(context.Background(), 0, "", message)
+		items, err := NewSysBot().resolveScanBatch(context.Background(), 0, &botProfileAccount{TenantId: 1, AccountId: 1}, []*publishsysin.BotMediaSearchItem{scanMessageIdentity(0, message)})
 		if err != nil {
 			t.Fatal(err)
 		}
-		items := scanSearchItems(media)
 		if len(items) != 1 || items[0].FileUniqueId != telegramMessageFileUniqueId(message) || items[0].FileUrl != "" {
 			t.Fatalf("cached scan media lost identity: %+v", items)
 		}

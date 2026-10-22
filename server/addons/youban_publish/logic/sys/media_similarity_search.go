@@ -69,6 +69,10 @@ func (s *sSysPublish) cachedProfilePHashSearchCandidates(ctx context.Context, qu
 }
 
 func (s *sSysPublish) cachedProfileFingerprintSearchCandidates(ctx context.Context, fingerprint *mediaFingerprint, in *sysin.ProfileImageSearchInp, scope *publishmodel.MediaSearchScope, candidateProfileIds []int64) ([]publishProfilePHashDistance, error) {
+	return s.cachedProfileFingerprintCandidates(ctx, fingerprint, in, scope, candidateProfileIds, false)
+}
+
+func (s *sSysPublish) cachedProfileFingerprintCandidates(ctx context.Context, fingerprint *mediaFingerprint, in *sysin.ProfileImageSearchInp, scope *publishmodel.MediaSearchScope, candidateProfileIds []int64, exactAlreadyChecked bool) ([]publishProfilePHashDistance, error) {
 	if fingerprint == nil || scope == nil || len(scope.Partitions) == 0 {
 		return []publishProfilePHashDistance{}, nil
 	}
@@ -86,7 +90,15 @@ func (s *sSysPublish) cachedProfileFingerprintSearchCandidates(ctx context.Conte
 			return cached, nil
 		}
 	}
-	items, err := s.profileFingerprintSearchCandidatesExactFirst(ctx, fingerprint, in, scope, candidateProfileIds)
+	var items []publishProfilePHashDistance
+	var err error
+	if exactAlreadyChecked {
+		finish := scantrace.Begin(ctx, "query.phash_approx")
+		items, err = s.profilePHashSearchCandidates(ctx, queryHash, in, scope, candidateProfileIds)
+		finish(err)
+	} else {
+		items, err = s.profileFingerprintSearchCandidatesExactFirst(ctx, fingerprint, in, scope, candidateProfileIds)
+	}
 	if err != nil {
 		return nil, err
 	}

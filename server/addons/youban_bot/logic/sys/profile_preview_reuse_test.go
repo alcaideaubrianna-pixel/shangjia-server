@@ -63,6 +63,67 @@ func TestProfilePreviewAlbumReusesReferences(t *testing.T) {
 	}
 }
 
+func TestProfilePreviewMixedRejectedReferencesSkipIncompleteHTTPRetry(t *testing.T) {
+	var previous publishService.ISysPublish
+	func() { defer func() { _ = recover() }(); previous = publishService.SysPublish() }()
+	cache := &previewCacheStub{ISysPublish: previous, path: filepath.Join(t.TempDir(), "preview.jpg")}
+	if err := os.WriteFile(cache.path, []byte("fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	publishService.RegisterSysPublish(cache)
+	t.Cleanup(func() { publishService.RegisterSysPublish(previous) })
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		if n == 1 {
+			w.WriteHeader(400)
+			_, _ = w.Write([]byte(`{"ok":false,"error_code":400,"description":"Bad Request: wrong file identifier/HTTP URL specified"}`))
+			return
+		}
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Error(err)
+		}
+		var media []struct {
+			Media string `json:"media"`
+		}
+		if err := json.Unmarshal([]byte(r.FormValue("media")), &media); err != nil {
+			t.Error(err)
+		}
+		if len(media) != 2 {
+			t.Errorf("incomplete album: %v", media)
+		}
+		for _, item := range media {
+			if !strings.HasPrefix(item.Media, "attach://") {
+				t.Errorf("rejected reference retried: %s", item.Media)
+			}
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"result":[{"message_id":1,"date":1,"chat":{"id":123,"type":"private"}}]}`))
+	}))
+	defer server.Close()
+	bot, err := tgbot.New("123:fake", tgbot.WithSkipGetMe(), tgbot.WithServerURL(server.URL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = NewSysBot().sendProfileMediaPurpose(context.Background(), context.Background(), bot, "123", []*publishsysin.MediaModel{
+		{Id: 1, MediaType: "image", Purpose: "display", TgFileId: "invalid-1", FileUrl: "https://example.test/1.jpg"},
+		{Id: 2, MediaType: "image", Purpose: "display", TgFileId: "invalid-2"},
+	}, "display", "preview", false)
+	if err != nil || requests.Load() != 2 || cache.calls.Load() != 2 {
+		t.Fatalf("requests=%d cache=%d err=%v", requests.Load(), cache.calls.Load(), err)
+	}
+}
+
+func TestProfilePreviewExpiredFallbackDoesNotStartDownloads(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := NewSysBot().sendProfileMediaGroupFallback(context.Background(), ctx, nil, "123",
+		[]*publishsysin.MediaModel{{Id: 1, MediaType: "image", TgFileId: "bad"}}, []string{""}, []models.InputMedia{&models.InputMediaPhoto{Media: "bad"}}, "display")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error=%v", err)
+	}
+}
+
 func TestProfilePreviewAlbumDoesNotRetryAmbiguousFailure(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

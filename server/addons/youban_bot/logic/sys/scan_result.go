@@ -42,13 +42,24 @@ func (s *sSysBot) searchScanMediaAndReply(ctx context.Context, botId int64, chat
 	ctx = scantrace.With(ctx, g.Map{"botId": botId, "tenantId": account.TenantId, "accountId": account.AccountId, "items": len(items)})
 	finish := scantrace.Begin(ctx, "request.total")
 	defer func() { finish(resultErr) }()
+	resolveCtx, cancelResolve := context.WithTimeout(ctx, 12*time.Second)
+	resolveFinish := scantrace.Begin(resolveCtx, "telegram.resolve_batch")
+	resolved, resolveErr := s.resolveScanBatch(resolveCtx, botId, account, items)
+	resolveFinish(resolveErr)
+	cancelResolve()
+	if len(resolved) == 0 && resolveErr != nil {
+		return s.replyBotError(ctx, botId, chatId, "扫图搜索", scanSearchUserError(traceId, resolveErr))
+	}
+	items = resolved
+	progress := &publishsysin.BotMediaSearchProgress{}
 	list, total, err := publishService.SysPublish().BotProfileMediaSearch(ctx, &publishsysin.BotMediaSearchInp{
-		TenantId:    account.TenantId,
-		AccountId:   account.AccountId,
-		AccountType: account.AccountType,
-		TraceId:     traceId,
-		Items:       items,
-		Threshold:   12,
+		SearchProgress: progress,
+		TenantId:       account.TenantId,
+		AccountId:      account.AccountId,
+		AccountType:    account.AccountType,
+		TraceId:        traceId,
+		Items:          items,
+		Threshold:      12,
 	})
 	observeScanStage(ctx, botId, "fingerprint_search", searchStartedAt, err)
 	g.Log().Info(ctx, "Bot扫图搜索完成", g.Map{"traceId": traceId, "botId": botId, "accountId": account.AccountId, "durationMs": time.Since(searchStartedAt).Milliseconds(), "total": total, "err": err})
@@ -58,6 +69,12 @@ func (s *sSysBot) searchScanMediaAndReply(ctx context.Context, botId int64, chat
 		return s.replyBotError(ctx, botId, chatId, "扫图搜索", scanSearchUserError(traceId, err))
 	}
 	if len(list) == 0 {
+		if resolveErr != nil {
+			return s.replyBotError(ctx, botId, chatId, "扫图搜索", scanSearchUserError(traceId, resolveErr))
+		}
+		if progress.Incomplete {
+			return s.replyBotError(ctx, botId, chatId, "扫图搜索", gerror.Newf("部分图片未完成搜索，暂时无法确认是否有匹配资料，请重试。\n（追踪号 %s）", traceId))
+		}
 		step := scantrace.Begin(ctx, "reply.empty")
 		defer func() { step(resultErr) }()
 		return s.sendMessageOnly(ctx, botId, chatId, fmt.Sprintf("未找到相似资料。\n（追踪号 %s）", traceId))
@@ -100,6 +117,9 @@ func (s *sSysBot) searchScanMediaAndReply(ctx context.Context, botId int64, chat
 		text = fmt.Sprintf("找到 %d 条相似资料，最多展示 %d 条，请选择要查看的资料：", total, len(state.ProfileIds))
 	}
 	text += fmt.Sprintf("\n（追踪号 %s）", traceId)
+	if progress.Incomplete || resolveErr != nil {
+		text += "\n部分图片未能完成搜索，以上仅为已确认的匹配；可单独重发未匹配图片。"
+	}
 	row, err := s.botById(ctx, botId)
 	if err != nil {
 		return err
@@ -214,8 +234,11 @@ func (s *sSysBot) sendScanProfileContent(ctx context.Context, botId int64, chatI
 	if err != nil {
 		return err
 	}
-	callCtx, cancel := telegramMediaAPICtx()
+	// Bind preparation and sends to the same bounded preview budget, including
+	// cancellation and trace values. Do not use a detached ten-minute API context.
+	callCtx, cancel := context.WithTimeout(ctx, 35*time.Second)
 	defer cancel()
+	ctx = callCtx
 	caption := profilePreviewDisplayCaption(note)
 	if profileHasPurposeMedia(note.Media, "display") {
 		if err = s.sendProfileMediaPurpose(ctx, callCtx, bot, chatId, note.Media, "display", caption, false); err != nil {

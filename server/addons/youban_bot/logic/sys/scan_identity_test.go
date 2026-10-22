@@ -20,10 +20,10 @@ func (s *scanKnownIdentityService) BotMediaFingerprintCached(context.Context, st
 }
 func (s *scanKnownIdentityService) BotMediaSearchKnownItems(_ context.Context, in *publishsysin.BotMediaSearchInp) ([]bool, error) {
 	s.calls++
-	if in.TenantId != 5 || in.AccountId != 6 || len(in.Items) != 1 {
+	if in.TenantId != 5 || in.AccountId != 6 || len(in.Items) != 2 {
 		s.t.Fatalf("scope missing: %+v", in)
 	}
-	return []bool{true}, nil
+	return []bool{true, true}, nil
 }
 
 func TestScanLedgerHitBeforeGetFileAndVideoThumbnail(t *testing.T) {
@@ -32,6 +32,7 @@ func TestScanLedgerHitBeforeGetFileAndVideoThumbnail(t *testing.T) {
 	stub := &scanKnownIdentityService{ISysPublish: previous, t: t}
 	publishService.RegisterSysPublish(stub)
 	t.Cleanup(func() { publishService.RegisterSysPublish(previous) })
+	batch := make([]*publishsysin.BotMediaSearchItem, 0, 2)
 	for _, msg := range []*models.Message{
 		{Photo: []models.PhotoSize{{FileID: "small", FileUniqueID: "small-id", FileSize: 10}, {FileID: "large", FileUniqueID: "large-id", FileSize: 100}}},
 		{Video: &models.Video{FileID: "video", FileUniqueID: "video-id"}},
@@ -44,8 +45,16 @@ func TestScanLedgerHitBeforeGetFileAndVideoThumbnail(t *testing.T) {
 		if msg.Video == nil && len(items[0].FileUniqueIds) != 2 {
 			t.Fatal("photo aliases lost")
 		}
+		batch = append(batch, items...)
 	}
-	if stub.calls != 2 {
+	if stub.calls != 0 {
+		t.Fatal("intake performed per-image queries")
+	}
+	resolved, err := NewSysBot().resolveScanBatch(context.Background(), 12, &botProfileAccount{TenantId: 5, AccountId: 6}, batch)
+	if err != nil || len(resolved) != 2 {
+		t.Fatalf("batch=%v err=%v", resolved, err)
+	}
+	if stub.calls != 1 {
 		t.Fatalf("preflight calls=%d", stub.calls)
 	}
 }

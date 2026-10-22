@@ -1326,8 +1326,8 @@ func (s *sSysBot) sendProfileMediaPurpose(ctx context.Context, callCtx context.C
 }
 
 func (s *sSysBot) sendProfileMediaGroupFallback(ctx context.Context, callCtx context.Context, bot *tgbot.Bot, chatId string, items []*publishsysin.MediaModel, captions []string, original []models.InputMedia, purpose string) error {
-	// Replace available file IDs with HTTP URLs without mutating stored media.
-	// Keep existing inputs for media without a URL so the album stays complete.
+	// Replace file IDs without mutating stored media. If some references cannot
+	// be converted, prepare a complete upload album instead of retrying stale IDs.
 	httpGroup := append([]models.InputMedia(nil), original...)
 	changed := false
 	for index, item := range items {
@@ -1340,7 +1340,23 @@ func (s *sSysBot) sendProfileMediaGroupFallback(ctx context.Context, callCtx con
 			changed = true
 		}
 	}
-	if changed {
+	// Do not retry a partly converted album with known-rejected file references.
+	// Every input must be an HTTP reference before attempting this route.
+	allHTTP := true
+	for _, input := range httpGroup {
+		source := ""
+		switch item := input.(type) {
+		case *models.InputMediaPhoto:
+			source = item.Media
+		case *models.InputMediaVideo:
+			source = item.Media
+		}
+		if !strings.HasPrefix(source, "https://") && !strings.HasPrefix(source, "http://") {
+			allHTTP = false
+			break
+		}
+	}
+	if changed && allHTTP {
 		step := scantrace.Begin(scantrace.With(ctx, g.Map{"purpose": purpose, "mediaCount": len(httpGroup), "sourceKind": "http"}), "result.media.send_group")
 		_, err := bot.SendMediaGroup(callCtx, &tgbot.SendMediaGroupParams{ChatID: chatId, Media: httpGroup})
 		step(err)
@@ -1349,7 +1365,10 @@ func (s *sSysBot) sendProfileMediaGroupFallback(ctx context.Context, callCtx con
 		}
 	}
 
-	group, files, err := prepareProfilePreviewAlbum(ctx, items, captions, func(itemCtx context.Context, item *publishsysin.MediaModel, caption string) (models.InputMedia, *os.File, error) {
+	if err := callCtx.Err(); err != nil {
+		return err
+	}
+	group, files, err := prepareProfilePreviewAlbum(callCtx, items, captions, func(itemCtx context.Context, item *publishsysin.MediaModel, caption string) (models.InputMedia, *os.File, error) {
 		step := scantrace.Begin(scantrace.With(itemCtx, g.Map{"mediaId": item.Id, "purpose": purpose}), "result.media.fallback_prepare")
 		input, file, prepareErr := s.profilePreviewInputMediaWithUpload(itemCtx, item, caption, true)
 		step(prepareErr)

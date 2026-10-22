@@ -48,16 +48,28 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 	if in == nil || in.TenantId <= 0 || in.AccountId <= 0 {
 		return nil, 0, gerror.New("上架账号信息不完整")
 	}
+	if in.SearchProgress != nil {
+		*in.SearchProgress = sysin.BotMediaSearchProgress{}
+	}
 	searchCtx, cancelSearch := context.WithTimeout(ctx, botMediaSearchTimeout)
 	defer cancelSearch()
 	ctx = searchCtx
 	requestID := gctx.CtxId(ctx)
-	ctx = scantrace.With(ctx, g.Map{"requestId": requestID, "queryId": in.TraceId, "tenantId": in.TenantId, "accountId": in.AccountId, "items": len(in.Items)})
+	ctx = scantrace.With(ctx, g.Map{"requestId": requestID, "traceId": in.TraceId, "queryId": in.TraceId, "tenantId": in.TenantId, "accountId": in.AccountId, "items": len(in.Items)})
+	stats := g.Map{"inputItems": len(in.Items), "incomplete": false}
 	finish := scantrace.Begin(ctx, "search.total")
 	defer func() { finish(resultErr) }()
 	startedAt := time.Now()
 	defer func() {
-		g.Log().Info(ctx, "Bot扫图服务完成", g.Map{"requestId": requestID, "queryId": in.TraceId, "tenantId": in.TenantId, "accountId": in.AccountId, "items": len(in.Items), "durationMs": time.Since(startedAt).Milliseconds()})
+		stats["durationMs"], stats["resultTotal"], stats["returnedNotes"] = time.Since(startedAt).Milliseconds(), count, len(notes)
+		stats["outcome"] = "complete"
+		if stats["incomplete"] == true {
+			stats["outcome"] = "partial"
+		}
+		if resultErr != nil {
+			stats["outcome"] = "failed"
+		}
+		scantrace.Record(ctx, "search.summary", stats, resultErr)
 	}()
 	step := scantrace.Begin(ctx, "access.check")
 	accessErr := s.ensureTenantVipFeature(ctx, in.TenantId, sysin.TenantVipFeatureSimilarMedia)
@@ -67,6 +79,7 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 	}
 	step = scantrace.Begin(ctx, "scope.accounts")
 	accountIds, err := s.botMediaSearchAccountIds(ctx, in)
+	stats["scopeAccounts"] = len(accountIds)
 	step(err)
 	if err != nil {
 		return nil, 0, err
@@ -80,6 +93,7 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 	if err != nil {
 		return nil, 0, err
 	}
+	stats["scopePartitions"] = len(searchScope.Partitions)
 	searchIn := &sysin.ProfileImageSearchInp{
 		Threshold: botMediaSearchMaxDistance,
 	}
@@ -113,6 +127,7 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 		}
 	}
 	searchItems = remaining
+	stats["identityHits"], stats["fingerprintItems"] = len(matches), len(searchItems)
 	fingerprints := make([]*mediaFingerprint, 0, len(searchItems))
 	coldItems := make([]*sysin.BotMediaSearchItem, 0, len(searchItems))
 	for _, item := range searchItems {
@@ -126,40 +141,103 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 		}
 	}
 	var lastHashErr error
+	stats["fingerprintCacheHits"], stats["coldItems"] = len(fingerprints), len(coldItems)
+	failedItems := 0
 	for _, result := range loadBotMediaColdFingerprints(ctx, in.TraceId, coldItems, cachedTelegramImageFingerprint) {
 		if result.err != nil {
 			lastHashErr = result.err
+			failedItems++
 			continue
 		}
 		fingerprints = append(fingerprints, result.fingerprint)
 	}
+	stats["coldFailures"] = failedItems
+	stats["incomplete"] = failedItems > 0
 	if len(fingerprints) == 0 && len(matches) == 0 && lastHashErr != nil {
 		return nil, 0, lastHashErr
 	}
-	fingerprintMatches, err := loadBotMediaSearchCandidates(ctx, fingerprints, func(queryCtx context.Context, fingerprint *mediaFingerprint) ([]*botMediaSearchCandidate, error) {
-		return s.botMediaSearchFingerprintCandidates(queryCtx, fingerprint, searchIn, searchScope)
-	})
-	if err != nil && len(matches) == 0 {
+	queryCtx, cancelQueries := context.WithTimeout(ctx, botMediaCandidateQueryTimeout(ctx))
+	fingerprintMatches, err := loadBotMediaSearchCandidatesExactFirst(queryCtx, fingerprints,
+		func(exactCtx context.Context, items []*mediaFingerprint) ([][]*botMediaSearchCandidate, error) {
+			if !isPostgresDatabase() {
+				return make([][]*botMediaSearchCandidate, len(items)), nil
+			}
+			return botMediaExactCandidates(exactCtx, items, searchScope)
+		}, func(queryCtx context.Context, fingerprint *mediaFingerprint) ([]*botMediaSearchCandidate, error) {
+			return s.botMediaFingerprintCandidates(queryCtx, fingerprint, searchIn, searchScope, isPostgresDatabase())
+		})
+	cancelQueries()
+	if err != nil && len(matches) == 0 && len(rankBotMediaSearchCandidates(fingerprintMatches)) == 0 {
 		return nil, 0, err
 	}
 	if err != nil {
+		failedItems++
+		stats["incomplete"] = true
 		g.Log().Warning(ctx, "部分扫图查询失败，保留已确认的媒体匹配", g.Map{"err": err, "matchedItems": len(matches)})
 	}
 	matches = append(matches, fingerprintMatches...)
+	if in.SearchProgress != nil {
+		in.SearchProgress.Incomplete = failedItems > 0
+	}
 	profileIds := rankBotMediaSearchCandidates(matches)
 	total := len(profileIds)
 	if len(profileIds) > botMediaSearchMaxResults {
 		profileIds = profileIds[:botMediaSearchMaxResults]
 	}
 	if len(profileIds) == 0 {
+		if lastHashErr != nil {
+			return nil, 0, lastHashErr
+		}
 		return []*sysin.NoteModel{}, 0, nil
 	}
 	// Load permission-scoped profile details once after merging the album.
+	step = scantrace.Begin(ctx, "result.hydrate")
 	list, err := s.profileImageSearchNotesByScope(ctx, profileIds, searchScope, nil, "")
+	step(err)
 	if err != nil {
 		return nil, 0, err
 	}
 	return orderBotMediaSearchNotes(list, profileIds), total, nil
+}
+
+// Exact lookups run for the whole album before approximate queries consume the
+// shared budget. Preserve input slots so multi-image ranking remains unchanged.
+func loadBotMediaSearchCandidatesExactFirst(ctx context.Context, fingerprints []*mediaFingerprint, exact func(context.Context, []*mediaFingerprint) ([][]*botMediaSearchCandidate, error), approximate func(context.Context, *mediaFingerprint) ([]*botMediaSearchCandidate, error)) ([][]*botMediaSearchCandidate, error) {
+	unique := uniqueBotMediaFingerprints(fingerprints)
+	if len(unique) == 0 {
+		return nil, nil
+	}
+	results, err := exact(ctx, unique)
+	exactHits := 0
+	for _, group := range results {
+		if len(group) > 0 {
+			exactHits++
+		}
+	}
+	scantrace.Record(ctx, "query.exact_batch.summary", g.Map{"uniqueItems": len(unique), "matchedItems": exactHits, "remainingItems": len(unique) - exactHits}, err)
+	if err != nil {
+		return results, err
+	}
+	if len(results) != len(unique) {
+		return nil, gerror.New("扫图精确匹配结果数量不一致")
+	}
+	remaining := make([]*mediaFingerprint, 0, len(unique))
+	indices := make([]int, 0, len(unique))
+	for i, f := range unique {
+		if len(results[i]) == 0 {
+			remaining = append(remaining, f)
+			indices = append(indices, i)
+		}
+	}
+	if len(remaining) == 0 {
+		return results, nil
+	}
+	more, err := loadBotMediaSearchCandidates(ctx, remaining, approximate)
+	scantrace.Record(ctx, "query.approx_batch.summary", g.Map{"inputItems": len(remaining), "matchedProfiles": len(rankBotMediaSearchCandidates(more)), "incomplete": err != nil}, err)
+	for i, group := range more {
+		results[indices[i]] = group
+	}
+	return results, err
 }
 
 func botMediaSentFileCandidates(ctx context.Context, fileIDs []string, scope *publishmodel.MediaSearchScope) (map[string][]*botMediaSearchCandidate, error) {
@@ -234,6 +312,11 @@ func botMediaCandidateQueryTimeout(ctx context.Context) time.Duration {
 }
 
 func loadBotMediaSearchCandidates(ctx context.Context, fingerprints []*mediaFingerprint, loader func(context.Context, *mediaFingerprint) ([]*botMediaSearchCandidate, error)) ([][]*botMediaSearchCandidate, error) {
+	unique := uniqueBotMediaFingerprints(fingerprints)
+	return loadUniqueBotMediaSearchCandidates(ctx, unique, loader)
+}
+
+func uniqueBotMediaFingerprints(fingerprints []*mediaFingerprint) []*mediaFingerprint {
 	unique := make([]*mediaFingerprint, 0, len(fingerprints))
 	seen := make(map[string]bool)
 	for _, fingerprint := range fingerprints {
@@ -249,6 +332,10 @@ func loadBotMediaSearchCandidates(ctx context.Context, fingerprints []*mediaFing
 			unique = append(unique, fingerprint)
 		}
 	}
+	return unique
+}
+
+func loadUniqueBotMediaSearchCandidates(ctx context.Context, unique []*mediaFingerprint, loader func(context.Context, *mediaFingerprint) ([]*botMediaSearchCandidate, error)) ([][]*botMediaSearchCandidate, error) {
 	results := make([][]*botMediaSearchCandidate, len(unique))
 	errors := make([]error, len(unique))
 	queryCtx, cancelQueries := context.WithTimeout(ctx, botMediaCandidateQueryTimeout(ctx))
@@ -284,7 +371,7 @@ func loadBotMediaSearchCandidates(ctx context.Context, fingerprints []*mediaFing
 	if firstErr != nil && !matched {
 		return nil, firstErr
 	}
-	return results, nil
+	return results, firstErr
 }
 
 func loadBotMediaColdFingerprints(ctx context.Context, traceId string, items []*sysin.BotMediaSearchItem, loader botMediaColdFingerprintLoader) []botMediaColdFingerprintResult {
@@ -321,6 +408,10 @@ func loadBotMediaColdFingerprints(ctx context.Context, traceId string, items []*
 }
 
 func (s *sSysPublish) botMediaSearchFingerprintCandidates(ctx context.Context, fingerprint *mediaFingerprint, searchIn *sysin.ProfileImageSearchInp, searchScope *publishmodel.MediaSearchScope) (candidatesResult []*botMediaSearchCandidate, resultErr error) {
+	return s.botMediaFingerprintCandidates(ctx, fingerprint, searchIn, searchScope, false)
+}
+
+func (s *sSysPublish) botMediaFingerprintCandidates(ctx context.Context, fingerprint *mediaFingerprint, searchIn *sysin.ProfileImageSearchInp, searchScope *publishmodel.MediaSearchScope, exactAlreadyChecked bool) (candidatesResult []*botMediaSearchCandidate, resultErr error) {
 	finish := scantrace.Begin(ctx, "fingerprint.search")
 	defer func() { finish(resultErr) }()
 	if err := ctx.Err(); err != nil {
@@ -331,9 +422,12 @@ func (s *sSysPublish) botMediaSearchFingerprintCandidates(ctx context.Context, f
 	var matches []publishProfilePHashDistance
 	var err error
 	if fingerprint.PHash == nil {
+		if exactAlreadyChecked {
+			return nil, nil
+		}
 		matches, err = mediaMD5CandidateMatches(fallbackCtx, fingerprint.MD5, searchScope, nil)
 	} else {
-		matches, err = s.cachedProfileFingerprintSearchCandidates(fallbackCtx, fingerprint, searchIn, searchScope, nil)
+		matches, err = s.cachedProfileFingerprintCandidates(fallbackCtx, fingerprint, searchIn, searchScope, nil, exactAlreadyChecked)
 	}
 	if err != nil {
 		if fallbackCtx.Err() != nil {

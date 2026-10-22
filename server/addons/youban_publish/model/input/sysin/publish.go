@@ -635,6 +635,8 @@ type BotProfileImageSearchInp struct {
 }
 
 type BotMediaSearchItem struct {
+	PreviewFileId   string   `json:"previewFileId,omitempty" dc:"按需解析的扫图预览文件ID"`
+	PreviewSize     int64    `json:"previewSize,omitempty" dc:"扫图预览字节数"`
 	FileUniqueIds   []string `json:"fileUniqueIds,omitempty" dc:"同一图片各尺寸的稳定标识"`
 	BotId           int64    `json:"botId,omitempty" dc:"接收媒体的机器人ID"`
 	FileId          string   `json:"fileId,omitempty" dc:"当前机器人收到的真实媒体ID"`
@@ -646,14 +648,21 @@ type BotMediaSearchItem struct {
 }
 
 type BotMediaSearchInp struct {
-	TenantId       int64                 `json:"tenantId" dc:"租户ID"`
-	AccountId      int64                 `json:"accountId" dc:"绑定账号ID"`
-	AccountType    string                `json:"accountType" dc:"账号类型：admin/uploader"`
-	TraceId        string                `json:"traceId" dc:"扫图业务追踪号"`
-	Items          []*BotMediaSearchItem `json:"items" dc:"待搜索媒体"`
-	Threshold      int                   `json:"threshold" dc:"相似度阈值"`
-	ReplyChatId    string                `json:"replyChatId" dc:"被引用消息所在会话ID"`
-	ReplyMessageId int64                 `json:"replyMessageId" dc:"被引用消息ID"`
+	// SearchProgress is populated only by the synchronous search call. It is
+	// not accepted from clients or retained in album/cache payloads.
+	SearchProgress *BotMediaSearchProgress `json:"-"`
+	TenantId       int64                   `json:"tenantId" dc:"租户ID"`
+	AccountId      int64                   `json:"accountId" dc:"绑定账号ID"`
+	AccountType    string                  `json:"accountType" dc:"账号类型：admin/uploader"`
+	TraceId        string                  `json:"traceId" dc:"扫图业务追踪号"`
+	Items          []*BotMediaSearchItem   `json:"items" dc:"待搜索媒体"`
+	Threshold      int                     `json:"threshold" dc:"相似度阈值"`
+	ReplyChatId    string                  `json:"replyChatId" dc:"被引用消息所在会话ID"`
+	ReplyMessageId int64                   `json:"replyMessageId" dc:"被引用消息ID"`
+}
+
+type BotMediaSearchProgress struct {
+	Incomplete bool
 }
 
 type ProfileSaveInp struct {

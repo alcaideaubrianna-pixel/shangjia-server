@@ -104,18 +104,15 @@ func TestScanSearchUserErrorHidesDatabaseTimeout(t *testing.T) {
 
 func TestScanVideoResolvesThumbnailWithoutRequestingVideoFile(t *testing.T) {
 	msg := &models.Message{Video: &models.Video{FileID: "large-video", FileUniqueID: "stable-video", Thumbnail: &models.PhotoSize{FileID: "preview", FileUniqueID: "preview-id", Width: 320, Height: 240}}}
-	preview, err := scanMediaPreviewMessage(msg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if preview.Video != nil || len(preview.Photo) != 1 || preview.Photo[0].FileID != "preview" {
+	preview := scanMessageIdentity(1, msg)
+	if preview.FileId != "large-video" || preview.PreviewFileId != "preview" || preview.FileUniqueId != "stable-video" {
 		t.Fatalf("video body could reach getFile: %+v", preview)
 	}
 	if msg.Video == nil || msg.Video.FileID != "large-video" {
 		t.Fatal("original message mutated")
 	}
 	msg.Video.Thumbnail = nil
-	if _, err = scanMediaPreviewMessage(msg); err == nil {
-		t.Fatal("video without thumbnail must not download body")
+	if item := scanMessageIdentity(1, msg); item.PreviewFileId != "" {
+		t.Fatal("video without thumbnail must not use body for download")
 	}
 }

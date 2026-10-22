@@ -7,11 +7,10 @@ import (
 	"time"
 
 	"github.com/go-telegram/bot/models"
-	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gctx"
 
 	botsysin "hotgo/addons/youban_bot/model/input/sysin"
-	publishsysin "hotgo/addons/youban_publish/model/input/sysin"
 	publishService "hotgo/addons/youban_publish/service"
 	"hotgo/utility/scantrace"
 )
@@ -34,7 +33,7 @@ func (scanFeature) Handle(ctx context.Context, bot *sSysBot, featureCtx *botFeat
 
 type scanMediaMessageHandler struct{}
 
-func (scanMediaMessageHandler) Handle(ctx context.Context, bot *sSysBot, event *botMessageEvent) (bool, error) {
+func (scanMediaMessageHandler) Handle(ctx context.Context, bot *sSysBot, event *botMessageEvent) (handled bool, resultErr error) {
 	if event == nil || event.Msg == nil || event.Msg.From == nil || !hasScanMedia(event.Msg) {
 		return false, nil
 	}
@@ -56,8 +55,12 @@ func (scanMediaMessageHandler) Handle(ctx context.Context, bot *sSysBot, event *
 	if strings.TrimSpace(event.Msg.MediaGroupID) == "" {
 		traceId, ackErr := bot.acknowledgeScanMedia(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.From.ID), event.Msg)
 		if ackErr != nil {
+			g.Log().Warningf(ctx, "扫图确认失败 botId:%d messageId:%d err:%+v", event.BotId, event.Msg.ID, ackErr)
 			return true, ackErr
 		}
+		ctx = scanRequestContext(ctx, traceId, event)
+		finishRequest := scantrace.Begin(ctx, "request.single")
+		defer func() { finishRequest(resultErr) }()
 		claimed, claimErr := bot.claimScanMediaGroupResolved(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.From.ID), fmt.Sprintf("message:%d", event.Msg.ID))
 		if claimErr != nil {
 			return true, claimErr
@@ -65,7 +68,6 @@ func (scanMediaMessageHandler) Handle(ctx context.Context, bot *sSysBot, event *
 		if !claimed {
 			return true, nil
 		}
-		ctx = withScanTrace(ctx, traceId)
 		finish := scantrace.Begin(ctx, "telegram.resolve")
 		items, resolveErr := bot.resolveScanSearchItems(ctx, event.BotId, account, event.Msg)
 		finish(resolveErr)
@@ -80,12 +82,18 @@ func (scanMediaMessageHandler) Handle(ctx context.Context, bot *sSysBot, event *
 	userId := fmt.Sprintf("%d", event.Msg.From.ID)
 	batchId, err := bot.scanMediaBatch(ctx, event.BotId, userId)
 	if err != nil {
+		g.Log().Warningf(ctx, "创建扫图批次失败 botId:%d messageId:%d err:%+v", event.BotId, event.Msg.ID, err)
 		return true, err
 	}
 	traceId, err := bot.acknowledgeScanMediaGroup(ctx, event.BotId, userId, batchId, event.Msg)
 	if err != nil {
+		g.Log().Warningf(ctx, "扫图批次确认失败 botId:%d messageId:%d batchId:%s err:%+v", event.BotId, event.Msg.ID, batchId, err)
 		return true, err
 	}
+	ctx = scanRequestContext(ctx, traceId, event)
+	ctx = scantrace.With(ctx, g.Map{"batchId": batchId})
+	finishRequest := scantrace.Begin(ctx, "request.album_item")
+	defer func() { finishRequest(resultErr) }()
 	if bot.scanMediaGroupResolved(ctx, event.BotId, userId, batchId) {
 		return true, nil
 	}
@@ -100,59 +108,28 @@ func (scanMediaMessageHandler) Handle(ctx context.Context, bot *sSysBot, event *
 	finish(err)
 	observeScanStage(ctx, event.BotId, "telegram_resolve", resolveStartedAt, err)
 	if err != nil {
-		_ = bot.completeScanMediaGroupItem(ctx, event.BotId, userId, batchId, nil)
+		if completeErr := bot.completeScanMediaGroupItem(ctx, event.BotId, userId, batchId, nil); completeErr != nil {
+			g.Log().Warningf(ctx, "完成扫图批次项失败 traceId:%s batchId:%s err:%+v", traceId, batchId, completeErr)
+		}
 		observeScanRequest(ctx, event.BotId, "failed")
 		return true, bot.replyBotError(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.Chat.ID), "扫图搜索", err)
 	}
 	if len(items) == 0 {
-		_ = bot.completeScanMediaGroupItem(ctx, event.BotId, userId, batchId, nil)
+		if err = bot.completeScanMediaGroupItem(ctx, event.BotId, userId, batchId, nil); err != nil {
+			return true, err
+		}
 		return true, bot.sendMessageOnly(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.Chat.ID), "当前媒体没有可用的图片或视频预览图。")
 	}
 	return true, bot.completeScanMediaGroupItem(ctx, event.BotId, userId, batchId, items)
 }
 
-// Keep the original stable file identity for the send-ledger shortcut, but
-// resolve only the thumbnail for video image search.
-func scanMediaPreviewMessage(msg *models.Message) (*models.Message, error) {
-	if msg == nil || msg.Video == nil {
-		return msg, nil
-	}
-	if msg.Video.Thumbnail == nil || strings.TrimSpace(msg.Video.Thumbnail.FileID) == "" {
-		return nil, gerror.New("视频没有可用的预览图，请发送视频封面图片")
-	}
-	preview := *msg
-	preview.Video = nil
-	preview.Photo = []models.PhotoSize{*msg.Video.Thumbnail}
-	return &preview, nil
-}
-
-func (s *sSysBot) resolveTelegramScanMedia(ctx context.Context, botId int64, token string, msg *models.Message) ([]*publishsysin.MessageTemplateMediaInp, error) {
-	preview, err := scanMediaPreviewMessage(msg)
-	if err != nil {
-		return nil, err
-	}
-	uniqueId := telegramMessageFileUniqueId(msg)
-	if publishService.SysPublish().BotMediaFingerprintCached(ctx, uniqueId) {
-		mediaType := "image"
-		if msg != nil && msg.Video != nil {
-			mediaType = "video"
-		}
-		// Cached fingerprints do not need a new Telegram getFile request or URL.
-		return []*publishsysin.MessageTemplateMediaInp{{MediaType: mediaType, TgFileUniqueId: uniqueId}}, nil
-	}
-	items, err := s.resolveTelegramMessageMedia(ctx, botId, token, preview)
-	if err != nil {
-		return nil, err
-	}
-	for _, item := range items {
-		item.TgFileUniqueId = telegramMessageFileUniqueId(msg)
-		if msg != nil && msg.Video != nil {
-			item.MediaType = "video"
-			item.PosterUrl = item.FileUrl
-			item.TgThumbFileId = msg.Video.Thumbnail.FileID
-		}
-	}
-	return items, nil
+func scanRequestContext(ctx context.Context, traceId string, event *botMessageEvent) context.Context {
+	return scantrace.With(withScanTrace(ctx, traceId), g.Map{
+		"requestId": gctx.CtxId(ctx),
+		"botId":     event.BotId, "userId": event.Msg.From.ID,
+		"chatId": event.Msg.Chat.ID, "messageId": event.Msg.ID,
+		"groupId": event.Msg.MediaGroupID,
+	})
 }
 
 func scanResultLabel(err error, success string) string {
@@ -168,27 +145,6 @@ func isTelegramPrivateChat(msg *models.Message) bool {
 
 func hasScanMedia(msg *models.Message) bool {
 	return msg != nil && (len(msg.Photo) > 0 || msg.Video != nil)
-}
-
-func scanSearchItems(media []*publishsysin.MessageTemplateMediaInp) []*publishsysin.BotMediaSearchItem {
-	items := make([]*publishsysin.BotMediaSearchItem, 0, len(media))
-	for _, item := range media {
-		if item == nil {
-			continue
-		}
-		url := strings.TrimSpace(item.FileUrl)
-		mediaType := strings.ToLower(strings.TrimSpace(item.MediaType))
-		if mediaType == "video" {
-			url = strings.TrimSpace(item.PosterUrl)
-		}
-		if (url == "" && strings.TrimSpace(item.TgFileUniqueId) == "") || (mediaType != "image" && mediaType != "video") {
-			continue
-		}
-		items = append(items, &publishsysin.BotMediaSearchItem{
-			FileUrl: url, MediaType: mediaType, FileUniqueId: strings.TrimSpace(item.TgFileUniqueId),
-		})
-	}
-	return items
 }
 
 func botTokenForEvent(ctx context.Context, bot *sSysBot, botId int64) string {
