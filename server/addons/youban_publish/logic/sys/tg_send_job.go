@@ -948,12 +948,20 @@ func (s *sSysPublish) switchTelegramJobToNextBot(ctx context.Context, job telegr
 }
 
 func (s *sSysPublish) completeTelegramJob(ctx context.Context, job telegramJobRecord) error {
-	return s.withProfileLifecycleLock(ctx, job.TenantId, job.ProfileId, func() error {
-		return s.completeTelegramJobLockedByProfile(ctx, job)
+	operationCompleted := false
+	err := s.withProfileLifecycleLock(ctx, job.TenantId, job.ProfileId, func() error {
+		return s.completeTelegramJobLockedByProfile(ctx, job, &operationCompleted)
 	})
+	if err != nil || !operationCompleted {
+		return err
+	}
+	if noticeErr := s.notifyBotProfilePublishCompleted(ctx, job); noticeErr != nil {
+		g.Log().Warningf(ctx, "发送Bot资料上架完成通知失败 profileId:%d operationNo:%s err:%+v", job.ProfileId, job.OperationNo, noticeErr)
+	}
+	return nil
 }
 
-func (s *sSysPublish) completeTelegramJobLockedByProfile(ctx context.Context, job telegramJobRecord) error {
+func (s *sSysPublish) completeTelegramJobLockedByProfile(ctx context.Context, job telegramJobRecord, completedNotice *bool) error {
 	if status, err := s.telegramJobCurrentStatus(ctx, job.Id); err != nil {
 		return err
 	} else if status != "sending" {
@@ -1015,6 +1023,9 @@ func (s *sSysPublish) completeTelegramJobLockedByProfile(ctx context.Context, jo
 	}
 	if !operationCompleted {
 		return nil
+	}
+	if completedNotice != nil {
+		*completedNotice = true
 	}
 	if job.CollectEventId > 0 {
 		return s.markCollectDispatchSentByProfile(ctx, job.ProfileId, job.CollectEventId)

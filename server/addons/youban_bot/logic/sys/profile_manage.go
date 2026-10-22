@@ -952,7 +952,7 @@ func (s *sSysBot) showProfileList(ctx context.Context, botId int64, chatId strin
 }
 
 func (s *sSysBot) changeProfilesStatus(ctx context.Context, botId int64, chatId string, account *botProfileAccount, nos []string, status int) error {
-	res, err := publishService.SysPublish().BotProfileStatus(ctx, &publishsysin.BotProfileStatusInp{TenantId: account.TenantId, AccountId: account.AccountId, AccountType: account.AccountType, Nos: nos, Status: status})
+	res, err := publishService.SysPublish().BotProfileStatus(ctx, &publishsysin.BotProfileStatusInp{TenantId: account.TenantId, AccountId: account.AccountId, AccountType: account.AccountType, NotifyBotId: botId, NotifyChatId: chatId, Nos: nos, Status: status})
 	if err != nil {
 		return s.replyBotError(ctx, botId, chatId, "资料管理", err)
 	}
@@ -970,7 +970,7 @@ func (s *sSysBot) changeProfilesStatus(ctx context.Context, botId int64, chatId 
 func (s *sSysBot) changeProfilesStatusByCallback(ctx context.Context, botId int64, chatId string, account *botProfileAccount, query *models.CallbackQuery, action string, no string, status int) error {
 	res, operationErr := publishService.SysPublish().BotProfileStatus(ctx, &publishsysin.BotProfileStatusInp{
 		TenantId: account.TenantId, AccountId: account.AccountId, AccountType: account.AccountType,
-		Nos: []string{no}, Status: status,
+		NotifyBotId: botId, NotifyChatId: chatId, Nos: []string{no}, Status: status,
 	})
 	s.auditProfileCallback(ctx, query, account, action, no, operationErr)
 	if operationErr != nil {

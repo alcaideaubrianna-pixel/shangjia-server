@@ -1013,12 +1013,14 @@ type BotProfileForwardLookupInp struct {
 
 // BotProfileStatusInp is used by youban_bot to update profile status.
 type BotProfileStatusInp struct {
-	TenantId    int64    `json:"tenantId" dc:"租户ID"`
-	AccountId   int64    `json:"accountId" dc:"上架账号ID"`
-	AccountType string   `json:"accountType" dc:"账号类型：admin/uploader"`
-	Ids         []int64  `json:"ids" dc:"资料ID列表"`
-	Nos         []string `json:"nos" dc:"资料编号列表"`
-	Status      int      `json:"status" dc:"状态：1上架 2下架"`
+	TenantId     int64    `json:"tenantId" dc:"租户ID"`
+	AccountId    int64    `json:"accountId" dc:"上架账号ID"`
+	AccountType  string   `json:"accountType" dc:"账号类型：admin/uploader"`
+	NotifyBotId  int64    `json:"notifyBotId" dc:"完成通知Bot ID"`
+	NotifyChatId string   `json:"notifyChatId" dc:"完成通知Chat ID"`
+	Ids          []int64  `json:"ids" dc:"资料ID列表"`
+	Nos          []string `json:"nos" dc:"资料编号列表"`
+	Status       int      `json:"status" dc:"状态：1上架 2下架"`
 }
 
 // BotProfileCreateInp is used by youban_bot to create a text profile quickly.
