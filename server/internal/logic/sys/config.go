@@ -233,9 +233,12 @@ func (s *sSysConfig) ensureCosUploadConfig(ctx context.Context) (err error) {
 	}{
 		{key: "uploadCosBucket", name: "COS Bucket", sort: 475, tip: "存储桶名称，必须包含APPID后缀，例如：bucket-1250000000"},
 		{key: "uploadCosRegion", name: "COS Region", sort: 476, tip: "存储桶所属地域，例如：ap-hongkong"},
+		{key: "uploadR2AccessKey", name: "R2 Access Key ID", sort: 473, tip: "Cloudflare R2 Access Key ID"},
+		{key: "uploadR2SecretKey", name: "R2 Secret Access Key", sort: 474, tip: "Cloudflare R2 Secret Access Key"},
 		{key: "uploadR2Endpoint", name: "R2 Endpoint", sort: 477, tip: "Cloudflare R2 S3 API Endpoint"},
 		{key: "uploadR2Bucket", name: "R2 Bucket", sort: 478, tip: "R2 存储桶名称"},
 		{key: "uploadR2Region", name: "R2 Region", sort: 479, tip: "R2 通常使用 auto"},
+		{key: "uploadR2PublicURL", name: "R2 公开访问域名", sort: 480, tip: "R2 自定义域名或公开访问地址"},
 	}
 
 	cols := dao.SysConfig.Columns()
