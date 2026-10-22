@@ -90,7 +90,7 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 			continue
 		}
 		url := normalizeBotMediaCacheURL(item.FileUrl)
-		if url == "" && strings.TrimSpace(item.FileUniqueId) == "" {
+		if url == "" && len(botMediaItemUniqueIDs(item)) == 0 && item.SourceMessageId <= 0 && item.FileId == "" {
 			continue
 		}
 		cloned := *item
@@ -99,20 +99,14 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 	}
 	// Reused Telegram files have a stable identity across bots. Consult the
 	// durable send ledger before downloading bytes or using approximate hashes.
-	fileIDs := make([]string, 0, len(searchItems))
-	for _, item := range searchItems {
-		if id := strings.TrimSpace(item.FileUniqueId); id != "" {
-			fileIDs = append(fileIDs, id)
-		}
-	}
-	direct, err := botMediaSentFileCandidates(ctx, fileIDs, searchScope)
+	direct, err := botMediaIdentityCandidates(ctx, searchItems, searchScope)
 	if err != nil {
 		return nil, 0, err
 	}
 	matches := make([][]*botMediaSearchCandidate, 0, len(searchItems))
 	remaining := make([]*sysin.BotMediaSearchItem, 0, len(searchItems))
-	for _, item := range searchItems {
-		if candidates := direct[strings.TrimSpace(item.FileUniqueId)]; len(candidates) > 0 {
+	for i, item := range searchItems {
+		if candidates := direct[i]; len(candidates) > 0 {
 			matches = append(matches, candidates)
 		} else {
 			remaining = append(remaining, item)

@@ -281,6 +281,7 @@ type ISysPublish interface {
 	BotProfileImageSearch(ctx context.Context, in *sysin.BotProfileImageSearchInp) (list []*sysin.NoteModel, totalCount int, err error)
 	EnsureBotMediaSearchAccess(ctx context.Context, tenantId int64) error
 	BotMediaFingerprintCached(ctx context.Context, fileUniqueId string) bool
+	BotMediaSearchKnownItems(ctx context.Context, in *sysin.BotMediaSearchInp) ([]bool, error)
 	BotProfileMediaSearch(ctx context.Context, in *sysin.BotMediaSearchInp) (list []*sysin.NoteModel, totalCount int, err error)
 	BotProfileView(ctx context.Context, in *sysin.BotProfileViewInp) (res *sysin.NoteModel, err error)
 	BotProfileDelete(ctx context.Context, tenantId int64, accountId int64, in *sysin.ProfileDeleteInp) error

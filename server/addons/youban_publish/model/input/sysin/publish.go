@@ -635,9 +635,14 @@ type BotProfileImageSearchInp struct {
 }
 
 type BotMediaSearchItem struct {
-	FileUrl      string `json:"fileUrl" dc:"图片或视频预览图地址"`
-	MediaType    string `json:"mediaType" dc:"媒体类型：image/video"`
-	FileUniqueId string `json:"fileUniqueId" dc:"Telegram稳定媒体ID"`
+	FileUniqueIds   []string `json:"fileUniqueIds,omitempty" dc:"同一图片各尺寸的稳定标识"`
+	BotId           int64    `json:"botId,omitempty" dc:"接收媒体的机器人ID"`
+	FileId          string   `json:"fileId,omitempty" dc:"当前机器人收到的真实媒体ID"`
+	SourceChatId    string   `json:"sourceChatId,omitempty" dc:"转发来源频道"`
+	SourceMessageId int64    `json:"sourceMessageId,omitempty" dc:"转发来源消息ID"`
+	FileUrl         string   `json:"fileUrl" dc:"图片或视频预览图地址"`
+	MediaType       string   `json:"mediaType" dc:"媒体类型：image/video"`
+	FileUniqueId    string   `json:"fileUniqueId" dc:"Telegram稳定媒体ID"`
 }
 
 type BotMediaSearchInp struct {

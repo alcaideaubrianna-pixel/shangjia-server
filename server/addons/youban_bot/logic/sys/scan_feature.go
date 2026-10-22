@@ -67,12 +67,11 @@ func (scanMediaMessageHandler) Handle(ctx context.Context, bot *sSysBot, event *
 		}
 		ctx = withScanTrace(ctx, traceId)
 		finish := scantrace.Begin(ctx, "telegram.resolve")
-		media, resolveErr := bot.resolveTelegramScanMedia(ctx, event.BotId, botTokenForEvent(ctx, bot, event.BotId), event.Msg)
+		items, resolveErr := bot.resolveScanSearchItems(ctx, event.BotId, account, event.Msg)
 		finish(resolveErr)
 		if resolveErr != nil {
 			return true, bot.replyBotError(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.Chat.ID), "扫图搜索", resolveErr)
 		}
-		items := scanSearchItems(media)
 		if len(items) == 0 {
 			return true, bot.sendMessageOnly(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.Chat.ID), "当前媒体没有可用的图片或视频预览图。")
 		}
@@ -97,7 +96,7 @@ func (scanMediaMessageHandler) Handle(ctx context.Context, bot *sSysBot, event *
 	}
 	resolveStartedAt := time.Now()
 	finish := scantrace.Begin(ctx, "telegram.resolve")
-	media, err := bot.resolveTelegramScanMedia(ctx, event.BotId, botTokenForEvent(ctx, bot, event.BotId), event.Msg)
+	items, err := bot.resolveScanSearchItems(ctx, event.BotId, account, event.Msg)
 	finish(err)
 	observeScanStage(ctx, event.BotId, "telegram_resolve", resolveStartedAt, err)
 	if err != nil {
@@ -105,7 +104,6 @@ func (scanMediaMessageHandler) Handle(ctx context.Context, bot *sSysBot, event *
 		observeScanRequest(ctx, event.BotId, "failed")
 		return true, bot.replyBotError(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.Chat.ID), "扫图搜索", err)
 	}
-	items := scanSearchItems(media)
 	if len(items) == 0 {
 		_ = bot.completeScanMediaGroupItem(ctx, event.BotId, userId, batchId, nil)
 		return true, bot.sendMessageOnly(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.Chat.ID), "当前媒体没有可用的图片或视频预览图。")
