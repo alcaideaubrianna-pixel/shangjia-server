@@ -337,16 +337,18 @@ func (s *sSysPublish) confirmTelegramAPISuccess(ctx context.Context, job telegra
 			return gerror.New("TG发送Attempt不存在")
 		}
 		if current.Status == telegramAttemptStatusConfirmed {
+			rows, err := tx.Model(publishTgAttemptMessageTable).Fields(gdb.Raw("message_id")).Where("attempt_id", attempt.Id).All()
+			if err != nil {
+				return err
+			}
+			known := make(map[int64]bool, len(rows))
+			for _, row := range rows {
+				known[row["message_id"].Int64()] = true
+			}
 			for _, message := range messages {
-				if message == nil {
-					continue
-				}
-				n, err := tx.Model(publishTgAttemptMessageTable).Where("attempt_id", attempt.Id).Where("message_id", message.MessageId).Count()
-				if err != nil {
-					return err
-				}
-				if n == 0 {
+				if message != nil && message.MessageId > 0 && !known[message.MessageId] {
 					duplicateMessages = append(duplicateMessages, message)
+					known[message.MessageId] = true
 				}
 			}
 			return nil
@@ -856,28 +858,42 @@ func (s *sSysPublish) recordTelegramAttemptMessages(ctx context.Context, attempt
 }
 
 func recordTelegramAttemptMessagesTx(ctx context.Context, tx gdb.TX, attempt telegramDeliveryAttempt, messages []*telegramSentMessage, source string) error {
+	rows := make(g.List, 0, len(messages))
+	positions := make(map[int64]int)
 	for _, message := range messages {
 		if message == nil || message.MessageId <= 0 {
 			continue
 		}
-		payload, marshalErr := json.Marshal(message)
-		if marshalErr != nil {
-			return gerror.Wrap(marshalErr, "序列化TG Attempt消息失败")
+		payload, err := json.Marshal(message)
+		if err != nil {
+			return gerror.Wrap(err, "序列化TG Attempt消息失败")
 		}
-		duplicateFields := "source,message_payload"
-		if source == "partial_response" {
-			// A webhook may already have mapped this ID while the RPC was returning.
-			duplicateFields = "message_id"
+		if index, ok := positions[message.MessageId]; ok {
+			if source != "partial_response" {
+				rows[index]["message_payload"] = string(payload)
+			}
+			continue
 		}
-		_, err := tx.Model(publishTgAttemptMessageTable).Data(g.Map{
+		positions[message.MessageId] = len(rows)
+		rows = append(rows, g.Map{
 			"attempt_id": attempt.Id, "job_id": attempt.JobId, "target_chat_id": attempt.TargetChatId,
 			"message_id": message.MessageId, "message_payload": string(payload), "source": source, "created_at": gtime.Now(),
-		}).OnConflict("attempt_id,message_id").OnDuplicate(duplicateFields).Save()
-		if err != nil {
-			g.Log().Errorf(ctx, "TG消息已返回但记录发送审计失败 attempt_id:%d job_id:%d phase:%s chat_id:%s message_id:%d source:%s err:%v",
-				attempt.Id, attempt.JobId, attempt.Phase, attempt.TargetChatId, message.MessageId, source, err)
-			return gerror.Wrap(err, "记录TG Attempt消息失败")
-		}
+		})
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	duplicateFields := "source,message_payload"
+	if source == "partial_response" {
+		// A webhook may already have mapped this ID while the RPC was returning.
+		duplicateFields = "message_id"
+	}
+	_, err := tx.Model(publishTgAttemptMessageTable).Data(rows).
+		OnConflict("attempt_id,message_id").OnDuplicate(duplicateFields).Save()
+	if err != nil {
+		g.Log().Warningf(ctx, "TG消息已返回但记录发送审计失败 attempt_id:%d job_id:%d phase:%s chat_id:%s message_count:%d source:%s err:%v",
+			attempt.Id, attempt.JobId, attempt.Phase, attempt.TargetChatId, len(rows), source, err)
+		return gerror.Wrap(err, "记录TG Attempt消息失败")
 	}
 	return nil
 }

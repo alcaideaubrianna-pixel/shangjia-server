@@ -256,46 +256,72 @@ func (s *sSysPublish) saveTelegramSentMessages(ctx context.Context, job telegram
 }
 
 func saveTelegramSentMessagesTx(ctx context.Context, tx gdb.TX, job telegramJobRecord, messages []*telegramSentMessage) error {
+	// Validate the complete album before writing any rows, including conflicts
+	// inside this response. One query replaces a query for every media item.
+	groups := make(map[string]string)
 	for _, item := range messages {
-		if item == nil || item.MessageId <= 0 {
+		if item == nil || item.MessageId <= 0 || strings.TrimSpace(item.MediaGroupId) == "" || (item.Purpose != "display" && item.Purpose != "verify") {
 			continue
 		}
-		if strings.TrimSpace(item.MediaGroupId) != "" && (item.Purpose == "display" || item.Purpose == "verify") {
-			stage := beginTelegramPublishStage(ctx, "api_success.message_group_check", g.Map{"jobId": job.Id, "messageId": item.MessageId, "mediaId": item.MediaId, "purpose": item.Purpose})
-			exists, err := tx.Model(publishTgMessageTable).
-				Where("job_id", job.Id).Where("media_group_id", item.MediaGroupId).
-				WhereNot("purpose", item.Purpose).WhereIn("purpose", []string{"display", "verify"}).Count()
-			stage.End(err)
-			if err != nil {
-				return gerror.Wrap(err, "校验TG媒体组用途失败")
-			}
-			if exists > 0 {
+		if purpose, ok := groups[item.MediaGroupId]; ok && purpose != item.Purpose {
+			observeTelegramMediaPurposeViolation(ctx, "persist")
+			return gerror.New("展示资料与验证资料禁止合并发送")
+		}
+		groups[item.MediaGroupId] = item.Purpose
+	}
+	if len(groups) > 0 {
+		groupIDs := make([]string, 0, len(groups))
+		for id := range groups {
+			groupIDs = append(groupIDs, id)
+		}
+		stage := beginTelegramPublishStage(ctx, "api_success.message_group_check", g.Map{"jobId": job.Id, "groupCount": len(groups)})
+		rows, err := tx.Model(publishTgMessageTable).Fields(gdb.Raw("media_group_id,purpose")).
+			Where("job_id", job.Id).WhereIn("media_group_id", groupIDs).
+			WhereIn("purpose", []string{"display", "verify"}).All()
+		stage.End(err)
+		if err != nil {
+			return gerror.Wrap(err, "校验TG媒体组用途失败")
+		}
+		for _, row := range rows {
+			if groups[row["media_group_id"].String()] != row["purpose"].String() {
 				observeTelegramMediaPurposeViolation(ctx, "persist")
 				return gerror.New("展示资料与验证资料禁止合并发送")
 			}
 		}
-		stage := beginTelegramPublishStage(ctx, "api_success.message_upsert", g.Map{"jobId": job.Id, "messageId": item.MessageId, "mediaId": item.MediaId, "purpose": item.Purpose})
-		_, err := tx.Model(publishTgMessageTable).Data(g.Map{
-			"job_id":            job.Id,
-			"tenant_id":         job.TenantId,
-			"account_id":        job.AccountId,
-			"profile_id":        job.ProfileId,
-			"bot_id":            job.BotId,
-			"target_chat_id":    job.TargetChatId,
-			"tg_message_id":     item.MessageId,
-			"media_group_id":    item.MediaGroupId,
-			"media_id":          item.MediaId,
-			"purpose":           item.Purpose,
-			"tg_file_id":        item.TgFileId,
-			"tg_file_unique_id": item.TgFileUniqueId,
-			"status":            "sent",
-			"sent_at":           gtime.Now(),
-			"deleted_at":        nil,
-		}).OnConflict("job_id,tg_message_id").OnDuplicate("status,tg_file_id,tg_file_unique_id,sent_at,deleted_at").Save()
-		stage.End(err)
-		if err != nil {
-			return gerror.Wrap(err, "保存TG消息记录失败")
+	}
+	rows := make(g.List, 0, len(messages))
+	positions := make(map[int64]int)
+	for _, item := range messages {
+		if item == nil || item.MessageId <= 0 {
+			continue
 		}
+		// PostgreSQL cannot update the same conflict key twice in one INSERT.
+		// Keep first-seen identity and last-seen mutable metadata, as the
+		// previous sequential upserts did.
+		if index, ok := positions[item.MessageId]; ok {
+			rows[index]["tg_file_id"] = item.TgFileId
+			rows[index]["tg_file_unique_id"] = item.TgFileUniqueId
+			continue
+		}
+		positions[item.MessageId] = len(rows)
+		rows = append(rows, g.Map{
+			"job_id": job.Id, "tenant_id": job.TenantId, "account_id": job.AccountId,
+			"profile_id": job.ProfileId, "bot_id": job.BotId, "target_chat_id": job.TargetChatId,
+			"tg_message_id": item.MessageId, "media_group_id": item.MediaGroupId,
+			"media_id": item.MediaId, "purpose": item.Purpose,
+			"tg_file_id": item.TgFileId, "tg_file_unique_id": item.TgFileUniqueId,
+			"status": "sent", "sent_at": gtime.Now(), "deleted_at": nil,
+		})
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	stage := beginTelegramPublishStage(ctx, "api_success.message_upsert", g.Map{"jobId": job.Id, "messageCount": len(rows)})
+	_, err := tx.Model(publishTgMessageTable).Data(rows).
+		OnConflict("job_id,tg_message_id").OnDuplicate("status,tg_file_id,tg_file_unique_id,sent_at,deleted_at").Save()
+	stage.End(err)
+	if err != nil {
+		return gerror.Wrap(err, "保存TG消息记录失败")
 	}
 	return nil
 }
