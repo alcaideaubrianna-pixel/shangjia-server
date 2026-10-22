@@ -52,6 +52,62 @@ func TestBotMediaExactPhaseRejectsIncompleteEmpty(t *testing.T) {
 	}
 }
 
+func TestBotMediaBatchPhasePreservesSlotsAndPartialResults(t *testing.T) {
+	items := []*mediaFingerprint{{MD5: "a"}, {MD5: "exact"}, {MD5: "b"}, {MD5: "a"}}
+	results, err := loadBotMediaSearchCandidatesExactFirstBatch(context.Background(), items,
+		func(_ context.Context, items []*mediaFingerprint) ([][]*botMediaSearchCandidate, error) {
+			return [][]*botMediaSearchCandidate{nil, {{ProfileId: 22}}, nil}, nil
+		}, func(_ context.Context, items []*mediaFingerprint) ([][]*botMediaSearchCandidate, error) {
+			if len(items) != 2 || items[0].MD5 != "a" || items[1].MD5 != "b" {
+				t.Fatalf("wrong remaining inputs: %+v", items)
+			}
+			return [][]*botMediaSearchCandidate{{{ProfileId: 11}}, nil}, context.DeadlineExceeded
+		})
+	if !errors.Is(err, context.DeadlineExceeded) || len(results) != 3 || results[0][0].ProfileId != 11 || results[1][0].ProfileId != 22 || len(results[2]) != 0 {
+		t.Fatalf("partial results lost: %+v err=%v", results, err)
+	}
+}
+
+func TestBotMediaBatchPhaseRejectsMalformedResponse(t *testing.T) {
+	for _, count := range []int{0, 2} {
+		_, err := loadBotMediaSearchCandidatesExactFirstBatch(context.Background(), []*mediaFingerprint{{MD5: "a"}},
+			func(context.Context, []*mediaFingerprint) ([][]*botMediaSearchCandidate, error) {
+				return make([][]*botMediaSearchCandidate, 1), nil
+			},
+			func(context.Context, []*mediaFingerprint) ([][]*botMediaSearchCandidate, error) {
+				return make([][]*botMediaSearchCandidate, count), nil
+			})
+		if err == nil {
+			t.Fatalf("accepted response slots=%d", count)
+		}
+	}
+}
+
+func TestBotMediaBatchWaiterCancellationDoesNotCancelSharedQuery(t *testing.T) {
+	key := t.Name()
+	started, release := make(chan struct{}), make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		_, err := botMediaSharedBatchRows(context.Background(), key, func() ([]mediaPHashBucketCandidateRow, error) {
+			close(started)
+			<-release
+			return []mediaPHashBucketCandidateRow{{MediaId: 123}}, nil
+		})
+		done <- err
+	}()
+	<-started
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	_, err := botMediaSharedBatchRows(ctx, key, func() ([]mediaPHashBucketCandidateRow, error) { t.Error("duplicate DB query started"); return nil, nil })
+	close(release)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("waiter error=%v", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("waiter canceled leader: %v", err)
+	}
+}
+
 func TestBotMediaSearchResultLimitIsBounded(t *testing.T) {
 	if botMediaSearchMaxResults <= 0 || botMediaSearchMaxResults > 20 {
 		t.Fatalf("unexpected bot media search result limit: %d", botMediaSearchMaxResults)

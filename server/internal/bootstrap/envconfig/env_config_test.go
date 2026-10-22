@@ -26,6 +26,7 @@ func TestClusterEnvironmentMapping(t *testing.T) {
 
 func TestMediaFileCacheEnvironmentMappings(t *testing.T) {
 	want := map[string]string{
+		"youbanPublish.mediaSearch.batchApproximateEnabled":  "YOUBAN_PUBLISH_MEDIA_SEARCH_BATCH_APPROXIMATE_ENABLED",
 		"youbanPublish.profileOriginEnabled":                 "YOUBAN_PUBLISH_PROFILE_ORIGIN_ENABLED",
 		"youbanPublish.mediaFileCache.cosDownloadMode":       "YOUBAN_PUBLISH_MEDIA_CACHE_DOWNLOAD_MODE",
 		"youbanPublish.mediaFileCache.workerCdnBaseUrl":      "YOUBAN_PUBLISH_MEDIA_CACHE_WORKER_CDN_BASE_URL",

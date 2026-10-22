@@ -471,6 +471,61 @@ func TestMediaSearchStorageLocalPostgres(t *testing.T) {
 			}
 		})
 
+		t.Run("bot_batch_chunks_cache_and_ranking", func(t *testing.T) {
+			if err := markMediaPHashLshReady(ctx); err != nil {
+				t.Fatal(err)
+			}
+			scope := &publishmodel.MediaSearchScope{Partitions: []publishmodel.MediaSearchScopePartition{{TenantId: 5, AccountIds: []int64{6}}}}
+			input := &sysin.ProfileImageSearchInp{Threshold: 12}
+			for _, size := range []int{1, 10, 30} {
+				fingerprints := make([]*mediaFingerprint, size)
+				for i := range fingerprints {
+					fingerprints[i] = &mediaFingerprint{PHash: goimagehash.NewImageHash(uint64(i), goimagehash.PHash)}
+				}
+				cache.Instance().SetAdapter(gcache.NewAdapterMemory())
+				if err := markMediaPHashLshReady(ctx); err != nil {
+					t.Fatal(err)
+				}
+				batch, err := service.botMediaApproximateBatch(ctx, fingerprints, input, scope)
+				if err != nil {
+					t.Fatal(err)
+				}
+				cached, err := service.botMediaApproximateBatch(ctx, fingerprints, input, scope)
+				if err != nil || !reflect.DeepEqual(batch, cached) {
+					t.Fatalf("size=%d cache differs err=%v", size, err)
+				}
+				cache.Instance().SetAdapter(gcache.NewAdapterMemory())
+				if err := markMediaPHashLshReady(ctx); err != nil {
+					t.Fatal(err)
+				}
+				old := make([][]*botMediaSearchCandidate, size)
+				for i, f := range fingerprints {
+					old[i], err = service.botMediaFingerprintCandidates(ctx, f, input, scope, true)
+					if err != nil {
+						t.Fatal(err)
+					}
+					// Empty slices and nil both represent a confirmed no-match.
+					if len(old[i]) != len(batch[i]) || (len(old[i]) > 0 && !reflect.DeepEqual(old[i], batch[i])) {
+						t.Fatalf("size=%d input=%d candidates differ", size, i)
+					}
+				}
+				if !reflect.DeepEqual(rankBotMediaSearchCandidates(old), rankBotMediaSearchCandidates(batch)) {
+					t.Fatalf("size=%d ranking differs", size)
+				}
+			}
+			// A changed index version must not reuse another album's old cache.
+			if _, err := tx.Ctx(ctx).Exec("UPDATE hg_youban_publish_profile_state SET deleted_at=now() WHERE tenant_id=5 AND account_id=6"); err != nil {
+				t.Fatal(err)
+			}
+			if err := bumpMediaPHashBucketVersion(ctx, 5, 6); err != nil {
+				t.Fatal(err)
+			}
+			found, err := service.botMediaApproximateBatch(ctx, []*mediaFingerprint{{PHash: goimagehash.NewImageHash(0, goimagehash.PHash)}, {PHash: goimagehash.NewImageHash(1, goimagehash.PHash)}}, input, scope)
+			if err != nil || len(rankBotMediaSearchCandidates(found)) != 0 {
+				t.Fatalf("stale deleted profile returned: %+v err=%v", found, err)
+			}
+		})
+
 		t.Run("lsh_scope_strategy_uses_statistics", func(t *testing.T) {
 			if address := os.Getenv("YOUBAN_SCAN_TEST_REDIS_ADDRESS"); address != "" {
 				client, err := gredis.New(&gredis.Config{Address: address})

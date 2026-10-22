@@ -22,6 +22,7 @@ import (
 )
 
 type mediaPHashBucketCandidateRow struct {
+	InputIndex int    `orm:"input_index"`
 	AccountId  int64  `orm:"account_id"`
 	BucketHits int    `orm:"bucket_hits"`
 	HashValue  string `orm:"hash_value"`
@@ -401,12 +402,16 @@ func mediaPHashMinEqualNibbles(threshold int) int {
 }
 
 func mediaPHashSearchCacheKey(ctx context.Context, queryHash uint64, md5Value string, in *sysin.ProfileImageSearchInp, scope *publishmodel.MediaSearchScope, candidateProfileIds []int64) string {
+	return mediaPHashSearchCacheKeyWithScopeVersion(queryHash, md5Value, in, candidateProfileIds, mediaSearchScopeCacheKey(scope), mediaSearchScopeVersion(ctx, scope))
+}
+
+func mediaPHashSearchCacheKeyWithScopeVersion(queryHash uint64, md5Value string, in *sysin.ProfileImageSearchInp, candidateProfileIds []int64, scopeKey, version string) string {
 	parts := []string{
 		fmt.Sprintf("youban_publish:profile_image_search:v9:%d", queryHash),
 		"md5=" + strings.TrimSpace(strings.ToLower(md5Value)),
 		fmt.Sprintf("threshold=%d", in.Threshold),
-		fmt.Sprintf("scope=%s", mediaSearchScopeCacheKey(scope)),
-		fmt.Sprintf("version=%s", mediaSearchScopeVersion(ctx, scope)),
+		fmt.Sprintf("scope=%s", scopeKey),
+		fmt.Sprintf("version=%s", version),
 	}
 	if len(candidateProfileIds) > 0 {
 		ids := uniqueIds(candidateProfileIds)

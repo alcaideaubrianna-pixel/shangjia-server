@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -259,13 +260,26 @@ LIMIT %d`, strings.Join(branches, " UNION ALL "), mediaSimilarLiveProfileIndexEx
 }
 
 func mediaPHashLshBranchSQL(pos int, values []int, scopes []mediaPHashBucketScopePart, profileIds []int64, mediaType string, excludeProfileId int64) (string, []any) {
+	return mediaPHashLshBranchWithProbesSQL(pos, values, scopes, profileIds, mediaType, excludeProfileId, false)
+}
+
+func mediaPHashLshBranchWithProbesSQL(pos int, values []int, scopes []mediaPHashBucketScopePart, profileIds []int64, mediaType string, excludeProfileId int64, arrayProbe bool) (string, []any) {
 	conds := []string{"b.bucket_pos = ?"}
 	args := []any{pos}
 	if len(values) > 0 {
-		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(values)), ",")
-		conds = append(conds, "b.bucket_value IN ("+placeholders+")")
-		for _, value := range values {
-			args = append(args, value)
+		if arrayProbe {
+			items := make([]string, len(values))
+			for i, value := range values {
+				items[i] = strconv.Itoa(value)
+			}
+			conds = append(conds, "b.bucket_value = ANY(?::integer[])")
+			args = append(args, "{"+strings.Join(items, ",")+"}")
+		} else {
+			placeholders := strings.TrimSuffix(strings.Repeat("?,", len(values)), ",")
+			conds = append(conds, "b.bucket_value IN ("+placeholders+")")
+			for _, value := range values {
+				args = append(args, value)
+			}
 		}
 	}
 	if mediaType != "" {

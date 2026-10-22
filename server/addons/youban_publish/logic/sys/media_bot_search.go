@@ -157,14 +157,14 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 		return nil, 0, lastHashErr
 	}
 	queryCtx, cancelQueries := context.WithTimeout(ctx, botMediaCandidateQueryTimeout(ctx))
-	fingerprintMatches, err := loadBotMediaSearchCandidatesExactFirst(queryCtx, fingerprints,
+	fingerprintMatches, err := loadBotMediaSearchCandidatesExactFirstBatch(queryCtx, fingerprints,
 		func(exactCtx context.Context, items []*mediaFingerprint) ([][]*botMediaSearchCandidate, error) {
 			if !isPostgresDatabase() {
 				return make([][]*botMediaSearchCandidate, len(items)), nil
 			}
 			return botMediaExactCandidates(exactCtx, items, searchScope)
-		}, func(queryCtx context.Context, fingerprint *mediaFingerprint) ([]*botMediaSearchCandidate, error) {
-			return s.botMediaFingerprintCandidates(queryCtx, fingerprint, searchIn, searchScope, isPostgresDatabase())
+		}, func(queryCtx context.Context, items []*mediaFingerprint) ([][]*botMediaSearchCandidate, error) {
+			return s.botMediaApproximateBatch(queryCtx, items, searchIn, searchScope)
 		})
 	cancelQueries()
 	if err != nil && len(matches) == 0 && len(rankBotMediaSearchCandidates(fingerprintMatches)) == 0 {
@@ -203,6 +203,12 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 // Exact lookups run for the whole album before approximate queries consume the
 // shared budget. Preserve input slots so multi-image ranking remains unchanged.
 func loadBotMediaSearchCandidatesExactFirst(ctx context.Context, fingerprints []*mediaFingerprint, exact func(context.Context, []*mediaFingerprint) ([][]*botMediaSearchCandidate, error), approximate func(context.Context, *mediaFingerprint) ([]*botMediaSearchCandidate, error)) ([][]*botMediaSearchCandidate, error) {
+	return loadBotMediaSearchCandidatesExactFirstBatch(ctx, fingerprints, exact, func(ctx context.Context, remaining []*mediaFingerprint) ([][]*botMediaSearchCandidate, error) {
+		return loadBotMediaSearchCandidates(ctx, remaining, approximate)
+	})
+}
+
+func loadBotMediaSearchCandidatesExactFirstBatch(ctx context.Context, fingerprints []*mediaFingerprint, exact func(context.Context, []*mediaFingerprint) ([][]*botMediaSearchCandidate, error), approximate func(context.Context, []*mediaFingerprint) ([][]*botMediaSearchCandidate, error)) ([][]*botMediaSearchCandidate, error) {
 	unique := uniqueBotMediaFingerprints(fingerprints)
 	if len(unique) == 0 {
 		return nil, nil
@@ -232,7 +238,10 @@ func loadBotMediaSearchCandidatesExactFirst(ctx context.Context, fingerprints []
 	if len(remaining) == 0 {
 		return results, nil
 	}
-	more, err := loadBotMediaSearchCandidates(ctx, remaining, approximate)
+	more, err := approximate(ctx, remaining)
+	if len(more) > len(indices) || (err == nil && len(more) != len(indices)) {
+		return results, gerror.New("扫图近似匹配结果数量不一致")
+	}
 	scantrace.Record(ctx, "query.approx_batch.summary", g.Map{"inputItems": len(remaining), "matchedProfiles": len(rankBotMediaSearchCandidates(more)), "incomplete": err != nil}, err)
 	for i, group := range more {
 		results[indices[i]] = group
@@ -438,6 +447,10 @@ func (s *sSysPublish) botMediaFingerprintCandidates(ctx context.Context, fingerp
 	if len(matches) == 0 {
 		return nil, nil
 	}
+	return botMediaCandidatesFromMatches(matches), nil
+}
+
+func botMediaCandidatesFromMatches(matches []publishProfilePHashDistance) []*botMediaSearchCandidate {
 	candidates := make(map[int64]*botMediaSearchCandidate)
 	for _, item := range matches {
 		candidate, exists := candidates[item.ProfileId]
@@ -463,7 +476,7 @@ func (s *sSysPublish) botMediaFingerprintCandidates(ctx context.Context, fingerp
 		}
 		return ordered[i].Distance < ordered[j].Distance
 	})
-	return ordered, nil
+	return ordered
 }
 
 func (s *sSysPublish) botMediaSearchAccountIds(ctx context.Context, in *sysin.BotMediaSearchInp) ([]int64, error) {
