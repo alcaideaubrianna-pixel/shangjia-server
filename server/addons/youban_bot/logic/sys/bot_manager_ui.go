@@ -26,6 +26,7 @@ import (
 var managerTokenPattern = regexp.MustCompile(`^[0-9]{5,}:[A-Za-z0-9_-]{20,}$`)
 var managerEmbeddedTokenPattern = regexp.MustCompile(`[0-9]{5,}:[A-Za-z0-9_-]{20,}`)
 var managerUsernamePattern = regexp.MustCompile(`@[A-Za-z0-9_]{5,32}`)
+var managerUsernameLinkPattern = regexp.MustCompile(`(?i)(?:https?://)?t\.me/([A-Za-z0-9_]{5,32})`)
 
 type managerInputCandidate struct {
 	Value string
@@ -53,6 +54,17 @@ func managerInputCandidates(raw string) []managerInputCandidate {
 	}
 	for _, username := range managerUsernamePattern.FindAllString(raw, -1) {
 		username = strings.ToLower(strings.TrimPrefix(username, "@"))
+		if seen[username] {
+			continue
+		}
+		seen[username] = true
+		result = append(result, managerInputCandidate{Value: username})
+	}
+	for _, match := range managerUsernameLinkPattern.FindAllStringSubmatch(raw, -1) {
+		if len(match) < 2 {
+			continue
+		}
+		username := strings.ToLower(match[1])
 		if seen[username] {
 			continue
 		}
@@ -270,10 +282,13 @@ func (s *sSysBot) managerCallback(ctx context.Context, st *entity.YoubanBotManag
 			return err
 		}
 		return s.managerSubmitted(ctx, st, msgID, id)
-	case "search", "token":
+	case "search", "token", "username":
 		text := "请输入机器人名称或 @用户名，搜索已同步的机器人。"
 		if c.Action == "token" {
 			text = "可以粘贴 Bot Token、@机器人用户名，或混合粘贴多条内容（例如：给 @foo_bot 添加 123456:AA...）。系统会自动提取、去重并逐个校验；Token 只用于验证和保存，收到后会尝试删除这条敏感消息。"
+		}
+		if c.Action == "username" {
+			text = "请输入机器人用户名，支持 @foo_bot、t.me/foo_bot 或 https://t.me/foo_bot，也可以一次粘贴多个。系统会自动提取、去重并由协议号确认是否为真实机器人。"
 		}
 		if _, err := dao.YoubanBotManagerState.Ctx(ctx).WherePri(st.Id).Data(do.YoubanBotManagerState{InputMode: c.Action, Revision: st.Revision + 1}).Update(); err != nil {
 			return err
@@ -286,7 +301,7 @@ func (s *sSysBot) managerCallback(ctx context.Context, st *entity.YoubanBotManag
 		}
 		return s.managerList(ctx, st, msgID, 1)
 	case "add":
-		return s.managerSend(ctx, st.EntryBotId, st.TelegramUserId, msgID, "选择需要添加的上架机器人。保存 Token 后选择候选频道，系统只分配到其中一个频道。", [][]models.InlineKeyboardButton{{managerButton("填写机器人 Token", "token", 0, 0)}, {managerButton("选择已有机器人", "choose", 0, 0)}, {managerButton("返回", "list", 0, 0)}})
+		return s.managerSend(ctx, st.EntryBotId, st.TelegramUserId, msgID, "选择添加方式。批量任务会把每个机器人分配到一个候选上架频道。", [][]models.InlineKeyboardButton{{managerButton("添加机器人用户名", "username", 0, 0)}, {managerButton("添加机器人 Token", "token", 0, 0)}, {managerButton("选择已有机器人", "choose", 0, 0)}, {managerButton("返回", "list", 0, 0)}})
 	case "choose":
 		return s.managerChoose(ctx, st, msgID, c.Page)
 	case "bot":
@@ -565,10 +580,19 @@ func (s *sSysBot) handleBotManagerInput(ctx context.Context, entryBot int64, msg
 		st.Keyword = text
 		return true, s.managerList(ctx, st, 0, 1)
 	}
-	if st.InputMode != "token" {
+	if st.InputMode != "token" && st.InputMode != "username" {
 		return true, s.managerError(ctx, st, 0, gerror.New("请点击添加上架BOT后发送Token、@用户名或混合文本"))
 	}
 	candidates := managerInputCandidates(text)
+	if st.InputMode == "username" {
+		filtered := candidates[:0]
+		for _, candidate := range candidates {
+			if !candidate.Token {
+				filtered = append(filtered, candidate)
+			}
+		}
+		candidates = filtered
+	}
 	if len(candidates) == 0 {
 		return true, s.managerError(ctx, st, 0, gerror.New("没有识别到有效的Token或@机器人用户名"))
 	}
