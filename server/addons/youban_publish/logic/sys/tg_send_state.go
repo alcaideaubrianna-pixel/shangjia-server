@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -12,21 +13,31 @@ import (
 func (s *sSysPublish) updateTelegramMediaFileIds(ctx context.Context, messages []*telegramSentMessage) error {
 	now := gtime.Now()
 	for _, item := range messages {
-		if item == nil || item.MediaId <= 0 || item.TgFileId == "" || strings.HasPrefix(item.AssetHash, "anti-scan:") {
+		if item == nil {
+			g.Log().Warning(ctx, "跳过TG媒体file_id回写：消息为空")
 			continue
 		}
+		if item.MediaId <= 0 || item.TgFileId == "" || strings.HasPrefix(item.AssetHash, "anti-scan:") {
+			continue
+		}
+		startedAt := time.Now()
 		mediaType, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 			Where("id", item.MediaId).
 			Fields("media_type").
 			Value()
 		if err != nil {
+			g.Log().Warning(ctx, "读取TG媒体类型失败，file_id回写中止", g.Map{
+				"mediaId": item.MediaId, "fileIdLength": len(item.TgFileId), "elapsedMs": time.Since(startedAt).Milliseconds(), "error": err.Error(),
+			})
 			return gerror.Wrap(err, "读取TG媒体类型失败")
 		}
 		if !telegramFileIDMatchesMediaType(mediaType.String(), item.TgFileId) {
-			g.Log().Warningf(ctx, "拒绝回填类型不匹配的TG媒体file_id mediaId:%d mediaType:%s fileId:%s", item.MediaId, mediaType.String(), item.TgFileId)
+			g.Log().Warning(ctx, "拒绝回填类型不匹配的TG媒体file_id", g.Map{
+				"mediaId": item.MediaId, "mediaType": mediaType.String(), "fileIdLength": len(item.TgFileId), "elapsedMs": time.Since(startedAt).Milliseconds(),
+			})
 			continue
 		}
-		_, err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+		result, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 			Where("id", item.MediaId).
 			Data(g.Map{
 				"tg_file_id":          item.TgFileId,
@@ -36,8 +47,25 @@ func (s *sSysPublish) updateTelegramMediaFileIds(ctx context.Context, messages [
 			}).
 			Update()
 		if err != nil {
+			g.Log().Warning(ctx, "更新TG媒体file_id失败", g.Map{
+				"mediaId": item.MediaId, "mediaType": mediaType.String(), "fileIdLength": len(item.TgFileId), "elapsedMs": time.Since(startedAt).Milliseconds(), "error": err.Error(),
+			})
 			return gerror.Wrap(err, "更新TG媒体file_id失败")
 		}
+		affected, affectedErr := result.RowsAffected()
+		if affectedErr != nil {
+			g.Log().Warning(ctx, "读取TG媒体file_id回写影响行数失败", g.Map{
+				"mediaId": item.MediaId, "mediaType": mediaType.String(), "elapsedMs": time.Since(startedAt).Milliseconds(), "error": affectedErr.Error(),
+			})
+			continue
+		}
+		if affected == 0 {
+			g.Log().Warning(ctx, "TG媒体file_id回写未更新任何记录", g.Map{
+				"mediaId": item.MediaId, "mediaType": mediaType.String(), "elapsedMs": time.Since(startedAt).Milliseconds(),
+			})
+			continue
+		}
+		g.Log().Debugf(ctx, "TG媒体file_id回写完成 mediaId:%d mediaType:%s fileIdLength:%d elapsedMs:%d", item.MediaId, mediaType.String(), len(item.TgFileId), time.Since(startedAt).Milliseconds())
 	}
 	return nil
 }
