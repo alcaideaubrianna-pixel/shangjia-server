@@ -1268,48 +1268,25 @@ func (s *sSysBot) sendProfileMediaPurpose(ctx context.Context, callCtx context.C
 		if end > len(items) {
 			end = len(items)
 		}
-		group := make([]models.InputMedia, 0, end-start)
-		groupItems := make([]*publishsysin.MediaModel, 0, end-start)
-		groupCaptions := make([]string, 0, end-start)
-		closers := make([]*os.File, 0)
-		var prepareErr error
-		for index, item := range items[start:end] {
-			caption := ""
-			if start == 0 && index == 0 && strings.TrimSpace(captionPrefix) != "" {
-				caption = captionPrefix
-			}
-			step := scantrace.Begin(scantrace.With(ctx, g.Map{"mediaId": item.Id, "purpose": purpose}), "result.media.prepare")
-			input, file, err := s.profilePreviewInputMediaWithUpload(ctx, item, caption, forceUpload)
+		groupItems := items[start:end]
+		groupCaptions := make([]string, len(groupItems))
+		if start == 0 && strings.TrimSpace(captionPrefix) != "" {
+			groupCaptions[0] = captionPrefix
+		}
+		group, closers, prepareErr := prepareProfilePreviewAlbum(ctx, groupItems, groupCaptions, func(itemCtx context.Context, item *publishsysin.MediaModel, caption string) (models.InputMedia, *os.File, error) {
+			step := scantrace.Begin(scantrace.With(itemCtx, g.Map{"mediaId": item.Id, "purpose": purpose}), "result.media.prepare")
+			input, file, err := s.profilePreviewInputMediaWithUpload(itemCtx, item, caption, forceUpload)
 			step(err)
-			if err != nil {
-				prepareErr = err
-				g.Log().Warningf(ctx, "Bot资料预览准备媒体失败 chatId:%s purpose:%s mediaId:%d type:%s tgFileId:%s tgThumbFileId:%s source_kind:%s err:%+v", chatId, purpose, item.Id, item.MediaType, telegramMediaIdKind(item.TgFileId), telegramMediaIdKind(item.TgThumbFileId), telegramMediaSourceKind(profileMediaSource(ctx, s, item)), err)
-				continue
-			}
-			if file != nil {
-				closers = append(closers, file)
-			}
-			if input != nil {
-				group = append(group, input)
-				groupItems = append(groupItems, item)
-				groupCaptions = append(groupCaptions, caption)
-			}
+			return input, file, err
+		})
+		if prepareErr != nil {
+			return prepareErr
 		}
 		defer func(files []*os.File) {
 			for _, file := range files {
 				_ = file.Close()
 			}
 		}(closers)
-		if prepareErr != nil {
-			return prepareErr
-		}
-		if len(group) == 0 {
-			if prepareErr != nil {
-				return prepareErr
-			}
-			g.Log().Warningf(ctx, "Bot资料预览媒体组为空 chatId:%s purpose:%s group_start:%d", chatId, purpose, start)
-			continue
-		}
 		g.Log().Infof(ctx, "Bot资料预览媒体组准备完成 chatId:%s purpose:%s group_start:%d group_count:%d", chatId, purpose, start, len(group))
 		if len(group) == 1 {
 			if err := s.sendSingleProfileMediaWithFallback(ctx, callCtx, bot, chatId, groupItems[0], groupCaptions[0], group[0]); err != nil {
@@ -1372,30 +1349,22 @@ func (s *sSysBot) sendProfileMediaGroupFallback(ctx context.Context, callCtx con
 		}
 	}
 
-	group := make([]models.InputMedia, 0, len(items))
-	files := make([]*os.File, 0, len(items))
+	group, files, err := prepareProfilePreviewAlbum(ctx, items, captions, func(itemCtx context.Context, item *publishsysin.MediaModel, caption string) (models.InputMedia, *os.File, error) {
+		step := scantrace.Begin(scantrace.With(itemCtx, g.Map{"mediaId": item.Id, "purpose": purpose}), "result.media.fallback_prepare")
+		input, file, prepareErr := s.profilePreviewInputMediaWithUpload(itemCtx, item, caption, true)
+		step(prepareErr)
+		return input, file, prepareErr
+	})
+	if err != nil {
+		return err
+	}
 	defer func() {
 		for _, file := range files {
 			_ = file.Close()
 		}
 	}()
-	for index, item := range items {
-		step := scantrace.Begin(scantrace.With(ctx, g.Map{"mediaId": item.Id, "purpose": purpose}), "result.media.fallback_prepare")
-		input, file, err := s.profilePreviewInputMediaWithUpload(ctx, item, captions[index], true)
-		step(err)
-		if file != nil {
-			files = append(files, file)
-		}
-		if err != nil {
-			return err
-		}
-		if input == nil {
-			return gerror.New("媒体组上传文件准备失败")
-		}
-		group = append(group, input)
-	}
 	step := scantrace.Begin(scantrace.With(ctx, g.Map{"purpose": purpose, "mediaCount": len(group), "upload": true}), "result.media.send_group")
-	_, err := bot.SendMediaGroup(callCtx, &tgbot.SendMediaGroupParams{ChatID: chatId, Media: group})
+	_, err = bot.SendMediaGroup(callCtx, &tgbot.SendMediaGroupParams{ChatID: chatId, Media: group})
 	step(err)
 	return err
 }

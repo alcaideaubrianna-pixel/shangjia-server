@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/go-telegram/bot/models"
 	publishService "hotgo/addons/youban_publish/service"
@@ -11,7 +12,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	tgbot "github.com/go-telegram/bot"
 	publishsysin "hotgo/addons/youban_publish/model/input/sysin"
@@ -85,12 +88,18 @@ func TestProfilePreviewAlbumDoesNotRetryAmbiguousFailure(t *testing.T) {
 // Stale/cross-bot file IDs must retain the existing upload fallback.
 type previewCacheStub struct {
 	publishService.ISysPublish
-	path  string
-	calls int
+	path    string
+	calls   atomic.Int32
+	prepare func(context.Context, *publishsysin.BotMediaCacheFileInp) error
 }
 
 func (s *previewCacheStub) BotMediaCacheFile(ctx context.Context, in *publishsysin.BotMediaCacheFileInp) (*publishsysin.BotMediaCacheFileModel, error) {
-	s.calls++
+	s.calls.Add(1)
+	if s.prepare != nil {
+		if err := s.prepare(ctx, in); err != nil {
+			return nil, err
+		}
+	}
 	return &publishsysin.BotMediaCacheFileModel{Path: s.path}, nil
 }
 
@@ -132,8 +141,8 @@ func TestProfilePreviewStaleReferenceFallsBackToUpload(t *testing.T) {
 	err = NewSysBot().sendProfileMediaPurpose(context.Background(), context.Background(), bot, "123", []*publishsysin.MediaModel{
 		{Id: 1, MediaType: "image", Purpose: "display", TgFileId: "stale-reference"},
 	}, "display", "preview", false)
-	if err != nil || requests != 2 || uploads != 1 || cache.calls != 1 {
-		t.Fatalf("requests=%d uploads=%d cache=%d err=%v", requests, uploads, cache.calls, err)
+	if err != nil || requests != 2 || uploads != 1 || cache.calls.Load() != 1 {
+		t.Fatalf("requests=%d uploads=%d cache=%d err=%v", requests, uploads, cache.calls.Load(), err)
 	}
 }
 
@@ -261,8 +270,8 @@ func TestProfilePreviewRejectedAlbumRemainsGrouped(t *testing.T) {
 				items = append(items, &publishsysin.MediaModel{Id: id, MediaType: "image", Purpose: "display", TgFileId: "stale-reference"})
 			}
 			err = NewSysBot().sendProfileMediaPurpose(context.Background(), context.Background(), bot, "123", items, "display", "preview", false)
-			if (err != nil) != fallbackFails || requests != 2 || uploads != 4 || cache.calls != 4 {
-				t.Fatalf("requests=%d uploads=%d cache=%d err=%v", requests, uploads, cache.calls, err)
+			if (err != nil) != fallbackFails || requests != 2 || uploads != 4 || cache.calls.Load() != 4 {
+				t.Fatalf("requests=%d uploads=%d cache=%d err=%v", requests, uploads, cache.calls.Load(), err)
 			}
 		})
 	}
@@ -330,7 +339,7 @@ func TestProfilePreviewAlbumFallbackOrder(t *testing.T) {
 						t.Error("caption changed")
 					}
 				}
-				if requests < 3 && cache.calls != 0 {
+				if requests < 3 && cache.calls.Load() != 0 {
 					t.Error("downloaded before URL rejection")
 				}
 				if requests == 3 && (r.MultipartForm == nil || len(r.MultipartForm.File) != 4) {
@@ -367,13 +376,135 @@ func TestProfilePreviewAlbumFallbackOrder(t *testing.T) {
 			if mode == "http_rejected" {
 				wantRequests, wantDownloads = 3, 4
 			}
-			if (err != nil) != (mode == "http_timeout") || requests != wantRequests || cache.calls != wantDownloads {
-				t.Fatalf("requests=%d downloads=%d err=%v", requests, cache.calls, err)
+			if (err != nil) != (mode == "http_timeout") || requests != wantRequests || int(cache.calls.Load()) != wantDownloads {
+				t.Fatalf("requests=%d downloads=%d err=%v", requests, cache.calls.Load(), err)
 			}
 			if items[0].TgFileId != "file-0" {
 				t.Error("stored media mutated")
 			}
 		})
+	}
+}
+
+// Reproduce the production fallback: all six URLs are rejected and the
+// downloads must overlap rather than consume the request budget serially.
+func TestProfilePreviewRejectedAlbumPreparesConcurrently(t *testing.T) {
+	var previous publishService.ISysPublish
+	func() { defer func() { _ = recover() }(); previous = publishService.SysPublish() }()
+	cache := &previewCacheStub{ISysPublish: previous, path: filepath.Join(t.TempDir(), "image.jpg")}
+	if err := os.WriteFile(cache.path, []byte("fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var active, peak atomic.Int32
+	ready := make(chan struct{})
+	cache.prepare = func(ctx context.Context, _ *publishsysin.BotMediaCacheFileInp) error {
+		n := active.Add(1)
+		defer active.Add(-1)
+		for old := peak.Load(); n > old && !peak.CompareAndSwap(old, n); old = peak.Load() {
+		}
+		if n == 3 {
+			select {
+			case <-ready:
+			default:
+				close(ready)
+			}
+		}
+		select {
+		case <-ready:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	publishService.RegisterSysPublish(cache)
+	t.Cleanup(func() { publishService.RegisterSysPublish(previous) })
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		if requests == 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"ok":false,"error_code":400,"description":"Bad Request: Wrong file identifier/HTTP URL specified"}`))
+			return
+		}
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Error(err)
+		}
+		if r.MultipartForm != nil {
+			defer r.MultipartForm.RemoveAll()
+		}
+		var media []struct {
+			Media string `json:"media"`
+			Type  string `json:"type"`
+		}
+		if err := json.Unmarshal([]byte(r.FormValue("media")), &media); err != nil {
+			t.Error(err)
+		}
+		if len(media) != 6 {
+			t.Errorf("incomplete album: %d", len(media))
+		}
+		for i, item := range media {
+			if !strings.HasPrefix(item.Media, fmt.Sprintf("attach://preview_%d_", i+1)) {
+				t.Errorf("order changed: %v", media)
+			}
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"result":[{"message_id":1,"date":1,"chat":{"id":123,"type":"private"}}]}`))
+	}))
+	defer server.Close()
+	bot, err := tgbot.New("123:fake", tgbot.WithSkipGetMe(), tgbot.WithServerURL(server.URL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := make([]*publishsysin.MediaModel, 6)
+	for i := range items {
+		items[i] = &publishsysin.MediaModel{Id: int64(i + 1), MediaType: "image", Purpose: "display", FileUrl: fmt.Sprintf("https://example.test/%d.jpg", i)}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err = NewSysBot().sendProfileMediaPurpose(ctx, ctx, bot, "123", items, "display", "preview", false)
+	if err != nil || requests != 2 || peak.Load() != 3 || cache.calls.Load() != 6 {
+		t.Fatalf("requests=%d peak=%d calls=%d err=%v", requests, peak.Load(), cache.calls.Load(), err)
+	}
+}
+
+func TestProfilePreviewFallbackDownloadFailureDoesNotSendPartialAlbum(t *testing.T) {
+	var previous publishService.ISysPublish
+	func() { defer func() { _ = recover() }(); previous = publishService.SysPublish() }()
+	wantErr := errors.New("source unavailable")
+	cache := &previewCacheStub{ISysPublish: previous, path: filepath.Join(t.TempDir(), "image.jpg")}
+	if err := os.WriteFile(cache.path, []byte("fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cache.prepare = func(ctx context.Context, in *publishsysin.BotMediaCacheFileInp) error {
+		if in.Media.Id == 2 {
+			return wantErr
+		}
+		return nil
+	}
+	publishService.RegisterSysPublish(cache)
+	t.Cleanup(func() { publishService.RegisterSysPublish(previous) })
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if requests > 1 {
+			t.Error("sent incomplete fallback album")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"ok":false,"error_code":400,"description":"Bad Request: Wrong file identifier/HTTP URL specified"}`))
+	}))
+	defer server.Close()
+	bot, err := tgbot.New("123:fake", tgbot.WithSkipGetMe(), tgbot.WithServerURL(server.URL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = NewSysBot().sendProfileMediaPurpose(context.Background(), context.Background(), bot, "123", []*publishsysin.MediaModel{
+		{Id: 1, MediaType: "image", Purpose: "display", TgFileId: "stale-1"},
+		{Id: 2, MediaType: "image", Purpose: "display", TgFileId: "stale-2"},
+		{Id: 3, MediaType: "video", Purpose: "display", TgFileId: "stale-3"},
+	}, "display", "caption", false)
+	if !errors.Is(err, wantErr) || requests != 1 {
+		t.Fatalf("requests=%d err=%v", requests, err)
 	}
 }
 
