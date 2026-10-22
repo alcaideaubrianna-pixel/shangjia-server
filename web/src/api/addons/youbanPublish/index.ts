@@ -578,9 +578,12 @@ export function CmsAppBindTenant(params = {}) {
 }
 
 export function AccountLoginLink(params: { id: number }) {
-  return http.request<{ token: string; expires: number }>({
-    url: '/youban_publish/publish/account/loginLink',
-    method: 'POST',
-    params,
-  });
+  return http.request<{ token: string; expires: number }>(
+    {
+      url: '/api/youban_publish/publish/account/loginLink',
+      method: 'POST',
+      params,
+    },
+    { joinPrefix: false }
+  );
 }
