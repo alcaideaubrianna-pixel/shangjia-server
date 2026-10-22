@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"html"
 	"regexp"
 	"strconv"
@@ -38,6 +39,12 @@ func managerCandidateLabel(c managerInputCandidate) string {
 		return "Token（已隐藏）"
 	}
 	return "@" + strings.TrimPrefix(c.Value, "@")
+}
+
+func managerPendingTelegramBotID(username string) int64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(strings.ToLower(strings.TrimPrefix(strings.TrimSpace(username), "@"))))
+	return -int64(h.Sum64()&0x3fffffffffffffff) - 1
 }
 
 // managerInputCandidates accepts a pasted message containing tokens and/or
@@ -207,11 +214,11 @@ func (s *sSysBot) managerList(ctx context.Context, st *entity.YoubanBotManagerSt
 	if err := q.OrderAsc(c.Id).Page(page, managerPageSize).Scan(&rows); err != nil {
 		return err
 	}
-	text := fmt.Sprintf("<b>🤖 上架频道机器人管理</b> · 第 %d 页\n显示上架频道中的全部机器人，不限于自己创建的机器人。\n", page)
+	text := fmt.Sprintf("<b>🤖 上架机器人管理</b> · 第 %d 页\n\n", page)
 	if st.SyncedAt == nil {
-		text += "尚未完成首次同步；同步完成会通知。\n"
+		text += "<b>首次使用</b>\n请先点击下方 <b>同步机器人</b>，系统将读取上架频道中的机器人。同步完成后会发送通知。\n"
 	} else {
-		text += "最近同步：" + st.SyncedAt.Format("m-d H:i") + "\n"
+		text += "这里显示已同步的上架频道机器人。\n最近同步：<code>" + st.SyncedAt.Format("Y-m-d H:i") + "</code>\n"
 	}
 	if st.Keyword != "" {
 		text += "搜索：" + html.EscapeString(st.Keyword) + "\n"
@@ -227,7 +234,14 @@ func (s *sSysBot) managerList(ctx context.Context, st *entity.YoubanBotManagerSt
 	if pager := managerPager("list", 0, page, total, 0); len(pager) > 0 {
 		buttons = append(buttons, pager)
 	}
-	buttons = append(buttons, []models.InlineKeyboardButton{managerButton("➕ 添加上架 BOT", "add", 0, 0)}, []models.InlineKeyboardButton{managerButton("🔍 搜索机器人", "search", 0, 0), managerButton("🔄 同步机器人", "sync", 0, 0)}, []models.InlineKeyboardButton{managerButton("返回", "exit", 0, 0)})
+	if st.SyncedAt == nil {
+		buttons = append(buttons, []models.InlineKeyboardButton{managerButton("🔄 同步机器人", "sync", 0, 0)})
+	}
+	buttons = append(buttons, []models.InlineKeyboardButton{managerButton("➕ 添加上架 BOT", "add", 0, 0)})
+	if st.SyncedAt != nil {
+		buttons = append(buttons, []models.InlineKeyboardButton{managerButton("🔍 搜索机器人", "search", 0, 0), managerButton("🔄 重新同步", "sync", 0, 0)})
+	}
+	buttons = append(buttons, []models.InlineKeyboardButton{managerButton("返回", "exit", 0, 0)})
 	return s.managerSend(ctx, st.EntryBotId, st.TelegramUserId, msgID, text, buttons)
 }
 
@@ -288,7 +302,19 @@ func (s *sSysBot) managerCallback(ctx context.Context, st *entity.YoubanBotManag
 			text = "可以粘贴 Bot Token、@机器人用户名，或混合粘贴多条内容（例如：给 @foo_bot 添加 123456:AA...）。系统会自动提取、去重并逐个校验；Token 只用于验证和保存，收到后会尝试删除这条敏感消息。"
 		}
 		if c.Action == "username" {
-			text = "请输入机器人用户名，支持 @foo_bot、t.me/foo_bot 或 https://t.me/foo_bot，也可以一次粘贴多个。系统会自动提取、去重并由协议号确认是否为真实机器人。"
+			text = `<b>添加机器人用户名</b>
+
+请发送机器人的用户名或 Telegram 链接：
+<code>@foo_bot</code>
+<code>https://t.me/foo_bot</code>
+
+<b>批量添加</b>
+每行填写一个机器人，例如：
+<pre>@foo_bot
+@bar_bot
+https://t.me/baz_bot</pre>
+
+系统会自动提取并去重，然后验证机器人身份。`
 		}
 		if _, err := dao.YoubanBotManagerState.Ctx(ctx).WherePri(st.Id).Data(do.YoubanBotManagerState{InputMode: c.Action, Revision: st.Revision + 1}).Update(); err != nil {
 			return err
@@ -445,35 +471,43 @@ func (s *sSysBot) managerSelection(ctx context.Context, st *entity.YoubanBotMana
 	return s.managerSend(ctx, st.EntryBotId, st.TelegramUserId, msgID, fmt.Sprintf("<b>选择候选上架频道</b> · 第 %d 页\n已选 %d 个，跨页保留。首次默认全选，以后沿用上次选择。\n每个机器人只分配一个频道；⚠ 表示需同步或权限异常，分配时会跳过。", page, len(ids)), buttons)
 }
 
-func (s *sSysBot) managerAddToken(ctx context.Context, st *entity.YoubanBotManagerState, token string) (*entity.YoubanBotManaged, error) {
+func (s *sSysBot) managerAddToken(ctx context.Context, st *entity.YoubanBotManagerState, token string) (*entity.YoubanBotManaged, bool, error) {
 	client, err := s.relayBot(ctx, token)
 	if err != nil {
-		return nil, gerror.New("Token格式或机器人连接异常")
+		return nil, false, gerror.New("Token格式或机器人连接异常")
 	}
 	call, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	identity, err := client.GetMe(call)
 	if err != nil || identity.ID <= 0 || !identity.IsBot || !strings.HasPrefix(token, strconv.FormatInt(identity.ID, 10)+":") {
-		return nil, gerror.New("机器人Token校验失败，请检查后重试")
+		return nil, false, gerror.New("机器人Token校验失败，请检查后重试")
 	}
 	if err := ps.SysPublish().BotManagerValidateToken(ctx, st.TenantId, st.AccountId, token); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	mainCols := dao.YoubanBotBot.Columns()
 	mainCount, err := dao.YoubanBotBot.Ctx(ctx).WhereLike(mainCols.BotToken, strconv.FormatInt(identity.ID, 10)+":%").Count()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if mainCount > 0 {
-		return nil, gerror.New("不能将平台主机器人添加为上架机器人")
+		return nil, false, gerror.New("不能将平台主机器人添加为上架机器人")
 	}
 	bc := dao.YoubanBotManaged.Columns()
+	var existing *entity.YoubanBotManaged
+	if err := dao.YoubanBotManaged.Ctx(ctx).Where(bc.TenantId, st.TenantId).Where(bc.AccountId, st.AccountId).
+		Where(bc.TelegramBotId, identity.ID).WhereNull(bc.DeletedAt).Scan(&existing); err != nil {
+		return nil, false, err
+	}
+	if existing != nil {
+		return existing, true, nil
+	}
 	n, err := dao.YoubanBotManaged.Ctx(ctx).Where(bc.TelegramBotId, identity.ID).WhereNot(bc.BotToken, "").Where("("+bc.TenantId+"<>? OR "+bc.AccountId+"<>?)", st.TenantId, st.AccountId).Count()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if n > 0 {
-		return nil, gerror.New("该机器人已属于其他账户，请联系管理员核对")
+		return nil, false, gerror.New("该机器人已属于其他账户，请联系管理员核对")
 	}
 	err = dao.YoubanBotManaged.Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		publishBotId, err := ps.SysPublish().BotManagerUpdateCredentials(ctx, &pi.BotManagerProjection{TenantId: st.TenantId, AccountId: st.AccountId, BotToken: token, BotName: telegramBotDisplayName(identity), BotUsername: identity.Username})
@@ -487,32 +521,39 @@ func (s *sSysBot) managerAddToken(ctx context.Context, st *entity.YoubanBotManag
 		return err
 	})
 	if err != nil {
-		return nil, gerror.New("保存机器人配置失败，请联系管理员检查数据库")
+		return nil, false, gerror.New("保存机器人配置失败，请联系管理员检查数据库")
 	}
 	ps.SysPublish().BotManagerRefreshCredentials(ctx)
 	var b entity.YoubanBotManaged
 	if err := dao.YoubanBotManaged.Ctx(ctx).Where(bc.TenantId, st.TenantId).Where(bc.AccountId, st.AccountId).Where(bc.TelegramBotId, identity.ID).Scan(&b); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return &b, nil
+	return &b, false, nil
 }
 
-func (s *sSysBot) managerAddExisting(ctx context.Context, st *entity.YoubanBotManagerState, username string) (*entity.YoubanBotManaged, error) {
+func (s *sSysBot) managerAddExisting(ctx context.Context, st *entity.YoubanBotManagerState, username string) (*entity.YoubanBotManaged, bool, error) {
 	c := dao.YoubanBotManaged.Columns()
+	username = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(username), "@"))
 	var b *entity.YoubanBotManaged
-	if err := dao.YoubanBotManaged.Ctx(ctx).Where(c.TenantId, st.TenantId).Where(c.AccountId, st.AccountId).Where(c.BotUsername, strings.TrimPrefix(username, "@")).Scan(&b); err != nil {
-		return nil, err
+	if err := dao.YoubanBotManaged.Ctx(ctx).Where(c.TenantId, st.TenantId).Where(c.AccountId, st.AccountId).
+		Where("LOWER("+c.BotUsername+") = ?", username).WhereNull(c.DeletedAt).Scan(&b); err != nil {
+		return nil, false, err
 	}
-	if b == nil {
-		// Keep an identity-only row. The account worker resolves the username,
-		// verifies User.Bot, and fills TelegramBotId before applying the task.
-		id, err := dao.YoubanBotManaged.Ctx(ctx).Data(do.YoubanBotManaged{TenantId: st.TenantId, AccountId: st.AccountId, BotUsername: strings.TrimPrefix(username, "@"), BotName: strings.TrimPrefix(username, "@"), Status: 1}).InsertAndGetId()
-		if err != nil {
-			return nil, err
+	if b != nil {
+		return b, true, nil
+	}
+	// Keep an identity-only row. The account worker resolves the username,
+	// verifies User.Bot, and fills TelegramBotId before applying the task.
+	id, err := dao.YoubanBotManaged.Ctx(ctx).Data(do.YoubanBotManaged{TenantId: st.TenantId, AccountId: st.AccountId, TelegramBotId: managerPendingTelegramBotID(username), BotUsername: username, BotName: username, Status: 1}).InsertAndGetId()
+	if err != nil {
+		// A concurrent request for the same username may win the unique-key race.
+		if readErr := dao.YoubanBotManaged.Ctx(ctx).Where(c.TenantId, st.TenantId).Where(c.AccountId, st.AccountId).
+			Where("LOWER("+c.BotUsername+") = ?", username).WhereNull(c.DeletedAt).Scan(&b); readErr == nil && b != nil {
+			return b, true, nil
 		}
-		b = &entity.YoubanBotManaged{Id: id, TenantId: st.TenantId, AccountId: st.AccountId, BotUsername: strings.TrimPrefix(username, "@"), BotName: strings.TrimPrefix(username, "@"), Status: 1}
+		return nil, false, err
 	}
-	return b, nil
+	return &entity.YoubanBotManaged{Id: id, TenantId: st.TenantId, AccountId: st.AccountId, TelegramBotId: managerPendingTelegramBotID(username), BotUsername: username, BotName: username, Status: 1}, false, nil
 }
 
 func (s *sSysBot) handleBotManagerInput(ctx context.Context, entryBot int64, msg *models.Message) (bool, error) {
@@ -598,16 +639,22 @@ func (s *sSysBot) handleBotManagerInput(ctx context.Context, entryBot int64, msg
 	}
 	results := make([]string, 0, len(candidates))
 	batchKey := guid.S()
+	submitted := 0
 	for _, candidate := range candidates {
 		var b *entity.YoubanBotManaged
+		var exists bool
 		var addErr error
 		if candidate.Token {
-			b, addErr = s.managerAddToken(ctx, st, candidate.Value)
+			b, exists, addErr = s.managerAddToken(ctx, st, candidate.Value)
 		} else {
-			b, addErr = s.managerAddExisting(ctx, st, candidate.Value)
+			b, exists, addErr = s.managerAddExisting(ctx, st, candidate.Value)
 		}
 		if addErr != nil {
-			results = append(results, "❌ "+managerCandidateLabel(candidate)+"："+sensitive.Diagnostic(addErr.Error()))
+			results = append(results, "❌ "+html.EscapeString(managerCandidateLabel(candidate))+"："+html.EscapeString(sensitive.Diagnostic(addErr.Error())))
+			continue
+		}
+		if exists {
+			results = append(results, "ℹ️ <code>@"+html.EscapeString(strings.TrimPrefix(b.BotUsername, "@"))+"</code>：已添加，无需重复添加")
 			continue
 		}
 		// Reuse the existing transactional allocator. Each candidate gets one
@@ -621,10 +668,15 @@ func (s *sSysBot) handleBotManagerInput(ctx context.Context, entryBot int64, msg
 			results = append(results, "❌ @"+b.BotUsername+"："+sensitive.Diagnostic(allocErr.Error()))
 			continue
 		}
+		submitted++
 		results = append(results, fmt.Sprintf("✅ @%s：任务 #%d 已提交，完成后显示分配频道", b.BotUsername, taskID))
 	}
 	_, _ = dao.YoubanBotManagerState.Ctx(ctx).WherePri(st.Id).Data(do.YoubanBotManagerState{InputMode: "", DraftBotId: 0}).Update()
-	return true, s.managerSend(ctx, st.EntryBotId, st.TelegramUserId, 0, "<b>批量添加任务已提交</b>\n"+strings.Join(results, "\n")+"\n\n任务完成后会逐项通知机器人最终分配的频道。", managerSyncButtons())
+	message := "<b>添加结果</b>\n\n" + strings.Join(results, "\n")
+	if submitted > 0 {
+		message += "\n\n已提交的任务完成后，会逐项通知机器人最终分配的频道。"
+	}
+	return true, s.managerSend(ctx, st.EntryBotId, st.TelegramUserId, 0, message, managerSyncButtons())
 }
 
 func (s *sSysBot) managerSubmitted(ctx context.Context, st *entity.YoubanBotManagerState, msgID int, taskID int64) error {

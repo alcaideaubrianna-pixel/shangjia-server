@@ -320,14 +320,14 @@ func (s *sSysBot) managerMutateChannel(ctx context.Context, client *tg.Client, s
 	}
 	var botUser *tg.User
 	for _, u := range resolved.Users {
-		if v, ok := u.(*tg.User); ok && v.Bot && (b.TelegramBotId == 0 || v.ID == b.TelegramBotId) {
+		if v, ok := u.(*tg.User); ok && v.Bot && (b.TelegramBotId <= 0 || v.ID == b.TelegramBotId) {
 			botUser = v
 		}
 	}
 	if botUser == nil {
 		return gerror.New("机器人用户名身份已变化，请重新同步")
 	}
-	if b.TelegramBotId == 0 {
+	if b.TelegramBotId <= 0 {
 		if _, err := dao.YoubanBotManaged.Ctx(ctx).WherePri(b.Id).Data(do.YoubanBotManaged{TelegramBotId: botUser.ID, BotName: strings.TrimSpace(botUser.FirstName + " " + botUser.LastName)}).Update(); err != nil {
 			return err
 		}
