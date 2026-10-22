@@ -22,6 +22,7 @@ const (
 	profileCycleChannelBacklogLimit = 200
 	profileCycleClaimLease          = 2 * time.Hour
 	profileCycleRetryDelay          = time.Hour
+	profileCycleFailureThreshold    = 3
 	profileCycleRescheduleBatchSize = 500
 	profileCycleOverdueSpreadWindow = 4 * time.Hour
 	profileCycleDevelopSpreadWindow = 5 * time.Minute
@@ -57,6 +58,7 @@ type profileCycleDueRow struct {
 	CyclePublishTime   string      `orm:"cycle_publish_time"`
 	NextCycleAt        *gtime.Time `orm:"next_cycle_at"`
 	DispatchCount      int         `orm:"dispatch_count"`
+	CycleFailureCount  int         `orm:"cycle_failure_count"`
 	ChannelEnabled     int         `orm:"channel_enabled"`
 	ChannelDays        int         `orm:"channel_days"`
 	ChannelPublishTime string      `orm:"channel_publish_time"`
@@ -448,7 +450,7 @@ func (s *sSysPublish) profileCycleDueRows(ctx context.Context, limit int) ([]pro
 	err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
 		InnerJoin(publishChannelProfileTable+" cp", "cp.last_job_id=j.id AND cp.status='active'").
 		LeftJoin(publishChannelTable+" c", "c.id=j.channel_id AND c.deleted_at IS NULL").
-		Fields("j.id AS job_id,j.tenant_id,j.account_id,j.profile_id,j.channel_id,j.sent_at,j.cycle_days,j.cycle_publish_time,j.next_cycle_at,j.dispatch_count,"+
+		Fields("j.id AS job_id,j.tenant_id,j.account_id,j.profile_id,j.channel_id,j.sent_at,j.cycle_days,j.cycle_publish_time,j.next_cycle_at,j.dispatch_count,j.cycle_failure_count,"+
 			"COALESCE(c.cycle_publish_enabled,0) AS channel_enabled,COALESCE(c.cycle_publish_days,0) AS channel_days,"+
 			"COALESCE(c.cycle_publish_time,'') AS channel_publish_time,COALESCE(c.cycle_publish_mode,'time') AS channel_mode,COALESCE(c.status,0) AS channel_status,COALESCE(c.publish_direction,'') AS publish_direction").
 		Where("j.cycle_enabled", 1).WhereIn("j.status", []string{"sent", "superseded"}).WhereNotNull("j.next_cycle_at").
@@ -530,17 +532,52 @@ func (s *sSysPublish) dispatchDueProfileCycle(ctx context.Context, row profileCy
 		return false, updateErr
 	}
 	if err == nil {
+		_, resetErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", row.JobId).
+			Data(g.Map{"cycle_failure_count": 0, "last_dispatch_error": "", "updated_at": gtime.Now()}).Update()
+		if resetErr != nil {
+			g.Log().Warningf(ctx, "重置资料循环失败次数失败 job:%d err:%+v", row.JobId, resetErr)
+		}
 		return true, nil
 	}
 	if errors.Is(err, errPublishProfileUnavailable) {
 		_ = s.deactivateChannelProfile(ctx, row.ChannelId, row.ProfileId)
 		return false, s.disableProfileCycleJob(ctx, row.JobId, "资料已下架或不可发布")
 	}
-	_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", row.JobId).Data(g.Map{
-		"next_cycle_at":       gtime.Now().Add(profileCycleRetryDelay),
-		"last_dispatch_error": err.Error(), "updated_at": gtime.Now(),
-	}).Update()
+	failureCount := row.CycleFailureCount + 1
+	message := cycleFailureSummary(err)
+	data := g.Map{"next_cycle_at": gtime.Now().Add(profileCycleRetryDelay), "cycle_failure_count": failureCount,
+		"last_dispatch_error": message, "updated_at": gtime.Now()}
+	if isPermanentProfileCycleError(err) || failureCount >= profileCycleFailureThreshold {
+		data["cycle_enabled"] = 0
+		data["next_cycle_at"] = nil
+		data["last_dispatch_error"] = message + "；连续失败达到阈值，已暂停循环"
+	}
+	_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", row.JobId).Data(data).Update()
 	return false, err
+}
+
+func cycleFailureSummary(err error) string {
+	if err == nil {
+		return "循环发布失败"
+	}
+	message := strings.TrimSpace(err.Error())
+	if len([]rune(message)) > 480 {
+		message = string([]rune(message)[:477]) + "..."
+	}
+	return message
+}
+
+func isPermanentProfileCycleError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	for _, marker := range []string{"wrong file identifier", "file_id_invalid", "file reference expired", "http 404"} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *sSysPublish) disableProfileCycleJob(ctx context.Context, jobId int64, message string) error {

@@ -1168,7 +1168,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_job` (
   `cycle_days` int(11) NOT NULL DEFAULT '4' COMMENT '循环天数', `cycle_publish_time` varchar(16) NOT NULL DEFAULT '' COMMENT '循环发布时间',
   `next_cycle_at` datetime DEFAULT NULL COMMENT '下次循环时间', `priority` int(11) NOT NULL DEFAULT '100' COMMENT '调度优先级',
   `queue_name` varchar(64) NOT NULL DEFAULT '' COMMENT '队列名称', `dispatch_status` varchar(32) NOT NULL DEFAULT 'idle' COMMENT '调度状态',
-  `dispatched_at` datetime DEFAULT NULL COMMENT '调度时间', `dispatch_count` int(11) NOT NULL DEFAULT '0' COMMENT '调度次数',
+  `dispatched_at` datetime DEFAULT NULL COMMENT '调度时间', `dispatch_count` int(11) NOT NULL DEFAULT '0' COMMENT '调度次数', `cycle_failure_count` int(11) NOT NULL DEFAULT '0' COMMENT '循环连续失败次数',
   `send_phase` varchar(32) NOT NULL DEFAULT '' COMMENT '发送阶段', `reconcile_count` int(11) NOT NULL DEFAULT '0' COMMENT '对账次数',
   `last_dispatch_error` varchar(512) NOT NULL DEFAULT '' COMMENT '最后调度错误', `error_message` text COMMENT '错误信息',
   `created_at` datetime DEFAULT NULL COMMENT '创建时间', `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
@@ -1210,6 +1210,7 @@ ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN `channel_id` bigint(20) NOT NU
 ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN `sent_at` datetime DEFAULT NULL COMMENT '发送成功时间' AFTER `next_retry_at`, ADD COLUMN `cycle_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否循环上架' AFTER `sent_at`;
 ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN `cycle_days` int(11) NOT NULL DEFAULT '4' COMMENT '循环天数' AFTER `cycle_enabled`, ADD COLUMN `cycle_publish_time` varchar(16) NOT NULL DEFAULT '' COMMENT '循环发布时间' AFTER `cycle_days`, ADD COLUMN `next_cycle_at` datetime DEFAULT NULL COMMENT '下次循环时间' AFTER `cycle_publish_time`;
 ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN `priority` int(11) NOT NULL DEFAULT '100' COMMENT '调度优先级' AFTER `next_cycle_at`, ADD COLUMN `queue_name` varchar(64) NOT NULL DEFAULT '' COMMENT '队列名称' AFTER `priority`, ADD COLUMN `dispatch_status` varchar(32) NOT NULL DEFAULT 'idle' COMMENT '调度状态' AFTER `queue_name`, ADD COLUMN `dispatched_at` datetime DEFAULT NULL COMMENT '调度时间' AFTER `dispatch_status`, ADD COLUMN `dispatch_count` int(11) NOT NULL DEFAULT '0' COMMENT '调度次数' AFTER `dispatched_at`, ADD COLUMN `last_dispatch_error` varchar(512) NOT NULL DEFAULT '' COMMENT '最后调度错误' AFTER `dispatch_count`;
+ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN IF NOT EXISTS `cycle_failure_count` int(11) NOT NULL DEFAULT '0' COMMENT '循环连续失败次数';
 UPDATE `hg_youban_publish_tg_job` SET `tenant_id` = `merchant_id` WHERE `tenant_id` = 0 AND `merchant_id` > 0;
 ALTER TABLE `hg_youban_publish_tg_job` DROP INDEX `uk_ybp_tg_job_task_channel`;
 ALTER TABLE `hg_youban_publish_tg_job` ADD KEY `idx_ybp_tg_job_task_channel` (`task_id`,`channel_id`,`id`);
