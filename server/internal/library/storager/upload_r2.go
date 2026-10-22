@@ -21,11 +21,11 @@ type R2Drive struct{}
 
 // NewR2Client creates a client from the current upload configuration.
 func NewR2Client() (*minio.Client, error) {
-	opts, err := r2Options()
+	endpoint, opts, err := r2ClientConfig()
 	if err != nil {
 		return nil, err
 	}
-	return minio.New(config.R2Endpoint, opts)
+	return minio.New(endpoint, opts)
 }
 
 // R2PresignedPutObject returns a short-lived upload URL.
@@ -70,15 +70,40 @@ func R2DeleteObject(ctx context.Context, key string) error {
 	return client.RemoveObject(ctx, config.R2Bucket, key, minio.RemoveObjectOptions{})
 }
 
-func r2Options() (*minio.Options, error) {
-	if config == nil || strings.TrimSpace(config.R2Endpoint) == "" || config.R2Bucket == "" {
-		return nil, gerror.New("R2存储驱动缺少Endpoint或Bucket配置")
+func r2ClientConfig() (string, *minio.Options, error) {
+	if config == nil {
+		return "", nil, gerror.New("R2存储配置不存在")
 	}
-	region := config.R2Region
+	endpoint, secure, err := normalizeR2Endpoint(config.R2Endpoint)
+	if err != nil {
+		return "", nil, err
+	}
+	if strings.TrimSpace(config.R2Bucket) == "" {
+		return "", nil, gerror.New("R2存储驱动缺少Bucket配置")
+	}
+	if strings.TrimSpace(config.R2AccessKey) == "" || strings.TrimSpace(config.R2SecretKey) == "" {
+		return "", nil, gerror.New("R2存储驱动缺少Access Key或Secret Key配置")
+	}
+	region := strings.TrimSpace(config.R2Region)
 	if region == "" {
 		region = "auto"
 	}
-	return &minio.Options{Creds: credentials.NewStaticV4(config.R2AccessKey, config.R2SecretKey, ""), Secure: true, Region: region}, nil
+	return endpoint, &minio.Options{Creds: credentials.NewStaticV4(strings.TrimSpace(config.R2AccessKey), strings.TrimSpace(config.R2SecretKey), ""), Secure: secure, Region: region}, nil
+}
+
+func normalizeR2Endpoint(raw string) (string, bool, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", false, gerror.New("R2存储驱动缺少Endpoint配置")
+	}
+	if !strings.Contains(raw, "://") {
+		return strings.TrimSuffix(raw, "/"), true, nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
+		return "", false, gerror.New("R2 Endpoint格式不正确")
+	}
+	return u.Host, u.Scheme == "https", nil
 }
 
 func (d *R2Drive) objectPath(meta *FileMeta) (string, error) {
@@ -89,11 +114,11 @@ func (d *R2Drive) Upload(ctx context.Context, file *ghttp.UploadFile, meta *File
 	if strings.TrimSpace(config.CosPath) == "" {
 		return "", gerror.New("R2存储驱动必须配置存储路径")
 	}
-	opts, err := r2Options()
+	endpoint, opts, err := r2ClientConfig()
 	if err != nil {
 		return "", err
 	}
-	client, err := minio.New(config.R2Endpoint, opts)
+	client, err := minio.New(endpoint, opts)
 	if err != nil {
 		return "", gerror.Wrap(err, "初始化R2客户端失败")
 	}
@@ -115,11 +140,11 @@ func (d *R2Drive) Upload(ctx context.Context, file *ghttp.UploadFile, meta *File
 }
 
 func (d *R2Drive) CreateMultipart(ctx context.Context, in *CheckMultipartParams) (*MultipartProgress, error) {
-	opts, err := r2Options()
+	endpoint, opts, err := r2ClientConfig()
 	if err != nil {
 		return nil, err
 	}
-	core, err := minio.NewCore(config.R2Endpoint, opts)
+	core, err := minio.NewCore(endpoint, opts)
 	if err != nil {
 		return nil, gerror.Wrap(err, "初始化R2分片客户端失败")
 	}
@@ -140,11 +165,11 @@ func (d *R2Drive) CreateMultipart(ctx context.Context, in *CheckMultipartParams)
 }
 
 func (d *R2Drive) UploadPart(ctx context.Context, in *UploadPartParams) (*UploadPartModel, error) {
-	opts, err := r2Options()
+	endpoint, opts, err := r2ClientConfig()
 	if err != nil {
 		return nil, err
 	}
-	core, err := minio.NewCore(config.R2Endpoint, opts)
+	core, err := minio.NewCore(endpoint, opts)
 	if err != nil {
 		return nil, gerror.Wrap(err, "初始化R2分片客户端失败")
 	}
