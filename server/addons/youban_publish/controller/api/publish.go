@@ -1462,3 +1462,11 @@ func (c *cPublish) TelegramLoginPassword(ctx context.Context, req *publish.Teleg
 	res = &publish.TelegramLoginPasswordRes{TelegramLoginModel: data}
 	return
 }
+
+func (c *cPublishAdmin) AccountLoginLink(ctx context.Context, req *publish.AccountLoginLinkReq) (*publish.AccountLoginLinkRes, error) {
+	res, err := service.SysPublish().ServerAccountLoginLink(ctx, &req.AccountLoginLinkInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.AccountLoginLinkRes{AccountLoginModel: res}, nil
+}

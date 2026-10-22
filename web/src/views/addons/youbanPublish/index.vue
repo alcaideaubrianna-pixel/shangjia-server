@@ -116,7 +116,10 @@
         </n-tab-pane>
 
         <n-tab-pane name="relay" tab="中转频道">
-          <RelayChannelPanel :tenant-id="Number(channelQuery.tenantId || 0)" :tenant-options="tenantOptionsWithAll.filter((item) => item.value)" />
+          <RelayChannelPanel
+            :tenant-id="Number(channelQuery.tenantId || 0)"
+            :tenant-options="tenantOptionsWithAll.filter((item) => item.value)"
+          />
         </n-tab-pane>
 
         <n-tab-pane name="profiles" tab="笔记资料">
@@ -933,8 +936,11 @@
               actionButton('编辑', () => openAccountModal(row)),
               actionButton('会员记录', () => openAccountVipRecords(row)),
               actionButton('重置密码', () => openAccountResetPassword(row)),
-              row.canGenerateLoginLink
-                ? h(AccountLoginLink, { accountId: row.id, disabled: row.status !== 1 })
+              row.canGenerateLoginLink !== false
+                ? h(AccountLoginLink, {
+                    accountId: row.id,
+                    disabled: row.status !== 1,
+                  })
                 : null,
               dangerButton('删除', () => deleteAccount(row.id)),
             ],
