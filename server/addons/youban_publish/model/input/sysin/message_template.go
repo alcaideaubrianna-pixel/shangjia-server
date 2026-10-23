@@ -215,7 +215,6 @@ func (in *MessageTemplateSaveInp) NormalizeButtonConfig() error {
 	if config.Mode != "inline" {
 		return gerror.New("当前仅支持消息按钮")
 	}
-	count := 0
 	for _, row := range config.Rows {
 		for _, button := range row {
 			if strings.TrimSpace(button.Text) == "" {
@@ -224,11 +223,7 @@ func (in *MessageTemplateSaveInp) NormalizeButtonConfig() error {
 			if strings.TrimSpace(button.URL) == "" {
 				return gerror.New("消息按钮链接不能为空")
 			}
-			count++
 		}
-	}
-	if count > 8 {
-		return gerror.New("按钮最多配置8个")
 	}
 	data, _ := json.Marshal(config)
 	in.ButtonConfig = string(data)

@@ -2,6 +2,8 @@ package sysin
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"testing"
 )
 
@@ -24,6 +26,38 @@ func TestMessageTemplateSaveFilterDefaultsOriginalMedia(t *testing.T) {
 	}
 	if media.EditStatus != "raw" {
 		t.Fatalf("EditStatus = %q, want raw", media.EditStatus)
+	}
+}
+
+func TestMessageTemplateButtonConfigAllowsMoreThanEightButtons(t *testing.T) {
+	rows := make([][]MessageTemplateButton, 3)
+	for rowIndex := range rows {
+		for buttonIndex := 0; buttonIndex < 4; buttonIndex++ {
+			index := rowIndex*4 + buttonIndex + 1
+			rows[rowIndex] = append(rows[rowIndex], MessageTemplateButton{
+				Text: fmt.Sprintf("button-%d", index),
+				URL:  fmt.Sprintf("https://example.com/%d", index),
+			})
+		}
+	}
+	encoded, err := json.Marshal(MessageTemplateButtonConfig{Mode: "inline", Rows: rows})
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := &MessageTemplateSaveInp{ButtonConfig: string(encoded)}
+	if err = in.NormalizeButtonConfig(); err != nil {
+		t.Fatalf("NormalizeButtonConfig() rejected 12 buttons: %v", err)
+	}
+	var normalized MessageTemplateButtonConfig
+	if err = json.Unmarshal([]byte(in.ButtonConfig), &normalized); err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, row := range normalized.Rows {
+		count += len(row)
+	}
+	if count != 12 {
+		t.Fatalf("normalized button count = %d, want 12", count)
 	}
 }
 
