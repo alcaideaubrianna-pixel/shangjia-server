@@ -630,8 +630,7 @@ func (s *sSysPublish) sendMessageTemplateWithGotd(ctx context.Context, builder *
 		}
 		return messages, nil
 	}
-	album := make([]gotdmessage.MultiMediaOption, 0, len(media))
-	for index, item := range media {
+	album, err := parallelOrderedMap(ctx, media, gotdAlbumUploadConcurrency, func(uploadCtx context.Context, index int, item *telegramMediaItem) (gotdmessage.MultiMediaOption, error) {
 		itemCaption := ""
 		if index == 0 {
 			itemCaption = caption
@@ -641,7 +640,7 @@ func (s *sSysPublish) sendMessageTemplateWithGotd(ctx context.Context, builder *
 			"mediaIndex": index + 1, "mediaCount": len(media), "mediaId": item.Id,
 			"mediaType": item.MediaType, "sourceSizeBytes": item.Size,
 		})
-		option, err := s.gotdMessageMediaAlbumOption(ctx, builder, itemCaption, item)
+		option, err := s.gotdMessageMediaAlbumOption(uploadCtx, builder, itemCaption, item)
 		if err != nil {
 			return nil, err
 		}
@@ -649,7 +648,10 @@ func (s *sSysPublish) sendMessageTemplateWithGotd(ctx context.Context, builder *
 			"mediaIndex": index + 1, "mediaCount": len(media), "mediaId": item.Id,
 			"durationMs": time.Since(uploadStartedAt).Milliseconds(),
 		})
-		album = append(album, option)
+		return option, nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	albumStartedAt := time.Now()
 	g.Log().Info(ctx, "协议号相册提交开始", g.Map{"mediaCount": len(album)})

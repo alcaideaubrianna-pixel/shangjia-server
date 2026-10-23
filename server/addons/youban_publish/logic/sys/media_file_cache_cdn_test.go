@@ -52,6 +52,27 @@ func TestMediaFileCacheRemoteSourcesRecoverObjectPathFromLegacyURL(t *testing.T)
 	}
 }
 
+func TestMediaFileCacheRemoteSourcesPreferKnownFallbackURL(t *testing.T) {
+	ctx := context.Background()
+	path := "hotgo/file/2026-09-14/example.jpg"
+	publicURL := mediaFileCacheFallbackURL(ctx, path)
+	sources, err := mediaFileCacheRemoteSources(ctx, &telegramMediaItem{
+		MediaType: "image", FileUrl: publicURL, StoragePath: path,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sources) != 2 {
+		t.Fatalf("source count=%d, want original and worker", len(sources))
+	}
+	if sources[0].URL != publicURL || sources[0].Role != "original" {
+		t.Fatalf("known fallback URL was not preferred: %+v", sources[0])
+	}
+	if sources[1].Role != "worker" {
+		t.Fatalf("worker must remain as fallback: %+v", sources[1])
+	}
+}
+
 func TestManagedMediaObjectPathRejectsUnmanagedPath(t *testing.T) {
 	if got := managedMediaObjectPath("https://example.com/private/file.jpg"); got != "" {
 		t.Fatalf("managedMediaObjectPath()=%q, want empty", got)

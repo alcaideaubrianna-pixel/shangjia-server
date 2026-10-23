@@ -180,8 +180,12 @@ func mediaFileCacheRemoteSources(ctx context.Context, media *telegramMediaItem) 
 			objectPath = managedMediaObjectPath(telegramSource)
 		}
 		if objectPath != "" && !isAbsoluteMediaURL(objectPath) {
+			fallbackURL := mediaFileCacheFallbackURL(ctx, objectPath)
+			if sameMediaFileCacheSource(telegramSource, fallbackURL) {
+				add(telegramSource, objectPath, "cos", objectPath, "original")
+			}
 			add(mediaFileCacheWorkerURL(ctx, objectPath), objectPath, "cos", objectPath, "worker")
-			add(mediaFileCacheFallbackURL(ctx, objectPath), objectPath, "cos", objectPath, "fallback")
+			add(fallbackURL, objectPath, "cos", objectPath, "fallback")
 		}
 		add(telegramSource, "", "", "", "original")
 		return sources, nil
@@ -195,15 +199,24 @@ func mediaFileCacheRemoteSources(ctx context.Context, media *telegramMediaItem) 
 		objectPath := firstNonEmpty(row["path"].String(), row["file_url"].String())
 		publicURL := storager.LastUrl(ctx, firstNonEmpty(row["file_url"].String(), row["path"].String()), drive)
 		if strings.EqualFold(drive, "cos") {
+			fallbackURL := mediaFileCacheFallbackURL(ctx, objectPath)
+			if sameMediaFileCacheSource(publicURL, fallbackURL) {
+				add(publicURL, fmt.Sprintf("attachment:%d", media.AttachmentId), drive, objectPath, "attachment")
+			}
 			add(mediaFileCacheWorkerURL(ctx, objectPath), fmt.Sprintf("attachment:%d", media.AttachmentId), drive, objectPath, "worker")
-		}
-		add(publicURL, fmt.Sprintf("attachment:%d", media.AttachmentId), drive, objectPath, "attachment")
-		if strings.EqualFold(drive, "cos") {
-			add(mediaFileCacheFallbackURL(ctx, objectPath), fmt.Sprintf("attachment:%d", media.AttachmentId), drive, objectPath, "fallback")
+			add(fallbackURL, fmt.Sprintf("attachment:%d", media.AttachmentId), drive, objectPath, "fallback")
+		} else {
+			add(publicURL, fmt.Sprintf("attachment:%d", media.AttachmentId), drive, objectPath, "attachment")
 		}
 	}
 	add(telegramSource, "", "", "", "original")
 	return sources, nil
+}
+
+func sameMediaFileCacheSource(left, right string) bool {
+	left = normalizedMediaCacheSource(left)
+	right = normalizedMediaCacheSource(right)
+	return left != "" && right != "" && strings.EqualFold(left, right)
 }
 
 func mediaFileCacheSourceHost(raw string) string {
