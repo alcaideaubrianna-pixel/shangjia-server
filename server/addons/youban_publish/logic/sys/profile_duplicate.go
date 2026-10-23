@@ -29,7 +29,7 @@ const (
 	duplicateScanBatchSize        = 500
 	duplicateScanSessionTTL       = 24 * time.Hour
 	duplicateScanResultTTL        = 15 * time.Minute
-	duplicateScanAlgorithmVersion = 7
+	duplicateScanAlgorithmVersion = 8
 	duplicateScanPagesPerTask     = 20
 	duplicateScanStartLockTTL     = 10 * time.Second
 )
@@ -79,10 +79,11 @@ type duplicateScanSession struct {
 }
 
 type duplicateScanWorkGroup struct {
-	KeepProfileId int64              `json:"keepProfileId"`
-	KeepCreatedAt int64              `json:"keepCreatedAt"`
-	MemberIds     []int64            `json:"memberIds"`
-	PHashSets     map[int64][]string `json:"pHashSets,omitempty"`
+	KeepProfileId int64               `json:"keepProfileId"`
+	KeepCreatedAt int64               `json:"keepCreatedAt"`
+	MemberIds     []int64             `json:"memberIds"`
+	PHashSets     map[int64][]string  `json:"pHashSets,omitempty"`
+	ImageRows     []duplicateImageRow `json:"imageRows,omitempty"`
 }
 
 type duplicateScanQueuePayload struct {
@@ -398,15 +399,6 @@ func (s *sSysPublish) appendDuplicateScanSignatures(ctx context.Context, token s
 	if err := work.preloadProcessed(ids); err != nil {
 		return err
 	}
-	groupSignatures := make([]string, 0, len(ids))
-	for _, profileId := range ids {
-		if signature, complete := duplicateProfileSignature("", mediaByProfile[profileId]); complete {
-			groupSignatures = append(groupSignatures, signature)
-		}
-	}
-	if err := work.preloadGroups(uniqueStrings(groupSignatures)); err != nil {
-		return err
-	}
 	for _, profileId := range ids {
 		processed, err := work.profileProcessed(profileId)
 		if err != nil {
@@ -415,22 +407,11 @@ func (s *sSysPublish) appendDuplicateScanSignatures(ctx context.Context, token s
 		if processed {
 			continue
 		}
-		signature, complete := duplicateProfileSignature("", mediaByProfile[profileId])
-		if !complete {
+		images := mediaByProfile[profileId]
+		if len(duplicateScanImageKeys(images, false)) == 0 {
 			session.IncompleteTotal++
-			work.markProfileProcessed(profileId)
-			continue
-		}
-		group, err := work.group(signature)
-		if err != nil {
+		} else if err := work.appendSimilarImages(profileId, createdByProfile[profileId], images); err != nil {
 			return err
-		}
-		if group == nil {
-			group = &duplicateScanWorkGroup{KeepProfileId: profileId, KeepCreatedAt: createdByProfile[profileId], MemberIds: []int64{profileId}}
-			work.setGroup(signature, group)
-		} else {
-			group.addMember(profileId, createdByProfile[profileId])
-			work.setGroup(signature, group)
 		}
 		work.markProfileProcessed(profileId)
 	}
@@ -466,7 +447,7 @@ func (s *sSysPublish) finishDuplicateScan(ctx context.Context, token string, ses
 		if group == nil || len(group.MemberIds) < 2 {
 			return nil
 		}
-		session.GroupTotal++
+		before := writer.total
 		members := group.MemberIds[1:]
 		for start := 0; start < len(members); start += duplicateScanBatchSize {
 			end := start + duplicateScanBatchSize
@@ -499,6 +480,9 @@ func (s *sSysPublish) finishDuplicateScan(ctx context.Context, token string, ses
 			if err = cache.HashSetMany(ctx, emittedKey, newlyEmitted, duplicateScanSessionTTL); err != nil {
 				return gerror.Wrap(err, "保存重复资料候选标记失败")
 			}
+		}
+		if writer.total > before {
+			session.GroupTotal++
 		}
 		return nil
 	}); err != nil {
@@ -654,6 +638,9 @@ func validateDuplicateCleanupState(ids []int64, candidates map[int64]duplicateSc
 		candidate, ok := candidates[id]
 		if !ok {
 			return gerror.New("待删除资料不属于当前扫描批次，请重新扫描")
+		}
+		if strings.HasPrefix(candidate.Signature, "phash:") {
+			return gerror.New("相似图片结果仅供查重，请确认后通过资料删除接口操作")
 		}
 		target, keep := profiles[id], profiles[candidate.KeepProfileId]
 		signatureValid := signatures[id] == candidate.Signature && signatures[candidate.KeepProfileId] == candidate.Signature
@@ -1032,19 +1019,33 @@ func newDuplicateScanWorkCache(ctx context.Context, token string) *duplicateScan
 }
 
 func (w *duplicateScanWorkCache) preloadBuckets(fields []string) error {
-	values, err := cache.HashGetMany(w.ctx, duplicateScanWorkHashKey(w.token, "buckets"), fields)
-	if err != nil {
-		return gerror.Wrap(err, "读取重复资料扫描图片索引失败")
+	missing := make([]string, 0, len(fields))
+	for _, field := range fields {
+		if _, loaded := w.buckets[field]; !loaded {
+			missing = append(missing, field)
+		}
 	}
-	for index, field := range fields {
-		if index >= len(values) || !duplicateScanWorkValuePresent(values[index]) {
-			continue
+	for start := 0; start < len(missing); start += duplicateScanBatchSize {
+		end := start + duplicateScanBatchSize
+		if end > len(missing) {
+			end = len(missing)
 		}
-		var signatures []string
-		if _, err = decodeDuplicateScanWorkValue(values[index].Bytes(), &signatures); err != nil {
-			return gerror.Wrap(err, "解析重复资料扫描图片索引失败")
+		batch := missing[start:end]
+		values, err := cache.HashGetMany(w.ctx, duplicateScanWorkHashKey(w.token, "buckets"), batch)
+		if err != nil {
+			return gerror.Wrap(err, "读取重复资料扫描图片索引失败")
 		}
-		w.buckets[field] = signatures
+		for index, field := range batch {
+			w.buckets[field] = nil
+			if index >= len(values) || !duplicateScanWorkValuePresent(values[index]) {
+				continue
+			}
+			var signatures []string
+			if _, err = decodeDuplicateScanWorkValue(values[index].Bytes(), &signatures); err != nil {
+				return gerror.Wrap(err, "解析重复资料扫描图片索引失败")
+			}
+			w.buckets[field] = signatures
+		}
 	}
 	return nil
 }
@@ -1166,6 +1167,108 @@ func (w *duplicateScanWorkCache) profileProcessed(profileId int64) (bool, error)
 func (w *duplicateScanWorkCache) markProfileProcessed(profileId int64) {
 	w.processed[profileId] = true
 	w.dirtyProcessed[fmt.Sprint(profileId)] = 1
+}
+
+// Each result group is a star: every candidate directly matches its keeper.
+// Index individual profiles as well, so A~B and B~C are both discoverable
+// without incorrectly claiming A~C. Results are suggestions, never mutations.
+func (w *duplicateScanWorkCache) appendSimilarImages(profileId, createdAt int64, rows []duplicateImageRow) error {
+	queryKeys := duplicateScanImageKeys(rows, true)
+	if err := w.preloadBuckets(queryKeys); err != nil {
+		return err
+	}
+	candidates := make(map[string]struct{})
+	for _, key := range queryKeys {
+		for _, signature := range w.buckets[key] {
+			candidates[signature] = struct{}{}
+		}
+	}
+	ordered := make([]string, 0, len(candidates))
+	for signature := range candidates {
+		ordered = append(ordered, signature)
+	}
+	sort.Strings(ordered)
+	missingGroups := make([]string, 0, len(ordered))
+	for _, signature := range ordered {
+		if !w.groupLoaded[signature] {
+			missingGroups = append(missingGroups, signature)
+		}
+	}
+	for start := 0; start < len(missingGroups); start += duplicateScanBatchSize {
+		end := start + duplicateScanBatchSize
+		if end > len(missingGroups) {
+			end = len(missingGroups)
+		}
+		if err := w.preloadGroups(missingGroups[start:end]); err != nil {
+			return err
+		}
+	}
+	for _, signature := range ordered {
+		other, err := w.group(signature)
+		if err != nil {
+			return err
+		}
+		if other == nil || other.KeepProfileId == profileId || !duplicateScanImagesMatch(rows, other.ImageRows) {
+			continue
+		}
+		keepID, keepTime, duplicateID := other.KeepProfileId, other.KeepCreatedAt, profileId
+		if createdAt > keepTime || (createdAt == keepTime && profileId > keepID) {
+			keepID, keepTime, duplicateID = profileId, createdAt, other.KeepProfileId
+		}
+		key := fmt.Sprintf("phash:%d", keepID)
+		group, err := w.group(key)
+		if err != nil {
+			return err
+		}
+		if group == nil {
+			group = &duplicateScanWorkGroup{KeepProfileId: keepID, KeepCreatedAt: keepTime, MemberIds: []int64{keepID}}
+		}
+		if !containsInt64(group.MemberIds, duplicateID) {
+			group.MemberIds = append(group.MemberIds, duplicateID)
+		}
+		w.setGroup(key, group)
+	}
+	reference := fmt.Sprintf("reference:%d", profileId)
+	w.setGroup(reference, &duplicateScanWorkGroup{KeepProfileId: profileId, KeepCreatedAt: createdAt, MemberIds: []int64{profileId}, ImageRows: rows})
+	storeKeys := duplicateScanImageKeys(rows, false)
+	// Query neighborhoods contain all exact storage keys; preserve entries loaded
+	// from prior pages as well as entries appended in this page.
+	for _, key := range storeKeys {
+		if !containsString(w.buckets[key], reference) {
+			w.buckets[key] = append(w.buckets[key], reference)
+		}
+		w.dirtyBuckets[key] = w.buckets[key]
+	}
+	return nil
+}
+
+func duplicateScanImageKeys(rows []duplicateImageRow, neighborhood bool) []string {
+	keys := make([]string, 0)
+	for _, row := range rows {
+		if md5 := strings.ToLower(strings.TrimSpace(row.Md5)); md5 != "" {
+			keys = append(keys, "md5:"+md5)
+		}
+		if hash := strings.ToLower(strings.TrimSpace(row.PerceptualHash)); hash != "" {
+			if _, valid := parseUploadPHash(hash); valid {
+				keys = append(keys, duplicatePHashBucketKeys([]string{hash}, neighborhood)...)
+			}
+		}
+	}
+	return uniqueStrings(keys)
+}
+
+func duplicateScanImagesMatch(left, right []duplicateImageRow) bool {
+	for _, a := range left {
+		for _, b := range right {
+			if md5 := strings.TrimSpace(a.Md5); md5 != "" && strings.EqualFold(md5, strings.TrimSpace(b.Md5)) {
+				return true
+			}
+			if duplicateScanPHashSetsMatch([]string{a.PerceptualHash}, []string{b.PerceptualHash}, collectProfilePHashCandidateThreshold) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (w *duplicateScanWorkCache) appendPHash(profileId, createdAt int64, rows []duplicateImageRow) error {

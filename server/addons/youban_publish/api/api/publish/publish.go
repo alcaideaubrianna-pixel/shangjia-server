@@ -799,7 +799,7 @@ type AdminNoteBatchIdsRes struct {
 }
 
 type AdminNoteDuplicateScanReq struct {
-	g.Meta `path:"/publish/admin/note/duplicate/scan" method:"get" tags:"上架插件管理端" summary:"查找图片完全重复的资料"`
+	g.Meta `path:"/publish/admin/note/duplicate/scan" method:"get" tags:"上架插件管理端" summary:"查找任意展示图片相似的资料"`
 	sysin.AdminNoteDuplicateScanInp
 }
 

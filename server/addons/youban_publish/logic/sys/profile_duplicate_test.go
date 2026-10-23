@@ -281,11 +281,11 @@ func TestDuplicateScanTaskHasBoundedRuntime(t *testing.T) {
 
 func TestDuplicatePHashScanBucketsBoundLookupCost(t *testing.T) {
 	keys := duplicatePHashBucketKeys([]string{"d87a07c29151f7c5"}, true)
-	if len(keys) != 8*37 {
+	if len(keys) != 1+8*37 {
 		t.Fatalf("unexpected scan LSH probe count: %d", len(keys))
 	}
 	exact := duplicatePHashBucketKeys([]string{"d87a07c29151f7c5"}, false)
-	if len(exact) != 8 {
+	if len(exact) != 1+8 {
 		t.Fatalf("unexpected exact scan bucket count: %d", len(exact))
 	}
 }

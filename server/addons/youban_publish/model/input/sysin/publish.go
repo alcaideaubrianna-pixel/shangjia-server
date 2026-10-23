@@ -899,9 +899,9 @@ type AdminNoteDuplicateItemModel struct {
 }
 
 type AdminNoteDuplicateGroupModel struct {
-	Signature  string                         `json:"signature" dc:"图片集合签名"`
-	Keep       *AdminNoteDuplicateItemModel   `json:"keep" dc:"保留的最新资料"`
-	Duplicates []*AdminNoteDuplicateItemModel `json:"duplicates" dc:"待删除资料"`
+	Signature  string                         `json:"signature" dc:"查重分组标识"`
+	Keep       *AdminNoteDuplicateItemModel   `json:"keep" dc:"用于对比的最新资料，是否保留由用户决定"`
+	Duplicates []*AdminNoteDuplicateItemModel `json:"duplicates" dc:"任意展示图片相似的资料，仅供用户判断"`
 }
 
 type AdminNoteDuplicateScanModel struct {

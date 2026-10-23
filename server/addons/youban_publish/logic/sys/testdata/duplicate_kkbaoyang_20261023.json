@@ -1,0 +1,17 @@
+[
+  {"url":"https://t.me/KKbaoyang01/557940","profileId":410504,"evidence":"production display image fingerprints","images":[
+    {"md5":"232467e9c743d1600ed3243d79a5ea7b","perceptualHash":"c2d2bf2523cb2ab2"},
+    {"md5":"23ab0965ee22c67a390e1bfb3438ed26","perceptualHash":"83fcc689337a8d8c"},
+    {"md5":"c9e3bde9d9f6b209f145b5bf14ac3368","perceptualHash":"8bb25c07306f765c"},
+    {"md5":"d735f83442c048d39035961f20f9e820","perceptualHash":"b7c7d8403e374383"},
+    {"md5":"c0e7e64bc22d53fc03621d18f175be3a","perceptualHash":"fbc648784ea974c1"}]},
+  {"url":"https://t.me/KKbaoyang01/552975","profileId":670334,"evidence":"production display image fingerprints","images":[
+    {"md5":"232467e9c743d1600ed3243d79a5ea7b","perceptualHash":"c2d2bf2523cb2ab2"}]},
+  {"url":"https://t.me/KKbaoyang01/3130","profileId":0,"evidence":"public embed JPEGs, goimagehash.PerceptionHash; no matching published-message record found","images":[
+    {"perceptualHash":"c2debf0521cb6aa2"},
+    {"perceptualHash":"d1ce4a704ead66e1"},
+    {"perceptualHash":"ee49f5cc8a06dc91"},
+    {"perceptualHash":"b9c30e2ad523c67c"},
+    {"perceptualHash":"e9d772358c334a68"},
+    {"perceptualHash":"b3cf59403c374363"}]}
+]
