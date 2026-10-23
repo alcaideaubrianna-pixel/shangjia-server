@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -69,9 +70,13 @@ type testFinalizingAccountTasks struct {
 type testTimeoutAccountTasks struct {
 	collectorservice.IAccountTasks
 	failed chan *sysin.AccountTaskFailure
+	block  <-chan struct{}
 }
 
 func (s *testTimeoutAccountTasks) Fail(_ context.Context, in *sysin.AccountTaskFailure) error {
+	if s.block != nil {
+		<-s.block
+	}
 	s.failed <- in
 	return nil
 }
@@ -209,5 +214,67 @@ func TestMediaFallbackWatchdogPersistsFailureAndResetsSession(t *testing.T) {
 	case <-reset:
 	case <-time.After(time.Second):
 		t.Fatal("watchdog did not reset the stuck account session")
+	}
+}
+
+func TestMediaFallbackWatchdogResetsSessionBeforeBlockedFailureWrite(t *testing.T) {
+	blocked := make(chan struct{})
+	tasks := &testTimeoutAccountTasks{
+		failed: make(chan *sysin.AccountTaskFailure, 1),
+		block:  blocked,
+	}
+	collectorservice.RegisterAccountTasks(tasks)
+	defer collectorservice.RegisterAccountTasks(nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	reset := make(chan struct{}, 1)
+	stop := watchAccountTaskTimeout(ctx,
+		&sysin.AccountTask{ID: 92, AccountID: 67, TaskType: sysin.AccountTaskTypeMessageMediaFallback},
+		&sysin.AccountLease{AccountID: 67, InstanceID: "test", Epoch: 3},
+		func() { reset <- struct{}{} },
+	)
+	defer stop()
+
+	select {
+	case <-reset:
+	case <-time.After(time.Second):
+		t.Fatal("blocked failure write prevented the stuck account session reset")
+	}
+	close(blocked)
+	select {
+	case <-tasks.failed:
+	case <-time.After(time.Second):
+		t.Fatal("watchdog did not persist failure after the blocked write resumed")
+	}
+}
+
+func TestMediaFallbackWatchdogPersistsParentCancellation(t *testing.T) {
+	tasks := &testTimeoutAccountTasks{failed: make(chan *sysin.AccountTaskFailure, 1)}
+	collectorservice.RegisterAccountTasks(tasks)
+	defer collectorservice.RegisterAccountTasks(nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	reset := make(chan struct{}, 1)
+	stop := watchAccountTaskTimeout(ctx,
+		&sysin.AccountTask{ID: 93, AccountID: 67, TaskType: sysin.AccountTaskTypeMessageMediaFallback},
+		&sysin.AccountLease{AccountID: 67, InstanceID: "test", Epoch: 3},
+		func() { reset <- struct{}{} },
+	)
+	cancel()
+	defer stop()
+
+	select {
+	case <-reset:
+	case <-time.After(time.Second):
+		t.Fatal("parent cancellation did not reset the stuck account session")
+	}
+	select {
+	case failure := <-tasks.failed:
+		if failure.Cause == nil || !strings.Contains(failure.Cause.Error(), context.Canceled.Error()) {
+			t.Fatalf("unexpected cancellation failure: %+v", failure)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("parent cancellation did not persist task failure")
 	}
 }

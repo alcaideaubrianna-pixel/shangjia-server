@@ -215,6 +215,23 @@ func accountTaskTerminal(status string) bool {
 	}
 }
 
+func accountTaskClaimLeaseTTL(taskType string, fallback time.Duration) time.Duration {
+	const grace = 30 * time.Second
+	bounded := fallback
+	switch taskType {
+	case sysin.AccountTaskTypeMessagePushInline, sysin.AccountTaskTypeMessageReconcile:
+		bounded = 2*time.Minute + grace
+	case sysin.AccountTaskTypeMessageMediaFallback:
+		bounded = 5*time.Minute + grace
+	case sysin.AccountTaskTypeMessageDeleteFallback:
+		bounded = 30*time.Second + grace
+	}
+	if fallback > 0 && fallback < bounded {
+		return fallback
+	}
+	return bounded
+}
+
 func (s *sAccountTasks) Claim(ctx context.Context, lease *sysin.AccountLease, limit int, ttl time.Duration) ([]*sysin.AccountTask, error) {
 	if lease == nil || lease.AccountID <= 0 || lease.Epoch <= 0 || strings.TrimSpace(lease.InstanceID) == "" {
 		return nil, gerror.New("Telegram账号任务领取租约无效")
@@ -232,7 +249,7 @@ func (s *sAccountTasks) Claim(ctx context.Context, lease *sysin.AccountLease, li
 	now := gtime.Now()
 	var candidates []*entity.TgCollectorAccountTask
 	err := dao.TgCollectorAccountTask.Ctx(ctx).
-		Fields(columns.Id).
+		Fields(columns.Id, columns.TaskType).
 		Where(columns.AccountId, lease.AccountID).
 		WhereIn(columns.Status, []string{sysin.AccountTaskStatusPending, sysin.AccountTaskStatusFailedRetry}).
 		Where("("+columns.NextRunAt+" IS NULL OR "+columns.NextRunAt+"<=?)", now).
@@ -250,13 +267,17 @@ func (s *sAccountTasks) Claim(ctx context.Context, lease *sysin.AccountLease, li
 		if candidate == nil || candidate.Id <= 0 {
 			continue
 		}
+		claimTTL := ttl
+		if bounded := accountTaskClaimLeaseTTL(candidate.TaskType, ttl); bounded > 0 {
+			claimTTL = bounded
+		}
 		result, updateErr := dao.TgCollectorAccountTask.Ctx(ctx).
 			WherePri(candidate.Id).
 			WhereIn(columns.Status, []string{sysin.AccountTaskStatusPending, sysin.AccountTaskStatusFailedRetry}).
 			Where("("+columns.LeaseUntil+" IS NULL OR "+columns.LeaseUntil+"<?)", now).
 			Data(g.Map{
 				columns.Status: sysin.AccountTaskStatusProcessing, columns.LeaseOwner: lease.InstanceID,
-				columns.LeaseEpoch: lease.Epoch, columns.LeaseUntil: now.Add(ttl),
+				columns.LeaseEpoch: lease.Epoch, columns.LeaseUntil: now.Add(claimTTL),
 				columns.AttemptCount: gdb.Raw(columns.AttemptCount + "+1"), columns.UpdatedAt: now,
 			}).Update()
 		if updateErr != nil {

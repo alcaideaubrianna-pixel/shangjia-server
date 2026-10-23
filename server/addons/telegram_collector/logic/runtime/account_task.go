@@ -172,31 +172,34 @@ func processAccountTask(ctx context.Context, client *telegram.Client, lease *sys
 
 func watchAccountTaskTimeout(ctx context.Context, task *sysin.AccountTask, lease *sysin.AccountLease, resetSession context.CancelFunc) func() {
 	stop := make(chan struct{})
+	var stopOnce sync.Once
 	if !accountTaskRequiresSessionResetOnTimeout(task) || resetSession == nil {
-		return func() { close(stop) }
+		return func() { stopOnce.Do(func() { close(stop) }) }
 	}
 	go func() {
 		select {
 		case <-stop:
 			return
 		case <-ctx.Done():
-			if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				return
-			}
+			// Reset first. A stuck protocol RPC can also delay the task-state
+			// write, and waiting for that write would leave the session wedged.
+			resetSession()
 			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 			defer cancel()
-			cause := gerror.Newf("Telegram账号任务超过%s，已重置协议号连接", accountTaskTimeout(task.TaskType))
+			cause := gerror.Newf("Telegram账号任务执行中断（%v），已重置协议号连接", ctx.Err())
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				cause = gerror.Newf("Telegram账号任务超过%s，已重置协议号连接", accountTaskTimeout(task.TaskType))
+			}
 			if err := collectorservice.AccountTasks().Fail(cleanupCtx, &sysin.AccountTaskFailure{
 				TaskID: task.ID, Lease: lease, Cause: cause, RetryDelay: retryDelay(cause),
 			}); err != nil {
-				g.Log().Warningf(cleanupCtx, "Telegram账号任务超时状态写回失败 taskId:%d type:%s tgAccountId:%d err:%+v", task.ID, task.TaskType, task.AccountID, err)
+				g.Log().Warningf(cleanupCtx, "Telegram账号任务中断状态写回失败 taskId:%d type:%s tgAccountId:%d cause:%v err:%+v", task.ID, task.TaskType, task.AccountID, ctx.Err(), err)
 			} else {
-				g.Log().Warningf(cleanupCtx, "Telegram账号任务调用未在期限内返回，已写回失败并重置连接 taskId:%d type:%s tgAccountId:%d timeout:%s", task.ID, task.TaskType, task.AccountID, accountTaskTimeout(task.TaskType))
+				g.Log().Warningf(cleanupCtx, "Telegram账号任务调用中断，已重置连接并写回失败 taskId:%d type:%s tgAccountId:%d timeout:%s cause:%v", task.ID, task.TaskType, task.AccountID, accountTaskTimeout(task.TaskType), ctx.Err())
 			}
-			resetSession()
 		}
 	}()
-	return func() { close(stop) }
+	return func() { stopOnce.Do(func() { close(stop) }) }
 }
 
 func accountTaskRequiresSessionResetOnTimeout(task *sysin.AccountTask) bool {

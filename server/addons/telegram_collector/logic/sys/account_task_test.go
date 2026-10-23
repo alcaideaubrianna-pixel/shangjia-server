@@ -35,6 +35,25 @@ func TestAccountTaskCompletedRevivalIsLimitedToIdempotentChecks(t *testing.T) {
 	}
 }
 
+func TestAccountTaskClaimLeaseTTLBoundsMessageTasks(t *testing.T) {
+	fallback := 30 * time.Minute
+	tests := map[string]time.Duration{
+		sysin.AccountTaskTypeMessagePushInline:         2*time.Minute + 30*time.Second,
+		sysin.AccountTaskTypeMessageReconcile:          2*time.Minute + 30*time.Second,
+		sysin.AccountTaskTypeMessageMediaFallback:      5*time.Minute + 30*time.Second,
+		sysin.AccountTaskTypeMessageDeleteFallback:     time.Minute,
+		sysin.AccountTaskTypeMaterialImportHistoryPage: fallback,
+	}
+	for taskType, want := range tests {
+		if got := accountTaskClaimLeaseTTL(taskType, fallback); got != want {
+			t.Fatalf("task %s lease TTL = %s, want %s", taskType, got, want)
+		}
+	}
+	if got := accountTaskClaimLeaseTTL(sysin.AccountTaskTypeMessageMediaFallback, time.Minute); got != time.Minute {
+		t.Fatalf("short caller lease TTL was extended to %s", got)
+	}
+}
+
 func TestAccountTaskPersistenceIntegration(t *testing.T) {
 	if os.Getenv("YOUBAN_TELEGRAM_COLLECTOR_INTEGRATION") != "1" {
 		t.Skip("set YOUBAN_TELEGRAM_COLLECTOR_INTEGRATION=1 to run database integration test")
