@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"fmt"
+	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
 	relayconsts "hotgo/addons/youban_publish/consts"
 	"sync"
 	"time"
@@ -16,10 +17,11 @@ import (
 )
 
 const (
-	telegramSendBudget                = 10 * time.Minute
+	telegramSendCommitGrace           = time.Minute
+	telegramSendBudget                = telegramBotMediaSendTimeout + telegramReconcileTakeoverWait + collectorin.AccountTaskMessageMediaFallbackTimeout + telegramSendCommitGrace
 	telegramSendMaxRetries            = 3
 	telegramSendPhaseTimeoutCancelled = "timeout_cancelled"
-	telegramSendTimeoutMessage        = "频道发送超过10分钟，旧任务已取消，整组资料移至队尾；迟到消息只删除不补发"
+	telegramSendTimeoutMessage        = "频道发送超过21分钟，旧任务已取消，整组资料移至队尾；迟到消息只删除不补发"
 )
 
 // telegramSendBudgetContext uses a durable deadline shared by every retry and

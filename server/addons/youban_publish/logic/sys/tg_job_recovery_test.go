@@ -10,7 +10,23 @@ import (
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
+	collectorservice "hotgo/addons/telegram_collector/service"
 )
+
+type mediaFallbackRecoveryAccountTasks struct {
+	collectorservice.IAccountTasks
+	task      *collectorin.AccountTask
+	tenantID  int64
+	taskKey   string
+	lookupErr error
+}
+
+func (f *mediaFallbackRecoveryAccountTasks) GetByKey(_ context.Context, tenantID int64, taskKey string) (*collectorin.AccountTask, error) {
+	f.tenantID = tenantID
+	f.taskKey = taskKey
+	return f.task, f.lookupErr
+}
 
 func TestTelegramPendingRecoverySelectsChannelHeadsBeforeLimit(t *testing.T) {
 	query := telegramPendingRecoveryChannelHeadSQL("j", "earlier")
@@ -237,8 +253,8 @@ func TestStaleSendingPermanentAttemptDoesNotEnterUnknown(t *testing.T) {
 }
 
 func TestTelegramMediaFallbackRecoveryIsPromptAndUnambiguous(t *testing.T) {
-	if telegramMediaFallbackRecoverAfter > 2*time.Minute {
-		t.Fatalf("fallback recovery is too slow: %s", telegramMediaFallbackRecoverAfter)
+	if telegramMediaFallbackRecoverAfter <= collectorin.AccountTaskMessageMediaFallbackTimeout {
+		t.Fatalf("fallback recovery %s must be later than account execution timeout %s", telegramMediaFallbackRecoverAfter, collectorin.AccountTaskMessageMediaFallbackTimeout)
 	}
 	for _, purpose := range []string{"display", "verify"} {
 		reason := telegramMediaFallbackReason(purpose)
@@ -254,15 +270,63 @@ func TestTelegramMediaFallbackRecoveryIsPromptAndUnambiguous(t *testing.T) {
 	}
 }
 
+func TestTelegramMediaFallbackRecoveryDoesNotResubmitActiveAccountTask(t *testing.T) {
+	for _, status := range []string{
+		collectorin.AccountTaskStatusPending,
+		collectorin.AccountTaskStatusProcessing,
+		collectorin.AccountTaskStatusFailedRetry,
+		collectorin.AccountTaskStatusFinalizing,
+	} {
+		if !telegramMediaFallbackTaskStatusActive(status) {
+			t.Fatalf("active account task status %q must prevent fallback resubmission", status)
+		}
+	}
+	for _, status := range []string{
+		collectorin.AccountTaskStatusCompleted,
+		collectorin.AccountTaskStatusDead,
+		collectorin.AccountTaskStatusCancelled,
+	} {
+		if telegramMediaFallbackTaskStatusActive(status) {
+			t.Fatalf("terminal account task status %q must allow fallback recovery", status)
+		}
+	}
+}
+
+func TestTelegramMediaFallbackRecoveryReadsDeterministicAccountTask(t *testing.T) {
+	fake := &mediaFallbackRecoveryAccountTasks{task: &collectorin.AccountTask{Status: collectorin.AccountTaskStatusProcessing}}
+	collectorservice.RegisterAccountTasks(fake)
+	t.Cleanup(func() { collectorservice.RegisterAccountTasks(nil) })
+
+	active, err := telegramMediaFallbackTaskActive(context.Background(), telegramJobRecord{Id: 2348982, TenantId: 8}, "display")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !active {
+		t.Fatal("processing account fallback must prevent scheduler resubmission")
+	}
+	if fake.tenantID != 8 || fake.taskKey != "message-media-fallback:2348982:display" {
+		t.Fatalf("unexpected account task lookup tenant=%d key=%q", fake.tenantID, fake.taskKey)
+	}
+
+	fake.task.Status = collectorin.AccountTaskStatusDead
+	active, err = telegramMediaFallbackTaskActive(context.Background(), telegramJobRecord{Id: 2348982, TenantId: 8}, "display")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active {
+		t.Fatal("dead account fallback must be eligible for scheduler recovery")
+	}
+}
+
 func TestTelegramMediaFallbackRecoveryBackoffIsBounded(t *testing.T) {
 	tests := []struct {
 		attempt int
 		want    time.Duration
 	}{
-		{attempt: 0, want: 2 * time.Minute},
-		{attempt: 1, want: 4 * time.Minute},
-		{attempt: 2, want: 8 * time.Minute},
-		{attempt: 3, want: 16 * time.Minute},
+		{attempt: 0, want: 5*time.Minute + 30*time.Second},
+		{attempt: 1, want: 11 * time.Minute},
+		{attempt: 2, want: 22 * time.Minute},
+		{attempt: 3, want: 30 * time.Minute},
 		{attempt: 4, want: 30 * time.Minute},
 		{attempt: 20, want: 30 * time.Minute},
 	}

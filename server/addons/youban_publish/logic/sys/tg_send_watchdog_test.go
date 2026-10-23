@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
+	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
 )
 
 func TestTelegramAPITimeoutFallback(t *testing.T) {
@@ -21,8 +22,9 @@ func TestTelegramAPITimeoutFallback(t *testing.T) {
 	if isTelegramAPITimeout(errors.New("bad request")) {
 		t.Fatal("rejection is not a timeout")
 	}
-	if telegramSendBudget != 10*time.Minute {
-		t.Fatal("publication must have a ten-minute total budget")
+	minimum := telegramBotMediaSendTimeout + telegramReconcileTakeoverWait + collectorin.AccountTaskMessageMediaFallbackTimeout
+	if telegramSendBudget <= minimum {
+		t.Fatalf("publication budget %s must exceed component budget %s", telegramSendBudget, minimum)
 	}
 }
 

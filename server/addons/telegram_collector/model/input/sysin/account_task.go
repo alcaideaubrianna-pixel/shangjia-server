@@ -6,6 +6,8 @@ import (
 	"github.com/gotd/td/tg"
 )
 
+const AccountTaskMessageMediaFallbackTimeout = 5 * time.Minute
+
 const (
 	AccountTaskStatusPending     = "pending"
 	AccountTaskStatusProcessing  = "processing"

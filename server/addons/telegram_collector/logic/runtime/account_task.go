@@ -337,7 +337,7 @@ func accountTaskTimeout(taskType string) time.Duration {
 	case sysin.AccountTaskTypeMessageReconcile:
 		return 2 * time.Minute
 	case sysin.AccountTaskTypeMessageMediaFallback:
-		return 5 * time.Minute
+		return sysin.AccountTaskMessageMediaFallbackTimeout
 	case sysin.AccountTaskTypeMessageDeleteFallback:
 		return 30 * time.Second
 	case sysin.AccountTaskTypeManagedBotUsernameCheck:

@@ -177,6 +177,25 @@ func (s *sAccountTasks) Get(ctx context.Context, taskID int64) (*sysin.AccountTa
 	return accountTaskModel(&row), nil
 }
 
+func (s *sAccountTasks) GetByKey(ctx context.Context, tenantID int64, taskKey string) (*sysin.AccountTask, error) {
+	taskKey = strings.TrimSpace(taskKey)
+	if tenantID <= 0 || taskKey == "" {
+		return nil, gerror.New("Telegram账号任务查询参数无效")
+	}
+	columns := dao.TgCollectorAccountTask.Columns()
+	var row entity.TgCollectorAccountTask
+	if err := dao.TgCollectorAccountTask.Ctx(ctx).
+		Where(columns.TenantId, tenantID).
+		Where(columns.TaskKey, taskKey).
+		Scan(&row); err != nil {
+		return nil, gerror.Wrap(err, "读取Telegram账号任务失败")
+	}
+	if row.Id <= 0 {
+		return nil, nil
+	}
+	return accountTaskModel(&row), nil
+}
+
 func (s *sAccountTasks) WaitTerminal(ctx context.Context, taskID int64, pollInterval time.Duration) (*sysin.AccountTask, error) {
 	if pollInterval <= 0 {
 		pollInterval = time.Second
@@ -222,7 +241,7 @@ func accountTaskClaimLeaseTTL(taskType string, fallback time.Duration) time.Dura
 	case sysin.AccountTaskTypeMessagePushInline, sysin.AccountTaskTypeMessageReconcile:
 		bounded = 2*time.Minute + grace
 	case sysin.AccountTaskTypeMessageMediaFallback:
-		bounded = 5*time.Minute + grace
+		bounded = sysin.AccountTaskMessageMediaFallbackTimeout + grace
 	case sysin.AccountTaskTypeMessageDeleteFallback:
 		bounded = 30*time.Second + grace
 	}

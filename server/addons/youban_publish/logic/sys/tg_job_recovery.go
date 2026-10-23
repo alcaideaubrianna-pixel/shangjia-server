@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
+	collectorservice "hotgo/addons/telegram_collector/service"
 	relayconsts "hotgo/addons/youban_publish/consts"
 	"strings"
 	"time"
@@ -27,7 +29,8 @@ const (
 	telegramConfirmedJobRecoverAfter   = 30 * time.Second
 	telegramPendingJobRecoverAfter     = 30 * time.Second
 	telegramDispatchJobRecoverAfter    = 5 * time.Minute
-	telegramMediaFallbackRecoverAfter  = 2 * time.Minute
+	telegramMediaFallbackCommitGrace   = 30 * time.Second
+	telegramMediaFallbackRecoverAfter  = collectorin.AccountTaskMessageMediaFallbackTimeout + telegramMediaFallbackCommitGrace
 	telegramMediaFallbackMaxBackoff    = 30 * time.Minute
 	messagePushPlanJobExpireAfter      = 30 * time.Minute
 )
@@ -451,6 +454,14 @@ func (s *sSysPublish) recoverStaleTelegramMediaFallbackJobs(ctx context.Context,
 		if purpose != "display" && purpose != "verify" {
 			continue
 		}
+		active, taskErr := telegramMediaFallbackTaskActive(ctx, job, purpose)
+		if taskErr != nil {
+			g.Log().Warningf(ctx, "读取协议号媒体降级任务状态失败 jobId:%d purpose:%s err:%+v", job.Id, purpose, taskErr)
+			continue
+		}
+		if active {
+			continue
+		}
 		channel, channelErr := s.messagePushChannelFromJob(ctx, job)
 		if channelErr != nil {
 			g.Log().Warningf(ctx, "恢复协议号媒体降级任务缺少可用账号 jobId:%d purpose:%s err:%+v", job.Id, purpose, channelErr)
@@ -476,6 +487,24 @@ func (s *sSysPublish) recoverStaleTelegramMediaFallbackJobs(ctx context.Context,
 		s.appendTelegramJobLog(ctx, job, "account_fallback", "requeued", "协议号媒体降级任务超时，已幂等重新提交")
 	}
 	return nil
+}
+
+func telegramMediaFallbackTaskActive(ctx context.Context, job telegramJobRecord, purpose string) (bool, error) {
+	task, err := collectorservice.AccountTasks().GetByKey(ctx, job.TenantId, fmt.Sprintf("message-media-fallback:%d:%s", job.Id, purpose))
+	if err != nil || task == nil {
+		return false, err
+	}
+	return telegramMediaFallbackTaskStatusActive(task.Status), nil
+}
+
+func telegramMediaFallbackTaskStatusActive(status string) bool {
+	switch status {
+	case collectorin.AccountTaskStatusPending, collectorin.AccountTaskStatusProcessing,
+		collectorin.AccountTaskStatusFailedRetry, collectorin.AccountTaskStatusFinalizing:
+		return true
+	default:
+		return false
+	}
 }
 
 func telegramMediaFallbackRecoveryDelay(attempt int) time.Duration {
