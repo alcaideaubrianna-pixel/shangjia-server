@@ -37,7 +37,7 @@ func TestAccountFallbackLifecycleLocalPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	redis := miniredis.RunT(t)
-	for _, scenario := range []string{"success", "restart_after_display", "restart_before_verify_response", "crash_after_verify_send", "display_commit_failure", "verify_commit_failure", "profile_lock_timeout", "multi_media", "slow_bot_album", "reject_premature_completion"} {
+	for _, scenario := range []string{"success", "restart_after_display", "restart_before_verify_response", "crash_after_verify_send", "display_commit_failure", "verify_commit_failure", "profile_lock_timeout", "expired_account_recovery", "multi_media", "slow_bot_album", "reject_premature_completion"} {
 		t.Run(scenario, func(t *testing.T) {
 			schema := fmt.Sprintf("account_lifecycle_%d", time.Now().UnixNano())
 			if _, err := db.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
@@ -68,6 +68,8 @@ func TestAccountFallbackLifecycleLocalPostgres(t *testing.T) {
 			}
 			if scenario == "profile_lock_timeout" {
 				stages = append(stages, "finish_lock_timeout", "projection_recover", "finish")
+			} else if scenario == "expired_account_recovery" {
+				stages = append(stages, "expire_account_recover", "finish")
 			} else {
 				stages = append(stages, "finish", "finish")
 			}
@@ -138,7 +140,8 @@ func runAccountLifecycleStage(t *testing.T, stage string) {
 		mustExec(`INSERT INTO hg_content_profile(id,profile_no,status,visibility,source_type) VALUES(468643,'D87396',1,'public','collect')`)
 		mustExec(`INSERT INTO hg_youban_publish_profile_state(id,tenant_id,account_id,profile_id,publish_operation_no,publish_task_status) VALUES(1,19,464,468643,'cycle_batch:local-test','publishing')`)
 		mustExec(`INSERT INTO hg_youban_publish_account(id,tenant_id,nickname) VALUES(464,19,'local account')`)
-		mustExec(`INSERT INTO hg_youban_publish_channel(id,tenant_id,status,publish_direction) VALUES(75,19,1,'up')`)
+		mustExec(`INSERT INTO hg_youban_publish_tg_account(id,tenant_id,account_id,status,session_key) VALUES(81,19,464,'authorized','local-session')`)
+		mustExec(`INSERT INTO hg_youban_publish_channel(id,tenant_id,tg_account_id,status,publish_direction) VALUES(75,19,81,1,'up')`)
 		mustExec(`INSERT INTO hg_youban_publish_media(id,profile_id,media_type,purpose) VALUES(5151488,468643,'video','verify')`)
 		mustExec(`INSERT INTO hg_youban_publish_tg_job(id,tenant_id,account_id,profile_id,channel_id,target_chat_id,status,dispatch_status,send_phase,operation_no) VALUES(2249614,19,464,468643,75,'-1002563223375','sending','processing','cleanup_confirmed','cycle_batch:local-test')`)
 		if os.Getenv("YOUBAN_ACCOUNT_TEST_SCENARIO") == "slow_bot_album" {
@@ -157,6 +160,22 @@ func runAccountLifecycleStage(t *testing.T, stage string) {
 		t.Fatal(err)
 	}
 	scenario := os.Getenv("YOUBAN_ACCOUNT_TEST_SCENARIO")
+	if stage == "expire_account_recover" {
+		mustExec(`UPDATE hg_youban_publish_tg_account SET status='expired' WHERE id=81`)
+		mustExec(`UPDATE hg_youban_publish_tg_job SET updated_at=NOW()-INTERVAL '1 minute' WHERE id=2249614`)
+		if err := s.recoverConfirmedTelegramJobs(ctx, 10); err != nil {
+			t.Fatal(err)
+		}
+		row, err := db.GetOne(ctx, `SELECT status,dispatch_status,send_phase FROM hg_youban_publish_tg_job WHERE id=2249614`)
+		if err != nil || row["status"].String() != "sent" || row["dispatch_status"].String() != "done" || row["send_phase"].String() != "verify_confirmed" {
+			t.Fatalf("confirmed delivery was not recovered for expired account: %v err=%v", row, err)
+		}
+		count, err := db.GetValue(ctx, `SELECT count(*) FROM test_remote_response WHERE send_count=1`)
+		if err != nil || count.Int() != 2 {
+			t.Fatalf("confirmed recovery resent Telegram media: count=%d err=%v", count.Int(), err)
+		}
+		return
+	}
 	if stage == "finish_lock_timeout" {
 		lockKey := fmt.Sprintf("youban_publish:profile_lifecycle:%d:%d", job.TenantId, job.ProfileId)
 		if _, err := g.Redis().Do(ctx, "SET", lockKey, "held-by-regression-test"); err != nil {

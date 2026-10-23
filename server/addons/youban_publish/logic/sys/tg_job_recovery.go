@@ -170,7 +170,6 @@ func (s *sSysPublish) recoverConfirmedTelegramJobs(ctx context.Context, limit in
 		Where("j.status", telegramJobStatusSending).
 		WhereIn("j.send_phase", []string{telegramSendPhaseVerifyConfirmed, telegramSendPhaseCompletedNoVerify}).
 		WhereLTE("j.updated_at", gtime.Now().Add(-telegramConfirmedJobRecoverAfter)).
-		Where(telegramActiveChannelConditionForAlias("j")).
 		OrderAsc("j.updated_at").OrderAsc("j.id").Limit(limit).Scan(&jobs)
 	if err != nil {
 		return gerror.Wrap(err, "读取已确认未收口TG任务失败")
