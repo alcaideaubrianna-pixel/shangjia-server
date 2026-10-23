@@ -4,8 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/go-telegram/bot/models"
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gcfg"
+	"hotgo/utility/scanconfig"
 )
 
 func TestGatewayUpdatePayloadRoundTrip(t *testing.T) {
@@ -31,6 +35,44 @@ func TestGatewayUpdatePayloadRoundTrip(t *testing.T) {
 	}
 	if decodedUpdate.ID != update.ID {
 		t.Fatalf("unexpected update id: %d", decodedUpdate.ID)
+	}
+}
+
+func TestGatewayLongScanBudgetDoesNotExtendOtherUpdates(t *testing.T) {
+	ctx := context.Background()
+	adapter := g.Cfg().GetAdapter().(*gcfg.AdapterFile)
+	const key = "youbanPublish.mediaSearch.queryTimeoutSeconds"
+	original := g.Cfg().MustGet(ctx, key).Val()
+	t.Cleanup(func() { _ = adapter.Set(key, original) })
+	if err := adapter.Set(key, 600); err != nil {
+		t.Fatal(err)
+	}
+	if scanconfig.SearchTimeout(ctx) != 10*time.Minute {
+		t.Fatal("parent search budget still truncates the configured query")
+	}
+	for _, tc := range []struct {
+		name   string
+		update *models.Update
+		want   time.Duration
+	}{
+		{"photo", &models.Update{Message: &models.Message{Chat: models.Chat{Type: "private"}, Photo: []models.PhotoSize{{FileID: "photo"}}}}, 630 * time.Second},
+		{"video", &models.Update{Message: &models.Message{Chat: models.Chat{Type: "private"}, Video: &models.Video{}}}, 630 * time.Second},
+		{"text", &models.Update{Message: &models.Message{Chat: models.Chat{Type: "private"}, Text: "hello"}}, 20 * time.Second},
+		{"callback", &models.Update{CallbackQuery: &models.CallbackQuery{}}, 20 * time.Second},
+		{"channel", &models.Update{ChannelPost: &models.Message{Chat: models.Chat{Type: "channel"}, Photo: []models.PhotoSize{{FileID: "photo"}}}}, 20 * time.Second},
+		{"nil", nil, 20 * time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := gatewayMediaSearchTaskTimeout(ctx, tc.update, 20*time.Second); got != tc.want {
+				t.Fatalf("timeout=%s want=%s", got, tc.want)
+			}
+		})
+	}
+	if err := adapter.Set(key, 5); err != nil {
+		t.Fatal(err)
+	}
+	if got := gatewayMediaSearchTaskTimeout(ctx, &models.Update{Message: &models.Message{Chat: models.Chat{Type: "private"}, Video: &models.Video{}}}, 20*time.Second); got != 20*time.Second {
+		t.Fatalf("default queue lease changed: %s", got)
 	}
 }
 

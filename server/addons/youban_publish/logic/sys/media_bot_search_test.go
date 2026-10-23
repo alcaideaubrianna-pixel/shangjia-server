@@ -287,7 +287,7 @@ func TestBotMediaCandidateQueryTimeoutEnvironment(t *testing.T) {
 		value string
 		want  time.Duration
 	}{
-		{"", 5 * time.Second}, {"7", 7 * time.Second}, {"0", 5 * time.Second}, {"-1", 5 * time.Second}, {"invalid", 5 * time.Second},
+		{"", 5 * time.Second}, {"7", 7 * time.Second}, {"600", 10 * time.Minute}, {"601", 5 * time.Second}, {"0", 5 * time.Second}, {"-1", 5 * time.Second}, {"invalid", 5 * time.Second},
 	} {
 		t.Run(tc.value, func(t *testing.T) {
 			t.Setenv("YOUBAN_PUBLISH_MEDIA_SEARCH_QUERY_TIMEOUT_SECONDS", tc.value)

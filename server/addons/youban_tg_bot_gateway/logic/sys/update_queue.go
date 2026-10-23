@@ -16,6 +16,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 
 	"hotgo/addons/youban_tg_bot_gateway/service"
+	"hotgo/utility/scanconfig"
 )
 
 const (
@@ -150,6 +151,7 @@ func (s *sGateway) enqueueUpdateBody(ctx context.Context, key string, body []byt
 		// operation is stuck. A short lease keeps private chat and callbacks
 		// responsive; the task is retried by Asynq when the handler times out.
 		taskTimeout = 20 * time.Second
+		taskTimeout = gatewayMediaSearchTaskTimeout(ctx, &update, taskTimeout)
 	}
 	_, err = client.EnqueueContext(enqueueCtx, asynq.NewTask(tgGatewayTaskType, payload),
 		asynq.Queue(queueName),
@@ -164,6 +166,25 @@ func (s *sGateway) enqueueUpdateBody(ctx context.Context, key string, body []byt
 		return nil
 	}
 	return err
+}
+
+// Only private photo/video updates can enter media scan; keep text, callbacks
+// and channel ingestion on their existing short leases.
+func gatewayMediaSearchTaskTimeout(ctx context.Context, update *models.Update, fallback time.Duration) time.Duration {
+	if update == nil {
+		return fallback
+	}
+	message := update.Message
+	if message == nil {
+		message = update.EditedMessage
+	}
+	if message == nil || message.Chat.Type != "private" || (len(message.Photo) == 0 && message.Video == nil) {
+		return fallback
+	}
+	if budget := scanconfig.QueryTimeout(ctx); budget > fallback {
+		return scanconfig.SearchTimeout(ctx) + 30*time.Second
+	}
+	return fallback
 }
 
 func updateNeedsInteractiveQueue(update *models.Update) bool {

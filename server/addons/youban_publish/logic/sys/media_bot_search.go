@@ -14,6 +14,7 @@ import (
 
 	publishmodel "hotgo/addons/youban_publish/model"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/utility/scanconfig"
 	"hotgo/utility/scantrace"
 )
 
@@ -51,7 +52,7 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 	if in.SearchProgress != nil {
 		*in.SearchProgress = sysin.BotMediaSearchProgress{}
 	}
-	searchCtx, cancelSearch := context.WithTimeout(ctx, botMediaSearchTimeout)
+	searchCtx, cancelSearch := context.WithTimeout(ctx, scanconfig.SearchTimeout(ctx))
 	defer cancelSearch()
 	ctx = searchCtx
 	requestID := gctx.CtxId(ctx)
@@ -321,11 +322,7 @@ func rankBotMediaSearchCandidates(groups [][]*botMediaSearchCandidate) []int64 {
 // botMediaCandidateQueryTimeout bounds all album candidate queries together.
 // Invalid values retain the default; parent request deadlines still take priority.
 func botMediaCandidateQueryTimeout(ctx context.Context) time.Duration {
-	seconds := g.Cfg().MustGet(ctx, "youbanPublish.mediaSearch.queryTimeoutSeconds", 5).Int()
-	if seconds <= 0 || int64(seconds) > int64((1<<63-1)/time.Second) {
-		seconds = 5
-	}
-	return time.Duration(seconds) * time.Second
+	return scanconfig.QueryTimeout(ctx)
 }
 
 func loadBotMediaSearchCandidates(ctx context.Context, fingerprints []*mediaFingerprint, loader func(context.Context, *mediaFingerprint) ([]*botMediaSearchCandidate, error)) ([][]*botMediaSearchCandidate, error) {
