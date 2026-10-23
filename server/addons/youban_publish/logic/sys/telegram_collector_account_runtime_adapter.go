@@ -2,9 +2,6 @@ package sys
 
 import (
 	"context"
-	"os"
-	"strconv"
-	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -40,7 +37,7 @@ func (p *publishAccountRuntimeProvider) ListAccountRuntimes(ctx context.Context)
 		return nil, err
 	}
 	for _, accountID := range accountIDs {
-		if accountID > 0 && accountRuntimeScopeAllows(accountID) {
+		if accountID > 0 {
 			if _, exists := groups[accountID]; !exists {
 				groups[accountID] = accountMonitorGroupRuntime{}
 			}
@@ -48,9 +45,6 @@ func (p *publishAccountRuntimeProvider) ListAccountRuntimes(ctx context.Context)
 	}
 	bindings := make([]*collectorin.AccountRuntimeBinding, 0, len(groups))
 	for accountID, group := range groups {
-		if !accountRuntimeScopeAllows(accountID) {
-			continue
-		}
 		pendingDelete := accountID > 0 && p.publish.accountHasPendingDeleteFallback(ctx, accountID)
 		if accountID <= 0 || (!p.publish.accountCollectCircuitShouldStart(accountID) && !pendingDelete) {
 			continue
@@ -66,32 +60,6 @@ func (p *publishAccountRuntimeProvider) ListAccountRuntimes(ctx context.Context)
 		})
 	}
 	return bindings, nil
-}
-
-func accountRuntimeScopeAllows(accountID int64) bool {
-	if accountID <= 0 {
-		return false
-	}
-	include := parseAccountRuntimeScope(os.Getenv("YOUBAN_TELEGRAM_ACCOUNT_INCLUDE_IDS"))
-	if len(include) > 0 {
-		_, ok := include[accountID]
-		return ok
-	}
-	_, excluded := parseAccountRuntimeScope(os.Getenv("YOUBAN_TELEGRAM_ACCOUNT_EXCLUDE_IDS"))[accountID]
-	return !excluded
-}
-
-func parseAccountRuntimeScope(value string) map[int64]struct{} {
-	result := make(map[int64]struct{})
-	for _, part := range strings.FieldsFunc(value, func(r rune) bool {
-		return r == ',' || r == ';' || r == ' ' || r == '\n' || r == '\t'
-	}) {
-		id, err := strconv.ParseInt(strings.TrimSpace(part), 10, 64)
-		if err == nil && id > 0 {
-			result[id] = struct{}{}
-		}
-	}
-	return result
 }
 
 func (s *sSysPublish) accountHasPendingDeleteFallback(ctx context.Context, accountID int64) bool {
