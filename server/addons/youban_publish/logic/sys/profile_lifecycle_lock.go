@@ -12,7 +12,8 @@ import (
 )
 
 const profileLifecycleLockTTL = 2 * time.Minute
-const profileLifecycleLockWait = 10 * time.Second
+
+var profileLifecycleLockWait = 10 * time.Second
 
 func (s *sSysPublish) withProfileLifecycleLock(ctx context.Context, tenantId int64, profileId int64, fn func() error) error {
 	if tenantId <= 0 || profileId <= 0 {

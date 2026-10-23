@@ -37,7 +37,7 @@ func TestAccountFallbackLifecycleLocalPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	redis := miniredis.RunT(t)
-	for _, scenario := range []string{"success", "restart_after_display", "restart_before_verify_response", "crash_after_verify_send", "display_commit_failure", "verify_commit_failure", "multi_media", "slow_bot_album", "reject_premature_completion"} {
+	for _, scenario := range []string{"success", "restart_after_display", "restart_before_verify_response", "crash_after_verify_send", "display_commit_failure", "verify_commit_failure", "profile_lock_timeout", "multi_media", "slow_bot_album", "reject_premature_completion"} {
 		t.Run(scenario, func(t *testing.T) {
 			schema := fmt.Sprintf("account_lifecycle_%d", time.Now().UnixNano())
 			if _, err := db.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
@@ -66,7 +66,11 @@ func TestAccountFallbackLifecycleLocalPostgres(t *testing.T) {
 			if scenario == "verify_commit_failure" {
 				stages = append(stages, "verify_recover")
 			}
-			stages = append(stages, "finish", "finish")
+			if scenario == "profile_lock_timeout" {
+				stages = append(stages, "finish_lock_timeout", "projection_recover", "finish")
+			} else {
+				stages = append(stages, "finish", "finish")
+			}
 			for _, stage := range stages {
 				commandCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 				cmd := exec.CommandContext(commandCtx, os.Args[0], "-test.run=^TestAccountFallbackLifecycleLocalPostgres$", "-test.count=1")
@@ -153,6 +157,45 @@ func runAccountLifecycleStage(t *testing.T, stage string) {
 		t.Fatal(err)
 	}
 	scenario := os.Getenv("YOUBAN_ACCOUNT_TEST_SCENARIO")
+	if stage == "finish_lock_timeout" {
+		lockKey := fmt.Sprintf("youban_publish:profile_lifecycle:%d:%d", job.TenantId, job.ProfileId)
+		if _, err := g.Redis().Do(ctx, "SET", lockKey, "held-by-regression-test"); err != nil {
+			t.Fatal(err)
+		}
+		previousWait := profileLifecycleLockWait
+		profileLifecycleLockWait = 100 * time.Millisecond
+		defer func() { profileLifecycleLockWait = previousWait }()
+		if err := s.finalizeTelegramMediaDelivery(ctx, job, true, true); err != nil {
+			t.Fatal(err)
+		}
+		row, err := db.GetOne(ctx, `SELECT status,dispatch_status,send_phase FROM hg_youban_publish_tg_job WHERE id=2249614`)
+		if err != nil || row["status"].String() != "sent" || row["dispatch_status"].String() != "done" || row["send_phase"].String() != "verify_confirmed" {
+			t.Fatalf("confirmed delivery remained blocked by profile lock: %v err=%v", row, err)
+		}
+		state, err := db.GetValue(ctx, `SELECT publish_task_status FROM hg_youban_publish_profile_state WHERE profile_id=468643`)
+		if err != nil || state.String() != "publishing" {
+			t.Fatalf("profile projection should remain recoverable: status=%q err=%v", state.String(), err)
+		}
+		return
+	}
+	if stage == "projection_recover" {
+		lockKey := fmt.Sprintf("youban_publish:profile_lifecycle:%d:%d", job.TenantId, job.ProfileId)
+		if _, err := g.Redis().Del(ctx, lockKey); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.recoverProfilePublishOperationStates(ctx, 100); err != nil {
+			t.Fatal(err)
+		}
+		state, err := db.GetValue(ctx, `SELECT publish_task_status FROM hg_youban_publish_profile_state WHERE profile_id=468643`)
+		if err != nil || state.String() != "" {
+			t.Fatalf("profile projection was not recovered: status=%q err=%v", state.String(), err)
+		}
+		count, err := db.GetValue(ctx, `SELECT count(*) FROM test_remote_response WHERE send_count=1`)
+		if err != nil || count.Int() != 2 {
+			t.Fatalf("projection recovery resent Telegram media: count=%d err=%v", count.Int(), err)
+		}
+		return
+	}
 	if stage == "premature_finish" {
 		if err := s.finalizeTelegramMediaDelivery(ctx, job, true, true); err == nil {
 			t.Fatal("completed before verification")

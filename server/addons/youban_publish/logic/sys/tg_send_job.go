@@ -948,23 +948,9 @@ func (s *sSysPublish) switchTelegramJobToNextBot(ctx context.Context, job telegr
 }
 
 func (s *sSysPublish) completeTelegramJob(ctx context.Context, job telegramJobRecord) error {
-	operationCompleted := false
-	err := s.withProfileLifecycleLock(ctx, job.TenantId, job.ProfileId, func() error {
-		return s.completeTelegramJobLockedByProfile(ctx, job, &operationCompleted)
-	})
-	if err != nil || !operationCompleted {
-		return err
-	}
-	if noticeErr := s.notifyBotProfilePublishCompleted(ctx, job); noticeErr != nil {
-		g.Log().Warningf(ctx, "发送Bot资料上架完成通知失败 profileId:%d operationNo:%s err:%+v", job.ProfileId, job.OperationNo, noticeErr)
-	}
-	return nil
-}
-
-func (s *sSysPublish) completeTelegramJobLockedByProfile(ctx context.Context, job telegramJobRecord, completedNotice *bool) error {
 	if status, err := s.telegramJobCurrentStatus(ctx, job.Id); err != nil {
 		return err
-	} else if status != "sending" {
+	} else if status != telegramJobStatusSending {
 		s.appendTelegramJobLog(ctx, job, "publish", "skipped", "TG发送完成前任务状态已变更，跳过成功标记："+status)
 		return nil
 	}
@@ -973,15 +959,33 @@ func (s *sSysPublish) completeTelegramJobLockedByProfile(ctx context.Context, jo
 		return err
 	}
 	if !allowed {
-		s.appendTelegramJobLog(ctx, job, "publish", "skipped", "TG发送完成前任务已下架，开始清理已发送消息")
-		if err = s.deleteTelegramMessageSetLockedByChannel(ctx, job, "任务已下架"); err != nil {
+		// The remote delivery is definitive even if the profile was taken down
+		// concurrently. Release the channel before cleanup/projection lock work;
+		// cleanup can be retried without risking a duplicate Telegram send.
+		if err = s.markTelegramJobSuperseded(ctx, job.Id); err != nil {
 			return err
 		}
-		return s.supersedeTelegramJobAndCompleteOperation(ctx, job)
+		err = s.withProfileLifecycleLock(ctx, job.TenantId, job.ProfileId, func() error {
+			s.appendTelegramJobLog(ctx, job, "publish", "skipped", "TG发送完成前任务已下架，开始清理已发送消息")
+			if err = s.deleteTelegramMessageSetLockedByChannel(ctx, job, "任务已下架"); err != nil {
+				return err
+			}
+			_, completeErr := s.completeProfileTelegramOperation(ctx, job, isCycleBatchOperation(job.OperationNo))
+			return completeErr
+		})
+		if err != nil {
+			s.appendTelegramJobLog(ctx, job, "projection", "pending", "TG任务已下架，消息清理及资料状态等待自动恢复："+err.Error())
+			g.Log().Warningf(ctx, "TG任务已废弃，消息清理及资料状态等待恢复 jobId:%d profileId:%d err:%+v", job.Id, job.ProfileId, err)
+		}
+		return nil
 	}
-	if err = s.validateTelegramJobCompletion(ctx, job.Id, job.ProfileId); err != nil {
+	if err := s.validateTelegramJobCompletion(ctx, job.Id, job.ProfileId); err != nil {
 		return err
 	}
+
+	// Remote delivery is already durably confirmed at this point. Persist that
+	// fact before taking the profile projection lock: projection contention must
+	// never leave a confirmed job holding the channel's sending slot.
 	sentAt := gtime.Now()
 	transitioned, err := s.transitionTelegramJob(ctx, telegramJobTransition{
 		JobId:      job.Id,
@@ -996,6 +1000,29 @@ func (s *sSysPublish) completeTelegramJobLockedByProfile(ctx context.Context, jo
 		s.appendTelegramJobLog(ctx, job, "publish", "skipped", "TG发送完成时任务已不再发送中，跳过成功标记")
 		return nil
 	}
+	s.completeTelegramJobDeliveryProjection(ctx, job, sentAt)
+
+	operationCompleted := false
+	err = s.withProfileLifecycleLock(ctx, job.TenantId, job.ProfileId, func() error {
+		return s.completeTelegramJobLockedByProfile(ctx, job, &operationCompleted)
+	})
+	if err != nil {
+		// The sent Job is the durable recovery input for the profile-state
+		// projector. Keep this failure non-fatal so the channel can advance.
+		s.appendTelegramJobLog(ctx, job, "projection", "pending", "TG已发送成功，资料状态等待自动恢复："+err.Error())
+		g.Log().Warningf(ctx, "TG任务已确认，资料状态投影等待恢复 jobId:%d profileId:%d err:%+v", job.Id, job.ProfileId, err)
+		return nil
+	}
+	if !operationCompleted {
+		return nil
+	}
+	if noticeErr := s.notifyBotProfilePublishCompleted(ctx, job); noticeErr != nil {
+		g.Log().Warningf(ctx, "发送Bot资料上架完成通知失败 profileId:%d operationNo:%s err:%+v", job.ProfileId, job.OperationNo, noticeErr)
+	}
+	return nil
+}
+
+func (s *sSysPublish) completeTelegramJobDeliveryProjection(ctx context.Context, job telegramJobRecord, sentAt *gtime.Time) {
 	if stepErr := s.projectTelegramDeliveryStep(ctx, job.Id, telegramDeliveryStepFinalize, telegramDeliveryStepSucceeded, 0, "", sentAt); stepErr != nil {
 		g.Log().Warningf(ctx, "投影TG完成步骤失败 jobId:%d err:%+v", job.Id, stepErr)
 	}
@@ -1015,6 +1042,20 @@ func (s *sSysPublish) completeTelegramJobLockedByProfile(ctx context.Context, jo
 		g.Log().Warningf(ctx, "更新频道资料索引失败 jobId:%d err:%+v", job.Id, indexErr)
 	} else if cycleErr := s.syncTelegramJobCycleSchedule(ctx, job); cycleErr != nil {
 		g.Log().Warningf(ctx, "更新资料循环计划失败 jobId:%d err:%+v", job.Id, cycleErr)
+	}
+}
+
+func (s *sSysPublish) completeTelegramJobLockedByProfile(ctx context.Context, job telegramJobRecord, completedNotice *bool) error {
+	allowed, err := s.canSendTelegramJob(ctx, job)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		s.appendTelegramJobLog(ctx, job, "publish", "skipped", "TG发送完成前任务已下架，开始清理已发送消息")
+		if err = s.deleteTelegramMessageSetLockedByChannel(ctx, job, "任务已下架"); err != nil {
+			return err
+		}
+		return s.supersedeTelegramJobAndCompleteOperation(ctx, job)
 	}
 	isCycle := isCycleBatchOperation(job.OperationNo)
 	operationCompleted, completeErr := s.completeProfileTelegramOperation(ctx, job, isCycle)
