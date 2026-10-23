@@ -1,15 +1,85 @@
 package sys
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/glog"
 	"github.com/gogf/gf/v2/os/gtime"
 )
+
+func TestTelegramPublishDetailedLogsSampling(t *testing.T) {
+	t.Setenv("YOUBAN_PUBLISH_VERBOSE_TRACE", "")
+	sampled := 0
+	for i := 0; i < 10000; i++ {
+		id := fmt.Sprintf("execution-%d", i)
+		selected := telegramPublishDetailedLogs(id)
+		if selected != telegramPublishDetailedLogs(id) {
+			t.Fatal("stages in the same execution must share sampling")
+		}
+		if selected {
+			sampled++
+		}
+	}
+	if sampled < 50 || sampled > 150 || telegramPublishDetailedLogs("") {
+		t.Fatalf("unexpected sampling: %d/10000", sampled)
+	}
+	t.Setenv("YOUBAN_PUBLISH_VERBOSE_TRACE", "1")
+	if !telegramPublishDetailedLogs("execution-1") {
+		t.Fatal("diagnostic override must retain all stages")
+	}
+}
+
+func TestTelegramPublishQuietTraceRetainsDiagnostics(t *testing.T) {
+	t.Setenv("YOUBAN_PUBLISH_VERBOSE_TRACE", "")
+	var output bytes.Buffer
+	logger := g.Log()
+	previous := logger.GetConfig()
+	config := glog.DefaultConfig()
+	config.Writer, config.StdoutPrint, config.Path = &output, false, ""
+	if err := logger.SetConfig(config); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = logger.SetConfig(previous) })
+	ctx := telegramPublishTraceContext(context.Background(), 42)
+	// Empty executionId deterministically disables successful detail logs.
+	ctx.Value(telegramPublishTraceContextKey{}).(g.Map)["executionId"] = ""
+	step := beginTelegramPublishStage(ctx, "api.sendVideo")
+	step.End(nil)
+	if output.Len() != 0 {
+		t.Fatalf("successful stages were not suppressed: %s", output.String())
+	}
+	if ctx.Value(telegramPublishTimingContextKey{}).(*telegramPublishTiming).snapshot()["stageCounts"].(map[string]int)["api.sendVideo"] != 1 {
+		t.Fatal("sampling removed summary timing")
+	}
+	step.log("slow", nil, nil)
+	failed := beginTelegramPublishStage(ctx, "api.sendVideo")
+	failed.End(errors.New("upload failed"))
+	func() {
+		defer func() {
+			if recover() != "test panic" {
+				t.Fatal("logging must not swallow a business panic")
+			}
+		}()
+		var err error
+		panicked := beginTelegramPublishStage(ctx, "api.sendVideo")
+		defer panicked.Finish(&err)
+		panic("test panic")
+	}()
+	logTelegramPublishSummary(ctx, time.Now(), nil)
+	for _, required := range []string{"slow", "upload failed", "test panic", "telegram_publish_summary", "jobId"} {
+		if !strings.Contains(output.String(), required) {
+			t.Fatalf("missing diagnostic %q", required)
+		}
+	}
+}
 
 func TestTelegramPublishTimingConcurrentAndIsolated(t *testing.T) {
 	ctx := telegramPublishTraceContext(context.Background(), 42)

@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"net/url"
 	"os"
 	"regexp"
@@ -148,11 +149,26 @@ func telegramPublishJobTraceContext(ctx context.Context, job telegramJobRecord) 
 }
 
 type telegramPublishStage struct {
-	ctx     context.Context
-	fields  g.Map
-	started time.Time
-	timer   *time.Timer
-	ended   atomic.Bool
+	ctx      context.Context
+	fields   g.Map
+	started  time.Time
+	timer    *time.Timer
+	ended    atomic.Bool
+	detailed bool
+}
+
+// Sample whole executions, not individual stages, so sampled traces stay useful.
+// Errors, slow stages and the execution summary are always retained.
+func telegramPublishDetailedLogs(executionID string) bool {
+	if os.Getenv("YOUBAN_PUBLISH_VERBOSE_TRACE") == "1" {
+		return true
+	}
+	if executionID == "" {
+		return false
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(executionID))
+	return h.Sum32()%100 == 0
 }
 
 func beginTelegramPublishStage(ctx context.Context, stage string, fields ...g.Map) *telegramPublishStage {
@@ -169,7 +185,8 @@ func beginTelegramPublishStage(ctx context.Context, stage string, fields ...g.Ma
 			data[key] = value
 		}
 	}
-	step := &telegramPublishStage{ctx: ctx, fields: data, started: time.Now()}
+	executionID, _ := base["executionId"].(string)
+	step := &telegramPublishStage{ctx: ctx, fields: data, started: time.Now(), detailed: telegramPublishDetailedLogs(executionID)}
 	step.log("start", nil, nil)
 	// One warning per slow stage bounds log volume and adds no database/Redis
 	// traffic. Stop on every normal/error/panic exit; never cancel business work.
@@ -217,6 +234,9 @@ func (s *telegramPublishStage) Finish(err *error) {
 }
 
 func (s *telegramPublishStage) log(event string, err error, fields []g.Map) {
+	if (event == "start" || event == "end") && !s.detailed {
+		return
+	}
 	data := g.Map{}
 	for key, value := range s.fields {
 		data[key] = value

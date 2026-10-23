@@ -40,7 +40,7 @@ security:
 
 # 统一默认日志配置
 defaultLogger: &defaultLogger
-  level: "all"
+  level: "info"                          # 默认关闭DEBUG，保留关键流程、警告与错误
   flags: 42
   file: "{Y-m-d}.log"                     # 日志文件格式。默认为"{Y-m-d}.log"
   stdoutColorDisabled: false              # 关闭终端的颜色打印。可选：false|true，默认false

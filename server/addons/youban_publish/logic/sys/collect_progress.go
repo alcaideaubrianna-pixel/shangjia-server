@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -38,7 +39,13 @@ func (s *sSysPublish) collectProgressContext(ctx context.Context, eventID, media
 			message = fmt.Sprintf("媒体 #%d：%s", mediaID, message)
 		}
 		s.appendCollectEventLogWithOwner(callCtx, eventID, owner[ec.TenantId].Int64(), owner[ec.AccountId].Int64(), "progress", stage, sensitive.Diagnostic(message), fmt.Sprintf("mediaId=%d", mediaID))
-		g.Log().Info(callCtx, "采集处理阶段更新", g.Map{"eventId": eventID, "mediaId": mediaID, "stage": stage, "message": sensitive.Diagnostic(message)})
+		// The full progress remains available in the existing event log/UI.
+		// Sample whole events without retaining any per-event state in memory.
+		if stage == "failed" {
+			g.Log().Warning(callCtx, "采集处理阶段更新", g.Map{"eventId": eventID, "mediaId": mediaID, "stage": stage, "message": sensitive.Diagnostic(message)})
+		} else if eventID%100 == 0 || os.Getenv("YOUBAN_MEDIA_VERBOSE_PROGRESS") == "1" {
+			g.Log().Info(callCtx, "采集处理阶段更新", g.Map{"eventId": eventID, "mediaId": mediaID, "stage": stage, "message": sensitive.Diagnostic(message)})
+		}
 	}))
 }
 
