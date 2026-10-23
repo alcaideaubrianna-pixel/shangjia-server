@@ -143,13 +143,13 @@ func TestTelegramMediaSetOversizeHandoffBeforeSending(t *testing.T) {
 	}{
 		{"unknown", &telegramMediaItem{MediaType: "video"}, false},
 		{"video boundary", &telegramMediaItem{MediaType: "video", Size: 50_000_000}, false},
-		{"oversized video", &telegramMediaItem{MediaType: "video", Size: 50_000_001}, true},
+		{"oversized video is compressed before upload", &telegramMediaItem{MediaType: "video", Size: 50_000_001}, false},
 		{"oversized photo is compressed before upload", &telegramMediaItem{MediaType: "image", Size: 10_000_001}, false},
 		{"M98925 protected photo", &telegramMediaItem{MediaType: "image", Size: 45_859_302, AntiScanEnabled: true, TgFileId: "cached"}, false},
 		{"N78120 photo", &telegramMediaItem{MediaType: "image", Size: 22_774_645}, false},
 		{"U73573 photo", &telegramMediaItem{MediaType: "image", Size: 16_181_637}, false},
 		{"reuse", &telegramMediaItem{MediaType: "video", Size: 100_000_000, TgFileId: "cached"}, false},
-		{"forced upload", &telegramMediaItem{MediaType: "video", Size: 100_000_000, TgFileId: "cached", ForceUpload: true}, true},
+		{"forced upload is compressed", &telegramMediaItem{MediaType: "video", Size: 100_000_000, TgFileId: "cached", ForceUpload: true}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := validateTelegramMediaSetKnownUploadSize([]*telegramMediaItem{{MediaType: "image", Size: 100}, tc.item})
@@ -174,8 +174,8 @@ func TestTelegramMediaUploadChecksActualSize(t *testing.T) {
 		size int64
 		ok   bool
 	}{
-		{"video", 50_000_000, true},
-		{"video", 50_000_001, false},
+		{"video", telegramVideoMaxUploadBytes, true},
+		{"video", telegramVideoMaxUploadBytes + 1, false},
 		{"image", 10_000_000, true},
 		{"photo", 10_000_001, false},
 	} {

@@ -2,16 +2,19 @@ package sys
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/go-telegram/bot/models"
+	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gotd/td/telegram"
 	"github.com/hibiken/asynq"
 
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
 	collectorservice "hotgo/addons/telegram_collector/service"
+	"hotgo/addons/youban_publish/model"
 	"hotgo/addons/youban_publish/service"
 	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
 	"hotgo/internal/library/payment"
@@ -105,17 +108,32 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		return &gatewayservice.RuntimeConfig{
-			Mode:             conf.BotRuntimeMode,
-			ProxyURL:         conf.ProxyUrl,
-			RuntimeServerURL: conf.BotRuntimeApiUrl,
-			MediaServerURL:   conf.BotApiServerUrl,
-			MediaFileURL:     conf.BotApiFileUrl,
-			WebhookBaseURL:   conf.WebhookBaseUrl,
-			WebhookSecret:    conf.WebhookSecret,
-		}, nil
+		return telegramGatewayRuntimeConfig(conf)
 	})
 	payment.RegisterNotifyCall(tenantVipOrderGroup, publish.TenantVipPayNotify)
+}
+
+func telegramGatewayRuntimeConfig(conf *model.TelegramConfig) (*gatewayservice.RuntimeConfig, error) {
+	if conf == nil {
+		return nil, gerror.New("Telegram配置不能为空")
+	}
+	if conf.LocalBotEnabled && strings.TrimSpace(conf.BotApiServerUrl) == "" {
+		return nil, gerror.New("已启用Telegram Local Bot模式，但未配置YOUBAN_TELEGRAM_BOT_API_URL")
+	}
+	runtimeServerURL := conf.BotRuntimeApiUrl
+	if conf.LocalBotEnabled {
+		runtimeServerURL = conf.BotApiServerUrl
+	}
+	return &gatewayservice.RuntimeConfig{
+		Mode:             conf.BotRuntimeMode,
+		ProxyURL:         conf.ProxyUrl,
+		RuntimeServerURL: runtimeServerURL,
+		MediaServerURL:   conf.BotApiServerUrl,
+		MediaFileURL:     conf.BotApiFileUrl,
+		LocalBotEnabled:  conf.LocalBotEnabled,
+		WebhookBaseURL:   conf.WebhookBaseUrl,
+		WebhookSecret:    conf.WebhookSecret,
+	}, nil
 }
 
 type publishBotGatewayProvider struct{ publish *sSysPublish }

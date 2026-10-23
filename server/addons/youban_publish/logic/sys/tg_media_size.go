@@ -8,6 +8,7 @@ import (
 )
 
 const telegramMediaUploadSizeError = "媒体超过官方Bot API上传限制"
+const telegramVideoMaxUploadBytes int64 = 49_000_000
 
 // Check the entire phase before sending any chunk so an oversized later item
 // cannot cause partial Bot delivery followed by a duplicate account handoff.
@@ -22,10 +23,8 @@ func validateTelegramMediaSetKnownUploadSize(media []*telegramMediaItem) error {
 			// Rejecting here bypasses that path and unnecessarily occupies Account.
 			continue
 		}
-		limit := int64(50_000_000)
-		if item.Size > limit {
-			return gerror.Newf("%s，切换协议号整组发送 mediaId:%d sizeBytes:%d limitBytes:%d", telegramMediaUploadSizeError, item.Id, item.Size, limit)
-		}
+		// Video metadata is not the final upload size. The shared preparation
+		// path transcodes oversized verification videos before sending.
 	}
 	return nil
 }
@@ -55,7 +54,7 @@ func validateTelegramMediaUploadSize(media *telegramMediaItem, path string) erro
 	if err != nil {
 		return gerror.Wrap(err, "读取待上传媒体大小失败")
 	}
-	limit := int64(50_000_000)
+	limit := telegramVideoMaxUploadBytes
 	if telegramMediaIsPhoto(media) {
 		limit = 10_000_000
 	}

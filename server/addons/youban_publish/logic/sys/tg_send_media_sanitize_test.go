@@ -72,6 +72,41 @@ func TestPrepareTelegramPhotoUploadFileKeepsValidImageUnchanged(t *testing.T) {
 	}
 }
 
+func TestPrepareTelegramVideoUploadFileCompressesOversizedMP4(t *testing.T) {
+	binDir := t.TempDir()
+	ffmpegPath := filepath.Join(binDir, "ffmpeg")
+	script := `#!/bin/sh
+out=""
+for arg in "$@"; do out="$arg"; done
+case " $* " in
+  *" -c copy "*) truncate -s 50000001 "$out" ;;
+  *) truncate -s 1000000 "$out" ;;
+esac
+`
+	if err := os.WriteFile(ffmpegPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	sourcePath := filepath.Join(t.TempDir(), "verify.mp4")
+	if err := os.WriteFile(sourcePath, []byte("source"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outPath, cleanup, err := prepareTelegramVideoUploadFile(context.Background(), sourcePath, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+	info, err := os.Stat(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Size() > telegramVideoMaxUploadBytes {
+		t.Fatalf("compressed video size=%d exceeds limit=%d", info.Size(), telegramVideoMaxUploadBytes)
+	}
+}
+
 func TestSplitTelegramMediaItems(t *testing.T) {
 	media := make([]*telegramMediaItem, 23)
 	chunks := splitTelegramMediaItems(media, telegramMediaGroupMaxItems)

@@ -188,6 +188,15 @@ func TestGatewayRuntimeSignatureIncludesMediaEndpoint(t *testing.T) {
 	}
 }
 
+func TestGatewayRuntimeSignatureIncludesLocalBotMode(t *testing.T) {
+	base := &service.RuntimeConfig{RuntimeServerURL: "https://api.telegram.org", MediaServerURL: "http://local-bot-api.internal"}
+	changed := *base
+	changed.LocalBotEnabled = true
+	if gatewayRuntimeSignature("webhook", base) == gatewayRuntimeSignature("webhook", &changed) {
+		t.Fatal("gateway runtime signature ignored Local Bot mode change")
+	}
+}
+
 func TestRuntimeModeForSystem(t *testing.T) {
 	tests := []struct {
 		name       string

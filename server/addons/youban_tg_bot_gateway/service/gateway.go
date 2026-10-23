@@ -16,6 +16,7 @@ type RuntimeConfig struct {
 	RuntimeServerURL string
 	MediaServerURL   string
 	MediaFileURL     string
+	LocalBotEnabled  bool
 	WebhookBaseURL   string
 	WebhookSecret    string
 }
@@ -58,7 +59,7 @@ type IGateway interface {
 	Webhook(ctx context.Context, key string, body []byte, secret string) error
 	Client(ctx context.Context, token string) (*tgbot.Bot, error)
 	MediaClient(ctx context.Context, token string) (*tgbot.Bot, error)
-	// SendClient always uses the official endpoint. MediaClient is local-download infrastructure.
+	// SendClient follows the configured complete Bot runtime mode. MediaClient is media-download infrastructure.
 	SendClient(ctx context.Context, token string) (*tgbot.Bot, error)
 	ResolveMedia(ctx context.Context, token string, in telegrammedia.Request) (telegrammedia.Resolved, error)
 	DownloadMedia(ctx context.Context, token string, in telegrammedia.Request, maxBytes int64) ([]byte, telegrammedia.Resolved, error)

@@ -468,6 +468,8 @@ func compressTelegramPhotoForUpload(ctx context.Context, path string) (string, e
 }
 
 func prepareTelegramVideoUploadFile(ctx context.Context, path string, cleanup func()) (string, func(), error) {
+	preparedPath := path
+	preparedCleanup := cleanup
 	if telegramVideoPathNeedsNormalization(path) {
 		step := beginTelegramPublishStage(ctx, "media.video.normalize", g.Map{"inputExtension": strings.ToLower(filepath.Ext(path))})
 		normalizedPath, err := normalizeTelegramVideo(ctx, path)
@@ -478,16 +480,39 @@ func prepareTelegramVideoUploadFile(ctx context.Context, path string, cleanup fu
 			}
 			return "", nil, err
 		}
-		return normalizedPath, chainCleanup(cleanup, func() { _ = os.Remove(normalizedPath) }), nil
+		preparedPath = normalizedPath
+		preparedCleanup = chainCleanup(cleanup, func() { _ = os.Remove(normalizedPath) })
+	} else {
+		step := beginTelegramPublishStage(ctx, "media.video.strip_metadata")
+		cleanPath, err := stripTelegramVideoMetadata(ctx, path)
+		step.End(err, g.Map{"fallbackToOriginal": err != nil})
+		if err != nil {
+			g.Log().Warningf(ctx, "清理视频元数据失败，使用原视频发送 path:%s err:%+v", path, err)
+		} else {
+			preparedPath = cleanPath
+			preparedCleanup = chainCleanup(cleanup, func() { _ = os.Remove(cleanPath) })
+		}
 	}
-	step := beginTelegramPublishStage(ctx, "media.video.strip_metadata")
-	cleanPath, err := stripTelegramVideoMetadata(ctx, path)
-	step.End(err, g.Map{"fallbackToOriginal": err != nil})
+	info, err := os.Stat(preparedPath)
 	if err != nil {
-		g.Log().Warningf(ctx, "清理视频元数据失败，使用原视频发送 path:%s err:%+v", path, err)
-		return path, cleanup, nil
+		if preparedCleanup != nil {
+			preparedCleanup()
+		}
+		return "", nil, gerror.Wrap(err, "读取验证视频大小失败")
 	}
-	return cleanPath, chainCleanup(cleanup, func() { _ = os.Remove(cleanPath) }), nil
+	if info.Size() <= telegramVideoMaxUploadBytes {
+		return preparedPath, preparedCleanup, nil
+	}
+	step := beginTelegramPublishStage(ctx, "media.video.compress", g.Map{"inputBytes": info.Size(), "limitBytes": telegramVideoMaxUploadBytes})
+	compressedPath, err := compressTelegramVideoForUpload(ctx, preparedPath)
+	step.End(err)
+	if err != nil {
+		if preparedCleanup != nil {
+			preparedCleanup()
+		}
+		return "", nil, err
+	}
+	return compressedPath, chainCleanup(preparedCleanup, func() { _ = os.Remove(compressedPath) }), nil
 }
 
 func telegramVideoPathNeedsNormalization(path string) bool {

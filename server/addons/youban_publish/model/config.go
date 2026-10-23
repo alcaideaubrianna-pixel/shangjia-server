@@ -7,6 +7,7 @@ type TelegramConfig struct {
 	BotRuntimeApiUrl  string `json:"botRuntimeApiUrl"`
 	BotApiServerUrl   string `json:"botApiServerUrl"`
 	BotApiFileUrl     string `json:"botApiFileUrl"`
+	LocalBotEnabled   bool   `json:"localBotEnabled"`
 	BotRuntimeMode    string `json:"botRuntimeMode"`
 	WebhookBaseUrl    string `json:"webhookBaseUrl"`
 	WebhookSecret     string `json:"webhookSecret"`

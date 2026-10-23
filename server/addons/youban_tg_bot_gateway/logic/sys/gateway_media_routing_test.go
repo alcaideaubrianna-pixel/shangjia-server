@@ -143,6 +143,23 @@ func TestMediaRoutingDefaultSenderUsesOfficialEndpoint(t *testing.T) {
 	}
 }
 
+func TestMediaRoutingLocalModeSenderUsesLocalEndpoint(t *testing.T) {
+	t.Setenv("YOUBAN_TELEGRAM_RUNTIME_SEND_BOTS", "*")
+	const endpoint = "http://local-bot-api.internal"
+	gateway := mediaRoutingTestGateway(&service.RuntimeConfig{MediaServerURL: endpoint, LocalBotEnabled: true})
+	var gotEndpoint string
+	gateway.newMediaClientForToken = func(_, _, serverURL string, _ tgbot.HandlerFunc) (*tgbot.Bot, error) {
+		gotEndpoint = serverURL
+		return new(tgbot.Bot), nil
+	}
+	if _, err := gateway.SendClient(context.Background(), "123456:routing-test"); err != nil {
+		t.Fatal(err)
+	}
+	if gotEndpoint != endpoint {
+		t.Fatalf("local mode sender endpoint = %q, want %q", gotEndpoint, endpoint)
+	}
+}
+
 func TestMediaRoutingSenderIgnoresLocalRuntimeEndpoint(t *testing.T) {
 	t.Setenv("YOUBAN_TELEGRAM_RUNTIME_SEND_BOTS", "")
 	gateway := mediaRoutingTestGateway(&service.RuntimeConfig{RuntimeServerURL: "http://new-runtime", MediaServerURL: "http://existing-media"})

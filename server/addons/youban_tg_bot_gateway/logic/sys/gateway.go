@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -65,7 +66,7 @@ func (s *sGateway) MediaClient(ctx context.Context, token string) (*tgbot.Bot, e
 	return s.mediaClient(ctx, token, false)
 }
 
-// SendClient always uses the official API; local Bot Server is download-only.
+// SendClient uses the Local Bot endpoint only when complete Local Bot mode is enabled.
 func (s *sGateway) SendClient(ctx context.Context, token string) (*tgbot.Bot, error) {
 	return s.mediaClient(ctx, token, true)
 }
@@ -118,9 +119,10 @@ func (s *sGateway) mediaClient(ctx context.Context, token string, sending bool) 
 	operation := "download"
 	if sending {
 		operation = "send"
-		// An empty endpoint selects the SDK's official Telegram API URL.
-		// Neither the download nor runtime endpoint may redirect media sends.
-		serverURL = ""
+		if !conf.LocalBotEnabled {
+			// An empty endpoint selects the SDK's official Telegram API URL.
+			serverURL = ""
+		}
 	}
 	client, err = clientFactory(token, conf.ProxyURL, serverURL, nil)
 	if err != nil {
@@ -134,7 +136,7 @@ func (s *sGateway) mediaClient(ctx context.Context, token string, sending bool) 
 	}
 	s.mu.Unlock()
 	// Never log the token or endpoint URL (which can contain credentials).
-	g.Log().Info(ctx, "TG媒体客户端已创建", g.Map{"botKey": key, "operation": operation, "usesOfficialSendEndpoint": sending, "timeoutSeconds": int(timeout.Seconds())})
+	g.Log().Info(ctx, "TG媒体客户端已创建", g.Map{"botKey": key, "operation": operation, "localBotEnabled": conf.LocalBotEnabled, "timeoutSeconds": int(timeout.Seconds())})
 	return client, nil
 }
 
@@ -462,7 +464,7 @@ func (s *sGateway) observeBotCounts(ctx context.Context, configured int) {
 }
 
 func gatewayRuntimeSignature(mode string, conf *service.RuntimeConfig) string {
-	return mode + "\n" + strings.TrimSpace(conf.WebhookBaseURL) + "\n" + strings.TrimSpace(conf.ProxyURL) + "\n" + strings.TrimSpace(conf.RuntimeServerURL) + "\n" + strings.TrimSpace(conf.MediaServerURL) + "\n" + strings.Join(allowedUpdates(), ",")
+	return mode + "\n" + strings.TrimSpace(conf.WebhookBaseURL) + "\n" + strings.TrimSpace(conf.ProxyURL) + "\n" + strings.TrimSpace(conf.RuntimeServerURL) + "\n" + strings.TrimSpace(conf.MediaServerURL) + "\n" + strconv.FormatBool(conf.LocalBotEnabled) + "\n" + strings.Join(allowedUpdates(), ",")
 }
 
 func (s *sGateway) ensure(ctx context.Context, key, token, mode string, conf *service.RuntimeConfig) error {
