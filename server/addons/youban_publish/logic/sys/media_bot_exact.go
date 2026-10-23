@@ -3,8 +3,10 @@ package sys
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	publishmodel "hotgo/addons/youban_publish/model"
@@ -39,17 +41,27 @@ func botMediaExactCandidates(ctx context.Context, fingerprints []*mediaFingerpri
 		for key := range keys {
 			values = append(values, key)
 		}
+		sort.Strings(values)
 		scopeSQL, args := mediaPHashBucketScopeSQL(alias, scope.Partitions)
 		if scopeSQL == "" {
 			return nil
 		}
-		mod := g.DB().Model(table+" "+alias).Safe().Ctx(ctx).
-			Fields(keyExpression+" AS fingerprint_key,"+alias+".profile_id").
-			WhereIn(keyColumn, values).Where("("+scopeSQL+")", args...).Where(extra).
-			Where("EXISTS (SELECT 1 FROM hg_content_profile p WHERE p.id=" + alias + ".profile_id AND p.deleted_at IS NULL)").
-			Where("EXISTS (SELECT 1 FROM hg_youban_publish_profile_state ps WHERE ps.profile_id=" + alias + ".profile_id AND ps.tenant_id=" + alias + ".tenant_id AND ps.account_id=" + alias + ".account_id AND ps.deleted_at IS NULL)")
 		finish := scantrace.Begin(ctx, "query.exact_batch."+alias)
-		rows, err := mod.Group(keyExpression + "," + alias + ".profile_id").All()
+		var rows gdb.Result
+		var err error
+		if alias == "m" {
+			// Materialize the selective fingerprint lookup before joining the
+			// large permission scope. Do not probe every account for every hash.
+			query, queryArgs := botMediaMD5CandidatesSQL(values, scope)
+			rows, err = g.DB().GetAll(ctx, query, queryArgs...)
+		} else {
+			rows, err = g.DB().Model(table+" "+alias).Safe().Ctx(ctx).
+				Fields(keyExpression+" AS fingerprint_key,"+alias+".profile_id").
+				WhereIn(keyColumn, values).Where("("+scopeSQL+")", args...).Where(extra).
+				Where("EXISTS (SELECT 1 FROM hg_content_profile p WHERE p.id=" + alias + ".profile_id AND p.deleted_at IS NULL)").
+				Where("EXISTS (SELECT 1 FROM hg_youban_publish_profile_state ps WHERE ps.profile_id=" + alias + ".profile_id AND ps.tenant_id=" + alias + ".tenant_id AND ps.account_id=" + alias + ".account_id AND ps.deleted_at IS NULL)").
+				Group(keyExpression + "," + alias + ".profile_id").All()
+		}
 		finish(err)
 		if err != nil {
 			return gerror.Wrap(err, "批量查询媒体精确匹配失败")
@@ -97,4 +109,32 @@ func botMediaExactCandidates(ctx context.Context, fingerprints []*mediaFingerpri
 		return result, err
 	}
 	return result, nil
+}
+
+func botMediaMD5CandidatesSQL(values []string, scope *publishmodel.MediaSearchScope) (string, []any) {
+	if len(values) == 0 || scope == nil {
+		return "", nil
+	}
+	scopeSQL, scopeArgs := mediaPHashBucketScopeSQL("m", scope.Partitions)
+	if scopeSQL == "" {
+		return "", nil
+	}
+	args := make([]any, 0, len(values)+len(scopeArgs))
+	for _, value := range values {
+		args = append(args, value)
+	}
+	args = append(args, scopeArgs...)
+	query := fmt.Sprintf(`WITH fingerprint_match AS MATERIALIZED (
+ SELECT md5,profile_id,tenant_id,account_id FROM %s
+ WHERE md5 IN (%s) AND md5<>'' AND deleted_at IS NULL
+ AND media_type IN ('image','video')
+)
+SELECT m.md5 AS fingerprint_key,m.profile_id FROM fingerprint_match m
+WHERE (%s)
+AND EXISTS (SELECT 1 FROM hg_content_profile p WHERE p.id=m.profile_id AND p.deleted_at IS NULL)
+AND EXISTS (SELECT 1 FROM hg_youban_publish_profile_state ps
+ WHERE ps.profile_id=m.profile_id AND ps.tenant_id=m.tenant_id
+ AND ps.account_id=m.account_id AND ps.deleted_at IS NULL)
+GROUP BY m.md5,m.profile_id`, publishMediaTable, strings.TrimSuffix(strings.Repeat("?,", len(values)), ","), scopeSQL)
+	return query, args
 }

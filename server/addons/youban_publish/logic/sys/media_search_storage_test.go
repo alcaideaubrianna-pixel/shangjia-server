@@ -77,6 +77,7 @@ func TestMediaSearchStorageLocalPostgres(t *testing.T) {
 	before := gdb.GetConfig("default")
 	t.Cleanup(func() { gdb.SetConfigGroup("default", before) })
 	gdb.SetConfigGroup("default", gdb.ConfigGroup{{Type: "pgsql", Host: "127.0.0.1", Port: "35432", User: os.Getenv("USER"), Name: "postgres"}})
+	resetLocalScanTableFields(t, g.DB())
 	ctx := context.Background()
 	if !cache.Initialized() {
 		// Update a config value through the adapter's synchronized setter rather
@@ -278,12 +279,34 @@ func TestMediaSearchStorageLocalPostgres(t *testing.T) {
 				t.Fatal(err)
 			}
 			cleaned := false
-			media := &telegramMediaItem{Id: 999999, MediaType: "image", AntiScanMode: "background_replace", AntiScanBackgroundURL: "unused"}
+			// The fallback still indexes the final upload. Give it a real,
+			// permission-owned source instead of bypassing that invariant.
+			id, err := service.saveMediaRecordAndIndex(ctx, g.Map{"tenant_id": 5, "account_id": 6, "profile_id": 101, "media_type": "image"}, "保存回退测试媒体失败")
+			if err != nil {
+				t.Fatal(err)
+			}
+			media := &telegramMediaItem{Id: id, MediaType: "image", AntiScanMode: "background_replace", AntiScanBackgroundURL: "unused"}
 			out, cleanup, err := service.prepareTelegramAntiScanUploadFile(ctx, media, path, func() { cleaned = true }, "image")
 			if err != nil || out == "" || cleanup == nil || cleaned {
 				t.Fatalf("out=%q err=%v cleaned=%v", out, err, cleaned)
 			}
+			count, err := tx.Ctx(ctx).Model(publishMediaPHashAliasBucketTable).Where("media_id", id).Count()
+			if err != nil || count != 4 {
+				t.Fatalf("fallback upload not searchable: buckets=%d err=%v", count, err)
+			}
 			cleanup()
+		})
+		t.Run("fallback_rejects_missing_original", func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "document.jpg")
+			if err := os.WriteFile(path, encodeBackgroundReplacementTestImage(t, color.White), 0600); err != nil {
+				t.Fatal(err)
+			}
+			cleaned := false
+			media := &telegramMediaItem{Id: 999999, MediaType: "image", AntiScanMode: "background_replace", AntiScanBackgroundURL: "unused"}
+			out, cleanup, err := service.prepareTelegramAntiScanUploadFile(ctx, media, path, func() { cleaned = true }, "image")
+			if err == nil || out != "" || cleanup != nil || !cleaned {
+				t.Fatalf("missing source was accepted: out=%q err=%v cleaned=%v", out, err, cleaned)
+			}
 		})
 		t.Run("alias_bucket_failure_is_atomic", func(t *testing.T) {
 			if _, err := tx.Ctx(ctx).Exec("ALTER TABLE " + publishMediaPHashAliasBucketTable + " ADD CONSTRAINT reject_second CHECK(media_id<>501 OR bucket_pos<>2)"); err != nil {

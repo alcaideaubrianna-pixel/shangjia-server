@@ -167,6 +167,14 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 			return s.botMediaApproximateBatch(queryCtx, items, searchIn, searchScope)
 		})
 	cancelQueries()
+	// Even an entirely failed query must be distinguishable from a complete
+	// empty match, both to callers and to incident replay assertions.
+	if err != nil && in.SearchProgress != nil {
+		in.SearchProgress.Incomplete = true
+	}
+	if err != nil {
+		stats["incomplete"] = true
+	}
 	if err != nil && len(matches) == 0 && len(rankBotMediaSearchCandidates(fingerprintMatches)) == 0 {
 		return nil, 0, err
 	}

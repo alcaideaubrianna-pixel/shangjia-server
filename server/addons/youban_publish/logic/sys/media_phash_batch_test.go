@@ -72,7 +72,17 @@ func TestMediaPHashBatchLocalPostgres(t *testing.T) {
 			}
 		}
 		// Noise is deterministic, so both implementations see identical data.
-		if _, err := tx.Exec(`INSERT INTO hg_youban_publish_media SELECT n,n,5,6,'image',substring(md5(n::text),1,16),NULL FROM generate_series(1,?) n`, noiseRows); err != nil {
+		if _, err := tx.Exec(`INSERT INTO hg_youban_publish_media SELECT n,n,5,1000+n%501,'image',substring(md5(n::text),1,16),NULL FROM generate_series(1,?) n`, noiseRows); err != nil {
+			return err
+		}
+		// A hot 16-bit bucket defeats uniform-noise-only tests. Half the
+		// corpus shares a bucket with the real failing input but usually has
+		// a distant full hash, recreating large intermediate candidate sets.
+		hotHash := "0000000000000000"
+		if hashes := incidentCases["ICFBUMHJ"]; len(hashes) > 0 {
+			hotHash = hashes[0]
+		}
+		if _, err := tx.Exec(`UPDATE hg_youban_publish_media SET perceptual_hash=?||substring(md5(id::text),1,12) WHERE id%2=0`, hotHash[:4]); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(`INSERT INTO hg_youban_publish_media VALUES
@@ -121,6 +131,11 @@ func TestMediaPHashBatchLocalPostgres(t *testing.T) {
 			return err
 		}
 		for _, table := range []string{publishMediaPHashLshTable, publishMediaPHashAliasBucketTable} {
+			// Include the production bucket-leading indexes as well as the
+			// account-leading ones; either planner choice must preserve results.
+			if _, err := tx.Exec(fmt.Sprintf(`CREATE INDEX ON %s(tenant_id,media_type,bucket_pos,bucket_value) INCLUDE(account_id,media_id,profile_id,hash_value)`, table)); err != nil {
+				return err
+			}
 			if _, err := tx.Exec("ANALYZE " + table); err != nil {
 				return err
 			}
@@ -157,6 +172,9 @@ func TestMediaPHashBatchLocalPostgres(t *testing.T) {
 						return err
 					}
 					elapsed := time.Since(started)
+					if elapsed > 2*time.Second {
+						t.Errorf("batch exceeded local 2s budget: case=%s elapsed=%s", name, elapsed)
+					}
 					groups := make([][]mediaPHashBucketCandidateRow, len(hashes))
 					for _, row := range batch {
 						if row.InputIndex < 0 || row.InputIndex >= len(hashes) {

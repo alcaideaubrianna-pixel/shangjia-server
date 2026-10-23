@@ -29,6 +29,8 @@ func mediaPHashBatchSQL(hashes []string, threshold int, scopes []mediaPHashBucke
 	}
 	scopes = mediaPHashBucketValidScopes(scopes)
 	inputs := make([]string, 0, len(hashes))
+	distanceFilters := make([]string, 0, len(hashes))
+	distanceArgs := make([]any, 0, 2*len(hashes))
 	args := make([]any, 0)
 	values := make([]map[int]bool, mediaPHashLshBlockCount)
 	for i, hash := range hashes {
@@ -37,6 +39,8 @@ func mediaPHashBatchSQL(hashes []string, threshold int, scopes []mediaPHashBucke
 		}
 		inputs = append(inputs, "(?::integer,('x'||?)::bit(64))")
 		args = append(args, i, hash)
+		distanceFilters = append(distanceFilters, "bit_count((('x'||source.hash_value)::bit(64)) # (('x'||?)::bit(64))) <= ?")
+		distanceArgs = append(distanceArgs, hash, threshold)
 		if !scanScope {
 			for _, cell := range mediaPHashLshCells(hash, threshold) {
 				if values[cell.Pos-1] == nil {
@@ -58,8 +62,15 @@ func mediaPHashBatchSQL(hashes []string, threshold int, scopes []mediaPHashBucke
 		sort.Ints(probes)
 		for _, scope := range scopes {
 			branch, branchArgs := mediaPHashLshBranchWithProbesSQL(pos, probes, []mediaPHashBucketScopePart{scope}, nil, "image", 0, true)
+			// Reject distant hashes while reading each index branch, before the
+			// materialized union multiplies them by every album input. Keep all
+			// buckets of a matching hash so bucket_hits and recall stay unchanged.
+			// Bind constant query hashes directly. A correlated scan of the
+			// input CTE here repeats tuple iteration for every index row.
+			branch = "SELECT source.* FROM (" + branch + ") source WHERE (" + strings.Join(distanceFilters, " OR ") + ")"
 			branches = append(branches, fmt.Sprintf("SELECT source.*,%d AS bucket_pos FROM (%s) source", pos, branch))
 			args = append(args, branchArgs...)
+			args = append(args, distanceArgs...)
 		}
 	}
 	bucketCondition := "TRUE"
