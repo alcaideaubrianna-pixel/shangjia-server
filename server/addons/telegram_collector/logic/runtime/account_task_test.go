@@ -66,6 +66,16 @@ type testFinalizingAccountTasks struct {
 	finalized chan int64
 }
 
+type testTimeoutAccountTasks struct {
+	collectorservice.IAccountTasks
+	failed chan *sysin.AccountTaskFailure
+}
+
+func (s *testTimeoutAccountTasks) Fail(_ context.Context, in *sysin.AccountTaskFailure) error {
+	s.failed <- in
+	return nil
+}
+
 func (s *testFinalizingAccountTasks) FinalizeFailure(_ context.Context, taskID int64) error {
 	s.finalized <- taskID
 	return nil
@@ -151,16 +161,53 @@ func TestAccountTaskMediaFallbackDoesNotBlockControlOperations(t *testing.T) {
 }
 
 func TestAccountTaskTimeoutResetsOnlyMediaFallbackSession(t *testing.T) {
-	if !accountTaskRequiresSessionResetOnTimeout(&sysin.AccountTask{TaskType: sysin.AccountTaskTypeMessageMediaFallback}) {
-		t.Fatal("media fallback timeout must reset its stuck account session")
+	for _, taskType := range []string{
+		sysin.AccountTaskTypeMessagePushInline,
+		sysin.AccountTaskTypeMessageReconcile,
+		sysin.AccountTaskTypeMessageMediaFallback,
+		sysin.AccountTaskTypeMessageDeleteFallback,
+	} {
+		if !accountTaskRequiresSessionResetOnTimeout(&sysin.AccountTask{TaskType: taskType}) {
+			t.Fatalf("message task %s timeout must reset its stuck account session", taskType)
+		}
 	}
 	for _, taskType := range []string{
-		sysin.AccountTaskTypeMessageReconcile,
 		sysin.AccountTaskTypeMediaDownload,
 		sysin.AccountTaskTypeHistoryPage,
+		sysin.AccountTaskTypeDialogCacheRefresh,
 	} {
 		if accountTaskRequiresSessionResetOnTimeout(&sysin.AccountTask{TaskType: taskType}) {
 			t.Fatalf("task %s must retain its existing timeout behavior", taskType)
 		}
+	}
+}
+
+func TestMediaFallbackWatchdogPersistsFailureAndResetsSession(t *testing.T) {
+	tasks := &testTimeoutAccountTasks{failed: make(chan *sysin.AccountTaskFailure, 1)}
+	collectorservice.RegisterAccountTasks(tasks)
+	defer collectorservice.RegisterAccountTasks(nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	reset := make(chan struct{}, 1)
+	stop := watchAccountTaskTimeout(ctx,
+		&sysin.AccountTask{ID: 91, AccountID: 67, TaskType: sysin.AccountTaskTypeMessageMediaFallback},
+		&sysin.AccountLease{AccountID: 67, InstanceID: "test", Epoch: 3},
+		func() { reset <- struct{}{} },
+	)
+	defer stop()
+
+	select {
+	case failure := <-tasks.failed:
+		if failure.TaskID != 91 || failure.NotStarted {
+			t.Fatalf("unexpected failure payload: %+v", failure)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("watchdog did not persist the timed out media fallback")
+	}
+	select {
+	case <-reset:
+	case <-time.After(time.Second):
+		t.Fatal("watchdog did not reset the stuck account session")
 	}
 }
