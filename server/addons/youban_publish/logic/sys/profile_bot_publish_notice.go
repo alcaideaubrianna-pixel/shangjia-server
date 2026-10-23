@@ -26,8 +26,11 @@ type botProfilePublishNoticeTarget struct {
 }
 
 type botProfilePublishNoticeRow struct {
-	ChannelTitle string `json:"channelTitle"`
-	Status       string `json:"status"`
+	ChannelTitle    string `json:"channelTitle"`
+	ChannelUsername string `json:"channelUsername"`
+	TargetChatId    string `json:"targetChatId"`
+	TgMessageId     int64  `json:"tgMessageId"`
+	Status          string `json:"status"`
 }
 
 func newBotProfilePublishOperationNo(botId int64, chatId string, profileId int64) string {
@@ -73,10 +76,11 @@ func (s *sSysPublish) notifyBotProfilePublishCompleted(ctx context.Context, job 
 	}
 	var profile struct {
 		ProfileNo string      `json:"profileNo"`
+		Title     string      `json:"title"`
 		CreatedAt *gtime.Time `json:"createdAt"`
 	}
 	if err := g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).
-		Fields("profile_no,created_at").Where("id", job.ProfileId).WhereNull("deleted_at").Scan(&profile); err != nil {
+		Fields("profile_no,title,created_at").Where("id", job.ProfileId).WhereNull("deleted_at").Scan(&profile); err != nil {
 		return gerror.Wrap(err, "读取Bot上架通知资料失败")
 	}
 	if strings.TrimSpace(profile.ProfileNo) == "" {
@@ -85,18 +89,18 @@ func (s *sSysPublish) notifyBotProfilePublishCompleted(ctx context.Context, job 
 	var channels []botProfilePublishNoticeRow
 	if err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
 		LeftJoin(publishChannelTable+" c", "c.id=j.channel_id").
-		Fields("COALESCE(NULLIF(c.channel_title,''),j.target_chat_id) AS channel_title,j.status").
+		Fields("COALESCE(NULLIF(c.channel_title,''),j.target_chat_id) AS channel_title,c.channel_username,j.target_chat_id,j.tg_message_id,j.status").
 		Where("j.profile_id", job.ProfileId).Where("j.operation_no", job.OperationNo).
 		OrderAsc("j.channel_id").Scan(&channels); err != nil {
 		return gerror.Wrap(err, "读取Bot上架通知频道失败")
 	}
-	text := formatBotProfilePublishNotice(profile.ProfileNo, profile.CreatedAt, channels)
+	text := formatBotProfilePublishNotice(profile.ProfileNo, profile.Title, profile.CreatedAt, channels)
 	return botservice.SysBot().Notify(ctx, &botsysin.NotifyInp{
 		BotId: target.BotId, ChatId: target.ChatId, Text: text, ParseMode: "HTML",
 	})
 }
 
-func formatBotProfilePublishNotice(profileNo string, createdAt *gtime.Time, channels []botProfilePublishNoticeRow) string {
+func formatBotProfilePublishNotice(profileNo string, title string, createdAt *gtime.Time, channels []botProfilePublishNoticeRow) string {
 	createdText := "-"
 	if createdAt != nil {
 		createdText = createdAt.Format("Y-m-d H:i:s")
@@ -104,6 +108,7 @@ func formatBotProfilePublishNotice(profileNo string, createdAt *gtime.Time, chan
 	lines := []string{
 		"<b>资料上架完成</b>", "",
 		"编号：<code>" + html.EscapeString(strings.TrimSpace(profileNo)) + "</code>",
+		"标题：<code>" + html.EscapeString(strings.TrimSpace(title)) + "</code>",
 		"创建时间：" + html.EscapeString(createdText), "",
 	}
 	for _, channel := range channels {
@@ -111,7 +116,38 @@ func formatBotProfilePublishNotice(profileNo string, createdAt *gtime.Time, chan
 		if strings.TrimSpace(channel.Status) != telegramJobStatusSent {
 			result = "已跳过"
 		}
-		lines = append(lines, "["+html.EscapeString(strings.TrimSpace(channel.ChannelTitle))+"] "+result)
+		lines = append(lines, "["+html.EscapeString(botProfilePublishChannelLabel(channel))+"] "+botProfilePublishStatusHTML(result, botProfilePublishMessageURL(channel)))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func botProfilePublishChannelLabel(channel botProfilePublishNoticeRow) string {
+	label := strings.TrimSpace(channel.ChannelTitle)
+	if label == "" {
+		label = strings.TrimSpace(channel.TargetChatId)
+	}
+	return label
+}
+
+func botProfilePublishMessageURL(channel botProfilePublishNoticeRow) string {
+	if channel.TgMessageId <= 0 {
+		return ""
+	}
+	username := strings.TrimPrefix(strings.TrimSpace(channel.ChannelUsername), "@")
+	if username != "" {
+		return fmt.Sprintf("https://t.me/%s/%d", username, channel.TgMessageId)
+	}
+	chatId := strings.TrimPrefix(strings.TrimSpace(channel.TargetChatId), "-100")
+	if chatId == "" {
+		return ""
+	}
+	return fmt.Sprintf("https://t.me/c/%s/%d", chatId, channel.TgMessageId)
+}
+
+func botProfilePublishStatusHTML(status, messageURL string) string {
+	status = html.EscapeString(strings.TrimSpace(status))
+	if strings.TrimSpace(messageURL) == "" {
+		return "<b>" + status + "</b>"
+	}
+	return `<a href="` + html.EscapeString(messageURL) + `"><b>` + status + `</b></a>`
 }

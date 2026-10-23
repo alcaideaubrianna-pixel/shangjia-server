@@ -1,6 +1,7 @@
 package sys
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/go-telegram/bot/models"
@@ -83,6 +84,41 @@ func TestProfileCardMarkupForNoteHidesEmptySourceURL(t *testing.T) {
 	note := &publishsysin.NoteModel{ProfileModel: publishsysin.ProfileModel{ProfileNo: "A10004", IsCollected: true}}
 	if hasProfileSourceButton(profileCardMarkupForNote(note, "view"), "") {
 		t.Fatal("unexpected source button for profile without source URL")
+	}
+}
+
+func TestProfileEditSuccessMarkupReusesPublishCallback(t *testing.T) {
+	markup := profileEditSuccessMarkup("a10005")
+	if markup == nil || len(markup.InlineKeyboard) == 0 || len(markup.InlineKeyboard[0]) < 2 {
+		t.Fatalf("edit success buttons missing: %#v", markup)
+	}
+	if got := markup.InlineKeyboard[0][0]; got.Text != "重新上架" || got.CallbackData != "pf:up:A10005" {
+		t.Fatalf("republish button = %#v", got)
+	}
+	if got := markup.InlineKeyboard[0][1]; got.CallbackData != "pf:view:A10005" {
+		t.Fatalf("view button = %#v", got)
+	}
+}
+
+func TestFormatProfileChannelActionNotice(t *testing.T) {
+	channels := []profileActionChannel{
+		{Id: 7, Title: "频道甲", Username: "public_one", TargetChatId: "-100123", LatestMessageId: 10},
+		{Id: 8, Title: "频道<乙>", TargetChatId: "-100456", LatestMessageId: 20},
+		{Id: 7, Title: "频道甲", Username: "public_one"},
+	}
+	text := formatProfileChannelActionNotice("a10006", "标题<测试>", channels, "下架")
+	for _, want := range []string{"<b>资料下架完成</b>", "编号：<code>A10006</code>", "标题：<code>标题&lt;测试&gt;</code>", `[频道甲] <a href="https://t.me/public_one/10"><b>已下架</b></a>`, `[频道&lt;乙&gt;] <a href="https://t.me/c/456/20"><b>已下架</b></a>`, "频道历史消息已进入后台清理队列"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("notice missing %q: %s", want, text)
+		}
+	}
+	if strings.Count(text, "[频道甲]") != 1 {
+		t.Fatalf("duplicate channel result: %s", text)
+	}
+
+	deleted := formatProfileChannelActionNotice("A10006", "删除标题", []profileActionChannel{{Id: 9}}, "删除")
+	if !strings.Contains(deleted, "[频道 9] <b>已删除</b>") {
+		t.Fatalf("delete fallback channel missing: %s", deleted)
 	}
 }
 

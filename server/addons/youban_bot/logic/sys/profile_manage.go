@@ -468,6 +468,7 @@ func (s *sSysBot) deleteProfileByCallback(ctx context.Context, botId int64, chat
 	if err = s.sendMessageOnly(ctx, botId, chatId, fmt.Sprintf("资料编号：%s 正在执行下架并删除，请稍候…", html.EscapeString(no))); err != nil {
 		return err
 	}
+	channels := profileActionChannels(ctx, account.TenantId, note.Id, note.ChannelIds)
 	profileId := note.Id
 	accountCopy := *account
 	go func() {
@@ -477,39 +478,121 @@ func (s *sSysBot) deleteProfileByCallback(ctx context.Context, botId int64, chat
 			_ = s.sendMessageOnly(workCtx, botId, chatId, fmt.Sprintf("资料编号：%s 下架删除失败：%s", html.EscapeString(no), html.EscapeString(err.Error())))
 			return
 		}
-		lines := []string{fmt.Sprintf("资料编号：%s 已经下架删除", html.EscapeString(no))}
-		channelNames := profileDeleteChannelNames(workCtx, accountCopy.TenantId, note.ChannelIds)
-		for _, channelId := range note.ChannelIds {
-			name := channelNames[channelId]
-			if name == "" {
-				name = fmt.Sprintf("频道 %d", channelId)
-			}
-			lines = append(lines, fmt.Sprintf("%s ✅", html.EscapeString(name)))
-		}
-		_ = s.sendMessageOnly(workCtx, botId, chatId, strings.Join(lines, "\n"))
+		_ = s.sendMessageOnly(workCtx, botId, chatId, formatProfileChannelActionNotice(no, note.Title, channels, "删除"))
 	}()
 	return nil
 }
 
-func profileDeleteChannelNames(ctx context.Context, tenantId int64, ids []int64) map[int64]string {
-	result := make(map[int64]string)
+type profileActionChannel struct {
+	Id              int64  `orm:"id"`
+	Title           string `orm:"channel_title"`
+	Username        string `orm:"channel_username"`
+	TargetChatId    string `orm:"target_chat_id"`
+	LatestMessageId int64  `orm:"latest_message_id"`
+}
+
+func formatProfileChannelActionNotice(profileNo string, title string, channels []profileActionChannel, action string) string {
+	result := "已" + strings.TrimSpace(action)
+	lines := []string{
+		"<b>资料" + html.EscapeString(action) + "完成</b>",
+		"",
+		"编号：<code>" + html.EscapeString(strings.ToUpper(strings.TrimSpace(profileNo))) + "</code>",
+		"标题：<code>" + html.EscapeString(strings.TrimSpace(title)) + "</code>",
+	}
+	seen := make(map[int64]struct{}, len(channels))
+	for _, channel := range channels {
+		if channel.Id <= 0 {
+			continue
+		}
+		if _, ok := seen[channel.Id]; ok {
+			continue
+		}
+		seen[channel.Id] = struct{}{}
+		lines = append(lines, "["+html.EscapeString(profileActionChannelLabel(channel))+"] "+profileActionStatusHTML(result, profileActionMessageURL(channel)))
+	}
+	if len(channels) > 0 {
+		lines = append(lines, "", "频道历史消息已进入后台清理队列。")
+	}
+	return strings.Join(lines, "\n")
+}
+
+func profileActionChannels(ctx context.Context, tenantId, profileId int64, ids []int64) []profileActionChannel {
+	result := make([]profileActionChannel, 0, len(ids))
 	if tenantId <= 0 || len(ids) == 0 {
 		return result
 	}
-	var rows []struct {
-		Id       int64  `orm:"id"`
-		Title    string `orm:"channel_title"`
-		Username string `orm:"channel_username"`
-	}
+	ids = uniqueInt64Values(ids)
 	if err := g.DB().Model("hg_youban_publish_channel").Safe().Ctx(ctx).
-		Fields("id,channel_title,channel_username").Where("tenant_id", tenantId).
-		WhereIn("id", ids).WhereNull("deleted_at").Scan(&rows); err != nil {
+		Fields("id,channel_title,channel_username,target_chat_id").Where("tenant_id", tenantId).
+		WhereIn("id", ids).WhereNull("deleted_at").OrderAsc("id").Scan(&result); err != nil {
 		return result
 	}
-	for _, row := range rows {
-		result[row.Id] = firstNonEmpty(strings.TrimSpace(row.Title), strings.TrimPrefix(strings.TrimSpace(row.Username), "@"))
+	if profileId <= 0 || len(result) == 0 {
+		return result
+	}
+	var messages []struct {
+		ChannelId int64 `orm:"channel_id"`
+		MessageId int64 `orm:"message_id"`
+	}
+	_ = g.DB().Model("hg_youban_publish_tg_job").Safe().Ctx(ctx).
+		Fields("channel_id,MAX(tg_message_id) AS message_id").
+		Where("tenant_id", tenantId).Where("profile_id", profileId).WhereIn("channel_id", ids).
+		WhereGT("tg_message_id", 0).Group("channel_id").Scan(&messages)
+	messageIds := make(map[int64]int64, len(messages))
+	for _, message := range messages {
+		messageIds[message.ChannelId] = message.MessageId
+	}
+	for i := range result {
+		result[i].LatestMessageId = messageIds[result[i].Id]
 	}
 	return result
+}
+
+func uniqueInt64Values(values []int64) []int64 {
+	seen := make(map[int64]struct{}, len(values))
+	result := make([]int64, 0, len(values))
+	for _, value := range values {
+		if value <= 0 {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
+func profileActionChannelLabel(channel profileActionChannel) string {
+	label := strings.TrimSpace(channel.Title)
+	if label == "" {
+		label = fmt.Sprintf("频道 %d", channel.Id)
+	}
+	return label
+}
+
+func profileActionMessageURL(channel profileActionChannel) string {
+	if channel.LatestMessageId <= 0 {
+		return ""
+	}
+	username := strings.TrimPrefix(strings.TrimSpace(channel.Username), "@")
+	if username != "" {
+		return fmt.Sprintf("https://t.me/%s/%d", username, channel.LatestMessageId)
+	}
+	chatId := strings.TrimPrefix(strings.TrimSpace(channel.TargetChatId), "-100")
+	if chatId == "" {
+		return ""
+	}
+	return fmt.Sprintf("https://t.me/c/%s/%d", chatId, channel.LatestMessageId)
+}
+
+func profileActionStatusHTML(status, messageURL string) string {
+	status = html.EscapeString(strings.TrimSpace(status))
+	if strings.TrimSpace(messageURL) == "" {
+		return "<b>" + status + "</b>"
+	}
+	return `<a href="` + html.EscapeString(messageURL) + `"><b>` + status + `</b></a>`
 }
 
 func (s *sSysBot) handleProfileInlineQuery(ctx context.Context, botId int64, query *models.InlineQuery) error {
@@ -968,6 +1051,14 @@ func (s *sSysBot) changeProfilesStatus(ctx context.Context, botId int64, chatId 
 }
 
 func (s *sSysBot) changeProfilesStatusByCallback(ctx context.Context, botId int64, chatId string, account *botProfileAccount, query *models.CallbackQuery, action string, no string, status int) error {
+	var downNote *publishsysin.NoteModel
+	var downChannels []profileActionChannel
+	if status == 2 {
+		downNote, _ = publishService.SysPublish().BotProfileView(ctx, botProfileViewInput(account, no))
+		if downNote != nil {
+			downChannels = profileActionChannels(ctx, account.TenantId, downNote.Id, downNote.ChannelIds)
+		}
+	}
 	res, operationErr := publishService.SysPublish().BotProfileStatus(ctx, &publishsysin.BotProfileStatusInp{
 		TenantId: account.TenantId, AccountId: account.AccountId, AccountType: account.AccountType,
 		NotifyBotId: botId, NotifyChatId: chatId, Nos: []string{no}, Status: status,
@@ -975,6 +1066,9 @@ func (s *sSysBot) changeProfilesStatusByCallback(ctx context.Context, botId int6
 	s.auditProfileCallback(ctx, query, account, action, no, operationErr)
 	if operationErr != nil {
 		return s.replyBotError(ctx, botId, chatId, "资料管理", operationErr)
+	}
+	if status == 2 && downNote != nil {
+		return s.sendMessageOnly(ctx, botId, chatId, formatProfileChannelActionNotice(downNote.ProfileNo, downNote.Title, downChannels, "下架"))
 	}
 	label := "上架"
 	if status == 2 {
@@ -2562,7 +2656,7 @@ func (s *sSysBot) consumeProfileCreatePart(ctx context.Context, botId int64, cha
 				return s.sendProfileCreateStepPrompt(ctx, botId, chatId, "waiting_verify")
 			}
 			_ = s.completeProfileSession(ctx, session.Id)
-			if err = s.sendMessageOnly(ctx, botId, chatId, "资料已重新覆盖。"); err != nil {
+			if err = s.sendProfileEditSuccess(ctx, botId, chatId, note, "资料已重新覆盖"); err != nil {
 				return err
 			}
 			return s.sendProfileCard(ctx, botId, chatId, note, "view")
@@ -3293,7 +3387,29 @@ func (s *sSysBot) editProfileBySession(ctx context.Context, botId int64, chatId 
 	if err != nil {
 		return s.replyBotError(ctx, botId, chatId, "资料管理", err)
 	}
-	return s.sendMessageOnly(ctx, botId, chatId, fmt.Sprintf("已保存。\n编号：<code>%s</code>\n标题：%s", html.EscapeString(note.ProfileNo), html.EscapeString(note.Title)))
+	return s.sendProfileEditSuccess(ctx, botId, chatId, note, "资料编辑成功")
+}
+
+func (s *sSysBot) sendProfileEditSuccess(ctx context.Context, botId int64, chatId string, note *publishsysin.NoteModel, title string) error {
+	if note == nil || strings.TrimSpace(note.ProfileNo) == "" {
+		return s.sendMessageOnly(ctx, botId, chatId, title+"。")
+	}
+	row, err := s.botById(ctx, botId)
+	if err != nil {
+		return err
+	}
+	profileNo := strings.ToUpper(strings.TrimSpace(note.ProfileNo))
+	text := fmt.Sprintf("<b>%s</b>\n\n编号：<code>%s</code>\n标题：<code>%s</code>", html.EscapeString(title), html.EscapeString(profileNo), html.EscapeString(note.Title))
+	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, text, "HTML", false, profileEditSuccessMarkup(profileNo))
+	return err
+}
+
+func profileEditSuccessMarkup(profileNo string) *models.InlineKeyboardMarkup {
+	profileNo = strings.ToUpper(strings.TrimSpace(profileNo))
+	return &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
+		{{Text: "重新上架", CallbackData: "pf:up:" + profileNo}, {Text: "查看详情", CallbackData: "pf:view:" + profileNo}},
+		{{Text: "返回资料管理", CallbackData: "pf:menu"}},
+	}}
 }
 
 func (s *sSysBot) cancelProfileQueue(ctx context.Context, botId int64, chatId string, account *botProfileAccount, nos []string) error {
