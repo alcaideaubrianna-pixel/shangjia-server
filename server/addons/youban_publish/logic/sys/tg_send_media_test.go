@@ -108,6 +108,18 @@ func TestTelegramReusableFileFallbackTriesURLBeforeUpload(t *testing.T) {
 	}
 }
 
+func TestTelegramRejectedURLFallsBackToMultipartUpload(t *testing.T) {
+	media := &telegramMediaItem{MediaType: "video", FileUrl: "https://cdn.example/media/video.mp4"}
+	err := errors.New("bad request, Bad Request: wrong file identifier/HTTP URL specified")
+	if !telegramMediaCanFallbackToUpload(media, err) {
+		t.Fatal("explicit Telegram URL rejection must fall back to multipart upload")
+	}
+	forced := telegramMediaFallbackCandidate(media)
+	if !forced.ForceUpload || telegramMediaRemoteURL(forced) != "" {
+		t.Fatalf("multipart fallback was not forced: %+v", forced)
+	}
+}
+
 func TestTelegramMediaGroupFallbackTriesURLBeforeUpload(t *testing.T) {
 	media := []*telegramMediaItem{{TgFileId: "BAAC-cached", FileUrl: "https://cdn.example/video.mp4"}}
 	urlStage := telegramMediaSetWithoutReusableFileID(media)

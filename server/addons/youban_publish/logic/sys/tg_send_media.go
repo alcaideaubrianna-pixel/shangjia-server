@@ -954,7 +954,7 @@ func telegramMediaCanFallbackToUpload(media *telegramMediaItem, err error) bool 
 	if telegramMediaUsesReusableFileId(media) {
 		return isTelegramInvalidReusableFileError(err) || isTelegramPhotoTooLargeError(err)
 	}
-	return telegramMediaCanUseRemoteURL(media) && (isTelegramRemoteURLRejectedError(err) || isTelegramPhotoTooLargeError(err))
+	return telegramMediaCanUseRemoteURL(media) && (isTelegramRemoteURLRejectedError(err) || isTelegramInvalidReusableFileError(err) || isTelegramPhotoTooLargeError(err))
 }
 
 func telegramMediaSetCanFallbackToUpload(media []*telegramMediaItem, err error) bool {
