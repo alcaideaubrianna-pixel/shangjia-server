@@ -16,3 +16,6 @@ docker
 !server/manifest/docker/entrypoint.sh
 logs
 /.migration-state/
+server/addons/youban_publish/logic/sys/resource
+server/.tmp-ops
+server/.tmp
