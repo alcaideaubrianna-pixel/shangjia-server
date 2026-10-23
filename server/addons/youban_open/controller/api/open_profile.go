@@ -256,5 +256,5 @@ func openProfileContext(ctx context.Context) (context.Context, error) {
 	if err != nil {
 		return nil, err
 	}
-	return profilescope.WithTrustedTenantIds(ctx, tenantIds), nil
+	return profilescope.WithTrustedEnabledAccountTenantIds(ctx, tenantIds), nil
 }

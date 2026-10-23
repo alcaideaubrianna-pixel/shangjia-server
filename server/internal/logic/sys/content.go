@@ -1829,10 +1829,16 @@ func (s *sSysContent) publicProfileAccessWhere(mod *gdb.Model) *gdb.Model {
 	if len(scope.TenantIds) == 0 {
 		return mod.Where("1=0")
 	}
-	return mod.Where(
-		"EXISTS (SELECT 1 FROM hg_youban_publish_profile_state yps WHERE yps.profile_id=p."+profileColumns.Id+" AND yps.tenant_id IN(?) AND yps.deleted_at IS NULL)",
-		scope.TenantIds,
-	)
+	condition := publicProfileScopeExistsCondition(profileColumns.Id, scope.RequireEnabledAccount)
+	return mod.Where(condition, scope.TenantIds)
+}
+
+func publicProfileScopeExistsCondition(profileIDColumn string, requireEnabledAccount bool) string {
+	condition := "EXISTS (SELECT 1 FROM hg_youban_publish_profile_state yps"
+	if requireEnabledAccount {
+		condition += " INNER JOIN hg_youban_publish_account ypa ON ypa.id=yps.account_id AND ypa.tenant_id=yps.tenant_id AND ypa.status=1 AND ypa.deleted_at IS NULL"
+	}
+	return condition + " WHERE yps.profile_id=p." + profileIDColumn + " AND yps.tenant_id IN(?) AND yps.deleted_at IS NULL)"
 }
 
 func (s *sSysContent) ClearHomeProfileCardsCache(ctx context.Context) {

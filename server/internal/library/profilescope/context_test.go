@@ -25,3 +25,13 @@ func TestWithTenantIdsDoesNotGrantTrustedAccess(t *testing.T) {
 		t.Fatalf("expected scoped non-trusted context, got %+v", scope)
 	}
 }
+
+func TestWithTrustedEnabledAccountTenantIdsMarksAccountRequirement(t *testing.T) {
+	scope := FromContext(WithTrustedEnabledAccountTenantIds(context.Background(), []int64{54}))
+	if !scope.Applied || !scope.Trusted || !scope.RequireEnabledAccount {
+		t.Fatalf("expected trusted enabled-account scope, got %+v", scope)
+	}
+	if len(scope.TenantIds) != 1 || scope.TenantIds[0] != 54 {
+		t.Fatalf("unexpected tenant ids: %+v", scope.TenantIds)
+	}
+}
