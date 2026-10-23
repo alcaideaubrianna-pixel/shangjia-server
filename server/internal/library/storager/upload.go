@@ -181,7 +181,7 @@ func LastUrl(ctx context.Context, fullPath, drive string) string {
 		}
 		return strings.TrimRight(config.CosBucketURL, "/") + "/" + fullPath
 	case consts.UploadDriveOss:
-		return config.OssBucketURL + "/" + fullPath
+		return strings.TrimRight(config.OssBucketURL, "/") + "/" + strings.TrimLeft(fullPath, "/")
 	case consts.UploadDriveQiNiu:
 		return config.QiNiuDomain + "/" + fullPath
 	case consts.UploadDriveMinio:

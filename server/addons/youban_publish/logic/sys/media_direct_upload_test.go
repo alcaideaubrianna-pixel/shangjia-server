@@ -132,3 +132,25 @@ func TestDirectUploadConfigDigestChangesWithBucketOrCredentials(t *testing.T) {
 		t.Fatal("credential change must invalidate direct upload session")
 	}
 }
+
+func TestDirectUploadConfigDigestIncludesOssConfig(t *testing.T) {
+	base := &model.UploadConfig{
+		Drive:        "oss",
+		OssBucket:    "bucket-1",
+		OssEndpoint:  "https://oss-ap-southeast-1-internal.aliyuncs.com",
+		OssSecretId:  "access-key",
+		OssSecretKey: "secret-key",
+		OssPath:      "hotgo/file",
+		OssBucketURL: "https://img.example.com",
+	}
+	changed := *base
+	changed.OssEndpoint = "https://oss-cn-hangzhou-internal.aliyuncs.com"
+	if directUploadConfigDigest(base) == directUploadConfigDigest(&changed) {
+		t.Fatal("OSS endpoint change must invalidate direct upload session")
+	}
+	changed = *base
+	changed.OssSecretKey = "rotated-secret-key"
+	if directUploadConfigDigest(base) == directUploadConfigDigest(&changed) {
+		t.Fatal("OSS credential change must invalidate direct upload session")
+	}
+}

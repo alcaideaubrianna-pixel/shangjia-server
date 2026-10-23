@@ -662,7 +662,7 @@ type AdminMediaMultipartAttachRes struct {
 }
 
 type AdminMediaDirectUploadCreateReq struct {
-	g.Meta `path:"/publish/admin/media/direct-upload/create" method:"post" tags:"上架插件管理端" summary:"创建COS直传会话"`
+	g.Meta `path:"/publish/admin/media/direct-upload/create" method:"post" tags:"上架插件管理端" summary:"创建媒体直传会话"`
 	sysin.MediaDirectUploadCreateInp
 }
 type AdminMediaDirectUploadCreateRes struct {
@@ -1006,7 +1006,7 @@ type MediaMultipartAttachRes struct {
 }
 
 type MediaDirectUploadCreateReq struct {
-	g.Meta `path:"/publish/media/direct-upload/create" method:"post" tags:"上架插件" summary:"创建COS直传会话"`
+	g.Meta `path:"/publish/media/direct-upload/create" method:"post" tags:"上架插件" summary:"创建媒体直传会话"`
 	sysin.MediaDirectUploadCreateInp
 }
 type MediaDirectUploadCreateRes struct {

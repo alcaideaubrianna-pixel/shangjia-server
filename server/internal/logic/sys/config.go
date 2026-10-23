@@ -239,6 +239,12 @@ func (s *sSysConfig) ensureCosUploadConfig(ctx context.Context) (err error) {
 		{key: "uploadR2Bucket", name: "R2 Bucket", sort: 478, tip: "R2 存储桶名称"},
 		{key: "uploadR2Region", name: "R2 Region", sort: 479, tip: "R2 通常使用 auto"},
 		{key: "uploadR2PublicURL", name: "R2 公开访问域名", sort: 480, tip: "R2 自定义域名或公开访问地址"},
+		{key: "uploadOssSecretId", name: "OSS AccessKey ID", sort: 481, tip: "阿里云 RAM 用户的 AccessKey ID"},
+		{key: "uploadOssSecretKey", name: "OSS AccessKey Secret", sort: 482, tip: "阿里云 RAM 用户的 AccessKey Secret"},
+		{key: "uploadOssEndpoint", name: "OSS 内网 Endpoint", sort: 483, tip: "SAE 同地域访问地址，例如：https://oss-ap-southeast-1-internal.aliyuncs.com"},
+		{key: "uploadOssBucket", name: "OSS Bucket", sort: 484, tip: "OSS 存储空间名称"},
+		{key: "uploadOssBucketURL", name: "OSS 公开访问域名", sort: 485, tip: "OSS 自定义域名或 Bucket 公网访问地址"},
+		{key: "uploadOssPath", name: "OSS 存储路径", sort: 486, tip: "对象存储目录前缀，例如：hotgo/file"},
 	}
 
 	cols := dao.SysConfig.Columns()

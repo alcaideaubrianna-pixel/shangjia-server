@@ -293,6 +293,15 @@ func mediaFileCacheCDNURL(ctx context.Context, configKey string, objectPath stri
 }
 
 func mediaFileCacheSourceDownloader(ctx context.Context, source mediaFileCacheSource) func(context.Context, string, string) error {
+	if strings.EqualFold(source.Drive, "oss") && source.ObjectPath != "" {
+		return func(downloadCtx context.Context, _ string, targetPath string) error {
+			if err := storager.DownloadOssObjectToFile(downloadCtx, source.ObjectPath, targetPath); err != nil {
+				g.Log().Warningf(downloadCtx, "OSS内网下载失败，降级使用公开地址 objectPath:%s err:%+v", source.ObjectPath, err)
+				return downloadMediaFileCache(downloadCtx, source.URL, targetPath)
+			}
+			return nil
+		}
+	}
 	if !strings.EqualFold(source.Drive, "cos") || mediaFileCacheCosDownloadMode(ctx) != mediaFileCacheCosModeOrigin || source.ObjectPath == "" {
 		if mediaFileCacheIsWorkerURL(ctx, source.URL) {
 			return downloadWorkerMediaFileCache

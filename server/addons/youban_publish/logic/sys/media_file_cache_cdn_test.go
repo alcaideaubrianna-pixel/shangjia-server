@@ -58,6 +58,17 @@ func TestManagedMediaObjectPathRejectsUnmanagedPath(t *testing.T) {
 	}
 }
 
+func TestMediaFileCacheUsesInternalDownloaderForOss(t *testing.T) {
+	source := mediaFileCacheSource{
+		Drive:      "oss",
+		ObjectPath: "hotgo/file/example.jpg",
+		URL:        "https://img.example.com/hotgo/file/example.jpg",
+	}
+	if downloader := mediaFileCacheSourceDownloader(context.Background(), source); downloader == nil {
+		t.Fatal("expected OSS attachment to use the internal object downloader")
+	}
+}
+
 func TestMediaFileCacheErrorClass(t *testing.T) {
 	if got := mediaFileCacheErrorClass(&mediaFileCacheHTTPStatusError{statusCode: 404}); got != "404" {
 		t.Fatalf("404 class=%q", got)
