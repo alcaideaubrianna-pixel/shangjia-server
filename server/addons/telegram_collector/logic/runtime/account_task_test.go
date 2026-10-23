@@ -137,14 +137,30 @@ func TestAccountTaskTimeoutForMessageReconcile(t *testing.T) {
 }
 
 func TestAccountTaskMediaFallbackDoesNotBlockControlOperations(t *testing.T) {
-	var gate sync.Mutex
-	if got := accountTaskOperationGate(sysin.AccountTaskTypeMessageMediaFallback, &gate); got != nil {
-		t.Fatal("media fallback must not hold the account control-operation gate")
+	var operationGate sync.Mutex
+	var mediaFallbackGate sync.Mutex
+	if got := accountTaskOperationGate(sysin.AccountTaskTypeMessageMediaFallback, &operationGate, &mediaFallbackGate); got != &mediaFallbackGate {
+		t.Fatal("media fallback tasks must be serialized on their dedicated gate")
 	}
-	if got := accountTaskOperationGate(sysin.AccountTaskTypeMediaDownload, &gate); got != nil {
+	if got := accountTaskOperationGate(sysin.AccountTaskTypeMediaDownload, &operationGate, &mediaFallbackGate); got != nil {
 		t.Fatal("media download must not hold the account control-operation gate")
 	}
-	if got := accountTaskOperationGate(sysin.AccountTaskTypeMessageReconcile, &gate); got != &gate {
+	if got := accountTaskOperationGate(sysin.AccountTaskTypeMessageReconcile, &operationGate, &mediaFallbackGate); got != &operationGate {
 		t.Fatal("reconciliation must retain the account control-operation gate")
+	}
+}
+
+func TestAccountTaskTimeoutResetsOnlyMediaFallbackSession(t *testing.T) {
+	if !accountTaskRequiresSessionResetOnTimeout(&sysin.AccountTask{TaskType: sysin.AccountTaskTypeMessageMediaFallback}) {
+		t.Fatal("media fallback timeout must reset its stuck account session")
+	}
+	for _, taskType := range []string{
+		sysin.AccountTaskTypeMessageReconcile,
+		sysin.AccountTaskTypeMediaDownload,
+		sysin.AccountTaskTypeHistoryPage,
+	} {
+		if accountTaskRequiresSessionResetOnTimeout(&sysin.AccountTask{TaskType: taskType}) {
+			t.Fatalf("task %s must retain its existing timeout behavior", taskType)
+		}
 	}
 }

@@ -30,6 +30,10 @@ type accountTaskRetryDelay interface {
 var accountRuntimeMeter = otel.Meter("hotgo/addons/telegram_collector/runtime")
 
 func RunAccountTaskLoop(ctx context.Context, client *telegram.Client, lease *sysin.AccountLease, operationGate *sync.Mutex) {
+	runAccountTaskLoop(ctx, client, lease, operationGate, nil)
+}
+
+func runAccountTaskLoop(ctx context.Context, client *telegram.Client, lease *sysin.AccountLease, operationGate *sync.Mutex, resetSession context.CancelFunc) {
 	if client == nil || lease == nil {
 		return
 	}
@@ -37,21 +41,22 @@ func RunAccountTaskLoop(ctx context.Context, client *telegram.Client, lease *sys
 	if operationGate == nil {
 		operationGate = &sync.Mutex{}
 	}
+	mediaFallbackGate := &sync.Mutex{}
 	workers.Add(accountTaskWorkerCount)
 	for workerID := 1; workerID <= accountTaskWorkerCount; workerID++ {
 		go func(workerID int) {
 			defer workers.Done()
-			accountTaskWorkerLoop(ctx, client, lease, operationGate, workerID)
+			accountTaskWorkerLoop(ctx, client, lease, operationGate, mediaFallbackGate, resetSession, workerID)
 		}(workerID)
 	}
 	workers.Wait()
 }
 
-func accountTaskWorkerLoop(ctx context.Context, client *telegram.Client, lease *sysin.AccountLease, operationGate *sync.Mutex, workerID int) {
+func accountTaskWorkerLoop(ctx context.Context, client *telegram.Client, lease *sysin.AccountLease, operationGate, mediaFallbackGate *sync.Mutex, resetSession context.CancelFunc, workerID int) {
 	ticker := time.NewTicker(accountTaskPollInterval)
 	defer ticker.Stop()
 	for {
-		keepRunning, handled := processAccountTask(ctx, client, lease, operationGate)
+		keepRunning, handled := processAccountTask(ctx, client, lease, operationGate, mediaFallbackGate, resetSession)
 		if !keepRunning {
 			return
 		}
@@ -67,7 +72,7 @@ func accountTaskWorkerLoop(ctx context.Context, client *telegram.Client, lease *
 	}
 }
 
-func processAccountTask(ctx context.Context, client *telegram.Client, lease *sysin.AccountLease, operationGate *sync.Mutex) (bool, bool) {
+func processAccountTask(ctx context.Context, client *telegram.Client, lease *sysin.AccountLease, operationGate, mediaFallbackGate *sync.Mutex, resetSession context.CancelFunc) (bool, bool) {
 	renewed, err := collectorservice.AccountLeaseManager().Renew(ctx, lease, 0)
 	if err != nil {
 		g.Log().Warningf(ctx, "续期Telegram账号任务租约失败 tgAccountId:%d err:%+v", lease.AccountID, err)
@@ -99,7 +104,7 @@ func processAccountTask(ctx context.Context, client *telegram.Client, lease *sys
 			taskCtx, cancel := context.WithCancel(ctx)
 			waitCtx, waitCancel := context.WithTimeout(taskCtx, 30*time.Second)
 			stopRenew := keepAccountTaskLeaseAlive(taskCtx, cancel, lease)
-			gate := accountTaskOperationGate(task.TaskType, operationGate)
+			gate := accountTaskOperationGate(task.TaskType, operationGate, mediaFallbackGate)
 			waitStarted := time.Now()
 			gateErr := lockAccountTaskOperation(waitCtx, gate)
 			waitCancel()
@@ -109,8 +114,10 @@ func processAccountTask(ctx context.Context, client *telegram.Client, lease *sys
 			var executionErr error
 			if gateErr == nil {
 				executionCtx, executionCancel := context.WithTimeout(taskCtx, accountTaskTimeout(task.TaskType))
+				stopWatchdog := watchAccountTaskTimeout(executionCtx, task, lease, resetSession)
 				result, handleErr = handler.HandleAccountTask(executionCtx, client, task)
 				executionErr = executionCtx.Err()
+				stopWatchdog()
 				executionCancel()
 				if gate != nil {
 					gate.Unlock()
@@ -163,17 +170,50 @@ func processAccountTask(ctx context.Context, client *telegram.Client, lease *sys
 	return true, len(tasks) > 0
 }
 
-// Media download/fallback work can spend minutes waiting on remote storage or
-// Telegram. It must not hold the account control-operation gate, otherwise one
-// slow media task blocks reconciliation and all subsequent account recovery
-// tasks. The account lease and per-task lease still provide ownership and
-// bounded concurrency.
-func accountTaskOperationGate(taskType string, gate *sync.Mutex) *sync.Mutex {
+func watchAccountTaskTimeout(ctx context.Context, task *sysin.AccountTask, lease *sysin.AccountLease, resetSession context.CancelFunc) func() {
+	stop := make(chan struct{})
+	if !accountTaskRequiresSessionResetOnTimeout(task) || resetSession == nil {
+		return func() { close(stop) }
+	}
+	go func() {
+		select {
+		case <-stop:
+			return
+		case <-ctx.Done():
+			if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				return
+			}
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			defer cancel()
+			cause := gerror.Newf("Telegram账号媒体降级发送超过%s，已重置协议号连接", accountTaskTimeout(task.TaskType))
+			if err := collectorservice.AccountTasks().Fail(cleanupCtx, &sysin.AccountTaskFailure{
+				TaskID: task.ID, Lease: lease, Cause: cause, RetryDelay: retryDelay(cause),
+			}); err != nil {
+				g.Log().Warningf(cleanupCtx, "协议号媒体降级超时状态写回失败 taskId:%d tgAccountId:%d err:%+v", task.ID, task.AccountID, err)
+			} else {
+				g.Log().Warningf(cleanupCtx, "协议号媒体降级调用未在期限内返回，已写回失败并重置连接 taskId:%d tgAccountId:%d timeout:%s", task.ID, task.AccountID, accountTaskTimeout(task.TaskType))
+			}
+			resetSession()
+		}
+	}()
+	return func() { close(stop) }
+}
+
+func accountTaskRequiresSessionResetOnTimeout(task *sysin.AccountTask) bool {
+	return task != nil && task.TaskType == sysin.AccountTaskTypeMessageMediaFallback
+}
+
+// Media fallback uses its own gate: large albums stay serialized per account
+// without blocking reconciliation and other control operations. Media downloads
+// retain their existing independent transfer concurrency.
+func accountTaskOperationGate(taskType string, operationGate, mediaFallbackGate *sync.Mutex) *sync.Mutex {
 	switch taskType {
-	case sysin.AccountTaskTypeMediaDownload, sysin.AccountTaskTypeMessageMediaFallback:
+	case sysin.AccountTaskTypeMediaDownload:
 		return nil
+	case sysin.AccountTaskTypeMessageMediaFallback:
+		return mediaFallbackGate
 	default:
-		return gate
+		return operationGate
 	}
 }
 

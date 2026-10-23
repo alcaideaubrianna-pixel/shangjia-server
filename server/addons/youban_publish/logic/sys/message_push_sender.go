@@ -636,16 +636,28 @@ func (s *sSysPublish) sendMessageTemplateWithGotd(ctx context.Context, builder *
 		if index == 0 {
 			itemCaption = caption
 		}
+		uploadStartedAt := time.Now()
+		g.Log().Info(ctx, "协议号相册媒体开始上传", g.Map{
+			"mediaIndex": index + 1, "mediaCount": len(media), "mediaId": item.Id,
+			"mediaType": item.MediaType, "sourceSizeBytes": item.Size,
+		})
 		option, err := s.gotdMessageMediaAlbumOption(ctx, builder, itemCaption, item)
 		if err != nil {
 			return nil, err
 		}
+		g.Log().Info(ctx, "协议号相册媒体上传完成", g.Map{
+			"mediaIndex": index + 1, "mediaCount": len(media), "mediaId": item.Id,
+			"durationMs": time.Since(uploadStartedAt).Milliseconds(),
+		})
 		album = append(album, option)
 	}
+	albumStartedAt := time.Now()
+	g.Log().Info(ctx, "协议号相册提交开始", g.Map{"mediaCount": len(album)})
 	updates, err := builder.Album(ctx, album[0], album[1:]...)
 	if err != nil {
 		return nil, err
 	}
+	g.Log().Info(ctx, "协议号相册提交完成", g.Map{"mediaCount": len(album), "durationMs": time.Since(albumStartedAt).Milliseconds()})
 	return gotdSentMessagesFromUpdates(updates, media), nil
 }
 

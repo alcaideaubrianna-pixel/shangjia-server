@@ -345,7 +345,7 @@ func (w *accountWorker) run(ctx context.Context) {
 		go w.runAccountMessageLoop(runCtx)
 		go w.runOperations(runCtx, client)
 		go w.runPriorityOperations(runCtx, client)
-		go RunAccountTaskLoop(runCtx, client, lease, nil)
+		go runAccountTaskLoop(runCtx, client, lease, nil, w.cancel)
 		<-runCtx.Done()
 		return runCtx.Err()
 	})
