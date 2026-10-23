@@ -951,7 +951,7 @@ func telegramMediaCanFallbackToUpload(media *telegramMediaItem, err error) bool 
 	if media == nil || media.ForceUpload || isTelegramAmbiguousDeliveryError(err) {
 		return false
 	}
-	if telegramMediaUsesReusableFileId(media) {
+	if telegramMediaUsesReusableFileId(media) || telegramVideoUsesReusableFileIdWithCover(media) {
 		return isTelegramInvalidReusableFileError(err) || isTelegramPhotoTooLargeError(err)
 	}
 	return telegramMediaCanUseRemoteURL(media) && (isTelegramRemoteURLRejectedError(err) || isTelegramInvalidReusableFileError(err) || isTelegramPhotoTooLargeError(err))
@@ -997,7 +997,7 @@ func telegramMediaFallbackCandidate(media *telegramMediaItem) *telegramMediaItem
 		return nil
 	}
 	cloned := *media
-	if telegramMediaUsesReusableFileId(media) {
+	if telegramMediaUsesReusableFileId(media) || telegramVideoUsesReusableFileIdWithCover(media) {
 		cloned.TgFileId = ""
 		cloned.TgThumbFileId = ""
 		cloned.ForceUpload = false

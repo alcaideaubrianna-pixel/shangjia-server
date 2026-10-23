@@ -120,6 +120,26 @@ func TestTelegramRejectedURLFallsBackToMultipartUpload(t *testing.T) {
 	}
 }
 
+func TestTelegramAntiScanVideoInvalidFileIDFallsBackToMultipartUpload(t *testing.T) {
+	media := &telegramMediaItem{
+		MediaType:       "video",
+		TgFileId:        "BAAC-stale",
+		FileUrl:         "https://cdn.example/media/video.mp4",
+		AntiScanEnabled: true,
+	}
+	err := errors.New("bad request, Bad Request: wrong file identifier/HTTP URL specified")
+	if !telegramMediaCanFallbackToUpload(media, err) {
+		t.Fatal("anti-scan video with an invalid reusable file_id must fall back to upload")
+	}
+	forced := telegramMediaFallbackCandidate(media)
+	if forced.TgFileId != "" || forced.TgThumbFileId != "" {
+		t.Fatalf("stale reusable identifiers were not cleared: %+v", forced)
+	}
+	if telegramVideoUsesReusableFileIdWithCover(forced) || telegramMediaRemoteURL(forced) != "" {
+		t.Fatalf("fallback must leave reusable file_id and remote URL paths: %+v", forced)
+	}
+}
+
 func TestTelegramMediaGroupFallbackTriesURLBeforeUpload(t *testing.T) {
 	media := []*telegramMediaItem{{TgFileId: "BAAC-cached", FileUrl: "https://cdn.example/video.mp4"}}
 	urlStage := telegramMediaSetWithoutReusableFileID(media)
