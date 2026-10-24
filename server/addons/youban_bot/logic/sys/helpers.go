@@ -611,7 +611,7 @@ func (s *sSysBot) sendMessageWithMarkup(ctx context.Context, botToken, chatId, t
 }
 
 func (s *sSysBot) replyKeyboard(ctx context.Context) *models.ReplyKeyboardMarkup {
-	buttons := make([]models.KeyboardButton, 0, len(botFeatures))
+	buttons := make([]replyKeyboardItem, 0, len(botFeatures))
 	for _, feature := range botFeatures {
 		if feature == nil {
 			continue
@@ -626,19 +626,12 @@ func (s *sSysBot) replyKeyboard(ctx context.Context) *models.ReplyKeyboardMarkup
 		if strings.TrimSpace(label) == "" {
 			label = "/" + strings.TrimPrefix(s.featureCommand(ctx, feature), "/")
 		}
-		buttons = append(buttons, models.KeyboardButton{Text: label})
+		buttons = append(buttons, replyKeyboardItem{Key: feature.Key(), Button: models.KeyboardButton{Text: label}})
 	}
 	if len(buttons) == 0 {
 		return nil
 	}
-	rows := make([][]models.KeyboardButton, 0, (len(buttons)+1)/2)
-	for i := 0; i < len(buttons); i += 2 {
-		end := i + 2
-		if end > len(buttons) {
-			end = len(buttons)
-		}
-		rows = append(rows, buttons[i:end])
-	}
+	rows := groupedReplyKeyboardRows(buttons)
 	return &models.ReplyKeyboardMarkup{Keyboard: rows, IsPersistent: true, ResizeKeyboard: true, InputFieldPlaceholder: "输入验证码或选择菜单"}
 }
 
@@ -648,7 +641,11 @@ func (s *sSysBot) replyKeyboardLabel(ctx context.Context, feature botFeature) st
 			return label
 		}
 	}
-	return s.featureDescription(ctx, feature)
+	label := s.featureDescription(ctx, feature)
+	if feature != nil && (label == strings.TrimSpace(feature.Description()) || (feature.Key() == (botManagerFeature{}).Key() && label == "上架BOT管理")) {
+		return compactReplyKeyboardLabel(feature, label)
+	}
+	return label
 }
 
 func telegramBotDisplayName(user *models.User) string {
@@ -923,7 +920,7 @@ func (s *sSysBot) featureVisibleForTelegramUser(ctx context.Context, feature bot
 		return false
 	}
 	key := feature.Key()
-	if key != (botManagerFeature{}).Key() && key != (adminFeature{}).Key() && key != (quickPushFeature{}).Key() && key != (profileFeature{}).Key() && key != (instantRegisterFeature{}).Key() && key != (collectManageFeature{}).Key() && key != (accountManagementFeature{}).Key() {
+	if key != (botManagerFeature{}).Key() && key != (adminFeature{}).Key() && key != (quickPushFeature{}).Key() && key != (profileFeature{}).Key() && key != (instantRegisterFeature{}).Key() && key != (collectManageFeature{}).Key() && key != (accountManagementFeature{}).Key() && key != (relayManagementFeature{}).Key() && key != (inviteFeature{}).Key() && key != (scanFeature{}).Key() {
 		return true
 	}
 	if telegramUserId == "" {
@@ -953,13 +950,17 @@ func (s *sSysBot) featureVisibleForTelegramUser(ctx context.Context, feature bot
 		}
 		return bind == nil || bind.AccountId <= 0
 	}
-	if key == (accountManagementFeature{}).Key() {
+	if key == (accountManagementFeature{}).Key() || key == (inviteFeature{}).Key() {
 		bind, err := s.bindingByTelegram(ctx, sysin.BotAppApi, telegramUserId)
 		if err != nil || bind == nil || bind.AccountId <= 0 {
 			return false
 		}
 		account, err := s.boundProfileAccountByUser(ctx, parseTelegramUserId(telegramUserId))
 		return err == nil && account != nil && account.AccountType == publishsysin.PublishAccountTypeAdmin
+	}
+	if key == (relayManagementFeature{}).Key() || key == (scanFeature{}).Key() {
+		account, err := s.boundProfileAccountByUser(ctx, parseTelegramUserId(telegramUserId))
+		return err == nil && account != nil && account.AccountId > 0
 	}
 	if key == (collectManageFeature{}).Key() {
 		bind, err := s.bindingByTelegram(ctx, sysin.BotAppApi, telegramUserId)

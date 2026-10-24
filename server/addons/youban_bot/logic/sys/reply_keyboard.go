@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -109,4 +110,102 @@ func isReplyKeyboardMarkup(replyMarkup models.ReplyMarkup) bool {
 	default:
 		return false
 	}
+}
+
+// Compact only built-in labels; administrator-defined labels retain their meaning.
+func compactReplyKeyboardLabel(feature botFeature, fallback string) string {
+	switch feature.Key() {
+	case (helpFeature{}).Key():
+		return "使用帮助"
+	case (relayFeature{}).Key():
+		return "双向联系"
+	case (relayManagementFeature{}).Key():
+		return "双向管理"
+	case (botManagerFeature{}).Key():
+		return "机器人"
+	case (infoFeature{}).Key():
+		return "聊天信息"
+	case (adminFeature{}).Key():
+		return "管理后台"
+	case (inlinePromotionFeature{}).Key():
+		return "合作推广"
+	}
+	return fallback
+}
+
+// A long label reduces the entire row's capacity. Never truncate custom text.
+func replyKeyboardRows(buttons []models.KeyboardButton) [][]models.KeyboardButton {
+	rows := make([][]models.KeyboardButton, 0, (len(buttons)+2)/3)
+	var row []models.KeyboardButton
+	capacity := 3
+	for _, button := range buttons {
+		limit := 3
+		length := utf8.RuneCountInString(button.Text)
+		if length > 6 {
+			limit = 1
+		} else if length > 4 {
+			limit = 2
+		}
+		next := capacity
+		if limit < next {
+			next = limit
+		}
+		if len(row) > 0 && len(row)+1 > next {
+			rows = append(rows, row)
+			row = nil
+			capacity = 3
+		}
+		if limit < capacity {
+			capacity = limit
+		}
+		row = append(row, button)
+	}
+	if len(row) > 0 {
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+type replyKeyboardItem struct {
+	Key    string
+	Button models.KeyboardButton
+}
+
+// Group only already-authorized features. Group boundaries remain intact even
+// when some features are disabled or hidden for the current user.
+func groupedReplyKeyboardRows(items []replyKeyboardItem) [][]models.KeyboardButton {
+	groups := [][]string{
+		{(profileFeature{}).Key(), (quickPushFeature{}).Key(), (scanFeature{}).Key()},
+		{(collectManageFeature{}).Key(), (botManagerFeature{}).Key(), (relayManagementFeature{}).Key()},
+		{(accountManagementFeature{}).Key(), (inviteFeature{}).Key()},
+		{(adminFeature{}).Key()},
+		{(instantRegisterFeature{}).Key(), (bindFeature{}).Key(), (loginFeature{}).Key()},
+		{(startFeature{}).Key(), (exchangeRateFeature{}).Key(), (infoFeature{}).Key()},
+		{(inlinePromotionFeature{}).Key()},
+		{(helpFeature{}).Key(), (contactFeature{}).Key()},
+	}
+	byKey := make(map[string]models.KeyboardButton, len(items))
+	for _, item := range items {
+		byKey[item.Key] = item.Button
+	}
+	var rows [][]models.KeyboardButton
+	for _, group := range groups {
+		var buttons []models.KeyboardButton
+		for _, key := range group {
+			if button, ok := byKey[key]; ok {
+				buttons = append(buttons, button)
+				delete(byKey, key)
+			}
+		}
+		rows = append(rows, replyKeyboardRows(buttons)...)
+	}
+	// New plugins keep their entry until they are assigned an explicit group.
+	var remaining []models.KeyboardButton
+	for _, item := range items {
+		if button, ok := byKey[item.Key]; ok {
+			remaining = append(remaining, button)
+			delete(byKey, item.Key)
+		}
+	}
+	return append(rows, replyKeyboardRows(remaining)...)
 }

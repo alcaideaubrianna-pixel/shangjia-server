@@ -293,7 +293,9 @@ func (s *sSysBot) matchFeatureLabel(ctx context.Context, row *botFeatureRow, fea
 	if row != nil {
 		name = row.Name
 	}
-	return featureLabelMatches(text, s.replyKeyboardLabel(ctx, feature), name, s.featureCommand(ctx, feature))
+	return featureLabelMatches(text, s.replyKeyboardLabel(ctx, feature), name, s.featureCommand(ctx, feature)) ||
+		strings.EqualFold(strings.TrimSpace(text), strings.TrimSpace(feature.Description())) ||
+		strings.EqualFold(strings.TrimSpace(text), s.featureDescription(ctx, feature))
 }
 
 func featureLabelMatches(text string, keyboardLabel string, featureName string, command string) bool {
@@ -415,7 +417,7 @@ func (s *sSysBot) featureConfigValue(ctx context.Context, key string, field stri
 }
 
 func (s *sSysBot) featureMenuVisible(ctx context.Context, key string) bool {
-	if key == (relayFeature{}).Key() {
+	if key == (relayFeature{}).Key() || key == (notifyFeature{}).Key() || key == (superNotifyFeature{}).Key() {
 		return false
 	} // Configuration-only globally; commands are scoped by Gateway to explicitly enabled Bots.
 	row, enabled := s.featureConfig(ctx, key)

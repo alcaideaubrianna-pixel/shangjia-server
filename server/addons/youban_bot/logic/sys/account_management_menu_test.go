@@ -200,6 +200,23 @@ func TestAccountManagementMenusLocalTelegram(t *testing.T) {
 	bot.features = map[string]*botFeatureRow{"account_management": {FeatureKey: "account_management", Status: 1}}
 	bot.featureAt = time.Now()
 	bot.featureDefaultsAt = time.Now()
+	t.Run("menu capabilities match real entry requirements", func(t *testing.T) {
+		for _, feature := range []botFeature{relayManagementFeature{}, scanFeature{}, inviteFeature{}, accountManagementFeature{}} {
+			if bot.featureVisibleForTelegramUser(ctx, feature, "12") {
+				t.Fatalf("unbound user sees %s", feature.Key())
+			}
+			fake.capabilityType = pi.PublishAccountTypeAdmin
+			if !bot.featureVisibleForTelegramUser(ctx, feature, "11") {
+				t.Fatalf("administrator cannot see %s", feature.Key())
+			}
+			fake.capabilityType = pi.PublishAccountTypeUploader
+			want := feature.Key() == (relayManagementFeature{}).Key() || feature.Key() == (scanFeature{}).Key()
+			if got := bot.featureVisibleForTelegramUser(ctx, feature, "11"); got != want {
+				t.Fatalf("uploader %s: %v want %v", feature.Key(), got, want)
+			}
+		}
+		fake.capabilityType = ""
+	})
 	for _, test := range []struct {
 		name             string
 		user             int64
