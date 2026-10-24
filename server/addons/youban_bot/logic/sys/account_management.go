@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"html"
+	"strconv"
 	"strings"
 	"time"
 
@@ -79,7 +80,7 @@ func (s *sSysBot) handleAccountManagementCallback(ctx context.Context, botID int
 	}
 	switch query.Data {
 	case "acct:accounts":
-		return true, s.showManagedAccounts(ctx, botID, chatID, account)
+		return true, s.showManagedAccounts(ctx, botID, chatID, account, 1)
 	case "acct:current":
 		current, loadErr := publishService.SysPublish().CurrentAccount(quickPushMediaUploadContext(ctx, account.AccountId))
 		if loadErr != nil {
@@ -119,6 +120,13 @@ func (s *sSysBot) handleAccountManagementCallback(ctx context.Context, botID int
 	case "acct:report:back":
 		return true, s.showAccountManagement(ctx, botID, chatID, account)
 	default:
+		if strings.HasPrefix(query.Data, "acct:accounts:page:") {
+			page, parseErr := strconv.Atoi(strings.TrimPrefix(query.Data, "acct:accounts:page:"))
+			if parseErr != nil || page < 1 {
+				page = 1
+			}
+			return true, s.showManagedAccounts(ctx, botID, chatID, account, page)
+		}
 		if strings.HasPrefix(query.Data, "acct:renew:") {
 			planCode := strings.TrimPrefix(query.Data, "acct:renew:")
 			order, orderErr := publishService.SysPublish().TenantVipOrderCreate(quickPushMediaUploadContext(ctx, account.AccountId), &publishsysin.TenantVipOrderCreateInp{PlanCode: planCode, ProductType: "vip", Quantity: 1})
@@ -175,9 +183,12 @@ func boolText(value int) string {
 	return "已关闭"
 }
 
-func (s *sSysBot) showManagedAccounts(ctx context.Context, botID int64, chatID string, account *botProfileAccount) error {
+func (s *sSysBot) showManagedAccounts(ctx context.Context, botID int64, chatID string, account *botProfileAccount, page int) error {
 	callCtx := quickPushMediaUploadContext(ctx, account.AccountId)
-	list, _, err := publishService.SysPublish().AdminAccountList(callCtx, &publishsysin.AccountListInp{PageReq: form.PageReq{Page: 1, PerPage: 50, Pagination: true}, AccountType: publishsysin.PublishAccountTypeUploader})
+	if page < 1 {
+		page = 1
+	}
+	list, total, err := publishService.SysPublish().AdminAccountList(callCtx, &publishsysin.AccountListInp{PageReq: form.PageReq{Page: page, PerPage: 10, Pagination: true}, AccountType: publishsysin.PublishAccountTypeUploader})
 	if err != nil {
 		return s.reply(ctx, botID, chatID, "读取上架账户失败，请稍后重试。")
 	}
@@ -193,7 +204,19 @@ func (s *sSysBot) showManagedAccounts(ctx context.Context, botID int64, chatID s
 		}
 	}
 	lines = append(lines, "\n可在网页端创建、删除或修改上架账户。")
-	return s.replyWithMarkup(ctx, botID, chatID, strings.Join(lines, ""), &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{{{Text: "返回账户管理", CallbackData: "acct:report:back"}}}})
+	buttons := []models.InlineKeyboardButton{}
+	if page > 1 {
+		buttons = append(buttons, models.InlineKeyboardButton{Text: "上一页", CallbackData: fmt.Sprintf("acct:accounts:page:%d", page-1)})
+	}
+	if page*10 < total {
+		buttons = append(buttons, models.InlineKeyboardButton{Text: "下一页", CallbackData: fmt.Sprintf("acct:accounts:page:%d", page+1)})
+	}
+	rows := [][]models.InlineKeyboardButton{}
+	if len(buttons) > 0 {
+		rows = append(rows, buttons)
+	}
+	rows = append(rows, []models.InlineKeyboardButton{{Text: "返回账户管理", CallbackData: "acct:report:back"}})
+	return s.replyWithMarkup(ctx, botID, chatID, strings.Join(lines, ""), &models.InlineKeyboardMarkup{InlineKeyboard: rows})
 }
 
 func (s *sSysBot) showDailyReport(ctx context.Context, botID int64, chatID string, account *botProfileAccount, date string) error {
