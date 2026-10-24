@@ -47,6 +47,8 @@ func TestTelegramJobPriorityClassifiesPublishOperations(t *testing.T) {
 		{name: "BOT manual profile", operationNo: "bot_publish:20:123456:123:456", want: tgJobPriorityUrgent},
 		{name: "manual batch", operationNo: "batchtext:1:batch-1:profile:123", want: tgJobPriorityUrgent},
 		{name: "message push", operationNo: "message_push:1:2:3", want: tgJobPriorityUrgent},
+		{name: "AI republish", operationNo: "ai-republish:1", priority: tgJobPriorityDefault, want: tgJobPriorityDefault},
+		{name: "verification repair", operationNo: "verify-misbinding-repair:1", priority: tgJobPriorityDefault, want: tgJobPriorityDefault},
 		{name: "full push", operationNo: "full_push:1:2", want: tgJobPriorityFullPush},
 		{name: "cycle push", operationNo: "cycle_batch:1:2:3", want: tgJobPriorityBulk},
 		{name: "explicit default", operationNo: "collect:1", priority: tgJobPriorityDefault, want: tgJobPriorityDefault},

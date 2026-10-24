@@ -10,7 +10,7 @@ func TestAdminBatchTextOperationNo(t *testing.T) {
 	if operationNo != "batchtext:12:1786000000000-a1b2c3d4:profile:345" {
 		t.Fatalf("unexpected operation no: %s", operationNo)
 	}
-	if !isManualProfilePublishOperation(operationNo) {
+	if !isInteractiveProfilePublishOperation(operationNo) {
 		t.Fatal("batch text publish must be recognized as manual publish")
 	}
 }

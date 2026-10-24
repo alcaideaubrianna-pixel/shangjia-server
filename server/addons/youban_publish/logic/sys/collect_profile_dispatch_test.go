@@ -48,8 +48,8 @@ func TestLateVerificationRepairOperationIsStableFullRepublish(t *testing.T) {
 	if operationNo != "verify-misbinding-repair:123:profile:456" {
 		t.Fatalf("unexpected operation number: %s", operationNo)
 	}
-	if !isManualProfilePublishOperation(operationNo) {
-		t.Fatal("late verification repair must replace the complete publication")
+	if isInteractiveProfilePublishOperation(operationNo) {
+		t.Fatal("late verification repair is automated and must not use the interactive fast path")
 	}
 }
 
