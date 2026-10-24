@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"html"
 	"regexp"
@@ -44,7 +45,10 @@ func (s *sSysBot) handleAccountManagementInput(ctx context.Context, botID int64,
 	}
 	username := strings.TrimSpace(msg.Text)
 	if strings.HasPrefix(username, "/") {
-		return true, s.cancelProfileSession(ctx, botID, msg)
+		if err := s.cancelAccountSessions(ctx, botID, fmt.Sprint(msg.From.ID), chatID); err != nil {
+			return true, err
+		}
+		return true, s.showAccountManagement(ctx, botID, chatID, account)
 	}
 	if session.Scene == "account_renewal" {
 		return true, s.setAccountRenewalCoupon(ctx, botID, chatID, session, account, username)
@@ -72,6 +76,9 @@ func (s *sSysBot) handleAccountManagementInput(ctx context.Context, botID int64,
 		if err != nil {
 			return true, s.reply(ctx, botID, chatID, "保存设置失败，请重新检查权限后重试。")
 		}
+		var navigation accountMenuContext
+		_ = json.Unmarshal([]byte(session.PayloadJson), &navigation)
+		ctx = context.WithValue(accountMenuWithPage(ctx, navigation.Page), accountMenuSavedKey{}, true)
 		return true, s.showAccountSettingSection(ctx, botID, chatID, account, session.ProfileId, accountSettingSectionForField(session.Step))
 	}
 	if !accountUsernamePattern.MatchString(username) {

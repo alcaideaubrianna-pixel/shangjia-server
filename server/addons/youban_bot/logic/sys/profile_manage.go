@@ -2082,6 +2082,12 @@ func (s *sSysBot) startProfileSessionByIds(ctx context.Context, botId int64, tel
 	if strings.TrimSpace(replyText) == "" {
 		return nil
 	}
+	if scene == "account_setting" {
+		return s.accountMenuReply(ctx, botId, chatId, replyText, &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
+			{{Text: "返回上一级", CallbackData: fmt.Sprintf("acct:section:%d:%s", profileId, accountSettingSectionForField(step))}},
+			{{Text: "取消", CallbackData: "acct:reset_cancel"}},
+		}})
+	}
 	return s.sendProfileSessionPrompt(ctx, botId, chatId, scene, profileId, profileNo, replyText)
 }
 
@@ -2089,6 +2095,12 @@ func (s *sSysBot) sendProfileSessionPrompt(ctx context.Context, botId int64, cha
 	row, err := s.botById(ctx, botId)
 	if err != nil {
 		return err
+	}
+	if scene == "account_create" {
+		return s.accountMenuReply(ctx, botId, chatId, text, &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
+			{{Text: "返回账户列表", CallbackData: "acct:accounts"}},
+			{{Text: "取消", CallbackData: "acct:reset_cancel"}},
+		}})
 	}
 	buttons := [][]models.InlineKeyboardButton{}
 	switch scene {

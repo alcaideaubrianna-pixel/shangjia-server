@@ -187,6 +187,16 @@ func TestAccountManagementMenusLocalTelegram(t *testing.T) {
 	if _, err := db.Exec(ctx, `INSERT INTO hg_youban_bot_account_bind(app,account_id,telegram_user_id,bot_id,status) VALUES('api',99,'11',1,1)`); err != nil {
 		t.Fatal(err)
 	}
+
+	if _, err := db.Exec(ctx, "DROP TABLE IF EXISTS "+profileSessionTable); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(ctx, `CREATE TABLE hg_youban_bot_profile_session(id integer primary key autoincrement,bot_id bigint,telegram_user_id text,chat_id text,app text,account_id bigint,tenant_id bigint,scene text,step text,profile_id bigint,profile_no text,status text,payload_json text,expires_at timestamp,created_at timestamp,updated_at timestamp)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.GetCore().ClearTableFieldsAll(ctx); err != nil {
+		t.Fatal(err)
+	}
 	bot.features = map[string]*botFeatureRow{"account_management": {FeatureKey: "account_management", Status: 1}}
 	bot.featureAt = time.Now()
 	bot.featureDefaultsAt = time.Now()
@@ -207,6 +217,7 @@ func TestAccountManagementMenusLocalTelegram(t *testing.T) {
 		{name: "title toggle returns to title settings", user: 11, kind: models.ChatTypePrivate, data: "acct:set:100:markPosition:bottom", want: "修改自定义标识"},
 		{name: "permission toggle returns to permission settings", user: 11, kind: models.ChatTypePrivate, data: "acct:set:100:groupPushEnabled:1", want: "只影响当前选中的上架账户"},
 		{name: "legacy settings button", user: 11, kind: models.ChatTypePrivate, data: "acct:edit:100:view", want: "请选择要修改的设置"},
+		{name: "page preserved through settings", user: 11, kind: models.ChatTypePrivate, data: "acct:edit:100:view~p2", want: "acct:accounts:view:100:2"},
 		{name: "account setting section", user: 11, kind: models.ChatTypePrivate, data: "acct:section:100:suffix", want: "修改后缀内容"},
 		{name: "managed account navigation", user: 11, kind: models.ChatTypePrivate, data: "acct:accounts:view:100:2", want: "重置密码"},
 		{name: "invalid section target", user: 11, kind: models.ChatTypePrivate, data: "acct:section:bad:suffix", want: "账户参数无效"},
@@ -221,7 +232,7 @@ func TestAccountManagementMenusLocalTelegram(t *testing.T) {
 			if test.disabled {
 				bot.features["account_management"].Status = 2
 			}
-			query := &models.CallbackQuery{ID: "local", From: models.User{ID: test.user}, Data: test.data, Message: models.MaybeInaccessibleMessage{Message: &models.Message{Chat: models.Chat{ID: test.user, Type: test.kind}}}}
+			query := &models.CallbackQuery{ID: "local", From: models.User{ID: test.user}, Data: test.data, Message: models.MaybeInaccessibleMessage{Message: &models.Message{ID: 55, Chat: models.Chat{ID: test.user, Type: test.kind}}}}
 			handled, err := bot.handleAccountManagementCallback(ctx, 1, query)
 			if err != nil || !handled {
 				t.Fatalf("callback: handled=%v err=%v", handled, err)

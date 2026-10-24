@@ -57,11 +57,12 @@ func (s *sSysBot) showManagedAccount(ctx context.Context, botID int64, chatID st
 	if id == account.AccountId {
 		return gerror.New("请在我的账户中管理当前账户。")
 	}
+	ctx = accountMenuWithPage(ctx, page)
 	name, err := s.accountManagementName(ctx, account, id)
 	if err != nil {
 		return err
 	}
-	return s.replyWithMarkup(ctx, botID, chatID, fmt.Sprintf("<b>上架账户</b>\n\n账户：<code>%s</code>\n\n请选择操作：", html.EscapeString(name)), &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
+	return s.accountMenuReply(ctx, botID, chatID, fmt.Sprintf("<b>上架账户</b>\n\n账户：<code>%s</code>\n\n请选择操作：", html.EscapeString(name)), &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
 		{{Text: "账号设置", CallbackData: fmt.Sprintf("acct:edit:%d:view", id)}},
 		{{Text: "重置密码", CallbackData: fmt.Sprintf("acct:accounts:reset:%d", id)}},
 		{{Text: "删除账户", CallbackData: fmt.Sprintf("acct:accounts:delete:%d", id)}},
@@ -107,7 +108,7 @@ func (s *sSysBot) showAccountSettingSection(ctx context.Context, botID int64, ch
 		back := "acct:mine"
 		if id != account.AccountId {
 			rows = append(rows, []models.InlineKeyboardButton{{Text: "账户权限", CallbackData: fmt.Sprintf("acct:section:%d:permissions", id)}})
-			back = fmt.Sprintf("acct:accounts:view:%d:1", id)
+			back = fmt.Sprintf("acct:accounts:view:%d:%d", id, accountMenuPage(ctx))
 		}
 		rows = append(rows, []models.InlineKeyboardButton{{Text: "返回账户", CallbackData: back}})
 	case "suffix":
@@ -157,5 +158,5 @@ func (s *sSysBot) showAccountSettingSection(ctx context.Context, botID int64, ch
 		rows = append(rows, []models.InlineKeyboardButton{{Text: "返回账号设置", CallbackData: fmt.Sprintf("acct:edit:%d:view", id)}})
 	}
 	text := fmt.Sprintf("<b>%s</b>\n\n账户：<code>%s</code>\n\n%s", title, html.EscapeString(name), body)
-	return s.replyWithMarkup(ctx, botID, chatID, text, &models.InlineKeyboardMarkup{InlineKeyboard: rows})
+	return s.accountMenuReply(ctx, botID, chatID, text, &models.InlineKeyboardMarkup{InlineKeyboard: rows})
 }
