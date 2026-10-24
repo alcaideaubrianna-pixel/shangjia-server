@@ -15,7 +15,22 @@ type DailyReportSourceRow struct {
 	Count        int    `json:"count"`
 }
 
+type DailyReportChannelRow struct {
+	ChannelID  int64  `json:"channelId"`
+	Title      string `json:"title"`
+	Action     string `json:"action"`
+	Success    int    `json:"success"`
+	Failed     int    `json:"failed"`
+	Processing int    `json:"processing"`
+}
+
 type DailyReportModel struct {
+	Channels []*DailyReportChannelRow `json:"channels"`
+
+	CycleSuccess    int `json:"cycleSuccess"`
+	CycleFailed     int `json:"cycleFailed"`
+	CycleProcessing int `json:"cycleProcessing"`
+
 	TenantID          int64                   `json:"tenantId"`
 	AccountID         int64                   `json:"accountId"`
 	ReportDate        string                  `json:"reportDate"`

@@ -126,6 +126,7 @@ type ISysPublish interface {
 	AdminCollectSourceOptions(ctx context.Context, keyword string, page, perPage int) (list []*sysin.CollectSourceOptionModel, totalCount int, err error)
 	AdminAccountSave(ctx context.Context, in *sysin.AccountSaveInp) (res *sysin.AccountSaveModel, err error)
 	AdminAccountResetPassword(ctx context.Context, in *sysin.AccountResetPasswordInp) (res *sysin.AccountSaveModel, err error)
+	MyAccountResetPassword(ctx context.Context) (*sysin.AccountSaveModel, error)
 	AdminAccountDelete(ctx context.Context, in *sysin.AccountDeleteInp) (err error)
 	AdminAccountTransferPreview(ctx context.Context, in *sysin.AccountTransferPreviewInp) (res *sysin.AccountTransferPreviewModel, err error)
 	AdminAccountTransferProfiles(ctx context.Context, in *sysin.AccountTransferProfilesInp) (res *sysin.AccountTransferProfilesModel, err error)

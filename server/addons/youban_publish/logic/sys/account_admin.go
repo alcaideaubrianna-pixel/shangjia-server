@@ -57,6 +57,16 @@ func (s *sSysPublish) ServerAccountSave(ctx context.Context, in *sysin.AccountSa
 	return &sysin.AccountSaveModel{Id: in.Id, Password: in.Password}, nil
 }
 
+// MyAccountResetPassword derives its target from the authenticated identity;
+// callers cannot supply another account ID.
+func (s *sSysPublish) MyAccountResetPassword(ctx context.Context) (*sysin.AccountSaveModel, error) {
+	account, err := s.currentAdminAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.ServerAccountResetPassword(ctx, &sysin.AccountResetPasswordInp{Id: account.Id})
+}
+
 func (s *sSysPublish) ServerAccountResetPassword(ctx context.Context, in *sysin.AccountResetPasswordInp) (res *sysin.AccountSaveModel, err error) {
 	if in == nil || in.Id <= 0 {
 		return nil, gerror.New("账号ID不能为空")
