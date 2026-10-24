@@ -120,6 +120,17 @@ func (s *sSysBot) handleAccountManagementCallback(ctx context.Context, botID int
 	case "acct:report:back":
 		return true, s.showAccountManagement(ctx, botID, chatID, account)
 	default:
+		if strings.HasPrefix(query.Data, "acct:accounts:reset:") {
+			id, parseErr := strconv.ParseInt(strings.TrimPrefix(query.Data, "acct:accounts:reset:"), 10, 64)
+			if parseErr != nil || id <= 0 {
+				return true, s.reply(ctx, botID, chatID, "账号参数无效。")
+			}
+			result, resetErr := publishService.SysPublish().AdminAccountResetPassword(quickPushMediaUploadContext(ctx, account.AccountId), &publishsysin.AccountResetPasswordInp{Id: id})
+			if resetErr != nil {
+				return true, s.reply(ctx, botID, chatID, "重置密码失败："+html.EscapeString(resetErr.Error()))
+			}
+			return true, s.reply(ctx, botID, chatID, fmt.Sprintf("账号 %d 的新密码：<code>%s</code>\n请及时转交并修改。", id, html.EscapeString(result.Password)))
+		}
 		if strings.HasPrefix(query.Data, "acct:accounts:page:") {
 			page, parseErr := strconv.Atoi(strings.TrimPrefix(query.Data, "acct:accounts:page:"))
 			if parseErr != nil || page < 1 {
@@ -193,6 +204,7 @@ func (s *sSysBot) showManagedAccounts(ctx context.Context, botID int64, chatID s
 		return s.reply(ctx, botID, chatID, "读取上架账户失败，请稍后重试。")
 	}
 	lines := []string{"<b>上架账户</b>"}
+	rows := [][]models.InlineKeyboardButton{}
 	if len(list) == 0 {
 		lines = append(lines, "\n暂无上架账户。")
 	} else {
@@ -201,6 +213,7 @@ func (s *sSysBot) showManagedAccounts(ctx context.Context, botID int64, chatID s
 				continue
 			}
 			lines = append(lines, fmt.Sprintf("\n• %s（ID：%d）", html.EscapeString(firstNonEmpty(item.Nickname, item.Username)), item.Id))
+			rows = append(rows, []models.InlineKeyboardButton{{Text: fmt.Sprintf("重置 %d 密码", item.Id), CallbackData: fmt.Sprintf("acct:accounts:reset:%d", item.Id)}})
 		}
 	}
 	lines = append(lines, "\n可在网页端创建、删除或修改上架账户。")
@@ -211,7 +224,6 @@ func (s *sSysBot) showManagedAccounts(ctx context.Context, botID int64, chatID s
 	if page*10 < total {
 		buttons = append(buttons, models.InlineKeyboardButton{Text: "下一页", CallbackData: fmt.Sprintf("acct:accounts:page:%d", page+1)})
 	}
-	rows := [][]models.InlineKeyboardButton{}
 	if len(buttons) > 0 {
 		rows = append(rows, buttons)
 	}
