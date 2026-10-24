@@ -78,12 +78,24 @@ func (s *sSysPublish) TenantVipPlans(ctx context.Context) ([]*sysin.TenantVipPla
 }
 
 func (s *sSysPublish) TenantVipOrderCreate(ctx context.Context, in *sysin.TenantVipOrderCreateInp) (*sysin.TenantVipOrderModel, error) {
+	if in == nil {
+		return nil, gerror.New("续费订单参数不能为空")
+	}
 	if strings.EqualFold(strings.TrimSpace(in.ProductType), imageQuotaProductType) {
 		return s.tenantImageQuotaOrderCreate(ctx, in)
 	}
 	account, err := s.currentAdminAccount(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if in.RequestKey != "" {
+		order, pay, err := s.loadTenantVipRenewalOrder(ctx, account, in)
+		if err != nil {
+			return nil, err
+		}
+		if order != nil {
+			return s.resumeTenantVipRenewalOrder(ctx, account, order, pay)
+		}
 	}
 	cfg, err := service.SysConfig().GetYoubanPublishVip(ctx)
 	if err != nil {
@@ -115,11 +127,31 @@ func (s *sSysPublish) TenantVipOrderCreate(ctx context.Context, in *sysin.Tenant
 		in.PayType = consts.PayTypeRainbow
 	}
 	orderSn := fmt.Sprintf("YBPVIP%d%d", account.TenantId, time.Now().UnixNano())
+	if in.RequestKey != "" {
+		orderSn = tenantVipRenewalOrderNo(account, in.RequestKey)
+	}
 	subject := fmt.Sprintf("上架系统VIP会员:%d天", plan.Days)
 	now := gtime.Now()
 	var res *sysin.TenantVipOrderModel
 	var freeOrderId int64
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if in.RequestKey != "" {
+			c := pdao.YoubanPublishAccount.Columns()
+			row, err := pdao.YoubanPublishAccount.Ctx(ctx).Where(c.Id, account.Id).Where(c.TenantId, account.TenantId).Where(c.Status, consts.StatusEnabled).Where(c.AccountType, sysin.PublishAccountTypeAdmin).LockUpdate().One()
+			if err != nil {
+				return err
+			}
+			if row.IsEmpty() {
+				return gerror.New("续费账户已不可用")
+			}
+			existing, _, err := s.loadTenantVipRenewalOrder(ctx, account, in)
+			if err != nil {
+				return err
+			}
+			if existing != nil {
+				return nil
+			}
+		}
 		orderColumns := dao.AdminOrder.Columns()
 		result, err := dao.AdminOrder.Ctx(ctx).Fields(
 			orderColumns.MemberId,
@@ -147,14 +179,15 @@ func (s *sSysPublish) TenantVipOrderCreate(ctx context.Context, in *sysin.Tenant
 		}
 		orderId, _ := result.LastInsertId()
 		create, err := service.Pay().Create(ctx, payin.PayCreateInp{
-			Subject:    subject,
-			Detail:     gjson.New(g.Map{"couponCode": couponCode, "couponDiscount": couponDiscount, "days": plan.Days, "level": plan.Level, "planCode": plan.Code, "tenantId": account.TenantId}),
-			OrderSn:    orderSn,
-			OrderGroup: tenantVipOrderGroup,
-			PayType:    in.PayType,
-			TradeType:  in.TradeType,
-			PayAmount:  amount,
-			ReturnUrl:  tenantVipPaymentReturnURL(in.ReturnUrl, orderSn),
+			DeferGateway: in.RequestKey != "",
+			Subject:      subject,
+			Detail:       gjson.New(g.Map{"couponCode": couponCode, "couponDiscount": couponDiscount, "days": plan.Days, "level": plan.Level, "planCode": plan.Code, "planName": plan.Name, "currency": plan.Currency, "tenantId": account.TenantId}),
+			OrderSn:      orderSn,
+			OrderGroup:   tenantVipOrderGroup,
+			PayType:      in.PayType,
+			TradeType:    in.TradeType,
+			PayAmount:    amount,
+			ReturnUrl:    tenantVipPaymentReturnURL(in.ReturnUrl, orderSn),
 		})
 		if err != nil {
 			return err
@@ -185,6 +218,16 @@ func (s *sSysPublish) TenantVipOrderCreate(ctx context.Context, in *sysin.Tenant
 		}
 		return nil
 	})
+	if err == nil && in.RequestKey != "" {
+		order, pay, loadErr := s.loadTenantVipRenewalOrder(ctx, account, in)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		if order == nil {
+			return nil, gerror.New("续费订单保存结果不完整")
+		}
+		return s.resumeTenantVipRenewalOrder(ctx, account, order, pay)
+	}
 	if err == nil && freeOrderId > 0 {
 		_, err = s.applyTenantVipExtension(ctx, &tenantVipChangeInp{
 			EventKey:      fmt.Sprintf("%s:%d", tenantVipEventPay, freeOrderId),

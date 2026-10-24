@@ -2939,10 +2939,19 @@ func (s *sSysBot) startProfileSessionRecovery(ctx context.Context) {
 		s.recoverPendingProfileMediaGroups(recoveryCtx)
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
+		auditTicker := time.NewTicker(10 * time.Minute)
+		defer auditTicker.Stop()
 		for {
 			select {
 			case <-recoveryCtx.Done():
 				return
+			case <-auditTicker.C:
+				cleanupCtx, cleanupCancel := context.WithTimeout(recoveryCtx, 5*time.Second)
+				err := s.cleanupAccountManagementSessions(cleanupCtx, time.Now())
+				cleanupCancel()
+				if err != nil && recoveryCtx.Err() == nil {
+					g.Log().Warningf(recoveryCtx, "清理账户管理会话失败 err:%+v", err)
+				}
 			case <-ticker.C:
 				s.recoverPendingProfileMediaGroups(recoveryCtx)
 			}

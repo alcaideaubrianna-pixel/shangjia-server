@@ -14,7 +14,6 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	botsysin "hotgo/addons/youban_bot/model/input/sysin"
-	botService "hotgo/addons/youban_bot/service"
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/consts"
@@ -111,7 +110,7 @@ func (s *sSysPublish) pauseInactiveFreeChannelCycles(ctx context.Context) error 
 		}
 		notified[channel.TenantId] = true
 		if accountId, notifyErr := s.tenantVipNotifyAccountId(ctx, channel.TenantId, 0); notifyErr == nil && accountId > 0 {
-			_ = botService.SysBot().NotifyAccount(ctx, &botsysin.NotifyAccountInp{BotStrategy: "official", FallbackBoundBot: true, IgnoreFeatureSwitch: true, App: consts.AppApi, AccountId: accountId, Text: fmt.Sprintf("为避免长期未使用的频道循环推送持续占用服务器资源，保障整体服务稳定运行，因连续 %d 天未使用后台，频道循环推送已暂时关闭。\n\n重新进入后台后，可在频道配置中手动恢复。", inactiveDays)})
+			_ = s.notifyAccountWithPreference(ctx, channel.TenantId, "channel", &botsysin.NotifyAccountInp{BotStrategy: "official", FallbackBoundBot: true, IgnoreFeatureSwitch: true, App: consts.AppApi, AccountId: accountId, Text: fmt.Sprintf("为避免长期未使用的频道循环推送持续占用服务器资源，保障整体服务稳定运行，因连续 %d 天未使用后台，频道循环推送已暂时关闭。\n\n重新进入后台后，可在频道配置中手动恢复。", inactiveDays)})
 		}
 	}
 	return nil

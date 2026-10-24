@@ -22,7 +22,6 @@ import (
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
 	collectorservice "hotgo/addons/telegram_collector/service"
 	botsysin "hotgo/addons/youban_bot/model/input/sysin"
-	botService "hotgo/addons/youban_bot/service"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/consts"
 )
@@ -349,7 +348,7 @@ func (s *sSysPublish) handleTgAccountPermanentAuthError(ctx context.Context, tgA
 		return
 	}
 	text := fmt.Sprintf("TG账号已自动停用。\n\nTG账号：%s\n原因：%s", html.EscapeString(firstNonEmpty(account.DisplayName, account.TelegramUsername, fmt.Sprintf("ID:%d", account.Id))), html.EscapeString(message))
-	if notifyErr := botService.SysBot().NotifyAccount(ctx, &botsysin.NotifyAccountInp{
+	if notifyErr := s.notifyAccountWithPreference(ctx, account.TenantId, "account", &botsysin.NotifyAccountInp{
 		App:       consts.AppApi,
 		AccountId: account.AccountId,
 		Text:      text,

@@ -35,7 +35,11 @@ import (
 func (s *sPay) Create(ctx context.Context, in payin.PayCreateInp) (res *payin.PayCreateModel, err error) {
 	request := ghttp.RequestFromCtx(ctx)
 	if in.TradeType == "" {
-		in.TradeType = payment.AutoTradeType(in.PayType, request.UserAgent())
+		userAgent := ""
+		if request != nil {
+			userAgent = request.UserAgent()
+		}
+		in.TradeType = payment.AutoTradeType(in.PayType, userAgent)
 	}
 
 	if in.PayType == consts.PayTypeWxPay && in.Openid == "" {
@@ -61,6 +65,9 @@ func (s *sPay) Create(ctx context.Context, in payin.PayCreateInp) (res *payin.Pa
 	}
 
 	config := payment.GetConfig()
+	if config == nil {
+		return nil, gerror.New("支付配置未初始化，请联系管理员")
+	}
 	mchId := ""
 	switch in.PayType {
 	case consts.PayTypeAliPay:
@@ -112,7 +119,7 @@ func (s *sPay) Create(ctx context.Context, in payin.PayCreateInp) (res *payin.Pa
 		return
 	}
 
-	if data.PayAmount <= 0 {
+	if data.PayAmount <= 0 || in.DeferGateway {
 		res = &payin.PayCreateModel{
 			Order: &payin.CreateOrderModel{
 				TradeType:  in.TradeType,

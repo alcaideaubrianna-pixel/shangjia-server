@@ -35,15 +35,17 @@ type PayNotifyUpdate struct {
 
 // PayCreateInp 创建支付订单和日志
 type PayCreateInp struct {
-	Subject    string      `json:"subject"    description:"订单标题"`
-	Detail     *gjson.Json `json:"detail"        description:"支付商品详情"`
-	OrderSn    string      `json:"orderSn"       description:"关联订单号"`
-	OrderGroup string      `json:"orderGroup"    description:"组别[默认统一支付类型]"`
-	Openid     string      `json:"openid"        description:"openid"`
-	PayType    string      `json:"payType"       description:"支付类型"`
-	TradeType  string      `json:"tradeType"     description:"交易类型"`
-	PayAmount  float64     `json:"payAmount"     description:"支付金额"`
-	ReturnUrl  string      `json:"returnUrl"     description:"买家付款成功跳转地址"`
+	// Internal callers may commit the local payment record before contacting the gateway.
+	DeferGateway bool        `json:"-"`
+	Subject      string      `json:"subject"    description:"订单标题"`
+	Detail       *gjson.Json `json:"detail"        description:"支付商品详情"`
+	OrderSn      string      `json:"orderSn"       description:"关联订单号"`
+	OrderGroup   string      `json:"orderGroup"    description:"组别[默认统一支付类型]"`
+	Openid       string      `json:"openid"        description:"openid"`
+	PayType      string      `json:"payType"       description:"支付类型"`
+	TradeType    string      `json:"tradeType"     description:"交易类型"`
+	PayAmount    float64     `json:"payAmount"     description:"支付金额"`
+	ReturnUrl    string      `json:"returnUrl"     description:"买家付款成功跳转地址"`
 }
 
 type PayCreateModel struct {

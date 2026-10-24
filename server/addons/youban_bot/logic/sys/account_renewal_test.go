@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -201,4 +202,134 @@ type accountRenewalTestGateway struct {
 
 func (g accountRenewalTestGateway) Client(ctx context.Context, token string) (*tgbot.Bot, error) {
 	return g.client(ctx, token)
+}
+
+// Models a locally committed payment identity; this must survive a later Bot
+// session-write error, just as the actual Publish/Pay integration test proves.
+type durableRenewalTestService struct {
+	ps.ISysPublish
+	afterCreate func(context.Context) error
+	calls       int
+	keys        []string
+}
+
+func (s *durableRenewalTestService) TenantVipOrderCreate(ctx context.Context, in *pi.TenantVipOrderCreateInp) (*pi.TenantVipOrderModel, error) {
+	s.calls++
+	s.keys = append(s.keys, in.RequestKey)
+	if in.RequestKey == "" {
+		return nil, fmt.Errorf("missing renewal identity")
+	}
+	db, _ := gdb.Instance()
+	if _, err := db.Exec(ctx, `INSERT OR IGNORE INTO renewal_orders(request_key)VALUES(?)`, in.RequestKey); err != nil {
+		return nil, err
+	}
+	row, err := db.GetOne(ctx, `SELECT id FROM renewal_orders WHERE request_key=?`, in.RequestKey)
+	if err != nil {
+		return nil, err
+	}
+	if s.afterCreate != nil {
+		if err := s.afterCreate(ctx); err != nil {
+			return nil, err
+		}
+	}
+	return &pi.TenantVipOrderModel{Id: row["id"].Int64(), OrderNo: in.RequestKey, PayUrl: "https://example.com/payment"}, nil
+}
+
+func TestAccountRenewalSessionWriteFailureRecovery(t *testing.T) {
+	ctx := relayTestDatabase(t)
+	db, _ := gdb.Instance()
+	for _, sql := range []string{
+		`DROP TABLE IF EXISTS hg_youban_bot_profile_session`,
+		`DROP TABLE IF EXISTS renewal_orders`,
+		`CREATE TABLE renewal_orders(id integer primary key autoincrement,request_key text UNIQUE)`,
+		`CREATE TABLE hg_youban_bot_profile_session(id bigint primary key,bot_id bigint,telegram_user_id text,chat_id text,account_id bigint,tenant_id bigint,scene text,status text,payload_json text,expires_at timestamp,updated_at timestamp)`,
+		`CREATE TRIGGER fail_session_completion BEFORE UPDATE ON hg_youban_bot_profile_session WHEN NEW.status='completed' BEGIN SELECT RAISE(ABORT,'injected completion write failure'); END`,
+	} {
+		if _, err := db.Exec(ctx, sql); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.GetCore().ClearTableFieldsAll(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(ctx, `INSERT INTO hg_youban_bot_profile_session VALUES(1,7,'11','11',99,1,'account_renewal','active','{"planCode":"vip_month"}',?,NULL)`, gtime.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	previous := managerPreviousPublish()
+	fake := &durableRenewalTestService{ISysPublish: previous}
+	ps.RegisterSysPublish(fake)
+	t.Cleanup(func() { ps.RegisterSysPublish(previous) })
+	s := &sSysBot{}
+	account := &botProfileAccount{AccountId: 99, TenantId: 1}
+	if _, err := s.accountRenewalOrder(ctx, 7, "11", "11", account, 1); err == nil {
+		t.Fatal("completion write error hidden")
+	}
+	count, err := db.GetCount(ctx, `SELECT COUNT(*) FROM renewal_orders`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatal("session rollback lost payment identity")
+	}
+	if _, err := s.accountRenewalOrder(ctx, 7, "11", "11", account, 1); err == nil || fake.calls != 1 {
+		t.Fatal("live lease permitted duplicate payment call")
+	}
+	row, err := db.GetOne(ctx, `SELECT payload_json,status FROM hg_youban_bot_profile_session WHERE id=1`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var draft accountRenewalDraft
+	if err := json.Unmarshal([]byte(row["payload_json"].String()), &draft); err != nil {
+		t.Fatal(err)
+	}
+	if row["status"].String() != "processing" || draft.LeaseToken == "" {
+		t.Fatal("missing recoverable claim")
+	}
+	draft.LeaseUntil = time.Now().Add(-time.Minute).Unix()
+	raw, _ := json.Marshal(draft)
+	if _, err := db.Exec(ctx, `UPDATE hg_youban_bot_profile_session SET payload_json=? WHERE id=1`, string(raw)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(ctx, `DROP TRIGGER fail_session_completion`); err != nil {
+		t.Fatal(err)
+	}
+	result, err := s.accountRenewalOrder(ctx, 7, "11", "11", account, 1)
+	if err != nil || result == nil {
+		t.Fatalf("expired claim did not recover: %v", err)
+	}
+	if fake.calls != 2 || fake.keys[0] != fake.keys[1] {
+		t.Fatalf("recovery changed identity: %v", fake.keys)
+	}
+	count, err = db.GetCount(ctx, `SELECT COUNT(*) FROM renewal_orders`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatal("recovery created duplicate payment")
+	}
+	again, err := s.accountRenewalOrder(ctx, 7, "11", "11", account, 1)
+	if err != nil || again == nil || again.Id != result.Id || fake.calls != 2 {
+		t.Fatalf("completed confirmation repeated creation: %v", err)
+	}
+	// A stale worker must not overwrite a replacement claim's token or result.
+	if _, err := db.Exec(ctx, `INSERT INTO hg_youban_bot_profile_session VALUES(2,7,'11','11',99,1,'account_renewal','active','{"planCode":"vip_month"}',?,NULL)`, gtime.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	fake.afterCreate = func(ctx context.Context) error {
+		replacement := accountRenewalDraft{PlanCode: "vip_month", LeaseToken: "replacement-worker", LeaseUntil: time.Now().Add(2 * time.Minute).Unix()}
+		raw, _ := json.Marshal(replacement)
+		_, err := db.Exec(ctx, `UPDATE hg_youban_bot_profile_session SET payload_json=? WHERE id=2`, string(raw))
+		return err
+	}
+	if _, err := s.accountRenewalOrder(ctx, 7, "11", "11", account, 2); err == nil {
+		t.Fatal("stale completion overwritten replacement claim")
+	}
+	latest, err := db.GetOne(ctx, `SELECT status,payload_json FROM hg_youban_bot_profile_session WHERE id=2`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if latest["status"].String() != "processing" || !strings.Contains(latest["payload_json"].String(), "replacement-worker") {
+		t.Fatal("stale worker corrupted new lease")
+	}
+
 }

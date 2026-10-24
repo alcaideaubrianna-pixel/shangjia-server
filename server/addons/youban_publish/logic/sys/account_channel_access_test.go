@@ -62,6 +62,7 @@ func TestAccountChannelAccessPauseLocalPostgres(t *testing.T) {
 	err := g.DB().Transaction(context.Background(), func(ctx context.Context, tx gdb.TX) error {
 		for _, sql := range []string{
 			`CREATE TEMP TABLE hg_youban_publish_collect_source(id bigint PRIMARY KEY,tenant_id bigint,account_id bigint,tg_account_id bigint,source_type text,source_chat_id text,collect_enabled int,status int,remark text,updated_at timestamp,deleted_at timestamp,title text DEFAULT '') ON COMMIT DROP`,
+			`CREATE TEMP TABLE hg_youban_publish_account_setting(tenant_id bigint,account_id bigint,channel_alert_enabled int,deleted_at timestamp) ON COMMIT DROP`,
 			`CREATE TEMP TABLE hg_youban_publish_tg_account(id bigint,tenant_id bigint,account_id bigint,display_name text,telegram_username text,status text,deleted_at timestamp) ON COMMIT DROP`,
 			`INSERT INTO hg_youban_publish_tg_account VALUES(42,38,512,'七七','qqby66','authorized',NULL)`,
 			`INSERT INTO hg_youban_publish_collect_source VALUES
@@ -158,6 +159,29 @@ func TestAccountChannelAccessPauseLocalPostgres(t *testing.T) {
 		}
 		if other["collect_enabled"].Int() != 1 {
 			t.Fatal("unrelated source paused")
+		}
+
+		// Disabling owner alerts must neither prevent pausing the source nor
+		// suppress the independently configured collection administrators.
+		if _, err = tx.Exec(`INSERT INTO hg_youban_publish_account_setting VALUES(38,512,0,NULL)`); err != nil {
+			return err
+		}
+		quiet := *n
+		quiet.SourceID = 1357
+		quiet.Event.ChannelID = 2736732070
+		ownerCalls, adminCalls := fake.ownerCalls, fake.adminCalls
+		if err = service.handleAccountChannelAccessNotification(ctx, "quiet-channel-test", &quiet); err != nil {
+			return err
+		}
+		if fake.ownerCalls != ownerCalls || fake.adminCalls != adminCalls+1 {
+			t.Fatalf("disabled owner alert changed recipients: %+v", fake)
+		}
+		quietRow, err := tx.Model("hg_youban_publish_collect_source").Where("id", 1357).One()
+		if err != nil {
+			return err
+		}
+		if quietRow["collect_enabled"].Int() != 0 {
+			t.Fatal("disabled notifications prevented source pause")
 		}
 		// A user re-enable/edit wins against a delayed queue retry.
 		if _, err = tx.Exec(`UPDATE hg_youban_publish_collect_source SET collect_enabled=1,updated_at='2026-10-24 17:00:00' WHERE id=109`); err != nil {

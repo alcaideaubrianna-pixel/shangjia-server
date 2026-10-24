@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"html"
 	"strings"
@@ -198,4 +199,40 @@ func (s *sSysPublish) finishAccountNotice(ctx context.Context, id int64, token, 
 	cols := pdao.YoubanPublishAccountNotice.Columns()
 	_, err := pdao.YoubanPublishAccountNotice.Ctx(ctx).Where(cols.Id, id).Where(cols.LeaseToken, token).Where(cols.Status, "sending").Data(g.Map{cols.Status: status, cols.LeaseUntil: nil, cols.NextRetryAt: nil, cols.ErrorMessage: message}).Update()
 	return err
+}
+
+// Persist only when the current publish operation actually transitions to failed.
+// The caller owns the state transaction; notification failure rolls back together
+// with the projection so a later retry can safely repeat the transition.
+func (s *sSysPublish) enqueueProfileFailureNoticeTx(ctx context.Context, tx gdb.TX, tenantID, accountID, profileID int64, operationNo string) error {
+	c := pdao.YoubanPublishAccount.Columns()
+	account, err := tx.Model(pdao.YoubanPublishAccount.Table()).Ctx(ctx).Where(c.Id, accountID).Where(c.TenantId, tenantID).One()
+	if err != nil {
+		return gerror.Wrap(err, "读取失败任务所属账户失败")
+	}
+	if account.IsEmpty() {
+		return nil
+	}
+	receiver := accountID
+	if account[c.AccountType].String() != sysin.PublishAccountTypeAdmin {
+		receiver = account[c.ParentId].Int64()
+	}
+	if receiver <= 0 {
+		return nil
+	}
+	admin, err := tx.Model(pdao.YoubanPublishAccount.Table()).Ctx(ctx).Where(c.Id, receiver).Where(c.TenantId, tenantID).Where(c.AccountType, sysin.PublishAccountTypeAdmin).One()
+	if err != nil {
+		return gerror.Wrap(err, "读取任务失败通知接收者失败")
+	}
+	if admin.IsEmpty() {
+		return nil
+	}
+	digest := sha256.Sum256([]byte(operationNo))
+	notice := do.YoubanPublishAccountNotice{
+		TenantId: tenantID, AccountId: receiver, Category: "task",
+		EventKey:    fmt.Sprintf("publish-failed:%d:%d:%x", tenantID, profileID, digest[:16]),
+		TextContent: fmt.Sprintf("<b>资料上架失败</b>\n\n资料 ID：%d\n所属账户：%s（ID：%d）\n操作编号：<code>%s</code>\n\n本次上架已记录为失败，请在后台发布记录查看具体原因。其他资料继续处理；此通知不会触发重新上架。", profileID, noticeName(firstNonEmpty(account[c.Nickname].String(), account[c.Username].String())), accountID, noticeName(operationNo)),
+	}
+	_, err = tx.Model(pdao.YoubanPublishAccountNotice.Table()).Ctx(ctx).Data(notice).OnConflict("event_key,account_id").OnDuplicate("event_key").Save()
+	return gerror.Wrap(err, "保存任务失败通知失败")
 }

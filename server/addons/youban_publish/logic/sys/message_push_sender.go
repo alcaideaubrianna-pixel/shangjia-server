@@ -1203,7 +1203,7 @@ func (s *sSysPublish) handleMessagePushPermanentAuthError(ctx context.Context, j
 	if strings.TrimSpace(message) != "" {
 		text += "\n原因：" + html.EscapeString(message)
 	}
-	if notifyErr := botService.SysBot().NotifyAccount(ctx, &botsysin.NotifyAccountInp{
+	if notifyErr := s.notifyAccountWithPreference(ctx, account.TenantId, "account", &botsysin.NotifyAccountInp{
 		App:       consts.AppApi,
 		AccountId: account.AccountId,
 		Text:      text,

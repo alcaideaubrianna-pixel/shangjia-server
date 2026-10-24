@@ -99,6 +99,8 @@ type TenantVipPayItemModel struct {
 }
 
 type TenantVipOrderCreateInp struct {
+	// Internal idempotency scope for a durable Bot renewal confirmation.
+	RequestKey  string `json:"-"`
 	CouponCode  string `json:"couponCode" dc:"优惠券码"`
 	PayType     string `json:"payType" dc:"支付方式"`
 	PlanCode    string `json:"planCode" dc:"套餐编码"`

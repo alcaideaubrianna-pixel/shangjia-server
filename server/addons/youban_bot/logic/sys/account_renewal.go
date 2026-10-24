@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/gogf/gf/v2/util/guid"
 	"html"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/database/gdb"
@@ -18,6 +20,8 @@ import (
 )
 
 type accountRenewalDraft struct {
+	LeaseToken string                  `json:"leaseToken,omitempty"`
+	LeaseUntil int64                   `json:"leaseUntil,omitempty"`
 	PlanCode   string                  `json:"planCode"`
 	CouponCode string                  `json:"couponCode,omitempty"`
 	Order      *pi.TenantVipOrderModel `json:"order,omitempty"`
@@ -83,15 +87,20 @@ func (s *sSysBot) setAccountRenewalCoupon(ctx context.Context, botID int64, chat
 	return s.replyWithMarkup(ctx, botID, chatID, "优惠码已通过校验：<code>"+html.EscapeString(code)+"</code>\n点击创建订单查看最终支付金额。", &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{{{Text: "创建续费订单", CallbackData: fmt.Sprintf("acct:renew_confirm:%d", session.Id)}}, {{Text: "取消", CallbackData: "acct:reset_cancel"}}}})
 }
 
-// Claim and order persistence share a transaction. A duplicate confirmation
-// returns the persisted order instead of issuing another payment order.
+// Claim the confirmation in a short transaction. Local payment persistence and
+// gateway I/O happen outside it so a session write failure cannot roll back an
+// already issued payment identity.
 func (s *sSysBot) accountRenewalOrder(ctx context.Context, botID int64, userID, chatID string, account *botProfileAccount, sessionID int64) (*pi.TenantVipOrderModel, error) {
-	var order *pi.TenantVipOrderModel
+	if account == nil || account.AccountId <= 0 || account.TenantId <= 0 {
+		return nil, gerror.New("续费账户归属不完整")
+	}
+	var draft accountRenewalDraft
+	var claimedJSON string
+	var completed bool
+	mod := g.DB().Model(profileSessionTable).Ctx(ctx).Where("id", sessionID).Where("bot_id", botID).Where("telegram_user_id", userID).Where("chat_id", chatID).Where("tenant_id", account.TenantId).Where("account_id", account.AccountId).Where("scene", "account_renewal").WhereGT("expires_at", gtime.Now())
 	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		var session *profileSessionRow
-		mod := g.DB().Model(profileSessionTable).Ctx(ctx).Where("id", sessionID).Where("bot_id", botID).Where("telegram_user_id", userID).Where("chat_id", chatID).Where("tenant_id", account.TenantId).Where("account_id", account.AccountId).Where("scene", "account_renewal").WhereGT("expires_at", gtime.Now())
-		// UPDATE acquires the row lock before reading; concurrent confirms serialize.
-		result, err := mod.Clone().WhereIn("status", []string{profileSessionStatusActive, profileSessionStatusCompleted}).Data(g.Map{"updated_at": gtime.Now()}).Update()
+		locked := mod.Clone().Ctx(ctx)
+		result, err := locked.Clone().WhereIn("status", []string{profileSessionStatusActive, profileSessionStatusCompleted, "processing"}).Data(g.Map{"updated_at": gtime.Now()}).Update()
 		if err != nil {
 			return err
 		}
@@ -102,43 +111,77 @@ func (s *sSysBot) accountRenewalOrder(ctx context.Context, botID int64, userID, 
 		if n == 0 {
 			return gerror.New("续费确认已过期或已取消，请重新选择套餐。")
 		}
-		if err = mod.Clone().Scan(&session); err != nil {
+		var session *profileSessionRow
+		if err := locked.Clone().Scan(&session); err != nil {
 			return err
 		}
 		if session == nil {
 			return gerror.New("续费会话不存在。")
 		}
-		var draft accountRenewalDraft
-		if err = json.Unmarshal([]byte(session.PayloadJson), &draft); err != nil {
+		if err := json.Unmarshal([]byte(session.PayloadJson), &draft); err != nil {
 			return err
 		}
 		if session.Status == profileSessionStatusCompleted {
 			if draft.Order == nil {
 				return gerror.New("订单记录不完整，请联系管理员。")
 			}
-			order = draft.Order
+			completed = true
 			return nil
+		}
+		if session.Status == "processing" && draft.LeaseUntil > time.Now().Unix() {
+			return gerror.New("续费订单正在创建中，请稍后再试；请勿重复点击。")
 		}
 		if draft.PlanCode == "" {
 			return gerror.New("套餐参数无效。")
 		}
-		order, err = ps.SysPublish().TenantVipOrderCreate(quickPushMediaUploadContext(ctx, account.AccountId), &pi.TenantVipOrderCreateInp{PlanCode: draft.PlanCode, CouponCode: draft.CouponCode, ProductType: "vip", Quantity: 1})
-		if err != nil {
-			return err
-		}
-		if order == nil {
-			return gerror.New("支付服务未返回订单。")
-		}
-		draft.Order = order
+		draft.LeaseToken = guid.S()
+		draft.LeaseUntil = time.Now().Add(2 * time.Minute).Unix()
 		raw, err := json.Marshal(draft)
 		if err != nil {
 			return err
 		}
-		_, err = mod.Clone().Data(g.Map{"status": profileSessionStatusCompleted, "payload_json": string(raw)}).Update()
+		claimedJSON = string(raw)
+		_, err = locked.Data(g.Map{"status": "processing", "payload_json": claimedJSON}).Update()
 		return err
 	})
 	if err != nil {
 		return nil, err
+	}
+	if completed {
+		return draft.Order, nil
+	}
+	callCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	order, createErr := ps.SysPublish().TenantVipOrderCreate(quickPushMediaUploadContext(callCtx, account.AccountId), &pi.TenantVipOrderCreateInp{PlanCode: draft.PlanCode, CouponCode: draft.CouponCode, ProductType: "vip", Quantity: 1, RequestKey: fmt.Sprintf("bot-renewal:%d:%d", botID, sessionID)})
+	cancel()
+	if createErr == nil && order == nil {
+		createErr = gerror.New("支付服务未返回订单。")
+	}
+	draft.LeaseToken = ""
+	draft.LeaseUntil = 0
+	status := profileSessionStatusActive
+	if createErr == nil {
+		draft.Order = order
+		status = profileSessionStatusCompleted
+	}
+	raw, err := json.Marshal(draft)
+	if err != nil {
+		return nil, err
+	}
+	persistCtx, persistCancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	defer persistCancel()
+	result, err := g.DB().Model(profileSessionTable).Ctx(persistCtx).Where("id", sessionID).Where("bot_id", botID).Where("telegram_user_id", userID).Where("chat_id", chatID).Where("tenant_id", account.TenantId).Where("account_id", account.AccountId).Where("scene", "account_renewal").Where("status", "processing").Where("payload_json", claimedJSON).Data(g.Map{"status": status, "payload_json": string(raw)}).Update()
+	if err != nil {
+		return nil, gerror.Wrap(err, "保存续费确认结果失败；请稍后重试，同次确认将复用已有订单")
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if n == 0 {
+		return nil, gerror.New("续费确认状态已改变，请稍后重试；同次确认将复用已有订单")
+	}
+	if createErr != nil {
+		return nil, createErr
 	}
 	return order, nil
 }

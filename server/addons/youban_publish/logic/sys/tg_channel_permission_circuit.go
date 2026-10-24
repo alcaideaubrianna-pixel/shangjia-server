@@ -15,7 +15,6 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/util/guid"
 	botin "hotgo/addons/youban_bot/model/input/sysin"
-	botservice "hotgo/addons/youban_bot/service"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
@@ -275,7 +274,7 @@ func (s *sSysPublish) notifyChannelPermissionCircuit(ctx context.Context, expect
 	if channel == nil {
 		return gerror.New("频道不存在")
 	}
-	err = botservice.SysBot().NotifyAccount(ctx, &botin.NotifyAccountInp{BotStrategy: "official", FallbackBoundBot: true, RequireDelivery: true, IgnoreFeatureSwitch: true,
+	err = s.notifyAccountWithPreference(ctx, row.TenantId, "channel", &botin.NotifyAccountInp{BotStrategy: "official", FallbackBoundBot: true, RequireDelivery: true, IgnoreFeatureSwitch: true,
 		App: "api", AccountId: row.AccountId,
 		Text:    fmt.Sprintf("频道推送已暂停\n频道：%s\n连续10次发送出现频道不存在或权限不足错误。请先将推送 Bot 添加为管理员并开启发布消息权限，再点击恢复。采集与资料保留，暂停期间不新增发送任务；历史未发送任务不会自动补投，调度记录最长保留一个月。", html.EscapeString(channel.ChannelTitle)),
 		Buttons: [][]botin.NotifyButton{{{Label: "检查权限并恢复推送", Data: fmt.Sprintf("ch:pr:%d:%s", row.ChannelId, row.Generation)}}},

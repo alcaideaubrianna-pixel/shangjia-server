@@ -211,3 +211,63 @@ func TestAccountAuthorizationShareLifecycle(t *testing.T) {
 		t.Fatal("changed binding permitted issuance")
 	}
 }
+
+func TestAccountManagementSessionRetention(t *testing.T) {
+	ctx := relayTestDatabase(t)
+	db, _ := gdb.Instance()
+	t.Cleanup(func() { _ = db.GetCore().ClearTableFieldsAll(ctx) })
+	for _, sql := range []string{
+		"DROP TABLE IF EXISTS " + profileSessionTable,
+		`CREATE TABLE hg_youban_bot_profile_session(id integer primary key,scene text,status text,expires_at timestamp)`,
+	} {
+		if _, err := db.Exec(ctx, sql); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.GetCore().ClearTableFieldsAll(ctx); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	for id := 1; id <= 205; id++ {
+		if _, err := db.Exec(ctx, `INSERT INTO hg_youban_bot_profile_session VALUES(?,'account_share','available',?)`, id, now.AddDate(0, 0, -31)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, row := range []struct {
+		id            int
+		scene, status string
+		expires       time.Time
+	}{
+		{301, "account_authorize", "completed", now.AddDate(0, 0, -1)},
+		{302, "account_share", "available", now.Add(time.Hour)},
+		{303, "create", "active", now.AddDate(0, 0, -90)},
+		{304, "account_renewal", "completed", now.AddDate(0, 0, -31)},
+		{305, "account_managed_reset", "completed", now.AddDate(0, 0, -31)},
+		{306, "account_reset", "active", now.AddDate(0, 0, -31)},
+	} {
+		if _, err := db.Exec(ctx, `INSERT INTO hg_youban_bot_profile_session VALUES(?,?,?,?)`, row.id, row.scene, row.status, row.expires); err != nil {
+			t.Fatal(err)
+		}
+	}
+	service := &sSysBot{}
+	if err := service.cleanupAccountManagementSessions(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+	count, err := db.GetCount(ctx, `SELECT COUNT(*) FROM hg_youban_bot_profile_session`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 11 {
+		t.Fatalf("cleanup not bounded to 200 rows: %d", count)
+	}
+	if err := service.cleanupAccountManagementSessions(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.GetAll(ctx, `SELECT id FROM hg_youban_bot_profile_session ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 3 || rows[0]["id"].Int() != 301 || rows[1]["id"].Int() != 302 || rows[2]["id"].Int() != 303 {
+		t.Fatalf("cleanup touched fresh audit/live link/media draft: %v", rows)
+	}
+}

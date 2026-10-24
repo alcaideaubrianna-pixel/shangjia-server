@@ -10,6 +10,8 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/util/gconv"
 
+	botin "hotgo/addons/youban_bot/model/input/sysin"
+	botservice "hotgo/addons/youban_bot/service"
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
@@ -442,4 +444,20 @@ func (s *sSysPublish) accountNotificationEnabled(ctx context.Context, tenantID, 
 		return false, gerror.Wrap(err, "读取通知设置失败")
 	}
 	return row.IsEmpty() || row[field].Int() == 1, nil
+}
+
+// A disabled notification is a completed delivery decision. Callers must still
+// perform their business action and persist their normal deduplication marker.
+func (s *sSysPublish) notifyAccountWithPreference(ctx context.Context, tenantID int64, kind string, in *botin.NotifyAccountInp) error {
+	if in == nil || tenantID <= 0 || in.AccountId <= 0 {
+		return gerror.New("通知账户归属不完整")
+	}
+	enabled, err := s.accountNotificationEnabled(ctx, tenantID, in.AccountId, kind)
+	if err != nil {
+		return err
+	}
+	if !enabled {
+		return nil
+	}
+	return botservice.SysBot().NotifyAccount(ctx, in)
 }

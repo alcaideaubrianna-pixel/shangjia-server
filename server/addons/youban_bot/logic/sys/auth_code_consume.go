@@ -93,19 +93,7 @@ func (s *sSysBot) consumeBindCode(ctx context.Context, botId int64, msg *models.
 	}
 	text, markup := s.bindSuccessMessage(ctx, row.App, row.AccountId, telegramUserId, telegramUsername)
 	replyErr := s.replyWithMarkup(ctx, botId, fmt.Sprintf("%d", msg.Chat.ID), text, markup)
-	if keyboardErr := s.ensureReplyKeyboardCurrent(ctx, botId, fmt.Sprintf("%d", msg.Chat.ID)); keyboardErr != nil {
-		g.Log().Warningf(ctx, "绑定成功后刷新Telegram底部键盘失败 botId:%d chatId:%d userId:%s err:%+v", botId, msg.Chat.ID, telegramUserId, keyboardErr)
-	}
-	for _, hookErr := range service.TriggerAccountBoundHooks(ctx, &service.AccountBoundEvent{
-		App:              row.App,
-		AccountId:        row.AccountId,
-		BotId:            botId,
-		TelegramUserId:   telegramUserId,
-		TelegramUsername: telegramUsername,
-	}) {
-		g.Log().Warningf(ctx, "Telegram绑定后置处理失败 accountId:%d err:%+v", row.AccountId, hookErr)
-	}
-	_ = s.notifySuperAdmins(ctx, botId, superNotifyBind, botBindNotifyText(row.App, row.AccountId, telegramUsername))
+	s.afterAccountBound(ctx, botId, fmt.Sprintf("%d", msg.Chat.ID), row.App, row.AccountId, telegramUserId, telegramUsername)
 	return replyErr
 }
 
@@ -149,4 +137,21 @@ func (s *sSysBot) markCodeFailed(ctx context.Context, code, status, message stri
 		return 0, err
 	}
 	return res.RowsAffected()
+}
+
+// Runs only after the binding has been persisted. Failures must not undo a binding.
+func (s *sSysBot) afterAccountBound(ctx context.Context, botId int64, chatId, app string, accountId int64, telegramUserId, telegramUsername string) {
+	if keyboardErr := s.ensureReplyKeyboardCurrent(ctx, botId, chatId); keyboardErr != nil {
+		g.Log().Warningf(ctx, "绑定成功后刷新Telegram底部键盘失败 botId:%d chatId:%s userId:%s err:%+v", botId, chatId, telegramUserId, keyboardErr)
+	}
+	for _, hookErr := range service.TriggerAccountBoundHooks(ctx, &service.AccountBoundEvent{
+		App:              app,
+		AccountId:        accountId,
+		BotId:            botId,
+		TelegramUserId:   telegramUserId,
+		TelegramUsername: telegramUsername,
+	}) {
+		g.Log().Warningf(ctx, "Telegram绑定后置处理失败 accountId:%d err:%+v", accountId, hookErr)
+	}
+	_ = s.notifySuperAdmins(ctx, botId, superNotifyBind, botBindNotifyText(app, accountId, telegramUsername))
 }

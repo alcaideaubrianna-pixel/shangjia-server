@@ -131,7 +131,7 @@ func (s *sSysPublish) handleAccountChannelAccessNotification(ctx context.Context
 	if !sent.IsNil() {
 		return adminErr
 	}
-	if err = botservice.SysBot().NotifyAccount(ctx, &botin.NotifyAccountInp{App: consts.AppApi, AccountId: notice.AccountID, BotStrategy: "official", FallbackBoundBot: true, IgnoreFeatureSwitch: true, RequireDelivery: true, Text: text, ParseMode: "HTML"}); err != nil {
+	if err = s.notifyAccountWithPreference(ctx, notice.TenantID, "channel", &botin.NotifyAccountInp{App: consts.AppApi, AccountId: notice.AccountID, BotStrategy: "official", FallbackBoundBot: true, IgnoreFeatureSwitch: true, RequireDelivery: true, Text: text, ParseMode: "HTML"}); err != nil {
 		return errors.Join(adminErr, err)
 	}
 	if err = cache.Instance().Set(ctx, key, true, 7*24*time.Hour); err != nil {

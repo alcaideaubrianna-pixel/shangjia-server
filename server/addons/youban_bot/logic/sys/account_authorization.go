@@ -189,6 +189,7 @@ func (s *sSysBot) handleAccountAuthorizationCallback(ctx context.Context, botID 
 	if created == nil {
 		return true, s.reply(ctx, botID, chatID, "授权已完成，请勿重复创建。")
 	}
+	s.afterAccountBound(ctx, botID, chatID, "api", created.Id, fmt.Sprint(query.From.ID), query.From.Username)
 	var draft accountAuthorizationDraft
 	if err := json.Unmarshal([]byte(session.PayloadJson), &draft); err != nil {
 		return true, err
@@ -301,4 +302,25 @@ func (s *sSysBot) createAccountAuthorizationShare(ctx context.Context, botID int
 func (s *sSysBot) revokeAccountAuthorizationShares(ctx context.Context, botID int64, userID string, account *botProfileAccount) error {
 	_, err := g.DB().Model(profileSessionTable).Ctx(ctx).Where("bot_id", botID).Where("telegram_user_id", userID).Where("account_id", account.AccountId).Where("tenant_id", account.TenantId).Where("scene", "account_share").Where("status", accountShareStatusAvailable).Data(g.Map{"status": profileSessionStatusCanceled}).Update()
 	return err
+}
+
+// Account-operation audit is retained for 30 days after expiry. Bounded hard
+// deletion keeps this shared session table finite without touching media drafts.
+func (s *sSysBot) cleanupAccountManagementSessions(ctx context.Context, now time.Time) error {
+	scenes := []string{"account_share", "account_authorize", "account_renewal", "account_create", "account_setting", "account_delete", "account_reset", "account_managed_reset"}
+	cutoff := now.AddDate(0, 0, -30)
+	mod := g.DB().Model(profileSessionTable).Unscoped().Ctx(ctx).WhereIn("scene", scenes).WhereLT("expires_at", cutoff)
+	rows, err := mod.Clone().Fields("id").OrderAsc("expires_at").OrderAsc("id").Limit(200).All()
+	if err != nil {
+		return gerror.Wrap(err, "读取过期账户管理会话失败")
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	ids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row["id"].Int64())
+	}
+	_, err = mod.WhereIn("id", ids).Delete()
+	return gerror.Wrap(err, "清理过期账户管理会话失败")
 }

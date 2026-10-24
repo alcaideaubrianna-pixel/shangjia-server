@@ -18,6 +18,7 @@ var mysqlSqlFiles = []string{
 	"addons/youban_bot/resource/sql/relay.sql",
 	"addons/youban_bot/resource/sql/manager.sql",
 	"addons/youban_bot/resource/sql/menu.sql",
+	"addons/youban_bot/resource/sql/account_management.sql",
 }
 
 var pgsqlSqlFiles = []string{
@@ -26,6 +27,7 @@ var pgsqlSqlFiles = []string{
 	"addons/youban_bot/resource/sql/relay.pgsql.sql",
 	"addons/youban_bot/resource/sql/manager.pgsql.sql",
 	"addons/youban_bot/resource/sql/menu.pgsql.sql",
+	"addons/youban_bot/resource/sql/account_management.pgsql.sql",
 }
 
 func Install(ctx context.Context) error { return execSql(ctx) }

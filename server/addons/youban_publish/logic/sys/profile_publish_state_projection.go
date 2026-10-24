@@ -140,6 +140,9 @@ func (s *sSysPublish) writeProfilePublishOperationStateTx(ctx context.Context, t
 	if _, err = indexMod.Data(g.Map{"task_status": status}).Update(); err != nil {
 		return gerror.Wrap(err, "更新资料列表上架状态失败")
 	}
+	if status == sysin.PublishTaskStatusFailed {
+		return s.enqueueProfileFailureNoticeTx(ctx, tx, tenantId, accountId, profileId, operationNo)
+	}
 	return nil
 }
 
