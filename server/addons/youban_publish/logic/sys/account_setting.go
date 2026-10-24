@@ -8,6 +8,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/gogf/gf/v2/util/gconv"
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
@@ -378,6 +379,9 @@ func (s *sSysPublish) PatchAccountSetting(ctx context.Context, in *sysin.Account
 		result, err = s.accountSetting(ctx, admin.TenantId, in.AccountId)
 		return err
 	})
+	if err == nil {
+		_ = bumpAccountVisibilityVersion(ctx, admin.TenantId)
+	}
 	return result, err
 }
 
@@ -392,6 +396,14 @@ func accountSettingSaveInput(current *sysin.AccountSettingModel) *sysin.AccountS
 }
 func applyAccountSettingPatch(save *sysin.AccountSettingSaveInp, in *sysin.AccountSettingPatchInp) {
 	switch in.Field {
+	case "profileDetailViewEnabled":
+		save.ProfileDetailViewEnabled = gconv.Int(in.Value)
+	case "sharedResourceEnabled":
+		save.SharedResourceEnabled = gconv.Int(in.Value)
+	case "telegramBindingEnabled":
+		save.TelegramBindingEnabled = gconv.Int(in.Value)
+	case "groupPushEnabled":
+		save.GroupPushEnabled = gconv.Int(in.Value)
 	case "enableSuffix":
 		if in.Value == "1" {
 			save.EnableSuffix = 1
@@ -415,4 +427,19 @@ func applyAccountSettingPatch(save *sysin.AccountSettingSaveInp, in *sysin.Accou
 	case "markPosition":
 		save.MarkPosition = in.Value
 	}
+}
+
+// Notification checks must not render account title/number previews or read
+// unrelated configuration. Missing rows keep the product's enabled default.
+func (s *sSysPublish) accountNotificationEnabled(ctx context.Context, tenantID, accountID int64, kind string) (bool, error) {
+	fields := map[string]string{"daily": "daily_report_enabled", "channel": "channel_alert_enabled", "account": "account_event_enabled", "task": "task_failure_enabled"}
+	field, ok := fields[kind]
+	if !ok {
+		return false, gerror.New("通知设置类型不合法")
+	}
+	row, err := g.DB().Model(publishAccountSettingTable).Ctx(ctx).Fields(field).Where("tenant_id", tenantID).Where("account_id", accountID).WhereNull("deleted_at").One()
+	if err != nil {
+		return false, gerror.Wrap(err, "读取通知设置失败")
+	}
+	return row.IsEmpty() || row[field].Int() == 1, nil
 }

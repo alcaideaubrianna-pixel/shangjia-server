@@ -54,6 +54,9 @@ func (startFeature) ConfigSchema() []*sysin.FeatureConfigSchema {
 	}
 }
 func (startFeature) Handle(ctx context.Context, bot *sSysBot, featureCtx *botFeatureContext) (bool, error) {
+	if strings.HasPrefix(strings.TrimSpace(featureCtx.Args), accountAuthorizationPrefix) {
+		return true, bot.beginAccountAuthorization(ctx, featureCtx)
+	}
 	if strings.HasPrefix(strings.TrimSpace(featureCtx.Args), "chat_profile_") {
 		return true, bot.handleChatProfilePreview(ctx, featureCtx)
 	}

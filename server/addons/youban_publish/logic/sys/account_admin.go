@@ -114,18 +114,7 @@ func (s *sSysPublish) ServerAccountDelete(ctx context.Context, in *sysin.Account
 		return gerror.New("请选择要删除的数据")
 	}
 	in.Ids = uniqueIds(in.Ids)
-	accountColumns := pdao.YoubanPublishAccount.Columns()
-	_, err = pdao.YoubanPublishAccount.Ctx(ctx).
-		WhereIn(accountColumns.Id, in.Ids).
-		Data(g.Map{
-			accountColumns.DeletedBy: contexts.GetUserId(ctx),
-			accountColumns.DeletedAt: gtime.Now(),
-		}).Update()
-	if err != nil {
-		return gerror.Wrap(err, "删除上架账号失败")
-	}
-	_ = bumpAccountVisibilityVersion(ctx, account.TenantId)
-	return nil
+	return s.deleteAccountsWithNotices(ctx, account, in.Ids, 0)
 }
 
 func (s *sSysPublish) AdminAccountList(ctx context.Context, in *sysin.AccountListInp) (list []*sysin.AccountModel, totalCount int, err error) {
@@ -237,17 +226,7 @@ func (s *sSysPublish) AdminAccountDelete(ctx context.Context, in *sysin.AccountD
 	if count != len(in.Ids) {
 		return gerror.New("存在无权操作的账号")
 	}
-	_, err = pdao.YoubanPublishAccount.Ctx(ctx).
-		WhereIn(accountColumns.Id, in.Ids).
-		Where(accountColumns.TenantId, account.TenantId).
-		Data(g.Map{
-			accountColumns.DeletedBy: account.Id,
-			accountColumns.DeletedAt: gtime.Now(),
-		}).Update()
-	if err != nil {
-		return gerror.Wrap(err, "删除上架账号失败")
-	}
-	return nil
+	return s.deleteAccountsWithNotices(ctx, account, in.Ids, account.TenantId)
 }
 
 func (s *sSysPublish) AdminAccountTransferPreview(ctx context.Context, in *sysin.AccountTransferPreviewInp) (res *sysin.AccountTransferPreviewModel, err error) {

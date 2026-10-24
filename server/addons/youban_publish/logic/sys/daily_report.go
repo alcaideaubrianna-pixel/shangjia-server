@@ -8,11 +8,14 @@ import (
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
+	pdao "hotgo/addons/youban_publish/internal/dao"
+	"hotgo/addons/youban_publish/internal/model/do"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
-const dailyReportTable = "hg_youban_publish_daily_report"
+var dailyReportTable = pdao.YoubanPublishDailyReport.Table()
 
 // BuildDailyReport reads the durable collection and publish projections for a
 // China calendar day. Source counts use DISTINCT profile_id, so retries and
@@ -40,7 +43,7 @@ func (s *sSysPublish) BuildDailyReport(ctx context.Context, tenantID, accountID 
 	// may collect many chats, and one chat may match several rules.
 	sourceSQL := `WITH material AS (
  SELECT d.source_id,d.profile_id,d.id,
- COALESCE(NULLIF(d.source_chat_id_snapshot,''),'source:' || CAST(d.source_id AS text)) AS chat_key,
+ COALESCE(NULLIF(d.source_chat_id_snapshot,''),CONCAT('source:',d.source_id)) AS chat_key,
  COALESCE(NULLIF(d.source_name_snapshot,''),NULLIF(s.title,''),NULLIF(d.source_chat_id_snapshot,''),'未知来源频道') AS title
  FROM hg_youban_publish_collect_dispatch d
  LEFT JOIN hg_youban_publish_collect_source s ON s.id=d.source_id AND s.tenant_id=d.tenant_id AND s.deleted_at IS NULL
@@ -73,11 +76,12 @@ func (s *sSysPublish) BuildDailyReport(ctx context.Context, tenantID, accountID 
 		Action                      string
 		Success, Failed, Processing int
 	}
-	if err = g.DB().Model(publishSuccessRecordTable).Safe().Ctx(ctx).
-		Fields("action,SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) AS success, SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed, SUM(CASE WHEN status IN ('pending','sending','unknown','failed_retry') THEN 1 ELSE 0 END) AS processing").
-		Where("tenant_id", tenantID).Where("account_id", accountID).
-		WhereIn("action", []string{"collect_publish", "cycle_publish"}).
-		WhereGTE("created_at", start).WhereLT("created_at", end).Group("action").Scan(&counts); err != nil {
+	if err = g.DB().Model(publishSuccessRecordTable+" r").Safe().Ctx(ctx).
+		LeftJoin(publishTgJobTable+" j", dailyReportJobJoin()).
+		Fields("r.action AS action,SUM(CASE WHEN r.status='success' THEN 1 ELSE 0 END) AS success, SUM(CASE WHEN r.status='failed' THEN 1 ELSE 0 END) AS failed, SUM(CASE WHEN r.status IN ('pending','sending','unknown','failed_retry') THEN 1 ELSE 0 END) AS processing").
+		Where("r.tenant_id", tenantID).Where("r.account_id", accountID).
+		WhereIn("r.action", []string{"collect_publish", "cycle_publish"}).
+		Where(dailyReportResultTime()+" >= ? AND "+dailyReportResultTime()+" < ?", start, end).Group("r.action").Scan(&counts); err != nil {
 		return nil, gerror.Wrap(err, "统计日报推送结果失败")
 	}
 	for _, count := range counts {
@@ -88,11 +92,12 @@ func (s *sSysPublish) BuildDailyReport(ctx context.Context, tenantID, accountID 
 		}
 	}
 	if err = g.DB().Model(publishSuccessRecordTable+" r").Safe().Ctx(ctx).
+		LeftJoin(publishTgJobTable+" j", dailyReportJobJoin()).
 		LeftJoin(publishChannelTable+" c", "c.id=r.channel_id AND c.tenant_id=r.tenant_id AND c.account_id=r.account_id").
-		Fields("r.channel_id AS channel_id,COALESCE(MAX(NULLIF(c.title,'')),CAST(r.channel_id AS text)) AS title,r.action AS action,SUM(CASE WHEN r.status='success' THEN 1 ELSE 0 END) AS success,SUM(CASE WHEN r.status='failed' THEN 1 ELSE 0 END) AS failed,SUM(CASE WHEN r.status IN ('pending','sending','unknown','failed_retry') THEN 1 ELSE 0 END) AS processing").
+		Fields("r.channel_id AS channel_id,COALESCE(MAX(NULLIF(c.title,'')),CONCAT('',r.channel_id)) AS title,r.action AS action,SUM(CASE WHEN r.status='success' THEN 1 ELSE 0 END) AS success,SUM(CASE WHEN r.status='failed' THEN 1 ELSE 0 END) AS failed,SUM(CASE WHEN r.status IN ('pending','sending','unknown','failed_retry') THEN 1 ELSE 0 END) AS processing").
 		Where("r.tenant_id", tenantID).Where("r.account_id", accountID).
 		WhereIn("r.action", []string{"collect_publish", "cycle_publish"}).
-		WhereGTE("r.created_at", start).WhereLT("r.created_at", end).
+		Where(dailyReportResultTime()+" >= ? AND "+dailyReportResultTime()+" < ?", start, end).
 		Group("r.channel_id,r.action").Order("r.channel_id,r.action").Scan(&report.Channels); err != nil {
 		return nil, gerror.Wrap(err, "统计日报目标频道失败")
 	}
@@ -108,11 +113,11 @@ func (s *sSysPublish) SaveDailyReport(ctx context.Context, report *sysin.DailyRe
 	if err != nil {
 		return gerror.Wrap(err, "序列化日报明细失败")
 	}
-	_, err = g.DB().Model(dailyReportTable).Safe().Ctx(ctx).Data(g.Map{
-		"tenant_id": report.TenantID, "account_id": report.AccountID, "report_date": report.ReportDate,
-		"collected_total": report.CollectedTotal, "publish_success": report.PublishSuccess, "publish_failed": report.PublishFailed,
-		"publish_processing": report.PublishProcessing, "source_breakdown_json": string(payload), "generated_at": report.GeneratedAt,
-	}).OnConflict("tenant_id,account_id,report_date").OnDuplicate("collected_total,publish_success,publish_failed,publish_processing,source_breakdown_json,generated_at").Save()
+	_, err = pdao.YoubanPublishDailyReport.Ctx(ctx).Data(do.YoubanPublishDailyReport{
+		TenantId: report.TenantID, AccountId: report.AccountID, ReportDate: gtime.New(report.ReportDate),
+		CollectedTotal: report.CollectedTotal, PublishSuccess: report.PublishSuccess, PublishFailed: report.PublishFailed,
+		PublishProcessing: report.PublishProcessing, SourceBreakdownJson: string(payload), GeneratedAt: gtime.New(report.GeneratedAt),
+	}).OnConflict("tenant_id,account_id,report_date").OnDuplicate("tenant_id").Save()
 	if err != nil {
 		return gerror.Wrap(err, "保存日报失败")
 	}
@@ -137,7 +142,7 @@ func (s *sSysPublish) DailyReports(ctx context.Context, in *sysin.DailyReportLis
 	}
 	today := time.Now().In(loc)
 	oldest := dailyReportOldestDate(today, days)
-	if err := g.DB().Model(dailyReportTable).Safe().Ctx(ctx).Fields("report_date,source_breakdown_json").Where("tenant_id", in.TenantID).Where("account_id", in.AccountID).WhereGTE("report_date", oldest).WhereLT("report_date", today.Format("2006-01-02")).OrderDesc("report_date").Limit(days).Scan(&rows); err != nil {
+	if err := pdao.YoubanPublishDailyReport.Ctx(ctx).Fields("report_date,source_breakdown_json").Where("tenant_id", in.TenantID).Where("account_id", in.AccountID).WhereGTE("report_date", oldest).WhereLT("report_date", today.Format("2006-01-02")).OrderDesc("report_date").Limit(days).Scan(&rows); err != nil {
 		return nil, gerror.Wrap(err, "读取日报失败")
 	}
 	list := make([]*sysin.DailyReportModel, 0, len(rows))
@@ -152,50 +157,47 @@ func (s *sSysPublish) DailyReports(ctx context.Context, in *sysin.DailyReportLis
 }
 
 func (s *sSysPublish) GenerateDailyReports(ctx context.Context, reportDate time.Time, limit int) error {
-	if limit <= 0 {
-		limit = 500
+	_, err := s.generateDailyReportBatch(ctx, reportDate, limit)
+	return err
+}
+
+func (s *sSysPublish) generateDailyReportBatch(ctx context.Context, reportDate time.Time, limit int) (int, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
 	}
 	loc, err := time.LoadLocation("Asia/Shanghai")
 	if err != nil {
-		return err
+		return 0, err
 	}
 	day := reportDate.In(loc)
 	start := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
 	end := start.AddDate(0, 0, 1)
-	var owners []struct {
-		TenantID  int64 `orm:"tenant_id"`
-		AccountID int64 `orm:"account_id"`
-	}
-	ownerSQL := `SELECT tenant_id,account_id FROM (SELECT tenant_id,account_id FROM hg_youban_publish_collect_dispatch WHERE created_at>=? AND created_at<? GROUP BY tenant_id,account_id UNION SELECT tenant_id,account_id FROM hg_youban_publish_success_record WHERE created_at>=? AND created_at<? AND action IN ('collect_publish','cycle_publish') GROUP BY tenant_id,account_id) owners ORDER BY tenant_id,account_id LIMIT ? OFFSET ?`
-	for offset := 0; ; offset += limit {
-		rows, queryErr := g.DB().GetAll(ctx, ownerSQL, start, end, start, end, limit, offset)
-		if queryErr != nil {
-			return gerror.Wrap(queryErr, "读取日报账号失败")
-		}
-		for _, row := range rows {
-			owners = append(owners, struct {
-				TenantID  int64 `orm:"tenant_id"`
-				AccountID int64 `orm:"account_id"`
-			}{TenantID: row["tenant_id"].Int64(), AccountID: row["account_id"].Int64()})
-		}
-		if len(rows) < limit {
-			break
-		}
-	}
-	for _, owner := range owners {
-		report, buildErr := s.BuildDailyReport(ctx, owner.TenantID, owner.AccountID, day)
-		if buildErr != nil {
-			return buildErr
-		}
-		if saveErr := s.SaveDailyReport(ctx, report); saveErr != nil {
-			return saveErr
-		}
-	}
-	_, err = g.DB().Model(dailyReportTable).Safe().Ctx(ctx).WhereLT("report_date", dailyReportOldestDate(time.Now().In(loc), 7)).Delete()
+	// Include enabled configurations even when they collected/sent zero groups.
+	// Existing snapshots are excluded, making repeated minute polls inexpensive.
+	query := `SELECT a.tenant_id,a.id AS account_id FROM hg_youban_publish_account a
+ WHERE a.status=1 AND a.deleted_at IS NULL AND a.account_type='admin' AND a.created_at<?
+ AND NOT EXISTS(SELECT 1 FROM hg_youban_publish_daily_report r WHERE r.tenant_id=a.tenant_id AND r.account_id=a.id AND r.report_date=?)
+ AND (EXISTS(SELECT 1 FROM hg_youban_publish_collect_source s WHERE s.tenant_id=a.tenant_id AND s.account_id=a.id AND s.status=1 AND s.deleted_at IS NULL AND s.created_at<?)
+ OR EXISTS(SELECT 1 FROM hg_youban_publish_channel c WHERE c.tenant_id=a.tenant_id AND c.account_id=a.id AND c.cycle_publish_enabled=1 AND c.deleted_at IS NULL AND c.created_at<?)
+ OR EXISTS(SELECT 1 FROM hg_youban_publish_collect_dispatch d WHERE d.tenant_id=a.tenant_id AND d.account_id=a.id AND d.created_at>=? AND d.created_at<?)
+ OR EXISTS(SELECT 1 FROM hg_youban_publish_success_record r LEFT JOIN hg_youban_publish_tg_job j ON ` + dailyReportJobJoin() + ` WHERE r.tenant_id=a.tenant_id AND r.account_id=a.id AND ` + dailyReportResultTime() + `>=? AND ` + dailyReportResultTime() + `<? AND r.action IN ('collect_publish','cycle_publish')))
+ ORDER BY a.tenant_id,a.id LIMIT ?`
+	rows, err := g.DB().GetAll(ctx, query, end, start.Format("2006-01-02"), end, end, start, end, start, end, limit)
 	if err != nil {
-		return gerror.Wrap(err, "清理过期日报失败")
+		return 0, gerror.Wrap(err, "读取日报账号失败")
 	}
-	return nil
+	count := 0
+	for _, owner := range rows {
+		report, err := s.BuildDailyReport(ctx, owner["tenant_id"].Int64(), owner["account_id"].Int64(), start)
+		if err != nil {
+			return count, err
+		}
+		if err = s.SaveDailyReport(ctx, report); err != nil {
+			return count, err
+		}
+		count++
+	}
+	return count, nil
 }
 
 func dailyReportSourceText(report *sysin.DailyReportModel) string {
@@ -211,4 +213,13 @@ func dailyReportOldestDate(today time.Time, days int) string {
 		days = 7
 	}
 	return time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, today.Location()).AddDate(0, 0, -days).Format("2006-01-02")
+}
+
+// The success projection keeps its first-created timestamp across retries.
+// Successful sends belong to sent_at's day, not the day they were enqueued.
+func dailyReportResultTime() string {
+	return "CASE WHEN r.status='success' THEN COALESCE(j.sent_at,r.created_at) WHEN r.status='failed' THEN COALESCE(j.updated_at,r.created_at) ELSE r.created_at END"
+}
+func dailyReportJobJoin() string {
+	return "j.id=r.job_id AND j.tenant_id=r.tenant_id AND j.account_id=r.account_id"
 }

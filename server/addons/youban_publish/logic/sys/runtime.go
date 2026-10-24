@@ -98,6 +98,7 @@ func telegramDeliveryRuntimeEnabled(config publishRuntimeConfig) bool {
 }
 
 func (s *sSysPublish) startPublishSchedulers(ctx context.Context) {
+	go s.runAccountNotices(ctx)
 	if err := s.backfillPublishSuccessRecords(ctx, 5000); err != nil {
 		g.Log().Warningf(ctx, "补写成功发布记录失败：%+v", err)
 	}

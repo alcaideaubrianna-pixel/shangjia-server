@@ -289,7 +289,7 @@ func (in *AccountSettingPatchInp) Filter(ctx context.Context) error {
 		return gerror.New("账号ID不能为空")
 	}
 	switch in.Field {
-	case "enableSuffix", "enableTitleMark":
+	case "enableSuffix", "enableTitleMark", "profileDetailViewEnabled", "sharedResourceEnabled", "telegramBindingEnabled", "groupPushEnabled":
 		if in.Value != "0" && in.Value != "1" {
 			return gerror.New("开关值不合法")
 		}

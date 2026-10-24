@@ -12,6 +12,7 @@ import (
 	"github.com/go-telegram/bot/models"
 	"hotgo/internal/model/input/form"
 
+	"hotgo/addons/youban_publish/library/dailyreport"
 	publishsysin "hotgo/addons/youban_publish/model/input/sysin"
 	publishService "hotgo/addons/youban_publish/service"
 )
@@ -39,23 +40,22 @@ func (s *sSysBot) showAccountManagement(ctx context.Context, botID int64, chatID
 	name := fmt.Sprintf("账号 %d", account.AccountId)
 	status := "未知"
 	callCtx := quickPushMediaUploadContext(ctx, account.AccountId)
-	if current, err := publishService.SysPublish().CurrentAccount(callCtx); err == nil && current != nil && current.Vip != nil {
-		if current.Vip.IsVip {
-			status = "VIP"
-		} else {
-			status = "非 VIP"
-		}
-		if current.Vip.ExpiredAt != nil {
-			status += "，到期：" + current.Vip.ExpiredAt.String()
+	if current, err := publishService.SysPublish().CurrentAccount(callCtx); err == nil && current != nil {
+		name = firstNonEmpty(current.Nickname, current.Username, name)
+		if current.Vip != nil {
+			if current.Vip.IsVip {
+				status = "VIP"
+			} else {
+				status = "非 VIP"
+			}
+			if current.Vip.ExpiredAt != nil {
+				status += "，到期：" + current.Vip.ExpiredAt.String()
+			}
 		}
 	}
 	text := fmt.Sprintf("<b>账户管理</b>\n\n当前账户：%s\n会员状态：%s\n\n请选择操作：", html.EscapeString(name), html.EscapeString(status))
 	markup := &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
-		{{Text: "当前账户", CallbackData: "acct:current"}, {Text: "会员续费", CallbackData: "acct:renew"}},
-		{{Text: "重置密码", CallbackData: "acct:reset"}, {Text: "账号设置", CallbackData: "acct:setting"}},
-		{{Text: "推送设置", CallbackData: "acct:notify"}, {Text: "邀请注册", CallbackData: "acct:invite"}},
-		{{Text: "上架账户", CallbackData: "acct:accounts"}},
-		{{Text: "创建上架账户", CallbackData: "acct:accounts:create"}},
+		{{Text: "我的账户", CallbackData: "acct:mine"}, {Text: "上架账户", CallbackData: "acct:accounts"}},
 		{{Text: "每日推送报告", CallbackData: "acct:report"}},
 	}}
 	return s.replyWithMarkup(ctx, botID, chatID, text, markup)
@@ -66,6 +66,9 @@ func (s *sSysBot) handleAccountManagementCallback(ctx context.Context, botID int
 		return false, nil
 	}
 	chatID := fmt.Sprint(query.Message.Message.Chat.ID)
+	if _, enabled := s.featureConfig(ctx, accountManagementFeature{}.Key()); !enabled {
+		return true, s.reply(ctx, botID, chatID, "账户管理当前未启用。")
+	}
 	if query.Message.Message.Chat.Type != models.ChatTypePrivate {
 		return true, s.reply(ctx, botID, chatID, "账户管理只能在私聊中使用。")
 	}
@@ -80,6 +83,20 @@ func (s *sSysBot) handleAccountManagementCallback(ctx context.Context, botID int
 		_, _ = tgBot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID})
 	}
 	switch query.Data {
+	case "acct:share":
+		return true, s.showAccountAuthorizationLink(ctx, botID, fmt.Sprint(query.From.ID), chatID, account)
+	case "acct:share:revoke":
+		if err := s.revokeAccountAuthorizationShares(ctx, botID, fmt.Sprint(query.From.ID), account); err != nil {
+			return true, err
+		}
+		return true, s.reply(ctx, botID, chatID, "授权链接已撤销。")
+	case "acct:mine":
+		return true, s.replyWithMarkup(ctx, botID, chatID, "<b>我的账户</b>\n请选择操作：", &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
+			{{Text: "当前账户", CallbackData: "acct:current"}, {Text: "会员续费", CallbackData: "acct:renew"}},
+			{{Text: "重置密码", CallbackData: "acct:reset"}, {Text: "账号设置", CallbackData: "acct:setting"}},
+			{{Text: "推送设置", CallbackData: "acct:notify"}, {Text: "邀请注册", CallbackData: "acct:invite"}},
+			{{Text: "返回账户管理", CallbackData: "acct:report:back"}},
+		}})
 	case "acct:accounts:create":
 		return true, s.startProfileSessionByIds(ctx, botID, fmt.Sprint(query.From.ID), chatID, account, "account_create", "waiting_username", 0, "", nil, "请输入新上架账户的登录用户名（3～32位字母、数字或下划线）。发送 /cancel 取消。")
 	case "acct:accounts":
@@ -134,7 +151,7 @@ func (s *sSysBot) handleAccountManagementCallback(ctx context.Context, botID int
 				return true, err
 			}
 			session := s.activeProfileSessionByIds(ctx, botID, fmt.Sprint(query.From.ID), chatID)
-			if session == nil || session.Id != id || session.Scene != "account_reset" || session.AccountId != account.AccountId || session.TenantId != account.TenantId {
+			if session == nil || session.Id != id || (session.Scene != "account_reset" && session.Scene != "account_managed_reset") || session.AccountId != account.AccountId || session.TenantId != account.TenantId {
 				return true, s.reply(ctx, botID, chatID, "确认已失效，请重新操作。")
 			}
 			result, err := s.resetOwnAccountFromSession(ctx, session, account)
@@ -202,14 +219,31 @@ func (s *sSysBot) handleAccountManagementCallback(ctx context.Context, botID int
 			if parseErr != nil || id <= 0 {
 				return true, s.reply(ctx, botID, chatID, "账号参数无效。")
 			}
-			return true, s.replyWithMarkup(ctx, botID, chatID, fmt.Sprintf("确定删除上架账户 %d 吗？删除后该账号将无法登录。", id), &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{{{Text: "确认删除", CallbackData: fmt.Sprintf("acct:accounts:delete_confirm:%d", id)}}, {{Text: "取消", CallbackData: "acct:accounts"}}}})
+			if id == account.AccountId {
+				return true, s.reply(ctx, botID, chatID, "不能删除当前管理员账户。")
+			}
+			if _, err := publishService.SysPublish().AdminAccountSettingView(quickPushMediaUploadContext(ctx, account.AccountId), &publishsysin.AccountSettingViewInp{AccountId: id}); err != nil {
+				return true, err
+			}
+			if err := s.startProfileSessionByIds(ctx, botID, fmt.Sprint(query.From.ID), chatID, account, "account_delete", "confirm", id, "", nil, ""); err != nil {
+				return true, err
+			}
+			session := s.activeProfileSessionByIds(ctx, botID, fmt.Sprint(query.From.ID), chatID)
+			if session == nil {
+				return true, s.reply(ctx, botID, chatID, "无法创建确认，请稍后重试。")
+			}
+			return true, s.replyWithMarkup(ctx, botID, chatID, fmt.Sprintf("确定删除上架账户 %d 吗？删除后该账号将无法登录。", id), &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{{{Text: "确认删除", CallbackData: fmt.Sprintf("acct:accounts:delete_confirm:%d", session.Id)}}, {{Text: "取消", CallbackData: "acct:reset_cancel"}}}})
 		}
 		if strings.HasPrefix(query.Data, "acct:accounts:delete_confirm:") {
 			id, parseErr := strconv.ParseInt(strings.TrimPrefix(query.Data, "acct:accounts:delete_confirm:"), 10, 64)
 			if parseErr != nil || id <= 0 {
 				return true, s.reply(ctx, botID, chatID, "账号参数无效。")
 			}
-			if deleteErr := publishService.SysPublish().AdminAccountDelete(quickPushMediaUploadContext(ctx, account.AccountId), &publishsysin.AccountDeleteInp{Ids: []int64{id}}); deleteErr != nil {
+			session := s.activeProfileSessionByIds(ctx, botID, fmt.Sprint(query.From.ID), chatID)
+			if session == nil || session.Id != id || session.Scene != "account_delete" || session.AccountId != account.AccountId || session.TenantId != account.TenantId {
+				return true, s.reply(ctx, botID, chatID, "删除确认已失效，请重新操作。")
+			}
+			if deleteErr := s.deleteManagedAccountFromSession(ctx, session, account); deleteErr != nil {
 				return true, s.reply(ctx, botID, chatID, "删除账号失败："+html.EscapeString(deleteErr.Error()))
 			}
 			return true, s.showManagedAccounts(ctx, botID, chatID, account, 1)
@@ -219,11 +253,14 @@ func (s *sSysBot) handleAccountManagementCallback(ctx context.Context, botID int
 			if parseErr != nil || id <= 0 {
 				return true, s.reply(ctx, botID, chatID, "账号参数无效。")
 			}
-			result, resetErr := publishService.SysPublish().AdminAccountResetPassword(quickPushMediaUploadContext(ctx, account.AccountId), &publishsysin.AccountResetPasswordInp{Id: id})
-			if resetErr != nil {
-				return true, s.reply(ctx, botID, chatID, "重置密码失败："+html.EscapeString(resetErr.Error()))
+			if err := s.startProfileSessionByIds(ctx, botID, fmt.Sprint(query.From.ID), chatID, account, "account_managed_reset", "confirm", id, "", nil, ""); err != nil {
+				return true, err
 			}
-			return true, s.reply(ctx, botID, chatID, fmt.Sprintf("账号 %d 的新密码：<code>%s</code>\n请及时转交并修改。", id, html.EscapeString(result.Password)))
+			session := s.activeProfileSessionByIds(ctx, botID, fmt.Sprint(query.From.ID), chatID)
+			if session == nil {
+				return true, s.reply(ctx, botID, chatID, "无法创建确认，请稍后重试。")
+			}
+			return true, s.replyWithMarkup(ctx, botID, chatID, fmt.Sprintf("确定重置上架账户 %d 的密码？旧密码将立即失效。", id), &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{{{Text: "确认重置", CallbackData: fmt.Sprintf("acct:reset_confirm:%d", session.Id)}}, {{Text: "取消", CallbackData: "acct:reset_cancel"}}}})
 		}
 		if strings.HasPrefix(query.Data, "acct:accounts:page:") {
 			page, parseErr := strconv.Atoi(strings.TrimPrefix(query.Data, "acct:accounts:page:"))
@@ -232,16 +269,11 @@ func (s *sSysBot) handleAccountManagementCallback(ctx context.Context, botID int
 			}
 			return true, s.showManagedAccounts(ctx, botID, chatID, account, page)
 		}
+		if strings.HasPrefix(query.Data, "acct:renew_confirm:") {
+			return true, s.confirmAccountRenewal(ctx, botID, chatID, query, account)
+		}
 		if strings.HasPrefix(query.Data, "acct:renew:") {
-			planCode := strings.TrimPrefix(query.Data, "acct:renew:")
-			order, orderErr := publishService.SysPublish().TenantVipOrderCreate(quickPushMediaUploadContext(ctx, account.AccountId), &publishsysin.TenantVipOrderCreateInp{PlanCode: planCode, ProductType: "vip", Quantity: 1})
-			if orderErr != nil {
-				return true, s.reply(ctx, botID, chatID, "创建续费订单失败："+html.EscapeString(orderErr.Error()))
-			}
-			if order.PayUrl == "" {
-				return true, s.reply(ctx, botID, chatID, "订单已创建，请在网页端完成支付。")
-			}
-			return true, s.replyWithMarkup(ctx, botID, chatID, "<b>续费订单已创建</b>\n请点击下方按钮完成支付。", &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{{{Text: "打开支付页面", URL: order.PayUrl}}}})
+			return true, s.startAccountRenewal(ctx, botID, fmt.Sprint(query.From.ID), chatID, account, strings.TrimPrefix(query.Data, "acct:renew:"))
 		}
 		if strings.HasPrefix(query.Data, "acct:report:date:") {
 			return true, s.showDailyReport(ctx, botID, chatID, account, strings.TrimPrefix(query.Data, "acct:report:date:"))
@@ -317,7 +349,7 @@ func (s *sSysBot) showManagedAccounts(ctx context.Context, botID int64, chatID s
 			rows = append(rows, []models.InlineKeyboardButton{{Text: "账号设置", CallbackData: fmt.Sprintf("acct:edit:%d:view", item.Id)}, {Text: fmt.Sprintf("重置 %d 密码", item.Id), CallbackData: fmt.Sprintf("acct:accounts:reset:%d", item.Id)}, {Text: "删除", CallbackData: fmt.Sprintf("acct:accounts:delete:%d", item.Id)}})
 		}
 	}
-	lines = append(lines, "\n可在网页端创建、删除或修改上架账户。")
+	rows = append(rows, []models.InlineKeyboardButton{{Text: "创建账户", CallbackData: "acct:accounts:create"}, {Text: "分享授权链接", CallbackData: "acct:share"}})
 	buttons := []models.InlineKeyboardButton{}
 	if page > 1 {
 		buttons = append(buttons, models.InlineKeyboardButton{Text: "上一页", CallbackData: fmt.Sprintf("acct:accounts:page:%d", page-1)})
@@ -344,24 +376,7 @@ func (s *sSysBot) showDailyReport(ctx context.Context, botID int64, chatID strin
 		if item == nil || item.ReportDate != date {
 			continue
 		}
-		text := fmt.Sprintf("<b>📊 %s 推送报告</b>\n\n📥 采集资料：%d 组\n\n<b>来源频道：</b>\n", item.ReportDate, item.CollectedTotal)
-		for _, source := range item.Sources {
-			if source != nil {
-				text += fmt.Sprintf("• %s：%d 组\n", accountReportTitle(source.SourceTitle), source.Count)
-			}
-		}
-		text += fmt.Sprintf("\n<b>采集推送</b>\n✅ 成功：%d 组\n❌ 失败：%d 组\n⏳ 处理中：%d 组\n\n<b>循环上架</b>\n✅ 成功：%d 组\n❌ 失败：%d 组\n⏳ 处理中：%d 组\n\n推送按频道投递次数统计，同一资料发往多个频道会分别计数。", item.PublishSuccess, item.PublishFailed, item.PublishProcessing, item.CycleSuccess, item.CycleFailed, item.CycleProcessing)
-		for _, channel := range item.Channels {
-			if channel == nil {
-				continue
-			}
-			kind := "采集推送"
-			if channel.Action == "cycle_publish" {
-				kind = "循环上架"
-			}
-			text += fmt.Sprintf("\n• [%s] %s：成功%d，失败%d，处理中%d", accountReportTitle(channel.Title), kind, channel.Success, channel.Failed, channel.Processing)
-		}
-		parts := accountReportMessageParts(text)
+		parts := dailyreport.Messages(item)
 		for index, part := range parts {
 			var markup models.ReplyMarkup
 			if index == len(parts)-1 {
@@ -410,35 +425,23 @@ func (s *sSysBot) showEditableAccountSetting(ctx context.Context, botID int64, c
 		{{Text: "修改后缀", CallbackData: fmt.Sprintf("acct:edit:%d:suffixContent", id)}, {Text: "修改自定义标识", CallbackData: fmt.Sprintf("acct:edit:%d:customMarkText", id)}},
 		{{Text: "返回账户管理", CallbackData: "acct:report:back"}},
 	}
+	if id != account.AccountId {
+		for _, permission := range []struct {
+			field, label string
+			value        int
+		}{
+			{"profileDetailViewEnabled", "查看租户资料详情", setting.ProfileDetailViewEnabled},
+			{"sharedResourceEnabled", "管理共享资料", setting.SharedResourceEnabled},
+			{"telegramBindingEnabled", "绑定并使用 Telegram", setting.TelegramBindingEnabled},
+			{"groupPushEnabled", "群聊推送", setting.GroupPushEnabled},
+		} {
+			rows = append(rows, []models.InlineKeyboardButton{{Text: permission.label + "：" + boolText(permission.value), CallbackData: fmt.Sprintf("acct:set:%d:%s:%d", id, permission.field, 1-permission.value)}})
+		}
+	}
 	return s.replyWithMarkup(ctx, botID, chatID, text, &models.InlineKeyboardMarkup{InlineKeyboard: rows})
 }
 
 // Split on complete lines so HTML entities and tags are not cut between
 // messages. Titles are bounded separately before building report lines.
-func accountReportMessageParts(text string) []string {
-	const limit = 3000
-	parts := []string{}
-	current := ""
-	for _, line := range strings.Split(text, "\n") {
-		if len([]rune(current))+len([]rune(line))+1 > limit && current != "" {
-			parts = append(parts, current)
-			current = ""
-		}
-		if current != "" {
-			current += "\n"
-		}
-		current += line
-	}
-	if current != "" {
-		parts = append(parts, current)
-	}
-	return parts
-}
-
-func accountReportTitle(title string) string {
-	runes := []rune(title)
-	if len(runes) > 200 {
-		title = string(runes[:200]) + "…"
-	}
-	return html.EscapeString(title)
-}
+func accountReportMessageParts(text string) []string { return dailyreport.Parts(text) }
+func accountReportTitle(title string) string         { return dailyreport.Title(title) }

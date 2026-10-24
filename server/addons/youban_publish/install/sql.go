@@ -20,6 +20,8 @@ var mysqlBusinessSqlFiles = []string{
 	"addons/youban_publish/resource/sql/channel_permission_circuit.sql",
 	"addons/youban_publish/resource/sql/install.sql",
 	"addons/youban_publish/resource/sql/relay.sql",
+	"addons/youban_publish/resource/sql/daily_report.sql",
+	"addons/youban_publish/resource/sql/account_notice.sql",
 	"addons/youban_publish/resource/sql/menu.sql",
 }
 
@@ -28,12 +30,16 @@ var mysqlOnlineUpgradeSqlFiles = []string{
 	"addons/youban_publish/resource/sql/menu.sql",
 	"addons/youban_publish/resource/sql/upgrade_online.sql",
 	"addons/youban_publish/resource/sql/relay.sql",
+	"addons/youban_publish/resource/sql/daily_report.sql",
+	"addons/youban_publish/resource/sql/account_notice.sql",
 }
 
 var pgsqlBusinessSqlFiles = []string{
 	"addons/youban_publish/resource/sql/channel_permission_circuit.pgsql.sql",
 	"addons/youban_publish/resource/sql/install.pgsql.sql",
 	"addons/youban_publish/resource/sql/relay.pgsql.sql",
+	"addons/youban_publish/resource/sql/daily_report.pgsql.sql",
+	"addons/youban_publish/resource/sql/account_notice.pgsql.sql",
 	"addons/youban_publish/resource/sql/menu.pgsql.sql",
 }
 
@@ -42,6 +48,8 @@ var pgsqlOnlineUpgradeSqlFiles = []string{
 	"addons/youban_publish/resource/sql/menu.pgsql.sql",
 	"addons/youban_publish/resource/sql/upgrade_online.pgsql.sql",
 	"addons/youban_publish/resource/sql/relay.pgsql.sql",
+	"addons/youban_publish/resource/sql/daily_report.pgsql.sql",
+	"addons/youban_publish/resource/sql/account_notice.pgsql.sql",
 }
 
 const publishInstallLockKey = "youban_publish:install"
@@ -74,7 +82,10 @@ func EnsureRuntimeCrons(ctx context.Context) error {
 	if err := ensureCycleSchedulerCron(ctx); err != nil {
 		return err
 	}
-	return ensureVipLifecycleCron(ctx)
+	if err := ensureVipLifecycleCron(ctx); err != nil {
+		return err
+	}
+	return ensureDailyReportCron(ctx)
 }
 
 func HeavyIndexSqlFiles() []string {

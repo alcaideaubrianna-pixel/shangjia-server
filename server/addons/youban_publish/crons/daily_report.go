@@ -19,14 +19,8 @@ func (c *cDailyReport) Execute(ctx context.Context, parser *cron.Parser) error {
 	if !service.SysPublish().RuntimeRoleEnabled(ctx, "scheduler") {
 		return nil
 	}
-	// The cron runner invokes this every day; reportDate is the just-finished
-	// China calendar day, while the persisted snapshot is immutable per date.
-	loc, err := time.LoadLocation("Asia/Shanghai")
-	if err != nil {
-		return err
-	}
-	if err = service.SysPublish().GenerateDailyReports(ctx, time.Now().In(loc).AddDate(0, 0, -1), 500); err != nil {
-		parser.Logger.Warningf(ctx, "生成每日推送报告失败 err:%+v", err)
+	if err := service.SysPublish().ProcessDailyReports(ctx, time.Now()); err != nil {
+		parser.Logger.Warningf(ctx, "处理每日推送报告失败 err:%+v", err)
 		return err
 	}
 	return nil

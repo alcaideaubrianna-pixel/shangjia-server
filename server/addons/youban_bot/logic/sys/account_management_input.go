@@ -28,8 +28,14 @@ func (s *sSysBot) handleAccountManagementInput(ctx context.Context, botID int64,
 		return false, nil
 	}
 	session := s.activeProfileSession(ctx, botID, msg)
-	if session == nil || (session.Scene != "account_create" && session.Scene != "account_setting") {
+	if session == nil || (session.Scene != "account_create" && session.Scene != "account_setting" && session.Scene != "account_renewal" && session.Scene != "account_authorize") {
 		return false, nil
+	}
+	if _, enabled := s.featureConfig(ctx, accountManagementFeature{}.Key()); !enabled {
+		return true, s.reply(ctx, botID, fmt.Sprint(msg.Chat.ID), "账户管理当前未启用。")
+	}
+	if session.Scene == "account_authorize" {
+		return true, s.accountAuthorizationInput(ctx, botID, msg, session)
 	}
 	chatID := fmt.Sprint(msg.Chat.ID)
 	account, err := s.boundProfileAccountByUser(ctx, msg.From.ID)
@@ -39,6 +45,9 @@ func (s *sSysBot) handleAccountManagementInput(ctx context.Context, botID int64,
 	username := strings.TrimSpace(msg.Text)
 	if strings.HasPrefix(username, "/") {
 		return true, s.cancelProfileSession(ctx, botID, msg)
+	}
+	if session.Scene == "account_renewal" {
+		return true, s.setAccountRenewalCoupon(ctx, botID, chatID, session, account, username)
 	}
 	if session.Scene == "account_setting" {
 		if username == "-" {
@@ -102,8 +111,15 @@ func (s *sSysBot) createUploaderFromSession(ctx context.Context, session *profil
 
 func (s *sSysBot) resetOwnAccountFromSession(ctx context.Context, session *profileSessionRow, account *botProfileAccount) (*pi.AccountSaveModel, error) {
 	var reset *pi.AccountSaveModel
+	scene := "account_reset"
+	if session.Scene == "account_managed_reset" {
+		if session.ProfileId <= 0 || session.ProfileId == account.AccountId {
+			return nil, fmt.Errorf("上架账户参数无效")
+		}
+		scene = session.Scene
+	}
 	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		result, err := g.DB().Model(profileSessionTable).Ctx(ctx).Where("id", session.Id).Where("account_id", account.AccountId).Where("tenant_id", account.TenantId).Where("scene", "account_reset").Where("status", profileSessionStatusActive).WhereGT("expires_at", gtime.Now()).Data(g.Map{"status": profileSessionStatusCompleted}).Update()
+		result, err := g.DB().Model(profileSessionTable).Ctx(ctx).Where("id", session.Id).Where("account_id", account.AccountId).Where("tenant_id", account.TenantId).Where("scene", scene).Where("profile_id", session.ProfileId).Where("status", profileSessionStatusActive).WhereGT("expires_at", gtime.Now()).Data(g.Map{"status": profileSessionStatusCompleted}).Update()
 		if err != nil {
 			return err
 		}
@@ -111,8 +127,31 @@ func (s *sSysBot) resetOwnAccountFromSession(ctx context.Context, session *profi
 		if err != nil || affected == 0 {
 			return err
 		}
-		reset, err = ps.SysPublish().MyAccountResetPassword(quickPushMediaUploadContext(ctx, account.AccountId))
+		if scene == "account_managed_reset" {
+			reset, err = ps.SysPublish().AdminAccountResetPassword(quickPushMediaUploadContext(ctx, account.AccountId), &pi.AccountResetPasswordInp{Id: session.ProfileId})
+		} else {
+			reset, err = ps.SysPublish().MyAccountResetPassword(quickPushMediaUploadContext(ctx, account.AccountId))
+		}
 		return err
 	})
 	return reset, err
+}
+
+// Deletion uses the same authorized service as the web UI. Consuming its
+// confirmation and deleting the account are atomic, including on retries.
+func (s *sSysBot) deleteManagedAccountFromSession(ctx context.Context, session *profileSessionRow, account *botProfileAccount) error {
+	if session.ProfileId <= 0 || session.ProfileId == account.AccountId {
+		return fmt.Errorf("上架账户参数无效")
+	}
+	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		result, err := g.DB().Model(profileSessionTable).Ctx(ctx).Where("id", session.Id).Where("account_id", account.AccountId).Where("tenant_id", account.TenantId).Where("scene", "account_delete").Where("profile_id", session.ProfileId).Where("status", profileSessionStatusActive).WhereGT("expires_at", gtime.Now()).Data(g.Map{"status": profileSessionStatusCompleted}).Update()
+		if err != nil {
+			return err
+		}
+		affected, err := result.RowsAffected()
+		if err != nil || affected == 0 {
+			return err
+		}
+		return ps.SysPublish().AdminAccountDelete(quickPushMediaUploadContext(ctx, account.AccountId), &pi.AccountDeleteInp{Ids: []int64{session.ProfileId}})
+	})
 }
