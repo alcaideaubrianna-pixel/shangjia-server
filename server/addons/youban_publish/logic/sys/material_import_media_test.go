@@ -47,6 +47,12 @@ func TestDispatchMaterialImportGroupReturnsWorkerError(t *testing.T) {
 	}
 }
 
+func TestMaterialImportConcurrencyIsBounded(t *testing.T) {
+	if materialImportGroupConcurrency < 1 || materialImportGroupConcurrency > 4 {
+		t.Fatalf("unsafe material import concurrency: %d", materialImportGroupConcurrency)
+	}
+}
+
 func TestMaterialImportMissingMediaItems(t *testing.T) {
 	items := []collectMediaItem{
 		{Type: "photo", Purpose: "display", FileId: "display-1"},

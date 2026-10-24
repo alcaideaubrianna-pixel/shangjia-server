@@ -21,6 +21,7 @@ const materialImportMediaItemTimeout = 10 * time.Minute
 const materialImportGroupTimeout = 12 * time.Minute
 const materialImportStaleGroupAfter = 15 * time.Minute
 const materialImportDispatchTimeout = 30 * time.Second
+const materialImportGroupConcurrency = 4
 
 func (s *sSysPublish) executeMaterialImportMedia(ctx context.Context, taskId int64) error {
 	task, err := s.materialImportTaskById(ctx, taskId, 0)
@@ -46,7 +47,7 @@ func (s *sSysPublish) materialImportDownloadGroups(ctx context.Context, task *sy
 	if len(groups) == 0 {
 		return s.materialImportMarkSuccess(ctx, task.Id, task.UpdatedBy, g.Map{"message": "资料导入完成"})
 	}
-	concurrency := accountCollectMediaConcurrency(ctx)
+	concurrency := materialImportGroupConcurrency
 	g.Log().Infof(ctx, "资料导入媒体分组开始调度 taskId:%d groups:%d concurrency:%d", task.Id, len(groups), concurrency)
 	jobs := make(chan *sysin.MaterialImportGroupModel)
 	errCh := make(chan error, 1)
@@ -270,13 +271,7 @@ func (s *sSysPublish) downloadMaterialImportItems(ctx context.Context, task *sys
 	if len(items) == 0 {
 		return 0, 0, nil
 	}
-	concurrency := accountCollectMediaConcurrency(ctx)
-	if concurrency < 1 {
-		concurrency = 1
-	}
-	if concurrency > 4 {
-		concurrency = 4
-	}
+	concurrency := materialImportGroupConcurrency
 	sem := make(chan struct{}, concurrency)
 	var mu sync.Mutex
 	progressMu := new(sync.Mutex)
