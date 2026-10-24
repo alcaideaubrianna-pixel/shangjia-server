@@ -130,6 +130,7 @@ type ISysPublish interface {
 	AdminAccountTransferPreview(ctx context.Context, in *sysin.AccountTransferPreviewInp) (res *sysin.AccountTransferPreviewModel, err error)
 	AdminAccountTransferProfiles(ctx context.Context, in *sysin.AccountTransferProfilesInp) (res *sysin.AccountTransferProfilesModel, err error)
 	AdminAccountSettingView(ctx context.Context, in *sysin.AccountSettingViewInp) (res *sysin.AccountSettingModel, err error)
+	PatchAccountSetting(ctx context.Context, in *sysin.AccountSettingPatchInp) (*sysin.AccountSettingModel, error)
 	AdminAccountSettingSave(ctx context.Context, in *sysin.AccountSettingSaveInp) (res *sysin.AccountSettingModel, err error)
 	AdminDashboardOverview(ctx context.Context) (res *sysin.DashboardOverviewModel, err error)
 	AdminDashboardTrend(ctx context.Context, in *sysin.TrendInp) (res *sysin.DashboardTrendModel, err error)

@@ -277,6 +277,45 @@ func (in *AccountSettingSaveInp) Filter(ctx context.Context) error {
 	return nil
 }
 
+// AccountSettingPatchInp edits one setting while preserving all other fields.
+type AccountSettingPatchInp struct {
+	AccountId int64  `json:"accountId"`
+	Field     string `json:"field"`
+	Value     string `json:"value"`
+}
+
+func (in *AccountSettingPatchInp) Filter(ctx context.Context) error {
+	if in.AccountId <= 0 {
+		return gerror.New("账号ID不能为空")
+	}
+	switch in.Field {
+	case "enableSuffix", "enableTitleMark":
+		if in.Value != "0" && in.Value != "1" {
+			return gerror.New("开关值不合法")
+		}
+	case "suffixContent", "customMarkText":
+		in.Value = strings.TrimSpace(in.Value)
+		if len([]rune(in.Value)) > 2000 {
+			return gerror.New("设置内容最多2000字")
+		}
+	case "markMode":
+		if in.Value != "nickname" && in.Value != "custom" {
+			return gerror.New("标识模式不合法")
+		}
+	case "numberSource":
+		if in.Value != "sequence" && in.Value != "random" {
+			return gerror.New("编号来源不合法")
+		}
+	case "markPosition":
+		if in.Value != "top" && in.Value != "bottom" && in.Value != "feeLine" {
+			return gerror.New("标识位置不合法")
+		}
+	default:
+		return gerror.New("不支持修改该账号设置")
+	}
+	return nil
+}
+
 type AccountSettingModel struct {
 	AccountId                int64       `json:"accountId" dc:"账号ID"`
 	EnableSuffix             int         `json:"enableSuffix" dc:"是否启用发送后缀"`

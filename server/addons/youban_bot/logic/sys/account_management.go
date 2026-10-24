@@ -81,11 +81,19 @@ func (s *sSysBot) handleAccountManagementCallback(ctx context.Context, botID int
 	case "acct:accounts":
 		return true, s.showManagedAccounts(ctx, botID, chatID, account)
 	case "acct:current":
-		return true, s.reply(ctx, botID, chatID, fmt.Sprintf("<b>当前账户</b>\n账号 ID：%d\n租户 ID：%d\n类型：管理员\n\n如需修改资料，请进入「账号设置」。", account.AccountId, account.TenantId))
+		current, loadErr := publishService.SysPublish().CurrentAccount(quickPushMediaUploadContext(ctx, account.AccountId))
+		if loadErr != nil {
+			return true, loadErr
+		}
+		return true, s.reply(ctx, botID, chatID, fmt.Sprintf("<b>当前账户</b>\n名称：%s\n用户名：%s\n账号 ID：%d\n类型：管理员", html.EscapeString(current.Nickname), html.EscapeString(current.Username), current.Id))
 	case "acct:renew":
 		return true, s.reply(ctx, botID, chatID, "<b>会员续费</b>\n请在网页端选择套餐并完成支付。支付完成后会员状态会自动更新。")
 	case "acct:setting":
-		return true, s.reply(ctx, botID, chatID, "<b>账号设置</b>\n账号名称、标题标识、介绍费后缀等设置请在网页端修改。")
+		setting, settingErr := publishService.SysPublish().AdminAccountSettingView(quickPushMediaUploadContext(ctx, account.AccountId), &publishsysin.AccountSettingViewInp{AccountId: account.AccountId})
+		if settingErr != nil {
+			return true, s.reply(ctx, botID, chatID, "读取账号设置失败，请稍后重试。")
+		}
+		return true, s.reply(ctx, botID, chatID, fmt.Sprintf("<b>账号设置</b>\n\n介绍费后缀：%s\n后缀内容：%s\n标题标识：%s\n\n详细修改请在网页端完成。", boolText(setting.EnableSuffix), html.EscapeString(setting.SuffixContent), boolText(setting.EnableTitleMark)))
 	case "acct:notify":
 		return true, s.showNotificationSetting(ctx, botID, chatID, account)
 	case "acct:notify:toggle":
@@ -105,7 +113,7 @@ func (s *sSysBot) handleAccountManagementCallback(ctx context.Context, botID int
 	case "acct:reset":
 		return true, s.reply(ctx, botID, chatID, "为保护账号安全，重置密码请在网页端完成验证后操作。")
 	case "acct:invite":
-		return true, s.reply(ctx, botID, chatID, "<b>邀请注册</b>\n请在网页端生成授权链接，分享给需要绑定的管理员。")
+		return (inviteFeature{}).Handle(quickPushMediaUploadContext(ctx, account.AccountId), s, &botFeatureContext{BotId: botID, Msg: query.Message.Message})
 	case "acct:report":
 		return true, s.showDailyReportDates(ctx, botID, chatID, account)
 	case "acct:report:back":

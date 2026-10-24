@@ -339,3 +339,80 @@ func fillAccountSettingModel(model *sysin.AccountSettingModel, row gdb.Record) {
 		model.MarkPosition = "bottom"
 	}
 }
+
+// PatchAccountSetting shares validation and persistence with web settings.
+// Only administrators can edit self or an uploader they manage.
+func (s *sSysPublish) PatchAccountSetting(ctx context.Context, in *sysin.AccountSettingPatchInp) (*sysin.AccountSettingModel, error) {
+	if in == nil {
+		return nil, gerror.New("账号设置不能为空")
+	}
+	if err := in.Filter(ctx); err != nil {
+		return nil, err
+	}
+	admin, err := s.currentAdminAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var result *sysin.AccountSettingModel
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		cols := pdao.YoubanPublishAccount.Columns()
+		target, err := pdao.YoubanPublishAccount.Ctx(ctx).Where(cols.Id, in.AccountId).Where(cols.TenantId, admin.TenantId).LockUpdate().One()
+		if err != nil {
+			return err
+		}
+		if target.IsEmpty() || (in.AccountId != admin.Id && target[cols.ParentId].Int64() != admin.Id) {
+			return gerror.New("账号不存在或无权操作")
+		}
+		current, err := s.accountSetting(ctx, admin.TenantId, in.AccountId)
+		if err != nil {
+			return err
+		}
+		save := accountSettingSaveInput(current)
+		applyAccountSettingPatch(save, in)
+		if err = save.Filter(ctx); err != nil {
+			return err
+		}
+		if err = s.saveAccountSetting(ctx, admin.TenantId, admin.Id, save); err != nil {
+			return err
+		}
+		result, err = s.accountSetting(ctx, admin.TenantId, in.AccountId)
+		return err
+	})
+	return result, err
+}
+
+func accountSettingSaveInput(current *sysin.AccountSettingModel) *sysin.AccountSettingSaveInp {
+	return &sysin.AccountSettingSaveInp{
+		AccountId: current.AccountId, EnableSuffix: current.EnableSuffix, SuffixContent: current.SuffixContent,
+		EnableTitleMark: current.EnableTitleMark, MarkMode: current.MarkMode, NumberSource: current.NumberSource,
+		CustomMarkText: current.CustomMarkText, MarkPosition: current.MarkPosition,
+		ProfileDetailViewEnabled: current.ProfileDetailViewEnabled, SharedResourceEnabled: current.SharedResourceEnabled,
+		TelegramBindingEnabled: current.TelegramBindingEnabled, GroupPushEnabled: current.GroupPushEnabled,
+	}
+}
+func applyAccountSettingPatch(save *sysin.AccountSettingSaveInp, in *sysin.AccountSettingPatchInp) {
+	switch in.Field {
+	case "enableSuffix":
+		if in.Value == "1" {
+			save.EnableSuffix = 1
+		} else {
+			save.EnableSuffix = 0
+		}
+	case "enableTitleMark":
+		if in.Value == "1" {
+			save.EnableTitleMark = 1
+		} else {
+			save.EnableTitleMark = 0
+		}
+	case "suffixContent":
+		save.SuffixContent = in.Value
+	case "customMarkText":
+		save.CustomMarkText = in.Value
+	case "markMode":
+		save.MarkMode = in.Value
+	case "numberSource":
+		save.NumberSource = in.Value
+	case "markPosition":
+		save.MarkPosition = in.Value
+	}
+}
