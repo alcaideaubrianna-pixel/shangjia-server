@@ -63,6 +63,7 @@ func (s *sSysBot) handleUpdate(ctx context.Context, botId int64, update *models.
 		return nil
 	}
 	if update.CallbackQuery != nil {
+		if handled, err := s.handleAccountManagementCallback(ctx, botId, update.CallbackQuery); handled || err != nil { return err }
 		if handled, err := s.handleBotManagerCallback(ctx, botId, update.CallbackQuery); handled || err != nil {
 			return err
 		}

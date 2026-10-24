@@ -63,6 +63,53 @@ func (s *sSysPublish) MyAccountSettingSave(ctx context.Context, in *sysin.Accoun
 	return s.accountSetting(ctx, account.TenantId, account.Id)
 }
 
+// SaveAccountNotificationSetting changes one preference without overwriting
+// suffixes, permissions or other notification preferences.
+func (s *sSysPublish) SaveAccountNotificationSetting(ctx context.Context, in *sysin.AccountNotificationSettingInp) error {
+	if in == nil {
+		return gerror.New("推送设置不能为空")
+	}
+	if err := in.Filter(ctx); err != nil {
+		return err
+	}
+	account, err := s.currentAdminAccount(ctx)
+	if err != nil {
+		return err
+	}
+	if err = s.ensureAdminManageableAccount(ctx, account, in.AccountId); err != nil {
+		return err
+	}
+	columns := map[string]string{"daily": "daily_report_enabled", "channel": "channel_alert_enabled", "account": "account_event_enabled", "task": "task_failure_enabled"}
+	column := columns[in.Kind]
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		// Serialize creation of a previously absent settings row across workers.
+		cols := pdao.YoubanPublishAccount.Columns()
+		row, err := pdao.YoubanPublishAccount.Ctx(ctx).Where(cols.Id, in.AccountId).Where(cols.TenantId, account.TenantId).LockUpdate().One()
+		if err != nil {
+			return err
+		}
+		if row.IsEmpty() {
+			return gerror.New("账号不存在或已删除")
+		}
+		count, err := g.DB().Model(publishAccountSettingTable).Safe().Ctx(ctx).Where("tenant_id", account.TenantId).Where("account_id", in.AccountId).Count()
+		if err != nil {
+			return err
+		}
+		data := g.Map{column: in.Enabled, "updated_by": account.Id}
+		if count > 0 {
+			_, err = g.DB().Model(publishAccountSettingTable).Safe().Ctx(ctx).Where("tenant_id", account.TenantId).Where("account_id", in.AccountId).Data(data).Update()
+		} else {
+			data["tenant_id"], data["account_id"], data["created_by"] = account.TenantId, in.AccountId, account.Id
+			_, err = g.DB().Model(publishAccountSettingTable).Safe().Ctx(ctx).Data(data).Insert()
+		}
+		return err
+	})
+	if err != nil {
+		return gerror.Wrap(err, "保存推送设置失败")
+	}
+	return nil
+}
+
 func (s *sSysPublish) AdminAccountSettingSave(ctx context.Context, in *sysin.AccountSettingSaveInp) (*sysin.AccountSettingModel, error) {
 	admin, err := s.currentAdminAccount(ctx)
 	if err != nil {
@@ -243,11 +290,15 @@ func (s *sSysPublish) ensureAdminManageableAccount(ctx context.Context, admin *s
 
 func defaultAccountSetting(accountId int64) *sysin.AccountSettingModel {
 	return &sysin.AccountSettingModel{
-		AccountId:       accountId,
-		EnableTitleMark: 0,
-		MarkMode:        "nickname",
-		NumberSource:    "sequence",
-		MarkPosition:    "top",
+		AccountId:           accountId,
+		EnableTitleMark:     0,
+		MarkMode:            "nickname",
+		NumberSource:        "sequence",
+		MarkPosition:        "top",
+		DailyReportEnabled:  1,
+		ChannelAlertEnabled: 1,
+		AccountEventEnabled: 1,
+		TaskFailureEnabled:  1,
 	}
 }
 
@@ -264,6 +315,18 @@ func fillAccountSettingModel(model *sysin.AccountSettingModel, row gdb.Record) {
 	model.SharedResourceEnabled = row["shared_resource_enabled"].Int()
 	model.TelegramBindingEnabled = row["telegram_binding_enabled"].Int()
 	model.GroupPushEnabled = row["group_push_enabled"].Int()
+	if value, ok := row["daily_report_enabled"]; ok && value != nil && !value.IsNil() {
+		model.DailyReportEnabled = value.Int()
+	}
+	if value, ok := row["channel_alert_enabled"]; ok && value != nil && !value.IsNil() {
+		model.ChannelAlertEnabled = value.Int()
+	}
+	if value, ok := row["account_event_enabled"]; ok && value != nil && !value.IsNil() {
+		model.AccountEventEnabled = value.Int()
+	}
+	if value, ok := row["task_failure_enabled"]; ok && value != nil && !value.IsNil() {
+		model.TaskFailureEnabled = value.Int()
+	}
 	model.CreatedAt = row["created_at"].GTime()
 	model.UpdatedAt = row["updated_at"].GTime()
 	if model.MarkMode == "" {

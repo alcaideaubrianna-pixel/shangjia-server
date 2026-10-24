@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"time"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/storager"
@@ -225,6 +226,11 @@ type ISysPublish interface {
 	CurrentAccount(ctx context.Context) (res *sysin.CurrentAccountModel, err error)
 	HandleVipAccountBound(ctx context.Context, accountId int64) (err error)
 	ProcessTenantVipLifecycle(ctx context.Context, limit int) (err error)
+	BuildDailyReport(ctx context.Context, tenantId, accountId int64, reportDate time.Time) (*sysin.DailyReportModel, error)
+	SaveDailyReport(ctx context.Context, report *sysin.DailyReportModel) error
+	DailyReports(ctx context.Context, in *sysin.DailyReportListInp) ([]*sysin.DailyReportModel, error)
+	GenerateDailyReports(ctx context.Context, reportDate time.Time, limit int) error
+	SaveAccountNotificationSetting(ctx context.Context, in *sysin.AccountNotificationSettingInp) error
 	AdminActivityList(ctx context.Context) (list []*sysin.ActivityModel, err error)
 	AdminActivitySave(ctx context.Context, in *sysin.ActivitySaveInp) (err error)
 	AdminActivityRewardList(ctx context.Context, in *sysin.ActivityRewardListInp) (list []*sysin.ActivityRewardModel, totalCount int, err error)

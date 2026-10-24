@@ -291,6 +291,10 @@ type AccountSettingModel struct {
 	SharedResourceEnabled    int         `json:"sharedResourceEnabled" dc:"是否允许管理租户共享资料"`
 	TelegramBindingEnabled   int         `json:"telegramBindingEnabled" dc:"是否允许绑定并使用Telegram"`
 	GroupPushEnabled         int         `json:"groupPushEnabled" dc:"是否允许使用群聊推送"`
+	DailyReportEnabled       int         `json:"dailyReportEnabled" dc:"是否接收每日报告"`
+	ChannelAlertEnabled      int         `json:"channelAlertEnabled" dc:"是否接收频道异常通知"`
+	AccountEventEnabled      int         `json:"accountEventEnabled" dc:"是否接收账户操作通知"`
+	TaskFailureEnabled       int         `json:"taskFailureEnabled" dc:"是否接收任务失败通知"`
 	CreatedAt                *gtime.Time `json:"createdAt" dc:"创建时间"`
 	UpdatedAt                *gtime.Time `json:"updatedAt" dc:"更新时间"`
 }

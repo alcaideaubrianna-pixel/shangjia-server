@@ -2290,3 +2290,22 @@ CREATE INDEX IF NOT EXISTS idx_ybp_bot_account ON hg_youban_publish_bot(tenant_i
 ALTER TABLE hg_youban_publish_bot ADD COLUMN IF NOT EXISTS bot_type varchar(32) NOT NULL DEFAULT 'normal';
 
 ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "profile_detail_view_enabled" smallint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "daily_report_enabled" smallint NOT NULL DEFAULT 1;
+ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "channel_alert_enabled" smallint NOT NULL DEFAULT 1;
+ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "account_event_enabled" smallint NOT NULL DEFAULT 1;
+ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "task_failure_enabled" smallint NOT NULL DEFAULT 1;
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_daily_report" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL,
+  "account_id" bigint NOT NULL,
+  "report_date" date NOT NULL,
+  "collected_total" integer NOT NULL DEFAULT 0,
+  "publish_success" integer NOT NULL DEFAULT 0,
+  "publish_failed" integer NOT NULL DEFAULT 0,
+  "publish_processing" integer NOT NULL DEFAULT 0,
+  "source_breakdown_json" text NOT NULL DEFAULT '{}',
+  "generated_at" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE("tenant_id","account_id","report_date")
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_daily_report_owner_date" ON "hg_youban_publish_daily_report" ("tenant_id","account_id","report_date" DESC);

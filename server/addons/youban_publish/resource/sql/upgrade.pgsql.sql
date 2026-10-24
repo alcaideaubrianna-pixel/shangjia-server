@@ -1,6 +1,10 @@
 ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "shared_resource_enabled" smallint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "telegram_binding_enabled" smallint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "group_push_enabled" smallint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "daily_report_enabled" smallint NOT NULL DEFAULT 1;
+ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "channel_alert_enabled" smallint NOT NULL DEFAULT 1;
+ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "account_event_enabled" smallint NOT NULL DEFAULT 1;
+ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "task_failure_enabled" smallint NOT NULL DEFAULT 1;
 
 ALTER TABLE "hg_youban_publish_collect_rule"
   ADD COLUMN IF NOT EXISTS "full_match_enabled" smallint NOT NULL DEFAULT 0;
@@ -1220,3 +1224,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_collect_source_single_rule"
 ALTER TABLE "hg_youban_publish_account" ADD COLUMN IF NOT EXISTS "last_active_at" timestamp DEFAULT NULL;
 UPDATE "hg_youban_publish_account" SET "last_active_at" = NOW() WHERE "last_active_at" IS NULL;
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "cycle_failure_count" integer NOT NULL DEFAULT 0;
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_daily_report" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL,
+  "account_id" bigint NOT NULL,
+  "report_date" date NOT NULL,
+  "collected_total" integer NOT NULL DEFAULT 0,
+  "publish_success" integer NOT NULL DEFAULT 0,
+  "publish_failed" integer NOT NULL DEFAULT 0,
+  "publish_processing" integer NOT NULL DEFAULT 0,
+  "source_breakdown_json" text NOT NULL DEFAULT '{}',
+  "generated_at" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE("tenant_id","account_id","report_date")
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_daily_report_owner_date" ON "hg_youban_publish_daily_report" ("tenant_id","account_id","report_date" DESC);

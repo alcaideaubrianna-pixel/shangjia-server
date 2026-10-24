@@ -923,7 +923,7 @@ func (s *sSysBot) featureVisibleForTelegramUser(ctx context.Context, feature bot
 		return false
 	}
 	key := feature.Key()
-	if key != (botManagerFeature{}).Key() && key != (adminFeature{}).Key() && key != (quickPushFeature{}).Key() && key != (profileFeature{}).Key() && key != (instantRegisterFeature{}).Key() && key != (collectManageFeature{}).Key() {
+	if key != (botManagerFeature{}).Key() && key != (adminFeature{}).Key() && key != (quickPushFeature{}).Key() && key != (profileFeature{}).Key() && key != (instantRegisterFeature{}).Key() && key != (collectManageFeature{}).Key() && key != (accountManagementFeature{}).Key() {
 		return true
 	}
 	if telegramUserId == "" {
@@ -952,6 +952,14 @@ func (s *sSysBot) featureVisibleForTelegramUser(ctx context.Context, feature bot
 			return false
 		}
 		return bind == nil || bind.AccountId <= 0
+	}
+	if key == (accountManagementFeature{}).Key() {
+		bind, err := s.bindingByTelegram(ctx, sysin.BotAppApi, telegramUserId)
+		if err != nil || bind == nil || bind.AccountId <= 0 {
+			return false
+		}
+		account, err := s.boundProfileAccountByUser(ctx, parseTelegramUserId(telegramUserId))
+		return err == nil && account != nil && account.AccountType == publishsysin.PublishAccountTypeAdmin
 	}
 	if key == (collectManageFeature{}).Key() {
 		bind, err := s.bindingByTelegram(ctx, sysin.BotAppApi, telegramUserId)

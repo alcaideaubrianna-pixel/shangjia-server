@@ -173,6 +173,7 @@ func init() {
 	registerBotFeature(contactFeature{})
 	registerBotFeature(adminFeature{})
 	registerBotFeature(inviteFeature{})
+	registerBotFeature(accountManagementFeature{})
 	registerBotFeature(instantRegisterFeature{})
 	registerBotFeature(profileFeature{})
 	registerBotFeature(collectManageFeature{})
