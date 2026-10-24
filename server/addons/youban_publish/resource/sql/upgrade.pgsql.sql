@@ -1203,6 +1203,7 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_ai_ops_repair_plan_status" ON "hg_youban_pub
 CREATE INDEX IF NOT EXISTS "idx_ybp_bot_message_source_received" ON "hg_youban_publish_bot_message_source" ("received_at", "id");
 
 ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "profile_detail_view_enabled" smallint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_material_import_task" ADD COLUMN IF NOT EXISTS "channel_id_json" text;
 
 -- Explicit maintenance only: keep live upgrade transactions free of historical cleanup.
 -- A bound rule is source-local. Global rules are account-level delete/replace policies only.

@@ -69,6 +69,20 @@ func TestOnlineUpgradeSqlIncludesDedupeSchema(t *testing.T) {
 	}
 }
 
+func TestMaterialImportChannelSchemaIsMigrated(t *testing.T) {
+	for _, path := range []string{
+		"addons/youban_publish/resource/sql/install.sql",
+		"addons/youban_publish/resource/sql/install.pgsql.sql",
+		"addons/youban_publish/resource/sql/upgrade_online.sql",
+		"addons/youban_publish/resource/sql/upgrade_online.pgsql.sql",
+	} {
+		sql := readSqlFile(path)
+		if !strings.Contains(sql, "hg_youban_publish_material_import_task") || !strings.Contains(sql, "channel_id_json") {
+			t.Fatalf("material import channel migration %s is incomplete", path)
+		}
+	}
+}
+
 func TestAntiScanMediaCacheSchemaIsMigrated(t *testing.T) {
 	for _, path := range []string{
 		"addons/youban_publish/resource/sql/install.sql",

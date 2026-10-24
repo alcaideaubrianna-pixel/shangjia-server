@@ -999,6 +999,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_ai_ops_repair_plan` (
 ALTER TABLE `hg_youban_publish_bot_message_source` ADD INDEX IF NOT EXISTS `idx_ybp_bot_message_source_received` (`received_at`,`id`);
 
 ALTER TABLE `hg_youban_publish_account_setting` ADD COLUMN IF NOT EXISTS `profile_detail_view_enabled` tinyint(1) NOT NULL DEFAULT 0 COMMENT '是否可只读查看租户资料详情';
+ALTER TABLE `hg_youban_publish_material_import_task` ADD COLUMN IF NOT EXISTS `channel_id_json` text COMMENT '导入资料默认上架频道ID JSON';
 
 -- Explicit maintenance only: keep live upgrade transactions free of historical cleanup.
 -- A bound rule is source-local. Global rules are account-level delete/replace policies only.

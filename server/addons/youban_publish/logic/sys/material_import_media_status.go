@@ -71,9 +71,6 @@ func (s *sSysPublish) materialImportMarkGroupDiscarded(ctx context.Context, id i
 }
 
 func (s *sSysPublish) materialImportTaskByPrimary(ctx context.Context, taskId int64) (*sysin.MaterialImportTaskModel, error) {
-	if err := ensureMaterialImportTaskChannelColumn(ctx); err != nil {
-		return nil, err
-	}
 	row, err := s.materialImportTaskBaseQuery(ctx, 0, nil).Master().
 		Fields("t.*,ta.display_name AS tg_account_nickname,ta.telegram_username AS tg_account_username,a.nickname AS account_name,tn.name AS tenant_name").
 		Where("t.id", taskId).Limit(1).One()

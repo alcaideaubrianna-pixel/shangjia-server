@@ -17,25 +17,12 @@ import (
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/internal/model/entity"
 	"hotgo/addons/youban_publish/model/input/sysin"
-	"hotgo/internal/consts"
 	"hotgo/internal/library/contexts"
 )
 
 const (
 	materialImportPageLimit = 100
 )
-
-func ensureMaterialImportTaskChannelColumn(ctx context.Context) error {
-	if strings.ToLower(g.DB().GetConfig().Type) == consts.DBPgsql {
-		_, err := g.DB().Exec(ctx, `ALTER TABLE "hg_youban_publish_material_import_task" ADD COLUMN IF NOT EXISTS "channel_id_json" text`)
-		return gerror.Wrap(err, "检查资料导入上架频道字段失败")
-	}
-	_, err := g.DB().Exec(ctx, "ALTER TABLE `hg_youban_publish_material_import_task` ADD COLUMN `channel_id_json` text COMMENT '导入资料默认上架频道ID JSON' AFTER `source_username`")
-	if err != nil && !isIgnorableImportTaskServerIPColumnError(err) {
-		return gerror.Wrap(err, "检查资料导入上架频道字段失败")
-	}
-	return nil
-}
 
 func (s *sSysPublish) materialImportTargetChannelIds(ctx context.Context, requested []int64, tenantId int64) ([]int64, error) {
 	channelIds := uniqueIds(requested)
@@ -136,9 +123,6 @@ func (s *sSysPublish) AdminMaterialImportTaskCreate(ctx context.Context, in *sys
 	if err = in.Filter(ctx); err != nil {
 		return 0, err
 	}
-	if err = ensureMaterialImportTaskChannelColumn(ctx); err != nil {
-		return 0, err
-	}
 	tgAccount, err := s.adminTgAccountById(ctx, in.TgAccountId, account.TenantId)
 	if err != nil {
 		return 0, err
@@ -224,10 +208,6 @@ func (s *sSysPublish) ServerMaterialImportTaskCreate(ctx context.Context, in *sy
 	if err = in.Filter(ctx); err != nil {
 		return 0, err
 	}
-	if err = ensureMaterialImportTaskChannelColumn(ctx); err != nil {
-		return 0, err
-	}
-
 	target, err := s.publishAccountById(ctx, in.AccountId)
 	if err != nil {
 		return 0, err
@@ -459,9 +439,6 @@ func (s *sSysPublish) AdminMaterialImportTaskRetry(ctx context.Context, in *sysi
 }
 
 func (s *sSysPublish) materialImportTaskList(ctx context.Context, tenantId int64, in *sysin.MaterialImportListInp) (list []*sysin.MaterialImportTaskModel, totalCount int, err error) {
-	if err = ensureMaterialImportTaskChannelColumn(ctx); err != nil {
-		return nil, 0, err
-	}
 	mod := s.materialImportTaskBaseQuery(ctx, tenantId, in)
 	totalCount, err = mod.Clone().Count()
 	if err != nil {
@@ -533,9 +510,6 @@ func (s *sSysPublish) materialImportTaskBaseQuery(ctx context.Context, tenantId 
 }
 
 func (s *sSysPublish) materialImportTaskRecord(ctx context.Context, id int64, tenantId int64) (gdb.Record, error) {
-	if err := ensureMaterialImportTaskChannelColumn(ctx); err != nil {
-		return nil, err
-	}
 	mod := s.materialImportTaskBaseQuery(ctx, tenantId, nil).
 		Fields("t.*,ta.display_name AS tg_account_nickname,ta.telegram_username AS tg_account_username,a.nickname AS account_name,tn.name AS tenant_name").
 		Where("t.id", id).

@@ -105,3 +105,4 @@ ALTER TABLE hg_youban_publish_bot ADD COLUMN account_id bigint NOT NULL DEFAULT 
 CREATE INDEX idx_ybp_bot_account ON hg_youban_publish_bot(tenant_id,account_id,created_by,status);
 
 ALTER TABLE hg_youban_publish_bot ADD COLUMN bot_type varchar(32) NOT NULL DEFAULT 'normal';
+ALTER TABLE `hg_youban_publish_material_import_task` ADD COLUMN IF NOT EXISTS `channel_id_json` text COMMENT '导入资料默认上架频道ID JSON';
