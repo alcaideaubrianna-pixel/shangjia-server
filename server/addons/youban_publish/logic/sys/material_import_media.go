@@ -148,10 +148,12 @@ func (s *sSysPublish) materialImportResetStaleGroups(ctx context.Context, taskID
 }
 
 func (s *sSysPublish) materialImportPendingMediaGroups(ctx context.Context, taskId int64) ([]*sysin.MaterialImportGroupModel, error) {
+	cols := pdao.YoubanPublishMaterialImportGroup.Columns()
 	rows, err := pdao.YoubanPublishMaterialImportGroup.Ctx(ctx).
-		Where("task_id", taskId).
-		WhereIn("status", []string{sysin.MaterialImportStatusPending, sysin.MaterialImportStatusFailed, sysin.MaterialImportStatusRunning}).
-		OrderAsc("id").
+		Fields(cols.Id, cols.MediaTotal, cols.MediaDone, cols.MediaFailed, cols.Status).
+		Where(cols.TaskId, taskId).
+		WhereIn(cols.Status, []string{sysin.MaterialImportStatusPending, sysin.MaterialImportStatusFailed, sysin.MaterialImportStatusRunning}).
+		OrderAsc(cols.Id).
 		All()
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取待下载资料分组失败")
@@ -164,6 +166,21 @@ func (s *sSysPublish) materialImportPendingMediaGroups(ctx context.Context, task
 		}
 	}
 	return list, nil
+}
+
+func (s *sSysPublish) materialImportGroupByPrimary(ctx context.Context, groupId int64) (*sysin.MaterialImportGroupModel, error) {
+	cols := pdao.YoubanPublishMaterialImportGroup.Columns()
+	row, err := pdao.YoubanPublishMaterialImportGroup.Ctx(ctx).
+		Where(cols.Id, groupId).
+		One()
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取资料导入分组失败")
+	}
+	group := materialImportGroupModelFromRecord(row)
+	if group == nil {
+		return nil, gerror.New("资料导入分组不存在")
+	}
+	return group, nil
 }
 
 func (s *sSysPublish) materialImportFailedGroupCount(ctx context.Context, taskId int64) (int, error) {
@@ -180,6 +197,10 @@ func (s *sSysPublish) materialImportFailedGroupCount(ctx context.Context, taskId
 func (s *sSysPublish) materialImportDownloadGroup(ctx context.Context, task *sysin.MaterialImportTaskModel, group *sysin.MaterialImportGroupModel) error {
 	if err := s.materialImportMarkGroupRunning(ctx, group.Id); err != nil {
 		return gerror.Wrap(err, "标记TG导入分组处理中失败")
+	}
+	group, err := s.materialImportGroupByPrimary(ctx, group.Id)
+	if err != nil {
+		return err
 	}
 	if !profileMessageHasProfileText(firstNonEmpty(group.ProfileText, group.RawText)) {
 		return s.materialImportMarkGroupDone(ctx, group.Id, 0, 0)
