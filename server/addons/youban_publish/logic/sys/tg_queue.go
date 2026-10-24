@@ -20,6 +20,7 @@ const (
 	// tgQueueNameMediaLegacy is read only by the one-time migration. It is
 	// intentionally not registered by any worker.
 	tgQueueNameMediaLegacy         = "youban_publish_media"
+	tgQueueNameInteractive         = "youban_publish_tg_interactive"
 	tgQueueNameUrgent              = "youban_publish_tg_urgent"
 	tgQueueNameDefault             = "youban_publish_tg"
 	tgQueueNameBulk                = "youban_publish_tg_bulk"
@@ -152,10 +153,11 @@ func collectMediaRealtimeQueueNames() []string {
 }
 
 const (
-	tgJobPriorityUrgent   = 10
-	tgJobPriorityDefault  = 50
-	tgJobPriorityFullPush = 70
-	tgJobPriorityBulk     = 90
+	tgJobPriorityInteractive = 1
+	tgJobPriorityUrgent      = 10
+	tgJobPriorityDefault     = 50
+	tgJobPriorityFullPush    = 70
+	tgJobPriorityBulk        = 90
 )
 
 type tgQueuePayload struct {

@@ -23,8 +23,10 @@ func telegramJobPriorityValue(job telegramJobRecord) int {
 		return tgJobPriorityUrgent
 	}
 	operationNo := strings.ToLower(strings.TrimSpace(job.OperationNo))
-	if isInteractiveProfilePublishOperation(operationNo) ||
-		strings.HasPrefix(operationNo, "quick_push:") ||
+	if isInteractiveProfilePublishOperation(operationNo) {
+		return tgJobPriorityInteractive
+	}
+	if strings.HasPrefix(operationNo, "quick_push:") ||
 		strings.HasPrefix(operationNo, "message_push:") {
 		return tgJobPriorityUrgent
 	}
@@ -53,6 +55,8 @@ func telegramJobEffectivePrioritySQL(alias string) string {
 
 func telegramQueueNameByPriority(priority int) string {
 	switch {
+	case priority <= tgJobPriorityInteractive:
+		return tgQueueNameInteractive
 	case priority <= tgJobPriorityUrgent:
 		return tgQueueNameUrgent
 	case priority >= tgJobPriorityBulk:
@@ -60,6 +64,32 @@ func telegramQueueNameByPriority(priority int) string {
 	default:
 		return tgQueueNameDefault
 	}
+}
+
+func telegramPublishInteractiveQueueWeights(ctx context.Context) map[string]int {
+	shardCount := telegramPublishQueueShardCount(ctx)
+	queues := make(map[string]int, shardCount+1)
+	queues[tgQueueNameInteractive] = 1
+	for shard := 0; shard < shardCount; shard++ {
+		queues[fmt.Sprintf("%s_%d", tgQueueNameInteractive, shard)] = 1
+	}
+	return queues
+}
+
+func telegramPublishInteractiveConcurrency(ctx context.Context) int {
+	return normalizeTelegramPublishInteractiveConcurrency(
+		g.Cfg().MustGet(ctx, "youbanPublish.queue.interactiveConcurrency", 4).Int(),
+	)
+}
+
+func normalizeTelegramPublishInteractiveConcurrency(value int) int {
+	if value < 1 {
+		return 1
+	}
+	if value > 16 {
+		return 16
+	}
+	return value
 }
 
 const defaultTelegramPublishQueueShards = 16

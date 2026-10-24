@@ -31,6 +31,7 @@ type sSysPublish struct {
 	tgQueueMu                 publishRuntimeMutex
 	telegramOutboxStarted     bool
 	tgQueueClient             *asynq.Client
+	tgInteractiveQueueServer  *asynq.Server
 	tgQueueServer             *asynq.Server
 	tgBulkQueueServer         *asynq.Server
 	mediaQueueServer          *asynq.Server

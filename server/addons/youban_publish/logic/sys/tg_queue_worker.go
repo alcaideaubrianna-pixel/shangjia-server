@@ -12,10 +12,15 @@ import (
 
 func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
 	s.tgQueueMu.Lock()
-	if s.tgQueueServer != nil {
+	if s.tgInteractiveQueueServer != nil || s.tgQueueServer != nil {
 		s.tgQueueMu.Unlock()
 		return
 	}
+	interactiveServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
+		Concurrency:    telegramPublishInteractiveConcurrency(ctx),
+		Queues:         telegramPublishInteractiveQueueWeights(ctx),
+		RetryDelayFunc: telegramQueueRetryDelay,
+	})
 	server := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
 		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.concurrency", 20).Int(),
 		Queues:         telegramPublishForegroundQueueWeights(ctx),
@@ -26,7 +31,8 @@ func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
 		Queues:         telegramPublishBulkQueueWeights(ctx),
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
-	g.Log().Info(ctx, "启动上架插件TG推送队列")
+	g.Log().Infof(ctx, "启动上架插件TG推送队列，人工上架独立并发：%d", telegramPublishInteractiveConcurrency(ctx))
+	s.tgInteractiveQueueServer = interactiveServer
 	s.tgQueueServer = server
 	s.tgBulkQueueServer = bulkServer
 	s.tgQueueMu.Unlock()
@@ -40,6 +46,11 @@ func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
 	mux.HandleFunc(tgTaskTypeCleanup, s.handleTelegramCleanupTask)
 	mux.HandleFunc(tgTaskTypeDown, s.handleProfileDownTask)
 
+	go func() {
+		if err := interactiveServer.Run(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
+			g.Log().Errorf(ctx, "启动上架插件TG人工发送队列失败：%+v", err)
+		}
+	}()
 	go func() {
 		if err := server.Run(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
 			g.Log().Errorf(ctx, "启动上架插件TG发送队列失败：%+v", err)
@@ -335,6 +346,7 @@ func (s *sSysPublish) startTelegramMediaWorker(ctx context.Context) {
 
 func (s *sSysPublish) stopTelegramQueueWorker() {
 	s.tgQueueMu.Lock()
+	interactiveServer := s.tgInteractiveQueueServer
 	server := s.tgQueueServer
 	bulkServer := s.tgBulkQueueServer
 	mediaServer := s.mediaQueueServer
@@ -353,6 +365,7 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	historyServer := s.historyQueueServer
 	mattingServer := s.mattingQueueServer
 	client := s.tgQueueClient
+	s.tgInteractiveQueueServer = nil
 	s.tgQueueServer = nil
 	s.tgBulkQueueServer = nil
 	s.mediaQueueServer = nil
@@ -372,6 +385,9 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	s.mattingQueueServer = nil
 	s.tgQueueClient = nil
 	s.tgQueueMu.Unlock()
+	if interactiveServer != nil {
+		interactiveServer.Shutdown()
+	}
 	if server != nil {
 		server.Shutdown()
 	}
