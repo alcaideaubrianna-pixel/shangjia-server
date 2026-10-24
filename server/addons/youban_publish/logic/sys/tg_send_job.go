@@ -127,7 +127,10 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) (resultE
 		return pauseErr
 	}
 	step = beginTelegramPublishStage(ctx, "channel.publish_interval")
-	delay, delayErr := s.telegramPublishIntervalDelay(ctx, targetJob)
+	delay, delayErr := time.Duration(0), error(nil)
+	if !telegramJobBypassesAutomaticSchedule(targetJob) {
+		delay, delayErr = s.telegramPublishIntervalDelay(ctx, targetJob)
+	}
 	step.End(delayErr, g.Map{"delayMs": delay.Milliseconds()})
 	if delayErr != nil {
 		g.Log().Warningf(ctx, "检查频道发送间隔失败，本次降级继续发送 jobId:%d channelId:%d err:%+v", targetJob.Id, targetJob.ChannelId, delayErr)

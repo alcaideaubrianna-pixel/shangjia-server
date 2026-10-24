@@ -44,6 +44,7 @@ func TestTelegramJobPriorityClassifiesPublishOperations(t *testing.T) {
 		want        int
 	}{
 		{name: "manual profile", operationNo: "profile:123", want: tgJobPriorityUrgent},
+		{name: "BOT manual profile", operationNo: "bot_publish:20:123456:123:456", want: tgJobPriorityUrgent},
 		{name: "manual batch", operationNo: "batchtext:1:batch-1:profile:123", want: tgJobPriorityUrgent},
 		{name: "message push", operationNo: "message_push:1:2:3", want: tgJobPriorityUrgent},
 		{name: "full push", operationNo: "full_push:1:2", want: tgJobPriorityFullPush},

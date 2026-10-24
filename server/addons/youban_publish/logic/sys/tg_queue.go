@@ -288,7 +288,7 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 	} else if !available {
 		return s.pauseTelegramJobsForUnavailableAccount(ctx, tgAccountId, "TG账号当前未授权或会话不可用")
 	}
-	if delay <= 0 {
+	if delay <= 0 && !telegramJobBypassesAutomaticSchedule(job) {
 		if windowDelay, enabled := s.telegramPublishWindowDelay(ctx, job.TenantId, job.AccountId); enabled && windowDelay > 0 {
 			delay = windowDelay
 		}

@@ -445,7 +445,7 @@ func (s *sSysPublish) handleTelegramPublishTask(ctx context.Context, task *asynq
 		return jobErr
 	}
 	ctx = telegramPublishJobTraceContext(ctx, job)
-	if delay, enabled := s.telegramPublishWindowDelay(ctx, job.TenantId, job.AccountId); enabled && delay > 0 {
+	if delay, enabled := s.telegramPublishWindowDelay(ctx, job.TenantId, job.AccountId); !telegramJobBypassesAutomaticSchedule(job) && enabled && delay > 0 {
 		beginTelegramPublishStage(ctx, "queue.deferred").End(nil, g.Map{"reason": "publish_window", "delayMs": delay.Milliseconds()})
 		return &tgRetryAfterError{after: delay, err: errTelegramPublishWindowBlocked}
 	}
