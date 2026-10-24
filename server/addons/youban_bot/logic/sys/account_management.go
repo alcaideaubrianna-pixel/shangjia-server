@@ -55,6 +55,7 @@ func (s *sSysBot) showAccountManagement(ctx context.Context, botID int64, chatID
 		{{Text: "重置密码", CallbackData: "acct:reset"}, {Text: "账号设置", CallbackData: "acct:setting"}},
 		{{Text: "推送设置", CallbackData: "acct:notify"}, {Text: "邀请注册", CallbackData: "acct:invite"}},
 		{{Text: "上架账户", CallbackData: "acct:accounts"}},
+		{{Text: "创建上架账户", CallbackData: "acct:accounts:create"}},
 		{{Text: "每日推送报告", CallbackData: "acct:report"}},
 	}}
 	return s.replyWithMarkup(ctx, botID, chatID, text, markup)
@@ -79,6 +80,13 @@ func (s *sSysBot) handleAccountManagementCallback(ctx context.Context, botID int
 		_, _ = tgBot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID})
 	}
 	switch query.Data {
+	case "acct:accounts:create":
+		username := fmt.Sprintf("tg_%d", query.From.ID)
+		created, createErr := publishService.SysPublish().AdminAccountSave(quickPushMediaUploadContext(ctx, account.AccountId), &publishsysin.AccountSaveInp{AccountType: publishsysin.PublishAccountTypeUploader, Nickname: fmt.Sprintf("TG用户 %d", query.From.ID), Username: username, TelegramUserId: fmt.Sprintf("%d", query.From.ID), TelegramUsername: query.From.Username})
+		if createErr != nil {
+			return true, s.reply(ctx, botID, chatID, "创建上架账户失败："+html.EscapeString(createErr.Error()))
+		}
+		return true, s.reply(ctx, botID, chatID, fmt.Sprintf("上架账户创建成功\n账号：<code>%s</code>\n初始密码：<code>%s</code>\n账号 ID：%d", html.EscapeString(username), html.EscapeString(created.Password), created.Id))
 	case "acct:accounts":
 		return true, s.showManagedAccounts(ctx, botID, chatID, account, 1)
 	case "acct:current":
