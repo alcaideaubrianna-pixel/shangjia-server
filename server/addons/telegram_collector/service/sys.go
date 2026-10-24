@@ -75,7 +75,7 @@ type IAccountHistory interface {
 
 type AccountRuntimeSession interface {
 	UpdateAccountRuntime(binding *sysin.AccountRuntimeBinding) bool
-	NewAccountRuntimeClient(ctx context.Context, dispatcher tg.UpdateDispatcher) (*telegram.Client, error)
+	NewAccountRuntimeClient(ctx context.Context, handler telegram.UpdateHandler) (*telegram.Client, error)
 	StartAccountRuntime(ctx context.Context, client *telegram.Client)
 	StopAccountRuntime()
 	HandleAccountRuntimeError(ctx context.Context, err error)
@@ -83,6 +83,12 @@ type AccountRuntimeSession interface {
 
 type AccountRuntimeMessageObserver interface {
 	HandleAccountRuntimeMessage(ctx context.Context, entities tg.Entities, message *tg.Message, chatIDs []string)
+}
+
+// Optional observer; implementations must persist/queue work, not perform
+// Telegram requests on the update delivery goroutine.
+type AccountRuntimeChannelAccessObserver interface {
+	HandleAccountRuntimeChannelAccess(ctx context.Context, event sysin.AccountChannelAccessEvent) error
 }
 
 type AccountRuntimeProvider interface {

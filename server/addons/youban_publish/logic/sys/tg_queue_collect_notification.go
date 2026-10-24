@@ -30,16 +30,17 @@ type collectChannelPurgeNotification struct {
 }
 
 type collectNotificationPayload struct {
-	PermissionCircuit *channelPermissionCircuit        `json:"permissionCircuit,omitempty"`
-	Purge             *collectChannelPurgeNotification `json:"purge,omitempty"`
-	ID                string                           `json:"id"`
-	BotID             int64                            `json:"botId"`
-	ChatID            string                           `json:"chatId,omitempty"`
-	Text              string                           `json:"text,omitempty"`
-	TenantID          int64                            `json:"tenantId,omitempty"`
-	AccountID         int64                            `json:"accountId,omitempty"`
-	SourceID          int64                            `json:"sourceId,omitempty"`
-	ChannelID         string                           `json:"channelId,omitempty"`
+	ChannelAccess     *accountChannelAccessNotification `json:"channelAccess,omitempty"`
+	PermissionCircuit *channelPermissionCircuit         `json:"permissionCircuit,omitempty"`
+	Purge             *collectChannelPurgeNotification  `json:"purge,omitempty"`
+	ID                string                            `json:"id"`
+	BotID             int64                             `json:"botId"`
+	ChatID            string                            `json:"chatId,omitempty"`
+	Text              string                            `json:"text,omitempty"`
+	TenantID          int64                             `json:"tenantId,omitempty"`
+	AccountID         int64                             `json:"accountId,omitempty"`
+	SourceID          int64                             `json:"sourceId,omitempty"`
+	ChannelID         string                            `json:"channelId,omitempty"`
 }
 
 func (s *sSysPublish) enqueueCollectNotification(ctx context.Context, payload collectNotificationPayload) error {
@@ -67,6 +68,9 @@ func (s *sSysPublish) handleCollectNotificationTask(ctx context.Context, task *a
 	}
 	if payload.ID == "" {
 		return gerror.New("采集通知任务缺少标识")
+	}
+	if payload.ChannelAccess != nil {
+		return s.handleAccountChannelAccessNotification(ctx, payload.ID, payload.ChannelAccess)
 	}
 	if payload.PermissionCircuit != nil {
 		return s.notifyChannelPermissionCircuit(ctx, payload.PermissionCircuit)

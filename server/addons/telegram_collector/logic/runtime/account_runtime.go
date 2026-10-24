@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
@@ -32,6 +33,7 @@ type accountRuntime struct {
 }
 
 type accountWorker struct {
+	selfUserID             atomic.Int64
 	bindingMu              sync.RWMutex
 	binding                *sysin.AccountRuntimeBinding
 	session                collectorservice.AccountRuntimeSession
@@ -332,15 +334,17 @@ func (w *accountWorker) run(ctx context.Context) {
 	startCounter.Add(ctx, 1)
 	dispatcher := tg.NewUpdateDispatcher()
 	w.bindAccountMessageHandlers(dispatcher)
-	client, err := w.session.NewAccountRuntimeClient(ctx, dispatcher)
+	client, err := w.session.NewAccountRuntimeClient(ctx, w.channelAccessUpdateHandler(dispatcher))
 	if err != nil {
 		w.session.HandleAccountRuntimeError(ctx, err)
 		return
 	}
 	err = client.Run(ctx, func(runCtx context.Context) error {
-		if _, selfErr := client.Self(runCtx); selfErr != nil {
+		self, selfErr := client.Self(runCtx)
+		if selfErr != nil {
 			return selfErr
 		}
+		w.selfUserID.Store(self.ID)
 		w.session.StartAccountRuntime(runCtx, client)
 		go w.runAccountMessageLoop(runCtx)
 		go w.runOperations(runCtx, client)

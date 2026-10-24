@@ -1,5 +1,19 @@
 package sysin
 
+const (
+	AccountChannelAccessLeft      = "left"
+	AccountChannelAccessRemoved   = "removed"
+	AccountChannelAccessForbidden = "forbidden"
+)
+
+type AccountChannelAccessEvent struct {
+	ChannelID int64  `json:"channelId"`
+	UserID    int64  `json:"userId"`
+	Date      int    `json:"date"`
+	Title     string `json:"title"`
+	Reason    string `json:"reason"`
+}
+
 type AccountRuntimeBinding struct {
 	AccountID int64
 	Signature string

@@ -123,7 +123,7 @@ func (w *accountCollectWorker) UpdateAccountRuntime(binding *collectorin.Account
 	return w.updateConfig(binding.Signature, payload.Listeners)
 }
 
-func (w *accountCollectWorker) NewAccountRuntimeClient(ctx context.Context, dispatcher tg.UpdateDispatcher) (*telegram.Client, error) {
+func (w *accountCollectWorker) NewAccountRuntimeClient(ctx context.Context, handler telegram.UpdateHandler) (*telegram.Client, error) {
 	account, err := w.service.accountCollectTgAccount(ctx, w.tgAccountId)
 	if err != nil {
 		return nil, err
@@ -132,7 +132,7 @@ func (w *accountCollectWorker) NewAccountRuntimeClient(ctx context.Context, disp
 	if err != nil {
 		return nil, err
 	}
-	return w.service.newAccountCollectClient(ctx, conf, account, dispatcher)
+	return w.service.newAccountCollectClient(ctx, conf, account, handler)
 }
 
 func (w *accountCollectWorker) StartAccountRuntime(ctx context.Context, client *telegram.Client) {

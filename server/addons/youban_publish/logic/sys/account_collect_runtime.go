@@ -11,7 +11,6 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gotd/td/telegram"
-	"github.com/gotd/td/tg"
 
 	collectorservice "hotgo/addons/telegram_collector/service"
 	pdao "hotgo/addons/youban_publish/internal/dao"
@@ -174,7 +173,7 @@ func validateAccountCollectTgAccount(item *accountCollectTgAccount) error {
 	return nil
 }
 
-func (s *sSysPublish) newAccountCollectClient(ctx context.Context, conf *model.TelegramConfig, item *accountCollectTgAccount, dispatcher tg.UpdateDispatcher) (*telegram.Client, error) {
+func (s *sSysPublish) newAccountCollectClient(ctx context.Context, conf *model.TelegramConfig, item *accountCollectTgAccount, handler telegram.UpdateHandler) (*telegram.Client, error) {
 	if conf == nil || conf.AppId <= 0 || strings.TrimSpace(conf.AppHash) == "" {
 		return nil, gerror.New("请先配置Telegram App ID和App Hash")
 	}
@@ -182,7 +181,7 @@ func (s *sSysPublish) newAccountCollectClient(ctx context.Context, conf *model.T
 	if err != nil {
 		return nil, err
 	}
-	options := telegram.Options{AllowCDN: true, SessionStorage: storage, UpdateHandler: dispatcher}
+	options := telegram.Options{AllowCDN: true, SessionStorage: storage, UpdateHandler: handler}
 	resolver, err := telegramMTProtoResolver(conf.ProxyUrl)
 	if err != nil {
 		return nil, err
