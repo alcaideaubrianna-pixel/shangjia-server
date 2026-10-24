@@ -134,3 +134,13 @@ go test ./internal/library/payment/epay -count=1
 易支付签名与订单URL测试使用本地库测试，会员回调使用实际业务处理器和本地PG事务；未向第三方真实下单／付款。
 
 本轮整包回归仍为原有5项失败，日志：`/tmp/youban-account-management-renewal-full-test.log`。
+
+## 2026-10-25：账户管理交互简化（本地验证）
+
+- 账户管理首页把会员状态和到期时间拆成独立行；正文账户名称统一 HTML 转义并使用 `<code>`，不再显示内部账户 ID。
+- 我的账户菜单每行一个功能。上架账户列表每行一个账户按钮，分页保留；点击进入该账户的账号设置、重置密码、删除账户。
+- 自身与上架账户共用设置分类页：发送后缀、标题标识；上架账户额外显示账户权限。点击分类才展开对应设置，修改后返回原分类。标题选项显示 ✅。
+- 创建、授权创建、重置与删除确认移除展示 ID，确认页显示所选账户名称；编辑文本提示显示账户名称、字段名称和原值。
+- 回调仍使用内部 ID；所有目标读取先走 AdminAccountSettingView 的管理权限检查，显示名称复用现有账户服务。旧设置回调继续可用，不修改权限、密码或删除的事务实现。
+- 本地 SQLite + 模拟 Telegram HTTP 测试通过：账户列表/详情/分类、名称转义、消息换行、无可见 ID、分页返回、旧回调、开关修改回到原分类、越权目标拒绝；同时跑过授权、续费、报告、创建、密码重置和删除现有专项用例。
+- 验证命令：`go test ./addons/youban_bot/logic/sys -run 'TestAccountAuthorization|TestAccountRenewal|TestAccountReport|TestAccountCreation|TestAccountManagement|TestOwnPasswordReset|TestManagedPasswordReset|TestManagedAccountDeletion' -count=1 -timeout=90s`；`git diff --check`。本轮未操作生产、未发消息给真实用户、未部署。

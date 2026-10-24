@@ -72,7 +72,7 @@ func (s *sSysBot) handleAccountManagementInput(ctx context.Context, botID int64,
 		if err != nil {
 			return true, s.reply(ctx, botID, chatID, "保存设置失败，请重新检查权限后重试。")
 		}
-		return true, s.showEditableAccountSetting(ctx, botID, chatID, account, session.ProfileId)
+		return true, s.showAccountSettingSection(ctx, botID, chatID, account, session.ProfileId, accountSettingSectionForField(session.Step))
 	}
 	if !accountUsernamePattern.MatchString(username) {
 		return true, s.reply(ctx, botID, chatID, "用户名需为3～32位字母、数字或下划线，请重新输入。")
@@ -84,7 +84,7 @@ func (s *sSysBot) handleAccountManagementInput(ctx context.Context, botID int64,
 	if created == nil {
 		return true, nil
 	}
-	return true, s.reply(ctx, botID, chatID, fmt.Sprintf("上架账户创建成功\n账号：<code>%s</code>\n初始密码：<code>%s</code>\n账号 ID：%d", html.EscapeString(username), html.EscapeString(created.Password), created.Id))
+	return true, s.reply(ctx, botID, chatID, fmt.Sprintf("上架账户创建成功\n账号：<code>%s</code>\n初始密码：<code>%s</code>", html.EscapeString(username), html.EscapeString(created.Password)))
 }
 
 // A session is consumed in the same transaction as creation, so retries after

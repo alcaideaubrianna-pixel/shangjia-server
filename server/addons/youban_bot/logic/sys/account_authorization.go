@@ -194,7 +194,7 @@ func (s *sSysBot) handleAccountAuthorizationCallback(ctx context.Context, botID 
 	if err := json.Unmarshal([]byte(session.PayloadJson), &draft); err != nil {
 		return true, err
 	}
-	return true, s.reply(ctx, botID, chatID, fmt.Sprintf("上架账户创建并绑定成功\n用户名：<code>%s</code>\n账号 ID：%d\n初始密码：<code>%s</code>\n请妥善保存并及时修改密码。", html.EscapeString(draft.Username), created.Id, html.EscapeString(created.Password)))
+	return true, s.reply(ctx, botID, chatID, fmt.Sprintf("上架账户创建并绑定成功\n用户名：<code>%s</code>\n初始密码：<code>%s</code>\n请妥善保存并及时修改密码。", html.EscapeString(draft.Username), html.EscapeString(created.Password)))
 }
 
 func (s *sSysBot) consumeAccountAuthorization(ctx context.Context, botID int64, user models.User, chatID string, session *profileSessionRow) (*pi.AccountSaveModel, error) {
