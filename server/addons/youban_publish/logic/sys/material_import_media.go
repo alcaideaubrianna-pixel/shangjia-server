@@ -22,26 +22,25 @@ const materialImportGroupTimeout = 12 * time.Minute
 const materialImportStaleGroupAfter = 15 * time.Minute
 const materialImportDispatchTimeout = 30 * time.Second
 const materialImportGroupConcurrency = 4
+const materialImportPreflightTimeout = 30 * time.Second
 
-func (s *sSysPublish) executeMaterialImportMedia(ctx context.Context, taskId int64) error {
-	task, err := s.materialImportTaskById(ctx, taskId, 0)
-	if err != nil {
-		return err
-	}
-	if err = s.materialImportEnsureNotCanceled(ctx, task.Id); err != nil {
-		return err
-	}
+func (s *sSysPublish) executeMaterialImportMedia(ctx context.Context, task *sysin.MaterialImportTaskModel) error {
 	return s.materialImportDownloadGroups(ctx, task)
 }
 
 func (s *sSysPublish) materialImportDownloadGroups(ctx context.Context, task *sysin.MaterialImportTaskModel) error {
 	// Task heartbeat can remain fresh while a worker is blocked in Telegram I/O.
 	// Requeue stale groups independently so one group cannot hold the import forever.
-	if err := s.materialImportResetStaleGroups(ctx, task.Id); err != nil {
-		return err
+	preflightCtx, cancelPreflight := context.WithTimeout(ctx, materialImportPreflightTimeout)
+	defer cancelPreflight()
+	if err := s.materialImportResetStaleGroups(preflightCtx, task.Id); err != nil {
+		return s.materialImportHandleMediaRetry(ctx, task, newCollectMediaFairnessRetryError("资料导入媒体预处理等待数据库", 15*time.Second))
 	}
-	groups, err := s.materialImportPendingMediaGroups(ctx, task.Id)
+	groups, err := s.materialImportPendingMediaGroups(preflightCtx, task.Id)
 	if err != nil {
+		if preflightCtx.Err() != nil {
+			return s.materialImportHandleMediaRetry(ctx, task, newCollectMediaFairnessRetryError("资料导入媒体分组读取超时", 15*time.Second))
+		}
 		return err
 	}
 	if len(groups) == 0 {

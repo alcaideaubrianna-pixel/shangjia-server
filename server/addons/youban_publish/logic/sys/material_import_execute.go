@@ -79,7 +79,7 @@ func (s *sSysPublish) executeMaterialImport(ctx context.Context, task *sysin.Mat
 	}
 	switch materialImportNextStage(task) {
 	case sysin.MaterialImportStageMedia:
-		return s.executeMaterialImportMedia(ctx, task.Id)
+		return s.executeMaterialImportMedia(ctx, task)
 	default:
 		return s.executeMaterialImportPull(ctx, task)
 	}
