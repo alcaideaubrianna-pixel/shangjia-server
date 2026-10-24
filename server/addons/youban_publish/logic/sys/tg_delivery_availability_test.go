@@ -98,6 +98,40 @@ func TestTelegramDeliveryAvailabilityLocalPostgres(t *testing.T) {
 				t.Fatalf("Bot with protocol account %d: Outbox blocked", accountID)
 			}
 		}
+		// Exercise the complete PostgreSQL Outbox head query with the backlog
+		// shape observed in production: an untouched historical AI repair must
+		// yield to a later interactive BOT publish, but becomes a hard barrier as
+		// soon as its worker starts.
+		if _, err := tx.Exec("TRUNCATE " + publishTgJobTable + "," + publishTgOutboxTable); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("INSERT INTO " + publishTgJobTable + ` (id,tenant_id,channel_id,bot_id,push_mode,status,send_phase,operation_no,created_at) VALUES
+			(1,87,256,80,'bot','pending','','ai-republish:old',NOW()-INTERVAL '1 day'),
+			(2,87,256,80,'bot','pending','','bot_publish:new',NOW()-INTERVAL '1 minute')`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("INSERT INTO " + publishTgOutboxTable + ` VALUES
+			(1,1,0,NOW()-INTERVAL '1 day','publish','pending',NULL),
+			(2,2,0,NOW()-INTERVAL '1 minute','publish','pending',NULL)`); err != nil {
+			return err
+		}
+		rows, err := tx.GetAll(telegramDueOutboxPostgresSQL(), time.Now(), "publish", time.Now(), "pending", "processing", time.Now(), 10)
+		if err != nil {
+			return err
+		}
+		if len(rows) != 1 || rows[0]["job_id"].Int64() != 2 {
+			t.Fatalf("interactive BOT publish was not selected ahead of untouched AI backlog: %+v", rows)
+		}
+		if _, err := tx.Exec("UPDATE " + publishTgJobTable + " SET status='sending',send_phase='display_sending' WHERE id=1"); err != nil {
+			return err
+		}
+		rows, err = tx.GetAll(telegramDueOutboxPostgresSQL(), time.Now(), "publish", time.Now(), "pending", "processing", time.Now(), 10)
+		if err != nil {
+			return err
+		}
+		if len(rows) != 0 {
+			t.Fatalf("started operation must hold the channel while its worker owns delivery: %+v", rows)
+		}
 		for _, id := range []int64{81, 83} {
 			_, err := checkTelegramProtocolAccount(ctx, db, 87, id)
 			if !errors.Is(err, errTelegramPublishAccountMissing) {

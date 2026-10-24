@@ -131,6 +131,63 @@ func TestTelegramChannelScheduleLocalPostgres(t *testing.T) {
 		if !row["precedes"].Bool() {
 			t.Fatal("started AI republish must remain a hard ordering barrier")
 		}
+
+		// Replay the production backlog shapes seen on 2026-10-24. IDs and
+		// timestamps are anonymized, but operation classes, duplicate clicks,
+		// channel fan-out and active verification phases match the live cases.
+		if _, err = tx.Exec(`CREATE TEMP TABLE production_schedule_fixture(
+			id bigint,status text,send_phase text,operation_no text,
+			created_at timestamp,profile_id bigint,channel_id bigint
+		)`); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(`INSERT INTO production_schedule_fixture VALUES
+			(101,'pending','','ai-republish:old',timestamp '2026-10-22 19:42:58',7001,501),
+			(102,'pending','','cycle_batch:old',timestamp '2026-10-23 08:00:00',7002,501),
+			(103,'pending','','collect:old',timestamp '2026-10-24 15:00:00',7003,501),
+			(104,'pending','','bot_publish:first',timestamp '2026-10-24 15:16:49',7004,501),
+			(105,'pending','','bot_publish:duplicate',timestamp '2026-10-24 15:17:01',7004,501),
+			(106,'pending','','batchtext:manual',timestamp '2026-10-24 15:18:00',7005,501),
+			(201,'sending','verify_sending','ai-republish:started',timestamp '2026-10-22 19:41:47',7101,502),
+			(202,'pending','','bot_publish:waiting',timestamp '2026-10-24 19:24:01',7102,502),
+			(301,'pending','','bot_publish:fanout',timestamp '2026-10-24 20:58:24',7201,503),
+			(302,'pending','','bot_publish:fanout',timestamp '2026-10-24 20:58:24',7201,504),
+			(303,'pending','','bot_publish:fanout',timestamp '2026-10-24 20:58:24',7201,505)
+		`); err != nil {
+			return err
+		}
+
+		rows, err = tx.GetAll(`
+			SELECT DISTINCT ON (channel_id) id,channel_id
+			FROM production_schedule_fixture j
+			ORDER BY channel_id, ` + telegramChannelScheduleOrderSQL("j"))
+		if err != nil {
+			return err
+		}
+		wantHeads := map[int64]int64{501: 104, 502: 201, 503: 301, 504: 302, 505: 303}
+		if len(rows) != len(wantHeads) {
+			t.Fatalf("production fixture returned %d channel heads, want %d", len(rows), len(wantHeads))
+		}
+		for _, fixtureRow := range rows {
+			channelID := fixtureRow["channel_id"].Int64()
+			if got, want := fixtureRow["id"].Int64(), wantHeads[channelID]; got != want {
+				t.Fatalf("production fixture channel %d head=%d want=%d", channelID, got, want)
+			}
+		}
+
+		// Repeated clicks for the same profile intentionally remain FIFO here.
+		// Replacement happens in prepareProfileChannelPublish when the newer
+		// generation reaches the sender; the scheduler must not reorder it ahead
+		// of an already-started generation.
+		row, err = tx.GetOne(`SELECT ` + telegramChannelSchedulePrecedesSQL("a", "b") + ` AS precedes
+			FROM production_schedule_fixture a CROSS JOIN production_schedule_fixture b
+			WHERE a.id=104 AND b.id=105`)
+		if err != nil {
+			return err
+		}
+		if !row["precedes"].Bool() {
+			t.Fatal("same-profile BOT generations lost FIFO ordering")
+		}
 		return nil
 	})
 	if err != nil {
