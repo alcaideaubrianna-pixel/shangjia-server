@@ -41,7 +41,7 @@ func (f *relayGatewayFeature) Menus(ctx context.Context, bc gatewayservice.BotCo
 			if err != nil || cfg == nil || cfg.Enabled != 1 {
 				return gatewayservice.FeatureMenus{}, err
 			}
-			return gatewayservice.FeatureMenus{Managed: true, Items: []gatewayservice.MenuItem{{Command: "start", Description: "开始双向聊天", Order: 0}, {Command: "help", Description: "双向管理帮助（仅管理员）", Order: 1}, {Command: "id", Description: "查看聊天ID", Order: 2}}}, nil
+			return gatewayservice.FeatureMenus{Managed: true, Exclusive: true, Items: []gatewayservice.MenuItem{{Command: "start", Description: "开始双向聊天", Order: 0}, {Command: "help", Description: "双向管理帮助（仅管理员）", Order: 1}, {Command: "id", Description: "查看聊天ID", Order: 2}}}, nil
 		}
 		if binding.Owner == "youban_bot" {
 			items := make([]gatewayservice.MenuItem, 0)

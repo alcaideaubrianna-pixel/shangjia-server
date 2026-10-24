@@ -23,7 +23,9 @@ type MenuItem struct {
 
 type FeatureMenus struct {
 	Managed bool
-	Items   []MenuItem
+	// Exclusive replaces the composed menu when a feature owns the entire Bot UI.
+	Exclusive bool
+	Items     []MenuItem
 }
 
 type Feature interface {

@@ -93,6 +93,9 @@ func TestRelayHelpOnlyBelongsToConfiguredBot(t *testing.T) {
 		if !relayMenuHas(menus, "start") {
 			t.Fatal("main start command lost")
 		}
+		if id == 2 && !menus.Exclusive {
+			t.Fatal("dedicated relay must own its menu to avoid duplicate /start")
+		}
 		for _, item := range menus.Items {
 			if item.Command == "help" && ((id == 1 && item.Description != "主机器人帮助") || (id == 2 && item.Description != "双向管理帮助（仅管理员）")) {
 				t.Fatalf("wrong scoped help: %+v", item)

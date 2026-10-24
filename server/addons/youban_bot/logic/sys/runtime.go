@@ -44,6 +44,9 @@ func botAllowedUpdatesMatch(actual []string) bool {
 }
 
 func (s *sSysBot) handleUpdate(ctx context.Context, botId int64, update *models.Update) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if update == nil {
 		return nil
 	}
@@ -128,11 +131,17 @@ func (s *sSysBot) handleUpdate(ctx context.Context, botId int64, update *models.
 		g.Log().Infof(ctx, "TG链路 bot_message_stored updateId:%d botId:%d chatId:%d messageId:%d duration:%s", update.ID, botId, msg.Chat.ID, msg.ID, time.Since(storeStartedAt))
 	}
 	text := strings.TrimSpace(firstNonEmpty(msg.Text, msg.Caption))
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	_, err := s.dispatchBotMessage(ctx, &botMessageEvent{BotId: botId, UpdateID: update.ID, Msg: msg, Text: text})
 	if err != nil {
 		g.Log().Warningf(ctx, "Telegram消息处理失败 botId:%d chatId:%d userId:%s text:%s err:%+v", botId, msg.Chat.ID, userId, text, err)
 	}
 	if msg.Chat.Type == models.ChatTypePrivate {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		if s.activeProfileSession(ctx, botId, msg) != nil {
 			return err
 		}

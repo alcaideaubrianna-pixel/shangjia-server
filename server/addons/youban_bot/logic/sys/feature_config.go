@@ -216,6 +216,9 @@ func (s *sSysBot) featureConfig(ctx context.Context, key string) (*botFeatureRow
 }
 
 func (s *sSysBot) featureConfigs(ctx context.Context) (map[string]*botFeatureRow, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if err := s.syncFeatureDefaults(ctx); err != nil {
 		return nil, err
 	}
@@ -253,9 +256,15 @@ func (s *sSysBot) clearFeatureCache() {
 }
 
 func (s *sSysBot) dispatchFeature(ctx context.Context, botId int64, msg *models.Message, text string) (bool, error) {
+	if _, err := s.featureConfigs(ctx); err != nil {
+		return false, err
+	}
 	command, args := botCommandAndArgs(text)
 	labelText := strings.TrimSpace(text)
 	for _, feature := range botFeatures {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
 		if feature == nil || feature.Key() == (relayFeature{}).Key() {
 			continue
 		}

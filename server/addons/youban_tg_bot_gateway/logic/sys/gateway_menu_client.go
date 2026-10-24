@@ -23,24 +23,42 @@ import (
 )
 
 func (s *sGateway) syncMenu(ctx context.Context, key, token string, bindings []service.BotBinding) error {
-	items := make([]service.MenuItem, 0)
-	managed := false
-	botCtx := service.BotContext{Key: key, Token: token, Bindings: bindings}
-	for _, feature := range service.Features() {
-		menus, err := feature.Menus(ctx, botCtx)
-		if err != nil {
-			return gerror.Wrapf(err, "读取Bot功能菜单失败 feature:%s", feature.Key())
-		}
-		managed = managed || menus.Managed
-		items = append(items, menus.Items...)
-	}
-	if !managed {
-		return nil
-	}
-	commands, signature, err := normalizeMenuItems(items)
-	if err != nil {
+	commands, signature, managed, err := gatewayMenuCommands(ctx, service.BotContext{Key: key, Token: token, Bindings: bindings}, service.Features())
+	if err != nil || !managed {
 		return err
 	}
+	return s.applyMenu(ctx, key, commands, signature)
+}
+
+func gatewayMenuCommands(ctx context.Context, botCtx service.BotContext, features []service.Feature) ([]models.BotCommand, string, bool, error) {
+	items := make([]service.MenuItem, 0)
+	managed := false
+	for _, feature := range features {
+		if err := ctx.Err(); err != nil {
+			return nil, "", false, err
+		}
+		menus, err := feature.Menus(ctx, botCtx)
+		if err != nil {
+			return nil, "", false, gerror.Wrapf(err, "读取Bot功能菜单失败 feature:%s", feature.Key())
+		}
+		managed = managed || menus.Managed
+		if menus.Exclusive {
+			items = nil
+		}
+		items = append(items, menus.Items...)
+		if menus.Exclusive {
+			break
+		}
+	}
+	if !managed {
+		return nil, "", false, nil
+	}
+	commands, signature, err := normalizeMenuItems(items)
+	return commands, signature, managed, err
+}
+
+func (s *sGateway) applyMenu(ctx context.Context, key string, commands []models.BotCommand, signature string) error {
+	var err error
 	s.mu.Lock()
 	runtime := s.runtimes[key]
 	client := s.clients[key]

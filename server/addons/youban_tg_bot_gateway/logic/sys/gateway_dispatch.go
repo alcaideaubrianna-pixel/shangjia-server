@@ -16,6 +16,9 @@ import (
 )
 
 func (s *sGateway) dispatch(ctx context.Context, key string, update *models.Update) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	dispatchStartedAt := time.Now()
 	if update != nil && update.InlineQuery != nil {
 		g.Log().Infof(ctx, "TG链路 gateway_inline_dispatch_start key:%s updateId:%d queryId:%s", key, update.ID, update.InlineQuery.ID)
@@ -61,6 +64,9 @@ func (s *sGateway) dispatch(ctx context.Context, key string, update *models.Upda
 	}
 	var featureErrors []error
 	for _, feature := range service.Features() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if update != nil && update.InlineQuery != nil {
 			g.Log().Infof(ctx, "TG链路 gateway_inline_feature_start updateId:%d feature:%s", update.ID, feature.Key())
 		}
@@ -88,6 +94,9 @@ func (s *sGateway) dispatch(ctx context.Context, key string, update *models.Upda
 	}
 	for _, binding := range bindings {
 		provider := providers[binding.Owner]
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if provider == nil {
 			continue
 		}
