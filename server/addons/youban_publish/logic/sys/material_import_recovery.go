@@ -134,7 +134,7 @@ func (s *sSysPublish) recoverMaterialImportTask(ctx context.Context, row gdb.Rec
 	if affected == 0 {
 		return nil
 	}
-	if err = s.enqueueMaterialImportTask(ctx, taskId, 0); err != nil {
+	if err = s.enqueueMaterialImportRecoveryTask(ctx, taskId); err != nil {
 		return gerror.Wrap(err, "重新投递资料导入任务失败")
 	}
 	g.Log().Infof(ctx, "已恢复滞留资料导入任务 task:%d stage:%s", taskId, row[cols.Stage].String())

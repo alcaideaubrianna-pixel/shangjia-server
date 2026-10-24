@@ -26,7 +26,11 @@ const materialImportPagesPerRun = 10
 func (s *sSysPublish) ExecuteMaterialImportTask(ctx context.Context, taskId int64) error {
 	lock := hglock.NewConfig(5*time.Minute, 200*time.Millisecond).
 		Mutex(fmt.Sprintf("youban_publish:material_import:%d", taskId))
-	if err := lock.Lock(ctx); err != nil {
+	if err := lock.TryLock(ctx); err != nil {
+		if gerror.Is(err, hglock.ErrLockFailed) {
+			g.Log().Infof(ctx, "资料导入任务已由其他消费者处理，跳过重复队列消息 taskId:%d", taskId)
+			return nil
+		}
 		return gerror.Wrap(err, "获取资料导入任务锁失败")
 	}
 	defer s.releaseTelegramChannelLease(context.Background(), lock)

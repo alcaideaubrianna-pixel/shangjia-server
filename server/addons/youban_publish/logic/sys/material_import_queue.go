@@ -16,11 +16,21 @@ import (
 
 const tgTaskTypeMaterialImport = "youban_publish:material_import"
 
+const materialImportRecoveryUniqueTTL = 7 * time.Hour
+
 type materialImportQueuePayload struct {
 	TaskId int64 `json:"taskId"`
 }
 
 func (s *sSysPublish) enqueueMaterialImportTask(ctx context.Context, taskId int64, delay time.Duration) error {
+	return s.enqueueMaterialImportTaskWithOptions(ctx, taskId, delay, false)
+}
+
+func (s *sSysPublish) enqueueMaterialImportRecoveryTask(ctx context.Context, taskId int64) error {
+	return s.enqueueMaterialImportTaskWithOptions(ctx, taskId, 0, true)
+}
+
+func (s *sSysPublish) enqueueMaterialImportTaskWithOptions(ctx context.Context, taskId int64, delay time.Duration, recovery bool) error {
 	if taskId <= 0 {
 		return nil
 	}
@@ -45,8 +55,11 @@ func (s *sSysPublish) enqueueMaterialImportTask(ctx context.Context, taskId int6
 	if delay > 0 {
 		options = append(options, asynq.ProcessIn(delay))
 	}
+	if recovery {
+		options = append(options, asynq.Unique(materialImportRecoveryUniqueTTL))
+	}
 	_, err = client.EnqueueContext(ctx, task, options...)
-	if errors.Is(err, asynq.ErrDuplicateTask) {
+	if errors.Is(err, asynq.ErrDuplicateTask) || errors.Is(err, asynq.ErrTaskIDConflict) {
 		return nil
 	}
 	return err

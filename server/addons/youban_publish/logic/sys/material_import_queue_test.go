@@ -2,9 +2,16 @@ package sys
 
 import (
 	"testing"
+	"time"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
+
+func TestMaterialImportRecoveryUniqueTTLCoversTaskTimeout(t *testing.T) {
+	if materialImportRecoveryUniqueTTL <= 6*time.Hour {
+		t.Fatalf("recovery unique TTL = %s, must exceed task timeout", materialImportRecoveryUniqueTTL)
+	}
+}
 
 func TestMaterialImportQueueNameByStage(t *testing.T) {
 	tests := []struct {
