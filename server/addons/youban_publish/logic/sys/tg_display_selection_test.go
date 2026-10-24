@@ -53,10 +53,13 @@ func TestDisplayVideoSelectionAndSnapshot(t *testing.T) {
 	media := []*telegramMediaItem{{Id: 1, MediaType: "video"}, {Id: 2, MediaType: "video"}, {Id: 3, MediaType: "image"}}
 	job := telegramJobRecord{Id: 5}
 	got := selectTelegramDisplayMediaWithPolicy(job, media, nil)
-	if len(got) != 2 {
-		t.Fatal("choose one optional video plus all default images")
+	if len(got) != 3 {
+		t.Fatal("media within the limit must all be selected")
 	}
-	ids := []int64{got[0].Id, got[1].Id}
+	ids := make([]int64, 0, len(got))
+	for _, item := range got {
+		ids = append(ids, item.Id)
+	}
 	payload, _ := json.Marshal(ids)
 	media[0], media[2] = media[2], media[0]
 	restored, err := restoreTelegramDisplaySelection(string(payload), media)
@@ -71,13 +74,28 @@ func TestDisplayVideoSelectionAndSnapshot(t *testing.T) {
 	}
 	media[1].MustSend = true
 	got = selectTelegramDisplayMediaWithPolicy(job, media, nil)
-	if len(got) != 2 || got[1].Id != 2 {
-		t.Fatal("required video replaces optional video")
+	if len(got) != 3 {
+		t.Fatal("required media must not reduce media within the limit")
 	}
 	media[2].MustSend = true // second required video after input reorder
 	got = selectTelegramDisplayMediaWithPolicy(job, media, nil)
 	if len(got) != 3 {
 		t.Fatal("all required videos retained")
+	}
+}
+
+func TestDisplaySelectionLimitsTotalImagesAndVideos(t *testing.T) {
+	on := true
+	media := []*telegramMediaItem{
+		{Id: 1, MediaType: "video"}, {Id: 2, MediaType: "video"},
+		{Id: 3, MediaType: "video"}, {Id: 4, MediaType: "image"},
+	}
+	if got := selectTelegramDisplayMediaWithPolicy(telegramJobRecord{Id: 7}, media, &sysin.ProfileRandomMediaPolicy{Enabled: &on, Count: 5}); len(got) != 4 {
+		t.Fatalf("media below configured limit were reduced: %d", len(got))
+	}
+	got := selectTelegramDisplayMediaWithPolicy(telegramJobRecord{Id: 7}, media, &sysin.ProfileRandomMediaPolicy{Enabled: &on, Count: 2})
+	if len(got) != 2 {
+		t.Fatalf("selected=%d, want total media limit 2", len(got))
 	}
 }
 
@@ -104,7 +122,7 @@ func TestDisplaySelectionDoesNotConsumeVerificationVideos(t *testing.T) {
 func TestRequiredImagesFollowRequiredDisplayVideos(t *testing.T) {
 	media := []*telegramMediaItem{{Id: 1, MediaType: "image", MustSend: true}, {Id: 2, MediaType: "video", MustSend: true}, {Id: 3, MediaType: "image"}}
 	got := selectTelegramDisplayMediaWithPolicy(telegramJobRecord{Id: 1}, media, nil)
-	if len(got) != 3 || got[0].Id != 3 || got[1].Id != 2 || got[2].Id != 1 {
-		t.Fatal("required images must be last even with required videos")
+	if len(got) != 3 || got[0].Id != 1 || got[1].Id != 2 || got[2].Id != 3 {
+		t.Fatal("media within the limit must preserve profile order")
 	}
 }

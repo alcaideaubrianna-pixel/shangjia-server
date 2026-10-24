@@ -115,29 +115,19 @@ func restoreTelegramDisplaySelection(payload string, media []*telegramMediaItem)
 }
 
 func selectTelegramDisplayMediaWithPolicy(job telegramJobRecord, media []*telegramMediaItem, policy *sysin.ProfileRandomMediaPolicy) []*telegramMediaItem {
-	var images, requiredImages, videos, requiredVideos, other []*telegramMediaItem
+	var display, required, optional []*telegramMediaItem
 	for _, item := range media {
 		if item == nil || strings.EqualFold(strings.TrimSpace(item.Purpose), "verify") {
 			continue
 		}
-		switch strings.ToLower(strings.TrimSpace(item.MediaType)) {
-		case "image":
-			if item.MustSend {
-				requiredImages = append(requiredImages, item)
-			} else {
-				images = append(images, item)
-			}
-		case "video":
-			if item.MustSend {
-				requiredVideos = append(requiredVideos, item)
-			} else {
-				videos = append(videos, item)
-			}
-		default:
-			other = append(other, item)
+		display = append(display, item)
+		if item.MustSend {
+			required = append(required, item)
+		} else {
+			optional = append(optional, item)
 		}
 	}
-	enabled, count := len(images)+len(requiredImages) > 10, 10
+	enabled, count := len(display) > telegramMediaGroupMaxItems, telegramMediaGroupMaxItems
 	if policy != nil && policy.Enabled != nil {
 		enabled = *policy.Enabled
 		count = policy.Count
@@ -145,25 +135,20 @@ func selectTelegramDisplayMediaWithPolicy(job telegramJobRecord, media []*telegr
 			count = 5
 		}
 	}
-	if enabled {
-		sortTelegramRandomMedia(job, images)
-		slots := count - len(requiredImages)
-		if slots < 0 {
-			slots = 0
-		}
-		if len(images) > slots {
-			images = images[:slots]
-		}
+	if !enabled || len(display) <= count {
+		return display
 	}
-	if len(requiredVideos) == 0 && len(videos) > 0 {
-		sortTelegramRandomMedia(job, videos)
-		other = append(other, videos[0])
+	sortTelegramRandomMedia(job, optional)
+	slots := count - len(required)
+	if slots < 0 {
+		slots = 0
 	}
-	// Ordinary media first, required media last. Required ordering remains the
-	// profile order; optional image ordering changes only for a new job.
-	selected := append(images, other...)
-	selected = append(selected, requiredVideos...)
-	return append(selected, requiredImages...)
+	if len(optional) > slots {
+		optional = optional[:slots]
+	}
+	// Required media are never dropped, even when they exceed the configured
+	// limit. Their profile order remains stable and retries reuse the snapshot.
+	return append(optional, required...)
 }
 
 func sortTelegramRandomMedia(job telegramJobRecord, media []*telegramMediaItem) {
