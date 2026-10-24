@@ -120,6 +120,23 @@ func (s *sSysBot) handleAccountManagementCallback(ctx context.Context, botID int
 	case "acct:report:back":
 		return true, s.showAccountManagement(ctx, botID, chatID, account)
 	default:
+		if strings.HasPrefix(query.Data, "acct:accounts:delete:") {
+			id, parseErr := strconv.ParseInt(strings.TrimPrefix(query.Data, "acct:accounts:delete:"), 10, 64)
+			if parseErr != nil || id <= 0 {
+				return true, s.reply(ctx, botID, chatID, "账号参数无效。")
+			}
+			return true, s.replyWithMarkup(ctx, botID, chatID, fmt.Sprintf("确定删除上架账户 %d 吗？删除后该账号将无法登录。", id), &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{{{Text: "确认删除", CallbackData: fmt.Sprintf("acct:accounts:delete_confirm:%d", id)}}, {{Text: "取消", CallbackData: "acct:accounts"}}}})
+		}
+		if strings.HasPrefix(query.Data, "acct:accounts:delete_confirm:") {
+			id, parseErr := strconv.ParseInt(strings.TrimPrefix(query.Data, "acct:accounts:delete_confirm:"), 10, 64)
+			if parseErr != nil || id <= 0 {
+				return true, s.reply(ctx, botID, chatID, "账号参数无效。")
+			}
+			if deleteErr := publishService.SysPublish().AdminAccountDelete(quickPushMediaUploadContext(ctx, account.AccountId), &publishsysin.AccountDeleteInp{Ids: []int64{id}}); deleteErr != nil {
+				return true, s.reply(ctx, botID, chatID, "删除账号失败："+html.EscapeString(deleteErr.Error()))
+			}
+			return true, s.showManagedAccounts(ctx, botID, chatID, account, 1)
+		}
 		if strings.HasPrefix(query.Data, "acct:accounts:reset:") {
 			id, parseErr := strconv.ParseInt(strings.TrimPrefix(query.Data, "acct:accounts:reset:"), 10, 64)
 			if parseErr != nil || id <= 0 {
@@ -213,7 +230,7 @@ func (s *sSysBot) showManagedAccounts(ctx context.Context, botID int64, chatID s
 				continue
 			}
 			lines = append(lines, fmt.Sprintf("\n• %s（ID：%d）", html.EscapeString(firstNonEmpty(item.Nickname, item.Username)), item.Id))
-			rows = append(rows, []models.InlineKeyboardButton{{Text: fmt.Sprintf("重置 %d 密码", item.Id), CallbackData: fmt.Sprintf("acct:accounts:reset:%d", item.Id)}})
+			rows = append(rows, []models.InlineKeyboardButton{{Text: fmt.Sprintf("重置 %d 密码", item.Id), CallbackData: fmt.Sprintf("acct:accounts:reset:%d", item.Id)}, {Text: "删除", CallbackData: fmt.Sprintf("acct:accounts:delete:%d", item.Id)}})
 		}
 	}
 	lines = append(lines, "\n可在网页端创建、删除或修改上架账户。")
