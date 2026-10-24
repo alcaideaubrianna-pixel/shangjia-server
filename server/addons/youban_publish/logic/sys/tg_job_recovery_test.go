@@ -366,6 +366,9 @@ func TestTelegramActiveChannelConditionSupportsMessagePushTargets(t *testing.T) 
 	if !strings.Contains(condition, "status='authorized'") || !strings.Contains(condition, "session_key") {
 		t.Fatalf("active channel condition must exclude unavailable protocol accounts: %s", condition)
 	}
+	if !strings.Contains(condition, "push_mode") || !strings.Contains(condition, publishBotTable) || !strings.Contains(condition, "bot_token") {
+		t.Fatalf("active channel condition must allow enabled BOT jobs: %s", condition)
+	}
 }
 
 func TestMessagePushPlanRecoveryConditionExcludesExpiredPlanJobs(t *testing.T) {
