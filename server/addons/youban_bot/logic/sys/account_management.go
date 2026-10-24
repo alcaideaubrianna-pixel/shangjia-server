@@ -87,7 +87,7 @@ func (s *sSysBot) handleAccountManagementCallback(ctx context.Context, botID int
 		}
 		return true, s.reply(ctx, botID, chatID, fmt.Sprintf("<b>当前账户</b>\n名称：%s\n用户名：%s\n账号 ID：%d\n类型：管理员", html.EscapeString(current.Nickname), html.EscapeString(current.Username), current.Id))
 	case "acct:renew":
-		return true, s.reply(ctx, botID, chatID, "<b>会员续费</b>\n请在网页端选择套餐并完成支付。支付完成后会员状态会自动更新。")
+		return true, s.showVipPlans(ctx, botID, chatID)
 	case "acct:setting":
 		setting, settingErr := publishService.SysPublish().AdminAccountSettingView(quickPushMediaUploadContext(ctx, account.AccountId), &publishsysin.AccountSettingViewInp{AccountId: account.AccountId})
 		if settingErr != nil {
@@ -119,11 +119,40 @@ func (s *sSysBot) handleAccountManagementCallback(ctx context.Context, botID int
 	case "acct:report:back":
 		return true, s.showAccountManagement(ctx, botID, chatID, account)
 	default:
+		if strings.HasPrefix(query.Data, "acct:renew:") {
+			planCode := strings.TrimPrefix(query.Data, "acct:renew:")
+			order, orderErr := publishService.SysPublish().TenantVipOrderCreate(quickPushMediaUploadContext(ctx, account.AccountId), &publishsysin.TenantVipOrderCreateInp{PlanCode: planCode, ProductType: "vip", Quantity: 1})
+			if orderErr != nil {
+				return true, s.reply(ctx, botID, chatID, "创建续费订单失败："+html.EscapeString(orderErr.Error()))
+			}
+			if order.PayUrl == "" {
+				return true, s.reply(ctx, botID, chatID, "订单已创建，请在网页端完成支付。")
+			}
+			return true, s.replyWithMarkup(ctx, botID, chatID, "<b>续费订单已创建</b>\n请点击下方按钮完成支付。", &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{{{Text: "打开支付页面", URL: order.PayUrl}}}})
+		}
 		if strings.HasPrefix(query.Data, "acct:report:date:") {
 			return true, s.showDailyReport(ctx, botID, chatID, account, strings.TrimPrefix(query.Data, "acct:report:date:"))
 		}
 		return true, s.reply(ctx, botID, chatID, "该账户功能正在接入，请稍后重试。")
 	}
+}
+
+func (s *sSysBot) showVipPlans(ctx context.Context, botID int64, chatID string) error {
+	plans, err := publishService.SysPublish().TenantVipPlans(ctx)
+	if err != nil {
+		return s.reply(ctx, botID, chatID, "读取会员套餐失败，请稍后重试。")
+	}
+	rows := make([][]models.InlineKeyboardButton, 0, len(plans))
+	lines := []string{"<b>会员续费</b>\n请选择套餐："}
+	for _, plan := range plans {
+		if plan == nil || plan.Level <= 0 {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("\n%s：%.2f %s，%d 天", html.EscapeString(plan.Name), plan.Price, html.EscapeString(plan.Currency), plan.Days))
+		rows = append(rows, []models.InlineKeyboardButton{{Text: plan.Name, CallbackData: "acct:renew:" + plan.Code}})
+	}
+	rows = append(rows, []models.InlineKeyboardButton{{Text: "返回账户管理", CallbackData: "acct:report:back"}})
+	return s.replyWithMarkup(ctx, botID, chatID, strings.Join(lines, ""), &models.InlineKeyboardMarkup{InlineKeyboard: rows})
 }
 
 func (s *sSysBot) showNotificationSetting(ctx context.Context, botID int64, chatID string, account *botProfileAccount) error {
