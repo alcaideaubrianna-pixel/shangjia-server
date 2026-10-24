@@ -122,7 +122,7 @@ func normalizeProfileSearchKeyword(keyword string) string {
 
 func parseProfilePublishMark(keyword string) (sequence string, prefix string, ok bool) {
 	keyword = strings.TrimSpace(keyword)
-	if profileSearchNoRegexp.MatchString(strings.ToUpper(keyword)) {
+	if profileSearchNoRegexp.MatchString(keyword) {
 		return "", "", false
 	}
 	if len(keyword) == 3 {
