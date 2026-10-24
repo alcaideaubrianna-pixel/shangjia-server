@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -21,6 +20,7 @@ import (
 const materialImportMediaItemTimeout = 10 * time.Minute
 const materialImportGroupTimeout = 12 * time.Minute
 const materialImportStaleGroupAfter = 15 * time.Minute
+const materialImportDispatchTimeout = 30 * time.Second
 
 func (s *sSysPublish) executeMaterialImportMedia(ctx context.Context, taskId int64) error {
 	task, err := s.materialImportTaskById(ctx, taskId, 0)
@@ -46,10 +46,12 @@ func (s *sSysPublish) materialImportDownloadGroups(ctx context.Context, task *sy
 	if len(groups) == 0 {
 		return s.materialImportMarkSuccess(ctx, task.Id, task.UpdatedBy, g.Map{"message": "资料导入完成"})
 	}
+	concurrency := accountCollectMediaConcurrency(ctx)
+	g.Log().Infof(ctx, "资料导入媒体分组开始调度 taskId:%d groups:%d concurrency:%d", task.Id, len(groups), concurrency)
 	jobs := make(chan *sysin.MaterialImportGroupModel)
 	errCh := make(chan error, 1)
 	var wg sync.WaitGroup
-	for i := 0; i < accountCollectMediaConcurrency(ctx); i++ {
+	for i := 0; i < concurrency; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -82,13 +84,23 @@ func (s *sSysPublish) materialImportDownloadGroups(ctx context.Context, task *sy
 		}()
 	}
 	for _, group := range groups {
+		dispatchTimer := time.NewTimer(materialImportDispatchTimeout)
 		select {
 		case jobs <- group:
+			if !dispatchTimer.Stop() {
+				<-dispatchTimer.C
+			}
 		case err := <-errCh:
+			dispatchTimer.Stop()
 			close(jobs)
 			wg.Wait()
 			return s.materialImportHandleMediaRetry(ctx, task, err)
+		case <-dispatchTimer.C:
+			close(jobs)
+			wg.Wait()
+			return s.materialImportHandleMediaRetry(ctx, task, newCollectMediaFairnessRetryError("资料导入媒体工作线程无响应", 15*time.Second))
 		case <-ctx.Done():
+			dispatchTimer.Stop()
 			close(jobs)
 			wg.Wait()
 			return ctx.Err()
@@ -163,6 +175,9 @@ func (s *sSysPublish) materialImportFailedGroupCount(ctx context.Context, taskId
 }
 
 func (s *sSysPublish) materialImportDownloadGroup(ctx context.Context, task *sysin.MaterialImportTaskModel, group *sysin.MaterialImportGroupModel) error {
+	if err := s.materialImportMarkGroupRunning(ctx, group.Id); err != nil {
+		return gerror.Wrap(err, "标记TG导入分组处理中失败")
+	}
 	if !profileMessageHasProfileText(firstNonEmpty(group.ProfileText, group.RawText)) {
 		return s.materialImportMarkGroupDone(ctx, group.Id, 0, 0)
 	}
@@ -213,7 +228,6 @@ func (s *sSysPublish) materialImportDownloadGroup(ctx context.Context, task *sys
 			return s.materialImportMarkGroupDone(ctx, group.Id, profileId, 0)
 		}
 	}
-	_ = s.materialImportMarkGroupRunning(ctx, group.Id)
 	_, failed, err := s.downloadMaterialImportItems(ctx, task, group.Id, missingItems)
 	if err != nil {
 		return err
@@ -262,6 +276,7 @@ func (s *sSysPublish) downloadMaterialImportItems(ctx context.Context, task *sys
 	}
 	sem := make(chan struct{}, concurrency)
 	var mu sync.Mutex
+	progressMu := new(sync.Mutex)
 	done := 0
 	failed := 0
 	group, groupCtx := errgroup.WithContext(ctx)
@@ -279,7 +294,11 @@ func (s *sSysPublish) downloadMaterialImportItems(ctx context.Context, task *sys
 			if materialImportMediaItemReady(item) {
 				mu.Lock()
 				done++
+				currentDone, currentFailed := done, failed
 				mu.Unlock()
+				if err := s.materialImportPersistItemProgress(groupCtx, progressMu, groupID, currentDone, currentFailed); err != nil {
+					return err
+				}
 				return nil
 			}
 			if strings.TrimSpace(item.StoragePath) != "" {
@@ -298,7 +317,11 @@ func (s *sSysPublish) downloadMaterialImportItems(ctx context.Context, task *sys
 				}
 				mu.Lock()
 				failed++
+				currentDone, currentFailed := done, failed
 				mu.Unlock()
+				if progressErr := s.materialImportPersistItemProgress(groupCtx, progressMu, groupID, currentDone, currentFailed); progressErr != nil {
+					return progressErr
+				}
 				return nil
 			}
 			if strings.TrimSpace(down.Path) != "" {
@@ -314,8 +337,9 @@ func (s *sSysPublish) downloadMaterialImportItems(ctx context.Context, task *sys
 			}
 			mu.Lock()
 			done++
+			currentDone, currentFailed := done, failed
 			mu.Unlock()
-			return nil
+			return s.materialImportPersistItemProgress(groupCtx, progressMu, groupID, currentDone, currentFailed)
 		})
 	}
 	if err := group.Wait(); err != nil {
@@ -325,6 +349,12 @@ func (s *sSysPublish) downloadMaterialImportItems(ctx context.Context, task *sys
 		return 0, 0, err
 	}
 	return done, failed, nil
+}
+
+func (s *sSysPublish) materialImportPersistItemProgress(ctx context.Context, mu *sync.Mutex, groupID int64, done, failed int) error {
+	mu.Lock()
+	defer mu.Unlock()
+	return s.materialImportUpdateGroupProgress(ctx, groupID, done, failed)
 }
 
 func materialImportMediaItemReady(item collectMediaItem) bool {
@@ -389,167 +419,6 @@ func materialImportMissingMediaItems(items []collectMediaItem, counts materialIm
 		missing[purpose]--
 	}
 	return selected, indexes
-}
-
-func materialImportSendErr(ch chan error, err error) {
-	select {
-	case ch <- err:
-	default:
-	}
-}
-
-func (s *sSysPublish) materialImportHandleMediaRetry(ctx context.Context, task *sysin.MaterialImportTaskModel, err error) error {
-	if retryErr, ok := err.(*collectMediaRetryError); ok {
-		delay := int(retryErr.delay.Seconds())
-		if delay <= 0 {
-			delay = 30
-		}
-		_ = s.materialImportMarkWaiting(ctx, task.Id, task.UpdatedBy, delay, retryErr.message, sysin.MaterialImportStageMedia)
-		return s.enqueueMaterialImportTask(ctx, task.Id, retryErr.delay)
-	}
-	return err
-}
-
-func (s *sSysPublish) materialImportMarkGroupRunning(ctx context.Context, id int64) error {
-	_, err := pdao.YoubanPublishMaterialImportGroup.Ctx(ctx).Where("id", id).Data(g.Map{
-		"status":        sysin.MaterialImportStatusRunning,
-		"error_message": "",
-		"updated_at":    gtime.Now(),
-	}).Update()
-	return err
-}
-
-func (s *sSysPublish) materialImportUpdateGroupProgress(ctx context.Context, id int64, done int, failed int) error {
-	_, err := pdao.YoubanPublishMaterialImportGroup.Ctx(ctx).Where("id", id).Data(g.Map{
-		"media_done":   done,
-		"media_failed": failed,
-		"updated_at":   gtime.Now(),
-	}).Update()
-	return err
-}
-
-func (s *sSysPublish) materialImportMarkGroupFailed(ctx context.Context, id int64, message string) error {
-	_, err := pdao.YoubanPublishMaterialImportGroup.Ctx(ctx).Where("id", id).Data(g.Map{
-		"status":        sysin.MaterialImportStatusFailed,
-		"error_message": strings.TrimSpace(message),
-		"updated_at":    gtime.Now(),
-	}).Update()
-	return err
-}
-
-func (s *sSysPublish) materialImportMarkGroupDone(ctx context.Context, id int64, profileId int64, taskProfileId int64) error {
-	_, err := pdao.YoubanPublishMaterialImportGroup.Ctx(ctx).Where("id", id).Data(g.Map{
-		"status":          sysin.MaterialImportStatusSuccess,
-		"media_done":      gdb.Raw("media_total"),
-		"media_failed":    0,
-		"profile_id":      profileId,
-		"task_profile_id": taskProfileId,
-		"updated_at":      gtime.Now(),
-	}).Update()
-	return err
-}
-
-func (s *sSysPublish) materialImportMarkGroupDiscarded(ctx context.Context, id int64, mediaTotal int, reason string) error {
-	_, err := pdao.YoubanPublishMaterialImportGroup.Ctx(ctx).Where("id", id).Data(g.Map{
-		"status":          sysin.MaterialImportStatusSuccess,
-		"media_done":      mediaTotal,
-		"media_failed":    0,
-		"profile_id":      0,
-		"task_profile_id": 0,
-		"error_message":   "已跳过：" + strings.TrimSpace(reason),
-		"updated_at":      gtime.Now(),
-	}).Update()
-	return err
-}
-
-func (s *sSysPublish) materialImportTaskByPrimary(ctx context.Context, taskId int64) (*sysin.MaterialImportTaskModel, error) {
-	if err := ensureMaterialImportTaskChannelColumn(ctx); err != nil {
-		return nil, err
-	}
-	row, err := s.materialImportTaskBaseQuery(ctx, 0, nil).
-		Master().
-		Fields("t.*,ta.display_name AS tg_account_nickname,ta.telegram_username AS tg_account_username,a.nickname AS account_name,tn.name AS tenant_name").
-		Where("t.id", taskId).
-		Limit(1).
-		One()
-	if err != nil {
-		return nil, gerror.Wrap(err, "从主库读取资料导入任务失败")
-	}
-	task := materialImportTaskModelFromRecord(row)
-	if task == nil {
-		return nil, gerror.New("资料导入任务不存在")
-	}
-	return task, nil
-}
-
-func (s *sSysPublish) materialImportEnsureNotCanceled(ctx context.Context, taskId int64) error {
-	cols := pdao.YoubanPublishMaterialImportTask.Columns()
-	value, err := pdao.YoubanPublishMaterialImportTask.Ctx(ctx).
-		Fields(cols.Status).
-		Where(cols.Id, taskId).
-		Value()
-	if err != nil {
-		return gerror.Wrap(err, "读取资料导入状态失败")
-	}
-	status := value.String()
-	if strings.TrimSpace(status) == sysin.MaterialImportStatusCanceled {
-		return gerror.New("资料导入已取消")
-	}
-	return nil
-}
-
-func (s *sSysPublish) materialImportAddPulledMessages(ctx context.Context, taskId int64, count int) error {
-	if count <= 0 {
-		return nil
-	}
-	cols := pdao.YoubanPublishMaterialImportTask.Columns()
-	_, err := pdao.YoubanPublishMaterialImportTask.Ctx(ctx).
-		Where(cols.Id, taskId).
-		Data(g.Map{
-			cols.MessageDone:  gdb.Raw(fmt.Sprintf("%s+%d", cols.MessageDone, count)),
-			cols.MessageTotal: gdb.Raw(fmt.Sprintf("%s+%d", cols.MessageTotal, count)),
-			cols.UpdatedAt:    gtime.Now(),
-		}).
-		Update()
-	return err
-}
-
-func (s *sSysPublish) materialImportMarkFailed(ctx context.Context, taskId int64, operatorId int64, message string) error {
-	_, err := pdao.YoubanPublishMaterialImportTask.Ctx(ctx).Where("id", taskId).Data(g.Map{
-		"status":        sysin.MaterialImportStatusFailed,
-		"stage":         sysin.MaterialImportStageFinished,
-		"error_message": strings.TrimSpace(message),
-		"updated_by":    operatorId,
-		"updated_at":    gtime.Now(),
-		"finished_at":   gtime.Now(),
-	}).Update()
-	return err
-}
-
-func (s *sSysPublish) refreshMaterialImportTaskStats(ctx context.Context, taskId int64) error {
-	groupCols := pdao.YoubanPublishMaterialImportGroup.Columns()
-	taskCols := pdao.YoubanPublishMaterialImportTask.Columns()
-	stats, err := pdao.YoubanPublishMaterialImportGroup.Ctx(ctx).
-		Where(groupCols.TaskId, taskId).
-		Fields(
-			"COUNT(*) AS group_total",
-			fmt.Sprintf("SUM(CASE WHEN %s='%s' THEN 1 ELSE 0 END) AS group_done", groupCols.Status, sysin.MaterialImportStatusSuccess),
-			"COALESCE(SUM(media_total),0) AS media_total",
-			"COALESCE(SUM(media_done),0) AS media_done",
-			"COALESCE(SUM(media_failed),0) AS media_failed",
-		).
-		One()
-	if err != nil {
-		return err
-	}
-	_, err = pdao.YoubanPublishMaterialImportTask.Ctx(ctx).Where(taskCols.Id, taskId).Data(g.Map{
-		taskCols.GroupTotal:  stats["group_total"].Int(),
-		taskCols.GroupDone:   stats["group_done"].Int(),
-		taskCols.MediaTotal:  stats["media_total"].Int(),
-		taskCols.MediaDone:   stats["media_done"].Int(),
-		taskCols.MediaFailed: stats["media_failed"].Int(),
-	}).Update()
-	return err
 }
 
 func gotdCollectMediaMetaFromItem(item collectMediaItem) (gotdCollectMediaMeta, bool) {
