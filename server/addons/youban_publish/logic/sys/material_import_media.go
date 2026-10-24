@@ -84,26 +84,11 @@ func (s *sSysPublish) materialImportDownloadGroups(ctx context.Context, task *sy
 		}()
 	}
 	for _, group := range groups {
-		dispatchTimer := time.NewTimer(materialImportDispatchTimeout)
-		select {
-		case jobs <- group:
-			if !dispatchTimer.Stop() {
-				<-dispatchTimer.C
-			}
-		case err := <-errCh:
-			dispatchTimer.Stop()
+		dispatchErr := dispatchMaterialImportGroup(ctx, jobs, errCh, group, materialImportDispatchTimeout)
+		if dispatchErr != nil {
 			close(jobs)
 			wg.Wait()
-			return s.materialImportHandleMediaRetry(ctx, task, err)
-		case <-dispatchTimer.C:
-			close(jobs)
-			wg.Wait()
-			return s.materialImportHandleMediaRetry(ctx, task, newCollectMediaFairnessRetryError("资料导入媒体工作线程无响应", 15*time.Second))
-		case <-ctx.Done():
-			dispatchTimer.Stop()
-			close(jobs)
-			wg.Wait()
-			return ctx.Err()
+			return s.materialImportHandleMediaRetry(ctx, task, dispatchErr)
 		}
 	}
 	close(jobs)
@@ -124,6 +109,24 @@ func (s *sSysPublish) materialImportDownloadGroups(ctx context.Context, task *sy
 		return s.materialImportMarkFailed(ctx, task.Id, task.UpdatedBy, fmt.Sprintf("资料导入失败：%d组资料处理失败", failedCount))
 	}
 	return s.materialImportMarkSuccess(ctx, task.Id, task.UpdatedBy, g.Map{"message": "资料导入完成"})
+}
+
+func dispatchMaterialImportGroup(ctx context.Context, jobs chan<- *sysin.MaterialImportGroupModel, errCh <-chan error, group *sysin.MaterialImportGroupModel, timeout time.Duration) error {
+	if timeout <= 0 {
+		timeout = materialImportDispatchTimeout
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case jobs <- group:
+		return nil
+	case err := <-errCh:
+		return err
+	case <-timer.C:
+		return newCollectMediaFairnessRetryError("资料导入媒体工作线程无响应", 15*time.Second)
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (s *sSysPublish) materialImportResetStaleGroups(ctx context.Context, taskID int64) error {

@@ -1,8 +1,51 @@
 package sys
 
 import (
+	"context"
+	"errors"
 	"testing"
+	"time"
+
+	"hotgo/addons/youban_publish/model/input/sysin"
 )
+
+func TestDispatchMaterialImportGroupTimesOutWithoutWorker(t *testing.T) {
+	jobs := make(chan *sysin.MaterialImportGroupModel)
+	errCh := make(chan error)
+	started := time.Now()
+	err := dispatchMaterialImportGroup(context.Background(), jobs, errCh, &sysin.MaterialImportGroupModel{}, 10*time.Millisecond)
+	if collectMediaRetryErrorFrom(err) == nil {
+		t.Fatalf("expected retry error, got %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("dispatch timeout took too long: %s", elapsed)
+	}
+}
+
+func TestDispatchMaterialImportGroupDeliversToWorker(t *testing.T) {
+	jobs := make(chan *sysin.MaterialImportGroupModel)
+	errCh := make(chan error)
+	want := &sysin.MaterialImportGroupModel{}
+	received := make(chan *sysin.MaterialImportGroupModel, 1)
+	go func() { received <- <-jobs }()
+
+	if err := dispatchMaterialImportGroup(context.Background(), jobs, errCh, want, time.Second); err != nil {
+		t.Fatalf("dispatch failed: %v", err)
+	}
+	if got := <-received; got != want {
+		t.Fatal("worker received a different group")
+	}
+}
+
+func TestDispatchMaterialImportGroupReturnsWorkerError(t *testing.T) {
+	jobs := make(chan *sysin.MaterialImportGroupModel)
+	want := errors.New("worker stopped")
+	errCh := make(chan error, 1)
+	errCh <- want
+	if err := dispatchMaterialImportGroup(context.Background(), jobs, errCh, &sysin.MaterialImportGroupModel{}, time.Second); !errors.Is(err, want) {
+		t.Fatalf("got %v, want %v", err, want)
+	}
+}
 
 func TestMaterialImportMissingMediaItems(t *testing.T) {
 	items := []collectMediaItem{
