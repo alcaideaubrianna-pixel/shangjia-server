@@ -37,9 +37,14 @@ const (
 	tgLoginStatusAuthorized       = "authorized"
 	tgLoginStatusFailed           = "failed"
 	tgLoginStatusExpired          = "expired"
+	tgLoginCodeCommandTTL         = 30 * time.Second
 	tgLoginPasswordCommandTTL     = 30 * time.Second
-	tgLoginPasswordPollInterval   = 200 * time.Millisecond
+	tgLoginCommandPollInterval    = 200 * time.Millisecond
 )
+
+type telegramLoginCodeCommand struct {
+	Code string `json:"code"`
+}
 
 type telegramLoginPasswordCommand struct {
 	Password string `json:"password"`
@@ -268,34 +273,28 @@ func (s *sSysPublish) runTelegramPhoneLogin(ctx context.Context, runtime *telegr
 			return err
 		}
 
+		ticker := time.NewTicker(tgLoginCommandPollInterval)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-runCtx.Done():
 				return runCtx.Err()
 			case code := <-runtime.codeCh:
-				authorization, signInErr := client.Auth().SignIn(runCtx, runtime.phone, code, runtime.codeHash)
-				if telegramPasswordNeeded(signInErr) {
-					if err := updateStatus(runCtx, runtime.loginToken, accountId, g.Map{
-						"status":        tgLoginStatusPasswordRequired,
-						"error_message": "",
-						"expires_at":    gtime.Now().Add(5 * time.Minute),
-					}); err != nil {
-						return err
-					}
-					authorization, signInErr = s.waitTelegramPassword(runCtx, runtime, client)
+				if done, err := s.applyTelegramLoginCode(runCtx, runtime, client, tenantId, accountId, sessionKey, code, updateStatus); done || err != nil {
+					return err
 				}
-				if tgerr.Is(signInErr, "PHONE_CODE_INVALID") || tgerr.Is(signInErr, "PHONE_CODE_EMPTY") {
-					_ = updateStatus(runCtx, runtime.loginToken, accountId, g.Map{
-						"status":        tgLoginStatusCodeRequired,
-						"error_message": "验证码错误，请重新输入",
-						"expires_at":    gtime.Now().Add(5 * time.Minute),
-					})
+			case <-ticker.C:
+				code, err := s.consumeTelegramLoginCode(runCtx, runtime.loginToken, runtime.accountId)
+				if err != nil {
+					g.Log().Warningf(runCtx, "读取TG登录验证码指令失败 accountId:%d err:%+v", runtime.accountId, err)
 					continue
 				}
-				if signInErr != nil {
-					return friendlyTelegramPhoneError(signInErr)
+				if code == "" {
+					continue
 				}
-				return s.finishAdminTgAccountLogin(runCtx, runtime, tenantId, accountId, sessionKey, authorization)
+				if done, err := s.applyTelegramLoginCode(runCtx, runtime, client, tenantId, accountId, sessionKey, code, updateStatus); done || err != nil {
+					return err
+				}
 			}
 		}
 	})
@@ -310,6 +309,32 @@ func (s *sSysPublish) runTelegramPhoneLogin(ctx context.Context, runtime *telegr
 		"status":        status,
 		"error_message": err.Error(),
 	})
+}
+
+func (s *sSysPublish) applyTelegramLoginCode(ctx context.Context, runtime *telegramLoginRuntime, client *telegram.Client, tenantId, accountId int64, sessionKey, code string, updateStatus telegramLoginStatusUpdater) (bool, error) {
+	authorization, err := client.Auth().SignIn(ctx, runtime.phone, code, runtime.codeHash)
+	if telegramPasswordNeeded(err) {
+		if err = updateStatus(ctx, runtime.loginToken, accountId, g.Map{
+			"status":        tgLoginStatusPasswordRequired,
+			"error_message": "",
+			"expires_at":    gtime.Now().Add(5 * time.Minute),
+		}); err != nil {
+			return true, err
+		}
+		authorization, err = s.waitTelegramPassword(ctx, runtime, client)
+	}
+	if tgerr.Is(err, "PHONE_CODE_INVALID") || tgerr.Is(err, "PHONE_CODE_EMPTY") {
+		_ = updateStatus(ctx, runtime.loginToken, accountId, g.Map{
+			"status":        tgLoginStatusCodeRequired,
+			"error_message": "验证码错误，请重新输入",
+			"expires_at":    gtime.Now().Add(5 * time.Minute),
+		})
+		return false, nil
+	}
+	if err != nil {
+		return true, friendlyTelegramPhoneError(err)
+	}
+	return true, s.finishAdminTgAccountLogin(ctx, runtime, tenantId, accountId, sessionKey, authorization)
 }
 
 func friendlyTelegramPhoneError(err error) error {
@@ -331,7 +356,7 @@ func friendlyTelegramPhoneError(err error) error {
 }
 
 func (s *sSysPublish) waitTelegramPassword(ctx context.Context, runtime *telegramLoginRuntime, client *telegram.Client) (*tg.AuthAuthorization, error) {
-	ticker := time.NewTicker(tgLoginPasswordPollInterval)
+	ticker := time.NewTicker(tgLoginCommandPollInterval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -371,6 +396,34 @@ func (s *sSysPublish) applyTelegramLoginPassword(ctx context.Context, runtime *t
 		return nil, true, err
 	}
 	return authorization, true, nil
+}
+
+func telegramLoginCodeCommandKey(token string, accountId int64) string {
+	return fmt.Sprintf("youban_publish:tg_login_code:%d:%s", accountId, strings.TrimSpace(token))
+}
+
+func (s *sSysPublish) submitTelegramLoginCode(ctx context.Context, token string, accountId int64, code string) error {
+	command := telegramLoginCodeCommand{Code: code}
+	if err := cache.Instance().Set(ctx, telegramLoginCodeCommandKey(token, accountId), command, tgLoginCodeCommandTTL); err != nil {
+		return gerror.Wrap(err, "提交Telegram验证码失败")
+	}
+	return nil
+}
+
+func (s *sSysPublish) consumeTelegramLoginCode(ctx context.Context, token string, accountId int64) (string, error) {
+	key := telegramLoginCodeCommandKey(token, accountId)
+	value, err := cache.Instance().Get(ctx, key)
+	if err != nil || value.IsNil() {
+		return "", err
+	}
+	var command telegramLoginCodeCommand
+	if err = value.Scan(&command); err != nil {
+		return "", gerror.Wrap(err, "解析Telegram验证码指令失败")
+	}
+	if _, err = cache.Instance().Remove(ctx, key); err != nil {
+		return "", gerror.Wrap(err, "确认Telegram验证码指令失败")
+	}
+	return command.Code, nil
 }
 
 func telegramLoginPasswordCommandKey(token string, accountId int64) string {

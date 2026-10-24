@@ -224,19 +224,13 @@ func (s *sSysPublish) AdminTgAccountCode(ctx context.Context, in *sysin.TgAccoun
 	if item.TenantId != current.TenantId || item.AccountId != current.Id {
 		return nil, gerror.New("TG账号登录会话不存在")
 	}
-	runtime := s.getLoginRuntime(strings.TrimSpace(in.LoginToken), current.Id)
-	if runtime == nil || runtime.codeCh == nil {
-		return nil, gerror.New("登录会话已失效，请重新发起登录")
-	}
 	if err = s.updateTelegramLoginStatus(ctx, strings.TrimSpace(in.LoginToken), current.Id, g.Map{
 		"error_message": "",
 	}); err != nil {
 		return nil, err
 	}
-	select {
-	case runtime.codeCh <- code:
-	case <-time.After(10 * time.Second):
-		return nil, gerror.New("提交Telegram验证码超时，请重试")
+	if err = s.submitTelegramLoginCode(ctx, strings.TrimSpace(in.LoginToken), current.Id, code); err != nil {
+		return nil, err
 	}
 	return s.waitAdminTgAccountPasswordResult(ctx, strings.TrimSpace(in.LoginToken), current.TenantId, current.Id)
 }
