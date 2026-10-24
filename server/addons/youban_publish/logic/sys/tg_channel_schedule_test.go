@@ -36,6 +36,7 @@ func TestTelegramChannelScheduleLocalPostgres(t *testing.T) {
 			{"cycle cleanup already started", "failed_retry", "cleanup_processing", "cycle_batch:1", 1},
 			{"earlier manual FIFO", "pending", "", "profile:1", 1},
 			{"earlier batch FIFO", "pending", "", "batchtext:1", 1},
+			{"BOT publish is manual priority", "pending", "", "bot_publish:1", 1},
 		}
 		for _, c := range cases {
 			if _, err = tx.Exec("TRUNCATE schedule_jobs"); err != nil {
@@ -95,6 +96,40 @@ func TestTelegramChannelScheduleLocalPostgres(t *testing.T) {
 					t.Fatalf("barrier differs from head order: %d before %d", id, otherID)
 				}
 			}
+		}
+		// A stale untouched AI republish must not block a new BOT manual publish.
+		if _, err = tx.Exec("TRUNCATE schedule_jobs"); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(`INSERT INTO schedule_jobs VALUES
+			(1,'pending','','ai-republish:old',timestamp '2026-10-17 09:00:00'),
+			(2,'pending','','bot_publish:new',timestamp '2026-10-17 10:00:00')`); err != nil {
+			return err
+		}
+		row, err := tx.GetOne("SELECT j.id FROM schedule_jobs j ORDER BY " + telegramChannelScheduleOrderSQL("j") + " LIMIT 1")
+		if err != nil {
+			return err
+		}
+		if row["id"].Int64() != 2 {
+			t.Fatalf("BOT manual publish was blocked by stale AI republish: head=%d", row["id"].Int64())
+		}
+		row, err = tx.GetOne("SELECT " + telegramChannelSchedulePrecedesSQL("a", "b") + " AS precedes FROM schedule_jobs a CROSS JOIN schedule_jobs b WHERE a.id=1 AND b.id=2")
+		if err != nil {
+			return err
+		}
+		if row["precedes"].Bool() {
+			t.Fatal("stale AI republish still precedes BOT manual publish")
+		}
+		// Once the older operation has started, it remains a hard ordering barrier.
+		if _, err = tx.Exec("UPDATE schedule_jobs SET status='sending' WHERE id=1"); err != nil {
+			return err
+		}
+		row, err = tx.GetOne("SELECT " + telegramChannelSchedulePrecedesSQL("a", "b") + " AS precedes FROM schedule_jobs a CROSS JOIN schedule_jobs b WHERE a.id=1 AND b.id=2")
+		if err != nil {
+			return err
+		}
+		if !row["precedes"].Bool() {
+			t.Fatal("started AI republish must remain a hard ordering barrier")
 		}
 		return nil
 	})
