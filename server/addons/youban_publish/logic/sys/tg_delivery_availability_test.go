@@ -27,7 +27,7 @@ func TestTelegramDeliveryAvailabilityLocalPostgres(t *testing.T) {
 			"CREATE TEMP TABLE " + publishChannelTable + " (id bigint,tenant_id bigint,tg_account_id bigint,status int,deleted_at timestamp)",
 			"CREATE TEMP TABLE " + publishTgChannelTable + " (id bigint,tenant_id bigint,tg_account_id bigint)",
 			"CREATE TEMP TABLE " + publishCollectSourceTable + " (id bigint,tenant_id bigint,tg_account_id bigint,deleted_at timestamp)",
-			"CREATE TEMP TABLE " + publishTgJobTable + " (id bigint,tenant_id bigint,channel_id bigint,bot_id bigint,push_mode text,status text,send_phase text,target_chat_id text DEFAULT '-100123',dispatch_status text DEFAULT 'idle',next_retry_at timestamp,created_at timestamp DEFAULT NOW(),operation_no text DEFAULT 'collect:1')",
+			"CREATE TEMP TABLE " + publishTgJobTable + " (id bigint,tenant_id bigint,channel_id bigint,bot_id bigint,push_mode text,status text,send_phase text,target_chat_id text DEFAULT '-100123',dispatch_status text DEFAULT 'idle',next_retry_at timestamp,created_at timestamp DEFAULT NOW(),operation_no text DEFAULT 'collect:1',priority int DEFAULT 50)",
 			"CREATE TEMP TABLE " + publishTgOutboxTable + " (id bigint,job_id bigint,attempt_count int,available_at timestamp,event_type text,status text,lease_expires_at timestamp)",
 			"INSERT INTO " + publishTgOutboxTable + " VALUES (1,1,0,NOW()-INTERVAL '1 hour','publish','pending',NULL)",
 			"INSERT INTO " + publishTgAccountTable + " VALUES (81,87,'authorized','old',NOW(),0),(82,87,'authorized','valid',NULL,0),(83,88,'authorized','other',NULL,0),(84,87,'expired','',NULL,0)",
@@ -70,7 +70,7 @@ func TestTelegramDeliveryAvailabilityLocalPostgres(t *testing.T) {
 			if !row["eligible"].Bool() {
 				t.Fatalf("%s: missing account must reach diagnostic gate", test.name)
 			}
-			rows, err := tx.GetAll(telegramDueOutboxPostgresSQL(), time.Now(), "publish", time.Now(), "pending", "processing", time.Now(), 10)
+			rows, err := tx.GetAll(telegramDueOutboxPostgresSQL(), time.Now(), "publish", time.Now(), "pending", "processing", time.Now())
 			if err != nil {
 				return err
 			}
@@ -90,7 +90,7 @@ func TestTelegramDeliveryAvailabilityLocalPostgres(t *testing.T) {
 			if !available || err != nil {
 				t.Fatalf("Bot with protocol account %d: available=%v err=%v", accountID, available, err)
 			}
-			rows, err := tx.GetAll(telegramDueOutboxPostgresSQL(), time.Now(), "publish", time.Now(), "pending", "processing", time.Now(), 10)
+			rows, err := tx.GetAll(telegramDueOutboxPostgresSQL(), time.Now(), "publish", time.Now(), "pending", "processing", time.Now())
 			if err != nil {
 				return err
 			}
@@ -115,7 +115,7 @@ func TestTelegramDeliveryAvailabilityLocalPostgres(t *testing.T) {
 			(2,2,0,NOW()-INTERVAL '1 minute','publish','pending',NULL)`); err != nil {
 			return err
 		}
-		rows, err := tx.GetAll(telegramDueOutboxPostgresSQL(), time.Now(), "publish", time.Now(), "pending", "processing", time.Now(), 10)
+		rows, err := tx.GetAll(telegramDueOutboxPostgresSQL(), time.Now(), "publish", time.Now(), "pending", "processing", time.Now())
 		if err != nil {
 			return err
 		}
@@ -125,12 +125,71 @@ func TestTelegramDeliveryAvailabilityLocalPostgres(t *testing.T) {
 		if _, err := tx.Exec("UPDATE " + publishTgJobTable + " SET status='sending',send_phase='display_sending' WHERE id=1"); err != nil {
 			return err
 		}
-		rows, err = tx.GetAll(telegramDueOutboxPostgresSQL(), time.Now(), "publish", time.Now(), "pending", "processing", time.Now(), 10)
+		rows, err = tx.GetAll(telegramDueOutboxPostgresSQL(), time.Now(), "publish", time.Now(), "pending", "processing", time.Now())
 		if err != nil {
 			return err
 		}
 		if len(rows) != 0 {
 			t.Fatalf("started operation must hold the channel while its worker owns delivery: %+v", rows)
+		}
+		// Across channels, interactive work must be selected before an older
+		// cycle. An unavailable channel is still returned so validation can fail
+		// its head explicitly and release that channel's successor.
+		if _, err := tx.Exec("TRUNCATE " + publishTgJobTable + "," + publishTgOutboxTable); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("INSERT INTO " + publishTgJobTable + ` (id,tenant_id,channel_id,bot_id,push_mode,status,send_phase,operation_no,created_at,priority) VALUES
+			(11,87,301,80,'bot','pending','','cycle_batch:old',NOW()-INTERVAL '1 day',90),
+			(12,87,302,80,'bot','pending','','profile:manual',NOW()-INTERVAL '1 minute',1),
+			(13,87,303,84,'bot','pending','','profile:invalid-bot',NOW()-INTERVAL '2 minutes',1),
+			(14,87,302,80,'bot','pending','','profile:manual-next',NOW(),1)`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("INSERT INTO " + publishTgOutboxTable + ` VALUES
+			(11,11,0,NOW()-INTERVAL '1 day','publish','pending',NULL),
+			(12,12,0,NOW()-INTERVAL '1 minute','publish','pending',NULL),
+			(13,13,0,NOW()-INTERVAL '2 minutes','publish','pending',NULL),
+			(14,14,0,NOW(),'publish','pending',NULL)`); err != nil {
+			return err
+		}
+		rows, err = tx.GetAll(telegramDueOutboxPostgresSQL(), time.Now(), "publish", time.Now(), "pending", "processing", time.Now())
+		if err != nil {
+			return err
+		}
+		if len(rows) != 3 || rows[0]["job_id"].Int64() != 13 || rows[1]["job_id"].Int64() != 12 || rows[2]["job_id"].Int64() != 11 {
+			t.Fatalf("cross-channel priority/isolation failed: %+v", rows)
+		}
+		// A scheduler pass is bounded by channel heads, not a global row limit.
+		// All 1000 channels must be represented while the second job in each
+		// channel remains behind its head.
+		if _, err := tx.Exec("TRUNCATE " + publishTgJobTable + "," + publishTgOutboxTable); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("INSERT INTO " + publishTgJobTable + ` (id,tenant_id,channel_id,bot_id,push_mode,status,send_phase,operation_no,created_at,priority)
+			SELECT n,87,n,80,'bot','pending','',CASE WHEN n%10=0 THEN 'profile:'||n ELSE 'cycle_batch:'||n END,NOW()-INTERVAL '1 hour',CASE WHEN n%10=0 THEN 1 ELSE 90 END FROM generate_series(1,1000) n
+			UNION ALL SELECT 2000+n,87,n,80,'bot','pending','',CASE WHEN n%10=0 THEN 'profile:later:'||n ELSE 'cycle_batch:later:'||n END,NOW(),CASE WHEN n%10=0 THEN 1 ELSE 90 END FROM generate_series(1,1000) n`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("INSERT INTO " + publishTgOutboxTable + ` (id,job_id,attempt_count,available_at,event_type,status,lease_expires_at)
+			SELECT n,n,0,NOW()-INTERVAL '1 hour','publish','pending',NULL::timestamp FROM generate_series(1,1000) n
+			UNION ALL SELECT 2000+n,2000+n,0,NOW(),'publish','pending',NULL::timestamp FROM generate_series(1,1000) n`); err != nil {
+			return err
+		}
+		rows, err = tx.GetAll(telegramDueOutboxPostgresSQL(), time.Now(), "publish", time.Now(), "pending", "processing", time.Now())
+		if err != nil {
+			return err
+		}
+		if len(rows) != 1000 {
+			t.Fatalf("1000 channels returned %d heads", len(rows))
+		}
+		for index, row := range rows {
+			jobID := row["job_id"].Int64()
+			if jobID > 1000 {
+				t.Fatalf("channel returned a later job: index=%d job=%d", index, jobID)
+			}
+			if index < 100 && jobID%10 != 0 {
+				t.Fatalf("manual channel head lost priority: index=%d job=%d", index, jobID)
+			}
 		}
 		for _, id := range []int64{81, 83} {
 			_, err := checkTelegramProtocolAccount(ctx, db, 87, id)

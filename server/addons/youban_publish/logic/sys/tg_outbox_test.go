@@ -36,20 +36,23 @@ func TestTelegramDueOutboxPostgresSQLSelectsChannelHeads(t *testing.T) {
 	for _, fragment := range []string{
 		"WITH active_jobs AS MATERIALIZED", "channel_job_heads AS", "DISTINCT ON", "j.tenant_id", "j.channel_id", "target_chat_id",
 		"j.status IN ('pending','failed_retry','confirming','sending')",
-		"FROM active_jobs j", "available_bot.id=h.bot_id", "c.id=h.channel_id",
+		"FROM active_jobs j", "AS schedule_rank",
 		"ORDER BY j.tenant_id", "j.created_at, j.id",
 		"h.status IN ('pending','failed_retry','unknown')",
 		"COALESCE(h.dispatch_status,'') IN ('','idle')",
 		"h.next_retry_at IS NULL OR h.next_retry_at<=?",
 		"o.status=? OR (o.status=? AND o.lease_expires_at<=?)",
-		"ORDER BY o.available_at,o.id",
+		"ORDER BY h.schedule_rank", "h.priority", "o.available_at,o.id",
 	} {
 		if !strings.Contains(query, fragment) {
 			t.Fatalf("channel-head query missing %q: %s", fragment, query)
 		}
 	}
-	if got := strings.Count(query, "?"); got != 7 {
-		t.Fatalf("channel-head query placeholder count=%d, want 7: %s", got, query)
+	if strings.Contains(query, telegramChannelAvailableAccountSQL("h")) {
+		t.Fatal("unavailable channel head must reach delivery validation instead of blocking the channel forever")
+	}
+	if got := strings.Count(query, "?"); got != 6 {
+		t.Fatalf("channel-head query placeholder count=%d, want 6: %s", got, query)
 	}
 }
 

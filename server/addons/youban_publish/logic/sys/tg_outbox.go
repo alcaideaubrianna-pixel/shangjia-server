@@ -3,15 +3,14 @@ package sys
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
-	"github.com/gogf/gf/v2/util/guid"
 )
 
 const (
@@ -21,6 +20,7 @@ const (
 	telegramOutboxDelivered    = "delivered"
 	telegramOutboxLeaseTTL     = 30 * time.Second
 	telegramOutboxQueryTimeout = 5 * time.Second
+	telegramOutboxWorkers      = 32
 
 	telegramOutboxDecisionWait     = "wait"
 	telegramOutboxDecisionDispatch = "dispatch"
@@ -309,20 +309,30 @@ func telegramOutboxRetryDelay(attemptCount int) time.Duration {
 }
 
 func (s *sSysPublish) dispatchDueTelegramJobOutbox(ctx context.Context, limit int) error {
-	if limit <= 0 {
-		limit = 100
-	}
 	rows, err := s.dueTelegramJobOutboxRows(ctx, limit, gtime.Now())
 	if err != nil {
 		return err
 	}
-	if len(rows) > 0 {
-		g.Log().Infof(ctx, "TG Outbox dispatcher selected jobs:%d", len(rows))
+	var wg sync.WaitGroup
+	jobs := make(chan telegramJobOutboxRecord)
+	for worker := 0; worker < telegramOutboxWorkers; worker++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for row := range jobs {
+				if dispatchErr := s.dispatchTelegramJobOutbox(ctx, row); dispatchErr != nil {
+					g.Log().Warningf(ctx, "投递TG任务Outbox失败 outboxId:%d jobId:%d err:%+v", row.Id, row.JobId, dispatchErr)
+				}
+			}
+		}()
 	}
 	for _, row := range rows {
-		if err = s.dispatchTelegramJobOutbox(ctx, row); err != nil {
-			g.Log().Warningf(ctx, "投递TG任务Outbox失败 outboxId:%d jobId:%d err:%+v", row.Id, row.JobId, err)
-		}
+		jobs <- row
+	}
+	close(jobs)
+	wg.Wait()
+	if len(rows) > 0 {
+		g.Log().Infof(ctx, "TG Outbox dispatcher selected channel heads:%d", len(rows))
 	}
 	return nil
 }
@@ -335,14 +345,20 @@ func (s *sSysPublish) dueTelegramJobOutboxRows(ctx context.Context, limit int, n
 		var rows []telegramJobOutboxRecord
 		if err := g.DB().GetScan(queryCtx, &rows, query,
 			now, telegramOutboxEventPublish, now,
-			telegramOutboxPending, telegramOutboxProcessing, now, limit,
+			telegramOutboxPending, telegramOutboxProcessing, now,
 		); err != nil {
 			return nil, gerror.Wrap(err, "读取每频道待投递TG任务Outbox失败")
+		}
+		if limit > 0 && len(rows) > limit {
+			rows = rows[:limit]
 		}
 		return rows, nil
 	}
 
 	candidateLimit := limit * 10
+	if candidateLimit <= 0 {
+		candidateLimit = 10000
+	}
 	if candidateLimit > 2000 {
 		candidateLimit = 2000
 	}
@@ -376,28 +392,31 @@ func (s *sSysPublish) dueTelegramJobOutboxRows(ctx context.Context, limit int, n
 }
 
 func telegramDueOutboxPostgresSQL() string {
-	channelKey := "CASE WHEN j.channel_id > 0 THEN j.channel_id::text ELSE 'chat:' || REPLACE(COALESCE(j.target_chat_id,''), '-100', '') END"
+	channelKey := telegramOutboxChannelKeySQL("j")
 	return `WITH active_jobs AS MATERIALIZED (
-		SELECT j.id,j.tenant_id,j.channel_id,j.target_chat_id,j.status,j.dispatch_status,j.next_retry_at,j.created_at,j.operation_no,j.send_phase,j.bot_id,j.push_mode
+		SELECT j.id,j.tenant_id,j.channel_id,j.target_chat_id,j.status,j.dispatch_status,j.next_retry_at,j.created_at,j.operation_no,j.send_phase,j.bot_id,j.push_mode,j.priority,
+			` + telegramChannelScheduleRankSQL("j") + ` AS schedule_rank
 		FROM ` + publishTgJobTable + ` j
 		WHERE ` + telegramChannelBlockingJobStateSQL("j") + `
 	), channel_job_heads AS (
 		SELECT DISTINCT ON (j.tenant_id, ` + channelKey + `)
-			j.id AS job_id,j.tenant_id,j.channel_id,j.target_chat_id,j.status,j.dispatch_status,j.next_retry_at,j.created_at,j.bot_id,j.push_mode,j.send_phase
+			j.id AS job_id,j.tenant_id,j.channel_id,j.target_chat_id,j.status,j.dispatch_status,j.next_retry_at,j.created_at,j.operation_no,j.bot_id,j.push_mode,j.send_phase,j.priority,j.schedule_rank
 		FROM active_jobs j
 		ORDER BY j.tenant_id, ` + channelKey + `, ` + telegramChannelScheduleOrderSQL("j") + `
 	)
 	SELECT o.id,o.job_id,o.attempt_count,o.available_at,h.tenant_id,h.channel_id,h.target_chat_id
 	FROM channel_job_heads h
 	JOIN ` + publishTgOutboxTable + ` o ON o.job_id=h.job_id
-	WHERE ` + telegramChannelAvailableAccountSQL("h") + `
-		AND h.status IN ('pending','failed_retry','unknown')
+	WHERE h.status IN ('pending','failed_retry','unknown')
 		AND COALESCE(h.dispatch_status,'') IN ('','idle')
 		AND (h.next_retry_at IS NULL OR h.next_retry_at<=?)
 		AND o.event_type=? AND o.available_at<=?
 		AND (o.status=? OR (o.status=? AND o.lease_expires_at<=?))
-	ORDER BY o.available_at,o.id
-	LIMIT ?`
+	ORDER BY h.schedule_rank, ` + telegramJobEffectivePrioritySQL("h") + `, o.available_at,o.id`
+}
+
+func telegramOutboxChannelKeySQL(alias string) string {
+	return "CASE WHEN " + alias + ".channel_id > 0 THEN " + alias + ".channel_id::text ELSE 'chat:' || REPLACE(COALESCE(" + alias + ".target_chat_id,''), '-100', '') END"
 }
 
 func fairTelegramOutboxRows(candidates []telegramJobOutboxRecord, limit int) []telegramJobOutboxRecord {
@@ -418,78 +437,4 @@ func fairTelegramOutboxRows(candidates []telegramJobOutboxRecord, limit int) []t
 		}
 	}
 	return rows
-}
-
-func (s *sSysPublish) runTelegramOutboxDispatcher(ctx context.Context) {
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-	for {
-		s.runTelegramOutboxPass(ctx)
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-	}
-}
-
-func (s *sSysPublish) startTelegramOutboxDispatcher(ctx context.Context) {
-	s.tgQueueMu.Lock()
-	if s.telegramOutboxStarted {
-		s.tgQueueMu.Unlock()
-		return
-	}
-	s.telegramOutboxStarted = true
-	s.tgQueueMu.Unlock()
-	g.Log().Info(ctx, "TG Outbox dispatcher started")
-	go func() {
-		defer func() {
-			if recovered := recover(); recovered != nil {
-				g.Log().Errorf(ctx, "TG Outbox调度器异常退出，正在自动恢复：%v", recovered)
-				s.tgQueueMu.Lock()
-				s.telegramOutboxStarted = false
-				s.tgQueueMu.Unlock()
-				if ctx.Err() == nil {
-					time.Sleep(time.Second)
-					s.startTelegramOutboxDispatcher(ctx)
-				}
-			}
-		}()
-		s.runTelegramOutboxDispatcher(ctx)
-	}()
-}
-
-func (s *sSysPublish) runTelegramOutboxPass(ctx context.Context) {
-	passCtx, cancel := context.WithTimeout(ctx, telegramOutboxQueryTimeout+telegramOutboxLeaseTTL)
-	defer cancel()
-	if err := s.dispatchDueTelegramJobOutbox(passCtx, 100); err != nil {
-		g.Log().Warningf(ctx, "调度TG任务Outbox失败：%+v", err)
-	}
-}
-
-// RecoverTelegramDispatch runs one bounded scheduler pass. It is used by
-// operational repair tooling and never sends Telegram messages itself.
-func (s *sSysPublish) RecoverTelegramDispatch(ctx context.Context, limit int) error {
-	if limit <= 0 {
-		limit = 100
-	}
-	if err := s.recoverPendingIdleTelegramJobs(ctx, limit); err != nil {
-		return err
-	}
-	return s.dispatchDueTelegramJobOutbox(ctx, limit)
-}
-
-// RecoverTelegramJobDispatch schedules one existing job through its Outbox,
-// preserving available_at and the normal idempotent queue path.
-func (s *sSysPublish) RecoverTelegramJobDispatch(ctx context.Context, jobId int64) error {
-	return s.dispatchTelegramJobOutboxByJob(ctx, jobId)
-}
-
-func telegramOutboxOwner() string {
-	hostname, _ := os.Hostname()
-	hostname = strings.TrimSpace(hostname)
-	if hostname == "" {
-		hostname = "worker"
-	}
-	return hostname + ":" + guid.S()
 }

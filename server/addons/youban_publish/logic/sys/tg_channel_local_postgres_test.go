@@ -69,7 +69,7 @@ func TestTelegramChannelHeadsLocalPostgres(t *testing.T) {
 			want[id] = (row["status"] == "pending" || row["status"] == "failed_retry") && row["dispatch_status"] == "idle" && (retry == nil || row["next_retry_at"] <= row["now"]) && row["outbox_status"] == "pending" && row["available_at"] <= row["now"]
 		}
 		query := func() (gdb.Result, error) {
-			return tx.GetAll(telegramDueOutboxPostgresSQL(), rows[0]["now"], telegramOutboxEventPublish, rows[0]["now"], telegramOutboxPending, telegramOutboxProcessing, rows[0]["now"], 100)
+			return tx.GetAll(telegramDueOutboxPostgresSQL(), rows[0]["now"], telegramOutboxEventPublish, rows[0]["now"], telegramOutboxPending, telegramOutboxProcessing, rows[0]["now"])
 		}
 		assertHeads := func() error {
 			got, err := query()
