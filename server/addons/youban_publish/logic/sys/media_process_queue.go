@@ -21,6 +21,8 @@ const (
 	mediaProcessingRetry      = "retry"
 	mediaProcessMaxAttempts   = 3
 	mediaProcessTaskTimeout   = 10 * time.Minute
+	mediaProcessRecoveryEvery = time.Minute
+	telegramMediaReadyRetry   = time.Minute
 )
 
 func (s *sSysPublish) handleMediaProcessTask(ctx context.Context, task *asynq.Task) error {
@@ -177,7 +179,8 @@ func (s *sSysPublish) recoverMediaProcessTasks(ctx context.Context) {
 	cutoff := gtime.Now().Add(-time.Minute)
 	processingCutoff := gtime.Now().Add(-mediaProcessTaskTimeout - time.Minute)
 	if err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
-		Where("((processing_status = ? AND updated_at < ?) OR (processing_status = ? AND updated_at < ?))", mediaProcessingUploaded, cutoff, mediaProcessingProcessing, processingCutoff).
+		Where("((processing_status IN (?, ?) AND updated_at < ?) OR (processing_status = ? AND updated_at < ?))",
+			mediaProcessingUploaded, mediaProcessingRetry, cutoff, mediaProcessingProcessing, processingCutoff).
 		WhereNull("deleted_at").OrderAsc("updated_at").Fields("id").Limit(200).Scan(&rows); err != nil {
 		g.Log().Warningf(ctx, "恢复媒体异步处理任务查询失败 err:%+v", err)
 		return
@@ -185,6 +188,20 @@ func (s *sSysPublish) recoverMediaProcessTasks(ctx context.Context) {
 	for _, row := range rows {
 		if err := s.enqueueMediaProcess(ctx, row.Id, 0); err != nil {
 			g.Log().Warningf(ctx, "恢复媒体异步处理任务入队失败 media_id:%d err:%+v", row.Id, err)
+		}
+	}
+}
+
+func (s *sSysPublish) runMediaProcessRecovery(ctx context.Context) {
+	s.recoverMediaProcessTasks(ctx)
+	ticker := time.NewTicker(mediaProcessRecoveryEvery)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.recoverMediaProcessTasks(ctx)
 		}
 	}
 }
@@ -212,16 +229,20 @@ func terminalMediaProcessingStatuses() []string {
 }
 
 func (s *sSysPublish) postponeTelegramJobUntilMediaReady(ctx context.Context, job telegramJobRecord) error {
+	nextRetryAt := gtime.Now().Add(telegramMediaReadyRetry)
 	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id", job.Id).
 		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
 		Data(g.Map{
 			"dispatch_status":     tgDispatchStatusIdle,
 			"last_dispatch_error": "媒体仍在异步处理中，媒体就绪后自动唤醒",
-			"next_retry_at":       gtime.Now().Add(telegramPublishTaskTimeout),
+			"next_retry_at":       nextRetryAt,
 			"updated_at":          gtime.Now(),
 		}).Update()
 	if err != nil {
+		return err
+	}
+	if err = s.rearmTelegramJobOutbox(ctx, job.Id, telegramMediaReadyRetry); err != nil {
 		return err
 	}
 	if wakeErr := s.wakeNextTelegramChannelJob(ctx, job); wakeErr != nil {

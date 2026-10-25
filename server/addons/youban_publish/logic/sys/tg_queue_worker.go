@@ -323,7 +323,7 @@ func (s *sSysPublish) startTelegramMediaWorker(ctx context.Context) {
 	processMux.HandleFunc(tgTaskTypeMediaProcess, s.handleMediaProcessTask)
 	materialImportMux := asynq.NewServeMux()
 	materialImportMux.HandleFunc(tgTaskTypeMaterialImport, s.handleMaterialImportTask)
-	go s.recoverMediaProcessTasks(ctx)
+	go s.runMediaProcessRecovery(ctx)
 	go func() {
 		if err := server.Run(mediaMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
 			g.Log().Errorf(ctx, "启动上架插件媒体缓存队列失败：%+v", err)

@@ -138,3 +138,15 @@ func TestTerminalMediaProcessingStatuses(t *testing.T) {
 		}
 	}
 }
+
+func TestMediaProcessRecoveryAndPublishRetryIntervalsStayBounded(t *testing.T) {
+	if mediaProcessRecoveryEvery <= 0 || mediaProcessRecoveryEvery > time.Minute {
+		t.Fatalf("media recovery interval = %s, want within one minute", mediaProcessRecoveryEvery)
+	}
+	if telegramMediaReadyRetry < mediaProcessRecoveryEvery || telegramMediaReadyRetry > 2*time.Minute {
+		t.Fatalf("media publish retry = %s, want recovery interval through two minutes", telegramMediaReadyRetry)
+	}
+	if telegramMediaReadyRetry >= telegramPublishTaskTimeout {
+		t.Fatalf("media publish retry = %s, must remain below task timeout %s", telegramMediaReadyRetry, telegramPublishTaskTimeout)
+	}
+}
