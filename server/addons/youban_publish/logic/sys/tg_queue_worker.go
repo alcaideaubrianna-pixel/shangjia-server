@@ -587,6 +587,10 @@ func (s *sSysPublish) handleCollectProcessTask(ctx context.Context, task *asynq.
 	reportCollectProgress(ctx, "processing", "工作线程已开始执行，检查资料分组、验证配对与规则")
 	delay, pending, removeSchedule, err := s.processCollectSourceTask(ctx, payload)
 	if err != nil {
+		if isCollectProcessRedisTransientError(err) {
+			reportCollectProgress(ctx, "waiting", "缓存服务正在恢复，采集任务将在稍后自动重试")
+			return newCollectProcessRetryError(collectProcessRedisRetryDelay, "缓存服务暂时不可用，采集任务稍后重试")
+		}
 		reportCollectProgress(ctx, "failed", err.Error())
 	}
 	if err != nil || !pending {

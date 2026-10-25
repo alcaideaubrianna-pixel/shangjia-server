@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -50,11 +51,42 @@ type collectProcessQueuePayload struct {
 }
 
 const (
-	collectProcessTaskUniqueTTL = 30 * time.Minute
-	collectProcessTaskMaxRetry  = 1000
-	collectProcessScheduleTTL   = 35 * time.Minute
-	collectProcessMinimumDelay  = 5 * time.Second
+	collectProcessTaskUniqueTTL   = 30 * time.Minute
+	collectProcessTaskMaxRetry    = 1000
+	collectProcessScheduleTTL     = 35 * time.Minute
+	collectProcessMinimumDelay    = 5 * time.Second
+	collectProcessRedisRetryDelay = 15 * time.Second
 )
+
+// isCollectProcessRedisTransientError keeps Redis startup/reconnect failures
+// out of the permanent collection-failure path. Redis returns LOADING while
+// restoring AOF/RDB; the source event itself is still valid and should retry
+// shortly after Redis becomes writable.
+func isCollectProcessRedisTransientError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	if strings.Contains(message, "redis is loading the dataset") || strings.Contains(message, "loading redis") {
+		return true
+	}
+	if !strings.Contains(message, "redis") && !strings.Contains(message, "cache") {
+		return false
+	}
+	for _, marker := range []string{
+		"connection refused",
+		"connection reset by peer",
+		"broken pipe",
+		"i/o timeout",
+		"context deadline exceeded",
+		"timeout",
+	} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
+}
 
 func (s *sSysPublish) enqueueCollectProcess(ctx context.Context, payload collectProcessQueuePayload, delay time.Duration) error {
 	_, err := s.enqueueCollectProcessTask(ctx, payload, delay, true)
