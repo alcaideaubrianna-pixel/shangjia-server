@@ -357,26 +357,18 @@ func (s *sSysConfig) GetConfigByGroup(ctx context.Context, in *sysin.GetConfigIn
 		}
 	}
 
-	var models []*entity.SysConfig
-	cols := dao.SysConfig.Columns()
-	if err = dao.SysConfig.Ctx(ctx).Fields(cols.Key, cols.Value, cols.Type).Where(cols.Group, in.Group).Scan(&models); err != nil {
-		err = gerror.Wrapf(err, "获取配置分组[ %v ]失败，请稍后重试！", in.Group)
-		return
-	}
-
 	res = new(sysin.GetConfigModel)
-	if len(models) > 0 {
-		res.List = make(g.Map, len(models))
-		for _, v := range models {
-			val, err := s.ConversionType(ctx, v)
-			if err != nil {
-				return nil, err
-			}
-			res.List[v.Key] = val
-		}
+	if in.Group == "upload" {
+		res.List, err = s.getUploadConfigValues(ctx)
+	} else {
+		res.List, err = s.getConfigValuesFromDB(ctx, in.Group)
+	}
+	if err != nil {
+		return nil, err
 	}
 
-	res.List = simple.FilterMaskDemo(ctx, res.List)
+	// FilterMaskDemo mutates the map; never allow it to alter the cached secrets.
+	res.List = simple.FilterMaskDemo(ctx, cloneConfigValues(res.List))
 	return
 }
 
@@ -444,11 +436,24 @@ func (s *sSysConfig) UpdateConfigByGroup(ctx context.Context, in *sysin.UpdateCo
 				return
 			}
 		}
+		if in.Group == "upload" {
+			return nil
+		}
 		return s.syncUpdate(ctx, in)
 	})
 
 	if err != nil {
 		return
+	}
+	if in.Group == "upload" {
+		if cacheErr := s.refreshUploadConfigCache(ctx); cacheErr != nil {
+			// DB is authoritative and has committed. Do not report a false save failure;
+			// cache misses will fall back to DB and the cluster reload below retries it.
+			g.Log().Warningf(ctx, "上传配置已保存，但刷新缓存失败: %+v", cacheErr)
+		}
+		if err = s.syncUpdate(ctx, in); err != nil {
+			return
+		}
 	}
 
 	global.PublishClusterSync(ctx, consts.ClusterSyncSysconfig, nil)
