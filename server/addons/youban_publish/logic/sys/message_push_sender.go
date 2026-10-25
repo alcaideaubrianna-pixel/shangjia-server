@@ -38,6 +38,7 @@ import (
 )
 
 type messagePushChannel struct {
+	Status       int    `json:"status"`
 	Id           int64  `json:"id"`
 	TgAccountId  int64  `json:"tgAccountId"`
 	AccessHash   string `json:"accessHash"`
@@ -1234,30 +1235,61 @@ func (s *sSysPublish) messagePushTgAccountOwner(ctx context.Context, tgAccountId
 	return account, nil
 }
 
-func (s *sSysPublish) messagePushChannelFromJob(ctx context.Context, job telegramJobRecord) (*messagePushChannel, error) {
-	if strings.TrimSpace(job.TargetChatId) != "" {
-		channels, err := s.messagePushCachedTargets(ctx, job.AccountId, []string{normalizeTelegramChannelChatID(job.TargetChatId)}, job.TenantId)
-		if err == nil && len(channels) > 0 {
-			return channels[0], nil
-		}
+// currentTelegramJobChannel resolves mutable configuration without changing the
+// immutable destination or sender identity recorded by historical Attempts.
+func (s *sSysPublish) currentTelegramJobChannel(ctx context.Context, job telegramJobRecord) (*messagePushChannel, error) {
+	if job.TenantId <= 0 {
+		return nil, gerror.New("推送任务缺少租户信息")
 	}
-	if job.ChannelId > 0 {
-		channels, err := s.messagePushChannels(ctx, []int64{job.ChannelId}, job.TenantId)
+	mod := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
+		Fields("id,tg_account_id,channel_title,target_chat_id,bot_id_json,status").
+		Where("tenant_id", job.TenantId).WhereNull("deleted_at")
+	if strings.TrimSpace(job.TargetChatId) != "" {
+		mod = mod.WhereIn("target_chat_id", tgChannelCacheLookupIds(job.TargetChatId))
+	} else if job.ChannelId > 0 {
+		mod = mod.Where("id", job.ChannelId)
+	} else {
+		return nil, gerror.New("推送任务缺少目标频道")
+	}
+	var channel *messagePushChannel
+	if err := mod.OrderDesc("id").Limit(1).Scan(&channel); err != nil {
+		return nil, gerror.Wrap(err, "读取当前推送频道配置失败")
+	}
+	if channel == nil {
+		return nil, gerror.New("目标频道配置已删除，请重新配置")
+	}
+	return channel, nil
+}
+
+func (s *sSysPublish) messagePushChannelFromJob(ctx context.Context, job telegramJobRecord) (*messagePushChannel, error) {
+	// Quick-push jobs store a TG account ID; profile jobs store a publishing
+	// account ID. Never use the latter to look up a Telegram peer.
+	if isMessagePushOperationNo(job.OperationNo) {
+		channels, err := s.messagePushCachedTargets(ctx, job.AccountId, []string{job.TargetChatId}, job.TenantId)
 		if err != nil {
 			return nil, err
 		}
-		if len(channels) > 0 {
-			return channels[0], nil
+		if len(channels) == 0 {
+			return nil, gerror.New("推送目标不存在")
 		}
+		return channels[0], nil
 	}
-	channels, err := s.messagePushCachedTargets(ctx, job.AccountId, []string{normalizeTelegramChannelChatID(job.TargetChatId)}, job.TenantId)
+	channel, err := s.currentTelegramJobChannel(ctx, job)
 	if err != nil {
 		return nil, err
 	}
-	if len(channels) == 0 {
-		return nil, gerror.New("推送目标不存在")
+	if channel.TgAccountId <= 0 {
+		return nil, gerror.New("当前频道未绑定协议号")
 	}
-	return channels[0], nil
+	peer, err := s.tgChannelCacheByChannelId(ctx, job.TenantId, channel.TgAccountId, channel.TargetChatId)
+	if err != nil {
+		return nil, err
+	}
+	channel.AccessHash = peer.AccessHash
+	channel.TargetChatId = peer.ChannelId
+	channel.IsBroadcast = peer.IsBroadcast
+	channel.IsMegagroup = peer.IsMegagroup
+	return channel, nil
 }
 
 func isMessagePushOperationNo(operationNo string) bool {

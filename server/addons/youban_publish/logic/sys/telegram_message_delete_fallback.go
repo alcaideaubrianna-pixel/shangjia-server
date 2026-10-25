@@ -49,8 +49,9 @@ func (e *telegramPartialSendCleanupRetryError) AccountTaskRetryDelay() time.Dura
 
 func (s *sSysPublish) enqueueTelegramMessageDeleteFallback(ctx context.Context, job telegramJobRecord, reason string, cause error) {
 	channel, err := s.messagePushChannelFromJob(ctx, job)
-	if err != nil || channel.TgAccountId <= 0 {
-		s.appendTelegramJobLog(ctx, job, "delete_fallback", "failed", "协议号删除兜底不可用：频道未绑定有效协议号")
+	if err != nil {
+		g.Log().Warningf(ctx, "读取当前删除兜底配置失败 jobId:%d tenantId:%d channelId:%d targetChatId:%s err:%+v", job.Id, job.TenantId, job.ChannelId, job.TargetChatId, err)
+		s.appendTelegramJobLog(ctx, job, "delete_fallback", "failed", "协议号删除兜底不可用："+err.Error())
 		return
 	}
 	if err = s.ensureTelegramDeleteFallbackAccountAvailable(ctx, channel.TgAccountId); err != nil {
