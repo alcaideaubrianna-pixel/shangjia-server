@@ -344,6 +344,7 @@ func (s *sSysPublish) dueTelegramJobOutboxRows(ctx context.Context, limit int, n
 		query := telegramDueOutboxPostgresSQL()
 		var rows []telegramJobOutboxRecord
 		if err := g.DB().GetScan(queryCtx, &rows, query,
+			telegramOutboxEventPublish, now, telegramOutboxPending, telegramOutboxProcessing, now,
 			now, telegramOutboxEventPublish, now,
 			telegramOutboxPending, telegramOutboxProcessing, now,
 		); err != nil {
@@ -393,7 +394,17 @@ func (s *sSysPublish) dueTelegramJobOutboxRows(ctx context.Context, limit int, n
 
 func telegramDueOutboxPostgresSQL() string {
 	channelKey := telegramOutboxChannelKeySQL("j")
-	return `WITH active_jobs AS MATERIALIZED (
+	return `WITH terminal_outboxes AS MATERIALIZED (
+		SELECT DISTINCT ON (j.tenant_id, ` + channelKey + `)
+			o.id,o.job_id,o.attempt_count,o.available_at,j.tenant_id,j.channel_id,j.target_chat_id,
+			999 AS schedule_rank,0 AS effective_priority
+		FROM ` + publishTgOutboxTable + ` o
+		JOIN ` + publishTgJobTable + ` j ON j.id=o.job_id
+		WHERE j.status IN ('sent','failed','superseded')
+			AND o.event_type=? AND o.available_at<=?
+			AND (o.status=? OR (o.status=? AND o.lease_expires_at<=?))
+		ORDER BY j.tenant_id, ` + channelKey + `, o.available_at,o.id
+	), active_jobs AS MATERIALIZED (
 		SELECT j.id,j.tenant_id,j.channel_id,j.target_chat_id,j.status,j.dispatch_status,j.next_retry_at,j.created_at,j.operation_no,j.send_phase,j.bot_id,j.push_mode,j.priority,
 			` + telegramChannelScheduleRankSQL("j") + ` AS schedule_rank
 		FROM ` + publishTgJobTable + ` j
@@ -404,7 +415,8 @@ func telegramDueOutboxPostgresSQL() string {
 		FROM active_jobs j
 		ORDER BY j.tenant_id, ` + channelKey + `, ` + telegramChannelScheduleOrderSQL("j") + `
 	)
-	SELECT o.id,o.job_id,o.attempt_count,o.available_at,h.tenant_id,h.channel_id,h.target_chat_id
+	SELECT o.id,o.job_id,o.attempt_count,o.available_at,h.tenant_id,h.channel_id,h.target_chat_id,
+		h.schedule_rank,` + telegramJobEffectivePrioritySQL("h") + ` AS effective_priority
 	FROM channel_job_heads h
 	JOIN ` + publishTgOutboxTable + ` o ON o.job_id=h.job_id
 	WHERE h.status IN ('pending','failed_retry','unknown')
@@ -412,7 +424,10 @@ func telegramDueOutboxPostgresSQL() string {
 		AND (h.next_retry_at IS NULL OR h.next_retry_at<=?)
 		AND o.event_type=? AND o.available_at<=?
 		AND (o.status=? OR (o.status=? AND o.lease_expires_at<=?))
-	ORDER BY h.schedule_rank, ` + telegramJobEffectivePrioritySQL("h") + `, o.available_at,o.id`
+	UNION ALL
+	SELECT id,job_id,attempt_count,available_at,tenant_id,channel_id,target_chat_id,schedule_rank,effective_priority
+	FROM terminal_outboxes
+	ORDER BY schedule_rank,effective_priority,available_at,id`
 }
 
 func telegramOutboxChannelKeySQL(alias string) string {

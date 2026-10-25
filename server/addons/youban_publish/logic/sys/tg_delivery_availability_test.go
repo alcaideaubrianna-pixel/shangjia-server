@@ -70,7 +70,7 @@ func TestTelegramDeliveryAvailabilityLocalPostgres(t *testing.T) {
 			if !row["eligible"].Bool() {
 				t.Fatalf("%s: missing account must reach diagnostic gate", test.name)
 			}
-			rows, err := tx.GetAll(telegramDueOutboxPostgresSQL(), time.Now(), "publish", time.Now(), "pending", "processing", time.Now())
+			rows, err := tx.GetAll(telegramDueOutboxPostgresSQL(), "publish", time.Now(), "pending", "processing", time.Now(), time.Now(), "publish", time.Now(), "pending", "processing", time.Now())
 			if err != nil {
 				return err
 			}
@@ -90,7 +90,7 @@ func TestTelegramDeliveryAvailabilityLocalPostgres(t *testing.T) {
 			if !available || err != nil {
 				t.Fatalf("Bot with protocol account %d: available=%v err=%v", accountID, available, err)
 			}
-			rows, err := tx.GetAll(telegramDueOutboxPostgresSQL(), time.Now(), "publish", time.Now(), "pending", "processing", time.Now())
+			rows, err := tx.GetAll(telegramDueOutboxPostgresSQL(), "publish", time.Now(), "pending", "processing", time.Now(), time.Now(), "publish", time.Now(), "pending", "processing", time.Now())
 			if err != nil {
 				return err
 			}
@@ -115,7 +115,7 @@ func TestTelegramDeliveryAvailabilityLocalPostgres(t *testing.T) {
 			(2,2,0,NOW()-INTERVAL '1 minute','publish','pending',NULL)`); err != nil {
 			return err
 		}
-		rows, err := tx.GetAll(telegramDueOutboxPostgresSQL(), time.Now(), "publish", time.Now(), "pending", "processing", time.Now())
+		rows, err := tx.GetAll(telegramDueOutboxPostgresSQL(), "publish", time.Now(), "pending", "processing", time.Now(), time.Now(), "publish", time.Now(), "pending", "processing", time.Now())
 		if err != nil {
 			return err
 		}
@@ -125,7 +125,7 @@ func TestTelegramDeliveryAvailabilityLocalPostgres(t *testing.T) {
 		if _, err := tx.Exec("UPDATE " + publishTgJobTable + " SET status='sending',send_phase='display_sending' WHERE id=1"); err != nil {
 			return err
 		}
-		rows, err = tx.GetAll(telegramDueOutboxPostgresSQL(), time.Now(), "publish", time.Now(), "pending", "processing", time.Now())
+		rows, err = tx.GetAll(telegramDueOutboxPostgresSQL(), "publish", time.Now(), "pending", "processing", time.Now(), time.Now(), "publish", time.Now(), "pending", "processing", time.Now())
 		if err != nil {
 			return err
 		}
@@ -152,7 +152,7 @@ func TestTelegramDeliveryAvailabilityLocalPostgres(t *testing.T) {
 			(14,14,0,NOW(),'publish','pending',NULL)`); err != nil {
 			return err
 		}
-		rows, err = tx.GetAll(telegramDueOutboxPostgresSQL(), time.Now(), "publish", time.Now(), "pending", "processing", time.Now())
+		rows, err = tx.GetAll(telegramDueOutboxPostgresSQL(), "publish", time.Now(), "pending", "processing", time.Now(), time.Now(), "publish", time.Now(), "pending", "processing", time.Now())
 		if err != nil {
 			return err
 		}
@@ -175,7 +175,7 @@ func TestTelegramDeliveryAvailabilityLocalPostgres(t *testing.T) {
 			UNION ALL SELECT 2000+n,2000+n,0,NOW(),'publish','pending',NULL::timestamp FROM generate_series(1,1000) n`); err != nil {
 			return err
 		}
-		rows, err = tx.GetAll(telegramDueOutboxPostgresSQL(), time.Now(), "publish", time.Now(), "pending", "processing", time.Now())
+		rows, err = tx.GetAll(telegramDueOutboxPostgresSQL(), "publish", time.Now(), "pending", "processing", time.Now(), time.Now(), "publish", time.Now(), "pending", "processing", time.Now())
 		if err != nil {
 			return err
 		}

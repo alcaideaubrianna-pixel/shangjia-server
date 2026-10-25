@@ -34,7 +34,7 @@ func TestTelegramDueOutboxPostgresSQLSelectsChannelHeads(t *testing.T) {
 		t.Fatalf("channel-head query has unbalanced parentheses: %s", query)
 	}
 	for _, fragment := range []string{
-		"WITH active_jobs AS MATERIALIZED", "channel_job_heads AS", "DISTINCT ON", "j.tenant_id", "j.channel_id", "target_chat_id",
+		"WITH terminal_outboxes AS MATERIALIZED", "WITH terminal_outboxes AS MATERIALIZED (", "active_jobs AS MATERIALIZED", "channel_job_heads AS", "DISTINCT ON", "j.tenant_id", "j.channel_id", "target_chat_id",
 		"j.status IN ('pending','failed_retry','confirming','sending')",
 		"FROM active_jobs j", "AS schedule_rank",
 		"ORDER BY j.tenant_id", "j.created_at, j.id",
@@ -42,7 +42,7 @@ func TestTelegramDueOutboxPostgresSQLSelectsChannelHeads(t *testing.T) {
 		"COALESCE(h.dispatch_status,'') IN ('','idle')",
 		"h.next_retry_at IS NULL OR h.next_retry_at<=?",
 		"o.status=? OR (o.status=? AND o.lease_expires_at<=?)",
-		"ORDER BY h.schedule_rank", "h.priority", "o.available_at,o.id",
+		"UNION ALL", "FROM terminal_outboxes", "ORDER BY schedule_rank,effective_priority,available_at,id",
 	} {
 		if !strings.Contains(query, fragment) {
 			t.Fatalf("channel-head query missing %q: %s", fragment, query)
@@ -51,8 +51,8 @@ func TestTelegramDueOutboxPostgresSQLSelectsChannelHeads(t *testing.T) {
 	if strings.Contains(query, telegramChannelAvailableAccountSQL("h")) {
 		t.Fatal("unavailable channel head must reach delivery validation instead of blocking the channel forever")
 	}
-	if got := strings.Count(query, "?"); got != 6 {
-		t.Fatalf("channel-head query placeholder count=%d, want 6: %s", got, query)
+	if got := strings.Count(query, "?"); got != 11 {
+		t.Fatalf("channel-head query placeholder count=%d, want 11: %s", got, query)
 	}
 }
 
