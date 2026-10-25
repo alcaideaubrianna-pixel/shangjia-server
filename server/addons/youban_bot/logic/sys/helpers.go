@@ -499,13 +499,19 @@ func (s *sSysBot) NotifyAccount(ctx context.Context, in *sysin.NotifyAccountInp)
 			}
 			markup = keyboard
 		}
-		_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, in.Text, firstNonEmpty(in.ParseMode, "HTML"), in.DisableNotice, markup)
+		message, err := s.sendMessageWithMarkup(ctx, row.BotToken, chatId, in.Text, firstNonEmpty(in.ParseMode, "HTML"), in.DisableNotice, markup)
 		if err != nil {
 			lastErr = err
 			if shouldMarkBotOffline(err) {
 				_ = s.markBotOffline(ctx, botId, err)
 			}
 			continue
+		}
+		if message != nil {
+			g.Log().Info(ctx, "Telegram账户通知发送成功", g.Map{
+				"noticeId": in.NoticeId, "accountId": in.AccountId, "app": app,
+				"botId": botId, "chatId": chatId, "messageId": message.ID,
+			})
 		}
 		return nil
 	}

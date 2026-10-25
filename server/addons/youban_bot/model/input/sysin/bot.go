@@ -488,6 +488,7 @@ type NotifyInp struct {
 }
 
 type NotifyAccountInp struct {
+	NoticeId            int64            `json:"noticeId,omitempty" dc:"持久化通知编号，用于发送日志关联"`
 	Buttons             [][]NotifyButton `json:"buttons,omitempty" dc:"通知操作按钮"`
 	BotId               int64            `json:"botId" dc:"指定Bot ID"`
 	BotStrategy         string           `json:"botStrategy" dc:"Bot策略：official/bound/explicit"`

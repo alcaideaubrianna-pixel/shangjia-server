@@ -178,7 +178,7 @@ func (s *sSysPublish) deliverAccountNotice(ctx context.Context, row *entity.Youb
 		}
 	}
 	if err == nil {
-		err = botService.SysBot().NotifyAccount(ctx, &botsysin.NotifyAccountInp{App: "api", AccountId: row.AccountId, Text: row.TextContent, ParseMode: "HTML", BotStrategy: "bound", IgnoreFeatureSwitch: true, RequireDelivery: true})
+		err = botService.SysBot().NotifyAccount(ctx, &botsysin.NotifyAccountInp{NoticeId: row.Id, App: "api", AccountId: row.AccountId, Text: row.TextContent, ParseMode: "HTML", BotStrategy: "bound", IgnoreFeatureSwitch: true, RequireDelivery: true})
 	}
 	if err == nil {
 		return s.finishAccountNotice(ctx, row.Id, token, "sent", "")
