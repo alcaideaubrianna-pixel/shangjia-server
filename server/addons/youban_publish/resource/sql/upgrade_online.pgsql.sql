@@ -249,3 +249,4 @@ ALTER TABLE hg_youban_publish_tg_job ADD COLUMN IF NOT EXISTS cycle_failure_coun
 
 ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "profile_detail_view_enabled" smallint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_material_import_task" ADD COLUMN IF NOT EXISTS "channel_id_json" text;
+ALTER TABLE "hg_youban_publish_profile_state" ADD COLUMN IF NOT EXISTS "dedupe_media_replaced_event_id" bigint NOT NULL DEFAULT 0;

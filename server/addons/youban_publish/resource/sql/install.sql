@@ -520,6 +520,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_profile_state` (
   `publish_operation_no` varchar(128) NOT NULL DEFAULT '' COMMENT '当前上架操作号',
   `publish_task_status` varchar(32) NOT NULL DEFAULT '' COMMENT '当前上架任务状态',
   `publish_task_updated_at` datetime DEFAULT NULL COMMENT '上架任务状态更新时间',
+  `dedupe_media_replaced_event_id` bigint NOT NULL DEFAULT 0 COMMENT '执行重复采集媒体覆盖的事件ID',
   `created_by` bigint(20) NOT NULL DEFAULT '0',
   `updated_by` bigint(20) NOT NULL DEFAULT '0',
   `created_at` datetime DEFAULT NULL,

@@ -88,7 +88,7 @@ func EnsureRuntimeCrons(ctx context.Context) error {
 	if err := ensureDailyReportCron(ctx); err != nil {
 		return err
 	}
-	return ensureProxyCollectMediaRepairCron(ctx)
+	return disableLegacyProxyCollectMediaRepairCron(ctx)
 }
 
 func HeavyIndexSqlFiles() []string {

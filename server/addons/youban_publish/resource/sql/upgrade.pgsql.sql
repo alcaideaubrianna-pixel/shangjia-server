@@ -977,6 +977,8 @@ ALTER TABLE "hg_youban_publish_profile_state" ADD COLUMN IF NOT EXISTS "publish_
 ALTER TABLE "hg_youban_publish_profile_state" ADD COLUMN IF NOT EXISTS "publish_task_status" varchar(32) NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_profile_state" ADD COLUMN IF NOT EXISTS "publish_task_updated_at" timestamp DEFAULT NULL;
 CREATE INDEX IF NOT EXISTS "idx_ybp_profile_state_publish_active" ON "hg_youban_publish_profile_state" ("publish_task_status", "publish_task_updated_at", "profile_id") WHERE "deleted_at" IS NULL AND "publish_task_status" <> '';
+ALTER TABLE "hg_youban_publish_profile_state" ADD COLUMN IF NOT EXISTS "dedupe_media_replaced_event_id" bigint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_profile_state" DROP COLUMN IF EXISTS "dedupe_media_replaced_at";
 
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "anti_scan_enabled" smallint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "text_obfuscation_enabled" smallint NOT NULL DEFAULT 0;

@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_profile_state" (
   "publish_operation_no" varchar(128) NOT NULL DEFAULT '',
   "publish_task_status" varchar(32) NOT NULL DEFAULT '',
   "publish_task_updated_at" timestamp DEFAULT NULL,
+  "dedupe_media_replaced_event_id" bigint NOT NULL DEFAULT 0,
   "created_by" bigint NOT NULL DEFAULT 0,
   "updated_by" bigint NOT NULL DEFAULT 0,
   "created_at" timestamp DEFAULT NULL,

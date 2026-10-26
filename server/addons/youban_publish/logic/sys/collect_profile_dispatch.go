@@ -99,11 +99,15 @@ func (s *sSysPublish) resumeCollectProfileDispatch(ctx context.Context, dispatch
 	return nil
 }
 
-func (s *sSysPublish) skipCollectProfileDispatchDuplicate(ctx context.Context, dispatchID int64, event, rule gdb.Record, duplicate *profileFingerprintDuplicateError) (string, error) {
+func (s *sSysPublish) skipCollectProfileDispatchDuplicate(ctx context.Context, dispatchID int64, event gdb.Record, content *collectContentResult, rule gdb.Record, duplicate *profileFingerprintDuplicateError) (string, error) {
 	if dispatchID <= 0 || event.IsEmpty() || rule.IsEmpty() || duplicate == nil {
 		return "", gerror.New("跳过重复采集分发参数不完整")
 	}
-	reason := duplicate.Error()
+	replaced, err := s.replaceDuplicateCollectProfileMedia(ctx, event, content, duplicate.ProfileID)
+	if err != nil {
+		return "", err
+	}
+	reason := collectDuplicateReason(duplicate, replaced)
 	if _, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).Where("id", dispatchID).Data(g.Map{
 		"status": sysin.CollectDispatchStatusSkipped, "error_message": reason,
 		"finished_at": gtime.Now(), "updated_at": gtime.Now(),
@@ -111,7 +115,7 @@ func (s *sSysPublish) skipCollectProfileDispatchDuplicate(ctx context.Context, d
 		return "", gerror.Wrap(err, "更新重复采集分发状态失败")
 	}
 	s.appendCollectEventLogForRecord(ctx, event, "dedupe", "skipped", reason, fmt.Sprintf("rule=%d", rule["id"].Int64()))
-	g.Log().Infof(ctx, "采集资料指纹命中，已跳过分发 eventId:%d ruleId:%d dispatchId:%d profileId:%d channelId:%d layer:%s cacheHit:%t", event["id"].Int64(), rule["id"].Int64(), dispatchID, duplicate.ProfileID, duplicate.ChannelID, duplicate.Layer, duplicate.CacheHit)
+	g.Log().Infof(ctx, "采集资料指纹命中，已跳过分发 eventId:%d ruleId:%d dispatchId:%d profileId:%d channelId:%d layer:%s cacheHit:%t mediaReplaced:%t", event["id"].Int64(), rule["id"].Int64(), dispatchID, duplicate.ProfileID, duplicate.ChannelID, duplicate.Layer, duplicate.CacheHit, replaced)
 	return reason, nil
 }
 

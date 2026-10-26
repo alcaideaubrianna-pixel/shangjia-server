@@ -565,6 +565,8 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_profile_state` (
   UNIQUE KEY `uk_ybp_profile_state_profile` (`profile_id`),
   KEY `idx_ybp_profile_state_owner` (`tenant_id`,`account_id`,`profile_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='上架资料归属和发布配置';
+ALTER TABLE `hg_youban_publish_profile_state` ADD COLUMN IF NOT EXISTS `dedupe_media_replaced_event_id` bigint NOT NULL DEFAULT 0 COMMENT '执行重复采集媒体覆盖的事件ID';
+ALTER TABLE `hg_youban_publish_profile_state` DROP COLUMN IF EXISTS `dedupe_media_replaced_at`;
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_profile_channel` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `tenant_id` bigint(20) NOT NULL DEFAULT '0',

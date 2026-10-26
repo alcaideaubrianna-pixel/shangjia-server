@@ -915,9 +915,13 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 		return false, "", findErr
 	}
 	if hit != nil {
-		reason := fmt.Sprintf("资料库已存在相同资料 profileId:%d channelId:%d layer:%s", hit.ProfileID, hit.ChannelID, hit.Layer)
+		replaced, replaceErr := s.replaceDuplicateCollectProfileMedia(ctx, event, content, hit.ProfileID)
+		if replaceErr != nil {
+			return false, "", replaceErr
+		}
+		reason := collectDuplicateReason(hit, replaced)
 		s.appendCollectEventLogForRecord(ctx, event, "dedupe", "skipped", reason, fmt.Sprintf("rule=%d", rule["id"].Int64()))
-		g.Log().Infof(ctx, "采集资料指纹命中 eventId:%d ruleId:%d profileId:%d channelId:%d layer:%s cacheHit:%t", event["id"].Int64(), rule["id"].Int64(), hit.ProfileID, hit.ChannelID, hit.Layer, hit.CacheHit)
+		g.Log().Infof(ctx, "采集资料指纹命中 eventId:%d ruleId:%d profileId:%d channelId:%d layer:%s cacheHit:%t mediaReplaced:%t", event["id"].Int64(), rule["id"].Int64(), hit.ProfileID, hit.ChannelID, hit.Layer, hit.CacheHit, replaced)
 		return false, reason, nil
 	}
 	var dispatchId int64
@@ -985,7 +989,7 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 	if err != nil {
 		var duplicate *profileFingerprintDuplicateError
 		if errors.As(err, &duplicate) {
-			reason, skipErr := s.skipCollectProfileDispatchDuplicate(ctx, dispatchId, event, rule, duplicate)
+			reason, skipErr := s.skipCollectProfileDispatchDuplicate(ctx, dispatchId, event, content, rule, duplicate)
 			if skipErr != nil {
 				return false, "", skipErr
 			}
@@ -1049,7 +1053,7 @@ func (s *sSysPublish) resumeExistingCollectDispatch(ctx context.Context, dispatc
 		if err := s.resumeCollectProfileDispatch(ctx, dispatch, event, content, rule, text); err != nil {
 			var duplicate *profileFingerprintDuplicateError
 			if errors.As(err, &duplicate) {
-				reason, skipErr := s.skipCollectProfileDispatchDuplicate(ctx, dispatch["id"].Int64(), event, rule, duplicate)
+				reason, skipErr := s.skipCollectProfileDispatchDuplicate(ctx, dispatch["id"].Int64(), event, content, rule, duplicate)
 				if skipErr != nil {
 					return false, "", skipErr
 				}
