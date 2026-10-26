@@ -3,11 +3,15 @@ package sys
 import (
 	"bytes"
 	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"image"
 	"image/color"
 	"image/png"
+	"io"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -80,3 +84,51 @@ func TestFacePPPermanentResponseClassification(t *testing.T) {
 		}
 	}
 }
+
+// Face++ returns the transparent image as Base64 in JSON, not as the small
+// source JPEG. This response reproduces the production 4 MiB truncation.
+func TestReadFacePPMattingResponseAboveFourMiB(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 1024, 1024))
+	copy(img.Pix, bytes.Repeat([]byte{18, 52, 86, 128}, 1024*1024))
+	var pngBody bytes.Buffer
+	encoder := png.Encoder{CompressionLevel: png.NoCompression}
+	if err := encoder.Encode(&pngBody, img); err != nil {
+		t.Fatal(err)
+	}
+	imageBytes := pngBody.Bytes()
+	response, err := json.Marshal(map[string]string{"body_image": base64.StdEncoding.EncodeToString(imageBytes)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(response) <= 4*1024*1024 {
+		t.Fatal("fixture must exceed former response limit")
+	}
+	raw, err := readFacePPMattingResponse(bytes.NewReader(response))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out struct {
+		BodyImage string `json:"body_image"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("valid large response was truncated: %v", err)
+	}
+	decoded, err := decodeBase64Image(out.BodyImage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(decoded, imageBytes) {
+		t.Fatal("returned image differs from provider response")
+	}
+}
+
+func TestReadFacePPMattingResponsePreservesReadFailure(t *testing.T) {
+	_, err := readFacePPMattingResponse(io.MultiReader(strings.NewReader(`{"body_image":"`), facePPFailingReader{}))
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("lost upstream read error: %v", err)
+	}
+}
+
+type facePPFailingReader struct{}
+
+func (facePPFailingReader) Read([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }

@@ -9,6 +9,7 @@ import (
 	"hotgo/addons/youban_publish/model"
 	"hotgo/internal/consts"
 	"hotgo/internal/library/contexts"
+	basemodel "hotgo/internal/model"
 )
 
 func TestAntiScanMattingQuotaReferenceIsStableAcrossJobs(t *testing.T) {
@@ -90,8 +91,9 @@ func TestAntiScanMattingCacheMatchesSelectedProvider(t *testing.T) {
 }
 
 func TestAntiScanTencentMattingFallbackRequiresCompleteConfig(t *testing.T) {
-	complete := &model.CloudResourceConfig{TencentSecretId: "id", TencentSecretKey: "key", TencentMattingBucket: "bucket"}
-	if !antiScanTencentMattingFallbackReady(complete) {
+	complete := &model.CloudResourceConfig{TencentSecretId: "id", TencentSecretKey: "key", TencentMattingBucket: "bucket", TencentRegion: "ap-singapore"}
+	upload := &basemodel.UploadConfig{Drive: consts.UploadDriveCos, CosBucketURL: "https://bucket.cos.ap-singapore.myqcloud.com", CosPath: "files"}
+	if !antiScanTencentMattingFallbackReady(complete, upload) {
 		t.Fatal("complete Tencent matting configuration should enable fallback")
 	}
 	for _, conf := range []*model.CloudResourceConfig{
@@ -100,8 +102,17 @@ func TestAntiScanTencentMattingFallbackRequiresCompleteConfig(t *testing.T) {
 		{TencentSecretId: "id", TencentMattingBucket: "bucket"},
 		{TencentSecretId: "id", TencentSecretKey: "key"},
 	} {
-		if antiScanTencentMattingFallbackReady(conf) {
+		if antiScanTencentMattingFallbackReady(conf, upload) {
 			t.Fatalf("incomplete Tencent matting configuration must not enable fallback: %#v", conf)
+		}
+	}
+}
+
+func TestAntiScanTencentMattingFallbackSkipsOSS(t *testing.T) {
+	conf := &model.CloudResourceConfig{TencentSecretId: "id", TencentSecretKey: "key", TencentMattingBucket: "bucket", TencentRegion: "ap-singapore"}
+	for _, upload := range []*basemodel.UploadConfig{nil, {Drive: consts.UploadDriveOss}, {Drive: consts.UploadDriveCos}} {
+		if antiScanTencentMattingFallbackReady(conf, upload) {
+			t.Fatal("OSS or incomplete COS storage must not enable COS fallback")
 		}
 	}
 }

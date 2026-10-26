@@ -26,6 +26,8 @@ const (
 	// Face++ documents a decimal 2 MB request limit. Keep multipart overhead headroom.
 	facePPMaximumImageBytes = 2_000_000 - 16*1024
 	facePPMaximumDimension  = 4096
+	// A 4096x4096 RGBA PNG plus Base64/JSON can exceed 85 MiB.
+	facePPMaximumResponseBytes = 128 * 1024 * 1024
 )
 
 var errFacePPPermanent = errors.New("Face++ permanent request error")
@@ -105,7 +107,7 @@ func facePPPortraitMatting(ctx context.Context, imageBytes []byte, imageHash str
 	}
 	defer resp.Body.Close()
 	readStartedAt := time.Now()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4*1024*1024))
+	raw, err := readFacePPMattingResponse(resp.Body)
 	if err != nil {
 		return "", err
 	}
@@ -135,6 +137,20 @@ func facePPPortraitMatting(ctx context.Context, imageBytes []byte, imageHash str
 	url, err := uploadAntiScanSegment(ctx, decoded, imageHash)
 	g.Log().Warningf(ctx, "防扫图 Face++ 结果上传完成 imageHash:%s durationMs:%d success:%t", imageHash, time.Since(uploadStartedAt).Milliseconds(), err == nil)
 	return url, err
+}
+
+// Read one extra byte so an oversized response is rejected explicitly instead
+// of being silently truncated into invalid JSON. The request limit does not
+// apply to the returned transparent PNG and its Base64 representation.
+func readFacePPMattingResponse(body io.Reader) ([]byte, error) {
+	raw, err := io.ReadAll(io.LimitReader(body, facePPMaximumResponseBytes+1))
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取 Face++ 人像分割响应失败")
+	}
+	if len(raw) > facePPMaximumResponseBytes {
+		return nil, fmt.Errorf("Face++ 人像分割响应超过大小上限: %w", errFacePPPermanent)
+	}
+	return raw, nil
 }
 
 func decodeBase64Image(v string) ([]byte, error) { return base64.StdEncoding.DecodeString(v) }

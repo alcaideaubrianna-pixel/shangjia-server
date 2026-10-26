@@ -131,7 +131,7 @@ func (s *sSysPublish) handleAntiScanMattingTask(ctx context.Context, task *asynq
 		stateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = saveAntiScanMattingTaskState(stateCtx, payload.MediaId, payload.Provider, state)
-		g.Log().Warning(ctx, "人像分割任务失败", g.Map{"taskId": payload.TaskId, "mediaId": payload.MediaId, "imageHash": payload.ImageHash, "err": err})
+		g.Log().Warning(ctx, "人像分割任务失败", g.Map{"taskId": payload.TaskId, "mediaId": payload.MediaId, "imageHash": payload.ImageHash, "err": err.Error()})
 	}()
 	if payload.TaskId == "" || payload.TenantId <= 0 || payload.AccountId <= 0 || payload.MediaId <= 0 || payload.ImageHash == "" {
 		return gerror.New("人像分割任务参数不完整")
@@ -190,6 +190,9 @@ func (s *sSysPublish) handleAntiScanMattingTask(ctx context.Context, task *asynq
 	segmentRaw, created, err := s.getOrCreateAntiScanMatting(ctx, imageHash, imageBytes, conf, cloudResourceUsageOwner{TenantId: payload.TenantId, AccountId: payload.AccountId})
 	g.Log().Warningf(ctx, "防扫图任务阶段完成 stage:matting taskId:%s durationMs:%d created:%t", payload.TaskId, time.Since(stageStartedAt).Milliseconds(), created)
 	if err != nil {
+		if isPermanentAntiScanMattingError(err) {
+			return fmt.Errorf("%v: %w", err, asynq.SkipRetry)
+		}
 		return err
 	}
 	segmentURL := antiScanSegmentURL(segmentRaw)

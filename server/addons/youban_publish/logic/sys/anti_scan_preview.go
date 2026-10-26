@@ -502,7 +502,7 @@ func (s *sSysPublish) createAntiScanMatting(ctx context.Context, imageHash strin
 		segmentURL, err = facePPPortraitMatting(ctx, imageBytes, imageHash, conf)
 		recordMattingProviderUsage(ctx, usageOwner, sysin.CloudResourceProviderFacePlus, err == nil, time.Since(primaryStartedAt))
 		providerName = "facepp-matting"
-		if err != nil && antiScanTencentMattingFallbackReady(conf) {
+		if err != nil && antiScanTencentMattingFallbackReady(conf, storager.GetConfig()) {
 			primaryErr := err
 			fallbackStartedAt := time.Now()
 			result, fallbackErr := tencentCOSPortraitMatting(ctx, imageBytes, imageHash, conf, false)
@@ -593,8 +593,10 @@ func fallbackErrorText(err error, result *tencentPortraitMattingResult) string {
 	return "empty result URL"
 }
 
-func antiScanTencentMattingFallbackReady(conf *model.CloudResourceConfig) bool {
-	return conf != nil &&
+func antiScanTencentMattingFallbackReady(conf *model.CloudResourceConfig, upload *basemodel.UploadConfig) bool {
+	return upload != nil && upload.Drive == consts.UploadDriveCos &&
+		strings.TrimSpace(upload.CosBucketURL) != "" && strings.TrimSpace(upload.CosPath) != "" &&
+		conf != nil && strings.TrimSpace(conf.TencentRegion) != "" &&
 		strings.TrimSpace(conf.TencentSecretId) != "" &&
 		strings.TrimSpace(conf.TencentSecretKey) != "" &&
 		strings.TrimSpace(conf.TencentMattingBucket) != ""
