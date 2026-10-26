@@ -85,7 +85,10 @@ func EnsureRuntimeCrons(ctx context.Context) error {
 	if err := ensureVipLifecycleCron(ctx); err != nil {
 		return err
 	}
-	return ensureDailyReportCron(ctx)
+	if err := ensureDailyReportCron(ctx); err != nil {
+		return err
+	}
+	return ensureProxyCollectMediaRepairCron(ctx)
 }
 
 func HeavyIndexSqlFiles() []string {

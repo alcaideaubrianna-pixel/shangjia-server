@@ -233,6 +233,7 @@ type ISysPublish interface {
 	DailyReports(ctx context.Context, in *sysin.DailyReportListInp) ([]*sysin.DailyReportModel, error)
 	GenerateDailyReports(ctx context.Context, reportDate time.Time, limit int) error
 	ProcessDailyReports(ctx context.Context, now time.Time) error
+	ProcessProxyCollectMediaRepairs(ctx context.Context, limit int) (processed, repaired int, err error)
 	SaveAccountNotificationSetting(ctx context.Context, in *sysin.AccountNotificationSettingInp) error
 	AdminActivityList(ctx context.Context) (list []*sysin.ActivityModel, err error)
 	AdminActivitySave(ctx context.Context, in *sysin.ActivitySaveInp) (err error)

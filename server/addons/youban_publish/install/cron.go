@@ -26,6 +26,7 @@ const (
 	vipLifecycleCronName             = "youbanPublishVipLifecycle"
 	vipLifecycleDevelopCronPattern   = "@every 10m"
 	vipLifecycleProductCronPattern   = "@every 1h"
+	proxyMediaRepairCronName         = "youbanPublishProxyCollectMediaRepair"
 )
 
 func cycleSchedulerCronPattern(mode string) string {
@@ -184,6 +185,28 @@ func ensureDailyReportCron(ctx context.Context) error {
 	}
 	var cronRow *entity.SysCron
 	if err = dao.SysCron.Ctx(ctx).Where(columns.Name, "youbanPublishDailyReport").Where(columns.Params, "").Scan(&cronRow); err != nil {
+		return err
+	}
+	return cron.RefreshStatus(cronRow)
+}
+
+func ensureProxyCollectMediaRepairCron(ctx context.Context) error {
+	columns := dao.SysCron.Columns()
+	row, err := dao.SysCron.Ctx(ctx).Where(columns.Name, proxyMediaRepairCronName).Where(columns.Params, "").One()
+	if err != nil {
+		return gerror.Wrap(err, "读取代理采集媒体修复定时任务失败")
+	}
+	data := g.Map{columns.GroupId: 1, columns.Title: "代理采集缺失媒体修复", columns.Name: proxyMediaRepairCronName, columns.Params: "", columns.Pattern: "@every 1h", columns.Policy: consts.CronPolicySingle, columns.Count: 0, columns.Sort: 24, columns.Remark: "每小时小批量替换因旧媒体404而被去重跳过的代理采集资料", columns.Status: consts.StatusEnabled}
+	if row.IsEmpty() {
+		_, err = dao.SysCron.Ctx(ctx).Data(data).Insert()
+	} else {
+		_, err = dao.SysCron.Ctx(ctx).Where(columns.Id, row[columns.Id].Int64()).Data(data).Update()
+	}
+	if err != nil {
+		return gerror.Wrap(err, "初始化代理采集媒体修复定时任务失败")
+	}
+	var cronRow *entity.SysCron
+	if err = dao.SysCron.Ctx(ctx).Where(columns.Name, proxyMediaRepairCronName).Where(columns.Params, "").Scan(&cronRow); err != nil {
 		return err
 	}
 	return cron.RefreshStatus(cronRow)

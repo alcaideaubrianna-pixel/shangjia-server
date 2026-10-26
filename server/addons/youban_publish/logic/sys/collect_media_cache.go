@@ -487,7 +487,10 @@ func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, even
 			continue
 		}
 		reuseStartedAt := time.Now()
-		reused, reuseErr := s.reuseCollectMediaCache(ctx, row)
+		reused, reuseErr := false, error(nil)
+		if !collectMediaRequiresStorageRefresh(row.ErrorMessage) {
+			reused, reuseErr = s.reuseCollectMediaCache(ctx, row)
+		}
 		if reuseErr != nil {
 			return changed, reuseErr
 		}
@@ -586,7 +589,7 @@ func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, even
 				cached, err = s.downloadBotTelegramMedia(itemCtx, event["tenant_id"].Int64(), event["bot_id"].Int64(), items[index])
 			} else {
 				reportCollectProgress(itemCtx, "account_download", "等待账号媒体任务完成下载和转存")
-				cached, err = s.downloadTelegramMedia(itemCtx, event["tenant_id"].Int64(), event["account_id"].Int64(), event["tg_account_id"].Int64(), row.Id, items[index])
+				cached, err = s.downloadTelegramMediaWithRefresh(itemCtx, event["tenant_id"].Int64(), event["account_id"].Int64(), event["tg_account_id"].Int64(), row.Id, items[index], collectMediaRequiresStorageRefresh(row.ErrorMessage))
 			}
 			if err != nil {
 				downloadDuration := time.Since(startedAt).Milliseconds()
@@ -924,12 +927,20 @@ func collectMediaAuthBytesInvalid(err error) bool {
 }
 
 func (s *sSysPublish) downloadTelegramMedia(ctx context.Context, tenantId int64, accountId int64, tgAccountId int64, mediaID int64, item collectMediaItem) (*collectDownloadedMedia, error) {
+	return s.downloadTelegramMediaWithRefresh(ctx, tenantId, accountId, tgAccountId, mediaID, item, false)
+}
+
+func (s *sSysPublish) downloadTelegramMediaWithRefresh(ctx context.Context, tenantId int64, accountId int64, tgAccountId int64, mediaID int64, item collectMediaItem, forceRefresh bool) (*collectDownloadedMedia, error) {
 	if tgAccountId <= 0 {
 		return nil, gerror.New("账号采集媒体缺少TG账号")
 	}
+	taskKey := accountMediaDownloadTaskKey(tgAccountId, mediaID, item)
+	if forceRefresh {
+		taskKey = "profile-media-refresh:" + taskKey
+	}
 	submit := &collectorin.AccountTaskSubmit{
 		TenantID: tenantId, AccountID: tgAccountId, TaskType: collectorin.AccountTaskTypeMediaDownload,
-		TaskKey: accountMediaDownloadTaskKey(tgAccountId, mediaID, item), Priority: collectorin.EventPriorityRealtime,
+		TaskKey: taskKey, Priority: collectorin.EventPriorityRealtime,
 		MediaOwnerAccountID: accountId, Media: ptrCollectorMediaItem(collectorMediaItemFromCollect(item)), MaxAttempts: 5,
 	}
 	// Media rows already have a persistent ID. They still need to wait for the
@@ -963,6 +974,11 @@ func (s *sSysPublish) downloadTelegramMedia(ctx context.Context, tenantId int64,
 	default:
 		return nil, newCollectMediaFairnessRetryError("账号媒体下载任务等待执行", 3*time.Second)
 	}
+}
+
+func collectMediaRequiresStorageRefresh(message string) bool {
+	message = strings.ToLower(strings.TrimSpace(message))
+	return strings.Contains(message, "持久化媒体返回404") || strings.Contains(message, "持久化媒体双端404")
 }
 
 func ptrCollectorMediaItem(item collectorin.CollectorMediaItem) *collectorin.CollectorMediaItem {
