@@ -7,43 +7,114 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gogf/gf/v2/frame/g"
+
 	"hotgo/internal/dao"
-	"hotgo/internal/model/entity"
 	"hotgo/internal/model/input/sysin"
 )
 
 type contentRegionDirectory struct {
-	byCode map[string]*entity.SysProvinces
+	byCode map[string]string
 }
 
-var contentRegionDirectoryCache struct {
+type contentRegionDirectoryCacheState struct {
 	sync.RWMutex
-	value     *contentRegionDirectory
-	expiresAt time.Time
+	value      *contentRegionDirectory
+	expiresAt  time.Time
+	refreshing bool
 }
+
+type contentRegionRow struct {
+	Id    int64  `orm:"id"`
+	Title string `orm:"title"`
+}
+
+const (
+	contentRegionDirectoryTTL            = 10 * time.Minute
+	contentRegionDirectoryRefreshTimeout = time.Second
+)
+
+var contentRegionDirectoryCache contentRegionDirectoryCacheState
 
 func loadContentRegionDirectory(ctx context.Context) *contentRegionDirectory {
-	contentRegionDirectoryCache.RLock()
-	if contentRegionDirectoryCache.value != nil && time.Now().Before(contentRegionDirectoryCache.expiresAt) {
-		directory := contentRegionDirectoryCache.value
-		contentRegionDirectoryCache.RUnlock()
+	return contentRegionDirectoryCache.load(ctx, queryContentRegionDirectory)
+}
+
+func queryContentRegionDirectory(ctx context.Context) (*contentRegionDirectory, error) {
+	columns := dao.SysProvinces.Columns()
+	rows := make([]contentRegionRow, 0)
+	if err := dao.SysProvinces.Ctx(ctx).
+		Fields(columns.Id, columns.Title).
+		Where(columns.Status, 1).
+		Scan(&rows); err != nil {
+		return nil, err
+	}
+	directory := &contentRegionDirectory{
+		byCode: make(map[string]string, len(rows)),
+	}
+	for index := range rows {
+		row := rows[index]
+		directory.byCode[strconv.FormatInt(row.Id, 10)] = row.Title
+	}
+	return directory, nil
+}
+
+func (c *contentRegionDirectoryCacheState) load(
+	ctx context.Context,
+	loader func(context.Context) (*contentRegionDirectory, error),
+) *contentRegionDirectory {
+	now := time.Now()
+	c.Lock()
+	cached := c.value
+	if cached != nil && now.Before(c.expiresAt) {
+		c.Unlock()
+		return cached
+	}
+	if c.refreshing {
+		c.Unlock()
+		return contentRegionDirectoryOrEmpty(cached)
+	}
+	c.refreshing = true
+	c.Unlock()
+
+	refreshCtx := context.WithoutCancel(ctx)
+	if cached != nil {
+		go c.refresh(refreshCtx, loader)
+		return cached
+	}
+	c.refresh(refreshCtx, loader)
+
+	c.RLock()
+	cached = c.value
+	c.RUnlock()
+	return contentRegionDirectoryOrEmpty(cached)
+}
+
+func (c *contentRegionDirectoryCacheState) refresh(
+	ctx context.Context,
+	loader func(context.Context) (*contentRegionDirectory, error),
+) {
+	refreshCtx, cancel := context.WithTimeout(ctx, contentRegionDirectoryRefreshTimeout)
+	defer cancel()
+
+	directory, err := loader(refreshCtx)
+	c.Lock()
+	c.refreshing = false
+	if err == nil && directory != nil {
+		c.value = directory
+		c.expiresAt = time.Now().Add(contentRegionDirectoryTTL)
+	}
+	c.Unlock()
+	if err != nil {
+		g.Log().Warningf(ctx, "刷新资料地区目录失败，继续使用旧缓存: %+v", err)
+	}
+}
+
+func contentRegionDirectoryOrEmpty(directory *contentRegionDirectory) *contentRegionDirectory {
+	if directory != nil {
 		return directory
 	}
-	contentRegionDirectoryCache.RUnlock()
-
-	rows := make([]*entity.SysProvinces, 0)
-	_ = dao.SysProvinces.Ctx(ctx).Where(dao.SysProvinces.Columns().Status, 1).Scan(&rows)
-	directory := &contentRegionDirectory{
-		byCode: make(map[string]*entity.SysProvinces),
-	}
-	for _, row := range rows {
-		directory.byCode[strconv.FormatInt(row.Id, 10)] = row
-	}
-	contentRegionDirectoryCache.Lock()
-	contentRegionDirectoryCache.value = directory
-	contentRegionDirectoryCache.expiresAt = time.Now().Add(10 * time.Minute)
-	contentRegionDirectoryCache.Unlock()
-	return directory
+	return &contentRegionDirectory{byCode: map[string]string{}}
 }
 
 func decorateProfileRegionWithDirectory(directory *contentRegionDirectory, profile *sysin.ContentProfileListModel) {
@@ -86,8 +157,8 @@ func resolveRegionCodes(directory *contentRegionDirectory, raw string) (string, 
 			continue
 		}
 		label := cleanRegionToken(part)
-		if row := directory.byCode[part]; row != nil {
-			label = cleanRegionToken(row.Title)
+		if title, ok := directory.byCode[part]; ok {
+			label = cleanRegionToken(title)
 			known = true
 		}
 		if label != "" {
