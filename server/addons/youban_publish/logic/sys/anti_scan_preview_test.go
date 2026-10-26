@@ -58,7 +58,7 @@ func TestAntiScanMattingPublicErrorPreservesRetryClassification(t *testing.T) {
 }
 
 func TestNormalizeAntiScanMattingConcurrency(t *testing.T) {
-	for _, tc := range []struct{ input, want int }{{0, 64}, {-1, 64}, {20, 20}, {800, 800}, {801, 800}} {
+	for _, tc := range []struct{ input, want int }{{0, 128}, {-1, 128}, {20, 20}, {800, 800}, {801, 800}} {
 		if got := normalizeAntiScanMattingConcurrency(tc.input); got != tc.want {
 			t.Fatalf("normalize concurrency %d: got %d want %d", tc.input, got, tc.want)
 		}

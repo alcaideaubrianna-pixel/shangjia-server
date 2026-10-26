@@ -15,6 +15,10 @@ import (
 
 const duplicateMediaReplacedEventIDColumn = "dedupe_media_replaced_event_id"
 
+func duplicateCollectMediaReplaceEnabled(ctx context.Context) bool {
+	return g.Cfg().MustGet(ctx, "youbanPublish.collect.duplicateMediaReplaceEnabled", false).Bool()
+}
+
 type duplicateMediaReplaceDecision int
 
 type duplicateMediaSnapshot struct {
@@ -129,6 +133,9 @@ func (s *sSysPublish) replaceDuplicateCollectProfileMedia(
 	content *collectContentResult,
 	profileID int64,
 ) (bool, error) {
+	if !duplicateCollectMediaReplaceEnabled(ctx) {
+		return false, nil
+	}
 	if profileID <= 0 || event.IsEmpty() || content == nil || len(content.Media) == 0 {
 		return false, nil
 	}

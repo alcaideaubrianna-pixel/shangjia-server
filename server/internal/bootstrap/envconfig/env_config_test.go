@@ -28,6 +28,7 @@ func TestMediaFileCacheEnvironmentMappings(t *testing.T) {
 	want := map[string]string{
 		"youbanPublish.mediaSearch.batchApproximateEnabled":  "YOUBAN_PUBLISH_MEDIA_SEARCH_BATCH_APPROXIMATE_ENABLED",
 		"youbanPublish.profileOriginEnabled":                 "YOUBAN_PUBLISH_PROFILE_ORIGIN_ENABLED",
+		"youbanPublish.collect.duplicateMediaReplaceEnabled": "YOUBAN_PUBLISH_DUPLICATE_MEDIA_REPLACE_ENABLED",
 		"youbanPublish.mediaFileCache.cosDownloadMode":       "YOUBAN_PUBLISH_MEDIA_CACHE_DOWNLOAD_MODE",
 		"youbanPublish.mediaFileCache.workerCdnBaseUrl":      "YOUBAN_PUBLISH_MEDIA_CACHE_WORKER_CDN_BASE_URL",
 		"youbanPublish.mediaFileCache.cosDownloadCdnBaseUrl": "YOUBAN_PUBLISH_COS_DOWNLOAD_CDN_URL",

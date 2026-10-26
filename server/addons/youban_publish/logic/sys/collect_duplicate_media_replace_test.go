@@ -1,12 +1,19 @@
 package sys
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 )
+
+func TestDuplicateCollectMediaReplaceDisabledByDefault(t *testing.T) {
+	if duplicateCollectMediaReplaceEnabled(context.Background()) {
+		t.Fatal("duplicate media replacement must require explicit enablement")
+	}
+}
 
 func TestCollectDuplicateReasonMarksMediaReplacement(t *testing.T) {
 	duplicate := &profileFingerprintDuplicateError{ProfileID: 12, ChannelID: 34, Layer: "text_hash"}
