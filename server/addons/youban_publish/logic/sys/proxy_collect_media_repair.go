@@ -76,99 +76,60 @@ func (s *sSysPublish) ProcessProxyCollectMediaRepairs(ctx context.Context, limit
 }
 
 func (s *sSysPublish) proxyCollectMediaRepairCandidates(ctx context.Context, limit int) ([]proxyMediaRepairCandidate, error) {
-	events, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
-		Fields("e.id,e.tenant_id,e.account_id").
-		InnerJoin(pdao.YoubanPublishCollectSource.Table()+" s", "s.id=e.source_id AND s.deleted_at IS NULL").
-		Where("s.source_type", "account").Where("e.material_role", collectMaterialRoleDisplay).
-		WhereGTE("e.received_at", gtime.Now().Add(-48*time.Hour)).
-		OrderDesc("e.id").Limit(proxyMediaRepairScanLimit).All()
-	if err != nil {
-		return nil, gerror.Wrap(err, "扫描近期代理采集事件失败")
-	}
-	byEvent := make(map[int64]proxyMediaRepairCandidate, len(events))
-	eventIDs := make([]int64, 0, len(events))
-	for _, event := range events {
-		eventID := event["id"].Int64()
-		if eventID > 0 {
-			eventIDs = append(eventIDs, eventID)
-			byEvent[eventID] = proxyMediaRepairCandidate{EventID: eventID, TenantID: event["tenant_id"].Int64(), AccountID: event["account_id"].Int64()}
-		}
-	}
-	completed := make(map[int64]struct{})
-	candidates := make([]proxyMediaRepairCandidate, 0)
-	for start := 0; start < len(eventIDs); start += 500 {
-		end := start + 500
-		if end > len(eventIDs) {
-			end = len(eventIDs)
-		}
-		logs, logErr := pdao.YoubanPublishCollectEventLog.Ctx(ctx).
-			Fields("event_id,stage,status,message").WhereIn("event_id", eventIDs[start:end]).
-			WhereIn("stage", []string{"dedupe", proxyMediaRepairStage}).All()
-		if logErr != nil {
-			return nil, gerror.Wrap(logErr, "读取代理采集去重日志失败")
-		}
-		for _, logRow := range logs {
-			eventID := logRow["event_id"].Int64()
-			if logRow["stage"].String() == proxyMediaRepairStage && logRow["status"].String() == "completed" {
-				completed[eventID] = struct{}{}
-				continue
-			}
-			if logRow["stage"].String() != "dedupe" || logRow["status"].String() != "skipped" {
-				continue
-			}
-			candidate := byEvent[eventID]
-			candidate.ProfileID = parseProxyMediaRepairProfileID(logRow["message"].String())
-			if candidate.ProfileID > 0 {
-				candidates = append(candidates, candidate)
-			}
-		}
-	}
-	profileIDs := make([]int64, 0, len(candidates))
-	for _, candidate := range candidates {
-		if _, done := completed[candidate.EventID]; !done {
-			profileIDs = append(profileIDs, candidate.ProfileID)
-		}
-	}
-	broken := make(map[int64]struct{})
-	profileIDs = uniqueIds(profileIDs)
-	for start := 0; start < len(profileIDs); start += 500 {
-		end := start + 500
-		if end > len(profileIDs) {
-			end = len(profileIDs)
-		}
-		rows, queryErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Fields("DISTINCT profile_id").
-			WhereIn("profile_id", profileIDs[start:end]).WhereLike("error_message", "%HTTP 404%").All()
-		if queryErr != nil {
-			return nil, gerror.Wrap(queryErr, "批量校验资料媒体404记录失败")
-		}
-		for _, row := range rows {
-			broken[row["profile_id"].Int64()] = struct{}{}
-		}
-	}
+	query := fmt.Sprintf(`WITH recent_events AS MATERIALIZED (
+		SELECT e.id,e.tenant_id,e.account_id
+		FROM %s e
+		JOIN %s s ON s.id=e.source_id AND s.deleted_at IS NULL
+		WHERE s.source_type='account' AND e.material_role=? AND e.received_at>=?
+		ORDER BY e.id DESC LIMIT %d
+	), dedupe AS MATERIALIZED (
+		SELECT e.id AS event_id,e.tenant_id,e.account_id,
+		       substring(l.message FROM 'profileId:([0-9]+)')::bigint AS profile_id
+		FROM recent_events e
+		JOIN %s l ON l.event_id=e.id AND l.stage='dedupe' AND l.status='skipped'
+		WHERE l.message ~ 'profileId:[0-9]+'
+		  AND NOT EXISTS (
+			SELECT 1 FROM %s done
+			WHERE done.event_id=e.id AND done.stage=? AND done.status='completed'
+		  )
+	), broken AS MATERIALIZED (
+		SELECT DISTINCT j.profile_id
+		FROM %s j
+		JOIN (SELECT DISTINCT profile_id FROM dedupe) d ON d.profile_id=j.profile_id
+		WHERE j.error_message LIKE '%%HTTP 404%%'
+	), eligible AS (
+		SELECT DISTINCT ON (d.profile_id)
+		       d.event_id,d.profile_id,d.tenant_id,d.account_id
+		FROM dedupe d
+		JOIN broken b ON b.profile_id=d.profile_id
+		JOIN %s ps ON ps.profile_id=d.profile_id AND ps.tenant_id=d.tenant_id
+		          AND ps.account_id=d.account_id AND ps.deleted_at IS NULL
+		JOIN hg_content_profile p ON p.id=d.profile_id AND p.deleted_at IS NULL
+		ORDER BY d.profile_id,d.event_id DESC
+	)
+	SELECT event_id,profile_id,tenant_id,account_id
+	FROM eligible
+	ORDER BY event_id DESC
+	LIMIT %d`,
+		pdao.YoubanPublishCollectEvent.Table(), pdao.YoubanPublishCollectSource.Table(),
+		proxyMediaRepairScanLimit, pdao.YoubanPublishCollectEventLog.Table(),
+		pdao.YoubanPublishCollectEventLog.Table(), publishTgJobTable,
+		publishProfileStateTable, limit)
 	result := make([]proxyMediaRepairCandidate, 0, limit)
-	seen := make(map[int64]struct{})
-	for _, candidate := range candidates {
-		if len(result) >= limit {
-			break
-		}
-		if _, done := completed[candidate.EventID]; done {
-			continue
-		}
-		if _, ok := broken[candidate.ProfileID]; !ok {
-			continue
-		}
-		if _, ok := seen[candidate.ProfileID]; ok {
-			continue
-		}
-		seen[candidate.ProfileID] = struct{}{}
-		eligible, checkErr := s.proxyCollectMediaRepairEligible(ctx, candidate)
-		if checkErr != nil {
-			return nil, checkErr
-		}
-		if eligible {
-			result = append(result, candidate)
-		}
+	rows, err := g.DB().GetAll(ctx, query, collectMaterialRoleDisplay,
+		gtime.Now().Add(-48*time.Hour), proxyMediaRepairStage)
+	if err != nil {
+		return nil, gerror.Wrap(err, "扫描代理采集缺失媒体修复候选失败")
 	}
+	if err = rows.Structs(&result); err != nil {
+		return nil, gerror.Wrap(err, "解析代理采集缺失媒体修复候选失败")
+	}
+	g.Log().Info(ctx, "代理采集缺失媒体修复候选扫描完成", g.Map{
+		"windowHours": 48,
+		"scanLimit":   proxyMediaRepairScanLimit,
+		"batchLimit":  limit,
+		"candidates":  len(result),
+	})
 	return result, nil
 }
 
@@ -196,6 +157,16 @@ func (s *sSysPublish) repairProxyCollectMediaCandidate(ctx context.Context, cand
 	}
 	if reset > 0 {
 		return gerror.Newf("已重置%d个失效媒体，等待媒体Worker从Telegram重新下载", reset)
+	}
+	existingReplacementID, err := s.proxyCollectMediaReplacementProfileID(ctx, candidate)
+	if err != nil {
+		return err
+	}
+	if existingReplacementID > 0 {
+		if err = s.detachProfileFingerprints(ctx, []int64{candidate.ProfileID}); err != nil {
+			return err
+		}
+		return s.finalizeProxyCollectMediaReplacement(ctx, candidate, existingReplacementID)
 	}
 	if err := s.detachProfileFingerprints(ctx, []int64{candidate.ProfileID}); err != nil {
 		return err
@@ -226,6 +197,27 @@ func (s *sSysPublish) repairProxyCollectMediaCandidate(ctx context.Context, cand
 	if newProfileID <= 0 || newProfileID == candidate.ProfileID {
 		return gerror.New("采集事件未生成新的替换资料")
 	}
+	// A committed replacement must be reused on later hourly runs while its
+	// channel jobs are pending. Restoring the old fingerprint here would make
+	// the same event deduplicate against the broken profile again.
+	restoreOldFingerprint = false
+	return s.finalizeProxyCollectMediaReplacement(ctx, candidate, newProfileID)
+}
+
+func (s *sSysPublish) proxyCollectMediaReplacementProfileID(ctx context.Context, candidate proxyMediaRepairCandidate) (int64, error) {
+	dispatch, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).Fields("profile_id").
+		Where("event_id", candidate.EventID).WhereGT("profile_id", 0).OrderDesc("id").One()
+	if err != nil {
+		return 0, gerror.Wrap(err, "读取缺失媒体替换资料失败")
+	}
+	profileID := dispatch["profile_id"].Int64()
+	if profileID == candidate.ProfileID {
+		return 0, nil
+	}
+	return profileID, nil
+}
+
+func (s *sSysPublish) finalizeProxyCollectMediaReplacement(ctx context.Context, candidate proxyMediaRepairCandidate, newProfileID int64) error {
 	complete, err := collectProfileMediaComplete(ctx, newProfileID)
 	if err != nil {
 		return gerror.Wrap(err, "检查替换资料媒体失败")
@@ -248,7 +240,6 @@ func (s *sSysPublish) repairProxyCollectMediaCandidate(ctx context.Context, cand
 	if err = s.deleteProfiles(ctx, &sysin.ProfileDeleteInp{Ids: []int64{candidate.ProfileID}}, candidate.TenantID, candidate.AccountID); err != nil {
 		return gerror.Wrap(err, "删除旧缺失媒体资料失败")
 	}
-	restoreOldFingerprint = false
 	s.appendCollectEventLog(ctx, candidate.EventID, proxyMediaRepairStage, "completed", "缺失媒体资料已替换", fmt.Sprintf("oldProfileId=%d newProfileId=%d", candidate.ProfileID, newProfileID))
 	return nil
 }
