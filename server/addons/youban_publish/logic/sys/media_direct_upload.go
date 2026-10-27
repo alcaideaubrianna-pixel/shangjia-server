@@ -161,7 +161,7 @@ func (s *sSysPublish) createMediaDirectUpload(ctx context.Context, in *sysin.Med
 		Key:       key,
 	}
 	if cfg.Drive == consts.UploadDriveOss {
-		uploadURL, signErr := storager.OssPresignedPutObject(ctx, key, in.ContentType, 10*time.Minute)
+		uploadURL, signErr := storager.OssPresignedPutObjectWithConfig(ctx, cfg, key, in.ContentType, 10*time.Minute)
 		if signErr != nil {
 			return nil, signErr
 		}

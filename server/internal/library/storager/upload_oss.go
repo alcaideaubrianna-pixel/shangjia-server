@@ -7,6 +7,7 @@ package storager
 
 import (
 	"context"
+	"hotgo/internal/model"
 	"io"
 	"net/url"
 	"os"
@@ -30,32 +31,36 @@ type OssObjectInfo struct {
 }
 
 func newOssBucket(endpoint string) (*oss.Bucket, error) {
-	return newOssBucketWithCname(endpoint, false)
+	return newOssBucketWithConfig(config, endpoint, false)
 }
 
 func newOssBucketWithCname(endpoint string, useCname bool) (*oss.Bucket, error) {
-	if config == nil {
+	return newOssBucketWithConfig(config, endpoint, useCname)
+}
+
+func newOssBucketWithConfig(uploadConfig *model.UploadConfig, endpoint string, useCname bool) (*oss.Bucket, error) {
+	if uploadConfig == nil {
 		return nil, gerror.New("OSS存储配置不存在")
 	}
 	if strings.TrimSpace(endpoint) == "" {
 		return nil, gerror.New("OSS存储驱动缺少Endpoint配置")
 	}
-	if strings.TrimSpace(config.OssBucket) == "" {
+	if strings.TrimSpace(uploadConfig.OssBucket) == "" {
 		return nil, gerror.New("OSS存储驱动缺少Bucket配置")
 	}
-	if strings.TrimSpace(config.OssSecretId) == "" || strings.TrimSpace(config.OssSecretKey) == "" {
+	if strings.TrimSpace(uploadConfig.OssSecretId) == "" || strings.TrimSpace(uploadConfig.OssSecretKey) == "" {
 		return nil, gerror.New("OSS存储驱动缺少Access Key或Secret Key配置")
 	}
 	client, err := oss.New(
 		strings.TrimSpace(endpoint),
-		strings.TrimSpace(config.OssSecretId),
-		strings.TrimSpace(config.OssSecretKey),
+		strings.TrimSpace(uploadConfig.OssSecretId),
+		strings.TrimSpace(uploadConfig.OssSecretKey),
 		oss.UseCname(useCname),
 	)
 	if err != nil {
 		return nil, gerror.Wrap(err, "初始化OSS客户端失败")
 	}
-	bucket, err := client.Bucket(strings.TrimSpace(config.OssBucket))
+	bucket, err := client.Bucket(strings.TrimSpace(uploadConfig.OssBucket))
 	if err != nil {
 		return nil, gerror.Wrap(err, "初始化OSS Bucket失败")
 	}
@@ -91,19 +96,25 @@ func OssPublicEndpoint(endpoint string) (string, error) {
 
 // OssPresignedPutObject returns a public short-lived upload URL for browsers.
 func OssPresignedPutObject(ctx context.Context, key, contentType string, expiry time.Duration) (string, error) {
-	if config == nil {
+	return OssPresignedPutObjectWithConfig(ctx, config, key, contentType, expiry)
+}
+
+// OssPresignedPutObjectWithConfig signs with the request's current config so
+// multi-instance config propagation cannot leave browser uploads on a stale endpoint.
+func OssPresignedPutObjectWithConfig(ctx context.Context, uploadConfig *model.UploadConfig, key, contentType string, expiry time.Duration) (string, error) {
+	if uploadConfig == nil {
 		return "", gerror.New("OSS存储配置不存在")
 	}
-	endpoint := strings.TrimSpace(config.OssUploadURL)
+	endpoint := strings.TrimSpace(uploadConfig.OssUploadURL)
 	useCname := endpoint != ""
 	if endpoint == "" {
 		var err error
-		endpoint, err = OssPublicEndpoint(config.OssEndpoint)
+		endpoint, err = OssPublicEndpoint(uploadConfig.OssEndpoint)
 		if err != nil {
 			return "", err
 		}
 	}
-	bucket, err := newOssBucketWithCname(endpoint, useCname)
+	bucket, err := newOssBucketWithConfig(uploadConfig, endpoint, useCname)
 	if err != nil {
 		return "", err
 	}
