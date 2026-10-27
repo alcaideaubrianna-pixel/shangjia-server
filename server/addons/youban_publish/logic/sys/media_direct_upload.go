@@ -560,7 +560,7 @@ func directUploadConfigDigest(cfg *model.UploadConfig) string {
 	sum := sha256.Sum256([]byte(strings.Join([]string{
 		strings.TrimSpace(cfg.Drive), strings.TrimSpace(cfg.CosBucket), strings.TrimSpace(cfg.CosRegion),
 		strings.TrimSpace(cfg.CosBucketURL), strings.TrimSpace(cfg.CosSecretId), strings.TrimSpace(cfg.CosSecretKey),
-		strings.TrimSpace(cfg.OssEndpoint), strings.TrimSpace(cfg.OssBucketURL), strings.TrimSpace(cfg.OssBucket), strings.TrimSpace(cfg.OssSecretId), strings.TrimSpace(cfg.OssSecretKey), strings.TrimSpace(cfg.OssPath),
+		strings.TrimSpace(cfg.OssEndpoint), strings.TrimSpace(cfg.OssUploadURL), strings.TrimSpace(cfg.OssBucketURL), strings.TrimSpace(cfg.OssBucket), strings.TrimSpace(cfg.OssSecretId), strings.TrimSpace(cfg.OssSecretKey), strings.TrimSpace(cfg.OssPath),
 		strings.TrimSpace(cfg.R2Endpoint), strings.TrimSpace(cfg.R2Bucket), strings.TrimSpace(cfg.R2AccessKey), strings.TrimSpace(cfg.R2SecretKey),
 	}, "\x00")))
 	return hex.EncodeToString(sum[:])

@@ -221,6 +221,9 @@ func (s *sSysConfig) GetUpload(ctx context.Context) (conf *model.UploadConfig, e
 	if err == nil && conf != nil && conf.CosBucket != "" && conf.CosRegion != "" {
 		conf.CosBucketURL = fmt.Sprintf("https://%s.cos.%s.myqcloud.com", conf.CosBucket, conf.CosRegion)
 	}
+	if err == nil {
+		conf, err = storager.ApplyUploadEndpointEnv(conf)
+	}
 	return
 }
 
@@ -245,6 +248,7 @@ func (s *sSysConfig) ensureCosUploadConfig(ctx context.Context) (err error) {
 		{key: "uploadOssBucket", name: "OSS Bucket", sort: 484, tip: "OSS 存储空间名称"},
 		{key: "uploadOssBucketURL", name: "OSS 公开访问域名", sort: 485, tip: "OSS 自定义域名或 Bucket 公网访问地址"},
 		{key: "uploadOssPath", name: "OSS 存储路径", sort: 486, tip: "对象存储目录前缀，例如：hotgo/file"},
+		{key: "uploadOssUploadURL", name: "OSS 浏览器上传域名", sort: 487, tip: "可选，浏览器直传使用的 OSS CNAME，例如：https://img.xiaohuiji.cc；留空时使用 OSS 公网 Endpoint"},
 	}
 
 	cols := dao.SysConfig.Columns()
@@ -343,6 +347,11 @@ func (s *sSysConfig) GetConfigByGroup(ctx context.Context, in *sysin.GetConfigIn
 	}
 	if in.Group == "member_vip" {
 		if err = s.ensureMemberVipConfig(ctx); err != nil {
+			return
+		}
+	}
+	if in.Group == "upload" {
+		if err = s.ensureCosUploadConfig(ctx); err != nil {
 			return
 		}
 	}

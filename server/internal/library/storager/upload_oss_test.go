@@ -73,3 +73,29 @@ func TestOssPresignedPutObjectUsesPublicEndpoint(t *testing.T) {
 		t.Fatalf("signed URL is missing OSS authorization parameters: %q", signedURL)
 	}
 }
+
+func TestOssPresignedPutObjectUsesConfiguredUploadCname(t *testing.T) {
+	old := config
+	t.Cleanup(func() { config = old })
+	SetConfig(&model.UploadConfig{
+		OssBucket:    "media-bucket",
+		OssEndpoint:  "https://oss-ap-southeast-1-internal.aliyuncs.com",
+		OssUploadURL: "https://img.example.com",
+		OssSecretId:  "access-key",
+		OssSecretKey: "secret-key",
+	})
+	signedURL, err := OssPresignedPutObject(context.Background(), "hotgo/file/test.jpg", "image/jpeg", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(signedURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Host != "img.example.com" {
+		t.Fatalf("signed URL does not use the configured upload CNAME: %q", signedURL)
+	}
+	if parsed.Query().Get("OSSAccessKeyId") == "" || parsed.Query().Get("Signature") == "" {
+		t.Fatalf("signed URL is missing OSS authorization parameters: %q", signedURL)
+	}
+}

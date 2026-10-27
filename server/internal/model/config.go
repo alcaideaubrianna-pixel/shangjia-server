@@ -81,6 +81,7 @@ type UploadConfig struct {
 	OssSecretId  string `json:"uploadOssSecretId"`
 	OssSecretKey string `json:"uploadOssSecretKey"`
 	OssEndpoint  string `json:"uploadOssEndpoint"`
+	OssUploadURL string `json:"uploadOssUploadURL"`
 	OssBucketURL string `json:"uploadOssBucketURL"`
 	OssPath      string `json:"uploadOssPath"`
 	OssBucket    string `json:"uploadOssBucket"`

@@ -138,6 +138,7 @@ func TestDirectUploadConfigDigestIncludesOssConfig(t *testing.T) {
 		Drive:        "oss",
 		OssBucket:    "bucket-1",
 		OssEndpoint:  "https://oss-ap-southeast-1-internal.aliyuncs.com",
+		OssUploadURL: "https://img.xiaohuiji.cc",
 		OssSecretId:  "access-key",
 		OssSecretKey: "secret-key",
 		OssPath:      "hotgo/file",
@@ -147,6 +148,11 @@ func TestDirectUploadConfigDigestIncludesOssConfig(t *testing.T) {
 	changed.OssEndpoint = "https://oss-cn-hangzhou-internal.aliyuncs.com"
 	if directUploadConfigDigest(base) == directUploadConfigDigest(&changed) {
 		t.Fatal("OSS endpoint change must invalidate direct upload session")
+	}
+	changed = *base
+	changed.OssUploadURL = "https://upload.example.com"
+	if directUploadConfigDigest(base) == directUploadConfigDigest(&changed) {
+		t.Fatal("OSS upload URL change must invalidate direct upload session")
 	}
 	changed = *base
 	changed.OssSecretKey = "rotated-secret-key"

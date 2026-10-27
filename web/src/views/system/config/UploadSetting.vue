@@ -59,6 +59,12 @@
               <n-input v-model:value="formValue.uploadOssEndpoint" placeholder="" />
               <template #feedback> Endpoint（地域节点）</template>
             </n-form-item>
+            <n-form-item label="浏览器上传域名" path="uploadOssUploadURL">
+              <n-input
+                v-model:value="formValue.uploadOssUploadURL"
+                placeholder="留空使用 OSS 公网 Endpoint，例如：https://img.xiaohuiji.cc"
+              />
+            </n-form-item>
             <n-form-item label="存储路径" path="uploadOssPath">
               <n-input v-model:value="formValue.uploadOssPath" placeholder="" />
               <template #feedback>填对对象存储中的相对路径</template>
@@ -380,6 +386,7 @@
     uploadOssSecretId: '',
     uploadOssSecretKey: '',
     uploadOssEndpoint: '',
+    uploadOssUploadURL: '',
     uploadOssBucketURL: '',
     uploadOssPath: '',
     uploadOssBucket: '',

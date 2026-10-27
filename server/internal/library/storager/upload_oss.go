@@ -30,6 +30,10 @@ type OssObjectInfo struct {
 }
 
 func newOssBucket(endpoint string) (*oss.Bucket, error) {
+	return newOssBucketWithCname(endpoint, false)
+}
+
+func newOssBucketWithCname(endpoint string, useCname bool) (*oss.Bucket, error) {
 	if config == nil {
 		return nil, gerror.New("OSS存储配置不存在")
 	}
@@ -42,7 +46,12 @@ func newOssBucket(endpoint string) (*oss.Bucket, error) {
 	if strings.TrimSpace(config.OssSecretId) == "" || strings.TrimSpace(config.OssSecretKey) == "" {
 		return nil, gerror.New("OSS存储驱动缺少Access Key或Secret Key配置")
 	}
-	client, err := oss.New(strings.TrimSpace(endpoint), strings.TrimSpace(config.OssSecretId), strings.TrimSpace(config.OssSecretKey))
+	client, err := oss.New(
+		strings.TrimSpace(endpoint),
+		strings.TrimSpace(config.OssSecretId),
+		strings.TrimSpace(config.OssSecretKey),
+		oss.UseCname(useCname),
+	)
 	if err != nil {
 		return nil, gerror.Wrap(err, "初始化OSS客户端失败")
 	}
@@ -85,11 +94,16 @@ func OssPresignedPutObject(ctx context.Context, key, contentType string, expiry 
 	if config == nil {
 		return "", gerror.New("OSS存储配置不存在")
 	}
-	endpoint, err := OssPublicEndpoint(config.OssEndpoint)
-	if err != nil {
-		return "", err
+	endpoint := strings.TrimSpace(config.OssUploadURL)
+	useCname := endpoint != ""
+	if endpoint == "" {
+		var err error
+		endpoint, err = OssPublicEndpoint(config.OssEndpoint)
+		if err != nil {
+			return "", err
+		}
 	}
-	bucket, err := newOssBucket(endpoint)
+	bucket, err := newOssBucketWithCname(endpoint, useCname)
 	if err != nil {
 		return "", err
 	}
