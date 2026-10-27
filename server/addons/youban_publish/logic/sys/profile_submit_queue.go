@@ -51,7 +51,22 @@ func (s *sSysPublish) handleProfileSubmitTask(ctx context.Context, task *asynq.T
 	if payload.TenantId <= 0 || payload.AccountId <= 0 || payload.Input.Id <= 0 {
 		return gerror.New("资料保存任务参数不完整")
 	}
+	var err error
 	publishAfterSave := payload.Input.PublishAfterSave
+	if payload.Input.ChannelIds == nil {
+		payload.Input.ChannelIds, err = s.profileChannelIdsOrDefaults(ctx, payload.TenantId, payload.AccountId, payload.Input.Id)
+		if err != nil {
+			return gerror.Wrap(err, "读取编辑资料频道配置失败")
+		}
+	}
+	republish, err := s.preparePublishedProfileEdit(ctx, payload.Input.Id, payload.TenantId, payload.AccountId)
+	if err != nil {
+		return gerror.Wrap(err, "后台准备编辑资料失败")
+	}
+	if republish {
+		markProfileOnlineForEdit(&payload.Input)
+		publishAfterSave = true
+	}
 	payload.Input.AsyncSubmit = false
 	payload.Input.DraftOnly = false
 	payload.Input.PublishAfterSave = false

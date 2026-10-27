@@ -379,6 +379,14 @@ func (s *sSysPublish) BotProfileEdit(ctx context.Context, in *sysin.BotProfileEd
 	if ownerAccountId <= 0 {
 		return nil, gerror.New("资料归属账号信息不完整")
 	}
+	channelIds, err := s.profileChannelIdsOrDefaults(ctx, capability.TenantId, ownerAccountId, profileId)
+	if err != nil {
+		return nil, err
+	}
+	republish, err := s.preparePublishedProfileEdit(ctx, profileId, capability.TenantId, ownerAccountId)
+	if err != nil {
+		return nil, err
+	}
 	title := strings.TrimSpace(in.Title)
 	if title == "" {
 		title = current.Title
@@ -387,7 +395,12 @@ func (s *sSysPublish) BotProfileEdit(ctx context.Context, in *sysin.BotProfileEd
 	if plainText == "" {
 		plainText = current.PlainText
 	}
-	if _, err = s.saveProfile(ctx, &sysin.ProfileSaveInp{Id: profileId, Title: title, PlainText: plainText, Status: current.Status, Visibility: current.Visibility, Province: current.Province, City: current.City, Tag: current.Tag, CustomerRemark: current.CustomerRemark}, capability.TenantId, ownerAccountId); err != nil {
+	saveInput := &sysin.ProfileSaveInp{Id: profileId, ChannelIds: channelIds, Title: title, PlainText: plainText, Status: current.Status, Visibility: current.Visibility, Province: current.Province, City: current.City, Tag: current.Tag, CustomerRemark: current.CustomerRemark}
+	if republish {
+		markProfileOnlineForEdit(saveInput)
+	}
+	saved, err := s.saveProfile(ctx, saveInput, capability.TenantId, ownerAccountId)
+	if err != nil {
 		return nil, err
 	}
 	if len(in.DisplayMedia) > 0 || len(in.VerifyMedia) > 0 || strings.TrimSpace(in.VerifyText) != "" {
@@ -396,6 +409,11 @@ func (s *sSysPublish) BotProfileEdit(ctx context.Context, in *sysin.BotProfileEd
 		}
 		if strings.TrimSpace(in.VerifyText) != "" {
 			_ = s.saveBotProfileVerifyText(ctx, current.Id, strings.TrimSpace(in.VerifyText))
+		}
+	}
+	if republish {
+		if err = s.submitProfilePublish(ctx, saved.Id, capability.TenantId, ownerAccountId, 0, "", nil, true); err != nil {
+			return nil, gerror.Wrap(err, "编辑资料重新上架失败")
 		}
 	}
 	newNo := normalizeBotProfileNo(in.NewNo)

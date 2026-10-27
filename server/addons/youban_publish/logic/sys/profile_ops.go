@@ -133,8 +133,37 @@ func (s *sSysPublish) MyProfileEdit(ctx context.Context, in *sysin.ProfileSaveIn
 	if err != nil {
 		return nil, err
 	}
-	in.KeepPublishState = true
-	return s.saveProfile(ctx, in, account.TenantId, ownerAccountId)
+	profileId := in.Id
+	if profileId <= 0 {
+		profileId, err = s.resolveProfileId(ctx, 0, in.Uuid, account.TenantId, ownerAccountId)
+		if err != nil {
+			return nil, err
+		}
+		in.Id = profileId
+	}
+	if in.ChannelIds == nil {
+		in.ChannelIds, err = s.profileChannelIdsOrDefaults(ctx, account.TenantId, ownerAccountId, profileId)
+		if err != nil {
+			return nil, err
+		}
+	}
+	republish, err := s.preparePublishedProfileEdit(ctx, profileId, account.TenantId, ownerAccountId)
+	if err != nil {
+		return nil, err
+	}
+	if republish {
+		markProfileOnlineForEdit(in)
+	}
+	saved, err := s.saveProfile(ctx, in, account.TenantId, ownerAccountId)
+	if err != nil {
+		return nil, err
+	}
+	if republish {
+		if err = s.submitProfilePublish(ctx, saved.Id, account.TenantId, ownerAccountId, contexts.GetUserId(ctx), "", nil, true); err != nil {
+			return nil, gerror.Wrap(err, "编辑资料重新上架失败")
+		}
+	}
+	return saved, nil
 }
 
 func (s *sSysPublish) MyProfileDelete(ctx context.Context, in *sysin.ProfileDeleteInp) (err error) {
