@@ -32,6 +32,19 @@ func (s *sSysPublish) preparePublishedProfileEdit(ctx context.Context, profileId
 	if row.IsEmpty() {
 		return false, gerror.New("资料不存在")
 	}
+	stateRow, err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
+		Fields("publish_task_status").
+		Where("tenant_id", tenantId).
+		Where("account_id", accountId).
+		Where("profile_id", profileId).
+		WhereIn("publish_task_status", []string{sysin.PublishTaskStatusPending, sysin.PublishTaskStatusPublishing}).
+		WhereNull("deleted_at").One()
+	if err != nil {
+		return false, gerror.Wrap(err, "读取资料发布状态失败")
+	}
+	if !stateRow.IsEmpty() {
+		return false, gerror.New("资料正在上架处理中，请稍后再编辑")
+	}
 	status := row[dao.ContentProfile.Columns().Status].Int()
 	if status != 1 {
 		return false, nil
