@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,9 +13,11 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	publishconsts "hotgo/addons/youban_publish/consts"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
+	"hotgo/internal/library/cache"
 	iservice "hotgo/internal/service"
 )
 
@@ -165,6 +168,36 @@ func (s *sSysPublish) prepareProfilePublishJobs(ctx context.Context, profileId, 
 // media URL has already become unavailable. This runs before the transaction,
 // so a failed cycle cannot create another child job for the same profile.
 func validateProfilePublishMedia(ctx context.Context, profileID int64) error {
+	if profileID <= 0 {
+		return nil
+	}
+	key := publishconsts.ProfileMediaValidationKeyPrefix + strconv.FormatInt(profileID, 10)
+	if value, err := cache.Instance().Get(ctx, key); err == nil && !value.IsNil() {
+		var cached profileMediaValidationCache
+		if value.Scan(&cached) == nil {
+			if cached.Error != "" {
+				return gerror.New(cached.Error)
+			}
+			if cached.Valid {
+				return nil
+			}
+		}
+	}
+	err := validateProfilePublishMediaUncached(ctx, profileID)
+	cached := profileMediaValidationCache{Valid: err == nil}
+	if err != nil {
+		cached.Error = err.Error()
+	}
+	_ = cache.Instance().Set(ctx, key, cached, 2*time.Minute)
+	return err
+}
+
+type profileMediaValidationCache struct {
+	Valid bool   `json:"valid"`
+	Error string `json:"error,omitempty"`
+}
+
+func validateProfilePublishMediaUncached(ctx context.Context, profileID int64) error {
 	if profileID <= 0 {
 		return nil
 	}

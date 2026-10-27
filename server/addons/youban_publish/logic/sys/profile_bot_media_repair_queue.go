@@ -12,7 +12,10 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/hibiken/asynq"
 
+	publishconsts "hotgo/addons/youban_publish/consts"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/library/cache"
+	"strconv"
 )
 
 const botMediaRepairBatchLimit = 1000
@@ -121,6 +124,7 @@ func (s *sSysPublish) quarantineProfileWithUnavailableMedia(ctx context.Context,
 	if profileId <= 0 {
 		return nil
 	}
+	_, _ = cache.Instance().Remove(ctx, publishconsts.ProfileMediaValidationKeyPrefix+strconv.FormatInt(profileId, 10))
 	message := "资料媒体已永久失效，需重新上传后再上架"
 	if reason = strings.TrimSpace(reason); reason != "" {
 		message += "：" + reason
