@@ -225,9 +225,10 @@ func (s *sSysPublish) sendTelegramJobLockedByChannel(ctx context.Context, jobId 
 	// call so an old retry cannot repeatedly send a known-broken profile.
 	if mediaErr := validateProfilePublishMedia(ctx, job.ProfileId); mediaErr != nil {
 		if isPermanentProfileMediaError(mediaErr) {
-			message := "资料媒体已失效，终止TG任务：" + mediaErr.Error()
-			s.appendTelegramJobLog(ctx, job, "publish", "failed", message)
-			return s.supersedeTelegramJobAndCompleteOperation(ctx, job)
+			if quarantineErr := s.quarantineProfileWithUnavailableMedia(ctx, job.ProfileId, mediaErr.Error()); quarantineErr != nil {
+				return gerror.Wrap(quarantineErr, "隔离失效媒体资料失败")
+			}
+			return nil
 		}
 		return s.handleTelegramJobError(ctx, job, mediaErr)
 	}
