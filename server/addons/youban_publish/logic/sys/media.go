@@ -186,29 +186,15 @@ func (s *sSysPublish) syncOwnedMediaFromInput(ctx context.Context, tx gdb.TX, ow
 		keep[mediaId] = &normalized
 	}
 
-	removed := make([]int64, 0)
 	now := gtime.Now()
 	for _, row := range current {
 		mediaId := row["id"].Int64()
 		item, retained := keep[mediaId]
 		if !retained {
-			if processingStatus := strings.TrimSpace(row["processing_status"].String()); processingStatus != "" && processingStatus != "ready" {
-				return nil, gerror.New("资料存在仍在处理的媒体，请等待媒体处理完成后再保存")
-			}
-			if _, err = mediaOwnerScope(tx.Model(publishMediaTable).Ctx(ctx), owner).
-				Where("id", mediaId).
-				WhereNull("deleted_at").
-				Data(g.Map{
-					"tg_file_id":          "",
-					"tg_thumb_file_id":    "",
-					"tg_cache_asset_hash": "",
-					"tg_cache_status":     tgCacheStatusInvalid,
-					"deleted_by":          contexts.GetUserId(ctx),
-					"deleted_at":          now,
-				}).Update(); err != nil {
-				return nil, gerror.Wrap(err, "删除资料媒体失败")
-			}
-			removed = append(removed, mediaId)
+			// The edit payload is not a deletion command. Uploads can finish
+			// after the profile save request, so treating an omitted item as
+			// deleted can empty a profile immediately before publish. Explicit
+			// media deletion is handled by deleteMedia/deleteMediaByTenant.
 			continue
 		}
 		updateData := g.Map{
@@ -240,7 +226,7 @@ func (s *sSysPublish) syncOwnedMediaFromInput(ctx context.Context, tx gdb.TX, ow
 	if err = s.syncOwnedMediaToProfile(ctx, tx, owner, profileId); err != nil {
 		return nil, err
 	}
-	return removed, nil
+	return []int64{}, nil
 }
 
 func (s *sSysPublish) isHistoricalProfileMediaTx(ctx context.Context, tx gdb.TX, mediaId int64, profileId int64, tenantId int64, accountId int64) (bool, error) {
