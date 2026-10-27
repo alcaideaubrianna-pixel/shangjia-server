@@ -61,16 +61,16 @@ func (s *sSysPublish) handleProfileSubmitTask(ctx context.Context, task *asynq.T
 			return gerror.Wrap(err, "读取编辑资料频道配置失败")
 		}
 	}
-	republish, err := s.preparePublishedProfileEdit(ctx, payload.Input.Id, payload.TenantId, payload.AccountId)
+	if strings.TrimSpace(payload.OperationNo) == "" {
+		payload.OperationNo = newTelegramOperationNo("edit", payload.Input.Id)
+	}
+	republish, err := s.preparePublishedProfileEdit(ctx, payload.Input.Id, payload.TenantId, payload.AccountId, payload.OperationNo)
 	if err != nil {
 		return gerror.Wrap(err, "后台准备编辑资料失败")
 	}
 	if republish {
 		markProfileOnlineForEdit(&payload.Input)
 		publishAfterSave = true
-	}
-	if strings.TrimSpace(payload.OperationNo) == "" {
-		payload.OperationNo = newTelegramOperationNo("edit", payload.Input.Id)
 	}
 	payload.Input.AsyncSubmit = false
 	payload.Input.DraftOnly = false

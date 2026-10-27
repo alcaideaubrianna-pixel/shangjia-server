@@ -147,9 +147,17 @@ func (s *sSysPublish) MyProfileEdit(ctx context.Context, in *sysin.ProfileSaveIn
 			return nil, err
 		}
 	}
-	republish, err := s.preparePublishedProfileEdit(ctx, profileId, account.TenantId, ownerAccountId)
+	operationNo := newTelegramOperationNo("edit", profileId)
+	republish, err := s.preparePublishedProfileEdit(ctx, profileId, account.TenantId, ownerAccountId, operationNo)
 	if err != nil {
 		return nil, err
+	}
+	if republish {
+		defer func() {
+			if err != nil {
+				s.releaseProfileEditClaim(ctx, profileId, account.TenantId, ownerAccountId, operationNo)
+			}
+		}()
 	}
 	if republish {
 		markProfileOnlineForEdit(in)
@@ -159,7 +167,7 @@ func (s *sSysPublish) MyProfileEdit(ctx context.Context, in *sysin.ProfileSaveIn
 		return nil, err
 	}
 	if republish {
-		if err = s.submitProfilePublish(ctx, saved.Id, account.TenantId, ownerAccountId, contexts.GetUserId(ctx), newTelegramOperationNo("edit", saved.Id), nil, true); err != nil {
+		if err = s.submitProfilePublish(ctx, saved.Id, account.TenantId, ownerAccountId, contexts.GetUserId(ctx), operationNo, nil, true); err != nil {
 			return nil, gerror.Wrap(err, "编辑资料重新上架失败")
 		}
 	}

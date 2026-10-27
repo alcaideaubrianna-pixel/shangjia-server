@@ -383,9 +383,17 @@ func (s *sSysPublish) BotProfileEdit(ctx context.Context, in *sysin.BotProfileEd
 	if err != nil {
 		return nil, err
 	}
-	republish, err := s.preparePublishedProfileEdit(ctx, profileId, capability.TenantId, ownerAccountId)
+	operationNo := newTelegramOperationNo("edit", profileId)
+	republish, err := s.preparePublishedProfileEdit(ctx, profileId, capability.TenantId, ownerAccountId, operationNo)
 	if err != nil {
 		return nil, err
+	}
+	if republish {
+		defer func() {
+			if err != nil {
+				s.releaseProfileEditClaim(ctx, profileId, capability.TenantId, ownerAccountId, operationNo)
+			}
+		}()
 	}
 	title := strings.TrimSpace(in.Title)
 	if title == "" {
@@ -412,7 +420,7 @@ func (s *sSysPublish) BotProfileEdit(ctx context.Context, in *sysin.BotProfileEd
 		}
 	}
 	if republish {
-		if err = s.submitProfilePublish(ctx, saved.Id, capability.TenantId, ownerAccountId, 0, newTelegramOperationNo("edit", saved.Id), nil, true); err != nil {
+		if err = s.submitProfilePublish(ctx, saved.Id, capability.TenantId, ownerAccountId, 0, operationNo, nil, true); err != nil {
 			return nil, gerror.Wrap(err, "编辑资料重新上架失败")
 		}
 	}
