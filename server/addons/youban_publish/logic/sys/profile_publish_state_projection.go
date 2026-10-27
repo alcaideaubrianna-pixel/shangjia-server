@@ -155,6 +155,7 @@ func (s *sSysPublish) recoverProfilePublishOperationStates(ctx context.Context, 
 		Fields("tenant_id,account_id,profile_id,publish_operation_no,publish_task_status").
 		WhereNull("deleted_at").
 		WhereIn("publish_task_status", []string{
+			"editing",
 			sysin.PublishTaskStatusPending,
 			sysin.PublishTaskStatusPublishing,
 		}).
