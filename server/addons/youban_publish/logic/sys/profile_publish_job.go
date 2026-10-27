@@ -2,8 +2,10 @@ package sys
 
 import (
 	"context"
+	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -97,6 +99,9 @@ func (s *sSysPublish) prepareProfilePublishJobs(ctx context.Context, profileId, 
 	if err != nil {
 		return nil, err
 	}
+	if err = validateProfilePublishMedia(ctx, profileId); err != nil {
+		return nil, err
+	}
 	requestedChannelIds := uniqueIds(channelIds)
 	var channels []telegramJobChannel
 	if len(requestedChannelIds) == 0 {
@@ -154,6 +159,54 @@ func (s *sSysPublish) prepareProfilePublishJobs(ctx context.Context, profileId, 
 	// Report the skip only after committing the failed UI projection. Returning
 	// this from the transaction would roll that projection back to pending.
 	return jobIds, profilePublishPreparationError(len(channels), jobIds)
+}
+
+// validateProfilePublishMedia prevents creating a Telegram job when a source
+// media URL has already become unavailable. This runs before the transaction,
+// so a failed cycle cannot create another child job for the same profile.
+func validateProfilePublishMedia(ctx context.Context, profileID int64) error {
+	if profileID <= 0 {
+		return nil
+	}
+	var rows []gdb.Record
+	if err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+		Fields("id,media_type,storage_path,file_url,processing_status").
+		Where("profile_id", profileID).Where("status", 1).WhereNull("deleted_at").
+		OrderAsc("purpose").OrderAsc("sort_index").OrderAsc("id").Scan(&rows); err != nil {
+		return gerror.Wrap(err, "检查资料媒体可用性失败")
+	}
+	if len(rows) == 0 {
+		return gerror.New("资料没有可发布媒体，已阻止上架")
+	}
+	client := &http.Client{Timeout: 5 * time.Second}
+	for _, row := range rows {
+		fileURL := strings.TrimSpace(row["file_url"].String())
+		if fileURL == "" && strings.TrimSpace(row["storage_path"].String()) == "" {
+			return gerror.Newf("资料媒体不可用，mediaId=%d，已阻止上架", row["id"].Int64())
+		}
+		if strings.EqualFold(strings.TrimSpace(row["processing_status"].String()), "failed") {
+			return gerror.Newf("资料媒体处理失败，mediaId=%d，已阻止上架", row["id"].Int64())
+		}
+		if fileURL == "" || !strings.HasPrefix(fileURL, "http") {
+			continue
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodHead, fileURL, nil)
+		if err != nil {
+			return gerror.Wrapf(err, "资料媒体地址无效 mediaId:%d", row["id"].Int64())
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return gerror.Wrapf(err, "资料媒体不可用 mediaId:%d", row["id"].Int64())
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone {
+			return gerror.Newf("资料媒体已失效，mediaId=%d，HTTP %d，已阻止上架", row["id"].Int64(), resp.StatusCode)
+		}
+		if resp.StatusCode >= http.StatusBadRequest && resp.StatusCode != http.StatusMethodNotAllowed {
+			return gerror.Newf("资料媒体不可用，mediaId=%d，HTTP %d，已阻止上架", row["id"].Int64(), resp.StatusCode)
+		}
+	}
+	return nil
 }
 
 func (s *sSysPublish) enqueuePreparedProfileJobs(ctx context.Context, jobIds []int64, operatorId int64) {
