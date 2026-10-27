@@ -818,6 +818,8 @@ ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_publish_
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_batch_size" integer NOT NULL DEFAULT 20;
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_batch_time" varchar(16) NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_batch_cursor" bigint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_batch_cursor_kind" varchar(16) NOT NULL DEFAULT 'job';
+ALTER TABLE "hg_youban_publish_channel" ALTER COLUMN "cycle_batch_cursor_kind" SET DEFAULT 'profile';
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_last_run_at" timestamp DEFAULT NULL;
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_active_run_id" bigint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_last_error_message" text;

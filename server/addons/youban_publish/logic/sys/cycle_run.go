@@ -531,22 +531,11 @@ func (s *sSysPublish) channelCycleById(ctx context.Context, channelId int64) (ch
 
 func (s *sSysPublish) channelCyclePage(ctx context.Context, channel channelCycleRecord, cursorId int64, limit int) ([]channelProfileRecord, error) {
 	var items []channelProfileRecord
+	model := s.fullPushEligibleProfileModel(ctx, channel.TenantId, channel.Id)
 	if channel.Mode == "batch" {
-		rows, err := g.DB().GetAll(ctx, `SELECT * FROM (SELECT MIN(j.id) AS id,j.tenant_id,MAX(j.account_id) AS account_id,j.profile_id,j.channel_id
-	FROM hg_youban_publish_tg_job j
-	WHERE j.tenant_id=? AND j.channel_id=? AND j.status='sent'
-		AND `+cycleProfileMediaAvailableSQL("j.profile_id")+`
-	GROUP BY j.tenant_id,j.channel_id,j.profile_id) q
-	WHERE id > ? ORDER BY id ASC LIMIT ?`, channel.TenantId, channel.Id, cursorId, limit)
-		if err != nil {
-			return nil, gerror.Wrap(err, "分页读取频道批次循环资料失败")
-		}
-		if err = rows.Structs(&items); err != nil {
-			return nil, gerror.Wrap(err, "解析频道批次循环资料失败")
-		}
-		return items, nil
+		model = s.batchCycleEligibleProfileModel(ctx, channel.TenantId, channel.Id)
 	}
-	err := s.fullPushEligibleProfileModel(ctx, channel.TenantId, channel.Id).
+	err := model.
 		Fields("p.id AS id,ps.tenant_id,ps.account_id,p.id AS profile_id").
 		WhereGT("p.id", cursorId).
 		OrderAsc("p.id").
@@ -607,8 +596,9 @@ func (s *sSysPublish) finishChannelCycleRun(ctx context.Context, run cycleRunRec
 	data := g.Map{
 		"cycle_active_run_id": 0, "cycle_last_run_at": now, "cycle_last_error_message": message, "updated_at": now,
 	}
-	if status == cycleRunStatusFinished {
+	if status == cycleRunStatusFinished || status == cycleRunStatusPartial {
 		data["cycle_batch_cursor"] = run.CursorId
+		data["cycle_batch_cursor_kind"] = "profile"
 	}
 	_, _ = g.DB().Model(publishChannelTable).Safe().Ctx(ctx).Where("id", run.ChannelId).Where("cycle_active_run_id", run.Id).Data(data).Update()
 	s.appendChannelCycleRunLog(ctx, run, "info", "finished", message, nil)

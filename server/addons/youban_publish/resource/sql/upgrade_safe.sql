@@ -223,6 +223,8 @@ ALTER TABLE `hg_youban_publish_channel` ADD COLUMN IF NOT EXISTS `cycle_publish_
 ALTER TABLE `hg_youban_publish_channel` ADD COLUMN IF NOT EXISTS `cycle_batch_size` int NOT NULL DEFAULT '20' COMMENT '批次循环数量';
 ALTER TABLE `hg_youban_publish_channel` ADD COLUMN IF NOT EXISTS `cycle_batch_time` varchar(16) NOT NULL DEFAULT '' COMMENT '批次循环时间';
 ALTER TABLE `hg_youban_publish_channel` ADD COLUMN IF NOT EXISTS `cycle_batch_cursor` bigint NOT NULL DEFAULT '0' COMMENT '批次循环游标';
+ALTER TABLE `hg_youban_publish_channel` ADD COLUMN IF NOT EXISTS `cycle_batch_cursor_kind` varchar(16) NOT NULL DEFAULT 'job' COMMENT '批次循环游标类型';
+ALTER TABLE `hg_youban_publish_channel` ALTER COLUMN `cycle_batch_cursor_kind` SET DEFAULT 'profile';
 ALTER TABLE `hg_youban_publish_message_push_plan` ADD COLUMN IF NOT EXISTS `push_mode` varchar(16) NOT NULL DEFAULT 'bot';
 ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN IF NOT EXISTS `push_mode` varchar(16) NOT NULL DEFAULT 'bot';
 ALTER TABLE `hg_youban_publish_anti_scan_cache` ADD COLUMN IF NOT EXISTS `media_id` bigint(20) NOT NULL DEFAULT '0';

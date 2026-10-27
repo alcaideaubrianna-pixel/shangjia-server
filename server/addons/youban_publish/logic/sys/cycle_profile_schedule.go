@@ -191,12 +191,14 @@ func profileCycleOverdueAt(now *gtime.Time, profileId, channelId int64) *gtime.T
 	return now.Add(profileCycleSpreadOffset(profileId, channelId, profileCycleOverdueSpreadWindow))
 }
 
-func profileCycleSpreadOffset(profileId, channelId int64, window time.Duration) time.Duration {
+func profileCycleSpreadOffset(profileId, _ int64, window time.Duration) time.Duration {
 	spreadSeconds := uint64(window / time.Second)
 	if spreadSeconds <= 0 {
 		return 0
 	}
-	offset := (uint64(profileId)*11400714819323198485 + uint64(channelId)*14029467366897019727) % spreadSeconds
+	// Keep the same profile in the same position across a tenant's channels.
+	// Channel delivery remains independent, so one failed channel cannot block others.
+	offset := uint64(profileId) * 11400714819323198485 % spreadSeconds
 	return time.Duration(offset) * time.Second
 }
 

@@ -12,18 +12,19 @@ import (
 )
 
 type dueBatchCycleChannel struct {
-	Id          int64  `orm:"id"`
-	TenantId    int64  `orm:"tenant_id"`
-	BatchSize   int    `orm:"cycle_batch_size"`
-	BatchTime   string `orm:"cycle_batch_time"`
-	BatchCursor int64  `orm:"cycle_batch_cursor"`
+	Id              int64  `orm:"id"`
+	TenantId        int64  `orm:"tenant_id"`
+	BatchSize       int    `orm:"cycle_batch_size"`
+	BatchTime       string `orm:"cycle_batch_time"`
+	BatchCursor     int64  `orm:"cycle_batch_cursor"`
+	BatchCursorKind string `orm:"cycle_batch_cursor_kind"`
 }
 
 func (s *sSysPublish) scheduleDueChannelBatchCycles(ctx context.Context, limit int) error {
 	now := gtime.Now()
 	var channels []dueBatchCycleChannel
 	err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
-		Fields("id,tenant_id,cycle_batch_size,cycle_batch_time,cycle_batch_cursor").
+		Fields("id,tenant_id,cycle_batch_size,cycle_batch_time,cycle_batch_cursor,cycle_batch_cursor_kind").
 		Where("cycle_publish_enabled", 1).Where("cycle_publish_mode", "batch").
 		Where("status", 1).Where("publish_direction", "up").Where("cycle_active_run_id", 0).
 		Where("cycle_next_run_at IS NULL OR cycle_next_run_at<=?", now).
@@ -77,6 +78,12 @@ func (s *sSysPublish) createScheduledBatchCycleRun(ctx context.Context, channel 
 			return nil
 		}
 		cursor := channel.BatchCursor
+		if channel.BatchCursorKind != "profile" {
+			cursor, err = migrateBatchCycleCursorTx(ctx, tx, channel.Id, cursor)
+			if err != nil {
+				return err
+			}
+		}
 		activeRunValue, valueErr := tx.Model(publishCycleRunTable).Safe().Ctx(ctx).
 			Where("channel_id", channel.Id).
 			WhereIn("status", []string{cycleRunStatusPending, cycleRunStatusRunning, cycleRunStatusDispatching}).
@@ -150,13 +157,36 @@ func (s *sSysPublish) createScheduledBatchCycleRun(ctx context.Context, channel 
 	})
 }
 
+func migrateBatchCycleCursorTx(ctx context.Context, tx gdb.TX, channelId, legacyCursor int64) (int64, error) {
+	cursor := int64(0)
+	if legacyCursor > 0 {
+		value, err := tx.Model(publishTgJobTable).Safe().Ctx(ctx).
+			Where("id", legacyCursor).Where("channel_id", channelId).Value("profile_id")
+		if err != nil {
+			return 0, gerror.Wrap(err, "转换频道批次循环游标失败")
+		}
+		cursor = value.Int64()
+	}
+	_, err := tx.Model(publishChannelTable).Safe().Ctx(ctx).Where("id", channelId).Where("cycle_active_run_id", -1).Data(g.Map{
+		"cycle_batch_cursor": cursor, "cycle_batch_cursor_kind": "profile", "updated_at": gtime.Now(),
+	}).Update()
+	if err != nil {
+		return 0, gerror.Wrap(err, "保存频道批次循环资料游标失败")
+	}
+	return cursor, nil
+}
+
 func (s *sSysPublish) batchCycleCandidateCount(ctx context.Context, tenantId, channelId, cursor int64) (int, error) {
-	sql := `(SELECT MIN(j.id) AS id
-		FROM hg_youban_publish_tg_job j
-		WHERE j.tenant_id=? AND j.channel_id=? AND j.status='sent'
-			AND ` + cycleProfileMediaAvailableSQL("j.profile_id") + `
-		GROUP BY j.profile_id) q`
-	return g.DB().Model(sql, tenantId, channelId).Safe().Ctx(ctx).WhereGT("id", cursor).Count()
+	return s.batchCycleEligibleProfileModel(ctx, tenantId, channelId).
+		WhereGT("p.id", cursor).
+		Count()
+}
+
+func (s *sSysPublish) batchCycleEligibleProfileModel(ctx context.Context, tenantId, channelId int64) *gdb.Model {
+	published := "EXISTS (SELECT 1 FROM " + publishTgJobTable + " sj WHERE sj.tenant_id=ps.tenant_id AND sj.profile_id=p.id AND sj.status='sent')"
+	return s.fullPushEligibleProfileModel(ctx, tenantId, channelId).
+		Where(published).
+		Where(cycleProfileMediaAvailableSQL("p.id"))
 }
 
 func cycleProfileMediaAvailableSQL(profileField string) string {

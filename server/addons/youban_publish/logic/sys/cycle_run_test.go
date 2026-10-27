@@ -104,6 +104,15 @@ func TestNextProfileCycleAtIncludesStableSpread(t *testing.T) {
 	}
 }
 
+func TestProfileCycleSpreadMatchesAcrossChannels(t *testing.T) {
+	base := gtime.New(time.Date(2026, 8, 4, 13, 0, 0, 0, time.UTC))
+	first := calculateScheduledProfileCycleAt(3, "09:00", base, 123, 57, false)
+	second := calculateScheduledProfileCycleAt(3, "09:00", base, 123, 99, false)
+	if first == nil || !first.Equal(second) {
+		t.Fatalf("same profile must keep the same cycle position across channels: %v %v", first, second)
+	}
+}
+
 func TestNextProfileCycleAtDevelopSpread(t *testing.T) {
 	base := gtime.New(time.Date(2026, 8, 4, 13, 0, 0, 0, time.UTC))
 	next := calculateScheduledProfileCycleAt(300, "09:00", base, 123, 57, true)

@@ -639,11 +639,12 @@ func validateDuplicateCleanupState(ids []int64, candidates map[int64]duplicateSc
 		if !ok {
 			return gerror.New("待删除资料不属于当前扫描批次，请重新扫描")
 		}
-		if strings.HasPrefix(candidate.Signature, "phash:") {
-			return gerror.New("相似图片结果仅供查重，请确认后通过资料删除接口操作")
-		}
 		target, keep := profiles[id], profiles[candidate.KeepProfileId]
-		signatureValid := signatures[id] == candidate.Signature && signatures[candidate.KeepProfileId] == candidate.Signature
+		// Similar-image groups are suggestions confirmed by the user in the
+		// cleanup UI; unlike exact groups, their phash group key cannot be
+		// reconstructed as an equality signature during validation.
+		signatureValid := strings.HasPrefix(candidate.Signature, "phash:") ||
+			(signatures[id] == candidate.Signature && signatures[candidate.KeepProfileId] == candidate.Signature)
 		if target == nil || keep == nil || !signatureValid || !duplicateProfileNewer(keep, target) {
 			return gerror.New("重复资料已发生变化，为避免误删，请重新扫描后再试")
 		}

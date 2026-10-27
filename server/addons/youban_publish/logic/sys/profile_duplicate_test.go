@@ -338,6 +338,21 @@ func TestValidateDuplicateCleanupStateRequiresExactImageSignature(t *testing.T) 
 	}
 }
 
+func TestValidateDuplicateCleanupStateAllowsConfirmedSimilarImage(t *testing.T) {
+	keepTime := gtime.New(time.Unix(20, 0))
+	targetTime := gtime.New(time.Unix(10, 0))
+	candidates := map[int64]duplicateScanCandidate{
+		1: {ProfileId: 1, KeepProfileId: 2, Signature: "phash:2"},
+	}
+	profiles := map[int64]*sysin.AdminNoteDuplicateItemModel{
+		1: {Id: 1, CreatedAt: targetTime},
+		2: {Id: 2, CreatedAt: keepTime},
+	}
+	if err := validateDuplicateCleanupState([]int64{1}, candidates, profiles, nil); err != nil {
+		t.Fatalf("confirmed similar-image cleanup should be allowed: %v", err)
+	}
+}
+
 func TestValidateDuplicateCleanupStateRequiresNewerKeep(t *testing.T) {
 	sameTime := gtime.New(time.Unix(10, 0))
 	candidates := map[int64]duplicateScanCandidate{2: {ProfileId: 2, KeepProfileId: 1, Signature: "same"}}
