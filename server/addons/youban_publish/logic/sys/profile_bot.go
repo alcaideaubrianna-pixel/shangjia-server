@@ -412,7 +412,7 @@ func (s *sSysPublish) BotProfileEdit(ctx context.Context, in *sysin.BotProfileEd
 		}
 	}
 	if republish {
-		if err = s.submitProfilePublish(ctx, saved.Id, capability.TenantId, ownerAccountId, 0, "", nil, true); err != nil {
+		if err = s.submitProfilePublish(ctx, saved.Id, capability.TenantId, ownerAccountId, 0, newTelegramOperationNo("edit", saved.Id), nil, true); err != nil {
 			return nil, gerror.Wrap(err, "编辑资料重新上架失败")
 		}
 	}

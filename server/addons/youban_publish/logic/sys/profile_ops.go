@@ -159,7 +159,7 @@ func (s *sSysPublish) MyProfileEdit(ctx context.Context, in *sysin.ProfileSaveIn
 		return nil, err
 	}
 	if republish {
-		if err = s.submitProfilePublish(ctx, saved.Id, account.TenantId, ownerAccountId, contexts.GetUserId(ctx), "", nil, true); err != nil {
+		if err = s.submitProfilePublish(ctx, saved.Id, account.TenantId, ownerAccountId, contexts.GetUserId(ctx), newTelegramOperationNo("edit", saved.Id), nil, true); err != nil {
 			return nil, gerror.Wrap(err, "编辑资料重新上架失败")
 		}
 	}

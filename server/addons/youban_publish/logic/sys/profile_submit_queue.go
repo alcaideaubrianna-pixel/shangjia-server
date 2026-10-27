@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -14,16 +15,17 @@ import (
 )
 
 type profileSubmitPayload struct {
-	TenantId  int64                `json:"tenantId"`
-	AccountId int64                `json:"accountId"`
-	Input     sysin.ProfileSaveInp `json:"input"`
+	TenantId    int64                `json:"tenantId"`
+	AccountId   int64                `json:"accountId"`
+	OperationNo string               `json:"operationNo"`
+	Input       sysin.ProfileSaveInp `json:"input"`
 }
 
 func (s *sSysPublish) enqueueProfileSubmit(ctx context.Context, in *sysin.ProfileSaveInp, tenantId, accountId int64) (*sysin.ProfileSaveModel, error) {
 	if in == nil || in.Id <= 0 {
 		return nil, gerror.New("资料草稿不存在，请重新上传")
 	}
-	payload := profileSubmitPayload{TenantId: tenantId, AccountId: accountId, Input: *in}
+	payload := profileSubmitPayload{TenantId: tenantId, AccountId: accountId, OperationNo: newTelegramOperationNo("edit", in.Id), Input: *in}
 	payload.Input.AsyncSubmit = false
 	payload.Input.DraftOnly = false
 	body, err := json.Marshal(payload)
@@ -67,6 +69,9 @@ func (s *sSysPublish) handleProfileSubmitTask(ctx context.Context, task *asynq.T
 		markProfileOnlineForEdit(&payload.Input)
 		publishAfterSave = true
 	}
+	if strings.TrimSpace(payload.OperationNo) == "" {
+		payload.OperationNo = newTelegramOperationNo("edit", payload.Input.Id)
+	}
 	payload.Input.AsyncSubmit = false
 	payload.Input.DraftOnly = false
 	payload.Input.PublishAfterSave = false
@@ -75,7 +80,7 @@ func (s *sSysPublish) handleProfileSubmitTask(ctx context.Context, task *asynq.T
 		return gerror.Wrap(err, "后台保存资料失败")
 	}
 	if publishAfterSave {
-		if err = s.submitProfilePublish(ctx, saved.Id, payload.TenantId, payload.AccountId, 0, "", nil, false); err != nil {
+		if err = s.submitProfilePublish(ctx, saved.Id, payload.TenantId, payload.AccountId, 0, payload.OperationNo, nil, false); err != nil {
 			if errors.Is(err, errTelegramPublishPermissionPaused) {
 				return errors.Join(err, asynq.SkipRetry)
 			}
