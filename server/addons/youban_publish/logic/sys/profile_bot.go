@@ -241,17 +241,39 @@ func (s *sSysPublish) replaceBotProfileMedia(ctx context.Context, profileId int6
 	if profileId <= 0 {
 		return nil
 	}
+	// A nil slice means that the caller did not submit that media group and
+	// must retain the existing records. An empty, non-nil slice is an explicit
+	// request to clear that group. This mirrors the web edit semantics and
+	// prevents a partial BOT edit from deleting verification media.
+	purposes := make([]string, 0, 2)
+	if displayMedia != nil {
+		purposes = append(purposes, "display")
+	}
+	if verifyMedia != nil {
+		purposes = append(purposes, "verify")
+	}
+	if len(purposes) == 0 {
+		return nil
+	}
+	replacementStartedAt := gtime.Now()
+	// Insert the replacement set first. If attachment lookup or media record
+	// creation fails, the existing media remains publishable. This is the same
+	// safety rule as web edits: never make a failed edit destructive.
+	if err := s.saveBotProfileMedia(ctx, profileId, tenantId, accountId, displayMedia, verifyMedia); err != nil {
+		return err
+	}
 	if _, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 		Where("tenant_id", tenantId).
 		Where("account_id", accountId).
 		Where("profile_id", profileId).
-		WhereIn("purpose", []string{"display", "verify"}).
+		WhereIn("purpose", purposes).
+		Where("created_at < ?", replacementStartedAt).
 		Data(g.Map{"deleted_at": gtime.Now(), "deleted_by": accountId, "updated_at": gtime.Now()}).
 		Update(); err != nil {
-		return gerror.Wrap(err, "清空原资料媒体失败")
+		return gerror.Wrap(err, "清理待替换资料媒体失败")
 	}
 	_ = s.deleteMediaPHashBucketByProfileId(ctx, profileId)
-	return s.saveBotProfileMedia(ctx, profileId, tenantId, accountId, displayMedia, verifyMedia)
+	return s.syncBotProfileMedia(ctx, profileId)
 }
 
 func (s *sSysPublish) saveBotProfileVerifyText(ctx context.Context, profileId int64, verifyText string) error {

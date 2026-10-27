@@ -83,7 +83,7 @@ func (profileManageMessageHandler) Handle(ctx context.Context, bot *sSysBot, eve
 		if account.AccountId != session.AccountId || account.TenantId != session.TenantId {
 			return true, bot.reply(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.Chat.ID), "当前绑定账号已变更，请重新操作")
 		}
-		if session.Scene == "create" || session.Scene == "replace" {
+		if session.Scene == "create" || session.Scene == "batch_create" || session.Scene == "replace" {
 			return true, bot.consumeProfileSessionMessage(ctx, event.BotId, event.Msg, account, session, text)
 		}
 		if session.Scene == "search" && len(event.Msg.Photo) > 0 {
@@ -183,6 +183,7 @@ func looksLikeProfileSearchIdentifier(text string) bool {
 func (s *sSysBot) profileMenuMarkup(ctx context.Context) *models.InlineKeyboardMarkup {
 	rows := [][]models.InlineKeyboardButton{
 		{{Text: "笔记列表", CallbackData: "pf:list:1"}, {Text: "新建笔记", CallbackData: "pf:create"}},
+		{{Text: "批量新增资料", CallbackData: "pf:batchcreate"}},
 		{{Text: "搜索笔记", CallbackData: "pf:search"}, {Text: "发送笔记", CallbackData: "pf:asksend"}},
 		{{Text: "编辑笔记", CallbackData: "pf:askedit"}, {Text: "频道管理", CallbackData: "ch:list"}},
 		{{Text: "取消当前操作", CallbackData: "pf:cancel"}},
@@ -227,6 +228,12 @@ func (s *sSysBot) handleProfileTextCommand(ctx context.Context, botId int64, msg
 	}
 	if strings.Contains(text, "新建") {
 		if err = s.startProfileSession(ctx, botId, msg, "create", "waiting_display", 0, "", nil, ""); err != nil {
+			return true, err
+		}
+		return true, s.sendProfileCreateStepPrompt(ctx, botId, chatId, "waiting_display")
+	}
+	if strings.Contains(text, "批量新增") {
+		if err = s.startProfileSession(ctx, botId, msg, "batch_create", "waiting_display", 0, "", nil, ""); err != nil {
 			return true, err
 		}
 		return true, s.sendProfileCreateStepPrompt(ctx, botId, chatId, "waiting_display")
@@ -369,6 +376,11 @@ func (s *sSysBot) handleProfileCallback(ctx context.Context, botId int64, query 
 			return true, err
 		}
 		return true, s.sendProfileCreateStepPrompt(ctx, botId, chatId, "waiting_display")
+	case "batchcreate":
+		if err = s.startProfileSessionByIds(ctx, botId, fmt.Sprintf("%d", query.From.ID), chatId, account, "batch_create", "waiting_display", 0, "", nil, ""); err != nil {
+			return true, err
+		}
+		return true, s.sendProfileCreateStepPrompt(ctx, botId, chatId, "waiting_display")
 	case "search":
 		return true, s.startProfileSessionByIds(ctx, botId, fmt.Sprintf("%d", query.From.ID), chatId, account, "search", "waiting_keyword", 0, "", nil, "请输入笔记编号、标题、正文关键词，或直接发送图片进行相似搜索。")
 	case "askup":
@@ -385,7 +397,7 @@ func (s *sSysBot) handleProfileCallback(ctx context.Context, botId int64, query 
 		return true, s.cancelProfileSessionByIds(ctx, botId, fmt.Sprintf("%d", query.From.ID), chatId)
 	case "createback":
 		session := s.activeProfileSessionByIds(ctx, botId, fmt.Sprintf("%d", query.From.ID), chatId)
-		if session == nil || (session.Scene != "create" && session.Scene != "replace") {
+		if session == nil || (session.Scene != "create" && session.Scene != "batch_create" && session.Scene != "replace") {
 			return true, s.sendProfileCreateStepPrompt(ctx, botId, chatId, "waiting_display")
 		}
 		draft := decodeProfileCreateDraft(session.PayloadJson)
@@ -402,7 +414,7 @@ func (s *sSysBot) handleProfileCallback(ctx context.Context, botId int64, query 
 		return true, s.sendProfileCreateStepPrompt(ctx, botId, chatId, "waiting_display")
 	case "createskip":
 		session := s.activeProfileSessionByIds(ctx, botId, fmt.Sprintf("%d", query.From.ID), chatId)
-		if session == nil || (session.Scene != "create" && session.Scene != "replace") || session.Step != "waiting_verify" {
+		if session == nil || (session.Scene != "create" && session.Scene != "batch_create" && session.Scene != "replace") || session.Step != "waiting_verify" {
 			return true, s.replyBotError(ctx, botId, chatId, "资料管理", gerror.New("当前没有可跳过的验证资料步骤"))
 		}
 		return true, s.consumeProfileCreatePart(ctx, botId, chatId, account, session, "跳过", nil)
@@ -2347,7 +2359,7 @@ func (s *sSysBot) isWaitingProfileCreate(ctx context.Context, botId int64, msg *
 	var row struct {
 		Id int64 `json:"id"`
 	}
-	_ = g.DB().Model(profileSessionTable).Safe().Ctx(ctx).Fields("id").Where("bot_id", botId).Where("telegram_user_id", fmt.Sprintf("%d", msg.From.ID)).Where("chat_id", fmt.Sprintf("%d", msg.Chat.ID)).Where("scene", "create").WhereIn("step", []string{"waiting_display", "waiting_verify"}).Where("status", profileSessionStatusActive).WhereGT("expires_at", gtime.Now()).Scan(&row)
+	_ = g.DB().Model(profileSessionTable).Safe().Ctx(ctx).Fields("id").Where("bot_id", botId).Where("telegram_user_id", fmt.Sprintf("%d", msg.From.ID)).Where("chat_id", fmt.Sprintf("%d", msg.Chat.ID)).WhereIn("scene", []string{"create", "batch_create"}).WhereIn("step", []string{"waiting_display", "waiting_verify"}).Where("status", profileSessionStatusActive).WhereGT("expires_at", gtime.Now()).Scan(&row)
 	return row.Id > 0
 }
 
@@ -2376,7 +2388,7 @@ type profilePendingMediaGroup struct {
 
 func (s *sSysBot) createProfileFromMessage(ctx context.Context, botId int64, msg *models.Message, text string) error {
 	session := s.activeProfileSession(ctx, botId, msg)
-	if session == nil || session.Scene != "create" {
+	if session == nil || (session.Scene != "create" && session.Scene != "batch_create") {
 		return nil
 	}
 	account := &botProfileAccount{TenantId: session.TenantId, AccountId: session.AccountId, AccountType: session.AccountType, App: session.App}
@@ -2683,6 +2695,22 @@ func (s *sSysBot) consumeProfileCreatePart(ctx context.Context, botId int64, cha
 			return s.sendProfileCreateStepPrompt(ctx, botId, chatId, "waiting_verify")
 		}
 		g.Log().Infof(ctx, "Bot资料创建完成 trace:%s stage:create_profile elapsed_ms:%d profile_id:%d", trace, time.Since(startedAt).Milliseconds(), res.Id)
+		if session.Scene == "batch_create" {
+			// Keep the durable session active for the next display/verify pair.
+			// The created profile is already committed, so a notification failure
+			// must not cancel the batch intake session.
+			if err = s.updateProfileSession(ctx, session.Id, "waiting_display", &profileCreateDraft{}); err != nil {
+				return err
+			}
+			if note, viewErr := publishService.SysPublish().BotProfileView(ctx, &publishsysin.BotProfileViewInp{TenantId: account.TenantId, AccountId: account.AccountId, ProfileId: res.Id}); viewErr == nil && note != nil {
+				if cardErr := s.sendProfileCard(ctx, botId, chatId, note, "up"); cardErr != nil {
+					g.Log().Warningf(ctx, "批量新增资料卡片发送失败 profileId:%d err:%+v", res.Id, cardErr)
+				}
+			} else if viewErr != nil {
+				g.Log().Warningf(ctx, "批量新增资料卡片读取失败 profileId:%d err:%+v", res.Id, viewErr)
+			}
+			return s.sendProfileCreateStepPrompt(ctx, botId, chatId, "waiting_display")
+		}
 		_ = s.completeProfileSession(ctx, session.Id)
 		// Creation is already durable; notification must not make the update
 		// handler fail or hold the session lock. Retry transient Telegram errors.
