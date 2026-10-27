@@ -45,10 +45,10 @@ func (s *sSysPublish) preparePublishedProfileEdit(ctx context.Context, profileId
 	if !stateRow.IsEmpty() {
 		stateStatus = stateRow["publish_task_status"].String()
 	}
-	if stateStatus == sysin.PublishTaskStatusPending || stateStatus == sysin.PublishTaskStatusPublishing {
+	if profileEditClaimBlocks(stateStatus, stateRow["publish_operation_no"].String(), operationNo) && stateStatus != "editing" {
 		return false, gerror.New("资料正在上架处理中，请稍后再编辑")
 	}
-	if stateStatus == "editing" && stateRow["publish_operation_no"].String() != operationNo {
+	if profileEditClaimBlocks(stateStatus, stateRow["publish_operation_no"].String(), operationNo) {
 		return false, gerror.New("资料正在编辑处理中，请稍后再编辑")
 	}
 	status := row[dao.ContentProfile.Columns().Status].Int()
@@ -93,4 +93,11 @@ func (s *sSysPublish) releaseProfileEditClaim(ctx context.Context, profileId, te
 func markProfileOnlineForEdit(in *sysin.ProfileSaveInp) {
 	in.Status = 1
 	in.Visibility = consts.ContentVisibilityPublic
+}
+
+func profileEditClaimBlocks(status, currentOperation, operation string) bool {
+	if status == sysin.PublishTaskStatusPending || status == sysin.PublishTaskStatusPublishing {
+		return true
+	}
+	return status == "editing" && currentOperation != operation
 }

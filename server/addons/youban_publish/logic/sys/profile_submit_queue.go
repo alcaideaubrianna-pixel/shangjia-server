@@ -45,7 +45,7 @@ func (s *sSysPublish) enqueueProfileSubmit(ctx context.Context, in *sysin.Profil
 	return &sysin.ProfileSaveModel{Id: in.Id, Uuid: normalizeProfileUUID(in.Uuid)}, nil
 }
 
-func (s *sSysPublish) handleProfileSubmitTask(ctx context.Context, task *asynq.Task) error {
+func (s *sSysPublish) handleProfileSubmitTask(ctx context.Context, task *asynq.Task) (err error) {
 	var payload profileSubmitPayload
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 		return gerror.Wrap(err, "解析资料保存任务失败")
@@ -53,7 +53,6 @@ func (s *sSysPublish) handleProfileSubmitTask(ctx context.Context, task *asynq.T
 	if payload.TenantId <= 0 || payload.AccountId <= 0 || payload.Input.Id <= 0 {
 		return gerror.New("资料保存任务参数不完整")
 	}
-	var err error
 	publishAfterSave := payload.Input.PublishAfterSave
 	if payload.Input.ChannelIds == nil {
 		payload.Input.ChannelIds, err = s.profileChannelIdsOrDefaults(ctx, payload.TenantId, payload.AccountId, payload.Input.Id)
@@ -67,6 +66,13 @@ func (s *sSysPublish) handleProfileSubmitTask(ctx context.Context, task *asynq.T
 	republish, err := s.preparePublishedProfileEdit(ctx, payload.Input.Id, payload.TenantId, payload.AccountId, payload.OperationNo)
 	if err != nil {
 		return gerror.Wrap(err, "后台准备编辑资料失败")
+	}
+	if republish {
+		defer func() {
+			if err != nil {
+				s.releaseProfileEditClaim(ctx, payload.Input.Id, payload.TenantId, payload.AccountId, payload.OperationNo)
+			}
+		}()
 	}
 	if republish {
 		markProfileOnlineForEdit(&payload.Input)
