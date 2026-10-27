@@ -115,10 +115,14 @@ func isReplyKeyboardMarkup(replyMarkup models.ReplyMarkup) bool {
 // Compact only built-in labels; administrator-defined labels retain their meaning.
 func compactReplyKeyboardLabel(feature botFeature, fallback string) string {
 	switch feature.Key() {
+	case (profilePublishFeature{}).Key():
+		return "上架资料"
 	case (helpFeature{}).Key():
 		return "使用帮助"
 	case (relayFeature{}).Key():
-		return "双向联系"
+		return "双向"
+	case (adminFeature{}).Key():
+		return "域名"
 	case (relayManagementFeature{}).Key():
 		return "双向管理"
 	case (botManagerFeature{}).Key():
@@ -175,10 +179,9 @@ type replyKeyboardItem struct {
 // when some features are disabled or hidden for the current user.
 func groupedReplyKeyboardRows(items []replyKeyboardItem) [][]models.KeyboardButton {
 	groups := [][]string{
-		{(profileFeature{}).Key(), (quickPushFeature{}).Key(), (scanFeature{}).Key()},
-		{(collectManageFeature{}).Key(), (botManagerFeature{}).Key(), (relayManagementFeature{}).Key()},
-		{(accountManagementFeature{}).Key(), (inviteFeature{}).Key()},
-		{(adminFeature{}).Key()},
+		{(profilePublishFeature{}).Key(), (profileFeature{}).Key(), (collectManageFeature{}).Key()},
+		{(botManagerFeature{}).Key(), (accountManagementFeature{}).Key(), (relayManagementFeature{}).Key()},
+		{(scanFeature{}).Key(), (relayFeature{}).Key(), (inviteFeature{}).Key(), (adminFeature{}).Key()},
 		{(instantRegisterFeature{}).Key(), (bindFeature{}).Key(), (loginFeature{}).Key()},
 		{(startFeature{}).Key(), (exchangeRateFeature{}).Key(), (infoFeature{}).Key()},
 		{(inlinePromotionFeature{}).Key()},
@@ -189,7 +192,7 @@ func groupedReplyKeyboardRows(items []replyKeyboardItem) [][]models.KeyboardButt
 		byKey[item.Key] = item.Button
 	}
 	var rows [][]models.KeyboardButton
-	for _, group := range groups {
+	for groupIndex, group := range groups {
 		var buttons []models.KeyboardButton
 		for _, key := range group {
 			if button, ok := byKey[key]; ok {
@@ -197,7 +200,11 @@ func groupedReplyKeyboardRows(items []replyKeyboardItem) [][]models.KeyboardButt
 				delete(byKey, key)
 			}
 		}
-		rows = append(rows, replyKeyboardRows(buttons)...)
+		if groupIndex == 2 && len(buttons) > 0 && len(buttons) <= 4 {
+			rows = append(rows, buttons)
+		} else {
+			rows = append(rows, replyKeyboardRows(buttons)...)
+		}
 	}
 	// New plugins keep their entry until they are assigned an explicit group.
 	var remaining []models.KeyboardButton

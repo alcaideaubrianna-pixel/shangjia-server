@@ -183,7 +183,6 @@ func looksLikeProfileSearchIdentifier(text string) bool {
 func (s *sSysBot) profileMenuMarkup(ctx context.Context) *models.InlineKeyboardMarkup {
 	rows := [][]models.InlineKeyboardButton{
 		{{Text: "笔记列表", CallbackData: "pf:list:1"}, {Text: "新建笔记", CallbackData: "pf:create"}},
-		{{Text: "批量新增资料", CallbackData: "pf:batchcreate"}},
 		{{Text: "搜索笔记", CallbackData: "pf:search"}, {Text: "发送笔记", CallbackData: "pf:asksend"}},
 		{{Text: "编辑笔记", CallbackData: "pf:askedit"}, {Text: "频道管理", CallbackData: "ch:list"}},
 		{{Text: "取消当前操作", CallbackData: "pf:cancel"}},

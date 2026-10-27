@@ -176,6 +176,7 @@ func init() {
 	registerBotFeature(accountManagementFeature{})
 	registerBotFeature(instantRegisterFeature{})
 	registerBotFeature(profileFeature{})
+	registerBotFeature(profilePublishFeature{})
 	registerBotFeature(collectManageFeature{})
 	registerBotFeature(scanFeature{})
 	registerBotFeature(quickPushFeature{})
