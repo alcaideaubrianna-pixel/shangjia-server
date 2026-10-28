@@ -358,6 +358,19 @@ func TestBuildCollectRuleDecisionDropsFeeWhenOnlyShortTitleRemains(t *testing.T)
 	}
 }
 
+func TestBuildCollectRuleDecisionKeepsFeeWhenTruncateAndSuffixEnabled(t *testing.T) {
+	event := gdb.Record{"raw_text": gvar.New("正文\n介绍费：7888 cft c67"), "media_count": gvar.New(1)}
+	rule := gdb.Record{
+		"truncate_intro_fee_enabled": gvar.New(true), "intro_fee_suffix": gvar.New("来风"),
+		"delete_lines": gvar.New([]string{}), "delete_texts": gvar.New([]string{}),
+		"replace_from": gvar.New([]string{}), "replace_to": gvar.New([]string{}),
+	}
+	got := buildCollectRuleDecision(event, nil, rule).Text
+	if !strings.Contains(got, "介绍费 7888 来风") {
+		t.Fatalf("fee suffix was lost: %q", got)
+	}
+}
+
 func TestBuildCollectRuleDecisionRemovesOriginalSourceMarkAndPreservesFooter(t *testing.T) {
 	event := gdb.Record{
 		"raw_text":    gvar.New("个人优点:反差、私生活少、嫩\n情诗w41\n介绍费:7888 情诗X"),
