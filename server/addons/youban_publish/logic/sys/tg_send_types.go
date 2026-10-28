@@ -18,6 +18,12 @@ type telegramMediaItem struct {
 	TgFileUniqueId          string `json:"tgFileUniqueId"`
 	TgThumbFileId           string `json:"tgThumbFileId"`
 	AssetHash               string `json:"assetHash"`
+	ProcessedFileURL        string `json:"-"`
+	ProcessedStoragePath    string `json:"-"`
+	ProcessedFileSize       int64  `json:"-"`
+	ProcessedAssetHash      string `json:"-"`
+	ProcessedTgFileId       string `json:"-"`
+	ProcessedStatus         string `json:"-"`
 	SortIndex               int    `json:"sortIndex"`
 	VideoWidth              int    `json:"videoWidth"`
 	VideoHeight             int    `json:"videoHeight"`

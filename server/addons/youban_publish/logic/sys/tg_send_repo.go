@@ -111,6 +111,12 @@ func (s *sSysPublish) telegramJobMedia(ctx context.Context, job telegramJobRecor
 			TgFileId:                media.ValidTgFileIdForHash(assetHash),
 			TgThumbFileId:           "",
 			AssetHash:               assetHash,
+			ProcessedFileURL:        normalizeMediaFileURL(record["processed_file_url"].String(), record["processed_storage_path"].String()),
+			ProcessedStoragePath:    record["processed_storage_path"].String(),
+			ProcessedFileSize:       record["processed_file_size"].Int64(),
+			ProcessedAssetHash:      record["processed_asset_hash"].String(),
+			ProcessedTgFileId:       record["processed_tg_file_id"].String(),
+			ProcessedStatus:         record["processed_status"].String(),
 			SortIndex:               record["sort_index"].Int(),
 			CollectedFileIdEligible: strings.TrimSpace(media.EditStatus) != mediaEditStatusEdited,
 		}

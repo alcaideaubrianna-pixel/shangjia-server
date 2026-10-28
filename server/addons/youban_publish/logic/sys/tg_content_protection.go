@@ -114,6 +114,18 @@ func (s *sSysPublish) applyTelegramJobContentProtection(ctx context.Context, job
 					item.TgFileId = ""
 					item.AssetHash = "anti-scan:" + telegramAntiScanCacheKey(item)
 				}
+				if strings.EqualFold(strings.TrimSpace(item.ProcessedStatus), "ready") &&
+					strings.TrimSpace(item.ProcessedAssetHash) == telegramProcessedAssetVariantHash(item) &&
+					(strings.TrimSpace(item.ProcessedTgFileId) != "" || strings.TrimSpace(item.ProcessedFileURL) != "") {
+					item.AntiScanEnabled = false
+					item.ForceUpload = false
+					if strings.TrimSpace(item.ProcessedTgFileId) != "" {
+						item.TgFileId = item.ProcessedTgFileId
+					} else if strings.TrimSpace(item.ProcessedFileURL) != "" {
+						item.FileUrl = item.ProcessedFileURL
+						item.StoragePath = item.ProcessedStoragePath
+					}
+				}
 			}
 		}
 	}
