@@ -28,10 +28,11 @@ def main():
     ap=argparse.ArgumentParser(); ap.add_argument('--apply',action='store_true'); ap.add_argument('--limit',type=int,default=10000); args=ap.parse_args()
     conn=psycopg2.connect(dbname='railway', user='postgres')
     cur=conn.cursor()
-    cur.execute('''SELECT DISTINCT ON (d.profile_id) d.profile_id,p.profile_no,p.plain_text,COALESCE(o.suffix,i.value) AS suffix
+    cur.execute('''SELECT DISTINCT ON (d.profile_id) d.profile_id,p.profile_no,CASE WHEN p.plain_text ~ '(介绍|推荐|牵线|居间|对接)费' THEN p.plain_text ELSE e.raw_text END AS plain_text,COALESCE(o.suffix,i.value) AS suffix
       FROM hg_youban_publish_collect_dispatch d
       JOIN hg_youban_publish_collect_rule_item i ON i.rule_id=d.rule_id AND i.item_type='intro_fee_suffix'
       JOIN hg_content_profile p ON p.id=d.profile_id
+      JOIN hg_youban_publish_collect_event e ON e.id=d.event_id
       JOIN hg_youban_publish_collect_source s ON s.id=d.source_id
       LEFT JOIN LATERAL (SELECT r.suffix FROM hg_youban_publish_intro_fee_channel_rule r
         WHERE r.tenant_id=d.tenant_id AND r.rule_id IN (d.rule_id,0) AND r.account_id IN (d.account_id,0)
