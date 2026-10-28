@@ -444,11 +444,26 @@ func applyCollectIntroFeeSuffix(text, original, suffix string) string {
 	suffix = strings.TrimSpace(suffix)
 	fields := parseCollectIntroFeeFields(original)
 	amount := fields.FirstAmount
-	if suffix == "" || amount == "" {
+	if suffix == "" {
 		return text
 	}
 	if len(collectNumberRule.FindAllString(normalizeCollectKeywordText(original), -1)) > 1 && fields.ForeignAmount == "" {
-		return text
+		lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+		for index, line := range lines {
+			if strings.Contains(normalizeCollectKeywordText(line), "介绍费") && !strings.HasSuffix(strings.TrimSpace(line), suffix) {
+				lines[index] = strings.TrimRightFunc(line, unicode.IsSpace) + " " + suffix
+			}
+		}
+		return strings.Join(lines, "\n")
+	}
+	if amount == "" {
+		lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+		for index, line := range lines {
+			if strings.Contains(normalizeCollectKeywordText(line), "介绍费") && !strings.HasSuffix(strings.TrimSpace(line), suffix) {
+				lines[index] = strings.TrimRightFunc(line, unicode.IsSpace) + " " + suffix
+			}
+		}
+		return strings.Join(lines, "\n")
 	}
 	feeLine := formatCollectIntroFeeFields(fields, suffix)
 	if feeLine == "" {
