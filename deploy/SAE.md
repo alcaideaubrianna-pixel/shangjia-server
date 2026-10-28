@@ -57,3 +57,5 @@ and pushes images; it does not change SAE state.
 
 
 All production SAE changes must go through `deploy/sae-deploy-all.sh`; do not call `DeployApplication` manually. The script preserves ENV, injects media fallback and publish concurrency, keeps Web at two replicas, uses rolling readiness for workers, and keeps Account as a singleton.
+
+The script validates the image tag in ACR before creating a change order and refuses to overlap an active SAE change order. For recovery from a stuck change order, use the script only with `SAE_ABORT_STUCK_CHANGE_ORDER=true`; never issue a standalone SAE deploy command.
