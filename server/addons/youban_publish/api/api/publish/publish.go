@@ -700,6 +700,28 @@ type AdminProfileViewRes struct {
 	*sysin.ProfileViewModel
 }
 
+type AdminProfileBaseReq struct {
+	g.Meta `path:"/publish/admin/profile/base" method:"get" tags:"上架插件管理端" summary:"资料基础详情"`
+	sysin.ProfileViewInp
+}
+type AdminProfileBaseRes struct {
+	Profile *sysin.ProfileModel `json:"profile"`
+}
+type AdminProfileMediaReq struct {
+	g.Meta `path:"/publish/admin/profile/media" method:"get" tags:"上架插件管理端" summary:"资料媒体详情"`
+	sysin.ProfileViewInp
+}
+type AdminProfileMediaRes struct {
+	Media []*sysin.MediaModel `json:"media"`
+}
+type AdminProfileChannelsReq struct {
+	g.Meta `path:"/publish/admin/profile/channels" method:"get" tags:"上架插件管理端" summary:"资料推送频道详情"`
+	sysin.ProfileViewInp
+}
+type AdminProfileChannelsRes struct {
+	PushChannels []*sysin.ProfilePushChannelModel `json:"pushChannels"`
+}
+
 type AdminProfileEditReq struct {
 	g.Meta `path:"/publish/admin/profile/edit" method:"post" tags:"上架插件管理端" summary:"编辑资料"`
 	sysin.ProfileSaveInp

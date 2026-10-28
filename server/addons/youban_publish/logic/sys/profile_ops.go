@@ -6,6 +6,8 @@ import (
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/net/gtrace"
+	"golang.org/x/sync/errgroup"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/consts"
@@ -338,16 +340,98 @@ func (s *sSysPublish) AdminProfileView(ctx context.Context, in *sysin.ProfileVie
 		return nil, gerror.New("资料不存在或无权操作")
 	}
 	markProfilePermission(profile, profilePermissionForViewer(account, profile))
+	var media []*sysin.MediaModel
+	var pushChannels []*sysin.ProfilePushChannelModel
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.Go(func() error {
+		var mediaErr error
+		media, mediaErr = s.mediaListByEditableProfile(groupCtx, profile.Id, profile.TenantId, profile.AccountId)
+		if mediaErr == nil {
+			sanitizeProfileMediaOriginals(media, profile.CanEdit)
+		}
+		return mediaErr
+	})
+	group.Go(func() error {
+		var channelErr error
+		pushChannels, channelErr = s.profilePushChannels(groupCtx, profile)
+		return channelErr
+	})
+	if err = group.Wait(); err != nil {
+		return nil, err
+	}
+	return &sysin.ProfileViewModel{Profile: profile, Media: media, PushChannels: pushChannels}, nil
+}
+
+func (s *sSysPublish) adminProfileAuthorized(ctx context.Context, in *sysin.ProfileViewInp) (*sysin.ProfileModel, error) {
+	account, err := s.currentAdminAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	profile, err := s.profileBaseBySelector(ctx, in, 0, 0)
+	if err != nil {
+		return nil, err
+	}
+	scope, err := s.adminProfileVisibleScope(ctx, account, &sysin.ProfileListInp{AccountScope: "all", AccountId: profile.AccountId})
+	if err != nil {
+		return nil, err
+	}
+	if !containsInt64(scope.AccountIds, profile.AccountId) {
+		return nil, gerror.New("资料不存在或无权操作")
+	}
+	markProfilePermission(profile, profilePermissionForViewer(account, profile))
+	return profile, nil
+}
+
+func (s *sSysPublish) AdminProfileBase(ctx context.Context, in *sysin.ProfileViewInp) (*sysin.ProfileModel, error) {
+	startedAt := time.Now()
+	profile, err := s.adminProfileAuthorized(ctx, in)
+	logProfileDetailStage(ctx, "base", startedAt, profileIdOf(profile), err)
+	return profile, err
+}
+
+func (s *sSysPublish) AdminProfileMedia(ctx context.Context, in *sysin.ProfileViewInp) ([]*sysin.MediaModel, error) {
+	startedAt := time.Now()
+	profile, err := s.adminProfileAuthorized(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	logProfileDetailStage(ctx, "media_authorize", startedAt, profile.Id, nil)
+	startedAt = time.Now()
 	media, err := s.mediaListByEditableProfile(ctx, profile.Id, profile.TenantId, profile.AccountId)
 	if err != nil {
 		return nil, err
 	}
 	sanitizeProfileMediaOriginals(media, profile.CanEdit)
-	pushChannels, err := s.profilePushChannels(ctx, profile)
+	logProfileDetailStage(ctx, "media_query", startedAt, profile.Id, nil)
+	return media, nil
+}
+
+func (s *sSysPublish) AdminProfileChannels(ctx context.Context, in *sysin.ProfileViewInp) ([]*sysin.ProfilePushChannelModel, error) {
+	startedAt := time.Now()
+	profile, err := s.adminProfileAuthorized(ctx, in)
 	if err != nil {
 		return nil, err
 	}
-	return &sysin.ProfileViewModel{Profile: profile, Media: media, PushChannels: pushChannels}, nil
+	logProfileDetailStage(ctx, "channels_authorize", startedAt, profile.Id, nil)
+	startedAt = time.Now()
+	channels, err := s.profilePushChannels(ctx, profile)
+	logProfileDetailStage(ctx, "channels_query", startedAt, profile.Id, err)
+	return channels, err
+}
+
+func profileIdOf(profile *sysin.ProfileModel) int64 {
+	if profile == nil {
+		return 0
+	}
+	return profile.Id
+}
+
+func logProfileDetailStage(ctx context.Context, stage string, startedAt time.Time, profileId int64, err error) {
+	fields := g.Map{"traceID": gtrace.GetTraceID(ctx), "stage": stage, "profileId": profileId, "durationMs": time.Since(startedAt).Milliseconds()}
+	if err != nil {
+		fields["error"] = err.Error()
+	}
+	g.Log().Info(ctx, "profile_detail_stage", fields)
 }
 
 func (s *sSysPublish) AdminProfileCreate(ctx context.Context, in *sysin.ProfileSaveInp) (res *sysin.ProfileSaveModel, err error) {

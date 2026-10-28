@@ -850,6 +850,30 @@ func (c *cPublishAdmin) ProfileView(ctx context.Context, req *publish.AdminProfi
 	return
 }
 
+func (c *cPublishAdmin) ProfileBase(ctx context.Context, req *publish.AdminProfileBaseReq) (*publish.AdminProfileBaseRes, error) {
+	profile, err := service.SysPublish().AdminProfileBase(ctx, &req.ProfileViewInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.AdminProfileBaseRes{Profile: profile}, nil
+}
+
+func (c *cPublishAdmin) ProfileMedia(ctx context.Context, req *publish.AdminProfileMediaReq) (*publish.AdminProfileMediaRes, error) {
+	media, err := service.SysPublish().AdminProfileMedia(ctx, &req.ProfileViewInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.AdminProfileMediaRes{Media: media}, nil
+}
+
+func (c *cPublishAdmin) ProfileChannels(ctx context.Context, req *publish.AdminProfileChannelsReq) (*publish.AdminProfileChannelsRes, error) {
+	channels, err := service.SysPublish().AdminProfileChannels(ctx, &req.ProfileViewInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.AdminProfileChannelsRes{PushChannels: channels}, nil
+}
+
 func (c *cPublishAdmin) ProfileEdit(ctx context.Context, req *publish.AdminProfileEditReq) (res *publish.AdminProfileEditRes, err error) {
 	data, err := service.SysPublish().AdminProfileEdit(ctx, &req.ProfileSaveInp)
 	if err != nil {

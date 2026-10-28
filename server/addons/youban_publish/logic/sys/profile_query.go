@@ -129,6 +129,28 @@ func (s *sSysPublish) profileView(ctx context.Context, profileId int64, tenantId
 }
 
 func (s *sSysPublish) profileViewBySelector(ctx context.Context, in *sysin.ProfileViewInp, tenantId int64, accountId int64) (res *sysin.ProfileModel, err error) {
+	res, err = s.profileBaseBySelector(ctx, in, tenantId, accountId)
+	if err != nil {
+		return nil, err
+	}
+	// The selector view is used by the admin endpoint and has the same
+	// independent enrichments as profileView. Keep them off the serial path.
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.Go(func() error { return s.applyProfileTagNames(groupCtx, []*sysin.ProfileModel{res}) })
+	group.Go(func() error { return s.applyProfileCollectionMetadata(groupCtx, []*sysin.ProfileModel{res}) })
+	group.Go(func() error {
+		var e error
+		res.ChannelIds, e = s.profileChannelIdsOrDefaults(groupCtx, res.TenantId, res.AccountId, res.Id)
+		return e
+	})
+	group.Go(func() error { return s.loadProfileRandomMedia(groupCtx, res) })
+	if err = group.Wait(); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+func (s *sSysPublish) profileBaseBySelector(ctx context.Context, in *sysin.ProfileViewInp, tenantId int64, accountId int64) (res *sysin.ProfileModel, err error) {
 	if !hasProfileViewSelector(in) {
 		return nil, gerror.New("资料ID、UUID或编号不能为空")
 	}
@@ -150,18 +172,6 @@ func (s *sSysPublish) profileViewBySelector(ctx context.Context, in *sysin.Profi
 		return nil, gerror.New("资料不存在或无权操作")
 	}
 	if err = s.ensureProfileModelUUID(ctx, res); err != nil {
-		return nil, err
-	}
-	if err = s.applyProfileTagNames(ctx, []*sysin.ProfileModel{res}); err != nil {
-		return nil, err
-	}
-	if err = s.applyProfileCollectionMetadata(ctx, []*sysin.ProfileModel{res}); err != nil {
-		return nil, err
-	}
-	if res.ChannelIds, err = s.profileChannelIdsOrDefaults(ctx, res.TenantId, res.AccountId, res.Id); err != nil {
-		return nil, err
-	}
-	if err = s.loadProfileRandomMedia(ctx, res); err != nil {
 		return nil, err
 	}
 	return res, nil
@@ -243,27 +253,40 @@ func (s *sSysPublish) adminNoteList(ctx context.Context, in *sysin.NoteListInp, 
 		return nil, err
 	}
 	logSlowAdminNoteListStage(ctx, "profile_query", startedAt, len(profiles), boolToInt(hasMore))
-	stageStartedAt := time.Now()
-	if err = s.ensureProfileListUUID(ctx, profiles); err != nil {
+	// These enrichments read independent tables and write disjoint fields on the
+	// page models. Running them concurrently removes the previous critical path
+	// of uuid -> tags -> collection metadata -> cover media.
+	var mediaBuckets map[int64][]*sysin.AdminNoteMediaModel
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.Go(func() error {
+		stageStartedAt := time.Now()
+		err := s.ensureProfileListUUID(groupCtx, profiles)
+		logSlowAdminNoteListStage(groupCtx, "profile_uuid", stageStartedAt, len(profiles), 0)
+		return err
+	})
+	group.Go(func() error {
+		stageStartedAt := time.Now()
+		err := s.applyProfileTagNames(groupCtx, profiles)
+		logSlowAdminNoteListStage(groupCtx, "tag_names", stageStartedAt, len(profiles), 0)
+		return err
+	})
+	group.Go(func() error {
+		stageStartedAt := time.Now()
+		err := s.applyProfileCollectionMetadata(groupCtx, profiles)
+		logSlowAdminNoteListStage(groupCtx, "collection_metadata", stageStartedAt, len(profiles), 0)
+		return err
+	})
+	group.Go(func() error {
+		stageStartedAt := time.Now()
+		var err error
+		mediaBuckets, err = s.adminNoteCoverMediaByProfiles(groupCtx, profiles)
+		count := len(mediaBuckets)
+		logSlowAdminNoteListStage(groupCtx, "cover_media", stageStartedAt, len(profiles), count)
+		return err
+	})
+	if err = group.Wait(); err != nil {
 		return nil, err
 	}
-	logSlowAdminNoteListStage(ctx, "profile_uuid", stageStartedAt, len(profiles), 0)
-	stageStartedAt = time.Now()
-	if err = s.applyProfileTagNames(ctx, profiles); err != nil {
-		return nil, err
-	}
-	logSlowAdminNoteListStage(ctx, "tag_names", stageStartedAt, len(profiles), 0)
-	stageStartedAt = time.Now()
-	if err = s.applyProfileCollectionMetadata(ctx, profiles); err != nil {
-		return nil, err
-	}
-	logSlowAdminNoteListStage(ctx, "collection_metadata", stageStartedAt, len(profiles), 0)
-	stageStartedAt = time.Now()
-	mediaBuckets, err := s.adminNoteCoverMediaByProfiles(ctx, profiles)
-	if err != nil {
-		return nil, err
-	}
-	logSlowAdminNoteListStage(ctx, "cover_media", stageStartedAt, len(profiles), len(mediaBuckets))
 	list := make([]*sysin.AdminNoteListModel, 0, len(profiles))
 	for _, item := range profiles {
 		if item == nil {
@@ -316,20 +339,47 @@ func adminNoteListFromProfile(profile *sysin.ProfileModel, media []*sysin.AdminN
 func (s *sSysPublish) adminNoteCoverMediaByProfiles(ctx context.Context, profiles []*sysin.ProfileModel) (map[int64][]*sysin.AdminNoteMediaModel, error) {
 	buckets := make(map[int64][]*sysin.AdminNoteMediaModel, len(profiles))
 	profileIds := make([]int64, 0, len(profiles))
+	coverMediaIds := make([]int64, 0, len(profiles))
 	for _, profile := range profiles {
 		if profile == nil || profile.Id <= 0 {
 			continue
 		}
 		profileIds = append(profileIds, profile.Id)
 		buckets[profile.Id] = []*sysin.AdminNoteMediaModel{}
+		if profile.CoverMediaId > 0 {
+			coverMediaIds = append(coverMediaIds, profile.CoverMediaId)
+		}
 	}
 	profileIds = uniqueIds(profileIds)
+	coverMediaIds = uniqueIds(coverMediaIds)
 	if len(profileIds) == 0 {
 		return buckets, nil
 	}
-	media, err := firstProfileCoverMedia(ctx, profileIds)
+	// The profile row already stores the selected cover. Read those media rows
+	// directly first; this avoids a window-function scan over every media row on
+	// the page. Old/inconsistent rows are handled by the legacy fallback below.
+	media, err := coverMediaByIds(ctx, coverMediaIds)
 	if err != nil {
 		return nil, gerror.Wrap(err, "获取笔记封面失败")
+	}
+	foundProfiles := make(map[int64]struct{}, len(media))
+	for _, item := range media {
+		if item != nil {
+			foundProfiles[item.ProfileId] = struct{}{}
+		}
+	}
+	missingProfileIds := make([]int64, 0, len(profileIds))
+	for _, profileId := range profileIds {
+		if _, ok := foundProfiles[profileId]; !ok {
+			missingProfileIds = append(missingProfileIds, profileId)
+		}
+	}
+	if len(missingProfileIds) > 0 {
+		fallback, fallbackErr := firstProfileCoverMedia(ctx, missingProfileIds)
+		if fallbackErr != nil {
+			return nil, gerror.Wrap(fallbackErr, "获取笔记封面失败")
+		}
+		media = append(media, fallback...)
 	}
 	for _, item := range media {
 		applyProfileCoverAsset(item)
@@ -349,6 +399,21 @@ func (s *sSysPublish) adminNoteCoverMediaByProfiles(ctx context.Context, profile
 		})
 	}
 	return buckets, nil
+}
+
+func coverMediaByIds(ctx context.Context, mediaIds []int64) ([]*sysin.MediaModel, error) {
+	if len(mediaIds) == 0 {
+		return []*sysin.MediaModel{}, nil
+	}
+	var media []*sysin.MediaModel
+	err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+		WhereIn("id", mediaIds).
+		WhereNull("deleted_at").
+		Where("status", 1).
+		Where("(purpose IS NULL OR purpose = '' OR purpose = 'display')").
+		Fields("id, profile_id, media_type, file_url, storage_path, poster_url, poster_storage_path, sort_index").
+		Scan(&media)
+	return media, err
 }
 
 func firstProfileCoverMedia(ctx context.Context, profileIds []int64) ([]*sysin.MediaModel, error) {

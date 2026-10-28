@@ -598,6 +598,7 @@ type ProfileModel struct {
 	RandomMedia *ProfileRandomMediaPolicy `json:"randomMedia,omitempty"`
 
 	Id                     int64                 `json:"id" dc:"资料ID"`
+	CoverMediaId           int64                 `json:"-" dc:"封面媒体ID"`
 	NoteIndexId            int64                 `json:"-" dc:"资料索引ID"`
 	Uuid                   string                `json:"uuid" dc:"资料UUID"`
 	TenantId               int64                 `json:"tenantId" dc:"租户ID"`
