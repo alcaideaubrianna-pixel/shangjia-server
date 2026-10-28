@@ -75,6 +75,21 @@ func (s *sSysPublish) telegramJobMedia(ctx context.Context, job telegramJobRecor
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取TG媒体失败")
 	}
+	if len(records) == 0 {
+		// An absent purpose is valid (for example, no verification video).
+		// Deleted media is not absent content: never silently turn it into a
+		// text-only publish or complete a job without its verification video.
+		cols := pdao.YoubanPublishMedia.Columns()
+		deleted, readErr := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Unscoped().
+			Where(cols.ProfileId, job.ProfileId).Where(cols.Purpose, purpose).
+			WhereNotNull(cols.DeletedAt).Limit(1).One()
+		if readErr != nil {
+			return nil, gerror.Wrap(readErr, "检查TG历史媒体失败")
+		}
+		if !deleted.IsEmpty() {
+			return nil, gerror.Newf("资料的%s媒体已删除，已阻止发送，请恢复媒体或重新编辑资料", purpose)
+		}
+	}
 	rowsBySlot := make(map[telegramMediaSlot]*telegramMediaItem, len(records))
 	for _, record := range records {
 		media := newProfileMediaFromRecord(record)

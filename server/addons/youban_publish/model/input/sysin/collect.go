@@ -120,7 +120,7 @@ type CollectSourceModel struct {
 	RuleIds               []int64     `json:"ruleIds" dc:"绑定规则ID"`
 	Status                int         `json:"status" dc:"状态"`
 	EventTotal            int64       `json:"eventTotal" dc:"事件总数"`
-	SuccessTotal          int64       `json:"successTotal" dc:"成功数"`
+	SuccessTotal          int64       `json:"successTotal" dc:"成功采集数量（按成功分发事件去重，不受事件日志清理影响）"`
 	FailedTotal           int64       `json:"failedTotal" dc:"失败数"`
 	LastEventAt           *gtime.Time `json:"lastEventAt" dc:"最后事件时间"`
 	Remark                string      `json:"remark" dc:"备注"`

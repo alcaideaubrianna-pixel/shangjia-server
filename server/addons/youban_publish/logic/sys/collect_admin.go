@@ -57,6 +57,9 @@ func (s *sSysPublish) CollectSourceList(ctx context.Context, in *sysin.CollectSo
 	if err = s.fillCollectSourceRules(ctx, list); err != nil {
 		return nil, 0, err
 	}
+	if err = fillCollectSourceSuccessTotals(ctx, list, account.TenantId, account.Id); err != nil {
+		return nil, 0, err
+	}
 	if err = s.fillCollectSourceChannelTitles(ctx, list); err != nil {
 		return nil, 0, err
 	}

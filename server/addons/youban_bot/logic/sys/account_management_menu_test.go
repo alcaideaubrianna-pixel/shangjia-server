@@ -345,4 +345,46 @@ func TestAccountManagementMenusLocalTelegram(t *testing.T) {
 			t.Fatal("opening a share consumed its single-use authorization")
 		}
 	})
+	t.Run("invite registration callback", func(t *testing.T) {
+		if _, err := db.Exec(ctx, "DROP TABLE IF EXISTS "+publishAccountTable); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(ctx, `CREATE TABLE hg_youban_publish_account(id bigint PRIMARY KEY,tenant_id bigint,account_type text,username text,nickname text,status int,deleted_at timestamp)`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(ctx, `INSERT INTO hg_youban_publish_account VALUES(99,1,'admin','manager','管理员',1,NULL)`); err != nil {
+			t.Fatal(err)
+		}
+		relayTestBaseTable(t, ctx, inviteTable)
+		for attempt := 0; attempt < 2; attempt++ {
+			query := &models.CallbackQuery{ID: "invite", From: models.User{ID: 11}, Data: "acct:invite", Message: models.MaybeInaccessibleMessage{Message: &models.Message{From: &models.User{ID: 888, IsBot: true}, Chat: models.Chat{ID: 11, Type: models.ChatTypePrivate}}}}
+			handled, err := bot.handleAccountManagementCallback(ctx, 1, query)
+			if err != nil || !handled {
+				t.Fatalf("invite callback: %v %v", handled, err)
+			}
+			deadline := time.After(3 * time.Second)
+			found := false
+			for !found {
+				select {
+				case text := <-requests:
+					if strings.TrimSpace(text) == "" {
+						continue
+					}
+					if !strings.Contains(text, "邀请码：") || !strings.Contains(text, "注册链接：") {
+						t.Fatalf("missing registration invitation: %s", text)
+					}
+					found = true
+				case <-deadline:
+					t.Fatal("missing invite response")
+				}
+			}
+		}
+		rows, err := db.GetAll(ctx, `SELECT inviter_account_id,inviter_tenant_id,source FROM hg_youban_bot_invite_code`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rows) != 1 || rows[0]["inviter_account_id"].Int64() != 99 || rows[0]["inviter_tenant_id"].Int64() != 1 || rows[0]["source"].String() != "bot" {
+			t.Fatalf("wrong invite owner or duplicate code: %v", rows)
+		}
+	})
 }

@@ -10,9 +10,14 @@ import (
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gcache"
+	"github.com/gogf/gf/v2/os/gcfg"
 	botsysin "hotgo/addons/youban_bot/model/input/sysin"
 	botService "hotgo/addons/youban_bot/service"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/consts"
+	"hotgo/internal/library/cache"
+	"hotgo/internal/model"
 )
 
 type accountNoticeTestBot struct {
@@ -45,9 +50,25 @@ func TestAccountDeletionNoticeLocalPostgres(t *testing.T) {
 	fake := &accountNoticeTestBot{ISysBot: previous, fail: true}
 	botService.RegisterSysBot(fake)
 	t.Cleanup(func() { botService.RegisterSysBot(previous) })
+	if !cache.Initialized() {
+		adapter := g.Cfg().GetAdapter().(*gcfg.AdapterFile)
+		original := g.Cfg().MustGet(context.Background(), "cache.adapter").Val()
+		if err := adapter.Set("cache.adapter", "memory"); err != nil {
+			t.Fatal(err)
+		}
+		cache.SetAdapter(context.Background())
+		if err := adapter.Set("cache.adapter", original); err != nil {
+			t.Fatal(err)
+		}
+	}
+	previousCache := cache.Instance().GetAdapter()
+	cache.Instance().SetAdapter(gcache.NewAdapterMemory())
+	t.Cleanup(func() { cache.Instance().SetAdapter(previousCache) })
 	err := g.DB().Transaction(context.Background(), func(ctx context.Context, tx gdb.TX) error {
 		for _, sql := range []string{
-			`CREATE TEMP TABLE hg_youban_publish_account(id bigint PRIMARY KEY,tenant_id bigint,parent_id bigint,account_type text,username text,nickname text,status int DEFAULT 1,deleted_by bigint,deleted_at timestamp,updated_at timestamp) ON COMMIT DROP`,
+			`CREATE TEMP TABLE hg_youban_publish_account(id bigint PRIMARY KEY,tenant_id bigint,parent_id bigint,account_type text,username text,nickname text,status int DEFAULT 1,deleted_by bigint,deleted_at timestamp,updated_at timestamp,last_active_at timestamp) ON COMMIT DROP`,
+			`CREATE TEMP TABLE hg_youban_publish_tenant(id bigint PRIMARY KEY,name text,deleted_at timestamp) ON COMMIT DROP`,
+			`INSERT INTO hg_youban_publish_tenant VALUES(1,'tenant one',NULL),(2,'tenant two',NULL)`,
 			`CREATE TEMP TABLE hg_youban_publish_account_setting(tenant_id bigint,account_id bigint,account_event_enabled int,deleted_at timestamp) ON COMMIT DROP`,
 			`CREATE TEMP TABLE hg_youban_publish_account_notice(id bigserial PRIMARY KEY,tenant_id bigint NOT NULL,account_id bigint NOT NULL,event_key varchar(128) NOT NULL,category varchar(32) NOT NULL DEFAULT 'account',text_content text NOT NULL,status varchar(16) NOT NULL DEFAULT 'pending',attempts int NOT NULL DEFAULT 0,next_retry_at timestamp,lease_until timestamp,lease_token varchar(64) NOT NULL DEFAULT '',error_message varchar(512) NOT NULL DEFAULT '',created_at timestamp,updated_at timestamp,UNIQUE(event_key,account_id)) ON COMMIT DROP`,
 			`INSERT INTO hg_youban_publish_account(id,tenant_id,parent_id,account_type,username,nickname)VALUES(2,1,0,'admin','manager','管理员'),(3,1,2,'uploader','child','<子账户>'),(4,2,5,'uploader','other','其他租户'),(6,1,2,'uploader','rollback','需回滚'),(7,1,2,'uploader','quiet','静默')`,
@@ -62,8 +83,31 @@ func TestAccountDeletionNoticeLocalPostgres(t *testing.T) {
 		}
 		s := &sSysPublish{}
 		operator := &sysin.AccountModel{Id: 2, Username: "manager", Nickname: "管理员"}
+		adminCtx := context.WithValue(ctx, consts.ContextHTTPKey, &model.Context{Module: consts.AppApi, User: &model.Identity{Id: 2, App: consts.AppApi}})
+		uploaderCtx := context.WithValue(ctx, consts.ContextHTTPKey, &model.Context{Module: consts.AppApi, User: &model.Identity{Id: 3, App: consts.AppApi}})
+		for _, attempt := range []struct {
+			ctx context.Context
+			ids []int64
+		}{
+			{ctx, []int64{3}},         // no authenticated identity
+			{uploaderCtx, []int64{6}}, // uploaders cannot manage other accounts
+			{adminCtx, []int64{2}},    // cannot delete self
+			{adminCtx, []int64{4}},    // different tenant
+			{adminCtx, []int64{3, 4}}, // mixed batch must be rejected atomically
+		} {
+			if err := s.AdminAccountDelete(attempt.ctx, &sysin.AccountDeleteInp{Ids: attempt.ids}); err == nil {
+				t.Fatal("unauthorized public deletion accepted", attempt.ids)
+			}
+		}
+		untouched, err := tx.GetCount(`SELECT COUNT(*) FROM hg_youban_publish_account WHERE deleted_at IS NOT NULL`)
+		if err != nil {
+			return err
+		}
+		if untouched != 0 {
+			t.Fatal("rejected public request modified an account")
+		}
 		now := time.Now()
-		if err := s.deleteAccountsWithNotices(ctx, operator, []int64{3}, 1); err != nil {
+		if err := s.AdminAccountDelete(adminCtx, &sysin.AccountDeleteInp{Ids: []int64{3, 3}}); err != nil {
 			return err
 		}
 		if fake.calls != 0 {

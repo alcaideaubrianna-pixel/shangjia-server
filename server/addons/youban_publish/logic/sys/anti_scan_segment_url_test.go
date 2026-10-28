@@ -17,3 +17,12 @@ func TestAntiScanSegmentPresentationURLKeepsExternalURL(t *testing.T) {
 		t.Fatalf("external URL was rewritten: got %q want %q", got, want)
 	}
 }
+
+func TestAntiScanSegmentPresentationURLRewritesAttachment(t *testing.T) {
+	path := "hotgo/attachment/a4/a4c0f143b4ae35a63c4746b9528ad35a.png"
+	got := antiScanSegmentPresentationURL("http://xiaohuiji-tg-os.oss-ap-southeast-1.aliyuncs.com/" + path)
+	want := mediaContentCDNBaseURL() + "/" + path
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}

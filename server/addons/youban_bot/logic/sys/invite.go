@@ -303,7 +303,9 @@ func (s *sSysBot) currentInviteAccount(ctx context.Context) (*publishsysin.Accou
 
 func (s *sSysBot) loadInviteAccountByID(ctx context.Context, accountId int64) (*publishsysin.AccountModel, error) {
 	var account *publishsysin.AccountModel
-	if err := g.DB().Model(publishAccountTable).Safe().Ctx(ctx).Where("id", accountId).WhereNull("deleted_at").Scan(&account); err != nil {
+	// AccountModel also contains computed presentation fields. Select only the
+	// persisted fields used by invitations instead of deriving SQL from that view.
+	if err := g.DB().Model(publishAccountTable).Safe().Ctx(ctx).Fields("id,tenant_id,account_type,username,nickname,status").Where("id", accountId).WhereNull("deleted_at").Scan(&account); err != nil {
 		return nil, gerror.Wrap(err, "读取账号失败")
 	}
 	if account == nil || account.Id <= 0 {

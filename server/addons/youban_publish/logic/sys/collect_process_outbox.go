@@ -90,10 +90,11 @@ func (s *sSysPublish) dispatchDueCollectProcessOutbox(ctx context.Context, limit
 	}
 	model = model.Where("available_at <= ?", now).
 		Where("status = ? OR (status = ? AND lease_expires_at <= ?)", "pending", "processing", now)
-	// Reserve part of each scan for fresh events so an expired historical batch
-	// cannot monopolize dispatch. Unused realtime capacity goes to recovery.
+	// Keep most dispatch capacity for fresh events while a historical backlog is
+	// being recovered. This protects live collection latency; the remaining
+	// capacity still guarantees bounded progress for older rows.
 	cutoff := now.Add(-10 * time.Minute)
-	realtimeLimit := limit / 5
+	realtimeLimit := limit * 4 / 5
 	if realtimeLimit < 1 {
 		realtimeLimit = 1
 	}
