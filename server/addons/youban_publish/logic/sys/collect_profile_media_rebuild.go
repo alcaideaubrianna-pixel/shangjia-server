@@ -59,8 +59,8 @@ func collectProfileMediaRebuildCandidates(ctx context.Context, options CollectPr
 		Where("p.source_type", "youban_collect").
 		WhereNull("p.deleted_at").
 		Where("e.material_role", collectMaterialRoleDisplay).
-		Where("(e.status IN (?, ?, ?, ?, ?) OR (e.status = ? AND e.error_message = ?))",
-			"processed", "ignored", "failed", "prechecked", "media_ready",
+		Where("(e.status IN (?, ?, ?, ?, ?, ?) OR (e.status = ? AND e.error_message = ?))",
+			"processed", "dispatched", "ignored", "failed", "prechecked", "media_ready",
 			"media_pending", "资料媒体重建：重新下载").
 		Where("e.media_count > 0")
 	if len(options.ProfileIDs) > 0 {
