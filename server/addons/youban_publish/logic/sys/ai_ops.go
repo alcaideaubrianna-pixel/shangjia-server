@@ -168,11 +168,6 @@ func (s *sSysPublish) AIOpsRepublishProfiles(ctx context.Context, in *sysin.Prof
 				return nil, err
 			}
 		}
-		// Republish is a replacement operation: enqueue cleanup of all prior
-		// Telegram display messages before creating the new publication jobs.
-		if _, err = s.AIOpsOfflineProfiles(ctx, []int64{profileId}); err != nil {
-			return nil, gerror.Wrapf(err, "资料%d清理旧上架消息失败", profileId)
-		}
 		complete, err := collectProfileMediaComplete(ctx, profileId)
 		if err != nil {
 			return nil, err
