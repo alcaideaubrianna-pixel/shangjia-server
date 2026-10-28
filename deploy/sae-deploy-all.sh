@@ -7,6 +7,7 @@ set -euo pipefail
 REGION_ID="${SAE_REGION_ID:-ap-southeast-1}"
 ACR_INSTANCE_ID="${SAE_ACR_INSTANCE_ID:-cri-wx0a7j1fo37ad8mo}"
 IMAGE_REPOSITORY="${SAE_IMAGE_REPOSITORY:-xxxxxx-registry-vpc.ap-southeast-1.cr.aliyuncs.com/xiaohuiji/youban-server}"
+MEDIA_FALLBACK_CDN_URL="${SAE_MEDIA_FALLBACK_CDN_URL:-https://awdaffwaffawf-1480411854.cos.ap-hongkong.myqcloud.com}"
 TAG="${1:-}"
 
 if [[ -z "$TAG" || ! "$TAG" =~ ^[A-Za-z0-9._-]+$ ]]; then
@@ -66,7 +67,12 @@ for role in "${ROLES[@]}"; do
   app_id="${APP_IDS[$role]}"
   echo "deploying $role"
   cfg=$(aliyun sae DescribeApplicationConfig --RegionId "$REGION_ID" --AppId "$app_id")
-  envs=$(jq -r '.Data.Envs // "[]"' <<<"$cfg")
+  envs=$(jq -r '.Data.Envs // "[]"' <<<"$cfg" | jq --arg value "$MEDIA_FALLBACK_CDN_URL" '
+    if any(.[]; .name == "YOUBAN_PUBLISH_MEDIA_CACHE_FALLBACK_CDN_BASE_URL")
+      then map(if .name == "YOUBAN_PUBLISH_MEDIA_CACHE_FALLBACK_CDN_BASE_URL" then .value = $value else . end)
+      else . + [{"name":"YOUBAN_PUBLISH_MEDIA_CACHE_FALLBACK_CDN_BASE_URL","value":$value}]
+      end
+  ' | jq -c '.')
   replicas=1
   max_surge=0
   min_ready=0
