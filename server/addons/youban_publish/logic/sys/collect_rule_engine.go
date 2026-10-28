@@ -441,6 +441,9 @@ func collectIntroFeeAmount(text string) string {
 
 func normalizeCollectKeywordText(text string) string {
 	return strings.Map(func(r rune) rune {
+		if r >= '０' && r <= '９' {
+			return '0' + (r - '０')
+		}
 		if unicode.Is(unicode.Cf, r) || isCollectInvisibleVariationSelector(r) {
 			return -1
 		}
