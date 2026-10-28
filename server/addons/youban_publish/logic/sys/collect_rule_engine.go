@@ -478,7 +478,7 @@ func applyCollectIntroFeeSuffix(text, original, suffix string) string {
 			continue
 		}
 		removeNextSuffix = false
-		if collectIntroFeeAmount(normalizeCollectKeywordText(line)) != "" {
+		if parseCollectIntroFeeFields(line).FirstAmount != "" {
 			removeNextSuffix = true
 			continue
 		}
