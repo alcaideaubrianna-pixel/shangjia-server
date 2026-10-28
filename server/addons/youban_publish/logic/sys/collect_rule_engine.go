@@ -18,6 +18,7 @@ var (
 	collectMaterialCodeLineRule      = regexp.MustCompile(`^\s*(?:(?:[A-Za-z]{1,8}[-_ ]?\d{3,10}|[\p{Han}]{1,8}\d{3,10})(?:\s+|$))+\s*$`)
 	collectIntroFeeAmountRule        = regexp.MustCompile(`(?:(?:介绍|推荐|牵线|居间|对接)费(?:用)?|中介(?:服务)?费(?:用)?)[\s\p{Zs}]*[:：=；;，,]?[\s\p{Zs}]*([¥￥]?[\s\p{Zs}]*\d[\d,.]*(?:[\s\p{Zs}]*(?:元|万))?)`)
 	collectIntroFeeLooseAmountRule   = regexp.MustCompile(`(?:(?:介绍|推荐|牵线|居间|对接)费(?:用)?|中介(?:服务)?费(?:用)?)[^0-9０-９]{0,32}([¥￥]?[\s\p{Zs}]*[0-9０-９][0-9０-９,，.]*)`)
+	collectNumberRule                = regexp.MustCompile(`[0-9０-９]+`)
 	collectIntroFeeStandaloneSuffix  = regexp.MustCompile(`^[\p{Han}A-Za-z0-9]{1,32}$`)
 )
 
@@ -392,6 +393,11 @@ func isCollectIntroFeeSourceMarkLine(line string) bool {
 
 func applyCollectIntroFeeSuffix(text, original, suffix string) string {
 	suffix = strings.TrimSpace(suffix)
+	if len(collectNumberRule.FindAllString(normalizeCollectKeywordText(original), -1)) > 1 {
+		// Keep multi-price structures intact; they require a dedicated
+		// per-price policy and must not be collapsed to the first amount.
+		return text
+	}
 	amount := collectIntroFeeAmount(original)
 	if suffix == "" || amount == "" {
 		return text
