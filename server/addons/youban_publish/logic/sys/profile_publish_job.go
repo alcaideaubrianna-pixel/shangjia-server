@@ -213,6 +213,16 @@ func validateProfilePublishMediaUncached(ctx context.Context, profileID int64) e
 	}
 	client := &http.Client{Timeout: 5 * time.Second}
 	for _, row := range rows {
+		// A manually uploaded profile can be saved before the asynchronous
+		// media pipeline has finished committing every asset.  Do not create a
+		// Telegram album from that transient view: the sender would observe a
+		// smaller set than the profile actually owns and then clean up the
+		// resulting partial album.  The caller/task will retry once processing
+		// reaches the durable ready state.
+		processingStatus := strings.ToLower(strings.TrimSpace(row["processing_status"].String()))
+		if processingStatus != "" && processingStatus != "ready" {
+			return gerror.Newf("资料媒体仍在处理中，mediaId=%d，当前状态=%s，请稍后重试", row["id"].Int64(), processingStatus)
+		}
 		fileURL := strings.TrimSpace(row["file_url"].String())
 		if fileURL == "" && strings.TrimSpace(row["storage_path"].String()) == "" {
 			return gerror.Newf("资料媒体不可用，mediaId=%d，已阻止上架", row["id"].Int64())
