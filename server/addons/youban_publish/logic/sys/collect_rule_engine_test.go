@@ -303,6 +303,26 @@ func TestIsCollectIntroFeeStandaloneSuffix(t *testing.T) {
 	}
 }
 
+func TestParseCollectIntroFeeFields(t *testing.T) {
+	tests := []struct {
+		name, text, amount, suffix, foreign string
+	}{
+		{name: "suffix after amount", text: "介绍费 7888 阿泽", amount: "7888", suffix: "", foreign: ""},
+		{name: "suffix before amount", text: "7888介绍费阿泽", amount: "7888", suffix: "阿泽", foreign: ""},
+		{name: "regional prices", text: "介绍费：国内7888，国外12888", amount: "7888", suffix: "", foreign: "12888"},
+		{name: "city label", text: "介绍费：cty：7888", amount: "7888", suffix: "cty", foreign: ""},
+		{name: "no amount", text: "介绍费：给钱就卖", amount: "", suffix: "", foreign: ""},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := parseCollectIntroFeeFields(test.text)
+			if got.FirstAmount != test.amount || got.FirstSuffix != test.suffix || got.ForeignAmount != test.foreign {
+				t.Fatalf("parseCollectIntroFeeFields(%q) = %+v", test.text, got)
+			}
+		})
+	}
+}
+
 func TestBuildCollectRuleDecisionDropsFeeWhenOnlyShortTitleRemains(t *testing.T) {
 	event := gdb.Record{"raw_text": gvar.New("编号：A123\n正文\n介绍费 7888\nKK"), "media_count": gvar.New(1)}
 	rule := gdb.Record{

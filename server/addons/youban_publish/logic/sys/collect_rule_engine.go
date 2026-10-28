@@ -30,6 +30,41 @@ type collectRuleDecision struct {
 	MatchJSON string
 }
 
+type collectIntroFeeFields struct {
+	FirstAmount   string
+	FirstSuffix   string
+	ForeignAmount string
+}
+
+func parseCollectIntroFeeFields(text string) collectIntroFeeFields {
+	clean := normalizeCollectKeywordText(text)
+	fields := collectIntroFeeFields{}
+	amounts := collectNumberRule.FindAllString(clean, -1)
+	if len(amounts) > 0 {
+		fields.FirstAmount = strings.Join(strings.Fields(amounts[0]), " ")
+	}
+	if len(amounts) > 1 && strings.Contains(clean, "国外") {
+		fields.ForeignAmount = strings.Join(strings.Fields(amounts[1]), " ")
+	}
+	if fields.FirstAmount != "" {
+		if feeIndex := strings.Index(clean, "介绍费"); feeIndex >= 0 && feeIndex+len("介绍费") < len(clean) {
+			afterFee := strings.TrimSpace(strings.TrimLeft(clean[feeIndex+len("介绍费"):], "：:；;，,./"))
+			if afterFee != "" && !strings.Contains(afterFee, fields.FirstAmount) {
+				fields.FirstSuffix = afterFee
+			}
+		}
+		if index := strings.Index(clean, fields.FirstAmount); index > 0 {
+			prefix := strings.TrimSpace(clean[:index])
+			prefix = strings.TrimSpace(strings.TrimLeft(prefix, "：:；;，,./"))
+			prefix = strings.TrimSpace(strings.TrimPrefix(prefix, "介绍费"))
+			if prefix != "" && !strings.Contains(prefix, "国外") {
+				fields.FirstSuffix = prefix
+			}
+		}
+	}
+	return fields
+}
+
 type collectReplaceRule struct {
 	From string `json:"from"`
 	To   string `json:"to"`
