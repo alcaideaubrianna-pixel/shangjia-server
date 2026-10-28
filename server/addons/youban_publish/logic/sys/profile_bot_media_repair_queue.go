@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"time"
 
@@ -91,7 +92,7 @@ func (s *sSysPublish) handleBotMediaRepairTask(ctx context.Context, task *asynq.
 		err = s.rebuildCollectedProfileMedia(ctx, payload.ProfileId, payload.JobId)
 	}
 	if err != nil {
-		if isBotMediaPermanentlyUnavailableError(err) {
+		if isBotMediaPermanentlyUnavailableError(err) && botMediaPermanentFailureQuarantineEnabled(ctx) {
 			if quarantineErr := s.quarantineProfileWithUnavailableMedia(ctx, payload.ProfileId, err.Error()); quarantineErr != nil {
 				return gerror.Wrap(quarantineErr, "隔离永久失效媒体资料失败")
 			}
@@ -118,6 +119,16 @@ func (s *sSysPublish) handleBotMediaRepairTask(ctx context.Context, task *asynq.
 	}
 	g.Log().Info(ctx, "Bot历史媒体恢复完成", g.Map{"profileId": payload.ProfileId, "mediaRecovered": result.Requeued > 0})
 	return nil
+}
+
+// botMediaPermanentFailureQuarantineEnabled keeps the safety circuit available
+// by default, while allowing operators to disable the historical quarantine
+// after storage migration. The media repair task will then remain retryable.
+func botMediaPermanentFailureQuarantineEnabled(ctx context.Context) bool {
+	if raw := strings.TrimSpace(os.Getenv("YOUBAN_PUBLISH_MEDIA_PERMANENT_FAILURE_ENABLED")); raw != "" {
+		return strings.EqualFold(raw, "true") || raw == "1"
+	}
+	return g.Cfg().MustGet(ctx, "youbanPublish.media.permanentFailureEnabled", true).Bool()
 }
 
 func (s *sSysPublish) quarantineProfileWithUnavailableMedia(ctx context.Context, profileId int64, reason string) error {

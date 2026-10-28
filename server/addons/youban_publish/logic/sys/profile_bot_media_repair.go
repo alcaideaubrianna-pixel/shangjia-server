@@ -72,7 +72,7 @@ func (s *sSysPublish) rebuildBotProfileMedia(ctx context.Context, profileIds []i
 				}
 			}
 			if downloadErr != nil {
-				if isBotMediaPermanentlyUnavailableError(downloadErr) {
+				if isBotMediaPermanentlyUnavailableError(downloadErr) && botMediaPermanentFailureQuarantineEnabled(ctx) {
 					message := fmt.Sprintf("Telegram原始媒体已永久失效，需重新上传：%v", downloadErr)
 					_, _ = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Where("id", row["id"].Int64()).Data(g.Map{
 						"processing_status": mediaProcessingFailed,

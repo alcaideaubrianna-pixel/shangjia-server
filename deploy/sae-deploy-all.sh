@@ -10,6 +10,7 @@ IMAGE_REPOSITORY="${SAE_IMAGE_REPOSITORY:-xxxxxx-registry-vpc.ap-southeast-1.cr.
 MEDIA_FALLBACK_CDN_URL="${SAE_MEDIA_FALLBACK_CDN_URL:-https://awdaffwaffawf-1480411854.cos.ap-hongkong.myqcloud.com}"
 PUBLISH_QUEUE_CONCURRENCY="${SAE_PUBLISH_QUEUE_CONCURRENCY:-6}"
 PUBLISH_BULK_CONCURRENCY="${SAE_PUBLISH_BULK_CONCURRENCY:-8}"
+MEDIA_PERMANENT_FAILURE_ENABLED="${SAE_PUBLISH_MEDIA_PERMANENT_FAILURE_ENABLED:-true}"
 ABORT_STUCK_CHANGE_ORDER="${SAE_ABORT_STUCK_CHANGE_ORDER:-false}"
 TAG="${1:-}"
 
@@ -87,9 +88,10 @@ for role in "${ROLES[@]}"; do
     sleep 5
   fi
   cfg=$(aliyun sae DescribeApplicationConfig --RegionId "$REGION_ID" --AppId "$app_id")
-  envs=$(jq -r '.Data.Envs // "[]"' <<<"$cfg" | jq --arg fallback "$MEDIA_FALLBACK_CDN_URL" --arg queue "$PUBLISH_QUEUE_CONCURRENCY" --arg bulk "$PUBLISH_BULK_CONCURRENCY" '
+  envs=$(jq -r '.Data.Envs // "[]"' <<<"$cfg" | jq --arg fallback "$MEDIA_FALLBACK_CDN_URL" --arg permanent "$MEDIA_PERMANENT_FAILURE_ENABLED" --arg queue "$PUBLISH_QUEUE_CONCURRENCY" --arg bulk "$PUBLISH_BULK_CONCURRENCY" '
     def upsert($name;$value): if any(.[]; .name == $name) then map(if .name == $name then .value = $value else . end) else . + [{"name":$name,"value":$value}] end;
     upsert("YOUBAN_PUBLISH_MEDIA_CACHE_FALLBACK_CDN_BASE_URL";$fallback)
+    | upsert("YOUBAN_PUBLISH_MEDIA_PERMANENT_FAILURE_ENABLED";$permanent)
     | if $ENV_ROLE == "publish" then upsert("YOUBAN_PUBLISH_QUEUE_CONCURRENCY";$queue) | upsert("YOUBAN_PUBLISH_BULK_CONCURRENCY";$bulk) else . end
   ' --arg ENV_ROLE "$role" | jq -c '.')
   replicas=1
