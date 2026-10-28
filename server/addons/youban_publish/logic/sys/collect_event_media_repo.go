@@ -267,6 +267,7 @@ func (s *sSysPublish) collectEventMediaItemsByEvent(ctx context.Context, eventId
 			end = len(eventIds)
 		}
 		records, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
+			Fields(collectEventMediaQueryFields()).
 			WhereIn(mediaCols.EventId, eventIds[start:end]).
 			OrderAsc(mediaCols.EventId).
 			OrderAsc(mediaCols.SortIndex).
@@ -333,6 +334,10 @@ func collectMediaRowsToItems(rows []*collectEventMediaRow, purpose string) []col
 		})
 	}
 	return items
+}
+
+func collectEventMediaQueryFields() string {
+	return "id,tenant_id,account_id,source_id,source_type,event_id,source_chat_id,source_message_id,source_grouped_id,source_media_key,media_type,source_ref_type,source_file_id,source_message_ref,backup_channel_id,backup_chat_id,backup_message_id,file_url,storage_path,poster_url,source_kind,source_media_id,source_access_hash,source_file_reference,source_thumb_size,source_mime_type,source_dc_id,source_size,file_md5,file_phash,meta_json,sort_index,cache_status,download_duration_ms,download_bytes,download_attempts,cache_hit,download_error_type,next_retry_at,error_message,created_at,updated_at"
 }
 
 func collectEventMediaRecords(records gdb.Result) []*collectEventMediaRow {

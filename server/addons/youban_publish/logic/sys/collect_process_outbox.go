@@ -88,21 +88,36 @@ func (s *sSysPublish) dispatchDueCollectProcessOutbox(ctx context.Context, limit
 	if strings.EqualFold(g.DB().GetConfig().Type, "pgsql") {
 		model = model.Fields("*, updated_at::text AS claim_version")
 	}
-	model = model.Where("available_at <= ?", now).
-		Where("status = ? OR (status = ? AND lease_expires_at <= ?)", "pending", "processing", now)
-	// Keep most dispatch capacity for fresh events while a historical backlog is
-	// being recovered. This protects live collection latency; the remaining
-	// capacity still guarantees bounded progress for older rows.
 	cutoff := now.Add(-10 * time.Minute)
 	realtimeLimit := limit * 4 / 5
 	if realtimeLimit < 1 {
 		realtimeLimit = 1
 	}
-	rows, err := model.Clone().WhereGTE("created_at", cutoff).OrderAsc("available_at").OrderAsc("id").Limit(realtimeLimit).All()
+	// Query pending and expired processing rows separately. The previous OR
+	// predicate forced PostgreSQL into BitmapOr + heap scan + sort over the
+	// whole outbox, which made task claiming take seconds under backlog.
+	load := func(status string, dueColumn string, freshLimit, olderLimit int) ([]gdb.Record, error) {
+		base := model.Clone()
+		if status == "pending" {
+			base = model.Clone().Where("status", status).Where("available_at <= ?", now)
+		} else {
+			base = model.Clone().Where("status", status).Where("lease_expires_at <= ?", now)
+		}
+		fresh, err := base.Clone().WhereGTE("created_at", cutoff).OrderAsc(dueColumn).OrderAsc("id").Limit(freshLimit).All()
+		if err != nil {
+			return nil, err
+		}
+		if len(fresh) >= freshLimit || olderLimit <= 0 {
+			return fresh, nil
+		}
+		older, err := base.Clone().WhereLT("created_at", cutoff).OrderAsc(dueColumn).OrderAsc("id").Limit(olderLimit).All()
+		return append(fresh, older...), err
+	}
+	rows, err := load("pending", "available_at", realtimeLimit, limit-realtimeLimit)
 	if err == nil && len(rows) < limit {
-		older, readErr := model.Clone().WhereLT("created_at", cutoff).OrderAsc("available_at").OrderAsc("id").Limit(limit - len(rows)).All()
+		processing, readErr := load("processing", "lease_expires_at", limit-len(rows), 0)
 		err = readErr
-		rows = append(rows, older...)
+		rows = append(rows, processing...)
 	}
 	if err != nil {
 		if isMissingCollectProcessOutboxError(err) {
