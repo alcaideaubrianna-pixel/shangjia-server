@@ -75,12 +75,14 @@ for role in "${ROLES[@]}"; do
     | if $ENV_ROLE == "publish" then upsert("YOUBAN_PUBLISH_QUEUE_CONCURRENCY";$queue) | upsert("YOUBAN_PUBLISH_BULK_CONCURRENCY";$bulk) else . end
   ' --arg ENV_ROLE "$role" | jq -c '.')
   replicas=1
-  max_surge=0
-  min_ready=0
-  if [[ "$role" == "web" ]]; then
+  max_surge=1
+  min_ready=1
+  if [[ "$role" == "account" ]]; then
+    # Account is a strict singleton; never overlap protocol consumers.
+    max_surge=0
+    min_ready=0
+  elif [[ "$role" == "web" ]]; then
     replicas=2
-    max_surge=1
-    min_ready=1
   fi
   aliyun sae DeployApplication \
     --RegionId "$REGION_ID" \
