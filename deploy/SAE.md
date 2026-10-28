@@ -1,5 +1,25 @@
 # Alibaba Cloud SAE deployment
 
+## Local deployment
+
+Use the checked-in script for production deployments; do not hand-edit SAE
+application settings between roles:
+
+```bash
+./deploy/sae-deploy-all.sh e5b746c
+./deploy/sae-deploy-all.sh e5b746c web publish
+```
+
+The script owns the role command arguments, image, ACR instance, environment
+preservation, one-at-a-time ordering, health polling, and Account singleton
+constraints. Web is started with the `runtime` command so the Telegram Gateway
+interactive and bulk consumers are actually started. Account is always last.
+
+Do not change `CommandArgs` for Web to `web`: that starts HTTP routes but does
+not start the Gateway Runtime queues. This exact mismatch caused the
+2026-10-28 incident: Telegram requests returned HTTP 200 while interactive
+Asynq tasks accumulated with no active consumer.
+
 The GitHub Actions workflow builds one immutable image per commit. SAE Web
 deployment is opt-in and runs only after the image build succeeds.
 

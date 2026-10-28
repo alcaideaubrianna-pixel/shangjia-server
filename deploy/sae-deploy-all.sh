@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Deploy one immutable image tag to all SAE roles in a safe order.
-# Usage: ./deploy/sae-deploy-all.sh e5b746c
+# Usage: ./deploy/sae-deploy-all.sh e5b746c [web|background|collector|media|publish|scheduler|account ...]
 
 REGION_ID="${SAE_REGION_ID:-ap-southeast-1}"
 ACR_INSTANCE_ID="${SAE_ACR_INSTANCE_ID:-cri-wx0a7j1fo37ad8mo}"
@@ -16,15 +16,33 @@ fi
 command -v aliyun >/dev/null || { echo "aliyun CLI is required" >&2; exit 1; }
 command -v jq >/dev/null || { echo "jq is required" >&2; exit 1; }
 
-declare -a ROLES=(
-  "web:b4565e3c-6d08-4297-bf8b-037884d54ee4"
-  "background:d12e3d86-e368-48ae-bac1-bd41b3a08ef2"
-  "collector:0deb4862-2af5-4c0f-9e82-ffa67364843e"
-  "media:a34c2ae5-6e59-428b-8aa5-1277cbecc9ae"
-  "publish:2fb5d3db-0975-4dea-b086-805d255131fa"
-  "scheduler:596e5f62-0715-499e-ba71-46f00c9869d3"
-  "account:f8d4a7a9-d30f-46a5-89ac-dc57eb48fb4f"
+declare -A APP_IDS=(
+  [web]=b4565e3c-6d08-4297-bf8b-037884d54ee4
+  [background]=d12e3d86-e368-48ae-bac1-bd41b3a08ef2
+  [collector]=0deb4862-2af5-4c0f-9e82-ffa67364843e
+  [media]=a34c2ae5-6e59-428b-8aa5-1277cbecc9ae
+  [publish]=2fb5d3db-0975-4dea-b086-805d255131fa
+  [scheduler]=596e5f62-0715-499e-ba71-46f00c9869d3
+  [account]=f8d4a7a9-d30f-46a5-89ac-dc57eb48fb4f
 )
+declare -A COMMAND_ARGS=(
+  [web]='["runtime"]'
+  [background]='["background-worker"]'
+  [collector]='["collector-worker"]'
+  [media]='["media-worker"]'
+  [publish]='["publish-worker"]'
+  [scheduler]='["scheduler"]'
+  [account]='["account"]'
+)
+
+if (( $# > 1 )); then
+  ROLES=("${@:2}")
+else
+  ROLES=(web background collector media publish scheduler account)
+fi
+for role in "${ROLES[@]}"; do
+  [[ -n "${APP_IDS[$role]:-}" ]] || { echo "unknown role: $role" >&2; exit 2; }
+done
 
 IMAGE_URL="${IMAGE_REPOSITORY}:${TAG}"
 wait_ready() {
@@ -44,9 +62,8 @@ wait_ready() {
   return 1
 }
 
-for item in "${ROLES[@]}"; do
-  role="${item%%:*}"
-  app_id="${item#*:}"
+for role in "${ROLES[@]}"; do
+  app_id="${APP_IDS[$role]}"
   echo "deploying $role"
   cfg=$(aliyun sae DescribeApplicationConfig --RegionId "$REGION_ID" --AppId "$app_id")
   envs=$(jq -r '.Data.Envs // "[]"' <<<"$cfg")
@@ -55,6 +72,10 @@ for item in "${ROLES[@]}"; do
     --AppId "$app_id" \
     --AcrInstanceId "$ACR_INSTANCE_ID" \
     --ImageUrl "$IMAGE_URL" \
+    --CommandArgs "${COMMAND_ARGS[$role]}" \
+    --Replicas 1 \
+    --MaxSurgeInstances 0 \
+    --MinReadyInstances 0 \
     --Envs "$envs" \
     --ChangeOrderDesc "deploy $TAG ($role)" \
     --Deploy true >/dev/null
