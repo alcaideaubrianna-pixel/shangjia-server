@@ -1,5 +1,4 @@
 import argparse, json, re, unicodedata
-import psycopg2
 
 FEE = re.compile(r'(?:介绍|推荐|牵线|居间|对接)费')
 NUM = re.compile(r'[0-9０-９]+')
@@ -24,6 +23,7 @@ def format_line(line, suffix):
     return out, out != line
 
 def main():
+    import psycopg2
     ap=argparse.ArgumentParser(); ap.add_argument('--apply',action='store_true'); ap.add_argument('--limit',type=int,default=10000); args=ap.parse_args()
     conn=psycopg2.connect(dbname='railway', user='postgres')
     cur=conn.cursor()
@@ -52,4 +52,5 @@ def main():
             cur.execute('UPDATE hg_content_profile SET plain_text=%s, updated_at=NOW() WHERE id=%s AND plain_text=%s',(after,pid,before))
         conn.commit(); print(json.dumps({'applied':len(changes)},ensure_ascii=False))
     conn.close()
-main()
+if __name__ == '__main__':
+    main()
