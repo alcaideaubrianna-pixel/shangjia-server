@@ -353,6 +353,15 @@ func TestParseCollectIntroFeeFieldsIgnoresProfileNumbers(t *testing.T) {
 	}
 }
 
+func TestParseCollectIntroFeeAliases(t *testing.T) {
+	for _, raw := range []string{"感谢费：7888", "大米7888"} {
+		got := parseCollectIntroFeeFields(raw)
+		if got.FirstAmount != "7888" {
+			t.Fatalf("%q parsed as %+v", raw, got)
+		}
+	}
+}
+
 func TestBuildCollectRuleDecisionDropsFeeWhenOnlyShortTitleRemains(t *testing.T) {
 	event := gdb.Record{"raw_text": gvar.New("编号：A123\n正文\n介绍费 7888\nKK"), "media_count": gvar.New(1)}
 	rule := gdb.Record{

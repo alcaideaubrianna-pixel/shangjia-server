@@ -18,11 +18,11 @@ var (
 	collectStandaloneCodeCaptionRule = regexp.MustCompile(`^[A-Za-z]{1,4}\d{3,6}$`)
 	collectMaterialMetaLineRule      = regexp.MustCompile(`^\s*(?:标题|昵称|编号|编码|同行)\s*(?:[:：=].*)?\s*$`)
 	collectMaterialCodeLineRule      = regexp.MustCompile(`^\s*(?:(?:[A-Za-z]{1,8}[-_ ]?\d{3,10}|[\p{Han}]{1,8}\d{3,10})(?:\s+|$))+\s*$`)
-	collectIntroFeeAmountRule        = regexp.MustCompile(`(?:(?:介绍|推荐|牵线|居间|对接)费(?:用)?|中介(?:服务)?费(?:用)?)[\s\p{Zs}]*[:：=；;，,]?[\s\p{Zs}]*([¥￥]?[\s\p{Zs}]*\d[\d,.]*(?:[\s\p{Zs}]*(?:元|万))?)`)
-	collectIntroFeeLooseAmountRule   = regexp.MustCompile(`(?:(?:介绍|推荐|牵线|居间|对接)费(?:用)?|中介(?:服务)?费(?:用)?)[^0-9０-９]{0,32}([¥￥]?[\s\p{Zs}]*[0-9０-９][0-9０-９,，.]*)`)
+	collectIntroFeeAmountRule        = regexp.MustCompile(`(?:(?:介绍|推荐|牵线|居间|对接|感谢)费(?:用)?|大米|中介(?:服务)?费(?:用)?)[\s\p{Zs}]*[:：=；;，,]?[\s\p{Zs}]*([¥￥]?[\s\p{Zs}]*\d[\d,.]*(?:[\s\p{Zs}]*(?:元|万))?)`)
+	collectIntroFeeLooseAmountRule   = regexp.MustCompile(`(?:(?:介绍|推荐|牵线|居间|对接|感谢)费(?:用)?|大米|中介(?:服务)?费(?:用)?)[^0-9０-９]{0,32}([¥￥]?[\s\p{Zs}]*[0-9０-９][0-9０-９,，.]*)`)
 	collectNumberRule                = regexp.MustCompile(`[0-9０-９]+`)
 	collectIntroFeeStandaloneSuffix  = regexp.MustCompile(`^[\p{Han}A-Za-z0-9]{1,32}$`)
-	collectFeeKeywordPattern         = regexp.MustCompile(`(?:介绍|推荐|牵线|居间|对接)费`)
+	collectFeeKeywordPattern         = regexp.MustCompile(`(?:介绍|推荐|牵线|居间|对接|感谢)费|大米`)
 )
 
 type collectRuleDecision struct {
@@ -58,8 +58,9 @@ func parseCollectIntroFeeFields(text string) collectIntroFeeFields {
 		fields.ForeignAmount = strings.Join(strings.Fields(amounts[1]), " ")
 	}
 	if fields.FirstAmount != "" {
-		if feeIndex := strings.Index(clean, "介绍费"); feeIndex >= 0 && feeIndex+len("介绍费") < len(clean) {
-			afterFee := strings.TrimSpace(strings.TrimLeft(clean[feeIndex+len("介绍费"):], "：:；;，,./"))
+		feeKeyword := collectFeeKeywordPattern.FindString(clean)
+		if feeIndex := strings.Index(clean, feeKeyword); feeKeyword != "" && feeIndex >= 0 && feeIndex+len(feeKeyword) < len(clean) {
+			afterFee := strings.TrimSpace(strings.TrimLeft(clean[feeIndex+len(feeKeyword):], "：:；;，,./"))
 			afterFee = strings.TrimSpace(strings.TrimLeft(afterFee, "：:；;，,./"))
 			if afterFee != "" && !strings.Contains(afterFee, fields.FirstAmount) {
 				fields.FirstSuffix = afterFee
@@ -69,7 +70,7 @@ func parseCollectIntroFeeFields(text string) collectIntroFeeFields {
 			prefix := strings.TrimSpace(clean[:index])
 			prefix = strings.TrimSpace(strings.TrimLeft(prefix, "：:；;，,./"))
 			prefix = strings.TrimSpace(strings.TrimLeft(prefix, "：:；;，,./"))
-			prefix = strings.TrimSpace(strings.TrimPrefix(prefix, "介绍费"))
+			prefix = strings.TrimSpace(strings.TrimPrefix(prefix, feeKeyword))
 			prefix = strings.TrimSpace(strings.TrimLeft(prefix, "：:；;，,./"))
 			prefix = strings.TrimSpace(strings.TrimRight(prefix, "：:；;，,./"))
 			if prefix != "" && !strings.Contains(prefix, "国内") && !strings.Contains(prefix, "国外") {
