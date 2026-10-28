@@ -14,6 +14,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+	"golang.org/x/sync/errgroup"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/dao"
@@ -107,16 +108,21 @@ func (s *sSysPublish) profileView(ctx context.Context, profileId int64, tenantId
 	if err = s.ensureProfileModelUUID(ctx, res); err != nil {
 		return nil, err
 	}
-	if err = s.applyProfileTagNames(ctx, []*sysin.ProfileModel{res}); err != nil {
-		return nil, err
-	}
-	if err = s.applyProfileCollectionMetadata(ctx, []*sysin.ProfileModel{res}); err != nil {
-		return nil, err
-	}
-	if res.ChannelIds, err = s.profileChannelIdsOrDefaults(ctx, res.TenantId, res.AccountId, res.Id); err != nil {
-		return nil, err
-	}
-	if err = s.loadProfileRandomMedia(ctx, res); err != nil {
+	// These enrichments touch independent fields and issue independent reads.
+	// Run them concurrently so a slow source/metadata query does not serialize
+	// the whole detail response behind otherwise unrelated lookups.
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.Go(func() error { return s.applyProfileTagNames(groupCtx, []*sysin.ProfileModel{res}) })
+	group.Go(func() error {
+		return s.applyProfileCollectionMetadata(groupCtx, []*sysin.ProfileModel{res})
+	})
+	group.Go(func() error {
+		var channelErr error
+		res.ChannelIds, channelErr = s.profileChannelIdsOrDefaults(groupCtx, res.TenantId, res.AccountId, res.Id)
+		return channelErr
+	})
+	group.Go(func() error { return s.loadProfileRandomMedia(groupCtx, res) })
+	if err = group.Wait(); err != nil {
 		return nil, err
 	}
 	return res, nil
