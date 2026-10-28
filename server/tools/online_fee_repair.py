@@ -15,6 +15,8 @@ def format_line(line, suffix):
     foreign = re.search(r'国外[^0-9０-９]*([0-9０-９]+)', clean)
     if foreign and len(nums) >= 2:
         out = f'介绍费 {nums[0]} 国外 {foreign.group(1)} {suffix}'
+    elif len(nums) > 1:
+        out = clean if clean.endswith(suffix) else clean.rstrip() + ' ' + suffix
     elif nums:
         out = f'介绍费 {nums[0]} {suffix}'
     else:
