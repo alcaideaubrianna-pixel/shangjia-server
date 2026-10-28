@@ -1243,3 +1243,13 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_daily_report" (
   UNIQUE("tenant_id","account_id","report_date")
 );
 CREATE INDEX IF NOT EXISTS "idx_ybp_daily_report_owner_date" ON "hg_youban_publish_daily_report" ("tenant_id","account_id","report_date" DESC);
+-- Processed Telegram media assets are distinct from the original upload.
+-- They are populated only after anti-scan/background replacement succeeds.
+ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "processed_storage_path" text NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "processed_file_url" text NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "processed_file_size" bigint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "processed_asset_hash" varchar(128) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "processed_tg_file_id" text NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "processed_tg_file_unique_id" varchar(255) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "processed_status" varchar(16) NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS "idx_ybp_media_processed_asset" ON "hg_youban_publish_media" ("processed_asset_hash", "processed_status") WHERE "deleted_at" IS NULL;
