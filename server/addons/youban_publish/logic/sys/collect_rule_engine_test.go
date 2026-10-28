@@ -268,6 +268,7 @@ func TestApplyCollectIntroFeeSuffix(t *testing.T) {
 		{name: "long suffix on next line", text: "正文\n介绍费7888\nBLYS", original: "正文\n介绍费7888\nBLYS", suffix: "AA", want: "正文\n介绍费 7888 AA"},
 		{name: "preserves following content", text: "正文\n介绍费 7888 KK\n联系方式", original: "正文\n介绍费 7888 KK\n联系方式", suffix: "AA", want: "正文\n联系方式\n介绍费 7888 AA"},
 		{name: "amount punctuation", text: "正文\n介绍费用：7,888.50 元 KK", original: "正文\n介绍费用：7,888.50 元 KK", suffix: "AA", want: "正文\n介绍费 7,888.50 元 AA"},
+		{name: "non-breaking spaces", text: "正文\n介绍费\u00a012888\u00a0卡路里", original: "正文\n介绍费\u00a012888\u00a0卡路里", suffix: "来雨", want: "正文\n介绍费 12888 来雨"},
 		{name: "recommendation fee removes duplicated intro fee", text: "推荐费：7888 情诗X\n七七xq\n介绍费:7889\u2060⁣‌", original: "推荐费：7888 情诗X\n七七xq\n介绍费:7889\u2060⁣‌", suffix: "七七xq", want: "介绍费 7888 七七xq"},
 		{name: "obfuscated brokerage fee", text: "正文\n牵︊线️费：7888 燕姐", original: "正文\n牵︊线️费：7888 燕姐", suffix: "AA", want: "正文\n介绍费 7888 AA"},
 		{name: "windows lines", text: "正文\r\n介绍费：7888\r\nKK", original: "正文\r\n介绍费：7888\r\nKK", suffix: "AA", want: "正文\n介绍费 7888 AA"},
