@@ -55,7 +55,8 @@ func TestNormalizeTelegramPublishInteractiveConcurrency(t *testing.T) {
 		{value: 1, want: 1},
 		{value: 4, want: 4},
 		{value: 16, want: 16},
-		{value: 17, want: 16},
+		{value: 20, want: 20},
+		{value: 21, want: 20},
 	}
 	for _, testCase := range cases {
 		if got := normalizeTelegramPublishInteractiveConcurrency(testCase.value); got != testCase.want {

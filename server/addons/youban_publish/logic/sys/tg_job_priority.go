@@ -78,7 +78,7 @@ func telegramPublishInteractiveQueueWeights(ctx context.Context) map[string]int 
 
 func telegramPublishInteractiveConcurrency(ctx context.Context) int {
 	return normalizeTelegramPublishInteractiveConcurrency(
-		g.Cfg().MustGet(ctx, "youbanPublish.queue.interactiveConcurrency", 4).Int(),
+		g.Cfg().MustGet(ctx, "youbanPublish.queue.interactiveConcurrency", 20).Int(),
 	)
 }
 
@@ -86,8 +86,8 @@ func normalizeTelegramPublishInteractiveConcurrency(value int) int {
 	if value < 1 {
 		return 1
 	}
-	if value > 16 {
-		return 16
+	if value > 20 {
+		return 20
 	}
 	return value
 }
