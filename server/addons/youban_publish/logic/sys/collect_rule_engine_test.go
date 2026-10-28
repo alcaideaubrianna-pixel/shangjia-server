@@ -346,6 +346,13 @@ func TestParseCollectIntroFeeFields(t *testing.T) {
 	}
 }
 
+func TestParseCollectIntroFeeFieldsIgnoresProfileNumbers(t *testing.T) {
+	got := parseCollectIntroFeeFields("昵称:x106\n年龄:21\n介绍费：7888。。。。。。\n女儿国")
+	if got.FirstAmount != "7888" || got.ForeignAmount != "" {
+		t.Fatalf("unexpected fee parse: %+v", got)
+	}
+}
+
 func TestBuildCollectRuleDecisionDropsFeeWhenOnlyShortTitleRemains(t *testing.T) {
 	event := gdb.Record{"raw_text": gvar.New("编号：A123\n正文\n介绍费 7888\nKK"), "media_count": gvar.New(1)}
 	rule := gdb.Record{

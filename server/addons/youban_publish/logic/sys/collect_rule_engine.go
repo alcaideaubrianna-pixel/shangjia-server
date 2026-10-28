@@ -41,6 +41,14 @@ type collectIntroFeeFields struct {
 
 func parseCollectIntroFeeFields(text string) collectIntroFeeFields {
 	clean := normalizeCollectKeywordText(text)
+	// Only numbers on the fee line are fee amounts. Other profile fields may
+	// contain ages, IDs, heights, etc. and must never become domestic/foreign fees.
+	for _, line := range strings.Split(clean, "\n") {
+		if collectFeeKeywordPattern.MatchString(line) {
+			clean = strings.TrimSpace(line)
+			break
+		}
+	}
 	fields := collectIntroFeeFields{}
 	amounts := collectNumberRule.FindAllString(clean, -1)
 	if len(amounts) > 0 {
@@ -62,6 +70,8 @@ func parseCollectIntroFeeFields(text string) collectIntroFeeFields {
 			prefix = strings.TrimSpace(strings.TrimLeft(prefix, "：:；;，,./"))
 			prefix = strings.TrimSpace(strings.TrimLeft(prefix, "：:；;，,./"))
 			prefix = strings.TrimSpace(strings.TrimPrefix(prefix, "介绍费"))
+			prefix = strings.TrimSpace(strings.TrimLeft(prefix, "：:；;，,./"))
+			prefix = strings.TrimSpace(strings.TrimRight(prefix, "：:；;，,./"))
 			if prefix != "" && !strings.Contains(prefix, "国内") && !strings.Contains(prefix, "国外") {
 				fields.FirstSuffix = prefix
 			}
@@ -110,11 +120,35 @@ func buildCollectRuleDecision(event gdb.Record, content *collectContentResult, r
 	if shouldDropCollectStandaloneCodeCaption(text, mediaCount) {
 		text = ""
 	}
+	// Keep evaluating suffix reconstruction even when truncation removed the
+	// entire body; the fee line itself must be restored from the pre-truncate text.
 	if strings.TrimSpace(text) == "" {
-		return &collectRuleDecision{
-			Matched:   true,
-			Text:      "",
-			MatchJSON: matchJSON,
+		if introFeeSuffix == "" {
+			return &collectRuleDecision{Matched: true, Text: "", MatchJSON: matchJSON}
+		}
+		candidate := normalizeCollectRuleBodyWithoutTruncate(rawText, rule)
+		if strings.Contains(candidate, "\nKK") {
+			return &collectRuleDecision{Matched: true, Text: "", MatchJSON: matchJSON}
+		}
+		meaningful := false
+		feeSeen := false
+		for _, line := range strings.Split(strings.ReplaceAll(candidate, "\r\n", "\n"), "\n") {
+			line = strings.TrimSpace(line)
+			if collectFeeKeywordPattern.MatchString(line) {
+				feeSeen = true
+				continue
+			}
+			if feeSeen && (isCollectIntroFeeStandaloneSuffix(line) || collectShortTitleLine(line)) {
+				return &collectRuleDecision{Matched: true, Text: "", MatchJSON: matchJSON}
+			}
+			if line == "" || collectMaterialMetaLineRule.MatchString(line) {
+				continue
+			}
+			meaningful = true
+			break
+		}
+		if !meaningful {
+			return &collectRuleDecision{Matched: true, Text: "", MatchJSON: matchJSON}
 		}
 	}
 	if rule["header_enabled"].Int() == 1 && strings.TrimSpace(rule["header_markdown"].String()) != "" {
@@ -449,7 +483,14 @@ func applyCollectIntroFeeSuffix(text, original, suffix string) string {
 	if suffix == "" {
 		return text
 	}
-	if len(collectNumberRule.FindAllString(normalizeCollectKeywordText(original), -1)) > 1 && fields.ForeignAmount == "" {
+	feeNumberCount := 0
+	for _, line := range strings.Split(strings.ReplaceAll(normalizeCollectKeywordText(original), "\r\n", "\n"), "\n") {
+		if collectFeeKeywordPattern.MatchString(line) {
+			feeNumberCount = len(collectNumberRule.FindAllString(line, -1))
+			break
+		}
+	}
+	if feeNumberCount > 1 && fields.ForeignAmount == "" && collectFeeKeywordPattern.MatchString(normalizeCollectKeywordText(text)) {
 		lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
 		for index, line := range lines {
 			if collectFeeKeywordPattern.MatchString(normalizeCollectKeywordText(line)) && !strings.HasSuffix(strings.TrimSpace(line), suffix) {
