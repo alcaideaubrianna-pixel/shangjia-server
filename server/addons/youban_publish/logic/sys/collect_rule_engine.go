@@ -2,6 +2,7 @@ package sys
 
 import (
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"sort"
 	"strings"
@@ -65,6 +66,17 @@ func parseCollectIntroFeeFields(text string) collectIntroFeeFields {
 		}
 	}
 	return fields
+}
+
+func formatCollectIntroFeeFields(fields collectIntroFeeFields, suffix string) string {
+	suffix = strings.TrimSpace(suffix)
+	if fields.FirstAmount == "" {
+		return ""
+	}
+	if fields.ForeignAmount != "" {
+		return strings.TrimSpace(fmt.Sprintf("介绍费 %s 国外 %s %s", fields.FirstAmount, fields.ForeignAmount, suffix))
+	}
+	return strings.TrimSpace(fmt.Sprintf("介绍费 %s %s", fields.FirstAmount, suffix))
 }
 
 type collectReplaceRule struct {
@@ -430,8 +442,16 @@ func isCollectIntroFeeSourceMarkLine(line string) bool {
 
 func applyCollectIntroFeeSuffix(text, original, suffix string) string {
 	suffix = strings.TrimSpace(suffix)
-	amount := collectIntroFeeAmount(original)
+	fields := parseCollectIntroFeeFields(original)
+	amount := fields.FirstAmount
 	if suffix == "" || amount == "" {
+		return text
+	}
+	if len(collectNumberRule.FindAllString(normalizeCollectKeywordText(original), -1)) > 1 && fields.ForeignAmount == "" {
+		return text
+	}
+	feeLine := formatCollectIntroFeeFields(fields, suffix)
+	if feeLine == "" {
 		return text
 	}
 	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
@@ -450,7 +470,6 @@ func applyCollectIntroFeeSuffix(text, original, suffix string) string {
 		kept = append(kept, line)
 	}
 	body := strings.TrimSpace(strings.Join(kept, "\n"))
-	feeLine := "介绍费 " + amount + " " + suffix
 	if body == "" {
 		return feeLine
 	}

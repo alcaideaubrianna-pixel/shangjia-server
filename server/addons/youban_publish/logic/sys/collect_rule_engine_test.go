@@ -271,7 +271,7 @@ func TestApplyCollectIntroFeeSuffix(t *testing.T) {
 		{name: "non-breaking spaces", text: "正文\n介绍费\u00a012888\u00a0卡路里", original: "正文\n介绍费\u00a012888\u00a0卡路里", suffix: "来雨", want: "正文\n介绍费 12888 来雨"},
 		{name: "fullwidth digits", text: "正文\n介绍费：１２８８８ 卡路里", original: "正文\n介绍费：１２８８８ 卡路里", suffix: "来雨", want: "正文\n介绍费 12888 来雨"},
 		{name: "suffix before amount", text: "正文\n介绍费 来风团队 7888", original: "正文\n介绍费 来风团队 7888", suffix: "来风", want: "正文\n介绍费 7888 来风"},
-		{name: "region prices", text: "正文\n介绍费：国内7888，国外12888 菠萝", original: "正文\n介绍费：国内7888，国外12888 菠萝", suffix: "来风", want: "正文\n介绍费：国内7888，国外12888 菠萝"},
+		{name: "region prices", text: "正文\n介绍费：国内7888，国外12888 菠萝", original: "正文\n介绍费：国内7888，国外12888 菠萝", suffix: "来风", want: "正文\n介绍费 7888 国外 12888 来风"},
 		{name: "package prices", text: "正文\n介绍费：打包 13888/单个 7888", original: "正文\n介绍费：打包 13888/单个 7888", suffix: "来风", want: "正文\n介绍费：打包 13888/单个 7888"},
 		{name: "missing amount", text: "正文\n介绍费：给钱就卖", original: "正文\n介绍费：给钱就卖", suffix: "来风", want: "正文\n介绍费：给钱就卖"},
 		{name: "prefix amount", text: "正文\n7888介绍费阿泽", original: "正文\n7888介绍费阿泽", suffix: "来风", want: "正文\n7888介绍费阿泽"},
