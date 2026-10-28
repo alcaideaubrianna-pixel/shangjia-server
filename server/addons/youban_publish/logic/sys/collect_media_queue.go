@@ -13,13 +13,14 @@ import (
 )
 
 type collectMediaQueuePayload struct {
-	EventId     int64  `json:"eventId"`
-	TenantId    int64  `json:"tenantId"`
-	AccountId   int64  `json:"accountId"`
-	SourceId    int64  `json:"sourceId"`
-	TgAccountId int64  `json:"tgAccountId"`
-	Bulk        bool   `json:"bulk,omitempty"`
-	Reason      string `json:"reason,omitempty"`
+	EventId          int64  `json:"eventId"`
+	TenantId         int64  `json:"tenantId"`
+	AccountId        int64  `json:"accountId"`
+	SourceId         int64  `json:"sourceId"`
+	TgAccountId      int64  `json:"tgAccountId"`
+	Bulk             bool   `json:"bulk,omitempty"`
+	Reason           string `json:"reason,omitempty"`
+	DeferredAttempts int    `json:"deferredAttempts,omitempty"`
 }
 
 const (
@@ -28,6 +29,7 @@ const (
 	collectMediaQueueDefaultConcurrency = 16
 	collectMediaQueueMaxConcurrency     = 32
 	collectMediaBulkDefaultConcurrency  = 8
+	collectMediaMaxDeferredAttempts     = 20
 	collectMediaBulkMaxConcurrency      = 16
 	mediaProcessDefaultConcurrency      = 2
 	mediaProcessMaxConcurrency          = 8

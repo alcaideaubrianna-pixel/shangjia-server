@@ -8,6 +8,8 @@ import (
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/hibiken/asynq"
+
+	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
 func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
@@ -674,6 +676,15 @@ func (s *sSysPublish) handleCollectMediaCacheTask(ctx context.Context, task *asy
 	}
 	err = s.ExecuteCollectMediaCache(ctx, payload)
 	if retryErr := collectMediaRetryErrorFrom(err); retryErr != nil && retryErr.deferWithoutFailure {
+		if payload.DeferredAttempts >= collectMediaMaxDeferredAttempts {
+			// Owner-slot contention used to create an unbounded stream of new
+			// deferred tasks. Keep the event pending for recovery, but stop
+			// multiplying Redis work until a later recovery pass retries it.
+			_ = s.markCollectEvent(ctx, payload.EventId, sysin.CollectEventStatusMediaPending, "媒体处理配额持续繁忙，已暂停本轮自动重试")
+			g.Log().Warningf(ctx, "采集媒体任务达到公平调度重试上限，暂停本轮重试 eventId:%d attempts:%d", payload.EventId, payload.DeferredAttempts)
+			return nil
+		}
+		payload.DeferredAttempts++
 		enqueued, enqueueErr := s.enqueueCollectMediaCacheDeferred(ctx, payload, retryErr.delay)
 		if enqueueErr != nil {
 			return enqueueErr
