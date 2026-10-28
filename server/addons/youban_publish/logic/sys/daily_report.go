@@ -178,7 +178,7 @@ func (s *sSysPublish) generateDailyReportBatch(ctx context.Context, reportDate t
  WHERE a.status=1 AND a.deleted_at IS NULL AND a.account_type='admin' AND a.created_at<?
  AND NOT EXISTS(SELECT 1 FROM hg_youban_publish_daily_report r WHERE r.tenant_id=a.tenant_id AND r.account_id=a.id AND r.report_date=?)
  AND (EXISTS(SELECT 1 FROM hg_youban_publish_collect_source s WHERE s.tenant_id=a.tenant_id AND s.account_id=a.id AND s.status=1 AND s.deleted_at IS NULL AND s.created_at<?)
- OR EXISTS(SELECT 1 FROM hg_youban_publish_channel c WHERE c.tenant_id=a.tenant_id AND c.account_id=a.id AND c.cycle_publish_enabled=1 AND c.deleted_at IS NULL AND c.created_at<?)
+ OR EXISTS(SELECT 1 FROM hg_youban_publish_channel c WHERE c.tenant_id=a.tenant_id AND c.tg_account_id=a.id AND c.cycle_publish_enabled=1 AND c.deleted_at IS NULL AND c.created_at<?)
  OR EXISTS(SELECT 1 FROM hg_youban_publish_collect_dispatch d WHERE d.tenant_id=a.tenant_id AND d.account_id=a.id AND d.created_at>=? AND d.created_at<?)
  OR EXISTS(SELECT 1 FROM hg_youban_publish_success_record r LEFT JOIN hg_youban_publish_tg_job j ON ` + dailyReportJobJoin() + ` WHERE r.tenant_id=a.tenant_id AND r.account_id=a.id AND ` + dailyReportResultTime() + `>=? AND ` + dailyReportResultTime() + `<? AND r.action IN ('collect_publish','cycle_publish')))
  ORDER BY a.tenant_id,a.id LIMIT ?`

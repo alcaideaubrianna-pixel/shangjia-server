@@ -31,7 +31,7 @@ func TestDailyReportGenerationLocalPostgres(t *testing.T) {
 			`CREATE TEMP TABLE hg_youban_publish_account(id bigint,tenant_id bigint,account_type text,status int,created_at timestamp,deleted_at timestamp) ON COMMIT DROP`,
 			`CREATE TEMP TABLE hg_youban_publish_account_setting(id bigint,tenant_id bigint,account_id bigint,daily_report_enabled int,deleted_at timestamp) ON COMMIT DROP`,
 			`CREATE TEMP TABLE hg_youban_publish_collect_source(id bigint,tenant_id bigint,account_id bigint,title text,status int,created_at timestamp,deleted_at timestamp) ON COMMIT DROP`,
-			`CREATE TEMP TABLE hg_youban_publish_channel(id bigint,tenant_id bigint,account_id bigint,title text,cycle_publish_enabled int,created_at timestamp,deleted_at timestamp) ON COMMIT DROP`,
+			`CREATE TEMP TABLE hg_youban_publish_channel(id bigint,tenant_id bigint,tg_account_id bigint,title text,cycle_publish_enabled int,created_at timestamp,deleted_at timestamp) ON COMMIT DROP`,
 			`CREATE TEMP TABLE hg_youban_publish_collect_dispatch(id bigint,tenant_id bigint,account_id bigint,source_id bigint,source_name_snapshot text,source_chat_id_snapshot text,profile_id bigint,status text,created_at timestamp) ON COMMIT DROP`,
 			`CREATE TEMP TABLE hg_youban_publish_success_record(id bigint,tenant_id bigint,account_id bigint,action text,status text,created_at timestamp,job_id bigint DEFAULT 0,channel_id bigint) ON COMMIT DROP`,
 			`CREATE TEMP TABLE hg_youban_publish_tg_job(id bigint,tenant_id bigint,account_id bigint,sent_at timestamp,updated_at timestamp) ON COMMIT DROP`,
