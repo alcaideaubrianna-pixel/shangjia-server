@@ -325,6 +325,7 @@
 
   function renderFeatureSwitch(row: any) {
     return h(NSwitch, {
+      disabled: row.featureKey === 'start',
       value: row.status,
       checkedValue: 1,
       uncheckedValue: 2,

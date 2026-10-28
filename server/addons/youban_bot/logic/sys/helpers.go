@@ -637,7 +637,10 @@ func (s *sSysBot) replyKeyboard(ctx context.Context) *models.ReplyKeyboardMarkup
 	if len(buttons) == 0 {
 		return nil
 	}
-	rows := groupedReplyKeyboardRows(buttons)
+	rows := s.configuredReplyKeyboardRows(ctx, buttons)
+	if len(rows) == 0 {
+		return nil
+	}
 	return &models.ReplyKeyboardMarkup{Keyboard: rows, IsPersistent: true, ResizeKeyboard: true, InputFieldPlaceholder: "输入验证码或选择菜单"}
 }
 

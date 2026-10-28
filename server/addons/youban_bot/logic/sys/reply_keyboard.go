@@ -25,10 +25,7 @@ func (s *sSysBot) ensureReplyKeyboardCurrent(ctx context.Context, botId int64, c
 	if telegramUserId == "" || botId <= 0 || strings.TrimSpace(chatId) == "" {
 		return nil
 	}
-	var markup models.ReplyMarkup = s.replyKeyboard(ctx)
-	if markup == nil {
-		markup = &models.ReplyKeyboardRemove{RemoveKeyboard: true}
-	}
+	markup := replyKeyboardMarkupOrRemove(s.replyKeyboard(ctx))
 	version := replyKeyboardDeliveryVersion(markup)
 	userKey := replyKeyboardUserVersionKey(botId, telegramUserId)
 	value, cacheErr := cache.Instance().Get(ctx, userKey)
@@ -82,6 +79,7 @@ func replyKeyboardDeliveryVersion(replyMarkup models.ReplyMarkup) string {
 			for _, row := range markup.Keyboard {
 				for _, button := range row {
 					builder.WriteString(button.Text)
+					builder.WriteString("|" + button.Style)
 					builder.WriteByte('\x1f')
 				}
 				builder.WriteByte('\x1e')
@@ -129,8 +127,6 @@ func compactReplyKeyboardLabel(feature botFeature, fallback string) string {
 		return "机器人"
 	case (infoFeature{}).Key():
 		return "聊天信息"
-	case (adminFeature{}).Key():
-		return "管理后台"
 	case (inlinePromotionFeature{}).Key():
 		return "合作推广"
 	}
@@ -215,4 +211,12 @@ func groupedReplyKeyboardRows(items []replyKeyboardItem) [][]models.KeyboardButt
 		}
 	}
 	return append(rows, replyKeyboardRows(remaining)...)
+}
+
+// A nil keyboard pointer stored in ReplyMarkup is not a nil interface.
+func replyKeyboardMarkupOrRemove(keyboard *models.ReplyKeyboardMarkup) models.ReplyMarkup {
+	if keyboard == nil {
+		return &models.ReplyKeyboardRemove{RemoveKeyboard: true}
+	}
+	return keyboard
 }

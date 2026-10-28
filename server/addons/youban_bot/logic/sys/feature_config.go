@@ -42,6 +42,10 @@ func (s *sSysBot) AdminFeatureList(ctx context.Context, in *sysin.FeatureListInp
 	for _, row := range rows {
 		configJson := normalizeFeatureConfigJson(row.FeatureKey, row.ConfigJson)
 		item := &sysin.FeatureModel{Id: row.Id, FeatureKey: row.FeatureKey, Name: row.Name, Command: row.Command, Description: row.Description, ConfigJson: configJson, Sort: row.Sort, Status: row.Status, ConfigSchema: featureConfigSchema(row.FeatureKey), ConfigValues: featureConfigValues(configJson)}
+		if row.FeatureKey == (startFeature{}).Key() {
+			item.Command = "start"
+			item.Status = 1
+		}
 		if row.CreatedAt != nil {
 			item.CreatedAt = row.CreatedAt.String()
 		}
@@ -70,6 +74,12 @@ func (s *sSysBot) AdminFeatureSave(ctx context.Context, in *sysin.FeatureSaveInp
 	if featureKey == "" {
 		return gerror.New("插件Key不能为空")
 	}
+	if strings.TrimSpace(in.ConfigJson) != "" && !json.Valid([]byte(in.ConfigJson)) {
+		return gerror.New("配置JSON格式不正确")
+	}
+	if err = s.validateFeatureCommand(ctx, in); err != nil {
+		return err
+	}
 	in.ConfigJson = normalizeFeatureConfigJson(in.FeatureKey, in.ConfigJson)
 	if strings.TrimSpace(in.ConfigJson) != "" && !json.Valid([]byte(strings.TrimSpace(in.ConfigJson))) {
 		return gerror.New("配置JSON格式不正确")
@@ -87,6 +97,9 @@ func (s *sSysBot) AdminFeatureSave(ctx context.Context, in *sysin.FeatureSaveInp
 	}
 	if featureKey == (startFeature{}).Key() {
 		config := featureConfigValues(in.ConfigJson)
+		if err = validateReplyKeyboardConfig(config); err != nil {
+			return err
+		}
 		config["replyText"] = sanitizeTelegramHTML(fmt.Sprintf("%v", config["replyText"]))
 		if strings.TrimSpace(fmt.Sprintf("%v", config["welcomeImage"])) != "" && telegramHTMLTextLength(fmt.Sprintf("%v", config["replyText"])) > telegramPhotoCaptionMaxLength {
 			return gerror.Newf("配置欢迎图片时，欢迎文案不能超过%d个字符", telegramPhotoCaptionMaxLength)
@@ -212,7 +225,7 @@ func (s *sSysBot) featureConfig(ctx context.Context, key string) (*botFeatureRow
 	if !ok || row == nil {
 		return nil, true
 	}
-	return row, row.Status == 1
+	return row, key == (startFeature{}).Key() || row.Status == 1
 }
 
 func (s *sSysBot) featureConfigs(ctx context.Context) (map[string]*botFeatureRow, error) {
@@ -260,6 +273,10 @@ func (s *sSysBot) dispatchFeature(ctx context.Context, botId int64, msg *models.
 		return false, err
 	}
 	command, args := botCommandAndArgs(text)
+	// /start owns deep links even when legacy configuration disabled or renamed it.
+	if command == "start" {
+		return (startFeature{}).Handle(ctx, s, &botFeatureContext{BotId: botId, Msg: msg, Text: text, Args: args})
+	}
 	labelText := strings.TrimSpace(text)
 	for _, feature := range botFeatures {
 		if err := ctx.Err(); err != nil {
@@ -338,6 +355,9 @@ func botCommandAndArgs(text string) (command string, args string) {
 }
 
 func (s *sSysBot) featureCommand(ctx context.Context, feature botFeature) string {
+	if feature.Key() == (startFeature{}).Key() {
+		return "start"
+	}
 	if row, _ := s.featureConfig(ctx, feature.Key()); row != nil && strings.TrimSpace(row.Command) != "" {
 		return strings.TrimPrefix(strings.TrimSpace(row.Command), "/")
 	}

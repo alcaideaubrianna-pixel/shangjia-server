@@ -119,12 +119,13 @@ type FeatureConfigOption struct {
 }
 
 type FeatureConfigSchema struct {
-	Field       string                 `json:"field" dc:"字段"`
-	Label       string                 `json:"label" dc:"名称"`
-	Component   string                 `json:"component" dc:"组件：hidden/switch/input/textarea/markdown/select/image_upload/image_upload_general/telegram_rich_text/telegram_buttons"`
-	Placeholder string                 `json:"placeholder" dc:"提示"`
-	Default     interface{}            `json:"default" dc:"默认值"`
-	Options     []*FeatureConfigOption `json:"options" dc:"选项"`
+	StyleOptions []*FeatureConfigOption `json:"styleOptions,omitempty" dc:"按钮颜色选项"`
+	Field        string                 `json:"field" dc:"字段"`
+	Label        string                 `json:"label" dc:"名称"`
+	Component    string                 `json:"component" dc:"组件：hidden/switch/input/textarea/markdown/select/image_upload/image_upload_general/telegram_rich_text/telegram_buttons/reply_keyboard"`
+	Placeholder  string                 `json:"placeholder" dc:"提示"`
+	Default      interface{}            `json:"default" dc:"默认值"`
+	Options      []*FeatureConfigOption `json:"options" dc:"选项"`
 }
 
 type FeatureSaveInp struct {

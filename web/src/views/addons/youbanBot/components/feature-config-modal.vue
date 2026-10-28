@@ -28,11 +28,18 @@
       /></n-form-item>
       <n-form-item label="插件名称"><n-input v-model:value="form.name" clearable /></n-form-item>
       <n-form-item label="命令"
-        ><n-input v-model:value="form.command" clearable placeholder="不带 /"
+        ><n-input
+          v-model:value="form.command"
+          :disabled="form.featureKey === 'start'"
+          clearable
+          placeholder="不带 /"
       /></n-form-item>
       <n-form-item label="排序"><n-input-number v-model:value="form.sort" clearable /></n-form-item>
       <n-form-item label="状态"
-        ><n-select v-model:value="form.status" :options="statusOptions"
+        ><n-select
+          v-model:value="form.status"
+          :disabled="form.featureKey === 'start'"
+          :options="statusOptions"
       /></n-form-item>
       <n-form-item
         v-for="item in form.configSchema"
@@ -40,8 +47,14 @@
         :key="item.field"
         :label="item.label"
       >
+        <ReplyKeyboardEditor
+          v-if="item.component === 'reply_keyboard'"
+          v-model:value="form.configValues[item.field]"
+          :options="item.options || []"
+          :style-options="item.styleOptions || []"
+        />
         <n-switch
-          v-if="item.component === 'switch'"
+          v-else-if="item.component === 'switch'"
           v-model:value="form.configValues[item.field]"
           :checked-value="1"
           :unchecked-value="0"
@@ -181,6 +194,7 @@
 
 <script setup lang="ts">
   import { computed, onMounted, ref } from 'vue';
+  import ReplyKeyboardEditor from './reply-keyboard-editor.vue';
   import { BotList, UserList } from '@/api/addons/youbanBot';
   import UploadImage from '@/components/Upload/uploadImage.vue';
   import TelegramRichEditor from '@/components/TelegramRichEditor/index.vue';
