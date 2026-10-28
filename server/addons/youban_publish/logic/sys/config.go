@@ -16,6 +16,7 @@ import (
 	"hotgo/addons/youban_publish/model"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/addons/youban_publish/service"
+	"hotgo/internal/library/cache"
 	baseservice "hotgo/internal/service"
 )
 
@@ -337,7 +338,10 @@ func (s *sSysConfig) CloudResourceConfigSave(ctx context.Context, in *sysin.Clou
 	if err := s.ensureCloudResourceConfigRows(ctx); err != nil {
 		return gerror.Wrap(err, "初始化云资源配置失败")
 	}
-	return s.updateConfigGroup(ctx, publishConfigGroupCloudResource, cloudResourceConfigMap(&in.CloudResourceConfig))
+	if err := s.updateConfigGroup(ctx, publishConfigGroupCloudResource, cloudResourceConfigMap(&in.CloudResourceConfig)); err != nil {
+		return err
+	}
+	return cache.Instance().Set(ctx, cloudResourceConfigCacheKey, &in.CloudResourceConfig, cloudResourceConfigCacheTTL)
 }
 
 func (s *sSysConfig) CloudResourceConfigTest(ctx context.Context, in *sysin.CloudResourceConfigTestInp) (res *sysin.CloudResourceConfigTestModel, err error) {
@@ -442,10 +446,17 @@ func (s *sSysConfig) AntiScanConfigView(ctx context.Context, in *sysin.AntiScanC
 }
 
 func (s *sSysConfig) GetCloudResource(ctx context.Context) (conf *model.CloudResourceConfig, err error) {
+	if value, cacheErr := cache.Instance().Get(ctx, cloudResourceConfigCacheKey); cacheErr == nil && !value.IsNil() {
+		conf = defaultCloudResourceConfig()
+		if scanErr := value.Scan(conf); scanErr == nil {
+			return conf, nil
+		}
+	}
 	conf = defaultCloudResourceConfig()
 	if err = s.scanConfigGroup(ctx, publishConfigGroupCloudResource, conf); err != nil {
 		return nil, err
 	}
+	_ = cache.Instance().Set(ctx, cloudResourceConfigCacheKey, conf, cloudResourceConfigCacheTTL)
 	return conf, nil
 }
 

@@ -106,6 +106,23 @@
       </n-form>
     </n-card>
 
+    <n-card size="small" title="OCR 文档识别">
+      <n-form :model="model" label-placement="left" label-width="170">
+        <n-form-item label="启用 OCR 判定">
+          <n-switch v-model:value="model.ocrEnabled" :checked-value="1" :unchecked-value="0" />
+        </n-form-item>
+        <n-form-item label="OCR 服务地址">
+          <n-input v-model:value="model.ocrEndpoint" placeholder="http://ocr-service:9005/ocr" />
+        </n-form-item>
+        <n-form-item label="超时（毫秒）">
+          <n-input-number v-model:value="model.ocrTimeoutMs" :min="200" :max="3000" />
+        </n-form-item>
+        <n-form-item label="OCR 屏蔽关键字">
+          <n-input v-model:value="model.ocrBlockedKeywords" type="textarea" :autosize="{ minRows: 2, maxRows: 6 }" placeholder="每行一个；识别到后禁止背景替换" />
+        </n-form-item>
+      </n-form>
+    </n-card>
+
     <n-card size="small" title="权限要求">
       <n-space vertical class="cloud-help">
         <div>人脸检测已停用，二维码和贴图由用户手动拖拽摆放。</div>
@@ -127,6 +144,10 @@
 
   const props = defineProps<{
     model: {
+      ocrEnabled: number;
+      ocrEndpoint: string;
+      ocrTimeoutMs: number;
+      ocrBlockedKeywords: string;
       aliyunAccessKeyId: string;
       aliyunAccessKeySecret: string;
       aliyunEndpoint: string;

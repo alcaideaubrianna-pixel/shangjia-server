@@ -43,6 +43,10 @@ type AutoDeleteConfig struct {
 }
 
 type CloudResourceConfig struct {
+	OcrEnabled            int    `json:"ocrEnabled"`
+	OcrEndpoint           string `json:"ocrEndpoint"`
+	OcrTimeoutMs          int    `json:"ocrTimeoutMs"`
+	OcrBlockedKeywords    string `json:"ocrBlockedKeywords"`
 	MattingProvider       string `json:"mattingProvider"`
 	AliyunAccessKeyId     string `json:"aliyunAccessKeyId"`
 	AliyunAccessKeySecret string `json:"aliyunAccessKeySecret"`

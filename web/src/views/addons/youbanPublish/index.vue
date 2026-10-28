@@ -844,6 +844,10 @@
   function newCloudResourceConfig() {
     return {
       mattingProvider: 'aliyun',
+      ocrEnabled: 0,
+      ocrEndpoint: '',
+      ocrTimeoutMs: 800,
+      ocrBlockedKeywords: [],
       facePlusApiKey: '',
       facePlusApiSecret: '',
       facePlusEndpoint: 'https://api-cn.faceplusplus.com/humanbodypp/v2/segment',

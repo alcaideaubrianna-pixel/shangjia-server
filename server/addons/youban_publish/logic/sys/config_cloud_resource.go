@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -10,8 +11,13 @@ import (
 	"hotgo/addons/youban_publish/model"
 )
 
+const cloudResourceConfigCacheKey = "youban_publish:config:cloud_resource"
+const cloudResourceConfigCacheTTL = 10 * time.Minute
+
 func defaultCloudResourceConfig() *model.CloudResourceConfig {
 	return &model.CloudResourceConfig{
+		OcrEnabled:           0,
+		OcrTimeoutMs:         800,
 		MattingProvider:      "facepp",
 		AliyunEndpoint:       "imageseg.cn-shanghai.aliyuncs.com",
 		TencentVisionEnabled: 0,
@@ -30,6 +36,10 @@ func defaultCloudResourceConfig() *model.CloudResourceConfig {
 
 func cloudResourceConfigMap(conf *model.CloudResourceConfig) g.Map {
 	return g.Map{
+		"ocrEnabled":            conf.OcrEnabled,
+		"ocrEndpoint":           conf.OcrEndpoint,
+		"ocrTimeoutMs":          conf.OcrTimeoutMs,
+		"ocrBlockedKeywords":    conf.OcrBlockedKeywords,
 		"mattingProvider":       conf.MattingProvider,
 		"aliyunAccessKeyId":     conf.AliyunAccessKeyId,
 		"aliyunAccessKeySecret": conf.AliyunAccessKeySecret,

@@ -196,6 +196,33 @@ func (in *CloudResourceConfigTestInp) Filter(ctx context.Context) error {
 }
 
 func filterCloudResourceConfig(ctx context.Context, in *model.CloudResourceConfig) error {
+	_ = ctx
+	in.OcrEndpoint = strings.TrimRight(strings.TrimSpace(in.OcrEndpoint), "/")
+	if in.OcrTimeoutMs <= 0 {
+		in.OcrTimeoutMs = 800
+	}
+	if in.OcrTimeoutMs > 3000 {
+		in.OcrTimeoutMs = 3000
+	}
+	lines := strings.FieldsFunc(in.OcrBlockedKeywords, func(r rune) bool { return r == '\n' || r == '\r' || r == ',' })
+	keywords := make([]string, 0, len(lines))
+	seen := make(map[string]struct{}, len(lines))
+	for _, keyword := range lines {
+		keyword = strings.TrimSpace(keyword)
+		if keyword != "" {
+			if _, ok := seen[keyword]; !ok {
+				seen[keyword] = struct{}{}
+				keywords = append(keywords, keyword)
+			}
+		}
+	}
+	in.OcrBlockedKeywords = strings.Join(keywords, "\n")
+	if err := checkSwitch(in.OcrEnabled, "OCR 开关"); err != nil {
+		return err
+	}
+	if in.OcrEnabled == 1 && in.OcrEndpoint == "" {
+		return gerror.New("启用 OCR 后必须配置 OCR 服务地址")
+	}
 	in.MattingProvider = strings.TrimSpace(in.MattingProvider)
 	in.AliyunAccessKeyId = strings.TrimSpace(in.AliyunAccessKeyId)
 	in.AliyunAccessKeySecret = strings.TrimSpace(in.AliyunAccessKeySecret)

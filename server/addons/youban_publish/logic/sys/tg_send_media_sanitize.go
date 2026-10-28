@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -27,6 +28,8 @@ import (
 const telegramPhotoMaxUploadBytes int64 = 10 * 1024 * 1024
 const telegramPhotoMaxDimensionsSum = 10000
 const telegramPhotoMaxDimensionRatio = 20.0
+
+var errTelegramOCRDocument = errors.New("OCR 判定为文档图片")
 
 func (s *sSysPublish) prepareTelegramMediaUploadFile(ctx context.Context, media *telegramMediaItem, path string, cleanup func()) (resultPath string, resultCleanup func(), resultErr error) {
 	ctx = telegramPublishMediaTraceContext(ctx, media)
@@ -69,6 +72,13 @@ func (s *sSysPublish) prepareTelegramAntiScanUploadFile(ctx context.Context, med
 		if err == nil && path != "" {
 			g.Log().Infof(ctx, "频道防扫图阶段完成 stage:background_replace durationMs:%d jobId:%d mediaId:%d", time.Since(startedAt).Milliseconds(), media.JobId, media.Id)
 			return prepareTelegramPhotoUploadFile(ctx, path, chainCleanup(cleanup, generatedCleanup))
+		}
+		if errors.Is(err, errTelegramOCRDocument) {
+			g.Log().Infof(ctx, "频道防扫图跳过 OCR 文档图片 jobId:%d mediaId:%d", media.JobId, media.Id)
+			// The original document is intentionally not a processed asset;
+			// prevent Telegram file-id writeback from caching it as one.
+			media.ProcessedAssetHash = ""
+			return prepareTelegramPhotoUploadFile(ctx, sourcePath, cleanup)
 		}
 		g.Log().Warningf(ctx, "频道背景替换已降级为轻量扰动 jobId:%d mediaId:%d durationMs:%d err:%+v", media.JobId, media.Id, time.Since(startedAt).Milliseconds(), err)
 	}
@@ -159,6 +169,13 @@ func (s *sSysPublish) prepareTelegramBackgroundReplacement(ctx context.Context, 
 	conf, err := service.SysConfig().GetCloudResource(ctx)
 	if err != nil {
 		return "", nil, err
+	}
+	ocrResult, ocrErr := classifyTelegramDocumentByOCR(ctx, imageBytes, conf)
+	if ocrErr != nil {
+		return "", nil, ocrErr
+	}
+	if ocrResult.HasText || ocrResult.KeywordHit {
+		return "", nil, errTelegramOCRDocument
 	}
 	provider := antiScanMattingProvider(conf)
 	segmentRaw := ""
