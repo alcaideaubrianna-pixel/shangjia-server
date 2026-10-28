@@ -49,6 +49,7 @@ func parseCollectIntroFeeFields(text string) collectIntroFeeFields {
 	if fields.FirstAmount != "" {
 		if feeIndex := strings.Index(clean, "介绍费"); feeIndex >= 0 && feeIndex+len("介绍费") < len(clean) {
 			afterFee := strings.TrimSpace(strings.TrimLeft(clean[feeIndex+len("介绍费"):], "：:；;，,./"))
+			afterFee = strings.TrimSpace(strings.TrimLeft(afterFee, "：:；;，,./"))
 			if afterFee != "" && !strings.Contains(afterFee, fields.FirstAmount) {
 				fields.FirstSuffix = afterFee
 			}
@@ -56,8 +57,9 @@ func parseCollectIntroFeeFields(text string) collectIntroFeeFields {
 		if index := strings.Index(clean, fields.FirstAmount); index > 0 {
 			prefix := strings.TrimSpace(clean[:index])
 			prefix = strings.TrimSpace(strings.TrimLeft(prefix, "：:；;，,./"))
+			prefix = strings.TrimSpace(strings.TrimLeft(prefix, "：:；;，,./"))
 			prefix = strings.TrimSpace(strings.TrimPrefix(prefix, "介绍费"))
-			if prefix != "" && !strings.Contains(prefix, "国外") {
+			if prefix != "" && !strings.Contains(prefix, "国内") && !strings.Contains(prefix, "国外") {
 				fields.FirstSuffix = prefix
 			}
 		}
@@ -428,11 +430,6 @@ func isCollectIntroFeeSourceMarkLine(line string) bool {
 
 func applyCollectIntroFeeSuffix(text, original, suffix string) string {
 	suffix = strings.TrimSpace(suffix)
-	if len(collectNumberRule.FindAllString(normalizeCollectKeywordText(original), -1)) > 1 {
-		// Keep multi-price structures intact; they require a dedicated
-		// per-price policy and must not be collapsed to the first amount.
-		return text
-	}
 	amount := collectIntroFeeAmount(original)
 	if suffix == "" || amount == "" {
 		return text
