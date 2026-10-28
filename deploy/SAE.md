@@ -49,3 +49,8 @@ role command and production dependency configuration.
 
 If `SAE_AUTO_DEPLOY` is absent or not exactly `true`, the workflow only builds
 and pushes images; it does not change SAE state.
+
+
+### Web 高可用部署
+
+部署脚本对 `web` 自动使用 2 个实例、`MaxSurgeInstances=1`、`MinReadyInstances=1`，并等待两个实例均为健康状态；这样新版本启动失败时仍保留旧实例提供服务。其他 Worker 仍按单实例部署，`account` 保持单实例。

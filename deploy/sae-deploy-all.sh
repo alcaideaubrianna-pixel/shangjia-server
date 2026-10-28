@@ -46,7 +46,7 @@ done
 
 IMAGE_URL="${IMAGE_REPOSITORY}:${TAG}"
 wait_ready() {
-  local role="$1" app_id="$2" attempts=60 data
+  local role="$1" app_id="$2" expected_instances="$3" attempts=60 data
   for ((i=1; i<=attempts; i++)); do
     data=$(aliyun sae DescribeApplicationStatus --RegionId "$REGION_ID" --AppId "$app_id")
     if [[ "$(jq -r '.Data.LastChangeOrderStatus // ""' <<<"$data")" == "FAIL" ]]; then
@@ -67,19 +67,27 @@ for role in "${ROLES[@]}"; do
   echo "deploying $role"
   cfg=$(aliyun sae DescribeApplicationConfig --RegionId "$REGION_ID" --AppId "$app_id")
   envs=$(jq -r '.Data.Envs // "[]"' <<<"$cfg")
+  replicas=1
+  max_surge=0
+  min_ready=0
+  if [[ "$role" == "web" ]]; then
+    replicas=2
+    max_surge=1
+    min_ready=1
+  fi
   aliyun sae DeployApplication \
     --RegionId "$REGION_ID" \
     --AppId "$app_id" \
     --AcrInstanceId "$ACR_INSTANCE_ID" \
     --ImageUrl "$IMAGE_URL" \
     --CommandArgs "${COMMAND_ARGS[$role]}" \
-    --Replicas 1 \
-    --MaxSurgeInstances 0 \
-    --MinReadyInstances 0 \
+    --Replicas "$replicas" \
+    --MaxSurgeInstances "$max_surge" \
+    --MinReadyInstances "$min_ready" \
     --Envs "$envs" \
     --ChangeOrderDesc "deploy $TAG ($role)" \
     --Deploy true >/dev/null
-  wait_ready "$role" "$app_id"
+  wait_ready "$role" "$app_id" "$replicas"
   echo "ready $role"
 done
 
