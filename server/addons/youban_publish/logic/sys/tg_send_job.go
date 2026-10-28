@@ -220,18 +220,6 @@ func (s *sSysPublish) sendTelegramJobLockedByChannel(ctx context.Context, jobId 
 		s.appendTelegramJobLog(ctx, job, "publish", "skipped", "上架任务已下架或不可发布，跳过TG推送")
 		return s.supersedeTelegramJobAndCompleteOperation(ctx, job)
 	}
-	// A job may have been created before its source object was deleted from
-	// storage. Re-check the complete media set immediately before any Telegram
-	// call so an old retry cannot repeatedly send a known-broken profile.
-	if mediaErr := validateProfilePublishMedia(ctx, job.ProfileId); mediaErr != nil {
-		if isPermanentProfileMediaError(mediaErr) {
-			if quarantineErr := s.quarantineProfileWithUnavailableMedia(ctx, job.ProfileId, mediaErr.Error()); quarantineErr != nil {
-				return gerror.Wrap(quarantineErr, "隔离失效媒体资料失败")
-			}
-			return nil
-		}
-		return s.handleTelegramJobError(ctx, job, mediaErr)
-	}
 	if relayPackageEnabled(ctx, job) {
 		relayErr := s.sendRelayPackageJob(ctx, job)
 		if errors.Is(relayErr, errTelegramMediaFallbackQueued) {
@@ -295,18 +283,6 @@ func (s *sSysPublish) sendTelegramJobLockedByChannel(ctx context.Context, jobId 
 		return s.handleTelegramJobError(ctx, job, gerror.Wrap(err, "完成TG推送任务失败"))
 	}
 	return nil
-}
-
-func isPermanentProfileMediaError(err error) bool {
-	if err == nil {
-		return false
-	}
-	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "http 404") ||
-		strings.Contains(message, "http 410") ||
-		strings.Contains(message, "媒体处理失败") ||
-		strings.Contains(message, "没有可发布媒体") ||
-		strings.Contains(message, "媒体已失效")
 }
 
 func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJobRecord) (resultErr error) {
