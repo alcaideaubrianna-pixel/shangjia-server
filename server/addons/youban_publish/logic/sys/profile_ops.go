@@ -320,14 +320,17 @@ func (s *sSysPublish) AdminProfileView(ctx context.Context, in *sysin.ProfileVie
 	if !hasProfileViewSelector(in) {
 		return nil, gerror.New("资料ID、UUID或编号不能为空")
 	}
-	scope, err := s.adminProfileVisibleScope(ctx, account, &sysin.ProfileListInp{AccountScope: "all"})
+	profile, err := s.profileViewBySelector(ctx, in, 0, 0)
 	if err != nil {
 		return nil, err
 	}
-	if err = s.ensureAdminProfileScopeTenants(ctx, scope); err != nil {
-		return nil, err
-	}
-	profile, err := s.profileViewBySelector(ctx, in, 0, 0)
+	// Resolve the profile first, then evaluate visibility for only its owner
+	// account. Building the complete AccountScope=all set here is expensive and
+	// unnecessary for a single UUID view request.
+	scope, err := s.adminProfileVisibleScope(ctx, account, &sysin.ProfileListInp{
+		AccountScope: "all",
+		AccountId:    profile.AccountId,
+	})
 	if err != nil {
 		return nil, err
 	}
