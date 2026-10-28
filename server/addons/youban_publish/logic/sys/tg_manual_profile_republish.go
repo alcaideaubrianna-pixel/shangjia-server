@@ -34,7 +34,7 @@ func (s *sSysPublish) prepareProfileChannelPublish(ctx context.Context, current 
 		Where("profile_id", current.ProfileId).
 		Where("target_chat_id", normalizeTelegramChannelChatID(current.TargetChatId)).
 		WhereLT("id", current.Id).
-		WhereIn("status", []string{"pending", "sending", "failed_retry", "unknown", "sent"}).
+		WhereIn("status", []string{"pending", "sending", "failed", "failed_retry", "unknown", "sent"}).
 		OrderAsc("id").
 		Scan(&previous)
 	if err != nil {
