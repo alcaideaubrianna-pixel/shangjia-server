@@ -533,6 +533,7 @@ func (s *sGateway) Webhook(ctx context.Context, key string, body []byte, secret 
 		return gerror.Wrap(err, "Webhook消息格式不正确")
 	}
 	parseDuration := time.Since(parseStartedAt)
+	g.Log().Infof(ctx, "TG链路 gateway_webhook_update key:%s updateId:%d message:%t editedMessage:%t channelPost:%t editedChannelPost:%t callback:%t inline:%t reaction:%t", key, update.ID, update.Message != nil, update.EditedMessage != nil, update.ChannelPost != nil, update.EditedChannelPost != nil, update.CallbackQuery != nil, update.InlineQuery != nil, update.MessageReaction != nil)
 	if update.InlineQuery != nil {
 		g.Log().Infof(ctx, "TG链路 gateway_webhook_inline_received key:%s updateId:%d queryId:%s query:%q", key, update.ID, update.InlineQuery.ID, strings.TrimSpace(update.InlineQuery.Query))
 	}

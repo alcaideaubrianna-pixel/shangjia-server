@@ -46,6 +46,7 @@ func (s *sGateway) dispatch(ctx context.Context, key string, update *models.Upda
 		bindings = append(bindings, s.bindings[key]...)
 		s.mu.Unlock()
 	}
+	g.Log().Infof(ctx, "TG链路 gateway_dispatch_bindings key:%s updateId:%d bindings:%d providers:%d", key, update.ID, len(bindings), len(service.Providers()))
 	if update != nil && update.InlineQuery != nil {
 		for _, binding := range bindings {
 			g.Log().Infof(ctx, "TG链路 gateway_inline_binding key:%s updateId:%d owner:%s reference:%d tenant:%d", key, update.ID, binding.Owner, binding.ReferenceID, binding.TenantID)
