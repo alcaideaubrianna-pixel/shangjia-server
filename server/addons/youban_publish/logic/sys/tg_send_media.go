@@ -1324,16 +1324,17 @@ func telegramSentMessagesFromGroup(msgs []*models.Message, purpose string, media
 		}
 		used[mediaIndex] = true
 		list = append(list, &telegramSentMessage{
-			MessageId:        int64(msg.ID),
-			MediaGroupId:     msg.MediaGroupID,
-			Purpose:          purpose,
-			MediaId:          mediaItem.Id,
-			TgFileId:         telegramMessageFileId(msg),
-			TgFileUniqueId:   telegramMessageFileUniqueId(msg),
-			AssetHash:        mediaItem.AssetHash,
-			ProtectedHashKey: mediaItem.ProtectedHashKey,
-			ProtectedPHash:   mediaItem.ProtectedPHash,
-			ProtectedDHash:   mediaItem.ProtectedDHash,
+			MessageId:          int64(msg.ID),
+			MediaGroupId:       msg.MediaGroupID,
+			Purpose:            purpose,
+			MediaId:            mediaItem.Id,
+			TgFileId:           telegramMessageFileId(msg),
+			TgFileUniqueId:     telegramMessageFileUniqueId(msg),
+			AssetHash:          mediaItem.AssetHash,
+			ProcessedAssetHash: mediaItem.ProcessedAssetHash,
+			ProtectedHashKey:   mediaItem.ProtectedHashKey,
+			ProtectedPHash:     mediaItem.ProtectedPHash,
+			ProtectedDHash:     mediaItem.ProtectedDHash,
 		})
 	}
 	return list
@@ -1364,15 +1365,16 @@ func telegramSentMessagesFromSingle(msg *models.Message, purpose string, media *
 		return nil, nil
 	}
 	return []*telegramSentMessage{{
-		MessageId:        int64(msg.ID),
-		MediaGroupId:     msg.MediaGroupID,
-		Purpose:          purpose,
-		MediaId:          media.Id,
-		TgFileId:         telegramMessageFileId(msg),
-		TgFileUniqueId:   telegramMessageFileUniqueId(msg),
-		AssetHash:        media.AssetHash,
-		ProtectedHashKey: media.ProtectedHashKey,
-		ProtectedPHash:   media.ProtectedPHash,
-		ProtectedDHash:   media.ProtectedDHash,
+		MessageId:          int64(msg.ID),
+		MediaGroupId:       msg.MediaGroupID,
+		Purpose:            purpose,
+		MediaId:            media.Id,
+		TgFileId:           telegramMessageFileId(msg),
+		TgFileUniqueId:     telegramMessageFileUniqueId(msg),
+		AssetHash:          media.AssetHash,
+		ProcessedAssetHash: media.ProcessedAssetHash,
+		ProtectedHashKey:   media.ProtectedHashKey,
+		ProtectedPHash:     media.ProtectedPHash,
+		ProtectedDHash:     media.ProtectedDHash,
 	}}, nil
 }

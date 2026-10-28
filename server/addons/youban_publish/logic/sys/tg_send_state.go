@@ -17,7 +17,19 @@ func (s *sSysPublish) updateTelegramMediaFileIds(ctx context.Context, messages [
 			g.Log().Warning(ctx, "跳过TG媒体file_id回写：消息为空")
 			continue
 		}
-		if item.MediaId <= 0 || item.TgFileId == "" || strings.HasPrefix(item.AssetHash, "anti-scan:") {
+		if item.MediaId <= 0 || item.TgFileId == "" {
+			continue
+		}
+		if strings.TrimSpace(item.ProcessedAssetHash) != "" {
+			_, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+				Where("id", item.MediaId).
+				Data(g.Map{"processed_tg_file_id": item.TgFileId, "processed_asset_hash": item.ProcessedAssetHash, "processed_status": "ready", "updated_at": now}).Update()
+			if err != nil {
+				return gerror.Wrap(err, "更新处理后TG媒体file_id失败")
+			}
+			continue
+		}
+		if strings.HasPrefix(item.AssetHash, "anti-scan:") {
 			continue
 		}
 		startedAt := time.Now()

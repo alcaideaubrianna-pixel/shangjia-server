@@ -43,17 +43,18 @@ type telegramMediaItem struct {
 }
 
 type telegramSentMessage struct {
-	RelaySourceId    int64
-	MessageId        int64
-	MediaGroupId     string
-	Purpose          string
-	MediaId          int64
-	TgFileId         string
-	TgFileUniqueId   string
-	AssetHash        string
-	ProtectedHashKey string
-	ProtectedPHash   uint64
-	ProtectedDHash   uint64
+	RelaySourceId      int64
+	MessageId          int64
+	MediaGroupId       string
+	Purpose            string
+	MediaId            int64
+	TgFileId           string
+	TgFileUniqueId     string
+	AssetHash          string
+	ProcessedAssetHash string
+	ProtectedHashKey   string
+	ProtectedPHash     uint64
+	ProtectedDHash     uint64
 }
 
 type telegramCopyMediaRef struct {
