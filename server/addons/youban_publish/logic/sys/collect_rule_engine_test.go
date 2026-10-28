@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/gogf/gf/v2/container/gvar"
@@ -293,6 +294,22 @@ func TestApplyCollectIntroFeeSuffix(t *testing.T) {
 				t.Fatalf("applyCollectIntroFeeSuffix() = %q, want %q", got, test.want)
 			}
 		})
+	}
+}
+
+func TestApplyCollectIntroFeeSuffixNeverLeavesKnownVariantUnprocessed(t *testing.T) {
+	cases := []string{
+		"7888介绍费阿泽", "介绍费：国内7888", "介绍费：国内7888，国外12888",
+		"介绍费：打包13888/单个7888", "介绍费：给钱就卖", "介绍费：cty：7888 cty",
+		"介绍费费7888", "介绍费（6）", "推荐费︂:7888", "牵线费：7888",
+		"居间费用：7888", "介绍费用 7888", "介绍费：𝟟𝟠𝟠𝟠𝘢𝘮𝘣𝘺",
+		"介绍费\u00a012888\u00a0卡路里", "介绍费 来风团队 7888",
+	}
+	for _, raw := range cases {
+		got := applyCollectIntroFeeSuffix(raw, raw, "来风")
+		if !strings.Contains(got, "来风") {
+			t.Fatalf("variant %q lost configured suffix: %q", raw, got)
+		}
 	}
 }
 
