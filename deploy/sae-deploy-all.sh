@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Deploy one immutable image tag to all SAE roles in a safe order.
+# Usage: ./deploy/sae-deploy-all.sh e5b746c
+
+REGION_ID="${SAE_REGION_ID:-ap-southeast-1}"
+ACR_INSTANCE_ID="${SAE_ACR_INSTANCE_ID:-cri-wx0a7j1fo37ad8mo}"
+IMAGE_REPOSITORY="${SAE_IMAGE_REPOSITORY:-xxxxxx-registry-vpc.ap-southeast-1.cr.aliyuncs.com/xiaohuiji/youban-server}"
+TAG="${1:-}"
+
+if [[ -z "$TAG" || ! "$TAG" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "usage: $0 <image-tag>" >&2
+  exit 2
+fi
+command -v aliyun >/dev/null || { echo "aliyun CLI is required" >&2; exit 1; }
+command -v jq >/dev/null || { echo "jq is required" >&2; exit 1; }
+
+declare -a ROLES=(
+  "web:b4565e3c-6d08-4297-bf8b-037884d54ee4"
+  "background:d12e3d86-e368-48ae-bac1-bd41b3a08ef2"
+  "collector:0deb4862-2af5-4c0f-9e82-ffa67364843e"
+  "media:a34c2ae5-6e59-428b-8aa5-1277cbecc9ae"
+  "publish:2fb5d3db-0975-4dea-b086-805d255131fa"
+  "scheduler:596e5f62-0715-499e-ba71-46f00c9869d3"
+  "account:f8d4a7a9-d30f-46a5-89ac-dc57eb48fb4f"
+)
+
+IMAGE_URL="${IMAGE_REPOSITORY}:${TAG}"
+wait_ready() {
+  local role="$1" app_id="$2" attempts=60 data
+  for ((i=1; i<=attempts; i++)); do
+    data=$(aliyun sae DescribeApplicationStatus --RegionId "$REGION_ID" --AppId "$app_id")
+    if [[ "$(jq -r '.Data.LastChangeOrderStatus // ""' <<<"$data")" == "FAIL" ]]; then
+      echo "$role deployment failed" >&2
+      return 1
+    fi
+    if [[ "$(jq -r '.Data.CurrentStatus // ""' <<<"$data")" == "RUNNING" && "$(jq -r '.Data.SubStatus // ""' <<<"$data")" == "NORMAL" && "$(jq -r '.Data.RunningInstances // 0' <<<"$data")" -ge 1 && "$(jq -r '.Data.LastChangeOrderStatus // ""' <<<"$data")" == "SUCCESS" ]]; then
+      return 0
+    fi
+    sleep 5
+  done
+  echo "$role deployment did not become healthy" >&2
+  return 1
+}
+
+for item in "${ROLES[@]}"; do
+  role="${item%%:*}"
+  app_id="${item#*:}"
+  echo "deploying $role"
+  cfg=$(aliyun sae DescribeApplicationConfig --RegionId "$REGION_ID" --AppId "$app_id")
+  envs=$(jq -r '.Data.Envs // "[]"' <<<"$cfg")
+  aliyun sae DeployApplication \
+    --RegionId "$REGION_ID" \
+    --AppId "$app_id" \
+    --AcrInstanceId "$ACR_INSTANCE_ID" \
+    --ImageUrl "$IMAGE_URL" \
+    --Envs "$envs" \
+    --ChangeOrderDesc "deploy $TAG ($role)" \
+    --Deploy true >/dev/null
+  wait_ready "$role" "$app_id"
+  echo "ready $role"
+done
+
+echo "deployed $IMAGE_URL"
