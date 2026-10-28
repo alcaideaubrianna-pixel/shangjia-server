@@ -25,9 +25,10 @@ def format_line(line, suffix):
 
 def main():
     import psycopg2
-    ap=argparse.ArgumentParser(); ap.add_argument('--apply',action='store_true'); ap.add_argument('--limit',type=int,default=10000); args=ap.parse_args()
+    ap=argparse.ArgumentParser(); ap.add_argument('--apply',action='store_true'); ap.add_argument('--missing-only',action='store_true'); ap.add_argument('--limit',type=int,default=10000); args=ap.parse_args()
     conn=psycopg2.connect(dbname='railway', user='postgres')
     cur=conn.cursor()
+    extra = " AND p.plain_text !~ '(介绍|推荐|牵线|居间|对接)费' AND e.raw_text ~ '(介绍|推荐|牵线|居间|对接)费'" if args.missing_only else ""
     cur.execute('''SELECT DISTINCT ON (d.profile_id) d.profile_id,p.profile_no,CASE WHEN p.plain_text ~ '(介绍|推荐|牵线|居间|对接)费' THEN p.plain_text ELSE e.raw_text END AS plain_text,COALESCE(o.suffix,i.value) AS suffix
       FROM hg_youban_publish_collect_dispatch d
       JOIN hg_youban_publish_collect_rule_item i ON i.rule_id=d.rule_id AND i.item_type='intro_fee_suffix'
@@ -39,7 +40,7 @@ def main():
           AND r.status=1 AND r.deleted_at IS NULL AND r.channel_id IN (s.source_chat_id,regexp_replace(s.source_chat_id,'^-',''))
           AND btrim(r.suffix)<>'' ORDER BY (r.rule_id=d.rule_id) DESC,(r.account_id=d.account_id) DESC,r.id DESC LIMIT 1) o ON TRUE
       WHERE d.source_type_snapshot IN ('bot','account') AND p.deleted_at IS NULL AND btrim(COALESCE(o.suffix,i.value))<>''
-      ORDER BY d.profile_id,d.id DESC LIMIT %s''',(args.limit,))
+      ''' + extra + ''' ORDER BY d.profile_id,d.id DESC LIMIT %s''',(args.limit,))
     rows=cur.fetchall(); changes=[]; skipped=[]
     for pid,pno,text,suffix in rows:
         lines=text.splitlines(); new=[]; changed=False
