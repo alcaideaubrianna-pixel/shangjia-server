@@ -275,6 +275,8 @@ func TestApplyCollectIntroFeeSuffix(t *testing.T) {
 		{name: "package prices", text: "正文\n介绍费：打包 13888/单个 7888", original: "正文\n介绍费：打包 13888/单个 7888", suffix: "来风", want: "正文\n介绍费：打包 13888/单个 7888 来风"},
 		{name: "missing amount", text: "正文\n介绍费：给钱就卖", original: "正文\n介绍费：给钱就卖", suffix: "来风", want: "正文\n介绍费：给钱就卖 来风"},
 		{name: "prefix amount", text: "正文\n7888介绍费阿泽", original: "正文\n7888介绍费阿泽", suffix: "来风", want: "正文\n介绍费 7888 来风"},
+		{name: "mathematical digits", text: "正文\n介绍费：𝟟𝟠𝟠𝟠𝘢𝘮𝘣𝘺", original: "正文\n介绍费：𝟟𝟠𝟠𝟠𝘢𝘮𝘣𝘺", suffix: "来风", want: "正文\n介绍费 7888 来风"},
+		{name: "recommendation fee", text: "正文\n推荐费︂:7888", original: "正文\n推荐费︂:7888", suffix: "来风", want: "正文\n介绍费 7888 来风"},
 		{name: "recommendation fee removes duplicated intro fee", text: "推荐费：7888 情诗X\n七七xq\n介绍费:7889\u2060⁣‌", original: "推荐费：7888 情诗X\n七七xq\n介绍费:7889\u2060⁣‌", suffix: "七七xq", want: "介绍费 7888 七七xq"},
 		{name: "obfuscated brokerage fee", text: "正文\n牵︊线️费：7888 燕姐", original: "正文\n牵︊线️费：7888 燕姐", suffix: "AA", want: "正文\n介绍费 7888 AA"},
 		{name: "windows lines", text: "正文\r\n介绍费：7888\r\nKK", original: "正文\r\n介绍费：7888\r\nKK", suffix: "AA", want: "正文\n介绍费 7888 AA"},

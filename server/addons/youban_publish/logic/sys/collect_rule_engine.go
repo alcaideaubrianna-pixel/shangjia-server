@@ -9,6 +9,7 @@ import (
 	"unicode"
 
 	"github.com/gogf/gf/v2/database/gdb"
+	"golang.org/x/text/unicode/norm"
 )
 
 var (
@@ -21,6 +22,7 @@ var (
 	collectIntroFeeLooseAmountRule   = regexp.MustCompile(`(?:(?:介绍|推荐|牵线|居间|对接)费(?:用)?|中介(?:服务)?费(?:用)?)[^0-9０-９]{0,32}([¥￥]?[\s\p{Zs}]*[0-9０-９][0-9０-９,，.]*)`)
 	collectNumberRule                = regexp.MustCompile(`[0-9０-９]+`)
 	collectIntroFeeStandaloneSuffix  = regexp.MustCompile(`^[\p{Han}A-Za-z0-9]{1,32}$`)
+	collectFeeKeywordPattern         = regexp.MustCompile(`(?:介绍|推荐|牵线|居间|对接)费`)
 )
 
 type collectRuleDecision struct {
@@ -450,7 +452,7 @@ func applyCollectIntroFeeSuffix(text, original, suffix string) string {
 	if len(collectNumberRule.FindAllString(normalizeCollectKeywordText(original), -1)) > 1 && fields.ForeignAmount == "" {
 		lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
 		for index, line := range lines {
-			if strings.Contains(normalizeCollectKeywordText(line), "介绍费") && !strings.HasSuffix(strings.TrimSpace(line), suffix) {
+			if collectFeeKeywordPattern.MatchString(normalizeCollectKeywordText(line)) && !strings.HasSuffix(strings.TrimSpace(line), suffix) {
 				lines[index] = strings.TrimRightFunc(line, unicode.IsSpace) + " " + suffix
 			}
 		}
@@ -459,7 +461,7 @@ func applyCollectIntroFeeSuffix(text, original, suffix string) string {
 	if amount == "" {
 		lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
 		for index, line := range lines {
-			if strings.Contains(normalizeCollectKeywordText(line), "介绍费") && !strings.HasSuffix(strings.TrimSpace(line), suffix) {
+			if collectFeeKeywordPattern.MatchString(normalizeCollectKeywordText(line)) && !strings.HasSuffix(strings.TrimSpace(line), suffix) {
 				lines[index] = strings.TrimRightFunc(line, unicode.IsSpace) + " " + suffix
 			}
 		}
@@ -516,6 +518,7 @@ func collectIntroFeeAmount(text string) string {
 }
 
 func normalizeCollectKeywordText(text string) string {
+	text = norm.NFKC.String(text)
 	return strings.Map(func(r rune) rune {
 		if r >= '０' && r <= '９' {
 			return '0' + (r - '０')
