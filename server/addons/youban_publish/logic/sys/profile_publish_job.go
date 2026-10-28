@@ -217,10 +217,10 @@ func validateProfilePublishMediaUncached(ctx context.Context, profileID int64) e
 		if fileURL == "" && strings.TrimSpace(row["storage_path"].String()) == "" {
 			return gerror.Newf("资料媒体不可用，mediaId=%d，已阻止上架", row["id"].Int64())
 		}
-		if strings.EqualFold(strings.TrimSpace(row["processing_status"].String()), "failed") {
-			return gerror.Newf("资料媒体处理失败，mediaId=%d，已阻止上架", row["id"].Int64())
-		}
 		if fileURL == "" || !strings.HasPrefix(fileURL, "http") {
+			if strings.EqualFold(strings.TrimSpace(row["processing_status"].String()), "failed") {
+				return gerror.Newf("资料媒体处理失败，mediaId=%d，已阻止上架", row["id"].Int64())
+			}
 			continue
 		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodHead, fileURL, nil)
@@ -238,6 +238,8 @@ func validateProfilePublishMediaUncached(ctx context.Context, profileID int64) e
 		if resp.StatusCode >= http.StatusBadRequest && resp.StatusCode != http.StatusMethodNotAllowed {
 			return gerror.Newf("资料媒体不可用，mediaId=%d，HTTP %d，已阻止上架", row["id"].Int64(), resp.StatusCode)
 		}
+		// A stale Telegram timeout must not block a durable object that is
+		// currently reachable; the successful HEAD above proves availability.
 	}
 	return nil
 }
