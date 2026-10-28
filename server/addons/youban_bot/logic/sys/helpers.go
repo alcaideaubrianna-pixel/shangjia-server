@@ -307,10 +307,11 @@ func telegramHTTPClient(proxyUrl string) (*http.Client, error) {
 }
 
 func (s *sSysBot) reply(ctx context.Context, botId int64, chatId string, text string) error {
-	return s.replyWithMarkup(ctx, botId, chatId, text, s.replyKeyboard(ctx))
+	return s.replyWithMarkup(ctx, botId, chatId, text, replyKeyboardMarkupOrRemove(s.replyKeyboard(ctx)))
 }
 
 func (s *sSysBot) replyWithMarkup(ctx context.Context, botId int64, chatId string, text string, replyMarkup models.ReplyMarkup) error {
+	replyMarkup = normalizeReplyKeyboardMarkup(replyMarkup)
 	tokenText := s.replyBotToken(ctx, botId)
 	if tokenText == "" {
 		return nil
@@ -321,6 +322,7 @@ func (s *sSysBot) replyWithMarkup(ctx context.Context, botId int64, chatId strin
 }
 
 func (s *sSysBot) replyPhotoWithCaption(ctx context.Context, botId int64, chatId string, imageSource string, caption string, replyMarkup models.ReplyMarkup) error {
+	replyMarkup = normalizeReplyKeyboardMarkup(replyMarkup)
 	tokenText := s.replyBotToken(ctx, botId)
 	if tokenText == "" || strings.TrimSpace(imageSource) == "" {
 		return nil

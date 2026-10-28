@@ -3,7 +3,6 @@ package sys
 import (
 	"context"
 	"encoding/json"
-	"strings"
 
 	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -131,39 +130,4 @@ func (s *sSysBot) configuredReplyKeyboardRows(ctx context.Context, items []reply
 		return groupedReplyKeyboardRows(items)
 	}
 	return configuredKeyboardRows(items, layout)
-}
-
-func (s *sSysBot) validateFeatureCommand(ctx context.Context, in *sysin.FeatureSaveInp) error {
-	command := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(in.Command), "/"))
-	if in.FeatureKey == "start" {
-		if command != "start" || (in.Status != 0 && in.Status != 1) {
-			return gerror.New("开始使用是默认插件，命令必须为start且保持启用")
-		}
-	} else if command == "start" {
-		return gerror.New("/start是默认插件保留命令")
-	}
-	if command == "" {
-		return nil
-	}
-	configs, err := s.featureConfigs(ctx)
-	if err != nil {
-		return err
-	}
-	for _, f := range botFeatures {
-		if f.Key() == in.FeatureKey {
-			continue
-		}
-		other := f.Command()
-		if row := configs[f.Key()]; row != nil && strings.TrimSpace(row.Command) != "" {
-			other = row.Command
-		}
-		if strings.EqualFold(command, strings.TrimPrefix(strings.TrimSpace(other), "/")) {
-			return gerror.New("该命令已被其他插件使用")
-		}
-	}
-	if in.FeatureKey == "start" {
-		in.Status = 1
-	}
-	in.Command = command
-	return nil
 }

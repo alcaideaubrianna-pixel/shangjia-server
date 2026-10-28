@@ -71,14 +71,12 @@ func (s *sSysBot) AdminFeatureSave(ctx context.Context, in *sysin.FeatureSaveInp
 		return err
 	}
 	featureKey := strings.TrimSpace(in.FeatureKey)
+	in.FeatureKey = featureKey
 	if featureKey == "" {
 		return gerror.New("插件Key不能为空")
 	}
 	if strings.TrimSpace(in.ConfigJson) != "" && !json.Valid([]byte(in.ConfigJson)) {
 		return gerror.New("配置JSON格式不正确")
-	}
-	if err = s.validateFeatureCommand(ctx, in); err != nil {
-		return err
 	}
 	in.ConfigJson = normalizeFeatureConfigJson(in.FeatureKey, in.ConfigJson)
 	if strings.TrimSpace(in.ConfigJson) != "" && !json.Valid([]byte(strings.TrimSpace(in.ConfigJson))) {
@@ -131,20 +129,7 @@ func (s *sSysBot) AdminFeatureSave(ctx context.Context, in *sysin.FeatureSaveInp
 		in.ConfigJson = string(data)
 	}
 
-	status := in.Status
-	if status == 0 {
-		status = 1
-	}
-	data := g.Map{"name": strings.TrimSpace(in.Name), "command": strings.TrimPrefix(strings.TrimSpace(in.Command), "/"), "description": strings.TrimSpace(in.Description), "config_json": strings.TrimSpace(in.ConfigJson), "sort": in.Sort, "status": status, "updated_at": gtime.Now()}
-	if featureKey == (relayFeature{}).Key() {
-		err = s.persistRelayFeature(ctx, in, data)
-	} else if in.Id > 0 {
-		_, err = g.DB().Model(featureTable).Safe().Ctx(ctx).Where("id", in.Id).Where("feature_key", featureKey).Data(data).Update()
-	} else {
-		data["feature_key"] = featureKey
-		data["created_at"] = gtime.Now()
-		_, err = g.DB().Model(featureTable).Safe().Ctx(ctx).Data(data).Insert()
-	}
+	err = s.persistFeature(ctx, in)
 	if err != nil {
 		return gerror.Wrap(err, "保存Bot插件失败")
 	}
@@ -355,13 +340,8 @@ func botCommandAndArgs(text string) (command string, args string) {
 }
 
 func (s *sSysBot) featureCommand(ctx context.Context, feature botFeature) string {
-	if feature.Key() == (startFeature{}).Key() {
-		return "start"
-	}
-	if row, _ := s.featureConfig(ctx, feature.Key()); row != nil && strings.TrimSpace(row.Command) != "" {
-		return strings.TrimPrefix(strings.TrimSpace(row.Command), "/")
-	}
-	return strings.TrimPrefix(strings.TrimSpace(feature.Command()), "/")
+	row, _ := s.featureConfig(ctx, feature.Key())
+	return effectiveFeatureCommand(feature, row)
 }
 
 func (s *sSysBot) featureDescription(ctx context.Context, feature botFeature) string {

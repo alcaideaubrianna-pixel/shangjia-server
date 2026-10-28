@@ -28,3 +28,10 @@
 - JSON 输入后点击“应用 JSON”，再保存；未应用的文本不参与保存。
 
 验证：新增排序/权限过滤/空布局/颜色刷新/保留命令与重复命令回归测试通过；网关菜单所有权测试通过；前端 ESLint、Vite 构建通过。全包 Go 测试仍存在失败，包含测试数据库缺表、双向帮助断言和旧固定分组断言，尚未验证其基线。
+
+## 保存与刷新修复
+
+- 命令清空时按实际生效的默认命令检查冲突，并将默认命令显式保存；分发与校验复用同一解析函数。
+- 元数据保存事务先锁住 start 插件行，再从数据库读取当前插件命令校验并写入；事务提交前保持锁，覆盖并发请求和多实例旧缓存。
+- 空菜单在文本回复和欢迎图片回复中统一转成 `ReplyKeyboardRemove`。空指针不会被记录成键盘投递成功；发送失败不更新版本。没有传入 markup 的既有流程继续保留原菜单。
+- 新增真实本地 PostgreSQL 并发、旧缓存、回滚、双向状态保存与模拟 Telegram 消息/版本回归测试。运行：`YOUBAN_LOCAL_COLLECT_PG=1 go test ./addons/youban_bot/logic/sys -run 'Test(FeatureCommandSaveLocalPostgres|EmptyKeyboardDeliveryLocalPostgres)' -count=1`，仅连接 127.0.0.1:35432，并在独立临时 schema 内测试。

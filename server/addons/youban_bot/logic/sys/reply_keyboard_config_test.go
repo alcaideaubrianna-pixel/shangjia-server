@@ -55,15 +55,17 @@ func TestStartReservedAndDuplicateCommands(t *testing.T) {
 	}
 	for _, in := range []*sysin.FeatureSaveInp{
 		{FeatureKey: "info", Command: "start", Status: 1},
+		{FeatureKey: "info", Command: "///START", Status: 1},
+		{FeatureKey: "info", Command: " / / /start", Status: 1},
 		{FeatureKey: "start", Command: "renamed", Status: 1},
 		{FeatureKey: "start", Command: "start", Status: 2},
 		{FeatureKey: "account_bind", Command: "CUSTOMINFO", Status: 1},
 	} {
-		if err := bot.validateFeatureCommand(ctx, in); err == nil {
+		if err := validateFeatureCommand(in, bot.features); err == nil {
 			t.Fatalf("invalid command accepted: %+v", in)
 		}
 	}
-	if err := bot.validateFeatureCommand(ctx, &sysin.FeatureSaveInp{FeatureKey: "start", Command: "start", Status: 1}); err != nil {
+	if err := validateFeatureCommand(&sysin.FeatureSaveInp{FeatureKey: "start", Command: "start", Status: 1}, bot.features); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -73,5 +75,65 @@ func TestEmptyKeyboardRemovesPreviousLayout(t *testing.T) {
 	remove, ok := markup.(*models.ReplyKeyboardRemove)
 	if !ok || !remove.RemoveKeyboard {
 		t.Fatal("empty menu must remove previously delivered keyboard")
+	}
+}
+
+func TestEmptyCommandCannotRestoreOccupiedDefault(t *testing.T) {
+	bot := &sSysBot{features: map[string]*botFeatureRow{"info": {Command: "custominfo", Status: 1}, "account_bind": {Command: "info", Status: 1}}, featureAt: time.Now(), featureDefaultsAt: time.Now()}
+	if err := validateFeatureCommand(&sysin.FeatureSaveInp{FeatureKey: "info", Command: "", Status: 1}, bot.features); err == nil {
+		t.Fatal("clearing command restored /info already owned by account_bind")
+	}
+}
+
+func TestTypedNilKeyboardIsNotDelivered(t *testing.T) {
+	var keyboard *models.ReplyKeyboardMarkup
+	if isReplyKeyboardMarkup(keyboard) {
+		t.Fatal("typed nil keyboard must not be recorded as a delivered keyboard")
+	}
+	var removal *models.ReplyKeyboardRemove
+	if isReplyKeyboardMarkup(removal) {
+		t.Fatal("typed nil removal must not be recorded as delivered")
+	}
+}
+
+func TestNormalizeReplyKeyboardMarkupKeepsIntent(t *testing.T) {
+	if normalizeReplyKeyboardMarkup(nil) != nil {
+		t.Fatal("absent markup must preserve existing menu")
+	}
+	inline := &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{{{Text: "link", URL: "https://example.com"}}}}
+	if normalizeReplyKeyboardMarkup(inline) != inline {
+		t.Fatal("inline keyboard changed")
+	}
+	keyboard := &models.ReplyKeyboardMarkup{Keyboard: [][]models.KeyboardButton{{{Text: "menu"}}}}
+	if normalizeReplyKeyboardMarkup(keyboard) != keyboard {
+		t.Fatal("nonempty keyboard changed")
+	}
+	var empty *models.ReplyKeyboardMarkup
+	removal, ok := normalizeReplyKeyboardMarkup(empty).(*models.ReplyKeyboardRemove)
+	if !ok || !removal.RemoveKeyboard {
+		t.Fatal("typed nil keyboard must send explicit removal")
+	}
+}
+
+func TestEmptyCommandPersistsEffectiveDefault(t *testing.T) {
+	in := &sysin.FeatureSaveInp{FeatureKey: "info", Command: "", Status: 1}
+	if err := validateFeatureCommand(in, map[string]*botFeatureRow{}); err != nil {
+		t.Fatal(err)
+	}
+	if in.Command != "info" {
+		t.Fatalf("empty fallback was not made explicit: %q", in.Command)
+	}
+	// Legacy start aliases no longer own commands: dispatch always uses /start.
+	if err := validateFeatureCommand(&sysin.FeatureSaveInp{FeatureKey: "info", Command: "legacy"}, map[string]*botFeatureRow{"start": {Command: "legacy"}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFeatureCommandNormalizationIsStable(t *testing.T) {
+	for _, input := range []string{"info", " /info ", "///INFO", " / / /start", "", "/"} {
+		normalized := normalizeFeatureCommand(input)
+		if second := normalizeFeatureCommand(normalized); second != normalized {
+			t.Fatalf("unstable command %q: %q -> %q", input, normalized, second)
+		}
 	}
 }

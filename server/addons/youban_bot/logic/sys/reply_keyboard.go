@@ -102,9 +102,11 @@ func replyKeyboardUserVersionKey(botId int64, telegramUserId string) string {
 }
 
 func isReplyKeyboardMarkup(replyMarkup models.ReplyMarkup) bool {
-	switch replyMarkup.(type) {
-	case *models.ReplyKeyboardMarkup, *models.ReplyKeyboardRemove:
-		return true
+	switch markup := replyMarkup.(type) {
+	case *models.ReplyKeyboardMarkup:
+		return markup != nil
+	case *models.ReplyKeyboardRemove:
+		return markup != nil
 	default:
 		return false
 	}
@@ -219,4 +221,13 @@ func replyKeyboardMarkupOrRemove(keyboard *models.ReplyKeyboardMarkup) models.Re
 		return &models.ReplyKeyboardRemove{RemoveKeyboard: true}
 	}
 	return keyboard
+}
+
+// Normalize typed nil reply keyboards while leaving an absent markup or inline
+// keyboard unchanged. An absent markup means preserve the user's current menu.
+func normalizeReplyKeyboardMarkup(markup models.ReplyMarkup) models.ReplyMarkup {
+	if keyboard, ok := markup.(*models.ReplyKeyboardMarkup); ok {
+		return replyKeyboardMarkupOrRemove(keyboard)
+	}
+	return markup
 }
