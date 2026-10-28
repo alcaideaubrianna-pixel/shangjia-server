@@ -2607,10 +2607,10 @@ func (s *sSysBot) consumeProfileCreatePart(ctx context.Context, botId int64, cha
 	draft := decodeProfileCreateDraft(session.PayloadJson)
 	switch session.Step {
 	case "waiting_display":
-		if strings.TrimSpace(text) == "" {
+		if strings.TrimSpace(text) == "" || len(media) == 0 {
 			g.Log().Warningf(ctx, "Bot资料展示组缺少正文 trace:%s session_id:%d media_count:%d", trace, session.Id, len(media))
 			_ = s.updateProfileSession(ctx, session.Id, "waiting_display", &profileCreateDraft{})
-			return s.replyBotError(ctx, botId, chatId, "资料管理", gerror.New("展示资料必须包含正文，请重新发送第一组展示资料"))
+			return s.replyBotError(ctx, botId, chatId, "资料管理", gerror.New("展示资料必须同时包含文字和媒体，请重新发送第一组展示资料"))
 		}
 		draft.DisplayText = strings.TrimSpace(text)
 		draft.DisplayMedia = media
