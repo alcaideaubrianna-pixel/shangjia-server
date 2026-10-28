@@ -202,6 +202,20 @@ func (s *sSysPublish) ensureTelegramProfileJobWithMetaTx(ctx context.Context, tx
 	if jobId := existing["id"].Int64(); jobId > 0 {
 		return jobId, nil
 	}
+	// Do not create another pending job for the same profile/channel while an
+	// earlier publish operation is still in flight. A later republish after a
+	// sent job still creates a new operation so old messages can be cleaned up.
+	active, err := tx.Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("profile_id", source["profile_id"].Int64()).
+		Where("channel_id", channel.Id).
+		WhereIn("status", []string{"pending", "sending", "failed_retry", "unknown"}).
+		Fields("id,status,bot_id,target_chat_id").OrderDesc("id").One()
+	if err != nil {
+		return 0, gerror.Wrap(err, "读取资料活动TG频道任务失败")
+	}
+	if jobId := active["id"].Int64(); jobId > 0 {
+		return jobId, nil
+	}
 	// The caller's snapshot may predate a Bot removal or channel edit. Read
 	// transport configuration only after acquiring the shared creation gate.
 	var current *telegramJobChannel
