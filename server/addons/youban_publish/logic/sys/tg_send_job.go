@@ -223,14 +223,16 @@ func (s *sSysPublish) sendTelegramJobLockedByChannel(ctx context.Context, jobId 
 	// A job may have been created before its source object was deleted from
 	// storage. Re-check the complete media set immediately before any Telegram
 	// call so an old retry cannot repeatedly send a known-broken profile.
-	if mediaErr := validateProfilePublishMedia(ctx, job.ProfileId); mediaErr != nil {
-		if isPermanentProfileMediaError(mediaErr) {
-			if quarantineErr := s.quarantineProfileWithUnavailableMedia(ctx, job.ProfileId, mediaErr.Error()); quarantineErr != nil {
-				return gerror.Wrap(quarantineErr, "隔离失效媒体资料失败")
+	if g.Cfg().MustGet(ctx, "youbanPublish.publish.mediaAvailabilityCheckEnabled", true).Bool() {
+		if mediaErr := validateProfilePublishMedia(ctx, job.ProfileId); mediaErr != nil {
+			if isPermanentProfileMediaError(mediaErr) {
+				if quarantineErr := s.quarantineProfileWithUnavailableMedia(ctx, job.ProfileId, mediaErr.Error()); quarantineErr != nil {
+					return gerror.Wrap(quarantineErr, "隔离失效媒体资料失败")
+				}
+				return nil
 			}
-			return nil
+			return s.handleTelegramJobError(ctx, job, mediaErr)
 		}
-		return s.handleTelegramJobError(ctx, job, mediaErr)
 	}
 	if relayPackageEnabled(ctx, job) {
 		relayErr := s.sendRelayPackageJob(ctx, job)

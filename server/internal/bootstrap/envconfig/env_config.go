@@ -77,6 +77,8 @@ var items = []item{
 	{Key: "youbanPublish.collect.materialWindowMaxRows", EnvKeys: []string{"YOUBAN_PUBLISH_MATERIAL_WINDOW_MAX_ROWS"}},
 	{Key: "youbanPublish.collect.materialVerifyWindowSeconds", EnvKeys: []string{"YOUBAN_PUBLISH_MATERIAL_VERIFY_WINDOW_SECONDS"}},
 	{Key: "youbanPublish.collect.duplicateMediaReplaceEnabled", EnvKeys: []string{"YOUBAN_PUBLISH_DUPLICATE_MEDIA_REPLACE_ENABLED"}},
+	{Key: "youbanPublish.collect.mediaAvailabilityCheckEnabled", EnvKeys: []string{"YOUBAN_PUBLISH_COLLECT_MEDIA_AVAILABILITY_CHECK_ENABLED"}},
+	{Key: "youbanPublish.publish.mediaAvailabilityCheckEnabled", EnvKeys: []string{"YOUBAN_PUBLISH_PUBLISH_MEDIA_AVAILABILITY_CHECK_ENABLED"}},
 	{Key: "youbanPublish.mediaFileCache.cosDownloadMode", EnvKeys: []string{"YOUBAN_PUBLISH_MEDIA_CACHE_DOWNLOAD_MODE"}},
 	{Key: "youbanPublish.mediaFileCache.workerCdnBaseUrl", EnvKeys: []string{"YOUBAN_PUBLISH_MEDIA_CACHE_WORKER_CDN_BASE_URL"}},
 	// Dedicated COS download endpoint used by publish/media workers. Keep the
