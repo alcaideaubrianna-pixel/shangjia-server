@@ -698,7 +698,9 @@ func antiScanSegmentPresentationURL(raw string) string {
 		return raw
 	}
 	storagePath := strings.TrimLeft(parsed.Path, "/")
-	if !strings.Contains(storagePath, "/anti-scan/segment/") && !strings.HasPrefix(storagePath, "hotgo/attachment/") {
+	if !strings.Contains(storagePath, "/anti-scan/segment/") &&
+		!strings.HasPrefix(storagePath, "hotgo/attachment/") &&
+		!strings.HasPrefix(storagePath, "hotgo/file/") {
 		return raw
 	}
 	return normalizeMediaPresentationURL(raw, storagePath)
