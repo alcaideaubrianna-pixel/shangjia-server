@@ -147,6 +147,30 @@ func (s *sSysPublish) MyProfileEdit(ctx context.Context, in *sysin.ProfileSaveIn
 			return nil, err
 		}
 	}
+	// A profile can be marked public by the create form before its first
+	// Telegram publication exists.  Treating that row as an online edit here
+	// creates an `edit:` republish operation and can race the final media
+	// upload.  Only profiles with a historical successful publication may enter
+	// the destructive edit/republish lifecycle.
+	var publishedCount int
+	publishedCount, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("profile_id", profileId).
+		Where("tenant_id", account.TenantId).
+		Where("account_id", ownerAccountId).
+		WhereIn("status", []string{telegramJobStatusSent, "superseded"}).
+		Count()
+	if err != nil {
+		return nil, gerror.Wrap(err, "检查资料历史发布状态失败")
+	}
+	if publishedCount == 0 {
+		if in.Status == 0 {
+			in.Status = 2
+		}
+		if in.Visibility == "" {
+			in.Visibility = consts.ContentVisibilityPublic
+		}
+		return s.saveProfile(ctx, in, account.TenantId, ownerAccountId)
+	}
 	operationNo := newTelegramOperationNo("edit", profileId)
 	republish, err := s.preparePublishedProfileEdit(ctx, profileId, account.TenantId, ownerAccountId, operationNo)
 	if err != nil {
