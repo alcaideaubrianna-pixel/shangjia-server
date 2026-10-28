@@ -3,6 +3,7 @@ import argparse, json, re, unicodedata
 FEE = re.compile(r'(?:介绍|推荐|牵线|居间|对接)费')
 NUM = re.compile(r'[0-9０-９]+')
 INVISIBLE = re.compile(r'[\u200b-\u200f\u2060\ufeff\ufe00-\ufe0f]')
+MULTI_MARKERS = ('国内', '国外', '村内', '村外', '一人', '双人', '打包', '单个', '/', '、')
 
 def norm(s):
     return ''.join(ch for ch in unicodedata.normalize('NFKC', s) if not (unicodedata.category(ch) == 'Cf' or ch in '\ufe00\ufe0f'))
@@ -14,7 +15,7 @@ def format_line(line, suffix):
     foreign = re.search(r'国外[^0-9０-９]*([0-9０-９]+)', clean)
     if foreign and len(nums) >= 2:
         out = f'介绍费 {nums[0]} 国外 {foreign.group(1)} {suffix}'
-    elif len(nums) > 1:
+    elif len(nums) > 1 and any(marker in clean for marker in MULTI_MARKERS):
         out = clean if clean.endswith(suffix) else clean.rstrip() + ' ' + suffix
     elif nums:
         out = f'介绍费 {nums[0]} {suffix}'
