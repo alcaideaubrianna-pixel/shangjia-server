@@ -219,7 +219,7 @@ func (s *sSysPublish) normalizeCollectMaterialText(ctx context.Context, event gd
 	}
 	text += footerSuffix
 	if suffix := strings.TrimSpace(rule["intro_fee_suffix"].String()); suffix != "" {
-		amountText := normalizeCollectRuleBodyWithoutTruncate(event["raw_text"].String(), rule)
+		amountText := normalizeCollectRuleBodyWithoutTruncate(authoritativeCollectRawText(event["raw_text"].String()), rule)
 		return applyCollectIntroFeeSuffix(text, amountText, suffix)
 	}
 	if !rule["truncate_intro_fee_enabled"].Bool() {

@@ -86,6 +86,30 @@ func parseCollectIntroFeeFields(text string) collectIntroFeeFields {
 	return fields
 }
 
+// authoritativeCollectRawText removes an already-processed copy that can be
+// appended to a collected message as "<source> | <processed>". The event raw
+// text remains unchanged for audit; this helper is only used as the input to
+// rule processing so retries cannot process the generated copy as a second
+// source document.
+func authoritativeCollectRawText(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return text
+	}
+	parts := strings.Split(text, " | ")
+	if len(parts) < 2 {
+		return text
+	}
+	for i := 1; i < len(parts); i++ {
+		left := strings.TrimSpace(strings.Join(parts[:i], " | "))
+		right := strings.TrimSpace(strings.Join(parts[i:], " | "))
+		if collectFeeKeywordPattern.MatchString(left) && collectFeeKeywordPattern.MatchString(right) {
+			return left
+		}
+	}
+	return text
+}
+
 func formatCollectIntroFeeFields(fields collectIntroFeeFields, suffix string) string {
 	suffix = strings.TrimSpace(suffix)
 	if fields.FirstAmount == "" {
@@ -103,10 +127,10 @@ type collectReplaceRule struct {
 }
 
 func buildCollectRuleDecision(event gdb.Record, content *collectContentResult, rule gdb.Record) *collectRuleDecision {
-	rawText := strings.TrimSpace(event["raw_text"].String())
+	rawText := authoritativeCollectRawText(event["raw_text"].String())
 	mediaCount := event["media_count"].Int()
 	if content != nil {
-		rawText = content.RawText
+		rawText = authoritativeCollectRawText(content.RawText)
 		mediaCount = content.MediaCount
 	}
 	precheck := precheckCollectRuleText(rawText, mediaCount, rule)
@@ -166,7 +190,7 @@ func buildCollectRuleDecision(event gdb.Record, content *collectContentResult, r
 	if introFeeSuffix != "" {
 		// Suffix reconstruction needs the amount from the cleaned source before
 		// truncation removes the original fee line.
-		amountText := normalizeCollectRuleBodyWithoutTruncate(rawText, rule)
+		amountText := normalizeCollectRuleBodyWithoutTruncate(authoritativeCollectRawText(rawText), rule)
 		text = applyCollectIntroFeeSuffix(text, amountText, introFeeSuffix)
 	}
 	return &collectRuleDecision{

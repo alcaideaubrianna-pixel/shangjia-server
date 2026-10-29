@@ -346,6 +346,14 @@ func TestParseCollectIntroFeeFields(t *testing.T) {
 	}
 }
 
+func TestAuthoritativeCollectRawTextDropsProcessedCopy(t *testing.T) {
+	raw := "正文\n介绍费：7777爱妃 | -1003891086979 | 正文\n介绍费 7888 土豆"
+	want := "正文\n介绍费：7777爱妃"
+	if got := authoritativeCollectRawText(raw); got != want {
+		t.Fatalf("authoritativeCollectRawText() = %q, want %q", got, want)
+	}
+}
+
 func TestParseCollectIntroFeeFieldsIgnoresProfileNumbers(t *testing.T) {
 	got := parseCollectIntroFeeFields("昵称:x106\n年龄:21\n介绍费：7888。。。。。。\n女儿国")
 	if got.FirstAmount != "7888" || got.ForeignAmount != "" {
