@@ -46,6 +46,26 @@ func TestProfileDetailReadDoesNotGrantWrite(t *testing.T) {
 	}
 }
 
+func TestProfilePermissionHidesCustomerRemarkExceptCreator(t *testing.T) {
+	for _, permission := range []string{sysin.ProfilePermissionShared, sysin.ProfilePermissionVisitor} {
+		item := &sysin.ProfileModel{CustomerRemark: "private"}
+		markProfilePermission(item, permission)
+		if item.CustomerRemark != "" {
+			t.Fatalf("permission %q exposed customer remark", permission)
+		}
+	}
+	item := &sysin.ProfileModel{CustomerRemark: "private"}
+	markProfilePermission(item, sysin.ProfilePermissionCreator)
+	if item.CustomerRemark != "private" {
+		t.Fatal("creator lost customer remark")
+	}
+	item = &sysin.ProfileModel{CustomerRemark: "private"}
+	markProfilePermission(item, sysin.ProfilePermissionAdmin)
+	if item.CustomerRemark != "private" {
+		t.Fatal("tenant admin lost customer remark")
+	}
+}
+
 func TestProfileDetailReadLocalPostgres(t *testing.T) {
 	if os.Getenv("YOUBAN_SCAN_STORAGE_PG") != "1" {
 		t.Skip("requires local PostgreSQL")
