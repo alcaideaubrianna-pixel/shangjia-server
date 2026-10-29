@@ -55,6 +55,8 @@ type sSysBot struct {
 	broadcastRunning      bool
 	profileRecoveryMu     sync.Mutex
 	profileRecoveryCancel context.CancelFunc
+	profileMediaMu        sync.Mutex
+	profileMediaInflight  map[string]struct{}
 }
 
 type authCodeRow struct {

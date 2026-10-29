@@ -3041,13 +3041,46 @@ func (s *sSysBot) recoverPendingProfileMediaGroups(ctx context.Context) {
 		}
 		account := &botProfileAccount{TenantId: session.TenantId, AccountId: session.AccountId, AccountType: session.AccountType, App: session.App}
 		if displayReady {
+			if !s.startProfileMediaRecovery(session.Id, groupId, "display") {
+				continue
+			}
 			g.Log().Infof(ctx, "恢复Bot资料展示组收尾 trace:PF-%d groupId:%s media_count:%d", session.Id, groupId, len(draft.PendingGroup.Media))
-			go s.finishProfileMediaGroup(session.BotId, groupId, account, session)
+			go func() {
+				defer s.finishProfileMediaRecovery(session.Id, groupId, "display")
+				s.finishProfileMediaGroup(session.BotId, groupId, account, session)
+			}()
+			continue
+		}
+		if !s.startProfileMediaRecovery(session.Id, groupId, "verify") {
 			continue
 		}
 		g.Log().Infof(ctx, "恢复Bot资料验证组收尾 trace:PF-%d media_count:%d", session.Id, len(draft.PendingVerify.Media))
-		go s.finishPendingProfileVerifyGroup(session.BotId, account, session.Id)
+		go func() {
+			defer s.finishProfileMediaRecovery(session.Id, groupId, "verify")
+			s.finishPendingProfileVerifyGroup(session.BotId, account, session.Id)
+		}()
 	}
+}
+
+func (s *sSysBot) startProfileMediaRecovery(sessionId int64, groupId, purpose string) bool {
+	key := fmt.Sprintf("%d:%s:%s", sessionId, strings.TrimSpace(groupId), purpose)
+	s.profileMediaMu.Lock()
+	defer s.profileMediaMu.Unlock()
+	if s.profileMediaInflight == nil {
+		s.profileMediaInflight = make(map[string]struct{})
+	}
+	if _, exists := s.profileMediaInflight[key]; exists {
+		return false
+	}
+	s.profileMediaInflight[key] = struct{}{}
+	return true
+}
+
+func (s *sSysBot) finishProfileMediaRecovery(sessionId int64, groupId, purpose string) {
+	key := fmt.Sprintf("%d:%s:%s", sessionId, strings.TrimSpace(groupId), purpose)
+	s.profileMediaMu.Lock()
+	delete(s.profileMediaInflight, key)
+	s.profileMediaMu.Unlock()
 }
 
 func (s *sSysBot) finishProfileMediaGroup(botId int64, groupId string, account *botProfileAccount, session *profileSessionRow) {
