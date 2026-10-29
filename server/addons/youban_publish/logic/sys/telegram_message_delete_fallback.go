@@ -178,8 +178,8 @@ func (s *sSysPublish) cancelTelegramDeleteFallbackTasks(ctx context.Context, tgA
 
 func telegramDeleteFallbackNextRunAt(ctx context.Context, tgAccountID, jobID int64) time.Time {
 	now := time.Now()
-	intervalSeconds := telegramDeleteFallbackConfigInt(ctx, "intervalSeconds", int(telegramDeleteFallbackInterval/time.Second), 10, 3600)
-	jitterSeconds := telegramDeleteFallbackConfigInt(ctx, "jitterSeconds", 30, 0, 300)
+	intervalSeconds := telegramDeleteFallbackConfigInt(ctx, "intervalSeconds", 10, 10, 3600)
+	jitterSeconds := telegramDeleteFallbackConfigInt(ctx, "jitterSeconds", 5, 0, 300)
 	jitter := time.Duration(0)
 	if jitterSeconds > 0 {
 		jitter = time.Duration(jobID%int64(jitterSeconds+1)) * time.Second

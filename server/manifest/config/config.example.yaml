@@ -404,8 +404,8 @@ youbanPublish:
     workerCdnBaseUrl: "https://img.xiaohuiji.cc" # ENV: YOUBAN_PUBLISH_MEDIA_CACHE_WORKER_CDN_BASE_URL
     fallbackCdnBaseUrl: "https://awdaffwaffawf-1480411854.cos.ap-hongkong.myqcloud.com" # ENV: YOUBAN_PUBLISH_MEDIA_CACHE_FALLBACK_CDN_BASE_URL
   telegramDeleteFallback:
-    intervalSeconds: 60        # 协议号旧消息删除任务的首次等待时间
-    jitterSeconds: 30          # 在最小间隔上增加的确定性抖动上限
+    intervalSeconds: 10        # 协议号旧消息删除任务的首次等待时间
+    jitterSeconds: 5           # 在最小间隔上增加的确定性抖动上限
     floodWaitBufferSeconds: 5  # Telegram要求等待时间之外的安全缓冲
     maxAttempts: 5             # 临时错误最大尝试次数
   fullPush:
