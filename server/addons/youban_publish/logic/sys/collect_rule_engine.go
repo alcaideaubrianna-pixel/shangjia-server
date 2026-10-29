@@ -186,11 +186,7 @@ func normalizeCollectRuleBodyWithoutTruncate(text string, rule gdb.Record) strin
 // idempotent order. It is shared by rule evaluation and the persistence
 // boundary so retries cannot write raw text back over cleaned content.
 func normalizeCollectRuleBody(text string, rule gdb.Record) string {
-	// A configured suffix is a line-local transformation. Never run the
-	// legacy whole-body fee truncation in that path: it can remove unrelated
-	// numeric profile fields (age/height/weight/days) before the fee line is
-	// rebuilt.
-	if rule["truncate_intro_fee_enabled"].Bool() && strings.TrimSpace(rule["intro_fee_suffix"].String()) == "" {
+	if rule["truncate_intro_fee_enabled"].Bool() {
 		text = applyCollectIntroFeeTruncate(text)
 	}
 	text = applyCollectLineDeletes(text, collectRuleStrings(rule, "delete_lines"))
@@ -489,10 +485,30 @@ func isCollectIntroFeeSourceMarkLine(line string) bool {
 func applyCollectIntroFeeSuffix(text, original, suffix string) string {
 	suffix = strings.TrimSpace(suffix)
 	fields := parseCollectIntroFeeFields(original)
-	amount := fields.FirstAmount
 	if suffix == "" {
 		return text
 	}
+	// Suffix replacement is strictly line-local. Do not remove neighbouring
+	// lines or truncate the body while rebuilding the fee caption.
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	changed := false
+	for index, line := range lines {
+		normalized := normalizeCollectKeywordText(line)
+		if !collectFeeKeywordPattern.MatchString(normalized) {
+			continue
+		}
+		lineFields := parseCollectIntroFeeFields(line)
+		if lineFields.FirstAmount != "" {
+			lines[index] = formatCollectIntroFeeFields(lineFields, suffix)
+		} else if !strings.HasSuffix(strings.TrimSpace(line), suffix) {
+			lines[index] = strings.TrimRightFunc(line, unicode.IsSpace) + " " + suffix
+		}
+		changed = true
+	}
+	if changed {
+		return strings.Join(lines, "\n")
+	}
+	amount := fields.FirstAmount
 	feeNumberCount := 0
 	for _, line := range strings.Split(strings.ReplaceAll(normalizeCollectKeywordText(original), "\r\n", "\n"), "\n") {
 		if collectFeeKeywordPattern.MatchString(line) {
@@ -522,7 +538,7 @@ func applyCollectIntroFeeSuffix(text, original, suffix string) string {
 	if feeLine == "" {
 		return text
 	}
-	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	lines = strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
 	kept := make([]string, 0, len(lines)+1)
 	removeNextSuffix := false
 	for _, line := range lines {

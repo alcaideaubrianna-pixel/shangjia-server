@@ -26,6 +26,33 @@ type collectContentResult struct {
 	PreviousSeenAt *gtime.Time
 }
 
+// preferCollectContentText prevents a duplicate Telegram account/event with a
+// shortened caption from overwriting the richer canonical caption already in
+// the content pool. This is especially important for profile fields such as
+// age, height and weight, which may be omitted by one collector account while
+// still present in another account's copy of the same message.
+func preferCollectContentText(existing, incoming string) bool {
+	existing = strings.TrimSpace(existing)
+	incoming = strings.TrimSpace(incoming)
+	if incoming == "" {
+		return false
+	}
+	if existing == "" {
+		return true
+	}
+	fieldScore := func(text string) int {
+		score := 0
+		for _, field := range []string{"年龄", "身高", "体重", "罩杯", "职业", "省份", "城市", "介绍费", "能否", "是否", "大姨妈", "自我加分"} {
+			score += strings.Count(text, field)
+		}
+		return score
+	}
+	if incomingScore, existingScore := fieldScore(incoming), fieldScore(existing); incomingScore != existingScore {
+		return incomingScore > existingScore
+	}
+	return len([]rune(incoming)) > len([]rune(existing))
+}
+
 func (s *sSysPublish) CollectContentList(ctx context.Context, in *sysin.CollectContentListInp) (list []*sysin.CollectContentModel, totalCount int, err error) {
 	account, err := s.currentAccount(ctx)
 	if err != nil {
@@ -161,6 +188,16 @@ func (s *sSysPublish) ensureCollectContent(ctx context.Context, event gdb.Record
 	}
 	result.Id = content["id"].Int64()
 	result.PreviousSeenAt = content["last_seen_at"].GTime()
+	// Keep the richest caption seen for this dedupe key. Telegram collector
+	// accounts can return different caption completeness for the same message.
+	storedRawText := content[contentCols.RawText].String()
+	storedNormalizedText := content[contentCols.NormalizedText].String()
+	if !preferCollectContentText(storedRawText, result.RawText) {
+		result.RawText = storedRawText
+	}
+	if !preferCollectContentText(storedNormalizedText, result.NormalizedText) {
+		result.NormalizedText = storedNormalizedText
+	}
 	_, err = contentDao.Ctx(ctx).
 		Where(contentCols.Id, result.Id).
 		Data(g.Map{
