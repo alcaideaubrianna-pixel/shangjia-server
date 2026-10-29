@@ -141,6 +141,7 @@ func (s *sSysPublish) syncProfileMediaFromInput(ctx context.Context, tx gdb.TX, 
 
 func (s *sSysPublish) syncOwnedMediaFromInput(ctx context.Context, tx gdb.TX, owner gdb.Record, profileId int64, tenantId int64, accountId int64, items []*sysin.ProfileMediaSaveItem) ([]int64, error) {
 	var err error
+	removedMediaIds := make([]int64, 0)
 
 	var current []gdb.Record
 	mediaMod := mediaOwnerScope(tx.Model(publishMediaTable).Ctx(ctx), owner).
@@ -191,10 +192,18 @@ func (s *sSysPublish) syncOwnedMediaFromInput(ctx context.Context, tx gdb.TX, ow
 		mediaId := row["id"].Int64()
 		item, retained := keep[mediaId]
 		if !retained {
-			// The edit payload is not a deletion command. Uploads can finish
-			// after the profile save request, so treating an omitted item as
-			// deleted can empty a profile immediately before publish. Explicit
-			// media deletion is handled by deleteMedia/deleteMediaByTenant.
+			// Profile edits are replacement writes: the submitted media list is
+			// the complete desired state. Omitted rows must be soft-deleted in
+			// the same transaction, otherwise repeated API uploads accumulate
+			// duplicate active media and are published again.
+			if _, err = tx.Model(publishMediaTable).Ctx(ctx).
+				Where("id", mediaId).
+				WhereNull("deleted_at").
+				Data(g.Map{"deleted_at": gtime.Now(), "updated_at": gtime.Now(), "updated_by": contexts.GetUserId(ctx)}).
+				Update(); err != nil {
+				return nil, gerror.Wrap(err, "清理资料旧媒体失败")
+			}
+			removedMediaIds = append(removedMediaIds, mediaId)
 			continue
 		}
 		updateData := g.Map{
@@ -226,7 +235,7 @@ func (s *sSysPublish) syncOwnedMediaFromInput(ctx context.Context, tx gdb.TX, ow
 	if err = s.syncOwnedMediaToProfile(ctx, tx, owner, profileId); err != nil {
 		return nil, err
 	}
-	return []int64{}, nil
+	return removedMediaIds, nil
 }
 
 func (s *sSysPublish) isHistoricalProfileMediaTx(ctx context.Context, tx gdb.TX, mediaId int64, profileId int64, tenantId int64, accountId int64) (bool, error) {
