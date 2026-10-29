@@ -385,6 +385,12 @@ func (s *sSysPublish) adminProfileAuthorized(ctx context.Context, in *sysin.Prof
 func (s *sSysPublish) AdminProfileBase(ctx context.Context, in *sysin.ProfileViewInp) (*sysin.ProfileModel, error) {
 	startedAt := time.Now()
 	profile, err := s.adminProfileAuthorized(ctx, in)
+	if err == nil && profile != nil {
+		// Restore the durable collection snapshot used by the detail summary.
+		// This deliberately skips Bot/TG display resolution so the lazy base
+		// request remains bounded and cannot block on channel lookups.
+		err = s.applyProfileCollectionMetadataWithOptions(ctx, []*sysin.ProfileModel{profile}, false)
+	}
 	logProfileDetailStage(ctx, "base", startedAt, profileIdOf(profile), err)
 	return profile, err
 }
