@@ -362,14 +362,14 @@ func TestParseCollectIntroFeeAliases(t *testing.T) {
 	}
 }
 
-func TestBuildCollectRuleDecisionDropsFeeWhenOnlyShortTitleRemains(t *testing.T) {
+func TestBuildCollectRuleDecisionPreservesOtherLinesWhenSuffixEnabled(t *testing.T) {
 	event := gdb.Record{"raw_text": gvar.New("编号：A123\n正文\n介绍费 7888\nKK"), "media_count": gvar.New(1)}
 	rule := gdb.Record{
 		"truncate_intro_fee_enabled": gvar.New(true), "intro_fee_suffix": gvar.New("AA"),
 		"delete_lines": gvar.New([]string{}), "delete_texts": gvar.New([]string{}),
 		"replace_from": gvar.New([]string{}), "replace_to": gvar.New([]string{}),
 	}
-	if got, want := buildCollectRuleDecision(event, nil, rule).Text, ""; got != want {
+	if got, want := buildCollectRuleDecision(event, nil, rule).Text, "编号：A123\n正文\n介绍费 7888 AA\nKK"; got != want {
 		t.Fatalf("decision text = %q, want %q", got, want)
 	}
 }
@@ -427,8 +427,29 @@ func TestNormalizeCollectMaterialTextPreservesModifiedIntroFee(t *testing.T) {
 		"id": gvar.New(int64(50)), "truncate_intro_fee_enabled": gvar.New(true),
 		"intro_fee_suffix": gvar.New("AA"),
 	}
-	if got, want := s.normalizeCollectMaterialText(context.Background(), event, rule, "正文\n介绍费 7888 AA"), "介绍费 7888 AA"; got != want {
+	if got, want := s.normalizeCollectMaterialText(context.Background(), event, rule, "正文\n介绍费 7888 AA"), "正文\n介绍费 7888 AA"; got != want {
 		t.Fatalf("commit boundary text = %q, want %q", got, want)
+	}
+}
+
+func TestNormalizeCollectMaterialTextKeepsNumericProfileFields(t *testing.T) {
+	s := &sSysPublish{}
+	raw := "省份:北京\n城市:北京\n年龄:18\n身高:169\n体重:85\n罩杯:B\n月陪伴天数:3\n月生活费多少:18000\n介绍费:7888"
+	event := gdb.Record{"id": gvar.New(int64(107)), "raw_text": gvar.New(raw)}
+	rule := gdb.Record{
+		"id": gvar.New(int64(298)), "truncate_intro_fee_enabled": gvar.New(true),
+		"intro_fee_suffix": gvar.New("土豆"),
+		"replace_from":     gvar.New([]string{}), "replace_to": gvar.New([]string{}),
+	}
+	text := normalizeCollectRuleBody(raw, rule)
+	got := s.normalizeCollectMaterialText(context.Background(), event, rule, text)
+	for _, field := range []string{"年龄:18", "身高:169", "体重:85", "月陪伴天数:3", "月生活费多少:18000"} {
+		if !strings.Contains(got, field) {
+			t.Fatalf("normalized text lost %q: %q", field, got)
+		}
+	}
+	if !strings.Contains(got, "介绍费 7888 土豆") {
+		t.Fatalf("normalized text did not rebuild fee suffix: %q", got)
 	}
 }
 

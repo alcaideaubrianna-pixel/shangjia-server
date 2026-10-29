@@ -43,13 +43,18 @@ func parseCollectIntroFeeFields(text string) collectIntroFeeFields {
 	clean := normalizeCollectKeywordText(text)
 	// Only numbers on the fee line are fee amounts. Other profile fields may
 	// contain ages, IDs, heights, etc. and must never become domestic/foreign fees.
+	feeLineFound := false
 	for _, line := range strings.Split(clean, "\n") {
 		if collectFeeKeywordPattern.MatchString(line) {
 			clean = strings.TrimSpace(line)
+			feeLineFound = true
 			break
 		}
 	}
 	fields := collectIntroFeeFields{}
+	if !feeLineFound {
+		return fields
+	}
 	amounts := collectNumberRule.FindAllString(clean, -1)
 	if len(amounts) > 0 {
 		fields.FirstAmount = strings.Join(strings.Fields(amounts[0]), " ")
@@ -181,7 +186,11 @@ func normalizeCollectRuleBodyWithoutTruncate(text string, rule gdb.Record) strin
 // idempotent order. It is shared by rule evaluation and the persistence
 // boundary so retries cannot write raw text back over cleaned content.
 func normalizeCollectRuleBody(text string, rule gdb.Record) string {
-	if rule["truncate_intro_fee_enabled"].Bool() {
+	// A configured suffix is a line-local transformation. Never run the
+	// legacy whole-body fee truncation in that path: it can remove unrelated
+	// numeric profile fields (age/height/weight/days) before the fee line is
+	// rebuilt.
+	if rule["truncate_intro_fee_enabled"].Bool() && strings.TrimSpace(rule["intro_fee_suffix"].String()) == "" {
 		text = applyCollectIntroFeeTruncate(text)
 	}
 	text = applyCollectLineDeletes(text, collectRuleStrings(rule, "delete_lines"))
