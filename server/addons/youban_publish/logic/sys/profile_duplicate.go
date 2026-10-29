@@ -29,7 +29,7 @@ const (
 	duplicateScanBatchSize        = 500
 	duplicateScanSessionTTL       = 24 * time.Hour
 	duplicateScanResultTTL        = 15 * time.Minute
-	duplicateScanAlgorithmVersion = 8
+	duplicateScanAlgorithmVersion = 9
 	duplicateScanPagesPerTask     = 20
 	duplicateScanStartLockTTL     = 10 * time.Second
 )
@@ -592,6 +592,23 @@ func (s *sSysPublish) AdminNoteDuplicateCleanup(ctx context.Context, in *sysin.A
 	validationIds := make([]int64, 0, len(ids)*2)
 	for _, candidate := range candidates {
 		candidateById[candidate.ProfileId] = candidate
+		if _, exists := candidateById[candidate.KeepProfileId]; !exists {
+			candidateById[candidate.KeepProfileId] = duplicateScanCandidate{
+				ProfileId: candidate.KeepProfileId, KeepProfileId: candidate.ProfileId,
+				Signature: candidate.Signature,
+			}
+		}
+	}
+	selected := make(map[int64]struct{}, len(ids))
+	for _, id := range ids {
+		selected[id] = struct{}{}
+	}
+	for _, candidate := range candidates {
+		if _, keepSelected := selected[candidate.KeepProfileId]; keepSelected {
+			if _, duplicateSelected := selected[candidate.ProfileId]; duplicateSelected {
+				return nil, gerror.New("同一重复组只能选择一条资料删除")
+			}
+		}
 	}
 	for _, id := range ids {
 		candidate, ok := candidateById[id]
@@ -645,7 +662,7 @@ func validateDuplicateCleanupState(ids []int64, candidates map[int64]duplicateSc
 		// reconstructed as an equality signature during validation.
 		signatureValid := strings.HasPrefix(candidate.Signature, "phash:") ||
 			(signatures[id] == candidate.Signature && signatures[candidate.KeepProfileId] == candidate.Signature)
-		if target == nil || keep == nil || !signatureValid || !duplicateProfileNewer(keep, target) {
+		if target == nil || keep == nil || !signatureValid {
 			return gerror.New("重复资料已发生变化，为避免误删，请重新扫描后再试")
 		}
 	}
@@ -933,23 +950,6 @@ func (s *sSysPublish) loadDuplicateValidationState(ctx context.Context, ids []in
 		}
 	}
 	return profiles, signatures, nil
-}
-
-func duplicateProfileNewer(left, right *sysin.AdminNoteDuplicateItemModel) bool {
-	if left == nil || right == nil {
-		return false
-	}
-	leftTime, rightTime := int64(0), int64(0)
-	if left.CreatedAt != nil {
-		leftTime = left.CreatedAt.Time.UnixNano()
-	}
-	if right.CreatedAt != nil {
-		rightTime = right.CreatedAt.Time.UnixNano()
-	}
-	if leftTime == rightTime {
-		return left.Id > right.Id
-	}
-	return leftTime > rightTime
 }
 
 func duplicateImageSignature(rows []duplicateImageRow) (string, bool) {

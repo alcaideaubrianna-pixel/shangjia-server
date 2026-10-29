@@ -353,15 +353,15 @@ func TestValidateDuplicateCleanupStateAllowsConfirmedSimilarImage(t *testing.T) 
 	}
 }
 
-func TestValidateDuplicateCleanupStateRequiresNewerKeep(t *testing.T) {
+func TestValidateDuplicateCleanupStateAllowsSwitchingSelectedMember(t *testing.T) {
 	sameTime := gtime.New(time.Unix(10, 0))
 	candidates := map[int64]duplicateScanCandidate{2: {ProfileId: 2, KeepProfileId: 1, Signature: "same"}}
 	profiles := map[int64]*sysin.AdminNoteDuplicateItemModel{
 		1: {Id: 1, CreatedAt: sameTime},
 		2: {Id: 2, CreatedAt: sameTime},
 	}
-	if err := validateDuplicateCleanupState([]int64{2}, candidates, profiles, map[int64]string{1: "same", 2: "same"}); err == nil {
-		t.Fatal("expected older retained profile to be rejected")
+	if err := validateDuplicateCleanupState([]int64{2}, candidates, profiles, map[int64]string{1: "same", 2: "same"}); err != nil {
+		t.Fatalf("selected duplicate member should be allowed: %v", err)
 	}
 }
 
