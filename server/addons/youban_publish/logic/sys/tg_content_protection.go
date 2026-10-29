@@ -111,12 +111,13 @@ func (s *sSysPublish) applyTelegramJobContentProtection(ctx context.Context, job
 				item.AccountId = job.AccountId
 				item.JobId = job.Id
 				item.TgThumbFileId = ""
+				desiredProcessedHash := telegramProcessedAssetVariantHash(item)
 				if isTelegramImageMedia(item.MediaType) {
 					item.TgFileId = ""
 					item.AssetHash = "anti-scan:" + telegramAntiScanCacheKey(item)
 				}
 				if strings.EqualFold(strings.TrimSpace(item.ProcessedStatus), "ready") &&
-					strings.TrimSpace(item.ProcessedAssetHash) == telegramProcessedAssetVariantHash(item) &&
+					strings.TrimSpace(item.ProcessedAssetHash) == desiredProcessedHash &&
 					(strings.TrimSpace(item.ProcessedTgFileId) != "" || strings.TrimSpace(item.ProcessedFileURL) != "") {
 					item.AntiScanEnabled = false
 					item.ForceUpload = false
@@ -126,6 +127,8 @@ func (s *sSysPublish) applyTelegramJobContentProtection(ctx context.Context, job
 						item.FileUrl = item.ProcessedFileURL
 						item.StoragePath = item.ProcessedStoragePath
 					}
+				} else {
+					item.ProcessedAssetHash = desiredProcessedHash
 				}
 			}
 		}
