@@ -14,7 +14,7 @@ import (
 
 func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
 	s.tgQueueMu.Lock()
-	if s.tgInteractiveQueueServer != nil || s.tgQueueServer != nil {
+	if s.tgInteractiveQueueServer != nil || s.tgQueueServer != nil || s.tgCleanupQueueServer != nil {
 		s.tgQueueMu.Unlock()
 		return
 	}
@@ -33,10 +33,16 @@ func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
 		Queues:         telegramPublishBulkQueueWeights(ctx),
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
+	cleanupServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
+		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.cleanupConcurrency", 8).Int(),
+		Queues:         map[string]int{tgQueueNameCleanup: 1},
+		RetryDelayFunc: telegramQueueRetryDelay,
+	})
 	g.Log().Infof(ctx, "启动上架插件TG推送队列，人工上架独立并发：%d", telegramPublishInteractiveConcurrency(ctx))
 	s.tgInteractiveQueueServer = interactiveServer
 	s.tgQueueServer = server
 	s.tgBulkQueueServer = bulkServer
+	s.tgCleanupQueueServer = cleanupServer
 	s.tgQueueMu.Unlock()
 	// The outbox dispatcher is part of the publish worker contract. Start it
 	// from the same lifecycle entry point as the Asynq consumers so a role
@@ -51,6 +57,11 @@ func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
 	go func() {
 		if err := interactiveServer.Run(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
 			g.Log().Errorf(ctx, "启动上架插件TG人工发送队列失败：%+v", err)
+		}
+	}()
+	go func() {
+		if err := cleanupServer.Run(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
+			g.Log().Errorf(ctx, "启动上架插件TG清理队列失败：%+v", err)
 		}
 	}()
 	go func() {
@@ -353,6 +364,7 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	interactiveServer := s.tgInteractiveQueueServer
 	server := s.tgQueueServer
 	bulkServer := s.tgBulkQueueServer
+	cleanupServer := s.tgCleanupQueueServer
 	mediaServer := s.mediaQueueServer
 	mediaBulkServer := s.mediaBulkQueueServer
 	mediaProcessServer := s.mediaProcessServer
@@ -372,6 +384,7 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	s.tgInteractiveQueueServer = nil
 	s.tgQueueServer = nil
 	s.tgBulkQueueServer = nil
+	s.tgCleanupQueueServer = nil
 	s.mediaQueueServer = nil
 	s.mediaBulkQueueServer = nil
 	s.mediaProcessServer = nil
@@ -397,6 +410,9 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	}
 	if bulkServer != nil {
 		bulkServer.Shutdown()
+	}
+	if cleanupServer != nil {
+		cleanupServer.Shutdown()
 	}
 	if mediaServer != nil {
 		mediaServer.Shutdown()

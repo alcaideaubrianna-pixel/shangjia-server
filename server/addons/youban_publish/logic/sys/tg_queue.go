@@ -24,6 +24,7 @@ const (
 	tgQueueNameUrgent              = "youban_publish_tg_urgent"
 	tgQueueNameDefault             = "youban_publish_tg"
 	tgQueueNameBulk                = "youban_publish_tg_bulk"
+	tgQueueNameCleanup             = "youban_publish_tg_cleanup"
 	tgQueueNameMediaRealtime       = "youban_publish_media_realtime"
 	tgQueueNameMediaRealtimePrefix = "youban_publish_media_realtime_"
 	tgQueueNameMediaProcess        = "youban_publish_media_process"
@@ -381,7 +382,7 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 }
 
 func (s *sSysPublish) enqueueTelegramCleanupJob(ctx context.Context, jobId int64, delay time.Duration) error {
-	return s.enqueueTelegramTask(ctx, tgTaskTypeCleanup, jobId, delay, true)
+	return s.enqueueTelegramTaskWithQueue(ctx, tgTaskTypeCleanup, jobId, delay, true, tgQueueNameCleanup)
 }
 
 func (s *sSysPublish) enqueueTelegramAutoDelete(ctx context.Context, payload autoDeleteQueuePayload) error {
