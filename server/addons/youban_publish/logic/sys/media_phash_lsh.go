@@ -106,6 +106,7 @@ func mediaPHashLshBucketValues(hash string) []mediaPHashLshCell {
 }
 
 func mediaPHashLshCandidateRowsWithScopes(ctx context.Context, normalizedHash string, threshold int, scopes []mediaPHashBucketScopePart, profileIds []int64, mediaType string, excludeProfileId int64) ([]mediaPHashBucketCandidateRow, error) {
+	startedAt := time.Now()
 	scanScope, err := mediaPHashLshScanSmallScope(ctx, scopes, profileIds, mediaType, excludeProfileId)
 	if err != nil {
 		return nil, err
@@ -134,8 +135,10 @@ func mediaPHashLshCandidateRowsWithScopes(ctx context.Context, normalizedHash st
 		}
 		return nil
 	}); err != nil {
+		g.Log().Warning(ctx, "图片搜索pHash候选失败", g.Map{"stage": "phash_lsh_query", "durationMs": time.Since(startedAt).Milliseconds(), "scopeScan": scanScope, "error": err.Error()})
 		return nil, err
 	}
+	g.Log().Info(ctx, "图片搜索pHash候选完成", g.Map{"stage": "phash_lsh_query", "durationMs": time.Since(startedAt).Milliseconds(), "scopeScan": scanScope, "rows": len(rows), "threshold": threshold})
 	return rows, nil
 }
 

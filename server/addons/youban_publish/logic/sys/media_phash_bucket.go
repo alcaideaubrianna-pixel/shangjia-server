@@ -319,9 +319,11 @@ func mediaPHashBucketCandidateRowsWithScopes(ctx context.Context, normalizedHash
 	if value, err := cache.Instance().Get(ctx, cacheKey); err == nil && !value.IsNil() {
 		var cached []mediaPHashBucketCandidateRow
 		if scanErr := value.Scan(&cached); scanErr == nil {
+			g.Log().Info(ctx, "图片搜索候选缓存命中", g.Map{"stage": "candidate_cache", "cacheHit": true, "rows": len(cached), "threshold": threshold, "mediaType": mediaType})
 			return cached, nil
 		}
 	}
+	g.Log().Info(ctx, "图片搜索候选缓存未命中", g.Map{"stage": "candidate_cache", "cacheHit": false, "threshold": threshold, "mediaType": mediaType})
 	result, err, _ := mediaPHashBucketCandidateGroup.Do(cacheKey, func() (any, error) {
 		if value, cacheErr := cache.Instance().Get(ctx, cacheKey); cacheErr == nil && !value.IsNil() {
 			var cached []mediaPHashBucketCandidateRow
@@ -345,6 +347,7 @@ func mediaPHashBucketCandidateRowsWithScopes(ctx context.Context, normalizedHash
 	if !ok {
 		return nil, gerror.New("解析媒体哈希候选结果失败")
 	}
+	g.Log().Info(ctx, "图片搜索候选完成", g.Map{"stage": "candidate_result", "rows": len(rows), "threshold": threshold, "mediaType": mediaType})
 	return rows, nil
 }
 
