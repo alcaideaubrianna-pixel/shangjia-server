@@ -128,7 +128,21 @@ func (s *sSysPublish) saveBotProfileMedia(ctx context.Context, profileId int64, 
 	if len(displayMedia) == 0 && len(verifyMedia) == 0 {
 		return nil
 	}
+	// BOT edits submit the complete media payload. Clear the previous active
+	// set before inserting the replacement so repeated edits cannot append the
+	// same Telegram/file-backed media again.
 	now := gtime.Now()
+	if _, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+		Where("profile_id", profileId).
+		Where("tenant_id", tenantId).
+		Where("account_id", accountId).
+		WhereNull("deleted_at").
+		Data(g.Map{"deleted_at": now, "updated_at": now, "updated_by": accountId}).Update(); err != nil {
+		return gerror.Wrap(err, "清理机器人资料旧媒体失败")
+	}
+	if err := s.deleteMediaPHashBucketByProfileId(ctx, profileId); err != nil {
+		return gerror.Wrap(err, "清理机器人资料旧媒体索引失败")
+	}
 	insertItems := func(purpose string, media []*sysin.MessageTemplateMediaInp) error {
 		for index, item := range media {
 			if item == nil {
