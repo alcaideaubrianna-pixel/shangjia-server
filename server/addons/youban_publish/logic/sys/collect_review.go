@@ -94,6 +94,10 @@ func (s *sSysPublish) CollectReviewList(ctx context.Context, in *sysin.CollectRe
 }
 
 func (s *sSysPublish) fillCollectReviewSourceDisplays(ctx context.Context, list []*sysin.CollectReviewModel, tenantId int64) error {
+	// Review/list endpoints use persisted source snapshots only. Never resolve
+	// Bot channel labels synchronously from this hot path.
+	return nil
+
 	eventIds := make([]int64, 0, len(list))
 	byEvent := make(map[int64]*sysin.CollectReviewModel, len(list))
 	for _, review := range list {

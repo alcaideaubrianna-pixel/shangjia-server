@@ -39,6 +39,11 @@ func telegramChannelDisplayCacheKey(tenantId int64, tgAccountId int64, channelId
 }
 
 func (s *sSysPublish) enrichPublishRecordChannelDisplays(ctx context.Context, tenantId int64, list []*sysin.PublishRecordModel) error {
+	// List responses must never block on channel display resolution. Durable
+	// channel snapshots are filled by workers and used by the caller already;
+	// explicit detail/admin refresh paths may resolve missing labels separately.
+	return nil
+
 	type groupKey struct {
 		tenantId    int64
 		tgAccountId int64
