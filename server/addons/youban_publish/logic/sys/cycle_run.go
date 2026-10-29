@@ -524,12 +524,15 @@ func (s *sSysPublish) channelCyclePage(ctx context.Context, channel channelCycle
 	if channel.Mode == "batch" {
 		model = s.batchCycleEligibleProfileModel(ctx, channel.TenantId, channel.Id)
 	}
-	err := model.
-		Fields("p.id AS id,ps.tenant_id,ps.account_id,p.id AS profile_id").
-		WhereGT("p.id", cursorId).
-		OrderAsc("p.id").
-		Limit(limit).
-		Scan(&items)
+	query := model.Fields("p.id AS id,ps.tenant_id,ps.account_id,p.id AS profile_id")
+	if channel.Mode == "batch" && cursorId > 0 {
+		// Keep the tail first, then wrap to the head in the same run so a
+		// configured 50-item batch remains full when only 26 tail rows remain.
+		query = query.Order("CASE WHEN p.id > ? THEN 0 ELSE 1 END", cursorId).OrderAsc("p.id")
+	} else {
+		query = query.WhereGT("p.id", cursorId).OrderAsc("p.id")
+	}
+	err := query.Limit(limit).Scan(&items)
 	if err != nil {
 		return nil, gerror.Wrap(err, "分页读取频道循环资料失败")
 	}
