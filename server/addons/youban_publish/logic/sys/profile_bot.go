@@ -134,6 +134,7 @@ func (s *sSysPublish) saveBotProfileMedia(ctx context.Context, profileId int64, 
 	// lookup never makes an existing group unavailable.
 	now := gtime.Now()
 	insertItems := func(purpose string, media []*sysin.MessageTemplateMediaInp) error {
+		seen := make(map[string]struct{}, len(media))
 		for index, item := range media {
 			if item == nil {
 				continue
@@ -155,6 +156,14 @@ func (s *sSysPublish) saveBotProfileMedia(ctx context.Context, profileId int64, 
 			attachmentId := attachment["id"].Int64()
 			md5Value := firstNonEmpty(attachment["md5"].String(), strings.TrimSpace(item.AssetHash))
 			assetHash := mediaAssetHash(strings.TrimSpace(item.AssetHash), storagePath, fileURL)
+			identity := firstNonEmpty(md5Value, strings.TrimSpace(item.AssetHash), storagePath, fileURL)
+			if identity != "" {
+				identityKey := mediaType + "\x00" + identity
+				if _, exists := seen[identityKey]; exists {
+					continue
+				}
+				seen[identityKey] = struct{}{}
+			}
 			data := g.Map{
 				"tenant_id":              tenantId,
 				"merchant_id":            tenantId,
