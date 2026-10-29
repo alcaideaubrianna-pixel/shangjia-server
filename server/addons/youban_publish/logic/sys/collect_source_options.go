@@ -44,8 +44,10 @@ func (s *sSysPublish) AdminCollectSourceOptions(ctx context.Context, keyword str
 	if totalCount, err = countCollectSourceOptionGroups(ctx, base); err != nil {
 		return nil, 0, gerror.Wrap(err, "统计采集频道失败")
 	}
-	mod := base.Fields("e.source_id,e.source_chat_id,MAX(s.title) AS title,MAX(s.source_username) AS source_username,COALESCE(MAX(c.channel_title),MAX(bc.chat_title)) AS channel_title,COALESCE(MAX(c.channel_username),MAX(bc.chat_username)) AS channel_username").
-		Group("e.source_id,e.source_chat_id")
+	// A Telegram channel is identified by source_chat_id. Historical source
+	// rows may point at the same channel, so expose one option per channel.
+	mod := base.Fields("MIN(e.source_id) AS source_id,e.source_chat_id,MAX(s.title) AS title,MAX(s.source_username) AS source_username,COALESCE(MAX(c.channel_title),MAX(bc.chat_title)) AS channel_title,COALESCE(MAX(c.channel_username),MAX(bc.chat_username)) AS channel_username").
+		Group("e.source_chat_id")
 	if err = mod.OrderAsc("title").OrderAsc("source_id").Page(page, perPage).Scan(&rows); err != nil {
 		return nil, 0, gerror.Wrap(err, "获取采集频道筛选选项失败")
 	}
@@ -75,6 +77,6 @@ func countCollectSourceOptionGroups(ctx context.Context, mod *gdb.Model) (int, e
 		SourceId     int64  `orm:"source_id"`
 		SourceChatId string `orm:"source_chat_id"`
 	}
-	err := mod.Clone().Fields(gdb.Raw("e.source_id,e.source_chat_id")).Group("e.source_id,e.source_chat_id").Scan(&groups)
+	err := mod.Clone().Fields(gdb.Raw("e.source_chat_id")).Group("e.source_chat_id").Scan(&groups)
 	return len(groups), err
 }

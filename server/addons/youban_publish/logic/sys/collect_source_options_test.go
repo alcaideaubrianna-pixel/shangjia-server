@@ -21,7 +21,7 @@ func TestCountCollectSourceOptionGroupsOnlySelectsGroupKeys(t *testing.T) {
 		generated = err.Error()
 	}
 	upperSQL := strings.ToUpper(generated)
-	if !strings.Contains(upperSQL, "SELECT E.SOURCE_ID,E.SOURCE_CHAT_ID") || !strings.Contains(upperSQL, "GROUP BY") {
+	if !strings.Contains(upperSQL, "SELECT E.SOURCE_CHAT_ID") || !strings.Contains(upperSQL, "GROUP BY") {
 		t.Fatalf("count must select grouped keys: %s", generated)
 	}
 	if strings.Contains(upperSQL, "COUNT(") || strings.Contains(upperSQL, "MAX(") || strings.Contains(upperSQL, "COLLECT_SOURCE_GROUPS") {
