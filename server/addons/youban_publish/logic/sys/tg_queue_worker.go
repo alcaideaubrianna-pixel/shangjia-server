@@ -34,7 +34,7 @@ func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
 	cleanupServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
-		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.cleanupConcurrency", 8).Int(),
+		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.cleanupConcurrency", 16).Int(),
 		Queues:         map[string]int{tgQueueNameCleanup: 1},
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})

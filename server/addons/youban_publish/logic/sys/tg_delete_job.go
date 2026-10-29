@@ -13,15 +13,10 @@ func (s *sSysPublish) CleanupTelegramJobMessages(ctx context.Context, jobId int6
 	if err != nil {
 		return err
 	}
-	lease, ok, err := s.tryTelegramChannelLease(ctx, job.TargetChatId)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		delay := s.telegramChannelBusyDelay(ctx, jobId, job.DispatchCount)
-		return s.requeueTelegramJob(ctx, tgTaskTypeCleanup, jobId, delay)
-	}
-	defer s.releaseTelegramChannelLease(ctx, lease)
+	// Cleanup runs on its own queue. Do not take the publish channel lease here:
+	// a busy publish job must not serialize unrelated delete work for the same
+	// channel. The message query is status-aware (only `sent` rows are selected)
+	// and the status update is idempotent, so concurrent cleanup tasks are safe.
 	return s.deleteTelegramMessageSetLockedByChannel(ctx, job, "资料清理")
 }
 
