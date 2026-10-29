@@ -170,12 +170,17 @@ func (s *sSysPublish) prepareTelegramBackgroundReplacement(ctx context.Context, 
 	if err != nil {
 		return "", nil, err
 	}
-	ocrResult, ocrErr := classifyTelegramDocumentByOCR(ctx, imageBytes, conf)
-	if ocrErr != nil {
-		return "", nil, ocrErr
-	}
-	if ocrResult.HasText || ocrResult.KeywordHit {
-		return "", nil, errTelegramOCRDocument
+	// OCR is an optional document guard. When it is disabled, background
+	// replacement must continue normally; an unavailable OCR service must not
+	// silently downgrade the configured replacement to lightweight protection.
+	if conf != nil && conf.OcrEnabled == 1 && strings.TrimSpace(conf.OcrEndpoint) != "" {
+		ocrResult, ocrErr := classifyTelegramDocumentByOCR(ctx, imageBytes, conf)
+		if ocrErr != nil {
+			return "", nil, ocrErr
+		}
+		if ocrResult.HasText || ocrResult.KeywordHit {
+			return "", nil, errTelegramOCRDocument
+		}
 	}
 	provider := antiScanMattingProvider(conf)
 	segmentRaw := ""
