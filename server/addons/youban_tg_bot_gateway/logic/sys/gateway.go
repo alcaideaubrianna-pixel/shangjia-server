@@ -558,11 +558,33 @@ func (s *sGateway) submitUpdate(ctx context.Context, key string, update *models.
 	if update != nil && update.CallbackQuery != nil {
 		query := update.CallbackQuery
 		g.Log().Infof(ctx, "TG链路 gateway_callback_received updateId:%d callbackId:%s userId:%d data:%s", update.ID, query.ID, query.From.ID, strings.TrimSpace(query.Data))
+		s.ackCallbackFast(ctx, key, query)
 	}
 	if updateNeedsImmediateDispatch(update) {
 		return s.dispatch(ctx, key, update)
 	}
 	return s.enqueueUpdate(ctx, key, update)
+}
+
+// ackCallbackFast clears Telegram's callback spinner before the durable
+// interactive queue performs database and UI work. It is intentionally best
+// effort and only uses an already cached client, so the webhook path never
+// blocks on client construction or binding queries.
+func (s *sGateway) ackCallbackFast(ctx context.Context, key string, query *models.CallbackQuery) {
+	if query == nil || strings.TrimSpace(query.ID) == "" {
+		return
+	}
+	s.mu.Lock()
+	client := s.clients[key]
+	s.mu.Unlock()
+	if client == nil {
+		return
+	}
+	ackCtx, cancel := context.WithTimeout(ctx, 800*time.Millisecond)
+	defer cancel()
+	if _, err := client.AnswerCallbackQuery(ackCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID}); err != nil {
+		g.Log().Debugf(ctx, "TG链路 callback快速确认失败 callbackId:%s err:%+v", query.ID, err)
+	}
 }
 
 func updateNeedsImmediateDispatch(update *models.Update) bool {
