@@ -15,6 +15,7 @@ import (
 	"hotgo/addons/youban_bot/model/input/sysin"
 	"hotgo/addons/youban_bot/service"
 	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
+	hglock "hotgo/internal/library/hgrds/lock"
 )
 
 const (
@@ -56,7 +57,7 @@ type sSysBot struct {
 	profileRecoveryMu     sync.Mutex
 	profileRecoveryCancel context.CancelFunc
 	profileMediaMu        sync.Mutex
-	profileMediaInflight  map[string]struct{}
+	profileMediaInflight  map[string]*hglock.Lock
 }
 
 type authCodeRow struct {

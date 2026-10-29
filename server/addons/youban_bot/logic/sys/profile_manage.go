@@ -3064,23 +3064,32 @@ func (s *sSysBot) recoverPendingProfileMediaGroups(ctx context.Context) {
 
 func (s *sSysBot) startProfileMediaRecovery(sessionId int64, groupId, purpose string) bool {
 	key := fmt.Sprintf("%d:%s:%s", sessionId, strings.TrimSpace(groupId), purpose)
+	distributed := hglock.NewConfig(10*time.Minute, time.Second).WithoutWatchDog().Mutex("youban_bot:profile_media_recovery:" + key)
+	if err := distributed.TryLock(context.Background()); err != nil {
+		return false
+	}
 	s.profileMediaMu.Lock()
 	defer s.profileMediaMu.Unlock()
 	if s.profileMediaInflight == nil {
-		s.profileMediaInflight = make(map[string]struct{})
+		s.profileMediaInflight = make(map[string]*hglock.Lock)
 	}
 	if _, exists := s.profileMediaInflight[key]; exists {
+		_ = distributed.Unlock(context.Background())
 		return false
 	}
-	s.profileMediaInflight[key] = struct{}{}
+	s.profileMediaInflight[key] = distributed
 	return true
 }
 
 func (s *sSysBot) finishProfileMediaRecovery(sessionId int64, groupId, purpose string) {
 	key := fmt.Sprintf("%d:%s:%s", sessionId, strings.TrimSpace(groupId), purpose)
 	s.profileMediaMu.Lock()
+	distributed := s.profileMediaInflight[key]
 	delete(s.profileMediaInflight, key)
 	s.profileMediaMu.Unlock()
+	if distributed != nil {
+		_ = distributed.Unlock(context.Background())
+	}
 }
 
 func (s *sSysBot) finishProfileMediaGroup(botId int64, groupId string, account *botProfileAccount, session *profileSessionRow) {
