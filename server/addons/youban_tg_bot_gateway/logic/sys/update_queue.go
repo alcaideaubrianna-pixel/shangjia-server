@@ -28,8 +28,9 @@ const (
 )
 
 type gatewayUpdatePayload struct {
-	Key  string `json:"key"`
-	Body []byte `json:"body"`
+	Key        string `json:"key"`
+	Body       []byte `json:"body"`
+	EnqueuedAt int64  `json:"enqueuedAt,omitempty"`
 }
 
 func (s *sGateway) startUpdateQueue(ctx context.Context) {
@@ -135,7 +136,8 @@ func (s *sGateway) enqueueUpdateBody(ctx context.Context, key string, body []byt
 	if len(body) == 0 {
 		return fmt.Errorf("Telegram更新内容为空")
 	}
-	payload, err := json.Marshal(gatewayUpdatePayload{Key: key, Body: body})
+	enqueuedAt := time.Now()
+	payload, err := json.Marshal(gatewayUpdatePayload{Key: key, Body: body, EnqueuedAt: enqueuedAt.UnixNano()})
 	if err != nil {
 		return fmt.Errorf("序列化Telegram队列任务失败: %w", err)
 	}
@@ -159,6 +161,9 @@ func (s *sGateway) enqueueUpdateBody(ctx context.Context, key string, body []byt
 		asynq.Timeout(taskTimeout),
 		asynq.Unique(5*time.Minute),
 	)
+	if err == nil {
+		g.Log().Infof(ctx, "TG链路 gateway_interactive_enqueue updateId:%d queue:%s enqueue:%s", update.ID, queueName, time.Since(enqueuedAt))
+	}
 	if errors.Is(err, asynq.ErrDuplicateTask) {
 		var update models.Update
 		_ = json.Unmarshal(body, &update)
@@ -232,10 +237,15 @@ func (s *sGateway) handleUpdateTask(ctx context.Context, task *asynq.Task) error
 	if err := json.Unmarshal(payload.Body, &update); err != nil {
 		return fmt.Errorf("解析Telegram更新失败: %w", err)
 	}
+	queueWait := time.Duration(0)
+	if payload.EnqueuedAt > 0 {
+		queueWait = time.Since(time.Unix(0, payload.EnqueuedAt))
+	}
+	g.Log().Infof(ctx, "TG链路 gateway_interactive_start updateId:%d queueWait:%s", update.ID, queueWait)
 	if err := s.dispatch(ctx, payload.Key, &update); err != nil {
-		g.Log().Warningf(ctx, "TG Bot Gateway分发失败 key:%s updateId:%d duration:%s err:%+v", payload.Key, update.ID, time.Since(startedAt), err)
+		g.Log().Warningf(ctx, "TG Bot Gateway分发失败 key:%s updateId:%d queueWait:%s duration:%s err:%+v", payload.Key, update.ID, queueWait, time.Since(startedAt), err)
 		return err
 	}
-	g.Log().Infof(ctx, "TG链路 gateway_task_complete key:%s updateId:%d duration:%s", payload.Key, update.ID, time.Since(startedAt))
+	g.Log().Infof(ctx, "TG链路 gateway_interactive_complete key:%s updateId:%d queueWait:%s handler:%s total:%s", payload.Key, update.ID, queueWait, time.Since(startedAt), queueWait+time.Since(startedAt))
 	return nil
 }

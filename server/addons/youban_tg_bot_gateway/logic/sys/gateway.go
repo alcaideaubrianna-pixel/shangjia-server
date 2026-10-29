@@ -578,13 +578,17 @@ func (s *sGateway) ackCallbackFast(ctx context.Context, key string, query *model
 	client := s.clients[key]
 	s.mu.Unlock()
 	if client == nil {
+		g.Log().Infof(ctx, "TG链路 callback_fast_ack_skipped callbackId:%s reason:client_not_cached", query.ID)
 		return
 	}
+	startedAt := time.Now()
 	ackCtx, cancel := context.WithTimeout(ctx, 800*time.Millisecond)
 	defer cancel()
 	if _, err := client.AnswerCallbackQuery(ackCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID}); err != nil {
-		g.Log().Debugf(ctx, "TG链路 callback快速确认失败 callbackId:%s err:%+v", query.ID, err)
+		g.Log().Warningf(ctx, "TG链路 callback_fast_ack_failed callbackId:%s duration:%s err:%+v", query.ID, time.Since(startedAt), err)
+		return
 	}
+	g.Log().Infof(ctx, "TG链路 callback_fast_ack callbackId:%s duration:%s", query.ID, time.Since(startedAt))
 }
 
 func updateNeedsImmediateDispatch(update *models.Update) bool {
