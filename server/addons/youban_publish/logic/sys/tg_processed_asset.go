@@ -13,7 +13,10 @@ func telegramProcessedAssetVariantHash(media *telegramMediaItem) string {
 	if media == nil {
 		return ""
 	}
-	payload := fmt.Sprintf("v1|%d|%s|%t|%d|%s|%s", media.Id, media.MediaType, media.AntiScanEnabled, media.AntiScanSeed, media.AntiScanMode, media.AntiScanBackgroundURL)
+	// v2 invalidates hashes written by the old reuse path, which could stamp
+	// an existing Telegram file_id as if it had been regenerated with the
+	// current background replacement settings.
+	payload := fmt.Sprintf("v2|%d|%s|%t|%d|%s|%s", media.Id, media.MediaType, media.AntiScanEnabled, media.AntiScanSeed, media.AntiScanMode, media.AntiScanBackgroundURL)
 	sum := sha256.Sum256([]byte(payload))
 	return hex.EncodeToString(sum[:])
 }
