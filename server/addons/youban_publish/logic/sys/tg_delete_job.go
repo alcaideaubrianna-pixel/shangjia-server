@@ -2,22 +2,52 @@ package sys
 
 import (
 	"context"
+	"fmt"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+
+	hglock "hotgo/internal/library/hgrds/lock"
 )
+
+const telegramCleanupPerChannelConcurrency = 4
 
 func (s *sSysPublish) CleanupTelegramJobMessages(ctx context.Context, jobId int64) error {
 	job, err := s.telegramJobById(ctx, jobId)
 	if err != nil {
 		return err
 	}
-	// Cleanup runs on its own queue. Do not take the publish channel lease here:
-	// a busy publish job must not serialize unrelated delete work for the same
-	// channel. The message query is status-aware (only `sent` rows are selected)
-	// and the status update is idempotent, so concurrent cleanup tasks are safe.
+	lease, ok, err := tryTelegramCleanupChannelSlot(ctx, job.TargetChatId)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return s.requeueTelegramJob(ctx, tgTaskTypeCleanup, jobId, time.Second)
+	}
+	defer s.releaseTelegramChannelLease(ctx, lease)
+	// Cleanup runs on its own queue and uses four Redis slots per channel. It does
+	// not take the publish channel lease, so publishing and cleanup do not block
+	// each other. The message query is status-aware (only `sent` rows are selected).
 	return s.deleteTelegramMessageSetLockedByChannel(ctx, job, "资料清理")
+}
+
+// Cleanup uses four Redis slots per channel. Different channels never contend
+// with each other, while a single channel is protected from an unbounded burst.
+func tryTelegramCleanupChannelSlot(ctx context.Context, chatId string) (*hglock.Lock, bool, error) {
+	base := telegramChannelLockKey(chatId) + ":cleanup"
+	for slot := 0; slot < telegramCleanupPerChannelConcurrency; slot++ {
+		lock := hglock.NewConfig(telegramChannelLeaseTTL, time.Second).WithoutWatchDog().Mutex(fmt.Sprintf("%s:%d", base, slot))
+		if err := lock.TryLock(ctx); err != nil {
+			if gerror.Is(err, hglock.ErrLockFailed) {
+				continue
+			}
+			return nil, false, gerror.Wrap(err, "获取TG频道清理并发槽位失败")
+		}
+		return lock, true, nil
+	}
+	return nil, false, nil
 }
 
 func (s *sSysPublish) telegramJobById(ctx context.Context, jobId int64) (telegramJobRecord, error) {
