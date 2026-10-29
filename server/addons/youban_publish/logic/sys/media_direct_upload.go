@@ -25,6 +25,7 @@ import (
 	"hotgo/internal/dao"
 	"hotgo/internal/library/cache"
 	"hotgo/internal/library/contexts"
+	hglock "hotgo/internal/library/hgrds/lock"
 	"hotgo/internal/library/storager"
 	"hotgo/internal/model"
 	basesysin "hotgo/internal/model/input/sysin"
@@ -418,6 +419,27 @@ func (s *sSysPublish) completeMediaDirectUpload(ctx context.Context, in *sysin.M
 		}
 	}
 	logStage("attachment")
+	// Two browser retries can complete the same session concurrently. Serialize
+	// the final media write and re-read the session under the lock so only one
+	// publish media row is created.
+	completeLock := hglock.NewConfig(5*time.Minute, 100*time.Millisecond).
+		Mutex(directUploadSessionPrefix + "complete:" + in.SessionId)
+	if err = completeLock.Lock(ctx); err != nil {
+		return nil, gerror.Wrap(err, "获取直传完成锁失败")
+	}
+	defer func() {
+		if unlockErr := completeLock.Unlock(ctx); unlockErr != nil && !gerror.Is(unlockErr, hglock.ErrNotExist) {
+			g.Log().Warningf(ctx, "释放直传完成锁失败 sessionId:%s err:%+v", in.SessionId, unlockErr)
+		}
+	}()
+	if latest, loadErr := loadMediaDirectUploadSession(ctx, in.SessionId); loadErr == nil {
+		session = latest
+		if session.MediaId > 0 {
+			return s.mediaViewById(ctx, session.MediaId)
+		}
+	} else {
+		return nil, loadErr
+	}
 	task, err := s.resolveMediaEditTask(ctx, &session.Media, session.TenantId, session.AccountId)
 	if err != nil {
 		return nil, err
