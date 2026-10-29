@@ -272,7 +272,7 @@ func (s *sSysPublish) adminNoteList(ctx context.Context, in *sysin.NoteListInp, 
 	})
 	group.Go(func() error {
 		stageStartedAt := time.Now()
-		err := s.applyProfileCollectionMetadata(groupCtx, profiles)
+		err := s.applyProfileCollectionMetadataWithOptions(groupCtx, profiles, false)
 		logSlowAdminNoteListStage(groupCtx, "collection_metadata", stageStartedAt, len(profiles), 0)
 		return err
 	})
@@ -596,6 +596,10 @@ type profileCollectionJobSourceRow struct {
 }
 
 func (s *sSysPublish) applyProfileCollectionMetadata(ctx context.Context, list []*sysin.ProfileModel) error {
+	return s.applyProfileCollectionMetadataWithOptions(ctx, list, true)
+}
+
+func (s *sSysPublish) applyProfileCollectionMetadataWithOptions(ctx context.Context, list []*sysin.ProfileModel, resolveDisplays bool) error {
 	profileIds := make([]int64, 0, len(list))
 	for _, item := range list {
 		if item != nil && item.Id > 0 {
@@ -634,38 +638,42 @@ func (s *sSysPublish) applyProfileCollectionMetadata(ctx context.Context, list [
 	if err = s.applyProfileCollectionJobSourceFallback(ctx, profileIds, metadata); err != nil {
 		return err
 	}
-	botChats := make(map[int64][]string)
-	tgChats := make(map[int64][]string)
-	for _, row := range metadata {
-		if strings.EqualFold(strings.TrimSpace(row.SourceType), sysin.CollectSourceTypeBot) {
-			botChats[row.BotId] = append(botChats[row.BotId], row.SourceChatId)
-		} else if row.TgAccountId > 0 {
-			tgChats[row.TgAccountId] = append(tgChats[row.TgAccountId], row.SourceChatId)
+	botDisplays := map[int64]map[int64]map[string]telegramChannelDisplay{}
+	tgDisplays := map[int64]map[int64]map[string]telegramChannelDisplay{}
+	if resolveDisplays {
+		botChats := make(map[int64][]string)
+		tgChats := make(map[int64][]string)
+		for _, row := range metadata {
+			if strings.EqualFold(strings.TrimSpace(row.SourceType), sysin.CollectSourceTypeBot) {
+				botChats[row.BotId] = append(botChats[row.BotId], row.SourceChatId)
+			} else if row.TgAccountId > 0 {
+				tgChats[row.TgAccountId] = append(tgChats[row.TgAccountId], row.SourceChatId)
+			}
 		}
-	}
-	botDisplays := make(map[int64]map[int64]map[string]telegramChannelDisplay, len(botChats))
-	for botId, chatIds := range botChats {
-		tenantId := collectionMetadataTenantId(metadata, botId, true)
-		displays, displayErr := s.resolveBotChannelDisplays(ctx, tenantId, botId, chatIds)
-		if displayErr != nil {
-			return gerror.Wrap(displayErr, "读取Bot采集来源频道失败")
+		botDisplays = make(map[int64]map[int64]map[string]telegramChannelDisplay, len(botChats))
+		for botId, chatIds := range botChats {
+			tenantId := collectionMetadataTenantId(metadata, botId, true)
+			displays, displayErr := s.resolveBotChannelDisplays(ctx, tenantId, botId, chatIds)
+			if displayErr != nil {
+				return gerror.Wrap(displayErr, "读取Bot采集来源频道失败")
+			}
+			if botDisplays[tenantId] == nil {
+				botDisplays[tenantId] = make(map[int64]map[string]telegramChannelDisplay)
+			}
+			botDisplays[tenantId][botId] = displays
 		}
-		if botDisplays[tenantId] == nil {
-			botDisplays[tenantId] = make(map[int64]map[string]telegramChannelDisplay)
+		tgDisplays = make(map[int64]map[int64]map[string]telegramChannelDisplay, len(tgChats))
+		for tgAccountId, chatIds := range tgChats {
+			tenantId := collectionMetadataTenantId(metadata, tgAccountId, false)
+			displays, displayErr := s.resolveTelegramChannelDisplays(ctx, tenantId, tgAccountId, chatIds)
+			if displayErr != nil {
+				return gerror.Wrap(displayErr, "读取TG采集来源频道失败")
+			}
+			if tgDisplays[tenantId] == nil {
+				tgDisplays[tenantId] = make(map[int64]map[string]telegramChannelDisplay)
+			}
+			tgDisplays[tenantId][tgAccountId] = displays
 		}
-		botDisplays[tenantId][botId] = displays
-	}
-	tgDisplays := make(map[int64]map[int64]map[string]telegramChannelDisplay, len(tgChats))
-	for tgAccountId, chatIds := range tgChats {
-		tenantId := collectionMetadataTenantId(metadata, tgAccountId, false)
-		displays, displayErr := s.resolveTelegramChannelDisplays(ctx, tenantId, tgAccountId, chatIds)
-		if displayErr != nil {
-			return gerror.Wrap(displayErr, "读取TG采集来源频道失败")
-		}
-		if tgDisplays[tenantId] == nil {
-			tgDisplays[tenantId] = make(map[int64]map[string]telegramChannelDisplay)
-		}
-		tgDisplays[tenantId][tgAccountId] = displays
 	}
 	for _, item := range list {
 		if item == nil {
@@ -682,14 +690,16 @@ func (s *sSysPublish) applyProfileCollectionMetadata(ctx context.Context, list [
 		item.CollectSourceChatId = strings.TrimSpace(row.SourceChatId)
 		item.CollectSourceMessageId = row.SourceMessageId
 		item.CollectSourceCreatedAt = row.SourceCreatedAt
-		display := telegramChannelDisplay{}
-		if strings.EqualFold(strings.TrimSpace(row.SourceType), sysin.CollectSourceTypeBot) {
-			display = botDisplays[row.TenantId][row.BotId][normalizeTelegramChannelChatID(row.SourceChatId)]
-		} else {
-			display = tgDisplays[row.TenantId][row.TgAccountId][normalizeTelegramChannelChatID(row.SourceChatId)]
-		}
-		if !display.Empty() {
-			mergeProfileCollectionDisplay(item, display)
+		if resolveDisplays {
+			display := telegramChannelDisplay{}
+			if strings.EqualFold(strings.TrimSpace(row.SourceType), sysin.CollectSourceTypeBot) {
+				display = botDisplays[row.TenantId][row.BotId][normalizeTelegramChannelChatID(row.SourceChatId)]
+			} else {
+				display = tgDisplays[row.TenantId][row.TgAccountId][normalizeTelegramChannelChatID(row.SourceChatId)]
+			}
+			if !display.Empty() {
+				mergeProfileCollectionDisplay(item, display)
+			}
 		}
 		if item.CollectSourceMessageId > 0 {
 			item.CollectSourceUrl = collectedTelegramMessageURL(item.CollectSourceChatId, item.CollectSourceUsername, item.CollectSourceMessageId)
