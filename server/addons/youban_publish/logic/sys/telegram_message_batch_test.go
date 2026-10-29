@@ -10,7 +10,7 @@ import (
 
 func TestTelegramDeleteMessagesBatchRequest(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/bot-token/deleteMessages" {
+		if r.URL.Path != "/bot123:token/deleteMessages" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
 		if err := r.ParseForm(); err != nil || r.Form.Get("chat_id") != "-1001" || r.Form.Get("message_ids") != "[1,2,3,4,5,6,7,8,9,10]" {
@@ -26,7 +26,7 @@ func TestTelegramDeleteMessagesBatchRequest(t *testing.T) {
 	for i := range messages {
 		messages[i] = telegramDeleteMessage{Id: int64(i + 1), TargetChatId: "-1001", MessageId: int64(i + 1)}
 	}
-	if err := telegramDeleteMessagesBatch(context.Background(), "token", messages); err != nil {
+	if err := telegramDeleteMessagesBatch(context.Background(), "123:token", messages); err != nil {
 		t.Fatalf("batch delete request failed: %v", err)
 	}
 }

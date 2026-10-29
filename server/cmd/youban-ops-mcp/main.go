@@ -75,6 +75,11 @@ type profileMediaInput struct {
 	ProfileIDs []int64 `json:"profileIds" jsonschema:"One to twenty profile IDs"`
 }
 
+type telegramOfflineBatchInput struct {
+	ProfileIDs []int64  `json:"profileIds,omitempty" jsonschema:"Profile IDs; processed in batches of 100"`
+	ProfileNos []string `json:"profileNos,omitempty" jsonschema:"Profile numbers; processed in batches of 100"`
+}
+
 type structuredOutput struct {
 	Data map[string]any `json:"data"`
 }
@@ -116,6 +121,10 @@ func main() {
 		Name: "resolve_profile_by_message", Description: "Resolve a Telegram message to its profile number and collection source by URL or chat/message ID",
 		Annotations: &mcp.ToolAnnotations{Title: "Resolve profile by Telegram message", ReadOnlyHint: true, IdempotentHint: true},
 	}, client.resolveProfileByMessage)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "telegram_message_offline_batch", Description: "Batch offline profiles and enqueue deletion of their Telegram messages through the production cleanup queue; requests are split into batches of 100",
+		Annotations: &mcp.ToolAnnotations{Title: "Batch delete Telegram messages", ReadOnlyHint: readOnly, DestructiveHint: &destructive, IdempotentHint: true},
+	}, client.telegramMessageOfflineBatch)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "collect_preview_repair", Description: "Create a bounded dry-run repair plan and confirmation token without changing business data",
 		Annotations: &mcp.ToolAnnotations{Title: "Preview collection repair", ReadOnlyHint: true, IdempotentHint: false},
@@ -236,6 +245,36 @@ func (c *apiClient) repairStatus(ctx context.Context, _ *mcp.CallToolRequest, in
 
 func (c *apiClient) previewProfileMedia(ctx context.Context, _ *mcp.CallToolRequest, input profileMediaInput) (*mcp.CallToolResult, structuredOutput, error) {
 	return c.previewRepair(ctx, nil, repairPlanInput{Action: "repair_profile_media", ProfileIDs: input.ProfileIDs, Limit: 20})
+}
+
+func (c *apiClient) telegramMessageOfflineBatch(ctx context.Context, _ *mcp.CallToolRequest, input telegramOfflineBatchInput) (*mcp.CallToolResult, structuredOutput, error) {
+	if len(input.ProfileIDs) == 0 && len(input.ProfileNos) == 0 {
+		return nil, structuredOutput{}, fmt.Errorf("profileIds or profileNos is required")
+	}
+	const batchSize = 100
+	results := make([]map[string]any, 0, (len(input.ProfileIDs)+len(input.ProfileNos)+batchSize-1)/batchSize)
+	idOffset, noOffset := 0, 0
+	for idOffset < len(input.ProfileIDs) || noOffset < len(input.ProfileNos) {
+		idsTake := len(input.ProfileIDs) - idOffset
+		if idsTake > batchSize {
+			idsTake = batchSize
+		}
+		noTake := batchSize - idsTake
+		if noTake > len(input.ProfileNos)-noOffset {
+			noTake = len(input.ProfileNos) - noOffset
+		}
+		data, err := c.call(ctx, http.MethodPost, "/api/youban_publish/ai-ops/telegram/message/offline", map[string]any{
+			"profileIds": input.ProfileIDs[idOffset : idOffset+idsTake],
+			"profileNos": input.ProfileNos[noOffset : noOffset+noTake],
+		})
+		if err != nil {
+			return nil, structuredOutput{}, err
+		}
+		results = append(results, data)
+		idOffset += idsTake
+		noOffset += noTake
+	}
+	return nil, structuredOutput{Data: map[string]any{"batchSize": batchSize, "batches": results}}, nil
 }
 
 func (c *apiClient) call(ctx context.Context, method, path string, body any) (map[string]any, error) {
