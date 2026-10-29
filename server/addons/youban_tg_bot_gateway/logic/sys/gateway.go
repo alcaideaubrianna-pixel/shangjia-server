@@ -537,16 +537,31 @@ func (s *sGateway) Webhook(ctx context.Context, key string, body []byte, secret 
 	if update.InlineQuery != nil {
 		g.Log().Infof(ctx, "TG链路 gateway_webhook_inline_received key:%s updateId:%d queryId:%s query:%q", key, update.ID, update.InlineQuery.ID, strings.TrimSpace(update.InlineQuery.Query))
 	}
-	submitStartedAt := time.Now()
-	err = s.submitUpdate(ctx, strings.TrimSpace(key), &update)
-	submitDuration := time.Since(submitStartedAt)
 	result := "queued"
+	var submitDuration time.Duration
 	if updateNeedsImmediateDispatch(&update) {
+		submitStartedAt := time.Now()
+		err = s.submitUpdate(ctx, strings.TrimSpace(key), &update)
+		submitDuration = time.Since(submitStartedAt)
 		result = "dispatched"
+		if err != nil {
+			g.Log().Warningf(ctx, "TG链路 gateway_webhook_submit_failed key:%s updateId:%d config:%s parse:%s submit:%s total:%s err:%+v", key, update.ID, configDuration, parseDuration, submitDuration, time.Since(startedAt), err)
+		}
+	} else {
+		// Channel posts are durable downstream queue work. Return the Telegram
+		// webhook response immediately so slow collection/DB work cannot block
+		// Telegram retries or user-facing callbacks.
+		asyncCtx := context.WithoutCancel(ctx)
+		asyncKey := strings.TrimSpace(key)
+		asyncUpdate := update
+		go func() {
+			if asyncErr := s.submitUpdate(asyncCtx, asyncKey, &asyncUpdate); asyncErr != nil {
+				g.Log().Warningf(asyncCtx, "TG链路 gateway_webhook_async_submit_failed key:%s updateId:%d err:%+v", asyncKey, asyncUpdate.ID, asyncErr)
+			}
+		}()
 	}
-	if err != nil {
+	if err != nil && updateNeedsImmediateDispatch(&update) {
 		result = "failed"
-		g.Log().Warningf(ctx, "TG链路 gateway_webhook_submit_failed key:%s updateId:%d config:%s parse:%s submit:%s total:%s err:%+v", key, update.ID, configDuration, parseDuration, submitDuration, time.Since(startedAt), err)
 	} else if total := time.Since(startedAt); total >= time.Second {
 		g.Log().Warningf(ctx, "TG链路 gateway_webhook_slow key:%s updateId:%d result:%s config:%s parse:%s submit:%s total:%s", key, update.ID, result, configDuration, parseDuration, submitDuration, total)
 	}
