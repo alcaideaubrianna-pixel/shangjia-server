@@ -19,6 +19,7 @@ import (
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+	"golang.org/x/sync/semaphore"
 	"hotgo/addons/youban_publish/model"
 )
 
@@ -59,6 +60,11 @@ var facePPHTTPClient = &http.Client{
 	},
 }
 
+// The current Face++ API key is limited to one in-flight request. Keep this
+// gate local to the provider so background replacement requests do not consume
+// or reduce normal Telegram publish concurrency.
+var facePPRequestGate = semaphore.NewWeighted(1)
+
 func facePPPortraitMatting(ctx context.Context, imageBytes []byte, imageHash string, conf *model.CloudResourceConfig) (string, error) {
 	startedAt := time.Now()
 	defer func() {
@@ -90,6 +96,10 @@ func facePPPortraitMatting(ctx context.Context, imageBytes []byte, imageHash str
 	if err = mw.Close(); err != nil {
 		return "", err
 	}
+	if err = facePPRequestGate.Acquire(ctx, 1); err != nil {
+		return "", gerror.Wrap(err, "等待 Face++ 并发槽位失败")
+	}
+	defer facePPRequestGate.Release(1)
 	endpoint := strings.TrimSpace(conf.FacePlusEndpoint)
 	if endpoint == "" {
 		endpoint = "https://api-cn.faceplusplus.com/humanbodypp/v2/segment"
