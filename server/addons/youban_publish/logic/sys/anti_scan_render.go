@@ -156,12 +156,34 @@ func applyAntiScanBackground(ctx context.Context, src *image.RGBA, segmentRaw st
 	}
 	underlayMask := antiScanPortraitUnderlayMask(portrait, bounds)
 	if provider == "fapihub-matting" || provider == "fapihub" {
+		portrait = erodePortraitAlpha(portrait, 1)
 		compositeOriginalForeground(bg, src, portrait, underlayMask)
 	} else {
 		draw.DrawMask(bg, bounds, src, image.Point{}, underlayMask, image.Point{}, draw.Over)
 		draw.Draw(bg, bounds, portrait, image.Point{}, draw.Over)
 	}
 	return bg, true
+}
+
+func erodePortraitAlpha(src image.Image, radius int) image.Image {
+	b := src.Bounds()
+	out := image.NewRGBA(b)
+	draw.Draw(out, b, src, b.Min, draw.Src)
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			_, _, _, a := src.At(x, y).RGBA()
+			if a == 0 { continue }
+			keep := true
+			for yy := maxInt(b.Min.Y, y-radius); yy <= minInt(b.Max.Y-1, y+radius) && keep; yy++ {
+				for xx := maxInt(b.Min.X, x-radius); xx <= minInt(b.Max.X-1, x+radius); xx++ {
+					_, _, _, neighbor := src.At(xx, yy).RGBA()
+					if neighbor == 0 { keep = false; break }
+				}
+			}
+			if !keep { out.SetRGBA(x, y, color.RGBA{}) }
+		}
+	}
+	return out
 }
 
 func compositeOriginalForeground(background, original *image.RGBA, matte image.Image, underlay *image.Alpha) {
