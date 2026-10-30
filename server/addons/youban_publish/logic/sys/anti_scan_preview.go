@@ -510,7 +510,7 @@ func (s *sSysPublish) createAntiScanMatting(ctx context.Context, imageHash strin
 			if fallbackErr == nil && strings.TrimSpace(fallbackURL) != "" {
 				segmentURL = fallbackURL
 				err = nil
-				providerName = "facepp-matting"
+				providerName = antiScanMattingProviderMarker(fallbackProvider)
 				g.Log().Warning(ctx, "防扫图供应商失败，已按 ENV 降级", g.Map{
 					"imageHash": imageHash, "primaryProvider": provider, "fallbackProvider": fallbackProvider,
 					"fallbackDurationMs": time.Since(fallbackStartedAt).Milliseconds(), "fallbackSuccess": true, "primaryError": primaryErr.Error(),
@@ -603,15 +603,6 @@ func fallbackErrorText(err error, result *tencentPortraitMattingResult) string {
 	return "empty result URL"
 }
 
-func antiScanEnvEnabled(name string) bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
-	case "1", "true", "yes", "on", "enabled":
-		return true
-	default:
-		return false
-	}
-}
-
 func antiScanFallbackProvider() string {
 	provider := strings.ToLower(strings.TrimSpace(os.Getenv("YOUBAN_ANTISCAN_FALLBACK_PROVIDER")))
 	switch provider {
@@ -646,6 +637,9 @@ func (s *sSysPublish) createAntiScanFallback(ctx context.Context, provider, imag
 		}
 		return "", callErr
 	case "fapihub":
+		if conf == nil {
+			return "", gerror.New("FAPIHub 降级配置缺失")
+		}
 		client := newFapiHubClient(conf.FapiHubApiKey, conf.FapiHubEndpoint, conf.FapiHubModel)
 		pngBytes, callErr := client.removeBackground(ctx, imageBytes)
 		if callErr != nil {
