@@ -64,7 +64,7 @@ func renderAntiScanPreviewWithEncoding(ctx context.Context, src []byte, in *sysi
 	warnings := []string{}
 	canvas := imageToRGBA(base)
 	if in.BackgroundReplaceEnabled == 1 || in.BackgroundTextureEnabled == 1 {
-		next, usedSegment := applyAntiScanBackground(ctx, canvas, detect.SegmentRaw, in)
+		next, usedSegment := applyAntiScanBackground(ctx, canvas, detect.SegmentRaw, detect.Provider, in)
 		canvas = next
 		if !usedSegment && in.BackgroundReplaceEnabled == 1 {
 			warnings = append(warnings, "未获取到可用人像分割结果，背景替换已降级为纹理叠加")
@@ -133,7 +133,7 @@ func imageToRGBA(src image.Image) *image.RGBA {
 	return dst
 }
 
-func applyAntiScanBackground(ctx context.Context, src *image.RGBA, segmentRaw string, in *sysin.AntiScanPreviewInp) (*image.RGBA, bool) {
+func applyAntiScanBackground(ctx context.Context, src *image.RGBA, segmentRaw string, provider string, in *sysin.AntiScanPreviewInp) (*image.RGBA, bool) {
 	bounds := src.Bounds()
 	if strings.HasPrefix(strings.TrimSpace(in.BackgroundTextureImage), "builtin:") {
 		in.BackgroundTexturePreset = strings.TrimPrefix(strings.TrimSpace(in.BackgroundTextureImage), "builtin:")
@@ -155,7 +155,12 @@ func applyAntiScanBackground(ctx context.Context, src *image.RGBA, segmentRaw st
 		portrait = resized
 	}
 	underlayMask := antiScanPortraitUnderlayMask(portrait, bounds)
-	compositeOriginalForeground(bg, src, portrait, underlayMask)
+	if provider == "fapihub-matting" || provider == "fapihub" {
+		compositeOriginalForeground(bg, src, portrait, underlayMask)
+	} else {
+		draw.DrawMask(bg, bounds, src, image.Point{}, underlayMask, image.Point{}, draw.Over)
+		draw.Draw(bg, bounds, portrait, image.Point{}, draw.Over)
+	}
 	return bg, true
 }
 
