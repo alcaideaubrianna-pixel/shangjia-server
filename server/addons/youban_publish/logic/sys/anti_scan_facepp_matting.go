@@ -14,7 +14,10 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -63,7 +66,42 @@ var facePPHTTPClient = &http.Client{
 // The current Face++ API key is limited to one in-flight request. Keep this
 // gate local to the provider so background replacement requests do not consume
 // or reduce normal Telegram publish concurrency.
-var facePPRequestGate = semaphore.NewWeighted(1)
+var facePPGateState struct {
+	sync.Mutex
+	limit int
+	gate  *semaphore.Weighted
+}
+
+func facePPConcurrencyLimit(conf *model.CloudResourceConfig) int {
+	limit := 1
+	if conf != nil && conf.FacePlusConcurrency > 0 {
+		limit = conf.FacePlusConcurrency
+	}
+	if raw := strings.TrimSpace(os.Getenv("YOUBAN_FACEPP_CONCURRENCY")); raw != "" {
+		if value, err := strconv.Atoi(raw); err == nil && value > 0 {
+			limit = value
+		}
+	}
+	if limit > 20 {
+		limit = 20
+	}
+	return limit
+}
+
+func acquireFacePPRequest(ctx context.Context, conf *model.CloudResourceConfig) (*semaphore.Weighted, error) {
+	limit := facePPConcurrencyLimit(conf)
+	facePPGateState.Lock()
+	if facePPGateState.gate == nil || facePPGateState.limit != limit {
+		facePPGateState.limit = limit
+		facePPGateState.gate = semaphore.NewWeighted(int64(limit))
+	}
+	gate := facePPGateState.gate
+	facePPGateState.Unlock()
+	if err := gate.Acquire(ctx, 1); err != nil {
+		return nil, err
+	}
+	return gate, nil
+}
 
 func facePPPortraitMatting(ctx context.Context, imageBytes []byte, imageHash string, conf *model.CloudResourceConfig) (string, error) {
 	startedAt := time.Now()
@@ -96,10 +134,11 @@ func facePPPortraitMatting(ctx context.Context, imageBytes []byte, imageHash str
 	if err = mw.Close(); err != nil {
 		return "", err
 	}
-	if err = facePPRequestGate.Acquire(ctx, 1); err != nil {
+	var facePPGate *semaphore.Weighted
+	if facePPGate, err = acquireFacePPRequest(ctx, conf); err != nil {
 		return "", gerror.Wrap(err, "等待 Face++ 并发槽位失败")
 	}
-	defer facePPRequestGate.Release(1)
+	defer facePPGate.Release(1)
 	endpoint := strings.TrimSpace(conf.FacePlusEndpoint)
 	if endpoint == "" {
 		endpoint = "https://api-cn.faceplusplus.com/humanbodypp/v2/segment"
