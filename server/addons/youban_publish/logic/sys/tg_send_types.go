@@ -32,6 +32,7 @@ type telegramMediaItem struct {
 	AntiScanSeed            int64  `json:"antiScanSeed"`
 	AntiScanMode            string `json:"antiScanMode"`
 	AntiScanBackgroundURL   string `json:"antiScanBackgroundUrl"`
+	AntiScanProvider        string `json:"-"`
 	TenantId                int64  `json:"-"`
 	AccountId               int64  `json:"-"`
 	JobId                   int64  `json:"-"`

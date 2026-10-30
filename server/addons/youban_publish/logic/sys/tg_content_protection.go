@@ -97,6 +97,11 @@ func (s *sSysPublish) applyTelegramJobContentProtection(ctx context.Context, job
 		caption = obfuscateTelegramCaption(caption, job.Id)
 	}
 	if policy.AntiScanEnabled {
+		cloudConfig, cloudErr := service.SysConfig().GetCloudResource(ctx)
+		if cloudErr != nil {
+			return "", gerror.Wrap(cloudErr, "读取防扫图供应商配置失败")
+		}
+		provider := antiScanMattingProvider(cloudConfig)
 		for _, media := range mediaSets {
 			for _, item := range media {
 				if item == nil || (!isTelegramImageMedia(item.MediaType) && !isTelegramVideoMedia(item.MediaType)) {
@@ -106,6 +111,7 @@ func (s *sSysPublish) applyTelegramJobContentProtection(ctx context.Context, job
 				item.AntiScanSeed = telegramProtectionSeed(job.Id, item.Id, item.Purpose)
 				item.AntiScanMode = policy.AntiScanMode
 				item.AntiScanBackgroundURL = policy.AntiScanBackgroundURL
+				item.AntiScanProvider = provider
 				item.ProcessedAssetHash = telegramProcessedAssetVariantHash(item)
 				item.TenantId = job.TenantId
 				item.AccountId = job.AccountId
