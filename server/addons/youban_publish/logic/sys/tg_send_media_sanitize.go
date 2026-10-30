@@ -80,11 +80,14 @@ func (s *sSysPublish) prepareTelegramAntiScanUploadFile(ctx context.Context, med
 			media.ProcessedAssetHash = ""
 			return prepareTelegramPhotoUploadFile(ctx, sourcePath, cleanup)
 		}
-		// Background replacement is an explicit user-visible mode. Do not
-		// silently downgrade one image to lightweight protection while the rest
-		// of the album uses replaced backgrounds; fail the preparation so the
-		// whole anti-scan job can retry consistently.
-		return "", nil, gerror.Wrap(err, "背景替换失败，禁止降级为轻量防扫图")
+		g.Log().Warning(ctx, "背景替换失败，当前图片降级为轻量防扫图", g.Map{
+			"jobId": media.JobId, "mediaId": media.Id, "provider": media.AntiScanProvider,
+			"backgroundUrl": media.AntiScanBackgroundURL, "error": err.Error(),
+		})
+		// Only this image falls back. The remaining album items continue to use
+		// the configured replacement path, while clearing the processed hash
+		// prevents the lightweight result from being reused as a replacement.
+		media.ProcessedAssetHash = ""
 	}
 	historyKey := telegramAntiScanHistoryKey(media, kind)
 	history := loadTelegramAntiScanHashHistory(ctx, historyKey)
@@ -164,14 +167,20 @@ func (s *sSysPublish) prepareTelegramAntiScanUploadFile(ctx context.Context, med
 }
 
 func (s *sSysPublish) prepareTelegramBackgroundReplacement(ctx context.Context, media *telegramMediaItem, sourcePath string) (string, func(), error) {
+	startedAt := time.Now()
+	defer func() {
+		g.Log().Info(ctx, "背景替换处理结束", g.Map{"jobId": media.JobId, "mediaId": media.Id, "provider": media.AntiScanProvider, "durationMs": time.Since(startedAt).Milliseconds()})
+	}()
 	imageBytes, err := os.ReadFile(sourcePath)
 	if err != nil {
+		g.Log().Warning(ctx, "背景替换读取源图失败", g.Map{"mediaId": media.Id, "error": err.Error()})
 		return "", nil, gerror.Wrap(err, "读取背景替换源图失败")
 	}
 	sum := sha256.Sum256(imageBytes)
 	imageHash := hex.EncodeToString(sum[:])
 	conf, err := service.SysConfig().GetCloudResource(ctx)
 	if err != nil {
+		g.Log().Warning(ctx, "背景替换读取云资源配置失败", g.Map{"mediaId": media.Id, "error": err.Error()})
 		return "", nil, err
 	}
 	// OCR is an optional document guard. When it is disabled, background
@@ -180,6 +189,7 @@ func (s *sSysPublish) prepareTelegramBackgroundReplacement(ctx context.Context, 
 	if conf != nil && conf.OcrEnabled == 1 && strings.TrimSpace(conf.OcrEndpoint) != "" {
 		ocrResult, ocrErr := classifyTelegramDocumentByOCR(ctx, imageBytes, conf)
 		if ocrErr != nil {
+			g.Log().Warning(ctx, "背景替换 OCR 判定失败", g.Map{"mediaId": media.Id, "error": ocrErr.Error()})
 			return "", nil, ocrErr
 		}
 		if ocrResult.HasText || ocrResult.KeywordHit {
@@ -195,15 +205,21 @@ func (s *sSysPublish) prepareTelegramBackgroundReplacement(ctx context.Context, 
 		segmentRaw = cached.SegmentRaw
 		cacheHit = true
 		mediaCacheHit = true
+		g.Log().Info(ctx, "背景替换复用媒体级缓存", g.Map{"mediaId": media.Id, "provider": provider, "imageHash": imageHash})
 	} else {
 		_, cacheHit = s.getAntiScanSegmentCache(ctx, imageHash, provider)
+		if cacheHit {
+			g.Log().Info(ctx, "背景替换复用图片指纹缓存", g.Map{"mediaId": media.Id, "provider": provider, "imageHash": imageHash})
+		}
 		if !cacheHit {
 			if err = s.ensureImageQuotaAvailable(ctx, media.TenantId); err != nil {
+				g.Log().Warning(ctx, "背景替换额度检查失败", g.Map{"mediaId": media.Id, "provider": provider, "error": err.Error()})
 				return "", nil, err
 			}
 		}
 		segmentRaw, created, err = s.getOrCreateAntiScanMatting(ctx, imageHash, imageBytes, conf, cloudResourceUsageOwner{TenantId: media.TenantId, AccountId: media.AccountId})
 		if err != nil {
+			g.Log().Warning(ctx, "背景替换供应商处理失败", g.Map{"mediaId": media.Id, "provider": provider, "imageHash": imageHash, "error": err.Error()})
 			return "", nil, err
 		}
 	}
@@ -218,6 +234,7 @@ func (s *sSysPublish) prepareTelegramBackgroundReplacement(ctx context.Context, 
 	if segmentURL != "" && !mediaCacheHit {
 		res := &sysin.AntiScanSegmentModel{CacheHit: boolToInt(cacheHit || !created), ImageHash: imageHash, SegmentUrl: segmentURL, Width: width, Height: height}
 		if err = s.saveAntiScanMediaSegmentCache(ctx, media.Id, res, segmentRaw, provider); err != nil {
+			g.Log().Warning(ctx, "背景替换缓存写入失败", g.Map{"mediaId": media.Id, "provider": provider, "error": err.Error()})
 			return "", nil, err
 		}
 	}
@@ -227,6 +244,7 @@ func (s *sSysPublish) prepareTelegramBackgroundReplacement(ctx context.Context, 
 	in.StickerOpacity = 30
 	output, _, err := renderAntiScanPreviewLossless(ctx, imageBytes, in, &antiScanDetectResult{Provider: provider, SegmentRaw: segmentRaw})
 	if err != nil {
+		g.Log().Warning(ctx, "背景替换渲染失败", g.Map{"mediaId": media.Id, "provider": provider, "hasSegment": segmentRaw != "", "error": err.Error()})
 		return "", nil, err
 	}
 	out, err := os.CreateTemp("", "ybp-background-replace-*.png")
