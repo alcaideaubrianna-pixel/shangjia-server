@@ -172,45 +172,60 @@ func antiScanPortraitUnderlayMask(portrait image.Image, bounds image.Rectangle) 
 			}
 		}
 	}
-	// Keep the original-scene feathering, but reduce its spread by 15% so the
-	// replacement background reaches closer to the subject edge.
-	radius := maxInt(6, minInt(bounds.Dx(), bounds.Dy())*255/1000)
-	mask = dilateAntiScanAlpha(mask, radius)
-	blurRadius := maxInt(5, radius/2)
-	for i := 0; i < 2; i++ {
-		mask = blurAntiScanAlpha(mask, blurRadius)
+	// Keep only a narrow binary edge ring around the foreground. The previous
+	// blur-based underlay could expand the original scene across the canvas.
+	radius := 6
+	ring := image.NewAlpha(bounds)
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			if mask.AlphaAt(x, y).A > 0 {
+				continue
+			}
+			found := false
+			for yy := maxInt(bounds.Min.Y, y-radius); yy <= minInt(bounds.Max.Y-1, y+radius) && !found; yy++ {
+				for xx := maxInt(bounds.Min.X, x-radius); xx <= minInt(bounds.Max.X-1, x+radius); xx++ {
+					if mask.AlphaAt(xx, yy).A > 0 {
+						found = true
+						break
+					}
+				}
+			}
+			if found {
+				ring.SetAlpha(x, y, color.Alpha{A: 128})
+			}
+		}
 	}
-	return mask
+	return ring
 }
 
 func dilateAntiScanAlpha(src *image.Alpha, radius int) *image.Alpha {
 	bounds := src.Bounds()
 	horizontal := image.NewAlpha(bounds)
 	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-		active := 0
-		for x := bounds.Min.X - radius; x < bounds.Max.X+radius; x++ {
-			if x+radius < bounds.Max.X && src.AlphaAt(x+radius, y).A > 0 {
-				active++
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			active := false
+			for sx := maxInt(bounds.Min.X, x-radius); sx <= minInt(bounds.Max.X-1, x+radius); sx++ {
+				if src.AlphaAt(sx, y).A > 0 {
+					active = true
+					break
+				}
 			}
-			if x-radius-1 >= bounds.Min.X && src.AlphaAt(x-radius-1, y).A > 0 {
-				active--
-			}
-			if x >= bounds.Min.X && x < bounds.Max.X && active > 0 {
+			if active {
 				horizontal.SetAlpha(x, y, color.Alpha{A: 255})
 			}
 		}
 	}
 	dst := image.NewAlpha(bounds)
 	for x := bounds.Min.X; x < bounds.Max.X; x++ {
-		active := 0
-		for y := bounds.Min.Y - radius; y < bounds.Max.Y+radius; y++ {
-			if y+radius < bounds.Max.Y && horizontal.AlphaAt(x, y+radius).A > 0 {
-				active++
+		for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+			active := false
+			for sy := maxInt(bounds.Min.Y, y-radius); sy <= minInt(bounds.Max.Y-1, y+radius); sy++ {
+				if horizontal.AlphaAt(x, sy).A > 0 {
+					active = true
+					break
+				}
 			}
-			if y-radius-1 >= bounds.Min.Y && horizontal.AlphaAt(x, y-radius-1).A > 0 {
-				active--
-			}
-			if y >= bounds.Min.Y && y < bounds.Max.Y && active > 0 {
+			if active {
 				dst.SetAlpha(x, y, color.Alpha{A: 255})
 			}
 		}
