@@ -80,12 +80,11 @@ func (s *sSysPublish) prepareTelegramAntiScanUploadFile(ctx context.Context, med
 			media.ProcessedAssetHash = ""
 			return prepareTelegramPhotoUploadFile(ctx, sourcePath, cleanup)
 		}
-		g.Log().Warningf(ctx, "频道背景替换已降级为轻量扰动 jobId:%d mediaId:%d durationMs:%d err:%+v", media.JobId, media.Id, time.Since(startedAt).Milliseconds(), err)
-		// The variant hash is reserved for a successfully generated processed
-		// asset. Do not persist a background-replacement hash when we fell back
-		// to lightweight protection, otherwise later pushes will reuse the
-		// fallback file and never retry the configured replacement.
-		media.ProcessedAssetHash = ""
+		// Background replacement is an explicit user-visible mode. Do not
+		// silently downgrade one image to lightweight protection while the rest
+		// of the album uses replaced backgrounds; fail the preparation so the
+		// whole anti-scan job can retry consistently.
+		return "", nil, gerror.Wrap(err, "背景替换失败，禁止降级为轻量防扫图")
 	}
 	historyKey := telegramAntiScanHistoryKey(media, kind)
 	history := loadTelegramAntiScanHashHistory(ctx, historyKey)
