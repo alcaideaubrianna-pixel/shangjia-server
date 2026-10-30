@@ -639,6 +639,27 @@ func telegramInputFile(ctx context.Context, media *telegramMediaItem) (models.In
 	if media == nil {
 		return nil, nil, gerror.New("媒体文件为空")
 	}
+	if media.PreparedUploadPath != "" {
+		path := media.PreparedUploadPath
+		cleanup := media.PreparedUploadCleanup
+		media.PreparedUploadPath = ""
+		media.PreparedUploadCleanup = nil
+		if err := validateTelegramMediaUploadSize(media, path); err != nil {
+			if cleanup != nil {
+				cleanup()
+			}
+			return nil, nil, telegramPreparationError(err)
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			if cleanup != nil {
+				cleanup()
+			}
+			return nil, nil, gerror.Wrapf(err, "打开已准备媒体文件失败:%s", path)
+		}
+		g.Log().Infof(ctx, "TG实际媒体输入 jobId:%d mediaId:%d purpose:%s mode:prepared antiScan:%t", media.JobId, media.Id, media.Purpose, media.AntiScanEnabled)
+		return &models.InputFileUpload{Filename: telegramUploadFilename(media, path), Data: file}, closeWithCleanup(file, cleanup), nil
+	}
 	if source := strings.TrimSpace(media.TgFileId); source != "" && !telegramMediaRequiresSanitizedUpload(media) {
 		g.Log().Infof(ctx, "TG实际媒体输入 jobId:%d mediaId:%d purpose:%s mode:file_id antiScan:%t", media.JobId, media.Id, media.Purpose, media.AntiScanEnabled)
 		return &models.InputFileString{Data: source}, nil, nil
@@ -861,6 +882,27 @@ func telegramCopyMediaRefFromFileId(fileId string) (telegramCopyMediaRef, bool) 
 func telegramInputMediaSource(ctx context.Context, media *telegramMediaItem) (string, io.Reader, io.Closer, error) {
 	if media == nil {
 		return "", nil, nil, gerror.New("媒体文件为空")
+	}
+	if media.PreparedUploadPath != "" {
+		path := media.PreparedUploadPath
+		cleanup := media.PreparedUploadCleanup
+		media.PreparedUploadPath = ""
+		media.PreparedUploadCleanup = nil
+		if err := validateTelegramMediaUploadSize(media, path); err != nil {
+			if cleanup != nil {
+				cleanup()
+			}
+			return "", nil, nil, telegramPreparationError(err)
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			if cleanup != nil {
+				cleanup()
+			}
+			return "", nil, nil, gerror.Wrapf(err, "打开已准备媒体文件失败:%s", path)
+		}
+		attachName := fmt.Sprintf("media_%d_%s", media.Id, telegramUploadFilename(media, path))
+		return "attach://" + attachName, file, closeWithCleanup(file, cleanup), nil
 	}
 	if source := strings.TrimSpace(media.TgFileId); source != "" && !media.ForceUpload && !telegramMediaRequiresSanitizedUpload(media) {
 		return source, nil, nil, nil

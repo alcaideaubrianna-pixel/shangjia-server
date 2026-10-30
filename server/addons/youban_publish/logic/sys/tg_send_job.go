@@ -341,6 +341,15 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	if err != nil {
 		return err
 	}
+	if telegramAntiScanMediaCount(displayMedia)+telegramAntiScanMediaCount(verifyMedia) > 0 {
+		step = beginTelegramPublishStage(ctx, "prepare.content_protection_all")
+		err = s.prepareTelegramAntiScanMediaSet(ctx, displayMedia, verifyMedia)
+		step.End(err, g.Map{"displayMediaCount": len(displayMedia), "verifyMediaCount": len(verifyMedia)})
+		if err != nil {
+			return err
+		}
+		defer cleanupPreparedTelegramMedia(displayMedia, verifyMedia)
+	}
 	step = beginTelegramPublishStage(ctx, "display.check_job_state")
 	stillSending, err := s.telegramJobStillSending(ctx, job.Id)
 	step.End(err, g.Map{"stillSending": stillSending})

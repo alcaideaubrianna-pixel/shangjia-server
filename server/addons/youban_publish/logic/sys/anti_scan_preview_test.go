@@ -91,6 +91,7 @@ func TestAntiScanMattingCacheMatchesSelectedProvider(t *testing.T) {
 }
 
 func TestAntiScanTencentMattingFallbackRequiresCompleteConfig(t *testing.T) {
+	t.Setenv("YOUBAN_ANTISCAN_TENCENT_FALLBACK_ENABLED", "true")
 	complete := &model.CloudResourceConfig{TencentSecretId: "id", TencentSecretKey: "key", TencentMattingBucket: "bucket", TencentRegion: "ap-singapore"}
 	upload := &basemodel.UploadConfig{Drive: consts.UploadDriveCos, CosBucketURL: "https://bucket.cos.ap-singapore.myqcloud.com", CosPath: "files"}
 	if !antiScanTencentMattingFallbackReady(complete, upload) {
@@ -109,6 +110,7 @@ func TestAntiScanTencentMattingFallbackRequiresCompleteConfig(t *testing.T) {
 }
 
 func TestAntiScanTencentMattingFallbackSkipsOSS(t *testing.T) {
+	t.Setenv("YOUBAN_ANTISCAN_TENCENT_FALLBACK_ENABLED", "true")
 	conf := &model.CloudResourceConfig{TencentSecretId: "id", TencentSecretKey: "key", TencentMattingBucket: "bucket", TencentRegion: "ap-singapore"}
 	for _, upload := range []*basemodel.UploadConfig{nil, {Drive: consts.UploadDriveOss}, {Drive: consts.UploadDriveCos}} {
 		if antiScanTencentMattingFallbackReady(conf, upload) {

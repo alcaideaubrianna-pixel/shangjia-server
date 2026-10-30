@@ -505,7 +505,15 @@ func (s *sSysPublish) createAntiScanMatting(ctx context.Context, imageHash strin
 		if err != nil && antiScanTencentMattingFallbackReady(conf, storager.GetConfig()) {
 			primaryErr := err
 			fallbackStartedAt := time.Now()
+			release, gateErr := acquireAntiScanProvider(ctx, "tencent")
+			if gateErr != nil {
+				return "", gateErr
+			}
 			result, fallbackErr := tencentCOSPortraitMatting(ctx, imageBytes, imageHash, conf, false)
+			release()
+			if fallbackErr == nil && gateErr != nil {
+				fallbackErr = gateErr
+			}
 			recordMattingProviderUsage(ctx, usageOwner, sysin.CloudResourceProviderTencent, fallbackErr == nil && result != nil && strings.TrimSpace(result.URL) != "", time.Since(fallbackStartedAt))
 			if fallbackErr == nil && result != nil && strings.TrimSpace(result.URL) != "" {
 				segmentURL = result.URL
@@ -531,12 +539,22 @@ func (s *sSysPublish) createAntiScanMatting(ctx context.Context, imageHash strin
 		}
 	} else if provider == "aliyun" {
 		providerStartedAt := time.Now()
+		release, gateErr := acquireAntiScanProvider(ctx, "aliyun")
+		if gateErr != nil {
+			return "", gateErr
+		}
+		defer release()
 		segmentURL, err = aliyunCOSPortraitMatting(ctx, imageBytes, imageHash, conf)
 		recordMattingProviderUsage(ctx, usageOwner, sysin.CloudResourceProviderAliyun, err == nil, time.Since(providerStartedAt))
 	} else if provider == "tencent" {
 		providerName = "tencent-ci-matting"
 		var result *tencentPortraitMattingResult
 		providerStartedAt := time.Now()
+		release, gateErr := acquireAntiScanProvider(ctx, "tencent")
+		if gateErr != nil {
+			return "", gateErr
+		}
+		defer release()
 		result, err = tencentCOSPortraitMatting(ctx, imageBytes, imageHash, conf, false)
 		recordMattingProviderUsage(ctx, usageOwner, sysin.CloudResourceProviderTencent, err == nil && result != nil && strings.TrimSpace(result.URL) != "", time.Since(providerStartedAt))
 		if result != nil {
@@ -547,6 +565,11 @@ func (s *sSysPublish) createAntiScanMatting(ctx context.Context, imageHash strin
 		client := newFapiHubClient(conf.FapiHubApiKey, conf.FapiHubEndpoint, conf.FapiHubModel)
 		var pngBytes []byte
 		providerStartedAt := time.Now()
+		release, gateErr := acquireAntiScanProvider(ctx, "fapihub")
+		if gateErr != nil {
+			return "", gateErr
+		}
+		defer release()
 		pngBytes, err = client.removeBackground(ctx, imageBytes)
 		recordMattingProviderUsage(ctx, usageOwner, sysin.CloudResourceProviderFapiHub, err == nil, time.Since(providerStartedAt))
 		if err == nil {
@@ -594,12 +617,24 @@ func fallbackErrorText(err error, result *tencentPortraitMattingResult) string {
 }
 
 func antiScanTencentMattingFallbackReady(conf *model.CloudResourceConfig, upload *basemodel.UploadConfig) bool {
+	if !antiScanEnvEnabled("YOUBAN_ANTISCAN_TENCENT_FALLBACK_ENABLED") {
+		return false
+	}
 	return upload != nil && upload.Drive == consts.UploadDriveCos &&
 		strings.TrimSpace(upload.CosBucketURL) != "" && strings.TrimSpace(upload.CosPath) != "" &&
 		conf != nil && strings.TrimSpace(conf.TencentRegion) != "" &&
 		strings.TrimSpace(conf.TencentSecretId) != "" &&
 		strings.TrimSpace(conf.TencentSecretKey) != "" &&
 		strings.TrimSpace(conf.TencentMattingBucket) != ""
+}
+
+func antiScanEnvEnabled(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "1", "true", "yes", "on", "enabled":
+		return true
+	default:
+		return false
+	}
 }
 
 func antiScanMattingProvider(conf *model.CloudResourceConfig) string {

@@ -40,6 +40,8 @@ type telegramMediaItem struct {
 	ProtectedHashKey        string `json:"-"`
 	ProtectedPHash          uint64 `json:"-"`
 	ProtectedDHash          uint64 `json:"-"`
+	PreparedUploadPath      string `json:"-"`
+	PreparedUploadCleanup   func() `json:"-"`
 }
 
 type telegramSentMessage struct {
