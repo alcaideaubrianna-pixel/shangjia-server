@@ -80,9 +80,13 @@ func (s *sSysPublish) prepareTelegramAntiScanUploadFile(ctx context.Context, med
 			media.ProcessedAssetHash = ""
 			return prepareTelegramPhotoUploadFile(ctx, sourcePath, cleanup)
 		}
+		failureText := "背景替换返回空结果"
+		if err != nil {
+			failureText = err.Error()
+		}
 		g.Log().Warning(ctx, "背景替换失败，当前图片降级为轻量防扫图", g.Map{
 			"jobId": media.JobId, "mediaId": media.Id, "provider": media.AntiScanProvider,
-			"backgroundUrl": media.AntiScanBackgroundURL, "error": err.Error(),
+			"backgroundConfigured": strings.TrimSpace(media.AntiScanBackgroundURL) != "", "error": failureText,
 		})
 		// Only this image falls back. The remaining album items continue to use
 		// the configured replacement path, while clearing the processed hash
