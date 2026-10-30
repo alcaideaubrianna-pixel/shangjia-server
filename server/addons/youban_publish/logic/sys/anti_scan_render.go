@@ -154,15 +154,33 @@ func applyAntiScanBackground(ctx context.Context, src *image.RGBA, segmentRaw st
 		xdraw.ApproxBiLinear.Scale(resized, bounds, portrait, portrait.Bounds(), draw.Over, nil)
 		portrait = resized
 	}
-	underlayMask := antiScanPortraitUnderlayMask(portrait, bounds)
 	if provider == "fapihub-matting" || provider == "fapihub" {
-		portrait = erodePortraitAlpha(portrait, 1)
-		compositeOriginalForeground(bg, src, portrait, underlayMask)
+		compositeFapiHubOriginal(bg, src, portrait)
 	} else {
+		underlayMask := antiScanPortraitUnderlayMask(portrait, bounds)
 		draw.DrawMask(bg, bounds, src, image.Point{}, underlayMask, image.Point{}, draw.Over)
 		draw.Draw(bg, bounds, portrait, image.Point{}, draw.Over)
 	}
 	return bg, true
+}
+
+func compositeFapiHubOriginal(background, original *image.RGBA, matte image.Image) {
+	b := background.Bounds()
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			_, _, _, a := matte.At(x, y).RGBA()
+			alpha := a >> 8
+			if alpha == 0 {
+				continue
+			}
+			bg := color.NRGBAModel.Convert(background.At(x, y)).(color.NRGBA)
+			fg := color.NRGBAModel.Convert(original.At(x, y)).(color.NRGBA)
+			bg.R = uint8((uint32(fg.R)*alpha + uint32(bg.R)*(255-alpha)) / 255)
+			bg.G = uint8((uint32(fg.G)*alpha + uint32(bg.G)*(255-alpha)) / 255)
+			bg.B = uint8((uint32(fg.B)*alpha + uint32(bg.B)*(255-alpha)) / 255)
+			background.SetRGBA(x, y, color.RGBA{R: bg.R, G: bg.G, B: bg.B, A: 255})
+		}
+	}
 }
 
 func erodePortraitAlpha(src image.Image, radius int) image.Image {
@@ -172,15 +190,22 @@ func erodePortraitAlpha(src image.Image, radius int) image.Image {
 	for y := b.Min.Y; y < b.Max.Y; y++ {
 		for x := b.Min.X; x < b.Max.X; x++ {
 			_, _, _, a := src.At(x, y).RGBA()
-			if a == 0 { continue }
+			if a == 0 {
+				continue
+			}
 			keep := true
 			for yy := maxInt(b.Min.Y, y-radius); yy <= minInt(b.Max.Y-1, y+radius) && keep; yy++ {
 				for xx := maxInt(b.Min.X, x-radius); xx <= minInt(b.Max.X-1, x+radius); xx++ {
 					_, _, _, neighbor := src.At(xx, yy).RGBA()
-					if neighbor == 0 { keep = false; break }
+					if neighbor == 0 {
+						keep = false
+						break
+					}
 				}
 			}
-			if !keep { out.SetRGBA(x, y, color.RGBA{}) }
+			if !keep {
+				out.SetRGBA(x, y, color.RGBA{})
+			}
 		}
 	}
 	return out
@@ -227,7 +252,7 @@ func antiScanPortraitUnderlayMask(portrait image.Image, bounds image.Rectangle) 
 	}
 	// Keep only a narrow binary edge ring around the foreground. The previous
 	// blur-based underlay could expand the original scene across the canvas.
-	radius := 24
+	radius := 72
 	ring := image.NewAlpha(bounds)
 	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
 		for x := bounds.Min.X; x < bounds.Max.X; x++ {
@@ -247,7 +272,7 @@ func antiScanPortraitUnderlayMask(portrait image.Image, bounds image.Rectangle) 
 				}
 			}
 			if minDistance <= radius {
-				alpha := uint8((radius - minDistance) * 128 / radius)
+				alpha := uint8((radius - minDistance) * 200 / radius)
 				ring.SetAlpha(x, y, color.Alpha{A: alpha})
 			}
 		}
