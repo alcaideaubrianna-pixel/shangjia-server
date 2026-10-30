@@ -58,8 +58,23 @@ func embeddedRabbitBackground(width, height int) (*image.RGBA, bool) {
 		return nil, false
 	}
 	dst := image.NewRGBA(image.Rect(0, 0, width, height))
-	drawCoverImage(dst, defaultRabbitTextureImage.image)
+	drawTopCoverImage(dst, defaultRabbitTextureImage.image)
 	return dst, true
+}
+
+// drawTopCoverImage preserves aspect ratio and crops from the top edge. This
+// keeps the repeating rabbit texture stable for both portrait and landscape
+// source images without stretching the pattern.
+func drawTopCoverImage(dst *image.RGBA, img image.Image) {
+	db, sb := dst.Bounds(), img.Bounds()
+	if sb.Dx() <= 0 || sb.Dy() <= 0 { return }
+	scale := math.Max(float64(db.Dx())/float64(sb.Dx()), float64(db.Dy())/float64(sb.Dy()))
+	sw := int(float64(db.Dx()) / scale)
+	sh := int(float64(db.Dy()) / scale)
+	if sw > sb.Dx() { sw = sb.Dx() }
+	if sh > sb.Dy() { sh = sb.Dy() }
+	srcRect := image.Rect(sb.Min.X+(sb.Dx()-sw)/2, sb.Min.Y, sb.Min.X+(sb.Dx()-sw)/2+sw, sb.Min.Y+sh)
+	xdraw.ApproxBiLinear.Scale(dst, db, img, srcRect, draw.Src, nil)
 }
 
 type antiScanTextureCacheItem struct {
