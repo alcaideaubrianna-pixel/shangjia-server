@@ -155,9 +155,34 @@ func applyAntiScanBackground(ctx context.Context, src *image.RGBA, segmentRaw st
 		portrait = resized
 	}
 	underlayMask := antiScanPortraitUnderlayMask(portrait, bounds)
-	draw.DrawMask(bg, bounds, src, image.Point{}, underlayMask, image.Point{}, draw.Over)
-	draw.Draw(bg, bounds, portrait, image.Point{}, draw.Over)
+	compositeOriginalForeground(bg, src, portrait, underlayMask)
 	return bg, true
+}
+
+func compositeOriginalForeground(background, original *image.RGBA, matte image.Image, underlay *image.Alpha) {
+	b := background.Bounds()
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			_, _, _, alpha16 := matte.At(x, y).RGBA()
+			alpha := alpha16 >> 8
+			if alpha == 0 {
+				continue
+			}
+			base := color.NRGBAModel.Convert(background.At(x, y)).(color.NRGBA)
+			if ua := underlay.AlphaAt(x, y).A; ua > 0 {
+				oc := color.NRGBAModel.Convert(original.At(x, y)).(color.NRGBA)
+				u := uint32(ua) * (255 - alpha) / 255
+				base.R = uint8((uint32(oc.R)*u + uint32(base.R)*(255-u)) / 255)
+				base.G = uint8((uint32(oc.G)*u + uint32(base.G)*(255-u)) / 255)
+				base.B = uint8((uint32(oc.B)*u + uint32(base.B)*(255-u)) / 255)
+			}
+			oc := color.NRGBAModel.Convert(original.At(x, y)).(color.NRGBA)
+			base.R = uint8((uint32(oc.R)*alpha + uint32(base.R)*(255-alpha)) / 255)
+			base.G = uint8((uint32(oc.G)*alpha + uint32(base.G)*(255-alpha)) / 255)
+			base.B = uint8((uint32(oc.B)*alpha + uint32(base.B)*(255-alpha)) / 255)
+			background.SetRGBA(x, y, color.RGBA{R: base.R, G: base.G, B: base.B, A: 255})
+		}
+	}
 }
 
 // antiScanPortraitUnderlayMask keeps the original scene in a feathered area
