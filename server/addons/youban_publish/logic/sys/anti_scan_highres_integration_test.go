@@ -3,10 +3,15 @@ package sys
 import (
 	"bytes"
 	"context"
+	"image"
+	"image/color"
+	"image/draw"
 	"image/png"
 	"os"
+	"path/filepath"
 	"testing"
 
+	xdraw "golang.org/x/image/draw"
 	"hotgo/addons/youban_publish/model"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
@@ -56,9 +61,43 @@ func TestFapiHubHighResolutionProductionRender(t *testing.T) {
 	if err := os.WriteFile(outputPath, output, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if debugDir := os.Getenv("YOUBAN_FAPIHUB_DEBUG_DIR"); debugDir != "" {
+		_ = os.MkdirAll(debugDir, 0o755)
+		portrait, ok := decodeTencentSegmentPortrait(context.Background(), detect.SegmentRaw)
+		if ok {
+			bounds := imageBounds(source)
+			if portrait.Bounds().Dx() != bounds.Dx() || portrait.Bounds().Dy() != bounds.Dy() {
+				resized := image.NewRGBA(bounds)
+				xdraw.ApproxBiLinear.Scale(resized, bounds, portrait, portrait.Bounds(), draw.Over, nil)
+				portrait = resized
+			}
+			mask := antiScanPortraitUnderlayMask(portrait, bounds)
+			maskImg := image.NewGray(bounds)
+			for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+				for x := bounds.Min.X; x < bounds.Max.X; x++ {
+					a := mask.AlphaAt(x, y).A
+					maskImg.SetGray(x, y, color.Gray{Y: a})
+				}
+			}
+			f, _ := os.Create(filepath.Join(debugDir, "underlay-mask.png"))
+			_ = png.Encode(f, maskImg)
+			_ = f.Close()
+			f, _ = os.Create(filepath.Join(debugDir, "portrait-alpha.png"))
+			_ = png.Encode(f, portrait)
+			_ = f.Close()
+		}
+	}
 	config, err := png.DecodeConfig(bytes.NewReader(output))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("production render output=%s size=%dx%d bytes=%d", outputPath, config.Width, config.Height, len(output))
+}
+
+func imageBounds(data []byte) image.Rectangle {
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err == nil {
+		return image.Rect(0, 0, cfg.Width, cfg.Height)
+	}
+	return image.Rect(0, 0, 1, 1)
 }
