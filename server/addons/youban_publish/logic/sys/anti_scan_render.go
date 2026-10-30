@@ -174,10 +174,10 @@ func antiScanPortraitUnderlayMask(portrait image.Image, bounds image.Rectangle) 
 	}
 	// Keep the original-scene feathering, but reduce its spread by 15% so the
 	// replacement background reaches closer to the subject edge.
-	radius := maxInt(10, minInt(bounds.Dx(), bounds.Dy())*51/1000)
+	radius := maxInt(6, minInt(bounds.Dx(), bounds.Dy())*255/1000)
 	mask = dilateAntiScanAlpha(mask, radius)
-	blurRadius := maxInt(8, radius*2/3)
-	for i := 0; i < 3; i++ {
+	blurRadius := maxInt(5, radius/2)
+	for i := 0; i < 2; i++ {
 		mask = blurAntiScanAlpha(mask, blurRadius)
 	}
 	return mask
