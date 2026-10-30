@@ -614,6 +614,9 @@ func antiScanFallbackProvider() string {
 }
 
 func (s *sSysPublish) createAntiScanFallback(ctx context.Context, provider, imageHash string, imageBytes []byte, conf *model.CloudResourceConfig, usageOwner cloudResourceUsageOwner) (string, error) {
+	if conf == nil {
+		return "", gerror.New("防扫图降级配置缺失")
+	}
 	release, err := acquireAntiScanProvider(ctx, provider)
 	if err != nil {
 		return "", err
