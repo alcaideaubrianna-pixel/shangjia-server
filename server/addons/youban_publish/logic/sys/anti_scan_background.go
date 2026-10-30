@@ -2,6 +2,7 @@ package sys
 
 import (
 	"bytes"
+	_ "embed"
 	"encoding/base64"
 	"image"
 	"image/color"
@@ -18,6 +19,14 @@ import (
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
+//go:embed assets/rabbit.jpg
+var defaultRabbitTexture []byte
+
+var defaultRabbitTextureImage struct {
+	sync.Once
+	image image.Image
+}
+
 func patternedBackground(width int, height int, in *sysin.AntiScanPreviewInp) *image.RGBA {
 	if in.BackgroundTextureImage != "" {
 		if bg, ok := tiledCustomBackground(width, height, in.BackgroundTextureImage, in.StickerOpacity); ok {
@@ -26,12 +35,31 @@ func patternedBackground(width int, height int, in *sysin.AntiScanPreviewInp) *i
 	}
 	dst := image.NewRGBA(image.Rect(0, 0, width, height))
 	if in.BackgroundTexturePreset == "rabbit" || in.BackgroundTexturePreset == "" {
-		drawRabbitBackground(dst)
+		if bg, ok := embeddedRabbitBackground(width, height); ok {
+			draw.Draw(dst, dst.Bounds(), bg, image.Point{}, draw.Src)
+		} else {
+			drawRabbitBackground(dst)
+		}
 		overlayTexture(dst, in.StickerOpacity/2)
 		return dst
 	}
 	drawPresetBackground(dst, in.BackgroundTexturePreset, in.StickerOpacity)
 	return dst
+}
+
+func embeddedRabbitBackground(width, height int) (*image.RGBA, bool) {
+	defaultRabbitTextureImage.Do(func() {
+		img, _, err := image.Decode(bytes.NewReader(defaultRabbitTexture))
+		if err == nil {
+			defaultRabbitTextureImage.image = img
+		}
+	})
+	if defaultRabbitTextureImage.image == nil {
+		return nil, false
+	}
+	dst := image.NewRGBA(image.Rect(0, 0, width, height))
+	drawCoverImage(dst, defaultRabbitTextureImage.image)
+	return dst, true
 }
 
 type antiScanTextureCacheItem struct {
