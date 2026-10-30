@@ -26,8 +26,8 @@ import (
 const endpoint = "https://fapihub.com/v2/rembg/"
 
 func main() {
-	if len(os.Args) != 3 {
-		fmt.Fprintln(os.Stderr, "usage: FAPIHUB_API_KEY=... go run ./tools/fapihub_highres_local.go input-image output-png")
+	if len(os.Args) < 3 || len(os.Args) > 4 {
+		fmt.Fprintln(os.Stderr, "usage: FAPIHUB_API_KEY=... go run ./tools/fapihub_highres_local.go input-image output-png [background-image]")
 		os.Exit(2)
 	}
 	key := os.Getenv("FAPIHUB_API_KEY")
@@ -56,7 +56,19 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	output := compositeOriginalWithMask(source, result, color.RGBA{R: 245, G: 245, B: 245, A: 255})
+	background := image.Image(image.NewUniform(color.RGBA{R: 245, G: 245, B: 245, A: 255}))
+	if len(os.Args) == 4 {
+		bgBytes, readErr := os.ReadFile(os.Args[3])
+		if readErr != nil {
+			panic(readErr)
+		}
+		bg, _, decodeErr := image.Decode(bytes.NewReader(bgBytes))
+		if decodeErr != nil {
+			panic(decodeErr)
+		}
+		background = bg
+	}
+	output := compositeOriginalWithMask(source, result, background)
 	out, err := os.Create(os.Args[2])
 	if err != nil {
 		panic(err)
@@ -136,7 +148,7 @@ func resizeNearest(src image.Image, max int) image.Image {
 	return dst
 }
 
-func compositeOriginalWithMask(original, cutout image.Image, bg color.RGBA) *image.RGBA {
+func compositeOriginalWithMask(original, cutout, background image.Image) *image.RGBA {
 	b := original.Bounds()
 	out := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
 	for y := 0; y < b.Dy(); y++ {
@@ -146,7 +158,10 @@ func compositeOriginalWithMask(original, cutout image.Image, bg color.RGBA) *ima
 			my := y * cutout.Bounds().Dy() / b.Dy()
 			_, _, _, a := cutout.At(cutout.Bounds().Min.X+mx, cutout.Bounds().Min.Y+my).RGBA()
 			alpha := uint32(a >> 8)
-			out.SetRGBA(x, y, color.RGBA{R: uint8((uint32(c.R)*alpha + uint32(bg.R)*(255-alpha)) / 255), G: uint8((uint32(c.G)*alpha + uint32(bg.G)*(255-alpha)) / 255), B: uint8((uint32(c.B)*alpha + uint32(bg.B)*(255-alpha)) / 255), A: 255})
+			bgx := x * background.Bounds().Dx() / b.Dx()
+			bgy := y * background.Bounds().Dy() / b.Dy()
+			bc := color.NRGBAModel.Convert(background.At(background.Bounds().Min.X+bgx, background.Bounds().Min.Y+bgy)).(color.NRGBA)
+			out.SetRGBA(x, y, color.RGBA{R: uint8((uint32(c.R)*alpha + uint32(bc.R)*(255-alpha)) / 255), G: uint8((uint32(c.G)*alpha + uint32(bc.G)*(255-alpha)) / 255), B: uint8((uint32(c.B)*alpha + uint32(bc.B)*(255-alpha)) / 255), A: 255})
 		}
 	}
 	return out
