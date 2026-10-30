@@ -155,13 +155,55 @@ func applyAntiScanBackground(ctx context.Context, src *image.RGBA, segmentRaw st
 		portrait = resized
 	}
 	if provider == "fapihub-matting" || provider == "fapihub" {
-		compositeFapiHubOriginal(bg, src, portrait)
+		compositeRabbitOverlay(src, bg, portrait)
+		return src, true
 	} else {
 		underlayMask := antiScanPortraitUnderlayMask(portrait, bounds)
 		draw.DrawMask(bg, bounds, src, image.Point{}, underlayMask, image.Point{}, draw.Over)
 		draw.Draw(bg, bounds, portrait, image.Point{}, draw.Over)
 	}
 	return bg, true
+}
+
+func compositeRabbitOverlay(original, rabbit *image.RGBA, matte image.Image) {
+	b := original.Bounds()
+	radius, feather := 24, 8
+	mask := image.NewAlpha(b)
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			_, _, _, a := matte.At(x, y).RGBA()
+			if a>>8 >= 32 {
+				mask.SetAlpha(x, y, color.Alpha{A: 255})
+			}
+		}
+	}
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			minDistance := radius + feather + 1
+			for yy := maxInt(b.Min.Y, y-radius-feather); yy <= minInt(b.Max.Y-1, y+radius+feather); yy++ {
+				for xx := maxInt(b.Min.X, x-radius-feather); xx <= minInt(b.Max.X-1, x+radius+feather); xx++ {
+					if mask.AlphaAt(xx, yy).A == 0 {
+						continue
+					}
+					dx, dy := xx-x, yy-y
+					d := int(math.Sqrt(float64(dx*dx + dy*dy)))
+					if d < minDistance {
+						minDistance = d
+					}
+				}
+			}
+			if minDistance <= radius {
+				continue
+			}
+			alpha := uint32(255)
+			if minDistance < radius+feather {
+				alpha = uint32(minDistance-radius) * 255 / uint32(feather)
+			}
+			oc := color.NRGBAModel.Convert(original.At(x, y)).(color.NRGBA)
+			rc := color.NRGBAModel.Convert(rabbit.At(x, y)).(color.NRGBA)
+			original.SetRGBA(x, y, color.RGBA{R: uint8((uint32(rc.R)*alpha + uint32(oc.R)*(255-alpha)) / 255), G: uint8((uint32(rc.G)*alpha + uint32(oc.G)*(255-alpha)) / 255), B: uint8((uint32(rc.B)*alpha + uint32(oc.B)*(255-alpha)) / 255), A: 255})
+		}
+	}
 }
 
 func compositeFapiHubOriginal(background, original *image.RGBA, matte image.Image) {
