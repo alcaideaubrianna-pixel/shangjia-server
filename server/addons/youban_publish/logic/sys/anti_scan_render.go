@@ -11,6 +11,7 @@ import (
 	"image/jpeg"
 	"image/png"
 	"io"
+	"math"
 	"math/rand"
 	"net/http"
 	"strings"
@@ -181,17 +182,21 @@ func antiScanPortraitUnderlayMask(portrait image.Image, bounds image.Rectangle) 
 			if mask.AlphaAt(x, y).A > 0 {
 				continue
 			}
-			found := false
-			for yy := maxInt(bounds.Min.Y, y-radius); yy <= minInt(bounds.Max.Y-1, y+radius) && !found; yy++ {
+			minDistance := radius + 1
+			for yy := maxInt(bounds.Min.Y, y-radius); yy <= minInt(bounds.Max.Y-1, y+radius); yy++ {
 				for xx := maxInt(bounds.Min.X, x-radius); xx <= minInt(bounds.Max.X-1, x+radius); xx++ {
 					if mask.AlphaAt(xx, yy).A > 0 {
-						found = true
-						break
+						dx, dy := xx-x, yy-y
+						d := int(math.Sqrt(float64(dx*dx + dy*dy)))
+						if d < minDistance {
+							minDistance = d
+						}
 					}
 				}
 			}
-			if found {
-				ring.SetAlpha(x, y, color.Alpha{A: 128})
+			if minDistance <= radius {
+				alpha := uint8((radius - minDistance) * 128 / radius)
+				ring.SetAlpha(x, y, color.Alpha{A: alpha})
 			}
 		}
 	}
