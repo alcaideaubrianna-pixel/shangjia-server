@@ -265,6 +265,19 @@ ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "bot_permission
 ALTER TABLE "hg_youban_publish_account" ALTER COLUMN "public_follow_enabled" SET DEFAULT 0;
 
 INSERT INTO "hg_sys_addons_config" ("addon_name", "group", "name", "type", "key", "value", "default_value", "sort", "tip", "is_default", "status", "created_at", "updated_at")
+SELECT 'youban_publish', 'cloudResource', 'OCR 开关', 'int', 'ocrEnabled', '0', '0', 10, '仅在开启背景替换时用于文档识别', 1, 1, NOW(), NOW()
+WHERE NOT EXISTS (SELECT 1 FROM "hg_sys_addons_config" WHERE "addon_name"='youban_publish' AND "group"='cloudResource' AND "key"='ocrEnabled');
+INSERT INTO "hg_sys_addons_config" ("addon_name", "group", "name", "type", "key", "value", "default_value", "sort", "tip", "is_default", "status", "created_at", "updated_at")
+SELECT 'youban_publish', 'cloudResource', 'OCR 服务地址', 'string', 'ocrEndpoint', '', '', 20, 'OCR HTTP 服务地址，关闭 OCR 时可为空', 1, 1, NOW(), NOW()
+WHERE NOT EXISTS (SELECT 1 FROM "hg_sys_addons_config" WHERE "addon_name"='youban_publish' AND "group"='cloudResource' AND "key"='ocrEndpoint');
+INSERT INTO "hg_sys_addons_config" ("addon_name", "group", "name", "type", "key", "value", "default_value", "sort", "tip", "is_default", "status", "created_at", "updated_at")
+SELECT 'youban_publish', 'cloudResource', 'OCR 超时时间', 'number', 'ocrTimeoutMs', '800', '800', 25, 'OCR 请求超时时间，单位毫秒', 1, 1, NOW(), NOW()
+WHERE NOT EXISTS (SELECT 1 FROM "hg_sys_addons_config" WHERE "addon_name"='youban_publish' AND "group"='cloudResource' AND "key"='ocrTimeoutMs');
+INSERT INTO "hg_sys_addons_config" ("addon_name", "group", "name", "type", "key", "value", "default_value", "sort", "tip", "is_default", "status", "created_at", "updated_at")
+SELECT 'youban_publish', 'cloudResource', 'OCR 屏蔽关键字', 'textarea', 'ocrBlockedKeywords', '', '', 30, '每行一个关键字，命中任意关键字时跳过背景替换', 1, 1, NOW(), NOW()
+WHERE NOT EXISTS (SELECT 1 FROM "hg_sys_addons_config" WHERE "addon_name"='youban_publish' AND "group"='cloudResource' AND "key"='ocrBlockedKeywords');
+
+INSERT INTO "hg_sys_addons_config" ("addon_name", "group", "name", "type", "key", "value", "default_value", "sort", "tip", "is_default", "status", "created_at", "updated_at")
 SELECT 'youban_publish', 'collect', '采集总开关', 'int', 'collectEnabled', '1', '1', 10, '是否启用采集能力', 0, 1, NOW(), NOW()
 WHERE NOT EXISTS (SELECT 1 FROM "hg_sys_addons_config" WHERE "addon_name"='youban_publish' AND "key"='collectEnabled');
 

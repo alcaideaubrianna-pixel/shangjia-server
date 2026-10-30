@@ -13,6 +13,10 @@ import (
 
 func (s *sSysConfig) ensureCloudResourceConfigRows(ctx context.Context) error {
 	rows := []g.Map{
+		{"name": "OCR 开关", "type": "int", "key": "ocrEnabled", "value": "0", "default_value": "0", "sort": 10, "tip": "仅在开启背景替换时用于文档识别"},
+		{"name": "OCR 服务地址", "type": "string", "key": "ocrEndpoint", "value": "", "default_value": "", "sort": 20, "tip": "OCR HTTP 服务地址，关闭 OCR 时可为空"},
+		{"name": "OCR 超时时间", "type": "number", "key": "ocrTimeoutMs", "value": "800", "default_value": "800", "sort": 25, "tip": "OCR 请求超时时间，单位毫秒"},
+		{"name": "OCR 屏蔽关键字", "type": "textarea", "key": "ocrBlockedKeywords", "value": "", "default_value": "", "sort": 30, "tip": "每行一个关键字，命中任意关键字时跳过背景替换"},
 		{"name": "人像抠图来源", "type": "string", "key": "mattingProvider", "value": "facepp", "default_value": "facepp", "sort": 40, "tip": "aliyun/tencent/fapihub/facepp"},
 		{"name": "阿里云 AccessKey ID", "type": "string", "key": "aliyunAccessKeyId", "value": "", "default_value": "", "sort": 50, "tip": "阿里云视觉智能开放平台 AccessKey ID"},
 		{"name": "阿里云 AccessKey Secret", "type": "string", "key": "aliyunAccessKeySecret", "value": "", "default_value": "", "sort": 60, "tip": "页面回显会脱敏"},
