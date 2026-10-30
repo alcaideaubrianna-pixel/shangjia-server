@@ -31,6 +31,7 @@ import (
 	"golang.org/x/net/html/atom"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/addons/youban_publish/service"
 )
 
 // 仅触发推送
