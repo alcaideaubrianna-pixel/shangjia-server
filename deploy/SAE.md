@@ -59,3 +59,18 @@ and pushes images; it does not change SAE state.
 All production SAE changes must go through `deploy/sae-deploy-all.sh`; do not call `DeployApplication` manually. The script preserves ENV, injects media fallback and publish concurrency, keeps Web at two replicas, uses rolling readiness for workers, and keeps Account as a singleton.
 
 The script validates the image tag in ACR before creating a change order and refuses to overlap an active SAE change order. For recovery from a stuck change order, use the script only with `SAE_ABORT_STUCK_CHANGE_ORDER=true`; never issue a standalone SAE deploy command.
+
+### 防扫图供应商限流与降级
+
+Publish 角色由部署脚本写入以下环境变量，均只影响开启防扫图的任务：
+
+```text
+YOUBAN_FACEPP_CONCURRENCY=1
+YOUBAN_ALIYUN_MATTING_CONCURRENCY=5
+YOUBAN_TENCENT_MATTING_CONCURRENCY=4
+YOUBAN_FAPIHUB_CONCURRENCY=2
+YOUBAN_FAPIHUB_RATE_LIMIT_PER_MINUTE=150
+YOUBAN_ANTISCAN_FALLBACK_PROVIDER=
+```
+
+`YOUBAN_ANTISCAN_FALLBACK_PROVIDER` 默认为空，表示供应商失败后不自动切换。需要降级时只能配置为 `aliyun`、`tencent` 或 `fapihub`，不会在代码中写死某一家供应商。部署脚本通过 `SAE_ANTISCAN_FALLBACK_PROVIDER` 读取覆盖值。

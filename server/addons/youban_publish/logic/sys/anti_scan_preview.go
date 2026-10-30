@@ -502,38 +502,25 @@ func (s *sSysPublish) createAntiScanMatting(ctx context.Context, imageHash strin
 		segmentURL, err = facePPPortraitMatting(ctx, imageBytes, imageHash, conf)
 		recordMattingProviderUsage(ctx, usageOwner, sysin.CloudResourceProviderFacePlus, err == nil, time.Since(primaryStartedAt))
 		providerName = "facepp-matting"
-		if err != nil && antiScanTencentMattingFallbackReady(conf, storager.GetConfig()) {
+		if err != nil && antiScanFallbackProvider() != "" {
 			primaryErr := err
 			fallbackStartedAt := time.Now()
-			release, gateErr := acquireAntiScanProvider(ctx, "tencent")
-			if gateErr != nil {
-				return "", gateErr
-			}
-			result, fallbackErr := tencentCOSPortraitMatting(ctx, imageBytes, imageHash, conf, false)
-			release()
-			if fallbackErr == nil && gateErr != nil {
-				fallbackErr = gateErr
-			}
-			recordMattingProviderUsage(ctx, usageOwner, sysin.CloudResourceProviderTencent, fallbackErr == nil && result != nil && strings.TrimSpace(result.URL) != "", time.Since(fallbackStartedAt))
-			if fallbackErr == nil && result != nil && strings.TrimSpace(result.URL) != "" {
-				segmentURL = result.URL
+			fallbackProvider := antiScanFallbackProvider()
+			fallbackURL, fallbackErr := s.createAntiScanFallback(ctx, fallbackProvider, imageHash, imageBytes, conf, usageOwner)
+			if fallbackErr == nil && strings.TrimSpace(fallbackURL) != "" {
+				segmentURL = fallbackURL
 				err = nil
-				// provider 列仅允许 32 字符；持久化为所选能力标记，实际降级信息由调用日志与指标记录。
 				providerName = "facepp-matting"
-				g.Log().Warning(ctx, "Face++抠图失败，已降级腾讯云", g.Map{
-					"imageHash": imageHash, "primaryProvider": provider, "actualProvider": sysin.CloudResourceProviderTencent,
+				g.Log().Warning(ctx, "防扫图供应商失败，已按 ENV 降级", g.Map{
+					"imageHash": imageHash, "primaryProvider": provider, "fallbackProvider": fallbackProvider,
 					"fallbackDurationMs": time.Since(fallbackStartedAt).Milliseconds(), "fallbackSuccess": true, "primaryError": primaryErr.Error(),
 				})
 			} else {
-				if fallbackErr != nil {
-					err = fallbackErr
-				} else {
-					err = gerror.New("腾讯云人像抠图降级返回空结果")
-				}
-				g.Log().Warning(ctx, "Face++抠图及腾讯云降级均失败", g.Map{
-					"imageHash": imageHash, "primaryProvider": provider, "actualProvider": sysin.CloudResourceProviderTencent,
+				err = fallbackErr
+				g.Log().Warning(ctx, "防扫图供应商及 ENV 降级均失败", g.Map{
+					"imageHash": imageHash, "primaryProvider": provider, "fallbackProvider": fallbackProvider,
 					"fallbackDurationMs": time.Since(fallbackStartedAt).Milliseconds(), "fallbackSuccess": false,
-					"primaryError": primaryErr.Error(), "fallbackError": fallbackErrorText(fallbackErr, result),
+					"primaryError": primaryErr.Error(), "fallbackError": fallbackErrorText(fallbackErr, nil),
 				})
 			}
 		}
@@ -616,24 +603,60 @@ func fallbackErrorText(err error, result *tencentPortraitMattingResult) string {
 	return "empty result URL"
 }
 
-func antiScanTencentMattingFallbackReady(conf *model.CloudResourceConfig, upload *basemodel.UploadConfig) bool {
-	if !antiScanEnvEnabled("YOUBAN_ANTISCAN_TENCENT_FALLBACK_ENABLED") {
-		return false
-	}
-	return upload != nil && upload.Drive == consts.UploadDriveCos &&
-		strings.TrimSpace(upload.CosBucketURL) != "" && strings.TrimSpace(upload.CosPath) != "" &&
-		conf != nil && strings.TrimSpace(conf.TencentRegion) != "" &&
-		strings.TrimSpace(conf.TencentSecretId) != "" &&
-		strings.TrimSpace(conf.TencentSecretKey) != "" &&
-		strings.TrimSpace(conf.TencentMattingBucket) != ""
-}
-
 func antiScanEnvEnabled(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
 	case "1", "true", "yes", "on", "enabled":
 		return true
 	default:
 		return false
+	}
+}
+
+func antiScanFallbackProvider() string {
+	provider := strings.ToLower(strings.TrimSpace(os.Getenv("YOUBAN_ANTISCAN_FALLBACK_PROVIDER")))
+	switch provider {
+	case "aliyun", "tencent", "fapihub":
+		return provider
+	default:
+		return ""
+	}
+}
+
+func (s *sSysPublish) createAntiScanFallback(ctx context.Context, provider, imageHash string, imageBytes []byte, conf *model.CloudResourceConfig, usageOwner cloudResourceUsageOwner) (string, error) {
+	release, err := acquireAntiScanProvider(ctx, provider)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+	started := time.Now()
+	switch provider {
+	case "aliyun":
+		url, callErr := aliyunCOSPortraitMatting(ctx, imageBytes, imageHash, conf)
+		recordMattingProviderUsage(ctx, usageOwner, sysin.CloudResourceProviderAliyun, callErr == nil, time.Since(started))
+		return url, callErr
+	case "tencent":
+		result, callErr := tencentCOSPortraitMatting(ctx, imageBytes, imageHash, conf, false)
+		ok := callErr == nil && result != nil && strings.TrimSpace(result.URL) != ""
+		recordMattingProviderUsage(ctx, usageOwner, sysin.CloudResourceProviderTencent, ok, time.Since(started))
+		if !ok && callErr == nil {
+			callErr = gerror.New("腾讯云降级返回空结果")
+		}
+		if result != nil {
+			return result.URL, callErr
+		}
+		return "", callErr
+	case "fapihub":
+		client := newFapiHubClient(conf.FapiHubApiKey, conf.FapiHubEndpoint, conf.FapiHubModel)
+		pngBytes, callErr := client.removeBackground(ctx, imageBytes)
+		if callErr != nil {
+			recordMattingProviderUsage(ctx, usageOwner, sysin.CloudResourceProviderFapiHub, false, time.Since(started))
+			return "", callErr
+		}
+		url, callErr := uploadAntiScanSegment(ctx, pngBytes, imageHash)
+		recordMattingProviderUsage(ctx, usageOwner, sysin.CloudResourceProviderFapiHub, callErr == nil, time.Since(started))
+		return url, callErr
+	default:
+		return "", gerror.New("未配置有效的防扫图降级供应商")
 	}
 }
 

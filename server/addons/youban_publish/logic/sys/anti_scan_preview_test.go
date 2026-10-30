@@ -9,7 +9,6 @@ import (
 	"hotgo/addons/youban_publish/model"
 	"hotgo/internal/consts"
 	"hotgo/internal/library/contexts"
-	basemodel "hotgo/internal/model"
 )
 
 func TestAntiScanMattingQuotaReferenceIsStableAcrossJobs(t *testing.T) {
@@ -90,31 +89,18 @@ func TestAntiScanMattingCacheMatchesSelectedProvider(t *testing.T) {
 	}
 }
 
-func TestAntiScanTencentMattingFallbackRequiresCompleteConfig(t *testing.T) {
-	t.Setenv("YOUBAN_ANTISCAN_TENCENT_FALLBACK_ENABLED", "true")
-	complete := &model.CloudResourceConfig{TencentSecretId: "id", TencentSecretKey: "key", TencentMattingBucket: "bucket", TencentRegion: "ap-singapore"}
-	upload := &basemodel.UploadConfig{Drive: consts.UploadDriveCos, CosBucketURL: "https://bucket.cos.ap-singapore.myqcloud.com", CosPath: "files"}
-	if !antiScanTencentMattingFallbackReady(complete, upload) {
-		t.Fatal("complete Tencent matting configuration should enable fallback")
+func TestAntiScanFallbackProviderFromEnv(t *testing.T) {
+	if got := antiScanFallbackProvider(); got != "" {
+		t.Fatalf("fallback must be disabled by default, got %q", got)
 	}
-	for _, conf := range []*model.CloudResourceConfig{
-		nil,
-		{TencentSecretKey: "key", TencentMattingBucket: "bucket"},
-		{TencentSecretId: "id", TencentMattingBucket: "bucket"},
-		{TencentSecretId: "id", TencentSecretKey: "key"},
-	} {
-		if antiScanTencentMattingFallbackReady(conf, upload) {
-			t.Fatalf("incomplete Tencent matting configuration must not enable fallback: %#v", conf)
+	for _, provider := range []string{"aliyun", "tencent", "fapihub"} {
+		t.Setenv("YOUBAN_ANTISCAN_FALLBACK_PROVIDER", provider)
+		if got := antiScanFallbackProvider(); got != provider {
+			t.Fatalf("fallback provider: got %q want %q", got, provider)
 		}
 	}
-}
-
-func TestAntiScanTencentMattingFallbackSkipsOSS(t *testing.T) {
-	t.Setenv("YOUBAN_ANTISCAN_TENCENT_FALLBACK_ENABLED", "true")
-	conf := &model.CloudResourceConfig{TencentSecretId: "id", TencentSecretKey: "key", TencentMattingBucket: "bucket", TencentRegion: "ap-singapore"}
-	for _, upload := range []*basemodel.UploadConfig{nil, {Drive: consts.UploadDriveOss}, {Drive: consts.UploadDriveCos}} {
-		if antiScanTencentMattingFallbackReady(conf, upload) {
-			t.Fatal("OSS or incomplete COS storage must not enable COS fallback")
-		}
+	t.Setenv("YOUBAN_ANTISCAN_FALLBACK_PROVIDER", "unknown")
+	if got := antiScanFallbackProvider(); got != "" {
+		t.Fatalf("unknown fallback provider must be disabled, got %q", got)
 	}
 }
