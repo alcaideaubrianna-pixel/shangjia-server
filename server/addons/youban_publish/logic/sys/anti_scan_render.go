@@ -177,22 +177,55 @@ func compositeRabbitOverlay(original, rabbit *image.RGBA, matte image.Image) {
 			}
 		}
 	}
-	inner := dilateAntiScanAlpha(mask, radius)
 	expanded := dilateAntiScanAlpha(mask, radius+feather)
+	softHole := blurAlphaSmooth(expanded, 8)
 	for y := b.Min.Y; y < b.Max.Y; y++ {
 		for x := b.Min.X; x < b.Max.X; x++ {
-			if inner.AlphaAt(x, y).A > 0 {
+			alpha := uint32(255 - softHole.AlphaAt(x, y).A)
+			if alpha == 0 {
 				continue
-			}
-			alpha := uint32(255)
-			if expanded.AlphaAt(x, y).A > 0 {
-				alpha = 180
 			}
 			oc := color.NRGBAModel.Convert(original.At(x, y)).(color.NRGBA)
 			rc := color.NRGBAModel.Convert(rabbit.At(x, y)).(color.NRGBA)
 			original.SetRGBA(x, y, color.RGBA{R: uint8((uint32(rc.R)*alpha + uint32(oc.R)*(255-alpha)) / 255), G: uint8((uint32(rc.G)*alpha + uint32(oc.G)*(255-alpha)) / 255), B: uint8((uint32(rc.B)*alpha + uint32(oc.B)*(255-alpha)) / 255), A: 255})
 		}
 	}
+}
+
+func blurAlphaSmooth(src *image.Alpha, radius int) *image.Alpha {
+	b := src.Bounds()
+	horizontal := image.NewAlpha(b)
+	window := radius*2 + 1
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		sum := 0
+		for x := b.Min.X - radius; x < b.Max.X+radius; x++ {
+			if x+radius < b.Max.X {
+				sum += int(src.AlphaAt(x+radius, y).A)
+			}
+			if x-radius-1 >= b.Min.X {
+				sum -= int(src.AlphaAt(x-radius-1, y).A)
+			}
+			if x >= b.Min.X && x < b.Max.X {
+				horizontal.SetAlpha(x, y, color.Alpha{A: uint8(sum / window)})
+			}
+		}
+	}
+	out := image.NewAlpha(b)
+	for x := b.Min.X; x < b.Max.X; x++ {
+		sum := 0
+		for y := b.Min.Y - radius; y < b.Max.Y+radius; y++ {
+			if y+radius < b.Max.Y {
+				sum += int(horizontal.AlphaAt(x, y+radius).A)
+			}
+			if y-radius-1 >= b.Min.Y {
+				sum -= int(horizontal.AlphaAt(x, y-radius-1).A)
+			}
+			if y >= b.Min.Y && y < b.Max.Y {
+				out.SetAlpha(x, y, color.Alpha{A: uint8(sum / window)})
+			}
+		}
+	}
+	return out
 }
 
 func compositeFapiHubOriginal(background, original *image.RGBA, matte image.Image) {
