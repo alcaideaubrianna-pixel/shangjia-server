@@ -125,7 +125,7 @@ func (s *sSysPublish) applyTelegramJobContentProtection(ctx context.Context, job
 				}
 				if strings.EqualFold(strings.TrimSpace(item.ProcessedStatus), "ready") &&
 					strings.TrimSpace(item.ProcessedAssetHash) == desiredProcessedHash &&
-					(strings.TrimSpace(item.ProcessedTgFileId) != "" || strings.TrimSpace(item.ProcessedFileURL) != "") {
+					(strings.TrimSpace(item.ProcessedFileURL) != "" || strings.TrimSpace(item.ProcessedStoragePath) != "") {
 					item.AntiScanEnabled = false
 					item.ForceUpload = false
 					if strings.TrimSpace(item.ProcessedTgFileId) != "" {
