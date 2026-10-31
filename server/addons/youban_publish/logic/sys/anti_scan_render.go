@@ -167,7 +167,7 @@ func applyAntiScanBackground(ctx context.Context, src *image.RGBA, segmentRaw st
 
 func compositeRabbitOverlay(original, rabbit *image.RGBA, matte image.Image) {
 	b := original.Bounds()
-	radius, feather := 24, 8
+	radius, feather := 32, 12
 	mask := image.NewAlpha(b)
 	for y := b.Min.Y; y < b.Max.Y; y++ {
 		for x := b.Min.X; x < b.Max.X; x++ {
@@ -178,7 +178,7 @@ func compositeRabbitOverlay(original, rabbit *image.RGBA, matte image.Image) {
 		}
 	}
 	expanded := dilateAntiScanAlpha(mask, radius+feather)
-	softHole := blurAlphaSmooth(expanded, 8)
+	softHole := blurAlphaGaussianApprox(expanded, 8, 3)
 	for y := b.Min.Y; y < b.Max.Y; y++ {
 		for x := b.Min.X; x < b.Max.X; x++ {
 			alpha := uint32(255 - softHole.AlphaAt(x, y).A)
@@ -190,6 +190,17 @@ func compositeRabbitOverlay(original, rabbit *image.RGBA, matte image.Image) {
 			original.SetRGBA(x, y, color.RGBA{R: uint8((uint32(rc.R)*alpha + uint32(oc.R)*(255-alpha)) / 255), G: uint8((uint32(rc.G)*alpha + uint32(oc.G)*(255-alpha)) / 255), B: uint8((uint32(rc.B)*alpha + uint32(oc.B)*(255-alpha)) / 255), A: 255})
 		}
 	}
+}
+
+func blurAlphaGaussianApprox(src *image.Alpha, radius, passes int) *image.Alpha {
+	if passes < 1 {
+		return src
+	}
+	out := src
+	for i := 0; i < passes; i++ {
+		out = blurAlphaSmooth(out, radius)
+	}
+	return out
 }
 
 func blurAlphaSmooth(src *image.Alpha, radius int) *image.Alpha {
