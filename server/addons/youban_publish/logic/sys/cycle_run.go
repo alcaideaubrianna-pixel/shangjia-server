@@ -528,7 +528,9 @@ func (s *sSysPublish) channelCyclePage(ctx context.Context, channel channelCycle
 	if channel.Mode == "batch" && cursorId > 0 {
 		// Keep the tail first, then wrap to the head in the same run so a
 		// configured 50-item batch remains full when only 26 tail rows remain.
-		query = query.Order("CASE WHEN p.id > ? THEN 0 ELSE 1 END", cursorId).OrderAsc("p.id")
+		// Order quotes string arguments as identifiers; use a typed raw expression
+		// so the cursor value is emitted as a numeric literal instead of a column.
+		query = query.Order(gdb.Raw(fmt.Sprintf("CASE WHEN p.id > %d THEN 0 ELSE 1 END", cursorId))).OrderAsc("p.id")
 	} else {
 		query = query.WhereGT("p.id", cursorId).OrderAsc("p.id")
 	}
