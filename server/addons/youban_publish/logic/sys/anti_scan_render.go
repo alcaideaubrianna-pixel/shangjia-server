@@ -167,7 +167,7 @@ func applyAntiScanBackground(ctx context.Context, src *image.RGBA, segmentRaw st
 
 func compositeRabbitOverlay(original, rabbit *image.RGBA, matte image.Image) {
 	b := original.Bounds()
-	radius, feather := 32, 12
+	radius, feather := 22, 12
 	mask := image.NewAlpha(b)
 	for y := b.Min.Y; y < b.Max.Y; y++ {
 		for x := b.Min.X; x < b.Max.X; x++ {
