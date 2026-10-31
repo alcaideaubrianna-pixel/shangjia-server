@@ -94,7 +94,7 @@ func (s *sSysPublish) BuildDailyReport(ctx context.Context, tenantID, accountID 
 	if err = g.DB().Model(publishSuccessRecordTable+" r").Safe().Ctx(ctx).
 		LeftJoin(publishTgJobTable+" j", dailyReportJobJoin()).
 		LeftJoin(publishChannelTable+" c", "c.id=r.channel_id AND c.tenant_id=r.tenant_id AND c.tg_account_id=r.account_id").
-		Fields("r.channel_id AS channel_id,COALESCE(MAX(NULLIF(c.title,'')),CONCAT('',r.channel_id)) AS title,r.action AS action,SUM(CASE WHEN r.status='success' THEN 1 ELSE 0 END) AS success,SUM(CASE WHEN r.status='failed' THEN 1 ELSE 0 END) AS failed,SUM(CASE WHEN r.status IN ('pending','sending','unknown','failed_retry') THEN 1 ELSE 0 END) AS processing").
+		Fields("r.channel_id AS channel_id,COALESCE(MAX(NULLIF(c.channel_title,'')),CONCAT('',r.channel_id)) AS title,r.action AS action,SUM(CASE WHEN r.status='success' THEN 1 ELSE 0 END) AS success,SUM(CASE WHEN r.status='failed' THEN 1 ELSE 0 END) AS failed,SUM(CASE WHEN r.status IN ('pending','sending','unknown','failed_retry') THEN 1 ELSE 0 END) AS processing").
 		Where("r.tenant_id", tenantID).Where("r.account_id", accountID).
 		WhereIn("r.action", []string{"collect_publish", "cycle_publish"}).
 		Where(dailyReportResultTime()+" >= ? AND "+dailyReportResultTime()+" < ?", start, end).
