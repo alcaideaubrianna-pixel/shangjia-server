@@ -530,7 +530,7 @@ func (s *sSysPublish) channelCyclePage(ctx context.Context, channel channelCycle
 		// configured 50-item batch remains full when only 26 tail rows remain.
 		// Order quotes string arguments as identifiers; use a typed raw expression
 		// so the cursor value is emitted as a numeric literal instead of a column.
-		query = query.Order(gdb.Raw(fmt.Sprintf("CASE WHEN p.id > %d THEN 0 ELSE 1 END", cursorId))).OrderAsc("p.id")
+		query = query.Order(fmt.Sprintf("CASE WHEN p.id > %d THEN 0 ELSE 1 END", cursorId)).OrderAsc("p.id")
 	} else {
 		query = query.WhereGT("p.id", cursorId).OrderAsc("p.id")
 	}
