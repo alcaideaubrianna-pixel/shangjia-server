@@ -123,7 +123,8 @@ func (s *sSysPublish) applyTelegramJobContentProtection(ctx context.Context, job
 					item.TgFileId = ""
 					item.AssetHash = "anti-scan:" + telegramAntiScanCacheKey(item)
 				}
-				if strings.EqualFold(strings.TrimSpace(item.ProcessedStatus), "ready") &&
+				if item.AntiScanMode != "background_replace" &&
+					strings.EqualFold(strings.TrimSpace(item.ProcessedStatus), "ready") &&
 					strings.TrimSpace(item.ProcessedAssetHash) == desiredProcessedHash &&
 					(strings.TrimSpace(item.ProcessedTgFileId) != "" || strings.TrimSpace(item.ProcessedFileURL) != "") {
 					item.AntiScanEnabled = false
