@@ -156,3 +156,24 @@ func TestTelegramMediaSetWithoutProtectionPreservesCopyReference(t *testing.T) {
 		t.Fatal("fallback must not mutate canonical media")
 	}
 }
+
+func TestOnlineCase653258RejectsLegacyProcessedTelegramFileID(t *testing.T) {
+	item := &telegramMediaItem{
+		Id:                   4987479,
+		MediaType:            "image",
+		AntiScanEnabled:      true,
+		AntiScanMode:         "background_replace",
+		ProcessedStatus:      "ready",
+		ProcessedAssetHash:   "e6c7bc3ae351fced00ee72ea26c1adc1a83b355b8f140ec261c5f1e00110c334",
+		ProcessedTgFileId:    "AgACAgUAAyEGAAMBAbVyzQACEz5q5axl-rpdKj9c1OZJ5nsTaSqndQACMxVrG0P1GVdSczZVaL0x0wEAAwIAA3kAAz0E",
+		ProcessedFileURL:     "",
+		ProcessedStoragePath: "",
+	}
+	if canReuseProcessedAntiScanAsset(item, item.ProcessedAssetHash) {
+		t.Fatal("online case 653258 must reject a legacy Telegram file id without a final artifact")
+	}
+	item.ProcessedStoragePath = "hotgo/file/processed/final.png"
+	if !canReuseProcessedAntiScanAsset(item, item.ProcessedAssetHash) {
+		t.Fatal("a persisted final artifact should be reusable")
+	}
+}

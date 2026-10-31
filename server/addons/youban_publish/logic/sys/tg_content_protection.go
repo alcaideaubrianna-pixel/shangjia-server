@@ -88,6 +88,13 @@ func (s *sSysPublish) telegramChannelSendPolicy(ctx context.Context, job telegra
 	return policy, nil
 }
 
+func canReuseProcessedAntiScanAsset(item *telegramMediaItem, desiredHash string) bool {
+	return item != nil &&
+		strings.EqualFold(strings.TrimSpace(item.ProcessedStatus), "ready") &&
+		strings.TrimSpace(item.ProcessedAssetHash) == desiredHash &&
+		(strings.TrimSpace(item.ProcessedFileURL) != "" || strings.TrimSpace(item.ProcessedStoragePath) != "")
+}
+
 func (s *sSysPublish) applyTelegramJobContentProtection(ctx context.Context, job telegramJobRecord, caption string, mediaSets ...[]*telegramMediaItem) (string, error) {
 	policy, err := s.telegramChannelSendPolicy(ctx, job)
 	if err != nil {
@@ -123,9 +130,7 @@ func (s *sSysPublish) applyTelegramJobContentProtection(ctx context.Context, job
 					item.TgFileId = ""
 					item.AssetHash = "anti-scan:" + telegramAntiScanCacheKey(item)
 				}
-				if strings.EqualFold(strings.TrimSpace(item.ProcessedStatus), "ready") &&
-					strings.TrimSpace(item.ProcessedAssetHash) == desiredProcessedHash &&
-					(strings.TrimSpace(item.ProcessedFileURL) != "" || strings.TrimSpace(item.ProcessedStoragePath) != "") {
+				if canReuseProcessedAntiScanAsset(item, desiredProcessedHash) {
 					item.AntiScanEnabled = false
 					item.ForceUpload = false
 					if strings.TrimSpace(item.ProcessedTgFileId) != "" {
