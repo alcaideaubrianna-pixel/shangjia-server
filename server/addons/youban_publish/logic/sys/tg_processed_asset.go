@@ -18,7 +18,7 @@ func telegramProcessedAssetVariantHash(media *telegramMediaItem) string {
 	// current background replacement settings.
 	// v4 invalidates historical processed file IDs written before background
 	// replacement failures were isolated from reusable assets.
-	payload := fmt.Sprintf("v4|%d|%s|%t|%d|%s|%s|%s|%s|%s", media.Id, media.MediaType, media.AntiScanEnabled, media.AntiScanSeed, media.AntiScanMode, media.AntiScanBackgroundURL, media.AntiScanProvider, media.AssetHash, media.StoragePath)
+	payload := fmt.Sprintf("v5|%d|%s|%t|%d|%s|%s|%s|%s|%s", media.Id, media.MediaType, media.AntiScanEnabled, media.AntiScanSeed, media.AntiScanMode, media.AntiScanBackgroundURL, media.AntiScanProvider, media.AssetHash, media.StoragePath)
 	sum := sha256.Sum256([]byte(payload))
 	return hex.EncodeToString(sum[:])
 }
