@@ -177,27 +177,16 @@ func compositeRabbitOverlay(original, rabbit *image.RGBA, matte image.Image) {
 			}
 		}
 	}
+	inner := dilateAntiScanAlpha(mask, radius)
+	expanded := dilateAntiScanAlpha(mask, radius+feather)
 	for y := b.Min.Y; y < b.Max.Y; y++ {
 		for x := b.Min.X; x < b.Max.X; x++ {
-			minDistance := radius + feather + 1
-			for yy := maxInt(b.Min.Y, y-radius-feather); yy <= minInt(b.Max.Y-1, y+radius+feather); yy++ {
-				for xx := maxInt(b.Min.X, x-radius-feather); xx <= minInt(b.Max.X-1, x+radius+feather); xx++ {
-					if mask.AlphaAt(xx, yy).A == 0 {
-						continue
-					}
-					dx, dy := xx-x, yy-y
-					d := int(math.Sqrt(float64(dx*dx + dy*dy)))
-					if d < minDistance {
-						minDistance = d
-					}
-				}
-			}
-			if minDistance <= radius {
+			if inner.AlphaAt(x, y).A > 0 {
 				continue
 			}
 			alpha := uint32(255)
-			if minDistance < radius+feather {
-				alpha = uint32(minDistance-radius) * 255 / uint32(feather)
+			if expanded.AlphaAt(x, y).A > 0 {
+				alpha = 180
 			}
 			oc := color.NRGBAModel.Convert(original.At(x, y)).(color.NRGBA)
 			rc := color.NRGBAModel.Convert(rabbit.At(x, y)).(color.NRGBA)
