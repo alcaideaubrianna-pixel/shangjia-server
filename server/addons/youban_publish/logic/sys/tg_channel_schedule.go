@@ -8,7 +8,7 @@ package sys
 func telegramChannelScheduleRankSQL(alias string) string {
 	p := alias + "."
 	op := "LOWER(TRIM(" + p + "operation_no))"
-	return "CASE WHEN " + p + "status IN ('sending','confirming') OR " + p + "send_phase IN ('cleanup_processing','display_sending','display_confirmed','verify_sending') THEN 0 WHEN " + op + " LIKE 'profile:%' OR " + op + " LIKE 'bot_publish:%' OR " + op + " LIKE 'batchtext:%' THEN 1 WHEN " + op + " LIKE 'cycle_batch:%' THEN 3 ELSE 2 END"
+	return "CASE WHEN " + p + "status IN ('sending','confirming') OR " + p + "send_phase IN ('cleanup_processing','display_sending','display_confirmed','verify_sending') THEN 0 WHEN " + op + " LIKE 'profile:%' OR " + op + " LIKE 'bot_publish:%' OR " + op + " LIKE 'batchtext:%' THEN 1 WHEN " + op + " LIKE 'cycle_batch:%' AND " + p + "created_at < CURRENT_TIMESTAMP - INTERVAL '15 minutes' THEN 2 WHEN " + op + " LIKE 'cycle_batch:%' THEN 3 ELSE 2 END"
 }
 
 func telegramChannelScheduleOrderSQL(alias string) string {
