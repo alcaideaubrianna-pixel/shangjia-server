@@ -2,17 +2,22 @@ package sys
 
 import (
 	"context"
+	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"golang.org/x/sync/errgroup"
 )
 
+const telegramAntiScanPrepareTimeout = 2 * time.Minute
+
 // prepareTelegramAntiScanMediaSet is the job-level barrier for content
 // protection. It is intentionally called only when the channel policy enables
 // anti-scan. Every protected image (display and verify) is prepared before the
 // first Telegram send is attempted.
 func (s *sSysPublish) prepareTelegramAntiScanMediaSet(ctx context.Context, mediaSets ...[]*telegramMediaItem) error {
+	prepareCtx, cancel := context.WithTimeout(ctx, telegramAntiScanPrepareTimeout)
+	defer cancel()
 	items := make([]*telegramMediaItem, 0)
 	for _, set := range mediaSets {
 		for _, item := range set {
@@ -25,7 +30,7 @@ func (s *sSysPublish) prepareTelegramAntiScanMediaSet(ctx context.Context, media
 		return nil
 	}
 	g.Log().Infof(ctx, "防扫图全量准备开始 mediaCount:%d", len(items))
-	group, groupCtx := errgroup.WithContext(ctx)
+	group, groupCtx := errgroup.WithContext(prepareCtx)
 	group.SetLimit(telegramMediaPrepareConcurrency)
 	for _, item := range items {
 		item := item

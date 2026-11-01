@@ -346,9 +346,24 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 		err = s.prepareTelegramAntiScanMediaSet(ctx, displayMedia, verifyMedia)
 		step.End(err, g.Map{"displayMediaCount": len(displayMedia), "verifyMediaCount": len(verifyMedia)})
 		if err != nil {
-			return err
+			// Anti-scan preparation is a best-effort pre-send transform. Never
+			// hold the channel lease until the global publish deadline when a
+			// provider/cache is unavailable; release prepared files and fall back
+			// to the original media so the queue can make progress.
+			g.Log().Warningf(ctx, "防扫图准备失败，降级发送原始媒体 jobId:%d err:%+v", job.Id, err)
+			cleanupPreparedTelegramMedia(displayMedia, verifyMedia)
+			for _, set := range [][]*telegramMediaItem{displayMedia, verifyMedia} {
+				for _, item := range set {
+					if item != nil {
+						item.AntiScanEnabled = false
+						item.ForceUpload = false
+					}
+				}
+			}
 		}
-		defer cleanupPreparedTelegramMedia(displayMedia, verifyMedia)
+		if telegramAntiScanMediaCount(displayMedia)+telegramAntiScanMediaCount(verifyMedia) > 0 {
+			defer cleanupPreparedTelegramMedia(displayMedia, verifyMedia)
+		}
 	}
 	step = beginTelegramPublishStage(ctx, "display.check_job_state")
 	stillSending, err := s.telegramJobStillSending(ctx, job.Id)
