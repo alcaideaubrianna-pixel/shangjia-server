@@ -111,3 +111,11 @@ func (c *cAIOps) ChannelCycleRun(ctx context.Context, req *aiops.ChannelCycleRun
 	}
 	return &aiops.ChannelRunRes{ChannelFullPushModel: result}, nil
 }
+
+func (c *cAIOps) ProfileClearQueue(ctx context.Context, req *aiops.ProfileQueueClearReq) (*aiops.ProfileQueueClearRes, error) {
+	result, err := service.SysPublish().AIOpsProfileClearQueue(ctx, req.TenantId, req.ProfileId)
+	if err != nil {
+		return nil, err
+	}
+	return &aiops.ProfileQueueClearRes{AIOpsProfileQueueClearModel: result}, nil
+}

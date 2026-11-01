@@ -80,6 +80,11 @@ type channelRunInput struct {
 	ChannelID int64 `json:"channelId" jsonschema:"Channel ID"`
 }
 
+type profileQueueClearInput struct {
+	TenantID  int64 `json:"tenantId" jsonschema:"Tenant ID"`
+	ProfileID int64 `json:"profileId" jsonschema:"Profile ID"`
+}
+
 type telegramOfflineBatchInput struct {
 	ProfileIDs []int64  `json:"profileIds,omitempty" jsonschema:"Profile IDs; processed in batches of 100"`
 	ProfileNos []string `json:"profileNos,omitempty" jsonschema:"Profile numbers; processed in batches of 100"`
@@ -174,9 +179,18 @@ func main() {
 		Name: "channel_cycle_run", Description: "Create one channel cycle run. This is non-idempotent: call once, record runId/batchNo, and poll status instead of retrying.",
 		Annotations: &mcp.ToolAnnotations{Title: "Trigger channel cycle run", ReadOnlyHint: readOnly, DestructiveHint: &destructive, IdempotentHint: false},
 	}, client.channelCycleRun)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "profile_clear_queue", Description: "Clear duplicate active Telegram publish jobs for one profile and keep the newest job",
+		Annotations: &mcp.ToolAnnotations{Title: "Clear profile publish queue", ReadOnlyHint: readOnly, DestructiveHint: &destructive, IdempotentHint: true},
+	}, client.profileClearQueue)
 	if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func (c *apiClient) profileClearQueue(ctx context.Context, _ *mcp.CallToolRequest, input profileQueueClearInput) (*mcp.CallToolResult, structuredOutput, error) {
+	data, err := c.call(ctx, http.MethodPost, "/api/youban_publish/ai-ops/profile/clear-queue", input)
+	return nil, structuredOutput{Data: data}, err
 }
 
 func (c *apiClient) channelFullPush(ctx context.Context, _ *mcp.CallToolRequest, input channelRunInput) (*mcp.CallToolResult, structuredOutput, error) {

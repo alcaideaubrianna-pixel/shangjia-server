@@ -114,3 +114,12 @@ type ChannelCycleRunReq struct {
 	ChannelId int64 `json:"channelId" v:"required|min:1#频道ID不能为空|频道ID不能为空"`
 }
 type ChannelRunRes struct{ *sysin.ChannelFullPushModel }
+
+type ProfileQueueClearReq struct {
+	g.Meta    `path:"/profile/clear-queue" method:"post" tags:"AI运维" summary:"清理资料重复发布任务"`
+	TenantId  int64 `json:"tenantId" v:"required|min:1"`
+	ProfileId int64 `json:"profileId" v:"required|min:1"`
+}
+type ProfileQueueClearRes struct {
+	*sysin.AIOpsProfileQueueClearModel
+}

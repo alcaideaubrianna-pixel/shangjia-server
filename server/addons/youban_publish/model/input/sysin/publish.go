@@ -1918,3 +1918,9 @@ func (in *RelayChannelStatusInp) Filter(ctx context.Context) error {
 	}
 	return nil
 }
+
+type AIOpsProfileQueueClearModel struct {
+	ProfileId int64 `json:"profileId"`
+	KeptJobId int64 `json:"keptJobId"`
+	Cleared   int   `json:"cleared"`
+}
