@@ -117,7 +117,10 @@ func (s *sSysPublish) AIOpsTelegramMessageOffline(ctx context.Context, in *sysin
 
 func (s *sSysPublish) resolveAIOpsOfflineMessage(ctx context.Context, ref aiOpsTelegramMessageRef, target string) *aiOpsOfflineTarget {
 	item := &sysin.AIOpsTelegramOfflineItem{Target: target, Status: "not_found", Message: "未找到系统发送记录"}
-	mod := g.DB().Model(publishTgMessageTable+" m").Ctx(ctx).
+	// Include soft-deleted message rows: an earlier cleanup attempt may have
+	// marked the local row deleted even though Telegram still has the message.
+	// An explicit message-ID request is allowed to requeue that row.
+	mod := g.DB().Model(publishTgMessageTable+" m").Ctx(ctx).Unscoped().
 		Fields("m.job_id,m.profile_id,m.status,p.profile_no").
 		LeftJoin("hg_content_profile p", "p.id=m.profile_id").
 		Where("m.tg_message_id", ref.MessageId)
@@ -138,9 +141,18 @@ func (s *sSysPublish) resolveAIOpsOfflineMessage(ctx context.Context, ref aiOpsT
 			resolved.profileId = row["profile_id"].Int64()
 			item.ProfileId, item.ProfileNo = resolved.profileId, row["profile_no"].String()
 		}
-		if row["status"].String() == "sent" {
+		if row["status"].String() == "sent" || row["status"].String() == "deleted" {
 			resolved.hadActive = true
 			resolved.jobIds = append(resolved.jobIds, row["job_id"].Int64())
+			if row["status"].String() == "deleted" {
+				// Re-activate only the explicitly addressed message. The existing
+				// cleanup worker will mark it deleted again after Telegram confirms
+				// DeleteMessage (or route the real error to fallback handling).
+				_, _ = g.DB().Model(publishTgMessageTable).Ctx(ctx).Unscoped().
+					Where("job_id", row["job_id"].Int64()).
+					Where("tg_message_id", ref.MessageId).
+					Data(g.Map{"status": "sent", "deleted_at": nil}).Update()
+			}
 		}
 	}
 	item.JobIds = uniqueIds(resolved.jobIds)

@@ -88,6 +88,10 @@ type profileQueueClearInput struct {
 type telegramOfflineBatchInput struct {
 	ProfileIDs []int64  `json:"profileIds,omitempty" jsonschema:"Profile IDs; processed in batches of 100"`
 	ProfileNos []string `json:"profileNos,omitempty" jsonschema:"Profile numbers; processed in batches of 100"`
+	Messages   []struct {
+		ChatID    string `json:"chatId" jsonschema:"Telegram channel Chat ID"`
+		MessageID int64  `json:"messageId" jsonschema:"Telegram message ID"`
+	} `json:"messages,omitempty" jsonschema:"Telegram messages; processed in batches of 100"`
 }
 
 type structuredOutput struct {
@@ -285,13 +289,14 @@ func (c *apiClient) previewProfileMedia(ctx context.Context, _ *mcp.CallToolRequ
 }
 
 func (c *apiClient) telegramMessageOfflineBatch(ctx context.Context, _ *mcp.CallToolRequest, input telegramOfflineBatchInput) (*mcp.CallToolResult, structuredOutput, error) {
-	if len(input.ProfileIDs) == 0 && len(input.ProfileNos) == 0 {
-		return nil, structuredOutput{}, fmt.Errorf("profileIds or profileNos is required")
+	if len(input.ProfileIDs) == 0 && len(input.ProfileNos) == 0 && len(input.Messages) == 0 {
+		return nil, structuredOutput{}, fmt.Errorf("profileIds, profileNos, or messages is required")
 	}
 	const batchSize = 100
-	results := make([]map[string]any, 0, (len(input.ProfileIDs)+len(input.ProfileNos)+batchSize-1)/batchSize)
+	results := make([]map[string]any, 0, (len(input.ProfileIDs)+len(input.ProfileNos)+len(input.Messages)+batchSize-1)/batchSize)
 	idOffset, noOffset := 0, 0
-	for idOffset < len(input.ProfileIDs) || noOffset < len(input.ProfileNos) {
+	msgOffset := 0
+	for idOffset < len(input.ProfileIDs) || noOffset < len(input.ProfileNos) || msgOffset < len(input.Messages) {
 		idsTake := len(input.ProfileIDs) - idOffset
 		if idsTake > batchSize {
 			idsTake = batchSize
@@ -300,9 +305,14 @@ func (c *apiClient) telegramMessageOfflineBatch(ctx context.Context, _ *mcp.Call
 		if noTake > len(input.ProfileNos)-noOffset {
 			noTake = len(input.ProfileNos) - noOffset
 		}
+		msgTake := batchSize - idsTake - noTake
+		if msgTake > len(input.Messages)-msgOffset {
+			msgTake = len(input.Messages) - msgOffset
+		}
 		data, err := c.call(ctx, http.MethodPost, "/api/youban_publish/ai-ops/telegram/message/offline", map[string]any{
 			"profileIds": input.ProfileIDs[idOffset : idOffset+idsTake],
 			"profileNos": input.ProfileNos[noOffset : noOffset+noTake],
+			"messages":   input.Messages[msgOffset : msgOffset+msgTake],
 		})
 		if err != nil {
 			return nil, structuredOutput{}, err
@@ -310,6 +320,7 @@ func (c *apiClient) telegramMessageOfflineBatch(ctx context.Context, _ *mcp.Call
 		results = append(results, data)
 		idOffset += idsTake
 		noOffset += noTake
+		msgOffset += msgTake
 	}
 	return nil, structuredOutput{Data: map[string]any{"batchSize": batchSize, "batches": results}}, nil
 }

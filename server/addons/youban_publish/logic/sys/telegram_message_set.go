@@ -60,18 +60,11 @@ func (s *sSysPublish) deleteTelegramMessagesLockedByChannel(ctx context.Context,
 	}
 	s.appendTelegramJobLog(ctx, job, "delete", "started", reason+"，开始删除TG消息")
 	startedAt := time.Now()
-	if len(messages) >= telegramDeleteMessagesBatchThreshold {
-		if err := telegramDeleteMessagesBatch(ctx, botToken, messages); err == nil {
-			if err = markTelegramMessagesDeleted(ctx, messages); err != nil {
-				return err
-			}
-			g.Log().Infof(ctx, "TG消息批量删除完成 job:%d messages:%d duration:%s", job.Id, len(messages), time.Since(startedAt).Round(time.Millisecond))
-			s.appendTelegramJobLog(ctx, job, "delete", "success", reason+"，TG消息批量删除成功")
-			return nil
-		} else {
-			g.Log().Warningf(ctx, "TG消息批量删除失败，降级逐条删除 job:%d messages:%d err:%+v", job.Id, len(messages), err)
-		}
-	}
+	// Always use the Bot API's per-message DeleteMessage call here. The
+	// custom deleteMessages endpoint can report success without proving that
+	// Telegram removed the messages, which leaves local rows marked deleted
+	// while the channel messages remain visible. The individual path also
+	// preserves the existing permission/error fallback handling.
 	if err = s.deleteTelegramMessagesIndividually(ctx, bot, job, messages, reason); err != nil {
 		return err
 	}
