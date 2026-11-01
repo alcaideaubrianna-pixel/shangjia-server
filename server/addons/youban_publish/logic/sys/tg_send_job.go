@@ -778,17 +778,23 @@ func (s *sSysPublish) submitTelegramMediaFallback(ctx context.Context, job teleg
 	if affected == 0 {
 		return gerror.New("TG任务已不在发送状态，取消协议号媒体降级提交")
 	}
-	if _, err = collectorservice.AccountTasks().Submit(ctx, &collectorin.AccountTaskSubmit{
+	taskID, submitErr := collectorservice.AccountTasks().Submit(ctx, &collectorin.AccountTaskSubmit{
 		TenantID: job.TenantId, AccountID: tgAccountID,
 		TaskType: collectorin.AccountTaskTypeMessageMediaFallback,
 		TaskKey:  fmt.Sprintf("message-media-fallback:%d:%s", job.Id, purpose),
 		Priority: collectorin.EventPriorityUrgent, MaxAttempts: 5,
-	}); err != nil {
+	})
+	if submitErr != nil {
 		// Ownership already belongs to the account fallback. Keep the marker so
 		// the recovery loop retries task creation without reopening Bot delivery.
-		g.Log().Warningf(ctx, "提交协议号媒体降级任务失败，等待自动恢复 jobId:%d purpose:%s err:%+v", job.Id, purpose, err)
-		return gerror.Wrap(errTelegramMediaFallbackSubmitDelayed, err.Error())
+		g.Log().Warningf(ctx, "提交协议号媒体降级任务失败，等待自动恢复 jobId:%d purpose:%s err:%+v", job.Id, purpose, submitErr)
+		return gerror.Wrap(errTelegramMediaFallbackSubmitDelayed, submitErr.Error())
 	}
+	g.Log().Info(ctx, "协议号媒体降级任务已持久化", g.Map{
+		"jobId": job.Id, "taskId": taskID, "purpose": purpose, "tgAccountId": tgAccountID,
+		"submittedAt": gtime.Now(), "maxAttempts": 5,
+	})
+	s.appendTelegramJobLog(ctx, job, "account_fallback", "task_submitted", fmt.Sprintf("协议号任务已持久化 taskId:%d purpose:%s maxAttempts:%d", taskID, purpose, 5))
 	return nil
 }
 
