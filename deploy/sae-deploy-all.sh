@@ -17,6 +17,7 @@ FAPIHUB_CONCURRENCY="${SAE_FAPIHUB_CONCURRENCY:-2}"
 FAPIHUB_RATE_LIMIT_PER_MINUTE="${SAE_FAPIHUB_RATE_LIMIT_PER_MINUTE:-150}"
 ANTISCAN_FALLBACK_PROVIDER="${SAE_ANTISCAN_FALLBACK_PROVIDER:-}"
 MEDIA_PERMANENT_FAILURE_ENABLED="${SAE_PUBLISH_MEDIA_PERMANENT_FAILURE_ENABLED:-true}"
+DISABLE_SLS="${SAE_DISABLE_SLS:-false}"
 ABORT_STUCK_CHANGE_ORDER="${SAE_ABORT_STUCK_CHANGE_ORDER:-false}"
 TAG="${1:-}"
 
@@ -110,7 +111,8 @@ for role in "${ROLES[@]}"; do
   elif [[ "$role" == "web" ]]; then
     replicas=2
   fi
-  aliyun sae DeployApplication \
+  deploy_args=(
+    aliyun sae DeployApplication
     --RegionId "$REGION_ID" \
     --AppId "$app_id" \
     --AcrInstanceId "$ACR_INSTANCE_ID" \
@@ -121,7 +123,12 @@ for role in "${ROLES[@]}"; do
     --MinReadyInstances "$min_ready" \
     --Envs "$envs" \
     --ChangeOrderDesc "deploy $TAG ($role)" \
-    --Deploy true >/dev/null
+    --Deploy true
+  )
+  if [[ "$DISABLE_SLS" == "true" ]]; then
+    deploy_args+=(--SlsConfigs "")
+  fi
+  "${deploy_args[@]}" >/dev/null
   wait_ready "$role" "$app_id" "$replicas"
   echo "ready $role"
 done
