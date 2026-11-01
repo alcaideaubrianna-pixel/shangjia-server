@@ -9,7 +9,11 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-const telegramAntiScanPrepareTimeout = 2 * time.Minute
+const (
+	telegramAntiScanPrepareTimeout     = 4 * time.Minute
+	telegramAntiScanBackgroundTimeout  = 2 * time.Minute
+	telegramAntiScanLightweightTimeout = 2 * time.Minute
+)
 
 // prepareTelegramAntiScanMediaSet is the job-level barrier for content
 // protection. It is intentionally called only when the channel policy enables

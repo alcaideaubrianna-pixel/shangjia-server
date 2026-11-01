@@ -68,7 +68,9 @@ func (s *sSysPublish) prepareTelegramAntiScanUploadFile(ctx context.Context, med
 
 	if kind == "image" && media.AntiScanMode == "background_replace" && media.AntiScanBackgroundURL != "" {
 		startedAt := time.Now()
-		path, generatedCleanup, err := s.prepareTelegramBackgroundReplacement(ctx, media, sourcePath)
+		backgroundCtx, cancelBackground := context.WithTimeout(ctx, telegramAntiScanBackgroundTimeout)
+		path, generatedCleanup, err := s.prepareTelegramBackgroundReplacement(backgroundCtx, media, sourcePath)
+		cancelBackground()
 		if err == nil && path != "" {
 			g.Log().Infof(ctx, "频道防扫图阶段完成 stage:background_replace durationMs:%d jobId:%d mediaId:%d", time.Since(startedAt).Milliseconds(), media.JobId, media.Id)
 			return prepareTelegramPhotoUploadFile(ctx, path, chainCleanup(cleanup, generatedCleanup))
@@ -93,6 +95,9 @@ func (s *sSysPublish) prepareTelegramAntiScanUploadFile(ctx context.Context, med
 		// prevents the lightweight result from being reused as a replacement.
 		media.ProcessedAssetHash = ""
 	}
+	lightweightCtx, cancelLightweight := context.WithTimeout(ctx, telegramAntiScanLightweightTimeout)
+	defer cancelLightweight()
+	ctx = lightweightCtx
 	historyKey := telegramAntiScanHistoryKey(media, kind)
 	history := loadTelegramAntiScanHashHistory(ctx, historyKey)
 	sourceHash, sourceHashErr := telegramAntiScanFileHash(sourcePath)
