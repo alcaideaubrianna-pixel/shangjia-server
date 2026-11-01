@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -231,17 +232,24 @@ func (s *sSysPublish) recoverProfilePublishOperationState(ctx context.Context, s
 		Where("operation_no", job.OperationNo).
 		Fields("COUNT(1) AS total," +
 			"SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed," +
+			"SUM(CASE WHEN status='failed_retry' THEN 1 ELSE 0 END) AS failed_retry," +
 			"SUM(CASE WHEN status='sending' THEN 1 ELSE 0 END) AS sending," +
 			"SUM(CASE WHEN status IN ('pending','failed_retry','unknown') THEN 1 ELSE 0 END) AS pending," +
 			"SUM(CASE WHEN status='sent' THEN 1 ELSE 0 END) AS sent," +
-			"SUM(CASE WHEN status IN ('sent','superseded') THEN 1 ELSE 0 END) AS completed").
+			"SUM(CASE WHEN status IN ('sent','superseded') THEN 1 ELSE 0 END) AS completed," +
+			"MAX(CASE WHEN status='failed_retry' THEN updated_at ELSE NULL END) AS last_failed_retry_at").
 		One()
 	if err != nil {
 		return gerror.Wrap(err, "统计资料上架任务状态失败")
 	}
 	total := row["total"].Int()
+	lastRetryAt := row["last_failed_retry_at"].GTime()
+	staleRetry := lastRetryAt != nil && lastRetryAt.Before(gtime.Now().Add(-15*time.Minute))
 	switch {
 	case total == 0 || row["failed"].Int() > 0:
+		return s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusFailed)
+	case row["failed_retry"].Int() > 0 && staleRetry:
+		g.Log().Warningf(ctx, "资料上架重试已超时，释放卡住的publishing状态 profileId:%d operationNo:%s", job.ProfileId, job.OperationNo)
 		return s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusFailed)
 	case row["sending"].Int() > 0:
 		return s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusPublishing)
