@@ -220,6 +220,10 @@ func (s *sSysPublish) AdminChannelCycleRun(ctx context.Context, in *sysin.Channe
 		s.failChannelCycleRun(ctx, runId, channel.Id, err)
 		return nil, gerror.Wrap(err, "手动循环批次入队失败")
 	}
+	g.Log().Info(ctx, "频道循环上架已触发", g.Map{
+		"tenantId": account.TenantId, "channelId": channel.Id, "runId": runId,
+		"status": cycleRunStatusPending,
+	})
 	return &sysin.ChannelFullPushModel{ChannelId: channel.Id, Queued: 0, BatchNo: fmt.Sprintf("cycle_batch:%d", runId), Status: cycleRunStatusPending}, nil
 }
 
@@ -634,6 +638,7 @@ func (s *sSysPublish) AIOpsChannelCycleRun(ctx context.Context, tenantId, channe
 		return nil, err
 	}
 	var runId int64
+	var totalCount int
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		now := gtime.Now()
 		locked, lockErr := tx.Model(publishChannelTable).Safe().Ctx(ctx).Where("id", channel.Id).Where("tenant_id", tenantId).Where("cycle_active_run_id", 0).WhereNull("deleted_at").Data(g.Map{"cycle_active_run_id": -1, "updated_at": now}).Update()
@@ -648,6 +653,7 @@ func (s *sSysPublish) AIOpsChannelCycleRun(ctx context.Context, tenantId, channe
 		if countErr != nil {
 			return gerror.Wrap(countErr, "统计频道循环资料失败")
 		}
+		totalCount = count
 		runId, err = tx.Model(publishCycleRunTable).Ctx(ctx).Data(g.Map{"plan_id": 0, "tenant_id": tenantId, "account_id": 0, "profile_id": 0, "channel_id": channel.Id, "status": cycleRunStatusPending, "stage": "manual", "cursor_id": 0, "total_count": count, "queued_count": 0, "scheduled_at": nil, "created_at": now, "updated_at": now}).InsertAndGetId()
 		if err != nil {
 			return gerror.Wrap(err, "创建手动循环批次失败")
@@ -662,5 +668,9 @@ func (s *sSysPublish) AIOpsChannelCycleRun(ctx context.Context, tenantId, channe
 		s.failChannelCycleRun(ctx, runId, channel.Id, err)
 		return nil, gerror.Wrap(err, "手动循环批次入队失败")
 	}
+	g.Log().Info(ctx, "AI Ops 触发频道循环上架", g.Map{
+		"tenantId": tenantId, "channelId": channel.Id, "runId": runId,
+		"totalCount": totalCount, "status": cycleRunStatusPending,
+	})
 	return &sysin.ChannelFullPushModel{ChannelId: channel.Id, Queued: 0, BatchNo: fmt.Sprintf("cycle_batch:%d", runId), Status: cycleRunStatusPending}, nil
 }

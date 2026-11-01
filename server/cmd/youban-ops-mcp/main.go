@@ -167,11 +167,11 @@ func main() {
 		Annotations: &mcp.ToolAnnotations{Title: "Repair profile media", ReadOnlyHint: readOnly, DestructiveHint: &destructive, IdempotentHint: true},
 	}, client.applyRepair)
 	mcp.AddTool(server, &mcp.Tool{
-		Name: "channel_full_push", Description: "Trigger a bounded channel full-push batch through the protected AI ops API",
+		Name: "channel_full_push", Description: "Trigger one idempotent channel full-push batch. Check the returned existingQueue and batchNo before any follow-up call; never repeat while a batch is pending or running.",
 		Annotations: &mcp.ToolAnnotations{Title: "Trigger channel full push", ReadOnlyHint: readOnly, DestructiveHint: &destructive, IdempotentHint: true},
 	}, client.channelFullPush)
 	mcp.AddTool(server, &mcp.Tool{
-		Name: "channel_cycle_run", Description: "Create and enqueue a new channel cycle run through the protected AI ops API",
+		Name: "channel_cycle_run", Description: "Create one channel cycle run. This is non-idempotent: call once, record runId/batchNo, and poll status instead of retrying.",
 		Annotations: &mcp.ToolAnnotations{Title: "Trigger channel cycle run", ReadOnlyHint: readOnly, DestructiveHint: &destructive, IdempotentHint: false},
 	}, client.channelCycleRun)
 	if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {

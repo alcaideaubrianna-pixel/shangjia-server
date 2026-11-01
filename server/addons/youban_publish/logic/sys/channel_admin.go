@@ -789,9 +789,17 @@ func (s *sSysPublish) AIOpsChannelFullPush(ctx context.Context, tenantId, channe
 	if err != nil {
 		return nil, err
 	}
+	existingQueue, err := s.channelClearQueueCount(ctx, tenantId, channel.Id)
+	if err != nil {
+		return nil, err
+	}
 	batch, err := s.createFullPushBatch(ctx, tenantId, channel.Id, 0)
 	if err != nil {
 		return nil, err
 	}
-	return &sysin.ChannelFullPushModel{ChannelId: channel.Id, Queued: batch.TotalCount, BatchNo: batch.BatchNo, Status: batch.Status}, nil
+	g.Log().Info(ctx, "AI Ops 触发频道全量推送", g.Map{
+		"tenantId": tenantId, "channelId": channel.Id, "batchNo": batch.BatchNo,
+		"totalCount": batch.TotalCount, "existingQueue": existingQueue, "status": batch.Status,
+	})
+	return &sysin.ChannelFullPushModel{ChannelId: channel.Id, Queued: batch.TotalCount, ExistingQueue: existingQueue, BatchNo: batch.BatchNo, Status: batch.Status}, nil
 }
