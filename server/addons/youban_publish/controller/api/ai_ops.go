@@ -95,3 +95,19 @@ func (c *cAIOps) RepairStatus(ctx context.Context, req *aiops.RepairStatusReq) (
 	}
 	return &aiops.RepairStatusRes{AIOpsRepairPlanStatusModel: result}, nil
 }
+
+func (c *cAIOps) ChannelFullPush(ctx context.Context, req *aiops.ChannelPushReq) (*aiops.ChannelRunRes, error) {
+	result, err := service.SysPublish().AIOpsChannelFullPush(ctx, req.TenantId, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	return &aiops.ChannelRunRes{ChannelFullPushModel: result}, nil
+}
+
+func (c *cAIOps) ChannelCycleRun(ctx context.Context, req *aiops.ChannelCycleRunReq) (*aiops.ChannelRunRes, error) {
+	result, err := service.SysPublish().AIOpsChannelCycleRun(ctx, req.TenantId, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	return &aiops.ChannelRunRes{ChannelFullPushModel: result}, nil
+}

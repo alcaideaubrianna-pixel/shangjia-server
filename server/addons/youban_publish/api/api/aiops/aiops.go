@@ -102,3 +102,15 @@ type RepairStatusReq struct {
 type RepairStatusRes struct {
 	*sysin.AIOpsRepairPlanStatusModel
 }
+
+type ChannelPushReq struct {
+	g.Meta    `path:"/channel/full-push" method:"post" tags:"AI运维" summary:"触发频道全量推送"`
+	TenantId  int64 `json:"tenantId" v:"required|min:1#租户ID不能为空|租户ID不能为空"`
+	ChannelId int64 `json:"channelId" v:"required|min:1#频道ID不能为空|频道ID不能为空"`
+}
+type ChannelCycleRunReq struct {
+	g.Meta    `path:"/channel/cycle-run" method:"post" tags:"AI运维" summary:"触发频道循环上架"`
+	TenantId  int64 `json:"tenantId" v:"required|min:1#租户ID不能为空|租户ID不能为空"`
+	ChannelId int64 `json:"channelId" v:"required|min:1#频道ID不能为空|频道ID不能为空"`
+}
+type ChannelRunRes struct{ *sysin.ChannelFullPushModel }

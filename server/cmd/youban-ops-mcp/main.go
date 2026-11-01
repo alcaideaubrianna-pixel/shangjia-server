@@ -75,6 +75,11 @@ type profileMediaInput struct {
 	ProfileIDs []int64 `json:"profileIds" jsonschema:"One to twenty profile IDs"`
 }
 
+type channelRunInput struct {
+	TenantID  int64 `json:"tenantId" jsonschema:"Tenant ID"`
+	ChannelID int64 `json:"channelId" jsonschema:"Channel ID"`
+}
+
 type telegramOfflineBatchInput struct {
 	ProfileIDs []int64  `json:"profileIds,omitempty" jsonschema:"Profile IDs; processed in batches of 100"`
 	ProfileNos []string `json:"profileNos,omitempty" jsonschema:"Profile numbers; processed in batches of 100"`
@@ -161,9 +166,27 @@ func main() {
 		Name: "profile_media_apply", Description: "Rebuild recoverable media for explicitly selected profiles",
 		Annotations: &mcp.ToolAnnotations{Title: "Repair profile media", ReadOnlyHint: readOnly, DestructiveHint: &destructive, IdempotentHint: true},
 	}, client.applyRepair)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "channel_full_push", Description: "Trigger a bounded channel full-push batch through the protected AI ops API",
+		Annotations: &mcp.ToolAnnotations{Title: "Trigger channel full push", ReadOnlyHint: readOnly, DestructiveHint: &destructive, IdempotentHint: true},
+	}, client.channelFullPush)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "channel_cycle_run", Description: "Create and enqueue a new channel cycle run through the protected AI ops API",
+		Annotations: &mcp.ToolAnnotations{Title: "Trigger channel cycle run", ReadOnlyHint: readOnly, DestructiveHint: &destructive, IdempotentHint: false},
+	}, client.channelCycleRun)
 	if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func (c *apiClient) channelFullPush(ctx context.Context, _ *mcp.CallToolRequest, input channelRunInput) (*mcp.CallToolResult, structuredOutput, error) {
+	data, err := c.call(ctx, http.MethodPost, "/api/youban_publish/ai-ops/channel/full-push", input)
+	return nil, structuredOutput{Data: data}, err
+}
+
+func (c *apiClient) channelCycleRun(ctx context.Context, _ *mcp.CallToolRequest, input channelRunInput) (*mcp.CallToolResult, structuredOutput, error) {
+	data, err := c.call(ctx, http.MethodPost, "/api/youban_publish/ai-ops/channel/cycle-run", input)
+	return nil, structuredOutput{Data: data}, err
 }
 
 func (c *apiClient) diagnoseMessage(ctx context.Context, _ *mcp.CallToolRequest, input messageContextInput) (*mcp.CallToolResult, structuredOutput, error) {

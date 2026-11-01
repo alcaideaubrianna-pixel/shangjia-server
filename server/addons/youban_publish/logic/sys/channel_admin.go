@@ -780,3 +780,18 @@ func (s *sSysPublish) ensureBotsBelongTenant(ctx context.Context, ids []int64, t
 	}
 	return nil
 }
+
+func (s *sSysPublish) AIOpsChannelFullPush(ctx context.Context, tenantId, channelId int64) (*sysin.ChannelFullPushModel, error) {
+	if tenantId <= 0 || channelId <= 0 {
+		return nil, gerror.New("租户或频道不能为空")
+	}
+	channel, err := s.fullPushChannel(ctx, tenantId, channelId)
+	if err != nil {
+		return nil, err
+	}
+	batch, err := s.createFullPushBatch(ctx, tenantId, channel.Id, 0)
+	if err != nil {
+		return nil, err
+	}
+	return &sysin.ChannelFullPushModel{ChannelId: channel.Id, Queued: batch.TotalCount, BatchNo: batch.BatchNo, Status: batch.Status}, nil
+}

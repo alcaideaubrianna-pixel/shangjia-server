@@ -104,6 +104,8 @@ type ISysPublish interface {
 	AIOpsCreateRepairPlan(ctx context.Context, in *sysin.AIOpsRepairPlanInp) (*sysin.AIOpsRepairPlanModel, error)
 	AIOpsApplyRepairPlan(ctx context.Context, in *sysin.AIOpsRepairApplyInp) (*sysin.AIOpsRepairApplyModel, error)
 	AIOpsRepairPlanStatus(ctx context.Context, in *sysin.AIOpsRepairPlanStatusInp) (*sysin.AIOpsRepairPlanStatusModel, error)
+	AIOpsChannelFullPush(ctx context.Context, tenantId, channelId int64) (*sysin.ChannelFullPushModel, error)
+	AIOpsChannelCycleRun(ctx context.Context, tenantId, channelId int64) (*sysin.ChannelFullPushModel, error)
 	ServerMediaList(ctx context.Context, in *sysin.MediaListInp) (list []*sysin.MediaModel, err error)
 	ServerMediaDelete(ctx context.Context, in *sysin.MediaDeleteInp) (err error)
 	RelayOwnedBots(ctx context.Context, tenantID, accountID, botID int64, lock bool) ([]*sysin.RelayOwnedBotModel, error)
