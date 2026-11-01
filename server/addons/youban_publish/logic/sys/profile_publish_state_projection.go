@@ -237,14 +237,29 @@ func (s *sSysPublish) recoverProfilePublishOperationState(ctx context.Context, s
 			"SUM(CASE WHEN status IN ('pending','failed_retry','unknown') THEN 1 ELSE 0 END) AS pending," +
 			"SUM(CASE WHEN status='sent' THEN 1 ELSE 0 END) AS sent," +
 			"SUM(CASE WHEN status IN ('sent','superseded') THEN 1 ELSE 0 END) AS completed," +
-			"MAX(CASE WHEN status='failed_retry' THEN updated_at ELSE NULL END) AS last_failed_retry_at").
+			"MIN(created_at) AS first_job_at").
 		One()
 	if err != nil {
 		return gerror.Wrap(err, "统计资料上架任务状态失败")
 	}
 	total := row["total"].Int()
-	lastRetryAt := row["last_failed_retry_at"].GTime()
-	staleRetry := lastRetryAt != nil && lastRetryAt.Before(gtime.Now().Add(-15*time.Minute))
+	firstRecoveryAt := (*gtime.Time)(nil)
+	var recoveryRow gdb.Record
+	recoveryRow, err = g.DB().Model(publishTgJobLogTable+" l").Safe().Ctx(ctx).
+		InnerJoin(publishTgJobTable+" j", "j.id=l.job_id").
+		Fields("MIN(l.created_at) AS first_recovery_at").
+		Where("j.profile_id", job.ProfileId).
+		Where("j.operation_no", job.OperationNo).
+		Where("l.action", "recovery").
+		Where("l.status", "queued").One()
+	if err != nil {
+		return gerror.Wrap(err, "统计资料上架恢复时间失败")
+	}
+	firstRecoveryAt = recoveryRow["first_recovery_at"].GTime()
+	if firstRecoveryAt == nil {
+		firstRecoveryAt = row["first_job_at"].GTime()
+	}
+	staleRetry := firstRecoveryAt != nil && firstRecoveryAt.Before(gtime.Now().Add(-15*time.Minute))
 	switch {
 	case total == 0 || row["failed"].Int() > 0:
 		return s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusFailed)
