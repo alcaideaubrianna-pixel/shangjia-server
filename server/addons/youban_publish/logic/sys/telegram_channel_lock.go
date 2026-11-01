@@ -59,8 +59,9 @@ func telegramCompletedLeaseRecoverable(owner telegramPublishLeaseOwner, job tele
 		job.Id == owner.JobId && job.TenantId == owner.TenantId &&
 		normalizeTelegramChannelChatID(job.TargetChatId) == normalizeTelegramChannelChatID(chatId) &&
 		!isDownTelegramOperationNo(job.OperationNo) && !isMessagePushOperationNo(job.OperationNo) &&
-		job.Status == telegramJobStatusSent &&
-		(job.SendPhase == telegramSendPhaseVerifyConfirmed || job.SendPhase == telegramSendPhaseCompletedNoVerify)
+		((job.Status == telegramJobStatusSent &&
+			(job.SendPhase == telegramSendPhaseVerifyConfirmed || job.SendPhase == telegramSendPhaseCompletedNoVerify)) ||
+			job.Status == telegramJobStatusRetryWait || job.Status == telegramJobStatusFailed || job.Status == telegramJobStatusSuperseded)
 }
 
 func (s *sSysPublish) tryTelegramPublishChannelLease(ctx context.Context, job telegramJobRecord) (telegramChannelLease, bool, error) {
