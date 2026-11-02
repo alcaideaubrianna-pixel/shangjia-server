@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ import (
 	pdo "hotgo/addons/youban_publish/internal/model/do"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/cache"
+	hglock "hotgo/internal/library/hgrds/lock"
 	"hotgo/internal/library/tasklog"
 )
 
@@ -55,7 +57,7 @@ func releaseCollectMediaRecovery(ctx context.Context, eventID int64) {
 
 func (s *sSysPublish) runCollectRecovery(ctx context.Context) {
 	time.Sleep(12 * time.Second)
-	s.recoverCollectOnce(ctx)
+	s.runCollectRecoveryCycle(ctx)
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	for {
@@ -63,9 +65,24 @@ func (s *sSysPublish) runCollectRecovery(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.recoverCollectOnce(ctx)
+			s.runCollectRecoveryCycle(ctx)
 		}
 	}
+}
+
+func (s *sSysPublish) runCollectRecoveryCycle(ctx context.Context) {
+	lockCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	distributedLock := hglock.NewConfig(2*time.Minute, 100*time.Millisecond).
+		Mutex("youban_publish:collect:recovery")
+	if err := distributedLock.TryLock(lockCtx); err != nil {
+		if !errors.Is(err, hglock.ErrLockFailed) && ctx.Err() == nil {
+			g.Log().Warningf(ctx, "获取采集恢复任务锁失败：%+v", err)
+		}
+		return
+	}
+	defer func() { _ = distributedLock.Unlock(context.Background()) }()
+	s.recoverCollectOnce(ctx)
 }
 
 func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {

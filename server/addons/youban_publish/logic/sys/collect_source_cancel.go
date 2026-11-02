@@ -172,6 +172,8 @@ func clearCollectSourceTasks(inspector *asynq.Inspector, sourceId int64) error {
 		return nil
 	}
 	type taskListFunc func(string, ...asynq.ListOption) ([]*asynq.TaskInfo, error)
+	// Archived tasks are terminal and cannot execute again. Scanning the full
+	// archive here blocks Redis without changing source cancellation behavior.
 	lists := []struct {
 		active bool
 		list   taskListFunc
@@ -179,7 +181,6 @@ func clearCollectSourceTasks(inspector *asynq.Inspector, sourceId int64) error {
 		{list: inspector.ListPendingTasks},
 		{list: inspector.ListScheduledTasks},
 		{list: inspector.ListRetryTasks},
-		{list: inspector.ListArchivedTasks},
 		{active: true, list: inspector.ListActiveTasks},
 	}
 	queues := []struct {
@@ -276,6 +277,8 @@ func clearCollectHistoryAsynqTasks(inspector *asynq.Inspector, taskIDs []int64) 
 		}
 	}
 	type taskListFunc func(string, ...asynq.ListOption) ([]*asynq.TaskInfo, error)
+	// Leave terminal archived history to Asynq retention instead of scanning a
+	// potentially large queue synchronously during source cancellation.
 	lists := []struct {
 		active bool
 		list   taskListFunc
@@ -283,7 +286,6 @@ func clearCollectHistoryAsynqTasks(inspector *asynq.Inspector, taskIDs []int64) 
 		{list: inspector.ListPendingTasks},
 		{list: inspector.ListScheduledTasks},
 		{list: inspector.ListRetryTasks},
-		{list: inspector.ListArchivedTasks},
 		{active: true, list: inspector.ListActiveTasks},
 	}
 	for _, item := range lists {
