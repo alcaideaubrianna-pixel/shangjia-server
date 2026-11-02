@@ -109,13 +109,25 @@ func collectProcessQueueNames() []string {
 }
 
 func collectProcessWorkerQueues() map[string]int {
-	queues := make(map[string]int, collectProcessQueueShards+2)
+	queues := make(map[string]int, collectProcessQueueShards+3)
 	for _, queue := range collectProcessQueueNames() {
 		queues[queue] = 1
 	}
-	queues[tgQueueNameBackground] = 1
 	queues[tgQueueNameCollectProcessRealtime] = 1
 	queues[tgQueueNameCollectProcessRecoveryV2] = 4
+	return queues
+}
+
+func backgroundWorkerQueues(collectorWorker, backgroundWorker bool) map[string]int {
+	queues := make(map[string]int)
+	if collectorWorker {
+		for queue, weight := range collectProcessWorkerQueues() {
+			queues[queue] = weight
+		}
+	}
+	if backgroundWorker {
+		queues[tgQueueNameBackground] = 1
+	}
 	return queues
 }
 

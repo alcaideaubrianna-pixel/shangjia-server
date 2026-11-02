@@ -231,6 +231,16 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_process_outbox" (
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_collect_process_outbox_event" ON "hg_youban_publish_collect_process_outbox" ("event_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_process_outbox_due" ON "hg_youban_publish_collect_process_outbox" ("available_at", "id") WHERE "status" = 'pending';
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_process_outbox_lease" ON "hg_youban_publish_collect_process_outbox" ("lease_expires_at", "id") WHERE "status" = 'processing';
+ALTER TABLE "hg_youban_publish_collect_process_outbox" ADD COLUMN IF NOT EXISTS "worker_role" varchar(64) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_collect_process_outbox" ADD COLUMN IF NOT EXISTS "worker_instance_id" varchar(128) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_collect_process_outbox" ADD COLUMN IF NOT EXISTS "worker_revision" varchar(128) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_collect_process_outbox" ADD COLUMN IF NOT EXISTS "worker_image_digest" varchar(255) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_collect_process_outbox" ADD COLUMN IF NOT EXISTS "worker_started_at" timestamp NULL;
+ALTER TABLE "hg_youban_publish_collect_process_outbox" ADD COLUMN IF NOT EXISTS "worker_finished_at" timestamp NULL;
+ALTER TABLE "hg_youban_publish_collect_dispatch" ADD COLUMN IF NOT EXISTS "worker_role" varchar(64) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_collect_dispatch" ADD COLUMN IF NOT EXISTS "worker_instance_id" varchar(128) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_collect_dispatch" ADD COLUMN IF NOT EXISTS "worker_revision" varchar(128) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_collect_dispatch" ADD COLUMN IF NOT EXISTS "worker_image_digest" varchar(255) NOT NULL DEFAULT '';
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_ai_ops_repair_plan" (
   "id" BIGSERIAL PRIMARY KEY, "plan_id" varchar(64) NOT NULL, "action" varchar(64) NOT NULL,
   "payload_json" text NOT NULL, "status" varchar(16) NOT NULL DEFAULT 'pending', "candidate_count" integer NOT NULL DEFAULT 0,

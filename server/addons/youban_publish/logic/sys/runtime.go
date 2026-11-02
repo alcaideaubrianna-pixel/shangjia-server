@@ -55,8 +55,8 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 	if len(config.Roles) == 0 {
 		g.Log().Warning(ctx, "上架插件未识别到有效运行角色，当前实例不会启动后台运行组件")
 	}
-	g.Log().Infof(ctx, "启动上架插件运行组件 roles:%v account:%t scheduler:%t pushWorker:%t mediaWorker:%t backgroundWorker:%t",
-		config.Roles, config.Account, config.Scheduler, config.PushWorker, config.MediaWorker, config.BackgroundWorker)
+	g.Log().Infof(ctx, "启动上架插件运行组件 roles:%v account:%t scheduler:%t pushWorker:%t mediaWorker:%t backgroundWorker:%t collectorWorker:%t",
+		config.Roles, config.Account, config.Scheduler, config.PushWorker, config.MediaWorker, config.BackgroundWorker, config.CollectorWorker)
 	startRuntimeResourceObserver(ctx, config)
 	observePublishRuntimeHeartbeat(ctx, config)
 	heartbeatTicker := time.NewTicker(30 * time.Second)
@@ -75,12 +75,12 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 		s.startTelegramMediaWorker(ctx)
 	}
 	if config.BackgroundWorker {
-		s.startTelegramBackgroundWorker(ctx)
+		s.startTelegramBackgroundWorker(ctx, config.CollectorWorker, config.BackgroundQueue)
 		// Collect processing has two halves: the background worker consumes
 		// queue tasks, while the recovery loop dispatches durable process_outbox
 		// rows into that queue. Keep the dispatcher available with the consumer
 		// when Scheduler is deployed separately or temporarily unavailable.
-		if !config.Scheduler {
+		if config.CollectorWorker && !config.Scheduler {
 			go s.runCollectRecovery(ctx)
 		}
 	}

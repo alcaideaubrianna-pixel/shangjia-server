@@ -60,8 +60,17 @@ func TestCollectProcessQueuesAreShardedAndObservable(t *testing.T) {
 			t.Fatalf("process queue %s must be observable", queue)
 		}
 	}
-	if collectProcessWorkerQueues()[tgQueueNameBackground] != 1 {
-		t.Fatal("collector worker must continue consuming legacy background tasks")
+	if collectProcessWorkerQueues()[tgQueueNameBackground] != 0 {
+		t.Fatal("collector worker must not compete for ordinary background tasks")
+	}
+	if backgroundWorkerQueues(false, true)[tgQueueNameBackground] != 1 || len(backgroundWorkerQueues(false, true)) != 1 {
+		t.Fatal("background worker must consume only the ordinary background queue")
+	}
+	if backgroundWorkerQueues(true, false)[tgQueueNameCollectProcessRealtime] != 1 || backgroundWorkerQueues(true, false)[tgQueueNameBackground] != 0 {
+		t.Fatal("collector worker must consume collect queues without the ordinary background queue")
+	}
+	if backgroundWorkerQueues(true, true)[tgQueueNameCollectProcessRealtime] != 1 || backgroundWorkerQueues(true, true)[tgQueueNameBackground] != 1 {
+		t.Fatal("all-role development runtime must retain both queue families")
 	}
 }
 

@@ -905,6 +905,7 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 		return s.resumeExistingCollectDispatch(ctx, existingDispatch, event, content, rule, decision.Text)
 	}
 	now := gtime.Now()
+	workerIdentity := currentCollectWorkerIdentity(ctx)
 	channelIds := collectRuleTargetChannelIds(rule)
 	if len(channelIds) == 0 {
 		return false, "", gerror.New("采集规则未配置目标频道")
@@ -962,6 +963,8 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 			"source_chat_id_snapshot":    event["source_chat_id"].String(),
 			"source_message_id_snapshot": event["source_message_id"].Int64(),
 			"match_json":                 decision.MatchJSON, "status": sysin.CollectDispatchStatusPending,
+			"worker_role": workerIdentity.Role, "worker_instance_id": workerIdentity.InstanceID,
+			"worker_revision": workerIdentity.Revision, "worker_image_digest": workerIdentity.ImageDigest,
 			"created_at": now, "updated_at": now,
 		}).InsertAndGetId()
 		if txErr != nil {

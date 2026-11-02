@@ -16,7 +16,14 @@ func TestParsePublishRuntimeRoles(t *testing.T) {
 			values: nil,
 			want: publishRuntimeConfig{
 				Roles: []string{publishRuntimeRoleAll}, Account: true, Scheduler: true,
-				PushWorker: true, MediaWorker: true, BackgroundWorker: true,
+				PushWorker: true, MediaWorker: true, BackgroundWorker: true, CollectorWorker: true, BackgroundQueue: true,
+			},
+		},
+		{
+			name:   "collector only",
+			values: []string{"collector-worker"},
+			want: publishRuntimeConfig{
+				Roles: []string{"collector-worker"}, BackgroundWorker: true, CollectorWorker: true,
 			},
 		},
 		{
@@ -29,14 +36,14 @@ func TestParsePublishRuntimeRoles(t *testing.T) {
 			values: []string{"account", "push-worker,background-worker"},
 			want: publishRuntimeConfig{
 				Roles:   []string{publishRuntimeRoleAccount, publishRuntimeRoleBackgroundWorker, publishRuntimeRolePushWorker},
-				Account: true, PushWorker: true, BackgroundWorker: true,
+				Account: true, PushWorker: true, BackgroundWorker: true, BackgroundQueue: true,
 			},
 		},
 		{
 			name:   "worker preset",
 			values: []string{"worker"},
 			want: publishRuntimeConfig{
-				Roles: []string{publishRuntimeRoleWorker}, PushWorker: true, MediaWorker: true, BackgroundWorker: true,
+				Roles: []string{publishRuntimeRoleWorker}, PushWorker: true, MediaWorker: true, BackgroundWorker: true, BackgroundQueue: true,
 			},
 		},
 		{
@@ -44,7 +51,7 @@ func TestParsePublishRuntimeRoles(t *testing.T) {
 			values: []string{"web", "all"},
 			want: publishRuntimeConfig{
 				Roles: []string{publishRuntimeRoleAll}, Account: true, Scheduler: true,
-				PushWorker: true, MediaWorker: true, BackgroundWorker: true,
+				PushWorker: true, MediaWorker: true, BackgroundWorker: true, CollectorWorker: true, BackgroundQueue: true,
 			},
 		},
 		{

@@ -39,6 +39,8 @@ repo_id=$(aliyun cr ListRepository --RegionId "$REGION_ID" --InstanceId "$ACR_IN
 [[ -n "$repo_id" ]] || { echo "ACR repository not found: $IMAGE_REPOSITORY" >&2; exit 1; }
 tag_exists=$(aliyun cr ListRepoTag --RegionId "$REGION_ID" --InstanceId "$ACR_INSTANCE_ID" --RepoId "$repo_id" --PageSize 100 | jq -r --arg tag "$TAG" '[.Images[]? | select(.Tag == $tag)] | length')
 [[ "$tag_exists" == "1" ]] || { echo "ACR image tag not found: $IMAGE_URL" >&2; exit 1; }
+IMAGE_DIGEST=$(aliyun cr GetRepoTag --RegionId "$REGION_ID" --InstanceId "$ACR_INSTANCE_ID" --RepoId "$repo_id" --Tag "$TAG" | jq -r '.Digest // empty')
+[[ -n "$IMAGE_DIGEST" ]] || { echo "ACR image digest not found: $IMAGE_URL" >&2; exit 1; }
 
 declare -A APP_IDS=(
   [web]=b4565e3c-6d08-4297-bf8b-037884d54ee4
@@ -100,10 +102,12 @@ for role in "${ROLES[@]}"; do
     sleep 5
   fi
   cfg=$(aliyun sae DescribeApplicationConfig --RegionId "$REGION_ID" --AppId "$app_id")
-  envs=$(jq -r '.Data.Envs // "[]"' <<<"$cfg" | jq --arg fallback "$MEDIA_FALLBACK_CDN_URL" --arg permanent "$MEDIA_PERMANENT_FAILURE_ENABLED" --arg queue "$PUBLISH_QUEUE_CONCURRENCY" --arg bulk "$PUBLISH_BULK_CONCURRENCY" '
+  envs=$(jq -r '.Data.Envs // "[]"' <<<"$cfg" | jq --arg fallback "$MEDIA_FALLBACK_CDN_URL" --arg permanent "$MEDIA_PERMANENT_FAILURE_ENABLED" --arg queue "$PUBLISH_QUEUE_CONCURRENCY" --arg bulk "$PUBLISH_BULK_CONCURRENCY" --arg image "$IMAGE_URL" --arg digest "$IMAGE_DIGEST" '
     def upsert($name;$value): if any(.[]; .name == $name) then map(if .name == $name then .value = $value else . end) else . + [{"name":$name,"value":$value}] end;
     upsert("YOUBAN_PUBLISH_MEDIA_CACHE_FALLBACK_CDN_BASE_URL";$fallback)
     | upsert("YOUBAN_PUBLISH_MEDIA_PERMANENT_FAILURE_ENABLED";$permanent)
+    | upsert("APP_IMAGE_REFERENCE";$image)
+    | upsert("APP_IMAGE_DIGEST";$digest)
     | if $ENV_ROLE == "publish" then upsert("YOUBAN_PUBLISH_QUEUE_CONCURRENCY";$queue) | upsert("YOUBAN_PUBLISH_BULK_CONCURRENCY";$bulk) | upsert("YOUBAN_FACEPP_CONCURRENCY";$FACEPP_CONCURRENCY) | upsert("YOUBAN_ALIYUN_MATTING_CONCURRENCY";$ALIYUN_MATTING_CONCURRENCY) | upsert("YOUBAN_TENCENT_MATTING_CONCURRENCY";$TENCENT_MATTING_CONCURRENCY) | upsert("YOUBAN_FAPIHUB_CONCURRENCY";$FAPIHUB_CONCURRENCY) | upsert("YOUBAN_FAPIHUB_RATE_LIMIT_PER_MINUTE";$FAPIHUB_RATE_LIMIT_PER_MINUTE) | upsert("YOUBAN_ANTISCAN_FALLBACK_PROVIDER";$ANTISCAN_FALLBACK_PROVIDER) else . end
   ' --arg ENV_ROLE "$role" --arg FACEPP_CONCURRENCY "$FACEPP_CONCURRENCY" --arg ALIYUN_MATTING_CONCURRENCY "$ALIYUN_MATTING_CONCURRENCY" --arg TENCENT_MATTING_CONCURRENCY "$TENCENT_MATTING_CONCURRENCY" --arg FAPIHUB_CONCURRENCY "$FAPIHUB_CONCURRENCY" --arg FAPIHUB_RATE_LIMIT_PER_MINUTE "$FAPIHUB_RATE_LIMIT_PER_MINUTE" --arg ANTISCAN_FALLBACK_PROVIDER "$ANTISCAN_FALLBACK_PROVIDER" | jq -c '.')
   replicas=1

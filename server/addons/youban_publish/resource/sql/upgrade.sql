@@ -1018,3 +1018,13 @@ INNER JOIN `hg_youban_publish_collect_source_rule` keep
 
 ALTER TABLE `hg_youban_publish_collect_source_rule`
   ADD UNIQUE KEY `uk_ybp_collect_source_single_rule` (`source_id`);
+ALTER TABLE `hg_youban_publish_collect_process_outbox` ADD COLUMN IF NOT EXISTS `worker_role` varchar(64) NOT NULL DEFAULT '';
+ALTER TABLE `hg_youban_publish_collect_process_outbox` ADD COLUMN IF NOT EXISTS `worker_instance_id` varchar(128) NOT NULL DEFAULT '';
+ALTER TABLE `hg_youban_publish_collect_process_outbox` ADD COLUMN IF NOT EXISTS `worker_revision` varchar(128) NOT NULL DEFAULT '';
+ALTER TABLE `hg_youban_publish_collect_process_outbox` ADD COLUMN IF NOT EXISTS `worker_image_digest` varchar(255) NOT NULL DEFAULT '';
+ALTER TABLE `hg_youban_publish_collect_process_outbox` ADD COLUMN IF NOT EXISTS `worker_started_at` datetime NULL;
+ALTER TABLE `hg_youban_publish_collect_process_outbox` ADD COLUMN IF NOT EXISTS `worker_finished_at` datetime NULL;
+ALTER TABLE `hg_youban_publish_collect_dispatch` ADD COLUMN IF NOT EXISTS `worker_role` varchar(64) NOT NULL DEFAULT '';
+ALTER TABLE `hg_youban_publish_collect_dispatch` ADD COLUMN IF NOT EXISTS `worker_instance_id` varchar(128) NOT NULL DEFAULT '';
+ALTER TABLE `hg_youban_publish_collect_dispatch` ADD COLUMN IF NOT EXISTS `worker_revision` varchar(128) NOT NULL DEFAULT '';
+ALTER TABLE `hg_youban_publish_collect_dispatch` ADD COLUMN IF NOT EXISTS `worker_image_digest` varchar(255) NOT NULL DEFAULT '';

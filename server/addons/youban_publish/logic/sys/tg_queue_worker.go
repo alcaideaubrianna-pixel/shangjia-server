@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/hibiken/asynq"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
@@ -76,7 +77,7 @@ func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
 	}()
 }
 
-func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
+func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context, collectorWorker, backgroundWorker bool) {
 	s.tgQueueMu.Lock()
 	if s.autoDeleteQueueServer != nil || s.autoDeleteBackfillServer != nil || s.attemptTimeoutServer != nil || s.collectRealtimeServer != nil || s.backgroundQueueServer != nil || s.materialImportPullServer != nil || s.cycleQueueServer != nil {
 		s.tgQueueMu.Unlock()
@@ -97,14 +98,18 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 		Queues:         map[string]int{tgQueueNameAttemptTimeout: 1},
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
-	collectRealtimeServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
-		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.collectRealtimeConcurrency", 16).Int(),
-		Queues:         map[string]int{tgQueueNameCollectProcessRealtimeV2: 1},
-		RetryDelayFunc: telegramQueueRetryDelay,
-	})
+	var collectRealtimeServer *asynq.Server
+	workerQueues := backgroundWorkerQueues(collectorWorker, backgroundWorker)
+	if collectorWorker {
+		collectRealtimeServer = asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
+			Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.collectRealtimeConcurrency", 16).Int(),
+			Queues:         map[string]int{tgQueueNameCollectProcessRealtimeV2: 1},
+			RetryDelayFunc: telegramQueueRetryDelay,
+		})
+	}
 	server := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
 		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.backgroundConcurrency", 4).Int(),
-		Queues:         collectProcessWorkerQueues(),
+		Queues:         workerQueues,
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
 	materialImportPullServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
@@ -138,7 +143,7 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
 	relayServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{Concurrency: g.Cfg().MustGet(ctx, "youbanPublish.queue.relayConcurrency", 4).Int(), Queues: map[string]int{tgQueueNameRelay: 1}, RetryDelayFunc: telegramQueueRetryDelay})
-	g.Log().Infof(ctx, "启动上架插件后台队列，自动删除独立并发：%d", telegramAutoDeleteConcurrency(ctx))
+	g.Log().Infof(ctx, "启动上架插件后台队列，自动删除独立并发：%d collectorWorker:%t backgroundWorker:%t queues:%v", telegramAutoDeleteConcurrency(ctx), collectorWorker, backgroundWorker, workerQueues)
 	s.autoDeleteQueueServer = autoDeleteServer
 	s.autoDeleteBackfillServer = autoDeleteBackfillServer
 	s.attemptTimeoutServer = attemptTimeoutServer
@@ -164,7 +169,9 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	backgroundMux.HandleFunc(tgTaskTypeCycleRun, s.handleCycleRunTask)
 	backgroundMux.HandleFunc(tgTaskTypeCycleReschedule, s.handleCycleRescheduleTask)
 	backgroundMux.HandleFunc(tgTaskTypeCycleRefresh, s.handleCycleRefreshTask)
-	backgroundMux.HandleFunc(tgTaskTypeCollectProcess, s.handleCollectProcessTask)
+	if collectorWorker {
+		backgroundMux.HandleFunc(tgTaskTypeCollectProcess, s.handleCollectProcessTask)
+	}
 	backgroundMux.HandleFunc(tgTaskTypeCollectTrigger, s.handleCollectTriggerTask)
 	backgroundMux.HandleFunc(tgTaskTypeChannelMemberSync, s.handleChannelMemberSyncTask)
 	backgroundMux.HandleFunc(tgTaskTypeCollectSourceDown, s.handleCollectSourceDownTask)
@@ -195,7 +202,9 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	attemptTimeoutMux := asynq.NewServeMux()
 	attemptTimeoutMux.HandleFunc(tgTaskTypeAttemptTimeout, s.handleTelegramAttemptTimeoutTask)
 	collectRealtimeMux := asynq.NewServeMux()
-	collectRealtimeMux.HandleFunc(tgTaskTypeCollectProcess, s.handleCollectProcessTask)
+	if collectorWorker {
+		collectRealtimeMux.HandleFunc(tgTaskTypeCollectProcess, s.handleCollectProcessTask)
+	}
 	profileMux := asynq.NewServeMux()
 	profileMux.HandleFunc(tgTaskTypeProfileMaintenance, s.handleProfileMaintenanceTask)
 	profileMux.HandleFunc(tgTaskTypeProfileSubmit, s.handleProfileSubmitTask)
@@ -217,11 +226,13 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 			g.Log().Errorf(ctx, "启动TG Attempt超时队列失败：%+v", err)
 		}
 	}()
-	go func() {
-		if err := collectRealtimeServer.Run(collectRealtimeMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
-			g.Log().Errorf(ctx, "启动实时采集处理队列失败：%+v", err)
-		}
-	}()
+	if collectRealtimeServer != nil {
+		go func() {
+			if err := collectRealtimeServer.Run(collectRealtimeMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
+				g.Log().Errorf(ctx, "启动实时采集处理队列失败：%+v", err)
+			}
+		}()
+	}
 	go func() {
 		if err := server.Run(backgroundMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
 			g.Log().Errorf(ctx, "启动上架插件后台队列失败：%+v", err)
@@ -587,6 +598,20 @@ func (s *sSysPublish) handleCollectProcessTask(ctx context.Context, task *asynq.
 		return err
 	}
 	ctx = s.collectProgressContext(ctx, payload.EventId, 0)
+	identity := currentCollectWorkerIdentity(ctx)
+	g.Log().Info(ctx, "采集处理任务开始", g.Map{
+		"eventId": payload.EventId, "tenantId": payload.TenantId, "accountId": payload.AccountId,
+		"sourceId": payload.SourceId, "outboxOwner": payload.OutboxOwner, "recovery": payload.Recovery,
+		"workerRole": identity.Role, "workerInstanceId": identity.InstanceID,
+		"workerRevision": identity.Revision, "workerImageDigest": identity.ImageDigest,
+	})
+	if payload.EventId > 0 {
+		_, _ = g.DB().Model(collectProcessOutboxTable).Ctx(ctx).Where("event_id", payload.EventId).Data(g.Map{
+			"worker_role": identity.Role, "worker_instance_id": identity.InstanceID,
+			"worker_revision": identity.Revision, "worker_image_digest": identity.ImageDigest,
+			"worker_started_at": gtime.Now(), "updated_at": gtime.Now(),
+		}).Update()
+	}
 	unlock, lockErr := lockCollectProcessEvent(ctx, payload)
 	if lockErr != nil {
 		reportCollectProgress(ctx, "waiting_lock", "已有工作线程持有事件处理锁，等待重试")
@@ -612,6 +637,20 @@ func (s *sSysPublish) handleCollectProcessTask(ctx context.Context, task *asynq.
 		reportCollectProgress(ctx, "failed", err.Error())
 	}
 	if err != nil || !pending {
+		errorMessage := ""
+		if err != nil {
+			errorMessage = err.Error()
+		}
+		g.Log().Info(ctx, "采集处理任务结束", g.Map{
+			"eventId": payload.EventId, "pending": pending, "removeSchedule": removeSchedule,
+			"error": errorMessage, "workerRole": identity.Role, "workerInstanceId": identity.InstanceID,
+			"workerRevision": identity.Revision, "workerImageDigest": identity.ImageDigest,
+		})
+		if err != nil && payload.EventId > 0 {
+			_, _ = g.DB().Model(collectProcessOutboxTable).Ctx(ctx).Where("event_id", payload.EventId).Data(g.Map{
+				"last_error": errorMessage, "worker_finished_at": gtime.Now(), "updated_at": gtime.Now(),
+			}).Update()
+		}
 		if err == nil && removeSchedule {
 			err = s.reconcileCollectProcessSchedule(ctx, payload)
 			if err == nil {
@@ -632,7 +671,11 @@ func (s *sSysPublish) handleCollectProcessTask(ctx context.Context, task *asynq.
 		return err
 	}
 	if enqueued {
-		g.Log().Debugf(ctx, "采集源单批处理完成并重新排队 sourceId:%d delay:%s", payload.SourceId, delay.Round(time.Second))
+		g.Log().Info(ctx, "采集处理任务等待后续批次", g.Map{
+			"eventId": payload.EventId, "sourceId": payload.SourceId, "delay": delay.Round(time.Second).String(),
+			"workerRole": identity.Role, "workerInstanceId": identity.InstanceID,
+			"workerRevision": identity.Revision, "workerImageDigest": identity.ImageDigest,
+		})
 	}
 	return nil
 }

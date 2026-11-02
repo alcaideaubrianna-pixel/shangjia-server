@@ -26,6 +26,8 @@ type publishRuntimeConfig struct {
 	PushWorker       bool
 	MediaWorker      bool
 	BackgroundWorker bool
+	CollectorWorker  bool
+	BackgroundQueue  bool
 }
 
 func loadPublishRuntimeConfig(ctx context.Context) publishRuntimeConfig {
@@ -50,7 +52,7 @@ func loadPublishRuntimeConfig(ctx context.Context) publishRuntimeConfig {
 		case runrole.CollectorWorker:
 			// 采集 Worker 负责消费采集分组、媒体窗口和发布前处理队列。
 			// Telegram Collector 插件与本插件使用同一运行角色，必须同时启用后台队列。
-			values = append(values, publishRuntimeRoleBackgroundWorker)
+			values = append(values, runrole.CollectorWorker)
 		case runrole.Scheduler:
 			values = append(values, publishRuntimeRoleScheduler)
 		case runrole.Runtime:
@@ -73,6 +75,8 @@ func (s *sSysPublish) RuntimeRoleEnabled(ctx context.Context, role string) bool 
 		return config.MediaWorker
 	case publishRuntimeRoleBackgroundWorker:
 		return config.BackgroundWorker
+	case runrole.CollectorWorker:
+		return config.CollectorWorker
 	case publishRuntimeRoleWorker:
 		return config.PushWorker && config.MediaWorker && config.BackgroundWorker
 	case publishRuntimeRoleWeb:
@@ -95,6 +99,8 @@ func parsePublishRuntimeRoles(values []string) publishRuntimeConfig {
 			config.PushWorker = true
 			config.MediaWorker = true
 			config.BackgroundWorker = true
+			config.CollectorWorker = true
+			config.BackgroundQueue = true
 		case publishRuntimeRoleWeb:
 		case publishRuntimeRoleAccount:
 			config.Account = true
@@ -104,12 +110,17 @@ func parsePublishRuntimeRoles(values []string) publishRuntimeConfig {
 			config.PushWorker = true
 			config.MediaWorker = true
 			config.BackgroundWorker = true
+			config.BackgroundQueue = true
 		case publishRuntimeRolePushWorker:
 			config.PushWorker = true
 		case publishRuntimeRoleMediaWorker:
 			config.MediaWorker = true
 		case publishRuntimeRoleBackgroundWorker:
 			config.BackgroundWorker = true
+			config.BackgroundQueue = true
+		case runrole.CollectorWorker:
+			config.BackgroundWorker = true
+			config.CollectorWorker = true
 		}
 	}
 	return config
@@ -150,7 +161,8 @@ func isPublishRuntimeRole(role string) bool {
 		publishRuntimeRoleWorker,
 		publishRuntimeRolePushWorker,
 		publishRuntimeRoleMediaWorker,
-		publishRuntimeRoleBackgroundWorker:
+		publishRuntimeRoleBackgroundWorker,
+		runrole.CollectorWorker:
 		return true
 	default:
 		return false
