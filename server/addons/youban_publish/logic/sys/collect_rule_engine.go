@@ -202,52 +202,99 @@ func buildCollectRuleDecision(event gdb.Record, content *collectContentResult, r
 	text = preserveCollectCriticalProfileLines(rawText, text)
 	return &collectRuleDecision{
 		Matched:   true,
-		Text:      strings.TrimSpace(text),
+		Text:      text,
 		MatchJSON: matchJSON,
 	}
 }
 
 func normalizeCollectRuleBodyWithoutTruncate(text string, rule gdb.Record) string {
-	text = applyCollectLineDeletes(text, collectRuleStrings(rule, "delete_lines"))
-	text = applyCollectTextDeletes(text, collectRuleStrings(rule, "delete_texts"))
-	return applyCollectReplacements(text, collectRuleReplacements(rule))
+	return applyCollectFeeScopedRules(text, rule, false)
 }
 
 // normalizeCollectRuleBody applies source text rules in a deterministic,
 // idempotent order. It is shared by rule evaluation and the persistence
 // boundary so retries cannot write raw text back over cleaned content.
 func normalizeCollectRuleBody(text string, rule gdb.Record) string {
-	// A configured suffix is a line-local rewrite. Whole-body truncation must
-	// never run in this path because profile fields can contain unrelated
-	// numbers that are business-critical and cannot be reconstructed reliably.
-	if rule["truncate_intro_fee_enabled"].Bool() && strings.TrimSpace(rule["intro_fee_suffix"].String()) == "" {
-		text = applyCollectIntroFeeTruncate(text)
-	}
-	text = applyCollectLineDeletes(text, collectRuleStrings(rule, "delete_lines"))
-	text = applyCollectTextDeletes(text, collectRuleStrings(rule, "delete_texts"))
-	return applyCollectReplacements(text, collectRuleReplacements(rule))
+	truncate := rule["truncate_intro_fee_enabled"].Bool() && strings.TrimSpace(rule["intro_fee_suffix"].String()) == ""
+	return applyCollectFeeScopedRules(text, rule, truncate)
 }
 
-// preserveCollectCriticalProfileLines is the final invariant for collection
-// text transforms: a rule may rewrite fee metadata, but it cannot silently
-// remove age, height, or weight lines present in the immutable source event.
-func preserveCollectCriticalProfileLines(original, processed string) string {
-	originalLines := strings.Split(strings.ReplaceAll(original, "\r\n", "\n"), "\n")
-	processedLines := strings.Split(strings.ReplaceAll(processed, "\r\n", "\n"), "\n")
-	missing := make([]string, 0, len(collectCriticalProfileLineRules))
-	for _, pattern := range collectCriticalProfileLineRules {
-		if pattern.MatchString(processed) {
+// applyCollectFeeScopedRules confines every destructive rule to the fee line
+// and its immediate neighbours. Lines outside these windows are immutable.
+func applyCollectFeeScopedRules(text string, rule gdb.Record, truncate bool) string {
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	allowed := make([]bool, len(lines))
+	for index, line := range lines {
+		if !collectFeeKeywordPattern.MatchString(normalizeCollectKeywordText(line)) {
 			continue
 		}
-		for _, line := range originalLines {
-			if pattern.MatchString(normalizeCollectKeywordText(line)) {
-				missing = append(missing, line)
-				break
+		for candidate := index - 1; candidate <= index+1; candidate++ {
+			if candidate >= 0 && candidate < len(lines) {
+				allowed[candidate] = true
 			}
 		}
 	}
+	result := make([]string, 0, len(lines))
+	for index := 0; index < len(lines); {
+		if !allowed[index] {
+			result = append(result, lines[index])
+			index++
+			continue
+		}
+		end := index + 1
+		for end < len(lines) && allowed[end] {
+			end++
+		}
+		window := strings.Join(lines[index:end], "\n")
+		if truncate {
+			window = applyCollectIntroFeeTruncate(window)
+		}
+		window = applyCollectLineDeletes(window, collectRuleStrings(rule, "delete_lines"))
+		window = applyCollectTextDeletes(window, collectRuleStrings(rule, "delete_texts"))
+		window = applyCollectReplacements(window, collectRuleReplacements(rule))
+		if window != "" {
+			result = append(result, strings.Split(window, "\n")...)
+		}
+		index = end
+	}
+	return strings.Join(result, "\n")
+}
+
+// preserveCollectNonFeeLines is the final persistence invariant. All source
+// lines outside the fee line and its immediate neighbours must survive.
+func preserveCollectNonFeeLines(original, processed string) string {
+	originalLines := strings.Split(strings.ReplaceAll(original, "\r\n", "\n"), "\n")
+	protected := make([]bool, len(originalLines))
+	for index := range protected {
+		protected[index] = true
+	}
+	for index, line := range originalLines {
+		if collectFeeKeywordPattern.MatchString(normalizeCollectKeywordText(line)) {
+			for candidate := index - 1; candidate <= index+1; candidate++ {
+				if candidate >= 0 && candidate < len(protected) {
+					protected[candidate] = false
+				}
+			}
+		}
+	}
+	missing := make([]string, 0)
+	remaining := processed
+	for index, line := range originalLines {
+		if !protected[index] || strings.TrimSpace(line) == "" {
+			continue
+		}
+		if position := strings.Index(remaining, line); position >= 0 {
+			remaining = remaining[position+len(line):]
+			continue
+		}
+		missing = append(missing, line)
+	}
 	if len(missing) == 0 {
 		return processed
+	}
+	processedLines := strings.Split(strings.ReplaceAll(processed, "\r\n", "\n"), "\n")
+	if processed == "" {
+		processedLines = nil
 	}
 	insertAt := len(processedLines)
 	for index, line := range processedLines {
@@ -260,7 +307,12 @@ func preserveCollectCriticalProfileLines(original, processed string) string {
 	result = append(result, processedLines[:insertAt]...)
 	result = append(result, missing...)
 	result = append(result, processedLines[insertAt:]...)
-	return strings.TrimSpace(strings.Join(result, "\n"))
+	return strings.Join(result, "\n")
+}
+
+// Kept as a compatibility alias for callers and historical tests.
+func preserveCollectCriticalProfileLines(original, processed string) string {
+	return preserveCollectNonFeeLines(original, processed)
 }
 
 func shouldDropCollectStandaloneCodeCaption(text string, mediaCount int) bool {
@@ -593,8 +645,8 @@ func applyCollectIntroFeeSuffix(text, original, suffix string) string {
 		}
 		kept = append(kept, line)
 	}
-	body := strings.TrimSpace(strings.Join(kept, "\n"))
-	if body == "" {
+	body := strings.Join(kept, "\n")
+	if strings.TrimSpace(body) == "" {
 		return feeLine
 	}
 	return body + "\n" + feeLine

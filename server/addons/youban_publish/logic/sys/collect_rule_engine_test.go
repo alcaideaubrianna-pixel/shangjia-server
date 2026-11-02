@@ -1,13 +1,97 @@
 package sys
 
 import (
+	"bufio"
 	"context"
+	"encoding/base64"
+	"fmt"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/gogf/gf/v2/container/gvar"
 	"github.com/gogf/gf/v2/database/gdb"
 )
+
+func TestCollectRuleProductionSamplesKeepLinesOutsideFeeNeighbourhood(t *testing.T) {
+	path := strings.TrimSpace(os.Getenv("YOUBAN_COLLECT_SAMPLE_FILE"))
+	if path == "" {
+		t.Skip("YOUBAN_COLLECT_SAMPLE_FILE is not set")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+
+	count := 0
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	for scanner.Scan() {
+		parts := strings.SplitN(scanner.Text(), "|", 2)
+		if len(parts) != 2 {
+			t.Fatalf("invalid sample row %d", count+1)
+		}
+		decoded, decodeErr := base64.StdEncoding.DecodeString(parts[1])
+		if decodeErr != nil {
+			t.Fatalf("decode event %s: %v", parts[0], decodeErr)
+		}
+		raw := string(decoded)
+		lines := strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n")
+		values := make([]string, 0, len(lines))
+		for _, line := range lines {
+			if value := strings.TrimSpace(line); value != "" {
+				values = append(values, value)
+			}
+		}
+		rule := gdb.Record{
+			"delete_lines": gvar.New(values), "delete_texts": gvar.New(values),
+			"replace_from": gvar.New(values), "replace_to": gvar.New(make([]string, len(values))),
+		}
+		got := normalizeCollectRuleBodyWithoutTruncate(raw, rule)
+		if err := assertCollectNonFeeLinesInOrder(raw, got); err != nil {
+			t.Fatalf("event %s: %v", parts[0], err)
+		}
+		count++
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if count == 0 {
+		t.Fatal("sample file is empty")
+	}
+	t.Logf("validated %d production samples", count)
+}
+
+func assertCollectNonFeeLinesInOrder(original, processed string) error {
+	originalLines := strings.Split(strings.ReplaceAll(original, "\r\n", "\n"), "\n")
+	protected := make([]bool, len(originalLines))
+	for index := range protected {
+		protected[index] = true
+	}
+	for index, line := range originalLines {
+		if !collectFeeKeywordPattern.MatchString(normalizeCollectKeywordText(line)) {
+			continue
+		}
+		for candidate := index - 1; candidate <= index+1; candidate++ {
+			if candidate >= 0 && candidate < len(protected) {
+				protected[candidate] = false
+			}
+		}
+	}
+	remaining := strings.ReplaceAll(processed, "\r\n", "\n")
+	for index, line := range originalLines {
+		if !protected[index] || strings.TrimSpace(line) == "" {
+			continue
+		}
+		position := strings.Index(remaining, line)
+		if position < 0 {
+			return fmt.Errorf("line %d outside fee neighbourhood changed or reordered", index+1)
+		}
+		remaining = remaining[position+len(line):]
+	}
+	return nil
+}
 
 func TestBuildCollectRuleDecisionAppendsFooterWithoutBlankLine(t *testing.T) {
 	event := gdb.Record{
@@ -40,7 +124,7 @@ func TestCollectRuleOnlineCaseMatrix(t *testing.T) {
 		mutate           func(gdb.Record)
 		matched          bool
 	}{
-		{name: "normal enters and replaces", text: "正文 A", media: 1, want: "正文 B", mutate: func(r gdb.Record) {
+		{name: "normal enters without replacing outside fee scope", text: "正文 A", media: 1, want: "正文 A", mutate: func(r gdb.Record) {
 			r["replace_from"] = gvar.New([]string{"A"})
 			r["replace_to"] = gvar.New([]string{"B"})
 		}, matched: true},
@@ -485,7 +569,7 @@ func TestCollectRuleRegressionPreservesOnlineB258ProfileFields(t *testing.T) {
 }
 
 func TestCriticalProfileLinesCannotBeDeletedByRules(t *testing.T) {
-	raw := "城市：深圳\n年龄：24\n身高：163\n体重：92\n介绍费7888"
+	raw := "城市：深圳\n年龄：24\n身高：163\n体重：92\n费用上行\n介绍费7888"
 	event := gdb.Record{"raw_text": gvar.New(raw), "media_count": gvar.New(2)}
 	rule := gdb.Record{
 		"truncate_intro_fee_enabled": gvar.New(true), "intro_fee_suffix": gvar.New("AA"),
@@ -508,7 +592,7 @@ func TestPreserveCollectCriticalProfileLines(t *testing.T) {
 		want      string
 	}{
 		{name: "empty result", original: "年龄：24\n身高：163\n体重：92", processed: "", want: "年龄：24\n身高：163\n体重：92"},
-		{name: "windows and fullwidth digits", original: "年龄：２４\r\n身高：１６３\r\n体重：９２\r\n介绍费：７８８８", processed: "介绍费 7888 AA", want: "年龄：２４\n身高：１６３\n体重：９２\n介绍费 7888 AA"},
+		{name: "windows and fullwidth digits", original: "年龄：２４\r\n身高：１６３\r\n体重：９２\r\n费用上行\r\n介绍费：７８８８", processed: "介绍费 7888 AA", want: "年龄：２４\n身高：１６３\n体重：９２\n介绍费 7888 AA"},
 		{name: "restore only missing field", original: "年龄：24\n身高：163\n体重：92\n介绍费7888", processed: "年龄：24\n体重：92\n介绍费 7888 AA", want: "年龄：24\n体重：92\n身高：163\n介绍费 7888 AA"},
 		{name: "english labels", original: "Age: 24\nHeight: 163\nWeight: 92", processed: "Age: 24", want: "Age: 24\nHeight: 163\nWeight: 92"},
 	}
@@ -537,6 +621,39 @@ func TestNormalizeCollectMaterialTextProtectsCriticalFieldsWithoutSuffix(t *test
 	for _, field := range []string{"年龄：24", "身高：163", "体重：92"} {
 		if !strings.Contains(got, field) {
 			t.Fatalf("persistence boundary lost %q: %q", field, got)
+		}
+	}
+}
+
+func TestCollectRulesCannotModifyLinesOutsideFeeNeighbourhood(t *testing.T) {
+	raw := "第一行必须保留\n年龄：24\n身高：163\n费用上行可处理\n介绍费7888\n橙子\n体重：92\n最后一行必须保留"
+	rule := gdb.Record{
+		"truncate_intro_fee_enabled": gvar.New(false),
+		"delete_lines":               gvar.New([]string{"第一行", "年龄", "身高", "橙子", "体重", "最后一行"}),
+		"delete_texts":               gvar.New([]string{"必须保留", "163", "92"}),
+		"replace_from":               gvar.New([]string{"年龄", "身高", "体重"}),
+		"replace_to":                 gvar.New([]string{"被修改", "被修改", "被修改"}),
+	}
+	got := normalizeCollectRuleBodyWithoutTruncate(raw, rule)
+	for _, untouched := range []string{"第一行必须保留", "年龄：24", "身高：163", "体重：92", "最后一行必须保留"} {
+		if !strings.Contains(got, untouched) {
+			t.Fatalf("line outside fee neighbourhood changed, missing %q in %q", untouched, got)
+		}
+	}
+	if strings.Contains(got, "橙子") {
+		t.Fatalf("fee-adjacent line should remain configurable: %q", got)
+	}
+}
+
+func TestCollectRulePersistenceRestoresAnyNonFeeLine(t *testing.T) {
+	s := &sSysPublish{}
+	raw := "普通标题\n城市：深圳\n职业：金融交易员\n介绍费7888\n橙子\n普通尾注"
+	event := gdb.Record{"id": gvar.New(int64(109)), "raw_text": gvar.New(raw)}
+	rule := gdb.Record{"id": gvar.New(int64(300)), "intro_fee_suffix": gvar.New("AA")}
+	got := s.normalizeCollectMaterialText(context.Background(), event, rule, "城市：深圳\n介绍费 7888 AA")
+	for _, untouched := range []string{"普通标题", "城市：深圳", "普通尾注"} {
+		if !strings.Contains(got, untouched) {
+			t.Fatalf("persistence boundary did not restore %q: %q", untouched, got)
 		}
 	}
 }
