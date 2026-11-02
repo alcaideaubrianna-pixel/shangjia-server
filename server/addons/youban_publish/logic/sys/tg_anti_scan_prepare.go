@@ -34,16 +34,20 @@ func (s *sSysPublish) prepareTelegramAntiScanMediaSet(ctx context.Context, media
 		return nil
 	}
 	g.Log().Infof(ctx, "防扫图全量准备开始 mediaCount:%d", len(items))
-	group, groupCtx := errgroup.WithContext(prepareCtx)
+	// One damaged image must not cancel sibling preparation. The caller falls
+	// back the whole album after Wait, while the shared parent deadline still
+	// bounds every worker. A fail-fast group caused cancelled siblings to run
+	// their candidate retry loops repeatedly before the fallback could proceed.
+	group := new(errgroup.Group)
 	group.SetLimit(telegramMediaPrepareConcurrency)
 	for _, item := range items {
 		item := item
 		group.Go(func() error {
-			path, cleanup, err := cachedTelegramMediaFile(groupCtx, item)
+			path, cleanup, err := cachedTelegramMediaFile(prepareCtx, item)
 			if err != nil {
 				return gerror.Wrapf(err, "防扫图源文件准备失败 mediaId:%d", item.Id)
 			}
-			path, cleanup, err = s.prepareTelegramMediaUploadFile(groupCtx, item, path, cleanup)
+			path, cleanup, err = s.prepareTelegramMediaUploadFile(prepareCtx, item, path, cleanup)
 			if err != nil {
 				if cleanup != nil {
 					cleanup()

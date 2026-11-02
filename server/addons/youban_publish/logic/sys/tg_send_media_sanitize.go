@@ -95,6 +95,9 @@ func (s *sSysPublish) prepareTelegramAntiScanUploadFile(ctx context.Context, med
 		// prevents the lightweight result from being reused as a replacement.
 		media.ProcessedAssetHash = ""
 	}
+	if err := ctx.Err(); err != nil {
+		return "", nil, err
+	}
 	lightweightCtx, cancelLightweight := context.WithTimeout(ctx, telegramAntiScanLightweightTimeout)
 	defer cancelLightweight()
 	ctx = lightweightCtx
@@ -107,6 +110,9 @@ func (s *sSysPublish) prepareTelegramAntiScanUploadFile(ctx context.Context, med
 	var bestHash telegramAntiScanHash
 	var lastCandidateErr error
 	for attempt := 0; attempt < telegramAntiScanCandidateAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return "", nil, err
+		}
 		var protectedPath string
 		var err error
 		if kind == "thumbnail" {

@@ -18,6 +18,7 @@ FAPIHUB_RATE_LIMIT_PER_MINUTE="${SAE_FAPIHUB_RATE_LIMIT_PER_MINUTE:-150}"
 ANTISCAN_FALLBACK_PROVIDER="${SAE_ANTISCAN_FALLBACK_PROVIDER:-}"
 MEDIA_PERMANENT_FAILURE_ENABLED="${SAE_PUBLISH_MEDIA_PERMANENT_FAILURE_ENABLED:-true}"
 DISABLE_SLS="${SAE_DISABLE_SLS:-false}"
+ENABLE_SLS="${SAE_ENABLE_SLS:-false}"
 ABORT_STUCK_CHANGE_ORDER="${SAE_ABORT_STUCK_CHANGE_ORDER:-false}"
 TAG="${1:-}"
 
@@ -27,6 +28,10 @@ if [[ -z "$TAG" || ! "$TAG" =~ ^[A-Za-z0-9._-]+$ ]]; then
 fi
 command -v aliyun >/dev/null || { echo "aliyun CLI is required" >&2; exit 1; }
 command -v jq >/dev/null || { echo "jq is required" >&2; exit 1; }
+if [[ "$DISABLE_SLS" == "true" && "$ENABLE_SLS" == "true" ]]; then
+  echo "SAE_DISABLE_SLS and SAE_ENABLE_SLS cannot both be true" >&2
+  exit 2
+fi
 
 IMAGE_URL="${IMAGE_REPOSITORY}:${TAG}"
 repo_path="${IMAGE_REPOSITORY#*/}"
@@ -127,6 +132,8 @@ for role in "${ROLES[@]}"; do
   )
   if [[ "$DISABLE_SLS" == "true" ]]; then
     deploy_args+=(--SlsConfigs "")
+  elif [[ "$ENABLE_SLS" == "true" ]]; then
+    deploy_args+=(--SlsConfigs '[{"logDir":"","logType":"stdout"}]')
   fi
   "${deploy_args[@]}" >/dev/null
   wait_ready "$role" "$app_id" "$replicas"

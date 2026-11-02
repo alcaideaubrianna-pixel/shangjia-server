@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"errors"
 	"image"
 	"image/color"
 	"image/png"
@@ -11,6 +12,17 @@ import (
 
 	"github.com/go-telegram/bot/models"
 )
+
+func TestPrepareTelegramAntiScanUploadFileStopsOnCancelledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, _, err := NewSysPublish().prepareTelegramAntiScanUploadFile(ctx, &telegramMediaItem{
+		Id: 1, JobId: 2, MediaType: "image", AntiScanEnabled: true, AntiScanMode: "lightweight",
+	}, filepath.Join(t.TempDir(), "unused.jpg"), nil, "image")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error=%v want context canceled", err)
+	}
+}
 
 func TestPrepareTelegramPhotoUploadFileKeepsOutputWithinLimit(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "source.png")
