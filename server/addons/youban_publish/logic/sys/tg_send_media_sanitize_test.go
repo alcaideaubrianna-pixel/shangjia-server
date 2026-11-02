@@ -9,9 +9,33 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/go-telegram/bot/models"
 )
+
+func TestPrepareTelegramAntiScanMediaSetTimeoutFallsBackWithoutCancelingPublish(t *testing.T) {
+	ctx := context.Background()
+	display := &telegramMediaItem{Id: 1, MediaType: "image", AntiScanEnabled: true, ForceUpload: true}
+	verify := &telegramMediaItem{Id: 2, MediaType: "image", AntiScanEnabled: true, ForceUpload: true}
+	err := prepareTelegramAntiScanMediaSetWithTimeout(ctx, 10*time.Millisecond, func(prepareCtx context.Context, item *telegramMediaItem) error {
+		<-prepareCtx.Done()
+		return prepareCtx.Err()
+	}, []*telegramMediaItem{display}, []*telegramMediaItem{verify})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("error=%v want deadline exceeded", err)
+	}
+	if err = ctx.Err(); err != nil {
+		t.Fatalf("publish context was canceled: %v", err)
+	}
+
+	fallbackTelegramAntiScanToOriginal([]*telegramMediaItem{display}, []*telegramMediaItem{verify})
+	for _, item := range []*telegramMediaItem{display, verify} {
+		if item.AntiScanEnabled || item.ForceUpload {
+			t.Fatalf("mediaId=%d did not fall back to original", item.Id)
+		}
+	}
+}
 
 func TestPrepareTelegramAntiScanUploadFileStopsOnCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())

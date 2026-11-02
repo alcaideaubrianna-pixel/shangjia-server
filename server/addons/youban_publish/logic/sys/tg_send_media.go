@@ -27,10 +27,9 @@ import (
 const telegramMediaGroupMaxItems = 10
 
 // A publish album normally contains up to nine display images. Preparing only
-// four at a time made each channel spend multiple serial waves downloading and
-// sanitizing the same album. Keep this bounded below the channel-level worker
-// concurrency so one large publish cannot exhaust the process.
-const telegramMediaPrepareConcurrency = 8
+// Preparing a full album fans out DB, Redis, download, and image work. Keep the
+// per-job fan-out low so concurrent channels cannot exhaust shared resources.
+const telegramMediaPrepareConcurrency = 3
 
 func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, chatId string, purpose string, caption string, media []*telegramMediaItem, replyMarkup ...models.ReplyMarkup) (resultMessages []*telegramSentMessage, resultErr error) {
 	stage := beginTelegramPublishStage(ctx, "media.send_set", g.Map{"purpose": purpose, "mediaCount": len(media)})

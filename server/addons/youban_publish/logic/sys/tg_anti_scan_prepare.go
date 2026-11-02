@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	telegramAntiScanPrepareTimeout     = 4 * time.Minute
+	telegramAntiScanPrepareTimeout     = 90 * time.Second
 	telegramAntiScanBackgroundTimeout  = 2 * time.Minute
 	telegramAntiScanLightweightTimeout = 2 * time.Minute
 )
@@ -20,7 +20,39 @@ const (
 // anti-scan. Every protected image (display and verify) is prepared before the
 // first Telegram send is attempted.
 func (s *sSysPublish) prepareTelegramAntiScanMediaSet(ctx context.Context, mediaSets ...[]*telegramMediaItem) error {
-	prepareCtx, cancel := context.WithTimeout(ctx, telegramAntiScanPrepareTimeout)
+	return prepareTelegramAntiScanMediaSetWithTimeout(ctx, telegramAntiScanPrepareTimeout, s.prepareTelegramAntiScanMediaItem, mediaSets...)
+}
+
+func (s *sSysPublish) prepareTelegramAntiScanMediaItem(ctx context.Context, item *telegramMediaItem) error {
+	path, cleanup, err := cachedTelegramMediaFile(ctx, item)
+	if err != nil {
+		return gerror.Wrapf(err, "防扫图源文件准备失败 mediaId:%d", item.Id)
+	}
+	path, cleanup, err = s.prepareTelegramMediaUploadFile(ctx, item, path, cleanup)
+	if err != nil {
+		if cleanup != nil {
+			cleanup()
+		}
+		return gerror.Wrapf(err, "防扫图媒体处理失败 mediaId:%d", item.Id)
+	}
+	if path == "" {
+		if cleanup != nil {
+			cleanup()
+		}
+		return gerror.Newf("防扫图媒体处理结果为空 mediaId:%d", item.Id)
+	}
+	item.PreparedUploadPath = path
+	item.PreparedUploadCleanup = cleanup
+	return nil
+}
+
+func prepareTelegramAntiScanMediaSetWithTimeout(
+	ctx context.Context,
+	timeout time.Duration,
+	prepare func(context.Context, *telegramMediaItem) error,
+	mediaSets ...[]*telegramMediaItem,
+) error {
+	prepareCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	items := make([]*telegramMediaItem, 0)
 	for _, set := range mediaSets {
@@ -43,26 +75,7 @@ func (s *sSysPublish) prepareTelegramAntiScanMediaSet(ctx context.Context, media
 	for _, item := range items {
 		item := item
 		group.Go(func() error {
-			path, cleanup, err := cachedTelegramMediaFile(prepareCtx, item)
-			if err != nil {
-				return gerror.Wrapf(err, "防扫图源文件准备失败 mediaId:%d", item.Id)
-			}
-			path, cleanup, err = s.prepareTelegramMediaUploadFile(prepareCtx, item, path, cleanup)
-			if err != nil {
-				if cleanup != nil {
-					cleanup()
-				}
-				return gerror.Wrapf(err, "防扫图媒体处理失败 mediaId:%d", item.Id)
-			}
-			if path == "" {
-				if cleanup != nil {
-					cleanup()
-				}
-				return gerror.Newf("防扫图媒体处理结果为空 mediaId:%d", item.Id)
-			}
-			item.PreparedUploadPath = path
-			item.PreparedUploadCleanup = cleanup
-			return nil
+			return prepare(prepareCtx, item)
 		})
 	}
 	if err := group.Wait(); err != nil {
@@ -78,6 +91,19 @@ func (s *sSysPublish) prepareTelegramAntiScanMediaSet(ctx context.Context, media
 	}
 	g.Log().Infof(ctx, "防扫图全量准备完成 mediaCount:%d", len(items))
 	return nil
+}
+
+func fallbackTelegramAntiScanToOriginal(mediaSets ...[]*telegramMediaItem) {
+	cleanupPreparedTelegramMedia(mediaSets...)
+	for _, set := range mediaSets {
+		for _, item := range set {
+			if item == nil {
+				continue
+			}
+			item.AntiScanEnabled = false
+			item.ForceUpload = false
+		}
+	}
 }
 
 func cleanupPreparedTelegramMedia(mediaSets ...[]*telegramMediaItem) {

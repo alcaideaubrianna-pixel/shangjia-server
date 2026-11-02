@@ -351,15 +351,7 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 			// provider/cache is unavailable; release prepared files and fall back
 			// to the original media so the queue can make progress.
 			g.Log().Warningf(ctx, "防扫图准备失败，降级发送原始媒体 jobId:%d err:%+v", job.Id, err)
-			cleanupPreparedTelegramMedia(displayMedia, verifyMedia)
-			for _, set := range [][]*telegramMediaItem{displayMedia, verifyMedia} {
-				for _, item := range set {
-					if item != nil {
-						item.AntiScanEnabled = false
-						item.ForceUpload = false
-					}
-				}
-			}
+			fallbackTelegramAntiScanToOriginal(displayMedia, verifyMedia)
 		}
 		if telegramAntiScanMediaCount(displayMedia)+telegramAntiScanMediaCount(verifyMedia) > 0 {
 			defer cleanupPreparedTelegramMedia(displayMedia, verifyMedia)
