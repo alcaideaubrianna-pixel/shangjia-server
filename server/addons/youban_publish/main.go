@@ -56,14 +56,19 @@ func (m *module) Start(option *addons.Option) (err error) {
 		router.Api(m.ctx, group)
 		router.Admin(m.ctx, group)
 	})
-	if runrole.Enabled(m.ctx, runrole.Worker) ||
-		runrole.Enabled(m.ctx, runrole.PushWorker) ||
-		runrole.Enabled(m.ctx, runrole.MediaWorker) ||
-		runrole.Enabled(m.ctx, runrole.BackgroundWorker) ||
-		runrole.Enabled(m.ctx, runrole.Scheduler) {
+	if publishRuntimeShouldStart(m.ctx) {
 		publishService.SysPublish().StartRuntime(m.ctx)
 	}
 	return
+}
+
+func publishRuntimeShouldStart(ctx context.Context) bool {
+	return runrole.Enabled(ctx, runrole.Worker) ||
+		runrole.Enabled(ctx, runrole.CollectorWorker) ||
+		runrole.Enabled(ctx, runrole.PushWorker) ||
+		runrole.Enabled(ctx, runrole.MediaWorker) ||
+		runrole.Enabled(ctx, runrole.BackgroundWorker) ||
+		runrole.Enabled(ctx, runrole.Scheduler)
 }
 
 func (m *module) Stop() (err error) {
