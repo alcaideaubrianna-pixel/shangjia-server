@@ -23,6 +23,12 @@ var (
 	collectNumberRule                = regexp.MustCompile(`[0-9０-９]+`)
 	collectIntroFeeStandaloneSuffix  = regexp.MustCompile(`^[\p{Han}A-Za-z0-9]{1,32}$`)
 	collectFeeKeywordPattern         = regexp.MustCompile(`(?:介绍|推荐|牵线|居间|对接|感谢)费|大米`)
+	collectMultiPricePattern         = regexp.MustCompile(`(?:打包|单个|单人|一人|双人|多人|套餐)`)
+	collectCriticalProfileLineRules  = []*regexp.Regexp{
+		regexp.MustCompile(`(?i)(?:年龄|年齡|age)[^0-9０-９\n]{0,12}[0-9０-９]`),
+		regexp.MustCompile(`(?i)(?:身高|height)[^0-9０-９\n]{0,12}[0-9０-９]`),
+		regexp.MustCompile(`(?i)(?:体重|體重|weight)[^0-9０-９\n]{0,12}[0-9０-９]`),
+	}
 )
 
 type collectRuleDecision struct {
@@ -193,6 +199,7 @@ func buildCollectRuleDecision(event gdb.Record, content *collectContentResult, r
 		amountText := normalizeCollectRuleBodyWithoutTruncate(authoritativeCollectRawText(rawText), rule)
 		text = applyCollectIntroFeeSuffix(text, amountText, introFeeSuffix)
 	}
+	text = preserveCollectCriticalProfileLines(rawText, text)
 	return &collectRuleDecision{
 		Matched:   true,
 		Text:      strings.TrimSpace(text),
@@ -210,12 +217,50 @@ func normalizeCollectRuleBodyWithoutTruncate(text string, rule gdb.Record) strin
 // idempotent order. It is shared by rule evaluation and the persistence
 // boundary so retries cannot write raw text back over cleaned content.
 func normalizeCollectRuleBody(text string, rule gdb.Record) string {
-	if rule["truncate_intro_fee_enabled"].Bool() {
+	// A configured suffix is a line-local rewrite. Whole-body truncation must
+	// never run in this path because profile fields can contain unrelated
+	// numbers that are business-critical and cannot be reconstructed reliably.
+	if rule["truncate_intro_fee_enabled"].Bool() && strings.TrimSpace(rule["intro_fee_suffix"].String()) == "" {
 		text = applyCollectIntroFeeTruncate(text)
 	}
 	text = applyCollectLineDeletes(text, collectRuleStrings(rule, "delete_lines"))
 	text = applyCollectTextDeletes(text, collectRuleStrings(rule, "delete_texts"))
 	return applyCollectReplacements(text, collectRuleReplacements(rule))
+}
+
+// preserveCollectCriticalProfileLines is the final invariant for collection
+// text transforms: a rule may rewrite fee metadata, but it cannot silently
+// remove age, height, or weight lines present in the immutable source event.
+func preserveCollectCriticalProfileLines(original, processed string) string {
+	originalLines := strings.Split(strings.ReplaceAll(original, "\r\n", "\n"), "\n")
+	processedLines := strings.Split(strings.ReplaceAll(processed, "\r\n", "\n"), "\n")
+	missing := make([]string, 0, len(collectCriticalProfileLineRules))
+	for _, pattern := range collectCriticalProfileLineRules {
+		if pattern.MatchString(processed) {
+			continue
+		}
+		for _, line := range originalLines {
+			if pattern.MatchString(normalizeCollectKeywordText(line)) {
+				missing = append(missing, line)
+				break
+			}
+		}
+	}
+	if len(missing) == 0 {
+		return processed
+	}
+	insertAt := len(processedLines)
+	for index, line := range processedLines {
+		if collectFeeKeywordPattern.MatchString(normalizeCollectKeywordText(line)) {
+			insertAt = index
+			break
+		}
+	}
+	result := make([]string, 0, len(processedLines)+len(missing))
+	result = append(result, processedLines[:insertAt]...)
+	result = append(result, missing...)
+	result = append(result, processedLines[insertAt:]...)
+	return strings.TrimSpace(strings.Join(result, "\n"))
 }
 
 func shouldDropCollectStandaloneCodeCaption(text string, mediaCount int) bool {
@@ -508,71 +553,42 @@ func isCollectIntroFeeSourceMarkLine(line string) bool {
 
 func applyCollectIntroFeeSuffix(text, original, suffix string) string {
 	suffix = strings.TrimSpace(suffix)
-	fields := parseCollectIntroFeeFields(original)
 	if suffix == "" {
 		return text
 	}
-	// Suffix replacement is strictly line-local. Do not remove neighbouring
-	// lines or truncate the body while rebuilding the fee caption.
 	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
-	changed := false
+	feeIndexes := make([]int, 0, 1)
 	for index, line := range lines {
-		normalized := normalizeCollectKeywordText(line)
-		if !collectFeeKeywordPattern.MatchString(normalized) {
-			continue
-		}
-		lineFields := parseCollectIntroFeeFields(line)
-		if lineFields.FirstAmount != "" {
-			lines[index] = formatCollectIntroFeeFields(lineFields, suffix)
-		} else if !strings.HasSuffix(strings.TrimSpace(line), suffix) {
-			lines[index] = strings.TrimRightFunc(line, unicode.IsSpace) + " " + suffix
-		}
-		changed = true
-	}
-	if changed {
-		return strings.Join(lines, "\n")
-	}
-	amount := fields.FirstAmount
-	feeNumberCount := 0
-	for _, line := range strings.Split(strings.ReplaceAll(normalizeCollectKeywordText(original), "\r\n", "\n"), "\n") {
-		if collectFeeKeywordPattern.MatchString(line) {
-			feeNumberCount = len(collectNumberRule.FindAllString(line, -1))
-			break
+		if collectFeeKeywordPattern.MatchString(normalizeCollectKeywordText(line)) {
+			feeIndexes = append(feeIndexes, index)
 		}
 	}
-	if feeNumberCount > 1 && fields.ForeignAmount == "" && collectFeeKeywordPattern.MatchString(normalizeCollectKeywordText(text)) {
-		lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
-		for index, line := range lines {
-			if collectFeeKeywordPattern.MatchString(normalizeCollectKeywordText(line)) && !strings.HasSuffix(strings.TrimSpace(line), suffix) {
-				lines[index] = strings.TrimRightFunc(line, unicode.IsSpace) + " " + suffix
-			}
-		}
-		return strings.Join(lines, "\n")
-	}
-	if amount == "" {
-		lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
-		for index, line := range lines {
-			if collectFeeKeywordPattern.MatchString(normalizeCollectKeywordText(line)) && !strings.HasSuffix(strings.TrimSpace(line), suffix) {
-				lines[index] = strings.TrimRightFunc(line, unicode.IsSpace) + " " + suffix
-			}
-		}
-		return strings.Join(lines, "\n")
-	}
-	feeLine := formatCollectIntroFeeFields(fields, suffix)
-	if feeLine == "" {
+	if len(feeIndexes) == 0 {
 		return text
 	}
-	lines = strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
-	kept := make([]string, 0, len(lines)+1)
-	removeNextSuffix := false
-	for _, line := range lines {
-		if removeNextSuffix && isCollectIntroFeeStandaloneSuffix(strings.TrimSpace(line)) {
-			removeNextSuffix = false
+
+	firstIndex := feeIndexes[0]
+	firstLine := lines[firstIndex]
+	fields := parseCollectIntroFeeFields(firstLine)
+	normalizedLine := normalizeCollectKeywordText(firstLine)
+	numbers := collectNumberRule.FindAllString(normalizedLine, -1)
+	complexAmount := len(numbers) > 1 && fields.ForeignAmount == "" && collectMultiPricePattern.MatchString(normalizedLine)
+	complexFormat := fields.ForeignAmount == "" && (strings.ContainsAny(normalizedLine, ",，./") || strings.Contains(normalizedLine, "-"))
+	if fields.FirstAmount == "" || complexAmount || complexFormat {
+		if !strings.HasSuffix(strings.TrimSpace(firstLine), suffix) {
+			lines[firstIndex] = strings.TrimRightFunc(firstLine, unicode.IsSpace) + " " + suffix
+		}
+		return strings.Join(lines, "\n")
+	}
+
+	feeLine := formatCollectIntroFeeFields(fields, suffix)
+	kept := make([]string, 0, len(lines))
+	for index, line := range lines {
+		if collectFeeKeywordPattern.MatchString(normalizeCollectKeywordText(line)) {
 			continue
 		}
-		removeNextSuffix = false
-		if parseCollectIntroFeeFields(line).FirstAmount != "" {
-			removeNextSuffix = true
+		if index > 0 && collectFeeKeywordPattern.MatchString(normalizeCollectKeywordText(lines[index-1])) &&
+			(isCollectIntroFeeStandaloneSuffix(strings.TrimSpace(line)) || strings.TrimSpace(line) == suffix) {
 			continue
 		}
 		kept = append(kept, line)

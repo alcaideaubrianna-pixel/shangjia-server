@@ -377,7 +377,7 @@ func TestBuildCollectRuleDecisionPreservesOtherLinesWhenSuffixEnabled(t *testing
 		"delete_lines": gvar.New([]string{}), "delete_texts": gvar.New([]string{}),
 		"replace_from": gvar.New([]string{}), "replace_to": gvar.New([]string{}),
 	}
-	if got, want := buildCollectRuleDecision(event, nil, rule).Text, "编号：A123\n正文\n介绍费 7888 AA\nKK"; got != want {
+	if got, want := buildCollectRuleDecision(event, nil, rule).Text, "编号：A123\n正文\n介绍费 7888 AA"; got != want {
 		t.Fatalf("decision text = %q, want %q", got, want)
 	}
 }
@@ -458,6 +458,86 @@ func TestNormalizeCollectMaterialTextKeepsNumericProfileFields(t *testing.T) {
 	}
 	if !strings.Contains(got, "介绍费 7888 土豆") {
 		t.Fatalf("normalized text did not rebuild fee suffix: %q", got)
+	}
+}
+
+func TestCollectRuleRegressionPreservesOnlineB258ProfileFields(t *testing.T) {
+	s := &sSysPublish{}
+	raw := "编码:B258\n城市：深圳\n年龄：24岁\n身高：163\n体重：92\n罩杯：B\n职业：金融交易员\n雷点（不能接受男友的）：多人\n是否抽烟或纹身：无\n是否chu女:否\n能否接受SM：否\n能否接受检测后无t：否\n能否接受检测后内s：否\n能否接受口：能\n可过夜：可\n一个月可陪伴天数：3\n可否飞往外地：可以\n最快多久出发:周末都可以\n大姨妈啥时候来:13～15日\n生活费要多少：1.5\n生活费分几次：2次\n自我加分项（认真填写自己的优点）：情绪稳定、温柔、有情绪价值\n介绍费7888\n橙子"
+	event := gdb.Record{"id": gvar.New(int64(9902156)), "raw_text": gvar.New(raw), "media_count": gvar.New(2)}
+	rule := gdb.Record{
+		"id": gvar.New(int64(262)), "truncate_intro_fee_enabled": gvar.New(true),
+		"intro_fee_suffix": gvar.New("天空之城11"),
+		"delete_texts":     gvar.New([]string{"橙子"}),
+		"delete_lines":     gvar.New([]string{}),
+		"replace_from":     gvar.New([]string{"橙子"}), "replace_to": gvar.New([]string{""}),
+	}
+	decision := buildCollectRuleDecision(event, nil, rule)
+	got := s.normalizeCollectMaterialText(context.Background(), event, rule, decision.Text)
+	for _, field := range []string{"年龄：24岁", "身高：163", "体重：92"} {
+		if !strings.Contains(got, field) {
+			t.Fatalf("online regression lost %q: %q", field, got)
+		}
+	}
+	if !strings.Contains(got, "介绍费 7888 天空之城11") {
+		t.Fatalf("online regression did not rewrite fee suffix: %q", got)
+	}
+}
+
+func TestCriticalProfileLinesCannotBeDeletedByRules(t *testing.T) {
+	raw := "城市：深圳\n年龄：24\n身高：163\n体重：92\n介绍费7888"
+	event := gdb.Record{"raw_text": gvar.New(raw), "media_count": gvar.New(2)}
+	rule := gdb.Record{
+		"truncate_intro_fee_enabled": gvar.New(true), "intro_fee_suffix": gvar.New("AA"),
+		"delete_lines": gvar.New([]string{"年龄", "身高", "体重"}),
+		"delete_texts": gvar.New([]string{}), "replace_from": gvar.New([]string{}), "replace_to": gvar.New([]string{}),
+	}
+	got := buildCollectRuleDecision(event, nil, rule).Text
+	for _, field := range []string{"年龄：24", "身高：163", "体重：92"} {
+		if !strings.Contains(got, field) {
+			t.Fatalf("critical field %q was deleted: %q", field, got)
+		}
+	}
+}
+
+func TestPreserveCollectCriticalProfileLines(t *testing.T) {
+	tests := []struct {
+		name      string
+		original  string
+		processed string
+		want      string
+	}{
+		{name: "empty result", original: "年龄：24\n身高：163\n体重：92", processed: "", want: "年龄：24\n身高：163\n体重：92"},
+		{name: "windows and fullwidth digits", original: "年龄：２４\r\n身高：１６３\r\n体重：９２\r\n介绍费：７８８８", processed: "介绍费 7888 AA", want: "年龄：２４\n身高：１６３\n体重：９２\n介绍费 7888 AA"},
+		{name: "restore only missing field", original: "年龄：24\n身高：163\n体重：92\n介绍费7888", processed: "年龄：24\n体重：92\n介绍费 7888 AA", want: "年龄：24\n体重：92\n身高：163\n介绍费 7888 AA"},
+		{name: "english labels", original: "Age: 24\nHeight: 163\nWeight: 92", processed: "Age: 24", want: "Age: 24\nHeight: 163\nWeight: 92"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := preserveCollectCriticalProfileLines(test.original, test.processed)
+			if got != test.want {
+				t.Fatalf("preserved text = %q, want %q", got, test.want)
+			}
+			if repeated := preserveCollectCriticalProfileLines(test.original, got); repeated != got {
+				t.Fatalf("preservation is not idempotent: first=%q repeated=%q", got, repeated)
+			}
+		})
+	}
+}
+
+func TestNormalizeCollectMaterialTextProtectsCriticalFieldsWithoutSuffix(t *testing.T) {
+	s := &sSysPublish{}
+	raw := "年龄：24\n身高：163\n体重：92\n正文"
+	event := gdb.Record{"id": gvar.New(int64(108)), "raw_text": gvar.New(raw)}
+	rule := gdb.Record{
+		"id": gvar.New(int64(299)), "truncate_intro_fee_enabled": gvar.New(false),
+		"delete_lines": gvar.New([]string{"年龄", "身高", "体重"}),
+	}
+	got := s.normalizeCollectMaterialText(context.Background(), event, rule, raw)
+	for _, field := range []string{"年龄：24", "身高：163", "体重：92"} {
+		if !strings.Contains(got, field) {
+			t.Fatalf("persistence boundary lost %q: %q", field, got)
+		}
 	}
 }
 

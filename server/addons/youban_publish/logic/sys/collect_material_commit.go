@@ -201,6 +201,14 @@ func (s *sSysPublish) commitCollectMaterial(ctx context.Context, event gdb.Recor
 // but repeated events and retry/update paths must not be able to write raw text
 // back over the cleaned profile text.
 func (s *sSysPublish) normalizeCollectMaterialText(ctx context.Context, event gdb.Record, rule gdb.Record, text string) string {
+	rawText := authoritativeCollectRawText(event["raw_text"].String())
+	preserveCriticalLines := func(candidate string) string {
+		preserved := preserveCollectCriticalProfileLines(rawText, candidate)
+		if preserved != candidate {
+			g.Log().Warningf(ctx, "采集资料关键字段保护已触发 eventId:%d ruleId:%d beforeLen:%d afterLen:%d", event["id"].Int64(), rule["id"].Int64(), len([]rune(candidate)), len([]rune(preserved)))
+		}
+		return preserved
+	}
 	footer := strings.TrimSpace(rule["footer_markdown"].String())
 	footerSuffix := ""
 	if footer != "" {
@@ -219,14 +227,15 @@ func (s *sSysPublish) normalizeCollectMaterialText(ctx context.Context, event gd
 	}
 	text += footerSuffix
 	if suffix := strings.TrimSpace(rule["intro_fee_suffix"].String()); suffix != "" {
-		amountText := normalizeCollectRuleBodyWithoutTruncate(authoritativeCollectRawText(event["raw_text"].String()), rule)
-		return applyCollectIntroFeeSuffix(text, amountText, suffix)
+		amountText := normalizeCollectRuleBodyWithoutTruncate(rawText, rule)
+		text = applyCollectIntroFeeSuffix(text, amountText, suffix)
+		return preserveCriticalLines(text)
 	}
 	if !rule["truncate_intro_fee_enabled"].Bool() {
-		return text
+		return preserveCriticalLines(text)
 	}
 	if footerSuffix != "" {
-		return text
+		return preserveCriticalLines(text)
 	}
 	// The rule engine appends user-configured footer text after cleaning the
 	// source body. When a footer is configured, do not re-truncate the final
@@ -242,7 +251,7 @@ func (s *sSysPublish) normalizeCollectMaterialText(ctx context.Context, event gd
 	if cleaned != text {
 		g.Log().Infof(ctx, "采集资料提交前执行介绍费兜底清洗 eventId:%d ruleId:%d beforeLen:%d afterLen:%d", event["id"].Int64(), rule["id"].Int64(), len([]rune(text)), len([]rune(cleaned)))
 	}
-	return cleaned
+	return preserveCriticalLines(cleaned)
 }
 
 func (s *sSysPublish) prepareCollectMaterial(ctx context.Context, event gdb.Record, content *collectContentResult) (*collectPreparedMaterial, error) {
