@@ -12,6 +12,29 @@ import (
 	"hotgo/utility/scanconfig"
 )
 
+func TestUpdateDedupKeyScopesByBotAndChat(t *testing.T) {
+	message := &models.Update{Message: &models.Message{ID: 42, Chat: models.Chat{ID: 100}}}
+	first := updateDedupKey("bot-a", message)
+	if first == "" {
+		t.Fatal("message update must have a dedup key")
+	}
+	if got := updateDedupKey("bot-b", message); got == first {
+		t.Fatal("different bots must not share a dedup key")
+	}
+	message.Message.Chat.ID = 200
+	if got := updateDedupKey("bot-a", message); got == first {
+		t.Fatal("different chats must not share a dedup key")
+	}
+}
+
+func TestUpdateDedupKeyUsesCallbackIdentityAcrossUpdateIDs(t *testing.T) {
+	first := updateDedupKey("bot-a", &models.Update{ID: 10, CallbackQuery: &models.CallbackQuery{ID: "callback-1"}})
+	second := updateDedupKey("bot-a", &models.Update{ID: 11, CallbackQuery: &models.CallbackQuery{ID: "callback-1"}})
+	if first == "" || first != second {
+		t.Fatalf("callback identity should be stable across update IDs: %q %q", first, second)
+	}
+}
+
 func TestGatewayUpdatePayloadRoundTrip(t *testing.T) {
 	update := &models.Update{ID: 12345}
 	body, err := json.Marshal(update)

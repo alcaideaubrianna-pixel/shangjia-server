@@ -16,6 +16,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 
 	"hotgo/addons/youban_tg_bot_gateway/service"
+	"hotgo/internal/library/cache"
 	"hotgo/utility/scanconfig"
 )
 
@@ -31,6 +32,49 @@ type gatewayUpdatePayload struct {
 	Key        string `json:"key"`
 	Body       []byte `json:"body"`
 	EnqueuedAt int64  `json:"enqueuedAt,omitempty"`
+}
+
+const gatewayUpdateDedupTTL = 24 * time.Hour
+
+// updateDedupKey identifies one Telegram update within one Bot. Telegram
+// update_id is not sufficient here: independent Bot API instances can assign
+// different update IDs to the same message. Message/callback identities are
+// stable across those delivery paths, while the Bot key keeps different Bots
+// isolated even when they receive the same chat/message ID.
+func updateDedupKey(botKey string, update *models.Update) string {
+	if update == nil {
+		return ""
+	}
+	botKey = strings.TrimSpace(botKey)
+	if botKey == "" {
+		return ""
+	}
+	if query := update.CallbackQuery; query != nil && strings.TrimSpace(query.ID) != "" {
+		return "youban_tg_bot_gateway:update:" + botKey + ":callback:" + strings.TrimSpace(query.ID)
+	}
+	if query := update.InlineQuery; query != nil && strings.TrimSpace(query.ID) != "" {
+		return "youban_tg_bot_gateway:update:" + botKey + ":inline:" + strings.TrimSpace(query.ID)
+	}
+	for _, message := range []*models.Message{update.Message, update.EditedMessage, update.ChannelPost, update.EditedChannelPost} {
+		if message != nil && message.ID != 0 && message.Chat.ID != 0 {
+			return fmt.Sprintf("youban_tg_bot_gateway:update:%s:message:%d:%d", botKey, message.Chat.ID, message.ID)
+		}
+	}
+	if update.ID != 0 {
+		return fmt.Sprintf("youban_tg_bot_gateway:update:%s:update:%d", botKey, update.ID)
+	}
+	return ""
+}
+
+func claimUpdate(ctx context.Context, botKey string, update *models.Update) (bool, error) {
+	if !cache.Initialized() {
+		return true, nil
+	}
+	key := updateDedupKey(botKey, update)
+	if key == "" {
+		return true, nil
+	}
+	return cache.Instance().SetIfNotExist(ctx, key, 1, gatewayUpdateDedupTTL)
 }
 
 func (s *sGateway) startUpdateQueue(ctx context.Context) {
@@ -236,6 +280,14 @@ func (s *sGateway) handleUpdateTask(ctx context.Context, task *asynq.Task) error
 	var update models.Update
 	if err := json.Unmarshal(payload.Body, &update); err != nil {
 		return fmt.Errorf("解析Telegram更新失败: %w", err)
+	}
+	claimed, err := claimUpdate(ctx, payload.Key, &update)
+	if err != nil {
+		return fmt.Errorf("记录Telegram更新幂等键失败: %w", err)
+	}
+	if !claimed {
+		g.Log().Warningf(ctx, "TG链路重复Update已拦截 key:%s updateId:%d", payload.Key, update.ID)
+		return nil
 	}
 	queueWait := time.Duration(0)
 	if payload.EnqueuedAt > 0 {
