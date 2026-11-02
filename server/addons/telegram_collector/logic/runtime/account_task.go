@@ -93,12 +93,22 @@ func processAccountTask(ctx context.Context, client *telegram.Client, lease *sys
 		}
 		startedAt := time.Now()
 		resultStatus := "completed"
+		var handleErr error
+		detailedLog := accountTaskLifecycleLogEnabled(task.TaskType)
+		if detailedLog {
+			g.Log().Info(ctx, "Telegram账号任务开始执行", g.Map{
+				"taskId": task.ID, "taskType": task.TaskType, "taskKey": task.TaskKey,
+				"tgAccountId": task.AccountID, "attempt": task.AttemptCount, "maxAttempts": task.MaxAttempts,
+				"leaseEpoch": lease.Epoch,
+			})
+		}
 		handler := collectorservice.AccountTaskHandlerFor(task.TaskType)
 		if handler == nil {
 			resultStatus = "failed"
+			handleErr = gerror.New("Telegram账号任务处理器不存在：" + task.TaskType)
 			err = collectorservice.AccountTasks().Fail(ctx, &sysin.AccountTaskFailure{
 				TaskID: task.ID, Lease: lease, RetryDelay: time.Minute,
-				Cause: gerror.New("Telegram账号任务处理器不存在：" + task.TaskType),
+				Cause: handleErr,
 			})
 		} else {
 			taskCtx, cancel := context.WithCancel(ctx)
@@ -110,13 +120,21 @@ func processAccountTask(ctx context.Context, client *telegram.Client, lease *sys
 			waitCancel()
 			g.Log().Infof(ctx, "Telegram账号任务发送锁等待结束 taskId:%d tgAccountId:%d waitMs:%d err:%v", task.ID, task.AccountID, time.Since(waitStarted).Milliseconds(), gateErr)
 			var result *sysin.AccountMediaDownloadResult
-			handleErr := gateErr
+			handleErr = gateErr
 			var executionErr error
 			if gateErr == nil {
 				executionCtx, executionCancel := context.WithTimeout(taskCtx, accountTaskTimeout(task.TaskType))
 				stopWatchdog := watchAccountTaskTimeout(executionCtx, task, lease, resetSession)
 				result, handleErr = handler.HandleAccountTask(executionCtx, client, task)
 				executionErr = executionCtx.Err()
+				if executionErr != nil {
+					g.Log().Warning(ctx, "Telegram账号任务执行上下文结束", g.Map{
+						"taskId": task.ID, "taskType": task.TaskType, "taskKey": task.TaskKey,
+						"tgAccountId": task.AccountID, "attempt": task.AttemptCount,
+						"duration":     time.Since(startedAt).Round(time.Millisecond).String(),
+						"contextError": executionErr.Error(), "handlerError": handleErr,
+					})
+				}
 				stopWatchdog()
 				executionCancel()
 				if gate != nil {
@@ -156,6 +174,14 @@ func processAccountTask(ctx context.Context, client *telegram.Client, lease *sys
 			resultStatus = "commit_failed"
 			g.Log().Warningf(ctx, "提交Telegram账号任务结果失败 taskId:%d type:%s err:%+v", task.ID, task.TaskType, err)
 		}
+		if detailedLog {
+			g.Log().Info(ctx, "Telegram账号任务执行结束", g.Map{
+				"taskId": task.ID, "taskType": task.TaskType, "taskKey": task.TaskKey,
+				"tgAccountId": task.AccountID, "attempt": task.AttemptCount, "maxAttempts": task.MaxAttempts,
+				"result": resultStatus, "duration": time.Since(startedAt).Round(time.Millisecond).String(),
+				"handlerError": handleErr, "commitError": err,
+			})
+		}
 		counter, _ := accountRuntimeMeter.Int64Counter("telegram_account_task_total")
 		counter.Add(ctx, 1, metric.WithAttributes(
 			attribute.String("task_type", task.TaskType),
@@ -168,6 +194,18 @@ func processAccountTask(ctx context.Context, client *telegram.Client, lease *sys
 		))
 	}
 	return true, len(tasks) > 0
+}
+
+func accountTaskLifecycleLogEnabled(taskType string) bool {
+	switch taskType {
+	case sysin.AccountTaskTypeMessagePushInline,
+		sysin.AccountTaskTypeMessageReconcile,
+		sysin.AccountTaskTypeMessageMediaFallback,
+		sysin.AccountTaskTypeMessageDeleteFallback:
+		return true
+	default:
+		return false
+	}
 }
 
 func watchAccountTaskTimeout(ctx context.Context, task *sysin.AccountTask, lease *sysin.AccountLease, resetSession context.CancelFunc) func() {
@@ -268,13 +306,23 @@ func finalizeAccountTaskFailure(ctx context.Context, task *sysin.AccountTask) {
 	}
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 	defer cancel()
+	g.Log().Warning(cleanupCtx, "Telegram账号任务开始终态失败回调", g.Map{
+		"taskId": task.ID, "taskType": task.TaskType, "taskKey": task.TaskKey,
+		"tgAccountId": task.AccountID, "attempt": task.AttemptCount, "maxAttempts": task.MaxAttempts,
+		"error": task.ErrorMessage,
+	})
 	if err := handleAccountTaskFinalFailure(cleanupCtx, task); err != nil {
 		g.Log().Warningf(cleanupCtx, "Telegram账号任务终态失败回调执行失败，稍后重试 taskId:%d type:%s err:%+v", task.ID, task.TaskType, err)
 		return
 	}
 	if err := collectorservice.AccountTasks().FinalizeFailure(cleanupCtx, task.ID); err != nil {
 		g.Log().Warningf(cleanupCtx, "Telegram账号任务终态确认失败，稍后重试 taskId:%d type:%s err:%+v", task.ID, task.TaskType, err)
+		return
 	}
+	g.Log().Info(cleanupCtx, "Telegram账号任务终态失败已确认", g.Map{
+		"taskId": task.ID, "taskType": task.TaskType, "taskKey": task.TaskKey,
+		"tgAccountId": task.AccountID,
+	})
 }
 
 func handleAccountTaskFinalFailure(ctx context.Context, task *sysin.AccountTask) error {

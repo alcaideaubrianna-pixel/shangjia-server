@@ -47,13 +47,16 @@ func (h *publishCollectorAccountTaskHandler) HandleAccountTaskFailure(ctx contex
 	if h == nil || h.publish == nil || task == nil {
 		return nil
 	}
-	var jobID int64
+	var (
+		jobID   int64
+		purpose string
+	)
 	var err error
 	switch task.TaskType {
 	case collectorin.AccountTaskTypeMessageReconcile:
 		jobID, _, err = parseMessageReconcileTaskKey(task.TaskKey)
 	case collectorin.AccountTaskTypeMessageMediaFallback:
-		jobID, _, err = parseMessageMediaFallbackTaskKey(task.TaskKey)
+		jobID, purpose, err = parseMessageMediaFallbackTaskKey(task.TaskKey)
 	default:
 		return nil
 	}
@@ -64,7 +67,20 @@ func (h *publishCollectorAccountTaskHandler) HandleAccountTaskFailure(ctx contex
 	if err != nil {
 		return err
 	}
+	if accountFallbackFailureIsObsolete(purpose, job.SendPhase) {
+		g.Log().Warning(ctx, "忽略已完成阶段的协议号任务终态失败", g.Map{
+			"taskId": task.ID, "taskType": task.TaskType, "taskKey": task.TaskKey,
+			"jobId": job.Id, "purpose": purpose, "sendPhase": job.SendPhase, "cause": cause,
+		})
+		h.publish.appendTelegramJobLog(ctx, job, "account_fallback", "superseded",
+			fmt.Sprintf("旧%s任务终态失败已忽略，当前阶段:%s error:%v", purpose, job.SendPhase, cause))
+		return h.publish.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 0, false)
+	}
 	return h.publish.failTelegramMediaFallbackJob(ctx, job, cause)
+}
+
+func accountFallbackFailureIsObsolete(purpose, sendPhase string) bool {
+	return purpose == "display" && telegramSendPhaseHasDisplay(sendPhase)
 }
 
 func (h *publishCollectorAccountTaskHandler) HandleAccountTaskCompletion(ctx context.Context, task *collectorin.AccountTask, result *collectorin.AccountMediaDownloadResult) error {
@@ -408,7 +424,9 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 			return err
 		}
 	}
-	caption, err = s.applyTelegramJobContentProtection(ctx, job, caption, media, verifyMedia)
+	// A display fallback owns only the display phase. Verification protection is
+	// prepared later by the normal verification send with a fresh task context.
+	caption, err = s.applyTelegramJobContentProtection(ctx, job, caption, media)
 	if err != nil {
 		return err
 	}
@@ -429,16 +447,9 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 			g.Log().Infof(ctx, "协议号媒体降级任务发送成功 taskId:%d jobId:%d tgAccountId:%d displayMessages:%d verifyMessages:0", task.ID, job.Id, task.AccountID, len(messages))
 			return s.finalizeTelegramMediaDelivery(ctx, job, false, true)
 		}
-		var verifyMessages []*telegramSentMessage
-		if job.SendPhase != telegramSendPhaseVerifyConfirmed {
-			verifyMessages, err = s.sendAccountFallbackPhase(ctx, client, channel, job, task.AccountID, "verify", "", verifyMedia)
-			if err != nil {
-				return err
-			}
-			stage("发送并确认验证媒体", "messageCount", len(verifyMessages))
-		}
-		g.Log().Infof(ctx, "协议号媒体降级任务发送成功 taskId:%d jobId:%d tgAccountId:%d displayMessages:%d verifyMessages:%d", task.ID, job.Id, task.AccountID, len(messages), len(verifyMessages))
-		return s.finalizeTelegramMediaDelivery(ctx, job, true, true)
+		g.Log().Infof(ctx, "协议号展示媒体降级完成，验证媒体交回正常队列 taskId:%d jobId:%d tgAccountId:%d displayMessages:%d verifyMedia:%d", task.ID, job.Id, task.AccountID, len(messages), len(verifyMedia))
+		s.appendTelegramJobLog(ctx, job, "account_fallback", "display_confirmed", "协议号展示媒体已确认，验证媒体交回正常发送队列")
+		return s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 0, false)
 	}
 	g.Log().Infof(ctx, "协议号验证媒体降级任务发送成功 taskId:%d jobId:%d tgAccountId:%d verifyMessages:%d", task.ID, job.Id, task.AccountID, len(messages))
 	return s.finalizeTelegramMediaDelivery(ctx, job, true, true)

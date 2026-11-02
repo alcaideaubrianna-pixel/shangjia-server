@@ -170,6 +170,25 @@ func TestAccountFallbackPhaseConfirmedPreventsDuplicateSend(t *testing.T) {
 	}
 }
 
+func TestAccountFallbackFailureIsObsoleteAfterDisplayConfirmation(t *testing.T) {
+	tests := []struct {
+		purpose string
+		phase   string
+		want    bool
+	}{
+		{purpose: "display", phase: telegramSendPhaseDisplayConfirmed, want: true},
+		{purpose: "display", phase: telegramSendPhaseVerifySending, want: true},
+		{purpose: "display", phase: telegramSendPhaseVerifyConfirmed, want: true},
+		{purpose: "display", phase: telegramSendPhaseDisplaySending, want: false},
+		{purpose: "verify", phase: telegramSendPhaseVerifySending, want: false},
+	}
+	for _, test := range tests {
+		if got := accountFallbackFailureIsObsolete(test.purpose, test.phase); got != test.want {
+			t.Fatalf("accountFallbackFailureIsObsolete(%q, %q) = %v, want %v", test.purpose, test.phase, got, test.want)
+		}
+	}
+}
+
 func TestTelegramMediaPurposeLabel(t *testing.T) {
 	if got := telegramMediaPurposeLabel("display"); got != "展示资料" {
 		t.Fatalf("display label = %q", got)

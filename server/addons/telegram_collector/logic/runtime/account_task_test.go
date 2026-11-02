@@ -49,6 +49,22 @@ func TestAccountTaskOperationGateRejectsExpiredTask(t *testing.T) {
 	gate.Unlock()
 }
 
+func TestAccountTaskLifecycleLogEnabled(t *testing.T) {
+	for _, taskType := range []string{
+		sysin.AccountTaskTypeMessagePushInline,
+		sysin.AccountTaskTypeMessageReconcile,
+		sysin.AccountTaskTypeMessageMediaFallback,
+		sysin.AccountTaskTypeMessageDeleteFallback,
+	} {
+		if !accountTaskLifecycleLogEnabled(taskType) {
+			t.Fatalf("critical task type %q must emit lifecycle logs", taskType)
+		}
+	}
+	if accountTaskLifecycleLogEnabled(sysin.AccountTaskTypeHistoryPage) {
+		t.Fatal("high-volume history tasks must not emit per-task lifecycle logs")
+	}
+}
+
 type testAccountTaskFailureHandler struct {
 	called chan error
 	err    error
