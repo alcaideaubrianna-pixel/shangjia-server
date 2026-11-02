@@ -16,24 +16,25 @@ func (s *sSysPublish) recoverProcessedCollectEvents(ctx context.Context, limit i
 		limit = 200
 	}
 	rows, err := g.DB().Model(pdao.YoubanPublishCollectDispatch.Table()+" d").Safe().Ctx(ctx).
-		LeftJoin(pdao.YoubanPublishCollectEvent.Table()+" e", "e.id=d.event_id").
-		Fields("d.event_id").
+		InnerJoin(pdao.YoubanPublishCollectEvent.Table()+" e", "e.id=d.event_id").
+		Fields("d.event_id,e.source_id").
 		Where("d.status", sysin.CollectDispatchStatusSent).
 		Where("e.status", sysin.CollectEventStatusDispatched).
 		WhereGT("d.event_id", 0).
-		Group("d.event_id").
+		Group("d.event_id,e.source_id").
 		Limit(limit).
 		All()
 	if err != nil {
 		return gerror.Wrap(err, "读取已发送采集事件失败")
 	}
 	now := gtime.Now()
+	dirtySourceIds := make(map[int64]struct{})
 	for _, row := range rows {
 		eventId := row["event_id"].Int64()
 		if eventId <= 0 {
 			continue
 		}
-		if _, err = pdao.YoubanPublishCollectEvent.Ctx(ctx).
+		result, updateErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).
 			Where("id", eventId).
 			Where("status", sysin.CollectEventStatusDispatched).
 			Data(g.Map{
@@ -42,10 +43,25 @@ func (s *sSysPublish) recoverProcessedCollectEvents(ctx context.Context, limit i
 				"processed_at":  now,
 				"updated_at":    now,
 			}).
-			Update(); err != nil {
-			return gerror.Wrap(err, "恢复采集事件完成状态失败")
+			Update()
+		if updateErr != nil {
+			return gerror.Wrap(updateErr, "恢复采集事件完成状态失败")
 		}
-		s.syncCollectSourceStatsForEvent(ctx, eventId)
+		affected, affectedErr := result.RowsAffected()
+		if affectedErr != nil {
+			return gerror.Wrap(affectedErr, "确认采集事件完成状态失败")
+		}
+		if affected == 0 {
+			continue
+		}
+		if sourceId := row["source_id"].Int64(); sourceId > 0 {
+			dirtySourceIds[sourceId] = struct{}{}
+		}
+	}
+	for sourceId := range dirtySourceIds {
+		if statsErr := s.syncCollectSourceStats(ctx, sourceId); statsErr != nil {
+			g.Log().Warningf(ctx, "同步采集源统计失败 sourceId:%d err:%+v", sourceId, statsErr)
+		}
 	}
 	return nil
 }
