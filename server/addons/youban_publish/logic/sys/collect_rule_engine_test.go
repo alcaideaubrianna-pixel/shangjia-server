@@ -335,6 +335,44 @@ func TestApplyCollectIntroFeeTruncate(t *testing.T) {
 	}
 }
 
+func TestCollectMaterialCodeLineRule(t *testing.T) {
+	for _, text := range []string{
+		"A12", "Lemon052", "柠檬052", "柠檬052 来源标题", "ABCDE1234567890尾标", "中文标题八个字12后缀",
+	} {
+		if !collectMaterialCodeLineRule.MatchString(text) {
+			t.Fatalf("%q should match material code title rule", text)
+		}
+	}
+	for _, text := range []string{
+		"A1", "ABCDEF12", "中文标题超过八个字12", "A12345678901", "普通正文",
+	} {
+		if collectMaterialCodeLineRule.MatchString(text) {
+			t.Fatalf("%q should not match material code title rule", text)
+		}
+	}
+}
+
+func TestApplyCollectIntroFeeTruncateRemovesCodeTitlePrefix(t *testing.T) {
+	for _, title := range []string{"A12", "Lemon052", "柠檬052", "柠檬052 来源标题"} {
+		text := "正文必须保留\n" + title + "\n介绍费：7888"
+		if got, want := applyCollectIntroFeeTruncate(text), "正文必须保留"; got != want {
+			t.Fatalf("title %q was not cleaned: got %q, want %q", title, got, want)
+		}
+	}
+}
+
+func TestApplyCollectIntroFeeTruncateOnlyMatchesCodeTitleInFirstThreeLines(t *testing.T) {
+	thirdLine := "第一行正文\n第二行正文\n柠檬052\n介绍费：7888"
+	if got, want := applyCollectIntroFeeTruncate(thirdLine), "第一行正文\n第二行正文"; got != want {
+		t.Fatalf("third-line code title was not cleaned: got %q, want %q", got, want)
+	}
+
+	fourthLine := "第一行正文\n第二行正文\n第三行正文\n柠檬052\n介绍费：7888"
+	if got, want := applyCollectIntroFeeTruncate(fourthLine), "第一行正文\n第二行正文\n第三行正文\n柠檬052"; got != want {
+		t.Fatalf("fourth-line code title must be preserved: got %q, want %q", got, want)
+	}
+}
+
 func TestApplyCollectIntroFeeSuffix(t *testing.T) {
 	tests := []struct {
 		name     string

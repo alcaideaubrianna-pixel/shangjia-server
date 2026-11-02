@@ -17,7 +17,7 @@ var (
 	collectUsernamePattern           = regexp.MustCompile(`@`)
 	collectStandaloneCodeCaptionRule = regexp.MustCompile(`^[A-Za-z]{1,4}\d{3,6}$`)
 	collectMaterialMetaLineRule      = regexp.MustCompile(`^\s*(?:标题|昵称|编号|编码|同行)\s*(?:[:：=].*)?\s*$`)
-	collectMaterialCodeLineRule      = regexp.MustCompile(`^\s*(?:(?:[A-Za-z]{1,8}[-_ ]?\d{3,10}|[\p{Han}]{1,8}\d{3,10})(?:\s+|$))+\s*$`)
+	collectMaterialCodeLineRule      = regexp.MustCompile(`^\s*(?:[A-Za-z]{1,5}|[\p{Han}]{1,8})[-_ ]?[0-9０-９]{2,10}(?:[^0-9０-９]|$)`)
 	collectIntroFeeAmountRule        = regexp.MustCompile(`(?:(?:介绍|推荐|牵线|居间|对接|感谢)费(?:用)?|大米|中介(?:服务)?费(?:用)?)[\s\p{Zs}]*[:：=；;，,]?[\s\p{Zs}]*([¥￥]?[\s\p{Zs}]*\d[\d,.]*(?:[\s\p{Zs}]*(?:元|万))?)`)
 	collectIntroFeeLooseAmountRule   = regexp.MustCompile(`(?:(?:介绍|推荐|牵线|居间|对接|感谢)费(?:用)?|大米|中介(?:服务)?费(?:用)?)[^0-9０-９]{0,32}([¥￥]?[\s\p{Zs}]*[0-9０-９][0-9０-９,，.]*)`)
 	collectNumberRule                = regexp.MustCompile(`[0-9０-９]+`)
@@ -247,7 +247,7 @@ func applyCollectFeeScopedRules(text string, rule gdb.Record, truncate bool) str
 		}
 		window := strings.Join(lines[index:end], "\n")
 		if truncate {
-			window = applyCollectIntroFeeTruncate(window)
+			window = applyCollectIntroFeeTruncateAt(window, index)
 		}
 		window = applyCollectLineDeletes(window, collectRuleStrings(rule, "delete_lines"))
 		window = applyCollectTextDeletes(window, collectRuleStrings(rule, "delete_texts"))
@@ -511,6 +511,10 @@ func applyCollectLineDeletes(text string, values []string) string {
 }
 
 func applyCollectIntroFeeTruncate(text string) string {
+	return applyCollectIntroFeeTruncateAt(text, 0)
+}
+
+func applyCollectIntroFeeTruncateAt(text string, lineOffset int) string {
 	normalized := strings.ReplaceAll(text, "\r\n", "\n")
 	lines := strings.Split(normalized, "\n")
 	changed := false
@@ -532,7 +536,7 @@ func applyCollectIntroFeeTruncate(text string) string {
 	firstContentLine := true
 	for start < len(lines) {
 		line := strings.TrimSpace(lines[start])
-		if line == "" || collectMaterialMetaLineRule.MatchString(line) || collectMaterialCodeLineRule.MatchString(line) || (firstContentLine && isCollectMaterialAlphaNumericCode(line)) {
+		if line == "" || collectMaterialMetaLineRule.MatchString(line) || (lineOffset+start < 3 && collectMaterialCodeLineRule.MatchString(line)) || (lineOffset+start < 3 && firstContentLine && isCollectMaterialAlphaNumericCode(line)) {
 			start++
 			changed = true
 			continue
@@ -541,9 +545,9 @@ func applyCollectIntroFeeTruncate(text string) string {
 		break
 	}
 	kept := make([]string, 0, len(lines)-start)
-	for _, line := range lines[start:] {
+	for index, line := range lines[start:] {
 		trimmed := strings.TrimSpace(line)
-		if collectMaterialMetaLineRule.MatchString(trimmed) || isCollectIntroFeeSourceMarkLine(trimmed) {
+		if collectMaterialMetaLineRule.MatchString(trimmed) || (lineOffset+start+index < 3 && collectMaterialCodeLineRule.MatchString(trimmed)) || isCollectIntroFeeSourceMarkLine(trimmed) {
 			changed = true
 			continue
 		}
