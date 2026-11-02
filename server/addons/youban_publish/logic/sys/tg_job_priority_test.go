@@ -73,6 +73,7 @@ func TestTelegramJobPriorityClassifiesPublishOperations(t *testing.T) {
 		want        int
 	}{
 		{name: "manual profile", operationNo: "profile:123", want: tgJobPriorityInteractive},
+		{name: "manual profile edit", operationNo: "edit:123:request", want: tgJobPriorityInteractive},
 		{name: "BOT manual profile", operationNo: "bot_publish:20:123456:123:456", want: tgJobPriorityInteractive},
 		{name: "manual batch", operationNo: "batchtext:1:batch-1:profile:123", want: tgJobPriorityInteractive},
 		{name: "message push", operationNo: "message_push:1:2:3", want: tgJobPriorityUrgent},
@@ -114,6 +115,9 @@ func TestTelegramChannelAllowsOnlyOneActiveJob(t *testing.T) {
 	expression := telegramJobEffectivePrioritySQL("j")
 	if !strings.Contains(expression, "j.status = 'unknown'") {
 		t.Fatalf("effective priority SQL does not prioritize unknown reconciliation jobs: %s", expression)
+	}
+	if !strings.Contains(expression, "LIKE 'edit:%'") || !strings.Contains(expression, "THEN 1") {
+		t.Fatalf("effective priority SQL does not prioritize existing edit jobs: %s", expression)
 	}
 	if !strings.Contains(expression, "j.operation_no LIKE 'full_push:%'") || !strings.Contains(expression, "THEN 70") {
 		t.Fatalf("effective priority SQL does not prioritize existing full push jobs: %s", expression)

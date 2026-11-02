@@ -4,7 +4,7 @@ import "testing"
 
 func TestTelegramJobBypassesAutomaticSchedule(t *testing.T) {
 	for _, operationNo := range []string{
-		"profile:1", "batchtext:1", "bot_publish:20:123:1:456",
+		"profile:1", "edit:1:request", "batchtext:1", "bot_publish:20:123:1:456",
 	} {
 		if !telegramJobBypassesAutomaticSchedule(telegramJobRecord{OperationNo: operationNo}) {
 			t.Fatalf("manual operation %q must bypass automatic window and interval", operationNo)

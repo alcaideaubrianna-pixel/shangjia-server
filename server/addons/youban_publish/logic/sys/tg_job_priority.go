@@ -48,8 +48,8 @@ func telegramJobEffectivePrioritySQL(alias string) string {
 		prefix = strings.TrimSpace(alias) + "."
 	}
 	return fmt.Sprintf(
-		"CASE WHEN %sstatus = 'unknown' THEN %d WHEN %soperation_no LIKE 'full_push:%%' THEN %d WHEN %soperation_no LIKE 'cycle_batch:%%' THEN %d ELSE %spriority END",
-		prefix, tgJobPriorityUrgent, prefix, tgJobPriorityFullPush, prefix, tgJobPriorityBulk, prefix,
+		"CASE WHEN %sstatus = 'unknown' THEN %d WHEN LOWER(TRIM(%soperation_no)) LIKE 'edit:%%' THEN %d WHEN %soperation_no LIKE 'full_push:%%' THEN %d WHEN %soperation_no LIKE 'cycle_batch:%%' THEN %d ELSE %spriority END",
+		prefix, tgJobPriorityUrgent, prefix, tgJobPriorityInteractive, prefix, tgJobPriorityFullPush, prefix, tgJobPriorityBulk, prefix,
 	)
 }
 

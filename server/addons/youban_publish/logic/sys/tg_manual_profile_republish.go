@@ -11,6 +11,7 @@ import (
 func isInteractiveProfilePublishOperation(operationNo string) bool {
 	operationNo = strings.ToLower(strings.TrimSpace(operationNo))
 	return strings.HasPrefix(operationNo, "profile:") ||
+		strings.HasPrefix(operationNo, "edit:") ||
 		strings.HasPrefix(operationNo, botProfilePublishOperationPrefix) ||
 		strings.HasPrefix(operationNo, "batchtext:")
 }
