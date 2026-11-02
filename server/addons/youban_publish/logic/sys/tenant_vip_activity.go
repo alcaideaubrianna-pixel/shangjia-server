@@ -406,6 +406,7 @@ func (s *sSysPublish) applyTenantVipExtension(ctx context.Context, in *tenantVip
 			_, _ = cache.Instance().Remove(ctx, tenantVipCacheKey(in.TenantId))
 			_, _ = cache.Instance().Remove(ctx, tenantVipFullCacheKey(in.TenantId))
 		}
+		s.enqueueTenantProfileCycleReschedules(ctx, in.TenantId, "会员生效")
 		if notifyErr := s.notifyTenantVipEvent(ctx, result.EventId); notifyErr != nil {
 			g.Log().Warningf(ctx, "会员通知发送失败 eventId:%d err:%+v", result.EventId, notifyErr)
 		}
@@ -496,6 +497,7 @@ func (s *sSysPublish) applyTenantVipUntil(ctx context.Context, tenantId int64, l
 	}
 	_, _ = cache.Instance().Remove(ctx, tenantVipCacheKey(tenantId))
 	_, _ = cache.Instance().Remove(ctx, tenantVipFullCacheKey(tenantId))
+	s.enqueueTenantProfileCycleReschedules(ctx, tenantId, "会员调整")
 	if notifyErr := s.notifyTenantVipEvent(ctx, result.EventId); notifyErr != nil {
 		g.Log().Warningf(ctx, "会员调整通知失败 eventId:%d err:%+v", result.EventId, notifyErr)
 	}
@@ -978,15 +980,7 @@ func (s *sSysPublish) processExpiredTenantVip(ctx context.Context, vip *entity.Y
 	if result.Applied {
 		_, _ = cache.Instance().Remove(ctx, tenantVipCacheKey(vip.TenantId))
 		_, _ = cache.Instance().Remove(ctx, tenantVipFullCacheKey(vip.TenantId))
-		var channelIds []int64
-		if loadErr := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).Fields("id").Where("tenant_id", vip.TenantId).Where("cycle_publish_enabled", 1).WhereNull("deleted_at").Scan(&channelIds); loadErr != nil {
-			g.Log().Warningf(ctx, "读取会员到期循环重算频道失败 tenantId:%d err:%+v", vip.TenantId, loadErr)
-		}
-		for _, channelId := range uniqueIds(channelIds) {
-			if enqueueErr := s.enqueueCycleReschedule(ctx, channelId, 0); enqueueErr != nil {
-				g.Log().Warningf(ctx, "提交会员到期循环重算失败 channel:%d err:%+v", channelId, enqueueErr)
-			}
-		}
+		s.enqueueTenantProfileCycleReschedules(ctx, vip.TenantId, "会员到期")
 	}
 	if result.Applied && result.EventId > 0 {
 		if notifyErr := s.notifyTenantVipEvent(ctx, result.EventId); notifyErr != nil {
@@ -994,6 +988,30 @@ func (s *sSysPublish) processExpiredTenantVip(ctx context.Context, vip *entity.Y
 		}
 	}
 	return nil
+}
+
+func (s *sSysPublish) enqueueTenantProfileCycleReschedules(ctx context.Context, tenantId int64, reason string) {
+	if tenantId <= 0 {
+		return
+	}
+	var channelIds []int64
+	if err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
+		Fields("id").
+		Where("tenant_id", tenantId).
+		Where("cycle_publish_enabled", 1).
+		Where("status", 1).
+		Where("publish_direction", "up").
+		Where("cycle_publish_mode", "time").
+		WhereNull("deleted_at").
+		Scan(&channelIds); err != nil {
+		g.Log().Warningf(ctx, "读取%s循环重算频道失败 tenantId:%d err:%+v", reason, tenantId, err)
+		return
+	}
+	for _, channelId := range uniqueIds(channelIds) {
+		if err := s.enqueueCycleReschedule(ctx, channelId, 0); err != nil {
+			g.Log().Warningf(ctx, "提交%s循环重算失败 tenantId:%d channel:%d err:%+v", reason, tenantId, channelId, err)
+		}
+	}
 }
 
 func downgradeTenantBatchCyclesTx(ctx context.Context, tx gdb.TX, tenantId int64, now *gtime.Time) ([]int64, error) {

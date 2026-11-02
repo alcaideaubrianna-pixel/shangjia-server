@@ -16,17 +16,18 @@ import (
 )
 
 const (
-	profileCycleScanBatchSize       = 200
-	profileCycleMaxProducePerRun    = 5000
-	profileCycleGlobalBacklogLimit  = 3000
-	profileCycleChannelBacklogLimit = 200
-	profileCycleClaimLease          = 2 * time.Hour
-	profileCycleRetryDelay          = time.Hour
-	profileCycleFailureThreshold    = 3
-	profileCycleRescheduleBatchSize = 500
-	profileCycleOverdueSpreadWindow = 4 * time.Hour
-	profileCycleDevelopSpreadWindow = 5 * time.Minute
-	profileCycleSummaryRefreshDelay = 30 * time.Second
+	profileCycleScanBatchSize        = 200
+	profileCycleMaxProducePerRun     = 5000
+	profileCycleGlobalBacklogLimit   = 3000
+	profileCycleChannelBacklogLimit  = 200
+	profileCycleClaimLease           = 2 * time.Hour
+	profileCycleRetryDelay           = time.Hour
+	profileCycleFailureThreshold     = 3
+	profileCycleRescheduleBatchSize  = 500
+	profileCycleOverdueSpreadWindow  = 4 * time.Hour
+	profileCycleDevelopSpreadWindow  = 5 * time.Minute
+	profileCycleSummaryRefreshDelay  = 30 * time.Second
+	profileCycleRescheduleClaimLease = 30 * time.Minute
 )
 
 type profileCycleChannelConfig struct {
@@ -407,7 +408,11 @@ func (s *sSysPublish) enqueuePendingProfileCycleReschedules(ctx context.Context,
 		return gerror.Wrap(err, "读取待恢复频道循环重算任务失败")
 	}
 	for _, channelId := range channelIds {
+		if err = s.claimChannelProfileCycleReschedule(ctx, channelId); err != nil {
+			return gerror.Wrapf(err, "领取待恢复频道循环重算任务失败 channel:%d", channelId)
+		}
 		if err = s.enqueueCycleReschedule(ctx, channelId, 0); err != nil {
+			s.releaseChannelProfileCycleReschedule(ctx, channelId)
 			return gerror.Wrapf(err, "提交待恢复频道循环重算任务失败 channel:%d", channelId)
 		}
 	}
@@ -437,11 +442,41 @@ func (s *sSysPublish) enqueueDueProfileCycleReschedules(ctx context.Context, lim
 		return gerror.Wrap(err, "读取到期时间循环恢复频道失败")
 	}
 	for _, channelId := range channelIds {
+		if err = s.claimChannelProfileCycleReschedule(ctx, channelId); err != nil {
+			return gerror.Wrapf(err, "领取到期时间循环恢复任务失败 channel:%d", channelId)
+		}
 		if err = s.enqueueCycleReschedule(ctx, channelId, 0); err != nil {
+			s.releaseChannelProfileCycleReschedule(ctx, channelId)
 			return gerror.Wrapf(err, "提交到期时间循环恢复任务失败 channel:%d", channelId)
 		}
 	}
 	return nil
+}
+
+// claimChannelProfileCycleReschedule moves the channel checkpoint forward after
+// enqueueing. Without this lease every scheduler tick selects the same oldest
+// channels, starving later channels when a rebuild is slow or retrying.
+func (s *sSysPublish) claimChannelProfileCycleReschedule(ctx context.Context, channelId int64) error {
+	if channelId <= 0 {
+		return nil
+	}
+	_, err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
+		Where("id", channelId).
+		Where("cycle_publish_mode", "time").
+		Data(g.Map{"cycle_next_run_at": gtime.Now().Add(profileCycleRescheduleClaimLease)}).
+		Update()
+	return err
+}
+
+func (s *sSysPublish) releaseChannelProfileCycleReschedule(ctx context.Context, channelId int64) {
+	if channelId <= 0 {
+		return
+	}
+	_, _ = g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
+		Where("id", channelId).
+		Where("cycle_publish_mode", "time").
+		Data(g.Map{"cycle_next_run_at": gtime.Now()}).
+		Update()
 }
 
 func (s *sSysPublish) profileCycleDueRows(ctx context.Context, limit int) ([]profileCycleDueRow, error) {
