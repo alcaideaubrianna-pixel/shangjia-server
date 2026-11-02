@@ -119,7 +119,6 @@ func parsePublishRuntimeRoles(values []string) publishRuntimeConfig {
 			config.BackgroundWorker = true
 			config.BackgroundQueue = true
 		case runrole.CollectorWorker:
-			config.BackgroundWorker = true
 			config.CollectorWorker = true
 		}
 	}

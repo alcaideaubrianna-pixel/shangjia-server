@@ -23,7 +23,7 @@ func TestParsePublishRuntimeRoles(t *testing.T) {
 			name:   "collector only",
 			values: []string{"collector-worker"},
 			want: publishRuntimeConfig{
-				Roles: []string{"collector-worker"}, BackgroundWorker: true, CollectorWorker: true,
+				Roles: []string{"collector-worker"}, CollectorWorker: true,
 			},
 		},
 		{

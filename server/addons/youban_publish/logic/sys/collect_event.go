@@ -963,8 +963,6 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 			"source_chat_id_snapshot":    event["source_chat_id"].String(),
 			"source_message_id_snapshot": event["source_message_id"].Int64(),
 			"match_json":                 decision.MatchJSON, "status": sysin.CollectDispatchStatusPending,
-			"worker_role": workerIdentity.Role, "worker_instance_id": workerIdentity.InstanceID,
-			"worker_revision": workerIdentity.Revision, "worker_image_digest": workerIdentity.ImageDigest,
 			"created_at": now, "updated_at": now,
 		}).InsertAndGetId()
 		if txErr != nil {
@@ -980,6 +978,12 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 	}
 	if !concurrentDispatch.IsEmpty() {
 		return s.resumeExistingCollectDispatch(ctx, concurrentDispatch, event, content, rule, decision.Text)
+	}
+	if _, auditErr := pdao.YoubanPublishCollectDispatch.Ctx(ctx).WherePri(dispatchId).Data(g.Map{
+		"worker_role": workerIdentity.Role, "worker_instance_id": workerIdentity.InstanceID,
+		"worker_revision": workerIdentity.Revision, "worker_image_digest": workerIdentity.ImageDigest,
+	}).Update(); auditErr != nil {
+		g.Log().Warningf(ctx, "记录采集分发Worker身份失败，不影响资料处理 dispatchId:%d err:%+v", dispatchId, auditErr)
 	}
 	if rule["review_enabled"].Int() == 1 {
 		if err = s.createCollectReview(ctx, event, content, rule, dispatchId, decision.Text); err != nil {

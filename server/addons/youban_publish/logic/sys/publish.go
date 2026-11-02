@@ -43,6 +43,7 @@ type sSysPublish struct {
 	autoDeleteBackfillServer  *asynq.Server
 	attemptTimeoutServer      *asynq.Server
 	collectRealtimeServer     *asynq.Server
+	collectProcessQueueServer *asynq.Server
 	backgroundQueueServer     *asynq.Server
 	materialImportPullServer  *asynq.Server
 	materialImportMediaServer *asynq.Server

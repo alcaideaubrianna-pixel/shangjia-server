@@ -71,15 +71,20 @@ func completeCollectProcessOutbox(ctx context.Context, payload collectProcessQue
 	if eventID <= 0 || payload.OutboxOwner == "" {
 		return
 	}
-	identity := currentCollectWorkerIdentity(ctx)
 	if _, err := g.DB().Model(collectProcessOutboxTable).Ctx(ctx).Where("event_id", eventID).Where("status", "processing").Where("lease_owner", payload.OutboxOwner).Data(g.Map{
 		"status": "delivered", "lease_owner": "", "lease_expires_at": nil,
 		"delivered_at": gtime.Now(), "updated_at": gtime.Now(),
+	}).Update(); err != nil {
+		g.Log().Warningf(ctx, "确认采集处理Outbox完成失败 eventId:%d err:%+v", eventID, err)
+		return
+	}
+	identity := currentCollectWorkerIdentity(ctx)
+	if _, err := g.DB().Model(collectProcessOutboxTable).Ctx(ctx).Where("event_id", eventID).Data(g.Map{
 		"worker_role": identity.Role, "worker_instance_id": identity.InstanceID,
 		"worker_revision": identity.Revision, "worker_image_digest": identity.ImageDigest,
 		"worker_finished_at": gtime.Now(),
 	}).Update(); err != nil {
-		g.Log().Warningf(ctx, "确认采集处理Outbox完成失败 eventId:%d err:%+v", eventID, err)
+		g.Log().Warningf(ctx, "记录采集处理Worker身份失败，不影响Outbox完成 eventId:%d err:%+v", eventID, err)
 	}
 }
 

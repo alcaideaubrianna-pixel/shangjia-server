@@ -77,9 +77,44 @@ func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
 	}()
 }
 
-func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context, collectorWorker, backgroundWorker bool) {
+func (s *sSysPublish) startCollectProcessWorker(ctx context.Context) {
 	s.tgQueueMu.Lock()
-	if s.autoDeleteQueueServer != nil || s.autoDeleteBackfillServer != nil || s.attemptTimeoutServer != nil || s.collectRealtimeServer != nil || s.backgroundQueueServer != nil || s.materialImportPullServer != nil || s.cycleQueueServer != nil {
+	if s.collectRealtimeServer != nil || s.collectProcessQueueServer != nil {
+		s.tgQueueMu.Unlock()
+		return
+	}
+	realtimeServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
+		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.collectRealtimeConcurrency", 16).Int(),
+		Queues:         map[string]int{tgQueueNameCollectProcessRealtimeV2: 1},
+		RetryDelayFunc: telegramQueueRetryDelay,
+	})
+	processServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
+		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.backgroundConcurrency", 4).Int(),
+		Queues:         collectProcessWorkerQueues(),
+		RetryDelayFunc: telegramQueueRetryDelay,
+	})
+	s.collectRealtimeServer = realtimeServer
+	s.collectProcessQueueServer = processServer
+	s.tgQueueMu.Unlock()
+
+	mux := asynq.NewServeMux()
+	mux.HandleFunc(tgTaskTypeCollectProcess, s.handleCollectProcessTask)
+	g.Log().Infof(ctx, "启动采集处理队列 queues:%v", collectProcessWorkerQueues())
+	go func() {
+		if err := realtimeServer.Run(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
+			g.Log().Errorf(ctx, "启动实时采集处理队列失败：%+v", err)
+		}
+	}()
+	go func() {
+		if err := processServer.Run(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
+			g.Log().Errorf(ctx, "启动采集处理队列失败：%+v", err)
+		}
+	}()
+}
+
+func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
+	s.tgQueueMu.Lock()
+	if s.autoDeleteQueueServer != nil || s.autoDeleteBackfillServer != nil || s.attemptTimeoutServer != nil || s.backgroundQueueServer != nil || s.materialImportPullServer != nil || s.cycleQueueServer != nil {
 		s.tgQueueMu.Unlock()
 		return
 	}
@@ -98,15 +133,7 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context, collect
 		Queues:         map[string]int{tgQueueNameAttemptTimeout: 1},
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
-	var collectRealtimeServer *asynq.Server
-	workerQueues := backgroundWorkerQueues(collectorWorker, backgroundWorker)
-	if collectorWorker {
-		collectRealtimeServer = asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
-			Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.collectRealtimeConcurrency", 16).Int(),
-			Queues:         map[string]int{tgQueueNameCollectProcessRealtimeV2: 1},
-			RetryDelayFunc: telegramQueueRetryDelay,
-		})
-	}
+	workerQueues := backgroundWorkerQueues(false, true)
 	server := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
 		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.backgroundConcurrency", 4).Int(),
 		Queues:         workerQueues,
@@ -143,11 +170,10 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context, collect
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
 	relayServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{Concurrency: g.Cfg().MustGet(ctx, "youbanPublish.queue.relayConcurrency", 4).Int(), Queues: map[string]int{tgQueueNameRelay: 1}, RetryDelayFunc: telegramQueueRetryDelay})
-	g.Log().Infof(ctx, "启动上架插件后台队列，自动删除独立并发：%d collectorWorker:%t backgroundWorker:%t queues:%v", telegramAutoDeleteConcurrency(ctx), collectorWorker, backgroundWorker, workerQueues)
+	g.Log().Infof(ctx, "启动上架插件后台队列，自动删除独立并发：%d queues:%v", telegramAutoDeleteConcurrency(ctx), workerQueues)
 	s.autoDeleteQueueServer = autoDeleteServer
 	s.autoDeleteBackfillServer = autoDeleteBackfillServer
 	s.attemptTimeoutServer = attemptTimeoutServer
-	s.collectRealtimeServer = collectRealtimeServer
 	s.backgroundQueueServer = server
 	s.materialImportPullServer = materialImportPullServer
 	s.cycleQueueServer = cycleServer
@@ -169,9 +195,6 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context, collect
 	backgroundMux.HandleFunc(tgTaskTypeCycleRun, s.handleCycleRunTask)
 	backgroundMux.HandleFunc(tgTaskTypeCycleReschedule, s.handleCycleRescheduleTask)
 	backgroundMux.HandleFunc(tgTaskTypeCycleRefresh, s.handleCycleRefreshTask)
-	if collectorWorker {
-		backgroundMux.HandleFunc(tgTaskTypeCollectProcess, s.handleCollectProcessTask)
-	}
 	backgroundMux.HandleFunc(tgTaskTypeCollectTrigger, s.handleCollectTriggerTask)
 	backgroundMux.HandleFunc(tgTaskTypeChannelMemberSync, s.handleChannelMemberSyncTask)
 	backgroundMux.HandleFunc(tgTaskTypeCollectSourceDown, s.handleCollectSourceDownTask)
@@ -201,10 +224,6 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context, collect
 	autoDeleteBackfillMux.HandleFunc(tgTaskTypeAutoDeleteBackfill, s.handleTelegramAutoDeleteBackfillTask)
 	attemptTimeoutMux := asynq.NewServeMux()
 	attemptTimeoutMux.HandleFunc(tgTaskTypeAttemptTimeout, s.handleTelegramAttemptTimeoutTask)
-	collectRealtimeMux := asynq.NewServeMux()
-	if collectorWorker {
-		collectRealtimeMux.HandleFunc(tgTaskTypeCollectProcess, s.handleCollectProcessTask)
-	}
 	profileMux := asynq.NewServeMux()
 	profileMux.HandleFunc(tgTaskTypeProfileMaintenance, s.handleProfileMaintenanceTask)
 	profileMux.HandleFunc(tgTaskTypeProfileSubmit, s.handleProfileSubmitTask)
@@ -226,13 +245,6 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context, collect
 			g.Log().Errorf(ctx, "启动TG Attempt超时队列失败：%+v", err)
 		}
 	}()
-	if collectRealtimeServer != nil {
-		go func() {
-			if err := collectRealtimeServer.Run(collectRealtimeMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
-				g.Log().Errorf(ctx, "启动实时采集处理队列失败：%+v", err)
-			}
-		}()
-	}
 	go func() {
 		if err := server.Run(backgroundMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
 			g.Log().Errorf(ctx, "启动上架插件后台队列失败：%+v", err)
@@ -383,7 +395,9 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	autoDeleteBackfillServer := s.autoDeleteBackfillServer
 	attemptTimeoutServer := s.attemptTimeoutServer
 	collectRealtimeServer := s.collectRealtimeServer
+	collectProcessServer := s.collectProcessQueueServer
 	backgroundServer := s.backgroundQueueServer
+	relayServer := s.relayQueueServer
 	materialImportPullServer := s.materialImportPullServer
 	materialImportMediaServer := s.materialImportMediaServer
 	cycleServer := s.cycleQueueServer
@@ -403,7 +417,9 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	s.autoDeleteBackfillServer = nil
 	s.attemptTimeoutServer = nil
 	s.collectRealtimeServer = nil
+	s.collectProcessQueueServer = nil
 	s.backgroundQueueServer = nil
+	s.relayQueueServer = nil
 	s.materialImportPullServer = nil
 	s.materialImportMediaServer = nil
 	s.cycleQueueServer = nil
@@ -446,6 +462,9 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	if collectRealtimeServer != nil {
 		collectRealtimeServer.Shutdown()
 	}
+	if collectProcessServer != nil {
+		collectProcessServer.Shutdown()
+	}
 	if backgroundServer != nil {
 		backgroundServer.Shutdown()
 	}
@@ -469,6 +488,9 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	}
 	if mattingServer != nil {
 		mattingServer.Shutdown()
+	}
+	if relayServer != nil {
+		relayServer.Shutdown()
 	}
 	if client != nil {
 		_ = client.Close()

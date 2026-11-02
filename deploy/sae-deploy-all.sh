@@ -64,7 +64,7 @@ declare -A COMMAND_ARGS=(
 if (( $# > 1 )); then
   ROLES=("${@:2}")
 else
-  ROLES=(web background collector media publish scheduler account)
+  ROLES=(web collector background media publish scheduler account)
 fi
 for role in "${ROLES[@]}"; do
   [[ -n "${APP_IDS[$role]:-}" ]] || { echo "unknown role: $role" >&2; exit 2; }
