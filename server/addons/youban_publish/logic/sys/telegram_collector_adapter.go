@@ -325,6 +325,10 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 	if err != nil {
 		return err
 	}
+	ctx = telegramPublishTraceContext(ctx, job.Id, g.Map{
+		"source": "account_fallback", "accountTaskId": task.ID, "tgAccountId": task.AccountID,
+	})
+	ctx = telegramPublishJobTraceContext(ctx, job)
 	stage("读取任务与Job", "purpose", purpose, "jobStatus", job.Status)
 	if job.Status == telegramJobStatusSuperseded {
 		return nil
@@ -470,6 +474,7 @@ func (s *sSysPublish) sendAccountFallbackPhase(ctx context.Context, client *tele
 		return nil, err
 	}
 	if err = s.confirmTelegramAPISuccess(ctx, job, attempt, messages); err != nil {
+		g.Log().Warningf(ctx, "协议号媒体发送成功但本地确认失败 jobId:%d attemptId:%d purpose:%s messageCount:%d err:%+v", job.Id, attempt.Id, purpose, len(messages), err)
 		return nil, telegramDeliveryUncertainError(err)
 	}
 	if err = s.updateTelegramMediaFileIds(ctx, messages); err != nil {
@@ -707,7 +712,10 @@ func (s *sSysPublish) handleMessageReconcileAccountTask(ctx context.Context, cli
 	job.Status = nextStatus
 	job.SendPhase = confirmedPhase
 	if attempt.Phase == "display" {
-		return s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 0, false)
+		// Re-arm the durable intent instead of competing directly with a later
+		// queued channel job. The outbox scheduler will restore this partially
+		// published job as the channel head and resume verification delivery.
+		return s.rearmTelegramJobOutbox(ctx, job.Id, 0)
 	}
 	return s.finalizeTelegramMediaDelivery(ctx, job, true, true)
 }

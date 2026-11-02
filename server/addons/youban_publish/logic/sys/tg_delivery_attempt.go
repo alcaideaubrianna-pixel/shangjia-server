@@ -1221,7 +1221,9 @@ func (s *sSysPublish) confirmTelegramAttemptFromWebhook(ctx context.Context, att
 		s.projectTelegramDeliveryAttempt(ctx, attempt, "")
 	}
 	if current, err := s.telegramJobById(ctx, job.Id); err == nil && current.Status == "failed_retry" {
-		_ = s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 0, false)
+		if rearmErr := s.rearmTelegramJobOutbox(ctx, job.Id, 0); rearmErr != nil {
+			g.Log().Warningf(ctx, "Webhook确认展示消息后恢复TG任务Outbox失败 jobId:%d attemptId:%d err:%+v", job.Id, attempt.Id, rearmErr)
+		}
 	}
 }
 

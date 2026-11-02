@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
-	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
 )
 
 func TestTelegramAPITimeoutFallback(t *testing.T) {
@@ -22,9 +21,18 @@ func TestTelegramAPITimeoutFallback(t *testing.T) {
 	if isTelegramAPITimeout(errors.New("bad request")) {
 		t.Fatal("rejection is not a timeout")
 	}
-	minimum := telegramBotMediaSendTimeout + telegramReconcileTakeoverWait + collectorin.AccountTaskMessageMediaFallbackTimeout
-	if telegramSendBudget <= minimum {
-		t.Fatalf("publication budget %s must exceed component budget %s", telegramSendBudget, minimum)
+	if telegramSendBudget != 21*time.Minute {
+		t.Fatalf("publication budget %s must enforce the 21 minute channel deadline", telegramSendBudget)
+	}
+}
+
+func TestTelegramSendBudgetBackfillUsesChannelDeadline(t *testing.T) {
+	source, err := os.ReadFile("tg_send_watchdog.go")
+	if err != nil {
+		t.Fatalf("read watchdog source: %v", err)
+	}
+	if !strings.Contains(string(source), "INTERVAL '21 minutes'") {
+		t.Fatal("legacy send deadline backfill must use the same 21 minute channel deadline")
 	}
 }
 
