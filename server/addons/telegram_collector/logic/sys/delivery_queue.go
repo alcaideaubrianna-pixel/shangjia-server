@@ -45,20 +45,31 @@ func (s *sCollector) StartDeliveryRuntime(ctx context.Context) {
 	server := asynq.NewServer(collectorRedisOption(runtimeCtx), asynq.Config{
 		Concurrency: collectorDeliveryConcurrency(runtimeCtx),
 		Queues: map[string]int{
-			consts.QueueDeliveryUrgent: 8,
-			consts.QueueDeliveryReady:  2,
+			consts.QueueDeliveryUrgent:   8,
+			consts.QueueDeliveryRealtime: 2,
 		},
 	})
 	if s.queueClient == nil {
 		s.queueClient = asynq.NewClient(collectorRedisOption(runtimeCtx))
 	}
+	historyServer := asynq.NewServer(collectorRedisOption(runtimeCtx), asynq.Config{
+		Concurrency: 1,
+		Queues:      map[string]int{consts.QueueDeliveryHistory: 1, consts.QueueDeliveryReady: 1},
+	})
 	s.deliveryServer = server
+	s.deliveryHistoryServer = historyServer
 	s.queueMu.Unlock()
 
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(deliveryTaskType, s.handleDeliveryTask)
 	g.Log().Infof(runtimeCtx, "启动Telegram Delivery Worker concurrency:%d", collectorDeliveryConcurrency(runtimeCtx))
-	s.runtimeWG.Add(2)
+	s.runtimeWG.Add(3)
+	go func() {
+		defer s.runtimeWG.Done()
+		if err := historyServer.Run(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
+			g.Log().Warningf(runtimeCtx, "Telegram历史交付Worker停止：%+v", err)
+		}
+	}()
 	go func() {
 		defer s.runtimeWG.Done()
 		if err := server.Run(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
@@ -81,10 +92,7 @@ func (s *sCollector) enqueueDeliveryTask(ctx context.Context, deliveryID int64, 
 	}
 	client := s.queueClient
 	s.queueMu.Unlock()
-	queueName := consts.QueueDeliveryReady
-	if priority >= sysin.EventPriorityUrgent {
-		queueName = consts.QueueDeliveryUrgent
-	}
+	queueName := deliveryQueueName(priority)
 	_, err := client.EnqueueContext(ctx, asynq.NewTask(deliveryTaskType, collectorTaskPayload(deliveryID)),
 		asynq.Queue(queueName),
 		asynq.MaxRetry(deliveryMaxAttempts-1),
@@ -101,6 +109,24 @@ func (s *sCollector) handleDeliveryTask(ctx context.Context, task *asynq.Task) e
 	deliveryID, err := parseCollectorTaskID(task.Payload(), "交付")
 	if err != nil {
 		return err
+	}
+	queue, _ := asynq.GetQueueName(ctx)
+	if queue == consts.QueueDeliveryReady || queue == consts.QueueDeliveryHistory {
+		timer := time.NewTimer(collectorDeliveryHistoryInterval(ctx))
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	if queue == consts.QueueDeliveryReady {
+		priority, err := s.persistedDeliveryPriority(ctx, deliveryID)
+		if err != nil {
+			return err
+		}
+		// ACK legacy work only after the classified task is durably enqueued.
+		return s.enqueueDeliveryTask(ctx, deliveryID, priority)
 	}
 	startedAt := time.Now()
 	if err = s.processDelivery(ctx, deliveryID); err != nil {
@@ -153,6 +179,14 @@ func (s *sCollector) processDelivery(ctx context.Context, deliveryID int64) erro
 	delivery, err := collectorDeliveryFromEvent(&event, []byte(event.RawUpdate.String()))
 	if err != nil {
 		return s.failDelivery(ctx, deliveryID, err)
+	}
+	class := "realtime"
+	if delivery.History {
+		class = "history"
+	}
+	if row.CreatedAt != nil {
+		wait, _ := collectorMeter.Float64Histogram("telegram_collector_delivery_queue_wait_seconds")
+		wait.Record(ctx, time.Since(row.CreatedAt.Time).Seconds(), metric.WithAttributes(attribute.String("class", class)))
 	}
 	delivery.ID = deliveryID
 	delivery.DeliveryKey = row.DeliveryKey
@@ -307,7 +341,11 @@ func (s *sCollector) enqueueDueDeliveryTasks(ctx context.Context, limit int) err
 		if deliveryID <= 0 || status == "" {
 			continue
 		}
-		if updateErr := s.enqueueDeliveryTask(ctx, deliveryID, row[columns.Priority].Int()); updateErr != nil {
+		priority, priorityErr := s.persistedDeliveryPriority(ctx, deliveryID)
+		if priorityErr != nil {
+			return priorityErr
+		}
+		if updateErr := s.enqueueDeliveryTask(ctx, deliveryID, priority); updateErr != nil {
 			return gerror.Wrap(updateErr, "投递待恢复Telegram采集交付失败")
 		}
 	}
@@ -320,4 +358,42 @@ func collectorDeliveryConcurrency(ctx context.Context) int {
 		return 1
 	}
 	return value
+}
+
+// Resolve legacy priorities from the immutable event; recovery and first
+// delivery use the same classification without rewriting existing jobs.
+func (s *sCollector) persistedDeliveryPriority(ctx context.Context, deliveryID int64) (int, error) {
+	dcols := dao.TgCollectorDelivery.Columns()
+	ecols := dao.TgCollectorEvent.Columns()
+	var event entity.TgCollectorEvent
+	err := dao.TgCollectorEvent.Ctx(ctx).Where(ecols.Id+" = (?)", dao.TgCollectorDelivery.Ctx(ctx).Fields(dcols.EventId).Where(dcols.Id, deliveryID)).Scan(&event)
+	if err != nil {
+		return 0, gerror.Wrap(err, "读取交付优先级失败")
+	}
+	if event.Id <= 0 || event.RawUpdate == nil {
+		return 0, gerror.New("交付缺少原始事件")
+	}
+	delivery, err := collectorDeliveryFromEvent(&event, []byte(event.RawUpdate.String()))
+	if err != nil {
+		return 0, err
+	}
+	return deliveryPriority(&delivery), nil
+}
+
+func deliveryQueueName(priority int) string {
+	if priority >= sysin.EventPriorityUrgent {
+		return consts.QueueDeliveryUrgent
+	}
+	if priority >= sysin.EventPriorityRealtime {
+		return consts.QueueDeliveryRealtime
+	}
+	return consts.QueueDeliveryHistory
+}
+
+func collectorDeliveryHistoryInterval(ctx context.Context) time.Duration {
+	value := g.Cfg().MustGet(ctx, "telegramCollector.delivery.historyIntervalMilliseconds", 500).Int()
+	if value < 100 {
+		value = 100
+	}
+	return time.Duration(value) * time.Millisecond
 }

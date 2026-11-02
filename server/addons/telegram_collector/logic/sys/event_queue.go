@@ -78,6 +78,8 @@ func (s *sCollector) StartRuntime(ctx context.Context) {
 
 func (s *sCollector) StopRuntime() {
 	s.queueMu.Lock()
+	historyServer := s.deliveryHistoryServer
+	s.deliveryHistoryServer = nil
 	server, deliveryServer, client, runtimeStop := s.queueServer, s.deliveryServer, s.queueClient, s.runtimeStop
 	s.queueServer, s.deliveryServer, s.queueClient, s.runtimeCtx, s.runtimeStop = nil, nil, nil, nil, nil
 	s.queueMu.Unlock()
@@ -89,6 +91,9 @@ func (s *sCollector) StopRuntime() {
 	}
 	if deliveryServer != nil {
 		deliveryServer.Shutdown()
+	}
+	if historyServer != nil {
+		historyServer.Shutdown()
 	}
 	if client != nil {
 		_ = client.Close()
@@ -186,7 +191,7 @@ func (s *sCollector) processEvent(ctx context.Context, eventID int64) error {
 		return s.failEvent(ctx, eventID, err)
 	}
 	delivery.ID = deliveryID
-	if err = s.enqueueDeliveryTask(ctx, deliveryID, row.Priority); err != nil {
+	if err = s.enqueueDeliveryTask(ctx, deliveryID, deliveryPriority(&delivery)); err != nil {
 		return s.failEvent(ctx, eventID, err)
 	}
 	_, err = dao.TgCollectorEvent.Ctx(ctx).WherePri(eventID).Data(g.Map{
@@ -239,6 +244,16 @@ func collectorDeliveryFromEvent(row *entity.TgCollectorEvent, raw []byte) (sysin
 		var message sysin.AccountMessageEvent
 		if err := json.Unmarshal(raw, &message); err != nil {
 			return sysin.CollectorDelivery{}, gerror.Wrap(err, "解析Telegram账号原始事件失败")
+		}
+		delivery.History = message.History
+		// Legacy events have no history flag. Classify against persistence time,
+		// never worker time, so queue delay cannot demote realtime messages.
+		var legacy struct {
+			History *bool `json:"history"`
+		}
+		_ = json.Unmarshal(raw, &legacy)
+		if legacy.History == nil && row.CreatedAt != nil && !message.ReceivedAt.IsZero() {
+			delivery.History = message.ReceivedAt.Before(row.CreatedAt.Time.Add(-5 * time.Minute))
 		}
 		delivery.AccountID = message.AccountID
 		delivery.TgAccountID = message.TgAccountID
@@ -341,6 +356,9 @@ func deliveryPriority(delivery *sysin.CollectorDelivery) int {
 		return sysin.EventPriorityNormal
 	}
 	if delivery.SourceType == sysin.SourceTypeAccount {
+		if delivery.History {
+			return sysin.EventPriorityNormal
+		}
 		return sysin.EventPriorityRealtime
 	}
 	return sysin.EventPriorityUrgent
@@ -535,4 +553,11 @@ func collectorInstanceID() string {
 		return value
 	}
 	return "local"
+}
+
+func accountMessagePriority(message *sysin.AccountMessageEvent) int {
+	if message != nil && message.History {
+		return sysin.EventPriorityNormal
+	}
+	return sysin.EventPriorityRealtime
 }

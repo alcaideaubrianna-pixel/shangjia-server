@@ -59,7 +59,7 @@ func (s *sSysPublish) recoverProcessedCollectEvents(ctx context.Context, limit i
 		}
 	}
 	for sourceId := range dirtySourceIds {
-		if statsErr := s.syncCollectSourceStats(ctx, sourceId); statsErr != nil {
+		if statsErr := s.scheduleCollectSourceStats(ctx, sourceId); statsErr != nil {
 			g.Log().Warningf(ctx, "同步采集源统计失败 sourceId:%d err:%+v", sourceId, statsErr)
 		}
 	}

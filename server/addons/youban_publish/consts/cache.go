@@ -1,6 +1,8 @@
 package consts
 
 const (
+	CollectSourceStatsDirtyKeyPrefix    = "youban_publish:collect:stats:dirty:"
+	CollectSourceStatsLockKey           = "youban_publish:collect:stats:lock"
 	AccountChannelAccessNotifyKeyPrefix = "youban_publish:account:channel_access:notify:"
 	AntiScanHashHistoryCacheKeyPrefix   = "youban_publish:anti_scan:history:"
 	AntiScanHashHistoryLockKeyPrefix    = "youban_publish:anti_scan:history_lock:"

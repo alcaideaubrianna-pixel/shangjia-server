@@ -38,13 +38,14 @@ const mediaPipelineVersion = "v1"
 var collectorMeter = otel.Meter("hotgo/addons/telegram_collector")
 
 type sCollector struct {
-	queueMu        sync.Mutex
-	queueServer    *asynq.Server
-	deliveryServer *asynq.Server
-	queueClient    *asynq.Client
-	runtimeCtx     context.Context
-	runtimeStop    context.CancelFunc
-	runtimeWG      sync.WaitGroup
+	queueMu               sync.Mutex
+	queueServer           *asynq.Server
+	deliveryServer        *asynq.Server
+	deliveryHistoryServer *asynq.Server
+	queueClient           *asynq.Client
+	runtimeCtx            context.Context
+	runtimeStop           context.CancelFunc
+	runtimeWG             sync.WaitGroup
 }
 
 func init() {
@@ -128,7 +129,7 @@ func (s *sCollector) IngestAccountMessage(ctx context.Context, message *sysin.Ac
 	if eventID, repaired, repairErr := s.refreshCorruptedAccountEvent(ctx, message, raw); repairErr != nil {
 		return repairErr
 	} else if repaired {
-		return s.enqueueEventTask(ctx, eventID, sysin.EventPriorityRealtime)
+		return s.enqueueEventTask(ctx, eventID, accountMessagePriority(message))
 	}
 	event := sysin.RawUpdateEvent{
 		EventID:    message.SourceUniqueKey,
@@ -138,7 +139,7 @@ func (s *sCollector) IngestAccountMessage(ctx context.Context, message *sysin.Ac
 		AccountID:  message.TgAccountID,
 		ChatID:     parseCollectorChatID(message.SourceChatID),
 		MessageID:  message.SourceMessageID,
-		Priority:   sysin.EventPriorityRealtime,
+		Priority:   accountMessagePriority(message),
 		RawUpdate:  raw,
 		ReceivedAt: message.ReceivedAt,
 		TraceID:    message.TraceID,

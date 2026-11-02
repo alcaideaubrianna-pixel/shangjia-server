@@ -185,6 +185,7 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	s.tgQueueMu.Unlock()
 
 	backgroundMux := asynq.NewServeMux()
+	backgroundMux.HandleFunc(tgTaskTypeCollectSourceStats, s.handleCollectSourceStatsTask)
 	backgroundMux.HandleFunc(tgTaskTypeImport, s.handleImportTask)
 	backgroundMux.HandleFunc(tgTaskTypeRepair, s.handleTgMessageRepairTask)
 	backgroundMux.HandleFunc(tgTaskTypeImportMatch, s.handleImportMatchTask)

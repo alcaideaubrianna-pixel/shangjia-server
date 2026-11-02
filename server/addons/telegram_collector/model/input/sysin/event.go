@@ -40,6 +40,7 @@ type RawUpdateEvent struct {
 }
 
 type AccountMessageEvent struct {
+	History         bool                 `json:"history"`
 	TenantID        int64                `json:"tenantId"`
 	AccountID       int64                `json:"accountId"`
 	SourceID        int64                `json:"sourceId"`
@@ -75,6 +76,7 @@ type CollectorMediaItem struct {
 }
 
 type CollectorDelivery struct {
+	History         bool                 `json:"history"`
 	ID              int64                `json:"id"`
 	DeliveryKey     string               `json:"deliveryKey"`
 	TenantID        int64                `json:"tenantId"`

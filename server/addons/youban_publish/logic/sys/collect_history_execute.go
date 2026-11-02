@@ -426,6 +426,7 @@ func (s *sSysPublish) ingestCollectHistoryMessages(ctx context.Context, task *sy
 		if event == nil {
 			continue
 		}
+		event.History = true
 		exists, err := collectorservice.Collector().EventExists(ctx, event.TenantID, event.SourceUniqueKey)
 		if err != nil {
 			return stats, nextOffset, stop, err

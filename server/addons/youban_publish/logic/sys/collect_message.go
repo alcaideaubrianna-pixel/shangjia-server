@@ -133,7 +133,7 @@ func (s *sSysPublish) ingestCollectMessage(ctx context.Context, message *Collect
 		return 0, err
 	}
 	s.appendCollectEventLogForRecord(ctx, created, "ingest", "created", "采集事件已入库", "")
-	if err = s.syncCollectSourceStats(ctx, message.SourceId); err != nil {
+	if err = s.scheduleCollectSourceStats(ctx, message.SourceId); err != nil {
 		g.Log().Warningf(ctx, "同步新采集事件统计失败 eventId:%d sourceId:%d err:%+v", eventId, message.SourceId, err)
 	}
 	return eventId, nil

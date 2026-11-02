@@ -65,17 +65,10 @@ func (s *sSysPublish) syncCollectSourceStats(ctx context.Context, sourceID int64
 	dispatchCols := dispatchDao.Columns()
 	sourceCols := pdao.YoubanPublishCollectSource.Columns()
 
-	eventTotal, err := eventDao.Ctx(ctx).Where(eventCols.SourceId, sourceID).Count()
+	eventStats, err := eventDao.Ctx(ctx).Where(eventCols.SourceId, sourceID).
+		Fields(fmt.Sprintf("COUNT(*) AS event_total, COALESCE(SUM(CASE WHEN %s='%s' AND COALESCE(%s,'')<>'%s' THEN 1 ELSE 0 END),0) AS failed_total, MAX(%s) AS last_event_at", eventCols.Status, sysin.CollectEventStatusFailed, "material_role", collectMaterialRoleVerify, eventCols.ReceivedAt)).One()
 	if err != nil {
-		return gerror.Wrap(err, "统计采集源事件数失败")
-	}
-	failedTotal, err := eventDao.Ctx(ctx).
-		Where(eventCols.SourceId, sourceID).
-		Where(eventCols.Status, sysin.CollectEventStatusFailed).
-		Where("COALESCE(material_role, '') <> ?", collectMaterialRoleVerify).
-		Count()
-	if err != nil {
-		return gerror.Wrap(err, "统计采集源失败数失败")
+		return gerror.Wrap(err, "统计采集源事件失败")
 	}
 	successTotal, err := dispatchDao.Ctx(ctx).
 		Where(dispatchCols.SourceId, sourceID).
@@ -84,19 +77,13 @@ func (s *sSysPublish) syncCollectSourceStats(ctx context.Context, sourceID int64
 	if err != nil {
 		return gerror.Wrap(err, "统计采集源成功数失败")
 	}
-	lastEventAt, err := eventDao.Ctx(ctx).
-		Where(eventCols.SourceId, sourceID).
-		Fields("MAX(" + eventCols.ReceivedAt + ")").Value()
-	if err != nil {
-		return gerror.Wrap(err, "统计采集源最后事件时间失败")
-	}
 	_, err = pdao.YoubanPublishCollectSource.Ctx(ctx).
 		Where(sourceCols.Id, sourceID).
 		Data(g.Map{
-			sourceCols.EventTotal:   eventTotal,
+			sourceCols.EventTotal:   eventStats["event_total"].Int64(),
 			sourceCols.SuccessTotal: successTotal.Int64(),
-			sourceCols.FailedTotal:  failedTotal,
-			sourceCols.LastEventAt:  lastEventAt,
+			sourceCols.FailedTotal:  eventStats["failed_total"].Int64(),
+			sourceCols.LastEventAt:  eventStats["last_event_at"],
 			sourceCols.UpdatedAt:    gtime.Now(),
 		}).Update()
 	return gerror.Wrap(err, "更新采集源统计失败")
@@ -115,7 +102,7 @@ func (s *sSysPublish) syncCollectSourceStatsForEvent(ctx context.Context, eventI
 		g.Log().Warningf(ctx, "读取采集事件统计归属失败 eventId:%d err:%+v", eventID, err)
 		return
 	}
-	if err = s.syncCollectSourceStats(ctx, sourceID.Int64()); err != nil {
+	if err = s.scheduleCollectSourceStats(ctx, sourceID.Int64()); err != nil {
 		g.Log().Warningf(ctx, "同步采集源统计失败 eventId:%d sourceId:%d err:%+v", eventID, sourceID.Int64(), err)
 	}
 }
