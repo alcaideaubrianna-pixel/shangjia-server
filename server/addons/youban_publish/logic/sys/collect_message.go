@@ -143,20 +143,20 @@ func (s *sSysPublish) mergeCollectMessageEvent(ctx context.Context, event gdb.Re
 	eventDao := pdao.YoubanPublishCollectEvent
 	eventCols := eventDao.Columns()
 	eventId := event[eventCols.Id].Int64()
-	shouldMerge, err := s.collectExistingEventShouldMerge(ctx, event, message.Media, rawText)
+	merge, err := s.collectExistingEventMergeDecision(ctx, event, message.Media, rawText)
 	if err != nil {
 		return eventId, err
 	}
-	if collectEventAlreadyMatched(event[eventCols.Status].String()) && !shouldMerge {
+	if collectEventAlreadyMatched(event[eventCols.Status].String()) && !merge.ShouldMerge {
 		return eventId, nil
 	}
-	if collectEventTerminalStatus(event[eventCols.Status].String()) && !shouldMerge {
+	if collectEventTerminalStatus(event[eventCols.Status].String()) && !merge.ShouldMerge {
 		return eventId, nil
 	}
 	// A lossless replay can correct historical Telegram media identifiers. Events
 	// already dispatched only need their media metadata repaired; replaying them
 	// would create duplicate profiles and channel messages.
-	if collectEventAlreadyMatched(event[eventCols.Status].String()) {
+	if collectEventAlreadyMatched(event[eventCols.Status].String()) && !merge.HasNewMedia {
 		if err = s.upsertCollectEventMedia(ctx, event, message.Media); err != nil {
 			return eventId, err
 		}
@@ -280,13 +280,18 @@ func collectMergedEventStatus(event gdb.Record, message *CollectMessage) string 
 	return sysin.CollectEventStatusPending
 }
 
-func (s *sSysPublish) collectExistingEventShouldMerge(ctx context.Context, event gdb.Record, media []collectMediaItem, rawText string) (bool, error) {
+type collectExistingEventMergeDecision struct {
+	ShouldMerge bool
+	HasNewMedia bool
+}
+
+func (s *sSysPublish) collectExistingEventMergeDecision(ctx context.Context, event gdb.Record, media []collectMediaItem, rawText string) (collectExistingEventMergeDecision, error) {
 	if strings.TrimSpace(event["raw_text"].String()) == "" && strings.TrimSpace(rawText) != "" {
-		return true, nil
+		return collectExistingEventMergeDecision{ShouldMerge: true}, nil
 	}
 	items := normalizeCollectMediaItems(media)
 	if len(items) == 0 {
-		return false, nil
+		return collectExistingEventMergeDecision{}, nil
 	}
 	keys := make([]string, 0, len(items))
 	for _, item := range items {
@@ -298,26 +303,27 @@ func (s *sSysPublish) collectExistingEventShouldMerge(ctx context.Context, event
 		WhereIn(mediaCols.SourceMediaKey, uniqueStrings(keys)).
 		All()
 	if err != nil {
-		return false, gerror.Wrap(err, "检查采集媒体组新增媒体失败")
-	}
-	if len(rows) < len(uniqueStrings(keys)) {
-		return true, nil
+		return collectExistingEventMergeDecision{}, gerror.Wrap(err, "检查采集媒体组新增媒体失败")
 	}
 	storedByKey := make(map[string]gdb.Record, len(rows))
 	for _, row := range rows {
 		storedByKey[row[mediaCols.SourceMediaKey].String()] = row
 	}
-	for _, item := range items {
+	return decideCollectExistingEventMerge(items, storedByKey), nil
+}
+
+func decideCollectExistingEventMerge(items []collectMediaItem, storedByKey map[string]gdb.Record) collectExistingEventMergeDecision {
+	for _, item := range normalizeCollectMediaItems(items) {
 		row := storedByKey[strings.TrimSpace(item.Type)+":"+collectMediaSourceKey(item)]
 		if row.IsEmpty() {
-			return true, nil
+			return collectExistingEventMergeDecision{ShouldMerge: true, HasNewMedia: true}
 		}
 		if item.SourceMediaId != 0 && (row["source_media_id"].Int64() != item.SourceMediaId ||
 			row["source_access_hash"].Int64() != item.SourceAccessHash) {
-			return true, nil
+			return collectExistingEventMergeDecision{ShouldMerge: true}
 		}
 	}
-	return false, nil
+	return collectExistingEventMergeDecision{}
 }
 
 func collectEventTerminalStatus(status string) bool {

@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"strings"
 
@@ -14,6 +15,13 @@ import (
 )
 
 const duplicateMediaReplacedEventIDColumn = "dedupe_media_replaced_event_id"
+
+type collectMediaReplaceMode int
+
+const (
+	collectMediaReplaceDuplicate collectMediaReplaceMode = iota
+	collectMediaReplaceLateArrival
+)
 
 func duplicateCollectMediaReplaceEnabled(ctx context.Context) bool {
 	return g.Cfg().MustGet(ctx, "youbanPublish.collect.duplicateMediaReplaceEnabled", false).Bool()
@@ -133,13 +141,27 @@ func (s *sSysPublish) replaceDuplicateCollectProfileMedia(
 	content *collectContentResult,
 	profileID int64,
 ) (bool, error) {
-	if !duplicateCollectMediaReplaceEnabled(ctx) {
+	return s.replaceCollectProfileMedia(ctx, event, content, profileID, collectMediaReplaceDuplicate)
+}
+
+func (s *sSysPublish) replaceLateCollectProfileMedia(ctx context.Context, event gdb.Record, content *collectContentResult, profileID int64) (bool, error) {
+	return s.replaceCollectProfileMedia(ctx, event, content, profileID, collectMediaReplaceLateArrival)
+}
+
+func (s *sSysPublish) replaceCollectProfileMedia(
+	ctx context.Context,
+	event gdb.Record,
+	content *collectContentResult,
+	profileID int64,
+	mode collectMediaReplaceMode,
+) (bool, error) {
+	if mode == collectMediaReplaceDuplicate && !duplicateCollectMediaReplaceEnabled(ctx) {
 		return false, nil
 	}
 	if profileID <= 0 || event.IsEmpty() || content == nil || len(content.Media) == 0 {
 		return false, nil
 	}
-	if !strings.EqualFold(strings.TrimSpace(event["source_type"].String()), "account") {
+	if mode == collectMediaReplaceDuplicate && !strings.EqualFold(strings.TrimSpace(event["source_type"].String()), "account") {
 		return false, nil
 	}
 	tenantID := event["tenant_id"].Int64()
@@ -169,12 +191,13 @@ func (s *sSysPublish) replaceDuplicateCollectProfileMedia(
 	if err != nil {
 		return false, err
 	}
-	replaced := decision == duplicateMediaReplaceRetryPublish
+	replaced := decision == duplicateMediaReplaceRetryPublish && mode == collectMediaReplaceDuplicate
 	var oldFingerprints, fingerprints []profileFingerprint
-	if decision == duplicateMediaReplaceAllowed {
-		prepared, prepareErr := s.prepareCollectMaterial(ctx, event, content)
-		if prepareErr != nil {
-			return false, prepareErr
+	var prepared *collectPreparedMaterial
+	if decision == duplicateMediaReplaceAllowed || mode == collectMediaReplaceLateArrival {
+		prepared, err = s.prepareCollectMaterial(ctx, event, content)
+		if err != nil {
+			return false, err
 		}
 		now := gtime.Now()
 		err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
@@ -188,7 +211,9 @@ func (s *sSysPublish) replaceDuplicateCollectProfileMedia(
 			if txErr != nil {
 				return gerror.Wrap(txErr, "锁定重复资料媒体覆盖状态失败")
 			}
-			if state.IsEmpty() || decideDuplicateMediaReplace(state[duplicateMediaReplacedEventIDColumn].Int64(), eventID) != duplicateMediaReplaceAllowed {
+			lockedDecision := decideDuplicateMediaReplace(state[duplicateMediaReplacedEventIDColumn].Int64(), eventID)
+			if state.IsEmpty() || lockedDecision == duplicateMediaReplaceAlreadyUsed ||
+				(lockedDecision == duplicateMediaReplaceRetryPublish && mode != collectMediaReplaceLateArrival) {
 				return nil
 			}
 			release, txErr := s.lockProfileMediaSyncTx(ctx, tx, profileID)
@@ -248,9 +273,13 @@ func (s *sSysPublish) replaceDuplicateCollectProfileMedia(
 			if oldFingerprints, fingerprints, txErr = s.replaceProfileFingerprintProjectionTx(ctx, tx, tenantID, accountID, profileID, channelIDs); txErr != nil {
 				return txErr
 			}
-			result, txErr := tx.Model(publishProfileStateTable).Ctx(ctx).
-				Where("id", state["id"].Int64()).Where(duplicateMediaReplacedEventIDColumn, 0).
-				Data(g.Map{duplicateMediaReplacedEventIDColumn: eventID, "updated_at": now}).Update()
+			markerUpdate := tx.Model(publishProfileStateTable).Ctx(ctx).Where("id", state["id"].Int64())
+			if mode == collectMediaReplaceLateArrival {
+				markerUpdate = markerUpdate.WhereIn(duplicateMediaReplacedEventIDColumn, []int64{0, eventID})
+			} else {
+				markerUpdate = markerUpdate.Where(duplicateMediaReplacedEventIDColumn, 0)
+			}
+			result, txErr := markerUpdate.Data(g.Map{duplicateMediaReplacedEventIDColumn: eventID, "updated_at": now}).Update()
 			if txErr != nil {
 				return gerror.Wrap(txErr, "标记重复资料媒体已覆盖失败")
 			}
@@ -283,9 +312,20 @@ func (s *sSysPublish) replaceDuplicateCollectProfileMedia(
 		CollectSourceMessageId: event["source_message_id"].Int64(),
 	}
 	operationNo := fmt.Sprintf("collect_media_replace:%d", eventID)
+	if mode == collectMediaReplaceLateArrival {
+		operationNo = collectMediaReplaceOperationNo(eventID, prepared.Media)
+	}
 	if err = s.submitProfilePublishWithMeta(ctx, profileID, tenantID, accountID, accountID, operationNo, channelIDs, false, meta); err != nil {
 		return true, gerror.Wrap(err, "提交重复资料媒体覆盖发布失败")
 	}
 	s.appendCollectEventLogForRecord(ctx, event, "dedupe_media_replace", "completed", "重复资料媒体已覆盖并重新提交发布", fmt.Sprintf("profileId=%d", profileID))
 	return true, nil
+}
+
+func collectMediaReplaceOperationNo(eventID int64, media []collectPreparedMedia) string {
+	digest := sha256.New()
+	for _, item := range media {
+		_, _ = fmt.Fprintf(digest, "%s\x00%s\x00%s\x00%d\x00", strings.TrimSpace(item.Purpose), strings.TrimSpace(item.MediaType), duplicateMediaIdentity(item.MD5, item.StoragePath, item.FileURL), item.SortIndex)
+	}
+	return fmt.Sprintf("collect_media_replace:%d:%x", eventID, digest.Sum(nil)[:8])
 }

@@ -1039,6 +1039,15 @@ func (s *sSysPublish) resumeExistingCollectDispatch(ctx context.Context, dispatc
 	}
 	switch collectDispatchResumeActionForStatus(dispatch["status"].String()) {
 	case collectDispatchResumeNoop:
+		if dispatch["status"].String() == sysin.CollectDispatchStatusSent {
+			replaced, err := s.replaceLateCollectProfileMedia(ctx, event, content, dispatch["profile_id"].Int64())
+			if err != nil {
+				return false, "", err
+			}
+			if replaced {
+				return true, "", nil
+			}
+		}
 		if collectContentHasVerification(content) {
 			switch dispatch["status"].String() {
 			case sysin.CollectDispatchStatusPending:

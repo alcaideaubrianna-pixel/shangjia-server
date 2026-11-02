@@ -5,10 +5,33 @@ import (
 
 	"github.com/gogf/gf/v2/container/gvar"
 	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
+
+func TestDecideCollectExistingEventMerge(t *testing.T) {
+	item := collectMediaItem{Type: "image", FileId: "file-1", SourceMediaId: 101, SourceAccessHash: 202}
+	key := "image:" + collectMediaSourceKey(item)
+
+	tests := []struct {
+		name   string
+		stored map[string]gdb.Record
+		want   collectExistingEventMergeDecision
+	}{
+		{name: "new media", stored: map[string]gdb.Record{}, want: collectExistingEventMergeDecision{ShouldMerge: true, HasNewMedia: true}},
+		{name: "telegram identity repaired", stored: map[string]gdb.Record{key: {"source_media_id": g.NewVar(int64(100)), "source_access_hash": g.NewVar(int64(201))}}, want: collectExistingEventMergeDecision{ShouldMerge: true}},
+		{name: "unchanged", stored: map[string]gdb.Record{key: {"source_media_id": g.NewVar(int64(101)), "source_access_hash": g.NewVar(int64(202))}}, want: collectExistingEventMergeDecision{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := decideCollectExistingEventMerge([]collectMediaItem{item}, tt.stored); got != tt.want {
+				t.Fatalf("decision = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
 
 func TestCollectReplayUpdateFieldsResetsTerminalGroupingState(t *testing.T) {
 	event := gdb.Record{

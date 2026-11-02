@@ -104,3 +104,18 @@ func TestPreparedVerificationOnlyReplacesWhenChanged(t *testing.T) {
 		t.Fatalf("verification-only change plan=%#v", plan)
 	}
 }
+
+func TestCollectMediaReplaceOperationNoTracksMediaVersion(t *testing.T) {
+	first := []collectPreparedMedia{{MediaType: "image", Purpose: "display", MD5: "aa", SortIndex: 1}}
+	same := append([]collectPreparedMedia(nil), first...)
+	changed := append([]collectPreparedMedia(nil), first...)
+	changed[0].MD5 = "bb"
+
+	firstNo := collectMediaReplaceOperationNo(42, first)
+	if sameNo := collectMediaReplaceOperationNo(42, same); sameNo != firstNo {
+		t.Fatalf("same media operation = %s, want %s", sameNo, firstNo)
+	}
+	if changedNo := collectMediaReplaceOperationNo(42, changed); changedNo == firstNo {
+		t.Fatalf("changed media reused operation number %s", changedNo)
+	}
+}
