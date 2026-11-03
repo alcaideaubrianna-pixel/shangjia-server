@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 	"hotgo/addons/telegram_collector/model/input/sysin"
@@ -52,4 +54,39 @@ func completeIngestSpool(ctx context.Context, id int64) error {
 	}
 	_, err := g.DB().Exec(ctx, "UPDATE "+collectorIngestSpoolTable+" SET status='completed',updated_at=? WHERE id=? AND status='received'", gtime.Now(), id)
 	return err
+}
+
+// recoverIngestSpool replays accepted updates whose downstream Event handoff
+// was interrupted. The unique event key makes replay idempotent.
+func (s *sCollector) recoverIngestSpool(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := g.DB().Model(collectorIngestSpoolTable).Ctx(ctx).
+		WhereIn("status", []string{"received", "failed_retry"}).
+		Where("next_run_at IS NULL OR next_run_at <= ?", gtime.Now()).
+		OrderAsc("id").Limit(limit).All()
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		var event sysin.RawUpdateEvent
+		if err := json.Unmarshal([]byte(row["payload"].String()), &event); err != nil {
+			_, _ = g.DB().Model(collectorIngestSpoolTable).Ctx(ctx).Where("id", row["id"].Int64()).Data(g.Map{"status": "dead", "last_error": err.Error(), "updated_at": gtime.Now()}).Update()
+			continue
+		}
+		eventID, err := s.persistEvent(ctx, &event)
+		if err == nil {
+			err = s.enqueueEventTask(ctx, eventID, event.Priority)
+		}
+		if err == nil {
+			_, err = g.DB().Model(collectorIngestSpoolTable).Ctx(ctx).Where("id", row["id"].Int64()).Data(g.Map{"status": "completed", "last_error": "", "updated_at": gtime.Now()}).Update()
+			continue
+		}
+		_, _ = g.DB().Model(collectorIngestSpoolTable).Ctx(ctx).Where("id", row["id"].Int64()).Data(g.Map{"status": "failed_retry", "attempt_count": gdb.Raw("attempt_count + 1"), "next_run_at": gtime.Now().Add(30 * time.Second), "last_error": err.Error(), "updated_at": gtime.Now()}).Update()
+	}
+	return nil
 }

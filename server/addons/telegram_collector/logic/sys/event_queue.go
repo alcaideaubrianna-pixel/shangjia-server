@@ -433,6 +433,9 @@ func (s *sCollector) runEventRecovery(ctx context.Context) {
 }
 
 func (s *sCollector) recoverEventTasks(ctx context.Context) {
+	if err := s.recoverIngestSpool(ctx, collectorRecoveryBatchSize(ctx)); err != nil {
+		g.Log().Warningf(ctx, "恢复Telegram采集接收Spool失败：%+v", err)
+	}
 	if err := s.resetExpiredEventLeases(ctx, collectorRecoveryBatchSize(ctx)); err != nil {
 		g.Log().Warningf(ctx, "恢复超时Telegram采集事件失败：%+v", err)
 	}
