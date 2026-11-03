@@ -311,8 +311,10 @@ func (w *accountWorker) run(ctx context.Context) {
 	}
 	binding := w.bindingSnapshot()
 	if binding == nil || binding.AccountID <= 0 {
+		g.Log().Warning(ctx, "Telegram账号运行绑定为空，跳过账号Worker")
 		return
 	}
+	g.Log().Info(ctx, "Telegram账号Worker启动", g.Map{"accountId": binding.AccountID})
 	lease, acquired, err := collectorservice.AccountLeaseManager().Acquire(ctx, binding.AccountID, accountRuntimeInstanceID(), leaseTTL)
 	leaseResult := "acquired"
 	if err != nil {
@@ -328,13 +330,20 @@ func (w *accountWorker) run(ctx context.Context) {
 		}
 		return
 	}
+	g.Log().Info(ctx, "Telegram账号运行租约已获取", g.Map{"accountId": binding.AccountID, "epoch": lease.Epoch})
 	defer collectorservice.AccountLeaseManager().Release(context.Background(), lease)
+	if recovered, recoverErr := collectorservice.AccountTasks().RecoverExpired(ctx, 100); recoverErr != nil {
+		g.Log().Warningf(ctx, "账号Worker启动恢复过期任务失败 accountId:%d err:%+v", binding.AccountID, recoverErr)
+	} else if recovered > 0 {
+		g.Log().Infof(ctx, "账号Worker启动恢复过期任务完成 accountId:%d count:%d", binding.AccountID, recovered)
+	}
 	startCounter, _ := accountRuntimeMeter.Int64Counter("telegram_account_runtime_starts_total")
 	startCounter.Add(ctx, 1)
 	dispatcher := tg.NewUpdateDispatcher()
 	w.bindAccountMessageHandlers(dispatcher)
 	client, err := w.session.NewAccountRuntimeClient(ctx, w.channelAccessUpdateHandler(dispatcher))
 	if err != nil {
+		g.Log().Warningf(ctx, "创建Telegram账号协议客户端失败 accountId:%d err:%+v", binding.AccountID, err)
 		w.session.HandleAccountRuntimeError(ctx, err)
 		return
 	}
@@ -344,10 +353,12 @@ func (w *accountWorker) run(ctx context.Context) {
 			return selfErr
 		}
 		w.selfUserID.Store(self.ID)
+		g.Log().Info(ctx, "Telegram账号协议连接已建立", g.Map{"accountId": binding.AccountID, "selfUserId": self.ID})
 		w.session.StartAccountRuntime(runCtx, client)
 		go w.runOperations(runCtx, client)
 		go w.runPriorityOperations(runCtx, client)
 		go runAccountTaskLoop(runCtx, client, lease, nil, w.cancel)
+		g.Log().Info(ctx, "Telegram账号任务循环已启动", g.Map{"accountId": binding.AccountID})
 		<-runCtx.Done()
 		return runCtx.Err()
 	})
