@@ -5,9 +5,10 @@ import (
 
 	"github.com/gogf/gf/v2/container/gvar"
 	"github.com/gogf/gf/v2/database/gdb"
+	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
-func TestCollectPublishClientRequestIDIgnoresCollectorAndRule(t *testing.T) {
+func TestCollectPublishClientRequestIDSharesAccountAndSeparatesBots(t *testing.T) {
 	accountEvent := gdb.Record{
 		"tenant_id": gvar.New(5), "account_id": gvar.New(6),
 		"source_chat_id": gvar.New("3974614787"), "source_grouped_id": gvar.New("14288735558729401"),
@@ -15,16 +16,28 @@ func TestCollectPublishClientRequestIDIgnoresCollectorAndRule(t *testing.T) {
 	}
 	botEvent := gdb.Record{
 		"tenant_id": gvar.New(5), "account_id": gvar.New(6),
+		"source_type": gvar.New(sysin.CollectSourceTypeBot), "bot_id": gvar.New(54),
 		"source_chat_id": gvar.New("-1003974614787"), "source_grouped_id": gvar.New("14288735558729401"),
 		"source_unique_key": gvar.New("bot:54:-1003974614787:group:14288735558729401"),
 	}
 	gotAccount := collectPublishClientRequestId(accountEvent, gdb.Record{"id": gvar.New(48)})
 	gotBot := collectPublishClientRequestId(botEvent, gdb.Record{"id": gvar.New(22)})
-	if gotAccount != gotBot {
-		t.Fatalf("same account channel group must share profile key: account=%q bot=%q", gotAccount, gotBot)
+	if gotAccount == gotBot {
+		t.Fatalf("account and bot collectors must not share profile key: account=%q bot=%q", gotAccount, gotBot)
 	}
 	if gotAccount != "collect:v2:5:6:-1003974614787:group:14288735558729401" {
 		t.Fatalf("unexpected canonical profile key: %q", gotAccount)
+	}
+	if gotBot != "collect:v3:5:6:bot:54:-1003974614787:group:14288735558729401" {
+		t.Fatalf("unexpected bot profile key: %q", gotBot)
+	}
+	otherBot := gdb.Record{}
+	for key, value := range botEvent {
+		otherBot[key] = value
+	}
+	otherBot["bot_id"] = gvar.New(55)
+	if gotBot == collectPublishClientRequestId(otherBot, nil) {
+		t.Fatal("different bots must not share profile key")
 	}
 }
 

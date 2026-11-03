@@ -24,6 +24,17 @@ func collectPublishClientRequestId(event gdb.Record, rule gdb.Record) string {
 	accountID := event["account_id"].Int64()
 	chatID := normalizeTelegramChannelChatID(event["source_chat_id"].String())
 	groupedID := strings.TrimSpace(event["source_grouped_id"].String())
+	// Bot collectors must remain independent within the same account. Account
+	// and follow-account collectors intentionally keep the shared v2 identity.
+	if event["source_type"].String() == sysin.CollectSourceTypeBot && event["bot_id"].Int64() > 0 {
+		botID := event["bot_id"].Int64()
+		if tenantID > 0 && accountID > 0 && chatID != "" && groupedID != "" {
+			return fmt.Sprintf("collect:v3:%d:%d:bot:%d:%s:group:%s", tenantID, accountID, botID, chatID, groupedID)
+		}
+		if messageID := event["source_message_id"].Int64(); tenantID > 0 && accountID > 0 && chatID != "" && messageID > 0 {
+			return fmt.Sprintf("collect:v3:%d:%d:bot:%d:%s:message:%d", tenantID, accountID, botID, chatID, messageID)
+		}
+	}
 	if tenantID > 0 && accountID > 0 && chatID != "" && groupedID != "" {
 		return fmt.Sprintf("collect:v2:%d:%d:%s:group:%s", tenantID, accountID, chatID, groupedID)
 	}
