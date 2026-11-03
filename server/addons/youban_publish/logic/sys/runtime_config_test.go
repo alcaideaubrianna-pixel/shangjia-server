@@ -1,9 +1,23 @@
 package sys
 
 import (
+	"context"
 	"reflect"
 	"testing"
+
+	"hotgo/utility/runrole"
 )
+
+func TestCollectWorkersAreNotWebRuntime(t *testing.T) {
+	defer runrole.Set()
+	for _, role := range []string{runrole.CollectorWorker, runrole.CollectProcessWorker} {
+		runrole.Set(role)
+		s := &sSysPublish{}
+		if !s.RuntimeRoleEnabled(context.Background(), role) || s.RuntimeRoleEnabled(context.Background(), runrole.Web) {
+			t.Fatalf("collect role misclassified: %s", role)
+		}
+	}
+}
 
 func TestParsePublishRuntimeRoles(t *testing.T) {
 	tests := []struct {

@@ -55,8 +55,8 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 	if len(config.Roles) == 0 {
 		g.Log().Warning(ctx, "上架插件未识别到有效运行角色，当前实例不会启动后台运行组件")
 	}
-	g.Log().Infof(ctx, "启动上架插件运行组件 roles:%v account:%t scheduler:%t pushWorker:%t mediaWorker:%t backgroundWorker:%t collectorWorker:%t",
-		config.Roles, config.Account, config.Scheduler, config.PushWorker, config.MediaWorker, config.BackgroundWorker, config.CollectorWorker)
+	g.Log().Infof(ctx, "启动上架插件运行组件 roles:%v account:%t scheduler:%t pushWorker:%t mediaWorker:%t backgroundWorker:%t collectorWorker:%t collectProcessWorker:%t",
+		config.Roles, config.Account, config.Scheduler, config.PushWorker, config.MediaWorker, config.BackgroundWorker, config.CollectorWorker, config.CollectProcessWorker)
 	startRuntimeResourceObserver(ctx, config)
 	observePublishRuntimeHeartbeat(ctx, config)
 	heartbeatTicker := time.NewTicker(30 * time.Second)
@@ -88,7 +88,7 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 	if config.BackgroundQueue {
 		s.startTelegramBackgroundWorker(ctx)
 	}
-	if config.PushWorker || config.MediaWorker || config.BackgroundWorker || config.CollectorWorker {
+	if config.PushWorker || config.MediaWorker || config.BackgroundWorker || config.CollectorWorker || config.CollectProcessWorker {
 		go s.runAsynqObserveMetrics(ctx)
 	}
 	if config.Scheduler {

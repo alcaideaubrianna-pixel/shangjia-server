@@ -85,7 +85,7 @@ func (s *sSysPublish) RuntimeRoleEnabled(ctx context.Context, role string) bool 
 	case publishRuntimeRoleWorker:
 		return config.PushWorker && config.MediaWorker && config.BackgroundWorker
 	case publishRuntimeRoleWeb:
-		return !config.Account && !config.Scheduler && !config.PushWorker && !config.MediaWorker && !config.BackgroundWorker
+		return !config.Account && !config.Scheduler && !config.PushWorker && !config.MediaWorker && !config.BackgroundWorker && !config.CollectorWorker && !config.CollectProcessWorker
 	case publishRuntimeRoleAll:
 		return config.Account && config.Scheduler && config.PushWorker && config.MediaWorker && config.BackgroundWorker
 	default:
