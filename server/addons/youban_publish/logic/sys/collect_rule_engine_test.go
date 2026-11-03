@@ -418,6 +418,8 @@ func TestApplyCollectIntroFeeSuffix(t *testing.T) {
 		{name: "colon suffix", text: "正文\n介绍费: 7888 KK", original: "正文\n介绍费: 7888 KK", suffix: "AA", want: "正文\n介绍费 7888 AA"},
 		{name: "suffix on next line", text: "这是一段需要保留的正文内容\n介绍费 7888\nKK", original: "这是一段需要保留的正文内容\n介绍费 7888\nKK", suffix: "AA", want: "这是一段需要保留的正文内容\n介绍费 7888 AA"},
 		{name: "long suffix on next line", text: "这是一段需要保留的正文内容\n介绍费7888\nBLYS", original: "这是一段需要保留的正文内容\n介绍费7888\nBLYS", suffix: "AA", want: "这是一段需要保留的正文内容\n介绍费 7888 AA"},
+		{name: "short suffix after blank lines", text: "介绍费：7888。。。。。\n\n\n女儿国", original: "介绍费：7888。。。。。\n\n\n女儿国", suffix: "哈哈", want: "介绍费 7888 哈哈"},
+		{name: "keep blank lines before regular content", text: "介绍费：7888。。。。。\n\n联系方式以及其他正文内容", original: "介绍费：7888。。。。。\n\n联系方式以及其他正文内容", suffix: "哈哈", want: "介绍费 7888 哈哈\n\n联系方式以及其他正文内容"},
 		{name: "preserves following content", text: "这是一段需要保留的正文内容\n介绍费 7888 KK\n联系方式以及其他正文内容", original: "这是一段需要保留的正文内容\n介绍费 7888 KK\n联系方式以及其他正文内容", suffix: "AA", want: "这是一段需要保留的正文内容\n介绍费 7888 AA\n联系方式以及其他正文内容"},
 		{name: "amount punctuation", text: "正文\n介绍费用：7,888.50 元 KK", original: "正文\n介绍费用：7,888.50 元 KK", suffix: "AA", want: "正文\n介绍费用：7,888.50 元 KK AA"},
 		{name: "non-breaking spaces", text: "正文\n介绍费\u00a012888\u00a0卡路里", original: "正文\n介绍费\u00a012888\u00a0卡路里", suffix: "来雨", want: "正文\n介绍费 12888 来雨"},
@@ -442,7 +444,7 @@ func TestApplyCollectIntroFeeSuffix(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if test.name == "multiple fee rows retain amounts and replace every suffix" || test.name == "suffix on next line" || test.name == "long suffix on next line" || test.name == "preserves following content" || test.name == "windows lines" || test.name == "standalone fee marker on next line" {
+			if test.name == "multiple fee rows retain amounts and replace every suffix" || test.name == "suffix on next line" || test.name == "long suffix on next line" || test.name == "short suffix after blank lines" || test.name == "keep blank lines before regular content" || test.name == "preserves following content" || test.name == "windows lines" || test.name == "standalone fee marker on next line" {
 				t.Setenv("YOUBAN_INTRO_FEE_NEIGHBOR_MAX_CHARS", "6")
 			}
 			if got := applyCollectIntroFeeSuffix(test.text, test.original, test.suffix); got != test.want {
@@ -559,7 +561,7 @@ func TestApplyCollectIntroFeeSuffixOnlyChangesFeeNeighborhood(t *testing.T) {
 		"第一行原文\n第二行正文内容\n介绍费：7888旧标识\n第四行正文内容\n第五行原文",
 		"介绍费：7888旧标识\n第二行正文内容\n第三行正文内容\n第四行原文",
 		"第一行正文内容\n第二行正文内容\n第三行正文内容\n介绍费：7888旧标识",
-		"第一行原文\n\n第二行正文内容\n介绍费：7888旧标识\n\n第五行原文",
+		"第一行原文\n\n第二行正文内容\n介绍费：7888旧标识\n\n第五行普通正文",
 		"第一行正文内容\n介绍费：7888旧标识\n第三行正文内容\n介绍费：6888旧标识\n第五行正文内容",
 	}
 	for index, input := range cases {

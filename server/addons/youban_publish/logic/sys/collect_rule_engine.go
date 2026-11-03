@@ -680,8 +680,12 @@ func applyCollectIntroFeeSuffix(text, original, suffix string) string {
 			lines = append(lines[:index-1], lines[index:]...)
 			index--
 		}
-		if index+1 < len(lines) && isCollectIntroFeeShortNeighbour(lines[index+1]) {
-			lines = append(lines[:index+1], lines[index+2:]...)
+		nextContent := index + 1
+		for nextContent < len(lines) && strings.TrimSpace(lines[nextContent]) == "" {
+			nextContent++
+		}
+		if nextContent < len(lines) && isCollectIntroFeeShortNeighbour(lines[nextContent]) {
+			lines = append(lines[:index+1], lines[nextContent+1:]...)
 		}
 	}
 	return strings.Join(lines, "\n")
