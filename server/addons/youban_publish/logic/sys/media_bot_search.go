@@ -412,6 +412,10 @@ func loadBotMediaColdFingerprints(ctx context.Context, traceId string, items []*
 			g.Log().Info(ctx, "Bot扫图冷媒体处理完成", g.Map{
 				"requestId": gctx.CtxId(ctx), "queryId": traceId, "stage": "fingerprint_cold",
 				"fileUniqueId": item.FileUniqueId, "cacheHit": cacheHit,
+				"mediaType": item.MediaType, "fileId": item.FileId, "fileUniqueIds": item.FileUniqueIds,
+				"previewFileId": item.PreviewFileId, "previewSize": item.PreviewSize,
+				"width": item.Width, "height": item.Height, "mimeType": item.MimeType, "duration": item.Duration,
+				"md5Prefix": fingerprintMD5Prefix(fingerprint), "phash": fingerprintPHashHex(fingerprint),
 				"durationMs": time.Since(startedAt).Milliseconds(), "err": err,
 			})
 			return nil

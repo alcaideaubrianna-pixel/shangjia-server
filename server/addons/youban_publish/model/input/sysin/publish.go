@@ -689,6 +689,10 @@ type BotMediaSearchItem struct {
 	FileUrl         string   `json:"fileUrl" dc:"图片或视频预览图地址"`
 	MediaType       string   `json:"mediaType" dc:"媒体类型：image/video"`
 	FileUniqueId    string   `json:"fileUniqueId" dc:"Telegram稳定媒体ID"`
+	Width           int      `json:"width,omitempty" dc:"媒体宽度"`
+	Height          int      `json:"height,omitempty" dc:"媒体高度"`
+	MimeType        string   `json:"mimeType,omitempty" dc:"媒体MIME类型"`
+	Duration        int      `json:"duration,omitempty" dc:"视频时长"`
 }
 
 type BotMediaSearchInp struct {

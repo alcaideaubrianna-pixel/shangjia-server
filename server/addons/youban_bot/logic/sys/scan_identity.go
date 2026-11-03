@@ -26,6 +26,8 @@ func scanMessageIdentity(botId int64, msg *models.Message) *publishsysin.BotMedi
 	if msg.Video != nil {
 		item.MediaType = "video"
 		item.FileId = msg.Video.FileID
+		item.Width, item.Height = msg.Video.Width, msg.Video.Height
+		item.MimeType, item.Duration = msg.Video.MimeType, msg.Video.Duration
 		if msg.Video.Thumbnail != nil {
 			item.PreviewFileId = msg.Video.Thumbnail.FileID
 			item.PreviewSize = int64(msg.Video.Thumbnail.FileSize)
@@ -34,6 +36,7 @@ func scanMessageIdentity(botId int64, msg *models.Message) *publishsysin.BotMedi
 	}
 	photo := scanPhotoSize(msg.Photo)
 	item.PreviewFileId, item.PreviewSize = photo.FileID, int64(photo.FileSize)
+	item.Width, item.Height = photo.Width, photo.Height
 	for _, photo := range msg.Photo {
 		if id := strings.TrimSpace(photo.FileUniqueID); id != "" {
 			item.FileUniqueIds = append(item.FileUniqueIds, id)
@@ -54,6 +57,17 @@ func (s *sSysBot) resolveScanSearchItems(ctx context.Context, botId int64, accou
 
 func (s *sSysBot) resolveScanBatch(ctx context.Context, botId int64, account *botProfileAccount, items []*publishsysin.BotMediaSearchItem) ([]*publishsysin.BotMediaSearchItem, error) {
 	started := time.Now()
+	for index, item := range items {
+		if item == nil {
+			continue
+		}
+		scantrace.Record(scantrace.With(ctx, g.Map{"itemIndex": index}), "telegram.input.summary", g.Map{
+			"mediaType": item.MediaType, "fileId": item.FileId, "fileUniqueId": item.FileUniqueId,
+			"fileUniqueIds": item.FileUniqueIds, "previewFileId": item.PreviewFileId, "previewSize": item.PreviewSize,
+			"width": item.Width, "height": item.Height, "mimeType": item.MimeType, "duration": item.Duration,
+			"sourceChatId": item.SourceChatId, "sourceMessageId": item.SourceMessageId,
+		}, nil)
+	}
 	known := make([]bool, len(items))
 	unchecked := make([]*publishsysin.BotMediaSearchItem, 0, len(items))
 	indices := make([]int, 0, len(items))

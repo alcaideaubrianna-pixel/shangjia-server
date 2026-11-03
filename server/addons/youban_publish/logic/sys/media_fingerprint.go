@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"fmt"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
@@ -27,6 +28,20 @@ const botMediaFingerprintCacheTTL = 90 * 24 * time.Hour
 type mediaFingerprint struct {
 	MD5   string
 	PHash *goimagehash.ImageHash
+}
+
+func fingerprintMD5Prefix(fingerprint *mediaFingerprint) string {
+	if fingerprint == nil || len(fingerprint.MD5) < 8 {
+		return ""
+	}
+	return fingerprint.MD5[:8]
+}
+
+func fingerprintPHashHex(fingerprint *mediaFingerprint) string {
+	if fingerprint == nil || fingerprint.PHash == nil {
+		return ""
+	}
+	return fmt.Sprintf("%016x", fingerprint.PHash.GetHash())
 }
 
 type cachedBotMediaFingerprint struct {
