@@ -26,26 +26,19 @@ func persistIngestSpool(ctx context.Context, event *sysin.RawUpdateEvent) (int64
 		return 0, fmt.Errorf("序列化采集接收事件失败: %w", err)
 	}
 	now := gtime.Now()
-	result, err := g.DB().Exec(ctx, `INSERT INTO `+collectorIngestSpoolTable+`
+	row, err := g.DB().GetOne(ctx, `INSERT INTO `+collectorIngestSpoolTable+`
  (tenant_id,event_key,source_type,source_id,account_id,payload,status,attempt_count,next_run_at,created_at,updated_at)
  VALUES (?,?,?,?,?,?, 'received',0,?,?,?)
- ON CONFLICT (tenant_id,event_key) DO UPDATE SET payload=EXCLUDED.payload,
- source_type=EXCLUDED.source_type,source_id=EXCLUDED.source_id,account_id=EXCLUDED.account_id,
- status=CASE WHEN `+collectorIngestSpoolTable+`.status='completed' THEN `+collectorIngestSpoolTable+`.status ELSE 'received' END,
- updated_at=EXCLUDED.updated_at`, event.TenantID, event.EventID, event.SourceType, event.SourceID,
+ ON CONFLICT (tenant_id,event_key) DO UPDATE SET event_key=EXCLUDED.event_key
+ RETURNING id`, event.TenantID, event.EventID, event.SourceType, event.SourceID,
 		event.AccountID, payload, now, now, now)
 	if err != nil {
 		return 0, fmt.Errorf("持久化采集接收事件失败: %w", err)
 	}
-	id, err := result.LastInsertId()
-	if err != nil || id <= 0 {
-		row, readErr := g.DB().GetOne(ctx, "SELECT id FROM "+collectorIngestSpoolTable+" WHERE tenant_id=? AND event_key=?", event.TenantID, event.EventID)
-		if readErr != nil || row.IsEmpty() {
-			return 0, fmt.Errorf("读取采集接收事件ID失败: %w", readErr)
-		}
-		id = row["id"].Int64()
+	if row.IsEmpty() || row["id"].Int64() <= 0 {
+		return 0, fmt.Errorf("读取采集接收事件ID失败")
 	}
-	return id, nil
+	return row["id"].Int64(), nil
 }
 
 func completeIngestSpool(ctx context.Context, id int64) error {
