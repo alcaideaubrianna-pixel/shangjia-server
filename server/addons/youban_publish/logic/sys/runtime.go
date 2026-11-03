@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
+	"hotgo/utility/runrole"
 )
 
 type publishRuntimeMutex struct {
@@ -74,14 +75,14 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 	if config.MediaWorker {
 		s.startTelegramMediaWorker(ctx)
 	}
-	if config.CollectorWorker || config.CollectProcessWorker {
+	if collectProcessRuntimeEnabled(config) {
 		s.startCollectProcessWorker(ctx)
 		go s.runCollectProcessDispatcher(ctx)
 		// Collect processing has two halves: the collector worker consumes
 		// queue tasks, while the recovery loop dispatches durable process_outbox
 		// rows into that queue. Keep the dispatcher available with the consumer
 		// when Scheduler is deployed separately or temporarily unavailable.
-		if (config.CollectorWorker || config.CollectProcessWorker) && !config.Scheduler {
+		if !config.Scheduler || runrole.CollectProcessIsolated() {
 			go s.runCollectRecovery(ctx)
 		}
 	}
@@ -108,6 +109,10 @@ func telegramDeliveryRuntimeEnabled(config publishRuntimeConfig) bool {
 	return config.PushWorker
 }
 
+func collectProcessRuntimeEnabled(config publishRuntimeConfig) bool {
+	return config.CollectProcessWorker || (config.CollectorWorker && !runrole.CollectProcessIsolated())
+}
+
 func (s *sSysPublish) startPublishSchedulers(ctx context.Context) {
 	go s.runAccountNotices(ctx)
 	if err := s.backfillPublishSuccessRecords(ctx, 5000); err != nil {
@@ -118,7 +123,9 @@ func (s *sSysPublish) startPublishSchedulers(ctx context.Context) {
 	go s.runMessagePushPlanScheduler(ctx)
 	go s.runFullPushBatchScheduler(ctx)
 	go s.runTelegramObserveStatsRefresher(ctx)
-	go s.runCollectRecovery(ctx)
+	if !runrole.CollectProcessIsolated() {
+		go s.runCollectRecovery(ctx)
+	}
 	go s.runProfileFingerprintBackfill(ctx)
 	go s.runMaterialImportRecovery(ctx)
 	go s.runPublishRecordRetentionCleaner(ctx)

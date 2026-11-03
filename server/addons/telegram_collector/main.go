@@ -53,7 +53,7 @@ func (m *module) Start(option *addons.Option) error {
 	if runrole.Enabled(m.ctx, runrole.Worker) || runrole.Enabled(m.ctx, runrole.CollectorWorker) {
 		collectorservice.Collector().StartRuntime(m.ctx)
 	}
-	if runrole.Enabled(m.ctx, runrole.Worker) || runrole.Enabled(m.ctx, runrole.PushWorker) {
+	if runrole.Enabled(m.ctx, runrole.CollectProcessWorker) || (!runrole.CollectProcessIsolated() && (runrole.Enabled(m.ctx, runrole.Worker) || runrole.Enabled(m.ctx, runrole.PushWorker))) {
 		collectorservice.Collector().StartDeliveryRuntime(m.ctx)
 	}
 	if runrole.Enabled(m.ctx, runrole.Account) || runrole.Enabled(m.ctx, runrole.Runtime) {
