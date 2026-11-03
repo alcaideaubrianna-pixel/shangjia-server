@@ -11,16 +11,17 @@ import (
 )
 
 const (
-	All              = "all"
-	Web              = "web"
-	Worker           = "worker"
-	CollectorWorker  = "collector-worker"
-	PushWorker       = "push-worker"
-	MediaWorker      = "media-worker"
-	BackgroundWorker = "background-worker"
-	Account          = "account"
-	Scheduler        = "scheduler"
-	Runtime          = "runtime"
+	All                  = "all"
+	Web                  = "web"
+	Worker               = "worker"
+	CollectorWorker      = "collector-worker"
+	CollectProcessWorker = "collect-process-worker"
+	PushWorker           = "push-worker"
+	MediaWorker          = "media-worker"
+	BackgroundWorker     = "background-worker"
+	Account              = "account"
+	Scheduler            = "scheduler"
+	Runtime              = "runtime"
 )
 
 var processRoles struct {
@@ -117,6 +118,8 @@ func canonical(role string) string {
 		return Worker
 	case CollectorWorker:
 		return CollectorWorker
+	case CollectProcessWorker:
+		return CollectProcessWorker
 	case PushWorker:
 		return PushWorker
 	case MediaWorker:

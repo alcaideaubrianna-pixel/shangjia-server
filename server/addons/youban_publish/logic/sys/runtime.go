@@ -74,14 +74,14 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 	if config.MediaWorker {
 		s.startTelegramMediaWorker(ctx)
 	}
-	if config.CollectorWorker {
+	if config.CollectorWorker || config.CollectProcessWorker {
 		s.startCollectProcessWorker(ctx)
 		go s.runCollectProcessDispatcher(ctx)
 		// Collect processing has two halves: the collector worker consumes
 		// queue tasks, while the recovery loop dispatches durable process_outbox
 		// rows into that queue. Keep the dispatcher available with the consumer
 		// when Scheduler is deployed separately or temporarily unavailable.
-		if config.CollectorWorker && !config.Scheduler {
+		if (config.CollectorWorker || config.CollectProcessWorker) && !config.Scheduler {
 			go s.runCollectRecovery(ctx)
 		}
 	}

@@ -113,7 +113,8 @@ var (
 
 	BackgroundWorker = roleCommand("background-worker", "启动后台任务 Worker 服务", runrole.BackgroundWorker, Http, Queue)
 
-	CollectorWorker = roleCommand("collector-worker", "启动 Telegram 采集 Worker 服务", runrole.CollectorWorker, Http)
+	CollectorWorker      = roleCommand("collector-worker", "启动 Telegram 采集 Worker 服务", runrole.CollectorWorker, Http)
+	CollectProcessWorker = roleCommand("collect-process-worker", "启动采集业务处理 Worker 服务", runrole.CollectProcessWorker, Http)
 
 	MediaWorker = roleCommand("media-worker", "启动 Telegram 媒体 Worker 服务", runrole.MediaWorker, Http)
 
@@ -150,7 +151,7 @@ func roleCommand(name string, brief string, role string, commands ...*gcmd.Comma
 }
 
 func init() {
-	if err := Main.AddCommand(All, Web, Worker, BackgroundWorker, CollectorWorker, MediaWorker, PublishWorker, Account, Scheduler, Runtime, Http, Queue, Cron, Auth, Tools, Up, Help); err != nil {
+	if err := Main.AddCommand(All, Web, Worker, BackgroundWorker, CollectorWorker, CollectProcessWorker, MediaWorker, PublishWorker, Account, Scheduler, Runtime, Http, Queue, Cron, Auth, Tools, Up, Help); err != nil {
 		panic(err)
 	}
 }

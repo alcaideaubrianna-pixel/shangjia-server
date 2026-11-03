@@ -20,14 +20,15 @@ const (
 )
 
 type publishRuntimeConfig struct {
-	Roles            []string
-	Account          bool
-	Scheduler        bool
-	PushWorker       bool
-	MediaWorker      bool
-	BackgroundWorker bool
-	CollectorWorker  bool
-	BackgroundQueue  bool
+	Roles                []string
+	Account              bool
+	Scheduler            bool
+	PushWorker           bool
+	MediaWorker          bool
+	BackgroundWorker     bool
+	CollectorWorker      bool
+	CollectProcessWorker bool
+	BackgroundQueue      bool
 }
 
 func loadPublishRuntimeConfig(ctx context.Context) publishRuntimeConfig {
@@ -53,6 +54,8 @@ func loadPublishRuntimeConfig(ctx context.Context) publishRuntimeConfig {
 			// 采集 Worker 负责消费采集分组、媒体窗口和发布前处理队列。
 			// Telegram Collector 插件与本插件使用同一运行角色，必须同时启用后台队列。
 			values = append(values, runrole.CollectorWorker)
+		case runrole.CollectProcessWorker:
+			values = append(values, runrole.CollectProcessWorker)
 		case runrole.Scheduler:
 			values = append(values, publishRuntimeRoleScheduler)
 		case runrole.Runtime:
@@ -77,6 +80,8 @@ func (s *sSysPublish) RuntimeRoleEnabled(ctx context.Context, role string) bool 
 		return config.BackgroundWorker
 	case runrole.CollectorWorker:
 		return config.CollectorWorker
+	case runrole.CollectProcessWorker:
+		return config.CollectProcessWorker
 	case publishRuntimeRoleWorker:
 		return config.PushWorker && config.MediaWorker && config.BackgroundWorker
 	case publishRuntimeRoleWeb:
@@ -120,6 +125,8 @@ func parsePublishRuntimeRoles(values []string) publishRuntimeConfig {
 			config.BackgroundQueue = true
 		case runrole.CollectorWorker:
 			config.CollectorWorker = true
+		case runrole.CollectProcessWorker:
+			config.CollectProcessWorker = true
 		}
 	}
 	return config
@@ -161,7 +168,8 @@ func isPublishRuntimeRole(role string) bool {
 		publishRuntimeRolePushWorker,
 		publishRuntimeRoleMediaWorker,
 		publishRuntimeRoleBackgroundWorker,
-		runrole.CollectorWorker:
+		runrole.CollectorWorker,
+		runrole.CollectProcessWorker:
 		return true
 	default:
 		return false
