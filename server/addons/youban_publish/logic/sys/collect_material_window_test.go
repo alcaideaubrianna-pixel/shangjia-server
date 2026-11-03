@@ -515,3 +515,18 @@ func TestAllCollectRepairSuspendedStatusesAreBlockedFromReplay(t *testing.T) {
 		}
 	}
 }
+
+func TestMixedVerificationAlbumDoesNotStartDisplayContext(t *testing.T) {
+	mixed := collectMaterialMessageView{Media: []collectMediaItem{{Type: "photo"}, {Type: "video"}}}
+	views := []collectMaterialMessageView{mixed, {Media: []collectMediaItem{{Type: "video"}}}}
+	if pairs := pairCollectMaterialMessages(views); len(pairs) != 0 {
+		t.Fatalf("standalone mixed album created display context: %+v", pairs)
+	}
+	views = []collectMaterialMessageView{
+		{RawText: "昵称：A", Media: []collectMediaItem{{Type: "photo"}}},
+		{RawText: "普通业务消息"}, mixed,
+	}
+	if pairs := pairCollectMaterialMessages(views); len(pairs) != 0 {
+		t.Fatalf("mixed verification crossed business boundary: %+v", pairs)
+	}
+}

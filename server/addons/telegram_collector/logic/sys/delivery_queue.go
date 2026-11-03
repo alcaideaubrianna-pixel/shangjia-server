@@ -21,6 +21,8 @@ import (
 	collectorservice "hotgo/addons/telegram_collector/service"
 )
 
+var errDeliveryInvalidEvent = errors.New("采集交付原始事件不可用")
+
 const deliveryTaskType = "telegram_collector:delivery"
 
 const (
@@ -54,32 +56,29 @@ func (s *sCollector) StartDeliveryRuntime(ctx context.Context) {
 	}
 	historyServer := asynq.NewServer(collectorRedisOption(runtimeCtx), asynq.Config{
 		Concurrency: 1,
-		Queues:      map[string]int{consts.QueueDeliveryHistory: 1, consts.QueueDeliveryReady: 1},
+		Queues:      map[string]int{consts.QueueDeliveryHistory: 1},
 	})
+	legacyServer := asynq.NewServer(collectorRedisOption(runtimeCtx), asynq.Config{Concurrency: 2, Queues: map[string]int{consts.QueueDeliveryReady: 1}})
+	s.deliveryLegacyServer = legacyServer
 	s.deliveryServer = server
 	s.deliveryHistoryServer = historyServer
-	s.queueMu.Unlock()
 
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(deliveryTaskType, s.handleDeliveryTask)
 	g.Log().Infof(runtimeCtx, "启动Telegram Delivery Worker concurrency:%d", collectorDeliveryConcurrency(runtimeCtx))
-	s.runtimeWG.Add(3)
-	go func() {
-		defer s.runtimeWG.Done()
-		if err := historyServer.Run(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
-			g.Log().Warningf(runtimeCtx, "Telegram历史交付Worker停止：%+v", err)
+	// The application owns signal handling and calls Shutdown in StopRuntime.
+	// Run waits for an OS signal even after Shutdown and would block runtimeWG.
+	for _, worker := range []*asynq.Server{legacyServer, historyServer, server} {
+		if err := worker.Start(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
+			g.Log().Warningf(runtimeCtx, "启动Telegram交付Worker失败：%+v", err)
 		}
-	}()
-	go func() {
-		defer s.runtimeWG.Done()
-		if err := server.Run(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
-			g.Log().Errorf(runtimeCtx, "Telegram Delivery Worker停止：%+v", err)
-		}
-	}()
+	}
+	s.runtimeWG.Add(1)
 	go func() {
 		defer s.runtimeWG.Done()
 		s.runDeliveryRecovery(runtimeCtx)
 	}()
+	s.queueMu.Unlock()
 }
 
 func (s *sCollector) enqueueDeliveryTask(ctx context.Context, deliveryID int64, priority int) error {
@@ -111,7 +110,7 @@ func (s *sCollector) handleDeliveryTask(ctx context.Context, task *asynq.Task) e
 		return err
 	}
 	queue, _ := asynq.GetQueueName(ctx)
-	if queue == consts.QueueDeliveryReady || queue == consts.QueueDeliveryHistory {
+	if queue == consts.QueueDeliveryHistory {
 		timer := time.NewTimer(collectorDeliveryHistoryInterval(ctx))
 		defer timer.Stop()
 		select {
@@ -123,6 +122,12 @@ func (s *sCollector) handleDeliveryTask(ctx context.Context, task *asynq.Task) e
 	if queue == consts.QueueDeliveryReady {
 		priority, err := s.persistedDeliveryPriority(ctx, deliveryID)
 		if err != nil {
+			if errors.Is(err, errDeliveryInvalidEvent) {
+				if quarantineErr := s.quarantineInvalidDelivery(ctx, deliveryID, err); quarantineErr != nil {
+					return quarantineErr
+				}
+				return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
+			}
 			return err
 		}
 		// ACK legacy work only after the classified task is durably enqueued.
@@ -343,7 +348,14 @@ func (s *sCollector) enqueueDueDeliveryTasks(ctx context.Context, limit int) err
 		}
 		priority, priorityErr := s.persistedDeliveryPriority(ctx, deliveryID)
 		if priorityErr != nil {
-			return priorityErr
+			if !errors.Is(priorityErr, errDeliveryInvalidEvent) {
+				return priorityErr
+			}
+			if err := s.quarantineInvalidDelivery(ctx, deliveryID, priorityErr); err != nil {
+				return err
+			}
+			g.Log().Warningf(ctx, "隔离无法分类的采集交付，继续恢复后续任务 deliveryId:%d err:%+v", deliveryID, priorityErr)
+			continue
 		}
 		if updateErr := s.enqueueDeliveryTask(ctx, deliveryID, priority); updateErr != nil {
 			return gerror.Wrap(updateErr, "投递待恢复Telegram采集交付失败")
@@ -371,11 +383,11 @@ func (s *sCollector) persistedDeliveryPriority(ctx context.Context, deliveryID i
 		return 0, gerror.Wrap(err, "读取交付优先级失败")
 	}
 	if event.Id <= 0 || event.RawUpdate == nil {
-		return 0, gerror.New("交付缺少原始事件")
+		return 0, fmt.Errorf("%w: 交付缺少原始事件", errDeliveryInvalidEvent)
 	}
 	delivery, err := collectorDeliveryFromEvent(&event, []byte(event.RawUpdate.String()))
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("%w: %v", errDeliveryInvalidEvent, err)
 	}
 	return deliveryPriority(&delivery), nil
 }
@@ -396,4 +408,12 @@ func collectorDeliveryHistoryInterval(ctx context.Context) time.Duration {
 		value = 100
 	}
 	return time.Duration(value) * time.Millisecond
+}
+
+// Quarantine only a deterministically malformed job by primary key. Keep its
+// payload and business state for repair; transient database failures retry.
+func (s *sCollector) quarantineInvalidDelivery(ctx context.Context, id int64, cause error) error {
+	c := dao.TgCollectorDelivery.Columns()
+	_, err := dao.TgCollectorDelivery.Ctx(ctx).Where(c.Id, id).WhereIn(c.Status, []string{sysin.DeliveryStatusPending, sysin.DeliveryStatusFailedRetry}).Data(g.Map{c.Status: sysin.DeliveryStatusQuarantined, c.ErrorMessage: cause.Error()}).Update()
+	return err
 }

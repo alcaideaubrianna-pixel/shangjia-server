@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gcfg"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/hibiken/asynq"
 	"hotgo/addons/telegram_collector/consts"
@@ -22,21 +24,23 @@ func TestDeliveryRecoveryPriorityLocalPostgres(t *testing.T) {
 	if port == "" {
 		t.Skip("requires disposable loopback PostgreSQL")
 	}
+	defer func() { _ = g.DB().GetCore().ClearTableFieldsAll(context.Background()) }()
 	old := gdb.GetConfig("default")
 	defer gdb.SetConfigGroup("default", old)
 	gdb.SetConfigGroup("default", gdb.ConfigGroup{{Type: "pgsql", Host: "127.0.0.1", Port: port, User: os.Getenv("USER"), Name: "postgres"}})
 	err := g.DB().Transaction(context.Background(), func(ctx context.Context, tx gdb.TX) error {
 		for _, sql := range []string{
-			`CREATE TEMP TABLE hg_tg_collector_event(id bigint,source_type text,raw_update jsonb,created_at timestamp) ON COMMIT DROP`,
+			`CREATE TEMP TABLE hg_tg_collector_event(id bigint,source_type text,raw_update jsonb,created_at timestamp,received_at timestamp) ON COMMIT DROP`,
 			`CREATE TEMP TABLE hg_tg_collector_delivery(id bigint,event_id bigint) ON COMMIT DROP`,
-			`INSERT INTO hg_tg_collector_event VALUES(1,'account','{"history":true}',now()),(2,'account','{"history":false}',now()),(3,'account','{"receivedAt":"2020-01-01T00:00:00Z"}',now())`,
-			`INSERT INTO hg_tg_collector_delivery VALUES(11,1),(12,2),(13,3)`,
+			`INSERT INTO hg_tg_collector_event(id,source_type,raw_update,created_at) VALUES(1,'account','{"history":true}',now()),(2,'account','{"history":false}',now()),(3,'account','{"receivedAt":"2020-01-01T00:00:00Z"}',now())`,
+			`INSERT INTO hg_tg_collector_event VALUES(4,'account','{"receivedAt":"2026-11-02T22:12:00+08:00"}','2026-11-02 22:12:01','2026-11-02 22:12:00'),(5,'account','{"receivedAt":"2026-11-01T22:12:00+08:00"}','2026-11-02 22:12:01','2026-11-01 22:12:00')`,
+			`INSERT INTO hg_tg_collector_delivery VALUES(11,1),(12,2),(13,3),(14,4),(15,5)`,
 		} {
 			if _, err := tx.Exec(sql); err != nil {
 				return err
 			}
 		}
-		for id, want := range map[int64]int{11: sysin.EventPriorityNormal, 12: sysin.EventPriorityRealtime, 13: sysin.EventPriorityNormal} {
+		for id, want := range map[int64]int{11: sysin.EventPriorityNormal, 12: sysin.EventPriorityRealtime, 13: sysin.EventPriorityNormal, 14: sysin.EventPriorityRealtime, 15: sysin.EventPriorityNormal} {
 			got, err := NewCollector().persistedDeliveryPriority(ctx, id)
 			if err != nil {
 				return err
@@ -117,6 +121,87 @@ func TestDeliveryRedisQueueIsolationAndDuplicateEnqueue(t *testing.T) {
 		}
 		if len(tasks) != want {
 			t.Fatalf("queue %s pending=%d want=%d", queue, len(tasks), want)
+		}
+	}
+}
+
+func TestDeliveryRecoveryQuarantinesBadEventAndContinuesLocalPostgres(t *testing.T) {
+	port := os.Getenv("YOUBAN_DELIVERY_TEST_PORT")
+	if port == "" {
+		t.Skip("requires disposable loopback PostgreSQL")
+	}
+	old := gdb.GetConfig("default")
+	defer gdb.SetConfigGroup("default", old)
+	gdb.SetConfigGroup("default", gdb.ConfigGroup{{Type: "pgsql", Host: "127.0.0.1", Port: port, User: os.Getenv("USER"), Name: "postgres"}})
+	ctx := context.Background()
+	_ = g.DB().GetCore().ClearTableFieldsAll(ctx)
+	defer g.DB().GetCore().ClearTableFieldsAll(ctx)
+	redis := miniredis.RunT(t)
+	opt := asynq.RedisClientOpt{Addr: redis.Addr()}
+	client := asynq.NewClient(opt)
+	defer client.Close()
+	inspector := asynq.NewInspector(opt)
+	defer inspector.Close()
+	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		for _, sql := range []string{
+			`CREATE TEMP TABLE hg_tg_collector_event(id bigint,source_type text,raw_update jsonb,created_at timestamp,received_at timestamp) ON COMMIT DROP`,
+			`CREATE TEMP TABLE hg_tg_collector_delivery(id bigint,event_id bigint,status text,priority int,updated_at timestamp,next_run_at timestamp,attempt_count int,error_message text) ON COMMIT DROP`,
+			`INSERT INTO hg_tg_collector_event VALUES(1,'account','"malformed"',now(),now()),(2,'account','{"history":false}',now(),now())`,
+			`INSERT INTO hg_tg_collector_delivery VALUES(1,1,'pending',100,now()-interval '1 hour',NULL,0,''),(2,2,'pending',50,now()-interval '1 hour',NULL,0,'')`,
+		} {
+			if _, err := tx.Exec(sql); err != nil {
+				return err
+			}
+		}
+		collector := &sCollector{queueClient: client}
+		if err := collector.enqueueDueDeliveryTasks(ctx, 10); err != nil {
+			return err
+		}
+		row, err := tx.GetOne(`SELECT status FROM hg_tg_collector_delivery WHERE id=1`)
+		if err != nil {
+			return err
+		}
+		if row["status"].String() != sysin.DeliveryStatusQuarantined {
+			t.Fatal("malformed event was not quarantined")
+		}
+		tasks, err := inspector.ListPendingTasks(consts.QueueDeliveryRealtime)
+		if err != nil {
+			return err
+		}
+		if len(tasks) != 1 {
+			t.Fatalf("valid task after malformed event was not recovered: %d", len(tasks))
+		}
+		cancelled, cancel := context.WithCancel(ctx)
+		cancel()
+		if _, err := collector.persistedDeliveryPriority(cancelled, 2); err == nil || errors.Is(err, errDeliveryInvalidEvent) {
+			t.Fatal("transient DB failure must remain retryable")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCollectorRuntimeStopsWithoutSignal(t *testing.T) {
+	redis := miniredis.RunT(t)
+	previous := g.Cfg().GetAdapter()
+	defer g.Cfg().SetAdapter(previous)
+	adapter, err := gcfg.NewAdapterContent("telegramCollector:\n  enabled: true\nredis:\n  default:\n    address: '" + redis.Addr() + "'\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.Cfg().SetAdapter(adapter)
+	collector := &sCollector{}
+	for i := 0; i < 2; i++ {
+		collector.StartRuntime(context.Background())
+		collector.StartDeliveryRuntime(context.Background())
+		stopped := make(chan struct{})
+		go func() { collector.StopRuntime(); close(stopped) }()
+		select {
+		case <-stopped:
+		case <-time.After(10 * time.Second):
+			t.Fatal("runtime shutdown still waits for an OS signal")
 		}
 	}
 }

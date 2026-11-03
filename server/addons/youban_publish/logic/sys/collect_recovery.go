@@ -86,6 +86,9 @@ func (s *sSysPublish) runCollectRecoveryCycle(ctx context.Context) {
 }
 
 func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
+	if err := s.recoverCollectSourceStats(ctx, 100); err != nil {
+		g.Log().Warningf(ctx, "恢复采集源统计任务失败：%+v", err)
+	}
 	mediaBatchSize := collectMediaRecoveryBatchSize(ctx)
 	if err := s.dispatchDueCollectProcessOutbox(ctx, collectProcessOutboxRecoveryBatchSize(ctx)); err != nil {
 		g.Log().Warningf(ctx, "恢复采集处理Outbox失败：%+v", err)

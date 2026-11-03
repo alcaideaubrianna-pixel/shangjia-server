@@ -61,7 +61,7 @@ func classifyProfileMessage(text string, media []collectMediaItem) profileMessag
 	if profileMessageIgnoredNotice(text) {
 		return profileMessageClassification{Kind: profileMessageKindIgnore}
 	}
-	if len(media) > 0 && profileMessageHasMediaType(media, "video") && !profileMessageHasProfileText(text) {
+	if profileMessageAllMediaType(media, "video") && !profileMessageHasProfileText(text) {
 		return profileMessageClassification{
 			Kind:  profileMessageKindVerify,
 			Media: media,

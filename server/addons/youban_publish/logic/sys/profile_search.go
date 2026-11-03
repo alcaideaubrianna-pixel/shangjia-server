@@ -17,7 +17,7 @@ import (
 
 var (
 	// Profile numbers use an uppercase alpha-numeric prefix followed by a
-	// numeric sequence (for example KK12426 and FNLZ1468974). Keep these on
+	// numeric sequence (for example KK12426 and FNLZ146897). Keep these on
 	// the exact-match path so PostgreSQL can use the profile_no index instead
 	// of scanning text fields with leading-wildcard LIKE predicates.
 	profileSearchNoRegexp   = regexp.MustCompile(`^[A-Z][A-Z0-9]{0,8}[0-9]$`)
@@ -91,15 +91,13 @@ func applyProfileKeywordSearch(mod *gdb.Model, keyword string, fields profileSea
 	if keyword == "" {
 		return mod
 	}
-	upper := strings.ToUpper(keyword)
-	if profileSearchNoRegexp.MatchString(upper) {
-		// Profile numbers are normalized to upper-case at write time. Keep the
-		// predicate sargable so PostgreSQL can use the regular B-tree index.
-		return mod.Where(fields.ProfileNo+" = ?", upper)
-	}
 	if sequence, prefix, ok := parseProfilePublishMark(keyword); ok {
 		condition, args := profilePublishMarkSearchCondition(sequence, prefix, fields.StateAlias)
 		return mod.Where(condition, args...)
+	}
+	upper := strings.ToUpper(keyword)
+	if profileSearchNoRegexp.MatchString(upper) {
+		return mod.Where(fields.ProfileNo+" = ?", upper)
 	}
 	condition, args := profileTextSearchCondition(keyword, fields)
 	return mod.Where(condition, args...)
@@ -122,7 +120,11 @@ func normalizeProfileSearchKeyword(keyword string) string {
 
 func parseProfilePublishMark(keyword string) (sequence string, prefix string, ok bool) {
 	keyword = strings.TrimSpace(keyword)
-	if profileSearchNoRegexp.MatchString(strings.ToUpper(keyword)) {
+	// Preserve uppercase legacy profile numbers; lowercase title prefixes of
+	// three or more letters (e.g. xxy6400) denote generated publish marks.
+	upper := strings.ToUpper(keyword)
+	letters := len(keyword) - len(strings.TrimLeft(keyword, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"))
+	if profileSearchNoRegexp.MatchString(upper) && (keyword == upper || letters <= 2) {
 		return "", "", false
 	}
 	if len(keyword) == 3 {

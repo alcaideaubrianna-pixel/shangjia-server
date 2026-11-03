@@ -42,6 +42,7 @@ type sCollector struct {
 	queueServer           *asynq.Server
 	deliveryServer        *asynq.Server
 	deliveryHistoryServer *asynq.Server
+	deliveryLegacyServer  *asynq.Server
 	queueClient           *asynq.Client
 	runtimeCtx            context.Context
 	runtimeStop           context.CancelFunc

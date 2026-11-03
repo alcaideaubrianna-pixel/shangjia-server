@@ -62,7 +62,7 @@ func TestNormalizeProfileSearchKeyword(t *testing.T) {
 }
 
 func TestProfileNumberSearchAcceptsShortAlphaNumericNumbers(t *testing.T) {
-	for _, value := range []string{"KK12426", "AB1234567"} {
+	for _, value := range []string{"KK12426", "AB1234567", "FNLZ146897"} {
 		if !profileSearchNoRegexp.MatchString(value) {
 			t.Fatalf("profile number %q must use exact-match search", value)
 		}
@@ -84,6 +84,12 @@ func TestParseProfilePublishMark(t *testing.T) {
 		if !ok || sequence != want[0] || prefix != want[1] {
 			t.Fatalf("parse %q = (%q,%q,%v), want (%q,%q,true)", input, sequence, prefix, ok, want[0], want[1])
 		}
+	}
+	if _, _, ok := parseProfilePublishMark("FNLZ146897"); ok {
+		t.Fatal("uppercase legacy profile number must retain exact-match search")
+	}
+	if _, _, ok := parseProfilePublishMark("m48574"); ok {
+		t.Fatal("lowercase standard profile number must retain exact-match search")
 	}
 	if _, _, ok := parseProfilePublishMark("M48574"); ok {
 		t.Fatal("profile number must not be parsed as publish mark")

@@ -42,7 +42,11 @@ func pairCollectMaterialMessages(messages []collectMaterialMessageView) []collec
 		if collectMaterialSkippableMessage(message) {
 			continue
 		}
-		switch classifyProfileMessage(message.RawText, message.Media).Kind {
+		kind := classifyProfileMessage(message.RawText, message.Media).Kind
+		if lastDisplayIndex >= 0 && collectMaterialMixedVerification(message) {
+			kind = profileMessageKindVerify
+		}
+		switch kind {
 		case profileMessageKindDisplay:
 			// A new business record closes the previous context. Verification can
 			// only belong to the latest effective display record.
@@ -64,6 +68,12 @@ func pairCollectMaterialMessages(messages []collectMaterialMessageView) []collec
 		}
 	}
 	return pairs
+}
+
+// A captionless mixed album is verification only inside an existing display
+// context. On its own it must not create a profile or claim a new context.
+func collectMaterialMixedVerification(message collectMaterialMessageView) bool {
+	return strings.TrimSpace(message.RawText) == "" && profileMessageHasMediaType(message.Media, "video")
 }
 
 func collectMaterialSkippableMessage(message collectMaterialMessageView) bool {
@@ -91,7 +101,7 @@ func collectMaterialContextClosed(messages []collectMaterialMessageView, display
 		if collectMaterialSkippableMessage(message) {
 			continue
 		}
-		if classifyProfileMessage(message.RawText, message.Media).Kind == profileMessageKindVerify {
+		if classifyProfileMessage(message.RawText, message.Media).Kind == profileMessageKindVerify || collectMaterialMixedVerification(message) {
 			continue
 		}
 		return true

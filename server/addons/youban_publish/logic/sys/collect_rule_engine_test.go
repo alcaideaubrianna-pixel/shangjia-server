@@ -69,6 +69,12 @@ func assertCollectNonFeeLinesInOrder(original, processed string) error {
 	for index := range protected {
 		protected[index] = true
 	}
+	for index := 0; index < min(3, len(originalLines)); index++ {
+		trimmed := strings.TrimSpace(originalLines[index])
+		if collectMaterialMetaLineRule.MatchString(trimmed) || collectMaterialCodeLineRule.MatchString(trimmed) || isCollectMaterialAlphaNumericCode(trimmed) {
+			protected[index] = false
+		}
+	}
 	for index, line := range originalLines {
 		if !collectFeeKeywordPattern.MatchString(normalizeCollectKeywordText(line)) {
 			continue
@@ -370,6 +376,28 @@ func TestApplyCollectIntroFeeTruncateOnlyMatchesCodeTitleInFirstThreeLines(t *te
 	fourthLine := "第一行正文\n第二行正文\n第三行正文\n柠檬052\n介绍费：7888"
 	if got, want := applyCollectIntroFeeTruncate(fourthLine), "第一行正文\n第二行正文\n第三行正文\n柠檬052"; got != want {
 		t.Fatalf("fourth-line code title must be preserved: got %q, want %q", got, want)
+	}
+}
+
+func TestNormalizeCollectRuleBodyCleansLeadingTitleWithFeeSuffix(t *testing.T) {
+	rule := gdb.Record{
+		"truncate_intro_fee_enabled": gvar.New(true),
+		"intro_fee_suffix":           gvar.New("天空之城11"),
+	}
+	text := "柠檬052\n城市：深圳\n年龄：24\n身高：163\n体重：92\n介绍费7888"
+	got := normalizeCollectRuleBody(text, rule)
+	if strings.Contains(got, "柠檬052") {
+		t.Fatalf("leading code title was not cleaned: %q", got)
+	}
+	for _, field := range []string{"城市：深圳", "年龄：24", "身高：163", "体重：92"} {
+		if !strings.Contains(got, field) {
+			t.Fatalf("body field %q was removed: %q", field, got)
+		}
+	}
+
+	fourthLine := "第一行正文\n第二行正文\n第三行正文\n柠檬052\n介绍费7888"
+	if got := normalizeCollectRuleBody(fourthLine, rule); !strings.Contains(got, "柠檬052") {
+		t.Fatalf("fourth-line code title must be preserved: %q", got)
 	}
 }
 

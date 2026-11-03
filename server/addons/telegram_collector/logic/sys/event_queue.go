@@ -59,25 +59,25 @@ func (s *sCollector) StartRuntime(ctx context.Context) {
 		s.queueClient = asynq.NewClient(collectorRedisOption(runtimeCtx))
 	}
 	s.queueServer = server
-	s.queueMu.Unlock()
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(eventTaskType, s.handleEventTask)
 	g.Log().Infof(runtimeCtx, "启动Telegram Collector Worker concurrency:%d", collectorConcurrency(runtimeCtx))
-	s.runtimeWG.Add(2)
-	go func() {
-		defer s.runtimeWG.Done()
-		if err := server.Run(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
-			g.Log().Errorf(runtimeCtx, "Telegram Collector Worker停止：%+v", err)
-		}
-	}()
+	// Signal handling belongs to the application; StopRuntime owns Shutdown.
+	if err := server.Start(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
+		g.Log().Warningf(runtimeCtx, "启动Telegram采集Worker失败：%+v", err)
+	}
+	s.runtimeWG.Add(1)
 	go func() {
 		defer s.runtimeWG.Done()
 		s.runEventRecovery(runtimeCtx)
 	}()
+	s.queueMu.Unlock()
 }
 
 func (s *sCollector) StopRuntime() {
 	s.queueMu.Lock()
+	legacyServer := s.deliveryLegacyServer
+	s.deliveryLegacyServer = nil
 	historyServer := s.deliveryHistoryServer
 	s.deliveryHistoryServer = nil
 	server, deliveryServer, client, runtimeStop := s.queueServer, s.deliveryServer, s.queueClient, s.runtimeStop
@@ -91,6 +91,9 @@ func (s *sCollector) StopRuntime() {
 	}
 	if deliveryServer != nil {
 		deliveryServer.Shutdown()
+	}
+	if legacyServer != nil {
+		legacyServer.Shutdown()
 	}
 	if historyServer != nil {
 		historyServer.Shutdown()
@@ -253,7 +256,13 @@ func collectorDeliveryFromEvent(row *entity.TgCollectorEvent, raw []byte) (sysin
 		}
 		_ = json.Unmarshal(raw, &legacy)
 		if legacy.History == nil && row.CreatedAt != nil && !message.ReceivedAt.IsZero() {
-			delivery.History = message.ReceivedAt.Before(row.CreatedAt.Time.Add(-5 * time.Minute))
+			receivedAt := message.ReceivedAt
+			// Both database timestamps use the same wall-clock convention. Do not
+			// mix timestamp-without-time-zone scans with RFC3339 offsets in raw JSON.
+			if row.ReceivedAt != nil {
+				receivedAt = row.ReceivedAt.Time
+			}
+			delivery.History = receivedAt.Before(row.CreatedAt.Time.Add(-5 * time.Minute))
 		}
 		delivery.AccountID = message.AccountID
 		delivery.TgAccountID = message.TgAccountID

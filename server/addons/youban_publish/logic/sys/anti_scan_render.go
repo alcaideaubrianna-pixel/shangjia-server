@@ -325,13 +325,14 @@ func antiScanPortraitUnderlayMask(portrait image.Image, bounds image.Rectangle) 
 			}
 		}
 	}
-	// Keep only a narrow binary edge ring around the foreground. The previous
+	// Preserve the foreground and feather only its surrounding edge. The previous
 	// blur-based underlay could expand the original scene across the canvas.
 	radius := 72
 	ring := image.NewAlpha(bounds)
 	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
 		for x := bounds.Min.X; x < bounds.Max.X; x++ {
 			if mask.AlphaAt(x, y).A > 0 {
+				ring.SetAlpha(x, y, color.Alpha{A: 255})
 				continue
 			}
 			minDistance := radius + 1

@@ -21,6 +21,7 @@ const (
 	DeliveryStatusCompleted   = "completed"
 	DeliveryStatusFailedRetry = "failed_retry"
 	DeliveryStatusDead        = "dead"
+	DeliveryStatusQuarantined = "quarantined"
 )
 
 type RawUpdateEvent struct {

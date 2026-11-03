@@ -2,11 +2,11 @@ package sys
 
 import (
 	"context"
-	"encoding/json"
+
 	"os"
+	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gogf/gf/v2/database/gdb"
@@ -62,19 +62,18 @@ func TestCollectSourceStatsConcurrentTriggersCoalesce(t *testing.T) {
 	defer client.Close()
 	inspector := asynq.NewInspector(opt)
 	defer inspector.Close()
-	now := time.Unix(1800000000, 0)
 	var wg sync.WaitGroup
 	for i := 0; i < 40; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := enqueueCollectSourceStatsTaskAt(context.Background(), client, 1421, now); err != nil {
+			if err := enqueueCollectSourceStatsTask(context.Background(), client, 1421); err != nil {
 				t.Error(err)
 			}
 		}()
 	}
 	wg.Wait()
-	if err := enqueueCollectSourceStatsTaskAt(context.Background(), client, 1422, now); err != nil {
+	if err := enqueueCollectSourceStatsTask(context.Background(), client, 1422); err != nil {
 		t.Fatal(err)
 	}
 	tasks, err := inspector.ListScheduledTasks(tgQueueNameBackground)
@@ -91,35 +90,99 @@ func TestCollectSourceStatsConcurrentTriggersCoalesce(t *testing.T) {
 	}
 }
 
-func TestCollectSourceStatsNextWindowSurvivesActiveTask(t *testing.T) {
+func TestCollectSourceStatsDurableRecoveryLocalPostgres(t *testing.T) {
+	port := os.Getenv("YOUBAN_DELIVERY_TEST_PORT")
+	if port == "" {
+		t.Skip("requires disposable loopback PostgreSQL")
+	}
+	old := gdb.GetConfig("default")
+	defer gdb.SetConfigGroup("default", old)
+	gdb.SetConfigGroup("default", gdb.ConfigGroup{{Type: "pgsql", Host: "127.0.0.1", Port: port, User: os.Getenv("USER"), Name: "postgres"}})
 	redis := miniredis.RunT(t)
 	opt := asynq.RedisClientOpt{Addr: redis.Addr()}
 	client := asynq.NewClient(opt)
 	defer client.Close()
 	inspector := asynq.NewInspector(opt)
 	defer inspector.Close()
-	now := time.Unix(1800000000, 0)
-	// Keeping the earlier task's unique lock models the completion/ACK window.
-	for _, at := range []time.Time{now, now.Add(30 * time.Second), now.Add(31 * time.Second)} {
-		if err := enqueueCollectSourceStatsTaskAt(context.Background(), client, 1421, at); err != nil {
-			t.Fatal(err)
+	err := g.DB().Transaction(context.Background(), func(ctx context.Context, tx gdb.TX) error {
+		ddl, err := os.ReadFile("../../resource/sql/collect_source_stats_work.pgsql.sql")
+		if err != nil {
+			return err
 		}
-	}
-	tasks, err := inspector.ListScheduledTasks(tgQueueNameBackground)
+		sql := strings.Replace(string(ddl), "CREATE TABLE IF NOT EXISTS", "CREATE TEMP TABLE", 1)
+		sql = strings.Replace(sql, ");", ") ON COMMIT DROP;", 1)
+		if _, err = tx.Exec(sql); err != nil {
+			return err
+		}
+		broken := asynq.NewClient(opt)
+		broken.Close()
+		service := &sSysPublish{tgQueueClient: broken}
+		if err = service.scheduleCollectSourceStats(ctx, 1421); err == nil {
+			t.Fatal("closed Redis client unexpectedly succeeded")
+		}
+		for i := 0; i < 1000; i++ {
+			if err = markCollectSourceStatsDirty(ctx, 1421); err != nil {
+				return err
+			}
+		}
+		row, err := tx.GetOne("SELECT COUNT(*) n FROM " + collectSourceStatsWorkTable)
+		if err != nil {
+			return err
+		}
+		if row["n"].Int() != 1 {
+			t.Fatal("dirty work grew with triggers")
+		}
+		if _, err = tx.Exec("UPDATE " + collectSourceStatsWorkTable + " SET available_at=CURRENT_TIMESTAMP-INTERVAL '1 minute'"); err != nil {
+			return err
+		}
+		service.tgQueueClient = client
+		if err = service.recoverCollectSourceStats(ctx, 100); err != nil {
+			return err
+		}
+		tasks, err := inspector.ListScheduledTasks(tgQueueNameBackground)
+		if err != nil {
+			return err
+		}
+		if len(tasks) != 1 {
+			t.Fatalf("lost enqueue was not recovered: %d", len(tasks))
+		}
+		// A concurrent event arriving during counting must survive conditional ACK.
+		if err = refreshCollectSourceStatsWork(ctx, 1421, func(ctx context.Context, id int64) error { return markCollectSourceStatsDirty(ctx, id) }); err != nil {
+			return err
+		}
+		row, err = tx.GetOne("SELECT pending FROM " + collectSourceStatsWorkTable + " WHERE source_id=1421")
+		if err != nil {
+			return err
+		}
+		if row["pending"].Int() != 1 {
+			t.Fatal("concurrent generation lost")
+		}
+		calls := 0
+		refresh := func(context.Context, int64) error { calls++; return nil }
+		if err = refreshCollectSourceStatsWork(ctx, 1421, refresh); err != nil {
+			return err
+		}
+		if err = refreshCollectSourceStatsWork(ctx, 1421, refresh); err != nil {
+			return err
+		}
+		if calls != 1 {
+			t.Fatalf("clean source redundantly scanned %d times", calls)
+		}
+		// A trigger after the task completes still has durable recovery, even
+		// while the previous Asynq uniqueness lock has not been released.
+		if err = service.scheduleCollectSourceStats(ctx, 1421); err != nil {
+			return err
+		}
+		row, err = tx.GetOne("SELECT pending FROM " + collectSourceStatsWorkTable + " WHERE source_id=1421")
+		if err != nil {
+			return err
+		}
+		if row["pending"].Int() != 1 {
+			t.Fatal("post-refresh trigger lost")
+		}
+		return nil
+	})
 	if err != nil {
 		t.Fatal(err)
-	}
-	if len(tasks) != 2 {
-		t.Fatalf("next-window refresh was swallowed: tasks=%d", len(tasks))
-	}
-	for _, task := range tasks {
-		var payload collectSourceStatsPayload
-		if err := json.Unmarshal(task.Payload, &payload); err != nil {
-			t.Fatal(err)
-		}
-		earliest := time.Unix((payload.Window+1)*30+5, 0)
-		if task.NextProcessAt.Before(earliest) {
-			t.Fatal("refresh executes before its window closes")
-		}
 	}
 }

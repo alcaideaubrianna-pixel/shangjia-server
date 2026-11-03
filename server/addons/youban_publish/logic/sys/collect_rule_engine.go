@@ -215,8 +215,35 @@ func normalizeCollectRuleBodyWithoutTruncate(text string, rule gdb.Record) strin
 // idempotent order. It is shared by rule evaluation and the persistence
 // boundary so retries cannot write raw text back over cleaned content.
 func normalizeCollectRuleBody(text string, rule gdb.Record) string {
-	truncate := rule["truncate_intro_fee_enabled"].Bool() && strings.TrimSpace(rule["intro_fee_suffix"].String()) == ""
+	truncateEnabled := rule["truncate_intro_fee_enabled"].Bool()
+	if truncateEnabled {
+		text = applyCollectLeadingMaterialTitleCleanup(text)
+	}
+	truncate := truncateEnabled && strings.TrimSpace(rule["intro_fee_suffix"].String()) == ""
 	return applyCollectFeeScopedRules(text, rule, truncate)
+}
+
+// Fee lines and explicit profile numbers are content, not source title codes.
+func isCollectLeadingMaterialTitle(line string) bool {
+	normalized := normalizeCollectKeywordText(line)
+	if collectFeeKeywordPattern.MatchString(normalized) || strings.HasPrefix(strings.TrimSpace(line), "编号") {
+		return false
+	}
+	return collectMaterialMetaLineRule.MatchString(line) || collectMaterialCodeLineRule.MatchString(line) || isCollectMaterialAlphaNumericCode(line)
+}
+
+func applyCollectLeadingMaterialTitleCleanup(text string) string {
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	limit := min(3, len(lines))
+	result := make([]string, 0, len(lines))
+	for index, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if index < limit && isCollectLeadingMaterialTitle(trimmed) {
+			continue
+		}
+		result = append(result, line)
+	}
+	return strings.Join(result, "\n")
 }
 
 // applyCollectFeeScopedRules confines every destructive rule to the fee line
@@ -267,6 +294,12 @@ func preserveCollectNonFeeLines(original, processed string) string {
 	protected := make([]bool, len(originalLines))
 	for index := range protected {
 		protected[index] = true
+	}
+	for index := 0; index < min(3, len(originalLines)); index++ {
+		trimmed := strings.TrimSpace(originalLines[index])
+		if isCollectLeadingMaterialTitle(trimmed) {
+			protected[index] = false
+		}
 	}
 	for index, line := range originalLines {
 		if collectFeeKeywordPattern.MatchString(normalizeCollectKeywordText(line)) {
