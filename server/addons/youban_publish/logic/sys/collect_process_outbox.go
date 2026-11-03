@@ -104,9 +104,10 @@ func (s *sSysPublish) dispatchDueCollectProcessOutbox(ctx context.Context, limit
 	if strings.EqualFold(g.DB().GetConfig().Type, "pgsql") {
 		model = model.Fields("*, updated_at::text AS claim_version")
 	}
+	// Reserve capacity for realtime first, then history and expired processing
+	// work. The explicit history marker is authoritative: an old realtime
+	// event must not be silently demoted merely because it waited in a backlog.
 	cutoff := now.Add(-10 * time.Minute)
-	// Reserve capacity for fresh pending, history, and expired processing work.
-	// Expired leases must be recoverable regardless of the row's creation date.
 	freshLimit := max(1, limit*3/5)
 	historyLimit := min(max(1, limit/5), limit-freshLimit)
 	expiredLimit := limit - freshLimit - historyLimit
@@ -120,10 +121,10 @@ func (s *sSysPublish) dispatchDueCollectProcessOutbox(ctx context.Context, limit
 		}
 		return base.OrderAsc(dueColumn).OrderAsc("id").Limit(count).All()
 	}
-	rows, err := load("pending", "available_at", freshLimit, "COALESCE(history,FALSE)=FALSE AND created_at>=?", cutoff)
+	rows, err := load("pending", "available_at", freshLimit, "COALESCE(history,FALSE)=FALSE")
 	if err == nil {
 		var more []gdb.Record
-		more, err = load("pending", "available_at", historyLimit, "history=TRUE OR created_at<?", cutoff)
+		more, err = load("pending", "available_at", historyLimit, "history=TRUE OR (history IS NULL AND created_at<?)", cutoff)
 		rows = append(rows, more...)
 	}
 	if err == nil {
