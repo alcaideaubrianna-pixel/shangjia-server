@@ -203,3 +203,94 @@ func TestProductionDeliveryBusinessHandoffLocalPostgres(t *testing.T) {
 	}
 	t.Logf("actual collector to business durable handoff rows=%d realtime=%d history_or_delayed=%d duplicates=0", count, live, history)
 }
+
+// Full production fixture replay: validates the real recovery dispatcher under
+// online-shaped source/account distribution, not synthetic equal-sized rows.
+func TestProductionFixtureRecoveryFairnessLocalPostgres(t *testing.T) {
+	fixture := os.Getenv("YOUBAN_DELIVERY_CAPTURE_FILE")
+	port := os.Getenv("YOUBAN_DELIVERY_TEST_PORT")
+	if fixture == "" || port == "" {
+		t.Skip("requires private online capture and disposable loopback PostgreSQL")
+	}
+	_ = g.DB()
+	old := gdb.GetConfig("default")
+	defer gdb.SetConfigGroup("default", old)
+	gdb.SetConfigGroup("default", gdb.ConfigGroup{{Type: "pgsql", Host: "127.0.0.1", Port: port, User: os.Getenv("USER"), Name: "postgres"}})
+	redis := miniredis.RunT(t)
+	opt := asynq.RedisClientOpt{Addr: redis.Addr()}
+	client := asynq.NewClient(opt)
+	defer client.Close()
+	inspector := asynq.NewInspector(opt)
+	defer inspector.Close()
+	s := &sSysPublish{tgQueueClient: client}
+	file, err := os.Open(fixture)
+	if err != nil {
+		t.Fatal("open online capture", err)
+	}
+	defer file.Close()
+	ctx := context.Background()
+	var rows, history, realtime int
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if _, err := tx.Exec(createRealtimeOutboxTestSQL); err != nil {
+			return err
+		}
+		scanner := bufio.NewScanner(file)
+		scanner.Buffer(make([]byte, 65536), 8*1024*1024)
+		for scanner.Scan() {
+			var delivery collectorin.CollectorDelivery
+			if err := json.Unmarshal(scanner.Bytes(), &delivery); err != nil {
+				return err
+			}
+			msg := collectorDeliveryMessage(&delivery, delivery.TenantID, delivery.AccountID, delivery.SourceID, delivery.SourceType)
+			// Keep source/account distribution from production; account id 1 is
+			// only the isolated test owner required by the queue payload contract.
+			payload := collectProcessQueuePayload{EventId: delivery.EventID + int64(rows)*1000000, TenantId: delivery.TenantID, AccountId: 1, SourceId: delivery.SourceID, History: msg.History}
+			if err := ensureCollectProcessOutbox(ctx, payload, 0); err != nil {
+				return err
+			}
+			rows++
+			if msg.History {
+				history++
+			} else {
+				realtime++
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			return err
+		}
+		if rows < 4000 || history == 0 || realtime == 0 {
+			t.Fatalf("online fixture diversity missing rows=%d realtime=%d history=%d", rows, realtime, history)
+		}
+		if err := s.dispatchDueCollectProcessOutbox(ctx, 200); err != nil {
+			return err
+		}
+		liveTasks, err := inspector.ListPendingTasks(tgQueueNameCollectProcessRealtimeV2)
+		if err != nil {
+			return err
+		}
+		recoveryTasks, err := inspector.ListPendingTasks(tgQueueNameCollectProcessRecoveryV2)
+		if err != nil {
+			return err
+		}
+		if len(liveTasks) == 0 || len(recoveryTasks) == 0 {
+			t.Fatalf("dispatcher starved a lane live=%d recovery=%d", len(liveTasks), len(recoveryTasks))
+		}
+		if len(liveTasks)+len(recoveryTasks) > 200 {
+			t.Fatalf("dispatcher exceeded batch=%d", len(liveTasks)+len(recoveryTasks))
+		}
+		// Both lanes must receive work; the exact count may be lower when
+		// source events coalesce into an existing durable task identity.
+		metric, err := tx.GetAll(`SELECT source_id,MIN(created_at) oldest,COUNT(*) pending FROM hg_youban_publish_collect_process_outbox WHERE status='pending' GROUP BY source_id ORDER BY oldest LIMIT 100`)
+		if err != nil {
+			return err
+		}
+		if len(metric) == 0 {
+			t.Fatal("oldest pending source metric missing")
+		}
+		t.Logf("online fixture recovery fairness rows=%d realtime=%d history=%d claimed_live=%d claimed_recovery=%d oldest_source_metrics=%d", rows, realtime, history, len(liveTasks), len(recoveryTasks), len(metric))
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
