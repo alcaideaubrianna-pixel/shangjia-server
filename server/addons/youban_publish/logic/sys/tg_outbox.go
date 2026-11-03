@@ -141,6 +141,7 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 	ctx = telegramPublishTraceContext(ctx, row.JobId, g.Map{"outboxId": row.Id, "outboxAttemptCount": row.AttemptCount})
 	stage := beginTelegramPublishStage(ctx, "outbox.dispatch")
 	defer stage.Finish(&resultErr)
+	g.Log().Info(ctx, "TG Outbox 选中任务", g.Map{"event": "outbox_selected", "outboxId": row.Id, "jobId": row.JobId, "outboxAttemptCount": row.AttemptCount, "availableAt": row.AvailableAt})
 	step := beginTelegramPublishStage(ctx, "outbox.decision")
 	decision, err := s.telegramOutboxJobDispatchDecision(ctx, row.JobId, gtime.Now())
 	step.End(err, g.Map{"decision": decision})
@@ -172,12 +173,15 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 	affected, _ := result.RowsAffected()
 	beginTelegramPublishStage(ctx, "outbox.lease.result").End(nil, g.Map{"affectedRows": affected, "acquired": affected > 0})
 	if affected == 0 {
+		g.Log().Info(ctx, "TG Outbox 租约未获取", g.Map{"event": "outbox_lease_missed", "outboxId": row.Id, "jobId": row.JobId})
 		return nil
 	}
+	g.Log().Info(ctx, "TG Outbox 租约已获取", g.Map{"event": "outbox_lease_acquired", "outboxId": row.Id, "jobId": row.JobId, "leaseOwner": owner})
 	// available_at is a database wall-clock timestamp. The caller only selects
 	// due rows, so do not convert it back to a Go duration: PostgreSQL timestamp
 	// values can otherwise acquire an eight-hour offset when locations differ.
 	if err = s.enqueueTelegramJobDirect(ctx, row.JobId, 0); err != nil {
+		g.Log().Warning(ctx, "TG Outbox Redis 入队失败", g.Map{"event": "outbox_enqueue_failed", "outboxId": row.Id, "jobId": row.JobId, "leaseOwner": owner, "error": err.Error()})
 		message := boundPublishSuccessRecordMessage(err.Error())
 		_, _ = g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
 			Where("id", row.Id).Where("status", telegramOutboxProcessing).Where("lease_owner", owner).
@@ -188,12 +192,14 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 			}).Update()
 		return err
 	}
+	g.Log().Info(ctx, "TG Outbox Redis 入队成功", g.Map{"event": "outbox_enqueued", "outboxId": row.Id, "jobId": row.JobId, "leaseOwner": owner})
 	job, err := s.telegramJobById(ctx, row.JobId)
 	if err != nil {
 		return s.releaseTelegramOutbox(ctx, row.Id, owner, row.AttemptCount, err.Error())
 	}
 	if telegramOutboxJobStillNeedsDispatch(job.Status, job.DispatchStatus) {
 		beginTelegramPublishStage(ctx, "outbox.deferred").End(nil, g.Map{"reason": "still_needs_dispatch", "jobStatus": job.Status, "dispatchStatus": job.DispatchStatus})
+		g.Log().Info(ctx, "TG Outbox 入队后任务仍待发送", g.Map{"event": "outbox_enqueue_deferred", "outboxId": row.Id, "jobId": row.JobId, "jobStatus": job.Status, "dispatchStatus": job.DispatchStatus})
 		return s.releaseTelegramOutbox(ctx, row.Id, owner, row.AttemptCount, "频道发送槽繁忙，等待再次调度")
 	}
 	_, err = g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
@@ -205,6 +211,7 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 	if err != nil {
 		return gerror.Wrap(err, "确认TG任务Outbox投递失败")
 	}
+	g.Log().Info(ctx, "TG Outbox 已确认投递", g.Map{"event": "outbox_delivered", "outboxId": row.Id, "jobId": row.JobId, "leaseOwner": owner})
 	return nil
 }
 
@@ -291,6 +298,7 @@ func (s *sSysPublish) releaseTelegramOutbox(ctx context.Context, outboxId int64,
 	if err != nil {
 		return gerror.Wrap(err, "释放TG任务Outbox租约失败")
 	}
+	g.Log().Info(ctx, "TG Outbox 已释放等待重试", g.Map{"event": "outbox_released", "outboxId": outboxId, "leaseOwner": owner, "attemptCount": attemptCount + 1, "reason": message})
 	return nil
 }
 
