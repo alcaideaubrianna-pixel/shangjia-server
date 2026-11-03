@@ -95,6 +95,12 @@ func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	if err := s.dispatchDueCollectProcessOutbox(ctx, collectProcessOutboxRecoveryBatchSize(ctx)); err != nil {
 		g.Log().Warningf(ctx, "恢复采集处理Outbox失败：%+v", err)
 	}
+	// Always drain a bounded ready-media transition before backpressure can
+	// yield historical recovery; otherwise ready events remain orphaned while
+	// realtime traffic is continuously above the gate.
+	if err := s.recoverReadyMediaPendingEvents(ctx, min(mediaBatchSize, 100)); err != nil {
+		g.Log().Warningf(ctx, "恢复媒体已就绪但事件仍待处理的采集任务失败：%+v", err)
+	}
 	if blocked, err := s.collectRecoveryBackpressure(ctx); err != nil {
 		g.Log().Warningf(ctx, "读取实时采集背压状态失败，暂停本轮历史恢复：%+v", err)
 		return
@@ -115,9 +121,6 @@ func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	}
 	if err := s.recoverPendingCollectMedia(ctx, mediaBatchSize); err != nil {
 		g.Log().Warningf(ctx, "恢复待处理采集媒体任务失败：%+v", err)
-	}
-	if err := s.recoverReadyMediaPendingEvents(ctx, mediaBatchSize); err != nil {
-		g.Log().Warningf(ctx, "恢复媒体已就绪但事件仍待处理的采集任务失败：%+v", err)
 	}
 	if err := s.recoverBotCollectMedia(ctx, mediaBatchSize); err != nil {
 		g.Log().Warningf(ctx, "恢复BOT采集媒体事件失败：%+v", err)
@@ -495,7 +498,6 @@ func (s *sSysPublish) recoverPendingCollectMedia(ctx context.Context, limit int)
 	rows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
 		Where("e."+eventCols.Status, sysin.CollectEventStatusMediaPending).
 		WhereNot("e."+eventCols.SourceType, sysin.CollectSourceTypeBot).
-		WhereNull("e."+eventCols.ProcessedAt).
 		Where(enabledCollectSourceExistsSQL("e")).
 		Where("EXISTS (SELECT 1 FROM "+mediaTable+" m WHERE m.event_id=e."+eventCols.Id+" AND m.cache_status=? AND (m.next_retry_at IS NULL OR m.next_retry_at<=?))", collectMediaCachePending, now).
 		OrderAsc("e." + eventCols.UpdatedAt).
@@ -540,7 +542,7 @@ func (s *sSysPublish) recoverPendingCollectMedia(ctx context.Context, limit int)
 		if _, updateErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).
 			Where(eventCols.Id, payload.EventId).
 			Where(eventCols.Status, sysin.CollectEventStatusMediaPending).
-			Data(g.Map{eventCols.UpdatedAt: now}).Update(); updateErr != nil {
+			Data(g.Map{eventCols.ProcessedAt: nil, eventCols.UpdatedAt: now}).Update(); updateErr != nil {
 			g.Log().Warningf(ctx, "更新待处理采集媒体恢复心跳失败 eventId:%d err:%+v", payload.EventId, updateErr)
 			continue
 		}
