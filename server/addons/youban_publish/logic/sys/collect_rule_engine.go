@@ -662,7 +662,11 @@ func applyCollectIntroFeeSuffix(text, original, suffix string) string {
 	normalizedLine := normalizeCollectKeywordText(firstLine)
 	numbers := collectNumberRule.FindAllString(normalizedLine, -1)
 	complexAmount := len(numbers) > 1 && fields.ForeignAmount == "" && collectMultiPricePattern.MatchString(normalizedLine)
-	complexFormat := fields.ForeignAmount == "" && (strings.ContainsAny(normalizedLine, ",，./") || strings.Contains(normalizedLine, "-"))
+	// A hyphen is commonly part of a trailing name/label (for example
+	// "7888强盛-高启强"), not evidence of multiple prices. Preserve only
+	// explicit multi-price separators here; otherwise normalize to the first
+	// amount and the effective channel suffix.
+	complexFormat := fields.ForeignAmount == "" && (strings.ContainsAny(normalizedLine, ",，./") || collectMultiPricePattern.MatchString(normalizedLine))
 	if fields.FirstAmount == "" || complexAmount || complexFormat {
 		if !strings.HasSuffix(strings.TrimSpace(firstLine), suffix) {
 			lines[firstIndex] = strings.TrimRightFunc(firstLine, unicode.IsSpace) + " " + suffix

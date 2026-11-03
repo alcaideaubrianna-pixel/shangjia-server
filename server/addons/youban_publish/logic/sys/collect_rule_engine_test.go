@@ -413,7 +413,7 @@ func TestApplyCollectIntroFeeSuffix(t *testing.T) {
 		{name: "joined suffix", text: "正文\n介绍费 7888KK", original: "正文\n介绍费 7888KK", suffix: "AA", want: "正文\n介绍费 7888 AA"},
 		{name: "joined suffix with invisible tail", text: "雷点（不能接受的）：拍照 户外 手指 肛交 多\n介绍费7888TT​‌⁣‌​​​‌​‌​​‌‌‌‌​‌‌‌‌​​‌‌‌​‌‌‌​‌​‌‌‌‌‌‌​​‌​​​​‌‌​‌‌​​​​​‌‌‌​‌​‌​​​‌‌​‌‌‌​‌‌​‌⁤", original: "雷点（不能接受的）：拍照 户外 手指 肛交 多\n介绍费7888TT​‌⁣‌​​​‌​‌​​‌‌‌‌​‌‌‌‌​​‌‌‌​‌‌‌​‌​‌‌‌‌‌‌​​‌​​​​‌‌​‌‌​​​​​‌‌‌​‌​‌​​​‌‌​‌‌‌​‌‌​‌⁤", suffix: "AA", want: "雷点（不能接受的）：拍照 户外 手指 肛交 多\n介绍费 7888 AA"},
 		{name: "joined chinese suffix", text: "正文\n介绍费:7888七七n", original: "正文\n介绍费:7888七七n", suffix: "AA", want: "正文\n介绍费 7888 AA"},
-		{name: "hyphen suffix", text: "正文\n介绍费：6888 BLY-54", original: "正文\n介绍费：6888 BLY-54", suffix: "AA", want: "正文\n介绍费：6888 BLY-54 AA"},
+		{name: "hyphen name is normalized", text: "正文\n介绍费：7888强盛-高启强", original: "正文\n介绍费：7888强盛-高启强", suffix: "天空之城22", want: "正文\n介绍费 7888 天空之城22"},
 		{name: "colon suffix", text: "正文\n介绍费: 7888 KK", original: "正文\n介绍费: 7888 KK", suffix: "AA", want: "正文\n介绍费 7888 AA"},
 		{name: "suffix on next line", text: "正文\n介绍费 7888\nKK", original: "正文\n介绍费 7888\nKK", suffix: "AA", want: "正文\n介绍费 7888 AA"},
 		{name: "long suffix on next line", text: "正文\n介绍费7888\nBLYS", original: "正文\n介绍费7888\nBLYS", suffix: "AA", want: "正文\n介绍费 7888 AA"},
