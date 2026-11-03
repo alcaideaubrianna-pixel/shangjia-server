@@ -19,6 +19,9 @@ const (
 	telegramRetryMinDelay = 30 * time.Second
 	telegramRetryMaxDelay = 2 * time.Hour
 	telegramRetryMaxCount = 3
+	// Network failures need three recovery opportunities even when an account's
+	// generic retry limit is configured as one. The fourth failure is terminal.
+	telegramNetworkRetryTerminalCount = 4
 )
 
 type telegramJobRetryPolicy struct {
@@ -78,15 +81,52 @@ func telegramJobErrorRetryPolicyWithConfig(err error, retryCount int, conf *mode
 	if maxRetryCount <= 0 {
 		return telegramJobRetryPolicy{Permanent: true, Message: "Telegram 发送失败，账号最大重试次数为 0：" + telegramUserFacingError(err)}
 	}
+	if isTelegramAccountBusyError(err) {
+		if retryCount >= maxRetryCount {
+			return telegramJobRetryPolicy{Permanent: true, Message: fmt.Sprintf("Telegram账号连接持续繁忙，已重试 %d 次，任务已停止", maxRetryCount)}
+		}
+		return telegramJobRetryPolicy{RetryDelay: 15 * time.Second, Message: fmt.Sprintf("Telegram账号当前正在执行其他操作，任务将在 15 秒后自动重试（第 %d/%d 次）", retryCount, maxRetryCount)}
+	}
+	if isTelegramGatewayRetryError(err) && maxRetryCount < telegramNetworkRetryTerminalCount {
+		maxRetryCount = telegramNetworkRetryTerminalCount
+	}
 	if retryCount >= maxRetryCount {
 		return telegramJobRetryPolicy{Permanent: true, Message: fmt.Sprintf("Telegram 发送连续失败已达到 %d 次，已将该资料标记为推送失败并继续处理下一条：%s", maxRetryCount, telegramUserFacingError(err))}
 	}
-	if isTelegramAccountBusyError(err) {
-		return telegramJobRetryPolicy{RetryDelay: 15 * time.Second, Message: fmt.Sprintf("Telegram账号当前正在执行其他操作，任务将在 15 秒后自动重试（第 %d/%d 次）", retryCount, maxRetryCount)}
-	}
 	base := time.Duration(conf.RetryIntervalMinutes) * time.Minute
 	delay := configurableTelegramRetryDelay(base, retryCount)
+	if isTelegramGatewayRetryError(err) {
+		delay = telegramNetworkRetryDelay(retryCount)
+	}
 	return telegramJobRetryPolicy{RetryDelay: delay, Message: telegramJobFriendlyErrorMessage(err, delay, retryCount)}
+}
+
+func telegramNetworkRetryDelay(retryCount int) time.Duration {
+	switch retryCount {
+	case 1:
+		return 30 * time.Second
+	case 2:
+		return 2 * time.Minute
+	default:
+		return 5 * time.Minute
+	}
+}
+
+func isTelegramGatewayRetryError(err error) bool {
+	if err == nil || !isTelegramNetworkRetryError(err) {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	for _, marker := range []string{
+		"502 bad gateway", "503 service unavailable", "504 gateway timeout",
+		"client.timeout exceeded while awaiting headers", "context deadline exceeded",
+		"connection reset by peer", "connection refused", "unexpected eof",
+	} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func configurableTelegramRetryDelay(base time.Duration, retryCount int) time.Duration {
@@ -198,13 +238,20 @@ func telegramJobErrorRetryPolicy(err error, retryCount int) telegramJobRetryPoli
 			Message:    fmt.Sprintf("Telegram账号当前正在执行其他操作，任务将在 15 秒后自动重试（第 %d/%d 次）", retryCount, telegramRetryMaxCount),
 		}
 	}
-	if retryCount >= telegramRetryMaxCount {
+	maxRetryCount := telegramRetryMaxCount
+	if isTelegramGatewayRetryError(err) {
+		maxRetryCount = telegramNetworkRetryTerminalCount
+	}
+	if retryCount >= maxRetryCount {
 		return telegramJobRetryPolicy{
 			Permanent: true,
-			Message:   fmt.Sprintf("Telegram 发送连续失败已达到 %d 次，已将该资料标记为推送失败并继续处理下一条：%s", telegramRetryMaxCount, telegramUserFacingError(err)),
+			Message:   fmt.Sprintf("Telegram 发送连续失败已达到 %d 次，已将该资料标记为推送失败并继续处理下一条：%s", maxRetryCount, telegramUserFacingError(err)),
 		}
 	}
 	delay := telegramRecoverableRetryDelay(err, retryCount)
+	if isTelegramGatewayRetryError(err) {
+		delay = telegramNetworkRetryDelay(retryCount)
+	}
 	return telegramJobRetryPolicy{
 		RetryDelay: delay,
 		Message:    telegramJobFriendlyErrorMessage(err, delay, retryCount),

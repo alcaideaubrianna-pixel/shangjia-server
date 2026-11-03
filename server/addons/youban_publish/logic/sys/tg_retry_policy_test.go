@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -54,6 +55,38 @@ func TestTelegramJobErrorRetryPolicyPermanentForBannedInChannel(t *testing.T) {
 	}
 	if got := policy.Message; !strings.Contains(got, "当前账号已被目标频道封禁") {
 		t.Fatalf("unexpected message: %q", got)
+	}
+}
+
+func TestTelegramNetworkErrorKeepsBoundedRetriesWithAccountLimitOne(t *testing.T) {
+	conf := &model.PublishConfig{RetryEnabled: 1, MaxRetryCount: 1, RetryIntervalMinutes: 5}
+	err := errors.New("error response from telegram for method sendMediaGroup, 502 Bad Gateway")
+	wantDelays := []time.Duration{30 * time.Second, 2 * time.Minute, 5 * time.Minute}
+	for retryCount, want := range wantDelays {
+		policy := telegramJobErrorRetryPolicyWithConfig(err, retryCount+1, conf)
+		if policy.Permanent || policy.RetryDelay != want {
+			t.Fatalf("retry %d: permanent=%v delay=%s want=%s", retryCount+1, policy.Permanent, policy.RetryDelay, want)
+		}
+	}
+	terminal := telegramJobErrorRetryPolicyWithConfig(err, telegramNetworkRetryTerminalCount, conf)
+	if !terminal.Permanent {
+		t.Fatal("fourth consecutive network failure must be terminal")
+	}
+}
+
+func TestTelegramNetworkErrorStillRespectsDisabledRetry(t *testing.T) {
+	conf := &model.PublishConfig{RetryEnabled: 0, MaxRetryCount: 10, RetryIntervalMinutes: 5}
+	policy := telegramJobErrorRetryPolicyWithConfig(errors.New("502 Bad Gateway"), 1, conf)
+	if !policy.Permanent {
+		t.Fatal("explicitly disabled automatic retry must remain disabled")
+	}
+}
+
+func TestTelegramOrdinaryNetworkErrorKeepsConfiguredPolicy(t *testing.T) {
+	conf := &model.PublishConfig{RetryEnabled: 1, MaxRetryCount: 4, RetryIntervalMinutes: 2}
+	policy := telegramJobErrorRetryPolicyWithConfig(errors.New("temporary network error"), 1, conf)
+	if policy.Permanent || policy.RetryDelay != 2*time.Minute {
+		t.Fatalf("ordinary network policy changed unexpectedly: %+v", policy)
 	}
 }
 
