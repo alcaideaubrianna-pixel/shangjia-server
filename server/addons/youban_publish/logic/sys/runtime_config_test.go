@@ -19,23 +19,6 @@ func TestCollectWorkersAreNotWebRuntime(t *testing.T) {
 	}
 }
 
-func TestCollectProcessOwnershipCutover(t *testing.T) {
-	for _, isolated := range []string{"false", "true"} {
-		t.Run(isolated, func(t *testing.T) {
-			t.Setenv("YOUBAN_COLLECT_PROCESS_ISOLATED", isolated)
-			if !collectProcessRuntimeEnabled(publishRuntimeConfig{CollectProcessWorker: true}) {
-				t.Fatal("dedicated worker must always consume during handover")
-			}
-			if collectProcessRuntimeEnabled(publishRuntimeConfig{CollectorWorker: true}) != (isolated == "false") {
-				t.Fatal("legacy collector ownership did not follow cutover")
-			}
-			if collectProcessRuntimeEnabled(publishRuntimeConfig{PushWorker: true}) {
-				t.Fatal("publish worker must not consume collection business tasks")
-			}
-		})
-	}
-}
-
 func TestParsePublishRuntimeRoles(t *testing.T) {
 	tests := []struct {
 		name   string

@@ -2,18 +2,9 @@
 set -euo pipefail
 
 # Deploy one immutable image tag to all SAE roles in a safe order.
-# Usage: ./deploy/sae-deploy-all.sh e5b746c [collect-process|web|background|collector|media|publish|scheduler|account ...]
+# Usage: ./deploy/sae-deploy-all.sh e5b746c [web|background|collector|media|publish|scheduler|account ...]
 
 REGION_ID="${SAE_REGION_ID:-ap-southeast-1}"
-SAE_PROFILE="${SAE_PROFILE:-}"
-COLLECT_PROCESS_ISOLATED="${SAE_COLLECT_PROCESS_ISOLATED:-}"
-aliyun() {
-  if [[ -n "$SAE_PROFILE" ]]; then
-    command aliyun --profile "$SAE_PROFILE" "$@"
-  else
-    command aliyun "$@"
-  fi
-}
 ACR_INSTANCE_ID="${SAE_ACR_INSTANCE_ID:-cri-wx0a7j1fo37ad8mo}"
 IMAGE_REPOSITORY="${SAE_IMAGE_REPOSITORY:-xxxxxx-registry-vpc.ap-southeast-1.cr.aliyuncs.com/xiaohuiji/youban-server}"
 MEDIA_FALLBACK_CDN_URL="${SAE_MEDIA_FALLBACK_CDN_URL:-https://awdaffwaffawf-1480411854.cos.ap-hongkong.myqcloud.com}"
@@ -52,7 +43,6 @@ IMAGE_DIGEST=$(aliyun cr GetRepoTag --RegionId "$REGION_ID" --InstanceId "$ACR_I
 [[ -n "$IMAGE_DIGEST" ]] || { echo "ACR image digest not found: $IMAGE_URL" >&2; exit 1; }
 
 declare -A APP_IDS=(
-  [collect-process]="${SAE_COLLECT_PROCESS_APP_ID:-e3a5862c-5746-4d47-8b11-bc7ae25eb090}"
   [web]=b4565e3c-6d08-4297-bf8b-037884d54ee4
   [background]=d12e3d86-e368-48ae-bac1-bd41b3a08ef2
   [collector]=0deb4862-2af5-4c0f-9e82-ffa67364843e
@@ -62,7 +52,6 @@ declare -A APP_IDS=(
   [account]=f8d4a7a9-d30f-46a5-89ac-dc57eb48fb4f
 )
 declare -A COMMAND_ARGS=(
-  [collect-process]='["collect-process-worker"]'
   [web]='["runtime"]'
   [background]='["background-worker"]'
   [collector]='["collector-worker"]'
@@ -100,13 +89,6 @@ wait_ready() {
 
 for role in "${ROLES[@]}"; do
   app_id="${APP_IDS[$role]}"
-  if [[ "$COLLECT_PROCESS_ISOLATED" == "true" && "$role" != "collect-process" ]]; then
-    [[ -n "${APP_IDS[collect-process]}" ]] || { echo "isolated collection requires SAE_COLLECT_PROCESS_APP_ID" >&2; exit 2; }
-    isolated_status=$(aliyun sae DescribeApplicationStatus --RegionId "$REGION_ID" --AppId "${APP_IDS[collect-process]}")
-    [[ "$(jq -r '.Data.CurrentStatus' <<<"$isolated_status")" == "RUNNING" && "$(jq -r '.Data.SubStatus' <<<"$isolated_status")" == "NORMAL" && "$(jq -r '.Data.LastChangeOrderStatus' <<<"$isolated_status")" == "SUCCESS" ]] || { echo "isolated collection worker is not ready; refusing ownership cutover" >&2; exit 1; }
-    isolated_config=$(aliyun sae DescribeApplicationConfig --RegionId "$REGION_ID" --AppId "${APP_IDS[collect-process]}")
-    [[ "$(jq -r '.Data.ImageUrl' <<<"$isolated_config")" == "$IMAGE_URL" ]] || { echo "isolated worker image differs from target; deploy collect-process first" >&2; exit 1; }
-  fi
   echo "deploying $role"
   current=$(aliyun sae DescribeApplicationStatus --RegionId "$REGION_ID" --AppId "$app_id")
   if [[ "$(jq -r '.Data.LastChangeOrderRunning // false' <<<"$current")" == "true" ]]; then
@@ -120,20 +102,15 @@ for role in "${ROLES[@]}"; do
     sleep 5
   fi
   cfg=$(aliyun sae DescribeApplicationConfig --RegionId "$REGION_ID" --AppId "$app_id")
-  envs=$(jq -r '.Data.Envs // "[]"' <<<"$cfg" | jq --arg fallback "$MEDIA_FALLBACK_CDN_URL" --arg permanent "$MEDIA_PERMANENT_FAILURE_ENABLED" --arg queue "$PUBLISH_QUEUE_CONCURRENCY" --arg bulk "$PUBLISH_BULK_CONCURRENCY" --arg revision "$TAG" --arg image "$IMAGE_URL" --arg digest "$IMAGE_DIGEST" '
+  envs=$(jq -r '.Data.Envs // "[]"' <<<"$cfg" | jq --arg fallback "$MEDIA_FALLBACK_CDN_URL" --arg permanent "$MEDIA_PERMANENT_FAILURE_ENABLED" --arg queue "$PUBLISH_QUEUE_CONCURRENCY" --arg bulk "$PUBLISH_BULK_CONCURRENCY" --arg image "$IMAGE_URL" --arg digest "$IMAGE_DIGEST" '
     def upsert($name;$value): if any(.[]; .name == $name) then map(if .name == $name then .value = $value else . end) else . + [{"name":$name,"value":$value}] end;
     upsert("YOUBAN_PUBLISH_MEDIA_CACHE_FALLBACK_CDN_BASE_URL";$fallback)
     | upsert("YOUBAN_PUBLISH_MEDIA_PERMANENT_FAILURE_ENABLED";$permanent)
-    | upsert("APP_REVISION";$revision)
     | upsert("APP_IMAGE_REFERENCE";$image)
     | upsert("APP_IMAGE_DIGEST";$digest)
     | if $ENV_ROLE == "publish" then upsert("YOUBAN_PUBLISH_QUEUE_CONCURRENCY";$queue) | upsert("YOUBAN_PUBLISH_BULK_CONCURRENCY";$bulk) | upsert("YOUBAN_FACEPP_CONCURRENCY";$FACEPP_CONCURRENCY) | upsert("YOUBAN_ALIYUN_MATTING_CONCURRENCY";$ALIYUN_MATTING_CONCURRENCY) | upsert("YOUBAN_TENCENT_MATTING_CONCURRENCY";$TENCENT_MATTING_CONCURRENCY) | upsert("YOUBAN_FAPIHUB_CONCURRENCY";$FAPIHUB_CONCURRENCY) | upsert("YOUBAN_FAPIHUB_RATE_LIMIT_PER_MINUTE";$FAPIHUB_RATE_LIMIT_PER_MINUTE) | upsert("YOUBAN_ANTISCAN_FALLBACK_PROVIDER";$ANTISCAN_FALLBACK_PROVIDER) else . end
   ' --arg ENV_ROLE "$role" --arg FACEPP_CONCURRENCY "$FACEPP_CONCURRENCY" --arg ALIYUN_MATTING_CONCURRENCY "$ALIYUN_MATTING_CONCURRENCY" --arg TENCENT_MATTING_CONCURRENCY "$TENCENT_MATTING_CONCURRENCY" --arg FAPIHUB_CONCURRENCY "$FAPIHUB_CONCURRENCY" --arg FAPIHUB_RATE_LIMIT_PER_MINUTE "$FAPIHUB_RATE_LIMIT_PER_MINUTE" --arg ANTISCAN_FALLBACK_PROVIDER "$ANTISCAN_FALLBACK_PROVIDER" | jq -c '.')
   replicas=1
-  if [[ -n "$COLLECT_PROCESS_ISOLATED" ]]; then
-    [[ "$COLLECT_PROCESS_ISOLATED" == "true" || "$COLLECT_PROCESS_ISOLATED" == "false" ]] || { echo "invalid SAE_COLLECT_PROCESS_ISOLATED" >&2; exit 2; }
-    envs=$(jq -c --arg value "$COLLECT_PROCESS_ISOLATED" 'map(select(.name != "YOUBAN_COLLECT_PROCESS_ISOLATED")) + [{"name":"YOUBAN_COLLECT_PROCESS_ISOLATED","value":$value}]' <<<"$envs")
-  fi
   max_surge=1
   min_ready=1
   if [[ "$role" == "account" ]]; then

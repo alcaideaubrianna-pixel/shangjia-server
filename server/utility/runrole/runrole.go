@@ -29,12 +29,6 @@ var processRoles struct {
 	values []string
 }
 
-// CollectProcessIsolated transfers delivery and business recovery ownership to
-// the dedicated collect-process-worker. Enable only after that worker is ready.
-func CollectProcessIsolated() bool {
-	return strings.EqualFold(strings.TrimSpace(os.Getenv("YOUBAN_COLLECT_PROCESS_ISOLATED")), "true")
-}
-
 func Set(values ...string) {
 	processRoles.Lock()
 	processRoles.values = normalize(values)

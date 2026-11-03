@@ -27,14 +27,3 @@
 5. 按架构文档完成 5/15/30 分钟及连续 24 小时对账后，再逐段删除旧消费者、兼容路由和旧恢复路径。
 
 回滚保持新增 SQL 表和全部任务；仅回滚应用镜像与消费者配置。不能清空 Redis 或批量重置任务。
-
-## 2026-11-03 16:25 Asia/Shanghai 更新
-
-- 全部旧 SAE 角色已部署 a2150ee，并保持 Web 2 副本、Account 1 副本。
-- spool 恢复已增加原子 SKIP LOCKED 领取及 attempt fencing。新增处理租约索引已在线上创建。
-- PostgreSQL race 测试验证 12 个并发领取不重复、过期重新领取、迟到 ACK 不覆盖新 owner；Redis 故障后恢复成功且 Event 不重复。
-- 有界生产样本：实时 process Outbox delivered=983，采集 Event processed=170、dispatched=15；仍存在历史 processing 积压，不代表全链路 SLO 达标。
-- 新 SAE 应用 e3a5862c-5746-4d47-8b11-bc7ae25eb090（xiaohuiji-sae-collect-process）已创建但未部署；1 核、2048 MiB，DB pool 上限 12，HTTP readiness=/readyz、liveness=/healthz。
-- 新隔离开关 YOUBAN_COLLECT_PROCESS_ISOLATED 默认 false。独立 worker 启动 Delivery 和业务处理；开启后 collector 仅保留原始 Event 处理，publish 不再消费 Collector Delivery，scheduler 不再运行采集 recovery。
-- 切换必须先通过部署脚本启动 collect-process，再给 collector、publish、scheduler 设置隔离开关。脚本会核对独立 worker 就绪且镜像与目标一致。回滚先关闭旧角色开关恢复消费，再停止独立 worker，保留全部队列和表。
-- CI 镜像标签使用 7 位 SHA；不能把 8 位提交简称查询失败当作构建/推送缺失。
