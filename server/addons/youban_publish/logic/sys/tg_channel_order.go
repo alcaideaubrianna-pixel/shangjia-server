@@ -53,10 +53,7 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 			telegramSendPhaseVerifySending)
 	}
 	if strings.TrimSpace(job.TargetChatId) != "" {
-		mod = mod.Where(
-			"REPLACE(COALESCE(j.target_chat_id, ''), '-100', '') = ?",
-			telegramChannelOrderChatKey(job.TargetChatId),
-		)
+		mod = mod.WhereIn("j.target_chat_id", telegramChannelChatIDVariants(job.TargetChatId))
 	} else if job.ChannelId > 0 {
 		mod = mod.Where("j.channel_id", job.ChannelId)
 	}
@@ -132,6 +129,25 @@ func telegramChannelOrderChatKey(chatID string) string {
 	return strings.TrimPrefix(normalizeTelegramChannelChatID(chatID), "-100")
 }
 
+// Match both legacy raw IDs and normalized IDs without applying a function to
+// target_chat_id, allowing PostgreSQL to use the existing B-Tree index.
+func telegramChannelChatIDVariants(chatID string) []string {
+	raw := strings.TrimSpace(chatID)
+	if raw == "" {
+		return nil
+	}
+	normalized := normalizeTelegramChannelChatID(raw)
+	variants := []string{raw}
+	if normalized != "" && normalized != raw {
+		variants = append(variants, normalized)
+	}
+	key := telegramChannelOrderChatKey(raw)
+	if key != "" && key != raw && key != normalized {
+		variants = append(variants, key)
+	}
+	return variants
+}
+
 func telegramJobRequiresChannelCompletionPriority(sendPhase string) bool {
 	return telegramSendPhaseHasDisplay(sendPhase) &&
 		sendPhase != telegramSendPhaseVerifyConfirmed &&
@@ -152,7 +168,7 @@ func (s *sSysPublish) wakeNextTelegramChannelJob(ctx context.Context, job telegr
 		Order(telegramChannelScheduleOrderSQL("j")).
 		Limit(telegramChannelActiveJobLimit)
 	if strings.TrimSpace(job.TargetChatId) != "" {
-		model = model.Where("REPLACE(COALESCE(j.target_chat_id, ''), '-100', '') = ?", telegramChannelOrderChatKey(job.TargetChatId))
+		model = model.WhereIn("j.target_chat_id", telegramChannelChatIDVariants(job.TargetChatId))
 	} else {
 		model = model.Where("j.tenant_id", job.TenantId).Where("j.channel_id", job.ChannelId)
 	}
@@ -217,7 +233,7 @@ func (s *sSysPublish) telegramChannelHasDispatchCapacity(ctx context.Context, jo
 		)`, tgDispatchStatusQueued, tgDispatchStatusProcessing).
 		Fields("id").Limit(telegramChannelActiveJobLimit)
 	if strings.TrimSpace(job.TargetChatId) != "" {
-		model = model.Where("REPLACE(COALESCE(target_chat_id, ''), '-100', '') = ?", telegramChannelOrderChatKey(job.TargetChatId))
+		model = model.WhereIn("target_chat_id", telegramChannelChatIDVariants(job.TargetChatId))
 	} else {
 		model = model.Where("tenant_id", job.TenantId).Where("channel_id", job.ChannelId)
 	}

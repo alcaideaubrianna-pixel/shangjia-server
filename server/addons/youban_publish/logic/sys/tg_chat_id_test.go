@@ -26,6 +26,17 @@ func TestTelegramChannelOrderChatKeyTreatsLegacyIDsAsSameChannel(t *testing.T) {
 	}
 }
 
+func TestTelegramChannelChatIDVariants(t *testing.T) {
+	got := telegramChannelChatIDVariants("-1003715905169")
+	if len(got) != 2 || !containsChatID(got, "-1003715905169") || !containsChatID(got, "3715905169") {
+		t.Fatalf("variants = %#v", got)
+	}
+	got = telegramChannelChatIDVariants("@example")
+	if len(got) != 1 || got[0] != "@example" {
+		t.Fatalf("username variants = %#v", got)
+	}
+}
+
 func TestTelegramChannelLookupIDsAcceptBothForms(t *testing.T) {
 	for _, input := range []string{"123456789012", "-100123456789012"} {
 		got := tgChannelCacheLookupIds(input)
