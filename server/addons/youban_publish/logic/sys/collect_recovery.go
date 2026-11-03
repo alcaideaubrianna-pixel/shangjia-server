@@ -152,7 +152,6 @@ func (s *sSysPublish) recoverReadyMediaPendingEvents(ctx context.Context, limit 
 	rows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
 		Fields("e.*").
 		Where("e."+e.Status, sysin.CollectEventStatusMediaPending).
-		WhereNull("e."+e.ProcessedAt).
 		Where(enabledCollectSourceExistsSQL("e")).
 		Where("EXISTS (SELECT 1 FROM "+m+" m WHERE m.event_id=e."+e.Id+")").
 		Where("NOT EXISTS (SELECT 1 FROM "+m+" m WHERE m.event_id=e."+e.Id+" AND m.cache_status<>?)", collectMediaCacheReady).
@@ -167,7 +166,7 @@ func (s *sSysPublish) recoverReadyMediaPendingEvents(ctx context.Context, limit 
 		}
 		if _, err = pdao.YoubanPublishCollectEvent.Ctx(ctx).Where(e.Id, id).
 			Where(e.Status, sysin.CollectEventStatusMediaPending).
-			Data(g.Map{e.Status: sysin.CollectEventStatusMediaReady, e.ErrorMessage: "", e.UpdatedAt: gtime.Now()}).Update(); err != nil {
+			Data(g.Map{e.Status: sysin.CollectEventStatusMediaReady, e.ErrorMessage: "", e.ProcessedAt: nil, e.UpdatedAt: gtime.Now()}).Update(); err != nil {
 			return gerror.Wrap(err, "更新媒体已就绪采集事件状态失败")
 		}
 		if err = s.enqueueCollectProcess(ctx, collectProcessQueuePayload{
