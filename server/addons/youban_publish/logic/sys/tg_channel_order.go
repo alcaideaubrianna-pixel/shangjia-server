@@ -38,7 +38,6 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 		createdAt = current["created_at"].GTime()
 	}
 	mod := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).Unscoped().
-		Where("j.tenant_id", job.TenantId).
 		Where("j.id <> ?", job.Id).
 		Where(telegramWebhookDetachedJobSQL("j.")).
 		Where(telegramChannelBlockingJobSQL("j"))
@@ -53,13 +52,13 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 			telegramSendPhaseDisplaySending, telegramSendPhaseDisplayConfirmed,
 			telegramSendPhaseVerifySending)
 	}
-	if job.ChannelId > 0 {
-		mod = mod.Where("j.channel_id", job.ChannelId)
-	} else {
+	if strings.TrimSpace(job.TargetChatId) != "" {
 		mod = mod.Where(
 			"REPLACE(COALESCE(j.target_chat_id, ''), '-100', '') = ?",
 			telegramChannelOrderChatKey(job.TargetChatId),
 		)
+	} else if job.ChannelId > 0 {
+		mod = mod.Where("j.channel_id", job.ChannelId)
 	}
 	// A destination channel is a single ordered stream. Source message IDs are
 	// only comparable within one source channel, so using them here lets jobs
@@ -140,21 +139,24 @@ func telegramJobRequiresChannelCompletionPriority(sendPhase string) bool {
 }
 
 func (s *sSysPublish) wakeNextTelegramChannelJob(ctx context.Context, job telegramJobRecord) error {
-	if job.TenantId <= 0 || job.ChannelId <= 0 {
+	if job.TenantId <= 0 || (job.ChannelId <= 0 && strings.TrimSpace(job.TargetChatId) == "") {
 		return nil
 	}
 	now := gtime.Now()
 	var nextJobs []telegramJobRecord
-	err := g.DB().Model(publishTgJobTable).As("j").Safe().Ctx(ctx).
-		Where("tenant_id", job.TenantId).
-		Where("channel_id", job.ChannelId).
+	model := g.DB().Model(publishTgJobTable).As("j").Safe().Ctx(ctx).
 		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
 		Where(telegramWebhookDetachedJobSQL("")).
 		Where("(dispatch_status = ? OR dispatch_status = '')", tgDispatchStatusIdle).
 		Where("(next_retry_at IS NULL OR next_retry_at <= ?)", now).
 		Order(telegramChannelScheduleOrderSQL("j")).
-		Limit(telegramChannelActiveJobLimit).
-		Scan(&nextJobs)
+		Limit(telegramChannelActiveJobLimit)
+	if strings.TrimSpace(job.TargetChatId) != "" {
+		model = model.Where("REPLACE(COALESCE(j.target_chat_id, ''), '-100', '') = ?", telegramChannelOrderChatKey(job.TargetChatId))
+	} else {
+		model = model.Where("j.tenant_id", job.TenantId).Where("j.channel_id", job.ChannelId)
+	}
+	err := model.Scan(&nextJobs)
 	if err != nil {
 		return gerror.Wrap(err, "读取频道待入队TG任务失败")
 	}
@@ -169,8 +171,11 @@ func (s *sSysPublish) wakeNextTelegramChannelJob(ctx context.Context, job telegr
 	return nil
 }
 
-func telegramChannelDispatchKey(tenantId, channelId int64) string {
-	return fmt.Sprintf("youban_publish:tg_channel_dispatch:%d:%d", tenantId, channelId)
+func telegramChannelDispatchKey(job telegramJobRecord) string {
+	if key := telegramChannelOrderChatKey(job.TargetChatId); key != "" {
+		return fmt.Sprintf("youban_publish:tg_destination_dispatch:%s", key)
+	}
+	return fmt.Sprintf("youban_publish:tg_channel_dispatch:%d:%d", job.TenantId, job.ChannelId)
 }
 
 func (s *sSysPublish) withTelegramChannelDispatchLease(ctx context.Context, job telegramJobRecord, reserve func(context.Context) (bool, error)) (bool, error) {
@@ -181,7 +186,7 @@ func (s *sSysPublish) withTelegramChannelDispatchLease(ctx context.Context, job 
 	defer cancelReserve()
 	lease := hglock.NewConfig(telegramChannelDispatchLeaseTTL, 100*time.Millisecond).
 		WithoutWatchDog().
-		Mutex(telegramChannelDispatchKey(job.TenantId, job.ChannelId))
+		Mutex(telegramChannelDispatchKey(job))
 	if err := lease.TryLock(reserveCtx); err != nil {
 		if gerror.Is(err, hglock.ErrLockFailed) {
 			// Lock contention or an unavailable Redis lock backend is not a
@@ -203,16 +208,20 @@ func (s *sSysPublish) withTelegramChannelDispatchLease(ctx context.Context, job 
 }
 
 func (s *sSysPublish) telegramChannelHasDispatchCapacity(ctx context.Context, job telegramJobRecord) (bool, error) {
-	active, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("tenant_id", job.TenantId).
-		Where("channel_id", job.ChannelId).
+	model := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id <> ?", job.Id).
 		Where(telegramWebhookDetachedJobSQL("")).
 		Where(`(
 			status = 'sending' OR
 			(status IN ('pending', 'failed_retry', 'unknown') AND dispatch_status IN (?, ?))
 		)`, tgDispatchStatusQueued, tgDispatchStatusProcessing).
-		Fields("id").Limit(telegramChannelActiveJobLimit).Count()
+		Fields("id").Limit(telegramChannelActiveJobLimit)
+	if strings.TrimSpace(job.TargetChatId) != "" {
+		model = model.Where("REPLACE(COALESCE(target_chat_id, ''), '-100', '') = ?", telegramChannelOrderChatKey(job.TargetChatId))
+	} else {
+		model = model.Where("tenant_id", job.TenantId).Where("channel_id", job.ChannelId)
+	}
+	active, err := model.Count()
 	if err != nil {
 		return false, gerror.Wrap(err, "检查频道活动TG任务失败")
 	}

@@ -431,7 +431,7 @@ func telegramDueOutboxPostgresSQL() string {
 }
 
 func telegramOutboxChannelKeySQL(alias string) string {
-	return "CASE WHEN " + alias + ".channel_id > 0 THEN " + alias + ".channel_id::text ELSE 'chat:' || REPLACE(COALESCE(" + alias + ".target_chat_id,''), '-100', '') END"
+	return "CASE WHEN NULLIF(REPLACE(COALESCE(" + alias + ".target_chat_id,''), '-100', ''),'') IS NOT NULL THEN 'chat:' || REPLACE(" + alias + ".target_chat_id, '-100', '') WHEN " + alias + ".channel_id > 0 THEN " + alias + ".channel_id::text ELSE 'chat:' || COALESCE(" + alias + ".target_chat_id,'') END"
 }
 
 func fairTelegramOutboxRows(candidates []telegramJobOutboxRecord, limit int) []telegramJobOutboxRecord {

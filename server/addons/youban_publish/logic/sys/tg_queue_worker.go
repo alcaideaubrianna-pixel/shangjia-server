@@ -515,6 +515,19 @@ func (s *sSysPublish) handleTelegramPublishTask(ctx context.Context, task *asynq
 		return jobErr
 	}
 	ctx = telegramPublishJobTraceContext(ctx, job)
+	queueWait := int64(0)
+	if job.CreatedAt != nil {
+		queueWait = time.Since(job.CreatedAt.Time).Milliseconds()
+	}
+	dispatchLag := int64(0)
+	if job.DispatchedAt != nil && job.CreatedAt != nil {
+		dispatchLag = job.DispatchedAt.Time.Sub(job.CreatedAt.Time).Milliseconds()
+	}
+	beginTelegramPublishStage(ctx, "queue.wait_observed").End(nil, g.Map{
+		"queueWaitMs": queueWait, "dispatchLagMs": dispatchLag,
+		"queueName": job.QueueName, "operationNo": job.OperationNo,
+		"channelId": job.ChannelId, "botId": job.BotId, "targetChatId": job.TargetChatId,
+	})
 	if delay, enabled := s.telegramPublishWindowDelay(ctx, job.TenantId, job.AccountId); !telegramJobBypassesAutomaticSchedule(job) && enabled && delay > 0 {
 		beginTelegramPublishStage(ctx, "queue.deferred").End(nil, g.Map{"reason": "publish_window", "delayMs": delay.Milliseconds()})
 		return &tgRetryAfterError{after: delay, err: errTelegramPublishWindowBlocked}
