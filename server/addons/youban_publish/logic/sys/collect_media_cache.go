@@ -218,27 +218,6 @@ func (s *sSysPublish) ExecuteCollectMediaCache(ctx context.Context, payload coll
 	payload.SourceId = event["source_id"].Int64()
 	payload.TgAccountId = event["tg_account_id"].Int64()
 	ctx = s.collectProgressContext(ctx, payload.EventId, 0)
-	reportCollectProgress(ctx, "waiting_owner", "等待租户或账号媒体处理配额")
-	ownerLease, err := s.acquireCollectMediaOwnerSlots(ctx, payload)
-	if err != nil {
-		return err
-	}
-	defer ownerLease.release()
-	ctx, stopOwnerLease := maintainCollectMediaLeases(ctx, payload.EventId, collectMediaLeaseRefreshInterval, ownerLease.refresh)
-	defer stopOwnerLease()
-	if event["source_type"].String() == sysin.CollectSourceTypeAccount {
-		accountIntervalStartedAt := time.Now()
-		reportCollectProgress(ctx, "waiting_interval", "等待账号媒体下载节流间隔")
-		s.waitCollectMediaAccountInterval(ctx, payload.TenantId, payload.TgAccountId)
-		g.Log().Debugf(ctx, "采集媒体任务账号间隔等待完成 eventId:%d wait:%s", payload.EventId, time.Since(accountIntervalStartedAt).Round(time.Millisecond))
-	}
-	if event["source_type"].String() == sysin.CollectSourceTypeBot && event["bot_id"].Int64() <= 0 {
-		botID, resolveErr := s.resolveCollectEventBotID(ctx, event)
-		if resolveErr != nil {
-			return resolveErr
-		}
-		event["bot_id"] = g.NewVar(botID)
-	}
 	statEvent = event
 	if collectEventAlreadyMatched(event["status"].String()) {
 		g.Log().Debugf(ctx, "采集媒体任务对应事件已完成，跳过重复任务 eventId:%d status:%s", payload.EventId, event["status"].String())
@@ -279,6 +258,39 @@ func (s *sSysPublish) ExecuteCollectMediaCache(ctx context.Context, payload coll
 				"等待父展示资料完成规则和去重预检",
 			)
 		}
+	}
+	// Reuse checks are deliberately before owner throttles. A cache hit does
+	// not consume Telegram/download capacity and must remain near-constant time
+	// even while recovery traffic is heavy.
+	needsOwner, reuseErr := s.collectMediaNeedsOwner(ctx, event)
+	if reuseErr != nil {
+		return reuseErr
+	}
+	if event["source_type"].String() == sysin.CollectSourceTypeBot && event["bot_id"].Int64() <= 0 {
+		botID, resolveErr := s.resolveCollectEventBotID(ctx, event)
+		if resolveErr != nil {
+			return resolveErr
+		}
+		event["bot_id"] = g.NewVar(botID)
+	}
+	var ownerLease *collectMediaConcurrencyLease
+	if needsOwner {
+		reportCollectProgress(ctx, "waiting_owner", "等待租户或账号媒体处理配额")
+		ownerLease, err = s.acquireCollectMediaOwnerSlots(ctx, payload)
+		if err != nil {
+			return err
+		}
+		defer ownerLease.release()
+		ctx, stopOwnerLease := maintainCollectMediaLeases(ctx, payload.EventId, collectMediaLeaseRefreshInterval, ownerLease.refresh)
+		defer stopOwnerLease()
+		if event["source_type"].String() == sysin.CollectSourceTypeAccount {
+			accountIntervalStartedAt := time.Now()
+			reportCollectProgress(ctx, "waiting_interval", "等待账号媒体下载节流间隔")
+			s.waitCollectMediaAccountInterval(ctx, payload.TenantId, payload.TgAccountId)
+			g.Log().Debugf(ctx, "采集媒体任务账号间隔等待完成 eventId:%d wait:%s", payload.EventId, time.Since(accountIntervalStartedAt).Round(time.Millisecond))
+		}
+	} else {
+		g.Log().Infof(ctx, "采集媒体命中可复用资源，跳过媒体配额 eventId:%d sourceId:%d", payload.EventId, payload.SourceId)
 	}
 	s.appendCollectEventLogForRecord(ctx, event, "media", "running", "媒体缓存任务开始执行", "")
 	if delay := s.collectGroupedMediaCacheDelay(ctx, event); delay > 0 {
@@ -418,6 +430,47 @@ func (s *sSysPublish) collectMediaCacheEvent(ctx context.Context, payload collec
 		return gdb.Record{}, nil
 	}
 	return row, nil
+}
+
+// collectMediaNeedsOwner performs the cheap, durable cache lookup before any
+// account/source slot is acquired. It returns true only when at least one
+// media item still needs a Telegram download or a later transformation.
+func (s *sSysPublish) collectMediaNeedsOwner(ctx context.Context, event gdb.Record) (bool, error) {
+	rows, err := s.collectEventMediaRows(ctx, event["id"].Int64())
+	if err != nil {
+		return true, err
+	}
+	needsOwner := false
+	for _, row := range rows {
+		if row == nil || !collectEventMediaRowNeedsCache(event, row) {
+			continue
+		}
+		if collectMediaRequiresStorageRefresh(row.ErrorMessage) {
+			needsOwner = true
+			continue
+		}
+		reused, reuseErr := s.reuseCollectMediaCache(ctx, row)
+		if reuseErr != nil {
+			return true, reuseErr
+		}
+		if !reused {
+			needsOwner = true
+			continue
+		}
+		_, _ = pdao.YoubanPublishCollectEventMedia.Ctx(ctx).Where("id", row.Id).Data(g.Map{
+			"cache_hit": 1, "download_duration_ms": 0, "download_bytes": fileSizeValue(row.StoragePath),
+			"download_error_type": "", "updated_at": gtime.Now(),
+		}).Update()
+		g.Log().Infof(ctx, "采集媒体预检复用缓存 eventId:%d mediaId:%d sourceMessageId:%d", event["id"].Int64(), row.Id, row.SourceMessageId)
+	}
+	return needsOwner, nil
+}
+
+func fileSizeValue(path string) int64 {
+	if size, err := fileSize(path); err == nil {
+		return size
+	}
+	return 0
 }
 
 func (s *sSysPublish) collectGroupedMediaCacheDelay(ctx context.Context, event gdb.Record) time.Duration {
