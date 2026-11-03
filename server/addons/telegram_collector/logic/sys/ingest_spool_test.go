@@ -4,10 +4,14 @@ import (
 	"context"
 	"os"
 	"strconv"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/hibiken/asynq"
 	"hotgo/addons/telegram_collector/model/input/sysin"
 )
 
@@ -88,4 +92,121 @@ func TestIngestSpoolPostgres(t *testing.T) {
 	if err != nil || row["status"].String() != "dead" || row["last_error"].String() == "" {
 		t.Fatalf("invalid event was not quarantined: %v %v", row, err)
 	}
+	t.Run("expired lease fences late acknowledgement", func(t *testing.T) {
+		event.EventID = "lease-test"
+		id, err := persistIngestSpool(ctx, event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		first, err := claimIngestSpool(ctx)
+		if err != nil || first["id"].Int64() != id {
+			t.Fatal("claim failed", err)
+		}
+		if another, err := claimIngestSpool(ctx); err != nil || !another.IsEmpty() {
+			t.Fatal("active lease claimed twice", err)
+		}
+		if _, err := g.DB().Exec(ctx, "UPDATE "+collectorIngestSpoolTable+" SET next_run_at=now()-interval '1 second' WHERE id=?", id); err != nil {
+			t.Fatal(err)
+		}
+		second, err := claimIngestSpool(ctx)
+		if err != nil || second["attempt_count"].Int() != first["attempt_count"].Int()+1 {
+			t.Fatal("expired lease not reclaimed", err)
+		}
+		if err := finishIngestSpool(ctx, first, "completed", ""); err != nil {
+			t.Fatal(err)
+		}
+		state, err := g.DB().GetOne(ctx, "SELECT status FROM "+collectorIngestSpoolTable+" WHERE id=?", id)
+		if err != nil || state["status"].String() != "processing" {
+			t.Fatal("late worker overwrote current owner", err)
+		}
+		if err := finishIngestSpool(ctx, second, "completed", ""); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("concurrent workers claim disjoint rows", func(t *testing.T) {
+		for i := 0; i < 12; i++ {
+			event.EventID = "parallel:" + strconv.Itoa(i)
+			if _, err := persistIngestSpool(ctx, event); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var wg sync.WaitGroup
+		claims := make(chan gdb.Record, 12)
+		errors := make(chan error, 12)
+		for i := 0; i < 12; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				row, err := claimIngestSpool(ctx)
+				claims <- row
+				errors <- err
+			}()
+		}
+		wg.Wait()
+		close(claims)
+		close(errors)
+		for err := range errors {
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		seen := map[int64]bool{}
+		for row := range claims {
+			id := row["id"].Int64()
+			if id <= 0 || seen[id] {
+				t.Fatalf("duplicate or missing claim: %d", id)
+			}
+			seen[id] = true
+		}
+		if len(seen) != 12 {
+			t.Fatal("lost claim")
+		}
+	})
+	t.Run("recover after queue outage", func(t *testing.T) {
+		if _, err := g.DB().Exec(ctx, "UPDATE "+collectorIngestSpoolTable+" SET status='completed'"); err != nil {
+			t.Fatal(err)
+		}
+		ddl, err := os.ReadFile("../../resource/sql/install.pgsql.sql")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := g.DB().Exec(ctx, string(ddl)); err != nil {
+			t.Fatal(err)
+		}
+		redis := miniredis.RunT(t)
+		client := asynq.NewClient(asynq.RedisClientOpt{Addr: redis.Addr()})
+		defer client.Close()
+		collector := &sCollector{queueClient: client}
+		event.EventID = "queue-outage-test"
+		event.Priority = sysin.EventPriorityRealtime
+		event.ReceivedAt = time.Now()
+		event.RawUpdate = []byte(`{"message_id":100}`)
+		id, err := persistIngestSpool(ctx, event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		redis.SetError("ERR injected queue outage")
+		if err := collector.recoverIngestSpool(ctx, 1); err != nil {
+			t.Fatal(err)
+		}
+		row, err := g.DB().GetOne(ctx, "SELECT status,attempt_count,last_error FROM "+collectorIngestSpoolTable+" WHERE id=?", id)
+		if err != nil || row["status"].String() != "failed_retry" || row["attempt_count"].Int() != 1 || row["last_error"].String() == "" {
+			t.Fatal("queue failure not durable", row, err)
+		}
+		redis.SetError("")
+		if _, err := g.DB().Exec(ctx, "UPDATE "+collectorIngestSpoolTable+" SET next_run_at=now()-interval '1 second' WHERE id=?", id); err != nil {
+			t.Fatal(err)
+		}
+		if err := collector.recoverIngestSpool(ctx, 1); err != nil {
+			t.Fatal(err)
+		}
+		row, err = g.DB().GetOne(ctx, "SELECT status,attempt_count FROM "+collectorIngestSpoolTable+" WHERE id=?", id)
+		if err != nil || row["status"].String() != "completed" || row["attempt_count"].Int() != 2 {
+			t.Fatal("queue recovery not completed", row, err)
+		}
+		row, err = g.DB().GetOne(ctx, "SELECT count(*) AS n FROM hg_tg_collector_event WHERE tenant_id=? AND event_key=?", event.TenantID, event.EventID)
+		if err != nil || row["n"].Int() != 1 {
+			t.Fatal("event replay duplicated", row, err)
+		}
+	})
 }

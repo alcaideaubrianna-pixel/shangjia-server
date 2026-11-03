@@ -55,15 +55,12 @@ func (s *sCollector) recoverIngestSpool(ctx context.Context, limit int) error {
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := g.DB().Model(collectorIngestSpoolTable).Ctx(ctx).
-		WhereIn("status", []string{"received", "failed_retry"}).
-		Where("next_run_at IS NULL OR next_run_at <= ?", gtime.Now()).
-		OrderAsc("id").Limit(limit).All()
-	if err != nil {
-		return err
-	}
-	for _, row := range rows {
+	for i := 0; i < limit; i++ {
 		if err := ctx.Err(); err != nil {
+			return err
+		}
+		row, err := claimIngestSpool(ctx)
+		if err != nil || row.IsEmpty() {
 			return err
 		}
 		var event sysin.RawUpdateEvent
@@ -72,8 +69,7 @@ func (s *sCollector) recoverIngestSpool(ctx context.Context, limit int) error {
 			decodeErr = fmt.Errorf("采集接收事件标识不完整")
 		}
 		if decodeErr != nil {
-			_, updateErr := g.DB().Exec(ctx, "UPDATE "+collectorIngestSpoolTable+" SET status='dead',last_error=?,updated_at=? WHERE id=?", decodeErr.Error(), gtime.Now(), row["id"].Int64())
-			if updateErr != nil {
+			if updateErr := finishIngestSpool(ctx, row, "dead", decodeErr.Error()); updateErr != nil {
 				return updateErr
 			}
 			continue
@@ -83,10 +79,36 @@ func (s *sCollector) recoverIngestSpool(ctx context.Context, limit int) error {
 			err = s.enqueueEventTask(ctx, eventID, event.Priority)
 		}
 		if err == nil {
-			_, err = g.DB().Model(collectorIngestSpoolTable).Ctx(ctx).Where("id", row["id"].Int64()).Data(g.Map{"status": "completed", "last_error": "", "updated_at": gtime.Now()}).Update()
+			if err = finishIngestSpool(ctx, row, "completed", ""); err != nil {
+				return err
+			}
 			continue
 		}
-		_, _ = g.DB().Model(collectorIngestSpoolTable).Ctx(ctx).Where("id", row["id"].Int64()).Data(g.Map{"status": "failed_retry", "attempt_count": gdb.Raw("attempt_count + 1"), "next_run_at": gtime.Now().Add(30 * time.Second), "last_error": err.Error(), "updated_at": gtime.Now()}).Update()
+		if updateErr := finishIngestSpool(ctx, row, "failed_retry", err.Error()); updateErr != nil {
+			return updateErr
+		}
 	}
 	return nil
+}
+
+// Claim one row at a time so a slow handoff cannot expire the leases of an
+// entire batch. attempt_count is the fencing token for late worker results.
+func claimIngestSpool(ctx context.Context) (gdb.Record, error) {
+	return g.DB().GetOne(ctx, `WITH candidate AS (
+ SELECT id FROM `+collectorIngestSpoolTable+`
+ WHERE status IN ('received','failed_retry','processing')
+ AND (next_run_at IS NULL OR next_run_at <= CURRENT_TIMESTAMP)
+ ORDER BY id FOR UPDATE SKIP LOCKED LIMIT 1
+ ) UPDATE `+collectorIngestSpoolTable+` AS spool
+ SET status='processing',attempt_count=attempt_count+1,
+ next_run_at=CURRENT_TIMESTAMP + INTERVAL '2 minutes',updated_at=CURRENT_TIMESTAMP
+ FROM candidate WHERE spool.id=candidate.id RETURNING spool.*`)
+}
+
+func finishIngestSpool(ctx context.Context, row gdb.Record, status, lastError string) error {
+	_, err := g.DB().Exec(ctx, `UPDATE `+collectorIngestSpoolTable+`
+ SET status=?,last_error=?,next_run_at=?,updated_at=?
+ WHERE id=? AND status='processing' AND attempt_count=?`,
+		status, lastError, gtime.Now().Add(30*time.Second), gtime.Now(), row["id"].Int64(), row["attempt_count"].Int())
+	return err
 }

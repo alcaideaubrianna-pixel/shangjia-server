@@ -19,3 +19,6 @@ CREATE TABLE IF NOT EXISTS hg_tg_collector_ingest_spool (
 CREATE INDEX IF NOT EXISTS idx_tg_collector_ingest_spool_due
  ON hg_tg_collector_ingest_spool (status,next_run_at,id)
  WHERE status IN ('received','failed_retry');
+CREATE INDEX IF NOT EXISTS idx_tg_collector_ingest_spool_lease
+ ON hg_tg_collector_ingest_spool (next_run_at,id)
+ WHERE status='processing';
