@@ -753,6 +753,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_job_profile_operation_generation" O
 CREATE UNIQUE INDEX IF NOT EXISTS "uq_tg_job_timeout_parent" ON "hg_youban_publish_tg_job" ("timeout_parent_job_id") WHERE "timeout_parent_job_id" IS NOT NULL;
 CREATE INDEX IF NOT EXISTS "idx_tg_job_send_deadline" ON "hg_youban_publish_tg_job" ("send_deadline_at","id") WHERE "status" IN ('pending','sending','failed_retry','unknown') AND "send_deadline_at" IS NOT NULL;
 CREATE INDEX IF NOT EXISTS "idx_tg_job_timeout_cleanup" ON "hg_youban_publish_tg_job" ("timeout_cleanup_at","id") WHERE "send_phase"='timeout_cancelled' AND "timeout_cleanup_at" IS NOT NULL;
+CREATE INDEX IF NOT EXISTS "idx_tg_job_timeout_cleanup_legacy" ON "hg_youban_publish_tg_job" ("id") WHERE "send_phase"='timeout_cancelled' AND "timeout_cleanup_at" IS NULL;
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_status_retry" ON "hg_youban_publish_tg_job" ("status", "next_retry_at", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_sending_recovery" ON "hg_youban_publish_tg_job" ("updated_at", "id") WHERE "status" = 'sending';
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_task" ON "hg_youban_publish_tg_job" ("task_id");
@@ -2321,3 +2322,5 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_daily_report" (
   UNIQUE("tenant_id","account_id","report_date")
 );
 CREATE INDEX IF NOT EXISTS "idx_ybp_daily_report_owner_date" ON "hg_youban_publish_daily_report" ("tenant_id","account_id","report_date" DESC);
+
+ALTER TABLE "hg_youban_publish_collect_process_outbox" ADD COLUMN IF NOT EXISTS "history" BOOLEAN NULL;

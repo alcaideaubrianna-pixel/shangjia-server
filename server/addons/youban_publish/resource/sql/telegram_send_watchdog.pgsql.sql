@@ -32,3 +32,6 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_tg_job_send_deadline
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_tg_job_timeout_cleanup
     ON hg_youban_publish_tg_job(timeout_cleanup_at,id)
     WHERE send_phase='timeout_cancelled' AND timeout_cleanup_at IS NOT NULL;
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_tg_job_timeout_cleanup_legacy
+    ON hg_youban_publish_tg_job(id)
+    WHERE send_phase='timeout_cancelled' AND timeout_cleanup_at IS NULL;

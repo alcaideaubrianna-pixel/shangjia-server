@@ -17,10 +17,12 @@ import (
 
 func (s *sSysPublish) lockTelegramJob(ctx context.Context, jobId int64) (telegramJobRecord, bool, error) {
 	var job telegramJobRecord
+	now := gtime.Now()
 	transitioned, err := s.transitionTelegramJob(ctx, telegramJobTransition{
-		JobId: jobId,
-		From:  []string{telegramJobStatusPending, telegramJobStatusRetryWait},
-		To:    telegramJobStatusSending,
+		JobId:        jobId,
+		From:         []string{telegramJobStatusPending, telegramJobStatusRetryWait},
+		To:           telegramJobStatusSending,
+		NotExpiredAt: now,
 		Additional: g.Map{
 			"error_message": "",
 			"sent_at":       nil,

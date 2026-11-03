@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 )
 
 func TestTelegramAPITimeoutFallback(t *testing.T) {
@@ -193,6 +195,50 @@ func TestTelegramSendWatchdogLocalPostgres(t *testing.T) {
 		}
 		if len(againClaimed) != 0 {
 			t.Fatal("leased cleanup jobs were claimed again")
+		}
+
+		// Production-derived regression: job 2700831 was reclaimed from
+		// failed_retry after its durable deadline had already expired.
+		if _, err := tx.Exec("INSERT INTO " + publishTgJobTable + ` (id,tenant_id,account_id,profile_id,channel_id,bot_id,target_chat_id,operation_no,status,dispatch_status,send_phase,send_deadline_at,updated_at)
+			VALUES(2700831,25,473,717852,103,23,'-1004372731951','collect:283676','failed_retry','idle','cleanup_confirmed',LOCALTIMESTAMP-interval '1 hour',LOCALTIMESTAMP-interval '1 hour')`); err != nil {
+			return err
+		}
+		now := gtime.Now()
+		result, err := transitionTelegramJobModel(
+			tx.Model(publishTgJobTable).Where("id", 2700831).Where("status", telegramJobStatusRetryWait),
+			telegramJobTransition{NotExpiredAt: now}, g.Map{"status": telegramJobStatusSending},
+		)
+		if err != nil {
+			return err
+		}
+		if affected, _ := result.RowsAffected(); affected != 0 {
+			t.Fatal("expired production-shaped job was reclaimed by a stale queue task")
+		}
+		if _, err := tx.Model(publishTgJobTable).Where("id", 2700831).Data(g.Map{"send_deadline_at": nil}).Update(); err != nil {
+			return err
+		}
+		result, err = transitionTelegramJobModel(
+			tx.Model(publishTgJobTable).Where("id", 2700831).Where("status", telegramJobStatusRetryWait),
+			telegramJobTransition{NotExpiredAt: now}, g.Map{"status": telegramJobStatusSending},
+		)
+		if err != nil {
+			return err
+		}
+		if affected, _ := result.RowsAffected(); affected != 1 {
+			t.Fatal("normal job without a send deadline could not be claimed")
+		}
+
+		// Production had 2,796 legacy timeout rows with a NULL cleanup time.
+		if _, err := tx.Exec("INSERT INTO " + publishTgJobTable + ` (id,tenant_id,account_id,profile_id,channel_id,operation_no,status,send_phase,timeout_cleanup_at,updated_at)
+			VALUES(2700832,25,473,717853,103,'collect:283677','superseded','timeout_cancelled',NULL,LOCALTIMESTAMP-interval '1 day')`); err != nil {
+			return err
+		}
+		legacyCleanup, err := tx.GetAll(telegramLegacyTimeoutCleanupClaimSQL, time.Now().Add(2*time.Minute))
+		if err != nil {
+			return err
+		}
+		if len(legacyCleanup) != 1 || legacyCleanup[0]["id"].Int64() != 2700832 {
+			t.Fatalf("legacy NULL cleanup row was not claimed: %+v", legacyCleanup)
 		}
 		return nil
 	})

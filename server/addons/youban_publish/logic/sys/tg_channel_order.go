@@ -13,7 +13,7 @@ import (
 	hglock "hotgo/internal/library/hgrds/lock"
 )
 
-const telegramChannelDispatchLeaseTTL = 15 * time.Second
+const telegramChannelDispatchLeaseTTL = 30 * time.Second
 const telegramChannelActiveJobLimit = 1
 
 func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, job telegramJobRecord) (bool, error) {
@@ -173,13 +173,16 @@ func telegramChannelDispatchKey(tenantId, channelId int64) string {
 	return fmt.Sprintf("youban_publish:tg_channel_dispatch:%d:%d", tenantId, channelId)
 }
 
-func (s *sSysPublish) withTelegramChannelDispatchLease(ctx context.Context, job telegramJobRecord, reserve func() (bool, error)) (bool, error) {
+func (s *sSysPublish) withTelegramChannelDispatchLease(ctx context.Context, job telegramJobRecord, reserve func(context.Context) (bool, error)) (bool, error) {
 	if job.TenantId <= 0 || job.ChannelId <= 0 {
-		return reserve()
+		return reserve(ctx)
 	}
+	reserveCtx, cancelReserve := context.WithTimeout(ctx, telegramChannelDispatchLeaseTTL-5*time.Second)
+	defer cancelReserve()
 	lease := hglock.NewConfig(telegramChannelDispatchLeaseTTL, 100*time.Millisecond).
+		WithoutWatchDog().
 		Mutex(telegramChannelDispatchKey(job.TenantId, job.ChannelId))
-	if err := lease.TryLock(ctx); err != nil {
+	if err := lease.TryLock(reserveCtx); err != nil {
 		if gerror.Is(err, hglock.ErrLockFailed) {
 			// Lock contention or an unavailable Redis lock backend is not a
 			// successful enqueue. Returning nil here silently stranded the
@@ -190,11 +193,13 @@ func (s *sSysPublish) withTelegramChannelDispatchLease(ctx context.Context, job 
 		return false, gerror.Wrap(err, "获取频道任务调度租约失败")
 	}
 	defer func() {
-		if err := lease.Unlock(ctx); err != nil && !gerror.Is(err, hglock.ErrNotExist) {
-			g.Log().Warningf(ctx, "释放频道任务调度租约失败 tenantId:%d channelId:%d err:%+v", job.TenantId, job.ChannelId, err)
+		unlockCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+		defer cancel()
+		if err := lease.Unlock(unlockCtx); err != nil && !gerror.Is(err, hglock.ErrNotExist) {
+			g.Log().Warningf(unlockCtx, "释放频道任务调度租约失败 tenantId:%d channelId:%d err:%+v", job.TenantId, job.ChannelId, err)
 		}
 	}()
-	return reserve()
+	return reserve(reserveCtx)
 }
 
 func (s *sSysPublish) telegramChannelHasDispatchCapacity(ctx context.Context, job telegramJobRecord) (bool, error) {

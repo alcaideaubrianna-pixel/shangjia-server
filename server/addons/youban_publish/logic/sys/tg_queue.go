@@ -87,7 +87,7 @@ const (
 func collectProcessQueueName(payload collectProcessQueuePayload) string {
 	if payload.EventId > 0 {
 		if payload.OutboxOwner != "" {
-			if payload.Recovery {
+			if payload.Recovery || payload.History {
 				return tgQueueNameCollectProcessRecoveryV2
 			}
 			return tgQueueNameCollectProcessRealtimeV2
@@ -349,20 +349,20 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 	} else {
 		data["next_retry_at"] = nil
 	}
-	reserved, err := s.withTelegramChannelDispatchLease(ctx, job, func() (bool, error) {
-		step := beginTelegramPublishStage(ctx, "dispatch.channel_order")
-		hasEarlier, orderErr := s.telegramChannelHasEarlierActiveJob(ctx, job)
+	reserved, err := s.withTelegramChannelDispatchLease(ctx, job, func(reserveCtx context.Context) (bool, error) {
+		step := beginTelegramPublishStage(reserveCtx, "dispatch.channel_order")
+		hasEarlier, orderErr := s.telegramChannelHasEarlierActiveJob(reserveCtx, job)
 		step.End(orderErr, g.Map{"hasEarlier": hasEarlier})
 		if orderErr != nil || hasEarlier {
 			return false, orderErr
 		}
-		step = beginTelegramPublishStage(ctx, "dispatch.channel_capacity")
-		hasCapacity, capacityErr := s.telegramChannelHasDispatchCapacity(ctx, job)
+		step = beginTelegramPublishStage(reserveCtx, "dispatch.channel_capacity")
+		hasCapacity, capacityErr := s.telegramChannelHasDispatchCapacity(reserveCtx, job)
 		step.End(capacityErr, g.Map{"hasCapacity": hasCapacity})
 		if capacityErr != nil || !hasCapacity {
 			return false, capacityErr
 		}
-		result, updateErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		result, updateErr := g.DB().Model(publishTgJobTable).Safe().Ctx(reserveCtx).
 			Where("id", jobId).
 			WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
 			Where("(dispatch_status = ? OR dispatch_status = '')", tgDispatchStatusIdle).

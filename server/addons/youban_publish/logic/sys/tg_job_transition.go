@@ -58,6 +58,7 @@ type telegramJobTransition struct {
 	Additional    g.Map
 	SendPhases    []string
 	UpdatedBefore *gtime.Time
+	NotExpiredAt  *gtime.Time
 }
 
 func validateTelegramJobTransition(from []string, to string) error {
@@ -157,6 +158,9 @@ func transitionTelegramJobModel(model *gdb.Model, in telegramJobTransition, data
 	}
 	if in.UpdatedBefore != nil {
 		model = model.WhereLTE("updated_at", in.UpdatedBefore)
+	}
+	if in.NotExpiredAt != nil {
+		model = model.Where("send_deadline_at IS NULL OR send_deadline_at > ?", in.NotExpiredAt)
 	}
 	return model.Data(data).Update()
 }

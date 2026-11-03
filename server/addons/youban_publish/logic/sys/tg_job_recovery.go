@@ -97,64 +97,79 @@ func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 }
 
 func (s *sSysPublish) runTelegramJobRecoveryCycle(ctx context.Context) {
-	lockCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-	distributedLock := hglock.NewConfig(2*time.Minute, 100*time.Millisecond).Mutex("youban_publish:telegram:job_recovery")
+	cycleCtx, cancelCycle := context.WithTimeout(ctx, 45*time.Second)
+	defer cancelCycle()
+	lockCtx, cancelLock := context.WithTimeout(cycleCtx, 3*time.Second)
+	defer cancelLock()
+	// Recovery must never renew its ownership forever. Every database operation
+	// is bounded by cycleCtx; the fixed lease is the final fence if a dependency
+	// ignores cancellation.
+	distributedLock := hglock.NewConfig(2*time.Minute, 100*time.Millisecond).
+		WithoutWatchDog().Mutex("youban_publish:telegram:job_recovery")
 	if err := distributedLock.TryLock(lockCtx); err != nil {
-		if !errors.Is(err, hglock.ErrLockFailed) && ctx.Err() == nil {
-			g.Log().Warningf(ctx, "获取TG推送恢复任务锁失败：%+v", err)
+		if !errors.Is(err, hglock.ErrLockFailed) && cycleCtx.Err() == nil {
+			g.Log().Warningf(cycleCtx, "获取TG推送恢复任务锁失败：%+v", err)
 		}
 		return
 	}
-	defer func() { _ = distributedLock.Unlock(context.Background()) }()
-	if err := s.maintainPermissionPausedBacklog(ctx); err != nil {
-		g.Log().Warningf(ctx, "清理频道权限暂停积压失败：%+v", err)
-	}
-	if err := s.retryChannelPermissionNotifications(ctx); err != nil {
-		g.Log().Warningf(ctx, "恢复频道权限暂停通知失败：%+v", err)
-	}
+	defer func() {
+		unlockCtx, cancel := context.WithTimeout(context.WithoutCancel(cycleCtx), 3*time.Second)
+		defer cancel()
+		if err := distributedLock.Unlock(unlockCtx); err != nil && !errors.Is(err, hglock.ErrNotExist) {
+			g.Log().Warningf(unlockCtx, "释放TG推送恢复任务锁失败：%+v", err)
+		}
+	}()
 
-	if err := s.supersedeExpiredMessagePushPlanJobs(ctx, 1000); err != nil {
-		g.Log().Warningf(ctx, "终止过期历史消息计划任务失败：%+v", err)
+	steps := []telegramRecoveryStep{
+		{"permission_backlog", "清理频道权限暂停积压", func(ctx context.Context) error { return s.maintainPermissionPausedBacklog(ctx) }},
+		{"permission_notification", "恢复频道权限暂停通知", func(ctx context.Context) error { return s.retryChannelPermissionNotifications(ctx) }},
+		{"expired_message_plan", "终止过期历史消息计划任务", func(ctx context.Context) error { return s.supersedeExpiredMessagePushPlanJobs(ctx, 1000) }},
+		{"pre_attempt", "恢复发送Attempt创建前中断的TG任务", func(ctx context.Context) error { return s.recoverStalePreAttemptTelegramJobs(ctx, 200) }},
+		{"confirmed_job", "收口已确认TG推送任务", func(ctx context.Context) error { return s.recoverConfirmedTelegramJobs(ctx, 200) }},
+		{"sending_job", "恢复卡住的TG推送任务", func(ctx context.Context) error { return s.recoverStaleTelegramSendingJobs(ctx, 100) }},
+		{"media_fallback", "恢复协议号媒体降级任务", func(ctx context.Context) error { return s.recoverStaleTelegramMediaFallbackJobs(ctx, 100) }},
+		{"expired_attempt", "重新投递过期TG发送Attempt", func(ctx context.Context) error { return s.requeueExpiredTelegramAttempts(ctx, 100) }},
+		{"sending_attempt", "恢复中断的TG发送Attempt", func(ctx context.Context) error { return s.recoverStaleSendingTelegramAttempts(ctx, 100) }},
+		{"terminal_attempt", "收敛TG发送Attempt状态", func(ctx context.Context) error { return s.recoverTerminalTelegramAttempts(ctx, 500) }},
+		{"failed_display", "释放展示后失败的历史TG任务", func(ctx context.Context) error { return s.detachFailedTelegramDisplayJobs(ctx, 500) }},
+		{"outbox_dispatch", "恢复Outbox入队确认中断的TG任务", func(ctx context.Context) error { return s.recoverExpiredTelegramOutboxDispatches(ctx, 200) }},
+		{"pending_idle", "恢复待入队TG推送任务", func(ctx context.Context) error { return s.recoverPendingIdleTelegramJobs(ctx, 500) }},
+		{"stale_dispatch", "恢复调度中断TG推送任务", func(ctx context.Context) error { return s.recoverStaleTelegramDispatchJobs(ctx, 200) }},
+		{"missing_operation_state", "补建资料上架状态", func(ctx context.Context) error { return s.recoverMissingProfilePublishOperationStates(ctx, 100) }},
+		{"operation_state", "恢复资料上架状态", func(ctx context.Context) error { return s.recoverProfilePublishOperationStates(ctx, 100) }},
 	}
-	if err := s.recoverStalePreAttemptTelegramJobs(ctx, 200); err != nil {
-		g.Log().Warningf(ctx, "恢复发送Attempt创建前中断的TG任务失败：%+v", err)
+	for _, step := range steps {
+		if cycleCtx.Err() != nil {
+			g.Log().Warningf(cycleCtx, "TG推送恢复整轮超时 step:%s err:%+v", step.name, cycleCtx.Err())
+			return
+		}
+		s.runTelegramRecoveryStep(cycleCtx, step)
 	}
-	if err := s.recoverConfirmedTelegramJobs(ctx, 200); err != nil {
-		g.Log().Warningf(ctx, "收口已确认TG推送任务失败：%+v", err)
+}
+
+type telegramRecoveryStep struct {
+	name    string
+	message string
+	run     func(context.Context) error
+}
+
+func (s *sSysPublish) runTelegramRecoveryStep(ctx context.Context, step telegramRecoveryStep) {
+	stepCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	startedAt := time.Now()
+	g.Log().Infof(ctx, "TG推送恢复步骤开始 step:%s", step.name)
+	err := step.run(stepCtx)
+	elapsed := time.Since(startedAt)
+	if err != nil {
+		g.Log().Warningf(ctx, "%s失败 step:%s elapsed:%s err:%+v", step.message, step.name, elapsed, err)
+		return
 	}
-	if err := s.recoverStaleTelegramSendingJobs(ctx, 100); err != nil {
-		g.Log().Warningf(ctx, "恢复卡住的TG推送任务失败：%+v", err)
+	if stepCtx.Err() != nil {
+		g.Log().Warningf(ctx, "%s超时 step:%s elapsed:%s err:%+v", step.message, step.name, elapsed, stepCtx.Err())
+		return
 	}
-	if err := s.recoverStaleTelegramMediaFallbackJobs(ctx, 100); err != nil {
-		g.Log().Warningf(ctx, "恢复协议号媒体降级任务失败：%+v", err)
-	}
-	if err := s.requeueExpiredTelegramAttempts(ctx, 100); err != nil {
-		g.Log().Warningf(ctx, "重新投递过期TG发送Attempt失败：%+v", err)
-	}
-	if err := s.recoverStaleSendingTelegramAttempts(ctx, 100); err != nil {
-		g.Log().Warningf(ctx, "恢复中断的TG发送Attempt失败：%+v", err)
-	}
-	if err := s.recoverTerminalTelegramAttempts(ctx, 500); err != nil {
-		g.Log().Warningf(ctx, "收敛TG发送Attempt状态失败：%+v", err)
-	}
-	if err := s.detachFailedTelegramDisplayJobs(ctx, 500); err != nil {
-		g.Log().Warningf(ctx, "释放展示后失败的历史TG任务失败：%+v", err)
-	}
-	if err := s.recoverExpiredTelegramOutboxDispatches(ctx, 200); err != nil {
-		g.Log().Warningf(ctx, "恢复Outbox入队确认中断的TG任务失败：%+v", err)
-	}
-	if err := s.recoverPendingIdleTelegramJobs(ctx, 500); err != nil {
-		g.Log().Warningf(ctx, "恢复待入队TG推送任务失败：%+v", err)
-	}
-	if err := s.recoverStaleTelegramDispatchJobs(ctx, 200); err != nil {
-		g.Log().Warningf(ctx, "恢复调度中断TG推送任务失败：%+v", err)
-	}
-	if err := s.recoverMissingProfilePublishOperationStates(ctx, 100); err != nil {
-		g.Log().Warningf(ctx, "补建资料上架状态失败：%+v", err)
-	}
-	if err := s.recoverProfilePublishOperationStates(ctx, 100); err != nil {
-		g.Log().Warningf(ctx, "恢复资料上架状态失败：%+v", err)
+	if elapsed >= time.Second {
+		g.Log().Infof(ctx, "TG推送恢复慢步骤完成 step:%s elapsed:%s", step.name, elapsed)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	relayconsts "hotgo/addons/youban_publish/consts"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -145,13 +146,19 @@ func (s *sSysPublish) expireTelegramSendTx(ctx context.Context, tx gdb.TX, id in
 func (s *sSysPublish) runTelegramSendWatchdog(ctx context.Context) {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
+	var cleanupRunning atomic.Bool
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			s.recoverTelegramSendTimeouts(ctx)
-			s.cleanupTelegramSendTimeouts(ctx)
+			if cleanupRunning.CompareAndSwap(false, true) {
+				go func() {
+					defer cleanupRunning.Store(false)
+					s.cleanupTelegramSendTimeouts(ctx)
+				}()
+			}
 		}
 	}
 }
@@ -159,22 +166,37 @@ func (s *sSysPublish) runTelegramSendWatchdog(ctx context.Context) {
 var telegramTimeoutCleanupClaimSQL = `WITH candidates AS (
  SELECT id FROM ` + publishTgJobTable + ` WHERE send_phase='timeout_cancelled'
  AND timeout_cleanup_at<=? ORDER BY timeout_cleanup_at,id
- LIMIT 40 FOR UPDATE SKIP LOCKED
+ LIMIT 30 FOR UPDATE SKIP LOCKED
+ ) UPDATE ` + publishTgJobTable + ` j SET timeout_cleanup_at=?
+ FROM candidates c WHERE j.id=c.id RETURNING j.*`
+
+var telegramLegacyTimeoutCleanupClaimSQL = `WITH candidates AS (
+ SELECT id FROM ` + publishTgJobTable + ` WHERE send_phase='timeout_cancelled'
+ AND timeout_cleanup_at IS NULL ORDER BY id
+ LIMIT 10 FOR UPDATE SKIP LOCKED
  ) UPDATE ` + publishTgJobTable + ` j SET timeout_cleanup_at=?
  FROM candidates c WHERE j.id=c.id RETURNING j.*`
 
 func (s *sSysPublish) cleanupTelegramSendTimeouts(ctx context.Context) {
+	batchCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
 	var jobs []telegramJobRecord
 	// Claim a bounded batch across replicas; a crashed worker releases it by expiry.
 	now := gtime.Now()
-	if err := g.DB().GetScan(ctx, &jobs, telegramTimeoutCleanupClaimSQL, now, now.Add(2*time.Minute)); err != nil {
-		g.Log().Warningf(ctx, "TG超时清理扫描失败 err:%+v", err)
+	if err := g.DB().GetScan(batchCtx, &jobs, telegramTimeoutCleanupClaimSQL, now, now.Add(2*time.Minute)); err != nil {
+		g.Log().Warningf(batchCtx, "TG超时清理扫描失败 err:%+v", err)
 		return
+	}
+	var legacy []telegramJobRecord
+	if err := g.DB().GetScan(batchCtx, &legacy, telegramLegacyTimeoutCleanupClaimSQL, now.Add(2*time.Minute)); err != nil {
+		g.Log().Warningf(batchCtx, "TG历史超时清理扫描失败 err:%+v", err)
+	} else {
+		jobs = append(jobs, legacy...)
 	}
 	var workers sync.WaitGroup
 	slots := make(chan struct{}, 8)
 	for _, job := range jobs {
-		if ctx.Err() != nil {
+		if batchCtx.Err() != nil {
 			break
 		}
 		slots <- struct{}{}
@@ -182,7 +204,7 @@ func (s *sSysPublish) cleanupTelegramSendTimeouts(ctx context.Context) {
 		go func(job telegramJobRecord) {
 			defer workers.Done()
 			defer func() { <-slots }()
-			s.cleanupTelegramSendTimeout(ctx, job)
+			s.cleanupTelegramSendTimeout(batchCtx, job)
 		}(job)
 	}
 	workers.Wait()
