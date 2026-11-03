@@ -14,11 +14,11 @@ func (s *sSysPublish) runCollectProcessDispatcher(ctx context.Context) {
 	for {
 		cycleCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		err := s.dispatchDueCollectProcessOutbox(cycleCtx, 200)
+		s.observeCollectProcessBacklog(cycleCtx)
 		cancel()
 		if err != nil && ctx.Err() == nil {
 			g.Log().Warningf(ctx, "投递实时采集处理任务失败：%+v", err)
 		}
-		s.observeCollectProcessBacklog(cycleCtx)
 		select {
 		case <-ctx.Done():
 			return
@@ -29,8 +29,8 @@ func (s *sSysPublish) runCollectProcessDispatcher(ctx context.Context) {
 
 func (s *sSysPublish) observeCollectProcessBacklog(ctx context.Context) {
 	rows, err := g.DB().Model(collectProcessOutboxTable).Ctx(ctx).
-		Fields("source_id,MIN(created_at) AS oldest,COUNT(*) AS pending").
-		Where("status", "pending").Group("source_id").OrderAsc("oldest").Limit(100).All()
+		Fields("COALESCE(history,FALSE) AS history,MIN(created_at) AS oldest,COUNT(*) AS pending").
+		Where("status", "pending").Group("COALESCE(history,FALSE)").OrderAsc("oldest").All()
 	if err != nil {
 		return
 	}
@@ -45,6 +45,33 @@ func (s *sSysPublish) observeCollectProcessBacklog(ctx context.Context) {
 	}
 	gauge, _ := publishObserveMeter.Int64Gauge("xiaohuiji.collect.process_oldest_pending_age_ms")
 	gauge.Record(ctx, oldest)
-	sources, _ := publishObserveMeter.Int64Gauge("xiaohuiji.collect.process_pending_sources")
-	sources.Record(ctx, int64(len(rows)))
+	var realtimePending, historyPending int64
+	var realtimeOldest, historyOldest int64
+	for _, row := range rows {
+		age := int64(0)
+		if value := row["oldest"].GTime(); value != nil && !value.IsZero() {
+			age = max(0, time.Since(value.Time).Milliseconds())
+		}
+		if row["history"].Bool() {
+			historyPending += row["pending"].Int64()
+			if age > historyOldest {
+				historyOldest = age
+			}
+		} else {
+			realtimePending += row["pending"].Int64()
+			if age > realtimeOldest {
+				realtimeOldest = age
+			}
+		}
+	}
+	pending, _ := publishObserveMeter.Int64Gauge("xiaohuiji.collect.process_pending")
+	pending.Record(ctx, realtimePending+historyPending)
+	realtime, _ := publishObserveMeter.Int64Gauge("xiaohuiji.collect.realtime_process_pending")
+	realtime.Record(ctx, realtimePending)
+	history, _ := publishObserveMeter.Int64Gauge("xiaohuiji.collect.history_process_pending")
+	history.Record(ctx, historyPending)
+	realtimeAge, _ := publishObserveMeter.Int64Gauge("xiaohuiji.collect.realtime_process_oldest_age_ms")
+	realtimeAge.Record(ctx, realtimeOldest)
+	historyAge, _ := publishObserveMeter.Int64Gauge("xiaohuiji.collect.history_process_oldest_age_ms")
+	historyAge.Record(ctx, historyOldest)
 }
