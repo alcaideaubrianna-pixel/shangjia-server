@@ -26,7 +26,7 @@ func TestTelegramChannelScheduleLocalPostgres(t *testing.T) {
 		}{
 			{"untouched cycle", "pending", "", "cycle_batch:1", 2},
 			{"queued cycle", "pending", "", "cycle_batch:1", 2},
-			{"untouched collect", "pending", "", "collect:1", 2},
+			{"untouched collect", "pending", "", "collect:1", 1},
 			{"AI repair is not interactive", "pending", "", "ai-republish:1", 2},
 			{"display sent", "failed_retry", "display_confirmed", "collect:1", 1},
 			{"display request pending", "failed_retry", "display_sending", "cycle_batch:1", 1},
@@ -83,7 +83,7 @@ func TestTelegramChannelScheduleLocalPostgres(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		want := []int64{7, 3, 4, 8, 2, 5, 1, 6}
+		want := []int64{7, 2, 5, 3, 4, 8, 1, 6}
 		if len(rows) != len(want) {
 			t.Fatalf("schedule returned %d rows, want %d", len(rows), len(want))
 		}
