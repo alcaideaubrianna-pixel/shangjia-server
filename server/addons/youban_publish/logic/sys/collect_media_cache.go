@@ -58,6 +58,10 @@ func (e *collectMediaDiscardedError) Error() string {
 
 const defaultCollectMediaDownloadThreads = 4
 
+// Waiting for an owner must never pin an Asynq worker behind a long-lived
+// lease. The task is requeued with a short delay when the slots are busy.
+const collectMediaOwnerAcquireTimeout = 2 * time.Second
+
 var errCollectMediaSourceGone = errors.New("TG原消息已删除或已无可用媒体")
 
 func (e *collectMediaRetryError) Error() string {
@@ -276,8 +280,13 @@ func (s *sSysPublish) ExecuteCollectMediaCache(ctx context.Context, payload coll
 	var ownerLease *collectMediaConcurrencyLease
 	if needsOwner {
 		reportCollectProgress(ctx, "waiting_owner", "等待租户或账号媒体处理配额")
-		ownerLease, err = s.acquireCollectMediaOwnerSlots(ctx, payload)
+		ownerCtx, cancelOwner := context.WithTimeout(ctx, collectMediaOwnerAcquireTimeout)
+		ownerLease, err = s.acquireCollectMediaOwnerSlots(ownerCtx, payload)
+		cancelOwner()
 		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+				return newCollectMediaFairnessRetryError("媒体处理配额繁忙，已释放工作线程等待下一轮", 3*time.Second)
+			}
 			return err
 		}
 		defer ownerLease.release()

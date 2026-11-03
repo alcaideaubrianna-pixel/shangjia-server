@@ -1,6 +1,15 @@
 package sys
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
+
+func TestCollectMediaOwnerAcquireIsShortBounded(t *testing.T) {
+	if collectMediaOwnerAcquireTimeout > 5*time.Second {
+		t.Fatalf("owner acquisition timeout=%s would pin workers", collectMediaOwnerAcquireTimeout)
+	}
+}
 
 func TestNormalizeCollectMediaConcurrency(t *testing.T) {
 	tests := []struct {
