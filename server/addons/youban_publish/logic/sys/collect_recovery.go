@@ -29,7 +29,9 @@ const (
 	collectMediaRecoverAfter = 20 * time.Minute
 	// This guard only prevents concurrent recovery passes. It must not hide a
 	// lost queue task for the lifetime of the old task's uniqueness window.
-	collectMediaRecoveryDedupTTL = 2 * time.Minute
+	collectMediaRecoveryDedupTTL      = 2 * time.Minute
+	collectRecoveryRealtimeMaxPending = 500
+	collectRecoveryRealtimeMaxAge     = 10 * time.Second
 )
 
 func reserveCollectMediaRecovery(ctx context.Context, eventID int64) bool {
@@ -93,6 +95,12 @@ func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	if err := s.dispatchDueCollectProcessOutbox(ctx, collectProcessOutboxRecoveryBatchSize(ctx)); err != nil {
 		g.Log().Warningf(ctx, "恢复采集处理Outbox失败：%+v", err)
 	}
+	if blocked, err := s.collectRecoveryBackpressure(ctx); err != nil {
+		g.Log().Warningf(ctx, "读取实时采集背压状态失败，暂停本轮历史恢复：%+v", err)
+		return
+	} else if blocked {
+		return
+	}
 	if err := s.cleanupCollectEventsOlderThan(ctx, tasklog.RetentionDays(), 1000); err != nil {
 		g.Log().Warningf(ctx, "清理过期采集事件失败：%+v", err)
 	}
@@ -126,6 +134,32 @@ func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	if err := s.recoverCollectPublishTasks(ctx, 100); err != nil {
 		g.Log().Warningf(ctx, "恢复采集推送任务失败：%+v", err)
 	}
+}
+
+// Recovery must yield to realtime when the shared database/worker budget is
+// under pressure. This is a bounded gate, not a queue deletion or reset.
+func (s *sSysPublish) collectRecoveryBackpressure(ctx context.Context) (bool, error) {
+	row, err := g.DB().Model(collectProcessOutboxTable).Ctx(ctx).
+		Fields("COUNT(*) AS pending, MIN(updated_at) AS oldest").
+		Where("history", false).
+		WhereIn("status", []string{"pending", "processing"}).One()
+	if err != nil {
+		return true, err
+	}
+	pending := row["pending"].Int64()
+	oldest := row["oldest"].GTime()
+	blocked := pending >= collectRecoveryRealtimeMaxPending
+	if oldest != nil && !oldest.IsZero() && time.Since(oldest.Time) >= collectRecoveryRealtimeMaxAge {
+		blocked = true
+	}
+	if blocked {
+		age := time.Duration(0)
+		if oldest != nil && !oldest.IsZero() {
+			age = time.Since(oldest.Time).Round(time.Millisecond)
+		}
+		g.Log().Infof(ctx, "实时采集背压，跳过本轮历史恢复 pending:%d oldestAge:%s", pending, age)
+	}
+	return blocked, nil
 }
 
 // recoverInvalidReadyCollectMedia repairs legacy rows that treated a Telegram
