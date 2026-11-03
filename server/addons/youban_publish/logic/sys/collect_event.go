@@ -577,7 +577,10 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		ruleMatched, skipReason, dispatchErr := s.dispatchCollectEventByRule(ctx, event, content, rule)
 		if dispatchErr != nil {
 			err = dispatchErr
-			_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusFailed, err.Error())
+			var retryErr *collectProcessRetryError
+			if !errors.As(err, &retryErr) {
+				_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusFailed, err.Error())
+			}
 			return err
 		}
 		if ruleMatched {

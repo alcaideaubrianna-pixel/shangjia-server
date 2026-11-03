@@ -15,12 +15,28 @@ var installSQLFiles = map[string]string{
 	"mysql": "addons/telegram_collector/resource/sql/install.sql",
 }
 
+var auxiliarySQLFiles = map[string][]string{
+	"pgsql": []string{"addons/telegram_collector/resource/sql/ingest_spool.pgsql.sql"},
+}
+
 func Install(ctx context.Context) error {
-	return executeSQLFile(ctx, installSQLFiles[strings.ToLower(g.DB().GetConfig().Type)])
+	return executeSQLFiles(ctx, strings.ToLower(g.DB().GetConfig().Type))
 }
 
 func Upgrade(ctx context.Context) error {
-	return executeSQLFile(ctx, installSQLFiles[strings.ToLower(g.DB().GetConfig().Type)])
+	return executeSQLFiles(ctx, strings.ToLower(g.DB().GetConfig().Type))
+}
+
+func executeSQLFiles(ctx context.Context, databaseType string) error {
+	if err := executeSQLFile(ctx, installSQLFiles[databaseType]); err != nil {
+		return err
+	}
+	for _, path := range auxiliarySQLFiles[databaseType] {
+		if err := executeSQLFile(ctx, path); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func executeSQLFile(ctx context.Context, path string) error {

@@ -18,9 +18,9 @@ CREATE TABLE IF NOT EXISTS hg_tg_collector_ingest_spool (
     CONSTRAINT uq_tg_collector_ingest_spool_event UNIQUE (tenant_id,event_key)
 );
 ALTER TABLE hg_tg_collector_ingest_spool ADD COLUMN IF NOT EXISTS priority INT NOT NULL DEFAULT 0;
-CREATE INDEX IF NOT EXISTS idx_tg_collector_ingest_spool_due
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_tg_collector_ingest_spool_priority
  ON hg_tg_collector_ingest_spool (status,priority DESC,next_run_at,id)
- WHERE status IN ('received','failed_retry');
+ WHERE status IN ('received','failed_retry','processing');
 CREATE INDEX IF NOT EXISTS idx_tg_collector_ingest_spool_lease
  ON hg_tg_collector_ingest_spool (next_run_at,id)
  WHERE status='processing';
