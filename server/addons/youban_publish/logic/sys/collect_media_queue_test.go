@@ -1,6 +1,9 @@
 package sys
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestCollectMediaQueueShardKey(t *testing.T) {
 	tests := []struct {
@@ -33,5 +36,11 @@ func TestNormalizeCollectMediaOwnerConcurrency(t *testing.T) {
 		if got := normalizeCollectMediaOwnerConcurrency(test.input); got != test.want {
 			t.Fatalf("normalizeCollectMediaOwnerConcurrency(%d)=%d, want %d", test.input, got, test.want)
 		}
+	}
+}
+
+func TestCollectMediaTaskTimeoutIsBounded(t *testing.T) {
+	if collectMediaTaskTimeout > 15*time.Minute {
+		t.Fatalf("media task timeout=%s is too long for interactive collection", collectMediaTaskTimeout)
 	}
 }
