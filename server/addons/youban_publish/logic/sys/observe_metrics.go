@@ -167,6 +167,20 @@ func observeCollectMediaScheduler(ctx context.Context, action string, tenantID, 
 	counter.Add(ctx, 1, attrs)
 }
 
+// observeCollectMediaOwnerWait records queue-side contention separately from
+// download time. Source/account dimensions make a hot account or source
+// visible without retaining per-event state in memory.
+func observeCollectMediaOwnerWait(ctx context.Context, tenantID, tgAccountID, sourceID int64, wait time.Duration, result string) {
+	attrs := metric.WithAttributes(
+		attribute.Int64("tenant_id", tenantID),
+		attribute.Int64("tg_account_id", tgAccountID),
+		attribute.Int64("source_id", sourceID),
+		attribute.String("result", result),
+	)
+	histogram, _ := publishObserveMeter.Float64Histogram("xiaohuiji.collect.media_owner_wait_seconds")
+	histogram.Record(ctx, wait.Seconds(), attrs)
+}
+
 func observeCollectMediaEnqueue(ctx context.Context, reason, result string) {
 	counter, _ := publishObserveMeter.Int64Counter("xiaohuiji.collect.media_queue_enqueues")
 	counter.Add(ctx, 1, metric.WithAttributes(

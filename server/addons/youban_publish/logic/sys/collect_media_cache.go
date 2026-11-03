@@ -280,15 +280,18 @@ func (s *sSysPublish) ExecuteCollectMediaCache(ctx context.Context, payload coll
 	var ownerLease *collectMediaConcurrencyLease
 	if needsOwner {
 		reportCollectProgress(ctx, "waiting_owner", "等待租户或账号媒体处理配额")
+		ownerWaitStartedAt := time.Now()
 		ownerCtx, cancelOwner := context.WithTimeout(ctx, collectMediaOwnerAcquireTimeout)
 		ownerLease, err = s.acquireCollectMediaOwnerSlots(ownerCtx, payload)
 		cancelOwner()
 		if err != nil {
+			observeCollectMediaOwnerWait(ctx, payload.TenantId, payload.TgAccountId, payload.SourceId, time.Since(ownerWaitStartedAt), "timeout_or_busy")
 			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 				return newCollectMediaFairnessRetryError("媒体处理配额繁忙，已释放工作线程等待下一轮", 3*time.Second)
 			}
 			return err
 		}
+		observeCollectMediaOwnerWait(ctx, payload.TenantId, payload.TgAccountId, payload.SourceId, time.Since(ownerWaitStartedAt), "acquired")
 		defer ownerLease.release()
 		ctx, stopOwnerLease := maintainCollectMediaLeases(ctx, payload.EventId, collectMediaLeaseRefreshInterval, ownerLease.refresh)
 		defer stopOwnerLease()
