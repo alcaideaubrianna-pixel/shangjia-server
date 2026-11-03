@@ -63,6 +63,15 @@ func TestProfileCycleRescheduleCandidateOnlyMatchesMissingPlans(t *testing.T) {
 	}
 }
 
+func TestProfileCycleBacklogIsLimitedPerChannel(t *testing.T) {
+	if profileCycleChannelHasCapacity(profileCycleChannelBacklogLimit) {
+		t.Fatal("a saturated channel must stop accepting cycle jobs")
+	}
+	if !profileCycleChannelHasCapacity(0) {
+		t.Fatal("another empty channel must remain eligible when one channel is saturated")
+	}
+}
+
 func TestCalculateProfileCycleAt(t *testing.T) {
 	location := time.FixedZone("Asia/Shanghai", 8*60*60)
 	base := gtime.New(time.Date(2026, 7, 31, 13, 25, 55, 0, location))

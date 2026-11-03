@@ -18,7 +18,6 @@ import (
 const (
 	profileCycleScanBatchSize        = 200
 	profileCycleMaxProducePerRun     = 5000
-	profileCycleGlobalBacklogLimit   = 3000
 	profileCycleChannelBacklogLimit  = 200
 	profileCycleClaimLease           = 2 * time.Hour
 	profileCycleRetryDelay           = time.Hour
@@ -347,13 +346,6 @@ func (s *sSysPublish) runProfileCycleDueScan(ctx context.Context) error {
 	affectedChannels := make(map[int64]struct{})
 	channelBacklog := make(map[int64]int)
 	for produced < profileCycleMaxProducePerRun && processed < profileCycleMaxProducePerRun {
-		backlog, err := s.profileCycleGlobalBacklog(ctx)
-		if err != nil {
-			return err
-		}
-		if backlog >= profileCycleGlobalBacklogLimit {
-			break
-		}
 		rows, err := s.profileCycleDueRows(ctx, profileCycleScanBatchSize)
 		if err != nil {
 			return err
@@ -362,9 +354,8 @@ func (s *sSysPublish) runProfileCycleDueScan(ctx context.Context) error {
 			break
 		}
 		processed += len(rows)
-		batchProduced := 0
 		for _, row := range rows {
-			if produced >= profileCycleMaxProducePerRun || backlog+batchProduced >= profileCycleGlobalBacklogLimit {
+			if produced >= profileCycleMaxProducePerRun {
 				break
 			}
 			created, handleErr := s.dispatchDueProfileCycle(ctx, row, channelBacklog)
@@ -375,7 +366,6 @@ func (s *sSysPublish) runProfileCycleDueScan(ctx context.Context) error {
 			affectedChannels[row.ChannelId] = struct{}{}
 			if created {
 				produced++
-				batchProduced++
 				channelBacklog[row.ChannelId]++
 			}
 		}
@@ -545,7 +535,7 @@ func (s *sSysPublish) dispatchDueProfileCycle(ctx context.Context, row profileCy
 		}
 		channelBacklog[row.ChannelId] = backlog
 	}
-	if backlog >= profileCycleChannelBacklogLimit {
+	if !profileCycleChannelHasCapacity(backlog) {
 		_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", row.JobId).Data(g.Map{
 			"next_cycle_at":       gtime.Now().Add(profileCycleRetryDelay),
 			"last_dispatch_error": "频道循环队列积压，已延后领取", "updated_at": gtime.Now(),
@@ -610,6 +600,10 @@ func (s *sSysPublish) dispatchDueProfileCycle(ctx context.Context, row profileCy
 	return false, err
 }
 
+func profileCycleChannelHasCapacity(backlog int) bool {
+	return backlog < profileCycleChannelBacklogLimit
+}
+
 func cycleFailureSummary(err error) string {
 	if err == nil {
 		return "循环发布失败"
@@ -646,11 +640,6 @@ func (s *sSysPublish) profileCycleChildActive(ctx context.Context, sourceJobId i
 	count, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		WhereLike("operation_no", prefix+"%").WhereIn("status", []string{"pending", "sending", "failed_retry", "unknown"}).Count()
 	return count > 0, err
-}
-
-func (s *sSysPublish) profileCycleGlobalBacklog(ctx context.Context) (int, error) {
-	return g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		WhereLike("operation_no", "cycle_batch:due:%").WhereIn("status", []string{"pending", "sending", "failed_retry", "unknown"}).Count()
 }
 
 func dueProfileCycleOperationNo(sourceJobId int64, attempt int, profileId int64, channelId int64) string {
