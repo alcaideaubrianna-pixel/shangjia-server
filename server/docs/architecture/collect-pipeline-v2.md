@@ -69,3 +69,9 @@
 - 真实 source/tenant lane 的最老任务和处理速率断言；
 - 影子计数与生产只读 SQL 对账；
 - race、全量 Go 测试和部署后 5/15/30 分钟分段验收。
+
+## Phase 1 当前实现状态
+
+已新增 `hg_tg_collector_ingest_spool` 的持久化接收边界。Bot 和账号更新在写入 Collector Event、入队成功后才把 spool 标记为 `completed`；任何数据库或队列失败都会向 Telegram 更新处理器返回错误，触发上游重放。现有 Event/Delivery 路径暂时保留，spool 只作为可靠接收边界，未删除旧消费者。
+
+上线前执行 `addons/telegram_collector/resource/sql/ingest_spool.pgsql.sql`。迁移只新增表和索引，不处理、不删除现有任务。Phase 1 的删除门槛仍是 spool 与 event 的数量、重复键、失败重放和断线重连对账连续通过。

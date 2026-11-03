@@ -88,12 +88,19 @@ func (s *sCollector) IngestBotUpdate(ctx context.Context, bot collectorservice.B
 		event.ChatID = message.Chat.ID
 		event.MessageID = int64(message.ID)
 	}
+	spoolID, err := persistIngestSpool(ctx, &event)
+	if err != nil {
+		return err
+	}
 	eventID, err := s.persistEvent(ctx, &event)
 	if err != nil {
 		return err
 	}
 	if err = s.enqueueEventTask(ctx, eventID, event.Priority); err != nil {
 		return gerror.Wrap(err, "Telegram采集事件入队失败")
+	}
+	if err = completeIngestSpool(ctx, spoolID); err != nil {
+		return err
 	}
 	counter, _ := collectorMeter.Int64Counter("telegram_collector_ingest_total")
 	counter.Add(ctx, 1, metric.WithAttributes(
@@ -128,23 +135,24 @@ func (s *sCollector) IngestAccountMessage(ctx context.Context, message *sysin.Ac
 	if err != nil {
 		return gerror.Wrap(err, "序列化Telegram账号采集事件失败")
 	}
+	event := sysin.RawUpdateEvent{
+		EventID: message.SourceUniqueKey, TenantID: message.TenantID, SourceID: message.SourceID,
+		SourceType: sysin.SourceTypeAccount, AccountID: message.TgAccountID,
+		ChatID: parseCollectorChatID(message.SourceChatID), MessageID: message.SourceMessageID,
+		Priority: accountMessagePriority(message), RawUpdate: raw, ReceivedAt: message.ReceivedAt,
+		TraceID: message.TraceID,
+	}
+	spoolID, err := persistIngestSpool(ctx, &event)
+	if err != nil {
+		return err
+	}
 	if eventID, repaired, repairErr := s.refreshCorruptedAccountEvent(ctx, message, raw); repairErr != nil {
 		return repairErr
 	} else if repaired {
-		return s.enqueueEventTask(ctx, eventID, accountMessagePriority(message))
-	}
-	event := sysin.RawUpdateEvent{
-		EventID:    message.SourceUniqueKey,
-		TenantID:   message.TenantID,
-		SourceID:   message.SourceID,
-		SourceType: sysin.SourceTypeAccount,
-		AccountID:  message.TgAccountID,
-		ChatID:     parseCollectorChatID(message.SourceChatID),
-		MessageID:  message.SourceMessageID,
-		Priority:   accountMessagePriority(message),
-		RawUpdate:  raw,
-		ReceivedAt: message.ReceivedAt,
-		TraceID:    message.TraceID,
+		if err := s.enqueueEventTask(ctx, eventID, accountMessagePriority(message)); err != nil {
+			return err
+		}
+		return completeIngestSpool(ctx, spoolID)
 	}
 	eventID, err := s.persistEvent(ctx, &event)
 	if err != nil {
@@ -152,6 +160,9 @@ func (s *sCollector) IngestAccountMessage(ctx context.Context, message *sysin.Ac
 	}
 	if err = s.enqueueEventTask(ctx, eventID, event.Priority); err != nil {
 		return gerror.Wrap(err, "Telegram账号采集事件入队失败")
+	}
+	if err = completeIngestSpool(ctx, spoolID); err != nil {
+		return err
 	}
 	counter, _ := collectorMeter.Int64Counter("telegram_collector_ingest_total")
 	counter.Add(ctx, 1, metric.WithAttributes(
