@@ -41,6 +41,7 @@ func newCollectProcessRetryError(delay time.Duration, message string) error {
 }
 
 type collectProcessQueuePayload struct {
+	History      bool   `json:"history,omitempty"`
 	AccountId    int64  `json:"accountId"`
 	EventId      int64  `json:"eventId"`
 	SourceId     int64  `json:"sourceId"`

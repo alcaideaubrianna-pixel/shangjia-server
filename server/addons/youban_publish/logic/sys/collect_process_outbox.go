@@ -2,7 +2,6 @@ package sys
 
 import (
 	"context"
-	"github.com/gogf/gf/v2/util/guid"
 	"strings"
 	"time"
 
@@ -10,6 +9,9 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/gogf/gf/v2/util/guid"
+
+	"hotgo/utility/dbtime"
 )
 
 const collectProcessOutboxTable = "hg_youban_publish_collect_process_outbox"
@@ -32,24 +34,29 @@ func ensureCollectProcessOutbox(ctx context.Context, payload collectProcessQueue
 		return nil
 	}
 	availableAt := gtime.Now().Add(delay)
-	args := []any{payload.EventId, payload.TenantId, payload.AccountId, payload.SourceId, payload.SourceChatId, availableAt, gtime.Now(), gtime.Now()}
+	var history any = payload.History
+	if payload.Recovery {
+		history = nil
+	}
+	args := []any{payload.EventId, payload.TenantId, payload.AccountId, payload.SourceId, payload.SourceChatId, availableAt, gtime.Now(), gtime.Now(), history}
 	var query string
 	if strings.EqualFold(strings.TrimSpace(g.DB().GetConfig().Type), "pgsql") {
 		query = `INSERT INTO ` + collectProcessOutboxTable + `
-            (event_id,tenant_id,account_id,source_id,source_chat_id,status,available_at,created_at,updated_at)
-            VALUES ($1,$2,$3,$4,$5,'pending',$6,$7,$8)
+            (event_id,tenant_id,account_id,source_id,source_chat_id,status,available_at,created_at,updated_at,history)
+            VALUES ($1,$2,$3,$4,$5,'pending',$6,$7,$8,$9)
             ON CONFLICT (event_id) DO UPDATE SET tenant_id=EXCLUDED.tenant_id,account_id=EXCLUDED.account_id,
             source_id=EXCLUDED.source_id,source_chat_id=EXCLUDED.source_chat_id,status='pending',
-            available_at=EXCLUDED.available_at,lease_owner='',lease_expires_at=NULL,last_error='',updated_at=EXCLUDED.updated_at`
+            available_at=EXCLUDED.available_at,lease_owner='',lease_expires_at=NULL,last_error='',updated_at=EXCLUDED.updated_at,
+             history=COALESCE(` + collectProcessOutboxTable + `.history,EXCLUDED.history)`
 		if payload.Recovery && payload.OutboxOwner == "" {
 			query += ` WHERE ` + collectProcessOutboxTable + `.status='delivered'`
 		}
 	} else {
 		query = `INSERT INTO ` + collectProcessOutboxTable + `
-            (event_id,tenant_id,account_id,source_id,source_chat_id,status,available_at,created_at,updated_at)
-            VALUES (?,?,?,?,?,'pending',?,?,?) ON DUPLICATE KEY UPDATE tenant_id=VALUES(tenant_id),
+            (event_id,tenant_id,account_id,source_id,source_chat_id,status,available_at,created_at,updated_at,history)
+            VALUES (?,?,?,?,?,'pending',?,?,?,?) ON DUPLICATE KEY UPDATE tenant_id=VALUES(tenant_id),
             account_id=VALUES(account_id),source_id=VALUES(source_id),source_chat_id=VALUES(source_chat_id),
-            status='pending',available_at=VALUES(available_at),lease_owner='',lease_expires_at=NULL,last_error='',updated_at=VALUES(updated_at)`
+            history=COALESCE(history,VALUES(history)),status='pending',available_at=VALUES(available_at),lease_owner='',lease_expires_at=NULL,last_error='',updated_at=VALUES(updated_at)`
 	}
 	if _, err := g.DB().Exec(ctx, query, args...); err != nil {
 		return gerror.Wrap(err, "保存采集处理Outbox失败")
@@ -62,8 +69,8 @@ func isMissingCollectProcessOutboxError(err error) bool {
 		return false
 	}
 	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "does not exist") || strings.Contains(message, "doesn't exist") ||
-		strings.Contains(message, "undefined table") || strings.Contains(message, "no such table")
+	return strings.Contains(message, collectProcessOutboxTable) && !strings.Contains(message, "column ") &&
+		(strings.Contains(message, "does not exist") || strings.Contains(message, "doesn't exist") || strings.Contains(message, "undefined table") || strings.Contains(message, "no such table"))
 }
 
 func completeCollectProcessOutbox(ctx context.Context, payload collectProcessQueuePayload) {
@@ -98,35 +105,31 @@ func (s *sSysPublish) dispatchDueCollectProcessOutbox(ctx context.Context, limit
 		model = model.Fields("*, updated_at::text AS claim_version")
 	}
 	cutoff := now.Add(-10 * time.Minute)
-	realtimeLimit := limit * 4 / 5
-	if realtimeLimit < 1 {
-		realtimeLimit = 1
+	// Reserve capacity for fresh pending, history, and expired processing work.
+	// Expired leases must be recoverable regardless of the row's creation date.
+	freshLimit := max(1, limit*3/5)
+	historyLimit := min(max(1, limit/5), limit-freshLimit)
+	expiredLimit := limit - freshLimit - historyLimit
+	load := func(status, dueColumn string, count int, condition string, args ...any) ([]gdb.Record, error) {
+		if count <= 0 {
+			return nil, nil
+		}
+		base := model.Clone().Where("status", status).WhereLTE(dueColumn, now)
+		if condition != "" {
+			base = base.Where(condition, args...)
+		}
+		return base.OrderAsc(dueColumn).OrderAsc("id").Limit(count).All()
 	}
-	// Query pending and expired processing rows separately. The previous OR
-	// predicate forced PostgreSQL into BitmapOr + heap scan + sort over the
-	// whole outbox, which made task claiming take seconds under backlog.
-	load := func(status string, dueColumn string, freshLimit, olderLimit int) ([]gdb.Record, error) {
-		base := model.Clone()
-		if status == "pending" {
-			base = model.Clone().Where("status", status).Where("available_at <= ?", now)
-		} else {
-			base = model.Clone().Where("status", status).Where("lease_expires_at <= ?", now)
-		}
-		fresh, err := base.Clone().WhereGTE("created_at", cutoff).OrderAsc(dueColumn).OrderAsc("id").Limit(freshLimit).All()
-		if err != nil {
-			return nil, err
-		}
-		if len(fresh) >= freshLimit || olderLimit <= 0 {
-			return fresh, nil
-		}
-		older, err := base.Clone().WhereLT("created_at", cutoff).OrderAsc(dueColumn).OrderAsc("id").Limit(olderLimit).All()
-		return append(fresh, older...), err
+	rows, err := load("pending", "available_at", freshLimit, "COALESCE(history,FALSE)=FALSE AND created_at>=?", cutoff)
+	if err == nil {
+		var more []gdb.Record
+		more, err = load("pending", "available_at", historyLimit, "history=TRUE OR created_at<?", cutoff)
+		rows = append(rows, more...)
 	}
-	rows, err := load("pending", "available_at", realtimeLimit, limit-realtimeLimit)
-	if err == nil && len(rows) < limit {
-		processing, readErr := load("processing", "lease_expires_at", limit-len(rows), 0)
-		err = readErr
-		rows = append(rows, processing...)
+	if err == nil {
+		var more []gdb.Record
+		more, err = load("processing", "lease_expires_at", expiredLimit, "")
+		rows = append(rows, more...)
 	}
 	if err != nil {
 		if isMissingCollectProcessOutboxError(err) {
@@ -134,11 +137,41 @@ func (s *sSysPublish) dispatchDueCollectProcessOutbox(ctx context.Context, limit
 		}
 		return gerror.Wrap(err, "读取到期采集处理Outbox失败")
 	}
+	// Resolve legacy classification in one bounded query, not one DB round
+	// trip per queued event. This map is only a transient query projection.
+	legacyIDs := make([]int64, 0, len(rows))
 	for _, row := range rows {
+		if row["history"].IsNil() {
+			legacyIDs = append(legacyIDs, row["event_id"].Int64())
+		}
+	}
+	legacyHistory := make(map[int64]bool, len(legacyIDs))
+	if len(legacyIDs) > 0 {
+		events, readErr := g.DB().Model(publishCollectEventTable).Ctx(ctx).Fields("id,received_at,created_at").WhereIn("id", legacyIDs).All()
+		if readErr != nil {
+			return readErr
+		}
+		for _, event := range events {
+			received, created := event["received_at"].GTime(), event["created_at"].GTime()
+			legacyHistory[event["id"].Int64()] = received != nil && created != nil && received.Before(created.Add(-5*time.Minute))
+		}
+	}
+	for _, row := range rows {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		history := row["history"].Bool()
+		createdAt := dbtime.FromTimestamp(row["created_at"].GTime())
+		old := createdAt != nil && time.Since(createdAt.Time) > 10*time.Minute
+		// Legacy rows have no history marker. Compare database wall clocks, not
+		// raw RFC3339 offsets; new ingress always persists the explicit marker.
+		if row["history"].IsNil() {
+			history = legacyHistory[row["event_id"].Int64()]
+		}
 		owner := row["lease_owner"].String()
 		if owner == "" {
 			owner = "realtime-" + guid.S()
-			if row["created_at"].GTime() != nil && time.Since(row["created_at"].Time()) > 10*time.Minute {
+			if history || old {
 				owner = "recovery-" + guid.S()
 			}
 		}
@@ -159,7 +192,8 @@ func (s *sSysPublish) dispatchDueCollectProcessOutbox(ctx context.Context, limit
 		}
 		payload := collectProcessQueuePayload{
 			OutboxOwner: owner,
-			Recovery:    strings.HasPrefix(owner, "recovery-") || (!strings.HasPrefix(owner, "realtime-") && row["created_at"].GTime() != nil && time.Since(row["created_at"].Time()) > 10*time.Minute),
+			History:     history,
+			Recovery:    strings.HasPrefix(owner, "recovery-") || old,
 			EventId:     row["event_id"].Int64(), TenantId: row["tenant_id"].Int64(), AccountId: row["account_id"].Int64(),
 			SourceId: row["source_id"].Int64(), SourceChatId: row["source_chat_id"].String(),
 		}

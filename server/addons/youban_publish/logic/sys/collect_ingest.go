@@ -108,14 +108,10 @@ type collectMediaItem struct {
 	DebugMetaJson       string `json:"debugMetaJson,omitempty"`
 }
 
-func (s *sSysPublish) scheduleCollectGroupedEvent(eventId int64, sourceId int64, sourceChatId string, tenantId int64, accountId int64) {
-	if err := s.enqueueCollectProcess(context.Background(), collectProcessQueuePayload{
-		EventId: eventId, SourceId: sourceId, SourceChatId: sourceChatId,
-		TenantId: tenantId, AccountId: accountId,
-	}, collectGroupedEventDelay); err != nil {
-		g.Log().Warningf(context.Background(), "投递采集媒体组延迟处理失败 event:%d err:%+v", eventId, err)
-	}
+func (s *sSysPublish) scheduleCollectGroupedEvent(ctx context.Context, eventId int64, sourceId int64, sourceChatId string, tenantId int64, accountId int64, history bool) error {
+	return s.enqueueCollectProcess(ctx, collectProcessQueuePayload{
+		History: history, EventId: eventId, SourceId: sourceId, SourceChatId: sourceChatId, TenantId: tenantId, AccountId: accountId,
+	}, collectGroupedEventDelay)
 }
 
-func (s *sSysPublish) stopCollectGroupedEventTimers() {
-}
+func (s *sSysPublish) stopCollectGroupedEventTimers() {}

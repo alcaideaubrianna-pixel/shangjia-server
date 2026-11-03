@@ -15,6 +15,7 @@ import (
 )
 
 type CollectMessage struct {
+	History         bool
 	TenantId        int64
 	AccountId       int64
 	SourceId        int64
@@ -37,10 +38,11 @@ func (s *sSysPublish) ingestAndProcessCollectMessage(ctx context.Context, messag
 	}
 	if strings.TrimSpace(message.SourceGroupedId) != "" {
 		g.Log().Debugf(ctx, "采集消息已入库，等待媒体组聚合 eventId:%d sourceId:%d sourceMessageId:%d groupedId:%s media:%d", eventId, message.SourceId, message.SourceMessageId, message.SourceGroupedId, len(message.Media))
-		s.scheduleCollectGroupedEvent(eventId, message.SourceId, message.SourceChatId, message.TenantId, message.AccountId)
-		return eventId, nil
+		err = s.scheduleCollectGroupedEvent(ctx, eventId, message.SourceId, message.SourceChatId, message.TenantId, message.AccountId, message.History)
+		return eventId, err
 	}
 	if err = s.enqueueCollectProcess(ctx, collectProcessQueuePayload{
+		History:      message.History,
 		EventId:      eventId,
 		SourceId:     message.SourceId,
 		SourceChatId: message.SourceChatId,

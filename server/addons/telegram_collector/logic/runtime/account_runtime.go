@@ -41,7 +41,6 @@ type accountWorker struct {
 	done                   chan struct{}
 	operations             chan accountOperationTask
 	priorityOperations     chan accountOperationTask
-	messages               chan accountMessageTask
 	operationSlots         chan struct{}
 	priorityOperationSlots chan struct{}
 }
@@ -232,7 +231,7 @@ func (r *accountRuntime) sync(ctx context.Context) {
 		workerCtx, cancel := context.WithCancel(ctx)
 		worker := &accountWorker{
 			binding: binding, session: session, cancel: cancel, done: make(chan struct{}),
-			operations: make(chan accountOperationTask, 256), priorityOperations: make(chan accountOperationTask, 64), messages: make(chan accountMessageTask, 4096),
+			operations: make(chan accountOperationTask, 256), priorityOperations: make(chan accountOperationTask, 64),
 			operationSlots: make(chan struct{}, accountRuntimeOperationConcurrency), priorityOperationSlots: make(chan struct{}, accountRuntimePriorityOperationConcurrency),
 		}
 		r.workers[binding.AccountID] = worker
@@ -346,7 +345,6 @@ func (w *accountWorker) run(ctx context.Context) {
 		}
 		w.selfUserID.Store(self.ID)
 		w.session.StartAccountRuntime(runCtx, client)
-		go w.runAccountMessageLoop(runCtx)
 		go w.runOperations(runCtx, client)
 		go w.runPriorityOperations(runCtx, client)
 		go runAccountTaskLoop(runCtx, client, lease, nil, w.cancel)

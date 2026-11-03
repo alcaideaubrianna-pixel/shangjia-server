@@ -61,7 +61,7 @@ func TestCollectProcessOutboxLocalPostgres(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		_, err := tx.Exec(`CREATE TEMP TABLE hg_youban_publish_collect_process_outbox(id bigserial PRIMARY KEY,event_id bigint UNIQUE,tenant_id bigint,account_id bigint,source_id bigint,source_chat_id text,status text,available_at timestamp,lease_owner text DEFAULT '',lease_expires_at timestamp,attempt_count int DEFAULT 0,last_error text DEFAULT '',delivered_at timestamp,created_at timestamp,updated_at timestamp) ON COMMIT DROP`)
+		_, err := tx.Exec(`CREATE TEMP TABLE hg_youban_publish_collect_process_outbox(id bigserial PRIMARY KEY,event_id bigint UNIQUE,tenant_id bigint,account_id bigint,source_id bigint,source_chat_id text,status text,available_at timestamp,lease_owner text DEFAULT '',lease_expires_at timestamp,attempt_count int DEFAULT 0,last_error text DEFAULT '',delivered_at timestamp,created_at timestamp,updated_at timestamp,history boolean DEFAULT FALSE) ON COMMIT DROP`)
 		if err != nil {
 			return err
 		}

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gotd/td/tg"
 
@@ -24,57 +25,70 @@ func (w *accountWorker) bindAccountMessageHandlers(dispatcher tg.UpdateDispatche
 	dispatcher.OnNewChannelMessage(func(ctx context.Context, entities tg.Entities, update *tg.UpdateNewChannelMessage) error {
 		message, ok := update.Message.(*tg.Message)
 		if ok {
-			w.handleAccountMessage(ctx, entities, message)
+			return w.handleAccountMessage(ctx, entities, message)
 		}
 		return nil
 	})
 	dispatcher.OnNewMessage(func(ctx context.Context, entities tg.Entities, update *tg.UpdateNewMessage) error {
 		message, ok := update.Message.(*tg.Message)
 		if ok {
-			w.handleAccountMessage(ctx, entities, message)
+			return w.handleAccountMessage(ctx, entities, message)
 		}
 		return nil
 	})
 }
 
-func (w *accountWorker) handleAccountMessage(ctx context.Context, entities tg.Entities, message *tg.Message) {
+// Return success to the update dispatcher only after every matching source
+// has durably accepted the event. A process-local buffer cannot acknowledge it.
+func (w *accountWorker) handleAccountMessage(ctx context.Context, entities tg.Entities, message *tg.Message) error {
 	if w == nil || message == nil || message.Out {
-		return
+		return nil
 	}
 	chatIDs := accountMessageChatIDs(message)
 	if len(chatIDs) == 0 {
-		return
+		return nil
 	}
 	if observer, ok := w.session.(collectorservice.AccountRuntimeMessageObserver); ok {
 		observer.HandleAccountRuntimeMessage(ctx, entities, message, chatIDs)
 	}
 	binding := w.bindingSnapshot()
 	if binding == nil {
-		return
+		return gerror.New("账号采集绑定尚未就绪")
 	}
 	for _, source := range matchAccountRuntimeSources(binding.Sources, chatIDs) {
-		task := accountMessageTask{source: source, message: message, chatID: chatIDs[0]}
-		select {
-		case w.messages <- task:
-		default:
-			g.Log().Warningf(ctx, "Telegram账号采集事件缓冲区已满 accountId:%d sourceId:%d messageId:%d", binding.AccountID, source.SourceID, message.ID)
+		event := accountMessageEvent(binding, accountMessageTask{source: source, message: message, chatID: chatIDs[0]})
+		if event == nil {
+			return gerror.New("账号采集消息转换失败")
+		}
+		if err := persistAccountMessage(ctx, event, collectorservice.Collector().IngestAccountMessage); err != nil {
+			return err
 		}
 	}
+	return nil
 }
 
-func (w *accountWorker) runAccountMessageLoop(ctx context.Context) {
+// Apply backpressure during dependency failures; do not drop an accepted update
+// or acknowledge it after a failed write. Repeating ingress is idempotent.
+func persistAccountMessage(ctx context.Context, event *sysin.AccountMessageEvent, ingest func(context.Context, *sysin.AccountMessageEvent) error) error {
+	delay := 200 * time.Millisecond
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := ingest(ctx, event); err == nil {
+			return nil
+		} else {
+			g.Log().Warningf(ctx, "账号采集持久化失败，等待重试 accountId:%d sourceId:%d messageId:%d errType:%T", event.TgAccountID, event.SourceID, event.SourceMessageID, err)
+		}
+		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
-			return
-		case task := <-w.messages:
-			event := accountMessageEvent(w.bindingSnapshot(), task)
-			if event == nil {
-				continue
-			}
-			if err := collectorservice.Collector().IngestAccountMessage(ctx, event); err != nil {
-				g.Log().Errorf(ctx, "提交Telegram账号采集事件失败 accountId:%d sourceId:%d messageId:%d err:%+v", event.TgAccountID, event.SourceID, event.SourceMessageID, err)
-			}
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+		if delay < 5*time.Second {
+			delay = min(2*delay, 5*time.Second)
 		}
 	}
 }

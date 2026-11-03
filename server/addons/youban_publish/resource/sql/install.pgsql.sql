@@ -2324,3 +2324,10 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_daily_report" (
 CREATE INDEX IF NOT EXISTS "idx_ybp_daily_report_owner_date" ON "hg_youban_publish_daily_report" ("tenant_id","account_id","report_date" DESC);
 
 ALTER TABLE "hg_youban_publish_collect_process_outbox" ADD COLUMN IF NOT EXISTS "history" BOOLEAN NULL;
+
+CREATE INDEX IF NOT EXISTS idx_ybp_collect_process_outbox_fresh
+ ON hg_youban_publish_collect_process_outbox (created_at,available_at,id)
+ WHERE status='pending' AND COALESCE(history,FALSE)=FALSE;
+CREATE INDEX IF NOT EXISTS idx_ybp_collect_process_outbox_history
+ ON hg_youban_publish_collect_process_outbox (available_at,id)
+ WHERE status='pending' AND history=TRUE;

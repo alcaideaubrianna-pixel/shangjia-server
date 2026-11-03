@@ -40,6 +40,7 @@ var collectorMeter = otel.Meter("hotgo/addons/telegram_collector")
 type sCollector struct {
 	queueMu               sync.Mutex
 	queueServer           *asynq.Server
+	queueHistoryServer    *asynq.Server
 	deliveryServer        *asynq.Server
 	deliveryHistoryServer *asynq.Server
 	deliveryLegacyServer  *asynq.Server

@@ -40,6 +40,7 @@ type deliveryReplayFixture struct {
 }
 
 type deliveryReplaySink struct {
+	capture  *os.File
 	expected map[int64][32]byte
 	mu       sync.Mutex
 	calls    map[int64]int
@@ -70,6 +71,11 @@ func (s *deliveryReplaySink) HandleCollectorDelivery(ctx context.Context, d *sys
 	s.attempts[d.ID]++
 	if d.ID == s.failedID && s.attempts[d.ID] == 1 {
 		return fmt.Errorf("injected temporary downstream failure")
+	}
+	if s.capture != nil {
+		if err := json.NewEncoder(s.capture).Encode(d); err != nil {
+			return fmt.Errorf("capture delivery metadata failed")
+		}
 	}
 	s.calls[d.ID]++
 	if s.realtime[d.ID] {
@@ -139,6 +145,14 @@ func TestDeliveryProductionFixtureReplay(t *testing.T) {
 	client := asynq.NewClient(opt)
 	collector := &sCollector{queueClient: client}
 	sink := &deliveryReplaySink{expected: map[int64][32]byte{}, calls: map[int64]int{}, attempts: map[int64]int{}, realtime: map[int64]bool{}, latency: map[int64]time.Duration{}, blocked: make(chan struct{}), entered: make(chan struct{})}
+	if capturePath := os.Getenv("YOUBAN_DELIVERY_CAPTURE_FILE"); capturePath != "" {
+		capture, openErr := os.OpenFile(capturePath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
+		if openErr != nil {
+			t.Fatal("open private capture failed")
+		}
+		defer capture.Close()
+		sink.capture = capture
+	}
 	previous := collectorservice.CollectorDeliveryHandler()
 	collectorservice.RegisterDeliveryHandler(sink)
 	defer collectorservice.RegisterDeliveryHandler(previous)

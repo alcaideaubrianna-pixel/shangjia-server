@@ -208,3 +208,30 @@ func TestCollectorRuntimeStopsWithoutSignal(t *testing.T) {
 		}
 	}
 }
+
+func TestCollectorIngressHistoryUsesDedicatedQueue(t *testing.T) {
+	redis := miniredis.RunT(t)
+	opt := asynq.RedisClientOpt{Addr: redis.Addr()}
+	client := asynq.NewClient(opt)
+	defer client.Close()
+	inspector := asynq.NewInspector(opt)
+	defer inspector.Close()
+	collector := &sCollector{queueClient: client}
+	for id := int64(1); id <= 20; id++ {
+		if err := collector.enqueueEventTask(context.Background(), id, sysin.EventPriorityNormal); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := collector.enqueueEventTask(context.Background(), 21, sysin.EventPriorityRealtime); err != nil {
+		t.Fatal(err)
+	}
+	for queue, want := range map[string]int{consts.QueueCollectHistory: 20, consts.QueueCollectRealtime: 1} {
+		tasks, err := inspector.ListPendingTasks(queue)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(tasks) != want {
+			t.Fatalf("%s jobs=%d want=%d", queue, len(tasks), want)
+		}
+	}
+}

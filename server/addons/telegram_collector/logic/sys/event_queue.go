@@ -52,12 +52,13 @@ func (s *sCollector) StartRuntime(ctx context.Context) {
 		Queues: map[string]int{
 			consts.QueueCollectUrgent:   8,
 			consts.QueueCollectRealtime: 4,
-			consts.QueueCollectHistory:  1,
 		},
 	})
 	if s.queueClient == nil {
 		s.queueClient = asynq.NewClient(collectorRedisOption(runtimeCtx))
 	}
+	historyServer := asynq.NewServer(collectorRedisOption(runtimeCtx), asynq.Config{Concurrency: 1, Queues: map[string]int{consts.QueueCollectHistory: 1}})
+	s.queueHistoryServer = historyServer
 	s.queueServer = server
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(eventTaskType, s.handleEventTask)
@@ -65,6 +66,9 @@ func (s *sCollector) StartRuntime(ctx context.Context) {
 	// Signal handling belongs to the application; StopRuntime owns Shutdown.
 	if err := server.Start(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
 		g.Log().Warningf(runtimeCtx, "启动Telegram采集Worker失败：%+v", err)
+	}
+	if err := historyServer.Start(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
+		g.Log().Warningf(runtimeCtx, "启动历史采集Worker失败：%+v", err)
 	}
 	s.runtimeWG.Add(1)
 	go func() {
@@ -76,6 +80,8 @@ func (s *sCollector) StartRuntime(ctx context.Context) {
 
 func (s *sCollector) StopRuntime() {
 	s.queueMu.Lock()
+	eventHistoryServer := s.queueHistoryServer
+	s.queueHistoryServer = nil
 	legacyServer := s.deliveryLegacyServer
 	s.deliveryLegacyServer = nil
 	historyServer := s.deliveryHistoryServer
@@ -88,6 +94,9 @@ func (s *sCollector) StopRuntime() {
 	}
 	if server != nil {
 		server.Shutdown()
+	}
+	if eventHistoryServer != nil {
+		eventHistoryServer.Shutdown()
 	}
 	if deliveryServer != nil {
 		deliveryServer.Shutdown()
@@ -116,7 +125,10 @@ func (s *sCollector) enqueueEventTask(ctx context.Context, eventID int64, priori
 	if eventID <= 0 {
 		return gerror.New("Telegram采集事件任务ID无效")
 	}
-	queueName := consts.QueueCollectRealtime
+	queueName := consts.QueueCollectHistory
+	if priority >= sysin.EventPriorityRealtime {
+		queueName = consts.QueueCollectRealtime
+	}
 	if priority >= sysin.EventPriorityUrgent {
 		queueName = consts.QueueCollectUrgent
 	}

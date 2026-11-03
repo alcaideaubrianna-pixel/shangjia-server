@@ -76,6 +76,7 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 	}
 	if config.CollectorWorker {
 		s.startCollectProcessWorker(ctx)
+		go s.runCollectProcessDispatcher(ctx)
 		// Collect processing has two halves: the collector worker consumes
 		// queue tasks, while the recovery loop dispatches durable process_outbox
 		// rows into that queue. Keep the dispatcher available with the consumer

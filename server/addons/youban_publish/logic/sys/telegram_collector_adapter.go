@@ -1567,6 +1567,7 @@ func (s *sSysPublish) ensureAccountCollectChannelRelation(ctx context.Context, d
 
 func collectorDeliveryMessage(delivery *collectorin.CollectorDelivery, tenantID, accountID, sourceID int64, sourceType string) *CollectMessage {
 	message := &CollectMessage{
+		History:  delivery.History || (sourceType == sysin.CollectSourceTypeBot && !delivery.ReceivedAt.IsZero() && time.Since(delivery.ReceivedAt) > 5*time.Minute),
 		TenantId: tenantID, AccountId: accountID, SourceId: sourceID, SourceType: sourceType,
 		SourceChatId: delivery.SourceChatID, SourceMessageId: delivery.SourceMessageID,
 		SourceGroupedId: delivery.SourceGroupedID, SourceUniqueKey: delivery.SourceUniqueKey, RawText: delivery.RawText,
