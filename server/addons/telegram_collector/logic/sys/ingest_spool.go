@@ -27,11 +27,11 @@ func persistIngestSpool(ctx context.Context, event *sysin.RawUpdateEvent) (int64
 	}
 	now := gtime.Now()
 	row, err := g.DB().GetOne(ctx, `INSERT INTO `+collectorIngestSpoolTable+`
- (tenant_id,event_key,source_type,source_id,account_id,payload,status,attempt_count,next_run_at,created_at,updated_at)
- VALUES (?,?,?,?,?,?, 'received',0,?,?,?)
+ (tenant_id,event_key,source_type,source_id,account_id,priority,payload,status,attempt_count,next_run_at,created_at,updated_at)
+ VALUES (?,?,?,?,?,?,?, 'received',0,?,?,?)
  ON CONFLICT (tenant_id,event_key) DO UPDATE SET event_key=EXCLUDED.event_key
  RETURNING id`, event.TenantID, event.EventID, event.SourceType, event.SourceID,
-		event.AccountID, payload, now, now, now)
+		event.AccountID, event.Priority, payload, now, now, now)
 	if err != nil {
 		return 0, fmt.Errorf("持久化采集接收事件失败: %w", err)
 	}
@@ -98,7 +98,7 @@ func claimIngestSpool(ctx context.Context) (gdb.Record, error) {
  SELECT id FROM `+collectorIngestSpoolTable+`
  WHERE status IN ('received','failed_retry','processing')
  AND (next_run_at IS NULL OR next_run_at <= CURRENT_TIMESTAMP)
- ORDER BY id FOR UPDATE SKIP LOCKED LIMIT 1
+ ORDER BY priority DESC,id FOR UPDATE SKIP LOCKED LIMIT 1
  ) UPDATE `+collectorIngestSpoolTable+` AS spool
  SET status='processing',attempt_count=attempt_count+1,
  next_run_at=CURRENT_TIMESTAMP + INTERVAL '2 minutes',updated_at=CURRENT_TIMESTAMP
