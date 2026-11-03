@@ -56,7 +56,11 @@ func (m *module) Start(option *addons.Option) error {
 	if runrole.Enabled(m.ctx, runrole.Worker) || runrole.Enabled(m.ctx, runrole.PushWorker) {
 		collectorservice.Collector().StartDeliveryRuntime(m.ctx)
 	}
-	if runrole.Enabled(m.ctx, runrole.Account) || runrole.Enabled(m.ctx, runrole.Runtime) {
+	// Protocol-account sessions are singleton state and must run only in the
+	// dedicated account role. The runtime role is also used by Web to host the
+	// Bot Gateway; starting account sessions there would create competing
+	// Telegram clients when Web has multiple replicas.
+	if runrole.Enabled(m.ctx, runrole.Account) {
 		collectorservice.AccountRuntime().Start(m.ctx)
 	}
 	return nil
