@@ -69,9 +69,9 @@ func buildProfileFingerprints(channelIDs []int64, finalText string, media []coll
 	return result
 }
 
-func profileFingerprintCacheKey(tenantID, accountID int64, item profileFingerprint) string {
-	return fmt.Sprintf("%s:%d:%d:%d:%s:%s:%d:%d", profileFingerprintCachePrefix,
-		tenantID, accountID, item.ChannelID, item.Layer, item.Signature, item.ItemTotal, item.SignatureCount)
+func profileFingerprintCacheKey(tenantID, accountID, botID int64, item profileFingerprint) string {
+	return fmt.Sprintf("%s:%d:%d:%d:%d:%s:%s:%d:%d", profileFingerprintCachePrefix,
+		tenantID, accountID, botID, item.ChannelID, item.Layer, item.Signature, item.ItemTotal, item.SignatureCount)
 }
 
 func profileFingerprintProfileKey(profileID int64, item profileFingerprint) string {
@@ -90,10 +90,10 @@ func markProfileFingerprintBackfillReady(ctx context.Context) error {
 	return cache.Instance().Set(ctx, profileFingerprintReadyKey, 1, profileFingerprintReadyTTL)
 }
 
-func (s *sSysPublish) findProfileFingerprintDuplicate(ctx context.Context, tenantID, accountID int64, items []profileFingerprint, excludeProfileID int64) (*profileFingerprintDuplicateError, error) {
+func (s *sSysPublish) findProfileFingerprintDuplicate(ctx context.Context, tenantID, accountID, botID int64, items []profileFingerprint, excludeProfileID int64) (*profileFingerprintDuplicateError, error) {
 	allCached := len(items) > 0
 	for _, item := range items {
-		value, err := cache.Instance().Get(ctx, profileFingerprintCacheKey(tenantID, accountID, item))
+		value, err := cache.Instance().Get(ctx, profileFingerprintCacheKey(tenantID, accountID, botID, item))
 		if err != nil {
 			g.Log().Warningf(ctx, "读取资料指纹缓存失败 tenantId:%d accountId:%d channelId:%d layer:%s err:%+v", tenantID, accountID, item.ChannelID, item.Layer, err)
 			allCached = false
@@ -112,7 +112,7 @@ func (s *sSysPublish) findProfileFingerprintDuplicate(ctx context.Context, tenan
 				Where("tenant_id", tenantID).Where("account_id", accountID).Where("profile_id", profileID).
 				Where("channel_id", item.ChannelID).Where("layer", item.Layer).Where("signature", item.Signature).
 				Where("item_total", item.ItemTotal).Where("signature_count", item.SignatureCount).
-				Where("owner_marker", "owner").Count()
+				Where("owner_marker", "owner").Where("EXISTS (SELECT 1 FROM hg_youban_publish_profile_origin o WHERE o.profile_id=? AND o.tenant_id=? AND o.account_id=? AND o.bot_id=?)", profileID, tenantID, accountID, botID).Count()
 			if validateErr != nil {
 				return nil, gerror.Wrap(validateErr, "校验资料指纹缓存失败")
 			}
@@ -138,7 +138,7 @@ func (s *sSysPublish) findProfileFingerprintDuplicate(ctx context.Context, tenan
 		conditions = append(conditions, "(f.channel_id=? AND f.layer=? AND f.signature=? AND f.item_total=? AND f.signature_count=?)")
 		args = append(args, item.ChannelID, item.Layer, item.Signature, item.ItemTotal, item.SignatureCount)
 	}
-	mod = mod.Where("("+strings.Join(conditions, " OR ")+")", args...)
+	mod = mod.Where("("+strings.Join(conditions, " OR ")+")", args...).Where("EXISTS (SELECT 1 FROM hg_youban_publish_profile_origin o WHERE o.profile_id=f.profile_id AND o.tenant_id=? AND o.account_id=? AND o.bot_id=?)", tenantID, accountID, botID)
 	if excludeProfileID > 0 {
 		mod = mod.WhereNot("f.profile_id", excludeProfileID)
 	}
@@ -149,7 +149,7 @@ func (s *sSysPublish) findProfileFingerprintDuplicate(ctx context.Context, tenan
 	if row.IsEmpty() {
 		failures := 0
 		for _, item := range items {
-			if err = cache.Instance().Set(ctx, profileFingerprintCacheKey(tenantID, accountID, item), profileFingerprintCacheMiss, profileFingerprintMissCacheTTL); err != nil {
+			if err = cache.Instance().Set(ctx, profileFingerprintCacheKey(tenantID, accountID, botID, item), profileFingerprintCacheMiss, profileFingerprintMissCacheTTL); err != nil {
 				failures++
 			}
 		}
@@ -160,7 +160,7 @@ func (s *sSysPublish) findProfileFingerprintDuplicate(ctx context.Context, tenan
 	}
 	hit := &profileFingerprintDuplicateError{ProfileID: row["profile_id"].Int64(), ChannelID: row["channel_id"].Int64(), Layer: row["layer"].String()}
 	hitItem := profileFingerprint{ChannelID: row["channel_id"].Int64(), Layer: row["layer"].String(), Signature: row["signature"].String(), ItemTotal: row["item_total"].Int(), SignatureCount: row["signature_count"].Int()}
-	_ = cache.Instance().Set(ctx, profileFingerprintCacheKey(tenantID, accountID, hitItem), hit.ProfileID, profileFingerprintCacheTTL)
+	_ = cache.Instance().Set(ctx, profileFingerprintCacheKey(tenantID, accountID, botID, hitItem), hit.ProfileID, profileFingerprintCacheTTL)
 	return hit, nil
 }
 
@@ -207,7 +207,7 @@ func attachProfileFingerprintsTx(ctx context.Context, tx gdb.TX, tenantID, accou
 func warmProfileFingerprintCache(ctx context.Context, tenantID, accountID, profileID int64, items []profileFingerprint) {
 	failures := 0
 	for _, item := range items {
-		if err := cache.Instance().Set(ctx, profileFingerprintCacheKey(tenantID, accountID, item), profileID, profileFingerprintCacheTTL); err != nil {
+		if err := cache.Instance().Set(ctx, profileFingerprintCacheKey(tenantID, accountID, 0, item), profileID, profileFingerprintCacheTTL); err != nil {
 			failures++
 		}
 	}
@@ -219,7 +219,7 @@ func warmProfileFingerprintCache(ctx context.Context, tenantID, accountID, profi
 func clearProfileFingerprintCache(ctx context.Context, tenantID, accountID int64, items []profileFingerprint) int {
 	failures := 0
 	for _, item := range items {
-		key := profileFingerprintCacheKey(tenantID, accountID, item)
+		key := profileFingerprintCacheKey(tenantID, accountID, 0, item)
 		var err error
 		for attempt := 0; attempt < profileFingerprintCacheRetries; attempt++ {
 			_, err = cache.Instance().Remove(ctx, key)

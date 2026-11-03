@@ -549,6 +549,68 @@ func TestApplyCollectIntroFeeSuffixHighRiskForms(t *testing.T) {
 	}
 }
 
+func TestApplyCollectIntroFeeSuffixOnlyChangesFeeNeighborhood(t *testing.T) {
+	cases := []string{
+		"第一行原文\n第二行正文内容\n介绍费：7888旧标识\n第四行正文内容\n第五行原文",
+		"介绍费：7888旧标识\n第二行正文内容\n第三行正文内容\n第四行原文",
+		"第一行正文内容\n第二行正文内容\n第三行正文内容\n介绍费：7888旧标识",
+		"第一行原文\n\n第二行正文内容\n介绍费：7888旧标识\n\n第五行原文",
+		"第一行正文内容\n介绍费：7888旧标识\n第三行正文内容\n介绍费：6888旧标识\n第五行正文内容",
+	}
+	for index, input := range cases {
+		got := applyCollectIntroFeeSuffix(input, input, "天空之城22")
+		before := strings.Split(strings.ReplaceAll(input, "\r\n", "\n"), "\n")
+		after := strings.Split(strings.ReplaceAll(got, "\r\n", "\n"), "\n")
+		for lineIndex, line := range before {
+			if strings.Contains(normalizeCollectKeywordText(line), "介绍费") {
+				continue
+			}
+			if lineIndex >= len(after) || after[lineIndex] != line {
+				t.Fatalf("case %d changed non-fee line %d: before=%q after=%q full=%q", index+1, lineIndex+1, line, func() string {
+					if lineIndex < len(after) {
+						return after[lineIndex]
+					}
+					return "<missing>"
+				}(), got)
+			}
+		}
+	}
+}
+
+func TestApplyCollectIntroFeeSuffixDeletesShortAdjacentLines(t *testing.T) {
+	short := "女儿国⁣‌‌"
+	input := short + "\n介绍费：7888. Q。。。\n" + short
+	got := applyCollectIntroFeeSuffix(input, input, "百花阁")
+	if strings.Contains(got, "女儿国") {
+		t.Fatalf("short adjacent marker was not deleted: %q", got)
+	}
+	long := "这是五个字以上的正文"
+	input = long + "\n介绍费：7888\n" + long
+	got = applyCollectIntroFeeSuffix(input, input, "百花阁")
+	if strings.Count(got, long) != 2 {
+		t.Fatalf("long adjacent body line was deleted: %q", got)
+	}
+}
+
+func TestCollectReplacementRunsBeforeIntroFeeSuffix(t *testing.T) {
+	rule := gdb.Record{
+		"replace_from":               gvar.New([]string{"6888"}),
+		"replace_to":                 gvar.New([]string{"7888"}),
+		"intro_fee_suffix":           gvar.New("百花阁"),
+		"truncate_intro_fee_enabled": gvar.New(false),
+		"header_enabled":             gvar.New(0), "footer_enabled": gvar.New(0),
+		"delete_lines": gvar.New([]string{}), "delete_texts": gvar.New([]string{}),
+	}
+	raw := "年龄：25\n身高：165\n体重：90\n介绍费：6888. Q。。。\n女儿国"
+	decision := buildCollectRuleDecision(gdb.Record{"raw_text": gvar.New(raw), "media_count": gvar.New(1)}, nil, rule)
+	if !strings.Contains(decision.Text, "7888") || !strings.Contains(decision.Text, "百花阁") {
+		t.Fatalf("replacement did not run before suffix: %q", decision.Text)
+	}
+	if !strings.Contains(decision.Text, "身高：165") || strings.Contains(decision.Text, "女儿国") {
+		t.Fatalf("fee neighbour handling is incorrect: %q", decision.Text)
+	}
+}
+
 func TestApplyCollectIntroFeeSuffixNeverLeavesKnownVariantUnprocessed(t *testing.T) {
 	cases := []string{
 		"7888介绍费阿泽", "介绍费：国内7888", "介绍费：国内7888，国外12888",

@@ -3,8 +3,10 @@ package sys
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -671,26 +673,47 @@ func applyCollectIntroFeeSuffix(text, original, suffix string) string {
 		if !strings.HasSuffix(strings.TrimSpace(firstLine), suffix) {
 			lines[firstIndex] = strings.TrimRightFunc(firstLine, unicode.IsSpace) + " " + suffix
 		}
+		lines = removeCollectIntroFeeShortNeighbours(lines, firstIndex)
 		return strings.Join(lines, "\n")
 	}
 
-	feeLine := formatCollectIntroFeeFields(fields, suffix)
-	kept := make([]string, 0, len(lines))
-	for index, line := range lines {
-		if collectFeeKeywordPattern.MatchString(normalizeCollectKeywordText(line)) {
-			continue
-		}
-		if index > 0 && collectFeeKeywordPattern.MatchString(normalizeCollectKeywordText(lines[index-1])) &&
-			(isCollectIntroFeeStandaloneSuffix(strings.TrimSpace(line)) || strings.TrimSpace(line) == suffix) {
-			continue
-		}
-		kept = append(kept, line)
+	// Replace the fee line in place. Non-fee lines are immutable: do not move,
+	// delete, or reorder body content while applying a channel suffix.
+	lines[firstIndex] = formatCollectIntroFeeFields(fields, suffix)
+	lines = removeCollectIntroFeeShortNeighbours(lines, firstIndex)
+	// Some source bots split the old channel marker across two lines, e.g.
+	// "介绍费：7888. Q。。。" followed by "女儿国". Remove only a short,
+	// standalone neighbour when the original fee line already contains a
+	// trailing marker; ordinary body text after a normal fee line is preserved.
+	return strings.Join(lines, "\n")
+}
+
+func removeCollectIntroFeeShortNeighbours(lines []string, feeIndex int) []string {
+	if feeIndex > 0 && isCollectIntroFeeShortNeighbour(lines[feeIndex-1]) {
+		lines = append(lines[:feeIndex-1], lines[feeIndex:]...)
+		feeIndex--
 	}
-	body := strings.Join(kept, "\n")
-	if strings.TrimSpace(body) == "" {
-		return feeLine
+	if feeIndex+1 < len(lines) && isCollectIntroFeeShortNeighbour(lines[feeIndex+1]) {
+		lines = append(lines[:feeIndex+1], lines[feeIndex+2:]...)
 	}
-	return body + "\n" + feeLine
+	return lines
+}
+
+func isCollectIntroFeeShortNeighbour(line string) bool {
+	clean := strings.TrimSpace(normalizeCollectKeywordText(line))
+	if clean == "" {
+		return false
+	}
+	for _, rule := range collectCriticalProfileLineRules {
+		if rule.MatchString(clean) {
+			return false
+		}
+	}
+	limit := 6
+	if configured, err := strconv.Atoi(strings.TrimSpace(os.Getenv("YOUBAN_INTRO_FEE_NEIGHBOR_MAX_CHARS"))); err == nil && configured > 0 {
+		limit = configured
+	}
+	return len([]rune(clean)) < limit
 }
 
 func isCollectIntroFeeStandaloneSuffix(text string) bool {

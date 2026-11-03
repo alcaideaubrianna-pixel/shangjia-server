@@ -1025,7 +1025,7 @@ func (s *sSysPublish) findCollectRuleDuplicate(ctx context.Context, event, rule 
 	if !ready {
 		return nil, newCollectProcessRetryError(15*time.Second, "资料指纹索引正在初始化")
 	}
-	return s.findProfileFingerprintDuplicate(ctx, event["tenant_id"].Int64(), event["account_id"].Int64(), fingerprints, 0)
+	return s.findProfileFingerprintDuplicate(ctx, event["tenant_id"].Int64(), event["account_id"].Int64(), event["bot_id"].Int64(), fingerprints, 0)
 }
 
 func collectRuleDedupeEnabled(rule gdb.Record) bool {
