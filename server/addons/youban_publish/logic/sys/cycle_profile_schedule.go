@@ -428,16 +428,17 @@ func (s *sSysPublish) enqueueDueProfileCycleReschedules(ctx context.Context, lim
 		limit = 20
 	}
 	var channelIds []int64
-	err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
-		Fields("id").
-		Where("cycle_publish_enabled", 1).
-		Where("cycle_publish_mode", "time").
-		Where("status", 1).
-		Where("publish_direction", "up").
-		Where("cycle_active_run_id", 0).
-		Where("cycle_next_run_at IS NOT NULL AND cycle_next_run_at<=?", gtime.Now()).
-		WhereNull("deleted_at").
-		OrderAsc("cycle_next_run_at").OrderAsc("id").Limit(limit).Scan(&channelIds)
+	err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).As("c").
+		Fields("c.id").
+		Where("c.cycle_publish_enabled", 1).
+		Where("c.cycle_publish_mode", "time").
+		Where("c.status", 1).
+		Where("c.publish_direction", "up").
+		Where("c.cycle_active_run_id", 0).
+		Where("c.cycle_next_run_at IS NOT NULL AND c.cycle_next_run_at<=?", gtime.Now()).
+		WhereNull("c.deleted_at").
+		Where(profileCycleRescheduleCandidateCondition("c")).
+		OrderAsc("c.cycle_next_run_at").OrderAsc("c.id").Limit(limit).Scan(&channelIds)
 	if err != nil {
 		return gerror.Wrap(err, "读取到期时间循环恢复频道失败")
 	}
@@ -451,6 +452,22 @@ func (s *sSysPublish) enqueueDueProfileCycleReschedules(ctx context.Context, lim
 		}
 	}
 	return nil
+}
+
+// profileCycleRescheduleCandidateCondition keeps healthy channels with normal
+// due work out of the expensive full rebuild queue. The regular due scan owns
+// that work; only missing or invalid profile plans require a full rebuild.
+func profileCycleRescheduleCandidateCondition(channelAlias string) string {
+	channelAlias = strings.TrimSpace(channelAlias)
+	if channelAlias == "" {
+		channelAlias = "c"
+	}
+	return `EXISTS (
+		SELECT 1 FROM ` + publishChannelProfileTable + ` cp
+		LEFT JOIN ` + publishTgJobTable + ` j ON j.id=cp.last_job_id
+		WHERE cp.channel_id=` + channelAlias + `.id AND cp.status='active'
+			AND (j.id IS NULL OR j.cycle_enabled<>1 OR j.next_cycle_at IS NULL)
+	)`
 }
 
 // claimChannelProfileCycleReschedule moves the channel checkpoint forward after

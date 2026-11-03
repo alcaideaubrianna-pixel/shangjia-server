@@ -45,6 +45,24 @@ func TestDueProfileCycleOperationNo(t *testing.T) {
 	}
 }
 
+func TestProfileCycleRescheduleCandidateOnlyMatchesMissingPlans(t *testing.T) {
+	condition := profileCycleRescheduleCandidateCondition("channel")
+	for _, fragment := range []string{
+		"cp.channel_id=channel.id",
+		"cp.status='active'",
+		"j.id IS NULL",
+		"j.cycle_enabled<>1",
+		"j.next_cycle_at IS NULL",
+	} {
+		if !strings.Contains(condition, fragment) {
+			t.Fatalf("cycle reschedule condition missing %q: %s", fragment, condition)
+		}
+	}
+	if strings.Contains(strings.ToLower(condition), "next_cycle_at<=") {
+		t.Fatalf("normal due plans must not trigger a full channel rebuild: %s", condition)
+	}
+}
+
 func TestCalculateProfileCycleAt(t *testing.T) {
 	location := time.FixedZone("Asia/Shanghai", 8*60*60)
 	base := gtime.New(time.Date(2026, 7, 31, 13, 25, 55, 0, location))
