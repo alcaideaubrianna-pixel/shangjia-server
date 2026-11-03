@@ -415,6 +415,8 @@ func loadBotMediaColdFingerprints(ctx context.Context, traceId string, items []*
 				"mediaType": item.MediaType, "fileId": item.FileId, "fileUniqueIds": item.FileUniqueIds,
 				"previewFileId": item.PreviewFileId, "previewSize": item.PreviewSize,
 				"width": item.Width, "height": item.Height, "mimeType": item.MimeType, "duration": item.Duration,
+				"forwarded": item.Forwarded, "forwardOrigin": item.ForwardOrigin, "replyMessageId": item.ReplyMessageId,
+				"mediaGroupId": item.MediaGroupId, "captionPresent": item.CaptionPresent, "captionLength": item.CaptionLength,
 				"md5Prefix": fingerprintMD5Prefix(fingerprint), "phash": fingerprintPHashHex(fingerprint),
 				"durationMs": time.Since(startedAt).Milliseconds(), "err": err,
 			})

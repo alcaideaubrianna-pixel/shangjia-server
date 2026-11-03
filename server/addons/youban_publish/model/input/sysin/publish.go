@@ -693,6 +693,12 @@ type BotMediaSearchItem struct {
 	Height          int      `json:"height,omitempty" dc:"媒体高度"`
 	MimeType        string   `json:"mimeType,omitempty" dc:"媒体MIME类型"`
 	Duration        int      `json:"duration,omitempty" dc:"视频时长"`
+	Forwarded       bool     `json:"forwarded,omitempty" dc:"是否转发消息"`
+	ForwardOrigin   string   `json:"forwardOrigin,omitempty" dc:"转发来源类型"`
+	ReplyMessageId  int64    `json:"replyMessageId,omitempty" dc:"回复消息ID"`
+	MediaGroupId    string   `json:"mediaGroupId,omitempty" dc:"媒体组ID"`
+	CaptionPresent  bool     `json:"captionPresent,omitempty" dc:"是否带说明文字"`
+	CaptionLength   int      `json:"captionLength,omitempty" dc:"说明文字长度"`
 }
 
 type BotMediaSearchInp struct {

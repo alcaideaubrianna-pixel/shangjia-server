@@ -20,6 +20,16 @@ func scanMessageIdentity(botId int64, msg *models.Message) *publishsysin.BotMedi
 	if msg == nil {
 		return item
 	}
+	item.MediaGroupId = strings.TrimSpace(msg.MediaGroupID)
+	item.CaptionLength = len([]rune(strings.TrimSpace(msg.Caption)))
+	item.CaptionPresent = item.CaptionLength > 0
+	if msg.ForwardOrigin != nil {
+		item.Forwarded = true
+		item.ForwardOrigin = string(msg.ForwardOrigin.Type)
+	}
+	if msg.ReplyToMessage != nil {
+		item.ReplyMessageId = int64(msg.ReplyToMessage.ID)
+	}
 	chatId, messageId := forwardedChannelMessageRef(msg)
 	item.SourceChatId = chatId
 	item.SourceMessageId = int64(messageId)
@@ -65,6 +75,8 @@ func (s *sSysBot) resolveScanBatch(ctx context.Context, botId int64, account *bo
 			"mediaType": item.MediaType, "fileId": item.FileId, "fileUniqueId": item.FileUniqueId,
 			"fileUniqueIds": item.FileUniqueIds, "previewFileId": item.PreviewFileId, "previewSize": item.PreviewSize,
 			"width": item.Width, "height": item.Height, "mimeType": item.MimeType, "duration": item.Duration,
+			"forwarded": item.Forwarded, "forwardOrigin": item.ForwardOrigin, "replyMessageId": item.ReplyMessageId,
+			"mediaGroupId": item.MediaGroupId, "captionPresent": item.CaptionPresent, "captionLength": item.CaptionLength,
 			"sourceChatId": item.SourceChatId, "sourceMessageId": item.SourceMessageId,
 		}, nil)
 	}
