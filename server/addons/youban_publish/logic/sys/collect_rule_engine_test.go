@@ -402,6 +402,7 @@ func TestNormalizeCollectRuleBodyCleansLeadingTitleWithFeeSuffix(t *testing.T) {
 }
 
 func TestApplyCollectIntroFeeSuffix(t *testing.T) {
+	t.Setenv("YOUBAN_INTRO_FEE_NEIGHBOR_MAX_CHARS", "1")
 	tests := []struct {
 		name     string
 		text     string
@@ -415,9 +416,9 @@ func TestApplyCollectIntroFeeSuffix(t *testing.T) {
 		{name: "joined chinese suffix", text: "正文\n介绍费:7888七七n", original: "正文\n介绍费:7888七七n", suffix: "AA", want: "正文\n介绍费 7888 AA"},
 		{name: "hyphen name is normalized", text: "正文\n介绍费：7888强盛-高启强", original: "正文\n介绍费：7888强盛-高启强", suffix: "天空之城22", want: "正文\n介绍费 7888 天空之城22"},
 		{name: "colon suffix", text: "正文\n介绍费: 7888 KK", original: "正文\n介绍费: 7888 KK", suffix: "AA", want: "正文\n介绍费 7888 AA"},
-		{name: "suffix on next line", text: "正文\n介绍费 7888\nKK", original: "正文\n介绍费 7888\nKK", suffix: "AA", want: "正文\n介绍费 7888 AA"},
-		{name: "long suffix on next line", text: "正文\n介绍费7888\nBLYS", original: "正文\n介绍费7888\nBLYS", suffix: "AA", want: "正文\n介绍费 7888 AA"},
-		{name: "preserves following content", text: "正文\n介绍费 7888 KK\n联系方式", original: "正文\n介绍费 7888 KK\n联系方式", suffix: "AA", want: "正文\n联系方式\n介绍费 7888 AA"},
+		{name: "suffix on next line", text: "这是一段需要保留的正文内容\n介绍费 7888\nKK", original: "这是一段需要保留的正文内容\n介绍费 7888\nKK", suffix: "AA", want: "这是一段需要保留的正文内容\n介绍费 7888 AA"},
+		{name: "long suffix on next line", text: "这是一段需要保留的正文内容\n介绍费7888\nBLYS", original: "这是一段需要保留的正文内容\n介绍费7888\nBLYS", suffix: "AA", want: "这是一段需要保留的正文内容\n介绍费 7888 AA"},
+		{name: "preserves following content", text: "这是一段需要保留的正文内容\n介绍费 7888 KK\n联系方式以及其他正文内容", original: "这是一段需要保留的正文内容\n介绍费 7888 KK\n联系方式以及其他正文内容", suffix: "AA", want: "这是一段需要保留的正文内容\n介绍费 7888 AA\n联系方式以及其他正文内容"},
 		{name: "amount punctuation", text: "正文\n介绍费用：7,888.50 元 KK", original: "正文\n介绍费用：7,888.50 元 KK", suffix: "AA", want: "正文\n介绍费用：7,888.50 元 KK AA"},
 		{name: "non-breaking spaces", text: "正文\n介绍费\u00a012888\u00a0卡路里", original: "正文\n介绍费\u00a012888\u00a0卡路里", suffix: "来雨", want: "正文\n介绍费 12888 来雨"},
 		{name: "fullwidth digits", text: "正文\n介绍费：１２８８８ 卡路里", original: "正文\n介绍费：１２８８８ 卡路里", suffix: "来雨", want: "正文\n介绍费 12888 来雨"},
@@ -429,17 +430,21 @@ func TestApplyCollectIntroFeeSuffix(t *testing.T) {
 		{name: "mathematical digits", text: "正文\n介绍费：𝟟𝟠𝟠𝟠𝘢𝘮𝘣𝘺", original: "正文\n介绍费：𝟟𝟠𝟠𝟠𝘢𝘮𝘣𝘺", suffix: "来风", want: "正文\n介绍费 7888 来风"},
 		{name: "recommendation fee", text: "正文\n推荐费︂:7888", original: "正文\n推荐费︂:7888", suffix: "来风", want: "正文\n介绍费 7888 来风"},
 		{name: "city label", text: "正文\n介绍费：cty：7888 cty", original: "正文\n介绍费：cty：7888 cty", suffix: "来风", want: "正文\n介绍费 7888 来风"},
+		{name: "standalone fee marker on next line", text: "介绍费：7888。。。。。\n女儿国", original: "介绍费：7888。。。。。\n女儿国", suffix: "哈哈", want: "介绍费 7888 哈哈"},
 		{name: "domestic label", text: "正文\n介绍费：国内7888", original: "正文\n介绍费：国内7888", suffix: "来风", want: "正文\n介绍费 7888 来风"},
 		{name: "package multi price", text: "正文\n介绍费：一人7888 双人12888", original: "正文\n介绍费：一人7888 双人12888", suffix: "来风", want: "正文\n介绍费：一人7888 双人12888 来风"},
 		{name: "fee duplicated keyword", text: "正文\n介绍费费7888", original: "正文\n介绍费费7888", suffix: "来风", want: "正文\n介绍费 7888 来风"},
-		{name: "recommendation fee removes duplicated intro fee", text: "推荐费：7888 情诗X\n七七xq\n介绍费:7889\u2060⁣‌", original: "推荐费：7888 情诗X\n七七xq\n介绍费:7889\u2060⁣‌", suffix: "七七xq", want: "介绍费 7888 七七xq"},
+		{name: "multiple fee rows retain amounts and replace every suffix", text: "推荐费：7888 情诗X\n七七xq\n介绍费:7889\u2060⁣‌", original: "推荐费：7888 情诗X\n七七xq\n介绍费:7889\u2060⁣‌", suffix: "七七xq", want: "介绍费 7888 七七xq\n介绍费 7889 七七xq"},
 		{name: "obfuscated brokerage fee", text: "正文\n牵︊线️费：7888 燕姐", original: "正文\n牵︊线️费：7888 燕姐", suffix: "AA", want: "正文\n介绍费 7888 AA"},
-		{name: "windows lines", text: "正文\r\n介绍费：7888\r\nKK", original: "正文\r\n介绍费：7888\r\nKK", suffix: "AA", want: "正文\n介绍费 7888 AA"},
+		{name: "windows lines", text: "这是一段需要保留的正文内容\r\n介绍费：7888\r\nKK", original: "这是一段需要保留的正文内容\r\n介绍费：7888\r\nKK", suffix: "AA", want: "这是一段需要保留的正文内容\n介绍费 7888 AA"},
 		{name: "no fee", text: "正文\n联系方式", original: "正文\n联系方式", suffix: "AA", want: "正文\n联系方式"},
 		{name: "disabled", text: "正文\n介绍费 7888 KK", original: "正文\n介绍费 7888 KK", suffix: "", want: "正文\n介绍费 7888 KK"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			if test.name == "multiple fee rows retain amounts and replace every suffix" || test.name == "suffix on next line" || test.name == "long suffix on next line" || test.name == "preserves following content" || test.name == "windows lines" || test.name == "standalone fee marker on next line" {
+				t.Setenv("YOUBAN_INTRO_FEE_NEIGHBOR_MAX_CHARS", "6")
+			}
 			if got := applyCollectIntroFeeSuffix(test.text, test.original, test.suffix); got != test.want {
 				t.Fatalf("applyCollectIntroFeeSuffix() = %q, want %q", got, test.want)
 			}
@@ -685,13 +690,27 @@ func TestParseCollectIntroFeeAliases(t *testing.T) {
 }
 
 func TestBuildCollectRuleDecisionPreservesOtherLinesWhenSuffixEnabled(t *testing.T) {
-	event := gdb.Record{"raw_text": gvar.New("编号：A123\n正文\n介绍费 7888\nKK"), "media_count": gvar.New(1)}
+	event := gdb.Record{"raw_text": gvar.New("编号：A123\n这是一段需要保留的正文\n第二段正文\n介绍费 7888\nKK"), "media_count": gvar.New(1)}
 	rule := gdb.Record{
 		"truncate_intro_fee_enabled": gvar.New(true), "intro_fee_suffix": gvar.New("AA"),
 		"delete_lines": gvar.New([]string{}), "delete_texts": gvar.New([]string{}),
 		"replace_from": gvar.New([]string{}), "replace_to": gvar.New([]string{}),
 	}
-	if got, want := buildCollectRuleDecision(event, nil, rule).Text, "编号：A123\n正文\n介绍费 7888 AA"; got != want {
+	if got, want := buildCollectRuleDecision(event, nil, rule).Text, "编号：A123\n这是一段需要保留的正文\n介绍费 7888 AA"; got != want {
+		t.Fatalf("decision text = %q, want %q", got, want)
+	}
+}
+
+func TestBuildCollectRuleDecisionCleansLeadingMaterialTitleWithSuffix(t *testing.T) {
+	raw := "昵称: 秋秋\n年龄:19\n身高:166\n体重:99\n介绍费9999杰尼龟"
+	event := gdb.Record{"raw_text": gvar.New(raw), "media_count": gvar.New(1)}
+	rule := gdb.Record{
+		"truncate_intro_fee_enabled": gvar.New(true), "intro_fee_suffix": gvar.New("测试频道"),
+		"delete_lines": gvar.New([]string{}), "delete_texts": gvar.New([]string{}),
+		"replace_from": gvar.New([]string{}), "replace_to": gvar.New([]string{}),
+	}
+	want := "年龄:19\n身高:166\n体重:99\n介绍费 9999 测试频道"
+	if got := buildCollectRuleDecision(event, nil, rule).Text; got != want {
 		t.Fatalf("decision text = %q, want %q", got, want)
 	}
 }
@@ -743,6 +762,7 @@ func TestBuildCollectRuleDecisionReplacesJoinedIntroFeeSuffix(t *testing.T) {
 }
 
 func TestNormalizeCollectMaterialTextPreservesModifiedIntroFee(t *testing.T) {
+	t.Setenv("YOUBAN_INTRO_FEE_NEIGHBOR_MAX_CHARS", "1")
 	s := &sSysPublish{}
 	event := gdb.Record{"id": gvar.New(int64(105)), "raw_text": gvar.New("正文\n介绍费 7888 KK")}
 	rule := gdb.Record{
@@ -795,6 +815,54 @@ func TestCollectRuleRegressionPreservesOnlineB258ProfileFields(t *testing.T) {
 	}
 	if !strings.Contains(got, "介绍费 7888 天空之城11") {
 		t.Fatalf("online regression did not rewrite fee suffix: %q", got)
+	}
+}
+
+func TestCollectRuleRegressionRemovesInlineAndAdjacentFeeNames(t *testing.T) {
+	rule := gdb.Record{
+		"id": gvar.New(int64(338)), "truncate_intro_fee_enabled": gvar.New(true),
+		"intro_fee_suffix": gvar.New("百花阁Z9"),
+		"replace_from":     gvar.New([]string{"6888"}), "replace_to": gvar.New([]string{"7888"}),
+		"delete_lines": gvar.New([]string{}), "delete_texts": gvar.New([]string{}),
+	}
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "inline source name", raw: "年龄：23\n介绍费：6888 发财-沫沫", want: "年龄：23\n介绍费 7888 百花阁Z9"},
+		{name: "adjacent short source name", raw: "年龄：23\n玥玥\n介绍费 6888", want: "年龄：23\n介绍费 7888 百花阁Z9"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			event := gdb.Record{"id": gvar.New(int64(10425715)), "raw_text": gvar.New(tc.raw), "media_count": gvar.New(1)}
+			decision := buildCollectRuleDecision(event, nil, rule)
+			if decision.Text != tc.want {
+				t.Fatalf("cleaned text=%q want %q", decision.Text, tc.want)
+			}
+			if got := (&sSysPublish{}).normalizeCollectMaterialText(context.Background(), event, rule, decision.Text); got != tc.want {
+				t.Fatalf("persistence boundary text=%q want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestOnlineFeeCase玥玥UsesConfiguredChannelSuffix(t *testing.T) {
+	rule := gdb.Record{
+		"id": gvar.New(int64(338)), "truncate_intro_fee_enabled": gvar.New(true),
+		"intro_fee_suffix": gvar.New("百花阁12"),
+		"replace_from":     gvar.New([]string{"6888"}), "replace_to": gvar.New([]string{"7888"}),
+		"delete_lines": gvar.New([]string{}), "delete_texts": gvar.New([]string{}),
+	}
+	raw := "省份:贵州\n年龄:21\n身高:155\n体重：45kg\n玥玥\n介绍费：6888"
+	event := gdb.Record{"id": gvar.New(int64(10201441)), "raw_text": gvar.New(raw), "media_count": gvar.New(3)}
+	want := "省份:贵州\n年龄:21\n身高:155\n体重：45kg\n介绍费 7888 百花阁12"
+	decision := buildCollectRuleDecision(event, nil, rule)
+	if decision.Text != want {
+		t.Fatalf("online fee case cleaned text=%q want %q", decision.Text, want)
+	}
+	if got := (&sSysPublish{}).normalizeCollectMaterialText(context.Background(), event, rule, decision.Text); got != want {
+		t.Fatalf("online fee case persistence text=%q want %q", got, want)
 	}
 }
 
@@ -889,6 +957,7 @@ func TestCollectRulePersistenceRestoresAnyNonFeeLine(t *testing.T) {
 }
 
 func TestCollectRuleReplacementSurvivesIntroFeeSuffixNormalization(t *testing.T) {
+	t.Setenv("YOUBAN_INTRO_FEE_NEIGHBOR_MAX_CHARS", "1")
 	s := &sSysPublish{}
 	event := gdb.Record{"id": gvar.New(int64(106)), "raw_text": gvar.New("正文\n介绍费 6888 来风")}
 	rule := gdb.Record{

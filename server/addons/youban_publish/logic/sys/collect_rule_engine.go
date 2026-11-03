@@ -648,43 +648,42 @@ func applyCollectIntroFeeSuffix(text, original, suffix string) string {
 		return text
 	}
 	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
-	feeIndexes := make([]int, 0, 1)
 	for index, line := range lines {
-		if collectFeeKeywordPattern.MatchString(normalizeCollectKeywordText(line)) {
-			feeIndexes = append(feeIndexes, index)
+		if !collectFeeKeywordPattern.MatchString(normalizeCollectKeywordText(line)) {
+			continue
 		}
-	}
-	if len(feeIndexes) == 0 {
-		return text
+		fields := parseCollectIntroFeeFields(line)
+		normalizedLine := normalizeCollectKeywordText(line)
+		numbers := collectNumberRule.FindAllString(normalizedLine, -1)
+		complexAmount := len(numbers) > 1 && fields.ForeignAmount == "" && collectMultiPricePattern.MatchString(normalizedLine)
+		// A hyphen is commonly part of a trailing name/label (for example
+		// "7888强盛-高启强"), not evidence of multiple prices. Preserve only
+		// explicit multi-price separators here; otherwise normalize to the first
+		// amount and the effective channel suffix.
+		complexFormat := fields.ForeignAmount == "" && (strings.ContainsAny(normalizedLine, ",，./") || collectMultiPricePattern.MatchString(normalizedLine))
+		if fields.FirstAmount == "" || complexAmount || complexFormat {
+			if !strings.HasSuffix(strings.TrimSpace(line), suffix) {
+				lines[index] = strings.TrimRightFunc(line, unicode.IsSpace) + " " + suffix
+			}
+			continue
+		}
+		lines[index] = formatCollectIntroFeeFields(fields, suffix)
 	}
 
-	firstIndex := feeIndexes[0]
-	firstLine := lines[firstIndex]
-	fields := parseCollectIntroFeeFields(firstLine)
-	normalizedLine := normalizeCollectKeywordText(firstLine)
-	numbers := collectNumberRule.FindAllString(normalizedLine, -1)
-	complexAmount := len(numbers) > 1 && fields.ForeignAmount == "" && collectMultiPricePattern.MatchString(normalizedLine)
-	// A hyphen is commonly part of a trailing name/label (for example
-	// "7888强盛-高启强"), not evidence of multiple prices. Preserve only
-	// explicit multi-price separators here; otherwise normalize to the first
-	// amount and the effective channel suffix.
-	complexFormat := fields.ForeignAmount == "" && (strings.ContainsAny(normalizedLine, ",，./") || collectMultiPricePattern.MatchString(normalizedLine))
-	if fields.FirstAmount == "" || complexAmount || complexFormat {
-		if !strings.HasSuffix(strings.TrimSpace(firstLine), suffix) {
-			lines[firstIndex] = strings.TrimRightFunc(firstLine, unicode.IsSpace) + " " + suffix
+	// Normalize every fee row before removing short standalone labels between
+	// rows, so a second fee row cannot retain an old source suffix.
+	for index := 0; index < len(lines); index++ {
+		if !collectFeeKeywordPattern.MatchString(normalizeCollectKeywordText(lines[index])) {
+			continue
 		}
-		lines = removeCollectIntroFeeShortNeighbours(lines, firstIndex)
-		return strings.Join(lines, "\n")
+		if index > 0 && isCollectIntroFeeShortNeighbour(lines[index-1]) {
+			lines = append(lines[:index-1], lines[index:]...)
+			index--
+		}
+		if index+1 < len(lines) && isCollectIntroFeeShortNeighbour(lines[index+1]) {
+			lines = append(lines[:index+1], lines[index+2:]...)
+		}
 	}
-
-	// Replace the fee line in place. Non-fee lines are immutable: do not move,
-	// delete, or reorder body content while applying a channel suffix.
-	lines[firstIndex] = formatCollectIntroFeeFields(fields, suffix)
-	lines = removeCollectIntroFeeShortNeighbours(lines, firstIndex)
-	// Some source bots split the old channel marker across two lines, e.g.
-	// "介绍费：7888. Q。。。" followed by "女儿国". Remove only a short,
-	// standalone neighbour when the original fee line already contains a
-	// trailing marker; ordinary body text after a normal fee line is preserved.
 	return strings.Join(lines, "\n")
 }
 
