@@ -517,6 +517,38 @@ func TestApplyCollectIntroFeeSuffixProductionMatrixAdditional100(t *testing.T) {
 	}
 }
 
+func TestApplyCollectIntroFeeSuffixHighRiskForms(t *testing.T) {
+	tests := []struct {
+		name, input, wantFee string
+	}{
+		{"keyword zero width", "年龄：25\n身高：165\n体重：90\n介\u200b绍费：7888", "介绍费 7888 天空之城22"},
+		{"keyword separated", "年龄：25\n身高：165\n体重：90\n介绍 费：7888", ""},
+		{"amount unit yuan", "年龄：25\n身高：165\n体重：90\n介绍费：7888元", "介绍费 7888 天空之城22"},
+		{"amount unit k", "年龄：25\n身高：165\n体重：90\n介绍费：7.8k", "天空之城22"},
+		{"amount unit wan", "年龄：25\n身高：165\n体重：90\n介绍费：1.28w", "天空之城22"},
+		{"inline fee", "年龄：25\n身高：165\n体重：90\n不能接受金主：不要太老太胖，介绍费7888", "天空之城22"},
+		{"three regions", "年龄：25\n身高：165\n体重：90\n介绍费：国内7888，国外12888，港澳9888", "天空之城22"},
+		{"old marker", "年龄：25\n身高：165\n体重：90\n介绍费：7888 天空之城22旧标识", "介绍费 7888 天空之城22"},
+		{"multiline amount", "年龄：25\n身高：165\n体重：90\n介绍费：\n7888\n天空之城22", "天空之城22"},
+		{"fullwidth amount", "年龄：25\n身高：１６５\n体重：９０\n介绍费：７８８８", "介绍费 7888 天空之城22"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := applyCollectIntroFeeSuffix(tc.input, tc.input, "天空之城22")
+			if tc.name != "inline fee" {
+				for _, field := range []string{"年龄", "身高", "体重"} {
+					if !strings.Contains(got, field) {
+						t.Fatalf("removed protected field %q: %q", field, got)
+					}
+				}
+			}
+			if tc.wantFee != "" && !strings.Contains(got, tc.wantFee) {
+				t.Fatalf("got %q, want fee fragment %q", got, tc.wantFee)
+			}
+		})
+	}
+}
+
 func TestApplyCollectIntroFeeSuffixNeverLeavesKnownVariantUnprocessed(t *testing.T) {
 	cases := []string{
 		"7888介绍费阿泽", "介绍费：国内7888", "介绍费：国内7888，国外12888",
