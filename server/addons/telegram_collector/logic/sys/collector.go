@@ -37,6 +37,31 @@ const mediaPipelineVersion = "v1"
 
 var collectorMeter = otel.Meter("hotgo/addons/telegram_collector")
 
+func observeIngestLatency(ctx context.Context, event *sysin.RawUpdateEvent, stage string) {
+	if event == nil || event.ReceivedAt.IsZero() {
+		return
+	}
+	seconds := time.Since(event.ReceivedAt).Seconds()
+	if seconds < 0 {
+		seconds = 0
+	}
+	histogram, _ := collectorMeter.Float64Histogram("telegram_collector_ingest_latency_seconds")
+	histogram.Record(ctx, seconds, metric.WithAttributes(
+		attribute.String("stage", stage),
+		attribute.String("source_type", event.SourceType),
+		attribute.String("queue_class", collectorQueueClass(event.Priority)),
+		attribute.Int64("source_id", event.SourceID),
+		attribute.Int64("account_id", event.AccountID),
+	))
+}
+
+func collectorQueueClass(priority int) string {
+	if priority >= sysin.EventPriorityRealtime {
+		return "realtime"
+	}
+	return "history"
+}
+
 type sCollector struct {
 	queueMu               sync.Mutex
 	queueServer           *asynq.Server
@@ -102,6 +127,7 @@ func (s *sCollector) IngestBotUpdate(ctx context.Context, bot collectorservice.B
 	if err = completeIngestSpool(ctx, spoolID); err != nil {
 		return err
 	}
+	observeIngestLatency(ctx, &event, "event_enqueued")
 	counter, _ := collectorMeter.Int64Counter("telegram_collector_ingest_total")
 	counter.Add(ctx, 1, metric.WithAttributes(
 		attribute.String("source_type", sysin.SourceTypeBot),
@@ -164,6 +190,7 @@ func (s *sCollector) IngestAccountMessage(ctx context.Context, message *sysin.Ac
 	if err = completeIngestSpool(ctx, spoolID); err != nil {
 		return err
 	}
+	observeIngestLatency(ctx, &event, "event_enqueued")
 	counter, _ := collectorMeter.Int64Counter("telegram_collector_ingest_total")
 	counter.Add(ctx, 1, metric.WithAttributes(
 		attribute.String("source_type", sysin.SourceTypeAccount),
