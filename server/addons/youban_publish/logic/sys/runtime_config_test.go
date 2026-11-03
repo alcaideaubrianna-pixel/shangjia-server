@@ -27,6 +27,11 @@ func TestParsePublishRuntimeRoles(t *testing.T) {
 			},
 		},
 		{
+			name:   "isolated collect process worker",
+			values: []string{"collect-process-worker"},
+			want:   publishRuntimeConfig{Roles: []string{"collect-process-worker"}, CollectProcessWorker: true},
+		},
+		{
 			name:   "web only",
 			values: []string{"web"},
 			want:   publishRuntimeConfig{Roles: []string{publishRuntimeRoleWeb}},

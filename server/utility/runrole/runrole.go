@@ -100,7 +100,7 @@ func normalizeLegacy(values []string) []string {
 				mapped = append(mapped, item)
 			case "account", "scheduler":
 				mapped = append(mapped, Runtime)
-			case PushWorker, MediaWorker, BackgroundWorker, CollectorWorker:
+			case PushWorker, MediaWorker, BackgroundWorker, CollectorWorker, CollectProcessWorker:
 				mapped = append(mapped, item)
 			}
 		}

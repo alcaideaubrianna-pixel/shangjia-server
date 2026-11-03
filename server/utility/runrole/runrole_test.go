@@ -15,6 +15,7 @@ func TestNormalize(t *testing.T) {
 		{name: "three roles", values: []string{"runtime", "worker|web"}, want: []string{Runtime, Web, Worker}},
 		{name: "split roles", values: []string{"account,scheduler,push-worker"}, want: []string{Account, PushWorker, Scheduler}},
 		{name: "invalid", values: []string{"unknown"}, want: []string{}},
+		{name: "isolated process", values: []string{"collect-process-worker"}, want: []string{CollectProcessWorker}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
