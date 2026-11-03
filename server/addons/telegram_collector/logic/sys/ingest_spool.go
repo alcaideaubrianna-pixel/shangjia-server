@@ -67,8 +67,15 @@ func (s *sCollector) recoverIngestSpool(ctx context.Context, limit int) error {
 			return err
 		}
 		var event sysin.RawUpdateEvent
-		if err := json.Unmarshal([]byte(row["payload"].String()), &event); err != nil {
-			_, _ = g.DB().Model(collectorIngestSpoolTable).Ctx(ctx).Where("id", row["id"].Int64()).Data(g.Map{"status": "dead", "last_error": err.Error(), "updated_at": gtime.Now()}).Update()
+		decodeErr := json.Unmarshal([]byte(row["payload"].String()), &event)
+		if decodeErr == nil && (event.EventID == "" || event.TenantID <= 0) {
+			decodeErr = fmt.Errorf("采集接收事件标识不完整")
+		}
+		if decodeErr != nil {
+			_, updateErr := g.DB().Exec(ctx, "UPDATE "+collectorIngestSpoolTable+" SET status='dead',last_error=?,updated_at=? WHERE id=?", decodeErr.Error(), gtime.Now(), row["id"].Int64())
+			if updateErr != nil {
+				return updateErr
+			}
 			continue
 		}
 		eventID, err := s.persistEvent(ctx, &event)

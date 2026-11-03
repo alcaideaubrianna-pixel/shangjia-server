@@ -75,4 +75,17 @@ func TestIngestSpoolPostgres(t *testing.T) {
 	if otherID, err := persistIngestSpool(ctx, &other); err != nil || otherID == id {
 		t.Fatalf("tenant collision: id=%d err=%v", otherID, err)
 	}
+	if _, err := g.DB().Exec(ctx, "UPDATE "+collectorIngestSpoolTable+" SET status='completed'"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.DB().Exec(ctx, "INSERT INTO "+collectorIngestSpoolTable+" (tenant_id,event_key,source_type,source_id,payload) VALUES (1,'invalid','account',10,'{}')"); err != nil {
+		t.Fatal(err)
+	}
+	if err := (&sCollector{}).recoverIngestSpool(ctx, 10); err != nil {
+		t.Fatal(err)
+	}
+	row, err = g.DB().GetOne(ctx, "SELECT status,last_error FROM "+collectorIngestSpoolTable+" WHERE event_key='invalid'")
+	if err != nil || row["status"].String() != "dead" || row["last_error"].String() == "" {
+		t.Fatalf("invalid event was not quarantined: %v %v", row, err)
+	}
 }
