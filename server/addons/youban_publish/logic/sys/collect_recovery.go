@@ -116,6 +116,9 @@ func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	if err := s.recoverPendingCollectMedia(ctx, mediaBatchSize); err != nil {
 		g.Log().Warningf(ctx, "恢复待处理采集媒体任务失败：%+v", err)
 	}
+	if err := s.recoverReadyMediaPendingEvents(ctx, mediaBatchSize); err != nil {
+		g.Log().Warningf(ctx, "恢复媒体已就绪但事件仍待处理的采集任务失败：%+v", err)
+	}
 	if err := s.recoverBotCollectMedia(ctx, mediaBatchSize); err != nil {
 		g.Log().Warningf(ctx, "恢复BOT采集媒体事件失败：%+v", err)
 	}
@@ -134,6 +137,50 @@ func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	if err := s.recoverCollectPublishTasks(ctx, 100); err != nil {
 		g.Log().Warningf(ctx, "恢复采集推送任务失败：%+v", err)
 	}
+}
+
+// A fairness retry can leave the event in media_pending after all media rows
+// have already become ready. Such rows are intentionally excluded from the
+// pending-media query, so normalize the event and put it back on the process
+// queue instead of leaving an orphaned state forever.
+func (s *sSysPublish) recoverReadyMediaPendingEvents(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		limit = 100
+	}
+	e := pdao.YoubanPublishCollectEvent.Columns()
+	m := pdao.YoubanPublishCollectEventMedia.Table()
+	rows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
+		Fields("e.*").
+		Where("e."+e.Status, sysin.CollectEventStatusMediaPending).
+		WhereNull("e."+e.ProcessedAt).
+		Where(enabledCollectSourceExistsSQL("e")).
+		Where("EXISTS (SELECT 1 FROM "+m+" m WHERE m.event_id=e."+e.Id+")").
+		Where("NOT EXISTS (SELECT 1 FROM "+m+" m WHERE m.event_id=e."+e.Id+" AND m.cache_status<>?)", collectMediaCacheReady).
+		OrderAsc("e." + e.UpdatedAt).Limit(limit).All()
+	if err != nil {
+		return gerror.Wrap(err, "读取媒体已就绪的采集事件失败")
+	}
+	for _, row := range rows {
+		id := row[e.Id].Int64()
+		if id <= 0 {
+			continue
+		}
+		if _, err = pdao.YoubanPublishCollectEvent.Ctx(ctx).Where(e.Id, id).
+			Where(e.Status, sysin.CollectEventStatusMediaPending).
+			Data(g.Map{e.Status: sysin.CollectEventStatusMediaReady, e.ErrorMessage: "", e.UpdatedAt: gtime.Now()}).Update(); err != nil {
+			return gerror.Wrap(err, "更新媒体已就绪采集事件状态失败")
+		}
+		if err = s.enqueueCollectProcess(ctx, collectProcessQueuePayload{
+			EventId: id, TenantId: row[e.TenantId].Int64(), AccountId: row[e.AccountId].Int64(),
+			SourceId: row[e.SourceId].Int64(), SourceChatId: row[e.SourceChatId].String(),
+		}, 0); err != nil {
+			return gerror.Wrap(err, "重新投递媒体已就绪采集事件失败")
+		}
+	}
+	if len(rows) > 0 {
+		g.Log().Infof(ctx, "恢复媒体已就绪但事件仍待处理的采集任务 count:%d", len(rows))
+	}
+	return nil
 }
 
 // Recovery must yield to realtime when the shared database/worker budget is
