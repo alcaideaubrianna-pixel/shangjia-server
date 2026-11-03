@@ -447,6 +447,76 @@ func TestApplyCollectIntroFeeSuffix(t *testing.T) {
 	}
 }
 
+func TestApplyCollectIntroFeeSuffixProductionMatrix100(t *testing.T) {
+	keywords := []string{"介绍费", "介绍费用", "推荐费", "感谢费", "牵线费", "居间费", "对接费", "国外介绍费", "💎介绍费", "介绍费；"}
+	separators := []string{"", ":", "：", ";", "；", " ", "  ", "\u00a0"}
+	amounts := []string{"5888", "6888", "7888", "8888", "9999", "10888", "１２８８８", "𝟟𝟠𝟠𝟠"}
+	tails := []string{"", "KK", "天空之城22", "强盛-高启强", "杰尼龟-C300", "xxy A5", "（周舟）", "。", "⁣⁤", "百花阁12", "国外12888", "/12888", "村外12888"}
+	count := 0
+	for _, keyword := range keywords {
+		for _, separator := range separators {
+			for _, amount := range amounts {
+				for _, tail := range tails {
+					if count >= 100 {
+						break
+					}
+					name := fmt.Sprintf("case-%03d", count+1)
+					input := "年龄：24\n身高：163\n体重：92\n" + keyword + separator + amount + tail
+					got := applyCollectIntroFeeSuffix(input, input, "天空之城22")
+					for _, protected := range []string{"年龄：24", "身高：163", "体重：92"} {
+						if !strings.Contains(got, protected) {
+							t.Fatalf("%s removed protected field %q: %q", name, protected, got)
+						}
+					}
+					if !strings.Contains(got, "天空之城22") {
+						t.Fatalf("%s did not apply suffix: input=%q got=%q", name, input, got)
+					}
+					count++
+				}
+			}
+		}
+	}
+	if count != 100 {
+		t.Fatalf("generated %d cases, want 100", count)
+	}
+}
+
+func TestApplyCollectIntroFeeSuffixProductionMatrixAdditional100(t *testing.T) {
+	prefixes := []string{"", "💎", "💸", "🍁", "佳佳 ", "晨 ", "无心 ", "SYF/", "水冰月/", "BLY-2 "}
+	keywords := []string{"介绍费", "介绍费用", "推荐费", "感谢费", "牵线费", "居间费", "对接费", "国外介绍费", "介绍费", "介绍费"}
+	forms := []string{
+		"7888", " 7888", "：7888", "： 7888", "；7888", "； 7888", "=7888", "-7888", "·7888", "。7888",
+		"7888元", "7888块", "7888/人", "7888/次", "7888起", "约7888", "低至7888", "7888左右", "7888+", "7888++",
+		"7888（村内）", "7888（村外12888）", "7888(村外12888)", "7888【村外12888】", "7888[村外12888]", "7888 外12888", "7888 出村12888", "7888 港澳9888", "7888 国外12888", "国内7888 国外12888",
+		"7888,12888", "7888，12888", "7888/12888", "7888 + 12888", "一人7888 双人12888", "单个7888 打包13888", "村内6888 村外8888", "境内7888 境外12888", "本地7888 外地12888", "短期7888 长期12888",
+		"7888强盛-高启强", "7888-蜜桃", "7888 - 月月DJ", "7888-BLY-XY", "7888_ABC", "7888.ABC", "7888...", "7888。。。。", "7888🐱qs", "7888🍊",
+		"7888\u200b", "7888\u2060", "7888\ufeff", "7888\u00a0", "7888\u3000", "7888 \u200b KK", "7888⁣⁤", "7888︂", "７８８８", "１２８８８",
+	}
+	count := 0
+	for _, prefix := range prefixes {
+		for _, keyword := range keywords {
+			if count >= 100 {
+				break
+			}
+			form := forms[count%len(forms)]
+			input := "年龄：25\n身高：165\n体重：90\n" + prefix + keyword + form
+			got := applyCollectIntroFeeSuffix(input, input, "天空之城15")
+			for _, protected := range []string{"年龄：25", "身高：165", "体重：90"} {
+				if !strings.Contains(got, protected) {
+					t.Fatalf("additional case %03d removed protected field %q: %q", count+1, protected, got)
+				}
+			}
+			if !strings.Contains(got, "天空之城15") {
+				t.Fatalf("additional case %03d did not apply suffix: input=%q got=%q", count+1, input, got)
+			}
+			count++
+		}
+	}
+	if count != 100 {
+		t.Fatalf("generated %d additional cases, want 100", count)
+	}
+}
+
 func TestApplyCollectIntroFeeSuffixNeverLeavesKnownVariantUnprocessed(t *testing.T) {
 	cases := []string{
 		"7888介绍费阿泽", "介绍费：国内7888", "介绍费：国内7888，国外12888",
