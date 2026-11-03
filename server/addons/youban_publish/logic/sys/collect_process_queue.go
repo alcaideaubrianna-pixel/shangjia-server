@@ -257,6 +257,7 @@ func removeCollectProcessSchedule(ctx context.Context, payload collectProcessQue
 
 func collectProcessTaskBody(payload collectProcessQueuePayload) ([]byte, error) {
 	return json.Marshal(collectProcessQueuePayload{
+		History:      payload.History,
 		TenantId:     payload.TenantId,
 		AccountId:    payload.AccountId,
 		EventId:      payload.EventId,

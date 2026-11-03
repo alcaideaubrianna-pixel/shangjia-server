@@ -193,7 +193,7 @@ func TestCollectProcessQueueSeparatesRealtimeFromBacklog(t *testing.T) {
 
 func TestCollectProcessTaskBodyPreservesSourceChat(t *testing.T) {
 	body, err := collectProcessTaskBody(collectProcessQueuePayload{
-		TenantId: 2, AccountId: 3, SourceId: 4, SourceChatId: "-1003981090528", EventId: 100,
+		TenantId: 2, AccountId: 3, SourceId: 4, SourceChatId: "-1003981090528", EventId: 100, History: true,
 	})
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)
@@ -202,7 +202,7 @@ func TestCollectProcessTaskBodyPreservesSourceChat(t *testing.T) {
 	if err = json.Unmarshal(body, &payload); err != nil {
 		t.Fatalf("decode payload: %v", err)
 	}
-	if payload.EventId != 100 || payload.SourceChatId != "-1003981090528" {
+	if payload.EventId != 100 || payload.SourceChatId != "-1003981090528" || !payload.History {
 		t.Fatalf("unexpected normalized payload: %+v", payload)
 	}
 }
