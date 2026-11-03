@@ -1040,12 +1040,18 @@ func (s *sSysPublish) resumeExistingCollectDispatch(ctx context.Context, dispatc
 	switch collectDispatchResumeActionForStatus(dispatch["status"].String()) {
 	case collectDispatchResumeNoop:
 		if dispatch["status"].String() == sysin.CollectDispatchStatusSent {
-			replaced, err := s.replaceLateCollectProfileMedia(ctx, event, content, dispatch["profile_id"].Int64())
+			hasLateMedia, err := collectDispatchHasLateMedia(ctx, dispatch, event)
 			if err != nil {
 				return false, "", err
 			}
-			if replaced {
-				return true, "", nil
+			if hasLateMedia {
+				replaced, replaceErr := s.replaceLateCollectProfileMedia(ctx, event, content, dispatch["profile_id"].Int64())
+				if replaceErr != nil {
+					return false, "", replaceErr
+				}
+				if replaced {
+					return true, "", nil
+				}
 			}
 		}
 		if collectContentHasVerification(content) {
@@ -1081,6 +1087,22 @@ func (s *sSysPublish) resumeExistingCollectDispatch(ctx context.Context, dispatc
 	default:
 		return false, "", gerror.Newf("采集分发状态不支持恢复：%s", dispatch["status"].String())
 	}
+}
+
+func collectDispatchHasLateMedia(ctx context.Context, dispatch, event gdb.Record) (bool, error) {
+	dispatchedAt := dispatch["created_at"].GTime()
+	if dispatchedAt == nil || event["id"].Int64() <= 0 {
+		return false, nil
+	}
+	mediaCols := pdao.YoubanPublishCollectEventMedia.Columns()
+	count, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
+		Where(mediaCols.EventId, event["id"].Int64()).
+		WhereGT(mediaCols.CreatedAt, dispatchedAt).
+		Count()
+	if err != nil {
+		return false, gerror.Wrap(err, "检查采集事件迟到媒体失败")
+	}
+	return count > 0, nil
 }
 
 func collectContentHasVerification(content *collectContentResult) bool {

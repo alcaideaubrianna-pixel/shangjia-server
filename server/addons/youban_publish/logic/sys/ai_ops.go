@@ -9,6 +9,7 @@ import (
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/consts"
 )
 
 // AIOpsRecoverIgnoredCollectVerifications re-enters only verification videos
@@ -163,17 +164,21 @@ func (s *sSysPublish) AIOpsRepublishProfiles(ctx context.Context, in *sysin.Prof
 		if err != nil {
 			return nil, err
 		}
-		if profile["status"].Int() != 1 {
-			if _, err = s.updateProfileStatus(ctx, &sysin.ProfileStatusInp{Ids: []int64{profileId}, Status: 1}, 0, 0); err != nil {
-				return nil, err
-			}
-		}
 		complete, err := collectProfileMediaComplete(ctx, profileId)
 		if err != nil {
 			return nil, err
 		}
 		if !complete {
 			return nil, gerror.Newf("资料%d媒体尚未恢复完整，禁止重新上架", profileId)
+		}
+		if profile["status"].Int() != 1 || profile["visibility"].String() != consts.ContentVisibilityPublic {
+			if _, err = s.updateProfileStatus(ctx, &sysin.ProfileStatusInp{Ids: []int64{profileId}, Status: 1}, 0, 0); err != nil {
+				return nil, err
+			}
+			// updateProfileStatus already persists and submits the normal profile
+			// operation. A second operation would replace its state projection and
+			// leave the profile private after Telegram delivery succeeds.
+			continue
 		}
 		if err = s.submitProfilePublish(ctx, profileId, profile["tenant_id"].Int64(), profile["account_id"].Int64(), 0, newTelegramOperationNo("ai-republish", profileId), nil, false); err != nil {
 			return nil, gerror.Wrapf(err, "资料%d提交TG发布任务失败", profileId)

@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -184,7 +185,7 @@ func (s *sSysPublish) replaceCollectProfileMedia(
 		return false, nil
 	}
 	decision := decideDuplicateMediaReplace(state[duplicateMediaReplacedEventIDColumn].Int64(), eventID)
-	if decision == duplicateMediaReplaceAlreadyUsed {
+	if mode == collectMediaReplaceDuplicate && decision == duplicateMediaReplaceAlreadyUsed {
 		return false, nil
 	}
 	channelIDs, err := s.profileChannelIdsOrDefaults(ctx, tenantID, accountID, profileID)
@@ -212,8 +213,7 @@ func (s *sSysPublish) replaceCollectProfileMedia(
 				return gerror.Wrap(txErr, "锁定重复资料媒体覆盖状态失败")
 			}
 			lockedDecision := decideDuplicateMediaReplace(state[duplicateMediaReplacedEventIDColumn].Int64(), eventID)
-			if state.IsEmpty() || lockedDecision == duplicateMediaReplaceAlreadyUsed ||
-				(lockedDecision == duplicateMediaReplaceRetryPublish && mode != collectMediaReplaceLateArrival) {
+			if state.IsEmpty() || (mode == collectMediaReplaceDuplicate && lockedDecision != duplicateMediaReplaceAllowed) {
 				return nil
 			}
 			release, txErr := s.lockProfileMediaSyncTx(ctx, tx, profileID)
@@ -273,26 +273,31 @@ func (s *sSysPublish) replaceCollectProfileMedia(
 			if oldFingerprints, fingerprints, txErr = s.replaceProfileFingerprintProjectionTx(ctx, tx, tenantID, accountID, profileID, channelIDs); txErr != nil {
 				return txErr
 			}
-			markerUpdate := tx.Model(publishProfileStateTable).Ctx(ctx).Where("id", state["id"].Int64())
-			if mode == collectMediaReplaceLateArrival {
-				markerUpdate = markerUpdate.WhereIn(duplicateMediaReplacedEventIDColumn, []int64{0, eventID})
+			if mode == collectMediaReplaceDuplicate {
+				result, updateErr := tx.Model(publishProfileStateTable).Ctx(ctx).
+					Where("id", state["id"].Int64()).Where(duplicateMediaReplacedEventIDColumn, 0).
+					Data(g.Map{duplicateMediaReplacedEventIDColumn: eventID, "updated_at": now}).Update()
+				if updateErr != nil {
+					return gerror.Wrap(updateErr, "标记重复资料媒体已覆盖失败")
+				}
+				affected, affectedErr := result.RowsAffected()
+				if affectedErr != nil {
+					return gerror.Wrap(affectedErr, "读取重复资料媒体覆盖结果失败")
+				}
+				replaced = affected == 1
 			} else {
-				markerUpdate = markerUpdate.Where(duplicateMediaReplacedEventIDColumn, 0)
+				replaced = true
 			}
-			result, txErr := markerUpdate.Data(g.Map{duplicateMediaReplacedEventIDColumn: eventID, "updated_at": now}).Update()
-			if txErr != nil {
-				return gerror.Wrap(txErr, "标记重复资料媒体已覆盖失败")
-			}
-			affected, txErr := result.RowsAffected()
-			if txErr != nil {
-				return gerror.Wrap(txErr, "读取重复资料媒体覆盖结果失败")
-			}
-			replaced = affected == 1
 			return nil
 		})
-		if err != nil || !replaced {
+		if err != nil || (!replaced && mode == collectMediaReplaceDuplicate) {
 			return replaced, err
 		}
+	}
+	if mode == collectMediaReplaceLateArrival && !replaced {
+		// A prior attempt may have committed the media transaction but failed
+		// before persisting the publish jobs. Reuse the versioned operation below.
+		replaced = true
 	}
 	if err = s.deleteMediaPHashBucketByProfileId(ctx, profileID); err != nil {
 		g.Log().Warningf(ctx, "重复资料媒体覆盖后清理PHash失败 profileId:%d err:%+v", profileID, err)
@@ -314,8 +319,20 @@ func (s *sSysPublish) replaceCollectProfileMedia(
 	operationNo := fmt.Sprintf("collect_media_replace:%d", eventID)
 	if mode == collectMediaReplaceLateArrival {
 		operationNo = collectMediaReplaceOperationNo(eventID, prepared.Media)
+		if _, sourceErr := s.profilePublishSource(ctx, profileID, tenantID, accountID, true); sourceErr != nil {
+			if errors.Is(sourceErr, errPublishProfileUnavailable) {
+				s.appendCollectEventLogForRecord(ctx, event, "late_media_replace", "skipped", "资料已下架或非公开，仅更新迟到媒体，不自动发布", fmt.Sprintf("profileId=%d operationNo=%s", profileID, operationNo))
+				return true, nil
+			}
+			return true, sourceErr
+		}
 	}
-	if err = s.submitProfilePublishWithMeta(ctx, profileID, tenantID, accountID, accountID, operationNo, channelIDs, false, meta); err != nil {
+	requireOnline := mode == collectMediaReplaceLateArrival
+	if err = s.submitProfilePublishWithMeta(ctx, profileID, tenantID, accountID, accountID, operationNo, channelIDs, requireOnline, meta); err != nil {
+		if requireOnline && errors.Is(err, errPublishProfileUnavailable) {
+			s.appendCollectEventLogForRecord(ctx, event, "late_media_replace", "skipped", "资料已下架或非公开，仅更新迟到媒体，不自动发布", fmt.Sprintf("profileId=%d operationNo=%s", profileID, operationNo))
+			return true, nil
+		}
 		return true, gerror.Wrap(err, "提交重复资料媒体覆盖发布失败")
 	}
 	s.appendCollectEventLogForRecord(ctx, event, "dedupe_media_replace", "completed", "重复资料媒体已覆盖并重新提交发布", fmt.Sprintf("profileId=%d", profileID))

@@ -119,3 +119,31 @@ func TestCollectMediaReplaceOperationNoTracksMediaVersion(t *testing.T) {
 		t.Fatalf("changed media reused operation number %s", changedNo)
 	}
 }
+
+func TestProductionIncompleteProfileMediaReplacementPlan(t *testing.T) {
+	existing := gdb.Result{
+		gdb.Record{"media_type": g.NewVar("image"), "purpose": g.NewVar("display"), "md5": g.NewVar("10b7d6aad024be5dc05306baffaba306")},
+		gdb.Record{"media_type": g.NewVar("image"), "purpose": g.NewVar("display"), "md5": g.NewVar("5d107018ce3d8ecbb077132f314ba182")},
+		gdb.Record{"media_type": g.NewVar("video"), "purpose": g.NewVar("verify"), "md5": g.NewVar("094f31b227bbd0d5f6c29b2a5b6d0aeb")},
+	}
+	prepared := []collectPreparedMedia{
+		{MediaType: "image", Purpose: "display", MD5: "10b7d6aad024be5dc05306baffaba306", SortIndex: 1},
+		{MediaType: "image", Purpose: "display", MD5: "late-122756", SortIndex: 2},
+		{MediaType: "image", Purpose: "display", MD5: "late-122757", SortIndex: 3},
+		{MediaType: "image", Purpose: "display", MD5: "late-122758", SortIndex: 4},
+		{MediaType: "image", Purpose: "display", MD5: "5d107018ce3d8ecbb077132f314ba182", SortIndex: 5},
+		{MediaType: "video", Purpose: "verify", MD5: "094f31b227bbd0d5f6c29b2a5b6d0aeb", SortIndex: 1},
+	}
+	plan := buildDuplicateMediaReplacePlan(existing, prepared)
+	if !plan.DisplayChanged || plan.VerifyChanged {
+		t.Fatalf("production replacement plan = %#v", plan)
+	}
+	operationNo := collectMediaReplaceOperationNo(9826309, prepared)
+	if retryNo := collectMediaReplaceOperationNo(9826309, append([]collectPreparedMedia(nil), prepared...)); retryNo != operationNo {
+		t.Fatalf("retry operation changed: %s != %s", retryNo, operationNo)
+	}
+	prepared[3].MD5 = "later-wave-122758"
+	if nextWaveNo := collectMediaReplaceOperationNo(9826309, prepared); nextWaveNo == operationNo {
+		t.Fatalf("next late-media wave reused operation %s", operationNo)
+	}
+}

@@ -108,6 +108,49 @@ func TestCollectMediaStatUpsertLocalPostgres(t *testing.T) {
 	}
 }
 
+func TestCollectDispatchHasLateMediaLocalPostgres(t *testing.T) {
+	if os.Getenv("YOUBAN_SQL_REVIEW_LOCAL_PG") != "1" {
+		t.Skip("requires disposable PostgreSQL at 127.0.0.1:55484")
+	}
+	if sqlReviewSubprocess(t) {
+		return
+	}
+	before := gdb.GetConfig("default")
+	t.Cleanup(func() { gdb.SetConfigGroup("default", before) })
+	gdb.SetConfigGroup("default", gdb.ConfigGroup{{Type: "pgsql", Host: "127.0.0.1", Port: "55484", User: "test", Name: "postgres"}})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		for _, sql := range []string{
+			"CREATE TEMP TABLE hg_youban_publish_collect_event_media(event_id bigint,created_at timestamp)",
+			"INSERT INTO hg_youban_publish_collect_event_media VALUES(9826309,'2026-11-01 19:39:03.952819'),(9826309,'2026-11-01 19:44:12.310683'),(9826309,'2026-11-01 19:53:36.259848')",
+		} {
+			if _, execErr := tx.Exec(sql); execErr != nil {
+				return execErr
+			}
+		}
+		dispatch := gdb.Record{"created_at": g.NewVar("2026-11-01 19:44:48.994715")}
+		hasLate, queryErr := collectDispatchHasLateMedia(ctx, dispatch, gdb.Record{"id": g.NewVar(int64(9826309))})
+		if queryErr != nil {
+			return queryErr
+		}
+		if !hasLate {
+			t.Fatal("production fixture late media was not detected")
+		}
+		hasLate, queryErr = collectDispatchHasLateMedia(ctx, dispatch, gdb.Record{"id": g.NewVar(int64(1))})
+		if queryErr != nil {
+			return queryErr
+		}
+		if hasLate {
+			t.Fatal("event without post-dispatch media was marked late")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 // g.DB caches its first driver. Isolate tests that replace the default group
 // so subsequent SQL-generation tests retain their original driver/configuration.
 func sqlReviewSubprocess(t *testing.T) bool {

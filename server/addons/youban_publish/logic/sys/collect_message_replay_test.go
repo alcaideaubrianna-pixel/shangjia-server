@@ -2,6 +2,7 @@ package sys
 
 import (
 	"testing"
+	"time"
 
 	"github.com/gogf/gf/v2/container/gvar"
 	"github.com/gogf/gf/v2/database/gdb"
@@ -10,6 +11,45 @@ import (
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
+
+func TestProductionLateMediaBoundarySamples(t *testing.T) {
+	tests := []struct {
+		name            string
+		dispatchCreated string
+		mediaCreated    []string
+		wantLate        int
+	}{
+		{name: "profile-712355", dispatchCreated: "2026-10-30T11:52:05.724786", mediaCreated: []string{"2026-10-30T11:51:59.514737", "2026-10-30T11:51:59.526597", "2026-10-30T13:18:20.766808"}, wantLate: 1},
+		{name: "profile-716593", dispatchCreated: "2026-11-01T19:44:48.994715", mediaCreated: []string{"2026-11-01T19:39:03.952819", "2026-11-01T19:44:12.310683", "2026-11-01T19:53:36.259848", "2026-11-01T19:53:37.284711", "2026-11-01T19:53:39.620195"}, wantLate: 3},
+		{name: "profile-716709", dispatchCreated: "2026-11-01T20:52:51.335127", mediaCreated: []string{"2026-11-01T20:52:22.621909", "2026-11-01T20:52:23.847004", "2026-11-01T20:52:23.892394", "2026-11-01T21:00:14.928487", "2026-11-01T21:00:18.551858"}, wantLate: 2},
+		{name: "profile-717277", dispatchCreated: "2026-11-02T16:20:34.743632", mediaCreated: []string{"2026-11-02T16:18:02.782936", "2026-11-02T16:19:23.977784", "2026-11-02T19:45:35.169398", "2026-11-02T19:45:38.049686"}, wantLate: 2},
+		{name: "profile-717329", dispatchCreated: "2026-11-02T17:34:41.081217", mediaCreated: []string{"2026-11-02T17:22:09.047085", "2026-11-02T17:22:09.987461", "2026-11-02T17:22:15.847163", "2026-11-02T20:17:15.483347"}, wantLate: 1},
+		{name: "profile-717421", dispatchCreated: "2026-11-02T18:27:54.892094", mediaCreated: []string{"2026-11-02T18:27:26.412273", "2026-11-02T18:27:41.999786", "2026-11-02T18:28:03.532859", "2026-11-02T18:28:05.760791", "2026-11-02T18:28:21.244642"}, wantLate: 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			boundary := mustParseProductionFixtureTime(t, tt.dispatchCreated)
+			late := 0
+			for _, value := range tt.mediaCreated {
+				if mustParseProductionFixtureTime(t, value).After(boundary) {
+					late++
+				}
+			}
+			if late != tt.wantLate {
+				t.Fatalf("late media = %d, want %d", late, tt.wantLate)
+			}
+		})
+	}
+}
+
+func mustParseProductionFixtureTime(t *testing.T, value string) time.Time {
+	t.Helper()
+	parsed, err := time.Parse("2006-01-02T15:04:05.999999", value)
+	if err != nil {
+		t.Fatalf("parse fixture time %q: %v", value, err)
+	}
+	return parsed
+}
 
 func TestDecideCollectExistingEventMerge(t *testing.T) {
 	item := collectMediaItem{Type: "image", FileId: "file-1", SourceMediaId: 101, SourceAccessHash: 202}
