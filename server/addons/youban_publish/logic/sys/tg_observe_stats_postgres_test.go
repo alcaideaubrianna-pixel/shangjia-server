@@ -9,6 +9,12 @@ import (
 	"github.com/gogf/gf/v2/database/gdb"
 )
 
+func TestTelegramObserveStatsRefreshInterval(t *testing.T) {
+	if telegramObserveStatsRefreshInterval != 5*time.Minute {
+		t.Fatalf("unexpected Telegram observe stats refresh interval: %s", telegramObserveStatsRefreshInterval)
+	}
+}
+
 func TestTelegramObserveAggregateBeforeJoinPostgres(t *testing.T) {
 	if os.Getenv("YOUBAN_SQL_REVIEW_LOCAL_PG") != "1" {
 		t.Skip("requires disposable localhost:55484 PostgreSQL")

@@ -15,7 +15,11 @@ import (
 	"hotgo/internal/consts"
 )
 
-const telegramObserveLastErrorMaxRunes = 512
+const (
+	telegramObserveLastErrorMaxRunes    = 512
+	telegramObserveStatsRefreshInterval = 5 * time.Minute
+	telegramObserveStatsSlowThreshold   = 3 * time.Second
+)
 
 func (s *sSysPublish) runTelegramObserveStatsRefresher(ctx context.Context) {
 	timer := time.NewTimer(5 * time.Second)
@@ -25,7 +29,7 @@ func (s *sSysPublish) runTelegramObserveStatsRefresher(ctx context.Context) {
 		return
 	case <-timer.C:
 	}
-	ticker := time.NewTicker(time.Minute)
+	ticker := time.NewTicker(telegramObserveStatsRefreshInterval)
 	defer ticker.Stop()
 	for {
 		if ctx.Err() != nil {
@@ -57,9 +61,10 @@ func isExpectedTelegramObserveShutdownError(err error) bool {
 }
 
 func (s *sSysPublish) refreshTelegramObserveStats(ctx context.Context) error {
+	startedAt := time.Now()
 	refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	return g.DB().Transaction(refreshCtx, func(ctx context.Context, tx gdb.TX) error {
+	err := g.DB().Transaction(refreshCtx, func(ctx context.Context, tx gdb.TX) error {
 		if strings.ToLower(g.DB().GetConfig().Type) == consts.DBPgsql {
 			return s.refreshTelegramObserveStatsPostgres(ctx, tx)
 		}
@@ -71,6 +76,11 @@ func (s *sSysPublish) refreshTelegramObserveStats(ctx context.Context) error {
 		}
 		return s.refreshTelegramBotStats(ctx, tx)
 	})
+	duration := time.Since(startedAt)
+	if err == nil && duration >= telegramObserveStatsSlowThreshold {
+		g.Log().Warningf(ctx, "TG推送观测统计刷新耗时偏长 duration:%s", duration.Round(time.Millisecond))
+	}
+	return err
 }
 
 func (s *sSysPublish) refreshTelegramQueueStats(ctx context.Context, tx gdb.TX) error {
