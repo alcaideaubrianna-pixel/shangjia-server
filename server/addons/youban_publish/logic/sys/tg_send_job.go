@@ -392,12 +392,13 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 				return attemptErr
 			}
 			displayCaption := telegramCaptionWithJobMarker(caption, job.Id, "display") + telegramAttemptMarker(attempt.AttemptToken)
-			g.Log().Infof(ctx, "TG展示资料开始Bot发送 jobId:%d botId:%d chat:%s media:%s", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(displayMedia))
+			displaySendMedia := telegramMediaSetForGatewayRetry(job, displayMedia)
+			g.Log().Infof(ctx, "TG展示资料开始Bot发送 jobId:%d botId:%d chat:%s media:%s", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(displaySendMedia))
 			stopAttemptHeartbeat := s.startTelegramAttemptHeartbeat(attempt.Id)
 			displaySendCtx, cancelDisplaySend := context.WithTimeout(ctx, telegramDisplaySendTimeout)
 			displaySendStartedAt := time.Now()
 			step = beginTelegramPublishStage(ctx, "display.api_send", g.Map{"attemptId": attempt.Id, "mediaCount": len(displayMedia)})
-			messages, err = s.sendTelegramDisplayPart(displaySendCtx, bot, job.TargetChatId, displayCaption, displayMedia)
+			messages, err = s.sendTelegramDisplayPart(displaySendCtx, bot, job.TargetChatId, displayCaption, displaySendMedia)
 			step.End(err, g.Map{"messageIds": telegramSentMessageIDs(messages), "messageCount": len(messages)})
 			cancelDisplaySend()
 			displaySendDuration := time.Since(displaySendStartedAt)

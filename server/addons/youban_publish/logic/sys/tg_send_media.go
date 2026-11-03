@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -747,6 +748,15 @@ func telegramMediaSetForcedUpload(media []*telegramMediaItem) []*telegramMediaIt
 		list = append(list, &cloned)
 	}
 	return list
+}
+
+// Keep the album intact after a gateway failure, but stop relying on Telegram
+// to fetch its remote URLs on the next queue attempt.
+func telegramMediaSetForGatewayRetry(job telegramJobRecord, media []*telegramMediaItem) []*telegramMediaItem {
+	if job.RetryCount <= 0 || !isTelegramGatewayRetryError(errors.New(job.ErrorMessage)) {
+		return media
+	}
+	return telegramMediaSetForcedUpload(media)
 }
 
 func telegramMediaSetWithoutReusableFileID(media []*telegramMediaItem) []*telegramMediaItem {
