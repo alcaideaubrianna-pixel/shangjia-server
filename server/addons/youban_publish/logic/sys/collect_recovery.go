@@ -101,6 +101,11 @@ func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	if err := s.recoverReadyMediaPendingEvents(ctx, min(mediaBatchSize, 100)); err != nil {
 		g.Log().Warningf(ctx, "恢复媒体已就绪但事件仍待处理的采集任务失败：%+v", err)
 	}
+	// Media retries have their own small budget. They must keep making
+	// progress while process recovery yields to realtime traffic.
+	if err := s.recoverPendingCollectMedia(ctx, min(mediaBatchSize, 50)); err != nil {
+		g.Log().Warningf(ctx, "恢复待处理采集媒体任务失败：%+v", err)
+	}
 	if blocked, err := s.collectRecoveryBackpressure(ctx); err != nil {
 		g.Log().Warningf(ctx, "读取实时采集背压状态失败，暂停本轮历史恢复：%+v", err)
 		return
@@ -118,9 +123,6 @@ func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	}
 	if err := s.recoverLegacyMissingVerifyCollectEvents(ctx, min(mediaBatchSize, 20)); err != nil {
 		g.Log().Warningf(ctx, "恢复历史缺少验证视频的采集事件失败：%+v", err)
-	}
-	if err := s.recoverPendingCollectMedia(ctx, mediaBatchSize); err != nil {
-		g.Log().Warningf(ctx, "恢复待处理采集媒体任务失败：%+v", err)
 	}
 	if err := s.recoverBotCollectMedia(ctx, mediaBatchSize); err != nil {
 		g.Log().Warningf(ctx, "恢复BOT采集媒体事件失败：%+v", err)
