@@ -202,7 +202,11 @@ func TestDeliveryProductionFixtureReplay(t *testing.T) {
 			if err = collector.processEvent(ctx, id); err != nil {
 				t.Fatal("offline replay operation failed (details suppressed to protect production payload)")
 			}
-			if _, err = client.Enqueue(asynq.NewTask(deliveryTaskType, collectorTaskPayload(deliveryID)), asynq.Queue(consts.QueueDeliveryReady)); err != nil {
+			legacyQueue := consts.QueueDeliveryReady
+			if f.SourceType == sysin.SourceTypeBot {
+				legacyQueue = consts.QueueDeliveryUrgent
+			}
+			if _, err = client.Enqueue(asynq.NewTask(deliveryTaskType, collectorTaskPayload(deliveryID)), asynq.Queue(legacyQueue)); err != nil {
 				t.Fatal("offline replay operation failed (details suppressed to protect production payload)")
 			}
 		}

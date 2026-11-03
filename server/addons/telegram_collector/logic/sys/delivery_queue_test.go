@@ -114,8 +114,11 @@ func TestDeliveryRedisQueueIsolationAndDuplicateEnqueue(t *testing.T) {
 			}
 		}
 	}
-	for queue, want := range map[string]int{consts.QueueDeliveryHistory: 20, consts.QueueDeliveryRealtime: 1, consts.QueueDeliveryUrgent: 1} {
+	for queue, want := range map[string]int{consts.QueueDeliveryHistory: 20, consts.QueueDeliveryRealtime: 1, consts.QueueDeliveryUrgentLive: 1, consts.QueueDeliveryUrgent: 0} {
 		tasks, err := inspector.ListPendingTasks(queue)
+		if want == 0 && errors.Is(err, asynq.ErrQueueNotFound) {
+			continue
+		}
 		if err != nil {
 			t.Fatal(err)
 		}

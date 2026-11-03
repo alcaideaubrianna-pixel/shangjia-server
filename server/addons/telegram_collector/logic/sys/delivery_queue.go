@@ -47,8 +47,8 @@ func (s *sCollector) StartDeliveryRuntime(ctx context.Context) {
 	server := asynq.NewServer(collectorRedisOption(runtimeCtx), asynq.Config{
 		Concurrency: collectorDeliveryConcurrency(runtimeCtx),
 		Queues: map[string]int{
-			consts.QueueDeliveryUrgent:   8,
-			consts.QueueDeliveryRealtime: 2,
+			consts.QueueDeliveryUrgentLive: 8,
+			consts.QueueDeliveryRealtime:   2,
 		},
 	})
 	if s.queueClient == nil {
@@ -58,7 +58,7 @@ func (s *sCollector) StartDeliveryRuntime(ctx context.Context) {
 		Concurrency: 1,
 		Queues:      map[string]int{consts.QueueDeliveryHistory: 1},
 	})
-	legacyServer := asynq.NewServer(collectorRedisOption(runtimeCtx), asynq.Config{Concurrency: 2, Queues: map[string]int{consts.QueueDeliveryReady: 1}})
+	legacyServer := asynq.NewServer(collectorRedisOption(runtimeCtx), asynq.Config{Concurrency: 2, Queues: map[string]int{consts.QueueDeliveryReady: 1, consts.QueueDeliveryUrgent: 1}})
 	s.deliveryLegacyServer = legacyServer
 	s.deliveryServer = server
 	s.deliveryHistoryServer = historyServer
@@ -394,7 +394,7 @@ func (s *sCollector) persistedDeliveryPriority(ctx context.Context, deliveryID i
 
 func deliveryQueueName(priority int) string {
 	if priority >= sysin.EventPriorityUrgent {
-		return consts.QueueDeliveryUrgent
+		return consts.QueueDeliveryUrgentLive
 	}
 	if priority >= sysin.EventPriorityRealtime {
 		return consts.QueueDeliveryRealtime
