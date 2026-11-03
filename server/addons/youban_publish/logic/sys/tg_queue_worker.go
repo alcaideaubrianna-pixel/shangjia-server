@@ -543,7 +543,16 @@ func (s *sSysPublish) handleCycleRescheduleTask(ctx context.Context, task *asynq
 	if err != nil {
 		return err
 	}
-	return s.rescheduleChannelProfileCycles(ctx, payload.ChannelId)
+	if err = s.rescheduleChannelProfileCycles(ctx, payload.ChannelId); err != nil {
+		// The scheduler advances cycle_next_run_at before enqueueing so that
+		// duplicate rebuilds are suppressed. Release that claim when the
+		// worker fails; otherwise one transient DB/Redis error hides the
+		// channel for the full claim lease and its cycle remains stalled.
+		s.releaseChannelProfileCycleReschedule(context.Background(), payload.ChannelId)
+		g.Log().Warningf(ctx, "频道循环重算失败，已释放检查点等待重试 channel:%d err:%+v", payload.ChannelId, err)
+		return err
+	}
+	return nil
 }
 
 func (s *sSysPublish) handleCycleRefreshTask(ctx context.Context, task *asynq.Task) error {
