@@ -1129,7 +1129,20 @@ func (s *sSysPublish) downloadBotTelegramMediaWithToken(ctx context.Context, bot
 	path, err := cachedRemoteMediaFileWithMetaSourceAndDownloader(ctx, cacheKey, remoteSource, cacheSource, collectMediaExt(item.Type, ""), func(downloadCtx context.Context, source string, filePath string) error {
 		downloadStartedAt := time.Now()
 		downloadErr := telegrammedia.DownloadFile(downloadCtx, client, source, filePath)
-		observeTelegramBotFileDownload(downloadCtx, endpoint, downloadErr, time.Since(downloadStartedAt))
+		duration := time.Since(downloadStartedAt)
+		observeTelegramBotFileDownload(downloadCtx, endpoint, downloadErr, duration)
+		result := "success"
+		if downloadErr != nil {
+			result = "error"
+		}
+		g.Log().Info(downloadCtx, "媒体下载网络流量", g.Map{
+			"log_type": "media_network_traffic", "event": "media_download_from_telegram",
+			"role": "media-worker", "direction": "internet_ingress", "destination": "telegram_file",
+			"endpoint": endpoint, "mediaType": item.Type, "sourceSizeBytes": item.SourceSize,
+			"downloadedFileBytes": fileSizeValue(filePath), "byteSemantics": "completed_file_size",
+			"getFileAttempts": resolved.Attempts, "cacheStatus": "miss",
+			"durationMs": duration.Milliseconds(), "result": result,
+		})
 		return downloadErr
 	})
 	if err != nil {

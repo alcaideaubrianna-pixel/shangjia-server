@@ -299,9 +299,29 @@ func telegramPublishMediaLogFields(media *telegramMediaItem) g.Map {
 	if parsed, err := url.Parse(media.FileUrl); err == nil {
 		host = parsed.Hostname()
 	}
+	clientUploadBytes := int64(0)
+	trafficDirection := "telegram_side_transfer"
+	if mode == "upload" {
+		trafficDirection = "client_to_telegram"
+		if media.Size > 0 {
+			clientUploadBytes = media.Size
+		}
+	}
 	return g.Map{"mediaId": media.Id, "mediaType": media.MediaType, "purpose": media.Purpose,
 		"inputMode": mode, "sourceHost": host, "antiScanEnabled": media.AntiScanEnabled,
 		"antiScanMode": media.AntiScanMode, "forceUpload": media.ForceUpload,
 		"sizeBytes": media.Size, "hasPoster": strings.TrimSpace(media.PosterUrl) != "" || strings.TrimSpace(media.PosterStoragePath) != "",
-		"hasFileId": strings.TrimSpace(media.TgFileId) != ""}
+		"hasFileId": strings.TrimSpace(media.TgFileId) != "", "trafficDirection": trafficDirection,
+		"clientUploadMediaBytes": clientUploadBytes}
+}
+
+func logTelegramMediaTraffic(ctx context.Context, media *telegramMediaItem, mode, direction string, bytes int64, result string) {
+	fields := telegramPublishMediaLogFields(media)
+	fields["log_type"] = "telegram_media_traffic"
+	fields["event"] = "media_traffic"
+	fields["mode"] = mode
+	fields["direction"] = direction
+	fields["mediaBytes"] = bytes
+	fields["result"] = result
+	g.Log().Info(ctx, "Telegram媒体流量分类", fields)
 }

@@ -167,3 +167,17 @@ func TestTelegramPublishMediaFieldsExcludeSecrets(t *testing.T) {
 		}
 	}
 }
+
+func TestTelegramPublishMediaTrafficClassification(t *testing.T) {
+	media := &telegramMediaItem{FileUrl: "https://cdn.example/video.mp4", TgFileId: "file-id", Size: 123}
+	fields := telegramPublishMediaLogFields(media)
+	if fields["inputMode"] != "file_id" || fields["trafficDirection"] != "telegram_side_transfer" || fields["clientUploadMediaBytes"] != int64(0) {
+		t.Fatalf("file_id must not be counted as application upload: %+v", fields)
+	}
+	media.TgFileId = ""
+	media.ForceUpload = true
+	fields = telegramPublishMediaLogFields(media)
+	if fields["inputMode"] != "upload" || fields["trafficDirection"] != "client_to_telegram" || fields["clientUploadMediaBytes"] != int64(123) {
+		t.Fatalf("multipart upload classification mismatch: %+v", fields)
+	}
+}

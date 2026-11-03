@@ -524,7 +524,18 @@ func isRetryableMediaFileCacheError(ctx context.Context, err error) bool {
 // Cache/worker retry scheduling remains here; all HTTP transfer and partial
 // file cleanup are owned by the shared media library.
 func downloadMediaFileCacheWithClient(ctx context.Context, client *http.Client, source string, filePath string) error {
+	startedAt := time.Now()
 	err := telegrammedia.DownloadFile(ctx, client, source, filePath, telegrammedia.TransferOptions{Attempts: 1})
+	result := "success"
+	if err != nil {
+		result = "error"
+	}
+	g.Log().Info(ctx, "媒体下载网络流量", g.Map{
+		"log_type": "media_network_traffic", "event": "media_download_for_publish",
+		"role": "publish-worker", "direction": "internet_ingress", "destinationHost": mediaFileCacheSourceHost(source),
+		"downloadedFileBytes": fileSizeValue(filePath), "byteSemantics": "completed_file_size",
+		"durationMs": time.Since(startedAt).Milliseconds(), "result": result,
+	})
 	var status *telegrammedia.HTTPStatusError
 	if errors.As(err, &status) {
 		return &mediaFileCacheHTTPStatusError{statusCode: status.StatusCode}

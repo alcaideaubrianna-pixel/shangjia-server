@@ -441,6 +441,9 @@ func (s *sSysPublish) copyTelegramMediaGroup(ctx context.Context, bot *tgbot.Bot
 			s.cleanupTelegramSentMessages(ctx, bot, chatId, append(allMessages, messages...), "复制媒体组返回数量不完整")
 			return nil, true, gerror.Newf("复制媒体组返回数量不完整，期望:%d 实际:%d", len(chunk), len(messages))
 		}
+		for _, item := range chunk {
+			logTelegramMediaTraffic(ctx, item, "copy", "telegram_internal", 0, "copied")
+		}
 		allMessages = append(allMessages, messages...)
 	}
 	return allMessages, true, nil
@@ -502,6 +505,7 @@ func (s *sSysPublish) copyTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 	if msg == nil {
 		return nil, nil
 	}
+	logTelegramMediaTraffic(ctx, media, "copy", "telegram_internal", 0, "copied")
 	return []*telegramSentMessage{{
 		MessageId: int64(msg.ID),
 		Purpose:   purpose,
@@ -524,6 +528,7 @@ func (s *sSysPublish) copyTelegramSingleMediaWithoutCaption(ctx context.Context,
 	if len(copied) == 0 || copied[0].ID <= 0 {
 		return nil, nil
 	}
+	logTelegramMediaTraffic(ctx, media, "copy", "telegram_internal", 0, "copied")
 	return []*telegramSentMessage{{
 		MessageId: int64(copied[0].ID),
 		Purpose:   purpose,
@@ -658,14 +663,17 @@ func telegramInputFile(ctx context.Context, media *telegramMediaItem) (models.In
 			return nil, nil, gerror.Wrapf(err, "打开已准备媒体文件失败:%s", path)
 		}
 		g.Log().Infof(ctx, "TG实际媒体输入 jobId:%d mediaId:%d purpose:%s mode:prepared antiScan:%t", media.JobId, media.Id, media.Purpose, media.AntiScanEnabled)
+		logTelegramMediaTraffic(ctx, media, "multipart", "client_to_telegram", fileSizeValue(path), "prepared")
 		return &models.InputFileUpload{Filename: telegramUploadFilename(media, path), Data: file}, closeWithCleanup(file, cleanup), nil
 	}
 	if source := strings.TrimSpace(media.TgFileId); source != "" && !telegramMediaRequiresSanitizedUpload(media) {
 		g.Log().Infof(ctx, "TG实际媒体输入 jobId:%d mediaId:%d purpose:%s mode:file_id antiScan:%t", media.JobId, media.Id, media.Purpose, media.AntiScanEnabled)
+		logTelegramMediaTraffic(ctx, media, "file_id", "telegram_internal", 0, "prepared")
 		return &models.InputFileString{Data: source}, nil, nil
 	}
 	if source := telegramMediaRemoteURL(media); source != "" {
 		g.Log().Infof(ctx, "TG实际媒体输入 jobId:%d mediaId:%d purpose:%s mode:url antiScan:%t", media.JobId, media.Id, media.Purpose, media.AntiScanEnabled)
+		logTelegramMediaTraffic(ctx, media, "url", "telegram_fetches_remote_url", 0, "prepared")
 		return &models.InputFileString{Data: source}, nil, nil
 	}
 	g.Log().Infof(ctx, "TG实际媒体输入 jobId:%d mediaId:%d purpose:%s mode:multipart antiScan:%t", media.JobId, media.Id, media.Purpose, media.AntiScanEnabled)
@@ -693,11 +701,13 @@ func telegramInputFile(ctx context.Context, media *telegramMediaItem) (models.In
 		}
 		return nil, nil, gerror.Wrapf(err, "打开媒体文件失败:%s", path)
 	}
+	logTelegramMediaTraffic(ctx, media, "multipart", "client_to_telegram", fileSizeValue(path), "prepared")
 	return &models.InputFileUpload{Filename: telegramUploadFilename(media, path), Data: file}, closeWithCleanup(file, cleanup), nil
 }
 
 func telegramSingleMediaInputFile(ctx context.Context, media *telegramMediaItem) (models.InputFile, io.Closer, error) {
 	if telegramVideoUsesReusableFileIdWithCover(media) {
+		logTelegramMediaTraffic(ctx, media, "file_id", "telegram_internal", 0, "prepared")
 		return &models.InputFileString{Data: strings.TrimSpace(media.TgFileId)}, nil, nil
 	}
 	return telegramInputFile(ctx, media)
@@ -911,12 +921,15 @@ func telegramInputMediaSource(ctx context.Context, media *telegramMediaItem) (st
 			return "", nil, nil, gerror.Wrapf(err, "打开已准备媒体文件失败:%s", path)
 		}
 		attachName := fmt.Sprintf("media_%d_%s", media.Id, telegramUploadFilename(media, path))
+		logTelegramMediaTraffic(ctx, media, "multipart", "client_to_telegram", fileSizeValue(path), "prepared")
 		return "attach://" + attachName, file, closeWithCleanup(file, cleanup), nil
 	}
 	if source := strings.TrimSpace(media.TgFileId); source != "" && !media.ForceUpload && !telegramMediaRequiresSanitizedUpload(media) {
+		logTelegramMediaTraffic(ctx, media, "file_id", "telegram_internal", 0, "prepared")
 		return source, nil, nil, nil
 	}
 	if source := telegramMediaRemoteURL(media); source != "" {
+		logTelegramMediaTraffic(ctx, media, "url", "telegram_fetches_remote_url", 0, "prepared")
 		return source, nil, nil, nil
 	}
 	path, cleanup, err := cachedTelegramMediaFile(ctx, media)
@@ -945,6 +958,7 @@ func telegramInputMediaSource(ctx context.Context, media *telegramMediaItem) (st
 	}
 	if info, statErr := file.Stat(); statErr == nil {
 		g.Log().Info(ctx, "TG媒体上传文件已准备", g.Map{"mediaId": media.Id, "mediaType": media.MediaType, "sizeBytes": info.Size(), "forceUpload": media.ForceUpload})
+		logTelegramMediaTraffic(ctx, media, "multipart", "client_to_telegram", info.Size(), "prepared")
 	}
 	attachName := fmt.Sprintf("media_%d_%s", media.Id, telegramUploadFilename(media, path))
 	return "attach://" + attachName, file, closeWithCleanup(file, cleanup), nil
