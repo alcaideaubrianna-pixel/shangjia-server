@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -15,6 +16,7 @@ import (
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/consts"
+	"hotgo/internal/library/hgrds/lock"
 )
 
 func (s *sSysPublish) ExecuteCollectSourceTrigger(ctx context.Context, sourceId int64, tenantId int64, accountId int64) (*sysin.CollectSourceTriggerModel, error) {
@@ -206,32 +208,42 @@ func collectSourceTriggerStatuses() []string {
 }
 
 func (s *sSysPublish) resetCollectEventForTrigger(ctx context.Context, eventId int64) error {
-	if err := s.clearCollectEventWorkflow(ctx, eventId); err != nil {
-		return err
-	}
-	_, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).Where("id", eventId).Data(g.Map{
-		"status":                   sysin.CollectEventStatusPending,
-		"error_message":            "",
-		"processed_at":             nil,
-		"material_role":            collectMaterialRolePending,
-		"material_parent_event_id": 0,
-		"material_group_status":    "",
-		"updated_at":               gtime.Now(),
-	}).Update()
-	return gerror.Wrap(err, "重置采集事件状态失败")
-}
-
-func (s *sSysPublish) clearCollectEventWorkflow(ctx context.Context, eventId int64) error {
 	if eventId <= 0 {
 		return nil
 	}
-	if _, err := pdao.YoubanPublishCollectReview.Ctx(ctx).Where("event_id", eventId).Delete(); err != nil {
-		return gerror.Wrap(err, "清理采集审核失败")
+	// Media workers acquire the media lock before entering the event processor;
+	// preserve that lock order while fencing a reset against both workers.
+	mediaLock := lock.NewConfig(collectMediaLeaseTTL, time.Second).WithoutWatchDog().
+		Mutex(fmt.Sprintf("youban_publish:collect:media:event:%d", eventId))
+	if err := mediaLock.Lock(ctx); err != nil {
+		return gerror.Wrap(err, "获取采集事件媒体重置锁失败")
 	}
-	if _, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).Where("event_id", eventId).Delete(); err != nil {
-		return gerror.Wrap(err, "清理采集分发失败")
+	defer func() { _ = mediaLock.Unlock(context.Background()) }()
+	eventLock := lock.NewConfig(2*time.Minute, 50*time.Millisecond).
+		Mutex(fmt.Sprintf("youban_publish:collect:event:%d", eventId))
+	if err := eventLock.Lock(ctx); err != nil {
+		return gerror.Wrap(err, "获取采集事件重置锁失败")
 	}
-	return nil
+	defer func() { _ = eventLock.Unlock(context.Background()) }()
+	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if _, txErr := tx.Model(pdao.YoubanPublishCollectReview.Table()).Where("event_id", eventId).Delete(); txErr != nil {
+			return gerror.Wrap(txErr, "清理采集审核失败")
+		}
+		if _, txErr := tx.Model(pdao.YoubanPublishCollectDispatch.Table()).Where("event_id", eventId).Delete(); txErr != nil {
+			return gerror.Wrap(txErr, "清理采集分发失败")
+		}
+		_, txErr := tx.Model(pdao.YoubanPublishCollectEvent.Table()).Where("id", eventId).Data(g.Map{
+			"status":                   sysin.CollectEventStatusPending,
+			"error_message":            "",
+			"processed_at":             nil,
+			"material_role":            collectMaterialRolePending,
+			"material_parent_event_id": 0,
+			"material_group_status":    "",
+			"updated_at":               gtime.Now(),
+		}).Update()
+		return gerror.Wrap(txErr, "重置采集事件状态失败")
+	})
+	return gerror.Wrap(err, "重置采集事件流程失败")
 }
 
 func (s *sSysPublish) resetCollectSourceForDev(ctx context.Context, sourceId int64, tenantId int64, accountId int64) (*sysin.CollectSourceResetModel, error) {

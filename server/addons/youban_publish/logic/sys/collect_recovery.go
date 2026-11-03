@@ -106,6 +106,9 @@ func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	if err := s.recoverPendingCollectMedia(ctx, min(mediaBatchSize, 50)); err != nil {
 		g.Log().Warningf(ctx, "恢复待处理采集媒体任务失败：%+v", err)
 	}
+	if err := s.recoverRecentOrphanCollectReviews(ctx, 5); err != nil {
+		g.Log().Warningf(ctx, "恢复近期孤立采集审核失败：%+v", err)
+	}
 	if blocked, err := s.collectRecoveryBackpressure(ctx); err != nil {
 		g.Log().Warningf(ctx, "读取实时采集背压状态失败，暂停本轮历史恢复：%+v", err)
 		return
@@ -142,6 +145,118 @@ func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	if err := s.recoverCollectPublishTasks(ctx, 100); err != nil {
 		g.Log().Warningf(ctx, "恢复采集推送任务失败：%+v", err)
 	}
+}
+
+// Rebuild only recent reviewing dispatches whose review row disappeared. Old
+// orphaned rows are excluded because they may reflect an intentional action in
+// an older application version.
+func (s *sSysPublish) recoverRecentOrphanCollectReviews(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		limit = 20
+	}
+	now := gtime.Now()
+	reviewTable := pdao.YoubanPublishCollectReview.Table()
+	ruleTable := pdao.YoubanPublishCollectRule.Table()
+	rows, err := g.DB().Model(publishCollectDispatchTable+" d").Safe().Ctx(ctx).
+		Fields("d.id,d.event_id,d.review_id,d.tenant_id,d.account_id,d.rule_id,d.updated_at").
+		Where("d.status", sysin.CollectDispatchStatusReviewing).
+		Where("d.profile_id", 0).
+		WhereGTE("d.updated_at", now.Add(-24*time.Hour)).
+		WhereLTE("d.updated_at", now.Add(-5*time.Minute)).
+		Where("(COALESCE(d.review_id,0)=0 OR NOT EXISTS (SELECT 1 FROM "+reviewTable+" r WHERE r.id=d.review_id))").
+		Where("EXISTS (SELECT 1 FROM "+publishCollectEventTable+" e WHERE e.id=d.event_id AND e.status=?)", sysin.CollectEventStatusDispatched).
+		Where("EXISTS (SELECT 1 FROM " + ruleTable + " r WHERE r.id=d.rule_id AND r.status=1 AND r.review_enabled=1 AND r.deleted_at IS NULL)").
+		OrderAsc("d.updated_at").Limit(limit).All()
+	if err != nil {
+		return gerror.Wrap(err, "读取近期孤立采集审核分发失败")
+	}
+	for _, row := range rows {
+		dispatchID, eventID := row["id"].Int64(), row["event_id"].Int64()
+		if dispatchID <= 0 || eventID <= 0 {
+			continue
+		}
+		eventLock := hglock.NewConfig(2*time.Minute, 50*time.Millisecond).
+			Mutex(fmt.Sprintf("youban_publish:collect:event:%d", eventID))
+		if err = eventLock.TryLock(ctx); err != nil {
+			if !errors.Is(err, hglock.ErrLockFailed) && ctx.Err() == nil {
+				g.Log().Warningf(ctx, "获取孤立审核事件锁失败 eventId:%d err:%+v", eventID, err)
+			}
+			continue
+		}
+		recoverErr := s.recoverOneOrphanCollectReview(ctx, row)
+		_ = eventLock.Unlock(context.Background())
+		if recoverErr != nil {
+			g.Log().Warningf(ctx, "恢复孤立采集审核失败 dispatchId:%d eventId:%d err:%+v", dispatchID, eventID, recoverErr)
+		}
+	}
+	return nil
+}
+
+func (s *sSysPublish) recoverOneOrphanCollectReview(ctx context.Context, dispatch gdb.Record) error {
+	dispatchID, eventID := dispatch["id"].Int64(), dispatch["event_id"].Int64()
+	current, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
+		Where("id", dispatchID).Where("status", sysin.CollectDispatchStatusReviewing).One()
+	if err != nil || current.IsEmpty() {
+		return err
+	}
+	existing, err := pdao.YoubanPublishCollectReview.Ctx(ctx).Where("dispatch_id", dispatchID).OrderDesc("id").One()
+	if err != nil {
+		return gerror.Wrap(err, "检查孤立审核的已有记录失败")
+	}
+	if !existing.IsEmpty() {
+		if existing["status"].String() != sysin.CollectReviewStatusPending {
+			return nil
+		}
+		_, err = pdao.YoubanPublishCollectDispatch.Ctx(ctx).Where("id", dispatchID).
+			Where("status", sysin.CollectDispatchStatusReviewing).
+			Data(g.Map{"review_id": existing["id"].Int64(), "updated_at": gtime.Now()}).Update()
+		return gerror.Wrap(err, "重新关联孤立审核记录失败")
+	}
+	event, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).Where("id", eventID).
+		Where("status", sysin.CollectEventStatusDispatched).One()
+	if err != nil || event.IsEmpty() {
+		return err
+	}
+	rule, err := pdao.YoubanPublishCollectRule.Ctx(ctx).
+		Where("id", current["rule_id"].Int64()).Where("status", 1).
+		Where("review_enabled", 1).WhereNull("deleted_at").One()
+	if err != nil || rule.IsEmpty() {
+		return err
+	}
+	// Clear only the dangling pointer. The row and event are fenced by status;
+	// createCollectReview then uses the normal media preparation and review path.
+	reviewTable := pdao.YoubanPublishCollectReview.Table()
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		locked, lockErr := tx.Model(publishCollectDispatchTable).Where("id", dispatchID).
+			Where("status", sysin.CollectDispatchStatusReviewing).
+			Where("profile_id", 0).LockUpdate().One()
+		if lockErr != nil || locked.IsEmpty() {
+			return lockErr
+		}
+		stillMissing, checkErr := tx.Model(reviewTable).Where("dispatch_id", dispatchID).Count()
+		if checkErr != nil || stillMissing > 0 {
+			return checkErr
+		}
+		_, updateErr := tx.Model(publishCollectDispatchTable).Where("id", dispatchID).
+			Where("status", sysin.CollectDispatchStatusReviewing).
+			Where("profile_id", 0).
+			Where("review_id", locked["review_id"].Int64()).
+			Data(g.Map{"review_id": 0, "updated_at": gtime.Now()}).Update()
+		return updateErr
+	})
+	if err != nil {
+		return gerror.Wrap(err, "清理孤立审核引用失败")
+	}
+	content, err := s.collectContentSnapshot(ctx, event)
+	if err != nil {
+		return gerror.Wrap(err, "恢复孤立审核资料快照失败")
+	}
+	text := strings.TrimSpace(event["raw_text"].String())
+	if err = s.createCollectReview(ctx, event, content, rule, dispatchID, text); err != nil {
+		return err
+	}
+	g.Log().Warningf(ctx, "已通过正常采集审核流程恢复孤立审核 dispatchId:%d eventId:%d", dispatchID, eventID)
+	return nil
 }
 
 // A fairness retry can leave the event in media_pending after all media rows
@@ -343,7 +458,6 @@ func (s *sSysPublish) recoverBotCollectMedia(ctx context.Context, limit int) err
 			continue
 		}
 		if queued {
-			releaseCollectMediaRecovery(ctx, payload.EventId)
 			status := row[e.Status].String()
 			if _, updateErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).
 				Where(e.Id, payload.EventId).
@@ -355,10 +469,6 @@ func (s *sSysPublish) recoverBotCollectMedia(ctx context.Context, limit int) err
 			}
 			requeued++
 			g.Log().Infof(ctx, "BOT媒体事件已按事件重新入队 eventId:%d sourceId:%d", payload.EventId, payload.SourceId)
-		} else {
-			// A duplicate/empty enqueue result must not leave the recovery guard
-			// blocking the next pass. The database state is authoritative.
-			releaseCollectMediaRecovery(ctx, payload.EventId)
 		}
 	}
 	if requeued > 0 {
@@ -535,11 +645,9 @@ func (s *sSysPublish) recoverPendingCollectMedia(ctx context.Context, limit int)
 			continue
 		}
 		if !enqueued {
-			releaseCollectMediaRecovery(ctx, payload.EventId)
 			observeCollectMediaScheduler(ctx, "recovery_enqueue_skipped", payload.TenantId, payload.TgAccountId)
 			continue
 		}
-		releaseCollectMediaRecovery(ctx, payload.EventId)
 		observeCollectMediaScheduler(ctx, "recovery_reenqueued", payload.TenantId, payload.TgAccountId)
 		if _, updateErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).
 			Where(eventCols.Id, payload.EventId).

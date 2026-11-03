@@ -169,8 +169,9 @@ func (s *sSysPublish) enqueueCollectMediaCacheTaskWithUnique(ctx context.Context
 		return false, err
 	}
 	task := asynq.NewTask(tgTaskTypeCollectMedia, body)
+	queueName := collectMediaQueueName(ctx, payload)
 	options := []asynq.Option{
-		asynq.Queue(collectMediaQueueName(ctx, payload)),
+		asynq.Queue(queueName),
 		asynq.MaxRetry(10),
 		asynq.Timeout(collectMediaTaskTimeout),
 	}
@@ -180,7 +181,16 @@ func (s *sSysPublish) enqueueCollectMediaCacheTaskWithUnique(ctx context.Context
 	if delay > 0 {
 		options = append(options, asynq.ProcessIn(delay))
 	}
-	_, err = client.EnqueueContext(ctx, task, options...)
+	var enqueued bool
+	if unique {
+		_, err = client.EnqueueContext(ctx, task, options...)
+		enqueued = err == nil
+	} else {
+		inspector := asynq.NewInspector(telegramQueueRedisOpt(ctx))
+		defer inspector.Close()
+		taskKey := fmt.Sprintf("collect-media:%d:%s:%d", payload.EventId, payload.Reason, payload.DeferredAttempts)
+		enqueued, err = enqueueCollectMediaCacheTaskWithID(ctx, client, inspector, task, queueName, options, taskKey, payload.EventId)
+	}
 	if errors.Is(err, asynq.ErrDuplicateTask) || errors.Is(err, asynq.ErrTaskIDConflict) {
 		observeCollectMediaEnqueue(ctx, payload.Reason, "duplicate")
 		return false, nil
@@ -190,7 +200,30 @@ func (s *sSysPublish) enqueueCollectMediaCacheTaskWithUnique(ctx context.Context
 	} else {
 		observeCollectMediaEnqueue(ctx, payload.Reason, "success")
 	}
-	return err == nil, err
+	return enqueued, err
+}
+
+func enqueueCollectMediaCacheTaskWithID(ctx context.Context, client *asynq.Client, inspector *asynq.Inspector, task *asynq.Task, queueName string, options []asynq.Option, baseID string, eventID int64) (bool, error) {
+	for generation := 0; generation < 100; generation++ {
+		taskID := baseID
+		if generation > 0 {
+			taskID = fmt.Sprintf("%s:repair:%d", baseID, generation)
+		}
+		taskOptions := append([]asynq.Option(nil), options...)
+		taskOptions = append(taskOptions, asynq.TaskID(taskID))
+		_, err := client.EnqueueContext(ctx, task, taskOptions...)
+		if !errors.Is(err, asynq.ErrTaskIDConflict) {
+			return err == nil, err
+		}
+		info, lookupErr := inspector.GetTaskInfo(queueName, taskID)
+		if lookupErr != nil {
+			return false, fmt.Errorf("读取采集媒体任务冲突状态失败: %w", lookupErr)
+		}
+		if info.State != asynq.TaskStateArchived && info.State != asynq.TaskStateCompleted {
+			return false, nil
+		}
+	}
+	return false, fmt.Errorf("采集事件 %d 的媒体任务历史轮次过多，需要人工检查", eventID)
 }
 
 func decodeCollectMediaQueuePayload(task *asynq.Task) (collectMediaQueuePayload, error) {
