@@ -626,13 +626,18 @@ func (s *sSysPublish) indexTelegramGeneratedMedia(ctx context.Context, media *te
 	if media.Id <= 0 {
 		return nil
 	}
-	owner, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
-		Fields("tenant_id,account_id,profile_id").Where("id", media.Id).WhereNull("deleted_at").One()
+	// Sending can race with profile/media cleanup. The Telegram payload has
+	// already been prepared from this row, so a soft-deleted row still carries
+	// the authoritative search scope. Use Unscoped for this non-critical index
+	// lookup; a missing owner must never block the actual Telegram send.
+	owner, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Unscoped().
+		Fields("tenant_id,account_id,profile_id").Where("id", media.Id).One()
 	if err != nil {
 		return gerror.Wrap(err, "读取生成媒体归属失败")
 	}
 	if owner.IsEmpty() || owner["tenant_id"].Int64() <= 0 || owner["account_id"].Int64() <= 0 || owner["profile_id"].Int64() <= 0 {
-		return gerror.New("生成媒体原始资料已失效，无法建立搜索索引")
+		g.Log().Warningf(ctx, "生成媒体归属已不存在，跳过防扫图搜索索引 mediaId:%d", media.Id)
+		return nil
 	}
 	return s.saveAntiScanSearchFingerprint(ctx, telegramJobRecord{
 		TenantId: owner["tenant_id"].Int64(), AccountId: owner["account_id"].Int64(), ProfileId: owner["profile_id"].Int64(),
