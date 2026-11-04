@@ -20,6 +20,10 @@ func (s *sGateway) dispatch(ctx context.Context, key string, update *models.Upda
 		return err
 	}
 	dispatchStartedAt := time.Now()
+	updateID, kind := int64(0), gatewayUpdateKind(update)
+	if update != nil {
+		updateID = update.ID
+	}
 	if update != nil && update.InlineQuery != nil {
 		g.Log().Infof(ctx, "TG链路 gateway_inline_dispatch_start key:%s updateId:%d queryId:%s", key, update.ID, update.InlineQuery.ID)
 		defer func() {
@@ -37,7 +41,9 @@ func (s *sGateway) dispatch(ctx context.Context, key string, update *models.Upda
 	bindings := append([]service.BotBinding(nil), s.bindings[key]...)
 	s.mu.Unlock()
 	if len(bindings) == 0 {
+		bindingLoadStartedAt := time.Now()
 		loaded, err := s.loadBindings(ctx)
+		logGatewaySlowStage(ctx, updateID, key, kind, "bindings", "load", 0, time.Since(bindingLoadStartedAt), nil, err)
 		if err != nil {
 			return err
 		}
@@ -46,7 +52,7 @@ func (s *sGateway) dispatch(ctx context.Context, key string, update *models.Upda
 		bindings = append(bindings, s.bindings[key]...)
 		s.mu.Unlock()
 	}
-	g.Log().Infof(ctx, "TG链路 gateway_dispatch_bindings key:%s updateId:%d bindings:%d providers:%d", key, update.ID, len(bindings), len(service.Providers()))
+	g.Log().Infof(ctx, "TG链路 gateway_dispatch_bindings botKey:%s updateId:%d bindings:%d providers:%d", key, update.ID, len(bindings), len(service.Providers()))
 	if update != nil && update.InlineQuery != nil {
 		for _, binding := range bindings {
 			g.Log().Infof(ctx, "TG链路 gateway_inline_binding key:%s updateId:%d owner:%s reference:%d tenant:%d", key, update.ID, binding.Owner, binding.ReferenceID, binding.TenantID)
@@ -71,7 +77,9 @@ func (s *sGateway) dispatch(ctx context.Context, key string, update *models.Upda
 		if update != nil && update.InlineQuery != nil {
 			g.Log().Infof(ctx, "TG链路 gateway_inline_feature_start updateId:%d feature:%s", update.ID, feature.Key())
 		}
+		featureStartedAt := time.Now()
 		handled, featureErr := feature.HandleUpdate(ctx, botCtx, update)
+		logGatewaySlowStage(ctx, updateID, key, kind, "feature", feature.Key(), 0, time.Since(featureStartedAt), &handled, featureErr)
 		if update != nil && update.InlineQuery != nil {
 			g.Log().Infof(ctx, "TG链路 gateway_inline_feature_end updateId:%d feature:%s handled:%t err:%v", update.ID, feature.Key(), handled, featureErr)
 		}
@@ -104,12 +112,15 @@ func (s *sGateway) dispatch(ctx context.Context, key string, update *models.Upda
 		if update != nil && update.InlineQuery != nil {
 			g.Log().Infof(ctx, "TG链路 gateway_inline_provider_start updateId:%d provider:%s reference:%d", update.ID, binding.Owner, binding.ReferenceID)
 		}
+		providerStartedAt := time.Now()
 		if err := provider.HandleUpdate(ctx, binding, update); err != nil {
+			logGatewaySlowStage(ctx, updateID, key, kind, "provider", binding.Owner, binding.ReferenceID, time.Since(providerStartedAt), nil, err)
 			if update != nil && update.InlineQuery != nil {
 				g.Log().Warningf(ctx, "TG链路 gateway_inline_provider_error updateId:%d provider:%s reference:%d err:%+v", update.ID, binding.Owner, binding.ReferenceID, err)
 			}
 			return err
 		}
+		logGatewaySlowStage(ctx, updateID, key, kind, "provider", binding.Owner, binding.ReferenceID, time.Since(providerStartedAt), nil, nil)
 		if update != nil && update.InlineQuery != nil {
 			g.Log().Infof(ctx, "TG链路 gateway_inline_provider_end updateId:%d provider:%s reference:%d", update.ID, binding.Owner, binding.ReferenceID)
 		}

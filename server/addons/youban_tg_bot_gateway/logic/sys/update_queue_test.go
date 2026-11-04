@@ -108,6 +108,12 @@ func TestGatewayQueueConcurrencyHasSafeMinimum(t *testing.T) {
 	}
 }
 
+func TestGatewayTaskQueueNameFallsBackWhenContextHasNoQueue(t *testing.T) {
+	if got := gatewayTaskQueueName(context.Background()); got != "unknown" {
+		t.Fatalf("gatewayTaskQueueName() = %q, want unknown", got)
+	}
+}
+
 func TestGatewayInteractiveQueueClassification(t *testing.T) {
 	tests := []struct {
 		name   string

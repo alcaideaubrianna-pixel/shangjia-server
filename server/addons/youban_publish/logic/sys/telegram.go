@@ -16,6 +16,8 @@ import (
 
 const telegramBotMessageSourceTable = "hg_youban_publish_bot_message_source"
 
+const telegramUpdateSlowStageLogThreshold = 100 * time.Millisecond
+
 func (s *sSysPublish) telegramUpdateHandler(ctx context.Context, currentBot *tgbot.Bot, update *models.Update) {
 	botId := int64(0)
 	if currentBot != nil {
@@ -31,10 +33,18 @@ func (s *sSysPublish) handleTelegramUpdate(ctx context.Context, botId int64, ten
 	}
 	text := telegramMessageText(msg)
 	g.Log().Debugf(ctx, "收到上架插件Telegram消息 bot:%d type:%s chat:%d message:%d text:%s", botId, updateType, msg.Chat.ID, msg.ID, text)
+	stageStartedAt := time.Now()
 	s.recordTelegramBotMessageSource(ctx, botId, tenantId, update.ID, updateType, msg, text)
+	logTelegramUpdateSlowStage(ctx, update.ID, botId, "record_source", time.Since(stageStartedAt), nil)
+	stageStartedAt = time.Now()
 	s.handleTelegramAutoDelete(ctx, botId, tenantId, msg, text)
+	logTelegramUpdateSlowStage(ctx, update.ID, botId, "auto_delete_check", time.Since(stageStartedAt), nil)
+	stageStartedAt = time.Now()
 	if err := s.cacheBotMessage(ctx, tenantId, botId, msg); err != nil {
 		g.Log().Warningf(ctx, "缓存上架Bot频道消息失败 bot:%d chat:%d err:%+v", botId, msg.Chat.ID, err)
+		logTelegramUpdateSlowStage(ctx, update.ID, botId, "channel_cache", time.Since(stageStartedAt), err)
+	} else {
+		logTelegramUpdateSlowStage(ctx, update.ID, botId, "channel_cache", time.Since(stageStartedAt), nil)
 	}
 	matchCtx := context.WithoutCancel(ctx)
 	simple.SafeGo(matchCtx, func(ctx context.Context) {
@@ -42,6 +52,17 @@ func (s *sSysPublish) handleTelegramUpdate(ctx context.Context, botId int64, ten
 		defer cancel()
 		s.matchTelegramDeliveryAttempt(ctx, botId, msg, text)
 	})
+}
+
+func logTelegramUpdateSlowStage(ctx context.Context, updateID, botID int64, stage string, duration time.Duration, err error) {
+	if duration < telegramUpdateSlowStageLogThreshold && err == nil {
+		return
+	}
+	if err != nil {
+		g.Log().Warningf(ctx, "TG链路 publish_update_slow_stage updateId:%d botId:%d stage:%s duration:%s result:error errorType:%T", updateID, botID, stage, duration, err)
+		return
+	}
+	g.Log().Infof(ctx, "TG链路 publish_update_slow_stage updateId:%d botId:%d stage:%s duration:%s result:ok", updateID, botID, stage, duration)
 }
 
 func (s *sSysPublish) recordTelegramBotMessageSource(ctx context.Context, botId, tenantId int64, updateId int64, updateType string, msg *models.Message, text string) {
