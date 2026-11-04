@@ -172,11 +172,8 @@ func migrateBatchCycleCursorTx(ctx context.Context, tx gdb.TX, channelId, legacy
 
 func (s *sSysPublish) batchCycleCandidateCount(ctx context.Context, tenantId, channelId, cursor int64) (int, error) {
 	model := s.batchCycleEligibleProfileModel(ctx, tenantId, channelId)
-	// A batch must be filled from the tail and then wrapped to the head when
-	// the cursor is near the end. Counting only p.id>cursor would incorrectly
-	// shrink a configured 50-item batch to the remaining tail size.
 	if cursor > 0 {
-		return model.Count()
+		model = model.WhereGT("p.id", cursor)
 	}
 	return model.Count()
 }

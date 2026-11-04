@@ -1,6 +1,7 @@
 package sys
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -32,6 +33,64 @@ func TestCyclePublishIdentifiers(t *testing.T) {
 	}
 	if cyclePublishOperationNo(12, 34, 57) == operationNo {
 		t.Fatal("different channels must not share a cycle operation number")
+	}
+}
+
+func TestBatchCycleRunRemainingUsesRunSnapshot(t *testing.T) {
+	tests := []struct {
+		name   string
+		total  int
+		queued int
+		want   int
+	}{
+		{name: "production 25 of configured 55", total: 25, queued: 0, want: 25},
+		{name: "production 41 of configured 55", total: 41, queued: 0, want: 41},
+		{name: "partially produced", total: 55, queued: 40, want: 15},
+		{name: "snapshot completed", total: 25, queued: 25, want: 0},
+		{name: "legacy overcount is terminal", total: 25, queued: 55, want: 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := batchCycleRunRemaining(cycleRunRecord{TotalCount: tc.total, QueuedCount: tc.queued})
+			if got != tc.want {
+				t.Fatalf("remaining=%d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBatchCycleRunDoesNotWrapInsideRun(t *testing.T) {
+	// Production uses a single profile ID cursor. A run with 25 tail profiles
+	// and batch size 55 must finish after 25; wrapping is deferred to the next
+	// run so the same profile cannot be counted twice.
+	run := cycleRunRecord{TotalCount: 25, QueuedCount: 25, CursorId: 655114}
+	if remaining := batchCycleRunRemaining(run); remaining != 0 {
+		t.Fatalf("tail run must finish without wrapping, remaining=%d", remaining)
+	}
+}
+
+func TestBatchCycleRunProductionOvercountRegressions(t *testing.T) {
+	// Read-only production audit on 2026-11-04 found these scheduled runs with
+	// queued_count above their immutable candidate snapshot.
+	cases := []struct {
+		runID        int64
+		total        int
+		legacyQueued int
+	}{
+		{258, 2, 200}, {276, 19, 199}, {333, 8, 30}, {334, 9, 30},
+		{341, 18, 30}, {342, 19, 30}, {394, 30, 50}, {404, 2, 10},
+		{411, 2, 20}, {421, 8, 20}, {486, 32, 40}, {546, 200, 300},
+		{547, 200, 300}, {551, 25, 55},
+	}
+	for _, tc := range cases {
+		t.Run(fmt.Sprintf("run_%d", tc.runID), func(t *testing.T) {
+			if got := batchCycleRunRemaining(cycleRunRecord{TotalCount: tc.total}); got != tc.total {
+				t.Fatalf("initial remaining=%d, want snapshot total %d", got, tc.total)
+			}
+			if got := batchCycleRunRemaining(cycleRunRecord{TotalCount: tc.total, QueuedCount: tc.legacyQueued}); got != 0 {
+				t.Fatalf("overcounted legacy run must be terminal, remaining=%d", got)
+			}
+		})
 	}
 }
 

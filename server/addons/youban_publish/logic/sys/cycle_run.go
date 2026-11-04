@@ -372,7 +372,7 @@ func (s *sSysPublish) ExecuteCycleRun(ctx context.Context, runId int64) error {
 	}
 	pageLimit := cycleBatchPageSize
 	if channel.Mode == "batch" {
-		remaining := channel.BatchSize - run.QueuedCount
+		remaining := batchCycleRunRemaining(run)
 		if remaining <= 0 {
 			return s.beginChannelCycleDispatch(ctx, run)
 		}
@@ -425,6 +425,17 @@ func (s *sSysPublish) ExecuteCycleRun(ctx context.Context, runId int64) error {
 		return nil
 	}
 	return s.enqueueCycleRun(ctx, run.Id, time.Second)
+}
+
+// The run snapshot is the hard upper bound for one scheduled batch. The
+// channel batch size is only used when the run is created; using it again here
+// makes a short candidate set wrap and count the same profiles more than once.
+func batchCycleRunRemaining(run cycleRunRecord) int {
+	remaining := run.TotalCount - run.QueuedCount
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
 }
 
 func finishPermissionPausedCycleRunTx(ctx context.Context, tx gdb.TX, run cycleRunRecord, cursor int64, queued int) error {
@@ -529,15 +540,10 @@ func (s *sSysPublish) channelCyclePage(ctx context.Context, channel channelCycle
 		model = s.batchCycleEligibleProfileModel(ctx, channel.TenantId, channel.Id)
 	}
 	query := model.Fields("p.id AS id,ps.tenant_id,ps.account_id,p.id AS profile_id")
-	if channel.Mode == "batch" && cursorId > 0 {
-		// Keep the tail first, then wrap to the head in the same run so a
-		// configured 50-item batch remains full when only 26 tail rows remain.
-		// Order quotes string arguments as identifiers; use a typed raw expression
-		// so the cursor value is emitted as a numeric literal instead of a column.
-		query = query.Order(fmt.Sprintf("CASE WHEN p.id > %d THEN 0 ELSE 1 END", cursorId)).OrderAsc("p.id")
-	} else {
-		query = query.WhereGT("p.id", cursorId).OrderAsc("p.id")
-	}
+	// A persisted profile ID is monotonic and cannot represent a mid-run wrap.
+	// Finish the tail in this run; the scheduler resets to zero only when the
+	// next run observes that no IDs remain after the cursor.
+	query = query.WhereGT("p.id", cursorId).OrderAsc("p.id")
 	err := query.Limit(limit).Scan(&items)
 	if err != nil {
 		return nil, gerror.Wrap(err, "分页读取频道循环资料失败")
