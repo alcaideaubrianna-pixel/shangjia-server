@@ -14,13 +14,15 @@ import (
 )
 
 const (
-	telegramOutboxEventPublish = "telegram_job.publish"
-	telegramOutboxPending      = "pending"
-	telegramOutboxProcessing   = "processing"
-	telegramOutboxDelivered    = "delivered"
-	telegramOutboxLeaseTTL     = 30 * time.Second
-	telegramOutboxQueryTimeout = 5 * time.Second
-	telegramOutboxWorkers      = 32
+	telegramOutboxEventPublish  = "telegram_job.publish"
+	telegramOutboxPending       = "pending"
+	telegramOutboxProcessing    = "processing"
+	telegramOutboxDelivered     = "delivered"
+	telegramOutboxLeaseTTL      = 30 * time.Second
+	telegramOutboxQueryTimeout  = 5 * time.Second
+	telegramOutboxWorkers       = 32
+	telegramOutboxBatchLimit    = 1000
+	telegramOutboxMaxBatchLimit = 2000
 
 	telegramOutboxDecisionWait     = "wait"
 	telegramOutboxDecisionDispatch = "dispatch"
@@ -351,10 +353,16 @@ func (s *sSysPublish) dueTelegramJobOutboxRows(ctx context.Context, limit int, n
 	if strings.EqualFold(strings.TrimSpace(g.DB().GetConfig().Type), "pgsql") {
 		query := telegramDueOutboxPostgresSQL()
 		var rows []telegramJobOutboxRecord
+		batchLimit := limit
+		if batchLimit <= 0 {
+			batchLimit = telegramOutboxBatchLimit
+		}
+		if batchLimit > telegramOutboxMaxBatchLimit {
+			batchLimit = telegramOutboxMaxBatchLimit
+		}
 		if err := g.DB().GetScan(queryCtx, &rows, query,
 			telegramOutboxEventPublish, now, telegramOutboxPending, telegramOutboxProcessing, now,
-			now, telegramOutboxEventPublish, now,
-			telegramOutboxPending, telegramOutboxProcessing, now,
+			now, batchLimit,
 		); err != nil {
 			return nil, gerror.Wrap(err, "读取每频道待投递TG任务Outbox失败")
 		}
@@ -402,44 +410,50 @@ func (s *sSysPublish) dueTelegramJobOutboxRows(ctx context.Context, limit int, n
 
 func telegramDueOutboxPostgresSQL() string {
 	channelKey := telegramOutboxChannelKeySQL("j")
-	return `WITH terminal_outboxes AS MATERIALIZED (
-		SELECT DISTINCT ON (j.tenant_id, ` + channelKey + `)
-			o.id,o.job_id,o.attempt_count,o.available_at,j.tenant_id,j.channel_id,j.target_chat_id,
-			999 AS schedule_rank,0 AS effective_priority
-		FROM ` + publishTgOutboxTable + ` o
-		JOIN ` + publishTgJobTable + ` j ON j.id=o.job_id
-		WHERE j.status IN ('sent','failed','superseded')
-			AND o.event_type=? AND o.available_at<=?
-			AND (o.status=? OR (o.status=? AND o.lease_expires_at<=?))
-		ORDER BY j.tenant_id, ` + channelKey + `, o.available_at,o.id
-	), active_jobs AS MATERIALIZED (
-		SELECT j.id,j.tenant_id,j.channel_id,j.target_chat_id,j.status,j.dispatch_status,j.next_retry_at,j.created_at,j.operation_no,j.send_phase,j.bot_id,j.push_mode,j.priority,
+	earlierChannelKey := telegramOutboxChannelKeySQL("earlier")
+	return `WITH due_outboxes AS MATERIALIZED (
+		SELECT id,job_id,attempt_count,available_at
+		FROM ` + publishTgOutboxTable + `
+		WHERE event_type=? AND available_at<=?
+			AND (status=? OR (status=? AND lease_expires_at<=?))
+	), due_jobs AS MATERIALIZED (
+		SELECT o.id,o.job_id,o.attempt_count,o.available_at,
+			j.tenant_id,j.channel_id,j.target_chat_id,j.status,j.dispatch_status,j.next_retry_at,
+			j.created_at,j.operation_no,j.send_phase,j.priority,
 			` + telegramChannelScheduleRankSQL("j") + ` AS schedule_rank
-		FROM ` + publishTgJobTable + ` j
-		WHERE ` + telegramChannelBlockingJobStateSQL("j") + `
-	), channel_job_heads AS (
-		SELECT DISTINCT ON (j.tenant_id, ` + channelKey + `)
-			j.id AS job_id,j.tenant_id,j.channel_id,j.target_chat_id,j.status,j.dispatch_status,j.next_retry_at,j.created_at,j.operation_no,j.bot_id,j.push_mode,j.send_phase,j.priority,j.schedule_rank
-		FROM active_jobs j
-		ORDER BY j.tenant_id, ` + channelKey + `, ` + telegramChannelScheduleOrderSQL("j") + `
+		FROM due_outboxes o
+		JOIN ` + publishTgJobTable + ` j ON j.id=o.job_id
+	), active_heads AS (
+		SELECT j.id,j.job_id,j.attempt_count,j.available_at,j.tenant_id,j.channel_id,j.target_chat_id,
+			j.status,j.dispatch_status,j.next_retry_at,j.created_at,j.operation_no,j.send_phase,j.priority,j.schedule_rank
+		FROM due_jobs j
+		WHERE j.status IN ('pending','failed_retry','unknown')
+			AND COALESCE(j.dispatch_status,'') IN ('','idle')
+			AND (j.next_retry_at IS NULL OR j.next_retry_at<=?)
+			AND NOT EXISTS (
+				SELECT 1 FROM ` + publishTgJobTable + ` earlier
+				WHERE earlier.tenant_id=j.tenant_id
+					AND ` + earlierChannelKey + `=` + channelKey + `
+					AND ` + telegramChannelBlockingJobStateSQL("earlier") + `
+					AND ` + telegramChannelSchedulePrecedesSQL("earlier", "j") + `
+			)
+	), terminal_outboxes AS (
+		SELECT id,job_id,attempt_count,available_at,tenant_id,channel_id,target_chat_id,999 AS schedule_rank,0 AS effective_priority
+		FROM due_jobs
+		WHERE status IN ('sent','failed','superseded')
 	)
-	SELECT o.id,o.job_id,o.attempt_count,o.available_at,h.tenant_id,h.channel_id,h.target_chat_id,
-		h.schedule_rank,` + telegramJobEffectivePrioritySQL("h") + ` AS effective_priority
-	FROM channel_job_heads h
-	JOIN ` + publishTgOutboxTable + ` o ON o.job_id=h.job_id
-	WHERE h.status IN ('pending','failed_retry','unknown')
-		AND COALESCE(h.dispatch_status,'') IN ('','idle')
-		AND (h.next_retry_at IS NULL OR h.next_retry_at<=?)
-		AND o.event_type=? AND o.available_at<=?
-		AND (o.status=? OR (o.status=? AND o.lease_expires_at<=?))
+	SELECT id,job_id,attempt_count,available_at,tenant_id,channel_id,target_chat_id,
+		schedule_rank,` + telegramJobEffectivePrioritySQL("") + ` AS effective_priority
+	FROM active_heads
 	UNION ALL
 	SELECT id,job_id,attempt_count,available_at,tenant_id,channel_id,target_chat_id,schedule_rank,effective_priority
 	FROM terminal_outboxes
-	ORDER BY schedule_rank,effective_priority,available_at,id`
+	ORDER BY schedule_rank,effective_priority,available_at,id
+	LIMIT ?`
 }
 
 func telegramOutboxChannelKeySQL(alias string) string {
-	return "CASE WHEN NULLIF(REPLACE(COALESCE(" + alias + ".target_chat_id,''), '-100', ''),'') IS NOT NULL THEN 'chat:' || REPLACE(" + alias + ".target_chat_id, '-100', '') WHEN " + alias + ".channel_id > 0 THEN " + alias + ".channel_id::text ELSE 'chat:' || COALESCE(" + alias + ".target_chat_id,'') END"
+	return "CASE WHEN NULLIF(REPLACE(COALESCE(" + alias + ".target_chat_id,''), '-100', ''),'') IS NOT NULL THEN 'chat:' || REPLACE(COALESCE(" + alias + ".target_chat_id,''), '-100', '') WHEN " + alias + ".channel_id > 0 THEN " + alias + ".channel_id::text ELSE 'chat:' || COALESCE(" + alias + ".target_chat_id,'') END"
 }
 
 func fairTelegramOutboxRows(candidates []telegramJobOutboxRecord, limit int) []telegramJobOutboxRecord {
