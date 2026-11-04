@@ -53,7 +53,37 @@ const (
 var (
 	profileNoFindRegexp   = regexp.MustCompile(`(?i)\b[A-Z][A-Z0-9]{4,}\b`)
 	profileMarkFindRegexp = regexp.MustCompile(`^\S{0,32}[0-9]{3}$`)
+	profileFinalizeGate   chan struct{}
+	profileFinalizeOnce   sync.Once
 )
+
+func profileFinalizeConcurrency() int {
+	const defaultConcurrency = 32
+	value, err := strconv.Atoi(strings.TrimSpace(os.Getenv("YOUBAN_BOT_PROFILE_FINALIZE_CONCURRENCY")))
+	if err != nil || value <= 0 {
+		return defaultConcurrency
+	}
+	if value > 256 {
+		return 256
+	}
+	return value
+}
+
+func acquireProfileFinalizeSlot(ctx context.Context) error {
+	profileFinalizeOnce.Do(func() {
+		profileFinalizeGate = make(chan struct{}, profileFinalizeConcurrency())
+	})
+	select {
+	case profileFinalizeGate <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func releaseProfileFinalizeSlot() {
+	<-profileFinalizeGate
+}
 
 type botProfileAccount struct {
 	TenantId              int64
@@ -3283,6 +3313,11 @@ func (s *sSysBot) finishProfileMediaGroup(botId int64, groupId string, account *
 	defer processCancel()
 	trace := fmt.Sprintf("PF-%d", session.Id)
 	startedAt := time.Now()
+	if err := acquireProfileFinalizeSlot(ctx); err != nil {
+		g.Log().Warningf(context.Background(), "Bot资料媒体组收尾排队超时 trace:%s groupId:%s err:%v", trace, groupId, err)
+		return
+	}
+	defer releaseProfileFinalizeSlot()
 	// The lock covers debounce, reconstruction, and consumption. Locking only
 	// the snapshot read allows separate Web instances to finalize the same group.
 	finalizeLock, err := tryProfileMediaFinalizeLock(session.Id, groupId)
@@ -3484,6 +3519,11 @@ func (s *sSysBot) rebuildProfileMediaGroupFromStoredMessages(ctx context.Context
 func (s *sSysBot) finishPendingProfileVerifyGroup(botId int64, account *botProfileAccount, sessionId int64) {
 	ctx, processCancel := context.WithTimeout(context.Background(), profileProcessingTimeout)
 	defer processCancel()
+	if err := acquireProfileFinalizeSlot(ctx); err != nil {
+		g.Log().Warningf(context.Background(), "Bot资料验证组收尾排队超时 trace:PF-%d err:%v", sessionId, err)
+		return
+	}
+	defer releaseProfileFinalizeSlot()
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			g.Log().Errorf(ctx, "Bot资料验证组收尾发生未捕获异常 trace:PF-%d panic:%v", sessionId, recovered)
