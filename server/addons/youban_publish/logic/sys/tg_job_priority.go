@@ -27,7 +27,8 @@ func telegramJobPriorityValue(job telegramJobRecord) int {
 		return tgJobPriorityInteractive
 	}
 	if strings.HasPrefix(operationNo, "quick_push:") ||
-		strings.HasPrefix(operationNo, "message_push:") {
+		strings.HasPrefix(operationNo, "message_push:") ||
+		strings.HasPrefix(operationNo, "collect:") {
 		return tgJobPriorityUrgent
 	}
 	if strings.HasPrefix(operationNo, "full_push:") {
@@ -47,9 +48,18 @@ func telegramJobEffectivePrioritySQL(alias string) string {
 	if strings.TrimSpace(alias) != "" {
 		prefix = strings.TrimSpace(alias) + "."
 	}
-	return fmt.Sprintf(
-		"CASE WHEN %sstatus = 'unknown' THEN %d WHEN LOWER(TRIM(%soperation_no)) LIKE 'edit:%%' THEN %d WHEN %soperation_no LIKE 'full_push:%%' THEN %d WHEN %soperation_no LIKE 'cycle_batch:%%' THEN %d ELSE %spriority END",
-		prefix, tgJobPriorityUrgent, prefix, tgJobPriorityInteractive, prefix, tgJobPriorityFullPush, prefix, tgJobPriorityBulk, prefix,
+	return fmt.Sprintf("CASE WHEN %sstatus = 'unknown' THEN %d "+
+		"WHEN LOWER(TRIM(%soperation_no)) LIKE 'profile:%%' OR LOWER(TRIM(%soperation_no)) LIKE 'edit:%%' OR LOWER(TRIM(%soperation_no)) LIKE 'bot_publish:%%' OR LOWER(TRIM(%soperation_no)) LIKE 'batchtext:%%' THEN %d "+
+		"WHEN LOWER(TRIM(%soperation_no)) LIKE 'quick_push:%%' OR LOWER(TRIM(%soperation_no)) LIKE 'message_push:%%' OR LOWER(TRIM(%soperation_no)) LIKE 'collect:%%' THEN %d "+
+		"WHEN LOWER(TRIM(%soperation_no)) LIKE 'full_push:%%' THEN %d "+
+		"WHEN LOWER(TRIM(%soperation_no)) LIKE 'cycle_batch:%%' THEN %d "+
+		"ELSE COALESCE(NULLIF(%spriority, 0), %d) END",
+		prefix, tgJobPriorityUrgent,
+		prefix, prefix, prefix, prefix, tgJobPriorityInteractive,
+		prefix, prefix, prefix, tgJobPriorityUrgent,
+		prefix, tgJobPriorityFullPush,
+		prefix, tgJobPriorityBulk,
+		prefix, tgJobPriorityDefault,
 	)
 }
 
