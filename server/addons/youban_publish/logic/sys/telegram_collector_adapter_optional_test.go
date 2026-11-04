@@ -68,3 +68,35 @@ func TestSelectBotCollectChannelFallsBackToLegacyChatID(t *testing.T) {
 		t.Fatalf("selected channel id=%d, want legacy fallback channel id=33803", got.Id)
 	}
 }
+
+func TestSelectBotCollectChannelUsesCurrentAccountsApprovedMapping(t *testing.T) {
+	candidates := []botCollectChannelCandidate{
+		{Id: 33803, TelegramChatId: "3739452626", Title: "legacy"},
+		{Id: 97373, TelegramChatId: "-1003739452626", Title: "canonical"},
+	}
+	relations := []botCollectChannelRelation{
+		{Id: 1, ChannelId: 33803, CollectEnabled: 1, Status: "enabled", ApprovalStatus: "approved"},
+		{Id: 2, ChannelId: 97373, CollectEnabled: 0, Status: "disabled", ApprovalStatus: "rejected"},
+	}
+
+	got := selectBotCollectChannelForAccount(candidates, relations, "-1003739452626")
+	if got.Id != 33803 {
+		t.Fatalf("selected channel id=%d, want the legacy mapping approved for this account", got.Id)
+	}
+}
+
+func TestSelectBotCollectChannelPrefersCanonicalWhenAccountApprovesBoth(t *testing.T) {
+	candidates := []botCollectChannelCandidate{
+		{Id: 33803, TelegramChatId: "3739452626"},
+		{Id: 97373, TelegramChatId: "-1003739452626"},
+	}
+	relations := []botCollectChannelRelation{
+		{Id: 1, ChannelId: 33803, CollectEnabled: 1, Status: "enabled", ApprovalStatus: "approved"},
+		{Id: 2, ChannelId: 97373, CollectEnabled: 1, Status: "enabled", ApprovalStatus: "approved"},
+	}
+
+	got := selectBotCollectChannelForAccount(candidates, relations, "-1003739452626")
+	if got.Id != 97373 {
+		t.Fatalf("selected channel id=%d, want canonical mapping when both are approved", got.Id)
+	}
+}

@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"testing"
@@ -285,6 +286,100 @@ func TestMatchBotCollectionSourcesProductionCase(t *testing.T) {
 		if len(matched) != 2 || matched[0].ID != 130 || matched[1].ID != 131 {
 			t.Fatalf("%s update matched sources = %+v", messageType, matched)
 		}
+	}
+}
+
+func TestMatchBotCollectionSourcesFansOutToEveryAccountRule(t *testing.T) {
+	sources := []botCollectionSource{
+		{TenantID: 10, ID: 130},
+		{TenantID: 10, ID: 131},
+		{TenantID: 10, ID: 132},
+		{TenantID: 10, ID: 133},
+		{TenantID: 10, ID: 134},
+		{TenantID: 10, ID: 135},
+		{TenantID: 10, ID: 136},
+		{TenantID: 10, ID: 137},
+		{TenantID: 10, ID: 137}, // duplicate source binding must be attempted once
+		{TenantID: 11, ID: 140},
+	}
+
+	matched := matchBotCollectionSources(sources, 10, 9)
+	if len(matched) != 8 {
+		t.Fatalf("matched source count=%d, want eight unique enabled sources", len(matched))
+	}
+	for id := int64(130); id <= 137; id++ {
+		found := false
+		for _, source := range matched {
+			if source.ID == id {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("source %d was not included in fan-out", id)
+		}
+	}
+}
+
+func TestIngestBotCollectionSourcesContinuesAfterSourceFailure(t *testing.T) {
+	sources := []botCollectionSource{{TenantID: 10, ID: 130}, {TenantID: 10, ID: 131}, {TenantID: 10, ID: 132}}
+	wantFailure := errors.New("temporary database error")
+	attempted := make([]int64, 0, len(sources))
+	err := ingestBotCollectionSources(sources, func(source botCollectionSource) error {
+		attempted = append(attempted, source.ID)
+		if source.ID == 131 {
+			return wantFailure
+		}
+		return nil
+	})
+	if !errors.Is(err, wantFailure) {
+		t.Fatalf("combined error=%v, want wrapped source error", err)
+	}
+	if len(attempted) != len(sources) {
+		t.Fatalf("attempted sources=%v, want every source attempted", attempted)
+	}
+	for i, source := range sources {
+		if attempted[i] != source.ID {
+			t.Fatalf("attempted sources=%v, want source order %v", attempted, sources)
+		}
+	}
+}
+
+func TestIngestBotCollectionSourcesReturnsNilWhenAllAccepted(t *testing.T) {
+	sources := []botCollectionSource{{TenantID: 10, ID: 130}, {TenantID: 10, ID: 131}}
+	calls := 0
+	if err := ingestBotCollectionSources(sources, func(botCollectionSource) error {
+		calls++
+		return nil
+	}); err != nil {
+		t.Fatalf("unexpected ingest error: %v", err)
+	}
+	if calls != len(sources) {
+		t.Fatalf("ingest calls=%d, want %d", calls, len(sources))
+	}
+}
+
+func TestBotUpdateEventIdentityIsIndependentPerMatchedSource(t *testing.T) {
+	const (
+		tenantID = int64(10)
+		botID    = int64(9)
+		updateID = int64(7213)
+	)
+	sources := make([]botCollectionSource, 8)
+	for i := range sources {
+		sources[i] = botCollectionSource{TenantID: tenantID, ID: int64(130 + i)}
+	}
+	matched := matchBotCollectionSources(sources, tenantID, botID)
+	identities := make(map[string]int64, len(matched))
+	for _, source := range matched {
+		key := updateEventID("shared-bot", tenantID, source.ID, updateID, []byte(`{"message_id":7213}`))
+		if previous, exists := identities[key]; exists {
+			t.Fatalf("sources %d and %d share event identity %q", previous, source.ID, key)
+		}
+		identities[key] = source.ID
+	}
+	if len(identities) != 8 {
+		t.Fatalf("unique event identities=%d, want 8", len(identities))
 	}
 }
 

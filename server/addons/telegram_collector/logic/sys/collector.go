@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -618,12 +619,28 @@ type botCollectionSource struct {
 
 func matchBotCollectionSources(sources []botCollectionSource, tenantID, botID int64) []botCollectionSource {
 	matched := make([]botCollectionSource, 0, len(sources))
+	seen := make(map[int64]struct{}, len(sources))
 	for _, source := range sources {
-		if source.TenantID == tenantID && source.ID > 0 && botID > 0 {
-			matched = append(matched, source)
+		if source.TenantID != tenantID || source.ID <= 0 || botID <= 0 {
+			continue
 		}
+		if _, exists := seen[source.ID]; exists {
+			continue
+		}
+		seen[source.ID] = struct{}{}
+		matched = append(matched, source)
 	}
 	return matched
+}
+
+func ingestBotCollectionSources(sources []botCollectionSource, ingest func(botCollectionSource) error) error {
+	var ingestErrors []error
+	for _, source := range sources {
+		if err := ingest(source); err != nil {
+			ingestErrors = append(ingestErrors, fmt.Errorf("采集source %d接收Telegram更新失败: %w", source.ID, err))
+		}
+	}
+	return errors.Join(ingestErrors...)
 }
 
 func (f *botCollectorFeature) Key() string { return gatewayOwner }
@@ -638,6 +655,7 @@ func (f *botCollectorFeature) HandleUpdate(ctx context.Context, bot gatewayservi
 	if !collectorEnabled(ctx) {
 		return false, nil
 	}
+	var ingestErrors []error
 	for _, binding := range bot.Bindings {
 		if binding.Owner != gatewayOwner && binding.Owner != "youban_publish" {
 			continue
@@ -650,22 +668,23 @@ func (f *botCollectorFeature) HandleUpdate(ctx context.Context, bot gatewayservi
 			Fields("id,tenant_id").Where("tenant_id", binding.TenantID).
 			Where("bot_id", binding.ReferenceID).Where("source_type", "bot").
 			Where("collect_enabled", 1).Where("status", 1).WhereNull("deleted_at").Scan(&sources); err != nil {
-			return false, err
+			ingestErrors = append(ingestErrors, fmt.Errorf("读取TG Bot采集源失败 tenant:%d bot:%d: %w", binding.TenantID, binding.ReferenceID, err))
+			continue
 		}
 		matchedSources := matchBotCollectionSources(sources, binding.TenantID, binding.ReferenceID)
 		if len(matchedSources) == 0 {
 			g.Log().Warningf(ctx, "TG Bot采集更新未匹配到采集源 tenantId:%d botId:%d sourceCount:%d", binding.TenantID, binding.ReferenceID, len(sources))
 		}
-		for _, source := range matchedSources {
-			if err := collectorservice.Collector().IngestBotUpdate(ctx, collectorservice.BotContext{
+		if err := ingestBotCollectionSources(matchedSources, func(source botCollectionSource) error {
+			return collectorservice.Collector().IngestBotUpdate(ctx, collectorservice.BotContext{
 				Key: bot.Key, Token: bot.Token,
 				Binding: collectorservice.BotBinding{TenantID: source.TenantID, SourceID: source.ID, Reference: fmt.Sprintf("source:%d", source.ID)},
-			}, update); err != nil {
-				return false, err
-			}
+			}, update)
+		}); err != nil {
+			ingestErrors = append(ingestErrors, err)
 		}
 	}
 	// Collector is an additional gateway consumer. Returning false allows the
 	// existing provider features to process the same update as before.
-	return false, nil
+	return false, errors.Join(ingestErrors...)
 }
