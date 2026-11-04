@@ -93,6 +93,18 @@ func TestProfileMediaGroupPurposeUsesFirstAndSecondGroup(t *testing.T) {
 	}
 }
 
+func TestProfileMediaFinalizeLockKeyScopesSessionAndGroup(t *testing.T) {
+	if got, want := profileMediaFinalizeLockKey(1646, "group-1"), "youban_bot:profile_media_finalize:1646:group-1"; got != want {
+		t.Fatalf("profileMediaFinalizeLockKey() = %q, want %q", got, want)
+	}
+	if profileMediaFinalizeLockKey(1646, "group-1") == profileMediaFinalizeLockKey(1647, "group-1") {
+		t.Fatal("different sessions must not share a finalize lock")
+	}
+	if profileMediaFinalizeLockKey(1646, "group-1") == profileMediaFinalizeLockKey(1646, "group-2") {
+		t.Fatal("different media groups must not share a finalize lock")
+	}
+}
+
 func TestProfileShouldStageEarlyVerify(t *testing.T) {
 	tests := []struct {
 		name  string
