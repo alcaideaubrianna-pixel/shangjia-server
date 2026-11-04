@@ -5,6 +5,7 @@ import (
 
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"os"
@@ -44,6 +45,7 @@ const (
 	profileCreateMaxMediaBytes  = 100 * 1024 * 1024
 	profileMediaGroupDebounce   = 2 * time.Second
 	profileSessionTimeout       = 6 * time.Minute
+	profileProcessingTimeout    = 2 * time.Minute
 	profileMediaGroupCacheTTL   = 10 * time.Minute
 	templateInlinePhotoCacheTTL = 24 * time.Hour
 )
@@ -2472,9 +2474,16 @@ func (s *sSysBot) consumeProfileSessionMessage(ctx context.Context, botId int64,
 		return s.replyBotError(ctx, botId, fmt.Sprintf("%d", msg.Chat.ID), "资料管理", gerror.New("资料会话已失效，请重新开始新增资料"))
 	}
 	g.Log().Infof(ctx, "Bot资料收尾阶段开始 trace:%s stage:process_message_locked step:%s", trace, latest.Step)
-	err := s.consumeProfileSessionMessageLocked(ctx, botId, msg, account, latest, text, preparedMedia)
+	processCtx, processCancel := context.WithTimeout(ctx, profileProcessingTimeout)
+	defer processCancel()
+	err := s.consumeProfileSessionMessageLocked(processCtx, botId, msg, account, latest, text, preparedMedia)
 	if err != nil {
 		g.Log().Warningf(ctx, "Bot资料收尾阶段失败 trace:%s stage:process_message_locked elapsed_ms:%d err:%s", trace, time.Since(startedAt).Milliseconds(), sensitive.Diagnostic(err.Error()))
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(processCtx.Err(), context.DeadlineExceeded) {
+			timeoutCtx := context.Background()
+			g.Log().Errorf(timeoutCtx, "Bot资料收尾阶段超时 trace:%s timeout:%s step:%s", trace, profileProcessingTimeout, latest.Step)
+			_ = s.sendMessageOnly(timeoutCtx, botId, fmt.Sprintf("%d", msg.Chat.ID), fmt.Sprintf("资料处理超时，请重新发送。\n处理编号：%s", trace))
+		}
 		return err
 	}
 	g.Log().Infof(ctx, "Bot资料收尾阶段完成 trace:%s stage:process_message_locked elapsed_ms:%d", trace, time.Since(startedAt).Milliseconds())
