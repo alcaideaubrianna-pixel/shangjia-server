@@ -4,6 +4,10 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_tg_job_log_created" ON "hg_youban_publish_tg_job_log" ("created_at", "id");
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_import_run_log_created" ON "hg_youban_publish_import_run_log" ("created_at", "id");
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_collect_event_log_created" ON "hg_youban_publish_collect_event_log" ("created_at", "id");
+-- Event-log list queries filter by source_id through the event join. Keep the
+-- join index independent from status so the source filter can be applied
+-- before walking the 22GB event-log table.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_collect_event_source_id" ON "hg_youban_publish_collect_event" ("source_id", "id");
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_collect_history_log_created" ON "hg_youban_publish_collect_history_log" ("created_at", "id");
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_cycle_run_log_created" ON "hg_youban_publish_cycle_run_log" ("created_at", "id");
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_lazysheep_tggo_push_log_created" ON "hg_addon_lazysheep_tggo_push_log" ("created_at", "id");
