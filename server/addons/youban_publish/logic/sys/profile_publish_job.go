@@ -42,7 +42,7 @@ func (s *sSysPublish) profilePublishSource(ctx context.Context, profileId, tenan
 		return nil, gerror.Wrap(err, "读取待发布资料失败")
 	}
 	if row.IsEmpty() {
-		return nil, errPublishProfileUnavailable
+		return nil, gerror.New("资料不存在、已删除或账号归属已变化")
 	}
 	if requireOnline && (row["status"].Int() != 1 || row["visibility"].String() != consts.ContentVisibilityPublic) {
 		return nil, errPublishProfileUnavailable
