@@ -59,7 +59,13 @@ func (s *sSysBot) persistTelegramMedia(ctx context.Context, operatorAccountId in
 			defer cancel()
 			startedAt := time.Now()
 			g.Log().Infof(ctx, "Telegram媒体持久化开始 media_index:%d media_type:%s name:%s", index, item.MediaType, item.Name)
-			fileURL, storagePath, err := persistQuickPushMediaFile(mediaCtx, client, item.MediaType, item.Name, item.FileUrl)
+			fileURL, storagePath, reused := lookupBotTelegramMediaReuse(mediaCtx, operatorAccountId, item.MediaType, item.TgFileId)
+			var err error
+			if reused {
+				g.Log().Infof(ctx, "Telegram媒体存储复用 media_index:%d tg_file_id:%s", index, item.TgFileId)
+			} else {
+				fileURL, storagePath, err = persistQuickPushMediaFile(mediaCtx, client, item.MediaType, item.Name, item.FileUrl)
+			}
 			if err != nil {
 				g.Log().Warningf(ctx, "Telegram媒体持久化失败 media_index:%d elapsed_ms:%d err:%+v", index, time.Since(startedAt).Milliseconds(), err)
 				errMu.Lock()
@@ -126,6 +132,28 @@ func persistQuickPushMediaFile(ctx context.Context, client *http.Client, mediaTy
 		return "", "", gerror.New("系统存储未返回媒体地址")
 	}
 	return strings.TrimSpace(attachment.FileUrl), strings.TrimSpace(attachment.Path), nil
+}
+
+// lookupBotTelegramMediaReuse returns an already persisted Telegram asset.
+// Telegram file IDs are stable, so reusing the storage object avoids another
+// download/upload when the same media is submitted again.
+func lookupBotTelegramMediaReuse(ctx context.Context, accountID int64, mediaType, tgFileID string) (string, string, bool) {
+	tgFileID = strings.TrimSpace(tgFileID)
+	if accountID <= 0 || tgFileID == "" {
+		return "", "", false
+	}
+	row, err := g.DB().Model("hg_youban_publish_media").Safe().Ctx(ctx).
+		Fields("file_url,storage_path,poster_url,poster_storage_path").
+		Where("account_id", accountID).
+		Where("tg_file_id", tgFileID).
+		Where("media_type", strings.TrimSpace(mediaType)).
+		WhereNull("deleted_at").
+		Where("storage_path IS NOT NULL AND storage_path <> ''").
+		OrderDesc("id").One()
+	if err != nil || row.IsEmpty() {
+		return "", "", false
+	}
+	return strings.TrimSpace(row["file_url"].String()), strings.TrimSpace(row["storage_path"].String()), true
 }
 
 func quickPushMediaFilename(name string, mediaType string) string {
