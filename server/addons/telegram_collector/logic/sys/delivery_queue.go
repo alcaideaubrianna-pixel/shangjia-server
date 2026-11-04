@@ -326,6 +326,16 @@ func (s *sCollector) enqueueDueDeliveryTasks(ctx context.Context, limit int) err
 		columns.NextRunAt,
 		columns.NextRunAt,
 	)
+	// Keep a bounded recent-history lane ahead of the old backlog. Manual
+	// history imports otherwise wait behind every older account delivery even
+	// though they are already ready to process. The window is intentionally
+	// finite so a continuous stream of new imports cannot starve old work.
+	recentHistoryWindow := collectorDeliveryRecentHistoryWindow(ctx)
+	recentHistoryCutoff := now.Add(-recentHistoryWindow)
+	orderBy := fmt.Sprintf(
+		"%s DESC, CASE WHEN %s=? AND %s>=? THEN 0 ELSE 1 END, %s ASC",
+		columns.Priority, columns.Priority, columns.CreatedAt, columns.UpdatedAt,
+	)
 	rows, err := dao.TgCollectorDelivery.Ctx(ctx).
 		Fields(columns.Id, columns.Priority, columns.Status).
 		Where(condition,
@@ -333,8 +343,7 @@ func (s *sCollector) enqueueDueDeliveryTasks(ctx context.Context, limit int) err
 			sysin.DeliveryStatusFailedRetry, now,
 		).
 		WhereLT(columns.AttemptCount, deliveryMaxAttempts).
-		OrderDesc(columns.Priority).
-		OrderAsc(columns.UpdatedAt).
+		Order(orderBy, sysin.EventPriorityNormal, recentHistoryCutoff).
 		Limit(limit).
 		All()
 	if err != nil {
@@ -408,6 +417,17 @@ func collectorDeliveryHistoryInterval(ctx context.Context) time.Duration {
 		value = 100
 	}
 	return time.Duration(value) * time.Millisecond
+}
+
+func collectorDeliveryRecentHistoryWindow(ctx context.Context) time.Duration {
+	value := g.Cfg().MustGet(ctx, "telegramCollector.delivery.recentHistoryWindowMinutes", 60).Int()
+	if value < 1 {
+		value = 1
+	}
+	if value > 24*60 {
+		value = 24 * 60
+	}
+	return time.Duration(value) * time.Minute
 }
 
 // Quarantine only a deterministically malformed job by primary key. Keep its
