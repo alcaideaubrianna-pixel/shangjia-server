@@ -3,6 +3,7 @@ package global
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"runtime"
 	"strings"
@@ -29,7 +30,7 @@ func initOTel(ctx context.Context) error {
 }
 
 func initOTelWithConfig(ctx context.Context, endpointKey, secureKey, serviceKey string) error {
-	endpoint := strings.TrimSpace(g.Cfg().MustGet(ctx, endpointKey).String())
+	endpoint := normalizeOTLPEndpoint(strings.TrimSpace(g.Cfg().MustGet(ctx, endpointKey).String()))
 	if endpoint == "" {
 		return fmt.Errorf("OTLP endpoint is empty")
 	}
@@ -55,8 +56,13 @@ func initOTelWithConfig(ctx context.Context, endpointKey, secureKey, serviceKey 
 		return fmt.Errorf("create resource: %w", err)
 	}
 
+	headers := otlpHeaders()
 	traceOptions := []otlptracegrpc.Option{otlptracegrpc.WithEndpoint(endpoint)}
 	metricOptions := []otlpmetricgrpc.Option{otlpmetricgrpc.WithEndpoint(endpoint)}
+	if len(headers) > 0 {
+		traceOptions = append(traceOptions, otlptracegrpc.WithHeaders(headers))
+		metricOptions = append(metricOptions, otlpmetricgrpc.WithHeaders(headers))
+	}
 	if !secure {
 		traceOptions = append(traceOptions, otlptracegrpc.WithInsecure())
 		metricOptions = append(metricOptions, otlpmetricgrpc.WithInsecure())
@@ -95,6 +101,33 @@ func initOTelWithConfig(ctx context.Context, endpointKey, secureKey, serviceKey 
 	startRuntimeMetrics(ctx, metricProvider)
 	g.Log().Infof(ctx, "通用 OpenTelemetry 已启用 endpoint:%s service:%s role:%s", endpoint, serviceName, strings.Join(runrole.Roles(ctx), ","))
 	return nil
+}
+
+func normalizeOTLPEndpoint(endpoint string) string {
+	if endpoint == "" {
+		return endpoint
+	}
+	if strings.Contains(endpoint, "://") {
+		parsed, err := url.Parse(endpoint)
+		if err == nil && parsed.Host != "" {
+			endpoint = parsed.Host
+		}
+	}
+	if !strings.Contains(endpoint, ":") {
+		endpoint += ":443"
+	}
+	return endpoint
+}
+
+func otlpHeaders() map[string]string {
+	result := make(map[string]string)
+	for _, item := range strings.Split(os.Getenv("OTEL_EXPORTER_OTLP_HEADERS"), ",") {
+		key, value, ok := strings.Cut(strings.TrimSpace(item), "=")
+		if ok && strings.TrimSpace(key) != "" {
+			result[strings.TrimSpace(key)] = strings.TrimSpace(value)
+		}
+	}
+	return result
 }
 
 func registerTelemetryShutdown(traceProvider *sdktrace.TracerProvider, metricProvider *sdkmetric.MeterProvider) {

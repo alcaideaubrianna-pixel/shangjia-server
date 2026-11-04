@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "${1:-}" == "--env-file" ]]; then
+  exec "$(dirname "$0")/sae-env-update.sh" "$@"
+fi
+
 # Deploy one immutable image tag to all SAE roles in a safe order.
 # Usage: ./deploy/sae-deploy-all.sh e5b746c [web|background|collector|media|publish|scheduler|account ...]
 
