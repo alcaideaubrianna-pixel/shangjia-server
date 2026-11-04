@@ -2862,7 +2862,7 @@ func (s *sSysBot) consumeProfileCreatePart(ctx context.Context, botId int64, cha
 			// Each completed batch item starts a fresh inactivity window. Older
 			// timers re-check updated_at and exit without canceling this session.
 			s.scheduleProfileSessionTimeout(session.Id, botId, chatId)
-			go s.sendProfileCreateSuccessWithRetry(botId, chatId, res, true)
+			go s.sendProfileCreateSuccessWithRetry(botId, chatId, res, true, draft.DisplayMedia, draft.VerifyMedia)
 			return nil
 		}
 		stageStartedAt = time.Now()
@@ -2879,7 +2879,7 @@ func (s *sSysBot) consumeProfileCreatePart(ctx context.Context, botId int64, cha
 	return nil
 }
 
-func (s *sSysBot) sendProfileCreateSuccessWithRetry(botId int64, chatId string, res *publishsysin.ProfileSaveModel, batch ...bool) {
+func (s *sSysBot) sendProfileCreateSuccessWithRetry(botId int64, chatId string, res *publishsysin.ProfileSaveModel, batch ...interface{}) {
 	if res == nil {
 		return
 	}
@@ -2943,7 +2943,7 @@ func profileVerificationReceivedText(draft *profileCreateDraft) string {
 	return "已跳过验证资料，正在保存资料…"
 }
 
-func (s *sSysBot) sendProfileCreateSuccess(ctx context.Context, botId int64, chatId string, res *publishsysin.ProfileSaveModel, batch ...bool) error {
+func (s *sSysBot) sendProfileCreateSuccess(ctx context.Context, botId int64, chatId string, res *publishsysin.ProfileSaveModel, batch ...interface{}) error {
 	if res == nil {
 		return s.sendMessageOnly(ctx, botId, chatId, "创建成功！\n\n新资料默认下架，可在笔记列表中查看。")
 	}
@@ -2956,11 +2956,43 @@ func (s *sSysBot) sendProfileCreateSuccess(ctx context.Context, botId int64, cha
 	} else {
 		text += "\n\n新资料默认下架，可在笔记列表中查看。"
 	}
-	if len(batch) > 0 && batch[0] {
+	isBatch := len(batch) > 0 && batch[0] == true
+	if isBatch {
 		text = strings.Replace(text, "创建成功！", "当前资料已保存！", 1)
+		if len(batch) >= 3 {
+			display, _ := batch[1].([]*publishsysin.MessageTemplateMediaInp)
+			verify, _ := batch[2].([]*publishsysin.MessageTemplateMediaInp)
+			text += fmt.Sprintf("\n\n展示资料：%s\n验证资料：%s", formatProfileMediaSummary(display), formatProfileMediaSummary(verify))
+		}
 		text += fmt.Sprintf("\n\n如需继续新增，请发送【下一份展示资料】。连续 %s 无操作，将自动结束新增；也可发送 /cancel 立即结束。", profileSessionTimeoutText())
 	}
 	return s.sendProfileSaveNotice(ctx, botId, chatId, text, markup)
+}
+
+func formatProfileMediaSummary(media []*publishsysin.MessageTemplateMediaInp) string {
+	imageCount, videoCount := 0, 0
+	for _, item := range media {
+		if item == nil {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(item.MediaType)) {
+		case "image", "photo":
+			imageCount++
+		case "video":
+			videoCount++
+		}
+	}
+	if imageCount == 0 && videoCount == 0 {
+		return "0"
+	}
+	parts := make([]string, 0, 2)
+	if imageCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d 图片", imageCount))
+	}
+	if videoCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d 视频", videoCount))
+	}
+	return strings.Join(parts, "，")
 }
 
 // Save notifications respect the caller's deadline and never query profile views.

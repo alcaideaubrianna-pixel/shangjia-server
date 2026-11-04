@@ -35,7 +35,8 @@ func (s *sSysBot) persistTelegramMedia(ctx context.Context, operatorAccountId in
 	}
 	client.Timeout = 2 * time.Minute
 	defer client.CloseIdleConnections()
-	uploadCtx := quickPushMediaUploadContext(ctx, operatorAccountId)
+	uploadCtx, uploadCancel := context.WithTimeout(quickPushMediaUploadContext(ctx, operatorAccountId), 60*time.Second)
+	defer uploadCancel()
 	result := make([]*publishsysin.MessageTemplateMediaInp, len(media))
 	workerLimit := 4
 	if len(media) < workerLimit {
@@ -92,7 +93,16 @@ func (s *sSysBot) persistTelegramMedia(ctx context.Context, operatorAccountId in
 			g.Log().Infof(ctx, "Telegram媒体持久化完成 media_index:%d elapsed_ms:%d", index, time.Since(startedAt).Milliseconds())
 		}(index, item)
 	}
-	wait.Wait()
+	done := make(chan struct{})
+	go func() {
+		wait.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-uploadCtx.Done():
+		return nil, gerror.Wrap(uploadCtx.Err(), "Telegram媒体持久化超时")
+	}
 	if firstErr != nil {
 		return nil, firstErr
 	}
