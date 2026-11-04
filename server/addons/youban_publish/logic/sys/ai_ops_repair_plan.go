@@ -6,15 +6,19 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/gogf/gf/v2/container/gvar"
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/util/guid"
 
+	collectorservice "hotgo/addons/telegram_collector/service"
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
@@ -33,16 +37,18 @@ var aiOpsRepairActions = map[string]struct{}{
 	"republish_profiles":          {},
 	"delete_profiles":             {},
 	"repair_profile_media":        {},
+	"replay_bot_source_updates":   {},
 }
 
 type aiOpsRepairPlanPayload struct {
-	Action         string  `json:"action"`
-	SourceID       int64   `json:"sourceId"`
-	EventIDs       []int64 `json:"eventIds"`
-	VerifyEventIDs []int64 `json:"verifyEventIds"`
-	ProfileIDs     []int64 `json:"profileIds"`
-	TenantID       int64   `json:"tenantId"`
-	AccountID      int64   `json:"accountId"`
+	Action            string  `json:"action"`
+	SourceID          int64   `json:"sourceId"`
+	EventIDs          []int64 `json:"eventIds"`
+	VerifyEventIDs    []int64 `json:"verifyEventIds"`
+	CollectorEventIDs []int64 `json:"collectorEventIds,omitempty"`
+	ProfileIDs        []int64 `json:"profileIds"`
+	TenantID          int64   `json:"tenantId"`
+	AccountID         int64   `json:"accountId"`
 }
 
 func (s *sSysPublish) AIOpsCreateRepairPlan(ctx context.Context, in *sysin.AIOpsRepairPlanInp) (*sysin.AIOpsRepairPlanModel, error) {
@@ -56,22 +62,36 @@ func (s *sSysPublish) AIOpsCreateRepairPlan(ctx context.Context, in *sysin.AIOps
 	limit := in.Limit
 	if limit <= 0 {
 		limit = 100
+		if action == "replay_bot_source_updates" {
+			limit = 1000
+		}
 	}
 	if limit > 1000 {
 		return nil, gerror.New("单次修复最多1000条事件")
 	}
-	eventIDs, verifyEventIDs, profileIDs, err := s.previewAIOpsRepairTargets(ctx, action, in, limit)
+	var (
+		err                                                     error
+		eventIDs, verifyEventIDs, profileIDs, collectorEventIDs []int64
+		replayPreview                                           []*sysin.AIOpsSourceReplayPreviewItem
+		tenantID, accountID                                     int64
+	)
+	if action == "replay_bot_source_updates" {
+		collectorEventIDs, replayPreview, tenantID, accountID, err = s.previewAIOpsBotSourceReplay(ctx, in.SourceId, in.CollectorEventIds, limit)
+	} else {
+		eventIDs, verifyEventIDs, profileIDs, err = s.previewAIOpsRepairTargets(ctx, action, in, limit)
+		tenantID, accountID = in.TenantId, in.AccountId
+	}
 	if err != nil {
 		return nil, err
 	}
 	payload, err := json.Marshal(aiOpsRepairPlanPayload{
 		Action: action, SourceID: in.SourceId, EventIDs: eventIDs, VerifyEventIDs: verifyEventIDs, ProfileIDs: profileIDs,
-		TenantID: in.TenantId, AccountID: in.AccountId,
+		CollectorEventIDs: collectorEventIDs, TenantID: tenantID, AccountID: accountID,
 	})
 	if err != nil {
 		return nil, gerror.Wrap(err, "生成修复计划失败")
 	}
-	candidateCount := len(eventIDs) + len(verifyEventIDs)
+	candidateCount := len(eventIDs) + len(verifyEventIDs) + len(collectorEventIDs)
 	if candidateCount == 0 {
 		candidateCount = len(profileIDs)
 	}
@@ -92,8 +112,150 @@ func (s *sSysPublish) AIOpsCreateRepairPlan(ctx context.Context, in *sysin.AIOps
 	g.Log().Info(ctx, "AI运维修复计划已生成", g.Map{"planId": planID, "action": action, "candidates": candidateCount})
 	return &sysin.AIOpsRepairPlanModel{
 		PlanId: planID, Action: action, Candidates: candidateCount, EventIds: eventIDs, VerifyEventIds: verifyEventIDs, ProfileIds: profileIDs,
+		CollectorEventIds: collectorEventIDs, ReplayPreview: replayPreview,
 		ConfirmToken: token, ExpiresAt: expiresAt.Format(time.RFC3339),
 	}, nil
+}
+
+func (s *sSysPublish) previewAIOpsBotSourceReplay(ctx context.Context, sourceID int64, requested []int64, limit int) ([]int64, []*sysin.AIOpsSourceReplayPreviewItem, int64, int64, error) {
+	ids := uniqueIds(requested)
+	if sourceID <= 0 || len(ids) == 0 || len(ids) > limit {
+		return nil, nil, 0, 0, gerror.Newf("必须指定目标source和1到%d个Collector原始事件ID", limit)
+	}
+	var target struct {
+		ID             int64  `json:"id"`
+		TenantID       int64  `json:"tenantId"`
+		AccountID      int64  `json:"accountId"`
+		BotID          int64  `json:"botId"`
+		SourceType     string `json:"sourceType"`
+		CollectEnabled int    `json:"collectEnabled"`
+		Status         int    `json:"status"`
+	}
+	sourceColumns := pdao.YoubanPublishCollectSource.Columns()
+	if err := pdao.YoubanPublishCollectSource.Ctx(ctx).
+		Fields(sourceColumns.Id, sourceColumns.TenantId, sourceColumns.AccountId, sourceColumns.BotId, sourceColumns.SourceType, sourceColumns.CollectEnabled, sourceColumns.Status).
+		Where(sourceColumns.Id, sourceID).WhereNull(sourceColumns.DeletedAt).Scan(&target); err != nil {
+		return nil, nil, 0, 0, gerror.Wrap(err, "读取目标采集source失败")
+	}
+	if target.ID <= 0 || target.TenantID <= 0 || target.AccountID <= 0 || target.BotID <= 0 || target.SourceType != sysin.CollectSourceTypeBot || target.CollectEnabled != 1 || target.Status != 1 {
+		return nil, nil, 0, 0, gerror.New("目标采集source不存在、未启用或不是Bot source")
+	}
+	if !s.collectGlobalEnabled(ctx) {
+		return nil, nil, 0, 0, gerror.New("采集总开关已关闭，当前不能重放")
+	}
+	if err := s.ensureTenantVipFeature(ctx, target.TenantID, sysin.TenantVipFeatureCollectSource); err != nil {
+		return nil, nil, 0, 0, gerror.Wrap(err, "目标租户当前不能处理采集重放")
+	}
+	candidates, err := collectorservice.Collector().BotUpdateReplayCandidates(ctx, target.TenantID, ids)
+	if err != nil {
+		return nil, nil, 0, 0, err
+	}
+	originIDs := make([]int64, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate == nil || candidate.ID <= 0 || candidate.SourceID <= 0 || candidate.BotKey == "" || candidate.ChatID == "" || candidate.MessageID <= 0 {
+			return nil, nil, 0, 0, gerror.New("原始Collector事件不是可重放的Bot消息")
+		}
+		originIDs = append(originIDs, candidate.SourceID)
+	}
+	originIDs = uniqueIds(originIDs)
+	var origins []struct {
+		ID    int64 `json:"id"`
+		BotID int64 `json:"botId"`
+	}
+	if err = pdao.YoubanPublishCollectSource.Ctx(ctx).
+		Fields(sourceColumns.Id, sourceColumns.BotId).Where(sourceColumns.TenantId, target.TenantID).
+		WhereIn(sourceColumns.Id, originIDs).Where(sourceColumns.SourceType, sysin.CollectSourceTypeBot).
+		WhereNull(sourceColumns.DeletedAt).Scan(&origins); err != nil {
+		return nil, nil, 0, 0, gerror.Wrap(err, "校验原始事件Bot来源失败")
+	}
+	originBotIDs := make(map[int64]int64, len(origins))
+	for _, origin := range origins {
+		originBotIDs[origin.ID] = origin.BotID
+	}
+	for _, candidate := range candidates {
+		if originBotIDs[candidate.SourceID] != target.BotID {
+			return nil, nil, 0, 0, gerror.Newf("原始事件%d与目标source不属于同一个Bot", candidate.ID)
+		}
+	}
+
+	preview := make([]*sysin.AIOpsSourceReplayPreviewItem, 0, len(candidates))
+	type resolvedReplayRule struct {
+		sourceID int64
+		ruleID   int64
+		name     string
+	}
+	rulesByChat := make(map[string]resolvedReplayRule)
+	for _, candidate := range candidates {
+		resolved, exists := rulesByChat[candidate.ChatID]
+		if !exists {
+			if err = s.validateAIOpsReplayChannelApproval(ctx, target.TenantID, target.AccountID, target.BotID, candidate.ChatID); err != nil {
+				return nil, nil, 0, 0, err
+			}
+			event := gdb.Record{"id": gvar.New(int64(0)), "source_id": gvar.New(sourceID), "source_chat_id": gvar.New(candidate.ChatID)}
+			rules, ruleErr := s.collectEventRules(ctx, event, target.TenantID, target.AccountID)
+			if ruleErr != nil {
+				return nil, nil, 0, 0, gerror.Wrapf(ruleErr, "预演原始事件%d的source规则失败", candidate.ID)
+			}
+			if len(rules) != 1 {
+				return nil, nil, 0, 0, gerror.Newf("目标source%d无法解析到唯一专属规则", sourceID)
+			}
+			rule := rules[0]
+			resolved = resolvedReplayRule{sourceID: collectRuleSourceID(event, rule), ruleID: rule["id"].Int64(), name: rule["name"].String()}
+			rulesByChat[candidate.ChatID] = resolved
+		}
+		preview = append(preview, &sysin.AIOpsSourceReplayPreviewItem{
+			CollectorEventId: candidate.ID, OriginSourceId: candidate.SourceID, UpdateId: candidate.UpdateID,
+			ChatId: candidate.ChatID, MessageId: candidate.MessageID,
+			RuleSourceId: resolved.sourceID, RuleId: resolved.ruleID, RuleName: resolved.name,
+		})
+	}
+	return ids, preview, target.TenantID, target.AccountID, nil
+}
+
+func (s *sSysPublish) validateAIOpsReplayChannelApproval(ctx context.Context, tenantID, accountID, botID int64, chatID string) error {
+	var channels []botCollectChannelCandidate
+	channelColumns := pdao.YoubanPublishCollectChannel.Columns()
+	if err := pdao.YoubanPublishCollectChannel.Ctx(ctx).
+		Fields(channelColumns.Id, channelColumns.TelegramChatId, channelColumns.Title).Where(channelColumns.TenantId, tenantID).
+		WhereIn(channelColumns.TelegramChatId, tgChannelCacheLookupIds(chatID)).
+		WhereNull(channelColumns.DeletedAt).Scan(&channels); !collectOptionalRecordScanSucceeded(err) {
+		return gerror.Wrap(err, "预演读取Telegram频道失败")
+	}
+	channelIDs := make([]int64, 0, len(channels))
+	for _, channel := range channels {
+		if channel.Id > 0 {
+			channelIDs = append(channelIDs, channel.Id)
+		}
+	}
+	if len(channelIDs) == 0 {
+		return gerror.Newf("频道%s尚无可核验的账号审批关系，拒绝重放", chatID)
+	}
+	var relations []botCollectChannelRelation
+	relationColumns := pdao.YoubanPublishCollectAccountChannel.Columns()
+	if err := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).
+		Fields(relationColumns.Id, relationColumns.ChannelId, relationColumns.CollectEnabled, relationColumns.Status, relationColumns.ApprovalStatus).
+		Where(relationColumns.TenantId, tenantID).Where(relationColumns.AccountId, accountID).
+		WhereIn(relationColumns.ChannelId, channelIDs).WhereNull(relationColumns.DeletedAt).Scan(&relations); !collectOptionalRecordScanSucceeded(err) {
+		return gerror.Wrap(err, "预演读取Telegram频道审批状态失败")
+	}
+	channel := selectBotCollectChannelForAccount(channels, relations, chatID)
+	relation := selectBotCollectChannelRelation(relations, channel.Id)
+	if channel.Id <= 0 || relation.Id <= 0 || strings.ToLower(strings.TrimSpace(relation.ApprovalStatus)) != "approved" || !botCollectChannelRelationEnabled(relation.CollectEnabled, relation.Status, relation.ApprovalStatus) {
+		return gerror.Newf("频道%s在目标账号下没有已批准的采集关系，拒绝重放", chatID)
+	}
+	var botRelation struct {
+		Status string `json:"status"`
+	}
+	botChannelColumns := pdao.YoubanPublishCollectBotChannel.Columns()
+	if err := pdao.YoubanPublishCollectBotChannel.Ctx(ctx).
+		Fields(botChannelColumns.Status).Where(botChannelColumns.TenantId, tenantID).Where(botChannelColumns.BotId, botID).
+		Where(botChannelColumns.ChannelId, channel.Id).Scan(&botRelation); err != nil {
+		return gerror.Wrap(err, "预演读取Bot频道关系失败")
+	}
+	if botRelation.Status == sysin.CollectBotChannelRemoved {
+		return gerror.Newf("Bot已退出频道%s，拒绝重放", chatID)
+	}
+	return nil
 }
 
 func (s *sSysPublish) previewAIOpsRepairTargets(ctx context.Context, action string, in *sysin.AIOpsRepairPlanInp, limit int) ([]int64, []int64, []int64, error) {
@@ -342,6 +504,21 @@ func (s *sSysPublish) AIOpsApplyRepairPlan(ctx context.Context, in *sysin.AIOpsR
 		result.Applied, result.Failed = s.applyAIOpsProfilePlan(ctx, payload.Action, payload.ProfileIDs, payload.TenantID, payload.AccountID)
 	case "repair_profile_media":
 		result.Applied, result.Failed = s.applyAIOpsProfilePlan(ctx, payload.Action, payload.ProfileIDs, payload.TenantID, payload.AccountID)
+	case "replay_bot_source_updates":
+		var tenantID, accountID int64
+		_, _, tenantID, accountID, err = s.previewAIOpsBotSourceReplay(ctx, payload.SourceID, payload.CollectorEventIDs, 1000)
+		if err == nil && (tenantID != payload.TenantID || accountID != payload.AccountID) {
+			err = gerror.New("目标source归属在计划预演后发生变化，请重新预演")
+		}
+		if err == nil {
+			var replay *collectorservice.BotUpdateReplayResult
+			replay, err = collectorservice.Collector().ReplayBotUpdatesForSource(ctx, tenantID, payload.SourceID, payload.CollectorEventIDs)
+			if err == nil && replay != nil {
+				result.Applied = replay.Queued
+				result.Failed = replay.Failed
+				result.Message = fmt.Sprintf("已入队%d条，已存在或正在处理%d条", replay.Queued, replay.Skipped)
+			}
+		}
 	}
 	if err != nil {
 		result.Status, result.Message = "failed", err.Error()
@@ -355,6 +532,44 @@ func (s *sSysPublish) AIOpsApplyRepairPlan(ctx context.Context, in *sysin.AIOpsR
 	}
 	g.Log().Info(ctx, "AI运维修复计划执行完成", g.Map{"planId": in.PlanId, "result": result})
 	return result, err
+}
+
+func (s *sSysPublish) AIOpsApplySourceReplayPlan(ctx context.Context, in *sysin.AIOpsRepairApplyInp) (*sysin.AIOpsRepairApplyModel, error) {
+	if in == nil {
+		return nil, gerror.New("修复计划和确认令牌不能为空")
+	}
+	if err := s.validateAIOpsPlanAction(ctx, in.PlanId, "replay_bot_source_updates"); err != nil {
+		return nil, err
+	}
+	return s.AIOpsApplyRepairPlan(ctx, in)
+}
+
+func (s *sSysPublish) AIOpsSourceReplayPlanStatus(ctx context.Context, in *sysin.AIOpsRepairPlanStatusInp) (*sysin.AIOpsRepairPlanStatusModel, error) {
+	if in == nil {
+		return nil, gerror.New("修复计划ID不能为空")
+	}
+	if err := s.validateAIOpsPlanAction(ctx, in.PlanId, "replay_bot_source_updates"); err != nil {
+		return nil, err
+	}
+	return s.AIOpsRepairPlanStatus(ctx, in)
+}
+
+func (s *sSysPublish) validateAIOpsPlanAction(ctx context.Context, planID, action string) error {
+	planID = strings.TrimSpace(planID)
+	if planID == "" {
+		return gerror.New("修复计划ID不能为空")
+	}
+	row, err := g.DB().Model(aiOpsRepairPlanTable).Ctx(ctx).Fields("action").Where("plan_id", planID).One()
+	if err != nil {
+		return gerror.Wrap(err, "读取修复计划失败")
+	}
+	if row.IsEmpty() {
+		return gerror.New("修复计划不存在")
+	}
+	if row["action"].String() != action {
+		return gerror.New("该计划不是source重放计划")
+	}
+	return nil
 }
 
 func (s *sSysPublish) applyAIOpsProfilePlan(ctx context.Context, action string, profileIDs []int64, tenantID, accountID int64) (int, []int64) {

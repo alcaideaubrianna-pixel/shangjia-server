@@ -67,6 +67,52 @@ func TestUpdateEventIDSeparatesCollectorSources(t *testing.T) {
 	}
 }
 
+func TestBotSourceReplayKeepsRawUpdateAndSourceScopedIdentity(t *testing.T) {
+	raw := []byte(`{"update_id":42,"channel_post":{"message_id":7213,"media_group_id":"group-1","chat":{"id":-100123456,"type":"channel"},"caption":"原始正文","photo":[{"file_id":"photo-file","file_unique_id":"photo-unique","width":640,"height":480}]}}`)
+	var update models.Update
+	if err := json.Unmarshal(raw, &update); err != nil {
+		t.Fatal(err)
+	}
+	message := collectorUpdateMessage(&update)
+	if message == nil {
+		t.Fatal("expected channel post in raw update")
+	}
+	original := &entity.TgCollectorEvent{TenantId: 78, SourceId: 351, BotKey: "same-bot", UpdateId: 42}
+	first := botSourceReplayEvent(original, 352, update.ID, raw, message, time.Now())
+	second := botSourceReplayEvent(original, 353, update.ID, raw, message, time.Now())
+	if first.SourceID != 352 || second.SourceID != 353 || first.EventID == second.EventID {
+		t.Fatalf("replay identity must be isolated per target source: first=%+v second=%+v", first, second)
+	}
+	if string(first.RawUpdate) != string(raw) {
+		t.Fatal("replay must retain the original Telegram update byte-for-byte")
+	}
+	var replayed models.Update
+	if err := json.Unmarshal(first.RawUpdate, &replayed); err != nil {
+		t.Fatal(err)
+	}
+	replayedMessage := collectorUpdateMessage(&replayed)
+	if replayedMessage == nil || replayedMessage.MediaGroupID != "group-1" || replayedMessage.ID != 7213 {
+		t.Fatalf("replay must preserve original message and album identity: %+v", replayedMessage)
+	}
+}
+
+func TestNormalizeBotReplayEventIDsDeduplicatesAndBoundsBatch(t *testing.T) {
+	ids, err := normalizeBotReplayEventIDs([]int64{9, 8, 9})
+	if err != nil || len(ids) != 2 || ids[0] != 9 || ids[1] != 8 {
+		t.Fatalf("unexpected normalized event IDs: ids=%v err=%v", ids, err)
+	}
+	if _, err = normalizeBotReplayEventIDs([]int64{0}); err == nil {
+		t.Fatal("non-positive event ID must be rejected")
+	}
+	tooMany := make([]int64, botUpdateReplayLimit+1)
+	for index := range tooMany {
+		tooMany[index] = int64(index + 1)
+	}
+	if _, err = normalizeBotReplayEventIDs(tooMany); err == nil {
+		t.Fatal("batch above the configured limit must be rejected")
+	}
+}
+
 func TestCollectorDeliveryFromAccountEvent(t *testing.T) {
 	receivedAt := time.Date(2026, 8, 11, 10, 30, 0, 0, time.FixedZone("CST", 8*60*60))
 	message := sysin.AccountMessageEvent{

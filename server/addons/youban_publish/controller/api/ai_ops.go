@@ -80,6 +80,33 @@ func (c *cAIOps) RepairPlan(ctx context.Context, req *aiops.RepairPlanReq) (*aio
 	return &aiops.RepairPlanRes{AIOpsRepairPlanModel: result}, nil
 }
 
+func (c *cAIOps) SourceReplayPlan(ctx context.Context, req *aiops.SourceReplayPlanReq) (*aiops.SourceReplayPlanRes, error) {
+	result, err := service.SysPublish().AIOpsCreateRepairPlan(ctx, &sysin.AIOpsRepairPlanInp{
+		Action: "replay_bot_source_updates", SourceId: req.SourceId,
+		CollectorEventIds: req.CollectorEventIds, Limit: req.Limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &aiops.SourceReplayPlanRes{AIOpsRepairPlanModel: result}, nil
+}
+
+func (c *cAIOps) SourceReplayApply(ctx context.Context, req *aiops.SourceReplayApplyReq) (*aiops.SourceReplayApplyRes, error) {
+	result, err := service.SysPublish().AIOpsApplySourceReplayPlan(ctx, &req.AIOpsRepairApplyInp)
+	if err != nil {
+		return nil, err
+	}
+	return &aiops.SourceReplayApplyRes{AIOpsRepairApplyModel: result}, nil
+}
+
+func (c *cAIOps) SourceReplayStatus(ctx context.Context, req *aiops.SourceReplayStatusReq) (*aiops.SourceReplayStatusRes, error) {
+	result, err := service.SysPublish().AIOpsSourceReplayPlanStatus(ctx, &req.AIOpsRepairPlanStatusInp)
+	if err != nil {
+		return nil, err
+	}
+	return &aiops.SourceReplayStatusRes{AIOpsRepairPlanStatusModel: result}, nil
+}
+
 func (c *cAIOps) RepairApply(ctx context.Context, req *aiops.RepairApplyReq) (*aiops.RepairApplyRes, error) {
 	result, err := service.SysPublish().AIOpsApplyRepairPlan(ctx, &req.AIOpsRepairApplyInp)
 	if err != nil {

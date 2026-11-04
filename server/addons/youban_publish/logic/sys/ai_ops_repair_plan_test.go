@@ -58,7 +58,7 @@ func TestCollectProcessOutboxRecoveryBatchSizeSupportsLargeBacklog(t *testing.T)
 
 func TestAIOpsRepairActionsIncludeProfileAndVerificationOperations(t *testing.T) {
 	for _, action := range []string{
-		"repair_missing_verification", "offline_profiles", "republish_profiles", "delete_profiles",
+		"repair_missing_verification", "offline_profiles", "republish_profiles", "delete_profiles", "replay_bot_source_updates",
 	} {
 		if _, ok := aiOpsRepairActions[action]; !ok {
 			t.Fatalf("missing controlled operation %q", action)

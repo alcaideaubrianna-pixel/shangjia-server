@@ -16,12 +16,32 @@ type ICollector interface {
 	StartDeliveryRuntime(ctx context.Context)
 	StopRuntime()
 	IngestBotUpdate(ctx context.Context, bot BotContext, update *models.Update) error
+	BotUpdateReplayCandidates(ctx context.Context, tenantID int64, eventIDs []int64) ([]*BotUpdateReplayCandidate, error)
+	ReplayBotUpdatesForSource(ctx context.Context, tenantID, sourceID int64, eventIDs []int64) (*BotUpdateReplayResult, error)
 	IngestAccountMessage(ctx context.Context, event *sysin.AccountMessageEvent) error
 	EventExists(ctx context.Context, tenantID int64, eventKey string) (bool, error)
 	MediaCache(ctx context.Context, fingerprint string) (*sysin.MediaCacheEntry, bool, error)
 	ClaimMediaProcessing(ctx context.Context, fingerprint string, ttl time.Duration) (bool, error)
 	SaveMediaReady(ctx context.Context, entry *sysin.MediaCacheEntry, ttl time.Duration) error
 	ReleaseMediaProcessing(ctx context.Context, fingerprint string, cause error) error
+}
+
+type BotUpdateReplayCandidate struct {
+	ID          int64
+	TenantID    int64
+	SourceID    int64
+	BotKey      string
+	UpdateID    int64
+	ChatID      string
+	MessageID   int64
+	EventStatus string
+	ReceivedAt  time.Time
+}
+
+type BotUpdateReplayResult struct {
+	Queued  int
+	Skipped int
+	Failed  []int64
 }
 
 type DeliveryHandler interface {

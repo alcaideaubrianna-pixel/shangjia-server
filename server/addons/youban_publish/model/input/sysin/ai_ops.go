@@ -1,27 +1,47 @@
 package sysin
 
 type AIOpsRepairPlanInp struct {
-	Action     string   `json:"action" dc:"受控运维动作"`
-	SourceId   int64    `json:"sourceId" dc:"采集源ID"`
-	EventIds   []int64  `json:"eventIds" dc:"采集事件ID"`
-	ProfileIds []int64  `json:"profileIds" dc:"资料ID"`
-	ProfileNos []string `json:"profileNos" dc:"资料编号"`
-	TenantId   int64    `json:"tenantId" dc:"租户ID，删除资料时必填"`
-	AccountId  int64    `json:"accountId" dc:"账号ID，删除资料时必填"`
-	StartAt    string   `json:"startAt" dc:"筛选开始时间，RFC3339"`
-	EndAt      string   `json:"endAt" dc:"筛选结束时间，RFC3339"`
-	Limit      int      `json:"limit" dc:"最大影响条数"`
+	Action            string   `json:"action" dc:"受控运维动作"`
+	SourceId          int64    `json:"sourceId" dc:"采集源ID"`
+	EventIds          []int64  `json:"eventIds" dc:"采集事件ID"`
+	CollectorEventIds []int64  `json:"collectorEventIds" dc:"Telegram Collector原始事件ID，仅source重放使用"`
+	ProfileIds        []int64  `json:"profileIds" dc:"资料ID"`
+	ProfileNos        []string `json:"profileNos" dc:"资料编号"`
+	TenantId          int64    `json:"tenantId" dc:"租户ID，删除资料时必填"`
+	AccountId         int64    `json:"accountId" dc:"账号ID，删除资料时必填"`
+	StartAt           string   `json:"startAt" dc:"筛选开始时间，RFC3339"`
+	EndAt             string   `json:"endAt" dc:"筛选结束时间，RFC3339"`
+	Limit             int      `json:"limit" dc:"最大影响条数"`
 }
 
 type AIOpsRepairPlanModel struct {
-	PlanId         string  `json:"planId"`
-	Action         string  `json:"action"`
-	Candidates     int     `json:"candidates"`
-	EventIds       []int64 `json:"eventIds"`
-	ProfileIds     []int64 `json:"profileIds"`
-	VerifyEventIds []int64 `json:"verifyEventIds"`
-	ConfirmToken   string  `json:"confirmToken"`
-	ExpiresAt      string  `json:"expiresAt"`
+	PlanId            string                          `json:"planId"`
+	Action            string                          `json:"action"`
+	Candidates        int                             `json:"candidates"`
+	EventIds          []int64                         `json:"eventIds"`
+	ProfileIds        []int64                         `json:"profileIds"`
+	VerifyEventIds    []int64                         `json:"verifyEventIds"`
+	CollectorEventIds []int64                         `json:"collectorEventIds,omitempty"`
+	ReplayPreview     []*AIOpsSourceReplayPreviewItem `json:"replayPreview,omitempty"`
+	ConfirmToken      string                          `json:"confirmToken"`
+	ExpiresAt         string                          `json:"expiresAt"`
+}
+
+type AIOpsSourceReplayPlanInp struct {
+	SourceId          int64   `json:"sourceId" v:"required|min:1#目标采集源ID不能为空|目标采集源ID不能为空" dc:"接收重放事件的目标采集source ID"`
+	CollectorEventIds []int64 `json:"collectorEventIds" v:"required#Collector原始事件ID不能为空" dc:"Telegram Collector原始事件ID，不是Youban采集事件ID或交付ID"`
+	Limit             int     `json:"limit" d:"1000" dc:"最大原始事件数，最多1000"`
+}
+
+type AIOpsSourceReplayPreviewItem struct {
+	CollectorEventId int64  `json:"collectorEventId"`
+	OriginSourceId   int64  `json:"originSourceId"`
+	UpdateId         int64  `json:"updateId"`
+	ChatId           string `json:"chatId"`
+	MessageId        int64  `json:"messageId"`
+	RuleSourceId     int64  `json:"ruleSourceId"`
+	RuleId           int64  `json:"ruleId"`
+	RuleName         string `json:"ruleName"`
 }
 
 type AIOpsRepairPlanStatusInp struct {

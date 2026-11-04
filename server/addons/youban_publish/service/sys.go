@@ -102,6 +102,8 @@ type ISysPublish interface {
 	AIOpsTelegramMessageContext(ctx context.Context, in *sysin.AIOpsTelegramMessageContextInp) (*sysin.AIOpsTelegramMessageContextModel, error)
 	AIOpsTelegramMessageOffline(ctx context.Context, in *sysin.AIOpsTelegramOfflineInp) (*sysin.AIOpsTelegramOfflineResult, error)
 	AIOpsCreateRepairPlan(ctx context.Context, in *sysin.AIOpsRepairPlanInp) (*sysin.AIOpsRepairPlanModel, error)
+	AIOpsApplySourceReplayPlan(ctx context.Context, in *sysin.AIOpsRepairApplyInp) (*sysin.AIOpsRepairApplyModel, error)
+	AIOpsSourceReplayPlanStatus(ctx context.Context, in *sysin.AIOpsRepairPlanStatusInp) (*sysin.AIOpsRepairPlanStatusModel, error)
 	AIOpsApplyRepairPlan(ctx context.Context, in *sysin.AIOpsRepairApplyInp) (*sysin.AIOpsRepairApplyModel, error)
 	AIOpsRepairPlanStatus(ctx context.Context, in *sysin.AIOpsRepairPlanStatusInp) (*sysin.AIOpsRepairPlanStatusModel, error)
 	AIOpsChannelFullPush(ctx context.Context, tenantId, channelId int64) (*sysin.ChannelFullPushModel, error)

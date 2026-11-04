@@ -87,6 +87,29 @@ type RepairPlanReq struct {
 
 type RepairPlanRes struct{ *sysin.AIOpsRepairPlanModel }
 
+type SourceReplayPlanReq struct {
+	g.Meta `path:"/collector/source/replay/plan" method:"post" tags:"AI运维" summary:"预演并创建按采集source重放计划"`
+	sysin.AIOpsSourceReplayPlanInp
+}
+
+type SourceReplayPlanRes struct{ *sysin.AIOpsRepairPlanModel }
+
+type SourceReplayApplyReq struct {
+	g.Meta `path:"/collector/source/replay/apply" method:"post" tags:"AI运维" summary:"执行已确认的source重放计划"`
+	sysin.AIOpsRepairApplyInp
+}
+
+type SourceReplayApplyRes struct{ *sysin.AIOpsRepairApplyModel }
+
+type SourceReplayStatusReq struct {
+	g.Meta `path:"/collector/source/replay/status" method:"get" tags:"AI运维" summary:"查询source重放计划状态"`
+	sysin.AIOpsRepairPlanStatusInp
+}
+
+type SourceReplayStatusRes struct {
+	*sysin.AIOpsRepairPlanStatusModel
+}
+
 type RepairApplyReq struct {
 	g.Meta `path:"/repair/apply" method:"post" tags:"AI运维" summary:"执行已确认的采集修复计划"`
 	sysin.AIOpsRepairApplyInp
