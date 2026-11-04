@@ -81,6 +81,7 @@ func TestProfileShouldSendVerifyPrompt(t *testing.T) {
 		{name: "waiting for verify", step: "waiting_verify", status: profileSessionStatusActive, draft: &profileCreateDraft{}, want: true},
 		{name: "display group pending", step: "waiting_verify", status: profileSessionStatusActive, draft: &profileCreateDraft{PendingGroup: &profilePendingMediaGroup{}}, want: false},
 		{name: "verify already received", step: "waiting_verify", status: profileSessionStatusActive, draft: &profileCreateDraft{PendingVerify: &profilePendingMediaGroup{}}, want: false},
+		{name: "verification already submitted", step: "waiting_verify", status: profileSessionStatusActive, draft: &profileCreateDraft{VerificationSubmitted: true, VerifyMedia: []*publishsysin.MessageTemplateMediaInp{{MediaType: "video"}}}, want: false},
 		{name: "still collecting display", step: "waiting_display", status: profileSessionStatusActive, draft: &profileCreateDraft{}, want: false},
 		{name: "session completed", step: "waiting_verify", status: profileSessionStatusCompleted, draft: &profileCreateDraft{}, want: false},
 	}

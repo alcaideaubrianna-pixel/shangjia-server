@@ -2662,6 +2662,14 @@ func (s *sSysBot) consumeProfileCreatePart(ctx context.Context, botId int64, cha
 		if err := s.updateProfileSession(ctx, session.Id, session.Step, draft); err != nil {
 			return err
 		}
+		ackCtx, ackCancel := context.WithTimeout(ctx, 5*time.Second)
+		ackErr := s.sendProfileSaveNotice(ackCtx, botId, chatId, profileVerificationReceivedText(draft), nil)
+		ackCancel()
+		if ackErr != nil {
+			g.Log().Warningf(ctx, "Bot资料验证接收提示失败 trace:%s err:%+v", trace, ackErr)
+		} else {
+			g.Log().Infof(ctx, "Bot资料验证接收提示已发送 trace:%s media_count:%d text_len:%d", trace, len(draft.VerifyMedia), len(strings.TrimSpace(draft.VerifyText)))
+		}
 		persistedDisplay, err := s.persistTelegramMedia(ctx, account.AccountId, draft.DisplayMedia)
 		if err != nil {
 			g.Log().Warningf(ctx, "Bot资料展示媒体持久化失败 trace:%s media_count:%d err:%+v", trace, len(draft.DisplayMedia), sensitive.Diagnostic(err.Error()))
@@ -2695,12 +2703,6 @@ func (s *sSysBot) consumeProfileCreatePart(ctx context.Context, botId int64, cha
 				return err
 			}
 			return s.sendProfileCard(ctx, botId, chatId, note, "view")
-		}
-		ackCtx, ackCancel := context.WithTimeout(ctx, 5*time.Second)
-		ackErr := s.sendProfileSaveNotice(ackCtx, botId, chatId, profileVerificationReceivedText(draft), nil)
-		ackCancel()
-		if ackErr != nil {
-			g.Log().Warningf(ctx, "Bot资料验证接收提示失败 trace:%s err:%+v", trace, ackErr)
 		}
 		res, err := publishService.SysPublish().BotProfileCreate(ctx, &publishsysin.BotProfileCreateInp{DiagnosticTraceId: trace, TenantId: account.TenantId, AccountId: account.AccountId, PlainText: draft.DisplayText, DisplayMedia: draft.DisplayMedia, VerifyText: draft.VerifyText, VerifyMedia: draft.VerifyMedia, Status: 2})
 		if err != nil {
@@ -2777,7 +2779,7 @@ func profileShouldSendVerifyPrompt(step string, status string, draft *profileCre
 	if step != "waiting_verify" || status != profileSessionStatusActive {
 		return false
 	}
-	return draft == nil || (draft.PendingGroup == nil && draft.PendingVerify == nil)
+	return draft == nil || (draft.PendingGroup == nil && draft.PendingVerify == nil && !profileDraftHasSubmittedVerification(draft))
 }
 
 func profileVerificationReceivedText(draft *profileCreateDraft) string {
