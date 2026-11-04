@@ -155,6 +155,13 @@ func telegramJobRequiresChannelCompletionPriority(sendPhase string) bool {
 }
 
 func (s *sSysPublish) wakeNextTelegramChannelJob(ctx context.Context, job telegramJobRecord) error {
+	// Completion callbacks often run while the worker task context is being
+	// cancelled. The channel lease has already been released at this point, so
+	// waking the durable successor must outlive that task context; otherwise a
+	// cancelled callback leaves the next Outbox row idle until periodic recovery.
+	wakeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	ctx = wakeCtx
 	if job.TenantId <= 0 || (job.ChannelId <= 0 && strings.TrimSpace(job.TargetChatId) == "") {
 		return nil
 	}
