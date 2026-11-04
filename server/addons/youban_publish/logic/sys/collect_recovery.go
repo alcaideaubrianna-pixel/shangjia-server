@@ -106,7 +106,7 @@ func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	if err := s.recoverPendingCollectMedia(ctx, min(mediaBatchSize, 50)); err != nil {
 		g.Log().Warningf(ctx, "恢复待处理采集媒体任务失败：%+v", err)
 	}
-	if err := s.recoverRecentOrphanCollectReviews(ctx, 5); err != nil {
+	if err := s.recoverRecentOrphanCollectReviews(ctx, 20); err != nil {
 		g.Log().Warningf(ctx, "恢复近期孤立采集审核失败：%+v", err)
 	}
 	if blocked, err := s.collectRecoveryBackpressure(ctx); err != nil {
@@ -166,7 +166,9 @@ func (s *sSysPublish) recoverRecentOrphanCollectReviews(ctx context.Context, lim
 		Where("(COALESCE(d.review_id,0)=0 OR NOT EXISTS (SELECT 1 FROM "+reviewTable+" r WHERE r.id=d.review_id))").
 		Where("EXISTS (SELECT 1 FROM "+publishCollectEventTable+" e WHERE e.id=d.event_id AND e.status=?)", sysin.CollectEventStatusDispatched).
 		Where("EXISTS (SELECT 1 FROM " + ruleTable + " r WHERE r.id=d.rule_id AND r.status=1 AND r.review_enabled=1 AND r.deleted_at IS NULL)").
-		OrderAsc("d.updated_at").Limit(limit).All()
+		// Drain the newest orphan wave first; older records remain eligible in
+		// later bounded passes after recent user-facing reviews are restored.
+		OrderDesc("d.updated_at").Limit(limit).All()
 	if err != nil {
 		return gerror.Wrap(err, "读取近期孤立采集审核分发失败")
 	}
