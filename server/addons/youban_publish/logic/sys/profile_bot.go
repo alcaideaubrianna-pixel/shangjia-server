@@ -4,6 +4,7 @@ import (
 	"context"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -108,15 +109,28 @@ func (s *sSysPublish) BotProfileCreate(ctx context.Context, in *sysin.BotProfile
 	if status == 0 {
 		status = 2
 	}
-	res, err = s.saveProfile(ctx, &sysin.ProfileSaveInp{Title: title, PlainText: plainText, Status: status, Visibility: "private"}, in.TenantId, in.AccountId)
+	res, err = s.saveProfile(ctx, &sysin.ProfileSaveInp{
+		DiagnosticTraceId: in.DiagnosticTraceId,
+		Title:             title,
+		PlainText:         plainText,
+		Status:            status,
+		Visibility:        "private",
+	}, in.TenantId, in.AccountId)
 	if err != nil {
 		return nil, err
 	}
+	mediaStartedAt := time.Now()
+	g.Log().Infof(ctx, "Bot资料媒体保存开始 trace:%s profile_id:%d display_count:%d verify_count:%d", in.DiagnosticTraceId, res.Id, len(in.DisplayMedia), len(in.VerifyMedia))
 	if err = s.saveBotProfileMedia(ctx, res.Id, in.TenantId, in.AccountId, in.DisplayMedia, in.VerifyMedia); err != nil {
-		return nil, err
+		g.Log().Warningf(ctx, "Bot资料媒体保存失败 trace:%s profile_id:%d elapsed_ms:%d err:%+v", in.DiagnosticTraceId, res.Id, time.Since(mediaStartedAt).Milliseconds(), err)
+		return nil, gerror.Wrap(err, "机器人资料媒体保存失败")
 	}
+	g.Log().Infof(ctx, "Bot资料媒体保存完成 trace:%s profile_id:%d elapsed_ms:%d", in.DiagnosticTraceId, res.Id, time.Since(mediaStartedAt).Milliseconds())
 	if strings.TrimSpace(in.VerifyText) != "" {
-		_ = s.saveBotProfileVerifyText(ctx, res.Id, strings.TrimSpace(in.VerifyText))
+		if err = s.saveBotProfileVerifyText(ctx, res.Id, strings.TrimSpace(in.VerifyText)); err != nil {
+			g.Log().Warningf(ctx, "Bot资料验证文本保存失败 trace:%s profile_id:%d err:%+v", in.DiagnosticTraceId, res.Id, err)
+			return nil, gerror.Wrap(err, "机器人资料验证文本保存失败")
+		}
 	}
 	return res, nil
 }

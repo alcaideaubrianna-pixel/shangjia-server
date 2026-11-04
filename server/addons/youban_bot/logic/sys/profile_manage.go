@@ -2408,35 +2408,56 @@ func (s *sSysBot) consumeProfileSessionMessage(ctx context.Context, botId int64,
 	if session == nil || msg == nil {
 		return nil
 	}
+	trace := fmt.Sprintf("PF-%d", session.Id)
+	startedAt := time.Now()
+	g.Log().Infof(ctx, "Bot资料收尾阶段开始 trace:%s stage:session_message message_id:%d media_group_id:%s step:%s", trace, msg.ID, strings.TrimSpace(msg.MediaGroupID), session.Step)
 	var preparedMedia []*publishsysin.MessageTemplateMediaInp
 	if strings.TrimSpace(msg.MediaGroupID) != "" {
+		stageStartedAt := time.Now()
+		g.Log().Infof(ctx, "Bot资料收尾阶段开始 trace:%s stage:reserve_media_group", trace)
 		if err := s.reserveProfileMediaGroup(ctx, session, msg, text); err != nil {
+			g.Log().Warningf(ctx, "Bot资料收尾阶段失败 trace:%s stage:reserve_media_group elapsed_ms:%d err:%s", trace, time.Since(stageStartedAt).Milliseconds(), sensitive.Diagnostic(err.Error()))
 			return err
 		}
+		g.Log().Infof(ctx, "Bot资料收尾阶段完成 trace:%s stage:reserve_media_group elapsed_ms:%d", trace, time.Since(stageStartedAt).Milliseconds())
+		stageStartedAt = time.Now()
 		row, err := s.botById(ctx, botId)
 		if err != nil {
+			g.Log().Warningf(ctx, "Bot资料收尾阶段失败 trace:%s stage:load_bot_for_media elapsed_ms:%d err:%s", trace, time.Since(stageStartedAt).Milliseconds(), sensitive.Diagnostic(err.Error()))
 			return err
 		}
+		g.Log().Infof(ctx, "Bot资料收尾阶段完成 trace:%s stage:load_bot_for_media elapsed_ms:%d", trace, time.Since(stageStartedAt).Milliseconds())
+		stageStartedAt = time.Now()
 		preparedMedia, err = s.resolveTelegramMessageMedia(ctx, botId, row.BotToken, msg)
 		if err != nil {
+			g.Log().Warningf(ctx, "Bot资料收尾阶段失败 trace:%s stage:resolve_group_media elapsed_ms:%d err:%s", trace, time.Since(stageStartedAt).Milliseconds(), sensitive.Diagnostic(err.Error()))
 			chatId := fmt.Sprintf("%d", msg.Chat.ID)
 			_ = s.replyBotError(ctx, botId, chatId, "资料管理", gerror.Wrap(err, "当前资料媒体解析失败，请重新发送当前步骤"))
 			return err
 		}
-		g.Log().Infof(ctx, "Bot资料媒体并发解析完成 trace:PF-%d message_id:%d media_count:%d", session.Id, msg.ID, len(preparedMedia))
+		g.Log().Infof(ctx, "Bot资料收尾阶段完成 trace:%s stage:resolve_group_media elapsed_ms:%d media_count:%d", trace, time.Since(stageStartedAt).Milliseconds(), len(preparedMedia))
 	}
 	lockCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	lock := hglock.NewConfig(20*time.Second, 100*time.Millisecond).Mutex(profileSessionLockKey(session.Id))
+	stageStartedAt := time.Now()
+	g.Log().Infof(ctx, "Bot资料收尾阶段开始 trace:%s stage:acquire_session_lock", trace)
 	if err := lock.Lock(lockCtx); err != nil {
 		// Another media-group update is finalizing this session. Do not emit a
 		// duplicate error message for every Telegram update; the recovery loop
 		// will pick up the durable pending group after the lock is released.
-		g.Log().Infof(ctx, "Bot资料会话锁忙，合并延迟事件 trace:PF-%d bot_id:%d message_id:%d group_id:%s", session.Id, botId, msg.ID, strings.TrimSpace(msg.MediaGroupID))
+		g.Log().Warningf(ctx, "Bot资料收尾阶段失败 trace:%s stage:acquire_session_lock elapsed_ms:%d err:%s", trace, time.Since(stageStartedAt).Milliseconds(), sensitive.Diagnostic(err.Error()))
 		return nil
 	}
+	g.Log().Infof(ctx, "Bot资料收尾阶段完成 trace:%s stage:acquire_session_lock elapsed_ms:%d", trace, time.Since(stageStartedAt).Milliseconds())
 	defer func() { _ = lock.Unlock(context.Background()) }()
+	stageStartedAt = time.Now()
 	latest := s.activeProfileSession(ctx, botId, msg)
+	if latest != nil {
+		g.Log().Infof(ctx, "Bot资料收尾阶段完成 trace:%s stage:reload_session elapsed_ms:%d current_step:%s status:%s", trace, time.Since(stageStartedAt).Milliseconds(), latest.Step, latest.Status)
+	} else {
+		g.Log().Warningf(ctx, "Bot资料收尾阶段完成 trace:%s stage:reload_session elapsed_ms:%d session_found:false", trace, time.Since(stageStartedAt).Milliseconds())
+	}
 	if latest == nil || latest.Id != session.Id {
 		var state struct {
 			Step   string `json:"step"`
@@ -2450,8 +2471,14 @@ func (s *sSysBot) consumeProfileSessionMessage(ctx context.Context, botId int64,
 		g.Log().Warningf(ctx, "Bot资料会话校验失败 trace:PF-%d bot_id:%d message_id:%d media_group_id:%s expected_step:%s current_step:%s current_status:%s", session.Id, botId, msg.ID, strings.TrimSpace(msg.MediaGroupID), session.Step, state.Step, state.Status)
 		return s.replyBotError(ctx, botId, fmt.Sprintf("%d", msg.Chat.ID), "资料管理", gerror.New("资料会话已失效，请重新开始新增资料"))
 	}
-	g.Log().Infof(ctx, "Bot资料会话校验通过 trace:PF-%d bot_id:%d message_id:%d media_group_id:%s step:%s", latest.Id, botId, msg.ID, strings.TrimSpace(msg.MediaGroupID), latest.Step)
-	return s.consumeProfileSessionMessageLocked(ctx, botId, msg, account, latest, text, preparedMedia)
+	g.Log().Infof(ctx, "Bot资料收尾阶段开始 trace:%s stage:process_message_locked step:%s", trace, latest.Step)
+	err := s.consumeProfileSessionMessageLocked(ctx, botId, msg, account, latest, text, preparedMedia)
+	if err != nil {
+		g.Log().Warningf(ctx, "Bot资料收尾阶段失败 trace:%s stage:process_message_locked elapsed_ms:%d err:%s", trace, time.Since(startedAt).Milliseconds(), sensitive.Diagnostic(err.Error()))
+		return err
+	}
+	g.Log().Infof(ctx, "Bot资料收尾阶段完成 trace:%s stage:process_message_locked elapsed_ms:%d", trace, time.Since(startedAt).Milliseconds())
+	return nil
 }
 
 func (s *sSysBot) consumeProfileSessionMessageLocked(ctx context.Context, botId int64, msg *models.Message, account *botProfileAccount, session *profileSessionRow, text string, preparedMedia []*publishsysin.MessageTemplateMediaInp) error {
@@ -2613,7 +2640,6 @@ func (s *sSysBot) scheduleProfileSessionTimeout(sessionId, botId int64, chatId s
 
 func (s *sSysBot) consumeProfileCreatePart(ctx context.Context, botId int64, chatId string, account *botProfileAccount, session *profileSessionRow, text string, media []*publishsysin.MessageTemplateMediaInp) error {
 	trace := fmt.Sprintf("PF-%d", session.Id)
-	startedAt := time.Now()
 	draft := decodeProfileCreateDraft(session.PayloadJson)
 	switch session.Step {
 	case "waiting_display":
@@ -2659,74 +2685,116 @@ func (s *sSysBot) consumeProfileCreatePart(ctx context.Context, botId int64, cha
 		draft.VerificationRecoveryBlocked = false
 		// Persist both parts before any network I/O so a transfer failure cannot
 		// discard verification media that arrived before the display group.
+		stageStartedAt := time.Now()
+		g.Log().Infof(ctx, "Bot资料收尾阶段开始 trace:%s stage:save_verification_payload media_count:%d", trace, len(draft.VerifyMedia))
 		if err := s.updateProfileSession(ctx, session.Id, session.Step, draft); err != nil {
+			g.Log().Warningf(ctx, "Bot资料收尾阶段失败 trace:%s stage:save_verification_payload elapsed_ms:%d err:%s", trace, time.Since(stageStartedAt).Milliseconds(), sensitive.Diagnostic(err.Error()))
 			return err
 		}
+		g.Log().Infof(ctx, "Bot资料收尾阶段完成 trace:%s stage:save_verification_payload elapsed_ms:%d", trace, time.Since(stageStartedAt).Milliseconds())
 		ackCtx, ackCancel := context.WithTimeout(ctx, 5*time.Second)
+		stageStartedAt = time.Now()
+		g.Log().Infof(ctx, "Bot资料收尾阶段开始 trace:%s stage:verification_ack", trace)
 		ackErr := s.sendProfileSaveNotice(ackCtx, botId, chatId, profileVerificationReceivedText(draft), nil)
 		ackCancel()
 		if ackErr != nil {
-			g.Log().Warningf(ctx, "Bot资料验证接收提示失败 trace:%s err:%+v", trace, ackErr)
+			g.Log().Warningf(ctx, "Bot资料收尾阶段失败 trace:%s stage:verification_ack elapsed_ms:%d err:%s", trace, time.Since(stageStartedAt).Milliseconds(), sensitive.Diagnostic(ackErr.Error()))
 		} else {
-			g.Log().Infof(ctx, "Bot资料验证接收提示已发送 trace:%s media_count:%d text_len:%d", trace, len(draft.VerifyMedia), len(strings.TrimSpace(draft.VerifyText)))
+			g.Log().Infof(ctx, "Bot资料验证接收提示已发送 trace:%s media_count:%d text_len:%d elapsed_ms:%d", trace, len(draft.VerifyMedia), len(strings.TrimSpace(draft.VerifyText)), time.Since(stageStartedAt).Milliseconds())
 		}
+		stageStartedAt = time.Now()
+		g.Log().Infof(ctx, "Bot资料收尾阶段开始 trace:%s stage:persist_display_media media_count:%d", trace, len(draft.DisplayMedia))
 		persistedDisplay, err := s.persistTelegramMedia(ctx, account.AccountId, draft.DisplayMedia)
 		if err != nil {
-			g.Log().Warningf(ctx, "Bot资料展示媒体持久化失败 trace:%s media_count:%d err:%+v", trace, len(draft.DisplayMedia), sensitive.Diagnostic(err.Error()))
+			g.Log().Warningf(ctx, "Bot资料收尾阶段失败 trace:%s stage:persist_display_media elapsed_ms:%d media_count:%d err:%s", trace, time.Since(stageStartedAt).Milliseconds(), len(draft.DisplayMedia), sensitive.Diagnostic(err.Error()))
 			return s.replyBotError(ctx, botId, chatId, "资料管理", gerror.Wrap(err, "展示资料保存失败，请重新发送"))
 		}
+		g.Log().Infof(ctx, "Bot资料收尾阶段完成 trace:%s stage:persist_display_media elapsed_ms:%d media_count:%d", trace, time.Since(stageStartedAt).Milliseconds(), len(persistedDisplay))
+		stageStartedAt = time.Now()
+		g.Log().Infof(ctx, "Bot资料收尾阶段开始 trace:%s stage:persist_verify_media media_count:%d", trace, len(draft.VerifyMedia))
 		persistedVerify, err := s.persistTelegramMedia(ctx, account.AccountId, draft.VerifyMedia)
 		if err != nil {
-			g.Log().Warningf(ctx, "Bot资料验证媒体持久化失败 trace:%s media_count:%d err:%+v", trace, len(draft.VerifyMedia), sensitive.Diagnostic(err.Error()))
+			g.Log().Warningf(ctx, "Bot资料收尾阶段失败 trace:%s stage:persist_verify_media elapsed_ms:%d media_count:%d err:%s", trace, time.Since(stageStartedAt).Milliseconds(), len(draft.VerifyMedia), sensitive.Diagnostic(err.Error()))
 			return s.replyBotError(ctx, botId, chatId, "资料管理", gerror.Wrap(err, "验证资料保存失败，请重新发送"))
 		}
+		g.Log().Infof(ctx, "Bot资料收尾阶段完成 trace:%s stage:persist_verify_media elapsed_ms:%d media_count:%d", trace, time.Since(stageStartedAt).Milliseconds(), len(persistedVerify))
 		draft.DisplayMedia = persistedDisplay
 		draft.VerifyMedia = persistedVerify
+		stageStartedAt = time.Now()
+		g.Log().Infof(ctx, "Bot资料收尾阶段开始 trace:%s stage:claim_saving", trace)
 		claimed, err := s.claimProfileSessionStep(ctx, session.Id, "waiting_verify", "saving", draft)
 		if err != nil {
+			g.Log().Warningf(ctx, "Bot资料收尾阶段失败 trace:%s stage:claim_saving elapsed_ms:%d err:%s", trace, time.Since(stageStartedAt).Milliseconds(), sensitive.Diagnostic(err.Error()))
 			return err
 		}
+		g.Log().Infof(ctx, "Bot资料收尾阶段完成 trace:%s stage:claim_saving elapsed_ms:%d claimed:%t", trace, time.Since(stageStartedAt).Milliseconds(), claimed)
 		if !claimed {
 			return nil
 		}
 		if session.Scene == "replace" {
+			stageStartedAt = time.Now()
+			g.Log().Infof(ctx, "Bot资料收尾阶段开始 trace:%s stage:edit_profile", trace)
 			note, err := publishService.SysPublish().BotProfileEdit(ctx, &publishsysin.BotProfileEditInp{TenantId: account.TenantId, AccountId: botProfileScopeAccountId(account), ProfileNo: session.ProfileNo, PlainText: draft.DisplayText, DisplayMedia: draft.DisplayMedia, VerifyText: draft.VerifyText, VerifyMedia: draft.VerifyMedia})
 			if err != nil {
-				_ = s.resetProfileSessionStep(ctx, session.Id, "saving", "waiting_verify", draft)
+				g.Log().Warningf(ctx, "Bot资料收尾阶段失败 trace:%s stage:edit_profile elapsed_ms:%d err:%s", trace, time.Since(stageStartedAt).Milliseconds(), sensitive.Diagnostic(err.Error()))
+				if resetErr := s.resetProfileSessionStep(ctx, session.Id, "saving", "waiting_verify", draft); resetErr != nil {
+					g.Log().Errorf(ctx, "Bot资料收尾阶段失败 trace:%s stage:reset_after_edit_failure err:%s", trace, sensitive.Diagnostic(resetErr.Error()))
+				}
 				if replyErr := s.replyBotError(ctx, botId, chatId, "资料管理", err); replyErr != nil {
 					return replyErr
 				}
 				return s.sendProfileCreateStepPrompt(ctx, botId, chatId, "waiting_verify")
 			}
-			_ = s.completeProfileSession(ctx, session.Id)
+			g.Log().Infof(ctx, "Bot资料收尾阶段完成 trace:%s stage:edit_profile elapsed_ms:%d profile_id:%d", trace, time.Since(stageStartedAt).Milliseconds(), note.Id)
+			stageStartedAt = time.Now()
+			if err = s.completeProfileSession(ctx, session.Id); err != nil {
+				g.Log().Errorf(ctx, "Bot资料收尾阶段失败 trace:%s stage:complete_session elapsed_ms:%d err:%s", trace, time.Since(stageStartedAt).Milliseconds(), sensitive.Diagnostic(err.Error()))
+				return err
+			}
+			g.Log().Infof(ctx, "Bot资料收尾阶段完成 trace:%s stage:complete_session elapsed_ms:%d", trace, time.Since(stageStartedAt).Milliseconds())
 			if err = s.sendProfileEditSuccess(ctx, botId, chatId, note, "资料已重新覆盖"); err != nil {
 				return err
 			}
 			return s.sendProfileCard(ctx, botId, chatId, note, "view")
 		}
+		stageStartedAt = time.Now()
+		g.Log().Infof(ctx, "Bot资料收尾阶段开始 trace:%s stage:create_profile display_media:%d verify_media:%d", trace, len(draft.DisplayMedia), len(draft.VerifyMedia))
 		res, err := publishService.SysPublish().BotProfileCreate(ctx, &publishsysin.BotProfileCreateInp{DiagnosticTraceId: trace, TenantId: account.TenantId, AccountId: account.AccountId, PlainText: draft.DisplayText, DisplayMedia: draft.DisplayMedia, VerifyText: draft.VerifyText, VerifyMedia: draft.VerifyMedia, Status: 2})
 		if err != nil {
-			g.Log().Warningf(ctx, "Bot资料创建失败 trace:%s stage:create_profile elapsed_ms:%d err:%v", trace, time.Since(startedAt).Milliseconds(), err)
+			g.Log().Warningf(ctx, "Bot资料收尾阶段失败 trace:%s stage:create_profile elapsed_ms:%d err:%s", trace, time.Since(stageStartedAt).Milliseconds(), sensitive.Diagnostic(err.Error()))
 			draft.VerificationSubmitted = false
 			draft.VerificationRecoveryBlocked = true
-			_ = s.resetProfileSessionStep(ctx, session.Id, "saving", "waiting_verify", draft)
+			stageStartedAt = time.Now()
+			if resetErr := s.resetProfileSessionStep(ctx, session.Id, "saving", "waiting_verify", draft); resetErr != nil {
+				g.Log().Errorf(ctx, "Bot资料收尾阶段失败 trace:%s stage:reset_after_create_failure elapsed_ms:%d err:%s", trace, time.Since(stageStartedAt).Milliseconds(), sensitive.Diagnostic(resetErr.Error()))
+			} else {
+				g.Log().Infof(ctx, "Bot资料收尾阶段完成 trace:%s stage:reset_after_create_failure elapsed_ms:%d", trace, time.Since(stageStartedAt).Milliseconds())
+			}
 			if replyErr := s.replyBotError(ctx, botId, chatId, "资料管理", err); replyErr != nil {
 				return replyErr
 			}
 			return s.sendProfileCreateStepPrompt(ctx, botId, chatId, "waiting_verify")
 		}
-		g.Log().Infof(ctx, "Bot资料创建完成 trace:%s stage:create_profile elapsed_ms:%d profile_id:%d", trace, time.Since(startedAt).Milliseconds(), res.Id)
+		g.Log().Infof(ctx, "Bot资料收尾阶段完成 trace:%s stage:create_profile elapsed_ms:%d profile_id:%d", trace, time.Since(stageStartedAt).Milliseconds(), res.Id)
 		if session.Scene == "batch_create" {
 			// Keep the durable session active for the next display/verify pair.
 			// The created profile is already committed, so a notification failure
 			// must not cancel the batch intake session.
+			stageStartedAt = time.Now()
 			if err = s.updateProfileSession(ctx, session.Id, "waiting_display", &profileCreateDraft{}); err != nil {
+				g.Log().Errorf(ctx, "Bot资料收尾阶段失败 trace:%s stage:advance_batch_session elapsed_ms:%d err:%s profile_id:%d", trace, time.Since(stageStartedAt).Milliseconds(), sensitive.Diagnostic(err.Error()), res.Id)
 				return err
 			}
+			g.Log().Infof(ctx, "Bot资料收尾阶段完成 trace:%s stage:advance_batch_session elapsed_ms:%d profile_id:%d", trace, time.Since(stageStartedAt).Milliseconds(), res.Id)
 			go s.sendProfileCreateSuccessWithRetry(botId, chatId, res, true)
 			return nil
 		}
-		_ = s.completeProfileSession(ctx, session.Id)
+		stageStartedAt = time.Now()
+		if err = s.completeProfileSession(ctx, session.Id); err != nil {
+			g.Log().Errorf(ctx, "Bot资料收尾阶段失败 trace:%s stage:complete_session elapsed_ms:%d err:%s profile_id:%d", trace, time.Since(stageStartedAt).Milliseconds(), sensitive.Diagnostic(err.Error()), res.Id)
+			return err
+		}
+		g.Log().Infof(ctx, "Bot资料收尾阶段完成 trace:%s stage:complete_session elapsed_ms:%d profile_id:%d", trace, time.Since(stageStartedAt).Milliseconds(), res.Id)
 		// Creation is already durable; notification must not make the update
 		// handler fail or hold the session lock. Retry transient Telegram errors.
 		go s.sendProfileCreateSuccessWithRetry(botId, chatId, res)
@@ -2741,12 +2809,15 @@ func (s *sSysBot) sendProfileCreateSuccessWithRetry(botId int64, chatId string, 
 	}
 	for attempt := 1; attempt <= 3; attempt++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		startedAt := time.Now()
+		g.Log().Infof(ctx, "Bot资料收尾阶段开始 trace:profile_id:%d stage:send_success_notice attempt:%d", res.Id, attempt)
 		err := s.sendProfileCreateSuccess(ctx, botId, chatId, res, batch...)
 		cancel()
 		if err == nil {
+			g.Log().Infof(context.Background(), "Bot资料收尾阶段完成 trace:profile_id:%d stage:send_success_notice attempt:%d elapsed_ms:%d", res.Id, attempt, time.Since(startedAt).Milliseconds())
 			return
 		}
-		g.Log().Warningf(context.Background(), "Bot资料创建成功通知失败 botId:%d profileId:%d attempt:%d err:%+v", botId, res.Id, attempt, err)
+		g.Log().Warningf(context.Background(), "Bot资料收尾阶段失败 trace:profile_id:%d stage:send_success_notice attempt:%d elapsed_ms:%d err:%s", res.Id, attempt, time.Since(startedAt).Milliseconds(), sensitive.Diagnostic(err.Error()))
 		time.Sleep(time.Duration(attempt) * time.Second)
 	}
 }
