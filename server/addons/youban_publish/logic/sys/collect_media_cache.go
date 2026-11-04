@@ -156,7 +156,33 @@ func collectMediaRetryErrorFrom(err error) *collectMediaRetryError {
 	return nil
 }
 
-func (s *sSysPublish) prepareCollectMediaAsset(ctx context.Context, event gdb.Record, item collectMediaItem) (collectMediaItem, error) {
+func (s *sSysPublish) prepareCollectMediaAsset(ctx context.Context, event gdb.Record, item collectMediaItem, sortIndex int) (collectMediaItem, error) {
+	if event.IsEmpty() || event["id"].Int64() <= 0 || event["source_message_id"].Int64() <= 0 || sortIndex <= 0 {
+		return item, nil
+	}
+	var cached gdb.Record
+	var err error
+	cached, err = pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
+		Where("tenant_id", event["tenant_id"].Int64()).
+		Where("REPLACE(source_chat_id, '-100', '') = REPLACE(?, '-100', '')", event["source_chat_id"].String()).
+		Where("source_message_id", event["source_message_id"].Int64()).
+		Where("sort_index", sortIndex).
+		Where("media_type", collectPublishMediaType(item.Type)).
+		Where("event_id <>", event["id"].Int64()).
+		Where("cache_status", collectMediaCacheReady).
+		Where("(file_url <> '' OR storage_path <> '')").
+		OrderAsc("id").One()
+	if err != nil {
+		return item, gerror.Wrap(err, "查找同消息媒体复用记录失败")
+	}
+	if !cached.IsEmpty() {
+		item.FileUrl = firstNonEmpty(cached["file_url"].String(), item.FileUrl)
+		item.StoragePath = firstNonEmpty(cached["storage_path"].String(), item.StoragePath)
+		item.PosterUrl = firstNonEmpty(cached["poster_url"].String(), item.PosterUrl)
+		item.FileMd5 = firstNonEmpty(cached["file_md5"].String(), item.FileMd5)
+		item.FilePhash = firstNonEmpty(cached["file_phash"].String(), item.FilePhash)
+		return item, nil
+	}
 	if !strings.HasPrefix(strings.TrimSpace(item.FileId), "gotd:") {
 		return item, nil
 	}

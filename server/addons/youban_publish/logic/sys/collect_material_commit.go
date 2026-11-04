@@ -291,7 +291,7 @@ func (s *sSysPublish) prepareCollectMaterialSnapshot(ctx context.Context, event 
 		purpose := group.purpose
 		purposeItems := group.items
 		for index, item := range purposeItems {
-			item, err := s.prepareCollectMediaAsset(ctx, event, item)
+			item, err := s.prepareCollectMediaAsset(ctx, event, item, index+1)
 			if err != nil {
 				return nil, gerror.Wrap(err, "准备采集媒体失败")
 			}
