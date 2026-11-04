@@ -2696,7 +2696,7 @@ func (s *sSysBot) consumeProfileCreatePart(ctx context.Context, botId int64, cha
 			}
 			return s.sendProfileCard(ctx, botId, chatId, note, "view")
 		}
-		res, err := publishService.SysPublish().BotProfileCreate(ctx, &publishsysin.BotProfileCreateInp{TenantId: account.TenantId, AccountId: account.AccountId, PlainText: draft.DisplayText, DisplayMedia: draft.DisplayMedia, VerifyText: draft.VerifyText, VerifyMedia: draft.VerifyMedia, Status: 2})
+		res, err := publishService.SysPublish().BotProfileCreate(ctx, &publishsysin.BotProfileCreateInp{DiagnosticTraceId: trace, TenantId: account.TenantId, AccountId: account.AccountId, PlainText: draft.DisplayText, DisplayMedia: draft.DisplayMedia, VerifyText: draft.VerifyText, VerifyMedia: draft.VerifyMedia, Status: 2})
 		if err != nil {
 			g.Log().Warningf(ctx, "Bot资料创建失败 trace:%s stage:create_profile elapsed_ms:%d err:%v", trace, time.Since(startedAt).Milliseconds(), err)
 			draft.VerificationSubmitted = false
@@ -3224,6 +3224,9 @@ func (s *sSysBot) finishProfileMediaGroup(botId int64, groupId string, account *
 		g.Log().Infof(ctx, "Bot资料展示媒体组已处理，忽略重复收尾 trace:PF-%d groupId:%s step:%s", session.Id, groupId, current.Step)
 		return
 	}
+	// Keep the session lock around snapshot/state checks only. Persistence,
+	// profile creation and Telegram I/O must not block later session messages.
+	_ = lock.Unlock(context.Background())
 	if consumeErr := s.consumeProfileCreatePart(ctx, botId, pending.ChatId, account, current, pending.Text, pending.Media); consumeErr != nil {
 		g.Log().Errorf(ctx, "Bot资料媒体组消费失败 trace:%s groupId:%s step:%s media_count:%d text_len:%d err:%+v", trace, groupId, current.Step, len(pending.Media), len(strings.TrimSpace(pending.Text)), consumeErr)
 		_ = s.reply(ctx, botId, pending.ChatId, "资料媒体组解析失败："+html.EscapeString(botErrorMessage(consumeErr)))
@@ -3390,6 +3393,9 @@ func (s *sSysBot) finishPendingProfileVerifyGroup(botId int64, account *botProfi
 					media = verify.Media
 				}
 				g.Log().Infof(ctx, "Bot资料验证收尾开始 trace:PF-%d media_count:%d text_len:%d", sessionId, len(media), len(strings.TrimSpace(text)))
+				// Do not hold the session mutex over media persistence, profile
+				// creation, or Telegram replies.
+				_ = lock.Unlock(context.Background())
 				err = s.consumeProfileCreatePart(ctx, botId, chatId, account, &latest, text, media)
 				if err != nil {
 					g.Log().Warningf(ctx, "Bot资料验证收尾未完成 trace:PF-%d err:%+v", sessionId, err)
