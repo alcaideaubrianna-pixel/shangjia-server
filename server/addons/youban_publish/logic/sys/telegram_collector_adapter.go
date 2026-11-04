@@ -43,6 +43,12 @@ type publishCollectorAccountTaskHandler struct{ publish *sSysPublish }
 
 type publishCollectorAccountMediaProvider struct{ publish *sSysPublish }
 
+type botCollectChannelCandidate struct {
+	Id             int64  `json:"id"`
+	TelegramChatId string `json:"telegramChatId"`
+	Title          string `json:"title"`
+}
+
 func (h *publishCollectorAccountTaskHandler) HandleAccountTaskFailure(ctx context.Context, task *collectorin.AccountTask, cause error) error {
 	if h == nil || h.publish == nil || task == nil {
 		return nil
@@ -1351,18 +1357,16 @@ func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, sourc
 		return false, nil
 	}
 	now := gtime.Now()
-	var channel struct {
-		Id    int64  `json:"id"`
-		Title string `json:"title"`
-	}
-	if err := pdao.YoubanPublishCollectChannel.Ctx(ctx).Fields("id,title").Where("tenant_id", tenantID).WhereIn("telegram_chat_id", tgChannelCacheLookupIds(chatID)).Scan(&channel); !collectOptionalRecordScanSucceeded(err) {
+	var channels []botCollectChannelCandidate
+	if err := pdao.YoubanPublishCollectChannel.Ctx(ctx).Fields("id,telegram_chat_id,title").Where("tenant_id", tenantID).WhereIn("telegram_chat_id", tgChannelCacheLookupIds(chatID)).Scan(&channels); !collectOptionalRecordScanSucceeded(err) {
 		return false, err
 	}
+	channel := selectBotCollectChannel(channels, chatID)
 	if channel.Id <= 0 {
 		if err := s.upsertCollectChannel(ctx, tenantID, chatID, "channel", chatID, "", 1, 0, delivery.SourceMessageID, now, now); err != nil {
 			return false, gerror.Wrap(err, "记录BOT采集频道失败")
 		}
-		if err := pdao.YoubanPublishCollectChannel.Ctx(ctx).Fields("id,title").Where("tenant_id", tenantID).Where("telegram_chat_id", chatID).Scan(&channel); err != nil || channel.Id <= 0 {
+		if err := pdao.YoubanPublishCollectChannel.Ctx(ctx).Fields("id,telegram_chat_id,title").Where("tenant_id", tenantID).Where("telegram_chat_id", chatID).Scan(&channel); err != nil || channel.Id <= 0 {
 			return false, err
 		}
 	} else {
@@ -1379,7 +1383,16 @@ func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, sourc
 		return false, gerror.Wrap(err, "读取BOT采集频道审批状态失败")
 	}
 	if relation.Id > 0 {
-		return botCollectChannelRelationEnabled(relation.CollectEnabled, relation.Status, relation.ApprovalStatus), nil
+		allowed := botCollectChannelRelationEnabled(relation.CollectEnabled, relation.Status, relation.ApprovalStatus)
+		if !allowed {
+			g.Log().Warning(ctx, "BOT采集频道审批未通过，跳过采集交付", g.Map{
+				"tenantId": tenantID, "accountId": accountID, "sourceId": source["id"].Int64(),
+				"botId": botID, "chatId": chatID, "channelId": channel.Id, "relationId": relation.Id,
+				"collectEnabled": relation.CollectEnabled, "status": relation.Status, "approvalStatus": relation.ApprovalStatus,
+				"sourceMessageId": delivery.SourceMessageID,
+			})
+		}
+		return allowed, nil
 	}
 	// Queue before creating the discovery relation: a crash or send failure
 	// must not permanently lose the first-channel notification.
@@ -1402,6 +1415,21 @@ func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, sourc
 		return false, gerror.Wrap(err, "创建BOT采集频道审批记录失败")
 	}
 	return true, nil
+}
+
+func selectBotCollectChannel(candidates []botCollectChannelCandidate, chatID string) botCollectChannelCandidate {
+	exact := normalizeTelegramChannelChatID(chatID)
+	for _, candidate := range candidates {
+		if strings.TrimSpace(candidate.TelegramChatId) == exact {
+			return candidate
+		}
+	}
+	for _, candidate := range candidates {
+		if normalizeTelegramChannelChatID(candidate.TelegramChatId) == exact {
+			return candidate
+		}
+	}
+	return botCollectChannelCandidate{}
 }
 
 func (s *sSysPublish) sendBotCollectChannelDiscovery(ctx context.Context, source gdb.Record, chatID string, relationID int64, notificationID string) error {

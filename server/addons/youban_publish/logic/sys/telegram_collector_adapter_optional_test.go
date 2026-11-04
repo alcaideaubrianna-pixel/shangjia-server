@@ -47,3 +47,24 @@ func TestBotCollectChannelDefaultEnabled(t *testing.T) {
 		}
 	}
 }
+
+func TestSelectBotCollectChannelPrefersExactCanonicalChatID(t *testing.T) {
+	candidates := []botCollectChannelCandidate{
+		{Id: 33803, TelegramChatId: "3739452626", Title: "legacy rejected channel"},
+		{Id: 97373, TelegramChatId: "-1003739452626", Title: "canonical approved channel"},
+	}
+
+	got := selectBotCollectChannel(candidates, "-1003739452626")
+	if got.Id != 97373 {
+		t.Fatalf("selected channel id=%d, want canonical channel id=97373", got.Id)
+	}
+}
+
+func TestSelectBotCollectChannelFallsBackToLegacyChatID(t *testing.T) {
+	candidates := []botCollectChannelCandidate{{Id: 33803, TelegramChatId: "3739452626"}}
+
+	got := selectBotCollectChannel(candidates, "-1003739452626")
+	if got.Id != 33803 {
+		t.Fatalf("selected channel id=%d, want legacy fallback channel id=33803", got.Id)
+	}
+}
