@@ -215,7 +215,7 @@ func (s *sSysPublish) saveBotProfileMedia(ctx context.Context, profileId int64, 
 				"created_at":             now,
 				"updated_at":             now,
 			}
-			mediaId, err := s.saveMediaRecordAndIndex(ctx, data, "保存机器人资料媒体失败")
+			mediaId, err := s.saveMediaRecord(ctx, data, "保存机器人资料媒体失败")
 			if err != nil {
 				g.Log().Warningf(ctx, "机器人资料媒体索引同步失败 profile_id:%d purpose:%s media_index:%d media_id:%d err:%+v", profileId, purpose, index, mediaId, err)
 				return err
@@ -236,7 +236,10 @@ func (s *sSysPublish) saveBotProfileMedia(ctx context.Context, profileId int64, 
 			return err
 		}
 	}
-	return s.syncBotProfileMedia(ctx, profileId)
+	// Projection and pHash indexing are rebuilt by the media processing queue.
+	// Keeping them out of this request makes profile creation independent from
+	// index locks and slow background scans.
+	return nil
 }
 
 func botProfileMediaAttachment(ctx context.Context, storagePath string, size int64) (gdb.Record, error) {

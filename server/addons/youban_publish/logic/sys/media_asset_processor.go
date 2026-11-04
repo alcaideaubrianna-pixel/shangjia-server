@@ -116,6 +116,17 @@ func (s *sSysPublish) saveMediaRecordAndIndex(ctx context.Context, data g.Map, e
 	return s.saveMediaDataAndIndex(ctx, 0, data, errorMessage)
 }
 
+// saveMediaRecord persists the ownership row without rebuilding the search
+// index inline. BOT profile creation uses this path so pHash/index work is
+// handled by the media processing queue and cannot block the user request.
+func (s *sSysPublish) saveMediaRecord(ctx context.Context, data g.Map, errorMessage string) (int64, error) {
+	mediaId, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Data(data).InsertAndGetId()
+	if err != nil {
+		return 0, gerror.Wrap(err, errorMessage)
+	}
+	return mediaId, nil
+}
+
 func (s *sSysPublish) saveMediaDataAndIndex(ctx context.Context, mediaId int64, data g.Map, errorMessage string) (int64, error) {
 	// Do not wrap this operation in a transaction. The pHash synchronizer
 	// deliberately uses its own transaction; nesting it here makes every
