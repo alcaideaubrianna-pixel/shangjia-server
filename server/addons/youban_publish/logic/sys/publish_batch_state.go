@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -16,18 +17,31 @@ type publishBatchJobCounts struct {
 }
 
 func publishBatchTerminalState(ctx context.Context, operationPrefix string) (bool, string, string, error) {
+	upperBound, ok := publishBatchOperationNoUpperBound(operationPrefix)
+	if !ok {
+		return false, "", "", gerror.New("批次任务前缀格式不合法")
+	}
 	var counts publishBatchJobCounts
 	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Fields(`COUNT(*) AS total,
 			SUM(CASE WHEN status IN ('pending','sending','failed_retry','unknown') THEN 1 ELSE 0 END) AS pending,
 			SUM(CASE WHEN status = 'sent' OR (status = 'superseded' AND sent_at IS NOT NULL) THEN 1 ELSE 0 END) AS sent,
 			SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed`).
-		WhereLike("operation_no", operationPrefix+"%").
+		Where("operation_no >= ? AND operation_no < ?", operationPrefix, upperBound).
 		Scan(&counts)
 	if err != nil {
 		return false, "", "", gerror.Wrap(err, "汇总批次TG任务状态失败")
 	}
 	return resolvePublishBatchState(counts)
+}
+
+func publishBatchOperationNoUpperBound(prefix string) (string, bool) {
+	if prefix == "" || !strings.HasSuffix(prefix, ":") {
+		return "", false
+	}
+	// Batch operation numbers are ASCII and production PostgreSQL uses C.UTF-8,
+	// so ':' to ';' gives an exact indexable interval for this prefix.
+	return prefix[:len(prefix)-1] + ";", true
 }
 
 func resolvePublishBatchState(counts publishBatchJobCounts) (bool, string, string, error) {

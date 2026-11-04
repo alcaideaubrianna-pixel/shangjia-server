@@ -2,6 +2,36 @@ package sys
 
 import "testing"
 
+func TestPublishBatchOperationNoUpperBound(t *testing.T) {
+	tests := []struct {
+		prefix string
+		upper  string
+		valid  bool
+	}{
+		{prefix: "cycle_batch:123:", upper: "cycle_batch:123;", valid: true},
+		{prefix: "full_push:12:345:", upper: "full_push:12:345;", valid: true},
+		{prefix: "", valid: false},
+		{prefix: "cycle_batch:123", valid: false},
+	}
+	for _, test := range tests {
+		t.Run(test.prefix, func(t *testing.T) {
+			upper, ok := publishBatchOperationNoUpperBound(test.prefix)
+			if ok != test.valid || upper != test.upper {
+				t.Fatalf("upper bound = %q, valid = %v; want %q, %v", upper, ok, test.upper, test.valid)
+			}
+		})
+	}
+
+	for _, prefix := range []string{"cycle_batch:123:", "full_push:12:345:"} {
+		upper, _ := publishBatchOperationNoUpperBound(prefix)
+		for _, operationNo := range []string{prefix, prefix + "1:88", prefix + "999"} {
+			if operationNo < prefix || operationNo >= upper {
+				t.Errorf("operation number %q is outside [%q, %q)", operationNo, prefix, upper)
+			}
+		}
+	}
+}
+
 func TestResolvePublishBatchState(t *testing.T) {
 	tests := []struct {
 		name    string
