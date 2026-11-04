@@ -273,6 +273,25 @@ func TestMediaSearchStorageLocalPostgres(t *testing.T) {
 			}
 
 		})
+		t.Run("lightweight_upload_indexes_with_live_context", func(t *testing.T) {
+			path := writeScanStorageImage(t, 7)
+			id, err := service.saveMediaRecordAndIndex(ctx, g.Map{"tenant_id": 5, "account_id": 6, "profile_id": 101, "media_type": "image"}, "保存防扫图测试媒体失败")
+			if err != nil {
+				t.Fatal(err)
+			}
+			media := &telegramMediaItem{Id: id, MediaType: "image", AntiScanEnabled: true, AntiScanMode: "lightweight"}
+			out, cleanup, err := service.prepareTelegramAntiScanUploadFile(ctx, media, path, nil, "image")
+			if cleanup != nil {
+				defer cleanup()
+			}
+			if err != nil || out == "" {
+				t.Fatalf("generated upload rejected: path=%q err=%v parentErr=%v", out, err, ctx.Err())
+			}
+			count, err := tx.Ctx(ctx).Model(publishMediaPHashAliasBucketTable).Where("media_id", id).Count()
+			if err != nil || count != 4 {
+				t.Fatalf("generated upload not indexed: buckets=%d err=%v", count, err)
+			}
+		})
 		t.Run("generation_failure_falls_back_to_source_upload", func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "document.jpg")
 			if err := os.WriteFile(path, encodeBackgroundReplacementTestImage(t, color.White), 0600); err != nil {

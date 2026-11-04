@@ -54,17 +54,20 @@ func (s *sSysPublish) prepareTelegramAntiScanUploadFile(ctx context.Context, med
 	// Every successful branch (including background replacement and cache reuse)
 	// must index the final upload bytes before they can be sent. A failed index
 	// write is a preparation failure and uses the existing job retry mechanism.
-	defer func() {
+	// Capture the caller context before ctx is replaced by the lightweight
+	// generation budget. Its cancel defer runs before this indexing defer.
+	// Indexing must still respect caller cancellation, but not that local cancel.
+	defer func(indexCtx context.Context) {
 		if resultErr != nil || resultPath == "" {
 			return
 		}
-		if err := s.indexTelegramGeneratedMedia(ctx, media, resultPath, kind); err != nil {
+		if err := s.indexTelegramGeneratedMedia(indexCtx, media, resultPath, kind); err != nil {
 			if resultCleanup != nil {
 				resultCleanup()
 			}
 			resultPath, resultCleanup, resultErr = "", nil, err
 		}
-	}()
+	}(ctx)
 
 	if kind == "image" && media.AntiScanMode == "background_replace" && media.AntiScanBackgroundURL != "" {
 		startedAt := time.Now()
