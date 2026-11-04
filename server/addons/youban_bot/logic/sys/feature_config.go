@@ -18,6 +18,7 @@ import (
 
 const featureCacheTTL = 30 * time.Second
 const featureDefaultSyncTTL = 5 * time.Minute
+const featureQueryTimeout = 5 * time.Second
 
 func (s *sSysBot) AdminFeatureList(ctx context.Context, in *sysin.FeatureListInp) (list []*sysin.FeatureModel, totalCount int, err error) {
 	if in == nil {
@@ -151,6 +152,8 @@ func (s *sSysBot) syncFeatureDefaults(ctx context.Context) error {
 	if s.featureDefaultsSynced() {
 		return nil
 	}
+	ctx, cancel := context.WithTimeout(ctx, featureQueryTimeout)
+	defer cancel()
 	changed := false
 	for index, feature := range botFeatures {
 		if feature == nil || strings.TrimSpace(feature.Key()) == "" {
@@ -195,6 +198,7 @@ func (s *sSysBot) markFeatureDefaultsSynced(changed bool) {
 	defer s.featureMu.Unlock()
 	s.featureDefaultsAt = time.Now()
 	if changed {
+		s.featureGeneration++
 		s.features = nil
 		s.featureAt = time.Time{}
 	}
@@ -214,6 +218,14 @@ func (s *sSysBot) featureConfig(ctx context.Context, key string) (*botFeatureRow
 }
 
 func (s *sSysBot) featureConfigs(ctx context.Context) (map[string]*botFeatureRow, error) {
+	return s.loadFeatureConfigs(ctx, func(ctx context.Context) ([]*botFeatureRow, error) {
+		var rows []*botFeatureRow
+		err := g.DB().Model(featureTable).Safe().Ctx(ctx).WhereNull("deleted_at").OrderAsc("sort").OrderAsc("id").Scan(&rows)
+		return rows, err
+	})
+}
+
+func (s *sSysBot) loadFeatureConfigs(ctx context.Context, load func(context.Context) ([]*botFeatureRow, error)) (map[string]*botFeatureRow, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -225,14 +237,17 @@ func (s *sSysBot) featureConfigs(ctx context.Context) (map[string]*botFeatureRow
 		defer s.featureMu.RUnlock()
 		return s.features, nil
 	}
+	generation := s.featureGeneration
 	s.featureMu.RUnlock()
-	s.featureMu.Lock()
-	defer s.featureMu.Unlock()
-	if s.features != nil && time.Since(s.featureAt) < featureCacheTTL {
-		return s.features, nil
+	// Never hold featureMu across network I/O: one stalled connection otherwise
+	// prevents every Bot message from even reaching its media handler.
+	queryCtx, cancel := context.WithTimeout(ctx, featureQueryTimeout)
+	defer cancel()
+	rows, err := load(queryCtx)
+	if err == nil {
+		err = queryCtx.Err()
 	}
-	var rows []*botFeatureRow
-	if err := g.DB().Model(featureTable).Safe().Ctx(ctx).WhereNull("deleted_at").OrderAsc("sort").OrderAsc("id").Scan(&rows); err != nil {
+	if err != nil {
 		return nil, gerror.Wrap(err, "读取Bot插件配置失败")
 	}
 	configs := make(map[string]*botFeatureRow, len(rows))
@@ -240,6 +255,14 @@ func (s *sSysBot) featureConfigs(ctx context.Context) (map[string]*botFeatureRow
 		if row != nil && strings.TrimSpace(row.FeatureKey) != "" {
 			configs[row.FeatureKey] = row
 		}
+	}
+	s.featureMu.Lock()
+	defer s.featureMu.Unlock()
+	if generation != s.featureGeneration {
+		return nil, gerror.New("Bot插件配置已更新，请重试")
+	}
+	if s.features != nil && time.Since(s.featureAt) < featureCacheTTL {
+		return s.features, nil
 	}
 	s.features = configs
 	s.featureAt = time.Now()
@@ -249,6 +272,7 @@ func (s *sSysBot) featureConfigs(ctx context.Context) (map[string]*botFeatureRow
 func (s *sSysBot) clearFeatureCache() {
 	s.featureMu.Lock()
 	defer s.featureMu.Unlock()
+	s.featureGeneration++
 	s.features = nil
 	s.featureAt = time.Time{}
 }

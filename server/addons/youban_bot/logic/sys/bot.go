@@ -51,6 +51,7 @@ type sSysBot struct {
 	featureMu             sync.RWMutex
 	features              map[string]*botFeatureRow
 	featureAt             time.Time
+	featureGeneration     uint64
 	featureDefaultsAt     time.Time
 	broadcastMu           sync.Mutex
 	broadcastRunning      bool
