@@ -2423,6 +2423,7 @@ func (s *sSysBot) isWaitingProfileCreate(ctx context.Context, botId int64, msg *
 }
 
 type profileCreateDraft struct {
+	CreatedProfileId            int64                                   `json:"createdProfileId,omitempty"`
 	DisplayText                 string                                  `json:"displayText"`
 	DisplayMedia                []*publishsysin.MessageTemplateMediaInp `json:"displayMedia"`
 	VerifyText                  string                                  `json:"verifyText"`
@@ -2843,6 +2844,11 @@ func (s *sSysBot) consumeProfileCreatePart(ctx context.Context, botId int64, cha
 			return s.sendProfileCreateStepPrompt(ctx, botId, chatId, "waiting_verify")
 		}
 		g.Log().Infof(ctx, "Bot资料收尾阶段完成 trace:%s stage:create_profile elapsed_ms:%d profile_id:%d", trace, time.Since(stageStartedAt).Milliseconds(), res.Id)
+		draft.CreatedProfileId = res.Id
+		if persistErr := s.updateProfileSession(ctx, session.Id, "saving", draft); persistErr != nil {
+			g.Log().Errorf(ctx, "Bot资料收尾阶段失败 trace:%s stage:save_created_profile_id err:%s profile_id:%d", trace, sensitive.Diagnostic(persistErr.Error()), res.Id)
+			return persistErr
+		}
 		if session.Scene == "batch_create" {
 			// Keep the durable session active for the next display/verify pair.
 			// The created profile is already committed, so a notification failure
@@ -3164,6 +3170,7 @@ func (s *sSysBot) startProfileSessionRecovery(ctx context.Context) {
 	s.profileRecoveryMu.Unlock()
 	go func() {
 		s.recoverPendingProfileMediaGroups(recoveryCtx)
+		s.recoverSavingProfileSessions(recoveryCtx)
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
 		auditTicker := time.NewTicker(10 * time.Minute)
@@ -3181,9 +3188,45 @@ func (s *sSysBot) startProfileSessionRecovery(ctx context.Context) {
 				}
 			case <-ticker.C:
 				s.recoverPendingProfileMediaGroups(recoveryCtx)
+				s.recoverSavingProfileSessions(recoveryCtx)
 			}
 		}
 	}()
+}
+
+func (s *sSysBot) recoverSavingProfileSessions(ctx context.Context) {
+	if ctx.Err() != nil {
+		return
+	}
+	var rows []profileSessionRow
+	cutoff := gtime.Now().Add(-profileProcessingTimeout)
+	if err := g.DB().Model(profileSessionTable).Safe().Ctx(ctx).
+		Fields("id,bot_id,chat_id,scene,step,status,payload_json,tenant_id,account_id,app").
+		Where("status", profileSessionStatusActive).Where("step", "saving").WhereLTE("updated_at", cutoff).
+		Limit(100).Scan(&rows); err != nil {
+		g.Log().Warningf(ctx, "恢复Bot资料保存会话查询失败 err:%+v", err)
+		return
+	}
+	for _, row := range rows {
+		draft := decodeProfileCreateDraft(row.PayloadJson)
+		trace := fmt.Sprintf("PF-%d", row.Id)
+		if draft.CreatedProfileId > 0 {
+			if err := s.completeProfileSession(ctx, row.Id); err != nil {
+				g.Log().Warningf(ctx, "恢复Bot资料已创建会话失败 trace:%s profile_id:%d err:%+v", trace, draft.CreatedProfileId, err)
+				continue
+			}
+			g.Log().Infof(ctx, "恢复Bot资料已创建会话完成 trace:%s profile_id:%d", trace, draft.CreatedProfileId)
+			continue
+		}
+		draft.VerificationSubmitted = false
+		draft.VerificationRecoveryBlocked = false
+		if err := s.resetProfileSessionStep(ctx, row.Id, "saving", "waiting_verify", draft); err != nil {
+			g.Log().Warningf(ctx, "恢复Bot资料未创建会话失败 trace:%s err:%+v", trace, err)
+			continue
+		}
+		g.Log().Warningf(ctx, "恢复Bot资料未创建会话，退回验证步骤 trace:%s", trace)
+		_ = s.sendProfileCreateStepPrompt(ctx, row.BotId, row.ChatId, "waiting_verify")
+	}
 }
 
 func (s *sSysBot) stopProfileSessionRecovery() {
