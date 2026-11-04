@@ -55,7 +55,7 @@ func (s *sCollector) StartDeliveryRuntime(ctx context.Context) {
 		s.queueClient = asynq.NewClient(collectorRedisOption(runtimeCtx))
 	}
 	historyServer := asynq.NewServer(collectorRedisOption(runtimeCtx), asynq.Config{
-		Concurrency: 1,
+		Concurrency: collectorDeliveryHistoryConcurrency(runtimeCtx),
 		Queues:      map[string]int{consts.QueueDeliveryHistory: 1},
 	})
 	legacyServer := asynq.NewServer(collectorRedisOption(runtimeCtx), asynq.Config{Concurrency: 2, Queues: map[string]int{consts.QueueDeliveryReady: 1, consts.QueueDeliveryUrgent: 1}})
@@ -412,11 +412,22 @@ func deliveryQueueName(priority int) string {
 }
 
 func collectorDeliveryHistoryInterval(ctx context.Context) time.Duration {
-	value := g.Cfg().MustGet(ctx, "telegramCollector.delivery.historyIntervalMilliseconds", 500).Int()
+	value := g.Cfg().MustGet(ctx, "telegramCollector.delivery.historyIntervalMilliseconds", 200).Int()
 	if value < 100 {
 		value = 100
 	}
 	return time.Duration(value) * time.Millisecond
+}
+
+func collectorDeliveryHistoryConcurrency(ctx context.Context) int {
+	value := g.Cfg().MustGet(ctx, "telegramCollector.delivery.historyConcurrency", 4).Int()
+	if value < 1 {
+		value = 1
+	}
+	if value > 32 {
+		value = 32
+	}
+	return value
 }
 
 func collectorDeliveryRecentHistoryWindow(ctx context.Context) time.Duration {
