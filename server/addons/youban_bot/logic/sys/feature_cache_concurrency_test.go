@@ -66,3 +66,18 @@ func TestFeatureConfigCancelledReadDoesNotPopulateCache(t *testing.T) {
 		t.Fatalf("cancelled read cached: err=%v cache=%v", err, s.features)
 	}
 }
+
+func TestFeatureConfigValidCacheSkipsDefaultSyncAndDatabase(t *testing.T) {
+	s := &sSysBot{
+		features:  map[string]*botFeatureRow{"image_scan": {FeatureKey: "image_scan", Status: 2}},
+		featureAt: time.Now(),
+		// Default synchronization is overdue; a cache hit must still return.
+	}
+	configs, err := s.loadFeatureConfigs(context.Background(), func(context.Context) ([]*botFeatureRow, error) {
+		t.Fatal("cache hit unexpectedly queried database")
+		return nil, nil
+	})
+	if err != nil || configs["image_scan"].Status != 2 {
+		t.Fatalf("cache hit lost configured disabled state: configs=%v err=%v", configs, err)
+	}
+}

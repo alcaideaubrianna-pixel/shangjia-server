@@ -229,6 +229,14 @@ func (s *sSysBot) loadFeatureConfigs(ctx context.Context, load func(context.Cont
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	// A valid snapshot must not depend on default synchronization or DB health.
+	s.featureMu.RLock()
+	if s.features != nil && time.Since(s.featureAt) < featureCacheTTL {
+		configs := s.features
+		s.featureMu.RUnlock()
+		return configs, nil
+	}
+	s.featureMu.RUnlock()
 	if err := s.syncFeatureDefaults(ctx); err != nil {
 		return nil, err
 	}
