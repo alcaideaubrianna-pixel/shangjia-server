@@ -94,6 +94,11 @@ type telegramOfflineBatchInput struct {
 	} `json:"messages,omitempty" jsonschema:"Telegram messages; processed in batches of 100"`
 }
 
+type telegramMessageDeleteInput struct {
+	ChatID    string `json:"chatId" jsonschema:"Telegram channel Chat ID, for example -1001234567890"`
+	MessageID int64  `json:"messageId" jsonschema:"Telegram message ID"`
+}
+
 type structuredOutput struct {
 	Data map[string]any `json:"data"`
 }
@@ -139,6 +144,10 @@ func main() {
 		Name: "telegram_message_offline_batch", Description: "Batch offline profiles and enqueue deletion of their Telegram messages through the production cleanup queue; requests are split into batches of 100",
 		Annotations: &mcp.ToolAnnotations{Title: "Batch delete Telegram messages", ReadOnlyHint: readOnly, DestructiveHint: &destructive, IdempotentHint: true},
 	}, client.telegramMessageOfflineBatch)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "telegram_message_delete", Description: "Delete one Telegram message directly by channel Chat ID and message ID through the production cleanup queue",
+		Annotations: &mcp.ToolAnnotations{Title: "Delete one Telegram message", ReadOnlyHint: readOnly, DestructiveHint: &destructive, IdempotentHint: true},
+	}, client.telegramMessageDelete)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "collect_preview_repair", Description: "Create a bounded dry-run repair plan and confirmation token without changing business data",
 		Annotations: &mcp.ToolAnnotations{Title: "Preview collection repair", ReadOnlyHint: true, IdempotentHint: false},
@@ -323,6 +332,17 @@ func (c *apiClient) telegramMessageOfflineBatch(ctx context.Context, _ *mcp.Call
 		msgOffset += msgTake
 	}
 	return nil, structuredOutput{Data: map[string]any{"batchSize": batchSize, "batches": results}}, nil
+}
+
+func (c *apiClient) telegramMessageDelete(ctx context.Context, _ *mcp.CallToolRequest, input telegramMessageDeleteInput) (*mcp.CallToolResult, structuredOutput, error) {
+	chatID := strings.TrimSpace(input.ChatID)
+	if chatID == "" || input.MessageID <= 0 {
+		return nil, structuredOutput{}, fmt.Errorf("chatId and a positive messageId are required")
+	}
+	data, err := c.call(ctx, http.MethodPost, "/api/youban_publish/ai-ops/telegram/message/offline", map[string]any{
+		"messages": []map[string]any{{"chatId": chatID, "messageId": input.MessageID}},
+	})
+	return nil, structuredOutput{Data: data}, err
 }
 
 func (c *apiClient) call(ctx context.Context, method, path string, body any) (map[string]any, error) {
