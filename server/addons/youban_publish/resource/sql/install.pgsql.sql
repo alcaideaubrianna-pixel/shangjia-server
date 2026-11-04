@@ -2331,3 +2331,66 @@ CREATE INDEX IF NOT EXISTS idx_ybp_collect_process_outbox_fresh
 CREATE INDEX IF NOT EXISTS idx_ybp_collect_process_outbox_history
  ON hg_youban_publish_collect_process_outbox (available_at,id)
  WHERE status='pending' AND history=TRUE;
+
+-- Unified task workflow. These tables are additive; existing publish and
+-- account-task tables remain compatible during the migration period.
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_task_batch" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "type" varchar(32) NOT NULL DEFAULT '',
+  "status" varchar(16) NOT NULL DEFAULT 'pending',
+  "total_count" integer NOT NULL DEFAULT 0,
+  "pending_count" integer NOT NULL DEFAULT 0,
+  "running_count" integer NOT NULL DEFAULT 0,
+  "success_count" integer NOT NULL DEFAULT 0,
+  "failed_count" integer NOT NULL DEFAULT 0,
+  "unknown_count" integer NOT NULL DEFAULT 0,
+  "cancelled_count" integer NOT NULL DEFAULT 0,
+  "deadline_at" timestamp NULL,
+  "started_at" timestamp NULL,
+  "completed_at" timestamp NULL,
+  "last_error" text NOT NULL DEFAULT '',
+  "created_at" timestamp NULL,
+  "updated_at" timestamp NULL
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_task_batch_owner" ON "hg_youban_publish_task_batch" ("tenant_id","account_id","created_at","id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_task_batch_status" ON "hg_youban_publish_task_batch" ("status","deadline_at","updated_at","id");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_task_item" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "batch_id" bigint NOT NULL,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "profile_id" bigint NOT NULL DEFAULT 0,
+  "channel_id" bigint NOT NULL DEFAULT 0,
+  "status" varchar(16) NOT NULL DEFAULT 'pending',
+  "deadline_at" timestamp NULL,
+  "started_at" timestamp NULL,
+  "completed_at" timestamp NULL,
+  "error_code" varchar(64) NOT NULL DEFAULT '',
+  "error_message" text NOT NULL DEFAULT '',
+  "created_at" timestamp NULL,
+  "updated_at" timestamp NULL
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_task_item_batch" ON "hg_youban_publish_task_item" ("batch_id","status","id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_task_item_dispatch" ON "hg_youban_publish_task_item" ("status","deadline_at","id");
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_task_item_target" ON "hg_youban_publish_task_item" ("batch_id","profile_id","channel_id");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_task_execution" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "item_id" bigint NOT NULL,
+  "attempt_no" integer NOT NULL DEFAULT 1,
+  "account_task_id" bigint NOT NULL DEFAULT 0,
+  "status" varchar(16) NOT NULL DEFAULT 'queued',
+  "lease_owner" varchar(128) NOT NULL DEFAULT '',
+  "lease_until" timestamp NULL,
+  "started_at" timestamp NULL,
+  "finished_at" timestamp NULL,
+  "error_code" varchar(64) NOT NULL DEFAULT '',
+  "error_message" text NOT NULL DEFAULT '',
+  "created_at" timestamp NULL,
+  "updated_at" timestamp NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_task_execution_attempt" ON "hg_youban_publish_task_execution" ("item_id","attempt_no");
+CREATE INDEX IF NOT EXISTS "idx_ybp_task_execution_lease" ON "hg_youban_publish_task_execution" ("status","lease_until","id");

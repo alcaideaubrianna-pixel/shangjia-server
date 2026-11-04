@@ -76,7 +76,44 @@ func (s *sSysPublish) BuildDailyReport(ctx context.Context, tenantID, accountID 
 		Action                      string
 		Success, Failed, Processing int
 	}
-	if err = g.DB().Model(publishSuccessRecordTable+" r").Safe().Ctx(ctx).
+	// New workflow batches are the authoritative source once a day has started
+	// producing them. Keep the legacy projection as a compatibility fallback so
+	// historical reports remain available during the migration.
+	var unifiedCount int
+	if unifiedCount, err = g.DB().Model("hg_youban_publish_task_batch").Safe().Ctx(ctx).
+		Where("tenant_id", tenantID).Where("account_id", accountID).
+		WhereGTE("created_at", start).WhereLT("created_at", end).Count(); err != nil {
+		return nil, gerror.Wrap(err, "检查统一任务批次失败")
+	}
+	if unifiedCount > 0 {
+		var unified []struct {
+			Action     string `orm:"action"`
+			Success    int    `orm:"success"`
+			Failed     int    `orm:"failed"`
+			Processing int    `orm:"processing"`
+		}
+		unifiedSQL := `SELECT b.type AS action,
+ SUM(CASE WHEN i.status='success' THEN 1 ELSE 0 END) AS success,
+ SUM(CASE WHEN i.status='failed' THEN 1 ELSE 0 END) AS failed,
+ SUM(CASE WHEN i.status IN ('pending','running','unknown') THEN 1 ELSE 0 END) AS processing
+ FROM hg_youban_publish_task_batch b
+ JOIN hg_youban_publish_task_item i ON i.batch_id=b.id
+ WHERE b.tenant_id=? AND b.account_id=? AND b.created_at>=? AND b.created_at<?
+ GROUP BY b.type`
+		if err = g.DB().GetScan(ctx, &unified, unifiedSQL, tenantID, accountID, start, end); err != nil {
+			return nil, gerror.Wrap(err, "统计统一任务结果失败")
+		}
+		for _, row := range unified {
+			action := row.Action
+			if action == taskBatchTypeFullPublish || action == taskBatchTypeManual {
+				action = "collect_publish"
+			}
+			counts = append(counts, struct {
+				Action                      string
+				Success, Failed, Processing int
+			}{action, row.Success, row.Failed, row.Processing})
+		}
+	} else if err = g.DB().Model(publishSuccessRecordTable+" r").Safe().Ctx(ctx).
 		LeftJoin(publishTgJobTable+" j", dailyReportJobJoin()).
 		Fields("r.action AS action,SUM(CASE WHEN r.status='success' THEN 1 ELSE 0 END) AS success, SUM(CASE WHEN r.status='failed' THEN 1 ELSE 0 END) AS failed, SUM(CASE WHEN r.status IN ('pending','sending','unknown','failed_retry') THEN 1 ELSE 0 END) AS processing").
 		Where("r.tenant_id", tenantID).Where("r.account_id", accountID).
