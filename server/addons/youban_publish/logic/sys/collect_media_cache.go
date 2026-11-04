@@ -166,7 +166,6 @@ func (s *sSysPublish) prepareCollectMediaAsset(ctx context.Context, event gdb.Re
 		Where("tenant_id", event["tenant_id"].Int64()).
 		Where("REPLACE(source_chat_id, '-100', '') = REPLACE(?, '-100', '')", event["source_chat_id"].String()).
 		Where("source_message_id", event["source_message_id"].Int64()).
-		Where("sort_index", sortIndex).
 		Where("media_type", collectPublishMediaType(item.Type)).
 		Where("event_id <>", event["id"].Int64()).
 		Where("cache_status", collectMediaCacheReady).
@@ -521,7 +520,6 @@ func (s *sSysPublish) reuseCollectMediaFromMessageSibling(ctx context.Context, e
 		Where("tenant_id", event["tenant_id"].Int64()).
 		Where("REPLACE(source_chat_id, '-100', '') = REPLACE(?, '-100', '')", event["source_chat_id"].String()).
 		Where("source_message_id", row.SourceMessageId).
-		Where("sort_index", row.SortIndex).
 		Where("media_type", row.MediaType).
 		Where("event_id <>", row.EventId).
 		Where("cache_status", collectMediaCacheReady).
