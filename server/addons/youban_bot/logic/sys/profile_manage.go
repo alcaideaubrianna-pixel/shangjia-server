@@ -2922,7 +2922,7 @@ func (s *sSysBot) sendProfileCreateSuccess(ctx context.Context, botId int64, cha
 	}
 	if len(batch) > 0 && batch[0] {
 		text = strings.Replace(text, "创建成功！", "当前资料已保存！", 1)
-		text += "\n\n如需继续新增，请发送【下一份展示资料】；结束新增可发送 /cancel。"
+		text += fmt.Sprintf("\n\n如需继续新增，请发送【下一份展示资料】。连续 %s 无操作，将自动结束新增；也可发送 /cancel 立即结束。", profileSessionTimeoutText())
 	}
 	return s.sendProfileSaveNotice(ctx, botId, chatId, text, markup)
 }
