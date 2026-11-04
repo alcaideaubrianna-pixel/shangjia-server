@@ -139,7 +139,12 @@ func persistQuickPushMediaFile(ctx context.Context, client *http.Client, mediaTy
 // download/upload when the same media is submitted again.
 func lookupBotTelegramMediaReuse(ctx context.Context, accountID int64, mediaType, tgFileID string) (string, string, bool) {
 	tgFileID = strings.TrimSpace(tgFileID)
-	if accountID <= 0 || tgFileID == "" {
+	// BOT profile media currently uses copy:<chat>:<message> as a provenance
+	// reference. It is not Telegram's reusable file_id and must never be used
+	// as a content identity. A real Telegram file_id is safe to reuse here;
+	// stable file_unique_id support is added separately once persisted on the
+	// publish media row.
+	if accountID <= 0 || tgFileID == "" || strings.HasPrefix(tgFileID, "copy:") {
 		return "", "", false
 	}
 	row, err := g.DB().Model("hg_youban_publish_media").Safe().Ctx(ctx).
