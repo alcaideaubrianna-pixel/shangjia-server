@@ -2802,6 +2802,9 @@ func (s *sSysBot) consumeProfileCreatePart(ctx context.Context, botId int64, cha
 				return err
 			}
 			g.Log().Infof(ctx, "Bot资料收尾阶段完成 trace:%s stage:advance_batch_session elapsed_ms:%d profile_id:%d", trace, time.Since(stageStartedAt).Milliseconds(), res.Id)
+			// Each completed batch item starts a fresh inactivity window. Older
+			// timers re-check updated_at and exit without canceling this session.
+			s.scheduleProfileSessionTimeout(session.Id, botId, chatId)
 			go s.sendProfileCreateSuccessWithRetry(botId, chatId, res, true)
 			return nil
 		}
