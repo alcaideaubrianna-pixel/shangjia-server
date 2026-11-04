@@ -55,8 +55,13 @@ func (s *sSysBot) persistTelegramMedia(ctx context.Context, operatorAccountId in
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }()
 			stored := *item
-			fileURL, storagePath, err := persistQuickPushMediaFile(uploadCtx, client, item.MediaType, item.Name, item.FileUrl)
+			mediaCtx, cancel := context.WithTimeout(uploadCtx, 45*time.Second)
+			defer cancel()
+			startedAt := time.Now()
+			g.Log().Infof(ctx, "Telegram媒体持久化开始 media_index:%d media_type:%s name:%s", index, item.MediaType, item.Name)
+			fileURL, storagePath, err := persistQuickPushMediaFile(mediaCtx, client, item.MediaType, item.Name, item.FileUrl)
 			if err != nil {
+				g.Log().Warningf(ctx, "Telegram媒体持久化失败 media_index:%d elapsed_ms:%d err:%+v", index, time.Since(startedAt).Milliseconds(), err)
 				errMu.Lock()
 				if firstErr == nil {
 					firstErr = gerror.Wrapf(err, "转存Telegram媒体失败 mediaType:%s name:%s", item.MediaType, item.Name)
@@ -67,7 +72,7 @@ func (s *sSysBot) persistTelegramMedia(ctx context.Context, operatorAccountId in
 			stored.FileUrl = fileURL
 			stored.StoragePath = storagePath
 			if strings.TrimSpace(item.PosterUrl) != "" {
-				posterURL, posterPath, posterErr := persistQuickPushMediaFile(uploadCtx, client, "image", item.Name+"-poster", item.PosterUrl)
+				posterURL, posterPath, posterErr := persistQuickPushMediaFile(mediaCtx, client, "image", item.Name+"-poster", item.PosterUrl)
 				if posterErr != nil {
 					g.Log().Warningf(ctx, "Telegram媒体封面转存失败 name:%s err:%+v", item.Name, posterErr)
 					stored.PosterUrl = ""
@@ -78,6 +83,7 @@ func (s *sSysBot) persistTelegramMedia(ctx context.Context, operatorAccountId in
 				}
 			}
 			result[index] = &stored
+			g.Log().Infof(ctx, "Telegram媒体持久化完成 media_index:%d elapsed_ms:%d", index, time.Since(startedAt).Milliseconds())
 		}(index, item)
 	}
 	wait.Wait()

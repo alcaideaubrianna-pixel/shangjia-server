@@ -217,6 +217,7 @@ func (s *sSysPublish) saveBotProfileMedia(ctx context.Context, profileId int64, 
 			}
 			mediaId, err := s.saveMediaRecordAndIndex(ctx, data, "保存机器人资料媒体失败")
 			if err != nil {
+				g.Log().Warningf(ctx, "机器人资料媒体索引同步失败 profile_id:%d purpose:%s media_index:%d media_id:%d err:%+v", profileId, purpose, index, mediaId, err)
 				return err
 			}
 			if err = s.enqueueMediaProcess(ctx, mediaId, 0); err != nil {

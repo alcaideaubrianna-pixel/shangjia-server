@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/corona10/goimagehash"
-	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
@@ -118,20 +117,23 @@ func (s *sSysPublish) saveMediaRecordAndIndex(ctx context.Context, data g.Map, e
 }
 
 func (s *sSysPublish) saveMediaDataAndIndex(ctx context.Context, mediaId int64, data g.Map, errorMessage string) (int64, error) {
-	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		var err error
-		if mediaId > 0 {
-			_, err = tx.Model(publishMediaTable).Safe().Ctx(ctx).Where("id", mediaId).Data(data).Update()
-		} else {
-			mediaId, err = tx.Model(publishMediaTable).Safe().Ctx(ctx).Data(data).InsertAndGetId()
-		}
-		if err != nil {
-			return gerror.Wrap(err, errorMessage)
-		}
-		return s.syncMediaPHashBucketByMediaId(ctx, mediaId)
-	})
+	// Do not wrap this operation in a transaction. The pHash synchronizer
+	// deliberately uses its own transaction; nesting it here makes every
+	// concurrent profile save reserve two DB connections and can exhaust the
+	// pool, leaving the BOT completion flow waiting indefinitely.
+	var err error
+	if mediaId > 0 {
+		_, err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Where("id", mediaId).Data(data).Update()
+	} else {
+		mediaId, err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Data(data).InsertAndGetId()
+	}
 	if err != nil {
-		return 0, err
+		return 0, gerror.Wrap(err, errorMessage)
+	}
+	if err = s.syncMediaPHashBucketByMediaId(ctx, mediaId); err != nil {
+		// The media row is intentionally retained. The maintenance/recovery
+		// path can rebuild the search index without duplicating the attachment.
+		return mediaId, err
 	}
 	return mediaId, nil
 }
