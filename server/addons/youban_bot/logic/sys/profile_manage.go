@@ -2696,6 +2696,12 @@ func (s *sSysBot) consumeProfileCreatePart(ctx context.Context, botId int64, cha
 			}
 			return s.sendProfileCard(ctx, botId, chatId, note, "view")
 		}
+		ackCtx, ackCancel := context.WithTimeout(ctx, 5*time.Second)
+		ackErr := s.sendProfileSaveNotice(ackCtx, botId, chatId, profileVerificationReceivedText(draft), nil)
+		ackCancel()
+		if ackErr != nil {
+			g.Log().Warningf(ctx, "Bot资料验证接收提示失败 trace:%s err:%+v", trace, ackErr)
+		}
 		res, err := publishService.SysPublish().BotProfileCreate(ctx, &publishsysin.BotProfileCreateInp{DiagnosticTraceId: trace, TenantId: account.TenantId, AccountId: account.AccountId, PlainText: draft.DisplayText, DisplayMedia: draft.DisplayMedia, VerifyText: draft.VerifyText, VerifyMedia: draft.VerifyMedia, Status: 2})
 		if err != nil {
 			g.Log().Warningf(ctx, "Bot资料创建失败 trace:%s stage:create_profile elapsed_ms:%d err:%v", trace, time.Since(startedAt).Milliseconds(), err)
@@ -2715,14 +2721,8 @@ func (s *sSysBot) consumeProfileCreatePart(ctx context.Context, botId int64, cha
 			if err = s.updateProfileSession(ctx, session.Id, "waiting_display", &profileCreateDraft{}); err != nil {
 				return err
 			}
-			if note, viewErr := publishService.SysPublish().BotProfileView(ctx, &publishsysin.BotProfileViewInp{TenantId: account.TenantId, AccountId: account.AccountId, ProfileId: res.Id}); viewErr == nil && note != nil {
-				if cardErr := s.sendProfileCard(ctx, botId, chatId, note, "up"); cardErr != nil {
-					g.Log().Warningf(ctx, "批量新增资料卡片发送失败 profileId:%d err:%+v", res.Id, cardErr)
-				}
-			} else if viewErr != nil {
-				g.Log().Warningf(ctx, "批量新增资料卡片读取失败 profileId:%d err:%+v", res.Id, viewErr)
-			}
-			return s.sendProfileCreateStepPrompt(ctx, botId, chatId, "waiting_display")
+			go s.sendProfileCreateSuccessWithRetry(botId, chatId, res, true)
+			return nil
 		}
 		_ = s.completeProfileSession(ctx, session.Id)
 		// Creation is already durable; notification must not make the update
@@ -2733,13 +2733,13 @@ func (s *sSysBot) consumeProfileCreatePart(ctx context.Context, botId int64, cha
 	return nil
 }
 
-func (s *sSysBot) sendProfileCreateSuccessWithRetry(botId int64, chatId string, res *publishsysin.ProfileSaveModel) {
+func (s *sSysBot) sendProfileCreateSuccessWithRetry(botId int64, chatId string, res *publishsysin.ProfileSaveModel, batch ...bool) {
 	if res == nil {
 		return
 	}
 	for attempt := 1; attempt <= 3; attempt++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		err := s.sendProfileCreateSuccess(ctx, botId, chatId, res)
+		err := s.sendProfileCreateSuccess(ctx, botId, chatId, res, batch...)
 		cancel()
 		if err == nil {
 			return
@@ -2780,13 +2780,23 @@ func profileShouldSendVerifyPrompt(step string, status string, draft *profileCre
 	return draft == nil || (draft.PendingGroup == nil && draft.PendingVerify == nil)
 }
 
-func (s *sSysBot) sendProfileCreateSuccess(ctx context.Context, botId int64, chatId string, res *publishsysin.ProfileSaveModel) error {
+func profileVerificationReceivedText(draft *profileCreateDraft) string {
+	if draft != nil {
+		for _, media := range draft.VerifyMedia {
+			if media != nil && media.MediaType == "video" {
+				return "已收到验证视频，正在保存资料…"
+			}
+		}
+		if len(draft.VerifyMedia) > 0 || strings.TrimSpace(draft.VerifyText) != "" {
+			return "已收到验证资料，正在保存资料…"
+		}
+	}
+	return "已跳过验证资料，正在保存资料…"
+}
+
+func (s *sSysBot) sendProfileCreateSuccess(ctx context.Context, botId int64, chatId string, res *publishsysin.ProfileSaveModel, batch ...bool) error {
 	if res == nil {
 		return s.sendMessageOnly(ctx, botId, chatId, "创建成功！\n\n新资料默认下架，可在笔记列表中查看。")
-	}
-	row, err := s.botById(ctx, botId)
-	if err != nil {
-		return err
 	}
 	profileNo := strings.ToUpper(strings.TrimSpace(res.ProfileNo))
 	text := fmt.Sprintf("创建成功！\n资料ID：<code>%d</code>", res.Id)
@@ -2797,7 +2807,28 @@ func (s *sSysBot) sendProfileCreateSuccess(ctx context.Context, botId int64, cha
 	} else {
 		text += "\n\n新资料默认下架，可在笔记列表中查看。"
 	}
-	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, text, "HTML", false, markup)
+	if len(batch) > 0 && batch[0] {
+		text = strings.Replace(text, "创建成功！", "当前资料已保存！", 1)
+		text += "\n\n如需继续新增，请发送【下一份展示资料】；结束新增可发送 /cancel。"
+	}
+	return s.sendProfileSaveNotice(ctx, botId, chatId, text, markup)
+}
+
+// Save notifications respect the caller's deadline and never query profile views.
+func (s *sSysBot) sendProfileSaveNotice(ctx context.Context, botId int64, chatId, text string, markup *models.InlineKeyboardMarkup) error {
+	row, err := s.botById(ctx, botId)
+	if err != nil {
+		return err
+	}
+	client, err := s.telegramBot(ctx, row.BotToken)
+	if err != nil {
+		return err
+	}
+	params := &tgbot.SendMessageParams{ChatID: chatId, Text: text, ParseMode: models.ParseModeHTML}
+	if markup != nil {
+		params.ReplyMarkup = markup
+	}
+	_, err = client.SendMessage(ctx, params)
 	return err
 }
 
