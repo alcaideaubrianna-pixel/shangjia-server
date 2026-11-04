@@ -477,12 +477,16 @@ func (s *sSysPublish) collectMediaNeedsOwner(ctx context.Context, event gdb.Reco
 	if err != nil {
 		return true, err
 	}
+	siblings, err := s.loadMessageMediaSiblings(ctx, event, rows)
+	if err != nil {
+		return true, err
+	}
 	needsOwner := false
 	for _, row := range rows {
 		if row == nil || !collectEventMediaRowNeedsCache(event, row) {
 			continue
 		}
-		reusedSibling, siblingErr := s.reuseCollectMediaFromMessageSibling(ctx, event, row)
+		reusedSibling, siblingErr := s.reuseCollectMediaFromMessageSibling(ctx, row, siblings)
 		if siblingErr != nil {
 			return true, siblingErr
 		}
@@ -510,23 +514,63 @@ func (s *sSysPublish) collectMediaNeedsOwner(ctx context.Context, event gdb.Reco
 	return needsOwner, nil
 }
 
-func (s *sSysPublish) reuseCollectMediaFromMessageSibling(ctx context.Context, event gdb.Record, row *collectEventMediaRow) (bool, error) {
-	if event.IsEmpty() || row == nil || row.Id <= 0 || row.SourceMessageId <= 0 || row.SortIndex <= 0 {
-		return false, nil
+func (s *sSysPublish) loadMessageMediaSiblings(ctx context.Context, event gdb.Record, rows []*collectEventMediaRow) (map[string]gdb.Record, error) {
+	result := make(map[string]gdb.Record)
+	if event.IsEmpty() || len(rows) == 0 {
+		return result, nil
 	}
-	var sibling gdb.Record
-	var err error
-	sibling, err = pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
+	messageIDs := make([]int64, 0, len(rows))
+	seen := make(map[int64]struct{}, len(rows))
+	mediaTypes := make([]string, 0, len(rows))
+	typesSeen := make(map[string]struct{}, len(rows))
+	for _, row := range rows {
+		if row == nil || row.SourceMessageId <= 0 {
+			continue
+		}
+		if _, ok := seen[row.SourceMessageId]; !ok {
+			seen[row.SourceMessageId] = struct{}{}
+			messageIDs = append(messageIDs, row.SourceMessageId)
+		}
+		mediaType := strings.TrimSpace(row.MediaType)
+		if mediaType != "" {
+			if _, ok := typesSeen[mediaType]; !ok {
+				typesSeen[mediaType] = struct{}{}
+				mediaTypes = append(mediaTypes, mediaType)
+			}
+		}
+	}
+	if len(messageIDs) == 0 || len(mediaTypes) == 0 {
+		return result, nil
+	}
+	records, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
+		Fields("id,event_id,source_message_id,media_type,file_url,storage_path,poster_url,file_md5,file_phash").
 		Where("tenant_id", event["tenant_id"].Int64()).
 		Where("REPLACE(source_chat_id, '-100', '') = REPLACE(?, '-100', '')", event["source_chat_id"].String()).
-		Where("source_message_id", row.SourceMessageId).
-		Where("media_type", row.MediaType).
-		Where("event_id <>", row.EventId).
+		WhereIn("source_message_id", messageIDs).
+		WhereIn("media_type", mediaTypes).
+		Where("event_id <>", event["id"].Int64()).
 		Where("cache_status", collectMediaCacheReady).
 		Where("(file_url <> '' OR storage_path <> '')").
-		OrderAsc("id").One()
+		OrderAsc("id").All()
 	if err != nil {
-		return false, gerror.Wrap(err, "预检同消息媒体复用失败")
+		return nil, gerror.Wrap(err, "批量读取同消息媒体复用记录失败")
+	}
+	for _, record := range records {
+		key := fmt.Sprintf("%d:%s", record["source_message_id"].Int64(), record["media_type"].String())
+		if _, exists := result[key]; !exists {
+			result[key] = record
+		}
+	}
+	return result, nil
+}
+
+func (s *sSysPublish) reuseCollectMediaFromMessageSibling(ctx context.Context, row *collectEventMediaRow, siblings map[string]gdb.Record) (bool, error) {
+	if row == nil || row.Id <= 0 || row.SourceMessageId <= 0 {
+		return false, nil
+	}
+	sibling, ok := siblings[fmt.Sprintf("%d:%s", row.SourceMessageId, row.MediaType)]
+	if !ok {
+		return false, nil
 	}
 	if sibling.IsEmpty() {
 		return false, nil
@@ -538,7 +582,7 @@ func (s *sSysPublish) reuseCollectMediaFromMessageSibling(ctx context.Context, e
 		"cache_hit": 1, "download_duration_ms": 0, "download_bytes": fileSizeValue(sibling["storage_path"].String()),
 		"download_error_type": "", "error_message": "", "updated_at": gtime.Now(),
 	}
-	if _, err = pdao.YoubanPublishCollectEventMedia.Ctx(ctx).WherePri(row.Id).Data(data).Update(); err != nil {
+	if _, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).WherePri(row.Id).Data(data).Update(); err != nil {
 		return false, gerror.Wrap(err, "写入同消息媒体复用结果失败")
 	}
 	return true, nil
