@@ -343,7 +343,7 @@ func TestApplyCollectIntroFeeTruncate(t *testing.T) {
 
 func TestCollectMaterialCodeLineRule(t *testing.T) {
 	for _, text := range []string{
-		"A12", "Lemon052", "柠檬052", "柠檬052 来源标题", "ABCDE1234567890尾标", "中文标题八个字12后缀",
+		"A12", "Lemon052", "柠檬052", "柠檬d016", "柠檬052 来源标题", "ABCDE1234567890尾标", "中文标题八个字12后缀",
 	} {
 		if !collectMaterialCodeLineRule.MatchString(text) {
 			t.Fatalf("%q should match material code title rule", text)
@@ -359,7 +359,7 @@ func TestCollectMaterialCodeLineRule(t *testing.T) {
 }
 
 func TestApplyCollectIntroFeeTruncateRemovesCodeTitlePrefix(t *testing.T) {
-	for _, title := range []string{"A12", "Lemon052", "柠檬052", "柠檬052 来源标题"} {
+	for _, title := range []string{"A12", "Lemon052", "柠檬052", "柠檬d016", "柠檬052 来源标题"} {
 		text := "正文必须保留\n" + title + "\n介绍费：7888"
 		if got, want := applyCollectIntroFeeTruncate(text), "正文必须保留"; got != want {
 			t.Fatalf("title %q was not cleaned: got %q, want %q", title, got, want)
