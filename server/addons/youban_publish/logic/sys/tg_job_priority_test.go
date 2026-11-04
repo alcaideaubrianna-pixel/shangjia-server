@@ -81,7 +81,7 @@ func TestTelegramJobPriorityClassifiesPublishOperations(t *testing.T) {
 		{name: "verification repair", operationNo: "verify-misbinding-repair:1", priority: tgJobPriorityDefault, want: tgJobPriorityDefault},
 		{name: "full push", operationNo: "full_push:1:2", want: tgJobPriorityFullPush},
 		{name: "cycle push", operationNo: "cycle_batch:1:2:3", want: tgJobPriorityBulk},
-		{name: "explicit default", operationNo: "collect:1", priority: tgJobPriorityDefault, want: tgJobPriorityDefault},
+		{name: "realtime collect", operationNo: "collect:1", priority: tgJobPriorityDefault, want: tgJobPriorityUrgent},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -119,7 +119,10 @@ func TestTelegramChannelAllowsOnlyOneActiveJob(t *testing.T) {
 	if !strings.Contains(expression, "LIKE 'edit:%'") || !strings.Contains(expression, "THEN 1") {
 		t.Fatalf("effective priority SQL does not prioritize existing edit jobs: %s", expression)
 	}
-	if !strings.Contains(expression, "j.operation_no LIKE 'full_push:%'") || !strings.Contains(expression, "THEN 70") {
+	if !strings.Contains(expression, "LOWER(TRIM(j.operation_no)) LIKE 'full_push:%'") || !strings.Contains(expression, "THEN 70") {
 		t.Fatalf("effective priority SQL does not prioritize existing full push jobs: %s", expression)
+	}
+	if !strings.Contains(expression, "LOWER(TRIM(j.operation_no)) LIKE 'collect:%'") || !strings.Contains(expression, "THEN 10") {
+		t.Fatalf("effective priority SQL does not prioritize realtime collect jobs: %s", expression)
 	}
 }
