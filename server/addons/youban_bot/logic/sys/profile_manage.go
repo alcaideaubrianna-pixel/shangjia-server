@@ -1892,10 +1892,8 @@ func profileCardMarkup(profileNo string, purpose string) *models.InlineKeyboardM
 		}}
 	default:
 		return &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
-			{{Text: "预览", CallbackData: "pf:send:" + profileNo}},
+			{{Text: "上架", CallbackData: "pf:up:" + profileNo}, {Text: "预览", CallbackData: "pf:send:" + profileNo}},
 			{{Text: "编辑", CallbackData: "pf:edit:" + profileNo}, {Text: "返回列表", CallbackData: "pf:list:1"}},
-			{{Text: "上架", CallbackData: "pf:up:" + profileNo}, {Text: "下架", CallbackData: "pf:down:" + profileNo}},
-			{{Text: "返回资料管理", CallbackData: "pf:menu"}},
 		}}
 	}
 }
@@ -1994,7 +1992,29 @@ func profileCreateStepText(step string) string {
 		"<b>有验证视频？</b> 请按顺序连续发送：\n" +
 		"1️⃣ 展示资料\n" +
 		"2️⃣ 验证视频\n\n" +
-		"也可以直接转发完整资料，系统会自动识别后续消息为验证资料。"
+		"也可以直接转发完整资料，系统会自动识别后续消息为验证资料。\n\n" +
+		fmt.Sprintf("<i>连续 %s 无操作，将自动结束新增。</i>", profileSessionTimeoutText())
+}
+
+func profileSessionInactivityTimeout() time.Duration {
+	const envName = "YOUBAN_BOT_PROFILE_SESSION_TIMEOUT"
+	if raw := strings.TrimSpace(os.Getenv(envName)); raw != "" {
+		if timeout, err := time.ParseDuration(raw); err == nil && timeout > 0 {
+			return timeout
+		}
+	}
+	return profileSessionTimeout
+}
+
+func profileSessionTimeoutText() string {
+	timeout := profileSessionInactivityTimeout()
+	if timeout%time.Hour == 0 {
+		return fmt.Sprintf("%d 小时", int(timeout/time.Hour))
+	}
+	if timeout%time.Minute == 0 {
+		return fmt.Sprintf("%d 分钟", int(timeout/time.Minute))
+	}
+	return timeout.Round(time.Second).String()
 }
 
 func (s *sSysBot) sendProfileCreateStepPrompt(ctx context.Context, botId int64, chatId string, step string) error {
@@ -2625,7 +2645,8 @@ func profileSessionLockKey(sessionId int64) string {
 
 func (s *sSysBot) scheduleProfileSessionTimeout(sessionId, botId int64, chatId string) {
 	go func() {
-		timer := time.NewTimer(profileSessionTimeout)
+		timeout := profileSessionInactivityTimeout()
+		timer := time.NewTimer(timeout)
 		defer timer.Stop()
 		<-timer.C
 		ctx := context.Background()
@@ -2639,7 +2660,7 @@ func (s *sSysBot) scheduleProfileSessionTimeout(sessionId, botId int64, chatId s
 		result, err := g.DB().Model(profileSessionTable).Safe().Ctx(ctx).
 			Where("id", sessionId).
 			Where("status", profileSessionStatusActive).
-			WhereLTE("updated_at", gtime.Now().Add(-profileSessionTimeout)).
+			WhereLTE("updated_at", gtime.Now().Add(-timeout)).
 			Data(g.Map{"status": profileSessionStatusCanceled, "updated_at": gtime.Now()}).Update()
 		if err != nil {
 			g.Log().Warningf(ctx, "Bot资料会话超时更新失败 trace:PF-%d step:%s err:%v", sessionId, row.Step, err)
