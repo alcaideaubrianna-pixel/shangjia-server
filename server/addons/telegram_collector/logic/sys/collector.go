@@ -601,6 +601,10 @@ func BuildMediaFingerprint(md5 string, size int64, kind, mimeType string) string
 	return collectorservice.BuildMediaFingerprint(md5, size, kind, mimeType)
 }
 
+func BuildMediaIdentityFingerprint(fileUniqueID string, mediaID int64, dcID int, kind, variant string) string {
+	return collectorservice.BuildMediaIdentityFingerprint(fileUniqueID, mediaID, dcID, kind, variant)
+}
+
 func updateEventID(botKey string, tenantID, sourceID, updateID int64, raw []byte) string {
 	scope := fmt.Sprintf("source:%d", sourceID)
 	if updateID > 0 {

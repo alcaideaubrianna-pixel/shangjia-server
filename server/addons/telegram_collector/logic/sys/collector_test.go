@@ -43,6 +43,20 @@ func TestBuildMediaFingerprintStableAndTypeAware(t *testing.T) {
 	}
 }
 
+func TestBuildMediaIdentityFingerprintSeparatesBotAndMTProto(t *testing.T) {
+	bot := BuildMediaIdentityFingerprint("bot-file-unique", 123, 2, "photo", "original")
+	mtproto := BuildMediaIdentityFingerprint("", 123, 2, "photo", "original")
+	if bot == mtproto {
+		t.Fatal("bot and MTProto media identities must use separate namespaces")
+	}
+	if bot != BuildMediaIdentityFingerprint("bot-file-unique", 123, 2, "photo", "original") {
+		t.Fatal("bot media identity is not stable")
+	}
+	if bot == BuildMediaIdentityFingerprint("bot-file-unique", 123, 2, "photo", "thumbnail") {
+		t.Fatal("media variants must not share an identity key")
+	}
+}
+
 func TestUpdateEventIDUsesTelegramUpdateID(t *testing.T) {
 	first := updateEventID("bot-key", 7, 11, 42, []byte(`{"ok":true}`))
 	second := updateEventID("bot-key", 7, 11, 42, []byte(`{"ok":false}`))

@@ -22,8 +22,12 @@ func BuildMediaFingerprint(md5 string, size int64, kind, mimeType string) string
 // Telegram media object. Access hashes and file references are deliberately
 // excluded because they are access credentials and file references can expire.
 func BuildMediaIdentityFingerprint(fileUniqueID string, mediaID int64, dcID int, kind, variant string) string {
+	identityType := "mtproto"
+	if strings.TrimSpace(fileUniqueID) != "" {
+		identityType = "bot"
+	}
 	value := strings.Join([]string{
-		"identity", strings.ToLower(strings.TrimSpace(fileUniqueID)),
+		"identity", identityType, strings.ToLower(strings.TrimSpace(fileUniqueID)),
 		fmt.Sprintf("%d", mediaID), fmt.Sprintf("%d", dcID),
 		strings.ToLower(strings.TrimSpace(kind)), strings.ToLower(strings.TrimSpace(variant)),
 	}, ":")
