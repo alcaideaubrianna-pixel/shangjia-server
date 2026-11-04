@@ -121,10 +121,13 @@ func quickPushMediaUploadContext(ctx context.Context, operatorAccountId int64) c
 }
 
 func persistQuickPushMediaFile(ctx context.Context, client *http.Client, mediaType string, name string, sourceURL string) (string, string, error) {
+	startedAt := time.Now()
 	data, err := telegrammedia.DownloadURL(ctx, client, sourceURL, profileCreateMaxMediaBytes)
 	if err != nil {
+		g.Log().Warningf(ctx, "Telegram媒体下载失败 media_type:%s elapsed_ms:%d err:%+v", mediaType, time.Since(startedAt).Milliseconds(), err)
 		return "", "", err
 	}
+	downloadedAt := time.Now()
 	filename := quickPushMediaFilename(name, mediaType)
 	header, err := fileutil.NewMultipartFileHeader(filename, data)
 	if err != nil {
@@ -136,11 +139,13 @@ func persistQuickPushMediaFile(ctx context.Context, client *http.Client, mediaTy
 	}
 	attachment, err := isc.CommonUpload().UploadFile(ctx, uploadType, &ghttp.UploadFile{FileHeader: header})
 	if err != nil {
+		g.Log().Warningf(ctx, "OSS媒体上传失败 media_type:%s size:%d download_ms:%d upload_ms:%d err:%+v", mediaType, len(data), downloadedAt.Sub(startedAt).Milliseconds(), time.Since(downloadedAt).Milliseconds(), err)
 		return "", "", err
 	}
 	if attachment == nil {
 		return "", "", gerror.New("系统存储未返回媒体地址")
 	}
+	g.Log().Infof(ctx, "Telegram媒体下载上传完成 media_type:%s size:%d download_ms:%d upload_ms:%d total_ms:%d", mediaType, len(data), downloadedAt.Sub(startedAt).Milliseconds(), time.Since(downloadedAt).Milliseconds(), time.Since(startedAt).Milliseconds())
 	return strings.TrimSpace(attachment.FileUrl), strings.TrimSpace(attachment.Path), nil
 }
 
