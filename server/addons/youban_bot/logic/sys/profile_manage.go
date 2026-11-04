@@ -3098,8 +3098,8 @@ func (s *sSysBot) finishProfileMediaGroup(botId int64, groupId string, account *
 	startedAt := time.Now()
 	// The lock covers debounce, reconstruction, and consumption. Locking only
 	// the snapshot read allows separate Web instances to finalize the same group.
-	finalizeLock := hglock.NewConfig(10*time.Minute, time.Second).WithoutWatchDog().Mutex(profileMediaFinalizeLockKey(session.Id, groupId))
-	if err := finalizeLock.TryLock(ctx); err != nil {
+	finalizeLock, err := tryProfileMediaFinalizeLock(session.Id, groupId)
+	if err != nil {
 		if !gerror.Is(err, hglock.ErrLockFailed) {
 			g.Log().Warningf(ctx, "Bot资料媒体组获取跨实例收尾锁失败 trace:%s groupId:%s err:%+v", trace, groupId, err)
 		}
@@ -3203,6 +3203,14 @@ func (s *sSysBot) finishProfileMediaGroup(botId int64, groupId string, account *
 
 func profileMediaFinalizeLockKey(sessionId int64, groupId string) string {
 	return fmt.Sprintf("youban_bot:profile_media_finalize:%d:%s", sessionId, strings.TrimSpace(groupId))
+}
+
+func tryProfileMediaFinalizeLock(sessionId int64, groupId string) (*hglock.Lock, error) {
+	lock := hglock.NewConfig(10*time.Minute, time.Second).WithoutWatchDog().Mutex(profileMediaFinalizeLockKey(sessionId, groupId))
+	if err := lock.TryLock(context.Background()); err != nil {
+		return nil, err
+	}
+	return lock, nil
 }
 
 func (s *sSysBot) rebuildProfileMediaGroupFromStoredMessages(ctx context.Context, botId int64, chatId string, groupId string) ([]*publishsysin.MessageTemplateMediaInp, string, error) {

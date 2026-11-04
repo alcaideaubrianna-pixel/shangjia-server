@@ -1,11 +1,21 @@
 package sys
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
+	_ "github.com/gogf/gf/contrib/nosql/redis/v2"
+	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gcfg"
 	publishsysin "hotgo/addons/youban_publish/model/input/sysin"
+	hglock "hotgo/internal/library/hgrds/lock"
 )
 
 func TestIsInvalidTelegramMediaReference(t *testing.T) {
@@ -102,6 +112,61 @@ func TestProfileMediaFinalizeLockKeyScopesSessionAndGroup(t *testing.T) {
 	}
 	if profileMediaFinalizeLockKey(1646, "group-1") == profileMediaFinalizeLockKey(1646, "group-2") {
 		t.Fatal("different media groups must not share a finalize lock")
+	}
+}
+
+func TestProfileMediaFinalizeLockIsExclusiveAcrossInstances(t *testing.T) {
+	redis := miniredis.RunT(t)
+	config, err := gcfg.NewAdapterContent(fmt.Sprintf(`{"redis":{"default":{"address":%q}}}`, redis.Addr()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := g.Cfg().GetAdapter()
+	g.Cfg().SetAdapter(config)
+	t.Cleanup(func() { g.Cfg().SetAdapter(previous) })
+
+	var successes atomic.Int32
+	var lockErrors atomic.Int32
+	var wait sync.WaitGroup
+	start := make(chan struct{})
+	for i := 0; i < 2; i++ {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			<-start
+			lease, err := tryProfileMediaFinalizeLock(1646, "album-1")
+			if err != nil {
+				if gerror.Is(err, hglock.ErrLockFailed) {
+					lockErrors.Add(1)
+					return
+				}
+				t.Errorf("acquire finalize lock: %v", err)
+				return
+			}
+			successes.Add(1)
+			defer func() { _ = lease.Unlock(context.Background()) }()
+			time.Sleep(20 * time.Millisecond)
+		}()
+	}
+	close(start)
+	wait.Wait()
+	if successes.Load() != 1 || lockErrors.Load() != 1 {
+		t.Fatalf("concurrent finalize lock results: acquired=%d rejected=%d, want 1 each", successes.Load(), lockErrors.Load())
+	}
+
+	// A crashed finalizer does not leave a permanent lock; the fixed lease expires.
+	crashedLease, err := tryProfileMediaFinalizeLock(1646, "album-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = crashedLease // Deliberately do not unlock, simulating process termination.
+	redis.FastForward(10 * time.Minute)
+	recoveredLease, err := tryProfileMediaFinalizeLock(1646, "album-2")
+	if err != nil {
+		t.Fatalf("lock did not recover after lease expiry: %v", err)
+	}
+	if err = recoveredLease.Unlock(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 }
 
