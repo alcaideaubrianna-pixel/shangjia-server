@@ -58,6 +58,21 @@ func TestProfileVerificationReceivedText(t *testing.T) {
 	}
 }
 
+func TestProfileCreateStepTextUsesTelegramHTML(t *testing.T) {
+	display := profileCreateStepText("waiting_display")
+	for _, want := range []string{"<b>", "展示资料", "1️⃣ 展示资料", "2️⃣ 验证视频", "自动识别"} {
+		if !strings.Contains(display, want) {
+			t.Fatalf("display prompt missing %q: %s", want, display)
+		}
+	}
+	verify := profileCreateStepText("waiting_verify")
+	for _, want := range []string{"<b>", "验证资料", "跳过验证资料"} {
+		if !strings.Contains(verify, want) {
+			t.Fatalf("verify prompt missing %q: %s", want, verify)
+		}
+	}
+}
+
 func TestProfileSaveNoticeBatchAndSingleTelegramRequests(t *testing.T) {
 	ctx := relayTestDatabase(t)
 	relayTestBaseTable(t, ctx, botTable)

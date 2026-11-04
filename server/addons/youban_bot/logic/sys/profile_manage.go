@@ -1985,9 +1985,16 @@ func profileCreateStepMarkup(step string) *models.InlineKeyboardMarkup {
 
 func profileCreateStepText(step string) string {
 	if step == "waiting_verify" {
-		return "第 2 步/共 2 步：请发送【验证资料】（通常是一条验证视频，也支持文本、图片、视频或图文媒体组）。\n没有验证资料可点击“跳过验证资料”。"
+		return "<b>第 2 步 / 共 2 步：发送验证资料</b>\n\n" +
+			"请发送一条验证视频，也支持文字、图片、视频或图文媒体组。\n\n" +
+			"没有验证资料？点击下方 <b>跳过验证资料</b>。"
 	}
-	return "请发送【展示资料】\n如果有验证视频，可按照验证资料的前后发送顺序发送消息, 推荐做好资料直接转发，系统会自动识别为验证资料。"
+	return "<b>第 1 步 / 共 2 步：发送展示资料</b>\n\n" +
+		"请先发送展示资料（文字、图片、视频或图文媒体组）。\n\n" +
+		"<b>有验证视频？</b> 请按顺序连续发送：\n" +
+		"1️⃣ 展示资料\n" +
+		"2️⃣ 验证视频\n\n" +
+		"也可以直接转发完整资料，系统会自动识别后续消息为验证资料。"
 }
 
 func (s *sSysBot) sendProfileCreateStepPrompt(ctx context.Context, botId int64, chatId string, step string) error {
