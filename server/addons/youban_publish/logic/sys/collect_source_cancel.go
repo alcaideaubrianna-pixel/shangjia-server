@@ -25,6 +25,9 @@ func (s *sSysPublish) executeCollectSourceDeleteCleanup(ctx context.Context, sou
 	if err = s.cancelCollectSourceEvents(ctx, sourceId, tenantId, accountId, now); err != nil {
 		return err
 	}
+	if err = cancelCollectorSourceTasks(ctx, sourceId, tenantId, accountId, now); err != nil {
+		return err
+	}
 	if err = s.clearCollectSourceDispatchClaims(ctx, sourceId, tenantId, accountId); err != nil {
 		return err
 	}
@@ -65,12 +68,49 @@ func (s *sSysPublish) cancelCollectSourceRuntime(ctx context.Context, sourceId i
 	if err = s.cancelCollectSourceEvents(ctx, sourceId, tenantId, accountId, now); err != nil {
 		return err
 	}
+	if err = cancelCollectorSourceTasks(ctx, sourceId, tenantId, accountId, now); err != nil {
+		return err
+	}
 	if err = s.clearCollectSourceAsynqTasks(ctx, sourceId, taskIDs); err != nil {
 		return err
 	}
 	s.refreshCollectSourceCache(ctx)
 	s.refreshAccountCollectSupervisor()
 	g.Log().Infof(ctx, "采集源未完成任务已取消 sourceId:%d historyTasks:%d", sourceId, len(taskIDs))
+	return nil
+}
+
+// cancelCollectorSourceTasks closes the collector-side work created from a
+// source. Source deletion used to stop only the publish history task, leaving
+// account tasks and deliveries eligible for later execution.
+func cancelCollectorSourceTasks(ctx context.Context, sourceId, tenantId, accountId int64, now *gtime.Time) error {
+	if sourceId <= 0 || tenantId <= 0 || accountId <= 0 {
+		return nil
+	}
+	eventTable := "hg_tg_collector_event"
+	deliveryTable := "hg_tg_collector_delivery"
+	accountTaskTable := "hg_tg_collector_account_task"
+	eventIDs := "SELECT id FROM " + eventTable + " WHERE source_id=? AND tenant_id=? AND account_id=?"
+	if _, err := g.DB().Model(accountTaskTable).Ctx(ctx).
+		Where("history_task_id IN (SELECT id FROM "+pdao.YoubanPublishCollectHistoryTask.Table()+" WHERE source_id=? AND tenant_id=? AND account_id=?)", sourceId, tenantId, accountId).
+		WhereIn("status", []string{"pending", "processing", "failed_retry", "finalizing"}).
+		Data(g.Map{"status": "cancelled", "error_message": collectSourceCanceledMessage, "updated_at": now}).Update(); err != nil {
+		return gerror.Wrap(err, "取消采集源账号任务失败")
+	}
+	if _, err := g.DB().Model(deliveryTable).Ctx(ctx).
+		Where("event_id IN ("+eventIDs+")", sourceId, tenantId, accountId).
+		WhereIn("status", []string{"pending", "processing", "failed_retry"}).
+		Data(g.Map{"status": "dead", "error_message": collectSourceCanceledMessage, "lease_owner": "", "lease_until": nil, "next_run_at": nil, "updated_at": now}).Update(); err != nil {
+		return gerror.Wrap(err, "终止采集源交付任务失败")
+	}
+	if _, err := g.DB().Model(eventTable).Ctx(ctx).
+		Where("source_id", sourceId).
+		Where("tenant_id", tenantId).
+		Where("account_id", accountId).
+		WhereIn("status", []string{"received", "processing", "failed_retry", "ready"}).
+		Data(g.Map{"status": "dead", "error_message": collectSourceCanceledMessage, "lease_owner": "", "lease_until": nil, "next_run_at": nil, "processed_at": now, "updated_at": now}).Update(); err != nil {
+		return gerror.Wrap(err, "终止采集源原始事件失败")
+	}
 	return nil
 }
 
