@@ -46,6 +46,30 @@ func TestProfileMediaGroupIdleWaitReturnsReadyAfterDebounce(t *testing.T) {
 	}
 }
 
+func TestNextProfileRecoveryCursorRotatesAndWraps(t *testing.T) {
+	if got := nextProfileRecoveryCursor([]profileSessionRow{{Id: 21}, {Id: 34}}); got != 34 {
+		t.Fatalf("nextProfileRecoveryCursor() = %d, want last batch ID 34", got)
+	}
+	if got := nextProfileRecoveryCursor(nil); got != 0 {
+		t.Fatalf("empty recovery batch must wrap cursor to 0, got %d", got)
+	}
+}
+
+func TestProfileDraftRecoveryResumesSubmittedVerificationOnly(t *testing.T) {
+	if profileDraftHasSubmittedVerification(&profileCreateDraft{DisplayMedia: make([]*publishsysin.MessageTemplateMediaInp, 1)}) {
+		t.Fatal("display-only draft must not be treated as submitted verification")
+	}
+	if !profileDraftHasSubmittedVerification(&profileCreateDraft{VerifyMedia: make([]*publishsysin.MessageTemplateMediaInp, 1)}) {
+		t.Fatal("persisted verification media must be recoverable")
+	}
+	if profileDraftHasSubmittedVerification(&profileCreateDraft{VerifyMedia: make([]*publishsysin.MessageTemplateMediaInp, 1), VerificationRecoveryBlocked: true}) {
+		t.Fatal("an ambiguous create failure must not be retried automatically")
+	}
+	if !profileDraftHasSubmittedVerification(&profileCreateDraft{VerificationSubmitted: true}) {
+		t.Fatal("explicitly submitted skip/empty verification must remain recoverable")
+	}
+}
+
 func TestProfileShouldSendVerifyPrompt(t *testing.T) {
 	tests := []struct {
 		name   string

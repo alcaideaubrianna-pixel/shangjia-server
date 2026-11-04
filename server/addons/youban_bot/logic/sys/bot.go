@@ -55,7 +55,9 @@ type sSysBot struct {
 	broadcastMu           sync.Mutex
 	broadcastRunning      bool
 	profileRecoveryMu     sync.Mutex
+	profileRecoveryScanMu sync.Mutex
 	profileRecoveryCancel context.CancelFunc
+	profileRecoveryCursor int64
 	profileMediaMu        sync.Mutex
 	profileMediaInflight  map[string]*hglock.Lock
 }

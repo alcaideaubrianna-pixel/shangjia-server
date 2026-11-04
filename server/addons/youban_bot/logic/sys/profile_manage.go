@@ -2157,6 +2157,7 @@ func (s *sSysBot) cancelProfileSessionByIds(ctx context.Context, botId int64, te
 type profileSessionRow struct {
 	BotId       int64  `json:"bot_id"`
 	Id          int64  `json:"id"`
+	ChatId      string `json:"chat_id"`
 	Scene       string `json:"scene"`
 	Step        string `json:"step"`
 	Status      string `json:"status"`
@@ -2363,14 +2364,16 @@ func (s *sSysBot) isWaitingProfileCreate(ctx context.Context, botId int64, msg *
 }
 
 type profileCreateDraft struct {
-	DisplayText             string                                  `json:"displayText"`
-	DisplayMedia            []*publishsysin.MessageTemplateMediaInp `json:"displayMedia"`
-	VerifyText              string                                  `json:"verifyText"`
-	VerifyMedia             []*publishsysin.MessageTemplateMediaInp `json:"verifyMedia"`
-	PendingGroupId          string                                  `json:"pendingGroupId,omitempty"`
-	PendingGroup            *profilePendingMediaGroup               `json:"pendingGroup,omitempty"`
-	PendingVerify           *profilePendingMediaGroup               `json:"pendingVerify,omitempty"`
-	CompletedDisplayGroupId string                                  `json:"completedDisplayGroupId,omitempty"`
+	DisplayText                 string                                  `json:"displayText"`
+	DisplayMedia                []*publishsysin.MessageTemplateMediaInp `json:"displayMedia"`
+	VerifyText                  string                                  `json:"verifyText"`
+	VerifyMedia                 []*publishsysin.MessageTemplateMediaInp `json:"verifyMedia"`
+	VerificationSubmitted       bool                                    `json:"verificationSubmitted,omitempty"`
+	VerificationRecoveryBlocked bool                                    `json:"verificationRecoveryBlocked,omitempty"`
+	PendingGroupId              string                                  `json:"pendingGroupId,omitempty"`
+	PendingGroup                *profilePendingMediaGroup               `json:"pendingGroup,omitempty"`
+	PendingVerify               *profilePendingMediaGroup               `json:"pendingVerify,omitempty"`
+	CompletedDisplayGroupId     string                                  `json:"completedDisplayGroupId,omitempty"`
 }
 
 type profilePendingMediaGroup struct {
@@ -2383,6 +2386,13 @@ type profilePendingMediaGroup struct {
 	Media     []*publishsysin.MessageTemplateMediaInp `json:"media"`
 	CreatedAt int64                                   `json:"createdAt"`
 	UpdatedAt int64                                   `json:"updatedAt"`
+}
+
+func profileDraftHasSubmittedVerification(draft *profileCreateDraft) bool {
+	if draft == nil {
+		return false
+	}
+	return !draft.VerificationRecoveryBlocked && (draft.VerificationSubmitted || len(draft.VerifyMedia) > 0 || strings.TrimSpace(draft.VerifyText) != "")
 }
 
 func (s *sSysBot) createProfileFromMessage(ctx context.Context, botId int64, msg *models.Message, text string) error {
@@ -2645,6 +2655,8 @@ func (s *sSysBot) consumeProfileCreatePart(ctx context.Context, botId int64, cha
 		}
 		draft.VerifyText = strings.TrimSpace(text)
 		draft.VerifyMedia = media
+		draft.VerificationSubmitted = true
+		draft.VerificationRecoveryBlocked = false
 		// Persist both parts before any network I/O so a transfer failure cannot
 		// discard verification media that arrived before the display group.
 		if err := s.updateProfileSession(ctx, session.Id, session.Step, draft); err != nil {
@@ -2687,6 +2699,8 @@ func (s *sSysBot) consumeProfileCreatePart(ctx context.Context, botId int64, cha
 		res, err := publishService.SysPublish().BotProfileCreate(ctx, &publishsysin.BotProfileCreateInp{TenantId: account.TenantId, AccountId: account.AccountId, PlainText: draft.DisplayText, DisplayMedia: draft.DisplayMedia, VerifyText: draft.VerifyText, VerifyMedia: draft.VerifyMedia, Status: 2})
 		if err != nil {
 			g.Log().Warningf(ctx, "Bot资料创建失败 trace:%s stage:create_profile elapsed_ms:%d err:%v", trace, time.Since(startedAt).Milliseconds(), err)
+			draft.VerificationSubmitted = false
+			draft.VerificationRecoveryBlocked = true
 			_ = s.resetProfileSessionStep(ctx, session.Id, "saving", "waiting_verify", draft)
 			if replyErr := s.replyBotError(ctx, botId, chatId, "资料管理", err); replyErr != nil {
 				return replyErr
@@ -3009,26 +3023,47 @@ func (s *sSysBot) stopProfileSessionRecovery() {
 }
 
 func (s *sSysBot) recoverPendingProfileMediaGroups(ctx context.Context) {
-	var sessions []profileSessionRow
-	err := g.DB().Model(profileSessionTable).Safe().Ctx(ctx).
-		Fields("id,bot_id,scene,step,status,payload_json,tenant_id,account_id,app").
-		Where("status", profileSessionStatusActive).
-		WhereIn("step", []string{"waiting_display", "waiting_verify"}).
-		WhereLTE("updated_at", gtime.Now().Add(-profileMediaGroupDebounce)).
-		WhereGT("expires_at", gtime.Now()).
-		OrderAsc("updated_at").
-		Limit(20).
-		Scan(&sessions)
-	if err != nil {
-		g.Log().Warningf(ctx, "恢复Bot资料媒体组查询失败 err:%+v", err)
+	s.profileRecoveryScanMu.Lock()
+	defer s.profileRecoveryScanMu.Unlock()
+	if ctx.Err() != nil {
 		return
 	}
+	now := gtime.Now()
+	query := func(afterId int64) ([]profileSessionRow, error) {
+		var sessions []profileSessionRow
+		mod := g.DB().Model(profileSessionTable).Safe().Ctx(ctx).
+			Fields("id,bot_id,chat_id,scene,step,status,payload_json,tenant_id,account_id,app").
+			Where("status", profileSessionStatusActive).
+			Where("((step = ? AND (payload_json LIKE ? OR payload_json LIKE ? OR payload_json LIKE ?)) OR (step = ? AND expires_at > ? AND payload_json LIKE ?))", "waiting_verify", "%pendingVerify%", "%verificationSubmitted%true%", "%\"verifyMedia\":[{%", "waiting_display", now, "%pendingGroup%").
+			Where("payload_json NOT LIKE ?", "%verificationRecoveryBlocked%true%").
+			WhereLTE("updated_at", now.Add(-profileMediaGroupDebounce))
+		if afterId > 0 {
+			mod = mod.WhereGT("id", afterId)
+		}
+		err := mod.OrderAsc("id").Limit(20).Scan(&sessions)
+		return sessions, err
+	}
+	sessions, err := query(s.profileRecoveryCursor)
+	if err != nil {
+		g.Log().Warningf(ctx, "恢复Bot资料媒体组查询失败 cursor:%d err:%+v", s.profileRecoveryCursor, err)
+		return
+	}
+	if len(sessions) == 0 && s.profileRecoveryCursor > 0 {
+		s.profileRecoveryCursor = 0
+		sessions, err = query(0)
+		if err != nil {
+			g.Log().Warningf(ctx, "恢复Bot资料媒体组查询失败 cursor:0 err:%+v", err)
+			return
+		}
+	}
+	s.profileRecoveryCursor = nextProfileRecoveryCursor(sessions)
 	for index := range sessions {
 		session := &sessions[index]
 		draft := decodeProfileCreateDraft(session.PayloadJson)
 		groupId := strings.TrimSpace(draft.PendingGroupId)
 		displayReady := groupId != "" && draft.PendingGroup != nil && profileMediaGroupIdleWait(*draft.PendingGroup, time.Now()) == 0
 		verifyReady := session.Step == "waiting_verify" && draft.PendingVerify != nil && profileMediaGroupIdleWait(*draft.PendingVerify, time.Now()) == 0
+		verifyReady = verifyReady || (session.Step == "waiting_verify" && profileDraftHasSubmittedVerification(draft))
 		if !displayReady && !verifyReady {
 			continue
 		}
@@ -3060,6 +3095,13 @@ func (s *sSysBot) recoverPendingProfileMediaGroups(ctx context.Context) {
 			s.finishPendingProfileVerifyGroup(session.BotId, account, session.Id)
 		}()
 	}
+}
+
+func nextProfileRecoveryCursor(sessions []profileSessionRow) int64 {
+	if len(sessions) == 0 {
+		return 0
+	}
+	return sessions[len(sessions)-1].Id
 }
 
 func (s *sSysBot) startProfileMediaRecovery(sessionId int64, groupId, purpose string) bool {
@@ -3296,42 +3338,68 @@ func (s *sSysBot) finishPendingProfileVerifyGroup(botId int64, account *botProfi
 	}()
 	for {
 		var row profileSessionRow
-		if err := g.DB().Model(profileSessionTable).Safe().Ctx(ctx).Fields("id,step,status,payload_json").Where("id", sessionId).Where("status", profileSessionStatusActive).Scan(&row); err != nil || row.Id == 0 {
+		if err := g.DB().Model(profileSessionTable).Safe().Ctx(ctx).Fields("id,step,status,payload_json,chat_id,scene,profile_no").Where("id", sessionId).Where("status", profileSessionStatusActive).Scan(&row); err != nil || row.Id == 0 {
 			return
 		}
 		draft := decodeProfileCreateDraft(row.PayloadJson)
-		if draft.PendingVerify == nil {
+		verifyReady := draft.PendingVerify != nil && profileMediaGroupIdleWait(*draft.PendingVerify, time.Now()) == 0
+		verifyReady = verifyReady || profileDraftHasSubmittedVerification(draft)
+		if !verifyReady {
 			return
 		}
-		if wait := profileMediaGroupIdleWait(*draft.PendingVerify, time.Now()); wait > 0 {
-			time.Sleep(wait)
-			continue
+		if draft.PendingVerify != nil {
+			if wait := profileMediaGroupIdleWait(*draft.PendingVerify, time.Now()); wait > 0 {
+				time.Sleep(wait)
+				continue
+			}
 		}
+		lockCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		lock := hglock.NewConfig(20*time.Second, 100*time.Millisecond).Mutex(profileSessionLockKey(sessionId))
-		if err := lock.Lock(ctx); err != nil {
+		if err := lock.Lock(lockCtx); err != nil {
+			cancel()
 			g.Log().Warningf(ctx, "Bot资料验证组获取会话锁失败 trace:PF-%d err:%+v", sessionId, err)
 			return
 		}
 		var latest profileSessionRow
-		err := g.DB().Model(profileSessionTable).Safe().Ctx(ctx).Fields("id,step,status,payload_json").Where("id", sessionId).Where("status", profileSessionStatusActive).Scan(&latest)
+		err := g.DB().Model(profileSessionTable).Safe().Ctx(ctx).Fields("id,step,status,payload_json,chat_id,scene,profile_no").Where("id", sessionId).Where("status", profileSessionStatusActive).Scan(&latest)
 		if err == nil && latest.Id > 0 && latest.Step == "waiting_verify" {
 			latestDraft := decodeProfileCreateDraft(latest.PayloadJson)
 			verify := latestDraft.PendingVerify
 			if verify != nil && profileMediaGroupIdleWait(*verify, time.Now()) == 0 {
-				verify.Media = orderedProfileGroupMedia(verify.Media)
 				latestDraft.VerifyText = verify.Text
-				latestDraft.VerifyMedia = verify.Media
+				latestDraft.VerifyMedia = orderedProfileGroupMedia(verify.Media)
 				latestDraft.PendingVerify = nil
+				latestDraft.VerificationSubmitted = true
+			} else if !profileDraftHasSubmittedVerification(latestDraft) {
+				verify = nil
+			}
+			if verify != nil || profileDraftHasSubmittedVerification(latestDraft) {
 				if err = s.updateProfileSession(ctx, sessionId, latest.Step, latestDraft); err != nil {
 					_ = lock.Unlock(context.Background())
+					cancel()
 					g.Log().Warningf(ctx, "Bot资料验证内容保存失败 trace:PF-%d err:%s", sessionId, sensitive.Diagnostic(err.Error()))
 					return
 				}
 				latest.PayloadJson = gjson.MustEncodeString(latestDraft)
-				err = s.consumeProfileCreatePart(ctx, botId, verify.ChatId, account, &latest, verify.Text, verify.Media)
+				chatId := strings.TrimSpace(latest.ChatId)
+				text := latestDraft.VerifyText
+				media := latestDraft.VerifyMedia
+				if verify != nil {
+					chatId = firstNonEmpty(verify.ChatId, chatId)
+					text = verify.Text
+					media = verify.Media
+				}
+				g.Log().Infof(ctx, "Bot资料验证收尾开始 trace:PF-%d media_count:%d text_len:%d", sessionId, len(media), len(strings.TrimSpace(text)))
+				err = s.consumeProfileCreatePart(ctx, botId, chatId, account, &latest, text, media)
+				if err != nil {
+					g.Log().Warningf(ctx, "Bot资料验证收尾未完成 trace:PF-%d err:%+v", sessionId, err)
+				} else {
+					g.Log().Infof(ctx, "Bot资料验证收尾调用完成 trace:PF-%d", sessionId)
+				}
 			}
 		}
 		_ = lock.Unlock(context.Background())
+		cancel()
 		if err != nil {
 			g.Log().Warningf(ctx, "Bot资料验证组处理失败 trace:PF-%d err:%+v", sessionId, err)
 		}
