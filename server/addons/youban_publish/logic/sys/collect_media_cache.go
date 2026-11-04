@@ -483,6 +483,13 @@ func (s *sSysPublish) collectMediaNeedsOwner(ctx context.Context, event gdb.Reco
 		if row == nil || !collectEventMediaRowNeedsCache(event, row) {
 			continue
 		}
+		reusedSibling, siblingErr := s.reuseCollectMediaFromMessageSibling(ctx, event, row)
+		if siblingErr != nil {
+			return true, siblingErr
+		}
+		if reusedSibling {
+			continue
+		}
 		if collectMediaRequiresStorageRefresh(row.ErrorMessage) {
 			needsOwner = true
 			continue
@@ -502,6 +509,41 @@ func (s *sSysPublish) collectMediaNeedsOwner(ctx context.Context, event gdb.Reco
 		g.Log().Infof(ctx, "采集媒体预检复用缓存 eventId:%d mediaId:%d sourceMessageId:%d", event["id"].Int64(), row.Id, row.SourceMessageId)
 	}
 	return needsOwner, nil
+}
+
+func (s *sSysPublish) reuseCollectMediaFromMessageSibling(ctx context.Context, event gdb.Record, row *collectEventMediaRow) (bool, error) {
+	if event.IsEmpty() || row == nil || row.Id <= 0 || row.SourceMessageId <= 0 || row.SortIndex <= 0 {
+		return false, nil
+	}
+	var sibling gdb.Record
+	var err error
+	sibling, err = pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
+		Where("tenant_id", event["tenant_id"].Int64()).
+		Where("REPLACE(source_chat_id, '-100', '') = REPLACE(?, '-100', '')", event["source_chat_id"].String()).
+		Where("source_message_id", row.SourceMessageId).
+		Where("sort_index", row.SortIndex).
+		Where("media_type", row.MediaType).
+		Where("event_id <>", row.EventId).
+		Where("cache_status", collectMediaCacheReady).
+		Where("(file_url <> '' OR storage_path <> '')").
+		OrderAsc("id").One()
+	if err != nil {
+		return false, gerror.Wrap(err, "预检同消息媒体复用失败")
+	}
+	if sibling.IsEmpty() {
+		return false, nil
+	}
+	data := g.Map{
+		"file_url": sibling["file_url"].String(), "storage_path": sibling["storage_path"].String(),
+		"poster_url": sibling["poster_url"].String(), "file_md5": sibling["file_md5"].String(),
+		"file_phash": sibling["file_phash"].String(), "cache_status": collectMediaCacheReady,
+		"cache_hit": 1, "download_duration_ms": 0, "download_bytes": fileSizeValue(sibling["storage_path"].String()),
+		"download_error_type": "", "error_message": "", "updated_at": gtime.Now(),
+	}
+	if _, err = pdao.YoubanPublishCollectEventMedia.Ctx(ctx).WherePri(row.Id).Data(data).Update(); err != nil {
+		return false, gerror.Wrap(err, "写入同消息媒体复用结果失败")
+	}
+	return true, nil
 }
 
 func fileSizeValue(path string) int64 {
