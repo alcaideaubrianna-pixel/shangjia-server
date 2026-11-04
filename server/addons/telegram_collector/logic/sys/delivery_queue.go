@@ -387,7 +387,11 @@ func (s *sCollector) persistedDeliveryPriority(ctx context.Context, deliveryID i
 	dcols := dao.TgCollectorDelivery.Columns()
 	ecols := dao.TgCollectorEvent.Columns()
 	var event entity.TgCollectorEvent
-	err := dao.TgCollectorEvent.Ctx(ctx).Where(ecols.Id+" = (?)", dao.TgCollectorDelivery.Ctx(ctx).Fields(dcols.EventId).Where(dcols.Id, deliveryID)).Scan(&event)
+	storedPriority, err := dao.TgCollectorDelivery.Ctx(ctx).WherePri(deliveryID).Value(dcols.Priority)
+	if err != nil {
+		return 0, gerror.Wrap(err, "读取交付优先级失败")
+	}
+	err = dao.TgCollectorEvent.Ctx(ctx).Where(ecols.Id+" = (?)", dao.TgCollectorDelivery.Ctx(ctx).Fields(dcols.EventId).Where(dcols.Id, deliveryID)).Scan(&event)
 	if err != nil {
 		return 0, gerror.Wrap(err, "读取交付优先级失败")
 	}
@@ -398,7 +402,11 @@ func (s *sCollector) persistedDeliveryPriority(ctx context.Context, deliveryID i
 	if err != nil {
 		return 0, fmt.Errorf("%w: %v", errDeliveryInvalidEvent, err)
 	}
-	return deliveryPriority(&delivery), nil
+	computed := deliveryPriority(&delivery)
+	if storedPriority.Int() > computed {
+		return storedPriority.Int(), nil
+	}
+	return computed, nil
 }
 
 func deliveryQueueName(priority int) string {

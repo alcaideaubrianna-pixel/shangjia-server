@@ -31,16 +31,16 @@ func TestDeliveryRecoveryPriorityLocalPostgres(t *testing.T) {
 	err := g.DB().Transaction(context.Background(), func(ctx context.Context, tx gdb.TX) error {
 		for _, sql := range []string{
 			`CREATE TEMP TABLE hg_tg_collector_event(id bigint,source_type text,raw_update jsonb,created_at timestamp,received_at timestamp) ON COMMIT DROP`,
-			`CREATE TEMP TABLE hg_tg_collector_delivery(id bigint,event_id bigint) ON COMMIT DROP`,
+			`CREATE TEMP TABLE hg_tg_collector_delivery(id bigint,event_id bigint,priority int) ON COMMIT DROP`,
 			`INSERT INTO hg_tg_collector_event(id,source_type,raw_update,created_at) VALUES(1,'account','{"history":true}',now()),(2,'account','{"history":false}',now()),(3,'account','{"receivedAt":"2020-01-01T00:00:00Z"}',now())`,
 			`INSERT INTO hg_tg_collector_event VALUES(4,'account','{"receivedAt":"2026-11-02T22:12:00+08:00"}','2026-11-02 22:12:01','2026-11-02 22:12:00'),(5,'account','{"receivedAt":"2026-11-01T22:12:00+08:00"}','2026-11-02 22:12:01','2026-11-01 22:12:00')`,
-			`INSERT INTO hg_tg_collector_delivery VALUES(11,1),(12,2),(13,3),(14,4),(15,5)`,
+			`INSERT INTO hg_tg_collector_delivery VALUES(11,1,0),(12,2,0),(13,3,0),(14,4,50),(15,5,0)`,
 		} {
 			if _, err := tx.Exec(sql); err != nil {
 				return err
 			}
 		}
-		for id, want := range map[int64]int{11: sysin.EventPriorityNormal, 12: sysin.EventPriorityRealtime, 13: sysin.EventPriorityNormal, 14: sysin.EventPriorityRealtime, 15: sysin.EventPriorityNormal} {
+		for id, want := range map[int64]int{11: sysin.EventPriorityNormal, 12: sysin.EventPriorityRealtime, 13: sysin.EventPriorityNormal, 14: 50, 15: sysin.EventPriorityNormal} {
 			got, err := NewCollector().persistedDeliveryPriority(ctx, id)
 			if err != nil {
 				return err
