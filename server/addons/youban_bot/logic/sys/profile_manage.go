@@ -3482,7 +3482,8 @@ func (s *sSysBot) rebuildProfileMediaGroupFromStoredMessages(ctx context.Context
 }
 
 func (s *sSysBot) finishPendingProfileVerifyGroup(botId int64, account *botProfileAccount, sessionId int64) {
-	ctx := context.Background()
+	ctx, processCancel := context.WithTimeout(context.Background(), profileProcessingTimeout)
+	defer processCancel()
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			g.Log().Errorf(ctx, "Bot资料验证组收尾发生未捕获异常 trace:PF-%d panic:%v", sessionId, recovered)
@@ -3548,6 +3549,10 @@ func (s *sSysBot) finishPendingProfileVerifyGroup(botId int64, account *botProfi
 				err = s.consumeProfileCreatePart(ctx, botId, chatId, account, &latest, text, media)
 				if err != nil {
 					g.Log().Warningf(ctx, "Bot资料验证收尾未完成 trace:PF-%d err:%+v", sessionId, err)
+					if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+						g.Log().Errorf(context.Background(), "Bot资料验证收尾超时 trace:PF-%d timeout:%s", sessionId, profileProcessingTimeout)
+						_ = s.sendMessageOnly(context.Background(), botId, chatId, fmt.Sprintf("资料处理超时，请重新发送。\n处理编号：PF-%d", sessionId))
+					}
 				} else {
 					g.Log().Infof(ctx, "Bot资料验证收尾调用完成 trace:PF-%d", sessionId)
 				}
