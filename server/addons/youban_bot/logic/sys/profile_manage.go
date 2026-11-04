@@ -3279,7 +3279,8 @@ func (s *sSysBot) finishProfileMediaRecovery(sessionId int64, groupId, purpose s
 }
 
 func (s *sSysBot) finishProfileMediaGroup(botId int64, groupId string, account *botProfileAccount, session *profileSessionRow) {
-	ctx := context.Background()
+	ctx, processCancel := context.WithTimeout(context.Background(), profileProcessingTimeout)
+	defer processCancel()
 	trace := fmt.Sprintf("PF-%d", session.Id)
 	startedAt := time.Now()
 	// The lock covers debounce, reconstruction, and consumption. Locking only
@@ -3373,6 +3374,10 @@ func (s *sSysBot) finishProfileMediaGroup(botId int64, groupId string, account *
 	_ = lock.Unlock(context.Background())
 	if consumeErr := s.consumeProfileCreatePart(ctx, botId, pending.ChatId, account, current, pending.Text, pending.Media); consumeErr != nil {
 		g.Log().Errorf(ctx, "Bot资料媒体组消费失败 trace:%s groupId:%s step:%s media_count:%d text_len:%d err:%+v", trace, groupId, current.Step, len(pending.Media), len(strings.TrimSpace(pending.Text)), consumeErr)
+		if errors.Is(consumeErr, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			g.Log().Errorf(context.Background(), "Bot资料媒体组收尾超时 trace:%s groupId:%s timeout:%s", trace, groupId, profileProcessingTimeout)
+			_ = s.sendMessageOnly(context.Background(), botId, pending.ChatId, fmt.Sprintf("资料处理超时，请重新发送。\n处理编号：%s", trace))
+		}
 		_ = s.reply(ctx, botId, pending.ChatId, "资料媒体组解析失败："+html.EscapeString(botErrorMessage(consumeErr)))
 		return
 	}
