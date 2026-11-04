@@ -96,6 +96,19 @@ func DoUpload(ctx context.Context, typ string, file *ghttp.UploadFile) (result *
 	if result != nil && result.Drive == config.Drive && result.MemberId == contexts.GetUserId(ctx) && result.AppId == contexts.GetModule(ctx) {
 		return
 	}
+	// The object path is content-addressed by MD5. If the attachment row was
+	// lost or created by another worker, verify the deterministic OSS object
+	// before uploading the bytes again and recreate only the missing metadata.
+	if config.Drive == consts.UploadDriveOss {
+		if fullPath, pathErr := GenContentPath(config.OssPath, meta.Md5, meta.Ext); pathErr == nil {
+			headCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			object, headErr := OssHeadObject(headCtx, fullPath)
+			cancel()
+			if headErr == nil && object != nil && object.Size == meta.Size {
+				return write(ctx, meta, fullPath)
+			}
+		}
+	}
 
 	// 上传到驱动
 	fullPath, err := New(config.Drive).Upload(ctx, file, meta)
