@@ -983,6 +983,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_media` (
   `poster_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '视频封面',
   `poster_storage_path` varchar(1024) NOT NULL DEFAULT '' COMMENT '视频封面存储路径',
   `tg_file_id` varchar(255) NOT NULL DEFAULT '' COMMENT 'Telegram文件ID',
+  `tg_file_unique_id` varchar(255) NOT NULL DEFAULT '' COMMENT 'Telegram稳定文件ID',
   `tg_thumb_file_id` varchar(255) NOT NULL DEFAULT '' COMMENT 'Telegram缩略图文件ID',
   `tg_cache_asset_hash` varchar(1024) NOT NULL DEFAULT '' COMMENT 'TG缓存素材Hash',
   `tg_cache_status` varchar(16) NOT NULL DEFAULT 'invalid' COMMENT 'TG缓存状态',
@@ -1014,7 +1015,8 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_media` (
   KEY `idx_ybp_media_phash` (`perceptual_hash`),
   KEY `idx_ybp_media_similar_tenant` (`tenant_id`,`media_type`,`account_id`,`profile_id`,`id`),
   KEY `idx_ybp_media_similar_account` (`account_id`,`media_type`,`profile_id`,`id`),
-  KEY `idx_ybp_media_purpose` (`task_id`,`purpose`,`sort_index`,`id`)
+  KEY `idx_ybp_media_purpose` (`task_id`,`purpose`,`sort_index`,`id`),
+  KEY `idx_ybp_media_tg_unique` (`account_id`,`media_type`,`tg_file_unique_id`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架媒体';
 
 ALTER TABLE `hg_youban_publish_media` ADD COLUMN `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID' AFTER `id`, ADD COLUMN `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '兼容旧版本商家ID' AFTER `tenant_id`;

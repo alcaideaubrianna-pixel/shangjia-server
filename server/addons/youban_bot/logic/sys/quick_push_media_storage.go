@@ -60,7 +60,7 @@ func (s *sSysBot) persistTelegramMedia(ctx context.Context, operatorAccountId in
 			defer cancel()
 			startedAt := time.Now()
 			g.Log().Infof(ctx, "Telegram媒体持久化开始 media_index:%d media_type:%s name:%s", index, item.MediaType, item.Name)
-			fileURL, storagePath, reused := lookupBotTelegramMediaReuse(mediaCtx, operatorAccountId, item.MediaType, item.TgFileId)
+			fileURL, storagePath, reused := lookupBotTelegramMediaReuse(mediaCtx, operatorAccountId, item.MediaType, item.TgFileId, item.TgFileUniqueId, item.AssetHash)
 			var err error
 			if reused {
 				g.Log().Infof(ctx, "Telegram媒体存储复用 media_index:%d tg_file_id:%s", index, item.TgFileId)
@@ -152,24 +152,28 @@ func persistQuickPushMediaFile(ctx context.Context, client *http.Client, mediaTy
 // lookupBotTelegramMediaReuse returns an already persisted Telegram asset.
 // Telegram file IDs are stable, so reusing the storage object avoids another
 // download/upload when the same media is submitted again.
-func lookupBotTelegramMediaReuse(ctx context.Context, accountID int64, mediaType, tgFileID string) (string, string, bool) {
+func lookupBotTelegramMediaReuse(ctx context.Context, accountID int64, mediaType, tgFileID, tgFileUniqueID, assetHash string) (string, string, bool) {
 	tgFileID = strings.TrimSpace(tgFileID)
-	// BOT profile media currently uses copy:<chat>:<message> as a provenance
-	// reference. It is not Telegram's reusable file_id and must never be used
-	// as a content identity. A real Telegram file_id is safe to reuse here;
-	// stable file_unique_id support is added separately once persisted on the
-	// publish media row.
-	if accountID <= 0 || tgFileID == "" || strings.HasPrefix(tgFileID, "copy:") {
+	tgFileUniqueID = strings.TrimSpace(tgFileUniqueID)
+	assetHash = strings.TrimSpace(assetHash)
+	if accountID <= 0 || (tgFileID == "" && tgFileUniqueID == "" && assetHash == "") ||
+		(strings.HasPrefix(tgFileID, "copy:") && tgFileUniqueID == "" && assetHash == "") {
 		return "", "", false
 	}
-	row, err := g.DB().Model("hg_youban_publish_media").Safe().Ctx(ctx).
-		Fields("file_url,storage_path,poster_url,poster_storage_path").
+	query := g.DB().Model("hg_youban_publish_media").Safe().Ctx(ctx)
+	query = query.Fields("file_url,storage_path,poster_url,poster_storage_path").
 		Where("account_id", accountID).
-		Where("tg_file_id", tgFileID).
 		Where("media_type", strings.TrimSpace(mediaType)).
 		WhereNull("deleted_at").
-		Where("storage_path IS NOT NULL AND storage_path <> ''").
-		OrderDesc("id").One()
+		Where("storage_path IS NOT NULL AND storage_path <> ''")
+	if tgFileUniqueID != "" {
+		query = query.Where("tg_file_unique_id", tgFileUniqueID)
+	} else if tgFileID != "" && !strings.HasPrefix(tgFileID, "copy:") {
+		query = query.Where("tg_file_id", tgFileID)
+	} else {
+		query = query.Where("tg_cache_asset_hash", assetHash)
+	}
+	row, err := query.OrderDesc("id").One()
 	if err != nil || row.IsEmpty() {
 		return "", "", false
 	}

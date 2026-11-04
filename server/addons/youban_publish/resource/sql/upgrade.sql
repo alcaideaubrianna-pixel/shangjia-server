@@ -1028,3 +1028,5 @@ ALTER TABLE `hg_youban_publish_collect_dispatch` ADD COLUMN IF NOT EXISTS `worke
 ALTER TABLE `hg_youban_publish_collect_dispatch` ADD COLUMN IF NOT EXISTS `worker_instance_id` varchar(128) NOT NULL DEFAULT '';
 ALTER TABLE `hg_youban_publish_collect_dispatch` ADD COLUMN IF NOT EXISTS `worker_revision` varchar(128) NOT NULL DEFAULT '';
 ALTER TABLE `hg_youban_publish_collect_dispatch` ADD COLUMN IF NOT EXISTS `worker_image_digest` varchar(255) NOT NULL DEFAULT '';
+ALTER TABLE `hg_youban_publish_media` ADD COLUMN IF NOT EXISTS `tg_file_unique_id` varchar(255) NOT NULL DEFAULT '' COMMENT 'Telegram稳定文件ID';
+ALTER TABLE `hg_youban_publish_media` ADD INDEX IF NOT EXISTS `idx_ybp_media_tg_unique` (`account_id`,`media_type`,`tg_file_unique_id`,`id`);
