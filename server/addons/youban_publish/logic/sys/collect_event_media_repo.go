@@ -363,6 +363,7 @@ func normalizeCollectMediaItem(item collectMediaItem) collectMediaItem {
 	item.Type = strings.TrimSpace(item.Type)
 	item.Purpose = strings.TrimSpace(item.Purpose)
 	item.FileId = strings.TrimSpace(item.FileId)
+	item.FileUniqueId = strings.TrimSpace(item.FileUniqueId)
 	item.FileUrl = strings.TrimSpace(item.FileUrl)
 	item.StoragePath = strings.TrimSpace(item.StoragePath)
 	item.PosterUrl = strings.TrimSpace(item.PosterUrl)

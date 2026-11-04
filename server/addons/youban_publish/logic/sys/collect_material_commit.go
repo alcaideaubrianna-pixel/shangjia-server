@@ -101,6 +101,18 @@ func lookupTelegramCollectorMediaCache(ctx context.Context, mediaType string, md
 	return entry, true, nil
 }
 
+func lookupTelegramCollectorMediaIdentityCache(ctx context.Context, mediaType, fileUniqueID string, mediaID int64, dcID int, variant string) (*collectorin.MediaCacheEntry, bool, error) {
+	if strings.TrimSpace(fileUniqueID) == "" && mediaID <= 0 {
+		return nil, false, nil
+	}
+	fingerprint := collectorservice.BuildMediaIdentityFingerprint(fileUniqueID, mediaID, dcID, telegramCollectorMediaKind(mediaType), variant)
+	entry, ready, err := collectorservice.Collector().MediaCache(ctx, fingerprint)
+	if err != nil || !ready || entry == nil || telegramCollectorMediaCacheURL(entry) == "" {
+		return entry, false, err
+	}
+	return entry, true, nil
+}
+
 func acquireTelegramCollectorMediaCache(ctx context.Context, mediaType, storagePath, fileURL, md5Value string, size int64, mimeType string) (*telegramCollectorMediaCacheState, error) {
 	md5Value = strings.TrimSpace(md5Value)
 	mimeType = strings.TrimSpace(mimeType)

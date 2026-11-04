@@ -319,6 +319,33 @@ func (s *sSysPublish) downloadMaterialImportItems(ctx context.Context, task *sys
 				}
 				return nil
 			}
+			// Material imports share the Telegram collector media cache with
+			// realtime and historical collection. When the source already carries
+			// an MD5 and size, reuse the completed asset before opening Telegram
+			// I/O. The tenant remains part of the cache key, so resources never
+			// cross tenant boundaries.
+			cached, ok, cacheErr := lookupTelegramCollectorMediaIdentityCache(groupCtx, item.Type, item.FileUniqueId, item.SourceMediaId, item.SourceDCId, item.SourceThumbSize)
+			if !ok && cacheErr == nil {
+				cached, ok, cacheErr = lookupTelegramCollectorMediaCache(groupCtx, item.Type, item.FileMd5, item.SourceSize, item.SourceMimeType)
+			}
+			if cacheErr != nil {
+				return cacheErr
+			} else if ok && cached != nil {
+				mu.Lock()
+				items[index].StoragePath = strings.TrimSpace(cached.StoragePath)
+				items[index].FileUrl = telegramCollectorMediaCacheURL(cached)
+				items[index].FileMd5 = item.FileMd5
+				items[index].SourceSize = cached.Size
+				mu.Unlock()
+				mu.Lock()
+				done++
+				currentDone, currentFailed := done, failed
+				mu.Unlock()
+				if err := s.materialImportPersistItemProgress(groupCtx, progressMu, groupID, currentDone, currentFailed); err != nil {
+					return err
+				}
+				return nil
+			}
 			if strings.TrimSpace(item.StoragePath) != "" {
 				item.StoragePath = ""
 				items[index].StoragePath = ""

@@ -319,7 +319,7 @@ func collectorBotMediaItems(message *models.Message) []sysin.CollectorMediaItem 
 		if fileUniqueID != "" {
 			seen["unique:"+fileUniqueID] = struct{}{}
 		}
-		items = append(items, sysin.CollectorMediaItem{Type: mediaType, FileID: fileID, SourceSize: size, SourceMimeType: mime})
+		items = append(items, sysin.CollectorMediaItem{Type: mediaType, FileID: fileID, FileUniqueID: fileUniqueID, SourceSize: size, SourceMimeType: mime})
 	}
 	if len(message.Photo) > 0 {
 		photo := message.Photo[len(message.Photo)-1]

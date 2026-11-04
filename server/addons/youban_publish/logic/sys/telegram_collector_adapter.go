@@ -1192,7 +1192,7 @@ func (p *publishCollectorAccountMediaProvider) StoreMediaPoster(ctx context.Cont
 
 func collectorMediaItemFromCollect(item collectMediaItem) collectorin.CollectorMediaItem {
 	return collectorin.CollectorMediaItem{
-		Type: item.Type, Purpose: item.Purpose, FileID: item.FileId, FileURL: item.FileUrl,
+		Type: item.Type, Purpose: item.Purpose, FileID: item.FileId, FileUniqueID: item.FileUniqueId, FileURL: item.FileUrl,
 		StoragePath: item.StoragePath, PosterURL: item.PosterUrl, FileMD5: item.FileMd5,
 		FilePHash: item.FilePhash, SourceKind: item.SourceKind, SourceMediaID: item.SourceMediaId,
 		SourceAccessHash: item.SourceAccessHash, SourceFileReference: append([]byte(nil), item.SourceFileReference...),
@@ -1203,7 +1203,7 @@ func collectorMediaItemFromCollect(item collectMediaItem) collectorin.CollectorM
 
 func collectMediaItemFromCollector(item collectorin.CollectorMediaItem) collectMediaItem {
 	return collectMediaItem{
-		Type: item.Type, Purpose: item.Purpose, FileId: item.FileID, FileUrl: item.FileURL,
+		Type: item.Type, Purpose: item.Purpose, FileId: item.FileID, FileUniqueId: item.FileUniqueID, FileUrl: item.FileURL,
 		StoragePath: item.StoragePath, PosterUrl: item.PosterURL, FileMd5: item.FileMD5,
 		FilePhash: item.FilePHash, SourceKind: item.SourceKind, SourceMediaId: item.SourceMediaID,
 		SourceAccessHash: item.SourceAccessHash, SourceFileReference: append([]byte(nil), item.SourceFileReference...),
@@ -1653,7 +1653,7 @@ func collectorDeliveryMessage(delivery *collectorin.CollectorDelivery, tenantID,
 	message.Media = make([]collectMediaItem, 0, len(delivery.Media))
 	for _, item := range delivery.Media {
 		message.Media = append(message.Media, collectMediaItem{
-			Type: item.Type, Purpose: item.Purpose, FileId: item.FileID, FileUrl: item.FileURL,
+			Type: item.Type, Purpose: item.Purpose, FileId: item.FileID, FileUniqueId: item.FileUniqueID, FileUrl: item.FileURL,
 			StoragePath: item.StoragePath, PosterUrl: item.PosterURL, FileMd5: item.FileMD5,
 			FilePhash: item.FilePHash, SourceKind: item.SourceKind, SourceMediaId: item.SourceMediaID,
 			SourceAccessHash: item.SourceAccessHash, SourceFileReference: append([]byte(nil), item.SourceFileReference...),

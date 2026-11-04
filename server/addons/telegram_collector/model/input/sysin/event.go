@@ -60,6 +60,7 @@ type CollectorMediaItem struct {
 	Type                string `json:"type"`
 	Purpose             string `json:"purpose,omitempty"`
 	FileID              string `json:"fileId"`
+	FileUniqueID        string `json:"fileUniqueId,omitempty"`
 	FileURL             string `json:"fileUrl,omitempty"`
 	StoragePath         string `json:"storagePath,omitempty"`
 	PosterURL           string `json:"posterUrl,omitempty"`
