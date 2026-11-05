@@ -229,21 +229,23 @@ func (s *sSysPublish) createDownChannelTelegramJob(ctx context.Context, job tele
 	}
 	now := gtime.Now()
 	id, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Data(g.Map{
-		"operation_no":    operationNo,
-		"tenant_id":       job.TenantId,
-		"account_id":      job.AccountId,
-		"profile_id":      job.ProfileId,
-		"channel_id":      job.ChannelId,
-		"bot_id":          job.BotId,
-		"target_chat_id":  job.TargetChatId,
-		"status":          "sending",
-		"priority":        tgJobPriorityUrgent,
-		"queue_name":      tgQueueNameCleanup,
-		"dispatch_status": tgDispatchStatusProcessing,
-		"dispatched_at":   now,
-		"dispatch_count":  1,
-		"created_at":      now,
-		"updated_at":      now,
+		"operation_no":      operationNo,
+		"operation_type":    "unpublish",
+		"tenant_id":         job.TenantId,
+		"account_id":        job.AccountId,
+		"profile_id":        job.ProfileId,
+		"channel_id":        job.ChannelId,
+		"bot_id":            job.BotId,
+		"target_chat_id":    job.TargetChatId,
+		"notify_account_id": job.AccountId,
+		"status":            "sending",
+		"priority":          tgJobPriorityUrgent,
+		"queue_name":        tgQueueNameCleanup,
+		"dispatch_status":   tgDispatchStatusProcessing,
+		"dispatched_at":     now,
+		"dispatch_count":    1,
+		"created_at":        now,
+		"updated_at":        now,
 	}).InsertAndGetId()
 	if err != nil {
 		return 0, false, gerror.Wrap(err, "创建下架频道TG任务失败")
