@@ -534,7 +534,9 @@ func (s *sSysBot) deleteProfileByCallback(ctx context.Context, botId int64, chat
 			_ = s.sendMessageOnly(workCtx, botId, chatId, fmt.Sprintf("资料编号：%s 下架删除失败：%s", html.EscapeString(no), html.EscapeString(err.Error())))
 			return
 		}
-		_ = s.sendMessageOnly(workCtx, botId, chatId, formatProfileChannelActionNotice(no, note.Title, channels, "删除"))
+		// Telegram cleanup is handled by the background publish worker. Do not
+		// report a completed deletion before that worker has acknowledged it.
+		_ = s.sendMessageOnly(workCtx, botId, chatId, formatProfileChannelActionNotice(no, note.Title, channels, "已提交删除"))
 	}()
 	return nil
 }
@@ -548,9 +550,15 @@ type profileActionChannel struct {
 }
 
 func formatProfileChannelActionNotice(profileNo string, title string, channels []profileActionChannel, action string) string {
-	result := "已" + strings.TrimSpace(action)
+	action = strings.TrimSpace(action)
+	result := "已" + action
+	heading := "资料" + action + "完成"
+	if strings.HasPrefix(action, "已提交") {
+		result = action
+		heading = "资料" + action
+	}
 	lines := []string{
-		"<b>资料" + html.EscapeString(action) + "完成</b>",
+		"<b>" + html.EscapeString(heading) + "</b>",
 		"",
 		"编号：<code>" + html.EscapeString(strings.ToUpper(strings.TrimSpace(profileNo))) + "</code>",
 		"标题：<code>" + html.EscapeString(strings.TrimSpace(title)) + "</code>",
@@ -1124,7 +1132,10 @@ func (s *sSysBot) changeProfilesStatusByCallback(ctx context.Context, botId int6
 		return s.replyBotError(ctx, botId, chatId, "资料管理", operationErr)
 	}
 	if status == 2 && downNote != nil {
-		return s.sendMessageOnly(ctx, botId, chatId, formatProfileChannelActionNotice(downNote.ProfileNo, downNote.Title, downChannels, "下架"))
+		// updateProfileStatus only commits the local state synchronously. The
+		// Telegram message cleanup is queued and may still be running, so the
+		// notice must describe submission rather than completion.
+		return s.sendMessageOnly(ctx, botId, chatId, formatProfileChannelActionNotice(downNote.ProfileNo, downNote.Title, downChannels, "已提交下架"))
 	}
 	label := "上架"
 	if status == 2 {
