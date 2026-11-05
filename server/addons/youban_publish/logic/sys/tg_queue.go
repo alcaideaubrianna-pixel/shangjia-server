@@ -395,7 +395,17 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 }
 
 func (s *sSysPublish) enqueueTelegramCleanupJob(ctx context.Context, jobId int64, delay time.Duration) error {
-	return s.enqueueTelegramTaskWithQueue(ctx, tgTaskTypeCleanup, jobId, delay, true, tgQueueNameCleanup)
+	queueName := tgQueueNameCleanup
+	var owner struct {
+		TenantId  int64 `orm:"tenant_id"`
+		AccountId int64 `orm:"account_id"`
+	}
+	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Fields("tenant_id,account_id").Where("id", jobId).Scan(&owner); err == nil &&
+		s.unifiedPushEngineEnabled(ctx, owner.TenantId, owner.AccountId) {
+		queueName = channelDispatchQueueName(channelDispatchLaneDelete)
+	}
+	return s.enqueueTelegramTaskWithQueue(ctx, tgTaskTypeCleanup, jobId, delay, true, queueName)
 }
 
 func (s *sSysPublish) enqueueTelegramAutoDelete(ctx context.Context, payload autoDeleteQueuePayload) error {
