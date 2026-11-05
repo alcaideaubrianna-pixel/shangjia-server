@@ -47,6 +47,12 @@ func claimProfileOperation(ctx context.Context, tenantID, profileID int64, opera
 	return cache.Instance().SetIfNotExist(ctx, profileOperationClaimKey(tenantID, profileID, operation), 1, profileOperationClaimTTL)
 }
 
+func releaseProfileOperationClaim(ctx context.Context, tenantID, profileID int64) {
+	if cache.Initialized() && tenantID > 0 && profileID > 0 {
+		_, _ = cache.Instance().Remove(ctx, fmt.Sprintf("youban_publish:profile_operation:lock:%d:%d", tenantID, profileID))
+	}
+}
+
 func profileOperationTypeFromNo(operationNo string) profileOperationType {
 	value := strings.ToLower(strings.TrimSpace(operationNo))
 	switch {

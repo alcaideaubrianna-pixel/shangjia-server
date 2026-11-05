@@ -428,15 +428,27 @@ func (s *sSysPublish) updateProfileStatus(ctx context.Context, in *sysin.Profile
 	if in.Status == 2 {
 		op = profileOperationUnpublish
 	}
+	claimedIDs := make([]int64, 0, len(ids))
 	for _, profileID := range ids {
 		claimed, claimErr := claimProfileOperation(ctx, tenantId, profileID, op)
 		if claimErr != nil {
 			return nil, claimErr
 		}
 		if !claimed {
+			for _, claimedID := range claimedIDs {
+				releaseProfileOperationClaim(ctx, tenantId, claimedID)
+			}
 			return nil, gerror.New("该资料操作正在处理中，请稍候刷新")
 		}
+		claimedIDs = append(claimedIDs, profileID)
 	}
+	defer func() {
+		if err != nil {
+			for _, profileID := range claimedIDs {
+				releaseProfileOperationClaim(ctx, tenantId, profileID)
+			}
+		}
+	}()
 	if in.Status == 1 {
 		if err = s.submitProfilesByIds(ctx, ids, tenantId, accountId); err != nil {
 			return nil, err
