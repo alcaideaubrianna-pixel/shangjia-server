@@ -483,6 +483,16 @@ func (s *sSysBot) handleProfileCallback(ctx context.Context, botId int64, query 
 		return true, s.startProfileSessionByIds(ctx, botId, fmt.Sprintf("%d", query.From.ID), chatId, account, "edit_no", "waiting_no", 0, no, nil, "请输入新的编号，格式如 A00001：")
 	case "channels":
 		return true, s.showProfileChannelEditMenu(ctx, botId, chatId, account, no)
+	case "ch":
+		if len(parts) < 4 {
+			return true, nil
+		}
+		channelID, _ := strconv.ParseInt(parts[3], 10, 64)
+		return true, s.toggleProfileChannelSelection(ctx, botId, chatId, account, no, channelID)
+	case "chconfirm":
+		return true, s.confirmProfileChannelSelection(ctx, botId, chatId, account, no)
+	case "editback":
+		return true, s.showProfileEditMenu(ctx, botId, chatId, account, no)
 	case "replace":
 		if err = s.startProfileSessionByIds(ctx, botId, fmt.Sprintf("%d", query.From.ID), chatId, account, "replace", "waiting_display", 0, no, nil, ""); err != nil {
 			return true, err
@@ -3940,6 +3950,10 @@ func (s *sSysBot) showProfileChannelEditMenu(ctx context.Context, botId int64, c
 	for _, id := range note.ChannelIds {
 		selected[id] = true
 	}
+	selectionKey := profileChannelEditKey(account.AccountId, no)
+	if cached, cacheErr := cache.Instance().Get(ctx, selectionKey); cacheErr != nil || cached.IsNil() {
+		_ = cache.Instance().Set(ctx, selectionKey, note.ChannelIds, 10*time.Minute)
+	}
 	buttons := make([][]models.InlineKeyboardButton, 0, len(channels)+2)
 	for _, channel := range channels {
 		if channel == nil || channel.Id <= 0 {
@@ -3960,6 +3974,54 @@ func (s *sSysBot) showProfileChannelEditMenu(ctx context.Context, botId int64, c
 	text := fmt.Sprintf("<b>上架频道编辑</b>\n\n编号：<code>%s</code>\n标题：%s\n\n请选择要推送的频道：\n点击频道切换选中状态，✅ 表示已选中。", html.EscapeString(note.ProfileNo), html.EscapeString(note.Title))
 	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, text, "HTML", false, &models.InlineKeyboardMarkup{InlineKeyboard: buttons})
 	return err
+}
+
+func profileChannelEditKey(accountID int64, no string) string {
+	return fmt.Sprintf("youban_bot:profile_channels:%d:%s", accountID, strings.ToUpper(strings.TrimSpace(no)))
+}
+
+func (s *sSysBot) toggleProfileChannelSelection(ctx context.Context, botID int64, chatID string, account *botProfileAccount, no string, channelID int64) error {
+	if channelID <= 0 {
+		return nil
+	}
+	value, err := cache.Instance().Get(ctx, profileChannelEditKey(account.AccountId, no))
+	if err != nil || value.IsNil() {
+		return s.showProfileChannelEditMenu(ctx, botID, chatID, account, no)
+	}
+	var ids []int64
+	if value.Scan(&ids) != nil {
+		ids = nil
+	}
+	found := false
+	result := make([]int64, 0, len(ids)+1)
+	for _, id := range ids {
+		if id == channelID {
+			found = true
+			continue
+		}
+		result = append(result, id)
+	}
+	if !found {
+		result = append(result, channelID)
+	}
+	_ = cache.Instance().Set(ctx, profileChannelEditKey(account.AccountId, no), result, 10*time.Minute)
+	return s.showProfileChannelEditMenu(ctx, botID, chatID, account, no)
+}
+
+func (s *sSysBot) confirmProfileChannelSelection(ctx context.Context, botID int64, chatID string, account *botProfileAccount, no string) error {
+	value, err := cache.Instance().Get(ctx, profileChannelEditKey(account.AccountId, no))
+	if err != nil || value.IsNil() {
+		return s.replyBotError(ctx, botID, chatID, "上架频道编辑", gerror.New("频道选择已过期，请重新进入编辑"))
+	}
+	var ids []int64
+	if err = value.Scan(&ids); err != nil {
+		return err
+	}
+	if _, err = publishService.SysPublish().BotProfileEdit(ctx, &publishsysin.BotProfileEditInp{TenantId: account.TenantId, AccountId: account.AccountId, ProfileNo: no, ChannelIds: ids}); err != nil {
+		return s.replyBotError(ctx, botID, chatID, "上架频道编辑", err)
+	}
+	_, _ = cache.Instance().Remove(ctx, profileChannelEditKey(account.AccountId, no))
+	return s.showProfileCard(ctx, botID, chatID, account, no)
 }
 
 func (s *sSysBot) editProfileBySession(ctx context.Context, botId int64, chatId string, account *botProfileAccount, no string, title string, plainText string, newNo string) error {
