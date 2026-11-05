@@ -282,8 +282,10 @@ func (s *sSysPublish) ensureTelegramProfileJobWithMetaTx(ctx context.Context, tx
 		CollectSourceChatId: strings.TrimSpace(meta.CollectSourceChatId), CollectSourceMessageId: meta.CollectSourceMessageId,
 	}
 	jobID, err := tx.Model(publishTgJobTable).Safe().Ctx(ctx).Data(g.Map{
-		"operation_no": operationNo,
-		"tenant_id":    job.TenantId, "merchant_id": job.TenantId, "account_id": job.AccountId,
+		"operation_no":      operationNo,
+		"operation_type":    string(profileOperationTypeFromNo(operationNo)),
+		"notify_account_id": job.AccountId,
+		"tenant_id":         job.TenantId, "merchant_id": job.TenantId, "account_id": job.AccountId,
 		"profile_id": job.ProfileId, "channel_id": job.ChannelId, "bot_id": job.BotId,
 		"target_chat_id": job.TargetChatId, "status": "pending",
 		"collect_event_id": job.CollectEventId, "collect_source_id": job.CollectSourceId,

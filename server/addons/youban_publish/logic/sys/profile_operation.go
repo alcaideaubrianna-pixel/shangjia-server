@@ -45,3 +45,19 @@ func claimProfileOperation(ctx context.Context, tenantID, profileID int64, opera
 	}
 	return cache.Instance().SetIfNotExist(ctx, profileOperationClaimKey(tenantID, profileID, operation), 1, profileOperationClaimTTL)
 }
+
+func profileOperationTypeFromNo(operationNo string) profileOperationType {
+	value := strings.ToLower(strings.TrimSpace(operationNo))
+	switch {
+	case strings.HasPrefix(value, "edit:"):
+		return profileOperationEdit
+	case strings.HasPrefix(value, "collect:"):
+		return profileOperationPublish
+	case strings.HasPrefix(value, "republish:"):
+		return profileOperationRepublish
+	case strings.HasPrefix(value, "down:"):
+		return profileOperationUnpublish
+	default:
+		return profileOperationPublish
+	}
+}
