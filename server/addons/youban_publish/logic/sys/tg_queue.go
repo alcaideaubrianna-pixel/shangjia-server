@@ -632,9 +632,17 @@ func (s *sSysPublish) enqueueProfileDownRun(ctx context.Context, tenantId int64,
 	if delay > 0 {
 		options = append(options, asynq.ProcessIn(delay))
 	}
-	_, err = client.EnqueueContext(ctx, task, options...)
+	info, err := client.EnqueueContext(ctx, task, options...)
 	if errors.Is(err, asynq.ErrDuplicateTask) {
+		g.Log().Infof(ctx, "资料下架任务已存在，跳过重复入队 tenantId:%d profileIds:%v queue:%s", tenantId, profileIds, tgQueueNameUrgent)
 		return nil
+	}
+	if err != nil {
+		g.Log().Errorf(ctx, "资料下架任务入队失败 tenantId:%d profileIds:%v queue:%s err:%+v", tenantId, profileIds, tgQueueNameUrgent, err)
+		return err
+	}
+	if info != nil {
+		g.Log().Infof(ctx, "资料下架任务入队成功 tenantId:%d profileIds:%v queue:%s taskId:%s", tenantId, profileIds, tgQueueNameUrgent, info.ID)
 	}
 	return err
 }
