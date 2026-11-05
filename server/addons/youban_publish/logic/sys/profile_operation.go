@@ -60,7 +60,7 @@ func profileOperationTypeFromNo(operationNo string) profileOperationType {
 		return profileOperationEdit
 	case strings.HasPrefix(value, "collect:"):
 		return profileOperationPublish
-	case strings.HasPrefix(value, "republish:"):
+	case strings.HasPrefix(value, "republish:"), strings.HasPrefix(value, "ai-republish:"):
 		return profileOperationRepublish
 	case strings.HasPrefix(value, "down:"):
 		return profileOperationUnpublish
