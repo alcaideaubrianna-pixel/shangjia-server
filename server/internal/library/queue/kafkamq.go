@@ -98,7 +98,7 @@ func (r *KafkaMq) ListenReceiveMsgDo(topic string, receiveDo func(mqMsg MqMsg)) 
 			}
 
 			if consumerCtx.Err() != nil {
-				Logger().Debugf(ctx, fmt.Sprintf("kafka consoumer stop : %v", consumerCtx.Err()))
+				Logger().Debug(ctx, fmt.Sprintf("kafka consoumer stop : %v", consumerCtx.Err()))
 				return
 			}
 			consumer.ready = make(chan bool)
