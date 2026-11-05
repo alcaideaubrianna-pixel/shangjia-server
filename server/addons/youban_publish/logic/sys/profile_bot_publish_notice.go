@@ -98,7 +98,7 @@ func (s *sSysPublish) notifyBotProfilePublishCompleted(ctx context.Context, job 
 	var channels []botProfilePublishNoticeRow
 	if err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
 		LeftJoin(publishChannelTable+" c", "c.id=j.channel_id").
-		Fields("COALESCE(NULLIF(c.channel_title,''),j.target_chat_id) AS channel_title,c.channel_username,j.target_chat_id,j.tg_message_id,j.status").
+		Fields("COALESCE(NULLIF(c.channel_title,''),j.target_chat_id) AS channel_title,c.channel_username,j.target_chat_id,COALESCE(j.tg_message_id,(SELECT MIN(m.tg_message_id) FROM "+publishTgMessageTable+" m WHERE m.job_id=j.id AND m.purpose='display' AND m.status='sent' AND m.deleted_at IS NULL)) AS tg_message_id,j.status").
 		Where("j.profile_id", job.ProfileId).Where("j.operation_no", job.OperationNo).
 		OrderAsc("j.channel_id").Scan(&channels); err != nil {
 		return gerror.Wrap(err, "读取Bot上架通知频道失败")
