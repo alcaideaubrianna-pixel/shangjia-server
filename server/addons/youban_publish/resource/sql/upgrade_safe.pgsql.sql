@@ -224,3 +224,5 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_bot_message_source_received" ON "hg_youban_p
 ALTER TABLE "hg_youban_publish_profile_state" ADD COLUMN IF NOT EXISTS "random_media_config" text NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "display_media_selection" text NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "cycle_failure_count" integer NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "push_engine" varchar(16) NOT NULL DEFAULT 'legacy';
+CREATE INDEX IF NOT EXISTS "idx_ybp_account_setting_push_engine" ON "hg_youban_publish_account_setting" ("tenant_id", "account_id", "push_engine") WHERE "deleted_at" IS NULL;
