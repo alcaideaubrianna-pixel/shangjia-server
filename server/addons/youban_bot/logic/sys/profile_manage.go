@@ -2924,12 +2924,19 @@ func (s *sSysBot) asyncPersistProfileMedia(account *botProfileAccount, profileID
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		startedAt := time.Now()
+		g.Log().Infof(ctx, "Bot资料异步媒体处理开始 trace:%s profile_id:%d display_count:%d verify_count:%d", trace, profileID, len(displayMedia), len(verifyMedia))
+		stageStartedAt := time.Now()
 		persistedDisplay, err := s.persistTelegramMedia(ctx, account.AccountId, displayMedia)
+		g.Log().Infof(ctx, "Bot资料异步媒体处理阶段 trace:%s profile_id:%d stage:persist_display input_count:%d output_count:%d elapsed_ms:%d err:%v", trace, profileID, len(displayMedia), len(persistedDisplay), time.Since(stageStartedAt).Milliseconds(), err)
 		if err == nil {
 			var persistedVerify []*publishsysin.MessageTemplateMediaInp
+			stageStartedAt = time.Now()
 			persistedVerify, err = s.persistTelegramMedia(ctx, account.AccountId, verifyMedia)
+			g.Log().Infof(ctx, "Bot资料异步媒体处理阶段 trace:%s profile_id:%d stage:persist_verify input_count:%d output_count:%d elapsed_ms:%d err:%v", trace, profileID, len(verifyMedia), len(persistedVerify), time.Since(stageStartedAt).Milliseconds(), err)
 			if err == nil {
+				stageStartedAt = time.Now()
 				err = publishService.SysPublish().BotProfilePersistMedia(ctx, account.TenantId, account.AccountId, profileNo, persistedDisplay, persistedVerify)
+				g.Log().Infof(ctx, "Bot资料异步媒体处理阶段 trace:%s profile_id:%d stage:media_commit display_count:%d verify_count:%d elapsed_ms:%d err:%v", trace, profileID, len(persistedDisplay), len(persistedVerify), time.Since(stageStartedAt).Milliseconds(), err)
 			}
 		}
 		if err != nil {
