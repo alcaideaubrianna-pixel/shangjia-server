@@ -13,6 +13,24 @@ import (
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
+// telegramCleanupWorkerQueues 返回资料清理 Worker 负责消费的队列集合。
+func telegramCleanupWorkerQueues() map[string]int {
+	return map[string]int{
+		tgQueueNameCleanup:               1,
+		channelDispatchQueueDelete:       1,
+		channelDispatchQueueDeleteManual: 1,
+	}
+}
+
+// telegramAutoDeleteWorkerQueues 返回关键字和循环删除 Worker 负责消费的队列集合。
+func telegramAutoDeleteWorkerQueues() map[string]int {
+	return map[string]int{
+		tgQueueNameAutoDeleteRealtime:     1,
+		channelDispatchQueueDeleteKeyword: 1,
+		channelDispatchQueueDeleteCycle:   1,
+	}
+}
+
 func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
 	s.tgQueueMu.Lock()
 	if s.tgInteractiveQueueServer != nil || s.tgQueueServer != nil || s.tgCleanupQueueServer != nil {
@@ -35,12 +53,8 @@ func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
 	cleanupServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
-		Concurrency: g.Cfg().MustGet(ctx, "youbanPublish.queue.cleanupConcurrency", 16).Int(),
-		Queues: map[string]int{
-			tgQueueNameCleanup:               1,
-			channelDispatchQueueDelete:       1,
-			channelDispatchQueueDeleteManual: 1,
-		},
+		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.cleanupConcurrency", 16).Int(),
+		Queues:         telegramCleanupWorkerQueues(),
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
 	g.Log().Infof(ctx, "启动上架插件TG推送队列，人工上架独立并发：%d", telegramPublishInteractiveConcurrency(ctx))
@@ -123,12 +137,8 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 		return
 	}
 	autoDeleteServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
-		Concurrency: telegramAutoDeleteConcurrency(ctx),
-		Queues: map[string]int{
-			tgQueueNameAutoDeleteRealtime:     1,
-			channelDispatchQueueDeleteKeyword: 1,
-			channelDispatchQueueDeleteCycle:   1,
-		},
+		Concurrency:    telegramAutoDeleteConcurrency(ctx),
+		Queues:         telegramAutoDeleteWorkerQueues(),
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
 	autoDeleteBackfillServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{

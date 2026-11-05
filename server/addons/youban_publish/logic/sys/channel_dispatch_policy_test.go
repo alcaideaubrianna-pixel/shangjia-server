@@ -56,3 +56,19 @@ func TestChannelDispatchDeleteQueueName(t *testing.T) {
 		}
 	}
 }
+
+// TestUnifiedDeleteQueuesHaveConsumers 验证新增删除 lane 均已绑定到对应 Worker。
+func TestUnifiedDeleteQueuesHaveConsumers(t *testing.T) {
+	cleanup := telegramCleanupWorkerQueues()
+	for _, queue := range []string{channelDispatchQueueDelete, channelDispatchQueueDeleteManual} {
+		if cleanup[queue] <= 0 {
+			t.Fatalf("cleanup worker does not consume queue %q", queue)
+		}
+	}
+	autoDelete := telegramAutoDeleteWorkerQueues()
+	for _, queue := range []string{channelDispatchQueueDeleteKeyword, channelDispatchQueueDeleteCycle} {
+		if autoDelete[queue] <= 0 {
+			t.Fatalf("auto-delete worker does not consume queue %q", queue)
+		}
+	}
+}
