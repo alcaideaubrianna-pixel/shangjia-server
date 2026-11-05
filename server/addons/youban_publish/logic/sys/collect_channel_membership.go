@@ -2,12 +2,17 @@ package sys
 
 import (
 	"context"
+	"fmt"
+	"strings"
+	"time"
+
+	tgbot "github.com/go-telegram/bot"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 	botService "hotgo/addons/youban_bot/service"
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	pdo "hotgo/addons/youban_publish/internal/model/do"
-	"strings"
+	"hotgo/internal/library/cache"
 )
 
 func (s *sSysPublish) BotChannelMembershipChanged(ctx context.Context, botId int64, chatId, status, role string, updateId int64) error {
@@ -33,7 +38,38 @@ func (s *sSysPublish) BotChannelMembershipChanged(ctx context.Context, botId int
 	}
 	if channel.Id <= 0 {
 		g.Log().Warningf(ctx, "Telegram BOT频道成员变更未找到频道目录，创建占位记录 bot_id:%d update_id:%d chat_id:%q status:%q role:%q", botId, updateId, chatId, status, role)
-		if err := s.upsertCollectChannel(ctx, bot.TenantId, chatId, "", chatId, "", 0, 0, 0, now, now); err != nil {
+		chatType, title, username, broadcast, megagroup := "", chatId, "", 0, 0
+		lookupKey := fmt.Sprintf("youban_publish:channel_getchat:%d:%s", botId, chatId)
+		lookupAllowed := true
+		if cached, cacheErr := cache.Instance().Get(ctx, lookupKey); cacheErr == nil && !cached.IsNil() {
+			lookupAllowed = false
+		}
+		if lookupAllowed {
+			_ = cache.Instance().Set(ctx, lookupKey, true, 30*time.Second)
+			lookupCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			if token, tokenErr := s.telegramJobBotToken(lookupCtx, botId, bot.TenantId); tokenErr == nil {
+				if tgBot, botErr := s.telegramBot(lookupCtx, token); botErr == nil {
+					if chat, chatErr := tgBot.GetChat(lookupCtx, &tgbot.GetChatParams{ChatID: chatId}); chatErr == nil && chat != nil {
+						chatType = string(chat.Type)
+						title = strings.TrimSpace(chat.Title)
+						username = strings.TrimSpace(chat.Username)
+						if chatType == "channel" {
+							broadcast = 1
+						}
+						if chatType == "group" || chatType == "supergroup" {
+							megagroup = 1
+						}
+						g.Log().Infof(lookupCtx, "Telegram getChat补全频道目录 bot_id:%d update_id:%d chat_id:%q type:%q title:%q username:%q", botId, updateId, chatId, chatType, title, username)
+					} else if chatErr != nil {
+						g.Log().Warningf(lookupCtx, "Telegram getChat获取频道信息失败 bot_id:%d update_id:%d chat_id:%q err:%+v", botId, updateId, chatId, chatErr)
+					}
+				}
+			}
+			cancel()
+		} else {
+			g.Log().Infof(ctx, "跳过重复Telegram getChat调用 bot_id:%d update_id:%d chat_id:%q", botId, updateId, chatId)
+		}
+		if err := s.upsertCollectChannel(ctx, bot.TenantId, chatId, chatType, title, username, broadcast, megagroup, 0, now, now); err != nil {
 			return err
 		}
 		if err := pdao.YoubanPublishCollectChannel.Ctx(ctx).Fields("id").Where("tenant_id", bot.TenantId).Where("telegram_chat_id", chatId).Scan(&channel); err != nil || channel.Id <= 0 {
