@@ -2921,29 +2921,39 @@ func (s *sSysBot) asyncPersistProfileMedia(account *botProfileAccount, profileID
 		return
 	}
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer cancel()
-		startedAt := time.Now()
-		g.Log().Infof(ctx, "Bot资料异步媒体处理开始 trace:%s profile_id:%d display_count:%d verify_count:%d", trace, profileID, len(displayMedia), len(verifyMedia))
-		stageStartedAt := time.Now()
-		persistedDisplay, err := s.persistTelegramMedia(ctx, account.AccountId, displayMedia)
-		g.Log().Infof(ctx, "Bot资料异步媒体处理阶段 trace:%s profile_id:%d stage:persist_display input_count:%d output_count:%d elapsed_ms:%d err:%v", trace, profileID, len(displayMedia), len(persistedDisplay), time.Since(stageStartedAt).Milliseconds(), err)
-		if err == nil {
-			var persistedVerify []*publishsysin.MessageTemplateMediaInp
-			stageStartedAt = time.Now()
-			persistedVerify, err = s.persistTelegramMedia(ctx, account.AccountId, verifyMedia)
-			g.Log().Infof(ctx, "Bot资料异步媒体处理阶段 trace:%s profile_id:%d stage:persist_verify input_count:%d output_count:%d elapsed_ms:%d err:%v", trace, profileID, len(verifyMedia), len(persistedVerify), time.Since(stageStartedAt).Milliseconds(), err)
+		var err error
+		for attempt := 1; attempt <= 3; attempt++ {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			startedAt := time.Now()
+			g.Log().Infof(ctx, "Bot资料异步媒体处理开始 trace:%s profile_id:%d attempt:%d display_count:%d verify_count:%d", trace, profileID, attempt, len(displayMedia), len(verifyMedia))
+			stageStartedAt := time.Now()
+			persistedDisplay, persistErr := s.persistTelegramMedia(ctx, account.AccountId, displayMedia)
+			err = persistErr
+			g.Log().Infof(ctx, "Bot资料异步媒体处理阶段 trace:%s profile_id:%d stage:persist_display input_count:%d output_count:%d elapsed_ms:%d err:%v", trace, profileID, len(displayMedia), len(persistedDisplay), time.Since(stageStartedAt).Milliseconds(), err)
 			if err == nil {
+				var persistedVerify []*publishsysin.MessageTemplateMediaInp
 				stageStartedAt = time.Now()
-				err = publishService.SysPublish().BotProfilePersistMedia(ctx, account.TenantId, account.AccountId, profileNo, persistedDisplay, persistedVerify)
-				g.Log().Infof(ctx, "Bot资料异步媒体处理阶段 trace:%s profile_id:%d stage:media_commit display_count:%d verify_count:%d elapsed_ms:%d err:%v", trace, profileID, len(persistedDisplay), len(persistedVerify), time.Since(stageStartedAt).Milliseconds(), err)
+				persistedVerify, err = s.persistTelegramMedia(ctx, account.AccountId, verifyMedia)
+				g.Log().Infof(ctx, "Bot资料异步媒体处理阶段 trace:%s profile_id:%d stage:persist_verify input_count:%d output_count:%d elapsed_ms:%d err:%v", trace, profileID, len(verifyMedia), len(persistedVerify), time.Since(stageStartedAt).Milliseconds(), err)
+				if err == nil {
+					stageStartedAt = time.Now()
+					err = publishService.SysPublish().BotProfilePersistMedia(ctx, account.TenantId, account.AccountId, profileNo, persistedDisplay, persistedVerify)
+					g.Log().Infof(ctx, "Bot资料异步媒体处理阶段 trace:%s profile_id:%d stage:media_commit display_count:%d verify_count:%d elapsed_ms:%d err:%v", trace, profileID, len(persistedDisplay), len(persistedVerify), time.Since(stageStartedAt).Milliseconds(), err)
+				}
+			}
+			cancel()
+			if err == nil {
+				return
+			}
+			g.Log().Warningf(context.Background(), "Bot资料异步媒体处理重试 trace:%s profile_id:%d attempt:%d elapsed_ms:%d err:%s", trace, profileID, attempt, time.Since(startedAt).Milliseconds(), sensitive.Diagnostic(err.Error()))
+			if attempt < 3 {
+				time.Sleep(time.Duration(attempt) * time.Second)
 			}
 		}
 		if err != nil {
-			g.Log().Warningf(ctx, "Bot资料异步媒体处理失败 trace:%s profile_id:%d elapsed_ms:%d err:%s", trace, profileID, time.Since(startedAt).Milliseconds(), sensitive.Diagnostic(err.Error()))
+			g.Log().Warningf(context.Background(), "Bot资料异步媒体处理失败 trace:%s profile_id:%d err:%s", trace, profileID, sensitive.Diagnostic(err.Error()))
 			return
 		}
-		g.Log().Infof(ctx, "Bot资料异步媒体处理完成 trace:%s profile_id:%d elapsed_ms:%d", trace, profileID, time.Since(startedAt).Milliseconds())
 	}()
 }
 
