@@ -94,13 +94,12 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) (resultE
 		if targetJob.Status == "sending" {
 			return nil
 		}
-		delay := s.telegramChannelBusyDelay(ctx, jobId, targetJob.DispatchCount)
 		_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 			Where("id", jobId).
 			WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
 			Data(g.Map{
 				"dispatch_status":     tgDispatchStatusIdle,
-				"next_retry_at":       gtime.Now().Add(delay),
+				"next_retry_at":       nil,
 				"last_dispatch_error": "频道正在发送其他任务，已等待重新调度",
 				"updated_at":          gtime.Now(),
 			}).Update()
