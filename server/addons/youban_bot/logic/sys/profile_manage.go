@@ -1129,12 +1129,14 @@ func (s *sSysBot) changeProfilesStatusByCallback(ctx context.Context, botId int6
 	})
 	s.auditProfileCallback(ctx, query, account, action, no, operationErr)
 	if operationErr != nil {
+		s.answerProfileCallback(ctx, botId, query, operationErr.Error())
 		return s.replyBotError(ctx, botId, chatId, "资料管理", operationErr)
 	}
 	if status == 2 && downNote != nil {
 		// updateProfileStatus only commits the local state synchronously. The
 		// Telegram message cleanup is queued and may still be running, so the
 		// notice must describe submission rather than completion.
+		s.answerProfileCallback(ctx, botId, query, "已提交下架")
 		return s.sendMessageOnly(ctx, botId, chatId, formatProfileChannelActionNotice(downNote.ProfileNo, downNote.Title, downChannels, "已提交下架"))
 	}
 	label := "上架"
@@ -1145,7 +1147,25 @@ func (s *sSysBot) changeProfilesStatusByCallback(ctx context.Context, botId int6
 	if res != nil && strings.TrimSpace(res.Message) != "" {
 		msg = html.EscapeString(res.Message)
 	}
+	s.answerProfileCallback(ctx, botId, query, msg)
 	return s.sendMessageOnly(ctx, botId, chatId, msg)
+}
+
+func (s *sSysBot) answerProfileCallback(ctx context.Context, botId int64, query *models.CallbackQuery, text string) {
+	if query == nil || strings.TrimSpace(text) == "" {
+		return
+	}
+	row, err := s.botById(ctx, botId)
+	if err != nil {
+		return
+	}
+	bot, err := s.telegramBot(ctx, row.BotToken)
+	if err != nil {
+		return
+	}
+	callCtx, cancel := telegramAPICtx()
+	defer cancel()
+	_, _ = bot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: shortText(text, 180), ShowAlert: false})
 }
 
 func (s *sSysBot) auditProfileCallback(ctx context.Context, query *models.CallbackQuery, account *botProfileAccount, action string, profileNo string, callbackErr error) {
