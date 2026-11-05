@@ -11,8 +11,11 @@ import (
 )
 
 func (s *sSysPublish) BotChannelMembershipChanged(ctx context.Context, botId int64, chatId, status, role string, updateId int64) error {
+	rawChatID := strings.TrimSpace(chatId)
 	chatId = normalizeTelegramChannelChatID(chatId)
+	g.Log().Infof(ctx, "Telegram BOT频道成员变更 bot_id:%d update_id:%d raw_chat_id:%q normalized_chat_id:%q new_status:%q role:%q", botId, updateId, rawChatID, chatId, status, role)
 	if botId <= 0 || strings.TrimSpace(chatId) == "" {
+		g.Log().Warningf(ctx, "忽略无效Telegram BOT频道成员变更 bot_id:%d update_id:%d raw_chat_id:%q", botId, updateId, rawChatID)
 		return nil
 	}
 	var bot struct {
@@ -29,6 +32,7 @@ func (s *sSysPublish) BotChannelMembershipChanged(ctx context.Context, botId int
 		return err
 	}
 	if channel.Id <= 0 {
+		g.Log().Warningf(ctx, "Telegram BOT频道成员变更未找到频道目录，创建占位记录 bot_id:%d update_id:%d chat_id:%q status:%q role:%q", botId, updateId, chatId, status, role)
 		if err := s.upsertCollectChannel(ctx, bot.TenantId, chatId, "", chatId, "", 0, 0, 0, now, now); err != nil {
 			return err
 		}
