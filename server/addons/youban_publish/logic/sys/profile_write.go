@@ -26,10 +26,24 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 	if in == nil {
 		return nil, gerror.New("资料信息不能为空")
 	}
+	trace := in.DiagnosticTraceId
+	logStage := func(stage string, stageStartedAt time.Time, stageErr error) {
+		fields := g.Map{"trace": trace, "stage": stage, "elapsedMs": time.Since(stageStartedAt).Milliseconds(), "tenantId": tenantId, "accountId": accountId}
+		if stageErr != nil {
+			fields["error"] = stageErr.Error()
+			g.Log().Warning(ctx, "资料保存阶段完成", fields)
+			return
+		}
+		g.Log().Info(ctx, "资料保存阶段完成", fields)
+	}
+	stageStartedAt := time.Now()
 	if err = in.Filter(ctx); err != nil {
+		logStage("validate_input", stageStartedAt, err)
 		return nil, err
 	}
+	logStage("validate_input", stageStartedAt, nil)
 	draftOnly := in.DraftOnly && in.Id <= 0 && normalizeProfileUUID(in.Uuid) == ""
+	stageStartedAt = time.Now()
 	if draftOnly {
 		in.Province = safeProfileRegionValue(in.Province)
 		in.City = safeProfileRegionValue(in.City)
@@ -40,16 +54,22 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 		return nil, gerror.New("上架账号信息不完整")
 	}
 	if in.Id <= 0 && normalizeProfileUUID(in.Uuid) != "" {
+		stageStartedAt = time.Now()
 		if in.Id, err = s.resolveProfileId(ctx, 0, in.Uuid, tenantId, accountId); err != nil {
+			logStage("resolve_profile_uuid", stageStartedAt, err)
 			return nil, err
 		}
+		logStage("resolve_profile_uuid", stageStartedAt, nil)
 	}
 	var manualChannelIds []int64
 	if !draftOnly && in.ChannelIds != nil {
+		stageStartedAt = time.Now()
 		in.ChannelIds, err = s.availableProfileChannelIds(ctx, in.ChannelIds, tenantId)
 		if err != nil {
+			logStage("validate_manual_channels", stageStartedAt, err)
 			return nil, err
 		}
+		logStage("validate_manual_channels", stageStartedAt, nil)
 		manualChannelIds = uniqueIds(in.ChannelIds)
 	}
 	var publishAt *gtime.Time
@@ -65,15 +85,21 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 	var oldFingerprints, newFingerprints []profileFingerprint
 	effectiveChannelIds := manualChannelIds
 	if !draftOnly && in.ChannelIds == nil && profileId > 0 {
+		stageStartedAt = time.Now()
 		effectiveChannelIds, err = s.profileChannelIdsOrDefaults(ctx, tenantId, accountId, profileId)
 		if err != nil {
+			logStage("load_profile_channels", stageStartedAt, err)
 			return nil, err
 		}
+		logStage("load_profile_channels", stageStartedAt, nil)
 	} else if !draftOnly && len(effectiveChannelIds) == 0 {
+		stageStartedAt = time.Now()
 		effectiveChannelIds, err = s.defaultSelectedPublishChannelIds(ctx, tenantId)
 		if err != nil {
+			logStage("load_default_channels", stageStartedAt, err)
 			return nil, err
 		}
+		logStage("load_default_channels", stageStartedAt, nil)
 	}
 	preparedAt := time.Now()
 	transaction := func() error {
@@ -94,7 +120,9 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 				}
 			}
 			if profileId == 0 {
+				stepStartedAt := time.Now()
 				profileId, err = s.createProfileFromInput(ctx, tx, in, tenantId, accountId)
+				logStage("create_profile_row_and_number", stepStartedAt, err)
 				if err != nil {
 					return err
 				}
@@ -133,10 +161,13 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 		err = transaction()
 	}
 	if err != nil {
+		logStage("database_transaction", preparedAt, err)
 		return nil, err
 	}
 	transactionDoneAt := time.Now()
+	logStage("database_transaction", preparedAt, nil)
 	if !draftOnly {
+		stageStartedAt = time.Now()
 		if err = s.enqueueProfileMaintenance(ctx, profileMaintenancePayload{
 			ProfileId: profileId, TenantId: tenantId, AccountId: accountId,
 			RemovedMediaIds: removedMediaIds, MediaChanged: in.Media != nil && (!isNewProfile || len(in.Media) > 0),
@@ -144,6 +175,7 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 		}); err != nil {
 			g.Log().Warningf(ctx, "资料已保存但后台维护任务提交失败 profileId:%d tenantId:%d accountId:%d err:%+v", profileId, tenantId, accountId, err)
 		}
+		logStage("enqueue_maintenance", stageStartedAt, err)
 	}
 	maintenanceQueuedAt := time.Now()
 	columns := dao.ContentProfile.Columns()
@@ -153,7 +185,7 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 		return nil, gerror.Wrap(err, "读取资料保存结果失败")
 	}
 	g.Log().Info(ctx, "资料保存完成", g.Map{
-		"profileId": profileId, "tenantId": tenantId, "accountId": accountId, "isNew": isNewProfile,
+		"trace": trace, "profileId": profileId, "tenantId": tenantId, "accountId": accountId, "isNew": isNewProfile,
 		"prepareMs": preparedAt.Sub(startedAt).Milliseconds(), "transactionMs": transactionDoneAt.Sub(preparedAt).Milliseconds(),
 		"maintenanceEnqueueMs": maintenanceQueuedAt.Sub(transactionDoneAt).Milliseconds(),
 		"resultQueryMs":        time.Since(maintenanceQueuedAt).Milliseconds(), "elapsedMs": time.Since(startedAt).Milliseconds(),
@@ -162,6 +194,7 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 }
 
 const profileRegionMaxRunes = 64
+const profileRegionLookupTimeout = 3 * time.Second
 
 // normalizeProfileRegionsBestEffort keeps region enrichment from blocking a
 // profile save. Region parsing and the province dictionary are auxiliary
@@ -202,7 +235,9 @@ func normalizeProfileRegionsBestEffort(ctx context.Context, plainText, province,
 		return "", ""
 	}
 
-	normalizedProvince, normalizedCity, _, err := location.NormalizeRegionCodes(ctx, province, city)
+	lookupCtx, cancel := context.WithTimeout(ctx, profileRegionLookupTimeout)
+	defer cancel()
+	normalizedProvince, normalizedCity, _, err := location.NormalizeRegionCodes(lookupCtx, province, city)
 	if err != nil {
 		g.Log().Warning(ctx, "资料地区编码转换失败，已降级保存原始资料", g.Map{
 			"provinceLength": len([]rune(province)),
@@ -371,6 +406,19 @@ func (s *sSysPublish) updateProfileStatus(ctx context.Context, in *sysin.Profile
 	if len(ids) == 0 {
 		return nil, gerror.New("资料不存在或无权操作")
 	}
+	op := profileOperationPublish
+	if in.Status == 2 {
+		op = profileOperationUnpublish
+	}
+	for _, profileID := range ids {
+		claimed, claimErr := claimProfileOperation(ctx, tenantId, profileID, op)
+		if claimErr != nil {
+			return nil, claimErr
+		}
+		if !claimed {
+			return nil, gerror.New("该资料操作正在处理中，请稍候刷新")
+		}
+	}
 	if in.Status == 1 {
 		if err = s.submitProfilesByIds(ctx, ids, tenantId, accountId); err != nil {
 			return nil, err
@@ -469,12 +517,16 @@ func (s *sSysPublish) createProfileFromInput(ctx context.Context, tx gdb.TX, in 
 	data[columns.AdminRemark] = in.CustomerRemark
 	var lastErr error
 	for i := 0; i < 1000; i++ {
+		numberStartedAt := time.Now()
 		profileNo, err := s.nextAccountProfileNo(ctx, tx, tenantId, accountId)
+		g.Log().Info(ctx, "资料保存阶段完成", g.Map{"trace": in.DiagnosticTraceId, "stage": "generate_profile_no", "elapsedMs": time.Since(numberStartedAt).Milliseconds(), "tenantId": tenantId, "accountId": accountId, "attempt": i + 1, "error": err})
 		if err != nil {
 			return 0, err
 		}
 		data[columns.ProfileNo] = profileNo
+		insertStartedAt := time.Now()
 		id, insertErr := tx.Model(dao.ContentProfile.Table()).Ctx(ctx).Data(data).InsertAndGetId()
+		g.Log().Info(ctx, "资料保存阶段完成", g.Map{"trace": in.DiagnosticTraceId, "stage": "insert_profile_row", "elapsedMs": time.Since(insertStartedAt).Milliseconds(), "tenantId": tenantId, "accountId": accountId, "attempt": i + 1, "error": insertErr})
 		if insertErr == nil {
 			return id, nil
 		}
