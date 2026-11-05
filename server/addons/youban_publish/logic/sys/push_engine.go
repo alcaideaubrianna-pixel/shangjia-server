@@ -13,6 +13,9 @@ import (
 
 const pushEngineCacheTTL = 5 * time.Minute
 
+// pushEngineFallbackCacheTTL 用于数据库字段暂不可用时抑制重复查询。
+const pushEngineFallbackCacheTTL = time.Minute
+
 // pushEngineCacheKey 返回账户推送引擎配置缓存键。
 func pushEngineCacheKey(tenantId, accountId int64) string {
 	return fmt.Sprintf("youban_publish:push_engine:%d:%d", tenantId, accountId)
@@ -48,6 +51,9 @@ func (s *sSysPublish) accountPushEngine(ctx context.Context, tenantId, accountId
 		Where("account_id", accountId).WhereNull("deleted_at").Scan(&row)
 	if err != nil {
 		// 迁移尚未执行或旧测试表没有新字段时，必须保持旧行为。
+		if cache.Initialized() {
+			_ = cache.Instance().Set(ctx, key, pushEngineLegacy, pushEngineFallbackCacheTTL)
+		}
 		return pushEngineLegacy
 	}
 	engine := strings.ToLower(strings.TrimSpace(row.PushEngine))
