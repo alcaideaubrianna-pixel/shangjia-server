@@ -26,7 +26,7 @@ func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
 	})
 	server := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
 		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.concurrency", 20).Int(),
-		Queues:         telegramPublishForegroundQueueWeights(ctx),
+		Queues:         telegramPublishForegroundQueueWeightsWithUnifiedLane(ctx),
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
 	bulkServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
@@ -36,7 +36,7 @@ func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
 	})
 	cleanupServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
 		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.cleanupConcurrency", 16).Int(),
-		Queues:         map[string]int{tgQueueNameCleanup: 1},
+		Queues:         map[string]int{tgQueueNameCleanup: 1, channelDispatchQueueDelete: 1},
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
 	g.Log().Infof(ctx, "启动上架插件TG推送队列，人工上架独立并发：%d", telegramPublishInteractiveConcurrency(ctx))

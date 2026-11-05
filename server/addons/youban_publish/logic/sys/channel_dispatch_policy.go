@@ -1,5 +1,7 @@
 package sys
 
+import "context"
+
 // channelDispatchQueueSend 是统一发送任务队列名称。
 const channelDispatchQueueSend = "youban_publish_push_send"
 
@@ -22,6 +24,13 @@ func channelDispatchQueueName(lane channelDispatchLane) string {
 		return channelDispatchQueueDelete
 	}
 	return channelDispatchQueueSend
+}
+
+// telegramPublishForegroundQueueWeightsWithUnifiedLane 在保留旧队列的同时注册统一发送队列。
+func telegramPublishForegroundQueueWeightsWithUnifiedLane(ctx context.Context) map[string]int {
+	queues := telegramPublishForegroundQueueWeights(ctx)
+	queues[channelDispatchQueueSend] = 1
+	return queues
 }
 
 // channelDispatchPriority 定义频道内任务优先级，数值越小越优先。
