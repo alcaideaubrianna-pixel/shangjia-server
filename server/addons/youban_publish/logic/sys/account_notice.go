@@ -278,3 +278,46 @@ func (s *sSysPublish) enqueueProfileOperationSuccessNotice(ctx context.Context, 
 		return gerror.Wrap(err, "保存资料完成通知失败")
 	})
 }
+
+func (s *sSysPublish) enqueueProfileUnpublishSuccessNotice(ctx context.Context, job telegramJobRecord) error {
+	if job.ProfileId <= 0 || job.TenantId <= 0 || job.AccountId <= 0 {
+		return nil
+	}
+	var remaining int
+	if err := g.DB().Model(publishTgMessageTable+" m").Safe().Ctx(ctx).
+		InnerJoin(publishTgJobTable+" j", "j.id=m.job_id").
+		Where("j.profile_id", job.ProfileId).Where("j.tenant_id", job.TenantId).
+		Where("m.status", "sent").WhereNull("m.deleted_at").Scan(&remaining); err != nil {
+		return err
+	}
+	if remaining > 0 {
+		return nil
+	}
+	state, err := g.DB().Model("hg_content_profile").Safe().Ctx(ctx).Fields("status,visibility").Where("id", job.ProfileId).WhereNull("deleted_at").One()
+	if err != nil || state.IsEmpty() || state["status"].Int() != 2 || state["visibility"].String() != "private" {
+		return err
+	}
+	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		ac := pdao.YoubanPublishAccount.Columns()
+		account, err := tx.Model(pdao.YoubanPublishAccount.Table()).Ctx(ctx).Where(ac.Id, job.AccountId).Where(ac.TenantId, job.TenantId).One()
+		if err != nil || account.IsEmpty() {
+			return err
+		}
+		receiver := job.AccountId
+		if account[ac.AccountType].String() != sysin.PublishAccountTypeAdmin {
+			receiver = account[ac.ParentId].Int64()
+		}
+		if receiver <= 0 {
+			return nil
+		}
+		profile, err := tx.Model("hg_content_profile").Ctx(ctx).Fields("profile_no,title").Where("id", job.ProfileId).One()
+		if err != nil || profile.IsEmpty() {
+			return err
+		}
+		key := fmt.Sprintf("profile-operation:%d:%d:unpublish-succeeded", job.TenantId, job.ProfileId)
+		notice := do.YoubanPublishAccountNotice{TenantId: job.TenantId, AccountId: receiver, Category: "profile_operation", EventKey: key,
+			TextContent: fmt.Sprintf("<b>资料下架完成</b>\n\n编号：<code>%s</code>\n标题：<code>%s</code>", html.EscapeString(profile["profile_no"].String()), html.EscapeString(profile["title"].String()))}
+		_, err = tx.Model(pdao.YoubanPublishAccountNotice.Table()).Ctx(ctx).Data(notice).OnConflict("event_key,account_id").OnDuplicate("event_key").Save()
+		return gerror.Wrap(err, "保存资料下架完成通知失败")
+	})
+}

@@ -30,7 +30,13 @@ func (s *sSysPublish) CleanupTelegramJobMessages(ctx context.Context, jobId int6
 	// Cleanup runs on its own queue and uses four Redis slots per channel. It does
 	// not take the publish channel lease, so publishing and cleanup do not block
 	// each other. The message query is status-aware (only `sent` rows are selected).
-	return s.deleteTelegramMessageSetLockedByChannel(ctx, job, "资料清理")
+	if err := s.deleteTelegramMessageSetLockedByChannel(ctx, job, "资料清理"); err != nil {
+		return err
+	}
+	if err := s.enqueueProfileUnpublishSuccessNotice(ctx, job); err != nil {
+		g.Log().Warningf(ctx, "保存资料下架完成通知失败 profileId:%d jobId:%d err:%+v", job.ProfileId, job.Id, err)
+	}
+	return nil
 }
 
 // Cleanup uses four Redis slots per channel. Different channels never contend
