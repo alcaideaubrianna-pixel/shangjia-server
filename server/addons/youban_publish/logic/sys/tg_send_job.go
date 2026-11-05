@@ -317,6 +317,15 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	if err != nil {
 		return err
 	}
+	if len(displayMedia) == 0 {
+		ready, checkErr := s.profileDisplayMediaReady(ctx, job.ProfileId)
+		if checkErr != nil {
+			return checkErr
+		}
+		if !ready {
+			return gerror.New("资料媒体还在处理中，请稍后再上架")
+		}
+	}
 	step = beginTelegramPublishStage(ctx, "prepare.verify_media")
 	verifyMedia, err := s.telegramJobMedia(ctx, job, "verify")
 	step.End(err, g.Map{"mediaCount": len(verifyMedia)})
@@ -555,6 +564,24 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	err = s.updateTelegramMediaFileIds(ctx, verifyMessages)
 	step.End(err)
 	return err
+}
+
+// profileDisplayMediaReady prevents a profile with declared media from being
+// silently downgraded to a text-only Telegram post while its media queue is
+// still writing rows or processing storage.
+func (s *sSysPublish) profileDisplayMediaReady(ctx context.Context, profileID int64) (bool, error) {
+	var profile struct {
+		ImageCount int `json:"image_count"`
+		VideoCount int `json:"video_count"`
+	}
+	if err := g.DB().Model("hg_content_profile").Safe().Ctx(ctx).
+		Fields("image_count,video_count").Where("id", profileID).WhereNull("deleted_at").Scan(&profile); err != nil {
+		return false, gerror.Wrap(err, "检查资料媒体状态失败")
+	}
+	if profile.ImageCount <= 0 && profile.VideoCount <= 0 {
+		return true, nil
+	}
+	return false, nil
 }
 
 func telegramVerifyMediaNeedsAccountUpload(media []*telegramMediaItem) bool {
