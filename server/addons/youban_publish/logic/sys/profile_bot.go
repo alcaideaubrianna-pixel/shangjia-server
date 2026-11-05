@@ -407,6 +407,11 @@ func (s *sSysPublish) BotProfileEdit(ctx context.Context, in *sysin.BotProfileEd
 	if err != nil {
 		return nil, err
 	}
+	if claimed, claimErr := claimProfileOperation(ctx, capability.TenantId, profileId, profileOperationEdit); claimErr != nil {
+		return nil, claimErr
+	} else if !claimed {
+		return nil, gerror.New("该资料编辑正在处理中，请稍候刷新")
+	}
 	current, err := s.profileView(ctx, profileId, capability.TenantId, accountScope)
 	if err != nil {
 		return nil, err

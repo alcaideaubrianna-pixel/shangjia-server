@@ -177,6 +177,15 @@ func (s *sSysPublish) BotProfileDelete(ctx context.Context, tenantId int64, acco
 	if err != nil {
 		return err
 	}
+	for _, profileID := range in.Ids {
+		claimed, claimErr := claimProfileOperation(ctx, tenantId, profileID, profileOperationUnpublishDelete)
+		if claimErr != nil {
+			return claimErr
+		}
+		if !claimed {
+			return gerror.New("该资料删除正在处理中，请稍候刷新")
+		}
+	}
 	return s.deleteProfilesByCapability(ctx, in, account)
 }
 
