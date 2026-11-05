@@ -2708,10 +2708,19 @@ func (s *sSysBot) scheduleProfileSessionTimeout(sessionId, botId int64, chatId s
 		<-timer.C
 		ctx := context.Background()
 		var row struct {
-			Step   string `json:"step"`
-			Status string `json:"status"`
+			Step      string `json:"step"`
+			Status    string `json:"status"`
+			ProfileId int64  `json:"profileId"`
+			Scene     string `json:"scene"`
 		}
-		if err := g.DB().Model(profileSessionTable).Safe().Ctx(ctx).Fields("step,status").Where("id", sessionId).Scan(&row); err != nil || row.Status != profileSessionStatusActive {
+		if err := g.DB().Model(profileSessionTable).Safe().Ctx(ctx).Fields("step,status,profile_id,scene").Where("id", sessionId).Scan(&row); err != nil || row.Status != profileSessionStatusActive {
+			return
+		}
+		// Profile persistence and Telegram publishing can finish after the
+		// session's inactivity timer. Once a profile is attached, this timer is
+		// stale and must not emit a misleading timeout notice.
+		if row.ProfileId > 0 {
+			g.Log().Infof(ctx, "忽略已创建资料的Bot会话超时 trace:PF-%d profileId:%d step:%s", sessionId, row.ProfileId, row.Step)
 			return
 		}
 		result, err := g.DB().Model(profileSessionTable).Safe().Ctx(ctx).
@@ -2728,7 +2737,11 @@ func (s *sSysBot) scheduleProfileSessionTimeout(sessionId, botId int64, chatId s
 			return
 		}
 		g.Log().Warningf(ctx, "Bot资料会话处理超时 trace:PF-%d step:%s", sessionId, row.Step)
-		_ = s.sendMessageOnly(ctx, botId, chatId, fmt.Sprintf("资料处理超时，请重新发送。\n处理编号：PF-%d", sessionId))
+		message := fmt.Sprintf("资料处理超时，请重新发送。\n处理编号：PF-%d", sessionId)
+		if row.Scene == "batch_create" {
+			message = "本次批量新增已结束（6分钟无新资料）。如需继续新增，请发送【下一份展示资料】。"
+		}
+		_ = s.sendMessageOnly(ctx, botId, chatId, message)
 	}()
 }
 
