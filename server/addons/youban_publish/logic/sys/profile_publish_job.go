@@ -72,6 +72,19 @@ func profilePublishPreparationError(channelCount int, jobIds []int64) error {
 }
 
 func (s *sSysPublish) submitProfilePublishWithMeta(ctx context.Context, profileId, tenantId, accountId, operatorId int64, operationNo string, channelIds []int64, requireOnline bool, meta telegramProfilePublishMeta) error {
+	if profileId > 0 {
+		ready, checkErr := s.profilePublishMediaReady(ctx, profileId)
+		if checkErr != nil {
+			return checkErr
+		}
+		if !ready {
+			_, _ = g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
+				Where("tenant_id", tenantId).Where("account_id", accountId).Where("profile_id", profileId).WhereNull("deleted_at").
+				Data(g.Map{"publish_task_status": "waiting_media", "publish_operation_no": strings.TrimSpace(operationNo), "publish_task_updated_at": gtime.Now()}).Update()
+			g.Log().Infof(ctx, "资料上架等待媒体完成 profileId:%d operationNo:%s", profileId, operationNo)
+			return nil
+		}
+	}
 	var jobIds []int64
 	var err error
 	if profileId <= 0 {
@@ -87,6 +100,18 @@ func (s *sSysPublish) submitProfilePublishWithMeta(ctx context.Context, profileI
 	}
 	s.enqueuePreparedProfileJobs(ctx, jobIds, operatorId)
 	return nil
+}
+
+func (s *sSysPublish) profilePublishMediaReady(ctx context.Context, profileID int64) (bool, error) {
+	var counts struct{ ImageCount, VideoCount int }
+	if err := g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).Fields("image_count,video_count").Where("id", profileID).Scan(&counts); err != nil {
+		return false, err
+	}
+	if counts.ImageCount+counts.VideoCount == 0 {
+		return true, nil
+	}
+	ready, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Where("profile_id", profileID).WhereNull("deleted_at").Where("processing_status", "ready").Count()
+	return ready >= counts.ImageCount+counts.VideoCount, err
 }
 
 // prepareProfilePublishJobs persists the publish intent while the profile

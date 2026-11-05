@@ -488,7 +488,17 @@ func (s *sSysPublish) BotProfilePersistMedia(ctx context.Context, tenantId, acco
 	if err != nil {
 		return err
 	}
-	return s.replaceBotProfileMedia(ctx, profileId, tenantId, accountId, displayMedia, verifyMedia)
+	if err = s.replaceBotProfileMedia(ctx, profileId, tenantId, accountId, displayMedia, verifyMedia); err != nil {
+		return err
+	}
+	state, stateErr := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).Fields("publish_task_status,publish_operation_no").Where("profile_id", profileId).WhereNull("deleted_at").One()
+	if stateErr != nil {
+		return stateErr
+	}
+	if state["publish_task_status"].String() == "waiting_media" {
+		return s.submitProfilePublish(ctx, profileId, tenantId, accountId, 0, state["publish_operation_no"].String(), nil, false)
+	}
+	return nil
 }
 
 func (s *sSysPublish) BotProfileCancelQueue(ctx context.Context, in *sysin.BotProfileQueueCancelInp) (res *sysin.BotProfileQueueCancelModel, err error) {
