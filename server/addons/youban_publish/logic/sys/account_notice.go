@@ -314,7 +314,7 @@ func (s *sSysPublish) enqueueProfileUnpublishSuccessNotice(ctx context.Context, 
 		if err != nil || profile.IsEmpty() {
 			return err
 		}
-		key := fmt.Sprintf("profile-operation:%d:%d:unpublish-succeeded", job.TenantId, job.ProfileId)
+		key := fmt.Sprintf("profile-operation:%d:%d:%s:unpublish-succeeded", job.TenantId, job.ProfileId, job.OperationNo)
 		notice := do.YoubanPublishAccountNotice{TenantId: job.TenantId, AccountId: receiver, Category: "profile_operation", EventKey: key,
 			TextContent: fmt.Sprintf("<b>资料下架完成</b>\n\n编号：<code>%s</code>\n标题：<code>%s</code>", html.EscapeString(profile["profile_no"].String()), html.EscapeString(profile["title"].String()))}
 		_, err = tx.Model(pdao.YoubanPublishAccountNotice.Table()).Ctx(ctx).Data(notice).OnConflict("event_key,account_id").OnDuplicate("event_key").Save()
