@@ -125,7 +125,7 @@ func (s *sSysPublish) handleTelegramAutoDelete(ctx context.Context, botId int64,
 		return
 	}
 	if err = s.enqueueTelegramAutoDelete(ctx, autoDeleteQueuePayload{
-		BotId: botId, TenantId: tenantId, ChannelId: channel.Id,
+		BotId: botId, TenantId: tenantId, AccountId: channel.TgAccountId, ChannelId: channel.Id,
 		ChatId: strconv.FormatInt(msg.Chat.ID, 10), MessageId: msg.ID, Keyword: keyword,
 	}); err != nil {
 		autoDeleteWarn(ctx, fmt.Sprintf("enqueue:%d:%d", channel.Id, msg.ID), "频道自动删除任务入队失败 channel:%d message:%d err:%+v", channel.Id, msg.ID, err)
