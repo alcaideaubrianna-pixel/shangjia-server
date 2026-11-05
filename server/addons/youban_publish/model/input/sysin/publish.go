@@ -230,6 +230,7 @@ type AccountSettingSaveInp struct {
 	SharedResourceEnabled    int    `json:"sharedResourceEnabled" dc:"是否允许上架账号管理租户共享资料"`
 	TelegramBindingEnabled   int    `json:"telegramBindingEnabled" dc:"是否允许上架账号绑定并使用Telegram"`
 	GroupPushEnabled         int    `json:"groupPushEnabled" dc:"是否允许上架账号使用群聊推送"`
+	PushEngine               string `json:"pushEngine" dc:"频道推送引擎：legacy/unified"`
 }
 
 func (in *AccountSettingSaveInp) Filter(ctx context.Context) error {
@@ -252,6 +253,13 @@ func (in *AccountSettingSaveInp) Filter(ctx context.Context) error {
 	}
 	if in.MarkPosition == "" {
 		in.MarkPosition = "top"
+	}
+	in.PushEngine = strings.TrimSpace(in.PushEngine)
+	if in.PushEngine == "" {
+		in.PushEngine = "legacy"
+	}
+	if in.PushEngine != "legacy" && in.PushEngine != "unified" {
+		return gerror.New("频道推送引擎不合法")
 	}
 	if in.MarkPosition != "top" && in.MarkPosition != "bottom" && in.MarkPosition != "feeLine" {
 		return gerror.New("标识显示位置不合法")
@@ -330,6 +338,7 @@ type AccountSettingModel struct {
 	SharedResourceEnabled    int         `json:"sharedResourceEnabled" dc:"是否允许管理租户共享资料"`
 	TelegramBindingEnabled   int         `json:"telegramBindingEnabled" dc:"是否允许绑定并使用Telegram"`
 	GroupPushEnabled         int         `json:"groupPushEnabled" dc:"是否允许使用群聊推送"`
+	PushEngine               string      `json:"pushEngine" dc:"频道推送引擎"`
 	DailyReportEnabled       int         `json:"dailyReportEnabled" dc:"是否接收每日报告"`
 	ChannelAlertEnabled      int         `json:"channelAlertEnabled" dc:"是否接收频道异常通知"`
 	AccountEventEnabled      int         `json:"accountEventEnabled" dc:"是否接收账户操作通知"`
