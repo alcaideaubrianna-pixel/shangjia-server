@@ -8,6 +8,7 @@ import (
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+	"hotgo/internal/library/cache"
 )
 
 type rankedProfileRow struct {
@@ -22,6 +23,16 @@ type preferredProvinceRow struct {
 func (s *sOpenAccess) RankedProfileIds(ctx context.Context, appId, actorId, feed string, limit int) ([]int64, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 500
+	}
+	cacheKey := "youban_open:ranked_profiles:" + appId + ":" + strings.TrimSpace(actorId) + ":" + strings.ToLower(strings.TrimSpace(feed))
+	if cached, cacheErr := cache.Instance().Get(ctx, cacheKey); cacheErr == nil && !cached.IsNil() {
+		var ids []int64
+		if cached.Scan(&ids) == nil {
+			if len(ids) > limit {
+				ids = ids[:limit]
+			}
+			return ids, nil
+		}
 	}
 	since := time.Now().AddDate(0, 0, -6).Format("2006-01-02")
 	provinces := []string{}
@@ -74,5 +85,6 @@ LIMIT 3`, appId, actorId)
 			ids = append(ids, row.ProfileId)
 		}
 	}
+	_ = cache.Instance().Set(ctx, cacheKey, ids, 15*time.Second)
 	return ids, nil
 }
