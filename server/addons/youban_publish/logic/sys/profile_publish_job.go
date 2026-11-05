@@ -78,10 +78,24 @@ func (s *sSysPublish) submitProfilePublishWithMeta(ctx context.Context, profileI
 			return checkErr
 		}
 		if !ready {
+			failedMediaCount, countErr := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+				Where("profile_id", profileId).WhereNull("deleted_at").
+				Where("processing_status", mediaProcessingFailed).Count()
+			if countErr != nil {
+				return gerror.Wrap(countErr, "检查资料媒体失败状态失败")
+			}
+			publishStatus := "waiting_media"
+			if failedMediaCount > 0 {
+				publishStatus = sysin.PublishTaskStatusFailed
+			}
 			_, _ = g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
 				Where("tenant_id", tenantId).Where("account_id", accountId).Where("profile_id", profileId).WhereNull("deleted_at").
-				Data(g.Map{"publish_task_status": "waiting_media", "publish_operation_no": strings.TrimSpace(operationNo), "publish_task_updated_at": gtime.Now()}).Update()
-			g.Log().Infof(ctx, "资料上架等待媒体完成 profileId:%d operationNo:%s", profileId, operationNo)
+				Data(g.Map{"publish_task_status": publishStatus, "publish_operation_no": strings.TrimSpace(operationNo), "publish_task_updated_at": gtime.Now()}).Update()
+			if failedMediaCount > 0 {
+				g.Log().Warningf(ctx, "资料上架因媒体失败停止等待 profileId:%d operationNo:%s failed_media:%d", profileId, operationNo, failedMediaCount)
+			} else {
+				g.Log().Infof(ctx, "资料上架等待媒体完成 profileId:%d operationNo:%s", profileId, operationNo)
+			}
 			return nil
 		}
 	}
