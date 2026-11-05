@@ -90,11 +90,17 @@ func TestProfileCardMarkupForNoteHidesEmptySourceURL(t *testing.T) {
 func TestProfileCardMarkupForNoteUsesPublishedStatus(t *testing.T) {
 	note := &publishsysin.NoteModel{ProfileModel: publishsysin.ProfileModel{ProfileNo: "M96589", Status: 1}}
 	markup := profileCardMarkupForNote(note, "view")
-	if markup == nil || len(markup.InlineKeyboard) < 2 || len(markup.InlineKeyboard[1]) == 0 {
+	if markup == nil || len(markup.InlineKeyboard) < 2 || len(markup.InlineKeyboard[0]) == 0 {
 		t.Fatalf("status buttons missing: %#v", markup)
 	}
-	if got := markup.InlineKeyboard[1][0].Text; got != "下架" {
+	if got := markup.InlineKeyboard[0][0].Text; got != "下架" {
 		t.Fatalf("published profile action = %q, want 下架", got)
+	}
+	if got := markup.InlineKeyboard[0][1].Text; got != "预览" {
+		t.Fatalf("published profile preview = %q, want 预览", got)
+	}
+	if got := markup.InlineKeyboard[1][0].Text; got != "编辑" {
+		t.Fatalf("published profile edit = %q, want 编辑", got)
 	}
 }
 

@@ -1951,7 +1951,11 @@ func profileCardMarkupForNote(note *publishsysin.NoteModel, purpose string) *mod
 			statusLabel = "下架"
 		}
 		if len(markup.InlineKeyboard) >= 2 {
-			markup.InlineKeyboard[1] = []models.InlineKeyboardButton{{Text: statusLabel, CallbackData: statusAction + profileNo}, {Text: "删除", CallbackData: "pf:del:" + profileNo}}
+			// Keep preview/edit/list actions intact; only the first action toggles
+			// with the persisted publication status.
+			if len(markup.InlineKeyboard[0]) > 0 {
+				markup.InlineKeyboard[0][0] = models.InlineKeyboardButton{Text: statusLabel, CallbackData: statusAction + profileNo}
+			}
 		}
 	}
 	url := strings.TrimSpace(note.CollectSourceUrl)
