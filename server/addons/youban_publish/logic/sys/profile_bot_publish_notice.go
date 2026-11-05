@@ -72,7 +72,25 @@ func (s *sSysPublish) submitBotProfilesWithNotice(ctx context.Context, ids []int
 				return nil, claimErr
 			}
 			if !claimed {
-				return nil, gerror.New("该资料上架正在处理中，请稍候刷新")
+				// A process can die after acquiring the short Redis guard but
+				// before creating a durable Telegram job. Do not make the user
+				// wait for that stale guard when PostgreSQL proves there is no
+				// active media/publish work for this profile.
+				stale, staleErr := s.profileOperationClaimHasNoActiveWork(ctx, profileId)
+				if staleErr != nil {
+					return nil, staleErr
+				}
+				if !stale {
+					return nil, gerror.New("该资料上架正在处理中，请稍候刷新")
+				}
+				releaseProfileOperationClaim(ctx, capability.TenantId, profileId)
+				claimed, claimErr = claimProfileOperation(ctx, capability.TenantId, profileId, profileOperationPublish)
+				if claimErr != nil {
+					return nil, claimErr
+				}
+				if !claimed {
+					return nil, gerror.New("该资料上架正在处理中，请稍候刷新")
+				}
 			}
 			operationNo := newBotProfilePublishOperationNo(botId, chatId, profileId)
 			if err = s.submitProfilePublish(ctx, profileId, capability.TenantId, group.AccountId, capability.AccountId, operationNo, nil, false); err != nil {
@@ -88,6 +106,31 @@ func (s *sSysPublish) submitBotProfilesWithNotice(ctx context.Context, ids []int
 	}
 	service.SysContent().ClearHomeProfileCardsCache(ctx)
 	return &sysin.ProfileStatusModel{Message: "资料已提交上架"}, nil
+}
+
+func (s *sSysPublish) profileOperationClaimHasNoActiveWork(ctx context.Context, profileID int64) (bool, error) {
+	if profileID <= 0 {
+		return false, nil
+	}
+	state, err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
+		Fields("publish_task_status").Where("profile_id", profileID).WhereNull("deleted_at").One()
+	if err != nil {
+		return false, err
+	}
+	if !state.IsEmpty() {
+		switch state["publish_task_status"].String() {
+		case "waiting_media", "publishing", "sending", "retry_wait", "unknown":
+			return false, nil
+		}
+	}
+	active, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("profile_id", profileID).
+		WhereIn("status", []string{telegramJobStatusPending, telegramJobStatusSending, telegramJobStatusRetryWait, "unknown"}).
+		Count()
+	if err != nil {
+		return false, err
+	}
+	return active == 0, nil
 }
 
 func (s *sSysPublish) notifyBotProfilePublishCompleted(ctx context.Context, job telegramJobRecord) error {
