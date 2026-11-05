@@ -488,7 +488,7 @@ func (s *sSysBot) handleProfileCallback(ctx context.Context, botId int64, query 
 			return true, nil
 		}
 		channelID, _ := strconv.ParseInt(parts[3], 10, 64)
-		return true, s.toggleProfileChannelSelection(ctx, botId, chatId, account, no, channelID)
+		return true, s.toggleProfileChannelSelection(ctx, botId, chatId, account, no, channelID, int64(query.Message.Message.ID))
 	case "chconfirm":
 		return true, s.confirmProfileChannelSelection(ctx, botId, chatId, account, no)
 	case "editback":
@@ -3920,6 +3920,10 @@ func (s *sSysBot) showProfileEditMenu(ctx context.Context, botId int64, chatId s
 }
 
 func (s *sSysBot) showProfileChannelEditMenu(ctx context.Context, botId int64, chatId string, account *botProfileAccount, no string) error {
+	return s.showProfileChannelEditMenuMessage(ctx, botId, chatId, account, no, 0)
+}
+
+func (s *sSysBot) showProfileChannelEditMenuMessage(ctx context.Context, botId int64, chatId string, account *botProfileAccount, no string, messageID int64) error {
 	note, err := publishService.SysPublish().BotProfileView(ctx, botProfileViewInput(account, no))
 	if err != nil {
 		return s.replyBotError(ctx, botId, chatId, "上架频道编辑", err)
@@ -3954,7 +3958,21 @@ func (s *sSysBot) showProfileChannelEditMenu(ctx context.Context, botId int64, c
 		return err
 	}
 	text := fmt.Sprintf("<b>上架频道编辑</b>\n\n编号：<code>%s</code>\n标题：%s\n\n请选择要推送的频道：\n点击频道切换选中状态，✅ 表示已选中。", html.EscapeString(note.ProfileNo), html.EscapeString(note.Title))
-	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, text, "HTML", false, &models.InlineKeyboardMarkup{InlineKeyboard: buttons})
+	markup := &models.InlineKeyboardMarkup{InlineKeyboard: buttons}
+	if messageID <= 0 {
+		_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, text, "HTML", false, markup)
+		return err
+	}
+	bot, err := s.telegramBot(ctx, row.BotToken)
+	if err != nil {
+		return err
+	}
+	callCtx, cancel := telegramAPICtx()
+	defer cancel()
+	_, err = bot.EditMessageText(callCtx, &tgbot.EditMessageTextParams{
+		ChatID: chatId, MessageID: int(messageID), Text: text,
+		ParseMode: models.ParseModeHTML, ReplyMarkup: markup,
+	})
 	return err
 }
 
@@ -3962,13 +3980,13 @@ func profileChannelEditKey(accountID int64, no string) string {
 	return fmt.Sprintf("youban_bot:profile_channels:%d:%s", accountID, strings.ToUpper(strings.TrimSpace(no)))
 }
 
-func (s *sSysBot) toggleProfileChannelSelection(ctx context.Context, botID int64, chatID string, account *botProfileAccount, no string, channelID int64) error {
+func (s *sSysBot) toggleProfileChannelSelection(ctx context.Context, botID int64, chatID string, account *botProfileAccount, no string, channelID int64, messageID int64) error {
 	if channelID <= 0 {
 		return nil
 	}
 	value, err := cache.Instance().Get(ctx, profileChannelEditKey(account.AccountId, no))
 	if err != nil || value.IsNil() {
-		return s.showProfileChannelEditMenu(ctx, botID, chatID, account, no)
+		return s.showProfileChannelEditMenuMessage(ctx, botID, chatID, account, no, messageID)
 	}
 	var ids []int64
 	if value.Scan(&ids) != nil {
@@ -3976,7 +3994,7 @@ func (s *sSysBot) toggleProfileChannelSelection(ctx context.Context, botID int64
 	}
 	result := toggleProfileChannelID(ids, channelID)
 	_ = cache.Instance().Set(ctx, profileChannelEditKey(account.AccountId, no), result, 10*time.Minute)
-	return s.showProfileChannelEditMenu(ctx, botID, chatID, account, no)
+	return s.showProfileChannelEditMenuMessage(ctx, botID, chatID, account, no, messageID)
 }
 
 func toggleProfileChannelID(ids []int64, channelID int64) []int64 {
