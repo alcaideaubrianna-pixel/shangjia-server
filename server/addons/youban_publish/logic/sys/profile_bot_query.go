@@ -185,6 +185,10 @@ func (s *sSysPublish) BotProfileDelete(ctx context.Context, tenantId int64, acco
 		if !claimed {
 			return gerror.New("该资料删除正在处理中，请稍候刷新")
 		}
+		// The durable delete jobs carry their own idempotency key. Release the
+		// request guard once they have been enqueued so a retry or status query
+		// is not blocked by the short Redis TTL.
+		defer releaseProfileOperationClaim(ctx, tenantId, profileID)
 	}
 	return s.deleteProfilesByCapability(ctx, in, account)
 }

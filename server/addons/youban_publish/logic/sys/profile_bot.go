@@ -412,6 +412,7 @@ func (s *sSysPublish) BotProfileEdit(ctx context.Context, in *sysin.BotProfileEd
 	} else if !claimed {
 		return nil, gerror.New("该资料编辑正在处理中，请稍候刷新")
 	}
+	defer releaseProfileOperationClaim(ctx, capability.TenantId, profileId)
 	current, err := s.profileView(ctx, profileId, capability.TenantId, accountScope)
 	if err != nil {
 		return nil, err
