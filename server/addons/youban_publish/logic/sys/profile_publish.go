@@ -29,6 +29,14 @@ func (s *sSysPublish) MyProfilePublish(ctx context.Context, in *sysin.ProfileVie
 		return err
 	}
 	group := groups[0]
+	claimed, err := claimProfileOperation(ctx, account.TenantId, group.Ids[0], profileOperationPublish)
+	if err != nil {
+		return err
+	}
+	if !claimed {
+		return gerror.New("该资料上架正在处理中，请稍候刷新")
+	}
+	defer releaseProfileOperationClaim(ctx, account.TenantId, group.Ids[0])
 	return s.submitProfilePublish(ctx, group.Ids[0], account.TenantId, group.AccountId, contexts.GetUserId(ctx), "", nil, false)
 }
 
@@ -47,6 +55,14 @@ func (s *sSysPublish) AdminProfilePublish(ctx context.Context, in *sysin.AdminPr
 	if view == nil || view.Profile == nil {
 		return gerror.New("资料不存在或无权操作")
 	}
+	claimed, err := claimProfileOperation(ctx, view.Profile.TenantId, view.Profile.Id, profileOperationPublish)
+	if err != nil {
+		return err
+	}
+	if !claimed {
+		return gerror.New("该资料上架正在处理中，请稍候刷新")
+	}
+	defer releaseProfileOperationClaim(ctx, view.Profile.TenantId, view.Profile.Id)
 	operationNo, err := adminBatchTextOperationNo(account.Id, in.BatchId, view.Profile.Id)
 	if err != nil {
 		return err

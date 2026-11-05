@@ -67,11 +67,21 @@ func (s *sSysPublish) submitBotProfilesWithNotice(ctx context.Context, ids []int
 	}
 	for _, group := range groups {
 		for _, profileId := range uniqueIds(group.Ids) {
+			claimed, claimErr := claimProfileOperation(ctx, capability.TenantId, profileId, profileOperationPublish)
+			if claimErr != nil {
+				return nil, claimErr
+			}
+			if !claimed {
+				return nil, gerror.New("该资料上架正在处理中，请稍候刷新")
+			}
 			operationNo := newBotProfilePublishOperationNo(botId, chatId, profileId)
 			if err = s.submitProfilePublish(ctx, profileId, capability.TenantId, group.AccountId, capability.AccountId, operationNo, nil, false); err != nil {
+				releaseProfileOperationClaim(ctx, capability.TenantId, profileId)
 				return nil, err
 			}
+			releaseProfileOperationClaim(ctx, capability.TenantId, profileId)
 			if err = s.syncProfileNoteIndex(ctx, profileId); err != nil {
+				releaseProfileOperationClaim(ctx, capability.TenantId, profileId)
 				return nil, err
 			}
 		}
