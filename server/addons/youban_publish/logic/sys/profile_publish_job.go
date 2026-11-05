@@ -88,9 +88,11 @@ func (s *sSysPublish) submitProfilePublishWithMeta(ctx context.Context, profileI
 			if failedMediaCount > 0 {
 				publishStatus = sysin.PublishTaskStatusFailed
 			}
-			_, _ = g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
+			if _, updateErr := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
 				Where("tenant_id", tenantId).Where("account_id", accountId).Where("profile_id", profileId).WhereNull("deleted_at").
-				Data(g.Map{"publish_task_status": publishStatus, "publish_operation_no": strings.TrimSpace(operationNo), "publish_task_updated_at": gtime.Now()}).Update()
+				Data(g.Map{"publish_task_status": publishStatus, "publish_operation_no": strings.TrimSpace(operationNo), "publish_task_updated_at": gtime.Now()}).Update(); updateErr != nil {
+				return gerror.Wrap(updateErr, "记录资料媒体等待状态失败")
+			}
 			if failedMediaCount > 0 {
 				g.Log().Warningf(ctx, "资料上架因媒体失败停止等待 profileId:%d operationNo:%s failed_media:%d", profileId, operationNo, failedMediaCount)
 			} else {
