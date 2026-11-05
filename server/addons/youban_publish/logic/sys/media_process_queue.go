@@ -12,6 +12,8 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/hibiken/asynq"
+
+	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
 const (
@@ -182,7 +184,7 @@ func (s *sSysPublish) wakeProfileTelegramJobs(ctx context.Context, profileId int
 			if _, err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
 				Where("profile_id", profileId).WhereNull("deleted_at").
 				Where("publish_task_status", "waiting_media").Data(g.Map{
-				"publish_task_status":     "failed",
+				"publish_task_status":     sysin.PublishTaskStatusFailed,
 				"publish_task_updated_at": gtime.Now(),
 			}).Update(); err != nil {
 				return gerror.Wrap(err, "记录媒体失败导致的上架失败状态失败")
