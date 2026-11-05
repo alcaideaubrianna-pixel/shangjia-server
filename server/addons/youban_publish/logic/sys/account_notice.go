@@ -283,12 +283,12 @@ func (s *sSysPublish) enqueueProfileUnpublishSuccessNotice(ctx context.Context, 
 	if job.ProfileId <= 0 || job.TenantId <= 0 || job.AccountId <= 0 {
 		return nil
 	}
-	var remaining int
-	if err := g.DB().Model(publishTgMessageTable+" m").Safe().Ctx(ctx).
+	remaining, err := g.DB().Model(publishTgMessageTable+" m").Safe().Ctx(ctx).
 		InnerJoin(publishTgJobTable+" j", "j.id=m.job_id").
 		Where("j.profile_id", job.ProfileId).Where("j.tenant_id", job.TenantId).
-		Where("m.status", "sent").WhereNull("m.deleted_at").Scan(&remaining); err != nil {
-		return err
+		Where("m.status", "sent").WhereNull("m.deleted_at").Count()
+	if err != nil {
+		return gerror.Wrap(err, "统计资料待清理TG消息失败")
 	}
 	if remaining > 0 {
 		return nil
