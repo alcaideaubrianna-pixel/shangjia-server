@@ -149,6 +149,10 @@ func TestFormatProfileChannelActionNotice(t *testing.T) {
 	if !strings.Contains(deleted, "[频道 9] <b>已删除</b>") {
 		t.Fatalf("delete fallback channel missing: %s", deleted)
 	}
+	queued := formatProfileChannelActionNotice("A10006", "删除标题", nil, "已提交删除")
+	if strings.Contains(queued, "完成") || !strings.Contains(queued, "<b>资料已提交删除</b>") {
+		t.Fatalf("queued lifecycle notice reported completion: %s", queued)
+	}
 }
 
 func hasProfileSourceButton(markup *models.InlineKeyboardMarkup, url string) bool {
