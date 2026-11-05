@@ -37,11 +37,9 @@ func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
 	cleanupServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
 		Concurrency: g.Cfg().MustGet(ctx, "youbanPublish.queue.cleanupConcurrency", 16).Int(),
 		Queues: map[string]int{
-			tgQueueNameCleanup:                1,
-			channelDispatchQueueDelete:        1,
-			channelDispatchQueueDeleteManual:  1,
-			channelDispatchQueueDeleteKeyword: 1,
-			channelDispatchQueueDeleteCycle:   1,
+			tgQueueNameCleanup:               1,
+			channelDispatchQueueDelete:       1,
+			channelDispatchQueueDeleteManual: 1,
 		},
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
@@ -125,8 +123,12 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 		return
 	}
 	autoDeleteServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
-		Concurrency:    telegramAutoDeleteConcurrency(ctx),
-		Queues:         map[string]int{tgQueueNameAutoDeleteRealtime: 1},
+		Concurrency: telegramAutoDeleteConcurrency(ctx),
+		Queues: map[string]int{
+			tgQueueNameAutoDeleteRealtime:     1,
+			channelDispatchQueueDeleteKeyword: 1,
+			channelDispatchQueueDeleteCycle:   1,
+		},
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
 	autoDeleteBackfillServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
