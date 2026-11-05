@@ -20,6 +20,8 @@ type preferredProvinceRow struct {
 	Province string `json:"province"`
 }
 
+const rankedProfileCacheTTL = 60 * time.Second
+
 func (s *sOpenAccess) RankedProfileIds(ctx context.Context, appId, actorId, feed string, limit int) ([]int64, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 500
@@ -85,6 +87,6 @@ LIMIT 3`, appId, actorId)
 			ids = append(ids, row.ProfileId)
 		}
 	}
-	_ = cache.Instance().Set(ctx, cacheKey, ids, 15*time.Second)
+	_ = cache.Instance().Set(ctx, cacheKey, ids, rankedProfileCacheTTL)
 	return ids, nil
 }
