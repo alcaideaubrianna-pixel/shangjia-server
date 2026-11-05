@@ -3041,13 +3041,9 @@ func (s *sSysBot) sendProfileCreateSuccess(ctx context.Context, botId int64, cha
 	markup := &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{{{Text: "返回资料管理", CallbackData: "pf:menu"}}}}
 	if profileNo != "" {
 		text = fmt.Sprintf("创建成功！\n资料编号：<code>%s</code>\n资料ID：<code>%d</code>\n\n新资料默认下架，确认无误后可直接上架。", html.EscapeString(profileNo), res.Id)
-		// The save response does not include the persisted status. Reload the
-		// note so the action button matches the status shown in the card; using
-		// the generic view markup here could show “上架” for an already-online
-		// profile and hide the required “下架” action.
-		if note, viewErr := publishService.SysPublish().BotProfileView(ctx, &publishsysin.BotProfileViewInp{TenantId: 0, AccountId: 0, ProfileNo: profileNo}); viewErr == nil && note != nil {
-			markup = profileCardMarkupForNote(note, "view")
-		}
+		// Save notifications do not perform a second service lookup. The
+		// authoritative status-aware card is rendered by sendProfileCard.
+		markup = profileCardMarkup(profileNo, "view")
 	} else {
 		text += "\n\n新资料默认下架，可在笔记列表中查看。"
 	}
