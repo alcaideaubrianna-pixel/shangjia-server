@@ -236,3 +236,45 @@ func (s *sSysPublish) enqueueProfileFailureNoticeTx(ctx context.Context, tx gdb.
 	_, err = tx.Model(pdao.YoubanPublishAccountNotice.Table()).Ctx(ctx).Data(notice).OnConflict("event_key,account_id").OnDuplicate("event_key").Save()
 	return gerror.Wrap(err, "保存任务失败通知失败")
 }
+
+// enqueueProfileOperationSuccessNotice persists the terminal result before
+// returning from the Telegram worker. Delivery is handled by the existing
+// account-notice worker, so a Telegram/API outage cannot make the operation
+// appear failed or cause a duplicate synchronous message.
+func (s *sSysPublish) enqueueProfileOperationSuccessNotice(ctx context.Context, job telegramJobRecord) error {
+	if job.TenantId <= 0 || job.AccountId <= 0 || job.ProfileId <= 0 || strings.TrimSpace(job.OperationNo) == "" {
+		return nil
+	}
+	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		ac := pdao.YoubanPublishAccount.Columns()
+		account, err := tx.Model(pdao.YoubanPublishAccount.Table()).Ctx(ctx).
+			Where(ac.Id, job.AccountId).Where(ac.TenantId, job.TenantId).One()
+		if err != nil || account.IsEmpty() {
+			return err
+		}
+		receiver := job.AccountId
+		if account[ac.AccountType].String() != sysin.PublishAccountTypeAdmin {
+			receiver = account[ac.ParentId].Int64()
+		}
+		if receiver <= 0 {
+			return nil
+		}
+		profile, err := tx.Model("hg_content_profile").Ctx(ctx).Fields("profile_no,title").Where("id", job.ProfileId).One()
+		if err != nil || profile.IsEmpty() {
+			return err
+		}
+		digest := sha256.Sum256([]byte(job.OperationNo))
+		kind := "上架"
+		if strings.HasPrefix(job.OperationNo, "edit:") {
+			kind = "编辑"
+		}
+		notice := do.YoubanPublishAccountNotice{
+			TenantId: job.TenantId, AccountId: receiver, Category: "profile_operation",
+			EventKey:    fmt.Sprintf("profile-operation:%d:%s:succeeded:%x", job.ProfileId, kind, digest[:16]),
+			TextContent: fmt.Sprintf("<b>资料%s完成</b>\n\n编号：<code>%s</code>\n标题：<code>%s</code>", kind, html.EscapeString(profile["profile_no"].String()), html.EscapeString(profile["title"].String())),
+		}
+		_, err = tx.Model(pdao.YoubanPublishAccountNotice.Table()).Ctx(ctx).Data(notice).
+			OnConflict("event_key,account_id").OnDuplicate("event_key").Save()
+		return gerror.Wrap(err, "保存资料完成通知失败")
+	})
+}
