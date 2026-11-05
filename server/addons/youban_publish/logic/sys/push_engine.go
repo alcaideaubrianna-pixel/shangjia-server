@@ -2,10 +2,21 @@ package sys
 
 import (
 	"context"
+	"fmt"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
+
+	"hotgo/internal/library/cache"
 )
+
+const pushEngineCacheTTL = 5 * time.Minute
+
+// pushEngineCacheKey 返回账户推送引擎配置缓存键。
+func pushEngineCacheKey(tenantId, accountId int64) string {
+	return fmt.Sprintf("youban_publish:push_engine:%d:%d", tenantId, accountId)
+}
 
 const (
 	// pushEngineLegacy 保持现网调度实现。
@@ -19,6 +30,16 @@ func (s *sSysPublish) accountPushEngine(ctx context.Context, tenantId, accountId
 	if tenantId <= 0 || accountId <= 0 {
 		return pushEngineLegacy
 	}
+	key := pushEngineCacheKey(tenantId, accountId)
+	if cache.Initialized() {
+		if value, err := cache.Instance().Get(ctx, key); err == nil && !value.IsNil() {
+			engine := strings.ToLower(strings.TrimSpace(value.String()))
+			if engine == pushEngineUnified {
+				return engine
+			}
+			return pushEngineLegacy
+		}
+	}
 	var row struct {
 		PushEngine string `orm:"push_engine"`
 	}
@@ -31,9 +52,23 @@ func (s *sSysPublish) accountPushEngine(ctx context.Context, tenantId, accountId
 	}
 	engine := strings.ToLower(strings.TrimSpace(row.PushEngine))
 	if engine != pushEngineUnified {
+		if cache.Initialized() {
+			_ = cache.Instance().Set(ctx, key, pushEngineLegacy, pushEngineCacheTTL)
+		}
 		return pushEngineLegacy
 	}
+	if cache.Initialized() {
+		_ = cache.Instance().Set(ctx, key, engine, pushEngineCacheTTL)
+	}
 	return engine
+}
+
+// clearPushEngineCache 清理账户推送引擎缓存，使灰度配置即时生效。
+func clearPushEngineCache(ctx context.Context, tenantId, accountId int64) {
+	if tenantId <= 0 || accountId <= 0 || !cache.Initialized() {
+		return
+	}
+	_, _ = cache.Instance().Remove(ctx, pushEngineCacheKey(tenantId, accountId))
 }
 
 // unifiedPushEngineEnabled 判断账户是否启用了统一推送引擎。

@@ -256,6 +256,7 @@ func (s *sSysPublish) saveAccountSetting(ctx context.Context, tenantId int64, op
 	if err != nil {
 		return gerror.Wrap(err, "保存账号推送设置失败")
 	}
+	clearPushEngineCache(ctx, tenantId, in.AccountId)
 	saved, err := s.accountSetting(ctx, tenantId, in.AccountId)
 	if err != nil {
 		return err
