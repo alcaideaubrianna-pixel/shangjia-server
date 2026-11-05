@@ -28,6 +28,13 @@ func (s *sSysPublish) cacheBotMessage(ctx context.Context, tenantId, botId int64
 	if chatType != "private" && chatType != "channel" && chatType != "group" && chatType != "supergroup" {
 		return nil
 	}
+	// Telegram updates produced by incomplete/placeholder sources can carry a
+	// valid numeric chat ID but no usable channel metadata (title="0", empty
+	// username). Do not turn that payload into a canonical directory row.
+	if chatType != "private" && (strings.TrimSpace(msg.Chat.Title) == "" || strings.TrimSpace(msg.Chat.Title) == "0") && strings.TrimSpace(msg.Chat.Username) == "" {
+		g.Log().Warningf(ctx, "跳过无效Telegram频道缓存 bot:%d chat:%d title:%q", botId, msg.Chat.ID, msg.Chat.Title)
+		return nil
+	}
 	chatId := normalizeTelegramChannelChatID(g.NewVar(msg.Chat.ID).String())
 	title := strings.TrimSpace(msg.Chat.Title)
 	if title == "" {
