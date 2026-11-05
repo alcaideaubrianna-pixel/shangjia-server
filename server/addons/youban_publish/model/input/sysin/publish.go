@@ -1111,6 +1111,9 @@ type BotProfileEditInp struct {
 	DisplayMedia []*MessageTemplateMediaInp `json:"displayMedia" dc:"展示媒体"`
 	VerifyText   string                     `json:"verifyText" dc:"验证正文"`
 	VerifyMedia  []*MessageTemplateMediaInp `json:"verifyMedia" dc:"验证媒体"`
+	// ChannelIds is optional: nil keeps the current channel mapping, while an
+	// explicit empty slice clears it.
+	ChannelIds []int64 `json:"channelIds" dc:"上架频道ID列表"`
 }
 
 // BotProfileQueueCancelInp cancels pending publish jobs for profiles.

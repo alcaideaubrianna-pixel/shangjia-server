@@ -29,6 +29,7 @@ import (
 	publishService "hotgo/addons/youban_publish/service"
 	"hotgo/internal/library/cache"
 	hglock "hotgo/internal/library/hgrds/lock"
+	"hotgo/internal/model/input/form"
 	"hotgo/utility/scantrace"
 	"hotgo/utility/telegramerror"
 )
@@ -480,6 +481,8 @@ func (s *sSysBot) handleProfileCallback(ctx context.Context, botId int64, query 
 		return true, s.startProfileSessionByIds(ctx, botId, fmt.Sprintf("%d", query.From.ID), chatId, account, "edit_text", "waiting_text", 0, no, nil, "请输入新的正文：")
 	case "edno":
 		return true, s.startProfileSessionByIds(ctx, botId, fmt.Sprintf("%d", query.From.ID), chatId, account, "edit_no", "waiting_no", 0, no, nil, "请输入新的编号，格式如 A00001：")
+	case "channels":
+		return true, s.showProfileChannelEditMenu(ctx, botId, chatId, account, no)
 	case "replace":
 		if err = s.startProfileSessionByIds(ctx, botId, fmt.Sprintf("%d", query.From.ID), chatId, account, "replace", "waiting_display", 0, no, nil, ""); err != nil {
 			return true, err
@@ -3917,9 +3920,45 @@ func (s *sSysBot) showProfileEditMenu(ctx context.Context, botId int64, chatId s
 	markup := &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
 		{{Text: "编辑标题", CallbackData: "pf:edtitle:" + note.ProfileNo}, {Text: "编辑正文", CallbackData: "pf:edtext:" + note.ProfileNo}},
 		{{Text: "编辑编号", CallbackData: "pf:edno:" + note.ProfileNo}, {Text: "重新覆盖资料", CallbackData: "pf:replace:" + note.ProfileNo}},
+		{{Text: "上架频道编辑", CallbackData: "pf:channels:" + note.ProfileNo}},
 		{{Text: "返回", CallbackData: "pf:backview:" + note.ProfileNo}},
 	}}
 	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, text, "HTML", false, markup)
+	return err
+}
+
+func (s *sSysBot) showProfileChannelEditMenu(ctx context.Context, botId int64, chatId string, account *botProfileAccount, no string) error {
+	note, err := publishService.SysPublish().BotProfileView(ctx, botProfileViewInput(account, no))
+	if err != nil {
+		return s.replyBotError(ctx, botId, chatId, "上架频道编辑", err)
+	}
+	channels, _, err := publishService.SysPublish().BotChannelList(ctx, &publishsysin.ChannelListInp{PageReq: form.PageReq{Page: 1, PerPage: 100}, TenantId: account.TenantId, PublishDirection: "up", Status: 1})
+	if err != nil {
+		return s.replyBotError(ctx, botId, chatId, "上架频道编辑", err)
+	}
+	selected := make(map[int64]bool, len(note.ChannelIds))
+	for _, id := range note.ChannelIds {
+		selected[id] = true
+	}
+	buttons := make([][]models.InlineKeyboardButton, 0, len(channels)+2)
+	for _, channel := range channels {
+		if channel == nil || channel.Id <= 0 {
+			continue
+		}
+		mark := "❌"
+		if selected[channel.Id] {
+			mark = "✅"
+		}
+		buttons = append(buttons, []models.InlineKeyboardButton{{Text: mark + " " + shortButtonText(channel.ChannelTitle, 24), CallbackData: fmt.Sprintf("pf:ch:%s:%d", strings.ToUpper(no), channel.Id)}})
+	}
+	buttons = append(buttons, []models.InlineKeyboardButton{{Text: "确认选择", CallbackData: "pf:chconfirm:" + strings.ToUpper(no)}})
+	buttons = append(buttons, []models.InlineKeyboardButton{{Text: "返回", CallbackData: "pf:editback:" + strings.ToUpper(no)}})
+	row, err := s.botById(ctx, botId)
+	if err != nil {
+		return err
+	}
+	text := fmt.Sprintf("<b>上架频道编辑</b>\n\n编号：<code>%s</code>\n标题：%s\n\n请选择要推送的频道：\n点击频道切换选中状态，✅ 表示已选中。", html.EscapeString(note.ProfileNo), html.EscapeString(note.Title))
+	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, text, "HTML", false, &models.InlineKeyboardMarkup{InlineKeyboard: buttons})
 	return err
 }
 

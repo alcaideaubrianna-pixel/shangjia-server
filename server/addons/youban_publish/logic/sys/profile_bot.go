@@ -419,6 +419,12 @@ func (s *sSysPublish) BotProfileEdit(ctx context.Context, in *sysin.BotProfileEd
 	if err != nil {
 		return nil, err
 	}
+	if in.ChannelIds != nil {
+		channelIds, err = s.availableProfileChannelIds(ctx, in.ChannelIds, capability.TenantId)
+		if err != nil {
+			return nil, err
+		}
+	}
 	operationNo := newTelegramOperationNo("edit", profileId)
 	republish, err := s.preparePublishedProfileEdit(ctx, profileId, capability.TenantId, ownerAccountId, operationNo)
 	if err != nil {
