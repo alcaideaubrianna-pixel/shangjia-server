@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/hibiken/asynq"
@@ -153,6 +154,27 @@ func mediaProcessFailureStatus(ctx context.Context, err error, retryCount int) s
 func (s *sSysPublish) wakeProfileTelegramJobs(ctx context.Context, profileId int64) error {
 	if profileId <= 0 {
 		return nil
+	}
+	// A Bot user may request publication before asynchronous media processing
+	// finishes. In that case submitProfilePublish records only a waiting_media
+	// intent and no Telegram job exists yet. Re-submit the same durable intent
+	// after every media completion; submitProfilePublish re-checks readiness and
+	// creates jobs exactly once when the final media item becomes ready.
+	var waiting struct {
+		TenantId      int64  `json:"tenantId"`
+		AccountId     int64  `json:"accountId"`
+		OperationNo   string `json:"operationNo"`
+		PublishStatus string `json:"publishStatus"`
+	}
+	if err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
+		Fields("tenant_id,account_id,publish_operation_no,publish_task_status").
+		Where("profile_id", profileId).WhereNull("deleted_at").Scan(&waiting); err != nil {
+		return err
+	}
+	if waiting.PublishStatus == "waiting_media" && strings.TrimSpace(waiting.OperationNo) != "" {
+		if err := s.submitProfilePublish(ctx, profileId, waiting.TenantId, waiting.AccountId, 0, waiting.OperationNo, nil, false); err != nil {
+			return gerror.Wrap(err, "媒体就绪后恢复资料上架失败")
+		}
 	}
 	var jobs []struct {
 		Id int64 `json:"id"`
