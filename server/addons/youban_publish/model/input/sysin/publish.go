@@ -1885,6 +1885,9 @@ func relayChannelInputOwner(tenantID, accountID, botID int64) error {
 	if tenantID <= 0 || accountID <= 0 {
 		return gerror.New("请选择租户和协议账号")
 	}
+	if botID <= 0 {
+		return gerror.New("请选择机器人")
+	}
 	return nil
 }
 func (in *RelayChannelCreateInp) Filter(ctx context.Context) error {
