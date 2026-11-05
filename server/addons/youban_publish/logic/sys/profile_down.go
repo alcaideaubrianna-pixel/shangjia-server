@@ -238,7 +238,7 @@ func (s *sSysPublish) createDownChannelTelegramJob(ctx context.Context, job tele
 		"target_chat_id":  job.TargetChatId,
 		"status":          "sending",
 		"priority":        tgJobPriorityUrgent,
-		"queue_name":      tgQueueNameUrgent,
+		"queue_name":      tgQueueNameCleanup,
 		"dispatch_status": tgDispatchStatusProcessing,
 		"dispatched_at":   now,
 		"dispatch_count":  1,

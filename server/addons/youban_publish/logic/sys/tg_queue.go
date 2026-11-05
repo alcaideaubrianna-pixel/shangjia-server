@@ -624,7 +624,10 @@ func (s *sSysPublish) enqueueProfileDownRun(ctx context.Context, tenantId int64,
 	}
 	task := asynq.NewTask(tgTaskTypeDown, payload)
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameUrgent),
+		// Profile down runs perform Telegram cleanup and must not wait behind
+		// interactive publish jobs sharing the urgent queue. The publish worker
+		// already owns a dedicated cleanup server with independent concurrency.
+		asynq.Queue(tgQueueNameCleanup),
 		asynq.MaxRetry(10),
 		asynq.Timeout(30 * time.Minute),
 		asynq.Unique(30 * time.Second),
@@ -634,15 +637,15 @@ func (s *sSysPublish) enqueueProfileDownRun(ctx context.Context, tenantId int64,
 	}
 	info, err := client.EnqueueContext(ctx, task, options...)
 	if errors.Is(err, asynq.ErrDuplicateTask) {
-		g.Log().Infof(ctx, "资料下架任务已存在，跳过重复入队 tenantId:%d profileIds:%v queue:%s", tenantId, profileIds, tgQueueNameUrgent)
+		g.Log().Infof(ctx, "资料下架任务已存在，跳过重复入队 tenantId:%d profileIds:%v queue:%s", tenantId, profileIds, tgQueueNameCleanup)
 		return nil
 	}
 	if err != nil {
-		g.Log().Errorf(ctx, "资料下架任务入队失败 tenantId:%d profileIds:%v queue:%s err:%+v", tenantId, profileIds, tgQueueNameUrgent, err)
+		g.Log().Errorf(ctx, "资料下架任务入队失败 tenantId:%d profileIds:%v queue:%s err:%+v", tenantId, profileIds, tgQueueNameCleanup, err)
 		return err
 	}
 	if info != nil {
-		g.Log().Infof(ctx, "资料下架任务入队成功 tenantId:%d profileIds:%v queue:%s taskId:%s", tenantId, profileIds, tgQueueNameUrgent, info.ID)
+		g.Log().Infof(ctx, "资料下架任务入队成功 tenantId:%d profileIds:%v queue:%s taskId:%s", tenantId, profileIds, tgQueueNameCleanup, info.ID)
 	}
 	return err
 }
