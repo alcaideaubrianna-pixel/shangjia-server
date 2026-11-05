@@ -29,7 +29,8 @@ const (
 const profileOperationClaimTTL = 2 * time.Minute
 
 func profileOperationClaimKey(tenantID, profileID int64, operation profileOperationType) string {
-	return fmt.Sprintf("youban_publish:profile_operation:claim:%d:%d:%s", tenantID, profileID, strings.TrimSpace(string(operation)))
+	_ = operation
+	return fmt.Sprintf("youban_publish:profile_operation:lock:%d:%d", tenantID, profileID)
 }
 
 // claimProfileOperation prevents duplicate Bot/Web clicks from creating
