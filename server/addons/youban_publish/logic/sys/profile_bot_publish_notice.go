@@ -11,6 +11,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/gogf/gf/v2/util/gconv"
 
 	botsysin "hotgo/addons/youban_bot/model/input/sysin"
 	botservice "hotgo/addons/youban_bot/service"
@@ -35,6 +36,7 @@ type botProfilePublishNoticeTarget struct {
 }
 
 type botProfilePublishNoticeRow struct {
+	JobId           int64  `json:"jobId"`
 	ChannelTitle    string `json:"channelTitle"`
 	ChannelUsername string `json:"channelUsername"`
 	TargetChatId    string `json:"targetChatId"`
@@ -98,10 +100,26 @@ func (s *sSysPublish) notifyBotProfilePublishCompleted(ctx context.Context, job 
 	var channels []botProfilePublishNoticeRow
 	if err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
 		LeftJoin(publishChannelTable+" c", "c.id=j.channel_id").
-		Fields("COALESCE(NULLIF(c.channel_title,''),j.target_chat_id) AS channel_title,c.channel_username,j.target_chat_id,COALESCE(j.tg_message_id,(SELECT MIN(m.tg_message_id) FROM "+publishTgMessageTable+" m WHERE m.job_id=j.id AND m.purpose='display' AND m.status='sent' AND m.deleted_at IS NULL)) AS tg_message_id,j.status").
+		Fields("j.id AS job_id,COALESCE(NULLIF(c.channel_title,''),j.target_chat_id) AS channel_title,c.channel_username,j.target_chat_id,j.tg_message_id,j.status").
 		Where("j.profile_id", job.ProfileId).Where("j.operation_no", job.OperationNo).
 		OrderAsc("j.channel_id").Scan(&channels); err != nil {
 		return gerror.Wrap(err, "读取Bot上架通知频道失败")
+	}
+	// The message ID is persisted in the message table for media groups; do
+	// not rely on a correlated subquery in the ORM projection because some
+	// production drivers return the job column's zero value for that expression.
+	for i := range channels {
+		if channels[i].TgMessageId > 0 {
+			continue
+		}
+		value, err := g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).
+			Where("job_id", channels[i].JobId).
+			Where("purpose", "display").Where("status", "sent").WhereNull("deleted_at").
+			OrderAsc("tg_message_id").Value("tg_message_id")
+		if err != nil {
+			return gerror.Wrap(err, "读取Bot上架通知展示消息失败")
+		}
+		channels[i].TgMessageId = gconv.Int64(value)
 	}
 	text := formatBotProfilePublishNotice(profile.ProfileNo, profile.Title, profile.CreatedAt, channels)
 	return botservice.SysBot().Notify(ctx, &botsysin.NotifyInp{

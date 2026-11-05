@@ -346,6 +346,23 @@ func saveTelegramSentMessagesTx(ctx context.Context, tx gdb.TX, job telegramJobR
 	if err != nil {
 		return gerror.Wrap(err, "保存TG消息记录失败")
 	}
+	// Keep the job-level pointer aligned with the first display message.  The
+	// detail table remains the source of truth for media groups, while this
+	// denormalized value lets completion notices build links without a join.
+	var displayMessageID int64
+	for _, item := range messages {
+		if item != nil && item.Purpose == "display" && item.MessageId > 0 &&
+			(displayMessageID == 0 || item.MessageId < displayMessageID) {
+			displayMessageID = item.MessageId
+		}
+	}
+	if displayMessageID > 0 {
+		if _, err = tx.Model(publishTgJobTable).Where("id", job.Id).
+			Where("tg_message_id", 0).
+			Data(g.Map{"tg_message_id": displayMessageID, "updated_at": gtime.Now()}).Update(); err != nil {
+			return gerror.Wrap(err, "更新TG任务展示消息ID失败")
+		}
+	}
 	return nil
 }
 
