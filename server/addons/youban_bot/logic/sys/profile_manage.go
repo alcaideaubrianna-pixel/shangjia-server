@@ -3988,8 +3988,17 @@ func (s *sSysBot) toggleProfileChannelSelection(ctx context.Context, botID int64
 	if value.Scan(&ids) != nil {
 		ids = nil
 	}
-	found := false
+	result := toggleProfileChannelID(ids, channelID)
+	_ = cache.Instance().Set(ctx, profileChannelEditKey(account.AccountId, no), result, 10*time.Minute)
+	return s.showProfileChannelEditMenu(ctx, botID, chatID, account, no)
+}
+
+func toggleProfileChannelID(ids []int64, channelID int64) []int64 {
+	if channelID <= 0 {
+		return append([]int64(nil), ids...)
+	}
 	result := make([]int64, 0, len(ids)+1)
+	found := false
 	for _, id := range ids {
 		if id == channelID {
 			found = true
@@ -4000,8 +4009,7 @@ func (s *sSysBot) toggleProfileChannelSelection(ctx context.Context, botID int64
 	if !found {
 		result = append(result, channelID)
 	}
-	_ = cache.Instance().Set(ctx, profileChannelEditKey(account.AccountId, no), result, 10*time.Minute)
-	return s.showProfileChannelEditMenu(ctx, botID, chatID, account, no)
+	return result
 }
 
 func (s *sSysBot) confirmProfileChannelSelection(ctx context.Context, botID int64, chatID string, account *botProfileAccount, no string) error {

@@ -1,6 +1,7 @@
 package sys
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -101,6 +102,17 @@ func TestProfileCardMarkupForNoteUsesPublishedStatus(t *testing.T) {
 	}
 	if got := markup.InlineKeyboard[1][0].Text; got != "编辑" {
 		t.Fatalf("published profile edit = %q, want 编辑", got)
+	}
+}
+
+func TestToggleProfileChannelID(t *testing.T) {
+	selected := toggleProfileChannelID([]int64{1, 2}, 3)
+	if !reflect.DeepEqual(selected, []int64{1, 2, 3}) {
+		t.Fatalf("select result = %v", selected)
+	}
+	selected = toggleProfileChannelID(selected, 2)
+	if !reflect.DeepEqual(selected, []int64{1, 3}) {
+		t.Fatalf("deselect result = %v", selected)
 	}
 }
 
