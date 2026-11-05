@@ -1030,3 +1030,8 @@ ALTER TABLE `hg_youban_publish_collect_dispatch` ADD COLUMN IF NOT EXISTS `worke
 ALTER TABLE `hg_youban_publish_collect_dispatch` ADD COLUMN IF NOT EXISTS `worker_image_digest` varchar(255) NOT NULL DEFAULT '';
 ALTER TABLE `hg_youban_publish_media` ADD COLUMN IF NOT EXISTS `tg_file_unique_id` varchar(255) NOT NULL DEFAULT '' COMMENT 'Telegram稳定文件ID';
 ALTER TABLE `hg_youban_publish_media` ADD INDEX IF NOT EXISTS `idx_ybp_media_tg_unique` (`account_id`,`media_type`,`tg_file_unique_id`,`id`);
+
+-- Query acceleration for collect log pagination and dashboard counters.
+CREATE INDEX IF NOT EXISTS idx_ybp_collect_event_log_owner_event ON hg_youban_publish_collect_event_log (tenant_id, account_id, created_at DESC, event_id, id);
+CREATE INDEX IF NOT EXISTS idx_ybp_collect_source_stats ON hg_youban_publish_collect_source (tenant_id, account_id, collect_enabled, status) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_ybp_collect_event_owner_status ON hg_youban_publish_collect_event (tenant_id, account_id, status, id);
