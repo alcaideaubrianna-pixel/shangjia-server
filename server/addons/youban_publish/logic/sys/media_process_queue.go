@@ -191,7 +191,10 @@ func (s *sSysPublish) wakeProfileTelegramJobs(ctx context.Context, profileId int
 			return nil
 		}
 		if err := s.submitProfilePublish(ctx, profileId, waiting.TenantId, waiting.AccountId, 0, waiting.OperationNo, nil, false); err != nil {
-			return gerror.Wrap(err, "媒体就绪后恢复资料上架失败")
+			// Media processing has already succeeded. A publication error (for
+			// example, no eligible channel or a permission pause) must not turn
+			// the successful media task into a retryable failure.
+			g.Log().Warningf(ctx, "媒体就绪后恢复资料上架失败 profileId:%d operationNo:%s err:%+v", profileId, waiting.OperationNo, err)
 		}
 	}
 	var jobs []struct {
