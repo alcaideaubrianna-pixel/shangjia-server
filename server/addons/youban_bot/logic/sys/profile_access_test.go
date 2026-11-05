@@ -87,6 +87,17 @@ func TestProfileCardMarkupForNoteHidesEmptySourceURL(t *testing.T) {
 	}
 }
 
+func TestProfileCardMarkupForNoteUsesPublishedStatus(t *testing.T) {
+	note := &publishsysin.NoteModel{ProfileModel: publishsysin.ProfileModel{ProfileNo: "M96589", Status: 1}}
+	markup := profileCardMarkupForNote(note, "view")
+	if markup == nil || len(markup.InlineKeyboard) < 2 || len(markup.InlineKeyboard[1]) == 0 {
+		t.Fatalf("status buttons missing: %#v", markup)
+	}
+	if got := markup.InlineKeyboard[1][0].Text; got != "下架" {
+		t.Fatalf("published profile action = %q, want 下架", got)
+	}
+}
+
 func TestProfileEditSuccessMarkupReusesPublishCallback(t *testing.T) {
 	markup := profileEditSuccessMarkup("a10005")
 	if markup == nil || len(markup.InlineKeyboard) == 0 || len(markup.InlineKeyboard[0]) < 2 {

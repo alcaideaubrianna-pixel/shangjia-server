@@ -1950,8 +1950,8 @@ func profileCardMarkupForNote(note *publishsysin.NoteModel, purpose string) *mod
 			statusAction = "pf:down:"
 			statusLabel = "下架"
 		}
-		if len(markup.InlineKeyboard) >= 3 {
-			markup.InlineKeyboard[2] = []models.InlineKeyboardButton{{Text: statusLabel, CallbackData: statusAction + profileNo}, {Text: "删除", CallbackData: "pf:del:" + profileNo}}
+		if len(markup.InlineKeyboard) >= 2 {
+			markup.InlineKeyboard[1] = []models.InlineKeyboardButton{{Text: statusLabel, CallbackData: statusAction + profileNo}, {Text: "删除", CallbackData: "pf:del:" + profileNo}}
 		}
 	}
 	url := strings.TrimSpace(note.CollectSourceUrl)
