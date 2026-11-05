@@ -6,6 +6,24 @@ const channelDispatchQueueSend = "youban_publish_push_send"
 // channelDispatchQueueDelete 是独立删除任务队列名称。
 const channelDispatchQueueDelete = "youban_publish_push_delete"
 
+// channelDispatchLane 表示任务所属的执行通道。
+type channelDispatchLane uint8
+
+const (
+	// channelDispatchLaneSend 表示消息发送通道。
+	channelDispatchLaneSend channelDispatchLane = iota
+	// channelDispatchLaneDelete 表示消息删除通道。
+	channelDispatchLaneDelete
+)
+
+// channelDispatchQueueName 返回统一调度通道对应的 Asynq 队列名称。
+func channelDispatchQueueName(lane channelDispatchLane) string {
+	if lane == channelDispatchLaneDelete {
+		return channelDispatchQueueDelete
+	}
+	return channelDispatchQueueSend
+}
+
 // channelDispatchPriority 定义频道内任务优先级，数值越小越优先。
 type channelDispatchPriority int
 
