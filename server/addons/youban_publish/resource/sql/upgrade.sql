@@ -1035,3 +1035,14 @@ ALTER TABLE `hg_youban_publish_media` ADD INDEX IF NOT EXISTS `idx_ybp_media_tg_
 CREATE INDEX IF NOT EXISTS idx_ybp_collect_event_log_owner_event ON hg_youban_publish_collect_event_log (tenant_id, account_id, created_at DESC, event_id, id);
 CREATE INDEX IF NOT EXISTS idx_ybp_collect_source_stats ON hg_youban_publish_collect_source (tenant_id, account_id, collect_enabled, status) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_ybp_collect_event_owner_status ON hg_youban_publish_collect_event (tenant_id, account_id, status, id);
+
+-- Historical channel counters filter TG jobs by owner and source chat.  The
+-- previous profile-first index forced a broad scan of this table and was the
+-- source of the three-second request timeout on large accounts.
+CREATE INDEX IF NOT EXISTS idx_ybp_tg_job_collect_history
+  ON hg_youban_publish_tg_job (tenant_id, account_id, collect_source_chat_id, rule_id, profile_id);
+CREATE INDEX IF NOT EXISTS idx_ybp_collect_dispatch_history
+  ON hg_youban_publish_collect_dispatch (tenant_id, account_id, rule_id, source_chat_id_snapshot, profile_id, event_id);
+CREATE INDEX IF NOT EXISTS idx_ybp_profile_origin_collect_history
+  ON hg_youban_publish_profile_origin (tenant_id, account_id, chat_id, profile_id)
+  WHERE origin_kind = 'collect';
