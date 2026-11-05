@@ -21,8 +21,8 @@ const (
 	telegramOutboxLeaseTTL      = 30 * time.Second
 	telegramOutboxQueryTimeout  = 5 * time.Second
 	telegramOutboxWorkers       = 32
-	telegramOutboxBatchLimit    = 1000
-	telegramOutboxMaxBatchLimit = 2000
+	telegramOutboxBatchLimit    = 5000
+	telegramOutboxMaxBatchLimit = 10000
 
 	telegramOutboxDecisionWait     = "wait"
 	telegramOutboxDecisionDispatch = "dispatch"
