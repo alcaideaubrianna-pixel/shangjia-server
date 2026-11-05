@@ -2261,3 +2261,23 @@ ALTER TABLE `hg_youban_publish_collect_dispatch` ADD COLUMN IF NOT EXISTS `worke
 ALTER TABLE `hg_youban_publish_collect_dispatch` ADD COLUMN IF NOT EXISTS `worker_instance_id` varchar(128) NOT NULL DEFAULT '';
 ALTER TABLE `hg_youban_publish_collect_dispatch` ADD COLUMN IF NOT EXISTS `worker_revision` varchar(128) NOT NULL DEFAULT '';
 ALTER TABLE `hg_youban_publish_collect_dispatch` ADD COLUMN IF NOT EXISTS `worker_image_digest` varchar(255) NOT NULL DEFAULT '';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_profile_media_operation` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `tenant_id` bigint NOT NULL,
+  `account_id` bigint NOT NULL,
+  `profile_no` varchar(128) NOT NULL,
+  `operation_no` varchar(256) NOT NULL,
+  `status` varchar(32) NOT NULL DEFAULT 'pending',
+  `payload_json` longtext NOT NULL,
+  `trace_id` varchar(128) NOT NULL DEFAULT '',
+  `retry_count` int NOT NULL DEFAULT 0,
+  `error_message` text NOT NULL,
+  `started_at` datetime NULL,
+  `finished_at` datetime NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_profile_media_operation_profile_operation` (`tenant_id`,`account_id`,`profile_no`,`operation_no`),
+  KEY `idx_ybp_profile_media_operation_recovery` (`status`,`updated_at`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

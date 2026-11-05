@@ -1342,3 +1342,23 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_task_execution" (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_task_execution_attempt" ON "hg_youban_publish_task_execution" ("item_id","attempt_no");
 CREATE INDEX IF NOT EXISTS "idx_ybp_task_execution_lease" ON "hg_youban_publish_task_execution" ("status","lease_until","id");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_profile_media_operation" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL,
+  "account_id" bigint NOT NULL,
+  "profile_no" varchar(128) NOT NULL,
+  "operation_no" varchar(256) NOT NULL,
+  "status" varchar(32) NOT NULL DEFAULT 'pending',
+  "payload_json" text NOT NULL DEFAULT '{}',
+  "trace_id" varchar(128) NOT NULL DEFAULT '',
+  "retry_count" integer NOT NULL DEFAULT 0,
+  "error_message" text NOT NULL DEFAULT '',
+  "started_at" timestamp NULL,
+  "finished_at" timestamp NULL,
+  "created_at" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updated_at" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+DROP INDEX IF EXISTS "uk_ybp_profile_media_operation_profile";
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_profile_media_operation_profile_operation" ON "hg_youban_publish_profile_media_operation" ("tenant_id","account_id","profile_no","operation_no");
+CREATE INDEX IF NOT EXISTS "idx_ybp_profile_media_operation_recovery" ON "hg_youban_publish_profile_media_operation" ("status","updated_at","id");

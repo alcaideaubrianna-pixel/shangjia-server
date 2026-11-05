@@ -2873,7 +2873,9 @@ func (s *sSysBot) consumeProfileCreatePart(ctx context.Context, botId int64, cha
 				g.Log().Errorf(ctx, "Bot资料收尾阶段失败 trace:%s stage:complete_session elapsed_ms:%d err:%s", trace, time.Since(stageStartedAt).Milliseconds(), sensitive.Diagnostic(err.Error()))
 				return err
 			}
-			s.asyncPersistProfileMedia(account, note.Id, session.ProfileNo, draft.DisplayText, draft.VerifyText, pendingDisplayMedia, pendingVerifyMedia, trace)
+			if err = publishService.SysPublish().BotProfileQueueMedia(ctx, account.TenantId, account.AccountId, session.ProfileNo, pendingDisplayMedia, pendingVerifyMedia, trace); err != nil {
+				g.Log().Warningf(ctx, "Bot资料媒体任务入队失败 trace:%s profile_id:%d err:%s", trace, note.Id, sensitive.Diagnostic(err.Error()))
+			}
 			g.Log().Infof(ctx, "Bot资料收尾阶段完成 trace:%s stage:complete_session elapsed_ms:%d", trace, time.Since(stageStartedAt).Milliseconds())
 			if err = s.sendProfileEditSuccess(ctx, botId, chatId, note, "资料已重新覆盖"); err != nil {
 				return err
@@ -2899,7 +2901,9 @@ func (s *sSysBot) consumeProfileCreatePart(ctx context.Context, botId int64, cha
 			return s.sendProfileCreateStepPrompt(ctx, botId, chatId, "waiting_verify")
 		}
 		g.Log().Infof(ctx, "Bot资料收尾阶段完成 trace:%s stage:create_profile elapsed_ms:%d profile_id:%d", trace, time.Since(stageStartedAt).Milliseconds(), res.Id)
-		s.asyncPersistProfileMedia(account, res.Id, res.ProfileNo, draft.DisplayText, draft.VerifyText, pendingDisplayMedia, pendingVerifyMedia, trace)
+		if err = publishService.SysPublish().BotProfileQueueMedia(ctx, account.TenantId, account.AccountId, res.ProfileNo, pendingDisplayMedia, pendingVerifyMedia, trace); err != nil {
+			g.Log().Warningf(ctx, "Bot资料媒体任务入队失败 trace:%s profile_id:%d err:%s", trace, res.Id, sensitive.Diagnostic(err.Error()))
+		}
 		draft.CreatedProfileId = res.Id
 		if persistErr := s.updateProfileSession(ctx, session.Id, "saving", draft); persistErr != nil {
 			g.Log().Errorf(ctx, "Bot资料收尾阶段失败 trace:%s stage:save_created_profile_id err:%s profile_id:%d", trace, sensitive.Diagnostic(persistErr.Error()), res.Id)
@@ -2954,48 +2958,19 @@ func (s *sSysBot) sendProfileCreateSuccessWithRetry(botId int64, chatId string, 
 	}
 }
 
-// asyncPersistProfileMedia keeps Telegram/OSS latency out of the BOT update
-// transaction. The profile text is already durable; media can be retried by
-// the worker without making users wait or exhausting request DB connections.
-func (s *sSysBot) asyncPersistProfileMedia(account *botProfileAccount, profileID int64, profileNo, displayText, verifyText string, displayMedia, verifyMedia []*publishsysin.MessageTemplateMediaInp, trace string) {
-	if account == nil || profileID <= 0 || (len(displayMedia) == 0 && len(verifyMedia) == 0) {
-		return
+// BotProcessProfileMedia is called by the durable publish worker. Keeping the
+// Telegram/OSS implementation here preserves the existing reuse logic while
+// removing request-scoped goroutines from the Bot update path.
+func (s *sSysBot) BotProcessProfileMedia(ctx context.Context, tenantId, accountId int64, profileNo string, displayMedia, verifyMedia []*publishsysin.MessageTemplateMediaInp) error {
+	persistedDisplay, err := s.persistTelegramMedia(ctx, accountId, displayMedia)
+	if err != nil {
+		return err
 	}
-	go func() {
-		var err error
-		for attempt := 1; attempt <= 3; attempt++ {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			startedAt := time.Now()
-			g.Log().Infof(ctx, "Bot资料异步媒体处理开始 trace:%s profile_id:%d attempt:%d display_count:%d verify_count:%d", trace, profileID, attempt, len(displayMedia), len(verifyMedia))
-			stageStartedAt := time.Now()
-			persistedDisplay, persistErr := s.persistTelegramMedia(ctx, account.AccountId, displayMedia)
-			err = persistErr
-			g.Log().Infof(ctx, "Bot资料异步媒体处理阶段 trace:%s profile_id:%d stage:persist_display input_count:%d output_count:%d elapsed_ms:%d err:%v", trace, profileID, len(displayMedia), len(persistedDisplay), time.Since(stageStartedAt).Milliseconds(), err)
-			if err == nil {
-				var persistedVerify []*publishsysin.MessageTemplateMediaInp
-				stageStartedAt = time.Now()
-				persistedVerify, err = s.persistTelegramMedia(ctx, account.AccountId, verifyMedia)
-				g.Log().Infof(ctx, "Bot资料异步媒体处理阶段 trace:%s profile_id:%d stage:persist_verify input_count:%d output_count:%d elapsed_ms:%d err:%v", trace, profileID, len(verifyMedia), len(persistedVerify), time.Since(stageStartedAt).Milliseconds(), err)
-				if err == nil {
-					stageStartedAt = time.Now()
-					err = publishService.SysPublish().BotProfilePersistMedia(ctx, account.TenantId, account.AccountId, profileNo, persistedDisplay, persistedVerify)
-					g.Log().Infof(ctx, "Bot资料异步媒体处理阶段 trace:%s profile_id:%d stage:media_commit display_count:%d verify_count:%d elapsed_ms:%d err:%v", trace, profileID, len(persistedDisplay), len(persistedVerify), time.Since(stageStartedAt).Milliseconds(), err)
-				}
-			}
-			cancel()
-			if err == nil {
-				return
-			}
-			g.Log().Warningf(context.Background(), "Bot资料异步媒体处理重试 trace:%s profile_id:%d attempt:%d elapsed_ms:%d err:%s", trace, profileID, attempt, time.Since(startedAt).Milliseconds(), sensitive.Diagnostic(err.Error()))
-			if attempt < 3 {
-				time.Sleep(time.Duration(attempt) * time.Second)
-			}
-		}
-		if err != nil {
-			g.Log().Warningf(context.Background(), "Bot资料异步媒体处理失败 trace:%s profile_id:%d err:%s", trace, profileID, sensitive.Diagnostic(err.Error()))
-			return
-		}
-	}()
+	persistedVerify, err := s.persistTelegramMedia(ctx, accountId, verifyMedia)
+	if err != nil {
+		return err
+	}
+	return publishService.SysPublish().BotProfilePersistMedia(ctx, tenantId, accountId, profileNo, persistedDisplay, persistedVerify)
 }
 
 func (s *sSysBot) scheduleVerifyPrompt(sessionId, botId int64, chatId string) {

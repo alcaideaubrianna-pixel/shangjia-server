@@ -1,0 +1,146 @@
+package sys
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/hibiken/asynq"
+	botservice "hotgo/addons/youban_bot/service"
+	"hotgo/addons/youban_publish/model/input/sysin"
+)
+
+const profileMediaOperationTable = "hg_youban_publish_profile_media_operation"
+const tgTaskTypeProfileMedia = "youban_publish:profile:media_process"
+
+type profileMediaOperationPayload struct {
+	OperationId int64 `json:"operationId"`
+}
+
+type profileMediaOperationInput struct {
+	TenantId     int64                            `json:"tenantId"`
+	AccountId    int64                            `json:"accountId"`
+	ProfileNo    string                           `json:"profileNo"`
+	DisplayMedia []*sysin.MessageTemplateMediaInp `json:"displayMedia"`
+	VerifyMedia  []*sysin.MessageTemplateMediaInp `json:"verifyMedia"`
+	TraceId      string                           `json:"traceId,omitempty"`
+}
+
+// BotProfileQueueMedia durably records the raw Telegram media payload before
+// enqueueing work. The Bot request can safely return even if the worker role is
+// temporarily unavailable; the recovery scan can enqueue pending rows later.
+func (s *sSysPublish) BotProfileQueueMedia(ctx context.Context, tenantId, accountId int64, profileNo string, displayMedia, verifyMedia []*sysin.MessageTemplateMediaInp, traceId string) error {
+	if tenantId <= 0 || accountId <= 0 || strings.TrimSpace(profileNo) == "" {
+		return gerror.New("资料媒体任务参数不完整")
+	}
+	if len(displayMedia) == 0 && len(verifyMedia) == 0 {
+		return nil
+	}
+	payload, err := json.Marshal(profileMediaOperationInput{TenantId: tenantId, AccountId: accountId, ProfileNo: profileNo, DisplayMedia: displayMedia, VerifyMedia: verifyMedia, TraceId: traceId})
+	if err != nil {
+		return gerror.Wrap(err, "编码资料媒体任务失败")
+	}
+	operationNo := fmt.Sprintf("media:%d:%s:%s", accountId, profileNo, strings.TrimSpace(traceId))
+	if strings.HasSuffix(operationNo, ":") {
+		operationNo = fmt.Sprintf("%s:%d", operationNo, time.Now().UnixNano())
+	}
+	result, err := g.DB().Model(profileMediaOperationTable).Ctx(ctx).Data(g.Map{
+		"tenant_id": tenantId, "account_id": accountId, "profile_no": profileNo,
+		"operation_no": operationNo, "status": "pending", "payload_json": string(payload),
+		"trace_id": traceId, "retry_count": 0,
+	}).OnConflict("tenant_id,account_id,profile_no,operation_no").OnDuplicate("payload_json,status,error_message,trace_id,retry_count,updated_at").Save()
+	if err != nil {
+		return gerror.Wrap(err, "保存资料媒体任务失败")
+	}
+	operationId, err := result.LastInsertId()
+	if err != nil || operationId <= 0 {
+		row, queryErr := g.DB().Model(profileMediaOperationTable).Ctx(ctx).Fields("id").Where("tenant_id", tenantId).Where("account_id", accountId).Where("profile_no", profileNo).Where("operation_no", operationNo).One()
+		if queryErr != nil {
+			return gerror.Wrap(err, "读取资料媒体任务失败")
+		}
+		operationId = row["id"].Int64()
+	}
+	return s.enqueueProfileMediaOperation(ctx, operationId)
+}
+
+func (s *sSysPublish) enqueueProfileMediaOperation(ctx context.Context, operationId int64) error {
+	client, err := s.telegramQueueClient(ctx)
+	if err != nil {
+		return err
+	}
+	body, err := json.Marshal(profileMediaOperationPayload{OperationId: operationId})
+	if err != nil {
+		return err
+	}
+	_, err = client.EnqueueContext(ctx, asynq.NewTask(tgTaskTypeProfileMedia, body), asynq.Queue(tgQueueNameBackground), asynq.MaxRetry(7), asynq.Timeout(10*time.Minute), asynq.TaskID(fmt.Sprintf("profile-media:%d", operationId)))
+	return err
+}
+
+func (s *sSysPublish) handleProfileMediaTask(ctx context.Context, task *asynq.Task) error {
+	var payload profileMediaOperationPayload
+	if err := json.Unmarshal(task.Payload(), &payload); err != nil || payload.OperationId <= 0 {
+		return gerror.New("资料媒体任务参数无效")
+	}
+	var row struct {
+		Id          int64  `json:"id"`
+		Status      string `json:"status"`
+		PayloadJson string `json:"payload_json"`
+		RetryCount  int    `json:"retry_count"`
+	}
+	if err := g.DB().Model(profileMediaOperationTable).Ctx(ctx).Where("id", payload.OperationId).Scan(&row); err != nil {
+		return err
+	}
+	if row.Id == 0 || row.Status == "success" {
+		return nil
+	}
+	var input profileMediaOperationInput
+	if err := json.Unmarshal([]byte(row.PayloadJson), &input); err != nil {
+		return gerror.Wrap(err, "解析资料媒体任务失败")
+	}
+	_, err := g.DB().Model(profileMediaOperationTable).Ctx(ctx).Where("id", payload.OperationId).WhereIn("status", []string{"pending", "processing"}).Data(g.Map{"status": "processing", "started_at": time.Now(), "retry_count": row.RetryCount + 1}).Update()
+	if err != nil {
+		return err
+	}
+	if err = botservice.SysBot().BotProcessProfileMedia(ctx, input.TenantId, input.AccountId, input.ProfileNo, input.DisplayMedia, input.VerifyMedia); err != nil {
+		_, _ = g.DB().Model(profileMediaOperationTable).Ctx(ctx).Where("id", payload.OperationId).Data(g.Map{"status": "pending", "error_message": err.Error(), "updated_at": time.Now()}).Update()
+		return err
+	}
+	_, err = g.DB().Model(profileMediaOperationTable).Ctx(ctx).Where("id", payload.OperationId).Data(g.Map{"status": "success", "finished_at": time.Now(), "error_message": "", "updated_at": time.Now()}).Update()
+	return err
+}
+
+// recoverProfileMediaOperations makes the media pipeline restart-safe. It is
+// intentionally bounded; subsequent scheduler passes pick up the remainder.
+func (s *sSysPublish) recoverProfileMediaOperations(ctx context.Context) {
+	var rows []struct {
+		Id int64 `json:"id"`
+	}
+	if err := g.DB().Model(profileMediaOperationTable).Ctx(ctx).
+		Fields("id").WhereIn("status", []string{"pending", "processing"}).
+		Where("updated_at < ?", time.Now().Add(-2*time.Minute)).OrderAsc("id").Limit(200).Scan(&rows); err != nil {
+		g.Log().Warningf(ctx, "恢复资料媒体任务失败 err:%s", err.Error())
+		return
+	}
+	for _, row := range rows {
+		if err := s.enqueueProfileMediaOperation(ctx, row.Id); err != nil {
+			g.Log().Warningf(ctx, "恢复资料媒体任务入队失败 operation_id:%d err:%s", row.Id, err.Error())
+		}
+	}
+}
+
+func (s *sSysPublish) profileMediaRecoveryLoop(ctx context.Context) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.recoverProfileMediaOperations(ctx)
+		}
+	}
+}

@@ -758,6 +758,25 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_status_retry" ON "hg_youban_publish_t
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_sending_recovery" ON "hg_youban_publish_tg_job" ("updated_at", "id") WHERE "status" = 'sending';
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_task" ON "hg_youban_publish_tg_job" ("task_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_profile_operation" ON "hg_youban_publish_tg_job" ("profile_id", "operation_no", "status", "id") WHERE "task_id" IS NULL;
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_profile_media_operation" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL,
+  "account_id" bigint NOT NULL,
+  "profile_no" varchar(128) NOT NULL,
+  "operation_no" varchar(256) NOT NULL,
+  "status" varchar(32) NOT NULL DEFAULT 'pending',
+  "payload_json" text NOT NULL DEFAULT '{}',
+  "trace_id" varchar(128) NOT NULL DEFAULT '',
+  "retry_count" integer NOT NULL DEFAULT 0,
+  "error_message" text NOT NULL DEFAULT '',
+  "started_at" timestamp NULL,
+  "finished_at" timestamp NULL,
+  "created_at" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updated_at" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_profile_media_operation_profile_operation" ON "hg_youban_publish_profile_media_operation" ("tenant_id","account_id","profile_no","operation_no");
+CREATE INDEX IF NOT EXISTS "idx_ybp_profile_media_operation_recovery" ON "hg_youban_publish_profile_media_operation" ("status","updated_at","id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_profile_cleanup" ON "hg_youban_publish_tg_job" ("profile_id", "tenant_id", "created_at", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_cycle" ON "hg_youban_publish_tg_job" ("cycle_enabled", "next_cycle_at", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_cycle_due" ON "hg_youban_publish_tg_job" ("next_cycle_at", "id") INCLUDE ("tenant_id", "account_id", "profile_id", "channel_id", "cycle_days") WHERE "cycle_enabled" = 1 AND "status" IN ('sent','superseded') AND "next_cycle_at" IS NOT NULL;

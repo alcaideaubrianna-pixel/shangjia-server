@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"hotgo/addons/youban_bot/internal/model/entity"
+	publishsysin "hotgo/addons/youban_publish/model/input/sysin"
 
 	"hotgo/addons/youban_bot/model/input/sysin"
 )
@@ -47,6 +48,10 @@ func TriggerAccountBoundHooks(ctx context.Context, event *AccountBoundEvent) []e
 }
 
 type ISysBot interface {
+	// BotProcessProfileMedia is the durable-worker entry point for Telegram
+	// media attached to a profile. It is intentionally separate from the Bot
+	// update handler so publish workers can retry it after an instance restart.
+	BotProcessProfileMedia(ctx context.Context, tenantId, accountId int64, profileNo string, displayMedia, verifyMedia []*publishsysin.MessageTemplateMediaInp) error
 	AdminRelaySwitch(ctx context.Context, in *sysin.RelaySwitchInp) error
 	AdminRelayBotList(ctx context.Context, in *sysin.BotListInp) ([]*sysin.RelayBotModel, int, error)
 	AdminRelaySettings(ctx context.Context, in *sysin.RelayBotInp) (*sysin.RelaySettingsModel, error)
