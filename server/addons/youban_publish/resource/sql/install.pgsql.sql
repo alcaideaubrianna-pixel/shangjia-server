@@ -707,7 +707,7 @@ WHERE NOT EXISTS (SELECT 1 FROM "hg_youban_publish_tag");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_job" (
 	"display_media_selection" text NOT NULL DEFAULT '',
-  "id" BIGSERIAL PRIMARY KEY, "task_id" bigint DEFAULT NULL, "operation_no" varchar(128) NOT NULL DEFAULT '', "tenant_id" bigint NOT NULL DEFAULT 0,
+  "id" BIGSERIAL PRIMARY KEY, "task_id" bigint DEFAULT NULL, "operation_no" varchar(128) NOT NULL DEFAULT '', "operation_type" varchar(32) NOT NULL DEFAULT '', "profile_no_snapshot" varchar(32) NOT NULL DEFAULT '', "title_snapshot" text NOT NULL DEFAULT '', "notify_account_id" bigint NOT NULL DEFAULT 0, "tenant_id" bigint NOT NULL DEFAULT 0,
   "merchant_id" bigint NOT NULL DEFAULT 0, "account_id" bigint NOT NULL DEFAULT 0, "profile_id" bigint NOT NULL DEFAULT 0,
   "channel_id" bigint NOT NULL DEFAULT 0, "bot_id" bigint NOT NULL DEFAULT 0, "target_chat_id" varchar(128) NOT NULL DEFAULT '',
   "collect_event_id" bigint NOT NULL DEFAULT 0, "collect_source_id" bigint NOT NULL DEFAULT 0,
