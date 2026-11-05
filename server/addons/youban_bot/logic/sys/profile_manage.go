@@ -3357,7 +3357,11 @@ func (s *sSysBot) recoverPendingProfileMediaGroups(ctx context.Context) {
 		if !s.startProfileMediaRecovery(session.Id, groupId, "verify") {
 			continue
 		}
-		g.Log().Infof(ctx, "恢复Bot资料验证组收尾 trace:PF-%d media_count:%d", session.Id, len(draft.PendingVerify.Media))
+		verifyMediaCount := 0
+		if draft.PendingVerify != nil {
+			verifyMediaCount = len(draft.PendingVerify.Media)
+		}
+		g.Log().Infof(ctx, "恢复Bot资料验证组收尾 trace:PF-%d media_count:%d", session.Id, verifyMediaCount)
 		go func() {
 			defer s.finishProfileMediaRecovery(session.Id, groupId, "verify")
 			s.finishPendingProfileVerifyGroup(session.BotId, account, session.Id)
