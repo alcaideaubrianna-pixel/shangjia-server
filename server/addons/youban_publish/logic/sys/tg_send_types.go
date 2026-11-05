@@ -69,6 +69,10 @@ type telegramJobRecord struct {
 	Id                     int64       `json:"id"`
 	TaskId                 int64       `json:"taskId"`
 	OperationNo            string      `json:"operationNo"`
+	OperationType          string      `json:"operationType"`
+	ProfileNoSnapshot      string      `json:"profileNoSnapshot"`
+	TitleSnapshot          string      `json:"titleSnapshot"`
+	NotifyAccountId        int64       `json:"notifyAccountId"`
 	TenantId               int64       `json:"tenantId"`
 	AccountId              int64       `json:"accountId"`
 	ProfileId              int64       `json:"profileId"`

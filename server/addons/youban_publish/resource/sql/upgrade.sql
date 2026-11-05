@@ -83,6 +83,11 @@ ALTER TABLE `hg_youban_publish_tg_job`
   ADD COLUMN `collect_source_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '采集源ID' AFTER `collect_event_id`,
   ADD COLUMN `collect_source_chat_id` varchar(128) NOT NULL DEFAULT '' COMMENT '采集来源Chat ID' AFTER `collect_source_id`,
   ADD COLUMN `collect_source_message_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '采集来源消息ID' AFTER `collect_source_chat_id`;
+ALTER TABLE `hg_youban_publish_tg_job`
+  ADD COLUMN IF NOT EXISTS `operation_type` varchar(32) NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS `profile_no_snapshot` varchar(32) NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS `title_snapshot` text NOT NULL,
+  ADD COLUMN IF NOT EXISTS `notify_account_id` bigint(20) NOT NULL DEFAULT '0';
 
 ALTER TABLE `hg_youban_publish_tg_channel`
   ADD COLUMN `management_role` varchar(16) NOT NULL DEFAULT 'member' COMMENT '当前TG账号角色：owner/admin/member' AFTER `channel_username`;

@@ -376,12 +376,28 @@ func (s *sSysPublish) enqueueProfilesTelegramCleanupBeforeDelete(ctx context.Con
 	if err != nil {
 		return err
 	}
+	var snapshots []gdb.Record
+	if err = g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).
+		Fields(dao.ContentProfile.Columns().Id+","+dao.ContentProfile.Columns().ProfileNo+","+dao.ContentProfile.Columns().Title).
+		WhereIn(dao.ContentProfile.Columns().Id, ids).Scan(&snapshots); err != nil {
+		return gerror.Wrap(err, "读取删除资料通知上下文失败")
+	}
+	snapshotByID := make(map[int64]gdb.Record, len(snapshots))
+	for _, row := range snapshots {
+		snapshotByID[row[dao.ContentProfile.Columns().Id].Int64()] = row
+	}
 	for _, job := range jobs {
 		if job.Id <= 0 {
 			continue
 		}
 		if err := s.enqueueTelegramCleanupJob(ctx, job.Id, 0); err != nil {
 			return gerror.Wrap(err, "加入资料TG清理队列失败")
+		}
+		if snapshot := snapshotByID[job.ProfileId]; snapshot != nil {
+			_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Data(g.Map{
+				"operation_type": "delete", "profile_no_snapshot": snapshot[dao.ContentProfile.Columns().ProfileNo].String(),
+				"title_snapshot": snapshot[dao.ContentProfile.Columns().Title].String(), "notify_account_id": job.AccountId,
+			}).Update()
 		}
 		s.appendTelegramJobLog(ctx, job.telegramJobRecord(), "delete", "queued", "资料已删除，TG历史消息已加入异步清理队列")
 	}
