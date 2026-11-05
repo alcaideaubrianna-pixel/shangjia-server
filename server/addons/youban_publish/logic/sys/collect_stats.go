@@ -11,6 +11,7 @@ import (
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/library/cache"
 )
 
 type collectStatsAggregate struct {
@@ -50,6 +51,13 @@ func (s *sSysPublish) CollectStats(ctx context.Context) (*sysin.CollectStatsMode
 }
 
 func loadCollectStatsAggregate(ctx context.Context, tenantId, accountId int64) (*collectStatsAggregate, error) {
+	cacheKey := fmt.Sprintf("youban_publish:collect:stats:%d:%d", tenantId, accountId)
+	if cached, cacheErr := cache.Instance().Get(ctx, cacheKey); cacheErr == nil && !cached.IsNil() {
+		var value collectStatsAggregate
+		if cached.Scan(&value) == nil {
+			return &value, nil
+		}
+	}
 	sourceCols := pdao.YoubanPublishCollectSource.Columns()
 	ruleCols := pdao.YoubanPublishCollectRule.Columns()
 	eventCols := pdao.YoubanPublishCollectEvent.Columns()
@@ -113,5 +121,6 @@ CROSS JOIN (
 	); err != nil {
 		return nil, gerror.Wrap(err, "统计采集数据失败")
 	}
+	_ = cache.Instance().Set(ctx, cacheKey, aggregate, 10*time.Second)
 	return &aggregate, nil
 }
