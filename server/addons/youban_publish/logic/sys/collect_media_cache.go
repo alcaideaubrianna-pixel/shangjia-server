@@ -1109,6 +1109,24 @@ func (s *sSysPublish) downloadTelegramMediaWithRefresh(ctx context.Context, tena
 	if tgAccountId <= 0 {
 		return nil, gerror.New("账号采集媒体缺少TG账号")
 	}
+	if !forceRefresh {
+		cached, ok, cacheErr := resolveTelegramMediaReuse(ctx, telegramMediaReuseInput{
+			MediaType: item.Type, FileUniqueID: item.FileUniqueId, SourceMediaID: item.SourceMediaId,
+			SourceDCID: item.SourceDCId, Variant: item.SourceThumbSize, FileMD5: item.FileMd5,
+			SourceSize: item.SourceSize, SourceMime: item.SourceMimeType,
+		})
+		if cacheErr != nil {
+			return nil, cacheErr
+		}
+		if ok && cached != nil {
+			item.FileUrl = telegramCollectorMediaCacheURL(cached)
+			item.StoragePath = cached.StoragePath
+			item.SourceSize = cached.Size
+			item.FilePhash = cached.PHash
+			item.PosterUrl = cached.PosterURL
+			return &collectDownloadedMedia{FileUrl: item.FileUrl, Path: item.StoragePath, Item: item}, nil
+		}
+	}
 	taskKey := accountMediaDownloadTaskKey(tgAccountId, mediaID, item)
 	if forceRefresh {
 		taskKey = "profile-media-refresh:" + taskKey
