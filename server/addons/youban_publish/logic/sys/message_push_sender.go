@@ -1079,6 +1079,10 @@ func (s *sSysPublish) createMessagePushJobWithOperation(ctx context.Context, tem
 		return telegramJobRecord{}, gerror.New("消息推送操作号不能为空")
 	}
 	queueName = telegramQueueNameByPriorityAndChannel(ctx, priority, channel.Id)
+	// 统一引擎使用独立发送队列，旧引擎继续沿用现有按优先级分片队列。
+	if s.unifiedPushEngineEnabled(ctx, tenantId, accountId) {
+		queueName = channelDispatchQueueName(channelDispatchLaneSend)
+	}
 	pushMode := sysin.MessageTemplatePushModeBot
 	if len(pushModes) > 0 && pushModes[0] != "" {
 		pushMode = pushModes[0]
