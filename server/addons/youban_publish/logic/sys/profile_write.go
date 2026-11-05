@@ -390,14 +390,16 @@ func (s *sSysPublish) enqueueProfilesTelegramCleanupBeforeDelete(ctx context.Con
 		if job.Id <= 0 {
 			continue
 		}
-		if err := s.enqueueTelegramCleanupJob(ctx, job.Id, 0); err != nil {
-			return gerror.Wrap(err, "加入资料TG清理队列失败")
-		}
 		if snapshot := snapshotByID[job.ProfileId]; snapshot != nil {
-			_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Data(g.Map{
+			if _, updateErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Data(g.Map{
 				"operation_type": "delete", "profile_no_snapshot": snapshot[dao.ContentProfile.Columns().ProfileNo].String(),
 				"title_snapshot": snapshot[dao.ContentProfile.Columns().Title].String(), "notify_account_id": job.AccountId,
-			}).Update()
+			}).Update(); updateErr != nil {
+				return gerror.Wrap(updateErr, "保存删除资料通知上下文失败")
+			}
+		}
+		if err := s.enqueueTelegramCleanupJob(ctx, job.Id, 0); err != nil {
+			return gerror.Wrap(err, "加入资料TG清理队列失败")
 		}
 		s.appendTelegramJobLog(ctx, job.telegramJobRecord(), "delete", "queued", "资料已删除，TG历史消息已加入异步清理队列")
 	}
