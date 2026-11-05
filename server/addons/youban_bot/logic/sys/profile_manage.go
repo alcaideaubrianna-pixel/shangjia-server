@@ -2540,12 +2540,38 @@ func (s *sSysBot) consumeProfileSessionMessage(ctx context.Context, botId int64,
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(processCtx.Err(), context.DeadlineExceeded) {
 			timeoutCtx := context.Background()
 			g.Log().Errorf(timeoutCtx, "Bot资料收尾阶段超时 trace:%s timeout:%s step:%s", trace, profileProcessingTimeout, latest.Step)
-			_ = s.sendMessageOnly(timeoutCtx, botId, fmt.Sprintf("%d", msg.Chat.ID), fmt.Sprintf("资料处理超时，请重新发送。\n处理编号：%s", trace))
+			if s.profileSessionTimeoutStillApplicable(timeoutCtx, session.Id) {
+				_ = s.sendMessageOnly(timeoutCtx, botId, fmt.Sprintf("%d", msg.Chat.ID), fmt.Sprintf("资料处理超时，请重新发送。\n处理编号：%s", trace))
+			} else {
+				g.Log().Infof(timeoutCtx, "抑制已完成资料的延迟超时提示 trace:%s", trace)
+			}
 		}
 		return err
 	}
 	g.Log().Infof(ctx, "Bot资料收尾阶段完成 trace:%s stage:process_message_locked elapsed_ms:%d", trace, time.Since(startedAt).Milliseconds())
 	return nil
+}
+
+// profileSessionTimeoutStillApplicable prevents a stale duplicate update from
+// reporting a timeout after another worker has already created/completed the
+// profile session.
+func (s *sSysBot) profileSessionTimeoutStillApplicable(ctx context.Context, sessionID int64) bool {
+	var row struct {
+		Status           string `json:"status"`
+		CreatedProfileId int64  `json:"created_profile_id"`
+	}
+	if err := g.DB().Model(profileSessionTable).Safe().Ctx(ctx).
+		Fields("status,payload_json").Where("id", sessionID).Scan(&row); err != nil {
+		return false
+	}
+	if row.Status != profileSessionStatusActive {
+		return false
+	}
+	var payload struct {
+		CreatedProfileId int64 `json:"createdProfileId"`
+	}
+	_ = g.DB().Model(profileSessionTable).Safe().Ctx(ctx).Fields("payload_json").Where("id", sessionID).Scan(&payload)
+	return payload.CreatedProfileId <= 0
 }
 
 func (s *sSysBot) consumeProfileSessionMessageLocked(ctx context.Context, botId int64, msg *models.Message, account *botProfileAccount, session *profileSessionRow, text string, preparedMedia []*publishsysin.MessageTemplateMediaInp) error {
