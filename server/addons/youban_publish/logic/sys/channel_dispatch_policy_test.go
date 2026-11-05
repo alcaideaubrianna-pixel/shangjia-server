@@ -39,3 +39,20 @@ func TestChannelDispatchPriorityOrder(t *testing.T) {
 		t.Fatal("delete priority order is invalid")
 	}
 }
+
+// TestChannelDispatchDeleteQueueName 验证删除任务按业务优先级进入独立队列。
+func TestChannelDispatchDeleteQueueName(t *testing.T) {
+	cases := []struct {
+		priority channelDispatchPriority
+		want     string
+	}{
+		{channelPriorityManualDelete, channelDispatchQueueDeleteManual},
+		{channelPriorityKeywordDelete, channelDispatchQueueDeleteKeyword},
+		{channelPriorityCycleDelete, channelDispatchQueueDeleteCycle},
+	}
+	for _, item := range cases {
+		if got := channelDispatchDeleteQueueName(item.priority); got != item.want {
+			t.Fatalf("priority %d queue = %q, want %q", item.priority, got, item.want)
+		}
+	}
+}

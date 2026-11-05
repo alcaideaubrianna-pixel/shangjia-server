@@ -7,6 +7,14 @@ const channelDispatchQueueSend = "youban_publish_push_send"
 
 // channelDispatchQueueDelete 是独立删除任务队列名称。
 const channelDispatchQueueDelete = "youban_publish_push_delete"
+const (
+	// channelDispatchQueueDeleteManual 用于手动上架触发的删除。
+	channelDispatchQueueDeleteManual = "youban_publish_push_delete_manual"
+	// channelDispatchQueueDeleteKeyword 用于关键字匹配删除。
+	channelDispatchQueueDeleteKeyword = "youban_publish_push_delete_keyword"
+	// channelDispatchQueueDeleteCycle 用于循环翻新删除。
+	channelDispatchQueueDeleteCycle = "youban_publish_push_delete_cycle"
+)
 
 // channelDispatchLane 表示任务所属的执行通道。
 type channelDispatchLane uint8
@@ -24,6 +32,18 @@ func channelDispatchQueueName(lane channelDispatchLane) string {
 		return channelDispatchQueueDelete
 	}
 	return channelDispatchQueueSend
+}
+
+// channelDispatchDeleteQueueName 根据删除优先级返回独立删除队列。
+func channelDispatchDeleteQueueName(priority channelDispatchPriority) string {
+	switch priority {
+	case channelPriorityManualDelete:
+		return channelDispatchQueueDeleteManual
+	case channelPriorityCycleDelete:
+		return channelDispatchQueueDeleteCycle
+	default:
+		return channelDispatchQueueDeleteKeyword
+	}
 }
 
 // telegramPublishForegroundQueueWeightsWithUnifiedLane 在保留旧队列的同时注册统一发送队列。
