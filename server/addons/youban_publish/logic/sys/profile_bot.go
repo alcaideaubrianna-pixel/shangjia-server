@@ -480,6 +480,17 @@ func (s *sSysPublish) BotProfileEdit(ctx context.Context, in *sysin.BotProfileEd
 	return s.BotProfileView(ctx, &sysin.BotProfileViewInp{TenantId: capability.TenantId, AccountId: capability.AccountId, ProfileId: profileId})
 }
 
+// BotProfilePersistMedia writes asynchronously collected media without taking
+// the profile publish/edit lifecycle lock. Media has its own per-profile sync
+// lock and must be allowed to finish while a user is publishing the profile.
+func (s *sSysPublish) BotProfilePersistMedia(ctx context.Context, tenantId, accountId int64, profileNo string, displayMedia, verifyMedia []*sysin.MessageTemplateMediaInp) error {
+	profileId, err := s.botResolveProfileId(ctx, tenantId, accountId, profileNo, false)
+	if err != nil {
+		return err
+	}
+	return s.replaceBotProfileMedia(ctx, profileId, tenantId, accountId, displayMedia, verifyMedia)
+}
+
 func (s *sSysPublish) BotProfileCancelQueue(ctx context.Context, in *sysin.BotProfileQueueCancelInp) (res *sysin.BotProfileQueueCancelModel, err error) {
 	if in == nil || in.TenantId <= 0 {
 		return nil, gerror.New("上架账号信息不完整")

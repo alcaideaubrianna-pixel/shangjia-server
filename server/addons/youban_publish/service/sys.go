@@ -303,6 +303,7 @@ type ISysPublish interface {
 	BotProfileStatus(ctx context.Context, in *sysin.BotProfileStatusInp) (res *sysin.ProfileStatusModel, err error)
 	BotProfileCreate(ctx context.Context, in *sysin.BotProfileCreateInp) (res *sysin.ProfileSaveModel, err error)
 	BotProfileEdit(ctx context.Context, in *sysin.BotProfileEditInp) (res *sysin.NoteModel, err error)
+	BotProfilePersistMedia(ctx context.Context, tenantId, accountId int64, profileNo string, displayMedia, verifyMedia []*sysin.MessageTemplateMediaInp) error
 	BotProfileCancelQueue(ctx context.Context, in *sysin.BotProfileQueueCancelInp) (res *sysin.BotProfileQueueCancelModel, err error)
 	BotMediaCacheFile(ctx context.Context, in *sysin.BotMediaCacheFileInp) (res *sysin.BotMediaCacheFileModel, err error)
 	BotChannelList(ctx context.Context, in *sysin.ChannelListInp) (list []*sysin.ChannelModel, totalCount int, err error)

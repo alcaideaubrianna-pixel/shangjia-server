@@ -2929,10 +2929,7 @@ func (s *sSysBot) asyncPersistProfileMedia(account *botProfileAccount, profileID
 			var persistedVerify []*publishsysin.MessageTemplateMediaInp
 			persistedVerify, err = s.persistTelegramMedia(ctx, account.AccountId, verifyMedia)
 			if err == nil {
-				_, err = publishService.SysPublish().BotProfileEdit(ctx, &publishsysin.BotProfileEditInp{
-					TenantId: account.TenantId, AccountId: account.AccountId, ProfileNo: profileNo,
-					PlainText: displayText, DisplayMedia: persistedDisplay, VerifyText: verifyText, VerifyMedia: persistedVerify,
-				})
+				err = publishService.SysPublish().BotProfilePersistMedia(ctx, account.TenantId, account.AccountId, profileNo, persistedDisplay, persistedVerify)
 			}
 		}
 		if err != nil {
