@@ -172,6 +172,24 @@ func (s *sSysPublish) wakeProfileTelegramJobs(ctx context.Context, profileId int
 		return err
 	}
 	if waiting.PublishStatus == "waiting_media" && strings.TrimSpace(waiting.OperationNo) != "" {
+		failedCount, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+			Where("profile_id", profileId).WhereNull("deleted_at").
+			Where("processing_status", mediaProcessingFailed).Count()
+		if err != nil {
+			return err
+		}
+		if failedCount > 0 {
+			if _, err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
+				Where("profile_id", profileId).WhereNull("deleted_at").
+				Where("publish_task_status", "waiting_media").Data(g.Map{
+				"publish_task_status":     "failed",
+				"publish_task_updated_at": gtime.Now(),
+			}).Update(); err != nil {
+				return gerror.Wrap(err, "记录媒体失败导致的上架失败状态失败")
+			}
+			g.Log().Warningf(ctx, "资料上架因媒体终态失败停止等待 profileId:%d failed_media:%d", profileId, failedCount)
+			return nil
+		}
 		if err := s.submitProfilePublish(ctx, profileId, waiting.TenantId, waiting.AccountId, 0, waiting.OperationNo, nil, false); err != nil {
 			return gerror.Wrap(err, "媒体就绪后恢复资料上架失败")
 		}
