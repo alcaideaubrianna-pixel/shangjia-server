@@ -1042,6 +1042,13 @@ func (s *sSysPublish) completeTelegramJob(ctx context.Context, job telegramJobRe
 	if !operationCompleted {
 		return nil
 	}
+	reserved, reserveErr := reserveBotProfilePublishNotice(ctx, job.ProfileId, job.OperationNo)
+	if reserveErr != nil {
+		return gerror.Wrap(reserveErr, "占用Bot资料上架通知幂等锁失败")
+	}
+	if !reserved {
+		return nil
+	}
 	if noticeErr := s.notifyBotProfilePublishCompleted(ctx, job); noticeErr != nil {
 		g.Log().Warningf(ctx, "发送Bot资料上架完成通知失败 profileId:%d operationNo:%s err:%+v", job.ProfileId, job.OperationNo, noticeErr)
 	}

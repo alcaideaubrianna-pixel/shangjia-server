@@ -6,6 +6,7 @@ import (
 	"html"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -15,10 +16,18 @@ import (
 	botservice "hotgo/addons/youban_bot/service"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/dao"
+	"hotgo/internal/library/cache"
 	"hotgo/internal/service"
 )
 
 const botProfilePublishOperationPrefix = "bot_publish:"
+
+const botProfilePublishNoticeTTL = 24 * time.Hour
+
+func reserveBotProfilePublishNotice(ctx context.Context, profileID int64, operationNo string) (bool, error) {
+	key := fmt.Sprintf("youban_publish:bot_notice:%d:%s", profileID, strings.TrimSpace(operationNo))
+	return cache.Instance().SetIfNotExist(ctx, key, 1, botProfilePublishNoticeTTL)
+}
 
 type botProfilePublishNoticeTarget struct {
 	BotId  int64
