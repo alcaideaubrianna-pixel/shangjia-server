@@ -33,6 +33,14 @@ func telegramPublishForegroundQueueWeightsWithUnifiedLane(ctx context.Context) m
 	return queues
 }
 
+// queueNameForPushEngine 根据账户引擎选择发送队列，旧引擎保留调用方已有队列。
+func queueNameForPushEngine(engine, legacyQueue string) string {
+	if engine == pushEngineUnified {
+		return channelDispatchQueueName(channelDispatchLaneSend)
+	}
+	return legacyQueue
+}
+
 // channelDispatchPriority 定义频道内任务优先级，数值越小越优先。
 type channelDispatchPriority int
 

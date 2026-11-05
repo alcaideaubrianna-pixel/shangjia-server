@@ -15,6 +15,17 @@ func TestChannelDispatchQueueName(t *testing.T) {
 	}
 }
 
+// TestQueueNameForPushEngine 验证灰度开关不会改变旧账户的队列路径。
+func TestQueueNameForPushEngine(t *testing.T) {
+	legacy := "youban_publish_tg_3"
+	if got := queueNameForPushEngine(pushEngineLegacy, legacy); got != legacy {
+		t.Fatalf("legacy queue = %q, want %q", got, legacy)
+	}
+	if got := queueNameForPushEngine(pushEngineUnified, legacy); got != channelDispatchQueueSend {
+		t.Fatalf("unified queue = %q, want %q", got, channelDispatchQueueSend)
+	}
+}
+
 // TestChannelDispatchPriorityOrder 验证优先级数值越小越优先。
 func TestChannelDispatchPriorityOrder(t *testing.T) {
 	if !(channelPriorityManualUpload < channelPriorityRealtimeCollect &&
