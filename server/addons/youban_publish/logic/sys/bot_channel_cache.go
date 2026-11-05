@@ -138,6 +138,8 @@ func (s *sSysPublish) AdminBotChannelCacheList(ctx context.Context, in *sysin.Bo
 		InnerJoin(channelTable+" ch", "ch.id=r.channel_id AND ch.tenant_id=r.tenant_id AND ch.deleted_at IS NULL").
 		LeftJoin(publishBotTable+" b", "b.id=r.bot_id AND b.deleted_at IS NULL").
 		Where("r.tenant_id", account.TenantId).WhereNull("r.deleted_at").
+		Where("ch.telegram_chat_id IS NOT NULL").WhereNot("ch.telegram_chat_id", "").WhereNot("ch.telegram_chat_id", "0").
+		Where("ch.title IS NOT NULL").WhereNot("ch.title", "").WhereNot("ch.title", "0").
 		WhereNot("ch.chat_type", "private")
 	if in.BotId > 0 {
 		mod = mod.Where("r.bot_id", in.BotId)
