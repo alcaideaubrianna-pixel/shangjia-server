@@ -21,13 +21,35 @@ const (
 	telegramOutboxLeaseTTL      = 30 * time.Second
 	telegramOutboxQueryTimeout  = 5 * time.Second
 	telegramOutboxWorkers       = 32
-	telegramOutboxBatchLimit    = 5000
-	telegramOutboxMaxBatchLimit = 10000
+	telegramOutboxBatchLimitDefault    = 5000
+	telegramOutboxMaxBatchLimitDefault = 10000
 
 	telegramOutboxDecisionWait     = "wait"
 	telegramOutboxDecisionDispatch = "dispatch"
 	telegramOutboxDecisionComplete = "complete"
 )
+
+func telegramOutboxBatchLimit(ctx context.Context) int {
+	value := g.Cfg().MustGet(ctx, "youbanPublish.queue.outboxBatchLimit", telegramOutboxBatchLimitDefault).Int()
+	if value < 100 {
+		return 100
+	}
+	if value > telegramOutboxMaxBatchLimit(ctx) {
+		return telegramOutboxMaxBatchLimit(ctx)
+	}
+	return value
+}
+
+func telegramOutboxMaxBatchLimit(ctx context.Context) int {
+	value := g.Cfg().MustGet(ctx, "youbanPublish.queue.outboxMaxBatchLimit", telegramOutboxMaxBatchLimitDefault).Int()
+	if value < 100 {
+		return 100
+	}
+	if value > 20000 {
+		return 20000
+	}
+	return value
+}
 
 type telegramJobOutboxRecord struct {
 	Id           int64       `json:"id"`
@@ -355,10 +377,10 @@ func (s *sSysPublish) dueTelegramJobOutboxRows(ctx context.Context, limit int, n
 		var rows []telegramJobOutboxRecord
 		batchLimit := limit
 		if batchLimit <= 0 {
-			batchLimit = telegramOutboxBatchLimit
+			batchLimit = telegramOutboxBatchLimit(ctx)
 		}
-		if batchLimit > telegramOutboxMaxBatchLimit {
-			batchLimit = telegramOutboxMaxBatchLimit
+		if batchLimit > telegramOutboxMaxBatchLimit(ctx) {
+			batchLimit = telegramOutboxMaxBatchLimit(ctx)
 		}
 		if err := g.DB().GetScan(queryCtx, &rows, query,
 			telegramOutboxEventPublish, now, telegramOutboxPending, telegramOutboxProcessing, now,
