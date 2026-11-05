@@ -9,7 +9,11 @@
 `hg_youban_publish_account_setting.push_engine` 控制账户路径：
 
 - `legacy`：现有优先级分片队列，默认值；
-- `unified`：统一发送队列 `youban_publish_push_send`，删除使用 `youban_publish_push_delete`。
+- `unified`：统一发送队列 `youban_publish_push_send`；删除按来源进入
+  `youban_publish_push_delete_manual`、`youban_publish_push_delete_keyword`、
+  `youban_publish_push_delete_cycle`。旧的 `youban_publish_push_delete` 仍注册用于兼容历史任务。
+
+账户开关读取后缓存 5 分钟，保存设置会主动清理缓存；缓存或新字段不可用时回退 `legacy`。
 
 字段不存在、读取失败或值非法时必须回退 `legacy`。
 
@@ -19,7 +23,7 @@
 业务入口 → tg_job/outbox → Asynq → Channel Dispatcher → Telegram
 ```
 
-发送队列按优先级处理：手动上架、实时采集、AI 修复、循环翻新、批次上架。删除队列按手动上架删除、关键字删除、循环翻新删除处理。
+统一发送 lane 由持久化 outbox 按频道队首投递，频道 lease 保证同一频道串行；发送优先级仍由 outbox 的有效优先级决定：手动上架、实时采集、AI 修复、循环翻新、批次上架。删除任务独立于发送，并按手动上架删除、关键字删除、循环翻新删除处理。
 
 ## 迁移步骤
 
