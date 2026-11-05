@@ -300,6 +300,31 @@ func (s *sSysPublish) deleteProfiles(ctx context.Context, in *sysin.ProfileDelet
 	if len(ids) == 0 {
 		return gerror.New("资料不存在或无权操作")
 	}
+	claimedIDs := make([]int64, 0, len(ids))
+	for _, profileID := range ids {
+		if tenantId <= 0 {
+			break
+		}
+		claimed, claimErr := claimProfileOperation(ctx, tenantId, profileID, profileOperationDelete)
+		if claimErr != nil {
+			for _, claimedID := range claimedIDs {
+				releaseProfileOperationClaim(ctx, tenantId, claimedID)
+			}
+			return claimErr
+		}
+		if !claimed {
+			for _, claimedID := range claimedIDs {
+				releaseProfileOperationClaim(ctx, tenantId, claimedID)
+			}
+			return gerror.New("该资料删除正在处理中，请稍候刷新")
+		}
+		claimedIDs = append(claimedIDs, profileID)
+	}
+	defer func() {
+		for _, profileID := range claimedIDs {
+			releaseProfileOperationClaim(ctx, tenantId, profileID)
+		}
+	}()
 	if err = s.enqueueProfilesTelegramCleanupBeforeDelete(ctx, ids, tenantId); err != nil {
 		return err
 	}
