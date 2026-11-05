@@ -44,6 +44,20 @@ func (s *sSysPublish) updateProfilePublishOperationState(ctx context.Context, jo
 	if job.TenantId <= 0 || job.AccountId <= 0 || job.ProfileId <= 0 || strings.TrimSpace(job.OperationNo) == "" || status == "" {
 		return nil
 	}
+	// A superseded job is historical data. Its delayed retry/cleanup callback
+	// must never resurrect a failed state after a newer job has replaced it.
+	// This guard is intentionally placed before the operation projection so an
+	// old cycle job cannot become the current operation again.
+	if status == sysin.PublishTaskStatusFailed || status == sysin.PublishTaskStatusCanceled {
+		current, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+			Fields("status").Where("id", job.Id).One()
+		if err != nil {
+			return gerror.Wrap(err, "读取资料上架任务状态失败")
+		}
+		if current["status"].String() == telegramJobStatusSuperseded {
+			return nil
+		}
+	}
 	return s.writeProfilePublishOperationState(ctx, job.TenantId, job.AccountId, job.ProfileId, job.OperationNo, status, true)
 }
 
@@ -159,6 +173,7 @@ func (s *sSysPublish) recoverProfilePublishOperationStates(ctx context.Context, 
 			"editing",
 			sysin.PublishTaskStatusPending,
 			sysin.PublishTaskStatusPublishing,
+			sysin.PublishTaskStatusFailed,
 		}).
 		OrderAsc("publish_task_updated_at").
 		OrderAsc("profile_id").
@@ -243,6 +258,29 @@ func (s *sSysPublish) recoverProfilePublishOperationState(ctx context.Context, s
 		return gerror.Wrap(err, "统计资料上架任务状态失败")
 	}
 	total := row["total"].Int()
+	// A terminal failed projection can be stale when the final job callback
+	// succeeded but the state/index projection failed afterwards. Repair only
+	// when the current operation is fully terminal and contains at least one
+	// successful Telegram job; real failed operations remain failed below.
+	if state.PublishTaskStatus == sysin.PublishTaskStatusFailed &&
+		row["failed"].Int() == 0 && row["failed_retry"].Int() == 0 &&
+		row["sending"].Int() == 0 && row["pending"].Int() == 0 &&
+		row["sent"].Int() > 0 && row["completed"].Int() == total {
+		if !isCycleBatchOperation(job.OperationNo) {
+			if _, err = s.syncProfilePublishState(ctx, job.ProfileId, 1, consts.ContentVisibilityPublic, gtime.Now()); err != nil {
+				return gerror.Wrap(err, "修复资料上架状态失败")
+			}
+		}
+		if err = s.clearProfilePublishOperationState(ctx, job); err != nil {
+			return err
+		}
+		if err = s.syncProfileNoteIndex(ctx, job.ProfileId); err != nil {
+			return err
+		}
+		service.SysContent().ClearHomeProfileCardsCache(ctx)
+		g.Log().Infof(ctx, "修复资料上架失败状态 profileId:%d operationNo:%s", job.ProfileId, job.OperationNo)
+		return nil
+	}
 	firstRecoveryAt := (*gtime.Time)(nil)
 	var recoveryRow gdb.Record
 	recoveryRow, err = g.DB().Model(publishTgJobLogTable+" l").Safe().Ctx(ctx).
