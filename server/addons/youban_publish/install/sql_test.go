@@ -344,3 +344,17 @@ func TestBotMessageSourceUsesMessageLevelUniqueKey(t *testing.T) {
 		})
 	}
 }
+
+func TestCollectAccountChannelUniqueKeyIncludesSource(t *testing.T) {
+	for _, path := range []string{
+		"addons/youban_publish/resource/sql/install.pgsql.sql",
+		"addons/youban_publish/resource/sql/upgrade.pgsql.sql",
+		"addons/youban_publish/resource/sql/upgrade_online.pgsql.sql",
+	} {
+		sql := readSqlFile(path)
+		if !strings.Contains(sql, "uk_ybp_collect_account_channel_source") ||
+			(!strings.Contains(sql, `channel_id","source_id`) && !strings.Contains(sql, `channel_id", "source_id`)) {
+			t.Fatalf("采集关系唯一键未按source隔离: %s", path)
+		}
+	}
+}
