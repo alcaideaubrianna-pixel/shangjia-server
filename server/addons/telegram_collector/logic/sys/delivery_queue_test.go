@@ -73,7 +73,7 @@ func TestDeliveryHistoryAndRealtimeClassification(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := deliveryQueueName(deliveryPriority(&delivery)); got != tc.want {
+			if got := deliveryQueueName(context.Background(), 0, deliveryPriority(&delivery)); got != tc.want {
 				t.Fatalf("queue=%s want=%s", got, tc.want)
 			}
 			// Recovery must not classify against the wall clock after a long backlog.

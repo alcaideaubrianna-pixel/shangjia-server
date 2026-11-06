@@ -56,7 +56,7 @@ func (s *sCollector) StartDeliveryRuntime(ctx context.Context) {
 	}
 	historyServer := asynq.NewServer(collectorRedisOption(runtimeCtx), asynq.Config{
 		Concurrency: collectorDeliveryHistoryConcurrency(runtimeCtx),
-		Queues:      map[string]int{consts.QueueDeliveryHistory: 1},
+		Queues:      deliveryHistoryQueues(),
 	})
 	legacyServer := asynq.NewServer(collectorRedisOption(runtimeCtx), asynq.Config{Concurrency: 2, Queues: map[string]int{consts.QueueDeliveryReady: 1, consts.QueueDeliveryUrgent: 1}})
 	s.deliveryLegacyServer = legacyServer
@@ -91,7 +91,7 @@ func (s *sCollector) enqueueDeliveryTask(ctx context.Context, deliveryID int64, 
 	}
 	client := s.queueClient
 	s.queueMu.Unlock()
-	queueName := deliveryQueueName(priority)
+	queueName := deliveryQueueName(ctx, deliveryID, priority)
 	_, err := client.EnqueueContext(ctx, asynq.NewTask(deliveryTaskType, collectorTaskPayload(deliveryID)),
 		asynq.Queue(queueName),
 		asynq.MaxRetry(deliveryMaxAttempts-1),
@@ -409,14 +409,39 @@ func (s *sCollector) persistedDeliveryPriority(ctx context.Context, deliveryID i
 	return computed, nil
 }
 
-func deliveryQueueName(priority int) string {
+func deliveryQueueName(ctx context.Context, deliveryID int64, priority int) string {
 	if priority >= sysin.EventPriorityUrgent {
 		return consts.QueueDeliveryUrgentLive
 	}
 	if priority >= sysin.EventPriorityRealtime {
 		return consts.QueueDeliveryRealtime
 	}
+	accountID := deliveryAccountID(ctx, deliveryID)
+	if accountID > 0 {
+		return consts.DeliveryHistoryShardQueue(accountID)
+	}
 	return consts.QueueDeliveryHistory
+}
+
+func deliveryHistoryQueues() map[string]int {
+	queues := map[string]int{consts.QueueDeliveryHistory: 1}
+	for accountID := int64(0); accountID < consts.DeliveryHistoryShardCount; accountID++ {
+		queues[fmt.Sprintf("%s%02d", consts.QueueDeliveryHistoryShardPrefix, accountID)] = 1
+	}
+	return queues
+}
+
+func deliveryAccountID(ctx context.Context, deliveryID int64) int64 {
+	if deliveryID <= 0 {
+		return 0
+	}
+	var accountID int64
+	_ = dao.TgCollectorDelivery.Ctx(ctx).
+		WherePri(deliveryID).
+		Fields("e.account_id").
+		LeftJoin("hg_tg_collector_event e", "e.id=hg_tg_collector_delivery.event_id").
+		Scan(&accountID)
+	return accountID
 }
 
 func collectorDeliveryHistoryInterval(ctx context.Context) time.Duration {
