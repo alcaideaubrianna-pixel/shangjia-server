@@ -27,6 +27,15 @@ type fakeProducer struct {
 	event  ReadyEvent
 }
 
+type fakeDispatcher struct {
+	jobIDs []int64
+}
+
+func (f *fakeDispatcher) Dispatch(_ context.Context, jobID int64) error {
+	f.jobIDs = append(f.jobIDs, jobID)
+	return nil
+}
+
 func (f *fakeProducer) Add(_ context.Context, stream string, event ReadyEvent) (string, error) {
 	f.stream, f.event = stream, event
 	return "1-0", nil
@@ -99,6 +108,21 @@ func TestPublishAfterCommit(t *testing.T) {
 	}
 	if _, err := PublishAfterCommit(context.Background(), func(context.Context) error { return nil }, producer, ReadyRealtimeStream, ReadyEvent{JobID: 1, ChannelID: 2}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestDispatchReadyEvent 验证 Stream 只调用现有任务调度器，不直接执行发送。
+func TestDispatchReadyEvent(t *testing.T) {
+	dispatcher := &fakeDispatcher{}
+	event := ReadyEvent{JobID: 7, ChannelID: 9}
+	if err := DispatchReadyEvent(context.Background(), dispatcher, event); err != nil {
+		t.Fatal(err)
+	}
+	if len(dispatcher.jobIDs) != 1 || dispatcher.jobIDs[0] != event.JobID {
+		t.Fatalf("dispatched jobs = %v", dispatcher.jobIDs)
+	}
+	if err := DispatchReadyEvent(context.Background(), dispatcher, ReadyEvent{}); err == nil {
+		t.Fatal("invalid event must fail")
 	}
 }
 
