@@ -3,8 +3,9 @@
 ## 启用前
 
 1. 仅部署 `Push Worker` 版本，确认 `youbanPublish.redisStream.grayEnabled=false`。
-2. 确认 Redis 使用项目统一 cache 适配器，Consumer Group 可执行 `XGROUP CREATE ... MKSTREAM`。
-3. 确认旧 Outbox/Asynq worker 正常，记录待处理任务数、发送延迟和失败率基线。
+2. 确认线上已执行账户 `push_engine` 字段迁移；未迁移时所有账户必须继续走旧路径。
+3. 确认 Redis 使用项目统一 cache 适配器，Consumer Group 可执行 `XGROUP CREATE ... MKSTREAM`。
+4. 确认旧 Outbox/Asynq worker 正常，记录待处理任务数、发送延迟和失败率基线。
 
 ## 单账户灰度
 
