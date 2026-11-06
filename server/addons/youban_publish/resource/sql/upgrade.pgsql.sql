@@ -249,7 +249,9 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_account_channel" (
   "updated_at" timestamp DEFAULT NULL,
   "deleted_at" timestamp DEFAULT NULL
 );
-CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_collect_account_channel" ON "hg_youban_publish_collect_account_channel" ("tenant_id", "account_id", "channel_id");
+-- 采集关系按 source 隔离，禁止一个规则的审批状态影响同频道的其他规则。
+DROP INDEX IF EXISTS "uk_ybp_collect_account_channel";
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_collect_account_channel_source" ON "hg_youban_publish_collect_account_channel" ("tenant_id", "account_id", "channel_id", "source_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_account_channel_status" ON "hg_youban_publish_collect_account_channel" ("tenant_id", "account_id", "status", "id");
 
 ALTER TABLE "hg_youban_publish_collect_source" ADD COLUMN IF NOT EXISTS "channel_id" bigint NOT NULL DEFAULT 0;

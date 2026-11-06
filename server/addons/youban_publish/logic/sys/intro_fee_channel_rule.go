@@ -622,7 +622,7 @@ func (s *sSysPublish) saveIntroFeeChannelCollectionStatus(ctx context.Context, t
 		if in.Status == 2 {
 			status, enabled = sysin.CollectAccountChannelDisabled, 0
 		}
-		_, saveErr = pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).OnConflict("tenant_id,account_id,channel_id").OnDuplicate("status,collect_enabled,approval_status,deleted_at").Data(pdo.YoubanPublishCollectAccountChannel{
+		_, saveErr = pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).OnConflict("tenant_id,account_id,channel_id,source_id").OnDuplicate("status,collect_enabled,approval_status,deleted_at").Data(pdo.YoubanPublishCollectAccountChannel{
 			TenantId: tenantID, AccountId: accountID, ChannelId: channel.Id, Status: status, CollectEnabled: enabled, ApprovalStatus: "approved", DeletedAt: nil,
 		}).Save()
 		return saveErr
@@ -909,7 +909,7 @@ func (s *sSysPublish) setCollectAccountChannelEnabled(ctx context.Context, tenan
 	} else {
 		data.DisabledAt = now
 	}
-	pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Data(data).OnConflict("tenant_id,account_id,channel_id").OnDuplicate("collect_enabled,status,approval_status,approved_at,disabled_at,updated_at").Save()
+	pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Data(data).OnConflict("tenant_id,account_id,channel_id,source_id").OnDuplicate("collect_enabled,status,approval_status,approved_at,disabled_at,updated_at").Save()
 }
 
 func introFeeBoolToInt(value bool) int {

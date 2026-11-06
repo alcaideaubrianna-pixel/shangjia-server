@@ -2248,7 +2248,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_account_channel" (
   "approved_at" timestamp DEFAULT NULL, "disabled_at" timestamp DEFAULT NULL, "disabled_reason" varchar(255) NOT NULL DEFAULT '',
   "created_at" timestamp DEFAULT NULL, "updated_at" timestamp DEFAULT NULL, "deleted_at" timestamp DEFAULT NULL
 );
-CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_collect_account_channel" ON "hg_youban_publish_collect_account_channel" ("tenant_id","account_id","channel_id");
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_collect_account_channel_source" ON "hg_youban_publish_collect_account_channel" ("tenant_id","account_id","channel_id","source_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_account_channel_status" ON "hg_youban_publish_collect_account_channel" ("tenant_id","account_id","status","id");
 
 

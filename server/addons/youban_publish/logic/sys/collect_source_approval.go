@@ -41,7 +41,7 @@ func (s *sSysPublish) BotCollectSourceApproval(ctx context.Context, sourceId, te
 			approvalStatus = "approved"
 		}
 		relation := g.Map{"tenant_id": tenantId, "account_id": source.AccountId, "channel_id": source.ChannelId, "source_id": sourceId, "collect_enabled": introFeeBoolToInt(approved), "status": status, "approval_status": approvalStatus, "approved_at": gdbNil(approved), "disabled_at": gdbNil(!approved), "updated_at": now}
-		_, _ = pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Data(relation).OnConflict("tenant_id,account_id,channel_id").OnDuplicate("source_id,collect_enabled,status,approval_status,approved_at,disabled_at,updated_at").Save()
+		_, _ = pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Data(relation).OnConflict("tenant_id,account_id,channel_id,source_id").OnDuplicate("source_id,collect_enabled,status,approval_status,approved_at,disabled_at,updated_at").Save()
 	}
 	s.refreshCollectSourceCache(ctx)
 	return nil

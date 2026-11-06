@@ -388,7 +388,7 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		}
 		if relationErr := g.DB().Model("hg_youban_publish_collect_account_channel").Ctx(ctx).
 			Fields("collect_enabled,status,approval_status").Where("tenant_id", tenantId).Where("account_id", accountId).
-			Where("channel_id", channelID).WhereNull("deleted_at").Scan(&channelRelation); !collectOptionalRecordScanSucceeded(relationErr) {
+			Where("source_id", event["source_id"].Int64()).Where("channel_id", channelID).WhereNull("deleted_at").Scan(&channelRelation); !collectOptionalRecordScanSucceeded(relationErr) {
 			return gerror.Wrap(relationErr, "读取频道采集状态失败")
 		} else {
 			if !botCollectChannelRelationEnabled(channelRelation.CollectEnabled, channelRelation.Status, channelRelation.ApprovalStatus) {

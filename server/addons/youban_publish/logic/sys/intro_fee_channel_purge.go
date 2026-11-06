@@ -180,7 +180,7 @@ func (s *sSysPublish) disableCollectChannel(ctx context.Context, tenantID, accou
 				DisabledAt: now, DisabledReason: introFeeChannelPurgeMessage,
 			}
 			_, err := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Data(data).
-				OnConflict("tenant_id,account_id,channel_id").
+				OnConflict("tenant_id,account_id,channel_id,source_id").
 				OnDuplicate("collect_enabled,status,approval_status,disabled_at,disabled_reason,updated_at").Save()
 			if err != nil {
 				return gerror.Wrap(err, "禁用采集频道失败")

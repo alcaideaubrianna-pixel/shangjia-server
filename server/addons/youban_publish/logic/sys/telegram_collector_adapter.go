@@ -50,9 +50,11 @@ type botCollectChannelCandidate struct {
 	Title          string `json:"title"`
 }
 
+// botCollectChannelRelation 表示某个采集源与频道的独立订阅状态。
 type botCollectChannelRelation struct {
 	Id             int64  `json:"id"`
 	ChannelId      int64  `json:"channelId"`
+	SourceId       int64  `json:"sourceId"`
 	CollectEnabled int    `json:"collectEnabled"`
 	Status         string `json:"status"`
 	ApprovalStatus string `json:"approvalStatus"`
@@ -1398,8 +1400,9 @@ func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, sourc
 	var relations []botCollectChannelRelation
 	if len(channelIDs) > 0 {
 		if err := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).
-			Fields("id,channel_id,collect_enabled,status,approval_status").
+			Fields("id,channel_id,source_id,collect_enabled,status,approval_status").
 			Where("tenant_id", tenantID).Where("account_id", accountID).
+			Where("source_id", source["id"].Int64()).
 			WhereIn("channel_id", channelIDs).Scan(&relations); !collectOptionalRecordScanSucceeded(err) {
 			return false, gerror.Wrap(err, "读取BOT采集频道审批状态失败")
 		}
@@ -1444,7 +1447,7 @@ func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, sourc
 	if err != nil {
 		// A concurrent delivery may have created the relation; respect its decision.
 		var current botCollectChannelRelation
-		lookupErr := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Fields("id,channel_id,collect_enabled,status,approval_status").Where("tenant_id", tenantID).Where("account_id", accountID).Where("channel_id", channel.Id).Scan(&current)
+		lookupErr := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Fields("id,channel_id,source_id,collect_enabled,status,approval_status").Where("tenant_id", tenantID).Where("account_id", accountID).Where("source_id", source["id"].Int64()).Where("channel_id", channel.Id).Scan(&current)
 		if lookupErr == nil && current.Id > 0 {
 			return botCollectChannelRelationEnabled(current.CollectEnabled, current.Status, current.ApprovalStatus), nil
 		}
@@ -1654,7 +1657,7 @@ func (s *sSysPublish) ensureAccountCollectChannelRelation(ctx context.Context, d
 		relation.DisabledAt = now
 	}
 	if _, err := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Data(relation).
-		OnConflict("tenant_id,account_id,channel_id").OnDuplicate("source_id,updated_at").Save(); err != nil {
+		OnConflict("tenant_id,account_id,channel_id,source_id").OnDuplicate("source_id,updated_at").Save(); err != nil {
 		return gerror.Wrap(err, "同步账户采集频道状态失败")
 	}
 	return nil
