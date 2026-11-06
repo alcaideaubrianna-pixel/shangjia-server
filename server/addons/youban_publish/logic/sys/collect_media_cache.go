@@ -1268,7 +1268,9 @@ func (s *sSysPublish) downloadBotTelegramMediaWithToken(ctx context.Context, bot
 	}
 	cacheSource := fmt.Sprintf("bot:%d:%s", botId, firstNonEmpty(file.FileUniqueID, fileID))
 	// 跨 media-worker 实例串行化同一 Bot 媒体的首次下载，避免多个 source 并发 miss 后重复访问 Telegram。
-	identityKey := firstNonEmpty(file.FileUniqueID, fileID)
+	// Bot API 的 file_unique_id 在不同网关/媒体类型下可能缺失或不一致；
+	// file_id 才是当前下载任务的稳定入口，必须用于跨实例锁和身份缓存。
+	identityKey := fmt.Sprintf("bot:%d:file:%s", botId, fileID)
 	identityFingerprint := collectorservice.BuildMediaIdentityFingerprint(identityKey, 0, 0, telegramCollectorMediaKind(item.Type), "")
 	identityLock := lock.NewConfig(3*time.Minute, 200*time.Millisecond).Mutex("youban_publish:media:identity:" + identityFingerprint)
 	if err := identityLock.Lock(ctx); err != nil {
