@@ -236,3 +236,16 @@ func TestRedisGroupConsumerRunStopsWithContext(t *testing.T) {
 		t.Fatalf("run err = %v, want %v", err, context.Canceled)
 	}
 }
+
+func TestRunBothStreamsStopsWithContext(t *testing.T) {
+	consumer, err := NewRedisGroupConsumer(emptyGroupClient{}, "publish", "worker-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err = RunBothStreams(ctx, consumer, func(context.Context, ReadyEvent) error { return nil })
+	if err != context.Canceled {
+		t.Fatalf("run both err = %v, want %v", err, context.Canceled)
+	}
+}
