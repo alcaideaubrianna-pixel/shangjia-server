@@ -3,9 +3,24 @@ package streamgray
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/gogf/gf/v2/container/gvar"
 )
+
+type fakeGroupClient struct {
+	entries []StreamEntry
+	acked   []string
+}
+
+func (f *fakeGroupClient) ReadGroup(_ context.Context, _, _, _, _ string, _ int, _ time.Duration) ([]StreamEntry, error) {
+	return f.entries, nil
+}
+
+func (f *fakeGroupClient) Ack(_ context.Context, _, _, entryID string) error {
+	f.acked = append(f.acked, entryID)
+	return nil
+}
 
 type fakeProducer struct {
 	stream string
@@ -79,5 +94,27 @@ func TestRedisProducerXAdd(t *testing.T) {
 	}
 	if fake.command != "XADD" || len(fake.args) != 4 || fake.args[0] != ReadyRealtimeStream || fake.args[1] != "*" || fake.args[2] != "payload" {
 		t.Fatalf("command=%q args=%v", fake.command, fake.args)
+	}
+}
+
+// TestRedisGroupConsumerAcksAfterHandler 验证只有 handler 成功后才确认消息。
+func TestRedisGroupConsumerAcksAfterHandler(t *testing.T) {
+	body, err := (ReadyEvent{JobID: 1, ChannelID: 2}).Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeGroupClient{entries: []StreamEntry{{ID: "1-0", Payload: body}}}
+	consumer, err := NewRedisGroupConsumer(fake, "publish", "worker-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	processed, err := consumer.ConsumeOnce(context.Background(), ReadyRealtimeStream, ">", func(_ context.Context, event ReadyEvent) error {
+		if event.JobID != 1 {
+			t.Fatalf("event = %+v", event)
+		}
+		return nil
+	})
+	if err != nil || processed != 1 || len(fake.acked) != 1 || fake.acked[0] != "1-0" {
+		t.Fatalf("processed=%d err=%v acked=%v", processed, err, fake.acked)
 	}
 }
