@@ -1251,6 +1251,12 @@ func (s *sSysPublish) ingestCollectorBotDelivery(ctx context.Context, delivery *
 		return gerror.Wrap(err, "检查Bot采集上架频道过滤失败")
 	}
 	if blocked {
+		g.Log().Warning(ctx, "账户采集跳过自循环上架频道", g.Map{
+			"reason":   "source_chat_is_publish_target",
+			"tenantId": delivery.TenantID, "sourceId": delivery.SourceID,
+			"accountId": delivery.AccountID, "tgAccountId": delivery.TgAccountID,
+			"sourceChatId": delivery.SourceChatID, "sourceMessageId": delivery.SourceMessageID,
+		})
 		return nil
 	}
 	allowed, err := s.ensureBotCollectChannelApproval(ctx, source, delivery)

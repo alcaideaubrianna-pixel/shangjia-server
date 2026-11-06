@@ -305,16 +305,39 @@ func (s *sSysPublish) processCollectSourceWindowWithLock(ctx context.Context, pa
 }
 
 func collectProcessSourceEnabled(ctx context.Context, payload collectProcessQueuePayload) (bool, error) {
+	columns := pdao.YoubanPublishCollectSource.Columns()
 	count, err := pdao.YoubanPublishCollectSource.Ctx(ctx).
 		Where("id", payload.SourceId).
 		Where("tenant_id", payload.TenantId).
-		Where(pdao.YoubanPublishCollectSource.Columns().AccountId, payload.AccountId).
+		Where(columns.AccountId, payload.AccountId).
 		Where("collect_enabled", 1).
-		Where(pdao.YoubanPublishCollectSource.Columns().ChannelBlacklisted, 0).
+		Where(columns.ChannelBlacklisted, 0).
 		Where("status", 1).
 		WhereNull("deleted_at").
 		Count()
-	return count > 0, err
+	if err != nil {
+		return false, err
+	}
+	if count > 0 {
+		return true, nil
+	}
+	source, err := pdao.YoubanPublishCollectSource.Ctx(ctx).
+		Fields(columns.Id, columns.AccountId, columns.TgAccountId, columns.CollectEnabled, columns.Status, columns.ChannelBlacklisted).
+		Where(columns.Id, payload.SourceId).Where(columns.TenantId, payload.TenantId).One()
+	if err != nil {
+		return false, err
+	}
+	g.Log().Warning(ctx, "采集处理跳过：采集源归属或状态不匹配", g.Map{
+		"reason":   "source_account_or_status_mismatch",
+		"tenantId": payload.TenantId, "sourceId": payload.SourceId,
+		"payloadAccountId":   payload.AccountId,
+		"sourceAccountId":    source[columns.AccountId].Int64(),
+		"sourceTgAccountId":  source[columns.TgAccountId].Int64(),
+		"collectEnabled":     source[columns.CollectEnabled].Int(),
+		"sourceStatus":       source[columns.Status].Int(),
+		"channelBlacklisted": source[columns.ChannelBlacklisted].Int(),
+	})
+	return false, nil
 }
 
 func (s *sSysPublish) processCollectSourceTask(ctx context.Context, payload collectProcessQueuePayload) (delay time.Duration, pending bool, removeSchedule bool, err error) {
