@@ -504,6 +504,10 @@ func (s *sSysPublish) AIOpsApplyRepairPlan(ctx context.Context, in *sysin.AIOpsR
 	if affected == 0 {
 		return nil, gerror.New("修复计划已被其他执行器领取")
 	}
+	if isAsyncAIOpsProfileAction(payload.Action) {
+		go s.runAIOpsProfilePlanAsync(in.PlanId, payload)
+		return &sysin.AIOpsRepairApplyModel{PlanId: in.PlanId, Status: "running", Message: "资料操作已转入后台执行", Failed: []int64{}}, nil
+	}
 	result := &sysin.AIOpsRepairApplyModel{PlanId: in.PlanId, Status: "completed", Failed: []int64{}}
 	switch payload.Action {
 	case "recover_verifications":
@@ -560,6 +564,32 @@ func (s *sSysPublish) AIOpsApplyRepairPlan(ctx context.Context, in *sysin.AIOpsR
 	}
 	g.Log().Info(ctx, "AI运维修复计划执行完成", g.Map{"planId": in.PlanId, "result": result})
 	return result, err
+}
+
+func isAsyncAIOpsProfileAction(action string) bool {
+	switch action {
+	case "offline_profiles", "republish_profiles", "delete_profiles", "repair_profile_media":
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *sSysPublish) runAIOpsProfilePlanAsync(planID string, payload aiOpsRepairPlanPayload) {
+	ctx := context.Background()
+	applied, failed := s.applyAIOpsProfilePlan(ctx, payload.Action, payload.ProfileIDs, payload.TenantID, payload.AccountID)
+	status, message := "completed", ""
+	if len(failed) > 0 {
+		status = "failed"
+		message = fmt.Sprintf("%d条资料处理失败", len(failed))
+	}
+	_, err := g.DB().Model(aiOpsRepairPlanTable).Ctx(ctx).Where("plan_id", planID).Data(g.Map{
+		"status": status, "applied_count": applied, "failed_ids_json": mustJSONString(failed),
+		"error_message": message, "finished_at": gtime.Now(), "updated_at": gtime.Now(),
+	}).Update()
+	if err != nil {
+		g.Log().Errorf(ctx, "AI运维后台资料计划结果写回失败 planId:%s err:%+v", planID, err)
+	}
 }
 
 func (s *sSysPublish) AIOpsApplySourceReplayPlan(ctx context.Context, in *sysin.AIOpsRepairApplyInp) (*sysin.AIOpsRepairApplyModel, error) {
