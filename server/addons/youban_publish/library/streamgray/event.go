@@ -15,6 +15,11 @@ const (
 	ReadyBulkStream = "youban_publish:tg:ready:bulk"
 )
 
+// validReadyStream 判断事件是否写入允许的灰度 Stream。
+func validReadyStream(stream string) bool {
+	return stream == ReadyRealtimeStream || stream == ReadyBulkStream
+}
+
 // ReadyEvent 是数据库任务提交后的轻量通知，不承载发送最终状态。
 type ReadyEvent struct {
 	JobID     int64  `json:"job_id"`
@@ -59,4 +64,18 @@ type Producer interface {
 // Consumer 是 Stream 消费端的最小接口，实际实现负责 pending 和 ACK 管理。
 type Consumer interface {
 	Consume(ctx context.Context, stream string, handler func(context.Context, ReadyEvent) error) error
+}
+
+// PublishReadyEvent 统一发布就绪事件，业务层不直接操作 Redis 命令。
+func PublishReadyEvent(ctx context.Context, producer Producer, stream string, event ReadyEvent) (string, error) {
+	if producer == nil {
+		return "", gerror.New("Redis Stream producer 未初始化")
+	}
+	if !validReadyStream(stream) {
+		return "", gerror.New("Redis Stream 名称不合法")
+	}
+	if err := event.Validate(); err != nil {
+		return "", err
+	}
+	return producer.Add(ctx, stream, event)
 }
