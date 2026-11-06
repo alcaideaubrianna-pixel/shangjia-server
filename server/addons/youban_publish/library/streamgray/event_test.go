@@ -172,6 +172,17 @@ func TestDispatchReadyEventWithGateSkipsRolledBackAccount(t *testing.T) {
 	}
 }
 
+func TestNewGatedHandler(t *testing.T) {
+	dispatcher := &fakeDispatcher{}
+	handler := NewGatedHandler(&fakeAccountGate{enabled: true}, dispatcher)
+	if err := handler(context.Background(), ReadyEvent{TenantID: 1, AccountID: 2, JobID: 8, ChannelID: 9}); err != nil {
+		t.Fatal(err)
+	}
+	if len(dispatcher.jobIDs) != 1 || dispatcher.jobIDs[0] != 8 {
+		t.Fatalf("jobs = %v", dispatcher.jobIDs)
+	}
+}
+
 type fakeRedisClient struct {
 	command string
 	args    []any

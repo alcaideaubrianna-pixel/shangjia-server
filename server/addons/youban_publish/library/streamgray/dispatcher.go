@@ -18,6 +18,13 @@ type AccountGate interface {
 	Enabled(context.Context, int64, int64) (bool, error)
 }
 
+// NewGatedHandler 创建可直接交给 Consumer 的账户灰度 handler。
+func NewGatedHandler(gate AccountGate, dispatcher JobDispatcher) func(context.Context, ReadyEvent) error {
+	return func(ctx context.Context, event ReadyEvent) error {
+		return DispatchReadyEventWithGate(ctx, gate, dispatcher, event)
+	}
+}
+
 // DispatchReadyEvent 将 Stream 事件交给现有任务调度器。
 // 重复事件不会在此层去重，幂等性由 JobDispatcher（通常是数据库状态条件更新 + Asynq 唯一入队）保证。
 func DispatchReadyEvent(ctx context.Context, dispatcher JobDispatcher, event ReadyEvent) error {
