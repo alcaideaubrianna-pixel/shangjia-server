@@ -11,13 +11,18 @@ import (
 )
 
 func TestNormalizeAdminNoteSortBy(t *testing.T) {
-	for input, want := range map[string]string{"": adminNoteSortCreatedAt, adminNoteSortCreatedAt: adminNoteSortCreatedAt, adminNoteSortPublishedAt: adminNoteSortPublishedAt} {
+	for input, want := range map[string]string{
+		"":                             adminNoteSortCreatedAt + "Desc",
+		adminNoteSortCreatedAt:         adminNoteSortCreatedAt + "Desc",
+		adminNoteSortPublishedAt:       adminNoteSortPublishedAt + "Desc",
+		adminNoteSortUpdatedAt + "Asc": adminNoteSortUpdatedAt + "Asc",
+	} {
 		got, err := normalizeAdminNoteSortBy(input)
 		if err != nil || got != want {
 			t.Fatalf("normalizeAdminNoteSortBy(%q) = %q, %v; want %q", input, got, err, want)
 		}
 	}
-	if _, err := normalizeAdminNoteSortBy("updatedAt"); err == nil {
+	if _, err := normalizeAdminNoteSortBy("invalid"); err == nil {
 		t.Fatal("unsupported sort field must fail")
 	}
 }
@@ -25,8 +30,9 @@ func TestNormalizeAdminNoteSortBy(t *testing.T) {
 func TestAdminNoteCursorUsesSelectedSort(t *testing.T) {
 	createdAt := gtime.NewFromTime(time.Date(2026, 9, 1, 1, 2, 3, 0, time.UTC))
 	publishedAt := gtime.NewFromTime(time.Date(2026, 9, 2, 1, 2, 3, 0, time.UTC))
-	item := &sysin.ProfileModel{Id: 9, NoteIndexId: 19, CreatedAt: createdAt, PublishedAt: publishedAt}
-	for _, sortBy := range []string{adminNoteSortCreatedAt, adminNoteSortPublishedAt} {
+	updatedAt := gtime.NewFromTime(time.Date(2026, 9, 3, 1, 2, 3, 0, time.UTC))
+	item := &sysin.ProfileModel{Id: 9, NoteIndexId: 19, CreatedAt: createdAt, PublishedAt: publishedAt, UpdatedAt: updatedAt}
+	for _, sortBy := range []string{adminNoteSortCreatedAt + "Desc", adminNoteSortPublishedAt + "Asc", adminNoteSortUpdatedAt + "Desc"} {
 		cursor, err := decodeAdminNoteCursor(encodeAdminNoteCursor(item, sortBy))
 		if err != nil || cursor.SortBy != sortBy || cursor.IndexId != 19 {
 			t.Fatalf("cursor for %s = %+v, %v", sortBy, cursor, err)

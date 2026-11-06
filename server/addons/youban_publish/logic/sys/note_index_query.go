@@ -24,6 +24,7 @@ type adminNoteCursor struct {
 const (
 	adminNoteSortCreatedAt   = "createdAt"
 	adminNoteSortPublishedAt = "publishedAt"
+	adminNoteSortUpdatedAt   = "updatedAt"
 )
 
 func (s *sSysPublish) adminNoteIndexList(ctx context.Context, in *sysin.NoteListInp, tenantId int64, tenantIds []int64, accountIds []int64) ([]*sysin.ProfileModel, bool, string, error) {
@@ -47,7 +48,8 @@ func (s *sSysPublish) adminNoteIndexList(ctx context.Context, in *sysin.NoteList
 	in.PerPage = perPage
 	var list []*sysin.ProfileModel
 	if err := mod.Clone().Fields(adminNoteIndexFields()).
-		OrderDesc(adminNoteSortExpression(sortBy)).OrderDesc("i.id").
+		Order(adminNoteSortExpression(sortBy) + " " + adminNoteSortDirection(sortBy)).
+		Order("i.id " + adminNoteSortDirection(sortBy)).
 		Limit(perPage + 1).Scan(&list); err != nil {
 		return nil, false, "", gerror.Wrap(err, "获取资料索引列表失败")
 	}
@@ -156,21 +158,37 @@ func applyNoteIndexTagFilter(mod *gdb.Model, tags []string) *gdb.Model {
 }
 
 func normalizeAdminNoteSortBy(value string) (string, error) {
-	switch strings.TrimSpace(value) {
-	case "", adminNoteSortCreatedAt:
-		return adminNoteSortCreatedAt, nil
-	case adminNoteSortPublishedAt:
-		return adminNoteSortPublishedAt, nil
-	default:
-		return "", gerror.New("笔记列表排序字段不合法")
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return adminNoteSortCreatedAt + "Desc", nil
 	}
+	for _, field := range []string{adminNoteSortCreatedAt, adminNoteSortPublishedAt, adminNoteSortUpdatedAt} {
+		if value == field+"Asc" || value == field+"Desc" {
+			return value, nil
+		}
+		// Keep compatibility with the original descending-only values.
+		if value == field {
+			return value + "Desc", nil
+		}
+	}
+	return "", gerror.New("笔记列表排序字段不合法")
 }
 
 func adminNoteSortExpression(sortBy string) string {
-	if sortBy == adminNoteSortPublishedAt {
+	if strings.HasPrefix(sortBy, adminNoteSortPublishedAt) {
 		return "COALESCE(i.published_at, '1970-01-01'::timestamp)"
 	}
+	if strings.HasPrefix(sortBy, adminNoteSortUpdatedAt) {
+		return "i.updated_at"
+	}
 	return "i.created_at"
+}
+
+func adminNoteSortDirection(sortBy string) string {
+	if strings.HasSuffix(sortBy, "Asc") {
+		return "ASC"
+	}
+	return "DESC"
 }
 
 func applyNoteIndexCursor(mod *gdb.Model, raw string, sortBy string) (*gdb.Model, error) {
@@ -189,7 +207,11 @@ func applyNoteIndexCursor(mod *gdb.Model, raw string, sortBy string) (*gdb.Model
 		return mod, gerror.New("笔记列表游标不合法")
 	}
 	expression := adminNoteSortExpression(sortBy)
-	return mod.Where("("+expression+" < ? OR ("+expression+" = ? AND i.id < ?))", sortAt, sortAt, cursor.IndexId), nil
+	operator := "<"
+	if adminNoteSortDirection(sortBy) == "ASC" {
+		operator = ">"
+	}
+	return mod.Where("("+expression+" "+operator+" ? OR ("+expression+" = ? AND i.id "+operator+" ?))", sortAt, sortAt, cursor.IndexId), nil
 }
 
 func encodeAdminNoteCursor(item *sysin.ProfileModel, sortBy string) string {
@@ -200,11 +222,14 @@ func encodeAdminNoteCursor(item *sysin.ProfileModel, sortBy string) string {
 		return ""
 	}
 	sortAt := item.CreatedAt
-	if sortBy == adminNoteSortPublishedAt {
+	if strings.HasPrefix(sortBy, adminNoteSortPublishedAt) {
 		sortAt = item.PublishedAt
 		if sortAt == nil {
 			sortAt = gtime.NewFromTime(time.Unix(0, 0))
 		}
+	}
+	if strings.HasPrefix(sortBy, adminNoteSortUpdatedAt) {
+		sortAt = item.UpdatedAt
 	}
 	if sortAt == nil {
 		return ""

@@ -884,7 +884,7 @@ func (in *ProfileReviewInp) Filter(ctx context.Context) error {
 type NoteListInp struct {
 	ProfileListInp
 	Cursor string `json:"cursor" dc:"下一页游标"`
-	SortBy string `json:"sortBy" dc:"排序字段：createdAt/publishedAt，默认createdAt"`
+	SortBy string `json:"sortBy" dc:"排序字段：createdAtAsc/createdAtDesc/publishedAtAsc/publishedAtDesc/updatedAtAsc/updatedAtDesc，默认createdAtDesc"`
 }
 
 type NoteModel struct {
