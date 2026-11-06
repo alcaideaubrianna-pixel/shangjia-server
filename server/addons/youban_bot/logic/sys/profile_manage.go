@@ -482,6 +482,9 @@ func (s *sSysBot) handleProfileCallback(ctx context.Context, botId int64, query 
 	case "edno":
 		return true, s.startProfileSessionByIds(ctx, botId, fmt.Sprintf("%d", query.From.ID), chatId, account, "edit_no", "waiting_no", 0, no, nil, "请输入新的编号，格式如 A00001：")
 	case "channels":
+		// Start a fresh selection session from the persisted channel set. A
+		// stale abandoned session must not make every channel appear unchecked.
+		_, _ = cache.Instance().Remove(ctx, profileChannelEditKey(account.AccountId, no))
 		return true, s.showProfileChannelEditMenu(ctx, botId, chatId, account, no)
 	case "ch":
 		if len(parts) < 4 {
@@ -508,11 +511,12 @@ func (s *sSysBot) confirmProfileDelete(ctx context.Context, botId int64, chatId,
 		return err
 	}
 	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId,
-		fmt.Sprintf("确定删除并下架资料 <code>%s</code>？此操作会删除资料并清理已推送消息。", html.EscapeString(profileNo)), "HTML", false,
-		&models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{{
-			{Text: "确认删除并下架", CallbackData: "pf:delconfirm:" + profileNo},
-			{Text: "取消", CallbackData: "pf:delcancel:" + profileNo},
-		}}})
+		fmt.Sprintf("请选择对资料 <code>%s</code> 的删除方式：", html.EscapeString(profileNo)), "HTML", false,
+		&models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
+			{{Text: "删除资料", CallbackData: "pf:delconfirm:" + profileNo}},
+			{{Text: "删除并下架", CallbackData: "pf:delconfirm:" + profileNo}},
+			{{Text: "取消", CallbackData: "pf:delcancel:" + profileNo}},
+		}})
 	return err
 }
 
@@ -2000,6 +2004,14 @@ func profileCardMarkupForNote(note *publishsysin.NoteModel, purpose string) *mod
 			if len(markup.InlineKeyboard[0]) > 0 {
 				markup.InlineKeyboard[0][0] = models.InlineKeyboardButton{Text: statusLabel, CallbackData: statusAction + profileNo}
 			}
+			// Keep lifecycle actions available from every profile card.
+			markup.InlineKeyboard[1] = []models.InlineKeyboardButton{
+				{Text: "编辑", CallbackData: "pf:edit:" + profileNo},
+				{Text: "删除", CallbackData: "pf:del:" + profileNo},
+			}
+			markup.InlineKeyboard = append(markup.InlineKeyboard,
+				[]models.InlineKeyboardButton{{Text: "重新上架", CallbackData: "pf:up:" + profileNo}},
+			)
 		}
 	}
 	url := strings.TrimSpace(note.CollectSourceUrl)
