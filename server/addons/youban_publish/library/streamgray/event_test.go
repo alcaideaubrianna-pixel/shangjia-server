@@ -226,6 +226,17 @@ func TestRedisCommandGroupClientCommands(t *testing.T) {
 	}
 }
 
+func TestDecodeXReadGroupResponse(t *testing.T) {
+	payload := `{"tenant_id":1,"account_id":2,"job_id":3,"channel_id":4}`
+	value := gvar.New([]any{
+		[]any{"stream", []any{[]any{"1-0", []any{"payload", payload}}}},
+	})
+	entries, err := DecodeXReadGroupResponse(value)
+	if err != nil || len(entries) != 1 || entries[0].ID != "1-0" || string(entries[0].Payload) != payload {
+		t.Fatalf("entries=%v err=%v", entries, err)
+	}
+}
+
 // TestRedisGroupConsumerAcksAfterHandler 验证只有 handler 成功后才确认消息。
 func TestRedisGroupConsumerAcksAfterHandler(t *testing.T) {
 	body, err := (ReadyEvent{TenantID: 1, AccountID: 2, JobID: 1, ChannelID: 2}).Encode()

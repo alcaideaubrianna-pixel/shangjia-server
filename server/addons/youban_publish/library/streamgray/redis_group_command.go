@@ -8,6 +8,40 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 )
 
+// DecodeXReadGroupResponse 解析 Redis XREADGROUP 的标准嵌套数组响应。
+// 只读取 payload 字段，忽略未知字段，便于后续扩展事件元数据。
+func DecodeXReadGroupResponse(value *gvar.Var) ([]StreamEntry, error) {
+	if value == nil || value.IsNil() {
+		return nil, nil
+	}
+	streams := value.Array()
+	entries := make([]StreamEntry, 0)
+	for _, streamValue := range streams {
+		streamParts := gvar.New(streamValue).Array()
+		if len(streamParts) < 2 {
+			return nil, gerror.New("Redis XREADGROUP stream 响应格式无效")
+		}
+		for _, entryValue := range gvar.New(streamParts[1]).Array() {
+			entryParts := gvar.New(entryValue).Array()
+			if len(entryParts) < 2 {
+				return nil, gerror.New("Redis XREADGROUP entry 响应格式无效")
+			}
+			fields := gvar.New(entryParts[1]).Array()
+			entry := StreamEntry{ID: gvar.New(entryParts[0]).String()}
+			for i := 0; i+1 < len(fields); i += 2 {
+				if gvar.New(fields[i]).String() == "payload" {
+					entry.Payload = []byte(gvar.New(fields[i+1]).String())
+				}
+			}
+			if entry.ID == "" || len(entry.Payload) == 0 {
+				return nil, gerror.New("Redis XREADGROUP entry 缺少 payload")
+			}
+			entries = append(entries, entry)
+		}
+	}
+	return entries, nil
+}
+
 // StreamReadDecoder 将 Redis XREADGROUP 原始响应转换为统一消息结构。
 type StreamReadDecoder func(*gvar.Var) ([]StreamEntry, error)
 
@@ -23,6 +57,11 @@ func NewRedisCommandGroupClient(client RedisCommandClient, decode StreamReadDeco
 		return nil, gerror.New("Redis Stream group command client 参数无效")
 	}
 	return &RedisCommandGroupClient{client: client, decode: decode}, nil
+}
+
+// NewRedisCommandGroupClientDefault 使用标准 Redis Stream 响应解析器创建客户端。
+func NewRedisCommandGroupClientDefault(client RedisCommandClient) (*RedisCommandGroupClient, error) {
+	return NewRedisCommandGroupClient(client, DecodeXReadGroupResponse)
 }
 
 // ReadGroup 执行 XREADGROUP GROUP 命令，响应解析委托给注入的 decoder。
