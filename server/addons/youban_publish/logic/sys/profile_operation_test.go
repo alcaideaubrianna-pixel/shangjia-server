@@ -19,21 +19,9 @@ func TestProfileOperationTypeFromNo(t *testing.T) {
 	}
 }
 
-func TestProfileOperationClaimKeySerializesAllLifecycleOperationsToOneProfileLock(t *testing.T) {
-	base := profileOperationClaimKey(7, 42, profileOperationPublish)
-	for _, operation := range []profileOperationType{
-		profileOperationCreate,
-		profileOperationEdit,
-		profileOperationUnpublish,
-		profileOperationDelete,
-		profileOperationUnpublishDelete,
-		profileOperationRepublish,
-	} {
-		if got := profileOperationClaimKey(7, 42, operation); got != base {
-			t.Fatalf("operation %q used a separate profile lock: %q != %q", operation, got, base)
-		}
-	}
-	if got := profileOperationClaimKey(7, 43, profileOperationPublish); got == base {
-		t.Fatal("different profile IDs must not share a lifecycle lock")
+func TestProfileOperationClaimIsDatabaseOwned(t *testing.T) {
+	claimed, err := claimProfileOperation(nil, 7, 42, profileOperationPublish)
+	if err != nil || !claimed {
+		t.Fatalf("database-owned operation claim should not depend on Redis: claimed=%t err=%v", claimed, err)
 	}
 }
