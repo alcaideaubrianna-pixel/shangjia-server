@@ -20,11 +20,12 @@ Stream 消息只携带 `job_id`、`channel_id`、优先级和原始队列提示�
 
 账户配置使用 `unified_stream` 时才启用该传输层。`legacy` 和 `unified` 路径继续使用现有 Outbox/Asynq 实现。回滚账户配置到 `legacy` 即可停止该账户的 Stream producer；历史 Stream 消息保留给恢复任务处理。
 
-## 接入顺序
+## 当前接入状态
 
-1. 在 publish worker 内注入 GoFrame Redis 客户端适配 `RedisCommandClient` 和 `RedisGroupClient`。
-2. 事务提交后由 Outbox dispatcher 发布就绪事件。
-3. Consumer Group handler 调用现有 `enqueueTelegramJobDirect` 的幂等入口。
-4. 观察 pending、ACK 延迟、重复事件和回滚结果后再逐账户放量。
+1. Push Worker 通过 HotGo cache 基础设施创建 Redis Producer/Consumer。
+2. Outbox 领取成功后，灰度账户发布 realtime/bulk Ready Event。
+3. Consumer Group handler 重新校验账户状态，再调用现有 Asynq 入队入口。
+4. 成功处理后 ACK；Redis 或 handler 失败时保留 Outbox/Stream pending 供恢复。
+5. 目前仅完成代码接入和本地回放，生产账户仍需逐个配置 `unified_stream` 灰度。
 
 删除整个目录不会影响现有发送、删除、循环、批次和 Outbox 代码。
