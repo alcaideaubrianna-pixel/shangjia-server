@@ -7,6 +7,8 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 )
 
+const streamConsumerIdleWait = 100 * time.Millisecond
+
 // StreamEntry 是 Redis Stream 消费适配层返回的最小消息结构。
 type StreamEntry struct {
 	ID      string
@@ -60,4 +62,31 @@ func (c *RedisGroupConsumer) ConsumeOnce(ctx context.Context, stream, startID st
 		processed++
 	}
 	return processed, nil
+}
+
+// Run 持续消费一个 Stream；启动时先读取 pending，再读取新消息。
+// Redis 阻塞读取由 client 控制，空批次仅短暂让出调度，避免无消息时忙循环。
+func (c *RedisGroupConsumer) Run(ctx context.Context, stream string, handler func(context.Context, ReadyEvent) error) error {
+	if !validReadyStream(stream) || handler == nil {
+		return gerror.New("Redis Stream 运行参数无效")
+	}
+	startID := "0"
+	for {
+		processed, err := c.ConsumeOnce(ctx, stream, startID, handler)
+		if err != nil {
+			return err
+		}
+		// pending 读完后切换到新消息；后续始终使用 >，避免重复扫描历史消息。
+		startID = ">"
+		if processed > 0 {
+			continue
+		}
+		timer := time.NewTimer(streamConsumerIdleWait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
 }
