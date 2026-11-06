@@ -1020,6 +1020,10 @@ ALTER TABLE "hg_youban_publish_image_quota" ADD COLUMN IF NOT EXISTS "reset_mont
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_dispatch_source_profile_event" ON "hg_youban_publish_collect_dispatch" ("source_id", "profile_id", "event_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_chat_id" ON "hg_youban_publish_collect_event" ("source_chat_id", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_source_rule_scope" ON "hg_youban_publish_collect_source_rule" ("tenant_id", "rule_id", "source_id");
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_source_search_trgm" ON "hg_youban_publish_collect_source" USING gin ((COALESCE("source_chat_id",'') || ' ' || COALESCE("title",'') || ' ' || COALESCE("source_username",'') || ' ' || COALESCE("channel_suffix",'')) gin_trgm_ops) WHERE "deleted_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_ybp_bot_channel_cache_search_trgm" ON "hg_youban_publish_bot_channel_cache" USING gin ((COALESCE("chat_id",'') || ' ' || COALESCE("chat_title",'') || ' ' || COALESCE("chat_username",'')) gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_channel_search_trgm" ON "hg_youban_publish_collect_channel" USING gin ((COALESCE("telegram_chat_id",'') || ' ' || COALESCE("title",'') || ' ' || COALESCE("username",'')) gin_trgm_ops) WHERE "deleted_at" IS NULL;
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_channel_profile_rule_channel" ON "hg_youban_publish_collect_channel_profile" ("tenant_id", "account_id", "rule_id", "channel_id", "updated_at" DESC);
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "auto_delete_enabled" smallint NOT NULL DEFAULT 1;
 UPDATE "hg_youban_publish_channel"

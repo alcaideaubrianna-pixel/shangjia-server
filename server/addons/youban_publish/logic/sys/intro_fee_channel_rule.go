@@ -235,6 +235,10 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 	}
 	sourceModel := g.DB().Model(publishCollectSourceTable).Ctx(ctx).
 		Where("tenant_id", tenantID).WhereNull("deleted_at")
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		sourceModel = sourceModel.Where("(source_chat_id LIKE ? OR title LIKE ? OR source_username LIKE ? OR channel_suffix LIKE ?)", like, like, like, like)
+	}
 	if accountID > 0 {
 		sourceModel = sourceModel.Where("account_id", accountID)
 	}
@@ -301,6 +305,10 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 		cacheModel = cacheModel.WhereIn("bot_id", boundBotIDs)
 	}
 	cacheModel = cacheModel.WhereGT("message_count", 0).WhereNot("chat_type", "private")
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		cacheModel = cacheModel.Where("(chat_id LIKE ? OR chat_title LIKE ? OR chat_username LIKE ?)", like, like, like)
+	}
 	if aggregateBotSource {
 		// Aggregate BOT sources own every channel/group that has sent this BOT
 		// a message. The BOT cache is the compact history index for this list.
@@ -331,6 +339,10 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 	canonicalModel := g.DB().Model(pdao.YoubanPublishCollectChannel.Table()).Ctx(ctx).
 		Where("hg_youban_publish_collect_channel.tenant_id", tenantID).
 		Where("hg_youban_publish_collect_channel.status", "active").WhereNull("hg_youban_publish_collect_channel.deleted_at")
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		canonicalModel = canonicalModel.Where("(hg_youban_publish_collect_channel.telegram_chat_id LIKE ? OR hg_youban_publish_collect_channel.title LIKE ? OR hg_youban_publish_collect_channel.username LIKE ?)", like, like, like)
+	}
 	if effectiveBotID > 0 {
 		canonicalModel = canonicalModel.InnerJoin(pdao.YoubanPublishCollectBotChannel.Table()+" bc", "bc.channel_id=hg_youban_publish_collect_channel.id AND bc.tenant_id=hg_youban_publish_collect_channel.tenant_id").
 			Where("bc.bot_id", effectiveBotID).Where("bc.status", "!=", sysin.CollectBotChannelRemoved).WhereNull("bc.deleted_at")
