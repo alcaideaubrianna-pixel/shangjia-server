@@ -7,11 +7,24 @@ package cache
 
 import (
 	"context"
+	"strings"
+
+	"github.com/gogf/gf/v2/database/gredis"
+	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gcache"
 	"github.com/gogf/gf/v2/os/gfile"
 	"hotgo/internal/library/cache/file"
 )
+
+// RedisClient 返回基础设施层 Redis 客户端。
+// 只有 queue/cache 等基础设施适配器允许使用；业务逻辑应继续通过 cache.Instance()。
+func RedisClient() (*gredis.Redis, error) {
+	if strings.ToLower(strings.TrimSpace(g.Cfg().MustGet(context.Background(), "cache.adapter").String())) != "redis" {
+		return nil, gerror.New("当前缓存适配器不是 Redis")
+	}
+	return g.Redis(), nil
+}
 
 // cache 缓存驱动
 var cache *gcache.Cache
