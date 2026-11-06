@@ -39,50 +39,7 @@ func telegramChannelDisplayCacheKey(tenantId int64, tgAccountId int64, channelId
 }
 
 func (s *sSysPublish) enrichPublishRecordChannelDisplays(ctx context.Context, tenantId int64, list []*sysin.PublishRecordModel) error {
-	// List responses must never block on channel display resolution. Durable
-	// channel snapshots are filled by workers and used by the caller already;
-	// explicit detail/admin refresh paths may resolve missing labels separately.
-	return nil
-
-	type groupKey struct {
-		tenantId    int64
-		tgAccountId int64
-	}
-	groups := make(map[groupKey][]string)
-	for _, item := range list {
-		if item == nil || strings.TrimSpace(item.TargetChatId) == "" || tenantId <= 0 {
-			continue
-		}
-		if item.Action != publishSuccessTypeQuick && strings.TrimSpace(item.ChannelTitle) != "" {
-			continue
-		}
-		key := groupKey{tenantId: tenantId, tgAccountId: 0}
-		groups[key] = append(groups[key], item.TargetChatId)
-	}
-	if len(groups) == 0 {
-		return nil
-	}
-	displays := make(map[groupKey]map[string]telegramChannelDisplay, len(groups))
-	for key, channelIds := range groups {
-		items, err := s.resolveTelegramChannelDisplays(ctx, key.tenantId, key.tgAccountId, channelIds)
-		if err != nil {
-			return err
-		}
-		displays[key] = items
-	}
-	for _, item := range list {
-		if item == nil {
-			continue
-		}
-		if item.Action != publishSuccessTypeQuick && strings.TrimSpace(item.ChannelTitle) != "" {
-			continue
-		}
-		key := groupKey{tenantId: tenantId, tgAccountId: 0}
-		if display, ok := displays[key][normalizeTelegramChannelChatID(item.TargetChatId)]; ok {
-			item.ChannelTitle = display.Title
-			item.ChannelUsername = display.Username
-		}
-	}
+	// 发布记录列表使用任务持久化的频道快照，避免列表请求阻塞在Telegram频道解析。
 	return nil
 }
 
