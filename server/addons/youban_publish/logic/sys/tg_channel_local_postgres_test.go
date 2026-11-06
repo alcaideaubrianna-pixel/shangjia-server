@@ -32,9 +32,10 @@ func TestTelegramChannelHeadsLocalPostgres(t *testing.T) {
 		// Temporary tables shadow production names only in this disposable
 		// local transaction. No real worker or external service is started.
 		ddl := []string{
-			"CREATE TEMP TABLE " + publishTgJobTable + " (id bigint,tenant_id bigint,channel_id bigint,target_chat_id text,status text,dispatch_status text,next_retry_at timestamp,created_at timestamp,send_phase text)",
+			"CREATE TEMP TABLE " + publishTgJobTable + " (id bigint,tenant_id bigint,channel_id bigint,target_chat_id text,status text,dispatch_status text,next_retry_at timestamp,created_at timestamp,send_phase text,operation_no text DEFAULT '',priority int DEFAULT 50,bot_id bigint DEFAULT 0,push_mode text DEFAULT 'bot')",
 			"CREATE TEMP TABLE " + publishTgOutboxTable + " (id bigint,job_id bigint,attempt_count int,available_at timestamp,event_type text,status text,lease_expires_at timestamp)",
 			"CREATE TEMP TABLE " + publishChannelTable + " (id bigint,tenant_id bigint,tg_account_id bigint,status int,deleted_at timestamp)",
+			"CREATE TEMP TABLE " + publishBotTable + " (id bigint,tenant_id bigint,status int,bot_token text,deleted_at timestamp)",
 			"CREATE TEMP TABLE " + publishTgAccountTable + " (id bigint,tenant_id bigint,status text,session_key text,deleted_at timestamp)",
 			"CREATE TEMP TABLE " + publishTgChannelTable + " (id bigint,tenant_id bigint,tg_account_id bigint)",
 		}
@@ -56,11 +57,11 @@ func TestTelegramChannelHeadsLocalPostgres(t *testing.T) {
 			if _, err := tx.Exec("INSERT INTO "+publishChannelTable+" VALUES(?,1,1,1,NULL)", channel); err != nil {
 				return err
 			}
-			if _, err := tx.Exec("INSERT INTO "+publishTgJobTable+" VALUES(?,1,?,'',?,?,?,'2026-10-15',?)", id, channel, row["status"], row["dispatch_status"], retry, row["send_phase"]); err != nil {
+			if _, err := tx.Exec("INSERT INTO "+publishTgJobTable+" (id,tenant_id,channel_id,target_chat_id,status,dispatch_status,next_retry_at,created_at,send_phase) VALUES(?,1,?,'',?,?,?,'2026-10-15',?)", id, channel, row["status"], row["dispatch_status"], retry, row["send_phase"]); err != nil {
 				return err
 			}
 			// Older terminal display must not hide this channel's active head.
-			if _, err := tx.Exec("INSERT INTO "+publishTgJobTable+" VALUES(-?::bigint,1,?,'','failed','done',NULL,'2026-10-14','display_confirmed')", id, channel); err != nil {
+			if _, err := tx.Exec("INSERT INTO "+publishTgJobTable+" (id,tenant_id,channel_id,target_chat_id,status,dispatch_status,next_retry_at,created_at,send_phase) VALUES(-?::bigint,1,?,'','failed','done',NULL,'2026-10-14','display_confirmed')", id, channel); err != nil {
 				return err
 			}
 			if _, err := tx.Exec("INSERT INTO "+publishTgOutboxTable+" VALUES(?,?,0,?, ?,?,NULL)", id, id, row["available_at"], telegramOutboxEventPublish, row["outbox_status"]); err != nil {
@@ -69,7 +70,7 @@ func TestTelegramChannelHeadsLocalPostgres(t *testing.T) {
 			want[id] = (row["status"] == "pending" || row["status"] == "failed_retry") && row["dispatch_status"] == "idle" && (retry == nil || row["next_retry_at"] <= row["now"]) && row["outbox_status"] == "pending" && row["available_at"] <= row["now"]
 		}
 		query := func() (gdb.Result, error) {
-			return tx.GetAll(telegramDueOutboxPostgresSQL(), telegramOutboxEventPublish, rows[0]["now"], telegramOutboxPending, telegramOutboxProcessing, rows[0]["now"], rows[0]["now"], telegramOutboxEventPublish, rows[0]["now"], telegramOutboxPending, telegramOutboxProcessing, rows[0]["now"])
+			return tx.GetAll(telegramDueOutboxPostgresSQL(), telegramOutboxEventPublish, rows[0]["now"], telegramOutboxPending, telegramOutboxProcessing, rows[0]["now"], rows[0]["now"], 100)
 		}
 		assertHeads := func() error {
 			got, err := query()
@@ -92,7 +93,7 @@ func TestTelegramChannelHeadsLocalPostgres(t *testing.T) {
 			return err
 		}
 		// 100k later jobs must neither hide heads nor change eligibility.
-		if _, err := tx.Exec("INSERT INTO " + publishTgJobTable + " SELECT 3000000+n,1,42,'','pending','idle',NULL,'2026-10-16 16:00:00','' FROM generate_series(1,100000) n"); err != nil {
+		if _, err := tx.Exec("INSERT INTO " + publishTgJobTable + " (id,tenant_id,channel_id,target_chat_id,status,dispatch_status,next_retry_at,created_at,send_phase,operation_no,priority,bot_id,push_mode) SELECT 3000000+n,1,42,'','pending','idle',NULL,'2026-10-16 16:00:00','','cycle_batch:backlog',90,0,'bot' FROM generate_series(1,100000) n"); err != nil {
 			return err
 		}
 		started := time.Now()
