@@ -4,9 +4,19 @@ package streamgray
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 )
+
+// StreamForOperation 根据任务操作号选择就绪事件流。
+func StreamForOperation(operationNo string) string {
+	operationNo = strings.ToLower(strings.TrimSpace(operationNo))
+	if strings.HasPrefix(operationNo, "cycle_batch:") || strings.HasPrefix(operationNo, "full_push:") {
+		return ReadyBulkStream
+	}
+	return ReadyRealtimeStream
+}
 
 const (
 	// ReadyRealtimeStream 是实时任务就绪事件流。

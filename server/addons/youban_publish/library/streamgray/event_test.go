@@ -58,6 +58,19 @@ func TestReadyEventValidation(t *testing.T) {
 	}
 }
 
+// TestStreamForOperation 验证循环和全量任务进入 bulk 流，其他任务进入 realtime 流。
+func TestStreamForOperation(t *testing.T) {
+	if got := StreamForOperation("cycle_batch:1"); got != ReadyBulkStream {
+		t.Fatalf("cycle stream = %q", got)
+	}
+	if got := StreamForOperation("full_push:1"); got != ReadyBulkStream {
+		t.Fatalf("full push stream = %q", got)
+	}
+	if got := StreamForOperation("collect:1"); got != ReadyRealtimeStream {
+		t.Fatalf("collect stream = %q", got)
+	}
+}
+
 // TestPublishReadyEventFacade 验证业务层只能通过允许的 Stream 发布就绪事件。
 func TestPublishReadyEventFacade(t *testing.T) {
 	producer := &fakeProducer{}
