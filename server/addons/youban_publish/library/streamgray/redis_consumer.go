@@ -27,6 +27,11 @@ type RedisGroupAdmin interface {
 	CreateGroup(context.Context, string, string) error
 }
 
+// RedisPendingClaimer 用于接管其他 consumer 遗留的超时 pending 消息。
+type RedisPendingClaimer interface {
+	ClaimPending(context.Context, string, string, string, time.Duration, int) ([]StreamEntry, error)
+}
+
 // RedisGroupConsumer 实现解码、处理、成功 ACK 的固定流程。
 type RedisGroupConsumer struct {
 	client   RedisGroupClient
@@ -79,6 +84,24 @@ func (c *RedisGroupConsumer) Run(ctx context.Context, stream string, handler fun
 	if admin, ok := c.client.(RedisGroupAdmin); ok {
 		if err := admin.CreateGroup(ctx, stream, c.group); err != nil && !isGroupAlreadyExistsError(err) {
 			return gerror.Wrap(err, "初始化 Redis Stream consumer group 失败")
+		}
+	}
+	if claimer, ok := c.client.(RedisPendingClaimer); ok {
+		entries, err := claimer.ClaimPending(ctx, stream, c.group, c.consumer, 30*time.Second, c.count)
+		if err != nil {
+			return gerror.Wrap(err, "接管 Redis Stream pending 消息失败")
+		}
+		for _, entry := range entries {
+			event, decodeErr := DecodeReadyEvent(entry.Payload)
+			if decodeErr != nil {
+				return decodeErr
+			}
+			if err = handler(ctx, event); err != nil {
+				return err
+			}
+			if err = c.client.Ack(ctx, stream, c.group, entry.ID); err != nil {
+				return gerror.Wrap(err, "确认接管的 Redis Stream pending 消息失败")
+			}
 		}
 	}
 	startID := "0"

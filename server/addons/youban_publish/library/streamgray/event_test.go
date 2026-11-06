@@ -234,6 +234,9 @@ func TestRedisCommandGroupClientCommands(t *testing.T) {
 	if err = client.CreateGroup(context.Background(), ReadyRealtimeStream, "publish"); err != nil || fake.command != "XGROUP" {
 		t.Fatalf("create group err=%v command=%s args=%v", err, fake.command, fake.args)
 	}
+	if len(fake.args) < 4 || fake.args[3] != "$" {
+		t.Fatalf("new group must start at latest entry, args=%v", fake.args)
+	}
 }
 
 func TestDecodeXReadGroupResponse(t *testing.T) {

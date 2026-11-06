@@ -43,6 +43,40 @@ func DecodeXReadGroupResponse(value *gvar.Var) ([]StreamEntry, error) {
 	return entries, nil
 }
 
+// DecodeXAutoClaimResponse 解析 XAUTOCLAIM 返回的 [next-id, entries, deleted]。
+func DecodeXAutoClaimResponse(value *gvar.Var) ([]StreamEntry, error) {
+	if value == nil || value.IsNil() {
+		return nil, nil
+	}
+	parts := value.Array()
+	if len(parts) < 2 {
+		return nil, gerror.New("Redis XAUTOCLAIM 响应格式无效")
+	}
+	return decodeStreamEntries(gvar.New(parts[1]).Array())
+}
+
+func decodeStreamEntries(values []any) ([]StreamEntry, error) {
+	entries := make([]StreamEntry, 0, len(values))
+	for _, entryValue := range values {
+		entryParts := gvar.New(entryValue).Array()
+		if len(entryParts) < 2 {
+			return nil, gerror.New("Redis Stream entry 响应格式无效")
+		}
+		fields := gvar.New(entryParts[1]).Array()
+		entry := StreamEntry{ID: gvar.New(entryParts[0]).String()}
+		for i := 0; i+1 < len(fields); i += 2 {
+			if gvar.New(fields[i]).String() == "payload" {
+				entry.Payload = []byte(gvar.New(fields[i+1]).String())
+			}
+		}
+		if entry.ID == "" || len(entry.Payload) == 0 {
+			return nil, gerror.New("Redis Stream entry 缺少 payload")
+		}
+		entries = append(entries, entry)
+	}
+	return entries, nil
+}
+
 // StreamReadDecoder 将 Redis XREADGROUP 原始响应转换为统一消息结构。
 type StreamReadDecoder func(*gvar.Var) ([]StreamEntry, error)
 
@@ -102,8 +136,20 @@ func (c *RedisCommandGroupClient) CreateGroup(ctx context.Context, stream, group
 	if stream == "" || group == "" {
 		return gerror.New("Redis Stream XGROUP 参数无效")
 	}
-	if _, err := c.client.Do(ctx, "XGROUP", "CREATE", stream, group, "0", "MKSTREAM"); err != nil {
+	if _, err := c.client.Do(ctx, "XGROUP", "CREATE", stream, group, "$", "MKSTREAM"); err != nil {
 		return gerror.Wrap(err, "创建 Redis Stream consumer group 失败")
 	}
 	return nil
+}
+
+// ClaimPending 使用 XAUTOCLAIM 接管其他 consumer 遗留的超时消息。
+func (c *RedisCommandGroupClient) ClaimPending(ctx context.Context, stream, group, consumer string, minIdle time.Duration, count int) ([]StreamEntry, error) {
+	if stream == "" || group == "" || consumer == "" || count <= 0 {
+		return nil, gerror.New("Redis Stream XAUTOCLAIM 参数无效")
+	}
+	result, err := c.client.Do(ctx, "XAUTOCLAIM", stream, group, consumer, minIdle.Milliseconds(), "0-0", "COUNT", count)
+	if err != nil {
+		return nil, gerror.Wrap(err, "执行 Redis Stream XAUTOCLAIM 失败")
+	}
+	return DecodeXAutoClaimResponse(result)
 }
