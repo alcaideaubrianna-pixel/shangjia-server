@@ -238,3 +238,43 @@ func TestProfileFilterOptionsLocalPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestProfileChannelMappingIsAccountScopedLocalPostgres 验证同一资料在不同账户下不会串读频道映射。
+func TestProfileChannelMappingIsAccountScopedLocalPostgres(t *testing.T) {
+	if os.Getenv("YOUBAN_PROFILE_CHANNEL_MAPPING_PG") != "1" {
+		t.Skip("requires disposable local PostgreSQL")
+	}
+	before := gdb.GetConfig("default")
+	t.Cleanup(func() { gdb.SetConfigGroup("default", before) })
+	gdb.SetConfigGroup("default", gdb.ConfigGroup{{Link: "pgsql:test:@tcp(127.0.0.1:55483)/postgres"}})
+	err := g.DB().Transaction(context.Background(), func(ctx context.Context, tx gdb.TX) error {
+		for _, query := range []string{
+			"CREATE TEMP TABLE hg_youban_publish_profile_channel(tenant_id bigint,account_id bigint,profile_id bigint,channel_id bigint,is_manual smallint,deleted_at timestamp) ON COMMIT DROP",
+			"CREATE TEMP TABLE hg_youban_publish_channel(id bigint,tenant_id bigint,status smallint,publish_direction text,deleted_at timestamp) ON COMMIT DROP",
+			"INSERT INTO hg_youban_publish_profile_channel VALUES(7,10,1,100,1,NULL),(7,20,1,200,1,NULL)",
+			"INSERT INTO hg_youban_publish_channel VALUES(100,7,1,'up',NULL),(200,7,1,'up',NULL)",
+		} {
+			if _, err := tx.Exec(query); err != nil {
+				return err
+			}
+		}
+		first, err := profileChannelIds(ctx, 7, 10, 1)
+		if err != nil {
+			return err
+		}
+		if len(first) != 1 || first[0] != 100 {
+			t.Fatalf("account 10 mapping = %v, want [100]", first)
+		}
+		second, err := profileChannelIds(ctx, 7, 20, 1)
+		if err != nil {
+			return err
+		}
+		if len(second) != 1 || second[0] != 200 {
+			t.Fatalf("account 20 mapping = %v, want [200]", second)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
