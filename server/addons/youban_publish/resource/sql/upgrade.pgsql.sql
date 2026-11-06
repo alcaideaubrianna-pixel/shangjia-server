@@ -727,6 +727,15 @@ BEGIN
   END IF;
 END $$;
 
+-- Cover filtered cursor sorts used by /publish/admin/note/list. Keep the
+-- partial predicates aligned with the read model's soft-delete scope.
+CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_tenant_source_updated" ON "hg_youban_publish_note_index" ("tenant_id", "is_collected", "updated_at" DESC, "id" DESC) INCLUDE ("account_id", "profile_id") WHERE "deleted_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_account_source_updated" ON "hg_youban_publish_note_index" ("account_id", "is_collected", "updated_at" DESC, "id" DESC) INCLUDE ("tenant_id", "profile_id") WHERE "deleted_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_tenant_status_published" ON "hg_youban_publish_note_index" ("tenant_id", "status", (COALESCE("published_at", '1970-01-01'::timestamp)) DESC, "id" DESC) WHERE "deleted_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_account_status_published" ON "hg_youban_publish_note_index" ("account_id", "status", (COALESCE("published_at", '1970-01-01'::timestamp)) DESC, "id" DESC) WHERE "deleted_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_tenant_status_updated" ON "hg_youban_publish_note_index" ("tenant_id", "status", "updated_at" DESC, "id" DESC) WHERE "deleted_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_account_status_updated" ON "hg_youban_publish_note_index" ("account_id", "status", "updated_at" DESC, "id" DESC) WHERE "deleted_at" IS NULL;
+
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_profile_state" (
   "id" BIGSERIAL PRIMARY KEY,
   "tenant_id" bigint NOT NULL DEFAULT 0,

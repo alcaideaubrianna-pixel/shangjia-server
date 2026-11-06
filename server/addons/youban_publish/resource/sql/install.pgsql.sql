@@ -182,6 +182,12 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_account_source_created" ON "hg_yo
 CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_scope_created" ON "hg_youban_publish_note_index" ("tenant_id", "account_id", "created_at" DESC, "id" DESC, "profile_id") WHERE "deleted_at" IS NULL;
 CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_tenant_published" ON "hg_youban_publish_note_index" ("tenant_id", (COALESCE("published_at", '1970-01-01'::timestamp)) DESC, "id" DESC) WHERE "deleted_at" IS NULL;
 CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_account_published" ON "hg_youban_publish_note_index" ("account_id", (COALESCE("published_at", '1970-01-01'::timestamp)) DESC, "id" DESC) WHERE "deleted_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_tenant_source_updated" ON "hg_youban_publish_note_index" ("tenant_id", "is_collected", "updated_at" DESC, "id" DESC) INCLUDE ("account_id", "profile_id") WHERE "deleted_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_account_source_updated" ON "hg_youban_publish_note_index" ("account_id", "is_collected", "updated_at" DESC, "id" DESC) INCLUDE ("tenant_id", "profile_id") WHERE "deleted_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_tenant_status_published" ON "hg_youban_publish_note_index" ("tenant_id", "status", (COALESCE("published_at", '1970-01-01'::timestamp)) DESC, "id" DESC) WHERE "deleted_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_account_status_published" ON "hg_youban_publish_note_index" ("account_id", "status", (COALESCE("published_at", '1970-01-01'::timestamp)) DESC, "id" DESC) WHERE "deleted_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_tenant_status_updated" ON "hg_youban_publish_note_index" ("tenant_id", "status", "updated_at" DESC, "id" DESC) WHERE "deleted_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_account_status_updated" ON "hg_youban_publish_note_index" ("account_id", "status", "updated_at" DESC, "id" DESC) WHERE "deleted_at" IS NULL;
 CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_profile" ON "hg_youban_publish_note_index" ("profile_id") WHERE "deleted_at" IS NULL;
 CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_title_trgm" ON "hg_youban_publish_note_index" USING gin ("title" gin_trgm_ops) WHERE "deleted_at" IS NULL;
 CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_plain_text_trgm" ON "hg_youban_publish_note_index" USING gin ("plain_text" gin_trgm_ops) WHERE "deleted_at" IS NULL;
