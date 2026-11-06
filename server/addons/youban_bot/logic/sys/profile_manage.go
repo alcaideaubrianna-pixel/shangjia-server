@@ -1339,10 +1339,7 @@ func (s *sSysBot) sendProfileCard(ctx context.Context, botId int64, chatId strin
 	if err != nil {
 		return err
 	}
-	status := "下架"
-	if note.Status == 1 {
-		status = "上架"
-	}
+	status := profileCardDisplayStatus(note)
 	mediaSummary := profileMediaSummary(note.Media)
 	header := profileCardStatusHeader(note, status)
 	if mediaSummary != "" {
@@ -1379,6 +1376,26 @@ func profileCardStatusHeader(note *publishsysin.NoteModel, status string) string
 		lines = append(lines, "下架时间："+html.EscapeString(profileCardChinaTime(note.UpdatedAt)))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func profileCardDisplayStatus(note *publishsysin.NoteModel) string {
+	if note == nil {
+		return ""
+	}
+	switch strings.ToLower(strings.TrimSpace(note.TaskStatus)) {
+	case publishsysin.PublishTaskStatusPending, publishsysin.PublishTaskStatusPublishing:
+		return "上架中"
+	case publishsysin.PublishTaskStatusFailed:
+		return "上架失败"
+	case publishsysin.PublishTaskStatusCanceled:
+		return "已取消"
+	case publishsysin.PublishTaskStatusPublished:
+		return "上架"
+	}
+	if note.Status == 1 {
+		return "上架"
+	}
+	return "下架"
 }
 
 func profileCardChinaTime(value *gtime.Time) string {
@@ -2001,7 +2018,10 @@ func profileCardMarkupForNote(note *publishsysin.NoteModel, purpose string) *mod
 		profileNo := strings.ToUpper(strings.TrimSpace(note.ProfileNo))
 		statusAction := "pf:up:"
 		statusLabel := "上架"
-		if note.Status == 1 {
+		if note.TaskStatus == publishsysin.PublishTaskStatusPending || note.TaskStatus == publishsysin.PublishTaskStatusPublishing {
+			statusAction = "pf:view:"
+			statusLabel = "上架中"
+		} else if note.Status == 1 {
 			statusAction = "pf:down:"
 			statusLabel = "下架"
 		}
