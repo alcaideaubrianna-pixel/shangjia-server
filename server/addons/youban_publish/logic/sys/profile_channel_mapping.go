@@ -15,13 +15,14 @@ type profileChannelMappingRow struct {
 	ChannelId int64 `orm:"channel_id"`
 }
 
-func profileChannelIds(ctx context.Context, tenantId, profileId int64) ([]int64, error) {
-	if tenantId <= 0 || profileId <= 0 {
+func profileChannelIds(ctx context.Context, tenantId, accountId, profileId int64) ([]int64, error) {
+	if tenantId <= 0 || accountId <= 0 || profileId <= 0 {
 		return []int64{}, nil
 	}
 	mod := g.DB().Model(publishProfileChannelTable).Safe().Ctx(ctx).
 		Fields("channel_id").
 		Where("tenant_id", tenantId).
+		Where("account_id", accountId).
 		Where("profile_id", profileId).
 		Where("is_manual", 1).
 		WhereNull("deleted_at")
@@ -102,7 +103,7 @@ func replaceProfileChannelMappings(ctx context.Context, tx gdb.TX, tenantId, acc
 }
 
 func (s *sSysPublish) profileChannelIdsOrDefaults(ctx context.Context, tenantId, accountId, profileId int64) ([]int64, error) {
-	ids, err := profileChannelIds(ctx, tenantId, profileId)
+	ids, err := profileChannelIds(ctx, tenantId, accountId, profileId)
 	if err != nil {
 		return nil, err
 	}
