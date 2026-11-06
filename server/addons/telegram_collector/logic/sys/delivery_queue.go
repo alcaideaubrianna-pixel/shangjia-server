@@ -369,9 +369,11 @@ func (s *sCollector) enqueueDueDeliveryTasks(ctx context.Context, limit int) err
 	// finite so a continuous stream of new imports cannot starve old work.
 	recentHistoryWindow := collectorDeliveryRecentHistoryWindow(ctx)
 	recentHistoryCutoff := now.Add(-recentHistoryWindow)
-	orderBy := fmt.Sprintf(
-		"%s DESC, CASE WHEN %s=? AND %s>=? THEN 0 ELSE 1 END, %s ASC",
-		columns.Priority, columns.Priority, columns.CreatedAt, columns.UpdatedAt,
+	// Order 只接受完整表达式；不能把 CASE 的参数传给 Order，否则会被 PostgreSQL 当作列名拼入 SQL。
+	orderExpression := fmt.Sprintf(
+		"%s DESC, CASE WHEN %s = %d AND %s >= '%s' THEN 0 ELSE 1 END, %s ASC",
+		columns.Priority, columns.Priority, sysin.EventPriorityNormal, columns.CreatedAt,
+		recentHistoryCutoff.Format("2006-01-02 15:04:05.999999"), columns.UpdatedAt,
 	)
 	rows, err := dao.TgCollectorDelivery.Ctx(ctx).
 		Fields(columns.Id, columns.Priority, columns.Status).
@@ -380,7 +382,7 @@ func (s *sCollector) enqueueDueDeliveryTasks(ctx context.Context, limit int) err
 			sysin.DeliveryStatusFailedRetry, now,
 		).
 		WhereLT(columns.AttemptCount, deliveryMaxAttempts).
-		Order(orderBy, sysin.EventPriorityNormal, recentHistoryCutoff).
+		Order(gdb.Raw(orderExpression)).
 		Limit(limit).
 		All()
 	if err != nil {
