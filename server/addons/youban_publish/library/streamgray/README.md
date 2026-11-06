@@ -7,6 +7,7 @@
 - `ReadyEvent`：描述数据库任务已经就绪；
 - `RedisProducer`：封装 `XADD`；
 - `RedisGroupConsumer`：封装读取、解码、handler、ACK；
+- `RunBothStreams`：同时运行 realtime/bulk 两条消费流；
 - `StreamForOperation`：选择 realtime/bulk lane。
 
 Stream 消息只携带 `job_id`、`channel_id`、优先级和原始队列提示。消费者必须通过现有 Asynq 幂等入队逻辑执行任务，不能直接调用 Telegram API。
