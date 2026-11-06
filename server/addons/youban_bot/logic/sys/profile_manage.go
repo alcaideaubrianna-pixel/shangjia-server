@@ -490,8 +490,15 @@ func (s *sSysBot) handleProfileCallback(ctx context.Context, botId int64, query 
 		if len(parts) < 4 {
 			return true, nil
 		}
-		channelID, _ := strconv.ParseInt(parts[3], 10, 64)
-		return true, s.toggleProfileChannelSelection(ctx, botId, chatId, account, no, channelID, int64(query.Message.Message.ID))
+		channelID, parseErr := strconv.ParseInt(parts[3], 10, 64)
+		if parseErr != nil || channelID <= 0 {
+			return true, gerror.New("频道参数无效，请重新打开频道编辑")
+		}
+		toggleErr := s.toggleProfileChannelSelection(ctx, botId, chatId, account, no, channelID, int64(query.Message.Message.ID))
+		if toggleErr != nil {
+			_, _ = bot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "频道切换失败，请重试", ShowAlert: true})
+		}
+		return true, toggleErr
 	case "chconfirm":
 		return true, s.confirmProfileChannelSelection(ctx, botId, chatId, account, no)
 	case "editback":
@@ -4024,12 +4031,19 @@ func (s *sSysBot) toggleProfileChannelSelection(ctx context.Context, botID int64
 		return nil
 	}
 	value, err := cache.Instance().Get(ctx, profileChannelEditKey(account.AccountId, no))
-	if err != nil || value.IsNil() {
-		return s.showProfileChannelEditMenuMessage(ctx, botID, chatID, account, no, messageID)
+	var ids []int64
+	if err == nil && value != nil && !value.IsNil() {
+		ids = decodeProfileChannelIDs(value.String())
 	}
-	ids := decodeProfileChannelIDs(value.String())
 	if ids == nil {
-		return s.showProfileChannelEditMenuMessage(ctx, botID, chatID, account, no, messageID)
+		note, viewErr := publishService.SysPublish().BotProfileView(ctx, botProfileViewInput(account, no))
+		if viewErr != nil {
+			return viewErr
+		}
+		if note == nil {
+			return gerror.New("资料不存在，无法编辑上架频道")
+		}
+		ids = append([]int64(nil), note.ChannelIds...)
 	}
 	result := toggleProfileChannelID(ids, channelID)
 	if encoded, marshalErr := json.Marshal(result); marshalErr == nil {
