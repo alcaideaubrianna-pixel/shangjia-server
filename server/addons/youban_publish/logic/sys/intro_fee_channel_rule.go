@@ -166,6 +166,13 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 	if perPage <= 0 || perPage > 100 {
 		perPage = 20
 	}
+	candidateLimit := page * perPage * 2
+	if candidateLimit < 100 {
+		candidateLimit = 100
+	}
+	if candidateLimit > 500 {
+		candidateLimit = 500
+	}
 	conf, configErr := s.CollectConfig(ctx)
 	if configErr != nil {
 		return nil, 0, configErr
@@ -179,7 +186,7 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 	} else {
 		configuredModel = configuredModel.Where("bot_id", 0)
 	}
-	if err := configuredModel.OrderDesc("account_id").OrderDesc("bot_id").OrderDesc("updated_at").Limit(introFeeChannelCandidateScanLimit).Scan(&configured); err != nil {
+	if err := configuredModel.OrderDesc("account_id").OrderDesc("bot_id").OrderDesc("updated_at").Limit(candidateLimit).Scan(&configured); err != nil {
 		return nil, 0, err
 	}
 	seen := make(map[string]struct{}, len(configured))
@@ -227,7 +234,7 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 		sourceModel = sourceModel.Where("EXISTS (SELECT 1 FROM "+pdao.YoubanPublishCollectSourceRule.Table()+" sr WHERE sr.source_id="+publishCollectSourceTable+".id AND sr.rule_id=? AND sr.tenant_id=?)", ruleID, tenantID)
 	}
 	var sourceRows []sourceCandidate
-	if err := sourceModel.Fields("status,collect_enabled,bot_id,source_chat_id,title AS chat_title,source_username AS chat_username,last_event_at AS last_message_at").OrderDesc("updated_at").Limit(introFeeChannelCandidateScanLimit).Scan(&sourceRows); err != nil {
+	if err := sourceModel.Fields("status,collect_enabled,bot_id,source_chat_id,title AS chat_title,source_username AS chat_username,last_event_at AS last_message_at").OrderDesc("updated_at").Limit(candidateLimit).Scan(&sourceRows); err != nil {
 		return nil, 0, err
 	}
 	// Aggregate BOT sources have no source_chat_id. Their compact
@@ -240,7 +247,7 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 	if err := g.DB().Model(publishCollectChannelProfileTable).Ctx(ctx).
 		Fields("channel_id,COUNT(DISTINCT profile_id) AS profile_count,MAX(updated_at) AS last_seen_at").
 		Where("tenant_id", tenantID).Where("account_id", accountID).Where("rule_id", ruleID).WhereNull("deleted_at").
-		Group("channel_id").OrderDesc("last_seen_at").Limit(introFeeChannelCandidateScanLimit).Scan(&indexedRows); err != nil {
+		Group("channel_id").OrderDesc("last_seen_at").Limit(candidateLimit).Scan(&indexedRows); err != nil {
 		return nil, 0, gerror.Wrap(err, "读取频道资料索引失败")
 	}
 	collectionSources := append([]sourceCandidate(nil), sourceRows...)
@@ -301,7 +308,7 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 		ChatUsername string      `orm:"chat_username"`
 		LastSeenAt   *gtime.Time `orm:"last_message_at"`
 	}
-	if err := cacheModel.Fields("chat_id,chat_title,chat_username,last_message_at").OrderDesc("last_message_at").Limit(introFeeChannelCandidateScanLimit).Scan(&candidates); err != nil {
+	if err := cacheModel.Fields("chat_id,chat_title,chat_username,last_message_at").OrderDesc("last_message_at").Limit(candidateLimit).Scan(&candidates); err != nil {
 		return nil, 0, err
 	}
 	var canonicalCandidates []struct {
@@ -329,7 +336,7 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 	}
 	if err := canonicalModel.
 		Fields("telegram_chat_id AS chat_id,title AS chat_title,username AS chat_username,last_seen_at AS last_message_at").
-		OrderDesc("last_seen_at").Limit(introFeeChannelCandidateScanLimit).Scan(&canonicalCandidates); err == nil {
+		OrderDesc("last_seen_at").Limit(candidateLimit).Scan(&canonicalCandidates); err == nil {
 		candidates = append(candidates, canonicalCandidates...)
 	}
 	// Collection sources are the compact historical index. Never scan the event
