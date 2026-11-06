@@ -7,7 +7,6 @@ package queue
 
 import (
 	"context"
-	"fmt"
 	"github.com/IBM/sarama"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -98,7 +97,7 @@ func (r *KafkaMq) ListenReceiveMsgDo(topic string, receiveDo func(mqMsg MqMsg)) 
 			}
 
 			if consumerCtx.Err() != nil {
-				Logger().Debugf(ctx, fmt.Sprintf("kafka consoumer stop : %v", consumerCtx.Err()))
+				Logger().Debugf(ctx, "kafka consoumer stop : %v", consumerCtx.Err())
 				return
 			}
 			consumer.ready = make(chan bool)
