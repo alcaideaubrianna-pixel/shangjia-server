@@ -524,6 +524,12 @@ export function VipConfigSave(params = {}) {
 export function VipTenantSave(params = {}) {
   return http.request({ url: '/youban_publish/publish/vip/tenant/save', method: 'POST', params });
 }
+export function VipQuotaView(params = {}) {
+  return http.request({ url: '/youban_publish/publish/vip/tenant/quota/view', method: 'get', params });
+}
+export function VipQuotaSave(params = {}) {
+  return http.request({ url: '/youban_publish/publish/vip/tenant/quota/save', method: 'POST', params });
+}
 
 export function VipFeatureView(params = {}) {
   return http.request({ url: '/youban_publish/publish/vip/feature/view', method: 'get', params });

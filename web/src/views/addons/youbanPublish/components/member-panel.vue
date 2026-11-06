@@ -152,6 +152,8 @@
     </n-modal>
 
     <n-modal v-model:show="tenantVipVisible" preset="dialog" title="账号会员配置">
+      <n-tabs type="line">
+      <n-tab-pane name="vip" tab="会员时间">
       <n-form :model="tenantVipForm" label-placement="left" label-width="100">
         <n-form-item label="账号归属">
           <n-select v-model:value="tenantVipForm.tenantId" :options="tenantOptions" filterable />
@@ -166,6 +168,18 @@
           ><n-input v-model:value="tenantVipForm.remark" type="textarea" clearable
         /></n-form-item>
       </n-form>
+      </n-tab-pane>
+      <n-tab-pane name="quota" tab="防扫图额度">
+        <n-form :model="quotaForm" label-placement="left" label-width="110">
+          <n-form-item label="账号归属"><n-select v-model:value="quotaForm.tenantId" :options="tenantOptions" /></n-form-item>
+          <n-form-item label="月度额度"><n-input-number v-model:value="quotaForm.monthlyLimit" :min="0" /></n-form-item>
+          <n-form-item label="已使用"><n-input-number v-model:value="quotaForm.monthlyUsed" :min="0" /></n-form-item>
+          <n-form-item label="额外额度"><n-input-number v-model:value="quotaForm.purchasedRemaining" :min="0" /></n-form-item>
+          <n-form-item label="每月自动重置"><n-switch v-model:value="quotaForm.resetMonthly" /></n-form-item>
+        </n-form>
+        <template #action><n-button type="primary" :loading="quotaSaving" @click="saveQuota">保存额度</n-button></template>
+      </n-tab-pane>
+      </n-tabs>
       <template #action>
         <n-space justify="end">
           <n-button @click="tenantVipVisible = false">取消</n-button>
@@ -198,6 +212,8 @@
     VipFeatureView,
     VipOrderList,
     VipTenantSave,
+    VipQuotaView,
+    VipQuotaSave,
   } from '@/api/addons/youbanPublish';
   import VipLogTable from './VipLogTable.vue';
   import { currencyOptions, defaultConfig, paymentGatewayOptions } from './member-panel-config';
@@ -214,6 +230,8 @@
   const orderLoading = ref(false);
   const couponLoading = ref(false);
   const tenantVipSaving = ref(false);
+  const quotaSaving = ref(false);
+  const quotaForm = reactive({ tenantId: null as number | null, monthlyLimit: 5000, monthlyUsed: 0, purchasedRemaining: 0, resetMonthly: true });
   const vipLogTableRef = ref<{ load: (reset?: boolean) => Promise<void> }>();
   const tenants = ref<Recordable[]>([]);
   const orders = ref<Recordable[]>([]);
@@ -460,7 +478,11 @@
       tenantId: currentTenantId,
     });
     tenantVipVisible.value = true;
+    if (currentTenantId) void loadQuota(currentTenantId);
   }
+
+  async function loadQuota(tenantId: number) { const res = await VipQuotaView({ tenantId }); Object.assign(quotaForm, res?.data || res || {}, { tenantId }); }
+  async function saveQuota() { if (!quotaForm.tenantId) return; quotaSaving.value = true; try { await VipQuotaSave(quotaForm); message.success('额度已保存'); } finally { quotaSaving.value = false; } }
 
   async function openVipRecords(tenantId?: number) {
     query.tenantId = tenantId || null;
