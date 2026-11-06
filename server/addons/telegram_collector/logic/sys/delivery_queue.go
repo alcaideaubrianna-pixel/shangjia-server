@@ -47,10 +47,7 @@ func (s *sCollector) StartDeliveryRuntime(ctx context.Context) {
 	runtimeCtx := s.ensureRuntimeContext(ctx)
 	server := asynq.NewServer(collectorRedisOption(runtimeCtx), asynq.Config{
 		Concurrency: collectorDeliveryConcurrency(runtimeCtx),
-		Queues: map[string]int{
-			consts.QueueDeliveryUrgentLive: 8,
-			consts.QueueDeliveryRealtime:   2,
-		},
+		Queues:      deliveryRealtimeQueues(),
 	})
 	if s.queueClient == nil {
 		s.queueClient = asynq.NewClient(collectorRedisOption(runtimeCtx))
@@ -120,7 +117,7 @@ func (s *sCollector) handleDeliveryTask(ctx context.Context, task *asynq.Task) e
 		case <-timer.C:
 		}
 	}
-	if queue == consts.QueueDeliveryHistory || strings.HasPrefix(queue, consts.QueueDeliveryHistoryShardPrefix) {
+	if queue == consts.QueueDeliveryHistory || strings.HasPrefix(queue, consts.QueueDeliveryHistoryShardPrefix) || strings.HasPrefix(queue, consts.QueueDeliveryRealtimeShardPrefix) || strings.HasPrefix(queue, consts.QueueDeliveryUrgentShardPrefix) {
 		accountID := deliveryAccountID(ctx, deliveryID)
 		releaseAccountSlot, acquired := s.acquireHistoryAccountSlot(ctx, accountID)
 		if !acquired {
@@ -451,9 +448,15 @@ func (s *sCollector) persistedDeliveryPriority(ctx context.Context, deliveryID i
 
 func deliveryQueueName(ctx context.Context, deliveryID int64, priority int) string {
 	if priority >= sysin.EventPriorityUrgent {
+		if accountID := deliveryAccountID(ctx, deliveryID); accountID > 0 {
+			return consts.DeliveryUrgentShardQueue(accountID)
+		}
 		return consts.QueueDeliveryUrgentLive
 	}
 	if priority >= sysin.EventPriorityRealtime {
+		if accountID := deliveryAccountID(ctx, deliveryID); accountID > 0 {
+			return consts.DeliveryRealtimeShardQueue(accountID)
+		}
 		return consts.QueueDeliveryRealtime
 	}
 	accountID := deliveryAccountID(ctx, deliveryID)
@@ -467,6 +470,15 @@ func deliveryHistoryQueues() map[string]int {
 	queues := map[string]int{consts.QueueDeliveryHistory: 1}
 	for accountID := int64(0); accountID < consts.DeliveryHistoryShardCount; accountID++ {
 		queues[fmt.Sprintf("%s%02d", consts.QueueDeliveryHistoryShardPrefix, accountID)] = 1
+	}
+	return queues
+}
+
+func deliveryRealtimeQueues() map[string]int {
+	queues := map[string]int{consts.QueueDeliveryUrgentLive: 8, consts.QueueDeliveryRealtime: 2}
+	for accountID := int64(0); accountID < consts.DeliveryHistoryShardCount; accountID++ {
+		queues[fmt.Sprintf("%s%02d", consts.QueueDeliveryUrgentShardPrefix, accountID)] = 2
+		queues[fmt.Sprintf("%s%02d", consts.QueueDeliveryRealtimeShardPrefix, accountID)] = 1
 	}
 	return queues
 }
