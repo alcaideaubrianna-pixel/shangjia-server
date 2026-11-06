@@ -3952,13 +3952,20 @@ func (s *sSysBot) showProfileChannelEditMenuMessage(ctx context.Context, botId i
 	if err != nil {
 		return s.replyBotError(ctx, botId, chatId, "上架频道编辑", err)
 	}
-	selected := make(map[int64]bool, len(note.ChannelIds))
-	for _, id := range note.ChannelIds {
-		selected[id] = true
-	}
 	selectionKey := profileChannelEditKey(account.AccountId, no)
-	if cached, cacheErr := cache.Instance().Get(ctx, selectionKey); cacheErr != nil || cached.IsNil() {
-		_ = cache.Instance().Set(ctx, selectionKey, note.ChannelIds, 10*time.Minute)
+	selectedIDs := append([]int64(nil), note.ChannelIds...)
+	if cached, cacheErr := cache.Instance().Get(ctx, selectionKey); cacheErr == nil && cached != nil && !cached.IsNil() {
+		if decoded := decodeProfileChannelIDs(cached.String()); decoded != nil {
+			selectedIDs = decoded
+		}
+	} else {
+		if encoded, marshalErr := json.Marshal(selectedIDs); marshalErr == nil {
+			_ = cache.Instance().Set(ctx, selectionKey, string(encoded), 10*time.Minute)
+		}
+	}
+	selected := make(map[int64]bool, len(selectedIDs))
+	for _, id := range selectedIDs {
+		selected[id] = true
 	}
 	buttons := make([][]models.InlineKeyboardButton, 0, len(channels)+2)
 	for _, channel := range channels {
@@ -4009,8 +4016,13 @@ func (s *sSysBot) toggleProfileChannelSelection(ctx context.Context, botID int64
 		return s.showProfileChannelEditMenuMessage(ctx, botID, chatID, account, no, messageID)
 	}
 	ids := decodeProfileChannelIDs(value.String())
+	if ids == nil {
+		return s.showProfileChannelEditMenuMessage(ctx, botID, chatID, account, no, messageID)
+	}
 	result := toggleProfileChannelID(ids, channelID)
-	_ = cache.Instance().Set(ctx, profileChannelEditKey(account.AccountId, no), result, 10*time.Minute)
+	if encoded, marshalErr := json.Marshal(result); marshalErr == nil {
+		_ = cache.Instance().Set(ctx, profileChannelEditKey(account.AccountId, no), string(encoded), 10*time.Minute)
+	}
 	return s.showProfileChannelEditMenuMessage(ctx, botID, chatID, account, no, messageID)
 }
 
