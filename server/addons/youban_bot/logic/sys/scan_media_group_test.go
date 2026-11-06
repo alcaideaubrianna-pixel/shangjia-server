@@ -59,6 +59,17 @@ func TestClaimScanMediaGroupResolvedScopesGroups(t *testing.T) {
 	}
 }
 
+func TestScanMediaBatchSessionKeyScopesMediaGroups(t *testing.T) {
+	first := scanMediaBatchSessionKey(59, "100", "album-a")
+	second := scanMediaBatchSessionKey(59, "100", "album-b")
+	if first == second {
+		t.Fatal("different Telegram media groups must not share a batch session")
+	}
+	if first != scanMediaBatchSessionKey(59, "100", "album-a") {
+		t.Fatal("same Telegram media group must have a stable batch session key")
+	}
+}
+
 func TestHasScanMediaKeepsSingleImageEligible(t *testing.T) {
 	msg := &models.Message{Photo: []models.PhotoSize{{FileID: "photo"}}}
 	if !hasScanMedia(msg) {

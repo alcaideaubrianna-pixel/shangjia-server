@@ -80,7 +80,9 @@ func (scanMediaMessageHandler) Handle(ctx context.Context, bot *sSysBot, event *
 		return true, bot.searchScanMediaAndReply(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.Chat.ID), account, items)
 	}
 	userId := fmt.Sprintf("%d", event.Msg.From.ID)
-	batchId, err := bot.scanMediaBatch(ctx, event.BotId, userId)
+	// Telegram assigns one stable media_group_id to every album. Use it as
+	// the batch identity so concurrent updates share one ACK/finalizer.
+	batchId, err := bot.scanMediaBatch(ctx, event.BotId, userId, strings.TrimSpace(event.Msg.MediaGroupID))
 	if err != nil {
 		g.Log().Warningf(ctx, "创建扫图批次失败 botId:%d messageId:%d err:%+v", event.BotId, event.Msg.ID, err)
 		return true, err

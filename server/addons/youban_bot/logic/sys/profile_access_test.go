@@ -116,6 +116,16 @@ func TestToggleProfileChannelID(t *testing.T) {
 	}
 }
 
+func TestDecodeProfileChannelIDs(t *testing.T) {
+	ids := decodeProfileChannelIDs(`[12,34]`)
+	if len(ids) != 2 || ids[0] != 12 || ids[1] != 34 {
+		t.Fatalf("unexpected decoded channel ids: %#v", ids)
+	}
+	if got := decodeProfileChannelIDs("not-json"); got != nil {
+		t.Fatalf("invalid channel ids should decode as nil: %#v", got)
+	}
+}
+
 func TestProfileEditSuccessMarkupReusesPublishCallback(t *testing.T) {
 	markup := profileEditSuccessMarkup("a10005")
 	if markup == nil || len(markup.InlineKeyboard) == 0 || len(markup.InlineKeyboard[0]) < 2 {

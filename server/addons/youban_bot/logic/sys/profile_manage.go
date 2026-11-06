@@ -4008,13 +4008,18 @@ func (s *sSysBot) toggleProfileChannelSelection(ctx context.Context, botID int64
 	if err != nil || value.IsNil() {
 		return s.showProfileChannelEditMenuMessage(ctx, botID, chatID, account, no, messageID)
 	}
-	var ids []int64
-	if value.Scan(&ids) != nil {
-		ids = nil
-	}
+	ids := decodeProfileChannelIDs(value.String())
 	result := toggleProfileChannelID(ids, channelID)
 	_ = cache.Instance().Set(ctx, profileChannelEditKey(account.AccountId, no), result, 10*time.Minute)
 	return s.showProfileChannelEditMenuMessage(ctx, botID, chatID, account, no, messageID)
+}
+
+func decodeProfileChannelIDs(raw string) []int64 {
+	var ids []int64
+	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &ids); err != nil {
+		return nil
+	}
+	return ids
 }
 
 func toggleProfileChannelID(ids []int64, channelID int64) []int64 {
@@ -4041,10 +4046,7 @@ func (s *sSysBot) confirmProfileChannelSelection(ctx context.Context, botID int6
 	if err != nil || value.IsNil() {
 		return s.replyBotError(ctx, botID, chatID, "上架频道编辑", gerror.New("频道选择已过期，请重新进入编辑"))
 	}
-	var ids []int64
-	if err = value.Scan(&ids); err != nil {
-		return err
-	}
+	ids := decodeProfileChannelIDs(value.String())
 	if _, err = publishService.SysPublish().BotProfileEdit(ctx, &publishsysin.BotProfileEditInp{TenantId: account.TenantId, AccountId: account.AccountId, ProfileNo: no, ChannelIds: ids}); err != nil {
 		return s.replyBotError(ctx, botID, chatID, "上架频道编辑", err)
 	}

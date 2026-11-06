@@ -116,31 +116,19 @@ func (s *sSysBot) completeScanMediaGroupItem(ctx context.Context, botId int64, u
 	return cache.Instance().Set(ctx, key, string(data), scanMediaGroupTTL)
 }
 
-func scanMediaBatchSessionKey(botId int64, userId string) string {
-	return fmt.Sprintf("youban_bot:scan_batch:%d:%s", botId, strings.TrimSpace(userId))
+func scanMediaBatchSessionKey(botId int64, userId string, groupId string) string {
+	return fmt.Sprintf("youban_bot:scan_batch:%d:%s:%s", botId, strings.TrimSpace(userId), strings.TrimSpace(groupId))
 }
 
-func (s *sSysBot) scanMediaBatch(ctx context.Context, botId int64, userId string) (string, error) {
-	lockCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-	lock := hglock.NewConfig(10*time.Second, 50*time.Millisecond).Mutex(scanMediaBatchSessionKey(botId, userId) + ":lock")
-	if err := lock.Lock(lockCtx); err != nil {
-		return "", err
+func (s *sSysBot) scanMediaBatch(ctx context.Context, botId int64, userId string, groupId string) (string, error) {
+	groupId = strings.TrimSpace(groupId)
+	if groupId == "" {
+		return "", fmt.Errorf("媒体组标识不能为空")
 	}
-	defer func() { _ = lock.Unlock(context.Background()) }()
-
-	key := scanMediaBatchSessionKey(botId, userId)
-	if value, err := cache.Instance().Get(ctx, key); err == nil && value != nil && !value.IsNil() {
-		batchId := strings.TrimSpace(value.String())
-		if batchId != "" && !s.scanMediaGroupResolved(ctx, botId, userId, batchId) {
-			return batchId, nil
-		}
-	}
-	batchId := strings.ToUpper(grand.S(12))
-	if err := cache.Instance().Set(ctx, key, batchId, scanMediaGroupTTL); err != nil {
-		return "", err
-	}
-	return batchId, nil
+	// The Telegram media_group_id is stable across webhook redelivery. Keep it
+	// as the batch id so a late duplicate update observes the same resolved
+	// marker instead of opening a second batch and sending another ACK.
+	return groupId, nil
 }
 
 func scanMediaGroupKey(botId int64, userId string, groupId string) string {
