@@ -390,6 +390,7 @@ youbanPublish:
   redisStream:
     # Redis Stream 灰度开关。默认关闭，仅 Push Worker 角色读取；按账户 push_engine=unified_stream 灰度。
     grayEnabled: false
+    consumerGroup: "youban_publish_push"
   # Enable only after explicit profile_origin migration and all writer versions are verified.
   profileOriginEnabled: false
   cycle:

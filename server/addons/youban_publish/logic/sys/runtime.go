@@ -64,7 +64,7 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 	if config.PushWorker {
 		s.startTelegramPushWorker(ctx)
 		if config.RedisStreamGray {
-			g.Log().Info(ctx, "Redis Stream 灰度消费者开关已开启，等待 Worker 适配器注入")
+			go s.runRedisStreamGrayConsumer(ctx)
 		}
 	}
 	if telegramDeliveryRuntimeEnabled(config) {
