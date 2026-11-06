@@ -43,7 +43,7 @@ func (f *fakeProducer) Add(_ context.Context, stream string, event ReadyEvent) (
 
 // TestReadyEventRoundTrip 验证就绪事件编码和解码保持幂等字段。
 func TestReadyEventRoundTrip(t *testing.T) {
-	want := ReadyEvent{JobID: 123, ChannelID: 456, Priority: 90, QueueName: "publish"}
+	want := ReadyEvent{TenantID: 10, AccountID: 20, JobID: 123, ChannelID: 456, Priority: 90, QueueName: "publish"}
 	body, err := want.Encode()
 	if err != nil {
 		t.Fatal(err)
@@ -59,10 +59,10 @@ func TestReadyEventRoundTrip(t *testing.T) {
 
 // TestReadyEventValidation 验证无效事件不会进入传输适配层。
 func TestReadyEventValidation(t *testing.T) {
-	if _, err := (ReadyEvent{ChannelID: 1}).Encode(); err == nil {
+	if _, err := (ReadyEvent{JobID: 1, ChannelID: 1}).Encode(); err == nil {
 		t.Fatal("missing job id must fail")
 	}
-	if _, err := DecodeReadyEvent([]byte(`{"job_id":1}`)); err == nil {
+	if _, err := DecodeReadyEvent([]byte(`{"tenant_id":1,"account_id":1,"job_id":1}`)); err == nil {
 		t.Fatal("missing channel id must fail")
 	}
 }
@@ -83,7 +83,7 @@ func TestStreamForOperation(t *testing.T) {
 // TestPublishReadyEventFacade 验证业务层只能通过允许的 Stream 发布就绪事件。
 func TestPublishReadyEventFacade(t *testing.T) {
 	producer := &fakeProducer{}
-	event := ReadyEvent{JobID: 1, ChannelID: 2}
+	event := ReadyEvent{TenantID: 1, AccountID: 2, JobID: 1, ChannelID: 2}
 	id, err := PublishReadyEvent(context.Background(), producer, ReadyRealtimeStream, event)
 	if err != nil || id != "1-0" || producer.stream != ReadyRealtimeStream || producer.event != event {
 		t.Fatalf("publish result id=%q err=%v producer=%+v", id, err, producer)
@@ -100,13 +100,13 @@ func TestPublishAfterCommit(t *testing.T) {
 	if _, err := PublishAfterCommit(context.Background(), func(context.Context) error {
 		called = true
 		return context.Canceled
-	}, producer, ReadyRealtimeStream, ReadyEvent{JobID: 1, ChannelID: 2}); err != context.Canceled {
+	}, producer, ReadyRealtimeStream, ReadyEvent{TenantID: 1, AccountID: 2, JobID: 1, ChannelID: 2}); err != context.Canceled {
 		t.Fatalf("commit err = %v", err)
 	}
 	if !called || producer.stream != "" {
 		t.Fatalf("commit failure must not publish: called=%t producer=%+v", called, producer)
 	}
-	if _, err := PublishAfterCommit(context.Background(), func(context.Context) error { return nil }, producer, ReadyRealtimeStream, ReadyEvent{JobID: 1, ChannelID: 2}); err != nil {
+	if _, err := PublishAfterCommit(context.Background(), func(context.Context) error { return nil }, producer, ReadyRealtimeStream, ReadyEvent{TenantID: 1, AccountID: 2, JobID: 1, ChannelID: 2}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -114,7 +114,7 @@ func TestPublishAfterCommit(t *testing.T) {
 // TestDispatchReadyEvent 验证 Stream 只调用现有任务调度器，不直接执行发送。
 func TestDispatchReadyEvent(t *testing.T) {
 	dispatcher := &fakeDispatcher{}
-	event := ReadyEvent{JobID: 7, ChannelID: 9}
+	event := ReadyEvent{TenantID: 1, AccountID: 2, JobID: 7, ChannelID: 9}
 	if err := DispatchReadyEvent(context.Background(), dispatcher, event); err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestRedisProducerXAdd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := producer.Add(context.Background(), ReadyRealtimeStream, ReadyEvent{JobID: 1, ChannelID: 2})
+	id, err := producer.Add(context.Background(), ReadyRealtimeStream, ReadyEvent{TenantID: 1, AccountID: 2, JobID: 1, ChannelID: 2})
 	if err != nil || id != "1700000000000-0" {
 		t.Fatalf("id=%q err=%v", id, err)
 	}
@@ -154,7 +154,7 @@ func TestRedisProducerXAdd(t *testing.T) {
 
 // TestRedisGroupConsumerAcksAfterHandler 验证只有 handler 成功后才确认消息。
 func TestRedisGroupConsumerAcksAfterHandler(t *testing.T) {
-	body, err := (ReadyEvent{JobID: 1, ChannelID: 2}).Encode()
+	body, err := (ReadyEvent{TenantID: 1, AccountID: 2, JobID: 1, ChannelID: 2}).Encode()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +176,7 @@ func TestRedisGroupConsumerAcksAfterHandler(t *testing.T) {
 
 // TestRedisGroupConsumerKeepsFailedEntryPending 验证 handler 失败时绝不 ACK，便于重试或恢复消费者接管。
 func TestRedisGroupConsumerKeepsFailedEntryPending(t *testing.T) {
-	body, err := (ReadyEvent{JobID: 2, ChannelID: 3}).Encode()
+	body, err := (ReadyEvent{TenantID: 1, AccountID: 2, JobID: 2, ChannelID: 3}).Encode()
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -32,6 +32,8 @@ func validReadyStream(stream string) bool {
 
 // ReadyEvent 是数据库任务提交后的轻量通知，不承载发送最终状态。
 type ReadyEvent struct {
+	TenantID  int64  `json:"tenant_id"`
+	AccountID int64  `json:"account_id"`
 	JobID     int64  `json:"job_id"`
 	ChannelID int64  `json:"channel_id"`
 	Priority  int    `json:"priority"`
@@ -40,7 +42,7 @@ type ReadyEvent struct {
 
 // Validate 检查就绪事件是否包含消费者投递所需字段。
 func (e ReadyEvent) Validate() error {
-	if e.JobID <= 0 || e.ChannelID <= 0 {
+	if e.TenantID <= 0 || e.AccountID <= 0 || e.JobID <= 0 || e.ChannelID <= 0 {
 		return gerror.New("Redis Stream 就绪事件参数无效")
 	}
 	return nil
