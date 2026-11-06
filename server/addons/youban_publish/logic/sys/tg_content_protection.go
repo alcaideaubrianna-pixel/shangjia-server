@@ -118,10 +118,10 @@ func (s *sSysPublish) applyTelegramJobContentProtection(ctx context.Context, job
 		return "", err
 	}
 	beginTelegramPublishStage(ctx, "protection.selected").End(nil, g.Map{"antiScanEnabled": policy.AntiScanEnabled, "antiScanMode": policy.AntiScanMode, "textObfuscationEnabled": policy.TextObfuscationEnabled})
+	caption = applyChannelTextRules(caption, policy)
 	if policy.TextObfuscationEnabled {
 		caption = obfuscateTelegramCaption(caption, job.Id)
 	}
-	caption = applyChannelTextRules(caption, policy)
 	if policy.AntiScanEnabled {
 		cloudConfig, cloudErr := service.SysConfig().GetCloudResource(ctx)
 		if cloudErr != nil {

@@ -19,6 +19,9 @@ import (
 )
 
 func jsonMustMarshal(value interface{}) string {
+	if value == nil {
+		return "[]"
+	}
 	data, err := json.Marshal(value)
 	if err != nil {
 		return "[]"
@@ -298,6 +301,14 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 			in.AntiScanBackgroundUrl = identity.AntiScanBackgroundUrl
 			in.AntiScanBackgroundName = identity.AntiScanBackgroundName
 			in.TextObfuscationEnabled = identity.TextObfuscationEnabled
+			in.TextDeleteEnabled = identity.TextDeleteEnabled
+			if identity.TextDeleteJSON != "" {
+				_ = json.Unmarshal([]byte(identity.TextDeleteJSON), &in.TextDeleteRules)
+			}
+			in.TextReplaceEnabled = identity.TextReplaceEnabled
+			if identity.TextReplaceJSON != "" {
+				_ = json.Unmarshal([]byte(identity.TextReplaceJSON), &in.TextReplaceRules)
+			}
 			in.AutoDeleteEnabled = identity.AutoDeleteEnabled
 			in.PreserveHistoryMessages = identity.PreserveHistoryMessages
 			if len(in.BotIds) == 0 {
@@ -391,6 +402,10 @@ type channelStableIdentity struct {
 	AntiScanBackgroundUrl   string `orm:"anti_scan_background_url"`
 	AntiScanBackgroundName  string `orm:"anti_scan_background_name"`
 	TextObfuscationEnabled  int    `orm:"text_obfuscation_enabled"`
+	TextDeleteEnabled       int    `orm:"text_delete_enabled"`
+	TextDeleteJSON          string `orm:"text_delete_json"`
+	TextReplaceEnabled      int    `orm:"text_replace_enabled"`
+	TextReplaceJSON         string `orm:"text_replace_json"`
 	AutoDeleteEnabled       int    `orm:"auto_delete_enabled"`
 	PreserveHistoryMessages int    `orm:"preserve_history_messages"`
 	Deleted                 bool   `orm:"deleted"`
