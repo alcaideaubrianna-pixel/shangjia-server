@@ -2,6 +2,7 @@ package streamgray
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -19,6 +20,11 @@ type StreamEntry struct {
 type RedisGroupClient interface {
 	ReadGroup(ctx context.Context, stream, group, consumer, startID string, count int, block time.Duration) ([]StreamEntry, error)
 	Ack(ctx context.Context, stream, group, entryID string) error
+}
+
+// RedisGroupAdmin 是可选的 Consumer Group 初始化能力。
+type RedisGroupAdmin interface {
+	CreateGroup(context.Context, string, string) error
 }
 
 // RedisGroupConsumer 实现解码、处理、成功 ACK 的固定流程。
@@ -70,6 +76,11 @@ func (c *RedisGroupConsumer) Run(ctx context.Context, stream string, handler fun
 	if !validReadyStream(stream) || handler == nil {
 		return gerror.New("Redis Stream 运行参数无效")
 	}
+	if admin, ok := c.client.(RedisGroupAdmin); ok {
+		if err := admin.CreateGroup(ctx, stream, c.group); err != nil && !isGroupAlreadyExistsError(err) {
+			return gerror.Wrap(err, "初始化 Redis Stream consumer group 失败")
+		}
+	}
 	startID := "0"
 	for {
 		processed, err := c.ConsumeOnce(ctx, stream, startID, handler)
@@ -89,4 +100,13 @@ func (c *RedisGroupConsumer) Run(ctx context.Context, stream string, handler fun
 		case <-timer.C:
 		}
 	}
+}
+
+// isGroupAlreadyExistsError 由具体 Redis 适配器将 BUSYGROUP 等错误映射为可忽略状态。
+// 默认只识别稳定错误文本，避免吞掉连接或权限错误。
+func isGroupAlreadyExistsError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToUpper(err.Error()), "BUSYGROUP") || strings.Contains(strings.ToLower(err.Error()), "already exists")
 }
