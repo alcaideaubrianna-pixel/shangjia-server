@@ -24,6 +24,7 @@ import (
 	"github.com/gotd/td/tg"
 
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
+	collectorservice "hotgo/addons/telegram_collector/service"
 	botsysin "hotgo/addons/youban_bot/model/input/sysin"
 	botService "hotgo/addons/youban_bot/service"
 	publishconsts "hotgo/addons/youban_publish/consts"
@@ -1164,6 +1165,19 @@ func (p *publishCollectorAccountMediaProvider) StoreMedia(ctx context.Context, t
 	item.FileMD5 = md5Value
 	item.SourceSize = mediaSize
 	item.SourceMimeType = mimeType
+	identityKey := strings.TrimSpace(item.FileUniqueID)
+	if identityKey == "" && item.SourceMediaID > 0 {
+		identityKey = fmt.Sprintf("media:%d", item.SourceMediaID)
+	}
+	if identityKey != "" {
+		identityFingerprint := collectorservice.BuildMediaIdentityFingerprint(identityKey, 0, item.SourceDCID, telegramCollectorMediaKind(item.Type), item.SourceThumbSize)
+		if saveErr := collectorservice.Collector().SaveMediaReady(ctx, &collectorin.MediaCacheEntry{
+			Fingerprint: identityFingerprint, FileURL: item.FileURL, StoragePath: item.StoragePath,
+			Kind: telegramCollectorMediaKind(item.Type), MimeType: mimeType, Size: mediaSize,
+		}, 0); saveErr != nil {
+			return nil, gerror.Wrap(saveErr, "保存Telegram账号媒体身份复用索引失败")
+		}
+	}
 	return &collectorin.AccountMediaDownloadResult{
 		AttachmentID: attachment.Id, FileURL: item.FileURL, StoragePath: item.StoragePath, Media: item,
 	}, nil

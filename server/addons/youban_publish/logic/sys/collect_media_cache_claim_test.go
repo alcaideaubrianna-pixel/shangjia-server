@@ -50,3 +50,31 @@ func TestCollectMediaClaimRaceReusesCompletedResult(t *testing.T) {
 		}
 	}
 }
+
+// TestTelegramMediaIdentityLockKeyStableAcrossSources verifies that the same
+// Telegram Bot file maps to one shared lock/cache identity even when collected
+// by different sources.
+func TestTelegramMediaIdentityLockKeyStableAcrossSources(t *testing.T) {
+	first := collectorservice.BuildMediaIdentityFingerprint(
+		"BAACAgQAAx0CSn-V2AABBIGmat9efy7Riwb60BkDD8qXlxGNh9AAAhwcAAKS5tFSsgTMYqLIHmE9BA",
+		0, 0, "video", "",
+	)
+	second := collectorservice.BuildMediaIdentityFingerprint(
+		"BAACAgQAAx0CSn-V2AABBIGmat9efy7Riwb60BkDD8qXlxGNh9AAAhwcAAKS5tFSsgTMYqLIHmE9BA",
+		0, 0, "video", "",
+	)
+	if first == "" || first != second {
+		t.Fatalf("same Telegram file must use a stable shared identity lock: %q != %q", first, second)
+	}
+}
+
+// TestTelegramMediaIdentityLockSeparatesVariants prevents compressed, original,
+// thumbnail and different media kinds from sharing a download lock.
+func TestTelegramMediaIdentityLockSeparatesVariants(t *testing.T) {
+	original := collectorservice.BuildMediaIdentityFingerprint("same-file", 0, 0, "video", "original")
+	thumbnail := collectorservice.BuildMediaIdentityFingerprint("same-file", 0, 0, "video", "thumbnail")
+	photo := collectorservice.BuildMediaIdentityFingerprint("same-file", 0, 0, "photo", "original")
+	if original == thumbnail || original == photo {
+		t.Fatalf("media variants/kinds must not share identity locks: original=%q thumbnail=%q photo=%q", original, thumbnail, photo)
+	}
+}

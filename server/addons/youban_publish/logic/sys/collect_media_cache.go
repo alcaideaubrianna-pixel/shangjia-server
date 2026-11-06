@@ -1127,6 +1127,32 @@ func (s *sSysPublish) downloadTelegramMediaWithRefresh(ctx context.Context, tena
 			return &collectDownloadedMedia{FileUrl: item.FileUrl, Path: item.StoragePath, Item: item}, nil
 		}
 	}
+	identityKey := strings.TrimSpace(item.FileUniqueId)
+	if identityKey == "" && item.SourceMediaId > 0 {
+		identityKey = fmt.Sprintf("media:%d", item.SourceMediaId)
+	}
+	if identityKey == "" && mediaID > 0 {
+		identityKey = fmt.Sprintf("tg:%d:media:%d", tgAccountId, mediaID)
+	}
+	identityFingerprint := collectorservice.BuildMediaIdentityFingerprint(identityKey, 0, item.SourceDCId, telegramCollectorMediaKind(item.Type), item.SourceThumbSize)
+	identityLock := lock.NewConfig(3*time.Minute, 200*time.Millisecond).Mutex("youban_publish:media:identity:" + identityFingerprint)
+	if err := identityLock.Lock(ctx); err != nil {
+		return nil, newCollectMediaFairnessRetryError("等待同一Telegram媒体下载锁", 3*time.Second)
+	}
+	defer func() { _ = identityLock.Unlock(context.WithoutCancel(ctx)) }()
+	if strings.TrimSpace(identityKey) != "" {
+		if cached, ok, cacheErr := lookupTelegramCollectorMediaIdentityCache(ctx, item.Type, identityKey, 0, item.SourceDCId, item.SourceThumbSize); cacheErr != nil {
+			return nil, cacheErr
+		} else if ok {
+			item.FileUrl = telegramCollectorMediaCacheURL(cached)
+			item.StoragePath = cached.StoragePath
+			item.SourceSize = cached.Size
+			item.SourceMimeType = cached.MimeType
+			item.FilePhash = cached.PHash
+			item.PosterUrl = cached.PosterURL
+			return &collectDownloadedMedia{FileUrl: item.FileUrl, Path: item.StoragePath, Item: item}, nil
+		}
+	}
 	taskKey := accountMediaDownloadTaskKey(tgAccountId, mediaID, item)
 	if forceRefresh {
 		taskKey = "profile-media-refresh:" + taskKey
@@ -1241,6 +1267,25 @@ func (s *sSysPublish) downloadBotTelegramMediaWithToken(ctx context.Context, bot
 		return nil, gerror.Wrap(err, "读取Bot媒体下载网络配置失败")
 	}
 	cacheSource := fmt.Sprintf("bot:%d:%s", botId, firstNonEmpty(file.FileUniqueID, fileID))
+	// 跨 media-worker 实例串行化同一 Bot 媒体的首次下载，避免多个 source 并发 miss 后重复访问 Telegram。
+	identityKey := firstNonEmpty(file.FileUniqueID, fileID)
+	identityFingerprint := collectorservice.BuildMediaIdentityFingerprint(identityKey, 0, 0, telegramCollectorMediaKind(item.Type), "")
+	identityLock := lock.NewConfig(3*time.Minute, 200*time.Millisecond).Mutex("youban_publish:media:identity:" + identityFingerprint)
+	if err := identityLock.Lock(ctx); err != nil {
+		return nil, newCollectMediaFairnessRetryError("等待同一Telegram媒体下载锁", 3*time.Second)
+	}
+	defer func() { _ = identityLock.Unlock(context.WithoutCancel(ctx)) }()
+	if cached, ok, cacheErr := lookupTelegramCollectorMediaIdentityCache(ctx, item.Type, identityKey, 0, 0, ""); cacheErr != nil {
+		return nil, cacheErr
+	} else if ok {
+		item.FileUrl = telegramCollectorMediaCacheURL(cached)
+		item.StoragePath = cached.StoragePath
+		item.SourceSize = cached.Size
+		item.SourceMimeType = cached.MimeType
+		item.FilePhash = cached.PHash
+		item.PosterUrl = cached.PosterURL
+		return &collectDownloadedMedia{FileUrl: item.FileUrl, Path: item.StoragePath, Item: item}, nil
+	}
 	cacheKey := mediaFileCacheKey(&telegramMediaItem{
 		MediaType:   listenerTelegramMediaType(item.Type),
 		StoragePath: fileID,
@@ -1309,6 +1354,14 @@ func (s *sSysPublish) downloadBotTelegramMediaWithToken(ctx context.Context, bot
 	item.FileMd5 = md5Value
 	item.SourceSize = mediaSize
 	item.SourceMimeType = mimeType
+	if strings.TrimSpace(identityFingerprint) != "" {
+		if saveErr := collectorservice.Collector().SaveMediaReady(ctx, &collectorin.MediaCacheEntry{
+			Fingerprint: identityFingerprint, FileURL: item.FileUrl, StoragePath: item.StoragePath,
+			Kind: telegramCollectorMediaKind(item.Type), MimeType: mimeType, Size: mediaSize,
+		}, 0); saveErr != nil {
+			return nil, gerror.Wrap(saveErr, "保存Telegram媒体身份复用索引失败")
+		}
+	}
 	return &collectDownloadedMedia{
 		AttachmentId: attachment.Id,
 		FileUrl:      item.FileUrl,
