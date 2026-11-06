@@ -31,6 +31,10 @@ type fakeDispatcher struct {
 	jobIDs []int64
 }
 
+type fakeAccountGate struct{ enabled bool }
+
+func (f *fakeAccountGate) Enabled(context.Context, int64, int64) (bool, error) { return f.enabled, nil }
+
 func (f *fakeDispatcher) Dispatch(_ context.Context, jobID int64) error {
 	f.jobIDs = append(f.jobIDs, jobID)
 	return nil
@@ -123,6 +127,23 @@ func TestDispatchReadyEvent(t *testing.T) {
 	}
 	if err := DispatchReadyEvent(context.Background(), dispatcher, ReadyEvent{}); err == nil {
 		t.Fatal("invalid event must fail")
+	}
+}
+
+func TestDispatchReadyEventWithGateSkipsRolledBackAccount(t *testing.T) {
+	dispatcher := &fakeDispatcher{}
+	event := ReadyEvent{TenantID: 1, AccountID: 2, JobID: 7, ChannelID: 9}
+	if err := DispatchReadyEventWithGate(context.Background(), &fakeAccountGate{}, dispatcher, event); err != nil {
+		t.Fatal(err)
+	}
+	if len(dispatcher.jobIDs) != 0 {
+		t.Fatalf("rolled back account must not dispatch: %v", dispatcher.jobIDs)
+	}
+	if err := DispatchReadyEventWithGate(context.Background(), &fakeAccountGate{enabled: true}, dispatcher, event); err != nil {
+		t.Fatal(err)
+	}
+	if len(dispatcher.jobIDs) != 1 {
+		t.Fatalf("enabled account must dispatch: %v", dispatcher.jobIDs)
 	}
 }
 
