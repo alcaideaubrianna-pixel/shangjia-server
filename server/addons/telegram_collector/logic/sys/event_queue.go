@@ -21,7 +21,6 @@ import (
 
 	"hotgo/addons/telegram_collector/consts"
 	"hotgo/addons/telegram_collector/internal/dao"
-	"hotgo/addons/telegram_collector/internal/model/do"
 	"hotgo/addons/telegram_collector/internal/model/entity"
 	"hotgo/addons/telegram_collector/model/input/sysin"
 )
@@ -344,15 +343,18 @@ func collectorBotMediaItems(message *models.Message) []sysin.CollectorMediaItem 
 func (s *sCollector) saveDelivery(ctx context.Context, delivery *sysin.CollectorDelivery) (int64, error) {
 	columns := dao.TgCollectorDelivery.Columns()
 	now := gtime.Now()
-	_, err := dao.TgCollectorDelivery.Ctx(ctx).Data(do.TgCollectorDelivery{
-		TenantId:    delivery.TenantID,
-		EventId:     delivery.EventID,
-		DeliveryKey: delivery.DeliveryKey,
-		Status:      sysin.DeliveryStatusPending,
-		Priority:    deliveryPriority(delivery),
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	}).OnConflict(columns.TenantId + "," + columns.DeliveryKey).
+	data := g.Map{
+		"tenant_id":    delivery.TenantID,
+		"event_id":     delivery.EventID,
+		"delivery_key": delivery.DeliveryKey,
+		"status":       sysin.DeliveryStatusPending,
+		"priority":     deliveryPriority(delivery),
+		"created_at":   now,
+		"updated_at":   now,
+	}
+	data["source_id"] = delivery.SourceID
+	data["account_id"] = delivery.AccountID
+	_, err := dao.TgCollectorDelivery.Ctx(ctx).Data(data).OnConflict(columns.TenantId + "," + columns.DeliveryKey).
 		OnDuplicate(g.Map{columns.DeliveryKey: conflictIncomingColumn(ctx, columns.DeliveryKey)}).
 		Save()
 	if err != nil {
