@@ -24,6 +24,9 @@ func TestQueueNameForPushEngine(t *testing.T) {
 	if got := queueNameForPushEngine(pushEngineUnified, legacy); got != channelDispatchQueueSend {
 		t.Fatalf("unified queue = %q, want %q", got, channelDispatchQueueSend)
 	}
+	if got := queueNameForPushEngine(pushEngineUnifiedStream, legacy); got != channelDispatchQueueSend {
+		t.Fatalf("stream queue = %q, want %q", got, channelDispatchQueueSend)
+	}
 }
 
 // TestChannelDispatchPriorityOrder 验证优先级数值越小越优先。
