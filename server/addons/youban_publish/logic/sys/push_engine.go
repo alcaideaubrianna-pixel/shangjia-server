@@ -8,6 +8,7 @@ import (
 
 	"github.com/gogf/gf/v2/frame/g"
 
+	publishconsts "hotgo/addons/youban_publish/consts"
 	"hotgo/internal/library/cache"
 )
 
@@ -18,7 +19,7 @@ const pushEngineFallbackCacheTTL = time.Minute
 
 // pushEngineCacheKey 返回账户推送引擎配置缓存键。
 func pushEngineCacheKey(tenantId, accountId int64) string {
-	return fmt.Sprintf("youban_publish:push_engine:%d:%d", tenantId, accountId)
+	return fmt.Sprintf(publishconsts.PushEngineCacheKeyPrefix+"%d:%d", tenantId, accountId)
 }
 
 const (
