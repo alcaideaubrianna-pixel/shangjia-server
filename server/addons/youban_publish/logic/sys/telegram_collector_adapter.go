@@ -1262,6 +1262,10 @@ func (s *sSysPublish) ingestCollectorBotDelivery(ctx context.Context, delivery *
 	if source.IsEmpty() {
 		return nil
 	}
+	// Collector webhook updates carry the authoritative current Chat title.
+	// Synchronize it before any rule-list/cache lookup so channel renames are
+	// visible even when this delivery does not pass a collection rule.
+	s.syncBotChannelMetadataFromUpdate(ctx, source["tenant_id"].Int64(), source["bot_id"].Int64(), delivery.RawUpdate)
 	blocked, err := s.collectMessageFromAccountPublishChannel(ctx, source["tenant_id"].Int64(), 0, delivery.SourceChatID)
 	if err != nil {
 		return gerror.Wrap(err, "检查Bot采集上架频道过滤失败")

@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -19,6 +20,51 @@ import (
 )
 
 const publishBotChannelCacheTable = "hg_youban_publish_bot_channel_cache"
+
+// syncBotChannelMetadataFromUpdate keeps the Bot channel directory current
+// for Collector webhook deliveries. Telegram does not emit a separate
+// reliable rename callback; the current title is carried by channel_post.
+func (s *sSysPublish) syncBotChannelMetadataFromUpdate(ctx context.Context, tenantID, botID int64, raw []byte) {
+	if tenantID <= 0 || botID <= 0 || len(raw) == 0 {
+		return
+	}
+	var update struct {
+		ChannelPost *struct {
+			Chat struct {
+				ID       int64  `json:"id"`
+				Title    string `json:"title"`
+				Username string `json:"username"`
+				Type     string `json:"type"`
+			} `json:"chat"`
+		} `json:"channel_post"`
+		EditedChannelPost *struct {
+			Chat struct {
+				ID       int64  `json:"id"`
+				Title    string `json:"title"`
+				Username string `json:"username"`
+				Type     string `json:"type"`
+			} `json:"chat"`
+		} `json:"edited_channel_post"`
+	}
+	if json.Unmarshal(raw, &update) != nil {
+		return
+	}
+	chat := update.ChannelPost
+	if chat == nil {
+		chat = update.EditedChannelPost
+	}
+	if chat == nil || chat.Chat.ID == 0 || strings.TrimSpace(chat.Chat.Title) == "" {
+		return
+	}
+	chatID := normalizeTelegramChannelChatID(g.NewVar(chat.Chat.ID).String())
+	now := gtime.Now()
+	data := g.Map{"chat_title": strings.TrimSpace(chat.Chat.Title), "chat_username": strings.TrimSpace(chat.Chat.Username), "updated_at": now}
+	_, _ = g.DB().Model(publishBotChannelCacheTable).Safe().Ctx(ctx).
+		Where("tenant_id", tenantID).Where("bot_id", botID).Where("chat_id", chatID).Data(data).Update()
+	_, _ = pdao.YoubanPublishCollectChannel.Ctx(ctx).Safe().
+		Where("tenant_id", tenantID).WhereIn("telegram_chat_id", tgChannelCacheLookupIds(chatID)).
+		Data(g.Map{"title": data["chat_title"], "username": data["chat_username"], "updated_at": now, "last_seen_at": now}).Update()
+}
 
 func (s *sSysPublish) cacheBotMessage(ctx context.Context, tenantId, botId int64, msg *models.Message) error {
 	if tenantId <= 0 || botId <= 0 || msg == nil || msg.Chat.ID == 0 {
