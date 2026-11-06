@@ -76,6 +76,13 @@ func (s *sSysPublish) resolveIntroFeeChannelSuffix(ctx context.Context, event gd
 		}
 	}
 	if row.IsEmpty() {
+		// 聚合 BOT source 不要求每个来源频道都预先建立频道行。
+		// 没有频道专属覆盖时，继续使用规则自身的默认介绍费后缀。
+		fallback := strings.TrimSpace(rule["intro_fee_suffix"].String())
+		if fallback != "" {
+			_ = cache.Instance().Set(ctx, key, fallback, introFeeChannelRuleCacheTTL)
+			return fallback, true, nil
+		}
 		_ = cache.Instance().Set(ctx, key, "__none__", time.Minute)
 		return "", false, nil
 	}
