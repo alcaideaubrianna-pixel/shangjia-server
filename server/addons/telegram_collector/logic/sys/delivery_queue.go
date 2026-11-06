@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -119,6 +120,14 @@ func (s *sCollector) handleDeliveryTask(ctx context.Context, task *asynq.Task) e
 		case <-timer.C:
 		}
 	}
+	if queue == consts.QueueDeliveryHistory || strings.HasPrefix(queue, consts.QueueDeliveryHistoryShardPrefix) {
+		accountID := deliveryAccountID(ctx, deliveryID)
+		releaseAccountSlot, acquired := s.acquireHistoryAccountSlot(ctx, accountID)
+		if !acquired {
+			return newDeliveryAccountBusyError()
+		}
+		defer releaseAccountSlot()
+	}
 	if queue == consts.QueueDeliveryReady {
 		priority, err := s.persistedDeliveryPriority(ctx, deliveryID)
 		if err != nil {
@@ -142,6 +151,37 @@ func (s *sCollector) handleDeliveryTask(ctx context.Context, task *asynq.Task) e
 	histogram, _ := collectorMeter.Float64Histogram("telegram_collector_delivery_duration_seconds")
 	histogram.Record(ctx, time.Since(startedAt).Seconds(), metric.WithAttributes(attribute.String("result", "completed")))
 	return nil
+}
+
+type deliveryAccountBusyError struct{}
+
+func (e *deliveryAccountBusyError) Error() string { return "历史采集账户并发额度已满" }
+
+func newDeliveryAccountBusyError() error { return &deliveryAccountBusyError{} }
+
+func (s *sCollector) acquireHistoryAccountSlot(ctx context.Context, accountID int64) (func(), bool) {
+	if accountID <= 0 {
+		return func() {}, true
+	}
+	limit := collectorDeliveryHistoryAccountConcurrency(ctx)
+	s.historyAccountMu.Lock()
+	if s.historyAccountSlots == nil {
+		s.historyAccountSlots = make(map[int64]chan struct{})
+	}
+	slots := s.historyAccountSlots[accountID]
+	if slots == nil || cap(slots) != limit {
+		slots = make(chan struct{}, limit)
+		s.historyAccountSlots[accountID] = slots
+	}
+	s.historyAccountMu.Unlock()
+	select {
+	case slots <- struct{}{}:
+		return func() { <-slots }, true
+	case <-ctx.Done():
+		return func() {}, false
+	default:
+		return func() {}, false
+	}
 }
 
 func (s *sCollector) processDelivery(ctx context.Context, deliveryID int64) error {
@@ -459,6 +499,17 @@ func collectorDeliveryHistoryConcurrency(ctx context.Context) int {
 	}
 	if value > 32 {
 		value = 32
+	}
+	return value
+}
+
+func collectorDeliveryHistoryAccountConcurrency(ctx context.Context) int {
+	value := g.Cfg().MustGet(ctx, "telegramCollector.delivery.accountConcurrency", 2).Int()
+	if value < 1 {
+		return 1
+	}
+	if value > 16 {
+		return 16
 	}
 	return value
 }

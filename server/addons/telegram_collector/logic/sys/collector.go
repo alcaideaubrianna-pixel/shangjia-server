@@ -70,6 +70,9 @@ type sCollector struct {
 	deliveryServer        *asynq.Server
 	deliveryHistoryServer *asynq.Server
 	deliveryLegacyServer  *asynq.Server
+	historySchedulerStop  context.CancelFunc
+	historyAccountMu      sync.Mutex
+	historyAccountSlots   map[int64]chan struct{}
 	queueClient           *asynq.Client
 	runtimeCtx            context.Context
 	runtimeStop           context.CancelFunc
