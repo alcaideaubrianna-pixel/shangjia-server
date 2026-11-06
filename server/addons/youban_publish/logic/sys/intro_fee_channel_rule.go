@@ -186,6 +186,10 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 	} else {
 		configuredModel = configuredModel.Where("bot_id", 0)
 	}
+	if keyword = strings.TrimSpace(keyword); keyword != "" {
+		like := "%" + keyword + "%"
+		configuredModel = configuredModel.Where("(channel_id LIKE ? OR channel_title LIKE ? OR channel_username LIKE ? OR suffix LIKE ?)", like, like, like, like)
+	}
 	if err := configuredModel.OrderDesc("account_id").OrderDesc("bot_id").OrderDesc("updated_at").Limit(candidateLimit).Scan(&configured); err != nil {
 		return nil, 0, err
 	}
