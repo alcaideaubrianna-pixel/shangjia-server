@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -17,9 +18,11 @@ import (
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	pdo "hotgo/addons/youban_publish/internal/model/do"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/library/cache"
 )
 
 const publishBotChannelCacheTable = "hg_youban_publish_bot_channel_cache"
+const botChannelMetadataSyncTTL = 10 * time.Minute
 
 // syncBotChannelMetadataFromUpdate keeps the Bot channel directory current
 // for Collector webhook deliveries. Telegram does not emit a separate
@@ -57,13 +60,20 @@ func (s *sSysPublish) syncBotChannelMetadataFromUpdate(ctx context.Context, tena
 		return
 	}
 	chatID := normalizeTelegramChannelChatID(g.NewVar(chat.Chat.ID).String())
+	metadataKey := fmt.Sprintf("publish:bot-channel-metadata:%d:%d:%s:%s:%s", tenantID, botID, chatID, strings.TrimSpace(chat.Chat.Title), strings.TrimSpace(chat.Chat.Username))
+	if cached, err := cache.Instance().Get(ctx, metadataKey); err == nil && !cached.IsNil() {
+		return
+	}
 	now := gtime.Now()
 	data := g.Map{"chat_title": strings.TrimSpace(chat.Chat.Title), "chat_username": strings.TrimSpace(chat.Chat.Username), "updated_at": now}
 	_, _ = g.DB().Model(publishBotChannelCacheTable).Safe().Ctx(ctx).
-		Where("tenant_id", tenantID).Where("bot_id", botID).Where("chat_id", chatID).Data(data).Update()
+		Where("tenant_id", tenantID).Where("bot_id", botID).Where("chat_id", chatID).
+		Where("chat_title != ? OR chat_username != ?", data["chat_title"], data["chat_username"]).Data(data).Update()
 	_, _ = pdao.YoubanPublishCollectChannel.Ctx(ctx).Safe().
 		Where("tenant_id", tenantID).WhereIn("telegram_chat_id", tgChannelCacheLookupIds(chatID)).
+		Where("title != ? OR username != ?", data["chat_title"], data["chat_username"]).
 		Data(g.Map{"title": data["chat_title"], "username": data["chat_username"], "updated_at": now, "last_seen_at": now}).Update()
+	_ = cache.Instance().Set(ctx, metadataKey, true, botChannelMetadataSyncTTL)
 }
 
 func (s *sSysPublish) cacheBotMessage(ctx context.Context, tenantId, botId int64, msg *models.Message) error {
