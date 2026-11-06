@@ -3,6 +3,8 @@ package sys
 import (
 	"errors"
 	"testing"
+
+	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
 func TestTelegramChannelSenderBotId(t *testing.T) {
@@ -39,6 +41,19 @@ func TestApplyCollectTextDeletes(t *testing.T) {
 	got := applyCollectTextDeletes("hello 删除 keep 删除", []string{"删除"})
 	if got != "hello  keep " {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestApplyChannelTextRules(t *testing.T) {
+	policy := telegramChannelSendPolicy{
+		TextReplaceEnabled: true,
+		TextReplaceRules:   []sysin.TextReplaceRule{{Enabled: true, From: "旧", To: "新"}},
+		TextDeleteEnabled:  true,
+		TextDeleteRules:    []sysin.TextDeleteRule{{Enabled: true, Text: "来源", WholeLine: true}, {Enabled: true, Text: "广告"}},
+	}
+	got := applyChannelTextRules("标题\n来源：频道\n广告内容\n旧文案", policy)
+	if got != "标题\n内容\n新文案" {
+		t.Fatalf("unexpected channel text result: %q", got)
 	}
 }
 

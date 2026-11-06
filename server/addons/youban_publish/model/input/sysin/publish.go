@@ -1426,72 +1426,92 @@ type ChannelListInp struct {
 }
 
 type ChannelModel struct {
-	Id                      int64       `json:"id" dc:"ID"`
-	TenantId                int64       `json:"tenantId" dc:"租户ID"`
-	TenantUsername          string      `json:"tenantUsername" dc:"归属租户账号"`
-	TgAccountId             int64       `json:"tgAccountId" dc:"TG账号ID"`
-	TgAccountName           string      `json:"tgAccountName" dc:"TG账号名称"`
-	ChannelTitle            string      `json:"channelTitle" dc:"频道名称"`
-	ChannelUsername         string      `json:"channelUsername" dc:"频道用户名"`
-	TargetChatId            string      `json:"targetChatId" dc:"目标Chat ID"`
-	PublishDirection        string      `json:"publishDirection" dc:"上架/下架频道：up/down"`
-	CyclePublishEnabled     int         `json:"cyclePublishEnabled" dc:"是否循环上架"`
-	CyclePublishDays        int         `json:"cyclePublishDays" dc:"循环时间，生产按天，开发按秒"`
-	StoredCyclePublishDays  int         `json:"storedCyclePublishDays" dc:"会员保存的循环时间"`
-	CycleVipActive          bool        `json:"cycleVipActive" dc:"频道所属租户会员是否有效"`
-	CyclePublishTime        string      `json:"cyclePublishTime" dc:"循环上架时间"`
-	CyclePublishMode        string      `json:"cyclePublishMode" dc:"循环模式"`
-	CycleBatchSize          int         `json:"cycleBatchSize" dc:"批次循环数量"`
-	CycleBatchTime          string      `json:"cycleBatchTime" dc:"批次循环时间"`
-	IsDefaultSelected       int         `json:"isDefaultSelected" dc:"是否默认选中"`
-	PublishVisible          int         `json:"publishVisible" dc:"上架端资料选择可见：1可见 2隐藏"`
-	AntiScanEnabled         int         `json:"antiScanEnabled" dc:"频道防扫图开关"`
-	AntiScanMode            string      `json:"antiScanMode" dc:"防扫图处理方式"`
-	AntiScanBackgroundUrl   string      `json:"antiScanBackgroundUrl" dc:"背景素材地址"`
-	AntiScanBackgroundName  string      `json:"antiScanBackgroundName" dc:"背景素材名称"`
-	TextObfuscationEnabled  int         `json:"textObfuscationEnabled" dc:"频道文本混淆开关"`
-	AutoDeleteEnabled       int         `json:"autoDeleteEnabled" dc:"频道自动删除开关"`
-	PreserveHistoryMessages int         `json:"preserveHistoryMessages" dc:"下架和循环上架时保留旧消息"`
-	BotIds                  []int64     `json:"botIds" dc:"绑定Bot ID列表"`
-	BotIdJson               string      `json:"botIdJson" dc:"绑定Bot ID JSON"`
-	BotPermissionStatusJson string      `json:"botPermissionStatusJson" dc:"Bot权限检测结果JSON"`
-	BotPermissionStatus     string      `json:"botPermissionStatus" dc:"Bot权限状态"`
-	BotPermissionMessage    string      `json:"botPermissionMessage" dc:"Bot权限提示"`
-	Remark                  string      `json:"remark" dc:"备注"`
-	Status                  int         `json:"status" dc:"状态"`
-	LastRefreshStatus       string      `json:"lastRefreshStatus" dc:"最近刷新状态"`
-	LastRefreshMessage      string      `json:"lastRefreshMessage" dc:"最近刷新信息"`
-	LastRefreshAt           *gtime.Time `json:"lastRefreshAt" dc:"最近刷新时间"`
-	CreatedAt               *gtime.Time `json:"createdAt" dc:"创建时间"`
-	UpdatedAt               *gtime.Time `json:"updatedAt" dc:"更新时间"`
+	Id                      int64             `json:"id" dc:"ID"`
+	TenantId                int64             `json:"tenantId" dc:"租户ID"`
+	TenantUsername          string            `json:"tenantUsername" dc:"归属租户账号"`
+	TgAccountId             int64             `json:"tgAccountId" dc:"TG账号ID"`
+	TgAccountName           string            `json:"tgAccountName" dc:"TG账号名称"`
+	ChannelTitle            string            `json:"channelTitle" dc:"频道名称"`
+	ChannelUsername         string            `json:"channelUsername" dc:"频道用户名"`
+	TargetChatId            string            `json:"targetChatId" dc:"目标Chat ID"`
+	PublishDirection        string            `json:"publishDirection" dc:"上架/下架频道：up/down"`
+	CyclePublishEnabled     int               `json:"cyclePublishEnabled" dc:"是否循环上架"`
+	CyclePublishDays        int               `json:"cyclePublishDays" dc:"循环时间，生产按天，开发按秒"`
+	StoredCyclePublishDays  int               `json:"storedCyclePublishDays" dc:"会员保存的循环时间"`
+	CycleVipActive          bool              `json:"cycleVipActive" dc:"频道所属租户会员是否有效"`
+	CyclePublishTime        string            `json:"cyclePublishTime" dc:"循环上架时间"`
+	CyclePublishMode        string            `json:"cyclePublishMode" dc:"循环模式"`
+	CycleBatchSize          int               `json:"cycleBatchSize" dc:"批次循环数量"`
+	CycleBatchTime          string            `json:"cycleBatchTime" dc:"批次循环时间"`
+	IsDefaultSelected       int               `json:"isDefaultSelected" dc:"是否默认选中"`
+	PublishVisible          int               `json:"publishVisible" dc:"上架端资料选择可见：1可见 2隐藏"`
+	AntiScanEnabled         int               `json:"antiScanEnabled" dc:"频道防扫图开关"`
+	AntiScanMode            string            `json:"antiScanMode" dc:"防扫图处理方式"`
+	AntiScanBackgroundUrl   string            `json:"antiScanBackgroundUrl" dc:"背景素材地址"`
+	AntiScanBackgroundName  string            `json:"antiScanBackgroundName" dc:"背景素材名称"`
+	TextObfuscationEnabled  int               `json:"textObfuscationEnabled" dc:"频道文本混淆开关"`
+	TextDeleteEnabled       int               `json:"textDeleteEnabled" dc:"频道删除文本开关"`
+	TextDeleteRules         []TextDeleteRule  `json:"textDeleteRules" dc:"频道删除文本规则"`
+	TextReplaceEnabled      int               `json:"textReplaceEnabled" dc:"频道替换文本开关"`
+	TextReplaceRules        []TextReplaceRule `json:"textReplaceRules" dc:"频道替换文本规则"`
+	AutoDeleteEnabled       int               `json:"autoDeleteEnabled" dc:"频道自动删除开关"`
+	PreserveHistoryMessages int               `json:"preserveHistoryMessages" dc:"下架和循环上架时保留旧消息"`
+	BotIds                  []int64           `json:"botIds" dc:"绑定Bot ID列表"`
+	BotIdJson               string            `json:"botIdJson" dc:"绑定Bot ID JSON"`
+	BotPermissionStatusJson string            `json:"botPermissionStatusJson" dc:"Bot权限检测结果JSON"`
+	BotPermissionStatus     string            `json:"botPermissionStatus" dc:"Bot权限状态"`
+	BotPermissionMessage    string            `json:"botPermissionMessage" dc:"Bot权限提示"`
+	Remark                  string            `json:"remark" dc:"备注"`
+	Status                  int               `json:"status" dc:"状态"`
+	LastRefreshStatus       string            `json:"lastRefreshStatus" dc:"最近刷新状态"`
+	LastRefreshMessage      string            `json:"lastRefreshMessage" dc:"最近刷新信息"`
+	LastRefreshAt           *gtime.Time       `json:"lastRefreshAt" dc:"最近刷新时间"`
+	CreatedAt               *gtime.Time       `json:"createdAt" dc:"创建时间"`
+	UpdatedAt               *gtime.Time       `json:"updatedAt" dc:"更新时间"`
 }
 
 type ChannelSaveInp struct {
-	Id                      int64   `json:"id" dc:"ID"`
-	TenantId                int64   `json:"tenantId" dc:"租户ID"`
-	TgAccountId             int64   `json:"tgAccountId" dc:"TG账号ID"`
-	ChannelTitle            string  `json:"channelTitle" dc:"频道名称"`
-	ChannelUsername         string  `json:"channelUsername" dc:"频道用户名"`
-	TargetChatId            string  `json:"targetChatId" dc:"目标Chat ID"`
-	PublishDirection        string  `json:"publishDirection" dc:"上架/下架频道：up/down"`
-	CyclePublishEnabled     int     `json:"cyclePublishEnabled" dc:"是否循环上架"`
-	CyclePublishDays        int     `json:"cyclePublishDays" dc:"循环时间，生产按天，开发按秒"`
-	CyclePublishTime        string  `json:"cyclePublishTime" dc:"循环上架时间"`
-	CyclePublishMode        string  `json:"cyclePublishMode" dc:"循环模式"`
-	CycleBatchSize          int     `json:"cycleBatchSize" dc:"批次循环数量"`
-	CycleBatchTime          string  `json:"cycleBatchTime" dc:"批次循环时间"`
-	IsDefaultSelected       int     `json:"isDefaultSelected" dc:"是否默认选中"`
-	PublishVisible          int     `json:"publishVisible" dc:"上架端资料选择可见：1可见 2隐藏"`
-	AntiScanEnabled         int     `json:"antiScanEnabled" dc:"频道防扫图开关"`
-	AntiScanMode            string  `json:"antiScanMode" dc:"防扫图处理方式"`
-	AntiScanBackgroundUrl   string  `json:"antiScanBackgroundUrl" dc:"背景素材地址"`
-	AntiScanBackgroundName  string  `json:"antiScanBackgroundName" dc:"背景素材名称"`
-	TextObfuscationEnabled  int     `json:"textObfuscationEnabled" dc:"频道文本混淆开关"`
-	AutoDeleteEnabled       int     `json:"autoDeleteEnabled" dc:"频道自动删除开关"`
-	PreserveHistoryMessages int     `json:"preserveHistoryMessages" dc:"下架和循环上架时保留旧消息"`
-	BotIds                  []int64 `json:"botIds" dc:"绑定Bot ID列表"`
-	Remark                  string  `json:"remark" dc:"备注"`
-	Status                  int     `json:"status" dc:"状态：1启用 2停用"`
+	Id                      int64             `json:"id" dc:"ID"`
+	TenantId                int64             `json:"tenantId" dc:"租户ID"`
+	TgAccountId             int64             `json:"tgAccountId" dc:"TG账号ID"`
+	ChannelTitle            string            `json:"channelTitle" dc:"频道名称"`
+	ChannelUsername         string            `json:"channelUsername" dc:"频道用户名"`
+	TargetChatId            string            `json:"targetChatId" dc:"目标Chat ID"`
+	PublishDirection        string            `json:"publishDirection" dc:"上架/下架频道：up/down"`
+	CyclePublishEnabled     int               `json:"cyclePublishEnabled" dc:"是否循环上架"`
+	CyclePublishDays        int               `json:"cyclePublishDays" dc:"循环时间，生产按天，开发按秒"`
+	CyclePublishTime        string            `json:"cyclePublishTime" dc:"循环上架时间"`
+	CyclePublishMode        string            `json:"cyclePublishMode" dc:"循环模式"`
+	CycleBatchSize          int               `json:"cycleBatchSize" dc:"批次循环数量"`
+	CycleBatchTime          string            `json:"cycleBatchTime" dc:"批次循环时间"`
+	IsDefaultSelected       int               `json:"isDefaultSelected" dc:"是否默认选中"`
+	PublishVisible          int               `json:"publishVisible" dc:"上架端资料选择可见：1可见 2隐藏"`
+	AntiScanEnabled         int               `json:"antiScanEnabled" dc:"频道防扫图开关"`
+	AntiScanMode            string            `json:"antiScanMode" dc:"防扫图处理方式"`
+	AntiScanBackgroundUrl   string            `json:"antiScanBackgroundUrl" dc:"背景素材地址"`
+	AntiScanBackgroundName  string            `json:"antiScanBackgroundName" dc:"背景素材名称"`
+	TextObfuscationEnabled  int               `json:"textObfuscationEnabled" dc:"频道文本混淆开关"`
+	TextDeleteEnabled       int               `json:"textDeleteEnabled" dc:"频道删除文本开关"`
+	TextDeleteRules         []TextDeleteRule  `json:"textDeleteRules" dc:"频道删除文本规则"`
+	TextReplaceEnabled      int               `json:"textReplaceEnabled" dc:"频道替换文本开关"`
+	TextReplaceRules        []TextReplaceRule `json:"textReplaceRules" dc:"频道替换文本规则"`
+	AutoDeleteEnabled       int               `json:"autoDeleteEnabled" dc:"频道自动删除开关"`
+	PreserveHistoryMessages int               `json:"preserveHistoryMessages" dc:"下架和循环上架时保留旧消息"`
+	BotIds                  []int64           `json:"botIds" dc:"绑定Bot ID列表"`
+	Remark                  string            `json:"remark" dc:"备注"`
+	Status                  int               `json:"status" dc:"状态：1启用 2停用"`
+}
+
+type TextDeleteRule struct {
+	Enabled   bool   `json:"enabled"`
+	Text      string `json:"text"`
+	WholeLine bool   `json:"wholeLine"`
+}
+
+type TextReplaceRule struct {
+	Enabled bool   `json:"enabled"`
+	From    string `json:"from"`
+	To      string `json:"to"`
 }
 
 func (in *ChannelSaveInp) Filter(ctx context.Context) error {

@@ -1012,6 +1012,10 @@ ALTER TABLE "hg_youban_publish_profile_state" DROP COLUMN IF EXISTS "dedupe_medi
 
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "anti_scan_enabled" smallint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "text_obfuscation_enabled" smallint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "text_delete_enabled" smallint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "text_delete_json" text NOT NULL DEFAULT '[]';
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "text_replace_enabled" smallint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "text_replace_json" text NOT NULL DEFAULT '[]';
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "auto_delete_enabled" smallint NOT NULL DEFAULT 1;
 UPDATE "hg_youban_publish_channel"
 SET "auto_delete_enabled" = 1

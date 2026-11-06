@@ -1114,6 +1114,10 @@ ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "is_default_sel
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "publish_visible" smallint NOT NULL DEFAULT 1;
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "anti_scan_enabled" smallint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "text_obfuscation_enabled" smallint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "text_delete_enabled" smallint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "text_delete_json" text NOT NULL DEFAULT '[]';
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "text_replace_enabled" smallint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "text_replace_json" text NOT NULL DEFAULT '[]';
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_channel" (
   "id" BIGSERIAL PRIMARY KEY,

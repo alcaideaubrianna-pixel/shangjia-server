@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"image"
 	"image/color"
@@ -40,6 +41,10 @@ type telegramChannelSendPolicy struct {
 	AntiScanMode           string
 	AntiScanBackgroundURL  string
 	TextObfuscationEnabled bool
+	TextDeleteEnabled      bool
+	TextDeleteRules        []sysin.TextDeleteRule
+	TextReplaceEnabled     bool
+	TextReplaceRules       []sysin.TextReplaceRule
 }
 
 const (
@@ -57,10 +62,14 @@ func (s *sSysPublish) telegramChannelSendPolicy(ctx context.Context, job telegra
 		AntiScanMode           string `orm:"anti_scan_mode"`
 		AntiScanBackgroundURL  string `orm:"anti_scan_background_url"`
 		TextObfuscationEnabled int    `orm:"text_obfuscation_enabled"`
+		TextDeleteEnabled      int    `orm:"text_delete_enabled"`
+		TextDeleteJSON         string `orm:"text_delete_json"`
+		TextReplaceEnabled     int    `orm:"text_replace_enabled"`
+		TextReplaceJSON        string `orm:"text_replace_json"`
 	}
 	step := beginTelegramPublishStage(ctx, "protection.channel_policy")
 	err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
-		Fields("anti_scan_enabled,anti_scan_mode,anti_scan_background_url,text_obfuscation_enabled").
+		Fields("anti_scan_enabled,anti_scan_mode,anti_scan_background_url,text_obfuscation_enabled,text_delete_enabled,text_delete_json,text_replace_enabled,text_replace_json").
 		Where("id", job.ChannelId).Where("tenant_id", job.TenantId).WhereNull("deleted_at").Scan(&channel)
 	step.End(err)
 	if err != nil {
@@ -85,6 +94,14 @@ func (s *sSysPublish) telegramChannelSendPolicy(ctx context.Context, job telegra
 	}
 	policy.AntiScanBackgroundURL = strings.TrimSpace(channel.AntiScanBackgroundURL)
 	policy.TextObfuscationEnabled = channel.TextObfuscationEnabled == 1 && containsString(vip.Features, sysin.TenantVipFeatureTextObfuscation)
+	if err := json.Unmarshal([]byte(channel.TextDeleteJSON), &policy.TextDeleteRules); err != nil {
+		policy.TextDeleteRules = nil
+	}
+	if err := json.Unmarshal([]byte(channel.TextReplaceJSON), &policy.TextReplaceRules); err != nil {
+		policy.TextReplaceRules = nil
+	}
+	policy.TextDeleteEnabled = channel.TextDeleteEnabled == 1
+	policy.TextReplaceEnabled = channel.TextReplaceEnabled == 1
 	return policy, nil
 }
 
@@ -104,6 +121,7 @@ func (s *sSysPublish) applyTelegramJobContentProtection(ctx context.Context, job
 	if policy.TextObfuscationEnabled {
 		caption = obfuscateTelegramCaption(caption, job.Id)
 	}
+	caption = applyChannelTextRules(caption, policy)
 	if policy.AntiScanEnabled {
 		cloudConfig, cloudErr := service.SysConfig().GetCloudResource(ctx)
 		if cloudErr != nil {
@@ -146,6 +164,36 @@ func (s *sSysPublish) applyTelegramJobContentProtection(ctx context.Context, job
 		}
 	}
 	return caption, nil
+}
+
+func applyChannelTextRules(caption string, policy telegramChannelSendPolicy) string {
+	if policy.TextReplaceEnabled {
+		for _, rule := range policy.TextReplaceRules {
+			if rule.Enabled && rule.From != "" {
+				caption = strings.ReplaceAll(caption, rule.From, rule.To)
+			}
+		}
+	}
+	if policy.TextDeleteEnabled {
+		for _, rule := range policy.TextDeleteRules {
+			if !rule.Enabled || rule.Text == "" {
+				continue
+			}
+			if rule.WholeLine {
+				lines := strings.Split(caption, "\n")
+				kept := lines[:0]
+				for _, line := range lines {
+					if !strings.Contains(line, rule.Text) {
+						kept = append(kept, line)
+					}
+				}
+				caption = strings.Join(kept, "\n")
+			} else {
+				caption = strings.ReplaceAll(caption, rule.Text, "")
+			}
+		}
+	}
+	return strings.TrimSpace(caption)
 }
 
 func isTelegramImageMedia(mediaType string) bool {
