@@ -237,6 +237,27 @@ func TestDecodeXReadGroupResponse(t *testing.T) {
 	}
 }
 
+func TestDecodeXReadGroupResponseRejectsMalformedEntries(t *testing.T) {
+	tests := []struct {
+		name  string
+		value *gvar.Var
+	}{
+		{name: "missing stream parts", value: gvar.New([]any{[]any{"stream"}})},
+		{name: "missing payload", value: gvar.New([]any{[]any{"stream", []any{[]any{"1-0", []any{"other", "value"}}}}})},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := DecodeXReadGroupResponse(test.value); err == nil {
+				t.Fatal("malformed response must fail")
+			}
+		})
+	}
+	entries, err := DecodeXReadGroupResponse(gvar.New(nil))
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("nil response entries=%v err=%v", entries, err)
+	}
+}
+
 // TestRedisGroupConsumerAcksAfterHandler 验证只有 handler 成功后才确认消息。
 func TestRedisGroupConsumerAcksAfterHandler(t *testing.T) {
 	body, err := (ReadyEvent{TenantID: 1, AccountID: 2, JobID: 1, ChannelID: 2}).Encode()
