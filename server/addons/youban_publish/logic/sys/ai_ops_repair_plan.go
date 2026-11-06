@@ -143,17 +143,24 @@ func (s *sSysPublish) previewAIOpsBotSourceReplay(ctx context.Context, sourceID 
 	}
 	// 未指定事件ID时，按频道和消息区间从统一 Collector 事件表生成重放范围。
 	if len(ids) == 0 {
-		if strings.TrimSpace(chatID) == "" || startMessageID <= 0 || endMessageID < startMessageID {
-			return nil, nil, 0, 0, gerror.New("请指定Collector事件ID，或同时指定频道和有效消息区间")
+		if strings.TrimSpace(chatID) == "" {
+			return nil, nil, 0, 0, gerror.New("请指定Collector事件ID，或指定频道Chat ID")
 		}
-		if endMessageID-startMessageID+1 > int64(limit)*10 {
+		if (startMessageID > 0 && endMessageID <= 0) || (startMessageID <= 0 && endMessageID > 0) || endMessageID < startMessageID && endMessageID > 0 {
+			return nil, nil, 0, 0, gerror.New("消息区间必须同时提供有效的起止消息ID")
+		}
+		if startMessageID > 0 && endMessageID-startMessageID+1 > int64(limit)*10 {
 			return nil, nil, 0, 0, gerror.New("消息区间过大，请缩小范围后重试")
 		}
 		var rows []struct{ ID int64 }
 		model := g.DB().Model("hg_tg_collector_event").Ctx(ctx).
 			Fields("id").Where("tenant_id", target.TenantID).Where("source_id", sourceID).
-			Where("source_type", sysin.CollectSourceTypeBot).Where("chat_id", strings.TrimSpace(chatID)).
-			WhereBetween("message_id", startMessageID, endMessageID).OrderAsc("message_id").Limit(limit)
+			Where("source_type", sysin.CollectSourceTypeBot).Where("chat_id", strings.TrimSpace(chatID))
+		if startMessageID > 0 {
+			model = model.WhereBetween("message_id", startMessageID, endMessageID)
+		}
+		model = model.OrderDesc("message_id").Limit(limit)
+
 		if err := model.Scan(&rows); err != nil {
 			return nil, nil, 0, 0, gerror.Wrap(err, "按频道消息区间读取重放事件失败")
 		}
