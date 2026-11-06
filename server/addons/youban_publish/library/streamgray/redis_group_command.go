@@ -6,6 +6,7 @@ import (
 
 	"github.com/gogf/gf/v2/container/gvar"
 	"github.com/gogf/gf/v2/errors/gerror"
+	"hotgo/internal/library/cache"
 )
 
 // DecodeXReadGroupResponse 解析 Redis XREADGROUP 的标准嵌套数组响应。
@@ -62,6 +63,15 @@ func NewRedisCommandGroupClient(client RedisCommandClient, decode StreamReadDeco
 // NewRedisCommandGroupClientDefault 使用标准 Redis Stream 响应解析器创建客户端。
 func NewRedisCommandGroupClientDefault(client RedisCommandClient) (*RedisCommandGroupClient, error) {
 	return NewRedisCommandGroupClient(client, DecodeXReadGroupResponse)
+}
+
+// NewRedisCommandGroupClientFromCache 从 HotGo cache 基础设施创建标准 Consumer Group 客户端。
+func NewRedisCommandGroupClientFromCache() (*RedisCommandGroupClient, error) {
+	client, err := cache.RedisClient()
+	if err != nil {
+		return nil, err
+	}
+	return NewRedisCommandGroupClientDefault(client)
 }
 
 // ReadGroup 执行 XREADGROUP GROUP 命令，响应解析委托给注入的 decoder。
