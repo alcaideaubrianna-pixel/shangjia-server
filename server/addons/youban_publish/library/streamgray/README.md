@@ -13,6 +13,10 @@ Stream 消息只携带 `job_id`、`channel_id`、优先级和原始队列提示�
 
 ## 灰度和回滚
 
+运行开关为 `youbanPublish.redisStream.grayEnabled`，默认 `false`，且只在
+`Push Worker` 角色读取。账户还必须将 `push_engine` 设置为 `unified_stream`；关闭
+运行开关或将账户切回 `legacy` 都不会影响旧链路。
+
 账户配置使用 `unified_stream` 时才启用该传输层。`legacy` 和 `unified` 路径继续使用现有 Outbox/Asynq 实现。回滚账户配置到 `legacy` 即可停止该账户的 Stream producer；历史 Stream 消息保留给恢复任务处理。
 
 ## 接入顺序
