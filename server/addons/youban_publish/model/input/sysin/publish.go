@@ -258,7 +258,7 @@ func (in *AccountSettingSaveInp) Filter(ctx context.Context) error {
 	if in.PushEngine == "" {
 		in.PushEngine = "legacy"
 	}
-	if in.PushEngine != "legacy" && in.PushEngine != "unified" {
+	if in.PushEngine != "legacy" && in.PushEngine != "unified" && in.PushEngine != "unified_stream" {
 		return gerror.New("频道推送引擎不合法")
 	}
 	if in.MarkPosition != "top" && in.MarkPosition != "bottom" && in.MarkPosition != "feeLine" {

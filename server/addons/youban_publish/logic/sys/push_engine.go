@@ -38,7 +38,7 @@ func (s *sSysPublish) accountPushEngine(ctx context.Context, tenantId, accountId
 	if cache.Initialized() {
 		if value, err := cache.Instance().Get(ctx, key); err == nil && !value.IsNil() {
 			engine := strings.ToLower(strings.TrimSpace(value.String()))
-			if engine == pushEngineUnified {
+			if engine == pushEngineUnified || engine == pushEngineUnifiedStream {
 				return engine
 			}
 			return pushEngineLegacy
@@ -58,7 +58,7 @@ func (s *sSysPublish) accountPushEngine(ctx context.Context, tenantId, accountId
 		return pushEngineLegacy
 	}
 	engine := strings.ToLower(strings.TrimSpace(row.PushEngine))
-	if engine != pushEngineUnified {
+	if engine != pushEngineUnified && engine != pushEngineUnifiedStream {
 		if cache.Initialized() {
 			_ = cache.Instance().Set(ctx, key, pushEngineLegacy, pushEngineCacheTTL)
 		}

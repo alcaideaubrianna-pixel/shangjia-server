@@ -55,7 +55,7 @@ func telegramPublishForegroundQueueWeightsWithUnifiedLane(ctx context.Context) m
 
 // queueNameForPushEngine 根据账户引擎选择发送队列，旧引擎保留调用方已有队列。
 func queueNameForPushEngine(engine, legacyQueue string) string {
-	if engine == pushEngineUnified {
+	if engine == pushEngineUnified || engine == pushEngineUnifiedStream {
 		return channelDispatchQueueName(channelDispatchLaneSend)
 	}
 	return legacyQueue

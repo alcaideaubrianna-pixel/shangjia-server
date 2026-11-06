@@ -11,6 +11,10 @@ func TestAccountSettingPushEngineValidation(t *testing.T) {
 	if err := valid.Filter(context.Background()); err != nil {
 		t.Fatalf("unified engine rejected: %v", err)
 	}
+	stream := AccountSettingSaveInp{AccountId: 1, PushEngine: "unified_stream"}
+	if err := stream.Filter(context.Background()); err != nil {
+		t.Fatalf("stream engine rejected: %v", err)
+	}
 	legacy := AccountSettingSaveInp{AccountId: 1}
 	if err := legacy.Filter(context.Background()); err != nil || legacy.PushEngine != "legacy" {
 		t.Fatalf("default engine = %q, err=%v", legacy.PushEngine, err)
