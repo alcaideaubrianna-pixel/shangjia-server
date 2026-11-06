@@ -84,6 +84,24 @@ func TestPublishReadyEventFacade(t *testing.T) {
 	}
 }
 
+// TestPublishAfterCommit 验证数据库提交失败时不会产生 Stream 幽灵消息。
+func TestPublishAfterCommit(t *testing.T) {
+	producer := &fakeProducer{}
+	called := false
+	if _, err := PublishAfterCommit(context.Background(), func(context.Context) error {
+		called = true
+		return context.Canceled
+	}, producer, ReadyRealtimeStream, ReadyEvent{JobID: 1, ChannelID: 2}); err != context.Canceled {
+		t.Fatalf("commit err = %v", err)
+	}
+	if !called || producer.stream != "" {
+		t.Fatalf("commit failure must not publish: called=%t producer=%+v", called, producer)
+	}
+	if _, err := PublishAfterCommit(context.Background(), func(context.Context) error { return nil }, producer, ReadyRealtimeStream, ReadyEvent{JobID: 1, ChannelID: 2}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 type fakeRedisClient struct {
 	command string
 	args    []any
