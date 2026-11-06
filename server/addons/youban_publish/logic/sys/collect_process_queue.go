@@ -308,10 +308,7 @@ func collectProcessSourceEnabled(ctx context.Context, payload collectProcessQueu
 	count, err := pdao.YoubanPublishCollectSource.Ctx(ctx).
 		Where("id", payload.SourceId).
 		Where("tenant_id", payload.TenantId).
-		// Collector delivery carries the Telegram protocol account ID. The
-		// collect source account_id is the owning business account, while
-		// tg_account_id identifies the protocol session that produced events.
-		Where(pdao.YoubanPublishCollectSource.Columns().TgAccountId, payload.AccountId).
+		Where(pdao.YoubanPublishCollectSource.Columns().AccountId, payload.AccountId).
 		Where("collect_enabled", 1).
 		Where(pdao.YoubanPublishCollectSource.Columns().ChannelBlacklisted, 0).
 		Where("status", 1).
