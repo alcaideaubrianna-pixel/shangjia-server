@@ -83,7 +83,7 @@ func (c *cAIOps) RepairPlan(ctx context.Context, req *aiops.RepairPlanReq) (*aio
 func (c *cAIOps) SourceReplayPlan(ctx context.Context, req *aiops.SourceReplayPlanReq) (*aiops.SourceReplayPlanRes, error) {
 	result, err := service.SysPublish().AIOpsCreateRepairPlan(ctx, &sysin.AIOpsRepairPlanInp{
 		Action: "replay_bot_source_updates", SourceId: req.SourceId,
-		CollectorEventIds: req.CollectorEventIds, Limit: req.Limit,
+		CollectorEventIds: req.CollectorEventIds, ChatId: req.ChatId, StartMessageId: req.StartMessageId, EndMessageId: req.EndMessageId, Limit: req.Limit,
 	})
 	if err != nil {
 		return nil, err

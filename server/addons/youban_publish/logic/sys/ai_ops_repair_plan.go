@@ -76,7 +76,7 @@ func (s *sSysPublish) AIOpsCreateRepairPlan(ctx context.Context, in *sysin.AIOps
 		tenantID, accountID                                     int64
 	)
 	if action == "replay_bot_source_updates" {
-		collectorEventIDs, replayPreview, tenantID, accountID, err = s.previewAIOpsBotSourceReplay(ctx, in.SourceId, in.CollectorEventIds, limit)
+		collectorEventIDs, replayPreview, tenantID, accountID, err = s.previewAIOpsBotSourceReplay(ctx, in.SourceId, in.CollectorEventIds, in.ChatId, in.StartMessageId, in.EndMessageId, limit)
 	} else {
 		eventIDs, verifyEventIDs, profileIDs, err = s.previewAIOpsRepairTargets(ctx, action, in, limit)
 		tenantID, accountID = in.TenantId, in.AccountId
@@ -117,10 +117,11 @@ func (s *sSysPublish) AIOpsCreateRepairPlan(ctx context.Context, in *sysin.AIOps
 	}, nil
 }
 
-func (s *sSysPublish) previewAIOpsBotSourceReplay(ctx context.Context, sourceID int64, requested []int64, limit int) ([]int64, []*sysin.AIOpsSourceReplayPreviewItem, int64, int64, error) {
+// previewAIOpsBotSourceReplay 统一解析明确ID、频道或消息区间，生成有界重放清单。
+func (s *sSysPublish) previewAIOpsBotSourceReplay(ctx context.Context, sourceID int64, requested []int64, chatID string, startMessageID, endMessageID int64, limit int) ([]int64, []*sysin.AIOpsSourceReplayPreviewItem, int64, int64, error) {
 	ids := uniqueIds(requested)
-	if sourceID <= 0 || len(ids) == 0 || len(ids) > limit {
-		return nil, nil, 0, 0, gerror.Newf("必须指定目标source和1到%d个Collector原始事件ID", limit)
+	if sourceID <= 0 || len(ids) > limit {
+		return nil, nil, 0, 0, gerror.Newf("目标source无效或事件数量超过%d条", limit)
 	}
 	var target struct {
 		ID             int64  `json:"id"`
@@ -139,6 +140,26 @@ func (s *sSysPublish) previewAIOpsBotSourceReplay(ctx context.Context, sourceID 
 	}
 	if target.ID <= 0 || target.TenantID <= 0 || target.AccountID <= 0 || target.BotID <= 0 || target.SourceType != sysin.CollectSourceTypeBot || target.CollectEnabled != 1 || target.Status != 1 {
 		return nil, nil, 0, 0, gerror.New("目标采集source不存在、未启用或不是Bot source")
+	}
+	// 未指定事件ID时，按频道和消息区间从统一 Collector 事件表生成重放范围。
+	if len(ids) == 0 {
+		if strings.TrimSpace(chatID) == "" || startMessageID <= 0 || endMessageID < startMessageID {
+			return nil, nil, 0, 0, gerror.New("请指定Collector事件ID，或同时指定频道和有效消息区间")
+		}
+		if endMessageID-startMessageID+1 > int64(limit)*10 {
+			return nil, nil, 0, 0, gerror.New("消息区间过大，请缩小范围后重试")
+		}
+		var rows []struct{ ID int64 }
+		model := g.DB().Model("hg_tg_collector_event").Ctx(ctx).
+			Fields("id").Where("tenant_id", target.TenantID).Where("source_id", sourceID).
+			Where("source_type", sysin.CollectSourceTypeBot).Where("chat_id", strings.TrimSpace(chatID)).
+			WhereBetween("message_id", startMessageID, endMessageID).OrderAsc("message_id").Limit(limit)
+		if err := model.Scan(&rows); err != nil {
+			return nil, nil, 0, 0, gerror.Wrap(err, "按频道消息区间读取重放事件失败")
+		}
+		for _, row := range rows {
+			ids = append(ids, row.ID)
+		}
 	}
 	if !s.collectGlobalEnabled(ctx) {
 		return nil, nil, 0, 0, gerror.New("采集总开关已关闭，当前不能重放")
@@ -506,7 +527,7 @@ func (s *sSysPublish) AIOpsApplyRepairPlan(ctx context.Context, in *sysin.AIOpsR
 		result.Applied, result.Failed = s.applyAIOpsProfilePlan(ctx, payload.Action, payload.ProfileIDs, payload.TenantID, payload.AccountID)
 	case "replay_bot_source_updates":
 		var tenantID, accountID int64
-		_, _, tenantID, accountID, err = s.previewAIOpsBotSourceReplay(ctx, payload.SourceID, payload.CollectorEventIDs, 1000)
+		_, _, tenantID, accountID, err = s.previewAIOpsBotSourceReplay(ctx, payload.SourceID, payload.CollectorEventIDs, "", 0, 0, 1000)
 		if err == nil && (tenantID != payload.TenantID || accountID != payload.AccountID) {
 			err = gerror.New("目标source归属在计划预演后发生变化，请重新预演")
 		}

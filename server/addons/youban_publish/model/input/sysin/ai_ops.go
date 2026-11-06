@@ -12,6 +12,9 @@ type AIOpsRepairPlanInp struct {
 	StartAt           string   `json:"startAt" dc:"筛选开始时间，RFC3339"`
 	EndAt             string   `json:"endAt" dc:"筛选结束时间，RFC3339"`
 	Limit             int      `json:"limit" dc:"最大影响条数"`
+	ChatId            string   `json:"chatId" dc:"频道Chat ID，用于消息区间重放"`
+	StartMessageId    int64    `json:"startMessageId" dc:"消息区间起始ID"`
+	EndMessageId      int64    `json:"endMessageId" dc:"消息区间结束ID"`
 }
 
 type AIOpsRepairPlanModel struct {
@@ -27,9 +30,13 @@ type AIOpsRepairPlanModel struct {
 	ExpiresAt         string                          `json:"expiresAt"`
 }
 
+// AIOpsSourceReplayPlanInp 描述 Bot 采集原始消息的重放范围。
 type AIOpsSourceReplayPlanInp struct {
 	SourceId          int64   `json:"sourceId" v:"required|min:1#目标采集源ID不能为空|目标采集源ID不能为空" dc:"接收重放事件的目标采集source ID"`
-	CollectorEventIds []int64 `json:"collectorEventIds" v:"required#Collector原始事件ID不能为空" dc:"Telegram Collector原始事件ID，不是Youban采集事件ID或交付ID"`
+	CollectorEventIds []int64 `json:"collectorEventIds" dc:"明确指定的Telegram Collector原始事件ID"`
+	ChatId            string  `json:"chatId" dc:"按频道Chat ID筛选"`
+	StartMessageId    int64   `json:"startMessageId" dc:"消息区间起始ID，包含"`
+	EndMessageId      int64   `json:"endMessageId" dc:"消息区间结束ID，包含"`
 	Limit             int     `json:"limit" d:"1000" dc:"最大原始事件数，最多1000"`
 }
 
