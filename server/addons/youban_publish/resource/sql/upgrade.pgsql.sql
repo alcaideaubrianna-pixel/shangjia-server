@@ -1017,6 +1017,10 @@ ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "text_delete_js
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "text_replace_enabled" smallint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "text_replace_json" text NOT NULL DEFAULT '[]';
 ALTER TABLE "hg_youban_publish_image_quota" ADD COLUMN IF NOT EXISTS "reset_monthly" smallint NOT NULL DEFAULT 1;
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_dispatch_source_profile_event" ON "hg_youban_publish_collect_dispatch" ("source_id", "profile_id", "event_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_chat_id" ON "hg_youban_publish_collect_event" ("source_chat_id", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_source_rule_scope" ON "hg_youban_publish_collect_source_rule" ("tenant_id", "rule_id", "source_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_channel_profile_rule_channel" ON "hg_youban_publish_collect_channel_profile" ("tenant_id", "account_id", "rule_id", "channel_id", "updated_at" DESC);
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "auto_delete_enabled" smallint NOT NULL DEFAULT 1;
 UPDATE "hg_youban_publish_channel"
 SET "auto_delete_enabled" = 1
