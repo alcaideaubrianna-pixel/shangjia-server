@@ -96,3 +96,14 @@ func (c *RedisCommandGroupClient) Ack(ctx context.Context, stream, group, entryI
 	}
 	return nil
 }
+
+// CreateGroup 创建 Consumer Group；MKSTREAM 确保首次部署时 Stream 不存在也能启动。
+func (c *RedisCommandGroupClient) CreateGroup(ctx context.Context, stream, group string) error {
+	if stream == "" || group == "" {
+		return gerror.New("Redis Stream XGROUP 参数无效")
+	}
+	if _, err := c.client.Do(ctx, "XGROUP", "CREATE", stream, group, "0", "MKSTREAM"); err != nil {
+		return gerror.Wrap(err, "创建 Redis Stream consumer group 失败")
+	}
+	return nil
+}

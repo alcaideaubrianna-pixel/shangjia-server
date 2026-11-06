@@ -224,6 +224,9 @@ func TestRedisCommandGroupClientCommands(t *testing.T) {
 	if err = client.Ack(context.Background(), ReadyRealtimeStream, "publish", "1-0"); err != nil || fake.command != "XACK" {
 		t.Fatalf("ack err=%v command=%s args=%v", err, fake.command, fake.args)
 	}
+	if err = client.CreateGroup(context.Background(), ReadyRealtimeStream, "publish"); err != nil || fake.command != "XGROUP" {
+		t.Fatalf("create group err=%v command=%s args=%v", err, fake.command, fake.args)
+	}
 }
 
 func TestDecodeXReadGroupResponse(t *testing.T) {
