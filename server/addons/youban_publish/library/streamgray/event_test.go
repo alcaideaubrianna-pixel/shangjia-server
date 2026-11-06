@@ -2,6 +2,7 @@ package streamgray
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -36,6 +37,12 @@ func (a *adminGroupClient) CreateGroup(_ context.Context, stream, group string) 
 	defer a.mu.Unlock()
 	a.groups = append(a.groups, stream+":"+group)
 	return nil
+}
+
+type existingGroupClient struct{ adminGroupClient }
+
+func (existingGroupClient) CreateGroup(context.Context, string, string) error {
+	return errors.New("BUSYGROUP Consumer Group name already exists")
 }
 
 func (f *fakeGroupClient) ReadGroup(_ context.Context, _, _, _, _ string, _ int, _ time.Duration) ([]StreamEntry, error) {
@@ -346,5 +353,20 @@ func TestRunBothStreamsInitializesBothGroups(t *testing.T) {
 	}
 	if len(client.groups) != 2 {
 		t.Fatalf("groups initialized = %v", client.groups)
+	}
+}
+
+func TestRunBothStreamsIgnoresExistingGroup(t *testing.T) {
+	consumer, err := NewRedisGroupConsumer(&existingGroupClient{}, "publish", "worker-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+	if err = RunBothStreams(ctx, consumer, func(context.Context, ReadyEvent) error { return nil }); err != context.Canceled {
+		t.Fatalf("run err = %v", err)
 	}
 }
