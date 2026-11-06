@@ -21,6 +21,17 @@ func (emptyGroupClient) ReadGroup(context.Context, string, string, string, strin
 
 func (emptyGroupClient) Ack(context.Context, string, string, string) error { return nil }
 
+type adminGroupClient struct{ groups []string }
+
+func (a *adminGroupClient) ReadGroup(context.Context, string, string, string, string, int, time.Duration) ([]StreamEntry, error) {
+	return nil, nil
+}
+func (a *adminGroupClient) Ack(context.Context, string, string, string) error { return nil }
+func (a *adminGroupClient) CreateGroup(_ context.Context, stream, group string) error {
+	a.groups = append(a.groups, stream+":"+group)
+	return nil
+}
+
 func (f *fakeGroupClient) ReadGroup(_ context.Context, _, _, _, _ string, _ int, _ time.Duration) ([]StreamEntry, error) {
 	return f.entries, nil
 }
@@ -247,5 +258,24 @@ func TestRunBothStreamsStopsWithContext(t *testing.T) {
 	err = RunBothStreams(ctx, consumer, func(context.Context, ReadyEvent) error { return nil })
 	if err != context.Canceled {
 		t.Fatalf("run both err = %v, want %v", err, context.Canceled)
+	}
+}
+
+func TestRunBothStreamsInitializesBothGroups(t *testing.T) {
+	client := &adminGroupClient{}
+	consumer, err := NewRedisGroupConsumer(client, "publish", "worker-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+	if err = RunBothStreams(ctx, consumer, func(context.Context, ReadyEvent) error { return nil }); err != context.Canceled {
+		t.Fatalf("run err = %v", err)
+	}
+	if len(client.groups) != 2 {
+		t.Fatalf("groups initialized = %v", client.groups)
 	}
 }
