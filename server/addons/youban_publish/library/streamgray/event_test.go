@@ -41,7 +41,7 @@ func (a *adminGroupClient) CreateGroup(_ context.Context, stream, group string) 
 
 type existingGroupClient struct{ adminGroupClient }
 
-func (existingGroupClient) CreateGroup(context.Context, string, string) error {
+func (*existingGroupClient) CreateGroup(context.Context, string, string) error {
 	return errors.New("BUSYGROUP Consumer Group name already exists")
 }
 
