@@ -209,6 +209,23 @@ func TestRedisProducerXAdd(t *testing.T) {
 	}
 }
 
+func TestRedisCommandGroupClientCommands(t *testing.T) {
+	fake := &fakeRedisClient{}
+	client, err := NewRedisCommandGroupClient(fake, func(*gvar.Var) ([]StreamEntry, error) {
+		return []StreamEntry{{ID: "1-0", Payload: []byte(`{"tenant_id":1,"account_id":2,"job_id":1,"channel_id":2}`)}}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := client.ReadGroup(context.Background(), ReadyRealtimeStream, "publish", "worker", ">", 10, time.Second)
+	if err != nil || len(entries) != 1 || fake.command != "XREADGROUP" {
+		t.Fatalf("entries=%v err=%v command=%s args=%v", entries, err, fake.command, fake.args)
+	}
+	if err = client.Ack(context.Background(), ReadyRealtimeStream, "publish", "1-0"); err != nil || fake.command != "XACK" {
+		t.Fatalf("ack err=%v command=%s args=%v", err, fake.command, fake.args)
+	}
+}
+
 // TestRedisGroupConsumerAcksAfterHandler 验证只有 handler 成功后才确认消息。
 func TestRedisGroupConsumerAcksAfterHandler(t *testing.T) {
 	body, err := (ReadyEvent{TenantID: 1, AccountID: 2, JobID: 1, ChannelID: 2}).Encode()
