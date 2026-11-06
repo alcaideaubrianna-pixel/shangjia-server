@@ -3,6 +3,8 @@ package streamgray
 import (
 	"context"
 	"testing"
+
+	"github.com/gogf/gf/v2/container/gvar"
 )
 
 type fakeProducer struct {
@@ -51,5 +53,31 @@ func TestPublishReadyEventFacade(t *testing.T) {
 	}
 	if _, err = PublishReadyEvent(context.Background(), producer, "other", event); err == nil {
 		t.Fatal("unknown stream must fail")
+	}
+}
+
+type fakeRedisClient struct {
+	command string
+	args    []any
+}
+
+func (f *fakeRedisClient) Do(_ context.Context, command string, args ...any) (*gvar.Var, error) {
+	f.command, f.args = command, args
+	return gvar.New("1700000000000-0"), nil
+}
+
+// TestRedisProducerXAdd 验证 Redis 适配器只通过 XADD 写入事件。
+func TestRedisProducerXAdd(t *testing.T) {
+	fake := &fakeRedisClient{}
+	producer, err := NewRedisProducer(fake)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := producer.Add(context.Background(), ReadyRealtimeStream, ReadyEvent{JobID: 1, ChannelID: 2})
+	if err != nil || id != "1700000000000-0" {
+		t.Fatalf("id=%q err=%v", id, err)
+	}
+	if fake.command != "XADD" || len(fake.args) != 4 || fake.args[0] != ReadyRealtimeStream || fake.args[1] != "*" || fake.args[2] != "payload" {
+		t.Fatalf("command=%q args=%v", fake.command, fake.args)
 	}
 }
