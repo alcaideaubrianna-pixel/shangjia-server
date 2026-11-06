@@ -2,6 +2,7 @@ package streamgray
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -21,13 +22,18 @@ func (emptyGroupClient) ReadGroup(context.Context, string, string, string, strin
 
 func (emptyGroupClient) Ack(context.Context, string, string, string) error { return nil }
 
-type adminGroupClient struct{ groups []string }
+type adminGroupClient struct {
+	mu     sync.Mutex
+	groups []string
+}
 
 func (a *adminGroupClient) ReadGroup(context.Context, string, string, string, string, int, time.Duration) ([]StreamEntry, error) {
 	return nil, nil
 }
 func (a *adminGroupClient) Ack(context.Context, string, string, string) error { return nil }
 func (a *adminGroupClient) CreateGroup(_ context.Context, stream, group string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.groups = append(a.groups, stream+":"+group)
 	return nil
 }
