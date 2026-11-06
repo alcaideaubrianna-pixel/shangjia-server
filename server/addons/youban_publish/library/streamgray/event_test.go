@@ -173,3 +173,24 @@ func TestRedisGroupConsumerAcksAfterHandler(t *testing.T) {
 		t.Fatalf("processed=%d err=%v acked=%v", processed, err, fake.acked)
 	}
 }
+
+// TestRedisGroupConsumerKeepsFailedEntryPending 验证 handler 失败时绝不 ACK，便于重试或恢复消费者接管。
+func TestRedisGroupConsumerKeepsFailedEntryPending(t *testing.T) {
+	body, err := (ReadyEvent{JobID: 2, ChannelID: 3}).Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeGroupClient{entries: []StreamEntry{{ID: "2-0", Payload: body}}}
+	consumer, err := NewRedisGroupConsumer(fake, "publish", "worker-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = consumer.ConsumeOnce(context.Background(), ReadyRealtimeStream, ">", func(context.Context, ReadyEvent) error {
+		return context.Canceled
+	}); err != context.Canceled {
+		t.Fatalf("handler err = %v", err)
+	}
+	if len(fake.acked) != 0 {
+		t.Fatalf("failed entry must remain pending, acked=%v", fake.acked)
+	}
+}
