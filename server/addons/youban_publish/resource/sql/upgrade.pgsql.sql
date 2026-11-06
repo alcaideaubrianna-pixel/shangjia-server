@@ -1016,6 +1016,7 @@ ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "text_delete_en
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "text_delete_json" text NOT NULL DEFAULT '[]';
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "text_replace_enabled" smallint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "text_replace_json" text NOT NULL DEFAULT '[]';
+ALTER TABLE "hg_youban_publish_image_quota" ADD COLUMN IF NOT EXISTS "reset_monthly" smallint NOT NULL DEFAULT 1;
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "auto_delete_enabled" smallint NOT NULL DEFAULT 1;
 UPDATE "hg_youban_publish_channel"
 SET "auto_delete_enabled" = 1

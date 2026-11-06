@@ -137,6 +137,17 @@ func (c *cPublishServer) VipTenantSave(ctx context.Context, req *publish.VipTena
 	return &publish.VipTenantSaveRes{}, err
 }
 
+func (c *cPublishServer) VipQuotaView(ctx context.Context, req *publish.VipQuotaViewReq) (*publish.VipQuotaViewRes, error) {
+	data, err := service.SysPublish().AdminTenantImageQuotaView(ctx, req.TenantId)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.VipQuotaViewRes{TenantImageQuotaModel: data}, nil
+}
+func (c *cPublishServer) VipQuotaSave(ctx context.Context, req *publish.VipQuotaSaveReq) (*publish.VipQuotaSaveRes, error) {
+	return &publish.VipQuotaSaveRes{}, service.SysPublish().AdminTenantImageQuotaSave(ctx, &req.TenantImageQuotaSaveInp)
+}
+
 func (c *cPublishServer) VipFeatureView(ctx context.Context, req *publish.VipFeatureViewReq) (res *publish.VipFeatureViewRes, err error) {
 	data, err := service.SysPublish().AdminTenantFeaturePermissionView(ctx, &req.TenantFeaturePermissionViewInp)
 	if err != nil {

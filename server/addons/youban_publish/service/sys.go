@@ -249,6 +249,8 @@ type ISysPublish interface {
 	AdminTenantVipConfigView(ctx context.Context) (res *sysin.TenantVipConfigModel, err error)
 	AdminTenantVipConfigSave(ctx context.Context, in *sysin.TenantVipConfigSaveInp) (err error)
 	AdminTenantVipTenantSave(ctx context.Context, in *sysin.TenantVipTenantSaveInp) (err error)
+	AdminTenantImageQuotaView(ctx context.Context, tenantId int64) (*sysin.TenantImageQuotaModel, error)
+	AdminTenantImageQuotaSave(ctx context.Context, in *sysin.TenantImageQuotaSaveInp) error
 	AdminTenantFeaturePermissionView(ctx context.Context, in *sysin.TenantFeaturePermissionViewInp) (res *sysin.TenantFeaturePermissionViewModel, err error)
 	AdminTenantFeaturePermissionSave(ctx context.Context, in *sysin.TenantFeaturePermissionSaveInp) (err error)
 	AdminTenantVipOrderList(ctx context.Context, in *sysin.TenantVipOrderListInp) (list []*sysin.TenantVipOrderModel, totalCount int, err error)

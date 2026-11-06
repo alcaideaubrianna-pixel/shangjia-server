@@ -192,6 +192,23 @@ type TenantVipTenantSaveInp struct {
 	TenantId  int64  `json:"tenantId" dc:"租户ID"`
 }
 
+type TenantImageQuotaModel struct {
+	TenantId           int64  `json:"tenantId"`
+	MonthlyLimit       int64  `json:"monthlyLimit"`
+	MonthlyUsed        int64  `json:"monthlyUsed"`
+	PurchasedRemaining int64  `json:"purchasedRemaining"`
+	ResetMonthly       bool   `json:"resetMonthly"`
+	Period             string `json:"period"`
+}
+type TenantImageQuotaSaveInp struct {
+	TenantId           int64  `json:"tenantId"`
+	MonthlyLimit       int64  `json:"monthlyLimit"`
+	MonthlyUsed        int64  `json:"monthlyUsed"`
+	PurchasedRemaining int64  `json:"purchasedRemaining"`
+	ResetMonthly       bool   `json:"resetMonthly"`
+	Remark             string `json:"remark"`
+}
+
 type TenantVipCouponListInp struct {
 	form.PageReq
 	Status  int    `json:"status" dc:"状态"`

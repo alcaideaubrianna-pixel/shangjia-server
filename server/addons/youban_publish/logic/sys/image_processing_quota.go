@@ -32,6 +32,35 @@ type imageQuotaRow struct {
 	MonthlyUsed        int64  `orm:"monthly_used"`
 	PurchasedRemaining int64  `orm:"purchased_remaining"`
 	Period             string `orm:"period"`
+	ResetMonthly       bool   `orm:"reset_monthly"`
+}
+
+func (s *sSysPublish) AdminTenantImageQuotaView(ctx context.Context, tenantId int64) (*sysin.TenantImageQuotaModel, error) {
+	if tenantId <= 0 {
+		return nil, gerror.New("账号归属不能为空")
+	}
+	if err := s.ensureImageQuotaPeriod(ctx, tenantId); err != nil {
+		return nil, err
+	}
+	var row imageQuotaRow
+	if err := g.DB().Model(imageQuotaTable).Ctx(ctx).Where("tenant_id", tenantId).Scan(&row); err != nil {
+		return nil, err
+	}
+	return &sysin.TenantImageQuotaModel{TenantId: tenantId, MonthlyLimit: row.MonthlyLimit, MonthlyUsed: row.MonthlyUsed, PurchasedRemaining: row.PurchasedRemaining, ResetMonthly: row.ResetMonthly, Period: row.Period}, nil
+}
+
+func (s *sSysPublish) AdminTenantImageQuotaSave(ctx context.Context, in *sysin.TenantImageQuotaSaveInp) error {
+	if in == nil || in.TenantId <= 0 || in.MonthlyLimit < 0 || in.MonthlyUsed < 0 || in.PurchasedRemaining < 0 {
+		return gerror.New("额度参数不合法")
+	}
+	if err := s.ensureImageQuotaPeriod(ctx, in.TenantId); err != nil {
+		return err
+	}
+	_, err := g.DB().Model(imageQuotaTable).Ctx(ctx).Where("tenant_id", in.TenantId).Data(g.Map{"monthly_limit": in.MonthlyLimit, "monthly_used": in.MonthlyUsed, "purchased_remaining": in.PurchasedRemaining, "reset_monthly": in.ResetMonthly, "updated_at": gtime.Now()}).Update()
+	if err == nil {
+		_, _ = cache.Instance().Remove(ctx, imageQuotaCacheKey(in.TenantId))
+	}
+	return err
 }
 
 func (s *sSysPublish) ensureImageQuotaAvailable(ctx context.Context, tenantId int64) error {
@@ -202,9 +231,11 @@ func (s *sSysPublish) ensureImageQuotaPeriod(ctx context.Context, tenantId int64
 	if err != nil {
 		return gerror.Wrap(err, "初始化图片处理额度失败")
 	}
-	_, err = g.DB().Model(imageQuotaTable).Safe().Ctx(ctx).
-		Where("tenant_id", tenantId).WhereNot("period", period).
-		Data(g.Map{"monthly_used": 0, "period": period, "updated_at": gtime.Now()}).Update()
+	var row imageQuotaRow
+	_ = g.DB().Model(imageQuotaTable).Ctx(ctx).Where("tenant_id", tenantId).Scan(&row)
+	if row.ResetMonthly {
+		_, err = g.DB().Model(imageQuotaTable).Safe().Ctx(ctx).Where("tenant_id", tenantId).WhereNot("period", period).Data(g.Map{"monthly_used": 0, "period": period, "updated_at": gtime.Now()}).Update()
+	}
 	return gerror.Wrap(err, "重置图片处理月度额度失败")
 }
 

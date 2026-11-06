@@ -29,6 +29,17 @@ type VipTenantSaveReq struct {
 
 type VipTenantSaveRes struct{}
 
+type VipQuotaViewReq struct {
+	g.Meta   `path:"/publish/vip/tenant/quota/view" method:"get"`
+	TenantId int64 `json:"tenantId"`
+}
+type VipQuotaViewRes struct{ *sysin.TenantImageQuotaModel }
+type VipQuotaSaveReq struct {
+	g.Meta `path:"/publish/vip/tenant/quota/save" method:"post"`
+	sysin.TenantImageQuotaSaveInp
+}
+type VipQuotaSaveRes struct{}
+
 type VipFeatureViewReq struct {
 	g.Meta `path:"/publish/vip/feature/view" method:"get" tags:"上架插件后台" summary:"账号归属功能权限"`
 	sysin.TenantFeaturePermissionViewInp
