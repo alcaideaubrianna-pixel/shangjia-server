@@ -16,18 +16,18 @@ import (
 )
 
 const (
-	profileCycleScanBatchSize        = 200
-	profileCycleMaxProducePerRun     = 5000
-	profileCycleChannelBacklogLimit  = 20
-	profileCycleClaimLease           = 2 * time.Hour
-	profileCycleRetryDelay           = time.Hour
-	profileCycleFailureThreshold     = 3
-	profileCycleRescheduleBatchSize  = 500
-	profileCycleOverdueSpreadWindow  = 4 * time.Hour
-	profileCycleDevelopSpreadWindow  = 5 * time.Minute
-	profileCycleSummaryRefreshDelay  = 30 * time.Second
-	profileCycleRescheduleClaimLease = 30 * time.Minute
-	profileCycleShardCount           = 64
+	profileCycleScanBatchSize         = 200
+	profileCycleMaxProducePerRun      = 5000
+	profileCycleChannelBacklogDefault = 100
+	profileCycleClaimLease            = 2 * time.Hour
+	profileCycleRetryDelay            = time.Hour
+	profileCycleFailureThreshold      = 3
+	profileCycleRescheduleBatchSize   = 500
+	profileCycleOverdueSpreadWindow   = 4 * time.Hour
+	profileCycleDevelopSpreadWindow   = 5 * time.Minute
+	profileCycleSummaryRefreshDelay   = 30 * time.Second
+	profileCycleRescheduleClaimLease  = 30 * time.Minute
+	profileCycleShardCount            = 64
 )
 
 type profileCycleChannelConfig struct {
@@ -540,7 +540,7 @@ func (s *sSysPublish) dispatchDueProfileCycle(ctx context.Context, row profileCy
 		}
 		channelBacklog[row.ChannelId] = backlog
 	}
-	if !profileCycleChannelHasCapacity(backlog) {
+	if !profileCycleChannelHasCapacity(ctx, backlog) {
 		_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", row.JobId).Data(g.Map{
 			"next_cycle_at":       gtime.Now().Add(profileCycleRetryDelay),
 			"last_dispatch_error": "频道循环队列积压，已延后领取", "updated_at": gtime.Now(),
@@ -605,8 +605,9 @@ func (s *sSysPublish) dispatchDueProfileCycle(ctx context.Context, row profileCy
 	return false, err
 }
 
-func profileCycleChannelHasCapacity(backlog int) bool {
-	return backlog < profileCycleChannelBacklogLimit
+func profileCycleChannelHasCapacity(ctx context.Context, backlog int) bool {
+	limit := maxConfigInt(ctx, "youbanPublish.cycle.channelBacklogLimit", profileCycleChannelBacklogDefault)
+	return backlog < limit
 }
 
 func cycleFailureSummary(err error) string {

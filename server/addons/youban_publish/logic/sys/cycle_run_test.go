@@ -123,10 +123,10 @@ func TestProfileCycleRescheduleCandidateOnlyMatchesMissingPlans(t *testing.T) {
 }
 
 func TestProfileCycleBacklogIsLimitedPerChannel(t *testing.T) {
-	if profileCycleChannelHasCapacity(profileCycleChannelBacklogLimit) {
+	if profileCycleChannelHasCapacity(t.Context(), profileCycleChannelBacklogDefault) {
 		t.Fatal("a saturated channel must stop accepting cycle jobs")
 	}
-	if !profileCycleChannelHasCapacity(0) {
+	if !profileCycleChannelHasCapacity(t.Context(), 0) {
 		t.Fatal("another empty channel must remain eligible when one channel is saturated")
 	}
 }
