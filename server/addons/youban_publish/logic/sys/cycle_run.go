@@ -164,10 +164,14 @@ func runChannelCycleSchedulerStages(ctx context.Context, stages []channelCycleSc
 		if stage.run == nil {
 			continue
 		}
+		startedAt := time.Now()
+		g.Log().Infof(ctx, "频道循环调度阶段开始 stage:%s", stage.name)
 		if err := stage.run(ctx); err != nil {
-			g.Log().Warningf(ctx, "频道循环调度阶段失败 stage:%s err:%+v", stage.name, err)
+			g.Log().Warningf(ctx, "频道循环调度阶段失败 stage:%s elapsed_ms:%d err:%+v", stage.name, time.Since(startedAt).Milliseconds(), err)
 			errs = append(errs, fmt.Errorf("%s: %w", stage.name, err))
+			continue
 		}
+		g.Log().Infof(ctx, "频道循环调度阶段完成 stage:%s elapsed_ms:%d", stage.name, time.Since(startedAt).Milliseconds())
 	}
 	return errors.Join(errs...)
 }
