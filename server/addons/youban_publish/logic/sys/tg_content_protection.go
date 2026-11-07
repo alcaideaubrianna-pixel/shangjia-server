@@ -169,8 +169,12 @@ func (s *sSysPublish) applyTelegramJobContentProtection(ctx context.Context, job
 func applyChannelTextRules(caption string, policy telegramChannelSendPolicy) string {
 	if policy.TextReplaceEnabled {
 		for _, rule := range policy.TextReplaceRules {
-			if rule.Enabled && rule.From != "" {
-				caption = strings.ReplaceAll(caption, rule.From, rule.To)
+			from := stripTelegramZeroWidth(strings.TrimSpace(rule.From))
+			if rule.Enabled && from != "" {
+				// Collected text may carry zero-width anti-scan markers. Rules
+				// are configured using the visible keyword, so match that visible
+				// form instead of requiring an exact invisible-codepoint sequence.
+				caption = strings.ReplaceAll(caption, from, rule.To)
 			}
 		}
 	}
@@ -194,6 +198,17 @@ func applyChannelTextRules(caption string, policy telegramChannelSendPolicy) str
 		}
 	}
 	return strings.TrimSpace(caption)
+}
+
+func stripTelegramZeroWidth(value string) string {
+	return strings.Map(func(r rune) rune {
+		switch r {
+		case '\u200b', '\u200c', '\u200d', '\u2060', '\u2063', '\ufeff':
+			return -1
+		default:
+			return r
+		}
+	}, value)
 }
 
 func isTelegramImageMedia(mediaType string) bool {
