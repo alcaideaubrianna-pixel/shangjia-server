@@ -109,6 +109,8 @@ func (s *sSysPublish) deleteProfilesTelegramMessages(ctx context.Context, ids []
 		return err
 	}
 	channelIDs := make([]int64, 0, len(jobs))
+	failed := 0
+	var firstErr error
 	for _, job := range jobs {
 		channelIDs = append(channelIDs, job.ChannelId)
 	}
@@ -123,9 +125,17 @@ func (s *sSysPublish) deleteProfilesTelegramMessages(ctx context.Context, ids []
 			continue
 		}
 		if err = s.enqueueTelegramCleanupJob(ctx, job.Id, 0); err != nil {
-			return gerror.Wrap(err, "加入TG下架清理队列失败")
+			failed++
+			if firstErr == nil {
+				firstErr = gerror.Wrapf(err, "加入TG下架清理队列失败 jobId:%d", job.Id)
+			}
+			g.Log().Warningf(ctx, "批量下架单条清理任务入队失败 jobId:%d profileId:%d err:%+v", job.Id, job.ProfileId, err)
+			continue
 		}
 		s.appendTelegramJobLog(ctx, job.telegramJobRecord(), "down", "queued", "资料下架，TG历史消息已加入Redis清理队列")
+	}
+	if firstErr != nil {
+		return gerror.Wrapf(firstErr, "批量下架清理完成，失败%d条", failed)
 	}
 	return nil
 }
@@ -138,6 +148,8 @@ func (s *sSysPublish) notifyProfilesDown(ctx context.Context, ids []int64, tenan
 	if len(rows) == 0 {
 		return nil
 	}
+	failed := 0
+	var firstErr error
 	for _, row := range rows {
 		conf, confErr := NewSysConfig().publishConfigViewByAccount(ctx, tenantId, row["account_id"].Int64())
 		if confErr != nil {
@@ -148,9 +160,16 @@ func (s *sSysPublish) notifyProfilesDown(ctx context.Context, ids []int64, tenan
 		}
 		for _, channel := range channels {
 			if err = s.sendDownChannelProfile(ctx, tenantId, channel, row, operationNo, cutoffAt); err != nil {
-				return err
+				failed++
+				if firstErr == nil {
+					firstErr = err
+				}
+				g.Log().Warningf(ctx, "批量下架单条频道通知失败 profileId:%d channelId:%d err:%+v", row["profile_id"].Int64(), channel.Id, err)
 			}
 		}
+	}
+	if firstErr != nil {
+		return gerror.Wrapf(firstErr, "批量下架通知完成，失败%d条", failed)
 	}
 	return nil
 }
