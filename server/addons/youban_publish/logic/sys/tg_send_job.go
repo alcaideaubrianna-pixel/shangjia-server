@@ -570,14 +570,16 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 // still writing rows or processing storage.
 func (s *sSysPublish) profileDisplayMediaReady(ctx context.Context, profileID int64) (bool, error) {
 	var profile struct {
-		ImageCount int `json:"image_count"`
-		VideoCount int `json:"video_count"`
+		ImageCount           int   `json:"image_count"`
+		VideoCount           int   `json:"video_count"`
+		HasVerificationVideo int   `json:"has_verification_video"`
+		CoverMediaId         int64 `json:"cover_media_id"`
 	}
 	if err := g.DB().Model("hg_content_profile").Safe().Ctx(ctx).
-		Fields("image_count,video_count").Where("id", profileID).WhereNull("deleted_at").Scan(&profile); err != nil {
+		Fields("image_count,video_count,has_verification_video,cover_media_id").Where("id", profileID).WhereNull("deleted_at").Scan(&profile); err != nil {
 		return false, gerror.Wrap(err, "检查资料媒体状态失败")
 	}
-	if profile.ImageCount <= 0 && profile.VideoCount <= 0 {
+	if profile.ImageCount <= 0 && profile.VideoCount <= 0 && profile.HasVerificationVideo <= 0 && profile.CoverMediaId <= 0 {
 		return true, nil
 	}
 	return false, nil
