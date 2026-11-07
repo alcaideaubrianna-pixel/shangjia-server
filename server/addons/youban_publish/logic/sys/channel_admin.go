@@ -77,6 +77,7 @@ func (s *sSysPublish) AdminChannelList(ctx context.Context, in *sysin.ChannelLis
 	}
 	applyChannelBotIds(list)
 	applyChannelBotPermissionSummary(list)
+	decodeChannelTextRules(list)
 	s.applyEffectiveChannelCycleInfo(ctx, list)
 	return list, totalCount, nil
 }
@@ -139,6 +140,7 @@ func (s *sSysPublish) MyChannelList(ctx context.Context, in *sysin.ChannelListIn
 	}
 	applyChannelBotIds(list)
 	applyChannelBotPermissionSummary(list)
+	decodeChannelTextRules(list)
 	s.applyEffectiveChannelCycleInfo(ctx, list)
 	return list, totalCount, nil
 }
@@ -168,6 +170,7 @@ func (s *sSysPublish) ServerChannelList(ctx context.Context, in *sysin.ChannelLi
 	applyChannelBotIds(list)
 	s.applyEffectiveChannelCycleInfo(ctx, list)
 	applyChannelBotPermissionSummary(list)
+	decodeChannelTextRules(list)
 	return list, totalCount, nil
 }
 
@@ -476,7 +479,31 @@ func (s *sSysPublish) channelById(ctx context.Context, tenantId int64, channelId
 		Scan(&channel); err != nil {
 		return nil, gerror.Wrap(err, "读取频道配置失败")
 	}
+	decodeChannelTextRules([]*sysin.ChannelModel{&channel})
 	return &channel, nil
+}
+
+// decodeChannelTextRules exposes the persisted JSON rules to the API model.
+// The database stores compact JSON columns; without this mapping the save
+// succeeds but the frontend receives empty rule arrays after a refresh.
+func decodeChannelTextRules(list []*sysin.ChannelModel) {
+	for _, item := range list {
+		if item == nil {
+			continue
+		}
+		if strings.TrimSpace(item.TextDeleteJSON) != "" {
+			_ = json.Unmarshal([]byte(item.TextDeleteJSON), &item.TextDeleteRules)
+		}
+		if strings.TrimSpace(item.TextReplaceJSON) != "" {
+			_ = json.Unmarshal([]byte(item.TextReplaceJSON), &item.TextReplaceRules)
+		}
+		if item.TextDeleteRules == nil {
+			item.TextDeleteRules = []sysin.TextDeleteRule{}
+		}
+		if item.TextReplaceRules == nil {
+			item.TextReplaceRules = []sysin.TextReplaceRule{}
+		}
+	}
 }
 
 func (s *sSysPublish) AdminChannelDelete(ctx context.Context, in *sysin.ChannelDeleteInp) (err error) {

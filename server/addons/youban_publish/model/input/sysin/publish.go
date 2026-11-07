@@ -1452,8 +1452,10 @@ type ChannelModel struct {
 	TextObfuscationEnabled  int               `json:"textObfuscationEnabled" dc:"频道文本混淆开关"`
 	TextDeleteEnabled       int               `json:"textDeleteEnabled" dc:"频道删除文本开关"`
 	TextDeleteRules         []TextDeleteRule  `json:"textDeleteRules" dc:"频道删除文本规则"`
+	TextDeleteJSON          string            `json:"-" orm:"text_delete_json"`
 	TextReplaceEnabled      int               `json:"textReplaceEnabled" dc:"频道替换文本开关"`
 	TextReplaceRules        []TextReplaceRule `json:"textReplaceRules" dc:"频道替换文本规则"`
+	TextReplaceJSON         string            `json:"-" orm:"text_replace_json"`
 	AutoDeleteEnabled       int               `json:"autoDeleteEnabled" dc:"频道自动删除开关"`
 	PreserveHistoryMessages int               `json:"preserveHistoryMessages" dc:"下架和循环上架时保留旧消息"`
 	BotIds                  []int64           `json:"botIds" dc:"绑定Bot ID列表"`
