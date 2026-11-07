@@ -332,21 +332,21 @@ func (s *sSysPublish) refreshChannelProfileCycleNextAt(ctx context.Context, chan
 }
 
 func (s *sSysPublish) runProfileCycleDueScan(ctx context.Context) error {
-	lockCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	lock := hglock.NewConfig(55*time.Minute, 100*time.Millisecond).Mutex("youban_publish:profile_cycle_due_scan")
-	if err := lock.TryLock(lockCtx); err != nil {
-		if gerror.Is(err, hglock.ErrLockFailed) {
-			return nil
-		}
-		return gerror.Wrap(err, "获取资料循环扫描锁失败")
-	}
-	defer s.releaseTelegramChannelLease(context.Background(), lock)
 	produced := 0
 	processed := 0
 	affectedChannels := make(map[int64]struct{})
 	channelBacklog := make(map[int64]int)
 	for shard := 0; shard < profileCycleShardCount; shard++ {
+		lockCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		lock := hglock.NewConfig(10*time.Minute, 100*time.Millisecond).Mutex(fmt.Sprintf("youban_publish:profile_cycle_due_scan:%02d", shard))
+		if err := lock.TryLock(lockCtx); err != nil {
+			cancel()
+			if gerror.Is(err, hglock.ErrLockFailed) {
+				continue
+			}
+			return gerror.Wrapf(err, "获取资料循环分片扫描锁失败 shard:%d", shard)
+		}
+		cancel()
 		produced, processed = 0, 0
 		for produced < profileCycleMaxProducePerRun && processed < profileCycleMaxProducePerRun {
 			rows, err := s.profileCycleDueRowsShard(ctx, profileCycleScanBatchSize, shard)
@@ -373,6 +373,7 @@ func (s *sSysPublish) runProfileCycleDueScan(ctx context.Context) error {
 				}
 			}
 		}
+		s.releaseTelegramChannelLease(context.Background(), lock)
 	}
 	for channelId := range affectedChannels {
 		if err := s.refreshChannelProfileCycleNextAt(ctx, channelId); err != nil {
