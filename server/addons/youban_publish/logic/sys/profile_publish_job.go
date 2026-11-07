@@ -119,15 +119,11 @@ func (s *sSysPublish) submitProfilePublishWithMeta(ctx context.Context, profileI
 }
 
 func (s *sSysPublish) profilePublishMediaReady(ctx context.Context, profileID int64) (bool, error) {
-	var counts struct{ ImageCount, VideoCount int }
-	if err := g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).Fields("image_count,video_count").Where("id", profileID).Scan(&counts); err != nil {
-		return false, err
-	}
-	if counts.ImageCount+counts.VideoCount == 0 {
-		return true, nil
-	}
-	ready, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Where("profile_id", profileID).WhereNull("deleted_at").Where("processing_status", "ready").Count()
-	return ready >= counts.ImageCount+counts.VideoCount, err
+	// Keep the submit path and the worker on one readiness predicate. Divergent
+	// checks previously let submit create jobs while the media rows were still
+	// being inserted, and the worker could then mistake the empty snapshot for
+	// an intentional text-only profile.
+	return s.profileMediaReady(ctx, profileID)
 }
 
 // prepareProfilePublishJobs persists the publish intent while the profile
