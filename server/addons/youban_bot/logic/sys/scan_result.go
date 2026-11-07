@@ -216,10 +216,10 @@ func (s *sSysBot) handleScanCallback(ctx context.Context, botId int64, query *mo
 	if viewErr != nil {
 		return true, s.replyBotError(ctx, botId, chatId, "扫图预览", viewErr)
 	}
-	step = scantrace.Begin(ctx, "result.media")
-	viewErr = s.sendScanProfileContent(ctx, botId, chatId, note)
-	step(viewErr)
-	return true, s.replyBotError(ctx, botId, chatId, "扫图预览", viewErr)
+	// Scanning only returns the management card. Media albums are sent by the
+	// explicit “预览” button so searching a profile never emits an unsolicited
+	// preview or duplicate Telegram messages.
+	return true, nil
 }
 
 func (s *sSysBot) sendScanProfileContent(ctx context.Context, botId int64, chatId string, note *publishsysin.NoteModel) error {
