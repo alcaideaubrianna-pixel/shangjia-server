@@ -11,7 +11,9 @@ import (
 	"hotgo/internal/library/addons"
 	internalservice "hotgo/internal/service"
 	"hotgo/utility/runrole"
+	"strings"
 	"sync"
+	"time"
 )
 
 type module struct {
@@ -30,6 +32,31 @@ func (m *module) Start(option *addons.Option) error {
 	option.Server.Group("/", func(group *ghttp.RouterGroup) {
 		group.Middleware(internalservice.Middleware().Addon)
 		router.Api(m.ctx, group)
+		// Compatibility endpoint for local Telegram Bot API clients. The bot
+		// token is the only Telegram parameter; no query/body is accepted.
+		group.GET("/_internal/telegram-bot-api/bot/:token/getWebhookInfo", func(r *ghttp.Request) {
+			token := strings.TrimSpace(r.GetRouter("token").String())
+			if token == "" || !strings.Contains(token, ":") {
+				r.Response.Status = 400
+				r.Response.WriteJson(map[string]interface{}{"ok": false, "error_code": 400, "description": "bot token is required"})
+				return
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+			defer cancel()
+			bot, err := gatewayservice.Gateway().Client(ctx, token)
+			if err != nil {
+				r.Response.Status = 502
+				r.Response.WriteJson(map[string]interface{}{"ok": false, "error_code": 502, "description": err.Error()})
+				return
+			}
+			info, err := bot.GetWebhookInfo(ctx)
+			if err != nil {
+				r.Response.Status = 502
+				r.Response.WriteJson(map[string]interface{}{"ok": false, "error_code": 502, "description": err.Error()})
+				return
+			}
+			r.Response.WriteJson(map[string]interface{}{"ok": true, "result": info})
+		})
 	})
 	if runrole.Enabled(m.ctx, runrole.Runtime) {
 		gatewayservice.Gateway().StartRuntime(m.ctx)
