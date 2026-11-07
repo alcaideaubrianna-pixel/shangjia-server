@@ -7,6 +7,7 @@ package sys
 
 import (
 	"context"
+	"fmt"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	"hotgo/internal/library/cron"
@@ -42,11 +43,17 @@ func (s *sSysCron) StartCron(ctx context.Context) {
 		cron.Logger().Fatalf(ctx, "定时任务获取失败, err . %v", err)
 		return
 	}
+	names := make([]string, 0, len(list))
+	for _, item := range list {
+		names = append(names, fmt.Sprintf("%s#%d", item.Name, item.Id))
+	}
+	cron.Logger().Infof(ctx, "定时任务加载完成 count:%d tasks:%v", len(list), names)
 
 	if err := cron.StartALL(list); err != nil {
 		cron.Logger().Fatalf(ctx, "定时任务启动失败, err . %v", err)
 		return
 	}
+	cron.Logger().Infof(ctx, "定时任务启动完成 count:%d tasks:%v", len(list), names)
 }
 
 // Delete 删除

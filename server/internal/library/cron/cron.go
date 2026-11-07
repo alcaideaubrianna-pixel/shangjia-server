@@ -96,6 +96,11 @@ func StopALL() {
 func StartALL(sysCron []*entity.SysCron) (err error) {
 	crons.Lock()
 	defer crons.Unlock()
+	registered := make([]string, 0, len(crons.tasks))
+	for name := range crons.tasks {
+		registered = append(registered, name)
+	}
+	g.Log().Infof(gctx.GetInitCtx(), "定时任务注册表加载完成 count:%d tasks:%v", len(registered), registered)
 
 	if len(crons.tasks) == 0 {
 		g.Log().Debug(gctx.GetInitCtx(), "no scheduled task is available.")
