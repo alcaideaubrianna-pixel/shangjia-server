@@ -14,6 +14,7 @@ import (
 	"github.com/hibiken/asynq"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/dao"
 )
 
 const (
@@ -257,8 +258,24 @@ func (s *sSysPublish) profileMediaReady(ctx context.Context, profileId int64) (b
 	}
 	count, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 		Where("profile_id", profileId).WhereNull("deleted_at").Count()
-	if err != nil || count == 0 {
-		return err == nil, err
+	if err != nil {
+		return false, err
+	}
+	if count == 0 {
+		// A newly created profile can be published before the asynchronous
+		// media writer inserts its rows. Use the profile declaration to
+		// distinguish that state from an intentional text-only profile.
+		var declared struct {
+			ImageCount           int   `orm:"image_count"`
+			VideoCount           int   `orm:"video_count"`
+			HasVerificationVideo int   `orm:"has_verification_video"`
+			CoverMediaId         int64 `orm:"cover_media_id"`
+		}
+		if err = g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).
+			Fields("image_count,video_count,has_verification_video,cover_media_id").Where("id", profileId).WhereNull("deleted_at").Scan(&declared); err != nil {
+			return false, gerror.Wrap(err, "检查资料声明媒体失败")
+		}
+		return declared.ImageCount <= 0 && declared.VideoCount <= 0 && declared.HasVerificationVideo <= 0 && declared.CoverMediaId <= 0, nil
 	}
 	pending, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 		Where("profile_id", profileId).WhereNull("deleted_at").
