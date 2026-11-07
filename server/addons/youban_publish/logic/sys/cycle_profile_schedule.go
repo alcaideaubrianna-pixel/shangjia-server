@@ -18,7 +18,7 @@ import (
 const (
 	profileCycleScanBatchSize        = 200
 	profileCycleMaxProducePerRun     = 5000
-	profileCycleChannelBacklogLimit  = 200
+	profileCycleChannelBacklogLimit  = 20
 	profileCycleClaimLease           = 2 * time.Hour
 	profileCycleRetryDelay           = time.Hour
 	profileCycleFailureThreshold     = 3
@@ -27,6 +27,7 @@ const (
 	profileCycleDevelopSpreadWindow  = 5 * time.Minute
 	profileCycleSummaryRefreshDelay  = 30 * time.Second
 	profileCycleRescheduleClaimLease = 30 * time.Minute
+	profileCycleShardCount           = 64
 )
 
 type profileCycleChannelConfig struct {
@@ -345,28 +346,31 @@ func (s *sSysPublish) runProfileCycleDueScan(ctx context.Context) error {
 	processed := 0
 	affectedChannels := make(map[int64]struct{})
 	channelBacklog := make(map[int64]int)
-	for produced < profileCycleMaxProducePerRun && processed < profileCycleMaxProducePerRun {
-		rows, err := s.profileCycleDueRows(ctx, profileCycleScanBatchSize)
-		if err != nil {
-			return err
-		}
-		if len(rows) == 0 {
-			break
-		}
-		processed += len(rows)
-		for _, row := range rows {
-			if produced >= profileCycleMaxProducePerRun {
+	for shard := 0; shard < profileCycleShardCount; shard++ {
+		produced, processed = 0, 0
+		for produced < profileCycleMaxProducePerRun && processed < profileCycleMaxProducePerRun {
+			rows, err := s.profileCycleDueRowsShard(ctx, profileCycleScanBatchSize, shard)
+			if err != nil {
+				return err
+			}
+			if len(rows) == 0 {
 				break
 			}
-			created, handleErr := s.dispatchDueProfileCycle(ctx, row, channelBacklog)
-			if handleErr != nil {
-				g.Log().Warningf(ctx, "提交到期资料循环失败 job:%d channel:%d err:%+v", row.JobId, row.ChannelId, handleErr)
-				continue
-			}
-			affectedChannels[row.ChannelId] = struct{}{}
-			if created {
-				produced++
-				channelBacklog[row.ChannelId]++
+			processed += len(rows)
+			for _, row := range rows {
+				if produced >= profileCycleMaxProducePerRun {
+					break
+				}
+				created, handleErr := s.dispatchDueProfileCycle(ctx, row, channelBacklog)
+				if handleErr != nil {
+					g.Log().Warningf(ctx, "提交到期资料循环失败 job:%d channel:%d err:%+v", row.JobId, row.ChannelId, handleErr)
+					continue
+				}
+				affectedChannels[row.ChannelId] = struct{}{}
+				if created {
+					produced++
+					channelBacklog[row.ChannelId]++
+				}
 			}
 		}
 	}
@@ -487,11 +491,15 @@ func (s *sSysPublish) releaseChannelProfileCycleReschedule(ctx context.Context, 
 }
 
 func (s *sSysPublish) profileCycleDueRows(ctx context.Context, limit int) ([]profileCycleDueRow, error) {
+	return s.profileCycleDueRowsShard(ctx, limit, -1)
+}
+
+func (s *sSysPublish) profileCycleDueRowsShard(ctx context.Context, limit, shard int) ([]profileCycleDueRow, error) {
 	if limit <= 0 {
 		limit = profileCycleScanBatchSize
 	}
 	var rows []profileCycleDueRow
-	err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
+	model := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
 		InnerJoin(publishChannelProfileTable+" cp", "cp.last_job_id=j.id AND cp.status='active'").
 		LeftJoin(publishChannelTable+" c", "c.id=j.channel_id AND c.deleted_at IS NULL").
 		Fields("j.id AS job_id,j.tenant_id,j.account_id,j.profile_id,j.channel_id,j.sent_at,j.cycle_days,j.cycle_publish_time,j.next_cycle_at,j.dispatch_count,j.cycle_failure_count,"+
@@ -499,7 +507,11 @@ func (s *sSysPublish) profileCycleDueRows(ctx context.Context, limit int) ([]pro
 			"COALESCE(c.cycle_publish_time,'') AS channel_publish_time,COALESCE(c.cycle_publish_mode,'time') AS channel_mode,COALESCE(c.status,0) AS channel_status,COALESCE(c.publish_direction,'') AS publish_direction").
 		Where("j.cycle_enabled", 1).WhereIn("j.status", []string{"sent", "superseded"}).WhereNotNull("j.next_cycle_at").
 		Where("NOT EXISTS (SELECT 1 FROM "+channelPermissionCircuitTable+" pc WHERE pc.tenant_id=j.tenant_id AND pc.channel_id=j.channel_id AND pc.paused=1)").
-		WhereLTE("j.next_cycle_at", gtime.Now()).OrderAsc("j.next_cycle_at").OrderAsc("j.id").Limit(limit).Scan(&rows)
+		WhereLTE("j.next_cycle_at", gtime.Now())
+	if shard >= 0 {
+		model = model.Where("MOD(ABS(HASHTEXT(j.tenant_id::text || ':' || j.account_id::text)), ?) = ?", profileCycleShardCount, shard)
+	}
+	err := model.OrderAsc("j.next_cycle_at").OrderAsc("j.id").Limit(limit).Scan(&rows)
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取到期资料循环计划失败")
 	}
@@ -511,21 +523,12 @@ func (s *sSysPublish) dispatchDueProfileCycle(ctx context.Context, row profileCy
 		Id: row.ChannelId, TenantId: row.TenantId, Enabled: row.ChannelEnabled, Days: row.ChannelDays,
 		Mode: row.ChannelMode, PublishTime: row.ChannelPublishTime, Status: row.ChannelStatus, Direction: row.PublishDirection,
 	}
-	config.Days = s.effectiveChannelCycleDays(ctx, config.TenantId, config.Days)
 	if !profileCycleChannelUsable(config) {
 		return false, s.disableProfileCycleJob(ctx, row.JobId, "频道循环配置已关闭")
 	}
-	if row.CycleDays != defaultCycleDays(config.Days) || strings.TrimSpace(row.CyclePublishTime) != strings.TrimSpace(config.PublishTime) {
-		nextAt := nextProfileCycleAt(ctx, config.Days, config.PublishTime, row.SentAt, row.ProfileId, row.ChannelId)
-		if nextAt == nil || !nextAt.After(gtime.Now()) {
-			nextAt = profileCycleOverdueAt(gtime.Now(), row.ProfileId, row.ChannelId)
-		}
-		_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", row.JobId).Data(g.Map{
-			"cycle_days": defaultCycleDays(config.Days), "cycle_publish_time": strings.TrimSpace(config.PublishTime),
-			"next_cycle_at": nextAt, "updated_at": gtime.Now(),
-		}).Update()
-		return false, err
-	}
+	// A due job keeps the schedule captured when it was created. Changes to
+	// tenant VIP status or channel interval apply to the next job after this
+	// one succeeds; they must not postpone an already overdue profile.
 	backlog, ok := channelBacklog[row.ChannelId]
 	if !ok {
 		var err error

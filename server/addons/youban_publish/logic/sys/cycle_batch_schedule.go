@@ -21,6 +21,15 @@ type dueBatchCycleChannel struct {
 }
 
 func (s *sSysPublish) scheduleDueChannelBatchCycles(ctx context.Context, limit int) error {
+	for shard := 0; shard < profileCycleShardCount; shard++ {
+		if err := s.scheduleDueChannelBatchCyclesShard(ctx, limit, shard); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *sSysPublish) scheduleDueChannelBatchCyclesShard(ctx context.Context, limit, shard int) error {
 	now := gtime.Now()
 	var channels []dueBatchCycleChannel
 	err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
@@ -28,6 +37,7 @@ func (s *sSysPublish) scheduleDueChannelBatchCycles(ctx context.Context, limit i
 		Where("cycle_publish_enabled", 1).Where("cycle_publish_mode", "batch").
 		Where("status", 1).Where("publish_direction", "up").Where("cycle_active_run_id", 0).
 		Where("cycle_next_run_at IS NULL OR cycle_next_run_at<=?", now).
+		Where("MOD(ABS(HASHTEXT(tenant_id::text || ':' || id::text)), ?) = ?", profileCycleShardCount, shard).
 		WhereNull("deleted_at").OrderAsc("id").Limit(limit).Scan(&channels)
 	if err != nil {
 		return gerror.Wrap(err, "读取到期批次循环频道失败")
