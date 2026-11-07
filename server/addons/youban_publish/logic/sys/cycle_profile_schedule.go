@@ -89,11 +89,12 @@ func (s *sSysPublish) syncTelegramJobCycleSchedule(ctx context.Context, job tele
 		return gerror.Wrap(err, "关闭资料旧循环计划失败")
 	}
 	data := g.Map{
-		"cycle_enabled":      0,
-		"cycle_days":         defaultCycleDays(config.Days),
-		"cycle_publish_time": strings.TrimSpace(config.PublishTime),
-		"next_cycle_at":      nil,
-		"updated_at":         now,
+		"cycle_enabled":         0,
+		"cycle_days":            defaultCycleDays(config.Days),
+		"cycle_publish_time":    strings.TrimSpace(config.PublishTime),
+		"next_cycle_at":         nil,
+		"updated_at":            now,
+		"cycle_scheduler_shard": gdb.Raw("MOD(ABS(HASHTEXT(tenant_id::text || ':' || account_id::text)),64)"),
 	}
 	if profileCycleChannelUsable(config) {
 		data["cycle_enabled"] = 1

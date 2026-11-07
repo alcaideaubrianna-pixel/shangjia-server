@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -20,6 +21,7 @@ func (s *sSysPublish) syncChannelCycleAfterSave(ctx context.Context, tenantId in
 		"cycle_active_run_id":      0,
 		"cycle_last_error_message": "",
 		"updated_at":               gtime.Now(),
+		"cycle_scheduler_shard":    gdb.Raw("MOD(ABS(HASHTEXT(tenant_id::text || ':' || id::text)),64)"),
 	}
 	data["cycle_next_run_at"] = nil
 	_, err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
