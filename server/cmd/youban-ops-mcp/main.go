@@ -141,6 +141,10 @@ func main() {
 		Annotations: &mcp.ToolAnnotations{Title: "Resolve profile by Telegram message", ReadOnlyHint: true, IdempotentHint: true},
 	}, client.resolveProfileByMessage)
 	mcp.AddTool(server, &mcp.Tool{
+		Name: "resolve_published_message", Description: "Resolve historical Telegram publish records by URL or Chat ID and message ID, including target Chat ID, profile, job, and message-group records",
+		Annotations: &mcp.ToolAnnotations{Title: "Resolve published Telegram message", ReadOnlyHint: true, IdempotentHint: true},
+	}, client.resolvePublishedMessage)
+	mcp.AddTool(server, &mcp.Tool{
 		Name: "telegram_message_offline_batch", Description: "Batch offline profiles and enqueue deletion of their Telegram messages through the production cleanup queue; requests are split into batches of 100",
 		Annotations: &mcp.ToolAnnotations{Title: "Batch delete Telegram messages", ReadOnlyHint: readOnly, DestructiveHint: &destructive, IdempotentHint: true},
 	}, client.telegramMessageOfflineBatch)
@@ -243,6 +247,11 @@ func (c *apiClient) resolveProfileByMessage(ctx context.Context, _ *mcp.CallTool
 		CollectRuleName:        mapString(data, "collectRuleName"),
 		Diagnosis:              mapString(data, "diagnosis"),
 	}, nil
+}
+
+func (c *apiClient) resolvePublishedMessage(ctx context.Context, _ *mcp.CallToolRequest, input messageContextInput) (*mcp.CallToolResult, structuredOutput, error) {
+	data, err := c.messageContext(ctx, input)
+	return nil, structuredOutput{Data: data}, err
 }
 
 func (c *apiClient) messageContext(ctx context.Context, input messageContextInput) (map[string]any, error) {
