@@ -508,6 +508,7 @@ func (s *sSysPublish) profileCycleDueRowsShard(ctx context.Context, limit, shard
 			"COALESCE(c.cycle_publish_enabled,0) AS channel_enabled,COALESCE(c.cycle_publish_days,0) AS channel_days,"+
 			"COALESCE(c.cycle_publish_time,'') AS channel_publish_time,COALESCE(c.cycle_publish_mode,'time') AS channel_mode,COALESCE(c.status,0) AS channel_status,COALESCE(c.publish_direction,'') AS publish_direction").
 		Where("j.cycle_enabled", 1).WhereIn("j.status", []string{"sent", "superseded"}).WhereNotNull("j.next_cycle_at").
+		Where("NOT EXISTS (SELECT 1 FROM "+publishAccountSettingTable+" ce WHERE ce.tenant_id=j.tenant_id AND ce.account_id=j.account_id AND ce.deleted_at IS NULL AND ce.cycle_engine='profile')").
 		Where("NOT EXISTS (SELECT 1 FROM "+channelPermissionCircuitTable+" pc WHERE pc.tenant_id=j.tenant_id AND pc.channel_id=j.channel_id AND pc.paused=1)").
 		WhereLTE("j.next_cycle_at", gtime.Now())
 	if shard >= 0 {

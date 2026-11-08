@@ -36,6 +36,7 @@ func (s *sSysPublish) scheduleDueChannelBatchCyclesShard(ctx context.Context, li
 		Fields("id,tenant_id,cycle_batch_size,cycle_batch_time,cycle_batch_cursor,cycle_batch_cursor_kind").
 		Where("cycle_publish_enabled", 1).Where("cycle_publish_mode", "batch").
 		Where("status", 1).Where("publish_direction", "up").Where("cycle_active_run_id", 0).
+		Where("NOT EXISTS (SELECT 1 FROM "+publishAccountSettingTable+" ce WHERE ce.tenant_id="+publishChannelTable+".tenant_id AND ce.account_id="+publishChannelTable+".tg_account_id AND ce.deleted_at IS NULL AND ce.cycle_engine='profile')").
 		Where("cycle_next_run_at IS NULL OR cycle_next_run_at<=?", now).
 		Where("MOD(ABS(HASHTEXT(tenant_id::text || ':' || id::text)), ?) = ?", profileCycleShardCount, shard).
 		WhereNull("deleted_at").OrderAsc("id").Limit(limit).Scan(&channels)
