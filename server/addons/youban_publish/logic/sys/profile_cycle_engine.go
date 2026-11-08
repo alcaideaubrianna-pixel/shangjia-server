@@ -14,8 +14,11 @@ const profileCycleEngineProfile = "profile"
 const profileCycleEngineLegacy = "legacy"
 const profileCycleEngineCacheTTL = 5 * time.Minute
 
+// profileCycleEngineCacheVersion 用于发布迁移时一次性绕过旧 Redis 缓存，避免逐个账户手工刷新。
+const profileCycleEngineCacheVersion = "v2"
+
 func profileCycleEngineCacheKey(tenantID, accountID int64) string {
-	return "youban_publish:cycle_engine:" + gvarInt64(tenantID) + ":" + gvarInt64(accountID)
+	return "youban_publish:cycle_engine:" + profileCycleEngineCacheVersion + ":" + gvarInt64(tenantID) + ":" + gvarInt64(accountID)
 }
 
 // clearProfileCycleEngineCache 清理账户循环引擎缓存，使后台配置修改立即对调度器生效。
