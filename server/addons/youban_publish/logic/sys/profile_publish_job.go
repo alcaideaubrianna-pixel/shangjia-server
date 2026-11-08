@@ -224,6 +224,18 @@ func (s *sSysPublish) ensureTelegramProfileJobWithMeta(ctx context.Context, sour
 }
 
 func (s *sSysPublish) ensureTelegramProfileJobWithMetaTx(ctx context.Context, tx gdb.TX, source gdb.Record, channel telegramJobChannel, operationNo string, meta telegramProfilePublishMeta) (int64, error) {
+	// Resolve collection source per target publish channel. A profile can be
+	// matched by multiple rules/BOTs; using the profile-level latest source here
+	// leaks one channel's suffix into another channel's message.
+	var channelSource struct {
+		SourceId int64 `orm:"source_id"`
+	}
+	if err := tx.Model(publishCollectDispatchTable+" d").Safe().Ctx(ctx).
+		InnerJoin(collectDispatchChannelTable+" dc", "dc.dispatch_id=d.id AND dc.tenant_id=d.tenant_id AND dc.account_id=d.account_id").
+		Where("d.profile_id", source["profile_id"].Int64()).Where("dc.channel_id", channel.Id).
+		Fields("d.source_id").OrderDesc("d.id").Scan(&channelSource); err == nil && channelSource.SourceId > 0 {
+		meta.CollectSourceId = channelSource.SourceId
+	}
 	paused, err := lockChannelPermissionCreationTx(ctx, tx, source["tenant_id"].Int64(), channel.Id)
 	if err != nil || paused {
 		return 0, err
