@@ -37,7 +37,10 @@ func (m *module) Start(option *addons.Option) error {
 	// requires the addon prefix and would reject /_internal/* as an unknown
 	// module before the handler can run.
 	option.Server.Group("/", func(group *ghttp.RouterGroup) {
-		group.GET("/_internal/telegram-bot-api/*path", func(r *ghttp.Request) {
+		// Telegram Bot API methods are POST in the local gateway contract. Keep
+		// this explicit so reverse proxies do not route the endpoint as a GET-only
+		// health-style path.
+		group.POST("/_internal/telegram-bot-api/*path", func(r *ghttp.Request) {
 			path := strings.TrimPrefix(strings.TrimSpace(r.URL.Path), "/_internal/telegram-bot-api/")
 			const prefix = "bot"
 			token := ""
