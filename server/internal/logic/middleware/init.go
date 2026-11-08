@@ -100,8 +100,10 @@ func (s *sMiddleware) Ctx(r *ghttp.Request) {
 	r.Middleware.Next()
 
 	if span != nil {
+		businessCode := getHTTPBusinessCode(r)
 		span.SetAttributes(
 			attribute.Int("http.status_code", r.Response.Status),
+			attribute.String("http.business_code", businessCode),
 			attribute.Int64("http.duration_ms", time.Since(start).Milliseconds()),
 		)
 		span.End()
