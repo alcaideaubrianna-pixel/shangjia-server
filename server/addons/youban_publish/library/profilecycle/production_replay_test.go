@@ -27,3 +27,23 @@ func TestProductionShapeReplay220734(t *testing.T) {
 		}
 	}
 }
+
+func TestProductionShapeReplay220468MixedChannels(t *testing.T) {
+	now := time.Date(2026, 11, 8, 16, 0, 0, 0, time.Local)
+	plan := BuildPlan(Profile{ID: 220468, TenantID: 3, AccountID: 8, LastSent: now.Add(-365 * 24 * time.Hour), Channels: []Channel{
+		{ID: 7, Enabled: true, Status: 1, Direction: "up", Mode: "time", Interval: 365 * 24 * time.Hour},
+		{ID: 8, Enabled: false, Status: 1, Direction: "up", Mode: "time", Interval: 365 * 24 * time.Hour},
+		{ID: 9, Enabled: false, Status: 1, Direction: "up", Mode: "time", Interval: 365 * 24 * time.Hour},
+		{ID: 19, Enabled: true, Status: 1, Direction: "up", Mode: "time", Interval: 365 * 24 * time.Hour},
+		{ID: 41, Enabled: false, Status: 1, Direction: "up", Mode: "time", Interval: 365 * 24 * time.Hour},
+		{ID: 79, Enabled: true, Status: 1, Direction: "up", Mode: "time", Interval: 365 * 24 * time.Hour},
+	}}, "production-replay-220468", now)
+	if plan == nil || len(plan.Tasks) != 3 {
+		t.Fatalf("mixed channel plan=%+v", plan)
+	}
+	for _, task := range plan.Tasks {
+		if task.ChannelID != 7 && task.ChannelID != 19 && task.ChannelID != 79 {
+			t.Fatalf("disabled channel included: %d", task.ChannelID)
+		}
+	}
+}
