@@ -37,8 +37,14 @@ func (m *module) Start(option *addons.Option) error {
 	// requires the addon prefix and would reject /_internal/* as an unknown
 	// module before the handler can run.
 	option.Server.Group("/", func(group *ghttp.RouterGroup) {
-		group.GET("/_internal/telegram-bot-api/bot/:token/getWebhookInfo", func(r *ghttp.Request) {
-			token := strings.TrimSpace(r.GetRouter("token").String())
+		group.GET("/_internal/telegram-bot-api/*path", func(r *ghttp.Request) {
+			path := strings.TrimPrefix(strings.TrimSpace(r.URL.Path), "/_internal/telegram-bot-api/")
+			const prefix = "bot"
+			token := ""
+			if strings.HasPrefix(path, prefix) && strings.HasSuffix(path, "/getWebhookInfo") {
+				token = strings.TrimSuffix(strings.TrimPrefix(path, prefix), "/getWebhookInfo")
+			}
+			token = strings.TrimSpace(strings.TrimPrefix(token, "/"))
 			if token == "" || !strings.Contains(token, ":") {
 				r.Response.Status = 400
 				r.Response.WriteJson(map[string]interface{}{"ok": false, "error_code": 400, "description": "bot token is required"})
