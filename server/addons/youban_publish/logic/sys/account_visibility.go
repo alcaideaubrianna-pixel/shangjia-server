@@ -199,7 +199,6 @@ func (s *sSysPublish) followNoteAccountIds(ctx context.Context, account *sysin.A
 	}
 	if err := pdao.YoubanPublishAccountFollow.Ctx(ctx).
 		Fields("following_account_id").
-		Where("tenant_id", account.TenantId).
 		Where("follower_account_id", account.Id).
 		Where("status", sysin.AccountFollowStatusApproved).
 		WhereNull("deleted_at").
