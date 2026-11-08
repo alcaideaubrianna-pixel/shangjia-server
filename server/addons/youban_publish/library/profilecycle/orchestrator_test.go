@@ -2,6 +2,7 @@ package profilecycle
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -9,12 +10,28 @@ import (
 type fakeStore struct {
 	profile Profile
 	plans   []*RunPlan
+	fail    bool
 }
 
 func (s *fakeStore) LoadProfile(context.Context, string) (Profile, error) { return s.profile, nil }
 func (s *fakeStore) SavePlan(_ context.Context, plan *RunPlan) error {
+	if s.fail {
+		return errors.New("persist failed")
+	}
 	s.plans = append(s.plans, plan)
 	return nil
+}
+
+func TestOrchestratorKeepsIndexWhenPersistenceFails(t *testing.T) {
+	index := &fakeIndex{keys: []string{"run-1"}}
+	store := &fakeStore{fail: true, profile: Profile{ID: 1, Channels: []Channel{{ID: 10, Enabled: true, Status: 1, Direction: "up", Mode: "time", Interval: time.Hour}}}}
+	orchestrator := &Orchestrator{Index: index, Store: store}
+	if _, err := orchestrator.ScheduleDue(context.Background(), time.Now(), 10); err == nil {
+		t.Fatal("persistence failure must be returned")
+	}
+	if len(index.removed) != 0 {
+		t.Fatalf("failed run must remain indexed: %v", index.removed)
+	}
 }
 
 type fakeIndex struct {
