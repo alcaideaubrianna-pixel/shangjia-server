@@ -454,6 +454,18 @@ func TestApplyCollectIntroFeeSuffix(t *testing.T) {
 	}
 }
 
+func TestOneMessageWith100RulesKeepsEachTransformationIsolated(t *testing.T) {
+	const original = "正文\n介绍费 7888 原始后缀"
+	for i := 0; i < 100; i++ {
+		rule := []collectReplaceRule{{From: "7888", To: fmt.Sprintf("%d888", i)}}
+		got := applyCollectIntroFeeSuffix(applyCollectReplacements(original, rule), original, fmt.Sprintf("频道%d", i))
+		want := fmt.Sprintf("介绍费 %d888 频道%d", i, i)
+		if got != want {
+			t.Fatalf("rule %d transformation leaked or was lost: got=%q want=%q", i, got, want)
+		}
+	}
+}
+
 func TestApplyCollectIntroFeeSuffixProductionMatrix100(t *testing.T) {
 	keywords := []string{"介绍费", "介绍费用", "推荐费", "感谢费", "牵线费", "居间费", "对接费", "国外介绍费", "💎介绍费", "介绍费；"}
 	separators := []string{"", ":", "：", ";", "；", " ", "  ", "\u00a0"}
