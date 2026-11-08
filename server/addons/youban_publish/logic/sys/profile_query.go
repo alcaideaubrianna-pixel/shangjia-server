@@ -782,12 +782,13 @@ func preferProfileCollectionMetadata(candidate, current profileCollectionMetadat
 			return false
 		}
 	}
-	candidatePriority := profileCollectionMetadataPriority(candidate)
-	currentPriority := profileCollectionMetadataPriority(current)
-	if candidatePriority != currentPriority {
-		return candidatePriority < currentPriority
+	if candidate.DispatchId != current.DispatchId {
+		return candidate.DispatchId > current.DispatchId
 	}
-	return candidate.DispatchId > current.DispatchId
+	if candidate.SourceId != current.SourceId {
+		return candidate.SourceId > current.SourceId
+	}
+	return profileCollectionMetadataPriority(candidate) < profileCollectionMetadataPriority(current)
 }
 
 func profileCollectionMetadataPriority(row profileCollectionMetadataRow) int {

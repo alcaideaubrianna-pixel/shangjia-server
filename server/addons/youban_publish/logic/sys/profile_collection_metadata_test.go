@@ -15,6 +15,25 @@ func TestPreferProfileCollectionMetadataUsesLatestSourceEvent(t *testing.T) {
 	}
 }
 
+func TestPreferProfileCollectionMetadataAcrossBotsAndAccounts(t *testing.T) {
+	when := gtime.New("2026-11-03 17:09:59")
+	bot := profileCollectionMetadataRow{DispatchId: 41862, SourceId: 352, BotId: 65, SourceCreatedAt: when}
+	account := profileCollectionMetadataRow{DispatchId: 41861, SourceId: 351, TgAccountId: 54, SourceCreatedAt: when}
+	if !preferProfileCollectionMetadata(bot, account) {
+		t.Fatal("same message from bot/account collectors must use deterministic latest dispatch")
+	}
+}
+
+func TestPreferProfileCollectionMetadataStableWhenSameDispatch(t *testing.T) {
+	when := gtime.New("2026-11-03 17:09:59")
+	if !preferProfileCollectionMetadata(
+		profileCollectionMetadataRow{DispatchId: 10, SourceId: 352, SourceCreatedAt: when},
+		profileCollectionMetadataRow{DispatchId: 10, SourceId: 351, SourceCreatedAt: when},
+	) {
+		t.Fatal("same dispatch must use the higher source id deterministically")
+	}
+}
+
 func TestApplyProfileCollectionJobSource(t *testing.T) {
 	metadata := map[int64]profileCollectionMetadataRow{
 		301948: {ProfileId: 301948, SourceId: 80, SourceChatId: "3974614787"},
