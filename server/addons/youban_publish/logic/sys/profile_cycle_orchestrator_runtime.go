@@ -9,7 +9,20 @@ import (
 	"hotgo/addons/youban_publish/library/profilecycle"
 )
 
-const profileCycleOrchestratorBatchSize = 20
+// 单轮只领取 profile 引擎任务；过滤 legacy 后可适当提高吞吐，避免新账户被旧迁移数据拖慢。
+const profileCycleOrchestratorDefaultBatchSize = 200
+
+// profileCycleOrchestratorBatchSize 读取资料级调度批次；限制范围避免误配一次性冲击 Telegram。
+func profileCycleOrchestratorBatchSize(ctx context.Context) int {
+	batchSize := g.Cfg().MustGet(ctx, "youbanPublish.cycle.orchestratorBatchSize", profileCycleOrchestratorDefaultBatchSize).Int()
+	if batchSize < 1 {
+		return profileCycleOrchestratorDefaultBatchSize
+	}
+	if batchSize > 1000 {
+		return 1000
+	}
+	return batchSize
+}
 
 // runProfileCycleOrchestrator 消费资料级循环 run，并复用现有资料发布入口。
 // 每轮只处理有限数量，避免迁移积压一次性冲击 Telegram 发送队列。
@@ -21,7 +34,7 @@ func (s *sSysPublish) runProfileCycleOrchestrator(ctx context.Context) error {
 	if err := g.DB().Model(publishProfileCycleRunTable).Safe().Ctx(ctx).
 		Fields("id,run_key").Where("status", "pending").WhereLTE("due_at", gtime.Now()).
 		Where("EXISTS (SELECT 1 FROM " + publishAccountSettingTable + " ce WHERE ce.tenant_id=" + publishProfileCycleRunTable + ".tenant_id AND ce.account_id=" + publishProfileCycleRunTable + ".account_id AND ce.deleted_at IS NULL AND ce.cycle_engine='profile')").
-		OrderAsc("due_at").OrderAsc("id").Limit(profileCycleOrchestratorBatchSize).Scan(&runs); err != nil {
+		OrderAsc("due_at").OrderAsc("id").Limit(profileCycleOrchestratorBatchSize(ctx)).Scan(&runs); err != nil {
 		return err
 	}
 	store := s.newProfileCycleStore()
