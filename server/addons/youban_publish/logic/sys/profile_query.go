@@ -772,6 +772,16 @@ func applyProfileCollectionJobSource(metadata map[int64]profileCollectionMetadat
 }
 
 func preferProfileCollectionMetadata(candidate, current profileCollectionMetadataRow) bool {
+	// 同一 Telegram 消息可能被多个 BOT 规则同时命中。来源展示应跟随
+	// 最近确认的采集事件，而不是被较大的 dispatch id 固定在首次来源。
+	if candidate.SourceCreatedAt != nil || current.SourceCreatedAt != nil {
+		if candidate.SourceCreatedAt != nil && (current.SourceCreatedAt == nil || candidate.SourceCreatedAt.After(current.SourceCreatedAt)) {
+			return true
+		}
+		if current.SourceCreatedAt != nil && (candidate.SourceCreatedAt == nil || current.SourceCreatedAt.After(candidate.SourceCreatedAt)) {
+			return false
+		}
+	}
 	candidatePriority := profileCollectionMetadataPriority(candidate)
 	currentPriority := profileCollectionMetadataPriority(current)
 	if candidatePriority != currentPriority {

@@ -3,8 +3,17 @@ package sys
 import (
 	"testing"
 
+	"github.com/gogf/gf/v2/os/gtime"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
+
+func TestPreferProfileCollectionMetadataUsesLatestSourceEvent(t *testing.T) {
+	old := gtime.New("2026-11-03 13:29:38")
+	latest := gtime.New("2026-11-03 17:09:59")
+	if !preferProfileCollectionMetadata(profileCollectionMetadataRow{SourceId: 352, SourceCreatedAt: latest}, profileCollectionMetadataRow{SourceId: 351, SourceCreatedAt: old}) {
+		t.Fatal("latest collection source event should be preferred")
+	}
+}
 
 func TestApplyProfileCollectionJobSource(t *testing.T) {
 	metadata := map[int64]profileCollectionMetadataRow{
