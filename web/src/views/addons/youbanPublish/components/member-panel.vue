@@ -482,7 +482,20 @@
   }
 
   async function loadQuota(tenantId: number) { const res = await VipQuotaView({ tenantId }); Object.assign(quotaForm, res?.data || res || {}, { tenantId }); }
-  async function saveQuota() { if (!quotaForm.tenantId) return; quotaSaving.value = true; try { await VipQuotaSave(quotaForm); message.success('额度已保存'); } finally { quotaSaving.value = false; } }
+  async function saveQuota() {
+    if (!quotaForm.tenantId) return;
+    quotaSaving.value = true;
+    try {
+      const tenantId = quotaForm.tenantId;
+      await VipQuotaSave({ ...quotaForm });
+      // Re-read the durable value so the panel cannot keep showing stale
+      // values after a successful save or a monthly reset decision.
+      await loadQuota(tenantId);
+      message.success('额度已保存');
+    } finally {
+      quotaSaving.value = false;
+    }
+  }
 
   async function openVipRecords(tenantId?: number) {
     query.tenantId = tenantId || null;
