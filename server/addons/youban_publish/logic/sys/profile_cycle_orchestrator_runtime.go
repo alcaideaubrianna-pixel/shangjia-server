@@ -20,6 +20,7 @@ func (s *sSysPublish) runProfileCycleOrchestrator(ctx context.Context) error {
 	}
 	if err := g.DB().Model(publishProfileCycleRunTable).Safe().Ctx(ctx).
 		Fields("id,run_key").Where("status", "pending").WhereLTE("due_at", gtime.Now()).
+		Where("EXISTS (SELECT 1 FROM " + publishAccountSettingTable + " ce WHERE ce.tenant_id=" + publishProfileCycleRunTable + ".tenant_id AND ce.account_id=" + publishProfileCycleRunTable + ".account_id AND ce.deleted_at IS NULL AND ce.cycle_engine='profile')").
 		OrderAsc("due_at").OrderAsc("id").Limit(profileCycleOrchestratorBatchSize).Scan(&runs); err != nil {
 		return err
 	}
