@@ -512,24 +512,32 @@ func (s *sGateway) ensure(ctx context.Context, key, token, mode string, conf *se
 
 func (s *sGateway) Webhook(ctx context.Context, key string, body []byte, secret string) error {
 	startedAt := time.Now()
+	webhookResult := "success"
+	defer func() {
+		observeGatewayWebhook(ctx, webhookResult, time.Since(startedAt))
+	}()
 	webhooks, _ := gatewayObserveMeter.Int64Counter("xiaohuiji.tg.gateway_webhook_updates")
 	webhooks.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "received")))
 	configStartedAt := time.Now()
 	conf, err := service.RuntimeConfiguration(ctx)
 	if err != nil {
+		webhookResult = "config_error"
 		g.Log().Warningf(ctx, "TG链路 gateway_webhook_config_failed key:%s duration:%s total:%s err:%+v", key, time.Since(configStartedAt), time.Since(startedAt), err)
 		return err
 	}
 	configDuration := time.Since(configStartedAt)
 	if conf.WebhookSecret != "" && secret != conf.WebhookSecret {
+		webhookResult = "secret_error"
 		return gerror.New("Webhook Secret无效")
 	}
 	if len(body) == 0 || !json.Valid(body) {
+		webhookResult = "invalid_body"
 		return gerror.New("Webhook消息格式不正确")
 	}
 	var update models.Update
 	parseStartedAt := time.Now()
 	if err = json.Unmarshal(body, &update); err != nil {
+		webhookResult = "parse_error"
 		return gerror.Wrap(err, "Webhook消息格式不正确")
 	}
 	parseDuration := time.Since(parseStartedAt)
@@ -562,6 +570,7 @@ func (s *sGateway) Webhook(ctx context.Context, key string, body []byte, secret 
 	}
 	if err != nil && updateNeedsImmediateDispatch(&update) {
 		result = "failed"
+		webhookResult = "dispatch_error"
 	} else if total := time.Since(startedAt); total >= time.Second {
 		g.Log().Warningf(ctx, "TG链路 gateway_webhook_slow key:%s updateId:%d result:%s config:%s parse:%s submit:%s total:%s", key, update.ID, result, configDuration, parseDuration, submitDuration, total)
 	}
@@ -593,6 +602,7 @@ func (s *sGateway) ackCallbackFast(ctx context.Context, key string, query *model
 	client := s.clients[key]
 	s.mu.Unlock()
 	if client == nil {
+		observeGatewayCallback(ctx, "client_not_cached", 0)
 		g.Log().Infof(ctx, "TG链路 callback_fast_ack_skipped callbackId:%s reason:client_not_cached", query.ID)
 		return
 	}
@@ -600,9 +610,11 @@ func (s *sGateway) ackCallbackFast(ctx context.Context, key string, query *model
 	ackCtx, cancel := context.WithTimeout(ctx, 800*time.Millisecond)
 	defer cancel()
 	if _, err := client.AnswerCallbackQuery(ackCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID}); err != nil {
+		observeGatewayCallback(ctx, "error", time.Since(startedAt))
 		g.Log().Warningf(ctx, "TG链路 callback_fast_ack_failed callbackId:%s duration:%s err:%+v", query.ID, time.Since(startedAt), err)
 		return
 	}
+	observeGatewayCallback(ctx, "success", time.Since(startedAt))
 	g.Log().Infof(ctx, "TG链路 callback_fast_ack callbackId:%s duration:%s", query.ID, time.Since(startedAt))
 }
 

@@ -6,9 +6,27 @@ import (
 
 	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/frame/g"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 const gatewaySlowStageLogThreshold = 100 * time.Millisecond
+
+func observeGatewayCallback(ctx context.Context, result string, duration time.Duration) {
+	attrs := metric.WithAttributes(attribute.String("result", result))
+	counter, _ := gatewayObserveMeter.Int64Counter("xiaohuiji.tg.bot.callback.requests")
+	histogram, _ := gatewayObserveMeter.Float64Histogram("xiaohuiji.tg.bot.callback.duration_seconds")
+	counter.Add(ctx, 1, attrs)
+	histogram.Record(ctx, duration.Seconds(), attrs)
+}
+
+func observeGatewayWebhook(ctx context.Context, result string, duration time.Duration) {
+	attrs := metric.WithAttributes(attribute.String("result", result))
+	counter, _ := gatewayObserveMeter.Int64Counter("xiaohuiji.tg.bot.webhook.requests")
+	histogram, _ := gatewayObserveMeter.Float64Histogram("xiaohuiji.tg.bot.webhook.duration_seconds")
+	counter.Add(ctx, 1, attrs)
+	histogram.Record(ctx, duration.Seconds(), attrs)
+}
 
 func logGatewaySlowStage(ctx context.Context, updateID int64, botKey, kind, stage, name string, referenceID int64, duration time.Duration, handled *bool, err error) {
 	if duration < gatewaySlowStageLogThreshold && err == nil {
