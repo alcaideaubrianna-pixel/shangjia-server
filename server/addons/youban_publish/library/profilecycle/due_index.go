@@ -11,6 +11,12 @@ import (
 
 const DueIndexKey = "youban_publish:profile_cycle:due"
 
+// DueIndex 是资料循环到期索引的最小接口。
+type DueIndex interface {
+	PopDue(context.Context, time.Time, int) ([]string, error)
+	Remove(context.Context, string) error
+}
+
 // RedisCommandClient 是 ZSET 到期索引所需的最小 Redis 接口。
 type RedisCommandClient interface {
 	Do(context.Context, string, ...any) (*gvar.Var, error)
