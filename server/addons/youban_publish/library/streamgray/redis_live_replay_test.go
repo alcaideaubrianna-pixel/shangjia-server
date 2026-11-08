@@ -53,20 +53,21 @@ func TestRedisLiveReplayWithMiniredis(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var got []ReadyEvent
+	received := make(chan ReadyEvent, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		_ = consumer.Run(ctx, ReadyRealtimeStream, func(_ context.Context, value ReadyEvent) error {
-			got = append(got, value)
+			received <- value
 			cancel()
 			return nil
 		})
 	}()
-	deadline := time.Now().Add(2 * time.Second)
-	for len(got) == 0 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if len(got) != 1 || got[0] != event {
-		t.Fatalf("live replay events=%v want=%v", got, event)
+	select {
+	case got := <-received:
+		if got != event {
+			t.Fatalf("live replay event=%v want=%v", got, event)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("live replay timed out")
 	}
 }
