@@ -33,6 +33,10 @@ func (s *sSysPublish) runProfileCycleOrchestrator(ctx context.Context) error {
 			g.Log().Warningf(ctx, "读取资料级循环资料失败 run:%s err:%+v", run.RunKey, err)
 			continue
 		}
+		if s.accountCycleEngine(ctx, profile.TenantID, profile.AccountID) != profileCycleEngineProfile {
+			// 迁移数据默认保持 legacy；未灰度账户不能被新 Orchestrator 接管。
+			continue
+		}
 		plan := profilecycle.BuildPlan(profile, run.RunKey, gtime.Now().Time)
 		if plan == nil {
 			_, _ = g.DB().Model(publishProfileCycleRunTable).Safe().Ctx(ctx).Where("id", run.ID).Data(g.Map{"status": "skipped", "updated_at": gtime.Now()}).Update()
