@@ -4,6 +4,7 @@ import (
 	"context"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -37,11 +38,25 @@ func (s *sSysPublish) CollectSourceList(ctx context.Context, in *sysin.CollectSo
 		like := "%" + keyword + "%"
 		mod = mod.Where("(title LIKE ? OR source_username LIKE ? OR source_chat_id LIKE ?)", like, like, like)
 	}
-	if totalCount, err = mod.Count(); err != nil {
-		return nil, 0, gerror.Wrap(err, "统计采集源失败")
+	// Count and page data are independent reads. Run them concurrently so the
+	// list endpoint does not add the count latency to the page latency.
+	var wg sync.WaitGroup
+	var countErr, listErr error
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		totalCount, countErr = mod.Count()
+	}()
+	go func() {
+		defer wg.Done()
+		listErr = mod.Page(in.Page, in.PerPage).OrderDesc("id").Scan(&list)
+	}()
+	wg.Wait()
+	if countErr != nil {
+		return nil, 0, gerror.Wrap(countErr, "统计采集源失败")
 	}
-	if err = mod.Page(in.Page, in.PerPage).OrderDesc("id").Scan(&list); err != nil {
-		return nil, 0, gerror.Wrap(err, "获取采集源失败")
+	if listErr != nil {
+		return nil, 0, gerror.Wrap(listErr, "获取采集源失败")
 	}
 	for _, item := range list {
 		if item == nil {
