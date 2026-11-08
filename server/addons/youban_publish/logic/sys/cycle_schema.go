@@ -36,7 +36,27 @@ func (s *sSysPublish) syncChannelCycleAfterSave(ctx context.Context, tenantId in
 	if err = s.enqueueCycleReschedule(ctx, channelId, 0); err != nil {
 		g.Log().Warningf(ctx, "提交频道循环重算任务失败，定时调度将自动恢复 channel:%d err:%+v", channelId, err)
 	}
+	// 频道配置变化后立即唤醒关联资料级 run，避免继续等待旧的到期时间。
+	if err = s.wakeProfileCycleRunsForChannel(ctx, tenantId, channelId); err != nil {
+		g.Log().Warningf(ctx, "唤醒频道资料循环任务失败 channel:%d err:%+v", channelId, err)
+	}
 	return nil
+}
+
+// wakeProfileCycleRunsForChannel 将受配置影响的 pending run 提前到当前时间。
+// run 仍按资料聚合，因此只更新关联频道的资料 run，不创建重复 run。
+func (s *sSysPublish) wakeProfileCycleRunsForChannel(ctx context.Context, tenantID, channelID int64) error {
+	if tenantID <= 0 || channelID <= 0 {
+		return nil
+	}
+	_, err := g.DB().Model(publishProfileCycleRunTable+" r").Safe().Ctx(ctx).
+		InnerJoin(publishProfileCycleRunChannelTable+" rc", "rc.run_id=r.id").
+		Where("r.tenant_id", tenantID).
+		Where("rc.channel_id", channelID).
+		Where("r.status", "pending").
+		Data(g.Map{"due_at": gtime.Now(), "updated_at": gtime.Now()}).
+		Update()
+	return err
 }
 
 func parseCycleClock(value string) (int, int, bool) {
