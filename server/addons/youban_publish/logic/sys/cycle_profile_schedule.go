@@ -676,4 +676,8 @@ func (s *sSysPublish) runProfileCycleStartupRecovery(ctx context.Context) {
 	if err := s.runProfileCycleDueScan(ctx); err != nil && ctx.Err() == nil {
 		g.Log().Warningf(ctx, "启动资料循环补扫失败：%+v", err)
 	}
+	// 启动时主动补偿一次资料级 run，避免 Cron 首次加载或刷新延迟造成已到期任务长期 pending。
+	if err := s.runProfileCycleOrchestrator(ctx); err != nil && ctx.Err() == nil {
+		g.Log().Warningf(ctx, "启动资料级循环调度补偿失败：%+v", err)
+	}
 }
