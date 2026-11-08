@@ -611,6 +611,7 @@ func (s *sGateway) ackCallbackFast(ctx context.Context, key string, query *model
 	defer cancel()
 	if _, err := client.AnswerCallbackQuery(ackCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID}); err != nil {
 		observeGatewayCallback(ctx, "error", time.Since(startedAt))
+		observeGatewayTelegramError(ctx, "answerCallbackQuery", err)
 		g.Log().Warningf(ctx, "TG链路 callback_fast_ack_failed callbackId:%s duration:%s err:%+v", query.ID, time.Since(startedAt), err)
 		return
 	}

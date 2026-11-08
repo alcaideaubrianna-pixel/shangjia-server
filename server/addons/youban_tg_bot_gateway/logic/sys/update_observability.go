@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/go-telegram/bot/models"
@@ -38,6 +39,30 @@ func observeGatewayDispatch(ctx context.Context, kind, result string, duration t
 	attrs := metric.WithAttributes(attribute.String("update_kind", kind), attribute.String("result", result))
 	histogram, _ := gatewayObserveMeter.Float64Histogram("xiaohuiji.tg.bot.dispatch.duration_seconds")
 	histogram.Record(ctx, duration.Seconds(), attrs)
+}
+
+func observeGatewayQueueTimeout(ctx context.Context, queue string) {
+	counter, _ := gatewayObserveMeter.Int64Counter("xiaohuiji.tg.bot.queue.timeouts")
+	counter.Add(ctx, 1, metric.WithAttributes(attribute.String("queue", queue)))
+}
+
+func observeGatewayTelegramError(ctx context.Context, apiMethod string, err error) {
+	result := "error"
+	message := strings.ToLower(errString(err))
+	if strings.Contains(message, "429") || strings.Contains(message, "too many requests") {
+		result = "rate_limited"
+	} else if strings.Contains(message, "500") || strings.Contains(message, "502") || strings.Contains(message, "503") || strings.Contains(message, "504") {
+		result = "5xx"
+	}
+	counter, _ := gatewayObserveMeter.Int64Counter("xiaohuiji.tg.bot.telegram_api.errors")
+	counter.Add(ctx, 1, metric.WithAttributes(attribute.String("api_method", apiMethod), attribute.String("result", result)))
+}
+
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 func logGatewaySlowStage(ctx context.Context, updateID int64, botKey, kind, stage, name string, referenceID int64, duration time.Duration, handled *bool, err error) {

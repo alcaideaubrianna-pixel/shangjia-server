@@ -301,6 +301,9 @@ func (s *sGateway) handleUpdateTask(ctx context.Context, task *asynq.Task) error
 	dispatchStartedAt := time.Now()
 	if err := s.dispatch(ctx, payload.Key, &update); err != nil {
 		observeGatewayDispatch(ctx, gatewayUpdateKind(&update), "error", time.Since(dispatchStartedAt))
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			observeGatewayQueueTimeout(ctx, queueName)
+		}
 		g.Log().Warningf(ctx, "TG Bot Gateway分发失败 botKey:%s updateId:%d queue:%s queueWait:%s dispatch:%s handler:%s err:%+v", payload.Key, update.ID, queueName, queueWait, time.Since(dispatchStartedAt), time.Since(startedAt), err)
 		return err
 	}
