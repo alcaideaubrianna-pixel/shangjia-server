@@ -14,13 +14,13 @@ import (
 )
 
 const (
-	telegramOutboxEventPublish  = "telegram_job.publish"
-	telegramOutboxPending       = "pending"
-	telegramOutboxProcessing    = "processing"
-	telegramOutboxDelivered     = "delivered"
-	telegramOutboxLeaseTTL      = 30 * time.Second
-	telegramOutboxQueryTimeout  = 5 * time.Second
-	telegramOutboxWorkers       = 32
+	telegramOutboxEventPublish         = "telegram_job.publish"
+	telegramOutboxPending              = "pending"
+	telegramOutboxProcessing           = "processing"
+	telegramOutboxDelivered            = "delivered"
+	telegramOutboxLeaseTTL             = 30 * time.Second
+	telegramOutboxQueryTimeout         = 5 * time.Second
+	telegramOutboxWorkers              = 32
 	telegramOutboxBatchLimitDefault    = 5000
 	telegramOutboxMaxBatchLimitDefault = 10000
 
@@ -200,6 +200,16 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 		g.Log().Info(ctx, "TG Outbox 租约未获取", g.Map{"event": "outbox_lease_missed", "outboxId": row.Id, "jobId": row.JobId})
 		return nil
 	}
+	job, err := s.telegramJobById(ctx, row.JobId)
+	if err != nil {
+		return s.releaseTelegramOutbox(ctx, row.Id, owner, row.AttemptCount, err.Error())
+	}
+	if s.accountPushEngine(ctx, job.TenantId, job.AccountId) == pushEngineUnifiedStream {
+		if err = s.publishTelegramReadyStream(ctx, job); err != nil {
+			return s.releaseTelegramOutbox(ctx, row.Id, owner, row.AttemptCount, err.Error())
+		}
+		return s.markTelegramOutboxDelivered(ctx, row.Id, owner, job.Id)
+	}
 	g.Log().Info(ctx, "TG Outbox 租约已获取", g.Map{"event": "outbox_lease_acquired", "outboxId": row.Id, "jobId": row.JobId, "leaseOwner": owner})
 	// available_at is a database wall-clock timestamp. The caller only selects
 	// due rows, so do not convert it back to a Go duration: PostgreSQL timestamp
@@ -217,7 +227,7 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 		return err
 	}
 	g.Log().Info(ctx, "TG Outbox Redis 入队成功", g.Map{"event": "outbox_enqueued", "outboxId": row.Id, "jobId": row.JobId, "leaseOwner": owner})
-	job, err := s.telegramJobById(ctx, row.JobId)
+	job, err = s.telegramJobById(ctx, row.JobId)
 	if err != nil {
 		return s.releaseTelegramOutbox(ctx, row.Id, owner, row.AttemptCount, err.Error())
 	}

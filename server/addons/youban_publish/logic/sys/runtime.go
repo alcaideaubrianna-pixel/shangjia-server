@@ -63,6 +63,9 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 	defer heartbeatTicker.Stop()
 	if config.PushWorker {
 		s.startTelegramPushWorker(ctx)
+		if config.RedisStreamGray {
+			go s.runRedisStreamGrayConsumer(ctx)
+		}
 	}
 	if telegramDeliveryRuntimeEnabled(config) {
 		// Telegram recovery belongs with the worker that owns delivery state.

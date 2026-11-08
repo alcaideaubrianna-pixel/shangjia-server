@@ -229,6 +229,7 @@ func (s *sSysPublish) saveAccountSetting(ctx context.Context, tenantId int64, op
 		"shared_resource_enabled":     in.SharedResourceEnabled,
 		"telegram_binding_enabled":    in.TelegramBindingEnabled,
 		"group_push_enabled":          in.GroupPushEnabled,
+		"push_engine":                 in.PushEngine,
 		"updated_by":                  operatorId,
 		"updated_at":                  now,
 	}
@@ -255,6 +256,7 @@ func (s *sSysPublish) saveAccountSetting(ctx context.Context, tenantId int64, op
 	if err != nil {
 		return gerror.Wrap(err, "保存账号推送设置失败")
 	}
+	clearPushEngineCache(ctx, tenantId, in.AccountId)
 	saved, err := s.accountSetting(ctx, tenantId, in.AccountId)
 	if err != nil {
 		return err
@@ -302,6 +304,7 @@ func defaultAccountSetting(accountId int64) *sysin.AccountSettingModel {
 		ChannelAlertEnabled: 1,
 		AccountEventEnabled: 1,
 		TaskFailureEnabled:  1,
+		PushEngine:          "legacy",
 	}
 }
 
@@ -318,6 +321,10 @@ func fillAccountSettingModel(model *sysin.AccountSettingModel, row gdb.Record) {
 	model.SharedResourceEnabled = row["shared_resource_enabled"].Int()
 	model.TelegramBindingEnabled = row["telegram_binding_enabled"].Int()
 	model.GroupPushEnabled = row["group_push_enabled"].Int()
+	model.PushEngine = strings.TrimSpace(row["push_engine"].String())
+	if model.PushEngine == "" {
+		model.PushEngine = "legacy"
+	}
 	if value, ok := row["daily_report_enabled"]; ok && value != nil && !value.IsNil() {
 		model.DailyReportEnabled = value.Int()
 	}
@@ -394,6 +401,7 @@ func accountSettingSaveInput(current *sysin.AccountSettingModel) *sysin.AccountS
 		CustomMarkText: current.CustomMarkText, MarkPosition: current.MarkPosition,
 		ProfileDetailViewEnabled: current.ProfileDetailViewEnabled, SharedResourceEnabled: current.SharedResourceEnabled,
 		TelegramBindingEnabled: current.TelegramBindingEnabled, GroupPushEnabled: current.GroupPushEnabled,
+		PushEngine: current.PushEngine,
 	}
 }
 func applyAccountSettingPatch(save *sysin.AccountSettingSaveInp, in *sysin.AccountSettingPatchInp) {

@@ -184,6 +184,7 @@ type tgAttemptQueuePayload struct {
 type autoDeleteQueuePayload struct {
 	BotId     int64  `json:"botId"`
 	TenantId  int64  `json:"tenantId"`
+	AccountId int64  `json:"accountId"`
 	ChannelId int64  `json:"channelId"`
 	ChatId    string `json:"chatId"`
 	MessageId int    `json:"messageId"`
@@ -394,7 +395,17 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 }
 
 func (s *sSysPublish) enqueueTelegramCleanupJob(ctx context.Context, jobId int64, delay time.Duration) error {
-	return s.enqueueTelegramTaskWithQueue(ctx, tgTaskTypeCleanup, jobId, delay, true, tgQueueNameCleanup)
+	queueName := tgQueueNameCleanup
+	var owner struct {
+		TenantId  int64 `orm:"tenant_id"`
+		AccountId int64 `orm:"account_id"`
+	}
+	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Fields("tenant_id,account_id").Where("id", jobId).Scan(&owner); err == nil &&
+		s.unifiedPushEngineEnabled(ctx, owner.TenantId, owner.AccountId) {
+		queueName = channelDispatchDeleteQueueName(channelPriorityManualDelete)
+	}
+	return s.enqueueTelegramTaskWithQueue(ctx, tgTaskTypeCleanup, jobId, delay, true, queueName)
 }
 
 func (s *sSysPublish) enqueueTelegramAutoDelete(ctx context.Context, payload autoDeleteQueuePayload) error {
@@ -410,8 +421,12 @@ func (s *sSysPublish) enqueueTelegramAutoDelete(ctx context.Context, payload aut
 		return err
 	}
 	task := asynq.NewTask(tgTaskTypeAutoDelete, body)
+	queueName := tgQueueNameAutoDeleteRealtime
+	if s.unifiedPushEngineEnabled(ctx, payload.TenantId, payload.AccountId) {
+		queueName = channelDispatchDeleteQueueName(channelPriorityKeywordDelete)
+	}
 	_, err = client.EnqueueContext(ctx, task,
-		asynq.Queue(tgQueueNameAutoDeleteRealtime),
+		asynq.Queue(queueName),
 		asynq.MaxRetry(10),
 		asynq.Timeout(time.Minute),
 		asynq.Unique(2*time.Minute),

@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/gogf/gf/v2/frame/g"
 	"hotgo/utility/runrole"
 )
 
@@ -29,6 +30,8 @@ type publishRuntimeConfig struct {
 	CollectorWorker      bool
 	CollectProcessWorker bool
 	BackgroundQueue      bool
+	// RedisStreamGray 仅允许在 Push Worker 上开启 Redis Stream 灰度消费者。
+	RedisStreamGray bool
 }
 
 func loadPublishRuntimeConfig(ctx context.Context) publishRuntimeConfig {
@@ -62,7 +65,10 @@ func loadPublishRuntimeConfig(ctx context.Context) publishRuntimeConfig {
 			values = append(values, publishRuntimeRoleAccount, publishRuntimeRoleScheduler)
 		}
 	}
-	return parsePublishRuntimeRoles(values)
+	config := parsePublishRuntimeRoles(values)
+	// 灰度开关默认关闭，且不能在非 Push Worker 角色启动，避免调度器重复消费。
+	config.RedisStreamGray = config.PushWorker && g.Cfg().MustGet(ctx, "youbanPublish.redisStream.grayEnabled", false).Bool()
+	return config
 }
 
 func (s *sSysPublish) RuntimeRoleEnabled(ctx context.Context, role string) bool {

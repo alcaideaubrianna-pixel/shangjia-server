@@ -561,7 +561,6 @@ func (s *sSysPublish) scanTgChannelMessagesSinceWithClient(ctx context.Context, 
 			}
 			time.Sleep(600 * time.Millisecond)
 		}
-		return nil
 	}()
 	if err != nil {
 		return scanned, gerror.Wrap(err, "拉取TG频道历史消息失败")

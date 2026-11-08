@@ -172,6 +172,11 @@ func telegramObserveQueueNames(ctx context.Context) []string {
 		tgQueueNameMediaProcess:             {},
 		tgQueueNameMatting:                  {},
 		tgQueueNameProfileMaintenance:       {},
+		channelDispatchQueueSend:            {},
+		channelDispatchQueueDelete:          {},
+		channelDispatchQueueDeleteManual:    {},
+		channelDispatchQueueDeleteKeyword:   {},
+		channelDispatchQueueDeleteCycle:     {},
 	}
 	for queue := range telegramPublishForegroundQueueWeights(ctx) {
 		set[queue] = struct{}{}

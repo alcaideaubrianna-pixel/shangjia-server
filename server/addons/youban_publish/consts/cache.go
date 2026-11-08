@@ -1,6 +1,8 @@
 package consts
 
 const (
+	// PushEngineCacheKeyPrefix 是账户推送引擎灰度配置缓存键前缀。
+	PushEngineCacheKeyPrefix            = "youban_publish:push_engine:"
 	CollectSourceStatsLockKey           = "youban_publish:collect:stats:lock"
 	AccountChannelAccessNotifyKeyPrefix = "youban_publish:account:channel_access:notify:"
 	AntiScanHashHistoryCacheKeyPrefix   = "youban_publish:anti_scan:history:"

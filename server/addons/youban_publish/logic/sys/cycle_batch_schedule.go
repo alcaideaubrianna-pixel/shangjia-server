@@ -75,7 +75,8 @@ func (s *sSysPublish) scheduleDueChannelBatchCyclesShard(ctx context.Context, li
 }
 
 func (s *sSysPublish) createScheduledBatchCycleRun(ctx context.Context, channel dueBatchCycleChannel, now *gtime.Time) error {
-	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+	var runID int64
+	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		locked, err := tx.Model(publishChannelTable).Safe().Ctx(ctx).Where("id", channel.Id).
 			Where("cycle_active_run_id", 0).Where("cycle_publish_mode", "batch").
 			Where("cycle_next_run_at IS NULL OR cycle_next_run_at<=?", now).
@@ -151,14 +152,20 @@ func (s *sSysPublish) createScheduledBatchCycleRun(ctx context.Context, channel 
 		if err != nil {
 			return err
 		}
+		runID = runId
 		_, err = tx.Model(publishChannelTable).Safe().Ctx(ctx).Where("id", channel.Id).Data(g.Map{
 			"cycle_active_run_id": runId, "cycle_next_run_at": nextBatchCycleAt(channel.BatchTime, now.Time), "updated_at": now,
 		}).Update()
-		if err == nil {
-			err = s.enqueueCycleRun(ctx, runId, 0)
-		}
 		return err
 	})
+	if err != nil || runID <= 0 {
+		return err
+	}
+	// 事务提交后再入队，避免 Redis 成功而数据库回滚产生幽灵批次。
+	if err = s.enqueueCycleRun(ctx, runID, 0); err != nil {
+		g.Log().Warningf(ctx, "提交定时批次循环入队失败，等待恢复扫描 run:%d channel:%d err:%+v", runID, channel.Id, err)
+	}
+	return err
 }
 
 func migrateBatchCycleCursorTx(ctx context.Context, tx gdb.TX, channelId, legacyCursor int64) (int64, error) {

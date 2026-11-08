@@ -486,6 +486,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_account_setting" (
   "cycle_publish_enabled" smallint NOT NULL DEFAULT 0,
   "cycle_publish_days" integer NOT NULL DEFAULT 4,
   "cycle_publish_time" varchar(16) NOT NULL DEFAULT '',
+	"push_engine" varchar(16) NOT NULL DEFAULT 'legacy',
   "created_by" bigint NOT NULL DEFAULT 0,
   "updated_by" bigint NOT NULL DEFAULT 0,
   "deleted_by" bigint NOT NULL DEFAULT 0,
@@ -497,6 +498,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_account_setting_account" ON "hg_youban
 ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "cycle_publish_enabled" smallint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "cycle_publish_days" integer NOT NULL DEFAULT 4;
 ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "cycle_publish_time" varchar(16) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "push_engine" varchar(16) NOT NULL DEFAULT 'legacy';
 ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "publish_config_json" text NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "shared_resource_enabled" smallint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "telegram_binding_enabled" smallint NOT NULL DEFAULT 0;
