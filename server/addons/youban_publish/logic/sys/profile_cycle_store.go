@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 	"hotgo/addons/youban_publish/library/profilecycle"
@@ -57,9 +58,18 @@ func (s *profileCycleStore) SavePlan(ctx context.Context, plan *profilecycle.Run
 	if plan == nil || s.publish == nil {
 		return profilecycle.ErrInvalidOrchestrator
 	}
+	// RunPlan.RunID 是业务 run_key；子任务 run_id 是 bigint 主键，先解析真实主键。
+	runID, err := g.DB().Model(publishProfileCycleRunTable).Safe().Ctx(ctx).
+		Where("run_key", plan.RunID).Value("id")
+	if err != nil {
+		return gerror.Wrap(err, "读取资料循环 run 主键失败")
+	}
+	if runID.Int64() <= 0 {
+		return gerror.New("资料循环 run 不存在")
+	}
 	for _, task := range plan.Tasks {
 		var existing int64
-		if value, readErr := g.DB().Model(publishProfileCycleRunChannelTable).Safe().Ctx(ctx).Where("run_id", plan.RunID).Where("channel_id", task.ChannelID).Value("job_id"); readErr == nil {
+		if value, readErr := g.DB().Model(publishProfileCycleRunChannelTable).Safe().Ctx(ctx).Where("run_id", runID.Int64()).Where("channel_id", task.ChannelID).Value("job_id"); readErr == nil {
 			existing = value.Int64()
 		}
 		if existing > 0 {
@@ -74,7 +84,7 @@ func (s *profileCycleStore) SavePlan(ctx context.Context, plan *profilecycle.Run
 			continue
 		}
 		if err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-			_, updateErr := tx.Model(publishProfileCycleRunChannelTable).Safe().Ctx(ctx).Where("run_id", plan.RunID).Where("channel_id", task.ChannelID).Data(g.Map{"job_id": jobIDs[0], "status": "queued", "updated_at": gtime.Now()}).Update()
+			_, updateErr := tx.Model(publishProfileCycleRunChannelTable).Safe().Ctx(ctx).Where("run_id", runID.Int64()).Where("channel_id", task.ChannelID).Data(g.Map{"job_id": jobIDs[0], "status": "queued", "updated_at": gtime.Now()}).Update()
 			return updateErr
 		}); err != nil {
 			return err
