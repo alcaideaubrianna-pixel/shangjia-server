@@ -240,7 +240,6 @@ func (s *sSysPublish) recoverMediaProcessTasks(ctx context.Context) {
 
 func (s *sSysPublish) runMediaProcessRecovery(ctx context.Context) {
 	s.recoverMediaProcessTasks(ctx)
-	s.recoverWaitingMediaPublishes(ctx)
 	ticker := time.NewTicker(mediaProcessRecoveryEvery)
 	defer ticker.Stop()
 	for {
@@ -249,33 +248,6 @@ func (s *sSysPublish) runMediaProcessRecovery(ctx context.Context) {
 			return
 		case <-ticker.C:
 			s.recoverMediaProcessTasks(ctx)
-			s.recoverWaitingMediaPublishes(ctx)
-		}
-	}
-}
-
-// recoverWaitingMediaPublishes repairs the event-loss window between the last
-// media row becoming ready and wakeProfileTelegramJobs. It is deliberately
-// bounded and idempotent: submitProfilePublish reuses the durable operation
-// number and cannot create duplicate jobs.
-func (s *sSysPublish) recoverWaitingMediaPublishes(ctx context.Context) {
-	var rows []struct {
-		ProfileId int64 `orm:"profile_id"`
-		TenantId  int64 `orm:"tenant_id"`
-	}
-	if err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
-		Fields("profile_id,tenant_id").Where("publish_task_status", "waiting_media").
-		WhereNull("deleted_at").OrderAsc("publish_task_updated_at").Limit(200).Scan(&rows); err != nil {
-		g.Log().Warningf(ctx, "恢复等待媒体上架任务查询失败 err:%+v", err)
-		return
-	}
-	for _, row := range rows {
-		ready, err := s.profileMediaReady(ctx, row.ProfileId)
-		if err != nil || !ready {
-			continue
-		}
-		if err = s.wakeProfileTelegramJobs(ctx, row.ProfileId); err != nil {
-			g.Log().Warningf(ctx, "恢复等待媒体上架任务失败 profileId:%d err:%+v", row.ProfileId, err)
 		}
 	}
 }

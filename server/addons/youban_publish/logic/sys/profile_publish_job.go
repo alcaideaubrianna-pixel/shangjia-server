@@ -97,6 +97,9 @@ func (s *sSysPublish) submitProfilePublishWithMeta(ctx context.Context, profileI
 				g.Log().Warningf(ctx, "资料上架因媒体失败停止等待 profileId:%d operationNo:%s failed_media:%d", profileId, operationNo, failedMediaCount)
 			} else {
 				g.Log().Infof(ctx, "资料上架等待媒体完成 profileId:%d operationNo:%s", profileId, operationNo)
+				if enqueueErr := s.enqueueWaitingMediaWake(ctx, profileId, tenantId, accountId); enqueueErr != nil {
+					g.Log().Warningf(ctx, "等待媒体延迟唤醒任务入队失败 profileId:%d err:%+v", profileId, enqueueErr)
+				}
 			}
 			return nil
 		}

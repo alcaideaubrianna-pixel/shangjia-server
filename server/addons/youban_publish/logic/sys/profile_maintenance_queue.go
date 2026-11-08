@@ -20,6 +20,7 @@ type profileMaintenancePayload struct {
 	MediaChanged    bool                 `json:"mediaChanged,omitempty"`
 	OldFingerprints []profileFingerprint `json:"oldFingerprints,omitempty"`
 	NewFingerprints []profileFingerprint `json:"newFingerprints,omitempty"`
+	WakePublish     bool                 `json:"wakePublish,omitempty"`
 }
 
 func (s *sSysPublish) enqueueProfileMaintenance(ctx context.Context, payload profileMaintenancePayload) error {
@@ -36,6 +37,23 @@ func (s *sSysPublish) enqueueProfileMaintenance(ctx context.Context, payload pro
 	return err
 }
 
+func (s *sSysPublish) enqueueWaitingMediaWake(ctx context.Context, profileID, tenantID, accountID int64) error {
+	return s.enqueueProfileMaintenanceDelayed(ctx, profileMaintenancePayload{ProfileId: profileID, TenantId: tenantID, AccountId: accountID, WakePublish: true}, time.Minute)
+}
+
+func (s *sSysPublish) enqueueProfileMaintenanceDelayed(ctx context.Context, payload profileMaintenancePayload, delay time.Duration) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return gerror.Wrap(err, "编码资料维护任务失败")
+	}
+	client, err := s.telegramQueueClient(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = client.EnqueueContext(ctx, asynq.NewTask(tgTaskTypeProfileMaintenance, body), asynq.Queue(tgQueueNameProfileMaintenance), asynq.ProcessIn(delay), asynq.MaxRetry(8), asynq.Timeout(2*time.Minute))
+	return err
+}
+
 func (s *sSysPublish) handleProfileMaintenanceTask(ctx context.Context, task *asynq.Task) error {
 	var payload profileMaintenancePayload
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
@@ -43,6 +61,16 @@ func (s *sSysPublish) handleProfileMaintenanceTask(ctx context.Context, task *as
 	}
 	if payload.ProfileId <= 0 || payload.TenantId <= 0 || payload.AccountId <= 0 {
 		return gerror.New("资料维护任务参数不完整")
+	}
+	if payload.WakePublish {
+		ready, err := s.profileMediaReady(ctx, payload.ProfileId)
+		if err != nil {
+			return err
+		}
+		if ready {
+			return s.wakeProfileTelegramJobs(ctx, payload.ProfileId)
+		}
+		return s.enqueueWaitingMediaWake(ctx, payload.ProfileId, payload.TenantId, payload.AccountId)
 	}
 	count, err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
 		Where("profile_id", payload.ProfileId).Where("tenant_id", payload.TenantId).
