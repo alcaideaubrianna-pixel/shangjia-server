@@ -32,8 +32,11 @@ func (m *module) Start(option *addons.Option) error {
 	option.Server.Group("/", func(group *ghttp.RouterGroup) {
 		group.Middleware(internalservice.Middleware().Addon)
 		router.Api(m.ctx, group)
-		// Compatibility endpoint for local Telegram Bot API clients. The bot
-		// token is the only Telegram parameter; no query/body is accepted.
+	})
+	// This path intentionally lives outside Addon middleware: that middleware
+	// requires the addon prefix and would reject /_internal/* as an unknown
+	// module before the handler can run.
+	option.Server.Group("/", func(group *ghttp.RouterGroup) {
 		group.GET("/_internal/telegram-bot-api/bot/:token/getWebhookInfo", func(r *ghttp.Request) {
 			token := strings.TrimSpace(r.GetRouter("token").String())
 			if token == "" || !strings.Contains(token, ":") {
