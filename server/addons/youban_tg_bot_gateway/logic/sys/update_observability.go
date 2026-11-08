@@ -28,6 +28,18 @@ func observeGatewayWebhook(ctx context.Context, result string, duration time.Dur
 	histogram.Record(ctx, duration.Seconds(), attrs)
 }
 
+func observeGatewayQueue(ctx context.Context, queue, result string, duration time.Duration) {
+	attrs := metric.WithAttributes(attribute.String("queue", queue), attribute.String("result", result))
+	histogram, _ := gatewayObserveMeter.Float64Histogram("xiaohuiji.tg.bot.queue.wait_seconds")
+	histogram.Record(ctx, duration.Seconds(), attrs)
+}
+
+func observeGatewayDispatch(ctx context.Context, kind, result string, duration time.Duration) {
+	attrs := metric.WithAttributes(attribute.String("update_kind", kind), attribute.String("result", result))
+	histogram, _ := gatewayObserveMeter.Float64Histogram("xiaohuiji.tg.bot.dispatch.duration_seconds")
+	histogram.Record(ctx, duration.Seconds(), attrs)
+}
+
 func logGatewaySlowStage(ctx context.Context, updateID int64, botKey, kind, stage, name string, referenceID int64, duration time.Duration, handled *bool, err error) {
 	if duration < gatewaySlowStageLogThreshold && err == nil {
 		return
