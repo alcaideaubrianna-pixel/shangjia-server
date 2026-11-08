@@ -74,14 +74,17 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 	if config.MediaWorker {
 		s.startTelegramMediaWorker(ctx)
 	}
-	if config.CollectorWorker || config.CollectProcessWorker {
+	// Collection processing is owned exclusively by Collector. Do not let a
+	// stale or over-broad role configuration make Media/Background consume the
+	// durable collect outbox and persist text with a different rule pipeline.
+	if config.CollectorWorker {
 		s.startCollectProcessWorker(ctx)
 		go s.runCollectProcessDispatcher(ctx)
 		// Collect processing has two halves: the collector worker consumes
 		// queue tasks, while the recovery loop dispatches durable process_outbox
 		// rows into that queue. Keep the dispatcher available with the consumer
 		// when Scheduler is deployed separately or temporarily unavailable.
-		if (config.CollectorWorker || config.CollectProcessWorker) && !config.Scheduler {
+		if !config.Scheduler {
 			go s.runCollectRecovery(ctx)
 		}
 	}
