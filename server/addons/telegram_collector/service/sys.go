@@ -14,6 +14,8 @@ type ICollector interface {
 	Enabled(ctx context.Context) bool
 	StartRuntime(ctx context.Context)
 	StartDeliveryRuntime(ctx context.Context)
+	StartHistoryScheduler(ctx context.Context)
+	StopHistoryScheduler()
 	StopRuntime()
 	IngestBotUpdate(ctx context.Context, bot BotContext, update *models.Update) error
 	BotUpdateReplayCandidates(ctx context.Context, tenantID int64, eventIDs []int64) ([]*BotUpdateReplayCandidate, error)

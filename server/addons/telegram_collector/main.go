@@ -56,6 +56,9 @@ func (m *module) Start(option *addons.Option) error {
 	if runrole.Enabled(m.ctx, runrole.Worker) || runrole.Enabled(m.ctx, runrole.PushWorker) {
 		collectorservice.Collector().StartDeliveryRuntime(m.ctx)
 	}
+	if runrole.Enabled(m.ctx, runrole.BackgroundWorker) {
+		collectorservice.Collector().StartHistoryScheduler(m.ctx)
+	}
 	// Protocol-account sessions are singleton state and must run only in the
 	// dedicated account role. The runtime role is also used by Web to host the
 	// Bot Gateway; starting account sessions there would create competing
@@ -69,6 +72,7 @@ func (m *module) Start(option *addons.Option) error {
 func (m *module) Stop() error {
 	collectorservice.AccountRuntime().Stop()
 	collectorservice.Collector().StopRuntime()
+	collectorservice.Collector().StopHistoryScheduler()
 	return nil
 }
 
