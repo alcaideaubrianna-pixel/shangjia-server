@@ -128,6 +128,34 @@ func TestDeliveryRedisQueueIsolationAndDuplicateEnqueue(t *testing.T) {
 	}
 }
 
+func TestReplayDeliveryCanMovePastStaleUniqueTask(t *testing.T) {
+	redis := miniredis.RunT(t)
+	opt := asynq.RedisClientOpt{Addr: redis.Addr()}
+	client := asynq.NewClient(opt)
+	defer client.Close()
+	inspector := asynq.NewInspector(opt)
+	defer inspector.Close()
+	collector := &sCollector{queueClient: client}
+	ctx := context.Background()
+
+	// Simulate a delivery already parked in the history queue under Asynq's
+	// unique marker, then replay the same delivery at urgent priority.
+	if err := collector.enqueueDeliveryTask(ctx, 991, sysin.EventPriorityNormal); err != nil {
+		t.Fatal(err)
+	}
+	if err := collector.enqueueDeliveryTaskWithOptions(ctx, 991, sysin.EventPriorityUrgent, false); err != nil {
+		t.Fatal(err)
+	}
+	history, err := inspector.ListPendingTasks(consts.QueueDeliveryHistory)
+	if err != nil || len(history) != 1 {
+		t.Fatalf("stale history task count=%d err=%v", len(history), err)
+	}
+	urgent, err := inspector.ListPendingTasks(consts.QueueDeliveryUrgentLive)
+	if err != nil || len(urgent) != 1 {
+		t.Fatalf("replay urgent task count=%d err=%v", len(urgent), err)
+	}
+}
+
 func TestDeliveryRecoveryQuarantinesBadEventAndContinuesLocalPostgres(t *testing.T) {
 	port := os.Getenv("YOUBAN_DELIVERY_TEST_PORT")
 	if port == "" {
