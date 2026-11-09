@@ -162,7 +162,11 @@ func allowedUpdates() []string {
 		models.AllowedUpdateCallbackQuery,
 		models.AllowedUpdateInlineQuery,
 		models.AllowedUpdateMessageReaction,
+		models.AllowedUpdateMessageReactionCount,
 		models.AllowedUpdateMyChatMember,
+		models.AllowedUpdateChatMember,
+		models.AllowedUpdateChatJoinRequest,
+		models.AllowedUpdateChatBoost,
 	}
 }
 

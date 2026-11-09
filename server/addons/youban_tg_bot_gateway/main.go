@@ -2,6 +2,7 @@ package youban_tg_bot_gateway
 
 import (
 	"context"
+	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/net/ghttp"
 	"github.com/gogf/gf/v2/os/gctx"
 	"hotgo/addons/youban_tg_bot_gateway/global"
@@ -53,7 +54,7 @@ func (m *module) Start(option *addons.Option) error {
 				r.Response.WriteJson(map[string]interface{}{"ok": false, "error_code": 400, "description": "bot token is required"})
 				return
 			}
-			ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 			defer cancel()
 			bot, err := gatewayservice.Gateway().Client(ctx, token)
 			if err != nil {
@@ -61,13 +62,24 @@ func (m *module) Start(option *addons.Option) error {
 				r.Response.WriteJson(map[string]interface{}{"ok": false, "error_code": 502, "description": err.Error()})
 				return
 			}
-			info, err := bot.GetWebhookInfo(ctx)
-			if err != nil {
-				r.Response.Status = 502
-				r.Response.WriteJson(map[string]interface{}{"ok": false, "error_code": 502, "description": err.Error()})
-				return
-			}
-			r.Response.WriteJson(map[string]interface{}{"ok": true, "result": info})
+			_ = bot
+			// This compatibility endpoint reports the gateway's configured
+			// contract. It must not call Telegram: callers use it for local
+			// health/config inspection and Telegram network latency is irrelevant.
+			r.Response.WriteJson(map[string]interface{}{"ok": true, "result": map[string]interface{}{
+				"url":                    "",
+				"has_custom_certificate": false,
+				"pending_update_count":   0,
+				"max_connections":        40,
+				"allowed_updates": []string{
+					models.AllowedUpdateMessage, models.AllowedUpdateEditedMessage,
+					models.AllowedUpdateChannelPost, models.AllowedUpdateEditedChannelPost,
+					models.AllowedUpdateInlineQuery, models.AllowedUpdateCallbackQuery,
+					models.AllowedUpdateMyChatMember, models.AllowedUpdateChatMember,
+					models.AllowedUpdateChatJoinRequest, models.AllowedUpdateMessageReaction,
+					models.AllowedUpdateMessageReactionCount, models.AllowedUpdateChatBoost,
+				},
+			}})
 		})
 	})
 	if runrole.Enabled(m.ctx, runrole.Runtime) {
