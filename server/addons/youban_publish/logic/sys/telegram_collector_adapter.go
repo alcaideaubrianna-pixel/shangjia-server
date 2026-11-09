@@ -1592,6 +1592,12 @@ func (s *sSysPublish) ingestCollectorAccountDelivery(ctx context.Context, delive
 		return gerror.Wrap(err, "检查协议号采集上架频道过滤失败")
 	}
 	if blocked {
+		g.Log().Info(ctx, "协议号采集跳过上架目标频道消息", g.Map{
+			"sourceType": "account", "reason": "source_chat_is_publish_target",
+			"tenantId": delivery.TenantID, "accountId": delivery.AccountID,
+			"tgAccountId": delivery.TgAccountID, "sourceId": delivery.SourceID,
+			"sourceChatId": delivery.SourceChatID, "sourceMessageId": delivery.SourceMessageID,
+		})
 		return nil
 	}
 	message := collectorDeliveryMessage(delivery, delivery.TenantID, delivery.AccountID, delivery.SourceID, sysin.CollectSourceTypeAccount)

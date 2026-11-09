@@ -364,3 +364,25 @@ func TestCollectorDeliveryMessageCases(t *testing.T) {
 		})
 	}
 }
+
+// TestPublishChannelMessagesAreAlwaysBlocked verifies that target channels are
+// recognized by normalized Telegram chat IDs regardless of message audit state.
+func TestPublishChannelMessagesAreAlwaysBlocked(t *testing.T) {
+	if !collectChatMatchesPublishChannel("-1003763752459", []string{"3763752459"}) {
+		t.Fatal("normalized publish target chat ID must be blocked")
+	}
+	if collectChatMatchesPublishChannel("-1003998084277", []string{"-1003763752459"}) {
+		t.Fatal("unconfigured chat must remain collectable")
+	}
+}
+
+// TestPublishChannelMessageAuditIsNotRequired documents the regression boundary:
+// the caller must use the channel-level decision even when tg_message is absent.
+func TestPublishChannelMessageAuditIsNotRequired(t *testing.T) {
+	publishTargets := []string{"-1003763752459"}
+	for _, incoming := range []string{"-1003763752459", "3763752459"} {
+		if !collectChatMatchesPublishChannel(incoming, publishTargets) {
+			t.Fatalf("publish target %s was not blocked without audit lookup", incoming)
+		}
+	}
+}

@@ -19,24 +19,16 @@ const (
 	collectPublishChannelCacheKey = "youban_publish:collect:publish_channels"
 )
 
-// collectMessageFromAccountPublishChannel 仅拦截已确认由本系统发送的消息，
-// 允许同一频道中的其他原始消息继续进入代理采集规则。
-func (s *sSysPublish) collectMessageFromAccountPublishChannel(ctx context.Context, tenantId, tgAccountId int64, chatId string, messageID ...int64) (bool, error) {
+// collectMessageFromAccountPublishChannel 拦截所有已配置为上架目标的频道消息，
+// 防止上架频道的消息再次进入采集链路形成死循环。
+func (s *sSysPublish) collectMessageFromAccountPublishChannel(ctx context.Context, tenantId, tgAccountId int64, chatId string, _ ...int64) (bool, error) {
 	chatId = normalizeTelegramChannelChatID(chatId)
 	if tenantId <= 0 || chatId == "" {
 		return false, nil
 	}
-	if len(messageID) > 0 && messageID[0] > 0 {
-		count, err := g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).
-			Where("target_chat_id", chatId).Where("tg_message_id", messageID[0]).Count()
-		if err != nil {
-			return false, err
-		}
-		if count > 0 {
-			return true, nil
-		}
-		return false, nil
-	}
+	// 已配置为上架目标的频道，其所有消息都必须停止在采集入口。
+	// 不能依赖 tg_message 审计记录：审计可能尚未写入、已被清理或来自旧版本，
+	// 否则上架消息会被误判为外部消息，重新进入采集形成死循环。
 	version := s.collectSourceCacheVersion(ctx)
 	cacheKey := fmt.Sprintf("%s:%s:%d:%d", collectPublishChannelCacheKey, version, tenantId, tgAccountId)
 	var chatIds []string
