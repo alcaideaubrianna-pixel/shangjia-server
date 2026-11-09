@@ -416,7 +416,11 @@ func (s *sCollector) enqueueDueDeliveryTasks(ctx context.Context, limit int) err
 			g.Log().Warningf(ctx, "隔离无法分类的采集交付，继续恢复后续任务 deliveryId:%d err:%+v", deliveryID, priorityErr)
 			continue
 		}
-		if updateErr := s.enqueueDeliveryTask(ctx, deliveryID, priority); updateErr != nil {
+		// An urgent task may have an old unique marker in another queue. Allow
+		// recovery to create a current-priority copy; processDelivery's
+		// conditional claim keeps duplicate callbacks idempotent.
+		unique := priority < sysin.EventPriorityUrgent
+		if updateErr := s.enqueueDeliveryTaskWithOptions(ctx, deliveryID, priority, unique); updateErr != nil {
 			return gerror.Wrap(updateErr, "投递待恢复Telegram采集交付失败")
 		}
 	}
