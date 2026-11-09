@@ -203,7 +203,7 @@ func (s *sCollector) enqueueReplayDelivery(ctx context.Context, eventID int64) (
 	case sysin.DeliveryStatusCompleted, sysin.DeliveryStatusProcessing, sysin.DeliveryStatusQuarantined:
 		return false, nil
 	case sysin.DeliveryStatusPending:
-		return true, s.enqueueDeliveryTask(ctx, row.Id, row.Priority)
+		return true, s.enqueueDeliveryTaskWithOptions(ctx, row.Id, row.Priority, false)
 	case sysin.DeliveryStatusFailedRetry, sysin.DeliveryStatusDead:
 		result, err := dao.TgCollectorDelivery.Ctx(ctx).WherePri(row.Id).
 			WhereIn(columns.Status, []string{sysin.DeliveryStatusFailedRetry, sysin.DeliveryStatusDead}).
@@ -216,7 +216,7 @@ func (s *sCollector) enqueueReplayDelivery(ctx context.Context, eventID int64) (
 		if affected, _ := result.RowsAffected(); affected == 0 {
 			return false, nil
 		}
-		return true, s.enqueueDeliveryTask(ctx, row.Id, row.Priority)
+		return true, s.enqueueDeliveryTaskWithOptions(ctx, row.Id, row.Priority, false)
 	default:
 		return false, gerror.Newf("source重放交付状态不支持：%s", row.Status)
 	}

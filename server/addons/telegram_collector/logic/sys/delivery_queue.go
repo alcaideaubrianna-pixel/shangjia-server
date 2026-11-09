@@ -80,6 +80,14 @@ func (s *sCollector) StartDeliveryRuntime(ctx context.Context) {
 }
 
 func (s *sCollector) enqueueDeliveryTask(ctx context.Context, deliveryID int64, priority int) error {
+	return s.enqueueDeliveryTaskWithOptions(ctx, deliveryID, priority, true)
+}
+
+// enqueueDeliveryTaskWithOptions allows an explicitly requested replay to
+// bypass Asynq's old unique task marker. A delivery is still claimed with a
+// status transition in processDelivery, so the duplicate task is harmless and
+// lets a replay move work from a stale queue to its current priority queue.
+func (s *sCollector) enqueueDeliveryTaskWithOptions(ctx context.Context, deliveryID int64, priority int, unique bool) error {
 	if deliveryID <= 0 {
 		return gerror.New("Telegram采集交付任务ID无效")
 	}
@@ -90,12 +98,15 @@ func (s *sCollector) enqueueDeliveryTask(ctx context.Context, deliveryID int64, 
 	client := s.queueClient
 	s.queueMu.Unlock()
 	queueName := deliveryQueueName(ctx, deliveryID, priority)
-	_, err := client.EnqueueContext(ctx, asynq.NewTask(deliveryTaskType, collectorTaskPayload(deliveryID)),
+	options := []asynq.Option{
 		asynq.Queue(queueName),
-		asynq.MaxRetry(deliveryMaxAttempts-1),
-		asynq.Timeout(3*time.Minute),
-		asynq.Unique(deliveryTaskUniqueTTL),
-	)
+		asynq.MaxRetry(deliveryMaxAttempts - 1),
+		asynq.Timeout(3 * time.Minute),
+	}
+	if unique {
+		options = append(options, asynq.Unique(deliveryTaskUniqueTTL))
+	}
+	_, err := client.EnqueueContext(ctx, asynq.NewTask(deliveryTaskType, collectorTaskPayload(deliveryID)), options...)
 	if errors.Is(err, asynq.ErrDuplicateTask) || errors.Is(err, asynq.ErrTaskIDConflict) {
 		return nil
 	}
