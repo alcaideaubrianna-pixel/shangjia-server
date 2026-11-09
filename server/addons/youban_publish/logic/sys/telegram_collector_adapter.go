@@ -1434,6 +1434,14 @@ func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, sourc
 				"sourceMessageId": delivery.SourceMessageID,
 			})
 		}
+		if allowed && !s.collectDiscoveryNotificationSent(ctx, tenantID, source["id"].Int64(), chatID) {
+			if err := s.enqueueCollectNotification(ctx, collectNotificationPayload{
+				ID:    fmt.Sprintf("discovery:%d:%d:%d:%s", tenantID, accountID, source["id"].Int64(), chatID),
+				BotID: botID, TenantID: tenantID, AccountID: accountID, SourceID: source["id"].Int64(), ChannelID: chatID,
+			}); err != nil {
+				return false, err
+			}
+		}
 		return allowed, nil
 	}
 	// Queue before creating the discovery relation: a crash or send failure

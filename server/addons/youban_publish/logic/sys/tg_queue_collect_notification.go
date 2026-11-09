@@ -14,9 +14,21 @@ import (
 	"github.com/hibiken/asynq"
 	botService "hotgo/addons/youban_bot/service"
 	pdao "hotgo/addons/youban_publish/internal/dao"
+	"hotgo/internal/library/cache"
 )
 
 const tgTaskTypeCollectNotification = "youban_publish:collect:notification"
+
+const collectDiscoveryNotificationKeyPrefix = "youban_publish:collect:discovery-notified:"
+
+func collectDiscoveryNotificationKey(tenantID, sourceID int64, channelID string) string {
+	return fmt.Sprintf("%s%d:%d:%s", collectDiscoveryNotificationKeyPrefix, tenantID, sourceID, canonicalCollectSourceChatID(channelID))
+}
+
+func (s *sSysPublish) collectDiscoveryNotificationSent(ctx context.Context, tenantID, sourceID int64, channelID string) bool {
+	value, err := cache.Instance().Get(ctx, collectDiscoveryNotificationKey(tenantID, sourceID, channelID))
+	return err == nil && !value.IsNil()
+}
 
 type collectChannelPurgeNotification struct {
 	RuleOnly     bool    `json:"ruleOnly,omitempty"`
@@ -130,7 +142,10 @@ func (s *sSysPublish) handleCollectNotificationTask(ctx context.Context, task *a
 	if relation.SourceId != payload.SourceID || !botCollectChannelRelationEnabled(relation.CollectEnabled, relation.Status, relation.ApprovalStatus) {
 		return nil
 	}
-	return s.sendBotCollectChannelDiscovery(ctx, source, payload.ChannelID, relation.Id, payload.ID)
+	if err := s.sendBotCollectChannelDiscovery(ctx, source, payload.ChannelID, relation.Id, payload.ID); err != nil {
+		return err
+	}
+	return cache.Instance().Set(ctx, collectDiscoveryNotificationKey(payload.TenantID, payload.SourceID, payload.ChannelID), true, 30*24*time.Hour)
 }
 
 func collectChannelPurgeProgressText(result collectChannelPurgeNotification, pending, blocked int) string {

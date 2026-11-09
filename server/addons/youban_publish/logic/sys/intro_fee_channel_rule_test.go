@@ -74,3 +74,11 @@ func TestIntroFeeOnlineSource351FixtureIsBound(t *testing.T) {
 		t.Fatal("Bot cache ownership should bind the canonical channel")
 	}
 }
+
+func TestCollectDiscoveryNotificationKeyCanonicalizesChat(t *testing.T) {
+	first := collectDiscoveryNotificationKey(78, 351, "-1003998084277")
+	second := collectDiscoveryNotificationKey(78, 351, "3998084277")
+	if first != second {
+		t.Fatalf("discovery notification key is not canonical: %q != %q", first, second)
+	}
+}
