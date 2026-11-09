@@ -53,3 +53,24 @@ func TestIntroFeeAggregateBotSourceMatchesCanonicalCacheChannel(t *testing.T) {
 		t.Fatal("aggregate BOT source must not match an uncached channel")
 	}
 }
+
+func TestIntroFeeOnlineSource351FixtureIsBound(t *testing.T) {
+	// Sanitized production-shaped fixture captured from source 351/rule 338.
+	const (
+		tenantID      int64 = 78
+		accountID     int64 = 615
+		ruleID        int64 = 338
+		sourceID      int64 = 351
+		botID         int64 = 64
+		channelChatID       = "-1003998084277"
+	)
+	if tenantID != 78 || accountID != 615 || ruleID != 338 || sourceID != 351 || botID != 64 {
+		t.Fatal("online fixture was changed unexpectedly")
+	}
+	if !introFeeCollectionSourceMatchesChannel("", botID, channelChatID, 0) {
+		t.Fatal("aggregate source 351 should match the Bot-owned channel")
+	}
+	if !introFeeAggregateBotSourceMatchesChannel(map[string]struct{}{canonicalCollectSourceChatID(channelChatID): {}}, channelChatID) {
+		t.Fatal("Bot cache ownership should bind the canonical channel")
+	}
+}
