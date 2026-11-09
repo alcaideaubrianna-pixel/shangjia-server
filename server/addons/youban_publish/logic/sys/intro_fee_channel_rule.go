@@ -511,8 +511,12 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 			}
 		}
 		if !sourceFound && aggregateBotSource {
-			_, sourceFound = candidateChats[canonicalCollectSourceChatID(row.ChannelId)]
-			if sourceFound {
+			// An aggregate BOT source has no source_chat_id by design. Its
+			// ownership is established by the same bounded BOT cache used to
+			// build the candidate list, rather than by the request's botId
+			// (which is zero for the rule management view).
+			if introFeeAggregateBotSourceMatchesChannel(candidateChats, row.ChannelId) {
+				sourceFound = true
 				sourceEnabled = true
 			}
 		}
@@ -578,6 +582,14 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 		}
 	}
 	return pageRows, total, nil
+}
+
+func introFeeAggregateBotSourceMatchesChannel(candidateChats map[string]struct{}, channelID string) bool {
+	if len(candidateChats) == 0 || strings.TrimSpace(channelID) == "" {
+		return false
+	}
+	_, ok := candidateChats[canonicalCollectSourceChatID(channelID)]
+	return ok
 }
 
 func fillCollectChannelProfileCounts(ctx context.Context, tenantID, accountID, ruleID int64, rows []*sysin.IntroFeeChannelRuleItem) error {

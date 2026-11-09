@@ -43,3 +43,13 @@ func TestIntroFeeCollectionSourceMatchesChannel(t *testing.T) {
 		})
 	}
 }
+
+func TestIntroFeeAggregateBotSourceMatchesCanonicalCacheChannel(t *testing.T) {
+	candidates := map[string]struct{}{"3998084277": {}}
+	if !introFeeAggregateBotSourceMatchesChannel(candidates, "-1003998084277") {
+		t.Fatal("aggregate BOT source should match the canonical cached channel")
+	}
+	if introFeeAggregateBotSourceMatchesChannel(candidates, "-1001234567890") {
+		t.Fatal("aggregate BOT source must not match an uncached channel")
+	}
+}
