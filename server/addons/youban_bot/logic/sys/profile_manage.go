@@ -1416,9 +1416,10 @@ func (s *sSysBot) sendProfileByNo(ctx context.Context, botId int64, chatId strin
 		g.Log().Warning(ctx, "Bot资料预览读取失败", g.Map{"botId": botId, "chatId": chatId, "tenantId": account.TenantId, "accountId": account.AccountId, "accountType": account.AccountType, "profileNo": no, "err": err})
 		return s.replyBotError(ctx, botId, chatId, "资料管理", err)
 	}
-	if profileCardPurpose(account, note, "send") == "readonly" {
-		return s.sendProfileCard(ctx, botId, chatId, note, "readonly")
-	}
+	// A cross-tenant friend-follow result is read-only for management actions,
+	// but an explicitly requested preview must still include its published
+	// media. Keep the card markup read-only; only the preview delivery is
+	// allowed to proceed through the normal media sender.
 	return s.sendProfileContent(ctx, botId, chatId, note)
 }
 
