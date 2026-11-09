@@ -54,6 +54,13 @@ func (c *cOpenProfile) List(ctx context.Context, req *open.ListReq) (res *open.L
 	if feed == "" {
 		feed = "latest"
 	}
+	// A total count turns keyword searches and deep pages into a full-range
+	// scan. Keep the list endpoint fast: only allow the count on the first
+	// unfiltered page; callers that need a count should use a dedicated stats
+	// request once one is available.
+	if req.WithTotal == 1 && (strings.TrimSpace(req.Keyword) != "" || req.Page > 1) {
+		req.WithTotal = 0
+	}
 	if in.Keyword == "" && (feed == "hot" || feed == "recommended") {
 		in.RankProfileIds, err = addonService.OpenAccess().RankedProfileIds(
 			ctx,
