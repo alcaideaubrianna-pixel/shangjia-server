@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -81,8 +82,9 @@ func initOTelWithConfig(ctx context.Context, endpointKey, secureKey, serviceKey 
 	if ratio <= 0 || ratio > 1 {
 		ratio = 0.15
 	}
+	redisRatio := telemetryRatioFromEnv("OTEL_REDIS_SAMPLE_RATIO", 0.2)
 	traceProvider := sdktrace.NewTracerProvider(
-		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(ratio))),
+		sdktrace.WithSampler(newTelemetrySampler(ratio, redisRatio)),
 		sdktrace.WithBatcher(traceExporter),
 		sdktrace.WithResource(res),
 	)
@@ -101,6 +103,45 @@ func initOTelWithConfig(ctx context.Context, endpointKey, secureKey, serviceKey 
 	startRuntimeMetrics(ctx, metricProvider)
 	g.Log().Infof(ctx, "通用 OpenTelemetry 已启用 endpoint:%s service:%s role:%s", endpoint, serviceName, strings.Join(runrole.Roles(ctx), ","))
 	return nil
+}
+
+// telemetrySampler keeps the normal trace sampling policy while reducing the
+// volume of high-frequency Redis client spans. Redis calls are still traced
+// with the same trace context, but only 20% are exported by default. The
+// ratio is controlled by OTEL_REDIS_SAMPLE_RATIO.
+type telemetrySampler struct {
+	parentBased sdktrace.Sampler
+	redis       sdktrace.Sampler
+}
+
+func newTelemetrySampler(ratio, redisRatio float64) sdktrace.Sampler {
+	return telemetrySampler{
+		parentBased: sdktrace.ParentBased(sdktrace.TraceIDRatioBased(ratio)),
+		redis:       sdktrace.TraceIDRatioBased(redisRatio),
+	}
+}
+
+func (s telemetrySampler) ShouldSample(p sdktrace.SamplingParameters) sdktrace.SamplingResult {
+	if isRedisSpan(p.Name) {
+		return s.redis.ShouldSample(p)
+	}
+	return s.parentBased.ShouldSample(p)
+}
+
+func (s telemetrySampler) Description() string {
+	return "parent-based trace sampling with Redis spans sampled at 20%"
+}
+
+func isRedisSpan(name string) bool {
+	return strings.HasPrefix(name, "Redis.") || strings.HasPrefix(name, "redis.")
+}
+
+func telemetryRatioFromEnv(key string, fallback float64) float64 {
+	ratio, err := strconv.ParseFloat(strings.TrimSpace(os.Getenv(key)), 64)
+	if err != nil || ratio <= 0 || ratio > 1 {
+		return fallback
+	}
+	return ratio
 }
 
 func normalizeOTLPEndpoint(endpoint string) string {
