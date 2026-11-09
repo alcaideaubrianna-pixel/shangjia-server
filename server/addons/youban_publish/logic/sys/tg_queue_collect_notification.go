@@ -30,6 +30,10 @@ func (s *sSysPublish) collectDiscoveryNotificationSent(ctx context.Context, tena
 	return err == nil && !value.IsNil()
 }
 
+func shouldQueueCollectDiscoveryNotification(relationEnabled, notificationSent bool) bool {
+	return relationEnabled && !notificationSent
+}
+
 type collectChannelPurgeNotification struct {
 	RuleOnly     bool    `json:"ruleOnly,omitempty"`
 	Title        string  `json:"title"`

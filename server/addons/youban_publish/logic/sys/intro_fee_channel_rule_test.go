@@ -82,3 +82,24 @@ func TestCollectDiscoveryNotificationKeyCanonicalizesChat(t *testing.T) {
 		t.Fatalf("discovery notification key is not canonical: %q != %q", first, second)
 	}
 }
+
+func TestShouldQueueCollectDiscoveryNotification(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		relation   bool
+		sent       bool
+		wantQueued bool
+	}{
+		{name: "new approved relation", relation: true, sent: false, wantQueued: true},
+		{name: "existing relation missed notification", relation: true, sent: false, wantQueued: true},
+		{name: "already notified", relation: true, sent: true, wantQueued: false},
+		{name: "disabled relation", relation: false, sent: false, wantQueued: false},
+		{name: "rejected relation", relation: false, sent: true, wantQueued: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := shouldQueueCollectDiscoveryNotification(test.relation, test.sent); got != test.wantQueued {
+				t.Fatalf("queue=%t want=%t", got, test.wantQueued)
+			}
+		})
+	}
+}
