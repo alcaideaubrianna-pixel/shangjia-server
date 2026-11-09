@@ -66,6 +66,21 @@ func TestAIOpsRepairActionsIncludeProfileAndVerificationOperations(t *testing.T)
 	}
 }
 
+func TestSourceReplayEventIDsPrefersExplicitCollectorIDs(t *testing.T) {
+	in := &sysin.AIOpsRepairPlanInp{EventIds: []int64{1, 2}, CollectorEventIds: []int64{9, 10}}
+	got := sourceReplayEventIDs(in)
+	if len(got) != 2 || got[0] != 9 || got[1] != 10 {
+		t.Fatalf("explicit collector event IDs were not preferred: %v", got)
+	}
+}
+
+func TestSourceReplayEventIDsAcceptsLegacyEventIDs(t *testing.T) {
+	got := sourceReplayEventIDs(&sysin.AIOpsRepairPlanInp{EventIds: []int64{28601776, 28601785}})
+	if len(got) != 2 || got[0] != 28601776 || got[1] != 28601785 {
+		t.Fatalf("legacy event IDs were not mapped: %v", got)
+	}
+}
+
 func TestPreviewMissingVerificationRejectsUnboundedRange(t *testing.T) {
 	service := NewSysPublish()
 	_, _, _, err := service.previewAIOpsMissingVerificationEvents(t.Context(), &sysin.AIOpsRepairPlanInp{

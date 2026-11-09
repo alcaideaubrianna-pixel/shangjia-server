@@ -76,7 +76,12 @@ func (s *sSysPublish) AIOpsCreateRepairPlan(ctx context.Context, in *sysin.AIOps
 		tenantID, accountID                                     int64
 	)
 	if action == "replay_bot_source_updates" {
-		collectorEventIDs, replayPreview, tenantID, accountID, err = s.previewAIOpsBotSourceReplay(ctx, in.SourceId, in.CollectorEventIds, in.ChatId, in.StartMessageId, in.EndMessageId, limit)
+		// Older MCP clients send the generic eventIds field. Treat it as
+		// collectorEventIds for this action so an explicitly bounded replay is
+		// not rejected merely because the client has not adopted the newer
+		// field name yet.
+		replayEventIDs := sourceReplayEventIDs(in)
+		collectorEventIDs, replayPreview, tenantID, accountID, err = s.previewAIOpsBotSourceReplay(ctx, in.SourceId, replayEventIDs, in.ChatId, in.StartMessageId, in.EndMessageId, limit)
 	} else {
 		eventIDs, verifyEventIDs, profileIDs, err = s.previewAIOpsRepairTargets(ctx, action, in, limit)
 		tenantID, accountID = in.TenantId, in.AccountId
@@ -115,6 +120,18 @@ func (s *sSysPublish) AIOpsCreateRepairPlan(ctx context.Context, in *sysin.AIOps
 		CollectorEventIds: collectorEventIDs, ReplayPreview: replayPreview,
 		ConfirmToken: token, ExpiresAt: expiresAt.Format(time.RFC3339),
 	}, nil
+}
+
+// sourceReplayEventIDs keeps the source replay contract compatible with older
+// MCP callers while preferring the explicit collectorEventIds field.
+func sourceReplayEventIDs(in *sysin.AIOpsRepairPlanInp) []int64 {
+	if in == nil {
+		return nil
+	}
+	if len(in.CollectorEventIds) > 0 {
+		return in.CollectorEventIds
+	}
+	return in.EventIds
 }
 
 // previewAIOpsBotSourceReplay 统一解析明确ID、频道或消息区间，生成有界重放清单。
