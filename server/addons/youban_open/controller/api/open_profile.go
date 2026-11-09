@@ -61,18 +61,12 @@ func (c *cOpenProfile) List(ctx context.Context, req *open.ListReq) (res *open.L
 	if req.WithTotal == 1 && (strings.TrimSpace(req.Keyword) != "" || req.Page > 1) {
 		req.WithTotal = 0
 	}
-	if in.Keyword == "" && (feed == "hot" || feed == "recommended") {
-		in.RankProfileIds, err = addonService.OpenAccess().RankedProfileIds(
-			ctx,
-			opencontext.AppId(ctx),
-			strings.TrimSpace(req.ActorId),
-			feed,
-			500,
-		)
-		if err != nil {
-			return nil, err
-		}
-	}
+	// Hot/recommended ordering is provided directly by the indexed profile
+	// stats join in the content query. Do not materialize up to 500 ranked IDs
+	// and feed them back through a CASE expression for every request.
+	// Personalised ranking is still recorded asynchronously through the normal
+	// interaction pipeline and must not block the list response.
+	in.RankProfileIds = nil
 	in.Feed, in.ActorId, in.WithTotal = feed, strings.TrimSpace(req.ActorId), req.WithTotal
 	list, total, err := service.SysContent().ListProfiles(scopedCtx, &in)
 	if err != nil {
