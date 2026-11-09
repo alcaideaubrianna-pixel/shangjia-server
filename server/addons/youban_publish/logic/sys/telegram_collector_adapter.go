@@ -1266,7 +1266,7 @@ func (s *sSysPublish) ingestCollectorBotDelivery(ctx context.Context, delivery *
 	// Synchronize it before any rule-list/cache lookup so channel renames are
 	// visible even when this delivery does not pass a collection rule.
 	s.syncBotChannelMetadataFromUpdate(ctx, source["tenant_id"].Int64(), source["bot_id"].Int64(), delivery.RawUpdate)
-	blocked, err := s.collectMessageFromAccountPublishChannel(ctx, source["tenant_id"].Int64(), 0, delivery.SourceChatID)
+	blocked, err := s.collectMessageFromAccountPublishChannel(ctx, source["tenant_id"].Int64(), 0, delivery.SourceChatID, delivery.SourceMessageID)
 	if err != nil {
 		return gerror.Wrap(err, "检查Bot采集上架频道过滤失败")
 	}
@@ -1587,7 +1587,7 @@ func (s *sSysPublish) ingestCollectorAccountDelivery(ctx context.Context, delive
 	if err := s.ensureAccountCollectChannelRelation(ctx, delivery); err != nil {
 		return err
 	}
-	blocked, err := s.collectMessageFromAccountPublishChannel(ctx, delivery.TenantID, delivery.TgAccountID, delivery.SourceChatID)
+	blocked, err := s.collectMessageFromAccountPublishChannel(ctx, delivery.TenantID, delivery.TgAccountID, delivery.SourceChatID, delivery.SourceMessageID)
 	if err != nil {
 		return gerror.Wrap(err, "检查协议号采集上架频道过滤失败")
 	}

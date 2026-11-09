@@ -19,9 +19,22 @@ const (
 	collectPublishChannelCacheKey = "youban_publish:collect:publish_channels"
 )
 
-func (s *sSysPublish) collectMessageFromAccountPublishChannel(ctx context.Context, tenantId, tgAccountId int64, chatId string) (bool, error) {
+// collectMessageFromAccountPublishChannel 仅拦截已确认由本系统发送的消息，
+// 允许同一频道中的其他原始消息继续进入代理采集规则。
+func (s *sSysPublish) collectMessageFromAccountPublishChannel(ctx context.Context, tenantId, tgAccountId int64, chatId string, messageID ...int64) (bool, error) {
 	chatId = normalizeTelegramChannelChatID(chatId)
 	if tenantId <= 0 || chatId == "" {
+		return false, nil
+	}
+	if len(messageID) > 0 && messageID[0] > 0 {
+		count, err := g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).
+			Where("target_chat_id", chatId).Where("tg_message_id", messageID[0]).Count()
+		if err != nil {
+			return false, err
+		}
+		if count > 0 {
+			return true, nil
+		}
 		return false, nil
 	}
 	version := s.collectSourceCacheVersion(ctx)
