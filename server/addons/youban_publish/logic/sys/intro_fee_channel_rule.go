@@ -330,6 +330,13 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 	if err := cacheModel.Fields("chat_id,chat_title,chat_username,last_message_at").OrderDesc("last_message_at").Limit(candidateLimit).Scan(&candidates); err != nil {
 		return nil, 0, err
 	}
+	// Keep the cache scope available for the binding check below. Aggregate BOT
+	// sources intentionally have no source_chat_id; their ownership is proven
+	// by the bound bot seeing this exact chat in bot_channel_cache.
+	candidateChats := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		candidateChats[canonicalCollectSourceChatID(candidate.ChatId)] = struct{}{}
+	}
 	var canonicalCandidates []struct {
 		ChatId       string      `orm:"chat_id"`
 		ChatTitle    string      `orm:"chat_title"`
@@ -501,6 +508,12 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 			if introFeeCollectionSourceMatchesChannel(source.ChatId, source.BotId, row.ChannelId, row.BotId) {
 				sourceFound = true
 				sourceEnabled = sourceEnabled || source.Status == 1 && source.CollectEnabled == 1
+			}
+		}
+		if !sourceFound && aggregateBotSource {
+			_, sourceFound = candidateChats[canonicalCollectSourceChatID(row.ChannelId)]
+			if sourceFound {
+				sourceEnabled = true
 			}
 		}
 		if !sourceFound {
