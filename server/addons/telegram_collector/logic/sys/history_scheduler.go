@@ -85,7 +85,10 @@ func (s *sCollector) dispatchHistoryBatch(ctx context.Context) error {
 		}
 		accountID := row["account_id"].Int64()
 		sourceID := row["source_id"].Int64()
-		if accountID <= 0 || sourceID <= 0 || accountCounts[accountID] >= accountLimit || sourceCounts[sourceID] >= sourceLimit {
+		// Bot deliveries intentionally have account_id=0. They are scoped by
+		// source_id and must not be dropped as invalid account tasks; only
+		// protocol-account deliveries participate in account-level limiting.
+		if !historyDeliveryWithinQuota(accountID, sourceID, accountCounts, sourceCounts, accountLimit, sourceLimit) {
 			continue
 		}
 		priority := row[columns.Priority].Int()
@@ -108,7 +111,9 @@ func (s *sCollector) dispatchHistoryBatch(ctx context.Context) error {
 		_, _ = dao.TgCollectorDelivery.Ctx(ctx).WherePri(id).
 			Where(columns.Status, sysin.DeliveryStatusPending).
 			Data(g.Map{"dispatch_at": gtime.Now(), "dispatch_owner": "", "dispatch_until": nil}).Update()
-		accountCounts[accountID]++
+		if accountID > 0 {
+			accountCounts[accountID]++
+		}
 		sourceCounts[sourceID]++
 		selected++
 	}
@@ -162,4 +167,11 @@ func historySchedulerBatchSize(ctx context.Context) int {
 		value = 1000
 	}
 	return value
+}
+
+func historyDeliveryWithinQuota(accountID, sourceID int64, accountCounts, sourceCounts map[int64]int, accountLimit, sourceLimit int) bool {
+	if sourceID <= 0 || sourceCounts[sourceID] >= sourceLimit {
+		return false
+	}
+	return accountID <= 0 || accountCounts[accountID] < accountLimit
 }
