@@ -37,6 +37,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
 	"github.com/gogf/gf/v2/os/gtime"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -680,13 +681,21 @@ func (s *sSysContent) buildProfileListFromRows(ctx context.Context, rows []conte
 	for _, row := range rows {
 		profileIds = append(profileIds, row.Id)
 	}
-	coverMap, err := s.getProfileCoverMap(ctx, profileIds)
-	if err != nil {
-		return
-	}
-	mediaMap, err := s.getProfileMediaMap(ctx, profileIds, s.isRequestVip(ctx))
-	if err != nil {
-		return
+	var coverMap map[int64]string
+	var mediaMap map[int64][]*sysin.ContentMediaModel
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.Go(func() error {
+		var loadErr error
+		coverMap, loadErr = s.getProfileCoverMap(groupCtx, profileIds)
+		return loadErr
+	})
+	group.Go(func() error {
+		var loadErr error
+		mediaMap, loadErr = s.getProfileMediaMap(groupCtx, profileIds, s.isRequestVip(ctx))
+		return loadErr
+	})
+	if err = group.Wait(); err != nil {
+		return nil, err
 	}
 	regionDirectory := loadContentRegionDirectory(ctx)
 	for _, row := range rows {

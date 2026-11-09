@@ -7,6 +7,8 @@ INSERT INTO "hg_admin_role_menu" ("role_id","menu_id") SELECT r."id",m."id" FROM
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE INDEX IF NOT EXISTS "idx_content_profile_age_active" ON "hg_content_profile" ("age") WHERE "deleted_at" IS NULL AND "age" > 0;
 CREATE INDEX IF NOT EXISTS "idx_content_profile_plain_text_trgm" ON "hg_content_profile" USING gin ("plain_text" gin_trgm_ops) WHERE "deleted_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_content_profile_summary_trgm" ON "hg_content_profile" USING gin ("summary" gin_trgm_ops) WHERE "deleted_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_content_profile_profile_no_trgm" ON "hg_content_profile" USING gin ("profile_no" gin_trgm_ops) WHERE "deleted_at" IS NULL;
 CREATE INDEX IF NOT EXISTS "idx_content_profile_title_trgm" ON "hg_content_profile" USING gin ("title" gin_trgm_ops) WHERE "deleted_at" IS NULL;
 ALTER TABLE "hg_youban_publish_cms_app" ADD COLUMN IF NOT EXISTS "review_mode" varchar(32) NOT NULL DEFAULT 'review_required';
 ALTER TABLE "hg_youban_publish_cms_app" ALTER COLUMN "review_mode" SET DEFAULT 'review_required';
