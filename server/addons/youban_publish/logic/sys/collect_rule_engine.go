@@ -683,6 +683,18 @@ func applyCollectIntroFeeSuffix(text, original, suffix string) string {
 			feeTail = normalizedLine[feeIndex:]
 		}
 		complexFormat := fields.ForeignAmount == "" && (strings.ContainsAny(feeTail, ",，.") || collectMultiPricePattern.MatchString(feeTail))
+		if fields.FirstAmount == "" {
+			// Some forwards contain only a city/name after the fee label, often
+			// separated by zero-width characters ("介绍费：秦皇岛 Gus...").
+			// Do not publish that opaque source text; normalize it to the
+			// configured channel suffix.
+			prefix := ""
+			if feeIndex > 0 {
+				prefix = strings.TrimSpace(normalizedLine[:feeIndex])
+			}
+			lines[index] = strings.TrimSpace(strings.TrimSpace(prefix) + " 介绍费 " + suffix)
+			continue
+		}
 		if fields.FirstAmount == "" || complexAmount || complexFormat {
 			if !strings.HasSuffix(strings.TrimSpace(line), suffix) {
 				lines[index] = strings.TrimRightFunc(line, unicode.IsSpace) + " " + suffix

@@ -20,7 +20,11 @@ def format_line(line, suffix):
     elif nums:
         out = f'介绍费 {nums[0]} {suffix}'
     else:
-        out = clean if clean.endswith(suffix) else clean.rstrip() + ' ' + suffix
+        # Fee rows without an amount may contain a city/name plus invisible
+        # Telegram format characters. Keep only the canonical fee marker and
+        # configured channel suffix.
+        prefix = clean[:clean.find(FEE.search(clean).group(0))].strip()
+        out = f'{prefix} 介绍费 {suffix}'.strip()
     return out, out != line
 
 def main():

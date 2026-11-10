@@ -737,6 +737,14 @@ func TestBuildCollectRuleDecisionKeepsInlineIntroduction(t *testing.T) {
 	}
 }
 
+func TestBuildCollectRuleDecisionCleansTextOnlyFeeRow(t *testing.T) {
+	event := gdb.Record{"raw_text": gvar.New("介绍费：秦皇岛\u2063\u200b Gus\ufeff"), "media_count": gvar.New(1)}
+	rule := gdb.Record{"truncate_intro_fee_enabled": gvar.New(true), "intro_fee_suffix": gvar.New("甜心"), "delete_lines": gvar.New([]string{}), "delete_texts": gvar.New([]string{}), "replace_from": gvar.New([]string{}), "replace_to": gvar.New([]string{})}
+	if got, want := buildCollectRuleDecision(event, nil, rule).Text, "介绍费 甜心"; got != want {
+		t.Fatalf("text-only fee decision = %q, want %q", got, want)
+	}
+}
+
 func TestBuildCollectRuleDecisionCleansLeadingMaterialTitleWithSuffix(t *testing.T) {
 	raw := "昵称: 秋秋\n年龄:19\n身高:166\n体重:99\n介绍费9999杰尼龟"
 	event := gdb.Record{"raw_text": gvar.New(raw), "media_count": gvar.New(1)}
