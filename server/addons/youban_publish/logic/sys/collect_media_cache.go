@@ -900,7 +900,33 @@ func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, even
 }
 
 func (s *sSysPublish) reuseCollectMediaCache(ctx context.Context, row *collectEventMediaRow) (bool, error) {
-	if row == nil || strings.TrimSpace(row.SourceChatId) == "" || row.SourceMessageId <= 0 {
+	if row == nil {
+		return false, nil
+	}
+	// Telegram Bot file_id is stable for the same bot/media. Check this
+	// durable key before requiring source chat/message metadata and before the
+	// owner quota is acquired. Account gotd references are scoped by chat and
+	// therefore naturally fall through to the source-message reuse path below.
+	if sourceFileID := strings.TrimSpace(row.SourceFileId); sourceFileID != "" && !strings.HasPrefix(sourceFileID, "gotd:") {
+		cols := pdao.YoubanPublishCollectEventMedia.Columns()
+		candidate, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
+			Fields(cols.FileUrl, cols.StoragePath, cols.PosterUrl, cols.MetaJson, "file_md5", "file_phash").
+			Where(cols.TenantId, row.TenantId).
+			Where(cols.SourceFileId, sourceFileID).
+			Where(cols.MediaType, row.MediaType).
+			Where(cols.CacheStatus, collectMediaCacheReady).
+			Where("(file_url <> '' OR storage_path <> '')").
+			WhereNot(cols.Id, row.Id).
+			OrderDesc(cols.UpdatedAt).One()
+		if err != nil {
+			return false, gerror.Wrap(err, "按Telegram file_id读取媒体复用缓存失败")
+		}
+		if !candidate.IsEmpty() && s.applyCollectMediaCacheReuse(ctx, row, candidate) {
+			g.Log().Infof(ctx, "按Telegram file_id复用采集媒体缓存 mediaId:%d sourceFileId:%s", row.Id, sourceFileID)
+			return true, nil
+		}
+	}
+	if strings.TrimSpace(row.SourceChatId) == "" || row.SourceMessageId <= 0 {
 		return false, nil
 	}
 	if reused, err := s.reusePublishedCollectMedia(ctx, row); reused || err != nil {
@@ -958,6 +984,24 @@ func (s *sSysPublish) reuseCollectMediaCache(ctx context.Context, row *collectEv
 		return true, nil
 	}
 	return false, nil
+}
+
+func (s *sSysPublish) applyCollectMediaCacheReuse(ctx context.Context, row *collectEventMediaRow, candidate gdb.Record) bool {
+	if row == nil || candidate.IsEmpty() {
+		return false
+	}
+	fileURL := firstNonEmpty(candidate["file_url"].String(), row.FileUrl)
+	storagePath := firstNonEmpty(candidate["storage_path"].String(), row.StoragePath)
+	if fileURL == "" && storagePath == "" {
+		return false
+	}
+	data := g.Map{"file_url": fileURL, "storage_path": storagePath, "poster_url": candidate["poster_url"].String(), "meta_json": candidate["meta_json"].String(), "cache_status": collectMediaCacheReady, "error_message": "", "file_md5": candidate["file_md5"].String(), "file_phash": candidate["file_phash"].String(), "updated_at": gtime.Now()}
+	if _, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).Where("id", row.Id).Data(data).Update(); err != nil {
+		return false
+	}
+	row.FileUrl, row.StoragePath, row.PosterUrl = fileURL, storagePath, candidate["poster_url"].String()
+	row.MetaJson, row.FileMd5, row.FilePhash, row.CacheStatus = candidate["meta_json"].String(), candidate["file_md5"].String(), candidate["file_phash"].String(), collectMediaCacheReady
+	return true
 }
 
 func (s *sSysPublish) updateCollectEventMediaItems(ctx context.Context, rows []*collectEventMediaRow, items []collectMediaItem) (bool, error) {
