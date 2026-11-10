@@ -19,6 +19,7 @@ import (
 )
 
 var (
+	feiniuSchemaInit            schemaInitializer
 	syncExistingConfigCronsMu   sync.Mutex
 	syncExistingConfigCronsDone bool
 )
@@ -28,6 +29,21 @@ func ensureTables(ctx context.Context) error {
 }
 
 func ensureTablesWithCron(ctx context.Context, syncCrons bool) error {
+	if err := ensureSchemaOnce(ctx); err != nil {
+		return err
+	}
+	if syncCrons {
+		return syncExistingConfigCronsIfNeeded(ctx)
+	}
+	return nil
+}
+
+// Cache only successful schema initialization. A failed initialization remains retryable.
+func ensureSchemaOnce(ctx context.Context) error {
+	return feiniuSchemaInit.ensure(ctx, initializeSchema)
+}
+
+func initializeSchema(ctx context.Context) error {
 	installSQL := mysqlInstallSQL
 	if strings.ToLower(g.DB().GetConfig().Type) == consts.DBPgsql {
 		installSQL = pgsqlInstallSQL
@@ -46,9 +62,6 @@ func ensureTablesWithCron(ctx context.Context, syncCrons bool) error {
 	}
 	if err := ensureDefaultCron(ctx); err != nil {
 		return err
-	}
-	if syncCrons {
-		return syncExistingConfigCronsIfNeeded(ctx)
 	}
 	return nil
 }

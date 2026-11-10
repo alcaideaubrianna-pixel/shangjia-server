@@ -32,8 +32,8 @@ type dailyReportDeliveryRow struct {
 func (s *sSysPublish) ProcessDailyReports(ctx context.Context, now time.Time) error {
 	// Keep the generation/delivery coordinator bounded so a backlog cannot hold
 	// the cron worker indefinitely. Lease duration exceeds this deadline.
-	ctx, cancel := context.WithTimeout(ctx, 50*time.Second)
-	defer cancel()
+	generationCtx, cancelGeneration := context.WithTimeout(ctx, 30*time.Second)
+	defer cancelGeneration()
 	loc, err := time.LoadLocation("Asia/Shanghai")
 	if err != nil {
 		return err
@@ -42,7 +42,7 @@ func (s *sSysPublish) ProcessDailyReports(ctx context.Context, now time.Time) er
 	budget := 100
 	var firstError error
 	for day := 1; day <= 7 && budget > 0; day++ {
-		generated, generationErr := s.generateDailyReportBatch(ctx, today.AddDate(0, 0, -day), budget)
+		generated, generationErr := s.generateDailyReportBatch(generationCtx, today.AddDate(0, 0, -day), budget)
 		if generationErr != nil {
 			firstError = generationErr
 			break
@@ -51,12 +51,22 @@ func (s *sSysPublish) ProcessDailyReports(ctx context.Context, now time.Time) er
 	}
 	// A generation failure must not prevent already-persisted reports from
 	// being delivered, nor should one failed delivery prevent retention cleanup.
-	if deliveryErr := s.deliverDailyReports(ctx, now, 50); deliveryErr != nil && firstError == nil {
+	cancelGeneration()
+	deliveryCtx, cancelDelivery := context.WithTimeout(ctx, 15*time.Second)
+	defer cancelDelivery()
+	if deliveryErr := s.deliverDailyReports(deliveryCtx, now, 50); deliveryErr != nil && firstError == nil {
 		firstError = deliveryErr
 	}
-	_, err = pdao.YoubanPublishDailyReport.Ctx(ctx).WhereLT("report_date", dailyReportOldestDate(today, 7)).Delete()
+	cancelDelivery()
+	cleanupCtx, cancelCleanup := context.WithTimeout(ctx, 5*time.Second)
+	defer cancelCleanup()
+	_, err = pdao.YoubanPublishDailyReport.Ctx(cleanupCtx).WhereLT("report_date", dailyReportOldestDate(today, 7)).Delete()
 	if err != nil {
-		return gerror.Wrap(err, "清理过期日报失败")
+		cleanupErr := gerror.Wrap(err, "清理过期日报失败")
+		if firstError != nil {
+			return gerror.Wrapf(firstError, "日报处理失败，且清理失败: %v", cleanupErr)
+		}
+		return cleanupErr
 	}
 	return firstError
 }

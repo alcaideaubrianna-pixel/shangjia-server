@@ -25,7 +25,6 @@ const (
 	mediaProcessingRetry      = "retry"
 	mediaProcessMaxAttempts   = 3
 	mediaProcessTaskTimeout   = 10 * time.Minute
-	mediaProcessRecoveryEvery = time.Minute
 	telegramMediaReadyRetry   = time.Minute
 )
 
@@ -216,40 +215,6 @@ func (s *sSysPublish) wakeProfileTelegramJobs(ctx context.Context, profileId int
 		}
 	}
 	return nil
-}
-
-func (s *sSysPublish) recoverMediaProcessTasks(ctx context.Context) {
-	var rows []struct {
-		Id int64 `json:"id"`
-	}
-	cutoff := gtime.Now().Add(-time.Minute)
-	processingCutoff := gtime.Now().Add(-mediaProcessTaskTimeout - time.Minute)
-	if err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
-		Where("((processing_status IN (?, ?) AND updated_at < ?) OR (processing_status = ? AND updated_at < ?))",
-			mediaProcessingUploaded, mediaProcessingRetry, cutoff, mediaProcessingProcessing, processingCutoff).
-		WhereNull("deleted_at").OrderAsc("updated_at").Fields("id").Limit(200).Scan(&rows); err != nil {
-		g.Log().Warningf(ctx, "恢复媒体异步处理任务查询失败 err:%+v", err)
-		return
-	}
-	for _, row := range rows {
-		if err := s.enqueueMediaProcess(ctx, row.Id, 0); err != nil {
-			g.Log().Warningf(ctx, "恢复媒体异步处理任务入队失败 media_id:%d err:%+v", row.Id, err)
-		}
-	}
-}
-
-func (s *sSysPublish) runMediaProcessRecovery(ctx context.Context) {
-	s.recoverMediaProcessTasks(ctx)
-	ticker := time.NewTicker(mediaProcessRecoveryEvery)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			s.recoverMediaProcessTasks(ctx)
-		}
-	}
 }
 
 func (s *sSysPublish) profileMediaReady(ctx context.Context, profileId int64) (bool, error) {

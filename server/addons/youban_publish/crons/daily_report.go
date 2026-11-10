@@ -19,7 +19,7 @@ func (c *cDailyReport) Execute(ctx context.Context, parser *cron.Parser) error {
 	if !service.SysPublish().RuntimeRoleEnabled(ctx, "scheduler") {
 		return nil
 	}
-	if err := service.SysPublish().ProcessDailyReports(ctx, time.Now()); err != nil {
+	if err := withDailyReportLease(ctx, func() error { return service.SysPublish().ProcessDailyReports(ctx, time.Now()) }); err != nil {
 		parser.Logger.Warningf(ctx, "处理每日推送报告失败 err:%+v", err)
 		return err
 	}

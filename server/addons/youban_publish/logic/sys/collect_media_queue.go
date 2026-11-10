@@ -85,50 +85,31 @@ func (s *sSysPublish) enqueueMediaProcess(ctx context.Context, mediaId int64, de
 	if mediaId <= 0 {
 		return nil
 	}
-	client, err := s.telegramQueueClient(ctx)
-	if err != nil {
-		return err
-	}
-	inspector := asynq.NewInspector(telegramQueueRedisOpt(ctx))
-	defer inspector.Close()
-	return enqueueMediaProcessTask(ctx, client, inspector, mediaId, delay)
+	// PostgreSQL trigger also records first-time uploads in the media transaction.
+	// Explicit requests cover repairs/projection retries and coalesce pending work.
+	_, err := g.DB().GetValue(ctx, "SELECT ybp_request_media_process(?, ?)", mediaId, delay.Milliseconds())
+	return err
 }
 
-func enqueueMediaProcessTask(ctx context.Context, client *asynq.Client, inspector *asynq.Inspector, mediaId int64, delay time.Duration) error {
+func enqueueMediaProcessTask(ctx context.Context, client *asynq.Client, mediaId int64, taskID string, delay time.Duration) error {
 	body, err := json.Marshal(mediaProcessQueuePayload{MediaId: mediaId, RetryPolicyVersion: 1})
 	if err != nil {
 		return err
 	}
-	task := asynq.NewTask(tgTaskTypeMediaProcess, body)
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameMediaProcess),
-		asynq.MaxRetry(mediaProcessMaxAttempts - 1),
-		asynq.Timeout(mediaProcessTaskTimeout),
+		asynq.Queue(tgQueueNameMediaProcess), asynq.MaxRetry(mediaProcessMaxAttempts - 1),
+		asynq.Timeout(mediaProcessTaskTimeout), asynq.Retention(7 * 24 * time.Hour),
+		asynq.TaskID(taskID),
 	}
 	if delay > 0 {
 		options = append(options, asynq.ProcessIn(delay))
 	}
-	// Fixed IDs deduplicate active/retrying tasks. Archived generations are
-	// retained for auditing; repairs use a new ID without deleting old tasks.
-	baseID := fmt.Sprintf("media-process:%d", mediaId)
-	for generation := 0; generation < 100; generation++ {
-		taskID := baseID
-		if generation > 0 {
-			taskID = fmt.Sprintf("%s:repair:%d", baseID, generation)
-		}
-		_, err = client.EnqueueContext(ctx, task, append(options, asynq.TaskID(taskID))...)
-		if !errors.Is(err, asynq.ErrTaskIDConflict) {
-			return err
-		}
-		info, lookupErr := inspector.GetTaskInfo(tgQueueNameMediaProcess, taskID)
-		if lookupErr != nil {
-			return fmt.Errorf("读取媒体处理冲突任务失败: %w", lookupErr)
-		}
-		if info.State != asynq.TaskStateArchived && info.State != asynq.TaskStateCompleted {
-			return nil
-		}
+	_, err = client.EnqueueContext(ctx, asynq.NewTask(tgTaskTypeMediaProcess, body), options...)
+	// Redelivery of the same intent never resets retry counts or revives archives.
+	if errors.Is(err, asynq.ErrTaskIDConflict) {
+		return nil
 	}
-	return fmt.Errorf("媒体 %d 处理任务历史轮次过多，需要人工检查", mediaId)
+	return err
 }
 
 func decodeMediaProcessQueuePayload(task *asynq.Task) (mediaProcessQueuePayload, error) {

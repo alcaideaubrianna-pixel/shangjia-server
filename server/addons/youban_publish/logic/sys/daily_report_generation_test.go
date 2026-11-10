@@ -28,10 +28,11 @@ func TestDailyReportGenerationLocalPostgres(t *testing.T) {
 	err := g.DB().Transaction(context.Background(), func(ctx context.Context, tx gdb.TX) error {
 		for _, sql := range []string{
 			`CREATE TEMP TABLE hg_youban_publish_daily_report(id bigserial PRIMARY KEY,tenant_id bigint,account_id bigint,report_date date,collected_total int DEFAULT 0,publish_success int DEFAULT 0,publish_failed int DEFAULT 0,publish_processing int DEFAULT 0,source_breakdown_json text,generated_at timestamp,notify_status text DEFAULT 'pending',notify_retry_count int DEFAULT 0,notify_next_retry_at timestamp,notify_lease_until timestamp,notify_token text DEFAULT '',notify_cursor int DEFAULT 0,notify_error text DEFAULT '',UNIQUE(tenant_id,account_id,report_date)) ON COMMIT DROP`,
+			`CREATE TEMP TABLE hg_youban_publish_task_batch(id bigint,tenant_id bigint,account_id bigint,created_at timestamp) ON COMMIT DROP`,
 			`CREATE TEMP TABLE hg_youban_publish_account(id bigint,tenant_id bigint,account_type text,status int,created_at timestamp,deleted_at timestamp) ON COMMIT DROP`,
 			`CREATE TEMP TABLE hg_youban_publish_account_setting(id bigint,tenant_id bigint,account_id bigint,daily_report_enabled int,deleted_at timestamp) ON COMMIT DROP`,
 			`CREATE TEMP TABLE hg_youban_publish_collect_source(id bigint,tenant_id bigint,account_id bigint,title text,status int,created_at timestamp,deleted_at timestamp) ON COMMIT DROP`,
-			`CREATE TEMP TABLE hg_youban_publish_channel(id bigint,tenant_id bigint,tg_account_id bigint,title text,cycle_publish_enabled int,created_at timestamp,deleted_at timestamp) ON COMMIT DROP`,
+			`CREATE TEMP TABLE hg_youban_publish_channel(id bigint,tenant_id bigint,tg_account_id bigint,title text,channel_title text,cycle_publish_enabled int,created_at timestamp,deleted_at timestamp) ON COMMIT DROP`,
 			`CREATE TEMP TABLE hg_youban_publish_collect_dispatch(id bigint,tenant_id bigint,account_id bigint,source_id bigint,source_name_snapshot text,source_chat_id_snapshot text,profile_id bigint,status text,created_at timestamp) ON COMMIT DROP`,
 			`CREATE TEMP TABLE hg_youban_publish_success_record(id bigint,tenant_id bigint,account_id bigint,action text,status text,created_at timestamp,job_id bigint DEFAULT 0,channel_id bigint) ON COMMIT DROP`,
 			`CREATE TEMP TABLE hg_youban_publish_tg_job(id bigint,tenant_id bigint,account_id bigint,sent_at timestamp,updated_at timestamp) ON COMMIT DROP`,
