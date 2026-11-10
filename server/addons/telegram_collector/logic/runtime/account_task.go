@@ -58,6 +58,12 @@ func accountTaskWorkerLoop(ctx context.Context, client *telegram.Client, lease *
 	for {
 		keepRunning, handled := processAccountTask(ctx, client, lease, operationGate, mediaFallbackGate, resetSession)
 		if !keepRunning {
+			// The task consumer and Telegram session share the same account lease.
+			// End the session as well, so runtime sync can recreate the worker.
+			if ctx.Err() == nil && resetSession != nil {
+				g.Log().Warningf(ctx, "Telegram账号任务消费者退出，重建账号会话 tgAccountId:%d worker:%d", lease.AccountID, workerID)
+				resetSession()
+			}
 			return
 		}
 		if handled {
