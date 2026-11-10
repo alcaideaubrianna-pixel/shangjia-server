@@ -77,6 +77,16 @@ func (s *sSysPublish) submitProfilePublishWithMeta(ctx context.Context, profileI
 		if checkErr != nil {
 			return checkErr
 		}
+		// Bot creation persists the raw media operation before the worker writes
+		// rows into hg_youban_publish_media. During that window the media table
+		// is empty, which must mean "pending", not "text-only and ready".
+		if ready {
+			pending, operationErr := s.profileMediaOperationPending(ctx, tenantId, accountId, profileId)
+			if operationErr != nil {
+				return operationErr
+			}
+			ready = !pending
+		}
 		if !ready {
 			failedMediaCount, countErr := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 				Where("profile_id", profileId).WhereNull("deleted_at").
@@ -119,6 +129,33 @@ func (s *sSysPublish) submitProfilePublishWithMeta(ctx context.Context, profileI
 	}
 	s.enqueuePreparedProfileJobs(ctx, jobIds, operatorId)
 	return nil
+}
+
+func (s *sSysPublish) profileMediaOperationPending(ctx context.Context, tenantId, accountId, profileId int64) (bool, error) {
+	if tenantId <= 0 || accountId <= 0 || profileId <= 0 {
+		return false, nil
+	}
+	var profileNo string
+	row, err := g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).
+		Fields("profile_no").Where("id", profileId).Where("tenant_id", tenantId).Where("account_id", accountId).WhereNull("deleted_at").One()
+	if err != nil {
+		return false, gerror.Wrap(err, "读取资料媒体任务编号失败")
+	}
+	profileNo = strings.TrimSpace(row["profile_no"].String())
+	if profileNo == "" {
+		return false, nil
+	}
+	count, err := g.DB().Model(profileMediaOperationTable).Safe().Ctx(ctx).
+		Where("tenant_id", tenantId).Where("account_id", accountId).Where("profile_no", profileNo).
+		WhereIn("status", profileMediaOperationPendingStatuses()).WhereNull("deleted_at").Count()
+	if err != nil {
+		return false, gerror.Wrap(err, "检查资料媒体任务状态失败")
+	}
+	return count > 0, nil
+}
+
+func profileMediaOperationPendingStatuses() []string {
+	return []string{"pending", "processing"}
 }
 
 func (s *sSysPublish) profilePublishMediaReady(ctx context.Context, profileID int64) (bool, error) {
