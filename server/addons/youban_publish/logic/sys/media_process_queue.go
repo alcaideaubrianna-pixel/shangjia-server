@@ -291,13 +291,30 @@ func (s *sSysPublish) profileMediaReady(ctx context.Context, profileId int64) (b
 	}
 	failed, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 		Where("profile_id", profileId).WhereNull("deleted_at").Where("processing_status", mediaProcessingFailed).Count()
-	if err != nil || failed > 0 {
+	if err != nil {
 		return false, err
 	}
 	pending, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 		Where("profile_id", profileId).WhereNull("deleted_at").
 		Where("processing_status IS NULL OR processing_status = '' OR processing_status NOT IN (?)", terminalMediaProcessingStatuses()).Count()
-	return pending == 0, err
+	if err != nil {
+		return false, err
+	}
+	ready, _ := decideProfileMediaReadiness(expectedTotal, count, pending, failed)
+	return ready, nil
+}
+
+// decideProfileMediaReadiness is the publish gate's pure state machine. The
+// database adapter only supplies counts; every timing combination is tested
+// without relying on a live worker or Telegram service.
+func decideProfileMediaReadiness(expected, actual, pending, failed int) (ready, decided bool) {
+	if failed > 0 || actual < expected || pending > 0 {
+		return false, true
+	}
+	if expected == 0 && actual == 0 {
+		return true, true
+	}
+	return actual >= expected, true
 }
 
 func mediaIntentStatusForCounts(displayCount, verifyCount int) string {
