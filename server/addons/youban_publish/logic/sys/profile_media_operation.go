@@ -12,6 +12,7 @@ import (
 	"github.com/hibiken/asynq"
 	botservice "hotgo/addons/youban_bot/service"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/dao"
 )
 
 const profileMediaOperationTable = "hg_youban_publish_profile_media_operation"
@@ -110,7 +111,25 @@ func (s *sSysPublish) handleProfileMediaTask(ctx context.Context, task *asynq.Ta
 		return err
 	}
 	_, err = g.DB().Model(profileMediaOperationTable).Ctx(ctx).Where("id", payload.OperationId).Data(g.Map{"status": "success", "finished_at": time.Now(), "error_message": "", "updated_at": time.Now()}).Update()
-	return err
+	if err != nil {
+		return err
+	}
+	// Media persistence is the event that releases a publish request waiting
+	// on media. Wake it in the same worker completion path; relying on a
+	// periodic scanner leaves users stuck after a successful media task.
+	var profile struct {
+		Id int64 `orm:"id"`
+	}
+	if err = g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).
+		Fields("id").Where("profile_no", input.ProfileNo).WhereNull("deleted_at").Scan(&profile); err != nil {
+		return err
+	}
+	if profile.Id > 0 {
+		if err = s.wakeProfileTelegramJobs(ctx, profile.Id); err != nil {
+			g.Log().Warningf(ctx, "媒体任务完成后唤醒资料上架失败 profileId:%d operationId:%d err:%+v", profile.Id, payload.OperationId, err)
+		}
+	}
+	return nil
 }
 
 // recoverProfileMediaOperations makes the media pipeline restart-safe. It is
