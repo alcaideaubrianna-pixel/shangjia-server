@@ -1,0 +1,7 @@
+{
+  "default": {"action": "success", "delayMs": 5},
+  "rules": [
+    {"method": "sendMediaGroup", "action": "success"},
+    {"method": "sendVideo", "action": "success"}
+  ]
+}
