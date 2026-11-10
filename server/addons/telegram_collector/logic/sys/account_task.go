@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -267,9 +268,10 @@ func (s *sAccountTasks) Claim(ctx context.Context, lease *sysin.AccountLease, li
 	columns := dao.TgCollectorAccountTask.Columns()
 	now := gtime.Now()
 	var candidates []*entity.TgCollectorAccountTask
+	ownerCondition := fmt.Sprintf("(%s=? OR (%s='media_download' AND %s=?))", columns.AccountId, columns.TaskType, columns.MediaOwnerAccountId)
 	err := dao.TgCollectorAccountTask.Ctx(ctx).
 		Fields(columns.Id, columns.TaskType).
-		Where(columns.AccountId, lease.AccountID).
+		Where(ownerCondition, lease.AccountID, lease.AccountID).
 		WhereIn(columns.Status, []string{sysin.AccountTaskStatusPending, sysin.AccountTaskStatusFailedRetry}).
 		Where("("+columns.NextRunAt+" IS NULL OR "+columns.NextRunAt+"<=?)", now).
 		Where("("+columns.LeaseUntil+" IS NULL OR "+columns.LeaseUntil+"<?)", now).
