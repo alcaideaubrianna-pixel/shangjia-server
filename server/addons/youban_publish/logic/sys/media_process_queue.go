@@ -256,10 +256,22 @@ func (s *sSysPublish) profileMediaReady(ctx context.Context, profileId int64) (b
 	if profileId <= 0 {
 		return true, nil
 	}
+	var expected struct {
+		Display int `orm:"expected_display_media_count"`
+		Verify  int `orm:"expected_verify_media_count"`
+	}
+	if err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
+		Fields("expected_display_media_count,expected_verify_media_count").Where("profile_id", profileId).WhereNull("deleted_at").Scan(&expected); err != nil {
+		return false, gerror.Wrap(err, "检查资料预期媒体失败")
+	}
+	expectedTotal := expected.Display + expected.Verify
 	count, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 		Where("profile_id", profileId).WhereNull("deleted_at").Count()
 	if err != nil {
 		return false, err
+	}
+	if count < expectedTotal {
+		return false, nil
 	}
 	if count == 0 {
 		// A newly created profile can be published before the asynchronous
@@ -277,10 +289,22 @@ func (s *sSysPublish) profileMediaReady(ctx context.Context, profileId int64) (b
 		}
 		return declared.ImageCount <= 0 && declared.VideoCount <= 0 && declared.HasVerificationVideo <= 0 && declared.CoverMediaId <= 0, nil
 	}
+	failed, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+		Where("profile_id", profileId).WhereNull("deleted_at").Where("processing_status", mediaProcessingFailed).Count()
+	if err != nil || failed > 0 {
+		return false, err
+	}
 	pending, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 		Where("profile_id", profileId).WhereNull("deleted_at").
 		Where("processing_status IS NULL OR processing_status = '' OR processing_status NOT IN (?)", terminalMediaProcessingStatuses()).Count()
 	return pending == 0, err
+}
+
+func mediaIntentStatusForCounts(displayCount, verifyCount int) string {
+	if displayCount > 0 || verifyCount > 0 {
+		return "pending"
+	}
+	return "none"
 }
 
 func terminalMediaProcessingStatuses() []string {

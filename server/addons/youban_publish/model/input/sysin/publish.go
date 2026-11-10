@@ -1098,15 +1098,17 @@ type BotProfileStatusInp struct {
 
 // BotProfileCreateInp is used by youban_bot to create a text profile quickly.
 type BotProfileCreateInp struct {
-	DiagnosticTraceId string                     `json:"-"`
-	TenantId          int64                      `json:"tenantId" dc:"租户ID"`
-	AccountId         int64                      `json:"accountId" dc:"上架账号ID"`
-	Title             string                     `json:"title" dc:"标题"`
-	PlainText         string                     `json:"plainText" dc:"展示正文"`
-	DisplayMedia      []*MessageTemplateMediaInp `json:"displayMedia" dc:"展示媒体"`
-	VerifyText        string                     `json:"verifyText" dc:"验证正文"`
-	VerifyMedia       []*MessageTemplateMediaInp `json:"verifyMedia" dc:"验证媒体"`
-	Status            int                        `json:"status" dc:"状态：1上架 2下架"`
+	DiagnosticTraceId         string                     `json:"-"`
+	TenantId                  int64                      `json:"tenantId" dc:"租户ID"`
+	AccountId                 int64                      `json:"accountId" dc:"上架账号ID"`
+	Title                     string                     `json:"title" dc:"标题"`
+	PlainText                 string                     `json:"plainText" dc:"展示正文"`
+	DisplayMedia              []*MessageTemplateMediaInp `json:"displayMedia" dc:"展示媒体"`
+	VerifyText                string                     `json:"verifyText" dc:"验证正文"`
+	VerifyMedia               []*MessageTemplateMediaInp `json:"verifyMedia" dc:"验证媒体"`
+	Status                    int                        `json:"status" dc:"状态：1上架 2下架"`
+	ExpectedDisplayMediaCount int                        `json:"expectedDisplayMediaCount"`
+	ExpectedVerifyMediaCount  int                        `json:"expectedVerifyMediaCount"`
 }
 
 // BotProfileEditInp is used by youban_bot to edit text fields and profile_no.

@@ -119,6 +119,15 @@ func (s *sSysPublish) BotProfileCreate(ctx context.Context, in *sysin.BotProfile
 	if err != nil {
 		return nil, err
 	}
+	if _, stateErr := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
+		Where("profile_id", res.Id).Where("tenant_id", in.TenantId).Where("account_id", in.AccountId).
+		Data(g.Map{
+			"expected_display_media_count": maxInt(in.ExpectedDisplayMediaCount, 0),
+			"expected_verify_media_count":  maxInt(in.ExpectedVerifyMediaCount, 0),
+			"media_intent_status":          mediaIntentStatusForCounts(in.ExpectedDisplayMediaCount, in.ExpectedVerifyMediaCount),
+		}).Update(); stateErr != nil {
+		return nil, gerror.Wrap(stateErr, "保存资料媒体意图失败")
+	}
 	mediaStartedAt := time.Now()
 	g.Log().Infof(ctx, "Bot资料媒体保存开始 trace:%s profile_id:%d display_count:%d verify_count:%d", in.DiagnosticTraceId, res.Id, len(in.DisplayMedia), len(in.VerifyMedia))
 	if err = s.saveBotProfileMedia(ctx, res.Id, in.TenantId, in.AccountId, in.DisplayMedia, in.VerifyMedia); err != nil {

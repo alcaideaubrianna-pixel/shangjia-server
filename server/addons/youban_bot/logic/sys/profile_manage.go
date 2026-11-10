@@ -2944,7 +2944,7 @@ func (s *sSysBot) consumeProfileCreatePart(ctx context.Context, botId int64, cha
 		}
 		stageStartedAt = time.Now()
 		g.Log().Infof(ctx, "Bot资料收尾阶段开始 trace:%s stage:create_profile display_media:%d verify_media:%d", trace, len(draft.DisplayMedia), len(draft.VerifyMedia))
-		res, err := publishService.SysPublish().BotProfileCreate(ctx, &publishsysin.BotProfileCreateInp{DiagnosticTraceId: trace, TenantId: account.TenantId, AccountId: account.AccountId, PlainText: draft.DisplayText, DisplayMedia: nil, VerifyText: draft.VerifyText, VerifyMedia: nil, Status: 2})
+		res, err := publishService.SysPublish().BotProfileCreate(ctx, &publishsysin.BotProfileCreateInp{DiagnosticTraceId: trace, TenantId: account.TenantId, AccountId: account.AccountId, PlainText: draft.DisplayText, DisplayMedia: nil, VerifyText: draft.VerifyText, VerifyMedia: nil, ExpectedDisplayMediaCount: len(draft.DisplayMedia), ExpectedVerifyMediaCount: len(draft.VerifyMedia), Status: 2})
 		if err != nil {
 			g.Log().Warningf(ctx, "Bot资料收尾阶段失败 trace:%s stage:create_profile elapsed_ms:%d err:%s", trace, time.Since(stageStartedAt).Milliseconds(), sensitive.Diagnostic(err.Error()))
 			draft.VerificationSubmitted = false
