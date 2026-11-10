@@ -33,6 +33,11 @@ var (
 	}
 )
 
+// Telegram forwards frequently replace the fee separator with full-width or
+// decorative punctuation. These characters are separators, not part of the
+// fee label or amount.
+const collectIntroFeeSeparatorChars = "：:；;，,./／|｜、·•"
+
 type collectRuleDecision struct {
 	Matched   bool
 	Skipped   bool
@@ -73,19 +78,19 @@ func parseCollectIntroFeeFields(text string) collectIntroFeeFields {
 	if fields.FirstAmount != "" {
 		feeKeyword := collectFeeKeywordPattern.FindString(clean)
 		if feeIndex := strings.Index(clean, feeKeyword); feeKeyword != "" && feeIndex >= 0 && feeIndex+len(feeKeyword) < len(clean) {
-			afterFee := strings.TrimSpace(strings.TrimLeft(clean[feeIndex+len(feeKeyword):], "：:；;，,./"))
-			afterFee = strings.TrimSpace(strings.TrimLeft(afterFee, "：:；;，,./"))
+			afterFee := strings.TrimSpace(strings.TrimLeft(clean[feeIndex+len(feeKeyword):], collectIntroFeeSeparatorChars))
+			afterFee = strings.TrimSpace(strings.TrimLeft(afterFee, collectIntroFeeSeparatorChars))
 			if afterFee != "" && !strings.Contains(afterFee, fields.FirstAmount) {
 				fields.FirstSuffix = afterFee
 			}
 		}
 		if index := strings.Index(clean, fields.FirstAmount); index > 0 {
 			prefix := strings.TrimSpace(clean[:index])
-			prefix = strings.TrimSpace(strings.TrimLeft(prefix, "：:；;，,./"))
-			prefix = strings.TrimSpace(strings.TrimLeft(prefix, "：:；;，,./"))
+			prefix = strings.TrimSpace(strings.TrimLeft(prefix, collectIntroFeeSeparatorChars))
+			prefix = strings.TrimSpace(strings.TrimLeft(prefix, collectIntroFeeSeparatorChars))
 			prefix = strings.TrimSpace(strings.TrimPrefix(prefix, feeKeyword))
-			prefix = strings.TrimSpace(strings.TrimLeft(prefix, "：:；;，,./"))
-			prefix = strings.TrimSpace(strings.TrimRight(prefix, "：:；;，,./"))
+			prefix = strings.TrimSpace(strings.TrimLeft(prefix, collectIntroFeeSeparatorChars))
+			prefix = strings.TrimSpace(strings.TrimRight(prefix, collectIntroFeeSeparatorChars))
 			if prefix != "" && !strings.Contains(prefix, "国内") && !strings.Contains(prefix, "国外") {
 				fields.FirstSuffix = prefix
 			}
@@ -662,20 +667,35 @@ func applyCollectIntroFeeSuffix(text, original, suffix string) string {
 		}
 		fields := parseCollectIntroFeeFields(line)
 		normalizedLine := normalizeCollectKeywordText(line)
+		feeKeyword := collectFeeKeywordPattern.FindString(normalizedLine)
+		feeIndex := strings.Index(normalizedLine, feeKeyword)
 		numbers := collectNumberRule.FindAllString(normalizedLine, -1)
 		complexAmount := len(numbers) > 1 && fields.ForeignAmount == "" && collectMultiPricePattern.MatchString(normalizedLine)
 		// A hyphen is commonly part of a trailing name/label (for example
 		// "7888强盛-高启强"), not evidence of multiple prices. Preserve only
 		// explicit multi-price separators here; otherwise normalize to the first
 		// amount and the effective channel suffix.
-		complexFormat := fields.ForeignAmount == "" && (strings.ContainsAny(normalizedLine, ",，./") || collectMultiPricePattern.MatchString(normalizedLine))
+		// A slash immediately after the fee label is a common separator
+		// ("介绍费/7888qb KK"), not a multi-price format. Treat it like a
+		// colon so the amount and configured channel suffix are normalized.
+		feeTail := normalizedLine
+		if feeIndex >= 0 {
+			feeTail = normalizedLine[feeIndex:]
+		}
+		complexFormat := fields.ForeignAmount == "" && (strings.ContainsAny(feeTail, ",，.") || collectMultiPricePattern.MatchString(feeTail))
 		if fields.FirstAmount == "" || complexAmount || complexFormat {
 			if !strings.HasSuffix(strings.TrimSpace(line), suffix) {
 				lines[index] = strings.TrimRightFunc(line, unicode.IsSpace) + " " + suffix
 			}
 			continue
 		}
-		lines[index] = formatCollectIntroFeeFields(fields, suffix)
+		formatted := formatCollectIntroFeeFields(fields, suffix)
+		// Keep an introduction or other prose that precedes an inline fee:
+		// "自我介绍: 啊啊啊 介绍费 7888".
+		if feeIndex > 0 && formatted != "" {
+			formatted = strings.TrimSpace(normalizedLine[:feeIndex]) + " " + formatted
+		}
+		lines[index] = formatted
 	}
 
 	// Normalize every fee row before removing short standalone labels between

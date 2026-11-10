@@ -3,7 +3,7 @@ import argparse, json, os, re, unicodedata
 FEE = re.compile(r'(?:介绍|推荐|牵线|居间|对接|感谢)费')
 NUM = re.compile(r'[0-9０-９]+')
 INVISIBLE = re.compile(r'[\u200b-\u200f\u2060\ufeff\ufe00-\ufe0f]')
-MULTI_MARKERS = ('国内', '国外', '村内', '村外', '一人', '双人', '打包', '单个', '/', '、')
+MULTI_MARKERS = ('国内', '国外', '村内', '村外', '一人', '双人', '打包', '单个', '、')
 
 def norm(s):
     return ''.join(ch for ch in unicodedata.normalize('NFKC', s) if not (unicodedata.category(ch) == 'Cf' or ch in '\ufe00\ufe0f'))
