@@ -94,15 +94,22 @@ func (s *sCollector) recoverIngestSpool(ctx context.Context, limit int) error {
 // Claim one row at a time so a slow handoff cannot expire the leases of an
 // entire batch. attempt_count is the fencing token for late worker results.
 func claimIngestSpool(ctx context.Context) (gdb.Record, error) {
-	return g.DB().GetOne(ctx, `WITH candidate AS (
- SELECT id FROM `+collectorIngestSpoolTable+`
- WHERE status IN ('received','failed_retry','processing')
- AND (next_run_at IS NULL OR next_run_at <= CURRENT_TIMESTAMP)
+	return g.DB().GetOne(ctx, `WITH ready AS (
+ SELECT id, priority FROM `+collectorIngestSpoolTable+`
+ WHERE status IN ('received','failed_retry','processing') AND next_run_at IS NULL
  ORDER BY priority DESC,id FOR UPDATE SKIP LOCKED LIMIT 1
+ ), due AS (
+ SELECT id, priority FROM `+collectorIngestSpoolTable+`
+ WHERE status IN ('received','failed_retry','processing') AND next_run_at <= CURRENT_TIMESTAMP
+ ORDER BY priority DESC,next_run_at,id FOR UPDATE SKIP LOCKED LIMIT 1
+ ), selected AS (
+ SELECT * FROM ready UNION ALL SELECT * FROM due
+ ), winner AS (
+ SELECT id FROM selected ORDER BY priority DESC,id LIMIT 1
  ) UPDATE `+collectorIngestSpoolTable+` AS spool
  SET status='processing',attempt_count=attempt_count+1,
  next_run_at=CURRENT_TIMESTAMP + INTERVAL '2 minutes',updated_at=CURRENT_TIMESTAMP
- FROM candidate WHERE spool.id=candidate.id RETURNING spool.*`)
+ FROM winner WHERE spool.id=winner.id RETURNING spool.*`)
 }
 
 func finishIngestSpool(ctx context.Context, row gdb.Record, status, lastError string) error {

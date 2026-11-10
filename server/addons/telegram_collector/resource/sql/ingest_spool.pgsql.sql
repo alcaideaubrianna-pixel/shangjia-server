@@ -21,6 +21,12 @@ ALTER TABLE hg_tg_collector_ingest_spool ADD COLUMN IF NOT EXISTS priority INT N
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_tg_collector_ingest_spool_priority
  ON hg_tg_collector_ingest_spool (status,priority DESC,next_run_at,id)
  WHERE status IN ('received','failed_retry','processing');
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_tg_collector_ingest_spool_ready_priority
+ ON hg_tg_collector_ingest_spool (priority DESC,id)
+ WHERE status IN ('received','failed_retry','processing') AND next_run_at IS NULL;
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_tg_collector_ingest_spool_due_priority
+ ON hg_tg_collector_ingest_spool (priority DESC,next_run_at,id)
+ WHERE status IN ('received','failed_retry','processing') AND next_run_at IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_tg_collector_ingest_spool_lease
  ON hg_tg_collector_ingest_spool (next_run_at,id)
  WHERE status='processing';
