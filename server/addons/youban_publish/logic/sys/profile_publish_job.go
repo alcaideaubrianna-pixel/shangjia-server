@@ -150,7 +150,7 @@ func (s *sSysPublish) profileMediaOperationPending(ctx context.Context, tenantId
 	}
 	count, err := g.DB().Model(profileMediaOperationTable).Safe().Ctx(ctx).
 		Where("tenant_id", tenantId).Where("account_id", accountId).Where("profile_no", profileNo).
-		WhereIn("status", profileMediaOperationPendingStatuses()).WhereNull("deleted_at").Count()
+		WhereIn("status", profileMediaOperationPendingStatuses()).Count()
 	if err != nil {
 		return false, gerror.Wrap(err, "检查资料媒体任务状态失败")
 	}
