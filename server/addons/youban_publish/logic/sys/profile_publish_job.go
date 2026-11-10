@@ -136,8 +136,11 @@ func (s *sSysPublish) profileMediaOperationPending(ctx context.Context, tenantId
 		return false, nil
 	}
 	var profileNo string
+	// Tenant/account ownership is stored in profile_state; content_profile
+	// only contains the profile identity and must not be filtered by columns it
+	// does not own.
 	row, err := g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).
-		Fields("profile_no").Where("id", profileId).Where("tenant_id", tenantId).Where("account_id", accountId).WhereNull("deleted_at").One()
+		Fields("profile_no").Where("id", profileId).WhereNull("deleted_at").One()
 	if err != nil {
 		return false, gerror.Wrap(err, "读取资料媒体任务编号失败")
 	}
