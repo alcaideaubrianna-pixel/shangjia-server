@@ -235,10 +235,8 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 	}
 	sourceModel := g.DB().Model(publishCollectSourceTable).Ctx(ctx).
 		Where("tenant_id", tenantID).WhereNull("deleted_at")
-	if keyword != "" {
-		like := "%" + keyword + "%"
-		sourceModel = sourceModel.Where("(source_chat_id LIKE ? OR title LIKE ? OR source_username LIKE ? OR channel_suffix LIKE ?)", like, like, like, like)
-	}
+	// Binding is independent of the channel search text. Aggregate BOT sources
+	// have an empty source_chat_id and a different title from their channels.
 	if accountID > 0 {
 		sourceModel = sourceModel.Where("account_id", accountID)
 	}
@@ -677,10 +675,37 @@ func (s *sSysPublish) saveIntroFeeChannelCollectionStatus(ctx context.Context, t
 		if in.Status == 2 {
 			status, enabled = sysin.CollectAccountChannelDisabled, 0
 		}
-		_, saveErr = pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).OnConflict("tenant_id,account_id,channel_id,source_id").OnDuplicate("status,collect_enabled,approval_status,deleted_at").Data(pdo.YoubanPublishCollectAccountChannel{
-			TenantId: tenantID, AccountId: accountID, ChannelId: channel.Id, Status: status, CollectEnabled: enabled, ApprovalStatus: "approved", DeletedAt: nil,
-		}).Save()
-		return saveErr
+		var sources []struct {
+			Id     int64  `orm:"id"`
+			ChatId string `orm:"source_chat_id"`
+			BotId  int64  `orm:"bot_id"`
+		}
+		if queryErr := pdao.YoubanPublishCollectSource.Ctx(ctx).
+			Fields("id,source_chat_id,bot_id").Where("tenant_id", tenantID).Where("account_id", accountID).
+			Where("EXISTS (SELECT 1 FROM "+pdao.YoubanPublishCollectSourceRule.Table()+" sr WHERE sr.source_id="+publishCollectSourceTable+".id AND sr.tenant_id=? AND sr.rule_id=?)", tenantID, in.RuleId).
+			Scan(&sources); queryErr != nil {
+			return gerror.Wrap(queryErr, "读取频道绑定采集源失败")
+		}
+		matched := false
+		for _, source := range sources {
+			if !introFeeCollectionSourceMatchesChannel(source.ChatId, source.BotId, in.ChannelId, in.BotId) {
+				continue
+			}
+			matched = true
+			if _, saveErr = pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).
+				OnConflict("tenant_id,account_id,channel_id,source_id").
+				OnDuplicate("status,collect_enabled,approval_status,deleted_at").
+				Data(pdo.YoubanPublishCollectAccountChannel{
+					TenantId: tenantID, AccountId: accountID, ChannelId: channel.Id, SourceId: source.Id,
+					Status: status, CollectEnabled: enabled, ApprovalStatus: "approved", DeletedAt: nil,
+				}).Save(); saveErr != nil {
+				return gerror.Wrap(saveErr, "保存频道采集状态失败")
+			}
+		}
+		if !matched {
+			return gerror.New("频道未绑定当前规则的采集源")
+		}
+		return nil
 	})
 	if err == nil {
 		_, _ = cache.Instance().Remove(ctx, introFeeChannelRuleCacheKey(tenantID, accountID, in.RuleId, in.BotId, in.ChannelId))
