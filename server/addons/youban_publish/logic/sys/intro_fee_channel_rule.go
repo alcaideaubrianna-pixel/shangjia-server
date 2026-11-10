@@ -257,10 +257,10 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 		ProfileCount int         `orm:"profile_count"`
 		LastSeenAt   *gtime.Time `orm:"last_seen_at"`
 	}
-	if err := g.DB().Model(publishCollectChannelProfileTable).Ctx(ctx).
-		Fields("channel_id,COUNT(DISTINCT profile_id) AS profile_count,MAX(updated_at) AS last_seen_at").
-		Where("tenant_id", tenantID).Where("account_id", accountID).Where("rule_id", ruleID).WhereNull("deleted_at").
-		Group("channel_id").OrderDesc("last_seen_at").Limit(candidateLimit).Scan(&indexedRows); err != nil {
+	if err := g.DB().Model(publishCollectChannelCountTable).Ctx(ctx).
+		Fields("channel_id,profile_count,last_seen_at").
+		Where("tenant_id", tenantID).Where("account_id", accountID).Where("rule_id", ruleID).Where("ready", true).WhereGT("profile_count", 0).
+		OrderDesc("last_seen_at").Limit(candidateLimit).Scan(&indexedRows); err != nil {
 		return nil, 0, gerror.Wrap(err, "读取频道资料索引失败")
 	}
 	collectionSources := append([]sourceCandidate(nil), sourceRows...)

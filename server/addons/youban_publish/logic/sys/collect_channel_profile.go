@@ -11,6 +11,7 @@ import (
 )
 
 const publishCollectChannelProfileTable = "hg_youban_publish_collect_channel_profile"
+const publishCollectChannelCountTable = "hg_youban_publish_collect_channel_count"
 
 func saveCollectMaterialOriginTx(ctx context.Context, tx gdb.TX, profileID int64, event, rule gdb.Record) error {
 	if err := saveCollectProfileOriginTx(ctx, tx, profileID, event); err != nil {
@@ -109,14 +110,9 @@ func collectChannelProfileIDs(ctx context.Context, tenantID, accountID, ruleID i
 	return uniqueIds(ids), nil
 }
 
-func collectChannelProfileCounts(ctx context.Context, tenantID, accountID, ruleID int64, channelIDs []string) (map[string]int, error) {
-	// Cancel expensive historical reads instead of leaving dashboard queries
-	// running indefinitely on the shared production database.
-	if gdb.TXFromCtx(ctx, g.DB().GetGroup()) == nil {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, 3*time.Second)
-		defer cancel()
-	}
+// collectChannelProfileHistoryCounts is reserved for offline reconciliation.
+// HTTP list requests must use collectChannelProfileCounts instead.
+func collectChannelProfileHistoryCounts(ctx context.Context, tenantID, accountID, ruleID int64, channelIDs []string) (map[string]int, error) {
 	counts := map[string]int{}
 	if len(channelIDs) == 0 {
 		return counts, nil
@@ -125,13 +121,73 @@ func collectChannelProfileCounts(ctx context.Context, tenantID, accountID, ruleI
 	if err != nil {
 		return nil, err
 	}
-	// A single aggregate query for at most the current page; no per-channel scans.
 	rows, err := g.DB().GetAll(ctx, "SELECT CASE WHEN chat_id LIKE '-100%' THEN SUBSTRING(chat_id,5) ELSE chat_id END AS channel_id,COUNT(DISTINCT profile_id) AS total FROM ("+query+") evidence GROUP BY CASE WHEN chat_id LIKE '-100%' THEN SUBSTRING(chat_id,5) ELSE chat_id END", args...)
 	if err != nil {
 		return nil, gerror.Wrap(err, "统计采集频道历史资料失败")
 	}
 	for _, row := range rows {
 		counts[canonicalCollectSourceChatID(row["channel_id"].String())] = row["total"].Int()
+	}
+	return counts, nil
+}
+
+func collectChannelProfileCounts(ctx context.Context, tenantID, accountID, ruleID int64, channelIDs []string) (map[string]int, error) {
+	counts := map[string]int{}
+	if len(channelIDs) == 0 {
+		return counts, nil
+	}
+	if tenantID <= 0 || accountID <= 0 || ruleID < 0 {
+		return nil, gerror.New("采集频道资料查询范围不完整")
+	}
+	if gdb.TXFromCtx(ctx, g.DB().GetGroup()) == nil {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+	}
+	canonical := make([]string, 0, len(channelIDs))
+	for _, id := range channelIDs {
+		if id = canonicalCollectSourceChatID(id); id != "" {
+			canonical = append(canonical, id)
+		}
+	}
+	canonical = uniqueStrings(canonical)
+	if len(canonical) == 0 {
+		return counts, nil
+	}
+	rows, err := g.DB().Model(publishCollectChannelCountTable).Ctx(ctx).
+		Fields("channel_id,profile_count,ready").Where("tenant_id", tenantID).
+		Where("account_id", accountID).Where("rule_id", ruleID).WhereIn("channel_id", canonical).All()
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取采集频道资料计数失败")
+	}
+	for _, row := range rows {
+		if !row["ready"].Bool() {
+			return nil, gerror.New("采集频道资料计数初始化中，请稍后重试")
+		}
+		counts[row["channel_id"].String()] = row["profile_count"].Int()
+	}
+	// Ready summaries are the only hot read. Probe the partial backfill index
+	// only for absent summaries, so unfinished historical channels cannot look empty.
+	lookups := make([]string, 0, len(canonical)*2)
+	for _, id := range canonical {
+		if _, found := counts[id]; !found {
+			lookups = append(lookups, tgChannelCacheLookupIds(id)...)
+		}
+	}
+	if len(lookups) > 0 {
+		pending := g.DB().Model(publishCollectChannelProfileTable).Ctx(ctx).
+			Where("tenant_id", tenantID).Where("account_id", accountID).
+			WhereIn("channel_id", uniqueStrings(lookups)).Where("count_projected", false)
+		if ruleID > 0 {
+			pending = pending.Where("rule_id", ruleID)
+		}
+		hasPending, queryErr := pending.Exist()
+		if queryErr != nil {
+			return nil, gerror.Wrap(queryErr, "读取采集频道计数初始化状态失败")
+		}
+		if hasPending {
+			return nil, gerror.New("采集频道资料计数初始化中，请稍后重试")
+		}
 	}
 	return counts, nil
 }

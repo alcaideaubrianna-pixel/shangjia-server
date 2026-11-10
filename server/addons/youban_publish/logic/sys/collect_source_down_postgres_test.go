@@ -71,7 +71,7 @@ func TestCollectSourceDownHistoricalLocalPostgres(t *testing.T) {
 			return err
 		}
 		assertIDs(ids, []int64{1, 2, 3, 5})
-		counts, countErr := collectChannelProfileCounts(ctx, 56, 561, 335, []string{"4439615649", "-1004439615649", "9999"})
+		counts, countErr := collectChannelProfileHistoryCounts(ctx, 56, 561, 335, []string{"4439615649", "-1004439615649", "9999"})
 		if countErr != nil {
 			return countErr
 		}
@@ -225,7 +225,7 @@ func TestCollectSourceDownHistoricalLocalPostgres(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		counts, err = collectChannelProfileCounts(ctx, 56, 561, 335, []string{"4439615649"})
+		counts, err = collectChannelProfileHistoryCounts(ctx, 56, 561, 335, []string{"4439615649"})
 		if err != nil {
 			return err
 		}
@@ -249,7 +249,7 @@ func TestCollectSourceDownHistoricalLocalPostgres(t *testing.T) {
 				}
 			}
 			started := time.Now()
-			counts, err = collectChannelProfileCounts(ctx, 56, 561, 335, []string{"987654321", "4439615649"})
+			counts, err = collectChannelProfileHistoryCounts(ctx, 56, 561, 335, []string{"987654321", "4439615649"})
 			if err != nil {
 				return err
 			}
