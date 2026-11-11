@@ -468,7 +468,7 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 		WHERE o.event_type=? AND o.status=? AND o.delivered_at IS NOT NULL
 			AND j.status IN ('pending','failed_retry','unknown')
 			AND COALESCE(j.dispatch_status,'') IN ('','idle')
-			AND (j.next_retry_at IS NULL OR j.next_retry_at<=?)
+			AND (j.next_retry_at IS NULL OR j.next_retry_at<=? OR (j.status='pending' AND COALESCE(j.asynq_task_id,'')=''))
 		ORDER BY o.id
 		LIMIT ?
 	)
@@ -488,7 +488,7 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 			AND (o.status=? OR (o.status=? AND o.lease_expires_at<=?))
 			AND j.status IN ('pending','failed_retry','unknown')
 			AND COALESCE(j.dispatch_status,'') IN ('','idle')
-			AND (j.next_retry_at IS NULL OR j.next_retry_at<=?)
+			AND (j.next_retry_at IS NULL OR j.next_retry_at<=? OR (j.status='pending' AND COALESCE(j.asynq_task_id,'')=''))
 		ORDER BY o.available_at,o.id LIMIT ?`
 	var rows []telegramJobOutboxRecord
 	err := g.DB().GetScan(ctx, &rows, query, telegramOutboxEventPublish, now,
@@ -520,7 +520,7 @@ func telegramDueOutboxPostgresSQL() string {
 		FROM due_jobs j
 		WHERE j.status IN ('pending','failed_retry','unknown')
 			AND COALESCE(j.dispatch_status,'') IN ('','idle')
-			AND (j.next_retry_at IS NULL OR j.next_retry_at<=?)
+			AND (j.next_retry_at IS NULL OR j.next_retry_at<=? OR (j.status='pending' AND COALESCE(j.asynq_task_id,'')=''))
 			AND NOT EXISTS (
 				SELECT 1 FROM ` + publishTgJobTable + ` earlier
 				WHERE earlier.tenant_id=j.tenant_id
