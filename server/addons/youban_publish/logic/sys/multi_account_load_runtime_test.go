@@ -29,10 +29,10 @@ func TestLocalMultiAccountLoadRuntime(t *testing.T) {
 	// 克隆业务账户、账户设置和频道；频道 tg_account_id 必须指向业务账户，
 	// 这样账户调度的 SQL 过滤和线上模型一致。
 	for i, account := range accounts[1:] {
-		exec("INSERT INTO "+publishAccountTable+" SELECT (jsonb_populate_record(NULL::"+publishAccountTable+",to_jsonb(a)||jsonb_build_object('id',?,'username',?,'nickname',?,'status',1))).* FROM "+publishAccountTable+" a WHERE a.id=999 ON CONFLICT(id) DO UPDATE SET status=1", account, fmt.Sprintf("local_multi_%d", account), fmt.Sprintf("本地并发账户%d", i+2))
-		exec("INSERT INTO "+publishAccountSettingTable+" SELECT (jsonb_populate_record(NULL::"+publishAccountSettingTable+",to_jsonb(a)||jsonb_build_object('id',?,'account_id',?,'push_engine','unified_stream'))).* FROM "+publishAccountSettingTable+" a WHERE a.account_id=999 AND a.tenant_id=999 LIMIT 1 ON CONFLICT(id) DO UPDATE SET push_engine='unified_stream'", account, account)
+		exec(fmt.Sprintf("INSERT INTO %s SELECT (jsonb_populate_record(NULL::%s,to_jsonb(a)||jsonb_build_object('id',%d,'username','local_multi_%d','nickname','本地并发账户%d','status',1))).* FROM %s a WHERE a.id=999 ON CONFLICT(id) DO UPDATE SET status=1", publishAccountTable, publishAccountTable, account, account, i+2, publishAccountTable))
+		exec(fmt.Sprintf("INSERT INTO %s SELECT (jsonb_populate_record(NULL::%s,to_jsonb(a)||jsonb_build_object('id',%d,'account_id',%d,'push_engine','unified_stream'))).* FROM %s a WHERE a.account_id=999 AND a.tenant_id=999 LIMIT 1 ON CONFLICT(id) DO UPDATE SET push_engine='unified_stream'", publishAccountSettingTable, publishAccountSettingTable, account, account, publishAccountSettingTable))
 		for _, channel := range channelGroups[i+1] {
-			exec("INSERT INTO "+publishChannelTable+" SELECT (jsonb_populate_record(NULL::"+publishChannelTable+",to_jsonb(c)||jsonb_build_object('id',?,'tg_account_id',?,'target_chat_id',?,'channel_title',?,'cycle_publish_enabled',0,'is_default_selected',1,'status',1))).* FROM "+publishChannelTable+" c WHERE c.id=1 ON CONFLICT(id) DO UPDATE SET tg_account_id=EXCLUDED.tg_account_id,status=1", channel, account, fmt.Sprintf("-100999%06d", channel), fmt.Sprintf("local-multi-%d", channel))
+			exec(fmt.Sprintf("INSERT INTO %s SELECT (jsonb_populate_record(NULL::%s,to_jsonb(c)||jsonb_build_object('id',%d,'tg_account_id',%d,'target_chat_id','-100999%06d','channel_title','local-multi-%d','cycle_publish_enabled',0,'is_default_selected',1,'status',1))).* FROM %s c WHERE c.id=1 ON CONFLICT(id) DO UPDATE SET tg_account_id=EXCLUDED.tg_account_id,status=1", publishChannelTable, publishChannelTable, channel, account, channel, channel, publishChannelTable))
 		}
 	}
 	for i, account := range accounts {
