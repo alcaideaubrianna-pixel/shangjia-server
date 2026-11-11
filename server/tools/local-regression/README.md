@@ -10,6 +10,12 @@ tgfake 提供完整 Bot API、Webhook、图片/视频/媒体组、文件下载�
 
 旧的轻量 Hook 保留为 `legacy-hook` profile，仅用于对比旧回放：`docker compose --profile legacy-hook up tg-hook`。
 
+重置 tgfake 后重新准备媒体：
+
+```bash
+YOUBAN_LOCAL_DB_NAME=youban_tgfake_test ./prepare-tgfake-media.sh
+```
+
 ## 启动
 
 ```bash
