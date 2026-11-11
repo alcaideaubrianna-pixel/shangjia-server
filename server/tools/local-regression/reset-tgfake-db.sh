@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# 重建独立 tgfake 回归库；只操作本地 PostgreSQL/Redis，不触碰线上数据。
+set -euo pipefail
+
+db="${YOUBAN_LOCAL_DB_NAME:-youban_tgfake_test}"
+source_db="${YOUBAN_SOURCE_DB_NAME:-youban_hotgo}"
+pg_host="${YOUBAN_DB_HOST:-127.0.0.1}"
+pg_user="${YOUBAN_DB_USER:-postgres}"
+pg_password="${YOUBAN_DB_PASSWORD:-postgres}"
+export PGPASSWORD="$pg_password"
+
+schema_dump="$(mktemp /tmp/tgfake-schema.XXXXXX.sql)"
+data_dump="$(mktemp /tmp/tgfake-config.XXXXXX.sql)"
+trap 'rm -f "$schema_dump" "$data_dump"' EXIT
+
+pg_dump -h "$pg_host" -U "$pg_user" -d "$source_db" --schema-only > "$schema_dump"
+sed -i.bak '/transaction_timeout/d' "$schema_dump"
+psql -h "$pg_host" -U "$pg_user" -d postgres -v ON_ERROR_STOP=1 \
+  -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='$db' AND pid<>pg_backend_pid()" >/dev/null || true
+dropdb -h "$pg_host" -U "$pg_user" --if-exists "$db"
+createdb -h "$pg_host" -U "$pg_user" "$db"
+psql -h "$pg_host" -U "$pg_user" -d "$db" -v ON_ERROR_STOP=1 -f "$schema_dump" >/dev/null
+
+# Worker 启动需要管理员和插件配置；只复制配置表，不复制历史任务。
+pg_dump -h "$pg_host" -U "$pg_user" -d "$source_db" --data-only --disable-triggers \
+  -t hg_admin_member -t hg_admin_role -t hg_admin_member_role \
+  -t hg_sys_config -t hg_sys_addons_install > "$data_dump"
+sed -i.bak '/transaction_timeout/d' "$data_dump"
+psql -h "$pg_host" -U "$pg_user" -d "$db" -v ON_ERROR_STOP=1 \
+  -c 'TRUNCATE hg_admin_member_role,hg_admin_member,hg_admin_role,hg_sys_config,hg_sys_addons_install CASCADE' >/dev/null
+psql -h "$pg_host" -U "$pg_user" -d "$db" -v ON_ERROR_STOP=1 -f "$data_dump" >/dev/null
+
+psql -h "$pg_host" -U "$pg_user" -d "$db" -v ON_ERROR_STOP=1 \
+  -f tools/local-regression/seed_publish_dependencies.sql >/dev/null
+psql -h "$pg_host" -U "$pg_user" -d "$db" -v ON_ERROR_STOP=1 \
+  -f tools/local-regression/seed_1000_publish.sql >/dev/null
+
+# seed_1000_publish.sql 同时包含旧吞吐压测任务；完整角色场景需要从空队列开始。
+psql -h "$pg_host" -U "$pg_user" -d "$db" -v ON_ERROR_STOP=1 <<'SQL' >/dev/null
+TRUNCATE hg_youban_publish_tg_attempt_message,hg_youban_publish_tg_delivery_step,
+  hg_youban_publish_tg_job_log,hg_youban_publish_tg_attempt,
+  hg_youban_publish_tg_message,hg_youban_publish_tg_outbox,
+  hg_youban_publish_tg_job CASCADE;
+UPDATE hg_youban_publish_profile_state
+SET publish_operation_no='',publish_task_status='',publish_task_updated_at=NULL
+WHERE tenant_id=999 AND account_id=999;
+SQL
+
+# 专用 Redis 只存本地回归 Stream/Asynq 数据。
+if docker ps --format '{{.Names}}' | rg -q '^youban-runtime-clean-redis$'; then
+  docker exec youban-runtime-clean-redis redis-cli -n 15 FLUSHDB >/dev/null
+fi
+
+echo "tgfake 回归库已重建：$db"
