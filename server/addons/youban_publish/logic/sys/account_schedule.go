@@ -142,12 +142,13 @@ func (s *sSysPublish) handleAccountScheduleTask(ctx context.Context, task *asynq
 	for stageIndex, stage := range []func(context.Context) error{
 		func(ctx context.Context) error { return s.submitDuePublishTasks(ctx, scope) },
 		func(ctx context.Context) error { return s.pauseInactiveAccountCycles(ctx, scope) },
-		func(ctx context.Context) error { return s.repairAccountCyclePlans(ctx, scope) },
 		func(ctx context.Context) error { return s.produceAccountProfileCycles(ctx, scope) },
 		func(ctx context.Context) error { return s.runProfileCycleOrchestrator(ctx, scope) },
 		func(ctx context.Context) error { return s.scheduleDueChannelBatchCyclesShard(ctx, 20, -1, scope) },
 		func(ctx context.Context) error { return s.finalizeDispatchingChannelCycleRuns(ctx, 20, scope) },
 		func(ctx context.Context) error { return s.recoverChannelCycleRuns(ctx, scope) },
+		// 历史映射修复是低优先级补偿，必须放在当前循环生产之后，不能阻塞用户当前曝光。
+		func(ctx context.Context) error { return s.repairAccountCyclePlans(ctx, scope) },
 	} {
 		// 阶段各自限时，慢查询不能耗尽账户全部预算，挤掉后续循环与恢复。
 		stageCtx, cancel := context.WithTimeout(bounded, 2*time.Second)
