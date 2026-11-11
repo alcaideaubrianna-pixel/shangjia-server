@@ -106,9 +106,9 @@ func (s *sSysPublish) enqueueAccountSchedules(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		// 账户调度使用独立循环队列，避免历史采集/资料定时任务占满后台队列后
-		// 把循环计划延迟到下一轮；同一账户仍由租约保证串行，账户之间可并行。
-		_, err = client.EnqueueContext(ctx, asynq.NewTask(publishconsts.QueueAccountScheduleTask, body), asynq.Queue(tgQueueNameCycle),
+		// 账户调度使用独立队列，避免历史采集/资料任务占满后台队列后把
+		// 循环计划延迟到下一轮；同一账户仍由租约保证串行，账户之间可并行。
+		_, err = client.EnqueueContext(ctx, asynq.NewTask(publishconsts.QueueAccountScheduleTask, body), asynq.Queue(tgQueueNameAccountSchedule),
 			asynq.Unique(2*time.Second), asynq.Timeout(25*time.Second), asynq.MaxRetry(3))
 		if err != nil && !errors.Is(err, asynq.ErrDuplicateTask) {
 			return err

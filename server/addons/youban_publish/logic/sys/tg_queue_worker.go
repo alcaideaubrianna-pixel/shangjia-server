@@ -149,7 +149,7 @@ func (s *sSysPublish) startCollectProcessWorker(ctx context.Context) {
 
 func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	s.tgQueueMu.Lock()
-	if s.autoDeleteQueueServer != nil || s.autoDeleteBackfillServer != nil || s.attemptTimeoutServer != nil || s.backgroundQueueServer != nil || s.materialImportPullServer != nil || s.cycleQueueServer != nil {
+	if s.autoDeleteQueueServer != nil || s.autoDeleteBackfillServer != nil || s.attemptTimeoutServer != nil || s.backgroundQueueServer != nil || s.accountScheduleQueueServer != nil || s.materialImportPullServer != nil || s.cycleQueueServer != nil {
 		s.tgQueueMu.Unlock()
 		return
 	}
@@ -172,6 +172,11 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	server := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
 		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.backgroundConcurrency", 4).Int(),
 		Queues:         workerQueues,
+		RetryDelayFunc: telegramQueueRetryDelay,
+	})
+	accountScheduleServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
+		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.accountScheduleConcurrency", 4).Int(),
+		Queues:         map[string]int{tgQueueNameAccountSchedule: 1},
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
 	materialImportPullServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
@@ -210,6 +215,7 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	s.autoDeleteBackfillServer = autoDeleteBackfillServer
 	s.attemptTimeoutServer = attemptTimeoutServer
 	s.backgroundQueueServer = server
+	s.accountScheduleQueueServer = accountScheduleServer
 	s.materialImportPullServer = materialImportPullServer
 	s.cycleQueueServer = cycleServer
 	s.profileQueueServer = profileServer
@@ -245,6 +251,8 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	go s.recoverProfileMediaOperations(ctx)
 	go s.profileMediaRecoveryLoop(ctx)
 	backgroundMux.HandleFunc(tgTaskTypeAttemptTimeout, s.handleTelegramAttemptTimeoutTask)
+	accountScheduleMux := asynq.NewServeMux()
+	accountScheduleMux.HandleFunc(publishconsts.QueueAccountScheduleTask, s.handleAccountScheduleTask)
 	materialImportPullMux := asynq.NewServeMux()
 	materialImportPullMux.HandleFunc(tgTaskTypeMaterialImport, s.handleMaterialImportTask)
 	relayMux := asynq.NewServeMux()
@@ -293,6 +301,11 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	go func() {
 		if err := server.Run(backgroundMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
 			g.Log().Errorf(ctx, "启动上架插件后台队列失败：%+v", err)
+		}
+	}()
+	go func() {
+		if err := accountScheduleServer.Run(accountScheduleMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
+			g.Log().Errorf(ctx, "启动账户循环调度队列失败：%+v", err)
 		}
 	}()
 	go func() {
@@ -442,6 +455,7 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	collectRealtimeServer := s.collectRealtimeServer
 	collectProcessServer := s.collectProcessQueueServer
 	backgroundServer := s.backgroundQueueServer
+	accountScheduleServer := s.accountScheduleQueueServer
 	relayServer := s.relayQueueServer
 	materialImportPullServer := s.materialImportPullServer
 	materialImportMediaServer := s.materialImportMediaServer
@@ -464,6 +478,7 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	s.collectRealtimeServer = nil
 	s.collectProcessQueueServer = nil
 	s.backgroundQueueServer = nil
+	s.accountScheduleQueueServer = nil
 	s.relayQueueServer = nil
 	s.materialImportPullServer = nil
 	s.materialImportMediaServer = nil
@@ -512,6 +527,9 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	}
 	if backgroundServer != nil {
 		backgroundServer.Shutdown()
+	}
+	if accountScheduleServer != nil {
+		accountScheduleServer.Shutdown()
 	}
 	if materialImportPullServer != nil {
 		materialImportPullServer.Shutdown()

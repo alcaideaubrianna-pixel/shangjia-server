@@ -34,6 +34,7 @@ const (
 	tgQueueNameAutoDeleteBackfill                 = "youban_publish_auto_delete_backfill"
 	tgQueueNameAttemptTimeout                     = "youban_publish_attempt_timeout"
 	tgQueueNameBackground                         = "youban_publish_background"
+	tgQueueNameAccountSchedule                    = "youban_publish_account_schedule"
 	tgQueueNameMaterialImportPull                 = "youban_publish_material_import_pull"
 	tgQueueNameMaterialImportMedia                = "youban_publish_material_import_media"
 	tgQueueNameCycle                              = "youban_publish_cycle"
