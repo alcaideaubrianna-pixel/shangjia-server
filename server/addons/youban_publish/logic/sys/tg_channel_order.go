@@ -10,11 +10,13 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	"hotgo/internal/library/cache"
 	hglock "hotgo/internal/library/hgrds/lock"
 )
 
 const telegramChannelDispatchLeaseTTL = 30 * time.Second
 const telegramChannelActiveJobLimit = 1
+const telegramChannelWakeDebounce = 200 * time.Millisecond
 
 func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, job telegramJobRecord) (bool, error) {
 	if err := ctx.Err(); err != nil {
@@ -202,6 +204,18 @@ func (s *sSysPublish) wakeNextTelegramChannelJob(ctx context.Context, job telegr
 	}
 	if job.TenantId <= 0 || (job.ChannelId <= 0 && strings.TrimSpace(job.TargetChatId) == "") {
 		return nil
+	}
+	// 完成回调、Stream 通知、Outbox 恢复可能同时唤醒同一频道。
+	// 只保留一个短窗口内的唤醒，避免重复执行账户/队首查询和 Asynq 入队。
+	// debounce 过期后仍由持久化 Outbox 继续保证可靠恢复。
+	if cache.Initialized() {
+		wakeKey := fmt.Sprintf("youban_publish:tg:wake:%d:%s", job.TenantId, telegramChannelDispatchKey(job))
+		ok, err := cache.Instance().SetIfNotExist(ctx, wakeKey, 1, telegramChannelWakeDebounce)
+		if err != nil {
+			g.Log().Warningf(ctx, "频道唤醒去重缓存失败，继续执行唤醒 channelId:%d err:%+v", job.ChannelId, err)
+		} else if !ok {
+			return nil
+		}
 	}
 	now := gtime.Now()
 	var nextJobs []telegramJobRecord
