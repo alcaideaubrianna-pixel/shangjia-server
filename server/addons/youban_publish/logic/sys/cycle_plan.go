@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	publishconsts "hotgo/addons/youban_publish/consts"
 	"hotgo/internal/dao"
@@ -59,6 +60,11 @@ func (s *sSysPublish) repairAccountCyclePlans(ctx context.Context, scope publish
 	checkpoint.NextAt = time.Now().Add(10 * time.Second).Unix()
 	if err := cache.Instance().Set(ctx, key, checkpoint, 24*time.Hour); err != nil {
 		return err
+	}
+	// 修复已存在但失效的映射：旧迁移或频道替换可能留下 last_job_id=0，
+	// 或指向已删除任务；这类映射不会进入到期扫描，必须绑定到最新成功记录。
+	if _, err := g.DB().Exec(ctx, "UPDATE "+publishChannelProfileTable+" cp SET last_job_id=latest.job_id,next_cycle_at=NULL,updated_at=NOW() FROM (SELECT DISTINCT ON (j.tenant_id,j.account_id,j.channel_id,j.profile_id) j.tenant_id,j.account_id,j.channel_id,j.profile_id,j.id AS job_id FROM "+publishTgJobTable+" j JOIN "+publishChannelTable+" c ON c.id=j.channel_id AND c.tenant_id=j.tenant_id AND c.deleted_at IS NULL WHERE j.tenant_id=? AND j.account_id=? AND j.status='sent' AND c.status=1 AND c.cycle_publish_enabled=1 AND c.publish_direction='up' ORDER BY j.tenant_id,j.account_id,j.channel_id,j.profile_id,j.id DESC) latest WHERE cp.tenant_id=latest.tenant_id AND cp.account_id=latest.account_id AND cp.channel_id=latest.channel_id AND cp.profile_id=latest.profile_id AND cp.status='active' AND (cp.last_job_id=0 OR NOT EXISTS (SELECT 1 FROM "+publishTgJobTable+" current_job WHERE current_job.id=cp.last_job_id AND current_job.status IN ('sent','superseded')))", scope.TenantID, scope.AccountID); err != nil {
+		return gerror.Wrap(err, "修复账户循环资料映射失败")
 	}
 	var page []struct {
 		ID int64 `orm:"id"`
