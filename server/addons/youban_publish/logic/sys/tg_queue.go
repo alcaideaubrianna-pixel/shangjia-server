@@ -410,6 +410,13 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 		return gerror.Wrap(err, "锁定TG任务入队状态失败")
 	}
 	if !reserved {
+		// Stream 事件只唤醒频道队首；非队首任务不能直接 ACK 后丢弃，
+		// 必须重新激活 Outbox，待前序任务完成后再次进入就绪流。
+		if globalStreamPushEngineEnabled() {
+			if rearmErr := s.rearmTelegramJobOutbox(ctx, jobId, time.Second); rearmErr != nil {
+				return gerror.Wrap(rearmErr, "恢复非队首TG任务Outbox失败")
+			}
+		}
 		return nil
 	}
 	if err = s.enqueueTelegramTaskWithQueue(ctx, tgTaskTypePublish, jobId, delay, unique, queueName); err != nil {
