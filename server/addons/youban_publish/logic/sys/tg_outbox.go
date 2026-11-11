@@ -451,10 +451,10 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 	if limit <= 0 {
 		limit = telegramOutboxBatchLimit(ctx)
 	}
-	// 多副本 Stream dispatcher 只负责快速通知；小批次可以避免多个
-	// worker 同时排序/锁定数千行，靠下一轮读取持续排空 Outbox。
-	if limit > 100 {
-		limit = 100
+	// Stream dispatcher 只做可靠通知，不执行频道发送；适当增大批次可以
+	// 一轮排空更多独立频道，减少秒级轮询等待。频道 lease 仍在发送阶段保证串行。
+	if limit > 500 {
+		limit = 500
 	}
 	if limit > telegramOutboxMaxBatchLimit(ctx) {
 		limit = telegramOutboxMaxBatchLimit(ctx)
