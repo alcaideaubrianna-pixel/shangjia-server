@@ -211,3 +211,5 @@ YOUBAN_LOCAL_STREAM_MEDIA_PG=1 go test ./addons/youban_publish/logic/sys -run '^
 - 已验证 `/sim/state`、Bot API `getMe`、429 故障注入、延迟/断响应规则清理，以及 `sendMessage` 的模拟发送。
 - 运行场景控制已改为 `/sim/fault`，支持按方法和频道注入错误、延迟、连接丢失和“已执行但丢响应”。
 - 首次全量混合场景仍受本地数据库中上一轮遗留 pending 队列影响，不能作为 tgfake 吞吐结论；需要使用干净测试库或先清理历史测试任务后重跑。
+- 独立库首次真实运行已通过 1000/1000 普通资料发送、资料投影、频道顺序和消息证据；tgfake 媒体文件在每次 `/sim/reset` 后必须重新上传，使用 `prepare-tgfake-media.sh` 回写当前 file_id。
+- 延迟/丢响应场景仍需在媒体初始化后单独重跑；首轮失败原因是 tgfake reset 后旧 file_id 失效，不能归因于业务发送逻辑。
