@@ -18,4 +18,6 @@ const (
 	PublishAccountActivityKeyPrefix     = "youban_publish:account:activity:"
 	MediaPHashScopeSizeKeyPrefix        = "youban_publish:media_phash_lsh:scope_size:"
 	ProfileMediaValidationKeyPrefix     = "youban_publish:profile_media_validation:"
+	// TelegramReadyStreamDedupeKeyPrefix 防止多个 Outbox dispatcher 在租约边界重复写入同一就绪事件。
+	TelegramReadyStreamDedupeKeyPrefix = "youban_publish:tg:ready:dedupe:"
 )

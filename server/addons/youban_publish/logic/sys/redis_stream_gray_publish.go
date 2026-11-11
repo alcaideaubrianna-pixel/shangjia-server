@@ -2,16 +2,34 @@ package sys
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+	publishconsts "hotgo/addons/youban_publish/consts"
+	"hotgo/internal/library/cache"
 
 	"hotgo/addons/youban_publish/library/streamgray"
 )
 
 // publishTelegramReadyStream 将已持久化的任务发布为 Stream 就绪事件。
 func (s *sSysPublish) publishTelegramReadyStream(ctx context.Context, job telegramJobRecord) error {
+	// Outbox 可能被多个实例同时领取，写 Stream 前按 job+stream 做短期幂等。
+	// Redis 已成功写入而数据库确认失败时，后续重试只需确认 Outbox，不应制造大量重复消息。
+	stream := streamgray.StreamForOperation(job.OperationNo)
+	if telegramJobPriorityValue(job) == tgJobPriorityHistory {
+		stream = streamgray.ReadyBulkStream
+	}
+	dedupeKey := fmt.Sprintf("%s%s:%d", publishconsts.TelegramReadyStreamDedupeKeyPrefix, stream, job.Id)
+	ok, err := cache.Instance().SetIfNotExist(ctx, dedupeKey, 1, 10*time.Minute)
+	if err != nil {
+		return gerror.Wrap(err, "记录TG任务 Stream 幂等键失败")
+	}
+	if !ok {
+		return nil
+	}
 	producer, err := streamgray.NewRedisProducerFromCache()
 	if err != nil {
 		return err
@@ -20,11 +38,8 @@ func (s *sSysPublish) publishTelegramReadyStream(ctx context.Context, job telegr
 		TenantID: job.TenantId, AccountID: job.AccountId, JobID: job.Id,
 		ChannelID: job.ChannelId, Priority: job.Priority, QueueName: job.QueueName,
 	}
-	stream := streamgray.StreamForOperation(job.OperationNo)
-	if telegramJobPriorityValue(job) == tgJobPriorityHistory {
-		stream = streamgray.ReadyBulkStream
-	}
 	if _, err = streamgray.PublishReadyEvent(ctx, producer, stream, event); err != nil {
+		_, _ = cache.Instance().Remove(ctx, dedupeKey)
 		return gerror.Wrap(err, "发布TG任务 Redis Stream 就绪事件失败")
 	}
 	return nil
