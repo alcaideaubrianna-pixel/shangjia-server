@@ -45,6 +45,15 @@ TRUNCATE hg_youban_publish_tg_attempt_message,hg_youban_publish_tg_delivery_step
   hg_youban_publish_tg_job_log,hg_youban_publish_tg_attempt,
   hg_youban_publish_tg_message,hg_youban_publish_tg_outbox,
   hg_youban_publish_tg_job CASCADE;
+-- 压力脚本会生成 1000×100 条历史任务；真实角色场景按需注入任务，
+-- 基础环境只保留少量资料映射，避免账户调度先扫描十万条历史记录。
+DELETE FROM hg_youban_publish_profile_channel WHERE account_id=999;
+INSERT INTO hg_youban_publish_profile_channel
+    (tenant_id,account_id,profile_id,channel_id,is_manual,created_at,updated_at)
+SELECT 999,999,p.id,c.id,0,NOW(),NOW()
+FROM hg_content_profile p
+JOIN hg_youban_publish_channel c ON c.tenant_id=999 AND c.channel_title LIKE 'local-hook-channel-%'
+WHERE p.source_type='local_regression' AND p.id<=20;
 UPDATE hg_youban_publish_profile_state
 SET publish_operation_no='',publish_task_status='',publish_task_updated_at=NULL
 WHERE tenant_id=999 AND account_id=999;
