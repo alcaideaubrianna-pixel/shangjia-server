@@ -99,19 +99,35 @@ func localAccountRuntimeContext(t *testing.T) context.Context {
 		t.Skip("requires local Docker roles")
 	}
 	t.Setenv("YOUBAN_PUBLISH_PUSH_ENGINE", pushEngineUnifiedStream)
-	t.Setenv("YOUBAN_TELEGRAM_RUNTIME_API_URL", "http://127.0.0.1:19100")
-	t.Setenv("YOUBAN_TELEGRAM_BOT_API_URL", "http://127.0.0.1:19100")
+	if os.Getenv("YOUBAN_TELEGRAM_RUNTIME_API_URL") == "" {
+		t.Setenv("YOUBAN_TELEGRAM_RUNTIME_API_URL", "http://127.0.0.1:18790")
+	}
+	if os.Getenv("YOUBAN_TELEGRAM_BOT_API_URL") == "" {
+		t.Setenv("YOUBAN_TELEGRAM_BOT_API_URL", "http://127.0.0.1:18790")
+	}
 	t.Setenv("YOUBAN_TELEGRAM_LOCAL_BOT_ENABLED", "1")
 	previousConfig := g.Cfg().GetAdapter()
 	t.Cleanup(func() { g.Cfg().SetAdapter(previousConfig) })
-	adapter, err := gcfg.NewAdapterContent(`{"cache":{"adapter":"redis"},"redis":{"default":{"address":"127.0.0.1:16382","db":15}}}`)
+	redisAddress := os.Getenv("YOUBAN_REDIS_ADDRESS")
+	if redisAddress == "" {
+		redisAddress = "127.0.0.1:16382"
+	}
+	redisDB := os.Getenv("YOUBAN_REDIS_DB")
+	if redisDB == "" {
+		redisDB = "15"
+	}
+	adapter, err := gcfg.NewAdapterContent(fmt.Sprintf(`{"cache":{"adapter":"redis"},"redis":{"default":{"address":"%s","db":%s}}}`, redisAddress, redisDB))
 	if err != nil {
 		t.Fatal(err)
 	}
 	g.Cfg().SetAdapter(adapter)
 	previousDB := gdb.GetConfig("default")
 	t.Cleanup(func() { gdb.SetConfigGroup("default", previousDB) })
-	gdb.SetConfigGroup("default", gdb.ConfigGroup{{Type: "pgsql", Host: "127.0.0.1", Port: "5432", User: "postgres", Pass: "postgres", Name: "youban_hotgo"}})
+	databaseName := os.Getenv("YOUBAN_LOCAL_DB_NAME")
+	if databaseName == "" {
+		databaseName = "youban_tgfake_test"
+	}
+	gdb.SetConfigGroup("default", gdb.ConfigGroup{{Type: "pgsql", Host: "127.0.0.1", Port: "5432", User: "postgres", Pass: "postgres", Name: databaseName}})
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	t.Cleanup(cancel)
 	cache.SetAdapter(ctx)
