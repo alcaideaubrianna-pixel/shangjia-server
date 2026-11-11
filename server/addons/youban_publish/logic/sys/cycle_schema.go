@@ -36,6 +36,19 @@ func (s *sSysPublish) syncChannelCycleAfterSave(ctx context.Context, tenantId in
 	if err = s.enqueueCycleReschedule(ctx, channelId, 0); err != nil {
 		g.Log().Warningf(ctx, "提交频道循环重算任务失败，定时调度将自动恢复 channel:%d err:%+v", channelId, err)
 	}
+	// 配置修改必须立即投影到频道内已有资料，否则资料仍会沿用旧循环时间或旧开关。
+	var jobs []telegramJobRecord
+	if err = g.DB().Model(publishChannelProfileTable+" cp").Safe().Ctx(ctx).
+		InnerJoin(publishTgJobTable+" j", "j.id=cp.last_job_id AND j.tenant_id=cp.tenant_id AND j.account_id=cp.account_id AND j.channel_id=cp.channel_id AND j.profile_id=cp.profile_id").
+		Where("cp.tenant_id", tenantId).Where("cp.channel_id", channelId).Where("cp.status", "active").
+		WhereIn("j.status", []string{"sent", "superseded"}).Fields("j.*").Limit(profileCycleOrchestratorBatchSize(ctx)).Scan(&jobs); err != nil {
+		return gerror.Wrap(err, "读取频道循环资料计划失败")
+	}
+	for _, job := range jobs {
+		if err = s.syncTelegramJobCycleSchedule(ctx, job); err != nil {
+			return gerror.Wrapf(err, "同步频道资料循环计划失败 profileId:%d", job.ProfileId)
+		}
+	}
 	// 频道配置变化后立即唤醒关联资料级 run，避免继续等待旧的到期时间。
 	if err = s.wakeProfileCycleRunsForChannel(ctx, tenantId, channelId); err != nil {
 		g.Log().Warningf(ctx, "唤醒频道资料循环任务失败 channel:%d err:%+v", channelId, err)
