@@ -53,6 +53,11 @@ SQL
 # 专用 Redis 只存本地回归 Stream/Asynq 数据。
 if docker ps --format '{{.Names}}' | rg -q '^youban-runtime-clean-redis$'; then
   docker exec youban-runtime-clean-redis redis-cli -n 15 FLUSHDB >/dev/null
+  redis_keys="$(docker exec youban-runtime-clean-redis redis-cli -n 15 DBSIZE | tr -d '\r')"
+  if [[ "$redis_keys" != "0" ]]; then
+    echo "本地回归 Redis 清理失败：DB15 仍有 ${redis_keys} 个 key" >&2
+    exit 1
+  fi
 fi
 
 echo "tgfake 回归库已重建：$db"
