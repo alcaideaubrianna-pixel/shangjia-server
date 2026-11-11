@@ -8,6 +8,28 @@ CREATE INDEX IF NOT EXISTS idx_local_tg_outbox_stream_ready
     ON hg_youban_publish_tg_outbox(event_type,status,available_at,id,job_id);
 ANALYZE hg_youban_publish_tg_outbox;
 ANALYZE hg_youban_publish_tg_job;
+-- 账户调度夹具：统一 Stream 模式的循环调度按账户目录入队。
+-- 没有账户及其 push_engine 配置时，scheduler 虽然正常执行，但不会创建账户调度任务。
+INSERT INTO hg_youban_publish_account
+    (id,tenant_id,merchant_id,parent_id,account_type,nickname,username,status,created_at,updated_at,last_active_at,deleted_at)
+VALUES
+    (999,999,0,0,'uploader','local-regression-account','local_regression_999',1,now(),now(),now(),NULL)
+ON CONFLICT (id) DO UPDATE SET
+    tenant_id=EXCLUDED.tenant_id,
+    status=1,
+    deleted_at=NULL,
+    last_active_at=now(),
+    updated_at=now();
+INSERT INTO hg_youban_publish_account_setting
+    (tenant_id,account_id,cycle_publish_enabled,cycle_publish_days,cycle_publish_time,push_engine,created_at,updated_at,deleted_at)
+VALUES
+    (999,999,1,1,'00:00','unified_stream',now(),now(),NULL)
+ON CONFLICT (tenant_id,account_id) WHERE deleted_at IS NULL DO UPDATE SET
+    cycle_publish_enabled=1,
+    cycle_publish_days=1,
+    push_engine='unified_stream',
+    deleted_at=NULL,
+    updated_at=now();
 INSERT INTO hg_youban_publish_bot(tenant_id,bot_name,bot_username,bot_token,status,created_at,updated_at)
 SELECT 999,'local-hook-bot','local_hook_bot','LOCAL:TEST:TOKEN',1,now(),now()
 WHERE NOT EXISTS (SELECT 1 FROM hg_youban_publish_bot WHERE tenant_id=999 AND bot_username='local_hook_bot');
