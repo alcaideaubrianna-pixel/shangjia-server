@@ -464,6 +464,10 @@ func (s *sSysBot) handleProfileCallback(ctx context.Context, botId int64, query 
 		err := s.sendProfileByNo(ctx, botId, chatId, account, no)
 		s.auditProfileCallback(ctx, query, account, action, no, err)
 		return true, err
+	case "preview":
+		err := s.sendProfileByNo(ctx, botId, chatId, account, no)
+		s.auditProfileCallback(ctx, query, account, action, no, err)
+		return true, err
 	case "view":
 		err := s.showProfileCard(ctx, botId, chatId, account, no)
 		s.auditProfileCallback(ctx, query, account, action, no, err)
@@ -480,7 +484,7 @@ func (s *sSysBot) handleProfileCallback(ctx context.Context, botId int64, query 
 	case "edtext":
 		return true, s.startProfileSessionByIds(ctx, botId, fmt.Sprintf("%d", query.From.ID), chatId, account, "edit_text", "waiting_text", 0, no, nil, "请输入新的正文：")
 	case "edno":
-		return true, s.startProfileSessionByIds(ctx, botId, fmt.Sprintf("%d", query.From.ID), chatId, account, "edit_no", "waiting_no", 0, no, nil, "请输入新的编号，格式如 A00001：")
+		return true, s.startProfileSessionByIds(ctx, botId, fmt.Sprintf("%d", query.From.ID), chatId, account, "edit_verify", "waiting_verify", 0, no, nil, "请发送新的验证视频，支持单独视频或视频 group。6 分钟无操作将自动取消。")
 	case "channels":
 		// Start a fresh selection session from the persisted channel set. A
 		// stale abandoned session must not make every channel appear unchecked.
@@ -2233,7 +2237,7 @@ func (s *sSysBot) startProfileSessionByIds(ctx context.Context, botId int64, tel
 		payloadText = gjson.MustEncodeString(suffixPayload)
 	}
 	now := gtime.Now()
-	_, err := g.DB().Model(profileSessionTable).Safe().Ctx(ctx).Data(g.Map{"bot_id": botId, "telegram_user_id": telegramUserId, "chat_id": chatId, "app": account.App, "account_id": account.AccountId, "tenant_id": account.TenantId, "scene": scene, "step": step, "profile_id": profileId, "profile_no": profileNo, "payload_json": payloadText, "expires_at": now.Add(30 * time.Minute), "status": profileSessionStatusActive, "created_at": now, "updated_at": now}).Insert()
+	_, err := g.DB().Model(profileSessionTable).Safe().Ctx(ctx).Data(g.Map{"bot_id": botId, "telegram_user_id": telegramUserId, "chat_id": chatId, "app": account.App, "account_id": account.AccountId, "tenant_id": account.TenantId, "scene": scene, "step": step, "profile_id": profileId, "profile_no": profileNo, "payload_json": payloadText, "expires_at": now.Add(profileSessionDuration(scene)), "status": profileSessionStatusActive, "created_at": now, "updated_at": now}).Insert()
 	if err != nil {
 		return gerror.Wrap(err, "创建资料操作会话失败")
 	}
@@ -2247,6 +2251,15 @@ func (s *sSysBot) startProfileSessionByIds(ctx context.Context, botId int64, tel
 		}})
 	}
 	return s.sendProfileSessionPrompt(ctx, botId, chatId, scene, profileId, profileNo, replyText)
+}
+
+func profileSessionDuration(scene string) time.Duration {
+	switch scene {
+	case "edit_title", "edit_text", "edit_verify", "replace":
+		return 6 * time.Minute
+	default:
+		return 30 * time.Minute
+	}
 }
 
 func (s *sSysBot) sendProfileSessionPrompt(ctx context.Context, botId int64, chatId string, scene string, profileId int64, profileNo string, text string) error {
@@ -2272,6 +2285,11 @@ func (s *sSysBot) sendProfileSessionPrompt(ctx context.Context, botId int64, cha
 		}
 	default:
 		buttons = append(buttons, []models.InlineKeyboardButton{{Text: "返回资料管理", CallbackData: "pf:menu"}})
+	}
+	if scene == "edit_verify" || scene == "replace" {
+		if strings.TrimSpace(profileNo) != "" {
+			buttons = append(buttons, []models.InlineKeyboardButton{{Text: "查看原文预览", CallbackData: "pf:preview:" + strings.ToUpper(profileNo)}})
+		}
 	}
 	cancelData := "pf:cancel"
 	if scene == "collect_channel_add" {
@@ -2913,10 +2931,14 @@ func (s *sSysBot) consumeProfileCreatePart(ctx context.Context, botId int64, cha
 		if !claimed {
 			return nil
 		}
-		if session.Scene == "replace" {
+		if session.Scene == "replace" || session.Scene == "edit_verify" {
 			stageStartedAt = time.Now()
 			g.Log().Infof(ctx, "Bot资料收尾阶段开始 trace:%s stage:edit_profile", trace)
-			note, err := publishService.SysPublish().BotProfileEdit(ctx, &publishsysin.BotProfileEditInp{TenantId: account.TenantId, AccountId: botProfileScopeAccountId(account), ProfileNo: session.ProfileNo, PlainText: draft.DisplayText, DisplayMedia: nil, VerifyText: draft.VerifyText, VerifyMedia: nil})
+			verifyMedia := []*publishsysin.MessageTemplateMediaInp(nil)
+			if session.Scene == "edit_verify" {
+				verifyMedia = pendingVerifyMedia
+			}
+			note, err := publishService.SysPublish().BotProfileEdit(ctx, &publishsysin.BotProfileEditInp{TenantId: account.TenantId, AccountId: botProfileScopeAccountId(account), ProfileNo: session.ProfileNo, PlainText: draft.DisplayText, DisplayMedia: nil, VerifyText: draft.VerifyText, VerifyMedia: verifyMedia})
 			if err != nil {
 				g.Log().Warningf(ctx, "Bot资料收尾阶段失败 trace:%s stage:edit_profile elapsed_ms:%d err:%s", trace, time.Since(stageStartedAt).Milliseconds(), sensitive.Diagnostic(err.Error()))
 				if resetErr := s.resetProfileSessionStep(ctx, session.Id, "saving", "waiting_verify", draft); resetErr != nil {
@@ -2937,7 +2959,11 @@ func (s *sSysBot) consumeProfileCreatePart(ctx context.Context, botId int64, cha
 				g.Log().Warningf(ctx, "Bot资料媒体任务入队失败 trace:%s profile_id:%d err:%s", trace, note.Id, sensitive.Diagnostic(err.Error()))
 			}
 			g.Log().Infof(ctx, "Bot资料收尾阶段完成 trace:%s stage:complete_session elapsed_ms:%d", trace, time.Since(stageStartedAt).Milliseconds())
-			if err = s.sendProfileEditSuccess(ctx, botId, chatId, note, "资料已重新覆盖"); err != nil {
+			successText := "资料已重新覆盖"
+			if session.Scene == "edit_verify" {
+				successText = "验证资料已更新"
+			}
+			if err = s.sendProfileEditSuccess(ctx, botId, chatId, note, successText); err != nil {
 				return err
 			}
 			return s.sendProfileCard(ctx, botId, chatId, note, "view")
@@ -3971,7 +3997,7 @@ func (s *sSysBot) showProfileEditMenu(ctx context.Context, botId int64, chatId s
 	text := fmt.Sprintf("编辑笔记\n\n编号：<code>%s</code>\n标题：%s\n\n请选择要编辑的内容：", html.EscapeString(note.ProfileNo), html.EscapeString(note.Title))
 	markup := &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
 		{{Text: "编辑标题", CallbackData: "pf:edtitle:" + note.ProfileNo}, {Text: "编辑正文", CallbackData: "pf:edtext:" + note.ProfileNo}},
-		{{Text: "编辑编号", CallbackData: "pf:edno:" + note.ProfileNo}, {Text: "重新覆盖资料", CallbackData: "pf:replace:" + note.ProfileNo}},
+		{{Text: "编辑验证资料", CallbackData: "pf:edno:" + note.ProfileNo}, {Text: "重新覆盖资料", CallbackData: "pf:replace:" + note.ProfileNo}},
 		{{Text: "上架频道编辑", CallbackData: "pf:channels:" + note.ProfileNo}},
 		{{Text: "返回", CallbackData: "pf:backview:" + note.ProfileNo}},
 	}}
