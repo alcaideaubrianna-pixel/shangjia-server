@@ -48,6 +48,18 @@ TRUNCATE hg_youban_publish_tg_attempt_message,hg_youban_publish_tg_delivery_step
 UPDATE hg_youban_publish_profile_state
 SET publish_operation_no='',publish_task_status='',publish_task_updated_at=NULL
 WHERE tenant_id=999 AND account_id=999;
+-- 任务表已清空后，循环状态仍必须有频道资料映射；否则测试会保留已删除的 last_job_id，循环扫描永远找不到队首。
+INSERT INTO hg_youban_publish_channel_profile
+    (tenant_id,account_id,channel_id,profile_id,last_job_id,status,next_cycle_at,cycle_generation,created_at,updated_at)
+SELECT pc.tenant_id,pc.account_id,pc.channel_id,pc.profile_id,0,'active',NOW()-interval '1 second',0,NOW(),NOW()
+FROM hg_youban_publish_profile_channel pc
+WHERE pc.tenant_id=999 AND pc.account_id=999
+ON CONFLICT (channel_id,profile_id) DO UPDATE SET
+    account_id=EXCLUDED.account_id,
+    last_job_id=0,
+    status='active',
+    next_cycle_at=EXCLUDED.next_cycle_at,
+    updated_at=NOW();
 SQL
 
 # 专用 Redis 只存本地回归 Stream/Asynq 数据。
