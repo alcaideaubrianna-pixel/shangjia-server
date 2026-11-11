@@ -2885,7 +2885,7 @@ func (s *sSysBot) consumeProfileCreatePart(ctx context.Context, botId int64, cha
 		} else if strings.TrimSpace(text) == "" && len(media) == 0 {
 			return s.sendProfileCreateStepPrompt(ctx, botId, chatId, "waiting_verify")
 		}
-		if strings.TrimSpace(draft.DisplayText) == "" && len(draft.DisplayMedia) == 0 {
+		if session.Scene != "edit_verify" && strings.TrimSpace(draft.DisplayText) == "" && len(draft.DisplayMedia) == 0 {
 			g.Log().Warningf(ctx, "Bot资料创建阻止空展示资料 trace:%s session_id:%d verify_media_count:%d verify_text_len:%d", trace, session.Id, len(media), len(strings.TrimSpace(text)))
 			if err := s.resetProfileSessionStep(ctx, session.Id, "waiting_verify", "waiting_display", draft); err != nil {
 				return err
