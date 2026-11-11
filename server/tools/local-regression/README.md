@@ -99,3 +99,15 @@ docker exec r1rpc-redis redis-cli -n 15 XINFO GROUPS youban_publish:tg:ready:bul
 ```
 
 Docker 服务使用 `restart: unless-stopped`，终端关闭后仍会持续运行；需要停止时执行 `docker-down.sh`。
+
+### 一键干净回归
+
+先停止业务角色并重建独立测试库，再启动两个 publish-worker 和两个 background-worker：
+
+```bash
+YOUBAN_LOCAL_DB_NAME=youban_tgfake_test \
+YOUBAN_LOCAL_POLL_INTERVAL=0.2 \
+./run-clean-tgfake-regression.sh
+```
+
+脚本会重置 PostgreSQL、Redis、tgfake 状态并重新上传媒体夹具，避免上一轮 pending/retry 任务污染结果。
