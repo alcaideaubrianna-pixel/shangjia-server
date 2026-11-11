@@ -20,6 +20,9 @@ func (s *sSysPublish) syncChannelCycleAfterSave(ctx context.Context, tenantId in
 	data := g.Map{
 		"cycle_active_run_id":      0,
 		"cycle_last_error_message": "",
+		"cycle_publish_enabled":    enabled,
+		"cycle_publish_days":       days,
+		"cycle_publish_time":       strings.TrimSpace(publishTime),
 		"updated_at":               gtime.Now(),
 		"cycle_scheduler_shard":    gdb.Raw("MOD(ABS(HASHTEXT(tenant_id::text || ':' || id::text)),64)"),
 	}
