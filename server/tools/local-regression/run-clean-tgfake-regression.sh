@@ -12,7 +12,10 @@ compose=(docker compose -f docker-compose.yml)
   YOUBAN_LOCAL_DB_NAME="$db" ./tools/local-regression/reset-tgfake-db.sh
 )
 curl --noproxy '*' -fsS -X POST http://127.0.0.1:18790/sim/reset >/dev/null
-YOUBAN_LOCAL_DB_NAME="$db" ./prepare-tgfake-media.sh
+(
+  cd ../..
+  YOUBAN_LOCAL_DB_NAME="$db" ./tools/local-regression/prepare-tgfake-media.sh
+)
 
 YOUBAN_LOCAL_DB_NAME="$db" "${compose[@]}" up -d \
   --scale publish-worker=2 --scale background-worker=2 \
