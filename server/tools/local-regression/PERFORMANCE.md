@@ -214,3 +214,4 @@ YOUBAN_LOCAL_STREAM_MEDIA_PG=1 go test ./addons/youban_publish/logic/sys -run '^
 - 独立库首次真实运行已通过 1000/1000 普通资料发送、资料投影、频道顺序和消息证据；tgfake 媒体文件在每次 `/sim/reset` 后必须重新上传，使用 `prepare-tgfake-media.sh` 回写当前 file_id。
 - 延迟/丢响应场景仍需在媒体初始化后单独重跑；首轮失败原因是 tgfake reset 后旧 file_id 失效，不能归因于业务发送逻辑。
 - tgfake 1.5 原生能力验证：按钮回调注入、文件下载断连接故障、429/延迟规则均可工作；Redis 就绪通知丢失场景 9/9 恢复，Redis 重启场景最终 200/200 收口（原 150 秒窗口达到 198/200，测试窗口已调整为 240 秒）。
+- 丢响应场景已调整为 30 秒客户端超时（而非直接 EOF），使业务正确进入 `unknown` 对账路径；tgfake 的 `contains` 过滤用于 multipart 媒体组频道匹配。
