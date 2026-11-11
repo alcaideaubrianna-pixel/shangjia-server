@@ -25,9 +25,12 @@ type collectMaterialUnit struct {
 }
 
 type collectMaterialMessageView struct {
-	RawText   string
-	Media     []collectMediaItem
-	MessageAt time.Time
+	// EventID/ParentEventID 来自采集事件落库关系；有明确父子关系时优先使用，避免 Telegram 时间乱序导致验证视频丢失。
+	EventID       int64
+	ParentEventID int64
+	RawText       string
+	Media         []collectMediaItem
+	MessageAt     time.Time
 }
 
 type collectMaterialPair struct {
@@ -37,8 +40,32 @@ type collectMaterialPair struct {
 
 func pairCollectMaterialMessages(messages []collectMaterialMessageView) []collectMaterialPair {
 	pairs := make([]collectMaterialPair, 0)
+	// 线上 Bot 可能先落库验证视频、后收到展示资料，不能只按时间顺序判断。
+	displaysByEventID := make(map[int64]int, len(messages))
+	for index, message := range messages {
+		if message.EventID > 0 && classifyProfileMessage(message.RawText, message.Media).Kind == profileMessageKindDisplay {
+			displaysByEventID[message.EventID] = index
+		}
+	}
+	pairedVerify := make(map[int]struct{})
+	for index, message := range messages {
+		if message.ParentEventID <= 0 {
+			continue
+		}
+		displayIndex, ok := displaysByEventID[message.ParentEventID]
+		if !ok || index == displayIndex {
+			continue
+		}
+		if classifyProfileMessage(message.RawText, message.Media).Kind == profileMessageKindVerify || collectMaterialMixedVerification(message) {
+			pairs = append(pairs, collectMaterialPair{DisplayIndex: displayIndex, VerifyIndex: index})
+			pairedVerify[index] = struct{}{}
+		}
+	}
 	lastDisplayIndex := -1
 	for index, message := range messages {
+		if _, exists := pairedVerify[index]; exists {
+			continue
+		}
 		if collectMaterialSkippableMessage(message) {
 			continue
 		}
@@ -48,8 +75,6 @@ func pairCollectMaterialMessages(messages []collectMaterialMessageView) []collec
 		}
 		switch kind {
 		case profileMessageKindDisplay:
-			// A new business record closes the previous context. Verification can
-			// only belong to the latest effective display record.
 			lastDisplayIndex = index
 		case profileMessageKindVerify:
 			if lastDisplayIndex >= 0 {
@@ -62,8 +87,6 @@ func pairCollectMaterialMessages(messages []collectMaterialMessageView) []collec
 				}
 			}
 		default:
-			// Unknown business content is a hard boundary. Known collector notices
-			// were skipped above; keyword configuration must not affect pairing.
 			lastDisplayIndex = -1
 		}
 	}

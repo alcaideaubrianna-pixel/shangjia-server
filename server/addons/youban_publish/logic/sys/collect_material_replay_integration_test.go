@@ -84,15 +84,18 @@ func TestCollectMaterialReplayProductionMessages(t *testing.T) {
 		t.Fatalf("read production replay stream: %v", err)
 	}
 	flush()
-	if stats.Channels != 50 {
+	bounded := os.Getenv("YOUBAN_COLLECT_REPLAY_BOUNDED") == "1"
+	if !bounded && stats.Channels != 50 {
 		t.Fatalf("replayed channels=%d, want 50", stats.Channels)
 	}
-	if stats.Events < 1000 || stats.Displays == 0 || stats.Verifies == 0 || stats.Pairs == 0 {
+	if stats.Events == 0 || stats.Displays == 0 || stats.Verifies == 0 || stats.Pairs == 0 {
 		t.Fatalf("production sample is not representative: %+v", stats)
 	}
+	if !bounded && stats.Events < 1000 {
+		t.Fatalf("production sample is too small: %+v", stats)
+	}
 	t.Logf("production replay: channels=%d events=%d displays=%d verifies=%d pairs=%d multiVerifyDisplays=%d existingBindings=%d bindingDiffs=%d existingNowUnmatched=%d existingParentDiffs=%d newlyMatchedDisplays=%d sampledDisplays=%d sampledWithVerify=%d sampledWithoutVerify=%d",
-		stats.Channels, stats.Events, stats.Displays, stats.Verifies, stats.Pairs, stats.MultiVerifyDisplays, stats.ExistingBindings, stats.ExistingBindingDiffs, stats.ExistingNowUnmatched, stats.ExistingParentDiffs, stats.NewlyMatchedDisplays,
-		stats.SampledDisplays, stats.SampledWithVerify, stats.SampledWithoutVerify)
+		stats.Channels, stats.Events, stats.Displays, stats.Verifies, stats.Pairs, stats.MultiVerifyDisplays, stats.ExistingBindings, stats.ExistingBindingDiffs, stats.ExistingNowUnmatched, stats.ExistingParentDiffs, stats.NewlyMatchedDisplays, stats.SampledDisplays, stats.SampledWithVerify, stats.SampledWithoutVerify)
 }
 
 func TestPairCollectMaterialMessagesHundredThousandWaitingEvents(t *testing.T) {
@@ -150,7 +153,7 @@ func replayCollectMaterialChannel(t *testing.T, rows []collectReplayRow, stats *
 		if err != nil {
 			t.Fatalf("parse event %d received_at %q: %v", row.EventID, row.ReceivedAt, err)
 		}
-		views = append(views, collectMaterialMessageView{RawText: row.RawText, Media: media, MessageAt: messageAt})
+		views = append(views, collectMaterialMessageView{EventID: row.EventID, ParentEventID: row.ParentEventID, RawText: row.RawText, Media: media, MessageAt: messageAt})
 		eventIndex[row.EventID] = index
 		stats.Events++
 		switch classifyProfileMessage(row.RawText, media).Kind {
@@ -170,8 +173,8 @@ func replayCollectMaterialChannel(t *testing.T, rows []collectReplayRow, stats *
 		}
 	}
 	for _, pair := range pairs {
-		if pair.DisplayIndex >= pair.VerifyIndex {
-			t.Fatalf("non-forward pair in channel %s: %+v", rows[0].SourceChatID, pair)
+		if pair.DisplayIndex >= pair.VerifyIndex && rows[pair.VerifyIndex].ParentEventID != rows[pair.DisplayIndex].EventID {
+			t.Fatalf("non-forward pair without persisted parent binding in channel %s: %+v", rows[0].SourceChatID, pair)
 		}
 		if _, exists := predictedParent[pair.VerifyIndex]; exists {
 			t.Fatalf("verification event assigned twice: event=%d", rows[pair.VerifyIndex].EventID)
@@ -238,19 +241,31 @@ func assertCollectReplayDisplayContext(t *testing.T, rows []collectReplayRow, vi
 	t.Helper()
 	displayAt := views[displayIndex].MessageAt
 	expected := 0
-	for index := displayIndex + 1; index < len(views); index++ {
+	for index, row := range rows {
 		view := views[index]
-		if !view.MessageAt.IsZero() && view.MessageAt.Sub(displayAt) > collectMaterialVerifyWindow() {
-			break
-		}
-		if collectMaterialSkippableMessage(view) {
-			continue
-		}
-		switch classifyProfileMessage(view.RawText, view.Media).Kind {
-		case profileMessageKindVerify:
+		if row.ParentEventID == rows[displayIndex].EventID &&
+			(classifyProfileMessage(view.RawText, view.Media).Kind == profileMessageKindVerify || collectMaterialMixedVerification(view)) {
 			expected++
-		default:
-			index = len(views)
+		}
+	}
+	// 对尚未持久化父子关系的实时消息，保留原有顺序窗口校验。
+	if expected == 0 {
+		for index := displayIndex + 1; index < len(views); index++ {
+			view := views[index]
+			if !view.MessageAt.IsZero() && view.MessageAt.Sub(displayAt) > collectMaterialVerifyWindow() {
+				break
+			}
+			if collectMaterialSkippableMessage(view) {
+				continue
+			}
+			if rows[index].ParentEventID > 0 {
+				continue
+			}
+			if classifyProfileMessage(view.RawText, view.Media).Kind == profileMessageKindVerify {
+				expected++
+				continue
+			}
+			break
 		}
 	}
 	if predictedCount != expected {
