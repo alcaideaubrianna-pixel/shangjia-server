@@ -22,7 +22,8 @@ FROM local_seed_profiles;
 INSERT INTO hg_youban_publish_media(tenant_id,account_id,profile_id,media_type,purpose,name,file_url,original_file_url,storage_path,original_storage_path,tg_file_id,tg_cache_status,processing_status,sort_index,status,created_at,updated_at)
 SELECT 999,999,p.profile_id,'image','display','local-display-'||p.profile_id||'-'||m.n,
        '/tmp/youban-testdata/image.jpg','/tmp/youban-testdata/image.jpg','/tmp/youban-testdata/image.jpg','/tmp/youban-testdata/image.jpg',
-       'local-file-'||p.profile_id||'-'||m.n,'valid','ready',m.n,1,now(),now()
+       -- tgfake 中预置的图片 file_id；旧 Hook 可接受 local-file-*，真实 Bot API 不会接受。
+       'file_6','valid','ready',m.n,1,now(),now()
 FROM local_seed_profiles p CROSS JOIN generate_series(1,2) m(n)
 WHERE p.profile_id%10<>0;
 INSERT INTO hg_youban_publish_profile_channel(tenant_id,account_id,profile_id,channel_id,is_manual,created_at,updated_at)
