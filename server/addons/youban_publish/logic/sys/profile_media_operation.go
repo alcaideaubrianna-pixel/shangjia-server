@@ -149,6 +149,29 @@ func (s *sSysPublish) recoverProfileMediaOperations(ctx context.Context) {
 			g.Log().Warningf(ctx, "恢复资料媒体任务入队失败 operation_id:%d err:%s", row.Id, err.Error())
 		}
 	}
+	s.recoverWaitingMediaPublishes(ctx)
+}
+
+// recoverWaitingMediaPublishes is a DB-backed safety net for the small window
+// where media completion commits successfully but Redis/Asynq is unavailable,
+// or the wake event runs before waiting_media is recorded. It only revisits
+// durable waiting intents; normal completion remains event driven.
+func (s *sSysPublish) recoverWaitingMediaPublishes(ctx context.Context) {
+	var rows []struct {
+		ProfileId int64 `json:"profileId"`
+	}
+	if err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
+		Fields("profile_id").Where("publish_task_status", "waiting_media").
+		WhereNull("deleted_at").Where("publish_task_updated_at < ?", time.Now().Add(-10*time.Second)).
+		OrderAsc("publish_task_updated_at").Limit(200).Scan(&rows); err != nil {
+		g.Log().Warningf(ctx, "恢复等待媒体上架状态失败 err:%s", err.Error())
+		return
+	}
+	for _, row := range rows {
+		if err := s.wakeProfileTelegramJobs(ctx, row.ProfileId); err != nil {
+			g.Log().Warningf(ctx, "恢复等待媒体上架失败 profileId:%d err:%+v", row.ProfileId, err)
+		}
+	}
 }
 
 func (s *sSysPublish) profileMediaRecoveryLoop(ctx context.Context) {
