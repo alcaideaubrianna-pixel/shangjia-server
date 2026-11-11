@@ -59,8 +59,10 @@ services:
       YOUBAN_DATABASE_LINK: pgsql:postgres:postgres@tcp(host.docker.internal:5432)/${YOUBAN_LOCAL_DB_NAME:-youban_hotgo}
       YOUBAN_DB_DEBUG: ${YOUBAN_LOCAL_DB_DEBUG:-false}
       # 多副本压力测试时限制单实例连接池，避免扩容后耗尽本地 PG 连接数。
-      YOUBAN_DB_MAX_OPEN: ${YOUBAN_LOCAL_DB_MAX_OPEN:-4}
-      YOUBAN_DB_MAX_IDLE: ${YOUBAN_LOCAL_DB_MAX_IDLE:-2}
+      # 每个角色有独立连接池；两个 push + 两个 background 使用 4 个连接会把
+      # 调度查询和发送回调互相阻塞，回放环境按 SAE 多副本最低配置提供余量。
+      YOUBAN_DB_MAX_OPEN: ${YOUBAN_LOCAL_DB_MAX_OPEN:-20}
+      YOUBAN_DB_MAX_IDLE: ${YOUBAN_LOCAL_DB_MAX_IDLE:-5}
       YOUBAN_REDIS_ADDRESS: ${YOUBAN_LOCAL_REDIS_ADDRESS:-host.docker.internal:16382}
       YOUBAN_REDIS_DB: "15"
       YOUBAN_TELEGRAM_RUNTIME_API_URL: http://tgfake:18790
