@@ -461,6 +461,19 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 	}
 	// 频道顺序检查失败后，通知可能已经被确认 delivered，但 Job 仍是 idle。
 	// 每轮只按主键选取一小页重新激活，避免这类孤儿通知让频道永久卡在队首。
+	// dispatch_status=idle 表示旧 Asynq 执行已经结束，asynq_task_id 可能只是陈旧引用；清掉它才能重新入队。
+	clearStaleTaskSQL := `WITH stale AS (
+		SELECT id FROM ` + publishTgJobTable + `
+		WHERE status='pending' AND COALESCE(dispatch_status,'')='idle'
+			AND (next_retry_at IS NULL OR next_retry_at<=?)
+		ORDER BY id LIMIT ?
+	)
+	UPDATE ` + publishTgJobTable + ` j
+	SET asynq_task_id='', task_id=NULL, updated_at=?
+	FROM stale WHERE j.id=stale.id`
+	if _, err := g.DB().Exec(ctx, clearStaleTaskSQL, now, limit, now); err != nil {
+		return nil, gerror.Wrap(err, "清理失效TG执行任务引用失败")
+	}
 	rearmSQL := `WITH due AS (
 		SELECT o.id
 		FROM ` + publishTgOutboxTable + ` o
@@ -468,7 +481,7 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 		WHERE o.event_type=? AND o.status=? AND o.delivered_at IS NOT NULL
 			AND j.status IN ('pending','failed_retry','unknown')
 			AND COALESCE(j.dispatch_status,'') IN ('','idle')
-			AND (j.next_retry_at IS NULL OR j.next_retry_at<=? OR (j.status='pending' AND COALESCE(j.asynq_task_id,'')=''))
+			AND (j.next_retry_at IS NULL OR j.next_retry_at<=? OR (j.status='pending' AND COALESCE(j.dispatch_status,'')='idle'))
 		ORDER BY o.id
 		LIMIT ?
 	)
@@ -488,7 +501,7 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 			AND (o.status=? OR (o.status=? AND o.lease_expires_at<=?))
 			AND j.status IN ('pending','failed_retry','unknown')
 			AND COALESCE(j.dispatch_status,'') IN ('','idle')
-			AND (j.next_retry_at IS NULL OR j.next_retry_at<=? OR (j.status='pending' AND COALESCE(j.asynq_task_id,'')=''))
+			AND (j.next_retry_at IS NULL OR j.next_retry_at<=? OR (j.status='pending' AND COALESCE(j.dispatch_status,'')='idle'))
 		ORDER BY o.available_at,o.id LIMIT ?`
 	var rows []telegramJobOutboxRecord
 	err := g.DB().GetScan(ctx, &rows, query, telegramOutboxEventPublish, now,
@@ -520,7 +533,7 @@ func telegramDueOutboxPostgresSQL() string {
 		FROM due_jobs j
 		WHERE j.status IN ('pending','failed_retry','unknown')
 			AND COALESCE(j.dispatch_status,'') IN ('','idle')
-			AND (j.next_retry_at IS NULL OR j.next_retry_at<=? OR (j.status='pending' AND COALESCE(j.asynq_task_id,'')=''))
+			AND (j.next_retry_at IS NULL OR j.next_retry_at<=? OR (j.status='pending' AND COALESCE(j.dispatch_status,'')='idle'))
 			AND NOT EXISTS (
 				SELECT 1 FROM ` + publishTgJobTable + ` earlier
 				WHERE earlier.tenant_id=j.tenant_id
