@@ -97,6 +97,7 @@ func (s *sSysPublish) enqueueAccountSchedules(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	enqueued := 0
 	for _, account := range accounts {
 		if s.accountPushEngine(ctx, account.TenantID, account.ID) != pushEngineUnifiedStream {
 			continue
@@ -110,7 +111,9 @@ func (s *sSysPublish) enqueueAccountSchedules(ctx context.Context) error {
 		if err != nil && !errors.Is(err, asynq.ErrDuplicateTask) {
 			return err
 		}
+		enqueued++
 	}
+	g.Log().Debugf(ctx, "账户调度任务入队 tenantAccounts:%d unified:%d cursor:%d", len(accounts), enqueued, cursor.Int64())
 	next := int64(0)
 	if len(accounts) == 100 {
 		next = accounts[len(accounts)-1].ID
@@ -127,6 +130,11 @@ func (s *sSysPublish) handleAccountScheduleTask(ctx context.Context, task *asynq
 	if scope.TenantID <= 0 || scope.AccountID <= 0 {
 		return asynq.SkipRetry
 	}
+	g.Log().Debugf(ctx, "账户调度任务开始 tenantId:%d accountId:%d", scope.TenantID, scope.AccountID)
+	startedAt := time.Now()
+	defer func() {
+		g.Log().Debugf(ctx, "账户调度任务结束 tenantId:%d accountId:%d elapsedMs:%d", scope.TenantID, scope.AccountID, time.Since(startedAt).Milliseconds())
+	}()
 	if s.accountPushEngine(ctx, scope.TenantID, scope.AccountID) != pushEngineUnifiedStream {
 		return nil
 	}
@@ -160,6 +168,7 @@ func (s *sSysPublish) handleAccountScheduleTask(ctx context.Context, task *asynq
 			continue
 		}
 		if err != nil {
+			g.Log().Warningf(ctx, "账户调度阶段失败 tenantId:%d accountId:%d stage:%d err:%+v", scope.TenantID, scope.AccountID, stageIndex+1, err)
 			failures = append(failures, err)
 		}
 	}
