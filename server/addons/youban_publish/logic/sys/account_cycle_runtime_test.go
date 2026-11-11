@@ -169,7 +169,20 @@ func TestLocalAccountCycleRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	profileID := localRuntimeProfiles(t, ctx, 3, 1)[0].ID
+	// 循环必须基于上一轮已发送记录计算；不能选择尚未建立 last_job_id 的空资料。
+	var cycleProfile struct {
+		ID int64 `orm:"profile_id"`
+	}
+	if err := g.DB().Model(publishProfileStateTable+" ps").Ctx(ctx).
+		Where("ps.tenant_id", 999).Where("ps.account_id", 999).
+		Where("EXISTS (SELECT 1 FROM " + publishChannelProfileTable + " cp WHERE cp.tenant_id=ps.tenant_id AND cp.account_id=ps.account_id AND cp.profile_id=ps.profile_id AND cp.channel_id IN (1,2,3) AND cp.last_job_id>0)").
+		Fields("ps.profile_id").OrderAsc("ps.profile_id").Limit(1).Scan(&cycleProfile); err != nil {
+		t.Fatal(err)
+	}
+	if cycleProfile.ID <= 0 {
+		t.Fatal("missing cycle baseline profile")
+	}
+	profileID := cycleProfile.ID
 	var baseline int64
 	v, err := g.DB().GetValue(ctx, "SELECT COALESCE(max(id),0) FROM "+publishTgJobTable)
 	if err != nil {
