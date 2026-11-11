@@ -64,7 +64,10 @@ CROSS JOIN generate_series(1,100) logical_channel
 JOIN hg_youban_publish_channel c
   ON c.tenant_id=999
  AND c.target_chat_id='-100999'||lpad(logical_channel::text,6,'0')
-WHERE p.source_type='local_regression';
+WHERE p.source_type='local_regression'
+  -- 基础映射只保留少量循环基线；大规模资料由压力场景按需创建，
+  -- 避免账户修复器在每轮调度扫描十万条历史夹具。
+  AND p.id <= 20;
 UPDATE hg_youban_publish_tg_outbox o SET updated_at=now()
 FROM hg_youban_publish_tg_job j WHERE j.id=o.job_id AND j.account_id=999;
 SELECT count(*) bots FROM hg_youban_publish_bot WHERE tenant_id=999;
