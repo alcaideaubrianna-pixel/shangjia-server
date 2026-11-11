@@ -111,6 +111,13 @@ func (s *sSysPublish) submitProfilePublishWithMeta(ctx context.Context, profileI
 				if enqueueErr := s.enqueueWaitingMediaWake(ctx, profileId, tenantId, accountId); enqueueErr != nil {
 					g.Log().Warningf(ctx, "等待媒体延迟唤醒任务入队失败 profileId:%d err:%+v", profileId, enqueueErr)
 				}
+				// Close the race where the media operation commits between the
+				// readiness check above and this state update. The media worker may
+				// already have attempted its wakeup before waiting_media existed;
+				// re-check synchronously after recording the durable intent.
+				if wakeErr := s.wakeProfileTelegramJobs(ctx, profileId); wakeErr != nil {
+					g.Log().Warningf(ctx, "记录等待媒体状态后立即收敛失败 profileId:%d err:%+v", profileId, wakeErr)
+				}
 			}
 			return nil
 		}
