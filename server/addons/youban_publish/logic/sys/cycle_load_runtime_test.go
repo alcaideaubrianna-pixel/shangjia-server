@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -46,11 +47,38 @@ func TestLocalCycleLoadRuntime(t *testing.T) {
 	tag := fmt.Sprintf("profile:cycle-load:%d", time.Now().UnixNano())
 	started := time.Now()
 	ids := make([]int64, 0, 1000)
-	for i, p := range profiles {
+	for _, p := range profiles {
 		ids = append(ids, p.ID)
-		if err := s.submitProfilePublish(ctx, p.ID, 999, 999, 999, fmt.Sprintf("%s:%d", tag, p.ID), []int64{int64(i%100 + 1)}, false); err != nil {
-			t.Fatal(err)
-		}
+	}
+	// 注入阶段只负责创建持久化任务；使用有限 worker 并发提交，避免
+	// 测试本身的逐条调用把真实角色吞吐掩盖成串行耗时。发送与循环仍由
+	// Docker 中的真实 scheduler/publish/background 角色完成并核验。
+	const submitWorkers = 16
+	tasks := make(chan int)
+	errs := make(chan error, submitWorkers)
+	var wg sync.WaitGroup
+	for worker := 0; worker < submitWorkers; worker++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range tasks {
+				if err := s.submitProfilePublish(ctx, profiles[i].ID, 999, 999, 999, fmt.Sprintf("%s:%d", tag, profiles[i].ID), []int64{int64(i%100 + 1)}, false); err != nil {
+					select {
+					case errs <- err:
+					default:
+					}
+				}
+			}
+		}()
+	}
+	for i := range profiles {
+		tasks <- i
+	}
+	close(tasks)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatal(err)
 	}
 	waitLocalRuntimeCount(t, ctx, "SELECT count(*) FROM "+publishTgJobTable+" WHERE tenant_id=999 AND operation_no LIKE ? AND status='sent'", 1000, tag+":%")
 	waitLocalRuntimeCount(t, ctx, "SELECT count(*) FROM "+publishChannelProfileTable+" cp JOIN "+publishTgJobTable+" j ON j.id=cp.last_job_id WHERE cp.tenant_id=999 AND cp.next_cycle_at>NOW() AND j.operation_no LIKE ?", 1000, tag+":%")
