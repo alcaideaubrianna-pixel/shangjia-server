@@ -109,7 +109,7 @@ func (s *sSysPublish) rearmTelegramJobOutbox(ctx context.Context, jobId int64, d
 	now := gtime.Now()
 	result, err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
 		Where("job_id", jobId).Where("event_type", telegramOutboxEventPublish).
-		Where("status", telegramOutboxDelivered).
+		WhereIn("status", []string{telegramOutboxDelivered, telegramOutboxPending}).
 		Data(g.Map{
 			"status": telegramOutboxPending, "available_at": now.Add(delay),
 			"lease_owner": "", "lease_expires_at": nil, "delivered_at": nil,
@@ -120,6 +120,16 @@ func (s *sSysPublish) rearmTelegramJobOutbox(ctx context.Context, jobId int64, d
 	}
 	affected, _ := result.RowsAffected()
 	if affected > 0 {
+		return nil
+	}
+	// 并发 rearm 可能已经有 processing 行；不能再插入第二条 Outbox。
+	exists, err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
+		Where("job_id", jobId).Where("event_type", telegramOutboxEventPublish).
+		WhereNot("status", telegramOutboxDelivered).Count()
+	if err != nil {
+		return gerror.Wrap(err, "检查TG任务Outbox重入状态失败")
+	}
+	if exists > 0 {
 		return nil
 	}
 	_, err = g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).InsertIgnore(g.Map{
