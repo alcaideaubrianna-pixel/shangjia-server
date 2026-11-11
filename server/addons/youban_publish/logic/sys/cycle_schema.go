@@ -33,8 +33,18 @@ func (s *sSysPublish) syncChannelCycleAfterSave(ctx context.Context, tenantId in
 	if err != nil {
 		return gerror.Wrap(err, "更新频道循环上架时间失败")
 	}
-	if err = s.enqueueCycleReschedule(ctx, channelId, 0); err != nil {
-		g.Log().Warningf(ctx, "提交频道循环重算任务失败，定时调度将自动恢复 channel:%d err:%+v", channelId, err)
+	// 统一账户调度会直接按资料计划投影配置。继续投递旧的频道重算任务
+	// 会与配置保存并发，旧任务晚到时可能把刚设置的到期时间覆盖成旧值。
+	// 未迁移账户仍保留旧入口，保证灰度期间兼容。
+	var channelAccountID int64
+	if value, valueErr := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
+		Where("id", channelId).Where("tenant_id", tenantId).Value("tg_account_id"); valueErr == nil {
+		channelAccountID = value.Int64()
+	}
+	if !s.unifiedPushEngineEnabled(ctx, tenantId, channelAccountID) {
+		if err = s.enqueueCycleReschedule(ctx, channelId, 0); err != nil {
+			g.Log().Warningf(ctx, "提交频道循环重算任务失败，定时调度将自动恢复 channel:%d err:%v", channelId, err)
+		}
 	}
 	// 配置修改必须立即投影到频道内已有资料，否则资料仍会沿用旧循环时间或旧开关。
 	var jobs []telegramJobRecord
