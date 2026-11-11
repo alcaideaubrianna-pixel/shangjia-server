@@ -149,6 +149,11 @@ func (s *sSysBot) AdminFeatureSave(ctx context.Context, in *sysin.FeatureSaveInp
 }
 
 func (s *sSysBot) syncFeatureDefaults(ctx context.Context) error {
+	// Webhook updates can initialize feature defaults concurrently. Serialize
+	// the check and inserts so concurrent /start and user messages cannot race
+	// on the unique feature_key constraint.
+	s.featureDefaultsMu.Lock()
+	defer s.featureDefaultsMu.Unlock()
 	if s.featureDefaultsSynced() {
 		return nil
 	}

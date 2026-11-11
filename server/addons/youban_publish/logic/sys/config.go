@@ -46,7 +46,11 @@ func (s *sSysConfig) GetTelegram(ctx context.Context) (conf *model.TelegramConfi
 		return nil, err
 	}
 	conf = &model.TelegramConfig{}
-	if err = gconv.Struct(res.List, conf); err != nil {
+	configValues := g.Map{}
+	if res != nil && res.List != nil {
+		configValues = res.List
+	}
+	if err = gconv.Struct(configValues, conf); err != nil {
 		return nil, err
 	}
 	conf.ProxyUrl = strings.TrimSpace(conf.ProxyUrl)
@@ -55,11 +59,11 @@ func (s *sSysConfig) GetTelegram(ctx context.Context) (conf *model.TelegramConfi
 	conf.BotRuntimeApiUrl = strings.TrimRight(strings.TrimSpace(os.Getenv("YOUBAN_TELEGRAM_RUNTIME_API_URL")), "/")
 	conf.BotApiServerUrl = strings.TrimRight(strings.TrimSpace(os.Getenv("YOUBAN_TELEGRAM_BOT_API_URL")), "/")
 	if conf.BotApiServerUrl == "" {
-		conf.BotApiServerUrl = strings.TrimRight(strings.TrimSpace(gconv.String(res.List["botApiServerUrl"])), "/")
+		conf.BotApiServerUrl = strings.TrimRight(strings.TrimSpace(gconv.String(configValues["botApiServerUrl"])), "/")
 	}
 	conf.BotApiFileUrl = strings.TrimRight(strings.TrimSpace(os.Getenv("YOUBAN_TELEGRAM_BOT_FILE_URL")), "/")
 	if conf.BotApiFileUrl == "" {
-		conf.BotApiFileUrl = strings.TrimRight(strings.TrimSpace(gconv.String(res.List["botApiFileUrl"])), "/")
+		conf.BotApiFileUrl = strings.TrimRight(strings.TrimSpace(gconv.String(configValues["botApiFileUrl"])), "/")
 	}
 	conf.BotRuntimeMode = strings.ToLower(strings.TrimSpace(conf.BotRuntimeMode))
 	conf.WebhookBaseUrl = strings.TrimRight(strings.TrimSpace(conf.WebhookBaseUrl), "/")

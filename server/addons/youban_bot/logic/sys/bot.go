@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	publishsysin "hotgo/addons/youban_publish/model/input/sysin"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -10,6 +11,7 @@ import (
 
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
+	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
 	"hotgo/addons/youban_bot/model/input/sysin"
@@ -49,6 +51,7 @@ type sSysBot struct {
 	cleanupMu             sync.Mutex
 	cleanupCancel         context.CancelFunc
 	featureMu             sync.RWMutex
+	featureDefaultsMu     sync.Mutex
 	features              map[string]*botFeatureRow
 	featureAt             time.Time
 	featureGeneration     uint64
@@ -110,7 +113,11 @@ func (s *sSysBot) StartRuntime(ctx context.Context) {
 	_ = s.syncAllTelegramBotMenus(ctx)
 	s.startTelegramMessageCleanup(ctx)
 	s.startPendingBroadcasts(ctx)
-	s.startProfileSessionRecovery(ctx)
+	if os.Getenv("YOUBAN_BOT_PROFILE_RECOVERY_ENABLED") != "false" {
+		s.startProfileSessionRecovery(ctx)
+	} else {
+		g.Log().Warning(ctx, "Bot资料会话自动恢复器已禁用")
+	}
 	s.startRelayRuntime(ctx)
 }
 func (s *sSysBot) StopRuntime() {
