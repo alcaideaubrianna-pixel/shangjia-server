@@ -5,6 +5,7 @@ cd "$(dirname "$0")"
 local_db_name="${YOUBAN_LOCAL_DB_NAME:-youban_hotgo}"
 tag="fault$(date +%Y%m%d%H%M%S)-$$"
 output="/tmp/youban-runtime-$tag"
+poll_interval="${YOUBAN_LOCAL_POLL_INTERVAL:-1}"
 mkdir -p "$output"
 cleanup() {
   bash ./tgfake-control.sh >/dev/null 2>&1 || true
@@ -17,7 +18,7 @@ wait_count() {
   while (( SECONDS-started < deadline )); do
     value="$(sql "$query")"
     if (( value == expected )); then return 0; fi
-    sleep 1
+    sleep "$poll_interval"
   done
   echo "故障恢复等待超时 expected=$expected actual=$value query=$query" >&2
   return 1

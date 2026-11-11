@@ -5,6 +5,7 @@ cd "$(dirname "$0")"
 local_db_name="${YOUBAN_LOCAL_DB_NAME:-youban_hotgo}"
 run_tag="rt$(date +%Y%m%d%H%M%S)-$$"
 output="${YOUBAN_LOCAL_RUNTIME_OUTPUT:-/tmp/youban-runtime-$run_tag}"
+poll_interval="${YOUBAN_LOCAL_POLL_INTERVAL:-2}"
 mkdir -p "$output"
 sql() { docker exec youban-postgres psql -U postgres -d "$local_db_name" -X -v ON_ERROR_STOP=1 -Atc "$1"; }
 control() {
@@ -23,7 +24,7 @@ wait_count() {
   while (( SECONDS-started < timeout )); do
     value="$(sql "$query")"
     if (( value >= expected )); then return 0; fi
-    sleep 2
+    sleep "$poll_interval"
   done
   echo "等待运行结果超时：expected=$expected actual=$value query=$query" >&2
   return 1
