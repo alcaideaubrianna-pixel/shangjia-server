@@ -51,6 +51,7 @@ var items = []item{
 	{Key: "youbanTgBotGateway.queue.interactiveConcurrency", EnvKeys: []string{"YOUBAN_TG_BOT_GATEWAY_INTERACTIVE_CONCURRENCY"}},
 	{Key: "youbanBot.telegram.proxyUrl", EnvKeys: []string{"YOUBAN_TELEGRAM_PROXY_URL"}},
 	{Key: "youbanPublish.queue.backgroundConcurrency", EnvKeys: []string{"YOUBAN_PUBLISH_BACKGROUND_CONCURRENCY"}},
+	{Key: "youbanPublish.queue.accountScheduleConcurrency", EnvKeys: []string{"YOUBAN_PUBLISH_ACCOUNT_SCHEDULE_CONCURRENCY"}},
 	{Key: "youbanPublish.queue.collectRealtimeConcurrency", EnvKeys: []string{"YOUBAN_PUBLISH_COLLECT_REALTIME_CONCURRENCY"}},
 	{Key: "youbanPublish.queue.historyPendingEventLimit", EnvKeys: []string{"YOUBAN_PUBLISH_HISTORY_PENDING_EVENT_LIMIT"}},
 	{Key: "youbanPublish.queue.historyConcurrency", EnvKeys: []string{"YOUBAN_PUBLISH_HISTORY_CONCURRENCY"}},

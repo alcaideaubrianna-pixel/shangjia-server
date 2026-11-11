@@ -70,6 +70,7 @@ database:
 	t.Setenv("YOUBAN_TELEGRAM_DELIVERY_HISTORY_CONCURRENCY", "4")
 	t.Setenv("YOUBAN_PUBLISH_BULK_CONCURRENCY", "4")
 	t.Setenv("YOUBAN_PUBLISH_CYCLE_CONCURRENCY", "1")
+	t.Setenv("YOUBAN_PUBLISH_ACCOUNT_SCHEDULE_CONCURRENCY", "6")
 	t.Setenv("YOUBAN_TELEGRAM_MEDIA_CONCURRENCY", "6")
 	t.Setenv("YOUBAN_TELEGRAM_ACCOUNT_LEASE_SECONDS", "45")
 
@@ -88,6 +89,7 @@ database:
 	assertCfg("token.secretKey", "token-test")
 	assertCfg("cache.adapter", "redis")
 	assertCfg("queue.driver", "redis")
+	assertCfg("youbanPublish.queue.accountScheduleConcurrency", "6")
 	assertCfg("redis.default.address", "redis-test:6380")
 	assertCfg("redis.default.db", "3")
 	assertCfg("redis.default.pass", "redis-pass")
