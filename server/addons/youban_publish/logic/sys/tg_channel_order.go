@@ -226,7 +226,7 @@ func (s *sSysPublish) wakeNextTelegramChannelJob(ctx context.Context, job telegr
 			continue
 		}
 		if err = s.enqueueTelegramJob(ctx, next.Id, 0); err != nil {
-			return gerror.Wrap(err, "唤醒频道待入队TG任务失败")
+			return gerror.Wrapf(err, "唤醒频道待入队TG任务失败 nextJobId:%d channelId:%d", next.Id, job.ChannelId)
 		}
 	}
 	return nil
