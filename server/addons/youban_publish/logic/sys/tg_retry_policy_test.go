@@ -90,6 +90,19 @@ func TestTelegramOrdinaryNetworkErrorKeepsConfiguredPolicy(t *testing.T) {
 	}
 }
 
+func TestTelegramRedisDependencyErrorRetriesQuickly(t *testing.T) {
+	err := errors.New(`获取TG发送Attempt锁失败: Redis Client Do failed with arguments "[Eval]": EOF`)
+	policy := telegramJobErrorRetryPolicy(err, 1)
+	if policy.Permanent || policy.RetryDelay != 2*time.Second {
+		t.Fatalf("redis dependency failure must retry quickly: %+v", policy)
+	}
+	conf := &model.PublishConfig{RetryEnabled: 1, MaxRetryCount: 1, RetryIntervalMinutes: 5}
+	configured := telegramJobErrorRetryPolicyWithConfig(err, 1, conf)
+	if configured.Permanent || configured.RetryDelay != 2*time.Second {
+		t.Fatalf("configured redis dependency failure must retry quickly: %+v", configured)
+	}
+}
+
 func TestTelegramChannelPermissionError(t *testing.T) {
 	if !isTelegramChannelPermissionError(assertError("rpcDoRequest: USER_BANNED_IN_CHANNEL")) {
 		t.Fatal("USER_BANNED_IN_CHANNEL must be treated as a channel permission error")

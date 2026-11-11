@@ -87,6 +87,12 @@ func telegramJobErrorRetryPolicyWithConfig(err error, retryCount int, conf *mode
 		}
 		return telegramJobRetryPolicy{RetryDelay: 15 * time.Second, Message: fmt.Sprintf("Telegram账号当前正在执行其他操作，任务将在 15 秒后自动重试（第 %d/%d 次）", retryCount, maxRetryCount)}
 	}
+	// Redis 是本地幂等锁和就绪通知的依赖。连接重启时不应套用 Telegram
+	// 网络错误的 30 秒/2 分钟/5 分钟退避，否则同一频道会被无故阻塞数分钟。
+	if isTelegramRuntimeDependencyError(err) {
+		delay := 2 * time.Second
+		return telegramJobRetryPolicy{RetryDelay: delay, Message: telegramJobFriendlyErrorMessage(err, delay, retryCount)}
+	}
 	if isTelegramGatewayRetryError(err) && maxRetryCount < telegramNetworkRetryTerminalCount {
 		maxRetryCount = telegramNetworkRetryTerminalCount
 	}
@@ -238,6 +244,10 @@ func telegramJobErrorRetryPolicy(err error, retryCount int) telegramJobRetryPoli
 			Message:    fmt.Sprintf("Telegram账号当前正在执行其他操作，任务将在 15 秒后自动重试（第 %d/%d 次）", retryCount, telegramRetryMaxCount),
 		}
 	}
+	if isTelegramRuntimeDependencyError(err) {
+		delay := 2 * time.Second
+		return telegramJobRetryPolicy{RetryDelay: delay, Message: telegramJobFriendlyErrorMessage(err, delay, retryCount)}
+	}
 	maxRetryCount := telegramRetryMaxCount
 	if isTelegramGatewayRetryError(err) {
 		maxRetryCount = telegramNetworkRetryTerminalCount
@@ -256,6 +266,26 @@ func telegramJobErrorRetryPolicy(err error, retryCount int) telegramJobRetryPoli
 		RetryDelay: delay,
 		Message:    telegramJobFriendlyErrorMessage(err, delay, retryCount),
 	}
+}
+
+// isTelegramRuntimeDependencyError 识别 Redis/运行时依赖短暂不可用。
+// 这类错误不会产生 Telegram 请求，应该快速重试并让频道尽快恢复。
+func isTelegramRuntimeDependencyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	for _, part := range []string{
+		"redis client do failed",
+		"redis client",
+		"redis: connection",
+		"redis connection",
+	} {
+		if strings.Contains(message, part) {
+			return true
+		}
+	}
+	return false
 }
 
 func telegramUserFacingError(err error) string {

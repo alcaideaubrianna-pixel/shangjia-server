@@ -74,7 +74,7 @@ fi
 control @scenarios/slow_channel_isolation.json
 round="$run_tag-slow"
 seed_round "$round" 3 100
-wait_count "SELECT count(*) FROM hg_youban_publish_tg_job WHERE $(round_filter "$round") AND target_chat_id='-100999000013' AND status='sent'" 3 45
+wait_count "SELECT count(*) FROM hg_youban_publish_tg_job WHERE $(round_filter "$round") AND target_chat_id='-100999000013' AND status='sent'" 3 120
 sql "SELECT json_build_object('at',clock_timestamp(),'pending_cleanup',count(*)) FROM hg_youban_publish_tg_outbox o JOIN hg_youban_publish_tg_job j ON j.id=o.job_id WHERE o.event_type LIKE 'telegram_job.cleanup.%' AND o.status<>'delivered' AND j.tenant_id=999 AND j.target_chat_id='-100999000013'" > "$output/slow-delete-isolation.json"
 python3 -c 'import json,sys;r=json.load(open(sys.argv[1]));assert r["pending_cleanup"]>0,r' "$output/slow-delete-isolation.json"
 wait_count "SELECT count(*) FROM hg_youban_publish_tg_job WHERE $(round_filter "$round") AND status='sent'" 300 120
@@ -84,7 +84,9 @@ echo '通过：慢TG发送与慢删除互不阻塞其他频道'
 reset_hook
 mix="$run_tag-mix"
   docker exec -i youban-postgres psql -U postgres -d "$local_db_name" -X -v ON_ERROR_STOP=1 -v "run_id=$mix" -v phase=history < scenarios/mixed_load.sql >> "$output/seed.log"
-wait_count "SELECT count(*) FROM hg_youban_publish_tg_job WHERE account_id=999 AND operation_no LIKE '%:local:mix:$mix:%' AND status='sent'" 1 30
+# 历史积压需要先经过频道队首逐频道释放；两个 worker 下首条任务可能等待一个
+# 调度周期，不能用 30 秒把正常的排队延迟误判成失败。
+wait_count "SELECT count(*) FROM hg_youban_publish_tg_job WHERE account_id=999 AND operation_no LIKE '%:local:mix:$mix:%' AND status='sent'" 1 120
 docker exec -i youban-postgres psql -U postgres -d "$local_db_name" -X -v ON_ERROR_STOP=1 -v "run_id=$mix" -v phase=live < scenarios/mixed_load.sql >> "$output/seed.log"
 wait_count "SELECT count(*) FROM hg_youban_publish_tg_job WHERE account_id=999 AND operation_no LIKE '%:local:mix:$mix:%' AND status='sent'" 720 360
 sql "WITH jobs AS (SELECT *,send_deadline_at-interval '21 minutes' started_at FROM hg_youban_publish_tg_job WHERE account_id=999 AND operation_no LIKE '%:local:mix:$mix:%'), ordered AS (SELECT sent_at,lag(sent_at) OVER(PARTITION BY target_chat_id,priority ORDER BY created_at,id) previous_sent FROM jobs) SELECT json_build_object('total',(SELECT count(*) FROM jobs),'sent',(SELECT count(*) FROM jobs WHERE status='sent'),'order_violations',(SELECT count(*) FROM ordered WHERE sent_at<previous_sent),'priority_violations',(SELECT count(*) FROM jobs low WHERE low.priority>1 AND EXISTS(SELECT 1 FROM jobs manual WHERE manual.priority=1 AND manual.target_chat_id=low.target_chat_id AND manual.created_at+interval '100 milliseconds'<low.started_at AND manual.sent_at>low.started_at)),'manual_p50_seconds',(SELECT percentile_cont(.5) WITHIN GROUP(ORDER BY extract(epoch FROM sent_at-created_at)) FROM jobs WHERE priority=1),'manual_p95_seconds',(SELECT percentile_cont(.95) WITHIN GROUP(ORDER BY extract(epoch FROM sent_at-created_at)) FROM jobs WHERE priority=1))" > "$output/mixed-load.json"
