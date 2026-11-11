@@ -64,7 +64,13 @@ func telegramCompletedLeaseRecoverable(owner telegramPublishLeaseOwner, job tele
 			job.Status == telegramJobStatusRetryWait || job.Status == telegramJobStatusFailed || job.Status == telegramJobStatusSuperseded)
 }
 
+// tryTelegramPublishChannelLease 为新引擎获取短期可续租执行槽位，旧引擎保持原有固定租约。
 func (s *sSysPublish) tryTelegramPublishChannelLease(ctx context.Context, job telegramJobRecord) (telegramChannelLease, bool, error) {
+	if s.accountPushEngine(ctx, job.TenantId, job.AccountId) == pushEngineUnifiedStream {
+		lease := newTelegramStreamExecutionLease(job)
+		acquired, err := lease.TryAcquire(ctx)
+		return lease, acquired, err
+	}
 	return tryTelegramPublishChannelLease(ctx, job, s.telegramJobById)
 }
 
@@ -148,8 +154,14 @@ func (s *sSysPublish) withTelegramChannelDBLock(ctx context.Context, key string,
 			if err := configureTelegramChannelLockTimeout(tx); err != nil {
 				return err
 			}
-			if _, err := tx.Exec("SELECT pg_advisory_xact_lock(hashtext(?))", key); err != nil {
+			// 使用非阻塞锁，避免大量频道任务在数据库连接池中排队。
+			// 未获取到锁时由上层 Stream/Asynq 重试，不能长期占用数据库连接。
+			locked, err := tx.GetValue("SELECT pg_try_advisory_xact_lock(hashtext(?))", key)
+			if err != nil {
 				return gerror.Wrap(err, "获取TG频道发送锁失败")
+			}
+			if !locked.Bool() {
+				return gerror.New("TG频道发送锁被占用，稍后重试")
 			}
 			return fn()
 		default:

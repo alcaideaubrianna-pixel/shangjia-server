@@ -54,8 +54,11 @@ func TestTelegramAllChannelHeadQueriesExcludeFailedDisplays(t *testing.T) {
 		"pending recovery": telegramPendingRecoveryPostgresSQL(),
 		"earlier recovery": telegramPendingRecoveryChannelHeadSQL("j", "earlier"),
 	} {
-		if strings.Contains(query, "status='failed'") || strings.Contains(query, "channel_display") {
-			t.Fatalf("%s still lets terminal display failures block the channel: %s", name, query)
+		if strings.Contains(query, "status='failed'") && !strings.Contains(query, "failed_display_message") {
+			t.Fatalf("%s adds an unqualified terminal failure blocker: %s", name, query)
+		}
+		if strings.Contains(query, "channel_display") {
+			t.Fatalf("%s contains obsolete channel_display condition: %s", name, query)
 		}
 		if !strings.Contains(query, "'pending','failed_retry','confirming','sending'") {
 			t.Fatalf("%s no longer preserves active job order: %s", name, query)

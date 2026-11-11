@@ -1,0 +1,8 @@
+{
+  "default": {"action": "success", "delayMs": 2},
+  "rules": [
+    {"method": "sendMessage", "chatId": "-100999000012", "action": "success", "delayMs": 10000},
+    {"method": "sendMediaGroup", "chatId": "-100999000012", "action": "success", "delayMs": 10000},
+    {"method": "deleteMessage", "chatId": "-100999000013", "action": "success", "delayMs": 15000}
+  ]
+}

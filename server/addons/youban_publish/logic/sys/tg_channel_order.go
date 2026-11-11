@@ -37,10 +37,14 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 		}
 		createdAt = current["created_at"].GTime()
 	}
+	blocking := telegramChannelBlockingJobSQL("j")
+	if s.accountPushEngine(ctx, job.TenantId, job.AccountId) == pushEngineUnifiedStream {
+		blocking = telegramStreamChannelBlockingJobSQL("j")
+	}
 	mod := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).Unscoped().
 		Where("j.id <> ?", job.Id).
 		Where(telegramWebhookDetachedJobSQL("j.")).
-		Where(telegramChannelBlockingJobSQL("j"))
+		Where(blocking)
 	// Once a display is visible in Telegram, finish that operation before
 	// returning it behind untouched historical backlog. Earlier operations that
 	// have also started still block it, preserving media/verification ordering.
@@ -67,9 +71,22 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
-	earlier, err := mod.Fields("j.id").Limit(1).One()
+	earlier, err := mod.Fields("j.id,j.created_at,j.priority,j.status,j.dispatch_status,j.operation_no").Limit(1).One()
 	if err != nil {
 		return false, gerror.Wrap(err, "检查频道前序TG任务失败")
+	}
+	if !earlier.IsEmpty() {
+		g.Log().Info(ctx, "TG频道队首判断命中前序任务", g.Map{
+			"currentJobId":          job.Id,
+			"currentChannelId":      job.ChannelId,
+			"currentTargetChatId":   job.TargetChatId,
+			"earlierJobId":          earlier["id"].Int64(),
+			"earlierCreatedAt":      earlier["created_at"].GTime(),
+			"earlierPriority":       earlier["priority"].Int(),
+			"earlierStatus":         earlier["status"].String(),
+			"earlierDispatchStatus": earlier["dispatch_status"].String(),
+			"earlierOperationNo":    earlier["operation_no"].String(),
+		})
 	}
 	return !earlier.IsEmpty(), nil
 }
@@ -88,7 +105,14 @@ func telegramChannelBlockingJobSQL(alias string) string {
 	// channel queue hostage while waiting for a webhook or account fallback.
 	// Jobs tied to an unavailable protocol account are likewise left durable but
 	// excluded until the account is authorized again.
-	return fmt.Sprintf(`(%s AND %s)`, telegramChannelAvailableAccountSQL(alias), telegramChannelBlockingJobStateSQL(alias))
+	qualified := alias
+	if qualified != "" {
+		qualified += "."
+	}
+	// 已经进入发送队列的任务必须继续占住频道，即使其 Bot/账户信息
+	// 在测试或授权切换期间暂时不可用；否则后续任务会越过已入队任务。
+	return fmt.Sprintf(`(((%sdispatch_status IN ('queued','processing')) OR %s) AND %s)`,
+		qualified, telegramChannelAvailableAccountSQL(alias), telegramChannelBlockingJobStateSQL(alias))
 }
 
 func telegramChannelBlockingJobStateSQL(alias string) string {
@@ -97,7 +121,15 @@ func telegramChannelBlockingJobStateSQL(alias string) string {
 	}
 	// Terminal jobs must never become unschedulable channel heads. Retrying a
 	// failed display later would also send verification apart from its display.
-	return fmt.Sprintf(`%sstatus IN ('pending','failed_retry','confirming','sending')`, alias)
+	return fmt.Sprintf(`(
+		%sstatus IN ('pending','failed_retry','confirming','sending') OR
+		(%sstatus='failed' AND %ssend_phase='display_confirmed' AND EXISTS (
+			SELECT 1 FROM %s failed_display_message
+			WHERE failed_display_message.job_id=%sid
+			  AND failed_display_message.status IN ('sent','undeletable')
+			  AND failed_display_message.deleted_at IS NULL
+		))
+	)`, alias, alias, alias, publishTgMessageTable, alias)
 }
 
 func telegramChannelAvailableAccountSQL(alias string) string {
@@ -154,6 +186,9 @@ func telegramJobRequiresChannelCompletionPriority(sendPhase string) bool {
 		sendPhase != telegramSendPhaseCompletedNoVerify
 }
 
+// telegramChannelWakeDispatchKey 标记完成回调允许在短期限内等待调度锁，避免一次竞争丢掉下一条唤醒。
+type telegramChannelWakeDispatchKey struct{}
+
 func (s *sSysPublish) wakeNextTelegramChannelJob(ctx context.Context, job telegramJobRecord) error {
 	// Completion callbacks often run while the worker task context is being
 	// cancelled. The channel lease has already been released at this point, so
@@ -162,6 +197,9 @@ func (s *sSysPublish) wakeNextTelegramChannelJob(ctx context.Context, job telegr
 	wakeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	ctx = wakeCtx
+	if s.accountPushEngine(ctx, job.TenantId, job.AccountId) == pushEngineUnifiedStream {
+		ctx = context.WithValue(ctx, telegramChannelWakeDispatchKey{}, true)
+	}
 	if job.TenantId <= 0 || (job.ChannelId <= 0 && strings.TrimSpace(job.TargetChatId) == "") {
 		return nil
 	}
@@ -210,7 +248,15 @@ func (s *sSysPublish) withTelegramChannelDispatchLease(ctx context.Context, job 
 	lease := hglock.NewConfig(telegramChannelDispatchLeaseTTL, 100*time.Millisecond).
 		WithoutWatchDog().
 		Mutex(telegramChannelDispatchKey(job))
-	if err := lease.TryLock(reserveCtx); err != nil {
+	var lockErr error
+	if wait, _ := ctx.Value(telegramChannelWakeDispatchKey{}).(bool); wait {
+		// 只让新引擎完成回调等待；普通 Stream 事件仍快速失败并保留 pending。
+		// reserveCtx 继承回调五秒预算，不能无限占用发送 Worker。
+		lockErr = lease.Lock(reserveCtx)
+	} else {
+		lockErr = lease.TryLock(reserveCtx)
+	}
+	if err := lockErr; err != nil {
 		if gerror.Is(err, hglock.ErrLockFailed) {
 			// Lock contention or an unavailable Redis lock backend is not a
 			// successful enqueue. Returning nil here silently stranded the
@@ -239,6 +285,10 @@ func (s *sSysPublish) telegramChannelHasDispatchCapacity(ctx context.Context, jo
 			(status IN ('pending', 'failed_retry', 'unknown') AND dispatch_status IN (?, ?))
 		)`, tgDispatchStatusQueued, tgDispatchStatusProcessing).
 		Fields("id").Limit(telegramChannelActiveJobLimit)
+	// 新引擎手工任务可越过尚未开始的低优先级排队项；发送中或部分确认任务仍占用执行权。
+	if telegramJobPriorityValue(job) == tgJobPriorityInteractive && s.accountPushEngine(ctx, job.TenantId, job.AccountId) == pushEngineUnifiedStream {
+		model = model.Where("("+telegramChannelScheduleRankSQL("")+") <= ?", tgJobPriorityInteractive)
+	}
 	if strings.TrimSpace(job.TargetChatId) != "" {
 		model = model.WhereIn("target_chat_id", telegramChannelChatIDVariants(job.TargetChatId))
 	} else {

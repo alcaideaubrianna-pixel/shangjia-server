@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -31,6 +32,10 @@ const (
 
 // accountPushEngine 返回账户当前启用的推送引擎；配置缺失或非法时回退到旧实现。
 func (s *sSysPublish) accountPushEngine(ctx context.Context, tenantId, accountId int64) string {
+	// 全量灰度开关：用于本地验证和线上逐步切换，优先级高于账户字段。
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("YOUBAN_PUBLISH_PUSH_ENGINE")), pushEngineUnifiedStream) {
+		return pushEngineUnifiedStream
+	}
 	if tenantId <= 0 || accountId <= 0 {
 		return pushEngineLegacy
 	}
@@ -80,5 +85,12 @@ func clearPushEngineCache(ctx context.Context, tenantId, accountId int64) {
 
 // unifiedPushEngineEnabled 判断账户是否启用了统一推送引擎。
 func (s *sSysPublish) unifiedPushEngineEnabled(ctx context.Context, tenantId, accountId int64) bool {
-	return s.accountPushEngine(ctx, tenantId, accountId) == pushEngineUnified
+	engine := s.accountPushEngine(ctx, tenantId, accountId)
+	return engine == pushEngineUnified || engine == pushEngineUnifiedStream
+}
+
+// globalStreamPushEngineEnabled 判断是否开启了全量 Redis Stream 灰度。
+// 全量灰度时 Outbox 只负责发布就绪事件，不再执行旧的频道队首 SQL。
+func globalStreamPushEngineEnabled() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("YOUBAN_PUBLISH_PUSH_ENGINE")), pushEngineUnifiedStream)
 }

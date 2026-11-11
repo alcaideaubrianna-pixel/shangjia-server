@@ -19,6 +19,17 @@ func (s *sSysPublish) CleanupTelegramJobMessages(ctx context.Context, jobId int6
 	if err != nil {
 		return err
 	}
+	if s.accountPushEngine(ctx, job.TenantId, job.AccountId) == pushEngineUnifiedStream {
+		return s.withTelegramCleanupExecution(ctx, job, func(ctx context.Context) error {
+			if err := s.deleteTelegramMessageSetLockedByChannel(ctx, job, "资料清理"); err != nil {
+				return err
+			}
+			if err := s.enqueueProfileUnpublishSuccessNotice(ctx, job); err != nil {
+				g.Log().Warningf(ctx, "保存资料下架完成通知失败 profileId:%d jobId:%d err:%+v", job.ProfileId, job.Id, err)
+			}
+			return s.completeTelegramCleanupIntent(ctx, job.Id)
+		})
+	}
 	lease, ok, err := tryTelegramCleanupChannelSlot(ctx, job.TargetChatId)
 	if err != nil {
 		return err

@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"os"
 	"sort"
 	"strings"
 
@@ -67,7 +68,7 @@ func loadPublishRuntimeConfig(ctx context.Context) publishRuntimeConfig {
 	}
 	config := parsePublishRuntimeRoles(values)
 	// 灰度开关默认关闭，且不能在非 Push Worker 角色启动，避免调度器重复消费。
-	config.RedisStreamGray = config.PushWorker && g.Cfg().MustGet(ctx, "youbanPublish.redisStream.grayEnabled", false).Bool()
+	config.RedisStreamGray = config.PushWorker && (g.Cfg().MustGet(ctx, "youbanPublish.redisStream.grayEnabled", false).Bool() || strings.EqualFold(strings.TrimSpace(os.Getenv("YOUBAN_PUBLISH_PUSH_ENGINE")), "unified_stream"))
 	return config
 }
 

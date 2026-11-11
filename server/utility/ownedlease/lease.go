@@ -83,3 +83,14 @@ func (l *Lease) Unlock(ctx context.Context) error {
 	_, err := ReleaseObserved(ctx, l.key, Snapshot{Token: l.token}, l.client)
 	return err
 }
+
+// Renew 仅延长当前持有者的租约；过期后不得续租或覆盖继任者。
+func (l *Lease) Renew(ctx context.Context) (bool, error) {
+	value, err := l.client.GroupScript().Eval(ctx,
+		`if redis.call('get',KEYS[1]) == ARGV[1] then return redis.call('pexpire',KEYS[1],ARGV[2]) else return 0 end`,
+		1, []string{l.key}, []interface{}{l.token, l.ttl.Milliseconds()})
+	if err != nil {
+		return false, err
+	}
+	return value.Int() == 1, nil
+}

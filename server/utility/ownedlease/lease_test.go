@@ -67,3 +67,41 @@ func TestLeaseLegacyTokenIsNotReclaimed(t *testing.T) {
 		t.Fatal("legacy lease removed")
 	}
 }
+
+// TestRenewCannotReviveExpiredOwner 验证续租保活且不会在过期后抢占继任者。
+func TestRenewCannotReviveExpiredOwner(t *testing.T) {
+	server := miniredis.RunT(t)
+	client, err := gredis.New(&gredis.Config{Address: server.Addr()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Close(context.Background()) })
+	ctx := context.Background()
+	first := New("test:renew", "first", time.Second, client)
+	if ok, err := first.TryAcquire(ctx); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	server.FastForward(800 * time.Millisecond)
+	if ok, err := first.Renew(ctx); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	server.FastForward(800 * time.Millisecond)
+	if !server.Exists("test:renew") {
+		t.Fatal("renewed lease expired early")
+	}
+	server.FastForward(time.Second)
+	second := New("test:renew", "second", time.Second, client)
+	if ok, err := second.TryAcquire(ctx); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	if ok, err := first.Renew(ctx); err != nil || ok {
+		t.Fatal("expired owner renewed successor", ok, err)
+	}
+	if err := first.Unlock(ctx); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := Inspect(ctx, "test:renew", client)
+	if err != nil || snapshot.Owner != "second" {
+		t.Fatal(snapshot, err)
+	}
+}

@@ -82,6 +82,8 @@ func TestTelegramJobPriorityClassifiesPublishOperations(t *testing.T) {
 		{name: "full push", operationNo: "full_push:1:2", want: tgJobPriorityFullPush},
 		{name: "cycle push", operationNo: "cycle_batch:1:2:3", want: tgJobPriorityBulk},
 		{name: "realtime collect", operationNo: "collect:1", priority: tgJobPriorityDefault, want: tgJobPriorityUrgent},
+		{name: "history collect", operationNo: "collect:2", priority: tgJobPriorityHistory, want: tgJobPriorityHistory},
+		{name: "profile cycle", operationNo: "profile_cycle:run:3", want: tgJobPriorityBulk},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	publishconsts "hotgo/addons/youban_publish/consts"
 	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
@@ -16,9 +17,11 @@ import (
 // telegramCleanupWorkerQueues 返回资料清理 Worker 负责消费的队列集合。
 func telegramCleanupWorkerQueues() map[string]int {
 	return map[string]int{
-		tgQueueNameCleanup:               1,
-		channelDispatchQueueDelete:       1,
-		channelDispatchQueueDeleteManual: 1,
+		tgQueueNameCleanup:                1,
+		channelDispatchQueueDelete:        1,
+		channelDispatchQueueDeleteManual:  100,
+		channelDispatchQueueDeleteKeyword: 10,
+		channelDispatchQueueDeleteCycle:   1,
 	}
 }
 
@@ -37,27 +40,34 @@ func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
 		s.tgQueueMu.Unlock()
 		return
 	}
-	interactiveServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
-		Concurrency:    telegramPublishInteractiveConcurrency(ctx),
-		Queues:         telegramPublishInteractiveQueueWeights(ctx),
-		RetryDelayFunc: telegramQueueRetryDelay,
-	})
+	var interactiveServer, bulkServer *asynq.Server
+	delayedCheck, emptyCheck := telegramPublishQueueCheckIntervals(ctx)
+	if telegramLegacyPublishQueuesEnabled(ctx) {
+		interactiveServer = asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
+			Concurrency:    telegramPublishInteractiveConcurrency(ctx),
+			Queues:         telegramPublishInteractiveQueueWeights(ctx),
+			RetryDelayFunc: telegramQueueRetryDelay,
+		})
+		bulkServer = asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
+			Concurrency:    telegramPublishBulkConcurrency(ctx),
+			Queues:         telegramPublishBulkQueueWeights(ctx),
+			RetryDelayFunc: telegramQueueRetryDelay,
+		})
+	}
 	server := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
 		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.concurrency", 20).Int(),
-		Queues:         telegramPublishForegroundQueueWeightsWithUnifiedLane(ctx),
+		Queues:         telegramPublishExecutionQueues(ctx),
 		RetryDelayFunc: telegramQueueRetryDelay,
-	})
-	bulkServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
-		Concurrency:    telegramPublishBulkConcurrency(ctx),
-		Queues:         telegramPublishBulkQueueWeights(ctx),
-		RetryDelayFunc: telegramQueueRetryDelay,
+		// 复用Asynq延迟任务提升器，避免1秒频道间隔被默认5秒轮询放大。
+		DelayedTaskCheckInterval: delayedCheck,
+		TaskCheckInterval:        emptyCheck,
 	})
 	cleanupServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
 		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.cleanupConcurrency", 16).Int(),
 		Queues:         telegramCleanupWorkerQueues(),
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
-	g.Log().Infof(ctx, "启动上架插件TG推送队列，人工上架独立并发：%d", telegramPublishInteractiveConcurrency(ctx))
+	g.Log().Infof(ctx, "启动上架插件TG推送队列，兼容旧发送队列:%t", telegramLegacyPublishQueuesEnabled(ctx))
 	s.tgInteractiveQueueServer = interactiveServer
 	s.tgQueueServer = server
 	s.tgBulkQueueServer = bulkServer
@@ -67,17 +77,22 @@ func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
 	// from the same lifecycle entry point as the Asynq consumers so a role
 	// parser or runtime branch cannot leave durable jobs stranded in pending.
 	s.startTelegramOutboxDispatcher(ctx)
+	go s.runTelegramStreamExecutionRecovery(ctx)
+	go s.runTelegramCleanupIntents(ctx)
 
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(tgTaskTypePublish, s.handleTelegramPublishTask)
 	mux.HandleFunc(tgTaskTypeCleanup, s.handleTelegramCleanupTask)
+	mux.HandleFunc(tgTaskTypeAutoDelete, s.handleTelegramAutoDeleteTask)
 	mux.HandleFunc(tgTaskTypeDown, s.handleProfileDownTask)
 
-	go func() {
-		if err := interactiveServer.Run(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
-			g.Log().Errorf(ctx, "启动上架插件TG人工发送队列失败：%+v", err)
-		}
-	}()
+	if interactiveServer != nil {
+		go func() {
+			if err := interactiveServer.Run(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
+				g.Log().Errorf(ctx, "启动上架插件TG人工发送队列失败：%+v", err)
+			}
+		}()
+	}
 	go func() {
 		if err := cleanupServer.Run(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
 			g.Log().Errorf(ctx, "启动上架插件TG清理队列失败：%+v", err)
@@ -88,11 +103,13 @@ func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
 			g.Log().Errorf(ctx, "启动上架插件TG发送队列失败：%+v", err)
 		}
 	}()
-	go func() {
-		if err := bulkServer.Run(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
-			g.Log().Errorf(ctx, "启动上架插件TG批量发送队列失败：%+v", err)
-		}
-	}()
+	if bulkServer != nil {
+		go func() {
+			if err := bulkServer.Run(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
+				g.Log().Errorf(ctx, "启动上架插件TG批量发送队列失败：%+v", err)
+			}
+		}()
+	}
 }
 
 func (s *sSysPublish) startCollectProcessWorker(ctx context.Context) {
@@ -203,6 +220,9 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	s.tgQueueMu.Unlock()
 
 	backgroundMux := asynq.NewServeMux()
+	backgroundMux.HandleFunc(publishconsts.QueueAccountScheduleTask, s.handleAccountScheduleTask)
+	backgroundMux.HandleFunc(publishconsts.QueueProfileCyclePrepareTask, s.handleProfileCyclePreparationTask)
+	backgroundMux.HandleFunc(tgTaskTypeProfileProjection, s.handleStreamProfileProjection)
 	backgroundMux.HandleFunc(tgTaskTypeCollectSourceStats, s.handleCollectSourceStatsTask)
 	backgroundMux.HandleFunc(tgTaskTypeImport, s.handleImportTask)
 	backgroundMux.HandleFunc(tgTaskTypeRepair, s.handleTgMessageRepairTask)
@@ -241,12 +261,14 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	cycleMux.HandleFunc(tgTaskTypeCycleRefresh, s.handleCycleRefreshTask)
 	autoDeleteMux := asynq.NewServeMux()
 	autoDeleteMux.HandleFunc(tgTaskTypeAutoDelete, s.handleTelegramAutoDeleteTask)
+	autoDeleteMux.HandleFunc(tgTaskTypeCleanup, s.handleTelegramCleanupTask)
 	autoDeleteBackfillMux := asynq.NewServeMux()
 	autoDeleteBackfillMux.HandleFunc(tgTaskTypeAutoDelete, s.handleTelegramAutoDeleteTask)
 	autoDeleteBackfillMux.HandleFunc(tgTaskTypeAutoDeleteBackfill, s.handleTelegramAutoDeleteBackfillTask)
 	attemptTimeoutMux := asynq.NewServeMux()
 	attemptTimeoutMux.HandleFunc(tgTaskTypeAttemptTimeout, s.handleTelegramAttemptTimeoutTask)
 	profileMux := asynq.NewServeMux()
+	profileMux.HandleFunc(publishconsts.QueueProfileCyclePrepareTask, s.handleProfileCyclePreparationTask)
 	profileMux.HandleFunc(tgTaskTypeProfileMaintenance, s.handleProfileMaintenanceTask)
 	profileMux.HandleFunc(tgTaskTypeProfileSubmit, s.handleProfileSubmitTask)
 	profileMux.HandleFunc(tgTaskTypePublishRecovery, s.handleTerminalPublishRecoveryTask)
@@ -797,12 +819,23 @@ func (s *sSysPublish) handleProfileDownTask(ctx context.Context, task *asynq.Tas
 	return s.handleProfilesDown(ctx, payload.ProfileIds, payload.TenantId, payload.DownAt, payload.OperationNo)
 }
 
+// handleCycleRunTask 执行批次生产，超时释放运行状态以便依据已保存游标幂等恢复。
 func (s *sSysPublish) handleCycleRunTask(ctx context.Context, task *asynq.Task) error {
 	payload, err := decodeCycleRunQueuePayload(task)
 	if err != nil {
 		return err
 	}
-	return s.ExecuteCycleRun(ctx, payload.RunId)
+	err = s.ExecuteCycleRun(ctx, payload.RunId)
+	if err != nil && ctx.Err() != nil {
+		// 生产阶段超时必须释放running状态，保留游标和已落库任务供幂等续跑。
+		recoveryCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_, recoveryErr := g.DB().Model(publishCycleRunTable).Ctx(recoveryCtx).Where("id", payload.RunId).Where("status", cycleRunStatusRunning).Data(g.Map{"status": cycleRunStatusFailed, "error_message": "循环生产超时，等待幂等恢复"}).Update()
+		if recoveryErr != nil {
+			g.Log().Warningf(recoveryCtx, "释放超时循环生产状态失败 run:%d err:%+v", payload.RunId, recoveryErr)
+		}
+	}
+	return err
 }
 
 func (s *sSysPublish) handleCollectMediaCacheTask(ctx context.Context, task *asynq.Task) error {

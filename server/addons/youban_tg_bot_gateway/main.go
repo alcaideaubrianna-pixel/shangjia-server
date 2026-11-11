@@ -82,6 +82,9 @@ func (m *module) Start(option *addons.Option) error {
 			}})
 		})
 	})
+	if runrole.Enabled(m.ctx, runrole.BackgroundWorker) || runrole.Enabled(m.ctx, runrole.Worker) {
+		gatewayservice.Gateway().StartWorker(m.ctx)
+	}
 	if runrole.Enabled(m.ctx, runrole.Runtime) {
 		gatewayservice.Gateway().StartRuntime(m.ctx)
 	}

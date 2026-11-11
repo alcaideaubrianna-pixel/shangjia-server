@@ -191,7 +191,7 @@ func (s *sSysPublish) sendDownChannelProfile(ctx context.Context, tenantId int64
 	if job.TargetChatId == "" {
 		return gerror.New("下架频道Chat ID未配置")
 	}
-	return s.withTelegramChannelLock(ctx, job.TargetChatId, func() error {
+	return s.withTelegramCleanupExecution(ctx, job, func(ctx context.Context) error {
 		jobId, shouldSend, err := s.createDownChannelTelegramJob(ctx, job, operationNo, cutoffAt)
 		if err != nil {
 			return err

@@ -17,8 +17,8 @@ const telegramDeleteMessagesMaxItems = 100
 const telegramDeleteMessagesBatchThreshold = 10
 
 func (s *sSysPublish) deleteTelegramMessageSet(ctx context.Context, job telegramJobRecord, reason string) error {
-	return s.withTelegramChannelLock(ctx, job.TargetChatId, func() error {
-		return s.deleteTelegramMessageSetLockedByChannel(ctx, job, reason)
+	return s.withTelegramCleanupExecution(ctx, job, func(cleanupCtx context.Context) error {
+		return s.deleteTelegramMessageSetLockedByChannel(cleanupCtx, job, reason)
 	})
 }
 

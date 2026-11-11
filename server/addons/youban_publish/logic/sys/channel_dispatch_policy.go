@@ -1,6 +1,22 @@
 package sys
 
-import "context"
+import (
+	"context"
+	"github.com/gogf/gf/v2/frame/g"
+)
+
+// telegramLegacyPublishQueuesEnabled 迁移期默认排空旧队列；全量新引擎且明确关闭后不再轮询旧分片。
+func telegramLegacyPublishQueuesEnabled(ctx context.Context) bool {
+	return !globalStreamPushEngineEnabled() || g.Cfg().MustGet(ctx, "youbanPublish.queue.drainLegacyQueues", true).Bool()
+}
+
+// telegramPublishExecutionQueues 返回发送执行队列，保留基础队列承接历史下架重试兼容任务。
+func telegramPublishExecutionQueues(ctx context.Context) map[string]int {
+	if telegramLegacyPublishQueuesEnabled(ctx) {
+		return telegramPublishForegroundQueueWeightsWithUnifiedLane(ctx)
+	}
+	return map[string]int{channelDispatchQueueSend: 1, tgQueueNameDefault: 1}
+}
 
 // channelDispatchQueueSend 是统一发送任务队列名称。
 const channelDispatchQueueSend = "youban_publish_push_send"
@@ -71,20 +87,4 @@ const (
 	channelPriorityKeywordDelete
 	// channelPriorityCycleDelete 表示循环翻新触发的旧消息删除。
 	channelPriorityCycleDelete
-)
-
-// channelSendPriority 定义上架任务的优先级，数值越小越优先。
-type channelSendPriority int
-
-const (
-	// channelPriorityManualUpload 表示用户主动上架。
-	channelPriorityManualUpload channelSendPriority = iota
-	// channelPriorityRealtimeCollect 表示实时采集推送。
-	channelPriorityRealtimeCollect
-	// channelPriorityAIRepair 表示 AI 巡检修复。
-	channelPriorityAIRepair
-	// channelPriorityCycle 表示循环翻新。
-	channelPriorityCycle
-	// channelPriorityBatch 表示批次上架。
-	channelPriorityBatch
 )

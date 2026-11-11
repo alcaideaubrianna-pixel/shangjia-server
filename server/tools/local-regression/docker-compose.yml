@@ -1,0 +1,122 @@
+services:
+  tg-hook:
+    build:
+      context: ../..
+      dockerfile: tools/local-regression/Dockerfile
+      target: hook
+    entrypoint: ["/usr/local/bin/tg-hook"]
+    command: ["--addr", "0.0.0.0:19100", "--record", "/var/log/youban/hook.jsonl", "--record-format", "jsonl", "--webhook-url", "http://web:8000/api/youban_tg_bot_gateway/telegram/webhook", "--webhook-key", "52aa4633e23d1347ca7dad6b"]
+    restart: unless-stopped
+    environment:
+      TZ: UTC
+    volumes:
+      - regression_logs:/var/log/youban
+      - ./testdata:/tmp/youban-testdata:ro
+    ports:
+      - "19100:19100"
+
+  publish-worker:
+    build:
+      context: ../..
+      dockerfile: tools/local-regression/Dockerfile
+    command: ["publish-worker"]
+    restart: unless-stopped
+    depends_on:
+      - tg-hook
+    environment: &local-worker-environment
+      TZ: UTC
+      YOUBAN_LOCAL_REGRESSION: "1"
+      YOUBAN_MODE: "product"
+      YOUBAN_TELEGRAM_LOCAL_BOT_ENABLED: "1"
+      YOUBAN_PUBLISH_PUSH_ENGINE: "unified_stream"
+      YOUBAN_PUBLISH_DRAIN_LEGACY_QUEUES: "false"
+      YOUBAN_RUNTIME_ROLES: "publish-worker"
+      YOUBAN_DB_DRIVER: pgsql
+      YOUBAN_DB_HOST: host.docker.internal
+      YOUBAN_DB_PORT: "5432"
+      YOUBAN_DB_USER: postgres
+      YOUBAN_DB_PASSWORD: postgres
+      YOUBAN_DB_NAME: youban_hotgo
+      YOUBAN_DB_DEBUG: ${YOUBAN_LOCAL_DB_DEBUG:-false}
+      # 多副本压力测试时限制单实例连接池，避免扩容后耗尽本地 PG 连接数。
+      YOUBAN_DB_MAX_OPEN: ${YOUBAN_LOCAL_DB_MAX_OPEN:-4}
+      YOUBAN_DB_MAX_IDLE: ${YOUBAN_LOCAL_DB_MAX_IDLE:-2}
+      YOUBAN_REDIS_ADDRESS: ${YOUBAN_LOCAL_REDIS_ADDRESS:-host.docker.internal:16382}
+      YOUBAN_REDIS_DB: "15"
+      YOUBAN_TELEGRAM_RUNTIME_API_URL: http://tg-hook:19100
+      YOUBAN_TELEGRAM_BOT_API_URL: http://tg-hook:19100
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - regression_logs:/var/log/youban
+      - ./testdata:/tmp/youban-testdata:ro
+
+  # Asynq Telegram 任务执行角色；Stream/Outbox 只负责就绪通知和入队。
+  background-worker:
+    build:
+      context: ../..
+      dockerfile: tools/local-regression/Dockerfile
+    command: ["background-worker"]
+    restart: unless-stopped
+    depends_on:
+      - tg-hook
+    environment:
+      <<: *local-worker-environment
+      YOUBAN_RUNTIME_ROLES: "background-worker"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - regression_logs:/var/log/youban
+      - ./testdata:/tmp/youban-testdata:ro
+
+  # 真实scheduler角色运行定时上架与账户调度；不启动Telegram账号长连接。
+  scheduler:
+    image: local-regression-publish-worker:latest
+    command: ["scheduler"]
+    restart: unless-stopped
+    environment:
+      <<: *local-worker-environment
+      YOUBAN_RUNTIME_ROLES: "scheduler"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - regression_logs:/var/log/youban
+      - ./testdata:/tmp/youban-testdata:ro
+
+  # 真实API角色接收Webhook；共享本地依赖，不启动账号长连接。
+  web:
+    image: local-regression-publish-worker:latest
+    command: ["web"]
+    restart: unless-stopped
+    depends_on:
+      - tg-hook
+    environment:
+      <<: *local-worker-environment
+      YOUBAN_RUNTIME_ROLES: "web"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:18080:8000"
+    volumes:
+      - regression_logs:/var/log/youban
+      - ./testdata:/tmp/youban-testdata:ro
+
+  # 按需运行真实媒体恢复角色；复用同一镜像和本地依赖配置。
+  media-worker:
+    image: local-regression-publish-worker:latest
+    command: ["media-worker"]
+    profiles: ["media"]
+    restart: unless-stopped
+    depends_on:
+      - tg-hook
+    environment:
+      <<: *local-worker-environment
+      YOUBAN_RUNTIME_ROLES: "media-worker"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - regression_logs:/var/log/youban
+      - ./testdata:/tmp/youban-testdata:ro
+
+volumes:
+  regression_logs:

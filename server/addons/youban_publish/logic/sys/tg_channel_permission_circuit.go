@@ -199,24 +199,30 @@ func (s *sSysPublish) recordChannelPermissionFailure(ctx context.Context, job te
 	if row != nil && row.Paused == 1 {
 		return nil
 	}
-	jobs, err := channelPermissionRecentJobs(ctx, g.DB().Model(publishTgJobTable), job, row)
-	if err != nil {
-		return err
-	}
-	if !telegramChannelPermissionStreak(jobs) {
-		return nil
+	// 明确的失权立即停止本频道；chat not found仍沿用连续失败阈值，避免误熔断。
+	if !isDefinitiveTelegramPermissionError(cause) {
+		jobs, err := channelPermissionRecentJobs(ctx, g.DB().Model(publishTgJobTable), job, row)
+		if err != nil {
+			return err
+		}
+		if !telegramChannelPermissionStreak(jobs) {
+			return nil
+		}
 	}
 	owner, err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).Fields("created_by").Where("id", job.ChannelId).Where("tenant_id", job.TenantId).WhereNull("deleted_at").Value()
 	if err != nil {
 		return err
 	}
-	if owner.Int64() <= 0 {
-		return gerror.New("频道缺少可通知的归属账号")
-	}
 	ownerAccountId := owner.Int64()
+	if ownerAccountId <= 0 {
+		ownerAccountId = job.AccountId
+	} // 通知资料缺失不能阻止安全停推。
 	generation := guid.S()
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		return pauseChannelPermissionTx(ctx, tx, job, ownerAccountId, generation, row)
+		if err := pauseChannelPermissionTx(ctx, tx, job, ownerAccountId, generation, row); err != nil {
+			return err
+		}
+		return s.projectChannelPermissionFailure(ctx, tx, job, cause)
 	})
 	if err != nil {
 		return err

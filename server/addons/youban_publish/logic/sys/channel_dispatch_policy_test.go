@@ -1,6 +1,41 @@
 package sys
 
-import "testing"
+import (
+	"context"
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gcfg"
+	"testing"
+)
+
+// TestLegacyPublishDrainMigrationPolicy 验证迁移默认排空旧队列，显式关闭仅对全量 Stream 生效。
+func TestLegacyPublishDrainMigrationPolicy(t *testing.T) {
+	before := g.Cfg().GetAdapter()
+	t.Cleanup(func() { g.Cfg().SetAdapter(before) })
+	setConfig := func(content string) {
+		a, err := gcfg.NewAdapterContent(content)
+		if err != nil {
+			t.Fatal(err)
+		}
+		g.Cfg().SetAdapter(a)
+	}
+	t.Setenv("YOUBAN_PUBLISH_PUSH_ENGINE", pushEngineUnifiedStream)
+	setConfig(`{}`)
+	if !telegramLegacyPublishQueuesEnabled(context.Background()) {
+		t.Fatal("migration must drain legacy queues by default")
+	}
+	setConfig(`{"youbanPublish":{"queue":{"drainLegacyQueues":false}}}`)
+	if telegramLegacyPublishQueuesEnabled(context.Background()) {
+		t.Fatal("explicit full-stream mode must disable old shard polling")
+	}
+	queues := telegramPublishExecutionQueues(context.Background())
+	if len(queues) != 2 || queues[channelDispatchQueueSend] == 0 || queues[tgQueueNameDefault] == 0 {
+		t.Fatalf("unexpected execution queues: %v", queues)
+	}
+	t.Setenv("YOUBAN_PUBLISH_PUSH_ENGINE", "")
+	if !telegramLegacyPublishQueuesEnabled(context.Background()) {
+		t.Fatal("legacy mode must keep its workers even when drain option is false")
+	}
+}
 
 // TestChannelDispatchQueueName 验证发送和删除使用完全隔离的队列。
 func TestChannelDispatchQueueName(t *testing.T) {
@@ -30,16 +65,11 @@ func TestQueueNameForPushEngine(t *testing.T) {
 }
 
 // TestChannelDispatchPriorityOrder 验证优先级数值越小越优先。
+// TestChannelDispatchPriorityOrder 验证删除执行容量按业务优先级分配；发送排序由真实SQL/Go一致性测试覆盖。
 func TestChannelDispatchPriorityOrder(t *testing.T) {
-	if !(channelPriorityManualUpload < channelPriorityRealtimeCollect &&
-		channelPriorityRealtimeCollect < channelPriorityAIRepair &&
-		channelPriorityAIRepair < channelPriorityCycle &&
-		channelPriorityCycle < channelPriorityBatch) {
-		t.Fatal("send priority order is invalid")
-	}
-	if !(channelPriorityManualDelete < channelPriorityKeywordDelete &&
-		channelPriorityKeywordDelete < channelPriorityCycleDelete) {
-		t.Fatal("delete priority order is invalid")
+	queues := telegramCleanupWorkerQueues()
+	if !(queues[channelDispatchQueueDeleteManual] > queues[channelDispatchQueueDeleteKeyword] && queues[channelDispatchQueueDeleteKeyword] > queues[channelDispatchQueueDeleteCycle]) {
+		t.Fatal("delete worker weights do not preserve business priorities")
 	}
 }
 

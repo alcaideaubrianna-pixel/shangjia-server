@@ -157,6 +157,15 @@ func (s *sSysPublish) submitCollectProfileDispatch(ctx context.Context, dispatch
 		CollectSourceChatId:    strings.TrimSpace(event["source_chat_id"].String()),
 		CollectSourceMessageId: event["source_message_id"].Int64(),
 	}
+	if s.accountPushEngine(ctx, event["tenant_id"].Int64(), event["account_id"].Int64()) == pushEngineUnifiedStream {
+		history, historyErr := g.DB().Model(collectProcessOutboxTable).Safe().Ctx(ctx).Where("event_id", event["id"].Int64()).Fields("history").Value()
+		if historyErr != nil {
+			return gerror.Wrap(historyErr, "读取采集来源调度类型失败")
+		}
+		if history.Bool() {
+			meta.InitialPriority = tgJobPriorityHistory
+		}
+	}
 	if err := s.submitProfilePublishWithMeta(ctx, profileId, event["tenant_id"].Int64(), event["account_id"].Int64(), event["account_id"].Int64(), operationNo, channelIds, false, meta); err != nil {
 		if errors.Is(err, errTelegramPublishPermissionPaused) {
 			_, updateErr := pdao.YoubanPublishCollectDispatch.Ctx(ctx).Where("id", dispatchId).Data(g.Map{

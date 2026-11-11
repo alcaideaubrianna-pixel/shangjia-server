@@ -1,0 +1,22 @@
+# 本地按账户灰度：先通过迁移脚本设置指定账户；其他账户保留原引擎。
+services:
+  publish-worker:
+    environment:
+      YOUBAN_PUBLISH_PUSH_ENGINE: ""
+      YOUBAN_PUBLISH_REDIS_STREAM_GRAY_ENABLED: "true"
+  background-worker:
+    environment:
+      YOUBAN_PUBLISH_PUSH_ENGINE: ""
+      YOUBAN_PUBLISH_REDIS_STREAM_GRAY_ENABLED: "true"
+  scheduler:
+    environment:
+      YOUBAN_PUBLISH_PUSH_ENGINE: ""
+      YOUBAN_PUBLISH_REDIS_STREAM_GRAY_ENABLED: "true"
+  web:
+    environment:
+      YOUBAN_PUBLISH_PUSH_ENGINE: ""
+      YOUBAN_PUBLISH_REDIS_STREAM_GRAY_ENABLED: "true"
+  media-worker:
+    environment:
+      YOUBAN_PUBLISH_PUSH_ENGINE: ""
+      YOUBAN_PUBLISH_REDIS_STREAM_GRAY_ENABLED: "true"

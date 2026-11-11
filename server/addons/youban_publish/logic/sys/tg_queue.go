@@ -336,6 +336,9 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 	}
 	priority := s.telegramJobPriority(job)
 	queueName := telegramQueueNameByPriorityAndChannel(ctx, priority, job.ChannelId)
+	// 新引擎统一执行队列，频道顺序和优先级仍由入队前的频道调度保证。
+	// 旧引擎保留原队列，便于按账户灰度和迁移回滚。
+	queueName = queueNameForPushEngine(s.accountPushEngine(ctx, job.TenantId, job.AccountId), queueName)
 	data := g.Map{
 		"priority":            priority,
 		"queue_name":          queueName,
@@ -665,6 +668,7 @@ func (s *sSysPublish) enqueueProfileDownRun(ctx context.Context, tenantId int64,
 	return err
 }
 
+// enqueueCycleRun 提交批次生产任务；新引擎复用后台队列并限制单页执行预算。
 func (s *sSysPublish) enqueueCycleRun(ctx context.Context, runId int64, delay time.Duration) error {
 	if runId <= 0 {
 		return nil
@@ -678,10 +682,26 @@ func (s *sSysPublish) enqueueCycleRun(ctx context.Context, runId int64, delay ti
 		return err
 	}
 	task := asynq.NewTask(tgTaskTypeCycleRun, payload)
+	queueName, budget := tgQueueNameCycle, 30*time.Minute
+	newEngine := globalStreamPushEngineEnabled()
+	if !newEngine {
+		var owner struct {
+			TenantID  int64 `orm:"tenant_id"`
+			AccountID int64 `orm:"account_id"`
+		}
+		if err := g.DB().Model(publishCycleRunTable+" r").Ctx(ctx).InnerJoin(publishChannelTable+" c", "c.id=r.channel_id").Where("r.id", runId).Fields("r.tenant_id,c.tg_account_id AS account_id").Scan(&owner); err != nil {
+			return err
+		}
+		newEngine = s.accountPushEngine(ctx, owner.TenantID, owner.AccountID) == pushEngineUnifiedStream
+	}
+	// 新批次只生产任务，不执行TG发送；复用可并发扩容的后台队列，避免旧cycle单消费者阻塞所有账户。
+	if newEngine {
+		queueName, budget = tgQueueNameBackground, 25*time.Second
+	}
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameCycle),
+		asynq.Queue(queueName),
 		asynq.MaxRetry(3),
-		asynq.Timeout(30 * time.Minute),
+		asynq.Timeout(budget),
 	}
 	if delay > 0 {
 		options = append(options, asynq.ProcessIn(delay))
@@ -836,7 +856,11 @@ func (s *sSysPublish) enqueueTelegramTaskWithQueue(ctx context.Context, taskType
 		options = append(options, asynq.Unique(30*time.Second))
 	}
 	if delay > 0 {
-		options = append(options, asynq.ProcessIn(delay))
+		if taskType == tgTaskTypePublish && queueName == channelDispatchQueueSend {
+			options = append(options, asynq.ProcessAt(telegramPublishScheduleTime(time.Now(), delay)))
+		} else {
+			options = append(options, asynq.ProcessIn(delay))
+		}
 	}
 	// Queue submission must never hold an HTTP/API request indefinitely when
 	// Redis or an Asynq Lua script is slow. Telegram deletion itself remains in
@@ -851,6 +875,10 @@ func (s *sSysPublish) enqueueTelegramTaskWithQueue(ctx context.Context, taskType
 	}
 	if err != nil {
 		return err
+	}
+	// 新删除通道独立于发送；删除任务不能覆盖发送任务的队列身份，否则恢复检查会认错执行者。
+	if taskType == tgTaskTypeCleanup && queueName != tgQueueNameCleanup {
+		return nil
 	}
 	step = beginTelegramPublishStage(ctx, "queue.save_task_id", g.Map{"enqueuedTaskId": info.ID, "targetQueue": queueName})
 	_, saveErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", jobId).Data(g.Map{

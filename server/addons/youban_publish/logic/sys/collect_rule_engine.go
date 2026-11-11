@@ -705,7 +705,11 @@ func applyCollectIntroFeeSuffix(text, original, suffix string) string {
 		// Keep an introduction or other prose that precedes an inline fee:
 		// "自我介绍: 啊啊啊 介绍费 7888".
 		if feeIndex > 0 && formatted != "" {
-			formatted = strings.TrimSpace(normalizedLine[:feeIndex]) + " " + formatted
+			prefix := strings.TrimSpace(normalizedLine[:feeIndex])
+			// 前置金额已经进入格式化结果，只保留真正的前置正文，避免“7888介绍费”重复金额。
+			if strings.TrimSpace(collectNumberRule.ReplaceAllString(prefix, "")) != "" {
+				formatted = prefix + " " + formatted
+			}
 		}
 		lines[index] = formatted
 	}

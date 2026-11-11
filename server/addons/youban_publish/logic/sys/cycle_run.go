@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,18 +44,19 @@ type channelCycleRecord struct {
 }
 
 type cycleRunRecord struct {
-	Id           int64       `orm:"id"`
-	TenantId     int64       `orm:"tenant_id"`
-	ChannelId    int64       `orm:"channel_id"`
-	Status       string      `orm:"status"`
-	Stage        string      `orm:"stage"`
-	CursorId     int64       `orm:"cursor_id"`
-	TotalCount   int         `orm:"total_count"`
-	QueuedCount  int         `orm:"queued_count"`
-	ScheduledAt  *gtime.Time `orm:"scheduled_at"`
-	StartedAt    *gtime.Time `orm:"started_at"`
-	FinishedAt   *gtime.Time `orm:"finished_at"`
-	ErrorMessage string      `orm:"error_message"`
+	Id             int64       `orm:"id"`
+	TenantId       int64       `orm:"tenant_id"`
+	ChannelId      int64       `orm:"channel_id"`
+	Status         string      `orm:"status"`
+	Stage          string      `orm:"stage"`
+	CursorId       int64       `orm:"cursor_id"`
+	UpperProfileID int64       `orm:"upper_profile_id"`
+	TotalCount     int         `orm:"total_count"`
+	QueuedCount    int         `orm:"queued_count"`
+	ScheduledAt    *gtime.Time `orm:"scheduled_at"`
+	StartedAt      *gtime.Time `orm:"started_at"`
+	FinishedAt     *gtime.Time `orm:"finished_at"`
+	ErrorMessage   string      `orm:"error_message"`
 }
 
 type channelProfileRecord struct {
@@ -66,14 +68,19 @@ type channelProfileRecord struct {
 }
 
 func (s *sSysPublish) RunChannelCycleScheduler(ctx context.Context) error {
+	if globalStreamPushEngineEnabled() {
+		return s.enqueueAccountSchedules(ctx)
+	}
+	if err := s.enqueueAccountSchedules(ctx); err != nil {
+		return err
+	}
 	return runChannelCycleSchedulerStages(ctx, []channelCycleSchedulerStage{
-		{name: "资料级循环调度", run: s.runProfileCycleOrchestrator},
 		// 到期循环是用户可见的主路径，必须先进入分片扫描；恢复和通知阶段
 		// 可能访问大量历史数据，不能阻塞新一轮循环调度。
 		{name: "扫描批次循环", run: func(ctx context.Context) error { return s.scheduleDueChannelBatchCycles(ctx, 50) }},
 		{name: "扫描时间循环", run: s.runProfileCycleDueScan},
-		{name: "暂停长期未活跃免费循环", run: s.pauseInactiveFreeChannelCycles},
-		{name: "恢复循环批次", run: s.recoverChannelCycleRuns},
+		{name: "暂停长期未活跃免费循环", run: func(ctx context.Context) error { return s.pauseInactiveFreeChannelCycles(ctx) }},
+		{name: "恢复循环批次", run: func(ctx context.Context) error { return s.recoverChannelCycleRuns(ctx) }},
 		{name: "核对循环补偿", run: func(ctx context.Context) error { return s.reconcileRecoveredChannelCycleRuns(ctx, 20) }},
 		{name: "收尾循环批次", run: func(ctx context.Context) error { return s.finalizeDispatchingChannelCycleRuns(ctx, 20) }},
 		{name: "恢复到期时间循环", run: func(ctx context.Context) error { return s.enqueueDueProfileCycleReschedules(ctx, 20) }},
@@ -81,30 +88,45 @@ func (s *sSysPublish) RunChannelCycleScheduler(ctx context.Context) error {
 	})
 }
 
-func (s *sSysPublish) pauseInactiveFreeChannelCycles(ctx context.Context) error {
+// pauseInactiveFreeChannelCycles 在指定账户范围复用免费频道长期不活跃保护规则。
+func (s *sSysPublish) pauseInactiveFreeChannelCycles(ctx context.Context, scopes ...publishAccountScope) error {
 	inactiveDays := maxConfigInt(ctx, "youbanPublish.cycle.freeInactiveDays", 7)
 	cutoff := gtime.Now().Add(-time.Duration(inactiveDays) * 24 * time.Hour)
 	var channels []*channelCycleRecord
-	if err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).Fields("id,tenant_id,cycle_publish_enabled,status,publish_direction,cycle_publish_mode").Where("cycle_publish_enabled", 1).Where("status", 1).Where("publish_direction", "up").WhereNull("deleted_at").Scan(&channels); err != nil {
+	model := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).Fields("id,tenant_id,cycle_publish_enabled,status,publish_direction,cycle_publish_mode").Where("cycle_publish_enabled", 1).Where("status", 1).Where("publish_direction", "up")
+	model = accountScheduleModel(model, publishChannelTable+".tenant_id", publishChannelTable+".tg_account_id", scopes)
+	if err := model.Scan(&channels); err != nil {
 		return gerror.Wrap(err, "读取免费循环频道失败")
 	}
 	notified := make(map[int64]bool)
+	inactiveByTenant := make(map[int64]bool)
 	for _, channel := range channels {
-		vip, err := s.tenantVipStatus(ctx, channel.TenantId)
-		if err != nil || tenantVipStatusActive(vip) {
+		inactive, loaded := inactiveByTenant[channel.TenantId]
+		if !loaded {
+			vip, err := s.tenantVipStatus(ctx, channel.TenantId)
+			if err != nil {
+				return err
+			}
+			if !tenantVipStatusActive(vip) {
+				var activity struct {
+					LastActiveAt *gtime.Time `orm:"last_active_at"`
+				}
+				err := pdao.YoubanPublishAccount.Ctx(ctx).Fields("last_active_at").Where("tenant_id", channel.TenantId).Where("account_type", sysin.PublishAccountTypeAdmin).Where("status", 1).OrderDesc("last_active_at").Limit(1).Scan(&activity)
+				if errors.Is(err, sql.ErrNoRows) && len(scopes) > 0 {
+					// 历史账户可能只有上传账户：复用本账户活动时间，缺少管理员不能导致保护永久失效。
+					err = pdao.YoubanPublishAccount.Ctx(ctx).Fields("last_active_at").Where("tenant_id", channel.TenantId).Where("id", scopes[0].AccountID).Where("status", 1).Scan(&activity)
+				}
+				if err != nil && !errors.Is(err, sql.ErrNoRows) {
+					return err
+				}
+				inactive = activity.LastActiveAt == nil || activity.LastActiveAt.Before(cutoff)
+			}
+			inactiveByTenant[channel.TenantId] = inactive
+		}
+		if !inactive {
 			continue
 		}
-		var activity struct {
-			LastActiveAt *gtime.Time `orm:"last_active_at"`
-		}
-		if err = pdao.YoubanPublishAccount.Ctx(ctx).Fields("last_active_at").Where("tenant_id", channel.TenantId).Where("account_type", sysin.PublishAccountTypeAdmin).Where("status", 1).OrderDesc("last_active_at").Limit(1).Scan(&activity); err != nil {
-			return err
-		}
-		last := activity.LastActiveAt
-		if last != nil && !last.Before(cutoff) {
-			continue
-		}
-		if _, err = g.DB().Model(publishChannelTable).Safe().Ctx(ctx).Where("id", channel.Id).Where("cycle_publish_enabled", 1).Data(g.Map{"cycle_publish_enabled": 0, "updated_at": gtime.Now()}).Update(); err != nil {
+		if _, err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).Where("id", channel.Id).Where("cycle_publish_enabled", 1).Data(g.Map{"cycle_publish_enabled": 0, "updated_at": gtime.Now()}).Update(); err != nil {
 			return err
 		}
 		_ = s.syncChannelCycleAfterSave(ctx, channel.TenantId, channel.Id, 0, 0, "")
@@ -234,12 +256,16 @@ func (s *sSysPublish) AdminChannelCycleRun(ctx context.Context, in *sysin.Channe
 	return &sysin.ChannelFullPushModel{ChannelId: channel.Id, Queued: 0, BatchNo: fmt.Sprintf("cycle_batch:%d", runId), Status: cycleRunStatusPending}, nil
 }
 
-func (s *sSysPublish) recoverChannelCycleRuns(ctx context.Context) error {
+// recoverChannelCycleRuns 恢复账户范围的滞留批次，新生产任务采用与短执行预算对应的恢复阈值。
+func (s *sSysPublish) recoverChannelCycleRuns(ctx context.Context, scopes ...publishAccountScope) error {
 	now := gtime.Now()
 	staleRunningBefore := now.Add(-35 * time.Minute)
 	staleDispatchingBefore := now.Add(-30 * time.Minute)
+	if len(scopes) > 0 {
+		staleRunningBefore = now.Add(-35 * time.Second)
+	}
 	var staleRunning []cycleRunRecord
-	if err := g.DB().Model(publishCycleRunTable).Safe().Ctx(ctx).
+	if err := cycleRunAccountModel(ctx, scopes).
 		Fields("id,channel_id").
 		Where("status", cycleRunStatusRunning).
 		WhereLTE("updated_at", staleRunningBefore).
@@ -249,7 +275,7 @@ func (s *sSysPublish) recoverChannelCycleRuns(ctx context.Context) error {
 		return gerror.Wrap(err, "读取超时频道循环批次失败")
 	}
 	for _, run := range staleRunning {
-		result, err := g.DB().Model(publishCycleRunTable).Safe().Ctx(ctx).
+		result, err := cycleRunAccountModel(ctx, scopes).
 			Where("id", run.Id).
 			Where("status", cycleRunStatusRunning).
 			WhereLTE("updated_at", staleRunningBefore).
@@ -276,7 +302,7 @@ func (s *sSysPublish) recoverChannelCycleRuns(ctx context.Context) error {
 	// as a partial failure. Never re-enqueue a run with pending/sending jobs,
 	// otherwise Telegram messages could be sent twice.
 	var staleDispatching []cycleRunRecord
-	if err := g.DB().Model(publishCycleRunTable).Safe().Ctx(ctx).
+	if err := cycleRunAccountModel(ctx, scopes).
 		Fields("id,channel_id").
 		Where("status", cycleRunStatusDispatching).
 		WhereLTE("updated_at", staleDispatchingBefore).
@@ -295,7 +321,7 @@ func (s *sSysPublish) recoverChannelCycleRuns(ctx context.Context) error {
 			return err
 		}
 		var current cycleRunRecord
-		if err = g.DB().Model(publishCycleRunTable).Safe().Ctx(ctx).
+		if err = cycleRunAccountModel(ctx, scopes).
 			Fields("id,status").Where("id", run.Id).Scan(&current); err != nil {
 			return gerror.Wrap(err, "校验超时频道循环发送状态失败")
 		}
@@ -308,7 +334,7 @@ func (s *sSysPublish) recoverChannelCycleRuns(ctx context.Context) error {
 	}
 
 	var waiting []cycleRunRecord
-	if err := g.DB().Model(publishCycleRunTable).Safe().Ctx(ctx).
+	if err := cycleRunAccountModel(ctx, scopes).
 		Fields("id,channel_id").
 		WhereIn("status", []string{cycleRunStatusPending, cycleRunStatusFailed}).
 		WhereLTE("updated_at", now.Add(-90*time.Second)).
@@ -387,7 +413,7 @@ func (s *sSysPublish) ExecuteCycleRun(ctx context.Context, runId int64) error {
 			pageLimit = remaining
 		}
 	}
-	items, err := s.channelCyclePage(ctx, channel, run.CursorId, pageLimit)
+	items, err := s.channelCyclePage(ctx, channel, run.CursorId, pageLimit, run.UpperProfileID)
 	if err != nil {
 		s.failChannelCycleRun(ctx, run.Id, run.ChannelId, err)
 		return err
@@ -480,9 +506,10 @@ func (s *sSysPublish) beginChannelCycleDispatch(ctx context.Context, run cycleRu
 	return s.finalizeChannelCycleDelivery(ctx, run)
 }
 
-func (s *sSysPublish) finalizeDispatchingChannelCycleRuns(ctx context.Context, limit int) error {
+// finalizeDispatchingChannelCycleRuns 按账户汇总已投递批次的频道结果并释放下一轮入口。
+func (s *sSysPublish) finalizeDispatchingChannelCycleRuns(ctx context.Context, limit int, scopes ...publishAccountScope) error {
 	var runs []cycleRunRecord
-	if err := g.DB().Model(publishCycleRunTable).Safe().Ctx(ctx).
+	if err := cycleRunAccountModel(ctx, scopes).
 		Where("status", cycleRunStatusDispatching).
 		OrderAsc("id").Limit(limit).Scan(&runs); err != nil {
 		return gerror.Wrap(err, "读取等待发送完成的循环批次失败")
@@ -540,7 +567,8 @@ func (s *sSysPublish) channelCycleById(ctx context.Context, channelId int64) (ch
 	return channel, err
 }
 
-func (s *sSysPublish) channelCyclePage(ctx context.Context, channel channelCycleRecord, cursorId int64, limit int) ([]channelProfileRecord, error) {
+// channelCyclePage 使用资料主键和本轮上界分页，新增资料不会延长正在执行的轮次。
+func (s *sSysPublish) channelCyclePage(ctx context.Context, channel channelCycleRecord, cursorId int64, limit int, upperIDs ...int64) ([]channelProfileRecord, error) {
 	var items []channelProfileRecord
 	model := s.fullPushEligibleProfileModel(ctx, channel.TenantId, channel.Id)
 	if channel.Mode == "batch" {
@@ -551,6 +579,9 @@ func (s *sSysPublish) channelCyclePage(ctx context.Context, channel channelCycle
 	// Finish the tail in this run; the scheduler resets to zero only when the
 	// next run observes that no IDs remain after the cursor.
 	query = query.WhereGT("p.id", cursorId).OrderAsc("p.id")
+	if len(upperIDs) > 0 && upperIDs[0] > 0 {
+		query = query.WhereLTE("p.id", upperIDs[0])
+	}
 	err := query.Limit(limit).Scan(&items)
 	if err != nil {
 		return nil, gerror.Wrap(err, "分页读取频道循环资料失败")

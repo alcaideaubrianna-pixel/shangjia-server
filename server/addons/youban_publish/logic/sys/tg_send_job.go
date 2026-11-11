@@ -35,6 +35,7 @@ var (
 	errTelegramRemoteConfirmed            = errors.New("Telegram已发送成功，等待修复本地投影")
 )
 
+// SendTelegramJob 串行执行目标频道任务，统一账户间隔、发送确认和完成后唤醒。
 func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) (resultErr error) {
 	ctx = telegramPublishTraceContext(ctx, jobId)
 	started := time.Now()
@@ -63,6 +64,9 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) (resultE
 	if readyErr != nil {
 		return readyErr
 	} else if !ready {
+		if settled, settleErr := s.settleStreamFailedMediaJob(ctx, targetJob); settled || settleErr != nil {
+			return settleErr
+		}
 		beginTelegramPublishStage(ctx, "job.deferred").End(nil, g.Map{"reason": "media_not_ready"})
 		return s.postponeTelegramJobUntilMediaReady(ctx, targetJob)
 	}
@@ -109,7 +113,13 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) (resultE
 		// periodic recovery loop remains the fallback if the lease holder exits.
 		return nil
 	}
+	stopExecution := func() {}
+	streamEngine := s.accountPushEngine(ctx, targetJob.TenantId, targetJob.AccountId) == pushEngineUnifiedStream
+	if streamEngine {
+		ctx, stopExecution = telegramStreamExecutionContext(ctx, lease)
+	}
 	defer func() {
+		stopExecution()
 		releaseStage := beginTelegramPublishStage(ctx, "channel.send_lease.release")
 		s.releaseTelegramChannelLease(ctx, lease)
 		releaseStage.End(nil)
@@ -125,13 +135,37 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) (resultE
 	if paused, pauseErr := s.postponePermissionPausedJob(ctx, targetJob); pauseErr != nil || paused {
 		return pauseErr
 	}
+	// 只拦截尚未开始发送的循环；在途、未知结果和已确认检查点继续对账/续跑。
+	if targetJob.Status == telegramJobStatusPending || targetJob.Status == telegramJobStatusRetryWait {
+		allowed, guardErr := cycleChannelAllowed(ctx, targetJob.TenantId, targetJob.ChannelId, targetJob.OperationNo)
+		if guardErr != nil {
+			return guardErr
+		}
+		if !allowed {
+			attempts, err := g.DB().Model(publishTgAttemptTable).Ctx(ctx).Where("job_id", targetJob.Id).Count()
+			if err != nil {
+				return err
+			}
+			if attempts == 0 {
+				return s.supersedeTelegramJobAndCompleteOperation(ctx, targetJob)
+			}
+		}
+	}
 	step = beginTelegramPublishStage(ctx, "channel.publish_interval")
 	delay, delayErr := time.Duration(0), error(nil)
-	if !telegramJobBypassesAutomaticSchedule(targetJob) {
+	checkInterval := !telegramJobBypassesAutomaticSchedule(targetJob)
+	// 手工优先只绕过自动发布时间窗口，不能绕过账户的频道发送间隔；删除仍使用独立通道。
+	if streamEngine {
+		checkInterval = !isDownTelegramOperationNo(targetJob.OperationNo)
+	}
+	if checkInterval {
 		delay, delayErr = s.telegramPublishIntervalDelay(ctx, targetJob)
 	}
 	step.End(delayErr, g.Map{"delayMs": delay.Milliseconds()})
 	if delayErr != nil {
+		if streamEngine {
+			return gerror.Wrap(delayErr, "读取频道推送间隔失败，等待重试")
+		}
 		g.Log().Warningf(ctx, "检查频道发送间隔失败，本次降级继续发送 jobId:%d channelId:%d err:%+v", targetJob.Id, targetJob.ChannelId, delayErr)
 	} else if delay > 0 {
 		return s.postponeTelegramJobForPublishInterval(ctx, targetJob, delay)
@@ -1041,13 +1075,18 @@ func (s *sSysPublish) completeTelegramJob(ctx context.Context, job telegramJobRe
 	// fact before taking the profile projection lock: projection contention must
 	// never leave a confirmed job holding the channel's sending slot.
 	sentAt := gtime.Now()
-	transitioned, err := s.transitionTelegramJob(ctx, telegramJobTransition{
-		JobId:      job.Id,
-		From:       []string{telegramJobStatusSending},
-		To:         telegramJobStatusSent,
-		Additional: g.Map{"sent_at": sentAt},
-	})
+	transition := telegramJobTransition{JobId: job.Id, From: []string{telegramJobStatusSending}, To: telegramJobStatusSent, Additional: g.Map{"sent_at": sentAt}}
+	streamEngine := s.accountPushEngine(ctx, job.TenantId, job.AccountId) == pushEngineUnifiedStream
+	var transitioned bool
+	if streamEngine {
+		transitioned, err = s.confirmTelegramJobAndCyclePlan(ctx, job, transition)
+	} else {
+		transitioned, err = s.transitionTelegramJob(ctx, transition)
+	}
 	if err != nil {
+		if streamEngine {
+			return gerror.Wrap(errTelegramRemoteConfirmed, "保存已确认发送及频道计划失败："+err.Error())
+		}
 		return gerror.Wrap(err, "更新TG任务状态失败")
 	}
 	if !transitioned {
@@ -1056,29 +1095,14 @@ func (s *sSysPublish) completeTelegramJob(ctx context.Context, job telegramJobRe
 	}
 	s.completeTelegramJobDeliveryProjection(ctx, job, sentAt)
 
-	operationCompleted := false
-	err = s.withProfileLifecycleLock(ctx, job.TenantId, job.ProfileId, func() error {
-		return s.completeTelegramJobLockedByProfile(ctx, job, &operationCompleted)
-	})
+	if s.accountPushEngine(ctx, job.TenantId, job.AccountId) == pushEngineUnifiedStream {
+		err = s.enqueueStreamProfileProjection(ctx, job)
+	} else {
+		err = s.projectCompletedTelegramOperation(ctx, job)
+	}
 	if err != nil {
-		// The sent Job is the durable recovery input for the profile-state
-		// projector. Keep this failure non-fatal so the channel can advance.
-		s.appendTelegramJobLog(ctx, job, "projection", "pending", "TG已发送成功，资料状态等待自动恢复："+err.Error())
-		g.Log().Warningf(ctx, "TG任务已确认，资料状态投影等待恢复 jobId:%d profileId:%d err:%+v", job.Id, job.ProfileId, err)
-		return nil
-	}
-	if !operationCompleted {
-		return nil
-	}
-	reserved, reserveErr := reserveBotProfilePublishNotice(ctx, job.ProfileId, job.OperationNo)
-	if reserveErr != nil {
-		return gerror.Wrap(reserveErr, "占用Bot资料上架通知幂等锁失败")
-	}
-	if !reserved {
-		return nil
-	}
-	if noticeErr := s.notifyBotProfilePublishCompleted(ctx, job); noticeErr != nil {
-		g.Log().Warningf(ctx, "发送Bot资料上架完成通知失败 profileId:%d operationNo:%s err:%+v", job.ProfileId, job.OperationNo, noticeErr)
+		s.appendTelegramJobLog(ctx, job, "projection", "pending", "TG已发送成功，资料投影等待恢复："+err.Error())
+		g.Log().Warningf(ctx, "TG任务已确认，资料投影等待恢复 jobId:%d profileId:%d err:%+v", job.Id, job.ProfileId, err)
 	}
 	return nil
 }
@@ -1088,6 +1112,9 @@ func (s *sSysPublish) completeTelegramJobDeliveryProjection(ctx context.Context,
 		g.Log().Warningf(ctx, "投影TG完成步骤失败 jobId:%d err:%+v", job.Id, stepErr)
 	}
 	job.SentAt = sentAt
+	if cycleErr := s.syncProfileCycleRunJob(ctx, job); cycleErr != nil {
+		g.Log().Warningf(ctx, "回写资料循环频道状态失败 job:%d err:%+v", job.Id, cycleErr)
+	}
 	if attemptErr := s.supersedeOpenTelegramAttempts(ctx, job.Id); attemptErr != nil {
 		g.Log().Warningf(ctx, "关闭TG任务遗留Attempt失败 jobId:%d err:%+v", job.Id, attemptErr)
 	}
@@ -1204,6 +1231,8 @@ func (s *sSysPublish) canSendTelegramJob(ctx context.Context, job telegramJobRec
 	return true, nil
 }
 
+// isCycleBatchOperation 统一识别旧批次循环和资料级循环，生命周期不再按入口分叉。
 func isCycleBatchOperation(operationNo string) bool {
-	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(operationNo)), "cycle_batch:")
+	operationNo = strings.ToLower(strings.TrimSpace(operationNo))
+	return strings.HasPrefix(operationNo, "cycle_batch:") || strings.HasPrefix(operationNo, "profile_cycle:")
 }

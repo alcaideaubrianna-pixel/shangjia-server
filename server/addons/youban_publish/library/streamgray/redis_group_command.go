@@ -15,12 +15,46 @@ func DecodeXReadGroupResponse(value *gvar.Var) ([]StreamEntry, error) {
 	if value == nil || value.IsNil() {
 		return nil, nil
 	}
+	// go-redis/GoFrame 在空结果时返回 map[interface{}]interface{}，而非标准嵌套数组。
+	if raw, ok := value.Val().(map[interface{}]interface{}); ok {
+		if len(raw) == 0 {
+			return nil, nil
+		}
+		for _, streamValue := range raw {
+			if entries, ok := streamValue.([]interface{}); ok && len(entries) == 0 {
+				return nil, nil
+			}
+		}
+	}
+	// Redis adapter may normalize the response to a string-keyed map.
+	if raw := value.Map(); len(raw) > 0 {
+		for _, streamValue := range raw {
+			if entries, ok := streamValue.([]interface{}); ok {
+				if len(entries) == 0 {
+					return nil, nil
+				}
+				// Convert map form to the standard [stream, entries] shape.
+				streams := []any{[]any{"stream", entries}}
+				return decodeXReadStreams(streams)
+			}
+		}
+	}
 	streams := value.Array()
+	return decodeXReadStreams(streams)
+}
+
+func decodeXReadStreams(streams []any) ([]StreamEntry, error) {
+	if len(streams) == 0 {
+		return nil, nil
+	}
 	entries := make([]StreamEntry, 0)
 	for _, streamValue := range streams {
+		if gvar.New(streamValue).IsNil() {
+			continue
+		}
 		streamParts := gvar.New(streamValue).Array()
 		if len(streamParts) < 2 {
-			return nil, gerror.New("Redis XREADGROUP stream 响应格式无效")
+			return nil, gerror.Newf("Redis XREADGROUP stream 响应格式无效 type=%T value=%v", streamValue, streamValue)
 		}
 		for _, entryValue := range gvar.New(streamParts[1]).Array() {
 			entryParts := gvar.New(entryValue).Array()

@@ -166,23 +166,25 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 	stage := beginTelegramPublishStage(ctx, "outbox.dispatch")
 	defer stage.Finish(&resultErr)
 	g.Log().Info(ctx, "TG Outbox 选中任务", g.Map{"event": "outbox_selected", "outboxId": row.Id, "jobId": row.JobId, "outboxAttemptCount": row.AttemptCount, "availableAt": row.AvailableAt})
-	step := beginTelegramPublishStage(ctx, "outbox.decision")
-	decision, err := s.telegramOutboxJobDispatchDecision(ctx, row.JobId, gtime.Now())
-	step.End(err, g.Map{"decision": decision})
-	if err != nil {
-		return err
-	}
-	switch decision {
-	case telegramOutboxDecisionComplete:
-		return s.completeTelegramOutbox(ctx, row.Id)
-	case telegramOutboxDecisionWait:
-		// A later channel job keeps its durable pending intent. Do not lease it,
-		// increment attempts, or move available_at while the real head is active.
-		return nil
+	// 全量 Stream 模式下，频道队首判断由 Stream 消费后的发送逻辑完成。
+	// Outbox 这里只做可靠事件投递，避免每轮对大表执行相关子查询。
+	if !globalStreamPushEngineEnabled() {
+		step := beginTelegramPublishStage(ctx, "outbox.decision")
+		decision, err := s.telegramOutboxJobDispatchDecision(ctx, row.JobId, gtime.Now())
+		step.End(err, g.Map{"decision": decision})
+		if err != nil {
+			return err
+		}
+		switch decision {
+		case telegramOutboxDecisionComplete:
+			return s.completeTelegramOutbox(ctx, row.Id)
+		case telegramOutboxDecisionWait:
+			return nil
+		}
 	}
 	owner := telegramOutboxOwner()
 	now := gtime.Now()
-	step = beginTelegramPublishStage(ctx, "outbox.lease.acquire")
+	step := beginTelegramPublishStage(ctx, "outbox.lease.acquire")
 	result, err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
 		Where("id", row.Id).
 		Where("status = ? OR (status = ? AND lease_expires_at <= ?)", telegramOutboxPending, telegramOutboxProcessing, now).
@@ -382,6 +384,9 @@ func (s *sSysPublish) dispatchDueTelegramJobOutbox(ctx context.Context, limit in
 func (s *sSysPublish) dueTelegramJobOutboxRows(ctx context.Context, limit int, now *gtime.Time) ([]telegramJobOutboxRecord, error) {
 	queryCtx, cancelQuery := context.WithTimeout(ctx, telegramOutboxQueryTimeout)
 	defer cancelQuery()
+	if globalStreamPushEngineEnabled() {
+		return s.dueTelegramStreamOutboxRows(queryCtx, limit, now)
+	}
 	if strings.EqualFold(strings.TrimSpace(g.DB().GetConfig().Type), "pgsql") {
 		query := telegramDueOutboxPostgresSQL()
 		var rows []telegramJobOutboxRecord
@@ -436,6 +441,40 @@ func (s *sSysPublish) dueTelegramJobOutboxRows(ctx context.Context, limit int, n
 		if len(rows) >= limit {
 			break
 		}
+	}
+	return rows, nil
+}
+
+// dueTelegramStreamOutboxRows 读取全量 Stream 模式下的待通知 Outbox。
+// 频道顺序由发送阶段保证，这里只按到期时间取数，避免扫描频道队首排序 SQL。
+func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int, now *gtime.Time) ([]telegramJobOutboxRecord, error) {
+	if limit <= 0 {
+		limit = telegramOutboxBatchLimit(ctx)
+	}
+	// 多副本 Stream dispatcher 只负责快速通知；小批次可以避免多个
+	// worker 同时排序/锁定数千行，靠下一轮读取持续排空 Outbox。
+	if limit > 100 {
+		limit = 100
+	}
+	if limit > telegramOutboxMaxBatchLimit(ctx) {
+		limit = telegramOutboxMaxBatchLimit(ctx)
+	}
+	// Stream 只负责快速通知；频道顺序由消费后的幂等入队和完成唤醒保证。
+	// 不在这里重复计算频道队首，避免大表窗口排序拖慢所有账户。
+	query := `SELECT o.id,o.job_id,o.attempt_count,o.available_at
+		FROM ` + publishTgOutboxTable + ` o
+		JOIN ` + publishTgJobTable + ` j ON j.id=o.job_id
+		WHERE o.event_type=? AND o.available_at<=?
+			AND (o.status=? OR (o.status=? AND o.lease_expires_at<=?))
+			AND j.status IN ('pending','failed_retry','unknown')
+			AND COALESCE(j.dispatch_status,'') IN ('','idle')
+			AND (j.next_retry_at IS NULL OR j.next_retry_at<=?)
+		ORDER BY o.available_at,o.id LIMIT ?`
+	var rows []telegramJobOutboxRecord
+	err := g.DB().GetScan(ctx, &rows, query, telegramOutboxEventPublish, now,
+		telegramOutboxPending, telegramOutboxProcessing, now, now, limit)
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取 Stream 模式TG任务Outbox失败")
 	}
 	return rows, nil
 }

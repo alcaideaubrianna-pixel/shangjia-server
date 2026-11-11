@@ -108,6 +108,9 @@ func TestStreamForOperation(t *testing.T) {
 	if got := StreamForOperation("cycle_batch:1"); got != ReadyBulkStream {
 		t.Fatalf("cycle stream = %q", got)
 	}
+	if got := StreamForOperation("profile_cycle:run:1"); got != ReadyBulkStream {
+		t.Fatalf("profile cycle stream = %q", got)
+	}
 	if got := StreamForOperation("full_push:1"); got != ReadyBulkStream {
 		t.Fatalf("full push stream = %q", got)
 	}
@@ -311,6 +314,123 @@ func TestRedisGroupConsumerKeepsFailedEntryPending(t *testing.T) {
 	}
 	if len(fake.acked) != 0 {
 		t.Fatalf("failed entry must remain pending, acked=%v", fake.acked)
+	}
+}
+
+// TestRedisGroupConsumerBusyChannelDoesNotBlockBatch 验证忙频道不阻止同批其他频道确认。
+func TestRedisGroupConsumerBusyChannelDoesNotBlockBatch(t *testing.T) {
+	fake := &fakeGroupClient{}
+	for _, id := range []int64{1, 2, 3} {
+		body, err := (ReadyEvent{TenantID: 1, AccountID: 2, JobID: id, ChannelID: id}).Encode()
+		if err != nil {
+			t.Fatal(err)
+		}
+		fake.entries = append(fake.entries, StreamEntry{ID: string(rune('0'+id)) + "-0", Payload: body})
+	}
+	consumer, err := NewRedisGroupConsumer(fake, "publish", "worker-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	processed, err := consumer.ConsumeOnce(context.Background(), ReadyRealtimeStream, ">", func(_ context.Context, event ReadyEvent) error {
+		if event.ChannelID == 1 {
+			return errors.New("获取频道任务调度租约失败: lock failed")
+		}
+		return nil
+	})
+	if processed != 2 || !isTransientStreamHandlerError(err) {
+		t.Fatalf("processed=%d err=%v", processed, err)
+	}
+	if len(fake.acked) != 2 || fake.acked[0] != "2-0" || fake.acked[1] != "3-0" {
+		t.Fatalf("busy channel must remain pending without blocking other channels: %v", fake.acked)
+	}
+}
+
+// alternatingGroupClient 区分 pending 和新消息，复现单频道持续竞争。
+type alternatingGroupClient struct {
+	pending []StreamEntry
+	fresh   []StreamEntry
+	acked   []string
+}
+
+func (f *alternatingGroupClient) ReadGroup(_ context.Context, _, _, _, startID string, _ int, _ time.Duration) ([]StreamEntry, error) {
+	if startID == "0" {
+		return f.pending, nil
+	}
+	return f.fresh, nil
+}
+
+func (f *alternatingGroupClient) Ack(_ context.Context, _, _, id string) error {
+	f.acked = append(f.acked, id)
+	return nil
+}
+
+// TestRedisGroupConsumerPendingDoesNotStarveNewChannel 验证持续竞争时仍消费新频道。
+func TestRedisGroupConsumerPendingDoesNotStarveNewChannel(t *testing.T) {
+	pending, err := (ReadyEvent{TenantID: 1, AccountID: 2, JobID: 1, ChannelID: 1}).Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := (ReadyEvent{TenantID: 1, AccountID: 2, JobID: 2, ChannelID: 2}).Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &alternatingGroupClient{pending: []StreamEntry{{ID: "1-0", Payload: pending}}, fresh: []StreamEntry{{ID: "2-0", Payload: fresh}}}
+	consumer, err := NewRedisGroupConsumer(fake, "publish", "worker-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	err = consumer.Run(ctx, ReadyRealtimeStream, func(_ context.Context, event ReadyEvent) error {
+		if event.ChannelID == 1 {
+			return errors.New("lock failed")
+		}
+		cancel()
+		return nil
+	})
+	if !errors.Is(err, context.Canceled) || len(fake.acked) != 1 || fake.acked[0] != "2-0" {
+		t.Fatalf("new channel starved: err=%v acked=%v", err, fake.acked)
+	}
+}
+
+// latePendingClient 模拟消费者启动之后另一个实例崩溃留下的消息。
+type latePendingClient struct {
+	emptyGroupClient
+	claims int
+	entry  StreamEntry
+	acked  bool
+}
+
+func (f *latePendingClient) ClaimPending(context.Context, string, string, string, time.Duration, int) ([]StreamEntry, error) {
+	f.claims++
+	if f.claims == 2 {
+		return []StreamEntry{f.entry}, nil
+	}
+	return nil, nil
+}
+
+func (f *latePendingClient) Ack(context.Context, string, string, string) error {
+	f.acked = true
+	return nil
+}
+
+// TestRedisGroupConsumerReclaimsAfterStartup 验证无需重启也会接管后来遗留的消息。
+func TestRedisGroupConsumerReclaimsAfterStartup(t *testing.T) {
+	body, err := (ReadyEvent{TenantID: 1, AccountID: 2, JobID: 1, ChannelID: 1}).Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &latePendingClient{entry: StreamEntry{ID: "1-0", Payload: body}}
+	consumer, err := NewRedisGroupConsumer(fake, "publish", "worker-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	consumer.claimInterval = time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	err = consumer.Run(ctx, ReadyRealtimeStream, func(context.Context, ReadyEvent) error { cancel(); return nil })
+	if !errors.Is(err, context.Canceled) || !fake.acked || fake.claims < 2 {
+		t.Fatalf("late pending not reclaimed: err=%v claims=%d acked=%v", err, fake.claims, fake.acked)
 	}
 }
 

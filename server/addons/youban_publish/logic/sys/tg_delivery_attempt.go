@@ -746,6 +746,9 @@ func (s *sSysPublish) handleTelegramAttemptTimeout(ctx context.Context, attemptI
 			return nil
 		}
 		g.Log().Warningf(ctx, "提交Telegram消息协议号对账失败 attemptId:%d jobId:%d phase:%s err:%+v", attempt.Id, job.Id, attempt.Phase, err)
+		if deferred, deferErr := s.deferStreamWebhookAfterUnavailableReconcile(ctx, job, attempt, err); deferred || deferErr != nil {
+			return deferErr
+		}
 		return s.failTelegramMediaFallbackJob(ctx, job, err)
 	}
 	// Preserve partial confirmations so a late Webhook can still complete the attempt.
@@ -980,6 +983,14 @@ func (s *sSysPublish) matchTelegramDeliveryAttempt(ctx context.Context, botId in
 	if matched == nil {
 		return
 	}
+	if matched.Status != telegramAttemptStatusConfirmed && matched.Status != telegramAttemptStatusSuperseded && matched.Phase != "package" {
+		if job, err := s.telegramJobById(ctx, matched.JobId); err == nil && s.accountPushEngine(ctx, job.TenantId, job.AccountId) == pushEngineUnifiedStream && job.Status != telegramJobStatusSent && job.Status != telegramJobStatusSuperseded && job.SendPhase != telegramSendPhaseTimeoutCancelled {
+			if err := s.matchStreamWebhookGroup(ctx, *matched, job, msg); err != nil {
+				g.Log().Warningf(ctx, "保存Stream相册Webhook确认失败 jobId:%d attemptId:%d err:%+v", job.Id, matched.Id, err)
+			}
+			return
+		}
+	}
 	if matched.Status == telegramAttemptStatusConfirmed || matched.Status == telegramAttemptStatusSuperseded {
 		// Retain album anchoring even for duplicates, so captionless followers
 		// of this same album can be deleted by their exact IDs as they arrive.
@@ -1169,11 +1180,19 @@ func (s *sSysPublish) confirmLateTelegramAttempt(ctx context.Context, attempt te
 func (s *sSysPublish) confirmTelegramAttemptFromWebhook(ctx context.Context, attempt telegramDeliveryAttempt, job telegramJobRecord, count int) {
 	confirmed := false
 	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		// 统一先锁任务再锁尝试，避免API确认与Webhook确认发生锁顺序反转。
+		var lockedJob telegramJobRecord
+		if err := tx.Model(publishTgJobTable).Where("id", job.Id).LockUpdate().Scan(&lockedJob); err != nil {
+			return err
+		}
+		if lockedJob.Id <= 0 || lockedJob.Status == telegramJobStatusSuperseded || lockedJob.SendPhase == telegramSendPhaseTimeoutCancelled {
+			return nil
+		}
 		var current telegramDeliveryAttempt
 		if err := tx.Model(publishTgAttemptTable).Where("id", attempt.Id).LockUpdate().Scan(&current); err != nil {
 			return err
 		}
-		if current.Status != telegramAttemptStatusSending && current.Status != telegramAttemptStatusWaiting && current.Status != telegramAttemptStatusConfirmed {
+		if current.Status != telegramAttemptStatusSending && current.Status != telegramAttemptStatusWaiting && current.Status != telegramAttemptStatusRetryWait && current.Status != telegramAttemptStatusConfirmed {
 			return nil
 		}
 		phase := telegramSendPhaseDisplayConfirmed

@@ -53,6 +53,8 @@ type Provider interface {
 type ConfigProvider func(ctx context.Context) (*RuntimeConfig, error)
 
 type IGateway interface {
+	// StartWorker 只消费持久化更新，不持有Bot轮询或Telegram账号连接。
+	StartWorker(ctx context.Context)
 	StartRuntime(ctx context.Context)
 	StopRuntime()
 	Refresh(ctx context.Context) error

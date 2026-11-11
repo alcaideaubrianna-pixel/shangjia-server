@@ -19,7 +19,10 @@ import (
 	"hotgo/internal/service"
 	"hotgo/internal/websocket"
 	"hotgo/utility/adminsecurity"
+	"hotgo/utility/ormcache"
 	"hotgo/utility/runrole"
+	"os"
+	"strings"
 )
 
 var (
@@ -28,6 +31,10 @@ var (
 		Usage: "http",
 		Brief: "HTTP服务，也可以称为主服务，包含http、websocket、tcpserver多个可对外服务",
 		Func: func(ctx context.Context, parser *gcmd.Parser) (err error) {
+			// 新引擎在插件和 Worker 启动前替换 ORM 元数据加载方式，禁止运行中切换缓存适配器。
+			if strings.EqualFold(strings.TrimSpace(os.Getenv("YOUBAN_PUBLISH_PUSH_ENGINE")), "unified_stream") || g.Cfg().MustGet(ctx, "youbanPublish.redisStream.grayEnabled", false).Bool() {
+				ormcache.EnableNonBlockingMetadata(g.DB())
+			}
 			// 初始化http服务
 			s := g.Server()
 			adminEntry, err := adminsecurity.FromConfig(ctx)

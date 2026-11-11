@@ -24,6 +24,7 @@ type Profile struct {
 	AccountID int64
 	Channels  []Channel
 	LastSent  time.Time
+	DueAt     time.Time // 已落库的到期计划优先，不能因运行时重启重新按当前时间计算。
 }
 
 // ChannelTask 是同一资料循环批次中的频道子任务。
@@ -60,7 +61,10 @@ func BuildPlan(profile Profile, runID string, now time.Time) *RunPlan {
 		return nil
 	}
 	sort.Slice(channels, func(i, j int) bool { return channels[i].ID < channels[j].ID })
-	dueAt := profile.LastSent.Add(channels[0].Interval)
+	dueAt := profile.DueAt
+	if dueAt.IsZero() {
+		dueAt = profile.LastSent.Add(channels[0].Interval)
+	}
 	if dueAt.Before(now) {
 		dueAt = now
 	}

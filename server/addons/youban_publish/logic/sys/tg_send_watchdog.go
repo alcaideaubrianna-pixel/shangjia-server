@@ -215,7 +215,11 @@ func (s *sSysPublish) cleanupTelegramSendTimeout(ctx context.Context, job telegr
 	// Do not spend all cleanup workers waiting for a busy in-process channel lock.
 	lock := s.telegramChannelLock(job.TargetChatId)
 	var err error
-	if !lock.TryLock() {
+	if s.accountPushEngine(cleanupCtx, job.TenantId, job.AccountId) == pushEngineUnifiedStream {
+		err = s.withTelegramCleanupExecution(cleanupCtx, job, func(ctx context.Context) error {
+			return s.deleteTelegramMessageSetLockedByChannel(ctx, job, telegramSendTimeoutMessage)
+		})
+	} else if !lock.TryLock() {
 		err = gerror.New("频道正在处理其他操作，稍后重试清理")
 	} else {
 		err = s.withTelegramChannelDBLock(cleanupCtx, telegramChannelLockKey(job.TargetChatId), func() error {

@@ -21,6 +21,9 @@ func (s *sSysPublish) publishTelegramReadyStream(ctx context.Context, job telegr
 		ChannelID: job.ChannelId, Priority: job.Priority, QueueName: job.QueueName,
 	}
 	stream := streamgray.StreamForOperation(job.OperationNo)
+	if telegramJobPriorityValue(job) == tgJobPriorityHistory {
+		stream = streamgray.ReadyBulkStream
+	}
 	if _, err = streamgray.PublishReadyEvent(ctx, producer, stream, event); err != nil {
 		return gerror.Wrap(err, "发布TG任务 Redis Stream 就绪事件失败")
 	}

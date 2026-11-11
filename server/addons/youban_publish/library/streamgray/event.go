@@ -12,7 +12,9 @@ import (
 // StreamForOperation 根据任务操作号选择就绪事件流。
 func StreamForOperation(operationNo string) string {
 	operationNo = strings.ToLower(strings.TrimSpace(operationNo))
-	if strings.HasPrefix(operationNo, "cycle_batch:") || strings.HasPrefix(operationNo, "full_push:") {
+	if strings.HasPrefix(operationNo, "cycle_batch:") ||
+		strings.HasPrefix(operationNo, "profile_cycle:") ||
+		strings.HasPrefix(operationNo, "full_push:") {
 		return ReadyBulkStream
 	}
 	return ReadyRealtimeStream

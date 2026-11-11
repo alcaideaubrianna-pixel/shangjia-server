@@ -24,6 +24,27 @@ func TestClusterEnvironmentMapping(t *testing.T) {
 	t.Fatal("missing YOUBAN_CLUSTER_ENABLED mapping")
 }
 
+// TestStreamGrayConsumerEnvironmentOverride 验证灰度只开启消费者，不需要开启全量引擎开关。
+func TestStreamGrayConsumerEnvironmentOverride(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("youbanPublish:\n  redisStream:\n    grayEnabled: false\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	adapter, err := gcfg.NewAdapterFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := g.Cfg().GetAdapter()
+	g.Cfg().SetAdapter(adapter)
+	t.Cleanup(func() { g.Cfg().SetAdapter(previous) })
+	t.Setenv("YOUBAN_PUBLISH_REDIS_STREAM_GRAY_ENABLED", "true")
+	Apply(context.Background())
+	value, err := adapter.Get(context.Background(), "youbanPublish.redisStream.grayEnabled")
+	if err != nil || !gconv.Bool(value) {
+		t.Fatal(value, err)
+	}
+}
+
 func TestMediaFileCacheEnvironmentMappings(t *testing.T) {
 	want := map[string]string{
 		"youbanPublish.mediaSearch.batchApproximateEnabled":  "YOUBAN_PUBLISH_MEDIA_SEARCH_BATCH_APPROXIMATE_ENABLED",

@@ -1,0 +1,9 @@
+{
+  "default": {"action": "success", "delayMs": 2},
+  "rules": [
+    {"method": "sendMessage", "chatId": "-100999000012", "action": "timeout", "delayMs": 30000},
+    {"method": "sendPhoto", "chatId": "-100999000012", "action": "timeout", "delayMs": 30000},
+    {"method": "sendMediaGroup", "chatId": "-100999000012", "action": "timeout", "delayMs": 30000},
+    {"method": "sendVideo", "chatId": "-100999000012", "action": "timeout", "delayMs": 30000}
+  ]
+}

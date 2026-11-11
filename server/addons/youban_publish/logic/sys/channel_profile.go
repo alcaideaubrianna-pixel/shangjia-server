@@ -20,7 +20,8 @@ func (s *sSysPublish) upsertChannelProfileFromJob(ctx context.Context, job teleg
 	data := g.Map{
 		"tenant_id": job.TenantId, "account_id": job.AccountId, "channel_id": job.ChannelId,
 		"profile_id": job.ProfileId, "last_job_id": job.Id,
-		"status": "active", "updated_at": now,
+		// 更换当前成功任务时同步撤下旧到期计划，避免新基准沿用旧到期时间被重复领取。
+		"status": "active", "next_cycle_at": nil, "updated_at": now,
 	}
 	result, err := g.DB().Model(publishChannelProfileTable).Safe().Ctx(ctx).
 		Where("channel_id", job.ChannelId).

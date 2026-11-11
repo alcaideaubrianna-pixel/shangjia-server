@@ -20,3 +20,7 @@ var (
 )
 
 // Add your custom methods and functionality below.
+
+// YoubanPublishMediaProcessingStatusColumn 补齐历史生成列结构尚未包含的媒体处理状态列。
+// 放在可扩展 DAO 层，后续统一重新生成模型时可迁移为 Columns().ProcessingStatus。
+const YoubanPublishMediaProcessingStatusColumn = "processing_status"

@@ -45,6 +45,8 @@ var items = []item{
 	{Key: "telemetry.metricsIntervalSeconds", EnvKeys: []string{"YOUBAN_TELEMETRY_METRICS_INTERVAL_SECONDS"}},
 	{Key: "youbanPublish.profileOriginEnabled", EnvKeys: []string{"YOUBAN_PUBLISH_PROFILE_ORIGIN_ENABLED"}},
 	{Key: "youbanPublish.queue.concurrency", EnvKeys: []string{"YOUBAN_PUBLISH_QUEUE_CONCURRENCY"}},
+	{Key: "youbanPublish.queue.drainLegacyQueues", EnvKeys: []string{"YOUBAN_PUBLISH_DRAIN_LEGACY_QUEUES"}},
+	{Key: "youbanPublish.redisStream.grayEnabled", EnvKeys: []string{"YOUBAN_PUBLISH_REDIS_STREAM_GRAY_ENABLED"}},
 	{Key: "youbanTgBotGateway.queue.concurrency", EnvKeys: []string{"YOUBAN_TG_BOT_GATEWAY_QUEUE_CONCURRENCY"}},
 	{Key: "youbanTgBotGateway.queue.interactiveConcurrency", EnvKeys: []string{"YOUBAN_TG_BOT_GATEWAY_INTERACTIVE_CONCURRENCY"}},
 	{Key: "youbanPublish.queue.backgroundConcurrency", EnvKeys: []string{"YOUBAN_PUBLISH_BACKGROUND_CONCURRENCY"}},

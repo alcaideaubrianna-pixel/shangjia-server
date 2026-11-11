@@ -8,6 +8,9 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 )
 
+// tgJobPriorityHistory 将已确认的历史采集排在实时、循环和手工任务之后。
+const tgJobPriorityHistory = 95
+
 func (s *sSysPublish) telegramJobPriority(job telegramJobRecord) int {
 	return telegramJobPriorityValue(job)
 }
@@ -26,6 +29,9 @@ func telegramJobPriorityValue(job telegramJobRecord) int {
 	if isInteractiveProfilePublishOperation(operationNo) {
 		return tgJobPriorityInteractive
 	}
+	if strings.HasPrefix(operationNo, "collect:") && job.Priority == tgJobPriorityHistory {
+		return tgJobPriorityHistory
+	}
 	if strings.HasPrefix(operationNo, "quick_push:") ||
 		strings.HasPrefix(operationNo, "message_push:") ||
 		strings.HasPrefix(operationNo, "collect:") {
@@ -34,7 +40,7 @@ func telegramJobPriorityValue(job telegramJobRecord) int {
 	if strings.HasPrefix(operationNo, "full_push:") {
 		return tgJobPriorityFullPush
 	}
-	if strings.HasPrefix(operationNo, "cycle_batch:") {
+	if strings.HasPrefix(operationNo, "cycle_batch:") || strings.HasPrefix(operationNo, "profile_cycle:") {
 		return tgJobPriorityBulk
 	}
 	if job.Priority > 0 && job.Priority != 100 {
@@ -48,17 +54,18 @@ func telegramJobEffectivePrioritySQL(alias string) string {
 	if strings.TrimSpace(alias) != "" {
 		prefix = strings.TrimSpace(alias) + "."
 	}
-	return fmt.Sprintf("CASE WHEN %sstatus = 'unknown' THEN %d "+
+	history := fmt.Sprintf("WHEN LEFT(LOWER(TRIM(%soperation_no)),8)='collect:' AND %spriority=%d THEN %d ", prefix, prefix, tgJobPriorityHistory, tgJobPriorityHistory)
+	return fmt.Sprintf("CASE WHEN %sstatus = 'unknown' THEN %d "+history+
 		"WHEN LOWER(TRIM(%soperation_no)) LIKE 'profile:%%' OR LOWER(TRIM(%soperation_no)) LIKE 'edit:%%' OR LOWER(TRIM(%soperation_no)) LIKE 'bot_publish:%%' OR LOWER(TRIM(%soperation_no)) LIKE 'batchtext:%%' THEN %d "+
 		"WHEN LOWER(TRIM(%soperation_no)) LIKE 'quick_push:%%' OR LOWER(TRIM(%soperation_no)) LIKE 'message_push:%%' OR LOWER(TRIM(%soperation_no)) LIKE 'collect:%%' THEN %d "+
 		"WHEN LOWER(TRIM(%soperation_no)) LIKE 'full_push:%%' THEN %d "+
-		"WHEN LOWER(TRIM(%soperation_no)) LIKE 'cycle_batch:%%' THEN %d "+
+		"WHEN (LOWER(TRIM(%soperation_no)) LIKE 'cycle_batch:%%' OR LOWER(TRIM(%soperation_no)) LIKE 'profile_cycle:%%') THEN %d "+
 		"ELSE COALESCE(NULLIF(%spriority, 0), %d) END",
 		prefix, tgJobPriorityUrgent,
 		prefix, prefix, prefix, prefix, tgJobPriorityInteractive,
 		prefix, prefix, prefix, tgJobPriorityUrgent,
 		prefix, tgJobPriorityFullPush,
-		prefix, tgJobPriorityBulk,
+		prefix, prefix, tgJobPriorityBulk,
 		prefix, tgJobPriorityDefault,
 	)
 }

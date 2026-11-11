@@ -18,6 +18,7 @@ type dueBatchCycleChannel struct {
 	BatchTime       string `orm:"cycle_batch_time"`
 	BatchCursor     int64  `orm:"cycle_batch_cursor"`
 	BatchCursorKind string `orm:"cycle_batch_cursor_kind"`
+	RoundEndID      int64  `orm:"cycle_round_end_id"`
 }
 
 func (s *sSysPublish) scheduleDueChannelBatchCycles(ctx context.Context, limit int) error {
@@ -29,17 +30,21 @@ func (s *sSysPublish) scheduleDueChannelBatchCycles(ctx context.Context, limit i
 	return nil
 }
 
-func (s *sSysPublish) scheduleDueChannelBatchCyclesShard(ctx context.Context, limit, shard int) error {
+// scheduleDueChannelBatchCyclesShard 按账户扫描到期批次配置，复用会员权限和既有批次游标能力。
+func (s *sSysPublish) scheduleDueChannelBatchCyclesShard(ctx context.Context, limit, shard int, scopes ...publishAccountScope) error {
 	now := gtime.Now()
 	var channels []dueBatchCycleChannel
-	err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
-		Fields("id,tenant_id,cycle_batch_size,cycle_batch_time,cycle_batch_cursor,cycle_batch_cursor_kind").
+	model := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
+		Fields("id,tenant_id,cycle_batch_size,cycle_batch_time,cycle_batch_cursor,cycle_batch_cursor_kind,cycle_round_end_id").
 		Where("cycle_publish_enabled", 1).Where("cycle_publish_mode", "batch").
 		Where("status", 1).Where("publish_direction", "up").Where("cycle_active_run_id", 0).
-		Where("NOT EXISTS (SELECT 1 FROM "+publishAccountSettingTable+" ce WHERE ce.tenant_id="+publishChannelTable+".tenant_id AND ce.account_id="+publishChannelTable+".tg_account_id AND ce.deleted_at IS NULL AND ce.cycle_engine='profile')").
 		Where("cycle_next_run_at IS NULL OR cycle_next_run_at<=?", now).
-		Where("MOD(ABS(HASHTEXT(tenant_id::text || ':' || id::text)), ?) = ?", profileCycleShardCount, shard).
-		WhereNull("deleted_at").OrderAsc("id").Limit(limit).Scan(&channels)
+		WhereNull("deleted_at")
+	model = accountScheduleModel(model, publishChannelTable+".tenant_id", publishChannelTable+".tg_account_id", scopes)
+	if shard >= 0 {
+		model = model.Where("MOD(ABS(HASHTEXT(tenant_id::text || ':' || id::text)), ?) = ?", profileCycleShardCount, shard)
+	}
+	err := model.OrderAsc("id").Limit(limit).Scan(&channels)
 	if err != nil {
 		return gerror.Wrap(err, "读取到期批次循环频道失败")
 	}
@@ -75,6 +80,7 @@ func (s *sSysPublish) scheduleDueChannelBatchCyclesShard(ctx context.Context, li
 	return nil
 }
 
+// createScheduledBatchCycleRun 在频道事务锁内领取有限批次，保存整轮上界并在提交后通知执行队列。
 func (s *sSysPublish) createScheduledBatchCycleRun(ctx context.Context, channel dueBatchCycleChannel, now *gtime.Time) error {
 	var runID int64
 	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
@@ -88,6 +94,10 @@ func (s *sSysPublish) createScheduledBatchCycleRun(ctx context.Context, channel 
 		affected, _ := locked.RowsAffected()
 		if affected == 0 {
 			return nil
+		}
+		// 在取得频道行锁后重新读取游标与轮次边界，不能沿用扫描时的旧快照。
+		if err := tx.Model(publishChannelTable).Where("id", channel.Id).Scan(&channel); err != nil {
+			return err
 		}
 		cursor := channel.BatchCursor
 		if channel.BatchCursorKind != "profile" {
@@ -120,34 +130,59 @@ func (s *sSysPublish) createScheduledBatchCycleRun(ctx context.Context, channel 
 			}
 			return nil
 		}
-		count, err := s.batchCycleCandidateCount(ctx, channel.TenantId, channel.Id, cursor)
-		if err != nil {
+		// 固定一轮上界；新增资料不能无限延长本轮，旧资料最终能重新轮到。
+		upper := channel.RoundEndID
+		if upper <= 0 || cursor >= upper {
+			if upper > 0 {
+				cursor = 0
+			} // 已有profile游标首次迁移时保留进度。
+			value, queryErr := s.batchCycleEligibleProfileModel(ctx, channel.TenantId, channel.Id).Fields("p.id").OrderDesc("p.id").Limit(1).Value()
+			if queryErr != nil {
+				return queryErr
+			}
+			upper = value.Int64()
+			if cursor >= upper {
+				cursor = 0
+			}
+		}
+		// 只读取本批数量，避免每次创建批次都COUNT全部剩余资料。
+		var candidates []struct {
+			ID int64 `orm:"id"`
+		}
+		readCandidates := func() error {
+			candidates = nil
+			if upper <= 0 {
+				return nil
+			}
+			return s.batchCycleEligibleProfileModel(ctx, channel.TenantId, channel.Id).WhereGT("p.id", cursor).WhereLTE("p.id", upper).Fields("p.id").OrderAsc("p.id").Limit(channel.BatchSize).Scan(&candidates)
+		}
+		if err := readCandidates(); err != nil {
 			return err
 		}
-		// When the cursor reaches the tail, start the next scheduled batch
-		// from the beginning. Do not mix tail and head rows in one run: the
-		// persisted cursor is a single monotonic profile ID and cannot encode
-		// a wrap-around position safely.
-		if count == 0 && cursor > 0 {
+		if len(candidates) == 0 && cursor > 0 {
+			// 尾部资料可能全部下架：本轮已结束，直接开启新轮，不能空等一个调度日。
 			cursor = 0
-			count, err = s.batchCycleCandidateCount(ctx, channel.TenantId, channel.Id, 0)
+			value, err := s.batchCycleEligibleProfileModel(ctx, channel.TenantId, channel.Id).Fields("p.id").OrderDesc("p.id").Limit(1).Value()
+			if err != nil {
+				return err
+			}
+			upper = value.Int64()
+			if err := readCandidates(); err != nil {
+				return err
+			}
 		}
-		if err != nil {
-			return err
-		}
-		if count == 0 {
-			_, err = tx.Model(publishChannelTable).Safe().Ctx(ctx).Where("id", channel.Id).Data(g.Map{
-				"cycle_active_run_id": 0, "cycle_batch_cursor": cursor, "cycle_next_run_at": nextBatchCycleAt(channel.BatchTime, now.Time), "updated_at": now,
+		if len(candidates) == 0 {
+			// 本轮剩余资料可能已下架；结束本轮，下一调度日重新确定上界。
+			_, err = tx.Model(publishChannelTable).Where("id", channel.Id).Data(g.Map{
+				"cycle_active_run_id": 0, "cycle_batch_cursor": 0, "cycle_round_end_id": 0,
+				"cycle_next_run_at": nextBatchCycleAt(channel.BatchTime, now.Time),
 			}).Update()
 			return err
 		}
-		total := channel.BatchSize
-		if count < total {
-			total = count
-		}
+		total := len(candidates)
 		runId, err := tx.Model(publishCycleRunTable).Safe().Ctx(ctx).Data(g.Map{
 			"tenant_id": channel.TenantId, "channel_id": channel.Id, "status": cycleRunStatusPending,
-			"stage": "batch", "cursor_id": cursor, "total_count": total, "queued_count": 0,
+			"stage": "batch", "cursor_id": cursor, "upper_profile_id": upper, "total_count": total, "queued_count": 0,
 			"scheduled_at": now, "created_at": now, "updated_at": now,
 		}).InsertAndGetId()
 		if err != nil {
@@ -155,7 +190,7 @@ func (s *sSysPublish) createScheduledBatchCycleRun(ctx context.Context, channel 
 		}
 		runID = runId
 		_, err = tx.Model(publishChannelTable).Safe().Ctx(ctx).Where("id", channel.Id).Data(g.Map{
-			"cycle_active_run_id": runId, "cycle_next_run_at": nextBatchCycleAt(channel.BatchTime, now.Time), "updated_at": now,
+			"cycle_active_run_id": runId, "cycle_round_end_id": upper, "cycle_next_run_at": nextBatchCycleAt(channel.BatchTime, now.Time), "updated_at": now,
 		}).Update()
 		return err
 	})
@@ -186,14 +221,6 @@ func migrateBatchCycleCursorTx(ctx context.Context, tx gdb.TX, channelId, legacy
 		return 0, gerror.Wrap(err, "保存频道批次循环资料游标失败")
 	}
 	return cursor, nil
-}
-
-func (s *sSysPublish) batchCycleCandidateCount(ctx context.Context, tenantId, channelId, cursor int64) (int, error) {
-	model := s.batchCycleEligibleProfileModel(ctx, tenantId, channelId)
-	if cursor > 0 {
-		model = model.WhereGT("p.id", cursor)
-	}
-	return model.Count()
 }
 
 func (s *sSysPublish) batchCycleEligibleProfileModel(ctx context.Context, tenantId, channelId int64) *gdb.Model {

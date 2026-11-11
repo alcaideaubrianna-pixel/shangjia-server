@@ -60,6 +60,7 @@ type telegramProfilePublishMeta struct {
 	CollectSourceChatId    string
 	CollectSourceMessageId int64
 	InitialSendPhase       string
+	InitialPriority        int // 历史采集等入口已确认的调度优先级。
 }
 
 var errTelegramPublishPermissionPaused = gerror.New("目标频道推送已因权限错误暂停，资料已保留，请恢复频道权限后主动重新上架")
@@ -116,7 +117,8 @@ func (s *sSysPublish) submitProfilePublishWithMeta(ctx context.Context, profileI
 	}
 	var jobIds []int64
 	var err error
-	if profileId <= 0 {
+	// 新引擎自动循环已有事务幂等和发送前资料校验，不再争用资料级Redis锁阻塞兄弟频道。
+	if profileId <= 0 || (isCycleBatchOperation(operationNo) && s.accountPushEngine(ctx, tenantId, accountId) == pushEngineUnifiedStream) {
 		jobIds, err = s.prepareProfilePublishJobs(ctx, profileId, tenantId, accountId, operationNo, channelIds, requireOnline, meta)
 	} else {
 		err = s.withProfileLifecycleLock(ctx, tenantId, profileId, func() error {
@@ -169,9 +171,7 @@ func (s *sSysPublish) profilePublishMediaReady(ctx context.Context, profileID in
 	return s.profileMediaReady(ctx, profileID)
 }
 
-// prepareProfilePublishJobs persists the publish intent while the profile
-// lifecycle lock is held. External queue and Telegram calls must happen after
-// this method returns so they cannot extend the profile critical section.
+// prepareProfilePublishJobs 一次读取资料与频道，事务内写入任务和Outbox；Redis投递在提交后执行。
 func (s *sSysPublish) prepareProfilePublishJobs(ctx context.Context, profileId, tenantId, accountId int64, operationNo string, channelIds []int64, requireOnline bool, meta telegramProfilePublishMeta) ([]int64, error) {
 	source, err := s.profilePublishSource(ctx, profileId, tenantId, accountId, requireOnline)
 	if err != nil {
@@ -197,31 +197,59 @@ func (s *sSysPublish) prepareProfilePublishJobs(ctx context.Context, profileId, 
 		operationNo = newTelegramOperationNo("profile", profileId)
 	}
 	jobIds := make([]int64, 0, len(channels))
+	streamEngine := s.accountPushEngine(ctx, source["tenant_id"].Int64(), source["account_id"].Int64()) == pushEngineUnifiedStream
 	// Creation locks channel circuit rows; always acquire them in ID order.
 	sort.Slice(channels, func(i, j int) bool { return channels[i].Id < channels[j].Id })
+	if streamEngine {
+		var existing []struct {
+			ID        int64 `orm:"id"`
+			ChannelID int64 `orm:"channel_id"`
+		}
+		if err := g.DB().Model(publishTgJobTable).Ctx(ctx).Where("tenant_id", source["tenant_id"].Int64()).Where("account_id", source["account_id"].Int64()).Where("profile_id", profileId).Where("operation_no", operationNo).Fields("id,channel_id").Scan(&existing); err != nil {
+			return nil, err
+		}
+		byChannel := make(map[int64]int64, len(existing))
+		for _, job := range existing {
+			byChannel[job.ChannelID] = job.ID
+		}
+		for _, channel := range channels {
+			if id := byChannel[channel.Id]; id > 0 {
+				jobIds = append(jobIds, id)
+			}
+		}
+		// 同一操作完整重试不重开资料状态，也不把已经成功的记录改回pending。
+		if len(channels) > 0 && len(jobIds) == len(channels) {
+			return jobIds, nil
+		}
+		jobIds = jobIds[:0]
+	}
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		if txErr := s.beginProfilePublishOperationTx(ctx, tx, source["tenant_id"].Int64(), source["account_id"].Int64(), profileId, operationNo); txErr != nil {
 			return txErr
 		}
 		for _, channel := range channels {
-			jobId, createErr := s.ensureTelegramProfileJobWithMetaTx(ctx, tx, source, channel, operationNo, meta)
+			var jobID int64
+			var createErr error
+			if streamEngine {
+				// 使用框架嵌套事务隔离单频道配置/约束错误，源资料和操作状态只准备一次。
+				createErr = g.DB().Transaction(ctx, func(ctx context.Context, channelTx gdb.TX) error {
+					var err error
+					jobID, err = s.prepareProfileChannelJobTx(ctx, channelTx, source, channel, operationNo, meta)
+					return err
+				})
+				if createErr != nil {
+					g.Log().Warningf(ctx, "准备频道任务失败，其他频道继续 profile:%d channel:%d err:%+v", profileId, channel.Id, createErr)
+					jobID, createErr = s.recordProfileChannelPreparationFailureTx(ctx, tx, source, channel, operationNo, meta, createErr)
+				}
+			} else {
+				jobID, createErr = s.prepareProfileChannelJobTx(ctx, tx, source, channel, operationNo, meta)
+			}
 			if createErr != nil {
 				return createErr
 			}
-			if jobId == 0 { // Permission-paused channels keep profiles, not new queue intents.
-				continue
+			if jobID > 0 {
+				jobIds = append(jobIds, jobID)
 			}
-			if strings.TrimSpace(meta.InitialSendPhase) != "" {
-				if _, createErr = tx.Model(publishTgJobTable).Safe().Ctx(ctx).
-					Where("id", jobId).Where("status", telegramJobStatusPending).
-					Data(g.Map{"send_phase": strings.TrimSpace(meta.InitialSendPhase), "updated_at": gtime.Now()}).Update(); createErr != nil {
-					return gerror.Wrap(createErr, "设置TG任务初始发送阶段失败")
-				}
-			}
-			if createErr = s.ensureTelegramJobOutboxTx(ctx, tx, jobId, 0); createErr != nil {
-				return createErr
-			}
-			jobIds = append(jobIds, jobId)
 		}
 		if len(channels) > 0 && len(jobIds) == 0 {
 			return s.writeProfilePublishOperationStateTx(ctx, tx, source["tenant_id"].Int64(), source["account_id"].Int64(), profileId, operationNo, sysin.PublishTaskStatusFailed, true)
@@ -236,10 +264,23 @@ func (s *sSysPublish) prepareProfilePublishJobs(ctx context.Context, profileId, 
 	return jobIds, profilePublishPreparationError(len(channels), jobIds)
 }
 
+// enqueuePreparedProfileJobs 在事务提交后投递待执行任务，终态重试保持原状态并合并资料投影。
 func (s *sSysPublish) enqueuePreparedProfileJobs(ctx context.Context, jobIds []int64, operatorId int64) {
 	for _, jobId := range jobIds {
 		if job, readErr := s.telegramJobById(ctx, jobId); readErr != nil {
 			g.Log().Warningf(ctx, "读取资料待发送记录失败 jobId:%d err:%+v", jobId, readErr)
+		} else if job.Status == telegramJobStatusSent || job.Status == telegramJobStatusSuperseded {
+			continue
+		} else if job.Status == telegramJobStatusFailed && s.accountPushEngine(ctx, job.TenantId, job.AccountId) == pushEngineUnifiedStream {
+			if recordErr := s.upsertPublishJobRecord(ctx, job, "failed", job.ErrorMessage); recordErr != nil {
+				g.Log().Warningf(ctx, "保存频道准备失败记录失败 job:%d err:%+v", job.Id, recordErr)
+			}
+			// 同操作重试可能曾创建通知；终态失败只收口通知，不进入发送队列。
+			_, _ = g.DB().Model(publishTgOutboxTable).Ctx(ctx).Where("job_id", job.Id).Where("event_type", telegramOutboxEventPublish).Data(g.Map{"status": telegramOutboxDelivered, "last_error": "任务准备失败，无需投递"}).Update()
+			if projectionErr := s.enqueueStreamProfileProjection(ctx, job); projectionErr != nil {
+				g.Log().Warningf(ctx, "提交失败任务投影失败 job:%d err:%+v", job.Id, projectionErr)
+			}
+			continue
 		} else if recordErr := s.upsertPublishJobRecord(ctx, job, "pending", ""); recordErr != nil {
 			g.Log().Warningf(ctx, "保存资料待发送记录失败 jobId:%d err:%+v", jobId, recordErr)
 		}
@@ -266,6 +307,7 @@ func (s *sSysPublish) ensureTelegramProfileJobWithMeta(ctx context.Context, sour
 	return jobID, err
 }
 
+// ensureTelegramProfileJobWithMetaTx 按账户、操作和频道幂等创建任务；新操作不复用另一操作的优先级。
 func (s *sSysPublish) ensureTelegramProfileJobWithMetaTx(ctx context.Context, tx gdb.TX, source gdb.Record, channel telegramJobChannel, operationNo string, meta telegramProfilePublishMeta) (int64, error) {
 	// Resolve collection source per target publish channel. A profile can be
 	// matched by multiple rules/BOTs; using the profile-level latest source here
@@ -284,6 +326,7 @@ func (s *sSysPublish) ensureTelegramProfileJobWithMetaTx(ctx context.Context, tx
 		return 0, err
 	}
 	existing, err := tx.Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("tenant_id", source["tenant_id"].Int64()).Where("account_id", source["account_id"].Int64()).
 		Where("profile_id", source["profile_id"].Int64()).
 		Where("operation_no", operationNo).
 		Where("channel_id", channel.Id).
@@ -294,19 +337,20 @@ func (s *sSysPublish) ensureTelegramProfileJobWithMetaTx(ctx context.Context, tx
 	if jobId := existing["id"].Int64(); jobId > 0 {
 		return jobId, nil
 	}
-	// Do not create another pending job for the same profile/channel while an
-	// earlier publish operation is still in flight. A later republish after a
-	// sent job still creates a new operation so old messages can be cleaned up.
-	active, err := tx.Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("profile_id", source["profile_id"].Int64()).
-		Where("channel_id", channel.Id).
-		WhereIn("status", []string{"pending", "sending", "failed_retry", "unknown"}).
-		Fields("id,status,bot_id,target_chat_id").OrderDesc("id").One()
-	if err != nil {
-		return 0, gerror.Wrap(err, "读取资料活动TG频道任务失败")
-	}
-	if jobId := active["id"].Int64(); jobId > 0 {
-		return jobId, nil
+	// 新引擎按操作号幂等：手工与编辑必须保留独立操作和优先级，频道执行租约负责串行。
+	// 旧引擎保留原来的活动任务合并，便于灰度回退。
+	if s.accountPushEngine(ctx, source["tenant_id"].Int64(), source["account_id"].Int64()) != pushEngineUnifiedStream {
+		active, err := tx.Model(publishTgJobTable).Safe().Ctx(ctx).
+			Where("tenant_id", source["tenant_id"].Int64()).Where("account_id", source["account_id"].Int64()).
+			Where("profile_id", source["profile_id"].Int64()).Where("channel_id", channel.Id).
+			WhereIn("status", []string{"pending", "sending", "failed_retry", "unknown"}).
+			Fields("id").OrderDesc("id").One()
+		if err != nil {
+			return 0, gerror.Wrap(err, "读取资料活动TG频道任务失败")
+		}
+		if jobID := active["id"].Int64(); jobID > 0 {
+			return jobID, nil
+		}
 	}
 	// The caller's snapshot may predate a Bot removal or channel edit. Read
 	// transport configuration only after acquiring the shared creation gate.
@@ -328,7 +372,7 @@ func (s *sSysPublish) ensureTelegramProfileJobWithMetaTx(ctx context.Context, tx
 	job := telegramJobRecord{
 		OperationNo: operationNo, TenantId: source["tenant_id"].Int64(), AccountId: source["account_id"].Int64(),
 		ProfileId: source["profile_id"].Int64(), ChannelId: channel.Id, BotId: botId,
-		TargetChatId: normalizeTelegramChannelChatID(channel.TargetChatId), Status: "pending",
+		TargetChatId: normalizeTelegramChannelChatID(channel.TargetChatId), Status: "pending", Priority: meta.InitialPriority,
 		CollectEventId: meta.CollectEventId, CollectSourceId: meta.CollectSourceId,
 		CollectSourceChatId: strings.TrimSpace(meta.CollectSourceChatId), CollectSourceMessageId: meta.CollectSourceMessageId,
 	}
@@ -350,8 +394,10 @@ func (s *sSysPublish) ensureTelegramProfileJobWithMetaTx(ctx context.Context, tx
 	return jobID, nil
 }
 
+// completeProfileTelegramOperation 汇总当前操作的频道结果，部分失败保持失败提示，不误报全部完成。
 func (s *sSysPublish) completeProfileTelegramOperation(ctx context.Context, job telegramJobRecord, isCycle bool) (bool, error) {
 	total, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("tenant_id", job.TenantId).Where("account_id", job.AccountId).
 		Where("profile_id", job.ProfileId).
 		Where("operation_no", job.OperationNo).Count()
 	if err != nil {
@@ -360,10 +406,16 @@ func (s *sSysPublish) completeProfileTelegramOperation(ctx context.Context, job 
 	if total == 0 {
 		return false, nil
 	}
+	streamEngine := s.accountPushEngine(ctx, job.TenantId, job.AccountId) == pushEngineUnifiedStream
+	terminal := []string{"sent", "superseded"}
+	if streamEngine {
+		terminal = append(terminal, telegramJobStatusFailed)
+	}
 	pending, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("tenant_id", job.TenantId).Where("account_id", job.AccountId).
 		Where("profile_id", job.ProfileId).
 		Where("operation_no", job.OperationNo).
-		WhereNotIn("status", []string{"sent", "superseded"}).Count()
+		WhereNotIn("status", terminal).Count()
 	if err != nil {
 		return false, gerror.Wrap(err, "统计资料未完成TG任务失败")
 	}
@@ -371,6 +423,7 @@ func (s *sSysPublish) completeProfileTelegramOperation(ctx context.Context, job 
 		return false, nil
 	}
 	sent, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("tenant_id", job.TenantId).Where("account_id", job.AccountId).
 		Where("profile_id", job.ProfileId).
 		Where("operation_no", job.OperationNo).
 		Where("status", telegramJobStatusSent).Count()
@@ -397,8 +450,17 @@ func (s *sSysPublish) completeProfileTelegramOperation(ctx context.Context, job 
 			return false, err
 		}
 	}
-	if isCycle {
+	if isCycle && s.accountPushEngine(ctx, job.TenantId, job.AccountId) != pushEngineUnifiedStream {
 		s.cleanupPreviousCycleMessages(ctx, job)
+	}
+	if streamEngine {
+		failed, err := g.DB().Model(publishTgJobTable).Ctx(ctx).Where("tenant_id", job.TenantId).Where("account_id", job.AccountId).Where("profile_id", job.ProfileId).Where("operation_no", job.OperationNo).Where("status", telegramJobStatusFailed).Count()
+		if err != nil {
+			return false, err
+		}
+		if failed > 0 {
+			return false, s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusFailed)
+		}
 	}
 	if err = s.clearProfilePublishOperationState(ctx, job); err != nil {
 		return false, err

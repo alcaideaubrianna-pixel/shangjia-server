@@ -4,8 +4,11 @@ package sys
 // complete. Untouched work uses the same effective priority as queue selection;
 // creation time and ID preserve FIFO order within one priority.
 func telegramChannelScheduleRankSQL(alias string) string {
-	p := alias + "."
-	return "CASE WHEN " + p + "status IN ('sending','confirming') OR " + p + "send_phase IN ('cleanup_processing','display_sending','display_confirmed','verify_sending') THEN 0 ELSE " + telegramJobEffectivePrioritySQL(alias) + " END"
+	p := alias
+	if p != "" {
+		p += "."
+	}
+	return "CASE WHEN " + p + "status IN ('sending','confirming','unknown') OR " + p + "send_phase IN ('cleanup_processing','display_sending','display_confirmed','verify_sending') THEN 0 ELSE " + telegramJobEffectivePrioritySQL(alias) + " END"
 }
 
 func telegramChannelScheduleOrderSQL(alias string) string {

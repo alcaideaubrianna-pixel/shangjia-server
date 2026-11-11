@@ -2,6 +2,8 @@ package sys
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 
 	"hotgo/addons/youban_publish/library/streamgray"
 )
@@ -23,7 +25,12 @@ func (d publishStreamGrayJobDispatcher) Dispatch(ctx context.Context, jobID int6
 	if d.publish == nil {
 		return streamgray.ErrInvalidRuntime
 	}
-	return d.publish.enqueueTelegramJobDirectWithUnique(ctx, jobID, 0, false)
+	err := d.publish.enqueueTelegramJobDirectWithUnique(ctx, jobID, 0, false)
+	// 已删除任务的旧通知可以确认；数据库连接故障仍返回错误，不能丢通知。
+	if errors.Is(err, sql.ErrNoRows) || (err != nil && err.Error() == "TG任务不存在") {
+		return nil
+	}
+	return err
 }
 
 // newPublishStreamGrayBridge 创建灰度 Consumer 所需的业务适配器。

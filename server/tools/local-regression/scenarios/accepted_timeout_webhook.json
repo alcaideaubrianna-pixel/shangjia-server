@@ -1,0 +1,6 @@
+{
+  "default": {"action": "success", "delayMs": 2},
+  "rules": [
+    {"method": "sendMediaGroup", "chatId": "-100999000012", "action": "accepted_timeout", "delayMs": 30}
+  ]
+}

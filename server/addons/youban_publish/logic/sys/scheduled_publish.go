@@ -21,38 +21,49 @@ type scheduledPublishProfile struct {
 	TenantId  int64       `json:"tenantId"`
 }
 
+// runScheduledPublishRuntime 每秒分发账户调度；旧引擎定时上架保留原配置频率，互不阻塞账户任务执行。
 func (s *sSysPublish) runScheduledPublishRuntime(ctx context.Context) {
-	interval := g.Cfg().MustGet(ctx, "youbanPublish.scheduled.intervalSeconds", 30).Int()
-	if interval <= 0 {
-		interval = 30
+	legacyInterval := g.Cfg().MustGet(ctx, "youbanPublish.scheduled.intervalSeconds", 30).Int()
+	if legacyInterval <= 0 {
+		legacyInterval = 30
 	}
-	timer := time.NewTimer(5 * time.Second)
+	timer := time.NewTimer(time.Second)
 	defer timer.Stop()
+	var lastLegacy time.Time
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-timer.C:
-			if err := s.submitDuePublishTasks(ctx); err != nil {
-				g.Log().Warningf(ctx, "提交到期上架任务失败：%+v", err)
+			if err := s.enqueueAccountSchedules(ctx); err != nil {
+				g.Log().Warningf(ctx, "分发账户调度任务失败 err:%+v", err)
 			}
-			timer.Reset(time.Duration(interval) * time.Second)
+			if !globalStreamPushEngineEnabled() && time.Since(lastLegacy) >= time.Duration(legacyInterval)*time.Second {
+				lastLegacy = time.Now()
+				if err := s.submitDuePublishTasks(ctx); err != nil {
+					g.Log().Warningf(ctx, "提交旧引擎到期上架任务失败 err:%+v", err)
+				}
+			}
+			timer.Reset(time.Second)
 		}
 	}
 }
 
-func (s *sSysPublish) submitDuePublishTasks(ctx context.Context) error {
+// submitDuePublishTasks 按账户读取到期资料，提交成功后以原时间为条件清除计划，避免覆盖并发修改。
+func (s *sSysPublish) submitDuePublishTasks(ctx context.Context, scopes ...publishAccountScope) error {
+	if len(scopes) == 0 && globalStreamPushEngineEnabled() {
+		return s.enqueueAccountSchedules(ctx)
+	}
 	var list []*scheduledPublishProfile
-	err := g.DB().Model(publishProfileStateTable+" ps").Safe().Ctx(ctx).
+	model := g.DB().Model(publishProfileStateTable+" ps").Safe().Ctx(ctx).
 		InnerJoin(dao.ContentProfile.Table()+" p", "p.id=ps.profile_id AND p.deleted_at IS NULL").
 		InnerJoin(publishAccountTable+" a", "a.id=ps.account_id AND a.deleted_at IS NULL AND a.status=1").
 		Fields("ps.id AS state_id,ps.profile_id,ps.tenant_id,ps.account_id,ps.publish_at").
 		WhereNotNull("ps.publish_at").
 		WhereLTE("ps.publish_at", gtime.Now()).
 		WhereNull("ps.deleted_at").
-		OrderAsc("ps.publish_at").
-		Limit(50).
-		Scan(&list)
+		OrderAsc("ps.publish_at")
+	err := accountScheduleModel(model, "ps.tenant_id", "ps.account_id", scopes).Limit(50).Scan(&list)
 	if err != nil {
 		return gerror.Wrap(err, "读取到期上架资料失败")
 	}
@@ -74,6 +85,7 @@ func (s *sSysPublish) submitDuePublishTasks(ctx context.Context) error {
 			continue
 		}
 		_, _ = g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
+			Where("tenant_id", item.TenantId).Where("account_id", item.AccountId).
 			Where("profile_id", item.ProfileId).
 			Where("publish_at", item.PublishAt).
 			Data(g.Map{"publish_at": nil, "updated_at": gtime.Now()}).Update()
@@ -83,7 +95,7 @@ func (s *sSysPublish) submitDuePublishTasks(ctx context.Context) error {
 
 func (s *sSysPublish) clearInvalidScheduledPublish(ctx context.Context, item *scheduledPublishProfile) error {
 	_, err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
-		Where("id", item.StateId).
+		Where("id", item.StateId).Where("publish_at", item.PublishAt).
 		WhereNull("deleted_at").
 		Data(g.Map{"publish_at": nil, "updated_at": gtime.Now()}).Update()
 	return err

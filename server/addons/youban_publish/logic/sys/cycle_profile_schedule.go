@@ -68,6 +68,7 @@ type profileCycleDueRow struct {
 	PublishDirection   string      `orm:"publish_direction"`
 }
 
+// syncTelegramJobCycleSchedule 复用会员和时钟规则，同步成功任务的兼容计划及当前频道资料计划。
 func (s *sSysPublish) syncTelegramJobCycleSchedule(ctx context.Context, job telegramJobRecord) error {
 	if job.Id <= 0 || job.ChannelId <= 0 || job.ProfileId <= 0 {
 		return nil
@@ -104,7 +105,10 @@ func (s *sSysPublish) syncTelegramJobCycleSchedule(ctx context.Context, job tele
 		Where("id", job.Id).WhereIn("status", []string{"sent", "superseded"}).Data(data).Update(); err != nil {
 		return gerror.Wrap(err, "更新资料循环计划失败")
 	}
-	if err = s.enqueueCycleSummaryRefresh(ctx, job.ChannelId, profileCycleSummaryRefreshDelay); err != nil {
+	if err = projectChannelCyclePlans(ctx, []int64{job.Id}); err != nil {
+		return err
+	}
+	if err = s.enqueueCycleSummaryRefresh(ctx, job.ChannelId, profileCycleSummaryRefreshDelay); err != nil && ctx.Err() == nil {
 		g.Log().Warningf(ctx, "提交频道循环汇总刷新失败 channel:%d job:%d err:%+v", job.ChannelId, job.Id, err)
 	}
 	return nil
@@ -229,6 +233,9 @@ func (s *sSysPublish) rescheduleChannelProfileCycles(ctx context.Context, channe
 			Data(g.Map{"cycle_enabled": 0, "next_cycle_at": nil, "updated_at": now}).Update(); err != nil {
 			return gerror.Wrap(err, "关闭频道资料循环计划失败")
 		}
+		if _, err := g.DB().Model(publishChannelProfileTable).Ctx(ctx).Where("channel_id", channelId).Data(g.Map{"next_cycle_at": nil}).Update(); err != nil {
+			return err
+		}
 		return s.finishChannelProfileCycleReschedule(ctx, config)
 	}
 	cleanupSQL := fmt.Sprintf("UPDATE %s SET cycle_enabled=0,next_cycle_at=NULL,updated_at=? WHERE channel_id=? AND cycle_enabled=1 AND NOT EXISTS (SELECT 1 FROM %s cp WHERE cp.last_job_id=%s.id AND cp.status='active')",
@@ -304,7 +311,11 @@ func (s *sSysPublish) updateProfileCycleRescheduleBatch(ctx context.Context, con
 	if _, err := g.DB().Exec(ctx, sql, args...); err != nil {
 		return gerror.Wrap(err, "批量重算频道资料循环时间失败")
 	}
-	return nil
+	ids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.JobId)
+	}
+	return projectChannelCyclePlans(ctx, ids)
 }
 
 func (s *sSysPublish) refreshChannelProfileCycleNextAt(ctx context.Context, channelId int64) error {
@@ -333,6 +344,9 @@ func (s *sSysPublish) refreshChannelProfileCycleNextAt(ctx context.Context, chan
 }
 
 func (s *sSysPublish) runProfileCycleDueScan(ctx context.Context) error {
+	if globalStreamPushEngineEnabled() {
+		return s.enqueueAccountSchedules(ctx)
+	}
 	produced := 0
 	processed := 0
 	affectedChannels := make(map[int64]struct{})
@@ -496,7 +510,8 @@ func (s *sSysPublish) profileCycleDueRows(ctx context.Context, limit int) ([]pro
 	return s.profileCycleDueRowsShard(ctx, limit, -1)
 }
 
-func (s *sSysPublish) profileCycleDueRowsShard(ctx context.Context, limit, shard int) ([]profileCycleDueRow, error) {
+// profileCycleDueRowsShard 新引擎限定账户查询到期计划，旧引擎保留迁移期分片兼容。
+func (s *sSysPublish) profileCycleDueRowsShard(ctx context.Context, limit, shard int, scopes ...publishAccountScope) ([]profileCycleDueRow, error) {
 	if limit <= 0 {
 		limit = profileCycleScanBatchSize
 	}
@@ -508,13 +523,32 @@ func (s *sSysPublish) profileCycleDueRowsShard(ctx context.Context, limit, shard
 			"COALESCE(c.cycle_publish_enabled,0) AS channel_enabled,COALESCE(c.cycle_publish_days,0) AS channel_days,"+
 			"COALESCE(c.cycle_publish_time,'') AS channel_publish_time,COALESCE(c.cycle_publish_mode,'time') AS channel_mode,COALESCE(c.status,0) AS channel_status,COALESCE(c.publish_direction,'') AS publish_direction").
 		Where("j.cycle_enabled", 1).WhereIn("j.status", []string{"sent", "superseded"}).WhereNotNull("j.next_cycle_at").
-		Where("NOT EXISTS (SELECT 1 FROM "+publishAccountSettingTable+" ce WHERE ce.tenant_id=j.tenant_id AND ce.account_id=j.account_id AND ce.deleted_at IS NULL AND ce.cycle_engine='profile')").
 		Where("NOT EXISTS (SELECT 1 FROM "+channelPermissionCircuitTable+" pc WHERE pc.tenant_id=j.tenant_id AND pc.channel_id=j.channel_id AND pc.paused=1)").
 		WhereLTE("j.next_cycle_at", gtime.Now())
+	if len(scopes) > 0 {
+		// 新引擎从账户到期索引驱动，历史任务只通过主键读取发送证据。
+		model = g.DB().Model(publishChannelProfileTable+" cp").Safe().Ctx(ctx).
+			InnerJoin(publishTgJobTable+" j", "j.id=cp.last_job_id AND j.tenant_id=cp.tenant_id AND j.account_id=cp.account_id AND j.profile_id=cp.profile_id AND j.channel_id=cp.channel_id").
+			InnerJoin(publishChannelTable+" c", "c.id=cp.channel_id AND c.deleted_at IS NULL").
+			Fields("j.id AS job_id,j.tenant_id,j.account_id,j.profile_id,j.channel_id,j.sent_at,j.cycle_days,j.cycle_publish_time,cp.next_cycle_at,cp.cycle_generation AS dispatch_count,j.cycle_failure_count").
+			Where("cp.tenant_id", scopes[0].TenantID).Where("cp.account_id", scopes[0].AccountID).Where("cp.status", "active").
+			WhereNotNull("cp.next_cycle_at").WhereLTE("cp.next_cycle_at", gtime.Now()).WhereIn("j.status", []string{"sent", "superseded"}).
+			Where("NOT EXISTS (SELECT 1 FROM " + channelPermissionCircuitTable + " pc WHERE pc.tenant_id=cp.tenant_id AND pc.channel_id=cp.channel_id AND pc.paused=1)")
+	} else {
+		model = accountScheduleModel(model, "j.tenant_id", "j.account_id", scopes)
+	}
+	if len(scopes) > 0 {
+		model = model.Where("NOT EXISTS (SELECT 1 FROM " + publishProfileCycleRunTable + " planning WHERE planning.tenant_id=j.tenant_id AND planning.account_id=j.account_id AND planning.profile_id=j.profile_id AND planning.status='pending')")
+		model = model.Where("c.status", 1).Where("c.cycle_publish_enabled", 1).Where("COALESCE(NULLIF(LOWER(TRIM(c.cycle_publish_mode)),''),'time')='time'").Where("c.publish_direction", "up").Where("NOT EXISTS (SELECT 1 FROM " + publishTgJobTable + " active WHERE active.tenant_id=j.tenant_id AND active.account_id=j.account_id AND active.profile_id=j.profile_id AND active.channel_id=j.channel_id AND active.status IN ('pending','sending','failed_retry','unknown'))")
+	}
 	if shard >= 0 {
 		model = model.Where("MOD(ABS(HASHTEXT(j.tenant_id::text || ':' || j.account_id::text)), ?) = ?", profileCycleShardCount, shard)
 	}
-	err := model.OrderAsc("j.next_cycle_at").OrderAsc("j.id").Limit(limit).Scan(&rows)
+	orderField := "j.next_cycle_at"
+	if len(scopes) > 0 {
+		orderField = "cp.next_cycle_at"
+	}
+	err := model.OrderAsc(orderField).OrderAsc("j.id").Limit(limit).Scan(&rows)
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取到期资料循环计划失败")
 	}
@@ -661,10 +695,17 @@ func (s *sSysPublish) runProfileCycleStartupRecovery(ctx context.Context) {
 		return
 	case <-timer.C:
 	}
+	if globalStreamPushEngineEnabled() {
+		if err := s.enqueueAccountSchedules(ctx); err != nil {
+			g.Log().Warningf(ctx, "启动账户循环调度恢复失败 err:%+v", err)
+		}
+		return
+	}
+	// 灰度阶段只恢复旧账户；新账户沿用持久化的到期计划，不在启动时全量改写。
 	var channelIds []int64
-	if err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
-		Fields("id").Where("cycle_publish_enabled", 1).Where("status", 1).
-		Where("publish_direction", "up").WhereNull("deleted_at").Scan(&channelIds); err != nil {
+	model := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).Fields("id").Where("cycle_publish_enabled", 1).Where("status", 1).Where("publish_direction", "up")
+	model = accountScheduleModel(model, publishChannelTable+".tenant_id", publishChannelTable+".tg_account_id", nil)
+	if err := model.Scan(&channelIds); err != nil {
 		g.Log().Warningf(ctx, "读取启动循环恢复频道失败：%+v", err)
 	} else {
 		for _, channelId := range channelIds {

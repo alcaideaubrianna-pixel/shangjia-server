@@ -24,6 +24,9 @@ func (s *sSysPublish) prepareProfileChannelPublish(ctx context.Context, current 
 	if current.Id <= 0 || current.TenantId <= 0 || current.ProfileId <= 0 || current.ChannelId <= 0 {
 		return true, nil
 	}
+	if s.accountPushEngine(ctx, current.TenantId, current.AccountId) == pushEngineUnifiedStream {
+		return s.prepareStreamProfileChannelPublish(ctx, current)
+	}
 	preserveHistory, err := s.channelPreservesHistoryMessages(ctx, current.TenantId, current.ChannelId)
 	if err != nil {
 		return false, err

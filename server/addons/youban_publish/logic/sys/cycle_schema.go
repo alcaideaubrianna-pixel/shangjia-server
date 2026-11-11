@@ -49,13 +49,9 @@ func (s *sSysPublish) wakeProfileCycleRunsForChannel(ctx context.Context, tenant
 	if tenantID <= 0 || channelID <= 0 {
 		return nil
 	}
-	_, err := g.DB().Model(publishProfileCycleRunTable+" r").Safe().Ctx(ctx).
-		InnerJoin(publishProfileCycleRunChannelTable+" rc", "rc.run_id=r.id").
-		Where("r.tenant_id", tenantID).
-		Where("rc.channel_id", channelID).
-		Where("r.status", "pending").
-		Data(g.Map{"due_at": gtime.Now(), "updated_at": gtime.Now()}).
-		Update()
+	_, err := g.DB().Model(publishProfileCycleRunTable).Ctx(ctx).Where("tenant_id", tenantID).Where("status", "pending").
+		Where("EXISTS (SELECT 1 FROM "+publishProfileCycleRunChannelTable+" rc WHERE rc.run_id="+publishProfileCycleRunTable+".id AND rc.channel_id=?)", channelID).
+		Data(g.Map{"due_at": gtime.Now()}).Update()
 	return err
 }
 
