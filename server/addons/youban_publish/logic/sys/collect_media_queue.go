@@ -68,11 +68,13 @@ func collectMediaQueueName(ctx context.Context, payload collectMediaQueuePayload
 }
 
 func collectMediaQueueShardKey(payload collectMediaQueuePayload) int64 {
+	// 账户采集优先按account_id隔离；只有没有账户归属的BOT采集才回退Bot/source分片。
+	if payload.TenantId > 0 && payload.AccountId > 0 {
+		return payload.AccountId
+	}
 	if payload.TgAccountId > 0 {
 		return payload.TgAccountId
 	}
-	// BOT sources do not own a Telegram account. Source ID is stable and
-	// prevents all BOT traffic from collapsing into shard zero.
 	return payload.SourceId
 }
 

@@ -30,54 +30,59 @@ const (
 	tgQueueNameMediaProcess        = "youban_publish_media_process"
 	tgQueueNameMediaBulkPrefix     = "youban_publish_media_bulk_"
 	// Keep realtime deletion isolated from explicitly requested historical work.
-	tgQueueNameAutoDeleteRealtime     = "youban_publish_auto_delete_realtime"
-	tgQueueNameAutoDeleteBackfill     = "youban_publish_auto_delete_backfill"
-	tgQueueNameAttemptTimeout         = "youban_publish_attempt_timeout"
-	tgQueueNameBackground             = "youban_publish_background"
-	tgQueueNameMaterialImportPull     = "youban_publish_material_import_pull"
-	tgQueueNameMaterialImportMedia    = "youban_publish_material_import_media"
-	tgQueueNameCycle                  = "youban_publish_cycle"
-	tgQueueNameCollectProcessRealtime = "youban_publish_collect_process_realtime"
-	tgQueueNameCollectProcess         = "youban_publish_collect_process"
-	tgQueueNameCollectProcessPrefix   = "youban_publish_collect_process_"
-	tgQueueNameHistory                = "youban_publish_history"
-	tgQueueNameProfileMaintenance     = "youban_publish_profile_maintenance"
-	tgQueueNameDuplicateScan          = "youban_publish_duplicate_scan"
-	tgQueueNameMatting                = "youban_publish_matting"
-	tgTaskTypePublish                 = "youban_publish:tg:publish"
-	tgTaskTypeCleanup                 = "youban_publish:tg:cleanup"
-	tgTaskTypeAutoDelete              = "youban_publish:tg:auto_delete"
-	tgTaskTypeAutoDeleteBackfill      = "youban_publish:tg:auto_delete_backfill"
-	tgTaskTypeImport                  = "youban_publish:import:legacy"
-	tgTaskTypeRepair                  = "youban_publish:tg:message_repair"
-	tgTaskTypeImportMatch             = "youban_publish:import:tg_match"
-	tgTaskTypeImportSync              = "youban_publish:import:tg_sync"
-	tgTaskTypeDown                    = "youban_publish:profile:down"
-	tgTaskTypeCycleRun                = "youban_publish:cycle:run"
-	tgTaskTypeCycleReschedule         = "youban_publish:cycle:reschedule"
-	tgTaskTypeCycleRefresh            = "youban_publish:cycle:refresh"
-	tgTaskTypeCollectMedia            = "youban_publish:collect:media_cache"
-	tgTaskTypeMediaProcess            = "youban_publish:media:process"
-	tgTaskTypeCollectProcess          = "youban_publish:collect:process"
-	tgTaskTypeCollectHistory          = "youban_publish:collect:history"
-	tgTaskTypeCollectTrigger          = "youban_publish:collect:trigger"
-	tgTaskTypeCollectSourceDelete     = "youban_publish:collect:source_delete"
-	tgTaskTypeChannelMemberSync       = "youban_publish:tg:channel_member_sync"
-	tgTaskTypeBotMediaRepair          = "youban_publish:bot:media_repair"
-	tgTaskTypeProfileMaintenance      = "youban_publish:profile:maintenance"
-	tgTaskTypeProfileSubmit           = "youban_publish:profile:submit"
-	tgTaskTypePublishRecovery         = "youban_publish:profile:publish_recovery"
-	tgTaskTypeDuplicateScan           = "youban_publish:profile:duplicate_scan"
-	tgTaskTypeMatting                 = "youban_publish:anti_scan:matting"
-	tgTaskTypeAttemptTimeout          = "youban_publish:tg:attempt_timeout"
-	tgTaskTypeRelayMedia              = "youban_publish:relay:media"
-	tgTaskTypeRelayMediaGroup         = "youban_publish:relay:media_group"
-	tgQueueNameRelay                  = "youban_publish_relay"
+	tgQueueNameAutoDeleteRealtime                 = "youban_publish_auto_delete_realtime"
+	tgQueueNameAutoDeleteBackfill                 = "youban_publish_auto_delete_backfill"
+	tgQueueNameAttemptTimeout                     = "youban_publish_attempt_timeout"
+	tgQueueNameBackground                         = "youban_publish_background"
+	tgQueueNameMaterialImportPull                 = "youban_publish_material_import_pull"
+	tgQueueNameMaterialImportMedia                = "youban_publish_material_import_media"
+	tgQueueNameCycle                              = "youban_publish_cycle"
+	tgQueueNameCollectProcessRealtime             = "youban_publish_collect_process_realtime"
+	tgQueueNameCollectProcess                     = "youban_publish_collect_process"
+	tgQueueNameCollectProcessPrefix               = "youban_publish_collect_process_"
+	tgQueueNameCollectProcessAccountPrefix        = "youban_publish_collect_account_realtime_"
+	tgQueueNameCollectProcessAccountHistoryPrefix = "youban_publish_collect_account_history_"
+	tgQueueNameHistory                            = "youban_publish_history"
+	tgQueueNameProfileMaintenance                 = "youban_publish_profile_maintenance"
+	tgQueueNameDuplicateScan                      = "youban_publish_duplicate_scan"
+	tgQueueNameMatting                            = "youban_publish_matting"
+	tgTaskTypePublish                             = "youban_publish:tg:publish"
+	tgTaskTypeCleanup                             = "youban_publish:tg:cleanup"
+	tgTaskTypeAutoDelete                          = "youban_publish:tg:auto_delete"
+	tgTaskTypeAutoDeleteBackfill                  = "youban_publish:tg:auto_delete_backfill"
+	tgTaskTypeImport                              = "youban_publish:import:legacy"
+	tgTaskTypeRepair                              = "youban_publish:tg:message_repair"
+	tgTaskTypeImportMatch                         = "youban_publish:import:tg_match"
+	tgTaskTypeImportSync                          = "youban_publish:import:tg_sync"
+	tgTaskTypeDown                                = "youban_publish:profile:down"
+	tgTaskTypeCycleRun                            = "youban_publish:cycle:run"
+	tgTaskTypeCycleReschedule                     = "youban_publish:cycle:reschedule"
+	tgTaskTypeCycleRefresh                        = "youban_publish:cycle:refresh"
+	tgTaskTypeCollectMedia                        = "youban_publish:collect:media_cache"
+	tgTaskTypeMediaProcess                        = "youban_publish:media:process"
+	tgTaskTypeCollectProcess                      = "youban_publish:collect:process"
+	tgTaskTypeCollectHistory                      = "youban_publish:collect:history"
+	tgTaskTypeCollectTrigger                      = "youban_publish:collect:trigger"
+	tgTaskTypeCollectSourceDelete                 = "youban_publish:collect:source_delete"
+	tgTaskTypeChannelMemberSync                   = "youban_publish:tg:channel_member_sync"
+	tgTaskTypeBotMediaRepair                      = "youban_publish:bot:media_repair"
+	tgTaskTypeProfileMaintenance                  = "youban_publish:profile:maintenance"
+	tgTaskTypeProfileSubmit                       = "youban_publish:profile:submit"
+	tgTaskTypePublishRecovery                     = "youban_publish:profile:publish_recovery"
+	tgTaskTypeDuplicateScan                       = "youban_publish:profile:duplicate_scan"
+	tgTaskTypeMatting                             = "youban_publish:anti_scan:matting"
+	tgTaskTypeAttemptTimeout                      = "youban_publish:tg:attempt_timeout"
+	tgTaskTypeRelayMedia                          = "youban_publish:relay:media"
+	tgTaskTypeRelayMediaGroup                     = "youban_publish:relay:media_group"
+	tgQueueNameRelay                              = "youban_publish_relay"
 )
 
 const collectMediaMaxBulkQueueShards = 16
 
 const collectProcessQueueShards = 16
+
+// 采集处理按账户固定分片，确保一个账户的积压不能占满其他账户的采集消费者。
+const collectProcessAccountQueueShards = collectProcessQueueShards
 
 const (
 	tgQueueNameCollectProcessRealtimeV2 = "youban_publish_collect_process_realtime_v2"
@@ -85,6 +90,9 @@ const (
 )
 
 func collectProcessQueueName(payload collectProcessQueuePayload) string {
+	if payload.TenantId > 0 && payload.AccountId > 0 && (payload.EventId == 0 || payload.OutboxOwner != "") {
+		return collectProcessAccountQueueName(payload)
+	}
 	if payload.EventId > 0 {
 		if payload.OutboxOwner != "" {
 			if payload.Recovery || payload.History {
@@ -94,9 +102,21 @@ func collectProcessQueueName(payload collectProcessQueuePayload) string {
 		}
 		return tgQueueNameCollectProcessRealtime
 	}
+	// 兼容没有账户归属的历史维护任务，继续使用来源分片。
 	hash := fnv.New32a()
 	_, _ = hash.Write([]byte(fmt.Sprintf("%d:%d", payload.TenantId, payload.AccountId)))
 	return fmt.Sprintf("%s%02d", tgQueueNameCollectProcessPrefix, hash.Sum32()%collectProcessQueueShards)
+}
+
+// collectProcessAccountQueueName 返回稳定的账户采集分片，不按消息或规则分片，保留同账户公平调度。
+func collectProcessAccountQueueName(payload collectProcessQueuePayload) string {
+	hash := fnv.New32a()
+	_, _ = hash.Write([]byte(fmt.Sprintf("%d:%d", payload.TenantId, payload.AccountId)))
+	prefix := tgQueueNameCollectProcessAccountPrefix
+	if payload.History || payload.Recovery {
+		prefix = tgQueueNameCollectProcessAccountHistoryPrefix
+	}
+	return fmt.Sprintf("%s%02d", prefix, hash.Sum32()%collectProcessAccountQueueShards)
 }
 
 func collectProcessQueueNames() []string {
@@ -109,12 +129,16 @@ func collectProcessQueueNames() []string {
 }
 
 func collectProcessWorkerQueues() map[string]int {
-	queues := make(map[string]int, collectProcessQueueShards+3)
+	queues := make(map[string]int, collectProcessAccountQueueShards*2+3)
 	for _, queue := range collectProcessQueueNames() {
 		queues[queue] = 1
 	}
 	queues[tgQueueNameCollectProcessRealtime] = 1
 	queues[tgQueueNameCollectProcessRecoveryV2] = 4
+	for shard := 0; shard < collectProcessAccountQueueShards; shard++ {
+		queues[fmt.Sprintf("%s%02d", tgQueueNameCollectProcessAccountPrefix, shard)] = 1
+		queues[fmt.Sprintf("%s%02d", tgQueueNameCollectProcessAccountHistoryPrefix, shard)] = 1
+	}
 	return queues
 }
 
