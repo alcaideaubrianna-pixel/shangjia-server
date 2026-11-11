@@ -20,7 +20,7 @@ func (s *sSysPublish) confirmTelegramJobAndCyclePlan(ctx context.Context, job te
 		if err != nil || !changed {
 			return err
 		}
-		return s.upsertChannelProfileFromJob(ctx, job)
+		return s.upsertChannelProfileFromJobTx(ctx, tx, job)
 	})
 	return
 }

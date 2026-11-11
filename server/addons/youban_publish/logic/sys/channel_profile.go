@@ -4,12 +4,20 @@ import (
 	"context"
 	"strings"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 )
 
 func (s *sSysPublish) upsertChannelProfileFromJob(ctx context.Context, job telegramJobRecord) error {
+	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		return s.upsertChannelProfileFromJobTx(ctx, tx, job)
+	})
+}
+
+// upsertChannelProfileFromJobTx 在调用方事务中写入频道资料映射，避免事务内再次申请数据库连接。
+func (s *sSysPublish) upsertChannelProfileFromJobTx(ctx context.Context, tx gdb.TX, job telegramJobRecord) error {
 	if job.TenantId <= 0 || job.AccountId <= 0 || job.ChannelId <= 0 || job.ProfileId <= 0 {
 		return nil
 	}
@@ -23,7 +31,7 @@ func (s *sSysPublish) upsertChannelProfileFromJob(ctx context.Context, job teleg
 		// 更换当前成功任务时同步撤下旧到期计划，避免新基准沿用旧到期时间被重复领取。
 		"status": "active", "next_cycle_at": nil, "updated_at": now,
 	}
-	result, err := g.DB().Model(publishChannelProfileTable).Safe().Ctx(ctx).
+	result, err := tx.Model(publishChannelProfileTable).Safe().Ctx(ctx).
 		Where("channel_id", job.ChannelId).
 		Where("profile_id", job.ProfileId).
 		Where("last_job_id <= ?", job.Id).
@@ -37,11 +45,11 @@ func (s *sSysPublish) upsertChannelProfileFromJob(ctx context.Context, job teleg
 		return nil
 	}
 	data["created_at"] = now
-	if _, err = g.DB().Model(publishChannelProfileTable).Safe().Ctx(ctx).Data(data).Insert(); err != nil {
+	if _, err = tx.Model(publishChannelProfileTable).Safe().Ctx(ctx).Data(data).Insert(); err != nil {
 		if !isDuplicateKeyError(err) {
 			return gerror.Wrap(err, "创建频道当前上架资料索引失败")
 		}
-		_, err = g.DB().Model(publishChannelProfileTable).Safe().Ctx(ctx).
+		_, err = tx.Model(publishChannelProfileTable).Safe().Ctx(ctx).
 			Where("channel_id", job.ChannelId).
 			Where("profile_id", job.ProfileId).
 			Where("last_job_id <= ?", job.Id).
