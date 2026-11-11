@@ -218,7 +218,11 @@ func TestLocalAccountCycleRuntime(t *testing.T) {
 	}
 	s := NewSysPublish()
 	for _, channel := range []int64{1, 2, 3} {
-		if err := s.syncChannelCycleAfterSave(ctx, 999, channel, 1, 3, "22:40"); err != nil {
+		enabled := 1
+		if channel == 2 {
+			enabled = 0
+		}
+		if err := s.syncChannelCycleAfterSave(ctx, 999, channel, enabled, 3, "22:40"); err != nil {
 			t.Fatal(err)
 		}
 	}
