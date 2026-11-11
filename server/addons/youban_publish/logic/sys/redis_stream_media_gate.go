@@ -17,9 +17,10 @@ func streamMediaFailureCanSettle(job telegramJobRecord) bool {
 }
 
 // settleStreamFailedMediaJob 将媒体终态失败收口为可见失败，避免频道永远等待不会再次完成的媒体任务。
-// 仅供 unified_stream 使用；processing/retry 媒体继续等待既有媒体恢复和就绪唤醒。
+// 该检查适用于所有发送引擎；只有 pending/retry_wait 且尚未开始发送的任务
+// 才能安全终止，processing/retry 媒体继续等待既有媒体恢复和就绪唤醒。
 func (s *sSysPublish) settleStreamFailedMediaJob(ctx context.Context, job telegramJobRecord) (bool, error) {
-	if !streamMediaFailureCanSettle(job) || s.accountPushEngine(ctx, job.TenantId, job.AccountId) != pushEngineUnifiedStream {
+	if !streamMediaFailureCanSettle(job) {
 		return false, nil
 	}
 	columns := publishdao.YoubanPublishMedia.Columns()
