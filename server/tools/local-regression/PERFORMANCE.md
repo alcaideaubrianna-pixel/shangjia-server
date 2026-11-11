@@ -197,3 +197,10 @@ YOUBAN_LOCAL_STREAM_MEDIA_PG=1 go test ./addons/youban_publish/logic/sys -run '^
 最新双 publish-worker、双 background-worker 压力结果：1000份首次发布46.54秒；1000份时间循环覆盖完整，频道间隔 P50 5.05秒、P95 7.25秒；1000组批次翻新覆盖完整，耗时74.45秒，频道间隔 P50 2.37秒、P95 3.44秒。完整业务脚本和 `logic/sys` 包测试通过。
 
 本轮测试验证了共享 Bot 多账户隔离、账户媒体分片隔离和实时/历史队列独立。协议账户采集、Bot采集、同一消息多账户/多Bot、多规则多频道 fanout、历史积压和文本后缀清理的完整线上样本回放仍需继续补齐；现有规则、媒体复用、后缀和清理单测不能替代真实采集链路回放。
+
+## 2026-11-11 事务内频道映射修复复验
+
+- 发现并修复 `confirmTelegramJobAndCyclePlan` 在事务中调用 `g.DB()` 的嵌套连接问题：成功发送状态和 `channel_profile` 映射现在复用同一个 `gdb.TX` 原子提交。
+- 修复前串行循环覆盖测试出现 1 个资料映射缺失并在 180 秒超时；修复后同一真实角色环境通过，3 轮时间循环、批次轮转、持续新增、缺失计划修复和 inactive 保护均完成。
+- `TestLocalCycleCoverageRuntime`：79.28 秒，覆盖集合 0 漏项、0 重复；发送确认与循环映射一致。
+- 这是本地真实 PG/Redis/双 publish-worker/双 background-worker/TG Hook 验证结果；仍不能代表真实 Telegram 网络容量，采集到推送完整多账户压力仍需独立运行，测试之间不得并行共享同一数据库。
