@@ -60,7 +60,7 @@ echo '通过：1000条真实发送、消息证据、频道顺序和资料投影'
 control '{"default":{"action":"success","delayMs":2},"rules":[{"method":"sendMediaGroup","chatId":"-100999000012","action":"accepted_timeout","webhookDelayMs":20000}]}'
 round="$run_tag-ambiguous"
 seed_round "$round" 2 100
-wait_count "SELECT count(*) FROM hg_youban_publish_tg_job WHERE $(round_filter "$round") AND target_chat_id='-100999000012' AND status='unknown'" 1 30
+wait_count "SELECT count(*) FROM hg_youban_publish_tg_job WHERE $(round_filter "$round") AND target_chat_id='-100999000012' AND status IN ('unknown','confirming')" 1 150
 sql "SELECT json_build_object('at',clock_timestamp(),'attempts',(SELECT count(*) FROM hg_youban_publish_tg_attempt a JOIN hg_youban_publish_tg_job j ON j.id=a.job_id WHERE j.account_id=999 AND j.operation_no LIKE 'profile_cycle:local:runtime:$round:%' AND j.target_chat_id='-100999000012'),'other_sent',(SELECT count(*) FROM hg_youban_publish_tg_job WHERE $(round_filter "$round") AND target_chat_id<>'-100999000012' AND status='sent'))" > "$output/unknown-isolation.json"
 attempts="$(sql "SELECT count(*) FROM hg_youban_publish_tg_attempt a JOIN hg_youban_publish_tg_job j ON j.id=a.job_id WHERE j.account_id=999 AND j.operation_no LIKE 'profile_cycle:local:runtime:$round:%' AND j.target_chat_id='-100999000012'")"
 [[ "$attempts" == 1 ]] || { echo '未知发送期间本频道后续任务越过了屏障' >&2; exit 1; }

@@ -54,8 +54,8 @@ for rule in rules:
     elif action == "accepted_timeout":
         # 让客户端真实超时，Telegram 请求仍在 tgfake 内完成；业务应进入 unknown 对账状态。
         fault.pop("delay_ms", None)
-        # 发送客户端的请求预算约 30 秒，使用 60 秒确保进入 unknown 对账分支。
-        fault["delay_ms"] = max(delay, 60000)
+        # 发送客户端的请求预算约 2 分钟，使用 180 秒确保进入 unknown 对账分支。
+        fault["delay_ms"] = max(delay, 180000)
         fault["times"] = 1
     elif action == "error":
         fault["code"] = int(rule.get("code", 500))
