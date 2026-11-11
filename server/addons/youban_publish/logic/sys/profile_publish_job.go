@@ -198,7 +198,8 @@ func (s *sSysPublish) prepareProfilePublishJobs(ctx context.Context, profileId, 
 	for _, channel := range channels {
 		resolvedChannelIds = append(resolvedChannelIds, channel.Id)
 	}
-	g.Log().Infof(ctx, "资料发布频道解析 profileId:%d tenantId:%d accountId:%d requestedChannelIds:%v resolvedChannelIds:%v explicit:%t", profileId, tenantId, accountId, requestedChannelIds, resolvedChannelIds, len(channelIds) > 0)
+	// 频道解析发生在每次资料上架入口，批量/采集场景使用 Debug 避免日志成为吞吐瓶颈。
+	g.Log().Debugf(ctx, "资料发布频道解析 profileId:%d tenantId:%d accountId:%d requestedChannelIds:%v resolvedChannelIds:%v explicit:%t", profileId, tenantId, accountId, requestedChannelIds, resolvedChannelIds, len(channelIds) > 0)
 	operationNo = strings.TrimSpace(operationNo)
 	if operationNo == "" {
 		operationNo = newTelegramOperationNo("profile", profileId)

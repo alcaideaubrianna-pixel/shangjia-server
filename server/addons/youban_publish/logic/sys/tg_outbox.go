@@ -189,7 +189,8 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 	ctx = telegramPublishTraceContext(ctx, row.JobId, g.Map{"outboxId": row.Id, "outboxAttemptCount": row.AttemptCount})
 	stage := beginTelegramPublishStage(ctx, "outbox.dispatch")
 	defer stage.Finish(&resultErr)
-	g.Log().Info(ctx, "TG Outbox 选中任务", g.Map{"event": "outbox_selected", "outboxId": row.Id, "jobId": row.JobId, "outboxAttemptCount": row.AttemptCount, "availableAt": row.AvailableAt})
+	// 逐条 Outbox 领取是高频热路径，只保留 Debug，避免批量推送时同步格式化大量日志。
+	g.Log().Debug(ctx, "TG Outbox 选中任务", g.Map{"event": "outbox_selected", "outboxId": row.Id, "jobId": row.JobId, "outboxAttemptCount": row.AttemptCount, "availableAt": row.AvailableAt})
 	// 全量 Stream 模式下，频道队首判断由 Stream 消费后的发送逻辑完成。
 	// Outbox 这里只做可靠事件投递，避免每轮对大表执行相关子查询。
 	if !globalStreamPushEngineEnabled() {

@@ -64,6 +64,7 @@ func (s *sSysPublish) markTelegramOutboxDelivered(ctx context.Context, outboxID 
 	if err != nil {
 		return gerror.Wrap(err, "确认TG任务 Stream 投递失败")
 	}
-	g.Log().Info(ctx, "TG Outbox Stream 投递成功", g.Map{"event": "stream_ready_published", "outboxId": outboxID, "jobId": jobID})
+	// Stream 投递成功本身属于每条任务的常规路径，批量推送时使用 Debug 降低日志开销。
+	g.Log().Debug(ctx, "TG Outbox Stream 投递成功", g.Map{"event": "stream_ready_published", "outboxId": outboxID, "jobId": jobID})
 	return nil
 }
