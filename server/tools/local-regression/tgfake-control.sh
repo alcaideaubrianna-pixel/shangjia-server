@@ -43,13 +43,18 @@ for rule in rules:
     method = rule.get("method", "*")
     fault = {"method": method, "times": 0}
     if rule.get("chatId"):
-        fault["chat_id"] = int(rule["chatId"])
+        # contains 对 multipart 方法同样生效；比 chat_id 字段更贴近实际 Bot API 编码形式。
+        fault["contains"] = str(rule["chatId"])
     delay = int(rule.get("delayMs", default.get("delayMs", 0)) or 0)
     if delay:
         fault["delay_ms"] = delay
-    if action in ("timeout", "accepted_timeout"):
+    if action == "timeout":
         fault["disconnect"] = True
-        fault["after_apply"] = action == "accepted_timeout"
+        fault["times"] = 1
+    elif action == "accepted_timeout":
+        # 让客户端真实超时，Telegram 请求仍在 tgfake 内完成；业务应进入 unknown 对账状态。
+        fault.pop("delay_ms", None)
+        fault["delay_ms"] = max(delay, 30000)
         fault["times"] = 1
     elif action == "error":
         fault["code"] = int(rule.get("code", 500))
