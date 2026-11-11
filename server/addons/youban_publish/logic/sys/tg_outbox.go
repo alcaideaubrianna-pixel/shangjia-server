@@ -124,8 +124,7 @@ func (s *sSysPublish) rearmTelegramJobOutbox(ctx context.Context, jobId int64, d
 	}
 	// 并发 rearm 可能已经有 processing 行；不能再插入第二条 Outbox。
 	exists, err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
-		Where("job_id", jobId).Where("event_type", telegramOutboxEventPublish).
-		WhereNot("status", telegramOutboxDelivered).Count()
+		Where("job_id", jobId).Where("event_type", telegramOutboxEventPublish).Count()
 	if err != nil {
 		return gerror.Wrap(err, "检查TG任务Outbox重入状态失败")
 	}
