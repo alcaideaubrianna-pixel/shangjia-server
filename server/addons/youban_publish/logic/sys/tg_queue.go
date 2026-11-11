@@ -922,8 +922,35 @@ func (s *sSysPublish) enqueueTelegramTaskWithQueue(ctx context.Context, taskType
 	step := beginTelegramPublishStage(ctx, "queue.redis_enqueue", g.Map{"targetQueue": queueName})
 	info, err := client.EnqueueContext(enqueueCtx, task, options...)
 	step.End(err, g.Map{"duplicate": errors.Is(err, asynq.ErrDuplicateTask), "taskIdConflict": errors.Is(err, asynq.ErrTaskIDConflict)})
-	if errors.Is(err, asynq.ErrDuplicateTask) || errors.Is(err, asynq.ErrTaskIDConflict) {
+	if errors.Is(err, asynq.ErrDuplicateTask) {
 		return nil
+	}
+	// 稳定 TaskID 可能残留在 Redis 的 pending 集合中，但对应任务已经丢失。
+	// 不能把冲突当成成功，否则频道队首会永久 pending；使用唯一兜底 ID 重入，
+	// 执行端仍以 job 状态和频道租约幂等校验，避免重复发送。
+	if errors.Is(err, asynq.ErrTaskIDConflict) && taskType == tgTaskTypePublish {
+		fallbackTaskID := fmt.Sprintf("tg-publish-job-%d-fallback-%d", jobId, time.Now().UnixNano())
+		fallbackOptions := []asynq.Option{
+			asynq.Queue(queueName),
+			asynq.MaxRetry(10),
+			asynq.Timeout(telegramPublishTaskTimeout),
+			asynq.TaskID(fallbackTaskID),
+		}
+		if unique {
+			fallbackOptions = append(fallbackOptions, asynq.Unique(30*time.Second))
+		}
+		if delay > 0 {
+			if queueName == channelDispatchQueueSend {
+				fallbackOptions = append(fallbackOptions, asynq.ProcessAt(telegramPublishScheduleTime(time.Now(), delay)))
+			} else {
+				fallbackOptions = append(fallbackOptions, asynq.ProcessIn(delay))
+			}
+		}
+		g.Log().Warningf(ctx, "TG任务稳定TaskID冲突，使用兜底任务重入 jobId:%d fallbackTaskId:%s", jobId, fallbackTaskID)
+		info, err = client.EnqueueContext(enqueueCtx, task, fallbackOptions...)
+		if errors.Is(err, asynq.ErrDuplicateTask) {
+			return nil
+		}
 	}
 	if err != nil {
 		return gerror.Wrapf(err, "Asynq任务入队失败 taskType:%s queue:%s jobId:%d delay:%s", taskType, queueName, jobId, delay)
