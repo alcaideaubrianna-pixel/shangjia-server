@@ -7,6 +7,9 @@ WHERE NOT EXISTS (SELECT 1 FROM hg_sys_addons_install WHERE name='youban_tg_bot_
 INSERT INTO hg_sys_cron(group_id,title,name,params,pattern,policy,count,sort,status,created_at,updated_at)
 SELECT 1,'本地循环调度','youbanPublishCycleScheduler','','@every 1m',2,0,21,1,now(),now()
 WHERE NOT EXISTS (SELECT 1 FROM hg_sys_cron WHERE name='youbanPublishCycleScheduler');
+UPDATE hg_sys_cron
+SET pattern='@every 1m',status=1,updated_at=now()
+WHERE name='youbanPublishCycleScheduler';
 -- Stream 模式按到期 Outbox 读取，补充本地压力测试索引，避免大批量夹具触发全表扫描。
 CREATE INDEX IF NOT EXISTS idx_local_tg_outbox_stream_ready
     ON hg_youban_publish_tg_outbox(event_type,status,available_at,id,job_id);
