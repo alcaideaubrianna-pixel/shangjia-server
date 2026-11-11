@@ -462,7 +462,7 @@ func (s *sSysPublish) enqueueTelegramAutoDelete(ctx context.Context, payload aut
 		asynq.Timeout(time.Minute),
 		asynq.Unique(2*time.Minute),
 	)
-	if errors.Is(err, asynq.ErrDuplicateTask) {
+	if errors.Is(err, asynq.ErrDuplicateTask) || errors.Is(err, asynq.ErrTaskIDConflict) {
 		return nil
 	}
 	return err
@@ -903,8 +903,8 @@ func (s *sSysPublish) enqueueTelegramTaskWithQueue(ctx context.Context, taskType
 	defer cancel()
 	step := beginTelegramPublishStage(ctx, "queue.redis_enqueue", g.Map{"targetQueue": queueName})
 	info, err := client.EnqueueContext(enqueueCtx, task, options...)
-	step.End(err, g.Map{"duplicate": errors.Is(err, asynq.ErrDuplicateTask)})
-	if errors.Is(err, asynq.ErrDuplicateTask) {
+	step.End(err, g.Map{"duplicate": errors.Is(err, asynq.ErrDuplicateTask), "taskIdConflict": errors.Is(err, asynq.ErrTaskIDConflict)})
+	if errors.Is(err, asynq.ErrDuplicateTask) || errors.Is(err, asynq.ErrTaskIDConflict) {
 		return nil
 	}
 	if err != nil {
