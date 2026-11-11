@@ -55,7 +55,8 @@ FROM hg_content_profile p
 JOIN hg_youban_publish_channel c ON c.tenant_id=999 AND c.channel_title LIKE 'local-hook-channel-%'
 WHERE p.source_type='local_regression' AND p.id<=20;
 UPDATE hg_youban_publish_profile_state
-SET publish_operation_no='',publish_task_status='',publish_task_updated_at=NULL
+SET publish_operation_no='',publish_task_status='',publish_task_updated_at=NULL,
+    publish_at=NULL
 WHERE tenant_id=999 AND account_id=999;
 -- 任务表已清空后，循环状态仍必须有频道资料映射；否则测试会保留已删除的 last_job_id，循环扫描永远找不到队首。
 INSERT INTO hg_youban_publish_channel_profile
