@@ -459,6 +459,26 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 	if limit > telegramOutboxMaxBatchLimit(ctx) {
 		limit = telegramOutboxMaxBatchLimit(ctx)
 	}
+	// 频道顺序检查失败后，通知可能已经被确认 delivered，但 Job 仍是 idle。
+	// 每轮只按主键选取一小页重新激活，避免这类孤儿通知让频道永久卡在队首。
+	rearmSQL := `WITH due AS (
+		SELECT o.id
+		FROM ` + publishTgOutboxTable + ` o
+		JOIN ` + publishTgJobTable + ` j ON j.id=o.job_id
+		WHERE o.event_type=? AND o.status=? AND o.delivered_at IS NOT NULL
+			AND j.status IN ('pending','failed_retry','unknown')
+			AND COALESCE(j.dispatch_status,'') IN ('','idle')
+			AND (j.next_retry_at IS NULL OR j.next_retry_at<=?)
+		ORDER BY o.id
+		LIMIT ?
+	)
+	UPDATE ` + publishTgOutboxTable + ` o
+	SET status=?, available_at=?, delivered_at=NULL, lease_owner='', lease_expires_at=NULL,
+		last_error='', updated_at=?
+	FROM due WHERE o.id=due.id`
+	if _, err := g.DB().Exec(ctx, rearmSQL, telegramOutboxEventPublish, telegramOutboxDelivered, now, limit, telegramOutboxPending, now, now); err != nil {
+		return nil, gerror.Wrap(err, "恢复已投递但未入队的TG通知失败")
+	}
 	// Stream 只负责快速通知；频道顺序由消费后的幂等入队和完成唤醒保证。
 	// 不在这里重复计算频道队首，避免大表窗口排序拖慢所有账户。
 	query := `SELECT o.id,o.job_id,o.attempt_count,o.available_at

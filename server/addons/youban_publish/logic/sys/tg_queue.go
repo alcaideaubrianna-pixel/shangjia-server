@@ -403,6 +403,10 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 	})
 	beginTelegramPublishStage(ctx, "dispatch.reserve_result").End(err, g.Map{"reserved": reserved, "targetQueue": queueName})
 	if err != nil {
+		// 频道租约或顺序检查失败时，Stream 通知不能保持 delivered；重新激活 Outbox，避免 Job 永久 idle。
+		if rearmErr := s.rearmTelegramJobOutbox(ctx, jobId, 3*time.Second); rearmErr != nil {
+			g.Log().Warningf(ctx, "恢复TG任务Outbox失败 jobId:%d err:%+v", jobId, rearmErr)
+		}
 		return gerror.Wrap(err, "锁定TG任务入队状态失败")
 	}
 	if !reserved {

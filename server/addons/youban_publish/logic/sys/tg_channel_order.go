@@ -306,7 +306,10 @@ func (s *sSysPublish) postponeTelegramJobForChannelOrder(ctx context.Context, jo
 		Where("id", job.Id).
 		WhereIn("status", []string{"pending", "failed_retry"}).
 		Data(g.Map{
-			"dispatch_status":     tgDispatchStatusIdle,
+			"dispatch_status": tgDispatchStatusIdle,
+			// 顺序延期意味着本次 Asynq 执行已经结束；清除旧任务引用，允许恢复通知创建新的执行任务。
+			"asynq_task_id":       "",
+			"task_id":             "",
 			"next_retry_at":       gtime.Now().Add(3 * time.Second),
 			"last_dispatch_error": "等待同频道前序推送任务完成",
 			"updated_at":          gtime.Now(),
