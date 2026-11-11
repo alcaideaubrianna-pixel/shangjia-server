@@ -116,7 +116,7 @@ func (profileManageMessageHandler) Handle(ctx context.Context, bot *sSysBot, eve
 		if account.AccountId != session.AccountId || account.TenantId != session.TenantId {
 			return true, bot.reply(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.Chat.ID), "当前绑定账号已变更，请重新操作")
 		}
-		if session.Scene == "create" || session.Scene == "batch_create" || session.Scene == "replace" {
+		if session.Scene == "create" || session.Scene == "batch_create" || session.Scene == "replace" || session.Scene == "edit_verify" {
 			return true, bot.consumeProfileSessionMessage(ctx, event.BotId, event.Msg, account, session, text)
 		}
 		if session.Scene == "search" && len(event.Msg.Photo) > 0 {

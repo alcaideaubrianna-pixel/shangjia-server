@@ -21,6 +21,12 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
 # 高于 bookworm 的 glibc/libstdc++，容器启动后反复重启。
 FROM golang:1.25
 WORKDIR /usr/local/bin
+# Media-worker exercises the same video poster path as production. Keep the
+# local full-flow image self-contained so the regression does not fail merely
+# because ffmpeg is absent from the test container.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=build /out/youban-server /usr/local/bin/youban-server
 COPY --from=build /src/manifest /usr/local/bin/manifest
 ENTRYPOINT ["/usr/local/bin/youban-server"]
