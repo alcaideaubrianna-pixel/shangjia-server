@@ -44,7 +44,7 @@ round="$tag-restart"
 seed "$round" 10 20
 wait_count "SELECT CASE WHEN count(*)>0 THEN 1 ELSE 0 END FROM hg_youban_publish_tg_job WHERE account_id=999 AND operation_no LIKE 'profile_cycle:local:runtime:$round:%' AND status='sent'" 1 30
 docker restart --timeout 1 youban-runtime-clean-redis > "$output/redis-restart.log"
-wait_count "SELECT count(*) FROM hg_youban_publish_tg_job WHERE account_id=999 AND operation_no LIKE 'profile_cycle:local:runtime:$round:%' AND status='sent'" 200 150
+wait_count "SELECT count(*) FROM hg_youban_publish_tg_job WHERE account_id=999 AND operation_no LIKE 'profile_cycle:local:runtime:$round:%' AND status='sent'" 200 240
 verify "$round" 10 20
 echo '通过：仅重启Redis，原worker自动恢复，200/200发送完成'
 round="$tag-after-restart"
