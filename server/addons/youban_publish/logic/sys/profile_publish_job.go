@@ -376,6 +376,19 @@ func (s *sSysPublish) ensureTelegramProfileJobWithMetaTx(ctx context.Context, tx
 		return 0, err
 	}
 	now := gtime.Now()
+	cycleData := g.Map{}
+	if isCycleBatchOperation(operationNo) {
+		var cycleConfig struct {
+			Enabled     int    `orm:"cycle_publish_enabled"`
+			Days        int    `orm:"cycle_publish_days"`
+			PublishTime string `orm:"cycle_publish_time"`
+		}
+		if err := tx.Model(publishChannelTable).Safe().Ctx(ctx).
+			Fields("cycle_publish_enabled,cycle_publish_days,cycle_publish_time").Where("id", channel.Id).Where("tenant_id", source["tenant_id"].Int64()).Scan(&cycleConfig); err != nil {
+			return 0, gerror.Wrap(err, "读取当前频道循环配置失败")
+		}
+		cycleData = g.Map{"cycle_enabled": cycleConfig.Enabled, "cycle_days": defaultCycleDays(cycleConfig.Days), "cycle_publish_time": strings.TrimSpace(cycleConfig.PublishTime)}
+	}
 	job := telegramJobRecord{
 		OperationNo: operationNo, TenantId: source["tenant_id"].Int64(), AccountId: source["account_id"].Int64(),
 		ProfileId: source["profile_id"].Int64(), ChannelId: channel.Id, BotId: botId,
@@ -383,7 +396,7 @@ func (s *sSysPublish) ensureTelegramProfileJobWithMetaTx(ctx context.Context, tx
 		CollectEventId: meta.CollectEventId, CollectSourceId: meta.CollectSourceId,
 		CollectSourceChatId: strings.TrimSpace(meta.CollectSourceChatId), CollectSourceMessageId: meta.CollectSourceMessageId,
 	}
-	jobID, err := tx.Model(publishTgJobTable).Safe().Ctx(ctx).Data(g.Map{
+	jobData := g.Map{
 		"operation_no":      operationNo,
 		"operation_type":    string(profileOperationTypeFromNo(operationNo)),
 		"notify_account_id": job.AccountId,
@@ -394,7 +407,11 @@ func (s *sSysPublish) ensureTelegramProfileJobWithMetaTx(ctx context.Context, tx
 		"collect_source_chat_id": job.CollectSourceChatId, "collect_source_message_id": job.CollectSourceMessageId,
 		"priority": s.telegramJobPriority(job), "queue_name": telegramQueueNameByPriorityAndChannel(ctx, s.telegramJobPriority(job), channel.Id),
 		"dispatch_status": tgDispatchStatusIdle, "created_at": now, "updated_at": now,
-	}).InsertAndGetId()
+	}
+	for key, value := range cycleData {
+		jobData[key] = value
+	}
+	jobID, err := tx.Model(publishTgJobTable).Safe().Ctx(ctx).Data(jobData).InsertAndGetId()
 	if err != nil {
 		return 0, gerror.Wrap(err, "创建资料TG频道任务失败")
 	}
