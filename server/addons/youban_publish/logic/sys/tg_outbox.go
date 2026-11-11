@@ -14,15 +14,16 @@ import (
 )
 
 const (
-	telegramOutboxEventPublish         = "telegram_job.publish"
-	telegramOutboxPending              = "pending"
-	telegramOutboxProcessing           = "processing"
-	telegramOutboxDelivered            = "delivered"
-	telegramOutboxLeaseTTL             = 30 * time.Second
-	telegramOutboxQueryTimeout         = 5 * time.Second
-	telegramOutboxWorkers              = 32
-	telegramOutboxBatchLimitDefault    = 5000
-	telegramOutboxMaxBatchLimitDefault = 10000
+	telegramOutboxEventPublish            = "telegram_job.publish"
+	telegramOutboxPending                 = "pending"
+	telegramOutboxProcessing              = "processing"
+	telegramOutboxDelivered               = "delivered"
+	telegramOutboxLeaseTTL                = 30 * time.Second
+	telegramOutboxQueryTimeout            = 5 * time.Second
+	telegramOutboxWorkers                 = 32
+	telegramOutboxBatchLimitDefault       = 5000
+	telegramOutboxMaxBatchLimitDefault    = 10000
+	telegramStreamOutboxBatchLimitDefault = 500
 
 	telegramOutboxDecisionWait     = "wait"
 	telegramOutboxDecisionDispatch = "dispatch"
@@ -47,6 +48,19 @@ func telegramOutboxMaxBatchLimit(ctx context.Context) int {
 	}
 	if value > 20000 {
 		return 20000
+	}
+	return value
+}
+
+// telegramStreamOutboxBatchLimit 控制 Stream 就绪通知单轮批量，便于按
+// worker 实例规格逐步放量；上限仍受全局 Outbox 批量保护。
+func telegramStreamOutboxBatchLimit(ctx context.Context) int {
+	value := g.Cfg().MustGet(ctx, "youbanPublish.queue.streamOutboxBatchLimit", telegramStreamOutboxBatchLimitDefault).Int()
+	if value < 100 {
+		return 100
+	}
+	if value > telegramOutboxMaxBatchLimit(ctx) {
+		return telegramOutboxMaxBatchLimit(ctx)
 	}
 	return value
 }
@@ -453,8 +467,8 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 	}
 	// Stream dispatcher 只做可靠通知，不执行频道发送；适当增大批次可以
 	// 一轮排空更多独立频道，减少秒级轮询等待。频道 lease 仍在发送阶段保证串行。
-	if limit > 500 {
-		limit = 500
+	if limit > telegramStreamOutboxBatchLimit(ctx) {
+		limit = telegramStreamOutboxBatchLimit(ctx)
 	}
 	if limit > telegramOutboxMaxBatchLimit(ctx) {
 		limit = telegramOutboxMaxBatchLimit(ctx)
