@@ -7,9 +7,13 @@ output="${YOUBAN_LOCAL_RUNTIME_OUTPUT:-/tmp/youban-runtime-$run_tag}"
 mkdir -p "$output"
 sql() { docker exec youban-postgres psql -U postgres -d youban_hotgo -X -v ON_ERROR_STOP=1 -Atc "$1"; }
 control() {
-  local status
-  status="$(curl --noproxy '*' -sS --fail --max-time 5 -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:19100/__test/scenario -H 'Content-Type: application/json' --data-binary "$1")"
-  [[ "$status" == 204 ]] || { echo 'Hook控制接口无效；请排查旧进程端口占用或旧镜像' >&2; return 1; }
+  if [[ "${YOUBAN_LOCAL_TG_BACKEND:-tgfake}" == "tg-hook" ]]; then
+    local status
+    status="$(curl --noproxy '*' -sS --fail --max-time 5 -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:19100/__test/scenario -H 'Content-Type: application/json' --data-binary "$1")"
+    [[ "$status" == "204" ]] || { echo 'Hook控制接口无效' >&2; return 1; }
+    return
+  fi
+  bash ./tgfake-control.sh "$1"
 }
 reset_hook() { control '{"default":{"action":"success","delayMs":2}}'; }
 trap 'reset_hook >/dev/null 2>&1 || true' EXIT
@@ -39,7 +43,7 @@ count="$(docker compose -f docker-compose.yml ps -q publish-worker | wc -l | tr 
 (( $(sql "SELECT count(*) FROM hg_content_profile WHERE source_type='local_regression'") >= 720 )) || { echo '缺少完整的1000份本地资料夹具' >&2; exit 1; }
 curl --noproxy '*' -sS --fail --max-time 5 http://127.0.0.1:18080/readyz > "$output/web-ready.json"
 for worker in $(docker compose -f docker-compose.yml ps -q publish-worker); do
-  docker inspect "$worker" --format '{{range .Config.Env}}{{println .}}{{end}}' | rg -q '^YOUBAN_TELEGRAM_BOT_API_URL=http://tg-hook:19100$'
+  docker inspect "$worker" --format '{{range .Config.Env}}{{println .}}{{end}}' | rg -q '^YOUBAN_TELEGRAM_BOT_API_URL=http://tgfake:18790$'
 done
 reset_hook
 

@@ -1,4 +1,18 @@
 services:
+  # 完整 Telegram Bot API、Webhook、媒体下载和故障注入模拟器。
+  tgfake:
+    image: ${TGFAKE_IMAGE:-ghcr.io/evilfreelancer/tgfake:1.5}
+    # 不限制 token，允许本地夹具中的多个 Bot 账户共享同一 fake Telegram 服务。
+    command: ["--allow-http-webhook"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:18790/sim/state"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+    ports:
+      - "127.0.0.1:18790:18790"
+
   tg-hook:
     build:
       context: ../..
@@ -6,6 +20,7 @@ services:
       target: hook
     entrypoint: ["/usr/local/bin/tg-hook"]
     command: ["--addr", "0.0.0.0:19100", "--record", "/var/log/youban/hook.jsonl", "--record-format", "jsonl", "--webhook-url", "http://web:8000/api/youban_tg_bot_gateway/telegram/webhook", "--webhook-key", "52aa4633e23d1347ca7dad6b"]
+    profiles: ["legacy-hook"]
     restart: unless-stopped
     environment:
       TZ: UTC
@@ -22,7 +37,8 @@ services:
     command: ["publish-worker"]
     restart: unless-stopped
     depends_on:
-      - tg-hook
+      tgfake:
+        condition: service_healthy
     environment: &local-worker-environment
       TZ: UTC
       YOUBAN_LOCAL_REGRESSION: "1"
@@ -43,8 +59,8 @@ services:
       YOUBAN_DB_MAX_IDLE: ${YOUBAN_LOCAL_DB_MAX_IDLE:-2}
       YOUBAN_REDIS_ADDRESS: ${YOUBAN_LOCAL_REDIS_ADDRESS:-host.docker.internal:16382}
       YOUBAN_REDIS_DB: "15"
-      YOUBAN_TELEGRAM_RUNTIME_API_URL: http://tg-hook:19100
-      YOUBAN_TELEGRAM_BOT_API_URL: http://tg-hook:19100
+      YOUBAN_TELEGRAM_RUNTIME_API_URL: http://tgfake:18790
+      YOUBAN_TELEGRAM_BOT_API_URL: http://tgfake:18790
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -59,7 +75,8 @@ services:
     command: ["background-worker"]
     restart: unless-stopped
     depends_on:
-      - tg-hook
+      tgfake:
+        condition: service_healthy
     environment:
       <<: *local-worker-environment
       YOUBAN_RUNTIME_ROLES: "background-worker"
@@ -89,7 +106,8 @@ services:
     command: ["web"]
     restart: unless-stopped
     depends_on:
-      - tg-hook
+      tgfake:
+        condition: service_healthy
     environment:
       <<: *local-worker-environment
       YOUBAN_RUNTIME_ROLES: "web"
@@ -108,7 +126,8 @@ services:
     profiles: ["media"]
     restart: unless-stopped
     depends_on:
-      - tg-hook
+      tgfake:
+        condition: service_healthy
     environment:
       <<: *local-worker-environment
       YOUBAN_RUNTIME_ROLES: "media-worker"

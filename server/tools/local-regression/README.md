@@ -1,6 +1,14 @@
 # 本地持续运行环境
 
-这个目录提供与线上 `web`、`publish-worker`、`background-worker`、`media-worker` 相同启动入口的 Docker 运行环境。默认两个 publish-worker，使用 product 模式及本地 PostgreSQL/Redis，Telegram请求全部指向tg-hook。
+这个目录提供与线上 `web`、`publish-worker`、`background-worker`、`media-worker` 相同启动入口的 Docker 运行环境。默认两个 publish-worker，使用 product 模式及本地 PostgreSQL/Redis，Telegram 请求全部指向 `EvilFreelancer/tgfake:1.5`。
+
+tgfake 提供完整 Bot API、Webhook、图片/视频/媒体组、文件下载、按钮回调和故障注入能力，浏览器界面位于 `http://127.0.0.1:18790/`。业务角色通过 `http://tgfake:18790` 访问，测试机上的故障控制使用：
+
+```bash
+./tgfake-control.sh '{"default":{"action":"success","delayMs":2},"rules":[{"method":"sendMediaGroup","chatId":"-100999000012","action":"accepted_timeout"}]}'
+```
+
+旧的轻量 Hook 保留为 `legacy-hook` profile，仅用于对比旧回放：`docker compose --profile legacy-hook up tg-hook`。
 
 ## 启动
 

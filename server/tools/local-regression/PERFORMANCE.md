@@ -204,3 +204,10 @@ YOUBAN_LOCAL_STREAM_MEDIA_PG=1 go test ./addons/youban_publish/logic/sys -run '^
 - 修复前串行循环覆盖测试出现 1 个资料映射缺失并在 180 秒超时；修复后同一真实角色环境通过，3 轮时间循环、批次轮转、持续新增、缺失计划修复和 inactive 保护均完成。
 - `TestLocalCycleCoverageRuntime`：79.28 秒，覆盖集合 0 漏项、0 重复；发送确认与循环映射一致。
 - 这是本地真实 PG/Redis/双 publish-worker/双 background-worker/TG Hook 验证结果；仍不能代表真实 Telegram 网络容量，采集到推送完整多账户压力仍需独立运行，测试之间不得并行共享同一数据库。
+
+## 2026-11-11 tgfake 1.5 环境切换
+
+- Compose 默认 Telegram 依赖切换为 `ghcr.io/evilfreelancer/tgfake:1.5`，启用 HTTP Webhook；旧 Hook 仅保留在 `legacy-hook` profile。
+- 已验证 `/sim/state`、Bot API `getMe`、429 故障注入、延迟/断响应规则清理，以及 `sendMessage` 的模拟发送。
+- 运行场景控制已改为 `/sim/fault`，支持按方法和频道注入错误、延迟、连接丢失和“已执行但丢响应”。
+- 首次全量混合场景仍受本地数据库中上一轮遗留 pending 队列影响，不能作为 tgfake 吞吐结论；需要使用干净测试库或先清理历史测试任务后重跑。

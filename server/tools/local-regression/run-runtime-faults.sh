@@ -6,7 +6,7 @@ tag="fault$(date +%Y%m%d%H%M%S)-$$"
 output="/tmp/youban-runtime-$tag"
 mkdir -p "$output"
 cleanup() {
-  curl --noproxy '*' --silent --max-time 5 -X POST http://127.0.0.1:19100/__test/scenario -H 'Content-Type: application/json' --data-binary '{"default":{"action":"success","delayMs":2}}' >/dev/null 2>&1 || true
+  bash ./tgfake-control.sh >/dev/null 2>&1 || true
   if [[ -n "${crashed_worker:-}" && -n "${standby_worker:-}" ]]; then docker start "$crashed_worker" "$standby_worker" >/dev/null 2>&1 || true; fi
 }
 trap cleanup EXIT
@@ -29,7 +29,7 @@ verify() {
 [[ "$(docker compose -f docker-compose.yml ps -q publish-worker | wc -l | tr -d ' ')" == 2 ]] || { echo '需要两个真实push worker' >&2; exit 1; }
 for worker in $(docker compose -f docker-compose.yml ps -q publish-worker); do
   docker inspect "$worker" --format '{{range .Config.Env}}{{println .}}{{end}}' | rg -q '^YOUBAN_REDIS_ADDRESS=host.docker.internal:16382$'
-  docker inspect "$worker" --format '{{range .Config.Env}}{{println .}}{{end}}' | rg -q '^YOUBAN_TELEGRAM_BOT_API_URL=http://tg-hook:19100$'
+  docker inspect "$worker" --format '{{range .Config.Env}}{{println .}}{{end}}' | rg -q '^YOUBAN_TELEGRAM_BOT_API_URL=http://tgfake:18790$'
 done
 [[ "$(docker inspect youban-runtime-clean-redis --format '{{(index (index .NetworkSettings.Ports "6379/tcp") 0).HostPort}}')" == 16382 ]] || { echo '目标不是独立测试Redis' >&2; exit 1; }
 for worker in $(docker compose -f docker-compose.yml ps -q publish-worker); do docker inspect "$worker" --format '{{.Id}} {{.State.StartedAt}}'; done > "$output/workers-before.txt"
@@ -61,14 +61,14 @@ standby_worker="$(docker compose -f docker-compose.yml ps -q publish-worker | ta
 docker stop --timeout 5 "$standby_worker" > "$output/standby-stop.log"
 chat="$(sql "SELECT target_chat_id FROM hg_youban_publish_channel WHERE tenant_id=999 AND channel_title LIKE 'local-hook-channel-%' AND status=1 ORDER BY id LIMIT 1")"
 [[ "$chat" =~ ^-?[0-9]+$ ]] || { echo '虚拟频道标识无效' >&2; exit 1; }
-curl --noproxy '*' --silent --show-error --fail --max-time 5 -X POST http://127.0.0.1:19100/__test/scenario -H 'Content-Type: application/json' --data-binary "{\"default\":{\"action\":\"success\",\"delayMs\":2},\"rules\":[{\"method\":\"sendMediaGroup\",\"chatId\":\"$chat\",\"action\":\"success\",\"delayMs\":10000}]}" >/dev/null
+  bash ./tgfake-control.sh "{\"default\":{\"action\":\"success\",\"delayMs\":2},\"rules\":[{\"method\":\"sendMediaGroup\",\"chatId\":\"$chat\",\"action\":\"success\",\"delayMs\":10000}]}"
 round="$tag-killed-worker"
 seed "$round" 1 1
 wait_count "SELECT count(DISTINCT j.id) FROM hg_youban_publish_tg_job j JOIN hg_youban_publish_tg_attempt a ON a.job_id=j.id WHERE j.account_id=999 AND j.operation_no LIKE 'profile_cycle:local:runtime:$round:%' AND j.status='sending' AND j.send_phase='display_sending' AND a.status='sending'" 1 30
 sleep 1
 docker kill --signal KILL "$crashed_worker" > "$output/worker-kill.log"
 docker start "$crashed_worker" "$standby_worker" > "$output/worker-restart.log"
-curl --noproxy '*' --silent --show-error --fail --max-time 5 -X POST http://127.0.0.1:19100/__test/scenario -H 'Content-Type: application/json' --data-binary '{"default":{"action":"success","delayMs":2}}' >/dev/null
+  bash ./tgfake-control.sh
 free_round="$tag-healthy-channel"
 seed "$free_round" 1 1 -v profile_offset=1 -v channel_offset=1
 wait_count "SELECT count(*) FROM hg_youban_publish_tg_job WHERE account_id=999 AND operation_no LIKE 'profile_cycle:local:runtime:$free_round:%' AND status='sent'" 1 15
