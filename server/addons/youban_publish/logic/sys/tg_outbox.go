@@ -464,14 +464,19 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 	// dispatch_status=idle 表示旧 Asynq 执行已经结束，asynq_task_id 可能只是陈旧引用；清掉它才能重新入队。
 	clearStaleTaskSQL := `WITH stale AS (
 		SELECT id FROM ` + publishTgJobTable + `
-		WHERE status='pending' AND COALESCE(dispatch_status,'')='idle'
-			AND (next_retry_at IS NULL OR next_retry_at<=?)
+		WHERE status='pending' AND (
+				(COALESCE(dispatch_status,'')='idle' AND (next_retry_at IS NULL OR next_retry_at<=?))
+				OR (COALESCE(dispatch_status,'')='queued' AND updated_at<=?)
+			)
 		ORDER BY id LIMIT ?
 	)
 	UPDATE ` + publishTgJobTable + ` j
-	SET asynq_task_id='', task_id=NULL, updated_at=?
+	SET asynq_task_id='', task_id=NULL, dispatch_status='idle', updated_at=?
 	FROM stale WHERE j.id=stale.id`
-	if _, err := g.DB().Exec(ctx, clearStaleTaskSQL, now, limit, now); err != nil {
+	// queued 状态超过一个执行租约周期仍未进入 sending，说明 Asynq
+	// 任务可能已丢失；清理引用后由持久化 Outbox 重新唤醒。
+	queuedStaleAt := now.Add(-telegramChannelDispatchLeaseTTL)
+	if _, err := g.DB().Exec(ctx, clearStaleTaskSQL, now, queuedStaleAt, limit, now); err != nil {
 		return nil, gerror.Wrap(err, "清理失效TG执行任务引用失败")
 	}
 	rearmSQL := `WITH due AS (
