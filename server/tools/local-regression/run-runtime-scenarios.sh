@@ -2,10 +2,11 @@
 # 在真实本地角色上执行发送场景；只访问固定Docker测试库和Hook，绝不连接Telegram。
 set -euo pipefail
 cd "$(dirname "$0")"
+local_db_name="${YOUBAN_LOCAL_DB_NAME:-youban_hotgo}"
 run_tag="rt$(date +%Y%m%d%H%M%S)-$$"
 output="${YOUBAN_LOCAL_RUNTIME_OUTPUT:-/tmp/youban-runtime-$run_tag}"
 mkdir -p "$output"
-sql() { docker exec youban-postgres psql -U postgres -d youban_hotgo -X -v ON_ERROR_STOP=1 -Atc "$1"; }
+sql() { docker exec youban-postgres psql -U postgres -d "$local_db_name" -X -v ON_ERROR_STOP=1 -Atc "$1"; }
 control() {
   if [[ "${YOUBAN_LOCAL_TG_BACKEND:-tgfake}" == "tg-hook" ]]; then
     local status
@@ -29,7 +30,7 @@ wait_count() {
 }
 round_filter() { printf "account_id=999 AND operation_no LIKE 'profile_cycle:local:runtime:%s:%%'" "$1"; }
 seed_round() {
-  docker exec -i youban-postgres psql -U postgres -d youban_hotgo -X -v ON_ERROR_STOP=1 -v "run_id=$1" -v "profiles=$2" -v "channels=$3" < scenarios/runtime_load.sql >> "$output/seed.log"
+  docker exec -i youban-postgres psql -U postgres -d "$local_db_name" -X -v ON_ERROR_STOP=1 -v "run_id=$1" -v "profiles=$2" -v "channels=$3" < scenarios/runtime_load.sql >> "$output/seed.log"
 }
 verify_round() {
   # 资料投影走后台队列，等待真实收口后再审计；超时仍判失败。
@@ -80,9 +81,9 @@ echo '通过：慢TG发送与慢删除互不阻塞其他频道'
 
 reset_hook
 mix="$run_tag-mix"
-docker exec -i youban-postgres psql -U postgres -d youban_hotgo -X -v ON_ERROR_STOP=1 -v "run_id=$mix" -v phase=history < scenarios/mixed_load.sql >> "$output/seed.log"
+  docker exec -i youban-postgres psql -U postgres -d "$local_db_name" -X -v ON_ERROR_STOP=1 -v "run_id=$mix" -v phase=history < scenarios/mixed_load.sql >> "$output/seed.log"
 wait_count "SELECT count(*) FROM hg_youban_publish_tg_job WHERE account_id=999 AND operation_no LIKE '%:local:mix:$mix:%' AND status='sent'" 1 30
-docker exec -i youban-postgres psql -U postgres -d youban_hotgo -X -v ON_ERROR_STOP=1 -v "run_id=$mix" -v phase=live < scenarios/mixed_load.sql >> "$output/seed.log"
+docker exec -i youban-postgres psql -U postgres -d "$local_db_name" -X -v ON_ERROR_STOP=1 -v "run_id=$mix" -v phase=live < scenarios/mixed_load.sql >> "$output/seed.log"
 wait_count "SELECT count(*) FROM hg_youban_publish_tg_job WHERE account_id=999 AND operation_no LIKE '%:local:mix:$mix:%' AND status='sent'" 720 360
 sql "WITH jobs AS (SELECT *,send_deadline_at-interval '21 minutes' started_at FROM hg_youban_publish_tg_job WHERE account_id=999 AND operation_no LIKE '%:local:mix:$mix:%'), ordered AS (SELECT sent_at,lag(sent_at) OVER(PARTITION BY target_chat_id,priority ORDER BY created_at,id) previous_sent FROM jobs) SELECT json_build_object('total',(SELECT count(*) FROM jobs),'sent',(SELECT count(*) FROM jobs WHERE status='sent'),'order_violations',(SELECT count(*) FROM ordered WHERE sent_at<previous_sent),'priority_violations',(SELECT count(*) FROM jobs low WHERE low.priority>1 AND EXISTS(SELECT 1 FROM jobs manual WHERE manual.priority=1 AND manual.target_chat_id=low.target_chat_id AND manual.created_at+interval '100 milliseconds'<low.started_at AND manual.sent_at>low.started_at)),'manual_p50_seconds',(SELECT percentile_cont(.5) WITHIN GROUP(ORDER BY extract(epoch FROM sent_at-created_at)) FROM jobs WHERE priority=1),'manual_p95_seconds',(SELECT percentile_cont(.95) WITHIN GROUP(ORDER BY extract(epoch FROM sent_at-created_at)) FROM jobs WHERE priority=1))" > "$output/mixed-load.json"
 python3 -c 'import json,sys;r=json.load(open(sys.argv[1]));assert r["total"]==r["sent"]==720 and r["order_violations"]==r["priority_violations"]==0,r' "$output/mixed-load.json"

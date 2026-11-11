@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 只读核验真实角色运行后的任务集合、频道顺序、发送审计和资料投影；不修改任务状态。
 set -euo pipefail
+local_db_name="${YOUBAN_LOCAL_DB_NAME:-youban_hotgo}"
 run_id="${1:?用法：verify-runtime-round.sh run_id profiles channels}"
 profiles="${2:?缺少资料数量}"
 channels="${3:?缺少频道数量}"
@@ -16,7 +17,7 @@ elif [[ "$audit_mode" != "response" ]]; then
   echo '证据模式必须为response或any；响应丢失场景使用any验证Webhook证据' >&2
   exit 1
 fi
-result="$(docker exec youban-postgres psql -U postgres -d youban_hotgo -X -v ON_ERROR_STOP=1 -Atc "
+result="$(docker exec youban-postgres psql -U postgres -d "$local_db_name" -X -v ON_ERROR_STOP=1 -Atc "
 WITH jobs AS (
  SELECT j.* FROM hg_youban_publish_tg_job j
  WHERE j.tenant_id=999 AND j.account_id=999

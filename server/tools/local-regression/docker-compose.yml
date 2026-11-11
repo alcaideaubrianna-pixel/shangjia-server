@@ -52,7 +52,7 @@ services:
       YOUBAN_DB_PORT: "5432"
       YOUBAN_DB_USER: postgres
       YOUBAN_DB_PASSWORD: postgres
-      YOUBAN_DB_NAME: youban_hotgo
+      YOUBAN_DB_NAME: ${YOUBAN_LOCAL_DB_NAME:-youban_hotgo}
       YOUBAN_DB_DEBUG: ${YOUBAN_LOCAL_DB_DEBUG:-false}
       # 多副本压力测试时限制单实例连接池，避免扩容后耗尽本地 PG 连接数。
       YOUBAN_DB_MAX_OPEN: ${YOUBAN_LOCAL_DB_MAX_OPEN:-4}

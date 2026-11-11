@@ -2,6 +2,7 @@
 # 仅重启固定的独立本地测试Redis，不清空任何队列；验证PG恢复意图及消费者自动重连。
 set -euo pipefail
 cd "$(dirname "$0")"
+local_db_name="${YOUBAN_LOCAL_DB_NAME:-youban_hotgo}"
 tag="fault$(date +%Y%m%d%H%M%S)-$$"
 output="/tmp/youban-runtime-$tag"
 mkdir -p "$output"
@@ -10,7 +11,7 @@ cleanup() {
   if [[ -n "${crashed_worker:-}" && -n "${standby_worker:-}" ]]; then docker start "$crashed_worker" "$standby_worker" >/dev/null 2>&1 || true; fi
 }
 trap cleanup EXIT
-sql() { docker exec youban-postgres psql -U postgres -d youban_hotgo -X -v ON_ERROR_STOP=1 -Atc "$1"; }
+sql() { docker exec youban-postgres psql -U postgres -d "$local_db_name" -X -v ON_ERROR_STOP=1 -Atc "$1"; }
 wait_count() {
   local query="$1" expected="$2" deadline="$3" started="$SECONDS" value
   while (( SECONDS-started < deadline )); do
@@ -21,7 +22,7 @@ wait_count() {
   echo "故障恢复等待超时 expected=$expected actual=$value query=$query" >&2
   return 1
 }
-seed() { docker exec -i youban-postgres psql -U postgres -d youban_hotgo -X -v ON_ERROR_STOP=1 -v "run_id=$1" -v "profiles=$2" -v "channels=$3" "${@:4}" < scenarios/runtime_load.sql >> "$output/seed.log"; }
+seed() { docker exec -i youban-postgres psql -U postgres -d "$local_db_name" -X -v ON_ERROR_STOP=1 -v "run_id=$1" -v "profiles=$2" -v "channels=$3" "${@:4}" < scenarios/runtime_load.sql >> "$output/seed.log"; }
 verify() {
   wait_count "SELECT count(*) FROM hg_youban_publish_profile_state WHERE tenant_id=999 AND account_id=999 AND publish_operation_no LIKE 'profile_cycle:local:runtime:$1:%' AND COALESCE(publish_task_status,'')=''" "$2" 30
   bash verify-runtime-round.sh "$1" "$2" "$3" any > "$output/$1.json"
