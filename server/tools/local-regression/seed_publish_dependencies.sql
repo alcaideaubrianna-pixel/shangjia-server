@@ -41,9 +41,13 @@ INSERT INTO hg_youban_publish_bot(tenant_id,bot_name,bot_username,bot_token,stat
 SELECT 999,'local-hook-bot','local_hook_bot','LOCAL:TEST:TOKEN',1,now(),now()
 WHERE NOT EXISTS (SELECT 1 FROM hg_youban_publish_bot WHERE tenant_id=999 AND bot_username='local_hook_bot');
 INSERT INTO hg_youban_publish_channel(tenant_id,tg_account_id,channel_title,target_chat_id,publish_direction,status,bot_id_json,created_at,updated_at)
-SELECT 999,0,'local-hook-channel-'||g,'-100999'||lpad(g::text,6,'0'),'up',1,'[1]',now(),now()
+SELECT 999,999,'local-hook-channel-'||g,'-100999'||lpad(g::text,6,'0'),'up',1,'[1]',now(),now()
 FROM generate_series(1,100) g
 WHERE NOT EXISTS (SELECT 1 FROM hg_youban_publish_channel c WHERE c.tenant_id=999 AND c.target_chat_id='-100999'||lpad(g::text,6,'0'));
+-- 频道调度按所属账户过滤；旧夹具曾写入0，导致批次循环被账户分片查询排除。
+UPDATE hg_youban_publish_channel
+SET tg_account_id=999,updated_at=now()
+WHERE tenant_id=999 AND channel_title LIKE 'local-hook-channel-%';
 UPDATE hg_youban_publish_tg_job
 SET bot_id=(SELECT id FROM hg_youban_publish_bot WHERE tenant_id=999 AND bot_username='local_hook_bot' LIMIT 1),
     -- 先移到临时负数，避免把逻辑频道编号替换成真实主键时触发唯一索引冲突。
