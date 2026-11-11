@@ -19,6 +19,10 @@ psql -h "$pg_host" -U "$pg_user" -d postgres -v ON_ERROR_STOP=1 \
   -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='$db' AND pid<>pg_backend_pid()" >/dev/null || true
 dropdb -h "$pg_host" -U "$pg_user" --if-exists "$db"
 createdb -h "$pg_host" -U "$pg_user" "$db"
+# 业务表使用 timestamp without time zone；测试库必须和 HotGo 应用统一使用
+# Asia/Shanghai，否则 Go 写入时间与 PostgreSQL now() 会相差 8 小时。
+psql -h "$pg_host" -U "$pg_user" -d postgres -v ON_ERROR_STOP=1 \
+  -c "ALTER DATABASE \"$db\" SET timezone TO 'Asia/Shanghai'" >/dev/null
 psql -h "$pg_host" -U "$pg_user" -d "$db" -v ON_ERROR_STOP=1 -f "$schema_dump" >/dev/null
 
 # Worker 启动需要管理员和插件配置；只复制配置表，不复制历史任务。

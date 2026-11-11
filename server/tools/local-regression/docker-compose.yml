@@ -23,7 +23,7 @@ services:
     profiles: ["legacy-hook"]
     restart: unless-stopped
     environment:
-      TZ: UTC
+      TZ: Asia/Shanghai
     volumes:
       - regression_logs:/var/log/youban
       - ./testdata:/tmp/youban-testdata:ro
@@ -40,7 +40,7 @@ services:
       tgfake:
         condition: service_healthy
     environment: &local-worker-environment
-      TZ: UTC
+      TZ: Asia/Shanghai
       YOUBAN_LOCAL_REGRESSION: "1"
       YOUBAN_MODE: "product"
       YOUBAN_TELEGRAM_LOCAL_BOT_ENABLED: "1"
