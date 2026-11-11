@@ -880,6 +880,12 @@ func (s *sSysPublish) enqueueTelegramTaskWithQueue(ctx context.Context, taskType
 		asynq.MaxRetry(10),
 		asynq.Timeout(telegramPublishTaskTimeout),
 	}
+	// Stream 重复通知、Outbox 恢复和频道完成唤醒可能同时尝试入队。
+	// 使用资料任务的稳定 ID，保证同一 job 在 Asynq 中只有一个执行实体，
+	// 避免多个不同 task ID 同时争抢同一频道租约。
+	if taskType == tgTaskTypePublish {
+		options = append(options, asynq.TaskID(fmt.Sprintf("tg-publish-job-%d", jobId)))
+	}
 	if unique {
 		options = append(options, asynq.Unique(30*time.Second))
 	}
