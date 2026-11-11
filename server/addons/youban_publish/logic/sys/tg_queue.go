@@ -908,7 +908,7 @@ func (s *sSysPublish) enqueueTelegramTaskWithQueue(ctx context.Context, taskType
 		return nil
 	}
 	if err != nil {
-		return err
+		return gerror.Wrapf(err, "Asynq任务入队失败 taskType:%s queue:%s jobId:%d delay:%s", taskType, queueName, jobId, delay)
 	}
 	// 新删除通道独立于发送；删除任务不能覆盖发送任务的队列身份，否则恢复检查会认错执行者。
 	if taskType == tgTaskTypeCleanup && queueName != tgQueueNameCleanup {
