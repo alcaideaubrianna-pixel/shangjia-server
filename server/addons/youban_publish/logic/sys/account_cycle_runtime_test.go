@@ -183,6 +183,10 @@ func TestLocalAccountCycleRuntime(t *testing.T) {
 		t.Fatal("missing cycle baseline profile")
 	}
 	profileID := cycleProfile.ID
+	// 统一把基线任务标记为可循环，避免前序手工/编辑场景留下的 cycle_enabled=0 影响本用例。
+	if _, err := g.DB().Exec(ctx, "UPDATE "+publishTgJobTable+" j SET cycle_enabled=1,cycle_days=3,cycle_publish_time='23:50',next_cycle_at=NOW()-interval '1 second' WHERE j.tenant_id=999 AND j.account_id=999 AND j.profile_id=? AND j.id IN (SELECT cp.last_job_id FROM "+publishChannelProfileTable+" cp WHERE cp.profile_id=? AND cp.channel_id IN (1,2,3))", profileID, profileID); err != nil {
+		t.Fatal(err)
+	}
 	var baseline int64
 	v, err := g.DB().GetValue(ctx, "SELECT COALESCE(max(id),0) FROM "+publishTgJobTable)
 	if err != nil {
