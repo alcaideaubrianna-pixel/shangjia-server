@@ -681,6 +681,15 @@ func (s *sSysPublish) AIOpsChannelCycleRun(ctx context.Context, tenantId, channe
 	if err != nil {
 		return nil, err
 	}
+	// Time-mode channels use per-profile due plans. AI compensation must rebuild
+	// those plans from each profile's last successful send; creating a channel
+	// batch here would incorrectly enqueue every active profile.
+	if strings.EqualFold(strings.TrimSpace(channel.CyclePublishMode), "time") {
+		if err := s.rescheduleChannelProfileCycles(ctx, channel.Id); err != nil {
+			return nil, gerror.Wrap(err, "重算频道资料循环计划失败")
+		}
+		return &sysin.ChannelFullPushModel{ChannelId: channel.Id, Queued: 0, BatchNo: fmt.Sprintf("profile_cycle:repair:%d", channel.Id), Status: cycleRunStatusPending}, nil
+	}
 	var runId int64
 	var totalCount int
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
