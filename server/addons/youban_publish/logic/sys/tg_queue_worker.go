@@ -256,6 +256,7 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 		}
 	}()
 	cycleMux := asynq.NewServeMux()
+	cycleMux.HandleFunc(publishconsts.QueueAccountScheduleTask, s.handleAccountScheduleTask)
 	cycleMux.HandleFunc(tgTaskTypeCycleRun, s.handleCycleRunTask)
 	cycleMux.HandleFunc(tgTaskTypeCycleReschedule, s.handleCycleRescheduleTask)
 	cycleMux.HandleFunc(tgTaskTypeCycleRefresh, s.handleCycleRefreshTask)
