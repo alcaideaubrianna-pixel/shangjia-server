@@ -105,6 +105,7 @@ func (s *sSysPublish) rearmTelegramJobOutbox(ctx context.Context, jobId int64, d
 	if jobId <= 0 {
 		return nil
 	}
+	clearTelegramReadyStreamDedupe(ctx, jobId)
 	now := gtime.Now()
 	result, err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
 		Where("job_id", jobId).Where("event_type", telegramOutboxEventPublish).

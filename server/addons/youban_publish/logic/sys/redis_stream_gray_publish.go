@@ -14,6 +14,17 @@ import (
 	"hotgo/addons/youban_publish/library/streamgray"
 )
 
+// clearTelegramReadyStreamDedupe 重新激活任务时清理旧的传输幂等键，允许它再次进入 Stream。
+func clearTelegramReadyStreamDedupe(ctx context.Context, jobID int64) {
+	if jobID <= 0 || !cache.Initialized() {
+		return
+	}
+	for _, stream := range []string{streamgray.ReadyRealtimeStream, streamgray.ReadyBulkStream} {
+		key := fmt.Sprintf("%s%s:%d", publishconsts.TelegramReadyStreamDedupeKeyPrefix, stream, jobID)
+		_, _ = cache.Instance().Remove(ctx, key)
+	}
+}
+
 // publishTelegramReadyStream 将已持久化的任务发布为 Stream 就绪事件。
 func (s *sSysPublish) publishTelegramReadyStream(ctx context.Context, job telegramJobRecord) error {
 	// Outbox 可能被多个实例同时领取，写 Stream 前按 job+stream 做短期幂等。
