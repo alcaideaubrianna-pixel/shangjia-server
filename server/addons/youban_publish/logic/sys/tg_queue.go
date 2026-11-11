@@ -377,17 +377,24 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 	} else {
 		data["next_retry_at"] = nil
 	}
+	reserveReason := ""
 	reserved, err := s.withTelegramChannelDispatchLease(ctx, job, func(reserveCtx context.Context) (bool, error) {
 		step := beginTelegramPublishStage(reserveCtx, "dispatch.channel_order")
 		hasEarlier, orderErr := s.telegramChannelHasEarlierActiveJob(reserveCtx, job)
 		step.End(orderErr, g.Map{"hasEarlier": hasEarlier})
 		if orderErr != nil || hasEarlier {
+			if hasEarlier {
+				reserveReason = "earlier_job"
+			}
 			return false, orderErr
 		}
 		step = beginTelegramPublishStage(reserveCtx, "dispatch.channel_capacity")
 		hasCapacity, capacityErr := s.telegramChannelHasDispatchCapacity(reserveCtx, job)
 		step.End(capacityErr, g.Map{"hasCapacity": hasCapacity})
 		if capacityErr != nil || !hasCapacity {
+			if !hasCapacity {
+				reserveReason = "channel_capacity"
+			}
 			return false, capacityErr
 		}
 		result, updateErr := g.DB().Model(publishTgJobTable).Safe().Ctx(reserveCtx).
@@ -399,6 +406,9 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 			return false, updateErr
 		}
 		affected, _ := result.RowsAffected()
+		if affected == 0 {
+			reserveReason = "job_state_changed"
+		}
 		return affected > 0, nil
 	})
 	beginTelegramPublishStage(ctx, "dispatch.reserve_result").End(err, g.Map{"reserved": reserved, "targetQueue": queueName})
@@ -410,6 +420,7 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 		return gerror.Wrap(err, "锁定TG任务入队状态失败")
 	}
 	if !reserved {
+		g.Log().Infof(ctx, "TG Stream任务未入发送队列 jobId:%d reason:%s", jobId, reserveReason)
 		// Stream 事件只唤醒频道队首；非队首任务不能直接 ACK 后丢弃，
 		// 必须重新激活 Outbox，待前序任务完成后再次进入就绪流。
 		if globalStreamPushEngineEnabled() {
