@@ -52,7 +52,7 @@ reset_hook
 echo "真实角色场景开始，报告目录：$output"
 round="$run_tag-success"
 seed_round "$round" 10 100
-wait_count "SELECT count(*) FROM hg_youban_publish_tg_job WHERE $(round_filter "$round") AND status='sent'" 1000 240
+wait_count "SELECT count(*) FROM hg_youban_publish_tg_job WHERE $(round_filter "$round") AND status='sent'" 1000 "${YOUBAN_LOCAL_NORMAL_TIMEOUT:-600}"
 wait_count "SELECT count(*) FROM hg_youban_publish_profile_state WHERE tenant_id=999 AND publish_operation_no LIKE 'profile_cycle:local:runtime:$round:%' AND COALESCE(publish_task_status,'')=''" 10 30
 verify_round "$round" 10 100
 echo '通过：1000条真实发送、消息证据、频道顺序和资料投影'
