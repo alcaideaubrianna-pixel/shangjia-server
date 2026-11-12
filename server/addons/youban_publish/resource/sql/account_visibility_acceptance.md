@@ -41,6 +41,13 @@ WITH active_accounts AS (
   FROM active_accounts c
   JOIN active_accounts p ON p.id = c.parent_id AND p.tenant_id = c.tenant_id
   UNION
+  -- A tenant administrator's own scope includes every active account in the
+  -- tenant, not only direct children. This matches the tenant_scope rows.
+  SELECT admin.tenant_id, admin.id, child.id
+  FROM active_accounts admin
+  JOIN active_accounts child ON child.tenant_id = admin.tenant_id
+  WHERE admin.account_type = 'admin'
+  UNION
   SELECT f.tenant_id, f.follower_account_id, f.following_account_id
   FROM hg_youban_publish_account_follow f
   JOIN active_accounts viewer ON viewer.id = f.follower_account_id AND viewer.tenant_id = f.tenant_id
