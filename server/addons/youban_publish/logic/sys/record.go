@@ -9,6 +9,7 @@ import (
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
@@ -416,7 +417,15 @@ func (s *sSysPublish) enrichPublishRecordFullPushProgress(ctx context.Context, l
 			continue
 		}
 		value := progress[fullPushOperationBatchKey(item.OperationNo)]
+		// Keep the progress as a snapshot of this record's completion.  The
+		// previous implementation reused the current batch total for every row,
+		// so an old 1/438 record changed to 15/438 on the next refresh.
 		item.ProgressDone = value.Done
+		if item.Id > 0 && item.CreatedAt != nil {
+			if snapshot, err := s.fullPushRecordProgressSnapshot(ctx, fullPushOperationBatchKey(item.OperationNo), item.Id, item.CreatedAt); err == nil && snapshot > 0 {
+				item.ProgressDone = snapshot
+			}
+		}
 		item.ProgressTotal = value.SnapshotTotal
 		item.ProgressQueued = value.Queued
 		if value.SnapshotTotal > 0 {
@@ -424,6 +433,19 @@ func (s *sSysPublish) enrichPublishRecordFullPushProgress(ctx context.Context, l
 		}
 	}
 	return nil
+}
+
+func (s *sSysPublish) fullPushRecordProgressSnapshot(ctx context.Context, batchNo string, recordID int64, createdAt *gtime.Time) (int, error) {
+	if batchNo == "" || recordID <= 0 || createdAt == nil {
+		return 0, nil
+	}
+	value, err := g.DB().Model(publishSuccessRecordTable+" r").Safe().Ctx(ctx).
+		Where("r.operation_no >= ?", batchNo+":").
+		Where("r.operation_no < ?", batchNo+";").
+		Where("r.status", "success").
+		Where("(r.created_at < ? OR (r.created_at = ? AND r.id <= ?))", createdAt, createdAt, recordID).
+		Count()
+	return value, err
 }
 
 func fullPushOperationBatchKey(operationNo string) string {
