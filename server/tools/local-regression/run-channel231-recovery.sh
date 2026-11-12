@@ -48,10 +48,18 @@ ORDER BY p.id
 LIMIT 20;
 
 DELETE FROM hg_youban_publish_channel_profile WHERE channel_id=231;
+INSERT INTO hg_youban_publish_tg_job
+    (tenant_id,account_id,profile_id,channel_id,target_chat_id,operation_no,status,
+     priority,dispatch_status,cycle_enabled,cycle_days,push_mode,sent_at,created_at,updated_at)
+SELECT 999,999,p.id,231,'-100999000231','cycle_seed:231:'||p.id,'sent',90,'done',1,3,'cycle',NOW()-interval '4 days',NOW()-interval '4 days',NOW()
+FROM hg_youban_publish_profile_channel p
+WHERE p.channel_id=231
+  AND NOT EXISTS (SELECT 1 FROM hg_youban_publish_tg_job j WHERE j.channel_id=231 AND j.profile_id=p.profile_id AND j.operation_no='cycle_seed:231:'||p.profile_id);
 INSERT INTO hg_youban_publish_channel_profile
     (tenant_id,account_id,channel_id,profile_id,last_job_id,status,next_cycle_at,cycle_generation,created_at,updated_at)
-SELECT 999,999,231,p.id,0,'active',NOW()-interval '1 second',0,NOW(),NOW()
+SELECT 999,999,231,p.id,j.id,'active',NOW()-interval '1 second',0,NOW(),NOW()
 FROM hg_youban_publish_profile_channel p
+JOIN hg_youban_publish_tg_job j ON j.channel_id=231 AND j.profile_id=p.profile_id AND j.operation_no='cycle_seed:231:'||p.profile_id
 WHERE p.channel_id=231;
 SQL
 
