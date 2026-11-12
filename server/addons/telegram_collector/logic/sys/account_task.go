@@ -2,7 +2,6 @@ package sys
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
 
@@ -268,18 +267,34 @@ func (s *sAccountTasks) Claim(ctx context.Context, lease *sysin.AccountLease, li
 	columns := dao.TgCollectorAccountTask.Columns()
 	now := gtime.Now()
 	var candidates []*entity.TgCollectorAccountTask
-	ownerCondition := fmt.Sprintf("(%s=? OR (%s='media_download' AND %s=?))", columns.AccountId, columns.TaskType, columns.MediaOwnerAccountId)
-	err := dao.TgCollectorAccountTask.Ctx(ctx).
-		Fields(columns.Id, columns.TaskType).
-		Where(ownerCondition, lease.AccountID, lease.AccountID).
-		WhereIn(columns.Status, []string{sysin.AccountTaskStatusPending, sysin.AccountTaskStatusFailedRetry}).
-		Where("("+columns.NextRunAt+" IS NULL OR "+columns.NextRunAt+"<=?)", now).
-		Where("("+columns.LeaseUntil+" IS NULL OR "+columns.LeaseUntil+"<?)", now).
-		OrderDesc(columns.Priority).
-		Order(gdb.Raw("CASE WHEN " + columns.TaskType + " = 'media_download' THEN 1 ELSE 0 END DESC")).
-		OrderAsc(columns.NextRunAt + "," + columns.Id).
-		Limit(limit).
-		Scan(&candidates)
+	// 将 account_id 与 media_owner_account_id 两条索引路径拆开，避免 OR
+	// 让 PostgreSQL 退化成大范围扫描。第二个分支排除 account_id 相同的
+	// 媒体任务，保持原 OR 条件的去重语义。
+	table := dao.TgCollectorAccountTask.Table()
+	query := `WITH candidates AS (
+		SELECT id,task_type,priority,next_run_at
+		FROM ` + table + `
+		WHERE account_id=? AND status IN (?,?)
+		  AND (next_run_at IS NULL OR next_run_at<=?)
+		  AND (lease_until IS NULL OR lease_until<?)
+		UNION ALL
+		SELECT id,task_type,priority,next_run_at
+		FROM ` + table + `
+		WHERE media_owner_account_id=? AND task_type='media_download' AND account_id<>?
+		  AND status IN (?,?)
+		  AND (next_run_at IS NULL OR next_run_at<=?)
+		  AND (lease_until IS NULL OR lease_until<?)
+	)
+	SELECT id,task_type FROM candidates
+	ORDER BY priority DESC,
+		CASE WHEN task_type='media_download' THEN 1 ELSE 0 END DESC,
+		next_run_at ASC NULLS FIRST,id ASC
+	LIMIT ?`
+	err := g.DB().GetScan(ctx, &candidates, query,
+		lease.AccountID, sysin.AccountTaskStatusPending, sysin.AccountTaskStatusFailedRetry, now, now,
+		lease.AccountID, lease.AccountID, sysin.AccountTaskStatusPending, sysin.AccountTaskStatusFailedRetry, now, now,
+		limit,
+	)
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取待执行Telegram账号任务失败")
 	}
