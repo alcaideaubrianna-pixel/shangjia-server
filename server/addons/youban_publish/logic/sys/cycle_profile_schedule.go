@@ -543,7 +543,8 @@ func (s *sSysPublish) profileCycleDueRowsShard(ctx context.Context, limit, shard
 		model = accountScheduleModel(model, "j.tenant_id", "j.account_id", scopes)
 	}
 	if len(scopes) > 0 {
-		model = model.Where("NOT EXISTS (SELECT 1 FROM " + publishProfileCycleRunTable + " planning WHERE planning.tenant_id=j.tenant_id AND planning.account_id=j.account_id AND planning.profile_id=j.profile_id AND planning.status='pending')")
+		// 仅阻止同一账户同一资料同一频道的未完成计划，避免一个频道的投影阻塞同资料的其他频道。
+		model = model.Where("NOT EXISTS (SELECT 1 FROM " + publishProfileCycleRunTable + " planning WHERE planning.tenant_id=j.tenant_id AND planning.account_id=j.account_id AND planning.profile_id=j.profile_id AND planning.channel_id=j.channel_id AND planning.status IN ('pending','running','dispatching'))")
 		model = model.Where("c.status", 1).Where("c.cycle_publish_enabled", 1).Where("COALESCE(NULLIF(LOWER(TRIM(c.cycle_publish_mode)),''),'time')='time'").Where("c.publish_direction", "up").Where("NOT EXISTS (SELECT 1 FROM " + publishTgJobTable + " active WHERE active.tenant_id=j.tenant_id AND active.account_id=j.account_id AND active.profile_id=j.profile_id AND active.channel_id=j.channel_id AND active.status IN ('pending','sending','failed_retry','unknown'))")
 	}
 	if shard >= 0 {
