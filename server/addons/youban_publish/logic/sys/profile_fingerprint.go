@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -647,6 +648,10 @@ func (s *sSysPublish) backfillProfileFingerprints(ctx context.Context, limit int
 }
 
 func (s *sSysPublish) runProfileFingerprintBackfill(ctx context.Context) {
+	// 轻量本地回放只验证采集/循环主链路时跳过全量指纹回填，避免测试夹具触发大表扫描。
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("YOUBAN_LOCAL_SKIP_PROFILE_FINGERPRINT_BACKFILL")), "1") {
+		return
+	}
 	timer := time.NewTimer(15 * time.Second)
 	defer timer.Stop()
 	select {

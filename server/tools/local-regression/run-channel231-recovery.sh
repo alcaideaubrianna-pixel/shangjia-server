@@ -16,6 +16,7 @@ export YOUBAN_LOCAL_DB_NAME="$db"
 export YOUBAN_LOCAL_DB_MAX_OPEN="${YOUBAN_LOCAL_DB_MAX_OPEN:-4}"
 export YOUBAN_LOCAL_DB_MAX_IDLE="${YOUBAN_LOCAL_DB_MAX_IDLE:-2}"
 export YOUBAN_LOCAL_PUBLISH_REPLICAS=1
+export YOUBAN_LOCAL_SKIP_PROFILE_FINGERPRINT_BACKFILL=1
 
 # 先停止本地角色释放数据库连接，再重建隔离测试库。
 docker compose -f tools/local-regression/docker-compose.yml down --remove-orphans >/dev/null 2>&1 || true

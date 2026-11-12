@@ -42,6 +42,7 @@ services:
     environment: &local-worker-environment
       TZ: Asia/Shanghai
       YOUBAN_LOCAL_REGRESSION: "1"
+      YOUBAN_LOCAL_SKIP_PROFILE_FINGERPRINT_BACKFILL: ${YOUBAN_LOCAL_SKIP_PROFILE_FINGERPRINT_BACKFILL:-0}
       YOUBAN_MODE: "product"
       YOUBAN_TELEGRAM_LOCAL_BOT_ENABLED: "1"
       YOUBAN_PUBLISH_PUSH_ENGINE: "unified_stream"
