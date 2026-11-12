@@ -71,13 +71,11 @@ func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload co
 		batchSize = maxRows
 	}
 	now := gtime.Now()
-	eventModel := collectProcessEventModel(ctx, payload).
-		WhereIn("e.status", collectProcessWindowStatuses()).
-		// Ignored events are terminal and must never re-enter the normal window.
-		// Only an ignored verify event with the explicit unmatched marker remains
-		// eligible for the bounded verification retry path.
-		Where("((e.status <> ? AND (e.material_role IS NULL OR e.material_role = '' OR e.material_role IN (?,?))) OR (e.status = ? AND e.material_role = ? AND e.error_message = ?))", sysin.CollectEventStatusIgnored, collectMaterialRolePending, collectMaterialRoleDisplay, sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage).
-		Where("(e.processed_at IS NULL AND (e.material_group_status IS NULL OR e.material_group_status <> ? OR e.updated_at <= ?)) OR (e.status = ? AND e.material_role = ? AND e.error_message = ? AND e.updated_at <= ?)", collectMaterialGroupWaitingVerify, now.Add(-collectMaterialWaitingVerifyRetryDelay), sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage, now.Add(-collectMaterialVerifyRetryDelay))
+	// 正常窗口和验证重试窗口分开查询，避免一个来源的历史验证资料触发大范围 OR 扫描。
+	eventModel := collectMaterialWindowModel(ctx, payload, false).
+		Where("e.processed_at IS NULL").
+		Where(collectMaterialGroupReadyCondition(), collectMaterialGroupWaitingVerify).
+		Where("e.updated_at <= ? OR e.material_group_status IS NULL", now)
 	if payload.EventId > 0 {
 		eventModel = eventModel.Where("e.id", payload.EventId)
 	}
@@ -93,6 +91,16 @@ func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload co
 	if err != nil {
 		return gerror.Wrap(err, "读取采集源消息窗口失败")
 	}
+	verifyModel := collectMaterialWindowModel(ctx, payload, true).
+		Where("e.updated_at <= ?", now.Add(-collectMaterialWaitingVerifyRetryDelay))
+	if payload.EventId > 0 {
+		verifyModel = verifyModel.Where("e.id", payload.EventId)
+	}
+	verifyRows, verifyErr := verifyModel.Fields("e.*").OrderAsc("e.updated_at").OrderAsc("e.id").Limit(batchSize).All()
+	if verifyErr != nil {
+		return gerror.Wrap(verifyErr, "读取验证资料重试窗口失败")
+	}
+	rows = mergeCollectMaterialWindowRows(rows, verifyRows, batchSize)
 	if len(rows) == 0 {
 		return nil
 	}
@@ -105,6 +113,55 @@ func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload co
 		}
 	}
 	return nil
+}
+
+// collectMaterialWindowModel 构造账户和来源分片查询，隔离正常事件与验证重试事件。
+func collectMaterialWindowModel(ctx context.Context, payload collectProcessQueuePayload, verifyOnly bool) *gdb.Model {
+	model := collectProcessEventModel(ctx, payload)
+	if verifyOnly {
+		return model.Where("e.status", sysin.CollectEventStatusIgnored).
+			Where("e.material_role", collectMaterialRoleVerify).
+			Where("e.error_message", collectMaterialVerifyUnmatchedMessage)
+	}
+	return model.Where("e.status <> ?", sysin.CollectEventStatusIgnored).
+		Where("(e.material_role IS NULL OR e.material_role IN (?,?))", collectMaterialRolePending, collectMaterialRoleDisplay)
+}
+
+// collectMaterialGroupReadyCondition 在 PostgreSQL 中使用 IS DISTINCT FROM，避免 NULL OR
+// 造成 BitmapOr；其他数据库保留兼容条件。
+func collectMaterialGroupReadyCondition() string {
+	if strings.EqualFold(strings.TrimSpace(g.DB().GetConfig().Type), "pgsql") {
+		return "e.material_group_status IS DISTINCT FROM ?"
+	}
+	return "(e.material_group_status IS NULL OR e.material_group_status <> ?)"
+}
+
+// mergeCollectMaterialWindowRows 合并两个有界查询结果并按消息顺序截断，保证恢复与实时任务幂等。
+func mergeCollectMaterialWindowRows(primary, retry gdb.Result, limit int) gdb.Result {
+	seen := make(map[int64]struct{}, len(primary)+len(retry))
+	rows := make(gdb.Result, 0, len(primary)+len(retry))
+	for _, row := range append(primary, retry...) {
+		id := row["id"].Int64()
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		rows = append(rows, row)
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		left, right := rows[i]["source_message_id"].Int64(), rows[j]["source_message_id"].Int64()
+		if left == right {
+			return rows[i]["id"].Int64() < rows[j]["id"].Int64()
+		}
+		return left < right
+	})
+	if limit > 0 && len(rows) > limit {
+		rows = rows[:limit]
+	}
+	return rows
 }
 
 // processTargetCollectEventWindow processes one realtime event with only the
@@ -139,16 +196,28 @@ func (s *sSysPublish) processTargetCollectEventWindow(ctx context.Context, paylo
 func (s *sSysPublish) loadTargetCollectMaterialWindow(ctx context.Context, payload collectProcessQueuePayload, target gdb.Record, eventAt *gtime.Time) (gdb.Result, bool, error) {
 	now := gtime.Now()
 	maxRows := collectMaterialWindowMaxRows(ctx)
-	rows, err := collectProcessEventModel(ctx, payload).
-		WhereIn("e.status", collectProcessWindowStatuses()).
-		Where("((e.status <> ? AND (e.material_role IS NULL OR e.material_role = '' OR e.material_role IN (?,?))) OR (e.status = ? AND e.material_role = ? AND e.error_message = ?))", sysin.CollectEventStatusIgnored, collectMaterialRolePending, collectMaterialRoleDisplay, sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage).
-		Where("(e.processed_at IS NULL AND (e.material_group_status IS NULL OR e.material_group_status <> ? OR e.updated_at <= ?)) OR (e.status = ? AND e.material_role = ? AND e.error_message = ? AND e.updated_at <= ?)", collectMaterialGroupWaitingVerify, now.Add(-collectMaterialWaitingVerifyRetryDelay), sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage, now.Add(-collectMaterialVerifyRetryDelay)).
-		Where("e.source_message_id >= ?", target["source_message_id"].Int64()).
-		Where("COALESCE(e.received_at,e.created_at) <= ?", eventAt.Add(collectMaterialVerifyWindow())).
-		Fields("e.*").OrderAsc("e.source_message_id").OrderAsc("e.id").Limit(maxRows + 1).All()
+	load := func(verifyOnly bool) (gdb.Result, error) {
+		model := collectMaterialWindowModel(ctx, payload, verifyOnly).
+			Where("e.source_message_id >= ?", target["source_message_id"].Int64()).
+			Where("COALESCE(e.received_at,e.created_at) <= ?", eventAt.Add(collectMaterialVerifyWindow()))
+		if verifyOnly {
+			model = model.Where("e.updated_at <= ?", now.Add(-collectMaterialWaitingVerifyRetryDelay))
+		} else {
+			model = model.Where("e.processed_at IS NULL").
+				Where(collectMaterialGroupReadyCondition(), collectMaterialGroupWaitingVerify).
+				Where("e.updated_at <= ? OR e.material_group_status IS NULL", now)
+		}
+		return model.Fields("e.*").OrderAsc("e.source_message_id").OrderAsc("e.id").Limit(maxRows + 1).All()
+	}
+	primary, err := load(false)
 	if err != nil {
 		return nil, false, err
 	}
+	retry, err := load(true)
+	if err != nil {
+		return nil, false, err
+	}
+	rows := mergeCollectMaterialWindowRows(primary, retry, maxRows+1)
 	windowTruncated := len(rows) > maxRows
 	if windowTruncated {
 		rows = rows[:maxRows]
