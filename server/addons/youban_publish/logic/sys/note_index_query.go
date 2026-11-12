@@ -11,6 +11,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/model/input/form"
 )
@@ -31,7 +32,11 @@ func (s *sSysPublish) adminNoteIndexList(ctx context.Context, in *sysin.NoteList
 	if in == nil {
 		in = &sysin.NoteListInp{}
 	}
-	mod := noteIndexModel(ctx).LeftJoin(publishAccountTable+" a", "a.id=i.account_id AND a.deleted_at IS NULL")
+	// Candidate scan must stay on the narrow note-index projection. Joining the
+	// profile/state/account tables before LIMIT causes one random lookup per
+	// candidate and becomes seconds slow for collected/all scopes. The detail
+	// query below validates and enriches only the selected page IDs.
+	mod := pdao.YoubanPublishNoteIndex.Ctx(ctx).As("i").WhereNull("i.deleted_at")
 	mod = applyNoteIndexScope(mod, tenantId, tenantIds, accountIds, &in.ProfileListInp)
 	mod = applyNoteIndexFilters(mod, &in.ProfileListInp)
 	var err error
