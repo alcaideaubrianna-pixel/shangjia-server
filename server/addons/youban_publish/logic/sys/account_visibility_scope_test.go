@@ -8,7 +8,7 @@ func TestAccountVisibilityRelationTypes(t *testing.T) {
 		t.Fatalf("unexpected general visibility relations: %#v", all)
 	}
 	following := accountVisibilityRelationTypes("following")
-	if len(following) != 2 || following[0] != "following" || following[1] != "mutual" {
+	if len(following) != 3 || following[0] != "following" || following[1] != "mutual" || following[2] != "tenant_scope" {
 		t.Fatalf("unexpected following visibility relations: %#v", following)
 	}
 	// Unknown scopes use the same broad set as mine/all; validation of the
@@ -33,7 +33,7 @@ func TestAccountVisibilityScopeFixtureRelations(t *testing.T) {
 	// This fixture mirrors the production projection: the viewer can see
 	// itself, a managed account, a followed account, a mutual account, and the
 	// accounts of a followed tenant administrator. Following scope deliberately
-	// excludes self/managed while retaining direct and mutual follows.
+	// excludes self/managed while retaining direct, mutual, and tenant scope.
 	rows := []struct {
 		id       int64
 		relation string
@@ -55,7 +55,7 @@ func TestAccountVisibilityScopeFixtureRelations(t *testing.T) {
 	for _, relation := range accountVisibilityRelationTypes("following") {
 		followingAllowed[relation] = true
 	}
-	if followingAllowed["self"] || followingAllowed["managed"] || followingAllowed["tenant_scope"] {
+	if followingAllowed["self"] || followingAllowed["managed"] {
 		t.Fatalf("following scope leaked non-follow relations: %#v", followingAllowed)
 	}
 	if !followingAllowed["following"] || !followingAllowed["mutual"] {

@@ -305,7 +305,9 @@ func accountVisibilityReadModelScope(ctx context.Context, tenantID, viewerID int
 
 func accountVisibilityRelationTypes(scope string) []string {
 	if strings.TrimSpace(scope) == "following" {
-		return []string{"following", "mutual"}
+		// Following a tenant administrator expands to that tenant's active
+		// accounts, represented by tenant_scope edges.
+		return []string{"following", "mutual", "tenant_scope"}
 	}
 	return []string{"self", "managed", "tenant_scope", "following", "mutual"}
 }
