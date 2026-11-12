@@ -2,8 +2,6 @@ package sys
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -82,25 +80,19 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 		} else if job.ChannelId > 0 {
 			fast = fast.Where("j.channel_id", job.ChannelId)
 		}
-		var earlier struct {
-			Id             int64       `orm:"id"`
-			CreatedAt      *gtime.Time `orm:"created_at"`
-			Priority       int         `orm:"priority"`
-			Status         string      `orm:"status"`
-			DispatchStatus string      `orm:"dispatch_status"`
-			OperationNo    string      `orm:"operation_no"`
-		}
-		if err := fast.Fields("j.id,j.created_at,j.priority,j.status,j.dispatch_status,j.operation_no").OrderAsc("j.created_at").OrderAsc("j.id").Limit(1).Scan(&earlier); err != nil {
-			// 没有前序任务是正常的队首状态，不能把 sql.ErrNoRows 当成调度失败。
-			if errors.Is(err, sql.ErrNoRows) || errors.Is(gerror.Cause(err), sql.ErrNoRows) || strings.Contains(strings.ToLower(err.Error()), "sql: no rows in result set") {
-				return false, nil
-			}
+		earlier, err := fast.Fields("j.id,j.created_at,j.priority,j.status,j.dispatch_status,j.operation_no").OrderAsc("j.created_at").OrderAsc("j.id").Limit(1).One()
+		if err != nil {
 			return false, gerror.Wrap(err, "检查统一流频道前序TG任务失败")
 		}
-		if earlier.Id > 0 {
-			g.Log().Info(ctx, "TG统一流频道队首命中前序任务", g.Map{"currentJobId": job.Id, "earlierJobId": earlier.Id, "earlierStatus": earlier.Status})
+		// One 返回空记录表示没有前序任务，这是正常的队首状态，不应触发退避。
+		if earlier.IsEmpty() {
+			return false, nil
 		}
-		return earlier.Id > 0, nil
+		earlierId := earlier["id"].Int64()
+		if earlierId > 0 {
+			g.Log().Info(ctx, "TG统一流频道队首命中前序任务", g.Map{"currentJobId": job.Id, "earlierJobId": earlierId, "earlierStatus": earlier["status"].String()})
+		}
+		return earlierId > 0, nil
 	}
 	// A destination channel is a single ordered stream. Source message IDs are
 	// only comparable within one source channel, so using them here lets jobs
