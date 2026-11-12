@@ -316,6 +316,12 @@ func accountVisibilityRelationTypes(scope string) []string {
 // resolver remains authoritative until all relation mutation paths have been
 // deployed and production parity is proven.
 func compareAccountVisibilityReadModel(ctx context.Context, account *sysin.AccountModel, scope *adminProfileVisibleScope) {
+	// Keep the parity query fully opt-in. The read model is disabled by default;
+	// running a second unfiltered visibility query on every list request defeats
+	// the fast path and can dominate latency for large tenants.
+	if !g.Cfg().MustGet(ctx, "youbanPublish.accountVisibilityReadModelEnabled", false).Bool() {
+		return
+	}
 	if account == nil || scope == nil || account.Id <= 0 || scope.TenantId <= 0 || len(scope.TenantIds) > 0 {
 		return
 	}
