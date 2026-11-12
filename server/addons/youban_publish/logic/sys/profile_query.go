@@ -253,23 +253,24 @@ func (s *sSysPublish) adminNoteList(ctx context.Context, in *sysin.NoteListInp, 
 		return nil, err
 	}
 	logSlowAdminNoteListStage(ctx, "profile_query", startedAt, len(profiles), boolToInt(hasMore))
-	// These enrichments read independent tables and write disjoint fields on the
-	// page models. Running them concurrently removes the previous critical path
-	// of uuid -> tags -> collection metadata -> cover media.
+	// UUID assignment is in-memory. Resolve the shared tag cache before opening
+	// the two database-heavy enrichment queries; otherwise a cold tag cache can
+	// consume a third pool connection and make the list request wait behind its
+	// own enrichment work.
+	stageStartedAt := time.Now()
+	if err = s.ensureProfileListUUID(ctx, profiles); err != nil {
+		return nil, err
+	}
+	logSlowAdminNoteListStage(ctx, "profile_uuid", stageStartedAt, len(profiles), 0)
+	stageStartedAt = time.Now()
+	if err = s.applyProfileTagNames(ctx, profiles); err != nil {
+		return nil, err
+	}
+	logSlowAdminNoteListStage(ctx, "tag_names", stageStartedAt, len(profiles), 0)
+	// Collection metadata and cover media remain independent and are the only
+	// concurrent database operations for this response.
 	var mediaBuckets map[int64][]*sysin.AdminNoteMediaModel
 	group, groupCtx := errgroup.WithContext(ctx)
-	group.Go(func() error {
-		stageStartedAt := time.Now()
-		err := s.ensureProfileListUUID(groupCtx, profiles)
-		logSlowAdminNoteListStage(groupCtx, "profile_uuid", stageStartedAt, len(profiles), 0)
-		return err
-	})
-	group.Go(func() error {
-		stageStartedAt := time.Now()
-		err := s.applyProfileTagNames(groupCtx, profiles)
-		logSlowAdminNoteListStage(groupCtx, "tag_names", stageStartedAt, len(profiles), 0)
-		return err
-	})
 	group.Go(func() error {
 		stageStartedAt := time.Now()
 		err := s.applyProfileCollectionMetadataWithOptions(groupCtx, profiles, false)
