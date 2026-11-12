@@ -17,6 +17,8 @@ export YOUBAN_LOCAL_DB_MAX_OPEN="${YOUBAN_LOCAL_DB_MAX_OPEN:-4}"
 export YOUBAN_LOCAL_DB_MAX_IDLE="${YOUBAN_LOCAL_DB_MAX_IDLE:-2}"
 export YOUBAN_LOCAL_PUBLISH_REPLICAS=1
 
+# 先停止本地角色释放数据库连接，再重建隔离测试库。
+docker compose -f tools/local-regression/docker-compose.yml down --remove-orphans >/dev/null 2>&1 || true
 ./tools/local-regression/reset-tgfake-db.sh
 
 # 使用 231 作为本地目标频道 ID，复用少量真实结构的资料映射；不导入线上正文或历史任务。
