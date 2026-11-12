@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	publishconsts "hotgo/addons/youban_publish/consts"
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	pdo "hotgo/addons/youban_publish/internal/model/do"
 	"hotgo/addons/youban_publish/model/input/sysin"
@@ -146,6 +149,16 @@ func (s *sSysPublish) upsertCollectChannel(ctx context.Context, tenantID int64, 
 }
 
 func (s *sSysPublish) touchCollectBotChannel(ctx context.Context, tenantID, botID int64, chatID string, now *gtime.Time) error {
+	chatID = normalizeTelegramChannelChatID(chatID)
+	if tenantID <= 0 || botID <= 0 || chatID == "" {
+		return nil
+	}
+	// 高频频道消息只需短窗口内触碰一次关系表；状态变化由独立的
+	// membership 流程写库，不经过此去重，因此不会丢失离开/权限变更。
+	touchKey := fmt.Sprintf("%s%d:%d:%s", publishconsts.CollectBotChannelTouchKeyPrefix, tenantID, botID, chatID)
+	if ok, cacheErr := cache.Instance().SetIfNotExist(ctx, touchKey, 1, botChannelTouchTTL()); cacheErr == nil && !ok {
+		return nil
+	}
 	var channel struct {
 		Id int64 `json:"id"`
 	}
@@ -193,6 +206,17 @@ func (s *sSysPublish) touchCollectBotChannel(ctx context.Context, tenantID, botI
 		}).Update()
 	}
 	return err
+}
+
+func botChannelTouchTTL() time.Duration {
+	seconds, err := strconv.Atoi(strings.TrimSpace(os.Getenv("YOUBAN_PUBLISH_BOT_CHANNEL_TOUCH_TTL")))
+	if err != nil || seconds < 1 {
+		seconds = 5
+	}
+	if seconds > 60 {
+		seconds = 60
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 func (s *sSysPublish) AdminBotChannelCacheList(ctx context.Context, in *sysin.BotChannelCacheListInp) (list []*sysin.BotChannelCacheModel, totalCount int, err error) {

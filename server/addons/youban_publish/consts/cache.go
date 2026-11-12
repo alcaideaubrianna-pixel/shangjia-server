@@ -11,6 +11,7 @@ const (
 	CollectProcessThrottleKeyPrefix     = "youban_publish:collect:process:throttle:"
 	CollectMediaRecoveryKeyPrefix       = "youban_publish:collect:media:recovery:"
 	CollectMediaCompletionKeyPrefix     = "youban_publish:collect:media:completion:"
+	CollectBotChannelTouchKeyPrefix     = "youban_publish:collect:bot_channel:touch:"
 	DuplicateScanSessionKeyPrefix       = "youban_publish:duplicate_scan:session:"
 	DuplicateScanBatchKeyPrefix         = "youban_publish:duplicate_scan:batch:"
 	DuplicateScanWorkKeyPrefix          = "youban_publish:duplicate_scan:work:"
