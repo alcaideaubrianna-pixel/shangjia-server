@@ -192,6 +192,8 @@ func (s *sCollector) processEvent(ctx context.Context, eventID int64) error {
 	if err = dao.TgCollectorEvent.Ctx(ctx).WherePri(eventID).Scan(&row); err != nil {
 		return s.failEvent(ctx, eventID, err)
 	}
+	pipelineStarted := time.Now()
+	logCollectorPipelineStage(ctx, &row, "event.loaded", pipelineStarted, nil, nil)
 	if row.RawUpdate == nil {
 		return s.failEvent(ctx, eventID, gerror.New("Telegram原始事件为空"))
 	}
@@ -200,14 +202,17 @@ func (s *sCollector) processEvent(ctx context.Context, eventID int64) error {
 	if err != nil {
 		return s.failEvent(ctx, eventID, err)
 	}
+	logCollectorPipelineStage(ctx, &row, "delivery.parsed", pipelineStarted, &delivery, nil)
 	deliveryID, err := s.saveDelivery(ctx, &delivery)
 	if err != nil {
 		return s.failEvent(ctx, eventID, err)
 	}
 	delivery.ID = deliveryID
+	logCollectorPipelineStage(ctx, &row, "delivery.persisted", pipelineStarted, &delivery, nil)
 	if err = s.enqueueDeliveryTask(ctx, deliveryID, deliveryPriority(&delivery)); err != nil {
 		return s.failEvent(ctx, eventID, err)
 	}
+	logCollectorPipelineStage(ctx, &row, "delivery.enqueued", pipelineStarted, &delivery, nil)
 	_, err = dao.TgCollectorEvent.Ctx(ctx).WherePri(eventID).Data(g.Map{
 		columns.Status:       sysin.EventStatusReady,
 		columns.ProcessedAt:  gtime.Now(),
@@ -216,7 +221,36 @@ func (s *sCollector) processEvent(ctx context.Context, eventID int64) error {
 		columns.ErrorMessage: "",
 		columns.UpdatedAt:    gtime.Now(),
 	}).Update()
+	logCollectorPipelineStage(ctx, &row, "event.ready", pipelineStarted, &delivery, err)
 	return err
+}
+
+// logCollectorPipelineStage 输出采集到分发的统一链路字段，便于按事件/账户/来源追踪耗时。
+func logCollectorPipelineStage(ctx context.Context, row *entity.TgCollectorEvent, stage string, started time.Time, delivery *sysin.CollectorDelivery, err error) {
+	if row == nil {
+		return
+	}
+	fields := g.Map{
+		"log_type": "telegram_collect_pipeline", "event": "collect_pipeline_stage", "stage": stage,
+		"eventId": row.Id, "tenantId": row.TenantId, "accountId": row.AccountId,
+		"sourceId": row.SourceId, "sourceType": row.SourceType, "sourceChatId": row.ChatId,
+		"sourceMessageId": row.MessageId, "durationMs": time.Since(started).Milliseconds(),
+	}
+	if row.CreatedAt != nil {
+		fields["eventAgeMs"] = time.Since(row.CreatedAt.Time).Milliseconds()
+	}
+	if delivery != nil {
+		fields["history"] = delivery.History
+		fields["deliveryId"] = delivery.ID
+		fields["deliverySourceChatId"] = delivery.SourceChatID
+		fields["deliverySourceMessageId"] = delivery.SourceMessageID
+		fields["mediaCount"] = len(delivery.Media)
+		fields["textLength"] = len([]rune(delivery.RawText))
+	}
+	if err != nil {
+		fields["error"] = err.Error()
+	}
+	g.Log().Info(ctx, "Telegram采集链路阶段", fields)
 }
 
 func collectorDeliveryFromEvent(row *entity.TgCollectorEvent, raw []byte) (sysin.CollectorDelivery, error) {
