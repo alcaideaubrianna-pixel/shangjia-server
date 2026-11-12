@@ -51,13 +51,23 @@ func ensureCollectProcessOutbox(ctx context.Context, payload collectProcessQueue
              history=COALESCE(` + collectProcessOutboxTable + `.history,EXCLUDED.history)`
 		if payload.Recovery && payload.OutboxOwner == "" {
 			query += ` WHERE ` + collectProcessOutboxTable + `.status='delivered'`
+		} else if !payload.Recovery {
+			// 正常入队必须保持已完成事件的终态。重复收到媒体完成、验证完成或
+			// webhook 通知时，不能把 delivered Outbox 重新改成 pending，
+			// 否则会造成重复处理并放大采集压力。
+			query += ` WHERE ` + collectProcessOutboxTable + `.status<>'delivered'`
 		}
 	} else {
 		query = `INSERT INTO ` + collectProcessOutboxTable + `
             (event_id,tenant_id,account_id,source_id,source_chat_id,status,available_at,created_at,updated_at,history)
             VALUES (?,?,?,?,?,'pending',?,?,?,?) ON DUPLICATE KEY UPDATE tenant_id=VALUES(tenant_id),
-            account_id=VALUES(account_id),source_id=VALUES(source_id),source_chat_id=VALUES(source_chat_id),
-            history=COALESCE(history,VALUES(history)),status='pending',available_at=VALUES(available_at),lease_owner='',lease_expires_at=NULL,last_error='',updated_at=VALUES(updated_at)`
+			account_id=VALUES(account_id),source_id=VALUES(source_id),source_chat_id=VALUES(source_chat_id),
+			history=COALESCE(history,VALUES(history)),
+			status=IF(status='delivered',status,'pending'),
+			available_at=IF(status='delivered',available_at,VALUES(available_at)),
+			lease_owner=IF(status='delivered',lease_owner,''),
+			lease_expires_at=IF(status='delivered',lease_expires_at,NULL),
+			last_error=IF(status='delivered',last_error,''),updated_at=VALUES(updated_at)`
 	}
 	if _, err := g.DB().Exec(ctx, query, args...); err != nil {
 		return gerror.Wrap(err, "保存采集处理Outbox失败")
