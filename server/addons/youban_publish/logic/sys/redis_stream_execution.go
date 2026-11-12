@@ -121,7 +121,9 @@ func (s *sSysPublish) runTelegramStreamExecutionRecovery(ctx context.Context) {
 
 // recoverMissingTelegramStreamTasks 用Asynq自身检查能力确认队列任务缺失，再恢复PG通知意图；游标避免正常旧任务挡住后续恢复。
 func (s *sSysPublish) recoverMissingTelegramStreamTasks(ctx context.Context, afterID int64, limit int) (int64, error) {
-	var jobs []telegramJobRecord
+	// GoFrame 对带别名字段的动态模型扫描要求使用指针元素切片。
+	// 使用 []*telegramJobRecord 避免运行时将切片误判为非结构体参数，导致 Stream 恢复消费者反复重连。
+	var jobs []*telegramJobRecord
 	cutoff := gtime.Now().Add(-telegramStreamExecutionTTL)
 	query := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).Fields("j.*").
 		WhereGT("j.id", afterID).WhereIn("j.status", []string{telegramJobStatusPending, telegramJobStatusRetryWait}).
@@ -141,7 +143,11 @@ func (s *sSysPublish) recoverMissingTelegramStreamTasks(ctx context.Context, aft
 	inspector := asynq.NewInspector(options)
 	defer inspector.Close()
 	cursor := afterID
-	for _, job := range jobs {
+	for _, jobPtr := range jobs {
+		if jobPtr == nil {
+			continue
+		}
+		job := *jobPtr
 		if ctx.Err() != nil {
 			return cursor, ctx.Err()
 		}
