@@ -10,11 +10,36 @@ import (
 	_ "github.com/gogf/gf/contrib/drivers/pgsql/v2"
 	_ "github.com/gogf/gf/contrib/nosql/redis/v2"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 
 	_ "hotgo/addons/youban_tg_bot_gateway/logic/sys"
 	"hotgo/internal/bootstrap/envconfig"
 	"hotgo/internal/library/cache"
 )
+
+func TestTelegramPublishTraceTimingAndOperationCategory(t *testing.T) {
+	start := gtime.New("2026-11-13 10:00:00")
+	end := gtime.New("2026-11-13 10:00:01.250")
+	if got := telegramPublishElapsedMs(start, end); got != 1250 {
+		t.Fatalf("dispatchAgeMs=%d, want 1250", got)
+	}
+	if got := telegramPublishElapsedMs(end, start); got != 0 {
+		t.Fatalf("negative duration=%d, want 0", got)
+	}
+	cases := map[string]string{
+		"collect:1:2":       "collect",
+		"cycle_batch:1:2:3": "cycle_batch",
+		"profile_cycle:1":   "cycle",
+		"quick_push:1":      "manual",
+		"edit:1":            "edit",
+		"unknown":           "other",
+	}
+	for operation, want := range cases {
+		if got := telegramPublishOperationCategory(operation); got != want {
+			t.Errorf("operation=%q category=%q, want %q", operation, got, want)
+		}
+	}
+}
 
 // Explicitly opt-in. This invokes preparation only: no queue consumers,
 // account sessions, attempts, Telegram sends or job state mutations.

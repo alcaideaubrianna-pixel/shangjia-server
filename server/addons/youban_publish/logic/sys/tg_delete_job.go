@@ -74,7 +74,10 @@ func (s *sSysPublish) telegramJobById(ctx context.Context, jobId int64) (telegra
 	}
 	// 发送任务必须从主库读取：Outbox/队列可能已由主库提交，读副本延迟会把
 	// 一个真实存在的任务误判为 sql.ErrNoRows，进而反复重试并阻塞频道队首。
-	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Master().Where("id", jobId).Scan(&job); err != nil {
+	// 读取 Job 时一次关联已落库的采集事件，避免每个埋点阶段重复查询。
+	if err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).Master().
+		LeftJoin(publishCollectEventTable+" e", "e.id=j.collect_event_id AND e.tenant_id=j.tenant_id").
+		Fields("j.*,e.received_at AS original_telegram_at,e.source_type AS collect_source_type").Where("j.id", jobId).Scan(&job); err != nil {
 		return job, gerror.Wrap(err, "读取TG任务失败")
 	}
 	if job.Id <= 0 {

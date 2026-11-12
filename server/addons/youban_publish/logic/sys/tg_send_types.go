@@ -85,6 +85,7 @@ type telegramJobRecord struct {
 	CollectSourceId        int64       `json:"collectSourceId"`
 	CollectSourceChatId    string      `json:"collectSourceChatId"`
 	CollectSourceMessageId int64       `json:"collectSourceMessageId"`
+	CollectSourceType      string      `json:"collectSourceType" orm:"collect_source_type"`
 	RetryCount             int         `json:"retryCount"`
 	Priority               int         `json:"priority"`
 	AsynqTaskId            string      `json:"asynqTaskId"`
@@ -103,9 +104,11 @@ type telegramJobRecord struct {
 	CyclePublishTime       string      `json:"cyclePublishTime"`
 	NextCycleAt            *gtime.Time `json:"nextCycleAt"`
 	CreatedAt              *gtime.Time `json:"createdAt"`
-	VerifyMediaCount       int         `json:"verifyMediaCount"`
-	SendDeadlineAt         *gtime.Time `json:"sendDeadlineAt"`
-	TimeoutParentJobId     int64       `json:"timeoutParentJobId"`
-	TimeoutCleanupAt       *gtime.Time `json:"timeoutCleanupAt"`
-	TimeoutRetryCount      int         `json:"timeoutRetryCount"`
+	// 原始 Telegram 时间由采集事件保存，和 Job 创建时间分开记录。
+	OriginalTelegramAt *gtime.Time `json:"originalTelegramAt" orm:"original_telegram_at"`
+	VerifyMediaCount   int         `json:"verifyMediaCount"`
+	SendDeadlineAt     *gtime.Time `json:"sendDeadlineAt"`
+	TimeoutParentJobId int64       `json:"timeoutParentJobId"`
+	TimeoutCleanupAt   *gtime.Time `json:"timeoutCleanupAt"`
+	TimeoutRetryCount  int         `json:"timeoutRetryCount"`
 }

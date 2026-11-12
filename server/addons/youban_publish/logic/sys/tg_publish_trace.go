@@ -139,15 +139,51 @@ func telegramPublishTraceContext(ctx context.Context, jobId int64, fields ...g.M
 }
 
 func telegramPublishJobTraceContext(ctx context.Context, job telegramJobRecord) context.Context {
+	dispatchAgeMs := telegramPublishElapsedMs(job.CreatedAt, job.DispatchedAt)
+	queueAgeMs := telegramPublishTimestampAge(job.CreatedAt)
+	originalAgeMs := telegramPublishTimestampAge(job.OriginalTelegramAt)
 	return telegramPublishTraceContext(ctx, job.Id, g.Map{
 		"tenantId": job.TenantId, "accountId": job.AccountId, "profileId": job.ProfileId,
 		"channelId": job.ChannelId, "botId": job.BotId, "targetChatId": job.TargetChatId,
 		"operationNo": job.OperationNo, "operationType": job.OperationType,
 		"collectEventId": job.CollectEventId, "collectSourceId": job.CollectSourceId,
-		"jobStatus": job.Status, "dispatchStatus": job.DispatchStatus, "sendPhase": job.SendPhase,
-		"jobAgeMs":      telegramPublishTimestampAge(job.CreatedAt),
-		"dispatchAgeMs": telegramPublishTimestampAge(job.DispatchedAt),
+		"sourceType": job.CollectSourceType, "sourceChatId": job.CollectSourceChatId,
+		"sourceMessageId": job.CollectSourceMessageId,
+		"jobStatus":       job.Status, "dispatchStatus": job.DispatchStatus, "sendPhase": job.SendPhase,
+		"jobAgeMs": queueAgeMs, "queueAgeMs": queueAgeMs,
+		"dispatchAgeMs": dispatchAgeMs, "originalTelegramAt": job.OriginalTelegramAt,
+		"originalTelegramAgeMs": originalAgeMs,
+		"operationCategory":     telegramPublishOperationCategory(job.OperationNo),
 	})
+}
+
+func telegramPublishElapsedMs(start, end *gtime.Time) int64 {
+	if start == nil || end == nil {
+		return 0
+	}
+	value := end.Time.Sub(start.Time).Milliseconds()
+	if value < 0 {
+		return 0
+	}
+	return value
+}
+
+func telegramPublishOperationCategory(operationNo string) string {
+	value := strings.ToLower(strings.TrimSpace(operationNo))
+	switch {
+	case strings.HasPrefix(value, "collect:"):
+		return "collect"
+	case strings.HasPrefix(value, "cycle_batch:"):
+		return "cycle_batch"
+	case strings.HasPrefix(value, "profile_cycle:"):
+		return "cycle"
+	case strings.HasPrefix(value, "quick_push:"), strings.HasPrefix(value, "message_push:"), strings.HasPrefix(value, "full_push:"):
+		return "manual"
+	case strings.HasPrefix(value, "edit:"), strings.HasPrefix(value, "profile:"):
+		return "edit"
+	default:
+		return "other"
+	}
 }
 
 type telegramPublishStage struct {
