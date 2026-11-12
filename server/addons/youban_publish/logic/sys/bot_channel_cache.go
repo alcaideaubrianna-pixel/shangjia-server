@@ -177,11 +177,20 @@ func (s *sSysPublish) touchCollectBotChannel(ctx context.Context, tenantID, botI
 	var sources []struct {
 		Id int64 `json:"id"`
 	}
-	if err = g.DB().Model(publishCollectSourceTable).Ctx(ctx).Fields("id").Where("tenant_id", tenantID).Where("bot_id", botID).WhereIn("source_chat_id", tgChannelCacheLookupIds(chatID)).WhereNull("deleted_at").Scan(&sources); err != nil {
+	// 来源配置可能在历史迁移中丢失字段；这里只允许来源频道或已存在的频道主键
+	// 精确匹配，不能用“两个字段都为空”兜底，否则同一 Bot 下多个异常来源会误绑定。
+	if err = g.DB().Model(publishCollectSourceTable).Ctx(ctx).Fields("id").
+		Where("tenant_id", tenantID).Where("bot_id", botID).
+		Where("(source_chat_id IN (?) OR channel_id = ?)", tgChannelCacheLookupIds(chatID), channel.Id).
+		WhereNull("deleted_at").Scan(&sources); err != nil {
 		return err
 	}
 	for _, source := range sources {
-		_, _ = g.DB().Model(publishCollectSourceTable).Ctx(ctx).Where("id", source.Id).Where("channel_id", 0).Data(g.Map{"channel_id": channel.Id, "updated_at": now}).Update()
+		_, _ = g.DB().Model(publishCollectSourceTable).Ctx(ctx).Where("id", source.Id).Data(g.Map{
+			"source_chat_id": chatID,
+			"channel_id":     channel.Id,
+			"updated_at":     now,
+		}).Update()
 	}
 	return err
 }
