@@ -11,6 +11,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/util/guid"
 
+	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/utility/dbtime"
 )
 
@@ -77,6 +78,20 @@ func completeCollectProcessOutbox(ctx context.Context, payload collectProcessQue
 	eventID := payload.EventId
 	if eventID <= 0 || payload.OutboxOwner == "" {
 		return
+	}
+	// Outbox 完成只代表处理函数返回，必须同时核对事件终态和分发记录，
+	// 及时暴露“Outbox delivered 但事件仍停在中间状态”的采集链路故障。
+	var event struct {
+		Status string `json:"status"`
+	}
+	if err := g.DB().Model(publishCollectEventTable).Ctx(ctx).Fields("status").Where("id", eventID).Scan(&event); err == nil {
+		dispatchCount, countErr := g.DB().Model(publishCollectDispatchTable).Ctx(ctx).Where("event_id", eventID).Count()
+		if countErr == nil {
+			terminal := event.Status == sysin.CollectEventStatusProcessed || event.Status == sysin.CollectEventStatusDispatched || event.Status == sysin.CollectEventStatusIgnored || event.Status == sysin.CollectEventStatusFailed
+			if !terminal && dispatchCount == 0 {
+				g.Log().Warningf(ctx, "采集Outbox完成但事件未进入终态 eventId:%d status:%s dispatchCount:%d sourceId:%d accountId:%d sourceChatId:%s", eventID, event.Status, dispatchCount, payload.SourceId, payload.AccountId, payload.SourceChatId)
+			}
+		}
 	}
 	if _, err := g.DB().Model(collectProcessOutboxTable).Ctx(ctx).Where("event_id", eventID).Where("status", "processing").Where("lease_owner", payload.OutboxOwner).Data(g.Map{
 		"status": "delivered", "lease_owner": "", "lease_expires_at": nil,
