@@ -90,6 +90,17 @@ func completeCollectProcessOutbox(ctx context.Context, payload collectProcessQue
 			terminal := event.Status == sysin.CollectEventStatusProcessed || event.Status == sysin.CollectEventStatusDispatched || event.Status == sysin.CollectEventStatusIgnored || event.Status == sysin.CollectEventStatusFailed
 			if !terminal && dispatchCount == 0 {
 				g.Log().Warningf(ctx, "采集Outbox完成但事件未进入终态 eventId:%d status:%s dispatchCount:%d sourceId:%d accountId:%d sourceChatId:%s", eventID, event.Status, dispatchCount, payload.SourceId, payload.AccountId, payload.SourceChatId)
+				// 处理函数提前返回但没有写入终态时，保留 Outbox 作为恢复入口，
+				// 避免 delivered 掩盖业务事件永久停在 media_ready/pending。
+				_, retryErr := g.DB().Model(collectProcessOutboxTable).Ctx(ctx).
+					Where("event_id", eventID).Where("status", "processing").Where("lease_owner", payload.OutboxOwner).
+					Data(g.Map{"status": "pending", "lease_owner": "", "lease_expires_at": nil,
+						"available_at": gtime.Now().Add(10 * time.Second), "last_error": "业务事件未进入终态，自动恢复重试",
+						"attempt_count": gdbRawIncrement(), "updated_at": gtime.Now()}).Update()
+				if retryErr != nil {
+					g.Log().Warningf(ctx, "采集Outbox异常收口后重新入队失败 eventId:%d err:%+v", eventID, retryErr)
+				}
+				return
 			}
 		}
 	}
