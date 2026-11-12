@@ -36,6 +36,14 @@ func refreshAccountVisibilityAccountEdge(ctx context.Context, tenantID, accountI
 	}
 	if active {
 		now := gtime.Now()
+		// An account transfer can change parent_id. Remove the old managed edge
+		// before writing the new one so the previous administrator does not keep
+		// seeing the account through the read model.
+		if _, err := g.DB().Model(accountVisibilityReadModelTable).Ctx(ctx).
+			Where("tenant_id", tenantID).Where("visible_account_id", accountID).
+			Where("relation_type", "managed").Delete(); err != nil {
+			return err
+		}
 		_, err := g.DB().Model(accountVisibilityReadModelTable).Ctx(ctx).Data(g.Map{
 			"tenant_id": tenantID, "viewer_account_id": accountID, "visible_account_id": accountID,
 			"relation_type": "self", "updated_at": now,
