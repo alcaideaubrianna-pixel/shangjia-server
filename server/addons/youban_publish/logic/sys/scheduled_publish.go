@@ -74,21 +74,27 @@ func (s *sSysPublish) submitDuePublishTasks(ctx context.Context, scopes ...publi
 		operationNo := fmt.Sprintf("scheduled:%d:%d", item.ProfileId, item.PublishAt.TimestampNano())
 		if err = s.submitProfilePublish(ctx, item.ProfileId, item.TenantId, item.AccountId, item.AccountId, operationNo, nil, false); err != nil {
 			if errors.Is(err, errNoTelegramPublishChannels) || errors.Is(err, errTelegramPublishPermissionPaused) {
-				if clearErr := s.clearInvalidScheduledPublish(ctx, item); clearErr != nil {
-					g.Log().Warningf(ctx, "清除无频道定时上架计划失败 tenantId:%d accountId:%d profileId:%d publishAt:%s err:%+v", item.TenantId, item.AccountId, item.ProfileId, item.PublishAt.String(), clearErr)
-				} else {
-					g.Log().Warningf(ctx, "定时上架资料无可推送频道，已终止本次计划 tenantId:%d accountId:%d profileId:%d publishAt:%s reason:%s", item.TenantId, item.AccountId, item.ProfileId, item.PublishAt.String(), err.Error())
-				}
+				// 计划投影必须保留，等待频道恢复后重试；清空 publish_at 会让资料永久失去循环入口。
+				g.Log().Warningf(ctx, "定时上架资料暂未生成任务，保留计划等待重试 tenantId:%d accountId:%d profileId:%d publishAt:%s reason:%s", item.TenantId, item.AccountId, item.ProfileId, item.PublishAt.String(), err.Error())
 				continue
 			}
 			g.Log().Warningf(ctx, "提交到期上架资料失败 profile:%d err:%+v", item.ProfileId, err)
 			continue
 		}
+		// 提交成功后才推进计划；循环资料写入下一次到期时间，单次定时任务才清空。
+		nextPublishAt := any(nil)
+		var cycleDays int
+		if value, cycleErr := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).Where("tenant_id", item.TenantId).Where("status", 1).Where("publish_direction", "up").Where("cycle_publish_enabled", 1).Where("cycle_publish_days > 0").Fields("MIN(cycle_publish_days)").Value(); cycleErr == nil && !value.IsNil() {
+			cycleDays = value.Int()
+		}
+		if cycleDays > 0 {
+			nextPublishAt = gtime.Now().Add(time.Duration(cycleDays) * 24 * time.Hour)
+		}
 		_, _ = g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
 			Where("tenant_id", item.TenantId).Where("account_id", item.AccountId).
 			Where("profile_id", item.ProfileId).
 			Where("publish_at", item.PublishAt).
-			Data(g.Map{"publish_at": nil, "updated_at": gtime.Now()}).Update()
+			Data(g.Map{"publish_at": nextPublishAt, "updated_at": gtime.Now()}).Update()
 	}
 	return nil
 }
