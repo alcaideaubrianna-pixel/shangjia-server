@@ -2,7 +2,6 @@ package sys
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -572,12 +571,18 @@ func logSlowAdminNoteListStage(ctx context.Context, stage string, startedAt time
 	if duration < 100*time.Millisecond {
 		return
 	}
-	message := fmt.Sprintf("上架笔记列表慢阶段 stage:%s duration_ms:%d first:%d second:%d", stage, duration.Milliseconds(), first, second)
+	fields := g.Map{
+		"traceID":    gtrace.GetTraceID(ctx),
+		"stage":      stage,
+		"durationMs": duration.Milliseconds(),
+		"first":      first,
+		"second":     second,
+	}
 	if duration >= time.Second {
-		g.Log().Warning(ctx, message)
+		g.Log().Warning(ctx, "上架笔记列表慢阶段", fields)
 		return
 	}
-	g.Log().Info(ctx, message)
+	g.Log().Info(ctx, "上架笔记列表阶段", fields)
 }
 
 func (s *sSysPublish) AdminTagList(ctx context.Context, in *sysin.TagListInp) (list []*sysin.TagModel, totalCount int, err error) {
