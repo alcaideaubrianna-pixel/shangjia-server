@@ -495,7 +495,9 @@ func (s *sSysPublish) dueTelegramJobOutboxRows(ctx context.Context, limit int, n
 // 让账户之间共享公平配额而不是共享一次全局候选扫描。
 func telegramDueOutboxPostgresSQLForAccount() string {
 	query := telegramDueOutboxPostgresSQL()
-	return strings.Replace(query, "\n\t), active_heads AS (", "\n\t\tWHERE j.account_id=?\n\t), active_heads AS (", 1)
+	needle := "\n\t\tJOIN " + publishTgJobTable + " j ON j.id=o.job_id\n\t), active_heads AS ("
+	replacement := "\n\t\tJOIN " + publishTgJobTable + " j ON j.id=o.job_id\n\t\tWHERE j.account_id=?\n\t), active_heads AS ("
+	return strings.Replace(query, needle, replacement, 1)
 }
 
 // dueTelegramStreamOutboxRows 读取全量 Stream 模式下的待通知 Outbox。
