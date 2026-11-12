@@ -60,7 +60,6 @@ func loadCollectStatsAggregate(ctx context.Context, tenantId, accountId int64) (
 	}
 	sourceCols := pdao.YoubanPublishCollectSource.Columns()
 	ruleCols := pdao.YoubanPublishCollectRule.Columns()
-	eventCols := pdao.YoubanPublishCollectEvent.Columns()
 	reviewCols := pdao.YoubanPublishCollectReview.Columns()
 	dispatchCols := pdao.YoubanPublishCollectDispatch.Columns()
 	query := fmt.Sprintf(`
@@ -84,10 +83,10 @@ CROSS JOIN (
     WHERE %s=? AND %s=? AND %s IS NULL
 ) rule_stats
 CROSS JOIN (
-    SELECT COUNT(*) AS event_count,
-           COALESCE(SUM(CASE WHEN %s=? THEN 1 ELSE 0 END), 0) AS blocked_count
-    FROM %s
-    WHERE %s=? AND %s=?
+	SELECT COALESCE(SUM(event_total),0) AS event_count,
+	       COALESCE(SUM(blocked_total),0) AS blocked_count
+	FROM %s
+	WHERE %s=? AND %s=? AND deleted_at IS NULL
 ) event_stats
 CROSS JOIN (
     SELECT COALESCE(SUM(CASE WHEN %s=? THEN 1 ELSE 0 END), 0) AS pending_review_count
@@ -103,7 +102,7 @@ CROSS JOIN (
 ) dispatch_stats`,
 		pdao.YoubanPublishCollectSource.Table(), sourceCols.TenantId, sourceCols.AccountId, sourceCols.CollectEnabled, sourceCols.Status, sourceCols.DeletedAt,
 		pdao.YoubanPublishCollectRule.Table(), ruleCols.TenantId, ruleCols.AccountId, ruleCols.DeletedAt,
-		eventCols.Status, pdao.YoubanPublishCollectEvent.Table(), eventCols.TenantId, eventCols.AccountId,
+		pdao.YoubanPublishCollectSource.Table(), sourceCols.TenantId, sourceCols.AccountId,
 		reviewCols.Status, pdao.YoubanPublishCollectReview.Table(), reviewCols.TenantId, reviewCols.AccountId,
 		dispatchCols.Status, dispatchCols.Status, dispatchCols.Status, dispatchCols.FinishedAt, pdao.YoubanPublishCollectDispatch.Table(), dispatchCols.TenantId, dispatchCols.AccountId,
 	)
@@ -112,7 +111,7 @@ CROSS JOIN (
 	if err := g.DB().GetScan(ctx, &aggregate, query,
 		tenantId, accountId,
 		tenantId, accountId,
-		sysin.CollectEventStatusIgnored, tenantId, accountId,
+		tenantId, accountId,
 		sysin.CollectReviewStatusPending, tenantId, accountId,
 		sysin.CollectDispatchStatusFailed,
 		sysin.CollectDispatchStatusSent,

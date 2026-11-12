@@ -213,6 +213,8 @@ ALTER TABLE "hg_youban_publish_collect_source"
 
 ALTER TABLE "hg_youban_publish_collect_source"
   ADD COLUMN IF NOT EXISTS "channel_suffix" text NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_collect_source"
+  ADD COLUMN IF NOT EXISTS "blocked_total" bigint NOT NULL DEFAULT 0;
 
 ALTER TABLE "hg_youban_publish_collect_source"
   ADD COLUMN IF NOT EXISTS "channel_blacklisted" smallint NOT NULL DEFAULT 0;
