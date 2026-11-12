@@ -57,6 +57,8 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_profile_fingerprint_profile" ON "hg_youban_p
 
 CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_tenant_created" ON "hg_youban_publish_note_index" ("tenant_id", "created_at" DESC, "id" DESC) WHERE "deleted_at" IS NULL;
 CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_account_created" ON "hg_youban_publish_note_index" ("account_id", "created_at" DESC, "id" DESC) WHERE "deleted_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_tenant_source_updated" ON "hg_youban_publish_note_index" ("tenant_id", "is_collected", "updated_at" DESC, "id" DESC) INCLUDE ("account_id", "profile_id") WHERE "deleted_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_account_source_updated" ON "hg_youban_publish_note_index" ("account_id", "is_collected", "updated_at" DESC, "id" DESC) INCLUDE ("tenant_id", "profile_id") WHERE "deleted_at" IS NULL;
 CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_tenant_status_created" ON "hg_youban_publish_note_index" ("tenant_id", "status", "created_at" DESC, "id" DESC) WHERE "deleted_at" IS NULL;
 CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_account_status_created" ON "hg_youban_publish_note_index" ("account_id", "status", "created_at" DESC, "id" DESC) WHERE "deleted_at" IS NULL;
 CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_scope_created" ON "hg_youban_publish_note_index" ("tenant_id", "account_id", "created_at" DESC, "id" DESC, "profile_id") WHERE "deleted_at" IS NULL;

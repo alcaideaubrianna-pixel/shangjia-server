@@ -46,19 +46,45 @@ func (s *sSysPublish) adminNoteIndexList(ctx context.Context, in *sysin.NoteList
 	_, perPage, _ := form.CalPage(1, in.PerPage)
 	in.Page = 1
 	in.PerPage = perPage
-	var list []*sysin.ProfileModel
-	if err := mod.Clone().Fields(adminNoteIndexFields()).
-		Order(adminNoteSortExpression(sortBy) + " " + adminNoteSortDirection(sortBy)).
+	type noteIndexCandidate struct {
+		NoteIndexId int64       `orm:"note_index_id"`
+		ProfileId   int64       `orm:"id"`
+		SortAt      *gtime.Time `orm:"sort_at"`
+	}
+	var candidates []noteIndexCandidate
+	sortExpression := adminNoteSortExpression(sortBy)
+	if err := mod.Clone().Fields("i.id AS note_index_id,i.profile_id AS id," + sortExpression + " AS sort_at").
+		Order(sortExpression + " " + adminNoteSortDirection(sortBy)).
 		Order("i.id " + adminNoteSortDirection(sortBy)).
-		Limit(perPage + 1).Scan(&list); err != nil {
+		Limit(perPage + 1).Scan(&candidates); err != nil {
 		return nil, false, "", gerror.Wrap(err, "获取资料索引列表失败")
 	}
-	if list == nil {
-		list = []*sysin.ProfileModel{}
-	}
-	hasMore := len(list) > perPage
+	hasMore := len(candidates) > perPage
 	if hasMore {
-		list = list[:perPage]
+		candidates = candidates[:perPage]
+	}
+	list := make([]*sysin.ProfileModel, 0, len(candidates))
+	if len(candidates) > 0 {
+		ids := make([]int64, 0, len(candidates))
+		for _, candidate := range candidates {
+			ids = append(ids, candidate.NoteIndexId)
+		}
+		var details []*sysin.ProfileModel
+		detailMod := noteIndexModel(ctx).LeftJoin(publishAccountTable+" a", "a.id=i.account_id AND a.deleted_at IS NULL")
+		if err := detailMod.WhereIn("i.id", ids).Fields(adminNoteIndexFields()).Scan(&details); err != nil {
+			return nil, false, "", gerror.Wrap(err, "获取资料索引详情失败")
+		}
+		byIndex := make(map[int64]*sysin.ProfileModel, len(details))
+		for _, detail := range details {
+			if detail != nil {
+				byIndex[detail.NoteIndexId] = detail
+			}
+		}
+		for _, candidate := range candidates {
+			if detail := byIndex[candidate.NoteIndexId]; detail != nil {
+				list = append(list, detail)
+			}
+		}
 	}
 	nextCursor := ""
 	if hasMore && len(list) > 0 {
@@ -258,5 +284,5 @@ func decodeAdminNoteCursor(raw string) (*adminNoteCursor, error) {
 }
 
 func adminNoteIndexFields() string {
-	return "i.id AS note_index_id,i.profile_id AS id,i.uuid,i.tenant_id,i.account_id,p.cover_media_id,p.source_type,p.profile_no,i.title,i.summary,i.plain_text,i.province,i.city,i.tag,i.visibility,i.review_status,i.status,i.published_at,i.created_at,i.updated_at,i.task_status,a.nickname AS account_name,a.nickname,a.username"
+	return "i.id AS note_index_id,i.profile_id AS id,i.uuid,i.tenant_id,i.account_id,p.cover_media_id,p.source_type,p.profile_no,i.title,i.province,i.city,i.tag,i.visibility,i.review_status,i.status,i.published_at,i.created_at,i.updated_at,i.task_status,a.nickname AS account_name,a.nickname,a.username"
 }
