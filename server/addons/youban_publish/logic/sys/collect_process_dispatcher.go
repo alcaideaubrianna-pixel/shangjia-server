@@ -2,6 +2,8 @@ package sys
 
 import (
 	"context"
+
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 	"time"
 )
@@ -19,16 +21,13 @@ func (s *sSysPublish) runCollectProcessDispatcher(ctx context.Context) {
 			Fields("tenant_id,account_id").Where("status", "pending").Where("account_id > 0").
 			Group("tenant_id,account_id").OrderAsc("tenant_id").OrderAsc("account_id").Limit(16).Scan(&scopes)
 		err := error(nil)
-		if len(scopes) == 0 {
-			err = s.dispatchDueCollectProcessOutbox(cycleCtx, 200)
-		} else {
-			for _, scope := range scopes {
-				if scopeErr := s.dispatchDueCollectProcessOutbox(cycleCtx, 200, scope); scopeErr != nil && err == nil {
-					err = scopeErr
-				}
+		// 没有账户分片时不再回退到全局扫描；无归属历史任务由独立恢复器处理。
+		for _, scope := range scopes {
+			if scopeErr := s.dispatchDueCollectProcessOutbox(cycleCtx, 200, scope); scopeErr != nil && err == nil {
+				err = scopeErr
 			}
 		}
-		s.observeCollectProcessBacklog(cycleCtx)
+		s.observeCollectProcessBacklog(cycleCtx, scopes)
 		cancel()
 		if err != nil && ctx.Err() == nil {
 			g.Log().Warningf(ctx, "投递实时采集处理任务失败：%+v", err)
@@ -41,12 +40,18 @@ func (s *sSysPublish) runCollectProcessDispatcher(ctx context.Context) {
 	}
 }
 
-func (s *sSysPublish) observeCollectProcessBacklog(ctx context.Context) {
-	rows, err := g.DB().Model(collectProcessOutboxTable).Ctx(ctx).
-		Fields("COALESCE(history,FALSE) AS history,MIN(created_at) AS oldest,COUNT(*) AS pending").
-		Where("status", "pending").Group("COALESCE(history,FALSE)").OrderAsc("oldest").All()
-	if err != nil {
-		return
+func (s *sSysPublish) observeCollectProcessBacklog(ctx context.Context, scopes []publishAccountScope) {
+	// 统计必须与投递使用同样的账户分片，禁止每两秒扫描全局 Outbox。
+	rows := make([]gdb.Record, 0)
+	for _, scope := range scopes {
+		part, err := g.DB().Model(collectProcessOutboxTable).Ctx(ctx).
+			Fields("COALESCE(history,FALSE) AS history,MIN(created_at) AS oldest,COUNT(*) AS pending").
+			Where("status", "pending").Where("tenant_id", scope.TenantID).Where("account_id", scope.AccountID).
+			Group("COALESCE(history,FALSE)").OrderAsc("oldest").All()
+		if err != nil {
+			continue
+		}
+		rows = append(rows, part...)
 	}
 	oldest := int64(0)
 	for _, row := range rows {
