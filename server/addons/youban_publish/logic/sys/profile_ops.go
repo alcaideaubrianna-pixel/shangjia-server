@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -571,7 +572,12 @@ func logSlowAdminNoteListStage(ctx context.Context, stage string, startedAt time
 	if duration < 100*time.Millisecond {
 		return
 	}
-	g.Log().Infof(ctx, "上架笔记列表慢阶段 stage:%s duration_ms:%d first:%d second:%d", stage, duration.Milliseconds(), first, second)
+	message := fmt.Sprintf("上架笔记列表慢阶段 stage:%s duration_ms:%d first:%d second:%d", stage, duration.Milliseconds(), first, second)
+	if duration >= time.Second {
+		g.Log().Warning(ctx, message)
+		return
+	}
+	g.Log().Info(ctx, message)
 }
 
 func (s *sSysPublish) AdminTagList(ctx context.Context, in *sysin.TagListInp) (list []*sysin.TagModel, totalCount int, err error) {
