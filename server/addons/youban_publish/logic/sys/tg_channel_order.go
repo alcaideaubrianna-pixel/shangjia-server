@@ -81,14 +81,21 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 		} else if job.ChannelId > 0 {
 			fast = fast.Where("j.channel_id", job.ChannelId)
 		}
-		var earlier gdb.Record
+		var earlier struct {
+			Id             int64       `orm:"id"`
+			CreatedAt      *gtime.Time `orm:"created_at"`
+			Priority       int         `orm:"priority"`
+			Status         string      `orm:"status"`
+			DispatchStatus string      `orm:"dispatch_status"`
+			OperationNo    string      `orm:"operation_no"`
+		}
 		if err := fast.Fields("j.id,j.created_at,j.priority,j.status,j.dispatch_status,j.operation_no").OrderAsc("j.created_at").OrderAsc("j.id").Limit(1).Scan(&earlier); err != nil {
 			return false, gerror.Wrap(err, "检查统一流频道前序TG任务失败")
 		}
-		if !earlier.IsEmpty() {
-			g.Log().Info(ctx, "TG统一流频道队首命中前序任务", g.Map{"currentJobId": job.Id, "earlierJobId": earlier["id"].Int64(), "earlierStatus": earlier["status"].String()})
+		if earlier.Id > 0 {
+			g.Log().Info(ctx, "TG统一流频道队首命中前序任务", g.Map{"currentJobId": job.Id, "earlierJobId": earlier.Id, "earlierStatus": earlier.Status})
 		}
-		return !earlier.IsEmpty(), nil
+		return earlier.Id > 0, nil
 	}
 	// A destination channel is a single ordered stream. Source message IDs are
 	// only comparable within one source channel, so using them here lets jobs
