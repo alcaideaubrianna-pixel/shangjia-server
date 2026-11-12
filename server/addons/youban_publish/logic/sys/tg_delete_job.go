@@ -72,7 +72,9 @@ func (s *sSysPublish) telegramJobById(ctx context.Context, jobId int64) (telegra
 	if jobId <= 0 {
 		return job, gerror.New("TG任务ID不能为空")
 	}
-	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", jobId).Scan(&job); err != nil {
+	// 发送任务必须从主库读取：Outbox/队列可能已由主库提交，读副本延迟会把
+	// 一个真实存在的任务误判为 sql.ErrNoRows，进而反复重试并阻塞频道队首。
+	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Master().Where("id", jobId).Scan(&job); err != nil {
 		return job, gerror.Wrap(err, "读取TG任务失败")
 	}
 	if job.Id <= 0 {
