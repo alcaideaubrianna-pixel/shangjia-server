@@ -47,6 +47,19 @@ func TestTelegramChannelBlockingJobSQLParentheses(t *testing.T) {
 	}
 }
 
+func TestTelegramChannelBlockingJobIgnoresStaleMissingExecution(t *testing.T) {
+	condition := telegramChannelBlockingJobStateSQL("j")
+	for _, fragment := range []string{
+		"就绪通知或执行任务缺失",
+		"j.updated_at < CURRENT_TIMESTAMP - INTERVAL '5 minutes'",
+		"COALESCE(j.dispatch_status,'')='idle'",
+	} {
+		if !strings.Contains(condition, fragment) {
+			t.Fatalf("stale missing execution must not block the channel head; missing %q in %s", fragment, condition)
+		}
+	}
+}
+
 func TestTelegramAllChannelHeadQueriesExcludeFailedDisplays(t *testing.T) {
 	for name, query := range map[string]string{
 		"send gate":        telegramChannelBlockingJobSQL("j"),

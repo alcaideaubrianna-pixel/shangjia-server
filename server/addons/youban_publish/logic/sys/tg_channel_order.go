@@ -126,7 +126,11 @@ func telegramChannelBlockingJobStateSQL(alias string) string {
 	// Terminal jobs must never become unschedulable channel heads. Retrying a
 	// failed display later would also send verification apart from its display.
 	return fmt.Sprintf(`(
-		%sstatus IN ('pending','confirming','sending') OR
+		(%[1]sstatus IN ('pending','confirming','sending') AND NOT (
+			%[1]sstatus='pending' AND COALESCE(%[1]sdispatch_status,'')='idle'
+			AND COALESCE(%[1]slast_dispatch_error,'') LIKE '就绪通知或执行任务缺失%%'
+			AND %[1]supdated_at < CURRENT_TIMESTAMP - INTERVAL '5 minutes'
+		)) OR
 		(%sstatus='failed_retry' AND (%snext_retry_at IS NULL OR %snext_retry_at<=CURRENT_TIMESTAMP)) OR
 		(%sstatus='failed' AND %ssend_phase='display_confirmed' AND EXISTS (
 			SELECT 1 FROM %s failed_display_message
@@ -134,7 +138,7 @@ func telegramChannelBlockingJobStateSQL(alias string) string {
 			  AND failed_display_message.status IN ('sent','undeletable')
 			  AND failed_display_message.deleted_at IS NULL
 		))
-	)`, alias, alias, alias, alias, alias, alias, publishTgMessageTable, alias)
+	)`, alias, alias, alias, alias, alias, alias, alias, publishTgMessageTable, alias)
 }
 
 func telegramChannelAvailableAccountSQL(alias string) string {
