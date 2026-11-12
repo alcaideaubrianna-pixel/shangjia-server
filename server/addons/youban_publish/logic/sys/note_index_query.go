@@ -53,12 +53,14 @@ func (s *sSysPublish) adminNoteIndexList(ctx context.Context, in *sysin.NoteList
 	}
 	var candidates []noteIndexCandidate
 	sortExpression := adminNoteSortExpression(sortBy)
+	candidateStartedAt := time.Now()
 	if err := mod.Clone().Fields("i.id AS note_index_id,i.profile_id AS id," + sortExpression + " AS sort_at").
 		Order(sortExpression + " " + adminNoteSortDirection(sortBy)).
 		Order("i.id " + adminNoteSortDirection(sortBy)).
 		Limit(perPage + 1).Scan(&candidates); err != nil {
 		return nil, false, "", gerror.Wrap(err, "获取资料索引列表失败")
 	}
+	logSlowAdminNoteListStage(ctx, "profile_query_candidates", candidateStartedAt, len(candidates), perPage)
 	hasMore := len(candidates) > perPage
 	if hasMore {
 		candidates = candidates[:perPage]
@@ -71,9 +73,11 @@ func (s *sSysPublish) adminNoteIndexList(ctx context.Context, in *sysin.NoteList
 		}
 		var details []*sysin.ProfileModel
 		detailMod := noteIndexModel(ctx).LeftJoin(publishAccountTable+" a", "a.id=i.account_id AND a.deleted_at IS NULL")
+		detailStartedAt := time.Now()
 		if err := detailMod.WhereIn("i.id", ids).Fields(adminNoteIndexFields()).Scan(&details); err != nil {
 			return nil, false, "", gerror.Wrap(err, "获取资料索引详情失败")
 		}
+		logSlowAdminNoteListStage(ctx, "profile_query_details", detailStartedAt, len(details), len(ids))
 		byIndex := make(map[int64]*sysin.ProfileModel, len(details))
 		for _, detail := range details {
 			if detail != nil {
