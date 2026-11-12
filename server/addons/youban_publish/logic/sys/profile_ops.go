@@ -507,6 +507,30 @@ func (s *sSysPublish) AdminGlobalProfileStatus(ctx context.Context, in *sysin.Pr
 
 func (s *sSysPublish) AdminNoteList(ctx context.Context, in *sysin.NoteListInp) (res *sysin.AdminNotePageModel, err error) {
 	startedAt := time.Now()
+	defer func() {
+		fields := g.Map{
+			"traceID":    gtrace.GetTraceID(ctx),
+			"durationMs": time.Since(startedAt).Milliseconds(),
+		}
+		if in != nil {
+			fields["accountScope"] = in.AccountScope
+			fields["sourceScope"] = in.SourceScope
+			fields["sortBy"] = in.SortBy
+			fields["status"] = in.Status
+		}
+		if err != nil {
+			fields["error"] = err.Error()
+			g.Log().Warning(ctx, "上架笔记列表请求失败", fields)
+			return
+		}
+		if res != nil {
+			fields["rows"] = len(res.List)
+			fields["hasMore"] = res.HasMore
+		}
+		if time.Since(startedAt) >= time.Second {
+			g.Log().Warning(ctx, "上架笔记列表请求完成", fields)
+		}
+	}()
 	account, err := s.currentAdminAccount(ctx)
 	if err != nil {
 		return nil, err
