@@ -548,7 +548,9 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 	// 账户目录直接从 Outbox 读取，避免先扫描 tg_job 再用 EXISTS 回查 Outbox。
 	// 这样 Stream 快速路径只触碰到期通知行，历史任务不会进入候选集合。
 	if err := g.DB().Model(publishTgOutboxTable+" o").Safe().Ctx(ctx).
-		Fields("DISTINCT j.account_id").
+		// 为表达式显式命名，避免 GoFrame 扫描 []int64 时将 DISTINCT
+		// 表达式解析成零值，导致后续只查询 account_id=0 的旧任务。
+		Fields("DISTINCT j.account_id AS account_id").
 		InnerJoin(publishTgJobTable+" j", "j.id=o.job_id").
 		Where("j.account_id > 0").Where("o.event_type", telegramOutboxEventPublish).
 		Where("o.available_at <= ?", now).Where("o.status IN (?,?)", telegramOutboxPending, telegramOutboxProcessing).
