@@ -202,7 +202,7 @@ func (s *sSysPublish) recoverMissingProfilePublishOperationStates(ctx context.Co
 		Where("j.operation_no <> ''").
 		Where("ps.publish_task_status = ''").
 		OrderDesc("j.id").
-		Limit(limit * 3).
+		Limit(limit).
 		Scan(&jobs); err != nil {
 		return gerror.Wrap(err, "读取缺失投影的资料上架任务失败")
 	}

@@ -14,3 +14,12 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ybp_tg_job_recovery_missing_state_ac
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ybp_profile_state_recovery_account
     ON hg_youban_publish_profile_state (tenant_id, account_id, profile_id)
     WHERE deleted_at IS NULL AND publish_task_status = '';
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ybp_tg_outbox_expired_account
+    ON hg_youban_publish_tg_outbox (status, lease_expires_at, id, job_id)
+    WHERE event_type = 'telegram_job.publish' AND status = 'processing';
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ybp_tg_job_dispatch_recovery_account
+    ON hg_youban_publish_tg_job (account_id, dispatch_status, status, dispatched_at, id)
+    WHERE status IN ('pending','failed_retry','unknown')
+      AND dispatch_status IN ('queued','processing');

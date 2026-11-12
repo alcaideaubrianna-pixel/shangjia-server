@@ -15,3 +15,13 @@ WHERE cycle_enabled=1 AND status IN ('sent','superseded') AND next_cycle_at IS N
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ybp_profile_state_account_publish_due
 ON hg_youban_publish_profile_state (tenant_id,account_id,publish_at,id)
 WHERE publish_at IS NOT NULL AND deleted_at IS NULL;
+-- 恢复器按账户读取异常任务，避免全局扫描历史 TG 任务。
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ybp_tg_job_failed_display_recovery
+ON hg_youban_publish_tg_job (tenant_id,account_id,updated_at,id)
+WHERE status='failed' AND send_phase='display_confirmed';
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ybp_tg_job_missing_operation_state
+ON hg_youban_publish_tg_job (tenant_id,account_id,id)
+WHERE task_id IS NULL AND operation_no<>'' AND status IN ('pending','sending','failed_retry','unknown');
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ybp_profile_state_missing_operation
+ON hg_youban_publish_profile_state (tenant_id,account_id,profile_id)
+WHERE deleted_at IS NULL AND publish_task_status='';
