@@ -387,6 +387,8 @@ runtime:
   roles: [ "all" ]
 
 youbanPublish:
+  # Opt-in account visibility read model after parity validation.
+  accountVisibilityReadModelEnabled: false
   redisStream:
     # Redis Stream 灰度开关。默认关闭，仅 Push Worker 角色读取；按账户 push_engine=unified_stream 灰度。
     grayEnabled: false
