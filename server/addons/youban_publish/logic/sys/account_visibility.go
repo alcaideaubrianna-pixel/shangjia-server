@@ -139,7 +139,12 @@ func refreshAccountVisibilityFollowEdgeBestEffort(ctx context.Context, tenantID,
 	}
 }
 
-func (s *sSysPublish) adminProfileVisibleScope(ctx context.Context, account *sysin.AccountModel, in *sysin.ProfileListInp) (*adminProfileVisibleScope, error) {
+func (s *sSysPublish) adminProfileVisibleScope(ctx context.Context, account *sysin.AccountModel, in *sysin.ProfileListInp) (result *adminProfileVisibleScope, err error) {
+	defer func() {
+		if result != nil && err == nil {
+			compareAccountVisibilityReadModel(ctx, account, result)
+		}
+	}()
 	if account == nil || account.Id <= 0 || account.TenantId <= 0 {
 		return nil, gerror.New("当前账号无管理权限")
 	}
@@ -205,6 +210,50 @@ func (s *sSysPublish) adminProfileVisibleScope(ctx context.Context, account *sys
 		return res, nil
 	default:
 		return nil, gerror.New("账号筛选范围不合法")
+	}
+}
+
+// compareAccountVisibilityReadModel is deliberately observational. The legacy
+// resolver remains authoritative until all relation mutation paths have been
+// deployed and production parity is proven.
+func compareAccountVisibilityReadModel(ctx context.Context, account *sysin.AccountModel, scope *adminProfileVisibleScope) {
+	if account == nil || scope == nil || account.Id <= 0 || scope.TenantId <= 0 || len(scope.TenantIds) > 0 {
+		return
+	}
+	var rows []struct {
+		VisibleAccountId int64 `json:"visible_account_id"`
+	}
+	if err := g.DB().Model(accountVisibilityReadModelTable).Ctx(ctx).
+		Fields("visible_account_id").Where("tenant_id", scope.TenantId).
+		Where("viewer_account_id", account.Id).Scan(&rows); err != nil {
+		g.Log().Warning(ctx, "账户可见性读模型双读失败", g.Map{"tenantId": scope.TenantId, "viewerAccountId": account.Id, "error": err.Error()})
+		return
+	}
+	legacy := make(map[int64]struct{}, len(scope.AccountIds))
+	for _, id := range scope.AccountIds {
+		if id > 0 {
+			legacy[id] = struct{}{}
+		}
+	}
+	model := make(map[int64]struct{}, len(rows))
+	for _, row := range rows {
+		if row.VisibleAccountId > 0 {
+			model[row.VisibleAccountId] = struct{}{}
+		}
+	}
+	missing, extra := 0, 0
+	for id := range legacy {
+		if _, ok := model[id]; !ok {
+			missing++
+		}
+	}
+	for id := range model {
+		if _, ok := legacy[id]; !ok {
+			extra++
+		}
+	}
+	if missing > 0 || extra > 0 {
+		g.Log().Warning(ctx, "账户可见性读模型与旧权限结果不一致", g.Map{"tenantId": scope.TenantId, "viewerAccountId": account.Id, "legacyCount": len(legacy), "modelCount": len(model), "missing": missing, "extra": extra})
 	}
 }
 
