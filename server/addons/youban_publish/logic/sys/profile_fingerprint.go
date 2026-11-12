@@ -652,6 +652,10 @@ func (s *sSysPublish) runProfileFingerprintBackfill(ctx context.Context) {
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("YOUBAN_LOCAL_SKIP_PROFILE_FINGERPRINT_BACKFILL")), "1") {
 		return
 	}
+	// 生产回填必须显式开启，避免 Publish 启动时与采集、推送共享数据库 IO。
+	if !strings.EqualFold(strings.TrimSpace(os.Getenv("YOUBAN_PROFILE_FINGERPRINT_BACKFILL_ENABLED")), "1") {
+		return
+	}
 	timer := time.NewTimer(15 * time.Second)
 	defer timer.Stop()
 	select {
@@ -665,7 +669,7 @@ func (s *sSysPublish) runProfileFingerprintBackfill(ctx context.Context) {
 		if err := mutex.Lock(ctx); err != nil {
 			g.Log().Warningf(ctx, "获取资料指纹回填锁失败 err:%+v", err)
 		} else {
-			count, err := s.backfillProfileFingerprints(ctx, 1000)
+			count, err := s.backfillProfileFingerprints(ctx, 20)
 			_ = mutex.Unlock(context.Background())
 			if err != nil {
 				g.Log().Warningf(ctx, "资料指纹回填失败 err:%+v", err)
