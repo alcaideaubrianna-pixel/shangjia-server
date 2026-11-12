@@ -131,7 +131,9 @@ func (s *sSysPublish) handleCollectSourceStatsTask(ctx context.Context, task *as
 	rows, err := g.DB().Model(collectSourceStatsWorkTable).Ctx(ctx).
 		Fields("source_id,generation").Where("pending", 1).
 		WhereLTE("available_at", time.Now()).OrderAsc("available_at").
-		OrderAsc("source_id").Limit(32).All()
+		// 对账只处理一个来源，避免低频修正任务同时扫描多个来源的大表；
+		// 其他 dirty 来源由下一轮游标继续处理，不能挤占实时采集连接。
+		OrderAsc("source_id").Limit(1).All()
 	if err != nil || len(rows) == 0 {
 		return refreshCollectSourceStatsWork(ctx, payload.SourceID, s.syncCollectSourceStats)
 	}
