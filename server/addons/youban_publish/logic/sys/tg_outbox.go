@@ -570,13 +570,18 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 		OrderAsc("j.account_id").Limit(32).Scan(&accountRows); err != nil {
 		return nil, gerror.Wrap(err, "读取Stream账户分片失败")
 	}
-	accounts := make([]int64, 0, len(accountRows)+1)
+	accounts := make([]int64, 0, len(accountRows))
 	for _, row := range accountRows {
 		if row.AccountID > 0 {
 			accounts = append(accounts, row.AccountID)
 		}
 	}
-	accounts = append(accounts, 0) // account_id=0 legacy fallback
+	// 不要每轮无条件追加 account_id=0。线上绝大多数任务都有账户归属，
+	// 无条件执行 legacy 查询会扫描整张历史 Outbox，拖住正常账户。无归属
+	// 任务由独立恢复流程处理，不能阻塞统一流账户。
+	if len(accounts) == 0 {
+		return nil, nil
+	}
 	perAccount := limit / len(accounts)
 	if perAccount < 1 {
 		perAccount = 1
@@ -584,9 +589,6 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 	var rows []telegramJobOutboxRecord
 	for _, accountID := range accounts {
 		accountFilter := "j.account_id=?"
-		if accountID == 0 {
-			accountFilter = "j.account_id<=0"
-		}
 		// Stream 只负责快速通知；频道顺序由消费后的幂等入队和完成唤醒保证。
 		// 不在这里重复计算频道队首，避免大表窗口排序拖慢所有账户。
 		query := `SELECT o.id,o.job_id,o.attempt_count,o.available_at
@@ -600,9 +602,6 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 		ORDER BY o.available_at,o.id LIMIT ?`
 		var rows []telegramJobOutboxRecord
 		queryArgs := []any{accountID, telegramOutboxEventPublish, now, telegramOutboxPending, telegramOutboxProcessing, now, now, perAccount}
-		if accountID == 0 {
-			queryArgs = queryArgs[1:]
-		}
 		var accountRows []telegramJobOutboxRecord
 		if err := g.DB().GetScan(ctx, &accountRows, query, queryArgs...); err != nil {
 			return nil, gerror.Wrap(err, "读取 Stream 模式TG任务Outbox失败")
