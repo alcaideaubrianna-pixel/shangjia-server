@@ -554,13 +554,13 @@ func telegramDueOutboxPostgresSQL() string {
 			AND (status=? OR (status=? AND lease_expires_at<=?))
 	), due_jobs AS MATERIALIZED (
 		SELECT o.id,o.job_id,o.attempt_count,o.available_at,
-			j.tenant_id,j.channel_id,j.target_chat_id,j.status,j.dispatch_status,j.next_retry_at,
+			j.tenant_id,j.account_id,j.channel_id,j.target_chat_id,j.status,j.dispatch_status,j.next_retry_at,
 			j.created_at,j.operation_no,j.send_phase,j.priority,
 			` + telegramChannelScheduleRankSQL("j") + ` AS schedule_rank
 		FROM due_outboxes o
 		JOIN ` + publishTgJobTable + ` j ON j.id=o.job_id
 	), active_heads AS (
-		SELECT j.id,j.job_id,j.attempt_count,j.available_at,j.tenant_id,j.channel_id,j.target_chat_id,
+		SELECT j.id,j.job_id,j.attempt_count,j.available_at,j.tenant_id,j.account_id,j.channel_id,j.target_chat_id,
 			j.status,j.dispatch_status,j.next_retry_at,j.created_at,j.operation_no,j.send_phase,j.priority,j.schedule_rank
 		FROM due_jobs j
 		WHERE j.status IN ('pending','failed_retry','unknown')
@@ -574,16 +574,37 @@ func telegramDueOutboxPostgresSQL() string {
 					AND ` + telegramChannelSchedulePrecedesSQL("earlier", "j") + `
 			)
 	), terminal_outboxes AS (
-		SELECT id,job_id,attempt_count,available_at,tenant_id,channel_id,target_chat_id,999 AS schedule_rank,0 AS effective_priority
+		SELECT id,job_id,attempt_count,available_at,tenant_id,account_id,channel_id,target_chat_id,999 AS schedule_rank,0 AS effective_priority
 		FROM due_jobs
 		WHERE status IN ('sent','failed','superseded')
+	), account_heads AS (
+		SELECT h.*, ROW_NUMBER() OVER (PARTITION BY h.tenant_id,h.account_id ORDER BY h.schedule_rank,h.effective_priority,h.available_at,h.id) AS account_rank
+		FROM (
+			SELECT id,job_id,attempt_count,available_at,tenant_id,account_id,channel_id,target_chat_id,schedule_rank,` + telegramJobEffectivePrioritySQL("") + ` AS effective_priority
+			FROM active_heads
+			UNION ALL
+			SELECT id,job_id,attempt_count,available_at,tenant_id,account_id,channel_id,target_chat_id,schedule_rank,effective_priority
+			FROM terminal_outboxes
+		) h
+		WHERE h.account_id > 0
+	), unscoped_heads AS (
+		SELECT h.*, ROW_NUMBER() OVER (ORDER BY h.schedule_rank,h.effective_priority,h.available_at,h.id) AS account_rank
+		FROM (
+			SELECT id,job_id,attempt_count,available_at,tenant_id,account_id,channel_id,target_chat_id,schedule_rank,` + telegramJobEffectivePrioritySQL("") + ` AS effective_priority
+			FROM active_heads
+			WHERE account_id <= 0
+			UNION ALL
+			SELECT id,job_id,attempt_count,available_at,tenant_id,account_id,channel_id,target_chat_id,schedule_rank,effective_priority
+			FROM terminal_outboxes
+			WHERE account_id <= 0
+		) h
 	)
 	SELECT id,job_id,attempt_count,available_at,tenant_id,channel_id,target_chat_id,
-		schedule_rank,` + telegramJobEffectivePrioritySQL("") + ` AS effective_priority
-	FROM active_heads
+		schedule_rank,effective_priority
+	FROM account_heads WHERE account_rank <= 100
 	UNION ALL
 	SELECT id,job_id,attempt_count,available_at,tenant_id,channel_id,target_chat_id,schedule_rank,effective_priority
-	FROM terminal_outboxes
+	FROM unscoped_heads WHERE account_rank <= 100
 	ORDER BY schedule_rank,effective_priority,available_at,id
 	LIMIT ?`
 }
