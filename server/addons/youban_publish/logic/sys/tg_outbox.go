@@ -447,6 +447,34 @@ func (s *sSysPublish) dueTelegramJobOutboxRows(ctx context.Context, limit int, n
 			}
 			rows = append(rows, accountRows...)
 		}
+		// 兼容尚未迁移的旧任务。正常账户路径明确排除 account_id=0，
+		// 但不能因此静默丢弃历史任务；只有确实存在到期旧任务时才执行
+		// 这条额外查询，避免无效 legacy 扫描拖慢正常账户调度。
+		if len(rows) < batchLimit {
+			legacyExists, err := g.DB().GetValue(queryCtx, `SELECT EXISTS(
+				SELECT 1 FROM `+publishTgOutboxTable+` o
+				JOIN `+publishTgJobTable+` j ON j.id=o.job_id
+				WHERE o.event_type=? AND o.available_at<=?
+				  AND (o.status=? OR (o.status=? AND o.lease_expires_at<=?))
+				  AND j.account_id<=0
+			)`, telegramOutboxEventPublish, now, telegramOutboxPending, telegramOutboxProcessing, now)
+			if err != nil {
+				return nil, gerror.Wrap(err, "检查旧账户TG任务Outbox失败")
+			}
+			if legacyExists.Bool() {
+				legacyLimit := batchLimit - len(rows)
+				if legacyLimit > 100 {
+					legacyLimit = 100
+				}
+				var legacyRows []telegramJobOutboxRecord
+				if err := g.DB().GetScan(queryCtx, &legacyRows, telegramDueOutboxPostgresSQLForAccount(),
+					telegramOutboxEventPublish, now, telegramOutboxPending, telegramOutboxProcessing, now,
+					int64(0), now, legacyLimit); err != nil {
+					return nil, gerror.Wrap(err, "读取旧账户TG任务Outbox失败")
+				}
+				rows = append(rows, legacyRows...)
+			}
+		}
 		if len(rows) > batchLimit {
 			rows = rows[:batchLimit]
 		}
