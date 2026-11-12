@@ -99,6 +99,53 @@ func (s *sSysPublish) syncCollectSourceStats(ctx context.Context, sourceID int64
 	return gerror.Wrap(err, "更新采集源统计失败")
 }
 
+// syncCollectSourceStatsBatch aggregates all requested sources in two scans,
+// instead of running one COUNT/SUM/MAX query per source.
+func (s *sSysPublish) syncCollectSourceStatsBatch(ctx context.Context, sourceIDs []int64) error {
+	if len(sourceIDs) == 0 {
+		return nil
+	}
+	type stat struct {
+		total, failed, success int64
+		last                   interface{}
+	}
+	stats := make(map[int64]*stat, len(sourceIDs))
+	eventDao := pdao.YoubanPublishCollectEvent
+	eventCols := eventDao.Columns()
+	rows, err := g.DB().GetAll(ctx, fmt.Sprintf(`SELECT %s AS source_id,COUNT(*) AS event_total,
+ COALESCE(SUM(CASE WHEN %s=? AND COALESCE(material_role,'')<>? THEN 1 ELSE 0 END),0) AS failed_total,
+ MAX(%s) AS last_event_at FROM %s WHERE %s IN (?) GROUP BY %s`, eventCols.SourceId, eventCols.Status, eventCols.ReceivedAt, eventDao.Table(), eventCols.SourceId, eventCols.SourceId), sysin.CollectEventStatusFailed, collectMaterialRoleVerify, sourceIDs)
+	if err != nil {
+		return gerror.Wrap(err, "批量统计采集源事件失败")
+	}
+	for _, row := range rows {
+		stats[row["source_id"].Int64()] = &stat{total: row["event_total"].Int64(), failed: row["failed_total"].Int64(), last: row["last_event_at"]}
+	}
+	dispatchDao := pdao.YoubanPublishCollectDispatch
+	dispatchCols := dispatchDao.Columns()
+	rows, err = g.DB().GetAll(ctx, fmt.Sprintf(`SELECT %s AS source_id,COUNT(DISTINCT %s) AS success_total FROM %s WHERE %s IN (?) AND %s=? GROUP BY %s`, dispatchCols.SourceId, dispatchCols.EventId, dispatchDao.Table(), dispatchCols.SourceId, dispatchCols.Status, dispatchCols.SourceId), sourceIDs, sysin.CollectDispatchStatusSent)
+	if err != nil {
+		return gerror.Wrap(err, "批量统计采集源成功数失败")
+	}
+	for _, row := range rows {
+		if v := stats[row["source_id"].Int64()]; v != nil {
+			v.success = row["success_total"].Int64()
+		}
+	}
+	sourceCols := pdao.YoubanPublishCollectSource.Columns()
+	for _, id := range sourceIDs {
+		v := stats[id]
+		if v == nil {
+			v = &stat{}
+		}
+		_, err = pdao.YoubanPublishCollectSource.Ctx(ctx).Where(sourceCols.Id, id).Data(g.Map{sourceCols.EventTotal: v.total, sourceCols.SuccessTotal: v.success, sourceCols.FailedTotal: v.failed, sourceCols.LastEventAt: v.last, sourceCols.UpdatedAt: gtime.Now()}).Update()
+		if err != nil {
+			return gerror.Wrap(err, "批量更新采集源统计失败")
+		}
+	}
+	return nil
+}
+
 func (s *sSysPublish) syncCollectSourceStatsForEvent(ctx context.Context, eventID int64) {
 	if eventID <= 0 {
 		return

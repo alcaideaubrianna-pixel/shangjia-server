@@ -126,5 +126,34 @@ func (s *sSysPublish) handleCollectSourceStatsTask(ctx context.Context, task *as
 		return err
 	}
 	defer mutex.Unlock(context.WithoutCancel(ctx))
-	return refreshCollectSourceStatsWork(ctx, payload.SourceID, s.syncCollectSourceStats)
+	// 一次领取多个 dirty source，统一聚合明细表，避免每个 source 单独
+	// 执行 COUNT/SUM/MAX 扫描。单源任务仍作为兜底，确保旧任务兼容。
+	rows, err := g.DB().Model(collectSourceStatsWorkTable).Ctx(ctx).
+		Fields("source_id,generation").Where("pending", 1).
+		WhereLTE("available_at", time.Now()).OrderAsc("available_at").
+		OrderAsc("source_id").Limit(32).All()
+	if err != nil || len(rows) == 0 {
+		return refreshCollectSourceStatsWork(ctx, payload.SourceID, s.syncCollectSourceStats)
+	}
+	ids := make([]int64, 0, len(rows))
+	generations := make(map[int64]string, len(rows))
+	for _, row := range rows {
+		id := row["source_id"].Int64()
+		if id > 0 {
+			ids = append(ids, id)
+			generations[id] = row["generation"].String()
+		}
+	}
+	if err := s.syncCollectSourceStatsBatch(ctx, ids); err != nil {
+		return err
+	}
+	for id, generation := range generations {
+		_, err = g.DB().Model(collectSourceStatsWorkTable).Ctx(ctx).
+			Where("source_id", id).Where("generation", generation).
+			Data(g.Map{"pending": 0, "updated_at": time.Now()}).Update()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
