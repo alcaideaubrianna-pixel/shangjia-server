@@ -701,7 +701,11 @@ func (s *sSysPublish) ensureCollectPairedVerifyReady(ctx context.Context, displa
 	}
 	ready := true
 	for _, verify := range verifies {
-		if !s.collectEventNeedsMediaCache(ctx, verify) {
+		needsMediaCache, mediaErr := s.collectEventNeedsMediaCacheResult(ctx, verify)
+		if mediaErr != nil {
+			return false, gerror.Wrap(mediaErr, "检查配对验证资料媒体缓存状态失败")
+		}
+		if !needsMediaCache {
 			continue
 		}
 		ready = false

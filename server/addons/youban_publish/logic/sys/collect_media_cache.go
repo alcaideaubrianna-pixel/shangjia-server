@@ -1049,19 +1049,32 @@ func (s *sSysPublish) updateCollectEventMediaItems(ctx context.Context, rows []*
 }
 
 func (s *sSysPublish) collectEventNeedsMediaCache(ctx context.Context, event gdb.Record) bool {
+	needs, err := s.collectEventNeedsMediaCacheResult(ctx, event)
+	if err != nil {
+		// 兼容仍使用旧布尔接口的后台诊断调用；正式处理链路必须使用
+		// collectEventNeedsMediaCacheResult，避免查询失败被误判为媒体已就绪。
+		return false
+	}
+	return needs
+}
+
+// collectEventNeedsMediaCacheResult 判断事件是否仍有媒体需要缓存，并保留数据库错误。
+// 采集主处理链路不能把“读取媒体失败”当成“没有待缓存媒体”，否则会跳过
+// media_pending 阶段并让 media_ready 事件继续执行，最终造成无分发记录的假完成。
+func (s *sSysPublish) collectEventNeedsMediaCacheResult(ctx context.Context, event gdb.Record) (bool, error) {
 	rows, err := s.collectEventMediaRows(ctx, event["id"].Int64())
 	if err != nil {
-		return false
+		return false, err
 	}
 	for _, row := range rows {
 		if row == nil {
 			continue
 		}
 		if collectEventMediaRowNeedsCache(event, row) {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 func collectMediaRowNeedsCache(sourceFileId string, sourceMessageRef string, storagePath string, fileUrl string, backupChatId string, backupMessageId int64) bool {

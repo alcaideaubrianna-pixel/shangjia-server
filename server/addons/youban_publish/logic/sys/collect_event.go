@@ -448,7 +448,11 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 				return newCollectProcessRetryError(5*time.Second, "等待父展示资料完成规则和去重预检")
 			}
 		}
-		if s.collectEventNeedsMediaCache(ctx, event) {
+		needsMediaCache, mediaErr := s.collectEventNeedsMediaCacheResult(ctx, event)
+		if mediaErr != nil {
+			return gerror.Wrap(mediaErr, "检查验证资料媒体缓存状态失败")
+		}
+		if needsMediaCache {
 			_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusMediaPending, "验证媒体缓存中")
 			return s.enqueueCollectMediaCache(ctx, collectMediaQueuePayloadFromEvent(event), 0)
 		}
@@ -499,7 +503,11 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 	if verifyErr != nil {
 		return verifyErr
 	}
-	if s.collectEventNeedsMediaCache(ctx, event) {
+	needsMediaCache, mediaErr := s.collectEventNeedsMediaCacheResult(ctx, event)
+	if mediaErr != nil {
+		return gerror.Wrap(mediaErr, "检查采集资料媒体缓存状态失败")
+	}
+	if needsMediaCache {
 		g.Log().Debugf(ctx, "采集事件进入媒体缓存 eventId:%d media:%d", eventId, event["media_count"].Int())
 		if err = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusMediaPending, "媒体缓存中"); err != nil {
 			return err
