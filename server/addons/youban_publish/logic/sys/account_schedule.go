@@ -46,6 +46,10 @@ func (s *sSysPublish) syncProfileCycleRunJob(ctx context.Context, job telegramJo
 	if !strings.HasPrefix(job.OperationNo, "profile_cycle:") {
 		return nil
 	}
+	// Outbox 尚未完成时不能收口投影；兼容历史任务的空 dispatch_status。
+	if job.DispatchStatus != "" && job.DispatchStatus != tgDispatchStatusDone {
+		return nil
+	}
 	projectionStatus := ""
 	switch job.Status {
 	case telegramJobStatusSent:
