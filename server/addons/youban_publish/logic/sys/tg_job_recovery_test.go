@@ -48,7 +48,7 @@ func TestTelegramPendingRecoveryPostgresSelectsHeadsBeforeDueFilters(t *testing.
 		t.Fatalf("PostgreSQL recovery query has unbalanced parentheses: %s", query)
 	}
 	for _, fragment := range []string{
-		"WITH channel_heads AS", "DISTINCT ON", "j.status IN ('pending','failed_retry','confirming','sending')",
+		"WITH channel_heads AS", "DISTINCT ON", "j.status IN ('pending','confirming','sending')", "j.status='failed_retry'",
 		"ORDER BY j.tenant_id", "j.created_at, j.id", "h.status IN ('pending','failed_retry','unknown')",
 		"COALESCE(h.dispatch_status,'') IN ('','idle')", "h.next_retry_at IS NULL OR h.next_retry_at<=?",
 		"h.updated_at<=?", "ORDER BY h.created_at,h.id", "LIMIT ?",
