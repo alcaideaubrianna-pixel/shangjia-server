@@ -19,6 +19,12 @@ WHERE publish_at IS NOT NULL AND deleted_at IS NULL;
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ybp_tg_job_failed_display_recovery
 ON hg_youban_publish_tg_job (tenant_id,account_id,updated_at,id)
 WHERE status='failed' AND send_phase='display_confirmed';
+-- 账户恢复查询按 status/send_phase 过滤，再按 account_id 分组排序。
+-- INCLUDE 错误字段避免为每个候选账户回表读取 last_dispatch_error。
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ybp_tg_job_recovery_status_phase_account
+ON hg_youban_publish_tg_job (status,send_phase,account_id)
+INCLUDE (last_dispatch_error)
+WHERE status='failed' AND send_phase='display_confirmed' AND account_id>0;
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ybp_tg_job_missing_operation_state
 ON hg_youban_publish_tg_job (tenant_id,account_id,id)
 WHERE task_id IS NULL AND operation_no<>'' AND status IN ('pending','sending','failed_retry','unknown');
