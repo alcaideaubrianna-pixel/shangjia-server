@@ -545,10 +545,14 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 	}
 	// 账户目录先分片，避免 Stream 模式每轮更新/扫描全局 Job 和 Outbox 大表。
 	var accounts []int64
-	if err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
+	// 账户目录直接从 Outbox 读取，避免先扫描 tg_job 再用 EXISTS 回查 Outbox。
+	// 这样 Stream 快速路径只触碰到期通知行，历史任务不会进入候选集合。
+	if err := g.DB().Model(publishTgOutboxTable+" o").Safe().Ctx(ctx).
 		Fields("DISTINCT j.account_id").
-		Where("j.account_id > 0").WhereIn("j.status", []string{"pending", "failed_retry", "unknown"}).
-		Where("EXISTS (SELECT 1 FROM "+publishTgOutboxTable+" o WHERE o.job_id=j.id AND o.event_type=? AND o.available_at<=? AND o.status IN (?,?))", telegramOutboxEventPublish, now, telegramOutboxPending, telegramOutboxProcessing).
+		InnerJoin(publishTgJobTable+" j", "j.id=o.job_id").
+		Where("j.account_id > 0").Where("o.event_type", telegramOutboxEventPublish).
+		Where("o.available_at <= ?", now).Where("o.status IN (?,?)", telegramOutboxPending, telegramOutboxProcessing).
+		WhereIn("j.status", []string{"pending", "failed_retry", "unknown"}).
 		OrderAsc("j.account_id").Limit(32).Scan(&accounts); err != nil {
 		return nil, gerror.Wrap(err, "读取Stream账户分片失败")
 	}
