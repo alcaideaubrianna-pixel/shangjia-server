@@ -85,6 +85,14 @@ func (s *sSysPublish) BotChannelMembershipChanged(ctx context.Context, botId int
 	if removed {
 		data.RemovedAt = now
 	}
+	// 同一 BOT/频道的重复成员事件不重复争抢数据库行锁；状态变化或超过短窗口后仍会正常落库。
+	upsertKey := fmt.Sprintf("youban_publish:collect_bot_channel_upsert:%d:%d:%d:%s:%s", bot.TenantId, botId, channel.Id, state, role)
+	if cached, cacheErr := cache.Instance().Get(ctx, upsertKey); cacheErr == nil && !cached.IsNil() && !removed {
+		return nil
+	}
+	if !removed {
+		_ = cache.Instance().Set(ctx, upsertKey, true, 5*time.Second)
+	}
 	_, err := pdao.YoubanPublishCollectBotChannel.Ctx(ctx).Data(data).OnConflict("tenant_id,bot_id,channel_id").OnDuplicate("status,bot_role,last_seen_at,last_update_id,updated_at,removed_at,removed_reason").Save()
 	if err != nil {
 		return err
