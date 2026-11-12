@@ -104,8 +104,10 @@ func applyProfileKeywordSearch(mod *gdb.Model, keyword string, fields profileSea
 		conditions := make([]string, 0, len(terms))
 		args := make([]interface{}, 0, len(terms))
 		for _, term := range terms {
-			conditions = append(conditions, "EXISTS (SELECT 1 FROM hg_youban_publish_note_search ns WHERE ns.tenant_id=i.tenant_id AND ns.account_id=i.account_id AND ns.profile_id=i.profile_id AND ns.deleted_at IS NULL AND ns.search_text ILIKE ?)")
+			legacy, legacyArgs := profileTextSearchCondition(term, fields)
+			conditions = append(conditions, "(EXISTS (SELECT 1 FROM hg_youban_publish_note_search ns WHERE ns.tenant_id=i.tenant_id AND ns.account_id=i.account_id AND ns.profile_id=i.profile_id AND ns.deleted_at IS NULL AND ns.search_text ILIKE ?) OR (NOT EXISTS (SELECT 1 FROM hg_youban_publish_note_search ns0 WHERE ns0.tenant_id=i.tenant_id AND ns0.account_id=i.account_id AND ns0.profile_id=i.profile_id) AND "+legacy+"))")
 			args = append(args, "%"+term+"%")
+			args = append(args, legacyArgs...)
 		}
 		if len(conditions) > 0 {
 			return mod.Where("("+strings.Join(conditions, " AND ")+")", args...)
