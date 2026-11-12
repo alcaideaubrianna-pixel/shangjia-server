@@ -94,6 +94,10 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 	if config.BackgroundQueue {
 		s.startTelegramBackgroundWorker(ctx)
 	}
+	// 资料指纹回填是低优先级维护任务，只允许 Background 角色运行，不能和 Publish 调度/发送共用实例。
+	if config.BackgroundWorker {
+		go s.runProfileFingerprintBackfill(ctx)
+	}
 	if config.PushWorker || config.MediaWorker || config.BackgroundWorker || config.CollectorWorker || config.CollectProcessWorker {
 		go s.runAsynqObserveMetrics(ctx)
 	}
@@ -125,7 +129,6 @@ func (s *sSysPublish) startPublishSchedulers(ctx context.Context) {
 	go s.runFullPushBatchScheduler(ctx)
 	go s.runTelegramObserveStatsRefresher(ctx)
 	go s.runCollectRecovery(ctx)
-	go s.runProfileFingerprintBackfill(ctx)
 	go s.runMaterialImportRecovery(ctx)
 	go s.runPublishRecordRetentionCleaner(ctx)
 	go func() {

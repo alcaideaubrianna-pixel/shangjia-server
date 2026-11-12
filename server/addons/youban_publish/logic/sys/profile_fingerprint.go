@@ -669,7 +669,7 @@ func (s *sSysPublish) runProfileFingerprintBackfill(ctx context.Context) {
 		if err := mutex.Lock(ctx); err != nil {
 			g.Log().Warningf(ctx, "获取资料指纹回填锁失败 err:%+v", err)
 		} else {
-			count, err := s.backfillProfileFingerprints(ctx, 20)
+			count, err := s.backfillProfileFingerprints(ctx, 100)
 			_ = mutex.Unlock(context.Background())
 			if err != nil {
 				g.Log().Warningf(ctx, "资料指纹回填失败 err:%+v", err)
