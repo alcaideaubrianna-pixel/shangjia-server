@@ -64,10 +64,10 @@ func TestTelegramDueOutboxPostgresSQLForAccountScopesDueJobs(t *testing.T) {
 }
 
 func TestTelegramOutboxTimeoutsAreBounded(t *testing.T) {
-	if telegramOutboxQueryTimeout <= 0 || telegramOutboxQueryTimeout > 5*time.Second {
+	if telegramOutboxQueryTimeout != 30*time.Second {
 		t.Fatalf("unexpected outbox query timeout: %s", telegramOutboxQueryTimeout)
 	}
-	if telegramOutboxLeaseTTL <= telegramOutboxQueryTimeout || telegramOutboxLeaseTTL > time.Minute {
+	if telegramOutboxLeaseTTL <= telegramOutboxQueryTimeout || telegramOutboxLeaseTTL > 2*time.Minute {
 		t.Fatalf("unexpected outbox lease TTL: %s", telegramOutboxLeaseTTL)
 	}
 }

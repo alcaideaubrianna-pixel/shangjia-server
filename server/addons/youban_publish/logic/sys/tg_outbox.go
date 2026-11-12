@@ -18,11 +18,13 @@ const (
 	telegramOutboxPending      = "pending"
 	telegramOutboxProcessing   = "processing"
 	telegramOutboxDelivered    = "delivered"
-	telegramOutboxLeaseTTL     = 30 * time.Second
-	telegramOutboxQueryTimeout = 5 * time.Second
+	// 查询允许最多运行 30 秒，但只作用于当前账户分片；超时后该分片退避，
+	// 不得占用其他账户的调度资源。租约必须长于查询预算，避免查询尚未结束时租约提前过期。
+	telegramOutboxLeaseTTL     = 90 * time.Second
+	telegramOutboxQueryTimeout = 30 * time.Second
 	telegramOutboxWorkers      = 32
-	// 大批量会让频道前序 NOT EXISTS 查询退化为 O(N²)，积压时直接触发
-	// 5 秒查询超时并阻塞全部频道。小批次配合下一轮调度可保持实时性。
+	// 大批量会让频道前序查询退化为 O(N²)，积压时可能触发查询超时。
+	// 小批次配合账户分片和失败退避，确保单账户慢查询不会阻塞其他账户。
 	telegramOutboxBatchLimitDefault       = 500
 	telegramOutboxMaxBatchLimitDefault    = 10000
 	telegramStreamOutboxBatchLimitDefault = 500
