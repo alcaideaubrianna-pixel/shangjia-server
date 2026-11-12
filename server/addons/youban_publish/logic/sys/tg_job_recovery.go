@@ -76,6 +76,9 @@ func (s *sSysPublish) recoverInterruptedTelegramJobs(ctx context.Context, limit 
 }
 
 func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
+	if heavyRecoveryDisabled("YOUBAN_DISABLE_TELEGRAM_RECOVERY") {
+		return
+	}
 	ticker := time.NewTicker(telegramRecoveryInterval(tgJobRecoveryIntervalEnv))
 	defer ticker.Stop()
 	startup := time.NewTimer(15 * time.Second)

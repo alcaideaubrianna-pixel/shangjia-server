@@ -114,6 +114,9 @@ func refreshCollectSourceStatsWork(ctx context.Context, sourceID int64, refresh 
 }
 
 func (s *sSysPublish) handleCollectSourceStatsTask(ctx context.Context, task *asynq.Task) error {
+	if heavyRecoveryDisabled("YOUBAN_DISABLE_COLLECT_STATS_RECONCILIATION") {
+		return nil
+	}
 	select {
 	case collectStatsLowPriorityGate <- struct{}{}:
 		defer func() { <-collectStatsLowPriorityGate }()

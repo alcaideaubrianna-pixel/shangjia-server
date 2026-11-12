@@ -86,6 +86,9 @@ func telegramStreamExecutionContext(ctx context.Context, lease telegramChannelLe
 
 // runTelegramStreamExecutionRecovery 定期补偿新引擎已失去执行者的确认阶段，单轮有界且按频道独立抢占。
 func (s *sSysPublish) runTelegramStreamExecutionRecovery(ctx context.Context) {
+	if heavyRecoveryDisabled("YOUBAN_DISABLE_TELEGRAM_RECOVERY") {
+		return
+	}
 	ticker := time.NewTicker(telegramStreamExecutionRecoveryInterval)
 	defer ticker.Stop()
 	cursor := int64(0)

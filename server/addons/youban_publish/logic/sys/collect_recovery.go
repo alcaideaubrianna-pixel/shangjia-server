@@ -156,6 +156,9 @@ func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 // collect_dispatch 的历史事件。该入口只重新投递采集处理 Outbox，不直接
 // 创建资料或发布任务，因此不会绕过规则、审核和去重流程。
 func (s *sSysPublish) recoverMediaReadyWithoutDispatch(ctx context.Context, limit int) error {
+	if heavyRecoveryDisabled("YOUBAN_DISABLE_MEDIA_READY_RECOVERY") {
+		return nil
+	}
 	if limit <= 0 {
 		limit = 100
 	}
