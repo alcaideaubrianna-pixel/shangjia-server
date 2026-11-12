@@ -125,6 +125,34 @@ func refreshAccountVisibilityFollowEdge(ctx context.Context, tenantID, firstID, 
 			Where("tenant_id", tenantID).Where("viewer_account_id", viewer).Where("visible_account_id", visible).Delete()
 		return err
 	}
+	syncTenantScope := func(viewer, adminID int64, enabled bool) error {
+		if !enabled {
+			_, err := g.DB().Model(accountVisibilityReadModelTable).Ctx(ctx).
+				Where("tenant_id", tenantID).Where("viewer_account_id", viewer).
+				Where("relation_type", "tenant_scope").Delete()
+			return err
+		}
+		var accountType string
+		if err := pdao.YoubanPublishAccount.Ctx(ctx).Fields("account_type").Where("tenant_id", tenantID).Where("id", adminID).WhereNull("deleted_at").Scan(&accountType); err != nil {
+			return err
+		}
+		if accountType != sysin.PublishAccountTypeAdmin {
+			return nil
+		}
+		var visibleIDs []int64
+		if err := pdao.YoubanPublishAccount.Ctx(ctx).Fields("id").Where("tenant_id", tenantID).Where("status", 1).WhereNull("deleted_at").Scan(&visibleIDs); err != nil {
+			return err
+		}
+		for _, visible := range visibleIDs {
+			if visible <= 0 || visible == viewer {
+				continue
+			}
+			if err := upsert(viewer, visible, "tenant_scope"); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	if forward == sysin.AccountFollowStatusApproved {
 		typ := "following"
 		if backward == sysin.AccountFollowStatusApproved {
@@ -133,7 +161,12 @@ func refreshAccountVisibilityFollowEdge(ctx context.Context, tenantID, firstID, 
 		if err = upsert(firstID, secondID, typ); err != nil {
 			return err
 		}
+		if err = syncTenantScope(firstID, secondID, true); err != nil {
+			return err
+		}
 	} else if err = remove(firstID, secondID); err != nil {
+		return err
+	} else if err = syncTenantScope(firstID, secondID, false); err != nil {
 		return err
 	}
 	if backward == sysin.AccountFollowStatusApproved {
@@ -144,7 +177,12 @@ func refreshAccountVisibilityFollowEdge(ctx context.Context, tenantID, firstID, 
 		if err = upsert(secondID, firstID, typ); err != nil {
 			return err
 		}
+		if err = syncTenantScope(secondID, firstID, true); err != nil {
+			return err
+		}
 	} else if err = remove(secondID, firstID); err != nil {
+		return err
+	} else if err = syncTenantScope(secondID, firstID, false); err != nil {
 		return err
 	}
 	return nil
