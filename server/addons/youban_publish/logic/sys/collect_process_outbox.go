@@ -131,12 +131,15 @@ func completeCollectProcessOutbox(ctx context.Context, payload collectProcessQue
 	}
 }
 
-func (s *sSysPublish) dispatchDueCollectProcessOutbox(ctx context.Context, limit int) error {
+func (s *sSysPublish) dispatchDueCollectProcessOutbox(ctx context.Context, limit int, scopes ...publishAccountScope) error {
 	if limit <= 0 {
 		limit = 500
 	}
 	now := gtime.Now()
 	model := g.DB().Model(collectProcessOutboxTable).Ctx(ctx)
+	if len(scopes) > 0 {
+		model = model.Where("tenant_id", scopes[0].TenantID).Where("account_id", scopes[0].AccountID)
+	}
 	if strings.EqualFold(g.DB().GetConfig().Type, "pgsql") {
 		model = model.Fields("*, updated_at::text AS claim_version")
 	}

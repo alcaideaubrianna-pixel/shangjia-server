@@ -13,7 +13,21 @@ func (s *sSysPublish) runCollectProcessDispatcher(ctx context.Context) {
 	defer ticker.Stop()
 	for {
 		cycleCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		err := s.dispatchDueCollectProcessOutbox(cycleCtx, 200)
+		// 账户级轮询，避免一个历史积压账户占满全局 Outbox 批次。
+		var scopes []publishAccountScope
+		_ = g.DB().Model(collectProcessOutboxTable).Ctx(cycleCtx).
+			Fields("tenant_id,account_id").Where("status", "pending").Where("account_id > 0").
+			Group("tenant_id,account_id").OrderAsc("tenant_id").OrderAsc("account_id").Limit(16).Scan(&scopes)
+		err := error(nil)
+		if len(scopes) == 0 {
+			err = s.dispatchDueCollectProcessOutbox(cycleCtx, 200)
+		} else {
+			for _, scope := range scopes {
+				if scopeErr := s.dispatchDueCollectProcessOutbox(cycleCtx, 200, scope); scopeErr != nil && err == nil {
+					err = scopeErr
+				}
+			}
+		}
 		s.observeCollectProcessBacklog(cycleCtx)
 		cancel()
 		if err != nil && ctx.Err() == nil {
