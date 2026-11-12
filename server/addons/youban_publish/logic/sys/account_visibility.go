@@ -61,7 +61,7 @@ func refreshAccountVisibilityAccountEdge(ctx context.Context, tenantID, accountI
 	}
 	_, err := g.DB().Model(accountVisibilityReadModelTable).Ctx(ctx).
 		Where("tenant_id", tenantID).Where("visible_account_id", accountID).
-		WhereIn("relation_type", []string{"self", "managed"}).Delete()
+		WhereIn("relation_type", []string{"self", "managed", "tenant_scope"}).Delete()
 	return err
 }
 
