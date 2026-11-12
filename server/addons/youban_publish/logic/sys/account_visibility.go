@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
@@ -22,6 +24,73 @@ type adminProfileVisibleScope struct {
 
 const accountVisibilityCacheTTL = 10 * time.Minute
 const accountVisibilityVersionTTL = 24 * time.Hour
+
+const accountVisibilityReadModelTable = "hg_youban_publish_account_visibility"
+
+// refreshAccountVisibilityFollowEdge keeps the additive visibility read model
+// in sync after a follow mutation. The legacy resolver remains authoritative;
+// failures are returned to the caller so a deployment cannot silently claim
+// the projection was refreshed when the relation table is unavailable.
+func refreshAccountVisibilityFollowEdge(ctx context.Context, tenantID, firstID, secondID int64) error {
+	if tenantID <= 0 || firstID <= 0 || secondID <= 0 || firstID == secondID {
+		return nil
+	}
+	type relation struct{ Status string }
+	read := func(follower, following int64) (string, error) {
+		var row relation
+		err := pdao.YoubanPublishAccountFollow.Ctx(ctx).
+			Fields("status").Where("tenant_id", tenantID).
+			Where("follower_account_id", follower).Where("following_account_id", following).
+			WhereNull("deleted_at").Scan(&row)
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(row.Status), nil
+	}
+	forward, err := read(firstID, secondID)
+	if err != nil {
+		return err
+	}
+	backward, err := read(secondID, firstID)
+	if err != nil {
+		return err
+	}
+	upsert := func(viewer, visible int64, relationType string) error {
+		_, err := g.DB().Model(accountVisibilityReadModelTable).Ctx(ctx).Data(g.Map{
+			"tenant_id": tenantID, "viewer_account_id": viewer, "visible_account_id": visible,
+			"relation_type": relationType, "updated_at": gtime.Now(),
+		}).OnConflict("(tenant_id,viewer_account_id,visible_account_id)").OnDuplicateEx("relation_type", "updated_at").Save()
+		return err
+	}
+	remove := func(viewer, visible int64) error {
+		_, err := g.DB().Model(accountVisibilityReadModelTable).Ctx(ctx).
+			Where("tenant_id", tenantID).Where("viewer_account_id", viewer).Where("visible_account_id", visible).Delete()
+		return err
+	}
+	if forward == sysin.AccountFollowStatusApproved {
+		typ := "following"
+		if backward == sysin.AccountFollowStatusApproved {
+			typ = "mutual"
+		}
+		if err = upsert(firstID, secondID, typ); err != nil {
+			return err
+		}
+	} else if err = remove(firstID, secondID); err != nil {
+		return err
+	}
+	if backward == sysin.AccountFollowStatusApproved {
+		typ := "following"
+		if forward == sysin.AccountFollowStatusApproved {
+			typ = "mutual"
+		}
+		if err = upsert(secondID, firstID, typ); err != nil {
+			return err
+		}
+	} else if err = remove(secondID, firstID); err != nil {
+		return err
+	}
+	return nil
+}
 
 func (s *sSysPublish) adminProfileVisibleScope(ctx context.Context, account *sysin.AccountModel, in *sysin.ProfileListInp) (*adminProfileVisibleScope, error) {
 	if account == nil || account.Id <= 0 || account.TenantId <= 0 {

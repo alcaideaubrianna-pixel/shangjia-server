@@ -191,6 +191,7 @@ func (s *sSysPublish) AccountFollowApply(ctx context.Context, in *sysin.AccountF
 		if err != nil {
 			return gerror.Wrap(err, "提交关注失败")
 		}
+		_ = refreshAccountVisibilityFollowEdge(ctx, account.TenantId, account.Id, targetId)
 		return bumpAccountVisibilityVersion(ctx, account.TenantId)
 	}
 	data["created_at"] = now
@@ -208,6 +209,7 @@ func (s *sSysPublish) AccountFollowApply(ctx context.Context, in *sysin.AccountF
 	if err != nil {
 		return gerror.Wrap(err, "提交关注失败")
 	}
+	_ = refreshAccountVisibilityFollowEdge(ctx, account.TenantId, account.Id, targetId)
 	return bumpAccountVisibilityVersion(ctx, account.TenantId)
 }
 
@@ -285,6 +287,7 @@ func (s *sSysPublish) AccountFollowAction(ctx context.Context, in *sysin.Account
 	if err != nil {
 		return gerror.Wrap(err, "处理关注失败")
 	}
+	_ = refreshAccountVisibilityFollowEdge(ctx, account.TenantId, account.Id, in.AccountId)
 	return bumpAccountVisibilityVersion(ctx, account.TenantId)
 }
 
@@ -337,6 +340,7 @@ func (s *sSysPublish) blockAccountFollow(ctx context.Context, account *sysin.Acc
 	if err != nil {
 		return gerror.Wrap(err, "拉黑账号失败")
 	}
+	_ = refreshAccountVisibilityFollowEdge(ctx, account.TenantId, account.Id, targetAccountId)
 	return bumpAccountVisibilityVersion(ctx, account.TenantId)
 }
 
