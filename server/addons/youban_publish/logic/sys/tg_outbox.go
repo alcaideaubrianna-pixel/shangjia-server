@@ -237,7 +237,9 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 		if err = s.publishTelegramReadyStream(ctx, job); err != nil {
 			return s.releaseTelegramOutbox(ctx, row.Id, owner, row.AttemptCount, err.Error())
 		}
-		return s.markTelegramOutboxDelivered(ctx, row.Id, owner, job.Id)
+		// Stream 只代表就绪通知写入 Redis；必须确认执行任务已进入
+		// queued/processing 并写入 task_id/asynq_task_id 后才能确认 Outbox。
+		return s.confirmTelegramStreamOutbox(ctx, row.Id, owner, job.Id, row.AttemptCount)
 	}
 	g.Log().Info(ctx, "TG Outbox 租约已获取", g.Map{"event": "outbox_lease_acquired", "outboxId": row.Id, "jobId": row.JobId, "leaseOwner": owner})
 	// available_at is a database wall-clock timestamp. The caller only selects

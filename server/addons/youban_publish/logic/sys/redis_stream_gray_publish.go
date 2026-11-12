@@ -56,9 +56,18 @@ func (s *sSysPublish) publishTelegramReadyStream(ctx context.Context, job telegr
 	return nil
 }
 
-// markTelegramOutboxDelivered 收口已经写入 Stream 的 Outbox，不执行 Asynq 入队。
-func (s *sSysPublish) markTelegramOutboxDelivered(ctx context.Context, outboxID int64, owner string, jobID int64) error {
-	_, err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
+// confirmTelegramStreamOutbox 只有在执行队列成功接管任务后才确认 Outbox。
+// Stream 写入成功本身不是执行成功；如果任务仍是 pending/idle，必须释放租约
+// 等待下一轮重试，避免出现 Outbox delivered 但频道永远不发送。
+func (s *sSysPublish) confirmTelegramStreamOutbox(ctx context.Context, outboxID int64, owner string, jobID int64, attemptCount int) error {
+	job, err := s.telegramJobById(ctx, jobID)
+	if err != nil {
+		return s.releaseTelegramOutbox(ctx, outboxID, owner, attemptCount, err.Error())
+	}
+	if telegramOutboxJobStillNeedsDispatch(job.Status, job.DispatchStatus) {
+		return s.releaseTelegramOutbox(ctx, outboxID, owner, attemptCount, "Stream任务尚未写入执行队列，等待重试")
+	}
+	_, err = g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
 		Where("id", outboxID).Where("status", telegramOutboxProcessing).Where("lease_owner", owner).
 		Data(g.Map{"status": telegramOutboxDelivered, "lease_owner": "", "lease_expires_at": nil, "delivered_at": gtime.Now(), "updated_at": gtime.Now()}).Update()
 	if err != nil {
