@@ -177,21 +177,53 @@ var telegramLegacyTimeoutCleanupClaimSQL = `WITH candidates AS (
  ) UPDATE ` + publishTgJobTable + ` j SET timeout_cleanup_at=?
  FROM candidates c WHERE j.id=c.id RETURNING j.*`
 
+// 按账户领取超时清理任务，避免恢复 worker 每轮扫描全库历史任务。
+var telegramTimeoutCleanupAccountSQL = `WITH candidates AS (
+ SELECT id FROM ` + publishTgJobTable + `
+ WHERE tenant_id=? AND account_id=? AND account_id>0
+ AND send_phase='timeout_cancelled' AND timeout_cleanup_at<=?
+ ORDER BY timeout_cleanup_at,id LIMIT 10 FOR UPDATE SKIP LOCKED
+ ) UPDATE ` + publishTgJobTable + ` j SET timeout_cleanup_at=?
+ FROM candidates c WHERE j.id=c.id RETURNING j.*`
+
+var telegramLegacyTimeoutCleanupAccountSQL = `WITH candidates AS (
+ SELECT id FROM ` + publishTgJobTable + `
+ WHERE tenant_id=? AND account_id=? AND account_id>0
+ AND send_phase='timeout_cancelled' AND timeout_cleanup_at IS NULL
+ ORDER BY id LIMIT 10 FOR UPDATE SKIP LOCKED
+ ) UPDATE ` + publishTgJobTable + ` j SET timeout_cleanup_at=?
+ FROM candidates c WHERE j.id=c.id RETURNING j.*`
+
 func (s *sSysPublish) cleanupTelegramSendTimeouts(ctx context.Context) {
 	batchCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
-	var jobs []telegramJobRecord
-	// Claim a bounded batch across replicas; a crashed worker releases it by expiry.
 	now := gtime.Now()
-	if err := g.DB().GetScan(batchCtx, &jobs, telegramTimeoutCleanupClaimSQL, now, now.Add(2*time.Minute)); err != nil {
-		g.Log().Warningf(batchCtx, "TG超时清理扫描失败 err:%+v", err)
+	// 先按租户/账户取有限 scope，再在 scope 内领取，禁止全库历史扫描。
+	var scopes []struct {
+		TenantID  int64 `orm:"tenant_id"`
+		AccountID int64 `orm:"account_id"`
+	}
+	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(batchCtx).
+		Fields("tenant_id,account_id").Where("account_id > 0").
+		Where("send_phase", telegramSendPhaseTimeoutCancelled).Group("tenant_id,account_id").
+		OrderAsc("tenant_id").OrderAsc("account_id").Limit(16).Scan(&scopes); err != nil {
+		g.Log().Warningf(batchCtx, "读取TG超时清理账户分片失败 err:%+v", err)
 		return
 	}
-	var legacy []telegramJobRecord
-	if err := g.DB().GetScan(batchCtx, &legacy, telegramLegacyTimeoutCleanupClaimSQL, now.Add(2*time.Minute)); err != nil {
-		g.Log().Warningf(batchCtx, "TG历史超时清理扫描失败 err:%+v", err)
-	} else {
-		jobs = append(jobs, legacy...)
+	var jobs []telegramJobRecord
+	for _, scope := range scopes {
+		var scoped []telegramJobRecord
+		if err := g.DB().GetScan(batchCtx, &scoped, telegramTimeoutCleanupAccountSQL, scope.TenantID, scope.AccountID, now, now.Add(2*time.Minute)); err != nil {
+			g.Log().Warningf(batchCtx, "TG超时清理账户分片失败 tenantId:%d accountId:%d err:%+v", scope.TenantID, scope.AccountID, err)
+		} else {
+			jobs = append(jobs, scoped...)
+		}
+		var legacy []telegramJobRecord
+		if err := g.DB().GetScan(batchCtx, &legacy, telegramLegacyTimeoutCleanupAccountSQL, scope.TenantID, scope.AccountID, now.Add(2*time.Minute)); err != nil {
+			g.Log().Warningf(batchCtx, "TG历史超时清理账户分片失败 tenantId:%d accountId:%d err:%+v", scope.TenantID, scope.AccountID, err)
+		} else {
+			jobs = append(jobs, legacy...)
+		}
 	}
 	var workers sync.WaitGroup
 	slots := make(chan struct{}, 4)
