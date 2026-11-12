@@ -26,41 +26,29 @@ func (s *sSysPublish) collectMessageFromAccountPublishChannel(ctx context.Contex
 	if tenantId <= 0 || chatId == "" {
 		return false, nil
 	}
-	// 已配置为上架目标的频道，其所有消息都必须停止在采集入口。
-	// 不能依赖 tg_message 审计记录：审计可能尚未写入、已被清理或来自旧版本，
-	// 否则上架消息会被误判为外部消息，重新进入采集形成死循环。
-	version := s.collectSourceCacheVersion(ctx)
-	cacheKey := fmt.Sprintf("%s:%s:%d:%d", collectPublishChannelCacheKey, version, tenantId, tgAccountId)
-	var chatIds []string
-	if value, cacheErr := cache.Instance().Get(ctx, cacheKey); cacheErr == nil && !value.IsNil() {
-		if json.Unmarshal([]byte(value.String()), &chatIds) == nil {
-			return collectChatMatchesPublishChannel(chatId, chatIds), nil
-		}
+	// Do this lookup synchronously at the ingestion boundary. A long-lived
+	// cached target list can outlive a channel reconfiguration and let messages
+	// from a publish target re-enter collection, creating an A -> A loop.
+	// Telegram represents channel IDs both as N and -100N, so compare both
+	// canonical forms without stripping arbitrary "100" substrings.
+	var target struct {
+		Id int64 `json:"id"`
 	}
 	model := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
-		Fields("target_chat_id").
+		Fields("id").
 		Where("tenant_id", tenantId).
 		Where("publish_direction", "up").
 		Where("status", 1).
-		WhereNull("deleted_at")
+		WhereNull("deleted_at").
+		Where("(target_chat_id=? OR target_chat_id=? OR REPLACE(target_chat_id,'-100','')=?)", chatId, "-100"+chatId, chatId)
 	if tgAccountId > 0 {
 		model = model.Where("tg_account_id", tgAccountId)
 	}
-	records, err := model.All()
+	err := model.Scan(&target)
 	if err != nil {
 		return false, err
 	}
-	chatIds = make([]string, 0, len(records))
-	for _, record := range records {
-		targetChatId := normalizeTelegramChannelChatID(record["target_chat_id"].String())
-		if targetChatId != "" {
-			chatIds = append(chatIds, targetChatId)
-		}
-	}
-	if data, marshalErr := json.Marshal(chatIds); marshalErr == nil {
-		_ = cache.Instance().Set(ctx, cacheKey, string(data), collectSourceCacheTTL)
-	}
-	return collectChatMatchesPublishChannel(chatId, chatIds), nil
+	return target.Id > 0, nil
 }
 
 func collectChatMatchesPublishChannel(chatId string, publishChatIds []string) bool {

@@ -264,6 +264,11 @@ func (s *sSysPublish) rescheduleChannelProfileCycles(ctx context.Context, channe
 		}
 		cursor = rows[len(rows)-1].RelationId
 	}
+	// 兜底修复所有来源的空循环计划（包括用户自行上传资料）。
+	// 这些资料可能由批次循环生成成功任务，但关联映射未投影 next_cycle_at。
+	if _, err = g.DB().Exec(ctx, fmt.Sprintf("UPDATE %s cp SET next_cycle_at = j.sent_at + (? * INTERVAL '1 day'), updated_at=? FROM %s j WHERE cp.last_job_id=j.id AND cp.channel_id=? AND cp.status='active' AND cp.next_cycle_at IS NULL AND j.status IN ('sent','superseded') AND j.sent_at IS NOT NULL", publishChannelProfileTable, publishTgJobTable), config.Days, now, channelId); err != nil {
+		return gerror.Wrap(err, "补齐频道资料循环计划失败")
+	}
 	return s.finishChannelProfileCycleReschedule(ctx, config)
 }
 

@@ -1,8 +1,11 @@
 # syntax=docker/dockerfile:1
 FROM golang:1.25 AS hook-build
 WORKDIR /src
+ARG GOPROXY=https://goproxy.cn,direct
+ENV GOPROXY=${GOPROXY} GOSUMDB=sum.golang.org
 # Hook 单独构建，业务代码更新不会改变 Hook 镜像或中断正在发送的请求。
 COPY go.mod go.sum ./
+RUN go mod download
 COPY tools/tg_hook_mock ./tools/tg_hook_mock
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
     go build -o /out/tg-hook ./tools/tg_hook_mock
@@ -13,6 +16,10 @@ ENTRYPOINT ["/usr/local/bin/tg-hook"]
 
 FROM golang:1.25 AS build
 WORKDIR /src
+ARG GOPROXY=https://goproxy.cn,direct
+ENV GOPROXY=${GOPROXY} GOSUMDB=sum.golang.org
+COPY go.mod go.sum ./
+RUN go mod download
 COPY . .
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
     go build -o /out/youban-server ./main.go
