@@ -36,7 +36,7 @@ func (s *sSysPublish) settleStreamFailedMediaJob(ctx context.Context, job telegr
 	changed, err := s.transitionTelegramJob(ctx, telegramJobTransition{
 		JobId: job.Id, From: []string{telegramJobStatusPending, telegramJobStatusRetryWait},
 		To: telegramJobStatusFailed, SendPhases: []string{""}, ErrorMessage: message,
-		Additional: g.Map{"last_dispatch_error": message},
+		Additional: g.Map{"last_dispatch_error": message, "dispatch_status": "done", "send_phase": "skipped_missing_profile"},
 	})
 	if err != nil || !changed {
 		return true, err
