@@ -74,8 +74,7 @@ func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload co
 	// 正常窗口和验证重试窗口分开查询，避免一个来源的历史验证资料触发大范围 OR 扫描。
 	eventModel := collectMaterialWindowModel(ctx, payload, false).
 		Where("e.processed_at IS NULL").
-		Where(collectMaterialGroupReadyCondition(), collectMaterialGroupWaitingVerify).
-		Where("e.updated_at <= ? OR e.material_group_status IS NULL", now)
+		Where(collectMaterialGroupReadyCondition(), collectMaterialGroupWaitingVerify)
 	if payload.EventId > 0 {
 		eventModel = eventModel.Where("e.id", payload.EventId)
 	}
@@ -204,8 +203,7 @@ func (s *sSysPublish) loadTargetCollectMaterialWindow(ctx context.Context, paylo
 			model = model.Where("e.updated_at <= ?", now.Add(-collectMaterialWaitingVerifyRetryDelay))
 		} else {
 			model = model.Where("e.processed_at IS NULL").
-				Where(collectMaterialGroupReadyCondition(), collectMaterialGroupWaitingVerify).
-				Where("e.updated_at <= ? OR e.material_group_status IS NULL", now)
+				Where(collectMaterialGroupReadyCondition(), collectMaterialGroupWaitingVerify)
 		}
 		return model.Fields("e.*").OrderAsc("e.source_message_id").OrderAsc("e.id").Limit(maxRows + 1).All()
 	}
