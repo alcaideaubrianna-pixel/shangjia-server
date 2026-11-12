@@ -543,12 +543,32 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 	if limit > telegramOutboxMaxBatchLimit(ctx) {
 		limit = telegramOutboxMaxBatchLimit(ctx)
 	}
-	// 频道顺序检查失败后，通知可能已经被确认 delivered，但 Job 仍是 idle。
-	// 每轮只按主键选取一小页重新激活，避免这类孤儿通知让频道永久卡在队首。
-	// dispatch_status=idle 表示旧 Asynq 执行已经结束，asynq_task_id 可能只是陈旧引用；清掉它才能重新入队。
-	clearStaleTaskSQL := `WITH stale AS (
+	// 账户目录先分片，避免 Stream 模式每轮更新/扫描全局 Job 和 Outbox 大表。
+	var accounts []int64
+	if err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
+		Fields("DISTINCT j.account_id").
+		Where("j.account_id > 0").WhereIn("j.status", []string{"pending", "failed_retry", "unknown"}).
+		Where("EXISTS (SELECT 1 FROM "+publishTgOutboxTable+" o WHERE o.job_id=j.id AND o.event_type=? AND o.available_at<=? AND o.status IN (?,?))", telegramOutboxEventPublish, now, telegramOutboxPending, telegramOutboxProcessing).
+		OrderAsc("j.account_id").Limit(32).Scan(&accounts); err != nil {
+		return nil, gerror.Wrap(err, "读取Stream账户分片失败")
+	}
+	accounts = append(accounts, 0) // account_id=0 legacy fallback
+	perAccount := limit / len(accounts)
+	if perAccount < 1 {
+		perAccount = 1
+	}
+	var rows []telegramJobOutboxRecord
+	for _, accountID := range accounts {
+		accountFilter := "j.account_id=?"
+		if accountID == 0 {
+			accountFilter = "j.account_id<=0"
+		}
+		// 频道顺序检查失败后，通知可能已经被确认 delivered，但 Job 仍是 idle。
+		// 每轮只按主键选取一小页重新激活，避免这类孤儿通知让频道永久卡在队首。
+		// dispatch_status=idle 表示旧 Asynq 执行已经结束，asynq_task_id 可能只是陈旧引用；清掉它才能重新入队。
+		clearStaleTaskSQL := `WITH stale AS (
 		SELECT id FROM ` + publishTgJobTable + `
-		WHERE status='pending' AND (
+		WHERE account_id=? AND status='pending' AND (
 				(COALESCE(dispatch_status,'')='idle' AND (next_retry_at IS NULL OR next_retry_at<=?))
 				OR (COALESCE(dispatch_status,'')='queued' AND updated_at<=?)
 			)
@@ -557,17 +577,24 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 	UPDATE ` + publishTgJobTable + ` j
 	SET asynq_task_id='', task_id=NULL, dispatch_status='idle', updated_at=?
 	FROM stale WHERE j.id=stale.id`
-	// queued 状态超过一个执行租约周期仍未进入 sending，说明 Asynq
-	// 任务可能已丢失；清理引用后由持久化 Outbox 重新唤醒。
-	queuedStaleAt := now.Add(-telegramChannelDispatchLeaseTTL)
-	if _, err := g.DB().Exec(ctx, clearStaleTaskSQL, now, queuedStaleAt, limit, now); err != nil {
-		return nil, gerror.Wrap(err, "清理失效TG执行任务引用失败")
-	}
-	rearmSQL := `WITH due AS (
+		// queued 状态超过一个执行租约周期仍未进入 sending，说明 Asynq
+		// 任务可能已丢失；清理引用后由持久化 Outbox 重新唤醒。
+		queuedStaleAt := now.Add(-telegramChannelDispatchLeaseTTL)
+		if accountID == 0 {
+			clearStaleTaskSQL = strings.Replace(clearStaleTaskSQL, "account_id=?", "account_id<=0", 1)
+		}
+		args := []any{accountID, now, queuedStaleAt, perAccount, now}
+		if accountID == 0 {
+			args = args[1:]
+		}
+		if _, err := g.DB().Exec(ctx, clearStaleTaskSQL, args...); err != nil {
+			return nil, gerror.Wrap(err, "清理失效TG执行任务引用失败")
+		}
+		rearmSQL := `WITH due AS (
 		SELECT o.id
 		FROM ` + publishTgOutboxTable + ` o
 		JOIN ` + publishTgJobTable + ` j ON j.id=o.job_id
-		WHERE o.event_type=? AND o.status=? AND o.delivered_at IS NOT NULL
+		WHERE ` + accountFilter + ` AND o.event_type=? AND o.status=? AND o.delivered_at IS NOT NULL
 			AND j.status IN ('pending','failed_retry','unknown')
 			AND COALESCE(j.dispatch_status,'') IN ('','idle')
 			AND (j.next_retry_at IS NULL OR j.next_retry_at<=? OR (j.status='pending' AND COALESCE(j.dispatch_status,'')='idle'))
@@ -578,25 +605,34 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 	SET status=?, available_at=?, delivered_at=NULL, lease_owner='', lease_expires_at=NULL,
 		last_error='', updated_at=?
 	FROM due WHERE o.id=due.id`
-	if _, err := g.DB().Exec(ctx, rearmSQL, telegramOutboxEventPublish, telegramOutboxDelivered, now, limit, telegramOutboxPending, now, now); err != nil {
-		return nil, gerror.Wrap(err, "恢复已投递但未入队的TG通知失败")
-	}
-	// Stream 只负责快速通知；频道顺序由消费后的幂等入队和完成唤醒保证。
-	// 不在这里重复计算频道队首，避免大表窗口排序拖慢所有账户。
-	query := `SELECT o.id,o.job_id,o.attempt_count,o.available_at
+		rearmArgs := []any{accountID, telegramOutboxEventPublish, telegramOutboxDelivered, now, perAccount, telegramOutboxPending, now, now}
+		if accountID == 0 {
+			rearmArgs = rearmArgs[1:]
+		}
+		if _, err := g.DB().Exec(ctx, rearmSQL, rearmArgs...); err != nil {
+			return nil, gerror.Wrap(err, "恢复已投递但未入队的TG通知失败")
+		}
+		// Stream 只负责快速通知；频道顺序由消费后的幂等入队和完成唤醒保证。
+		// 不在这里重复计算频道队首，避免大表窗口排序拖慢所有账户。
+		query := `SELECT o.id,o.job_id,o.attempt_count,o.available_at
 		FROM ` + publishTgOutboxTable + ` o
 		JOIN ` + publishTgJobTable + ` j ON j.id=o.job_id
-		WHERE o.event_type=? AND o.available_at<=?
+		WHERE ` + accountFilter + ` AND o.event_type=? AND o.available_at<=?
 			AND (o.status=? OR (o.status=? AND o.lease_expires_at<=?))
 			AND j.status IN ('pending','failed_retry','unknown')
 			AND COALESCE(j.dispatch_status,'') IN ('','idle')
 			AND (j.next_retry_at IS NULL OR j.next_retry_at<=? OR (j.status='pending' AND COALESCE(j.dispatch_status,'')='idle'))
 		ORDER BY o.available_at,o.id LIMIT ?`
-	var rows []telegramJobOutboxRecord
-	err := g.DB().GetScan(ctx, &rows, query, telegramOutboxEventPublish, now,
-		telegramOutboxPending, telegramOutboxProcessing, now, now, limit)
-	if err != nil {
-		return nil, gerror.Wrap(err, "读取 Stream 模式TG任务Outbox失败")
+		var rows []telegramJobOutboxRecord
+		queryArgs := []any{accountID, telegramOutboxEventPublish, now, telegramOutboxPending, telegramOutboxProcessing, now, now, perAccount}
+		if accountID == 0 {
+			queryArgs = queryArgs[1:]
+		}
+		var accountRows []telegramJobOutboxRecord
+		if err := g.DB().GetScan(ctx, &accountRows, query, queryArgs...); err != nil {
+			return nil, gerror.Wrap(err, "读取 Stream 模式TG任务Outbox失败")
+		}
+		rows = append(rows, accountRows...)
 	}
 	return rows, nil
 }
