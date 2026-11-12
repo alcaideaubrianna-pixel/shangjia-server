@@ -415,8 +415,6 @@ func (s *sSysPublish) dueTelegramJobOutboxRows(ctx context.Context, limit int, n
 		return s.dueTelegramStreamOutboxRows(queryCtx, limit, now)
 	}
 	if strings.EqualFold(strings.TrimSpace(g.DB().GetConfig().Type), "pgsql") {
-		query := telegramDueOutboxPostgresSQL()
-		var rows []telegramJobOutboxRecord
 		batchLimit := limit
 		if batchLimit <= 0 {
 			batchLimit = telegramOutboxBatchLimit(ctx)
@@ -424,11 +422,32 @@ func (s *sSysPublish) dueTelegramJobOutboxRows(ctx context.Context, limit int, n
 		if batchLimit > telegramOutboxMaxBatchLimit(ctx) {
 			batchLimit = telegramOutboxMaxBatchLimit(ctx)
 		}
-		if err := g.DB().GetScan(queryCtx, &rows, query,
-			telegramOutboxEventPublish, now, telegramOutboxPending, telegramOutboxProcessing, now,
-			now, batchLimit,
-		); err != nil {
-			return nil, gerror.Wrap(err, "读取每频道待投递TG任务Outbox失败")
+		// 先按账户领取少量就绪账户，再逐账户执行频道队首查询，避免一个
+		// 账户的历史积压在全局 NOT EXISTS 查询中耗尽数据库预算。
+		var accountIDs []int64
+		if err := g.DB().GetScan(queryCtx, &accountIDs, `SELECT DISTINCT j.account_id
+			FROM `+publishTgOutboxTable+` o JOIN `+publishTgJobTable+` j ON j.id=o.job_id
+			WHERE o.event_type=? AND o.available_at<=?
+				AND (o.status=? OR (o.status=? AND o.lease_expires_at<=?))
+				AND j.account_id>0 ORDER BY j.account_id LIMIT 64`,
+			telegramOutboxEventPublish, now, telegramOutboxPending, telegramOutboxProcessing, now); err != nil {
+			return nil, gerror.Wrap(err, "读取TG Outbox就绪账户失败")
+		}
+		rows := make([]telegramJobOutboxRecord, 0, batchLimit)
+		perAccount := max(1, min(100, batchLimit/max(1, len(accountIDs))))
+		for _, accountID := range accountIDs {
+			accountQuery := telegramDueOutboxPostgresSQLForAccount()
+			var accountRows []telegramJobOutboxRecord
+			if err := g.DB().GetScan(queryCtx, &accountRows, accountQuery,
+				telegramOutboxEventPublish, now, telegramOutboxPending, telegramOutboxProcessing, now,
+				accountID, now, perAccount,
+			); err != nil {
+				return nil, gerror.Wrapf(err, "读取账户TG任务Outbox失败 accountId:%d", accountID)
+			}
+			rows = append(rows, accountRows...)
+		}
+		if len(rows) > batchLimit {
+			rows = rows[:batchLimit]
 		}
 		if limit > 0 && len(rows) > limit {
 			rows = rows[:limit]
@@ -470,6 +489,13 @@ func (s *sSysPublish) dueTelegramJobOutboxRows(ctx context.Context, limit int, n
 		}
 	}
 	return rows, nil
+}
+
+// telegramDueOutboxPostgresSQLForAccount 将旧的频道队首 SQL 限定到单个账户，
+// 让账户之间共享公平配额而不是共享一次全局候选扫描。
+func telegramDueOutboxPostgresSQLForAccount() string {
+	query := telegramDueOutboxPostgresSQL()
+	return strings.Replace(query, "\n\t), active_heads AS (", "\n\t\tWHERE j.account_id=?\n\t), active_heads AS (", 1)
 }
 
 // dueTelegramStreamOutboxRows 读取全量 Stream 模式下的待通知 Outbox。
