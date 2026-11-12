@@ -424,15 +424,23 @@ func (s *sSysPublish) dueTelegramJobOutboxRows(ctx context.Context, limit int, n
 		}
 		// 先按账户领取少量就绪账户，再逐账户执行频道队首查询，避免一个
 		// 账户的历史积压在全局 NOT EXISTS 查询中耗尽数据库预算。
-		var accountIDs []int64
-		if err := g.DB().GetScan(queryCtx, &accountIDs, `SELECT DISTINCT j.account_id
+		var accountRows []struct {
+			AccountID int64 `orm:"account_id"`
+		}
+		if err := g.DB().GetScan(queryCtx, &accountRows, `SELECT DISTINCT j.account_id AS account_id
 			FROM `+publishTgOutboxTable+` o JOIN `+publishTgJobTable+` j ON j.id=o.job_id
 			WHERE o.event_type=? AND o.available_at<=?
 				AND (o.status=? OR (o.status=? AND o.lease_expires_at<=?))
 				AND j.account_id>0
-				ORDER BY j.account_id LIMIT 64`,
+			ORDER BY j.account_id LIMIT 64`,
 			telegramOutboxEventPublish, now, telegramOutboxPending, telegramOutboxProcessing, now); err != nil {
 			return nil, gerror.Wrap(err, "读取TG Outbox就绪账户失败")
+		}
+		accountIDs := make([]int64, 0, len(accountRows))
+		for _, row := range accountRows {
+			if row.AccountID > 0 {
+				accountIDs = append(accountIDs, row.AccountID)
+			}
 		}
 		rows := make([]telegramJobOutboxRecord, 0, batchLimit)
 		perAccount := max(1, min(100, batchLimit/max(1, len(accountIDs))))
