@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"net"
@@ -177,7 +178,14 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) (resultE
 	targetJob, err = s.telegramJobById(ctx, jobId)
 	step.End(err)
 	if err != nil {
-		return err
+		// 任务首次加载成功后，二次刷新偶发读空不能让频道队列永久卡死。
+		// 保留首次读取的快照继续执行；首次加载仍严格返回错误，避免执行未知任务。
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		g.Log().Warning(ctx, "TG任务二次刷新读空，继续使用已加载快照", g.Map{
+			"jobId": jobId, "error": err.Error(), "event": "telegram_job_reload_fallback",
+		})
 	}
 	if isDownTelegramOperationNo(targetJob.OperationNo) {
 		return s.sendQueuedDownChannelTelegramJob(ctx, jobId)
