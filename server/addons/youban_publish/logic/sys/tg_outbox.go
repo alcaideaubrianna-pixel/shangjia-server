@@ -14,14 +14,16 @@ import (
 )
 
 const (
-	telegramOutboxEventPublish            = "telegram_job.publish"
-	telegramOutboxPending                 = "pending"
-	telegramOutboxProcessing              = "processing"
-	telegramOutboxDelivered               = "delivered"
-	telegramOutboxLeaseTTL                = 30 * time.Second
-	telegramOutboxQueryTimeout            = 5 * time.Second
-	telegramOutboxWorkers                 = 32
-	telegramOutboxBatchLimitDefault       = 5000
+	telegramOutboxEventPublish = "telegram_job.publish"
+	telegramOutboxPending      = "pending"
+	telegramOutboxProcessing   = "processing"
+	telegramOutboxDelivered    = "delivered"
+	telegramOutboxLeaseTTL     = 30 * time.Second
+	telegramOutboxQueryTimeout = 5 * time.Second
+	telegramOutboxWorkers      = 32
+	// 大批量会让频道前序 NOT EXISTS 查询退化为 O(N²)，积压时直接触发
+	// 5 秒查询超时并阻塞全部频道。小批次配合下一轮调度可保持实时性。
+	telegramOutboxBatchLimitDefault       = 500
 	telegramOutboxMaxBatchLimitDefault    = 10000
 	telegramStreamOutboxBatchLimitDefault = 500
 
