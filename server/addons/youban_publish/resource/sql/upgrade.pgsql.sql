@@ -104,6 +104,28 @@ ON CONFLICT ("tenant_id", "viewer_account_id", "visible_account_id") DO UPDATE
 SET "relation_type" = CASE WHEN "relation_type" IN ('self','following','mutual','managed') THEN "relation_type" ELSE EXCLUDED."relation_type" END,
     "updated_at" = CURRENT_TIMESTAMP;
 
+-- A user following a tenant administrator receives the same tenant-wide
+-- account scope as the legacy resolver's expandFollowNoteAccountIds path.
+INSERT INTO "hg_youban_publish_account_visibility"
+  ("tenant_id", "viewer_account_id", "visible_account_id", "relation_type")
+SELECT f."tenant_id", f."follower_account_id", child."id", 'tenant_scope'
+FROM "hg_youban_publish_account_follow" f
+JOIN "hg_youban_publish_account" admin
+  ON admin."id" = f."following_account_id"
+ AND admin."tenant_id" = f."tenant_id"
+ AND admin."account_type" = 'admin'
+ AND admin."status" = 1
+ AND admin."deleted_at" IS NULL
+JOIN "hg_youban_publish_account" child
+  ON child."tenant_id" = admin."tenant_id"
+ AND child."status" = 1
+ AND child."deleted_at" IS NULL
+WHERE f."status" = 'approved'
+  AND f."deleted_at" IS NULL
+ON CONFLICT ("tenant_id", "viewer_account_id", "visible_account_id") DO UPDATE
+SET "relation_type" = CASE WHEN "relation_type" IN ('self','following','mutual','managed') THEN "relation_type" ELSE EXCLUDED."relation_type" END,
+    "updated_at" = CURRENT_TIMESTAMP;
+
 ALTER TABLE "hg_youban_publish_collect_rule"
   ADD COLUMN IF NOT EXISTS "full_match_enabled" smallint NOT NULL DEFAULT 0;
 
