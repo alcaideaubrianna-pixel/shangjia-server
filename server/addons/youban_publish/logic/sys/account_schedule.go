@@ -198,21 +198,36 @@ func reconcileProfileCycleRunChannels(ctx context.Context, scope publishAccountS
 		limit = 500
 	}
 	rows, err := g.DB().GetAll(ctx, `WITH candidates AS (
-		SELECT rc.id, rc.run_id, j.status, COALESCE(j.error_message, '') AS error_message
+		SELECT rc.id, rc.run_id,
+			CASE
+				WHEN j.status='sent' THEN 'sent'
+				WHEN j.status='superseded' THEN 'superseded'
+				WHEN j.status='failed' THEN 'failed'
+				ELSE 'skipped'
+			END AS projection_status,
+			CASE
+				WHEN j.status='superseded' THEN COALESCE(NULLIF(j.error_message, ''), '原任务已被替代')
+				WHEN j.status='failed' THEN COALESCE(NULLIF(j.error_message, ''), 'Telegram任务已终态失败')
+				WHEN j.id IS NULL THEN '频道已关闭或任务已清理'
+				ELSE ''
+			END AS error_message
 		FROM `+publishProfileCycleRunChannelTable+` rc
 		JOIN `+publishProfileCycleRunTable+` r ON r.id=rc.run_id
-		JOIN `+publishTgJobTable+` j ON j.id=rc.job_id
+		LEFT JOIN `+publishTgJobTable+` j ON j.id=rc.job_id
+		LEFT JOIN `+publishChannelTable+` c ON c.id=rc.channel_id AND c.deleted_at IS NULL
 		WHERE rc.tenant_id=? AND rc.account_id=?
 		  AND r.tenant_id=? AND r.account_id=?
 		  AND rc.status NOT IN ('sent','superseded','failed','skipped')
-		  AND j.status IN ('sent','superseded')
-		  AND COALESCE(j.dispatch_status,'')='done'
+		  AND (
+				(j.status IN ('sent','superseded','failed') AND COALESCE(j.dispatch_status,'')='done')
+				OR (rc.job_id=0 AND (c.id IS NULL OR c.status<>1 OR c.cycle_publish_enabled<>1 OR c.publish_direction<>'up'))
+		  )
 		ORDER BY rc.id
 		LIMIT ?
 	)
 	UPDATE `+publishProfileCycleRunChannelTable+` rc
-	SET status=CASE WHEN c.status='sent' THEN 'sent' ELSE 'superseded' END,
-		error_message=CASE WHEN c.status='sent' THEN '' ELSE COALESCE(NULLIF(c.error_message, ''), '原任务已被替代') END,
+	SET status=c.projection_status,
+		error_message=c.error_message,
 		updated_at=NOW()
 	FROM candidates c
 	WHERE rc.id=c.id
