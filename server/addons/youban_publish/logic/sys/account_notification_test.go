@@ -47,7 +47,7 @@ func TestAccountNotificationPreferenceLocalPostgres(t *testing.T) {
 			return err
 		}
 		s := &sSysPublish{}
-		for _, kind := range []string{"daily", "channel", "account", "task"} {
+		for _, kind := range []string{"daily", "channel", "account", "profile_operation", "task"} {
 			calls := fake.calls
 			if err := s.notifyAccountWithPreference(ctx, 1, kind, &botin.NotifyAccountInp{AccountId: 2}); err != nil {
 				return err

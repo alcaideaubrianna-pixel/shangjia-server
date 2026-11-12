@@ -442,7 +442,13 @@ func applyAccountSettingPatch(save *sysin.AccountSettingSaveInp, in *sysin.Accou
 // Notification checks must not render account title/number previews or read
 // unrelated configuration. Missing rows keep the product's enabled default.
 func (s *sSysPublish) accountNotificationEnabled(ctx context.Context, tenantID, accountID int64, kind string) (bool, error) {
-	fields := map[string]string{"daily": "daily_report_enabled", "channel": "channel_alert_enabled", "account": "account_event_enabled", "task": "task_failure_enabled"}
+	fields := map[string]string{
+		"daily":             "daily_report_enabled",
+		"channel":           "channel_alert_enabled",
+		"account":           "account_event_enabled",
+		"profile_operation": "account_event_enabled",
+		"task":              "task_failure_enabled",
+	}
 	field, ok := fields[kind]
 	if !ok {
 		return false, gerror.New("通知设置类型不合法")
