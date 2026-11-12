@@ -339,7 +339,8 @@ func (s *sSysPublish) detachFailedTelegramDisplayJobs(ctx context.Context, limit
 			return err
 		}
 	}
-	return s.detachFailedTelegramDisplayJobsForAccount(ctx, 0, limit)
+	// 无归属历史任务交给独立迁移/清理流程，恢复主循环禁止回退到全局 account_id=0 扫描。
+	return nil
 }
 
 func (s *sSysPublish) detachFailedTelegramDisplayJobsForAccount(ctx context.Context, accountId int64, limit int) error {
