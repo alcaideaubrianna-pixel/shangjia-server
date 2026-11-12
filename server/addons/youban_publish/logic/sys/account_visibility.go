@@ -27,6 +27,36 @@ const accountVisibilityVersionTTL = 24 * time.Hour
 
 const accountVisibilityReadModelTable = "hg_youban_publish_account_visibility"
 
+// refreshAccountVisibilityAccountEdge keeps self/managed edges current after
+// account lifecycle changes. Follow edges are deliberately preserved because
+// they are owned by the follow relation lifecycle.
+func refreshAccountVisibilityAccountEdge(ctx context.Context, tenantID, accountID, parentID int64, active bool) error {
+	if tenantID <= 0 || accountID <= 0 {
+		return nil
+	}
+	if active {
+		now := gtime.Now()
+		_, err := g.DB().Model(accountVisibilityReadModelTable).Ctx(ctx).Data(g.Map{
+			"tenant_id": tenantID, "viewer_account_id": accountID, "visible_account_id": accountID,
+			"relation_type": "self", "updated_at": now,
+		}).OnConflict("(tenant_id,viewer_account_id,visible_account_id)").OnDuplicateEx("relation_type", "updated_at").Save()
+		if err != nil {
+			return err
+		}
+		if parentID > 0 && parentID != accountID {
+			_, err = g.DB().Model(accountVisibilityReadModelTable).Ctx(ctx).Data(g.Map{
+				"tenant_id": tenantID, "viewer_account_id": parentID, "visible_account_id": accountID,
+				"relation_type": "managed", "updated_at": now,
+			}).OnConflict("(tenant_id,viewer_account_id,visible_account_id)").OnDuplicateEx("relation_type", "updated_at").Save()
+		}
+		return err
+	}
+	_, err := g.DB().Model(accountVisibilityReadModelTable).Ctx(ctx).
+		Where("tenant_id", tenantID).Where("visible_account_id", accountID).
+		WhereIn("relation_type", []string{"self", "managed"}).Delete()
+	return err
+}
+
 // refreshAccountVisibilityFollowEdge keeps the additive visibility read model
 // in sync after a follow mutation. The legacy resolver remains authoritative;
 // failures are returned to the caller so a deployment cannot silently claim

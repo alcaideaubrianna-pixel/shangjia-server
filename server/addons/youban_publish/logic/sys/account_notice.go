@@ -28,6 +28,7 @@ func (s *sSysPublish) deleteAccountsWithNotices(ctx context.Context, operator *s
 		return gerror.New("操作账户不能为空")
 	}
 	affectedTenants := map[int64]bool{}
+	var deletedRows []struct{ tenantID, accountID, parentID int64 }
 	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		cols := pdao.YoubanPublishAccount.Columns()
 		mod := pdao.YoubanPublishAccount.Ctx(ctx).WhereIn(cols.Id, ids).WhereNull(cols.DeletedAt)
@@ -40,6 +41,9 @@ func (s *sSysPublish) deleteAccountsWithNotices(ctx context.Context, operator *s
 		}
 		if tenantID > 0 && len(rows) != len(ids) {
 			return gerror.New("账户归属或状态已改变，请刷新后重试")
+		}
+		for _, row := range rows {
+			deletedRows = append(deletedRows, struct{ tenantID, accountID, parentID int64 }{row[cols.TenantId].Int64(), row[cols.Id].Int64(), row[cols.ParentId].Int64()})
 		}
 		operation := guid.S()
 		for _, row := range rows {
@@ -77,6 +81,11 @@ func (s *sSysPublish) deleteAccountsWithNotices(ctx context.Context, operator *s
 	}
 	for tenant := range affectedTenants {
 		_ = bumpAccountVisibilityVersion(ctx, tenant)
+	}
+	for _, row := range deletedRows {
+		if refreshErr := refreshAccountVisibilityAccountEdge(ctx, row.tenantID, row.accountID, row.parentID, false); refreshErr != nil {
+			g.Log().Warning(ctx, "删除账户后刷新可见范围读模型失败", g.Map{"tenantId": row.tenantID, "accountId": row.accountID, "error": refreshErr.Error()})
+		}
 	}
 	return nil
 }
