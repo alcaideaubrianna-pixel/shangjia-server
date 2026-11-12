@@ -61,6 +61,9 @@ sleep 1
 
 export YOUBAN_DB_DRIVER=pgsql YOUBAN_DB_HOST=127.0.0.1 YOUBAN_DB_PORT=5432
 export YOUBAN_DB_USER=postgres YOUBAN_DB_PASSWORD=postgres YOUBAN_DB_NAME="$PG_DB"
+# GoFrame 的默认数据库配置读取完整 link；只设置 YOUBAN_DB_NAME 会让部分角色
+# 回退到 youban_hotgo，导致采集、媒体和发布角色不在同一测试库中。
+export YOUBAN_DATABASE_LINK="pgsql:postgres:postgres@tcp(127.0.0.1:5432)/$PG_DB"
 export YOUBAN_REDIS_ADDRESS="$REDIS_ADDR" YOUBAN_REDIS_DB="${YOUBAN_LOCAL_REDIS_DB:-15}"
 export YOUBAN_TELEGRAM_RUNTIME_API_URL="http://$HOOK_ADDR"
 export YOUBAN_TELEGRAM_BOT_API_URL="http://$HOOK_ADDR"
