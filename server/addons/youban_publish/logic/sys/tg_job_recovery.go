@@ -131,11 +131,11 @@ func (s *sSysPublish) runTelegramJobRecoveryCycle(ctx context.Context) {
 		{"expired_attempt", "重新投递过期TG发送Attempt", func(ctx context.Context) error { return s.requeueExpiredTelegramAttempts(ctx, 100) }},
 		{"sending_attempt", "恢复中断的TG发送Attempt", func(ctx context.Context) error { return s.recoverStaleSendingTelegramAttempts(ctx, 100) }},
 		{"terminal_attempt", "收敛TG发送Attempt状态", func(ctx context.Context) error { return s.recoverTerminalTelegramAttempts(ctx, 500) }},
-		{"failed_display", "释放展示后失败的历史TG任务", func(ctx context.Context) error { return s.detachFailedTelegramDisplayJobs(ctx, 500) }},
+		{"failed_display", "释放展示后失败的历史TG任务", func(ctx context.Context) error { return s.detachFailedTelegramDisplayJobs(ctx, 200) }},
 		{"outbox_dispatch", "恢复Outbox入队确认中断的TG任务", func(ctx context.Context) error { return s.recoverExpiredTelegramOutboxDispatches(ctx, 200) }},
 		{"pending_idle", "恢复待入队TG推送任务", func(ctx context.Context) error { return s.recoverPendingIdleTelegramJobs(ctx, 500) }},
 		{"stale_dispatch", "恢复调度中断TG推送任务", func(ctx context.Context) error { return s.recoverStaleTelegramDispatchJobs(ctx, 200) }},
-		{"missing_operation_state", "补建资料上架状态", func(ctx context.Context) error { return s.recoverMissingProfilePublishOperationStates(ctx, 100) }},
+		{"missing_operation_state", "补建资料上架状态", func(ctx context.Context) error { return s.recoverMissingProfilePublishOperationStates(ctx, 50) }},
 		{"operation_state", "恢复资料上架状态", func(ctx context.Context) error { return s.recoverProfilePublishOperationStates(ctx, 100) }},
 	}
 	for _, step := range steps {
@@ -321,9 +321,9 @@ func (s *sSysPublish) detachFailedTelegramDisplayJobs(ctx context.Context, limit
 		Fields("j.*").
 		Where("j.status", telegramJobStatusFailed).
 		Where("j.send_phase", telegramSendPhaseDisplayConfirmed).
-		Where("COALESCE(j.last_dispatch_error,'') <> ?", telegramFailedDisplayDetachedMessage).
+		Where("(j.last_dispatch_error IS NULL OR j.last_dispatch_error <> ?)", telegramFailedDisplayDetachedMessage).
 		Where("j.next_retry_at IS NULL OR j.next_retry_at <= ?", gtime.Now()).
-		OrderAsc("j.updated_at").OrderAsc("j.id").Limit(limit).Scan(&jobs)
+		OrderAsc("j.account_id").OrderAsc("j.updated_at").OrderAsc("j.id").Limit(limit).Scan(&jobs)
 	if err != nil {
 		return gerror.Wrap(err, "读取缺少验证视频的终态TG任务失败")
 	}
