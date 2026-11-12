@@ -92,6 +92,15 @@ func refreshAccountVisibilityFollowEdge(ctx context.Context, tenantID, firstID, 
 	return nil
 }
 
+func refreshAccountVisibilityFollowEdgeBestEffort(ctx context.Context, tenantID, firstID, secondID int64) {
+	if err := refreshAccountVisibilityFollowEdge(ctx, tenantID, firstID, secondID); err != nil {
+		g.Log().Warning(ctx, "账户可见性关注边增量刷新失败", g.Map{
+			"tenantId": tenantID, "firstAccountId": firstID, "secondAccountId": secondID,
+			"error": err.Error(),
+		})
+	}
+}
+
 func (s *sSysPublish) adminProfileVisibleScope(ctx context.Context, account *sysin.AccountModel, in *sysin.ProfileListInp) (*adminProfileVisibleScope, error) {
 	if account == nil || account.Id <= 0 || account.TenantId <= 0 {
 		return nil, gerror.New("当前账号无管理权限")
