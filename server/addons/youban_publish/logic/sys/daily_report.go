@@ -210,16 +210,37 @@ func (s *sSysPublish) generateDailyReportBatch(ctx context.Context, reportDate t
 	start := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
 	end := start.AddDate(0, 0, 1)
 	// Include enabled configurations even when they collected/sent zero groups.
-	// Existing snapshots are excluded, making repeated minute polls inexpensive.
-	query := `SELECT a.tenant_id,a.id AS account_id FROM hg_youban_publish_account a
- WHERE a.status=1 AND a.deleted_at IS NULL AND a.account_type='admin' AND a.created_at<?
- AND NOT EXISTS(SELECT 1 FROM hg_youban_publish_daily_report r WHERE r.tenant_id=a.tenant_id AND r.account_id=a.id AND r.report_date=?)
- AND (EXISTS(SELECT 1 FROM hg_youban_publish_collect_source s WHERE s.tenant_id=a.tenant_id AND s.account_id=a.id AND s.status=1 AND s.deleted_at IS NULL AND s.created_at<?)
- OR EXISTS(SELECT 1 FROM hg_youban_publish_channel c WHERE c.tenant_id=a.tenant_id AND c.tg_account_id=a.id AND c.cycle_publish_enabled=1 AND c.deleted_at IS NULL AND c.created_at<?)
- OR EXISTS(SELECT 1 FROM hg_youban_publish_collect_dispatch d WHERE d.tenant_id=a.tenant_id AND d.account_id=a.id AND d.created_at>=? AND d.created_at<?)
- OR EXISTS(SELECT 1 FROM hg_youban_publish_success_record r LEFT JOIN hg_youban_publish_tg_job j ON ` + dailyReportJobJoin() + ` WHERE r.tenant_id=a.tenant_id AND r.account_id=a.id AND ` + dailyReportResultTime() + `>=? AND ` + dailyReportResultTime() + `<? AND r.action IN ('collect_publish','cycle_publish')))
- ORDER BY a.tenant_id,a.id LIMIT ?`
-	rows, err := g.DB().GetAll(ctx, query, end, start.Format("2006-01-02"), end, end, start, end, start, end, limit)
+	// Existing snapshots are excluded, making repeated hourly polls inexpensive.
+	query := `WITH candidate_accounts AS (
+ SELECT s.tenant_id,s.account_id
+ FROM hg_youban_publish_collect_source s
+ WHERE s.status=1 AND s.deleted_at IS NULL AND s.created_at<?
+ UNION
+ SELECT c.tenant_id,c.tg_account_id
+ FROM hg_youban_publish_channel c
+ WHERE c.cycle_publish_enabled=1 AND c.deleted_at IS NULL AND c.created_at<?
+ UNION
+ SELECT d.tenant_id,d.account_id
+ FROM hg_youban_publish_collect_dispatch d
+ WHERE d.created_at>=? AND d.created_at<?
+ UNION
+ SELECT r.tenant_id,r.account_id
+ FROM hg_youban_publish_success_record r
+ LEFT JOIN hg_youban_publish_tg_job j ON ` + dailyReportJobJoin() + `
+ WHERE ` + dailyReportResultTime() + `>=? AND ` + dailyReportResultTime() + `<?
+   AND r.action IN ('collect_publish','cycle_publish')
+), pending_accounts AS (
+ SELECT DISTINCT tenant_id,account_id FROM candidate_accounts
+)
+SELECT a.tenant_id,a.id AS account_id
+FROM hg_youban_publish_account a
+JOIN pending_accounts p ON p.tenant_id=a.tenant_id AND p.account_id=a.id
+WHERE a.status=1 AND a.deleted_at IS NULL AND a.account_type='admin'
+  AND a.created_at<?
+  AND NOT EXISTS(SELECT 1 FROM hg_youban_publish_daily_report r
+                 WHERE r.tenant_id=a.tenant_id AND r.account_id=a.id AND r.report_date=?)
+ORDER BY a.tenant_id,a.id LIMIT ?`
+	rows, err := g.DB().GetAll(ctx, query, end, end, start, end, start, end, end, start.Format("2006-01-02"), limit)
 	if err != nil {
 		return 0, gerror.Wrap(err, "读取日报账号失败")
 	}

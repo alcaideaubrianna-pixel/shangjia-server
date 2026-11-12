@@ -172,9 +172,9 @@ func ensureDailyReportCron(ctx context.Context) error {
 	if err != nil {
 		return gerror.Wrap(err, "读取每日推送报告定时任务失败")
 	}
-	// A minute poll derives the completed day in Asia/Shanghai. This avoids
+	// An hourly poll derives the completed day in Asia/Shanghai. This avoids
 	// depending on the host's cron timezone and resumes missed work after restart.
-	data := g.Map{columns.GroupId: 1, columns.Title: "每日推送报告", columns.Name: "youbanPublishDailyReport", columns.Params: "", columns.Pattern: "@every 1m", columns.Policy: consts.CronPolicySingle, columns.Count: 0, columns.Sort: 23, columns.Remark: "中国时间零点生成前一日报告，补偿最近七日并重试通知", columns.Status: consts.StatusEnabled}
+	data := g.Map{columns.GroupId: 1, columns.Title: "每日推送报告", columns.Name: "youbanPublishDailyReport", columns.Params: "", columns.Pattern: "@every 1h", columns.Policy: consts.CronPolicySingle, columns.Count: 0, columns.Sort: 23, columns.Remark: "中国时间零点生成前一日报告，补偿最近七日并重试通知", columns.Status: consts.StatusEnabled}
 	if row.IsEmpty() {
 		_, err = dao.SysCron.Ctx(ctx).Data(data).Insert()
 	} else {

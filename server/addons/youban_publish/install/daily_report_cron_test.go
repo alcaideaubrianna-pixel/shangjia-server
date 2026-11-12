@@ -50,7 +50,7 @@ func TestDailyReportCronInstallationLocalPostgres(t *testing.T) {
 			} else if row.Id != firstID {
 				t.Fatal("upgrade replaced cron identity")
 			}
-			if row.Name != "youbanPublishDailyReport" || row.Pattern != "@every 1m" || row.Policy != consts.CronPolicySingle || row.Status != consts.StatusEnabled {
+			if row.Name != "youbanPublishDailyReport" || row.Pattern != "@every 1h" || row.Policy != consts.CronPolicySingle || row.Status != consts.StatusEnabled {
 				t.Fatalf("invalid report schedule: %+v", row)
 			}
 			if gcron.Search(cron.GenCronSn(row)) == nil {
