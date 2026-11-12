@@ -144,7 +144,7 @@ func (s *sSysPublish) expireTelegramSendTx(ctx context.Context, tx gdb.TX, id in
 }
 
 func (s *sSysPublish) runTelegramSendWatchdog(ctx context.Context) {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(telegramRecoveryInterval(tgSendWatchdogIntervalEnv))
 	defer ticker.Stop()
 	var cleanupRunning atomic.Bool
 	for {
