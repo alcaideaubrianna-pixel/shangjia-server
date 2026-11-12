@@ -602,7 +602,6 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 			AND COALESCE(j.dispatch_status,'') IN ('','idle')
 			AND (j.next_retry_at IS NULL OR j.next_retry_at<=? OR (j.status='pending' AND COALESCE(j.dispatch_status,'')='idle'))
 		ORDER BY o.available_at,o.id LIMIT ?`
-		var rows []telegramJobOutboxRecord
 		queryArgs := []any{accountID, telegramOutboxEventPublish, now, telegramOutboxPending, telegramOutboxProcessing, now, now, perAccount}
 		var accountRows []telegramJobOutboxRecord
 		if err := g.DB().GetScan(ctx, &accountRows, query, queryArgs...); err != nil {
