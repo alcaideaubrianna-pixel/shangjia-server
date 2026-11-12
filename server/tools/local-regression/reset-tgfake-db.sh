@@ -9,8 +9,9 @@ pg_user="${YOUBAN_DB_USER:-postgres}"
 pg_password="${YOUBAN_DB_PASSWORD:-postgres}"
 export PGPASSWORD="$pg_password"
 
-schema_dump="$(mktemp /tmp/tgfake-schema.XXXXXX.sql)"
-data_dump="$(mktemp /tmp/tgfake-config.XXXXXX.sql)"
+# macOS 的 mktemp 要求 XXXXXX 位于模板末尾，使用 -t 兼容 macOS/Linux。
+schema_dump="$(mktemp -t tgfake-schema)"
+data_dump="$(mktemp -t tgfake-config)"
 trap 'rm -f "$schema_dump" "$data_dump"' EXIT
 
 pg_dump -h "$pg_host" -U "$pg_user" -d "$source_db" --schema-only > "$schema_dump"
