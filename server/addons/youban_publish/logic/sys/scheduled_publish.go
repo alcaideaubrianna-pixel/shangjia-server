@@ -81,6 +81,16 @@ func (s *sSysPublish) submitDuePublishTasks(ctx context.Context, scopes ...publi
 			g.Log().Warningf(ctx, "提交到期上架资料失败 profile:%d err:%+v", item.ProfileId, err)
 			continue
 		}
+		// submitProfilePublish 可能在迁移/权限/频道映射异常时没有创建任何可执行 Job；
+		// 没有 Job 就不能推进 publish_at，否则资料会永久丢失循环入口。
+		createdCount, countErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+			Where("tenant_id", item.TenantId).Where("account_id", item.AccountId).
+			Where("profile_id", item.ProfileId).Where("operation_no", operationNo).
+			WhereIn("status", []string{telegramJobStatusPending, telegramJobStatusRetryWait, telegramJobStatusSent, telegramJobStatusSending, telegramJobStatusConfirming}).Count()
+		if countErr != nil || createdCount == 0 {
+			g.Log().Warningf(ctx, "定时上架未生成有效Job，保留publish_at tenantId:%d accountId:%d profileId:%d operationNo:%s count:%d err:%+v", item.TenantId, item.AccountId, item.ProfileId, operationNo, createdCount, countErr)
+			continue
+		}
 		// 提交成功后才推进计划；循环资料写入下一次到期时间，单次定时任务才清空。
 		nextPublishAt := any(nil)
 		var cycleDays int
