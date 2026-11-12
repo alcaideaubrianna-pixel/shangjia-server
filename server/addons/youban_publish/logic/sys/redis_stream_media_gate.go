@@ -52,3 +52,30 @@ func (s *sSysPublish) settleStreamFailedMediaJob(ctx context.Context, job telegr
 	}
 	return true, stateErr
 }
+
+// settleMissingTelegramProfileJob closes a stale queue head created for a
+// profile that has already been deleted. It is safe before any Telegram send
+// has started and immediately wakes the next job for the same channel.
+func (s *sSysPublish) settleMissingTelegramProfileJob(ctx context.Context, job telegramJobRecord) error {
+	message := "资料已删除，跳过本次推送"
+	changed, err := s.transitionTelegramJob(ctx, telegramJobTransition{
+		JobId: job.Id, From: []string{telegramJobStatusPending, telegramJobStatusRetryWait},
+		To: telegramJobStatusFailed, SendPhases: []string{""}, ErrorMessage: message,
+		Additional: g.Map{"last_dispatch_error": message},
+	})
+	if err != nil {
+		return gerror.Wrap(err, "终止失效资料推送任务失败")
+	}
+	if !changed {
+		return nil
+	}
+	s.appendTelegramJobLog(ctx, job, "media_ready", "failed", message)
+	if recordErr := s.upsertPublishJobRecord(ctx, job, "failed", message); recordErr != nil {
+		g.Log().Warningf(ctx, "记录失效资料推送失败结果失败 jobId:%d profileId:%d err:%+v", job.Id, job.ProfileId, recordErr)
+	}
+	_ = s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusFailed)
+	if wakeErr := s.wakeNextTelegramChannelJob(ctx, job); wakeErr != nil {
+		g.Log().Warningf(ctx, "失效资料任务终止后唤醒频道失败 jobId:%d channelId:%d err:%+v", job.Id, job.ChannelId, wakeErr)
+	}
+	return nil
+}

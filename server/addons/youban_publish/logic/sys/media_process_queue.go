@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -16,6 +17,11 @@ import (
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/dao"
 )
+
+// errTelegramProfileMissing marks a durable TG job whose source profile was
+// deleted. Such a job must be terminally failed and release its channel head;
+// retrying it forever can block every later job in that channel.
+var errTelegramProfileMissing = errors.New("telegram profile missing")
 
 const (
 	mediaProcessingUploaded   = "uploaded"
@@ -227,6 +233,9 @@ func (s *sSysPublish) profileMediaReady(ctx context.Context, profileId int64) (b
 	}
 	if err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
 		Fields("expected_display_media_count,expected_verify_media_count").Where("profile_id", profileId).WhereNull("deleted_at").Scan(&expected); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, errTelegramProfileMissing
+		}
 		return false, gerror.Wrap(err, "检查资料预期媒体失败")
 	}
 	expectedTotal := expected.Display + expected.Verify
@@ -250,6 +259,9 @@ func (s *sSysPublish) profileMediaReady(ctx context.Context, profileId int64) (b
 		}
 		if err = g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).
 			Fields("image_count,video_count,has_verification_video,cover_media_id").Where("id", profileId).WhereNull("deleted_at").Scan(&declared); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return false, errTelegramProfileMissing
+			}
 			return false, gerror.Wrap(err, "检查资料声明媒体失败")
 		}
 		return declared.ImageCount <= 0 && declared.VideoCount <= 0 && declared.HasVerificationVideo <= 0 && declared.CoverMediaId <= 0, nil

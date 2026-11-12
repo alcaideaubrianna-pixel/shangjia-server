@@ -62,6 +62,9 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) (resultE
 	ready, readyErr := s.profileMediaReady(ctx, targetJob.ProfileId)
 	step.End(readyErr, g.Map{"ready": ready})
 	if readyErr != nil {
+		if errors.Is(readyErr, errTelegramProfileMissing) {
+			return s.settleMissingTelegramProfileJob(ctx, targetJob)
+		}
 		return readyErr
 	} else if !ready {
 		if settled, settleErr := s.settleStreamFailedMediaJob(ctx, targetJob); settled || settleErr != nil {
