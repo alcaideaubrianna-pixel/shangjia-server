@@ -2,6 +2,8 @@ package sys
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"strconv"
 	"time"
 
@@ -42,6 +44,11 @@ func (s *sSysPublish) collectMessageFromAccountPublishChannel(ctx context.Contex
 	// 上架目标是租户级频道边界，不能按采集协议账号过滤；同一目标可能由
 	// Bot、多个协议账号或多个账户共用，任何入口都必须拦截，避免自采集循环。
 	err := model.Scan(&target)
+	// 没有匹配的上架目标是正常路径，表示该来源频道可以继续采集。
+	// GoFrame 在 Scan 到空结果时可能返回 sql.ErrNoRows，不能把它当成采集失败。
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}
