@@ -246,10 +246,7 @@ func accountVisibilityReadModelScope(ctx context.Context, tenantID, viewerID int
 	if !g.Cfg().MustGet(ctx, "youbanPublish.accountVisibilityReadModelEnabled", false).Bool() || tenantID <= 0 || viewerID <= 0 {
 		return nil, false, nil
 	}
-	relationTypes := []string{"self", "managed", "tenant_scope", "following", "mutual"}
-	if scope == "following" {
-		relationTypes = []string{"following", "mutual"}
-	}
+	relationTypes := accountVisibilityRelationTypes(scope)
 	var rows []struct {
 		VisibleAccountId int64 `orm:"visible_account_id"`
 	}
@@ -266,6 +263,13 @@ func accountVisibilityReadModelScope(ctx context.Context, tenantID, viewerID int
 		}
 	}
 	return &adminProfileVisibleScope{AccountIds: uniqueIds(ids), Strict: scope == "following", TenantId: tenantID}, true, nil
+}
+
+func accountVisibilityRelationTypes(scope string) []string {
+	if strings.TrimSpace(scope) == "following" {
+		return []string{"following", "mutual"}
+	}
+	return []string{"self", "managed", "tenant_scope", "following", "mutual"}
 }
 
 // compareAccountVisibilityReadModel is deliberately observational. The legacy
