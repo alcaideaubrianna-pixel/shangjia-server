@@ -316,14 +316,47 @@ func (s *sSysPublish) detachFailedTelegramDisplayJobs(ctx context.Context, limit
 	if limit <= 0 {
 		limit = 100
 	}
+	// 账户任务分开读取，避免一个账户的历史失败任务占满恢复批次。
+	var accounts []struct {
+		AccountId int64 `orm:"account_id"`
+	}
+	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Fields("account_id").
+		Where("account_id > 0").Where("status", telegramJobStatusFailed).
+		Where("send_phase", telegramSendPhaseDisplayConfirmed).
+		Where("(last_dispatch_error IS NULL OR last_dispatch_error <> ?)", telegramFailedDisplayDetachedMessage).
+		Group("account_id").OrderAsc("account_id").Limit(16).Scan(&accounts); err != nil {
+		return gerror.Wrap(err, "读取待恢复TG账户失败")
+	}
+	perAccount := limit
+	if len(accounts) > 0 && perAccount > 0 {
+		perAccount = (limit + len(accounts) - 1) / len(accounts)
+		if perAccount < 1 {
+			perAccount = 1
+		}
+	}
+	for _, account := range accounts {
+		if err := s.detachFailedTelegramDisplayJobsForAccount(ctx, account.AccountId, perAccount); err != nil {
+			return err
+		}
+	}
+	return s.detachFailedTelegramDisplayJobsForAccount(ctx, 0, limit)
+}
+
+func (s *sSysPublish) detachFailedTelegramDisplayJobsForAccount(ctx context.Context, accountId int64, limit int) error {
 	var jobs []telegramJobRecord
-	err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
+	model := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
 		Fields("j.*").
 		Where("j.status", telegramJobStatusFailed).
 		Where("j.send_phase", telegramSendPhaseDisplayConfirmed).
 		Where("(j.last_dispatch_error IS NULL OR j.last_dispatch_error <> ?)", telegramFailedDisplayDetachedMessage).
 		Where("j.next_retry_at IS NULL OR j.next_retry_at <= ?", gtime.Now()).
-		OrderAsc("j.account_id").OrderAsc("j.updated_at").OrderAsc("j.id").Limit(limit).Scan(&jobs)
+		OrderAsc("j.updated_at").OrderAsc("j.id").Limit(limit)
+	if accountId > 0 {
+		model = model.Where("j.account_id", accountId)
+	} else {
+		model = model.Where("j.account_id <= 0")
+	}
+	err := model.Scan(&jobs)
 	if err != nil {
 		return gerror.Wrap(err, "读取缺少验证视频的终态TG任务失败")
 	}
