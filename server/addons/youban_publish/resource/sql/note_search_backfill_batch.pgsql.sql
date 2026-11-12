@@ -1,5 +1,5 @@
 -- Run this statement repeatedly. Change :last_id to the max id returned by the
--- final SELECT after every batch. Each execution is bounded to 5,000 rows and
+-- final SELECT after every batch. Each execution is bounded to 500 rows and
 -- is safe to resume after a timeout.
 WITH batch AS (
   SELECT id, tenant_id, account_id, profile_id, is_collected, status,
@@ -7,7 +7,7 @@ WITH batch AS (
   FROM hg_youban_publish_note_index
   WHERE id > :last_id
   ORDER BY id
-  LIMIT 5000
+  LIMIT 500
 )
 INSERT INTO hg_youban_publish_note_search
   (tenant_id, account_id, profile_id, is_collected, status, search_text, deleted_at, updated_at)
@@ -24,5 +24,5 @@ ON CONFLICT (tenant_id, account_id, profile_id) DO UPDATE SET
 SELECT max(id) AS next_last_id
 FROM (
   SELECT id FROM hg_youban_publish_note_index
-  WHERE id > :last_id ORDER BY id LIMIT 5000
+  WHERE id > :last_id ORDER BY id LIMIT 500
 ) batch_cursor;
