@@ -7,6 +7,11 @@ ON hg_youban_publish_profile_cycle_run_channel (tenant_id,account_id,job_id);
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ybp_channel_account_batch_due
 ON hg_youban_publish_channel (tenant_id,tg_account_id,cycle_next_run_at,id)
 WHERE cycle_publish_enabled=1 AND cycle_publish_mode='batch' AND status=1 AND cycle_active_run_id=0 AND deleted_at IS NULL;
+-- 按账户读取到期循环队列时覆盖队首关联字段，减少 channel_profile 回表和随机 IO。
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ybp_cp_account_due_job
+ON hg_youban_publish_channel_profile (tenant_id,account_id,next_cycle_at,id)
+INCLUDE (last_job_id,profile_id,channel_id,cycle_generation)
+WHERE status='active' AND next_cycle_at IS NOT NULL;
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ybp_profile_cycle_run_account_due
 ON hg_youban_publish_profile_cycle_run (tenant_id,account_id,status,due_at,id);
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ybp_tg_job_account_cycle_due
