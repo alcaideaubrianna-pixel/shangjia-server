@@ -39,9 +39,8 @@ func (s *sSysPublish) collectMessageFromAccountPublishChannel(ctx context.Contex
 		Where("status", 1).
 		WhereNull("deleted_at").
 		Where("(target_chat_id=? OR target_chat_id=? OR REPLACE(target_chat_id,'-100','')=?)", chatId, "-100"+chatId, chatId)
-	if tgAccountId > 0 {
-		model = model.Where("tg_account_id", tgAccountId)
-	}
+	// 上架目标是租户级频道边界，不能按采集协议账号过滤；同一目标可能由
+	// Bot、多个协议账号或多个账户共用，任何入口都必须拦截，避免自采集循环。
 	err := model.Scan(&target)
 	if err != nil {
 		return false, err
