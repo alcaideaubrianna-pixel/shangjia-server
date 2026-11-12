@@ -2,6 +2,8 @@ package sys
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
@@ -17,6 +19,9 @@ func cycleChannelAllowed(ctx context.Context, tenantID, channelID int64, operati
 	var channel channelCycleRecord
 	err := g.DB().Model(publishChannelTable).Ctx(ctx).Where("tenant_id", tenantID).Where("id", channelID).Scan(&channel)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
 		return false, err
 	}
 	if channel.Id <= 0 || channel.Enabled != 1 || channel.Status != 1 || channel.PublishDirection != "up" {
@@ -37,6 +42,11 @@ func cycleChannelAllowed(ctx context.Context, tenantID, channelID int64, operati
 	}
 	var run cycleRunRecord
 	if err := g.DB().Model(publishCycleRunTable).Ctx(ctx).Where("id", runID).Where("tenant_id", tenantID).Where("channel_id", channelID).Scan(&run); err != nil {
+		// 恢复期间旧批次 run 可能已被清理；对应 job 已失去调度归属，
+		// 必须按失效循环任务收口，不能让它永久停留 pending 阻塞频道。
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
 		return false, err
 	}
 	return run.Id > 0 && (!scheduledBatchCycleRun(run) || mode == "batch"), nil
