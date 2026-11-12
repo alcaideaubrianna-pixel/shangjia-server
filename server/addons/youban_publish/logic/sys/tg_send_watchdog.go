@@ -144,7 +144,7 @@ func (s *sSysPublish) expireTelegramSendTx(ctx context.Context, tx gdb.TX, id in
 }
 
 func (s *sSysPublish) runTelegramSendWatchdog(ctx context.Context) {
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	var cleanupRunning atomic.Bool
 	for {
@@ -166,7 +166,7 @@ func (s *sSysPublish) runTelegramSendWatchdog(ctx context.Context) {
 var telegramTimeoutCleanupClaimSQL = `WITH candidates AS (
  SELECT id FROM ` + publishTgJobTable + ` WHERE send_phase='timeout_cancelled'
  AND timeout_cleanup_at<=? ORDER BY timeout_cleanup_at,id
- LIMIT 30 FOR UPDATE SKIP LOCKED
+ LIMIT 10 FOR UPDATE SKIP LOCKED
  ) UPDATE ` + publishTgJobTable + ` j SET timeout_cleanup_at=?
  FROM candidates c WHERE j.id=c.id RETURNING j.*`
 
@@ -194,7 +194,7 @@ func (s *sSysPublish) cleanupTelegramSendTimeouts(ctx context.Context) {
 		jobs = append(jobs, legacy...)
 	}
 	var workers sync.WaitGroup
-	slots := make(chan struct{}, 8)
+	slots := make(chan struct{}, 4)
 	for _, job := range jobs {
 		if batchCtx.Err() != nil {
 			break

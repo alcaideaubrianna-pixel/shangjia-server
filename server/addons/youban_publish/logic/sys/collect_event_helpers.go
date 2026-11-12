@@ -76,25 +76,24 @@ func (s *sSysPublish) syncCollectSourceStats(ctx context.Context, sourceID int64
 	dispatchCols := dispatchDao.Columns()
 	sourceCols := pdao.YoubanPublishCollectSource.Columns()
 
-	eventStats, err := eventDao.Ctx(ctx).Where(eventCols.SourceId, sourceID).
-		Fields(fmt.Sprintf("COUNT(*) AS event_total, COALESCE(SUM(CASE WHEN %s='%s' AND COALESCE(%s,'')<>'%s' THEN 1 ELSE 0 END),0) AS failed_total, MAX(%s) AS last_event_at", eventCols.Status, sysin.CollectEventStatusFailed, "material_role", collectMaterialRoleVerify, eventCols.ReceivedAt)).One()
+	stats, err := g.DB().GetOne(ctx, fmt.Sprintf(`SELECT
+		(SELECT COUNT(*) FROM %s WHERE %s=?) AS event_total,
+		(SELECT COALESCE(SUM(CASE WHEN %s=? AND COALESCE(%s,'')<>? THEN 1 ELSE 0 END),0) FROM %s WHERE %s=?) AS failed_total,
+		(SELECT MAX(%s) FROM %s WHERE %s=?) AS last_event_at,
+		(SELECT COUNT(DISTINCT %s) FROM %s WHERE %s=? AND %s=?) AS success_total`,
+		eventDao.Table(), eventCols.SourceId, eventCols.Status, "material_role", eventDao.Table(), eventCols.SourceId,
+		eventCols.ReceivedAt, eventDao.Table(), eventCols.SourceId, dispatchCols.EventId, dispatchDao.Table(), dispatchCols.SourceId, dispatchCols.Status),
+		sourceID, sysin.CollectEventStatusFailed, collectMaterialRoleVerify, sourceID, sourceID, sourceID, sysin.CollectDispatchStatusSent)
 	if err != nil {
-		return gerror.Wrap(err, "统计采集源事件失败")
-	}
-	successTotal, err := dispatchDao.Ctx(ctx).
-		Where(dispatchCols.SourceId, sourceID).
-		Where(dispatchCols.Status, sysin.CollectDispatchStatusSent).
-		Fields("COUNT(DISTINCT " + dispatchCols.EventId + ")").Value()
-	if err != nil {
-		return gerror.Wrap(err, "统计采集源成功数失败")
+		return gerror.Wrap(err, "统计采集源事件和成功数失败")
 	}
 	_, err = pdao.YoubanPublishCollectSource.Ctx(ctx).
 		Where(sourceCols.Id, sourceID).
 		Data(g.Map{
-			sourceCols.EventTotal:   eventStats["event_total"].Int64(),
-			sourceCols.SuccessTotal: successTotal.Int64(),
-			sourceCols.FailedTotal:  eventStats["failed_total"].Int64(),
-			sourceCols.LastEventAt:  eventStats["last_event_at"],
+			sourceCols.EventTotal:   stats["event_total"].Int64(),
+			sourceCols.SuccessTotal: stats["success_total"].Int64(),
+			sourceCols.FailedTotal:  stats["failed_total"].Int64(),
+			sourceCols.LastEventAt:  stats["last_event_at"],
 			sourceCols.UpdatedAt:    gtime.Now(),
 		}).Update()
 	return gerror.Wrap(err, "更新采集源统计失败")
