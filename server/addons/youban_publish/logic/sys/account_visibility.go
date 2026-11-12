@@ -80,7 +80,11 @@ func refreshAccountVisibilityFollowEdge(ctx context.Context, tenantID, firstID, 
 	if err := pdao.YoubanPublishAccount.Ctx(ctx).Fields("id,tenant_id").WhereIn("id", []int64{firstID, secondID}).Scan(&accounts); err != nil {
 		return err
 	}
-	if len(accounts) != 2 || accounts[0].TenantId != tenantID || accounts[1].TenantId != tenantID {
+	accountTenants := make(map[int64]int64, len(accounts))
+	for _, account := range accounts {
+		accountTenants[account.Id] = account.TenantId
+	}
+	if len(accountTenants) != 2 || accountTenants[firstID] != tenantID || accountTenants[secondID] != tenantID {
 		// Follow rows can historically cross tenant boundaries. Never project
 		// such a relation into the tenant-scoped visibility model.
 		_, err := g.DB().Model(accountVisibilityReadModelTable).Ctx(ctx).
