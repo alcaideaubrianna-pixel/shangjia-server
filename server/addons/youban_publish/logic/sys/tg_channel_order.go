@@ -325,8 +325,11 @@ func (s *sSysPublish) postponeTelegramJobForChannelOrder(ctx context.Context, jo
 		Data(g.Map{
 			"dispatch_status": tgDispatchStatusIdle,
 			// 顺序延期意味着本次 Asynq 执行已经结束；清除旧任务引用，允许恢复通知创建新的执行任务。
-			"asynq_task_id":       "",
-			"task_id":             "",
+			"asynq_task_id": "",
+			// task_id 是 PostgreSQL BIGINT。普通资料推送没有协议任务 ID，
+			// 必须写 NULL，不能写空字符串，否则会触发
+			// invalid input syntax for type bigint 并让频道队首反复重试。
+			"task_id":             nil,
 			"next_retry_at":       gtime.Now().Add(3 * time.Second),
 			"last_dispatch_error": "等待同频道前序推送任务完成",
 			"updated_at":          gtime.Now(),
