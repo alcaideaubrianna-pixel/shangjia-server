@@ -39,3 +39,10 @@ CREATE EXTENSION IF NOT EXISTS vector;
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_media_fingerprint_hnsw" ON "hg_youban_publish_media_fingerprint" USING hnsw ("phash_bits" bit_hamming_ops) WITH (m=8, ef_construction=64);
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_media_fingerprint_exact_scope" ON "hg_youban_publish_media_fingerprint" ("phash_bits", "tenant_id", "account_id", "profile_id", "media_id") WHERE "deleted_at" IS NULL AND "media_type" = 'image' AND "phash_bits" IS NOT NULL;
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_media_md5_search" ON "hg_youban_publish_media" ("tenant_id", "account_id", "md5", "media_type", "profile_id", "id") WHERE "deleted_at" IS NULL AND "md5" <> '';
+
+-- Profile fingerprint backfill probes the immutable completion marker by
+-- profile_id. Keep this partial index out of transactional upgrades because
+-- it is created concurrently on the production-sized fingerprint table.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_profile_fingerprint_indexed_profile"
+    ON "hg_youban_publish_profile_fingerprint" ("profile_id")
+    WHERE "layer" = '_indexed';
