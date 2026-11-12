@@ -16,3 +16,17 @@ ALTER TABLE hg_youban_publish_daily_report ADD COLUMN IF NOT EXISTS notify_token
 ALTER TABLE hg_youban_publish_daily_report ADD COLUMN IF NOT EXISTS notify_cursor integer NOT NULL DEFAULT 0;
 ALTER TABLE hg_youban_publish_daily_report ADD COLUMN IF NOT EXISTS notify_error varchar(512) NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS idx_ybp_daily_report_delivery ON hg_youban_publish_daily_report (notify_status,notify_next_retry_at,id);
+
+-- Batch candidate selection for the hourly daily-report generator.
+-- Keep the active/deleted predicates in the index so repeated polls do not
+-- scan historical source and channel rows.
+CREATE INDEX IF NOT EXISTS idx_ybp_daily_report_source_candidate
+  ON hg_youban_publish_collect_source (tenant_id,account_id,created_at)
+  WHERE status=1 AND deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_ybp_daily_report_channel_candidate
+  ON hg_youban_publish_channel (tenant_id,tg_account_id,created_at)
+  WHERE cycle_publish_enabled=1 AND deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_ybp_daily_report_dispatch_candidate
+  ON hg_youban_publish_collect_dispatch (tenant_id,account_id,created_at);
+CREATE INDEX IF NOT EXISTS idx_ybp_daily_report_result_candidate
+  ON hg_youban_publish_success_record (tenant_id,account_id,action,status,id);
