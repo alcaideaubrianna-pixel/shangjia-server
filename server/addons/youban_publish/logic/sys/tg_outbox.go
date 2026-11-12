@@ -429,7 +429,7 @@ func (s *sSysPublish) dueTelegramJobOutboxRows(ctx context.Context, limit int, n
 			FROM `+publishTgOutboxTable+` o JOIN `+publishTgJobTable+` j ON j.id=o.job_id
 			WHERE o.event_type=? AND o.available_at<=?
 				AND (o.status=? OR (o.status=? AND o.lease_expires_at<=?))
-				AND j.account_id>0 ORDER BY j.account_id LIMIT 64`,
+				ORDER BY j.account_id LIMIT 64`,
 			telegramOutboxEventPublish, now, telegramOutboxPending, telegramOutboxProcessing, now); err != nil {
 			return nil, gerror.Wrap(err, "读取TG Outbox就绪账户失败")
 		}
