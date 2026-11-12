@@ -33,7 +33,7 @@ func TestTelegramPendingRecoverySelectsChannelHeadsBeforeLimit(t *testing.T) {
 	for _, fragment := range []string{
 		"NOT EXISTS", "earlier.tenant_id=j.tenant_id", "j.channel_id>0",
 		"earlier.channel_id=j.channel_id", "REPLACE(COALESCE(earlier.target_chat_id,''),'-100','')",
-		"earlier.status IN ('pending','failed_retry','confirming','sending')",
+		"earlier.status IN ('pending','confirming','sending')", "earlier.status='failed_retry'",
 		"earlier.created_at<j.created_at", "earlier.id<j.id",
 	} {
 		if !strings.Contains(query, fragment) {
