@@ -544,7 +544,9 @@ func (s *sSysPublish) profileCycleDueRowsShard(ctx context.Context, limit, shard
 	}
 	if len(scopes) > 0 {
 		// 仅阻止同一账户同一资料同一频道的未完成计划，避免一个频道的投影阻塞同资料的其他频道。
-		model = model.Where("NOT EXISTS (SELECT 1 FROM " + publishProfileCycleRunTable + " planning WHERE planning.tenant_id=j.tenant_id AND planning.account_id=j.account_id AND planning.profile_id=j.profile_id AND planning.channel_id=j.channel_id AND planning.status IN ('pending','running','dispatching'))")
+		// profile_cycle_run 是资料级 Run，不含 channel_id；频道状态保存在
+		// profile_cycle_run_channel，必须通过 run_id 关联，不能直接读取不存在的字段。
+		model = model.Where("NOT EXISTS (SELECT 1 FROM " + publishProfileCycleRunChannelTable + " planning_channel INNER JOIN " + publishProfileCycleRunTable + " planning ON planning.id=planning_channel.run_id WHERE planning.tenant_id=j.tenant_id AND planning.account_id=j.account_id AND planning.profile_id=j.profile_id AND planning_channel.channel_id=j.channel_id AND planning.status IN ('pending','running','dispatching') AND planning_channel.status IN ('pending','running','dispatching'))")
 		model = model.Where("c.status", 1).Where("c.cycle_publish_enabled", 1).Where("COALESCE(NULLIF(LOWER(TRIM(c.cycle_publish_mode)),''),'time')='time'").Where("c.publish_direction", "up").Where("NOT EXISTS (SELECT 1 FROM " + publishTgJobTable + " active WHERE active.tenant_id=j.tenant_id AND active.account_id=j.account_id AND active.profile_id=j.profile_id AND active.channel_id=j.channel_id AND active.status IN ('pending','sending','failed_retry','unknown'))")
 	}
 	if shard >= 0 {
