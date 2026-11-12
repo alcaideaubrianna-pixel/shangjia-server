@@ -28,3 +28,37 @@ func TestAccountVisibilityRelationTypesTenantIsolationIsQueryScoped(t *testing.T
 		}
 	}
 }
+
+func TestAccountVisibilityScopeFixtureRelations(t *testing.T) {
+	// This fixture mirrors the production projection: the viewer can see
+	// itself, a managed account, a followed account, a mutual account, and the
+	// accounts of a followed tenant administrator. Following scope deliberately
+	// excludes self/managed while retaining direct and mutual follows.
+	rows := []struct {
+		id       int64
+		relation string
+	}{
+		{1, "self"}, {2, "managed"}, {3, "tenant_scope"}, {4, "following"}, {5, "mutual"},
+	}
+	for _, scope := range []string{"mine", "all", "unknown"} {
+		allowed := map[string]bool{}
+		for _, relation := range accountVisibilityRelationTypes(scope) {
+			allowed[relation] = true
+		}
+		for _, row := range rows {
+			if !allowed[row.relation] {
+				t.Fatalf("scope %s omitted relation %s for account %d", scope, row.relation, row.id)
+			}
+		}
+	}
+	followingAllowed := map[string]bool{}
+	for _, relation := range accountVisibilityRelationTypes("following") {
+		followingAllowed[relation] = true
+	}
+	if followingAllowed["self"] || followingAllowed["managed"] || followingAllowed["tenant_scope"] {
+		t.Fatalf("following scope leaked non-follow relations: %#v", followingAllowed)
+	}
+	if !followingAllowed["following"] || !followingAllowed["mutual"] {
+		t.Fatalf("following scope missing direct/mutual relations: %#v", followingAllowed)
+	}
+}
