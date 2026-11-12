@@ -226,3 +226,7 @@ ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "display_media_s
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "cycle_failure_count" integer NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "push_engine" varchar(16) NOT NULL DEFAULT 'legacy';
 CREATE INDEX IF NOT EXISTS "idx_ybp_account_setting_push_engine" ON "hg_youban_publish_account_setting" ("tenant_id", "account_id", "push_engine") WHERE "deleted_at" IS NULL;
+
+-- 采集入口按租户和 Telegram 目标频道快速判断上架频道，避免每条消息扫描发布频道表。
+CREATE INDEX IF NOT EXISTS "idx_ybp_publish_channel_collect_target"
+  ON "hg_youban_publish_channel" ("tenant_id", "target_chat_id", "publish_direction", "status", "deleted_at");
