@@ -99,21 +99,6 @@ func applyProfileKeywordSearch(mod *gdb.Model, keyword string, fields profileSea
 	if profileSearchNoRegexp.MatchString(upper) {
 		return mod.Where(fields.ProfileNo+" = ?", upper)
 	}
-	// The note index has dedicated trigram indexes on its text columns. Keep
-	// the text predicate inside a candidate subquery so PostgreSQL can use the
-	// GIN indexes before the outer query applies ordering and joins. Applying
-	// the OR predicate directly to the ordered btree path makes PostgreSQL walk
-	// rows one by one and was observed to exceed one second on large tenants.
-	if strings.HasPrefix(fields.ProfileNo, "i.") {
-		candidateFields := profileSearchFields{
-			ProfileNo: "candidate.profile_no",
-			Title:     "candidate.title",
-			Summary:   "candidate.summary",
-			PlainText: "candidate.plain_text",
-		}
-		condition, args := profileTextSearchCondition(keyword, candidateFields)
-		return mod.Where("i.id IN (SELECT candidate.id FROM "+publishNoteIndexTable+" candidate WHERE candidate.deleted_at IS NULL AND "+condition+")", args...)
-	}
 	condition, args := profileTextSearchCondition(keyword, fields)
 	return mod.Where(condition, args...)
 }
