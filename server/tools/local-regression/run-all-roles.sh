@@ -7,7 +7,8 @@ ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT_DIR"
 
 HOOK_ADDR="${YOUBAN_LOCAL_TG_HOOK_ADDR:-127.0.0.1:19100}"
-PG_DB="${YOUBAN_LOCAL_DB_NAME:-youban_hotgo}"
+# 默认使用专用回归库，避免误连开发库或残留历史任务污染真实链路验证。
+PG_DB="${YOUBAN_LOCAL_DB_NAME:-youban_tgfake_test}"
 PG_LINK="pgsql:postgres:postgres@tcp(127.0.0.1:5432)/${PG_DB}"
 REDIS_ADDR="${YOUBAN_LOCAL_REDIS_ADDR:-127.0.0.1:6379}"
 SCENARIO="${YOUBAN_LOCAL_TG_SCENARIO:-$ROOT_DIR/tools/local-regression/scenarios/display_verify_success.json}"
@@ -21,6 +22,17 @@ if [[ "${1:-}" == "--with-account" ]]; then WITH_ACCOUNT=1; fi
 command -v docker >/dev/null
 docker exec youban-postgres pg_isready -U postgres >/dev/null
 docker exec r1rpc-redis redis-cli ping | grep -q PONG
+
+# 需要显式开启才重建本地数据库；禁止使用生产库名称，避免测试脚本误删真实数据。
+if [[ "${YOUBAN_LOCAL_RESET_DB:-0}" == "1" ]]; then
+  case "$PG_DB" in
+    railway|youban_hotgo|youban_production|postgres)
+      echo "拒绝重建疑似共享数据库: $PG_DB" >&2
+      exit 1
+      ;;
+  esac
+  YOUBAN_LOCAL_DB_NAME="$PG_DB" ./tools/local-regression/reset-tgfake-db.sh
+fi
 
 # 本地测试库可选应用插件升级 DDL，确保实际运行角色拥有生产同版本表结构。
 if [[ "${YOUBAN_LOCAL_APPLY_SCHEMA:-1}" == "1" ]]; then
