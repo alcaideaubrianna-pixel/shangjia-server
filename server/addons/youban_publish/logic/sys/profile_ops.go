@@ -7,6 +7,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/gtrace"
+	"github.com/gogf/gf/v2/os/gctx"
 	"golang.org/x/sync/errgroup"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
@@ -509,8 +510,10 @@ func (s *sSysPublish) AdminNoteList(ctx context.Context, in *sysin.NoteListInp) 
 	startedAt := time.Now()
 	defer func() {
 		fields := g.Map{
-			"traceID":    gtrace.GetTraceID(ctx),
-			"durationMs": time.Since(startedAt).Milliseconds(),
+			"traceID":     gctx.CtxId(ctx),
+			"httpTraceID": gctx.CtxId(ctx),
+			"otelTraceID": gtrace.GetTraceID(ctx),
+			"durationMs":  time.Since(startedAt).Milliseconds(),
 		}
 		if in != nil {
 			fields["accountScope"] = in.AccountScope
@@ -596,11 +599,13 @@ func logSlowAdminNoteListStage(ctx context.Context, stage string, startedAt time
 		return
 	}
 	fields := g.Map{
-		"traceID":    gtrace.GetTraceID(ctx),
-		"stage":      stage,
-		"durationMs": duration.Milliseconds(),
-		"first":      first,
-		"second":     second,
+		"traceID":     gctx.CtxId(ctx),
+		"httpTraceID": gctx.CtxId(ctx),
+		"otelTraceID": gtrace.GetTraceID(ctx),
+		"stage":       stage,
+		"durationMs":  duration.Milliseconds(),
+		"first":       first,
+		"second":      second,
 	}
 	if duration >= time.Second {
 		g.Log().Warning(ctx, "上架笔记列表慢阶段", fields)
