@@ -40,6 +40,41 @@ ON CONFLICT ("tenant_id", "viewer_account_id", "visible_account_id") DO UPDATE
 SET "relation_type" = CASE WHEN "relation_type" = 'self' THEN "relation_type" ELSE EXCLUDED."relation_type" END,
     "updated_at" = CURRENT_TIMESTAMP;
 
+-- Seed administrator -> managed account edges. The account hierarchy is the
+-- authoritative source for the tenant administrator's visible scope.
+INSERT INTO "hg_youban_publish_account_visibility"
+  ("tenant_id", "viewer_account_id", "visible_account_id", "relation_type")
+SELECT child."tenant_id", child."parent_id", child."id", 'managed'
+FROM "hg_youban_publish_account" child
+JOIN "hg_youban_publish_account" parent
+  ON parent."id" = child."parent_id"
+ AND parent."tenant_id" = child."tenant_id"
+WHERE child."status" = 1
+  AND child."deleted_at" IS NULL
+  AND parent."status" = 1
+  AND parent."deleted_at" IS NULL
+ON CONFLICT ("tenant_id", "viewer_account_id", "visible_account_id") DO UPDATE
+SET "relation_type" = CASE WHEN "relation_type" IN ('self','following','mutual') THEN "relation_type" ELSE EXCLUDED."relation_type" END,
+    "updated_at" = CURRENT_TIMESTAMP;
+
+-- Seed mutual-follow edges as a symmetric relation. Keep an existing self or
+-- direct-follow label stable when the same edge is represented by both rules.
+INSERT INTO "hg_youban_publish_account_visibility"
+  ("tenant_id", "viewer_account_id", "visible_account_id", "relation_type")
+SELECT f1."tenant_id", f1."follower_account_id", f1."following_account_id", 'mutual'
+FROM "hg_youban_publish_account_follow" f1
+JOIN "hg_youban_publish_account_follow" f2
+  ON f2."tenant_id" = f1."tenant_id"
+ AND f2."follower_account_id" = f1."following_account_id"
+ AND f2."following_account_id" = f1."follower_account_id"
+ AND f2."status" = 'approved'
+ AND f2."deleted_at" IS NULL
+WHERE f1."status" = 'approved'
+  AND f1."deleted_at" IS NULL
+ON CONFLICT ("tenant_id", "viewer_account_id", "visible_account_id") DO UPDATE
+SET "relation_type" = CASE WHEN "relation_type" = 'self' THEN "relation_type" ELSE 'mutual' END,
+    "updated_at" = CURRENT_TIMESTAMP;
+
 ALTER TABLE "hg_youban_publish_collect_rule"
   ADD COLUMN IF NOT EXISTS "full_match_enabled" smallint NOT NULL DEFAULT 0;
 
