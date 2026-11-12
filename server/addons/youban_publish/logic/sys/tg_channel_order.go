@@ -92,7 +92,7 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 		}
 		if err := fast.Fields("j.id,j.created_at,j.priority,j.status,j.dispatch_status,j.operation_no").OrderAsc("j.created_at").OrderAsc("j.id").Limit(1).Scan(&earlier); err != nil {
 			// 没有前序任务是正常的队首状态，不能把 sql.ErrNoRows 当成调度失败。
-			if errors.Is(err, sql.ErrNoRows) || errors.Is(gerror.Cause(err), sql.ErrNoRows) {
+			if errors.Is(err, sql.ErrNoRows) || errors.Is(gerror.Cause(err), sql.ErrNoRows) || strings.Contains(strings.ToLower(err.Error()), "sql: no rows in result set") {
 				return false, nil
 			}
 			return false, gerror.Wrap(err, "检查统一流频道前序TG任务失败")
