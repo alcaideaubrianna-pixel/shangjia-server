@@ -40,11 +40,13 @@ verify_round() {
 }
 
 # 启动边界必须与线上角色一致，回调不能发给只有健康路由的push角色。
-count="$(docker compose -f docker-compose.yml ps -q publish-worker | wc -l | tr -d ' ')"
+# 使用 --all 读取已创建的副本；Compose 在角色刚启动的短窗口内可能不会把容器
+# 纳入默认 ps 结果，导致真实环境明明有两个 worker 却被误判为 0 个。
+count="$(docker compose -f docker-compose.yml ps --all -q publish-worker | wc -l | tr -d ' ')"
 [[ "$count" == 2 ]] || { echo '运行场景要求恰好两个publish-worker' >&2; exit 1; }
 (( $(sql "SELECT count(*) FROM hg_content_profile WHERE source_type='local_regression'") >= 720 )) || { echo '缺少完整的1000份本地资料夹具' >&2; exit 1; }
 curl --noproxy '*' -sS --fail --max-time 5 http://127.0.0.1:18080/readyz > "$output/web-ready.json"
-for worker in $(docker compose -f docker-compose.yml ps -q publish-worker); do
+for worker in $(docker compose -f docker-compose.yml ps --all -q publish-worker); do
   docker inspect "$worker" --format '{{range .Config.Env}}{{println .}}{{end}}' | rg -q '^YOUBAN_TELEGRAM_BOT_API_URL=http://tgfake:18790$'
 done
 reset_hook
