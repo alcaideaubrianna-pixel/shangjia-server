@@ -28,8 +28,12 @@ func cycleChannelAllowed(ctx context.Context, tenantID, channelID int64, operati
 	}
 	// 手工触发的整频道循环沿用原语义；只有定时批次要求当前仍为batch。
 	var runID int64
-	if _, err := fmt.Sscanf(operation, "cycle_batch:%d:", &runID); err != nil {
-		return false, err
+	// 新批次任务使用 cycle_batch:due:<runID>:...，兼容迁移期旧的
+	// cycle_batch:<runID>:... 格式，不能把 due 当作整数解析。
+	if _, err := fmt.Sscanf(operation, "cycle_batch:due:%d:", &runID); err != nil {
+		if _, legacyErr := fmt.Sscanf(operation, "cycle_batch:%d:", &runID); legacyErr != nil {
+			return false, err
+		}
 	}
 	var run cycleRunRecord
 	if err := g.DB().Model(publishCycleRunTable).Ctx(ctx).Where("id", runID).Where("tenant_id", tenantID).Where("channel_id", channelID).Scan(&run); err != nil {
