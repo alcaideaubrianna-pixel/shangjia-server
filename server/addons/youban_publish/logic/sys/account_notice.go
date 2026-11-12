@@ -183,13 +183,27 @@ func (s *sSysPublish) deliverAccountNotice(ctx context.Context, row *entity.Youb
 	if err == nil {
 		return s.finishAccountNotice(ctx, row.Id, token, "sent", "")
 	}
+	// A missing Telegram binding is a terminal delivery decision for this
+	// notice. Retrying it every minute only fills the warning log and blocks
+	// newer account events.
+	if strings.TrimSpace(err.Error()) == "当前账号未绑定Telegram" {
+		return s.finishAccountNotice(ctx, row.Id, token, "skipped", "当前账号未绑定Telegram")
+	}
 	cleanup := ctx
 	if ctx.Err() != nil {
 		var cancel context.CancelFunc
 		cleanup, cancel = context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 		defer cancel()
 	}
-	_, persistErr := pdao.YoubanPublishAccountNotice.Ctx(cleanup).Where(cols.Id, row.Id).Where(cols.LeaseToken, token).Where(cols.Status, "sending").Data(g.Map{cols.Status: "failed", cols.Attempts: row.Attempts + 1, cols.NextRetryAt: now.Add(time.Duration(row.Attempts+1) * time.Minute), cols.LeaseUntil: nil, cols.ErrorMessage: boundDailyReportError(err.Error())}).Update()
+	nextRetryAt := now.Add(time.Duration(row.Attempts+1) * time.Minute)
+	attempts := row.Attempts + 1
+	if delay, rateLimited := telegramRateLimitRetryDelay(err); rateLimited {
+		// Telegram's retry_after is authoritative. Do not consume the five
+		// normal delivery attempts while the global Bot API limit is active.
+		nextRetryAt = now.Add(delay)
+		attempts = row.Attempts
+	}
+	_, persistErr := pdao.YoubanPublishAccountNotice.Ctx(cleanup).Where(cols.Id, row.Id).Where(cols.LeaseToken, token).Where(cols.Status, "sending").Data(g.Map{cols.Status: "failed", cols.Attempts: attempts, cols.NextRetryAt: nextRetryAt, cols.LeaseUntil: nil, cols.ErrorMessage: boundDailyReportError(err.Error())}).Update()
 	if persistErr != nil {
 		return gerror.Wrap(persistErr, "保存账户通知重试状态失败")
 	}
