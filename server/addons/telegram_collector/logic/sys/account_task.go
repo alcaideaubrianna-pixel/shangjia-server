@@ -2,6 +2,8 @@ package sys
 
 import (
 	"context"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -10,10 +12,12 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	"hotgo/addons/telegram_collector/consts"
 	"hotgo/addons/telegram_collector/internal/dao"
 	"hotgo/addons/telegram_collector/internal/model/entity"
 	"hotgo/addons/telegram_collector/model/input/sysin"
 	collectorservice "hotgo/addons/telegram_collector/service"
+	"hotgo/internal/library/cache"
 )
 
 type sAccountTasks struct{}
@@ -29,6 +33,7 @@ func (s *sAccountTasks) Submit(ctx context.Context, in *sysin.AccountTaskSubmit)
 	if in.TaskType == "" || in.TaskKey == "" {
 		return 0, gerror.New("Telegram账号任务参数不完整")
 	}
+	clearAccountTaskEmptyCache(ctx, in.AccountID)
 	if err := validateAccountTaskSubmit(in); err != nil {
 		return 0, err
 	}
@@ -264,6 +269,11 @@ func (s *sAccountTasks) Claim(ctx context.Context, lease *sysin.AccountLease, li
 	if ttl <= 0 {
 		ttl = 10 * time.Minute
 	}
+	if cache.Initialized() {
+		if value, cacheErr := cache.Instance().Get(ctx, consts.AccountTaskEmptyKey(lease.AccountID)); cacheErr == nil && !value.IsNil() {
+			return []*sysin.AccountTask{}, nil
+		}
+	}
 	columns := dao.TgCollectorAccountTask.Columns()
 	now := gtime.Now()
 	var candidates []*entity.TgCollectorAccountTask
@@ -297,6 +307,12 @@ func (s *sAccountTasks) Claim(ctx context.Context, lease *sysin.AccountLease, li
 	)
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取待执行Telegram账号任务失败")
+	}
+	if len(candidates) == 0 {
+		if cache.Initialized() {
+			_ = cache.Instance().Set(ctx, consts.AccountTaskEmptyKey(lease.AccountID), 1, accountTaskEmptyCacheTTL())
+		}
+		return []*sysin.AccountTask{}, nil
 	}
 	claimed := make([]*sysin.AccountTask, 0, len(candidates))
 	for _, candidate := range candidates {
@@ -336,6 +352,7 @@ func (s *sAccountTasks) Complete(ctx context.Context, taskID int64, lease *sysin
 	if taskID <= 0 || lease == nil {
 		return gerror.New("Telegram账号任务完成参数无效")
 	}
+	clearAccountTaskEmptyCache(ctx, lease.AccountID)
 	columns := dao.TgCollectorAccountTask.Columns()
 	data := g.Map{
 		columns.Status: sysin.AccountTaskStatusCompleted, columns.LeaseOwner: "", columns.LeaseEpoch: 0,
@@ -371,6 +388,7 @@ func (s *sAccountTasks) Fail(ctx context.Context, in *sysin.AccountTaskFailure) 
 	if in == nil || in.TaskID <= 0 || in.Lease == nil {
 		return gerror.New("Telegram账号任务失败参数无效")
 	}
+	clearAccountTaskEmptyCache(ctx, in.Lease.AccountID)
 	columns := dao.TgCollectorAccountTask.Columns()
 	var row entity.TgCollectorAccountTask
 	if err := dao.TgCollectorAccountTask.Ctx(ctx).WherePri(in.TaskID).Scan(&row); err != nil {
@@ -411,6 +429,23 @@ func (s *sAccountTasks) Fail(ctx context.Context, in *sysin.AccountTaskFailure) 
 		return gerror.New("Telegram账号任务租约已失效，拒绝提交失败结果")
 	}
 	return nil
+}
+
+func accountTaskEmptyCacheTTL() time.Duration {
+	milliseconds, err := strconv.Atoi(strings.TrimSpace(os.Getenv("YOUBAN_PUBLISH_ACCOUNT_TASK_EMPTY_CACHE_MS")))
+	if err != nil || milliseconds < 100 {
+		milliseconds = 500
+	}
+	if milliseconds > 3000 {
+		milliseconds = 3000
+	}
+	return time.Duration(milliseconds) * time.Millisecond
+}
+
+func clearAccountTaskEmptyCache(ctx context.Context, accountID int64) {
+	if accountID > 0 && cache.Initialized() {
+		_, _ = cache.Instance().Remove(ctx, consts.AccountTaskEmptyKey(accountID))
+	}
 }
 
 func (s *sAccountTasks) RecoverExpired(ctx context.Context, limit int) (int, error) {

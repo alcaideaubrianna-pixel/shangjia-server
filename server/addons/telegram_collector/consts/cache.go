@@ -5,6 +5,7 @@ const (
 	MediaLockPrefix         = "tg:collector:media-lock:"
 	AccountOwnerPrefix      = "youban_publish:tg:account-client:"
 	AccountLeaseEpochPrefix = "tg:collector:account-lease-epoch:"
+	AccountTaskEmptyPrefix  = "tg:collector:account-task-empty:"
 	MediaCacheDefaultHours  = 720
 )
 
@@ -22,6 +23,10 @@ func AccountOwnerKey(accountID int64) string {
 
 func AccountLeaseEpochKey(accountID int64) string {
 	return AccountLeaseEpochPrefix + formatInt64(accountID)
+}
+
+func AccountTaskEmptyKey(accountID int64) string {
+	return AccountTaskEmptyPrefix + formatInt64(accountID)
 }
 
 func formatInt64(value int64) string {
