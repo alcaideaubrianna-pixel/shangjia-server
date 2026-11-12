@@ -15,9 +15,9 @@ func TestAccountMediaDownloadTimeout(t *testing.T) {
 		size int64
 		want time.Duration
 	}{
-		{size: 2 << 20, want: time.Minute},
-		{size: 20 << 20, want: 2 * time.Minute},
-		{size: 80 << 20, want: 3 * time.Minute},
+		{size: 2 << 20, want: 3 * time.Minute},
+		{size: 20 << 20, want: 5 * time.Minute},
+		{size: 80 << 20, want: 10 * time.Minute},
 	}
 	for _, test := range tests {
 		if got := accountMediaDownloadTimeout(test.size); got != test.want {

@@ -271,11 +271,11 @@ func accountMediaReferenceExpired(err error) bool {
 func accountMediaDownloadTimeout(size int64) time.Duration {
 	switch {
 	case size > 50<<20:
-		return 3 * time.Minute
+		return 10 * time.Minute
 	case size > 10<<20:
-		return 2 * time.Minute
+		return 5 * time.Minute
 	default:
-		return time.Minute
+		return 3 * time.Minute
 	}
 }
 
