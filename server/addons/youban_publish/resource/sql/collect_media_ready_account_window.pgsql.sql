@@ -6,5 +6,5 @@ WHERE processed_at IS NULL;
 
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ybp_collect_media_account_ready_window
 ON hg_youban_publish_collect_event_media
-(tenant_id, account_id, source_id, source_chat_id, status, updated_at, id)
+(tenant_id, account_id, source_id, source_chat_id, cache_status, updated_at, id)
 WHERE cache_status='ready';

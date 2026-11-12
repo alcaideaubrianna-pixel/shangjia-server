@@ -39,3 +39,13 @@ DROP INDEX CONCURRENTLY IF EXISTS idx_ybp_profile_fingerprint_indexed_profile;
 CREATE INDEX CONCURRENTLY idx_ybp_profile_fingerprint_indexed_profile
     ON hg_youban_publish_profile_fingerprint (profile_id)
     WHERE layer = '_indexed';
+
+-- 采集 media_ready 按账户读取索引。旧脚本误用了不存在的 status 列，
+-- 这里使用事件关联键，确保账户分片查询先缩小媒体范围。
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ybp_collect_media_account_ready_v2
+    ON hg_youban_publish_collect_event_media (tenant_id, account_id, event_id, updated_at, id)
+    WHERE cache_status = 'ready';
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ybp_collect_event_media_ready_account_v2
+    ON hg_youban_publish_collect_event (tenant_id, account_id, source_id, updated_at, id)
+    WHERE status = 'media_ready' AND processed_at IS NULL;
