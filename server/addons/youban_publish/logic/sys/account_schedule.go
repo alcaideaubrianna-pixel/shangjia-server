@@ -206,6 +206,7 @@ func reconcileProfileCycleRunChannels(ctx context.Context, scope publishAccountS
 		  AND r.tenant_id=? AND r.account_id=?
 		  AND rc.status NOT IN ('sent','superseded','failed','skipped')
 		  AND j.status IN ('sent','superseded')
+		  AND COALESCE(j.dispatch_status,'')='done'
 		ORDER BY rc.id
 		LIMIT ?
 	)
