@@ -152,6 +152,13 @@ func (s *sSysPublish) adminProfileVisibleScope(ctx context.Context, account *sys
 	if in != nil && strings.TrimSpace(in.AccountScope) != "" {
 		scope = strings.TrimSpace(in.AccountScope)
 	}
+	if in == nil || in.AccountId <= 0 {
+		if readModelScope, enabled, readErr := accountVisibilityReadModelScope(ctx, account.TenantId, account.Id, scope); readErr != nil {
+			g.Log().Warning(ctx, "读取账户可见范围读模型失败，回退旧权限解析", g.Map{"tenantId": account.TenantId, "viewerAccountId": account.Id, "error": readErr.Error()})
+		} else if enabled {
+			return readModelScope, nil
+		}
+	}
 	cacheKey := accountVisibilityScopeCacheKey(ctx, account.TenantId, account.Id, scope, accountScopeSelectedID(in))
 	if cached, err := cache.Instance().Get(ctx, cacheKey); err == nil && !cached.IsNil() {
 		var res *adminProfileVisibleScope
@@ -211,6 +218,34 @@ func (s *sSysPublish) adminProfileVisibleScope(ctx context.Context, account *sys
 	default:
 		return nil, gerror.New("账号筛选范围不合法")
 	}
+}
+
+// accountVisibilityReadModelScope is opt-in. The legacy resolver remains the
+// default and the fallback whenever the projection is disabled or unavailable.
+func accountVisibilityReadModelScope(ctx context.Context, tenantID, viewerID int64, scope string) (*adminProfileVisibleScope, bool, error) {
+	if !g.Cfg().MustGet(ctx, "youbanPublish.accountVisibilityReadModelEnabled", false).Bool() || tenantID <= 0 || viewerID <= 0 {
+		return nil, false, nil
+	}
+	relationTypes := []string{"self", "managed", "following", "mutual"}
+	if scope == "following" {
+		relationTypes = []string{"following", "mutual"}
+	}
+	var rows []struct {
+		VisibleAccountId int64 `orm:"visible_account_id"`
+	}
+	if err := g.DB().Model(accountVisibilityReadModelTable).Ctx(ctx).
+		Fields("visible_account_id").Where("tenant_id", tenantID).
+		Where("viewer_account_id", viewerID).WhereIn("relation_type", relationTypes).
+		OrderAsc("visible_account_id").Scan(&rows); err != nil {
+		return nil, false, err
+	}
+	ids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		if row.VisibleAccountId > 0 {
+			ids = append(ids, row.VisibleAccountId)
+		}
+	}
+	return &adminProfileVisibleScope{AccountIds: uniqueIds(ids), Strict: scope == "following", TenantId: tenantID}, true, nil
 }
 
 // compareAccountVisibilityReadModel is deliberately observational. The legacy
