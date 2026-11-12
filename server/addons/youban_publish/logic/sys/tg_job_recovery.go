@@ -406,7 +406,26 @@ func (s *sSysPublish) detachFailedTelegramDisplayJobsForAccount(ctx context.Cont
 
 const telegramFailedDisplayDetachedMessage = "展示后失败的历史任务已释放频道，禁止孤立补发验证；问题资料需整组重新上架"
 
+// recoverExpiredTelegramOutboxDispatches 按账户拆分过期 Outbox 恢复，避免全局联表扫描。
 func (s *sSysPublish) recoverExpiredTelegramOutboxDispatches(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		limit = 100
+	}
+	var accounts []struct {
+		AccountId int64 `orm:"account_id"`
+	}
+	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Fields("account_id").Where("account_id > 0").WhereIn("status", []string{telegramJobStatusPending, telegramJobStatusRetryWait, telegramJobStatusConfirming}).Where("dispatch_status", tgDispatchStatusQueued).Group("account_id").OrderAsc("account_id").Limit(32).Scan(&accounts); err != nil {
+		return gerror.Wrap(err, "读取待恢复Outbox账户失败")
+	}
+	for _, account := range accounts {
+		if err := s.recoverExpiredTelegramOutboxDispatchesForAccount(ctx, limit, account.AccountId); err != nil {
+			return err
+		}
+	}
+	return s.recoverExpiredTelegramOutboxDispatchesForAccount(ctx, limit, 0)
+}
+
+func (s *sSysPublish) recoverExpiredTelegramOutboxDispatchesForAccount(ctx context.Context, limit int, accountID int64) error {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -417,7 +436,7 @@ func (s *sSysPublish) recoverExpiredTelegramOutboxDispatches(ctx context.Context
 		AttemptCount int   `json:"attemptCount"`
 	}
 	var rows []expiredDispatch
-	err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
+	model := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
 		InnerJoin(publishTgOutboxTable+" o", "o.job_id=j.id").
 		Fields("o.id AS outbox_id,o.job_id,o.attempt_count").
 		Where("o.event_type", telegramOutboxEventPublish).
@@ -426,7 +445,13 @@ func (s *sSysPublish) recoverExpiredTelegramOutboxDispatches(ctx context.Context
 		WhereIn("j.status", []string{telegramJobStatusPending, telegramJobStatusRetryWait, telegramJobStatusConfirming}).
 		Where("j.dispatch_status", tgDispatchStatusQueued).
 		Where(telegramActiveChannelConditionForAlias("j")).
-		OrderAsc("o.lease_expires_at").OrderAsc("j.id").Limit(limit).Scan(&rows)
+		OrderAsc("o.lease_expires_at").OrderAsc("j.id").Limit(limit)
+	if accountID > 0 {
+		model = model.Where("j.account_id", accountID)
+	} else {
+		model = model.Where("j.account_id <= 0")
+	}
+	err := model.Scan(&rows)
 	if err != nil {
 		return gerror.Wrap(err, "读取Outbox入队确认中断的TG任务失败")
 	}
