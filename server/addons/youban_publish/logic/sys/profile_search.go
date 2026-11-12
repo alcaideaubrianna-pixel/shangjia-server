@@ -99,6 +99,18 @@ func applyProfileKeywordSearch(mod *gdb.Model, keyword string, fields profileSea
 	if profileSearchNoRegexp.MatchString(upper) {
 		return mod.Where(fields.ProfileNo+" = ?", upper)
 	}
+	if strings.HasPrefix(fields.ProfileNo, "i.") {
+		terms := splitProfileSearchTerms(keyword)
+		conditions := make([]string, 0, len(terms))
+		args := make([]interface{}, 0, len(terms))
+		for _, term := range terms {
+			conditions = append(conditions, "EXISTS (SELECT 1 FROM hg_youban_publish_note_search ns WHERE ns.tenant_id=i.tenant_id AND ns.account_id=i.account_id AND ns.profile_id=i.profile_id AND ns.deleted_at IS NULL AND ns.search_text ILIKE ?)")
+			args = append(args, "%"+term+"%")
+		}
+		if len(conditions) > 0 {
+			return mod.Where("("+strings.Join(conditions, " AND ")+")", args...)
+		}
+	}
 	condition, args := profileTextSearchCondition(keyword, fields)
 	return mod.Where(condition, args...)
 }

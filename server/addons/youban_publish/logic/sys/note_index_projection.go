@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -68,6 +69,10 @@ func (s *sSysPublish) syncProfileNoteIndex(ctx context.Context, profileId int64)
 		Data(g.Map{columns.DeletedAt: gtime.Now(), columns.UpdatedAt: gtime.Now()}).
 		Update(); err != nil {
 		return gerror.Wrap(err, "清理资料索引失败")
+	}
+	if _, err := g.DB().Model("hg_youban_publish_note_search").Ctx(ctx).
+		Where("profile_id", profileId).Data(g.Map{"deleted_at": gtime.Now(), "updated_at": gtime.Now()}).Update(); err != nil {
+		return gerror.Wrap(err, "清理资料搜索索引失败")
 	}
 
 	rows, err := s.noteIndexSources(ctx, profileId)
@@ -136,6 +141,25 @@ func upsertNoteIndex(ctx context.Context, row *noteIndexSource) error {
 	if err != nil {
 		return gerror.Wrap(err, "写入资料索引失败")
 	}
+	if err := upsertNoteIndexSearch(ctx, row); err != nil {
+		return err
+	}
+	return nil
+}
+
+func upsertNoteIndexSearch(ctx context.Context, row *noteIndexSource) error {
+	if row == nil || row.TenantId <= 0 || row.AccountId <= 0 || row.ProfileId <= 0 {
+		return nil
+	}
+	searchText := strings.Join([]string{row.ProfileNo, row.Title, row.Summary, row.PlainText}, " ")
+	_, err := g.DB().Model("hg_youban_publish_note_search").Ctx(ctx).Data(g.Map{
+		"tenant_id": row.TenantId, "account_id": row.AccountId,
+		"profile_id": row.ProfileId, "is_collected": row.IsCollected, "status": row.Status,
+		"search_text": searchText, "deleted_at": row.DeletedAt, "updated_at": gtime.Now(),
+	}).OnConflict("tenant_id,account_id,profile_id").OnDuplicateEx("id,tenant_id,account_id,profile_id").Save()
+	if err != nil {
+		return gerror.Wrap(err, "写入资料搜索索引失败")
+	}
 	return nil
 }
 
@@ -150,6 +174,11 @@ func (s *sSysPublish) deleteProfileNoteIndex(ctx context.Context, profileIds []i
 		Update()
 	if err != nil {
 		return gerror.Wrap(err, "删除资料索引失败")
+	}
+	if _, err = g.DB().Model("hg_youban_publish_note_search").Ctx(ctx).
+		WhereIn("profile_id", profileIds).
+		Data(g.Map{"deleted_at": gtime.Now(), "updated_at": gtime.Now()}).Update(); err != nil {
+		return gerror.Wrap(err, "删除资料搜索索引失败")
 	}
 	return nil
 }

@@ -67,6 +67,21 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_scope_created" ON "hg_youban_publ
 CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_tenant_published" ON "hg_youban_publish_note_index" ("tenant_id", (COALESCE("published_at", '1970-01-01'::timestamp)) DESC, "id" DESC) WHERE "deleted_at" IS NULL;
 CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_account_published" ON "hg_youban_publish_note_index" ("account_id", (COALESCE("published_at", '1970-01-01'::timestamp)) DESC, "id" DESC) WHERE "deleted_at" IS NULL;
 
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_note_search" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "profile_id" bigint NOT NULL DEFAULT 0,
+  "is_collected" boolean NOT NULL DEFAULT false,
+  "status" integer NOT NULL DEFAULT 0,
+  "search_text" text NOT NULL DEFAULT '',
+  "deleted_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL,
+  UNIQUE ("tenant_id", "account_id", "profile_id")
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_note_search_scope" ON "hg_youban_publish_note_search" ("tenant_id", "is_collected", "status", "profile_id") WHERE "deleted_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_ybp_note_search_trgm" ON "hg_youban_publish_note_search" USING gin ("search_text" gin_trgm_ops) WHERE "deleted_at" IS NULL;
+
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_image_quota" (
   "id" BIGSERIAL PRIMARY KEY, "tenant_id" bigint NOT NULL DEFAULT 0,
