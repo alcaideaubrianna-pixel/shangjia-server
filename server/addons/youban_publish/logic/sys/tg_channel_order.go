@@ -348,7 +348,8 @@ func (s *sSysPublish) telegramChannelHasDispatchCapacity(ctx context.Context, jo
 }
 
 func (s *sSysPublish) postponeTelegramJobForChannelOrder(ctx context.Context, job telegramJobRecord) error {
-	nextRetryAt := gtime.Now().Add(telegramChannelDispatchRetryDelay(job.DispatchCount))
+	retryDelay := telegramChannelDispatchRetryDelay(job.DispatchCount)
+	nextRetryAt := gtime.Now().Add(retryDelay)
 	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id", job.Id).
 		WhereIn("status", []string{"pending", "failed_retry"}).
@@ -368,7 +369,7 @@ func (s *sSysPublish) postponeTelegramJobForChannelOrder(ctx context.Context, jo
 	if err != nil {
 		return gerror.Wrap(err, "延后TG频道顺序任务失败")
 	}
-	return s.rearmTelegramJobOutbox(ctx, job.Id, time.Until(nextRetryAt.Time))
+	return s.rearmTelegramJobOutbox(ctx, job.Id, retryDelay)
 }
 
 func (s *sSysPublish) postponeTelegramJobForCollectPushPause(ctx context.Context, job telegramJobRecord) error {
