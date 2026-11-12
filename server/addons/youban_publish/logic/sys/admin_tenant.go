@@ -147,12 +147,18 @@ func (s *sSysPublish) AdminTenantSave(ctx context.Context, in *sysin.TenantSaveI
 	if err = in.Filter(ctx); err != nil {
 		return nil, err
 	}
+	var accountID int64
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		res, _, err = s.adminTenantSaveTx(ctx, tx, in)
+		res, accountID, err = s.adminTenantSaveTx(ctx, tx, in)
 		return err
 	})
 	if err != nil {
 		return nil, err
+	}
+	if accountID > 0 {
+		if refreshErr := refreshAccountVisibilityAccountEdge(ctx, in.Id, accountID, 0, true); refreshErr != nil {
+			g.Log().Warning(ctx, "创建租户管理员后刷新可见范围读模型失败", g.Map{"tenantId": in.Id, "accountId": accountID, "error": refreshErr.Error()})
+		}
 	}
 	return res, nil
 }

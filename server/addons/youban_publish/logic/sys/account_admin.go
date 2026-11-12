@@ -54,6 +54,9 @@ func (s *sSysPublish) ServerAccountSave(ctx context.Context, in *sysin.AccountSa
 	if err = s.savePublishAccount(ctx, nil, in); err != nil {
 		return nil, err
 	}
+	if refreshErr := refreshAccountVisibilityAccountEdge(ctx, in.TenantId, in.Id, in.ParentId, in.Status == 1); refreshErr != nil {
+		g.Log().Warning(ctx, "刷新账户可见范围读模型失败", g.Map{"tenantId": in.TenantId, "accountId": in.Id, "parentId": in.ParentId, "error": refreshErr.Error()})
+	}
 	return &sysin.AccountSaveModel{Id: in.Id, Password: in.Password}, nil
 }
 
@@ -155,6 +158,9 @@ func (s *sSysPublish) AdminAccountSave(ctx context.Context, in *sysin.AccountSav
 	}
 	if err = s.savePublishAccount(ctx, nil, in); err != nil {
 		return nil, err
+	}
+	if refreshErr := refreshAccountVisibilityAccountEdge(ctx, in.TenantId, in.Id, in.ParentId, in.Status == 1); refreshErr != nil {
+		g.Log().Warning(ctx, "刷新账户可见范围读模型失败", g.Map{"tenantId": in.TenantId, "accountId": in.Id, "parentId": in.ParentId, "error": refreshErr.Error()})
 	}
 	return &sysin.AccountSaveModel{Id: in.Id, Password: in.Password}, nil
 }
@@ -377,9 +383,6 @@ func (s *sSysPublish) savePublishAccount(ctx context.Context, tx gdb.TX, in *sys
 	}
 	if err != nil {
 		return gerror.Wrap(err, "保存上架账号失败")
-	}
-	if refreshErr := refreshAccountVisibilityAccountEdge(ctx, in.TenantId, in.Id, in.ParentId, in.Status == 1); refreshErr != nil {
-		g.Log().Warning(ctx, "刷新账户可见范围读模型失败", g.Map{"tenantId": in.TenantId, "accountId": in.Id, "parentId": in.ParentId, "error": refreshErr.Error()})
 	}
 	_ = bumpAccountVisibilityVersion(ctx, in.TenantId)
 	return nil
