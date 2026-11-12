@@ -18,13 +18,14 @@ import (
 )
 
 const (
-	profileFingerprintCachePrefix  = "youban_publish:profile_fingerprint:v1"
-	profileFingerprintReadyKey     = "youban_publish:profile_fingerprint:v1:backfill_ready"
-	profileFingerprintCacheTTL     = 24 * time.Hour
-	profileFingerprintMissCacheTTL = 10 * time.Minute
-	profileFingerprintReadyTTL     = 30 * time.Minute
-	profileFingerprintCacheRetries = 3
-	profileFingerprintCacheMiss    = int64(-1)
+	profileFingerprintCachePrefix       = "youban_publish:profile_fingerprint:v1"
+	profileFingerprintReadyKey          = "youban_publish:profile_fingerprint:v1:backfill_ready"
+	profileFingerprintCacheTTL          = 24 * time.Hour
+	profileFingerprintMissCacheTTL      = 10 * time.Minute
+	profileFingerprintReadyTTL          = 30 * time.Minute
+	profileFingerprintBackfillCursorKey = profileFingerprintCachePrefix + ":backfill_cursor"
+	profileFingerprintCacheRetries      = 3
+	profileFingerprintCacheMiss         = int64(-1)
 )
 
 type profileFingerprint struct {
@@ -504,12 +505,22 @@ func (s *sSysPublish) backfillProfileFingerprints(ctx context.Context, limit int
 	if limit <= 0 {
 		limit = 200
 	}
-	rows, err := g.DB().Model(dao.ContentProfile.Table()+" p").Safe().Ctx(ctx).
+	cursorValue, _ := cache.Instance().Get(ctx, profileFingerprintBackfillCursorKey)
+	cursor := cursorValue.Int64()
+	model := g.DB().Model(dao.ContentProfile.Table()+" p").Safe().Ctx(ctx).
 		InnerJoin(publishProfileStateTable+" ps", "ps.profile_id=p.id AND ps.deleted_at IS NULL").
 		Fields("p.id,p.plain_text,ps.tenant_id,ps.account_id").WhereNull("p.deleted_at").
-		Where("NOT EXISTS (SELECT 1 FROM " + publishProfileFingerprintTable + " f WHERE f.profile_id=p.id AND f.layer='_indexed')").
-		OrderDesc("p.id").Limit(limit).All()
+		Where("NOT EXISTS (SELECT 1 FROM " + publishProfileFingerprintTable + " f WHERE f.profile_id=p.id AND f.layer='_indexed')")
+	if cursor > 0 {
+		model = model.WhereGT("p.id", cursor)
+	}
+	rows, err := model.OrderAsc("p.id").Limit(limit).All()
 	if err != nil || len(rows) == 0 {
+		if err == nil {
+			// A complete pass has reached the end of the profile ID space. Reset
+			// the cursor so late repairs below the cursor are picked up next pass.
+			_, _ = cache.Instance().Remove(ctx, profileFingerprintBackfillCursorKey)
+		}
 		return 0, gerror.Wrap(err, "读取待回填资料指纹失败")
 	}
 	profileIDs := make([]int64, 0, len(rows))
@@ -625,6 +636,9 @@ func (s *sSysPublish) backfillProfileFingerprints(ctx context.Context, limit int
 		return 0, gerror.Wrap(err, "批量标记资料指纹回填完成失败")
 	}
 	processed := len(rows)
+	if processed > 0 {
+		_ = cache.Instance().Set(ctx, profileFingerprintBackfillCursorKey, profileIDs[len(profileIDs)-1], profileFingerprintReadyTTL)
+	}
 	if processed > 0 {
 		g.Log().Infof(ctx, "资料指纹增量回填完成 scanned:%d projected:%d owners:%d duplicates:%d maxProfileId:%d minProfileId:%d elapsed:%s",
 			len(rows), processed, len(ownerData)-len(duplicateAssociations), len(duplicateAssociations), profileIDs[0], profileIDs[len(profileIDs)-1], time.Since(startedAt).Round(time.Millisecond))
