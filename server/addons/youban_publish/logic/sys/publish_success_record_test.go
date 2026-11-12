@@ -24,6 +24,15 @@ func TestMessagePushOperationUsesQuickPushAction(t *testing.T) {
 	}
 }
 
+func TestFullPushProfileRecordIsNotBatchSuccess(t *testing.T) {
+	if got := publishSuccessRecordMessage(publishSuccessTypeFull); got != "资料推送成功" {
+		t.Fatalf("full push profile message = %q, want per-profile success", got)
+	}
+	if got := publishJobRecordMessage(publishSuccessTypeFull, "success"); got != "资料推送成功" {
+		t.Fatalf("full push terminal profile message = %q, want per-profile success", got)
+	}
+}
+
 func TestBoundPublishSuccessRecordMessage(t *testing.T) {
 	short := "Telegram 发送失败"
 	if got := boundPublishSuccessRecordMessage(short); got != short {

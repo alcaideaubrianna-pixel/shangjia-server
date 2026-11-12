@@ -154,7 +154,12 @@ func publishSuccessRecordMessage(action string) string {
 	case publishSuccessTypeCycle:
 		return "循环上架推送成功"
 	case publishSuccessTypeFull:
-		return "全量推送成功"
+		// A full-push record belongs to one profile job.  The batch is only
+		// complete after every snapshot job has reached a terminal state;
+		// reporting "全量推送成功" for every successful profile made an
+		// in-progress batch look complete (and produced misleading repeated
+		// notifications such as 15/438 · 全量推送成功).
+		return "资料推送成功"
 	case publishSuccessTypeCollect:
 		return "采集推送成功"
 	case publishSuccessTypeQuick:
