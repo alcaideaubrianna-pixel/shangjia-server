@@ -415,9 +415,11 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 	beginTelegramPublishStage(ctx, "dispatch.reserve_result").End(err, g.Map{"reserved": reserved, "targetQueue": queueName})
 	if err != nil {
 		// 频道租约或顺序检查失败时，Stream 通知不能保持 delivered；重新激活 Outbox，避免 Job 永久 idle。
-		if rearmErr := s.rearmTelegramJobOutbox(ctx, jobId, 3*time.Second); rearmErr != nil {
+		retryDelay := telegramChannelDispatchRetryDelay(job.DispatchCount)
+		if rearmErr := s.rearmTelegramJobOutbox(ctx, jobId, retryDelay); rearmErr != nil {
 			g.Log().Warningf(ctx, "恢复TG任务Outbox失败 jobId:%d err:%+v", jobId, rearmErr)
 		}
+		g.Log().Warning(ctx, "频道调度租约获取失败，已延迟重入", g.Map{"jobId": jobId, "delayMs": retryDelay.Milliseconds(), "event": "channel_dispatch_retry"})
 		return gerror.Wrap(err, "锁定TG任务入队状态失败")
 	}
 	if !reserved {
@@ -442,6 +444,21 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 		return gerror.Wrap(err, "TG任务直接入队失败")
 	}
 	return nil
+}
+
+// telegramChannelDispatchRetryDelay 根据任务调度次数计算退避，避免锁竞争时热循环。
+func telegramChannelDispatchRetryDelay(dispatchCount int) time.Duration {
+	if dispatchCount < 0 {
+		dispatchCount = 0
+	}
+	if dispatchCount > 4 {
+		dispatchCount = 4
+	}
+	delay := time.Second << dispatchCount
+	if delay > 30*time.Second {
+		return 30 * time.Second
+	}
+	return delay
 }
 
 func (s *sSysPublish) enqueueTelegramCleanupJob(ctx context.Context, jobId int64, delay time.Duration) error {
