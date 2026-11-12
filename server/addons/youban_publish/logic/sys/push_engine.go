@@ -94,3 +94,20 @@ func (s *sSysPublish) unifiedPushEngineEnabled(ctx context.Context, tenantId, ac
 func globalStreamPushEngineEnabled() bool {
 	return strings.EqualFold(strings.TrimSpace(os.Getenv("YOUBAN_PUBLISH_PUSH_ENGINE")), pushEngineUnifiedStream)
 }
+
+// accountStreamPushEngineEnabled 读取账户的 Stream 灰度配置，绕过旧缓存。
+// 运维通过 DBX 切换账户版本后，旧缓存不能继续把任务送回 legacy 队列。
+func (s *sSysPublish) accountStreamPushEngineEnabled(ctx context.Context, tenantId, accountId int64) bool {
+	if globalStreamPushEngineEnabled() || tenantId <= 0 || accountId <= 0 {
+		return globalStreamPushEngineEnabled()
+	}
+	var row struct {
+		PushEngine string `orm:"push_engine"`
+	}
+	if err := g.DB().Model(publishAccountSettingTable).Safe().Ctx(ctx).
+		Fields("push_engine").Where("tenant_id", tenantId).Where("account_id", accountId).
+		WhereNull("deleted_at").Scan(&row); err != nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(row.PushEngine), pushEngineUnifiedStream)
+}

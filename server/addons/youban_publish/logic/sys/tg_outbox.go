@@ -233,7 +233,7 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 	if err != nil {
 		return s.releaseTelegramOutbox(ctx, row.Id, owner, row.AttemptCount, err.Error())
 	}
-	if s.accountPushEngine(ctx, job.TenantId, job.AccountId) == pushEngineUnifiedStream {
+	if s.accountStreamPushEngineEnabled(ctx, job.TenantId, job.AccountId) {
 		if err = s.publishTelegramReadyStream(ctx, job); err != nil {
 			return s.releaseTelegramOutbox(ctx, row.Id, owner, row.AttemptCount, err.Error())
 		}
