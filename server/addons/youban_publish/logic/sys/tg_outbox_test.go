@@ -52,6 +52,17 @@ func TestTelegramDueOutboxPostgresSQLSelectsChannelHeads(t *testing.T) {
 	}
 }
 
+func TestTelegramDueOutboxPostgresSQLForAccountScopesDueJobs(t *testing.T) {
+	query := telegramDueOutboxPostgresSQLForAccount()
+	marker := "WHERE j.account_id=?\n\t), active_heads AS ("
+	if !strings.Contains(query, marker) {
+		t.Fatalf("account-scoped predicate must be inside due_jobs CTE: %s", query)
+	}
+	if strings.Count(query, "?") != 8 {
+		t.Fatalf("account-scoped query placeholder count=%d, want 8", strings.Count(query, "?"))
+	}
+}
+
 func TestTelegramOutboxTimeoutsAreBounded(t *testing.T) {
 	if telegramOutboxQueryTimeout <= 0 || telegramOutboxQueryTimeout > 5*time.Second {
 		t.Fatalf("unexpected outbox query timeout: %s", telegramOutboxQueryTimeout)
