@@ -131,6 +131,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_outbox_dedupe" ON "hg_youban_publis
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_outbox_due" ON "hg_youban_publish_tg_outbox" ("available_at", "id") WHERE "status" = 'pending';
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_outbox_lease" ON "hg_youban_publish_tg_outbox" ("lease_expires_at", "id") WHERE "status" = 'processing';
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_outbox_job" ON "hg_youban_publish_tg_outbox" ("job_id", "event_type", "id");
+-- 账户分片调度先按 Outbox 状态和时间缩小候选集，避免每轮扫描整个待处理表。
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_outbox_event_status_due"
+  ON "hg_youban_publish_tg_outbox" ("event_type", "status", "available_at", "id")
+  INCLUDE ("job_id", "attempt_count");
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_outbox_event_status_lease"
+  ON "hg_youban_publish_tg_outbox" ("event_type", "status", "lease_expires_at", "id")
+  INCLUDE ("job_id", "attempt_count");
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_account_channel_order"
+  ON "hg_youban_publish_tg_job" ("tenant_id", "account_id", "channel_id", "created_at", "id")
+  INCLUDE ("status", "dispatch_status", "next_retry_at", "priority");
 ALTER TABLE "hg_youban_publish_account" ADD COLUMN IF NOT EXISTS "last_active_at" timestamp DEFAULT NULL;
 ALTER TABLE "hg_youban_publish_collect_source" ADD COLUMN IF NOT EXISTS "channel_suffix" text NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_collect_source" ADD COLUMN IF NOT EXISTS "channel_blacklisted" smallint NOT NULL DEFAULT 0;
