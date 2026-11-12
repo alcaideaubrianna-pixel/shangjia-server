@@ -27,7 +27,7 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 	}
 	createdAt := job.CreatedAt
 	if createdAt == nil {
-		current, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		current, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Master().
 			Fields("created_at").
 			Where("id", job.Id).
 			One()
@@ -43,7 +43,9 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 	if s.accountPushEngine(ctx, job.TenantId, job.AccountId) == pushEngineUnifiedStream {
 		blocking = telegramStreamChannelBlockingJobSQL("j")
 	}
-	mod := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).Unscoped().
+	// 队首判断必须读取主库，否则副本延迟会继续看到已终态的旧任务，
+	// 让频道在数据库已释放后仍被旧队首阻塞。
+	mod := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).Master().Unscoped().
 		Where("j.id <> ?", job.Id).
 		Where(telegramWebhookDetachedJobSQL("j.")).
 		Where(blocking)
