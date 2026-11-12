@@ -33,12 +33,23 @@ WHERE "status" = 1 AND "deleted_at" IS NULL
 ON CONFLICT ("tenant_id", "viewer_account_id", "visible_account_id") DO NOTHING;
 INSERT INTO "hg_youban_publish_account_visibility"
   ("tenant_id", "viewer_account_id", "visible_account_id", "relation_type")
-SELECT "tenant_id", "follower_account_id", "following_account_id", 'following'
-FROM "hg_youban_publish_account_follow"
-WHERE "status" = 'approved' AND "deleted_at" IS NULL
+SELECT f."tenant_id", f."follower_account_id", f."following_account_id", 'following'
+FROM "hg_youban_publish_account_follow" f
+JOIN "hg_youban_publish_account" viewer ON viewer."id" = f."follower_account_id" AND viewer."tenant_id" = f."tenant_id"
+JOIN "hg_youban_publish_account" visible ON visible."id" = f."following_account_id" AND visible."tenant_id" = f."tenant_id"
+WHERE f."status" = 'approved' AND f."deleted_at" IS NULL
 ON CONFLICT ("tenant_id", "viewer_account_id", "visible_account_id") DO UPDATE
 SET "relation_type" = CASE WHEN "relation_type" = 'self' THEN "relation_type" ELSE EXCLUDED."relation_type" END,
     "updated_at" = CURRENT_TIMESTAMP;
+
+-- Remove historical cross-tenant follow edges before the projection can be
+-- enabled. Follow data remains untouched; only the derived visibility rows
+-- are discarded.
+DELETE FROM "hg_youban_publish_account_visibility" v
+USING "hg_youban_publish_account" viewer, "hg_youban_publish_account" visible
+WHERE v."viewer_account_id" = viewer."id"
+  AND v."visible_account_id" = visible."id"
+  AND (viewer."tenant_id" <> v."tenant_id" OR visible."tenant_id" <> v."tenant_id");
 
 -- Seed administrator -> managed account edges. The account hierarchy is the
 -- authoritative source for the tenant administrator's visible scope.
@@ -73,6 +84,24 @@ WHERE f1."status" = 'approved'
   AND f1."deleted_at" IS NULL
 ON CONFLICT ("tenant_id", "viewer_account_id", "visible_account_id") DO UPDATE
 SET "relation_type" = CASE WHEN "relation_type" = 'self' THEN "relation_type" ELSE 'mutual' END,
+    "updated_at" = CURRENT_TIMESTAMP;
+
+-- Following a tenant administrator grants the same tenant-wide account scope
+-- as the legacy resolver. Materialize it explicitly so the read model does
+-- not silently omit that administrator's managed accounts.
+INSERT INTO "hg_youban_publish_account_visibility"
+  ("tenant_id", "viewer_account_id", "visible_account_id", "relation_type")
+SELECT parent."tenant_id", parent."id", child."id", 'tenant_scope'
+FROM "hg_youban_publish_account" parent
+JOIN "hg_youban_publish_account" child
+  ON child."tenant_id" = parent."tenant_id"
+ AND child."status" = 1
+ AND child."deleted_at" IS NULL
+WHERE parent."account_type" = 'admin'
+  AND parent."status" = 1
+  AND parent."deleted_at" IS NULL
+ON CONFLICT ("tenant_id", "viewer_account_id", "visible_account_id") DO UPDATE
+SET "relation_type" = CASE WHEN "relation_type" IN ('self','following','mutual','managed') THEN "relation_type" ELSE EXCLUDED."relation_type" END,
     "updated_at" = CURRENT_TIMESTAMP;
 
 ALTER TABLE "hg_youban_publish_collect_rule"

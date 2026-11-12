@@ -73,6 +73,22 @@ func refreshAccountVisibilityFollowEdge(ctx context.Context, tenantID, firstID, 
 	if tenantID <= 0 || firstID <= 0 || secondID <= 0 || firstID == secondID {
 		return nil
 	}
+	var accounts []struct {
+		Id       int64 `orm:"id"`
+		TenantId int64 `orm:"tenant_id"`
+	}
+	if err := pdao.YoubanPublishAccount.Ctx(ctx).Fields("id,tenant_id").WhereIn("id", []int64{firstID, secondID}).Scan(&accounts); err != nil {
+		return err
+	}
+	if len(accounts) != 2 || accounts[0].TenantId != tenantID || accounts[1].TenantId != tenantID {
+		// Follow rows can historically cross tenant boundaries. Never project
+		// such a relation into the tenant-scoped visibility model.
+		_, err := g.DB().Model(accountVisibilityReadModelTable).Ctx(ctx).
+			Where("tenant_id", tenantID).
+			WhereIn("viewer_account_id", []int64{firstID, secondID}).
+			WhereIn("visible_account_id", []int64{firstID, secondID}).Delete()
+		return err
+	}
 	type relation struct{ Status string }
 	read := func(follower, following int64) (string, error) {
 		var row relation
@@ -226,7 +242,7 @@ func accountVisibilityReadModelScope(ctx context.Context, tenantID, viewerID int
 	if !g.Cfg().MustGet(ctx, "youbanPublish.accountVisibilityReadModelEnabled", false).Bool() || tenantID <= 0 || viewerID <= 0 {
 		return nil, false, nil
 	}
-	relationTypes := []string{"self", "managed", "following", "mutual"}
+	relationTypes := []string{"self", "managed", "tenant_scope", "following", "mutual"}
 	if scope == "following" {
 		relationTypes = []string{"following", "mutual"}
 	}
