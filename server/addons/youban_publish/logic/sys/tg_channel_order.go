@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -64,6 +65,30 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 		mod = mod.WhereIn("j.target_chat_id", telegramChannelChatIDVariants(job.TargetChatId))
 	} else if job.ChannelId > 0 {
 		mod = mod.Where("j.channel_id", job.ChannelId)
+	}
+	// 统一流任务已经按账户和频道串行领取；使用轻量 FIFO 前序查询，避免
+	// 复杂的 Bot/协议账户 EXISTS 和优先级 CASE 在高负载下阻塞发送队首。
+	if s.accountPushEngine(ctx, job.TenantId, job.AccountId) == pushEngineUnifiedStream {
+		fast := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).Master().Unscoped().
+			Where("j.id <> ?", job.Id).
+			Where("j.tenant_id", job.TenantId).
+			Where("j.account_id", job.AccountId).
+			Where("j.status IN (?)", []string{telegramJobStatusPending, telegramJobStatusRetryWait, telegramJobStatusConfirming, telegramJobStatusSending}).
+			Where("(j.dispatch_status IN ('queued','processing') OR (j.status IN ('pending','failed_retry') AND COALESCE(j.last_dispatch_error,'') NOT LIKE '就绪通知或执行任务缺失%'))").
+			Where("j.created_at < ? OR (j.created_at = ? AND j.id < ?)", createdAt, createdAt, job.Id)
+		if strings.TrimSpace(job.TargetChatId) != "" {
+			fast = fast.WhereIn("j.target_chat_id", telegramChannelChatIDVariants(job.TargetChatId))
+		} else if job.ChannelId > 0 {
+			fast = fast.Where("j.channel_id", job.ChannelId)
+		}
+		var earlier gdb.Record
+		if err := fast.Fields("j.id,j.created_at,j.priority,j.status,j.dispatch_status,j.operation_no").OrderAsc("j.created_at").OrderAsc("j.id").Limit(1).Scan(&earlier); err != nil {
+			return false, gerror.Wrap(err, "检查统一流频道前序TG任务失败")
+		}
+		if !earlier.IsEmpty() {
+			g.Log().Info(ctx, "TG统一流频道队首命中前序任务", g.Map{"currentJobId": job.Id, "earlierJobId": earlier["id"].Int64(), "earlierStatus": earlier["status"].String()})
+		}
+		return !earlier.IsEmpty(), nil
 	}
 	// A destination channel is a single ordered stream. Source message IDs are
 	// only comparable within one source channel, so using them here lets jobs
