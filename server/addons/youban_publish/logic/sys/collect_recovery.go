@@ -101,6 +101,11 @@ func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	if err := s.recoverReadyMediaPendingEvents(ctx, min(mediaBatchSize, 100)); err != nil {
 		g.Log().Warningf(ctx, "恢复媒体已就绪但事件仍待处理的采集任务失败：%+v", err)
 	}
+	// 媒体已经就绪但历史版本没有生成 collect_dispatch 的事件，不能只依赖
+	// media_pending 恢复；按账户/来源有界补投递，交给正常规则分发流程幂等处理。
+	if err := s.recoverMediaReadyWithoutDispatch(ctx, min(mediaBatchSize, 100)); err != nil {
+		g.Log().Warningf(ctx, "恢复媒体就绪但缺少分发记录的采集事件失败：%+v", err)
+	}
 	// Media retries have their own small budget. They must keep making
 	// progress while process recovery yields to realtime traffic.
 	if err := s.recoverPendingCollectMedia(ctx, min(mediaBatchSize, 50)); err != nil {
@@ -145,6 +150,56 @@ func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	if err := s.recoverCollectPublishTasks(ctx, 100); err != nil {
 		g.Log().Warningf(ctx, "恢复采集推送任务失败：%+v", err)
 	}
+}
+
+// recoverMediaReadyWithoutDispatch 恢复媒体已完成、事件仍未终态且没有
+// collect_dispatch 的历史事件。该入口只重新投递采集处理 Outbox，不直接
+// 创建资料或发布任务，因此不会绕过规则、审核和去重流程。
+func (s *sSysPublish) recoverMediaReadyWithoutDispatch(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		limit = 100
+	}
+	now := gtime.Now()
+	e := pdao.YoubanPublishCollectEvent.Columns()
+	m := pdao.YoubanPublishCollectEventMedia.Table()
+	d := pdao.YoubanPublishCollectDispatch.Table()
+	rows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
+		Fields("e.id,e.tenant_id,e.account_id,e.source_id,e.source_chat_id,e.updated_at").
+		Where("e.status", sysin.CollectEventStatusMediaReady).
+		WhereNull("e.processed_at").
+		WhereLTE("e.updated_at", now.Add(-collectEventRecoverAfter)).
+		Where(enabledCollectSourceExistsSQL("e")).
+		Where("EXISTS (SELECT 1 FROM "+m+" m WHERE m.event_id=e.id)").
+		Where("NOT EXISTS (SELECT 1 FROM "+m+" m WHERE m.event_id=e.id AND m.cache_status<>?)", collectMediaCacheReady).
+		Where("NOT EXISTS (SELECT 1 FROM " + d + " d WHERE d.event_id=e.id AND d.tenant_id=e.tenant_id AND d.account_id=e.account_id)").
+		OrderAsc("e.account_id").OrderAsc("e.source_id").OrderAsc("e.updated_at").OrderAsc("e.id").
+		Limit(limit).All()
+	if err != nil {
+		return gerror.Wrap(err, "读取媒体就绪但缺少分发记录的采集事件失败")
+	}
+	requeued := 0
+	for _, row := range rows {
+		eventID := row[e.Id].Int64()
+		if eventID <= 0 {
+			continue
+		}
+		queued, queueErr := s.enqueueCollectProcessDeferred(ctx, collectProcessQueuePayload{
+			Recovery: true, EventId: eventID, TenantId: row[e.TenantId].Int64(),
+			AccountId: row[e.AccountId].Int64(), SourceId: row[e.SourceId].Int64(),
+			SourceChatId: row[e.SourceChatId].String(),
+		}, 0)
+		if queueErr != nil {
+			g.Log().Warningf(ctx, "恢复媒体就绪采集事件入队失败 eventId:%d accountId:%d sourceId:%d err:%+v", eventID, row[e.AccountId].Int64(), row[e.SourceId].Int64(), queueErr)
+			continue
+		}
+		if queued {
+			requeued++
+		}
+	}
+	if requeued > 0 {
+		g.Log().Infof(ctx, "恢复媒体就绪但缺少分发记录的采集事件 count:%d", requeued)
+	}
+	return nil
 }
 
 // Rebuild only recent reviewing dispatches whose review row disappeared. Old
