@@ -142,6 +142,8 @@ func telegramPublishJobTraceContext(ctx context.Context, job telegramJobRecord) 
 	return telegramPublishTraceContext(ctx, job.Id, g.Map{
 		"tenantId": job.TenantId, "accountId": job.AccountId, "profileId": job.ProfileId,
 		"channelId": job.ChannelId, "botId": job.BotId, "targetChatId": job.TargetChatId,
+		"operationNo": job.OperationNo, "operationType": job.OperationType,
+		"collectEventId": job.CollectEventId, "collectSourceId": job.CollectSourceId,
 		"jobStatus": job.Status, "dispatchStatus": job.DispatchStatus, "sendPhase": job.SendPhase,
 		"jobAgeMs":      telegramPublishTimestampAge(job.CreatedAt),
 		"dispatchAgeMs": telegramPublishTimestampAge(job.DispatchedAt),
