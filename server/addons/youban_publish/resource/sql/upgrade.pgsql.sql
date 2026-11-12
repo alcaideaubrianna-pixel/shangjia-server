@@ -6,6 +6,40 @@ ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "channe
 ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "account_event_enabled" smallint NOT NULL DEFAULT 1;
 ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "task_failure_enabled" smallint NOT NULL DEFAULT 1;
 
+-- Read-model foundation for account visibility.  This is intentionally
+-- additive: the existing visibility resolver remains authoritative until a
+-- parity backfill has been verified in production.
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_account_visibility" (
+  "tenant_id" bigint NOT NULL,
+  "viewer_account_id" bigint NOT NULL,
+  "visible_account_id" bigint NOT NULL,
+  "relation_type" varchar(32) NOT NULL DEFAULT 'self',
+  "created_at" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updated_at" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY ("tenant_id", "viewer_account_id", "visible_account_id")
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_account_visibility_visible"
+  ON "hg_youban_publish_account_visibility" ("tenant_id", "visible_account_id", "viewer_account_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_account_visibility_relation"
+  ON "hg_youban_publish_account_visibility" ("tenant_id", "viewer_account_id", "relation_type", "visible_account_id");
+
+-- Seed direct self/follow edges only. Managed-account and mutual-follow edges
+-- are filled by the parity worker after validating account_visibility.go.
+INSERT INTO "hg_youban_publish_account_visibility"
+  ("tenant_id", "viewer_account_id", "visible_account_id", "relation_type")
+SELECT "tenant_id", "id", "id", 'self'
+FROM "hg_youban_publish_account"
+WHERE "status" = 1 AND "deleted_at" IS NULL
+ON CONFLICT ("tenant_id", "viewer_account_id", "visible_account_id") DO NOTHING;
+INSERT INTO "hg_youban_publish_account_visibility"
+  ("tenant_id", "viewer_account_id", "visible_account_id", "relation_type")
+SELECT "tenant_id", "follower_account_id", "following_account_id", 'following'
+FROM "hg_youban_publish_account_follow"
+WHERE "status" = 'approved' AND "deleted_at" IS NULL
+ON CONFLICT ("tenant_id", "viewer_account_id", "visible_account_id") DO UPDATE
+SET "relation_type" = CASE WHEN "relation_type" = 'self' THEN "relation_type" ELSE EXCLUDED."relation_type" END,
+    "updated_at" = CURRENT_TIMESTAMP;
+
 ALTER TABLE "hg_youban_publish_collect_rule"
   ADD COLUMN IF NOT EXISTS "full_match_enabled" smallint NOT NULL DEFAULT 0;
 
