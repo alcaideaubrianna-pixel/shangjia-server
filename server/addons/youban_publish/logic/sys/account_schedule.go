@@ -42,15 +42,35 @@ func (s *sSysPublish) pauseInactiveAccountCycles(ctx context.Context, scope publ
 
 // syncProfileCycleRunJob 频道独立保存循环结果；只有最后一个频道完成时收口run，不在发送前获取资料锁。
 func (s *sSysPublish) syncProfileCycleRunJob(ctx context.Context, job telegramJobRecord) error {
+	// 循环频道投影只接受 Telegram 任务终态，发送中或重试中的任务不能提前收口。
 	if !strings.HasPrefix(job.OperationNo, "profile_cycle:") {
 		return nil
 	}
-	value, err := g.DB().Model(publishProfileCycleRunChannelTable).Ctx(ctx).Where("tenant_id", job.TenantId).Where("account_id", job.AccountId).Where("job_id", job.Id).Fields("run_id").Value()
+	projectionStatus := ""
+	switch job.Status {
+	case telegramJobStatusSent:
+		projectionStatus = "sent"
+	case telegramJobStatusSuperseded:
+		projectionStatus = "superseded"
+	case telegramJobStatusFailed:
+		projectionStatus = "failed"
+	default:
+		return nil
+	}
+	value, err := g.DB().Model(publishProfileCycleRunChannelTable).Ctx(ctx).
+		Where("tenant_id", job.TenantId).Where("account_id", job.AccountId).Where("job_id", job.Id).
+		Fields("run_id").Value()
 	if err != nil || value.IsNil() {
 		return err
 	}
 	runID := value.Int64()
-	if _, err := g.DB().Model(publishProfileCycleRunChannelTable).Ctx(ctx).Where("run_id", runID).Where("job_id", job.Id).Data(g.Map{"status": "sent"}).Update(); err != nil {
+	if runID <= 0 {
+		return nil
+	}
+	if _, err := g.DB().Model(publishProfileCycleRunChannelTable).Ctx(ctx).
+		Where("run_id", runID).Where("job_id", job.Id).
+		Data(g.Map{"status": projectionStatus, "error_message": job.ErrorMessage, "updated_at": gtime.Now()}).
+		Update(); err != nil {
 		return err
 	}
 	// 先提交本频道结果，再检查全体，避免并发事务互相看不到对方的最终状态。
