@@ -74,6 +74,26 @@ func TestProfileNumberSearchAcceptsShortAlphaNumericNumbers(t *testing.T) {
 	}
 }
 
+func TestProfileTextSearchKeepsSpecialKeywordInArguments(t *testing.T) {
+	condition, args := profileTextSearchCondition("深圳%_", noteIndexSearchFields())
+	if strings.Contains(condition, "深圳") || strings.Contains(condition, "%_") {
+		t.Fatalf("keyword must not be interpolated into SQL: %s", condition)
+	}
+	if len(args) != 4 || args[0] != "%深圳%_%" {
+		t.Fatalf("unexpected keyword arguments: %#v", args)
+	}
+}
+
+func TestProfileTextSearchRequiresAllTerms(t *testing.T) {
+	condition, args := profileTextSearchCondition("深圳 小红", noteIndexSearchFields())
+	if strings.Count(condition, " AND ") != 1 {
+		t.Fatalf("multiple terms must use AND: %s", condition)
+	}
+	if len(args) != 8 || args[0] != "%深圳%" || args[4] != "%小红%" {
+		t.Fatalf("unexpected multi-term arguments: %#v", args)
+	}
+}
+
 func TestParseProfilePublishMark(t *testing.T) {
 	for input, want := range map[string][2]string{
 		"001":     {"001", ""},
