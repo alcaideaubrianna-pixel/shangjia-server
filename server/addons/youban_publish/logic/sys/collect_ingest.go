@@ -39,7 +39,10 @@ func (s *sSysPublish) collectMessageFromAccountPublishChannel(ctx context.Contex
 		Where("tenant_id", tenantId).
 		Where("publish_direction", "up").
 		Where("status", 1).
-		WhereNull("deleted_at").
+		// Keep soft-deleted publish targets in the loop guard.  Telegram can
+		// still deliver messages from a channel after its web configuration is
+		// removed, and allowing that historical target back into collection
+		// creates the same A -> A loop we are trying to prevent.
 		Where("(target_chat_id=? OR target_chat_id=? OR REPLACE(target_chat_id,'-100','')=?)", chatId, "-100"+chatId, chatId)
 	// 上架目标是租户级频道边界，不能按采集协议账号过滤；同一目标可能由
 	// Bot、多个协议账号或多个账户共用，任何入口都必须拦截，避免自采集循环。
