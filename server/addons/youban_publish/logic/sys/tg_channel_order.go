@@ -348,6 +348,7 @@ func (s *sSysPublish) telegramChannelHasDispatchCapacity(ctx context.Context, jo
 }
 
 func (s *sSysPublish) postponeTelegramJobForChannelOrder(ctx context.Context, job telegramJobRecord) error {
+	nextRetryAt := gtime.Now().Add(telegramChannelDispatchRetryDelay(job.DispatchCount))
 	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id", job.Id).
 		WhereIn("status", []string{"pending", "failed_retry"}).
@@ -359,7 +360,7 @@ func (s *sSysPublish) postponeTelegramJobForChannelOrder(ctx context.Context, jo
 			// 必须写 NULL，不能写空字符串，否则会触发
 			// invalid input syntax for type bigint 并让频道队首反复重试。
 			"task_id":             nil,
-			"next_retry_at":       gtime.Now().Add(3 * time.Second),
+			"next_retry_at":       nextRetryAt,
 			"last_dispatch_error": "等待同频道前序推送任务完成",
 			"updated_at":          gtime.Now(),
 		}).
@@ -367,7 +368,7 @@ func (s *sSysPublish) postponeTelegramJobForChannelOrder(ctx context.Context, jo
 	if err != nil {
 		return gerror.Wrap(err, "延后TG频道顺序任务失败")
 	}
-	return s.rearmTelegramJobOutbox(ctx, job.Id, 3*time.Second)
+	return s.rearmTelegramJobOutbox(ctx, job.Id, time.Until(nextRetryAt.Time))
 }
 
 func (s *sSysPublish) postponeTelegramJobForCollectPushPause(ctx context.Context, job telegramJobRecord) error {

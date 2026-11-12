@@ -14,6 +14,9 @@ import (
 	"hotgo/internal/library/hgrds/lock"
 )
 
+// 统计纠偏属于低优先级维护任务，单进程只允许一个来源执行，避免与实时采集和发布争抢数据库 IO。
+var collectStatsLowPriorityGate = make(chan struct{}, 1)
+
 const tgTaskTypeCollectSourceStats = "youban_publish:collect:source_stats"
 const collectSourceStatsWorkTable = "hg_youban_publish_collect_source_stats_work"
 
@@ -111,6 +114,12 @@ func refreshCollectSourceStatsWork(ctx context.Context, sourceID int64, refresh 
 }
 
 func (s *sSysPublish) handleCollectSourceStatsTask(ctx context.Context, task *asynq.Task) error {
+	select {
+	case collectStatsLowPriorityGate <- struct{}{}:
+		defer func() { <-collectStatsLowPriorityGate }()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 	var payload collectSourceStatsPayload
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 		return err
