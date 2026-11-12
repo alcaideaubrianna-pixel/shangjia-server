@@ -11,12 +11,19 @@ import (
 
 func TestCountCollectSourceOptionGroupsOnlySelectsGroupKeys(t *testing.T) {
 	ctx := context.Background()
-	mod := g.DB().Model("events e").Safe().Ctx(ctx)
-	sql, err := gdb.ToSQL(ctx, func(sqlCtx context.Context) error {
-		_, countErr := countCollectSourceOptionGroups(sqlCtx, mod)
-		return countErr
+	var generated string
+	var err error
+	err = g.DB().Transaction(ctx, func(txCtx context.Context, tx gdb.TX) error {
+		if _, execErr := tx.Exec("CREATE TEMP TABLE events(source_chat_id text) ON COMMIT DROP"); execErr != nil {
+			return execErr
+		}
+		mod := tx.Model("events e").Safe().Ctx(txCtx)
+		generated, err = gdb.ToSQL(txCtx, func(sqlCtx context.Context) error {
+			_, countErr := countCollectSourceOptionGroups(sqlCtx, mod)
+			return countErr
+		})
+		return err
 	})
-	generated := sql
 	if generated == "" && err != nil {
 		generated = err.Error()
 	}
