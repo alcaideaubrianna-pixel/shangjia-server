@@ -58,4 +58,4 @@ SQL
 docker compose -f tools/local-regression/docker-compose.yml up -d --no-build \
   tgfake publish-worker background-worker scheduler web
 docker compose -f tools/local-regression/docker-compose.yml ps --all
-echo "频道 231 轻量回放已启动：DB=$db，publish worker=1，连接池=$YOUBAN_LOCAL_DB_MAX_OPEN"
+echo "频道 231 轻量回放已启动：DB=${db}，publish worker=1，连接池=${YOUBAN_LOCAL_DB_MAX_OPEN}"
