@@ -13,6 +13,7 @@ import (
 	"hotgo/utility/ownedlease"
 
 	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/hibiken/asynq"
@@ -150,6 +151,9 @@ func (s *sSysPublish) handleAccountScheduleTask(ctx context.Context, task *asynq
 	// 各阶段都独立继续；错误交给Asynq重试，单阶段不能吞掉其他入口。
 	var failures []error
 	for stageIndex, stage := range []func(context.Context) error{
+		// 先收口已经完成的资料级频道投影，避免历史投影一直停在 pending
+		// 阻塞本账户下一轮循环。该阶段按账户、按小批次执行，不扫描其他账户。
+		func(ctx context.Context) error { return reconcileProfileCycleRunChannels(ctx, scope, 200) },
 		func(ctx context.Context) error { return s.submitDuePublishTasks(ctx, scope) },
 		func(ctx context.Context) error { return s.pauseInactiveAccountCycles(ctx, scope) },
 		func(ctx context.Context) error { return s.produceAccountProfileCycles(ctx, scope) },
@@ -175,6 +179,67 @@ func (s *sSysPublish) handleAccountScheduleTask(ctx context.Context, task *asynq
 		}
 	}
 	return errors.Join(failures...)
+}
+
+// reconcileProfileCycleRunChannels 将已经有终态 Job 的资料级频道投影收口。
+//
+// 旧版本在 Job 已经 sent/superseded 后，可能因为回调中断或迁移任务提前结束，
+// 没有同步更新 profile_cycle_run_channel，留下 pending 投影。调度器把这种投影
+// 当作仍在执行，后续轮次便永远不会创建。这里仅处理当前账户且每次限制数量，
+// 不重试 Telegram，也不修改仍在发送的 Job，保证幂等和频道隔离。
+func reconcileProfileCycleRunChannels(ctx context.Context, scope publishAccountScope, limit int) error {
+	if scope.TenantID <= 0 || scope.AccountID <= 0 {
+		return nil
+	}
+	if limit <= 0 {
+		limit = 200
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	rows, err := g.DB().GetAll(ctx, `WITH candidates AS (
+		SELECT rc.id, rc.run_id, j.status, COALESCE(j.error_message, '') AS error_message
+		FROM `+publishProfileCycleRunChannelTable+` rc
+		JOIN `+publishProfileCycleRunTable+` r ON r.id=rc.run_id
+		JOIN `+publishTgJobTable+` j ON j.id=rc.job_id
+		WHERE rc.tenant_id=? AND rc.account_id=?
+		  AND r.tenant_id=? AND r.account_id=?
+		  AND rc.status NOT IN ('sent','superseded','failed','skipped')
+		  AND j.status IN ('sent','superseded')
+		ORDER BY rc.id
+		LIMIT ?
+	)
+	UPDATE `+publishProfileCycleRunChannelTable+` rc
+	SET status=CASE WHEN c.status='sent' THEN 'sent' ELSE 'superseded' END,
+		error_message=CASE WHEN c.status='sent' THEN '' ELSE COALESCE(NULLIF(c.error_message, ''), '原任务已被替代') END,
+		updated_at=NOW()
+	FROM candidates c
+	WHERE rc.id=c.id
+	RETURNING rc.run_id`, scope.TenantID, scope.AccountID, scope.TenantID, scope.AccountID, limit)
+	if err != nil {
+		return gerror.Wrap(err, "收口资料循环频道投影失败")
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	seen := make(map[int64]struct{}, len(rows))
+	for _, row := range rows {
+		runID := row["run_id"].Int64()
+		if runID <= 0 {
+			continue
+		}
+		if _, ok := seen[runID]; ok {
+			continue
+		}
+		seen[runID] = struct{}{}
+		if err := finishProfileCycleRun(ctx, runID); err != nil {
+			return gerror.Wrapf(err, "收口资料循环运行状态失败 runId:%d", runID)
+		}
+	}
+	g.Log().Info(ctx, "资料循环频道投影已收口", g.Map{
+		"tenantId": scope.TenantID, "accountId": scope.AccountID, "count": len(rows), "runCount": len(seen),
+	})
+	return nil
 }
 
 // produceAccountProfileCycles 复用已成功任务的到期时间；一份资料的一轮只创建一个run和一次频道准备。
