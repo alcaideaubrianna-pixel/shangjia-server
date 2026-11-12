@@ -327,10 +327,12 @@ func (s *sSysPublish) refreshChannelProfileCycleNextAt(ctx context.Context, chan
 	if channelId <= 0 {
 		return nil
 	}
+	// 频道本身已经是最小调度分片；使用有序 LIMIT 1 读取队首，避免对该频道全部资料执行 MIN 聚合。
 	value, err := g.DB().Model(publishChannelProfileTable+" cp").Safe().Ctx(ctx).
 		InnerJoin(publishTgJobTable+" j", "j.id=cp.last_job_id AND j.cycle_enabled=1 AND j.status IN ('sent','superseded')").
 		Where("cp.channel_id", channelId).Where("cp.status", "active").
-		Fields("MIN(j.next_cycle_at)").Value()
+		Where("j.next_cycle_at IS NOT NULL").
+		Fields("j.next_cycle_at").OrderAsc("j.next_cycle_at").Limit(1).Value()
 	if err != nil {
 		return gerror.Wrap(err, "刷新频道下次循环时间失败")
 	}
