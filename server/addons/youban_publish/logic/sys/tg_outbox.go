@@ -544,7 +544,9 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 		limit = telegramOutboxMaxBatchLimit(ctx)
 	}
 	// 账户目录先分片，避免 Stream 模式每轮更新/扫描全局 Job 和 Outbox 大表。
-	var accounts []int64
+	var accountRows []struct {
+		AccountID int64 `orm:"account_id"`
+	}
 	// 账户目录直接从 Outbox 读取，避免先扫描 tg_job 再用 EXISTS 回查 Outbox。
 	// 这样 Stream 快速路径只触碰到期通知行，历史任务不会进入候选集合。
 	if err := g.DB().Model(publishTgOutboxTable+" o").Safe().Ctx(ctx).
@@ -555,8 +557,14 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 		Where("j.account_id > 0").Where("o.event_type", telegramOutboxEventPublish).
 		Where("o.available_at <= ?", now).Where("o.status IN (?,?)", telegramOutboxPending, telegramOutboxProcessing).
 		WhereIn("j.status", []string{"pending", "failed_retry", "unknown"}).
-		OrderAsc("j.account_id").Limit(32).Scan(&accounts); err != nil {
+		OrderAsc("j.account_id").Limit(32).Scan(&accountRows); err != nil {
 		return nil, gerror.Wrap(err, "读取Stream账户分片失败")
+	}
+	accounts := make([]int64, 0, len(accountRows)+1)
+	for _, row := range accountRows {
+		if row.AccountID > 0 {
+			accounts = append(accounts, row.AccountID)
+		}
 	}
 	accounts = append(accounts, 0) // account_id=0 legacy fallback
 	perAccount := limit / len(accounts)
