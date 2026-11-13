@@ -266,9 +266,15 @@ func GenStagingPath(basePath, sessionId, ext string) (string, error) {
 
 // write 写入附件记录
 func write(ctx context.Context, meta *FileMeta, fullPath string) (models *entity.SysAttachment, err error) {
+	// 后台 Worker 没有 HTTP 请求上下文，GetModule 可能为空；附件表的 app_id
+	// 是必填字段，统一回退到 API 应用，避免媒体处理因数据库约束失败。
+	appID := contexts.GetModule(ctx)
+	if strings.TrimSpace(appID) == "" {
+		appID = consts.AppApi
+	}
 	models = &entity.SysAttachment{
 		Id:        0,
-		AppId:     contexts.GetModule(ctx),
+		AppId:     appID,
 		MemberId:  contexts.GetUserId(ctx),
 		Drive:     config.Drive,
 		Size:      meta.Size,
