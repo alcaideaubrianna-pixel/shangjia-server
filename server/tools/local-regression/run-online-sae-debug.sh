@@ -27,7 +27,11 @@ trap cleanup EXIT INT TERM
 if [[ "$WRITE_MODE" != "0" && "$WRITE_MODE" != "1" ]]; then echo "ONLINE_DEBUG_WRITE 必须为 0 或 1" >&2; exit 2; fi
 command -v aliyun >/dev/null || { echo "缺少 aliyun CLI" >&2; exit 1; }
 command -v jq >/dev/null || { echo "缺少 jq" >&2; exit 1; }
-if [[ ! -x "$BIN" ]]; then echo "本地二进制不存在：${BIN}；先执行 cd server && go build -o bin/hotgo ./main.go" >&2; exit 1; fi
+if [[ "$BUILD_MODE" == "1" ]]; then
+  echo "构建本地二进制：$BIN"
+  (cd "$ROOT_DIR" && go build -o "$BIN" ./main.go)
+fi
+if [[ ! -x "$BIN" ]]; then echo "本地二进制不存在：${BIN}；构建失败" >&2; exit 1; fi
 umask 077
 cfg="$(aliyun sae DescribeApplicationConfig --RegionId "$REGION_ID" --AppId "$APP_ID" --profile "$PROFILE")"
 printf '%s' "$cfg" | jq -e '.Data.Envs' >/dev/null
@@ -51,17 +55,16 @@ export YOUBAN_PUBLISH_MEDIA_SOURCE_CONCURRENCY=0
 ENV
 else
   if [[ "$ALL_MODE" == "1" || "$ROLE" != "web" ]]; then
+    if [[ -z "${ONLINE_DEBUG_TENANT_ID:-}" && "$ALL_MODE" == "1" ]]; then
+      read -r -p "请输入线上测试租户ID（仅用于本次调试范围）：" ONLINE_DEBUG_TENANT_ID
+    fi
     : "${ONLINE_DEBUG_TENANT_ID:?Worker写入线上前必须设置 ONLINE_DEBUG_TENANT_ID}"
-    : "${ONLINE_DEBUG_RUN_ID:?Worker写入线上前必须设置 ONLINE_DEBUG_RUN_ID}"
+    ONLINE_DEBUG_RUN_ID="${ONLINE_DEBUG_RUN_ID:-online-debug-$(date +%Y%m%d%H%M%S)}"
   fi
   cat >> "$ENV_FILE" <<ENV
 export YOUBAN_ONLINE_DEBUG_READ_ONLY=false
-if [[ -n "${ONLINE_DEBUG_TENANT_ID:-}" ]]; then
-    echo "export YOUBAN_ONLINE_DEBUG_TENANT_ID=$(printf '%q' "$ONLINE_DEBUG_TENANT_ID")" >> "$ENV_FILE"
-  fi
-  if [[ -n "${ONLINE_DEBUG_RUN_ID:-}" ]]; then
-    echo "export YOUBAN_ONLINE_DEBUG_RUN_ID=$(printf '%q' "$ONLINE_DEBUG_RUN_ID")" >> "$ENV_FILE"
-  fi
+${ONLINE_DEBUG_TENANT_ID:+export YOUBAN_ONLINE_DEBUG_TENANT_ID=$(printf '%q' "$ONLINE_DEBUG_TENANT_ID")}
+${ONLINE_DEBUG_RUN_ID:+export YOUBAN_ONLINE_DEBUG_RUN_ID=$(printf '%q' "$ONLINE_DEBUG_RUN_ID")}
 export YOUBAN_PUBLISH_QUEUE_CONCURRENCY=${ONLINE_DEBUG_QUEUE_CONCURRENCY:-1}
 export YOUBAN_PUBLISH_BULK_CONCURRENCY=${ONLINE_DEBUG_BULK_CONCURRENCY:-1}
 export YOUBAN_PUBLISH_HISTORY_CONCURRENCY=0
