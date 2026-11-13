@@ -2,10 +2,26 @@ package sys
 
 import (
 	"encoding/json"
+	"os"
+	"strings"
 	"testing"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
+
+func TestProfileMediaRecoveryUsesContentProfileForProfileNo(t *testing.T) {
+	raw, err := os.ReadFile("profile_media_operation.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(raw)
+	if !strings.Contains(source, "cp.profile_no=o.profile_no") {
+		t.Fatal("media recovery must resolve profile_no through hg_content_profile")
+	}
+	if strings.Contains(source, " p.profile_no=o.profile_no") {
+		t.Fatal("profile_state does not contain profile_no; recovery must not join it directly")
+	}
+}
 
 func TestProfileMediaOperationPayloadRoundTrip(t *testing.T) {
 	want := profileMediaOperationInput{
