@@ -3,12 +3,27 @@ package sys
 import (
 	"context"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/util/guid"
 )
+
+// telegramOutboxRecoveryBatchSize 控制异常恢复每轮领取数量；即时事件
+// 唤醒和正常频道 Stream 调度不受该值影响。
+func telegramOutboxRecoveryBatchSize() int {
+	const defaultSize = 10
+	value, err := strconv.Atoi(strings.TrimSpace(os.Getenv("YOUBAN_PUBLISH_TG_RECOVERY_BATCH_SIZE")))
+	if err != nil || value <= 0 {
+		return defaultSize
+	}
+	if value > 500 {
+		return 500
+	}
+	return value
+}
 
 func (s *sSysPublish) runTelegramOutboxDispatcher(ctx context.Context) {
 	// 手动/BOT 上架通过事件立即唤醒；定时器只负责进程重启、Redis
@@ -69,7 +84,7 @@ func (s *sSysPublish) runTelegramOutboxPass(ctx context.Context) {
 	// Outbox 可能已经持久化，但 Redis/Asynq 任务在进程重启、Redis抖动或
 	// 稳定 TaskID 冲突时丢失。每轮先用有界恢复补灌 pending/idle 任务，
 	// 再处理普通到期 Outbox，避免任务永久停在 pending 且没有 asynq_task_id。
-	if err := s.recoverPendingIdleTelegramJobs(passCtx, 100); err != nil {
+	if err := s.recoverPendingIdleTelegramJobs(passCtx, telegramOutboxRecoveryBatchSize()); err != nil {
 		g.Log().Warningf(ctx, "恢复待入队TG任务失败：%+v", err)
 	}
 	if err := s.dispatchDueTelegramJobOutbox(passCtx, 0); err != nil {
