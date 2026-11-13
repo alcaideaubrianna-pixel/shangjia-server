@@ -272,7 +272,8 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 			if !settled {
 				return newCollectProcessRetryError(s.collectDisplayRetryDelay(ctx, event), "等待验证资料静默期结束")
 			}
-			if err = s.processCollectEvent(ctx, event["id"].Int64(), payload.TenantId, payload.AccountId); err != nil && !isCollectProcessRetryError(err) {
+			if err = s.processCollectEvent(ctx, event["id"].Int64(), payload.TenantId, payload.AccountId); err != nil {
+				// 目标事件的可重试错误必须回传 Outbox，不能误完成后遗留 media_ready。
 				return err
 			}
 			continue
@@ -306,7 +307,8 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 					continue
 				}
 				if collectMaterialContextClosed(messageViews, index) {
-					if err = s.processCollectEvent(ctx, event["id"].Int64(), payload.TenantId, payload.AccountId); err != nil && !isCollectProcessRetryError(err) {
+					if err = s.processCollectEvent(ctx, event["id"].Int64(), payload.TenantId, payload.AccountId); err != nil {
+						// 目标事件的重试错误必须回传 Outbox，不能误完成后遗留 media_ready。
 						return err
 					}
 					continue
@@ -322,7 +324,8 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 					return claimErr
 				}
 				if claimed {
-					if err = s.processCollectEvent(ctx, event["id"].Int64(), payload.TenantId, payload.AccountId); err != nil && !isCollectProcessRetryError(err) {
+					if err = s.processCollectEvent(ctx, event["id"].Int64(), payload.TenantId, payload.AccountId); err != nil {
+						// 目标事件的重试错误必须回传 Outbox，不能误完成后遗留 media_ready。
 						return err
 					}
 				}
@@ -343,10 +346,8 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 			}
 			s.appendCollectEventLogForRecord(ctx, event, "group", "timeout_without_verify", "验证窗口到期，按无验证资料继续处理", "")
 			if err = s.processCollectEvent(ctx, event["id"].Int64(), payload.TenantId, payload.AccountId); err != nil {
-				if !isCollectProcessRetryError(err) {
-					return err
-				}
-				g.Log().Infof(ctx, "采集资料组等待异步依赖，继续处理后续资料 eventId:%d err:%s", event["id"].Int64(), err.Error())
+				// 当前事件是本次窗口的目标，重试错误必须回到 Outbox 调度，避免状态停在 media_ready。
+				return err
 			}
 		case profileMessageKindVerify:
 			displayIndex := s.findCollectDisplayEvent(rows, messageViews, index)
