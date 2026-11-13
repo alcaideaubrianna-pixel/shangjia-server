@@ -12,6 +12,7 @@ REGION_ID="${SAE_REGION_ID:-ap-southeast-1}"
 PROFILE="${ALIBABA_CLOUD_PROFILE:-default}"
 ROLE="${ONLINE_DEBUG_ROLE:-publish-worker}"
 ALL_MODE="${ONLINE_DEBUG_ALL:-0}"
+if [[ "${1:-}" == "all" ]]; then ALL_MODE=1; fi
 LOG_DIR="${ONLINE_DEBUG_LOG_DIR:-/tmp/youban-online-debug-logs}"
 WRITE_MODE="${ONLINE_DEBUG_WRITE:-0}"
 ENV_FILE="${ONLINE_DEBUG_ENV_FILE:-$(mktemp /tmp/youban-online-debug.XXXXXX.env)}"
