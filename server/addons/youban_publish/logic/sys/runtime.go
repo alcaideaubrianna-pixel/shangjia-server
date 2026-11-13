@@ -91,9 +91,7 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 			go s.runCollectRecovery(ctx)
 		}
 	}
-	// 账户循环调度由 Scheduler 负责投递；即使 Background 角色暂时未部署，
-	// Scheduler 也必须启动账户调度消费者，否则 pending cycle_run 会永久无人领取。
-	if config.BackgroundQueue || config.Scheduler {
+	if config.BackgroundQueue {
 		s.startTelegramBackgroundWorker(ctx)
 	}
 	// 资料指纹回填是低优先级维护任务，只允许 Background 角色运行，不能和 Publish 调度/发送共用实例。
