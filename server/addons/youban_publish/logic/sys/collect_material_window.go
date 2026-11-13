@@ -653,8 +653,9 @@ func (s *sSysPublish) bindCollectMaterialPair(ctx context.Context, display gdb.R
 		return nil
 	})
 	if errors.Is(err, errCollectMaterialPairRace) {
-		g.Log().Infof(ctx, "采集验证组配对竞态已跳过 displayEventId:%d verifyEventId:%d", display["id"].Int64(), verify["id"].Int64())
-		return false, nil
+		g.Log().Infof(ctx, "采集验证组配对竞态已恢复重试 displayEventId:%d verifyEventId:%d", display["id"].Int64(), verify["id"].Int64())
+		// 另一 Worker 已经完成配对；当前事件必须回到 Outbox 重试，不能被当成成功结束。
+		return false, newCollectProcessRetryError(2*time.Second, "资料组正在被其他Worker配对，稍后重试")
 	}
 	if err != nil {
 		return false, err
