@@ -20,8 +20,20 @@ func (s *sSysPublish) runTelegramOutboxDispatcher(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-s.telegramOutboxWake:
+			// 新任务写入 Outbox 后立即调度；定时器仍负责崩溃和丢信号恢复。
 		case <-ticker.C:
 		}
+	}
+}
+
+func (s *sSysPublish) wakeTelegramOutbox() {
+	if s == nil || s.telegramOutboxWake == nil {
+		return
+	}
+	select {
+	case s.telegramOutboxWake <- struct{}{}:
+	default:
 	}
 }
 

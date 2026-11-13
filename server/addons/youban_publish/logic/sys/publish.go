@@ -30,6 +30,7 @@ type sSysPublish struct {
 	tgLogins                   map[string]*telegramLoginRuntime
 	tgQueueMu                  publishRuntimeMutex
 	telegramOutboxStarted      bool
+	telegramOutboxWake         chan struct{}
 	tgQueueClient              *asynq.Client
 	tgInteractiveQueueServer   *asynq.Server
 	tgQueueServer              *asynq.Server
@@ -71,6 +72,7 @@ func NewSysPublish() *sSysPublish {
 	return &sSysPublish{
 		accountClients:        make(map[int64]*telegram.Client),
 		tgLogins:              make(map[string]*telegramLoginRuntime),
+		telegramOutboxWake:    make(chan struct{}, 1),
 		telegramChannelLocks:  make(map[string]*publishRuntimeMutex),
 		collectGroupTimers:    make(map[int64]*time.Timer),
 		collectMediaLastTouch: make(map[string]time.Time),

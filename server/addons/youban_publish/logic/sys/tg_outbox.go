@@ -100,6 +100,9 @@ func (s *sSysPublish) ensureTelegramJobOutboxTx(ctx context.Context, tx gdb.TX, 
 	if err != nil {
 		return gerror.Wrap(err, "保存TG任务Outbox失败")
 	}
+	// 事务提交后 Dispatcher 会立即被唤醒；若事务尚未提交，下一轮兜底
+	// 扫描仍会再次领取，事件信号本身不承担可靠性。
+	s.wakeTelegramOutbox()
 	return nil
 }
 
