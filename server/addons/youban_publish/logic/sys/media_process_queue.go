@@ -169,10 +169,10 @@ func (s *sSysPublish) wakeProfileTelegramJobs(ctx context.Context, profileId int
 	// after every media completion; submitProfilePublish re-checks readiness and
 	// creates jobs exactly once when the final media item becomes ready.
 	var waiting struct {
-		TenantId      int64  `json:"tenantId"`
-		AccountId     int64  `json:"accountId"`
-		OperationNo   string `json:"operationNo"`
-		PublishStatus string `json:"publishStatus"`
+		TenantId      int64  `json:"tenantId" orm:"tenant_id"`
+		AccountId     int64  `json:"accountId" orm:"account_id"`
+		OperationNo   string `json:"operationNo" orm:"publish_operation_no"`
+		PublishStatus string `json:"publishStatus" orm:"publish_status"`
 	}
 	if err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
 		Fields("tenant_id,account_id,publish_operation_no,publish_task_status AS publish_status").
