@@ -126,7 +126,7 @@ ENV
 fi
 # shellcheck disable=SC1090
 source "$ENV_FILE"
-echo "线上调试配置已加载：region=$REGION_ID app=$APP_ID role=$ROLE all=$ALL_MODE write=$WRITE_MODE writeAll=$WRITE_ALL"
+echo "线上调试配置已加载：region=$REGION_ID app=$APP_ID role=$ROLE all=${ALL_MODE} write=${WRITE_MODE} writeAll=${WRITE_ALL}"
 echo "session=$SESSION"
 echo "角色日志目录：$LOG_DIR"
 echo "Web入口日志：$LOG_DIR/web.log"
@@ -161,9 +161,9 @@ if [[ "$ALL_MODE" == "1" ]]; then
     if [[ "$role" == "web" ]]; then echo "Web入口地址：http://127.0.0.1:$role_port"; echo "管理后台地址：http://127.0.0.1:$role_port${YOUBAN_ADMIN_ENTRY_PATH:-/admin}"; echo "后台API地址：http://127.0.0.1:$role_port/admin"; fi
     index=$((index + 1))
   done
-  echo "已启动 ${#roles[@]} 个角色；account=$WITH_ACCOUNT；按 Ctrl-C 统一停止。"
+  echo "已启动 ${#roles[@]} 个角色；account=${WITH_ACCOUNT}；按 Ctrl-C 统一停止。"
   wait
 else
-  echo "单角色模式：$ROLE；account=$WITH_ACCOUNT。"
+  echo "单角色模式：${ROLE}；account=$WITH_ACCOUNT。"
   exec "$BIN" "$ROLE"
 fi
