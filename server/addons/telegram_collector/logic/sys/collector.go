@@ -628,7 +628,9 @@ func matchBotCollectionSources(sources []botCollectionSource, tenantID, botID in
 	matched := make([]botCollectionSource, 0, len(sources))
 	seen := make(map[int64]struct{}, len(sources))
 	for _, source := range sources {
-		if source.TenantID != tenantID || source.ID <= 0 || botID <= 0 {
+		// Gateway 可能只知道 BOT 身份而没有租户上下文；同一个 BOT
+		// 可以被多个租户绑定，此时按来源自身租户拆分，不能用 tenant=0 过滤掉全部规则。
+		if (tenantID > 0 && source.TenantID != tenantID) || source.TenantID <= 0 || source.ID <= 0 || botID <= 0 {
 			continue
 		}
 		if _, exists := seen[source.ID]; exists {
@@ -671,10 +673,10 @@ func (f *botCollectorFeature) HandleUpdate(ctx context.Context, bot gatewayservi
 		// sources for that BOT here, so private chats, groups, and channels use
 		// the same source routing and never confuse bot_id with source_id.
 		var sources []botCollectionSource
-		if err := g.DB().Model("hg_youban_publish_collect_source").Safe().Ctx(ctx).
-			Fields("id,tenant_id").Where("tenant_id", binding.TenantID).
-			Where("bot_id", binding.ReferenceID).Where("source_type", "bot").
-			Where("collect_enabled", 1).Where("status", 1).WhereNull("deleted_at").Scan(&sources); err != nil {
+		model := g.DB().Model("hg_youban_publish_collect_source").Safe().Ctx(ctx).
+			Fields("id,tenant_id").Where("bot_id", binding.ReferenceID).Where("source_type", "bot").
+			Where("collect_enabled", 1).Where("status", 1).WhereNull("deleted_at")
+		if err := model.Scan(&sources); err != nil {
 			ingestErrors = append(ingestErrors, fmt.Errorf("读取TG Bot采集源失败 tenant:%d bot:%d: %w", binding.TenantID, binding.ReferenceID, err))
 			continue
 		}

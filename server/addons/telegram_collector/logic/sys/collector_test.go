@@ -349,6 +349,14 @@ func TestMatchBotCollectionSourcesProductionCase(t *testing.T) {
 	}
 }
 
+func TestMatchBotCollectionSourcesAllowsUnknownTenantBinding(t *testing.T) {
+	sources := []botCollectionSource{{TenantID: 10, ID: 130}, {TenantID: 11, ID: 140}}
+	matched := matchBotCollectionSources(sources, 0, 9)
+	if len(matched) != 2 {
+		t.Fatalf("unknown tenant binding matched=%d, want 2", len(matched))
+	}
+}
+
 func TestMatchBotCollectionSourcesFansOutToEveryAccountRule(t *testing.T) {
 	sources := []botCollectionSource{
 		{TenantID: 10, ID: 130},
