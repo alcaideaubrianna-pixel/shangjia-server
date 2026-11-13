@@ -23,7 +23,7 @@
 
 - [ ] 统一 `PublishJobCreator` 覆盖手动、采集、循环、批次、AI 入口。
 - [ ] 收口 `profile_publish_job.go` 等仍直接调用 `ensureTelegramProfileJobWithMetaTx` 的旧资料发布路径。
-- [ ] 使用 GoFrame CLI 同步 `do.YoubanPublishTgJob` 的 `send_phase` 等字段，禁止统一入口继续使用 `g.Map` 写库。
+- [x] 使用 GoFrame CLI 同步 `do.YoubanPublishTgJob` 的 `send_phase` 等字段：`08113c59`。统一入口已改用 DO/DAO；历史逻辑仍需逐模块迁移。
 - [ ] 循环/批次统一 `cycle_plan → cycle_run → tg_job` 游标模型。
 - [ ] 真实 TG Fake 回放：1000 条、多频道、跨账户同频道、手动插队。
 - [ ] 超时释放频道租约、ZREM、唤醒下一条的真实回放。
