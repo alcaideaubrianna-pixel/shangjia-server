@@ -236,6 +236,21 @@ func (s *sSysPublish) enqueueProfileFailureNoticeTx(ctx context.Context, tx gdb.
 	if account.IsEmpty() {
 		return nil
 	}
+	// Do not create durable failure notices when the account has disabled them.
+	// Checking before the insert prevents disabled task notifications from
+	// flooding the shared notice queue and delaying enabled notifications.
+	setting, settingErr := tx.Model(publishAccountSettingTable).Safe().Ctx(ctx).
+		Fields("task_failure_enabled").
+		Where("tenant_id", tenantID).
+		Where("account_id", accountID).
+		WhereNull("deleted_at").
+		One()
+	if settingErr != nil {
+		return gerror.Wrap(settingErr, "读取任务通知设置失败")
+	}
+	if !setting.IsEmpty() && setting["task_failure_enabled"].Int() == 0 {
+		return nil
+	}
 	receiver := accountID
 	if account[c.AccountType].String() != sysin.PublishAccountTypeAdmin {
 		receiver = account[c.ParentId].Int64()
