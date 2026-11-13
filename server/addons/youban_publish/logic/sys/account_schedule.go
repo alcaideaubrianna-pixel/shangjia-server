@@ -203,6 +203,8 @@ func (s *sSysPublish) handleAccountScheduleTask(ctx context.Context, task *asynq
 	// 各阶段都独立继续；错误交给Asynq重试，单阶段不能吞掉其他入口。
 	var failures []error
 	for stageIndex, stage := range []func(context.Context) error{
+		// 先清理已发送任务遗留的 Outbox，避免历史状态阻塞队首。
+		func(ctx context.Context) error { return reconcileTerminalTelegramOutboxes(ctx, scope, 200) },
 		// 先收口已经完成的资料级频道投影，避免历史投影一直停在 pending
 		// 阻塞本账户下一轮循环。该阶段按账户、按小批次执行，不扫描其他账户。
 		func(ctx context.Context) error { return reconcileProfileCycleRunChannels(ctx, scope, 200) },
@@ -307,6 +309,41 @@ func reconcileProfileCycleRunChannels(ctx context.Context, scope publishAccountS
 	g.Log().Info(ctx, "资料循环频道投影已收口", g.Map{
 		"tenantId": scope.TenantID, "accountId": scope.AccountID, "count": len(rows), "runCount": len(seen),
 	})
+	return nil
+}
+
+// reconcileTerminalTelegramOutboxes 收口已经有终态 Job 的遗留 Outbox。
+// 发送结果已经落库后，旧版本可能在 Outbox 回调前退出，留下 pending/processing；
+// 这些记录不应再次参与调度，也不能阻塞同频道后续任务。按账户小批量处理，
+// 只更新终态 Job，避免全局扫描和误触发 Telegram 重发。
+func reconcileTerminalTelegramOutboxes(ctx context.Context, scope publishAccountScope, limit int) error {
+	if scope.TenantID <= 0 || scope.AccountID <= 0 {
+		return nil
+	}
+	if limit <= 0 {
+		limit = 200
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	_, err := g.DB().Exec(ctx, `WITH candidates AS (
+		SELECT o.id
+		FROM `+publishTgOutboxTable+` o
+		JOIN `+publishTgJobTable+` j ON j.id=o.job_id
+		WHERE j.tenant_id=? AND j.account_id=?
+		  AND j.status IN ('sent','superseded','failed')
+		  AND o.status IN ('pending','processing')
+		ORDER BY o.id
+		LIMIT ?
+	)
+	UPDATE `+publishTgOutboxTable+` o
+	SET status='delivered', lease_owner='', lease_expires_at=NULL,
+	    delivered_at=COALESCE(o.delivered_at,NOW()), last_error='', updated_at=NOW()
+	FROM candidates c
+	WHERE o.id=c.id`, scope.TenantID, scope.AccountID, limit)
+	if err != nil {
+		return gerror.Wrap(err, "收口终态TG任务Outbox失败")
+	}
 	return nil
 }
 
