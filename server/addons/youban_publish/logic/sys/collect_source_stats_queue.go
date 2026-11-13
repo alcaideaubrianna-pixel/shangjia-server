@@ -147,7 +147,13 @@ func (s *sSysPublish) handleCollectSourceStatsTask(ctx context.Context, task *as
 		// 其他 dirty 来源由下一轮游标继续处理，不能挤占实时采集连接。
 		OrderAsc("source_id").Limit(1).All()
 	if err != nil || len(rows) == 0 {
-		return refreshCollectSourceStatsWork(ctx, payload.SourceID, s.syncCollectSourceStats)
+		// 没有待对账记录时不要回退到单来源全表 COUNT/SUM/MAX。
+		// 实时路径只负责写入 dirty work，低频批量任务负责真正聚合；
+		// 旧任务到达这里也直接结束，避免再次触发 13 秒大表扫描。
+		if err != nil {
+			return gerror.Wrap(err, "读取采集源统计待对账任务失败")
+		}
+		return nil
 	}
 	ids := make([]int64, 0, len(rows))
 	generations := make(map[int64]string, len(rows))
