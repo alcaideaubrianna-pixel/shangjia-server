@@ -9,6 +9,7 @@ import (
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/hibiken/asynq"
 	botservice "hotgo/addons/youban_bot/service"
 	"hotgo/addons/youban_publish/model/input/sysin"
@@ -147,6 +148,35 @@ func (s *sSysPublish) recoverProfileMediaOperations(ctx context.Context) {
 	for _, row := range rows {
 		if err := s.enqueueProfileMediaOperation(ctx, row.Id); err != nil {
 			g.Log().Warningf(ctx, "恢复资料媒体任务入队失败 operation_id:%d err:%s", row.Id, err.Error())
+		}
+	}
+	// Close the partial-completion window: media rows may have committed while
+	// the operation status update or queue acknowledgement timed out.
+	var readyRows []struct {
+		OperationId int64 `json:"operationId"`
+		ProfileId   int64 `json:"profileId"`
+	}
+	readyQuery := `SELECT o.id AS operation_id,p.profile_id
+		FROM ` + profileMediaOperationTable + ` o
+		JOIN ` + publishProfileStateTable + ` p ON p.tenant_id=o.tenant_id AND p.account_id=o.account_id AND p.deleted_at IS NULL
+		JOIN ` + dao.ContentProfile.Table() + ` cp ON cp.id=p.profile_id AND cp.profile_no=o.profile_no AND cp.deleted_at IS NULL
+		WHERE o.status IN ('pending','processing') AND p.publish_task_status='waiting_media'
+		AND (SELECT COUNT(*) FROM ` + publishMediaTable + ` m WHERE m.profile_id=p.profile_id AND m.deleted_at IS NULL)
+			>= (p.expected_display_media_count+p.expected_verify_media_count)
+		ORDER BY o.id LIMIT 200`
+	if err := g.DB().GetScan(ctx, &readyRows, readyQuery); err != nil {
+		g.Log().Warningf(ctx, "读取已齐全媒体任务失败 err:%s", err.Error())
+	} else {
+		for _, row := range readyRows {
+			if _, err := g.DB().Model(profileMediaOperationTable).Ctx(ctx).Where("id", row.OperationId).
+				WhereIn("status", []string{"pending", "processing"}).
+				Data(g.Map{"status": "success", "error_message": "媒体记录已齐全，恢复收口", "finished_at": gtime.Now(), "updated_at": gtime.Now()}).Update(); err != nil {
+				g.Log().Warningf(ctx, "收口已齐全媒体任务失败 operation_id:%d err:%s", row.OperationId, err.Error())
+				continue
+			}
+			if err := s.wakeProfileTelegramJobs(ctx, row.ProfileId); err != nil {
+				g.Log().Warningf(ctx, "收口后唤醒资料上架失败 profile_id:%d err:%s", row.ProfileId, err.Error())
+			}
 		}
 	}
 	// The media worker can finish successfully while the wake-up transaction
