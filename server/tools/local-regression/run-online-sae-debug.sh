@@ -12,11 +12,18 @@ REGION_ID="${SAE_REGION_ID:-ap-southeast-1}"
 PROFILE="${ALIBABA_CLOUD_PROFILE:-xiaohuiji-sae}"
 ROLE="${ONLINE_DEBUG_ROLE:-publish-worker}"
 ALL_MODE="${ONLINE_DEBUG_ALL:-0}"
-if [[ "${1:-}" == "all" ]]; then ALL_MODE=1; fi
+WRITE_ARG=0
+for arg in "$@"; do
+  case "$arg" in
+    all) ALL_MODE=1 ;;
+    --write|write) WRITE_ARG=1 ;;
+  esac
+done
 SESSION="${ONLINE_DEBUG_SESSION:-$(date +%Y-%m-%d-%H-%M-%S)}"
 LOG_DIR="${ONLINE_DEBUG_LOG_DIR:-/tmp/youban-online-debug/$SESSION}"
 WRITE_MODE="${ONLINE_DEBUG_WRITE:-0}"
-if [[ "${1:-}" == "all" && -z "${ONLINE_DEBUG_WRITE+x}" ]]; then WRITE_MODE=1; fi
+if [[ "$WRITE_ARG" == "1" ]]; then WRITE_MODE=1; fi
+if [[ "${1:-}" == "all" && -z "${ONLINE_DEBUG_WRITE+x}" && "$WRITE_ARG" == "0" ]]; then WRITE_MODE=1; fi
 BUILD_MODE="${ONLINE_DEBUG_BUILD:-1}"
 ENV_FILE="${ONLINE_DEBUG_ENV_FILE:-$(mktemp /tmp/youban-online-debug.XXXXXX.env)}"
 BIN="${ONLINE_DEBUG_SERVER_BIN:-$ROOT_DIR/bin/hotgo}"
@@ -58,10 +65,14 @@ ENV
 else
   if [[ "$ALL_MODE" == "1" || "$ROLE" != "web" ]]; then
     if [[ -z "${ONLINE_DEBUG_TENANT_ID:-}" && "$ALL_MODE" == "1" ]]; then
-      read -r -p "请输入线上测试租户ID（仅用于本次调试范围）：" ONLINE_DEBUG_TENANT_ID
+      read -r -p "请输入线上测试租户ID（直接回车进入只读模式）：" ONLINE_DEBUG_TENANT_ID
     fi
-    : "${ONLINE_DEBUG_TENANT_ID:?Worker写入线上前必须设置 ONLINE_DEBUG_TENANT_ID}"
-    ONLINE_DEBUG_RUN_ID="${ONLINE_DEBUG_RUN_ID:-online-debug-$(date +%Y%m%d%H%M%S)}"
+    if [[ -z "${ONLINE_DEBUG_TENANT_ID:-}" ]]; then
+      echo "未填写测试租户ID，自动切换为只读调试模式。"
+      WRITE_MODE=0
+    else
+      ONLINE_DEBUG_RUN_ID="${ONLINE_DEBUG_RUN_ID:-online-debug-$(date +%Y%m%d%H%M%S)}"
+    fi
   fi
   cat >> "$ENV_FILE" <<ENV
 export YOUBAN_ONLINE_DEBUG_READ_ONLY=false
