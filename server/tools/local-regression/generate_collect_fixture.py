@@ -63,6 +63,19 @@ INSERT INTO hg_youban_publish_collect_channel
 (id,tenant_id,telegram_chat_id,chat_type,title,status,created_at,updated_at)
 VALUES ({args.channel_id},{args.tenant_id},{q(args.source_chat_id)},'channel',{source_name},'active',NOW(),NOW())
 ON CONFLICT (id) DO UPDATE SET status='active',updated_at=NOW();
+INSERT INTO hg_youban_publish_channel
+(id,tenant_id,merchant_id,tg_account_id,channel_title,target_chat_id,publish_direction,
+ is_default_selected,publish_visible,auto_delete_enabled,bot_id_json,status,created_at,updated_at)
+VALUES ({args.channel_id},{args.tenant_id},0,{tg_account_id},{source_name},{q(args.source_chat_id)},'up',1,1,1,'[{bot_id}]',1,NOW(),NOW())
+ON CONFLICT (id) DO UPDATE SET target_chat_id=EXCLUDED.target_chat_id,bot_id_json=EXCLUDED.bot_id_json,status=1,updated_at=NOW();
+INSERT INTO hg_youban_publish_tg_channel
+(tenant_id,merchant_id,tg_account_id,channel_id,channel_title,management_role,can_post_messages,created_at,updated_at)
+VALUES ({args.tenant_id},0,{tg_account_id},{q(args.source_chat_id)},{source_name},'admin',1,NOW(),NOW())
+ON CONFLICT (tenant_id,tg_account_id,channel_id) DO UPDATE SET can_post_messages=1,updated_at=NOW();
+INSERT INTO hg_youban_publish_bot_channel_cache
+(tenant_id,bot_id,chat_id,chat_type,chat_title,is_broadcast,message_count,created_at,updated_at)
+VALUES ({args.tenant_id},{bot_id},{q(args.source_chat_id)},'channel',{source_name},1,0,NOW(),NOW())
+ON CONFLICT (tenant_id,bot_id,chat_id) DO UPDATE SET chat_title=EXCLUDED.chat_title,updated_at=NOW();
 INSERT INTO hg_youban_publish_collect_bot_channel
 (tenant_id,bot_id,channel_id,status,bot_role,first_seen_at,last_seen_at,created_at,updated_at)
 VALUES ({args.tenant_id},{bot_id},{args.channel_id},'active','collector',NOW(),NOW(),NOW(),NOW())
