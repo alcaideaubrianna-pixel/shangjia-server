@@ -65,6 +65,12 @@ func (s *sSysPublish) confirmTelegramStreamOutbox(ctx context.Context, outboxID 
 		return s.releaseTelegramOutbox(ctx, outboxID, owner, attemptCount, err.Error())
 	}
 	if telegramOutboxJobStillNeedsDispatch(job.Status, job.DispatchStatus) {
+		if attemptCount >= 3 {
+			if fallbackErr := s.enqueueTelegramJobDirectWithUnique(ctx, jobID, 0, false); fallbackErr == nil {
+				g.Log().Warning(ctx, "TG任务Stream未接管已降级Asynq", g.Map{"event": "stream_fallback_enqueue", "jobId": jobID, "outboxId": outboxID, "attemptCount": attemptCount})
+				return s.confirmTelegramStreamOutbox(ctx, outboxID, owner, jobID, 0)
+			}
+		}
 		return s.releaseTelegramOutbox(ctx, outboxID, owner, attemptCount, "Stream任务尚未写入执行队列，等待重试")
 	}
 	_, err = g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).

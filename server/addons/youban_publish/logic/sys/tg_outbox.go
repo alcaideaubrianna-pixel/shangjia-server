@@ -253,8 +253,9 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 			// 手动上架属于交互优先级。Stream 只是通知传输层，
 			// Stream 写入失败不能让用户任务跟循环积压一起等待；
 			// 直接走同一频道顺序校验的 Asynq fallback，仍保持幂等。
-			if telegramJobPriorityValue(job) == tgJobPriorityInteractive {
+			if telegramJobPriorityValue(job) == tgJobPriorityInteractive || row.AttemptCount >= 3 {
 				if fallbackErr := s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 0, false); fallbackErr == nil {
+					g.Log().Warning(ctx, "TG任务Stream失败已降级Asynq", g.Map{"event": "stream_fallback_enqueue", "jobId": job.Id, "outboxId": row.Id, "attemptCount": row.AttemptCount})
 					return s.confirmTelegramStreamOutbox(ctx, row.Id, owner, job.Id, row.AttemptCount)
 				} else {
 					err = gerror.Wrapf(err, "手动TG任务Stream失败且Asynq兜底失败: %v", fallbackErr)
