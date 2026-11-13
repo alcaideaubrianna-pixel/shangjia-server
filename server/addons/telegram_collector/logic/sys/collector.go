@@ -680,6 +680,26 @@ func (f *botCollectorFeature) HandleUpdate(ctx context.Context, bot gatewayservi
 			ingestErrors = append(ingestErrors, fmt.Errorf("读取TG Bot采集源失败 tenant:%d bot:%d: %w", binding.TenantID, binding.ReferenceID, err))
 			continue
 		}
+		// 部分历史配置把入口 BOT 写在来源频道绑定中，bot_id 可能为空或指向旧 Bot。
+		// 当按 BOT 身份没有命中时，再按消息所在频道补偿匹配，避免消息已落原始表却完全丢失采集分发。
+		if len(sources) == 0 {
+			if message := collectorUpdateMessage(update); message != nil && message.Chat.ID != 0 {
+				chatID := fmt.Sprintf("%d", message.Chat.ID)
+				chatVariants := []string{chatID}
+				if strings.HasPrefix(chatID, "-100") {
+					chatVariants = append(chatVariants, strings.TrimPrefix(chatID, "-100"))
+				} else if strings.HasPrefix(chatID, "-") {
+					chatVariants = append(chatVariants, "-100"+strings.TrimPrefix(chatID, "-"))
+				}
+				fallbackModel := g.DB().Model("hg_youban_publish_collect_source").Safe().Ctx(ctx).
+					Fields("id,tenant_id").Where("source_type", "bot").Where("collect_enabled", 1).
+					Where("status", 1).WhereIn("source_chat_id", chatVariants).WhereNull("deleted_at")
+				if err := fallbackModel.Scan(&sources); err != nil {
+					ingestErrors = append(ingestErrors, fmt.Errorf("按来源频道读取TG Bot采集源失败 chat:%s: %w", chatID, err))
+					continue
+				}
+			}
+		}
 		matchedSources := matchBotCollectionSources(sources, binding.TenantID, binding.ReferenceID)
 		if len(matchedSources) == 0 {
 			g.Log().Warningf(ctx, "TG Bot采集更新未匹配到采集源 tenantId:%d botId:%d sourceCount:%d", binding.TenantID, binding.ReferenceID, len(sources))
