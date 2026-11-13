@@ -77,6 +77,7 @@ type telegramJobOutboxRecord struct {
 	AccountId    int64       `json:"accountId"`
 	TenantId     int64       `json:"tenantId"`
 	ChannelId    int64       `json:"channelId"`
+	Priority     int         `json:"priority"`
 	TargetChatId string      `json:"targetChatId"`
 }
 
@@ -99,6 +100,15 @@ func (s *sSysPublish) ensureTelegramJobOutboxTx(ctx context.Context, tx gdb.TX, 
 	})
 	if err != nil {
 		return gerror.Wrap(err, "保存TG任务Outbox失败")
+	}
+	// Outbox 是可靠事实记录，频道 ZSET 只是快速队首索引。写入两者后，
+	// 即使 Redis 短暂不可用，后续 Outbox 扫描也会重新回填索引。
+	var job telegramJobRecord
+	if err = tx.Model(publishTgJobTable).Safe().Ctx(ctx).
+		Fields("id,tenant_id,channel_id,priority").Where("id", jobId).Scan(&job); err == nil && job.Id > 0 {
+		if indexErr := (tgChannelPendingIndex{}).add(ctx, job.TenantId, job.ChannelId, job.Id, job.Priority); indexErr != nil {
+			g.Log().Warningf(ctx, "写入频道待投递索引失败，等待Outbox回填 jobId:%d channelId:%d err:%+v", job.Id, job.ChannelId, indexErr)
+		}
 	}
 	// 事务提交后 Dispatcher 会立即被唤醒；若事务尚未提交，下一轮兜底
 	// 扫描仍会再次领取，事件信号本身不承担可靠性。
@@ -190,6 +200,10 @@ func telegramJobOutboxRecordFromRecord(record gdb.Record) telegramJobOutboxRecor
 		JobId:        record["job_id"].Int64(),
 		AttemptCount: record["attempt_count"].Int(),
 		AvailableAt:  record["available_at"].GTime(),
+		AccountId:    record["account_id"].Int64(),
+		TenantId:     record["tenant_id"].Int64(),
+		ChannelId:    record["channel_id"].Int64(),
+		Priority:     record["priority"].Int(),
 	}
 }
 
@@ -334,14 +348,22 @@ func (s *sSysPublish) completeTelegramOutbox(ctx context.Context, outboxId int64
 	if outboxId <= 0 {
 		return nil
 	}
+	var row telegramJobOutboxRecord
+	if err := g.DB().Model(publishTgOutboxTable+" o").Safe().Ctx(ctx).
+		LeftJoin(publishTgJobTable+" j", "j.id=o.job_id").
+		Fields("o.id,o.job_id,j.tenant_id,j.channel_id,j.priority").Where("o.id", outboxId).Scan(&row); err != nil {
+		return gerror.Wrap(err, "读取TG任务Outbox失败")
+	}
 	_, err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
 		Where("id", outboxId).WhereNot("status", telegramOutboxDelivered).
-		Data(g.Map{
-			"status": telegramOutboxDelivered, "lease_owner": "", "lease_expires_at": nil,
+		Data(g.Map{"status": telegramOutboxDelivered, "lease_owner": "", "lease_expires_at": nil,
 			"delivered_at": gtime.Now(), "last_error": "", "updated_at": gtime.Now(),
 		}).Update()
 	if err != nil {
 		return gerror.Wrap(err, "收口TG任务Outbox失败")
+	}
+	if removeErr := (tgChannelPendingIndex{}).remove(ctx, row.TenantId, row.ChannelId, row.JobId); removeErr != nil {
+		g.Log().Debug(ctx, "频道待投递索引删除失败，继续使用数据库事实", g.Map{"jobId": row.JobId, "channelId": row.ChannelId, "error": removeErr.Error()})
 	}
 	return nil
 }
@@ -607,24 +629,30 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 	// 查询的 N+1 开销；频道内仍按调度等级、优先级和时间保持顺序。
 	var candidates []telegramJobOutboxRecord
 	query := `WITH channel_heads AS (
-		SELECT DISTINCT ON (j.account_id,j.channel_id)
-			o.id,o.job_id,o.attempt_count,o.available_at,j.account_id,j.channel_id
+		SELECT DISTINCT ON (j.tenant_id,j.channel_id)
+			o.id,o.job_id,o.attempt_count,o.available_at,j.account_id,j.tenant_id,j.channel_id,j.priority
 		FROM ` + publishTgOutboxTable + ` o
 		JOIN ` + publishTgJobTable + ` j ON j.id=o.job_id
-		WHERE j.account_id>0 AND j.channel_id>0
+		WHERE j.tenant_id>0 AND j.channel_id>0
 			AND o.event_type=? AND o.available_at<=?
 			AND (o.status=? OR (o.status=? AND o.lease_expires_at<=?))
 			AND j.status IN ('pending','failed_retry','unknown')
 			AND COALESCE(j.dispatch_status,'') IN ('','idle')
 			AND (j.next_retry_at IS NULL OR j.next_retry_at<=? OR (j.status='pending' AND COALESCE(j.dispatch_status,'')='idle'))
-		ORDER BY j.account_id,j.channel_id,` + telegramChannelScheduleOrderSQL("j") + `,o.available_at,o.id
+		ORDER BY j.tenant_id,j.channel_id,` + telegramChannelScheduleOrderSQL("j") + `,o.available_at,o.id
 	)
-	SELECT id,job_id,attempt_count,available_at,account_id FROM channel_heads
+	SELECT id,job_id,attempt_count,available_at,account_id,tenant_id,channel_id,priority FROM channel_heads
 	ORDER BY available_at,id LIMIT ?`
 	if err := g.DB().GetScan(ctx, &candidates, query, telegramOutboxEventPublish, now, telegramOutboxPending, telegramOutboxProcessing, now, now, limit*2); err != nil {
 		return nil, gerror.Wrap(err, "读取Stream频道队首失败")
 	}
 	var rows []telegramJobOutboxRecord
+	// 将本轮发现的队首同步到频道索引；Redis 失败只记录日志，数据库仍是可靠事实源。
+	for _, candidate := range candidates {
+		if err := (tgChannelPendingIndex{}).add(ctx, candidate.TenantId, candidate.ChannelId, candidate.JobId, candidate.Priority); err != nil {
+			g.Log().Debug(ctx, "频道待投递索引写入失败，继续使用数据库兜底", g.Map{"jobId": candidate.JobId, "channelId": candidate.ChannelId, "error": err.Error()})
+		}
+	}
 	// 每个账户本轮最多占用固定频道配额，避免大账户耗尽 dispatcher。
 	accountQuota := max(1, limit/8)
 	accountSelected := make(map[int64]int)

@@ -5,8 +5,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/gogf/gf/v2/container/gvar"
-	"github.com/gogf/gf/v2/frame/g"
+	"hotgo/internal/library/cache"
 )
 
 // tgChannelPendingIndex 是频道待投递 Job 的 Redis 高速索引。
@@ -27,30 +26,24 @@ func (tgChannelPendingIndex) add(ctx context.Context, tenantID, channelID, jobID
 	}
 	// 组合分数保留优先级顺序，同时用 Job ID 保证同优先级 FIFO。
 	score := float64(priority)*1_000_000_000_000 + float64(jobID)
-	_, err := g.Redis().Do(ctx, "ZADD", tgChannelPendingKey(tenantID, channelID), score, strconv.FormatInt(jobID, 10))
-	return err
+	return cache.ZSetAdd(ctx, tgChannelPendingKey(tenantID, channelID), score, strconv.FormatInt(jobID, 10))
 }
 
 func (tgChannelPendingIndex) remove(ctx context.Context, tenantID, channelID, jobID int64) error {
 	if tenantID <= 0 || channelID <= 0 || jobID <= 0 {
 		return nil
 	}
-	_, err := g.Redis().Do(ctx, "ZREM", tgChannelPendingKey(tenantID, channelID), strconv.FormatInt(jobID, 10))
-	return err
+	return cache.ZSetRemove(ctx, tgChannelPendingKey(tenantID, channelID), strconv.FormatInt(jobID, 10))
 }
 
 func (tgChannelPendingIndex) head(ctx context.Context, tenantID, channelID int64) (int64, error) {
 	if tenantID <= 0 || channelID <= 0 {
 		return 0, nil
 	}
-	value, err := g.Redis().Do(ctx, "ZRANGE", tgChannelPendingKey(tenantID, channelID), 0, 0)
-	if err != nil || value == nil || value.IsNil() {
+	value, err := cache.ZSetHead(ctx, tgChannelPendingKey(tenantID, channelID))
+	if err != nil || value == "" {
 		return 0, err
 	}
-	items := value.Array()
-	if len(items) == 0 {
-		return 0, nil
-	}
-	jobID, _ := strconv.ParseInt(gvar.New(items[0]).String(), 10, 64)
+	jobID, _ := strconv.ParseInt(value, 10, 64)
 	return jobID, nil
 }
