@@ -118,6 +118,34 @@ func (s *sSysPublish) enqueueAccountSchedules(ctx context.Context) error {
 		OrderAsc("id").Limit(100).Scan(&accounts); err != nil {
 		return err
 	}
+	// 账户目录游标只保证账户轮询公平，不能覆盖长期到期的资料循环。
+	// 直接从到期 channel_profile 反查账户，避免游标停在较大主键时漏掉
+	// 231 这类已有大量到期资料但没有新 cycle_run 的频道。
+	dueAccounts := make([]struct {
+		ID       int64 `orm:"id"`
+		TenantID int64 `orm:"tenant_id"`
+	}, 0)
+	if err := g.DB().Model(publishChannelProfileTable+" cp").Ctx(ctx).
+		Fields("DISTINCT cp.account_id AS id,cp.tenant_id").
+		InnerJoin(publishChannelTable+" c", "c.id=cp.channel_id AND c.tenant_id=cp.tenant_id").
+		Where("cp.account_id > 0").Where("cp.status", "active").
+		Where("c.status", 1).Where("c.cycle_publish_enabled", 1).
+		Where("c.publish_direction", "up").Where("cp.next_cycle_at IS NOT NULL AND cp.next_cycle_at<=?", gtime.Now()).
+		Limit(100).Scan(&dueAccounts); err != nil {
+		return err
+	}
+	seenAccounts := make(map[int64]struct{}, len(accounts)+len(dueAccounts))
+	for _, account := range accounts {
+		seenAccounts[account.TenantID*1000000000+account.ID] = struct{}{}
+	}
+	for _, account := range dueAccounts {
+		key := account.TenantID*1000000000 + account.ID
+		if _, ok := seenAccounts[key]; ok {
+			continue
+		}
+		accounts = append(accounts, account)
+		seenAccounts[key] = struct{}{}
+	}
 	client, err := s.telegramQueueClient(ctx)
 	if err != nil {
 		return err
