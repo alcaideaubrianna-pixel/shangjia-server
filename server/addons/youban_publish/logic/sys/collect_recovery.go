@@ -1091,28 +1091,31 @@ var (
 
 func (s *sSysPublish) recoverCollectPublishTasks(ctx context.Context, limit int) error {
 	if limit <= 0 {
-		limit = 100
+		limit = 50
 	}
+	// 采集分发恢复必须使用独立的小预算，不能因为历史积压拖住实时采集。
+	queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	deadline := gtime.Now().Add(-collectEventRecoverAfter)
-	rows, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
+	d := pdao.YoubanPublishCollectDispatch.Columns()
+	rows, err := pdao.YoubanPublishCollectDispatch.Ctx(queryCtx).
+		Fields(d.Id, d.EventId, d.ProfileId, d.RuleId, d.UpdatedAt).
 		Where("profile_id > 0").
 		Where("status", sysin.CollectDispatchStatusPending).
 		WhereLTE("updated_at", deadline).
-		OrderAsc("updated_at").Limit(limit).All()
+		OrderAsc("updated_at").OrderAsc("id").Limit(limit).All()
 	if err != nil {
 		return gerror.Wrap(err, "读取待恢复采集资料分发失败")
 	}
 	repaired := 0
 	for _, row := range rows {
-		event, eventErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).Where("id", row["event_id"].Int64()).One()
+		event, eventErr := pdao.YoubanPublishCollectEvent.Ctx(queryCtx).
+			Fields("id,tenant_id,account_id,source_id,bot_id,source_chat_id,source_message_id").
+			Where("id", row["event_id"].Int64()).One()
 		if eventErr != nil || event.IsEmpty() {
 			continue
 		}
-		rule, ruleErr := pdao.YoubanPublishCollectRule.Ctx(ctx).Where("id", row["rule_id"].Int64()).WhereNull("deleted_at").One()
-		if ruleErr != nil || rule.IsEmpty() {
-			continue
-		}
-		if err = s.submitCollectProfileDispatch(ctx, row["id"].Int64(), row["profile_id"].Int64(), event); err != nil {
+		if err = s.submitCollectProfileDispatch(queryCtx, row["id"].Int64(), row["profile_id"].Int64(), event); err != nil {
 			g.Log().Warningf(ctx, "恢复采集资料TG任务失败 dispatch:%d err:%+v", row["id"].Int64(), err)
 			continue
 		}
