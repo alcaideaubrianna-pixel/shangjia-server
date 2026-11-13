@@ -9,7 +9,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SERVER_DIR="$ROOT_DIR"
 APP_ID="${SAE_PUBLISH_APP_ID:-2fb5d3db-0975-4dea-b086-805d255131fa}"
 REGION_ID="${SAE_REGION_ID:-ap-southeast-1}"
-PROFILE="${ALIBABA_CLOUD_PROFILE:-default}"
+PROFILE="${ALIBABA_CLOUD_PROFILE:-xiaohuiji-sae}"
 ROLE="${ONLINE_DEBUG_ROLE:-publish-worker}"
 ALL_MODE="${ONLINE_DEBUG_ALL:-0}"
 if [[ "${1:-}" == "all" ]]; then ALL_MODE=1; fi
@@ -35,7 +35,7 @@ if [[ "$BUILD_MODE" == "1" ]]; then
 fi
 if [[ ! -x "$BIN" ]]; then echo "本地二进制不存在：${BIN}；构建失败" >&2; exit 1; fi
 umask 077
-cfg="$(aliyun sae DescribeApplicationConfig --RegionId "$REGION_ID" --AppId "$APP_ID" --profile "$PROFILE")"
+cfg="$(ALIBABA_CLOUD_REGION_ID="$REGION_ID" aliyun sae DescribeApplicationConfig --region "$REGION_ID" --RegionId "$REGION_ID" --AppId "$APP_ID" --profile "$PROFILE")"
 printf '%s' "$cfg" | jq -e '.Data.Envs' >/dev/null
 printf '%s' "$cfg" | jq -r '.Data.Envs[]? | select(.name != null and .value != null) | "export " + .name + "=" + (.value|@sh)' > "$ENV_FILE"
 cat >> "$ENV_FILE" <<ENV
