@@ -71,7 +71,7 @@ VALUES
 INSERT INTO hg_youban_publish_collect_event_media
 (tenant_id,account_id,source_id,source_type,event_id,source_chat_id,source_message_id,source_media_key,media_type,source_ref_type,source_file_id,file_url,storage_path,source_kind,source_mime_type,source_size,sort_index,cache_status,cache_hit,created_at,updated_at)
 VALUES
-(999,0,900087,'bot',990088,'-1003954550954',990088,'local-media-990088','photo','bot','local-file-990088','http://127.0.0.1:19100/local-media-990088','/tmp/local-media-990088.jpg','photo','image/jpeg',1024,0,'ready',1,NOW(),NOW());
+(999,0,900087,'bot',990088,'-1003954550954',990088,'local-media-990088','photo','bot','local-file-990088','http://127.0.0.1:19100/local-media-990088','/Users/ley/Desktop/CodeProject/youban/youban-server/server/tools/local-regression/testdata/image.jpg','photo','image/jpeg',1024,0,'ready',1,NOW(),NOW());
 
 INSERT INTO hg_youban_publish_collect_process_outbox
 (event_id,tenant_id,account_id,source_id,source_chat_id,status,available_at,created_at,updated_at)
