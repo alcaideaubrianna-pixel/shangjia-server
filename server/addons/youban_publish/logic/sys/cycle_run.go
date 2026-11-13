@@ -101,10 +101,10 @@ func (s *sSysPublish) supersedeOfflineCycleJobs(ctx context.Context, limit int) 
 		WHERE (j.operation_no LIKE 'cycle_%' OR j.operation_no LIKE 'profile_cycle:%')
 		  AND j.status IN ('pending','failed_retry','unknown','sending','confirming')
 		  AND (p.status<>1 OR p.visibility<>? OR p.deleted_at IS NOT NULL
-		       OR j.created_at < NOW() - INTERVAL '2 hours')
+		       OR j.created_at < NOW() - INTERVAL '15 minutes')
 		ORDER BY j.id LIMIT ?
 	)
-	UPDATE `+publishTgJobTable+` j SET status='superseded',dispatch_status=?,send_phase=CASE WHEN j.created_at < NOW() - INTERVAL '2 hours' AND p.status=1 AND p.visibility=? AND p.deleted_at IS NULL THEN 'skipped_stale_cycle' ELSE 'skipped_offline_profile' END,next_retry_at=NULL,last_dispatch_error=CASE WHEN j.created_at < NOW() - INTERVAL '2 hours' AND p.status=1 AND p.visibility=? AND p.deleted_at IS NULL THEN '循环任务等待超时，已跳过以释放频道队首' ELSE '资料已下架或不可公开，跳过循环翻新' END,updated_at=NOW()
+	UPDATE `+publishTgJobTable+` j SET status='superseded',dispatch_status=?,send_phase=CASE WHEN j.created_at < NOW() - INTERVAL '15 minutes' AND p.status=1 AND p.visibility=? AND p.deleted_at IS NULL THEN 'skipped_stale_cycle' ELSE 'skipped_offline_profile' END,next_retry_at=NULL,last_dispatch_error=CASE WHEN j.created_at < NOW() - INTERVAL '15 minutes' AND p.status=1 AND p.visibility=? AND p.deleted_at IS NULL THEN '循环任务等待超过15分钟，已跳过以释放频道队首' ELSE '资料已下架或不可公开，跳过循环翻新' END,updated_at=NOW()
 	FROM candidates c JOIN hg_content_profile p ON p.id=j.profile_id
 	WHERE j.id=c.id`, consts.ContentVisibilityPublic, consts.ContentVisibilityPublic, consts.ContentVisibilityPublic, limit, tgDispatchStatusDone)
 	if err != nil {
