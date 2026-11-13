@@ -90,6 +90,9 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_note_search" (
 CREATE INDEX IF NOT EXISTS "idx_ybp_note_search_scope" ON "hg_youban_publish_note_search" ("tenant_id", "is_collected", "status", "profile_id") WHERE "deleted_at" IS NULL;
 CREATE INDEX IF NOT EXISTS "idx_ybp_note_search_trgm" ON "hg_youban_publish_note_search" USING gin ("search_text" gin_trgm_ops) WHERE "deleted_at" IS NULL;
 
+ALTER TABLE "hg_youban_publish_collect_source"
+  ADD COLUMN IF NOT EXISTS "blocked_total" bigint NOT NULL DEFAULT 0;
+
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_image_quota" (
   "id" BIGSERIAL PRIMARY KEY, "tenant_id" bigint NOT NULL DEFAULT 0,
