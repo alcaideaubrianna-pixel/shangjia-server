@@ -173,6 +173,10 @@ func mergeCollectMaterialWindowRows(primary, retry gdb.Result, limit int) gdb.Re
 // forward context required to pair a verification message. It deliberately
 // avoids the source backlog so old events cannot delay realtime ingestion.
 func (s *sSysPublish) processTargetCollectEventWindow(ctx context.Context, payload collectProcessQueuePayload, target gdb.Record) error {
+	startedAt := time.Now()
+	defer func() {
+		g.Log().Info(ctx, "采集实时事件窗口处理完成", g.Map{"stage": "collect.window.process", "tenantId": payload.TenantId, "accountId": payload.AccountId, "sourceId": payload.SourceId, "eventId": target["id"].Int64(), "durationMs": time.Since(startedAt).Milliseconds()})
+	}()
 	if target.IsEmpty() || target["id"].Int64() <= 0 {
 		return gerror.New("目标采集事件不存在")
 	}
@@ -199,6 +203,7 @@ func (s *sSysPublish) processTargetCollectEventWindow(ctx context.Context, paylo
 }
 
 func (s *sSysPublish) loadTargetCollectMaterialWindow(ctx context.Context, payload collectProcessQueuePayload, target gdb.Record, eventAt *gtime.Time) (gdb.Result, bool, error) {
+	startedAt := time.Now()
 	now := gtime.Now()
 	maxRows := collectMaterialWindowMaxRows(ctx)
 	load := func(verifyOnly bool) (gdb.Result, error) {
@@ -217,10 +222,12 @@ func (s *sSysPublish) loadTargetCollectMaterialWindow(ctx context.Context, paylo
 	if err != nil {
 		return nil, false, err
 	}
+	g.Log().Info(ctx, "采集实时窗口查询完成", g.Map{"stage": "collect.window.primary", "tenantId": payload.TenantId, "accountId": payload.AccountId, "sourceId": payload.SourceId, "eventId": target["id"].Int64(), "rows": len(primary), "durationMs": time.Since(startedAt).Milliseconds()})
 	retry, err := load(true)
 	if err != nil {
 		return nil, false, err
 	}
+	g.Log().Info(ctx, "采集验证窗口查询完成", g.Map{"stage": "collect.window.retry", "tenantId": payload.TenantId, "accountId": payload.AccountId, "sourceId": payload.SourceId, "eventId": target["id"].Int64(), "rows": len(retry), "durationMs": time.Since(startedAt).Milliseconds()})
 	rows := mergeCollectMaterialWindowRows(primary, retry, maxRows+1)
 	windowTruncated := len(rows) > maxRows
 	if windowTruncated {
@@ -230,6 +237,10 @@ func (s *sSysPublish) loadTargetCollectMaterialWindow(ctx context.Context, paylo
 }
 
 func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload collectProcessQueuePayload, chatID string, rows []gdb.Record, processEventIds map[int64]struct{}, windowTruncated bool) error {
+	startedAt := time.Now()
+	defer func() {
+		g.Log().Info(ctx, "采集消息窗口处理完成", g.Map{"stage": "collect.message.process", "tenantId": payload.TenantId, "accountId": payload.AccountId, "sourceId": payload.SourceId, "rows": len(rows), "durationMs": time.Since(startedAt).Milliseconds()})
+	}()
 	sort.SliceStable(rows, func(i, j int) bool {
 		left := rows[i]["source_message_id"].Int64()
 		right := rows[j]["source_message_id"].Int64()
