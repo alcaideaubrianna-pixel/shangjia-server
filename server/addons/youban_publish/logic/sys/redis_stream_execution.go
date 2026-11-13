@@ -163,17 +163,31 @@ func (s *sSysPublish) recoverMissingTelegramStreamTasks(ctx context.Context, aft
 			}
 		}
 		missing := job.AsynqTaskId == "" || job.QueueName == ""
+		stalled := false
 		if !missing {
 			info, err := inspector.GetTaskInfo(job.QueueName, job.AsynqTaskId)
 			if err == nil {
 				missing = info.State == asynq.TaskStateArchived || info.State == asynq.TaskStateCompleted
+				// queued 任务存在于 Redis 不等于已经被发送 worker 接管。
+				// worker 重启、队列消费者异常时，任务会长期停在 pending，
+				// 而原恢复逻辑只处理“任务不存在”，会让频道永久卡在 queued。
+				// 仅对超过执行租约的 pending 任务重置；active/running 任务不触碰，
+				// 避免外部发送尚未确认时产生重复发送。
+				stalled = info.State == asynq.TaskStatePending
 			} else if errors.Is(err, asynq.ErrTaskNotFound) || errors.Is(err, asynq.ErrQueueNotFound) {
 				missing = true
 			} else {
 				return cursor, err
 			}
 		}
-		if missing {
+		if missing || stalled {
+			if stalled {
+				// 删除旧的 pending 任务后再释放 PG 状态，避免稳定 TaskID
+				// 继续占用 Redis 幂等键，阻止新的 Stream 就绪事件进入队列。
+				if err := inspector.DeleteTask(job.QueueName, job.AsynqTaskId); err != nil && !errors.Is(err, asynq.ErrTaskNotFound) {
+					return cursor, gerror.Wrap(err, "删除超时TG队列任务失败")
+				}
+			}
 			result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).
 				Where("asynq_task_id", job.AsynqTaskId).WhereIn("status", []string{telegramJobStatusPending, telegramJobStatusRetryWait}).
 				WhereIn("dispatch_status", []string{tgDispatchStatusIdle, tgDispatchStatusQueued, tgDispatchStatusProcessing}).WhereLTE("updated_at", cutoff).
@@ -189,7 +203,14 @@ func (s *sSysPublish) recoverMissingTelegramStreamTasks(ctx context.Context, aft
 				if err := s.rearmTelegramJobOutbox(ctx, job.Id, 0); err != nil {
 					return cursor, err
 				}
-				s.appendTelegramJobLog(ctx, job, "execution_recovery", "ready", "Asynq任务已缺失，恢复持久化就绪通知")
+				message := "Asynq任务已缺失，恢复持久化就绪通知"
+				stage := "missing_task"
+				if stalled {
+					message = "Asynq任务长期停在pending，已清理并恢复持久化就绪通知"
+					stage = "queued_timeout_recovered"
+				}
+				s.appendTelegramJobLog(ctx, job, "execution_recovery", stage, message)
+				g.Log().Warning(ctx, "TG队列任务超时恢复", g.Map{"event": stage, "jobId": job.Id, "channelId": job.ChannelId, "accountId": job.AccountId, "queueName": job.QueueName})
 			}
 		}
 		cursor = job.Id
