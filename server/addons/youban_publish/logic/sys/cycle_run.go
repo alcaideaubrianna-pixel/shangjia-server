@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -95,18 +97,19 @@ func (s *sSysPublish) supersedeOfflineCycleJobs(ctx context.Context, limit int) 
 	if limit <= 0 || limit > 500 {
 		limit = 200
 	}
+	headTimeoutMinutes := cycleHeadTimeoutMinutes()
 	_, err := g.DB().Exec(ctx, `WITH candidates AS (
 		SELECT j.id FROM `+publishTgJobTable+` j
 		JOIN hg_content_profile p ON p.id=j.profile_id
 		WHERE (j.operation_no LIKE 'cycle_%' OR j.operation_no LIKE 'profile_cycle:%')
 		  AND j.status IN ('pending','failed_retry','unknown','sending','confirming')
 		  AND (p.status<>1 OR p.visibility<>? OR p.deleted_at IS NOT NULL
-		       OR j.created_at < NOW() - INTERVAL '15 minutes')
+		       OR j.created_at < NOW() - (? * INTERVAL '1 minute'))
 		ORDER BY j.id LIMIT ?
 	)
-	UPDATE `+publishTgJobTable+` j SET status='superseded',dispatch_status=?,send_phase=CASE WHEN j.created_at < NOW() - INTERVAL '15 minutes' AND p.status=1 AND p.visibility=? AND p.deleted_at IS NULL THEN 'skipped_stale_cycle' ELSE 'skipped_offline_profile' END,next_retry_at=NULL,last_dispatch_error=CASE WHEN j.created_at < NOW() - INTERVAL '15 minutes' AND p.status=1 AND p.visibility=? AND p.deleted_at IS NULL THEN '循环任务等待超过15分钟，已跳过以释放频道队首' ELSE '资料已下架或不可公开，跳过循环翻新' END,updated_at=NOW()
+	UPDATE `+publishTgJobTable+` j SET status='superseded',dispatch_status=?,send_phase=CASE WHEN j.created_at < NOW() - (? * INTERVAL '1 minute') AND p.status=1 AND p.visibility=? AND p.deleted_at IS NULL THEN 'skipped_stale_cycle' ELSE 'skipped_offline_profile' END,next_retry_at=NULL,last_dispatch_error=CASE WHEN j.created_at < NOW() - (? * INTERVAL '1 minute') AND p.status=1 AND p.visibility=? AND p.deleted_at IS NULL THEN '循环任务等待超过15分钟，已跳过以释放频道队首' ELSE '资料已下架或不可公开，跳过循环翻新' END,updated_at=NOW()
 	FROM candidates c JOIN hg_content_profile p ON p.id=j.profile_id
-	WHERE j.id=c.id`, consts.ContentVisibilityPublic, consts.ContentVisibilityPublic, consts.ContentVisibilityPublic, limit, tgDispatchStatusDone)
+	WHERE j.id=c.id`, headTimeoutMinutes, consts.ContentVisibilityPublic, headTimeoutMinutes, consts.ContentVisibilityPublic, headTimeoutMinutes, consts.ContentVisibilityPublic, limit, tgDispatchStatusDone)
 	if err != nil {
 		return gerror.Wrap(err, "收口下架循环任务失败")
 	}
@@ -114,6 +117,18 @@ func (s *sSysPublish) supersedeOfflineCycleJobs(ctx context.Context, limit int) 
 		return gerror.Wrap(err, "收口循环任务Outbox失败")
 	}
 	return nil
+}
+
+// cycleHeadTimeoutMinutes 返回循环队首最大等待时间，默认15分钟，可通过环境变量调整。
+func cycleHeadTimeoutMinutes() int {
+	value, err := strconv.Atoi(os.Getenv("YOUBAN_PUBLISH_CYCLE_HEAD_TIMEOUT_MINUTES"))
+	if err != nil || value <= 0 {
+		return 15
+	}
+	if value > 24*60 {
+		return 24 * 60
+	}
+	return value
 }
 
 // pauseInactiveFreeChannelCycles 在指定账户范围复用免费频道长期不活跃保护规则。
