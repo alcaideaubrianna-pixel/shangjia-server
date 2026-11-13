@@ -157,9 +157,15 @@ func (s *sSysPublish) dispatchDueCollectProcessOutbox(ctx context.Context, limit
 	if len(scopes) > 0 {
 		model = model.Where("tenant_id", scopes[0].TenantID).Where("account_id", scopes[0].AccountID)
 	}
+	// 采集 Outbox 只读取领取和重建任务需要的字段，避免把错误文本、
+	// 连接元数据及未来新增的大字段带入每轮分片扫描。
+	fields := `id,event_id,tenant_id,account_id,source_id,source_chat_id,
+		status,available_at,lease_owner,lease_expires_at,attempt_count,last_error,
+		delivered_at,created_at,updated_at,history`
 	if strings.EqualFold(g.DB().GetConfig().Type, "pgsql") {
-		model = model.Fields("*, updated_at::text AS claim_version")
+		fields += ",updated_at::text AS claim_version"
 	}
+	model = model.Fields(fields)
 	// Reserve capacity for realtime first, then history and expired processing
 	// work. The explicit history marker is authoritative: an old realtime
 	// event must not be silently demoted merely because it waited in a backlog.
