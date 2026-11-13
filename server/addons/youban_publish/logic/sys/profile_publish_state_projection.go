@@ -121,23 +121,24 @@ func (s *sSysPublish) writeProfilePublishOperationState(ctx context.Context, ten
 
 func (s *sSysPublish) writeProfilePublishOperationStateTx(ctx context.Context, tx gdb.TX, tenantId, accountId, profileId int64, operationNo, status string, requireCurrentOperation bool) error {
 	now := gtime.Now()
-	// A late failure callback must never overwrite a successful delivery from
-	// the same operation. Callbacks are concurrent and can arrive out of order:
-	// one TG job may already be sent while another retry/watchdog callback
-	// reports failure. The sent job is durable evidence that this operation
-	// succeeded, so project it as published before touching the index.
+	// A late failure callback must never overwrite a successful delivery.
+	// Cycle/recovery callbacks can carry an older operation number while the
+	// same profile already has successful jobs from another operation.
 	if status == sysin.PublishTaskStatusFailed {
-		sentCount, err := tx.Model(publishTgJobTable).Safe().Ctx(ctx).
+		var summary struct {
+			Sent   int `orm:"sent"`
+			Active int `orm:"active"`
+		}
+		err := tx.Model(publishTgJobTable).Safe().Ctx(ctx).
 			Where("tenant_id", tenantId).
 			Where("account_id", accountId).
 			Where("profile_id", profileId).
-			Where("operation_no", strings.TrimSpace(operationNo)).
-			Where("status", telegramJobStatusSent).
-			Count()
+			Fields("SUM(CASE WHEN status='sent' THEN 1 ELSE 0 END) AS sent, SUM(CASE WHEN status IN ('pending','sending','confirming','failed_retry','unknown') THEN 1 ELSE 0 END) AS active").
+			Scan(&summary)
 		if err != nil {
 			return gerror.Wrap(err, "检查资料已成功发送任务失败")
 		}
-		if sentCount > 0 {
+		if summary.Sent > 0 && summary.Active == 0 {
 			status = sysin.PublishTaskStatusPublished
 		}
 	}
