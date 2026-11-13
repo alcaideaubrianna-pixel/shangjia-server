@@ -445,8 +445,8 @@ func collectSourceChannelCache(tgAccountId int64, channelId string, cacheMap map
 
 func (s *sSysPublish) saveCollectSourceRules(ctx context.Context, tx gdb.TX, tenantId int64, sourceId int64, ruleIds []int64) error {
 	ruleIds = uniqueIds(ruleIds)
-	if len(ruleIds) != 1 || ruleIds[0] <= 0 {
-		return gerror.New("每个采集源必须绑定一个专属规则")
+	if len(ruleIds) == 0 {
+		return gerror.New("每个采集源至少绑定一个专属规则")
 	}
 	accountId, err := tx.Model(pdao.YoubanPublishCollectSource.Table()).Ctx(ctx).
 		Fields("account_id").Where("id", sourceId).Where("tenant_id", tenantId).Value()
@@ -454,33 +454,19 @@ func (s *sSysPublish) saveCollectSourceRules(ctx context.Context, tx gdb.TX, ten
 		return gerror.Wrap(err, "读取采集源账号失败")
 	}
 	ruleCols := pdao.YoubanPublishCollectRule.Columns()
-	rule, err := tx.Model(pdao.YoubanPublishCollectRule.Table()).Ctx(ctx).
-		Fields(ruleCols.Id).Where(ruleCols.Id, ruleIds[0]).Where(ruleCols.TenantId, tenantId).Where(ruleCols.AccountId, accountId.Int64()).
-		Where(ruleCols.GlobalEnabled, 0).WhereNull(ruleCols.DeletedAt).LockUpdate().One()
+	rules, err := tx.Model(pdao.YoubanPublishCollectRule.Table()).Ctx(ctx).
+		Fields(ruleCols.Id).WhereIn(ruleCols.Id, ruleIds).Where(ruleCols.TenantId, tenantId).Where(ruleCols.AccountId, accountId.Int64()).
+		Where(ruleCols.GlobalEnabled, 0).WhereNull(ruleCols.DeletedAt).LockUpdate().All()
 	if err != nil {
 		return gerror.Wrap(err, "校验采集源专属规则失败")
 	}
-	if rule.IsEmpty() {
+	if len(rules) != len(ruleIds) {
 		return gerror.New("采集源只能绑定当前账号的专属规则")
 	}
 	// A rule is source-specific. Older clients could submit an existing rule ID
 	// from the same account, which silently made multiple sources share one rule.
 	// Clone the rule (including its items) on conflict so existing clients remain
 	// compatible while each source gets an independent rule going forward.
-	otherSourceValue, err := tx.Model(pdao.YoubanPublishCollectSourceRule.Table()).Ctx(ctx).
-		Fields("source_id").Where("rule_id", ruleIds[0]).
-		Where("source_id !=", sourceId).Value()
-	if err != nil {
-		return gerror.Wrap(err, "检查采集规则是否已被其他来源使用失败")
-	}
-	otherSourceId := otherSourceValue.Int64()
-	if otherSourceId > 0 {
-		clonedRuleId, cloneErr := cloneCollectRuleTx(ctx, tx, tenantId, accountId.Int64(), ruleIds[0], sourceId)
-		if cloneErr != nil {
-			return cloneErr
-		}
-		ruleIds[0] = clonedRuleId
-	}
 	if _, err := tx.Model(pdao.YoubanPublishCollectSourceRule.Table()).Ctx(ctx).Where("source_id", sourceId).Delete(); err != nil {
 		return gerror.Wrap(err, "清理采集源规则失败")
 	}

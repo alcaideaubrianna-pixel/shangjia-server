@@ -770,8 +770,8 @@ func (s *sSysPublish) collectEventRules(ctx context.Context, event gdb.Record, t
 	if err := pdao.YoubanPublishCollectSourceRule.Ctx(ctx).Where("source_id", sourceId).OrderAsc("sort").Scan(&bindRows); err != nil {
 		return nil, gerror.Wrap(err, "读取采集源绑定规则失败")
 	}
-	if len(bindRows) != 1 {
-		return nil, gerror.Newf("采集源%d必须且只能绑定一个专属规则，当前绑定%d个", sourceId, len(bindRows))
+	if len(bindRows) == 0 {
+		return nil, gerror.Newf("采集源%d未绑定专属规则", sourceId)
 	}
 	ruleIds := make([]int64, 0, len(bindRows))
 	for _, row := range bindRows {
@@ -810,10 +810,12 @@ func (s *sSysPublish) collectEventRules(ctx context.Context, event gdb.Record, t
 			}
 		}
 	}
-	if len(rows) != 1 {
+	if len(rows) == 0 {
 		return nil, gerror.Newf("采集源%d的专属规则不存在或已删除", sourceId)
 	}
-	rows[0][collectRuleSourceIDField] = gvar.New(sourceId)
+	for _, row := range rows {
+		row[collectRuleSourceIDField] = gvar.New(sourceId)
+	}
 	if err = attachCollectRuleChannels(ctx, rows); err != nil {
 		return nil, err
 	}
