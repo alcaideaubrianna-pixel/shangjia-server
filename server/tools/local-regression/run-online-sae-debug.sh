@@ -13,16 +13,19 @@ PROFILE="${ALIBABA_CLOUD_PROFILE:-xiaohuiji-sae}"
 ROLE="${ONLINE_DEBUG_ROLE:-publish-worker}"
 ALL_MODE="${ONLINE_DEBUG_ALL:-0}"
 WRITE_ARG=0
+WRITE_ALL=0
 for arg in "$@"; do
   case "$arg" in
     all) ALL_MODE=1 ;;
     --write|write) WRITE_ARG=1 ;;
+    --write-all|write-all) WRITE_ARG=1; WRITE_ALL=1 ;;
   esac
 done
 SESSION="${ONLINE_DEBUG_SESSION:-$(date +%Y-%m-%d-%H-%M-%S)}"
 LOG_DIR="${ONLINE_DEBUG_LOG_DIR:-/tmp/youban-online-debug/$SESSION}"
 WRITE_MODE="${ONLINE_DEBUG_WRITE:-0}"
 if [[ "$WRITE_ARG" == "1" ]]; then WRITE_MODE=1; fi
+if [[ "$WRITE_ALL" == "1" ]]; then WRITE_MODE=1; fi
 if [[ "${1:-}" == "all" && -z "${ONLINE_DEBUG_WRITE+x}" && "$WRITE_ARG" == "0" ]]; then WRITE_MODE=1; fi
 BUILD_MODE="${ONLINE_DEBUG_BUILD:-1}"
 ENV_FILE="${ONLINE_DEBUG_ENV_FILE:-$(mktemp /tmp/youban-online-debug.XXXXXX.env)}"
@@ -64,10 +67,10 @@ export YOUBAN_PUBLISH_MEDIA_SOURCE_CONCURRENCY=0
 ENV
 else
   if [[ "$ALL_MODE" == "1" || "$ROLE" != "web" ]]; then
-    if [[ -z "${ONLINE_DEBUG_TENANT_ID:-}" && "$ALL_MODE" == "1" ]]; then
+    if [[ -z "${ONLINE_DEBUG_TENANT_ID:-}" && "$ALL_MODE" == "1" && "$WRITE_ALL" != "1" ]]; then
       read -r -p "请输入线上测试租户ID（直接回车进入只读模式）：" ONLINE_DEBUG_TENANT_ID
     fi
-    if [[ -z "${ONLINE_DEBUG_TENANT_ID:-}" ]]; then
+    if [[ -z "${ONLINE_DEBUG_TENANT_ID:-}" && "$WRITE_ALL" != "1" ]]; then
       echo "未填写测试租户ID，自动切换为只读调试模式。"
       WRITE_MODE=0
     else
@@ -88,7 +91,7 @@ ENV
 fi
 # shellcheck disable=SC1090
 source "$ENV_FILE"
-echo "线上调试配置已加载：region=$REGION_ID app=$APP_ID role=$ROLE all=$ALL_MODE write=$WRITE_MODE"
+echo "线上调试配置已加载：region=$REGION_ID app=$APP_ID role=$ROLE all=$ALL_MODE write=$WRITE_MODE writeAll=$WRITE_ALL"
 echo "session=$SESSION"
 echo "角色日志目录：$LOG_DIR"
 echo "Web入口日志：$LOG_DIR/web.log"
