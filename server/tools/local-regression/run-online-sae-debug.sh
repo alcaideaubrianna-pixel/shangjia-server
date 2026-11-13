@@ -14,11 +14,13 @@ ROLE="${ONLINE_DEBUG_ROLE:-publish-worker}"
 ALL_MODE="${ONLINE_DEBUG_ALL:-0}"
 WRITE_ARG=0
 WRITE_ALL=0
+LOAD_MODE=0
 for arg in "$@"; do
   case "$arg" in
     all) ALL_MODE=1 ;;
     --write|write) WRITE_ARG=1 ;;
     --write-all|write-all) WRITE_ARG=1; WRITE_ALL=1 ;;
+    --load|load) LOAD_MODE=1; ALL_MODE=1; WRITE_ARG=1; WRITE_ALL=1 ;;
   esac
 done
 SESSION="${ONLINE_DEBUG_SESSION:-$(date +%Y-%m-%d-%H-%M-%S)}"
@@ -37,7 +39,6 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 if [[ "$WRITE_MODE" != "0" && "$WRITE_MODE" != "1" ]]; then echo "ONLINE_DEBUG_WRITE 必须为 0 或 1" >&2; exit 2; fi
-command -v aliyun >/dev/null || { echo "缺少 aliyun CLI" >&2; exit 1; }
 command -v jq >/dev/null || { echo "缺少 jq" >&2; exit 1; }
 if [[ "$BUILD_MODE" == "1" ]]; then
   echo "构建本地二进制：$BIN"
@@ -45,9 +46,33 @@ if [[ "$BUILD_MODE" == "1" ]]; then
 fi
 if [[ ! -x "$BIN" ]]; then echo "本地二进制不存在：${BIN}；构建失败" >&2; exit 1; fi
 umask 077
-cfg="$(ALIBABA_CLOUD_REGION_ID="$REGION_ID" aliyun sae DescribeApplicationConfig --region "$REGION_ID" --RegionId "$REGION_ID" --AppId "$APP_ID" --profile "$PROFILE")"
-printf '%s' "$cfg" | jq -e '.Data.Envs' >/dev/null
-printf '%s' "$cfg" | jq -r '.Data.Envs[]? | select(.name != null and .value != null) | "export " + .name + "=" + (.value|@sh)' > "$ENV_FILE"
+if [[ "$LOAD_MODE" == "1" ]]; then
+  echo "LOAD模式：使用本地PG/Redis/TG Fake，不读取线上SAE配置。"
+  cat > "$ENV_FILE" <<'ENV_LOCAL'
+export YOUBAN_DB_DRIVER=pgsql
+export YOUBAN_DB_HOST=127.0.0.1
+export YOUBAN_DB_PORT=5432
+export YOUBAN_DB_USER=postgres
+export YOUBAN_DB_PASSWORD=postgres
+export YOUBAN_DB_NAME=youban_tgfake_test
+export YOUBAN_DATABASE_LINK='pgsql:postgres:postgres@tcp(127.0.0.1:5432)/youban_tgfake_test'
+export GF_REDIS_DEFAULT_ADDRESS=127.0.0.1:6379
+export GF_REDIS_DEFAULT_DB=15
+export YOUBAN_REDIS_ADDRESS=127.0.0.1:6379
+export YOUBAN_REDIS_DB=15
+export REDIS_ADDRESS=127.0.0.1:6379
+export REDIS_DB=15
+export YOUBAN_TELEGRAM_RUNTIME_API_URL=http://127.0.0.1:19100
+export YOUBAN_TELEGRAM_BOT_API_URL=http://127.0.0.1:19100
+export YOUBAN_TELEGRAM_LOCAL_BOT_ENABLED=1
+export YOUBAN_LOCAL_REGRESSION=1
+ENV_LOCAL
+else
+  command -v aliyun >/dev/null || { echo "缺少 aliyun CLI" >&2; exit 1; }
+  cfg="$(ALIBABA_CLOUD_REGION_ID="$REGION_ID" aliyun sae DescribeApplicationConfig --region "$REGION_ID" --RegionId "$REGION_ID" --AppId "$APP_ID" --profile "$PROFILE")"
+  printf '%s' "$cfg" | jq -e '.Data.Envs' >/dev/null
+  printf '%s' "$cfg" | jq -r '.Data.Envs[]? | select(.name != null and .value != null) | "export " + .name + "=" + (.value|@sh)' > "$ENV_FILE"
+fi
 cat >> "$ENV_FILE" <<ENV
 export YOUBAN_LOCAL_APPLY_SCHEMA=0
 export YOUBAN_PUBLISH_RUNTIME_ROLE=$(printf '%q' "$ROLE")
@@ -99,6 +124,12 @@ echo "Web入口日志：$LOG_DIR/web.log"
 if [[ "$ALL_MODE" == "1" ]]; then
   # account 是 Telegram 协议号长连接，必须继续使用 SAE 单实例，不在本地重复启动。
   roles=(web collector-worker background-worker media-worker publish-worker scheduler)
+  if [[ "$LOAD_MODE" == "1" ]]; then
+    echo "启动本地 TG Fake Hook：127.0.0.1:19100"
+    (cd "$ROOT_DIR" && go run ./tools/tg_hook_mock --addr 127.0.0.1:19100) >"$LOG_DIR/tg-fake.log" 2>&1 &
+    pids=("$!")
+    sleep 1
+  fi
   base_port="${ONLINE_DEBUG_HTTP_PORT_BASE:-18000}"
   mkdir -p "$LOG_DIR"
   printf 'session=%s\nregion=%s\napp=%s\nwrite=%s\n' "$SESSION" "$REGION_ID" "$APP_ID" "$WRITE_MODE" > "$LOG_DIR/session.env"
