@@ -63,6 +63,14 @@ INSERT INTO hg_youban_publish_collect_channel
 (id,tenant_id,telegram_chat_id,chat_type,title,status,created_at,updated_at)
 VALUES ({args.channel_id},{args.tenant_id},{q(args.source_chat_id)},'channel',{source_name},'active',NOW(),NOW())
 ON CONFLICT (id) DO UPDATE SET status='active',updated_at=NOW();
+INSERT INTO hg_youban_publish_collect_bot_channel
+(tenant_id,bot_id,channel_id,status,bot_role,first_seen_at,last_seen_at,created_at,updated_at)
+VALUES ({args.tenant_id},{bot_id},{args.channel_id},'active','collector',NOW(),NOW(),NOW(),NOW())
+ON CONFLICT (tenant_id,bot_id,channel_id) DO UPDATE SET status='active',bot_role='collector',last_seen_at=NOW(),updated_at=NOW();
+INSERT INTO hg_youban_publish_collect_account_channel
+(tenant_id,account_id,channel_id,source_id,collect_enabled,status,approval_status,approved_at,created_at,updated_at)
+VALUES ({args.tenant_id},{account_id},{args.channel_id},{args.source_id},1,'approved','approved',NOW(),NOW(),NOW())
+ON CONFLICT (tenant_id,account_id,channel_id,source_id) DO UPDATE SET collect_enabled=1,status='approved',approval_status='approved',approved_at=NOW(),updated_at=NOW();
 INSERT INTO hg_youban_publish_collect_rule
 (id,tenant_id,account_id,name,global_enabled,review_enabled,dedupe_enabled,dedupe_days,
  block_link,block_username,block_plain_text,status,created_at,updated_at)
