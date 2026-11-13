@@ -166,14 +166,14 @@ func telegramChannelBlockingJobStateSQL(alias string) string {
 			AND COALESCE(%[1]slast_dispatch_error,'') LIKE '就绪通知或执行任务缺失%%'
 			AND %[1]supdated_at < CURRENT_TIMESTAMP - INTERVAL '5 minutes'
 		)) OR
-		(%sstatus='failed_retry' AND (%snext_retry_at IS NULL OR %snext_retry_at<=CURRENT_TIMESTAMP)) OR
-		(%sstatus='failed' AND %ssend_phase='display_confirmed' AND EXISTS (
-			SELECT 1 FROM %s failed_display_message
-			WHERE failed_display_message.job_id=%sid
+		(%[1]sstatus='failed_retry' AND (%[1]snext_retry_at IS NULL OR %[1]snext_retry_at<=CURRENT_TIMESTAMP)) OR
+		(%[1]sstatus='failed' AND %[1]ssend_phase='display_confirmed' AND EXISTS (
+			SELECT 1 FROM %[2]s failed_display_message
+			WHERE failed_display_message.job_id=%[1]sid
 			  AND failed_display_message.status IN ('sent','undeletable')
 			  AND failed_display_message.deleted_at IS NULL
 		))
-	)`, alias, alias, alias, alias, alias, alias, alias, publishTgMessageTable, alias)
+	)`, alias, publishTgMessageTable)
 }
 
 func telegramChannelAvailableAccountSQL(alias string) string {
