@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -133,6 +134,7 @@ func (s *sSysPublish) enqueueAccountSchedules(ctx context.Context) error {
 		Fields("a.id,a.tenant_id").
 		Where("a.status", 1).
 		Where("a.deleted_at IS NULL").
+		WhereGT("a.id", cursor.Int64()).
 		Where(fmt.Sprintf(`EXISTS (
 			SELECT 1
 			FROM %s cp
@@ -162,6 +164,17 @@ func (s *sSysPublish) enqueueAccountSchedules(ctx context.Context) error {
 		}
 		accounts = append(accounts, account)
 		seenAccounts[key] = struct{}{}
+	}
+	// 两个来源都按同一个账户游标读取后统一排序并截断，避免普通账户和到期账户
+	// 合并后超过批次上限，导致游标被重置、每分钟重复扫描最小账户集合。
+	sort.Slice(accounts, func(i, j int) bool {
+		if accounts[i].ID == accounts[j].ID {
+			return accounts[i].TenantID < accounts[j].TenantID
+		}
+		return accounts[i].ID < accounts[j].ID
+	})
+	if len(accounts) > 100 {
+		accounts = accounts[:100]
 	}
 	client, err := s.telegramQueueClient(ctx)
 	if err != nil {
