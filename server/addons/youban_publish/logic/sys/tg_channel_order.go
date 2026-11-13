@@ -73,7 +73,6 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 		fast := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).Master().Unscoped().
 			Where("j.id <> ?", job.Id).
 			Where("j.tenant_id", job.TenantId).
-			Where("j.account_id", job.AccountId).
 			Where("j.status IN (?)", []string{telegramJobStatusPending, telegramJobStatusRetryWait, telegramJobStatusConfirming, telegramJobStatusSending}).
 			Where("j.created_at < ? OR (j.created_at = ? AND j.id < ?)", createdAt, createdAt, job.Id)
 		// Outbox 已记录 Stream 入队失败且超过队首超时的旧任务不能继续
