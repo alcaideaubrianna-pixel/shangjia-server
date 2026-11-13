@@ -168,8 +168,14 @@ func (s *sSysPublish) dispatchDueCollectProcessOutbox(ctx context.Context, limit
 		var sources []struct {
 			SourceID int64 `orm:"source_id"`
 		}
-		if err := model.Clone().Fields("source_id").Where("status", status).WhereLTE(dueColumn, now).
-			Where("source_id > 0").Group("source_id").OrderAsc("source_id").Limit(min(32, count)).Scan(&sources); err != nil {
+		// 不能在已带有 SELECT * 的 model 上追加 GROUP BY；PostgreSQL 会拒绝
+		// SELECT * 与仅按 source_id 分组的查询，导致整个账户分片停止灌入队列。
+		sourceModel := g.DB().Model(collectProcessOutboxTable).Ctx(ctx)
+		if len(scopes) > 0 {
+			sourceModel = sourceModel.Where("tenant_id", scopes[0].TenantID).Where("account_id", scopes[0].AccountID)
+		}
+		if err := sourceModel.Fields("source_id").Where("status", status).WhereLTE(dueColumn, now).
+			Where("source_id > 0").Distinct().OrderAsc("source_id").Limit(min(32, count)).Scan(&sources); err != nil {
 			return nil, err
 		}
 		if len(sources) <= 1 {
