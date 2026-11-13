@@ -15,6 +15,7 @@ ALL_MODE="${ONLINE_DEBUG_ALL:-0}"
 if [[ "${1:-}" == "all" ]]; then ALL_MODE=1; fi
 LOG_DIR="${ONLINE_DEBUG_LOG_DIR:-/tmp/youban-online-debug-logs}"
 WRITE_MODE="${ONLINE_DEBUG_WRITE:-0}"
+BUILD_MODE="${ONLINE_DEBUG_BUILD:-1}"
 ENV_FILE="${ONLINE_DEBUG_ENV_FILE:-$(mktemp /tmp/youban-online-debug.XXXXXX.env)}"
 BIN="${ONLINE_DEBUG_SERVER_BIN:-$ROOT_DIR/bin/hotgo}"
 
@@ -72,6 +73,7 @@ fi
 # shellcheck disable=SC1090
 source "$ENV_FILE"
 echo "线上调试配置已加载：region=$REGION_ID app=$APP_ID role=$ROLE all=$ALL_MODE write=$WRITE_MODE"
+echo "角色日志目录：$LOG_DIR"
 
 if [[ "$ALL_MODE" == "1" ]]; then
   # account 是 Telegram 协议号长连接，必须继续使用 SAE 单实例，不在本地重复启动。
