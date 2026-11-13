@@ -364,6 +364,11 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 	// 新引擎统一执行队列，频道顺序和优先级仍由入队前的频道调度保证。
 	// 旧引擎保留原队列，便于按账户灰度和迁移回滚。
 	queueName = queueNameForPushEngine(s.accountPushEngine(ctx, job.TenantId, job.AccountId), queueName)
+	// 手动/AI上架独立进入高优先级队列，避免被循环、历史和采集积压拖延。
+	// 频道前序检查与租约仍在下方执行，队列隔离不改变同频道串行语义。
+	if priority == tgJobPriorityInteractive {
+		queueName = channelDispatchQueueManual
+	}
 	data := g.Map{
 		"priority":            priority,
 		"queue_name":          queueName,

@@ -13,13 +13,18 @@ func telegramLegacyPublishQueuesEnabled(ctx context.Context) bool {
 // telegramPublishExecutionQueues 返回发送执行队列，保留基础队列承接历史下架重试兼容任务。
 func telegramPublishExecutionQueues(ctx context.Context) map[string]int {
 	if telegramLegacyPublishQueuesEnabled(ctx) {
-		return telegramPublishForegroundQueueWeightsWithUnifiedLane(ctx)
+		queues := telegramPublishForegroundQueueWeightsWithUnifiedLane(ctx)
+		queues[channelDispatchQueueManual] = 8
+		return queues
 	}
-	return map[string]int{channelDispatchQueueSend: 1, tgQueueNameDefault: 1}
+	return map[string]int{channelDispatchQueueManual: 8, channelDispatchQueueSend: 1, tgQueueNameDefault: 1}
 }
 
 // channelDispatchQueueSend 是统一发送任务队列名称。
 const channelDispatchQueueSend = "youban_publish_push_send"
+
+// channelDispatchQueueManual 独立承接手动/AI上架，避免被循环和历史任务拖住。
+const channelDispatchQueueManual = "youban_publish_push_manual"
 
 // channelDispatchQueueDelete 是独立删除任务队列名称。
 const channelDispatchQueueDelete = "youban_publish_push_delete"
