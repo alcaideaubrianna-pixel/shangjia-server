@@ -51,6 +51,8 @@ def main() -> None:
         )
     source_name = q(f"本地回放来源 {args.run_id}")
     rule_name = q(f"本地回放规则 {args.run_id}")
+    event_sql = ",\n".join(events)
+    media_sql = ",\n".join(media)
     sql = f"""-- 本地完整采集回放夹具 run_id={args.run_id} mode={args.mode} count={args.count}
 BEGIN;
 -- 先清理本 run 的事实记录，保证脚本可重复执行。
@@ -89,12 +91,12 @@ INSERT INTO hg_youban_publish_collect_event
 (id,tenant_id,account_id,source_id,source_type,bot_id,tg_account_id,source_chat_id,source_message_id,source_unique_key,
  material_role,material_parent_event_id,material_group_status,raw_text,media_count,status,received_at,created_at,updated_at)
 VALUES
-{',\n'.join(events)};
+{event_sql};
 INSERT INTO hg_youban_publish_collect_event_media
 (tenant_id,account_id,source_id,source_type,event_id,source_chat_id,source_message_id,source_media_key,media_type,
  source_ref_type,source_file_id,file_url,storage_path,source_kind,source_mime_type,source_size,sort_index,cache_status,cache_hit,created_at,updated_at)
 VALUES
-{',\n'.join(media)};
+{media_sql};
 INSERT INTO hg_youban_publish_collect_process_outbox
 (event_id,tenant_id,account_id,source_id,source_chat_id,status,available_at,created_at,updated_at,history)
 SELECT id,tenant_id,account_id,source_id,source_chat_id,'pending',NOW(),NOW(),NOW(),{history}
