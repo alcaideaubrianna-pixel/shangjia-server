@@ -12,6 +12,7 @@ import (
 
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -255,6 +256,22 @@ func (s *sSysPublish) sendTelegramJobLockedByChannel(ctx context.Context, jobId 
 	ctx = telegramPublishJobTraceContext(ctx, job)
 	bounded, cancelBudget, budgetErr := s.telegramSendBudgetContext(ctx, job)
 	if budgetErr != nil {
+		// 发送预算已到期时，不能只把错误交给队列重试；先隔离旧任务、释放
+		// 频道队首并唤醒下一条，迟到的 Telegram 回执由 watchdog 对账处理。
+		if strings.Contains(budgetErr.Error(), telegramSendTimeoutMessage) {
+			var expired telegramJobRecord
+			var replacement int64
+			if fenceErr := g.DB().Transaction(context.WithoutCancel(ctx), func(txCtx context.Context, tx gdb.TX) error {
+				var err error
+				expired, replacement, err = s.expireTelegramSendTx(txCtx, tx, job.Id)
+				return err
+			}); fenceErr == nil && expired.Id > 0 {
+				_ = s.wakeNextTelegramChannelJob(context.WithoutCancel(ctx), expired)
+				if replacement > 0 {
+					g.Log().Warningf(ctx, "TG发送预算到期已隔离并重入队 jobId:%d replacementJobId:%d", expired.Id, replacement)
+				}
+			}
+		}
 		return budgetErr
 	}
 	defer cancelBudget()

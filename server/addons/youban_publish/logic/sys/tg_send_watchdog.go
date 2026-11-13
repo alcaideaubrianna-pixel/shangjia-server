@@ -17,10 +17,10 @@ import (
 )
 
 const (
-	telegramSendBudget                = 21 * time.Minute
+	telegramSendBudget                = 10 * time.Minute
 	telegramSendMaxRetries            = 3
 	telegramSendPhaseTimeoutCancelled = "timeout_cancelled"
-	telegramSendTimeoutMessage        = "频道发送超过21分钟，旧任务已取消，整组资料移至队尾；迟到消息只删除不补发"
+	telegramSendTimeoutMessage        = "频道发送超过10分钟，旧任务已取消，整组资料移至队尾；迟到消息只删除不补发"
 )
 
 // telegramSendBudgetContext uses a durable deadline shared by every retry and
@@ -376,7 +376,7 @@ func (s *sSysPublish) recoverTelegramSendTimeouts(ctx context.Context) {
       (status='failed_retry' AND send_phase IN ('cleanup_processing','display_sending','display_confirmed','verify_sending')))
  ORDER BY id LIMIT 500 FOR UPDATE SKIP LOCKED
  ) UPDATE `+publishTgJobTable+` j
- SET send_deadline_at=COALESCE((SELECT MIN(a.created_at) FROM `+publishTgAttemptTable+` a WHERE a.job_id=j.id),j.updated_at,j.created_at,CURRENT_TIMESTAMP::timestamp)+INTERVAL '21 minutes'
+ SET send_deadline_at=COALESCE((SELECT MIN(a.created_at) FROM `+publishTgAttemptTable+` a WHERE a.job_id=j.id),j.updated_at,j.created_at,CURRENT_TIMESTAMP::timestamp)+INTERVAL '10 minutes'
  FROM candidates c WHERE j.id=c.id AND j.send_deadline_at IS NULL`)
 	if backfillErr != nil {
 		g.Log().Warningf(ctx, "TG历史发送截止时间回填失败 err:%+v", backfillErr)
