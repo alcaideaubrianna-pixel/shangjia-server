@@ -323,11 +323,12 @@ func collectProcessSourceEnabled(ctx context.Context, payload collectProcessQueu
 	if payload.AccountId > 0 {
 		sourceModel = sourceModel.Where(columns.AccountId, payload.AccountId)
 	}
-	count, err := sourceModel.Count()
+	// 实时路径只需判断是否存在，不能使用 COUNT 扫描来源表。
+	matchedSource, err := sourceModel.One()
 	if err != nil {
 		return false, err
 	}
-	if count > 0 {
+	if !matchedSource.IsEmpty() {
 		return true, nil
 	}
 	source, err := pdao.YoubanPublishCollectSource.Ctx(ctx).
