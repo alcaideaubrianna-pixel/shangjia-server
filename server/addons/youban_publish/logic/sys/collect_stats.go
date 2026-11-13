@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
@@ -113,7 +112,11 @@ CROSS JOIN (
 		sysin.CollectDispatchStatusSent, startOfDay,
 		tenantId, accountId,
 	); err != nil {
-		return nil, gerror.Wrap(err, "统计采集数据失败")
+		// Statistics are auxiliary to the collection workflow. Do not make a
+		// database-pressure spike surface as an API failure and block the page;
+		// return a safe empty snapshot while the next request retries.
+		g.Log().Warningf(ctx, "统计采集数据失败，降级返回空统计 err:%+v", err)
+		return &collectStatsAggregate{}, nil
 	}
 	_ = cache.Instance().Set(ctx, cacheKey, aggregate, 10*time.Second)
 	return &aggregate, nil
