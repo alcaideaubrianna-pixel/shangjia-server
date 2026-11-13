@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -219,7 +221,7 @@ func (s *sSysPublish) handleAccountScheduleTask(ctx context.Context, task *asynq
 		func(ctx context.Context) error { return s.repairAccountCyclePlans(ctx, scope) },
 	} {
 		// 阶段各自限时，慢查询不能耗尽账户全部预算，挤掉后续循环与恢复。
-		stageCtx, cancel := context.WithTimeout(bounded, 2*time.Second)
+		stageCtx, cancel := context.WithTimeout(bounded, accountScheduleStageTimeout())
 		err := stage(stageCtx)
 		budgetEnded := stageCtx.Err() != nil && bounded.Err() == nil
 		cancel()
@@ -233,6 +235,19 @@ func (s *sSysPublish) handleAccountScheduleTask(ctx context.Context, task *asynq
 		}
 	}
 	return errors.Join(failures...)
+}
+
+// accountScheduleStageTimeout 为账户循环调度阶段提供独立预算，避免大账户每轮只能生成极少任务。
+// 仍受账户总租约限制，不会恢复全局扫描；默认10秒，可通过环境变量调整。
+func accountScheduleStageTimeout() time.Duration {
+	minutes, err := strconv.Atoi(os.Getenv("YOUBAN_PUBLISH_ACCOUNT_SCHEDULE_STAGE_SECONDS"))
+	if err != nil || minutes <= 0 {
+		return 10 * time.Second
+	}
+	if minutes > 60 {
+		minutes = 60
+	}
+	return time.Duration(minutes) * time.Second
 }
 
 // reconcileProfileCycleRunChannels 将已经有终态 Job 的资料级频道投影收口。
