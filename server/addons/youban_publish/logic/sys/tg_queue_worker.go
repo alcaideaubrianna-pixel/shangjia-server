@@ -2,11 +2,14 @@ package sys
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	publishconsts "hotgo/addons/youban_publish/consts"
+	"strings"
 	"time"
 
+	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/hibiken/asynq"
@@ -574,6 +577,16 @@ func (s *sSysPublish) handleTelegramPublishTask(ctx context.Context, task *asynq
 	job, jobErr := s.telegramJobById(ctx, payload.JobId)
 	jobStage.End(jobErr)
 	if jobErr != nil {
+		if isTelegramMissingJobError(jobErr) {
+			// 旧 Asynq 任务可能晚于数据库 Job 清理到达。此类任务没有可执行事实，
+			// 必须在当前消费中收口，不能把不存在的 Job 交给 Asynq 无限重试。
+			s.settleMissingTelegramPublishTask(ctx, payload.JobId, jobErr)
+			beginTelegramPublishStage(ctx, "queue.stale_job").End(nil, g.Map{
+				"jobId": payload.JobId, "stale": true,
+				"decision": "ack_and_stop_retry",
+			})
+			return nil
+		}
 		return jobErr
 	}
 	ctx = telegramPublishJobTraceContext(ctx, job)
@@ -595,6 +608,53 @@ func (s *sSysPublish) handleTelegramPublishTask(ctx context.Context, task *asynq
 		return &tgRetryAfterError{after: delay, err: errTelegramPublishWindowBlocked}
 	}
 	return s.SendTelegramJob(ctx, payload.JobId)
+}
+
+// isTelegramMissingJobError 识别数据库空结果和 GoFrame 包装后的空结果。
+// 旧队列任务对应的 Job 已被清理时，消费端必须把它当作幂等终态。
+func isTelegramMissingJobError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, sql.ErrNoRows) || errors.Is(gerror.Cause(err), sql.ErrNoRows) {
+		return true
+	}
+	cause := gerror.Cause(err)
+	return cause != nil && strings.Contains(cause.Error(), "TG任务不存在")
+}
+
+// settleMissingTelegramPublishTask 收口不存在 Job 的遗留队列任务。
+// Job 已不存在时无法恢复频道身份，只能按 job_id 有界清理 Outbox 和 Stream 去重键；
+// 频道索引由 Outbox 恢复/重建流程按数据库事实维护，避免用不完整信息误删其他频道任务。
+func (s *sSysPublish) settleMissingTelegramPublishTask(ctx context.Context, jobID int64, cause error) {
+	if jobID <= 0 {
+		return
+	}
+	clearTelegramReadyStreamDedupe(ctx, jobID)
+	_, err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
+		Where("job_id", jobID).
+		Where("event_type", telegramOutboxEventPublish).
+		WhereIn("status", []string{telegramOutboxPending, telegramOutboxProcessing}).
+		Data(g.Map{
+			"status":           telegramOutboxDelivered,
+			"lease_owner":      "",
+			"lease_expires_at": nil,
+			"delivered_at":     gtime.Now(),
+			"last_error":       "关联TG任务已不存在，遗留队列任务已收口",
+			"updated_at":       gtime.Now(),
+		}).Update()
+	if err != nil {
+		// 收口失败不能重新抛回 Asynq，否则旧任务会形成无限重试；持久化 Outbox
+		// 后续仍可由恢复扫描再次处理，当前只记录结构化告警。
+		g.Log().Warning(ctx, "不存在TG任务的Outbox收口失败，已停止队列重试", g.Map{
+			"jobId": jobID, "stale": true, "error": err.Error(),
+		})
+		return
+	}
+	g.Log().Warning(ctx, "发现不存在TG任务，已幂等停止遗留队列重试", g.Map{
+		"jobId": jobID, "stale": true,
+		"error": cause.Error(),
+	})
 }
 
 func (s *sSysPublish) handleTelegramAttemptTimeoutTask(ctx context.Context, task *asynq.Task) error {
