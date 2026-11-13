@@ -64,7 +64,12 @@ export YOUBAN_DB_USER=postgres YOUBAN_DB_PASSWORD=postgres YOUBAN_DB_NAME="$PG_D
 # GoFrame 的默认数据库配置读取完整 link；只设置 YOUBAN_DB_NAME 会让部分角色
 # 回退到 youban_hotgo，导致采集、媒体和发布角色不在同一测试库中。
 export YOUBAN_DATABASE_LINK="pgsql:postgres:postgres@tcp(127.0.0.1:5432)/$PG_DB"
-export YOUBAN_REDIS_ADDRESS="$REDIS_ADDR" YOUBAN_REDIS_DB="${YOUBAN_LOCAL_REDIS_DB:-15}"
+REDIS_DB="${YOUBAN_LOCAL_REDIS_DB:-15}"
+# envconfig 按 GF_REDIS_*、YOUBAN_REDIS_*、REDIS_* 的顺序读取；同时覆盖三组变量，
+# 防止开发机残留的 GF_REDIS_DEFAULT_DB 让 Asynq Producer 与 Worker 连接不同逻辑库。
+export GF_REDIS_DEFAULT_ADDRESS="$REDIS_ADDR" GF_REDIS_DEFAULT_DB="$REDIS_DB"
+export YOUBAN_REDIS_ADDRESS="$REDIS_ADDR" YOUBAN_REDIS_DB="$REDIS_DB"
+export REDIS_ADDRESS="$REDIS_ADDR" REDIS_DB="$REDIS_DB"
 export YOUBAN_TELEGRAM_RUNTIME_API_URL="http://$HOOK_ADDR"
 export YOUBAN_TELEGRAM_BOT_API_URL="http://$HOOK_ADDR"
 export YOUBAN_TELEGRAM_LOCAL_BOT_ENABLED=1
@@ -86,6 +91,7 @@ done
 
 echo "local roles started: ${roles[*]}"
 echo "database: $PG_LINK"
+echo "redis: $REDIS_ADDR db=$REDIS_DB"
 echo "telegram hook: http://$HOOK_ADDR"
 echo "press Ctrl-C to stop"
 wait
