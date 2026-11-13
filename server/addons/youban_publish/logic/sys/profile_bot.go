@@ -517,7 +517,7 @@ func (s *sSysPublish) BotProfilePersistMedia(ctx context.Context, tenantId, acco
 		return stateErr
 	}
 	if state["publish_task_status"].String() == "waiting_media" {
-		return s.submitProfilePublish(ctx, profileId, tenantId, accountId, 0, state["publish_operation_no"].String(), nil, false)
+		return s.wakeProfileTelegramJobs(ctx, profileId)
 	}
 	return nil
 }
