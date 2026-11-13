@@ -5,7 +5,6 @@ import (
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
-	"github.com/gogf/gf/v2/os/gtime"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
@@ -44,17 +43,30 @@ func (s *sSysPublish) clearTelegramChannelQueue(ctx context.Context, tenantId in
 		return nil, gerror.Wrap(err, "统计频道发送中任务失败")
 	}
 	res.Sending = sending
-	data := telegramJobStateUpdateData("superseded", 0, gtime.Now())
-	data["error_message"] = channelQueueClearMessage
-	data["last_dispatch_error"] = channelQueueClearMessage
-	result, err := base.
+
+	// 清空队列必须复用统一状态迁移入口，确保批量废弃同时收口
+	// Outbox、Redis 频道索引并唤醒下一条任务，避免清空后频道继续卡死。
+	values, err := base.Clone().
 		WhereIn("status", channelQueueClearStatuses()).
-		Data(data).
-		Update()
+		Fields("id").Array()
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取频道待清理任务失败")
+	}
+	jobIDs := make([]int64, 0, len(values))
+	for _, value := range values {
+		if id := value.Int64(); id > 0 {
+			jobIDs = append(jobIDs, id)
+		}
+	}
+	affected, err := s.transitionTelegramJobs(ctx, jobIDs, telegramJobTransition{
+		From:         channelQueueClearStatuses(),
+		To:           telegramJobStatusSuperseded,
+		ErrorMessage: channelQueueClearMessage,
+		Additional:   g.Map{"last_dispatch_error": channelQueueClearMessage},
+	})
 	if err != nil {
 		return nil, gerror.Wrap(err, "清空频道发送队列失败")
 	}
-	affected, _ := result.RowsAffected()
 	res.Cleared = int(affected)
 	return res, nil
 }
