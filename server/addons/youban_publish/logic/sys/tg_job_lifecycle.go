@@ -33,7 +33,15 @@ func (s *sSysPublish) markTelegramJobSuperseded(ctx context.Context, jobId int64
 	if removeErr := (tgChannelPendingIndex{}).remove(ctx, job.TenantId, job.ChannelId, job.Id); removeErr != nil {
 		g.Log().Warningf(ctx, "移除已废弃TG任务频道索引失败 jobId:%d channelId:%d err:%+v", job.Id, job.ChannelId, removeErr)
 	}
-	return s.upsertPublishJobRecord(ctx, job, "superseded", "")
+	if err := s.upsertPublishJobRecord(ctx, job, "superseded", ""); err != nil {
+		return err
+	}
+	// 任务从任意业务入口被废弃后都必须唤醒同频道下一条任务。
+	// 不能只依赖发送 Worker 的 defer，否则资料下架、编辑覆盖等入口会留下空闲队首。
+	if err := s.wakeNextTelegramChannelJob(ctx, job); err != nil {
+		return gerror.Wrap(err, "废弃TG任务后唤醒频道下一条任务失败")
+	}
+	return nil
 }
 
 func (s *sSysPublish) supersedeTelegramJobAndCompleteOperation(ctx context.Context, job telegramJobRecord) error {
