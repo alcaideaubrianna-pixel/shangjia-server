@@ -33,6 +33,9 @@ round_filter() { printf "account_id=999 AND operation_no LIKE 'profile_cycle:loc
 seed_round() {
   docker exec -i youban-postgres psql -U postgres -d "$local_db_name" -X -v ON_ERROR_STOP=1 -v "run_id=$1" -v "profiles=$2" -v "channels=$3" < scenarios/runtime_load.sql >> "$output/seed.log"
 }
+runtime_channel_chat_id() {
+  sql "SELECT target_chat_id FROM hg_youban_publish_channel WHERE tenant_id=999 AND channel_title LIKE 'local-hook-channel-%' AND status=1 AND deleted_at IS NULL ORDER BY id LIMIT 1"
+}
 verify_round() {
   # 资料投影走后台队列，等待真实收口后再审计；超时仍判失败。
   wait_count "SELECT count(*) FROM hg_youban_publish_profile_state WHERE tenant_id=999 AND account_id=999 AND publish_operation_no LIKE 'profile_cycle:local:runtime:$1:%' AND COALESCE(publish_task_status,'')=''" "$2" 30
@@ -61,24 +64,26 @@ echo '通过：1000条真实发送、消息证据、频道顺序和资料投影'
 
 # 让回调晚于HTTP失败20秒；期间本频道第二条不能开始，其他频道继续。
 if [[ "${YOUBAN_SKIP_AMBIGUOUS:-0}" != "1" ]]; then
-  control '{"default":{"action":"success","delayMs":2},"rules":[{"method":"sendMediaGroup","chatId":"-100999000012","action":"accepted_timeout","webhookDelayMs":20000}]}'
   round="$run_tag-ambiguous"
   seed_round "$round" 2 100
-  wait_count "SELECT count(*) FROM hg_youban_publish_tg_job WHERE $(round_filter "$round") AND target_chat_id='-100999000012' AND status IN ('unknown','confirming')" 1 150
-  sql "SELECT json_build_object('at',clock_timestamp(),'attempts',(SELECT count(*) FROM hg_youban_publish_tg_attempt a JOIN hg_youban_publish_tg_job j ON j.id=a.job_id WHERE j.account_id=999 AND j.operation_no LIKE 'profile_cycle:local:runtime:$round:%' AND j.target_chat_id='-100999000012'),'other_sent',(SELECT count(*) FROM hg_youban_publish_tg_job WHERE $(round_filter "$round") AND target_chat_id<>'-100999000012' AND status='sent'))" > "$output/unknown-isolation.json"
-  attempts="$(sql "SELECT count(*) FROM hg_youban_publish_tg_attempt a JOIN hg_youban_publish_tg_job j ON j.id=a.job_id WHERE j.account_id=999 AND j.operation_no LIKE 'profile_cycle:local:runtime:$round:%' AND j.target_chat_id='-100999000012'")"
+  ambiguous_chat_id="$(runtime_channel_chat_id)"
+  control "{\"default\":{\"action\":\"success\",\"delayMs\":2},\"rules\":[{\"method\":\"sendMediaGroup\",\"chatId\":\"$ambiguous_chat_id\",\"action\":\"accepted_timeout\",\"webhookDelayMs\":20000}]}"
+  wait_count "SELECT count(*) FROM hg_youban_publish_tg_job WHERE $(round_filter "$round") AND target_chat_id='$ambiguous_chat_id' AND status IN ('unknown','confirming')" 1 150
+  sql "SELECT json_build_object('at',clock_timestamp(),'attempts',(SELECT count(*) FROM hg_youban_publish_tg_attempt a JOIN hg_youban_publish_tg_job j ON j.id=a.job_id WHERE j.account_id=999 AND j.operation_no LIKE 'profile_cycle:local:runtime:$round:%' AND j.target_chat_id='$ambiguous_chat_id'),'other_sent',(SELECT count(*) FROM hg_youban_publish_tg_job WHERE $(round_filter "$round") AND target_chat_id<>'$ambiguous_chat_id' AND status='sent'))" > "$output/unknown-isolation.json"
+  attempts="$(sql "SELECT count(*) FROM hg_youban_publish_tg_attempt a JOIN hg_youban_publish_tg_job j ON j.id=a.job_id WHERE j.account_id=999 AND j.operation_no LIKE 'profile_cycle:local:runtime:$round:%' AND j.target_chat_id='$ambiguous_chat_id'")"
   [[ "$attempts" == 1 ]] || { echo '未知发送期间本频道后续任务越过了屏障' >&2; exit 1; }
-  wait_count "SELECT count(*) FROM hg_youban_publish_tg_job WHERE $(round_filter "$round") AND target_chat_id<>'-100999000012' AND status='sent'" 198 30
+  wait_count "SELECT count(*) FROM hg_youban_publish_tg_job WHERE $(round_filter "$round") AND target_chat_id<>'$ambiguous_chat_id' AND status='sent'" 198 30
   wait_count "SELECT count(*) FROM hg_youban_publish_tg_job WHERE $(round_filter "$round") AND status='sent'" 200 120
   verify_round "$round" 2 100
   echo '通过：响应丢失、延迟Webhook、未知发送屏障及跨频道隔离'
 fi
 
-control @scenarios/slow_channel_isolation.json
+slow_chat_id="$(runtime_channel_chat_id)"
+control "{\"default\":{\"action\":\"success\",\"delayMs\":2},\"rules\":[{\"method\":\"sendMediaGroup\",\"chatId\":\"$slow_chat_id\",\"action\":\"accepted_timeout\",\"webhookDelayMs\":20000}]}"
 round="$run_tag-slow"
 seed_round "$round" 3 100
-wait_count "SELECT count(*) FROM hg_youban_publish_tg_job WHERE $(round_filter "$round") AND target_chat_id='-100999000013' AND status='sent'" 3 120
-sql "SELECT json_build_object('at',clock_timestamp(),'pending_cleanup',count(*)) FROM hg_youban_publish_tg_outbox o JOIN hg_youban_publish_tg_job j ON j.id=o.job_id WHERE o.event_type LIKE 'telegram_job.cleanup.%' AND o.status<>'delivered' AND j.tenant_id=999 AND j.target_chat_id='-100999000013'" > "$output/slow-delete-isolation.json"
+wait_count "SELECT count(*) FROM hg_youban_publish_tg_job WHERE $(round_filter "$round") AND target_chat_id='$slow_chat_id' AND status='sent'" 3 120
+sql "SELECT json_build_object('at',clock_timestamp(),'pending_cleanup',count(*)) FROM hg_youban_publish_tg_outbox o JOIN hg_youban_publish_tg_job j ON j.id=o.job_id WHERE o.event_type LIKE 'telegram_job.cleanup.%' AND o.status<>'delivered' AND j.tenant_id=999 AND j.target_chat_id='$slow_chat_id'" > "$output/slow-delete-isolation.json"
 python3 -c 'import json,sys;r=json.load(open(sys.argv[1]));assert r["pending_cleanup"]>0,r' "$output/slow-delete-isolation.json"
 wait_count "SELECT count(*) FROM hg_youban_publish_tg_job WHERE $(round_filter "$round") AND status='sent'" 300 120
 verify_round "$round" 3 100
