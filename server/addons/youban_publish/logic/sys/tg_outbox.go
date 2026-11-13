@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -612,20 +613,41 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 		Where("j.account_id > 0").Where("o.event_type", telegramOutboxEventPublish).
 		Where("o.available_at <= ?", now).Where("o.status IN (?,?)", telegramOutboxPending, telegramOutboxProcessing).
 		WhereIn("j.status", []string{"pending", "failed_retry", "unknown"}).
-		Where("j.channel_id > 0").Group("j.account_id,j.channel_id").OrderAsc("MIN(o.available_at)").Limit(limit).Scan(&channelRows); err != nil {
+		Where("j.channel_id > 0").
+		Where("COALESCE(j.dispatch_status,'') IN ('','idle')").
+		Where("j.next_retry_at IS NULL OR j.next_retry_at<=? OR (j.status='pending' AND COALESCE(j.dispatch_status,'')='idle')", now).
+		Group("j.account_id,j.channel_id").OrderAsc("MIN(o.available_at)").Limit(limit * 2).Scan(&channelRows); err != nil {
 		return nil, gerror.Wrap(err, "读取Stream频道分片失败")
 	}
 	if len(channelRows) == 0 {
 		return nil, nil
 	}
 	var rows []telegramJobOutboxRecord
+	// 每个账户本轮最多占用固定频道配额，避免一个大账户耗尽整个
+	// dispatcher；候选按最早 available_at 排序，下一轮自然继续轮转。
+	accountQuota := max(1, limit/8)
+	accountSelected := make(map[int64]int)
 	for _, channel := range channelRows {
+		if accountSelected[channel.AccountID] >= accountQuota {
+			continue
+		}
 		query := `SELECT o.id,o.job_id,o.attempt_count,o.available_at FROM ` + publishTgOutboxTable + ` o JOIN ` + publishTgJobTable + ` j ON j.id=o.job_id WHERE j.account_id=? AND j.channel_id=? AND o.event_type=? AND o.available_at<=? AND (o.status=? OR (o.status=? AND o.lease_expires_at<=?)) AND j.status IN ('pending','failed_retry','unknown') AND COALESCE(j.dispatch_status,'') IN ('','idle') AND (j.next_retry_at IS NULL OR j.next_retry_at<=? OR (j.status='pending' AND COALESCE(j.dispatch_status,'')='idle')) ORDER BY o.available_at,o.id LIMIT 1`
 		var head []telegramJobOutboxRecord
-		if err := g.DB().GetScan(ctx, &head, query, channel.AccountID, channel.ChannelID, telegramOutboxEventPublish, now, telegramOutboxPending, telegramOutboxProcessing, now, now); err != nil {
+		channelCtx, cancel := context.WithTimeout(ctx, 750*time.Millisecond)
+		err := g.DB().GetScan(channelCtx, &head, query, channel.AccountID, channel.ChannelID, telegramOutboxEventPublish, now, telegramOutboxPending, telegramOutboxProcessing, now, now)
+		cancel()
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				g.Log().Warning(ctx, "读取频道Stream队首超时，跳过本轮", g.Map{"accountId": channel.AccountID, "channelId": channel.ChannelID})
+				continue
+			}
 			return nil, gerror.Wrap(err, "读取频道Stream队首失败")
 		}
+		accountSelected[channel.AccountID]++
 		rows = append(rows, head...)
+		if len(rows) >= limit {
+			break
+		}
 	}
 	return rows, nil
 }
