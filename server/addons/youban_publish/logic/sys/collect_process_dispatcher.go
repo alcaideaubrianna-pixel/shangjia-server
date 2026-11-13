@@ -5,6 +5,7 @@ import (
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 	"time"
 )
 
@@ -17,8 +18,13 @@ func (s *sSysPublish) runCollectProcessDispatcher(ctx context.Context) {
 		cycleCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		// 账户级轮询，避免一个历史积压账户占满全局 Outbox 批次。
 		var scopes []publishAccountScope
+		// 过期 processing 也必须进入账户轮询。旧逻辑只选 pending，
+		// 导致 Worker 崩溃后留下的 processing 租约只能等待低频全局恢复，
+		// 采集事件长期无法进入资料终态和规则分发。
 		_ = g.DB().Model(collectProcessOutboxTable).Ctx(cycleCtx).
-			Fields("tenant_id,account_id").Where("status", "pending").Where("account_id > 0").
+			Fields("tenant_id,account_id").
+			Where("account_id > 0").
+			Where("status = ? OR (status = ? AND lease_expires_at <= ?)", "pending", "processing", gtime.Now()).
 			Group("tenant_id,account_id").OrderAsc("tenant_id").OrderAsc("account_id").Limit(16).Scan(&scopes)
 		err := error(nil)
 		// 没有账户分片时不再回退到全局扫描；无归属历史任务由独立恢复器处理。
