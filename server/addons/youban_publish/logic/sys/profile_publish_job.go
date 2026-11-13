@@ -414,6 +414,16 @@ func (s *sSysPublish) ensureTelegramProfileJobWithMetaTx(ctx context.Context, tx
 	}
 	jobID, err := tx.Model(publishTgJobTable).Safe().Ctx(ctx).Data(jobData).InsertAndGetId()
 	if err != nil {
+		if isUniqueConstraintError(err) {
+			active, readErr := tx.Model(publishTgJobTable).Safe().Ctx(ctx).
+				Where("tenant_id", job.TenantId).Where("account_id", job.AccountId).
+				Where("profile_id", job.ProfileId).Where("channel_id", job.ChannelId).
+				WhereIn("status", []string{"pending", "sending", "failed_retry", "unknown"}).
+				Fields("id").OrderDesc("id").One()
+			if readErr == nil && active["id"].Int64() > 0 {
+				return active["id"].Int64(), nil
+			}
+		}
 		return 0, gerror.Wrap(err, "创建资料TG频道任务失败")
 	}
 	return jobID, nil
