@@ -673,8 +673,18 @@ func (f *botCollectorFeature) HandleUpdate(ctx context.Context, bot gatewayservi
 		// sources for that BOT here, so private chats, groups, and channels use
 		// the same source routing and never confuse bot_id with source_id.
 		var sources []botCollectionSource
+		// Gateway 的 ReferenceID 属于入口 Bot 表；采集来源保存的是发布 Bot 表 ID。
+		// 使用 Bot Token 解析真实发布 Bot ID，避免两张表的业务 ID 混用。
+		publishBotID := binding.ReferenceID
+		if strings.TrimSpace(bot.Token) != "" {
+			var publishBot struct{ ID int64 }
+			if err := g.DB().Model("hg_youban_publish_bot").Safe().Ctx(ctx).
+				Fields("id").Where("bot_token", bot.Token).Where("status", 1).WhereNull("deleted_at").Scan(&publishBot); err == nil && publishBot.ID > 0 {
+				publishBotID = publishBot.ID
+			}
+		}
 		model := g.DB().Model("hg_youban_publish_collect_source").Safe().Ctx(ctx).
-			Fields("id,tenant_id").Where("bot_id", binding.ReferenceID).Where("source_type", "bot").
+			Fields("id,tenant_id").Where("bot_id", publishBotID).Where("source_type", "bot").
 			Where("collect_enabled", 1).Where("status", 1).WhereNull("deleted_at")
 		if err := model.Scan(&sources); err != nil {
 			ingestErrors = append(ingestErrors, fmt.Errorf("读取TG Bot采集源失败 tenant:%d bot:%d: %w", binding.TenantID, binding.ReferenceID, err))
@@ -700,9 +710,9 @@ func (f *botCollectorFeature) HandleUpdate(ctx context.Context, bot gatewayservi
 				}
 			}
 		}
-		matchedSources := matchBotCollectionSources(sources, binding.TenantID, binding.ReferenceID)
+		matchedSources := matchBotCollectionSources(sources, binding.TenantID, publishBotID)
 		if len(matchedSources) == 0 {
-			g.Log().Warningf(ctx, "TG Bot采集更新未匹配到采集源 tenantId:%d botId:%d sourceCount:%d", binding.TenantID, binding.ReferenceID, len(sources))
+			g.Log().Warningf(ctx, "TG Bot采集更新未匹配到采集源 tenantId:%d publishBotId:%d gatewayBotId:%d sourceCount:%d", binding.TenantID, publishBotID, binding.ReferenceID, len(sources))
 		}
 		if err := ingestBotCollectionSources(matchedSources, func(source botCollectionSource) error {
 			return collectorservice.Collector().IngestBotUpdate(ctx, collectorservice.BotContext{
