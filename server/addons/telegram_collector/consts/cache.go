@@ -29,6 +29,12 @@ func AccountTaskEmptyKey(accountID int64) string {
 	return AccountTaskEmptyPrefix + formatInt64(accountID)
 }
 
+// AccountTaskQueueKey 返回账号任务热队列的 Redis ZSET key。
+// PostgreSQL 仍保留任务事实，Redis 仅用于减少高频候选扫描。
+func AccountTaskQueueKey(accountID int64) string {
+	return "youban:tg:collector:account_task:" + formatInt64(accountID)
+}
+
 func formatInt64(value int64) string {
 	if value == 0 {
 		return "0"

@@ -28,6 +28,24 @@ func ZSetRemove(ctx context.Context, key string, member string) error {
 }
 
 // ZSetHead 读取有序集合的第一个成员；集合为空时返回空值。
+// ZSetRange 返回按分值排序的成员，用于读取账号或频道热队列的候选任务。
+func ZSetRange(ctx context.Context, key string, start, stop int) ([]string, error) {
+	client, err := RedisClient()
+	if err != nil {
+		return nil, err
+	}
+	value, err := client.Do(ctx, "ZRANGE", key, start, stop)
+	if err != nil || value == nil || value.IsNil() {
+		return nil, err
+	}
+	items := value.Array()
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		result = append(result, gvar.New(item).String())
+	}
+	return result, nil
+}
+
 func ZSetHead(ctx context.Context, key string) (string, error) {
 	client, err := RedisClient()
 	if err != nil {

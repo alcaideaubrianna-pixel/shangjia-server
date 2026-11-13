@@ -96,7 +96,37 @@ func (s *sAccountTasks) Submit(ctx context.Context, in *sysin.AccountTaskSubmit)
 		Scan(&row); err != nil {
 		return 0, gerror.Wrap(err, "读取Telegram账号任务失败")
 	}
+	// Redis 只维护可调度热索引，写入失败不影响 PostgreSQL 事实落库。
+	_ = indexAccountTask(ctx, row.Id, in.AccountID, in.MediaOwnerAccountID, in.Priority, now)
 	return row.Id, nil
+}
+
+// accountTaskQueueScore 将高优先级任务排在前面，同优先级按任务 ID 先进先出。
+func accountTaskQueueScore(priority, taskID int) float64 {
+	return float64(-priority)*1e12 + float64(taskID)
+}
+
+// indexAccountTask 将账号任务写入账号热队列；媒体任务同时写入媒体归属账号队列。
+func indexAccountTask(ctx context.Context, taskID, accountID, mediaOwnerAccountID int64, priority int, now *gtime.Time) error {
+	if !cache.Initialized() || taskID <= 0 {
+		return nil
+	}
+	score := accountTaskQueueScore(int(priority), int(taskID))
+	if err := cache.ZSetAdd(ctx, consts.AccountTaskQueueKey(accountID), score, strconv.FormatInt(taskID, 10)); err != nil {
+		return err
+	}
+	if mediaOwnerAccountID > 0 && mediaOwnerAccountID != accountID {
+		return cache.ZSetAdd(ctx, consts.AccountTaskQueueKey(mediaOwnerAccountID), score, strconv.FormatInt(taskID, 10))
+	}
+	return nil
+}
+
+// removeAccountTaskIndex 删除已完成任务的热索引，避免 Redis 队列长期堆积历史 ID。
+func removeAccountTaskIndex(ctx context.Context, taskID, accountID int64) error {
+	if !cache.Initialized() || taskID <= 0 || accountID <= 0 {
+		return nil
+	}
+	return cache.ZSetRemove(ctx, consts.AccountTaskQueueKey(accountID), strconv.FormatInt(taskID, 10))
 }
 
 func accountTaskCanReviveCompleted(taskType string) bool {
@@ -277,36 +307,47 @@ func (s *sAccountTasks) Claim(ctx context.Context, lease *sysin.AccountLease, li
 	columns := dao.TgCollectorAccountTask.Columns()
 	now := gtime.Now()
 	var candidates []*entity.TgCollectorAccountTask
-	// 将 account_id 与 media_owner_account_id 两条索引路径拆开，避免 OR
-	// 让 PostgreSQL 退化成大范围扫描。第二个分支排除 account_id 相同的
-	// 媒体任务，保持原 OR 条件的去重语义。
-	table := dao.TgCollectorAccountTask.Table()
-	query := `WITH candidates AS (
-		SELECT id,task_type,priority,next_run_at
-		FROM ` + table + `
-		WHERE account_id=? AND status IN (?,?)
-		  AND (next_run_at IS NULL OR next_run_at<=?)
-		  AND (lease_until IS NULL OR lease_until<?)
-		UNION ALL
-		SELECT id,task_type,priority,next_run_at
-		FROM ` + table + `
-		WHERE media_owner_account_id=? AND task_type='media_download' AND account_id<>?
-		  AND status IN (?,?)
-		  AND (next_run_at IS NULL OR next_run_at<=?)
-		  AND (lease_until IS NULL OR lease_until<?)
-	)
-	SELECT id,task_type FROM candidates
-	ORDER BY priority DESC,
-		CASE WHEN task_type='media_download' THEN 1 ELSE 0 END DESC,
-		next_run_at ASC NULLS FIRST,id ASC
-	LIMIT ?`
-	err := g.DB().GetScan(ctx, &candidates, query,
-		lease.AccountID, sysin.AccountTaskStatusPending, sysin.AccountTaskStatusFailedRetry, now, now,
-		lease.AccountID, lease.AccountID, sysin.AccountTaskStatusPending, sysin.AccountTaskStatusFailedRetry, now, now,
-		limit,
-	)
-	if err != nil {
-		return nil, gerror.Wrap(err, "读取待执行Telegram账号任务失败")
+	// 优先从 Redis 账号热队列读取候选 ID，避免每次按账号扫描大表。
+	if cache.Initialized() {
+		if ids, cacheErr := cache.ZSetRange(ctx, consts.AccountTaskQueueKey(lease.AccountID), 0, limit*4-1); cacheErr == nil {
+			for _, rawID := range ids {
+				id, parseErr := strconv.ParseInt(rawID, 10, 64)
+				if parseErr != nil || id <= 0 {
+					continue
+				}
+				var row entity.TgCollectorAccountTask
+				if readErr := dao.TgCollectorAccountTask.Ctx(ctx).WherePri(id).Scan(&row); readErr != nil || row.Id <= 0 {
+					continue
+				}
+				if (row.AccountId != lease.AccountID && (row.MediaOwnerAccountId != lease.AccountID || row.TaskType != sysin.AccountTaskTypeMediaDownload)) ||
+					(row.Status != sysin.AccountTaskStatusPending && row.Status != sysin.AccountTaskStatusFailedRetry) ||
+					(row.NextRunAt != nil && row.NextRunAt.After(now)) || (row.LeaseUntil != nil && row.LeaseUntil.After(now)) {
+					continue
+				}
+				candidates = append(candidates, &row)
+				if len(candidates) >= limit {
+					break
+				}
+			}
+		}
+	}
+	// Redis 丢失或尚未回填时回退 PostgreSQL，保证不丢任务；同时把候选补回热索引。
+	if len(candidates) == 0 {
+		table := dao.TgCollectorAccountTask.Table()
+		query := `WITH candidates AS (
+			SELECT id,task_type,priority,next_run_at FROM ` + table + ` WHERE account_id=? AND status IN (?,?) AND (next_run_at IS NULL OR next_run_at<=?) AND (lease_until IS NULL OR lease_until<?)
+			UNION ALL
+			SELECT id,task_type,priority,next_run_at FROM ` + table + ` WHERE media_owner_account_id=? AND task_type='media_download' AND account_id<>? AND status IN (?,?) AND (next_run_at IS NULL OR next_run_at<=?) AND (lease_until IS NULL OR lease_until<?)
+		)
+		SELECT id,task_type FROM candidates ORDER BY priority DESC, CASE WHEN task_type='media_download' THEN 1 ELSE 0 END DESC, next_run_at ASC NULLS FIRST,id ASC LIMIT ?`
+		if err := g.DB().GetScan(ctx, &candidates, query, lease.AccountID, sysin.AccountTaskStatusPending, sysin.AccountTaskStatusFailedRetry, now, now, lease.AccountID, lease.AccountID, sysin.AccountTaskStatusPending, sysin.AccountTaskStatusFailedRetry, now, now, limit); err != nil {
+			return nil, gerror.Wrap(err, "读取待执行Telegram账号任务失败")
+		}
+		for _, candidate := range candidates {
+			if candidate != nil {
+				_ = indexAccountTask(ctx, candidate.Id, candidate.AccountId, candidate.MediaOwnerAccountId, candidate.Priority, now)
+			}
+		}
 	}
 	if len(candidates) == 0 {
 		if cache.Initialized() {
@@ -381,6 +422,7 @@ func (s *sAccountTasks) Complete(ctx context.Context, taskID int64, lease *sysin
 	if affected == 0 {
 		return gerror.New("Telegram账号任务租约已失效，拒绝提交完成结果")
 	}
+	_ = removeAccountTaskIndex(ctx, taskID, lease.AccountID)
 	return nil
 }
 
