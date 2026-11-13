@@ -678,8 +678,14 @@ func (f *botCollectorFeature) HandleUpdate(ctx context.Context, bot gatewayservi
 		publishBotID := binding.ReferenceID
 		if strings.TrimSpace(bot.Token) != "" {
 			var publishBot struct{ ID int64 }
-			if err := g.DB().Model("hg_youban_publish_bot").Safe().Ctx(ctx).
-				Fields("id").Where("bot_token", bot.Token).Where("status", 1).WhereNull("deleted_at").Scan(&publishBot); err == nil && publishBot.ID > 0 {
+			// 管理后台 BOT 配置表是入口身份的权威来源，优先使用该表的 ID。
+			_ = g.DB().Model("hg_youban_bot_bot").Safe().Ctx(ctx).
+				Fields("id").Where("bot_token", bot.Token).Where("status", 1).WhereNull("deleted_at").Scan(&publishBot)
+			if publishBot.ID <= 0 {
+				_ = g.DB().Model("hg_youban_publish_bot").Safe().Ctx(ctx).
+					Fields("id").Where("bot_token", bot.Token).Where("status", 1).WhereNull("deleted_at").Scan(&publishBot)
+			}
+			if publishBot.ID > 0 {
 				publishBotID = publishBot.ID
 			}
 		}
