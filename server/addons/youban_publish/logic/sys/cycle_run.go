@@ -99,7 +99,7 @@ func (s *sSysPublish) supersedeOfflineCycleJobs(ctx context.Context, limit int) 
 	}
 	headTimeoutMinutes := cycleHeadTimeoutMinutes()
 	_, err := g.DB().Exec(ctx, `WITH candidates AS (
-		SELECT j.id FROM `+publishTgJobTable+` j
+		SELECT j.id,p.status AS profile_status,p.visibility AS profile_visibility,p.deleted_at AS profile_deleted_at FROM `+publishTgJobTable+` j
 		JOIN hg_content_profile p ON p.id=j.profile_id
 		WHERE (j.operation_no LIKE 'cycle_%' OR j.operation_no LIKE 'profile_cycle:%')
 		  AND j.status IN ('pending','failed_retry','unknown','sending','confirming')
@@ -107,9 +107,9 @@ func (s *sSysPublish) supersedeOfflineCycleJobs(ctx context.Context, limit int) 
 		       OR j.created_at < NOW() - (? * INTERVAL '1 minute'))
 		ORDER BY j.id LIMIT ?
 	)
-	UPDATE `+publishTgJobTable+` j SET status='superseded',dispatch_status=?,send_phase=CASE WHEN j.created_at < NOW() - (? * INTERVAL '1 minute') AND p.status=1 AND p.visibility=? AND p.deleted_at IS NULL THEN 'skipped_stale_cycle' ELSE 'skipped_offline_profile' END,next_retry_at=NULL,last_dispatch_error=CASE WHEN j.created_at < NOW() - (? * INTERVAL '1 minute') AND p.status=1 AND p.visibility=? AND p.deleted_at IS NULL THEN '循环任务等待超过15分钟，已跳过以释放频道队首' ELSE '资料已下架或不可公开，跳过循环翻新' END,updated_at=NOW()
-	FROM candidates c JOIN hg_content_profile p ON p.id=j.profile_id
-	WHERE j.id=c.id`, headTimeoutMinutes, consts.ContentVisibilityPublic, headTimeoutMinutes, consts.ContentVisibilityPublic, headTimeoutMinutes, consts.ContentVisibilityPublic, limit, tgDispatchStatusDone)
+	UPDATE `+publishTgJobTable+` j SET status='superseded',dispatch_status=?,send_phase=CASE WHEN j.created_at < NOW() - (? * INTERVAL '1 minute') AND c.profile_status=1 AND c.profile_visibility=? AND c.profile_deleted_at IS NULL THEN 'skipped_stale_cycle' ELSE 'skipped_offline_profile' END,next_retry_at=NULL,last_dispatch_error=CASE WHEN j.created_at < NOW() - (? * INTERVAL '1 minute') AND c.profile_status=1 AND c.profile_visibility=? AND c.profile_deleted_at IS NULL THEN '循环任务等待超过15分钟，已跳过以释放频道队首' ELSE '资料已下架或不可公开，跳过循环翻新' END,updated_at=NOW()
+	FROM candidates c
+	WHERE j.id=c.id`, consts.ContentVisibilityPublic, headTimeoutMinutes, tgDispatchStatusDone, headTimeoutMinutes, consts.ContentVisibilityPublic, headTimeoutMinutes, consts.ContentVisibilityPublic, limit)
 	if err != nil {
 		return gerror.Wrap(err, "收口下架循环任务失败")
 	}
