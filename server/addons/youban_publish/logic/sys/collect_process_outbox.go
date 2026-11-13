@@ -19,6 +19,7 @@ const collectProcessOutboxTable = "hg_youban_publish_collect_process_outbox"
 
 const collectProcessOutboxLease = 5 * time.Minute
 const collectProcessProcessingCap = 100
+const collectProcessOutboxMaxTerminalRetries = 12
 
 const (
 	// 规则队列默认每轮只领取少量任务，避免一次领取过多导致 processing 堆积。
@@ -145,6 +146,19 @@ func completeCollectProcessOutbox(ctx context.Context, payload collectProcessQue
 			terminal := event.Status == sysin.CollectEventStatusProcessed || event.Status == sysin.CollectEventStatusDispatched || event.Status == sysin.CollectEventStatusIgnored || event.Status == sysin.CollectEventStatusFailed
 			if !terminal && dispatchRow.IsEmpty() {
 				g.Log().Warningf(ctx, "采集Outbox完成但事件未进入终态 eventId:%d status:%s dispatchCount:%d sourceId:%d accountId:%d sourceChatId:%s", eventID, event.Status, dispatchCount, payload.SourceId, payload.AccountId, payload.SourceChatId)
+				var retryCount int
+				_ = g.DB().Model(collectProcessOutboxTable).Ctx(ctx).Fields("attempt_count").Where("event_id", eventID).Scan(&retryCount)
+				if retryCount >= collectProcessOutboxMaxTerminalRetries {
+					// 规则分发连续失败时必须落明确终态，禁止无限显示“等待定时重试”。
+					_, terminalErr := g.DB().Model(publishCollectEventTable).Ctx(ctx).Where("id", eventID).Data(g.Map{
+						"status": sysin.CollectEventStatusIgnored, "error_message": "rule_no_match: 规则分发连续重试仍未生成目标任务", "processed_at": gtime.Now(), "updated_at": gtime.Now(),
+					}).Update()
+					if terminalErr != nil {
+						g.Log().Warningf(ctx, "采集规则无匹配终态写入失败 eventId:%d err:%+v", eventID, terminalErr)
+					}
+					g.Log().Warningf(ctx, "采集规则分发超过重试上限，已落ignored终态 eventId:%d retryCount:%d sourceChatId:%s", eventID, retryCount, payload.SourceChatId)
+					return
+				}
 				// 处理函数提前返回但没有写入终态时，保留 Outbox 作为恢复入口，
 				// 避免 delivered 掩盖业务事件永久停在 media_ready/pending。
 				_, retryErr := g.DB().Model(collectProcessOutboxTable).Ctx(ctx).
