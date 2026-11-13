@@ -177,7 +177,7 @@ func (s *sSysPublish) queueMessageTemplateToChannelWithPriority(ctx context.Cont
 	if len(pushModes) > 0 && pushModes[0] != "" {
 		pushMode = pushModes[0]
 	}
-	job, err := s.createQueuedMessagePushJobWithPriority(ctx, template, channel, tenantId, accountId, botId, operationNo, priority, queueName, pushMode)
+	job, err := s.createMessagePublishJob(ctx, template, channel, tenantId, accountId, botId, operationNo, priority, queueName, tgDispatchStatusIdle, pushMode)
 	if err != nil {
 		result.Message = err.Error()
 		return result

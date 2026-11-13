@@ -2,7 +2,6 @@ package sys
 
 import (
 	"context"
-	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
@@ -14,19 +13,12 @@ func (s *sSysPublish) prepareProfileChannelJobTx(ctx context.Context, tx gdb.TX,
 	if err != nil || !allowed {
 		return 0, err
 	}
-	jobID, err := s.ensureTelegramProfileJobWithMetaTx(ctx, tx, source, channel, operationNo, meta)
-	if err != nil || jobID == 0 {
-		return jobID, err
-	}
-	if strings.TrimSpace(meta.InitialSendPhase) != "" {
-		if _, err := tx.Model(publishTgJobTable).Ctx(ctx).Where("id", jobID).Where("status", telegramJobStatusPending).Data(g.Map{"send_phase": strings.TrimSpace(meta.InitialSendPhase)}).Update(); err != nil {
-			return 0, err
-		}
-	}
-	if err := s.ensureTelegramJobOutboxTx(ctx, tx, jobID, 0); err != nil {
-		return 0, err
-	}
-	return jobID, nil
+	return s.createPublishJobTx(ctx, tx, publishJobCreateRequest{
+		Source:      source,
+		Channel:     channel,
+		OperationNo: operationNo,
+		Meta:        meta,
+	})
 }
 
 // recordProfileChannelPreparationFailureTx 保留失败频道的独立任务供用户查看，失败不得回滚其他频道或伪造成功。
