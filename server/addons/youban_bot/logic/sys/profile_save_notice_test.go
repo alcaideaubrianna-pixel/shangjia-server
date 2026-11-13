@@ -39,6 +39,11 @@ func (s *batchProfileCreateStub) BotProfileCreate(_ context.Context, in *pi.BotP
 	return &pi.ProfileSaveModel{Id: int64(900000 + s.calls), ProfileNo: fmt.Sprintf("B%05d", s.calls)}, nil
 }
 
+// BotProfileQueueMedia 在批量资料创建测试中只验证资料边界；媒体入队由发布模块集成测试覆盖。
+func (s *batchProfileCreateStub) BotProfileQueueMedia(_ context.Context, _ int64, _ int64, _ string, _ []*pi.MessageTemplateMediaInp, _ []*pi.MessageTemplateMediaInp, _ string) error {
+	return nil
+}
+
 func TestProfileVerificationReceivedText(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
