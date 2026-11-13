@@ -157,7 +157,8 @@ func (s *sSysPublish) recoverProfileMediaOperations(ctx context.Context) {
 	}
 	if err := g.DB().Model(profileMediaOperationTable+" o").Ctx(ctx).
 		Fields("p.profile_id").
-		InnerJoin(publishProfileStateTable+" p", "p.profile_no=o.profile_no AND p.tenant_id=o.tenant_id AND p.account_id=o.account_id AND p.deleted_at IS NULL").
+		InnerJoin(publishProfileStateTable+" p", "p.tenant_id=o.tenant_id AND p.account_id=o.account_id AND p.deleted_at IS NULL").
+		InnerJoin(dao.ContentProfile.Table()+" cp", "cp.id=p.profile_id AND cp.profile_no=o.profile_no AND cp.deleted_at IS NULL").
 		Where("o.status", "success").Where("p.publish_task_status", "waiting_media").
 		Where("o.updated_at < ?", time.Now().Add(-10*time.Second)).
 		OrderAsc("o.id").Limit(200).Scan(&completed); err != nil {
