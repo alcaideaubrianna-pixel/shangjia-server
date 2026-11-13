@@ -81,11 +81,34 @@ func (s *sSysPublish) RunChannelCycleScheduler(ctx context.Context) error {
 		{name: "扫描时间循环", run: s.runProfileCycleDueScan},
 		{name: "暂停长期未活跃免费循环", run: func(ctx context.Context) error { return s.pauseInactiveFreeChannelCycles(ctx) }},
 		{name: "恢复循环批次", run: func(ctx context.Context) error { return s.recoverChannelCycleRuns(ctx) }},
+		{name: "收口下架循环任务", run: func(ctx context.Context) error { return s.supersedeOfflineCycleJobs(ctx, 200) }},
 		{name: "核对循环补偿", run: func(ctx context.Context) error { return s.reconcileRecoveredChannelCycleRuns(ctx, 20) }},
 		{name: "收尾循环批次", run: func(ctx context.Context) error { return s.finalizeDispatchingChannelCycleRuns(ctx, 20) }},
 		{name: "恢复到期时间循环", run: func(ctx context.Context) error { return s.enqueueDueProfileCycleReschedules(ctx, 20) }},
 		{name: "恢复循环重算", run: func(ctx context.Context) error { return s.enqueuePendingProfileCycleReschedules(ctx, 200) }},
 	})
+}
+
+// supersedeOfflineCycleJobs 收口历史上已经生成但资料后来下架的循环任务。
+// 只处理未发送任务，保留已发送历史审计，避免下架资料继续占用频道队首。
+func (s *sSysPublish) supersedeOfflineCycleJobs(ctx context.Context, limit int) error {
+	if limit <= 0 || limit > 500 {
+		limit = 200
+	}
+	_, err := g.DB().Exec(ctx, `WITH candidates AS (
+		SELECT j.id FROM `+publishTgJobTable+` j
+		JOIN hg_content_profile p ON p.id=j.profile_id
+		WHERE j.operation_no LIKE 'cycle_%'
+		  AND j.status IN ('pending','failed_retry','unknown','sending','confirming')
+		  AND (p.status<>1 OR p.visibility<>? OR p.deleted_at IS NOT NULL)
+		ORDER BY j.id LIMIT ?
+	)
+	UPDATE `+publishTgJobTable+` j SET status='superseded',dispatch_status=?,send_phase='skipped_offline_profile',next_retry_at=NULL,last_dispatch_error='资料已下架或不可公开，跳过循环翻新',updated_at=NOW()
+	FROM candidates c WHERE j.id=c.id`, consts.ContentVisibilityPublic, limit, tgDispatchStatusDone)
+	if err != nil {
+		return gerror.Wrap(err, "收口下架循环任务失败")
+	}
+	return nil
 }
 
 // pauseInactiveFreeChannelCycles 在指定账户范围复用免费频道长期不活跃保护规则。
