@@ -43,6 +43,10 @@ const (
 	tgQueueNameCollectProcessPrefix               = "youban_publish_collect_process_"
 	tgQueueNameCollectProcessAccountPrefix        = "youban_publish_collect_account_realtime_"
 	tgQueueNameCollectProcessAccountHistoryPrefix = "youban_publish_collect_account_history_"
+	// BOT 采集没有协议号账户，按租户+采集来源分片，避免所有 account_id=0
+	// 事件进入同一个全局队列。
+	tgQueueNameCollectProcessSourceRealtimePrefix = "youban_publish_collect_source_realtime_"
+	tgQueueNameCollectProcessSourceRecoveryPrefix = "youban_publish_collect_source_recovery_"
 	tgQueueNameHistory                            = "youban_publish_history"
 	tgQueueNameProfileMaintenance                 = "youban_publish_profile_maintenance"
 	tgQueueNameDuplicateScan                      = "youban_publish_duplicate_scan"
@@ -85,12 +89,18 @@ const collectProcessQueueShards = 16
 // 采集处理按账户固定分片，确保一个账户的积压不能占满其他账户的采集消费者。
 const collectProcessAccountQueueShards = collectProcessQueueShards
 
+// BOT 来源队列和账户队列使用同样的分片数量，避免单个来源积压占满所有消费者。
+const collectProcessSourceQueueShards = collectProcessQueueShards
+
 const (
 	tgQueueNameCollectProcessRealtimeV2 = "youban_publish_collect_process_realtime_v2"
 	tgQueueNameCollectProcessRecoveryV2 = "youban_publish_collect_process_recovery_v2"
 )
 
 func collectProcessQueueName(payload collectProcessQueuePayload) string {
+	if payload.TenantId > 0 && payload.AccountId == 0 && payload.SourceId > 0 {
+		return collectProcessSourceQueueName(payload)
+	}
 	if payload.TenantId > 0 && payload.AccountId > 0 && (payload.EventId == 0 || payload.OutboxOwner != "") {
 		return collectProcessAccountQueueName(payload)
 	}
@@ -107,6 +117,29 @@ func collectProcessQueueName(payload collectProcessQueuePayload) string {
 	hash := fnv.New32a()
 	_, _ = hash.Write([]byte(fmt.Sprintf("%d:%d", payload.TenantId, payload.AccountId)))
 	return fmt.Sprintf("%s%02d", tgQueueNameCollectProcessPrefix, hash.Sum32()%collectProcessQueueShards)
+}
+
+// collectProcessSourceQueueName 为没有协议号账户的 BOT 采集任务生成稳定来源队列。
+// 只使用租户、来源和来源频道参与分片，事件 ID 不参与，保证同一来源的窗口任务顺序稳定。
+func collectProcessSourceQueueName(payload collectProcessQueuePayload) string {
+	hash := fnv.New32a()
+	_, _ = hash.Write([]byte(fmt.Sprintf("%d:%s", payload.TenantId, collectProcessPartition(payload))))
+	prefix := tgQueueNameCollectProcessSourceRealtimePrefix
+	if payload.History || payload.Recovery {
+		prefix = tgQueueNameCollectProcessSourceRecoveryPrefix
+	}
+	return fmt.Sprintf("%s%02d", prefix, hash.Sum32()%collectProcessSourceQueueShards)
+}
+
+func collectProcessSourceQueueNames() (queues []string) {
+	queues = make([]string, 0, collectProcessSourceQueueShards*2)
+	for shard := 0; shard < collectProcessSourceQueueShards; shard++ {
+		queues = append(queues,
+			fmt.Sprintf("%s%02d", tgQueueNameCollectProcessSourceRealtimePrefix, shard),
+			fmt.Sprintf("%s%02d", tgQueueNameCollectProcessSourceRecoveryPrefix, shard),
+		)
+	}
+	return queues
 }
 
 // collectProcessAccountQueueName 返回稳定的账户采集分片，不按消息或规则分片，保留同账户公平调度。
@@ -130,7 +163,7 @@ func collectProcessQueueNames() []string {
 }
 
 func collectProcessWorkerQueues() map[string]int {
-	queues := make(map[string]int, collectProcessAccountQueueShards*2+3)
+	queues := make(map[string]int, collectProcessAccountQueueShards*2+collectProcessSourceQueueShards*2+3)
 	for _, queue := range collectProcessQueueNames() {
 		queues[queue] = 1
 	}
@@ -139,6 +172,11 @@ func collectProcessWorkerQueues() map[string]int {
 	for shard := 0; shard < collectProcessAccountQueueShards; shard++ {
 		queues[fmt.Sprintf("%s%02d", tgQueueNameCollectProcessAccountPrefix, shard)] = 1
 		queues[fmt.Sprintf("%s%02d", tgQueueNameCollectProcessAccountHistoryPrefix, shard)] = 1
+	}
+	for shard := 0; shard < collectProcessSourceQueueShards; shard++ {
+		// 实时来源队列权重更高，历史/恢复队列保留独立低权重。
+		queues[fmt.Sprintf("%s%02d", tgQueueNameCollectProcessSourceRealtimePrefix, shard)] = 2
+		queues[fmt.Sprintf("%s%02d", tgQueueNameCollectProcessSourceRecoveryPrefix, shard)] = 1
 	}
 	return queues
 }
