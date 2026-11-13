@@ -609,6 +609,8 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 				WHEN j.channel_id > 0 THEN j.channel_id::text
 				ELSE 'chat:' || COALESCE(j.target_chat_id,'') END)
 				o.id,o.job_id,o.attempt_count,o.available_at,
+				` + telegramChannelScheduleRankSQL("j") + ` AS schedule_rank,
+				` + telegramJobEffectivePrioritySQL("j") + ` AS effective_priority,
 				CASE WHEN NULLIF(REPLACE(COALESCE(j.target_chat_id,''), '-100', ''),'') IS NOT NULL
 					THEN 'chat:' || REPLACE(COALESCE(j.target_chat_id,''), '-100', '')
 					WHEN j.channel_id > 0 THEN j.channel_id::text
@@ -620,7 +622,7 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 			AND j.status IN ('pending','failed_retry','unknown')
 			AND COALESCE(j.dispatch_status,'') IN ('','idle')
 			AND (j.next_retry_at IS NULL OR j.next_retry_at<=? OR (j.status='pending' AND COALESCE(j.dispatch_status,'')='idle'))
-		ORDER BY channel_key,o.available_at,o.id
+		ORDER BY channel_key,schedule_rank,effective_priority,o.available_at,o.id
 		)
 		SELECT id,job_id,attempt_count,available_at
 		FROM channel_heads

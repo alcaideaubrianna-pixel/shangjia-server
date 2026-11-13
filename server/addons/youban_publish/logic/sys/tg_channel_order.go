@@ -73,8 +73,14 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 			Where("j.tenant_id", job.TenantId).
 			Where("j.account_id", job.AccountId).
 			Where("j.status IN (?)", []string{telegramJobStatusPending, telegramJobStatusRetryWait, telegramJobStatusConfirming, telegramJobStatusSending}).
-			Where("(j.dispatch_status IN ('queued','processing') OR (j.status IN ('pending','failed_retry') AND COALESCE(j.last_dispatch_error,'') NOT LIKE '就绪通知或执行任务缺失%'))").
 			Where("j.created_at < ? OR (j.created_at = ? AND j.id < ?)", createdAt, createdAt, job.Id)
+		// 手动/交互任务可以越过尚未开始的循环、批次和历史任务，
+		// 但不能越过已经入队、发送中或结果未知的任务，避免破坏同频道顺序。
+		if telegramJobPriorityValue(job) <= tgJobPriorityInteractive {
+			fast = fast.Where("(j.dispatch_status IN ('queued','processing') OR j.status IN ('sending','confirming','unknown'))")
+		} else {
+			fast = fast.Where("(j.dispatch_status IN ('queued','processing') OR (j.status IN ('pending','failed_retry') AND COALESCE(j.last_dispatch_error,'') NOT LIKE '就绪通知或执行任务缺失%'))")
+		}
 		if strings.TrimSpace(job.TargetChatId) != "" {
 			fast = fast.WhereIn("j.target_chat_id", telegramChannelChatIDVariants(job.TargetChatId))
 		} else if job.ChannelId > 0 {
