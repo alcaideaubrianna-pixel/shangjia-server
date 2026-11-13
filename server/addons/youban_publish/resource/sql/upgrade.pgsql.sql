@@ -1386,8 +1386,7 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_bot_message_source_received" ON "hg_youban_p
 ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "profile_detail_view_enabled" smallint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_material_import_task" ADD COLUMN IF NOT EXISTS "channel_id_json" text;
 
--- Explicit maintenance only: keep live upgrade transactions free of historical cleanup.
--- A bound rule is source-local. Global rules are account-level delete/replace policies only.
+-- 保持已绑定来源规则不作为全局规则运行。
 UPDATE "hg_youban_publish_collect_rule" r
 SET "global_enabled" = 0, "updated_at" = CURRENT_TIMESTAMP
 WHERE r."global_enabled" = 1
@@ -1395,13 +1394,9 @@ WHERE r."global_enabled" = 1
     SELECT 1 FROM "hg_youban_publish_collect_source_rule" sr WHERE sr."rule_id" = r."id"
   );
 
-DELETE FROM "hg_youban_publish_collect_source_rule" sr
-USING "hg_youban_publish_collect_source_rule" keep
-WHERE sr."source_id" = keep."source_id"
-  AND (sr."sort", sr."id") > (keep."sort", keep."id");
-
-CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_collect_source_single_rule"
-  ON "hg_youban_publish_collect_source_rule" ("source_id");
+-- 多规则采集：同一来源可以命中多条规则。
+-- 仅保留 (source_id, rule_id) 唯一约束，禁止在升级时删除历史绑定。
+DROP INDEX IF EXISTS "uk_ybp_collect_source_single_rule";
 
 ALTER TABLE "hg_youban_publish_account" ADD COLUMN IF NOT EXISTS "last_active_at" timestamp DEFAULT NULL;
 UPDATE "hg_youban_publish_account" SET "last_active_at" = NOW() WHERE "last_active_at" IS NULL;

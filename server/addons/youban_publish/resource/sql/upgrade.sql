@@ -1015,14 +1015,10 @@ INNER JOIN `hg_youban_publish_collect_source_rule` sr ON sr.`rule_id` = r.`id`
 SET r.`global_enabled` = 0, r.`updated_at` = CURRENT_TIMESTAMP
 WHERE r.`global_enabled` = 1;
 
-DELETE sr
-FROM `hg_youban_publish_collect_source_rule` sr
-INNER JOIN `hg_youban_publish_collect_source_rule` keep
-  ON keep.`source_id` = sr.`source_id`
- AND (keep.`sort` < sr.`sort` OR (keep.`sort` = sr.`sort` AND keep.`id` < sr.`id`));
-
+-- 多规则采集：同一来源可以命中多条规则，仅保留来源+规则组合唯一。
+-- 不删除历史绑定，避免升级过程丢失规则分发关系。
 ALTER TABLE `hg_youban_publish_collect_source_rule`
-  ADD UNIQUE KEY `uk_ybp_collect_source_single_rule` (`source_id`);
+  DROP INDEX `uk_ybp_collect_source_single_rule`;
 ALTER TABLE `hg_youban_publish_collect_process_outbox` ADD COLUMN IF NOT EXISTS `worker_role` varchar(64) NOT NULL DEFAULT '';
 ALTER TABLE `hg_youban_publish_collect_process_outbox` ADD COLUMN IF NOT EXISTS `worker_instance_id` varchar(128) NOT NULL DEFAULT '';
 ALTER TABLE `hg_youban_publish_collect_process_outbox` ADD COLUMN IF NOT EXISTS `worker_revision` varchar(128) NOT NULL DEFAULT '';
