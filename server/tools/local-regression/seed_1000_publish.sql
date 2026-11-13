@@ -27,13 +27,17 @@ SELECT 999,999,p.profile_id,'image','display','local-display-'||p.profile_id||'-
 FROM local_seed_profiles p CROSS JOIN generate_series(1,2) m(n)
 WHERE p.profile_id%10<>0;
 INSERT INTO hg_youban_publish_profile_channel(tenant_id,account_id,profile_id,channel_id,is_manual,created_at,updated_at)
-SELECT 999,999,p.profile_id,c.channel_id,0,now(),now()
-FROM local_seed_profiles p CROSS JOIN generate_series(1,100) c(channel_id);
+SELECT 999,999,p.profile_id,c.id,0,now(),now()
+FROM local_seed_profiles p
+JOIN hg_youban_publish_channel c
+  ON c.tenant_id=999 AND c.channel_title LIKE 'local-hook-channel-%';
 INSERT INTO hg_youban_publish_tg_job(tenant_id,account_id,profile_id,channel_id,target_chat_id,operation_no,status,priority,dispatch_status,cycle_enabled,cycle_days,push_mode,profile_no_snapshot,title_snapshot,created_at,updated_at)
-SELECT 999,999,p.profile_id,c.channel_id,'-100LOCAL'||c.channel_id,
+SELECT 999,999,p.profile_id,c.id,c.target_chat_id,
        CASE WHEN p.profile_id%20=0 THEN 'manual:local:'||p.profile_id WHEN p.profile_id%3=0 THEN 'collect:local:'||p.profile_id ELSE 'profile_cycle:local:'||p.profile_id END,
        'pending',CASE WHEN p.profile_id%20=0 THEN 1 WHEN p.profile_id%3=0 THEN 10 ELSE 90 END,'idle',1,1,'bot',p.profile_no,p.title,now(),now()
-FROM local_seed_profiles p CROSS JOIN generate_series(1,100) c(channel_id);
+FROM local_seed_profiles p
+JOIN hg_youban_publish_channel c
+  ON c.tenant_id=999 AND c.channel_title LIKE 'local-hook-channel-%';
 INSERT INTO hg_youban_publish_tg_outbox(job_id,event_type,dedupe_key,status,available_at,created_at,updated_at)
 SELECT j.id,'telegram_job.publish','local-regression:'||j.id,'pending',now(),now(),now()
 FROM hg_youban_publish_tg_job j WHERE j.operation_no LIKE '%:local:%' AND j.created_at>=now()-interval '1 minute';
