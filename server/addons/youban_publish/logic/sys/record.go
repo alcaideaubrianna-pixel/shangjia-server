@@ -416,6 +416,9 @@ func (s *sSysPublish) enrichPublishRecordFullPushProgress(ctx context.Context, l
 		if item == nil || item.Action != "full_push" {
 			continue
 		}
+		// 进度由 ProgressText 统一渲染；历史记录里的 message 可能已经带过一次进度，
+		// 这里剥离旧前缀，避免页面出现“进度 x/y · 进度 x/y · 资料推送成功”。
+		item.Message = stripFullPushProgressPrefix(item.Message)
 		value := progress[fullPushOperationBatchKey(item.OperationNo)]
 		// Keep the progress as a snapshot of this record's completion.  The
 		// previous implementation reused the current batch total for every row,
@@ -433,6 +436,17 @@ func (s *sSysPublish) enrichPublishRecordFullPushProgress(ctx context.Context, l
 		}
 	}
 	return nil
+}
+
+func stripFullPushProgressPrefix(message string) string {
+	message = strings.TrimSpace(message)
+	if !strings.HasPrefix(message, "进度 ") {
+		return message
+	}
+	if index := strings.Index(message, " · "); index >= 0 {
+		return strings.TrimSpace(message[index+3:])
+	}
+	return message
 }
 
 func (s *sSysPublish) fullPushRecordProgressSnapshot(ctx context.Context, batchNo string, recordID int64, createdAt *gtime.Time) (int, error) {
