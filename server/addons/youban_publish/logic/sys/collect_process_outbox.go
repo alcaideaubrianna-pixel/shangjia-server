@@ -176,7 +176,21 @@ func (s *sSysPublish) dispatchDueCollectProcessOutbox(ctx context.Context, limit
 		}
 		if err := sourceModel.Fields("source_id").Where("status", status).WhereLTE(dueColumn, now).
 			Where("source_id > 0").Distinct().OrderAsc("source_id").Limit(min(32, count)).Scan(&sources); err != nil {
+			g.Log().Warning(ctx, "采集Outbox来源分片读取失败", g.Map{"tenantId": func() int64 {
+				if len(scopes) > 0 {
+					return scopes[0].TenantID
+				}
+				return 0
+			}(), "accountId": func() int64 {
+				if len(scopes) > 0 {
+					return scopes[0].AccountID
+				}
+				return 0
+			}(), "status": status, "error": err.Error()})
 			return nil, err
+		}
+		if len(scopes) > 0 && scopes[0].AccountID == 615 {
+			g.Log().Info(ctx, "采集Outbox来源分片读取完成", g.Map{"tenantId": scopes[0].TenantID, "accountId": scopes[0].AccountID, "status": status, "sourceCount": len(sources), "limit": count})
 		}
 		if len(sources) <= 1 {
 			return load(status, dueColumn, count, condition, args...)
@@ -274,6 +288,13 @@ func (s *sSysPublish) dispatchDueCollectProcessOutbox(ctx context.Context, limit
 			SourceId: row["source_id"].Int64(), SourceChatId: row["source_chat_id"].String(),
 		}
 		queued, queueErr := s.enqueueCollectProcessTaskWithOutbox(ctx, payload, 0, false, false)
+		if row["account_id"].Int64() == 615 {
+			queueError := ""
+			if queueErr != nil {
+				queueError = queueErr.Error()
+			}
+			g.Log().Info(ctx, "采集Outbox入队结果", g.Map{"outboxId": row["id"].Int64(), "eventId": payload.EventId, "tenantId": payload.TenantId, "accountId": payload.AccountId, "sourceId": payload.SourceId, "queued": queued, "error": queueError, "queue": collectProcessQueueName(payload)})
+		}
 		if queueErr == nil && queued {
 			// Keep the row leased until the worker marks it delivered. Updating it
 			// back to pending here can overwrite a fast worker's delivered state
