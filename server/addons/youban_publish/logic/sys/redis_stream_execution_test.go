@@ -115,7 +115,9 @@ func TestUnknownSendOnlyBlocksOwnChannelLocalPostgres(t *testing.T) {
 	defer cancel()
 	rollback := errors.New("rollback unknown channel fixture")
 	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		if _, err := tx.Exec("INSERT INTO hg_youban_publish_tg_job(tenant_id,account_id,channel_id,target_chat_id,operation_no,status,dispatch_status,priority,send_phase,created_at) VALUES(999,999,0,'-100999999981','collect:local:unknown','unknown','processing',10,'display_sending',now())"); err != nil {
+		// 前序任务故意使用不同账户，验证同一 tenant + target_chat_id
+		// 仍然共享频道顺序，不会被 account_id 条件错误过滤。
+		if _, err := tx.Exec("INSERT INTO hg_youban_publish_tg_job(tenant_id,account_id,channel_id,target_chat_id,operation_no,status,dispatch_status,priority,send_phase,created_at) VALUES(999,998,0,'-100999999981','collect:local:unknown','unknown','processing',10,'display_sending',now())"); err != nil {
 			return err
 		}
 		id, err := tx.GetValue("INSERT INTO hg_youban_publish_tg_job(tenant_id,account_id,channel_id,target_chat_id,operation_no,status,dispatch_status,priority,created_at) VALUES(999,999,0,'-100999999981','profile:local:unknown','pending','idle',1,now()) RETURNING id")

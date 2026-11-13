@@ -86,9 +86,14 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 			fast = fast.Where("(j.dispatch_status IN ('queued','processing') OR (j.status IN ('pending','failed_retry') AND COALESCE(j.last_dispatch_error,'') NOT LIKE '就绪通知或执行任务缺失%'))")
 		}
 		if strings.TrimSpace(job.TargetChatId) != "" {
+			// target_chat_id 是真实 Telegram 目标的串行边界。即使两个
+			// 采集账户不同，只要租户和目标频道相同，也必须共享同一个队首。
 			fast = fast.WhereIn("j.target_chat_id", telegramChannelChatIDVariants(job.TargetChatId))
 		} else if job.ChannelId > 0 {
-			fast = fast.Where("j.channel_id", job.ChannelId)
+			// 没有目标 chat_id 时才退回内部频道和账户边界，避免不同
+			// 账户恰好复用内部 channel_id 时互相阻塞。
+			fast = fast.Where("j.channel_id", job.ChannelId).
+				Where("j.account_id", job.AccountId)
 		}
 		earlier, err := fast.Fields("j.id,j.created_at,j.priority,j.status,j.dispatch_status,j.operation_no").OrderAsc("j.created_at").OrderAsc("j.id").Limit(1).One()
 		if err != nil {
