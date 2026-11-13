@@ -352,7 +352,10 @@ func (s *sSysPublish) telegramChannelHasDispatchCapacity(ctx context.Context, jo
 }
 
 func (s *sSysPublish) postponeTelegramJobForChannelOrder(ctx context.Context, job telegramJobRecord) error {
-	retryDelay := telegramChannelDispatchRetryDelay(job.DispatchCount)
+	// 前序任务等待不是异常重试。使用固定短延迟，避免同频道正常串行发送
+	// 因历史 dispatch_count 被放大到 30 秒，造成资料之间出现长时间空洞。
+	// 锁竞争和 Redis/数据库错误仍使用独立的指数退避策略。
+	retryDelay := telegramChannelOrderRetryDelay()
 	nextRetryAt := gtime.Now().Add(retryDelay)
 	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id", job.Id).
@@ -374,6 +377,12 @@ func (s *sSysPublish) postponeTelegramJobForChannelOrder(ctx context.Context, jo
 		return gerror.Wrap(err, "延后TG频道顺序任务失败")
 	}
 	return s.rearmTelegramJobOutbox(ctx, job.Id, retryDelay)
+}
+
+// telegramChannelOrderRetryDelay 只用于等待同频道前序任务完成。
+// 前序任务一旦完成，完成回调会立即唤醒下一条；定时重试仅作为兜底。
+func telegramChannelOrderRetryDelay() time.Duration {
+	return time.Second
 }
 
 func (s *sSysPublish) postponeTelegramJobForCollectPushPause(ctx context.Context, job telegramJobRecord) error {

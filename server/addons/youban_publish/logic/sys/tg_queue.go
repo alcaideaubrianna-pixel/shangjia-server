@@ -947,6 +947,15 @@ func (s *sSysPublish) enqueueTelegramTaskWithQueue(ctx context.Context, taskType
 	// 不能把冲突当成成功，否则频道队首会永久 pending；使用唯一兜底 ID 重入，
 	// 执行端仍以 job 状态和频道租约幂等校验，避免重复发送。
 	if errors.Is(err, asynq.ErrTaskIDConflict) && taskType == tgTaskTypePublish {
+		// 稳定 ID 已被 Redis 中的旧任务占用时，先清除数据库里的旧引用。
+		// 否则恢复器会反复检查同一个失效 ID，任务虽然使用 fallback 入队，
+		// 但数据库仍看起来像旧任务未恢复，导致频道继续延迟重入。
+		_, clearErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+			Where("id", jobId).Where("asynq_task_id", fmt.Sprintf("tg-publish-job-%d", jobId)).
+			Data(g.Map{"asynq_task_id": "", "updated_at": time.Now()}).Update()
+		if clearErr != nil {
+			g.Log().Warningf(ctx, "清理TG任务稳定TaskID引用失败 jobId:%d err:%+v", jobId, clearErr)
+		}
 		fallbackTaskID := fmt.Sprintf("tg-publish-job-%d-fallback-%d", jobId, time.Now().UnixNano())
 		fallbackOptions := []asynq.Option{
 			asynq.Queue(queueName),
