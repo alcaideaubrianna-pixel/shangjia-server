@@ -2,6 +2,33 @@
 -- 导入到本地 youban_tgfake_test 后，由真实 collector/collect-process/media/publish 角色处理。
 BEGIN;
 
+-- 来源频道及 BOT 关系必须存在；真实处理会先校验频道快照，缺失时事件会停在 pending。
+INSERT INTO hg_youban_publish_collect_channel
+(id,tenant_id,telegram_chat_id,chat_type,title,status,created_at,updated_at)
+VALUES
+(900087,999,'-1003954550954','supergroup','本地多规则回放来源','active',NOW(),NOW())
+ON CONFLICT (id) DO UPDATE SET tenant_id=EXCLUDED.tenant_id,
+  telegram_chat_id=EXCLUDED.telegram_chat_id,status='active',updated_at=NOW();
+
+INSERT INTO hg_youban_publish_collect_bot_channel
+(tenant_id,bot_id,channel_id,status,bot_role,first_seen_at,last_seen_at,created_at,updated_at)
+VALUES
+(999,1,900087,'active','collector',NOW(),NOW(),NOW(),NOW())
+ON CONFLICT (tenant_id,bot_id,channel_id) DO UPDATE SET status='active',
+  removed_at=NULL,last_seen_at=NOW(),updated_at=NOW();
+
+INSERT INTO hg_youban_publish_collect_account_channel
+(tenant_id,account_id,channel_id,source_id,collect_enabled,status,approval_status,approved_at,created_at,updated_at)
+VALUES
+(999,0,900087,900087,1,'active','approved',NOW(),NOW(),NOW())
+ON CONFLICT (tenant_id,account_id,channel_id,source_id) DO UPDATE SET collect_enabled=1,
+  status='active',approval_status='approved',approved_at=NOW(),updated_at=NOW();
+
+UPDATE hg_youban_publish_collect_source
+SET channel_id=900087, account_id=0, collect_enabled=1, status=1, channel_blacklisted=0,
+    updated_at=NOW()
+WHERE id=900087;
+
 -- 两条规则共享一个 BOT 来源，但分别绑定不同目标频道。
 INSERT INTO hg_youban_publish_collect_rule
 (id,tenant_id,account_id,name,global_enabled,review_enabled,dedupe_enabled,dedupe_days,full_match_enabled,block_link,block_username,block_plain_text,status,created_at,updated_at)
