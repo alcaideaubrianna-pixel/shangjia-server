@@ -14,6 +14,8 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/hibiken/asynq"
+
+	publishconsts "hotgo/addons/youban_publish/consts"
 )
 
 const (
@@ -129,6 +131,19 @@ func collectProcessSourceQueueName(payload collectProcessQueuePayload) string {
 		prefix = tgQueueNameCollectProcessSourceRecoveryPrefix
 	}
 	return fmt.Sprintf("%s%02d", prefix, hash.Sum32()%collectProcessSourceQueueShards)
+}
+
+// collectProcessRuleQueueKey 返回规则级逻辑队列键。
+// 规则队列只作为公平调度、限流和观测维度，不直接创建一个 Asynq 物理队列，
+// 避免规则数量增长后导致 Redis 队列和 Worker 配置线性膨胀。
+func collectProcessRuleQueueKey(payload collectProcessQueuePayload) string {
+	if payload.RuleQueueKey != "" {
+		return payload.RuleQueueKey
+	}
+	if payload.RuleId > 0 {
+		return fmt.Sprintf("%s%d:rule:%d", publishconsts.CollectProcessRuleQueueKeyPrefix, payload.TenantId, payload.RuleId)
+	}
+	return fmt.Sprintf("%s%d:source:%s", publishconsts.CollectProcessRuleQueueKeyPrefix, payload.TenantId, collectProcessPartition(payload))
 }
 
 func collectProcessSourceQueueNames() (queues []string) {

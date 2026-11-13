@@ -27,3 +27,36 @@ func TestCollectProcessKeysPartitionBySourceChat(t *testing.T) {
 		t.Fatal("different chats under one source must use different throttle partitions")
 	}
 }
+
+func TestCollectProcessRuleQueueKeyIsTenantScoped(t *testing.T) {
+	first := collectProcessRuleQueueKey(collectProcessQueuePayload{TenantId: 2, RuleId: 9, SourceId: 4})
+	same := collectProcessRuleQueueKey(collectProcessQueuePayload{TenantId: 2, RuleId: 9, SourceId: 8})
+	otherTenant := collectProcessRuleQueueKey(collectProcessQueuePayload{TenantId: 3, RuleId: 9, SourceId: 4})
+	if first != same {
+		t.Fatalf("same tenant and rule must share logical queue: %s %s", first, same)
+	}
+	if first == otherTenant {
+		t.Fatalf("different tenants must not share logical queue: %s", first)
+	}
+}
+
+func TestCollectProcessRuleQueueKeyFallsBackToSourcePartition(t *testing.T) {
+	first := collectProcessRuleQueueKey(collectProcessQueuePayload{TenantId: 2, SourceId: 4, SourceChatId: "-1003981090528"})
+	sameChat := collectProcessRuleQueueKey(collectProcessQueuePayload{TenantId: 2, SourceId: 4, SourceChatId: "3981090528"})
+	otherChat := collectProcessRuleQueueKey(collectProcessQueuePayload{TenantId: 2, SourceId: 4, SourceChatId: "3981090529"})
+	if first != sameChat {
+		t.Fatalf("equivalent Telegram chat IDs must share source fallback queue: %s %s", first, sameChat)
+	}
+	if first == otherChat {
+		t.Fatalf("different source chats must not share source fallback queue: %s", first)
+	}
+}
+
+func TestCollectProcessDispatchBatchSizeIsBounded(t *testing.T) {
+	if got := normalizeCollectProcessDispatchBatchSize(0); got != collectProcessDispatchBatchDefault {
+		t.Fatalf("unexpected default dispatch batch size: %d", got)
+	}
+	if got := normalizeCollectProcessDispatchBatchSize(1000); got != collectProcessDispatchBatchMaximum {
+		t.Fatalf("dispatch batch size must be bounded: %d", got)
+	}
+}

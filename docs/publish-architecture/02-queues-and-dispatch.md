@@ -8,9 +8,24 @@
 | 删除 | `delete:{tenant}:{channel}` | 删除消息，与发布发送独立 |
 | 实时采集 | `collect:realtime:{tenant}:{source}` | BOT/协议号实时事件 |
 | 历史采集 | `collect:history:{account}` | 历史拉取，低于实时优先级 |
-| 规则分发 | `collect:rule:{tenant}:{source}` | 规则拆分和资料投影 |
+| 规则分发 | 逻辑键 `collect:rule:{tenant}:{rule}`，物理上复用有限 Asynq 分片 | 规则拆分和资料投影 |
 
 Redis 使用 ZSET 保存待处理成员，分数为 `priority + sequence`。Outbox 是可靠回填入口。入队、终态、租约回收都必须幂等。
+
+规则队列分为两层：
+
+1. 逻辑层以 `tenant_id + rule_id` 标识公平性、限流和观测维度；如果任务尚未解析到规则，则回退为 `tenant_id + source_id + source_chat_id`，保证 BOT、协议号和历史任务都能进入同一套调度模型。
+2. 物理层继续使用有限数量的 Redis/Asynq 分片和共享 Worker Pool。不能为每个规则创建一个真实 Asynq 队列，否则规则数增长会带来队列注册、轮询和监控开销，反而拖慢调度。
+
+采集处理的安全默认值如下，可通过 GoFrame 配置覆盖：
+
+| 配置 | 默认值 | 上限 | 作用 |
+|---|---:|---:|---|
+| `youbanPublish.collect.processDispatchBatchSize` | 10 | 100 | Outbox 每轮领取数量 |
+| `youbanPublish.collect.ruleConcurrency` | 2 | 8 | 单规则逻辑队列在单个 Worker 实例内的并发 |
+| `youbanPublish.queue.backgroundConcurrency` | 4 | 由 Worker 配置控制 | 所有采集处理物理队列共享的总并发 |
+
+因此，数据库压力上升时优先降低 `processDispatchBatchSize` 或 `backgroundConcurrency`；单个规则异常时降低 `ruleConcurrency`，不会把其他规则全部停住。
 
 ## 调度规则
 

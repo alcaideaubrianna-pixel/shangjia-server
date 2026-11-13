@@ -37,6 +37,7 @@
 - [ ] 线上检查所有新增索引 `indisvalid=true AND indisready=true`。
 - [ ] 将历史 `g.Map` 写库和手动时间字段逐模块迁移到 DO/DAO。
 - [ ] 完成删除队列独立 Worker 的隔离和失败退避验收。
+- [ ] 规则逻辑队列完成 PG/Redis/TG Fake 回放验收：每租户+规则隔离、默认批次 10、规则并发 ENV 生效、规则异常不阻塞其他规则。
 
 ## 完成标准
 

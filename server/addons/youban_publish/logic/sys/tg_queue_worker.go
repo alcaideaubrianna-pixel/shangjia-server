@@ -7,6 +7,7 @@ import (
 	"errors"
 	publishconsts "hotgo/addons/youban_publish/consts"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -25,6 +26,23 @@ func telegramCleanupWorkerQueues() map[string]int {
 		channelDispatchQueueDeleteManual:  100,
 		channelDispatchQueueDeleteKeyword: 10,
 		channelDispatchQueueDeleteCycle:   1,
+	}
+}
+
+// collectProcessRuleLimiters 为每个规则逻辑队列维护本实例内的并发闸门。
+// Asynq 负责跨实例的物理队列消费，本闸门负责单规则在当前 Worker 实例内的公平性；
+// 全局上限仍由 youbanPublish.queue.backgroundConcurrency 控制。
+var collectProcessRuleLimiters sync.Map
+
+func acquireCollectProcessRuleSlot(ctx context.Context, payload collectProcessQueuePayload) (func(), error) {
+	key := collectProcessRuleQueueKey(payload)
+	value, _ := collectProcessRuleLimiters.LoadOrStore(key, make(chan struct{}, collectProcessRuleConcurrency(ctx)))
+	limiter := value.(chan struct{})
+	select {
+	case limiter <- struct{}{}:
+		return func() { <-limiter }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
 }
 
@@ -764,12 +782,18 @@ func (s *sSysPublish) handleCollectProcessTask(ctx context.Context, task *asynq.
 	if err != nil {
 		return err
 	}
+	releaseRuleSlot, err := acquireCollectProcessRuleSlot(ctx, payload)
+	if err != nil {
+		return err
+	}
+	defer releaseRuleSlot()
 	ctx = s.collectProgressContext(ctx, payload.EventId, 0)
 	identity := currentCollectWorkerIdentity(ctx)
 	g.Log().Info(ctx, "采集处理任务开始", g.Map{
 		"eventId": payload.EventId, "tenantId": payload.TenantId, "accountId": payload.AccountId,
-		"sourceId": payload.SourceId, "outboxOwner": payload.OutboxOwner, "recovery": payload.Recovery,
-		"workerRole": identity.Role, "workerInstanceId": identity.InstanceID,
+		"sourceId": payload.SourceId, "ruleId": payload.RuleId, "ruleQueueKey": collectProcessRuleQueueKey(payload),
+		"outboxOwner": payload.OutboxOwner, "recovery": payload.Recovery,
+		"ruleConcurrency": collectProcessRuleConcurrency(ctx), "workerRole": identity.Role, "workerInstanceId": identity.InstanceID,
 		"workerRevision": identity.Revision, "workerImageDigest": identity.ImageDigest,
 	})
 	if payload.EventId > 0 {
@@ -786,11 +810,16 @@ func (s *sSysPublish) handleCollectProcessTask(ctx context.Context, task *asynq.
 	}
 	defer unlock()
 	if payload.OutboxOwner != "" {
-		current, readErr := g.DB().Model(collectProcessOutboxTable).Ctx(ctx).Where("event_id", payload.EventId).Where("status", "processing").Where("lease_owner", payload.OutboxOwner).Count()
+		// event_id 有唯一索引，只读取一条主键即可判断租约是否仍属于当前任务，
+		// 避免实时路径对 Outbox 执行 COUNT 聚合。
+		current, readErr := g.DB().Model(collectProcessOutboxTable).Ctx(ctx).
+			Fields("id").Where("event_id", payload.EventId).
+			Where("status", "processing").Where("lease_owner", payload.OutboxOwner).
+			Limit(1).One()
 		if readErr != nil {
 			return readErr
 		}
-		if current == 0 {
+		if current.IsEmpty() {
 			return nil
 		} // Superseded by a newer durable schedule.
 	}

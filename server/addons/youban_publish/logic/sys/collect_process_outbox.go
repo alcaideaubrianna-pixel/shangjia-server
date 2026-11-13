@@ -20,6 +20,43 @@ const collectProcessOutboxTable = "hg_youban_publish_collect_process_outbox"
 const collectProcessOutboxLease = 5 * time.Minute
 const collectProcessProcessingCap = 100
 
+const (
+	// 规则队列默认每轮只领取少量任务，避免一次领取过多导致 processing 堆积。
+	collectProcessDispatchBatchDefault   = 10
+	collectProcessDispatchBatchMaximum   = 100
+	collectProcessRuleConcurrencyDefault = 2
+	collectProcessRuleConcurrencyMaximum = 8
+)
+
+// collectProcessDispatchBatchSize 返回采集规则队列每轮领取上限。
+// 通过配置限制数据库读取和 Worker 投递压力，实时/历史仍由调用方分别配额。
+func collectProcessDispatchBatchSize(ctx context.Context) int {
+	return normalizeCollectProcessDispatchBatchSize(g.Cfg().MustGet(ctx, "youbanPublish.collect.processDispatchBatchSize", collectProcessDispatchBatchDefault).Int())
+}
+
+// normalizeCollectProcessDispatchBatchSize 限制单轮 Outbox 领取数量，避免大批量任务挤占数据库连接。
+func normalizeCollectProcessDispatchBatchSize(value int) int {
+	if value <= 0 {
+		return collectProcessDispatchBatchDefault
+	}
+	if value > collectProcessDispatchBatchMaximum {
+		return collectProcessDispatchBatchMaximum
+	}
+	return value
+}
+
+// collectProcessRuleConcurrency 返回单个租户规则逻辑队列的并发上限。
+func collectProcessRuleConcurrency(ctx context.Context) int {
+	value := g.Cfg().MustGet(ctx, "youbanPublish.collect.ruleConcurrency", collectProcessRuleConcurrencyDefault).Int()
+	if value < 1 {
+		return 1
+	}
+	if value > collectProcessRuleConcurrencyMaximum {
+		return collectProcessRuleConcurrencyMaximum
+	}
+	return value
+}
+
 func collectProcessOutboxRecoveryBatchSize(ctx context.Context) int {
 	batchSize := g.Cfg().MustGet(ctx, "youbanPublish.collect.processOutboxRecoveryBatchSize", 5000).Int()
 	if batchSize < 100 {
@@ -96,10 +133,17 @@ func completeCollectProcessOutbox(ctx context.Context, payload collectProcessQue
 		Status string `json:"status"`
 	}
 	if err := g.DB().Model(publishCollectEventTable).Ctx(ctx).Fields("status").Where("id", eventID).Scan(&event); err == nil {
-		dispatchCount, countErr := g.DB().Model(publishCollectDispatchTable).Ctx(ctx).Where("event_id", eventID).Count()
+		// event_id 有索引，读取一条记录即可判断是否已创建分发任务，
+		// 避免每个实时事件结束时执行 COUNT 聚合。
+		dispatchRow, countErr := g.DB().Model(publishCollectDispatchTable).Ctx(ctx).
+			Fields("id").Where("event_id", eventID).Limit(1).One()
 		if countErr == nil {
+			dispatchCount := 0
+			if !dispatchRow.IsEmpty() {
+				dispatchCount = 1
+			}
 			terminal := event.Status == sysin.CollectEventStatusProcessed || event.Status == sysin.CollectEventStatusDispatched || event.Status == sysin.CollectEventStatusIgnored || event.Status == sysin.CollectEventStatusFailed
-			if !terminal && dispatchCount == 0 {
+			if !terminal && dispatchRow.IsEmpty() {
 				g.Log().Warningf(ctx, "采集Outbox完成但事件未进入终态 eventId:%d status:%s dispatchCount:%d sourceId:%d accountId:%d sourceChatId:%s", eventID, event.Status, dispatchCount, payload.SourceId, payload.AccountId, payload.SourceChatId)
 				// 处理函数提前返回但没有写入终态时，保留 Outbox 作为恢复入口，
 				// 避免 delivered 掩盖业务事件永久停在 media_ready/pending。
@@ -133,8 +177,10 @@ func completeCollectProcessOutbox(ctx context.Context, payload collectProcessQue
 }
 
 func (s *sSysPublish) dispatchDueCollectProcessOutbox(ctx context.Context, limit int, scopes ...publishAccountScope) error {
+	// 外部调用方可以传入更大的批次，但最终由规则级配置统一限流。
+	limit = min(limit, collectProcessDispatchBatchSize(ctx))
 	if limit <= 0 {
-		limit = 500
+		limit = collectProcessDispatchBatchSize(ctx)
 	}
 	now := gtime.Now()
 	// 账户已有大量处理中任务时暂停继续领取，避免 Dispatcher 速度超过
@@ -319,6 +365,13 @@ func (s *sSysPublish) dispatchDueCollectProcessOutbox(ctx context.Context, limit
 			g.Log().Info(ctx, "采集Outbox入队结果", g.Map{"outboxId": row["id"].Int64(), "eventId": payload.EventId, "tenantId": payload.TenantId, "accountId": payload.AccountId, "sourceId": payload.SourceId, "queued": queued, "error": queueError, "queue": collectProcessQueueName(payload)})
 		}
 		if queueErr == nil && queued {
+			g.Log().Debug(ctx, "采集规则逻辑队列已入队", g.Map{
+				"stage": "collect.rule_queue.enqueued", "outboxId": row["id"].Int64(),
+				"eventId": payload.EventId, "tenantId": payload.TenantId, "accountId": payload.AccountId,
+				"sourceId": payload.SourceId, "ruleId": payload.RuleId,
+				"ruleQueueKey": collectProcessRuleQueueKey(payload), "batchSize": collectProcessDispatchBatchSize(ctx),
+				"history": payload.History, "recovery": payload.Recovery,
+			})
 			// Keep the row leased until the worker marks it delivered. Updating it
 			// back to pending here can overwrite a fast worker's delivered state
 			// and cause a duplicate recovery dispatch.

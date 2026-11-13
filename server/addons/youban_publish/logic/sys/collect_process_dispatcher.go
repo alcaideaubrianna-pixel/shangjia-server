@@ -50,8 +50,9 @@ func (s *sSysPublish) runCollectProcessDispatcher(ctx context.Context) {
 		}
 		err := error(nil)
 		// 没有账户分片时不再回退到全局扫描；无归属历史任务由独立恢复器处理。
+		batchSize := collectProcessDispatchBatchSize(cycleCtx)
 		for _, scope := range scopes {
-			if scopeErr := s.dispatchDueCollectProcessOutbox(cycleCtx, 200, scope); scopeErr != nil && err == nil {
+			if scopeErr := s.dispatchDueCollectProcessOutbox(cycleCtx, batchSize, scope); scopeErr != nil && err == nil {
 				err = scopeErr
 			}
 		}

@@ -47,6 +47,8 @@ type collectProcessQueuePayload struct {
 	SourceId     int64  `json:"sourceId"`
 	SourceChatId string `json:"sourceChatId,omitempty"`
 	TenantId     int64  `json:"tenantId"`
+	RuleId       int64  `json:"ruleId,omitempty"`
+	RuleQueueKey string `json:"ruleQueueKey,omitempty"`
 	OutboxOwner  string `json:"outboxOwner,omitempty"`
 	Recovery     bool   `json:"recovery,omitempty"`
 }
@@ -264,6 +266,8 @@ func collectProcessTaskBody(payload collectProcessQueuePayload) ([]byte, error) 
 		EventId:      payload.EventId,
 		SourceId:     payload.SourceId,
 		SourceChatId: payload.SourceChatId,
+		RuleId:       payload.RuleId,
+		RuleQueueKey: collectProcessRuleQueueKey(payload),
 		OutboxOwner:  payload.OutboxOwner,
 		Recovery:     payload.Recovery,
 	})
