@@ -11,9 +11,9 @@ import (
 )
 
 func (s *sSysPublish) runTelegramOutboxDispatcher(ctx context.Context) {
-	// 手动/BOT 上架需要在提交后尽快进入发送队列；持久化 Outbox
-	// 仍负责崩溃恢复，因此将兜底轮询缩短到 200ms，避免用户等待整秒。
-	ticker := time.NewTicker(200 * time.Millisecond)
+	// 手动/BOT 上架通过事件立即唤醒；定时器只负责进程重启、Redis
+	// 抖动等异常后的持久化兜底，降低无效轮询对数据库的压力。
+	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	for {
 		s.runTelegramOutboxPass(ctx)
