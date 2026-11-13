@@ -655,12 +655,19 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 	}
 	// 每个账户本轮最多占用固定频道配额，避免大账户耗尽 dispatcher。
 	accountQuota := max(1, limit/8)
-	accountSelected := make(map[int64]int)
+	// 配额按租户和账户联合分片；account_id=0 是 BOT 采集的合法归属，
+	// 不能让不同租户的 BOT 任务共享同一个限额。
+	type accountShard struct {
+		tenantID  int64
+		accountID int64
+	}
+	accountSelected := make(map[accountShard]int)
 	for _, candidate := range candidates {
-		if accountSelected[candidate.AccountId] >= accountQuota {
+		shard := accountShard{tenantID: candidate.TenantId, accountID: candidate.AccountId}
+		if accountSelected[shard] >= accountQuota {
 			continue
 		}
-		accountSelected[candidate.AccountId]++
+		accountSelected[shard]++
 		rows = append(rows, candidate)
 		if len(rows) >= limit {
 			break
