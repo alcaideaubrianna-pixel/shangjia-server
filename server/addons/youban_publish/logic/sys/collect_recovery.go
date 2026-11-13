@@ -32,6 +32,9 @@ const (
 	collectMediaRecoveryDedupTTL      = 2 * time.Minute
 	collectRecoveryRealtimeMaxPending = 500
 	collectRecoveryRealtimeMaxAge     = 10 * time.Second
+	// 恢复查询本身只处理超过 10 秒未推进的事件，因此实时优先窗口
+	// 必须覆盖这段短暂积压，而不能再次使用 10 秒阈值导致全部命中历史。
+	collectRecoveryRealtimeWindow = 10 * time.Minute
 )
 
 func reserveCollectMediaRecovery(ctx context.Context, eventID int64) bool {
@@ -337,7 +340,9 @@ func (s *sSysPublish) recoverReadyMediaPendingEvents(ctx context.Context, limit 
 		Where(enabledCollectSourceExistsSQL("e")).
 		Where("EXISTS (SELECT 1 FROM "+m+" m WHERE m.event_id=e."+e.Id+")").
 		Where("NOT EXISTS (SELECT 1 FROM "+m+" m WHERE m.event_id=e."+e.Id+" AND m.cache_status<>?)", collectMediaCacheReady).
-		OrderAsc("e." + e.UpdatedAt).Limit(limit).All()
+		// 实时采集必须先于历史恢复，避免旧媒体积压占满本轮预算。
+		Order("CASE WHEN e."+e.UpdatedAt+" >= ? THEN 0 ELSE 1 END, e."+e.UpdatedAt+", e.id", gtime.Now().Add(-collectRecoveryRealtimeMaxAge)).
+		Limit(limit).All()
 	if err != nil {
 		return gerror.Wrap(err, "读取媒体已就绪的采集事件失败")
 	}
@@ -905,8 +910,8 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 		WhereIn("e.status", activeStatuses).
 		WhereLTE("e.updated_at", deadline).
 		Where(enabledCollectSourceExistsSQL("e")).
-		OrderAsc("e.updated_at").
-		OrderAsc("e.id").
+		// 先处理实时窗口内的事件；历史 group_collecting 只能使用剩余预算。
+		Order("CASE WHEN e.updated_at >= ? THEN 0 ELSE 1 END, e.updated_at, e.id", gtime.Now().Add(-collectRecoveryRealtimeWindow)).
 		Limit(limit).
 		All()
 	if err != nil {
