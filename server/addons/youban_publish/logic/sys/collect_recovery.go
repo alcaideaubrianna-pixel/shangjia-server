@@ -114,6 +114,11 @@ func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	if err := s.recoverRecentOrphanCollectReviews(ctx, 20); err != nil {
 		g.Log().Warningf(ctx, "恢复近期孤立采集审核失败：%+v", err)
 	}
+	// 分发恢复不能被实时采集背压短路；资料已经落库的 pending dispatch
+	// 必须优先生成 collect TG Job，否则采集会长期停在“已入库但未推送”。
+	if err := s.recoverCollectPublishTasks(ctx, 100); err != nil {
+		g.Log().Warningf(ctx, "恢复采集推送任务失败：%+v", err)
+	}
 	if blocked, err := s.collectRecoveryBackpressure(ctx); err != nil {
 		g.Log().Warningf(ctx, "读取实时采集背压状态失败，暂停本轮历史恢复：%+v", err)
 		return
@@ -146,9 +151,6 @@ func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	}
 	if err := s.recoverProcessedCollectEvents(ctx, 200); err != nil {
 		g.Log().Warningf(ctx, "恢复采集事件完成状态失败：%+v", err)
-	}
-	if err := s.recoverCollectPublishTasks(ctx, 100); err != nil {
-		g.Log().Warningf(ctx, "恢复采集推送任务失败：%+v", err)
 	}
 }
 
