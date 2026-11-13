@@ -198,7 +198,12 @@ func (s *sSysPublish) wakeProfileTelegramJobs(ctx context.Context, profileId int
 			g.Log().Warningf(ctx, "资料上架因媒体终态失败停止等待 profileId:%d failed_media:%d", profileId, failedCount)
 			return nil
 		}
-		if err := s.submitProfilePublish(ctx, profileId, waiting.TenantId, waiting.AccountId, 0, waiting.OperationNo, nil, false); err != nil {
+		// Media completion is already inside the publish lifecycle. Re-entering
+		// submitProfilePublish here can race with the waiting_media projection
+		// and make the request look like a second submission. Prepare the same
+		// Telegram jobs directly, then enqueue the committed job IDs.
+		jobIds, err := s.prepareProfilePublishJobs(ctx, profileId, waiting.TenantId, waiting.AccountId, waiting.OperationNo, nil, false, telegramProfilePublishMeta{})
+		if err != nil {
 			message := boundPublishSuccessRecordMessage(err.Error())
 			_, _ = g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
 				Where("profile_id", profileId).Where("publish_task_status", "waiting_media").Data(g.Map{
@@ -206,14 +211,15 @@ func (s *sSysPublish) wakeProfileTelegramJobs(ctx context.Context, profileId int
 			}).Update()
 			g.Log().Warning(ctx, "媒体就绪后恢复资料上架失败，已结束等待状态", g.Map{"profileId": profileId, "operationNo": waiting.OperationNo, "stage": "media_ready_wakeup", "error": message})
 		} else {
-			jobCount, countErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("profile_id", profileId).Where("operation_no", waiting.OperationNo).Count()
-			if countErr == nil && jobCount == 0 {
+			if len(jobIds) == 0 {
 				message := "媒体已就绪但未生成任何上架任务"
 				_, _ = g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
 					Where("profile_id", profileId).Where("publish_task_status", "waiting_media").Data(g.Map{
 					"publish_task_status": sysin.PublishTaskStatusFailed, "publish_task_updated_at": gtime.Now(),
 				}).Update()
 				g.Log().Warning(ctx, "媒体就绪后未生成上架任务，已结束等待状态", g.Map{"profileId": profileId, "operationNo": waiting.OperationNo, "stage": "media_ready_wakeup", "error": message})
+			} else {
+				s.enqueuePreparedProfileJobs(ctx, jobIds, 0)
 			}
 		}
 	}
