@@ -160,15 +160,45 @@ func (s *sSysPublish) dispatchDueCollectProcessOutbox(ctx context.Context, limit
 		}
 		return base.OrderAsc(dueColumn).OrderAsc("id").Limit(count).All()
 	}
-	rows, err := load("pending", "available_at", freshLimit, "COALESCE(history,FALSE)=FALSE")
+	// 账户内再按来源分片，避免一个来源的历史积压占满账户本轮配额。
+	loadFair := func(status, dueColumn string, count int, condition string, args ...any) ([]gdb.Record, error) {
+		if len(scopes) == 0 || count <= 1 {
+			return load(status, dueColumn, count, condition, args...)
+		}
+		var sources []struct {
+			SourceID int64 `orm:"source_id"`
+		}
+		if err := model.Clone().Fields("source_id").Where("status", status).WhereLTE(dueColumn, now).
+			Where("source_id > 0").Group("source_id").OrderAsc("source_id").Limit(min(32, count)).Scan(&sources); err != nil {
+			return nil, err
+		}
+		if len(sources) <= 1 {
+			return load(status, dueColumn, count, condition, args...)
+		}
+		perSource := max(1, count/len(sources))
+		rows := make([]gdb.Record, 0, count)
+		for _, source := range sources {
+			base := model.Clone().Where("status", status).Where("source_id", source.SourceID).WhereLTE(dueColumn, now)
+			if condition != "" {
+				base = base.Where(condition, args...)
+			}
+			part, err := base.OrderAsc(dueColumn).OrderAsc("id").Limit(perSource).All()
+			if err != nil {
+				return nil, err
+			}
+			rows = append(rows, part...)
+		}
+		return rows, nil
+	}
+	rows, err := loadFair("pending", "available_at", freshLimit, "COALESCE(history,FALSE)=FALSE")
 	if err == nil {
 		var more []gdb.Record
-		more, err = load("pending", "available_at", historyLimit, "history=TRUE OR (history IS NULL AND created_at<?)", cutoff)
+		more, err = loadFair("pending", "available_at", historyLimit, "history=TRUE OR (history IS NULL AND created_at<?)", cutoff)
 		rows = append(rows, more...)
 	}
 	if err == nil {
 		var more []gdb.Record
-		more, err = load("processing", "lease_expires_at", expiredLimit, "")
+		more, err = loadFair("processing", "lease_expires_at", expiredLimit, "")
 		rows = append(rows, more...)
 	}
 	if err != nil {
