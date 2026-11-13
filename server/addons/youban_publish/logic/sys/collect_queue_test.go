@@ -7,6 +7,8 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/frame/g"
 	"github.com/hibiken/asynq"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
@@ -204,6 +206,37 @@ func TestCollectProcessTaskBodyPreservesSourceChat(t *testing.T) {
 	}
 	if payload.EventId != 100 || payload.SourceChatId != "-1003981090528" || !payload.History {
 		t.Fatalf("unexpected normalized payload: %+v", payload)
+	}
+}
+
+func TestBotCollectProcessPayloadAllowsZeroAccount(t *testing.T) {
+	body, err := collectProcessTaskBody(collectProcessQueuePayload{
+		TenantId: 78, AccountId: 0, SourceId: 351, EventId: 404825,
+	})
+	if err != nil {
+		t.Fatalf("marshal bot payload: %v", err)
+	}
+	task := asynq.NewTask(tgTaskTypeCollectProcess, body)
+	payload, err := decodeCollectProcessQueuePayload(task)
+	if err != nil {
+		t.Fatalf("account_id=0 bot payload must be accepted: %v", err)
+	}
+	if payload.AccountId != 0 || payload.SourceId != 351 {
+		t.Fatalf("unexpected bot payload: %+v", payload)
+	}
+}
+
+func TestBotCollectProcessEventMatchesByTenantAndSource(t *testing.T) {
+	event := gdb.Record{"tenant_id": g.NewVar(78), "account_id": g.NewVar(615), "source_id": g.NewVar(351)}
+	if !collectProcessEventMatchesPayload(event, collectProcessQueuePayload{
+		TenantId: 78, AccountId: 0, SourceId: 351,
+	}) {
+		t.Fatal("BOT payload must match source even when event has resolved account")
+	}
+	if collectProcessEventMatchesPayload(event, collectProcessQueuePayload{
+		TenantId: 78, AccountId: 616, SourceId: 351,
+	}) {
+		t.Fatal("non-BOT payload must keep account isolation")
 	}
 }
 

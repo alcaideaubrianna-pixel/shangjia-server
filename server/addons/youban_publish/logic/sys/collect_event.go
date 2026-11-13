@@ -319,11 +319,13 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 	}
 	defer func() { _ = eventLock.Unlock(context.Background()) }()
 
-	event, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+	eventModel := pdao.YoubanPublishCollectEvent.Ctx(ctx).
 		Where("id", eventId).
-		Where("tenant_id", tenantId).
-		Where("account_id", accountId).
-		One()
+		Where("tenant_id", tenantId)
+	if accountId > 0 {
+		eventModel = eventModel.Where("account_id", accountId)
+	}
+	event, err := eventModel.One()
 	if err != nil {
 		return gerror.Wrap(err, "读取采集事件失败")
 	}
@@ -332,17 +334,27 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		return gerror.New("采集事件不存在")
 	}
 	g.Log().Debugf(ctx, "采集事件开始处理 eventId:%d sourceId:%d sourceMessageId:%d groupedId:%s status:%s media:%d", eventId, event["source_id"].Int64(), event["source_message_id"].Int64(), event["source_grouped_id"].String(), event["status"].String(), event["media_count"].Int())
-	source, err := pdao.YoubanPublishCollectSource.Ctx(ctx).
+	sourceModel := pdao.YoubanPublishCollectSource.Ctx(ctx).
 		Where("id", event["source_id"].Int64()).
 		Where("tenant_id", tenantId).
-		Where("account_id", accountId).
-		WhereNull("deleted_at").
-		One()
+		WhereNull("deleted_at")
+	if accountId > 0 {
+		sourceModel = sourceModel.Where("account_id", accountId)
+	}
+	source, err := sourceModel.One()
 	if err != nil {
 		return gerror.Wrap(err, "读取采集源状态失败")
 	}
 	if source.IsEmpty() {
 		return s.ignoreCollectEvent(ctx, eventId, "采集源不存在", "source")
+	}
+	// BOT 事件可能以 account_id=0 入库；解析到采集源归属后，后续规则、
+	// 频道关系和资料写入仍沿用真实账户上下文。
+	if accountId <= 0 {
+		accountId = event["account_id"].Int64()
+		if accountId <= 0 {
+			accountId = source["account_id"].Int64()
+		}
 	}
 	if source["channel_blacklisted"].Int() != 0 {
 		return s.ignoreCollectEvent(ctx, eventId, "采集频道已禁用", "source")

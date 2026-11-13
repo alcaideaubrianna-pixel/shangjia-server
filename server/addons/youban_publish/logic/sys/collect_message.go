@@ -59,7 +59,9 @@ func (s *sSysPublish) ingestCollectMessage(ctx context.Context, message *Collect
 	if message == nil {
 		return 0, gerror.New("采集消息不能为空")
 	}
-	if message.TenantId <= 0 || message.AccountId <= 0 || message.SourceId <= 0 {
+	// BOT 采集不一定绑定协议号账户，account_id=0 由租户+采集源分片处理。
+	if message.TenantId <= 0 || message.AccountId < 0 || message.SourceId <= 0 ||
+		(message.AccountId == 0 && message.BotId <= 0) {
 		return 0, gerror.New("采集消息归属不完整")
 	}
 	message.SourceType = strings.TrimSpace(message.SourceType)

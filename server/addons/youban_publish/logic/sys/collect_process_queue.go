@@ -103,7 +103,8 @@ func (s *sSysPublish) enqueueCollectProcessTask(ctx context.Context, payload col
 }
 
 func (s *sSysPublish) enqueueCollectProcessTaskWithOutbox(ctx context.Context, payload collectProcessQueuePayload, delay time.Duration, unique, persist bool) (bool, error) {
-	if payload.TenantId <= 0 || payload.AccountId <= 0 || payload.SourceId <= 0 {
+	// BOT 采集事件可能没有协议号账户归属，account_id=0 仍是合法租户+来源分片。
+	if payload.TenantId <= 0 || payload.AccountId < 0 || payload.SourceId <= 0 {
 		return false, nil
 	}
 	if persist {
@@ -273,7 +274,8 @@ func decodeCollectProcessQueuePayload(task *asynq.Task) (collectProcessQueuePayl
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 		return payload, fmt.Errorf("解析采集事件处理任务失败: %w", err)
 	}
-	if payload.SourceId <= 0 || payload.TenantId <= 0 || payload.AccountId <= 0 {
+	// account_id=0 是 BOT 采集的合法值，不能在任务解码阶段丢弃。
+	if payload.SourceId <= 0 || payload.TenantId <= 0 || payload.AccountId < 0 {
 		return payload, fmt.Errorf("采集源处理任务参数不完整")
 	}
 	return payload, nil
@@ -306,15 +308,18 @@ func (s *sSysPublish) processCollectSourceWindowWithLock(ctx context.Context, pa
 
 func collectProcessSourceEnabled(ctx context.Context, payload collectProcessQueuePayload) (bool, error) {
 	columns := pdao.YoubanPublishCollectSource.Columns()
-	count, err := pdao.YoubanPublishCollectSource.Ctx(ctx).
+	sourceModel := pdao.YoubanPublishCollectSource.Ctx(ctx).
 		Where("id", payload.SourceId).
 		Where("tenant_id", payload.TenantId).
-		Where(columns.AccountId, payload.AccountId).
 		Where("collect_enabled", 1).
 		Where(columns.ChannelBlacklisted, 0).
 		Where("status", 1).
 		WhereNull("deleted_at").
-		Count()
+		Fields(columns.Id)
+	if payload.AccountId > 0 {
+		sourceModel = sourceModel.Where(columns.AccountId, payload.AccountId)
+	}
+	count, err := sourceModel.Count()
 	if err != nil {
 		return false, err
 	}
@@ -499,9 +504,11 @@ func collectProcessEventModel(ctx context.Context, payload collectProcessQueuePa
 	model := g.DB().Model(publishCollectEventTable+" e").Ctx(ctx).
 		InnerJoin(publishCollectSourceTable+" s", "s.id=e.source_id AND s.tenant_id=e.tenant_id").
 		Where("e.tenant_id", payload.TenantId).
-		Where("e.account_id", payload.AccountId).
 		Where("e.source_id", payload.SourceId).
 		Where("s.channel_blacklisted", 0)
+	if payload.AccountId > 0 {
+		model = model.Where("e.account_id", payload.AccountId)
+	}
 	if chatID := canonicalCollectSourceChatID(payload.SourceChatId); chatID != "" {
 		model = model.WhereIn("e.source_chat_id", tgChannelCacheLookupIds(chatID))
 	}
@@ -551,7 +558,11 @@ func collectProcessEventFinished(event gdb.Record) bool {
 }
 
 func collectProcessEventMatchesPayload(event gdb.Record, payload collectProcessQueuePayload) bool {
-	return event["tenant_id"].Int64() == payload.TenantId && event["account_id"].Int64() == payload.AccountId && event["source_id"].Int64() == payload.SourceId
+	if event["tenant_id"].Int64() != payload.TenantId || event["source_id"].Int64() != payload.SourceId {
+		return false
+	}
+	// BOT 事件没有协议号账户，按租户+来源匹配即可；有账户的任务仍严格隔离。
+	return payload.AccountId == 0 || event["account_id"].Int64() == payload.AccountId
 }
 
 // Serialize legacy and v2 tasks for the same event, including queue migration.

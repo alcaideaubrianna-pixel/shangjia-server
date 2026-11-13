@@ -142,7 +142,7 @@ func collectProcessPayloadFromTaskInfo(task *asynq.TaskInfo) (collectProcessQueu
 		return collectProcessQueuePayload{}, false
 	}
 	var payload collectProcessQueuePayload
-	if err := json.Unmarshal(task.Payload, &payload); err != nil || payload.TenantId <= 0 || payload.AccountId <= 0 || payload.SourceId <= 0 {
+	if err := json.Unmarshal(task.Payload, &payload); err != nil || payload.TenantId <= 0 || payload.AccountId < 0 || payload.SourceId <= 0 {
 		return collectProcessQueuePayload{}, false
 	}
 	return payload, true
