@@ -463,9 +463,8 @@ func (s *sSysPublish) dispatchDueTelegramJobOutbox(ctx context.Context, limit in
 func (s *sSysPublish) dueTelegramJobOutboxRows(ctx context.Context, limit int, now *gtime.Time) ([]telegramJobOutboxRecord, error) {
 	queryCtx, cancelQuery := context.WithTimeout(ctx, telegramOutboxQueryTimeout)
 	defer cancelQuery()
-	if globalStreamPushEngineEnabled() {
-		return s.dueTelegramStreamOutboxRows(queryCtx, limit, now)
-	}
+	// 全量统一使用频道级 Stream 调度；旧账户级队首 SQL 不再作为运行路径。
+	return s.dueTelegramStreamOutboxRows(queryCtx, limit, now)
 	if strings.EqualFold(strings.TrimSpace(g.DB().GetConfig().Type), "pgsql") {
 		batchLimit := limit
 		if batchLimit <= 0 {
