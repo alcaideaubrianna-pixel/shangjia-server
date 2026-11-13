@@ -324,6 +324,9 @@ func (s *sSysPublish) handleAutoDeleteFallbackAccountTask(ctx context.Context, c
 	})
 	if err == nil {
 		s.appendAutoDeleteLogByValues(ctx, channel, 0, messageID, "", "success", "Bot删除失败，协议号已完成自动删除")
+		if indexErr := (tgChannelDeleteIndex{}).removeAutoDelete(ctx, task.TenantID, channelID, messageID); indexErr != nil {
+			g.Log().Warningf(ctx, "移除协议号自动删除队列索引失败 tenantId:%d channelId:%d messageId:%d err:%+v", task.TenantID, channelID, messageID, indexErr)
+		}
 		return nil
 	}
 	if delay, flood := tgerr.AsFloodWait(err); flood {
@@ -331,6 +334,9 @@ func (s *sSysPublish) handleAutoDeleteFallbackAccountTask(ctx context.Context, c
 	}
 	if telegramDeleteFallbackPermanentError(err) {
 		s.appendAutoDeleteLogByValues(ctx, channel, 0, messageID, "", "failed", "协议号实时删除永久失败："+err.Error())
+		if indexErr := (tgChannelDeleteIndex{}).removeAutoDelete(ctx, task.TenantID, channelID, messageID); indexErr != nil {
+			g.Log().Warningf(ctx, "移除永久失败协议号自动删除队列索引失败 tenantId:%d channelId:%d messageId:%d err:%+v", task.TenantID, channelID, messageID, indexErr)
+		}
 		return nil
 	}
 	return &telegramDeleteFallbackRetryError{cause: gerror.Wrap(err, "协议号实时删除失败"), delay: telegramDeleteFallbackRetryDelay(task.AttemptCount)}

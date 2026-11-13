@@ -142,12 +142,18 @@ func (s *sSysPublish) handleTelegramAutoDeleteTask(ctx context.Context, task *as
 	if payload.ChannelId <= 0 || payload.MessageId <= 0 || strings.TrimSpace(payload.ChatId) == "" {
 		return gerror.New("频道自动删除任务参数无效")
 	}
+	removeIndex := func() {
+		if indexErr := (tgChannelDeleteIndex{}).removeAutoDelete(ctx, payload.TenantId, payload.ChannelId, payload.MessageId); indexErr != nil {
+			g.Log().Warningf(ctx, "移除频道自动删除队列索引失败 tenantId:%d channelId:%d messageId:%d err:%+v", payload.TenantId, payload.ChannelId, payload.MessageId, indexErr)
+		}
+	}
 	channel, err := s.autoDeleteChannelById(ctx, payload.ChannelId, payload.TenantId)
 	if err != nil || channel == nil || channel.AutoDeleteEnabled != 1 {
 		return err
 	}
 	if s.isTelegramPublishMessage(ctx, payload.ChatId, payload.MessageId) {
 		g.Log().Infof(ctx, "频道自动删除任务跳过上架资料消息 channel:%d chat:%s message:%d", payload.ChannelId, payload.ChatId, payload.MessageId)
+		removeIndex()
 		return nil
 	}
 	messageLock := lock.Mutex(fmt.Sprintf("youban_publish:auto_delete:%d:%d", payload.ChannelId, payload.MessageId))
@@ -174,6 +180,7 @@ func (s *sSysPublish) handleTelegramAutoDeleteTask(ctx context.Context, task *as
 			}
 			s.appendAutoDeleteLogByValues(ctx, channel, botId, payload.MessageId, payload.Keyword, "failed", message)
 			g.Log().Warningf(ctx, "频道自动删除永久失败，停止重试 channel:%d bot:%d message:%d err:%+v fallbackErr:%+v", channel.Id, botId, payload.MessageId, resultErr, fallbackErr)
+			removeIndex()
 			return nil
 		}
 		if fallbackErr != nil {
@@ -185,9 +192,11 @@ func (s *sSysPublish) handleTelegramAutoDeleteTask(ctx context.Context, task *as
 	}
 	if err != nil {
 		s.appendAutoDeleteLogByValues(ctx, channel, botItem.Id, payload.MessageId, payload.Keyword, "skipped", "频道消息命中关键词，但TG消息已不存在")
+		removeIndex()
 		return nil
 	}
 	s.appendAutoDeleteLogByValues(ctx, channel, botItem.Id, payload.MessageId, payload.Keyword, "success", "频道消息命中关键词，已自动删除")
+	removeIndex()
 	return nil
 }
 

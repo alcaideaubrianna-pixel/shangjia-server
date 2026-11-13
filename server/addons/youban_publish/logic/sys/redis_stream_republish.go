@@ -88,12 +88,16 @@ func (s *sSysPublish) dispatchTelegramCleanupIntents(ctx context.Context, limit 
 		JobId        int64
 		EventType    string
 		AttemptCount int
+		TenantId     int64
+		ChannelId    int64
 	}
 	now := gtime.Now()
-	if err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
-		WhereIn("event_type", []string{telegramOutboxCleanupPrefix + "manual", telegramOutboxCleanupPrefix + "keyword", telegramOutboxCleanupPrefix + "cycle"}).
-		WhereLTE("available_at", now).Where("status=? OR (status=? AND lease_expires_at<=?)", telegramOutboxPending, telegramOutboxProcessing, now).
-		OrderAsc("available_at").OrderAsc("id").Limit(limit).Scan(&rows); err != nil {
+	if err := g.DB().Model(publishTgOutboxTable+" o").Safe().Ctx(ctx).
+		LeftJoin(publishTgJobTable+" j", "j.id=o.job_id").
+		Fields("o.id,o.job_id,o.event_type,o.attempt_count,j.tenant_id,j.channel_id").
+		WhereIn("o.event_type", []string{telegramOutboxCleanupPrefix + "manual", telegramOutboxCleanupPrefix + "keyword", telegramOutboxCleanupPrefix + "cycle"}).
+		WhereLTE("o.available_at", now).Where("o.status=? OR (o.status=? AND o.lease_expires_at<=?)", telegramOutboxPending, telegramOutboxProcessing, now).
+		OrderAsc("o.available_at").OrderAsc("o.id").Limit(limit).Scan(&rows); err != nil {
 		return err
 	}
 	for _, row := range rows {
@@ -117,6 +121,9 @@ func (s *sSysPublish) dispatchTelegramCleanupIntents(ctx context.Context, limit 
 		} else if row.EventType == telegramOutboxCleanupPrefix+"cycle" {
 			priority = channelPriorityCycleDelete
 		}
+		if indexErr := (tgChannelDeleteIndex{}).addJob(ctx, row.TenantId, row.ChannelId, row.JobId, priority); indexErr != nil {
+			g.Log().Warningf(ctx, "写入频道删除队列索引失败 tenantId:%d channelId:%d jobId:%d err:%+v", row.TenantId, row.ChannelId, row.JobId, indexErr)
+		}
 		client, err := s.telegramQueueClient(ctx)
 		if err == nil {
 			// 固定task ID在任务执行或重试期间去重，不覆盖发送任务的asynq_task_id/queue_name。
@@ -137,5 +144,19 @@ func (s *sSysPublish) completeTelegramCleanupIntent(ctx context.Context, jobId i
 	_, err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).Where("job_id", jobId).
 		WhereIn("event_type", []string{telegramOutboxCleanupPrefix + "manual", telegramOutboxCleanupPrefix + "keyword", telegramOutboxCleanupPrefix + "cycle"}).
 		WhereNot("status", telegramOutboxDelivered).Data(g.Map{"status": telegramOutboxDelivered, "delivered_at": gtime.Now(), "lease_owner": "", "lease_expires_at": nil, "last_error": ""}).Update()
+	if err != nil {
+		return err
+	}
+	var job struct {
+		TenantId  int64 `orm:"tenant_id"`
+		ChannelId int64 `orm:"channel_id"`
+	}
+	if queryErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Fields("tenant_id,channel_id").Where("id", jobId).Scan(&job); queryErr != nil {
+		return gerror.Wrap(queryErr, "读取频道删除队列索引任务失败")
+	}
+	if indexErr := (tgChannelDeleteIndex{}).removeJob(ctx, job.TenantId, job.ChannelId, jobId); indexErr != nil {
+		g.Log().Warningf(ctx, "移除频道删除队列索引失败 tenantId:%d channelId:%d jobId:%d err:%+v", job.TenantId, job.ChannelId, jobId, indexErr)
+	}
 	return err
 }

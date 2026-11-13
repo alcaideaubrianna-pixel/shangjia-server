@@ -471,13 +471,26 @@ func (s *sSysPublish) enqueueTelegramCleanupJob(ctx context.Context, jobId int64
 	var owner struct {
 		TenantId  int64 `orm:"tenant_id"`
 		AccountId int64 `orm:"account_id"`
+		ChannelId int64 `orm:"channel_id"`
+		Priority  int   `orm:"priority"`
 	}
 	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Fields("tenant_id,account_id").Where("id", jobId).Scan(&owner); err == nil &&
+		Fields("tenant_id,account_id,channel_id,priority").Where("id", jobId).Scan(&owner); err == nil &&
 		s.unifiedPushEngineEnabled(ctx, owner.TenantId, owner.AccountId) {
 		queueName = channelDispatchDeleteQueueName(channelPriorityManualDelete)
 	}
-	return s.enqueueTelegramTaskWithQueue(ctx, tgTaskTypeCleanup, jobId, delay, true, queueName)
+	if err := s.enqueueTelegramTaskWithQueue(ctx, tgTaskTypeCleanup, jobId, delay, true, queueName); err != nil {
+		return err
+	}
+	priority := channelPriorityManualDelete
+	if owner.Priority > tgJobPriorityInteractive {
+		priority = channelPriorityCycleDelete
+	}
+	if indexErr := (tgChannelDeleteIndex{}).addJob(ctx, owner.TenantId, owner.ChannelId, jobId, priority); indexErr != nil {
+		// Redis 只是删除队列的高速索引，不能因为索引故障回滚已经入队的删除事实。
+		g.Log().Warningf(ctx, "写入频道删除队列索引失败 tenantId:%d channelId:%d jobId:%d err:%+v", owner.TenantId, owner.ChannelId, jobId, indexErr)
+	}
+	return nil
 }
 
 func (s *sSysPublish) enqueueTelegramAutoDelete(ctx context.Context, payload autoDeleteQueuePayload) error {
@@ -504,9 +517,16 @@ func (s *sSysPublish) enqueueTelegramAutoDelete(ctx context.Context, payload aut
 		asynq.Unique(2*time.Minute),
 	)
 	if errors.Is(err, asynq.ErrDuplicateTask) || errors.Is(err, asynq.ErrTaskIDConflict) {
-		return nil
+		err = nil
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	if indexErr := (tgChannelDeleteIndex{}).addAutoDelete(ctx, payload.TenantId, payload.ChannelId, payload.MessageId, channelPriorityKeywordDelete); indexErr != nil {
+		// 自动删除任务已经持久化到 Asynq，索引失败由后续重试重新补齐。
+		g.Log().Warningf(ctx, "写入频道自动删除队列索引失败 tenantId:%d channelId:%d messageId:%d err:%+v", payload.TenantId, payload.ChannelId, payload.MessageId, indexErr)
+	}
+	return nil
 }
 
 func (s *sSysPublish) enqueueTelegramAutoDeleteBackfill(ctx context.Context, payload autoDeleteBackfillQueuePayload, delay time.Duration) error {
