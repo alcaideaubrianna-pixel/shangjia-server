@@ -25,7 +25,8 @@ type profilePublishOperationState struct {
 
 func (s *sSysPublish) beginProfilePublishOperation(ctx context.Context, tenantId, accountId, profileId int64, operationNo string) error {
 	operationNo = strings.TrimSpace(operationNo)
-	if tenantId <= 0 || accountId <= 0 || profileId <= 0 || operationNo == "" {
+	// BOT 采集没有协议号账户，account_id=0 是合法的发布归属。
+	if tenantId <= 0 || accountId < 0 || profileId <= 0 || operationNo == "" {
 		return gerror.New("上架操作状态参数不完整")
 	}
 	return s.writeProfilePublishOperationState(ctx, tenantId, accountId, profileId, operationNo, sysin.PublishTaskStatusPending, false)
@@ -33,7 +34,8 @@ func (s *sSysPublish) beginProfilePublishOperation(ctx context.Context, tenantId
 
 func (s *sSysPublish) beginProfilePublishOperationTx(ctx context.Context, tx gdb.TX, tenantId, accountId, profileId int64, operationNo string) error {
 	operationNo = strings.TrimSpace(operationNo)
-	if tenantId <= 0 || accountId <= 0 || profileId <= 0 || operationNo == "" {
+	// BOT 采集没有协议号账户，account_id=0 是合法的发布归属。
+	if tenantId <= 0 || accountId < 0 || profileId <= 0 || operationNo == "" {
 		return gerror.New("上架操作状态参数不完整")
 	}
 	return s.writeProfilePublishOperationStateTx(ctx, tx, tenantId, accountId, profileId, operationNo, sysin.PublishTaskStatusPending, false)
