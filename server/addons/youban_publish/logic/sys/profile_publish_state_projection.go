@@ -191,7 +191,8 @@ func (s *sSysPublish) recoverProfilePublishOperationStates(ctx context.Context, 
 	if err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
 		Fields("tenant_id,account_id,profile_id,publish_operation_no,publish_task_status").
 		WhereNull("deleted_at").
-		Where("account_id > 0").
+		// BOT 资料允许使用 account_id=0，不能在状态恢复时被过滤。
+		Where("account_id >= 0").
 		WhereIn("publish_task_status", []string{
 			"editing",
 			sysin.PublishTaskStatusPending,
@@ -220,7 +221,8 @@ func (s *sSysPublish) recoverMissingProfilePublishOperationStates(ctx context.Co
 	if err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
 		InnerJoin(publishProfileStateTable+" ps", "ps.profile_id=j.profile_id AND ps.tenant_id=j.tenant_id AND ps.account_id=j.account_id AND ps.deleted_at IS NULL").
 		Fields("j.tenant_id,j.account_id,j.profile_id,j.operation_no,j.status").
-		Where("j.account_id > 0").
+		// BOT 资料允许使用 account_id=0，恢复投影时必须保留零账户任务。
+		Where("j.account_id >= 0").
 		WhereNull("j.task_id").
 		WhereIn("j.status", []string{"pending", "sending", "failed_retry", "unknown"}).
 		Where("j.operation_no <> ''").
