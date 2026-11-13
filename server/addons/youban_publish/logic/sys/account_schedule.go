@@ -154,7 +154,11 @@ func (s *sSysPublish) enqueueAccountSchedules(ctx context.Context) error {
 	}
 	enqueued := 0
 	for _, account := range accounts {
-		if s.accountPushEngine(ctx, account.TenantID, account.ID) != pushEngineUnifiedStream {
+		engine := s.accountPushEngine(ctx, account.TenantID, account.ID)
+		if engine != pushEngineUnifiedStream {
+			if account.TenantID == 78 && account.ID == 615 {
+				g.Log().Info(ctx, "账户循环调度跳过", g.Map{"tenantId": account.TenantID, "accountId": account.ID, "pushEngine": engine, "reason": "push_engine_not_unified_stream"})
+			}
 			continue
 		}
 		body, err := json.Marshal(publishAccountScope{TenantID: account.TenantID, AccountID: account.ID})
@@ -166,11 +170,17 @@ func (s *sSysPublish) enqueueAccountSchedules(ctx context.Context) error {
 		_, err = client.EnqueueContext(ctx, asynq.NewTask(publishconsts.QueueAccountScheduleTask, body), asynq.Queue(tgQueueNameAccountSchedule),
 			asynq.Unique(2*time.Second), asynq.Timeout(25*time.Second), asynq.MaxRetry(3))
 		if err != nil && !errors.Is(err, asynq.ErrDuplicateTask) {
+			g.Log().Warning(ctx, "账户循环调度入队失败", g.Map{"tenantId": account.TenantID, "accountId": account.ID, "queueName": tgQueueNameAccountSchedule, "error": err.Error()})
 			return err
+		}
+		if account.TenantID == 78 && account.ID == 615 {
+			g.Log().Info(ctx, "账户循环调度入队结果", g.Map{"tenantId": account.TenantID, "accountId": account.ID, "queueName": tgQueueNameAccountSchedule, "duplicate": errors.Is(err, asynq.ErrDuplicateTask), "error": ""})
 		}
 		enqueued++
 	}
-	g.Log().Debugf(ctx, "账户调度任务入队 tenantAccounts:%d unified:%d cursor:%d", len(accounts), enqueued, cursor.Int64())
+	if len(dueAccounts) > 0 || enqueued > 0 {
+		g.Log().Info(ctx, "账户调度扫描完成", g.Map{"tenantAccounts": len(accounts), "enqueued": enqueued, "cursor": cursor.Int64(), "dueAccounts": len(dueAccounts)})
+	}
 	next := int64(0)
 	if len(accounts) == 100 {
 		next = accounts[len(accounts)-1].ID
@@ -187,10 +197,10 @@ func (s *sSysPublish) handleAccountScheduleTask(ctx context.Context, task *asynq
 	if scope.TenantID <= 0 || scope.AccountID <= 0 {
 		return asynq.SkipRetry
 	}
-	g.Log().Debugf(ctx, "账户调度任务开始 tenantId:%d accountId:%d", scope.TenantID, scope.AccountID)
+	g.Log().Info(ctx, "账户调度任务开始", g.Map{"tenantId": scope.TenantID, "accountId": scope.AccountID, "queueName": tgQueueNameAccountSchedule})
 	startedAt := time.Now()
 	defer func() {
-		g.Log().Debugf(ctx, "账户调度任务结束 tenantId:%d accountId:%d elapsedMs:%d", scope.TenantID, scope.AccountID, time.Since(startedAt).Milliseconds())
+		g.Log().Info(ctx, "账户调度任务结束", g.Map{"tenantId": scope.TenantID, "accountId": scope.AccountID, "queueName": tgQueueNameAccountSchedule, "elapsedMs": time.Since(startedAt).Milliseconds()})
 	}()
 	if s.accountPushEngine(ctx, scope.TenantID, scope.AccountID) != pushEngineUnifiedStream {
 		return nil
