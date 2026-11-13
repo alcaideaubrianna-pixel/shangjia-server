@@ -283,10 +283,9 @@ func (s *sSysPublish) enqueueProfileOperationSuccessNotice(ctx context.Context, 
 	if job.TenantId <= 0 || job.AccountId <= 0 || job.ProfileId <= 0 || strings.TrimSpace(job.OperationNo) == "" {
 		return nil
 	}
-	// Normal/manual/cycle publishes must not create the generic account notice.
 	// BOT publishes have their own interactive notification path keyed by the
-	// bot_publish operation prefix.
-	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(job.OperationNo)), botProfilePublishOperationPrefix) {
+	// bot_publish operation prefix, so do not create the generic short notice.
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(job.OperationNo)), botProfilePublishOperationPrefix) {
 		return nil
 	}
 	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
