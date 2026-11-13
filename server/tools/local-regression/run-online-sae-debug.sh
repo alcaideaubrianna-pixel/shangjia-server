@@ -11,6 +11,8 @@ APP_ID="${SAE_PUBLISH_APP_ID:-2fb5d3db-0975-4dea-b086-805d255131fa}"
 REGION_ID="${SAE_REGION_ID:-ap-southeast-1}"
 PROFILE="${ALIBABA_CLOUD_PROFILE:-default}"
 ROLE="${ONLINE_DEBUG_ROLE:-publish-worker}"
+ALL_MODE="${ONLINE_DEBUG_ALL:-0}"
+LOG_DIR="${ONLINE_DEBUG_LOG_DIR:-/tmp/youban-online-debug-logs}"
 WRITE_MODE="${ONLINE_DEBUG_WRITE:-0}"
 ENV_FILE="${ONLINE_DEBUG_ENV_FILE:-$(mktemp /tmp/youban-online-debug.XXXXXX.env)}"
 BIN="${ONLINE_DEBUG_SERVER_BIN:-$ROOT_DIR/bin/hotgo}"
@@ -62,6 +64,27 @@ ENV
 fi
 # shellcheck disable=SC1090
 source "$ENV_FILE"
-echo "线上调试配置已加载：region=$REGION_ID app=$APP_ID role=$ROLE write=$WRITE_MODE"
-echo "不会启动 scheduler；停止本地进程请按 Ctrl-C。"
-exec "$BIN" "$ROLE"
+echo "线上调试配置已加载：region=$REGION_ID app=$APP_ID role=$ROLE all=$ALL_MODE write=$WRITE_MODE"
+
+if [[ "$ALL_MODE" == "1" ]]; then
+  # account 是 Telegram 协议号长连接，必须继续使用 SAE 单实例，不在本地重复启动。
+  roles=(web collector-worker background-worker media-worker publish-worker scheduler)
+  mkdir -p "$LOG_DIR"
+  pids=()
+  stop_roles() {
+    for pid in "${pids[@]:-}"; do kill "$pid" 2>/dev/null || true; done
+    wait 2>/dev/null || true
+  }
+  trap 'stop_roles; cleanup' EXIT INT TERM
+  for role in "${roles[@]}"; do
+    log_file="$LOG_DIR/${role}.log"
+    echo "启动本地线上调试角色：$role 日志=$log_file"
+    (source "$ENV_FILE"; export YOUBAN_PUBLISH_RUNTIME_ROLE="$role"; exec "$BIN" "$role") >"$log_file" 2>&1 &
+    pids+=("$!")
+  done
+  echo "已启动 ${#roles[@]} 个角色；account 未启动；按 Ctrl-C 统一停止。"
+  wait
+else
+  echo "单角色模式：$ROLE；account 未启动。"
+  exec "$BIN" "$ROLE"
+fi
