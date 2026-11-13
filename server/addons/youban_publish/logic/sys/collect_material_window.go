@@ -63,7 +63,8 @@ func collectMaterialWindowMaxRows(ctx context.Context) int {
 }
 
 func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload collectProcessQueuePayload) error {
-	if payload.SourceId <= 0 || payload.TenantId <= 0 || payload.AccountId <= 0 {
+	// BOT 采集没有协议号账户，account_id=0 是合法的租户来源分片。
+	if !validCollectSourceWindowPayload(payload) {
 		return gerror.New("采集源窗口参数不完整")
 	}
 	batchSize := collectMaterialWindowBatchSize(ctx)
@@ -112,6 +113,11 @@ func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload co
 		}
 	}
 	return nil
+}
+
+// validCollectSourceWindowPayload 允许 BOT 采集使用 account_id=0，同时拒绝无租户或无来源的任务。
+func validCollectSourceWindowPayload(payload collectProcessQueuePayload) bool {
+	return payload.SourceId > 0 && payload.TenantId > 0 && payload.AccountId >= 0
 }
 
 // collectMaterialWindowModel 构造账户和来源分片查询，隔离正常事件与验证重试事件。
