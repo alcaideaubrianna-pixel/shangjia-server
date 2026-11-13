@@ -85,6 +85,7 @@ echo "Web入口日志：$LOG_DIR/web.log"
 if [[ "$ALL_MODE" == "1" ]]; then
   # account 是 Telegram 协议号长连接，必须继续使用 SAE 单实例，不在本地重复启动。
   roles=(web collector-worker background-worker media-worker publish-worker scheduler)
+  base_port="${ONLINE_DEBUG_HTTP_PORT_BASE:-18000}"
   mkdir -p "$LOG_DIR"
   printf 'session=%s\nregion=%s\napp=%s\nwrite=%s\n' "$SESSION" "$REGION_ID" "$APP_ID" "$WRITE_MODE" > "$LOG_DIR/session.env"
   pids=()
@@ -93,12 +94,16 @@ if [[ "$ALL_MODE" == "1" ]]; then
     wait 2>/dev/null || true
   }
   trap 'stop_roles; cleanup' EXIT INT TERM
+  index=0
   for role in "${roles[@]}"; do
+    role_port=$((base_port + index))
     log_file="$LOG_DIR/${role}.log"
-    echo "启动本地线上调试角色：$role pid=starting 日志=$log_file"
-    (source "$ENV_FILE"; export YOUBAN_PUBLISH_RUNTIME_ROLE="$role"; exec "$BIN" "$role") >"$log_file" 2>&1 &
+    echo "启动本地线上调试角色：$role port=$role_port pid=starting 日志=$log_file"
+    (source "$ENV_FILE"; export YOUBAN_PUBLISH_RUNTIME_ROLE="$role" GF_SERVER_ADDRESS=":$role_port" YOUBAN_SERVER_ADDRESS=":$role_port"; exec "$BIN" "$role") >"$log_file" 2>&1 &
     pids+=("$!")
     echo "角色已启动：$role pid=${pids[-1]} 日志=$log_file"
+    if [[ "$role" == "web" ]]; then echo "Web入口地址：http://127.0.0.1:$role_port"; fi
+    index=$((index + 1))
   done
   echo "已启动 ${#roles[@]} 个角色；account 未启动；按 Ctrl-C 统一停止。"
   wait
