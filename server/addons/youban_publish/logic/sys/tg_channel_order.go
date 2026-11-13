@@ -281,6 +281,27 @@ func (s *sSysPublish) wakeNextTelegramChannelJob(ctx context.Context, job telegr
 			return nil
 		}
 	}
+	// 优先从频道 ZSET 读取队首，避免在 tg_job/outbox 历史记录上排序扫描。
+	// ZSET 只做加速索引，命中后仍用状态条件校验；过期成员立即移除，
+	// 再回退到 PostgreSQL 事实查询，保证 Redis 丢数据不会漏发任务。
+	if job.ChannelId > 0 && cache.Initialized() {
+		if headID, headErr := (tgChannelPendingIndex{}).head(ctx, job.TenantId, job.ChannelId); headErr == nil && headID > 0 {
+			var head telegramJobRecord
+			headErr = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+				Where("id", headID).
+				WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
+				Where("dispatch_status", tgDispatchStatusIdle).
+				Where("next_retry_at IS NULL OR next_retry_at <= ?", gtime.Now()).
+				Scan(&head)
+			if headErr == nil && head.Id > 0 {
+				if enqueueErr := s.enqueueTelegramJob(ctx, head.Id, 0); enqueueErr != nil {
+					return gerror.Wrapf(enqueueErr, "通过频道索引唤醒TG任务失败 jobId:%d channelId:%d", head.Id, job.ChannelId)
+				}
+				return nil
+			}
+			_ = (tgChannelPendingIndex{}).remove(ctx, job.TenantId, job.ChannelId, headID)
+		}
+	}
 	now := gtime.Now()
 	var nextJobs []telegramJobRecord
 	model := g.DB().Model(publishTgJobTable).As("j").Safe().Ctx(ctx).

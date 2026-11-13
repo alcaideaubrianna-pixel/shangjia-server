@@ -30,6 +30,9 @@ func (s *sSysPublish) markTelegramJobSuperseded(ctx context.Context, jobId int64
 	if !transitioned {
 		return nil
 	}
+	if removeErr := (tgChannelPendingIndex{}).remove(ctx, job.TenantId, job.ChannelId, job.Id); removeErr != nil {
+		g.Log().Warningf(ctx, "移除已废弃TG任务频道索引失败 jobId:%d channelId:%d err:%+v", job.Id, job.ChannelId, removeErr)
+	}
 	return s.upsertPublishJobRecord(ctx, job, "superseded", "")
 }
 
@@ -44,6 +47,9 @@ func (s *sSysPublish) supersedeTelegramJobAndCompleteOperation(ctx context.Conte
 func (s *sSysPublish) completeTelegramJobAndWakeChannel(ctx context.Context, job telegramJobRecord) error {
 	if err := s.completeTelegramJob(ctx, job); err != nil {
 		return err
+	}
+	if removeErr := (tgChannelPendingIndex{}).remove(ctx, job.TenantId, job.ChannelId, job.Id); removeErr != nil {
+		g.Log().Warningf(ctx, "移除已完成TG任务频道索引失败 jobId:%d channelId:%d err:%+v", job.Id, job.ChannelId, removeErr)
 	}
 	if err := s.wakeNextTelegramChannelJob(ctx, job); err != nil {
 		g.Log().Warningf(ctx, "TG任务完成后唤醒频道下一条任务失败 jobId:%d channelId:%d err:%+v", job.Id, job.ChannelId, err)
