@@ -3,6 +3,8 @@ package sys
 import (
 	"context"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -74,6 +76,9 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 			Where("j.account_id", job.AccountId).
 			Where("j.status IN (?)", []string{telegramJobStatusPending, telegramJobStatusRetryWait, telegramJobStatusConfirming, telegramJobStatusSending}).
 			Where("j.created_at < ? OR (j.created_at = ? AND j.id < ?)", createdAt, createdAt, job.Id)
+		// Outbox 已记录 Stream 入队失败且超过队首超时的旧任务不能继续
+		// 阻塞频道。它们会由恢复扫描收口，当前判断先允许后续任务推进。
+		fast = fast.Where("NOT (j.status='pending' AND COALESCE(j.dispatch_status,'')='idle' AND COALESCE(j.asynq_task_id,'')='' AND j.updated_at < CURRENT_TIMESTAMP - (? * INTERVAL '1 minute') AND EXISTS (SELECT 1 FROM "+publishTgOutboxTable+" stale_o WHERE stale_o.job_id=j.id AND stale_o.status IN ('pending','processing') AND COALESCE(stale_o.last_error,'') LIKE 'Stream任务尚未写入执行队列%'))", telegramChannelHeadTimeoutMinutes())
 		// 手动/交互任务可以越过尚未开始的循环、批次和历史任务，
 		// 但不能越过已经入队、发送中或结果未知的任务，避免破坏同频道顺序。
 		if telegramJobPriorityValue(job) <= tgJobPriorityInteractive {
@@ -150,8 +155,25 @@ func telegramChannelBlockingJobSQL(alias string) string {
 	}
 	// 已经进入发送队列的任务必须继续占住频道，即使其 Bot/账户信息
 	// 在测试或授权切换期间暂时不可用；否则后续任务会越过已入队任务。
-	return fmt.Sprintf(`(((%sdispatch_status IN ('queued','processing')) OR %s) AND %s)`,
-		qualified, telegramChannelAvailableAccountSQL(alias), telegramChannelBlockingJobStateSQL(alias))
+	return fmt.Sprintf(`(((%sdispatch_status IN ('queued','processing')) OR %s) AND %s AND NOT (
+		%sstatus='pending' AND COALESCE(%sdispatch_status,'')='idle' AND COALESCE(%sasynq_task_id,'')='' AND %supdated_at < CURRENT_TIMESTAMP - (%d * INTERVAL '1 minute')
+		AND EXISTS (SELECT 1 FROM %s stale_o WHERE stale_o.job_id=%sid AND stale_o.status IN ('pending','processing') AND COALESCE(stale_o.last_error,'') LIKE 'Stream任务尚未写入执行队列%%')
+	))`,
+		qualified, telegramChannelAvailableAccountSQL(alias), telegramChannelBlockingJobStateSQL(alias), qualified, qualified, qualified, qualified, telegramChannelHeadTimeoutMinutes(), publishTgOutboxTable, qualified)
+}
+
+// telegramChannelHeadTimeoutMinutes 返回频道队首最大等待时间，默认15分钟。
+// 与循环队首超时共用环境变量，保证旧队首和循环队首不会使用不同策略。
+func telegramChannelHeadTimeoutMinutes() int {
+	value := os.Getenv("YOUBAN_PUBLISH_CYCLE_HEAD_TIMEOUT_MINUTES")
+	minutes, err := strconv.Atoi(value)
+	if err != nil || minutes <= 0 {
+		return 15
+	}
+	if minutes > 24*60 {
+		return 24 * 60
+	}
+	return minutes
 }
 
 func telegramChannelBlockingJobStateSQL(alias string) string {
