@@ -18,6 +18,7 @@ import (
 const collectProcessOutboxTable = "hg_youban_publish_collect_process_outbox"
 
 const collectProcessOutboxLease = 5 * time.Minute
+const collectProcessProcessingCap = 100
 
 func collectProcessOutboxRecoveryBatchSize(ctx context.Context) int {
 	batchSize := g.Cfg().MustGet(ctx, "youbanPublish.collect.processOutboxRecoveryBatchSize", 5000).Int()
@@ -136,6 +137,20 @@ func (s *sSysPublish) dispatchDueCollectProcessOutbox(ctx context.Context, limit
 		limit = 500
 	}
 	now := gtime.Now()
+	// 账户已有大量处理中任务时暂停继续领取，避免 Dispatcher 速度超过
+	// Worker，导致所有 Outbox 长时间停在 processing，事件无法进入分发终态。
+	if len(scopes) > 0 {
+		processing, countErr := g.DB().Model(collectProcessOutboxTable).Ctx(ctx).
+			Where("tenant_id", scopes[0].TenantID).Where("account_id", scopes[0].AccountID).
+			Where("status", "processing").WhereGT("lease_expires_at", now).Count()
+		if countErr != nil {
+			return gerror.Wrap(countErr, "读取账户采集处理中任务数量失败")
+		}
+		if processing >= collectProcessProcessingCap {
+			return nil
+		}
+		limit = min(limit, collectProcessProcessingCap-processing)
+	}
 	model := g.DB().Model(collectProcessOutboxTable).Ctx(ctx)
 	if len(scopes) > 0 {
 		model = model.Where("tenant_id", scopes[0].TenantID).Where("account_id", scopes[0].AccountID)
