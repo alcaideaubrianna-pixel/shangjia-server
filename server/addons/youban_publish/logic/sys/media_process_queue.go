@@ -172,7 +172,7 @@ func (s *sSysPublish) wakeProfileTelegramJobs(ctx context.Context, profileId int
 		TenantId      int64  `json:"tenantId"`
 		AccountId     int64  `json:"accountId"`
 		OperationNo   string `json:"operationNo"`
-		PublishStatus string `json:"publishStatus"`
+		PublishStatus string `json:"publishStatus" orm:"publish_task_status"`
 	}
 	if err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
 		Fields("tenant_id,account_id,publish_operation_no,publish_task_status").
