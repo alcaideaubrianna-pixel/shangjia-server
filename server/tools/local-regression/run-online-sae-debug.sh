@@ -15,12 +15,14 @@ ALL_MODE="${ONLINE_DEBUG_ALL:-0}"
 WRITE_ARG=0
 WRITE_ALL=0
 LOAD_MODE=0
+REAL_TG=0
 for arg in "$@"; do
   case "$arg" in
     all) ALL_MODE=1 ;;
     --write|write) WRITE_ARG=1 ;;
     --write-all|write-all) WRITE_ARG=1; WRITE_ALL=1 ;;
     --load|load) LOAD_MODE=1; ALL_MODE=1; WRITE_ARG=1; WRITE_ALL=1 ;;
+    --real-tg|real-tg) REAL_TG=1 ;;
   esac
 done
 SESSION="${ONLINE_DEBUG_SESSION:-$(date +%Y-%m-%d-%H-%M-%S)}"
@@ -67,6 +69,12 @@ export YOUBAN_TELEGRAM_BOT_API_URL=http://127.0.0.1:19100
 export YOUBAN_TELEGRAM_LOCAL_BOT_ENABLED=1
 export YOUBAN_LOCAL_REGRESSION=1
 ENV_LOCAL
+  if [[ "$REAL_TG" == "1" ]]; then
+    command -v aliyun >/dev/null || { echo "--real-tg 需要 aliyun CLI" >&2; exit 1; }
+    echo "警告：LOAD模式使用本地PG/Redis，但 Telegram 将调用线上真实接口。"
+    real_cfg="$(ALIBABA_CLOUD_REGION_ID="$REGION_ID" aliyun sae DescribeApplicationConfig --region "$REGION_ID" --RegionId "$REGION_ID" --AppId "$APP_ID" --profile "$PROFILE")"
+    printf '%s' "$real_cfg" | jq -r '.Data.Envs[]? | select(.name != null and (.name|test("TELEGRAM|TG_|BOT_TOKEN|BOT_API";"i"))) | "export " + .name + "=" + (.value|@sh)' >> "$ENV_FILE"
+  fi
 else
   command -v aliyun >/dev/null || { echo "缺少 aliyun CLI" >&2; exit 1; }
   cfg="$(ALIBABA_CLOUD_REGION_ID="$REGION_ID" aliyun sae DescribeApplicationConfig --region "$REGION_ID" --RegionId "$REGION_ID" --AppId "$APP_ID" --profile "$PROFILE")"
@@ -124,7 +132,7 @@ echo "Web入口日志：$LOG_DIR/web.log"
 if [[ "$ALL_MODE" == "1" ]]; then
   # account 是 Telegram 协议号长连接，必须继续使用 SAE 单实例，不在本地重复启动。
   roles=(web collector-worker background-worker media-worker publish-worker scheduler)
-  if [[ "$LOAD_MODE" == "1" ]]; then
+  if [[ "$LOAD_MODE" == "1" && "$REAL_TG" != "1" ]]; then
     echo "启动本地 TG Fake Hook：127.0.0.1:19100"
     (cd "$ROOT_DIR" && go run ./tools/tg_hook_mock --addr 127.0.0.1:19100) >"$LOG_DIR/tg-fake.log" 2>&1 &
     pids=("$!")
