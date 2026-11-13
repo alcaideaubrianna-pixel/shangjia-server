@@ -236,6 +236,19 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 		return s.releaseTelegramOutbox(ctx, row.Id, owner, row.AttemptCount, err.Error())
 	}
 	if s.accountStreamPushEngineEnabled(ctx, job.TenantId, job.AccountId) {
+		// 手动/AI 运维任务是用户明确触发的交互操作，不能依赖 Stream
+		// 作为关键路径。Stream 堵塞时用户点击必须仍能进入 Asynq；
+		// 直接入队仍会执行频道前序检查、频道租约和 Job 幂等保护。
+		if telegramJobPriorityValue(job) == tgJobPriorityInteractive {
+			if err = s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 0, false); err != nil {
+				return s.releaseTelegramOutbox(ctx, row.Id, owner, row.AttemptCount, err.Error())
+			}
+			g.Log().Info(ctx, "手动TG任务绕过Stream直接进入Asynq", g.Map{
+				"event": "manual_direct_enqueue", "jobId": job.Id,
+				"channelId": job.ChannelId, "accountId": job.AccountId,
+			})
+			return s.confirmTelegramStreamOutbox(ctx, row.Id, owner, job.Id, row.AttemptCount)
+		}
 		if err = s.publishTelegramReadyStream(ctx, job); err != nil {
 			// 手动上架属于交互优先级。Stream 只是通知传输层，
 			// Stream 写入失败不能让用户任务跟循环积压一起等待；
