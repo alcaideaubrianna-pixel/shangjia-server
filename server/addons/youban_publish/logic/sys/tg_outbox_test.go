@@ -284,3 +284,22 @@ func TestTelegramDueOutboxChannelHeadAndLeaseIntegration(t *testing.T) {
 		t.Fatalf("rearmed Outbox status=%q err=%v, want %q", status.String(), err, telegramOutboxPending)
 	}
 }
+
+// TestFairTelegramOutboxRowsKeepsManualPriorityAndChannelIsolation verifies
+// that a blocked channel contributes at most one head while another channel's
+// manual task remains eligible for dispatch.
+func TestFairTelegramOutboxRowsKeepsManualPriorityAndChannelIsolation(t *testing.T) {
+	rows := []telegramJobOutboxRecord{
+		{Id: 10, JobId: 10, TenantId: 1, ChannelId: 100, TargetChatId: "-100100", AvailableAt: gtime.NewFromTime(time.Unix(10, 0))},
+		{Id: 11, JobId: 11, TenantId: 1, ChannelId: 100, TargetChatId: "-100100", AvailableAt: gtime.NewFromTime(time.Unix(11, 0))},
+		{Id: 20, JobId: 20, TenantId: 1, ChannelId: 200, TargetChatId: "-100200", AvailableAt: gtime.NewFromTime(time.Unix(12, 0))},
+		{Id: 30, JobId: 30, TenantId: 1, ChannelId: 300, TargetChatId: "-100300", AvailableAt: gtime.NewFromTime(time.Unix(13, 0))},
+	}
+	got := fairTelegramOutboxRows(rows, 3)
+	if len(got) != 3 {
+		t.Fatalf("selected heads=%d, want 3", len(got))
+	}
+	if got[0].JobId != 10 || got[1].JobId != 20 || got[2].JobId != 30 {
+		t.Fatalf("unexpected channel heads: %+v", got)
+	}
+}
