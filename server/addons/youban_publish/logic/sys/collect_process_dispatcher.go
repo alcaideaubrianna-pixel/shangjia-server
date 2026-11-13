@@ -14,6 +14,9 @@ import (
 func (s *sSysPublish) runCollectProcessDispatcher(ctx context.Context) {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
+	// 账户轮询游标保证大账户不能长期占据前 16 个分片名额。
+	// 游标只存在当前 Dispatcher 实例内，数据库租约仍负责多实例并发安全。
+	var accountCursor int64
 	for {
 		cycleCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		// 账户级轮询，避免一个历史积压账户占满全局 Outbox 批次。
@@ -21,11 +24,26 @@ func (s *sSysPublish) runCollectProcessDispatcher(ctx context.Context) {
 		// 过期 processing 也必须进入账户轮询。旧逻辑只选 pending，
 		// 导致 Worker 崩溃后留下的 processing 租约只能等待低频全局恢复，
 		// 采集事件长期无法进入资料终态和规则分发。
-		_ = g.DB().Model(collectProcessOutboxTable).Ctx(cycleCtx).
+		model := g.DB().Model(collectProcessOutboxTable).Ctx(cycleCtx).
 			Fields("tenant_id,account_id").
 			Where("account_id > 0").
 			Where("status = ? OR (status = ? AND lease_expires_at <= ?)", "pending", "processing", gtime.Now()).
-			Group("tenant_id,account_id").OrderAsc("tenant_id").OrderAsc("account_id").Limit(16).Scan(&scopes)
+			Where("account_id > ?", accountCursor).
+			Group("tenant_id,account_id").OrderAsc("account_id").OrderAsc("tenant_id").Limit(16)
+		if err := model.Scan(&scopes); err != nil {
+			g.Log().Warningf(ctx, "读取采集账户分片失败 cursor:%d err:%+v", accountCursor, err)
+		}
+		if len(scopes) == 0 && accountCursor > 0 {
+			accountCursor = 0
+			_ = g.DB().Model(collectProcessOutboxTable).Ctx(cycleCtx).
+				Fields("tenant_id,account_id").
+				Where("account_id > 0").
+				Where("status = ? OR (status = ? AND lease_expires_at <= ?)", "pending", "processing", gtime.Now()).
+				Group("tenant_id,account_id").OrderAsc("account_id").OrderAsc("tenant_id").Limit(16).Scan(&scopes)
+		}
+		if len(scopes) > 0 {
+			accountCursor = scopes[len(scopes)-1].AccountID
+		}
 		err := error(nil)
 		// 没有账户分片时不再回退到全局扫描；无归属历史任务由独立恢复器处理。
 		for _, scope := range scopes {
