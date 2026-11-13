@@ -16,6 +16,7 @@ WRITE_ARG=0
 WRITE_ALL=0
 LOAD_MODE=0
 REAL_TG=0
+WITH_ACCOUNT=0
 for arg in "$@"; do
   case "$arg" in
     all) ALL_MODE=1 ;;
@@ -23,6 +24,7 @@ for arg in "$@"; do
     --write-all|write-all) WRITE_ARG=1; WRITE_ALL=1 ;;
     --load|load) LOAD_MODE=1; ALL_MODE=1; WRITE_ARG=1; WRITE_ALL=1 ;;
     --real-tg|real-tg) REAL_TG=1 ;;
+    --with-account|with-account) WITH_ACCOUNT=1 ;;
   esac
 done
 SESSION="${ONLINE_DEBUG_SESSION:-$(date +%Y-%m-%d-%H-%M-%S)}"
@@ -132,6 +134,7 @@ echo "Web入口日志：$LOG_DIR/web.log"
 if [[ "$ALL_MODE" == "1" ]]; then
   # account 是 Telegram 协议号长连接，必须继续使用 SAE 单实例，不在本地重复启动。
   roles=(web collector-worker background-worker media-worker publish-worker scheduler)
+  if [[ "$WITH_ACCOUNT" == "1" ]]; then roles+=(account); fi
   if [[ "$LOAD_MODE" == "1" && "$REAL_TG" != "1" ]]; then
     echo "启动本地 TG Fake Hook：127.0.0.1:19100"
     (cd "$ROOT_DIR" && go run ./tools/tg_hook_mock --addr 127.0.0.1:19100) >"$LOG_DIR/tg-fake.log" 2>&1 &
@@ -158,9 +161,9 @@ if [[ "$ALL_MODE" == "1" ]]; then
     if [[ "$role" == "web" ]]; then echo "Web入口地址：http://127.0.0.1:$role_port"; echo "管理后台地址：http://127.0.0.1:$role_port${YOUBAN_ADMIN_ENTRY_PATH:-/admin}"; echo "后台API地址：http://127.0.0.1:$role_port/admin"; fi
     index=$((index + 1))
   done
-  echo "已启动 ${#roles[@]} 个角色；account 未启动；按 Ctrl-C 统一停止。"
+  echo "已启动 ${#roles[@]} 个角色；account=$WITH_ACCOUNT；按 Ctrl-C 统一停止。"
   wait
 else
-  echo "单角色模式：$ROLE；account 未启动。"
+  echo "单角色模式：$ROLE；account=$WITH_ACCOUNT。"
   exec "$BIN" "$ROLE"
 fi
