@@ -235,6 +235,14 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 	if err != nil {
 		return s.releaseTelegramOutbox(ctx, row.Id, owner, row.AttemptCount, err.Error())
 	}
+	// Stream 连续失败达到阈值时，任何账户都必须走 Asynq 兜底；不能再依赖
+	// 账户灰度配置，否则旧账户会无限重试而永远没有执行任务。
+	if row.AttemptCount >= 3 && telegramOutboxJobStillNeedsDispatch(job.Status, job.DispatchStatus) {
+		if fallbackErr := s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 0, false); fallbackErr == nil {
+			g.Log().Warning(ctx, "TG任务Outbox达到重试阈值，直接降级Asynq", g.Map{"event": "stream_fallback_enqueue", "jobId": job.Id, "outboxId": row.Id, "attemptCount": row.AttemptCount})
+			return s.confirmTelegramStreamOutbox(ctx, row.Id, owner, job.Id, row.AttemptCount)
+		}
+	}
 	if s.accountStreamPushEngineEnabled(ctx, job.TenantId, job.AccountId) {
 		// 手动/AI 运维任务是用户明确触发的交互操作，不能依赖 Stream
 		// 作为关键路径。Stream 堵塞时用户点击必须仍能进入 Asynq；
