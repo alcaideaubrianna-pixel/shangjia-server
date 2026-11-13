@@ -15,6 +15,7 @@ ALL_MODE="${ONLINE_DEBUG_ALL:-0}"
 if [[ "${1:-}" == "all" ]]; then ALL_MODE=1; fi
 LOG_DIR="${ONLINE_DEBUG_LOG_DIR:-/tmp/youban-online-debug-logs}"
 WRITE_MODE="${ONLINE_DEBUG_WRITE:-0}"
+if [[ "${1:-}" == "all" && -z "${ONLINE_DEBUG_WRITE+x}" ]]; then WRITE_MODE=1; fi
 BUILD_MODE="${ONLINE_DEBUG_BUILD:-1}"
 ENV_FILE="${ONLINE_DEBUG_ENV_FILE:-$(mktemp /tmp/youban-online-debug.XXXXXX.env)}"
 BIN="${ONLINE_DEBUG_SERVER_BIN:-$ROOT_DIR/bin/hotgo}"
