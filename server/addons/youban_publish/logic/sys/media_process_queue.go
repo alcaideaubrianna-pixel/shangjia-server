@@ -199,10 +199,22 @@ func (s *sSysPublish) wakeProfileTelegramJobs(ctx context.Context, profileId int
 			return nil
 		}
 		if err := s.submitProfilePublish(ctx, profileId, waiting.TenantId, waiting.AccountId, 0, waiting.OperationNo, nil, false); err != nil {
-			// Media processing has already succeeded. A publication error (for
-			// example, no eligible channel or a permission pause) must not turn
-			// the successful media task into a retryable failure.
-			g.Log().Warningf(ctx, "媒体就绪后恢复资料上架失败 profileId:%d operationNo:%s err:%+v", profileId, waiting.OperationNo, err)
+			message := boundPublishSuccessRecordMessage(err.Error())
+			_, _ = g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
+				Where("profile_id", profileId).Where("publish_task_status", "waiting_media").Data(g.Map{
+				"publish_task_status": sysin.PublishTaskStatusFailed, "publish_task_updated_at": gtime.Now(),
+			}).Update()
+			g.Log().Warning(ctx, "媒体就绪后恢复资料上架失败，已结束等待状态", g.Map{"profileId": profileId, "operationNo": waiting.OperationNo, "stage": "media_ready_wakeup", "error": message})
+		} else {
+			jobCount, countErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("profile_id", profileId).Where("operation_no", waiting.OperationNo).Count()
+			if countErr == nil && jobCount == 0 {
+				message := "媒体已就绪但未生成任何上架任务"
+				_, _ = g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
+					Where("profile_id", profileId).Where("publish_task_status", "waiting_media").Data(g.Map{
+					"publish_task_status": sysin.PublishTaskStatusFailed, "publish_task_updated_at": gtime.Now(),
+				}).Update()
+				g.Log().Warning(ctx, "媒体就绪后未生成上架任务，已结束等待状态", g.Map{"profileId": profileId, "operationNo": waiting.OperationNo, "stage": "media_ready_wakeup", "error": message})
+			}
 		}
 	}
 	var jobs []struct {
