@@ -334,17 +334,38 @@ func (s *sSysPublish) recoverReadyMediaPendingEvents(ctx context.Context, limit 
 	}
 	e := pdao.YoubanPublishCollectEvent.Columns()
 	m := pdao.YoubanPublishCollectEventMedia.Table()
-	rows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
-		Fields("e.id,e.tenant_id,e.account_id,e.source_id,e.source_chat_id").
-		Where("e."+e.Status, sysin.CollectEventStatusMediaPending).
-		Where(enabledCollectSourceExistsSQL("e")).
-		Where("EXISTS (SELECT 1 FROM "+m+" m WHERE m.event_id=e."+e.Id+")").
-		Where("NOT EXISTS (SELECT 1 FROM "+m+" m WHERE m.event_id=e."+e.Id+" AND m.cache_status<>?)", collectMediaCacheReady).
-		// 实时采集必须先于历史恢复，避免旧媒体积压占满本轮预算。
-		Order("CASE WHEN e."+e.UpdatedAt+" >= ? THEN 0 ELSE 1 END, e."+e.UpdatedAt+", e.id", gtime.Now().Add(-collectRecoveryRealtimeMaxAge)).
-		Limit(limit).All()
+	realtimeCutoff := gtime.Now().Add(-collectRecoveryRealtimeMaxAge)
+	buildModel := func() *gdb.Model {
+		return pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
+			Fields("e.id,e.tenant_id,e.account_id,e.source_id,e.source_chat_id").
+			Where("e."+e.Status, sysin.CollectEventStatusMediaPending).
+			Where(enabledCollectSourceExistsSQL("e")).
+			Where("EXISTS (SELECT 1 FROM "+m+" m WHERE m.event_id=e."+e.Id+")").
+			Where("NOT EXISTS (SELECT 1 FROM "+m+" m WHERE m.event_id=e."+e.Id+" AND m.cache_status<>?)", collectMediaCacheReady)
+	}
+	queryRows := func(recent bool, queryLimit int) ([]gdb.Record, error) {
+		if queryLimit <= 0 {
+			return nil, nil
+		}
+		model := buildModel()
+		if recent {
+			model = model.WhereGTE("e."+e.UpdatedAt, realtimeCutoff)
+		} else {
+			model = model.WhereLT("e."+e.UpdatedAt, realtimeCutoff)
+		}
+		return model.OrderAsc("e." + e.UpdatedAt).OrderAsc("e.id").Limit(queryLimit).All()
+	}
+
+	rows, err := queryRows(true, limit)
 	if err != nil {
-		return gerror.Wrap(err, "读取媒体已就绪的采集事件失败")
+		return gerror.Wrap(err, "读取实时优先媒体已就绪采集事件失败")
+	}
+	if len(rows) < limit {
+		historyRows, historyErr := queryRows(false, limit-len(rows))
+		if historyErr != nil {
+			return gerror.Wrap(historyErr, "读取历史媒体已就绪采集事件失败")
+		}
+		rows = append(rows, historyRows...)
 	}
 	for _, row := range rows {
 		id := row[e.Id].Int64()
@@ -904,18 +925,38 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 		limit = 100
 	}
 	deadline := gtime.Now().Add(-collectEventRecoverAfter)
+	realtimeCutoff := gtime.Now().Add(-collectRecoveryRealtimeWindow)
 	activeStatuses := []string{sysin.CollectEventStatusPending, sysin.CollectEventStatusGroupCollect, sysin.CollectEventStatusWaitingOrder, sysin.CollectEventStatusPrechecked, sysin.CollectEventStatusMediaPending, sysin.CollectEventStatusMediaReady}
-	rows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
-		Fields("e.id,e.tenant_id,e.account_id,e.source_id,e.source_chat_id,e.status,e.error_message").
-		WhereIn("e.status", activeStatuses).
-		WhereLTE("e.updated_at", deadline).
-		Where(enabledCollectSourceExistsSQL("e")).
-		// 先处理实时窗口内的事件；历史 group_collecting 只能使用剩余预算。
-		Order("CASE WHEN e.updated_at >= ? THEN 0 ELSE 1 END, e.updated_at, e.id", gtime.Now().Add(-collectRecoveryRealtimeWindow)).
-		Limit(limit).
-		All()
+	buildModel := func() *gdb.Model {
+		return pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
+			Fields("e.id,e.tenant_id,e.account_id,e.source_id,e.source_chat_id,e.status,e.error_message").
+			WhereIn("e.status", activeStatuses).
+			WhereLTE("e.updated_at", deadline).
+			Where(enabledCollectSourceExistsSQL("e"))
+	}
+	queryRows := func(recent bool, queryLimit int) ([]gdb.Record, error) {
+		if queryLimit <= 0 {
+			return nil, nil
+		}
+		model := buildModel()
+		if recent {
+			model = model.WhereGTE("e.updated_at", realtimeCutoff)
+		} else {
+			model = model.WhereLT("e.updated_at", realtimeCutoff)
+		}
+		return model.OrderAsc("e.updated_at").OrderAsc("e.id").Limit(queryLimit).All()
+	}
+
+	rows, err := queryRows(true, limit)
 	if err != nil {
-		return gerror.Wrap(err, "读取待恢复采集事件失败")
+		return gerror.Wrap(err, "读取实时优先待恢复采集事件失败")
+	}
+	if len(rows) < limit {
+		historyRows, historyErr := queryRows(false, limit-len(rows))
+		if historyErr != nil {
+			return gerror.Wrap(historyErr, "读取历史待恢复采集事件失败")
+		}
+		rows = append(rows, historyRows...)
 	}
 	if len(rows) < limit {
 		failedRows, failedErr := recoverableFailedCollectEventModel(ctx, deadline).
