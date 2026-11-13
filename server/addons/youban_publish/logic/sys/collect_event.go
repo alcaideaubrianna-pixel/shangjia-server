@@ -886,6 +886,13 @@ func collectEventRuleMapsToRecords(list []g.Map) []gdb.Record {
 }
 
 func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record) (bool, string, error) {
+	// 防止采集来源与发布目标相同形成回流死循环；来源和目标统一去掉 -100 后比较。
+	sourceChatID := canonicalCollectSourceChatID(event["source_chat_id"].String())
+	for _, targetChannelID := range collectRuleTargetChannelIds(rule) {
+		if sourceChatID != "" && sourceChatID == canonicalCollectSourceChatID(fmt.Sprintf("%d", targetChannelID)) {
+			return false, "采集来源与目标发布频道相同，已跳过防止循环", nil
+		}
+	}
 	if disabled, err := collectRuleChannelDisabled(ctx, event["tenant_id"].Int64(), event["account_id"].Int64(), rule["id"].Int64(), event["bot_id"].Int64(), event["source_chat_id"].String()); err != nil {
 		return false, "", err
 	} else if disabled {
