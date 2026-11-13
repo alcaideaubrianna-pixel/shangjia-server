@@ -335,7 +335,7 @@ func (s *sSysPublish) recoverReadyMediaPendingEvents(ctx context.Context, limit 
 	e := pdao.YoubanPublishCollectEvent.Columns()
 	m := pdao.YoubanPublishCollectEventMedia.Table()
 	rows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
-		Fields("e.*").
+		Fields("e.id,e.tenant_id,e.account_id,e.source_id,e.source_chat_id").
 		Where("e."+e.Status, sysin.CollectEventStatusMediaPending).
 		Where(enabledCollectSourceExistsSQL("e")).
 		Where("EXISTS (SELECT 1 FROM "+m+" m WHERE m.event_id=e."+e.Id+")").
@@ -494,7 +494,7 @@ func (s *sSysPublish) recoverBotCollectMedia(ctx context.Context, limit int) err
 	e := pdao.YoubanPublishCollectEvent.Columns()
 	deadline := gtime.Now().Add(-collectEventRecoverAfter)
 	model := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
-		Fields("e.*").
+		Fields("e.id,e.tenant_id,e.account_id,e.source_id,e.tg_account_id,e.status").
 		Where("e."+e.SourceType, sysin.CollectSourceTypeBot).
 		WhereIn("e."+e.Status, []string{sysin.CollectEventStatusMediaPending, sysin.CollectEventStatusMediaReady, sysin.CollectEventStatusGroupCollect, sysin.CollectEventStatusPending, sysin.CollectEventStatusFailed}).
 		WhereNull("e."+e.ProcessedAt).
@@ -906,7 +906,7 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 	deadline := gtime.Now().Add(-collectEventRecoverAfter)
 	activeStatuses := []string{sysin.CollectEventStatusPending, sysin.CollectEventStatusGroupCollect, sysin.CollectEventStatusWaitingOrder, sysin.CollectEventStatusPrechecked, sysin.CollectEventStatusMediaPending, sysin.CollectEventStatusMediaReady}
 	rows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
-		Fields("e.*").
+		Fields("e.id,e.tenant_id,e.account_id,e.source_id,e.source_chat_id,e.status,e.error_message").
 		WhereIn("e.status", activeStatuses).
 		WhereLTE("e.updated_at", deadline).
 		Where(enabledCollectSourceExistsSQL("e")).
@@ -986,7 +986,7 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 
 func recoverableFailedCollectEventModel(ctx context.Context, deadline *gtime.Time) *gdb.Model {
 	model := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
-		Fields("e.*").
+		Fields("e.id,e.tenant_id,e.account_id,e.source_id,e.source_chat_id,e.status,e.error_message").
 		Where("e.status", sysin.CollectEventStatusFailed).
 		WhereLTE("e.updated_at", deadline).
 		Where(enabledCollectSourceExistsSQL("e"))
