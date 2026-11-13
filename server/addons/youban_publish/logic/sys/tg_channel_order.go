@@ -95,7 +95,10 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 			fast = fast.Where("j.channel_id", job.ChannelId).
 				Where("j.account_id", job.AccountId)
 		}
-		earlier, err := fast.Fields("j.id,j.created_at,j.priority,j.status,j.dispatch_status,j.operation_no").OrderAsc("j.created_at").OrderAsc("j.id").Limit(1).One()
+		// 使用与 Outbox 队首选择器完全相同的排序规则：已开始任务优先，
+		// 其次按有效优先级、创建时间和主键排序，避免两套比较器互相打死。
+		earlier, err := fast.Fields("j.id,j.created_at,j.priority,j.status,j.dispatch_status,j.operation_no").
+			Order(telegramChannelScheduleOrderSQL("j")).Limit(1).One()
 		if err != nil {
 			return false, gerror.Wrap(err, "检查统一流频道前序TG任务失败")
 		}
