@@ -149,6 +149,26 @@ func (s *sSysPublish) recoverProfileMediaOperations(ctx context.Context) {
 			g.Log().Warningf(ctx, "恢复资料媒体任务入队失败 operation_id:%d err:%s", row.Id, err.Error())
 		}
 	}
+	// The media worker can finish successfully while the wake-up transaction
+	// times out. Treat the durable success row plus waiting_media state as a
+	// persisted media-ready event and retry the wake directly.
+	var completed []struct {
+		ProfileId int64 `json:"profileId"`
+	}
+	if err := g.DB().Model(profileMediaOperationTable+" o").Ctx(ctx).
+		Fields("p.profile_id").
+		InnerJoin(publishProfileStateTable+" p", "p.profile_no=o.profile_no AND p.tenant_id=o.tenant_id AND p.account_id=o.account_id AND p.deleted_at IS NULL").
+		Where("o.status", "success").Where("p.publish_task_status", "waiting_media").
+		Where("o.updated_at < ?", time.Now().Add(-10*time.Second)).
+		OrderAsc("o.id").Limit(200).Scan(&completed); err != nil {
+		g.Log().Warningf(ctx, "读取已完成媒体唤醒事件失败 err:%s", err.Error())
+	} else {
+		for _, row := range completed {
+			if err := s.wakeProfileTelegramJobs(ctx, row.ProfileId); err != nil {
+				g.Log().Warningf(ctx, "恢复已完成媒体上架唤醒失败 profile_id:%d err:%s", row.ProfileId, err.Error())
+			}
+		}
+	}
 	s.recoverWaitingMediaPublishes(ctx)
 }
 
