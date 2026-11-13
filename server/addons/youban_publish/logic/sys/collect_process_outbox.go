@@ -142,7 +142,9 @@ func (s *sSysPublish) dispatchDueCollectProcessOutbox(ctx context.Context, limit
 	if len(scopes) > 0 {
 		processing, countErr := g.DB().Model(collectProcessOutboxTable).Ctx(ctx).
 			Where("tenant_id", scopes[0].TenantID).Where("account_id", scopes[0].AccountID).
-			Where("status", "processing").WhereGT("lease_expires_at", now).Count()
+			// 过期 processing 也要计入上限；否则旧租约会在每轮被重新 claim，
+			// 总 processing 数持续增长并挤压正常采集终态处理。
+			Where("status", "processing").Count()
 		if countErr != nil {
 			return gerror.Wrap(countErr, "读取账户采集处理中任务数量失败")
 		}
