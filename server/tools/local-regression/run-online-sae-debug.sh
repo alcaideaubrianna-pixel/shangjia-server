@@ -116,7 +116,7 @@ if [[ "$ALL_MODE" == "1" ]]; then
     (source "$ENV_FILE"; export YOUBAN_PUBLISH_RUNTIME_ROLE="$role" GF_SERVER_ADDRESS=":$role_port" YOUBAN_SERVER_ADDRESS=":$role_port"; exec "$BIN" "$role") >"$log_file" 2>&1 &
     pids+=("$!")
     echo "角色已启动：$role pid=${pids[-1]} 日志=$log_file"
-    if [[ "$role" == "web" ]]; then echo "Web入口地址：http://127.0.0.1:$role_port"; fi
+    if [[ "$role" == "web" ]]; then echo "Web入口地址：http://127.0.0.1:$role_port"; echo "管理后台地址：http://127.0.0.1:$role_port${YOUBAN_ADMIN_ENTRY_PATH:-/admin}"; echo "后台API地址：http://127.0.0.1:$role_port${YOUBAN_ADMIN_ENTRY_PATH:-}/admin"; fi
     index=$((index + 1))
   done
   echo "已启动 ${#roles[@]} 个角色；account 未启动；按 Ctrl-C 统一停止。"
