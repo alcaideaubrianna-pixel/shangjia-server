@@ -66,28 +66,24 @@ func loadCollectStatsAggregate(ctx context.Context, tenantId, accountId int64) (
 SELECT
     source_stats.collecting_count,
     rule_stats.rule_count,
-    event_stats.event_count,
-    event_stats.blocked_count,
+    source_stats.event_count,
+    source_stats.blocked_count,
     review_stats.pending_review_count,
     dispatch_stats.failed_dispatch_count,
     dispatch_stats.sent_count,
     dispatch_stats.today_pushed_count
 FROM (
-    SELECT COUNT(*) AS collecting_count
+    SELECT COUNT(*) FILTER (WHERE %s=1 AND %s=1) AS collecting_count,
+           COALESCE(SUM(event_total),0) AS event_count,
+           COALESCE(SUM(blocked_total),0) AS blocked_count
     FROM %s
-    WHERE %s=? AND %s=? AND %s=1 AND %s=1 AND %s IS NULL
+    WHERE %s=? AND %s=? AND %s IS NULL
 ) source_stats
 CROSS JOIN (
     SELECT COUNT(*) AS rule_count
     FROM %s
     WHERE %s=? AND %s=? AND %s IS NULL
 ) rule_stats
-CROSS JOIN (
-	SELECT COALESCE(SUM(event_total),0) AS event_count,
-	       COALESCE(SUM(blocked_total),0) AS blocked_count
-	FROM %s
-	WHERE %s=? AND %s=? AND deleted_at IS NULL
-) event_stats
 CROSS JOIN (
     SELECT COALESCE(SUM(CASE WHEN %s=? THEN 1 ELSE 0 END), 0) AS pending_review_count
     FROM %s
@@ -100,9 +96,8 @@ CROSS JOIN (
     FROM %s
     WHERE %s=? AND %s=?
 ) dispatch_stats`,
-		pdao.YoubanPublishCollectSource.Table(), sourceCols.TenantId, sourceCols.AccountId, sourceCols.CollectEnabled, sourceCols.Status, sourceCols.DeletedAt,
+		sourceCols.CollectEnabled, sourceCols.Status, pdao.YoubanPublishCollectSource.Table(), sourceCols.TenantId, sourceCols.AccountId, sourceCols.DeletedAt,
 		pdao.YoubanPublishCollectRule.Table(), ruleCols.TenantId, ruleCols.AccountId, ruleCols.DeletedAt,
-		pdao.YoubanPublishCollectSource.Table(), sourceCols.TenantId, sourceCols.AccountId,
 		reviewCols.Status, pdao.YoubanPublishCollectReview.Table(), reviewCols.TenantId, reviewCols.AccountId,
 		dispatchCols.Status, dispatchCols.Status, dispatchCols.Status, dispatchCols.FinishedAt, pdao.YoubanPublishCollectDispatch.Table(), dispatchCols.TenantId, dispatchCols.AccountId,
 	)

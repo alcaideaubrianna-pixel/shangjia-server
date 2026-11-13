@@ -77,23 +77,28 @@ func (s *sSysPublish) syncCollectSourceStats(ctx context.Context, sourceID int64
 	sourceCols := pdao.YoubanPublishCollectSource.Columns()
 
 	stats, err := g.DB().GetOne(ctx, fmt.Sprintf(`SELECT
-		(SELECT COUNT(*) FROM %s WHERE %s=?) AS event_total,
-		(SELECT COALESCE(SUM(CASE WHEN %s=? AND COALESCE(%s,'')<>? THEN 1 ELSE 0 END),0) FROM %s WHERE %s=?) AS failed_total,
-		(SELECT COALESCE(SUM(CASE WHEN %s=? THEN 1 ELSE 0 END),0) FROM %s WHERE %s=?) AS blocked_total,
-		(SELECT MAX(%s) FROM %s WHERE %s=?) AS last_event_at,
-		(SELECT COUNT(DISTINCT %s) FROM %s WHERE %s=? AND %s=?) AS success_total`,
-		eventDao.Table(), eventCols.SourceId, eventCols.Status, "material_role", eventDao.Table(), eventCols.SourceId,
-		eventCols.Status, eventDao.Table(), eventCols.SourceId,
-		eventCols.ReceivedAt, eventDao.Table(), eventCols.SourceId, dispatchCols.EventId, dispatchDao.Table(), dispatchCols.SourceId, dispatchCols.Status),
-		sourceID, sysin.CollectEventStatusFailed, collectMaterialRoleVerify, sourceID, sysin.CollectEventStatusIgnored, sourceID, sourceID, sourceID, sysin.CollectDispatchStatusSent)
+		COUNT(*) AS event_total,
+		COALESCE(SUM(CASE WHEN %s=? AND COALESCE(material_role,'')<>? THEN 1 ELSE 0 END),0) AS failed_total,
+		COALESCE(SUM(CASE WHEN %s=? THEN 1 ELSE 0 END),0) AS blocked_total,
+		MAX(%s) AS last_event_at
+	FROM %s
+	WHERE %s=?`, eventCols.Status, eventCols.Status, eventCols.ReceivedAt, eventDao.Table(), eventCols.SourceId),
+		sysin.CollectEventStatusFailed, collectMaterialRoleVerify, sysin.CollectEventStatusIgnored, sourceID)
 	if err != nil {
-		return gerror.Wrap(err, "统计采集源事件和成功数失败")
+		return gerror.Wrap(err, "统计采集源事件失败")
+	}
+	success, err := g.DB().GetValue(ctx, fmt.Sprintf(`SELECT COUNT(DISTINCT %s)
+	FROM %s
+	WHERE %s=? AND %s=?`, dispatchCols.EventId, dispatchDao.Table(), dispatchCols.SourceId, dispatchCols.Status),
+		sourceID, sysin.CollectDispatchStatusSent)
+	if err != nil {
+		return gerror.Wrap(err, "统计采集源成功数失败")
 	}
 	_, err = pdao.YoubanPublishCollectSource.Ctx(ctx).
 		Where(sourceCols.Id, sourceID).
 		Data(g.Map{
 			sourceCols.EventTotal:   stats["event_total"].Int64(),
-			sourceCols.SuccessTotal: stats["success_total"].Int64(),
+			sourceCols.SuccessTotal: success.Int64(),
 			sourceCols.FailedTotal:  stats["failed_total"].Int64(),
 			"blocked_total":         stats["blocked_total"].Int64(),
 			sourceCols.LastEventAt:  stats["last_event_at"],
