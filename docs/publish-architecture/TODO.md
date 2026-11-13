@@ -30,7 +30,7 @@
 - [x] 使用 GoFrame CLI 同步 `do.YoubanPublishTgJob` 的 `send_phase` 等字段：`08113c59`。统一入口已改用 DO/DAO；历史逻辑仍需逐模块迁移。
 - [ ] 循环/批次统一 `cycle_plan → cycle_run → tg_job` 游标模型。
 - [ ] 真实 TG Fake 回放：1000 条、多频道、跨账户同频道、手动插队。
-- [ ] 固定批次小规模回放已验证：20 条中 18 条 sent，2 条按同频道前序 sending/failed_retry 正确等待；仍需隔离前序任务后完成 1000 条验收。
+- [x] 固定批次隔离回放：20/20 sent，20/20 Outbox delivered，TG 消息记录 40 条，非终态 0；验证命令使用 `fixed_accept:run2:*`，仍需扩展到 1000 条。
 - [ ] 超时释放频道租约、ZREM、唤醒下一条的真实回放。
 - [ ] Redis 索引删除后由 Outbox 自动回填的真实回放。
 - [ ] DBX 对 300 万资料表和采集/TG Job 热点 SQL 完成 EXPLAIN 验证。
