@@ -119,6 +119,12 @@ func telegramDeliveryRuntimeEnabled(config publishRuntimeConfig) bool {
 }
 
 func (s *sSysPublish) startPublishSchedulers(ctx context.Context) {
+	// Media operations are durable database intents and must be recovered by every
+	// publish runtime, including instances that do not start the Telegram queue
+	// server. This closes the gap where a BOT profile is saved but Redis/Asynq
+	// enqueue fails before the queue worker is ready.
+	go s.recoverProfileMediaOperations(ctx)
+	go s.profileMediaRecoveryLoop(ctx)
 	go s.runAccountNotices(ctx)
 	if err := s.backfillPublishSuccessRecords(ctx, 5000); err != nil {
 		g.Log().Warningf(ctx, "补写成功发布记录失败：%+v", err)
