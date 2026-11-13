@@ -475,12 +475,13 @@ func (s *sSysPublish) dueTelegramJobOutboxRows(ctx context.Context, limit int, n
 		var accountRows []struct {
 			AccountID int64 `orm:"account_id"`
 		}
-		if err := g.DB().GetScan(queryCtx, &accountRows, `SELECT DISTINCT j.account_id AS account_id
+		if err := g.DB().GetScan(queryCtx, &accountRows, `SELECT j.account_id AS account_id
 			FROM `+publishTgOutboxTable+` o JOIN `+publishTgJobTable+` j ON j.id=o.job_id
 			WHERE o.event_type=? AND o.available_at<=?
 				AND (o.status=? OR (o.status=? AND o.lease_expires_at<=?))
 				AND j.account_id>0
-			ORDER BY j.account_id LIMIT 64`,
+			GROUP BY j.account_id
+			ORDER BY MIN(o.available_at), j.account_id LIMIT 64`,
 			telegramOutboxEventPublish, now, telegramOutboxPending, telegramOutboxProcessing, now); err != nil {
 			return nil, gerror.Wrap(err, "读取TG Outbox就绪账户失败")
 		}
@@ -608,12 +609,12 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 	if err := g.DB().Model(publishTgOutboxTable+" o").Safe().Ctx(ctx).
 		// 为表达式显式命名，避免 GoFrame 扫描 []int64 时将 DISTINCT
 		// 表达式解析成零值，导致后续只查询 account_id=0 的旧任务。
-		Fields("DISTINCT j.account_id AS account_id").
+		Fields("j.account_id AS account_id, MIN(o.available_at) AS oldest_available").
 		InnerJoin(publishTgJobTable+" j", "j.id=o.job_id").
 		Where("j.account_id > 0").Where("o.event_type", telegramOutboxEventPublish).
 		Where("o.available_at <= ?", now).Where("o.status IN (?,?)", telegramOutboxPending, telegramOutboxProcessing).
 		WhereIn("j.status", []string{"pending", "failed_retry", "unknown"}).
-		OrderAsc("j.account_id").Limit(32).Scan(&accountRows); err != nil {
+		Group("j.account_id").OrderAsc("oldest_available").OrderAsc("j.account_id").Limit(32).Scan(&accountRows); err != nil {
 		return nil, gerror.Wrap(err, "读取Stream账户分片失败")
 	}
 	accounts := make([]int64, 0, len(accountRows))
