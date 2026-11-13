@@ -600,74 +600,32 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 	if limit > telegramOutboxMaxBatchLimit(ctx) {
 		limit = telegramOutboxMaxBatchLimit(ctx)
 	}
-	// 账户目录先分片，避免 Stream 模式每轮更新/扫描全局 Job 和 Outbox 大表。
-	var accountRows []struct {
+	// 频道目录分片，避免一个账户的频道积压互相饿死。
+	var channelRows []struct {
 		AccountID int64 `orm:"account_id"`
+		ChannelID int64 `orm:"channel_id"`
 	}
-	// 账户目录直接从 Outbox 读取，避免先扫描 tg_job 再用 EXISTS 回查 Outbox。
-	// 这样 Stream 快速路径只触碰到期通知行，历史任务不会进入候选集合。
+	// 只读取到期 Outbox 的账户/频道键，再为每个频道单独取队首。
 	if err := g.DB().Model(publishTgOutboxTable+" o").Safe().Ctx(ctx).
-		// 为表达式显式命名，避免 GoFrame 扫描 []int64 时将 DISTINCT
-		// 表达式解析成零值，导致后续只查询 account_id=0 的旧任务。
-		Fields("j.account_id AS account_id, MIN(o.available_at) AS oldest_available").
+		Fields("j.account_id,j.channel_id").
 		InnerJoin(publishTgJobTable+" j", "j.id=o.job_id").
 		Where("j.account_id > 0").Where("o.event_type", telegramOutboxEventPublish).
 		Where("o.available_at <= ?", now).Where("o.status IN (?,?)", telegramOutboxPending, telegramOutboxProcessing).
 		WhereIn("j.status", []string{"pending", "failed_retry", "unknown"}).
-		Group("j.account_id").OrderAsc("oldest_available").OrderAsc("j.account_id").Limit(32).Scan(&accountRows); err != nil {
-		return nil, gerror.Wrap(err, "读取Stream账户分片失败")
+		Where("j.channel_id > 0").Group("j.account_id,j.channel_id").OrderAsc("MIN(o.available_at)").Limit(limit).Scan(&channelRows); err != nil {
+		return nil, gerror.Wrap(err, "读取Stream频道分片失败")
 	}
-	accounts := make([]int64, 0, len(accountRows))
-	for _, row := range accountRows {
-		if row.AccountID > 0 {
-			accounts = append(accounts, row.AccountID)
-		}
-	}
-	// 不要每轮无条件追加 account_id=0。线上绝大多数任务都有账户归属，
-	// 无条件执行 legacy 查询会扫描整张历史 Outbox，拖住正常账户。无归属
-	// 任务由独立恢复流程处理，不能阻塞统一流账户。
-	if len(accounts) == 0 {
+	if len(channelRows) == 0 {
 		return nil, nil
 	}
-	perAccount := limit / len(accounts)
-	if perAccount < 1 {
-		perAccount = 1
-	}
 	var rows []telegramJobOutboxRecord
-	for _, accountID := range accounts {
-		accountFilter := "j.account_id=?"
-		// Stream 只负责快速通知；频道顺序由消费后的幂等入队和完成唤醒保证。
-		// 不在这里重复计算频道队首，避免大表窗口排序拖慢所有账户。
-		query := `WITH channel_heads AS (
-			SELECT DISTINCT ON (CASE WHEN NULLIF(REPLACE(COALESCE(j.target_chat_id,''), '-100', ''),'') IS NOT NULL
-				THEN 'chat:' || REPLACE(COALESCE(j.target_chat_id,''), '-100', '')
-				WHEN j.channel_id > 0 THEN j.channel_id::text
-				ELSE 'chat:' || COALESCE(j.target_chat_id,'') END)
-				o.id,o.job_id,o.attempt_count,o.available_at,
-				` + telegramChannelScheduleRankSQL("j") + ` AS schedule_rank,
-				` + telegramJobEffectivePrioritySQL("j") + ` AS effective_priority,
-				CASE WHEN NULLIF(REPLACE(COALESCE(j.target_chat_id,''), '-100', ''),'') IS NOT NULL
-					THEN 'chat:' || REPLACE(COALESCE(j.target_chat_id,''), '-100', '')
-					WHEN j.channel_id > 0 THEN j.channel_id::text
-					ELSE 'chat:' || COALESCE(j.target_chat_id,'') END AS channel_key
-		FROM ` + publishTgOutboxTable + ` o
-		JOIN ` + publishTgJobTable + ` j ON j.id=o.job_id
-		WHERE ` + accountFilter + ` AND o.event_type=? AND o.available_at<=?
-			AND (o.status=? OR (o.status=? AND o.lease_expires_at<=?))
-			AND j.status IN ('pending','failed_retry','unknown')
-			AND COALESCE(j.dispatch_status,'') IN ('','idle')
-			AND (j.next_retry_at IS NULL OR j.next_retry_at<=? OR (j.status='pending' AND COALESCE(j.dispatch_status,'')='idle'))
-		ORDER BY channel_key,schedule_rank,effective_priority,o.available_at,o.id
-		)
-		SELECT id,job_id,attempt_count,available_at
-		FROM channel_heads
-		ORDER BY available_at,id LIMIT ?`
-		queryArgs := []any{accountID, telegramOutboxEventPublish, now, telegramOutboxPending, telegramOutboxProcessing, now, now, perAccount}
-		var accountRows []telegramJobOutboxRecord
-		if err := g.DB().GetScan(ctx, &accountRows, query, queryArgs...); err != nil {
-			return nil, gerror.Wrap(err, "读取 Stream 模式TG任务Outbox失败")
+	for _, channel := range channelRows {
+		query := `SELECT o.id,o.job_id,o.attempt_count,o.available_at FROM ` + publishTgOutboxTable + ` o JOIN ` + publishTgJobTable + ` j ON j.id=o.job_id WHERE j.account_id=? AND j.channel_id=? AND o.event_type=? AND o.available_at<=? AND (o.status=? OR (o.status=? AND o.lease_expires_at<=?)) AND j.status IN ('pending','failed_retry','unknown') AND COALESCE(j.dispatch_status,'') IN ('','idle') AND (j.next_retry_at IS NULL OR j.next_retry_at<=? OR (j.status='pending' AND COALESCE(j.dispatch_status,'')='idle')) ORDER BY o.available_at,o.id LIMIT 1`
+		var head []telegramJobOutboxRecord
+		if err := g.DB().GetScan(ctx, &head, query, channel.AccountID, channel.ChannelID, telegramOutboxEventPublish, now, telegramOutboxPending, telegramOutboxProcessing, now, now); err != nil {
+			return nil, gerror.Wrap(err, "读取频道Stream队首失败")
 		}
-		rows = append(rows, accountRows...)
+		rows = append(rows, head...)
 	}
 	return rows, nil
 }
