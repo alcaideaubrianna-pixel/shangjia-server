@@ -244,6 +244,12 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 		}
 	}
 	if s.accountStreamPushEngineEnabled(ctx, job.TenantId, job.AccountId) {
+		// Asynq 是发送主路径，Stream 仅作为旁路通知/观测通道。
+		// Stream 不可用时不能阻塞频道；直接入队仍经过频道租约、队首和幂等校验。
+		if err = s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 0, false); err == nil {
+			g.Log().Debug(ctx, "TG任务绕过Stream进入Asynq主路径", g.Map{"event": "stream_bypass_direct_enqueue", "jobId": job.Id, "outboxId": row.Id})
+			return s.confirmTelegramStreamOutbox(ctx, row.Id, owner, job.Id, row.AttemptCount)
+		}
 		// 手动/AI 运维任务是用户明确触发的交互操作，不能依赖 Stream
 		// 作为关键路径。Stream 堵塞时用户点击必须仍能进入 Asynq；
 		// 直接入队仍会执行频道前序检查、频道租约和 Job 幂等保护。
