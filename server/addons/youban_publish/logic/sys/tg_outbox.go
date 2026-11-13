@@ -593,7 +593,16 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 		accountFilter := "j.account_id=?"
 		// Stream 只负责快速通知；频道顺序由消费后的幂等入队和完成唤醒保证。
 		// 不在这里重复计算频道队首，避免大表窗口排序拖慢所有账户。
-		query := `SELECT o.id,o.job_id,o.attempt_count,o.available_at
+		query := `WITH channel_heads AS (
+			SELECT DISTINCT ON (CASE WHEN NULLIF(REPLACE(COALESCE(j.target_chat_id,''), '-100', ''),'') IS NOT NULL
+				THEN 'chat:' || REPLACE(COALESCE(j.target_chat_id,''), '-100', '')
+				WHEN j.channel_id > 0 THEN j.channel_id::text
+				ELSE 'chat:' || COALESCE(j.target_chat_id,'') END)
+				o.id,o.job_id,o.attempt_count,o.available_at,
+				CASE WHEN NULLIF(REPLACE(COALESCE(j.target_chat_id,''), '-100', ''),'') IS NOT NULL
+					THEN 'chat:' || REPLACE(COALESCE(j.target_chat_id,''), '-100', '')
+					WHEN j.channel_id > 0 THEN j.channel_id::text
+					ELSE 'chat:' || COALESCE(j.target_chat_id,'') END AS channel_key
 		FROM ` + publishTgOutboxTable + ` o
 		JOIN ` + publishTgJobTable + ` j ON j.id=o.job_id
 		WHERE ` + accountFilter + ` AND o.event_type=? AND o.available_at<=?
@@ -601,7 +610,11 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 			AND j.status IN ('pending','failed_retry','unknown')
 			AND COALESCE(j.dispatch_status,'') IN ('','idle')
 			AND (j.next_retry_at IS NULL OR j.next_retry_at<=? OR (j.status='pending' AND COALESCE(j.dispatch_status,'')='idle'))
-		ORDER BY o.available_at,o.id LIMIT ?`
+		ORDER BY channel_key,o.available_at,o.id
+		)
+		SELECT id,job_id,attempt_count,available_at
+		FROM channel_heads
+		ORDER BY available_at,id LIMIT ?`
 		queryArgs := []any{accountID, telegramOutboxEventPublish, now, telegramOutboxPending, telegramOutboxProcessing, now, now, perAccount}
 		var accountRows []telegramJobOutboxRecord
 		if err := g.DB().GetScan(ctx, &accountRows, query, queryArgs...); err != nil {
