@@ -676,6 +676,7 @@ func (f *botCollectorFeature) HandleUpdate(ctx context.Context, bot gatewayservi
 		// Gateway 的 ReferenceID 属于入口 Bot 表；采集来源保存的是发布 Bot 表 ID。
 		// 使用 Bot Token 解析真实发布 Bot ID，避免两张表的业务 ID 混用。
 		publishBotID := binding.ReferenceID
+		botIDs := []int64{binding.ReferenceID}
 		if strings.TrimSpace(bot.Token) != "" {
 			var publishBot struct{ ID int64 }
 			// 管理后台 BOT 配置表是入口身份的权威来源，优先使用该表的 ID。
@@ -687,10 +688,20 @@ func (f *botCollectorFeature) HandleUpdate(ctx context.Context, bot gatewayservi
 			}
 			if publishBot.ID > 0 {
 				publishBotID = publishBot.ID
+				botIDs = append(botIDs, publishBot.ID)
+			}
+			var publishBotRow struct{ ID int64 }
+			if err := g.DB().Model("hg_youban_publish_bot").Safe().Ctx(ctx).
+				Fields("id").Where("bot_token", bot.Token).Where("status", 1).WhereNull("deleted_at").Scan(&publishBotRow); err == nil && publishBotRow.ID > 0 {
+				botIDs = append(botIDs, publishBotRow.ID)
+				if publishBotID <= 0 {
+					publishBotID = publishBotRow.ID
+				}
 			}
 		}
+		botIDs = uniqueCollectorBotIDs(botIDs)
 		model := g.DB().Model("hg_youban_publish_collect_source").Safe().Ctx(ctx).
-			Fields("id,tenant_id").Where("bot_id", publishBotID).Where("source_type", "bot").
+			Fields("id,tenant_id").WhereIn("bot_id", botIDs).Where("source_type", "bot").
 			Where("collect_enabled", 1).Where("status", 1).WhereNull("deleted_at")
 		if err := model.Scan(&sources); err != nil {
 			ingestErrors = append(ingestErrors, fmt.Errorf("读取TG Bot采集源失败 tenant:%d bot:%d: %w", binding.TenantID, binding.ReferenceID, err))
@@ -732,4 +743,20 @@ func (f *botCollectorFeature) HandleUpdate(ctx context.Context, bot gatewayservi
 	// Collector is an additional gateway consumer. Returning false allows the
 	// existing provider features to process the same update as before.
 	return false, errors.Join(ingestErrors...)
+}
+
+func uniqueCollectorBotIDs(values []int64) []int64 {
+	seen := make(map[int64]struct{}, len(values))
+	result := make([]int64, 0, len(values))
+	for _, value := range values {
+		if value <= 0 {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
 }
