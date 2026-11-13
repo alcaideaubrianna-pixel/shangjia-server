@@ -18,6 +18,12 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ybp_collect_event_source_received
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_sys_attachment_path
     ON public.hg_sys_attachment (path);
 
+-- 账户分片调度只读取仍待处理或租约已过期的账户，避免按 Outbox 全表聚合。
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ybp_collect_outbox_scope_due
+    ON public.hg_youban_publish_collect_process_outbox
+    (tenant_id, account_id, status, available_at, lease_expires_at, id);
+
 -- Rollback only if required, separately and outside a transaction:
 -- DROP INDEX CONCURRENTLY public.idx_ybp_collect_event_source_received;
 -- DROP INDEX CONCURRENTLY public.idx_sys_attachment_path;
+-- DROP INDEX CONCURRENTLY public.idx_ybp_collect_outbox_scope_due;

@@ -14,10 +14,10 @@ import (
 func (s *sSysPublish) runCollectProcessDispatcher(ctx context.Context) {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
-	// 账户轮询游标保证大账户不能长期占据前 16 个分片名额。
+	// 复合游标保证同一账户在不同租户下不会互相跳过，且 account_id=0 的 BOT 分片可被公平轮询。
 	// 游标只存在当前 Dispatcher 实例内，数据库租约仍负责多实例并发安全。
-	// 从 -1 开始，确保 account_id=0 的 BOT 采集分片也会被轮询。
-	var accountCursor int64 = -1
+	var cursorTenantID int64 = -1
+	var cursorAccountID int64 = -1
 	for {
 		cycleCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		// 账户级轮询，避免一个历史积压账户占满全局 Outbox 批次。
@@ -29,21 +29,24 @@ func (s *sSysPublish) runCollectProcessDispatcher(ctx context.Context) {
 			Fields("tenant_id,account_id").
 			Where("account_id >= 0").
 			Where("status = ? OR (status = ? AND lease_expires_at <= ?)", "pending", "processing", gtime.Now()).
-			Where("account_id > ?", accountCursor).
-			Group("tenant_id,account_id").OrderAsc("account_id").OrderAsc("tenant_id").Limit(16)
+			Where("(tenant_id > ? OR (tenant_id = ? AND account_id > ?))", cursorTenantID, cursorTenantID, cursorAccountID).
+			Group("tenant_id,account_id").OrderAsc("tenant_id").OrderAsc("account_id").Limit(16)
 		if err := model.Scan(&scopes); err != nil {
-			g.Log().Warningf(ctx, "读取采集账户分片失败 cursor:%d err:%+v", accountCursor, err)
+			g.Log().Warningf(ctx, "读取采集账户分片失败 tenantCursor:%d accountCursor:%d err:%+v", cursorTenantID, cursorAccountID, err)
 		}
-		if len(scopes) == 0 && accountCursor >= 0 {
-			accountCursor = -1
+		if len(scopes) == 0 && (cursorTenantID >= 0 || cursorAccountID >= 0) {
+			cursorTenantID = -1
+			cursorAccountID = -1
 			_ = g.DB().Model(collectProcessOutboxTable).Ctx(cycleCtx).
 				Fields("tenant_id,account_id").
 				Where("account_id >= 0").
 				Where("status = ? OR (status = ? AND lease_expires_at <= ?)", "pending", "processing", gtime.Now()).
-				Group("tenant_id,account_id").OrderAsc("account_id").OrderAsc("tenant_id").Limit(16).Scan(&scopes)
+				Group("tenant_id,account_id").OrderAsc("tenant_id").OrderAsc("account_id").Limit(16).Scan(&scopes)
 		}
 		if len(scopes) > 0 {
-			accountCursor = scopes[len(scopes)-1].AccountID
+			last := scopes[len(scopes)-1]
+			cursorTenantID = last.TenantID
+			cursorAccountID = last.AccountID
 		}
 		err := error(nil)
 		// 没有账户分片时不再回退到全局扫描；无归属历史任务由独立恢复器处理。
