@@ -12,6 +12,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	"hotgo/internal/consts"
 	hglock "hotgo/internal/library/hgrds/lock"
 )
 
@@ -525,6 +526,7 @@ func (s *sSysPublish) profileCycleDueRowsShard(ctx context.Context, limit, shard
 	var rows []profileCycleDueRow
 	model := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
 		InnerJoin(publishChannelProfileTable+" cp", "cp.last_job_id=j.id AND cp.status='active'").
+		InnerJoin("hg_content_profile p", "p.id=j.profile_id AND p.deleted_at IS NULL").
 		LeftJoin(publishChannelTable+" c", "c.id=j.channel_id AND c.deleted_at IS NULL").
 		Fields("j.id AS job_id,j.tenant_id,j.account_id,j.profile_id,j.channel_id,j.sent_at,j.cycle_days,j.cycle_publish_time,j.next_cycle_at,j.dispatch_count,j.cycle_failure_count,"+
 			"COALESCE(c.cycle_publish_enabled,0) AS channel_enabled,COALESCE(c.cycle_publish_days,0) AS channel_days,"+
@@ -536,6 +538,7 @@ func (s *sSysPublish) profileCycleDueRowsShard(ctx context.Context, limit, shard
 		// 新引擎从账户到期索引驱动，历史任务只通过主键读取发送证据。
 		model = g.DB().Model(publishChannelProfileTable+" cp").Safe().Ctx(ctx).
 			InnerJoin(publishTgJobTable+" j", "j.id=cp.last_job_id AND j.tenant_id=cp.tenant_id AND j.account_id=cp.account_id AND j.profile_id=cp.profile_id AND j.channel_id=cp.channel_id").
+			InnerJoin("hg_content_profile p", "p.id=cp.profile_id AND p.deleted_at IS NULL").
 			InnerJoin(publishChannelTable+" c", "c.id=cp.channel_id AND c.deleted_at IS NULL").
 			Fields("j.id AS job_id,j.tenant_id,j.account_id,j.profile_id,j.channel_id,j.sent_at,j.cycle_days,j.cycle_publish_time,cp.next_cycle_at,cp.cycle_generation AS dispatch_count,j.cycle_failure_count").
 			Where("cp.tenant_id", scopes[0].TenantID).Where("cp.account_id", scopes[0].AccountID).Where("cp.status", "active").
@@ -551,6 +554,8 @@ func (s *sSysPublish) profileCycleDueRowsShard(ctx context.Context, limit, shard
 		model = model.Where("NOT EXISTS (SELECT 1 FROM " + publishProfileCycleRunChannelTable + " planning_channel INNER JOIN " + publishProfileCycleRunTable + " planning ON planning.id=planning_channel.run_id WHERE planning.tenant_id=j.tenant_id AND planning.account_id=j.account_id AND planning.profile_id=j.profile_id AND planning_channel.channel_id=j.channel_id AND planning.status IN ('pending','running','dispatching') AND planning_channel.status IN ('pending','running','dispatching'))")
 		model = model.Where("c.status", 1).Where("c.cycle_publish_enabled", 1).Where("COALESCE(NULLIF(LOWER(TRIM(c.cycle_publish_mode)),''),'time')='time'").Where("c.publish_direction", "up").Where("NOT EXISTS (SELECT 1 FROM " + publishTgJobTable + " active WHERE active.tenant_id=j.tenant_id AND active.account_id=j.account_id AND active.profile_id=j.profile_id AND active.channel_id=j.channel_id AND active.status IN ('pending','sending','failed_retry','unknown'))")
 	}
+	// 循环翻新只处理当前仍可发布的资料；下架或非公开资料不再生成新的循环 Job。
+	model = model.Where("p.status", 1).Where("p.visibility", consts.ContentVisibilityPublic)
 	if shard >= 0 {
 		model = model.Where("MOD(ABS(HASHTEXT(j.tenant_id::text || ':' || j.account_id::text)), ?) = ?", profileCycleShardCount, shard)
 	}
