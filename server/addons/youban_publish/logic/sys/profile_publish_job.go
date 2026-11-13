@@ -309,7 +309,12 @@ func (s *sSysPublish) ensureTelegramProfileJobWithMeta(ctx context.Context, sour
 	var jobID int64
 	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		var txErr error
-		jobID, txErr = s.ensureTelegramProfileJobWithMetaTx(ctx, tx, source, channel, operationNo, meta)
+		jobID, txErr = s.createPublishJobTx(ctx, tx, publishJobCreateRequest{
+			Source:      source,
+			Channel:     channel,
+			OperationNo: operationNo,
+			Meta:        meta,
+		})
 		return txErr
 	})
 	return jobID, err
