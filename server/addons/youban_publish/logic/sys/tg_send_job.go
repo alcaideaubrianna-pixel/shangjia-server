@@ -123,6 +123,26 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) (resultE
 	if streamEngine {
 		ctx, stopExecution = telegramStreamExecutionContext(ctx, lease)
 	}
+	// 获取频道执行租约后必须再次确认队首。Outbox/Stream 入队检查与
+	// Worker 开始执行之间存在时间窗口，单靠前一次检查会让后创建的任务
+	// 在旧任务尚未发送时提前进入 Telegram。此处在频道租约保护下重新读取
+	// 主库，非队首任务立即退避并释放租约，禁止进入 sendMediaGroup。
+	step = beginTelegramPublishStage(ctx, "channel.send_gate")
+	gateWaitingOrder, gateErr := s.telegramChannelHasEarlierActiveJob(ctx, targetJob)
+	step.End(gateErr, g.Map{"hasEarlier": gateWaitingOrder, "gate": "execution"})
+	if gateErr != nil {
+		stopExecution()
+		s.releaseTelegramChannelLease(ctx, lease)
+		return gerror.Wrap(gateErr, "执行阶段频道队首闸门检查失败")
+	}
+	if gateWaitingOrder {
+		stopExecution()
+		s.releaseTelegramChannelLease(ctx, lease)
+		if postponeErr := s.postponeTelegramJobForChannelOrder(ctx, targetJob); postponeErr != nil {
+			return gerror.Wrap(postponeErr, "执行阶段非队首任务退避失败")
+		}
+		return nil
+	}
 	defer func() {
 		stopExecution()
 		releaseStage := beginTelegramPublishStage(ctx, "channel.send_lease.release")
