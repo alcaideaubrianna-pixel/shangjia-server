@@ -14,6 +14,7 @@
 8. [HotGo 实现规范](./08-hotgo-implementation.md)
 9. [迁移、回放与验收](./09-migration-and-acceptance.md)
 10. [重构 TODO 与验收状态](./TODO.md)
+11. [实时采集规则队列与性能稳定方案](./10-realtime-rule-queue-performance.md)
 
 ## 不可违反的原则
 
