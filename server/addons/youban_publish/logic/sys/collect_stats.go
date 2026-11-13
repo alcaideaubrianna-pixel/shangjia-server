@@ -57,6 +57,12 @@ func loadCollectStatsAggregate(ctx context.Context, tenantId, accountId int64) (
 			return &value, nil
 		}
 	}
+	var snapshot collectStatsAggregate
+	if err := g.DB().Model("hg_youban_publish_collect_stats_snapshot").Ctx(ctx).
+		Where("tenant_id", tenantId).Where("account_id", accountId).Scan(&snapshot); err == nil && snapshot.EventCount > 0 {
+		_ = cache.Instance().Set(ctx, cacheKey, snapshot, 30*time.Second)
+		return &snapshot, nil
+	}
 	sourceCols := pdao.YoubanPublishCollectSource.Columns()
 	ruleCols := pdao.YoubanPublishCollectRule.Columns()
 	reviewCols := pdao.YoubanPublishCollectReview.Columns()
@@ -119,5 +125,13 @@ CROSS JOIN (
 		return &collectStatsAggregate{}, nil
 	}
 	_ = cache.Instance().Set(ctx, cacheKey, aggregate, 10*time.Second)
+	_, _ = g.DB().Model("hg_youban_publish_collect_stats_snapshot").Ctx(ctx).
+		Data(g.Map{"tenant_id": tenantId, "account_id": accountId,
+			"collecting_count": aggregate.CollectingCount, "rule_count": aggregate.RuleCount,
+			"event_count": aggregate.EventCount, "blocked_count": aggregate.BlockedCount,
+			"pending_review_count": aggregate.PendingReviewCount, "failed_dispatch_count": aggregate.FailedDispatchCount,
+			"sent_count": aggregate.SentCount, "today_pushed_count": aggregate.TodayPushedCount,
+			"updated_at": gtime.Now()}).
+		OnConflict("tenant_id,account_id").Save()
 	return &aggregate, nil
 }
