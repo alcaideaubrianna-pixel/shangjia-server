@@ -955,6 +955,11 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 		reason := collectDuplicateReason(hit, replaced)
 		s.appendCollectEventLogForRecord(ctx, event, "dedupe", "skipped", reason, fmt.Sprintf("rule=%d", rule["id"].Int64()))
 		g.Log().Infof(ctx, "采集资料指纹命中 eventId:%d ruleId:%d profileId:%d channelId:%d layer:%s cacheHit:%t mediaReplaced:%t", event["id"].Int64(), rule["id"].Int64(), hit.ProfileID, hit.ChannelID, hit.Layer, hit.CacheHit, replaced)
+		// 重复资料已经完成复用/替换，当前事件不再需要创建新的发布分发；
+		// 必须立即落终态，否则 Outbox 会把 media_ready 无限重试。
+		if terminalErr := s.ignoreCollectEvent(ctx, event["id"].Int64(), "重复资料已复用，跳过重复分发", "dedupe"); terminalErr != nil {
+			return false, "", terminalErr
+		}
 		return false, reason, nil
 	}
 	var dispatchId int64
