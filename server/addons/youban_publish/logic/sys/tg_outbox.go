@@ -235,6 +235,12 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 	if err != nil {
 		return s.releaseTelegramOutbox(ctx, row.Id, owner, row.AttemptCount, err.Error())
 	}
+	// 所有账户统一以 Asynq 作为发送主路径，不能再由账户灰度字段决定是否
+	// 进入可靠队列；Stream 只作为旁路能力，避免 legacy 账户被旧路径卡死。
+	if err = s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 0, false); err == nil {
+		g.Log().Debug(ctx, "TG任务统一进入Asynq发送主路径", g.Map{"event": "asynq_primary_enqueue", "jobId": job.Id, "outboxId": row.Id})
+		return s.confirmTelegramStreamOutbox(ctx, row.Id, owner, job.Id, row.AttemptCount)
+	}
 	// Stream 连续失败达到阈值时，任何账户都必须走 Asynq 兜底；不能再依赖
 	// 账户灰度配置，否则旧账户会无限重试而永远没有执行任务。
 	if row.AttemptCount >= 3 && telegramOutboxJobStillNeedsDispatch(job.Status, job.DispatchStatus) {
