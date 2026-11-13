@@ -17,6 +17,7 @@ import (
 	"hotgo/utility/format"
 	"hotgo/utility/url"
 	"hotgo/utility/validate"
+	"os"
 	"path"
 	"strconv"
 	"strings"
@@ -185,7 +186,18 @@ func LastUrl(ctx context.Context, fullPath, drive string) string {
 
 	switch drive {
 	case consts.UploadDriveLocal:
-		return url.GetAddr(ctx) + "/" + fullPath
+		base := strings.TrimRight(url.GetAddr(ctx), "/")
+		if base == "" {
+			// 后台 Worker 没有 HTTP 请求上下文，使用显式公网地址生成可访问媒体 URL。
+			base = strings.TrimRight(strings.TrimSpace(os.Getenv("YOUBAN_PUBLIC_BASE_URL")), "/")
+			if base == "" {
+				base = strings.TrimRight(g.Cfg().MustGet(ctx, "server.publicURL", "").String(), "/")
+			}
+		}
+		if base == "" {
+			return fullPath
+		}
+		return base + "/" + strings.TrimLeft(fullPath, "/")
 	case consts.UploadDriveUCloud:
 		return config.UCloudEndpoint + "/" + fullPath
 	case consts.UploadDriveCos:
