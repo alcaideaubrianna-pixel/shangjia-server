@@ -21,70 +21,102 @@ type YoubanPublishTgJobDao struct {
 
 // YoubanPublishTgJobColumns defines and stores column names for the table hg_youban_publish_tg_job.
 type YoubanPublishTgJobColumns struct {
-	Id                    string //
-	TaskId                string //
-	TenantId              string //
-	MerchantId            string //
-	AccountId             string //
-	ProfileId             string //
-	BotId                 string //
-	TargetChatId          string //
-	TgMessageId           string //
-	Status                string //
-	RetryCount            string //
-	NextRetryAt           string //
-	ErrorMessage          string //
-	CreatedAt             string //
-	UpdatedAt             string //
-	ChannelId             string //
-	SentAt                string //
-	CycleEnabled          string //
-	CycleDays             string //
-	NextCycleAt           string //
-	CyclePublishTime      string //
-	AsynqTaskId           string //
-	OperationNo           string //
-	Priority              string //
-	QueueName             string //
-	DispatchStatus        string //
-	DispatchedAt          string //
-	DispatchCount         string //
-	LastDispatchError     string //
-	DisplayMediaSelection string // 展示媒体选择快照
+	Id                     string //
+	TaskId                 string //
+	OperationNo            string //
+	TenantId               string //
+	MerchantId             string //
+	AccountId              string //
+	ProfileId              string //
+	ChannelId              string //
+	BotId                  string //
+	TargetChatId           string //
+	CollectEventId         string //
+	CollectSourceId        string //
+	CollectSourceChatId    string //
+	CollectSourceMessageId string //
+	TgMessageId            string //
+	AsynqTaskId            string //
+	Status                 string //
+	RetryCount             string //
+	NextRetryAt            string //
+	SentAt                 string //
+	CycleEnabled           string //
+	CycleDays              string //
+	CyclePublishTime       string //
+	NextCycleAt            string //
+	Priority               string //
+	QueueName              string //
+	DispatchStatus         string //
+	DispatchedAt           string //
+	DispatchCount          string //
+	SendPhase              string //
+	ReconcileCount         string //
+	LastDispatchError      string //
+	ErrorMessage           string //
+	CreatedAt              string //
+	UpdatedAt              string //
+	PushMode               string //
+	OperationType          string //
+	ProfileNoSnapshot      string //
+	TitleSnapshot          string //
+	NotifyAccountId        string //
+	CycleFailureCount      string //
+	SendDeadlineAt         string //
+	TimeoutParentJobId     string //
+	TimeoutCleanupAt       string //
+	TimeoutRetryCount      string //
+	DisplayMediaSelection  string //
 }
 
 // youbanPublishTgJobColumns holds the columns for the table hg_youban_publish_tg_job.
 var youbanPublishTgJobColumns = YoubanPublishTgJobColumns{
-	Id:                    "id",
-	TaskId:                "task_id",
-	TenantId:              "tenant_id",
-	MerchantId:            "merchant_id",
-	AccountId:             "account_id",
-	ProfileId:             "profile_id",
-	BotId:                 "bot_id",
-	TargetChatId:          "target_chat_id",
-	TgMessageId:           "tg_message_id",
-	Status:                "status",
-	RetryCount:            "retry_count",
-	NextRetryAt:           "next_retry_at",
-	ErrorMessage:          "error_message",
-	CreatedAt:             "created_at",
-	UpdatedAt:             "updated_at",
-	ChannelId:             "channel_id",
-	SentAt:                "sent_at",
-	CycleEnabled:          "cycle_enabled",
-	CycleDays:             "cycle_days",
-	NextCycleAt:           "next_cycle_at",
-	CyclePublishTime:      "cycle_publish_time",
-	AsynqTaskId:           "asynq_task_id",
-	OperationNo:           "operation_no",
-	Priority:              "priority",
-	QueueName:             "queue_name",
-	DispatchStatus:        "dispatch_status",
-	DispatchedAt:          "dispatched_at",
-	DispatchCount:         "dispatch_count",
-	LastDispatchError:     "last_dispatch_error",
-	DisplayMediaSelection: "display_media_selection",
+	Id:                     "id",
+	TaskId:                 "task_id",
+	OperationNo:            "operation_no",
+	TenantId:               "tenant_id",
+	MerchantId:             "merchant_id",
+	AccountId:              "account_id",
+	ProfileId:              "profile_id",
+	ChannelId:              "channel_id",
+	BotId:                  "bot_id",
+	TargetChatId:           "target_chat_id",
+	CollectEventId:         "collect_event_id",
+	CollectSourceId:        "collect_source_id",
+	CollectSourceChatId:    "collect_source_chat_id",
+	CollectSourceMessageId: "collect_source_message_id",
+	TgMessageId:            "tg_message_id",
+	AsynqTaskId:            "asynq_task_id",
+	Status:                 "status",
+	RetryCount:             "retry_count",
+	NextRetryAt:            "next_retry_at",
+	SentAt:                 "sent_at",
+	CycleEnabled:           "cycle_enabled",
+	CycleDays:              "cycle_days",
+	CyclePublishTime:       "cycle_publish_time",
+	NextCycleAt:            "next_cycle_at",
+	Priority:               "priority",
+	QueueName:              "queue_name",
+	DispatchStatus:         "dispatch_status",
+	DispatchedAt:           "dispatched_at",
+	DispatchCount:          "dispatch_count",
+	SendPhase:              "send_phase",
+	ReconcileCount:         "reconcile_count",
+	LastDispatchError:      "last_dispatch_error",
+	ErrorMessage:           "error_message",
+	CreatedAt:              "created_at",
+	UpdatedAt:              "updated_at",
+	PushMode:               "push_mode",
+	OperationType:          "operation_type",
+	ProfileNoSnapshot:      "profile_no_snapshot",
+	TitleSnapshot:          "title_snapshot",
+	NotifyAccountId:        "notify_account_id",
+	CycleFailureCount:      "cycle_failure_count",
+	SendDeadlineAt:         "send_deadline_at",
+	TimeoutParentJobId:     "timeout_parent_job_id",
+	TimeoutCleanupAt:       "timeout_cleanup_at",
+	TimeoutRetryCount:      "timeout_retry_count",
+	DisplayMediaSelection:  "display_media_selection",
 }
 
 // NewYoubanPublishTgJobDao creates and returns a new DAO object for table data access.

@@ -6,9 +6,10 @@ import (
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	"hotgo/addons/youban_publish/internal/dao"
+	"hotgo/addons/youban_publish/internal/model/do"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
@@ -42,10 +43,11 @@ func (s *sSysPublish) createPublishJobTx(ctx context.Context, tx gdb.TX, req pub
 		return 0, err
 	}
 	if strings.TrimSpace(req.Meta.InitialSendPhase) != "" {
-		if _, err = tx.Model(publishTgJobTable).Ctx(ctx).
-			Where("id", jobID).
-			Where("status", telegramJobStatusPending).
-			Data(g.Map{"send_phase": strings.TrimSpace(req.Meta.InitialSendPhase)}).
+		columns := dao.YoubanPublishTgJob.Columns()
+		if _, err = tx.Model(dao.YoubanPublishTgJob.Table()).Ctx(ctx).
+			Where(columns.Id, jobID).
+			Where(columns.Status, telegramJobStatusPending).
+			Data(do.YoubanPublishTgJob{SendPhase: strings.TrimSpace(req.Meta.InitialSendPhase)}).
 			Update(); err != nil {
 			return 0, gerror.Wrap(err, "设置资料发布初始阶段失败")
 		}
