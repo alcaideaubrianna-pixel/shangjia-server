@@ -631,7 +631,7 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 		if accountSelected[channel.AccountID] >= accountQuota {
 			continue
 		}
-		query := `SELECT o.id,o.job_id,o.attempt_count,o.available_at FROM ` + publishTgOutboxTable + ` o JOIN ` + publishTgJobTable + ` j ON j.id=o.job_id WHERE j.account_id=? AND j.channel_id=? AND o.event_type=? AND o.available_at<=? AND (o.status=? OR (o.status=? AND o.lease_expires_at<=?)) AND j.status IN ('pending','failed_retry','unknown') AND COALESCE(j.dispatch_status,'') IN ('','idle') AND (j.next_retry_at IS NULL OR j.next_retry_at<=? OR (j.status='pending' AND COALESCE(j.dispatch_status,'')='idle')) ORDER BY o.available_at,o.id LIMIT 1`
+		query := `SELECT o.id,o.job_id,o.attempt_count,o.available_at FROM ` + publishTgOutboxTable + ` o JOIN ` + publishTgJobTable + ` j ON j.id=o.job_id WHERE j.account_id=? AND j.channel_id=? AND o.event_type=? AND o.available_at<=? AND (o.status=? OR (o.status=? AND o.lease_expires_at<=?)) AND j.status IN ('pending','failed_retry','unknown') AND COALESCE(j.dispatch_status,'') IN ('','idle') AND (j.next_retry_at IS NULL OR j.next_retry_at<=? OR (j.status='pending' AND COALESCE(j.dispatch_status,'')='idle')) ORDER BY ` + telegramChannelScheduleRankSQL("j") + `,` + telegramJobEffectivePrioritySQL("j") + `,o.available_at,o.id LIMIT 1`
 		var head []telegramJobOutboxRecord
 		channelCtx, cancel := context.WithTimeout(ctx, 750*time.Millisecond)
 		err := g.DB().GetScan(channelCtx, &head, query, channel.AccountID, channel.ChannelID, telegramOutboxEventPublish, now, telegramOutboxPending, telegramOutboxProcessing, now, now)
