@@ -98,7 +98,7 @@ func (s *sSysPublish) supersedeOfflineCycleJobs(ctx context.Context, limit int) 
 	_, err := g.DB().Exec(ctx, `WITH candidates AS (
 		SELECT j.id FROM `+publishTgJobTable+` j
 		JOIN hg_content_profile p ON p.id=j.profile_id
-		WHERE j.operation_no LIKE 'cycle_%'
+		WHERE (j.operation_no LIKE 'cycle_%' OR j.operation_no LIKE 'profile_cycle:%')
 		  AND j.status IN ('pending','failed_retry','unknown','sending','confirming')
 		  AND (p.status<>1 OR p.visibility<>? OR p.deleted_at IS NOT NULL)
 		ORDER BY j.id LIMIT ?

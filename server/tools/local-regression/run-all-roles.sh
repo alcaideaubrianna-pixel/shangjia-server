@@ -78,7 +78,7 @@ base_port="${YOUBAN_LOCAL_HTTP_PORT_BASE:-18000}"
 index=0
 for role in "${roles[@]}"; do
   role_port=$((base_port + index))
-  GF_SERVER_ADDRESS=":${role_port}" YOUBAN_SERVER_ADDRESS=":${role_port}" YOUBAN_RUNTIME_ROLES="$role" \
+  GF_SERVER_ADDRESS=":${role_port}" YOUBAN_SERVER_ADDRESS=":${role_port}" YOUBAN_RUNTIME_ROLES="$role" YOUBAN_LOCAL_REGRESSION=1 \
     "$LOCAL_SERVER_BIN" "$role" >/tmp/youban-local-${role}.log 2>&1 &
   PIDS+=("$!")
   index=$((index + 1))

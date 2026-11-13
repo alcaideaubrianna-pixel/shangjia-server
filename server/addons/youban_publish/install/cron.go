@@ -2,6 +2,7 @@ package install
 
 import (
 	"context"
+	"os"
 	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -30,6 +31,9 @@ const (
 )
 
 func cycleSchedulerCronPattern(mode string) string {
+	if os.Getenv("YOUBAN_LOCAL_REGRESSION") == "1" {
+		return "@every 5s"
+	}
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case "", "not-set", "develop", "testing":
 		return cycleSchedulerDevelopCronPattern
