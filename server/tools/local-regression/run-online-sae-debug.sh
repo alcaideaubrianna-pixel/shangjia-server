@@ -26,7 +26,7 @@ trap cleanup EXIT INT TERM
 if [[ "$WRITE_MODE" != "0" && "$WRITE_MODE" != "1" ]]; then echo "ONLINE_DEBUG_WRITE 必须为 0 或 1" >&2; exit 2; fi
 command -v aliyun >/dev/null || { echo "缺少 aliyun CLI" >&2; exit 1; }
 command -v jq >/dev/null || { echo "缺少 jq" >&2; exit 1; }
-if [[ ! -x "$BIN" ]]; then echo "本地二进制不存在：$BIN；先执行 cd server && go build -o bin/hotgo ./main.go" >&2; exit 1; fi
+if [[ ! -x "$BIN" ]]; then echo "本地二进制不存在：${BIN}；先执行 cd server && go build -o bin/hotgo ./main.go" >&2; exit 1; fi
 umask 077
 cfg="$(aliyun sae DescribeApplicationConfig --RegionId "$REGION_ID" --AppId "$APP_ID" --profile "$PROFILE")"
 printf '%s' "$cfg" | jq -e '.Data.Envs' >/dev/null
