@@ -248,6 +248,8 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	backgroundMux.HandleFunc(tgTaskTypeCollectSourceDelete, s.handleCollectSourceDeleteTask)
 	backgroundMux.HandleFunc(tgTaskTypeBotMediaRepair, s.handleBotMediaRepairTask)
 	backgroundMux.HandleFunc(tgTaskTypeProfileMedia, s.handleProfileMediaTask)
+	go s.recoverProfileMediaOperations(ctx)
+	go s.profileMediaRecoveryLoop(ctx)
 	backgroundMux.HandleFunc(tgTaskTypeAttemptTimeout, s.handleTelegramAttemptTimeoutTask)
 	accountScheduleMux := asynq.NewServeMux()
 	accountScheduleMux.HandleFunc(publishconsts.QueueAccountScheduleTask, s.handleAccountScheduleTask)
