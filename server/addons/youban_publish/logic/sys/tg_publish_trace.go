@@ -285,6 +285,13 @@ func (s *telegramPublishStage) log(event string, err error, fields []g.Map) {
 		}
 	}
 	data["event"] = event
+	if event == "error" || event == "slow" || event == "panic" {
+		data["status"] = "error"
+	} else if event == "start" {
+		data["status"] = "started"
+	} else {
+		data["status"] = "ok"
+	}
 	data["durationMs"] = time.Since(s.started).Milliseconds()
 	if deadline, ok := s.ctx.Deadline(); ok {
 		data["deadlineRemainingMs"] = time.Until(deadline).Milliseconds()

@@ -27,6 +27,11 @@ import (
 const publishBotChannelCacheTable = "hg_youban_publish_bot_channel_cache"
 const botChannelMetadataSyncTTL = 10 * time.Minute
 
+// botChannelMessageWriteTTL 限制频道目录统计写库频率。
+// message_count 只用于判断频道是否有消息，实时采集事实已经写入事件表；
+// 高频 webhook 不应每条消息都触发一次 UPDATE/WAL。
+const botChannelMessageWriteTTL = 15 * time.Second
+
 // syncBotChannelMetadataFromUpdate keeps the Bot channel directory current
 // for Collector webhook deliveries. Telegram does not emit a separate
 // reliable rename callback; the current title is carried by channel_post.
@@ -129,6 +134,10 @@ func (s *sSysPublish) cacheBotMessage(ctx context.Context, tenantId, botId int64
 		return err
 	}
 	if exists.Id > 0 {
+		messageTouchKey := fmt.Sprintf("publish:bot-channel-message-write:%d:%d:%s", tenantId, botId, chatId)
+		if ok, cacheErr := cache.Instance().SetIfNotExist(ctx, messageTouchKey, 1, botChannelMessageWriteTTL); cacheErr == nil && !ok {
+			return nil
+		}
 		_, err := g.DB().Model(publishBotChannelCacheTable).Safe().Ctx(ctx).Where("id", exists.Id).Data(data).Increment("message_count", 1)
 		return err
 	}

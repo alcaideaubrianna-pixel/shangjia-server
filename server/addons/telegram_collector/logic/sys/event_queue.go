@@ -14,6 +14,7 @@ import (
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/net/gtrace"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/hibiken/asynq"
 	"go.opentelemetry.io/otel/attribute"
@@ -232,6 +233,7 @@ func logCollectorPipelineStage(ctx context.Context, row *entity.TgCollectorEvent
 	}
 	fields := g.Map{
 		"log_type": "telegram_collect_pipeline", "event": "collect_pipeline_stage", "stage": stage,
+		"status": "ok", "traceId": gtrace.GetTraceID(ctx), "collectEventId": row.Id,
 		"eventId": row.Id, "tenantId": row.TenantId, "accountId": row.AccountId,
 		"sourceId": row.SourceId, "sourceType": row.SourceType, "sourceChatId": row.ChatId,
 		"sourceMessageId": row.MessageId, "durationMs": time.Since(started).Milliseconds(),
@@ -248,7 +250,13 @@ func logCollectorPipelineStage(ctx context.Context, row *entity.TgCollectorEvent
 		fields["textLength"] = len([]rune(delivery.RawText))
 	}
 	if err != nil {
+		fields["status"] = "error"
+		fields["errorType"] = fmt.Sprintf("%T", err)
 		fields["error"] = err.Error()
+	}
+	if err != nil {
+		g.Log().Warning(ctx, "Telegram采集链路阶段", fields)
+		return
 	}
 	g.Log().Info(ctx, "Telegram采集链路阶段", fields)
 }
