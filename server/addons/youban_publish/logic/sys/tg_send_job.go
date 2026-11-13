@@ -1091,7 +1091,7 @@ func (s *sSysPublish) switchTelegramJobToNextBot(ctx context.Context, job telegr
 func (s *sSysPublish) completeTelegramJob(ctx context.Context, job telegramJobRecord) error {
 	if status, err := s.telegramJobCurrentStatus(ctx, job.Id); err != nil {
 		return err
-	} else if status != telegramJobStatusSending {
+	} else if status != telegramJobStatusSending && !(status == telegramJobStatusConfirming && (job.SendPhase == telegramSendPhaseVerifyConfirmed || job.SendPhase == telegramSendPhaseCompletedNoVerify)) {
 		s.appendTelegramJobLog(ctx, job, "publish", "skipped", "TG发送完成前任务状态已变更，跳过成功标记："+status)
 		return nil
 	}
@@ -1128,7 +1128,7 @@ func (s *sSysPublish) completeTelegramJob(ctx context.Context, job telegramJobRe
 	// fact before taking the profile projection lock: projection contention must
 	// never leave a confirmed job holding the channel's sending slot.
 	sentAt := gtime.Now()
-	transition := telegramJobTransition{JobId: job.Id, From: []string{telegramJobStatusSending}, To: telegramJobStatusSent, Additional: g.Map{"sent_at": sentAt}}
+	transition := telegramJobTransition{JobId: job.Id, From: []string{telegramJobStatusSending, telegramJobStatusConfirming}, To: telegramJobStatusSent, Additional: g.Map{"sent_at": sentAt}}
 	streamEngine := s.accountPushEngine(ctx, job.TenantId, job.AccountId) == pushEngineUnifiedStream
 	var transitioned bool
 	if streamEngine {

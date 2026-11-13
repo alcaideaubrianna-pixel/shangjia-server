@@ -28,11 +28,12 @@ psql -h "$pg_host" -U "$pg_user" -d "$db" -v ON_ERROR_STOP=1 -f "$schema_dump" >
 
 # Worker 启动需要管理员和插件配置；只复制配置表，不复制历史任务。
 pg_dump -h "$pg_host" -U "$pg_user" -d "$source_db" --data-only --disable-triggers \
-  -t hg_admin_member -t hg_admin_role -t hg_admin_member_role \
+  -t hg_admin_dept -t hg_admin_member -t hg_admin_role -t hg_admin_menu -t hg_admin_role_menu \
+  -t hg_admin_member_role -t hg_admin_post -t hg_admin_member_post \
   -t hg_sys_config -t hg_sys_addons_config -t hg_sys_addons_install > "$data_dump"
 sed -i.bak '/transaction_timeout/d' "$data_dump"
 psql -h "$pg_host" -U "$pg_user" -d "$db" -v ON_ERROR_STOP=1 \
-  -c 'TRUNCATE hg_admin_member_role,hg_admin_member,hg_admin_role,hg_sys_config,hg_sys_addons_config,hg_sys_addons_install CASCADE' >/dev/null
+  -c 'TRUNCATE hg_admin_member_role,hg_admin_member_post,hg_admin_post,hg_admin_member,hg_admin_role_menu,hg_admin_menu,hg_admin_role,hg_admin_dept,hg_sys_config,hg_sys_addons_config,hg_sys_addons_install CASCADE' >/dev/null
 psql -h "$pg_host" -U "$pg_user" -d "$db" -v ON_ERROR_STOP=1 -f "$data_dump" >/dev/null
 
 psql -h "$pg_host" -U "$pg_user" -d "$db" -v ON_ERROR_STOP=1 \

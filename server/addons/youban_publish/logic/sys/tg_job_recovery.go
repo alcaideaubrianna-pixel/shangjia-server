@@ -185,7 +185,7 @@ func (s *sSysPublish) recoverConfirmedTelegramJobs(ctx context.Context, limit in
 	var jobs []telegramJobRecord
 	err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
 		Fields("j.*").
-		Where("j.status", telegramJobStatusSending).
+		WhereIn("j.status", []string{telegramJobStatusSending, telegramJobStatusConfirming}).
 		WhereIn("j.send_phase", []string{telegramSendPhaseVerifyConfirmed, telegramSendPhaseCompletedNoVerify}).
 		WhereLTE("j.updated_at", gtime.Now().Add(-telegramConfirmedJobRecoverAfter)).
 		OrderAsc("j.updated_at").OrderAsc("j.id").Limit(limit).Scan(&jobs)
