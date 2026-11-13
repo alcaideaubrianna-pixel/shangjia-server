@@ -539,15 +539,18 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 	}
 	dedupeLocks := make([]*lock.Lock, 0, len(lockKeys))
 	for _, signatureKey := range lockKeys {
-		dedupeLock := lock.NewConfig(2*time.Minute, 20*time.Millisecond).Mutex(fmt.Sprintf(
+		// 去重锁只保护资料提交的短事务，禁止在这里无限等待；
+		// Redis 锁被其他事件占用时让 Outbox 延迟重入，避免整个来源队列被阻塞。
+		dedupeLock := lock.NewConfig(30*time.Second, 20*time.Millisecond).WithoutWatchDog().Mutex(fmt.Sprintf(
 			"youban_publish:collect:dedupe-commit:%d:%d:%s",
 			event["tenant_id"].Int64(), event["account_id"].Int64(), collectHash(signatureKey),
 		))
-		if err = dedupeLock.Lock(ctx); err != nil {
+		if err = dedupeLock.TryLock(ctx); err != nil {
 			for index := len(dedupeLocks) - 1; index >= 0; index-- {
 				_ = dedupeLocks[index].Unlock(context.Background())
 			}
-			return gerror.Wrap(err, "获取采集资料提交锁失败")
+			// 锁竞争是可恢复的调度事件，不应把事件标记为失败或长时间占住 Worker。
+			return newCollectProcessRetryError(2*time.Second, "采集资料提交锁被占用，稍后重试")
 		}
 		dedupeLocks = append(dedupeLocks, dedupeLock)
 	}
