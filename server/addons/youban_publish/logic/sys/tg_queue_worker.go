@@ -56,6 +56,24 @@ func telegramAutoDeleteWorkerQueues() map[string]int {
 }
 
 func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
+	// Channel-queue mode owns Telegram publish consumption. Do not start the
+	// legacy Asynq publish server: running both consumers can duplicate sends
+	// and lets old shard queues continue to block new channel work.
+	if telegramChannelQueueEnabled() {
+		s.tgQueueMu.Lock()
+		if s.tgQueueServer != nil {
+			s.tgQueueMu.Unlock()
+			return
+		}
+		// Mark the publish role as initialized without creating an Asynq
+		// consumer. Channel worker startup is handled by runPublishRuntime.
+		s.tgQueueServer = nil
+		s.tgQueueMu.Unlock()
+		g.Log().Info(ctx, "频道队列模式已启用，禁用旧TG Asynq发布消费者")
+		s.startTelegramOutboxDispatcher(ctx)
+		go s.runTelegramCleanupIntents(ctx)
+		return
+	}
 	s.tgQueueMu.Lock()
 	if s.tgQueueServer != nil || s.tgCleanupQueueServer != nil {
 		s.tgQueueMu.Unlock()
