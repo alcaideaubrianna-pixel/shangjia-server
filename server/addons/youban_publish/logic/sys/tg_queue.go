@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"os"
 	"strings"
 	"time"
 
@@ -493,6 +494,16 @@ func (s *sSysPublish) enqueueTelegramJobInternal(ctx context.Context, jobId int6
 	if affected, _ := result.RowsAffected(); affected == 0 {
 		return nil
 	}
+	// During migration the channel queue can be enabled in shadow mode.  The
+	// existing Asynq transport remains authoritative until a dedicated channel
+	// worker is enabled, so this write is opt-in and never creates a second
+	// consumer by default.
+	if telegramChannelQueueShadowEnabled() && job.ChannelId > 0 {
+		score := time.Now().UnixMilli()*1000 + int64(max(0, 100000-priority))
+		if queueErr := enqueueTelegramChannelJob(ctx, job.ChannelId, jobId, score); queueErr != nil {
+			g.Log().Warningf(ctx, "写入频道逻辑队列失败 jobId:%d err:%+v", jobId, queueErr)
+		}
+	}
 	/*
 		reserved, err := s.withTelegramChannelDispatchLease(ctx, job, func(reserveCtx context.Context) (bool, error) {
 			step := beginTelegramPublishStage(reserveCtx, "dispatch.channel_order")
@@ -560,6 +571,11 @@ func (s *sSysPublish) enqueueTelegramJobInternal(ctx context.Context, jobId int6
 		return gerror.Wrap(err, "TG任务直接入队失败")
 	}
 	return nil
+}
+
+func telegramChannelQueueShadowEnabled() bool {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv("YOUBAN_PUBLISH_CHANNEL_QUEUE_SHADOW")))
+	return value == "1" || value == "true" || value == "yes" || value == "on"
 }
 
 // telegramChannelDispatchRetryDelay 根据任务调度次数计算退避，避免锁竞争时热循环。
