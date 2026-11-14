@@ -808,27 +808,50 @@ func (s *sSysPublish) recoverStaleTelegramDispatchJobs(ctx context.Context, limi
 		return gerror.Wrap(err, "读取调度中断TG推送任务失败")
 	}
 	scanned = len(jobs)
+	jobIDs := make([]int64, 0, len(jobs))
 	for _, job := range jobs {
-		if job.Id <= 0 {
-			continue
+		if job.Id > 0 {
+			jobIDs = append(jobIDs, job.Id)
 		}
-		result, updateErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-			Where("id", job.Id).
-			WhereIn("dispatch_status", []string{tgDispatchStatusQueued, tgDispatchStatusProcessing}).
-			Data(g.Map{
-				"dispatch_status":     tgDispatchStatusIdle,
-				"next_retry_at":       gtime.Now(),
-				"last_dispatch_error": "TG任务调度超时，已自动恢复入队",
-				"updated_at":          gtime.Now(),
-			}).Update()
-		if updateErr != nil {
-			g.Log().Warningf(ctx, "重置调度中断TG任务失败 job:%d err:%+v", job.Id, updateErr)
-			continue
-		}
-		affected, _ := result.RowsAffected()
-		if affected == 0 {
-			continue
-		}
+	}
+	if len(jobIDs) == 0 {
+		return nil
+	}
+	updatedAt := gtime.Now()
+	const recoveryMessage = "TG任务调度超时，已自动恢复入队"
+	// 一次性释放本轮所有过期调度租约，避免逐任务 UPDATE 造成大量往返、WAL
+	// 和行锁竞争。状态条件保留，和发送 worker 的幂等状态转换保持一致。
+	result, updateErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		WhereIn("id", jobIDs).
+		WhereIn("dispatch_status", []string{tgDispatchStatusQueued, tgDispatchStatusProcessing}).
+		Data(g.Map{
+			"dispatch_status":     tgDispatchStatusIdle,
+			"next_retry_at":       updatedAt,
+			"last_dispatch_error": recoveryMessage,
+			"updated_at":          updatedAt,
+		}).Update()
+	if updateErr != nil {
+		observeErr = updateErr
+		return gerror.Wrap(updateErr, "批量重置调度中断TG任务失败")
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return nil
+	}
+	// 只对本次 UPDATE 实际命中的任务入队；并发 worker 可能已经抢先改变
+	// 其中一部分任务，避免无谓地重新创建 Asynq 任务。
+	var updatedJobs []struct {
+		Id int64 `orm:"id"`
+	}
+	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Fields("id").WhereIn("id", jobIDs).
+		Where("dispatch_status", tgDispatchStatusIdle).
+		Where("last_dispatch_error", recoveryMessage).
+		WhereGTE("updated_at", updatedAt).Scan(&updatedJobs); err != nil {
+		observeErr = err
+		return gerror.Wrap(err, "读取已重置TG任务失败")
+	}
+	for _, job := range updatedJobs {
 		// The stale Asynq task can still hold its uniqueness key after the task
 		// itself disappeared. A recovery enqueue must create a fresh task; the
 		// database transition in the worker remains the delivery idempotency gate.
