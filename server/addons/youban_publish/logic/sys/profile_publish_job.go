@@ -362,6 +362,24 @@ func (s *sSysPublish) ensureTelegramProfileJobWithMetaTx(ctx context.Context, tx
 	if jobId := existing["id"].Int64(); jobId > 0 {
 		return jobId, nil
 	}
+	// Cycle scheduling must be idempotent across manual/full-push operations.
+	// The active partial unique index is enforced by PostgreSQL, so checking
+	// before INSERT avoids surfacing a raw duplicate-key error when a manual
+	// push already owns this profile/channel. The sender/lease still serializes
+	// any task that is actually executed.
+	if isCycleBatchOperation(operationNo) {
+		active, readErr := tx.Model(publishTgJobTable).Safe().Ctx(ctx).
+			Where("tenant_id", source["tenant_id"].Int64()).Where("account_id", source["account_id"].Int64()).
+			Where("profile_id", source["profile_id"].Int64()).Where("channel_id", channel.Id).
+			WhereIn("status", []string{"pending", "sending", "failed_retry", "unknown"}).
+			Fields("id").OrderDesc("id").One()
+		if readErr != nil {
+			return 0, gerror.Wrap(readErr, "读取资料活动TG频道任务失败")
+		}
+		if jobID := active["id"].Int64(); jobID > 0 {
+			return jobID, nil
+		}
+	}
 	// 新引擎按操作号幂等：手工与编辑必须保留独立操作和优先级，频道执行租约负责串行。
 	// 旧引擎保留原来的活动任务合并，便于灰度回退。
 	if s.accountPushEngine(ctx, source["tenant_id"].Int64(), source["account_id"].Int64()) != pushEngineUnifiedStream {
