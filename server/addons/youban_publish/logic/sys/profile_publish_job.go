@@ -362,6 +362,44 @@ func (s *sSysPublish) ensureTelegramProfileJobWithMetaTx(ctx context.Context, tx
 	if jobId := existing["id"].Int64(); jobId > 0 {
 		return jobId, nil
 	}
+	// A newer manual/full-push request replaces an older active operation for
+	// the same profile/channel. The partial unique index intentionally allows
+	// only one active job, so returning a raw duplicate-key error would make a
+	// user retry appear to do nothing. Promote the existing job to the latest
+	// operation; the caller will rearm its Outbox and enqueue it on the proper
+	// realtime lane.
+	if !isCycleBatchOperation(operationNo) {
+		active, readErr := tx.Model(publishTgJobTable).Safe().Ctx(ctx).
+			Where("tenant_id", source["tenant_id"].Int64()).Where("account_id", source["account_id"].Int64()).
+			Where("profile_id", source["profile_id"].Int64()).Where("channel_id", channel.Id).
+			WhereIn("status", []string{"pending", "sending", "failed_retry", "unknown"}).
+			Fields("id,status").OrderDesc("id").One()
+		if readErr != nil {
+			return 0, gerror.Wrap(readErr, "读取资料活动TG频道任务失败")
+		}
+		if activeID := active["id"].Int64(); activeID > 0 {
+			priority := meta.InitialPriority
+			if priority <= 0 {
+				priority = tgJobPriorityInteractive
+			}
+			if _, updateErr := tx.Model(publishTgJobTable).Safe().Ctx(ctx).
+				Where("id", activeID).
+				Data(g.Map{
+					"operation_no":        operationNo,
+					"operation_type":      string(profileOperationTypeFromNo(operationNo)),
+					"priority":            priority,
+					"queue_name":          telegramQueueNameByPriorityAndChannel(ctx, priority, channel.Id),
+					"dispatch_status":     tgDispatchStatusIdle,
+					"asynq_task_id":       "",
+					"next_retry_at":       nil,
+					"last_dispatch_error": "",
+					"updated_at":          gtime.Now(),
+				}).Update(); updateErr != nil {
+				return 0, gerror.Wrap(updateErr, "提升资料活动TG任务失败")
+			}
+			return activeID, nil
+		}
+	}
 	// Cycle scheduling must be idempotent across manual/full-push operations.
 	// The active partial unique index is enforced by PostgreSQL, so checking
 	// before INSERT avoids surfacing a raw duplicate-key error when a manual
