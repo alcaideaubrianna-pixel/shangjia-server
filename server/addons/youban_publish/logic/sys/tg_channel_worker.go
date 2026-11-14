@@ -8,13 +8,18 @@ import (
 	"time"
 )
 
-// telegramChannelQueueEnabled is deliberately opt-in while the legacy Asynq
-// transport remains live. This prevents two consumers from sending the same
-// job during migration.
+// telegramChannelQueueEnabled defaults to the channel queue transport. Set the
+// environment variable to false for an emergency rollback to Asynq.
 func telegramChannelQueueEnabled() bool {
 	v := strings.TrimSpace(os.Getenv("YOUBAN_PUBLISH_CHANNEL_QUEUE_ENABLED"))
+	if v == "" {
+		return true
+	}
 	b, _ := strconv.ParseBool(v)
-	return b
+	if strings.EqualFold(v, "false") || v == "0" {
+		return false
+	}
+	return b || !strings.EqualFold(v, "false")
 }
 
 // processTelegramChannelQueueHead claims and executes one logical channel
