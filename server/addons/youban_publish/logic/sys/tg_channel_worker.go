@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 )
 
 // telegramChannelQueueEnabled defaults to the channel queue transport. Set the
@@ -51,8 +52,25 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 		// Keep the job available for the next attempt. A bounded delay avoids a
 		// hot loop when the channel lease or Telegram API is temporarily busy.
 		hold := time.Now().Add(time.Second).UnixMilli()
-		_ = enqueueTelegramChannelJob(ctx, channelID, jobID, hold)
-		g.Log().Warning(ctx, "频道队列任务发送失败，已重入队", g.Map{"event": "channel_queue_requeue", "stage": "send", "channelId": channelID, "jobId": jobID, "profileId": job.ProfileId, "score": hold, "error": err.Error()})
+		if refreshed, reloadErr := s.telegramJobById(ctx, jobID); reloadErr == nil {
+			job = refreshed
+		}
+		priority := job.Priority
+		if priority <= 0 {
+			priority = tgJobPriorityBulk
+		}
+		// Every third failed attempt lowers the lane priority by five. There is
+		// deliberately no maximum downgrade: a permanently bad head eventually
+		// yields to newer work while remaining retryable in the queue.
+		if job.RetryCount > 0 && job.RetryCount%3 == 0 {
+			newPriority := priority - 5
+			_, _ = g.DB().Model(publishTgJobTable).Ctx(ctx).Where("id", jobID).Data(g.Map{"priority": newPriority, "updated_at": gtime.Now()}).Update()
+			priority = newPriority
+			g.Log().Warning(ctx, "频道队列任务优先级降级", g.Map{"event": "channel_queue_priority_downgrade", "channelId": channelID, "jobId": jobID, "oldPriority": job.Priority, "newPriority": priority, "retryCount": job.RetryCount, "reason": err.Error()})
+		}
+		score := hold*1000 + int64(max(0, 100000-priority))
+		_ = enqueueTelegramChannelJob(ctx, channelID, jobID, score)
+		g.Log().Warning(ctx, "频道队列任务发送失败，已重入队", g.Map{"event": "channel_queue_requeue", "stage": "send", "channelId": channelID, "jobId": jobID, "profileId": job.ProfileId, "score": score, "error": err.Error()})
 		return true, err
 	}
 	// SendTelegramJob may return nil when another sender owns the lease. Do
