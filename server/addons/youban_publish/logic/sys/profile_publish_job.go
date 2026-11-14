@@ -508,10 +508,5 @@ func (s *sSysPublish) completeProfileTelegramOperation(ctx context.Context, job 
 	if err = s.syncProfileNoteIndex(ctx, job.ProfileId); err != nil {
 		return false, err
 	}
-	if !isCycle {
-		if noticeErr := s.enqueueProfileOperationSuccessNotice(ctx, job); noticeErr != nil {
-			g.Log().Warningf(ctx, "保存资料完成通知失败 profileId:%d operationNo:%s err:%+v", job.ProfileId, job.OperationNo, noticeErr)
-		}
-	}
 	return true, nil
 }
