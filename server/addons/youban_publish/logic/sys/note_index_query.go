@@ -9,6 +9,8 @@ import (
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gctx"
 	"github.com/gogf/gf/v2/os/gtime"
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
@@ -63,6 +65,14 @@ func (s *sSysPublish) adminNoteIndexList(ctx context.Context, in *sysin.NoteList
 		Order(sortExpression + " " + adminNoteSortDirection(sortBy)).
 		Order("i.id " + adminNoteSortDirection(sortBy)).
 		Limit(perPage + 1).Scan(&candidates); err != nil {
+		g.Log().Warning(ctx, "资料索引候选查询失败", g.Map{
+			"traceId":  gctx.CtxId(ctx),
+			"tenantId": tenantId,
+			"sortBy":   sortBy,
+			"perPage":  perPage,
+			"keyword":  strings.TrimSpace(in.Keyword),
+			"error":    err.Error(),
+		})
 		return nil, false, "", gerror.Wrap(err, "获取资料索引列表失败")
 	}
 	logSlowAdminNoteListStage(ctx, "profile_query_candidates", candidateStartedAt, len(candidates), perPage)
