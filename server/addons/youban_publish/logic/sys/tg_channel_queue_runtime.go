@@ -2,6 +2,9 @@ package sys
 
 import (
 	"context"
+	"os"
+	"strconv"
+	"sync"
 	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
@@ -39,25 +42,48 @@ func (s *sSysPublish) processTelegramChannelQueuePass(ctx context.Context) {
 		g.Log().Warningf(ctx, "频道活跃集合读取失败 err:%+v", err)
 		return
 	}
+	// Channel ordering is enforced by the per-channel Redis lease. Different
+	// channels must run concurrently; a single global loop here otherwise turns
+	// one slow upload into a backlog for every channel.
+	limit := channelQueueWorkerConcurrency()
+	sem := make(chan struct{}, limit)
+	var wg sync.WaitGroup
 	for _, channelID := range channels {
 		if channelID <= 0 {
 			continue
 		}
-		processed, processErr := s.processTelegramChannelQueueHead(ctx, channelID)
-		if processErr != nil {
-			g.Log().Warningf(ctx, "频道队列消费失败 channel:%d err:%+v", channelID, processErr)
-			continue
-		}
-		if !processed {
-			normal, normalErr := g.Redis().Do(ctx, "ZCARD", telegramChannelQueueKey(channelID))
-			urgent, urgentErr := g.Redis().Do(ctx, "ZCARD", telegramChannelUrgentQueueKey(channelID))
-			if normalErr == nil && urgentErr == nil && normal.Int()+urgent.Int() == 0 {
-				if removeErr := removeActiveTelegramChannel(ctx, channelID); removeErr != nil {
-					g.Log().Warningf(ctx, "频道活跃集合清理失败 channel:%d err:%+v", channelID, removeErr)
+		sem <- struct{}{}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			processed, processErr := s.processTelegramChannelQueueHead(ctx, channelID)
+			if processErr != nil {
+				g.Log().Warningf(ctx, "频道队列消费失败 channel:%d err:%+v", channelID, processErr)
+				return
+			}
+			if !processed {
+				normal, normalErr := g.Redis().Do(ctx, "ZCARD", telegramChannelQueueKey(channelID))
+				urgent, urgentErr := g.Redis().Do(ctx, "ZCARD", telegramChannelUrgentQueueKey(channelID))
+				if normalErr == nil && urgentErr == nil && normal.Int()+urgent.Int() == 0 {
+					if removeErr := removeActiveTelegramChannel(ctx, channelID); removeErr != nil {
+						g.Log().Warningf(ctx, "频道活跃集合清理失败 channel:%d err:%+v", channelID, removeErr)
+					}
 				}
 			}
+		}()
+	}
+	wg.Wait()
+}
+
+func channelQueueWorkerConcurrency() int {
+	limit := 128
+	if raw := os.Getenv("YOUBAN_PUBLISH_CHANNEL_WORKER_CONCURRENCY"); raw != "" {
+		if value, err := strconv.Atoi(raw); err == nil && value > 0 {
+			limit = value
 		}
 	}
+	return limit
 }
 
 // telegramChannelCursorNext returns the last channel visited by a pass. It is
