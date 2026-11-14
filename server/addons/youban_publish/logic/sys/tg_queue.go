@@ -618,17 +618,36 @@ func (s *sSysPublish) enqueueTelegramCleanupJobWithContext(ctx context.Context, 
 		ChannelId int64 `orm:"channel_id"`
 		Priority  int   `orm:"priority"`
 	}
-	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Fields("tenant_id,account_id,channel_id,priority").Where("id", jobId).Scan(&owner); err == nil &&
-		s.unifiedPushEngineEnabled(ctx, owner.TenantId, owner.AccountId) {
-		queueName = channelDispatchDeleteQueueName(channelPriorityManualDelete)
-	}
-	if err := s.enqueueTelegramTaskWithQueuePayload(ctx, tgTaskTypeCleanup, jobId, delay, true, queueName, payload); err != nil {
-		return err
+	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Master().
+		Fields("tenant_id,account_id,channel_id,priority").Where("id", jobId).Scan(&owner); err != nil {
+		return gerror.Wrap(err, "读取TG删除任务归属失败")
 	}
 	priority := channelPriorityManualDelete
 	if owner.Priority > tgJobPriorityInteractive {
 		priority = channelPriorityCycleDelete
+	}
+	if s.unifiedPushEngineEnabled(ctx, owner.TenantId, owner.AccountId) {
+		queueName = channelDispatchDeleteQueueName(priority)
+	}
+	// Keep a durable deletion intent alongside the Redis task. Redis is only
+	// the execution index; a restart must not lose a submitted cleanup.
+	eventType := telegramOutboxCleanupPrefix + "manual"
+	if priority == channelPriorityCycleDelete {
+		eventType = telegramOutboxCleanupPrefix + "cycle"
+	}
+	if _, err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).InsertIgnore(g.Map{
+		"job_id":       jobId,
+		"event_type":   eventType,
+		"dedupe_key":   fmt.Sprintf("telegram-cleanup:%d", jobId),
+		"status":       telegramOutboxPending,
+		"available_at": gtime.Now(),
+		"created_at":   gtime.Now(),
+		"updated_at":   gtime.Now(),
+	}); err != nil {
+		return gerror.Wrap(err, "保存TG删除意图失败")
+	}
+	if err := s.enqueueTelegramTaskWithQueuePayload(ctx, tgTaskTypeCleanup, jobId, delay, true, queueName, payload); err != nil {
+		return err
 	}
 	if indexErr := (tgChannelDeleteIndex{}).addJob(ctx, owner.TenantId, owner.ChannelId, jobId, priority); indexErr != nil {
 		// Redis 只是删除队列的高速索引，不能因为索引故障回滚已经入队的删除事实。
@@ -1109,6 +1128,12 @@ func (s *sSysPublish) enqueueTelegramTaskWithQueuePayload(ctx context.Context, t
 	if taskType == tgTaskTypePublish {
 		options = append(options, asynq.TaskID(fmt.Sprintf("tg-publish-job-%d", jobId)))
 	}
+	if taskType == tgTaskTypeCleanup {
+		// Cleanup is idempotent at the Telegram message row level. A stable
+		// task ID makes repeated down requests converge on one pending task
+		// instead of creating multiple consumers for the same job.
+		options = append(options, asynq.TaskID(fmt.Sprintf("tg-cleanup-job-%d", jobId)))
+	}
 	if unique {
 		options = append(options, asynq.Unique(30*time.Second))
 	}
@@ -1128,6 +1153,12 @@ func (s *sSysPublish) enqueueTelegramTaskWithQueuePayload(ctx context.Context, t
 	info, err := client.EnqueueContext(enqueueCtx, task, options...)
 	step.End(err, g.Map{"duplicate": errors.Is(err, asynq.ErrDuplicateTask), "taskIdConflict": errors.Is(err, asynq.ErrTaskIDConflict)})
 	if errors.Is(err, asynq.ErrDuplicateTask) {
+		return nil
+	}
+	if errors.Is(err, asynq.ErrTaskIDConflict) && taskType == tgTaskTypeCleanup {
+		// The stable cleanup task is already pending or running. Treat the
+		// conflict as an idempotent enqueue success; the existing task owns
+		// deletion and will retry on its own if Telegram rejects the request.
 		return nil
 	}
 	// 稳定 TaskID 可能残留在 Redis 的 pending 集合中，但对应任务已经丢失。

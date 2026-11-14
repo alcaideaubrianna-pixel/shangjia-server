@@ -13,7 +13,7 @@ func TestStreamEngineUsesUnifiedDeleteRouting(t *testing.T) {
 		t.Fatal("Stream engine must use unified delete routing")
 	}
 	t.Setenv("YOUBAN_PUBLISH_PUSH_ENGINE", "")
-	if publish.unifiedPushEngineEnabled(context.Background(), 0, 0) {
-		t.Fatal("legacy fallback must not enter unified queues")
+	if !publish.unifiedPushEngineEnabled(context.Background(), 0, 0) {
+		t.Fatal("missing engine configuration must use the unified producer")
 	}
 }

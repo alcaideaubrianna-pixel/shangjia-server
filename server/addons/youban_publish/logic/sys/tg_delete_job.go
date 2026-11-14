@@ -30,6 +30,7 @@ func (s *sSysPublish) cleanupTelegramJobMessages(ctx context.Context, jobId int6
 			}
 			if err := s.notifyBotProfileUnpublishCompleted(ctx, job, payload); err != nil {
 				g.Log().Warningf(ctx, "发送Bot资料下架完成通知失败 profileId:%d jobId:%d err:%+v", job.ProfileId, job.Id, err)
+				return gerror.Wrap(err, "发送Bot资料下架完成通知失败")
 			}
 			return s.completeTelegramCleanupIntent(ctx, job.Id)
 		})
@@ -50,8 +51,9 @@ func (s *sSysPublish) cleanupTelegramJobMessages(ctx context.Context, jobId int6
 	}
 	if err := s.notifyBotProfileUnpublishCompleted(ctx, job, payload); err != nil {
 		g.Log().Warningf(ctx, "发送Bot资料下架完成通知失败 profileId:%d jobId:%d err:%+v", job.ProfileId, job.Id, err)
+		return gerror.Wrap(err, "发送Bot资料下架完成通知失败")
 	}
-	return nil
+	return s.completeTelegramCleanupIntent(ctx, job.Id)
 }
 
 // Cleanup uses four Redis slots per channel. Different channels never contend

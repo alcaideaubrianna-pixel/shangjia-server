@@ -128,7 +128,7 @@ func (s *sSysPublish) dispatchTelegramCleanupIntents(ctx context.Context, limit 
 		if err == nil {
 			// 固定task ID在任务执行或重试期间去重，不覆盖发送任务的asynq_task_id/queue_name。
 			_, err = client.EnqueueContext(ctx, asynq.NewTask(tgTaskTypeCleanup, []byte(fmt.Sprintf(`{"jobId":%d}`, row.JobId))),
-				asynq.Queue(channelDispatchDeleteQueueName(priority)), asynq.TaskID(fmt.Sprintf("cleanup:%d", row.JobId)), asynq.MaxRetry(20), asynq.Timeout(2*time.Minute))
+				asynq.Queue(channelDispatchDeleteQueueName(priority)), asynq.TaskID(fmt.Sprintf("tg-cleanup-job-%d", row.JobId)), asynq.MaxRetry(20), asynq.Timeout(2*time.Minute))
 		}
 		if err != nil && !gerror.Is(err, asynq.ErrTaskIDConflict) {
 			if releaseErr := s.releaseTelegramOutbox(ctx, row.Id, owner, row.AttemptCount, err.Error()); releaseErr != nil {

@@ -81,6 +81,11 @@ func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
 
 		cleanupMux := asynq.NewServeMux()
 		cleanupMux.HandleFunc(tgTaskTypeCleanup, s.handleTelegramCleanupTask)
+		// Down-channel/profile cleanup is dispatched on the same isolated
+		// deletion lane in unified mode. Register it here as well; otherwise
+		// the task can remain in Redis forever because only the legacy server
+		// registered this handler.
+		cleanupMux.HandleFunc(tgTaskTypeDown, s.handleProfileDownTask)
 		go func() {
 			if err := cleanupServer.Run(cleanupMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
 				g.Log().Errorf(ctx, "启动上架插件TG清理队列失败：%+v", err)
