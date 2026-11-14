@@ -412,6 +412,11 @@ func (s *sSysPublish) withTelegramChannelDispatchLease(ctx context.Context, job 
 }
 
 func (s *sSysPublish) telegramChannelHasDispatchCapacity(ctx context.Context, job telegramJobRecord) (bool, error) {
+	// 频道队列模式已经由 Redis ZSET 的单头领取和频道 lease 保证串行，
+	// 不再为每个任务回到 tg_job 做 COUNT(*)。PG 仍在发送阶段负责最终状态和幂等校验。
+	if telegramChannelQueueEnabled() {
+		return true, nil
+	}
 	model := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id <> ?", job.Id).
 		Where(telegramWebhookDetachedJobSQL("")).
@@ -429,11 +434,15 @@ func (s *sSysPublish) telegramChannelHasDispatchCapacity(ctx context.Context, jo
 	} else {
 		model = model.Where("tenant_id", job.TenantId).Where("channel_id", job.ChannelId)
 	}
-	active, err := model.Count()
-	if err != nil {
+	// Limit(telegramChannelActiveJobLimit) 已将查询变成有界存在性检查，
+	// 兼容旧传输时仍保留容量语义，但不再要求精确 COUNT 全部活动任务。
+	var activeRows []struct {
+		ID int64 `orm:"id"`
+	}
+	if err := model.Scan(&activeRows); err != nil {
 		return false, gerror.Wrap(err, "检查频道活动TG任务失败")
 	}
-	return active < telegramChannelActiveJobLimit, nil
+	return len(activeRows) < telegramChannelActiveJobLimit, nil
 }
 
 func (s *sSysPublish) postponeTelegramJobForChannelOrder(ctx context.Context, job telegramJobRecord) error {

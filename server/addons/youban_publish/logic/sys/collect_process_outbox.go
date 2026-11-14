@@ -200,18 +200,27 @@ func (s *sSysPublish) dispatchDueCollectProcessOutbox(ctx context.Context, limit
 	// 账户已有大量处理中任务时暂停继续领取，避免 Dispatcher 速度超过
 	// Worker，导致所有 Outbox 长时间停在 processing，事件无法进入分发终态。
 	if len(scopes) > 0 {
-		processing, countErr := g.DB().Model(collectProcessOutboxTable).Ctx(ctx).
+		// 这里只需要判断是否达到并发上限，不需要精确 COUNT。精确统计会
+		// 扫描账户下全部 processing Outbox；有界读取 cap+1 条即可做同样的
+		// 限流决策，并把数据库工作量固定在一个很小的上限内。
+		processingRows, readErr := g.DB().Model(collectProcessOutboxTable).Ctx(ctx).
+			Fields("id").
 			Where("tenant_id", scopes[0].TenantID).Where("account_id", scopes[0].AccountID).
 			// 过期 processing 也要计入上限；否则旧租约会在每轮被重新 claim，
 			// 总 processing 数持续增长并挤压正常采集终态处理。
-			Where("status", "processing").Count()
-		if countErr != nil {
-			return gerror.Wrap(countErr, "读取账户采集处理中任务数量失败")
+			Where("status", "processing").
+			Limit(collectProcessProcessingCap + 1).All()
+		if readErr != nil {
+			return gerror.Wrap(readErr, "读取账户采集处理中任务数量失败")
 		}
+		processing := len(processingRows)
 		if processing >= collectProcessProcessingCap {
 			return nil
 		}
 		limit = min(limit, collectProcessProcessingCap-processing)
+		if limit <= 0 {
+			return nil
+		}
 	}
 	model := g.DB().Model(collectProcessOutboxTable).Ctx(ctx)
 	if len(scopes) > 0 {

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
-	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	publishconsts "hotgo/addons/youban_publish/consts"
 	"hotgo/internal/dao"
@@ -61,10 +60,47 @@ func (s *sSysPublish) repairAccountCyclePlans(ctx context.Context, scope publish
 	if err := cache.Instance().Set(ctx, key, checkpoint, 24*time.Hour); err != nil {
 		return err
 	}
-	// 修复已存在但失效的映射：旧迁移或频道替换可能留下 last_job_id=0，
-	// 或指向已删除任务；这类映射不会进入到期扫描，必须绑定到最新成功记录。
-	if _, err := g.DB().Exec(ctx, "UPDATE "+publishChannelProfileTable+" cp SET last_job_id=latest.job_id,next_cycle_at=NULL,updated_at=NOW() FROM (SELECT DISTINCT ON (j.tenant_id,j.account_id,j.channel_id,j.profile_id) j.tenant_id,j.account_id,j.channel_id,j.profile_id,j.id AS job_id FROM "+publishTgJobTable+" j JOIN "+publishChannelTable+" c ON c.id=j.channel_id AND c.tenant_id=j.tenant_id AND c.deleted_at IS NULL WHERE j.tenant_id=? AND j.account_id=? AND j.status='sent' AND c.status=1 AND c.cycle_publish_enabled=1 AND c.publish_direction='up' ORDER BY j.tenant_id,j.account_id,j.channel_id,j.profile_id,j.id DESC) latest WHERE cp.tenant_id=latest.tenant_id AND cp.account_id=latest.account_id AND cp.channel_id=latest.channel_id AND cp.profile_id=latest.profile_id AND cp.status='active' AND (cp.last_job_id=0 OR NOT EXISTS (SELECT 1 FROM "+publishTgJobTable+" current_job WHERE current_job.id=cp.last_job_id AND current_job.status IN ('sent','superseded')))", scope.TenantID, scope.AccountID); err != nil {
-		return gerror.Wrap(err, "修复账户循环资料映射失败")
+	// 正常发送成功时已经通过 upsertChannelProfileFromJob 写入 last_job_id。
+	// 历史异常映射只按 channel_profile 有界修复，每轮最多 200 条；
+	// 不再对账户全部 sent job 做高频 DISTINCT ON。
+	if _, err := g.DB().Exec(ctx, `WITH candidates AS (
+		SELECT cp.tenant_id, cp.account_id, cp.channel_id, cp.profile_id
+		FROM `+publishChannelProfileTable+` cp
+		WHERE cp.tenant_id=? AND cp.account_id=? AND cp.status='active'
+		  AND (cp.last_job_id=0 OR NOT EXISTS (
+			SELECT 1 FROM `+publishTgJobTable+` current_job
+			WHERE current_job.id=cp.last_job_id
+			  AND current_job.tenant_id=cp.tenant_id
+			  AND current_job.account_id=cp.account_id
+			  AND current_job.channel_id=cp.channel_id
+			  AND current_job.profile_id=cp.profile_id
+			  AND current_job.status IN ('sent','superseded')
+		  ))
+		ORDER BY cp.id
+		LIMIT 200
+	), latest AS (
+		SELECT c.tenant_id, c.account_id, c.channel_id, c.profile_id,
+			(
+				SELECT j.id FROM `+publishTgJobTable+` j
+				JOIN `+publishChannelTable+` ch ON ch.id=j.channel_id
+				  AND ch.tenant_id=j.tenant_id AND ch.deleted_at IS NULL
+				WHERE j.tenant_id=c.tenant_id AND j.account_id=c.account_id
+				  AND j.channel_id=c.channel_id AND j.profile_id=c.profile_id
+				  AND j.status='sent' AND ch.status=1
+				  AND ch.cycle_publish_enabled=1 AND ch.publish_direction='up'
+				ORDER BY j.id DESC
+				LIMIT 1
+			) AS job_id
+		FROM candidates c
+	)
+	UPDATE `+publishChannelProfileTable+` cp
+	SET last_job_id=latest.job_id, next_cycle_at=NULL, updated_at=NOW()
+	FROM latest
+	WHERE latest.job_id IS NOT NULL
+	  AND cp.tenant_id=latest.tenant_id AND cp.account_id=latest.account_id
+	  AND cp.channel_id=latest.channel_id AND cp.profile_id=latest.profile_id
+	  AND cp.status='active'`, scope.TenantID, scope.AccountID); err != nil {
+		return err
 	}
 	var page []struct {
 		ID int64 `orm:"id"`

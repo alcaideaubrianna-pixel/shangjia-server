@@ -352,43 +352,23 @@ type collectQueueDatabaseStats struct {
 func loadCollectQueueDatabaseStats(ctx context.Context, staleAfter time.Duration) (collectQueueDatabaseStats, error) {
 	var stats collectQueueDatabaseStats
 	eventColumns := pdao.YoubanPublishCollectEvent.Columns()
-	sourceColumns := pdao.YoubanPublishCollectSource.Columns()
-	base := pdao.YoubanPublishCollectEvent.Ctx(ctx).
-		As("e").
-		InnerJoin(pdao.YoubanPublishCollectSource.Table()+" s", "s."+sourceColumns.Id+"=e."+eventColumns.SourceId).
-		WhereIn("e."+eventColumns.Status, collectProcessWindowStatuses()).
-		WhereNull("e."+eventColumns.ProcessedAt).
-		Where("s."+sourceColumns.CollectEnabled, 1).
-		Where("s."+sourceColumns.Status, 1).
-		WhereNull("s." + sourceColumns.DeletedAt)
-	pendingEvents, err := base.Clone().Count()
-	if err != nil {
-		return stats, err
-	}
-	partitionRows, err := base.Clone().
-		Fields("e."+eventColumns.TenantId, "e."+eventColumns.AccountId, "e."+eventColumns.SourceId, "e."+eventColumns.SourceChatId).
-		Group("e."+eventColumns.TenantId, "e."+eventColumns.AccountId, "e."+eventColumns.SourceId, "e."+eventColumns.SourceChatId).
-		All()
-	if err != nil {
-		return stats, err
-	}
-	stats.PendingEvents = pendingEvents
-	stats.PendingPartitions = len(partitionRows)
-
 	mediaBase := pdao.YoubanPublishCollectEvent.Ctx(ctx).
 		Where(eventColumns.Status, sysin.CollectEventStatusMediaPending).
 		WhereNull(eventColumns.ProcessedAt)
+
 	mediaPending, err := mediaBase.Clone().Count()
 	if err != nil {
 		return stats, err
 	}
 	stats.MediaPendingEvents = mediaPending
+
 	staleCutoff := time.Now().Add(-staleAfter)
 	staleMediaPending, err := mediaBase.Clone().WhereLTE(eventColumns.UpdatedAt, staleCutoff).Count()
 	if err != nil {
 		return stats, err
 	}
 	stats.StaleMediaPendingEvents = staleMediaPending
+
 	oldest, err := mediaBase.Clone().Fields("MIN(" + eventColumns.UpdatedAt + ") AS oldest_at").One()
 	if err != nil {
 		return stats, err
@@ -396,6 +376,7 @@ func loadCollectQueueDatabaseStats(ctx context.Context, staleAfter time.Duration
 	if !oldest.IsEmpty() && oldest["oldest_at"].GTime() != nil {
 		stats.OldestMediaPendingAt = oldest["oldest_at"].GTime().Time
 	}
+
 	staleRows, err := mediaBase.Clone().
 		Fields(eventColumns.Id).
 		WhereLTE(eventColumns.UpdatedAt, staleCutoff).
@@ -527,10 +508,10 @@ func collectMediaAsynqTaskEventIDs(ctx context.Context, inspector *asynq.Inspect
 }
 
 func recordCollectQueueDatabaseStats(ctx context.Context, stats collectQueueDatabaseStats, processTasks, missingMediaTasks int) {
-	recordInt64Gauge(ctx, "xiaohuiji.collect.pending_events", stats.PendingEvents)
-	recordInt64Gauge(ctx, "xiaohuiji.collect.pending_partitions", stats.PendingPartitions)
+	// Runtime backlog is sourced from Asynq/Redis. Database event totals are
+	// intentionally not queried from the hot health-check loop: the durable
+	// event table is a recovery/audit store, not a realtime queue counter.
 	recordInt64Gauge(ctx, "xiaohuiji.collect.process_queue_tasks", processTasks)
-	recordFloat64Gauge(ctx, "xiaohuiji.collect.process_queue_amplification_ratio", collectQueueAmplificationRatio(processTasks, stats.PendingPartitions))
 	recordInt64Gauge(ctx, "xiaohuiji.collect.media_pending_events", stats.MediaPendingEvents)
 	recordInt64Gauge(ctx, "xiaohuiji.collect.media_pending_stale_events", stats.StaleMediaPendingEvents)
 	recordInt64Gauge(ctx, "xiaohuiji.invariant.media_pending_missing_asynq_task", missingMediaTasks)

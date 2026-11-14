@@ -14,6 +14,31 @@ import (
 	"github.com/hibiken/asynq"
 )
 
+func TestCollectSourceStatsBatchLimit(t *testing.T) {
+	old := os.Getenv("YOUBAN_PUBLISH_COLLECT_SOURCE_STATS_BATCH_SIZE")
+	t.Cleanup(func() { _ = os.Setenv("YOUBAN_PUBLISH_COLLECT_SOURCE_STATS_BATCH_SIZE", old) })
+
+	for _, tc := range []struct {
+		name  string
+		value string
+		want  int
+	}{
+		{name: "default", value: "", want: 32},
+		{name: "invalid", value: "bad", want: 32},
+		{name: "bounded low", value: "4", want: 4},
+		{name: "bounded high", value: "999", want: 128},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := os.Setenv("YOUBAN_PUBLISH_COLLECT_SOURCE_STATS_BATCH_SIZE", tc.value); err != nil {
+				t.Fatal(err)
+			}
+			if got := collectSourceStatsBatchLimit(); got != tc.want {
+				t.Fatalf("collectSourceStatsBatchLimit() = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestCollectSourceStatsAggregateLocalPostgres(t *testing.T) {
 	port := os.Getenv("YOUBAN_DELIVERY_TEST_PORT")
 	if port == "" {

@@ -12,6 +12,8 @@ import (
 	pdao "hotgo/addons/youban_publish/internal/dao"
 )
 
+const collectProcessRebalanceScanBatchSize = 1000
+
 type CollectProcessQueueRebalanceResult struct {
 	TasksRemoved  int
 	TasksRequeued int
@@ -75,66 +77,99 @@ func RebalanceCollectProcessQueue(ctx context.Context) (*CollectProcessQueueReba
 		}
 	}
 
-	payloads, err := pendingCollectProcessPayloads(ctx)
-	if err != nil {
-		return nil, err
-	}
 	service := NewSysPublish()
-	for _, payload := range payloads {
-		key := collectProcessScheduleKey(payload)
-		if _, ok := active[key]; ok {
-			result.TasksSkipped++
-			continue
+	defer func() {
+		if service.tgQueueClient != nil {
+			_ = service.tgQueueClient.Close()
 		}
-		removeCollectProcessSchedule(ctx, payload)
-		enqueued, enqueueErr := service.enqueueCollectProcessTask(ctx, payload, 0, true)
-		if enqueueErr != nil {
-			return nil, gerror.Wrapf(enqueueErr, "重新投递采集处理任务失败 sourceId:%d chatId:%s", payload.SourceId, payload.SourceChatId)
+	}()
+
+	var lastEventID int64
+	for {
+		payloads, nextEventID, err := pendingCollectProcessPayloads(ctx, lastEventID, collectProcessRebalanceScanBatchSize)
+		if err != nil {
+			return nil, err
 		}
-		if enqueued {
-			result.TasksRequeued++
-		} else {
-			result.TasksSkipped++
+		if len(payloads) == 0 {
+			break
 		}
-	}
-	if service.tgQueueClient != nil {
-		_ = service.tgQueueClient.Close()
+		for _, payload := range payloads {
+			key := collectProcessScheduleKey(payload)
+			if _, ok := active[key]; ok {
+				result.TasksSkipped++
+				continue
+			}
+			removeCollectProcessSchedule(ctx, payload)
+			enqueued, enqueueErr := service.enqueueCollectProcessTask(ctx, payload, 0, true)
+			if enqueueErr != nil {
+				return nil, gerror.Wrapf(enqueueErr, "重新投递采集处理任务失败 sourceId:%d chatId:%s", payload.SourceId, payload.SourceChatId)
+			}
+			if enqueued {
+				result.TasksRequeued++
+			} else {
+				result.TasksSkipped++
+			}
+		}
+		if nextEventID <= lastEventID {
+			return nil, gerror.New("采集处理队列重排游标未前进")
+		}
+		lastEventID = nextEventID
 	}
 	g.Log().Infof(ctx, "采集处理队列重排完成 removed:%d requeued:%d skipped:%d active:%d",
 		result.TasksRemoved, result.TasksRequeued, result.TasksSkipped, result.ActiveTasks)
 	return result, nil
 }
 
-func pendingCollectProcessPayloads(ctx context.Context) ([]collectProcessQueuePayload, error) {
+func pendingCollectProcessPayloads(ctx context.Context, afterEventID int64, limit int) ([]collectProcessQueuePayload, int64, error) {
+	if limit <= 0 {
+		limit = collectProcessRebalanceScanBatchSize
+	}
 	eventColumns := pdao.YoubanPublishCollectEvent.Columns()
 	sourceColumns := pdao.YoubanPublishCollectSource.Columns()
 	rows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
 		As("e").
 		InnerJoin(pdao.YoubanPublishCollectSource.Table()+" s", "s."+sourceColumns.Id+"=e."+eventColumns.SourceId).
-		Fields("e."+eventColumns.TenantId, "e."+eventColumns.AccountId, "e."+eventColumns.SourceId, "e."+eventColumns.SourceChatId).
+		Fields(
+			"e."+eventColumns.Id,
+			"e."+eventColumns.TenantId,
+			"e."+eventColumns.AccountId,
+			"e."+eventColumns.SourceId,
+			"e."+eventColumns.SourceChatId,
+		).
+		WhereGT("e."+eventColumns.Id, afterEventID).
 		WhereIn("e."+eventColumns.Status, collectProcessWindowStatuses()).
 		WhereNull("e."+eventColumns.ProcessedAt).
 		Where("s."+sourceColumns.CollectEnabled, 1).
 		Where("s."+sourceColumns.Status, 1).
-		WhereNull("s."+sourceColumns.DeletedAt).
-		Group("e."+eventColumns.TenantId, "e."+eventColumns.AccountId, "e."+eventColumns.SourceId, "e."+eventColumns.SourceChatId).
-		OrderAsc("e." + eventColumns.TenantId).
-		OrderAsc("e." + eventColumns.AccountId).
-		OrderAsc("e." + eventColumns.SourceId).
+		WhereNull("s." + sourceColumns.DeletedAt).
+		OrderAsc("e." + eventColumns.Id).
+		Limit(limit).
 		All()
 	if err != nil {
-		return nil, gerror.Wrap(err, "读取待恢复采集处理分区失败")
+		return nil, afterEventID, gerror.Wrap(err, "读取待恢复采集处理分区失败")
 	}
 	payloads := make([]collectProcessQueuePayload, 0, len(rows))
+	seen := make(map[string]struct{}, len(rows))
+	lastEventID := afterEventID
 	for _, row := range rows {
-		payloads = append(payloads, collectProcessQueuePayload{
+		eventID := row[eventColumns.Id].Int64()
+		if eventID > lastEventID {
+			lastEventID = eventID
+		}
+		payload := collectProcessQueuePayload{
 			TenantId:     row[eventColumns.TenantId].Int64(),
 			AccountId:    row[eventColumns.AccountId].Int64(),
 			SourceId:     row[eventColumns.SourceId].Int64(),
 			SourceChatId: row[eventColumns.SourceChatId].String(),
-		})
+		}
+		key := collectProcessScheduleKey(payload)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		payloads = append(payloads, payload)
 	}
-	return payloads, nil
+	return payloads, lastEventID, nil
 }
 
 func collectProcessPayloadFromTaskInfo(task *asynq.TaskInfo) (collectProcessQueuePayload, bool) {

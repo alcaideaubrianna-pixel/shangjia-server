@@ -34,6 +34,17 @@ func collectSourceStatsRefreshDelay() time.Duration {
 	return time.Duration(seconds) * time.Second
 }
 
+func collectSourceStatsBatchLimit() int {
+	limit, err := strconv.Atoi(strings.TrimSpace(os.Getenv("YOUBAN_PUBLISH_COLLECT_SOURCE_STATS_BATCH_SIZE")))
+	if err != nil || limit <= 0 {
+		limit = 32
+	}
+	if limit > 128 {
+		limit = 128
+	}
+	return limit
+}
+
 type collectSourceStatsPayload struct {
 	SourceID int64 `json:"sourceId"`
 }
@@ -152,18 +163,16 @@ func (s *sSysPublish) handleCollectSourceStatsTask(ctx context.Context, task *as
 		return err
 	}
 	defer mutex.Unlock(context.WithoutCancel(ctx))
-	// 一次领取多个 dirty source，统一聚合明细表，避免每个 source 单独
-	// 执行 COUNT/SUM/MAX 扫描。单源任务仍作为兜底，确保旧任务兼容。
+	// 一次领取一批 dirty source，统一聚合明细表，避免每个 source 单独
+	// 执行 COUNT/SUM/MAX 扫描。批量有上限，避免低频纠偏任务争抢实时采集连接。
 	rows, err := g.DB().Model(collectSourceStatsWorkTable).Ctx(ctx).
 		Fields("source_id,generation").Where("pending", 1).
 		WhereLTE("available_at", time.Now()).OrderAsc("available_at").
-		// 对账只处理一个来源，避免低频修正任务同时扫描多个来源的大表；
-		// 其他 dirty 来源由下一轮游标继续处理，不能挤占实时采集连接。
-		OrderAsc("source_id").Limit(1).All()
+		OrderAsc("source_id").Limit(collectSourceStatsBatchLimit()).All()
 	if err != nil || len(rows) == 0 {
 		// 没有待对账记录时不要回退到单来源全表 COUNT/SUM/MAX。
 		// 实时路径只负责写入 dirty work，低频批量任务负责真正聚合；
-		// 旧任务到达这里也直接结束，避免再次触发 13 秒大表扫描。
+		// 旧任务到达这里也直接结束，避免再次触发大表扫描。
 		if err != nil {
 			return gerror.Wrap(err, "读取采集源统计待对账任务失败")
 		}
