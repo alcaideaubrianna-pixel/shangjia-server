@@ -79,7 +79,7 @@ func TestTelegramJobPriorityClassifiesPublishOperations(t *testing.T) {
 		{name: "message push", operationNo: "message_push:1:2:3", want: tgJobPriorityUrgent},
 		{name: "AI republish", operationNo: "ai-republish:1", priority: tgJobPriorityDefault, want: tgJobPriorityDefault},
 		{name: "verification repair", operationNo: "verify-misbinding-repair:1", priority: tgJobPriorityDefault, want: tgJobPriorityDefault},
-		{name: "full push", operationNo: "full_push:1:2", want: tgJobPriorityFullPush},
+		{name: "full push", operationNo: "full_push:1:2", want: tgJobPriorityInteractive},
 		{name: "cycle push", operationNo: "cycle_batch:1:2:3", want: tgJobPriorityBulk},
 		{name: "realtime collect", operationNo: "collect:1", priority: tgJobPriorityDefault, want: tgJobPriorityUrgent},
 		{name: "history collect", operationNo: "collect:2", priority: tgJobPriorityHistory, want: tgJobPriorityHistory},
@@ -116,8 +116,8 @@ func TestTelegramChannelAllowsOnlyOneActiveJob(t *testing.T) {
 	if tgJobPriorityFullPush >= tgJobPriorityBulk {
 		t.Fatalf("full push priority=%d must be higher than cycle bulk=%d", tgJobPriorityFullPush, tgJobPriorityBulk)
 	}
-	if queue := telegramQueueNameByPriority(tgJobPriorityFullPush); queue != tgQueueNameDefault {
-		t.Fatalf("full push queue=%s, want %s", queue, tgQueueNameDefault)
+	if queue := telegramQueueNameByPriority(telegramJobPriorityValue(telegramJobRecord{OperationNo: "full_push:1:2"})); queue != tgQueueNameInteractive {
+		t.Fatalf("full push queue=%s, want %s", queue, tgQueueNameInteractive)
 	}
 	if queue := telegramQueueNameByPriority(tgJobPriorityBulk); queue != tgQueueNameBulk {
 		t.Fatalf("cycle queue=%s, want %s", queue, tgQueueNameBulk)
@@ -135,7 +135,7 @@ func TestTelegramChannelAllowsOnlyOneActiveJob(t *testing.T) {
 	if !strings.Contains(expression, "LIKE 'edit:%'") || !strings.Contains(expression, "THEN 1") {
 		t.Fatalf("effective priority SQL does not prioritize existing edit jobs: %s", expression)
 	}
-	if !strings.Contains(expression, "LOWER(TRIM(j.operation_no)) LIKE 'full_push:%'") || !strings.Contains(expression, "THEN 70") {
+	if !strings.Contains(expression, "LOWER(TRIM(j.operation_no)) LIKE 'full_push:%'") || !strings.Contains(expression, "THEN 1") {
 		t.Fatalf("effective priority SQL does not prioritize existing full push jobs: %s", expression)
 	}
 	if !strings.Contains(expression, "LOWER(TRIM(j.operation_no)) LIKE 'collect:%'") || !strings.Contains(expression, "THEN 10") {

@@ -38,7 +38,7 @@ func telegramJobPriorityValue(job telegramJobRecord) int {
 		return tgJobPriorityUrgent
 	}
 	if strings.HasPrefix(operationNo, "full_push:") {
-		return tgJobPriorityFullPush
+		return tgJobPriorityInteractive
 	}
 	if strings.HasPrefix(operationNo, "cycle_batch:") || strings.HasPrefix(operationNo, "profile_cycle:") {
 		return tgJobPriorityBulk
@@ -64,7 +64,7 @@ func telegramJobEffectivePrioritySQL(alias string) string {
 		prefix, tgJobPriorityUrgent,
 		prefix, prefix, prefix, prefix, tgJobPriorityInteractive,
 		prefix, prefix, prefix, tgJobPriorityUrgent,
-		prefix, tgJobPriorityFullPush,
+		prefix, tgJobPriorityInteractive,
 		prefix, prefix, tgJobPriorityBulk,
 		prefix, tgJobPriorityDefault,
 	)
