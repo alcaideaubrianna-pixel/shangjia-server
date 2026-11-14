@@ -323,7 +323,10 @@ func terminalMediaProcessingStatuses() []string {
 	// Metadata processing failure is terminal. The original media remains
 	// available and publishing must not wait forever for a retry that will
 	// never transition this row back to processing.
-	return []string{mediaProcessingReady, mediaProcessingFailed}
+	// uploaded is a completed upstream upload state.  Older/imported media
+	// rows may never pass through the local metadata worker, but they already
+	// have a reusable Telegram/file reference and must not block publishing.
+	return []string{mediaProcessingUploaded, mediaProcessingReady, mediaProcessingFailed}
 }
 
 func (s *sSysPublish) postponeTelegramJobUntilMediaReady(ctx context.Context, job telegramJobRecord) error {

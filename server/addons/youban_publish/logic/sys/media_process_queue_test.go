@@ -116,8 +116,9 @@ func TestMediaProcessFailureStatus(t *testing.T) {
 func TestTerminalMediaProcessingStatuses(t *testing.T) {
 	statuses := terminalMediaProcessingStatuses()
 	want := map[string]bool{
-		mediaProcessingReady:  true,
-		mediaProcessingFailed: true,
+		mediaProcessingUploaded: true,
+		mediaProcessingReady:    true,
+		mediaProcessingFailed:   true,
 	}
 	if len(statuses) != len(want) {
 		t.Fatalf("terminal status count = %d, want %d", len(statuses), len(want))
