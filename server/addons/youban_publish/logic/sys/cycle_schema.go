@@ -17,6 +17,7 @@ func (s *sSysPublish) syncChannelCycleAfterSave(ctx context.Context, tenantId in
 	if tenantId <= 0 || channelId <= 0 {
 		return nil
 	}
+	invalidateProfileCycleChannelConfigCache(ctx, channelId)
 	data := g.Map{
 		"cycle_active_run_id":      0,
 		"cycle_last_error_message": "",
@@ -33,35 +34,10 @@ func (s *sSysPublish) syncChannelCycleAfterSave(ctx context.Context, tenantId in
 	if err != nil {
 		return gerror.Wrap(err, "更新频道循环上架时间失败")
 	}
-	// 统一账户调度会直接按资料计划投影配置。继续投递旧的频道重算任务
-	// 会与配置保存并发，旧任务晚到时可能把刚设置的到期时间覆盖成旧值。
-	// 未迁移账户仍保留旧入口，保证灰度期间兼容。
-	var channelAccountID int64
-	if value, valueErr := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
-		Where("id", channelId).Where("tenant_id", tenantId).Value("tg_account_id"); valueErr == nil {
-		channelAccountID = value.Int64()
-	}
-	if !s.unifiedPushEngineEnabled(ctx, tenantId, channelAccountID) {
-		if err = s.enqueueCycleReschedule(ctx, channelId, 0); err != nil {
-			g.Log().Warningf(ctx, "提交频道循环重算任务失败，定时调度将自动恢复 channel:%d err:%v", channelId, err)
-		}
-	}
-	// 配置修改必须立即投影到频道内已有资料，否则资料仍会沿用旧循环时间或旧开关。
-	var jobs []telegramJobRecord
-	if err = g.DB().Model(publishChannelProfileTable+" cp").Safe().Ctx(ctx).
-		InnerJoin(publishTgJobTable+" j", "j.id=cp.last_job_id AND j.tenant_id=cp.tenant_id AND j.account_id=cp.account_id AND j.channel_id=cp.channel_id AND j.profile_id=cp.profile_id").
-		Where("cp.tenant_id", tenantId).Where("cp.channel_id", channelId).Where("cp.status", "active").
-		WhereIn("j.status", []string{"sent", "superseded"}).Fields("j.*").Limit(profileCycleOrchestratorBatchSize(ctx)).Scan(&jobs); err != nil {
-		return gerror.Wrap(err, "读取频道循环资料计划失败")
-	}
-	for _, job := range jobs {
-		if err = s.syncTelegramJobCycleSchedule(ctx, job); err != nil {
-			return gerror.Wrapf(err, "同步频道资料循环计划失败 profileId:%d", job.ProfileId)
-		}
-	}
-	// 频道配置变化后立即唤醒关联资料级 run，避免继续等待旧的到期时间。
-	if err = s.wakeProfileCycleRunsForChannel(ctx, tenantId, channelId); err != nil {
-		g.Log().Warningf(ctx, "唤醒频道资料循环任务失败 channel:%d err:%+v", channelId, err)
+	// 循环配置是频道级配置。保存时只更新频道本身，调度器在每轮
+	// 读取最新配置并计算资料计划；不能在 HTTP 请求中遍历并改写历史资料。
+	if err = s.enqueueCycleReschedule(ctx, channelId, 0); err != nil {
+		g.Log().Warningf(ctx, "提交频道循环重算任务失败，定时调度将自动读取最新配置 channel:%d err:%v", channelId, err)
 	}
 	return nil
 }

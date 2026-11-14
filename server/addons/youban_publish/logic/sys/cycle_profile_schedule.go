@@ -13,6 +13,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	"hotgo/internal/consts"
+	"hotgo/internal/library/cache"
 	hglock "hotgo/internal/library/hgrds/lock"
 )
 
@@ -30,6 +31,18 @@ const (
 	profileCycleRescheduleClaimLease  = 30 * time.Minute
 	profileCycleShardCount            = 64
 )
+
+const profileCycleChannelConfigCacheTTL = 30 * time.Second
+
+func profileCycleChannelConfigCacheKey(channelId int64) string {
+	return fmt.Sprintf("youban_publish:cycle:channel_config:%d", channelId)
+}
+
+func invalidateProfileCycleChannelConfigCache(ctx context.Context, channelId int64) {
+	if channelId > 0 {
+		_, _ = cache.Instance().Remove(ctx, profileCycleChannelConfigCacheKey(channelId))
+	}
+}
 
 type profileCycleChannelConfig struct {
 	Id          int64  `orm:"id"`
@@ -120,6 +133,12 @@ func (s *sSysPublish) profileCycleChannelConfigById(ctx context.Context, channel
 	if channelId <= 0 {
 		return config, nil
 	}
+	cacheKey := profileCycleChannelConfigCacheKey(channelId)
+	if cached, err := cache.Instance().Get(ctx, cacheKey); err == nil && !cached.IsNil() {
+		if err = cached.Scan(&config); err == nil && config.Id > 0 {
+			return config, nil
+		}
+	}
 	err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
 		Fields("id,tenant_id,cycle_publish_enabled,cycle_publish_mode,cycle_publish_days,cycle_publish_time,status,publish_direction").
 		Where("id", channelId).WhereNull("deleted_at").Scan(&config)
@@ -127,6 +146,7 @@ func (s *sSysPublish) profileCycleChannelConfigById(ctx context.Context, channel
 		return config, gerror.Wrap(err, "读取频道循环配置失败")
 	}
 	config.Days = s.effectiveChannelCycleDays(ctx, config.TenantId, config.Days)
+	_ = cache.Instance().Set(ctx, cacheKey, config, profileCycleChannelConfigCacheTTL)
 	return config, nil
 }
 
