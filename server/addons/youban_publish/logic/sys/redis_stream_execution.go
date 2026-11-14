@@ -121,6 +121,12 @@ func (s *sSysPublish) runTelegramStreamExecutionRecovery(ctx context.Context) {
 
 // recoverMissingTelegramStreamTasks 用Asynq自身检查能力确认队列任务缺失，再恢复PG通知意图；游标避免正常旧任务挡住后续恢复。
 func (s *sSysPublish) recoverMissingTelegramStreamTasks(ctx context.Context, afterID int64, limit int) (int64, error) {
+	// Channel-queue mode has no Asynq task id by design. The channel ZSET is
+	// the authoritative ready transport; running the legacy Asynq inspector
+	// here would incorrectly reset valid jobs to idle and rearm their Outbox.
+	if telegramChannelQueueEnabled() {
+		return 0, nil
+	}
 	// GoFrame 对带别名字段的动态模型扫描要求使用指针元素切片。
 	// 使用 []*telegramJobRecord 避免运行时将切片误判为非结构体参数，导致 Stream 恢复消费者反复重连。
 	var jobs []*telegramJobRecord
