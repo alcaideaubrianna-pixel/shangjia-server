@@ -234,7 +234,7 @@ func (s *sSysPublish) wakeProfileTelegramJobs(ctx context.Context, profileId int
 		return err
 	}
 	for _, job := range jobs {
-		if err := s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 0, false); err != nil {
+		if err := s.EnqueueTelegramJob(ctx, job.Id, 0, false); err != nil {
 			g.Log().Warningf(ctx, "媒体就绪唤醒TG任务失败 media_profile_id:%d job_id:%d err:%+v", profileId, job.Id, err)
 		}
 	}

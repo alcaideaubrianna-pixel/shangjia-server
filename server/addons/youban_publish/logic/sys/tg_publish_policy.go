@@ -141,5 +141,5 @@ func (s *sSysPublish) postponeTelegramJobForPublishInterval(ctx context.Context,
 	if affected, _ := result.RowsAffected(); affected == 0 {
 		return nil
 	}
-	return s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, delay, false)
+	return s.EnqueueTelegramJob(ctx, job.Id, delay, false)
 }

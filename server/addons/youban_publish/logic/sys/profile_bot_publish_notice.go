@@ -21,7 +21,10 @@ import (
 	"hotgo/internal/service"
 )
 
-const botProfilePublishOperationPrefix = "bot_publish:"
+const (
+	botProfilePublishOperationPrefix   = "bot_publish:"
+	botProfileUnpublishOperationPrefix = "bot_unpublish:"
+)
 
 const botProfilePublishNoticeTTL = 24 * time.Hour
 
@@ -45,12 +48,28 @@ type botProfilePublishNoticeRow struct {
 }
 
 func newBotProfilePublishOperationNo(botId int64, chatId string, profileId int64) string {
-	return fmt.Sprintf("%s%d:%s:%d:%d", botProfilePublishOperationPrefix, botId, strings.TrimSpace(chatId), profileId, gtime.Now().TimestampNano())
+	return newBotProfileOperationNo(botProfilePublishOperationPrefix, botId, chatId, profileId)
+}
+
+func newBotProfileUnpublishOperationNo(botId int64, chatId string, profileId int64) string {
+	return newBotProfileOperationNo(botProfileUnpublishOperationPrefix, botId, chatId, profileId)
+}
+
+func newBotProfileOperationNo(prefix string, botId int64, chatId string, profileId int64) string {
+	return fmt.Sprintf("%s%d:%s:%d:%d", prefix, botId, strings.TrimSpace(chatId), profileId, gtime.Now().TimestampNano())
 }
 
 func parseBotProfilePublishNoticeTarget(operationNo string) (botProfilePublishNoticeTarget, bool) {
+	return parseBotProfileNoticeTarget(operationNo, botProfilePublishOperationPrefix)
+}
+
+func parseBotProfileUnpublishNoticeTarget(operationNo string) (botProfilePublishNoticeTarget, bool) {
+	return parseBotProfileNoticeTarget(operationNo, botProfileUnpublishOperationPrefix)
+}
+
+func parseBotProfileNoticeTarget(operationNo, prefix string) (botProfilePublishNoticeTarget, bool) {
 	parts := strings.SplitN(strings.TrimSpace(operationNo), ":", 5)
-	if len(parts) != 5 || parts[0] != strings.TrimSuffix(botProfilePublishOperationPrefix, ":") {
+	if len(parts) != 5 || parts[0] != strings.TrimSuffix(prefix, ":") {
 		return botProfilePublishNoticeTarget{}, false
 	}
 	botId, err := strconv.ParseInt(parts[1], 10, 64)
@@ -88,6 +107,36 @@ func (s *sSysPublish) submitBotProfilesWithNotice(ctx context.Context, ids []int
 	}
 	service.SysContent().ClearHomeProfileCardsCache(ctx)
 	return &sysin.ProfileStatusModel{Message: "资料已提交上架"}, nil
+}
+
+func (s *sSysPublish) submitBotProfilesUnpublishWithNotice(ctx context.Context, ids []int64, capability *sysin.AccountCapabilityModel, botId int64, chatId string) (*sysin.ProfileStatusModel, error) {
+	groups, err := s.profileOwnerGroups(ctx, ids, nil, capability)
+	if err != nil {
+		return nil, err
+	}
+	for _, group := range groups {
+		for _, profileId := range uniqueIds(group.Ids) {
+			claimed, claimErr := claimProfileOperation(ctx, capability.TenantId, profileId, profileOperationUnpublish)
+			if claimErr != nil {
+				return nil, claimErr
+			}
+			if !claimed {
+				return nil, gerror.New("资料操作参数不完整")
+			}
+			operationNo := newBotProfileUnpublishOperationNo(botId, chatId, profileId)
+			if err = s.setProfilesOffline(ctx, []int64{profileId}, capability.TenantId); err != nil {
+				releaseProfileOperationClaim(ctx, capability.TenantId, profileId)
+				return nil, err
+			}
+			if err = s.enqueueProfileDownRunWithOperationNo(ctx, capability.TenantId, []int64{profileId}, 0, operationNo); err != nil {
+				releaseProfileOperationClaim(ctx, capability.TenantId, profileId)
+				return nil, gerror.Wrap(err, "加入资料下架队列失败")
+			}
+			releaseProfileOperationClaim(ctx, capability.TenantId, profileId)
+		}
+	}
+	service.SysContent().ClearHomeProfileCardsCache(ctx)
+	return &sysin.ProfileStatusModel{Message: "资料已提交下架"}, nil
 }
 
 func (s *sSysPublish) notifyBotProfilePublishCompleted(ctx context.Context, job telegramJobRecord) error {
@@ -135,6 +184,56 @@ func (s *sSysPublish) notifyBotProfilePublishCompleted(ctx context.Context, job 
 	return botservice.SysBot().Notify(ctx, &botsysin.NotifyInp{
 		BotId: target.BotId, ChatId: target.ChatId, Text: text, ParseMode: "HTML",
 	})
+}
+
+func (s *sSysPublish) notifyBotProfileUnpublishCompleted(ctx context.Context, job telegramJobRecord) error {
+	target, ok := parseBotProfileUnpublishNoticeTarget(job.OperationNo)
+	if !ok {
+		return nil
+	}
+	active, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("profile_id", job.ProfileId).Where("operation_no", job.OperationNo).
+		WhereIn("status", []string{telegramJobStatusPending, telegramJobStatusSending, telegramJobStatusRetryWait, telegramJobStatusConfirming}).
+		Count()
+	if err != nil {
+		return gerror.Wrap(err, "检查Bot资料下架任务状态失败")
+	}
+	if active > 0 {
+		return nil
+	}
+	claimed, err := reserveBotProfilePublishNotice(ctx, job.ProfileId, job.OperationNo)
+	if err != nil || !claimed {
+		return err
+	}
+	var profile struct {
+		ProfileNo string `json:"profileNo"`
+		Title     string `json:"title"`
+	}
+	if err = g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).
+		Fields("profile_no,title").Where("id", job.ProfileId).WhereNull("deleted_at").Scan(&profile); err != nil {
+		return gerror.Wrap(err, "读取Bot下架通知资料失败")
+	}
+	if strings.TrimSpace(profile.ProfileNo) == "" {
+		return gerror.New("Bot下架通知资料不存在")
+	}
+	var channels []botProfilePublishNoticeRow
+	if err = g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
+		LeftJoin(publishChannelTable+" c", "c.id=j.channel_id").
+		Fields("j.id AS job_id,COALESCE(NULLIF(c.channel_title,''),j.target_chat_id) AS channel_title,c.channel_username,j.target_chat_id,j.tg_message_id,j.status").
+		Where("j.profile_id", job.ProfileId).Where("j.operation_no", job.OperationNo).
+		OrderAsc("j.channel_id").Scan(&channels); err != nil {
+		return gerror.Wrap(err, "读取Bot下架通知频道失败")
+	}
+	text := formatBotProfileUnpublishNotice(profile.ProfileNo, profile.Title, channels)
+	return botservice.SysBot().Notify(ctx, &botsysin.NotifyInp{BotId: target.BotId, ChatId: target.ChatId, Text: text, ParseMode: "HTML"})
+}
+
+func formatBotProfileUnpublishNotice(profileNo, title string, channels []botProfilePublishNoticeRow) string {
+	lines := []string{"<b>资料下架完成</b>", "", "编号：<code>" + html.EscapeString(strings.TrimSpace(profileNo)) + "</code>", "标题：<code>" + html.EscapeString(strings.TrimSpace(title)) + "</code>", ""}
+	for _, channel := range channels {
+		lines = append(lines, "["+html.EscapeString(botProfilePublishChannelLabel(channel))+"] "+botProfilePublishStatusHTML("已下架", botProfilePublishMessageURL(channel)))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func formatBotProfilePublishNotice(profileNo string, title string, createdAt *gtime.Time, channels []botProfilePublishNoticeRow) string {

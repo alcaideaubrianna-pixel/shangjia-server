@@ -457,7 +457,7 @@ func TestTelegramAPISuccessCommitsAttemptMessageAndPhaseIntegration(t *testing.T
 		"target_chat_id": "-1001234567890", "phase": "verify", "chunk_index": 0,
 		"attempt_no": 1, "attempt_token": fmt.Sprintf("rate-limit-%d", seed),
 		"expected_count": 1, "confirmed_count": 0, "response_received": 0,
-		"status": telegramAttemptStatusRetryWait,
+		"status":        telegramAttemptStatusRetryWait,
 		"error_message": "too many requests, Too Many Requests: retry after 16: retry_after 16",
 	}).InsertAndGetId()
 	if err != nil {

@@ -81,8 +81,13 @@ func (s *sSysPublish) BotProfileStatus(ctx context.Context, in *sysin.BotProfile
 		}
 		ids = append(ids, id)
 	}
-	if in.Status == 1 && in.NotifyBotId > 0 && strings.TrimSpace(in.NotifyChatId) != "" {
-		return s.submitBotProfilesWithNotice(ctx, ids, capability, in.NotifyBotId, in.NotifyChatId)
+	if in.NotifyBotId > 0 && strings.TrimSpace(in.NotifyChatId) != "" {
+		if in.Status == 1 {
+			return s.submitBotProfilesWithNotice(ctx, ids, capability, in.NotifyBotId, in.NotifyChatId)
+		}
+		if in.Status == 2 {
+			return s.submitBotProfilesUnpublishWithNotice(ctx, ids, capability, in.NotifyBotId, in.NotifyChatId)
+		}
 	}
 	return s.updateProfileStatusByCapability(ctx, &sysin.ProfileStatusInp{Ids: ids, Status: in.Status}, capability)
 }

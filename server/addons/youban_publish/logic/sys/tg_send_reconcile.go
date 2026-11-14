@@ -348,7 +348,7 @@ func (s *sSysPublish) recoverUnconfirmedUnknownTelegramJob(ctx context.Context, 
 			return true, nil
 		}
 		s.appendTelegramJobLog(ctx, job, "reconcile", "retry", "TG请求前准备失败且无远端消息证据，已安全重新排队")
-		return true, s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 0, false)
+		return true, s.EnqueueTelegramJob(ctx, job.Id, 0, false)
 	default:
 		return false, nil
 	}
@@ -508,7 +508,7 @@ func (s *sSysPublish) recoverConfirmedUnknownTelegramJob(ctx context.Context, jo
 			return true, nil
 		}
 		s.appendTelegramJobLog(ctx, job, "reconcile", "confirmed", "TG展示资料已确认，继续按频道顺序推送验证资料")
-		return true, s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 0, false)
+		return true, s.EnqueueTelegramJob(ctx, job.Id, 0, false)
 
 	case telegramUnknownRecoveryComplete:
 		phase := job.SendPhase

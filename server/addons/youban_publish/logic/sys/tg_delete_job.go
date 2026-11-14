@@ -24,8 +24,8 @@ func (s *sSysPublish) CleanupTelegramJobMessages(ctx context.Context, jobId int6
 			if err := s.deleteTelegramMessageSetLockedByChannel(ctx, job, "资料清理"); err != nil {
 				return err
 			}
-			if err := s.enqueueProfileUnpublishSuccessNotice(ctx, job); err != nil {
-				g.Log().Warningf(ctx, "保存资料下架完成通知失败 profileId:%d jobId:%d err:%+v", job.ProfileId, job.Id, err)
+			if err := s.notifyBotProfileUnpublishCompleted(ctx, job); err != nil {
+				g.Log().Warningf(ctx, "发送Bot资料下架完成通知失败 profileId:%d jobId:%d err:%+v", job.ProfileId, job.Id, err)
 			}
 			return s.completeTelegramCleanupIntent(ctx, job.Id)
 		})
@@ -44,8 +44,8 @@ func (s *sSysPublish) CleanupTelegramJobMessages(ctx context.Context, jobId int6
 	if err := s.deleteTelegramMessageSetLockedByChannel(ctx, job, "资料清理"); err != nil {
 		return err
 	}
-	if err := s.enqueueProfileUnpublishSuccessNotice(ctx, job); err != nil {
-		g.Log().Warningf(ctx, "保存资料下架完成通知失败 profileId:%d jobId:%d err:%+v", job.ProfileId, job.Id, err)
+	if err := s.notifyBotProfileUnpublishCompleted(ctx, job); err != nil {
+		g.Log().Warningf(ctx, "发送Bot资料下架完成通知失败 profileId:%d jobId:%d err:%+v", job.ProfileId, job.Id, err)
 	}
 	return nil
 }

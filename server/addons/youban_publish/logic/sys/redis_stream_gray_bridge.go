@@ -45,7 +45,7 @@ func (d publishStreamGrayJobDispatcher) Dispatch(ctx context.Context, jobID int6
 			return nil
 		}
 	}
-	err := d.publish.enqueueTelegramJobDirectWithUnique(ctx, jobID, 0, false)
+	err := d.publish.EnqueueTelegramJob(ctx, jobID, 0, false)
 	// 已删除任务的旧通知可以确认；数据库连接故障仍返回错误，不能丢通知。
 	if errors.Is(err, sql.ErrNoRows) || (err != nil && err.Error() == "TG任务不存在") {
 		return nil

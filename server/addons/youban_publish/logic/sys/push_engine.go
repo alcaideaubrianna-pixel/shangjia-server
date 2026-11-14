@@ -30,14 +30,18 @@ const (
 	pushEngineUnified = "unified"
 )
 
-// accountPushEngine 返回账户当前启用的推送引擎；配置缺失或非法时回退到旧实现。
+// accountPushEngine 返回账户当前启用的推送引擎。新任务默认走统一 Stream
+// producer；legacy 只在显式配置时保留，避免配置缺失把任务静默送回旧队列。
 func (s *sSysPublish) accountPushEngine(ctx context.Context, tenantId, accountId int64) string {
-	// 全量灰度开关：用于本地验证和线上逐步切换，优先级高于账户字段。
+	// 全量开关优先级高于账户字段。
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("YOUBAN_PUBLISH_PUSH_ENGINE")), pushEngineLegacy) {
+		return pushEngineLegacy
+	}
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("YOUBAN_PUBLISH_PUSH_ENGINE")), pushEngineUnifiedStream) {
 		return pushEngineUnifiedStream
 	}
 	if tenantId <= 0 || accountId <= 0 {
-		return pushEngineLegacy
+		return pushEngineUnifiedStream
 	}
 	key := pushEngineCacheKey(tenantId, accountId)
 	if cache.Initialized() {
@@ -46,7 +50,7 @@ func (s *sSysPublish) accountPushEngine(ctx context.Context, tenantId, accountId
 			if engine == pushEngineUnified || engine == pushEngineUnifiedStream {
 				return engine
 			}
-			return pushEngineLegacy
+			return pushEngineUnifiedStream
 		}
 	}
 	var row struct {
@@ -56,18 +60,18 @@ func (s *sSysPublish) accountPushEngine(ctx context.Context, tenantId, accountId
 		Fields("push_engine").Where("tenant_id", tenantId).
 		Where("account_id", accountId).WhereNull("deleted_at").Scan(&row)
 	if err != nil {
-		// 迁移尚未执行或旧测试表没有新字段时，必须保持旧行为。
+		// 迁移尚未执行或旧测试表没有新字段时，仍走统一 producer。
 		if cache.Initialized() {
-			_ = cache.Instance().Set(ctx, key, pushEngineLegacy, pushEngineFallbackCacheTTL)
+			_ = cache.Instance().Set(ctx, key, pushEngineUnifiedStream, pushEngineFallbackCacheTTL)
 		}
-		return pushEngineLegacy
+		return pushEngineUnifiedStream
 	}
 	engine := strings.ToLower(strings.TrimSpace(row.PushEngine))
 	if engine != pushEngineUnified && engine != pushEngineUnifiedStream {
 		if cache.Initialized() {
-			_ = cache.Instance().Set(ctx, key, pushEngineLegacy, pushEngineCacheTTL)
+			_ = cache.Instance().Set(ctx, key, pushEngineUnifiedStream, pushEngineCacheTTL)
 		}
-		return pushEngineLegacy
+		return pushEngineUnifiedStream
 	}
 	if cache.Initialized() {
 		_ = cache.Instance().Set(ctx, key, engine, pushEngineCacheTTL)

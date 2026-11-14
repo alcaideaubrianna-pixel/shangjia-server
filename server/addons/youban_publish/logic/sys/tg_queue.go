@@ -383,10 +383,17 @@ func (s *sSysPublish) enqueueTelegramJob(ctx context.Context, jobId int64, delay
 }
 
 func (s *sSysPublish) enqueueTelegramJobDirect(ctx context.Context, jobId int64, delay time.Duration) error {
-	return s.enqueueTelegramJobDirectWithUnique(ctx, jobId, delay, true)
+	return s.EnqueueTelegramJob(ctx, jobId, delay, true)
 }
 
-func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jobId int64, delay time.Duration, unique bool) (resultErr error) {
+// EnqueueTelegramJob is the single producer entry point used by all publish
+// paths. Ordering and channel lease decisions are deliberately left to the
+// worker; this method only durably hands the job to the execution queue.
+func (s *sSysPublish) EnqueueTelegramJob(ctx context.Context, jobId int64, delay time.Duration, unique bool) error {
+	return s.enqueueTelegramJobInternal(ctx, jobId, delay, unique)
+}
+
+func (s *sSysPublish) enqueueTelegramJobInternal(ctx context.Context, jobId int64, delay time.Duration, unique bool) (resultErr error) {
 	ctx = telegramPublishTraceContext(ctx, jobId)
 	stage := beginTelegramPublishStage(ctx, "dispatch.enqueue", g.Map{"delayMs": delay.Milliseconds(), "unique": unique})
 	defer stage.Finish(&resultErr)

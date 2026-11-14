@@ -255,14 +255,14 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 	}
 	// 所有账户统一以 Asynq 作为发送主路径，不能再由账户灰度字段决定是否
 	// 进入可靠队列；Stream 只作为旁路能力，避免 legacy 账户被旧路径卡死。
-	if err = s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 0, false); err == nil {
+	if err = s.EnqueueTelegramJob(ctx, job.Id, 0, false); err == nil {
 		g.Log().Debug(ctx, "TG任务统一进入Asynq发送主路径", g.Map{"event": "asynq_primary_enqueue", "jobId": job.Id, "outboxId": row.Id})
 		return s.confirmTelegramStreamOutbox(ctx, row.Id, owner, job.Id, row.AttemptCount)
 	}
 	// Stream 连续失败达到阈值时，任何账户都必须走 Asynq 兜底；不能再依赖
 	// 账户灰度配置，否则旧账户会无限重试而永远没有执行任务。
 	if row.AttemptCount >= 3 && telegramOutboxJobStillNeedsDispatch(job.Status, job.DispatchStatus) {
-		if fallbackErr := s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 0, false); fallbackErr == nil {
+		if fallbackErr := s.EnqueueTelegramJob(ctx, job.Id, 0, false); fallbackErr == nil {
 			g.Log().Warning(ctx, "TG任务Outbox达到重试阈值，直接降级Asynq", g.Map{"event": "stream_fallback_enqueue", "jobId": job.Id, "outboxId": row.Id, "attemptCount": row.AttemptCount})
 			return s.confirmTelegramStreamOutbox(ctx, row.Id, owner, job.Id, row.AttemptCount)
 		}
@@ -270,7 +270,7 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 	if s.accountStreamPushEngineEnabled(ctx, job.TenantId, job.AccountId) {
 		// Asynq 是发送主路径，Stream 仅作为旁路通知/观测通道。
 		// Stream 不可用时不能阻塞频道；直接入队仍经过频道租约、队首和幂等校验。
-		if err = s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 0, false); err == nil {
+		if err = s.EnqueueTelegramJob(ctx, job.Id, 0, false); err == nil {
 			g.Log().Debug(ctx, "TG任务绕过Stream进入Asynq主路径", g.Map{"event": "stream_bypass_direct_enqueue", "jobId": job.Id, "outboxId": row.Id})
 			return s.confirmTelegramStreamOutbox(ctx, row.Id, owner, job.Id, row.AttemptCount)
 		}
@@ -278,7 +278,7 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 		// 作为关键路径。Stream 堵塞时用户点击必须仍能进入 Asynq；
 		// 直接入队仍会执行频道前序检查、频道租约和 Job 幂等保护。
 		if telegramJobPriorityValue(job) == tgJobPriorityInteractive {
-			if err = s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 0, false); err != nil {
+			if err = s.EnqueueTelegramJob(ctx, job.Id, 0, false); err != nil {
 				return s.releaseTelegramOutbox(ctx, row.Id, owner, row.AttemptCount, err.Error())
 			}
 			g.Log().Info(ctx, "手动TG任务绕过Stream直接进入Asynq", g.Map{
@@ -292,7 +292,7 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 			// Stream 写入失败不能让用户任务跟循环积压一起等待；
 			// 直接走同一频道顺序校验的 Asynq fallback，仍保持幂等。
 			if telegramJobPriorityValue(job) == tgJobPriorityInteractive || row.AttemptCount >= 3 {
-				if fallbackErr := s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 0, false); fallbackErr == nil {
+				if fallbackErr := s.EnqueueTelegramJob(ctx, job.Id, 0, false); fallbackErr == nil {
 					g.Log().Warning(ctx, "TG任务Stream失败已降级Asynq", g.Map{"event": "stream_fallback_enqueue", "jobId": job.Id, "outboxId": row.Id, "attemptCount": row.AttemptCount})
 					return s.confirmTelegramStreamOutbox(ctx, row.Id, owner, job.Id, row.AttemptCount)
 				} else {

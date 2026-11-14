@@ -674,7 +674,7 @@ func (s *sSysPublish) waitTelegramDeliveryWebhook(ctx context.Context, attempt t
 	if confirmed {
 		attempt.Status = telegramAttemptStatusConfirmed
 		s.projectTelegramDeliveryAttempt(ctx, attempt, "")
-		return s.enqueueTelegramJobDirectWithUnique(ctx, attempt.JobId, 0, false)
+		return s.EnqueueTelegramJob(ctx, attempt.JobId, 0, false)
 	}
 	attempt.Status = telegramAttemptStatusWaiting
 	s.projectTelegramDeliveryAttempt(ctx, attempt, cause.Error())

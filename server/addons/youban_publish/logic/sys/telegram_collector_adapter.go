@@ -91,7 +91,7 @@ func (h *publishCollectorAccountTaskHandler) HandleAccountTaskFailure(ctx contex
 		})
 		h.publish.appendTelegramJobLog(ctx, job, "account_fallback", "superseded",
 			fmt.Sprintf("旧%s任务终态失败已忽略，当前阶段:%s error:%v", purpose, job.SendPhase, cause))
-		return h.publish.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 0, false)
+		return h.publish.EnqueueTelegramJob(ctx, job.Id, 0, false)
 	}
 	return h.publish.failTelegramMediaFallbackJob(ctx, job, cause)
 }
@@ -466,7 +466,7 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 		}
 		g.Log().Infof(ctx, "协议号展示媒体降级完成，验证媒体交回正常队列 taskId:%d jobId:%d tgAccountId:%d displayMessages:%d verifyMedia:%d", task.ID, job.Id, task.AccountID, len(messages), len(verifyMedia))
 		s.appendTelegramJobLog(ctx, job, "account_fallback", "display_confirmed", "协议号展示媒体已确认，验证媒体交回正常发送队列")
-		return s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 0, false)
+		return s.EnqueueTelegramJob(ctx, job.Id, 0, false)
 	}
 	g.Log().Infof(ctx, "协议号验证媒体降级任务发送成功 taskId:%d jobId:%d tgAccountId:%d verifyMessages:%d", task.ID, job.Id, task.AccountID, len(messages))
 	return s.finalizeTelegramMediaDelivery(ctx, job, true, true)

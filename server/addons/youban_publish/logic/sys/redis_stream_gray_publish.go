@@ -66,7 +66,7 @@ func (s *sSysPublish) confirmTelegramStreamOutbox(ctx context.Context, outboxID 
 	}
 	if telegramOutboxJobStillNeedsDispatch(job.Status, job.DispatchStatus) {
 		if attemptCount >= 3 {
-			if fallbackErr := s.enqueueTelegramJobDirectWithUnique(ctx, jobID, 0, false); fallbackErr == nil {
+			if fallbackErr := s.EnqueueTelegramJob(ctx, jobID, 0, false); fallbackErr == nil {
 				g.Log().Warning(ctx, "TG任务Stream未接管已降级Asynq", g.Map{"event": "stream_fallback_enqueue", "jobId": jobID, "outboxId": outboxID, "attemptCount": attemptCount})
 				return s.confirmTelegramStreamOutbox(ctx, outboxID, owner, jobID, 0)
 			}

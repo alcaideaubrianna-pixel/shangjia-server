@@ -335,7 +335,7 @@ func (s *sSysPublish) recoverStalePreAttemptTelegramJobs(ctx context.Context, li
 		}
 		job.Status = telegramJobStatusRetryWait
 		s.appendTelegramJobLog(ctx, job, "recovery", "queued", "发送Attempt尚未创建，已安全重新投递")
-		if enqueueErr := s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 0, false); enqueueErr != nil {
+		if enqueueErr := s.EnqueueTelegramJob(ctx, job.Id, 0, false); enqueueErr != nil {
 			g.Log().Warningf(ctx, "重新投递发送前中断TG任务失败 jobId:%d err:%+v", job.Id, enqueueErr)
 		}
 	}
@@ -907,7 +907,7 @@ func (s *sSysPublish) recoverStaleTelegramDispatchJobs(ctx context.Context, limi
 		// The stale Asynq task can still hold its uniqueness key after the task
 		// itself disappeared. A recovery enqueue must create a fresh task; the
 		// database transition in the worker remains the delivery idempotency gate.
-		if enqueueErr := s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 0, false); enqueueErr != nil {
+		if enqueueErr := s.EnqueueTelegramJob(ctx, job.Id, 0, false); enqueueErr != nil {
 			g.Log().Warningf(ctx, "重新入队调度中断TG任务失败 job:%d err:%+v", job.Id, enqueueErr)
 		}
 	}
