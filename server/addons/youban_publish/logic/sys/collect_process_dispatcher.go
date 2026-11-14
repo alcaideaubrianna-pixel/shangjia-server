@@ -30,7 +30,7 @@ func (s *sSysPublish) runCollectProcessDispatcher(ctx context.Context) {
 			Where("account_id >= 0").
 			Where("status = ? OR (status = ? AND lease_expires_at <= ?)", "pending", "processing", gtime.Now()).
 			Where("(tenant_id > ? OR (tenant_id = ? AND account_id > ?))", cursorTenantID, cursorTenantID, cursorAccountID).
-			Group("tenant_id,account_id").OrderAsc("tenant_id").OrderAsc("account_id").Limit(16)
+			Group("tenant_id,account_id").OrderAsc("tenant_id").OrderAsc("account_id").Limit(64)
 		if err := model.Scan(&scopes); err != nil {
 			g.Log().Warningf(ctx, "读取采集账户分片失败 tenantCursor:%d accountCursor:%d err:%+v", cursorTenantID, cursorAccountID, err)
 		}
@@ -41,7 +41,7 @@ func (s *sSysPublish) runCollectProcessDispatcher(ctx context.Context) {
 				Fields("tenant_id,account_id").
 				Where("account_id >= 0").
 				Where("status = ? OR (status = ? AND lease_expires_at <= ?)", "pending", "processing", gtime.Now()).
-				Group("tenant_id,account_id").OrderAsc("tenant_id").OrderAsc("account_id").Limit(16).Scan(&scopes)
+				Group("tenant_id,account_id").OrderAsc("tenant_id").OrderAsc("account_id").Limit(64).Scan(&scopes)
 		}
 		if len(scopes) > 0 {
 			last := scopes[len(scopes)-1]

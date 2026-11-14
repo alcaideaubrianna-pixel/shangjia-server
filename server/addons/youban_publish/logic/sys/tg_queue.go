@@ -196,6 +196,36 @@ func collectProcessWorkerQueues() map[string]int {
 	return queues
 }
 
+// collectProcessRealtimeWorkerQueues isolates current BOT/account collection
+// work from historical recovery traffic. Both maps keep the same shard layout
+// so a single account/source remains ordered while the workers are independent.
+func collectProcessRealtimeWorkerQueues() map[string]int {
+	queues := map[string]int{tgQueueNameCollectProcessRealtime: 1, tgQueueNameCollectProcessRealtimeV2: 1}
+	for _, queue := range collectProcessQueueNames() {
+		queues[queue] = 1
+	}
+	for shard := 0; shard < collectProcessAccountQueueShards; shard++ {
+		queues[fmt.Sprintf("%s%02d", tgQueueNameCollectProcessAccountPrefix, shard)] = 1
+	}
+	for shard := 0; shard < collectProcessSourceQueueShards; shard++ {
+		queues[fmt.Sprintf("%s%02d", tgQueueNameCollectProcessSourceRealtimePrefix, shard)] = 2
+	}
+	return queues
+}
+
+func collectProcessHistoryWorkerQueues() map[string]int {
+	queues := map[string]int{
+		tgQueueNameCollectProcessRecoveryV2: 4,
+	}
+	for shard := 0; shard < collectProcessAccountQueueShards; shard++ {
+		queues[fmt.Sprintf("%s%02d", tgQueueNameCollectProcessAccountHistoryPrefix, shard)] = 1
+	}
+	for shard := 0; shard < collectProcessSourceQueueShards; shard++ {
+		queues[fmt.Sprintf("%s%02d", tgQueueNameCollectProcessSourceRecoveryPrefix, shard)] = 1
+	}
+	return queues
+}
+
 func backgroundWorkerQueues(collectorWorker, backgroundWorker bool) map[string]int {
 	queues := make(map[string]int)
 	if collectorWorker {

@@ -23,8 +23,8 @@ const collectProcessOutboxMaxTerminalRetries = 12
 
 const (
 	// 规则队列默认每轮只领取少量任务，避免一次领取过多导致 processing 堆积。
-	collectProcessDispatchBatchDefault   = 10
-	collectProcessDispatchBatchMaximum   = 100
+	collectProcessDispatchBatchDefault   = 500
+	collectProcessDispatchBatchMaximum   = 1000
 	collectProcessRuleConcurrencyDefault = 2
 	collectProcessRuleConcurrencyMaximum = 8
 )

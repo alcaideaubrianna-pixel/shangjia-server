@@ -56,7 +56,7 @@ func TestCollectProcessDispatchBatchSizeIsBounded(t *testing.T) {
 	if got := normalizeCollectProcessDispatchBatchSize(0); got != collectProcessDispatchBatchDefault {
 		t.Fatalf("unexpected default dispatch batch size: %d", got)
 	}
-	if got := normalizeCollectProcessDispatchBatchSize(1000); got != collectProcessDispatchBatchMaximum {
+	if got := normalizeCollectProcessDispatchBatchSize(5000); got != collectProcessDispatchBatchMaximum {
 		t.Fatalf("dispatch batch size must be bounded: %d", got)
 	}
 }

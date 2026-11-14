@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -45,6 +46,7 @@ type sSysPublish struct {
 	attemptTimeoutServer       *asynq.Server
 	collectRealtimeServer      *asynq.Server
 	collectProcessQueueServer  *asynq.Server
+	collectHistoryQueueServer  *asynq.Server
 	backgroundQueueServer      *asynq.Server
 	accountScheduleQueueServer *asynq.Server
 	materialImportPullServer   *asynq.Server
@@ -130,6 +132,10 @@ func telegramGatewayRuntimeConfig(conf *model.TelegramConfig) (*gatewayservice.R
 	if conf.LocalBotEnabled {
 		runtimeServerURL = conf.BotApiServerUrl
 	}
+	webhookBaseURL := conf.WebhookBaseUrl
+	if debugWebhookURL := strings.TrimSpace(os.Getenv("YOUBAN_DEBUG_WEBHOOK_URL")); debugWebhookURL != "" {
+		webhookBaseURL = debugWebhookURL
+	}
 	return &gatewayservice.RuntimeConfig{
 		Mode:             conf.BotRuntimeMode,
 		ProxyURL:         conf.ProxyUrl,
@@ -137,7 +143,7 @@ func telegramGatewayRuntimeConfig(conf *model.TelegramConfig) (*gatewayservice.R
 		MediaServerURL:   conf.BotApiServerUrl,
 		MediaFileURL:     conf.BotApiFileUrl,
 		LocalBotEnabled:  conf.LocalBotEnabled,
-		WebhookBaseURL:   conf.WebhookBaseUrl,
+		WebhookBaseURL:   webhookBaseURL,
 		WebhookSecret:    conf.WebhookSecret,
 	}, nil
 }

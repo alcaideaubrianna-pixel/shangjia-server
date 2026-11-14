@@ -135,7 +135,7 @@ func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
 
 func (s *sSysPublish) startCollectProcessWorker(ctx context.Context) {
 	s.tgQueueMu.Lock()
-	if s.collectRealtimeServer != nil || s.collectProcessQueueServer != nil {
+	if s.collectRealtimeServer != nil || s.collectProcessQueueServer != nil || s.collectHistoryQueueServer != nil {
 		s.tgQueueMu.Unlock()
 		return
 	}
@@ -144,13 +144,19 @@ func (s *sSysPublish) startCollectProcessWorker(ctx context.Context) {
 		Queues:         map[string]int{tgQueueNameCollectProcessRealtimeV2: 1},
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
-	processServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
-		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.backgroundConcurrency", 4).Int(),
-		Queues:         collectProcessWorkerQueues(),
+	realtimeProcessServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
+		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.collectRealtimeConcurrency", 16).Int(),
+		Queues:         collectProcessRealtimeWorkerQueues(),
+		RetryDelayFunc: telegramQueueRetryDelay,
+	})
+	historyProcessServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
+		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.collectHistoryConcurrency", 4).Int(),
+		Queues:         collectProcessHistoryWorkerQueues(),
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
 	s.collectRealtimeServer = realtimeServer
-	s.collectProcessQueueServer = processServer
+	s.collectProcessQueueServer = realtimeProcessServer
+	s.collectHistoryQueueServer = historyProcessServer
 	s.tgQueueMu.Unlock()
 
 	mux := asynq.NewServeMux()
@@ -162,8 +168,13 @@ func (s *sSysPublish) startCollectProcessWorker(ctx context.Context) {
 		}
 	}()
 	go func() {
-		if err := processServer.Run(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
-			g.Log().Errorf(ctx, "启动采集处理队列失败：%+v", err)
+		if err := realtimeProcessServer.Run(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
+			g.Log().Errorf(ctx, "启动实时采集处理队列失败：%+v", err)
+		}
+	}()
+	go func() {
+		if err := historyProcessServer.Run(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
+			g.Log().Errorf(ctx, "启动历史采集处理队列失败：%+v", err)
 		}
 	}()
 }
@@ -475,6 +486,7 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	attemptTimeoutServer := s.attemptTimeoutServer
 	collectRealtimeServer := s.collectRealtimeServer
 	collectProcessServer := s.collectProcessQueueServer
+	collectHistoryServer := s.collectHistoryQueueServer
 	backgroundServer := s.backgroundQueueServer
 	accountScheduleServer := s.accountScheduleQueueServer
 	relayServer := s.relayQueueServer
@@ -498,6 +510,7 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	s.attemptTimeoutServer = nil
 	s.collectRealtimeServer = nil
 	s.collectProcessQueueServer = nil
+	s.collectHistoryQueueServer = nil
 	s.backgroundQueueServer = nil
 	s.accountScheduleQueueServer = nil
 	s.relayQueueServer = nil
@@ -542,6 +555,9 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	}
 	if collectRealtimeServer != nil {
 		collectRealtimeServer.Shutdown()
+	}
+	if collectHistoryServer != nil {
+		collectHistoryServer.Shutdown()
 	}
 	if collectProcessServer != nil {
 		collectProcessServer.Shutdown()
