@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -274,8 +275,14 @@ func (s *sSysPublish) prepareProfilePublishJobs(ctx context.Context, profileId, 
 
 // enqueuePreparedProfileJobs 在事务提交后投递待执行任务，终态重试保持原状态并合并资料投影。
 func (s *sSysPublish) enqueuePreparedProfileJobs(ctx context.Context, jobIds []int64, operatorId int64) {
+	// A large manual publish batch can contain thousands of jobs. Persist all
+	// jobs in the transaction, then wake only one head per channel; completion
+	// callbacks continue the channel. This avoids one DB/Redis/lease round trip
+	// per item while preserving strict per-channel ordering.
+	wokenChannels := make(map[string]struct{})
 	for _, jobId := range jobIds {
-		if job, readErr := s.telegramJobById(ctx, jobId); readErr != nil {
+		job, readErr := s.telegramJobById(ctx, jobId)
+		if readErr != nil {
 			g.Log().Warningf(ctx, "读取资料待发送记录失败 jobId:%d err:%+v", jobId, readErr)
 		} else if job.Status == telegramJobStatusSent || job.Status == telegramJobStatusSuperseded {
 			continue
@@ -292,6 +299,11 @@ func (s *sSysPublish) enqueuePreparedProfileJobs(ctx context.Context, jobIds []i
 		} else if recordErr := s.upsertPublishJobRecord(ctx, job, "pending", ""); recordErr != nil {
 			g.Log().Warningf(ctx, "保存资料待发送记录失败 jobId:%d err:%+v", jobId, recordErr)
 		}
+		channelKey := fmt.Sprintf("%d:%s", job.TenantId, telegramChannelDispatchKey(job))
+		if _, ok := wokenChannels[channelKey]; ok {
+			continue
+		}
+		wokenChannels[channelKey] = struct{}{}
 		if err := s.dispatchTelegramJobOutboxByJob(ctx, jobId); err != nil {
 			message := "Redis调度失败，等待数据库调度器恢复：" + err.Error()
 			_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", jobId).
