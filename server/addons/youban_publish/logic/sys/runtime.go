@@ -63,6 +63,9 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 	defer heartbeatTicker.Stop()
 	if config.PushWorker {
 		s.startTelegramPushWorker(ctx)
+		if telegramChannelQueueEnabled() {
+			go s.runTelegramChannelQueueWorker(ctx)
+		}
 		if config.RedisStreamGray {
 			go s.runRedisStreamGrayConsumer(ctx)
 		}
