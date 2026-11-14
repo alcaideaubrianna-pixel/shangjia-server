@@ -15,6 +15,26 @@ func TestTelegramChannelQueueKey(t *testing.T) {
 	}
 }
 
+func TestTelegramChannelQueueUrgentLaneAndMigration(t *testing.T) {
+	if got := telegramChannelQueueKeyForPriority(254, tgJobPriorityInteractive); got != "youban:tg:channel:urgent:254" {
+		t.Fatalf("urgent queue key=%q", got)
+	}
+	if got := telegramChannelQueueKeyForPriority(254, tgJobPriorityBulk); got != telegramChannelQueueKey(254) {
+		t.Fatalf("bulk queue key=%q, want ordinary queue", got)
+	}
+	newBulk := telegramChannelQueueScore(tgJobPriorityBulk, time.UnixMilli(1_700_000_000_000), 101)
+	if telegramChannelQueueNeedsMigration(newBulk, tgJobPriorityBulk, false) {
+		t.Fatal("current ordinary bulk score should not migrate")
+	}
+	oldBulk := time.UnixMilli(1_700_000_000_000).UnixMilli()*telegramChannelQueueSequenceScale + 9
+	if !telegramChannelQueueNeedsMigration(oldBulk, tgJobPriorityBulk, false) {
+		t.Fatal("legacy ordinary bulk score should migrate")
+	}
+	if !telegramChannelQueueNeedsMigration(newBulk, tgJobPriorityBulk, true) {
+		t.Fatal("ordinary job in urgent lane should migrate")
+	}
+}
+
 func TestTelegramChannelQueueScorePriorityAndFIFO(t *testing.T) {
 	due := time.UnixMilli(1_700_000_000_000)
 	manual := telegramChannelQueueScore(tgJobPriorityInteractive, due, 101)
@@ -71,9 +91,12 @@ func TestTelegramChannelQueueRedisIntegration(t *testing.T) {
 	}
 	ctx := context.Background()
 	channelID := int64(990001)
-	_, _ = g.Redis().Do(ctx, "DEL", telegramChannelQueueKey(channelID))
-	t.Cleanup(func() { _, _ = g.Redis().Do(ctx, "DEL", telegramChannelQueueKey(channelID)) })
-	if err := enqueueTelegramChannelJob(ctx, channelID, 2, tgJobPriorityBulk, time.Now()); err != nil {
+	_, _ = g.Redis().Do(ctx, "DEL", telegramChannelQueueKey(channelID), telegramChannelUrgentQueueKey(channelID))
+	t.Cleanup(func() {
+		_, _ = g.Redis().Do(ctx, "DEL", telegramChannelQueueKey(channelID), telegramChannelUrgentQueueKey(channelID))
+	})
+	legacyScore := time.Now().UnixMilli()*telegramChannelQueueSequenceScale + 9
+	if _, err := g.Redis().Do(ctx, "ZADD", telegramChannelQueueKey(channelID), legacyScore, "2"); err != nil {
 		t.Fatal(err)
 	}
 	if err := enqueueTelegramChannelJob(ctx, channelID, 1, tgJobPriorityInteractive, time.Now()); err != nil {

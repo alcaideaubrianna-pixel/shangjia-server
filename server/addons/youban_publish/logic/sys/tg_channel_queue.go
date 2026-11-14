@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
@@ -15,10 +16,22 @@ import (
 // the Asynq transport so the migration can be introduced behind one producer.
 // The database job remains the source of truth; Redis only stores ready ids.
 const telegramChannelQueuePrefix = "youban:tg:channel:queue:"
+const telegramChannelUrgentQueuePrefix = "youban:tg:channel:urgent:"
 const telegramChannelActiveSetKey = "youban:tg:channel:active"
 
 func telegramChannelQueueKey(channelID int64) string {
 	return fmt.Sprintf("%s%d", telegramChannelQueuePrefix, channelID)
+}
+
+func telegramChannelUrgentQueueKey(channelID int64) string {
+	return fmt.Sprintf("%s%d", telegramChannelUrgentQueuePrefix, channelID)
+}
+
+func telegramChannelQueueKeyForPriority(channelID int64, priority int) string {
+	if priority <= tgJobPriorityInteractive {
+		return telegramChannelUrgentQueueKey(channelID)
+	}
+	return telegramChannelQueueKey(channelID)
 }
 
 const (
@@ -66,13 +79,24 @@ func telegramChannelQueueScore(priority int, availableAt time.Time, jobID int64)
 	return telegramChannelQueuePriorityRank(priority)*telegramChannelQueuePriorityScale + dueMillis*telegramChannelQueueSequenceScale + sequence
 }
 
+func telegramChannelQueueNeedsMigration(score int64, priority int, urgent bool) bool {
+	expectedUrgent := priority <= tgJobPriorityInteractive
+	if urgent != expectedUrgent {
+		return true
+	}
+	if expectedUrgent {
+		return false
+	}
+	return score/telegramChannelQueuePriorityScale != telegramChannelQueuePriorityRank(priority)
+}
+
 // enqueueTelegramChannelJob adds a job id exactly once. Lower scores are read
 // first; the lane is encoded ahead of the creation sequence by the caller.
 func enqueueTelegramChannelJob(ctx context.Context, channelID, jobID int64, priority int, availableAt time.Time) error {
 	if channelID <= 0 || jobID <= 0 {
 		return fmt.Errorf("invalid telegram channel queue identity channel:%d job:%d", channelID, jobID)
 	}
-	key := telegramChannelQueueKey(channelID)
+	key := telegramChannelQueueKeyForPriority(channelID, priority)
 	member := strconv.FormatInt(jobID, 10)
 	score := telegramChannelQueueScore(priority, availableAt, jobID)
 	var err error
@@ -82,6 +106,23 @@ func enqueueTelegramChannelJob(ctx context.Context, channelID, jobID int64, prio
 	for attempt := 1; attempt <= 3; attempt++ {
 		_, err = g.Redis().Do(ctx, "ZADD", key, score, member)
 		if err == nil {
+			// Keep one physical member per job. A priority change can move an
+			// existing member between lanes; remove the opposite copy only after
+			// the new ZADD succeeds so a Redis error never loses the job.
+			otherKey := telegramChannelUrgentQueueKey(channelID)
+			if key == otherKey {
+				otherKey = telegramChannelQueueKey(channelID)
+			}
+			if _, err = g.Redis().Do(ctx, "ZREM", otherKey, member); err != nil {
+				g.Log().Warning(ctx, "频道队列旧成员迁移失败，保留新队列任务", g.Map{
+					"event":     "channel_queue_lane_migration_failed",
+					"channelId": channelID,
+					"jobId":     jobID,
+					"queue":     key,
+					"error":     err.Error(),
+				})
+				return err
+			}
 			if _, setErr := g.Redis().Do(ctx, "SADD", telegramChannelActiveSetKey, strconv.FormatInt(channelID, 10)); setErr != nil {
 				return setErr
 			}
@@ -104,6 +145,7 @@ func enqueueTelegramChannelJob(ctx context.Context, channelID, jobID int64, prio
 		"priority":    priority,
 		"availableAt": availableAt,
 		"score":       score,
+		"queue":       key,
 		"attempts":    3,
 		"error":       err.Error(),
 	})
@@ -133,44 +175,89 @@ func removeActiveTelegramChannel(ctx context.Context, channelID int64) error {
 	return err
 }
 
-// dequeueTelegramChannelHead atomically claims the current queue head. The
-// caller must acquire the channel lease before sending and requeue the id when
-// the lease is unavailable.
-func dequeueTelegramChannelHead(ctx context.Context, channelID int64) (int64, error) {
-	if channelID <= 0 {
-		return 0, fmt.Errorf("invalid telegram channel id: %d", channelID)
-	}
+type telegramChannelQueueClaim struct {
+	JobID  int64
+	Score  int64
+	Urgent bool
+}
+
+func dequeueTelegramChannelHeadFromKey(ctx context.Context, key string) (telegramChannelQueueClaim, error) {
 	// Claim only an item whose encoded available_at is due. The priority lane
 	// remains part of the score for ordering, but readiness must inspect the
 	// due-time portion only; comparing the complete score would make every
 	// priority lane appear to be in the far future.
 	const claimDueScript = `local v=redis.call('ZRANGE',KEYS[1],0,0,'WITHSCORES'); if #v==0 then return {} end; local score=tonumber(v[2]); local due=math.floor((score % 1800000000000000) / 1000); if due>tonumber(ARGV[1]) then return {} end; redis.call('ZREM',KEYS[1],v[1]); return {v[1],v[2]}`
-	now := time.Now().UnixMilli()
-	value, err := g.Redis().Do(ctx, "EVAL", claimDueScript, 1, telegramChannelQueueKey(channelID), strconv.FormatInt(now, 10))
+	value, err := g.Redis().Do(ctx, "EVAL", claimDueScript, 1, key, strconv.FormatInt(time.Now().UnixMilli(), 10))
 	if err != nil {
-		return 0, err
+		return telegramChannelQueueClaim{}, err
 	}
 	items := value.Array()
 	if len(items) < 1 {
-		return 0, nil
+		return telegramChannelQueueClaim{}, nil
 	}
 	first := items[0]
-	if nested, ok := first.([]interface{}); ok && len(nested) > 0 {
-		first = nested[0]
+	second := interface{}(nil)
+	if nested, ok := first.([]interface{}); ok {
+		if len(nested) > 0 {
+			first = nested[0]
+		}
+		if len(nested) > 1 {
+			second = nested[1]
+		}
+	} else if len(items) > 1 {
+		second = items[1]
 	}
 	if encoded, ok := first.(string); ok && len(encoded) > 0 && encoded[0] == '[' {
 		var nested []interface{}
 		if json.Unmarshal([]byte(encoded), &nested) == nil && len(nested) > 0 {
 			first = nested[0]
+			if len(nested) > 1 {
+				second = nested[1]
+			}
 		}
 	}
-	return gconv.Int64(first), nil
+	jobID := gconv.Int64(first)
+	if jobID <= 0 {
+		return telegramChannelQueueClaim{}, nil
+	}
+	return telegramChannelQueueClaim{JobID: jobID, Score: gconv.Int64(second), Urgent: strings.HasPrefix(key, telegramChannelUrgentQueuePrefix)}, nil
+}
+
+// dequeueTelegramChannelHead atomically claims the current queue head. The
+// caller must acquire the channel lease before sending and requeue the id when
+// the lease is unavailable.
+func dequeueTelegramChannelHead(ctx context.Context, channelID int64) (int64, error) {
+	claim, err := dequeueTelegramChannelHeadWithScore(ctx, channelID)
+	return claim.JobID, err
+}
+
+func dequeueTelegramChannelHeadWithScore(ctx context.Context, channelID int64) (telegramChannelQueueClaim, error) {
+	if channelID <= 0 {
+		return telegramChannelQueueClaim{}, fmt.Errorf("invalid telegram channel id: %d", channelID)
+	}
+	// A future urgent retry must not block a due ordinary task. Check urgent
+	// first, then ordinary, and let each ZSET independently decide readiness.
+	for _, key := range []string{telegramChannelUrgentQueueKey(channelID), telegramChannelQueueKey(channelID)} {
+		claim, err := dequeueTelegramChannelHeadFromKey(ctx, key)
+		if err != nil {
+			return telegramChannelQueueClaim{}, err
+		}
+		if claim.JobID > 0 {
+			return claim, nil
+		}
+	}
+	return telegramChannelQueueClaim{}, nil
 }
 
 func removeTelegramChannelJob(ctx context.Context, channelID, jobID int64) error {
 	if channelID <= 0 || jobID <= 0 {
 		return fmt.Errorf("invalid telegram channel queue identity channel:%d job:%d", channelID, jobID)
 	}
-	_, err := g.Redis().Do(ctx, "ZREM", telegramChannelQueueKey(channelID), strconv.FormatInt(jobID, 10))
-	return err
+	member := strconv.FormatInt(jobID, 10)
+	for _, key := range []string{telegramChannelUrgentQueueKey(channelID), telegramChannelQueueKey(channelID)} {
+		if _, err := g.Redis().Do(ctx, "ZREM", key, member); err != nil {
+			return err
+		}
+	}
+	return nil
 }

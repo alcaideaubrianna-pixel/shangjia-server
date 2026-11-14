@@ -34,13 +34,14 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 		return false, nil
 	}
 	dequeueStartedAt := time.Now()
-	jobID, err := dequeueTelegramChannelHead(ctx, channelID)
+	claim, err := dequeueTelegramChannelHeadWithScore(ctx, channelID)
 	if err != nil {
 		g.Log().Warning(ctx, "频道队列取头失败", g.Map{"event": "channel_queue_error", "stage": "dequeue", "channelId": channelID, "error": err.Error()})
 		return false, err
 	}
+	jobID := claim.JobID
 	if jobID <= 0 {
-		return false, err
+		return false, nil
 	}
 	job, loadErr := s.telegramJobById(ctx, jobID)
 	if loadErr != nil {
@@ -52,7 +53,30 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 	if priority <= 0 {
 		priority = tgJobPriorityBulk
 	}
+	if telegramChannelQueueNeedsMigration(claim.Score, priority, claim.Urgent) {
+		// Historical members use the old score format. Reinsert the same job
+		// with the current lane/score before sending; this preserves the job and
+		// lets a newly clicked manual job stay ahead on the next pass.
+		if migrateErr := enqueueTelegramChannelJob(ctx, channelID, jobID, priority, time.Now()); migrateErr != nil {
+			g.Log().Warning(ctx, "频道队列旧成员迁移失败，保留任务待恢复", g.Map{
+				"event": "channel_queue_migration_failed", "channelId": channelID,
+				"jobId": jobID, "score": claim.Score, "priority": priority,
+				"error": migrateErr.Error(),
+			})
+			return true, migrateErr
+		}
+		g.Log().Info(ctx, "频道队列旧成员已重算排序", g.Map{
+			"event": "channel_queue_migrated", "channelId": channelID,
+			"jobId": jobID, "oldScore": claim.Score,
+			"newScore": telegramChannelQueueScore(priority, time.Now(), jobID),
+			"priority": priority, "urgent": priority <= tgJobPriorityInteractive,
+		})
+		return true, nil
+	}
 	queueName := telegramChannelQueueKey(channelID)
+	if claim.Urgent {
+		queueName = telegramChannelUrgentQueueKey(channelID)
+	}
 	g.Log().Info(ctx, "频道队列取出任务", g.Map{
 		"event":       "channel_queue_dequeue",
 		"channelId":   channelID,

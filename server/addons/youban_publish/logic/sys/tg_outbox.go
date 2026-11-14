@@ -269,12 +269,12 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 			"channelId": job.ChannelId,
 			"profileId": job.ProfileId,
 			"priority":  telegramJobPriorityValue(job),
-			"queue":     telegramChannelQueueKey(job.ChannelId),
+			"queue":     telegramChannelQueueKeyForPriority(job.ChannelId, priority),
 			"score":     score,
 		})
 		if _, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 			Where("id", job.Id).Where("dispatch_status", tgDispatchStatusIdle).
-			Data(g.Map{"dispatch_status": tgDispatchStatusQueued, "queue_name": telegramChannelQueueKey(job.ChannelId), "updated_at": gtime.Now()}).Update(); err != nil {
+			Data(g.Map{"dispatch_status": tgDispatchStatusQueued, "queue_name": telegramChannelQueueKeyForPriority(job.ChannelId, priority), "updated_at": gtime.Now()}).Update(); err != nil {
 			return s.releaseTelegramOutbox(ctx, row.Id, owner, row.AttemptCount, err.Error())
 		}
 		return s.markTelegramStreamOutboxDelivered(ctx, row.Id, owner, job.Id)

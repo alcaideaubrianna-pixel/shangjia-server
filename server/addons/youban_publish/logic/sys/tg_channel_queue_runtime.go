@@ -49,8 +49,9 @@ func (s *sSysPublish) processTelegramChannelQueuePass(ctx context.Context) {
 			continue
 		}
 		if !processed {
-			value, cardErr := g.Redis().Do(ctx, "ZCARD", telegramChannelQueueKey(channelID))
-			if cardErr == nil && value.Int() == 0 {
+			normal, normalErr := g.Redis().Do(ctx, "ZCARD", telegramChannelQueueKey(channelID))
+			urgent, urgentErr := g.Redis().Do(ctx, "ZCARD", telegramChannelUrgentQueueKey(channelID))
+			if normalErr == nil && urgentErr == nil && normal.Int()+urgent.Int() == 0 {
 				if removeErr := removeActiveTelegramChannel(ctx, channelID); removeErr != nil {
 					g.Log().Warningf(ctx, "频道活跃集合清理失败 channel:%d err:%+v", channelID, removeErr)
 				}
@@ -115,7 +116,7 @@ func (s *sSysPublish) rehydrateMissingTelegramChannelQueue(ctx context.Context, 
 			Where("id", job.Id).
 			WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
 			Where("COALESCE(asynq_task_id,'') = ''").
-			Data(g.Map{"dispatch_status": tgDispatchStatusQueued, "queue_name": telegramChannelQueueKey(job.ChannelId), "updated_at": gtime.Now()}).Update()
+			Data(g.Map{"dispatch_status": tgDispatchStatusQueued, "queue_name": telegramChannelQueueKeyForPriority(job.ChannelId, job.Priority), "updated_at": gtime.Now()}).Update()
 		g.Log().Infof(ctx, "频道队列对账补入成功 channel:%d job:%d", job.ChannelId, job.Id)
 	}
 	return nil
