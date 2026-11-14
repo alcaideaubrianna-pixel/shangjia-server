@@ -8,7 +8,14 @@ func telegramChannelScheduleRankSQL(alias string) string {
 	if p != "" {
 		p += "."
 	}
-	return "CASE WHEN " + p + "status IN ('sending','confirming','unknown') OR " + p + "send_phase IN ('cleanup_processing','display_sending','display_confirmed','verify_sending') THEN 0 ELSE " + telegramJobEffectivePrioritySQL(alias) + " END"
+	// A realtime collect task (priority below the history boundary) must be
+	// able to pass an older profile_cycle backlog in the same channel. Keep
+	// this explicit here because channel ordering is also used by the SQL
+	// recovery path, independently of queue-name classification.
+	return "CASE WHEN " + p + "status IN ('sending','confirming','unknown') OR " + p + "send_phase IN ('cleanup_processing','display_sending','display_confirmed','verify_sending') THEN 0 " +
+		"WHEN LEFT(LOWER(TRIM(" + p + "operation_no)),8)='collect:' AND COALESCE(" + p + "priority,0) < 90 THEN 10 " +
+		"WHEN " + p + "collect_source_id > 0 AND LEFT(LOWER(TRIM(" + p + "operation_no)),14)='profile_cycle:' THEN 10 " +
+		"ELSE " + telegramJobEffectivePrioritySQL(alias) + " END"
 }
 
 func telegramChannelScheduleOrderSQL(alias string) string {
