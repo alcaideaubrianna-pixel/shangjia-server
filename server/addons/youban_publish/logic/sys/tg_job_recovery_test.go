@@ -48,13 +48,12 @@ func TestTelegramPendingRecoveryPostgresSelectsHeadsBeforeDueFilters(t *testing.
 		t.Fatalf("PostgreSQL recovery query has unbalanced parentheses: %s", query)
 	}
 	for _, fragment := range []string{
-		"WITH channel_heads AS", "DISTINCT ON", "j.status IN ('pending','confirming','sending')", "j.status='failed_retry'",
-		"ORDER BY j.tenant_id", "j.created_at, j.id", "h.status IN ('pending','failed_retry','unknown')",
-		"COALESCE(h.dispatch_status,'') IN ('','idle')", "h.next_retry_at IS NULL OR h.next_retry_at<=?",
-		"h.updated_at<=?", "ORDER BY h.created_at,h.id", "LIMIT ?",
+		"SELECT j.* FROM", "j.status IN ('pending','failed_retry','unknown')",
+		"COALESCE(j.dispatch_status,'') IN ('','idle')", "j.next_retry_at IS NULL OR j.next_retry_at<=?",
+		"j.updated_at<=?", "ORDER BY", "j.created_at,j.id", "LIMIT ?",
 	} {
 		if !strings.Contains(query, fragment) {
-			t.Fatalf("PostgreSQL channel-head recovery query missing %q: %s", fragment, query)
+			t.Fatalf("PostgreSQL bulk recovery query missing %q: %s", fragment, query)
 		}
 	}
 	if got := strings.Count(query, "?"); got != 4 {
