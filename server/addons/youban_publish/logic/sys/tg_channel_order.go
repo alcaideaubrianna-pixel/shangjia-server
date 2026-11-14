@@ -78,6 +78,9 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 		// Outbox 已记录 Stream 入队失败且超过队首超时的旧任务不能继续
 		// 阻塞频道。它们会由恢复扫描收口，当前判断先允许后续任务推进。
 		fast = fast.Where("NOT (j.status='pending' AND COALESCE(j.dispatch_status,'')='idle' AND COALESCE(j.asynq_task_id,'')='' AND j.updated_at < CURRENT_TIMESTAMP - (? * INTERVAL '1 minute'))", telegramChannelHeadTimeoutMinutes())
+		// 媒体尚未就绪的任务只应停留在媒体准备队列，不能占用频道发送队首；
+		// 媒体完成后由唤醒逻辑重新进入 Ready 队列。
+		fast = fast.Where("NOT (j.status IN ('pending','failed_retry') AND COALESCE(j.last_dispatch_error,'') LIKE '媒体仍在异步处理中%')")
 		// 手动/交互任务可以越过尚未开始的循环、批次和历史任务，
 		// 但不能越过已经入队、发送中或结果未知的任务，避免破坏同频道顺序。
 		if telegramJobPriorityValue(job) <= tgJobPriorityInteractive {
