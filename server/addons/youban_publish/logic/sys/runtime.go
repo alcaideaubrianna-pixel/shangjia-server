@@ -70,7 +70,7 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 			go s.runRedisStreamGrayConsumer(ctx)
 		}
 	}
-	if telegramDeliveryRuntimeEnabled(config) {
+	if telegramDeliveryRuntimeEnabled(config) && !telegramChannelQueueEnabled() {
 		// Telegram recovery belongs with the worker that owns delivery state.
 		// Keeping it on Scheduler made every channel unrecoverable whenever the
 		// scheduler role was stopped independently of the push workers.
