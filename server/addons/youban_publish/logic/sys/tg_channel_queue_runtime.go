@@ -101,7 +101,6 @@ func (s *sSysPublish) rehydrateMissingTelegramChannelQueue(ctx context.Context, 
 		Where("channel_id > 0").
 		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
 		Where("COALESCE(dispatch_status,'') IN ('queued','idle','')").
-		Where("COALESCE(asynq_task_id,'') = ''").
 		Order("CASE WHEN COALESCE(dispatch_status,'')='queued' THEN 0 ELSE 1 END, updated_at ASC, id ASC").
 		Limit(limit).Scan(&jobs)
 	if err != nil {
@@ -115,7 +114,6 @@ func (s *sSysPublish) rehydrateMissingTelegramChannelQueue(ctx context.Context, 
 		_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 			Where("id", job.Id).
 			WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
-			Where("COALESCE(asynq_task_id,'') = ''").
 			Data(g.Map{"dispatch_status": tgDispatchStatusQueued, "queue_name": telegramChannelQueueKeyForPriority(job.ChannelId, job.Priority), "updated_at": gtime.Now()}).Update()
 		g.Log().Infof(ctx, "频道队列对账补入成功 channel:%d job:%d", job.ChannelId, job.Id)
 	}
