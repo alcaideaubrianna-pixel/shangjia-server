@@ -951,6 +951,7 @@ func (s *sSysPublish) recoverPendingIdleTelegramJobs(ctx context.Context, limit 
 			WhereIn("j.status", []string{"pending", "failed_retry", "unknown"}).
 			Where(telegramWebhookDetachedJobSQL("j.")).
 			Where("(j.dispatch_status = ? OR j.dispatch_status = '')", tgDispatchStatusIdle).
+			Where("COALESCE(j.asynq_task_id, '') = ''").
 			Where(telegramActiveChannelConditionForAlias("j")).
 			Where(messagePushPlanRecoveryConditionSQL("j"), telegramRecoveryTimeText(now.Add(-messagePushPlanJobExpireAfter))).
 			Where("(j.next_retry_at IS NULL OR j.next_retry_at <= ?)", nowText).
@@ -986,6 +987,7 @@ func telegramPendingRecoveryPostgresSQL() string {
 	return `SELECT j.* FROM ` + publishTgJobTable + ` j
 		WHERE j.status IN ('pending','failed_retry','unknown')
 		AND COALESCE(j.dispatch_status,'') IN ('','idle')
+		AND COALESCE(j.asynq_task_id,'')=''
 		AND ` + telegramActiveChannelConditionForAlias("j") + `
 		AND ` + messagePushPlanRecoveryConditionSQL("j") + `
 		AND (j.next_retry_at IS NULL OR j.next_retry_at<=?)
