@@ -444,6 +444,12 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 	}
 	priority := s.telegramJobPriority(job)
 	queueName := telegramQueueNameByPriorityAndChannel(ctx, priority, job.ChannelId)
+	// A user-triggered full push is foreground work. Keep it out of the
+	// ordinary shard queues, where historical bulk backlog can delay the
+	// click-triggered operation for minutes or hours.
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(job.OperationNo)), "full_push:") {
+		queueName = tgQueueNameInteractive
+	}
 	// 新引擎统一执行队列，频道顺序和优先级仍由入队前的频道调度保证。
 	// 旧引擎保留原队列，便于按账户灰度和迁移回滚。
 	queueName = queueNameForPushEngine(s.accountPushEngine(ctx, job.TenantId, job.AccountId), queueName)
@@ -797,6 +803,10 @@ func (s *sSysPublish) enqueueImportRunMatchTask(ctx context.Context, taskType st
 }
 
 func (s *sSysPublish) enqueueProfileDownRun(ctx context.Context, tenantId int64, profileIds []int64, delay time.Duration) error {
+	return s.enqueueProfileDownRunWithOperationNo(ctx, tenantId, profileIds, delay, "")
+}
+
+func (s *sSysPublish) enqueueProfileDownRunWithOperationNo(ctx context.Context, tenantId int64, profileIds []int64, delay time.Duration, operationNo string) error {
 	profileIds = uniqueIds(profileIds)
 	if tenantId <= 0 || len(profileIds) == 0 {
 		return nil
@@ -807,7 +817,12 @@ func (s *sSysPublish) enqueueProfileDownRun(ctx context.Context, tenantId int64,
 	}
 	payload, err := json.Marshal(profileDownQueuePayload{
 		TenantId: tenantId, ProfileIds: profileIds, DownAt: gtime.Now().String(),
-		OperationNo: newTelegramOperationNo("down", profileIds[0]),
+		OperationNo: func() string {
+			if strings.TrimSpace(operationNo) != "" {
+				return strings.TrimSpace(operationNo)
+			}
+			return newTelegramOperationNo("down", profileIds[0])
+		}(),
 	})
 	if err != nil {
 		return err
