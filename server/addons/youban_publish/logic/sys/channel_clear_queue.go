@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"strconv"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -66,6 +67,19 @@ func (s *sSysPublish) clearTelegramChannelQueue(ctx context.Context, tenantId in
 	})
 	if err != nil {
 		return nil, gerror.Wrap(err, "清空频道发送队列失败")
+	}
+	// The channel queue is the active transport when the new queue mode is
+	// enabled. State transition alone cannot remove a claimed job from the
+	// Redis ZSET, so remove the whole batch after the DB transition. ZREM is
+	// idempotent and the DB remains the source of truth if Redis is unavailable.
+	if telegramChannelQueueEnabled() && len(jobIDs) > 0 {
+		members := make([]interface{}, 0, len(jobIDs))
+		for _, id := range jobIDs {
+			members = append(members, strconv.FormatInt(id, 10))
+		}
+		if _, err = g.Redis().Do(ctx, "ZREM", append([]interface{}{telegramChannelQueueKey(channelId)}, members...)...); err != nil {
+			g.Log().Warningf(ctx, "清空频道Redis队列失败 channel:%d err:%+v", channelId, err)
+		}
 	}
 	res.Cleared = int(affected)
 	return res, nil
