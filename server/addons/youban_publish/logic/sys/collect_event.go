@@ -493,7 +493,7 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		if err = s.scheduleCollectDisplaySettlement(ctx, collectProcessQueuePayload{
 			EventId: parentEventId, TenantId: tenantId, AccountId: accountId,
 			SourceId: event["source_id"].Int64(), SourceChatId: event["source_chat_id"].String(),
-		}, parent, s.collectDisplayRetryDelay(ctx, parent)); err != nil {
+		}, parent, 0); err != nil {
 			return err
 		}
 		return nil
