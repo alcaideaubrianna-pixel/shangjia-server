@@ -256,16 +256,28 @@ func (s *sSysPublish) profileMediaReady(ctx context.Context, profileId int64) (b
 		}
 		return false, gerror.Wrap(err, "检查资料预期媒体失败")
 	}
-	expectedTotal := expected.Display + expected.Verify
-	count, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
-		Where("profile_id", profileId).WhereNull("deleted_at").Count()
+	// Count each purpose independently. A total count can hide a missing
+	// verification asset when an extra display asset exists (or vice versa).
+	displayCount, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+		Where("profile_id", profileId).Where("purpose", "display").WhereNull("deleted_at").Count()
 	if err != nil {
 		return false, err
 	}
-	if count < expectedTotal {
+	verifyCount, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+		Where("profile_id", profileId).Where("purpose", "verify").WhereNull("deleted_at").Count()
+	if err != nil {
+		return false, err
+	}
+	actualTotal := displayCount + verifyCount
+	// The expected counters describe the upload intent, not a hard exact
+	// cardinality: edits/imports can legitimately remove an item. Require at
+	// least one asset for each purpose requested, then let the sender use the
+	// current rows. This prevents stale expected counts from blocking a valid
+	// profile forever.
+	if (expected.Display > 0 && displayCount < 1) || (expected.Verify > 0 && verifyCount < 1) {
 		return false, nil
 	}
-	if count == 0 {
+	if actualTotal == 0 {
 		// A newly created profile can be published before the asynchronous
 		// media writer inserts its rows. Use the profile declaration to
 		// distinguish that state from an intentional text-only profile.
@@ -295,8 +307,15 @@ func (s *sSysPublish) profileMediaReady(ctx context.Context, profileId int64) (b
 	if err != nil {
 		return false, err
 	}
-	ready, _ := decideProfileMediaReadiness(expectedTotal, count, pending, failed)
+	ready, _ := decideProfileMediaPurposeReadiness(expected.Display, expected.Verify, displayCount, verifyCount, pending, failed)
 	return ready, nil
+}
+
+func decideProfileMediaPurposeReadiness(expectedDisplay, expectedVerify, actualDisplay, actualVerify, pending, failed int) (bool, bool) {
+	if failed > 0 || pending > 0 || (expectedDisplay > 0 && actualDisplay < 1) || (expectedVerify > 0 && actualVerify < 1) {
+		return false, true
+	}
+	return true, true
 }
 
 // decideProfileMediaReadiness is the publish gate's pure state machine. The

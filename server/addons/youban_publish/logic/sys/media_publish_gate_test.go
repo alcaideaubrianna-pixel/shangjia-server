@@ -37,6 +37,17 @@ func TestDecideProfileMediaReadiness(t *testing.T) {
 	}
 }
 
+func TestDecideProfileMediaPurposeReadinessIgnoresStaleExpectedTotals(t *testing.T) {
+	ready, _ := decideProfileMediaPurposeReadiness(5, 1, 4, 1, 0, 0)
+	if !ready {
+		t.Fatal("valid display and verify media should not be blocked by stale expected count")
+	}
+	ready, _ = decideProfileMediaPurposeReadiness(5, 1, 0, 1, 0, 0)
+	if ready {
+		t.Fatal("missing display media must remain blocked")
+	}
+}
+
 func TestLocalProfileMediaOperationPendingUsesRealProfileSchema(t *testing.T) {
 	if os.Getenv("YOUBAN_PUBLISH_INTEGRATION") != "1" {
 		t.Skip("set YOUBAN_PUBLISH_INTEGRATION=1 to run local PostgreSQL integration test")
