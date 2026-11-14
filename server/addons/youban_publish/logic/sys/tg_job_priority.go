@@ -86,6 +86,9 @@ func telegramQueueNameByPriority(priority int) string {
 func telegramPublishInteractiveQueueWeights(ctx context.Context) map[string]int {
 	shardCount := telegramPublishQueueShardCount(ctx)
 	queues := make(map[string]int, shardCount+1)
+	// Manual publishing is a foreground lane and must be registered by the
+	// legacy interactive server too; otherwise tasks remain pending forever.
+	queues[channelDispatchQueueManual] = 8
 	queues[tgQueueNameInteractive] = 1
 	for shard := 0; shard < shardCount; shard++ {
 		queues[fmt.Sprintf("%s_%d", tgQueueNameInteractive, shard)] = 1
