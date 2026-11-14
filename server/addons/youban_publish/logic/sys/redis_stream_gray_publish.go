@@ -65,6 +65,14 @@ func (s *sSysPublish) confirmTelegramStreamOutbox(ctx context.Context, outboxID 
 		return s.releaseTelegramOutbox(ctx, outboxID, owner, attemptCount, err.Error())
 	}
 	if telegramOutboxJobStillNeedsDispatch(job.Status, job.DispatchStatus) {
+		// When the channel-queue transport is enabled, Redis ZSET ownership is
+		// the execution hand-off. It deliberately has no Asynq task id, so do
+		// not send it through the legacy fallback/retry loop.
+		if telegramChannelQueueEnabled() && job.ChannelId > 0 {
+			if value, scoreErr := g.Redis().Do(ctx, "ZSCORE", telegramChannelQueueKey(job.ChannelId), fmt.Sprintf("%d", jobID)); scoreErr == nil && !value.IsNil() {
+				return s.markTelegramStreamOutboxDelivered(ctx, outboxID, owner, jobID)
+			}
+		}
 		if attemptCount >= 3 {
 			if fallbackErr := s.EnqueueTelegramJob(ctx, jobID, 0, false); fallbackErr == nil {
 				g.Log().Warning(ctx, "TG任务Stream未接管已降级Asynq", g.Map{"event": "stream_fallback_enqueue", "jobId": jobID, "outboxId": outboxID, "attemptCount": attemptCount})
@@ -81,5 +89,16 @@ func (s *sSysPublish) confirmTelegramStreamOutbox(ctx context.Context, outboxID 
 	}
 	// Stream 投递成功本身属于每条任务的常规路径，批量推送时使用 Debug 降低日志开销。
 	g.Log().Debug(ctx, "TG Outbox Stream 投递成功", g.Map{"event": "stream_ready_published", "outboxId": outboxID, "jobId": jobID})
+	return nil
+}
+
+func (s *sSysPublish) markTelegramStreamOutboxDelivered(ctx context.Context, outboxID int64, owner string, jobID int64) error {
+	_, err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
+		Where("id", outboxID).Where("status", telegramOutboxProcessing).Where("lease_owner", owner).
+		Data(g.Map{"status": telegramOutboxDelivered, "lease_owner": "", "lease_expires_at": nil, "delivered_at": gtime.Now(), "updated_at": gtime.Now()}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "确认TG频道队列投递失败")
+	}
+	g.Log().Debug(ctx, "TG频道队列投递成功", g.Map{"event": "channel_queue_ready", "outboxId": outboxID, "jobId": jobID})
 	return nil
 }
