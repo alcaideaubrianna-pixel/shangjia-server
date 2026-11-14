@@ -97,6 +97,44 @@ func (s *sSysPublish) upsertPublishJobRecord(ctx context.Context, job telegramJo
 	if err != nil {
 		return gerror.Wrap(err, "保存发布记录失败")
 	}
+	// Keep the static read model in sync with the legacy record during the
+	// migration window. The projection is idempotent on job_id and only the
+	// mutable delivery fields are changed on subsequent state transitions.
+	if err := s.upsertPublishRecordLog(ctx, job, action, status, message); err != nil {
+		return err
+	}
+	return nil
+}
+
+type publishRecordLogSnapshot struct {
+	Title        string `json:"title"`
+	AccountName  string `json:"accountName"`
+	TenantName   string `json:"tenantName"`
+	ChannelTitle string `json:"channelTitle"`
+	ChannelUser  string `json:"channelUsername"`
+	BotName      string `json:"botName"`
+	BotUsername  string `json:"botUsername"`
+}
+
+func (s *sSysPublish) upsertPublishRecordLog(ctx context.Context, job telegramJobRecord, action, status, message string) error {
+	// The table is introduced online; old test databases and older instances
+	// may not have it yet. Legacy writes remain authoritative until migration.
+	snapshot := publishRecordLogSnapshot{Title: job.TitleSnapshot}
+	data := g.Map{
+		"job_id": job.Id, "task_id": job.TaskId, "tenant_id": job.TenantId,
+		"account_id": job.AccountId, "profile_id": job.ProfileId, "channel_id": job.ChannelId,
+		"bot_id": job.BotId, "operation_no": job.OperationNo, "target_chat_id": job.TargetChatId,
+		"action": action, "title": snapshot.Title, "account_name": snapshot.AccountName,
+		"tenant_name": snapshot.TenantName, "channel_title": snapshot.ChannelTitle,
+		"channel_username": snapshot.ChannelUser, "bot_name": snapshot.BotName,
+		"bot_username": snapshot.BotUsername, "status": status, "message": message,
+		"retry_count": job.RetryCount, "created_at": gtime.Now(), "updated_at": gtime.Now(),
+	}
+	_, err := g.DB().Model(publishRecordLogTable).Safe().Ctx(ctx).Data(data).
+		OnConflict("job_id").OnDuplicateEx("status", "message", "retry_count", "updated_at").Save()
+	if err != nil && !strings.Contains(strings.ToLower(err.Error()), "does not exist") && !strings.Contains(strings.ToLower(err.Error()), "undefined table") {
+		return gerror.Wrap(err, "保存发布日志投影失败")
+	}
 	return nil
 }
 
