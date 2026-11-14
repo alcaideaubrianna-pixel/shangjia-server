@@ -123,7 +123,7 @@ func (s *sSysPublish) postponeTelegramJobForPublishInterval(ctx context.Context,
 		return nil
 	}
 	now := gtime.Now()
-	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id", job.Id).
 		WhereIn("status", []string{"pending", "failed_retry"}).
 		Data(g.Map{
@@ -134,6 +134,12 @@ func (s *sSysPublish) postponeTelegramJobForPublishInterval(ctx context.Context,
 		}).Update()
 	if err != nil {
 		return gerror.Wrap(err, "延后频道间隔任务失败")
+	}
+	// The send lease may have completed this job while the interval was being
+	// checked. In that case the conditional update affects no rows; do not
+	// enqueue the stable TaskID again and create a false conflict/pending state.
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return nil
 	}
 	return s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, delay, false)
 }
