@@ -497,7 +497,11 @@ func (s *sSysPublish) ensureTelegramProfileJobWithMetaTx(ctx context.Context, tx
 				return active["id"].Int64(), nil
 			}
 		}
-		return 0, gerror.Wrap(err, "创建资料TG频道任务失败")
+		// Keep database details out of the API response. The framework would
+		// otherwise serialize the wrapped PostgreSQL error (including SQL and
+		// constraint names), which is an information disclosure risk.
+		g.Log().Errorf(ctx, "创建资料TG频道任务失败 tenant:%d account:%d profile:%d channel:%d err:%+v", job.TenantId, job.AccountId, job.ProfileId, job.ChannelId, err)
+		return 0, gerror.New("创建资料TG频道任务失败，请稍后重试")
 	}
 	return jobID, nil
 }
