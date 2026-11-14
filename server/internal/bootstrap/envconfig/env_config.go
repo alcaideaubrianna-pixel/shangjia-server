@@ -55,6 +55,7 @@ var items = []item{
 	{Key: "youbanPublish.queue.collectRealtimeConcurrency", EnvKeys: []string{"YOUBAN_PUBLISH_COLLECT_REALTIME_CONCURRENCY"}},
 	{Key: "youbanPublish.collect.processDispatchBatchSize", EnvKeys: []string{"YOUBAN_PUBLISH_COLLECT_PROCESS_BATCH_SIZE"}},
 	{Key: "youbanPublish.collect.processDispatchInterval", EnvKeys: []string{"YOUBAN_PUBLISH_COLLECT_PROCESS_INTERVAL"}},
+	{Key: "youbanPublish.collect.processMetricsInterval", EnvKeys: []string{"YOUBAN_PUBLISH_COLLECT_PROCESS_METRICS_INTERVAL"}},
 	{Key: "youbanPublish.collect.ruleConcurrency", EnvKeys: []string{"YOUBAN_PUBLISH_COLLECT_RULE_CONCURRENCY"}},
 	{Key: "youbanPublish.queue.historyPendingEventLimit", EnvKeys: []string{"YOUBAN_PUBLISH_HISTORY_PENDING_EVENT_LIMIT"}},
 	{Key: "youbanPublish.queue.historyConcurrency", EnvKeys: []string{"YOUBAN_PUBLISH_HISTORY_CONCURRENCY"}},
