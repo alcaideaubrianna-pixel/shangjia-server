@@ -2,6 +2,9 @@ package sys
 
 import (
 	"context"
+	"os"
+	"strconv"
+	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
@@ -9,10 +12,24 @@ import (
 	"time"
 )
 
+func collectProcessDispatchInterval() time.Duration {
+	value := strings.TrimSpace(os.Getenv("YOUBAN_PUBLISH_COLLECT_PROCESS_INTERVAL"))
+	seconds, err := strconv.Atoi(value)
+	if err != nil || seconds < 2 {
+		seconds = 5
+	}
+	if seconds > 60 {
+		seconds = 60
+	}
+	return time.Duration(seconds) * time.Second
+}
+
 // The foreground handoff must not wait behind the broad minute-long recovery
 // sweep. Database claims arbitrate concurrent dispatchers across replicas.
 func (s *sSysPublish) runCollectProcessDispatcher(ctx context.Context) {
-	ticker := time.NewTicker(2 * time.Second)
+	// Account-sharded claims plus event-driven queue insertion keep realtime
+	// handoff responsive; this ticker is only a fairness/recovery safety net.
+	ticker := time.NewTicker(collectProcessDispatchInterval())
 	defer ticker.Stop()
 	// 复合游标保证同一账户在不同租户下不会互相跳过，且 account_id=0 的 BOT 分片可被公平轮询。
 	// 游标只存在当前 Dispatcher 实例内，数据库租约仍负责多实例并发安全。
