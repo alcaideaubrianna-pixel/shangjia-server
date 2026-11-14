@@ -379,6 +379,8 @@ type IntroFeeChannelRuleItem struct {
 	LastSeenAt      *gtime.Time `json:"lastSeenAt"`
 	BlockReason     string      `json:"blockReason"`
 	ProfileCount    int         `json:"profileCount"`
+	IsCandidate     bool        `json:"isCandidate"`
+	IsBound         bool        `json:"isBound"`
 	UpdatedAt       *gtime.Time `json:"updatedAt"`
 }
 type IntroFeeChannelRuleSaveInp struct {

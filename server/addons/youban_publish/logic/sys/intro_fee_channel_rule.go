@@ -211,6 +211,11 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 		deduplicated = append(deduplicated, row)
 	}
 	configured = deduplicated
+	for _, row := range configured {
+		if row != nil {
+			row.IsBound = true
+		}
+	}
 	var disabledChannels []struct {
 		ChannelID string `orm:"channel_id"`
 	}
@@ -404,7 +409,7 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 			continue
 		}
 		seen[id] = struct{}{}
-		configured = append(configured, &sysin.IntroFeeChannelRuleItem{RuleId: ruleID, BotId: botID, ChannelId: id, ChannelTitle: candidate.ChatTitle, ChannelUsername: candidate.ChatUsername, LastSeenAt: candidate.LastSeenAt})
+		configured = append(configured, &sysin.IntroFeeChannelRuleItem{RuleId: ruleID, BotId: botID, ChannelId: id, ChannelTitle: candidate.ChatTitle, ChannelUsername: candidate.ChatUsername, LastSeenAt: candidate.LastSeenAt, IsCandidate: true})
 	}
 	// Enrich all rows in three bounded queries. The dialog must not issue one
 	// query per channel because historical BOT lists can be large.
