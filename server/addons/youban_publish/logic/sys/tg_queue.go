@@ -499,16 +499,14 @@ func (s *sSysPublish) enqueueTelegramJobInternal(ctx context.Context, jobId int6
 	// worker is enabled, so this write is opt-in and never creates a second
 	// consumer by default.
 	if telegramChannelQueueShadowEnabled() && job.ChannelId > 0 {
-		score := time.Now().UnixMilli()*1000 + int64(max(0, 100000-priority))
-		if queueErr := enqueueTelegramChannelJob(ctx, job.ChannelId, jobId, score); queueErr != nil {
+		if queueErr := enqueueTelegramChannelJob(ctx, job.ChannelId, jobId, priority, time.Now()); queueErr != nil {
 			g.Log().Warningf(ctx, "写入频道逻辑队列失败 jobId:%d err:%+v", jobId, queueErr)
 		}
 	}
 	// In channel-queue mode the ZSET is the execution hand-off. Do not also
 	// create an Asynq task: that would give the same job two consumers.
 	if telegramChannelQueueEnabled() && job.ChannelId > 0 {
-		score := time.Now().UnixMilli()*1000 + int64(max(0, 100000-priority))
-		if queueErr := enqueueTelegramChannelJob(ctx, job.ChannelId, jobId, score); queueErr != nil {
+		if queueErr := enqueueTelegramChannelJob(ctx, job.ChannelId, jobId, priority, time.Now()); queueErr != nil {
 			_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 				Where("id", jobId).Where("dispatch_status", tgDispatchStatusQueued).
 				Data(g.Map{"dispatch_status": tgDispatchStatusIdle, "updated_at": gtime.Now()}).Update()
