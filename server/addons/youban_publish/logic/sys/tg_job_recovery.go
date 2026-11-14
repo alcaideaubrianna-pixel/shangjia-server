@@ -81,6 +81,13 @@ func (s *sSysPublish) recoverInterruptedTelegramJobs(ctx context.Context, limit 
 }
 
 func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
+	// Channel queues own TG delivery and rehydrate their jobs independently.
+	// Never start the legacy DB/Asynq recovery loop in that mode, even when a
+	// broad runtime role configuration invokes this function directly.
+	if telegramChannelQueueEnabled() {
+		g.Log().Info(ctx, "频道队列模式跳过旧TG任务恢复器")
+		return
+	}
 	if heavyRecoveryDisabled("YOUBAN_DISABLE_TELEGRAM_RECOVERY") {
 		return
 	}
