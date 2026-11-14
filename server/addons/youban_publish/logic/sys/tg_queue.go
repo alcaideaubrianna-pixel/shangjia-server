@@ -472,61 +472,76 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 	} else {
 		data["next_retry_at"] = nil
 	}
-	reserveReason := ""
-	reserved, err := s.withTelegramChannelDispatchLease(ctx, job, func(reserveCtx context.Context) (bool, error) {
-		step := beginTelegramPublishStage(reserveCtx, "dispatch.channel_order")
-		hasEarlier, orderErr := s.telegramChannelHasEarlierActiveJob(reserveCtx, job)
-		step.End(orderErr, g.Map{"hasEarlier": hasEarlier})
-		if orderErr != nil || hasEarlier {
-			if hasEarlier {
-				reserveReason = "earlier_job"
-			}
-			return false, orderErr
-		}
-		step = beginTelegramPublishStage(reserveCtx, "dispatch.channel_capacity")
-		hasCapacity, capacityErr := s.telegramChannelHasDispatchCapacity(reserveCtx, job)
-		step.End(capacityErr, g.Map{"hasCapacity": hasCapacity})
-		if capacityErr != nil || !hasCapacity {
-			if !hasCapacity {
-				reserveReason = "channel_capacity"
-			}
-			return false, capacityErr
-		}
-		result, updateErr := g.DB().Model(publishTgJobTable).Safe().Ctx(reserveCtx).
-			Where("id", jobId).
-			WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
-			Where("(dispatch_status = ? OR dispatch_status = '')", tgDispatchStatusIdle).
-			Data(data).Update()
-		if updateErr != nil {
-			return false, updateErr
-		}
-		affected, _ := result.RowsAffected()
-		if affected == 0 {
-			reserveReason = "job_state_changed"
-		}
-		return affected > 0, nil
-	})
-	beginTelegramPublishStage(ctx, "dispatch.reserve_result").End(err, g.Map{"reserved": reserved, "targetQueue": queueName})
+	// Producer only claims the durable job state. Channel ordering, capacity,
+	// and lease checks belong to the worker execution path; checking them here
+	// left queued jobs idle and blocked newer realtime work.
+	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("id", jobId).
+		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
+		Where("(dispatch_status = ? OR dispatch_status = '')", tgDispatchStatusIdle).
+		Data(data).Update()
 	if err != nil {
-		// 频道租约或顺序检查失败时，Stream 通知不能保持 delivered；重新激活 Outbox，避免 Job 永久 idle。
-		retryDelay := telegramChannelDispatchRetryDelay(job.DispatchCount)
-		if rearmErr := s.rearmTelegramJobOutbox(ctx, jobId, retryDelay); rearmErr != nil {
-			g.Log().Warningf(ctx, "恢复TG任务Outbox失败 jobId:%d err:%+v", jobId, rearmErr)
-		}
-		g.Log().Warning(ctx, "频道调度租约获取失败，已延迟重入", g.Map{"jobId": jobId, "delayMs": retryDelay.Milliseconds(), "event": "channel_dispatch_retry"})
 		return gerror.Wrap(err, "锁定TG任务入队状态失败")
 	}
-	if !reserved {
-		g.Log().Debugf(ctx, "TG Stream任务暂未入发送队列 jobId:%d reason:%s", jobId, reserveReason)
-		// Stream 事件只唤醒频道队首；非队首任务不能直接 ACK 后丢弃，
-		// 必须重新激活 Outbox，待前序任务完成后再次进入就绪流。
-		if globalStreamPushEngineEnabled() {
-			if rearmErr := s.rearmTelegramJobOutbox(ctx, jobId, time.Second); rearmErr != nil {
-				return gerror.Wrap(rearmErr, "恢复非队首TG任务Outbox失败")
-			}
-		}
+	if affected, _ := result.RowsAffected(); affected == 0 {
 		return nil
 	}
+	/*
+		reserved, err := s.withTelegramChannelDispatchLease(ctx, job, func(reserveCtx context.Context) (bool, error) {
+			step := beginTelegramPublishStage(reserveCtx, "dispatch.channel_order")
+			hasEarlier, orderErr := s.telegramChannelHasEarlierActiveJob(reserveCtx, job)
+			step.End(orderErr, g.Map{"hasEarlier": hasEarlier})
+			if orderErr != nil || hasEarlier {
+				if hasEarlier {
+					reserveReason = "earlier_job"
+				}
+				return false, orderErr
+			}
+			step = beginTelegramPublishStage(reserveCtx, "dispatch.channel_capacity")
+			hasCapacity, capacityErr := s.telegramChannelHasDispatchCapacity(reserveCtx, job)
+			step.End(capacityErr, g.Map{"hasCapacity": hasCapacity})
+			if capacityErr != nil || !hasCapacity {
+				if !hasCapacity {
+					reserveReason = "channel_capacity"
+				}
+				return false, capacityErr
+			}
+			result, updateErr := g.DB().Model(publishTgJobTable).Safe().Ctx(reserveCtx).
+				Where("id", jobId).
+				WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
+				Where("(dispatch_status = ? OR dispatch_status = '')", tgDispatchStatusIdle).
+				Data(data).Update()
+			if updateErr != nil {
+				return false, updateErr
+			}
+			affected, _ := result.RowsAffected()
+			if affected == 0 {
+				reserveReason = "job_state_changed"
+			}
+			return affected > 0, nil
+		})
+		beginTelegramPublishStage(ctx, "dispatch.reserve_result").End(err, g.Map{"reserved": reserved, "targetQueue": queueName})
+		if err != nil {
+			// 频道租约或顺序检查失败时，Stream 通知不能保持 delivered；重新激活 Outbox，避免 Job 永久 idle。
+			retryDelay := telegramChannelDispatchRetryDelay(job.DispatchCount)
+			if rearmErr := s.rearmTelegramJobOutbox(ctx, jobId, retryDelay); rearmErr != nil {
+				g.Log().Warningf(ctx, "恢复TG任务Outbox失败 jobId:%d err:%+v", jobId, rearmErr)
+			}
+			g.Log().Warning(ctx, "频道调度租约获取失败，已延迟重入", g.Map{"jobId": jobId, "delayMs": retryDelay.Milliseconds(), "event": "channel_dispatch_retry"})
+			return gerror.Wrap(err, "锁定TG任务入队状态失败")
+		}
+		if !reserved {
+			g.Log().Debugf(ctx, "TG Stream任务暂未入发送队列 jobId:%d reason:%s", jobId, reserveReason)
+			// Stream 事件只唤醒频道队首；非队首任务不能直接 ACK 后丢弃，
+			// 必须重新激活 Outbox，待前序任务完成后再次进入就绪流。
+			if globalStreamPushEngineEnabled() {
+				if rearmErr := s.rearmTelegramJobOutbox(ctx, jobId, time.Second); rearmErr != nil {
+					return gerror.Wrap(rearmErr, "恢复非队首TG任务Outbox失败")
+				}
+			}
+			return nil
+		}
+	*/
 	if err = s.enqueueTelegramTaskWithQueue(ctx, tgTaskTypePublish, jobId, delay, unique, queueName); err != nil {
 		_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", jobId).
 			Where("dispatch_status", tgDispatchStatusQueued).
