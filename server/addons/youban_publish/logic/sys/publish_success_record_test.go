@@ -24,6 +24,17 @@ func TestMessagePushOperationUsesQuickPushAction(t *testing.T) {
 	}
 }
 
+func TestCycleOperationsUseCycleAction(t *testing.T) {
+	for _, operationNo := range []string{"cycle_batch:12:34:56", "profile_cycle:run-1"} {
+		if got := publishSuccessRecordAction(operationNo); got != publishSuccessTypeCycle {
+			t.Fatalf("operation %q classified as %q, want %q", operationNo, got, publishSuccessTypeCycle)
+		}
+	}
+	if got := publishSuccessRecordMessage(publishSuccessTypeCycle); got != "循环上架推送成功" {
+		t.Fatalf("cycle success message = %q", got)
+	}
+}
+
 func TestFullPushProfileRecordIsNotBatchSuccess(t *testing.T) {
 	if got := publishSuccessRecordMessage(publishSuccessTypeFull); got != "资料推送成功" {
 		t.Fatalf("full push profile message = %q, want per-profile success", got)

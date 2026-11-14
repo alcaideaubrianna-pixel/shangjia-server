@@ -77,7 +77,8 @@ func (s *sSysPublish) adminNoteIndexList(ctx context.Context, in *sysin.NoteList
 			ids = append(ids, candidate.NoteIndexId)
 		}
 		var details []*sysin.ProfileModel
-		detailMod := noteIndexModel(ctx).LeftJoin(publishAccountTable+" a", "a.id=i.account_id AND a.deleted_at IS NULL")
+		detailMod := noteIndexModel(ctx).
+			LeftJoin(publishAccountTable+" a", "a.id=i.account_id AND a.deleted_at IS NULL")
 		detailStartedAt := time.Now()
 		if err := detailMod.WhereIn("i.id", ids).Fields(adminNoteIndexFields()).Scan(&details); err != nil {
 			return nil, false, "", gerror.Wrap(err, "获取资料索引详情失败")
@@ -293,5 +294,5 @@ func decodeAdminNoteCursor(raw string) (*adminNoteCursor, error) {
 }
 
 func adminNoteIndexFields() string {
-	return "i.id AS note_index_id,i.profile_id AS id,i.uuid,i.tenant_id,i.account_id,p.cover_media_id,p.source_type,p.profile_no,i.title,i.province,i.city,i.tag,i.visibility,i.review_status,i.status,i.published_at,i.created_at,i.updated_at,i.task_status,a.nickname AS account_name,a.nickname,a.username"
+	return "i.id AS note_index_id,i.profile_id AS id,i.uuid,i.tenant_id,i.account_id,p.cover_media_id,p.source_type,p.profile_no,i.title,i.province,i.city,i.tag,i.visibility,i.review_status,i.status,i.published_at,i.created_at,i.updated_at,CASE WHEN COALESCE(ps.publish_task_status,'') IN ('pending','publishing') AND (LOWER(COALESCE(ps.publish_operation_no,'')) LIKE 'cycle_batch:%' OR LOWER(COALESCE(ps.publish_operation_no,'')) LIKE 'profile_cycle:%') THEN 'cycling' ELSE COALESCE(ps.publish_task_status,i.task_status) END AS task_status,a.nickname AS account_name,a.nickname,a.username"
 }

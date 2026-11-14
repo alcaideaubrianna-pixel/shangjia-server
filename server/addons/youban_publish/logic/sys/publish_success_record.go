@@ -136,7 +136,7 @@ func (s *sSysPublish) backfillPublishSuccessRecords(ctx context.Context, limit i
 func publishSuccessRecordAction(operationNo string) string {
 	operationNo = strings.ToLower(strings.TrimSpace(operationNo))
 	switch {
-	case strings.HasPrefix(operationNo, "cycle_batch:"):
+	case isCycleBatchOperation(operationNo):
 		return publishSuccessTypeCycle
 	case strings.HasPrefix(operationNo, "full_push:"):
 		return publishSuccessTypeFull
