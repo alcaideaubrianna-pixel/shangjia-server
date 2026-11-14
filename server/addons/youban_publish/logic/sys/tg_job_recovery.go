@@ -898,8 +898,9 @@ func (s *sSysPublish) supersedeStalePendingChannelHeads(ctx context.Context, lim
 	}
 	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Fields("id").Where("status", telegramJobStatusPending).
-		Where("COALESCE(dispatch_status,'')", tgDispatchStatusIdle).
-		Where("COALESCE(asynq_task_id,'')", "").WhereGTE("priority", tgJobPriorityBulk).WhereLTE("updated_at", deadline).
+		Where("COALESCE(dispatch_status,'') = ?", tgDispatchStatusIdle).
+		Where("COALESCE(asynq_task_id,'') = ?", "").
+		WhereGTE("priority", tgJobPriorityBulk).WhereLTE("updated_at", deadline).
 		OrderAsc("updated_at").OrderAsc("id").Limit(limit).Scan(&rows); err != nil {
 		return gerror.Wrap(err, "读取超时频道队首任务失败")
 	}
