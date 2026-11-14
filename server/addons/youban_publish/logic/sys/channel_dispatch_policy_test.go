@@ -28,7 +28,7 @@ func TestLegacyPublishDrainMigrationPolicy(t *testing.T) {
 		t.Fatal("explicit full-stream mode must disable old shard polling")
 	}
 	queues := telegramPublishExecutionQueues(context.Background())
-	if len(queues) != 3 || queues[channelDispatchQueueManual] == 0 || queues[channelDispatchQueueSend] == 0 || queues[tgQueueNameDefault] == 0 {
+	if queues[channelDispatchQueueManual] == 0 || queues[channelDispatchQueueSend] == 0 || queues[tgQueueNameDefault] == 0 || queues[tgQueueNameBulk] == 0 {
 		t.Fatalf("unexpected execution queues: %v", queues)
 	}
 	t.Setenv("YOUBAN_PUBLISH_PUSH_ENGINE", "")
