@@ -38,7 +38,9 @@ func (s *sSysPublish) adminNoteIndexList(ctx context.Context, in *sysin.NoteList
 	// profile/state/account tables before LIMIT causes one random lookup per
 	// candidate and becomes seconds slow for collected/all scopes. The detail
 	// query below validates and enriches only the selected page IDs.
-	mod := pdao.YoubanPublishNoteIndex.Ctx(ctx).As("i").WhereNull("i.deleted_at")
+	mod := pdao.YoubanPublishNoteIndex.Ctx(ctx).As("i").
+		InnerJoin(publishProfileStateTable+" ps", "ps.tenant_id=i.tenant_id AND ps.account_id=i.account_id AND ps.profile_id=i.profile_id AND ps.deleted_at IS NULL").
+		WhereNull("i.deleted_at")
 	mod = applyNoteIndexScope(mod, tenantId, tenantIds, accountIds, &in.ProfileListInp)
 	mod = applyNoteIndexFilters(mod, &in.ProfileListInp)
 	var err error
