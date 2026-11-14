@@ -14,8 +14,13 @@ import (
 // telegramOutboxRecoveryBatchSize 控制异常恢复每轮领取数量；即时事件
 // 唤醒和正常频道 Stream 调度不受该值影响。
 func telegramOutboxRecoveryBatchSize() int {
-	const defaultSize = 10
-	value, err := strconv.Atoi(strings.TrimSpace(os.Getenv("YOUBAN_PUBLISH_TG_RECOVERY_BATCH_SIZE")))
+	// Recovery is the safety net for jobs that were persisted before Redis/Asynq
+	// became unavailable. A batch of 10 every five seconds leaves large
+	// backlogs effectively stalled (only ~2 jobs/s) and can starve realtime
+	// delivery behind historical rows. Keep the scan bounded, but restore a
+	// useful refill rate by default; operators can still tune it via ENV.
+	const defaultSize = 500
+	value, err := strconv.Atoi(strings.TrimSpace(g.Cfg().MustGet(context.Background(), "youbanPublish.queue.tgRecoveryBatchSize", defaultSize).String()))
 	if err != nil || value <= 0 {
 		return defaultSize
 	}

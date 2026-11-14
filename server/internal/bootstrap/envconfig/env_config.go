@@ -71,6 +71,7 @@ var items = []item{
 	{Key: "youbanPublish.fullPush.schedulerIntervalSeconds", EnvKeys: []string{"YOUBAN_PUBLISH_FULL_PUSH_INTERVAL_SECONDS"}},
 	{Key: "youbanPublish.fullPush.expandLeaseSeconds", EnvKeys: []string{"YOUBAN_PUBLISH_FULL_PUSH_LEASE_SECONDS"}},
 	{Key: "youbanPublish.queue.publishBulkConcurrency", EnvKeys: []string{"YOUBAN_PUBLISH_BULK_CONCURRENCY"}},
+	{Key: "youbanPublish.queue.tgRecoveryBatchSize", EnvKeys: []string{"YOUBAN_PUBLISH_TG_RECOVERY_BATCH_SIZE"}},
 	{Key: "youbanPublish.queue.cycleConcurrency", EnvKeys: []string{"YOUBAN_PUBLISH_CYCLE_CONCURRENCY"}},
 	{Key: "youbanPublish.cycle.orchestratorBatchSize", EnvKeys: []string{"YOUBAN_PUBLISH_CYCLE_ORCHESTRATOR_BATCH_SIZE"}},
 	// 免费账号频道循环上架的固定间隔天数，默认 15 天。
