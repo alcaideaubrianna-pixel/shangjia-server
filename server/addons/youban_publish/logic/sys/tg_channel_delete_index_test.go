@@ -22,3 +22,12 @@ func TestTelegramChannelDeleteIndexScorePriorityAndFIFO(t *testing.T) {
 	}
 	_ = index
 }
+
+func TestTelegramChannelCleanupKeyIsIndependent(t *testing.T) {
+	if got := tgChannelCleanupKey(231); got != "youban:tg:channel:cleanup:231" {
+		t.Fatalf("频道清理队列 key 不符合约定: %q", got)
+	}
+	if tgChannelCleanupKey(231) == telegramChannelQueueKey(231) {
+		t.Fatalf("频道清理队列不能复用推送频道队列 key")
+	}
+}

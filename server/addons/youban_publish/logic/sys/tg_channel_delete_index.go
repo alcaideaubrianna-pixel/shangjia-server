@@ -19,20 +19,26 @@ func tgChannelDeleteKey(tenantID, channelID int64) string {
 	return fmt.Sprintf("youban_publish:tg:channel_delete:%d:%d", tenantID, channelID)
 }
 
+// tgChannelCleanupKey 是资料/关键字/周期删除任务的独立频道队列索引。
+// 删除任务不能与推送频道 ZSET 共用，频道推送阻塞时仍必须能够独立清理。
+func tgChannelCleanupKey(channelID int64) string {
+	return fmt.Sprintf("youban:tg:channel:cleanup:%d", channelID)
+}
+
 func (tgChannelDeleteIndex) addJob(ctx context.Context, tenantID, channelID, jobID int64, priority channelDispatchPriority) error {
-	if tenantID <= 0 || channelID <= 0 || jobID <= 0 {
+	if channelID <= 0 || jobID <= 0 {
 		return nil
 	}
 	// 分数先按删除优先级排序，再按 Job ID 保持同优先级 FIFO。
 	score := float64(priority)*1_000_000_000_000 + float64(jobID)
-	return cache.ZSetAdd(ctx, tgChannelDeleteKey(tenantID, channelID), score, "job:"+strconv.FormatInt(jobID, 10))
+	return cache.ZSetAdd(ctx, tgChannelCleanupKey(channelID), score, "job:"+strconv.FormatInt(jobID, 10))
 }
 
 func (tgChannelDeleteIndex) removeJob(ctx context.Context, tenantID, channelID, jobID int64) error {
-	if tenantID <= 0 || channelID <= 0 || jobID <= 0 {
+	if channelID <= 0 || jobID <= 0 {
 		return nil
 	}
-	return cache.ZSetRemove(ctx, tgChannelDeleteKey(tenantID, channelID), "job:"+strconv.FormatInt(jobID, 10))
+	return cache.ZSetRemove(ctx, tgChannelCleanupKey(channelID), "job:"+strconv.FormatInt(jobID, 10))
 }
 
 func (tgChannelDeleteIndex) addAutoDelete(ctx context.Context, tenantID, channelID int64, messageID int, priority channelDispatchPriority) error {
@@ -51,8 +57,8 @@ func (tgChannelDeleteIndex) removeAutoDelete(ctx context.Context, tenantID, chan
 }
 
 func (tgChannelDeleteIndex) head(ctx context.Context, tenantID, channelID int64) (string, error) {
-	if tenantID <= 0 || channelID <= 0 {
+	if channelID <= 0 {
 		return "", nil
 	}
-	return cache.ZSetHead(ctx, tgChannelDeleteKey(tenantID, channelID))
+	return cache.ZSetHead(ctx, tgChannelCleanupKey(channelID))
 }

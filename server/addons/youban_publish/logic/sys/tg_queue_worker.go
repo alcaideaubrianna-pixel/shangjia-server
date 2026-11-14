@@ -56,22 +56,36 @@ func telegramAutoDeleteWorkerQueues() map[string]int {
 }
 
 func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
-	// Channel-queue mode owns Telegram publish consumption. Do not start the
-	// legacy Asynq publish server: running both consumers can duplicate sends
-	// and lets old shard queues continue to block new channel work.
+	// Channel-queue mode owns Telegram publish consumption. Keep cleanup on a
+	// separate Asynq lane: cleanup must continue even when the publish ZSET is
+	// blocked, while still reusing the existing cleanup handler and retry policy.
 	if telegramChannelQueueEnabled() {
 		s.tgQueueMu.Lock()
-		if s.tgQueueServer != nil {
+		if s.tgCleanupQueueServer != nil {
 			s.tgQueueMu.Unlock()
 			return
 		}
-		// Mark the publish role as initialized without creating an Asynq
-		// consumer. Channel worker startup is handled by runPublishRuntime.
-		s.tgQueueServer = nil
+		cleanupServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
+			Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.cleanupConcurrency", 16).Int(),
+			Queues:         telegramCleanupWorkerQueues(),
+			RetryDelayFunc: telegramQueueRetryDelay,
+		})
+		s.tgCleanupQueueServer = cleanupServer
 		s.tgQueueMu.Unlock()
-		g.Log().Info(ctx, "频道队列模式已启用，禁用旧TG Asynq发布消费者")
+		g.Log().Info(ctx, "频道队列模式已启用，启动独立TG清理消费者", g.Map{
+			"event":  "telegram_cleanup_consumer_started",
+			"queues": telegramCleanupWorkerQueues(),
+		})
 		s.startTelegramOutboxDispatcher(ctx)
 		go s.runTelegramCleanupIntents(ctx)
+
+		cleanupMux := asynq.NewServeMux()
+		cleanupMux.HandleFunc(tgTaskTypeCleanup, s.handleTelegramCleanupTask)
+		go func() {
+			if err := cleanupServer.Run(cleanupMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
+				g.Log().Errorf(ctx, "启动上架插件TG清理队列失败：%+v", err)
+			}
+		}()
 		return
 	}
 	s.tgQueueMu.Lock()
