@@ -138,6 +138,12 @@ func (s *sSysPublish) rearmTelegramJobOutbox(ctx context.Context, jobId int64, d
 	}
 	affected, _ := result.RowsAffected()
 	if affected > 0 {
+		// A rearmed Outbox must be handed back to the active transport immediately.
+		// Unified channel mode intentionally skips the legacy recovery scanner, so
+		// leaving this row pending would strand the job in PostgreSQL indefinitely.
+		if err := s.dispatchTelegramJobOutboxByJob(ctx, jobId); err != nil {
+			return gerror.Wrap(err, "重新激活TG任务后入队失败")
+		}
 		return nil
 	}
 	// 并发 rearm 可能已经有 processing 行；不能再插入第二条 Outbox。
@@ -232,7 +238,13 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 	owner := telegramOutboxOwner()
 	now := gtime.Now()
 	step := beginTelegramPublishStage(ctx, "outbox.lease.acquire")
-	result, err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
+	// Keep the lease mutation short and independent from any time already
+	// consumed by upstream batch work. A slow PostgreSQL update must release
+	// the outbox back to retry instead of holding the channel dispatch path
+	// until the caller's much larger deadline expires.
+	leaseCtx, leaseCancel := context.WithTimeout(ctx, 3*time.Second)
+	defer leaseCancel()
+	result, err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(leaseCtx).
 		Where("id", row.Id).
 		Where("status = ? OR (status = ? AND lease_expires_at <= ?)", telegramOutboxPending, telegramOutboxProcessing, now).
 		Data(g.Map{
