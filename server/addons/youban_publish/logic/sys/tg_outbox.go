@@ -671,11 +671,17 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 			if _, exists := channelSelected[shard]; exists {
 				continue
 			}
-			channelSelected[shard] = struct{}{}
 		}
 		shard := accountShard{tenantID: candidate.TenantId, accountID: candidate.AccountId}
 		if accountSelected[shard] >= accountQuota {
 			continue
+		}
+		// Mark the channel only after all account quota checks pass. If the
+		// first candidate is rejected by quota, a later candidate for the same
+		// channel must still be eligible in this batch.
+		if candidate.ChannelId > 0 {
+			shard := channelShard{tenantID: candidate.TenantId, channelID: candidate.ChannelId}
+			channelSelected[shard] = struct{}{}
 		}
 		accountSelected[shard]++
 		rows = append(rows, candidate)
