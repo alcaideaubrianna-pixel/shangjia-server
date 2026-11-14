@@ -24,7 +24,7 @@ func TestTelegramPublishQueueWeightsKeepLegacyQueues(t *testing.T) {
 	interactive := telegramPublishInteractiveQueueWeights(context.Background())
 	foreground := telegramPublishForegroundQueueWeights(context.Background())
 	bulk := telegramPublishBulkQueueWeights(context.Background())
-	if interactive[tgQueueNameInteractive] <= 0 || interactive[telegramQueueNameByPriorityAndChannel(context.Background(), tgJobPriorityInteractive, 1)] <= 0 {
+	if interactive[tgQueueNameInteractive] <= 0 || interactive[channelDispatchQueueManual] <= 0 || interactive[telegramQueueNameByPriorityAndChannel(context.Background(), tgJobPriorityInteractive, 1)] <= 0 {
 		t.Fatal("interactive queues are not registered")
 	}
 	for _, queue := range []string{tgQueueNameUrgent, tgQueueNameDefault} {

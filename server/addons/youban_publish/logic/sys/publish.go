@@ -33,9 +33,7 @@ type sSysPublish struct {
 	telegramOutboxStarted      bool
 	telegramOutboxWake         chan struct{}
 	tgQueueClient              *asynq.Client
-	tgInteractiveQueueServer   *asynq.Server
 	tgQueueServer              *asynq.Server
-	tgBulkQueueServer          *asynq.Server
 	tgCleanupQueueServer       *asynq.Server
 	mediaQueueServer           *asynq.Server
 	mediaBulkQueueServer       *asynq.Server
