@@ -26,7 +26,34 @@ func enqueueTelegramChannelJob(ctx context.Context, channelID, jobID int64, scor
 	if channelID <= 0 || jobID <= 0 {
 		return fmt.Errorf("invalid telegram channel queue identity channel:%d job:%d", channelID, jobID)
 	}
-	_, err := g.Redis().Do(ctx, "ZADD", telegramChannelQueueKey(channelID), score, strconv.FormatInt(jobID, 10))
+	key := telegramChannelQueueKey(channelID)
+	member := strconv.FormatInt(jobID, 10)
+	var err error
+	// Redis is the ready transport, while the DB Outbox remains the source of
+	// truth. Retry transient ZADD failures briefly, but never report success on
+	// failure: the caller will keep the Outbox pending for the next recovery.
+	for attempt := 1; attempt <= 3; attempt++ {
+		_, err = g.Redis().Do(ctx, "ZADD", key, score, member)
+		if err == nil {
+			return nil
+		}
+		if attempt < 3 {
+			timer := time.NewTimer(time.Duration(attempt*20) * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
+			case <-timer.C:
+			}
+		}
+	}
+	g.Log().Warning(ctx, "频道队列写入失败，保留Outbox待重试", g.Map{
+		"event":     "channel_queue_zadd_failed",
+		"channelId": channelID,
+		"jobId":     jobID,
+		"attempts":  3,
+		"error":     err.Error(),
+	})
 	return err
 }
 
