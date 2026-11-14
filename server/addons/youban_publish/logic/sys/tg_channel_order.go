@@ -88,11 +88,12 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 		// ordering boundary, but allow collect/quick-push jobs to overtake
 		// pending idle bulk/history rows.  Otherwise a lost Stream event at
 		// the head can stall every newer publication on the channel.
-		if telegramJobPriorityValue(job) <= tgJobPriorityUrgent {
-			fast = fast.Where("(j.dispatch_status IN ('queued','processing') OR j.status IN ('sending','confirming','unknown'))")
-		} else {
-			fast = fast.Where("(j.dispatch_status IN ('queued','processing') OR (j.status IN ('pending','failed_retry') AND COALESCE(j.last_dispatch_error,'') NOT LIKE '就绪通知或执行任务缺失%'))")
-		}
+		// queued + pending only means the task is ready in Redis; it has not
+		// started sending and must not form a multi-minute FIFO barrier.  The
+		// actual ordering boundary is an execution that has claimed the job or
+		// entered a send/confirmation phase.  This lets a newer publication
+		// proceed while a stale queued task is waiting for a worker.
+		fast = fast.Where("(j.dispatch_status = 'processing' OR j.status IN ('sending','confirming','unknown'))")
 		if strings.TrimSpace(job.TargetChatId) != "" {
 			// target_chat_id 是真实 Telegram 目标的串行边界。即使两个
 			// 采集账户不同，只要租户和目标频道相同，也必须共享同一个队首。
