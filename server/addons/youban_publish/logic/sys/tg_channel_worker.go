@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/gogf/gf/v2/frame/g"
 )
 
 // telegramChannelQueueEnabled defaults to the channel queue transport. Set the
@@ -31,13 +33,26 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 		return false, nil
 	}
 	jobID, err := dequeueTelegramChannelHead(ctx, channelID)
-	if err != nil || jobID <= 0 {
+	if err != nil {
+		g.Log().Warning(ctx, "频道队列取头失败", g.Map{"event": "channel_queue_error", "stage": "dequeue", "channelId": channelID, "error": err.Error()})
 		return false, err
 	}
+	if jobID <= 0 {
+		return false, err
+	}
+	job, loadErr := s.telegramJobById(ctx, jobID)
+	if loadErr != nil {
+		g.Log().Warning(ctx, "频道队列任务加载失败", g.Map{"event": "channel_queue_error", "stage": "load", "channelId": channelID, "jobId": jobID, "error": loadErr.Error()})
+		_ = enqueueTelegramChannelJob(ctx, channelID, jobID, time.Now().Add(time.Second).UnixMilli())
+		return true, loadErr
+	}
+	g.Log().Info(ctx, "频道队列取出任务", g.Map{"event": "channel_queue_dequeue", "channelId": channelID, "jobId": jobID, "profileId": job.ProfileId, "operationNo": job.OperationNo, "queue": telegramChannelQueueKey(channelID)})
 	if err = s.SendTelegramJob(ctx, jobID); err != nil {
 		// Keep the job available for the next attempt. A bounded delay avoids a
 		// hot loop when the channel lease or Telegram API is temporarily busy.
-		_ = enqueueTelegramChannelJob(ctx, channelID, jobID, time.Now().Add(time.Second).UnixMilli())
+		hold := time.Now().Add(time.Second).UnixMilli()
+		_ = enqueueTelegramChannelJob(ctx, channelID, jobID, hold)
+		g.Log().Warning(ctx, "频道队列任务发送失败，已重入队", g.Map{"event": "channel_queue_requeue", "stage": "send", "channelId": channelID, "jobId": jobID, "profileId": job.ProfileId, "score": hold, "error": err.Error()})
 		return true, err
 	}
 	// SendTelegramJob may return nil when another sender owns the lease. Do
@@ -45,12 +60,21 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 	if job, loadErr := s.telegramJobById(ctx, jobID); loadErr == nil {
 		switch job.Status {
 		case telegramJobStatusSent, "failed", "superseded":
+			g.Log().Info(ctx, "频道队列任务确认完成", g.Map{"event": "channel_queue_ack", "channelId": channelID, "jobId": jobID, "profileId": job.ProfileId, "status": job.Status})
 			return true, nil
 		default:
-			_ = enqueueTelegramChannelJob(ctx, channelID, jobID, time.Now().Add(time.Second).UnixMilli())
+			hold := time.Now().Add(time.Second).UnixMilli()
+			_ = enqueueTelegramChannelJob(ctx, channelID, jobID, hold)
+			reason := job.LastDispatchError
+			if strings.Contains(reason, "媒体仍在异步处理中") {
+				g.Log().Info(ctx, "频道队列任务等待媒体就绪", g.Map{"event": "channel_queue_media_not_ready", "channelId": channelID, "jobId": jobID, "profileId": job.ProfileId, "score": hold})
+			}
+			g.Log().Warning(ctx, "频道队列任务未完成，已重入队", g.Map{"event": "channel_queue_requeue", "stage": "post_send", "channelId": channelID, "jobId": jobID, "profileId": job.ProfileId, "status": job.Status, "score": hold, "reason": reason})
 		}
 	} else {
-		_ = enqueueTelegramChannelJob(ctx, channelID, jobID, time.Now().Add(time.Second).UnixMilli())
+		hold := time.Now().Add(time.Second).UnixMilli()
+		_ = enqueueTelegramChannelJob(ctx, channelID, jobID, hold)
+		g.Log().Warning(ctx, "频道队列任务状态读取失败，已重入队", g.Map{"event": "channel_queue_requeue", "stage": "reload", "channelId": channelID, "jobId": jobID, "score": hold, "error": loadErr.Error()})
 	}
 	return true, nil
 }
