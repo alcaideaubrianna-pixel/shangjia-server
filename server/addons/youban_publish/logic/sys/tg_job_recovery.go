@@ -558,7 +558,7 @@ func (s *sSysPublish) recoverStaleTelegramMediaFallbackJobs(ctx context.Context,
 	}
 	var jobs []telegramJobRecord
 	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("status", telegramJobStatusSending).
+		WhereIn("status", []string{telegramJobStatusSending, telegramJobStatusRetryWait}).
 		WhereLike("last_dispatch_error", telegramMediaFallbackMarker+"%").
 		WhereNotNull("next_retry_at").
 		WhereLTE("next_retry_at", gtime.Now()).
@@ -642,7 +642,7 @@ func (s *sSysPublish) deferTelegramMediaFallbackRecovery(ctx context.Context, jo
 	attempt := job.ReconcileCount + 1
 	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id", job.Id).
-		Where("status", telegramJobStatusSending).
+		WhereIn("status", []string{telegramJobStatusSending, telegramJobStatusRetryWait}).
 		WhereLike("last_dispatch_error", telegramMediaFallbackMarker+"%").
 		Data(g.Map{
 			"reconcile_count": attempt,

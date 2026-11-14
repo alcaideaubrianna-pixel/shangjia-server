@@ -915,6 +915,9 @@ func (s *sSysPublish) submitTelegramMediaFallback(ctx context.Context, job teleg
 	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id", job.Id).Where("status", telegramJobStatusSending).
 		Data(g.Map{
+			"status":              telegramJobStatusRetryWait,
+			"dispatch_status":     tgDispatchStatusIdle,
+			"send_phase":          "",
 			"last_dispatch_error": telegramMediaFallbackReason(purpose),
 			"next_retry_at":       gtime.Now().Add(telegramMediaFallbackRecoverAfter),
 			"reconcile_count":     0,
