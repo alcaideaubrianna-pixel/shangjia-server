@@ -24,6 +24,13 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
+	// The channel ZSET is the sole ordering source in channel-queue mode.
+	// Consulting the legacy DB head here lets stale pending/idle jobs block a
+	// ready ZSET task even though the Channel Worker already owns ordering and
+	// the channel lease. Keep this check only for the legacy transport.
+	if telegramChannelQueueEnabled() {
+		return false, nil
+	}
 	if job.Id <= 0 {
 		return false, nil
 	}
