@@ -291,6 +291,20 @@ func (s *sSysPublish) wakeNextTelegramChannelJob(ctx context.Context, job telegr
 	if job.TenantId <= 0 || (job.ChannelId <= 0 && strings.TrimSpace(job.TargetChatId) == "") {
 		return nil
 	}
+	// Channel queues are the sole realtime transport. Completion only marks
+	// the channel active; the channel worker reads the ZSET head directly.
+	// Do not fall back to the PostgreSQL successor query or the legacy
+	// enqueueTelegramJob/Asynq path here, otherwise a completed send can
+	// re-enter the old global scheduler and reintroduce head-of-line delay.
+	if telegramChannelQueueEnabled() {
+		if job.ChannelId <= 0 {
+			return nil
+		}
+		if _, err := g.Redis().Do(ctx, "SADD", telegramChannelActiveSetKey, fmt.Sprintf("%d", job.ChannelId)); err != nil {
+			return gerror.Wrapf(err, "唤醒频道活跃队列失败 channelId:%d", job.ChannelId)
+		}
+		return nil
+	}
 	// 完成回调、Stream 通知、Outbox 恢复可能同时唤醒同一频道。
 	// 只保留一个短窗口内的唤醒，避免重复执行账户/队首查询和 Asynq 入队。
 	// debounce 过期后仍由持久化 Outbox 继续保证可靠恢复。
