@@ -338,11 +338,53 @@ func (s *sSysPublish) enqueuePreparedProfileJobs(ctx context.Context, jobIds []i
 			continue
 		}
 		wokenChannels[channelKey] = struct{}{}
+		g.Log().Debug(ctx, "资料发布任务开始入队", g.Map{
+			"event":       "publish_enqueue_start",
+			"profileId":   job.ProfileId,
+			"tenantId":    job.TenantId,
+			"accountId":   job.AccountId,
+			"channelId":   job.ChannelId,
+			"jobId":       job.Id,
+			"operationNo": job.OperationNo,
+			"priority":    job.Priority,
+			"queue":       telegramChannelQueueKey(job.ChannelId),
+			"score":       telegramChannelQueueScore(job.Priority, time.Now(), job.Id),
+		})
+		enqueueStartedAt := time.Now()
 		if err := s.dispatchTelegramJobOutboxByJob(ctx, jobId); err != nil {
 			message := "Redis调度失败，等待数据库调度器恢复：" + err.Error()
 			_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", jobId).
 				Data(g.Map{"last_dispatch_error": message, "updated_at": gtime.Now()}).Update()
-			g.Log().Warningf(ctx, "资料TG任务入队失败，等待数据库调度器恢复 jobId:%d operatorId:%d err:%+v", jobId, operatorId, err)
+			g.Log().Warning(ctx, "资料TG任务入队失败，等待数据库调度器恢复", g.Map{
+				"event":       "publish_enqueue_failed",
+				"profileId":   job.ProfileId,
+				"tenantId":    job.TenantId,
+				"accountId":   job.AccountId,
+				"channelId":   job.ChannelId,
+				"jobId":       job.Id,
+				"operationNo": job.OperationNo,
+				"priority":    job.Priority,
+				"queue":       telegramChannelQueueKey(job.ChannelId),
+				"score":       telegramChannelQueueScore(job.Priority, time.Now(), job.Id),
+				"durationMs":  time.Since(enqueueStartedAt).Milliseconds(),
+				"operatorId":  operatorId,
+				"reason":      telegramPublishLogError(err),
+			})
+		} else {
+			g.Log().Info(ctx, "资料发布任务入队完成", g.Map{
+				"event":       "publish_enqueue_success",
+				"profileId":   job.ProfileId,
+				"tenantId":    job.TenantId,
+				"accountId":   job.AccountId,
+				"channelId":   job.ChannelId,
+				"jobId":       job.Id,
+				"operationNo": job.OperationNo,
+				"priority":    job.Priority,
+				"queue":       telegramChannelQueueKey(job.ChannelId),
+				"score":       telegramChannelQueueScore(job.Priority, time.Now(), job.Id),
+				"durationMs":  time.Since(enqueueStartedAt).Milliseconds(),
+				"reason":      "queued",
+			})
 		}
 	}
 }

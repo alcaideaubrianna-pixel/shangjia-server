@@ -33,6 +33,7 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 	if !telegramChannelQueueEnabled() {
 		return false, nil
 	}
+	dequeueStartedAt := time.Now()
 	jobID, err := dequeueTelegramChannelHead(ctx, channelID)
 	if err != nil {
 		g.Log().Warning(ctx, "频道队列取头失败", g.Map{"event": "channel_queue_error", "stage": "dequeue", "channelId": channelID, "error": err.Error()})
@@ -47,7 +48,23 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 		_ = enqueueTelegramChannelJob(ctx, channelID, jobID, tgJobPriorityDefault, time.Now().Add(time.Second))
 		return true, loadErr
 	}
-	g.Log().Info(ctx, "频道队列取出任务", g.Map{"event": "channel_queue_dequeue", "channelId": channelID, "jobId": jobID, "profileId": job.ProfileId, "operationNo": job.OperationNo, "queue": telegramChannelQueueKey(channelID)})
+	priority := job.Priority
+	if priority <= 0 {
+		priority = tgJobPriorityBulk
+	}
+	queueName := telegramChannelQueueKey(channelID)
+	g.Log().Info(ctx, "频道队列取出任务", g.Map{
+		"event":       "channel_queue_dequeue",
+		"channelId":   channelID,
+		"jobId":       jobID,
+		"profileId":   job.ProfileId,
+		"operationNo": job.OperationNo,
+		"priority":    priority,
+		"queue":       queueName,
+		"score":       telegramChannelQueueScore(priority, time.Now(), jobID),
+		"durationMs":  time.Since(dequeueStartedAt).Milliseconds(),
+		"reason":      "head_claimed",
+	})
 	if err = s.SendTelegramJob(ctx, jobID); err != nil {
 		// Keep the job available for the next attempt. A bounded delay avoids a
 		// hot loop when the channel lease or Telegram API is temporarily busy.
@@ -70,7 +87,19 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 		}
 		score := telegramChannelQueueScore(priority, time.UnixMilli(hold), jobID)
 		_ = enqueueTelegramChannelJob(ctx, channelID, jobID, priority, time.UnixMilli(hold))
-		g.Log().Warning(ctx, "频道队列任务发送失败，已重入队", g.Map{"event": "channel_queue_requeue", "stage": "send", "channelId": channelID, "jobId": jobID, "profileId": job.ProfileId, "score": score, "error": err.Error()})
+		g.Log().Warning(ctx, "频道队列任务发送失败，已重入队", g.Map{
+			"event":       "channel_queue_requeue",
+			"stage":       "send",
+			"channelId":   channelID,
+			"jobId":       jobID,
+			"profileId":   job.ProfileId,
+			"operationNo": job.OperationNo,
+			"priority":    priority,
+			"queue":       queueName,
+			"score":       score,
+			"durationMs":  time.Since(dequeueStartedAt).Milliseconds(),
+			"reason":      telegramPublishLogError(err),
+		})
 		return true, err
 	}
 	// SendTelegramJob may return nil when another sender owns the lease. Do
@@ -78,7 +107,19 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 	if job, loadErr := s.telegramJobById(ctx, jobID); loadErr == nil {
 		switch job.Status {
 		case telegramJobStatusSent, "failed", "superseded":
-			g.Log().Info(ctx, "频道队列任务确认完成", g.Map{"event": "channel_queue_ack", "channelId": channelID, "jobId": jobID, "profileId": job.ProfileId, "status": job.Status})
+			g.Log().Info(ctx, "频道队列任务确认完成", g.Map{
+				"event":       "channel_queue_ack",
+				"channelId":   channelID,
+				"jobId":       jobID,
+				"profileId":   job.ProfileId,
+				"operationNo": job.OperationNo,
+				"priority":    priority,
+				"queue":       queueName,
+				"score":       telegramChannelQueueScore(priority, time.Now(), jobID),
+				"durationMs":  time.Since(dequeueStartedAt).Milliseconds(),
+				"status":      job.Status,
+				"reason":      "terminal",
+			})
 			return true, nil
 		default:
 			hold := time.Now().Add(time.Second).UnixMilli()
@@ -134,8 +175,22 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 					priority = tgJobPriorityBulk
 				}
 			}
+			requeueScore := telegramChannelQueueScore(priority, time.UnixMilli(hold), jobID)
 			_ = enqueueTelegramChannelJob(ctx, channelID, jobID, priority, time.UnixMilli(hold))
-			g.Log().Warning(ctx, "频道队列任务未完成，已重入队", g.Map{"event": "channel_queue_requeue", "stage": "post_send", "channelId": channelID, "jobId": jobID, "profileId": job.ProfileId, "status": job.Status, "score": hold, "reason": reason})
+			g.Log().Warning(ctx, "频道队列任务未完成，已重入队", g.Map{
+				"event":       "channel_queue_requeue",
+				"stage":       "post_send",
+				"channelId":   channelID,
+				"jobId":       jobID,
+				"profileId":   job.ProfileId,
+				"operationNo": job.OperationNo,
+				"priority":    priority,
+				"queue":       queueName,
+				"status":      job.Status,
+				"score":       requeueScore,
+				"durationMs":  time.Since(dequeueStartedAt).Milliseconds(),
+				"reason":      reason,
+			})
 		}
 	} else {
 		hold := time.Now().Add(time.Second).UnixMilli()
