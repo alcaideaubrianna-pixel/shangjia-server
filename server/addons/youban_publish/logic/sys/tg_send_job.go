@@ -497,7 +497,7 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 			step.End(err, g.Map{"messageIds": telegramSentMessageIDs(messages), "messageCount": len(messages)})
 			cancelDisplaySend()
 			displaySendDuration := time.Since(displaySendStartedAt)
-			observeTelegramMediaSend(ctx, "display", err, displaySendDuration)
+			observeTelegramMediaSend(ctx, &job, "display", err, displaySendDuration)
 			g.Log().Infof(ctx, "TG展示资料Bot发送结束 jobId:%d profileId:%d channelId:%d botId:%d chat:%s duration:%s messages:%d messageIds:%v err:%v", job.Id, job.ProfileId, job.ChannelId, job.BotId, job.TargetChatId, displaySendDuration.Round(time.Millisecond), len(messages), telegramSentMessageIDs(messages), err)
 			if err != nil && len(messages) == 0 && shouldFallbackTelegramMediaToAccount(err) {
 				g.Log().Warningf(ctx, "Bot展示媒体发送失败，命中媒体降级条件 jobId:%d botId:%d chat:%s media:%s err:%+v", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(displayMedia), err)
@@ -588,7 +588,7 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	step.End(err, g.Map{"messageIds": telegramSentMessageIDs(verifyMessages), "messageCount": len(verifyMessages)})
 	cancelVerifySend()
 	verifySendDuration := time.Since(verifySendStartedAt)
-	observeTelegramMediaSend(ctx, "verify", err, verifySendDuration)
+	observeTelegramMediaSend(ctx, &job, "verify", err, verifySendDuration)
 	g.Log().Infof(ctx, "TG验证资料Bot发送结束 jobId:%d profileId:%d channelId:%d botId:%d chat:%s duration:%s messages:%d messageIds:%v err:%v", job.Id, job.ProfileId, job.ChannelId, job.BotId, job.TargetChatId, verifySendDuration.Round(time.Millisecond), len(verifyMessages), telegramSentMessageIDs(verifyMessages), err)
 	if err != nil && len(verifyMessages) == 0 && shouldFallbackTelegramMediaToAccount(err) {
 		g.Log().Warningf(ctx, "Bot验证媒体发送失败，命中媒体降级条件 jobId:%d botId:%d chat:%s media:%s err:%+v", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(verifyMedia), err)

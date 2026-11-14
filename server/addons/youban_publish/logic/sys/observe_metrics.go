@@ -121,7 +121,7 @@ func observeTelegramPublishFailure(ctx context.Context, stage string) {
 	counter.Add(ctx, 1, metric.WithAttributes(attribute.String("stage", stage)))
 }
 
-func observeTelegramMediaSend(ctx context.Context, phase string, err error, duration time.Duration) {
+func observeTelegramMediaSend(ctx context.Context, job *telegramJobRecord, phase string, err error, duration time.Duration) {
 	result := "success"
 	if err != nil {
 		result = "error"
@@ -131,11 +131,26 @@ func observeTelegramMediaSend(ctx context.Context, phase string, err error, dura
 			result = "canceled"
 		}
 	}
-	attrs := metric.WithAttributes(attribute.String("phase", phase), attribute.String("result", result))
+	attrs := []attribute.KeyValue{attribute.String("phase", phase), attribute.String("result", result)}
+	if job != nil {
+		if job.ChannelId > 0 {
+			attrs = append(attrs, attribute.Int64("channel_id", job.ChannelId))
+		}
+		if channelName := strings.TrimSpace(job.TargetChatId); channelName != "" {
+			attrs = append(attrs, attribute.String("channel_name", channelName))
+		}
+		if job.ProfileId > 0 {
+			attrs = append(attrs, attribute.Int64("profile_id", job.ProfileId))
+		}
+		if profileNo := strings.TrimSpace(job.ProfileNoSnapshot); profileNo != "" {
+			attrs = append(attrs, attribute.String("profile_no", profileNo))
+		}
+	}
+	metricAttrs := metric.WithAttributes(attrs...)
 	requests, _ := publishObserveMeter.Int64Counter("xiaohuiji.tg.media_send_requests")
 	durations, _ := publishObserveMeter.Float64Histogram("xiaohuiji.tg.media_send_duration_seconds")
-	requests.Add(ctx, 1, attrs)
-	durations.Record(ctx, duration.Seconds(), attrs)
+	requests.Add(ctx, 1, metricAttrs)
+	durations.Record(ctx, duration.Seconds(), metricAttrs)
 }
 
 func observeTelegramLateDelivery(ctx context.Context, phase, action string, count int) {
