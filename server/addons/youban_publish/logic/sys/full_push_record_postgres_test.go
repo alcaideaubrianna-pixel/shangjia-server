@@ -91,7 +91,8 @@ func TestFullPushRecordsFollowExecutionPostgres(t *testing.T) {
 			}
 		}
 		for _, keyword := range []string{"", "needle"} {
-			base := g.DB().Model(publishSuccessRecordTable+" l").Safe().Ctx(ctx).Where("l.tenant_id", 1)
+			base := g.DB().Model(publishSuccessRecordTable+" l").Safe().Ctx(ctx).
+				LeftJoin(publishTgJobTable+" j", "j.id=l.job_id").Where("l.tenant_id", 1)
 			if keyword == "" {
 				base = applyPublishRecordVisibilityFilter(base)
 			} else {

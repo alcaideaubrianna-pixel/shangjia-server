@@ -12,7 +12,9 @@ import (
 )
 
 func (s *sSysPublish) publishRecordListFast(ctx context.Context, in *sysin.PublishRecordListInp, tenantId int64, accountId int64) (list []*sysin.PublishRecordModel, totalCount int, err error) {
-	base := g.DB().Model(publishSuccessRecordTable+" l").Safe().Ctx(ctx).Where("l.tenant_id", tenantId)
+	base := g.DB().Model(publishSuccessRecordTable+" l").Safe().Ctx(ctx).
+		LeftJoin(publishTgJobTable+" j", "j.id=l.job_id").
+		Where("l.tenant_id", tenantId)
 	if accountId > 0 {
 		base = base.Where("l.account_id", accountId)
 	} else if in.AccountId > 0 {
@@ -30,7 +32,6 @@ func (s *sSysPublish) publishRecordListFast(ctx context.Context, in *sysin.Publi
 	base = applyPublishRecordVisibilityFilter(base)
 	countMod := base.Clone()
 	if in.Status != "" {
-		countMod = countMod.LeftJoin(publishTgJobTable+" j", "j.id=l.job_id")
 		countMod = applyPublishRecordStatusFilter(countMod, in.Status)
 	}
 	totalCount, err = countMod.Count()
@@ -38,7 +39,7 @@ func (s *sSysPublish) publishRecordListFast(ctx context.Context, in *sysin.Publi
 		return nil, 0, gerror.Wrap(err, "获取发送记录总数失败")
 	}
 	normalizePublishRecordPage(in, totalCount)
-	mod := base.LeftJoin(publishTgJobTable+" j", "j.id=l.job_id")
+	mod := base
 	mod = applyPublishRecordStatusFilter(mod, in.Status)
 	if err = mod.Fields("l.id,l.job_id,l.task_id,l.tenant_id,l.account_id,l.profile_id,l.channel_id,l.bot_id,l.operation_no,l.target_chat_id,l.action,"+publishRecordStatusExpression+" AS status,"+publishRecordMessageExpression+" AS message,l.created_at").
 		Page(in.Page, in.PerPage).

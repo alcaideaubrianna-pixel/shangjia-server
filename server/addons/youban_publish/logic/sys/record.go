@@ -333,11 +333,15 @@ func (s *sSysPublish) applyPublishRecordFilters(mod *gdb.Model, in *sysin.Publis
 }
 
 // Hide legacy pre-created full-push rows until execution changes their status.
-// Use EXISTS so the fast count keeps one row per record without extra joins.
 func applyPublishRecordVisibilityFilter(mod *gdb.Model) *gdb.Model {
-	return mod.Where(`((COALESCE(l.action,'') <> 'full_push' AND LEFT(COALESCE(l.operation_no,''),10) <> 'full_push:')
-OR COALESCE(l.status,'') <> 'pending'
-OR EXISTS (SELECT 1 FROM ` + publishTgJobTable + ` record_job WHERE record_job.id=l.job_id AND record_job.status <> 'pending'))`)
+	// Callers join tg_job as j. Keeping the status predicate on that join
+	// avoids a correlated EXISTS that makes PostgreSQL scan/hash the whole job
+	// table during the record count.
+	return mod.Where(`NOT (
+COALESCE(l.action,'') = 'full_push'
+AND LEFT(COALESCE(l.operation_no,''),10) = 'full_push:'
+AND COALESCE(l.status,'') = 'pending'
+AND COALESCE(j.status,'pending') = 'pending')`)
 }
 
 func applyPublishRecordStatusFilter(mod *gdb.Model, status string) *gdb.Model {
