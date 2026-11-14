@@ -86,6 +86,12 @@ func telegramStreamExecutionContext(ctx context.Context, lease telegramChannelLe
 
 // runTelegramStreamExecutionRecovery 定期补偿新引擎已失去执行者的确认阶段，单轮有界且按频道独立抢占。
 func (s *sSysPublish) runTelegramStreamExecutionRecovery(ctx context.Context) {
+	// Channel ZSET mode owns TG publish scheduling. The legacy Asynq
+	// inspector/recovery must stay completely dormant or it will treat the
+	// intentionally empty asynq_task_id as a lost task and reset valid jobs.
+	if telegramChannelQueueEnabled() {
+		return
+	}
 	if heavyRecoveryDisabled("YOUBAN_DISABLE_TELEGRAM_RECOVERY") {
 		return
 	}
