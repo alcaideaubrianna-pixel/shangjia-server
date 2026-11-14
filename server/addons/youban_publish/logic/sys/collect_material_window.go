@@ -331,7 +331,7 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 				}
 				continue
 			}
-			if collectMaterialShouldWaitForVerify(event, windowTruncated) {
+			if !collectClassificationHasVerifyMedia(classification) && collectMaterialShouldWaitForVerify(event, windowTruncated) {
 				if err = s.markCollectMaterialWaitingVerify(ctx, event["id"].Int64()); err != nil {
 					return err
 				}
@@ -451,6 +451,16 @@ func (s *sSysPublish) collectDisplayRetryDelay(ctx context.Context, display gdb.
 		return collectProcessMinimumDelay
 	}
 	return delay
+}
+
+// collectClassificationHasVerifyMedia 判断同一消息是否已经包含验证媒体；包含时无需等待外部验证事件。
+func collectClassificationHasVerifyMedia(classification profileMessageClassification) bool {
+	for _, media := range classification.Media {
+		if strings.EqualFold(strings.TrimSpace(media.Purpose), collectMaterialRoleVerify) {
+			return true
+		}
+	}
+	return false
 }
 
 func collectMaterialShouldWaitForVerify(event gdb.Record, windowTruncated bool) bool {
