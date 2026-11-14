@@ -29,9 +29,12 @@ const (
 	collectMediaRecoverAfter = 20 * time.Minute
 	// This guard only prevents concurrent recovery passes. It must not hide a
 	// lost queue task for the lifetime of the old task's uniqueness window.
-	collectMediaRecoveryDedupTTL      = 2 * time.Minute
-	collectRecoveryRealtimeMaxPending = 500
-	collectRecoveryRealtimeMaxAge     = 10 * time.Second
+	collectMediaRecoveryDedupTTL        = 2 * time.Minute
+	collectRecoveryRealtimeMaxPending   = 500
+	collectRecoveryRealtimeMaxAge       = 10 * time.Second
+	collectRecoveryBackpressureCacheKey = "youban_publish:collect:recovery:backpressure"
+	collectRecoveryBackpressureLockKey  = collectRecoveryBackpressureCacheKey + ":lock"
+	collectRecoveryBackpressureCacheTTL = 5 * time.Second
 	// 恢复查询本身只处理超过 10 秒未推进的事件，因此实时优先窗口
 	// 必须覆盖这段短暂积压，而不能再次使用 10 秒阈值导致全部命中历史。
 	collectRecoveryRealtimeWindow = 10 * time.Minute
@@ -393,6 +396,21 @@ func (s *sSysPublish) recoverReadyMediaPendingEvents(ctx context.Context, limit 
 // Recovery must yield to realtime when the shared database/worker budget is
 // under pressure. This is a bounded gate, not a queue deletion or reset.
 func (s *sSysPublish) collectRecoveryBackpressure(ctx context.Context) (bool, error) {
+	if cached, cacheErr := cache.Instance().Get(ctx, collectRecoveryBackpressureCacheKey); cacheErr == nil && !cached.IsNil() {
+		var value collectRecoveryBackpressureValue
+		if cached.Scan(&value) == nil {
+			return value.blocked(), nil
+		}
+	}
+	if locked, lockErr := cache.Instance().SetIfNotExist(ctx, collectRecoveryBackpressureLockKey, 1, 2*time.Second); lockErr == nil && !locked {
+		// Another recovery pass is refreshing the same global count. Yield this
+		// pass instead of issuing another COUNT against the event table.
+		return true, nil
+	} else if lockErr != nil {
+		// Redis is optional for this guard; continue with the durable DB check.
+		g.Log().Warningf(ctx, "采集恢复背压缓存不可用，回退数据库统计 err:%+v", lockErr)
+	}
+	defer func() { _, _ = cache.Instance().Remove(ctx, collectRecoveryBackpressureLockKey) }()
 	row, err := g.DB().Model(collectProcessOutboxTable).Ctx(ctx).
 		Fields("COUNT(*) AS pending, MIN(updated_at) AS oldest").
 		Where("history", false).
@@ -402,10 +420,12 @@ func (s *sSysPublish) collectRecoveryBackpressure(ctx context.Context) (bool, er
 	}
 	pending := row["pending"].Int64()
 	oldest := row["oldest"].GTime()
-	blocked := pending >= collectRecoveryRealtimeMaxPending
-	if oldest != nil && !oldest.IsZero() && time.Since(oldest.Time) >= collectRecoveryRealtimeMaxAge {
-		blocked = true
+	value := collectRecoveryBackpressureValue{Pending: pending}
+	if oldest != nil && !oldest.IsZero() {
+		value.OldestUnixNano = oldest.UnixNano()
 	}
+	_ = cache.Instance().Set(ctx, collectRecoveryBackpressureCacheKey, value, collectRecoveryBackpressureCacheTTL)
+	blocked := value.blocked()
 	if blocked {
 		age := time.Duration(0)
 		if oldest != nil && !oldest.IsZero() {
@@ -414,6 +434,18 @@ func (s *sSysPublish) collectRecoveryBackpressure(ctx context.Context) (bool, er
 		g.Log().Infof(ctx, "实时采集背压，跳过本轮历史恢复 pending:%d oldestAge:%s", pending, age)
 	}
 	return blocked, nil
+}
+
+type collectRecoveryBackpressureValue struct {
+	Pending        int64 `json:"pending"`
+	OldestUnixNano int64 `json:"oldestUnixNano"`
+}
+
+func (v collectRecoveryBackpressureValue) blocked() bool {
+	if v.Pending >= collectRecoveryRealtimeMaxPending {
+		return true
+	}
+	return v.OldestUnixNano > 0 && time.Since(time.Unix(0, v.OldestUnixNano)) >= collectRecoveryRealtimeMaxAge
 }
 
 // recoverInvalidReadyCollectMedia repairs legacy rows that treated a Telegram
