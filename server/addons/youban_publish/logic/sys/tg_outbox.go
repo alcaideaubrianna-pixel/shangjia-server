@@ -625,12 +625,12 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 	if limit > telegramOutboxMaxBatchLimit(ctx) {
 		limit = telegramOutboxMaxBatchLimit(ctx)
 	}
-	// PostgreSQL 一次为每个账户/频道分片选出队首，避免候选目录后再逐频道
-	// 查询的 N+1 开销；频道内仍按调度等级、优先级和时间保持顺序。
+	// Stream dispatcher 只负责可靠通知，频道顺序由发送阶段 lease 保证。
+	// 不在这里执行全局 DISTINCT ON 频道头部聚合：历史积压会迫使数据库
+	// 对整个候选集排序，直接拖慢实时通知。先按到期时间取有界候选，
+	// 再在内存中做账户/频道配额控制。
 	var candidates []telegramJobOutboxRecord
-	query := `WITH channel_heads AS (
-		SELECT DISTINCT ON (j.tenant_id,j.channel_id)
-			o.id,o.job_id,o.attempt_count,o.available_at,j.account_id,j.tenant_id,j.channel_id,j.priority
+	query := `SELECT o.id,o.job_id,o.attempt_count,o.available_at,j.account_id,j.tenant_id,j.channel_id,j.priority
 		FROM ` + publishTgOutboxTable + ` o
 		JOIN ` + publishTgJobTable + ` j ON j.id=o.job_id
 		WHERE j.tenant_id>0 AND j.channel_id>0
@@ -640,10 +640,7 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 			AND COALESCE(j.dispatch_status,'') IN ('','idle')
 			AND NOT (j.status='pending' AND COALESCE(j.dispatch_status,'')='idle' AND COALESCE(j.asynq_task_id,'')='' AND j.updated_at < CURRENT_TIMESTAMP - (? * INTERVAL '1 minute'))
 			AND (j.next_retry_at IS NULL OR j.next_retry_at<=? OR (j.status='pending' AND COALESCE(j.dispatch_status,'')='idle'))
-		ORDER BY j.tenant_id,j.channel_id,` + telegramChannelScheduleOrderSQL("j") + `,o.available_at,o.id
-	)
-	SELECT id,job_id,attempt_count,available_at,account_id,tenant_id,channel_id,priority FROM channel_heads
-	ORDER BY available_at,id LIMIT ?`
+		ORDER BY o.available_at,o.id LIMIT ?`
 	if err := g.DB().GetScan(ctx, &candidates, query, telegramOutboxEventPublish, now, telegramOutboxPending, telegramOutboxProcessing, telegramChannelHeadTimeoutMinutes(), now, limit*2); err != nil {
 		return nil, gerror.Wrap(err, "读取Stream频道队首失败")
 	}
@@ -663,7 +660,19 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 		accountID int64
 	}
 	accountSelected := make(map[accountShard]int)
+	type channelShard struct {
+		tenantID  int64
+		channelID int64
+	}
+	channelSelected := make(map[channelShard]struct{})
 	for _, candidate := range candidates {
+		if candidate.ChannelId > 0 {
+			shard := channelShard{tenantID: candidate.TenantId, channelID: candidate.ChannelId}
+			if _, exists := channelSelected[shard]; exists {
+				continue
+			}
+			channelSelected[shard] = struct{}{}
+		}
 		shard := accountShard{tenantID: candidate.TenantId, accountID: candidate.AccountId}
 		if accountSelected[shard] >= accountQuota {
 			continue
@@ -685,6 +694,9 @@ func telegramDueOutboxPostgresSQL() string {
 		FROM ` + publishTgOutboxTable + `
 		WHERE event_type=? AND available_at<=?
 			AND (status=? OR (status=? AND lease_expires_at<=?))
+		ORDER BY available_at,id
+		LIMIT 2000
+		FOR UPDATE SKIP LOCKED
 	), due_jobs AS MATERIALIZED (
 		SELECT o.id,o.job_id,o.attempt_count,o.available_at,
 			j.tenant_id,j.account_id,j.channel_id,j.target_chat_id,j.status,j.dispatch_status,j.next_retry_at,
