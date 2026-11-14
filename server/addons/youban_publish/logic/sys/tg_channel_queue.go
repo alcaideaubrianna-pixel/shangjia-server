@@ -68,7 +68,12 @@ func dequeueTelegramChannelHead(ctx context.Context, channelID int64) (int64, er
 	// future retries immediately and create a hot loop for media_not_ready jobs.
 	// The Lua script keeps inspect-and-remove atomic across workers.
 	const claimDueScript = `local v=redis.call('ZRANGE',KEYS[1],0,0,'WITHSCORES'); if #v==0 or tonumber(v[2])>tonumber(ARGV[1]) then return {} end; redis.call('ZREM',KEYS[1],v[1]); return {v[1],v[2]}`
-	value, err := g.Redis().Do(ctx, "EVAL", claimDueScript, 1, telegramChannelQueueKey(channelID), strconv.FormatInt(time.Now().UnixMilli(), 10))
+	// Queue scores use milliseconds in the high-order portion and reserve the
+	// low three digits for priority/tie-breaking. Compare against the end of
+	// the current millisecond so every score scheduled for this millisecond is
+	// eligible while future retries remain untouched.
+	now := time.Now().UnixMilli()
+	value, err := g.Redis().Do(ctx, "EVAL", claimDueScript, 1, telegramChannelQueueKey(channelID), strconv.FormatInt(now*1000+999, 10))
 	if err != nil {
 		return 0, err
 	}
