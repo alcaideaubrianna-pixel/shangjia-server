@@ -37,6 +37,23 @@ var (
 	errTelegramRemoteConfirmed            = errors.New("Telegram已发送成功，等待修复本地投影")
 )
 
+// telegramProfilePublishable 读取资料主表的权威生命周期状态。发布任务可能
+// 在下架请求之前已经入队，因此不能依赖 job 创建时的快照。
+func telegramProfilePublishable(ctx context.Context, profileID int64) (bool, error) {
+	if profileID <= 0 {
+		return false, nil
+	}
+	var row struct {
+		Status     int    `orm:"status"`
+		Visibility string `orm:"visibility"`
+	}
+	if err := g.DB().Model("hg_content_profile").Safe().Ctx(ctx).
+		Fields("status,visibility").Where("id", profileID).WhereNull("deleted_at").Scan(&row); err != nil {
+		return false, gerror.Wrap(err, "读取资料发布状态失败")
+	}
+	return row.Status == 1 && strings.EqualFold(strings.TrimSpace(row.Visibility), "public"), nil
+}
+
 // SendTelegramJob 串行执行目标频道任务，统一账户间隔、发送确认和完成后唤醒。
 func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) (resultErr error) {
 	ctx = telegramPublishTraceContext(ctx, jobId)
@@ -57,6 +74,16 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) (resultE
 		return err
 	}
 	ctx = telegramPublishJobTraceContext(ctx, targetJob)
+	// 资料生命周期以后一次操作为准。下架可能与已入队的上架任务并发，
+	// 发送前必须重新读取主资料状态，避免下架完成后仍把旧任务发到 Telegram。
+	if active, stateErr := telegramProfilePublishable(ctx, targetJob.ProfileId); stateErr != nil {
+		return stateErr
+	} else if !active {
+		if supersedeErr := s.markTelegramJobSuperseded(ctx, targetJob.Id); supersedeErr != nil {
+			return supersedeErr
+		}
+		return nil
+	}
 	if isMessagePushOperationNo(targetJob.OperationNo) {
 		return s.SendMessagePushJob(ctx, jobId)
 	}
@@ -140,6 +167,19 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) (resultE
 		s.releaseTelegramChannelLease(ctx, lease)
 		if postponeErr := s.postponeTelegramJobForChannelOrder(ctx, targetJob); postponeErr != nil {
 			return gerror.Wrap(postponeErr, "执行阶段非队首任务退避失败")
+		}
+		return nil
+	}
+	// 下架可能刚好发生在取队首/获取 lease 期间，再做一次最终闸门检查。
+	if active, stateErr := telegramProfilePublishable(ctx, targetJob.ProfileId); stateErr != nil {
+		stopExecution()
+		s.releaseTelegramChannelLease(ctx, lease)
+		return stateErr
+	} else if !active {
+		stopExecution()
+		s.releaseTelegramChannelLease(ctx, lease)
+		if supersedeErr := s.markTelegramJobSuperseded(ctx, targetJob.Id); supersedeErr != nil {
+			return supersedeErr
 		}
 		return nil
 	}

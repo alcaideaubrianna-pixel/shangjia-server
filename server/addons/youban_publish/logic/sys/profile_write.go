@@ -552,6 +552,11 @@ func (s *sSysPublish) setProfilesOffline(ctx context.Context, ids []int64, tenan
 			return gerror.Newf("资料 %d 下架状态未生效，请稍后重试", id)
 		}
 	}
+	// 下架是资料生命周期的最终操作：先确认主资料已变为 private，再废弃
+	// 所有尚未完成的发布任务，避免上架任务在删除完成后继续发送。
+	if err := s.supersedeProfilePendingTelegramJobs(ctx, ids, tenantId); err != nil {
+		return err
+	}
 	for _, id := range ids {
 		if err := s.syncProfileNoteIndex(ctx, id); err != nil {
 			return err
