@@ -33,7 +33,10 @@ func telegramOutboxRecoveryBatchSize() int {
 func (s *sSysPublish) runTelegramOutboxDispatcher(ctx context.Context) {
 	// 手动/BOT 上架通过事件立即唤醒；定时器只负责进程重启、Redis
 	// 抖动等异常后的持久化兜底，降低无效轮询对数据库的压力。
-	ticker := time.NewTicker(5 * time.Second)
+	// New Outbox rows wake the dispatcher immediately. The ticker is only a
+	// recovery safety net, so keep it low frequency to avoid repeated full
+	// channel-head scans while preserving realtime latency.
+	ticker := time.NewTicker(telegramOutboxScanInterval())
 	defer ticker.Stop()
 	for {
 		s.runTelegramOutboxPass(ctx)
