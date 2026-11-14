@@ -140,6 +140,7 @@ func (s *sSysPublish) runTelegramJobRecoveryCycle(ctx context.Context) {
 		{"terminal_attempt", "收敛TG发送Attempt状态", func(ctx context.Context) error { return s.recoverTerminalTelegramAttempts(ctx, 500) }},
 		{"failed_display", "释放展示后失败的历史TG任务", func(ctx context.Context) error { return s.detachFailedTelegramDisplayJobs(ctx, 200) }},
 		{"outbox_dispatch", "恢复Outbox入队确认中断的TG任务", func(ctx context.Context) error { return s.recoverExpiredTelegramOutboxDispatches(ctx, 200) }},
+		{"stale_pending_head", "收口超时未入队的低优先级TG队首", func(ctx context.Context) error { return s.supersedeStalePendingChannelHeads(ctx, 500) }},
 		{"pending_idle", "恢复待入队TG推送任务", func(ctx context.Context) error { return s.recoverPendingIdleTelegramJobs(ctx, 500) }},
 		{"stale_dispatch", "恢复调度中断TG推送任务", func(ctx context.Context) error { return s.recoverStaleTelegramDispatchJobs(ctx, 200) }},
 		{"missing_operation_state", "补建资料上架状态", func(ctx context.Context) error { return s.recoverMissingProfilePublishOperationStates(ctx, 50) }},
@@ -875,7 +876,7 @@ func (s *sSysPublish) supersedeStalePendingChannelHeads(ctx context.Context, lim
 	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Fields("id").Where("status", telegramJobStatusPending).
 		Where("COALESCE(dispatch_status,'')", tgDispatchStatusIdle).
-		Where("COALESCE(asynq_task_id,'')", "").WhereLTE("updated_at", deadline).
+		Where("COALESCE(asynq_task_id,'')", "").WhereGTE("priority", tgJobPriorityBulk).WhereLTE("updated_at", deadline).
 		OrderAsc("updated_at").OrderAsc("id").Limit(limit).Scan(&rows); err != nil {
 		return gerror.Wrap(err, "读取超时频道队首任务失败")
 	}
