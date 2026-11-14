@@ -72,6 +72,7 @@ func (s *sSysPublish) confirmTelegramStreamOutbox(ctx context.Context, outboxID 
 			if value, scoreErr := g.Redis().Do(ctx, "ZSCORE", telegramChannelQueueKey(job.ChannelId), fmt.Sprintf("%d", jobID)); scoreErr == nil && !value.IsNil() {
 				return s.markTelegramStreamOutboxDelivered(ctx, outboxID, owner, jobID)
 			}
+			return s.releaseTelegramOutbox(ctx, outboxID, owner, attemptCount, "频道队列任务尚未确认接管，等待重试")
 		}
 		if attemptCount >= 3 {
 			if fallbackErr := s.EnqueueTelegramJob(ctx, jobID, 0, false); fallbackErr == nil {
