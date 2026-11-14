@@ -25,6 +25,10 @@ createdb -h "$pg_host" -U "$pg_user" "$db"
 psql -h "$pg_host" -U "$pg_user" -d postgres -v ON_ERROR_STOP=1 \
   -c "ALTER DATABASE \"$db\" SET timezone TO 'Asia/Shanghai'" >/dev/null
 psql -h "$pg_host" -U "$pg_user" -d "$db" -v ON_ERROR_STOP=1 -f "$schema_dump" >/dev/null
+# 线上独立迁移不一定存在于历史 schema dump；本地回放必须补齐资料来源表，
+# 否则指纹去重查询会因关系不存在而阻塞整个采集链路。
+psql -h "$pg_host" -U "$pg_user" -d "$db" -v ON_ERROR_STOP=1 \
+  -f addons/youban_publish/resource/sql/migrations/profile_origin.pgsql.sql >/dev/null
 
 # Worker 启动需要管理员和插件配置；只复制配置表，不复制历史任务。
 pg_dump -h "$pg_host" -U "$pg_user" -d "$source_db" --data-only --disable-triggers \
