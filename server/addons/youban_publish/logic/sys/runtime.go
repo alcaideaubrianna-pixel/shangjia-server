@@ -104,7 +104,10 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 	if config.BackgroundWorker {
 		go s.runProfileFingerprintBackfill(ctx)
 	}
-	if config.PushWorker || config.MediaWorker || config.BackgroundWorker || config.CollectorWorker || config.CollectProcessWorker {
+	// The unified channel transport does not use the legacy TG Asynq queues.
+	// Avoid starting the expensive Inspector/DB invariant loop on a push-only
+	// instance; media, background and collector roles still retain metrics.
+	if (config.PushWorker && !telegramChannelQueueEnabled()) || config.MediaWorker || config.BackgroundWorker || config.CollectorWorker || config.CollectProcessWorker {
 		go s.runAsynqObserveMetrics(ctx)
 	}
 	if config.Scheduler {

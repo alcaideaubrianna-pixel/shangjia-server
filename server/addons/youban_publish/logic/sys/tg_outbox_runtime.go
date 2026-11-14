@@ -92,8 +92,15 @@ func (s *sSysPublish) runTelegramOutboxPass(ctx context.Context) {
 	// Outbox 可能已经持久化，但 Redis/Asynq 任务在进程重启、Redis抖动或
 	// 稳定 TaskID 冲突时丢失。每轮先用有界恢复补灌 pending/idle 任务，
 	// 再处理普通到期 Outbox，避免任务永久停在 pending 且没有 asynq_task_id。
-	if err := s.recoverPendingIdleTelegramJobs(passCtx, telegramOutboxRecoveryBatchSize()); err != nil {
-		g.Log().Warningf(ctx, "恢复待入队TG任务失败：%+v", err)
+	// Unified channel queues own TG publish recovery. The legacy DB scan only
+	// understands the old Asynq dispatch state and performs an expensive query
+	// every pass; running it alongside channel ZSET dispatch can requeue the
+	// same jobs and add database pressure. Channel rehydration remains the
+	// bounded repair path for missing Redis members.
+	if !telegramChannelQueueEnabled() {
+		if err := s.recoverPendingIdleTelegramJobs(passCtx, telegramOutboxRecoveryBatchSize()); err != nil {
+			g.Log().Warningf(ctx, "恢复待入队TG任务失败：%+v", err)
+		}
 	}
 	if err := s.dispatchDueTelegramJobOutbox(passCtx, 0); err != nil {
 		g.Log().Warningf(ctx, "调度TG任务Outbox失败：%+v", err)
