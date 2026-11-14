@@ -83,7 +83,12 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 		fast = fast.Where("NOT (j.status IN ('pending','failed_retry') AND COALESCE(j.last_dispatch_error,'') LIKE '媒体仍在异步处理中%')")
 		// 手动/交互任务可以越过尚未开始的循环、批次和历史任务，
 		// 但不能越过已经入队、发送中或结果未知的任务，避免破坏同频道顺序。
-		if telegramJobPriorityValue(job) <= tgJobPriorityInteractive {
+		// Realtime/urgent work must not wait behind an untouched historical
+		// backlog.  Keep the channel lease and already-started jobs as the
+		// ordering boundary, but allow collect/quick-push jobs to overtake
+		// pending idle bulk/history rows.  Otherwise a lost Stream event at
+		// the head can stall every newer publication on the channel.
+		if telegramJobPriorityValue(job) <= tgJobPriorityUrgent {
 			fast = fast.Where("(j.dispatch_status IN ('queued','processing') OR j.status IN ('sending','confirming','unknown'))")
 		} else {
 			fast = fast.Where("(j.dispatch_status IN ('queued','processing') OR (j.status IN ('pending','failed_retry') AND COALESCE(j.last_dispatch_error,'') NOT LIKE '就绪通知或执行任务缺失%'))")
