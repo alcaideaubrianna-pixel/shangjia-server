@@ -306,17 +306,12 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 				if !pairedAny {
 					continue
 				}
-				if collectMaterialContextClosed(messageViews, index) {
-					if err = s.processCollectEvent(ctx, event["id"].Int64(), payload.TenantId, payload.AccountId); err != nil {
-						// 目标事件的重试错误必须回传 Outbox，不能误完成后遗留 media_ready。
-						return err
-					}
-					continue
-				}
-				if err = s.markCollectMaterialWaitingVerify(ctx, event["id"].Int64()); err != nil {
+				// 当前窗口已经完成展示/验证配对，立即处理父展示事件。
+				// 不能沿用配对前的事件快照继续等待验证静默窗口。
+				if err = s.processCollectEvent(ctx, event["id"].Int64(), payload.TenantId, payload.AccountId); err != nil {
 					return err
 				}
-				return newCollectProcessRetryError(s.collectDisplayRetryDelay(ctx, event), "等待连续验证资料收集完成")
+				continue
 			}
 			if collectMaterialContextClosed(messageViews, index) {
 				claimed, claimErr := s.markCollectMaterialRole(ctx, event["id"].Int64(), collectMaterialRoleDisplay, 0, "complete")
