@@ -158,11 +158,11 @@ func (s *sCollector) handleEventTask(ctx context.Context, task *asynq.Task) erro
 	startedAt := time.Now()
 	if err = s.processEvent(ctx, eventID); err != nil {
 		counter, _ := collectorMeter.Int64Counter("telegram_collector_event_total")
-		counter.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "failed")))
+		counter.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "failed"), attribute.String("queue", collectorQueueName(ctx))))
 		return err
 	}
 	histogram, _ := collectorMeter.Float64Histogram("telegram_collector_event_duration_seconds")
-	histogram.Record(ctx, time.Since(startedAt).Seconds(), metric.WithAttributes(attribute.String("result", "ready")))
+	histogram.Record(ctx, time.Since(startedAt).Seconds(), metric.WithAttributes(attribute.String("result", "ready"), attribute.String("queue", collectorQueueName(ctx))))
 	return nil
 }
 

@@ -119,7 +119,7 @@ func (s *sCollector) handleDeliveryTask(ctx context.Context, task *asynq.Task) e
 	if err != nil {
 		return err
 	}
-	queue, _ := asynq.GetQueueName(ctx)
+	queue := collectorQueueName(ctx)
 	if queue == consts.QueueDeliveryHistory {
 		timer := time.NewTimer(collectorDeliveryHistoryInterval(ctx))
 		defer timer.Stop()
@@ -154,11 +154,11 @@ func (s *sCollector) handleDeliveryTask(ctx context.Context, task *asynq.Task) e
 	startedAt := time.Now()
 	if err = s.processDelivery(ctx, deliveryID); err != nil {
 		counter, _ := collectorMeter.Int64Counter("telegram_collector_delivery_total")
-		counter.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "failed")))
+		counter.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "failed"), attribute.String("queue", collectorQueueName(ctx))))
 		return err
 	}
 	histogram, _ := collectorMeter.Float64Histogram("telegram_collector_delivery_duration_seconds")
-	histogram.Record(ctx, time.Since(startedAt).Seconds(), metric.WithAttributes(attribute.String("result", "completed")))
+	histogram.Record(ctx, time.Since(startedAt).Seconds(), metric.WithAttributes(attribute.String("result", "completed"), attribute.String("queue", collectorQueueName(ctx))))
 	return nil
 }
 

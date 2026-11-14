@@ -56,6 +56,11 @@ func observeIngestLatency(ctx context.Context, event *sysin.RawUpdateEvent, stag
 	))
 }
 
+func collectorQueueName(ctx context.Context) string {
+	queue, _ := asynq.GetQueueName(ctx)
+	return queue
+}
+
 func collectorQueueClass(priority int) string {
 	if priority >= sysin.EventPriorityRealtime {
 		return "realtime"
