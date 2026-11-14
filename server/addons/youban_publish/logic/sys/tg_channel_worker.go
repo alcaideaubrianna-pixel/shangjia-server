@@ -82,11 +82,38 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 			return true, nil
 		default:
 			hold := time.Now().Add(time.Second).UnixMilli()
-			_ = enqueueTelegramChannelJob(ctx, channelID, jobID, hold)
 			reason := job.LastDispatchError
 			if strings.Contains(reason, "媒体仍在异步处理中") {
+				// Media readiness is an asynchronous failure too. Count it so a
+				// stale media head yields to later channel work after every third
+				// failed check, while remaining retryable.
+				attempt := job.RetryCount + 1
+				priority := job.Priority
+				if priority <= 0 {
+					priority = tgJobPriorityBulk
+				}
+				newPriority := priority
+				if attempt%3 == 0 {
+					newPriority = priority - 5
+				}
+				_, _ = g.DB().Model(publishTgJobTable).Ctx(ctx).Where("id", jobID).
+					Data(g.Map{"retry_count": attempt, "priority": newPriority, "updated_at": gtime.Now()}).Update()
+				if newPriority != priority {
+					g.Log().Warning(ctx, "频道队列媒体未就绪任务优先级降级", g.Map{"event": "channel_queue_priority_downgrade", "channelId": channelID, "jobId": jobID, "oldPriority": priority, "newPriority": newPriority, "retryCount": attempt, "reason": reason})
+				}
 				g.Log().Info(ctx, "频道队列任务等待媒体就绪", g.Map{"event": "channel_queue_media_not_ready", "channelId": channelID, "jobId": jobID, "profileId": job.ProfileId, "score": hold})
 			}
+			priority := job.Priority
+			if priority <= 0 {
+				priority = tgJobPriorityBulk
+			}
+			if strings.Contains(reason, "媒体仍在异步处理中") {
+				priority = job.Priority
+				if priority <= 0 {
+					priority = tgJobPriorityBulk
+				}
+			}
+			_ = enqueueTelegramChannelJob(ctx, channelID, jobID, hold*1000+int64(max(0, 100000-priority)))
 			g.Log().Warning(ctx, "频道队列任务未完成，已重入队", g.Map{"event": "channel_queue_requeue", "stage": "post_send", "channelId": channelID, "jobId": jobID, "profileId": job.ProfileId, "status": job.Status, "score": hold, "reason": reason})
 		}
 	} else {
