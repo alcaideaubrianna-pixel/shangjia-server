@@ -12,6 +12,7 @@ MAX_BATCHES=${MAX_BATCHES:-0}
 PGURL=${PGURL:-}
 REDIS_URL=${REDIS_URL:-}
 REDIS_PREFIX=${REDIS_PREFIX:-youban:tg:channel:queue:}
+LEGACY_PREFIX=${LEGACY_PREFIX:-youban_publish:tg:channel_pending:}
 
 usage() {
   cat <<'EOF'
@@ -22,6 +23,7 @@ Environment:
   REDIS_URL   redis-cli URL (required for --execute)
   BATCH_SIZE  rows per batch (default: 500)
   MAX_BATCHES 0 means unlimited
+  LEGACY_PREFIX legacy Redis ZSET prefix
 EOF
 }
 
@@ -31,6 +33,7 @@ while (($#)); do
     --execute) MODE=execute ;;
     --batch-size) BATCH_SIZE=$2; shift ;;
     --max-batches) MAX_BATCHES=$2; shift ;;
+    --legacy-prefix) LEGACY_PREFIX=$2; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -44,13 +47,20 @@ if [[ "$MODE" == execute && ( -z "$PGURL" || -z "$REDIS_URL" ) ]]; then
   exit 2
 fi
 
-if [[ "$MODE" == dry-run ]]; then
-  echo "DRY RUN: no Redis or database writes will be performed."
-  exit 0
-fi
-
 command -v psql >/dev/null || { echo "psql is required" >&2; exit 127; }
 command -v redis-cli >/dev/null || { echo "redis-cli is required" >&2; exit 127; }
+
+if [[ "$MODE" == dry-run ]]; then
+  echo "DRY RUN: no Redis or database writes will be performed."
+  if [[ -n "$REDIS_URL" ]]; then
+    keys=$(redis-cli -u "$REDIS_URL" --scan --pattern "${LEGACY_PREFIX}*" || true)
+    while IFS= read -r key; do
+      [[ -n "$key" ]] || continue
+      echo "legacy_key=$key members=$(redis-cli -u "$REDIS_URL" ZCARD "$key")"
+    done <<< "$keys"
+  fi
+  exit 0
+fi
 
 batch=0
 total=0
@@ -107,3 +117,6 @@ SQL
   (( count < BATCH_SIZE )) && break
 done
 echo "migration complete total=$total" >&2
+
+# Legacy namespace migration is intentionally a separate explicit pass.
+# Invoke tools/migrate-tg-channel-queue-legacy.sh after stopping old consumers.
