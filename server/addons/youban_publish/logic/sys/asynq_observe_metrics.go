@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/hibiken/asynq"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -71,9 +72,45 @@ func (s *sSysPublish) refreshAsynqObserveMetrics(ctx context.Context) {
 		recordAsynqQueueGauge(ctx, queue, "orphan_latency_seconds", int(info.Latency.Seconds()))
 	}
 	observeQueuedJobsWithoutConsumer(ctx, servers)
+	observePendingJobsWithoutTask(ctx)
 	s.observeDatabaseJobsMissingAsynqTask(ctx, inspector)
 	s.observeAsynqTasksWithTerminalDatabaseJob(ctx, inspector, queues)
 	s.observeCollectQueueInvariants(ctx, inspector)
+}
+
+// observePendingJobsWithoutTask publishes the backlog that cannot be consumed
+// because no Asynq task was recorded. Keep this query small and indexable so
+// the health check never becomes part of the dispatch path.
+func observePendingJobsWithoutTask(ctx context.Context) {
+	type backlog struct {
+		Count  int         `json:"count"`
+		Oldest *gtime.Time `json:"oldest"`
+	}
+	var row backlog
+	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Fields("COUNT(*) AS count, MIN(created_at) AS oldest").
+		Where("status = ?", "pending").
+		Where("COALESCE(dispatch_status, '') = ?", tgDispatchStatusIdle).
+		Where("COALESCE(asynq_task_id, '') = ''").
+		Scan(&row)
+	if err != nil {
+		g.Log().Warningf(ctx, "读取TG无执行任务积压指标失败：%+v", err)
+		return
+	}
+	countGauge, _ := publishObserveMeter.Int64Gauge("xiaohuiji.invariant.pending_without_task_id")
+	countGauge.Record(ctx, int64(row.Count))
+	oldestAge := int64(0)
+	if row.Oldest != nil {
+		oldestAge = int64(time.Since(row.Oldest.Time).Seconds())
+		if oldestAge < 0 {
+			oldestAge = 0
+		}
+	}
+	ageGauge, _ := publishObserveMeter.Int64Gauge("xiaohuiji.invariant.pending_without_task_oldest_age_seconds")
+	ageGauge.Record(ctx, oldestAge)
+	if row.Count >= 100 || oldestAge >= 60 {
+		g.Log().Warningf(ctx, "TG无执行任务积压告警 count:%d oldest_age_seconds:%d", row.Count, oldestAge)
+	}
 }
 
 func isAsynqQueueNotFound(err error) bool {
