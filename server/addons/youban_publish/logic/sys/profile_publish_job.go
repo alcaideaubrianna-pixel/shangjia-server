@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -74,7 +75,19 @@ func profilePublishPreparationError(channelCount int, jobIds []int64) error {
 }
 
 func (s *sSysPublish) submitProfilePublishWithMeta(ctx context.Context, profileId, tenantId, accountId, operatorId int64, operationNo string, channelIds []int64, requireOnline bool, meta telegramProfilePublishMeta) error {
+	startedAt := time.Now()
+	g.Log().Info(ctx, "资料发布准备开始", g.Map{
+		"event":         "publish_prepare_start",
+		"profileId":     profileId,
+		"tenantId":      tenantId,
+		"accountId":     accountId,
+		"operatorId":    operatorId,
+		"operationNo":   strings.TrimSpace(operationNo),
+		"channelCount":  len(channelIds),
+		"requireOnline": requireOnline,
+	})
 	if profileId > 0 {
+		mediaCheckStartedAt := time.Now()
 		ready, checkErr := s.profilePublishMediaReady(ctx, profileId)
 		if checkErr != nil {
 			return checkErr
@@ -82,13 +95,24 @@ func (s *sSysPublish) submitProfilePublishWithMeta(ctx context.Context, profileI
 		// Bot creation persists the raw media operation before the worker writes
 		// rows into hg_youban_publish_media. During that window the media table
 		// is empty, which must mean "pending", not "text-only and ready".
+		pending := false
 		if ready {
-			pending, operationErr := s.profileMediaOperationPending(ctx, tenantId, accountId, profileId)
-			if operationErr != nil {
-				return operationErr
+			pending, checkErr = s.profileMediaOperationPending(ctx, tenantId, accountId, profileId)
+			if checkErr != nil {
+				return checkErr
 			}
 			ready = !pending
 		}
+		g.Log().Info(ctx, "资料发布媒体就绪检查完成", g.Map{
+			"event":       "publish_media_ready",
+			"profileId":   profileId,
+			"tenantId":    tenantId,
+			"accountId":   accountId,
+			"operationNo": strings.TrimSpace(operationNo),
+			"ready":       ready,
+			"pending":     pending,
+			"durationMs":  time.Since(mediaCheckStartedAt).Milliseconds(),
+		})
 		if !ready {
 			failedMediaCount, countErr := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 				Where("profile_id", profileId).WhereNull("deleted_at").
@@ -137,6 +161,16 @@ func (s *sSysPublish) submitProfilePublishWithMeta(ctx context.Context, profileI
 	if err != nil {
 		return err
 	}
+	g.Log().Info(ctx, "资料发布任务创建完成", g.Map{
+		"event":       "publish_job_created",
+		"profileId":   profileId,
+		"tenantId":    tenantId,
+		"accountId":   accountId,
+		"operationNo": strings.TrimSpace(operationNo),
+		"jobCount":    len(jobIds),
+		"jobIds":      jobIds,
+		"durationMs":  time.Since(startedAt).Milliseconds(),
+	})
 	s.enqueuePreparedProfileJobs(ctx, jobIds, operatorId)
 	return nil
 }

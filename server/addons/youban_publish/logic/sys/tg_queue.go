@@ -516,19 +516,6 @@ func (s *sSysPublish) enqueueTelegramJobInternal(ctx context.Context, jobId int6
 		}
 		return nil
 	}
-	// In formal channel-queue mode the ZSET is the sole transport for new
-	// publish jobs. Do not also create an Asynq task: that would create two
-	// consumers for the same job and can result in duplicate Telegram sends.
-	if telegramChannelQueueEnabled() && job.ChannelId > 0 {
-		score := time.Now().UnixMilli()*1000 + int64(max(0, 100000-priority))
-		if queueErr := enqueueTelegramChannelJob(ctx, job.ChannelId, jobId, score); queueErr != nil {
-			_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-				Where("id", jobId).Where("dispatch_status", tgDispatchStatusQueued).
-				Data(g.Map{"dispatch_status": tgDispatchStatusIdle, "last_dispatch_error": queueErr.Error(), "updated_at": gtime.Now()}).Update()
-			return gerror.Wrap(queueErr, "写入频道逻辑队列失败")
-		}
-		return nil
-	}
 	/*
 		reserved, err := s.withTelegramChannelDispatchLease(ctx, job, func(reserveCtx context.Context) (bool, error) {
 			step := beginTelegramPublishStage(reserveCtx, "dispatch.channel_order")

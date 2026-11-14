@@ -261,6 +261,15 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 		if err = enqueueTelegramChannelJob(ctx, job.ChannelId, job.Id, score); err != nil {
 			return s.releaseTelegramOutbox(ctx, row.Id, owner, row.AttemptCount, err.Error())
 		}
+		g.Log().Info(ctx, "TG频道队列已就绪", g.Map{
+			"event":     "channel_queue_ready",
+			"jobId":     job.Id,
+			"channelId": job.ChannelId,
+			"profileId": job.ProfileId,
+			"priority":  telegramJobPriorityValue(job),
+			"queue":     telegramChannelQueueKey(job.ChannelId),
+			"score":     score,
+		})
 		if _, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 			Where("id", job.Id).Where("dispatch_status", tgDispatchStatusIdle).
 			Data(g.Map{"dispatch_status": tgDispatchStatusQueued, "queue_name": telegramChannelQueueKey(job.ChannelId), "updated_at": gtime.Now()}).Update(); err != nil {
