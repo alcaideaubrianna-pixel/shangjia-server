@@ -800,7 +800,7 @@ func (s *sSysPublish) recoverStaleTelegramDispatchJobs(ctx context.Context, limi
 		WhereIn("dispatch_status", []string{tgDispatchStatusQueued, tgDispatchStatusProcessing}).
 		Where(telegramActiveChannelCondition()).
 		Where(messagePushPlanRecoveryConditionSQL(publishTgJobTable), telegramRecoveryTimeText(now.Add(-messagePushPlanJobExpireAfter))).
-		WhereLTE("dispatched_at", deadline).
+		Where("((dispatch_status=? AND COALESCE(asynq_task_id,'')='') OR dispatched_at<=?) AND updated_at<=?", tgDispatchStatusQueued, deadline, telegramRecoveryTimeText(now.Add(-time.Minute))).
 		OrderAsc("dispatched_at").OrderAsc("id").
 		Limit(limit).
 		Scan(&jobs)
@@ -853,6 +853,10 @@ func (s *sSysPublish) recoverStaleTelegramDispatchJobs(ctx context.Context, limi
 		return gerror.Wrap(err, "读取已重置TG任务失败")
 	}
 	for _, job := range updatedJobs {
+		if err := s.rearmTelegramJobOutbox(ctx, job.Id, 0); err != nil {
+			g.Log().Warningf(ctx, "重新激活TG任务Outbox失败 job:%d err:%+v", job.Id, err)
+			continue
+		}
 		// The stale Asynq task can still hold its uniqueness key after the task
 		// itself disappeared. A recovery enqueue must create a fresh task; the
 		// database transition in the worker remains the delivery idempotency gate.
