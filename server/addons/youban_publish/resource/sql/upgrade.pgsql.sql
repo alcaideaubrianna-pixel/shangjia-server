@@ -25,13 +25,13 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_account_visibility_relation"
 
 -- Seed direct self/follow edges only. Managed-account and mutual-follow edges
 -- are filled by the parity worker after validating account_visibility.go.
-INSERT INTO "hg_youban_publish_account_visibility"
+INSERT INTO "hg_youban_publish_account_visibility" AS current_visibility
   ("tenant_id", "viewer_account_id", "visible_account_id", "relation_type")
 SELECT "tenant_id", "id", "id", 'self'
 FROM "hg_youban_publish_account"
 WHERE "status" = 1 AND "deleted_at" IS NULL
 ON CONFLICT ("tenant_id", "viewer_account_id", "visible_account_id") DO NOTHING;
-INSERT INTO "hg_youban_publish_account_visibility"
+INSERT INTO "hg_youban_publish_account_visibility" AS current_visibility
   ("tenant_id", "viewer_account_id", "visible_account_id", "relation_type")
 SELECT f."tenant_id", f."follower_account_id", f."following_account_id", 'following'
 FROM "hg_youban_publish_account_follow" f
@@ -39,7 +39,7 @@ JOIN "hg_youban_publish_account" viewer ON viewer."id" = f."follower_account_id"
 JOIN "hg_youban_publish_account" visible ON visible."id" = f."following_account_id" AND visible."tenant_id" = f."tenant_id"
 WHERE f."status" = 'approved' AND f."deleted_at" IS NULL
 ON CONFLICT ("tenant_id", "viewer_account_id", "visible_account_id") DO UPDATE
-SET "relation_type" = CASE WHEN "relation_type" = 'self' THEN "relation_type" ELSE EXCLUDED."relation_type" END,
+SET "relation_type" = CASE WHEN current_visibility."relation_type" = 'self' THEN current_visibility."relation_type" ELSE EXCLUDED."relation_type" END,
     "updated_at" = CURRENT_TIMESTAMP;
 
 -- Remove historical cross-tenant follow edges before the projection can be
@@ -53,7 +53,7 @@ WHERE v."viewer_account_id" = viewer."id"
 
 -- Seed administrator -> managed account edges. The account hierarchy is the
 -- authoritative source for the tenant administrator's visible scope.
-INSERT INTO "hg_youban_publish_account_visibility"
+INSERT INTO "hg_youban_publish_account_visibility" AS current_visibility
   ("tenant_id", "viewer_account_id", "visible_account_id", "relation_type")
 SELECT child."tenant_id", child."parent_id", child."id", 'managed'
 FROM "hg_youban_publish_account" child
@@ -65,12 +65,12 @@ WHERE child."status" = 1
   AND parent."status" = 1
   AND parent."deleted_at" IS NULL
 ON CONFLICT ("tenant_id", "viewer_account_id", "visible_account_id") DO UPDATE
-SET "relation_type" = CASE WHEN "relation_type" IN ('self','following','mutual') THEN "relation_type" ELSE EXCLUDED."relation_type" END,
+SET "relation_type" = CASE WHEN current_visibility."relation_type" IN ('self','following','mutual') THEN current_visibility."relation_type" ELSE EXCLUDED."relation_type" END,
     "updated_at" = CURRENT_TIMESTAMP;
 
 -- Seed mutual-follow edges as a symmetric relation. Keep an existing self or
 -- direct-follow label stable when the same edge is represented by both rules.
-INSERT INTO "hg_youban_publish_account_visibility"
+INSERT INTO "hg_youban_publish_account_visibility" AS current_visibility
   ("tenant_id", "viewer_account_id", "visible_account_id", "relation_type")
 SELECT f1."tenant_id", f1."follower_account_id", f1."following_account_id", 'mutual'
 FROM "hg_youban_publish_account_follow" f1
@@ -83,13 +83,13 @@ JOIN "hg_youban_publish_account_follow" f2
 WHERE f1."status" = 'approved'
   AND f1."deleted_at" IS NULL
 ON CONFLICT ("tenant_id", "viewer_account_id", "visible_account_id") DO UPDATE
-SET "relation_type" = CASE WHEN "relation_type" = 'self' THEN "relation_type" ELSE 'mutual' END,
+SET "relation_type" = CASE WHEN current_visibility."relation_type" = 'self' THEN current_visibility."relation_type" ELSE 'mutual' END,
     "updated_at" = CURRENT_TIMESTAMP;
 
 -- Following a tenant administrator grants the same tenant-wide account scope
 -- as the legacy resolver. Materialize it explicitly so the read model does
 -- not silently omit that administrator's managed accounts.
-INSERT INTO "hg_youban_publish_account_visibility"
+INSERT INTO "hg_youban_publish_account_visibility" AS current_visibility
   ("tenant_id", "viewer_account_id", "visible_account_id", "relation_type")
 SELECT parent."tenant_id", parent."id", child."id", 'tenant_scope'
 FROM "hg_youban_publish_account" parent
@@ -101,12 +101,12 @@ WHERE parent."account_type" = 'admin'
   AND parent."status" = 1
   AND parent."deleted_at" IS NULL
 ON CONFLICT ("tenant_id", "viewer_account_id", "visible_account_id") DO UPDATE
-SET "relation_type" = CASE WHEN "relation_type" IN ('self','following','mutual','managed') THEN "relation_type" ELSE EXCLUDED."relation_type" END,
+SET "relation_type" = CASE WHEN current_visibility."relation_type" IN ('self','following','mutual','managed') THEN current_visibility."relation_type" ELSE EXCLUDED."relation_type" END,
     "updated_at" = CURRENT_TIMESTAMP;
 
 -- A user following a tenant administrator receives the same tenant-wide
 -- account scope as the legacy resolver's expandFollowNoteAccountIds path.
-INSERT INTO "hg_youban_publish_account_visibility"
+INSERT INTO "hg_youban_publish_account_visibility" AS current_visibility
   ("tenant_id", "viewer_account_id", "visible_account_id", "relation_type")
 SELECT f."tenant_id", f."follower_account_id", child."id", 'tenant_scope'
 FROM "hg_youban_publish_account_follow" f
@@ -123,7 +123,7 @@ JOIN "hg_youban_publish_account" child
 WHERE f."status" = 'approved'
   AND f."deleted_at" IS NULL
 ON CONFLICT ("tenant_id", "viewer_account_id", "visible_account_id") DO UPDATE
-SET "relation_type" = CASE WHEN "relation_type" IN ('self','following','mutual','managed') THEN "relation_type" ELSE EXCLUDED."relation_type" END,
+SET "relation_type" = CASE WHEN current_visibility."relation_type" IN ('self','following','mutual','managed') THEN current_visibility."relation_type" ELSE EXCLUDED."relation_type" END,
     "updated_at" = CURRENT_TIMESTAMP;
 
 ALTER TABLE "hg_youban_publish_collect_rule"
@@ -275,7 +275,7 @@ SELECT s."tenant_id",s."account_id",s."channel_id",s."id",s."collect_enabled",
   COALESCE(s."created_at",NOW()),COALESCE(s."updated_at",NOW())
 FROM "hg_youban_publish_collect_source" s
 WHERE s."channel_id">0
-ON CONFLICT ("tenant_id","account_id","channel_id") DO UPDATE SET
+ON CONFLICT ("tenant_id","account_id","channel_id","source_id") DO UPDATE SET
   "source_id"=EXCLUDED."source_id", "collect_enabled"=EXCLUDED."collect_enabled", "updated_at"=EXCLUDED."updated_at";
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_intro_fee_channel_rule" (
@@ -836,6 +836,8 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_note_index" (
 -- and pagination still require a stable primary key.
 ALTER TABLE "hg_youban_publish_note_index"
   ADD COLUMN IF NOT EXISTS "id" BIGSERIAL;
+ALTER TABLE "hg_youban_publish_note_index"
+  ADD COLUMN IF NOT EXISTS "is_collected" boolean NOT NULL DEFAULT false;
 DO $$
 BEGIN
   IF NOT EXISTS (
@@ -1056,6 +1058,14 @@ ALTER TABLE IF EXISTS "hg_youban_publish_collect_content" DROP COLUMN IF EXISTS 
 ALTER TABLE IF EXISTS "hg_youban_publish_collect_content" DROP COLUMN IF EXISTS "media_json";
 DROP TABLE IF EXISTS "hg_youban_publish_collect_content_media";
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_queue" ON "hg_youban_publish_collect_event" ("tenant_id", "account_id", "source_id", "status", "processed_at", "source_chat_id", "source_message_id", "id");
+-- Pending event consumers should seek only unprocessed rows instead of
+-- repeatedly sorting the full event history.
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_pending_source"
+  ON "hg_youban_publish_collect_event" ("tenant_id", "source_id", "received_at", "id")
+  WHERE "status" = 'pending' AND "processed_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_pending_due"
+  ON "hg_youban_publish_collect_event" ("status", "received_at", "id")
+  WHERE "status" = 'pending' AND "processed_at" IS NULL;
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_dispatch_dedupe" ON "hg_youban_publish_collect_dispatch" ("tenant_id", "account_id", "event_id", "status", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_dispatch_source_status" ON "hg_youban_publish_collect_dispatch" ("source_id", "status", "event_id");
 

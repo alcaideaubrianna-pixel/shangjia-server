@@ -1438,6 +1438,12 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_event" (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_collect_event_unique" ON "hg_youban_publish_collect_event" ("source_unique_key");
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_source" ON "hg_youban_publish_collect_event" ("tenant_id", "source_id", "status", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_pending_source"
+  ON "hg_youban_publish_collect_event" ("tenant_id", "source_id", "received_at", "id")
+  WHERE "status" = 'pending' AND "processed_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_pending_due"
+  ON "hg_youban_publish_collect_event" ("status", "received_at", "id")
+  WHERE "status" = 'pending' AND "processed_at" IS NULL;
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_chat" ON "hg_youban_publish_collect_event" ("source_chat_id", "source_message_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_order" ON "hg_youban_publish_collect_event" ("tenant_id", "account_id", "source_id", "source_chat_id", "source_message_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_material" ON "hg_youban_publish_collect_event" ("source_id", "source_chat_id", "material_role", "material_parent_event_id", "source_message_id");
