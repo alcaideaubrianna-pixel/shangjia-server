@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -443,10 +444,16 @@ func (s *sCollector) persistedDeliveryPriority(ctx context.Context, deliveryID i
 	var event entity.TgCollectorEvent
 	storedPriority, err := dao.TgCollectorDelivery.Ctx(ctx).WherePri(deliveryID).Value(dcols.Priority)
 	if err != nil {
+		if isMissingDeliveryRowError(err) {
+			return 0, gerror.Wrapf(errDeliveryInvalidEvent, "Telegram采集交付记录不存在 deliveryId:%d", deliveryID)
+		}
 		return 0, gerror.Wrap(err, "读取交付优先级失败")
 	}
 	err = dao.TgCollectorEvent.Ctx(ctx).Where(ecols.Id+" = (?)", dao.TgCollectorDelivery.Ctx(ctx).Fields(dcols.EventId).Where(dcols.Id, deliveryID)).Scan(&event)
 	if err != nil {
+		if isMissingDeliveryRowError(err) {
+			return 0, gerror.Wrapf(errDeliveryInvalidEvent, "Telegram采集交付关联事件不存在 deliveryId:%d", deliveryID)
+		}
 		return 0, gerror.Wrap(err, "读取交付优先级失败")
 	}
 	if event.Id <= 0 || event.RawUpdate == nil {
@@ -461,6 +468,10 @@ func (s *sCollector) persistedDeliveryPriority(ctx context.Context, deliveryID i
 		return storedPriority.Int(), nil
 	}
 	return computed, nil
+}
+
+func isMissingDeliveryRowError(err error) bool {
+	return errors.Is(err, sql.ErrNoRows)
 }
 
 func deliveryQueueName(ctx context.Context, deliveryID int64, priority int) string {
