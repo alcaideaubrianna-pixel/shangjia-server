@@ -427,73 +427,50 @@ func nextCollectProcessDelay(ctx context.Context, payload collectProcessQueuePay
 	groupDeadline := now.Add(-collectMaterialGroupingDelay)
 	waitingVerifyDeadline := now.Add(-collectMaterialWaitingVerifyRetryDelay)
 	verifyDeadline := now.Add(-collectMaterialVerifyRetryDelay)
-	dueModel := collectProcessEventModel(ctx, payload)
-	due, err := dueModel.
-		Fields("e.id").
-		WhereIn("e.status", statuses).
-		Where("((e.status <> ? AND (e.material_role IS NULL OR e.material_role = '' OR e.material_role IN (?,?))) OR (e.status = ? AND e.material_role = ? AND e.error_message = ?))", sysin.CollectEventStatusIgnored, collectMaterialRolePending, collectMaterialRoleDisplay, sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage).
-		Where("(e.processed_at IS NULL AND (e.material_group_status IS NULL OR e.material_group_status <> ?) AND e.created_at <= ?) OR (e.processed_at IS NULL AND e.material_group_status = ? AND e.updated_at <= ?) OR (e.status = ? AND e.material_role = ? AND e.error_message = ? AND e.updated_at <= ?)", collectMaterialGroupWaitingVerify, groupDeadline, collectMaterialGroupWaitingVerify, waitingVerifyDeadline, sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage, verifyDeadline).
-		Limit(1).
-		One()
-	if err != nil {
-		return 0, false, gerror.Wrap(err, "读取采集源后续任务失败")
+	// Read all four scheduling windows in one aggregate query. The previous
+	// implementation issued four ordered scans against collect_event for every
+	// account/source shard, multiplying I/O under load.
+	var window struct {
+		Due           int         `orm:"due"`
+		Normal        *gtime.Time `orm:"normal"`
+		WaitingVerify *gtime.Time `orm:"waiting_verify"`
+		Verify        *gtime.Time `orm:"verify"`
 	}
-	if !due.IsEmpty() {
+	model := collectProcessEventModel(ctx, payload)
+	model = model.WhereIn("e.status", statuses)
+	fields := `
+		COUNT(CASE WHEN (
+			((e.status <> '` + sysin.CollectEventStatusIgnored + `' AND (e.material_role IS NULL OR e.material_role = '' OR e.material_role IN ('` + collectMaterialRolePending + `','` + collectMaterialRoleDisplay + `'))) OR
+			(e.status = '` + sysin.CollectEventStatusIgnored + `' AND e.material_role = '` + collectMaterialRoleVerify + `' AND e.error_message = '` + collectMaterialVerifyUnmatchedMessage + `')) AND
+			((e.processed_at IS NULL AND (e.material_group_status IS NULL OR e.material_group_status <> '` + collectMaterialGroupWaitingVerify + `') AND e.created_at <= '` + groupDeadline.Format(time.RFC3339Nano) + `') OR
+			(e.processed_at IS NULL AND e.material_group_status = '` + collectMaterialGroupWaitingVerify + `' AND e.updated_at <= '` + waitingVerifyDeadline.Format(time.RFC3339Nano) + `') OR
+			(e.status = '` + sysin.CollectEventStatusIgnored + `' AND e.material_role = '` + collectMaterialRoleVerify + `' AND e.error_message = '` + collectMaterialVerifyUnmatchedMessage + `' AND e.updated_at <= '` + verifyDeadline.Format(time.RFC3339Nano) + `'))
+		) END) AS due,
+		MIN(CASE WHEN e.status <> '` + sysin.CollectEventStatusIgnored + `' AND (e.material_role IS NULL OR e.material_role = '' OR e.material_role = '` + collectMaterialRolePending + `') AND (e.material_group_status IS NULL OR e.material_group_status <> '` + collectMaterialGroupWaitingVerify + `') AND e.processed_at IS NULL THEN e.created_at END) AS normal,
+		MIN(CASE WHEN e.material_role = '` + collectMaterialRolePending + `' AND e.material_group_status = '` + collectMaterialGroupWaitingVerify + `' AND e.processed_at IS NULL THEN e.updated_at END) AS waiting_verify,
+		MIN(CASE WHEN e.status = '` + sysin.CollectEventStatusIgnored + `' AND e.material_role = '` + collectMaterialRoleVerify + `' AND e.error_message = '` + collectMaterialVerifyUnmatchedMessage + `' THEN e.updated_at END) AS verify`
+	if err := model.Fields(fields).Scan(&window); err != nil {
+		return 0, false, gerror.Wrap(err, "读取采集源后续任务窗口失败")
+	}
+	if window.Due > 0 {
 		return 0, true, nil
-	}
-	normal, err := collectProcessEventModel(ctx, payload).
-		Fields("e.created_at AS ready_from").
-		WhereIn("e.status", statuses).
-		Where("e.status <> ? AND (e.material_role IS NULL OR e.material_role = '' OR e.material_role = ?)", sysin.CollectEventStatusIgnored, collectMaterialRolePending).
-		Where("e.material_group_status IS NULL OR e.material_group_status <> ?", collectMaterialGroupWaitingVerify).
-		WhereNull("e.processed_at").
-		OrderAsc("e.created_at").
-		Limit(1).
-		One()
-	if err != nil {
-		return 0, false, gerror.Wrap(err, "读取采集源分组等待任务失败")
-	}
-	waitingVerify, err := collectProcessEventModel(ctx, payload).
-		Fields("e.updated_at AS ready_from").
-		WhereIn("e.status", statuses).
-		Where("e.material_role", collectMaterialRolePending).
-		Where("e.material_group_status", collectMaterialGroupWaitingVerify).
-		WhereNull("e.processed_at").
-		OrderAsc("e.updated_at").
-		Limit(1).
-		One()
-	if err != nil {
-		return 0, false, gerror.Wrap(err, "读取采集源验证配对等待任务失败")
-	}
-	verify, err := collectProcessEventModel(ctx, payload).
-		Fields("e.updated_at AS ready_from").
-		Where("e.status", sysin.CollectEventStatusIgnored).
-		Where("e.material_role", collectMaterialRoleVerify).
-		Where("e.error_message", collectMaterialVerifyUnmatchedMessage).
-		OrderAsc("e.updated_at").
-		Limit(1).
-		One()
-	if err != nil {
-		return 0, false, gerror.Wrap(err, "读取采集源验证等待任务失败")
 	}
 	var nextDelay time.Duration
 	hasNextDelay := false
-	if !normal.IsEmpty() && normal["ready_from"].GTime() != nil {
-		nextDelay = collectLocalWindowRemaining(normal["ready_from"].GTime(), collectMaterialGroupingDelay)
+	if window.Normal != nil {
+		nextDelay = collectLocalWindowRemaining(window.Normal, collectMaterialGroupingDelay)
 		hasNextDelay = true
 	}
-	if !waitingVerify.IsEmpty() && waitingVerify["ready_from"].GTime() != nil {
-		waitingDelay := collectLocalWindowRemaining(waitingVerify["ready_from"].GTime(), collectMaterialWaitingVerifyRetryDelay)
-		if !hasNextDelay || waitingDelay < nextDelay {
-			nextDelay = waitingDelay
-			hasNextDelay = true
+	if window.WaitingVerify != nil {
+		d := collectLocalWindowRemaining(window.WaitingVerify, collectMaterialWaitingVerifyRetryDelay)
+		if !hasNextDelay || d < nextDelay {
+			nextDelay, hasNextDelay = d, true
 		}
 	}
-	if !verify.IsEmpty() && verify["ready_from"].GTime() != nil {
-		verifyDelay := collectLocalWindowRemaining(verify["ready_from"].GTime(), collectMaterialVerifyRetryDelay)
-		if !hasNextDelay || verifyDelay < nextDelay {
-			nextDelay = verifyDelay
-			hasNextDelay = true
+	if window.Verify != nil {
+		d := collectLocalWindowRemaining(window.Verify, collectMaterialVerifyRetryDelay)
+		if !hasNextDelay || d < nextDelay {
+			nextDelay, hasNextDelay = d, true
 		}
 	}
 	if !hasNextDelay {
@@ -503,6 +480,44 @@ func nextCollectProcessDelay(ctx context.Context, payload collectProcessQueuePay
 		return 0, true, nil
 	}
 	return nextDelay, true, nil
+	/*
+		if err != nil {
+			return 0, false, gerror.Wrap(err, "读取采集源验证等待任务失败")
+		}
+	*/
+	/* legacy four-query implementation removed */
+	/*
+		if err != nil {
+			return 0, false, gerror.Wrap(err, "读取采集源验证等待任务失败")
+		}
+		var nextDelay time.Duration
+		hasNextDelay := false
+		if !normal.IsEmpty() && normal["ready_from"].GTime() != nil {
+			nextDelay = collectLocalWindowRemaining(normal["ready_from"].GTime(), collectMaterialGroupingDelay)
+			hasNextDelay = true
+		}
+		if !waitingVerify.IsEmpty() && waitingVerify["ready_from"].GTime() != nil {
+			waitingDelay := collectLocalWindowRemaining(waitingVerify["ready_from"].GTime(), collectMaterialWaitingVerifyRetryDelay)
+			if !hasNextDelay || waitingDelay < nextDelay {
+				nextDelay = waitingDelay
+				hasNextDelay = true
+			}
+		}
+		if !verify.IsEmpty() && verify["ready_from"].GTime() != nil {
+			verifyDelay := collectLocalWindowRemaining(verify["ready_from"].GTime(), collectMaterialVerifyRetryDelay)
+			if !hasNextDelay || verifyDelay < nextDelay {
+				nextDelay = verifyDelay
+				hasNextDelay = true
+			}
+		}
+		if !hasNextDelay {
+			return 0, false, nil
+		}
+		if nextDelay <= 0 {
+			return 0, true, nil
+		}
+		return nextDelay, true, nil
+	*/
 }
 
 func collectProcessEventModel(ctx context.Context, payload collectProcessQueuePayload) *gdb.Model {
