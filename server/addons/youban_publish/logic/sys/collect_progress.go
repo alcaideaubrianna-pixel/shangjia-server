@@ -56,7 +56,7 @@ func collectProgressLabel(stage string) string {
 		"processing": "资料分组与规则检查", "waiting": "等待条件满足", "waiting_lock": "等待事件处理锁", "failed": "处理失败",
 		"waiting_slot": "等待下载并发槽", "get_file": "获取Telegram文件信息", "download": "下载媒体文件", "account_download": "账号媒体任务执行中",
 		"fingerprint": "计算媒体指纹", "upload": "上传云存储", "persist": "写回媒体结果", "media_queued": "等待媒体处理队列",
-		"media_ready": "媒体处理完成", "ready": "媒体已就绪，等待后续处理", "persisted": "采集入库", "waiting_push": "等待推送", "pushing": "推送中", "sent": "已推送", "finished": "处理结束", "collect_saved": "采集入库", "waiting_push": "等待推送", "pushing": "推送中", "published": "已推送",
+		"media_ready": "媒体处理完成", "ready": "媒体已就绪，等待后续处理", "persisted": "采集入库", "collect_saved": "采集入库", "waiting_push": "等待推送", "pushing": "推送中", "sent": "已推送", "published": "已推送", "finished": "处理结束",
 		"dedupe": "匹配重复", "ignored": "匹配忽略",
 	}
 	if label := labels[stage]; label != "" {

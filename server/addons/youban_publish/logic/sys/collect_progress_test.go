@@ -98,7 +98,7 @@ func TestCollectProgressProduction5905256(t *testing.T) {
 	}
 	item.Status = sysin.CollectEventStatusProcessed
 	p = collectEventProgressView(item, latest, outbox, now)
-	if p.Stage != "finished" || p.NoProgressWarning {
+	if p.Stage != "persisted" || p.NoProgressWarning {
 		t.Fatal("terminal event shown as stuck")
 	}
 }
