@@ -383,14 +383,14 @@ func TestMessagePushPlanRecoveryConditionExcludesExpiredPlanJobs(t *testing.T) {
 	}
 }
 
-func TestFairPendingTelegramJobsSelectsOnePerChannel(t *testing.T) {
+func TestFairPendingTelegramJobsSelectsBoundedBatchPerChannel(t *testing.T) {
 	candidates := []telegramJobRecord{
 		{Id: 1, TenantId: 1, ChannelId: 10},
 		{Id: 2, TenantId: 1, ChannelId: 10},
 		{Id: 3, TenantId: 1, ChannelId: 20},
 	}
 	jobs := fairPendingTelegramJobs(candidates, 10)
-	if len(jobs) != 2 || jobs[0].Id != 1 || jobs[1].Id != 3 {
+	if len(jobs) != 3 || jobs[0].Id != 1 || jobs[1].Id != 2 || jobs[2].Id != 3 {
 		t.Fatalf("unexpected fair candidates: %+v", jobs)
 	}
 }

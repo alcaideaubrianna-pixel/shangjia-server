@@ -93,6 +93,9 @@ func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 		return
 	case <-startup.C:
 	}
+	// Pending idle recovery has its own lane so slow maintenance steps cannot
+	// consume the recovery cycle budget and starve tasks that need enqueueing.
+	go s.runTelegramPendingRecoveryLane(ctx)
 	s.runTelegramJobRecoveryCycle(ctx)
 	for {
 		select {
@@ -100,6 +103,32 @@ func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 			return
 		case <-ticker.C:
 			s.runTelegramJobRecoveryCycle(ctx)
+		}
+	}
+}
+
+func (s *sSysPublish) runTelegramPendingRecoveryLane(ctx context.Context) {
+	ticker := time.NewTicker(telegramRecoveryInterval(tgJobRecoveryIntervalEnv))
+	defer ticker.Stop()
+	run := func() {
+		stepCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		lock := hglock.NewConfig(20*time.Second, 100*time.Millisecond).WithoutWatchDog().Mutex("youban_publish:telegram:pending_recovery")
+		if err := lock.TryLock(stepCtx); err != nil {
+			return
+		}
+		defer lock.Unlock(context.WithoutCancel(stepCtx))
+		if err := s.recoverPendingIdleTelegramJobs(stepCtx, 500); err != nil {
+			g.Log().Warningf(stepCtx, "独立恢复待入队TG推送任务失败：%+v", err)
+		}
+	}
+	run()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			run()
 		}
 	}
 }
@@ -142,7 +171,6 @@ func (s *sSysPublish) runTelegramJobRecoveryCycle(ctx context.Context) {
 		{"failed_display", "释放展示后失败的历史TG任务", func(ctx context.Context) error { return s.detachFailedTelegramDisplayJobs(ctx, 200) }},
 		{"outbox_dispatch", "恢复Outbox入队确认中断的TG任务", func(ctx context.Context) error { return s.recoverExpiredTelegramOutboxDispatches(ctx, 200) }},
 		{"stale_pending_head", "收口超时未入队的低优先级TG队首", func(ctx context.Context) error { return s.supersedeStalePendingChannelHeads(ctx, 500) }},
-		{"pending_idle", "恢复待入队TG推送任务", func(ctx context.Context) error { return s.recoverPendingIdleTelegramJobs(ctx, 500) }},
 		{"stale_dispatch", "恢复调度中断TG推送任务", func(ctx context.Context) error { return s.recoverStaleTelegramDispatchJobs(ctx, 200) }},
 		{"missing_operation_state", "补建资料上架状态", func(ctx context.Context) error { return s.recoverMissingProfilePublishOperationStates(ctx, 50) }},
 		{"operation_state", "恢复资料上架状态", func(ctx context.Context) error { return s.recoverProfilePublishOperationStates(ctx, 100) }},
@@ -1018,13 +1046,17 @@ func fairPendingTelegramJobs(candidates []telegramJobRecord, limit int) []telegr
 		return nil
 	}
 	jobs := make([]telegramJobRecord, 0, min(limit, len(candidates)))
-	seen := make(map[string]struct{}, len(candidates))
+	// Re-arm a small batch per channel so recovery does not require one full
+	// scan/wake cycle for every historical job.  Actual Telegram execution is
+	// still serialized by the channel lease.
+	const perChannelBatch = 5
+	counts := make(map[string]int, len(candidates))
 	for _, job := range candidates {
 		key := fmt.Sprintf("%d:%d:%s", job.TenantId, job.ChannelId, normalizeTelegramChannelChatID(job.TargetChatId))
-		if _, exists := seen[key]; exists {
+		if counts[key] >= perChannelBatch {
 			continue
 		}
-		seen[key] = struct{}{}
+		counts[key]++
 		jobs = append(jobs, job)
 		if len(jobs) >= limit {
 			break
