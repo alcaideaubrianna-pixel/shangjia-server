@@ -62,13 +62,24 @@ func (s *sSysPublish) rehydrateMissingTelegramChannelQueue(ctx context.Context, 
 		ChannelId int64 `json:"channel_id"`
 		Priority  int   `json:"priority"`
 	}
+	if limit <= 0 {
+		limit = 500
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	// Reconcile queued rows independently of Outbox status. Outbox may already
+	// be marked delivered after a Redis timeout, while the channel ZSET member
+	// was never persisted. Prioritize this exact failure state so a large
+	// historical backlog cannot starve realtime/manual jobs.
 	err := g.DB().Model(publishTgJobTable).Ctx(ctx).
 		Fields("id,channel_id,priority").
 		Where("channel_id > 0").
 		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
-		Where("COALESCE(dispatch_status,'') IN ('','idle','queued')").
+		Where("COALESCE(dispatch_status,'') IN ('queued','idle','')").
 		Where("COALESCE(asynq_task_id,'') = ''").
-		OrderAsc("updated_at").Limit(limit).Scan(&jobs)
+		Order("CASE WHEN COALESCE(dispatch_status,'')='queued' THEN 0 ELSE 1 END, updated_at ASC, id ASC").
+		Limit(limit).Scan(&jobs)
 	if err != nil {
 		return err
 	}
@@ -76,11 +87,16 @@ func (s *sSysPublish) rehydrateMissingTelegramChannelQueue(ctx context.Context, 
 	for _, job := range jobs {
 		member := strconv.FormatInt(job.Id, 10)
 		value, scoreErr := g.Redis().Do(ctx, "ZSCORE", telegramChannelQueueKey(job.ChannelId), member)
-		if scoreErr != nil || !value.IsNil() {
+		if scoreErr != nil {
+			g.Log().Warningf(ctx, "频道队列对账读取失败 channel:%d job:%d err:%+v", job.ChannelId, job.Id, scoreErr)
+			continue
+		}
+		if !value.IsNil() {
 			continue
 		}
 		score := now*1000 + int64(max(0, 100000-job.Priority))
 		if err = enqueueTelegramChannelJob(ctx, job.ChannelId, job.Id, score); err != nil {
+			g.Log().Warningf(ctx, "频道队列对账补入失败 channel:%d job:%d err:%+v", job.ChannelId, job.Id, err)
 			continue
 		}
 		_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
@@ -88,6 +104,7 @@ func (s *sSysPublish) rehydrateMissingTelegramChannelQueue(ctx context.Context, 
 			WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
 			Where("COALESCE(asynq_task_id,'') = ''").
 			Data(g.Map{"dispatch_status": tgDispatchStatusQueued, "queue_name": telegramChannelQueueKey(job.ChannelId), "updated_at": gtime.Now()}).Update()
+		g.Log().Infof(ctx, "频道队列对账补入成功 channel:%d job:%d", job.ChannelId, job.Id)
 	}
 	return nil
 }
