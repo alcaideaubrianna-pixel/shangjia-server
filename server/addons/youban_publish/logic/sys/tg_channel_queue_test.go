@@ -14,6 +14,23 @@ func TestTelegramChannelQueueKey(t *testing.T) {
 	}
 }
 
+func TestTelegramChannelCursorNext(t *testing.T) {
+	channels := []telegramChannelQueueChannel{
+		{ChannelID: 1672},
+		{ChannelID: 1673},
+		{ChannelID: 3201},
+	}
+	if got := telegramChannelCursorNext(1500, channels); got != 3201 {
+		t.Fatalf("cursor=%d, want 3201", got)
+	}
+	if got := telegramChannelCursorNext(4000, channels); got != 4000 {
+		t.Fatalf("cursor=%d, want current cursor 4000 when no larger channel exists", got)
+	}
+	if got := telegramChannelCursorNext(0, nil); got != 0 {
+		t.Fatalf("empty cursor=%d, want 0", got)
+	}
+}
+
 func TestTelegramChannelQueueRejectsInvalidIdentity(t *testing.T) {
 	ctx := context.Background()
 	if err := enqueueTelegramChannelJob(ctx, 0, 1, 1); err == nil {

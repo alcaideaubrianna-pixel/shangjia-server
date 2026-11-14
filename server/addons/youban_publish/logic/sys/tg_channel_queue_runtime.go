@@ -29,13 +29,29 @@ func (s *sSysPublish) processTelegramChannelQueuePass(ctx context.Context) {
 	if !telegramChannelQueueEnabled() {
 		return
 	}
-	var channels []struct {
-		ChannelID int64 `json:"channel_id"`
+	var channels []telegramChannelQueueChannel
+	// Rotate the bounded database window instead of always starting at the
+	// smallest channel id. A permanently busy low-id channel must not starve
+	// channels created later once the active set exceeds the per-pass limit.
+	scanChannels := func(after int64) error {
+		model := g.DB().Model(publishTgJobTable).Ctx(ctx).
+			Fields("channel_id").
+			Where("channel_id > 0 AND status IN ('pending','failed_retry','unknown')")
+		if after > 0 {
+			model = model.Where("channel_id > ?", after)
+		}
+		return model.Group("channel_id").OrderAsc("channel_id").Limit(200).Scan(&channels)
 	}
-	err := g.DB().Model(publishTgJobTable).Ctx(ctx).
-		Fields("channel_id").
-		Where("channel_id > 0 AND status IN ('pending','failed_retry','unknown')").
-		Group("channel_id").OrderAsc("channel_id").Limit(200).Scan(&channels)
+	cursor := s.telegramChannelCursor.Load()
+	scanCursor := cursor
+	err := scanChannels(scanCursor)
+	if err == nil && len(channels) == 0 && cursor > 0 {
+		// Reached the end of the ordered set; wrap around so newly created
+		// lower-id channels are picked up on the next pass.
+		channels = nil
+		scanCursor = 0
+		err = scanChannels(scanCursor)
+	}
 	if err != nil {
 		g.Log().Warningf(ctx, "频道队列扫描失败 err:%+v", err)
 		return
@@ -54,6 +70,27 @@ func (s *sSysPublish) processTelegramChannelQueuePass(ctx context.Context) {
 			g.Log().Warningf(ctx, "频道队列消费失败 channel:%d err:%+v", channel.ChannelID, err)
 		}
 	}
+	s.telegramChannelCursor.Store(telegramChannelCursorNext(scanCursor, channels))
+}
+
+// telegramChannelCursorNext returns the last channel visited by a pass. It is
+// kept separate from the database query so cursor wrap behavior is unit
+// testable without a live database.
+type telegramChannelQueueChannel struct {
+	ChannelID int64 `json:"channel_id"`
+}
+
+func telegramChannelCursorNext(current int64, channels []telegramChannelQueueChannel) int64 {
+	if len(channels) == 0 {
+		return 0
+	}
+	next := current
+	for _, channel := range channels {
+		if channel.ChannelID > next {
+			next = channel.ChannelID
+		}
+	}
+	return next
 }
 
 func (s *sSysPublish) rehydrateMissingTelegramChannelQueue(ctx context.Context, limit int) error {

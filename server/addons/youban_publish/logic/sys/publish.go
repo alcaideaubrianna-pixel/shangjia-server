@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-telegram/bot/models"
@@ -55,8 +56,9 @@ type sSysPublish struct {
 	historyQueueServer         *asynq.Server
 	mattingQueueServer         *asynq.Server
 
-	telegramChannelMu    publishRuntimeMutex
-	telegramChannelLocks map[string]*publishRuntimeMutex
+	telegramChannelMu     publishRuntimeMutex
+	telegramChannelLocks  map[string]*publishRuntimeMutex
+	telegramChannelCursor atomic.Int64
 
 	collectGroupMu        publishRuntimeMutex
 	collectGroupTimers    map[int64]*time.Timer
