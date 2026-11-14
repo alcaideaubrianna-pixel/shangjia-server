@@ -827,6 +827,14 @@ type ProfileDeleteInp struct {
 	Uuids []string `json:"uuids" dc:"资料UUID列表"`
 }
 
+type BotProfileDeleteInp struct {
+	ProfileDeleteInp
+	TenantId     int64  `json:"tenantId" dc:"租户ID"`
+	AccountId    int64  `json:"accountId" dc:"上架账号ID"`
+	NotifyBotId  int64  `json:"notifyBotId" dc:"完成通知Bot ID"`
+	NotifyChatId string `json:"notifyChatId" dc:"完成通知Chat ID"`
+}
+
 type ProfileStatusInp struct {
 	Ids    []int64  `json:"ids" dc:"资料ID列表"`
 	Uuids  []string `json:"uuids" dc:"资料UUID列表"`

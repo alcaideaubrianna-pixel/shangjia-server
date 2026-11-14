@@ -448,7 +448,7 @@ func (s *sSysPublish) ensureTelegramProfileJobWithMetaTx(ctx context.Context, tx
 		active, readErr := tx.Model(publishTgJobTable).Safe().Ctx(ctx).
 			Where("tenant_id", source["tenant_id"].Int64()).Where("account_id", source["account_id"].Int64()).
 			Where("profile_id", source["profile_id"].Int64()).Where("channel_id", channel.Id).
-			WhereIn("status", []string{"pending", "sending", "failed_retry", "unknown"}).
+			WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
 			Fields("id,status").OrderDesc("id").One()
 		if readErr != nil {
 			return 0, gerror.Wrap(readErr, "读取资料活动TG频道任务失败")
@@ -485,7 +485,7 @@ func (s *sSysPublish) ensureTelegramProfileJobWithMetaTx(ctx context.Context, tx
 		active, readErr := tx.Model(publishTgJobTable).Safe().Ctx(ctx).
 			Where("tenant_id", source["tenant_id"].Int64()).Where("account_id", source["account_id"].Int64()).
 			Where("profile_id", source["profile_id"].Int64()).Where("channel_id", channel.Id).
-			WhereIn("status", []string{"pending", "sending", "failed_retry", "unknown"}).
+			WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
 			Fields("id").OrderDesc("id").One()
 		if readErr != nil {
 			return 0, gerror.Wrap(readErr, "读取资料活动TG频道任务失败")
@@ -500,7 +500,7 @@ func (s *sSysPublish) ensureTelegramProfileJobWithMetaTx(ctx context.Context, tx
 		active, err := tx.Model(publishTgJobTable).Safe().Ctx(ctx).
 			Where("tenant_id", source["tenant_id"].Int64()).Where("account_id", source["account_id"].Int64()).
 			Where("profile_id", source["profile_id"].Int64()).Where("channel_id", channel.Id).
-			WhereIn("status", []string{"pending", "sending", "failed_retry", "unknown"}).
+			WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
 			Fields("id").OrderDesc("id").One()
 		if err != nil {
 			return 0, gerror.Wrap(err, "读取资料活动TG频道任务失败")
@@ -567,7 +567,7 @@ func (s *sSysPublish) ensureTelegramProfileJobWithMetaTx(ctx context.Context, tx
 			active, readErr := tx.Model(publishTgJobTable).Safe().Ctx(ctx).
 				Where("tenant_id", job.TenantId).Where("account_id", job.AccountId).
 				Where("profile_id", job.ProfileId).Where("channel_id", job.ChannelId).
-				WhereIn("status", []string{"pending", "sending", "failed_retry", "unknown"}).
+				WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
 				Fields("id").OrderDesc("id").One()
 			if readErr == nil && active["id"].Int64() > 0 {
 				return active["id"].Int64(), nil

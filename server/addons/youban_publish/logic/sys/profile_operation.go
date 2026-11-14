@@ -51,8 +51,12 @@ func profileOperationTypeFromNo(operationNo string) profileOperationType {
 		return profileOperationPublish
 	case strings.HasPrefix(value, "republish:"), strings.HasPrefix(value, "ai-republish:"):
 		return profileOperationRepublish
-	case strings.HasPrefix(value, "down:"):
+	case strings.HasPrefix(value, "down:"), strings.HasPrefix(value, botProfileUnpublishOperationPrefix):
 		return profileOperationUnpublish
+	case strings.HasPrefix(value, botProfileDeleteOperationPrefix):
+		return profileOperationDelete
+	case strings.HasPrefix(value, botProfilePublishOperationPrefix):
+		return profileOperationPublish
 	default:
 		return profileOperationPublish
 	}

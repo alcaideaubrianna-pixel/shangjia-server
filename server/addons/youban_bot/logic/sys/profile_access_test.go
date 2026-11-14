@@ -103,6 +103,64 @@ func TestProfileCardMarkupForNoteUsesPublishedStatus(t *testing.T) {
 	if got := markup.InlineKeyboard[1][0].Text; got != "编辑" {
 		t.Fatalf("published profile edit = %q, want 编辑", got)
 	}
+	for _, row := range markup.InlineKeyboard {
+		for _, button := range row {
+			if button.Text == "重新上架" {
+				t.Fatal("published profile must not expose a duplicate republish button")
+			}
+		}
+	}
+}
+
+func TestProfileCardMarkupForNoteOfflineIgnoresStalePublishedTask(t *testing.T) {
+	note := &publishsysin.NoteModel{ProfileModel: publishsysin.ProfileModel{
+		ProfileNo:  "M96590",
+		Status:     2,
+		TaskStatus: publishsysin.PublishTaskStatusPublished,
+	}}
+	markup := profileCardMarkupForNote(note, "view")
+	if markup == nil || len(markup.InlineKeyboard) < 2 || markup.InlineKeyboard[0][0].Text != "上架" {
+		t.Fatalf("offline profile action incorrectly follows stale task status: %#v", markup)
+	}
+	if got := markup.InlineKeyboard[0][0].CallbackData; got != "pf:up:M96590" {
+		t.Fatalf("offline profile action callback = %q", got)
+	}
+}
+
+func TestValidateBotProfileLifecycleActionRejectsStaleCallbacks(t *testing.T) {
+	tests := []struct {
+		name   string
+		note   *publishsysin.NoteModel
+		status int
+		want   string
+	}{
+		{
+			name:   "down already offline",
+			note:   &publishsysin.NoteModel{ProfileModel: publishsysin.ProfileModel{Status: 2}},
+			status: 2,
+			want:   "已下架",
+		},
+		{
+			name:   "up already online",
+			note:   &publishsysin.NoteModel{ProfileModel: publishsysin.ProfileModel{Status: 1}},
+			status: 1,
+			want:   "已上架",
+		},
+		{
+			name:   "publish in progress",
+			note:   &publishsysin.NoteModel{ProfileModel: publishsysin.ProfileModel{Status: 2, TaskStatus: publishsysin.PublishTaskStatusPending}},
+			status: 1,
+			want:   "处理中",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateBotProfileLifecycleAction(test.note, test.status)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("validation error = %v, want text containing %q", err, test.want)
+			}
+		})
+	}
 }
 
 func TestToggleProfileChannelID(t *testing.T) {
@@ -136,6 +194,21 @@ func TestProfileEditSuccessMarkupReusesPublishCallback(t *testing.T) {
 	}
 	if got := markup.InlineKeyboard[0][1]; got.CallbackData != "pf:view:A10005" {
 		t.Fatalf("view button = %#v", got)
+	}
+}
+
+func TestProfileEditSuccessMarkupReflectsCurrentState(t *testing.T) {
+	note := &publishsysin.NoteModel{ProfileModel: publishsysin.ProfileModel{ProfileNo: "A10007", Status: 1, TaskStatus: publishsysin.PublishTaskStatusPending}}
+	markup := profileEditSuccessMarkupForNote(note)
+	if markup == nil || markup.InlineKeyboard[0][0].Text != "上架中" || markup.InlineKeyboard[0][0].CallbackData != "pf:view:A10007" {
+		t.Fatalf("editing published profile exposed stale republish action: %#v", markup)
+	}
+
+	note.Status = 2
+	note.TaskStatus = ""
+	markup = profileEditSuccessMarkupForNote(note)
+	if markup.InlineKeyboard[0][0].Text != "重新上架" || markup.InlineKeyboard[0][0].CallbackData != "pf:up:A10007" {
+		t.Fatalf("offline edit result missing republish action: %#v", markup)
 	}
 }
 

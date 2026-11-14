@@ -683,7 +683,7 @@ func (s *sSysPublish) handleTelegramCleanupTask(ctx context.Context, task *asynq
 	if err != nil {
 		return err
 	}
-	return s.CleanupTelegramJobMessages(ctx, payload.JobId)
+	return s.cleanupTelegramJobMessages(ctx, payload.JobId, payload)
 }
 
 func (s *sSysPublish) handleCycleRescheduleTask(ctx context.Context, task *asynq.Task) error {

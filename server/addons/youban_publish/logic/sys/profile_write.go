@@ -286,6 +286,10 @@ func (s *sSysPublish) supersedeProfilePendingTelegramJobsOutsideChannels(ctx con
 }
 
 func (s *sSysPublish) deleteProfiles(ctx context.Context, in *sysin.ProfileDeleteInp, tenantId int64, accountId int64) (err error) {
+	return s.deleteProfilesWithOperationNo(ctx, in, tenantId, accountId, "")
+}
+
+func (s *sSysPublish) deleteProfilesWithOperationNo(ctx context.Context, in *sysin.ProfileDeleteInp, tenantId int64, accountId int64, operationNo string) (err error) {
 	if in == nil || (len(in.Ids) == 0 && len(in.Uuids) == 0) {
 		return gerror.New("请选择要删除的资料")
 	}
@@ -325,7 +329,8 @@ func (s *sSysPublish) deleteProfiles(ctx context.Context, in *sysin.ProfileDelet
 			releaseProfileOperationClaim(ctx, tenantId, profileID)
 		}
 	}()
-	if err = s.enqueueProfilesTelegramCleanupBeforeDelete(ctx, ids, tenantId); err != nil {
+	cleanupQueued, snapshotsByID, err := s.enqueueProfilesTelegramCleanupBeforeDelete(ctx, ids, tenantId, operationNo)
+	if err != nil {
 		return err
 	}
 	if err = s.deactivateChannelProfiles(ctx, tenantId, ids); err != nil {
@@ -367,6 +372,22 @@ func (s *sSysPublish) deleteProfiles(ctx context.Context, in *sysin.ProfileDelet
 	if err = s.deleteProfileNoteIndex(ctx, ids); err != nil {
 		return err
 	}
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(operationNo)), botProfileDeleteOperationPrefix) && !cleanupQueued {
+		for _, profileID := range ids {
+			snapshot := snapshotsByID[profileID]
+			job := telegramJobRecord{
+				TenantId: tenantId, AccountId: accountId, ProfileId: profileID,
+				OperationNo: operationNo,
+			}
+			if snapshot != nil {
+				job.ProfileNoSnapshot = snapshot[columns.ProfileNo].String()
+				job.TitleSnapshot = snapshot[columns.Title].String()
+			}
+			if notifyErr := s.notifyBotProfileUnpublishCompleted(ctx, job, tgQueuePayload{ForceCompletion: true}); notifyErr != nil {
+				g.Log().Warningf(ctx, "发送无TG清理任务的Bot资料删除完成通知失败 profileId:%d err:%+v", profileID, notifyErr)
+			}
+		}
+	}
 	service.SysContent().ClearHomeProfileCardsCache(ctx)
 	return nil
 }
@@ -393,24 +414,25 @@ func (s *sSysPublish) supersedeProfilePendingTelegramJobs(ctx context.Context, p
 	return nil
 }
 
-func (s *sSysPublish) enqueueProfilesTelegramCleanupBeforeDelete(ctx context.Context, ids []int64, tenantId int64) error {
+func (s *sSysPublish) enqueueProfilesTelegramCleanupBeforeDelete(ctx context.Context, ids []int64, tenantId int64, operationNo string) (bool, map[int64]gdb.Record, error) {
 	if len(ids) == 0 {
-		return nil
+		return false, map[int64]gdb.Record{}, nil
 	}
 	jobs, err := s.telegramJobsWithActiveMessages(ctx, tenantId, ids, "")
 	if err != nil {
-		return err
+		return false, nil, err
 	}
 	var snapshots []gdb.Record
 	if err = g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).
 		Fields(dao.ContentProfile.Columns().Id+","+dao.ContentProfile.Columns().ProfileNo+","+dao.ContentProfile.Columns().Title).
 		WhereIn(dao.ContentProfile.Columns().Id, ids).Scan(&snapshots); err != nil {
-		return gerror.Wrap(err, "读取删除资料通知上下文失败")
+		return false, nil, gerror.Wrap(err, "读取删除资料通知上下文失败")
 	}
 	snapshotByID := make(map[int64]gdb.Record, len(snapshots))
 	for _, row := range snapshots {
 		snapshotByID[row[dao.ContentProfile.Columns().Id].Int64()] = row
 	}
+	jobIds := make([]int64, 0, len(jobs))
 	for _, job := range jobs {
 		if job.Id <= 0 {
 			continue
@@ -420,15 +442,24 @@ func (s *sSysPublish) enqueueProfilesTelegramCleanupBeforeDelete(ctx context.Con
 				"operation_type": "delete", "profile_no_snapshot": snapshot[dao.ContentProfile.Columns().ProfileNo].String(),
 				"title_snapshot": snapshot[dao.ContentProfile.Columns().Title].String(), "notify_account_id": job.AccountId,
 			}).Update(); updateErr != nil {
-				return gerror.Wrap(updateErr, "保存删除资料通知上下文失败")
+				return false, nil, gerror.Wrap(updateErr, "保存删除资料通知上下文失败")
 			}
 		}
-		if err := s.enqueueTelegramCleanupJob(ctx, job.Id, 0); err != nil {
-			return gerror.Wrap(err, "加入资料TG清理队列失败")
+		jobIds = append(jobIds, job.Id)
+	}
+	for _, job := range jobs {
+		if job.Id <= 0 {
+			continue
+		}
+		if err := s.enqueueTelegramCleanupJobWithContext(ctx, job.Id, 0, tgQueuePayload{
+			CleanupOperationNo: strings.TrimSpace(operationNo),
+			CleanupJobIds:      jobIds,
+		}); err != nil {
+			return len(jobIds) > 0, snapshotByID, gerror.Wrap(err, "加入资料TG清理队列失败")
 		}
 		s.appendTelegramJobLog(ctx, job.telegramJobRecord(), "delete", "queued", "资料已删除，TG历史消息已加入异步清理队列")
 	}
-	return nil
+	return len(jobIds) > 0, snapshotByID, nil
 }
 
 func (s *sSysPublish) updateProfileStatus(ctx context.Context, in *sysin.ProfileStatusInp, tenantId int64, accountId int64) (res *sysin.ProfileStatusModel, err error) {
@@ -501,6 +532,24 @@ func (s *sSysPublish) setProfilesOffline(ctx context.Context, ids []int64, tenan
 			return lockErr
 		}); err != nil {
 			return gerror.Wrap(err, "更新资料状态失败")
+		}
+	}
+	// Do not report a successful down operation until the authoritative profile
+	// row reflects the new state. This protects both the web and Bot entrypoints
+	// from returning "submitted" when a concurrent publish or stale lifecycle
+	// write left the profile publicly visible.
+	columns := dao.ContentProfile.Columns()
+	for _, id := range ids {
+		var state struct {
+			Status     int    `json:"status"`
+			Visibility string `json:"visibility"`
+		}
+		if err := dao.ContentProfile.Ctx(ctx).Fields(columns.Status, columns.Visibility).
+			Where(columns.Id, id).Scan(&state); err != nil {
+			return gerror.Wrap(err, "确认资料下架状态失败")
+		}
+		if state.Status != 2 || state.Visibility != consts.ContentVisibilityPrivate {
+			return gerror.Newf("资料 %d 下架状态未生效，请稍后重试", id)
 		}
 	}
 	for _, id := range ids {

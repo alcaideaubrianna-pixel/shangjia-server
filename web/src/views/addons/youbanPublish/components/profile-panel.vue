@@ -27,33 +27,83 @@
         placeholder="标签"
         class="status-select"
       />
+      <n-select
+        v-model:value="query.status"
+        :options="profileStatusOptionsWithAll"
+        clearable
+        placeholder="资料状态"
+        class="status-select"
+      />
       <n-input
         v-model:value="query.keyword"
         placeholder="编号 / 标题 / 正文"
         clearable
         @keyup.enter="loadProfiles"
       />
-      <n-button @click="loadProfiles">查询</n-button>
-      <n-button @click="loadProfiles">刷新</n-button>
-      <n-button type="primary" secondary @click="openTgImportModal">TG频道导入</n-button>
+      <n-button :loading="loading" @click="loadProfiles">查询</n-button>
+      <n-button :loading="loading" @click="loadProfiles">刷新</n-button>
+      <n-button type="primary" secondary :disabled="loading" @click="openTgImportModal"
+        >TG频道导入</n-button
+      >
+      <n-button
+        type="success"
+        :disabled="!selectedProfileIds.length || isActionPending('batch:status:1')"
+        :loading="isActionPending('batch:status:1')"
+        @click="batchChangeProfileStatus(1)"
+        >批量上架</n-button
+      >
+      <n-popconfirm
+        :disabled="!selectedProfileIds.length || isActionPending('batch:status:2')"
+        @positive-click="batchChangeProfileStatus(2)"
+      >
+        <template #trigger>
+          <n-button
+            type="warning"
+            :disabled="!selectedProfileIds.length || isActionPending('batch:status:2')"
+            :loading="isActionPending('batch:status:2')"
+            >批量下架</n-button
+          >
+        </template>
+        下架后会清理资料在 Telegram 频道中的历史消息，确认继续？
+      </n-popconfirm>
       <n-button
         type="primary"
-        :disabled="!selectedProfileIds.length"
+        :disabled="!selectedProfileIds.length || isActionPending('batch:review:approved')"
+        :loading="isActionPending('batch:review:approved')"
         @click="batchReviewProfiles('approved')"
         >批量通过</n-button
       >
-      <n-button :disabled="!selectedProfileIds.length" @click="batchReviewProfiles('rejected')"
+      <n-button
+        :disabled="!selectedProfileIds.length || isActionPending('batch:review:rejected')"
+        :loading="isActionPending('batch:review:rejected')"
+        @click="batchReviewProfiles('rejected')"
         >批量驳回</n-button
       >
-      <n-popconfirm @positive-click="batchDeleteProfiles">
+      <n-popconfirm
+        :disabled="!selectedProfileIds.length || isActionPending('batch:delete')"
+        @positive-click="batchDeleteProfiles"
+      >
         <template #trigger>
-          <n-button type="error" :disabled="!selectedProfileIds.length">批量删除</n-button>
+          <n-button
+            type="error"
+            :disabled="!selectedProfileIds.length || isActionPending('batch:delete')"
+            :loading="isActionPending('batch:delete')"
+            >批量删除</n-button
+          >
         </template>
         确认删除选中的笔记资料？
       </n-popconfirm>
-      <n-popconfirm @positive-click="purgeDeletedProfiles">
+      <n-popconfirm
+        :disabled="!query.tenantId || !query.accountId || isActionPending('purge')"
+        @positive-click="purgeDeletedProfiles"
+      >
         <template #trigger>
-          <n-button type="error" secondary :disabled="!query.tenantId || !query.accountId">
+          <n-button
+            type="error"
+            secondary
+            :disabled="!query.tenantId || !query.accountId || isActionPending('purge')"
+            :loading="isActionPending('purge')"
+          >
             清空资料
           </n-button>
         </template>
@@ -138,6 +188,7 @@
       title="编辑笔记资料"
       positive-text="保存"
       negative-text="取消"
+      :loading="editLoading"
       @positive-click="saveProfile"
     >
       <n-form :model="editForm" label-placement="left" label-width="90">
@@ -165,9 +216,6 @@
         <n-form-item label="可见性">
           <n-select v-model:value="editForm.visibility" :options="visibilityOptions" />
         </n-form-item>
-        <n-form-item label="状态">
-          <n-select v-model:value="editForm.status" :options="profileStatusOptions" />
-        </n-form-item>
         <n-form-item label="正文">
           <n-input
             v-model:value="editForm.plainText"
@@ -184,6 +232,51 @@
         </n-form-item>
       </n-form>
     </n-modal>
+
+    <n-modal
+      v-model:show="viewVisible"
+      preset="card"
+      title="资料详情"
+      class="profile-panel__view-modal"
+    >
+      <n-spin :show="viewLoading">
+        <n-descriptions v-if="viewData?.profile" bordered :column="2">
+          <n-descriptions-item label="资料编号">
+            {{ viewData.profile.profileNo || '-' }}
+          </n-descriptions-item>
+          <n-descriptions-item label="状态">
+            {{ profileStatusLabel(viewData.profile.status) }}
+          </n-descriptions-item>
+          <n-descriptions-item label="标题" :span="2">
+            {{ viewData.profile.title || '-' }}
+          </n-descriptions-item>
+          <n-descriptions-item label="账号归属">
+            {{ viewData.profile.tenantName || '-' }}
+          </n-descriptions-item>
+          <n-descriptions-item label="上架账号">
+            {{ viewData.profile.accountName || viewData.profile.nickname || '-' }}
+          </n-descriptions-item>
+          <n-descriptions-item label="地区">
+            {{
+              [viewData.profile.province, viewData.profile.city].filter(Boolean).join(' / ') || '-'
+            }}
+          </n-descriptions-item>
+          <n-descriptions-item label="审核状态">
+            {{ reviewStatusLabel(viewData.profile.reviewStatus) }}
+          </n-descriptions-item>
+          <n-descriptions-item label="正文" :span="2">
+            <div class="profile-panel__text">{{ viewData.profile.plainText || '-' }}</div>
+          </n-descriptions-item>
+          <n-descriptions-item label="媒体">
+            {{ viewData.media?.length || 0 }} 个
+          </n-descriptions-item>
+          <n-descriptions-item label="推送频道">
+            {{ viewData.pushChannels?.length || 0 }} 个
+          </n-descriptions-item>
+        </n-descriptions>
+        <n-empty v-else description="暂无资料详情" />
+      </n-spin>
+    </n-modal>
   </div>
 </template>
 
@@ -198,6 +291,7 @@
     ProfilePurgeDeleted,
     ProfileReview,
     ProfileSave,
+    ProfileStatus,
     ProfileView,
     ServerTgAccountList,
     TagList,
@@ -207,8 +301,13 @@
   const message = useMessage();
   const loading = ref(false);
   const editVisible = ref(false);
+  const editLoading = ref(false);
+  const viewVisible = ref(false);
+  const viewLoading = ref(false);
+  const viewData = ref<Recordable | null>(null);
   const tgImportVisible = ref(false);
   const tgImportLoading = ref(false);
+  const actionKeys = ref(new Set<string>());
   const profiles = ref<Recordable[]>([]);
   const checkedRowKeys = ref<Array<number | string>>([]);
   const tenants = ref<Recordable[]>([]);
@@ -227,7 +326,6 @@
     tag: '',
     customerRemark: '',
     visibility: 'private',
-    status: 1,
   });
   const virginOptions = [
     { label: '未知', value: 0 },
@@ -245,8 +343,10 @@
     tenantId: null as number | null,
     accountId: null as number | null,
     tag: '',
+    status: null as number | null,
     keyword: '',
   });
+  let profileLoadSequence = 0;
   const pagination = reactive({
     page: 1,
     pageSize: 20,
@@ -308,6 +408,7 @@
     { label: '上架', value: 1 },
     { label: '下架', value: 2 },
   ];
+  const profileStatusOptionsWithAll = [{ label: '全部状态', value: null }, ...profileStatusOptions];
   const selectedProfileIds = computed(() =>
     checkedRowKeys.value.map((id) => Number(id)).filter((id) => id > 0)
   );
@@ -335,14 +436,33 @@
       render: (row) => renderReview(row.reviewStatus),
     },
     { title: '状态', key: 'status', width: 90, render: (row) => renderStatus(row.status) },
+    {
+      title: 'TG任务',
+      key: 'tgStatus',
+      width: 120,
+      render: (row) => renderTaskStatus(row),
+    },
     { title: '更新时间', key: 'updatedAt', width: 180 },
     { title: '摘要', key: 'summary', width: 260, ellipsis: { tooltip: true } },
     {
       title: '操作',
       key: 'actions',
-      width: 300,
+      width: 460,
       fixed: 'right',
       render(row) {
+        const profileStatus = profileStatusValue(row.status);
+        const statusAction = profileStatus === 1 ? 2 : 1;
+        const statusActionName = statusAction === 1 ? '上架' : '下架';
+        const statusActionKey = actionKey('status', row.id);
+        const reviewApprovedKey = actionKey('review:approved', row.id);
+        const reviewRejectedKey = actionKey('review:rejected', row.id);
+        const deleteActionKey = actionKey('delete', row.id);
+        const busy = isProfileBusy(row);
+        const taskProcessing = isTaskProcessing(row);
+        const statusDisabled = busy || taskProcessing || isActionPending(statusActionKey);
+        const editDisabled = busy || taskProcessing || isActionPending(actionKey('edit', row.id));
+        const reviewDisabled = busy || taskProcessing;
+        const deleteDisabled = busy || taskProcessing || isActionPending(deleteActionKey);
         return h(
           NSpace,
           { size: 8 },
@@ -350,19 +470,58 @@
             default: () => [
               h(
                 NButton,
-                { size: 'small', onClick: () => viewProfile(row) },
+                {
+                  size: 'small',
+                  loading: isActionPending(actionKey('view', row.id)),
+                  onClick: () => viewProfile(row),
+                },
                 { default: () => '查看' }
-              ),
-              h(
-                NButton,
-                { size: 'small', type: 'primary', onClick: () => openEdit(row) },
-                { default: () => '编辑' }
               ),
               h(
                 NButton,
                 {
                   size: 'small',
-                  disabled: row.reviewStatus === 'approved',
+                  type: 'primary',
+                  disabled: editDisabled,
+                  loading: isActionPending(actionKey('edit', row.id)),
+                  onClick: () => openEdit(row),
+                },
+                { default: () => '编辑' }
+              ),
+              h(
+                NPopconfirm,
+                {
+                  disabled: statusDisabled,
+                  onPositiveClick: () => changeProfileStatus(row, statusAction),
+                },
+                {
+                  trigger: () =>
+                    h(
+                      NButton,
+                      {
+                        size: 'small',
+                        type: statusAction === 1 ? 'success' : 'warning',
+                        loading: isActionPending(statusActionKey),
+                        disabled: statusDisabled,
+                        title: taskProcessing ? taskProcessingMessage(row) : undefined,
+                      },
+                      { default: () => statusActionName }
+                    ),
+                  default: () =>
+                    statusAction === 1
+                      ? '确认提交资料上架？'
+                      : '下架后会清理资料在 Telegram 频道中的历史消息，确认继续？',
+                }
+              ),
+              h(
+                NButton,
+                {
+                  size: 'small',
+                  disabled:
+                    row.reviewStatus === 'approved' ||
+                    reviewDisabled ||
+                    isActionPending(reviewApprovedKey),
+                  loading: isActionPending(reviewApprovedKey),
                   onClick: () => reviewProfile(row, 'approved'),
                 },
                 { default: () => '通过' }
@@ -371,18 +530,38 @@
                 NButton,
                 {
                   size: 'small',
-                  disabled: row.reviewStatus === 'rejected',
+                  disabled:
+                    row.reviewStatus === 'rejected' ||
+                    reviewDisabled ||
+                    isActionPending(reviewRejectedKey),
+                  loading: isActionPending(reviewRejectedKey),
                   onClick: () => reviewProfile(row, 'rejected'),
                 },
                 { default: () => '驳回' }
               ),
               h(
                 NPopconfirm,
-                { onPositiveClick: () => deleteProfile(row) },
+                {
+                  disabled: deleteDisabled,
+                  onPositiveClick: () => deleteProfile(row),
+                },
                 {
                   trigger: () =>
-                    h(NButton, { size: 'small', type: 'error' }, { default: () => '删除' }),
-                  default: () => '确认删除该笔记资料？',
+                    h(
+                      NButton,
+                      {
+                        size: 'small',
+                        type: 'error',
+                        loading: isActionPending(deleteActionKey),
+                        disabled: deleteDisabled,
+                        title: taskProcessing ? taskProcessingMessage(row) : undefined,
+                      },
+                      { default: () => '删除' }
+                    ),
+                  default: () =>
+                    profileStatus === 1
+                      ? '删除会先下架并清理 Telegram 历史消息，确认删除该资料？'
+                      : '确认删除该笔记资料？',
                 }
               ),
             ],
@@ -441,6 +620,7 @@
   }
 
   async function loadProfiles() {
+    const sequence = ++profileLoadSequence;
     loading.value = true;
     try {
       const res: any = await ProfileList({
@@ -448,11 +628,16 @@
         page: pagination.page,
         perPage: pagination.pageSize,
       });
+      if (sequence !== profileLoadSequence) {
+        return;
+      }
       profiles.value = res?.list || [];
       pagination.itemCount = res?.totalCount || res?.total || 0;
       checkedRowKeys.value = [];
     } finally {
-      loading.value = false;
+      if (sequence === profileLoadSequence) {
+        loading.value = false;
+      }
     }
   }
 
@@ -496,6 +681,7 @@
       const result: any = await ImportTaskCreateForAccount({ ...tgImportForm });
       message.success(`TG资料导入任务已启动，任务ID：${result?.id || result?.data?.id || '-'}`);
       tgImportVisible.value = false;
+      await loadProfiles();
       return true;
     } finally {
       tgImportLoading.value = false;
@@ -503,43 +689,104 @@
   }
 
   async function viewProfile(row: Recordable) {
-    await ProfileView({ id: row.id });
-    message.info('查看页面暂未开放');
+    const key = actionKey('view', row.id);
+    if (isActionPending(key)) {
+      return;
+    }
+    setActionPending(key, true);
+    viewLoading.value = true;
+    try {
+      const res: any = await ProfileView({ id: row.id });
+      viewData.value = {
+        profile: res?.profile || row,
+        media: res?.media || [],
+        pushChannels: res?.pushChannels || [],
+      };
+      viewVisible.value = true;
+    } finally {
+      viewLoading.value = false;
+      setActionPending(key, false);
+    }
   }
 
   async function openEdit(row: Recordable) {
-    const res: any = await ProfileView({ id: row.id });
-    const profile = res?.profile || row;
-    editForm.id = profile.id;
-    editForm.taskId = profile.taskId || 0;
-    editForm.title = profile.title || '';
-    editForm.province = profile.province || '';
-    editForm.city = profile.city || '';
-    editForm.isVirgin = Number(profile.isVirgin || 0);
-    editForm.plainText = profile.plainText || '';
-    editForm.tag = profile.tag || '';
-    editForm.customerRemark = profile.customerRemark || '';
-    editForm.visibility = profile.visibility || 'private';
-    editForm.status = profile.status || 1;
-    editVisible.value = true;
+    const key = actionKey('edit', row.id);
+    if (isActionPending(key)) {
+      return;
+    }
+    setActionPending(key, true);
+    editLoading.value = true;
+    try {
+      const res: any = await ProfileView({ id: row.id });
+      const profile = res?.profile || row;
+      editForm.id = profile.id;
+      editForm.taskId = profile.taskId || 0;
+      editForm.title = profile.title || '';
+      editForm.province = profile.province || '';
+      editForm.city = profile.city || '';
+      editForm.isVirgin = Number(profile.isVirgin || 0);
+      editForm.plainText = profile.plainText || '';
+      editForm.tag = profile.tag || '';
+      editForm.customerRemark = profile.customerRemark || '';
+      editForm.visibility = profile.visibility || 'private';
+      editVisible.value = true;
+    } finally {
+      editLoading.value = false;
+      setActionPending(key, false);
+    }
   }
 
   async function saveProfile() {
-    await ProfileSave({ ...editForm });
-    message.success('笔记资料已保存');
-    await loadProfiles();
+    const key = actionKey('edit', editForm.id);
+    if (editLoading.value || isProfileBusy({ id: editForm.id })) {
+      return false;
+    }
+    if (!editForm.title.trim()) {
+      message.warning('标题不能为空');
+      return false;
+    }
+    setActionPending(key, true);
+    editLoading.value = true;
+    try {
+      const payload = {
+        id: editForm.id,
+        title: editForm.title,
+        province: editForm.province,
+        city: editForm.city,
+        isVirgin: editForm.isVirgin,
+        plainText: editForm.plainText,
+        tag: editForm.tag,
+        customerRemark: editForm.customerRemark,
+        visibility: editForm.visibility,
+      };
+      await ProfileSave(payload);
+      message.success('笔记资料已保存');
+      editVisible.value = false;
+      await loadProfiles();
+      return true;
+    } finally {
+      editLoading.value = false;
+      setActionPending(key, false);
+    }
   }
 
   async function reviewProfile(row: Recordable, reviewStatus: string) {
-    await ProfileReview({ ids: [row.id], reviewStatus });
-    message.success(reviewStatus === 'approved' ? '已审核通过' : '已驳回');
-    await loadProfiles();
+    await runAction(actionKey(`review:${reviewStatus}`, row.id), async () => {
+      await ProfileReview({ ids: [row.id], reviewStatus });
+      message.success(reviewStatus === 'approved' ? '已审核通过' : '已驳回');
+      await loadProfiles();
+    });
   }
 
   async function deleteProfile(row: Recordable) {
-    await ProfileDelete({ ids: [row.id] });
-    message.success('笔记资料已删除');
-    await loadProfiles();
+    if (isProfileBusy(row)) {
+      return;
+    }
+    await runAction(actionKey('delete', row.id), async () => {
+      await ProfileDelete({ ids: [row.id] });
+      message.success('笔记资料删除已提交，Telegram 清理按任务异步处理');
+      await loadProfiles();
+    });
   }
 
   function handleCheckedRowKeys(keys: Array<number | string>) {
@@ -552,9 +799,11 @@
       message.warning('请选择笔记资料');
       return;
     }
-    await ProfileReview({ ids, reviewStatus });
-    message.success(reviewStatus === 'approved' ? '已批量审核通过' : '已批量驳回');
-    await loadProfiles();
+    await runAction(`batch:review:${reviewStatus}`, async () => {
+      await ProfileReview({ ids, reviewStatus });
+      message.success(reviewStatus === 'approved' ? '已批量审核通过' : '已批量驳回');
+      await loadProfiles();
+    });
   }
 
   async function batchDeleteProfiles() {
@@ -563,9 +812,11 @@
       message.warning('请选择笔记资料');
       return;
     }
-    await ProfileDelete({ ids });
-    message.success('已批量删除笔记资料');
-    await loadProfiles();
+    await runAction('batch:delete', async () => {
+      await ProfileDelete({ ids });
+      message.success('已批量删除笔记资料，Telegram 清理任务已提交');
+      await loadProfiles();
+    });
   }
 
   async function purgeDeletedProfiles() {
@@ -573,12 +824,146 @@
       message.warning('请先选择账号归属和账号');
       return;
     }
-    const result: any = await ProfilePurgeDeleted({
-      tenantId: query.tenantId,
-      accountId: query.accountId,
+    await runAction('purge', async () => {
+      const result: any = await ProfilePurgeDeleted({
+        tenantId: query.tenantId,
+        accountId: query.accountId,
+      });
+      message.success(`清理完成，共永久删除 ${result?.deletedCount || 0} 条软删除资料`);
+      await loadProfiles();
     });
-    message.success(`清理完成，共永久删除 ${result?.deletedCount || 0} 条软删除资料`);
-    await loadProfiles();
+  }
+
+  async function changeProfileStatus(row: Recordable, status: number) {
+    const key = actionKey('status', row.id);
+    const currentStatus = profileStatusValue(row.status);
+    if (currentStatus === status) {
+      message.warning(
+        status === 1 ? '资料当前已上架，无需重复操作' : '资料当前已下架，无需重复操作'
+      );
+      return;
+    }
+    if (isProfileBusy(row)) {
+      message.warning(taskProcessingMessage(row));
+      return;
+    }
+    await runAction(key, async () => {
+      const result: any = await ProfileStatus({ ids: [row.id], status });
+      message.success(
+        result?.message ||
+          (status === 1
+            ? '资料已提交上架，正在处理 Telegram 推送'
+            : '资料已提交下架，正在清理 Telegram 消息')
+      );
+      await loadProfiles();
+    });
+  }
+
+  async function batchChangeProfileStatus(status: number) {
+    const ids = selectedProfileIds.value;
+    if (!ids.length) {
+      message.warning('请选择笔记资料');
+      return;
+    }
+    const key = `batch:status:${status}`;
+    await runAction(key, async () => {
+      const result: any = await ProfileStatus({ ids, status });
+      message.success(
+        result?.message ||
+          (status === 1
+            ? '已批量提交上架，正在处理 Telegram 推送'
+            : '已批量提交下架，正在清理 Telegram 消息')
+      );
+      await loadProfiles();
+    });
+  }
+
+  function actionKey(action: string, id: number | string) {
+    return `${action}:${id}`;
+  }
+
+  function isActionPending(key: string) {
+    return actionKeys.value.has(key);
+  }
+
+  function isBatchActionPending() {
+    return Array.from(actionKeys.value).some((key) => key.startsWith('batch:'));
+  }
+
+  function isProfileBusy(row: Recordable) {
+    const id = row?.id;
+    if (!id) {
+      return true;
+    }
+    return (
+      isBatchActionPending() ||
+      Array.from(actionKeys.value).some(
+        (key) => key.endsWith(`:${id}`) && !key.startsWith('view:') && !key.startsWith('review:')
+      )
+    );
+  }
+
+  function profileStatusValue(value: unknown) {
+    const status = Number(value);
+    return status === 1 || status === 2 ? status : 0;
+  }
+
+  function taskStatusValue(row: Recordable) {
+    return String(row?.taskStatus || row?.tgStatus || '')
+      .trim()
+      .toLowerCase();
+  }
+
+  function isTaskProcessing(row: Recordable) {
+    return [
+      'pending',
+      'publishing',
+      'waiting_media',
+      'editing',
+      'queued',
+      'running',
+      'sending',
+      'confirming',
+      'retry_wait',
+      'failed_retry',
+      'unknown',
+    ].includes(taskStatusValue(row));
+  }
+
+  function taskProcessingMessage(row: Recordable) {
+    const taskStatus = taskStatusValue(row);
+    if (taskStatus === 'waiting_media') {
+      return '资料媒体仍在处理中，请等待媒体任务完成后再操作';
+    }
+    if (taskStatus === 'editing') {
+      return '资料编辑仍在处理中，请稍候再操作';
+    }
+    if (['failed_retry', 'retry_wait', 'unknown'].includes(taskStatus)) {
+      return 'Telegram 任务正在重试或等待恢复，请稍候再操作';
+    }
+    return 'Telegram 任务正在处理中，请稍候再操作';
+  }
+
+  function setActionPending(key: string, pending: boolean) {
+    const next = new Set(actionKeys.value);
+    if (pending) {
+      next.add(key);
+    } else {
+      next.delete(key);
+    }
+    actionKeys.value = next;
+  }
+
+  async function runAction(key: string, action: () => Promise<void>) {
+    if (isActionPending(key)) {
+      return;
+    }
+    setActionPending(key, true);
+    try {
+      await action();
+    } finally {
+      setActionPending(key, false);
+    }
   }
 
   function accountOwnerName(item: Recordable) {
@@ -605,8 +990,82 @@
   }
 
   function renderStatus(value: number) {
+    const status = profileStatusValue(value);
     const item =
-      value === 1 ? ['success', '上架'] : value === 2 ? ['default', '下架'] : ['default', '-'];
+      status === 1 ? ['success', '上架'] : status === 2 ? ['default', '下架'] : ['default', '-'];
     return h(NTag, { type: item[0] as any, bordered: false }, { default: () => item[1] });
   }
+
+  function profileStatusLabel(value: number) {
+    const status = profileStatusValue(value);
+    return status === 1 ? '上架' : status === 2 ? '下架' : '-';
+  }
+
+  function reviewStatusLabel(value: string) {
+    return (
+      {
+        pending: '待审核',
+        approved: '已通过',
+        rejected: '已驳回',
+      }[value] ||
+      value ||
+      '-'
+    );
+  }
+
+  function renderTaskStatus(row: Recordable) {
+    const labels: Record<string, string> = {
+      pending: '等待处理',
+      waiting_media: '等待媒体',
+      publishing: '发布中',
+      editing: '编辑中',
+      queued: '排队中',
+      running: '处理中',
+      sending: '发送中',
+      confirming: '确认中',
+      retry_wait: '等待重试',
+      failed_retry: '重试中',
+      unknown: '状态未知',
+      sent: '已发送',
+      published: '已完成',
+      completed: '已完成',
+      success: '成功',
+      failed: '失败',
+      canceled: '已取消',
+      superseded: '已替代',
+    };
+    const value = taskStatusValue(row);
+    const fallback = profileStatusValue(row?.status) === 1 ? '已完成' : '无任务';
+    const label = labels[value] || value || fallback;
+    const type = ['failed', 'canceled', 'unknown'].includes(value)
+      ? 'error'
+      : [
+            'pending',
+            'waiting_media',
+            'publishing',
+            'editing',
+            'queued',
+            'running',
+            'sending',
+            'confirming',
+            'retry_wait',
+            'failed_retry',
+          ].includes(value)
+        ? 'warning'
+        : ['sent', 'published', 'completed', 'success'].includes(value)
+          ? 'success'
+          : 'default';
+    return h(NTag, { type: type as any, bordered: false }, { default: () => label });
+  }
 </script>
+
+<style scoped>
+  .profile-panel__text {
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .profile-panel__view-modal {
+    width: 720px;
+  }
+</style>

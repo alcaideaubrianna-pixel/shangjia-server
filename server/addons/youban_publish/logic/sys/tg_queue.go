@@ -283,7 +283,10 @@ const (
 )
 
 type tgQueuePayload struct {
-	JobId int64 `json:"jobId"`
+	JobId              int64   `json:"jobId"`
+	CleanupOperationNo string  `json:"cleanupOperationNo,omitempty"`
+	CleanupJobIds      []int64 `json:"cleanupJobIds,omitempty"`
+	ForceCompletion    bool    `json:"forceCompletion,omitempty"`
 }
 
 type tgAttemptQueuePayload struct {
@@ -604,6 +607,10 @@ func telegramChannelDispatchRetryDelay(dispatchCount int) time.Duration {
 }
 
 func (s *sSysPublish) enqueueTelegramCleanupJob(ctx context.Context, jobId int64, delay time.Duration) error {
+	return s.enqueueTelegramCleanupJobWithContext(ctx, jobId, delay, tgQueuePayload{})
+}
+
+func (s *sSysPublish) enqueueTelegramCleanupJobWithContext(ctx context.Context, jobId int64, delay time.Duration, payload tgQueuePayload) error {
 	queueName := tgQueueNameCleanup
 	var owner struct {
 		TenantId  int64 `orm:"tenant_id"`
@@ -616,7 +623,7 @@ func (s *sSysPublish) enqueueTelegramCleanupJob(ctx context.Context, jobId int64
 		s.unifiedPushEngineEnabled(ctx, owner.TenantId, owner.AccountId) {
 		queueName = channelDispatchDeleteQueueName(channelPriorityManualDelete)
 	}
-	if err := s.enqueueTelegramTaskWithQueue(ctx, tgTaskTypeCleanup, jobId, delay, true, queueName); err != nil {
+	if err := s.enqueueTelegramTaskWithQueuePayload(ctx, tgTaskTypeCleanup, jobId, delay, true, queueName, payload); err != nil {
 		return err
 	}
 	priority := channelPriorityManualDelete
@@ -724,6 +731,10 @@ func (s *sSysPublish) requeueTelegramJob(ctx context.Context, taskType string, j
 		return s.enqueueTelegramJobDirect(ctx, jobId, delay)
 	}
 	return s.enqueueTelegramTask(ctx, taskType, jobId, delay, false)
+}
+
+func (s *sSysPublish) requeueTelegramCleanupJob(ctx context.Context, jobId int64, delay time.Duration, payload tgQueuePayload) error {
+	return s.enqueueTelegramCleanupJobWithContext(ctx, jobId, delay, payload)
 }
 
 func (s *sSysPublish) enqueueImportTask(ctx context.Context, id int64, delay time.Duration) error {
@@ -1064,6 +1075,10 @@ func (s *sSysPublish) enqueueTelegramAttemptTimeout(ctx context.Context, attempt
 }
 
 func (s *sSysPublish) enqueueTelegramTaskWithQueue(ctx context.Context, taskType string, jobId int64, delay time.Duration, unique bool, queueName string) (resultErr error) {
+	return s.enqueueTelegramTaskWithQueuePayload(ctx, taskType, jobId, delay, unique, queueName, tgQueuePayload{JobId: jobId})
+}
+
+func (s *sSysPublish) enqueueTelegramTaskWithQueuePayload(ctx context.Context, taskType string, jobId int64, delay time.Duration, unique bool, queueName string, payload tgQueuePayload) (resultErr error) {
 	ctx = telegramPublishTraceContext(ctx, jobId)
 	stage := beginTelegramPublishStage(ctx, "queue.enqueue", g.Map{"taskType": taskType, "targetQueue": queueName, "delayMs": delay.Milliseconds()})
 	defer stage.Finish(&resultErr)
@@ -1074,11 +1089,12 @@ func (s *sSysPublish) enqueueTelegramTaskWithQueue(ctx context.Context, taskType
 	if err != nil {
 		return err
 	}
-	payload, err := json.Marshal(tgQueuePayload{JobId: jobId})
+	payload.JobId = jobId
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
-	task := asynq.NewTask(taskType, payload)
+	task := asynq.NewTask(taskType, body)
 	if queueName == "" {
 		queueName = tgQueueNameDefault
 	}

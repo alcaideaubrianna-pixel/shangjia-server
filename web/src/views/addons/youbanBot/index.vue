@@ -24,9 +24,21 @@
               <n-button @click="loadBots">查询</n-button>
             </n-space>
             <n-space>
-              <n-button @click="refreshBots">刷新状态</n-button>
-              <n-button @click="restartBots">重启全部</n-button>
-              <n-button type="primary" @click="openBotModal()">新增 Bot</n-button>
+              <n-button
+                :loading="botRefreshing"
+                :disabled="botRefreshing || botRestarting || botLoading"
+                @click="refreshBots"
+                >刷新状态</n-button
+              >
+              <n-button
+                :loading="botRestarting"
+                :disabled="botRefreshing || botRestarting || botLoading"
+                @click="restartBots"
+                >重启全部</n-button
+              >
+              <n-button type="primary" :disabled="botSaving" @click="openBotModal()"
+                >新增 Bot</n-button
+              >
             </n-space>
           </n-space>
 
@@ -88,6 +100,7 @@
       :title="botForm.id ? '编辑 Bot' : '新增 Bot'"
       positive-text="保存"
       negative-text="取消"
+      :loading="botSaving"
       @positive-click="saveBot"
     >
       <n-form :model="botForm" label-placement="left" label-width="110">
@@ -149,6 +162,7 @@
       v-model:show="featureModalVisible"
       :form="featureForm"
       :status-options="statusOptions"
+      :saving="featureSaving"
       @save="saveFeature"
     />
   </div>
@@ -182,8 +196,17 @@
   const featureLoading = ref(false);
   const botModalVisible = ref(false);
   const featureModalVisible = ref(false);
+  const botSaving = ref(false);
+  const featureSaving = ref(false);
+  const botRefreshing = ref(false);
+  const botRestarting = ref(false);
+  const botDeletingKeys = ref(new Set<number>());
+  const botRestartingKeys = ref(new Set<number>());
+  const featureUpdatingKeys = ref(new Set<number>());
   const botRows = ref<any[]>([]);
   const featureRows = ref<any[]>([]);
+  let botLoadSequence = 0;
+  let featureLoadSequence = 0;
 
   const statusOptions = [
     { label: '启用', value: 1 },
@@ -261,20 +284,53 @@
         h(NSpace, { size: 8 }, () => [
           h(
             NButton,
-            { size: 'small', onClick: () => openBotModal(row) },
+            {
+              size: 'small',
+              disabled:
+                botSaving.value ||
+                botRefreshing.value ||
+                botRestarting.value ||
+                isBotDeleting(row.id) ||
+                isBotRestarting(row.id),
+              loading: botSaving.value && botForm.id === row.id,
+              onClick: () => openBotModal(row),
+            },
             { default: () => '编辑' }
           ),
           h(
             NButton,
-            { size: 'small', type: 'primary', onClick: () => restartBot(row) },
+            {
+              size: 'small',
+              type: 'primary',
+              disabled:
+                botRefreshing.value ||
+                botRestarting.value ||
+                isBotDeleting(row.id) ||
+                isBotRestarting(row.id),
+              loading: isBotRestarting(row.id),
+              onClick: () => restartBot(row),
+            },
             { default: () => '重启' }
           ),
           h(
             NPopconfirm,
-            { onPositiveClick: () => deleteBot(row) },
+            { disabled: isBotDeleting(row.id), onPositiveClick: () => deleteBot(row) },
             {
               trigger: () =>
-                h(NButton, { size: 'small', type: 'error' }, { default: () => '删除' }),
+                h(
+                  NButton,
+                  {
+                    size: 'small',
+                    type: 'error',
+                    disabled:
+                      botRefreshing.value ||
+                      botRestarting.value ||
+                      isBotDeleting(row.id) ||
+                      isBotRestarting(row.id),
+                    loading: isBotDeleting(row.id),
+                  },
+                  { default: () => '删除' }
+                ),
               default: () => '确认删除该 Bot？',
             }
           ),
@@ -325,19 +381,34 @@
 
   function renderFeatureSwitch(row: any) {
     return h(NSwitch, {
-      disabled: row.featureKey === 'start',
       value: row.status,
       checkedValue: 1,
       uncheckedValue: 2,
+      loading: featureUpdatingKeys.value.has(Number(row.id)),
+      disabled: row.featureKey === 'start' || featureUpdatingKeys.value.has(Number(row.id)),
       onUpdateValue: async (value: number) => {
-        await FeatureSave({ ...row, status: value, statusOnly: true });
-        message.success('插件状态已更新');
-        await loadFeatures();
+        const id = Number(row.id);
+        if (featureUpdatingKeys.value.has(id)) {
+          return;
+        }
+        const next = new Set(featureUpdatingKeys.value);
+        next.add(id);
+        featureUpdatingKeys.value = next;
+        try {
+          await FeatureSave({ ...row, status: value, statusOnly: true });
+          message.success('插件状态已更新');
+          await loadFeatures();
+        } finally {
+          const updated = new Set(featureUpdatingKeys.value);
+          updated.delete(id);
+          featureUpdatingKeys.value = updated;
+        }
       },
     });
   }
 
   async function loadBots() {
+    const sequence = ++botLoadSequence;
     botLoading.value = true;
     try {
       const res: any = await BotList({
@@ -345,14 +416,20 @@
         page: botPagination.page,
         perPage: botPagination.pageSize,
       });
+      if (sequence !== botLoadSequence) {
+        return;
+      }
       botRows.value = res?.list || [];
       botPagination.itemCount = res?.totalCount || res?.total || 0;
     } finally {
-      botLoading.value = false;
+      if (sequence === botLoadSequence) {
+        botLoading.value = false;
+      }
     }
   }
 
   async function loadFeatures() {
+    const sequence = ++featureLoadSequence;
     featureLoading.value = true;
     try {
       const res: any = await FeatureList({
@@ -360,10 +437,15 @@
         page: featurePagination.page,
         perPage: featurePagination.pageSize,
       });
+      if (sequence !== featureLoadSequence) {
+        return;
+      }
       featureRows.value = res?.list || [];
       featurePagination.itemCount = res?.totalCount || res?.total || 0;
     } finally {
-      featureLoading.value = false;
+      if (sequence === featureLoadSequence) {
+        featureLoading.value = false;
+      }
     }
   }
 
@@ -412,42 +494,103 @@
   }
 
   async function saveBot() {
-    await BotSave({ ...botForm });
-    message.success('保存成功');
-    botModalVisible.value = false;
-    await loadBots();
+    if (botSaving.value) {
+      return false;
+    }
+    botSaving.value = true;
+    try {
+      await BotSave({ ...botForm });
+      message.success('Bot 保存成功');
+      botModalVisible.value = false;
+      await loadBots();
+      return true;
+    } finally {
+      botSaving.value = false;
+    }
   }
 
   async function deleteBot(row: any) {
-    await BotDelete({ ids: [row.id] });
-    message.success('删除成功');
-    await loadBots();
+    const id = Number(row.id);
+    if (!id || botRefreshing.value || botRestarting.value || isBotDeleting(id)) {
+      return;
+    }
+    setBotKey(botDeletingKeys, id, true);
+    try {
+      await BotDelete({ ids: [row.id] });
+      message.success('Bot 删除成功');
+      await loadBots();
+    } finally {
+      setBotKey(botDeletingKeys, id, false);
+    }
   }
 
   async function refreshBots() {
-    await BotRefresh({ ids: botRows.value.map((item) => item.id) });
-    message.success('刷新完成');
-    await loadBots();
+    const ids = botRows.value.map((item) => item.id).filter(Boolean);
+    if (!ids.length) {
+      message.warning('当前没有可刷新的 Bot');
+      return;
+    }
+    if (botRefreshing.value) {
+      return;
+    }
+    botRefreshing.value = true;
+    try {
+      await BotRefresh({ ids });
+      message.success('Bot 状态刷新完成');
+      await loadBots();
+    } finally {
+      botRefreshing.value = false;
+    }
   }
 
   async function restartBot(row: any) {
-    await BotRestart({ ids: [row.id] });
-    message.success('重启完成');
-    await loadBots();
+    const id = Number(row.id);
+    if (!id || botRefreshing.value || botRestarting.value || isBotRestarting(id)) {
+      return;
+    }
+    setBotKey(botRestartingKeys, id, true);
+    try {
+      await BotRestart({ ids: [row.id] });
+      message.success('Bot 重启完成');
+      await loadBots();
+    } finally {
+      setBotKey(botRestartingKeys, id, false);
+    }
   }
 
   async function restartBots() {
-    await BotRestart({ ids: botRows.value.map((item) => item.id) });
-    message.success('重启完成');
-    await loadBots();
+    const ids = botRows.value.map((item) => item.id).filter(Boolean);
+    if (!ids.length) {
+      message.warning('当前没有可重启的 Bot');
+      return;
+    }
+    if (botRefreshing.value || botRestarting.value) {
+      return;
+    }
+    botRestarting.value = true;
+    try {
+      await BotRestart({ ids });
+      message.success('Bot 重启完成');
+      await loadBots();
+    } finally {
+      botRestarting.value = false;
+    }
   }
 
   async function saveFeature() {
-    featureForm.configJson = JSON.stringify(featureForm.configValues || {}, null, 2);
-    await FeatureSave(featureForm);
-    message.success('保存成功');
-    featureModalVisible.value = false;
-    await loadFeatures();
+    if (featureSaving.value) {
+      return;
+    }
+    featureSaving.value = true;
+    try {
+      featureForm.configJson = JSON.stringify(featureForm.configValues || {}, null, 2);
+      await FeatureSave(featureForm);
+      message.success('插件配置保存成功');
+      featureModalVisible.value = false;
+      await loadFeatures();
+    } finally {
+      featureSaving.value = false;
+    }
   }
 
   function newBotForm() {
@@ -500,6 +643,24 @@
       sort: 0,
       status: 1,
     };
+  }
+
+  function isBotDeleting(id: number) {
+    return botDeletingKeys.value.has(Number(id));
+  }
+
+  function isBotRestarting(id: number) {
+    return botRestartingKeys.value.has(Number(id));
+  }
+
+  function setBotKey(target: typeof botDeletingKeys, id: number, pending: boolean) {
+    const next = new Set(target.value);
+    if (pending) {
+      next.add(id);
+    } else {
+      next.delete(id);
+    }
+    target.value = next;
   }
 
   onMounted(() => {

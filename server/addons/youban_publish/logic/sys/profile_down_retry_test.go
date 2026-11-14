@@ -3,7 +3,7 @@ package sys
 import "testing"
 
 func TestDownTelegramOperationNo(t *testing.T) {
-	for _, operationNo := range []string{"down:12:345", " DOWN:12:345 "} {
+	for _, operationNo := range []string{"down:12:345", " DOWN:12:345 ", "bot_unpublish:20:-100123:12:345"} {
 		if !isDownTelegramOperationNo(operationNo) {
 			t.Fatalf("expected down operation: %q", operationNo)
 		}

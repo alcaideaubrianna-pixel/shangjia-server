@@ -13,6 +13,7 @@ func isInteractiveProfilePublishOperation(operationNo string) bool {
 	return strings.HasPrefix(operationNo, "profile:") ||
 		strings.HasPrefix(operationNo, "edit:") ||
 		strings.HasPrefix(operationNo, botProfilePublishOperationPrefix) ||
+		strings.HasPrefix(operationNo, botProfileUnpublishOperationPrefix) ||
 		strings.HasPrefix(operationNo, "batchtext:")
 }
 

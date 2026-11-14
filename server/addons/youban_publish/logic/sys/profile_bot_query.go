@@ -180,6 +180,28 @@ func (s *sSysPublish) BotProfileDelete(ctx context.Context, tenantId int64, acco
 	return s.deleteProfilesByCapability(ctx, in, account)
 }
 
+func (s *sSysPublish) BotProfileDeleteWithNotice(ctx context.Context, in *sysin.BotProfileDeleteInp) error {
+	if in == nil || in.NotifyBotId <= 0 || strings.TrimSpace(in.NotifyChatId) == "" {
+		return gerror.New("Bot删除通知参数不完整")
+	}
+	if len(in.Ids) != 1 && len(in.Uuids) != 1 {
+		return gerror.New("请选择一条资料")
+	}
+	capability, err := s.activeAccountCapability(ctx, in.TenantId, in.AccountId)
+	if err != nil {
+		return err
+	}
+	groups, err := s.profileOwnerGroups(ctx, in.Ids, in.Uuids, capability)
+	if err != nil {
+		return err
+	}
+	if len(groups) != 1 || len(groups[0].Ids) != 1 {
+		return gerror.New("资料不存在或无权删除")
+	}
+	profileID := groups[0].Ids[0]
+	return s.deleteProfilesWithOperationNo(ctx, &sysin.ProfileDeleteInp{Ids: []int64{profileID}}, capability.TenantId, groups[0].AccountId, newBotProfileDeleteOperationNo(in.NotifyBotId, in.NotifyChatId, profileID))
+}
+
 // BotProfileForwardLookup uses the durable Telegram send ledger before the Bot
 // falls back to downloading media and calculating image fingerprints. The
 // permission scope is derived from the currently bound account, so a forwarded

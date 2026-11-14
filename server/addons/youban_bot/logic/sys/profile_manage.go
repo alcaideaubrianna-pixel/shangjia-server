@@ -49,6 +49,7 @@ const (
 	profileProcessingTimeout    = 2 * time.Minute
 	profileMediaGroupCacheTTL   = 10 * time.Minute
 	templateInlinePhotoCacheTTL = 24 * time.Hour
+	profileBotMutationDedupTTL  = 2 * time.Minute
 )
 
 var (
@@ -352,7 +353,6 @@ func (s *sSysBot) handleProfileCallback(ctx context.Context, botId int64, query 
 	}
 	callCtx, cancel := telegramAPICtx()
 	defer cancel()
-	_, _ = bot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID})
 	msg := query.Message.Message
 	if msg == nil {
 		g.Log().Warning(ctx, "Bot资料Callback消息上下文不可用", g.Map{
@@ -384,6 +384,12 @@ func (s *sSysBot) handleProfileCallback(ctx context.Context, botId int64, query 
 	no := ""
 	if len(parts) > 2 {
 		no = strings.ToUpper(parts[2])
+	}
+	// Status callbacks send their own immediate result after the fresh state
+	// check. Answering them here first would make Telegram ignore the useful
+	// status-specific callback toast.
+	if action != "up" && action != "down" {
+		_, _ = bot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID})
 	}
 	if strings.HasPrefix(query.Data, "ch:") {
 		return s.handleChannelCallback(ctx, botId, chatId, fmt.Sprintf("%d", query.From.ID), account, query.Data, query)
@@ -480,14 +486,26 @@ func (s *sSysBot) handleProfileCallback(ctx context.Context, botId int64, query 
 		s.auditProfileCallback(ctx, query, account, action, no, err)
 		return true, err
 	case "edtitle":
+		if err := s.ensureBotProfileEditable(ctx, account, no); err != nil {
+			return true, s.replyBotError(ctx, botId, chatId, "资料编辑", err)
+		}
 		return true, s.startProfileSessionByIds(ctx, botId, fmt.Sprintf("%d", query.From.ID), chatId, account, "edit_title", "waiting_title", 0, no, nil, "请输入新的标题：")
 	case "edtext":
+		if err := s.ensureBotProfileEditable(ctx, account, no); err != nil {
+			return true, s.replyBotError(ctx, botId, chatId, "资料编辑", err)
+		}
 		return true, s.startProfileSessionByIds(ctx, botId, fmt.Sprintf("%d", query.From.ID), chatId, account, "edit_text", "waiting_text", 0, no, nil, "请输入新的正文：")
 	case "edno":
+		if err := s.ensureBotProfileEditable(ctx, account, no); err != nil {
+			return true, s.replyBotError(ctx, botId, chatId, "资料编辑", err)
+		}
 		return true, s.startProfileSessionByIds(ctx, botId, fmt.Sprintf("%d", query.From.ID), chatId, account, "edit_verify", "waiting_verify", 0, no, nil, "请发送新的验证视频，支持单独视频或视频 group。6 分钟无操作将自动取消。")
 	case "channels":
 		// Start a fresh selection session from the persisted channel set. A
 		// stale abandoned session must not make every channel appear unchecked.
+		if err := s.ensureBotProfileEditable(ctx, account, no); err != nil {
+			return true, s.replyBotError(ctx, botId, chatId, "上架频道编辑", err)
+		}
 		_, _ = cache.Instance().Remove(ctx, profileChannelEditKey(account.AccountId, no))
 		return true, s.showProfileChannelEditMenu(ctx, botId, chatId, account, no)
 	case "ch":
@@ -498,16 +516,25 @@ func (s *sSysBot) handleProfileCallback(ctx context.Context, botId int64, query 
 		if parseErr != nil || channelID <= 0 {
 			return true, gerror.New("频道参数无效，请重新打开频道编辑")
 		}
+		if err := s.ensureBotProfileEditable(ctx, account, no); err != nil {
+			return true, s.replyBotError(ctx, botId, chatId, "上架频道编辑", err)
+		}
 		toggleErr := s.toggleProfileChannelSelection(ctx, botId, chatId, account, no, channelID, int64(query.Message.Message.ID))
 		if toggleErr != nil {
 			_, _ = bot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "频道切换失败，请重试", ShowAlert: true})
 		}
 		return true, toggleErr
 	case "chconfirm":
+		if err := s.ensureBotProfileEditable(ctx, account, no); err != nil {
+			return true, s.replyBotError(ctx, botId, chatId, "上架频道编辑", err)
+		}
 		return true, s.confirmProfileChannelSelection(ctx, botId, chatId, account, no)
 	case "editback":
 		return true, s.showProfileEditMenu(ctx, botId, chatId, account, no)
 	case "replace":
+		if err := s.ensureBotProfileEditable(ctx, account, no); err != nil {
+			return true, s.replyBotError(ctx, botId, chatId, "资料编辑", err)
+		}
 		if err = s.startProfileSessionByIds(ctx, botId, fmt.Sprintf("%d", query.From.ID), chatId, account, "replace", "waiting_display", 0, no, nil, ""); err != nil {
 			return true, err
 		}
@@ -521,11 +548,21 @@ func (s *sSysBot) confirmProfileDelete(ctx context.Context, botId int64, chatId,
 	if err != nil {
 		return err
 	}
+	account, err := s.boundProfileAccountByUser(ctx, parseTelegramUserId(telegramUserIdFromCtx(ctx)))
+	if err != nil {
+		return s.replyBotError(ctx, botId, chatId, "资料删除", err)
+	}
+	note, err := publishService.SysPublish().BotProfileView(ctx, botProfileViewInput(account, profileNo))
+	if err != nil {
+		return s.replyBotError(ctx, botId, chatId, "资料删除", err)
+	}
+	if profileCardPurpose(account, note, "delete") == "readonly" {
+		return s.replyBotError(ctx, botId, chatId, "资料删除", gerror.New("当前资料只读，无权删除"))
+	}
 	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId,
-		fmt.Sprintf("请选择对资料 <code>%s</code> 的删除方式：", html.EscapeString(profileNo)), "HTML", false,
+		fmt.Sprintf("确认删除资料 <code>%s</code>？删除会同时下架并清理已发送的 Telegram 消息，此操作不可恢复。", html.EscapeString(note.ProfileNo)), "HTML", false,
 		&models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
-			{{Text: "删除资料", CallbackData: "pf:delconfirm:" + profileNo}},
-			{{Text: "删除并下架", CallbackData: "pf:delconfirm:" + profileNo}},
+			{{Text: "确认下架并删除", CallbackData: "pf:delconfirm:" + strings.ToUpper(strings.TrimSpace(note.ProfileNo))}},
 			{{Text: "取消", CallbackData: "pf:delcancel:" + profileNo}},
 		}})
 	return err
@@ -536,7 +573,18 @@ func (s *sSysBot) deleteProfileByCallback(ctx context.Context, botId int64, chat
 	if err != nil {
 		return s.replyBotError(ctx, botId, chatId, "资料删除", err)
 	}
+	if profileCardPurpose(account, note, "delete") == "readonly" {
+		return s.replyBotError(ctx, botId, chatId, "资料删除", gerror.New("当前资料只读，无权删除"))
+	}
+	claimed, err := reserveBotProfileMutation(ctx, account, note.Id, "delete")
+	if err != nil {
+		return s.replyBotError(ctx, botId, chatId, "资料删除", err)
+	}
+	if !claimed {
+		return s.sendMessageOnly(ctx, botId, chatId, "该资料删除已提交，请等待后台完成清理。")
+	}
 	if err = s.sendMessageOnly(ctx, botId, chatId, fmt.Sprintf("资料编号：%s 正在执行下架并删除，请稍候…", html.EscapeString(no))); err != nil {
+		_ = releaseBotProfileMutation(ctx, account, note.Id, "delete")
 		return err
 	}
 	channels := profileActionChannels(ctx, account.TenantId, note.Id, note.ChannelIds)
@@ -544,8 +592,15 @@ func (s *sSysBot) deleteProfileByCallback(ctx context.Context, botId int64, chat
 	accountCopy := *account
 	go func() {
 		workCtx := context.Background()
-		err := publishService.SysPublish().BotProfileDelete(workCtx, accountCopy.TenantId, accountCopy.AccountId, &publishsysin.ProfileDeleteInp{Ids: []int64{profileId}})
+		err := publishService.SysPublish().BotProfileDeleteWithNotice(workCtx, &publishsysin.BotProfileDeleteInp{
+			ProfileDeleteInp: publishsysin.ProfileDeleteInp{Ids: []int64{profileId}},
+			TenantId:         accountCopy.TenantId,
+			AccountId:        accountCopy.AccountId,
+			NotifyBotId:      botId,
+			NotifyChatId:     chatId,
+		})
 		if err != nil {
+			_ = releaseBotProfileMutation(workCtx, &accountCopy, profileId, "delete")
 			_ = s.sendMessageOnly(workCtx, botId, chatId, fmt.Sprintf("资料编号：%s 下架删除失败：%s", html.EscapeString(no), html.EscapeString(err.Error())))
 			return
 		}
@@ -1114,7 +1169,20 @@ func (s *sSysBot) showProfileList(ctx context.Context, botId int64, chatId strin
 }
 
 func (s *sSysBot) changeProfilesStatus(ctx context.Context, botId int64, chatId string, account *botProfileAccount, nos []string, status int) error {
-	res, err := publishService.SysPublish().BotProfileStatus(ctx, &publishsysin.BotProfileStatusInp{TenantId: account.TenantId, AccountId: account.AccountId, AccountType: account.AccountType, NotifyBotId: botId, NotifyChatId: chatId, Nos: nos, Status: status})
+	normalizedNos := uniqueProfileNos(nos)
+	for _, no := range normalizedNos {
+		note, viewErr := publishService.SysPublish().BotProfileView(ctx, botProfileViewInput(account, no))
+		if viewErr != nil {
+			return s.replyBotError(ctx, botId, chatId, "资料管理", viewErr)
+		}
+		if writeErr := ensureBotProfileWritable(account, note); writeErr != nil {
+			return s.replyBotError(ctx, botId, chatId, "资料管理", writeErr)
+		}
+		if actionErr := validateBotProfileLifecycleAction(note, status); actionErr != nil {
+			return s.replyBotError(ctx, botId, chatId, "资料管理", actionErr)
+		}
+	}
+	res, err := publishService.SysPublish().BotProfileStatus(ctx, &publishsysin.BotProfileStatusInp{TenantId: account.TenantId, AccountId: account.AccountId, AccountType: account.AccountType, NotifyBotId: botId, NotifyChatId: chatId, Nos: normalizedNos, Status: status})
 	if err != nil {
 		return s.replyBotError(ctx, botId, chatId, "资料管理", err)
 	}
@@ -1122,7 +1190,7 @@ func (s *sSysBot) changeProfilesStatus(ctx context.Context, botId int64, chatId 
 	if status == 2 {
 		label = "下架"
 	}
-	msg := fmt.Sprintf("已提交%s：%s", label, html.EscapeString(strings.Join(nos, ", ")))
+	msg := fmt.Sprintf("已提交%s：%s", label, html.EscapeString(strings.Join(normalizedNos, ", ")))
 	if res != nil && strings.TrimSpace(res.Message) != "" {
 		msg = html.EscapeString(res.Message)
 	}
@@ -1130,13 +1198,27 @@ func (s *sSysBot) changeProfilesStatus(ctx context.Context, botId int64, chatId 
 }
 
 func (s *sSysBot) changeProfilesStatusByCallback(ctx context.Context, botId int64, chatId string, account *botProfileAccount, query *models.CallbackQuery, action string, no string, status int) error {
+	current, viewErr := publishService.SysPublish().BotProfileView(ctx, botProfileViewInput(account, no))
+	if viewErr != nil {
+		s.auditProfileCallback(ctx, query, account, action, no, viewErr)
+		s.answerProfileCallback(ctx, botId, query, viewErr.Error())
+		return s.replyBotError(ctx, botId, chatId, "资料管理", viewErr)
+	}
+	if writeErr := ensureBotProfileWritable(account, current); writeErr != nil {
+		s.auditProfileCallback(ctx, query, account, action, no, writeErr)
+		s.answerProfileCallback(ctx, botId, query, writeErr.Error())
+		return s.replyBotError(ctx, botId, chatId, "资料管理", writeErr)
+	}
+	if actionErr := validateBotProfileLifecycleAction(current, status); actionErr != nil {
+		s.auditProfileCallback(ctx, query, account, action, no, actionErr)
+		s.answerProfileCallback(ctx, botId, query, actionErr.Error())
+		return s.replyBotError(ctx, botId, chatId, "资料管理", actionErr)
+	}
 	var downNote *publishsysin.NoteModel
 	var downChannels []profileActionChannel
 	if status == 2 {
-		downNote, _ = publishService.SysPublish().BotProfileView(ctx, botProfileViewInput(account, no))
-		if downNote != nil {
-			downChannels = profileActionChannels(ctx, account.TenantId, downNote.Id, downNote.ChannelIds)
-		}
+		downNote = current
+		downChannels = profileActionChannels(ctx, account.TenantId, downNote.Id, downNote.ChannelIds)
 	}
 	res, operationErr := publishService.SysPublish().BotProfileStatus(ctx, &publishsysin.BotProfileStatusInp{
 		TenantId: account.TenantId, AccountId: account.AccountId, AccountType: account.AccountType,
@@ -1164,6 +1246,97 @@ func (s *sSysBot) changeProfilesStatusByCallback(ctx context.Context, botId int6
 	}
 	s.answerProfileCallback(ctx, botId, query, msg)
 	return s.sendMessageOnly(ctx, botId, chatId, msg)
+}
+
+func uniqueProfileNos(nos []string) []string {
+	seen := make(map[string]struct{}, len(nos))
+	result := make([]string, 0, len(nos))
+	for _, no := range nos {
+		normalized := strings.ToUpper(strings.TrimSpace(no))
+		if normalized == "" {
+			continue
+		}
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		result = append(result, normalized)
+	}
+	return result
+}
+
+func profileTaskInProgress(note *publishsysin.NoteModel) bool {
+	if note == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(note.TaskStatus)) {
+	case publishsysin.PublishTaskStatusPending, publishsysin.PublishTaskStatusPublishing, "editing":
+		return true
+	default:
+		return false
+	}
+}
+
+func validateBotProfileLifecycleAction(note *publishsysin.NoteModel, status int) error {
+	if note == nil {
+		return gerror.New("资料不存在或无权操作")
+	}
+	if profileTaskInProgress(note) {
+		return gerror.New("资料正在处理中，请稍候刷新后再操作")
+	}
+	switch status {
+	case 1:
+		if note.Status == 1 {
+			return gerror.New("资料当前已上架，无需重复操作")
+		}
+	case 2:
+		if note.Status != 1 {
+			return gerror.New("资料当前已下架，无需重复操作")
+		}
+	default:
+		return gerror.New("资料状态操作不合法")
+	}
+	return nil
+}
+
+func ensureBotProfileWritable(account *botProfileAccount, note *publishsysin.NoteModel) error {
+	if profileCardPurpose(account, note, "write") == "readonly" {
+		return gerror.New("当前资料只读，无权操作")
+	}
+	return nil
+}
+
+func (s *sSysBot) ensureBotProfileEditable(ctx context.Context, account *botProfileAccount, no string) error {
+	note, err := publishService.SysPublish().BotProfileView(ctx, botProfileViewInput(account, no))
+	if err != nil {
+		return err
+	}
+	if err = ensureBotProfileWritable(account, note); err != nil {
+		return gerror.New("当前资料只读，无权编辑")
+	}
+	if profileTaskInProgress(note) {
+		return gerror.New("资料正在处理中，请稍候刷新后再编辑")
+	}
+	return nil
+}
+
+func botProfileMutationKey(account *botProfileAccount, profileID int64, action string) string {
+	if account == nil {
+		return fmt.Sprintf("youban_bot:profile_mutation:%s:%d", strings.TrimSpace(action), profileID)
+	}
+	return fmt.Sprintf("youban_bot:profile_mutation:%d:%d:%d:%s", account.TenantId, account.AccountId, profileID, strings.TrimSpace(action))
+}
+
+func reserveBotProfileMutation(ctx context.Context, account *botProfileAccount, profileID int64, action string) (bool, error) {
+	if profileID <= 0 {
+		return false, gerror.New("资料信息不完整")
+	}
+	return cache.Instance().SetIfNotExist(ctx, botProfileMutationKey(account, profileID, action), 1, profileBotMutationDedupTTL)
+}
+
+func releaseBotProfileMutation(ctx context.Context, account *botProfileAccount, profileID int64, action string) error {
+	_, err := cache.Instance().Remove(ctx, botProfileMutationKey(account, profileID, action))
+	return err
 }
 
 func (s *sSysBot) answerProfileCallback(ctx context.Context, botId int64, query *models.CallbackQuery, text string) {
@@ -1385,6 +1558,15 @@ func profileCardStatusHeader(note *publishsysin.NoteModel, status string) string
 func profileCardDisplayStatus(note *publishsysin.NoteModel) string {
 	if note == nil {
 		return ""
+	}
+	// The persisted online/offline state is authoritative. A previous
+	// publish task can remain "published" after a successful offline
+	// transition, and must not make an offline card look online.
+	if note.Status != 1 {
+		if profileTaskInProgress(note) {
+			return "下架中"
+		}
+		return "下架"
 	}
 	switch strings.ToLower(strings.TrimSpace(note.TaskStatus)) {
 	case publishsysin.PublishTaskStatusPending, publishsysin.PublishTaskStatusPublishing:
@@ -2023,12 +2205,19 @@ func profileCardMarkupForNote(note *publishsysin.NoteModel, purpose string) *mod
 		profileNo := strings.ToUpper(strings.TrimSpace(note.ProfileNo))
 		statusAction := "pf:up:"
 		statusLabel := "上架"
-		if note.TaskStatus == publishsysin.PublishTaskStatusPending || note.TaskStatus == publishsysin.PublishTaskStatusPublishing {
+		if profileTaskInProgress(note) {
 			statusAction = "pf:view:"
-			statusLabel = "上架中"
+			statusLabel = "处理中"
+			if note.Status == 1 {
+				statusLabel = "上架中"
+			} else {
+				statusLabel = "下架中"
+			}
 		} else if note.Status == 1 {
 			statusAction = "pf:down:"
 			statusLabel = "下架"
+		} else if note.PublishedAt != nil {
+			statusLabel = "重新上架"
 		}
 		if len(markup.InlineKeyboard) >= 2 {
 			// Keep preview/edit/list actions intact; only the first action toggles
@@ -2041,9 +2230,6 @@ func profileCardMarkupForNote(note *publishsysin.NoteModel, purpose string) *mod
 				{Text: "编辑", CallbackData: "pf:edit:" + profileNo},
 				{Text: "删除", CallbackData: "pf:del:" + profileNo},
 			}
-			markup.InlineKeyboard = append(markup.InlineKeyboard,
-				[]models.InlineKeyboardButton{{Text: "重新上架", CallbackData: "pf:up:" + profileNo}},
-			)
 		}
 	}
 	url := strings.TrimSpace(note.CollectSourceUrl)
@@ -4157,7 +4343,7 @@ func (s *sSysBot) sendProfileEditSuccess(ctx context.Context, botId int64, chatI
 	}
 	profileNo := strings.ToUpper(strings.TrimSpace(note.ProfileNo))
 	text := fmt.Sprintf("<b>%s</b>\n\n编号：<code>%s</code>\n标题：<code>%s</code>", html.EscapeString(title), html.EscapeString(profileNo), html.EscapeString(note.Title))
-	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, text, "HTML", false, profileEditSuccessMarkup(profileNo))
+	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, text, "HTML", false, profileEditSuccessMarkupForNote(note))
 	return err
 }
 
@@ -4167,6 +4353,26 @@ func profileEditSuccessMarkup(profileNo string) *models.InlineKeyboardMarkup {
 		{{Text: "重新上架", CallbackData: "pf:up:" + profileNo}, {Text: "查看详情", CallbackData: "pf:view:" + profileNo}},
 		{{Text: "返回资料管理", CallbackData: "pf:menu"}},
 	}}
+}
+
+func profileEditSuccessMarkupForNote(note *publishsysin.NoteModel) *models.InlineKeyboardMarkup {
+	if note == nil {
+		return profileEditSuccessMarkup("")
+	}
+	profileNo := strings.ToUpper(strings.TrimSpace(note.ProfileNo))
+	if profileTaskInProgress(note) {
+		return &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
+			{{Text: "上架中", CallbackData: "pf:view:" + profileNo}},
+			{{Text: "返回资料管理", CallbackData: "pf:menu"}},
+		}}
+	}
+	if note.Status == 1 {
+		return &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
+			{{Text: "查看详情", CallbackData: "pf:view:" + profileNo}},
+			{{Text: "返回资料管理", CallbackData: "pf:menu"}},
+		}}
+	}
+	return profileEditSuccessMarkup(profileNo)
 }
 
 func (s *sSysBot) cancelProfileQueue(ctx context.Context, botId int64, chatId string, account *botProfileAccount, nos []string) error {

@@ -46,8 +46,15 @@ func (s *sSysPublish) handleProfilesDown(ctx context.Context, ids []int64, tenan
 	if operationNo == "" {
 		operationNo = fmt.Sprintf("down:%d:%s", tenantId, strings.NewReplacer(" ", "-", ":", "", ".", "").Replace(cutoffAt))
 	}
-	if err := s.deleteProfilesTelegramMessages(ctx, ids, tenantId, cutoffAt); err != nil {
+	cleanupQueued, err := s.deleteProfilesTelegramMessages(ctx, ids, tenantId, cutoffAt, operationNo)
+	if err != nil {
 		return err
+	}
+	if strings.HasPrefix(strings.ToLower(operationNo), botProfileUnpublishOperationPrefix) && !cleanupQueued {
+		job := telegramJobRecord{TenantId: tenantId, ProfileId: ids[0], OperationNo: operationNo}
+		if err = s.notifyBotProfileUnpublishCompleted(ctx, job, tgQueuePayload{ForceCompletion: true}); err != nil {
+			g.Log().Warningf(ctx, "发送无TG清理任务的Bot资料下架完成通知失败 profileId:%d err:%+v", ids[0], err)
+		}
 	}
 	ids, err = s.activeDownProfileIds(ctx, ids, tenantId)
 	if err != nil {
@@ -103,10 +110,10 @@ func (s *sSysPublish) activeDownProfileIds(ctx context.Context, ids []int64, ten
 	return uniqueIds(activeIds), nil
 }
 
-func (s *sSysPublish) deleteProfilesTelegramMessages(ctx context.Context, ids []int64, tenantId int64, cutoffAt string) error {
+func (s *sSysPublish) deleteProfilesTelegramMessages(ctx context.Context, ids []int64, tenantId int64, cutoffAt string, operationNo string) (bool, error) {
 	jobs, err := s.telegramJobsWithActiveMessages(ctx, tenantId, ids, cutoffAt)
 	if err != nil {
-		return err
+		return false, err
 	}
 	channelIDs := make([]int64, 0, len(jobs))
 	failed := 0
@@ -116,15 +123,26 @@ func (s *sSysPublish) deleteProfilesTelegramMessages(ctx context.Context, ids []
 	}
 	policies, err := s.channelHistoryMessagePolicies(ctx, tenantId, channelIDs)
 	if err != nil {
-		return err
+		return false, err
 	}
+	cleanupJobs := make([]int64, 0, len(jobs))
 	for _, job := range jobs {
 		preserve, configured := policies[job.ChannelId]
 		if !configured || preserve {
 			s.appendTelegramJobLog(ctx, job.telegramJobRecord(), "down", "skipped", "资料下架，频道已配置保留旧消息")
 			continue
 		}
-		if err = s.enqueueTelegramCleanupJob(ctx, job.Id, 0); err != nil {
+		cleanupJobs = append(cleanupJobs, job.Id)
+	}
+	for _, job := range jobs {
+		preserve, configured := policies[job.ChannelId]
+		if !configured || preserve {
+			continue
+		}
+		if err = s.enqueueTelegramCleanupJobWithContext(ctx, job.Id, 0, tgQueuePayload{
+			CleanupOperationNo: strings.TrimSpace(operationNo),
+			CleanupJobIds:      cleanupJobs,
+		}); err != nil {
 			failed++
 			if firstErr == nil {
 				firstErr = gerror.Wrapf(err, "加入TG下架清理队列失败 jobId:%d", job.Id)
@@ -135,9 +153,9 @@ func (s *sSysPublish) deleteProfilesTelegramMessages(ctx context.Context, ids []
 		s.appendTelegramJobLog(ctx, job.telegramJobRecord(), "down", "queued", "资料下架，TG历史消息已加入Redis清理队列")
 	}
 	if firstErr != nil {
-		return gerror.Wrapf(firstErr, "批量下架清理完成，失败%d条", failed)
+		return len(cleanupJobs) > 0, gerror.Wrapf(firstErr, "批量下架清理完成，失败%d条", failed)
 	}
-	return nil
+	return len(cleanupJobs) > 0, nil
 }
 
 func (s *sSysPublish) notifyProfilesDown(ctx context.Context, ids []int64, tenantId int64, channels []telegramJobChannel, operationNo string, cutoffAt string) error {
@@ -375,7 +393,8 @@ func (s *sSysPublish) handleDownChannelTelegramJobError(ctx context.Context, job
 }
 
 func isDownTelegramOperationNo(operationNo string) bool {
-	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(operationNo)), "down:")
+	value := strings.ToLower(strings.TrimSpace(operationNo))
+	return strings.HasPrefix(value, "down:") || strings.HasPrefix(value, botProfileUnpublishOperationPrefix)
 }
 
 func (s *sSysPublish) telegramDownChannels(ctx context.Context, tenantId int64) ([]telegramJobChannel, error) {

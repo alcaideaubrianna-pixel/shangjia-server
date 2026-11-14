@@ -6,7 +6,8 @@
     title="插件配置"
     positive-text="保存"
     negative-text="取消"
-    @positive-click="emit('save')"
+    :loading="saving"
+    @positive-click="handleSave"
   >
     <n-alert v-if="form.configError" type="error">{{ form.configError }}</n-alert>
     <n-alert v-if="form.featureKey === 'two_way_relay'" type="info" class="mb-4">
@@ -200,9 +201,23 @@
   import TelegramRichEditor from '@/components/TelegramRichEditor/index.vue';
   import MarkdownEditor from '@/components/MarkdownEditor/index.vue';
 
-  const props = defineProps<{ show: boolean; form: Record<string, any>; statusOptions: any[] }>();
+  const props = defineProps<{
+    show: boolean;
+    form: Record<string, any>;
+    statusOptions: any[];
+    saving?: boolean;
+  }>();
   const form = computed(() => props.form);
+  const saving = computed(() => Boolean(props.saving));
   const emit = defineEmits<{ (e: 'update:show', value: boolean): void; (e: 'save'): void }>();
+
+  function handleSave() {
+    if (saving.value) {
+      return false;
+    }
+    emit('save');
+    return false;
+  }
 
   const adminUsers = ref<any[]>([]);
   const superBots = ref<any[]>([]);

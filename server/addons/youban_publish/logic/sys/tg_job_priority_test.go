@@ -75,6 +75,7 @@ func TestTelegramJobPriorityClassifiesPublishOperations(t *testing.T) {
 		{name: "manual profile", operationNo: "profile:123", want: tgJobPriorityInteractive},
 		{name: "manual profile edit", operationNo: "edit:123:request", want: tgJobPriorityInteractive},
 		{name: "BOT manual profile", operationNo: "bot_publish:20:123456:123:456", want: tgJobPriorityInteractive},
+		{name: "BOT manual unpublish", operationNo: "bot_unpublish:20:123456:123:456", want: tgJobPriorityInteractive},
 		{name: "manual batch", operationNo: "batchtext:1:batch-1:profile:123", want: tgJobPriorityInteractive},
 		{name: "message push", operationNo: "message_push:1:2:3", want: tgJobPriorityUrgent},
 		{name: "AI republish", operationNo: "ai-republish:1", priority: tgJobPriorityDefault, want: tgJobPriorityDefault},
@@ -100,6 +101,7 @@ func TestManualPublishAlwaysUsesInteractivePriority(t *testing.T) {
 		"profile:123",
 		"edit:123:request",
 		"bot_publish:20:123456:123:456",
+		"bot_unpublish:20:123456:123:456",
 		"batchtext:1:batch-1:profile:123",
 	} {
 		job := telegramJobRecord{OperationNo: operationNo, Priority: tgJobPriorityBulk}

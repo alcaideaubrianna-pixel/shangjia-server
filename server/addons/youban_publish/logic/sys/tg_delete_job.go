@@ -15,6 +15,10 @@ import (
 const telegramCleanupPerChannelConcurrency = 4
 
 func (s *sSysPublish) CleanupTelegramJobMessages(ctx context.Context, jobId int64) error {
+	return s.cleanupTelegramJobMessages(ctx, jobId, tgQueuePayload{})
+}
+
+func (s *sSysPublish) cleanupTelegramJobMessages(ctx context.Context, jobId int64, payload tgQueuePayload) error {
 	job, err := s.telegramJobById(ctx, jobId)
 	if err != nil {
 		return err
@@ -24,7 +28,7 @@ func (s *sSysPublish) CleanupTelegramJobMessages(ctx context.Context, jobId int6
 			if err := s.deleteTelegramMessageSetLockedByChannel(ctx, job, "资料清理"); err != nil {
 				return err
 			}
-			if err := s.notifyBotProfileUnpublishCompleted(ctx, job); err != nil {
+			if err := s.notifyBotProfileUnpublishCompleted(ctx, job, payload); err != nil {
 				g.Log().Warningf(ctx, "发送Bot资料下架完成通知失败 profileId:%d jobId:%d err:%+v", job.ProfileId, job.Id, err)
 			}
 			return s.completeTelegramCleanupIntent(ctx, job.Id)
@@ -35,7 +39,7 @@ func (s *sSysPublish) CleanupTelegramJobMessages(ctx context.Context, jobId int6
 		return err
 	}
 	if !ok {
-		return s.requeueTelegramJob(ctx, tgTaskTypeCleanup, jobId, time.Second)
+		return s.requeueTelegramCleanupJob(ctx, jobId, time.Second, payload)
 	}
 	defer s.releaseTelegramChannelLease(ctx, lease)
 	// Cleanup runs on its own queue and uses four Redis slots per channel. It does
@@ -44,7 +48,7 @@ func (s *sSysPublish) CleanupTelegramJobMessages(ctx context.Context, jobId int6
 	if err := s.deleteTelegramMessageSetLockedByChannel(ctx, job, "资料清理"); err != nil {
 		return err
 	}
-	if err := s.notifyBotProfileUnpublishCompleted(ctx, job); err != nil {
+	if err := s.notifyBotProfileUnpublishCompleted(ctx, job, payload); err != nil {
 		g.Log().Warningf(ctx, "发送Bot资料下架完成通知失败 profileId:%d jobId:%d err:%+v", job.ProfileId, job.Id, err)
 	}
 	return nil

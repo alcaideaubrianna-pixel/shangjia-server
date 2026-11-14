@@ -146,7 +146,11 @@ export function ProfileView(params = {}) {
 }
 
 export function ProfileSave(params = {}) {
-  return http.request({ url: '/youban_publish/publish/profile/save', method: 'POST', params });
+  return http.request({ url: '/youban_publish/publish/profile/edit', method: 'POST', params });
+}
+
+export function ProfileStatus(params = {}) {
+  return http.request({ url: '/youban_publish/publish/profile/status', method: 'POST', params });
 }
 
 export function ProfileDelete(params = {}) {
@@ -525,10 +529,18 @@ export function VipTenantSave(params = {}) {
   return http.request({ url: '/youban_publish/publish/vip/tenant/save', method: 'POST', params });
 }
 export function VipQuotaView(params = {}) {
-  return http.request({ url: '/youban_publish/publish/vip/tenant/quota/view', method: 'get', params });
+  return http.request({
+    url: '/youban_publish/publish/vip/tenant/quota/view',
+    method: 'get',
+    params,
+  });
 }
 export function VipQuotaSave(params = {}) {
-  return http.request({ url: '/youban_publish/publish/vip/tenant/quota/save', method: 'POST', params });
+  return http.request({
+    url: '/youban_publish/publish/vip/tenant/quota/save',
+    method: 'POST',
+    params,
+  });
 }
 
 export function VipFeatureView(params = {}) {

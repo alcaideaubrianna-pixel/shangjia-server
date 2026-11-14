@@ -24,6 +24,7 @@ import (
 const (
 	botProfilePublishOperationPrefix   = "bot_publish:"
 	botProfileUnpublishOperationPrefix = "bot_unpublish:"
+	botProfileDeleteOperationPrefix    = "bot_delete:"
 )
 
 const botProfilePublishNoticeTTL = 24 * time.Hour
@@ -40,6 +41,7 @@ type botProfilePublishNoticeTarget struct {
 
 type botProfilePublishNoticeRow struct {
 	JobId           int64  `json:"jobId"`
+	ChannelId       int64  `json:"channelId"`
 	ChannelTitle    string `json:"channelTitle"`
 	ChannelUsername string `json:"channelUsername"`
 	TargetChatId    string `json:"targetChatId"`
@@ -55,6 +57,10 @@ func newBotProfileUnpublishOperationNo(botId int64, chatId string, profileId int
 	return newBotProfileOperationNo(botProfileUnpublishOperationPrefix, botId, chatId, profileId)
 }
 
+func newBotProfileDeleteOperationNo(botId int64, chatId string, profileId int64) string {
+	return newBotProfileOperationNo(botProfileDeleteOperationPrefix, botId, chatId, profileId)
+}
+
 func newBotProfileOperationNo(prefix string, botId int64, chatId string, profileId int64) string {
 	return fmt.Sprintf("%s%d:%s:%d:%d", prefix, botId, strings.TrimSpace(chatId), profileId, gtime.Now().TimestampNano())
 }
@@ -65,6 +71,10 @@ func parseBotProfilePublishNoticeTarget(operationNo string) (botProfilePublishNo
 
 func parseBotProfileUnpublishNoticeTarget(operationNo string) (botProfilePublishNoticeTarget, bool) {
 	return parseBotProfileNoticeTarget(operationNo, botProfileUnpublishOperationPrefix)
+}
+
+func parseBotProfileDeleteNoticeTarget(operationNo string) (botProfilePublishNoticeTarget, bool) {
+	return parseBotProfileNoticeTarget(operationNo, botProfileDeleteOperationPrefix)
 }
 
 func parseBotProfileNoticeTarget(operationNo, prefix string) (botProfilePublishNoticeTarget, bool) {
@@ -159,7 +169,7 @@ func (s *sSysPublish) notifyBotProfilePublishCompleted(ctx context.Context, job 
 	var channels []botProfilePublishNoticeRow
 	if err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
 		LeftJoin(publishChannelTable+" c", "c.id=j.channel_id").
-		Fields("j.id AS job_id,COALESCE(NULLIF(c.channel_title,''),j.target_chat_id) AS channel_title,c.channel_username,j.target_chat_id,j.tg_message_id,j.status").
+		Fields("j.id AS job_id,j.channel_id,COALESCE(NULLIF(c.channel_title,''),j.target_chat_id) AS channel_title,c.channel_username,j.target_chat_id,j.tg_message_id,j.status").
 		Where("j.profile_id", job.ProfileId).Where("j.operation_no", job.OperationNo).
 		OrderAsc("j.channel_id").Scan(&channels); err != nil {
 		return gerror.Wrap(err, "读取Bot上架通知频道失败")
@@ -186,22 +196,50 @@ func (s *sSysPublish) notifyBotProfilePublishCompleted(ctx context.Context, job 
 	})
 }
 
-func (s *sSysPublish) notifyBotProfileUnpublishCompleted(ctx context.Context, job telegramJobRecord) error {
-	target, ok := parseBotProfileUnpublishNoticeTarget(job.OperationNo)
+func (s *sSysPublish) notifyBotProfileUnpublishCompleted(ctx context.Context, job telegramJobRecord, payload tgQueuePayload) error {
+	operationNo := strings.TrimSpace(payload.CleanupOperationNo)
+	if operationNo == "" {
+		operationNo = strings.TrimSpace(job.OperationNo)
+	}
+	target, unpublish := parseBotProfileUnpublishNoticeTarget(operationNo)
+	deleteTarget, deleted := parseBotProfileDeleteNoticeTarget(operationNo)
+	if deleted {
+		target = deleteTarget
+	}
+	ok := unpublish || deleted
 	if !ok {
 		return nil
 	}
-	active, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("profile_id", job.ProfileId).Where("operation_no", job.OperationNo).
-		WhereIn("status", []string{telegramJobStatusPending, telegramJobStatusSending, telegramJobStatusRetryWait, telegramJobStatusConfirming}).
-		Count()
-	if err != nil {
-		return gerror.Wrap(err, "检查Bot资料下架任务状态失败")
-	}
-	if active > 0 {
+	cleanupJobIds := uniqueIds(payload.CleanupJobIds)
+	if len(cleanupJobIds) > 0 {
+		remaining, err := g.DB().Model(publishTgMessageTable+" m").Safe().Ctx(ctx).
+			WhereIn("m.job_id", cleanupJobIds).
+			Where("m.status", "sent").
+			WhereNull("m.deleted_at").
+			Count()
+		if err != nil {
+			return gerror.Wrap(err, "检查Bot资料下架消息状态失败")
+		}
+		if remaining > 0 {
+			return nil
+		}
+	} else if !payload.ForceCompletion {
 		return nil
 	}
-	claimed, err := reserveBotProfilePublishNotice(ctx, job.ProfileId, job.OperationNo)
+	if !deleted {
+		state, err := g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).
+			Fields("status,visibility").
+			Where("id", job.ProfileId).
+			WhereNull("deleted_at").
+			One()
+		if err != nil {
+			return gerror.Wrap(err, "检查Bot资料下架状态失败")
+		}
+		if state.IsEmpty() || state["status"].Int() != 2 || state["visibility"].String() != "private" {
+			return nil
+		}
+	}
+	claimed, err := reserveBotProfilePublishNotice(ctx, job.ProfileId, operationNo)
 	if err != nil || !claimed {
 		return err
 	}
@@ -209,29 +247,85 @@ func (s *sSysPublish) notifyBotProfileUnpublishCompleted(ctx context.Context, jo
 		ProfileNo string `json:"profileNo"`
 		Title     string `json:"title"`
 	}
-	if err = g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).
+	if deleted {
+		profile.ProfileNo = strings.TrimSpace(job.ProfileNoSnapshot)
+		profile.Title = strings.TrimSpace(job.TitleSnapshot)
+	} else if err = g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).
 		Fields("profile_no,title").Where("id", job.ProfileId).WhereNull("deleted_at").Scan(&profile); err != nil {
 		return gerror.Wrap(err, "读取Bot下架通知资料失败")
 	}
 	if strings.TrimSpace(profile.ProfileNo) == "" {
-		return gerror.New("Bot下架通知资料不存在")
+		return gerror.New("Bot资料通知上下文不存在")
 	}
 	var channels []botProfilePublishNoticeRow
-	if err = g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
+	channelMod := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
 		LeftJoin(publishChannelTable+" c", "c.id=j.channel_id").
-		Fields("j.id AS job_id,COALESCE(NULLIF(c.channel_title,''),j.target_chat_id) AS channel_title,c.channel_username,j.target_chat_id,j.tg_message_id,j.status").
-		Where("j.profile_id", job.ProfileId).Where("j.operation_no", job.OperationNo).
-		OrderAsc("j.channel_id").Scan(&channels); err != nil {
+		Fields("j.id AS job_id,j.channel_id,COALESCE(NULLIF(c.channel_title,''),j.target_chat_id) AS channel_title,c.channel_username,j.target_chat_id,j.tg_message_id,j.status").
+		Where("j.profile_id", job.ProfileId).
+		Where("j.tenant_id", job.TenantId).
+		Where("COALESCE(j.operation_type,'') <> ?", "unpublish").
+		Where("EXISTS (SELECT 1 FROM " + publishTgMessageTable + " m WHERE m.job_id=j.id)")
+	if job.AccountId > 0 {
+		channelMod = channelMod.Where("j.account_id", job.AccountId)
+	}
+	if err = channelMod.OrderAsc("j.channel_id").OrderDesc("j.id").Scan(&channels); err != nil {
 		return gerror.Wrap(err, "读取Bot下架通知频道失败")
 	}
+	channels = uniqueBotProfilePublishNoticeChannels(channels)
+	for i := range channels {
+		if channels[i].TgMessageId > 0 {
+			continue
+		}
+		value, queryErr := g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).
+			Where("job_id", channels[i].JobId).
+			Where("purpose", "display").
+			WhereIn("status", []string{"sent", "deleted", "undeletable"}).
+			OrderAsc("tg_message_id").
+			Value("tg_message_id")
+		if queryErr != nil {
+			return gerror.Wrap(queryErr, "读取Bot下架通知展示消息失败")
+		}
+		channels[i].TgMessageId = gconv.Int64(value)
+	}
 	text := formatBotProfileUnpublishNotice(profile.ProfileNo, profile.Title, channels)
+	if deleted {
+		text = formatBotProfileDeleteNotice(profile.ProfileNo, profile.Title, channels)
+	}
 	return botservice.SysBot().Notify(ctx, &botsysin.NotifyInp{BotId: target.BotId, ChatId: target.ChatId, Text: text, ParseMode: "HTML"})
+}
+
+func uniqueBotProfilePublishNoticeChannels(channels []botProfilePublishNoticeRow) []botProfilePublishNoticeRow {
+	if len(channels) < 2 {
+		return channels
+	}
+	seen := make(map[int64]struct{}, len(channels))
+	result := make([]botProfilePublishNoticeRow, 0, len(channels))
+	for _, channel := range channels {
+		key := channel.ChannelId
+		if key <= 0 {
+			key = channel.JobId
+		}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, channel)
+	}
+	return result
 }
 
 func formatBotProfileUnpublishNotice(profileNo, title string, channels []botProfilePublishNoticeRow) string {
 	lines := []string{"<b>资料下架完成</b>", "", "编号：<code>" + html.EscapeString(strings.TrimSpace(profileNo)) + "</code>", "标题：<code>" + html.EscapeString(strings.TrimSpace(title)) + "</code>", ""}
 	for _, channel := range channels {
 		lines = append(lines, "["+html.EscapeString(botProfilePublishChannelLabel(channel))+"] "+botProfilePublishStatusHTML("已下架", botProfilePublishMessageURL(channel)))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func formatBotProfileDeleteNotice(profileNo, title string, channels []botProfilePublishNoticeRow) string {
+	lines := []string{"<b>资料删除完成</b>", "", "编号：<code>" + html.EscapeString(strings.TrimSpace(profileNo)) + "</code>", "标题：<code>" + html.EscapeString(strings.TrimSpace(title)) + "</code>", ""}
+	for _, channel := range channels {
+		lines = append(lines, "["+html.EscapeString(botProfilePublishChannelLabel(channel))+"] "+botProfilePublishStatusHTML("已删除", botProfilePublishMessageURL(channel)))
 	}
 	return strings.Join(lines, "\n")
 }
