@@ -253,6 +253,21 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 	if err != nil {
 		return s.releaseTelegramOutbox(ctx, row.Id, owner, row.AttemptCount, err.Error())
 	}
+	// Channel queue mode is the sole transport. Do not call the generic
+	// EnqueueTelegramJob/Asynq path here: that would leave local runs on the
+	// legacy transport even when the channel worker is enabled.
+	if telegramChannelQueueEnabled() && job.ChannelId > 0 {
+		score := time.Now().UnixMilli()*1000 + int64(max(0, 100000-job.Priority))
+		if err = enqueueTelegramChannelJob(ctx, job.ChannelId, job.Id, score); err != nil {
+			return s.releaseTelegramOutbox(ctx, row.Id, owner, row.AttemptCount, err.Error())
+		}
+		if _, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+			Where("id", job.Id).Where("dispatch_status", tgDispatchStatusIdle).
+			Data(g.Map{"dispatch_status": tgDispatchStatusQueued, "queue_name": telegramChannelQueueKey(job.ChannelId), "updated_at": gtime.Now()}).Update(); err != nil {
+			return s.releaseTelegramOutbox(ctx, row.Id, owner, row.AttemptCount, err.Error())
+		}
+		return s.markTelegramStreamOutboxDelivered(ctx, row.Id, owner, job.Id)
+	}
 	// 所有账户统一以 Asynq 作为发送主路径，不能再由账户灰度字段决定是否
 	// 进入可靠队列；Stream 只作为旁路能力，避免 legacy 账户被旧路径卡死。
 	if err = s.EnqueueTelegramJob(ctx, job.Id, 0, false); err == nil {
