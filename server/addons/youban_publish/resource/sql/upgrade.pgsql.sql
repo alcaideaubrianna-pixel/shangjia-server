@@ -6,6 +6,11 @@ ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "channe
 ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "account_event_enabled" smallint NOT NULL DEFAULT 1;
 ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "task_failure_enabled" smallint NOT NULL DEFAULT 1;
 
+-- Cycle configuration version columns are required by the account scheduler.
+-- Keep this additive so existing installations self-heal on upgrade.
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_config_version" bigint NOT NULL DEFAULT 1;
+ALTER TABLE "hg_youban_publish_channel_profile" ADD COLUMN IF NOT EXISTS "applied_cycle_config_version" bigint NOT NULL DEFAULT 0;
+
 -- Read-model foundation for account visibility.  This is intentionally
 -- additive: the existing visibility resolver remains authoritative until a
 -- parity backfill has been verified in production.
