@@ -19,12 +19,17 @@ def main() -> None:
     parser.add_argument("--source-chat-id", default="-1009900000990")
     parser.add_argument("--rule-id", type=int, default=990001)
     parser.add_argument("--channel-id", type=int, default=2)
+    parser.add_argument("--media-file-id", default="")
+    parser.add_argument("--invalid-file-id", default="")
+    parser.add_argument("--reuse-media-every", type=int, default=0)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.count <= 0 or args.count > 10000:
         raise SystemExit("count 必须在 1 到 10000 之间")
     if args.tenant_id <= 0 or args.source_id <= 0 or args.rule_id <= 0 or args.channel_id <= 0:
         raise SystemExit("tenant/source/rule/channel ID 必须为正数")
+    if args.reuse_media_every < 0:
+        raise SystemExit("reuse-media-every 不能为负数")
     account_id = 0 if args.mode == "bot" else args.account_id
     if args.mode != "bot" and account_id <= 0:
         raise SystemExit("account/history 模式必须提供正数 account-id")
@@ -44,9 +49,14 @@ def main() -> None:
             f"({event_id},{args.tenant_id},{account_id},{args.source_id},{q(source_type)},{bot_id},{tg_account_id},"
             f"{q(args.source_chat_id)},{index},{unique_key},'display',0,'ready',{text},1,'pending',NOW(),NOW(),NOW())"
         )
+        file_id = args.media_file_id or f"local-file-{args.run_id}-{index}"
+        if args.invalid_file_id and index == 1:
+            file_id = args.invalid_file_id
+        if args.reuse_media_every and index % args.reuse_media_every == 0:
+            file_id = args.media_file_id or f"local-file-{args.run_id}-1"
         media.append(
             f"({args.tenant_id},{account_id},{args.source_id},{q(source_type)},{event_id},{q(args.source_chat_id)},"
-            f"{index},{q(f'{args.run_id}:media:{index}')},'photo','bot','local-file-{args.run_id}-{index}',"
+            f"{index},{q(f'{args.run_id}:media:{index}')},'photo','bot',{q(file_id)},"
             f"'', 'local-replay-image.jpg','photo','image/jpeg',1047,0,'ready',1,NOW(),NOW())"
         )
     source_name = q(f"本地回放来源 {args.run_id}")
@@ -87,7 +97,7 @@ ON CONFLICT (tenant_id,account_id,channel_id,source_id) DO UPDATE SET collect_en
 INSERT INTO hg_youban_publish_collect_rule
 (id,tenant_id,account_id,name,global_enabled,review_enabled,dedupe_enabled,dedupe_days,
  block_link,block_username,block_plain_text,status,created_at,updated_at)
-VALUES ({args.rule_id},{args.tenant_id},{account_id},{rule_name},0,0,0,7,0,0,0,1,NOW(),NOW())
+VALUES ({args.rule_id},{args.tenant_id},{account_id},{rule_name},1,0,0,7,0,0,0,1,NOW(),NOW())
 ON CONFLICT (id) DO UPDATE SET status=1,updated_at=NOW();
 INSERT INTO hg_youban_publish_collect_rule_item
 (tenant_id,account_id,rule_id,item_type,value,replacement,sort,created_at)
