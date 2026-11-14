@@ -755,15 +755,12 @@ func (s *sSysPublish) collectVerifyEventsSettled(ctx context.Context, display gd
 		return true, nil
 	}
 	rows, err := s.pairedCollectVerifyEvents(ctx, display["id"].Int64())
-	if err != nil || len(rows) == 0 {
-		return err == nil, err
+	if err != nil {
+		return false, err
 	}
-	latest := collectMaterialEventAt(rows[len(rows)-1])
-	if latest.IsZero() {
-		return false, nil
-	}
-	displayAt := collectMaterialEventAt(display)
-	return collectMaterialVerifyDeadlineReached(displayAt, latest, time.Now()), nil
+	// 已经写入 material_parent_event_id 就表示展示与验证资料完成配对。
+	// 配对成功后立即进入资料落库，不再等待验证静默窗口；只有尚未配对时才等待窗口。
+	return len(rows) > 0, nil
 }
 
 func collectMaterialVerifyDeadlineReached(displayAt, latestVerifyAt, now time.Time) bool {
