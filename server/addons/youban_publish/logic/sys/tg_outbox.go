@@ -638,12 +638,13 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 			AND (o.status=? OR (o.status=? AND o.lease_expires_at<=?))
 			AND j.status IN ('pending','failed_retry','unknown')
 			AND COALESCE(j.dispatch_status,'') IN ('','idle')
+			AND NOT (j.status='pending' AND COALESCE(j.dispatch_status,'')='idle' AND COALESCE(j.asynq_task_id,'')='' AND j.updated_at < CURRENT_TIMESTAMP - (? * INTERVAL '1 minute'))
 			AND (j.next_retry_at IS NULL OR j.next_retry_at<=? OR (j.status='pending' AND COALESCE(j.dispatch_status,'')='idle'))
 		ORDER BY j.tenant_id,j.channel_id,` + telegramChannelScheduleOrderSQL("j") + `,o.available_at,o.id
 	)
 	SELECT id,job_id,attempt_count,available_at,account_id,tenant_id,channel_id,priority FROM channel_heads
 	ORDER BY available_at,id LIMIT ?`
-	if err := g.DB().GetScan(ctx, &candidates, query, telegramOutboxEventPublish, now, telegramOutboxPending, telegramOutboxProcessing, now, now, limit*2); err != nil {
+	if err := g.DB().GetScan(ctx, &candidates, query, telegramOutboxEventPublish, now, telegramOutboxPending, telegramOutboxProcessing, telegramChannelHeadTimeoutMinutes(), now, limit*2); err != nil {
 		return nil, gerror.Wrap(err, "读取Stream频道队首失败")
 	}
 	var rows []telegramJobOutboxRecord
