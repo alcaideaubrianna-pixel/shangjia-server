@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"unicode/utf8"
 
@@ -120,6 +121,18 @@ func (s *sSysPublish) upsertPublishRecordLog(ctx context.Context, job telegramJo
 	// The table is introduced online; old test databases and older instances
 	// may not have it yet. Legacy writes remain authoritative until migration.
 	snapshot := publishRecordLogSnapshot{Title: job.TitleSnapshot}
+	var row publishRecordLogSnapshot
+	if err := g.DB().Model(publishAccountTable+" a").Safe().Ctx(ctx).
+		LeftJoin(publishTenantTable+" t", "t.id=a.tenant_id AND t.deleted_at IS NULL").
+		LeftJoin(publishAccountTable+" owner", "owner.tenant_id=a.tenant_id AND owner.account_type='admin' AND owner.deleted_at IS NULL").
+		LeftJoin(publishChannelTable+" c", fmt.Sprintf("c.id=%d", job.ChannelId)).
+		LeftJoin(publishBotTable+" b", fmt.Sprintf("b.id=%d", job.BotId)).
+		Fields("a.nickname AS account_name,COALESCE(NULLIF(owner.username,''),NULLIF(t.name,'')) AS tenant_name,c.channel_title,c.channel_username,b.bot_name,b.bot_username").
+		Where("a.id", job.AccountId).Scan(&row); err == nil {
+		snapshot.AccountName, snapshot.TenantName = row.AccountName, row.TenantName
+		snapshot.ChannelTitle, snapshot.ChannelUser = row.ChannelTitle, row.ChannelUser
+		snapshot.BotName, snapshot.BotUsername = row.BotName, row.BotUsername
+	}
 	data := g.Map{
 		"job_id": job.Id, "task_id": job.TaskId, "tenant_id": job.TenantId,
 		"account_id": job.AccountId, "profile_id": job.ProfileId, "channel_id": job.ChannelId,
