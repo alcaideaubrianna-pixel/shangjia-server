@@ -17,10 +17,12 @@ import (
 )
 
 const (
-	telegramSendBudget                = 10 * time.Minute
+	// A stuck Telegram call must release the channel promptly; recovery then
+	// lets the next queued job proceed while the timed-out job is reconciled.
+	telegramSendBudget                = 2 * time.Minute
 	telegramSendMaxRetries            = 3
 	telegramSendPhaseTimeoutCancelled = "timeout_cancelled"
-	telegramSendTimeoutMessage        = "频道发送超过10分钟，旧任务已取消，整组资料移至队尾；迟到消息只删除不补发"
+	telegramSendTimeoutMessage        = "频道发送超过2分钟，旧任务已取消，整组资料移至队尾；迟到消息只删除不补发"
 )
 
 // telegramSendBudgetContext uses a durable deadline shared by every retry and

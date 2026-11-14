@@ -23,8 +23,8 @@ func TestTelegramAPITimeoutFallback(t *testing.T) {
 	if isTelegramAPITimeout(errors.New("bad request")) {
 		t.Fatal("rejection is not a timeout")
 	}
-	if telegramSendBudget != 10*time.Minute {
-		t.Fatalf("publication budget %s must enforce the 10 minute channel deadline", telegramSendBudget)
+	if telegramSendBudget != 2*time.Minute {
+		t.Fatalf("publication budget %s must enforce the 2 minute channel deadline", telegramSendBudget)
 	}
 }
 
