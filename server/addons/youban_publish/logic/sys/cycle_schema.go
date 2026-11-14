@@ -23,6 +23,7 @@ func (s *sSysPublish) syncChannelCycleAfterSave(ctx context.Context, tenantId in
 		"cycle_last_error_message": "",
 		"updated_at":               gtime.Now(),
 		"cycle_scheduler_shard":    gdb.Raw("MOD(ABS(HASHTEXT(tenant_id::text || ':' || id::text)),64)"),
+		"cycle_config_version":     gdb.Raw("COALESCE(cycle_config_version,0)+1"),
 	}
 	data["cycle_next_run_at"] = nil
 	_, err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).

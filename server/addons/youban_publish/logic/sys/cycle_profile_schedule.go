@@ -53,6 +53,7 @@ type profileCycleChannelConfig struct {
 	PublishTime string `orm:"cycle_publish_time"`
 	Status      int    `orm:"status"`
 	Direction   string `orm:"publish_direction"`
+	Version     int64  `orm:"cycle_config_version"`
 }
 
 type profileCycleRescheduleRow struct {
@@ -140,7 +141,7 @@ func (s *sSysPublish) profileCycleChannelConfigById(ctx context.Context, channel
 		}
 	}
 	err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
-		Fields("id,tenant_id,cycle_publish_enabled,cycle_publish_mode,cycle_publish_days,cycle_publish_time,status,publish_direction").
+		Fields("id,tenant_id,cycle_publish_enabled,cycle_publish_mode,cycle_publish_days,cycle_publish_time,status,publish_direction,cycle_config_version").
 		Where("id", channelId).WhereNull("deleted_at").Scan(&config)
 	if err != nil {
 		return config, gerror.Wrap(err, "读取频道循环配置失败")
@@ -340,6 +341,9 @@ func (s *sSysPublish) updateProfileCycleRescheduleBatch(ctx context.Context, con
 	ids := make([]int64, 0, len(rows))
 	for _, row := range rows {
 		ids = append(ids, row.JobId)
+	}
+	if _, err := g.DB().Model(publishChannelProfileTable).Safe().Ctx(ctx).Where("channel_id", config.Id).WhereIn("last_job_id", ids).Data(g.Map{"applied_cycle_config_version": config.Version, "updated_at": now}).Update(); err != nil {
+		return gerror.Wrap(err, "更新频道资料循环配置版本失败")
 	}
 	return projectChannelCyclePlans(ctx, ids)
 }
@@ -548,10 +552,10 @@ func (s *sSysPublish) profileCycleDueRowsShard(ctx context.Context, limit, shard
 		InnerJoin(publishChannelProfileTable+" cp", "cp.last_job_id=j.id AND cp.status='active'").
 		InnerJoin("hg_content_profile p", "p.id=j.profile_id AND p.deleted_at IS NULL").
 		LeftJoin(publishChannelTable+" c", "c.id=j.channel_id AND c.deleted_at IS NULL").
-		Fields("j.id AS job_id,j.tenant_id,j.account_id,j.profile_id,j.channel_id,j.sent_at,j.cycle_days,j.cycle_publish_time,j.next_cycle_at,j.dispatch_count,j.cycle_failure_count,"+
+		Fields("j.id AS job_id,j.tenant_id,j.account_id,j.profile_id,j.channel_id,j.sent_at,j.cycle_days,j.cycle_publish_time,j.next_cycle_at,j.dispatch_count,j.cycle_failure_count,COALESCE(cp.applied_cycle_config_version,0) AS applied_cycle_config_version,COALESCE(c.cycle_config_version,0) AS channel_cycle_config_version,"+
 			"COALESCE(c.cycle_publish_enabled,0) AS channel_enabled,COALESCE(c.cycle_publish_days,0) AS channel_days,"+
 			"COALESCE(c.cycle_publish_time,'') AS channel_publish_time,COALESCE(c.cycle_publish_mode,'time') AS channel_mode,COALESCE(c.status,0) AS channel_status,COALESCE(c.publish_direction,'') AS publish_direction").
-		Where("j.cycle_enabled", 1).WhereIn("j.status", []string{"sent", "superseded"}).WhereNotNull("j.next_cycle_at").
+		Where("j.cycle_enabled", 1).WhereIn("j.status", []string{"sent", "superseded"}).Where("(j.next_cycle_at IS NOT NULL AND j.next_cycle_at<=? OR COALESCE(cp.applied_cycle_config_version,0)<COALESCE(c.cycle_config_version,0))", gtime.Now()).
 		Where("NOT EXISTS (SELECT 1 FROM "+channelPermissionCircuitTable+" pc WHERE pc.tenant_id=j.tenant_id AND pc.channel_id=j.channel_id AND pc.paused=1)").
 		WhereLTE("j.next_cycle_at", gtime.Now())
 	if len(scopes) > 0 {
@@ -562,7 +566,7 @@ func (s *sSysPublish) profileCycleDueRowsShard(ctx context.Context, limit, shard
 			InnerJoin(publishChannelTable+" c", "c.id=cp.channel_id AND c.deleted_at IS NULL").
 			Fields("j.id AS job_id,j.tenant_id,j.account_id,j.profile_id,j.channel_id,j.sent_at,j.cycle_days,j.cycle_publish_time,cp.next_cycle_at,cp.cycle_generation AS dispatch_count,j.cycle_failure_count").
 			Where("cp.tenant_id", scopes[0].TenantID).Where("cp.account_id", scopes[0].AccountID).Where("cp.status", "active").
-			WhereNotNull("cp.next_cycle_at").WhereLTE("cp.next_cycle_at", gtime.Now()).WhereIn("j.status", []string{"sent", "superseded"}).
+			Where("(cp.next_cycle_at IS NOT NULL AND cp.next_cycle_at<=? OR COALESCE(cp.applied_cycle_config_version,0)<COALESCE(c.cycle_config_version,0))", gtime.Now()).WhereIn("j.status", []string{"sent", "superseded"}).
 			Where("NOT EXISTS (SELECT 1 FROM " + channelPermissionCircuitTable + " pc WHERE pc.tenant_id=cp.tenant_id AND pc.channel_id=cp.channel_id AND pc.paused=1)")
 	} else {
 		model = accountScheduleModel(model, "j.tenant_id", "j.account_id", scopes)
