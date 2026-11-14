@@ -557,6 +557,24 @@ func (s *sSysPublish) setProfilesOffline(ctx context.Context, ids []int64, tenan
 	if err := s.supersedeProfilePendingTelegramJobs(ctx, ids, tenantId); err != nil {
 		return err
 	}
+	// The profile may be unpublished while a publish task is completing. The
+	// task can therefore become sent after the first pending-task cancellation
+	// scan. Re-scan the authoritative message table after the profile is private
+	// and enqueue cleanup for every still-sent message-bearing job. The cleanup
+	// enqueue is idempotent and uses the independent delete lane.
+	activeJobs, err := s.telegramJobsWithActiveMessages(ctx, tenantId, ids, "")
+	if err != nil {
+		return err
+	}
+	for _, job := range activeJobs {
+		if job.Id <= 0 {
+			continue
+		}
+		if err := s.enqueueTelegramCleanupJob(ctx, job.Id, 0); err != nil {
+			return gerror.Wrap(err, "加入资料已发送消息清理队列失败")
+		}
+		s.appendTelegramJobLog(ctx, job.telegramJobRecord(), "down", "queued", "资料下架后补扫已发送TG消息并加入清理队列")
+	}
 	for _, id := range ids {
 		if err := s.syncProfileNoteIndex(ctx, id); err != nil {
 			return err

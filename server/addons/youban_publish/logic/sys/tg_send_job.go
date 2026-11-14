@@ -76,13 +76,15 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) (resultE
 	ctx = telegramPublishJobTraceContext(ctx, targetJob)
 	// 资料生命周期以后一次操作为准。下架可能与已入队的上架任务并发，
 	// 发送前必须重新读取主资料状态，避免下架完成后仍把旧任务发到 Telegram。
-	if active, stateErr := telegramProfilePublishable(ctx, targetJob.ProfileId); stateErr != nil {
-		return stateErr
-	} else if !active {
-		if supersedeErr := s.markTelegramJobSuperseded(ctx, targetJob.Id); supersedeErr != nil {
-			return supersedeErr
+	if targetJob.ProfileId > 0 && !isMessagePushOperationNo(targetJob.OperationNo) {
+		if active, stateErr := telegramProfilePublishable(ctx, targetJob.ProfileId); stateErr != nil {
+			return stateErr
+		} else if !active {
+			if supersedeErr := s.markTelegramJobSuperseded(ctx, targetJob.Id); supersedeErr != nil {
+				return supersedeErr
+			}
+			return nil
 		}
-		return nil
 	}
 	if isMessagePushOperationNo(targetJob.OperationNo) {
 		return s.SendMessagePushJob(ctx, jobId)
@@ -171,17 +173,19 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) (resultE
 		return nil
 	}
 	// 下架可能刚好发生在取队首/获取 lease 期间，再做一次最终闸门检查。
-	if active, stateErr := telegramProfilePublishable(ctx, targetJob.ProfileId); stateErr != nil {
-		stopExecution()
-		s.releaseTelegramChannelLease(ctx, lease)
-		return stateErr
-	} else if !active {
-		stopExecution()
-		s.releaseTelegramChannelLease(ctx, lease)
-		if supersedeErr := s.markTelegramJobSuperseded(ctx, targetJob.Id); supersedeErr != nil {
-			return supersedeErr
+	if targetJob.ProfileId > 0 && !isMessagePushOperationNo(targetJob.OperationNo) {
+		if active, stateErr := telegramProfilePublishable(ctx, targetJob.ProfileId); stateErr != nil {
+			stopExecution()
+			s.releaseTelegramChannelLease(ctx, lease)
+			return stateErr
+		} else if !active {
+			stopExecution()
+			s.releaseTelegramChannelLease(ctx, lease)
+			if supersedeErr := s.markTelegramJobSuperseded(ctx, targetJob.Id); supersedeErr != nil {
+				return supersedeErr
+			}
+			return nil
 		}
-		return nil
 	}
 	defer func() {
 		stopExecution()
