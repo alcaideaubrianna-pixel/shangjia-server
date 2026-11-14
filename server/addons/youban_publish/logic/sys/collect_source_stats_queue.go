@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -20,6 +23,17 @@ var collectStatsLowPriorityGate = make(chan struct{}, 1)
 const tgTaskTypeCollectSourceStats = "youban_publish:collect:source_stats"
 const collectSourceStatsWorkTable = "hg_youban_publish_collect_source_stats_work"
 
+func collectSourceStatsRefreshDelay() time.Duration {
+	seconds, err := strconv.Atoi(strings.TrimSpace(os.Getenv("YOUBAN_PUBLISH_COLLECT_SOURCE_STATS_DELAY_SECONDS")))
+	if err != nil || seconds < 10 {
+		seconds = 30
+	}
+	if seconds > 300 {
+		seconds = 300
+	}
+	return time.Duration(seconds) * time.Second
+}
+
 type collectSourceStatsPayload struct {
 	SourceID int64 `json:"sourceId"`
 }
@@ -29,10 +43,10 @@ type collectSourceStatsPayload struct {
 // already pending source's deadline: busy sources must still make progress.
 func markCollectSourceStatsDirty(ctx context.Context, sourceID int64) error {
 	_, err := g.DB().Exec(ctx, `INSERT INTO `+collectSourceStatsWorkTable+` (source_id,generation,pending,available_at)
- VALUES (?, ?, 1, CURRENT_TIMESTAMP + INTERVAL '5 seconds')
+ VALUES (?, ?, 1, CURRENT_TIMESTAMP + (? * INTERVAL '1 second'))
  ON CONFLICT (source_id) DO UPDATE SET generation=EXCLUDED.generation,pending=1,
  available_at=CASE WHEN `+collectSourceStatsWorkTable+`.pending=1 THEN `+collectSourceStatsWorkTable+`.available_at ELSE EXCLUDED.available_at END,
- updated_at=CURRENT_TIMESTAMP`, sourceID, guid.S())
+	 updated_at=CURRENT_TIMESTAMP`, sourceID, guid.S(), int(collectSourceStatsRefreshDelay().Seconds()))
 	return gerror.Wrap(err, "持久化采集源统计刷新请求失败")
 }
 
@@ -56,7 +70,7 @@ func enqueueCollectSourceStatsTask(ctx context.Context, client *asynq.Client, so
 		return err
 	}
 	_, err = client.EnqueueContext(ctx, asynq.NewTask(tgTaskTypeCollectSourceStats, body),
-		asynq.Queue(tgQueueNameBackground), asynq.ProcessIn(5*time.Second),
+		asynq.Queue(tgQueueNameBackground), asynq.ProcessIn(collectSourceStatsRefreshDelay()),
 		asynq.Unique(30*time.Minute), asynq.Timeout(2*time.Minute), asynq.MaxRetry(1000))
 	if errors.Is(err, asynq.ErrDuplicateTask) {
 		return nil
