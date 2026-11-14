@@ -2,7 +2,6 @@ package sys
 
 import (
 	"context"
-	"strconv"
 	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
@@ -107,19 +106,8 @@ func (s *sSysPublish) rehydrateMissingTelegramChannelQueue(ctx context.Context, 
 	if err != nil {
 		return err
 	}
-	now := time.Now().UnixMilli()
 	for _, job := range jobs {
-		member := strconv.FormatInt(job.Id, 10)
-		value, scoreErr := g.Redis().Do(ctx, "ZSCORE", telegramChannelQueueKey(job.ChannelId), member)
-		if scoreErr != nil {
-			g.Log().Warningf(ctx, "频道队列对账读取失败 channel:%d job:%d err:%+v", job.ChannelId, job.Id, scoreErr)
-			continue
-		}
-		if !value.IsNil() {
-			continue
-		}
-		score := now*1000 + int64(max(0, 100000-job.Priority))
-		if err = enqueueTelegramChannelJob(ctx, job.ChannelId, job.Id, score); err != nil {
+		if err = enqueueTelegramChannelJob(ctx, job.ChannelId, job.Id, job.Priority, time.Now()); err != nil {
 			g.Log().Warningf(ctx, "频道队列对账补入失败 channel:%d job:%d err:%+v", job.ChannelId, job.Id, err)
 			continue
 		}

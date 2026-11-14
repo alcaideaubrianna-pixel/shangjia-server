@@ -21,14 +21,60 @@ func telegramChannelQueueKey(channelID int64) string {
 	return fmt.Sprintf("%s%d", telegramChannelQueuePrefix, channelID)
 }
 
+const (
+	// Redis stores scores as IEEE-754 doubles. Keep the complete score below
+	// 2^53 while reserving the high part for the lane and the low part for the
+	// due timestamp plus a FIFO tie breaker.
+	telegramChannelQueuePriorityScale int64 = 1_800_000_000_000_000
+	telegramChannelQueueSequenceScale int64 = 1_000
+)
+
+// telegramChannelQueuePriorityRank maps the existing publish lanes to the
+// queue order. Lower ranks are consumed first; manual/interactive work is
+// therefore ahead of realtime, normal, bulk and historical work.
+func telegramChannelQueuePriorityRank(priority int) int64 {
+	switch {
+	case priority <= tgJobPriorityInteractive:
+		return 0
+	case priority <= tgJobPriorityUrgent:
+		return 1
+	case priority <= tgJobPriorityDefault:
+		return 2
+	case priority <= tgJobPriorityBulk:
+		return 3
+	default:
+		return 4
+	}
+}
+
+// telegramChannelQueueScore implements priority > available_at > FIFO.
+// Job IDs are monotonically allocated by PostgreSQL and provide a stable FIFO
+// tie breaker for jobs made available in the same millisecond. The queue
+// worker decodes only the due timestamp for readiness checks.
+func telegramChannelQueueScore(priority int, availableAt time.Time, jobID int64) int64 {
+	if availableAt.IsZero() {
+		availableAt = time.Now()
+	}
+	dueMillis := availableAt.UnixMilli()
+	if dueMillis < 0 {
+		dueMillis = 0
+	}
+	sequence := jobID % telegramChannelQueueSequenceScale
+	if sequence < 0 {
+		sequence = -sequence
+	}
+	return telegramChannelQueuePriorityRank(priority)*telegramChannelQueuePriorityScale + dueMillis*telegramChannelQueueSequenceScale + sequence
+}
+
 // enqueueTelegramChannelJob adds a job id exactly once. Lower scores are read
 // first; the lane is encoded ahead of the creation sequence by the caller.
-func enqueueTelegramChannelJob(ctx context.Context, channelID, jobID int64, score int64) error {
+func enqueueTelegramChannelJob(ctx context.Context, channelID, jobID int64, priority int, availableAt time.Time) error {
 	if channelID <= 0 || jobID <= 0 {
 		return fmt.Errorf("invalid telegram channel queue identity channel:%d job:%d", channelID, jobID)
 	}
 	key := telegramChannelQueueKey(channelID)
 	member := strconv.FormatInt(jobID, 10)
+	score := telegramChannelQueueScore(priority, availableAt, jobID)
 	var err error
 	// Redis is the ready transport, while the DB Outbox remains the source of
 	// truth. Retry transient ZADD failures briefly, but never report success on
@@ -36,9 +82,6 @@ func enqueueTelegramChannelJob(ctx context.Context, channelID, jobID int64, scor
 	for attempt := 1; attempt <= 3; attempt++ {
 		_, err = g.Redis().Do(ctx, "ZADD", key, score, member)
 		if err == nil {
-			// Keep the worker's ready set in sync with the per-channel queue.
-			// This is the realtime wake/index path; PostgreSQL scanning is only
-			// a recovery mechanism.
 			if _, setErr := g.Redis().Do(ctx, "SADD", telegramChannelActiveSetKey, strconv.FormatInt(channelID, 10)); setErr != nil {
 				return setErr
 			}
@@ -55,11 +98,14 @@ func enqueueTelegramChannelJob(ctx context.Context, channelID, jobID int64, scor
 		}
 	}
 	g.Log().Warning(ctx, "频道队列写入失败，保留Outbox待重试", g.Map{
-		"event":     "channel_queue_zadd_failed",
-		"channelId": channelID,
-		"jobId":     jobID,
-		"attempts":  3,
-		"error":     err.Error(),
+		"event":       "channel_queue_zadd_failed",
+		"channelId":   channelID,
+		"jobId":       jobID,
+		"priority":    priority,
+		"availableAt": availableAt,
+		"score":       score,
+		"attempts":    3,
+		"error":       err.Error(),
 	})
 	return err
 }
@@ -94,16 +140,13 @@ func dequeueTelegramChannelHead(ctx context.Context, channelID int64) (int64, er
 	if channelID <= 0 {
 		return 0, fmt.Errorf("invalid telegram channel id: %d", channelID)
 	}
-	// Claim only an item whose retry score is due. ZPOPMIN alone would remove
-	// future retries immediately and create a hot loop for media_not_ready jobs.
-	// The Lua script keeps inspect-and-remove atomic across workers.
-	const claimDueScript = `local v=redis.call('ZRANGE',KEYS[1],0,0,'WITHSCORES'); if #v==0 or tonumber(v[2])>tonumber(ARGV[1]) then return {} end; redis.call('ZREM',KEYS[1],v[1]); return {v[1],v[2]}`
-	// Queue scores use milliseconds in the high-order portion and reserve the
-	// low three digits for priority/tie-breaking. Compare against the end of
-	// the current millisecond so every score scheduled for this millisecond is
-	// eligible while future retries remain untouched.
+	// Claim only an item whose encoded available_at is due. The priority lane
+	// remains part of the score for ordering, but readiness must inspect the
+	// due-time portion only; comparing the complete score would make every
+	// priority lane appear to be in the far future.
+	const claimDueScript = `local v=redis.call('ZRANGE',KEYS[1],0,0,'WITHSCORES'); if #v==0 then return {} end; local score=tonumber(v[2]); local due=math.floor((score % 1800000000000000) / 1000); if due>tonumber(ARGV[1]) then return {} end; redis.call('ZREM',KEYS[1],v[1]); return {v[1],v[2]}`
 	now := time.Now().UnixMilli()
-	value, err := g.Redis().Do(ctx, "EVAL", claimDueScript, 1, telegramChannelQueueKey(channelID), strconv.FormatInt(now*1000+999, 10))
+	value, err := g.Redis().Do(ctx, "EVAL", claimDueScript, 1, telegramChannelQueueKey(channelID), strconv.FormatInt(now, 10))
 	if err != nil {
 		return 0, err
 	}
@@ -111,10 +154,6 @@ func dequeueTelegramChannelHead(ctx context.Context, channelID int64) (int64, er
 	if len(items) < 1 {
 		return 0, nil
 	}
-	// Redis adapters may decode ZPOPMIN as either a flat
-	// [member, score] array or a nested [[member, score]] array.
-	// Accept both shapes so a successfully claimed job is never treated as
-	// an empty queue.
 	first := items[0]
 	if nested, ok := first.([]interface{}); ok && len(nested) > 0 {
 		first = nested[0]

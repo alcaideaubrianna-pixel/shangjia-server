@@ -44,7 +44,7 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 	job, loadErr := s.telegramJobById(ctx, jobID)
 	if loadErr != nil {
 		g.Log().Warning(ctx, "频道队列任务加载失败", g.Map{"event": "channel_queue_error", "stage": "load", "channelId": channelID, "jobId": jobID, "error": loadErr.Error()})
-		_ = enqueueTelegramChannelJob(ctx, channelID, jobID, time.Now().Add(time.Second).UnixMilli())
+		_ = enqueueTelegramChannelJob(ctx, channelID, jobID, tgJobPriorityDefault, time.Now().Add(time.Second))
 		return true, loadErr
 	}
 	g.Log().Info(ctx, "频道队列取出任务", g.Map{"event": "channel_queue_dequeue", "channelId": channelID, "jobId": jobID, "profileId": job.ProfileId, "operationNo": job.OperationNo, "queue": telegramChannelQueueKey(channelID)})
@@ -68,8 +68,8 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 			priority = newPriority
 			g.Log().Warning(ctx, "频道队列任务优先级降级", g.Map{"event": "channel_queue_priority_downgrade", "channelId": channelID, "jobId": jobID, "oldPriority": job.Priority, "newPriority": priority, "retryCount": job.RetryCount, "reason": err.Error()})
 		}
-		score := hold*1000 + int64(max(0, 100000-priority))
-		_ = enqueueTelegramChannelJob(ctx, channelID, jobID, score)
+		score := telegramChannelQueueScore(priority, time.UnixMilli(hold), jobID)
+		_ = enqueueTelegramChannelJob(ctx, channelID, jobID, priority, time.UnixMilli(hold))
 		g.Log().Warning(ctx, "频道队列任务发送失败，已重入队", g.Map{"event": "channel_queue_requeue", "stage": "send", "channelId": channelID, "jobId": jobID, "profileId": job.ProfileId, "score": score, "error": err.Error()})
 		return true, err
 	}
@@ -83,6 +83,27 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 		default:
 			hold := time.Now().Add(time.Second).UnixMilli()
 			reason := job.LastDispatchError
+			// A nil SendTelegramJob error is not proof of delivery. If the
+			// persisted job is still non-terminal, treat it as a failed state
+			// transition and apply the same retry/downgrade policy as transport
+			// errors; otherwise a pending job can occupy the channel forever.
+			if strings.TrimSpace(reason) == "" {
+				reason = "发送完成但任务状态未落库"
+			}
+			attempt := job.RetryCount + 1
+			priority := job.Priority
+			if priority <= 0 {
+				priority = tgJobPriorityBulk
+			}
+			newPriority := priority
+			if attempt%3 == 0 {
+				newPriority = priority - 5
+			}
+			_, _ = g.DB().Model(publishTgJobTable).Ctx(ctx).Where("id", jobID).
+				Data(g.Map{"retry_count": attempt, "priority": newPriority, "last_dispatch_error": reason, "updated_at": gtime.Now()}).Update()
+			if newPriority != priority {
+				g.Log().Warning(ctx, "频道队列非终态任务优先级降级", g.Map{"event": "channel_queue_priority_downgrade", "channelId": channelID, "jobId": jobID, "oldPriority": priority, "newPriority": newPriority, "retryCount": attempt, "reason": reason})
+			}
 			if strings.Contains(reason, "媒体仍在异步处理中") {
 				// Media readiness is an asynchronous failure too. Count it so a
 				// stale media head yields to later channel work after every third
@@ -103,7 +124,7 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 				}
 				g.Log().Info(ctx, "频道队列任务等待媒体就绪", g.Map{"event": "channel_queue_media_not_ready", "channelId": channelID, "jobId": jobID, "profileId": job.ProfileId, "score": hold})
 			}
-			priority := job.Priority
+			priority = newPriority
 			if priority <= 0 {
 				priority = tgJobPriorityBulk
 			}
@@ -113,12 +134,12 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 					priority = tgJobPriorityBulk
 				}
 			}
-			_ = enqueueTelegramChannelJob(ctx, channelID, jobID, hold*1000+int64(max(0, 100000-priority)))
+			_ = enqueueTelegramChannelJob(ctx, channelID, jobID, priority, time.UnixMilli(hold))
 			g.Log().Warning(ctx, "频道队列任务未完成，已重入队", g.Map{"event": "channel_queue_requeue", "stage": "post_send", "channelId": channelID, "jobId": jobID, "profileId": job.ProfileId, "status": job.Status, "score": hold, "reason": reason})
 		}
 	} else {
 		hold := time.Now().Add(time.Second).UnixMilli()
-		_ = enqueueTelegramChannelJob(ctx, channelID, jobID, hold)
+		_ = enqueueTelegramChannelJob(ctx, channelID, jobID, tgJobPriorityDefault, time.UnixMilli(hold))
 		g.Log().Warning(ctx, "频道队列任务状态读取失败，已重入队", g.Map{"event": "channel_queue_requeue", "stage": "reload", "channelId": channelID, "jobId": jobID, "score": hold, "error": loadErr.Error()})
 	}
 	return true, nil

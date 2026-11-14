@@ -257,8 +257,10 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 	// EnqueueTelegramJob/Asynq path here: that would leave local runs on the
 	// legacy transport even when the channel worker is enabled.
 	if telegramChannelQueueEnabled() && job.ChannelId > 0 {
-		score := time.Now().UnixMilli()*1000 + int64(max(0, 100000-job.Priority))
-		if err = enqueueTelegramChannelJob(ctx, job.ChannelId, job.Id, score); err != nil {
+		priority := telegramJobPriorityValue(job)
+		availableAt := time.Now()
+		score := telegramChannelQueueScore(priority, availableAt, job.Id)
+		if err = enqueueTelegramChannelJob(ctx, job.ChannelId, job.Id, priority, availableAt); err != nil {
 			return s.releaseTelegramOutbox(ctx, row.Id, owner, row.AttemptCount, err.Error())
 		}
 		g.Log().Info(ctx, "TG频道队列已就绪", g.Map{

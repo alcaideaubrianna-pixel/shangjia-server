@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
 )
@@ -11,6 +12,24 @@ import (
 func TestTelegramChannelQueueKey(t *testing.T) {
 	if got, want := telegramChannelQueueKey(254), "youban:tg:channel:queue:254"; got != want {
 		t.Fatalf("queue key=%q, want %q", got, want)
+	}
+}
+
+func TestTelegramChannelQueueScorePriorityAndFIFO(t *testing.T) {
+	due := time.UnixMilli(1_700_000_000_000)
+	manual := telegramChannelQueueScore(tgJobPriorityInteractive, due, 101)
+	oldBulk := telegramChannelQueueScore(tgJobPriorityBulk, due.Add(-time.Hour), 1)
+	if manual >= oldBulk {
+		t.Fatalf("manual score=%d must precede older bulk score=%d", manual, oldBulk)
+	}
+	first := telegramChannelQueueScore(tgJobPriorityInteractive, due, 101)
+	second := telegramChannelQueueScore(tgJobPriorityInteractive, due, 102)
+	if first >= second {
+		t.Fatalf("same-priority FIFO scores: first=%d second=%d", first, second)
+	}
+	future := telegramChannelQueueScore(tgJobPriorityInteractive, due.Add(time.Second), 103)
+	if future <= second {
+		t.Fatalf("future retry score=%d must remain after due score=%d", future, second)
 	}
 }
 
@@ -33,7 +52,7 @@ func TestTelegramChannelCursorNext(t *testing.T) {
 
 func TestTelegramChannelQueueRejectsInvalidIdentity(t *testing.T) {
 	ctx := context.Background()
-	if err := enqueueTelegramChannelJob(ctx, 0, 1, 1); err == nil {
+	if err := enqueueTelegramChannelJob(ctx, 0, 1, tgJobPriorityInteractive, time.Now()); err == nil {
 		t.Fatal("expected invalid channel error")
 	}
 	if err := removeTelegramChannelJob(ctx, 1, 0); err == nil {
@@ -54,13 +73,13 @@ func TestTelegramChannelQueueRedisIntegration(t *testing.T) {
 	channelID := int64(990001)
 	_, _ = g.Redis().Do(ctx, "DEL", telegramChannelQueueKey(channelID))
 	t.Cleanup(func() { _, _ = g.Redis().Do(ctx, "DEL", telegramChannelQueueKey(channelID)) })
-	if err := enqueueTelegramChannelJob(ctx, channelID, 2, 20); err != nil {
+	if err := enqueueTelegramChannelJob(ctx, channelID, 2, tgJobPriorityBulk, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if err := enqueueTelegramChannelJob(ctx, channelID, 1, 10); err != nil {
+	if err := enqueueTelegramChannelJob(ctx, channelID, 1, tgJobPriorityInteractive, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if err := enqueueTelegramChannelJob(ctx, channelID, 1, 10); err != nil {
+	if err := enqueueTelegramChannelJob(ctx, channelID, 1, tgJobPriorityInteractive, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := dequeueTelegramChannelHead(ctx, channelID); err != nil || got != 1 {
@@ -84,10 +103,10 @@ func TestTelegramChannelQueueDifferentChannelsAreIndependent(t *testing.T) {
 		_, _ = g.Redis().Do(ctx, "DEL", telegramChannelQueueKey(channelID))
 		t.Cleanup(func() { _, _ = g.Redis().Do(ctx, "DEL", telegramChannelQueueKey(channelID)) })
 	}
-	if err := enqueueTelegramChannelJob(ctx, channelA, 11, 10); err != nil {
+	if err := enqueueTelegramChannelJob(ctx, channelA, 11, tgJobPriorityInteractive, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if err := enqueueTelegramChannelJob(ctx, channelB, 21, 10); err != nil {
+	if err := enqueueTelegramChannelJob(ctx, channelB, 21, tgJobPriorityInteractive, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := dequeueTelegramChannelHead(ctx, channelA); err != nil || got != 11 {
