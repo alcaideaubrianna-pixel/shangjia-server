@@ -35,6 +35,7 @@ var (
 	publishTgMessageCacheTable      = pdao.YoubanPublishTgMessageCache.Table()
 	publishTgJobLogTable            = "hg_youban_publish_tg_job_log"
 	publishSuccessRecordTable       = "hg_youban_publish_success_record"
+	publishRecordLogTable            = "hg_youban_publish_record_log"
 	publishCycleRunTable            = pdao.YoubanPublishCycleRun.Table()
 	publishCycleRunLogTable         = pdao.YoubanPublishCycleRunLog.Table()
 	publishDailyStatTable           = "hg_youban_publish_daily_stat"
