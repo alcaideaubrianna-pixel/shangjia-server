@@ -5,7 +5,7 @@
 ## 1. 接手顺序
 
 1. 完整阅读仓库根目录 `AGENTS.md`，查看 `git status --short`、当前分支及 `git worktree list`。现有未提交修改不等于本任务修改，禁止整体暂存或清理。
-2. 用户通常要求合并到 `feat/railway-runtime-ci-split`，不要自行改为 develop。确认本次要求及两分支差异后再合并；构建、部署状态分别记录。
+2. 当前生产部署以阿里云 SAE、RDS、Redis 和 OSS 为准。不要根据历史分支名或旧平台文档推断当前运行环境；构建、部署状态分别记录。
 3. 先确定租户、账号、频道、资料、消息、job/event ID，获取有界的真实样本。区分已证实原因、推测、修复和待验收项。
 4. DB 优先 DBX MCP，远程系统使用 SSH server 2 MCP。不要因为终端缺少 curl/wget 就判断服务故障。
 
@@ -13,11 +13,11 @@
 
 | 入口 | 名称/地址 | 用途 |
 |---|---|---|
-| DBX PostgreSQL | `PostgreSQL_Xiaohuiji` | 生产业务库 railway |
+| DBX PostgreSQL | `PostgreSQL_Xiaohuiji` | 生产业务库；数据库名和连接参数以当前 RDS 配置为准 |
 | DBX connection ID | `436a8ca1-a13c-4a26-aa6f-08633096b8a4` | 当前配置的连接 ID，重建后可能变化 |
 | PostgreSQL 内网地址 | `10.3.0.10:5432` | 以 DBX 当前配置为准，不要求本机直接可达 |
 | SSH server 2 | `b-xiaohuiji-sg`，`ubuntu@43.159.54.73` | PostgreSQL 主机，已验证本机 psql 可用 |
-| SSH server 2 | `aliyun-sg-Redis`，`root@47.79.227.11` | 阿里云新加坡 Redis 主机；逻辑 DB、端口及当前实际连接从应用 ENV 确认 |
+| SSH server 2 | `aliyun-sg-Redis`，`root@47.79.227.11` | Redis 节点；逻辑 DB、端口及当前实际连接从阿里云配置和应用配置确认 |
 | SSH server 2 | `b-xiaohuiji-Redis-sg`，`ubuntu@43.153.199.31` | 另一个已配置 Redis 节点；不能据名称认定仍承载生产 |
 | API | `https://api.xiaohuiji.cc` | 生产 Web API |
 | 本地后端 | `/Users/ley/Desktop/CodeProject/youban/youban-server/server` | Go module hotgo |
@@ -31,15 +31,28 @@ DBX 示例（工具参数，不是 shell 命令）：
 {"connection_name":"PostgreSQL_Xiaohuiji","sql":"SELECT current_database(), now();","max_rows":10}
 ```
 
-SSH 示例：
+SSH 示例（仅用于节点级检查；云资源操作优先使用阿里云 CLI）：
 
 ```json
-{"connectionName":"b-xiaohuiji-sg","cmdString":"sudo -u postgres psql -d railway -X -P pager=off -c 'SELECT now();'","timeout":20000}
+{"connectionName":"b-xiaohuiji-sg","cmdString":"sudo -u postgres psql -d <production_database> -X -P pager=off -c 'SELECT now();'","timeout":20000}
 ```
 
-优先使用已配置的连接凭据。应用 Redis、COS、Bot 配置从对应线上应用 ENV 或现有配置读取，在进程内使用；禁止整份 ENV、docker inspect 环境或带凭据的连接串输出到日志、对话、文档。
+优先使用已配置的连接凭据。应用运行参数从 SAE 应用配置、RDS、Redis 和 OSS 的阿里云配置读取；禁止整份 ENV、docker inspect 环境或带凭据的连接串输出到日志、对话、文档。
 
-## 3. DB、磁盘、日志排查
+## 3. 阿里云 CLI 与本地代理
+
+本地执行阿里云 CLI 前必须通过系统代理访问云 API。代理地址以本机实际配置为准，常见配置如下：
+
+```bash
+export HTTP_PROXY=http://127.0.0.1:6153
+export HTTPS_PROXY=http://127.0.0.1:6153
+export ALL_PROXY=http://127.0.0.1:6153
+aliyun sts GetCallerIdentity
+```
+
+只在当前 shell 会话设置代理，不把代理地址、AccessKey、Secret 或临时凭证写入仓库。执行资源查询时优先使用只读阿里云 CLI 命令；变更前核对地域（当前生产为 `ap-southeast-1`）、实例 ID、应用角色和目标环境。
+
+## 4. DB、磁盘、日志排查
 
 先查连接与锁等待，再查慢查询和磁盘；不能只凭 API 503 判定 Redis 或 DB 已挂。
 
@@ -66,7 +79,7 @@ DB 主机检查 `df -h`；已知 PostgreSQL CSV 日志目录 `/pg/log/postgres/`
 
 历史故障涉及数据库磁盘、日志大表、自建 Bot API 缓存。先核对各路径/表大小和保留需求；不得把消息审计、Attempt、采集事件和普通运行日志当成同一类直接清空。
 
-## 4. SAE 角色与部署约束
+## 5. SAE 角色与部署约束
 
 区域 `ap-southeast-1`；以下 ID 来自现有 `deploy/sae-deploy-all.sh`。
 
@@ -160,3 +173,39 @@ git diff --check
 ## 8. 收尾记录
 
 每次记录：时间与时区、环境/角色/镜像、样本业务 ID、证据、影响范围、变更与行数、验证结果、未验证事项、回滚方法、commit/合并/构建/部署各自状态。不要将历史观察写成永久事实，也不要承诺一次测试覆盖所有生产故障。
+
+## 9. Publish SLS 快速排查
+
+Publish 线上日志使用以下项目：
+
+```text
+Project: sae-2fb5d3db-0975-4dea-b086-805d255131fa
+Logstore: sae-1325481f8155ce1a0e0b76739397e96e
+Region: ap-southeast-1
+Profile: xiaohuiji-sae
+```
+
+查询最近一小时错误：
+
+```sh
+FROM=$(($(date +%s)-3600)); TO=$(date +%s)
+aliyun sls get-logs-v2 \
+  --profile xiaohuiji-sae \
+  --project sae-2fb5d3db-0975-4dea-b086-805d255131fa \
+  --logstore sae-1325481f8155ce1a0e0b76739397e96e \
+  --region ap-southeast-1 --from "$FROM" --to "$TO" \
+  --query '* and ("ERROR" or "WARN" or "失败" or "超时")' \
+  --line 100 --reverse true \
+  --user-agent 'AlibabaCloud-Agent-Skills/alibabacloud-sls-query/7c4f1a2b9d8e4f6a1c3b5e7d9f0a2c4e'
+```
+
+按 trace、任务、频道查询时，直接替换 query：
+
+```sh
+--query '"TRACE_ID"'
+--query '"jobId":3225583'
+--query '"4403292454"'
+--query '"获取发送记录总数失败"'
+```
+
+发布链路重点查看 `traceId`、`jobId`、`profileId`、`channelId`、`dispatchStatus`、`jobStatus`、`sendPhase`、`returnedError`、`executionDurationMs`、`deferredReason`。没有 `execution_started` 通常表示队列未消费；`dispatchStatus=queued` 长时间不变表示调度或 Redis/Asynq 消费阻塞；有开始日志但没有完成日志表示执行卡住；接口 `code=52` 必须继续用同一 traceID 搜索底层 SQL 错误。
