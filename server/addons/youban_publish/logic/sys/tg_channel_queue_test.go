@@ -56,3 +56,34 @@ func TestTelegramChannelQueueRedisIntegration(t *testing.T) {
 		t.Fatalf("empty head=(%d,%v), want (0,nil)", got, err)
 	}
 }
+
+func TestTelegramChannelQueueDifferentChannelsAreIndependent(t *testing.T) {
+	if os.Getenv("YOUBAN_CHANNEL_QUEUE_INTEGRATION") != "1" {
+		t.Skip("set YOUBAN_CHANNEL_QUEUE_INTEGRATION=1 with disposable Redis")
+	}
+	ctx := context.Background()
+	channelA, channelB := int64(990002), int64(990003)
+	for _, channelID := range []int64{channelA, channelB} {
+		_, _ = g.Redis().Do(ctx, "DEL", telegramChannelQueueKey(channelID))
+		t.Cleanup(func() { _, _ = g.Redis().Do(ctx, "DEL", telegramChannelQueueKey(channelID)) })
+	}
+	if err := enqueueTelegramChannelJob(ctx, channelA, 11, 10); err != nil {
+		t.Fatal(err)
+	}
+	if err := enqueueTelegramChannelJob(ctx, channelB, 21, 10); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := dequeueTelegramChannelHead(ctx, channelA); err != nil || got != 11 {
+		t.Fatalf("channel A head=(%d,%v), want (11,nil)", got, err)
+	}
+	if got, err := dequeueTelegramChannelHead(ctx, channelB); err != nil || got != 21 {
+		t.Fatalf("channel B head=(%d,%v), want (21,nil)", got, err)
+	}
+}
+
+func TestTelegramChannelQueueWorkerDisabledByDefault(t *testing.T) {
+	t.Setenv("YOUBAN_PUBLISH_CHANNEL_QUEUE_ENABLED", "false")
+	if telegramChannelQueueEnabled() {
+		t.Fatal("channel queue worker must remain disabled unless explicitly enabled")
+	}
+}
