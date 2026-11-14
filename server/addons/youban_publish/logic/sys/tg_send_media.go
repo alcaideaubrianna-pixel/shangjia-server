@@ -41,6 +41,19 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 	if err := validateTelegramMediaSetKnownUploadSize(media); err != nil {
 		return nil, telegramPreparationError(err)
 	}
+	var releaseUpload func()
+	if telegramMediaSetRequiresUpload(media) {
+		accountID := int64(0)
+		if media[0] != nil {
+			accountID = media[0].AccountId
+		}
+		var err error
+		releaseUpload, err = acquireTelegramMediaUpload(ctx, accountID)
+		if err != nil {
+			return nil, err
+		}
+		defer releaseUpload()
+	}
 	caption = limitTelegramMediaCaption(caption)
 	if err := validateTelegramMediaPurpose(purpose, media); err != nil {
 		observeTelegramMediaPurposeViolation(ctx, "send")
