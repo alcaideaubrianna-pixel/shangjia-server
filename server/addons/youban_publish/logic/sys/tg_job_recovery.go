@@ -983,7 +983,6 @@ func (s *sSysPublish) recoverPendingIdleTelegramJobs(ctx context.Context, limit 
 }
 
 func telegramPendingRecoveryPostgresSQL() string {
-	channelKey := "CASE WHEN j.channel_id > 0 THEN j.channel_id::text ELSE 'chat:' || REPLACE(COALESCE(j.target_chat_id,''), '-100', '') END"
 	return `SELECT j.* FROM ` + publishTgJobTable + ` j
 		WHERE j.status IN ('pending','failed_retry','unknown')
 		AND COALESCE(j.dispatch_status,'') IN ('','idle')
@@ -992,33 +991,8 @@ func telegramPendingRecoveryPostgresSQL() string {
 		AND ` + messagePushPlanRecoveryConditionSQL("j") + `
 		AND (j.next_retry_at IS NULL OR j.next_retry_at<=?)
 		AND j.updated_at<=?
-		ORDER BY ` + channelKey + `, j.created_at,j.id
+		ORDER BY j.created_at,j.id
 		LIMIT ?`
-	/* Legacy strict channel-head query retained below in history; recovery now
-	   selects stale jobs directly and fairPendingTelegramJobs provides one job
-	   per channel per pass. */
-	/*
-		return `WITH channel_heads AS (
-			SELECT DISTINCT ON (j.tenant_id, ` + channelKey + `)
-				j.id,j.task_id,j.operation_no,j.tenant_id,j.account_id,j.profile_id,j.channel_id,j.bot_id,
-				j.push_mode,j.status,j.target_chat_id,j.collect_event_id,j.collect_source_id,j.collect_source_chat_id,
-				j.collect_source_message_id,j.retry_count,j.priority,j.asynq_task_id,j.queue_name,j.dispatch_status,
-				j.dispatched_at,j.dispatch_count,j.last_dispatch_error,j.next_retry_at,j.send_phase,j.reconcile_count,
-				j.error_message,j.sent_at,j.cycle_enabled,j.cycle_days,j.cycle_publish_time,j.next_cycle_at,j.created_at,j.updated_at
-			FROM ` + publishTgJobTable + ` j
-			WHERE ` + telegramChannelBlockingJobSQL("j") + `
-			ORDER BY j.tenant_id, ` + channelKey + `, ` + telegramChannelScheduleOrderSQL("j") + `
-		)
-		SELECT h.* FROM channel_heads h
-		WHERE h.status IN ('pending','failed_retry','unknown')
-			AND COALESCE(h.dispatch_status,'') IN ('','idle')
-			AND ` + telegramActiveChannelConditionForAlias("h") + `
-			AND ` + messagePushPlanRecoveryConditionSQL("h") + `
-			AND (h.next_retry_at IS NULL OR h.next_retry_at<=?)
-			AND h.updated_at<=?
-		ORDER BY h.created_at,h.id
-		LIMIT ?`
-	*/
 }
 
 // telegramPendingRecoveryChannelHeadSQL keeps heavily backlogged channels from
