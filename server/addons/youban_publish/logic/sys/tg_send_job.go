@@ -1144,7 +1144,16 @@ func (s *sSysPublish) completeTelegramJob(ctx context.Context, job telegramJobRe
 	}
 	if !transitioned {
 		s.appendTelegramJobLog(ctx, job, "publish", "skipped", "TG发送完成时任务已不再发送中，跳过成功标记")
-		return nil
+		current, loadErr := s.telegramJobCurrentStatus(ctx, job.Id)
+		if loadErr != nil {
+			return gerror.Wrap(loadErr, "读取TG任务最终状态失败")
+		}
+		switch current {
+		case telegramJobStatusSent, telegramJobStatusFailed, telegramJobStatusSuperseded:
+			return nil
+		default:
+			return gerror.Newf("TG发送已完成但任务状态未落库，当前状态：%s", current)
+		}
 	}
 	s.completeTelegramJobDeliveryProjection(ctx, job, sentAt)
 
