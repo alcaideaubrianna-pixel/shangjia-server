@@ -279,6 +279,12 @@ func (s *sSysPublish) enqueueProfileUnpublishSuccessNotice(ctx context.Context, 
 	if job.ProfileId <= 0 || job.TenantId <= 0 || job.AccountId <= 0 {
 		return nil
 	}
+	// Only Bot initiated lifecycle operations have a dedicated interactive
+	// notification path. Do not emit the generic account notice for admin,
+	// scheduled, or other non-Bot cleanup operations.
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(job.OperationNo)), botProfilePublishOperationPrefix) {
+		return nil
+	}
 	remaining, err := g.DB().Model(publishTgMessageTable+" m").Safe().Ctx(ctx).
 		InnerJoin(publishTgJobTable+" j", "j.id=m.job_id").
 		Where("j.profile_id", job.ProfileId).Where("j.tenant_id", job.TenantId).
