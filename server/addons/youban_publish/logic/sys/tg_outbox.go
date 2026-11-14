@@ -235,6 +235,24 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 			return nil
 		}
 	}
+	// Unified channel mode uses Redis as the realtime transport. Do not acquire or renew
+	// a PostgreSQL Outbox lease on the hot path: a slow DB update must not delay enqueue.
+	if telegramChannelQueueEnabled() {
+		job, loadErr := s.telegramJobById(ctx, row.JobId)
+		if loadErr != nil {
+			return loadErr
+		}
+		if job.ChannelId <= 0 {
+			return gerror.New("频道队列模式要求有效channel_id")
+		}
+		priority := telegramJobPriorityValue(job)
+		if enqueueErr := enqueueTelegramChannelJob(ctx, job.ChannelId, job.Id, priority, time.Now()); enqueueErr != nil {
+			g.Log().Warning(ctx, "统一频道队列Redis入队失败，保留Outbox待补偿", g.Map{"event": "channel_direct_enqueue_failed", "jobId": job.Id, "channelId": job.ChannelId, "outboxId": row.Id, "error": enqueueErr.Error()})
+			return enqueueErr
+		}
+		g.Log().Info(ctx, "统一频道队列直接入队", g.Map{"event": "channel_direct_enqueue", "jobId": job.Id, "channelId": job.ChannelId, "outboxId": row.Id, "priority": priority})
+		return nil
+	}
 	owner := telegramOutboxOwner()
 	now := gtime.Now()
 	step := beginTelegramPublishStage(ctx, "outbox.lease.acquire")
