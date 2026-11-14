@@ -68,7 +68,11 @@ func loadPublishRuntimeConfig(ctx context.Context) publishRuntimeConfig {
 	}
 	config := parsePublishRuntimeRoles(values)
 	// 灰度开关默认关闭，且不能在非 Push Worker 角色启动，避免调度器重复消费。
-	config.RedisStreamGray = config.PushWorker && (g.Cfg().MustGet(ctx, "youbanPublish.redisStream.grayEnabled", false).Bool() || strings.EqualFold(strings.TrimSpace(os.Getenv("YOUBAN_PUBLISH_PUSH_ENGINE")), "unified_stream"))
+	// The channel ZSET transport is the sole TG publish transport.  The
+	// historical Redis Stream gray bridge dispatches back into Asynq and must
+	// never run alongside it, otherwise the same Outbox job can have two
+	// consumers.
+	config.RedisStreamGray = config.PushWorker && !telegramChannelQueueEnabled() && (g.Cfg().MustGet(ctx, "youbanPublish.redisStream.grayEnabled", false).Bool() || strings.EqualFold(strings.TrimSpace(os.Getenv("YOUBAN_PUBLISH_PUSH_ENGINE")), "unified_stream"))
 	return config
 }
 
