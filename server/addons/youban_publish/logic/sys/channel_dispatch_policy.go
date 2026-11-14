@@ -12,12 +12,15 @@ func telegramLegacyPublishQueuesEnabled(ctx context.Context) bool {
 
 // telegramPublishExecutionQueues 返回发送执行队列，保留基础队列承接历史下架重试兼容任务。
 func telegramPublishExecutionQueues(ctx context.Context) map[string]int {
-	if telegramLegacyPublishQueuesEnabled(ctx) {
-		queues := telegramPublishForegroundQueueWeightsWithUnifiedLane(ctx)
-		queues[channelDispatchQueueManual] = 8
-		return queues
+	// One execution server owns every send lane. Keep legacy queue names in the
+	// map during migration so existing Redis tasks remain consumable, while new
+	// work uses the same manual/send/bulk registration in every environment.
+	queues := telegramPublishForegroundQueueWeightsWithUnifiedLane(ctx)
+	for name, weight := range telegramPublishBulkQueueWeights(ctx) {
+		queues[name] = weight
 	}
-	return map[string]int{channelDispatchQueueManual: 8, channelDispatchQueueSend: 1, tgQueueNameDefault: 1}
+	queues[channelDispatchQueueManual] = 8
+	return queues
 }
 
 // channelDispatchQueueSend 是统一发送任务队列名称。

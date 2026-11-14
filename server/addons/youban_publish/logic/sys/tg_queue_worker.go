@@ -57,24 +57,11 @@ func telegramAutoDeleteWorkerQueues() map[string]int {
 
 func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
 	s.tgQueueMu.Lock()
-	if s.tgInteractiveQueueServer != nil || s.tgQueueServer != nil || s.tgCleanupQueueServer != nil {
+	if s.tgQueueServer != nil || s.tgCleanupQueueServer != nil {
 		s.tgQueueMu.Unlock()
 		return
 	}
-	var interactiveServer, bulkServer *asynq.Server
 	delayedCheck, emptyCheck := telegramPublishQueueCheckIntervals(ctx)
-	if telegramLegacyPublishQueuesEnabled(ctx) {
-		interactiveServer = asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
-			Concurrency:    telegramPublishInteractiveConcurrency(ctx),
-			Queues:         telegramPublishInteractiveQueueWeights(ctx),
-			RetryDelayFunc: telegramQueueRetryDelay,
-		})
-		bulkServer = asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
-			Concurrency:    telegramPublishBulkConcurrency(ctx),
-			Queues:         telegramPublishBulkQueueWeights(ctx),
-			RetryDelayFunc: telegramQueueRetryDelay,
-		})
-	}
 	server := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
 		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.concurrency", 20).Int(),
 		Queues:         telegramPublishExecutionQueues(ctx),
@@ -89,9 +76,7 @@ func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
 	g.Log().Infof(ctx, "启动上架插件TG推送队列，兼容旧发送队列:%t", telegramLegacyPublishQueuesEnabled(ctx))
-	s.tgInteractiveQueueServer = interactiveServer
 	s.tgQueueServer = server
-	s.tgBulkQueueServer = bulkServer
 	s.tgCleanupQueueServer = cleanupServer
 	s.tgQueueMu.Unlock()
 	// The outbox dispatcher is part of the publish worker contract. Start it
@@ -107,13 +92,6 @@ func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
 	mux.HandleFunc(tgTaskTypeAutoDelete, s.handleTelegramAutoDeleteTask)
 	mux.HandleFunc(tgTaskTypeDown, s.handleProfileDownTask)
 
-	if interactiveServer != nil {
-		go func() {
-			if err := interactiveServer.Run(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
-				g.Log().Errorf(ctx, "启动上架插件TG人工发送队列失败：%+v", err)
-			}
-		}()
-	}
 	go func() {
 		if err := cleanupServer.Run(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
 			g.Log().Errorf(ctx, "启动上架插件TG清理队列失败：%+v", err)
@@ -124,13 +102,6 @@ func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
 			g.Log().Errorf(ctx, "启动上架插件TG发送队列失败：%+v", err)
 		}
 	}()
-	if bulkServer != nil {
-		go func() {
-			if err := bulkServer.Run(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
-				g.Log().Errorf(ctx, "启动上架插件TG批量发送队列失败：%+v", err)
-			}
-		}()
-	}
 }
 
 func (s *sSysPublish) startCollectProcessWorker(ctx context.Context) {
@@ -474,9 +445,7 @@ func (s *sSysPublish) startTelegramMediaWorker(ctx context.Context) {
 
 func (s *sSysPublish) stopTelegramQueueWorker() {
 	s.tgQueueMu.Lock()
-	interactiveServer := s.tgInteractiveQueueServer
 	server := s.tgQueueServer
-	bulkServer := s.tgBulkQueueServer
 	cleanupServer := s.tgCleanupQueueServer
 	mediaServer := s.mediaQueueServer
 	mediaBulkServer := s.mediaBulkQueueServer
@@ -498,9 +467,7 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	historyServer := s.historyQueueServer
 	mattingServer := s.mattingQueueServer
 	client := s.tgQueueClient
-	s.tgInteractiveQueueServer = nil
 	s.tgQueueServer = nil
-	s.tgBulkQueueServer = nil
 	s.tgCleanupQueueServer = nil
 	s.mediaQueueServer = nil
 	s.mediaBulkQueueServer = nil
@@ -523,14 +490,8 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	s.mattingQueueServer = nil
 	s.tgQueueClient = nil
 	s.tgQueueMu.Unlock()
-	if interactiveServer != nil {
-		interactiveServer.Shutdown()
-	}
 	if server != nil {
 		server.Shutdown()
-	}
-	if bulkServer != nil {
-		bulkServer.Shutdown()
 	}
 	if cleanupServer != nil {
 		cleanupServer.Shutdown()
