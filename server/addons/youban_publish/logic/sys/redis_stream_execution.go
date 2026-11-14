@@ -157,6 +157,13 @@ func (s *sSysPublish) recoverMissingTelegramStreamTasks(ctx context.Context, aft
 		if ctx.Err() != nil {
 			return cursor, ctx.Err()
 		}
+		// In channel-queue mode, Redis ZSET ownership replaces Asynq task
+		// ownership. An empty asynq_task_id is expected and must not be
+		// rearmed by the legacy missing-task recovery path.
+		if telegramChannelQueueEnabled() && job.ChannelId > 0 {
+			cursor = job.Id
+			continue
+		}
 		// Redis丢失就绪事件时，任务仍可能停在idle；只恢复该频道真正队首，避免批量重复通知。
 		if job.DispatchStatus == tgDispatchStatusIdle {
 			waiting, err := s.telegramChannelHasEarlierActiveJob(ctx, job)
