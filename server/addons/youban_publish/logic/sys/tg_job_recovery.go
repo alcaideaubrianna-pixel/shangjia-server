@@ -15,6 +15,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/hibiken/asynq"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 	hglock "hotgo/internal/library/hgrds/lock"
@@ -800,7 +801,7 @@ func (s *sSysPublish) recoverStaleTelegramDispatchJobs(ctx context.Context, limi
 		WhereIn("dispatch_status", []string{tgDispatchStatusQueued, tgDispatchStatusProcessing}).
 		Where(telegramActiveChannelCondition()).
 		Where(messagePushPlanRecoveryConditionSQL(publishTgJobTable), telegramRecoveryTimeText(now.Add(-messagePushPlanJobExpireAfter))).
-		Where("((dispatch_status=? AND COALESCE(asynq_task_id,'')='') OR dispatched_at<=?) AND updated_at<=?", tgDispatchStatusQueued, deadline, telegramRecoveryTimeText(now.Add(-time.Minute))).
+		Where("(dispatch_status=? OR dispatched_at<=?) AND updated_at<=?", tgDispatchStatusQueued, deadline, telegramRecoveryTimeText(now.Add(-time.Minute))).
 		OrderAsc("dispatched_at").OrderAsc("id").
 		Limit(limit).
 		Scan(&jobs)
@@ -810,10 +811,28 @@ func (s *sSysPublish) recoverStaleTelegramDispatchJobs(ctx context.Context, limi
 	}
 	scanned = len(jobs)
 	jobIDs := make([]int64, 0, len(jobs))
+	inspector := asynq.NewInspector(telegramQueueRedisOpt(ctx))
+	defer inspector.Close()
 	for _, job := range jobs {
-		if job.Id > 0 {
-			jobIDs = append(jobIDs, job.Id)
+		if job.Id <= 0 {
+			continue
 		}
+		// A queued task with a task ID is recoverable only when Redis confirms
+		// that the execution entity is gone. Redis connectivity errors are
+		// deliberately left untouched to avoid duplicate sends during outages.
+		if job.DispatchStatus == tgDispatchStatusQueued && strings.TrimSpace(job.AsynqTaskId) != "" {
+			queueName := strings.TrimSpace(job.QueueName)
+			if queueName == "" {
+				queueName = telegramQueueNameByPriorityAndChannel(ctx, job.Priority, job.ChannelId)
+			}
+			if _, inspectErr := inspector.GetTaskInfo(queueName, job.AsynqTaskId); inspectErr == nil {
+				continue
+			} else if !errors.Is(inspectErr, asynq.ErrTaskNotFound) {
+				g.Log().Warningf(ctx, "检查TG Asynq任务失败，保留原状态 job:%d task:%s err:%+v", job.Id, job.AsynqTaskId, inspectErr)
+				continue
+			}
+		}
+		jobIDs = append(jobIDs, job.Id)
 	}
 	if len(jobIDs) == 0 {
 		return nil
