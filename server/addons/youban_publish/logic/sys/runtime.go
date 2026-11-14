@@ -66,7 +66,10 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 		if telegramChannelQueueEnabled() {
 			go s.runTelegramChannelQueueWorker(ctx)
 		}
-		if config.RedisStreamGray {
+		// Channel queue mode is the sole TG publish transport. The legacy
+		// Stream gray bridge dispatches back into Asynq and would consume the
+		// same Outbox notifications a second time, so it must stay disabled.
+		if config.RedisStreamGray && !telegramChannelQueueEnabled() {
 			go s.runRedisStreamGrayConsumer(ctx)
 		}
 	}
