@@ -1,6 +1,87 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# The deployment helper uses Bash functions and arrays.  Re-exec explicitly
+# when invoked through `sh`/another shell so background role workers see the
+# same function definitions instead of failing with "deploy_role: command not
+# found".
+if [[ -z "${BASH_VERSION:-}" ]]; then
+  exec bash "$0" "$@"
+fi
+
+usage() {
+  cat <<'HELP'
+阿里云 SAE 部署工具
+
+用法：
+  deploy/sae-deploy-all.sh <image-tag> [角色 ...]
+  deploy/sae-deploy-all.sh --env-file <env.json> [角色 ...]
+  deploy/sae-deploy-all.sh --help
+  deploy/sae-deploy-all.sh -h
+
+命令：
+  <image-tag>            检查 ACR 镜像标签和摘要，然后部署指定角色。
+  --env-file <env.json>  合并 ENV，保留各角色当前镜像，并重新部署。
+                        JSON 必须为字符串键值对象，例如：
+                        {"YOUBAN_PUBLISH_HISTORY_CONCURRENCY":"4"}
+  -h, --help            显示帮助并退出，不访问云服务。
+
+角色：
+  web         Web/API 与 Bot runtime 入口（2 个副本）
+  collector   采集消息处理
+  background  后台任务
+  media       媒体下载与处理
+  publish     Telegram 消息推送
+  scheduler   定时调度
+  account     Telegram 账户会话（严格单实例）
+
+不指定角色时，按以下顺序部署全部角色：
+  web collector background media publish scheduler account
+指定角色时，仅按传入顺序部署这些角色。
+镜像部署模式会同步脚本管理的 ENV 和副本数；除 web 外均为 1 个副本。
+ENV-only 模式保留当前副本数，account 使用单实例切换策略。
+
+示例：
+  deploy/sae-deploy-all.sh ee36a708 web
+  deploy/sae-deploy-all.sh ee36a708 collector publish
+  deploy/sae-deploy-all.sh ee36a708
+  deploy/sae-deploy-all.sh --env-file /path/to/env.json media publish
+
+环境变量（可选）：
+  SAE_REGION_ID                             地域，默认 ap-southeast-1
+  SAE_ACR_INSTANCE_ID                       ACR 实例
+  SAE_IMAGE_URL                             临时使用的完整镜像地址（例如 ghcr.io/...），跳过 ACR 校验
+  SAE_IMAGE_REPOSITORY                      镜像仓库
+  SAE_MEDIA_FALLBACK_CDN_URL                 媒体回源 CDN
+  SAE_PUBLISH_QUEUE_CONCURRENCY              推送并发，默认 3
+  SAE_PUBLISH_BULK_CONCURRENCY               批量推送并发，默认 4
+  SAE_HISTORY_PENDING_EVENT_LIMIT            历史待处理事件上限，默认 240
+  SAE_HISTORY_CONCURRENCY                    历史并发，默认 4
+  SAE_MEDIA_ACCOUNT_CONCURRENCY              媒体账户并发，默认 8
+  SAE_MEDIA_SOURCE_CONCURRENCY               媒体来源并发，默认 4
+  SAE_FACEPP_CONCURRENCY                     Face++ 并发，默认 1
+  SAE_ALIYUN_MATTING_CONCURRENCY              阿里云抠图并发，默认 5
+  SAE_TENCENT_MATTING_CONCURRENCY             腾讯云抠图并发，默认 4
+  SAE_FAPIHUB_CONCURRENCY                    FAPIHUB 并发，默认 2
+  SAE_FAPIHUB_RATE_LIMIT_PER_MINUTE           FAPIHUB 每分钟限额，默认 150
+  SAE_DB_HOST_OVERRIDE                      覆盖数据库地址
+  SAE_REDIS_ADDRESS_OVERRIDE                覆盖 Redis 地址
+  SAE_ASSOCIATE_EIP_OVERRIDE=true            account 部署时关联 EIP
+  SAE_ANTISCAN_FALLBACK_PROVIDER              防扫图备用服务商
+  SAE_PUBLISH_MEDIA_PERMANENT_FAILURE_ENABLED 永久媒体失败处理，默认 true
+  SAE_DISABLE_SLS=true                      关闭 SLS
+  SAE_ENABLE_SLS=true                       启用 SLS（与关闭选项互斥）
+  SAE_ABORT_STUCK_CHANGE_ORDER=true          中止并回滚进行中的变更，再部署
+  ALIBABA_CLOUD_PROFILE                     ENV-only 模式使用的 CLI profile
+
+部署依赖：aliyun CLI、jq，以及已配置的云访问凭据。
+HELP
+}
+
+case "${1:-}" in
+  -h|--help) usage; exit 0 ;;
+esac
+
 if [[ "${1:-}" == "--env-file" ]]; then
   exec "$(dirname "$0")/sae-env-update.sh" "$@"
 fi
@@ -11,6 +92,7 @@ fi
 REGION_ID="${SAE_REGION_ID:-ap-southeast-1}"
 ACR_INSTANCE_ID="${SAE_ACR_INSTANCE_ID:-cri-wx0a7j1fo37ad8mo}"
 IMAGE_REPOSITORY="${SAE_IMAGE_REPOSITORY:-xxxxxx-registry-vpc.ap-southeast-1.cr.aliyuncs.com/xiaohuiji/youban-server}"
+EXTERNAL_IMAGE_URL="${SAE_IMAGE_URL:-}"
 MEDIA_FALLBACK_CDN_URL="${SAE_MEDIA_FALLBACK_CDN_URL:-https://awdaffwaffawf-1480411854.cos.ap-hongkong.myqcloud.com}"
 PUBLISH_QUEUE_CONCURRENCY="${SAE_PUBLISH_QUEUE_CONCURRENCY:-3}"
 PUBLISH_BULK_CONCURRENCY="${SAE_PUBLISH_BULK_CONCURRENCY:-4}"
@@ -34,7 +116,7 @@ ABORT_STUCK_CHANGE_ORDER="${SAE_ABORT_STUCK_CHANGE_ORDER:-false}"
 TAG="${1:-}"
 
 if [[ -z "$TAG" || ! "$TAG" =~ ^[A-Za-z0-9._-]+$ ]]; then
-  echo "usage: $0 <image-tag>" >&2
+  usage >&2
   exit 2
 fi
 command -v aliyun >/dev/null || { echo "aliyun CLI is required" >&2; exit 1; }
@@ -44,14 +126,20 @@ if [[ "$DISABLE_SLS" == "true" && "$ENABLE_SLS" == "true" ]]; then
   exit 2
 fi
 
-IMAGE_URL="${IMAGE_REPOSITORY}:${TAG}"
-repo_path="${IMAGE_REPOSITORY#*/}"
-repo_id=$(aliyun cr ListRepository --RegionId "$REGION_ID" --InstanceId "$ACR_INSTANCE_ID" --RepoName "${repo_path##*/}" --RepoNamespaceName "${repo_path%/*}" --PageSize 100 | jq -r '.Repositories[0].RepoId // empty')
-[[ -n "$repo_id" ]] || { echo "ACR repository not found: $IMAGE_REPOSITORY" >&2; exit 1; }
-tag_exists=$(aliyun cr ListRepoTag --RegionId "$REGION_ID" --InstanceId "$ACR_INSTANCE_ID" --RepoId "$repo_id" --PageSize 100 | jq -r --arg tag "$TAG" '[.Images[]? | select(.Tag == $tag)] | length')
-[[ "$tag_exists" == "1" ]] || { echo "ACR image tag not found: $IMAGE_URL" >&2; exit 1; }
-IMAGE_DIGEST=$(aliyun cr GetRepoTag --RegionId "$REGION_ID" --InstanceId "$ACR_INSTANCE_ID" --RepoId "$repo_id" --Tag "$TAG" | jq -r '.Digest // empty')
-[[ -n "$IMAGE_DIGEST" ]] || { echo "ACR image digest not found: $IMAGE_URL" >&2; exit 1; }
+if [[ -n "$EXTERNAL_IMAGE_URL" ]]; then
+  IMAGE_URL="$EXTERNAL_IMAGE_URL"
+  IMAGE_DIGEST=""
+  echo "using external image: $IMAGE_URL"
+else
+  IMAGE_URL="${IMAGE_REPOSITORY}:${TAG}"
+  repo_path="${IMAGE_REPOSITORY#*/}"
+  repo_id=$(aliyun cr ListRepository --RegionId "$REGION_ID" --InstanceId "$ACR_INSTANCE_ID" --RepoName "${repo_path##*/}" --RepoNamespaceName "${repo_path%/*}" --PageSize 100 | jq -r '.Repositories[0].RepoId // empty')
+  [[ -n "$repo_id" ]] || { echo "ACR repository not found: $IMAGE_REPOSITORY" >&2; exit 1; }
+  tag_exists=$(aliyun cr ListRepoTag --RegionId "$REGION_ID" --InstanceId "$ACR_INSTANCE_ID" --RepoId "$repo_id" --PageSize 100 | jq -r --arg tag "$TAG" '[.Images[]? | select(.Tag == $tag)] | length')
+  [[ "$tag_exists" == "1" ]] || { echo "ACR image tag not found: $IMAGE_URL" >&2; exit 1; }
+  IMAGE_DIGEST=$(aliyun cr GetRepoTag --RegionId "$REGION_ID" --InstanceId "$ACR_INSTANCE_ID" --RepoId "$repo_id" --Tag "$TAG" | jq -r '.Digest // empty')
+  [[ -n "$IMAGE_DIGEST" ]] || { echo "ACR image digest not found: $IMAGE_URL" >&2; exit 1; }
+fi
 
 app_id_for_role() {
   case "$1" in
@@ -105,7 +193,8 @@ wait_ready() {
   return 1
 }
 
-for role in "${ROLES[@]}"; do
+deploy_role() {
+  local role="$1"
   app_id="$(app_id_for_role "$role")"
   echo "deploying $role"
   current=$(aliyun sae DescribeApplicationStatus --RegionId "$REGION_ID" --AppId "$app_id")
@@ -146,7 +235,6 @@ for role in "${ROLES[@]}"; do
     aliyun sae DeployApplication
     --RegionId "$REGION_ID" \
     --AppId "$app_id" \
-    --AcrInstanceId "$ACR_INSTANCE_ID" \
     --ImageUrl "$IMAGE_URL" \
     --CommandArgs "$(command_args_for_role "$role")" \
     --Replicas "$replicas" \
@@ -156,6 +244,9 @@ for role in "${ROLES[@]}"; do
     --ChangeOrderDesc "deploy $TAG ($role)" \
     --Deploy true
   )
+  if [[ -z "$EXTERNAL_IMAGE_URL" ]]; then
+    deploy_args+=(--AcrInstanceId "$ACR_INSTANCE_ID")
+  fi
   if [[ "$role" == "account" && "$ASSOCIATE_EIP_OVERRIDE" == "true" ]]; then
     deploy_args+=(--AssociateEip true)
   fi
@@ -167,6 +258,31 @@ for role in "${ROLES[@]}"; do
   "${deploy_args[@]}" >/dev/null
   wait_ready "$role" "$app_id" "$replicas"
   echo "ready $role"
+}
+
+# Deploy requested roles concurrently.  Each role owns its SAE application and
+# readiness polling, so serialising them only adds the full rollout time of
+# every role.  Keep account's singleton safety inside its own deployment
+# options; a failure in any background deployment must fail this script.
+DEPLOY_PIDS=()
+DEPLOY_ROLES=()
+for role in "${ROLES[@]}"; do
+  deploy_role "$role" &
+  DEPLOY_PIDS+=("$!")
+  DEPLOY_ROLES+=("$role")
 done
+
+deploy_failed=0
+for i in "${!DEPLOY_PIDS[@]}"; do
+  pid="${DEPLOY_PIDS[$i]}"
+  role="${DEPLOY_ROLES[$i]}"
+  if ! wait "$pid"; then
+    echo "$role deployment failed" >&2
+    deploy_failed=1
+  fi
+done
+if (( deploy_failed != 0 )); then
+  exit 1
+fi
 
 echo "deployed $IMAGE_URL"
