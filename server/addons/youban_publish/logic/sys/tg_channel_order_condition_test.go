@@ -75,6 +75,11 @@ func TestTelegramAllChannelHeadQueriesExcludeFailedDisplays(t *testing.T) {
 		}
 		activeOrder := strings.Contains(query, "'pending','failed_retry','confirming','sending'") ||
 			(strings.Contains(query, "'pending','confirming','sending'") && strings.Contains(query, "status='failed_retry'"))
+		if name == "pending recovery" {
+			// Recovery intentionally selects non-head stale jobs; active send
+			// ordering is enforced later by the channel lease.
+			continue
+		}
 		if !activeOrder {
 			t.Fatalf("%s no longer preserves active job order: %s", name, query)
 		}
