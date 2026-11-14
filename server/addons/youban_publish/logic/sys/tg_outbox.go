@@ -268,6 +268,9 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 		}
 		return s.markTelegramStreamOutboxDelivered(ctx, row.Id, owner, job.Id)
 	}
+	if telegramChannelQueueEnabled() {
+		return s.releaseTelegramOutbox(ctx, row.Id, owner, row.AttemptCount, "频道队列模式要求有效channel_id")
+	}
 	// 所有账户统一以 Asynq 作为发送主路径，不能再由账户灰度字段决定是否
 	// 进入可靠队列；Stream 只作为旁路能力，避免 legacy 账户被旧路径卡死。
 	if err = s.EnqueueTelegramJob(ctx, job.Id, 0, false); err == nil {
@@ -652,7 +655,7 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 			AND o.event_type=? AND o.available_at<=?
 			AND (o.status=? OR (o.status=? AND o.lease_expires_at<=?))
 			AND j.status IN ('pending','failed_retry','unknown')
-			AND COALESCE(j.dispatch_status,'') IN ('','idle')
+			AND (COALESCE(j.dispatch_status,'') IN ('','idle') OR (j.dispatch_status='queued' AND COALESCE(j.asynq_task_id,'')=''))
 			AND NOT (j.status='pending' AND COALESCE(j.dispatch_status,'')='idle' AND COALESCE(j.asynq_task_id,'')='' AND j.updated_at < CURRENT_TIMESTAMP - (? * INTERVAL '1 minute'))
 			AND (j.next_retry_at IS NULL OR j.next_retry_at<=? OR (j.status='pending' AND COALESCE(j.dispatch_status,'')='idle'))
 		ORDER BY o.available_at,o.id LIMIT ?`
@@ -730,7 +733,7 @@ func telegramDueOutboxPostgresSQL() string {
 			j.status,j.dispatch_status,j.next_retry_at,j.created_at,j.operation_no,j.send_phase,j.priority,j.schedule_rank
 		FROM due_jobs j
 		WHERE j.status IN ('pending','failed_retry','unknown')
-			AND COALESCE(j.dispatch_status,'') IN ('','idle')
+			AND (COALESCE(j.dispatch_status,'') IN ('','idle') OR (j.dispatch_status='queued' AND COALESCE(j.asynq_task_id,'')=''))
 			AND (j.next_retry_at IS NULL OR j.next_retry_at<=? OR (j.status='pending' AND COALESCE(j.dispatch_status,'')='idle'))
 			AND NOT EXISTS (
 				SELECT 1 FROM ` + publishTgJobTable + ` earlier
