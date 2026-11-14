@@ -364,7 +364,7 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 					if !paired {
 						continue
 					}
-					if err = s.scheduleCollectDisplaySettlement(ctx, payload, storedDisplay, s.collectDisplayRetryDelay(ctx, storedDisplay)); err != nil {
+					if err = s.scheduleCollectDisplaySettlement(ctx, payload, storedDisplay, 0); err != nil {
 						return err
 					}
 					continue
@@ -379,7 +379,7 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 				if !paired {
 					continue
 				}
-				if err = s.scheduleCollectDisplaySettlement(ctx, payload, display, s.collectDisplayRetryDelay(ctx, display)); err != nil {
+				if err = s.scheduleCollectDisplaySettlement(ctx, payload, display, 0); err != nil {
 					return err
 				}
 				continue
