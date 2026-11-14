@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -1062,7 +1063,8 @@ func (s *sSysPublish) findCollectRuleDuplicate(ctx context.Context, event, rule 
 	if err != nil {
 		return nil, err
 	}
-	if !ready {
+	if !ready && strings.EqualFold(strings.TrimSpace(os.Getenv("YOUBAN_PROFILE_FINGERPRINT_BACKFILL_ENABLED")), "1") {
+		// 只有明确开启全量回填时才等待索引；否则直接使用数据库指纹查询降级，不能阻塞采集入库。
 		return nil, newCollectProcessRetryError(15*time.Second, "资料指纹索引正在初始化")
 	}
 	return s.findProfileFingerprintDuplicate(ctx, event["tenant_id"].Int64(), event["account_id"].Int64(), event["bot_id"].Int64(), fingerprints, 0)
