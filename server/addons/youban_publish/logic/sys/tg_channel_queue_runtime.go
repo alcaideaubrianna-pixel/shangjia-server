@@ -14,13 +14,19 @@ import (
 // the sole sender until a channel is explicitly migrated.
 func (s *sSysPublish) runTelegramChannelQueueWorker(ctx context.Context) {
 	ticker := time.NewTicker(500 * time.Millisecond)
+	recoveryTicker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
+	defer recoveryTicker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			s.processTelegramChannelQueuePass(ctx)
+		case <-recoveryTicker.C:
+			if err := s.rehydrateMissingTelegramChannelQueue(ctx, 500); err != nil {
+				g.Log().Warningf(ctx, "频道队列低频恢复失败 err:%+v", err)
+			}
 		}
 	}
 }
@@ -29,48 +35,29 @@ func (s *sSysPublish) processTelegramChannelQueuePass(ctx context.Context) {
 	if !telegramChannelQueueEnabled() {
 		return
 	}
-	var channels []telegramChannelQueueChannel
-	// Rotate the bounded database window instead of always starting at the
-	// smallest channel id. A permanently busy low-id channel must not starve
-	// channels created later once the active set exceeds the per-pass limit.
-	scanChannels := func(after int64) error {
-		model := g.DB().Model(publishTgJobTable).Ctx(ctx).
-			Fields("channel_id").
-			Where("channel_id > 0 AND status IN ('pending','failed_retry','unknown')")
-		if after > 0 {
-			model = model.Where("channel_id > ?", after)
-		}
-		return model.Group("channel_id").OrderAsc("channel_id").Limit(200).Scan(&channels)
-	}
-	cursor := s.telegramChannelCursor.Load()
-	scanCursor := cursor
-	err := scanChannels(scanCursor)
-	if err == nil && len(channels) == 0 && cursor > 0 {
-		// Reached the end of the ordered set; wrap around so newly created
-		// lower-id channels are picked up on the next pass.
-		channels = nil
-		scanCursor = 0
-		err = scanChannels(scanCursor)
-	}
+	channels, err := activeTelegramChannelIDs(ctx)
 	if err != nil {
-		g.Log().Warningf(ctx, "频道队列扫描失败 err:%+v", err)
+		g.Log().Warningf(ctx, "频道活跃集合读取失败 err:%+v", err)
 		return
 	}
-	// Rehydrate jobs created before the channel queue cutover. They may have a
-	// delivered outbox but no ZSET member, so the normal outbox dispatcher will
-	// never see them again. Only non-active jobs are eligible.
-	if err = s.rehydrateMissingTelegramChannelQueue(ctx, 500); err != nil {
-		g.Log().Warningf(ctx, "频道队列历史任务补入失败 err:%+v", err)
-	}
-	for _, channel := range channels {
-		if channel.ChannelID <= 0 {
+	for _, channelID := range channels {
+		if channelID <= 0 {
 			continue
 		}
-		if _, err = s.processTelegramChannelQueueHead(ctx, channel.ChannelID); err != nil {
-			g.Log().Warningf(ctx, "频道队列消费失败 channel:%d err:%+v", channel.ChannelID, err)
+		processed, processErr := s.processTelegramChannelQueueHead(ctx, channelID)
+		if processErr != nil {
+			g.Log().Warningf(ctx, "频道队列消费失败 channel:%d err:%+v", channelID, processErr)
+			continue
+		}
+		if !processed {
+			value, cardErr := g.Redis().Do(ctx, "ZCARD", telegramChannelQueueKey(channelID))
+			if cardErr == nil && value.Int() == 0 {
+				if removeErr := removeActiveTelegramChannel(ctx, channelID); removeErr != nil {
+					g.Log().Warningf(ctx, "频道活跃集合清理失败 channel:%d err:%+v", channelID, removeErr)
+				}
+			}
 		}
 	}
-	s.telegramChannelCursor.Store(telegramChannelCursorNext(scanCursor, channels))
 }
 
 // telegramChannelCursorNext returns the last channel visited by a pass. It is

@@ -15,6 +15,7 @@ import (
 // the Asynq transport so the migration can be introduced behind one producer.
 // The database job remains the source of truth; Redis only stores ready ids.
 const telegramChannelQueuePrefix = "youban:tg:channel:queue:"
+const telegramChannelActiveSetKey = "youban:tg:channel:active"
 
 func telegramChannelQueueKey(channelID int64) string {
 	return fmt.Sprintf("%s%d", telegramChannelQueuePrefix, channelID)
@@ -35,6 +36,12 @@ func enqueueTelegramChannelJob(ctx context.Context, channelID, jobID int64, scor
 	for attempt := 1; attempt <= 3; attempt++ {
 		_, err = g.Redis().Do(ctx, "ZADD", key, score, member)
 		if err == nil {
+			// Keep the worker's ready set in sync with the per-channel queue.
+			// This is the realtime wake/index path; PostgreSQL scanning is only
+			// a recovery mechanism.
+			if _, setErr := g.Redis().Do(ctx, "SADD", telegramChannelActiveSetKey, strconv.FormatInt(channelID, 10)); setErr != nil {
+				return setErr
+			}
 			return nil
 		}
 		if attempt < 3 {
@@ -54,6 +61,29 @@ func enqueueTelegramChannelJob(ctx context.Context, channelID, jobID int64, scor
 		"attempts":  3,
 		"error":     err.Error(),
 	})
+	return err
+}
+
+func activeTelegramChannelIDs(ctx context.Context) ([]int64, error) {
+	value, err := g.Redis().Do(ctx, "SMEMBERS", telegramChannelActiveSetKey)
+	if err != nil {
+		return nil, err
+	}
+	var result []int64
+	for _, item := range value.Array() {
+		id, parseErr := strconv.ParseInt(fmt.Sprint(item), 10, 64)
+		if parseErr == nil && id > 0 {
+			result = append(result, id)
+		}
+	}
+	return result, nil
+}
+
+func removeActiveTelegramChannel(ctx context.Context, channelID int64) error {
+	if channelID <= 0 {
+		return nil
+	}
+	_, err := g.Redis().Do(ctx, "SREM", telegramChannelActiveSetKey, strconv.FormatInt(channelID, 10))
 	return err
 }
 
