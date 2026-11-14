@@ -372,6 +372,7 @@ func (s *sSysPublish) publishRecordClear(ctx context.Context, tenantId int64, ac
 
 func (s *sSysPublish) enrichPublishRecordFullPushProgress(ctx context.Context, list []*sysin.PublishRecordModel) error {
 	batchKeys := make(map[string]struct{})
+	operationNos := make(map[string]struct{})
 	for _, item := range list {
 		if item == nil || !strings.HasPrefix(item.OperationNo, "full_push:") {
 			continue
@@ -379,6 +380,7 @@ func (s *sSysPublish) enrichPublishRecordFullPushProgress(ctx context.Context, l
 		item.Action = "full_push"
 		if key := fullPushOperationBatchKey(item.OperationNo); key != "" {
 			batchKeys[key] = struct{}{}
+			operationNos[item.OperationNo] = struct{}{}
 		}
 	}
 	if len(batchKeys) == 0 {
@@ -412,6 +414,33 @@ func (s *sSysPublish) enrichPublishRecordFullPushProgress(ctx context.Context, l
 		}
 		progress[row.BatchNo] = row
 	}
+	// Load all success records for the requested batches in one query.  The
+	// previous per-row snapshot query caused an N+1 DB pattern on large batches.
+	type successRow struct {
+		OperationNo string      `orm:"operation_no"`
+		ID          int64       `orm:"id"`
+		CreatedAt   *gtime.Time `orm:"created_at"`
+	}
+	var successRows []successRow
+	ops := make([]string, 0, len(operationNos))
+	for op := range operationNos {
+		ops = append(ops, op)
+	}
+	if err = g.DB().Model(publishSuccessRecordTable+" r").Safe().Ctx(ctx).
+		Fields("r.operation_no,r.id,r.created_at").
+		Where("r.status", "success").
+		WhereIn("r.operation_no", ops).
+		OrderAsc("r.operation_no").OrderAsc("r.created_at").OrderAsc("r.id").
+		Scan(&successRows); err != nil {
+		return gerror.Wrap(err, "批量读取全量推送成功记录失败")
+	}
+	ranks := make(map[int64]int, len(successRows))
+	batchRank := make(map[string]int)
+	for _, row := range successRows {
+		key := fullPushOperationBatchKey(row.OperationNo)
+		batchRank[key]++
+		ranks[row.ID] = batchRank[key]
+	}
 	for _, item := range list {
 		if item == nil || item.Action != "full_push" {
 			continue
@@ -424,10 +453,8 @@ func (s *sSysPublish) enrichPublishRecordFullPushProgress(ctx context.Context, l
 		// previous implementation reused the current batch total for every row,
 		// so an old 1/438 record changed to 15/438 on the next refresh.
 		item.ProgressDone = value.Done
-		if item.Id > 0 && item.CreatedAt != nil {
-			if snapshot, err := s.fullPushRecordProgressSnapshot(ctx, fullPushOperationBatchKey(item.OperationNo), item.Id, item.CreatedAt); err == nil && snapshot > 0 {
-				item.ProgressDone = snapshot
-			}
+		if snapshot := ranks[item.Id]; snapshot > 0 {
+			item.ProgressDone = snapshot
 		}
 		item.ProgressTotal = value.SnapshotTotal
 		item.ProgressQueued = value.Queued
