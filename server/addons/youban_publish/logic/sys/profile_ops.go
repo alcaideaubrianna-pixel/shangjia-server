@@ -186,7 +186,10 @@ func (s *sSysPublish) MyProfileEdit(ctx context.Context, in *sysin.ProfileSaveIn
 		}()
 	}
 	if republish {
-		markProfileOnlineForEdit(in)
+		// Lifecycle state is owned by PublishProfile. Keep the current state
+		// while saving ordinary fields; the republish operation transitions it
+		// after media validation and job creation.
+		in.KeepPublishState = true
 	}
 	saved, err := s.saveProfile(ctx, in, account.TenantId, ownerAccountId)
 	if err != nil {

@@ -467,7 +467,9 @@ func (s *sSysPublish) BotProfileEdit(ctx context.Context, in *sysin.BotProfileEd
 	}
 	saveInput := &sysin.ProfileSaveInp{Id: profileId, ChannelIds: channelIds, Title: title, PlainText: plainText, Status: current.Status, Visibility: current.Visibility, Province: current.Province, City: current.City, Tag: current.Tag, CustomerRemark: current.CustomerRemark}
 	if republish {
-		markProfileOnlineForEdit(saveInput)
+		// Do not mutate lifecycle fields while saving ordinary edits. The
+		// unified republish operation owns the public/online transition.
+		saveInput.KeepPublishState = true
 	}
 	saved, err := s.saveProfile(ctx, saveInput, capability.TenantId, ownerAccountId)
 	if err != nil {
