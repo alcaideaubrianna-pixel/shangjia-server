@@ -264,6 +264,7 @@ func (s *sSysPublish) prepareTelegramDeliveryAttempt(ctx context.Context, job te
 	}
 	step = beginTelegramPublishStage(ctx, "attempt.project", g.Map{"attemptId": attempt.Id})
 	s.projectTelegramDeliveryAttempt(ctx, attempt, "")
+	indexTelegramDeliveryAttempt(ctx, attempt)
 	step.End(nil)
 	// Keep a durable job-level audit entry for every Bot send attempt, including
 	// attempts whose HTTP response later times out and has no Telegram message ID.
@@ -971,6 +972,9 @@ func (s *sSysPublish) matchTelegramDeliveryAttempt(ctx context.Context, botId in
 		return
 	}
 	chatId := normalizeTelegramChannelChatID(strconv.FormatInt(msg.Chat.ID, 10))
+	cacheTelegramWebhookReconcileMessage(ctx, telegramWebhookReconcileMessage{
+		ChatID: chatId, MessageID: int64(msg.ID), MediaGroupID: msg.MediaGroupID, ReceivedAt: time.Now(),
+	})
 	var attempts []telegramDeliveryAttempt
 	window := time.Minute
 	limit := 4
@@ -978,7 +982,11 @@ func (s *sSysPublish) matchTelegramDeliveryAttempt(ctx context.Context, botId in
 		window = 24 * time.Hour
 		limit = 1000
 	}
-	if err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
+	attemptQuery := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx)
+	if attemptIDs := telegramWebhookAttemptIDs(ctx, chatId); len(attemptIDs) > 0 {
+		attemptQuery = attemptQuery.WhereIn("id", attemptIDs)
+	}
+	if err := attemptQuery.
 		Where("bot_id", botId).Where("target_chat_id", chatId).
 		WhereIn("status", []string{telegramAttemptStatusSending, telegramAttemptStatusWaiting, telegramAttemptStatusRetryWait, telegramAttemptStatusConfirmed, telegramAttemptStatusSuperseded}).
 		Where("status <> ? OR webhook_deadline IS NOT NULL", telegramAttemptStatusRetryWait).
@@ -986,6 +994,19 @@ func (s *sSysPublish) matchTelegramDeliveryAttempt(ctx context.Context, botId in
 		OrderDesc("id").Limit(limit).Scan(&attempts); err != nil {
 		g.Log().Warningf(ctx, "匹配TG Webhook Attempt失败 bot:%d chat:%s message:%d err:%+v", botId, chatId, msg.ID, err)
 		return
+	}
+	if len(attempts) == 0 {
+		// Redis is only a candidate accelerator. A stale/truncated index must
+		// never hide a valid PostgreSQL Attempt from the webhook matcher.
+		if err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
+			Where("bot_id", botId).Where("target_chat_id", chatId).
+			WhereIn("status", []string{telegramAttemptStatusSending, telegramAttemptStatusWaiting, telegramAttemptStatusRetryWait, telegramAttemptStatusConfirmed, telegramAttemptStatusSuperseded}).
+			Where("status <> ? OR webhook_deadline IS NOT NULL", telegramAttemptStatusRetryWait).
+			WhereGTE("created_at", gtime.Now().Add(-window)).
+			OrderDesc("id").Limit(limit).Scan(&attempts); err != nil {
+			g.Log().Warningf(ctx, "Redis对账候选失效后回退PostgreSQL失败 bot:%d chat:%s message:%d err:%v", botId, chatId, msg.ID, err)
+			return
+		}
 	}
 	var matched *telegramDeliveryAttempt
 	if strings.TrimSpace(msg.MediaGroupID) != "" {

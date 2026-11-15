@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/os/gcache"
+	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gotd/td/tg"
 
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
@@ -426,5 +427,29 @@ func TestTelegramWebhookReconcileIndexUsesMessageAndGroupKeys(t *testing.T) {
 	group, err := cache.Instance().Get(context.Background(), telegramWebhookReconcileGroupKey(message.ChatID, message.MediaGroupID))
 	if err != nil || group.IsNil() {
 		t.Fatalf("group reconcile index missing: value=%v err=%v", group, err)
+	}
+}
+
+func TestTelegramWebhookAttemptIndexRoundTripAndRedisFallback(t *testing.T) {
+	if !cache.Initialized() {
+		cache.SetAdapter(context.Background())
+	}
+	previous := cache.Instance().GetAdapter()
+	cache.Instance().SetAdapter(gcache.NewAdapterMemory())
+	t.Cleanup(func() { cache.Instance().SetAdapter(previous) })
+
+	attempt := telegramDeliveryAttempt{Id: 901, JobId: 902, Phase: "display", TargetChatId: "-100123", CreatedAt: gtime.Now()}
+	indexTelegramDeliveryAttempt(context.Background(), attempt)
+	ids := telegramWebhookAttemptIDs(context.Background(), attempt.TargetChatId)
+	if len(ids) != 1 || ids[0] != attempt.Id {
+		t.Fatalf("attempt index ids=%v, want [%d]", ids, attempt.Id)
+	}
+
+	_, err := cache.Instance().Remove(context.Background(), telegramWebhookAttemptIndexKey(attempt.TargetChatId))
+	if err != nil {
+		t.Fatalf("remove attempt index: %v", err)
+	}
+	if got := telegramWebhookAttemptIDs(context.Background(), attempt.TargetChatId); len(got) != 0 {
+		t.Fatalf("redis fallback should return no candidates, got %v", got)
 	}
 }

@@ -33,6 +33,7 @@ import (
 	"hotgo/addons/youban_publish/model/input/sysin"
 	idao "hotgo/internal/dao"
 	"hotgo/internal/library/cache"
+	"hotgo/internal/library/hgrds/lock"
 	"hotgo/utility/dbtime"
 )
 
@@ -64,7 +65,7 @@ func telegramWebhookReconcileGroupKey(chatID, mediaGroupID string) string {
 }
 
 func cacheTelegramWebhookReconcileMessage(ctx context.Context, message telegramWebhookReconcileMessage) {
-	if strings.TrimSpace(message.ChatID) == "" || message.MessageID <= 0 {
+	if strings.TrimSpace(message.ChatID) == "" || message.MessageID <= 0 || !cache.Initialized() {
 		return
 	}
 	_ = cache.Instance().Set(ctx, telegramWebhookReconcileMessageKey(message.ChatID, message.MessageID), message, telegramWebhookReconcileIndexTTL)
@@ -73,6 +74,76 @@ func cacheTelegramWebhookReconcileMessage(ctx context.Context, message telegramW
 		// authoritative Redis entries and avoid a growing list in one key.
 		_ = cache.Instance().Set(ctx, telegramWebhookReconcileGroupKey(message.ChatID, message.MediaGroupID), message.ReceivedAt, telegramWebhookReconcileIndexTTL)
 	}
+}
+
+type telegramWebhookAttemptIndexEntry struct {
+	AttemptID  int64     `json:"attemptId"`
+	JobID      int64     `json:"jobId"`
+	Phase      string    `json:"phase"`
+	CreatedAt  time.Time `json:"createdAt"`
+	TargetChat string    `json:"targetChat"`
+}
+
+func telegramWebhookAttemptIndexKey(chatID string) string {
+	return fmt.Sprintf("youban:tg:reconcile:attempts:%s", strings.TrimSpace(chatID))
+}
+
+func indexTelegramDeliveryAttempt(ctx context.Context, attempt telegramDeliveryAttempt) {
+	if attempt.Id <= 0 || strings.TrimSpace(attempt.TargetChatId) == "" || !cache.Initialized() {
+		return
+	}
+	mutex := lock.NewConfig(5*time.Second, 20*time.Millisecond).WithoutWatchDog().Mutex("youban_publish:tg:webhook:index:" + strings.TrimSpace(attempt.TargetChatId))
+	if err := mutex.Lock(ctx); err != nil {
+		return
+	}
+	defer func() { _ = mutex.Unlock(context.Background()) }()
+	key := telegramWebhookAttemptIndexKey(attempt.TargetChatId)
+	entries := make([]telegramWebhookAttemptIndexEntry, 0, 8)
+	if value, err := cache.Instance().Get(ctx, key); err == nil && !value.IsNil() {
+		_ = json.Unmarshal([]byte(value.String()), &entries)
+	}
+	for _, entry := range entries {
+		if entry.AttemptID == attempt.Id {
+			return
+		}
+	}
+	createdAt := time.Now()
+	if attempt.CreatedAt != nil {
+		createdAt = attempt.CreatedAt.Time
+	}
+	entries = append([]telegramWebhookAttemptIndexEntry{{
+		AttemptID: attempt.Id, JobID: attempt.JobId, Phase: attempt.Phase,
+		CreatedAt: createdAt, TargetChat: attempt.TargetChatId,
+	}}, entries...)
+	if len(entries) > 64 {
+		entries = entries[:64]
+	}
+	payload, err := json.Marshal(entries)
+	if err != nil {
+		return
+	}
+	_ = cache.Instance().Set(ctx, key, string(payload), telegramWebhookReconcileIndexTTL)
+}
+
+func telegramWebhookAttemptIDs(ctx context.Context, chatID string) []int64 {
+	if strings.TrimSpace(chatID) == "" || !cache.Initialized() {
+		return nil
+	}
+	value, err := cache.Instance().Get(ctx, telegramWebhookAttemptIndexKey(chatID))
+	if err != nil || value.IsNil() {
+		return nil
+	}
+	var entries []telegramWebhookAttemptIndexEntry
+	if err := json.Unmarshal([]byte(value.String()), &entries); err != nil {
+		return nil
+	}
+	ids := make([]int64, 0, len(entries))
+	for _, entry := range entries {
+		if entry.AttemptID > 0 {
+			ids = append(ids, entry.AttemptID)
+		}
+	}
+	return ids
 }
 
 type botCollectChannelCandidate struct {
