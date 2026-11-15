@@ -53,8 +53,8 @@ func TestCollectProcessQueuesAreShardedAndObservable(t *testing.T) {
 		t.Fatal("different sources must use different physical queues")
 	}
 	queues := collectProcessQueueNames()
-	if len(queues) != collectProcessQueueShards+1 || queues[0] != tgQueueNameCollectProcess {
-		t.Fatalf("unexpected process queues: %v", queues)
+	if len(queues) != 0 {
+		t.Fatalf("legacy process queues must be removed: %v", queues)
 	}
 	observed := telegramObserveQueueNames(context.Background())
 	for _, queue := range queues {

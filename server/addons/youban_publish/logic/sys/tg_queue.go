@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"hash/fnv"
 	"os"
 	"strings"
 	"time"
@@ -33,19 +32,16 @@ const (
 	tgQueueNameMediaProcess        = "youban_publish_media_process"
 	tgQueueNameMediaBulkPrefix     = "youban_publish_media_bulk_"
 	// Keep realtime deletion isolated from explicitly requested historical work.
-	tgQueueNameAutoDeleteRealtime                 = "youban_publish_auto_delete_realtime"
-	tgQueueNameAutoDeleteBackfill                 = "youban_publish_auto_delete_backfill"
-	tgQueueNameAttemptTimeout                     = "youban_publish_attempt_timeout"
-	tgQueueNameBackground                         = "youban_publish_background"
-	tgQueueNameAccountSchedule                    = "youban_publish_account_schedule"
-	tgQueueNameMaterialImportPull                 = "youban_publish_material_import_pull"
-	tgQueueNameMaterialImportMedia                = "youban_publish_material_import_media"
-	tgQueueNameCycle                              = "youban_publish_cycle"
-	tgQueueNameCollectProcessRealtime             = "youban_publish_collect_process_realtime"
-	tgQueueNameCollectProcess                     = "youban_publish_collect_process"
-	tgQueueNameCollectProcessPrefix               = "youban_publish_collect_process_"
-	tgQueueNameCollectProcessAccountPrefix        = "youban_publish_collect_account_realtime_"
-	tgQueueNameCollectProcessAccountHistoryPrefix = "youban_publish_collect_account_history_"
+	tgQueueNameAutoDeleteRealtime     = "youban_publish_auto_delete_realtime"
+	tgQueueNameAutoDeleteBackfill     = "youban_publish_auto_delete_backfill"
+	tgQueueNameAttemptTimeout         = "youban_publish_attempt_timeout"
+	tgQueueNameBackground             = "youban_publish_background"
+	tgQueueNameAccountSchedule        = "youban_publish_account_schedule"
+	tgQueueNameMaterialImportPull     = "youban_publish_material_import_pull"
+	tgQueueNameMaterialImportMedia    = "youban_publish_material_import_media"
+	tgQueueNameCycle                  = "youban_publish_cycle"
+	tgQueueNameCollectProcessRealtime = "youban_publish_collect_process_realtime"
+	tgQueueNameCollectProcess         = "youban_publish_collect_process"
 	// BOT 采集没有协议号账户，按租户+采集来源分片，避免所有 account_id=0
 	// 事件进入同一个全局队列。
 	tgQueueNameCollectProcessSourceRealtimePrefix = "youban_publish_collect_source_realtime_"
@@ -87,14 +83,6 @@ const (
 
 const collectMediaMaxBulkQueueShards = 16
 
-const collectProcessQueueShards = 16
-
-// 采集处理按账户固定分片，确保一个账户的积压不能占满其他账户的采集消费者。
-const collectProcessAccountQueueShards = collectProcessQueueShards
-
-// BOT 来源队列和账户队列使用同样的分片数量，避免单个来源积压占满所有消费者。
-const collectProcessSourceQueueShards = collectProcessQueueShards
-
 const (
 	tgQueueNameCollectProcessRealtimeV2 = "youban_publish_collect_process_realtime_v2"
 	tgQueueNameCollectProcessRecoveryV2 = "youban_publish_collect_process_recovery_v2"
@@ -104,22 +92,7 @@ func collectProcessQueueName(payload collectProcessQueuePayload) string {
 	if payload.TenantId > 0 && payload.SourceId > 0 {
 		return collectProcessSourceQueueName(payload)
 	}
-	if payload.TenantId > 0 && payload.AccountId > 0 && (payload.EventId == 0 || payload.OutboxOwner != "") {
-		return collectProcessAccountQueueName(payload)
-	}
-	if payload.EventId > 0 {
-		if payload.OutboxOwner != "" {
-			if payload.Recovery || payload.History {
-				return tgQueueNameCollectProcessRecoveryV2
-			}
-			return tgQueueNameCollectProcessRealtimeV2
-		}
-		return tgQueueNameCollectProcessRealtime
-	}
-	// 兼容没有账户归属的历史维护任务，继续使用来源分片。
-	hash := fnv.New32a()
-	_, _ = hash.Write([]byte(fmt.Sprintf("%d:%d", payload.TenantId, payload.AccountId)))
-	return fmt.Sprintf("%s%02d", tgQueueNameCollectProcessPrefix, hash.Sum32()%collectProcessQueueShards)
+	return ""
 }
 
 // collectProcessSourceQueueName 为没有协议号账户的 BOT 采集任务生成稳定来源队列。
@@ -145,84 +118,28 @@ func collectProcessRuleQueueKey(payload collectProcessQueuePayload) string {
 	return fmt.Sprintf("%s%d:source:%s", publishconsts.CollectProcessRuleQueueKeyPrefix, payload.TenantId, collectProcessPartition(payload))
 }
 
-func collectProcessSourceQueueNames() (queues []string) {
-	queues = make([]string, 0, collectProcessSourceQueueShards*2)
-	for shard := 0; shard < collectProcessSourceQueueShards; shard++ {
-		queues = append(queues,
-			fmt.Sprintf("%s%02d", tgQueueNameCollectProcessSourceRealtimePrefix, shard),
-			fmt.Sprintf("%s%02d", tgQueueNameCollectProcessSourceRecoveryPrefix, shard),
-		)
-	}
-	return queues
+func collectProcessSourceQueueNames() []string {
+	return nil
 }
 
 // collectProcessAccountQueueName 返回稳定的账户采集分片，不按消息或规则分片，保留同账户公平调度。
-func collectProcessAccountQueueName(payload collectProcessQueuePayload) string {
-	hash := fnv.New32a()
-	_, _ = hash.Write([]byte(fmt.Sprintf("%d:%d", payload.TenantId, payload.AccountId)))
-	prefix := tgQueueNameCollectProcessAccountPrefix
-	if payload.History || payload.Recovery {
-		prefix = tgQueueNameCollectProcessAccountHistoryPrefix
-	}
-	return fmt.Sprintf("%s%02d", prefix, hash.Sum32()%collectProcessAccountQueueShards)
-}
-
 func collectProcessQueueNames() []string {
-	queues := make([]string, 0, collectProcessQueueShards+1)
-	queues = append(queues, tgQueueNameCollectProcess)
-	for shard := 0; shard < collectProcessQueueShards; shard++ {
-		queues = append(queues, fmt.Sprintf("%s%02d", tgQueueNameCollectProcessPrefix, shard))
-	}
-	return queues
+	return nil
 }
 
 func collectProcessWorkerQueues() map[string]int {
-	queues := make(map[string]int, collectProcessAccountQueueShards*2+collectProcessSourceQueueShards*2+3)
-	for _, queue := range collectProcessQueueNames() {
-		queues[queue] = 1
-	}
-	queues[tgQueueNameCollectProcessRealtime] = 1
-	queues[tgQueueNameCollectProcessRecoveryV2] = 4
-	for shard := 0; shard < collectProcessAccountQueueShards; shard++ {
-		queues[fmt.Sprintf("%s%02d", tgQueueNameCollectProcessAccountPrefix, shard)] = 1
-		queues[fmt.Sprintf("%s%02d", tgQueueNameCollectProcessAccountHistoryPrefix, shard)] = 1
-	}
-	for shard := 0; shard < collectProcessSourceQueueShards; shard++ {
-		// 实时来源队列权重更高，历史/恢复队列保留独立低权重。
-		queues[fmt.Sprintf("%s%02d", tgQueueNameCollectProcessSourceRealtimePrefix, shard)] = 2
-		queues[fmt.Sprintf("%s%02d", tgQueueNameCollectProcessSourceRecoveryPrefix, shard)] = 1
-	}
-	return queues
+	return map[string]int{tgQueueNameCollectProcessRealtime: 1}
 }
 
 // collectProcessRealtimeWorkerQueues isolates current BOT/account collection
 // work from historical recovery traffic. Both maps keep the same shard layout
 // so a single account/source remains ordered while the workers are independent.
 func collectProcessRealtimeWorkerQueues() map[string]int {
-	queues := map[string]int{tgQueueNameCollectProcessRealtime: 1, tgQueueNameCollectProcessRealtimeV2: 1}
-	for _, queue := range collectProcessQueueNames() {
-		queues[queue] = 1
-	}
-	for shard := 0; shard < collectProcessAccountQueueShards; shard++ {
-		queues[fmt.Sprintf("%s%02d", tgQueueNameCollectProcessAccountPrefix, shard)] = 1
-	}
-	for shard := 0; shard < collectProcessSourceQueueShards; shard++ {
-		queues[fmt.Sprintf("%s%02d", tgQueueNameCollectProcessSourceRealtimePrefix, shard)] = 2
-	}
-	return queues
+	return map[string]int{tgQueueNameCollectProcessRealtime: 1}
 }
 
 func collectProcessHistoryWorkerQueues() map[string]int {
-	queues := map[string]int{
-		tgQueueNameCollectProcessRecoveryV2: 4,
-	}
-	for shard := 0; shard < collectProcessAccountQueueShards; shard++ {
-		queues[fmt.Sprintf("%s%02d", tgQueueNameCollectProcessAccountHistoryPrefix, shard)] = 1
-	}
-	for shard := 0; shard < collectProcessSourceQueueShards; shard++ {
-		queues[fmt.Sprintf("%s%02d", tgQueueNameCollectProcessSourceRecoveryPrefix, shard)] = 1
-	}
-	return queues
+	return map[string]int{}
 }
 
 func backgroundWorkerQueues(collectorWorker, backgroundWorker bool) map[string]int {

@@ -1,9 +1,6 @@
 package sys
 
-import (
-	"fmt"
-	"testing"
-)
+import "testing"
 
 // TestCollectProcessSourceQueueIsolation 验证 BOT account_id=0 按租户和来源分片，
 // 不会因为事件 ID 不同而漂移到不同队列。
@@ -29,12 +26,10 @@ func TestCollectProcessSourceQueueIsolation(t *testing.T) {
 }
 
 func TestCollectProcessSourceQueuesRegistered(t *testing.T) {
-	queues := collectProcessWorkerQueues()
-	for shard := 0; shard < collectProcessSourceQueueShards; shard++ {
-		realtime := fmt.Sprintf("%s%02d", tgQueueNameCollectProcessSourceRealtimePrefix, shard)
-		recovery := fmt.Sprintf("%s%02d", tgQueueNameCollectProcessSourceRecoveryPrefix, shard)
-		if queues[realtime] != 2 || queues[recovery] != 1 {
-			t.Fatalf("BOT 来源队列未注册或优先级错误 realtime=%s recovery=%s", realtime, recovery)
-		}
+	payload := collectProcessQueuePayload{TenantId: 56, AccountId: 561, SourceId: 1370, EventId: 1}
+	realtime := collectProcessQueueName(payload)
+	recovery := collectProcessQueueName(collectProcessQueuePayload{TenantId: 56, AccountId: 561, SourceId: 1370, EventId: 1, Recovery: true, History: true})
+	if realtime == recovery || realtime == "" || recovery == "" {
+		t.Fatalf("source realtime/recovery queues are not isolated: realtime=%s recovery=%s", realtime, recovery)
 	}
 }

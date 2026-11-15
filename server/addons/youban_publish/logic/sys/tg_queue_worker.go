@@ -147,48 +147,14 @@ func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
 
 func (s *sSysPublish) startCollectProcessWorker(ctx context.Context) {
 	s.tgQueueMu.Lock()
-	if s.collectRealtimeServer != nil || s.collectProcessQueueServer != nil || s.collectHistoryQueueServer != nil {
+	if s.collectSourceQueueServers != nil {
 		s.tgQueueMu.Unlock()
 		return
 	}
-	realtimeServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
-		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.collectRealtimeConcurrency", 16).Int(),
-		Queues:         map[string]int{tgQueueNameCollectProcessRealtimeV2: 1},
-		RetryDelayFunc: telegramQueueRetryDelay,
-	})
-	realtimeProcessServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
-		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.collectRealtimeConcurrency", 16).Int(),
-		Queues:         collectProcessRealtimeWorkerQueues(),
-		RetryDelayFunc: telegramQueueRetryDelay,
-	})
-	historyProcessServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
-		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.collectHistoryConcurrency", 4).Int(),
-		Queues:         collectProcessHistoryWorkerQueues(),
-		RetryDelayFunc: telegramQueueRetryDelay,
-	})
-	s.collectRealtimeServer = realtimeServer
-	s.collectProcessQueueServer = realtimeProcessServer
-	s.collectHistoryQueueServer = historyProcessServer
+	s.collectSourceQueueServers = make(map[string]*asynq.Server)
+	s.collectSourceQueueOwners = make(map[string]string)
 	s.tgQueueMu.Unlock()
-
-	mux := asynq.NewServeMux()
-	mux.HandleFunc(tgTaskTypeCollectProcess, s.handleCollectProcessTask)
-	g.Log().Infof(ctx, "启动采集处理队列 queues:%v", collectProcessWorkerQueues())
-	go func() {
-		if err := realtimeServer.Run(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
-			g.Log().Errorf(ctx, "启动实时采集处理队列失败：%+v", err)
-		}
-	}()
-	go func() {
-		if err := realtimeProcessServer.Run(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
-			g.Log().Errorf(ctx, "启动实时采集处理队列失败：%+v", err)
-		}
-	}()
-	go func() {
-		if err := historyProcessServer.Run(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
-			g.Log().Errorf(ctx, "启动历史采集处理队列失败：%+v", err)
-		}
-	}()
+	g.Log().Info(ctx, "启动来源级采集处理 Worker")
 	go s.runCollectSourceQueueManager(ctx)
 }
 

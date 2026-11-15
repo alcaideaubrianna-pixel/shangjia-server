@@ -25,11 +25,8 @@ func TestCollectorHistoryReachesBusinessRouting(t *testing.T) {
 		if msg.History != history {
 			t.Fatal("delivery classification was lost")
 		}
-		want := tgQueueNameCollectProcessRealtimeV2
-		if history {
-			want = tgQueueNameCollectProcessRecoveryV2
-		}
-		if got := collectProcessQueueName(collectProcessQueuePayload{EventId: 1, OutboxOwner: "realtime-owner", History: msg.History}); got != want {
+		want := collectProcessSourceQueueName(collectProcessQueuePayload{TenantId: 1, AccountId: 2, SourceId: 3, History: msg.History, Recovery: history})
+		if got := collectProcessQueueName(collectProcessQueuePayload{TenantId: 1, AccountId: 2, SourceId: 3, EventId: 1, OutboxOwner: "realtime-owner", History: msg.History, Recovery: history}); got != want {
 			t.Fatalf("queue=%s want=%s", got, want)
 		}
 	}

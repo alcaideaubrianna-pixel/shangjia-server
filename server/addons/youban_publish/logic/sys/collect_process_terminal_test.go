@@ -39,18 +39,13 @@ func TestCollectProcessPayloadMustMatchProductionEventOwner(t *testing.T) {
 }
 
 func TestCollectProcessV2SeparatesRealtimeRecoveryAndLegacy(t *testing.T) {
-	realtime := collectProcessQueuePayload{EventId: 1, OutboxOwner: "owner"}
+	realtime := collectProcessQueuePayload{TenantId: 1, AccountId: 2, SourceId: 3, EventId: 1}
 	recovery := realtime
 	recovery.Recovery = true
-	legacy := collectProcessQueuePayload{EventId: 1}
-	if collectProcessQueueName(realtime) != tgQueueNameCollectProcessRealtimeV2 || collectProcessQueueName(recovery) != tgQueueNameCollectProcessRecoveryV2 || collectProcessQueueName(legacy) != tgQueueNameCollectProcessRealtime {
-		t.Fatal("new, recovery and legacy tasks must use separate queues")
+	if collectProcessQueueName(realtime) == collectProcessQueueName(recovery) {
+		t.Fatal("realtime and recovery source queues must be isolated")
 	}
-	queues := collectProcessWorkerQueues()
-	if queues[tgQueueNameCollectProcessRealtime] == 0 || queues[tgQueueNameCollectProcessRecoveryV2] == 0 {
-		t.Fatal("legacy/recovery queues have no consumer")
-	}
-	if queues[tgQueueNameCollectProcessRealtimeV2] != 0 {
-		t.Fatal("realtime must have dedicated consumers")
+	if collectProcessQueueName(realtime) == tgQueueNameCollectProcessRealtime {
+		t.Fatal("source event must not use the legacy global realtime queue")
 	}
 }

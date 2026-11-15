@@ -117,8 +117,6 @@ func handleUpgradeFix(ctx context.Context, args map[string]string) (err error) {
 		_, err = publishsys.RebalanceCollectMediaQueue(ctx)
 	case "collectMediaLegacyQueueMigrate":
 		_, err = publishsys.MigrateLegacyCollectMediaQueue(ctx)
-	case "collectProcessQueueRebalance":
-		_, err = publishsys.RebalanceCollectProcessQueue(ctx)
 	case "collectProfileMediaRepair":
 		profileIds, parseErr := fix.ParseMaterialImportRepairGroupIDs(args["a2"])
 		if parseErr != nil {
