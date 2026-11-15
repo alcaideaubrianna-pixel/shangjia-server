@@ -147,24 +147,27 @@ func (s *sSysPublish) repairAccountCyclePlans(ctx context.Context, scope publish
 		if job.ChannelId <= 0 || job.ProfileId <= 0 || isDownTelegramOperationNo(job.OperationNo) || isMessagePushOperationNo(job.OperationNo) {
 			continue
 		}
+		inserted := false
 		err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 			// 当前资料必须仍属于账户并处于上架状态，历史成功不代表当前仍应发布。
-			_, e := tx.Exec("INSERT INTO "+publishChannelProfileTable+" (tenant_id,account_id,channel_id,profile_id,last_job_id,status) SELECT j.tenant_id,j.account_id,j.channel_id,j.profile_id,j.id,'active' FROM "+publishTgJobTable+" j JOIN "+publishProfileStateTable+" ps ON ps.tenant_id=j.tenant_id AND ps.account_id=j.account_id AND ps.profile_id=j.profile_id JOIN "+publishChannelTable+" c ON c.id=j.channel_id AND c.tenant_id=j.tenant_id AND c.deleted_at IS NULL WHERE j.id=? AND ps.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM "+publishTgJobTable+" newer WHERE newer.tenant_id=j.tenant_id AND newer.account_id=j.account_id AND newer.channel_id=j.channel_id AND newer.profile_id=j.profile_id AND newer.status='sent' AND newer.id>j.id) ON CONFLICT(channel_id,profile_id) DO NOTHING", job.Id)
+			result, e := tx.Exec("INSERT INTO "+publishChannelProfileTable+" (tenant_id,account_id,channel_id,profile_id,last_job_id,status) SELECT j.tenant_id,j.account_id,j.channel_id,j.profile_id,j.id,'active' FROM "+publishTgJobTable+" j JOIN "+publishProfileStateTable+" ps ON ps.tenant_id=j.tenant_id AND ps.account_id=j.account_id AND ps.profile_id=j.profile_id JOIN "+publishChannelTable+" c ON c.id=j.channel_id AND c.tenant_id=j.tenant_id AND c.deleted_at IS NULL WHERE j.id=? AND ps.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM "+publishTgJobTable+" newer WHERE newer.tenant_id=j.tenant_id AND newer.account_id=j.account_id AND newer.channel_id=j.channel_id AND newer.profile_id=j.profile_id AND newer.status='sent' AND newer.id>j.id) ON CONFLICT(channel_id,profile_id) DO NOTHING", job.Id)
+			if e != nil {
+				return e
+			}
+			affected, e := result.RowsAffected()
+			inserted = e == nil && affected > 0
 			return e
 		})
 		if err != nil {
 			return err
 		}
-		// 先补计划再推进审计游标；中途退出会幂等重做本页。
-		missing, err := g.DB().Model(publishChannelProfileTable).Ctx(ctx).Where("last_job_id", job.Id).Where("status", "active").WhereNull("next_cycle_at").Count()
-		if err != nil {
-			return err
-		}
-		if missing > 0 {
+		if inserted {
 			if err := s.syncTelegramJobCycleSchedule(ctx, job); err != nil {
 				return err
 			}
 		}
+		// 已存在映射的 job 不再执行 COUNT(*)；正常成功路径已经写入计划。
+		// 修复任务只在确实补出新映射时同步计划，避免产生 N+1 查询。
 	}
 	checkpoint.Cursor = 0
 	if len(page) == 200 {

@@ -23,10 +23,10 @@ func TestCollectSourceStatsBatchLimit(t *testing.T) {
 		value string
 		want  int
 	}{
-		{name: "default", value: "", want: 32},
-		{name: "invalid", value: "bad", want: 32},
+		{name: "default", value: "", want: 128},
+		{name: "invalid", value: "bad", want: 128},
 		{name: "bounded low", value: "4", want: 4},
-		{name: "bounded high", value: "999", want: 128},
+		{name: "bounded high", value: "999", want: 256},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := os.Setenv("YOUBAN_PUBLISH_COLLECT_SOURCE_STATS_BATCH_SIZE", tc.value); err != nil {

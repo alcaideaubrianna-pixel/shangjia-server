@@ -209,7 +209,11 @@ func (s *sSysPublish) loadTargetCollectMaterialWindow(ctx context.Context, paylo
 	load := func(verifyOnly bool) (gdb.Result, error) {
 		model := collectMaterialWindowModel(ctx, payload, verifyOnly).
 			Where("e.source_message_id >= ?", target["source_message_id"].Int64()).
-			Where("COALESCE(e.received_at,e.created_at) <= ?", eventAt.Add(collectMaterialVerifyWindow()))
+			// Keep the timestamp predicate sargable for rows with and without
+			// received_at. COALESCE on the column forced PostgreSQL to evaluate
+			// the expression for a broad source range before applying LIMIT.
+			Where("(e.received_at <= ? OR (e.received_at IS NULL AND e.created_at <= ?))",
+				eventAt.Add(collectMaterialVerifyWindow()), eventAt.Add(collectMaterialVerifyWindow()))
 		if verifyOnly {
 			model = model.Where("e.updated_at <= ?", now.Add(-collectMaterialWaitingVerifyRetryDelay))
 		} else {

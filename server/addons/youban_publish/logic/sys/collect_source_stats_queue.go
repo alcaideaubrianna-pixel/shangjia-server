@@ -37,10 +37,10 @@ func collectSourceStatsRefreshDelay() time.Duration {
 func collectSourceStatsBatchLimit() int {
 	limit, err := strconv.Atoi(strings.TrimSpace(os.Getenv("YOUBAN_PUBLISH_COLLECT_SOURCE_STATS_BATCH_SIZE")))
 	if err != nil || limit <= 0 {
-		limit = 32
-	}
-	if limit > 128 {
 		limit = 128
+	}
+	if limit > 256 {
+		limit = 256
 	}
 	return limit
 }

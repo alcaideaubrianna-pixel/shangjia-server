@@ -521,11 +521,15 @@ func nextCollectProcessDelay(ctx context.Context, payload collectProcessQueuePay
 }
 
 func collectProcessEventModel(ctx context.Context, payload collectProcessQueuePayload) *gdb.Model {
+	// The caller has already passed collectProcessSourceEnabled before entering
+	// the source window. Rejoining collect_source here made every realtime
+	// candidate scan touch the source table again and prevented the event
+	// index from being the sole driving relation. The source status is checked
+	// again on the next scheduled run, while the event query stays scoped by
+	// tenant/source/account/chat.
 	model := g.DB().Model(publishCollectEventTable+" e").Ctx(ctx).
-		InnerJoin(publishCollectSourceTable+" s", "s.id=e.source_id AND s.tenant_id=e.tenant_id").
 		Where("e.tenant_id", payload.TenantId).
-		Where("e.source_id", payload.SourceId).
-		Where("s.channel_blacklisted", 0)
+		Where("e.source_id", payload.SourceId)
 	if payload.AccountId > 0 {
 		model = model.Where("e.account_id", payload.AccountId)
 	}

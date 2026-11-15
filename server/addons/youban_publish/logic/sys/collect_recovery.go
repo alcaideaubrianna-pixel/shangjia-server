@@ -35,6 +35,8 @@ const (
 	collectRecoveryBackpressureCacheKey = "youban_publish:collect:recovery:backpressure"
 	collectRecoveryBackpressureLockKey  = collectRecoveryBackpressureCacheKey + ":lock"
 	collectRecoveryBackpressureCacheTTL = 5 * time.Second
+	collectRecoveryMediaCursorTTL       = 2 * time.Minute
+	collectRecoveryMediaCursorKey       = "youban_publish:collect:recovery:media:cursor"
 	// 恢复查询本身只处理超过 10 秒未推进的事件，因此实时优先窗口
 	// 必须覆盖这段短暂积压，而不能再次使用 10 秒阈值导致全部命中历史。
 	collectRecoveryRealtimeWindow = 10 * time.Minute
@@ -403,35 +405,39 @@ func (s *sSysPublish) collectRecoveryBackpressure(ctx context.Context) (bool, er
 		}
 	}
 	if locked, lockErr := cache.Instance().SetIfNotExist(ctx, collectRecoveryBackpressureLockKey, 1, 2*time.Second); lockErr == nil && !locked {
-		// Another recovery pass is refreshing the same global count. Yield this
-		// pass instead of issuing another COUNT against the event table.
+		// Another recovery pass is refreshing the bounded sample. Yield this
+		// pass instead of querying the outbox again.
 		return true, nil
 	} else if lockErr != nil {
-		// Redis is optional for this guard; continue with the durable DB check.
-		g.Log().Warningf(ctx, "采集恢复背压缓存不可用，回退数据库统计 err:%+v", lockErr)
+		g.Log().Warningf(ctx, "采集恢复背压缓存不可用，回退数据库有界检查 err:%+v", lockErr)
 	}
 	defer func() { _, _ = cache.Instance().Remove(ctx, collectRecoveryBackpressureLockKey) }()
-	row, err := g.DB().Model(collectProcessOutboxTable).Ctx(ctx).
-		Fields("COUNT(*) AS pending, MIN(updated_at) AS oldest").
+
+	// Do not use COUNT/MIN here. Backpressure only needs to know whether the
+	// cap is exceeded and the oldest sampled row. LIMIT cap+1 bounds the work
+	// even when the historical outbox is very large.
+	rows, err := g.DB().Model(collectProcessOutboxTable).Ctx(ctx).
+		Fields("updated_at").
 		Where("history", false).
-		WhereIn("status", []string{"pending", "processing"}).One()
+		WhereIn("status", []string{"pending", "processing"}).
+		OrderAsc("updated_at").
+		Limit(collectRecoveryRealtimeMaxPending + 1).
+		All()
 	if err != nil {
 		return true, err
 	}
-	pending := row["pending"].Int64()
-	oldest := row["oldest"].GTime()
-	value := collectRecoveryBackpressureValue{Pending: pending}
-	if oldest != nil && !oldest.IsZero() {
-		value.OldestUnixNano = oldest.UnixNano()
+	value := collectRecoveryBackpressureValue{Pending: int64(len(rows))}
+	if len(rows) > 0 && rows[0]["updated_at"].GTime() != nil {
+		value.OldestUnixNano = rows[0]["updated_at"].GTime().UnixNano()
 	}
 	_ = cache.Instance().Set(ctx, collectRecoveryBackpressureCacheKey, value, collectRecoveryBackpressureCacheTTL)
 	blocked := value.blocked()
 	if blocked {
 		age := time.Duration(0)
-		if oldest != nil && !oldest.IsZero() {
-			age = time.Since(oldest.Time).Round(time.Millisecond)
+		if value.OldestUnixNano > 0 {
+			age = time.Since(time.Unix(0, value.OldestUnixNano)).Round(time.Millisecond)
 		}
-		g.Log().Infof(ctx, "实时采集背压，跳过本轮历史恢复 pending:%d oldestAge:%s", pending, age)
+		g.Log().Infof(ctx, "实时采集背压，跳过本轮历史恢复 sampled:%d oldestAge:%s", value.Pending, age)
 	}
 	return blocked, nil
 }
@@ -727,16 +733,35 @@ func (s *sSysPublish) recoverPendingCollectMedia(ctx context.Context, limit int)
 	if candidateLimit > 2000 {
 		candidateLimit = 2000
 	}
-	rows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
+
+	var cursorUpdatedAt *gtime.Time
+	var cursorID int64
+	if cached, cacheErr := cache.Instance().Get(ctx, collectRecoveryMediaCursorKey); cacheErr == nil && !cached.IsNil() {
+		var cursor struct {
+			UpdatedAtUnixNano int64 `json:"updated_at_unix_nano"`
+			ID                int64 `json:"id"`
+		}
+		if cached.Scan(&cursor) == nil && cursor.UpdatedAtUnixNano > 0 && cursor.ID > 0 {
+			cursorUpdatedAt = gtime.New(time.Unix(0, cursor.UpdatedAtUnixNano))
+			cursorID = cursor.ID
+		}
+	}
+
+	model := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
 		Where("e."+eventCols.Status, sysin.CollectEventStatusMediaPending).
 		WhereNot("e."+eventCols.SourceType, sysin.CollectSourceTypeBot).
 		Where(enabledCollectSourceExistsSQL("e")).
-		Where("EXISTS (SELECT 1 FROM "+mediaTable+" m WHERE m.event_id=e."+eventCols.Id+" AND m.cache_status=? AND (m.next_retry_at IS NULL OR m.next_retry_at<=?))", collectMediaCachePending, now).
-		OrderAsc("e." + eventCols.UpdatedAt).
-		Limit(candidateLimit).
-		All()
+		Where("EXISTS (SELECT 1 FROM "+mediaTable+" m WHERE m.event_id=e."+eventCols.Id+" AND m.cache_status=? AND (m.next_retry_at IS NULL OR m.next_retry_at<=?))", collectMediaCachePending, now)
+	if cursorUpdatedAt != nil {
+		model = model.Where("(e."+eventCols.UpdatedAt+">? OR (e."+eventCols.UpdatedAt+"=? AND e."+eventCols.Id+">?))", cursorUpdatedAt, cursorUpdatedAt, cursorID)
+	}
+	rows, err := model.OrderAsc("e." + eventCols.UpdatedAt).OrderAsc("e." + eventCols.Id).Limit(candidateLimit).All()
 	if err != nil {
 		return gerror.Wrap(err, "读取待恢复采集媒体事件失败")
+	}
+	if len(rows) == 0 && cursorUpdatedAt != nil {
+		_, _ = cache.Instance().Remove(ctx, collectRecoveryMediaCursorKey)
+		return nil
 	}
 	if len(rows) == 0 {
 		return nil
@@ -756,8 +781,6 @@ func (s *sSysPublish) recoverPendingCollectMedia(ctx context.Context, limit int)
 			observeCollectMediaScheduler(ctx, "recovery_duplicate_skipped", payload.TenantId, payload.TgAccountId)
 			continue
 		}
-		// Recovery must bypass Asynq's 24-hour unique key. A lost or stuck
-		// unique task otherwise prevents this media event from being requeued.
 		enqueued, enqueueErr := s.enqueueCollectMediaCacheDeferred(ctx, payload, 0)
 		if enqueueErr != nil {
 			releaseCollectMediaRecovery(ctx, payload.EventId)
@@ -777,6 +800,16 @@ func (s *sSysPublish) recoverPendingCollectMedia(ctx context.Context, limit int)
 			continue
 		}
 		recovered++
+	}
+
+	last := rows[len(rows)-1]
+	lastUpdatedAt := last[eventCols.UpdatedAt].GTime()
+	lastID := last[eventCols.Id].Int64()
+	if lastUpdatedAt != nil && lastID > 0 {
+		_ = cache.Instance().Set(ctx, collectRecoveryMediaCursorKey, struct {
+			UpdatedAtUnixNano int64 `json:"updated_at_unix_nano"`
+			ID                int64 `json:"id"`
+		}{lastUpdatedAt.UnixNano(), lastID}, collectRecoveryMediaCursorTTL)
 	}
 	if recovered > 0 {
 		g.Log().Infof(ctx, "已重新投递待处理采集媒体任务 count:%d", recovered)
