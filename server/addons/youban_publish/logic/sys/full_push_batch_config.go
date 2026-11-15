@@ -9,7 +9,7 @@ import (
 
 const (
 	defaultFullPushExpandWorkerCount = 4
-	defaultFullPushPageSize          = 100
+	defaultFullPushPageSize          = 20
 	defaultFullPushCandidateCount    = 20
 	defaultFullPushSchedulerInterval = 2 * time.Second
 	defaultFullPushExpandLeaseTTL    = 60 * time.Second
@@ -29,13 +29,10 @@ func fullPushExpandWorkerCount(ctx context.Context) int {
 
 func fullPushPageSize(ctx context.Context) int {
 	value := g.Cfg().MustGet(ctx, "youbanPublish.fullPush.pageSize", defaultFullPushPageSize).Int()
-	if value < 20 {
-		return 20
+	if value != defaultFullPushPageSize {
+		g.Log().Warningf(ctx, "全量推送批次大小已固定为%d，忽略配置值:%d", defaultFullPushPageSize, value)
 	}
-	if value > 500 {
-		return 500
-	}
-	return value
+	return defaultFullPushPageSize
 }
 
 func fullPushCandidateCount(ctx context.Context) int {
