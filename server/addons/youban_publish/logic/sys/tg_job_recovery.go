@@ -18,6 +18,7 @@ import (
 	"github.com/hibiken/asynq"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/library/cache"
 	hglock "hotgo/internal/library/hgrds/lock"
 )
 
@@ -43,38 +44,79 @@ func (s *sSysPublish) recoverInterruptedTelegramJobs(ctx context.Context, limit 
 	if limit <= 0 {
 		limit = 100
 	}
+	if limit > 200 {
+		limit = 200
+	}
 	now := gtime.Now()
 	if err := s.supersedeExpiredMessagePushPlanJobs(ctx, limit); err != nil {
 		return err
 	}
-	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+
+	// Recover only a bounded page of interrupted jobs. The previous implementation
+	// updated every matching row in one statement, which could rewrite tens of
+	// thousands of jobs and create a large WAL/IO spike during startup recovery.
+	var ids []int64
+	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Fields("id").
 		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
 		WhereIn("dispatch_status", []string{tgDispatchStatusQueued, tgDispatchStatusProcessing}).
+		Where("updated_at <= ?", now.Add(-telegramDispatchJobRecoverAfter)).
 		Where(telegramActiveChannelCondition()).
 		Where(messagePushPlanRecoveryConditionSQL(publishTgJobTable), telegramRecoveryTimeText(now.Add(-messagePushPlanJobExpireAfter))).
-		Data(g.Map{
-			"dispatch_status":     tgDispatchStatusIdle,
-			"next_retry_at":       now,
-			"last_dispatch_error": "服务启动时发现任务调度中断，已重新进入待调度队列",
-			"updated_at":          now,
-		}).
-		Update()
-	if err != nil {
-		return gerror.Wrap(err, "恢复调度中断的TG任务失败")
+		OrderAsc("id").
+		Limit(limit).
+		Scan(&ids); err != nil {
+		return gerror.Wrap(err, "读取中断的TG任务失败")
 	}
-	if affected, _ := result.RowsAffected(); affected > 0 {
-		g.Log().Infof(ctx, "已恢复调度中断的TG任务：%d条", affected)
+
+	if len(ids) > 0 {
+		recoverableIDs := make([]int64, 0, len(ids))
+		for _, jobID := range ids {
+			key := fmt.Sprintf("%s%d", relayconsts.TelegramJobRecoveryKeyPrefix, jobID)
+			claimed, cacheErr := cache.Instance().SetIfNotExist(ctx, key, 1, telegramDispatchJobRecoverAfter)
+			if cacheErr != nil {
+				// Redis is only a duplicate-recovery guard. If it is unavailable,
+				// keep the PG conditional update as the source of truth.
+				recoverableIDs = append(recoverableIDs, jobID)
+				continue
+			}
+			if claimed {
+				recoverableIDs = append(recoverableIDs, jobID)
+			}
+		}
+
+		if len(recoverableIDs) > 0 {
+			result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+				WhereIn("id", recoverableIDs).
+				WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
+				WhereIn("dispatch_status", []string{tgDispatchStatusQueued, tgDispatchStatusProcessing}).
+				Where("updated_at <= ?", now.Add(-telegramDispatchJobRecoverAfter)).
+				Data(g.Map{
+					"dispatch_status":     tgDispatchStatusIdle,
+					"next_retry_at":       now,
+					"last_dispatch_error": "服务启动时发现任务调度中断，已重新进入待调度队列",
+					"updated_at":          now,
+				}).
+				Update()
+			if err != nil {
+				return gerror.Wrap(err, "恢复调度中断的TG任务失败")
+			}
+			if affected, _ := result.RowsAffected(); affected > 0 {
+				g.Log().Infof(ctx, "已恢复调度中断的TG任务：%d条", affected)
+			}
+		}
 	}
-	if err = s.supersedeStalePendingChannelHeads(ctx, limit); err != nil {
+
+	if err := s.supersedeStalePendingChannelHeads(ctx, limit); err != nil {
 		return err
 	}
-	if err = s.recoverPendingIdleTelegramJobs(ctx, limit); err != nil {
+	if err := s.recoverPendingIdleTelegramJobs(ctx, limit); err != nil {
 		return err
 	}
-	if err = s.recoverStaleTelegramDispatchJobs(ctx, limit); err != nil {
+	if err := s.recoverStaleTelegramDispatchJobs(ctx, limit); err != nil {
 		return err
 	}
-	if err = s.recoverStaleTelegramMediaFallbackJobs(ctx, limit); err != nil {
+	if err := s.recoverStaleTelegramMediaFallbackJobs(ctx, limit); err != nil {
 		return err
 	}
 	return s.recoverStaleTelegramSendingJobs(ctx, limit)

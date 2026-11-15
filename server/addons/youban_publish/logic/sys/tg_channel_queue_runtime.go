@@ -140,6 +140,7 @@ func (s *sSysPublish) rehydrateMissingTelegramChannelQueue(ctx context.Context, 
 		_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 			Where("id", job.Id).
 			WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
+			Where("dispatch_status IS DISTINCT FROM ? OR queue_name IS DISTINCT FROM ?", tgDispatchStatusQueued, telegramChannelQueueKeyForPriority(job.ChannelId, job.Priority)).
 			Data(g.Map{"dispatch_status": tgDispatchStatusQueued, "queue_name": telegramChannelQueueKeyForPriority(job.ChannelId, job.Priority), "updated_at": gtime.Now()}).Update()
 		g.Log().Infof(ctx, "频道队列对账补入成功 channel:%d job:%d", job.ChannelId, job.Id)
 	}

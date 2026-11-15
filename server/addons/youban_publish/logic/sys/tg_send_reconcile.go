@@ -140,14 +140,37 @@ func (s *sSysPublish) updateTelegramJobSendPhaseFromStatuses(ctx context.Context
 		return gerror.New("TG任务发送阶段来源状态不能为空")
 	}
 	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("id", jobId).WhereIn("status", statuses).
+		Where("id", jobId).
+		WhereIn("status", statuses).
+		Where("send_phase IS DISTINCT FROM ?", phase).
 		Data(g.Map{"send_phase": phase, "updated_at": gtime.Now()}).Update()
 	if err != nil {
 		return gerror.Wrap(err, "更新TG发送阶段失败")
 	}
 	affected, _ := result.RowsAffected()
 	if affected == 0 {
-		return gerror.New("TG任务状态已变化，停止更新发送阶段")
+		// A repeated phase is an idempotent success. Only report an error when
+		// the job no longer has an allowed source status.
+		var current struct {
+			Status    string `json:"status"`
+			SendPhase string `json:"send_phase"`
+		}
+		if err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+			Fields("status,send_phase").
+			Where("id", jobId).
+			Scan(&current); err != nil {
+			return gerror.Wrap(err, "读取TG发送阶段失败")
+		}
+		statusMatched := false
+		for _, status := range statuses {
+			if current.Status == status {
+				statusMatched = true
+				break
+			}
+		}
+		if !statusMatched || current.SendPhase != phase {
+			return gerror.New("TG任务状态已变化，停止更新发送阶段")
+		}
 	}
 	if projectionErr := s.projectTelegramDeliverySteps(ctx, jobId, phase); projectionErr != nil {
 		g.Log().Warningf(ctx, "投影TG发送步骤失败 jobId:%d phase:%s err:%+v", jobId, phase, projectionErr)
