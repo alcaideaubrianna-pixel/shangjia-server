@@ -16,7 +16,6 @@ import (
 	botsysin "hotgo/addons/youban_bot/model/input/sysin"
 	botservice "hotgo/addons/youban_bot/service"
 	"hotgo/addons/youban_publish/model/input/sysin"
-	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	"hotgo/internal/library/cache"
 	"hotgo/internal/service"
@@ -103,14 +102,6 @@ func (s *sSysPublish) submitBotProfilesWithNotice(ctx context.Context, ids []int
 			}
 			if !claimed {
 				return nil, gerror.New("资料操作参数不完整")
-			}
-			// BOT 上架是明确的用户操作：切换资料为可发布状态后再创建任务。
-			// 否则发送前状态校验会把刚创建的 bot_publish 任务立即标记为 superseded。
-			if _, err = g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).
-				Where("id", profileId).WhereNull("deleted_at").
-				Data(g.Map{"status": 1, "visibility": consts.ContentVisibilityPublic}).Update(); err != nil {
-				releaseProfileOperationClaim(ctx, capability.TenantId, profileId)
-				return nil, gerror.Wrap(err, "资料上架状态更新失败")
 			}
 			operationNo := newBotProfilePublishOperationNo(botId, chatId, profileId)
 			if err = s.submitProfilePublish(ctx, profileId, capability.TenantId, group.AccountId, capability.AccountId, operationNo, nil, false); err != nil {

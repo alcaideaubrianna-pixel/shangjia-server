@@ -151,7 +151,8 @@ func (s *sSysPublish) submitProfilePublishWithMeta(ctx context.Context, profileI
 	// make the authoritative lifecycle state public before creating jobs; the
 	// sender performs a final status check and would otherwise supersede jobs
 	// created while the profile still has its default offline status.
-	if profileId > 0 && (strings.TrimSpace(operationNo) == "" || isInteractiveProfilePublishOperation(operationNo)) {
+	manualLifecycle := profileId > 0 && (strings.TrimSpace(operationNo) == "" || isInteractiveProfilePublishOperation(operationNo))
+	if manualLifecycle {
 		if _, stateErr := s.syncProfilePublishState(ctx, profileId, 1, consts.ContentVisibilityPublic, nil); stateErr != nil {
 			return stateErr
 		}
@@ -168,6 +169,13 @@ func (s *sSysPublish) submitProfilePublishWithMeta(ctx context.Context, profileI
 		})
 	}
 	if err != nil {
+		if manualLifecycle {
+			// Do not leave a profile publicly visible when job preparation fails.
+			// The lifecycle transition and task creation are one user operation.
+			if _, rollbackErr := s.syncProfilePublishState(ctx, profileId, 2, consts.ContentVisibilityPrivate, nil); rollbackErr != nil {
+				g.Log().Warning(ctx, "资料发布失败后回滚公开状态失败", g.Map{"event": "publish_state_rollback_failed", "profileId": profileId, "operationNo": strings.TrimSpace(operationNo), "error": rollbackErr.Error()})
+			}
+		}
 		return err
 	}
 	g.Log().Info(ctx, "资料发布任务创建完成", g.Map{
