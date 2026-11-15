@@ -112,6 +112,21 @@ func TestTelegramChannelPermissionError(t *testing.T) {
 	}
 }
 
+func TestTelegramWebpageForbiddenIsPermanent(t *testing.T) {
+	err := errors.New("Bad Request: CHAT_SEND_WEBPAGE_FORBIDDEN")
+	if !isTelegramPermanentSendError(err) {
+		t.Fatal("CHAT_SEND_WEBPAGE_FORBIDDEN must fail permanently without fallback retry")
+	}
+	policy := telegramJobErrorRetryPolicyWithConfig(err, 1, &model.PublishConfig{
+		RetryEnabled:         1,
+		MaxRetryCount:        5,
+		RetryIntervalMinutes: 1,
+	})
+	if !policy.Permanent {
+		t.Fatal("CHAT_SEND_WEBPAGE_FORBIDDEN must not enter retry policy")
+	}
+}
+
 func TestTelegramAccountBusyBecomesPermanentAfterThreeRetries(t *testing.T) {
 	err := &telegramAccountBusyError{tgAccountId: 16, err: context.DeadlineExceeded}
 	policy := telegramJobErrorRetryPolicy(err, telegramRetryMaxCount)

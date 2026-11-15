@@ -41,6 +41,23 @@ func TestTelegramAmbiguousDeliveryError(t *testing.T) {
 	}
 }
 
+func TestTelegramAmbiguousDeliveryRequiresReconciliation(t *testing.T) {
+	attempt := telegramDeliveryAttempt{
+		Id:     1,
+		Status: telegramAttemptStatusRetryWait,
+	}
+	for _, message := range []string{
+		"context deadline exceeded",
+		"unexpected EOF",
+		"connection reset by peer",
+	} {
+		attempt.ErrorMessage = message
+		if got := telegramUnknownAttemptRecoveryAction(attempt, 0); got != telegramUnknownAttemptReconcile {
+			t.Fatalf("%q: got recovery action %q, want %q", message, got, telegramUnknownAttemptReconcile)
+		}
+	}
+}
+
 func TestTelegramSendPhaseHasDisplay(t *testing.T) {
 	if !telegramSendPhaseHasDisplay(telegramSendPhaseVerifySending) {
 		t.Fatal("verify phase must not resend display media")

@@ -383,6 +383,7 @@ func isTelegramPermanentSendError(err error) bool {
 		"file_reference_invalid",
 		"webpage_curl_failed",
 		"webpage_media_empty",
+		"chat_send_webpage_forbidden",
 		"账号推送暂不支持远程媒体地址",
 		"账号推送媒体文件不存在",
 		"forbidden:",
