@@ -302,6 +302,11 @@ func (s *sSysPublish) confirmTelegramAPISuccess(ctx context.Context, job telegra
 	if attempt.ExpectedCount == 0 {
 		count = 0
 	}
+	// Telegram 已确认发送后先独立保存远端消息证据。确认投影事务失败时，
+	// 对账可以凭这些消息 ID 恢复展示阶段，而不会重复发送展示媒体。
+	if err = persistTelegramAttemptResponseDurably(ctx, attempt, messages); err != nil {
+		return err
+	}
 	step := beginTelegramPublishStage(ctx, "api_success.commit_transaction", g.Map{"attemptId": attempt.Id})
 	var duplicateMessages []*telegramSentMessage
 	cancelled := false
@@ -897,6 +902,47 @@ func recordTelegramAttemptMessagesTx(ctx context.Context, tx gdb.TX, attempt tel
 		g.Log().Warningf(ctx, "TG消息已返回但记录发送审计失败 attempt_id:%d job_id:%d phase:%s chat_id:%s message_count:%d source:%s err:%v",
 			attempt.Id, attempt.JobId, attempt.Phase, attempt.TargetChatId, len(rows), source, err)
 		return gerror.Wrap(err, "记录TG Attempt消息失败")
+	}
+	return nil
+}
+
+// persistTelegramAttemptResponseDurably 先以独立短事务保存 Telegram 已返回的消息证据。
+// 后续确认投影即使因连接或事务生命周期异常失败，对账仍可恢复并继续验证阶段。
+func persistTelegramAttemptResponseDurably(ctx context.Context, attempt telegramDeliveryAttempt, messages []*telegramSentMessage) error {
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	rows := make(g.List, 0, len(messages))
+	positions := make(map[int64]int, len(messages))
+	for _, message := range messages {
+		if message == nil || message.MessageId <= 0 {
+			continue
+		}
+		payload, err := json.Marshal(message)
+		if err != nil {
+			return gerror.Wrap(err, "序列化TG响应消息失败")
+		}
+		if index, ok := positions[message.MessageId]; ok {
+			rows[index]["message_payload"] = string(payload)
+			continue
+		}
+		positions[message.MessageId] = len(rows)
+		rows = append(rows, g.Map{
+			"attempt_id":      attempt.Id,
+			"job_id":          attempt.JobId,
+			"target_chat_id":  attempt.TargetChatId,
+			"message_id":      message.MessageId,
+			"message_payload": string(payload),
+			"source":          "response",
+			"created_at":      gtime.Now(),
+		})
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	_, err := g.DB().Model(publishTgAttemptMessageTable).Ctx(persistCtx).Data(rows).
+		OnConflict("attempt_id,message_id").OnDuplicate("source,message_payload").Save()
+	if err != nil {
+		return gerror.Wrap(err, "持久化TG响应消息失败")
 	}
 	return nil
 }
