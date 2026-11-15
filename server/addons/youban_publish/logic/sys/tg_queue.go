@@ -1156,10 +1156,26 @@ func (s *sSysPublish) enqueueTelegramTaskWithQueuePayload(ctx context.Context, t
 		return nil
 	}
 	if errors.Is(err, asynq.ErrTaskIDConflict) && taskType == tgTaskTypeCleanup {
-		// The stable cleanup task is already pending or running. Treat the
-		// conflict as an idempotent enqueue success; the existing task owns
-		// deletion and will retry on its own if Telegram rejects the request.
-		return nil
+		// A stable ID conflict is only idempotent when the existing task belongs
+		// to this same job. Older cleanup paths used a shared request ID, so
+		// treating every conflict as success silently drops deletion jobs.
+		// Re-enqueue with a job-scoped fallback ID; deletion is idempotent at the
+		// message-row level and the worker will converge without losing work.
+		fallbackTaskID := fmt.Sprintf("tg-cleanup-job-%d-fallback-%d", jobId, time.Now().UnixNano())
+		fallbackOptions := []asynq.Option{
+			asynq.Queue(queueName),
+			asynq.MaxRetry(10),
+			asynq.Timeout(telegramPublishTaskTimeout),
+			asynq.TaskID(fallbackTaskID),
+		}
+		if delay > 0 {
+			fallbackOptions = append(fallbackOptions, asynq.ProcessIn(delay))
+		}
+		g.Log().Warningf(ctx, "清理任务稳定TaskID冲突，使用兜底任务重入 jobId:%d fallbackTaskId:%s", jobId, fallbackTaskID)
+		info, err = client.EnqueueContext(enqueueCtx, task, fallbackOptions...)
+		if errors.Is(err, asynq.ErrDuplicateTask) {
+			return nil
+		}
 	}
 	// 稳定 TaskID 可能残留在 Redis 的 pending 集合中，但对应任务已经丢失。
 	// 不能把冲突当成成功，否则频道队首会永久 pending；使用唯一兜底 ID 重入，
