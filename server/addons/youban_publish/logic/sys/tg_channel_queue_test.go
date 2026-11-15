@@ -146,3 +146,18 @@ func TestTelegramChannelQueueWorkerDisabledByDefault(t *testing.T) {
 		t.Fatal("channel queue worker must remain disabled unless explicitly enabled")
 	}
 }
+
+func TestTelegramChannelRecoveryBatchSize(t *testing.T) {
+	t.Setenv("YOUBAN_PUBLISH_TG_CHANNEL_RECOVERY_BATCH_SIZE", "")
+	if got, want := telegramChannelRecoveryBatchSize(), 500; got != want {
+		t.Fatalf("default recovery batch size=%d, want %d", got, want)
+	}
+	t.Setenv("YOUBAN_PUBLISH_TG_CHANNEL_RECOVERY_BATCH_SIZE", "1200")
+	if got, want := telegramChannelRecoveryBatchSize(), 1200; got != want {
+		t.Fatalf("configured recovery batch size=%d, want %d", got, want)
+	}
+	t.Setenv("YOUBAN_PUBLISH_TG_CHANNEL_RECOVERY_BATCH_SIZE", "99999")
+	if got, want := telegramChannelRecoveryBatchSize(), 2000; got != want {
+		t.Fatalf("capped recovery batch size=%d, want %d", got, want)
+	}
+}

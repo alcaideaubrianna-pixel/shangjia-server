@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,11 +32,30 @@ func (s *sSysPublish) runTelegramChannelQueueWorker(ctx context.Context) {
 		case <-ticker.C:
 			s.processTelegramChannelQueuePass(ctx)
 		case <-recoveryTicker.C:
-			if err := s.rehydrateMissingTelegramChannelQueue(ctx, 500); err != nil {
+			if err := s.rehydrateMissingTelegramChannelQueue(ctx, telegramChannelRecoveryBatchSize()); err != nil {
 				g.Log().Warningf(ctx, "频道队列低频恢复失败 err:%+v", err)
 			}
 		}
 	}
+}
+
+func telegramChannelRecoveryBatchSize() int {
+	const (
+		defaultSize = 500
+		maxSize     = 2000
+	)
+	raw := strings.TrimSpace(os.Getenv("YOUBAN_PUBLISH_TG_CHANNEL_RECOVERY_BATCH_SIZE"))
+	if raw == "" {
+		return defaultSize
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		return defaultSize
+	}
+	if value > maxSize {
+		return maxSize
+	}
+	return value
 }
 
 func (s *sSysPublish) processTelegramChannelQueuePass(ctx context.Context) {
