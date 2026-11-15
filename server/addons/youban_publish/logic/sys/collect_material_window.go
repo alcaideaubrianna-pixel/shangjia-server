@@ -17,6 +17,7 @@ import (
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/library/cache"
 )
 
 const (
@@ -565,15 +566,39 @@ func (s *sSysPublish) findStoredCollectDisplayEvent(ctx context.Context, verify 
 	if verifyAt == nil || verifyAt.IsZero() {
 		return nil, nil
 	}
-	rows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
-		Where("tenant_id", verify["tenant_id"].Int64()).
-		Where("account_id", verify["account_id"].Int64()).
-		Where("tg_account_id", verify["tg_account_id"].Int64()).
-		Where("source_id", verify["source_id"].Int64()).
-		Where("source_chat_id", verify["source_chat_id"].String()).
-		Where("source_message_id < ?", messageID).
-		Where("COALESCE(received_at,created_at) BETWEEN ? AND ?", verifyAt.Add(-collectMaterialVerifyWindow()), verifyAt).
-		OrderDesc("source_message_id").OrderDesc("id").All()
+	loadRows := func(eventIDs []int64) ([]gdb.Record, error) {
+		model := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+			Where("tenant_id", verify["tenant_id"].Int64()).
+			Where("account_id", verify["account_id"].Int64()).
+			Where("tg_account_id", verify["tg_account_id"].Int64()).
+			Where("source_id", verify["source_id"].Int64()).
+			Where("source_chat_id", verify["source_chat_id"].String()).
+			Where("source_message_id < ?", messageID).
+			Where("COALESCE(received_at,created_at) BETWEEN ? AND ?", verifyAt.Add(-collectMaterialVerifyWindow()), verifyAt)
+		if len(eventIDs) > 0 {
+			model = model.WhereIn("id", eventIDs)
+		}
+		return model.OrderDesc("source_message_id").OrderDesc("id").All()
+	}
+	var rows []gdb.Record
+	var err error
+	cursorUsed := false
+	if cache.Initialized() {
+		members, cacheErr := cache.ZSetRangeByScore(ctx, collectSourceHistoryCursorKey(verify["tenant_id"].Int64(), verify["account_id"].Int64(), verify["source_id"].Int64(), verify["source_chat_id"].String()), 0, float64(messageID-1), 200)
+		if cacheErr == nil && len(members) > 0 {
+			eventIDs := make([]int64, 0, len(members))
+			for _, member := range members {
+				if eventID, parseErr := strconv.ParseInt(member, 10, 64); parseErr == nil && eventID > 0 {
+					eventIDs = append(eventIDs, eventID)
+				}
+			}
+			rows, err = loadRows(eventIDs)
+			cursorUsed = len(rows) > 0
+		}
+	}
+	if len(rows) == 0 {
+		rows, err = loadRows(nil)
+	}
 	if err != nil {
 		return nil, gerror.Wrap(err, "回看验证资料前序展示组失败")
 	}
@@ -597,6 +622,34 @@ func (s *sSysPublish) findStoredCollectDisplayEvent(ctx context.Context, verify 
 			return row, nil
 		default:
 			return nil, nil
+		}
+	}
+	if cursorUsed {
+		fallbackRows, fallbackErr := loadRows(nil)
+		if fallbackErr != nil {
+			return nil, gerror.Wrap(fallbackErr, "回退读取验证资料前序展示组失败")
+		}
+		fallbackIDs := make([]int64, 0, len(fallbackRows))
+		for _, row := range fallbackRows {
+			fallbackIDs = append(fallbackIDs, row["id"].Int64())
+		}
+		fallbackMedia, mediaErr := s.collectEventMediaItemsByEvent(ctx, fallbackIDs)
+		if mediaErr != nil {
+			return nil, mediaErr
+		}
+		for _, row := range fallbackRows {
+			view := collectMaterialEventViews([]gdb.Record{row}, fallbackMedia)[0]
+			if collectMaterialSkippableMessage(view) {
+				continue
+			}
+			switch classifyProfileMessage(view.RawText, view.Media).Kind {
+			case profileMessageKindVerify:
+				continue
+			case profileMessageKindDisplay:
+				return row, nil
+			default:
+				return nil, nil
+			}
 		}
 	}
 	return nil, nil

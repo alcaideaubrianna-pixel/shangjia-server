@@ -113,6 +113,19 @@ func collectProcessCandidateIndexKey(payload collectProcessQueuePayload) string 
 	return fmt.Sprintf("youban_publish:collect:candidates:%d:%d:%d", payload.TenantId, payload.AccountId, payload.SourceId)
 }
 
+func collectSourceHistoryCursorKey(tenantID, accountID, sourceID int64, sourceChatID string) string {
+	return fmt.Sprintf("youban_publish:collect:history:%d:%d:%d:%s", tenantID, accountID, sourceID, canonicalCollectSourceChatID(sourceChatID))
+}
+
+func indexCollectSourceHistoryCursor(ctx context.Context, tenantID, accountID, sourceID int64, sourceChatID string, sourceMessageID, eventID int64) {
+	if tenantID <= 0 || accountID < 0 || sourceID <= 0 || sourceMessageID <= 0 || eventID <= 0 || !cache.Initialized() {
+		return
+	}
+	if err := cache.ZSetAdd(ctx, collectSourceHistoryCursorKey(tenantID, accountID, sourceID, sourceChatID), float64(sourceMessageID), fmt.Sprintf("%d", eventID)); err != nil {
+		g.Log().Debugf(ctx, "写入采集源历史Redis游标失败 eventId:%d err:%+v", eventID, err)
+	}
+}
+
 func collectProcessCandidateIndexMarkerKey(payload collectProcessQueuePayload) string {
 	return collectProcessCandidateIndexKey(payload) + ":alive"
 }

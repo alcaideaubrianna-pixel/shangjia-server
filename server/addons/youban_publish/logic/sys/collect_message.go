@@ -89,6 +89,8 @@ func (s *sSysPublish) ingestCollectMessage(ctx context.Context, message *Collect
 	}
 	if !event.IsEmpty() {
 		message.Media = media
+		eventID := event[eventCols.Id].Int64()
+		indexCollectSourceHistoryCursor(ctx, message.TenantId, message.AccountId, message.SourceId, message.SourceChatId, message.SourceMessageId, eventID)
 		return s.mergeCollectMessageEvent(ctx, event, message, rawText, now)
 	}
 	status := sysin.CollectEventStatusPending
@@ -128,6 +130,7 @@ func (s *sSysPublish) ingestCollectMessage(ctx context.Context, message *Collect
 		return 0, gerror.New("创建采集事件后未找到记录")
 	}
 	eventId := created[eventCols.Id].Int64()
+	indexCollectSourceHistoryCursor(ctx, message.TenantId, message.AccountId, message.SourceId, message.SourceChatId, message.SourceMessageId, eventId)
 	createdAt := created[eventCols.CreatedAt].GTime()
 	if createdAt == nil || !createdAt.Time.Equal(now.Time) {
 		message.Media = media
