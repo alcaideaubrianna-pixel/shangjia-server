@@ -612,27 +612,29 @@ func (s *sSysPublish) createProfileFromInput(ctx context.Context, tx gdb.TX, in 
 		isVirgin = extracted.Virgin
 	}
 	data := g.Map{
-		columns.SourceType:      publishProfileSourceType,
-		columns.SourceNoteUuid:  newPublishProfileUUID(),
-		columns.SourceKey:       fmt.Sprintf("youban_publish:profile:%s", newPublishProfileUUID()),
-		columns.Title:           in.Title,
-		columns.Summary:         profileSummary(in.PlainText),
-		columns.PlainText:       in.PlainText,
-		columns.Province:        in.Province,
-		columns.City:            in.City,
-		columns.Age:             extracted.Age,
-		columns.IsVirgin:        isVirgin,
-		columns.Height:          extracted.Height,
-		columns.Weight:          extracted.Weight,
-		columns.CupSize:         extracted.Cup,
-		columns.Visibility:      consts.ContentVisibilityPublic,
+		columns.SourceType:     publishProfileSourceType,
+		columns.SourceNoteUuid: newPublishProfileUUID(),
+		columns.SourceKey:      fmt.Sprintf("youban_publish:profile:%s", newPublishProfileUUID()),
+		columns.Title:          in.Title,
+		columns.Summary:        profileSummary(in.PlainText),
+		columns.PlainText:      in.PlainText,
+		columns.Province:       in.Province,
+		columns.City:           in.City,
+		columns.Age:            extracted.Age,
+		columns.IsVirgin:       isVirgin,
+		columns.Height:         extracted.Height,
+		columns.Weight:         extracted.Weight,
+		columns.CupSize:        extracted.Cup,
+		// Newly created profiles are always offline. Lifecycle transitions are
+		// owned by Publish/Unpublish/Republish, never by the save payload.
+		columns.Visibility:      consts.ContentVisibilityPrivate,
 		columns.ReviewStatus:    consts.ContentReviewPending,
 		columns.ImportStatus:    "manual",
 		columns.SourceCreateBy:  strconv.FormatInt(accountId, 10),
 		columns.SourceUpdateBy:  strconv.FormatInt(accountId, 10),
 		columns.SourceCreatedAt: now,
 		columns.SourceUpdatedAt: now,
-		columns.Status:          in.Status,
+		columns.Status:          2,
 		columns.CreatedAt:       now,
 		columns.UpdatedAt:       now,
 	}
@@ -688,8 +690,10 @@ func (s *sSysPublish) updateProfileFromInput(ctx context.Context, tx gdb.TX, in 
 	if err != nil {
 		return gerror.Wrap(err, "读取资料当前状态失败")
 	}
-	nextStatus := in.Status
-	nextVisibility := in.Visibility
+	// Editing content must not change lifecycle state. Publish/Unpublish/
+	// Republish are the only operations allowed to transition it.
+	nextStatus := current[columns.Status].Int()
+	nextVisibility := current[columns.Visibility].String()
 	profilePublishedAt := publishAt
 	if in.KeepPublishState {
 		nextStatus = current[columns.Status].Int()
