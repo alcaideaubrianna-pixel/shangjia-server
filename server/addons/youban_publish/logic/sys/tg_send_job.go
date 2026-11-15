@@ -37,21 +37,21 @@ var (
 	errTelegramRemoteConfirmed            = errors.New("Telegram已发送成功，等待修复本地投影")
 )
 
-// telegramProfilePublishable 读取资料主表的权威生命周期状态。发布任务可能
-// 在下架请求之前已经入队，因此不能依赖 job 创建时的快照。
+// telegramProfilePublishable 读取资料主表的发布可见性。资料 status 是
+// 后台审核/上下架投影字段，采集自动发布可能先完成 visibility 写入而
+// status 仍处于历史值；发送前不能再用 status==1 阻断已经公开的资料。
 func telegramProfilePublishable(ctx context.Context, profileID int64) (bool, error) {
 	if profileID <= 0 {
 		return false, nil
 	}
 	var row struct {
-		Status     int    `orm:"status"`
 		Visibility string `orm:"visibility"`
 	}
 	if err := g.DB().Model("hg_content_profile").Safe().Ctx(ctx).
-		Fields("status,visibility").Where("id", profileID).WhereNull("deleted_at").Scan(&row); err != nil {
+		Fields("visibility").Where("id", profileID).WhereNull("deleted_at").Scan(&row); err != nil {
 		return false, gerror.Wrap(err, "读取资料发布状态失败")
 	}
-	return row.Status == 1 && strings.EqualFold(strings.TrimSpace(row.Visibility), "public"), nil
+	return strings.EqualFold(strings.TrimSpace(row.Visibility), "public"), nil
 }
 
 // SendTelegramJob 串行执行目标频道任务，统一账户间隔、发送确认和完成后唤醒。
@@ -90,11 +90,8 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) (resultE
 				}
 				return nil
 			}
-			// Jobs are created only after the publish lifecycle has been made
-			// public. A private profile here is therefore a stale job (for
-			// example, a job created before media-wakeup fixed the lifecycle
-			// transition). Leaving it pending blocks the channel head forever
-			// and keeps the Bot operation in "processing".
+			// A non-public profile is a stale job. Leaving it pending blocks
+			// the channel head forever and keeps the Bot operation processing.
 			return s.supersedeTelegramJobAndCompleteOperation(ctx, targetJob)
 		}
 	}
