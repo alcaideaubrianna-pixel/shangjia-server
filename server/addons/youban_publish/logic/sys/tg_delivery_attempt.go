@@ -324,9 +324,10 @@ func (s *sSysPublish) confirmTelegramAPISuccess(ctx context.Context, job telegra
 		if err := boundTelegramConfirmationTransaction(ctx, tx); err != nil {
 			return err
 		}
-		// Shared lock order with timeout cancellation: Job, then Attempt.
+		// 这里只读取超时取消标记，不提前锁定 tg_job。最终状态更新使用
+		// 带状态条件的短更新，避免 API 成功确认阶段长时间等待任务行锁。
 		var lockedJob telegramJobRecord
-		if err := tx.Model(publishTgJobTable).Where("id", job.Id).LockUpdate().Scan(&lockedJob); err != nil {
+		if err := tx.Model(publishTgJobTable).Where("id", job.Id).Scan(&lockedJob); err != nil {
 			return err
 		}
 		if lockedJob.SendPhase == telegramSendPhaseTimeoutCancelled {
