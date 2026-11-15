@@ -206,3 +206,23 @@ func TestTelegramChannelJobRequeueAtUsesPersistedState(t *testing.T) {
 		t.Fatalf("pending hold=%s, want 3 seconds", got)
 	}
 }
+
+func TestTelegramChannelJobRequeueAtPreservesPostgresLocalTimestamp(t *testing.T) {
+	originalLocation := time.Local
+	time.Local = time.FixedZone("Asia/Shanghai", 8*60*60)
+	defer func() { time.Local = originalLocation }()
+
+	wallClock := time.Now().Add(2 * time.Minute)
+	persisted := gtime.NewFromTime(time.Date(
+		wallClock.Year(), wallClock.Month(), wallClock.Day(),
+		wallClock.Hour(), wallClock.Minute(), wallClock.Second(),
+		wallClock.Nanosecond(), time.UTC,
+	))
+	hold, _ := telegramChannelJobRequeueAt(telegramJobRecord{
+		Status:      telegramJobStatusPending,
+		NextRetryAt: persisted,
+	})
+	if got := time.Until(time.UnixMilli(hold)); got < time.Minute || got > 3*time.Minute {
+		t.Fatalf("retry hold=%s, want around two minutes", got)
+	}
+}

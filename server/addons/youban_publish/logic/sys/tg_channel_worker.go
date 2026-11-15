@@ -191,7 +191,8 @@ func telegramChannelJobRequeueAt(job telegramJobRecord) (int64, string) {
 			reason = "任务等待下一次重试"
 		}
 		if job.NextRetryAt != nil {
-			retryAt := job.NextRetryAt.Time
+			value := job.NextRetryAt.Time
+			retryAt := time.Date(value.Year(), value.Month(), value.Day(), value.Hour(), value.Minute(), value.Second(), value.Nanosecond(), now.Location())
 			if retryAt.After(now) {
 				return retryAt.UnixMilli(), reason
 			}
@@ -202,7 +203,8 @@ func telegramChannelJobRequeueAt(job telegramJobRecord) (int64, string) {
 			reason = "任务仍待发送"
 		}
 		if job.NextRetryAt != nil {
-			retryAt := job.NextRetryAt.Time
+			value := job.NextRetryAt.Time
+			retryAt := time.Date(value.Year(), value.Month(), value.Day(), value.Hour(), value.Minute(), value.Second(), value.Nanosecond(), now.Location())
 			if retryAt.After(now) {
 				return retryAt.UnixMilli(), reason
 			}
