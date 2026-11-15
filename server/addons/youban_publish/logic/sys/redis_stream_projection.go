@@ -45,10 +45,15 @@ func (s *sSysPublish) enqueueStreamProfileProjection(ctx context.Context, job te
 	}
 	_, err = client.EnqueueContext(ctx, asynq.NewTask(tgTaskTypeProfileProjection, body),
 		asynq.Queue(tgQueueNameBackground), asynq.Unique(time.Minute), asynq.Timeout(time.Minute), asynq.MaxRetry(10))
-	if errors.Is(err, asynq.ErrDuplicateTask) {
-		return nil
+	if err != nil && !errors.Is(err, asynq.ErrDuplicateTask) {
+		return err
 	}
-	return err
+	// The background projection is the normal path, but a successfully sent
+	// operation must not remain in publishing when that queue is delayed or a
+	// worker is restarting. Reconcile synchronously as an idempotent fallback;
+	// the unique Bot notice reservation prevents duplicate notifications, and a
+	// later background retry becomes a no-op after the state is cleared.
+	return s.projectCompletedTelegramOperation(ctx, job)
 }
 
 // handleStreamProfileProjection 使用已有后台执行角色处理合并投影，失败由Asynq重试，不重发TG消息。
