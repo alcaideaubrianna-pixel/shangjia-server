@@ -435,6 +435,9 @@ func (s *sSysPublish) sendTelegramJobLockedByChannel(ctx context.Context, jobId 
 }
 
 func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJobRecord) (resultErr error) {
+	if job.CreatedAt != nil {
+		observeTelegramProfilePublishQueueWait(ctx, job, time.Since(job.CreatedAt.Time))
+	}
 	ctx = telegramPublishJobTraceContext(ctx, job)
 	stage := beginTelegramPublishStage(ctx, "send.execute")
 	startedAt := time.Now()

@@ -236,6 +236,7 @@ func (s *sSysPublish) handleMessageDeleteFallbackAccountTask(ctx context.Context
 	if channel.TgAccountId != task.AccountID {
 		return gerror.New("协议号删除兜底任务与频道绑定账号不一致")
 	}
+	deleteStartedAt := time.Now()
 	observeTelegramDeleteFallback(ctx, "started", task.AccountID, 0)
 	g.Log().Infof(ctx, "协议号删除兜底开始执行 tgAccountId:%d taskId:%d jobId:%d attempt:%d/%d", task.AccountID, task.ID, jobID, task.AttemptCount, task.MaxAttempts)
 	peer, err := messagePushInputPeer(channel)
@@ -290,6 +291,7 @@ func (s *sSysPublish) handleMessageDeleteFallbackAccountTask(ctx context.Context
 		}
 	}
 	observeTelegramDeleteFallback(ctx, "success", task.AccountID, int64(len(messages)))
+	observeTelegramProfileDeleteDuration(ctx, job, "success", time.Since(deleteStartedAt))
 	g.Log().Infof(ctx, "协议号删除兜底执行成功 tgAccountId:%d taskId:%d jobId:%d messages:%d", task.AccountID, task.ID, jobID, len(messages))
 	s.appendTelegramJobLog(ctx, job, "delete_fallback", "success", fmt.Sprintf("协议号删除旧消息成功，消息数:%d", len(messages)))
 	return nil

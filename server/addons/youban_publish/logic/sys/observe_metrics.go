@@ -151,6 +151,21 @@ func observeTelegramProfilePublish(ctx context.Context, job telegramJobRecord, r
 	durations.Record(ctx, duration.Seconds(), metricAttrs)
 }
 
+func observeTelegramProfilePublishQueueWait(ctx context.Context, job telegramJobRecord, wait time.Duration) {
+	attrs := []attribute.KeyValue{}
+	if job.ChannelId > 0 {
+		attrs = append(attrs, attribute.Int64("channel_id", job.ChannelId))
+	}
+	if job.ProfileId > 0 {
+		attrs = append(attrs, attribute.Int64("profile_id", job.ProfileId))
+	}
+	if profileNo := strings.TrimSpace(job.ProfileNoSnapshot); profileNo != "" {
+		attrs = append(attrs, attribute.String("profile_no", profileNo))
+	}
+	histogram, _ := publishObserveMeter.Float64Histogram("xiaohuiji.tg.profile_publish_queue_wait_seconds")
+	histogram.Record(ctx, wait.Seconds(), metric.WithAttributes(attrs...))
+}
+
 func observeTelegramMediaSend(ctx context.Context, job *telegramJobRecord, phase string, err error, duration time.Duration) {
 	result := "success"
 	if err != nil {
@@ -264,6 +279,24 @@ func observeTelegramDeleteFallbackWait(ctx context.Context, kind string, tgAccou
 	)
 	histogram, _ := publishObserveMeter.Float64Histogram("xiaohuiji.tg.delete_fallback_wait_seconds")
 	histogram.Record(ctx, wait.Seconds(), attrs)
+}
+
+func observeTelegramProfileDeleteDuration(ctx context.Context, job telegramJobRecord, result string, duration time.Duration) {
+	attrs := []attribute.KeyValue{attribute.String("result", result)}
+	if job.ChannelId > 0 {
+		attrs = append(attrs, attribute.Int64("channel_id", job.ChannelId))
+	}
+	if job.ProfileId > 0 {
+		attrs = append(attrs, attribute.Int64("profile_id", job.ProfileId))
+	}
+	if profileNo := strings.TrimSpace(job.ProfileNoSnapshot); profileNo != "" {
+		attrs = append(attrs, attribute.String("profile_no", profileNo))
+	}
+	counter, _ := publishObserveMeter.Int64Counter("xiaohuiji.tg.profile_delete_total")
+	durations, _ := publishObserveMeter.Float64Histogram("xiaohuiji.tg.profile_delete_duration_seconds")
+	metricAttrs := metric.WithAttributes(attrs...)
+	counter.Add(ctx, 1, metricAttrs)
+	durations.Record(ctx, duration.Seconds(), metricAttrs)
 }
 
 func observeCollectHistoryBackpressure(ctx context.Context, sourceID int64, stats collectHistoryPendingStats, limit int) {
