@@ -80,10 +80,17 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) (resultE
 		if active, stateErr := telegramProfilePublishable(ctx, targetJob.ProfileId); stateErr != nil {
 			return stateErr
 		} else if !active {
-			if supersedeErr := s.markTelegramJobSuperseded(ctx, targetJob.Id); supersedeErr != nil {
-				return supersedeErr
+			newer, checkErr := s.hasNewerSameChannelOperation(ctx, targetJob)
+			if checkErr != nil {
+				return checkErr
 			}
-			return nil
+			if newer {
+				if supersedeErr := s.markTelegramJobSuperseded(ctx, targetJob.Id); supersedeErr != nil {
+					return supersedeErr
+				}
+				return nil
+			}
+			return gerror.New("资料当前不可发布，等待资料操作状态收敛")
 		}
 	}
 	if isMessagePushOperationNo(targetJob.OperationNo) {
@@ -348,7 +355,14 @@ func (s *sSysPublish) sendTelegramJobLockedByChannel(ctx context.Context, jobId 
 	}
 	if !allowed {
 		s.appendTelegramJobLog(ctx, job, "publish", "skipped", "上架任务已下架或不可发布，跳过TG推送")
-		return s.supersedeTelegramJobAndCompleteOperation(ctx, job)
+		newer, checkErr := s.hasNewerSameChannelOperation(ctx, job)
+		if checkErr != nil {
+			return checkErr
+		}
+		if newer {
+			return s.supersedeTelegramJobAndCompleteOperation(ctx, job)
+		}
+		return gerror.New("资料当前不可发布，等待资料操作状态收敛")
 	}
 	if relayPackageEnabled(ctx, job) {
 		relayErr := s.sendRelayPackageJob(ctx, job)
@@ -1338,6 +1352,29 @@ func (s *sSysPublish) canSendTelegramJob(ctx context.Context, job telegramJobRec
 		return false, err
 	}
 	return true, nil
+}
+
+func (s *sSysPublish) hasNewerSameChannelOperation(ctx context.Context, job telegramJobRecord) (bool, error) {
+	query := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("tenant_id", job.TenantId).
+		Where("profile_id", job.ProfileId).
+		Where("channel_id", job.ChannelId).
+		// Use an explicit expression here.  This predicate is on the hot send
+		// path; keeping the operator in the expression prevents argument
+		// shifting in adapters that treat Where's variadic form differently.
+		Wheref("id > ?", job.Id).
+		WhereIn("status", []string{"pending", "sending", "confirming", "sent", "failed_retry", "unknown"}).
+		WhereNot("operation_no", job.OperationNo)
+	if strings.TrimSpace(job.OperationType) == "" {
+		query = query.Where("(COALESCE(operation_type,'')='' OR operation_type='publish')")
+	} else {
+		query = query.Where("operation_type", job.OperationType)
+	}
+	count, err := query.Count()
+	if err != nil {
+		return false, gerror.Wrap(err, "检查TG任务替换关系失败")
+	}
+	return count > 0, nil
 }
 
 // isCycleBatchOperation 统一识别旧批次循环和资料级循环，生命周期不再按入口分叉。
