@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -154,27 +153,8 @@ func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 		g.Log().Warningf(ctx, "恢复采集源统计任务失败：%+v", err)
 	}
 	mediaBatchSize := collectMediaRecoveryBatchSize(ctx)
-	batchSize := collectProcessOutboxRecoveryBatchSize(ctx)
-	scopes := activeCollectProcessScopes(ctx)
-	limit := make(chan struct{}, collectSourceRecoveryConcurrency(ctx))
-	var wg sync.WaitGroup
-	for _, scope := range scopes {
-		scope := scope
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			select {
-			case limit <- struct{}{}:
-			case <-ctx.Done():
-				return
-			}
-			defer func() { <-limit }()
-			if err := s.dispatchDueCollectProcessOutbox(ctx, batchSize, scope); err != nil {
-				g.Log().Warningf(ctx, "恢复采集处理Outbox失败 tenantId:%d accountId:%d sourceId:%d err:%+v", scope.TenantID, scope.AccountID, scope.SourceID, err)
-			}
-		}()
-	}
-	wg.Wait()
+	// 采集处理只由来源级 Redis 队列驱动。这里禁止按来源轮询
+	// collect_process_outbox，避免恢复任务再次形成 PostgreSQL 热点。
 	// Always drain a bounded ready-media transition before backpressure can
 	// yield historical recovery; otherwise ready events remain orphaned while
 	// realtime traffic is continuously above the gate.
