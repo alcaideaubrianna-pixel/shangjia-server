@@ -2,6 +2,8 @@ package sys
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"net/url"
 	"strconv"
 	"strings"
@@ -72,6 +74,9 @@ func (s *sSysPublish) resolveAIOpsPublishedMessage(ctx context.Context, ref aiOp
 	}
 	row, err := mod.OrderDesc("m.id").One()
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
 		return gerror.Wrap(err, "查询Telegram发送消息失败")
 	}
 	if row.IsEmpty() {
@@ -104,6 +109,9 @@ func (s *sSysPublish) resolveAIOpsCollectedMessage(ctx context.Context, ref aiOp
 	}
 	row, err := mod.OrderDesc("d.id").OrderDesc("e.id").One()
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
 		return gerror.Wrap(err, "查询Telegram采集消息失败")
 	}
 	if row.IsEmpty() {
