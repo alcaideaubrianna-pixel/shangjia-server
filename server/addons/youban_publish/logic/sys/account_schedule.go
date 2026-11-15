@@ -122,37 +122,27 @@ func (s *sSysPublish) enqueueAccountSchedules(ctx context.Context) error {
 		OrderAsc("id").Limit(100).Scan(&accounts); err != nil {
 		return err
 	}
-	// 账户目录游标只保证账户轮询公平，不能覆盖长期到期的资料循环。
-	// 直接从账户目录反查到期资料，避免 DISTINCT 扫描三百万行
-	// channel_profile。每个账户通过 EXISTS 命中
-	// (tenant_id,account_id,next_cycle_at,id) 索引；游标仍按账户主键推进，
-	// 因此每分钟扫描只触碰当前批次账户。
+	// 账户目录游标只保证账户轮询公平；到期账户由 profileCycle Redis ZSET 提供，
+	// 这里只回查少量 job_id 的账户归属，避免每轮对 channel_profile 执行 EXISTS 扫描。
 	dueAccounts := make([]struct {
 		ID       int64 `orm:"id"`
 		TenantID int64 `orm:"tenant_id"`
 	}, 0)
-	if err := g.DB().Model(publishAccountTable+" a").Ctx(ctx).
-		Fields("a.id,a.tenant_id").
-		Where("a.status", 1).
-		Where("a.deleted_at IS NULL").
-		WhereGT("a.id", cursor.Int64()).
-		Where(fmt.Sprintf(`EXISTS (
-			SELECT 1
-			FROM %s cp
-			INNER JOIN %s c
-				ON c.id=cp.channel_id AND c.tenant_id=cp.tenant_id
-			WHERE cp.tenant_id=a.tenant_id
-			  AND cp.account_id=a.id
-			  AND cp.status='active'
-			  AND cp.next_cycle_at IS NOT NULL
-			  AND cp.next_cycle_at<=?
-			  AND c.status=1
-			  AND c.cycle_publish_enabled=1
-			  AND c.publish_direction='up'
-			  AND c.deleted_at IS NULL
-		)`, publishChannelProfileTable, publishChannelTable), gtime.Now()).
-		OrderAsc("a.id").Limit(100).Scan(&dueAccounts); err != nil {
-		return err
+	if cache.Initialized() {
+		members, cacheErr := cache.ZSetRangeByScore(ctx, profileCycleDueZSetKey, 0, float64(time.Now().Unix()), 200)
+		if cacheErr == nil && len(members) > 0 {
+			jobIDs := make([]int64, 0, len(members))
+			for _, member := range members {
+				if jobID, parseErr := strconv.ParseInt(member, 10, 64); parseErr == nil && jobID > 0 {
+					jobIDs = append(jobIDs, jobID)
+				}
+			}
+			if len(jobIDs) > 0 {
+				if err := g.DB().Model(publishTgJobTable).Ctx(ctx).Fields("account_id AS id,tenant_id").WhereIn("id", jobIDs).Group("tenant_id,account_id").Scan(&dueAccounts); err != nil {
+					return err
+				}
+			}
+		}
 	}
 	seenAccounts := make(map[int64]struct{}, len(accounts)+len(dueAccounts))
 	for _, account := range accounts {

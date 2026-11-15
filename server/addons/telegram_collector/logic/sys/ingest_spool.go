@@ -45,7 +45,7 @@ func completeIngestSpool(ctx context.Context, id int64) error {
 	if id <= 0 {
 		return nil
 	}
-	_, err := g.DB().Exec(ctx, "UPDATE "+collectorIngestSpoolTable+" SET status='completed',updated_at=? WHERE id=? AND status='received'", gtime.Now(), id)
+	_, err := g.DB().Exec(ctx, "UPDATE "+collectorIngestSpoolTable+" SET status='completed' WHERE id=? AND status='received'", id)
 	return err
 }
 
@@ -113,6 +113,13 @@ func claimIngestSpool(ctx context.Context) (gdb.Record, error) {
 }
 
 func finishIngestSpool(ctx context.Context, row gdb.Record, status, lastError string) error {
+	if status == "completed" || status == "dead" {
+		_, err := g.DB().Exec(ctx, `UPDATE `+collectorIngestSpoolTable+`
+ SET status=?,last_error=?,next_run_at=?
+ WHERE id=? AND status='processing' AND attempt_count=?`,
+			status, lastError, gtime.Now().Add(30*time.Second), row["id"].Int64(), row["attempt_count"].Int())
+		return err
+	}
 	_, err := g.DB().Exec(ctx, `UPDATE `+collectorIngestSpoolTable+`
  SET status=?,last_error=?,next_run_at=?,updated_at=?
  WHERE id=? AND status='processing' AND attempt_count=?`,

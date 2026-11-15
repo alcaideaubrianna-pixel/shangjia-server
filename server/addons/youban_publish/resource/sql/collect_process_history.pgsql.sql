@@ -10,6 +10,10 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ybp_collect_process_outbox_history
  WHERE status='pending' AND history=TRUE;
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ybp_collect_process_outbox_history_status_updated
  ON hg_youban_publish_collect_process_outbox (history,status,updated_at,id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ybp_collect_event_history_cursor
+ ON hg_youban_publish_collect_event
+ (tenant_id,account_id,tg_account_id,source_id,source_chat_id,source_message_id DESC,id DESC)
+ WHERE source_message_id IS NOT NULL;
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ybp_collect_event_source_stats_cover
  ON hg_youban_publish_collect_event (source_id)
  INCLUDE (status,material_role,received_at);
