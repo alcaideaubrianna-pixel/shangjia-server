@@ -1263,7 +1263,7 @@ func (s *sSysPublish) reconcileCollectDispatchesFromSentJobs(ctx context.Context
 	dispatchTable := pdao.YoubanPublishCollectDispatch.Table()
 	jobTable := pdao.YoubanPublishTgJob.Table()
 	rows, err := g.DB().Model(dispatchTable+" d").Ctx(ctx).
-		Fields("d.id,d.profile_id,d.event_id").
+		Fields("d.id,d.event_id").
 		Where("d.profile_id > 0").
 		Where("d.status", sysin.CollectDispatchStatusPending).
 		Where(`EXISTS (
@@ -1280,18 +1280,46 @@ func (s *sSysPublish) reconcileCollectDispatchesFromSentJobs(ctx context.Context
 	if err != nil {
 		return gerror.Wrap(err, "读取已发送但未收口的采集分发失败")
 	}
-	reconciled := 0
+	if len(rows) == 0 {
+		return nil
+	}
+	dispatchIDs := make([]int64, 0, len(rows))
+	eventIDs := make([]int64, 0, len(rows))
 	for _, row := range rows {
-		profileID, eventID := row["profile_id"].Int64(), row["event_id"].Int64()
-		if err = s.markCollectDispatchSentByProfile(ctx, profileID, eventID); err != nil {
-			g.Log().Warningf(ctx, "收口采集分发状态失败 dispatch:%d profile:%d event:%d err:%+v",
-				row["id"].Int64(), profileID, eventID, err)
-			continue
+		dispatchIDs = append(dispatchIDs, row["id"].Int64())
+		if eventID := row["event_id"].Int64(); eventID > 0 {
+			eventIDs = append(eventIDs, eventID)
 		}
-		reconciled++
+	}
+	now := gtime.Now()
+	result, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
+		WhereIn("id", dispatchIDs).
+		Where("status", sysin.CollectDispatchStatusPending).
+		Data(g.Map{
+			"status":        sysin.CollectDispatchStatusSent,
+			"error_message": "",
+			"finished_at":   now,
+			"updated_at":    now,
+		}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "批量收口采集分发状态失败")
+	}
+	reconciled, _ := result.RowsAffected()
+	if len(eventIDs) > 0 {
+		if _, err = pdao.YoubanPublishCollectEvent.Ctx(ctx).
+			WhereIn("id", eventIDs).
+			Where("status", sysin.CollectEventStatusDispatched).
+			Data(g.Map{
+				"status":        sysin.CollectEventStatusProcessed,
+				"error_message": "",
+				"processed_at":  now,
+				"updated_at":    now,
+			}).Update(); err != nil {
+			return gerror.Wrap(err, "批量收口采集事件状态失败")
+		}
 	}
 	if reconciled > 0 {
-		g.Log().Infof(ctx, "已对账收口采集分发：%d条", reconciled)
+		g.Log().Infof(ctx, "已批量对账收口采集分发：%d条", reconciled)
 	}
 	return nil
 }
