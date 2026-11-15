@@ -65,10 +65,21 @@ func releaseCollectMediaRecovery(ctx context.Context, eventID int64) {
 	}
 }
 
+func collectRecoveryInterval(ctx context.Context) time.Duration {
+	seconds := g.Cfg().MustGet(ctx, "youbanPublish.collect.recoveryIntervalSeconds", 60).Int()
+	if seconds < 10 {
+		seconds = 10
+	}
+	if seconds > 3600 {
+		seconds = 3600
+	}
+	return time.Duration(seconds) * time.Second
+}
+
 func (s *sSysPublish) runCollectRecovery(ctx context.Context) {
 	time.Sleep(12 * time.Second)
 	s.runCollectRecoveryCycle(ctx)
-	ticker := time.NewTicker(time.Minute)
+	ticker := time.NewTicker(collectRecoveryInterval(ctx))
 	defer ticker.Stop()
 	for {
 		select {

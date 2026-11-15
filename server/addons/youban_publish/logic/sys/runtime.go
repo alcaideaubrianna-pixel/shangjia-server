@@ -88,11 +88,10 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 	// durable collect outbox and persist text with a different rule pipeline.
 	if config.CollectorWorker {
 		s.startCollectProcessWorker(ctx)
-		go s.runCollectProcessDispatcher(ctx)
-		// Collect processing has two halves: the collector worker consumes
-		// queue tasks, while the recovery loop dispatches durable process_outbox
-		// rows into that queue. Keep the dispatcher available with the consumer
-		// when Scheduler is deployed separately or temporarily unavailable.
+		// Realtime events are enqueued immediately after their Outbox row is
+		// persisted. Historical and failed rows are handled by the bounded
+		// minute-level recovery sweep, so Collector does not run a second
+		// high-frequency global dispatcher that can compete with realtime work.
 		if !config.Scheduler {
 			go s.runCollectRecovery(ctx)
 		}
