@@ -3,7 +3,6 @@ package sys
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -12,6 +11,7 @@ import (
 
 	"hotgo/addons/youban_publish/model"
 	"hotgo/internal/library/cache"
+	"hotgo/utility/dbtime"
 )
 
 const telegramPublishPolicyCacheTTL = 5 * time.Minute
@@ -72,21 +72,20 @@ func (s *sSysPublish) telegramLastSuccessAt(ctx context.Context, job telegramJob
 			return gtime.NewFromTime(time.UnixMilli(timestampMilli)), nil
 		}
 	}
-	value, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+	var row struct {
+		SentAt *gtime.Time `orm:"sent_at"`
+	}
+	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("tenant_id", job.TenantId).
 		Where("account_id", job.AccountId).
 		Where("channel_id", job.ChannelId).
 		Where("status", "sent").
 		WhereNotNull("sent_at").
 		OrderDesc("id").
-		Fields("sent_at").Value()
-	if err != nil {
+		Fields("sent_at").Scan(&row); err != nil {
 		return nil, gerror.Wrap(err, "读取频道最后成功推送时间失败")
 	}
-	// PostgreSQL timestamp without time zone represents the application's local
-	// wall clock. gvar.GTime may attach UTC and shift the value by eight hours,
-	// so parse the database text explicitly in the process local timezone.
-	last := gtime.NewFromStr(strings.TrimSpace(value.String()))
+	last := dbtime.FromTimestamp(row.SentAt)
 	if last != nil {
 		_ = cache.Instance().Set(ctx, key, last.TimestampMilli(), telegramLastSuccessCacheTTL)
 	}

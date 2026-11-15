@@ -42,7 +42,7 @@ func (s *sSysPublish) telegramSendBudgetContext(ctx context.Context, job telegra
 		return nil, nil, errTelegramJobSuperseded
 	}
 	deadline := dbtime.FromTimestamp(current.SendDeadlineAt)
-	if !deadline.Time.After(time.Now()) {
+	if deadline == nil || !deadline.Time.After(time.Now()) {
 		return nil, nil, gerror.New(telegramSendTimeoutMessage)
 	}
 	bounded, cancel := context.WithDeadline(ctx, deadline.Time)

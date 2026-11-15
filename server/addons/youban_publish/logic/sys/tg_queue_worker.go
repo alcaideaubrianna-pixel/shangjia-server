@@ -20,6 +20,7 @@ import (
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/cache"
+	"hotgo/utility/dbtime"
 )
 
 // telegramCleanupWorkerQueues 返回资料清理 Worker 负责消费的队列集合。
@@ -743,11 +744,15 @@ func (s *sSysPublish) handleTelegramPublishTask(ctx context.Context, task *asynq
 	ctx = telegramPublishJobTraceContext(ctx, job)
 	queueWait := int64(0)
 	if job.CreatedAt != nil {
-		queueWait = time.Since(job.CreatedAt.Time).Milliseconds()
+		if createdAt := dbtime.FromTimestamp(job.CreatedAt); createdAt != nil {
+			queueWait = time.Since(createdAt.Time).Milliseconds()
+		}
 	}
 	dispatchLag := int64(0)
 	if job.DispatchedAt != nil && job.CreatedAt != nil {
-		dispatchLag = job.DispatchedAt.Time.Sub(job.CreatedAt.Time).Milliseconds()
+		if dispatchedAt, createdAt := dbtime.FromTimestamp(job.DispatchedAt), dbtime.FromTimestamp(job.CreatedAt); dispatchedAt != nil && createdAt != nil {
+			dispatchLag = dispatchedAt.Time.Sub(createdAt.Time).Milliseconds()
+		}
 	}
 	beginTelegramPublishStage(ctx, "queue.wait_observed").End(nil, g.Map{
 		"queueWaitMs": queueWait, "dispatchLagMs": dispatchLag,

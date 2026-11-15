@@ -9,9 +9,11 @@ import (
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+
 	"github.com/hibiken/asynq"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
+	"hotgo/utility/dbtime"
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
@@ -101,7 +103,9 @@ func observePendingJobsWithoutTask(ctx context.Context) {
 	countGauge.Record(ctx, int64(row.Count))
 	oldestAge := int64(0)
 	if row.Oldest != nil {
-		oldestAge = int64(time.Since(row.Oldest.Time).Seconds())
+		if oldest := dbtime.FromTimestamp(row.Oldest); oldest != nil {
+			oldestAge = int64(time.Since(oldest.Time).Seconds())
+		}
 		if oldestAge < 0 {
 			oldestAge = 0
 		}
@@ -374,7 +378,7 @@ func loadCollectQueueDatabaseStats(ctx context.Context, staleAfter time.Duration
 		return stats, err
 	}
 	if !oldest.IsEmpty() && oldest["oldest_at"].GTime() != nil {
-		stats.OldestMediaPendingAt = oldest["oldest_at"].GTime().Time
+		stats.OldestMediaPendingAt = dbtime.FromTimestamp(oldest["oldest_at"].GTime()).Time
 	}
 
 	staleRows, err := mediaBase.Clone().

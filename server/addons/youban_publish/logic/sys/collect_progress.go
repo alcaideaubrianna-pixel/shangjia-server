@@ -11,6 +11,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/utility/dbtime"
 	"hotgo/utility/sensitive"
 )
 
@@ -164,22 +165,23 @@ func collectEventProgressView(item *sysin.CollectEventModel, latest *sysin.Colle
 			continue
 		}
 		if p.Stage == "waiting" {
-			p.NextRetryAt = row["available_at"].GTime()
+			p.NextRetryAt = dbtime.FromTimestamp(row["available_at"].GTime())
 			break
 		}
-		if p.Since != nil && !row["updated_at"].GTime().After(p.Since) {
+		updatedAt := dbtime.FromTimestamp(row["updated_at"].GTime())
+		if p.Since != nil && updatedAt != nil && !updatedAt.After(p.Since) {
 			break
 		}
 		switch row["status"].String() {
 		case "pending":
-			p = &sysin.CollectEventProgressModel{Stage: "queued", Message: "等待调度器投递到处理队列", Since: row["updated_at"].GTime(), NextRetryAt: row["available_at"].GTime()}
+			p = &sysin.CollectEventProgressModel{Stage: "queued", Message: "等待调度器投递到处理队列", Since: updatedAt, NextRetryAt: dbtime.FromTimestamp(row["available_at"].GTime())}
 			if p.NextRetryAt != nil && p.NextRetryAt.After(gtime.New(now)) {
 				p.Stage = "scheduled"
 				p.Message = "等待计划执行时间"
 			}
 		case "processing":
-			p = &sysin.CollectEventProgressModel{Stage: "claimed", Message: "任务已投递；队列领取不代表工作线程已开始执行", Since: row["updated_at"].GTime()}
-			if expiry := row["lease_expires_at"].GTime(); expiry != nil && expiry.Before(gtime.New(now)) {
+			p = &sysin.CollectEventProgressModel{Stage: "claimed", Message: "任务已投递；队列领取不代表工作线程已开始执行", Since: updatedAt}
+			if expiry := dbtime.FromTimestamp(row["lease_expires_at"].GTime()); expiry != nil && expiry.Before(gtime.New(now)) {
 				p.Stage = "lease_expired"
 				p.Message = "任务租约已过期，等待调度恢复"
 			}

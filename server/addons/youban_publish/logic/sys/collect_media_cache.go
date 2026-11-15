@@ -31,6 +31,7 @@ import (
 	"hotgo/internal/library/hgrds/lock"
 	"hotgo/internal/library/telegrammedia"
 	"hotgo/internal/model"
+	"hotgo/utility/dbtime"
 )
 
 type collectMediaRetryError struct {
@@ -617,21 +618,11 @@ func (s *sSysPublish) collectGroupedMediaCacheDelay(ctx context.Context, event g
 }
 
 func collectLocalElapsedSince(value *gtime.Time) time.Duration {
+	value = dbtime.FromTimestamp(value)
 	if value == nil {
 		return 0
 	}
-	wallClock := value.Time
-	localTime := time.Date(
-		wallClock.Year(),
-		wallClock.Month(),
-		wallClock.Day(),
-		wallClock.Hour(),
-		wallClock.Minute(),
-		wallClock.Second(),
-		wallClock.Nanosecond(),
-		time.Local,
-	)
-	return time.Since(localTime)
+	return time.Since(value.Time)
 }
 
 func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, event gdb.Record) (bool, error) {

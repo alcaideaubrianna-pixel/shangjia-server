@@ -9,6 +9,8 @@ import (
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+
+	"hotgo/utility/dbtime"
 )
 
 // telegramChannelQueueEnabled defaults to the channel queue transport. Set the
@@ -190,24 +192,16 @@ func telegramChannelJobRequeueAt(job telegramJobRecord) (int64, string) {
 		if reason == "" {
 			reason = "任务等待下一次重试"
 		}
-		if job.NextRetryAt != nil {
-			value := job.NextRetryAt.Time
-			retryAt := time.Date(value.Year(), value.Month(), value.Day(), value.Hour(), value.Minute(), value.Second(), value.Nanosecond(), now.Location())
-			if retryAt.After(now) {
-				return retryAt.UnixMilli(), reason
-			}
+		if retryAt := dbtime.FromTimestamp(job.NextRetryAt); retryAt != nil && retryAt.Time.After(now) {
+			return retryAt.TimestampMilli(), reason
 		}
 		return now.Add(time.Second).UnixMilli(), reason
 	case telegramJobStatusPending:
 		if reason == "" {
 			reason = "任务仍待发送"
 		}
-		if job.NextRetryAt != nil {
-			value := job.NextRetryAt.Time
-			retryAt := time.Date(value.Year(), value.Month(), value.Day(), value.Hour(), value.Minute(), value.Second(), value.Nanosecond(), now.Location())
-			if retryAt.After(now) {
-				return retryAt.UnixMilli(), reason
-			}
+		if retryAt := dbtime.FromTimestamp(job.NextRetryAt); retryAt != nil && retryAt.Time.After(now) {
+			return retryAt.TimestampMilli(), reason
 		}
 		return now.Add(3 * time.Second).UnixMilli(), reason
 	case telegramJobStatusSending, telegramJobStatusConfirming, "reconciling":
