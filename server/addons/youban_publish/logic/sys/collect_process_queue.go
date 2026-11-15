@@ -59,6 +59,10 @@ const (
 	collectProcessScheduleTTL     = 35 * time.Minute
 	collectProcessMinimumDelay    = 5 * time.Second
 	collectProcessRedisRetryDelay = 15 * time.Second
+
+	collectProcessCandidateIndexTTL        = 15 * time.Minute
+	collectProcessCandidateIndexBatchSize  = 256
+	collectProcessCandidateIndexReadFactor = 4
 )
 
 // isCollectProcessRedisTransientError keeps Redis startup/reconnect failures
@@ -91,6 +95,76 @@ func isCollectProcessRedisTransientError(err error) bool {
 	return false
 }
 
+func collectProcessCandidateIndexKey(payload collectProcessQueuePayload) string {
+	return fmt.Sprintf("youban_publish:collect:candidates:%d:%d:%d", payload.TenantId, payload.AccountId, payload.SourceId)
+}
+
+func collectProcessCandidateIndexMarkerKey(payload collectProcessQueuePayload) string {
+	return collectProcessCandidateIndexKey(payload) + ":alive"
+}
+
+func collectProcessCandidateIndexReady(ctx context.Context, payload collectProcessQueuePayload) bool {
+	if !cache.Initialized() {
+		return false
+	}
+	value, err := cache.Instance().Get(ctx, collectProcessCandidateIndexMarkerKey(payload))
+	if err == nil && !value.IsNil() && value.Int() == 1 {
+		return true
+	}
+	// The marker is the logical TTL for the ZSET. Remove the old set when it
+	// expires so abandoned event IDs do not accumulate indefinitely. A failed
+	// cleanup only affects the accelerator; the PG fallback remains correct.
+	if client, clientErr := cache.RedisClient(); clientErr == nil {
+		_, _ = client.Do(ctx, "DEL", collectProcessCandidateIndexKey(payload))
+	}
+	return false
+}
+
+func indexCollectProcessCandidate(ctx context.Context, payload collectProcessQueuePayload, eventID int64) {
+	if eventID <= 0 || payload.TenantId <= 0 || payload.AccountId < 0 || payload.SourceId <= 0 || !cache.Initialized() {
+		return
+	}
+	key := collectProcessCandidateIndexKey(payload)
+	if err := cache.ZSetAdd(ctx, key, float64(eventID), fmt.Sprintf("%d", eventID)); err != nil {
+		g.Log().Debugf(ctx, "写入采集候选Redis索引失败 eventId:%d err:%+v", eventID, err)
+		return
+	}
+	if err := cache.Instance().Set(ctx, collectProcessCandidateIndexMarkerKey(payload), 1, collectProcessCandidateIndexTTL); err != nil {
+		g.Log().Debugf(ctx, "刷新采集候选Redis索引TTL失败 eventId:%d err:%+v", eventID, err)
+	}
+}
+
+func collectProcessCandidateIDs(ctx context.Context, payload collectProcessQueuePayload, limit int) []int64 {
+	if limit <= 0 || !collectProcessCandidateIndexReady(ctx, payload) {
+		return nil
+	}
+	if limit > collectProcessCandidateIndexBatchSize*collectProcessCandidateIndexReadFactor {
+		limit = collectProcessCandidateIndexBatchSize * collectProcessCandidateIndexReadFactor
+	}
+	members, err := cache.ZSetRange(ctx, collectProcessCandidateIndexKey(payload), 0, limit-1)
+	if err != nil {
+		g.Log().Debugf(ctx, "读取采集候选Redis索引失败 err:%+v", err)
+		return nil
+	}
+	ids := make([]int64, 0, len(members))
+	for _, member := range members {
+		var eventID int64
+		if _, scanErr := fmt.Sscan(member, &eventID); scanErr == nil && eventID > 0 {
+			ids = append(ids, eventID)
+		}
+	}
+	return ids
+}
+
+func removeCollectProcessCandidate(ctx context.Context, payload collectProcessQueuePayload, eventID int64) {
+	if eventID <= 0 || !cache.Initialized() {
+		return
+	}
+	if err := cache.ZSetRemove(ctx, collectProcessCandidateIndexKey(payload), fmt.Sprintf("%d", eventID)); err != nil {
+		g.Log().Debugf(ctx, "移除采集候选Redis索引失败 eventId:%d err:%+v", eventID, err)
+	}
+}
+
 func (s *sSysPublish) enqueueCollectProcess(ctx context.Context, payload collectProcessQueuePayload, delay time.Duration) error {
 	_, err := s.enqueueCollectProcessTask(ctx, payload, delay, true)
 	return err
@@ -108,6 +182,11 @@ func (s *sSysPublish) enqueueCollectProcessTaskWithOutbox(ctx context.Context, p
 	// BOT 采集事件可能没有协议号账户归属，account_id=0 仍是合法租户+来源分片。
 	if payload.TenantId <= 0 || payload.AccountId < 0 || payload.SourceId <= 0 {
 		return false, nil
+	}
+	// Event-specific enqueue paths are the low-cost producer for the candidate
+	// index. The index is only an accelerator; PG remains authoritative below.
+	if payload.EventId > 0 {
+		indexCollectProcessCandidate(ctx, payload, payload.EventId)
 	}
 	if persist {
 		if err := ensureCollectProcessOutbox(ctx, payload, delay); err != nil {

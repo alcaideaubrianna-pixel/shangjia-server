@@ -72,8 +72,19 @@ func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload co
 		batchSize = maxRows
 	}
 	now := gtime.Now()
+	// Redis 只提供候选 ID，PG 仍通过完整窗口条件、租户/账户/来源和状态
+	// 校验事实。索引为空、过期或 Redis 不可用时回退原始 PG 扫描，并用结果回填。
+	candidateIDs := collectProcessCandidateIDs(ctx, payload, batchSize*collectProcessCandidateIndexReadFactor)
+	candidateMode := len(candidateIDs) > 0
+	candidateModel := func(model *gdb.Model) *gdb.Model {
+		if candidateMode {
+			return model.WhereIn("e.id", candidateIDs)
+		}
+		return model
+	}
+
 	// 正常窗口和验证重试窗口分开查询，避免一个来源的历史验证资料触发大范围 OR 扫描。
-	eventModel := collectMaterialWindowModel(ctx, payload, false).
+	eventModel := candidateModel(collectMaterialWindowModel(ctx, payload, false)).
 		Where("e.processed_at IS NULL").
 		Where(collectMaterialGroupReadyCondition(), collectMaterialGroupWaitingVerify)
 	if payload.EventId > 0 {
@@ -81,9 +92,6 @@ func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload co
 	}
 	rows, err := eventModel.
 		Fields("e.*").
-		// Oldest checked events go first. markCollectMaterialWaitingVerify updates
-		// updated_at, so a large waiting set rotates fairly instead of allowing
-		// the first channel/message range to occupy every batch.
 		OrderAsc("e.updated_at").
 		OrderAsc("e.id").
 		Limit(batchSize).
@@ -91,7 +99,7 @@ func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload co
 	if err != nil {
 		return gerror.Wrap(err, "读取采集源消息窗口失败")
 	}
-	verifyModel := collectMaterialWindowModel(ctx, payload, true).
+	verifyModel := candidateModel(collectMaterialWindowModel(ctx, payload, true)).
 		Where("e.updated_at <= ?", now.Add(-collectMaterialWaitingVerifyRetryDelay))
 	if payload.EventId > 0 {
 		verifyModel = verifyModel.Where("e.id", payload.EventId)
@@ -101,6 +109,25 @@ func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload co
 		return gerror.Wrap(verifyErr, "读取验证资料重试窗口失败")
 	}
 	rows = mergeCollectMaterialWindowRows(rows, verifyRows, batchSize)
+
+	// A stale/incomplete index must not hide work. One bounded PG fallback rebuilds
+	// the index for this shard; normal indexed cycles avoid the source-range scan.
+	if len(rows) == 0 && candidateMode && payload.EventId == 0 {
+		fallbackModel := collectMaterialWindowModel(ctx, payload, false).
+			Where("e.processed_at IS NULL").
+			Where(collectMaterialGroupReadyCondition(), collectMaterialGroupWaitingVerify)
+		rows, err = fallbackModel.Fields("e.*").OrderAsc("e.updated_at").OrderAsc("e.id").Limit(batchSize).All()
+		if err != nil {
+			return gerror.Wrap(err, "回退读取采集源消息窗口失败")
+		}
+		fallbackVerifyModel := collectMaterialWindowModel(ctx, payload, true).
+			Where("e.updated_at <= ?", now.Add(-collectMaterialWaitingVerifyRetryDelay))
+		fallbackVerifyRows, fallbackVerifyErr := fallbackVerifyModel.Fields("e.*").OrderAsc("e.updated_at").OrderAsc("e.id").Limit(batchSize).All()
+		if fallbackVerifyErr != nil {
+			return gerror.Wrap(fallbackVerifyErr, "回退读取验证资料重试窗口失败")
+		}
+		rows = mergeCollectMaterialWindowRows(rows, fallbackVerifyRows, batchSize)
+	}
 	if len(rows) == 0 {
 		return nil
 	}
@@ -108,9 +135,14 @@ func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload co
 		targetPayload := payload
 		targetPayload.EventId = event["id"].Int64()
 		targetPayload.SourceChatId = event["source_chat_id"].String()
-		if err = s.processTargetCollectEventWindow(ctx, targetPayload, event); err != nil && !isCollectProcessRetryError(err) {
+		indexCollectProcessCandidate(ctx, targetPayload, targetPayload.EventId)
+		if err = s.processTargetCollectEventWindow(ctx, targetPayload, event); err != nil {
+			if isCollectProcessRetryError(err) {
+				continue
+			}
 			return err
 		}
+		removeCollectProcessCandidate(ctx, targetPayload, targetPayload.EventId)
 	}
 	return nil
 }
