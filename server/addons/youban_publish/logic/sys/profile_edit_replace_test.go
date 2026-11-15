@@ -17,8 +17,9 @@ func TestMarkProfileOnlineForEditRestoresPublishState(t *testing.T) {
 
 func TestProfileEditClaimBlocksOnlyActiveOrDifferentEdit(t *testing.T) {
 	tests := []struct {
-		name, status, current, operation string
-		want                             bool
+		name, current, operation string
+		status                   sysin.PublishTaskStatus
+		want                     bool
 	}{
 		{name: "idle", status: "", want: false},
 		{name: "failed can retry", status: "failed", want: false},

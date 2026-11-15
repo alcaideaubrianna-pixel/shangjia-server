@@ -41,11 +41,11 @@ func (s *sSysPublish) preparePublishedProfileEdit(ctx context.Context, profileId
 	if err != nil {
 		return false, gerror.Wrap(err, "读取资料发布状态失败")
 	}
-	stateStatus := ""
+	stateStatus := sysin.PublishTaskStatus("")
 	if !stateRow.IsEmpty() {
-		stateStatus = stateRow["publish_task_status"].String()
+		stateStatus = sysin.PublishTaskStatus(stateRow["publish_task_status"].String())
 	}
-	if profileEditClaimBlocks(stateStatus, stateRow["publish_operation_no"].String(), operationNo) && stateStatus != "editing" {
+	if profileEditClaimBlocks(stateStatus, stateRow["publish_operation_no"].String(), operationNo) && stateStatus != sysin.PublishTaskStatusEditing {
 		return false, gerror.New("资料正在上架处理中，请稍后再编辑")
 	}
 	if profileEditClaimBlocks(stateStatus, stateRow["publish_operation_no"].String(), operationNo) {
@@ -57,12 +57,12 @@ func (s *sSysPublish) preparePublishedProfileEdit(ctx context.Context, profileId
 	}
 	claimed, err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
 		Where("tenant_id", tenantId).Where("account_id", accountId).Where("profile_id", profileId).
-		WhereNull("deleted_at").WhereIn("publish_task_status", []string{"", string(sysin.PublishTaskStatusFailed), string(sysin.PublishTaskStatusCanceled)}).
-		Data(g.Map{"publish_task_status": "editing", "publish_operation_no": operationNo}).Update()
+		WhereNull("deleted_at").WhereIn("publish_task_status", append([]string{""}, sysin.PublishTaskStatusStrings(sysin.PublishTaskStatusFailed, sysin.PublishTaskStatusCanceled)...)).
+		Data(g.Map{"publish_task_status": sysin.PublishTaskStatusEditing.String(), "publish_operation_no": operationNo}).Update()
 	if err != nil {
 		return false, gerror.Wrap(err, "锁定资料编辑操作失败")
 	}
-	if affected, _ := claimed.RowsAffected(); affected == 0 && !(stateStatus == "editing" && stateRow["publish_operation_no"].String() == operationNo) {
+	if affected, _ := claimed.RowsAffected(); affected == 0 && !(stateStatus == sysin.PublishTaskStatusEditing && stateRow["publish_operation_no"].String() == operationNo) {
 		return false, gerror.New("资料正在编辑处理中，请稍后再编辑")
 	}
 	if err := s.setProfilesOffline(ctx, []int64{profileId}, tenantId); err != nil {
@@ -86,7 +86,7 @@ func (s *sSysPublish) preparePublishedProfileEdit(ctx context.Context, profileId
 func (s *sSysPublish) releaseProfileEditClaim(ctx context.Context, profileId, tenantId, accountId int64, operationNo string) {
 	_, _ = g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
 		Where("tenant_id", tenantId).Where("account_id", accountId).Where("profile_id", profileId).
-		Where("publish_task_status", "editing").Where("publish_operation_no", operationNo).
+		Where("publish_task_status", sysin.PublishTaskStatusEditing.String()).Where("publish_operation_no", operationNo).
 		Data(g.Map{"publish_task_status": "", "publish_operation_no": ""}).Update()
 }
 
@@ -95,9 +95,9 @@ func markProfileOnlineForEdit(in *sysin.ProfileSaveInp) {
 	in.Visibility = consts.ContentVisibilityPublic
 }
 
-func profileEditClaimBlocks(status, currentOperation, operation string) bool {
-	if status == string(sysin.PublishTaskStatusPending) || status == string(sysin.PublishTaskStatusPublishing) {
+func profileEditClaimBlocks(status sysin.PublishTaskStatus, currentOperation, operation string) bool {
+	if status == sysin.PublishTaskStatusPending || status == sysin.PublishTaskStatusPublishing {
 		return true
 	}
-	return status == "editing" && currentOperation != operation
+	return status == sysin.PublishTaskStatusEditing && currentOperation != operation
 }

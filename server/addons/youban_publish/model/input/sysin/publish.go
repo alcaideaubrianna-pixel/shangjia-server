@@ -17,42 +17,38 @@ import (
 type PublishTaskStatus string
 
 const (
-	PublishTaskStatusPendingValue       PublishTaskStatus = "pending"
-	PublishTaskStatusPublishingValue    PublishTaskStatus = "publishing"
-	PublishTaskStatusCyclingValue       PublishTaskStatus = "cycling"
-	PublishTaskStatusPublishedValue     PublishTaskStatus = "published"
-	PublishTaskStatusPartialFailedValue PublishTaskStatus = "partial_failed"
-	PublishTaskStatusFailedValue        PublishTaskStatus = "failed"
-	PublishTaskStatusCanceledValue      PublishTaskStatus = "canceled"
-	PublishTaskStatusWaitingMediaValue  PublishTaskStatus = "waiting_media"
-	PublishTaskStatusEditingValue       PublishTaskStatus = "editing"
-)
-
-const (
-	PublishTaskStatusPending       = PublishTaskStatusPendingValue
-	PublishTaskStatusPublishing    = PublishTaskStatusPublishingValue
-	PublishTaskStatusCycling       = PublishTaskStatusCyclingValue
-	PublishTaskStatusPublished     = PublishTaskStatusPublishedValue
-	PublishTaskStatusPartialFailed = PublishTaskStatusPartialFailedValue
-	PublishTaskStatusFailed        = PublishTaskStatusFailedValue
-	PublishTaskStatusCanceled      = PublishTaskStatusCanceledValue
-	PublishTaskStatusWaitingMedia  = PublishTaskStatusWaitingMediaValue
-	PublishTaskStatusEditing       = PublishTaskStatusEditingValue
+	PublishTaskStatusPending       PublishTaskStatus = "pending"
+	PublishTaskStatusPublishing    PublishTaskStatus = "publishing"
+	PublishTaskStatusCycling       PublishTaskStatus = "cycling"
+	PublishTaskStatusPublished     PublishTaskStatus = "published"
+	PublishTaskStatusPartialFailed PublishTaskStatus = "partial_failed"
+	PublishTaskStatusFailed        PublishTaskStatus = "failed"
+	PublishTaskStatusCanceled      PublishTaskStatus = "canceled"
+	PublishTaskStatusWaitingMedia  PublishTaskStatus = "waiting_media"
+	PublishTaskStatusEditing       PublishTaskStatus = "editing"
 )
 
 func (s PublishTaskStatus) String() string { return string(s) }
 
+func PublishTaskStatusStrings(values ...PublishTaskStatus) []string {
+	result := make([]string, len(values))
+	for i, value := range values {
+		result[i] = value.String()
+	}
+	return result
+}
+
 func (s PublishTaskStatus) Valid() bool {
 	switch s {
-	case PublishTaskStatusPendingValue,
-		PublishTaskStatusPublishingValue,
-		PublishTaskStatusCyclingValue,
-		PublishTaskStatusPublishedValue,
-		PublishTaskStatusPartialFailedValue,
-		PublishTaskStatusFailedValue,
-		PublishTaskStatusCanceledValue,
-		PublishTaskStatusWaitingMediaValue,
-		PublishTaskStatusEditingValue:
+	case PublishTaskStatusPending,
+		PublishTaskStatusPublishing,
+		PublishTaskStatusCycling,
+		PublishTaskStatusPublished,
+		PublishTaskStatusPartialFailed,
+		PublishTaskStatusFailed,
+		PublishTaskStatusCanceled,
+		PublishTaskStatusWaitingMedia,
+		PublishTaskStatusEditing:
 		return true
 	default:
 		return false

@@ -115,7 +115,7 @@ func (s *sSysPublish) dashboardOverview(ctx context.Context, tenantId int64, acc
 	stats := dashboardStats(profile, counts, tgOnline, channels, accounts, admin)
 	result := &sysin.DashboardOverviewModel{
 		Stats:      stats,
-		Health:     dashboardHealth(tgOnline, tgTotal, counts[sysin.PublishTaskStatusFailedValue]+counts[sysin.PublishTaskStatusPartialFailedValue], channels),
+		Health:     dashboardHealth(tgOnline, tgTotal, counts[sysin.PublishTaskStatusFailed]+counts[sysin.PublishTaskStatusPartialFailed], channels),
 		QuickLinks: dashboardQuickLinks(counts, admin),
 		Profile:    profile,
 	}
@@ -127,15 +127,15 @@ func dashboardStats(profile *sysin.ProfileStatsModel, counts map[sysin.PublishTa
 	stats := []*sysin.DashboardStatModel{
 		{Key: "profiles", Title: "资料总数", Value: profile.Total},
 		{Key: "published", Title: "已上架", Value: profile.UpCount},
-		{Key: "pending", Title: "待上架事件", Value: counts[sysin.PublishTaskStatusPendingValue]},
-		{Key: "failed", Title: "发布失败", Value: counts[sysin.PublishTaskStatusFailedValue] + counts[sysin.PublishTaskStatusPartialFailedValue]},
+		{Key: "pending", Title: "待上架事件", Value: counts[sysin.PublishTaskStatusPending]},
+		{Key: "failed", Title: "发布失败", Value: counts[sysin.PublishTaskStatusFailed] + counts[sysin.PublishTaskStatusPartialFailed]},
 	}
 	if admin {
 		stats = append(stats,
 			&sysin.DashboardStatModel{Key: "accounts", Title: "上架账号", Value: accounts},
 			&sysin.DashboardStatModel{Key: "tgOnline", Title: "在线协议号", Value: tgOnline},
 			&sysin.DashboardStatModel{Key: "channels", Title: "可用频道", Value: channels},
-			&sysin.DashboardStatModel{Key: "successRate", Title: "发布成功率", Value: int(dashboardSuccessRate(counts[sysin.PublishTaskStatusPublishedValue], counts[sysin.PublishTaskStatusFailedValue]+counts[sysin.PublishTaskStatusPartialFailedValue])), Suffix: "%"},
+			&sysin.DashboardStatModel{Key: "successRate", Title: "发布成功率", Value: int(dashboardSuccessRate(counts[sysin.PublishTaskStatusPublished], counts[sysin.PublishTaskStatusFailed]+counts[sysin.PublishTaskStatusPartialFailed])), Suffix: "%"},
 		)
 	}
 	return stats
@@ -172,7 +172,7 @@ func (s *sSysPublish) dashboardTaskTodos(ctx context.Context, tenantId int64, ac
 	var rows []*collectTaskSummary
 	mod := s.collectTaskSummaryModel(ctx).
 		Where("t.tenant_id", tenantId).
-		WhereIn("t.status", dashboardPublishStatusStrings(sysin.PublishTaskStatusFailedValue, sysin.PublishTaskStatusPendingValue, sysin.PublishTaskStatusPartialFailedValue)).
+		WhereIn("t.status", sysin.PublishTaskStatusStrings(sysin.PublishTaskStatusFailed, sysin.PublishTaskStatusPending, sysin.PublishTaskStatusPartialFailed)).
 		WhereNull("t.deleted_at")
 	if accountId > 0 {
 		mod = mod.Where("t.account_id", accountId)
@@ -272,16 +272,16 @@ func dashboardHealth(tgOnline int, tgTotal int, failed int, channels int) []*sys
 func dashboardQuickLinks(counts map[sysin.PublishTaskStatus]int, admin bool) []*sysin.DashboardQuickLinkModel {
 	if admin {
 		return []*sysin.DashboardQuickLinkModel{
-			{Key: "notes", Title: "资料列表", Path: "/admin/notes", Badge: counts[sysin.PublishTaskStatusPendingValue]},
-			{Key: "records", Title: "发布记录", Path: "/admin/logs", Badge: counts[sysin.PublishTaskStatusFailedValue] + counts[sysin.PublishTaskStatusPartialFailedValue]},
+			{Key: "notes", Title: "资料列表", Path: "/admin/notes", Badge: counts[sysin.PublishTaskStatusPending]},
+			{Key: "records", Title: "发布记录", Path: "/admin/logs", Badge: counts[sysin.PublishTaskStatusFailed] + counts[sysin.PublishTaskStatusPartialFailed]},
 			{Key: "channels", Title: "频道配置", Path: "/admin/channels"},
 			{Key: "accounts", Title: "协议号", Path: "/admin/accounts/protocol"},
 		}
 	}
 	return []*sysin.DashboardQuickLinkModel{
 		{Key: "upload", Title: "上传资料", Path: "/collector/upload"},
-		{Key: "content", Title: "我的资料", Path: "/collector/content", Badge: counts[sysin.PublishTaskStatusPendingValue]},
-		{Key: "records", Title: "发布记录", Path: "/collector/records", Badge: counts[sysin.PublishTaskStatusFailedValue] + counts[sysin.PublishTaskStatusPartialFailedValue]},
+		{Key: "content", Title: "我的资料", Path: "/collector/content", Badge: counts[sysin.PublishTaskStatusPending]},
+		{Key: "records", Title: "发布记录", Path: "/collector/records", Badge: counts[sysin.PublishTaskStatusFailed] + counts[sysin.PublishTaskStatusPartialFailed]},
 	}
 }
 

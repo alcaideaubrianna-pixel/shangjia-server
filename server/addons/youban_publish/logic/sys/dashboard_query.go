@@ -16,14 +16,6 @@ type dashboardTrendRow struct {
 	Count  int    `json:"count"`
 }
 
-func dashboardPublishStatusStrings(values ...sysin.PublishTaskStatus) []string {
-	result := make([]string, 0, len(values))
-	for _, value := range values {
-		result = append(result, string(value))
-	}
-	return result
-}
-
 func (s *sSysPublish) dashboardTrend(ctx context.Context, in *sysin.TrendInp, tenantId int64, accountId int64) (*sysin.DashboardTrendModel, error) {
 	profile, err := s.profileStats(ctx, in, tenantId, accountId)
 	if err != nil {
@@ -45,11 +37,11 @@ func (s *sSysPublish) dashboardTaskCounts(ctx context.Context, tenantId int64, a
 		InnerJoin(publishProfileStateTable+" ps", "ps.profile_id=p.id AND ps.deleted_at IS NULL").
 		Fields("ps.publish_task_status AS status", "COUNT(*) AS count").
 		Where("ps.tenant_id", tenantId).
-		WhereIn("ps.publish_task_status", dashboardPublishStatusStrings(
-			sysin.PublishTaskStatusPendingValue, sysin.PublishTaskStatusPublishingValue,
-			sysin.PublishTaskStatusCyclingValue, sysin.PublishTaskStatusPublishedValue,
-			sysin.PublishTaskStatusPartialFailedValue, sysin.PublishTaskStatusFailedValue,
-			sysin.PublishTaskStatusCanceledValue,
+		WhereIn("ps.publish_task_status", sysin.PublishTaskStatusStrings(
+			sysin.PublishTaskStatusPending, sysin.PublishTaskStatusPublishing,
+			sysin.PublishTaskStatusCycling, sysin.PublishTaskStatusPublished,
+			sysin.PublishTaskStatusPartialFailed, sysin.PublishTaskStatusFailed,
+			sysin.PublishTaskStatusCanceled,
 		)).
 		WhereNull("p.deleted_at").
 		Group("ps.publish_task_status")
@@ -137,11 +129,11 @@ func buildDashboardPublishTrend(dateRange *trendDateRange, rows []dashboardTrend
 			continue
 		}
 		switch sysin.PublishTaskStatus(row.Status) {
-		case sysin.PublishTaskStatusPublishedValue:
+		case sysin.PublishTaskStatusPublished:
 			point.Success += row.Count
-		case sysin.PublishTaskStatusPartialFailedValue, sysin.PublishTaskStatusFailedValue:
+		case sysin.PublishTaskStatusPartialFailed, sysin.PublishTaskStatusFailed:
 			point.Failed += row.Count
-		case sysin.PublishTaskStatusPendingValue, sysin.PublishTaskStatusPublishingValue, sysin.PublishTaskStatusCyclingValue:
+		case sysin.PublishTaskStatusPending, sysin.PublishTaskStatusPublishing, sysin.PublishTaskStatusCycling:
 			point.Pending += row.Count
 		}
 	}
