@@ -50,6 +50,11 @@ func (s *sSysPublish) handleProfilesDown(ctx context.Context, ids []int64, tenan
 	if err != nil {
 		return err
 	}
+	if !cleanupQueued {
+		if err = s.finishProfilesUnpublishing(ctx, ids, tenantId, operationNo); err != nil {
+			return err
+		}
+	}
 	if strings.HasPrefix(strings.ToLower(operationNo), botProfileUnpublishOperationPrefix) && !cleanupQueued {
 		job := telegramJobRecord{TenantId: tenantId, ProfileId: ids[0], OperationNo: operationNo}
 		if err = s.notifyBotProfileUnpublishCompleted(ctx, job, tgQueuePayload{ForceCompletion: true}); err != nil {
@@ -78,6 +83,38 @@ func (s *sSysPublish) handleProfilesDown(ctx context.Context, ids []int64, tenan
 		return nil
 	}
 	return s.notifyProfilesDown(ctx, ids, tenantId, plan.Channels, operationNo, cutoffAt)
+}
+
+// finishProfilesUnpublishing clears the durable loading state only after the
+// profile's historical publish messages and down-run jobs have both settled.
+func (s *sSysPublish) finishProfilesUnpublishing(ctx context.Context, ids []int64, tenantId int64, operationNo string) error {
+	ids = uniqueIds(ids)
+	if len(ids) == 0 {
+		return nil
+	}
+	pending, err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
+		Where("j.tenant_id", tenantId).WhereIn("j.profile_id", ids).
+		Where("j.operation_type", "unpublish").
+		WhereIn("j.status", telegramJobActiveStatuses()).Count()
+	if err != nil {
+		return gerror.Wrap(err, "检查资料下架任务状态失败")
+	}
+	if pending > 0 {
+		return nil
+	}
+	sent, err := g.DB().Model(publishTgMessageTable+" m").Safe().Ctx(ctx).
+		InnerJoin(publishTgJobTable+" j", "j.id=m.job_id").
+		WhereIn("j.profile_id", ids).
+		Where("m.status", "sent").
+		WhereNot("j.operation_type", "unpublish").
+		Count()
+	if err != nil {
+		return gerror.Wrap(err, "检查资料历史TG消息状态失败")
+	}
+	if sent > 0 {
+		return nil
+	}
+	return s.clearProfilesUnpublishing(ctx, ids, tenantId, operationNo)
 }
 
 func (s *sSysPublish) activeDownProfileIds(ctx context.Context, ids []int64, tenantId int64) ([]int64, error) {

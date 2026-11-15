@@ -771,6 +771,15 @@ type AdminProfileStatusRes struct {
 	*sysin.ProfileStatusModel
 }
 
+type AdminProfileCycleCancelReq struct {
+	g.Meta `path:"/publish/admin/profile/cycle/cancel" method:"post" tags:"上架插件管理端" summary:"取消资料当前循环上架"`
+	sysin.ProfileViewInp
+}
+
+type AdminProfileCycleCancelRes struct {
+	*sysin.ProfileStatusModel
+}
+
 type AdminProfileImageSearchReq struct {
 	g.Meta `path:"/publish/admin/profile/image-search" method:"post" mime:"multipart/form-data" tags:"上架插件管理端" summary:"管理端资料图片搜索"`
 	sysin.ProfileImageSearchInp

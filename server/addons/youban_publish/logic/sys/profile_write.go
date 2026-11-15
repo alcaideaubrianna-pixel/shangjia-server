@@ -466,6 +466,17 @@ func (s *sSysPublish) updateProfileStatus(ctx context.Context, in *sysin.Profile
 	if in == nil || (len(in.Ids) == 0 && len(in.Uuids) == 0) {
 		return nil, gerror.New("请选择要处理的资料")
 	}
+	if in.CancelCycle {
+		targetIds, resolveErr := s.allowedProfileTargetIds(ctx, in.Ids, in.Uuids, tenantId, accountId)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		ids, resolveErr := s.allowedProfileIds(ctx, targetIds, tenantId, accountId)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		return s.cancelProfileCycle(ctx, ids, tenantId, accountId)
+	}
 	if in.Status != 1 && in.Status != 2 {
 		return nil, gerror.New("资料状态不合法")
 	}
@@ -514,9 +525,18 @@ func (s *sSysPublish) updateProfileStatus(ctx context.Context, in *sysin.Profile
 	if err = s.setProfilesOffline(ctx, ids, tenantId); err != nil {
 		return nil, err
 	}
-	if err = s.enqueueProfileDownRun(ctx, tenantId, ids, 0); err != nil {
+	operationNo := fmt.Sprintf("unpublish:%d:%d", tenantId, time.Now().UnixNano())
+	if err = s.markProfilesUnpublishing(ctx, ids, tenantId, operationNo); err != nil {
+		return nil, err
+	}
+	if err = s.enqueueProfileDownRunWithOperationNo(ctx, tenantId, ids, 0, operationNo); err != nil {
+		_ = s.clearProfilesUnpublishing(ctx, ids, tenantId, operationNo)
 		return nil, gerror.Wrap(err, "加入资料下架队列失败")
 	}
+	// The cleanup queue can finish before the state projection is written on
+	// very small/local deployments. Re-check once after enqueueing so that a
+	// completed down operation cannot leave a stale loading state behind.
+	_ = s.finishProfilesUnpublishing(ctx, ids, tenantId, operationNo)
 	service.SysContent().ClearHomeProfileCardsCache(ctx)
 	return &sysin.ProfileStatusModel{Message: "资料已下架，已有TG消息将在后台清理"}, nil
 }

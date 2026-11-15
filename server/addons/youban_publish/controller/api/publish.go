@@ -931,6 +931,19 @@ func (c *cPublishAdmin) ProfileStatus(ctx context.Context, req *publish.AdminPro
 	return
 }
 
+func (c *cPublishAdmin) ProfileCycleCancel(ctx context.Context, req *publish.AdminProfileCycleCancelReq) (res *publish.AdminProfileCycleCancelRes, err error) {
+	data, err := service.SysPublish().AdminProfileStatus(ctx, &sysin.ProfileStatusInp{
+		Ids:         []int64{req.Id},
+		Uuids:       []string{req.Uuid},
+		Status:      2,
+		CancelCycle: true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &publish.AdminProfileCycleCancelRes{ProfileStatusModel: data}, nil
+}
+
 func (c *cPublishAdmin) ProfileImageSearch(ctx context.Context, req *publish.AdminProfileImageSearchReq) (res *publish.AdminProfileImageSearchRes, err error) {
 	file := g.RequestFromCtx(ctx).GetUploadFile("image")
 	if file == nil {

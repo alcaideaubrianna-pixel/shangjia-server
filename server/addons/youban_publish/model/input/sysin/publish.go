@@ -24,6 +24,7 @@ const (
 	PublishTaskStatusPartialFailed PublishTaskStatus = "partial_failed"
 	PublishTaskStatusFailed        PublishTaskStatus = "failed"
 	PublishTaskStatusCanceled      PublishTaskStatus = "canceled"
+	PublishTaskStatusUnpublishing  PublishTaskStatus = "unpublishing"
 	PublishTaskStatusWaitingMedia  PublishTaskStatus = "waiting_media"
 	PublishTaskStatusEditing       PublishTaskStatus = "editing"
 )
@@ -47,6 +48,7 @@ func (s PublishTaskStatus) Valid() bool {
 		PublishTaskStatusPartialFailed,
 		PublishTaskStatusFailed,
 		PublishTaskStatusCanceled,
+		PublishTaskStatusUnpublishing,
 		PublishTaskStatusWaitingMedia,
 		PublishTaskStatusEditing:
 		return true
@@ -875,6 +877,10 @@ type ProfileStatusInp struct {
 	Ids    []int64  `json:"ids" dc:"资料ID列表"`
 	Uuids  []string `json:"uuids" dc:"资料UUID列表"`
 	Status int      `json:"status" v:"required#状态不能为空" dc:"状态：1上架 2下架"`
+	// CancelCycle is used by the dedicated profile cycle-cancel endpoint.
+	// It is intentionally kept on the existing status input so the plugin
+	// service interface does not need a parallel method for this operation.
+	CancelCycle bool `json:"-"`
 }
 
 type ProfileStatusModel struct {
