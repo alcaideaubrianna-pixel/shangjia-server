@@ -120,31 +120,42 @@ func (s *sSysPublish) submitProfilePublishWithMeta(ctx context.Context, profileI
 			if countErr != nil {
 				return gerror.Wrap(countErr, "检查资料媒体失败状态失败")
 			}
-			publishStatus := "waiting_media"
 			if failedMediaCount > 0 {
-				publishStatus = sysin.PublishTaskStatusFailed
-			}
-			if _, updateErr := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
-				Where("tenant_id", tenantId).Where("account_id", accountId).Where("profile_id", profileId).WhereNull("deleted_at").
-				Data(g.Map{"publish_task_status": publishStatus, "publish_operation_no": strings.TrimSpace(operationNo), "publish_task_updated_at": gtime.Now()}).Update(); updateErr != nil {
-				return gerror.Wrap(updateErr, "记录资料媒体等待状态失败")
-			}
-			if failedMediaCount > 0 {
-				g.Log().Warningf(ctx, "资料上架因媒体失败停止等待 profileId:%d operationNo:%s failed_media:%d", profileId, operationNo, failedMediaCount)
+				unavailableFailedMediaCount, availabilityErr := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+					Where("profile_id", profileId).WhereNull("deleted_at").
+					Where("processing_status", mediaProcessingFailed).
+					Where("(COALESCE(file_url,'') = '' AND COALESCE(storage_path,'') = '' AND COALESCE(tg_file_id,'') = '' AND COALESCE(processed_tg_file_id,'') = '')").Count()
+				if availabilityErr != nil {
+					return gerror.Wrap(availabilityErr, "检查资料媒体降级来源失败")
+				}
+				if unavailableFailedMediaCount == 0 {
+					// 预处理失败但仍有原始文件或 Telegram 缓存时，交给发送阶段降级处理。
+					g.Log().Warningf(ctx, "资料媒体预处理失败，已允许发送阶段降级 profileId:%d operationNo:%s failed_media:%d", profileId, operationNo, failedMediaCount)
+				} else {
+					publishStatus := sysin.PublishTaskStatusFailed
+					if _, updateErr := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
+						Where("tenant_id", tenantId).Where("account_id", accountId).Where("profile_id", profileId).WhereNull("deleted_at").
+						Data(g.Map{"publish_task_status": publishStatus, "publish_operation_no": strings.TrimSpace(operationNo), "publish_task_updated_at": gtime.Now()}).Update(); updateErr != nil {
+						return gerror.Wrap(updateErr, "记录资料媒体失败状态失败")
+					}
+					g.Log().Warningf(ctx, "资料上架因媒体无可用来源停止 profileId:%d operationNo:%s failed_media:%d unavailable:%d", profileId, operationNo, failedMediaCount, unavailableFailedMediaCount)
+					return nil
+				}
 			} else {
 				g.Log().Infof(ctx, "资料上架等待媒体完成 profileId:%d operationNo:%s", profileId, operationNo)
+				if _, updateErr := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
+					Where("tenant_id", tenantId).Where("account_id", accountId).Where("profile_id", profileId).WhereNull("deleted_at").
+					Data(g.Map{"publish_task_status": "waiting_media", "publish_operation_no": strings.TrimSpace(operationNo), "publish_task_updated_at": gtime.Now()}).Update(); updateErr != nil {
+					return gerror.Wrap(updateErr, "记录资料媒体等待状态失败")
+				}
 				if enqueueErr := s.enqueueWaitingMediaWake(ctx, profileId, tenantId, accountId); enqueueErr != nil {
 					g.Log().Warningf(ctx, "等待媒体延迟唤醒任务入队失败 profileId:%d err:%+v", profileId, enqueueErr)
 				}
-				// Close the race where the media operation commits between the
-				// readiness check above and this state update. The media worker may
-				// already have attempted its wakeup before waiting_media existed;
-				// re-check synchronously after recording the durable intent.
 				if wakeErr := s.wakeProfileTelegramJobs(ctx, profileId); wakeErr != nil {
 					g.Log().Warningf(ctx, "记录等待媒体状态后立即收敛失败 profileId:%d err:%+v", profileId, wakeErr)
 				}
+				return nil
 			}
-			return nil
 		}
 	}
 	// Manual web/BOT publishing shares this entrypoint. Once media is ready,
