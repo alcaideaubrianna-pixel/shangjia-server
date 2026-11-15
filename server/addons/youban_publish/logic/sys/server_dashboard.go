@@ -61,7 +61,7 @@ func (s *sSysPublish) ServerDashboard(ctx context.Context, in *sysin.TrendInp) (
 		Stats:             serverDashboardStats(basicCounts, taskCounts, tgOnline),
 		TaskTrend:         taskTrend,
 		ProfileTrend:      profileTrend,
-		Health:            serverDashboardHealth(tgOnline, tgTotal, taskCounts[string(sysin.PublishTaskStatusFailed)], basicCounts["channels"]),
+		Health:            serverDashboardHealth(tgOnline, tgTotal, taskCounts.ByStatus[sysin.PublishTaskStatusFailed], basicCounts["channels"]),
 		Todos:             todos,
 		PublishFailureTop: failureTop,
 		ProfilePublishTop: profileTop,
@@ -73,21 +73,26 @@ func (s *sSysPublish) ServerDashboard(ctx context.Context, in *sysin.TrendInp) (
 	return result, nil
 }
 
-func serverDashboardStats(basic map[string]int, tasks map[string]int, tgOnline int) []*sysin.ServerDashboardStat {
-	successRate := dashboardSuccessRate(tasks[string(sysin.PublishTaskStatusPublished)], tasks[string(sysin.PublishTaskStatusFailed)])
+type serverDashboardTaskCounts struct {
+	Total    int
+	ByStatus map[sysin.PublishTaskStatus]int
+}
+
+func serverDashboardStats(basic map[string]int, tasks serverDashboardTaskCounts, tgOnline int) []*sysin.ServerDashboardStat {
+	successRate := dashboardSuccessRate(tasks.ByStatus[sysin.PublishTaskStatusPublished], tasks.ByStatus[sysin.PublishTaskStatusFailed])
 	return []*sysin.ServerDashboardStat{
 		{Key: "tenants", Title: "账号归属", Value: basic["tenants"]},
 		{Key: "accounts", Title: "上架账号", Value: basic["accounts"]},
-		{Key: "tasks", Title: "范围内任务", Value: tasks["total"]},
-		{Key: "published", Title: "发布成功", Value: tasks[string(sysin.PublishTaskStatusPublished)]},
-		{Key: "failed", Title: "发布失败", Value: tasks[string(sysin.PublishTaskStatusFailed)]},
+		{Key: "tasks", Title: "范围内任务", Value: tasks.Total},
+		{Key: "published", Title: "发布成功", Value: tasks.ByStatus[sysin.PublishTaskStatusPublished]},
+		{Key: "failed", Title: "发布失败", Value: tasks.ByStatus[sysin.PublishTaskStatusFailed]},
 		{Key: "tgOnline", Title: "在线协议号", Value: tgOnline},
 		{Key: "channels", Title: "频道数量", Value: basic["channels"]},
 		{Key: "successRate", Title: "发布成功率", Value: int(successRate), Suffix: "%", Rate: successRate},
 	}
 }
 
-func (s *sSysPublish) serverDashboardPublishTaskTrend(ctx context.Context, dateRange *trendDateRange) ([]*sysin.ServerDashboardTrendPoint, map[string]int, error) {
+func (s *sSysPublish) serverDashboardPublishTaskTrend(ctx context.Context, dateRange *trendDateRange) ([]*sysin.ServerDashboardTrendPoint, serverDashboardTaskCounts, error) {
 	var rows []struct {
 		Date   string `json:"date"`
 		Status string `json:"status"`
@@ -101,11 +106,11 @@ func (s *sSysPublish) serverDashboardPublishTaskTrend(ctx context.Context, dateR
 		Group("DATE(l.created_at)," + publishRecordStatusExpression).
 		Scan(&rows)
 	if err != nil {
-		return nil, nil, gerror.Wrap(err, "统计后台任务趋势失败")
+		return nil, serverDashboardTaskCounts{}, gerror.Wrap(err, "统计后台任务趋势失败")
 	}
 	points := makeDashboardTaskTrendPoints(dateRange)
 	index := make(map[string]*sysin.ServerDashboardTrendPoint, len(points))
-	counts := map[string]int{"total": 0}
+	counts := serverDashboardTaskCounts{ByStatus: make(map[sysin.PublishTaskStatus]int)}
 	for _, point := range points {
 		index[point.Date] = point
 	}
@@ -115,17 +120,17 @@ func (s *sSysPublish) serverDashboardPublishTaskTrend(ctx context.Context, dateR
 			continue
 		}
 		point.Created += row.Count
-		counts["total"] += row.Count
+		counts.Total += row.Count
 		switch row.Status {
 		case "success", "sent":
 			point.Published += row.Count
-			counts[string(sysin.PublishTaskStatusPublished)] += row.Count
+			counts.ByStatus[sysin.PublishTaskStatusPublished] += row.Count
 		case "failed":
 			point.Failed += row.Count
-			counts[string(sysin.PublishTaskStatusFailed)] += row.Count
+			counts.ByStatus[sysin.PublishTaskStatusFailed] += row.Count
 		case "canceled", "superseded":
 			point.Canceled += row.Count
-			counts[string(sysin.PublishTaskStatusCanceled)] += row.Count
+			counts.ByStatus[sysin.PublishTaskStatusCanceled] += row.Count
 		}
 	}
 	return points, counts, nil
