@@ -50,6 +50,14 @@ func markCollectProcessSourceActive(ctx context.Context, payload collectProcessQ
 	}
 	member := fmt.Sprintf("%d:%d:%d", payload.TenantId, payload.AccountId, payload.SourceId)
 	_, _ = client.Do(ctx, "SADD", collectProcessActiveSourcesKey, member)
+	// Deduplicate wakeups briefly so bursty realtime traffic does not turn one
+	// source into an unbounded Redis list. The database remains authoritative;
+	// this key only wakes the bounded, source-scoped dispatcher.
+	wakeKey := collectProcessSourceWakeKey(member)
+	woken, wakeErr := client.Do(ctx, "SET", wakeKey, "1", "NX", "EX", 2)
+	if wakeErr == nil && wakeAccepted(woken.String()) {
+		_, _ = client.Do(ctx, "LPUSH", collectProcessWakeQueueKey, member)
+	}
 }
 
 type collectProcessQueuePayload struct {
@@ -65,7 +73,18 @@ type collectProcessQueuePayload struct {
 	Recovery     bool   `json:"recovery,omitempty"`
 }
 
-const collectProcessActiveSourcesKey = "youban_publish:collect:active_sources"
+const (
+	collectProcessActiveSourcesKey = "youban_publish:collect:active_sources"
+	collectProcessWakeQueueKey     = "youban_publish:collect:source:wake"
+)
+
+func collectProcessSourceWakeKey(member string) string {
+	return "youban_publish:collect:source:wake:" + member
+}
+
+func wakeAccepted(value string) bool {
+	return strings.EqualFold(strings.TrimSpace(value), "OK")
+}
 
 const (
 	collectProcessTaskUniqueTTL   = 30 * time.Minute

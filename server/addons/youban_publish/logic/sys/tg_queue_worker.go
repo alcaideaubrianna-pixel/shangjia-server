@@ -157,6 +157,78 @@ func (s *sSysPublish) startCollectProcessWorker(ctx context.Context) {
 	s.tgQueueMu.Unlock()
 	g.Log().Info(ctx, "启动来源级采集处理 Worker")
 	go s.runCollectSourceQueueManager(ctx)
+	go s.runCollectProcessOutboxDispatcher(ctx)
+}
+
+const (
+	collectProcessDispatcherInterval = 5 * time.Second
+	collectProcessDispatcherBatch    = 4
+)
+
+func (s *sSysPublish) runCollectProcessOutboxDispatcher(ctx context.Context) {
+	// Redis only provides source wakeups. Every database read remains scoped to
+	// one tenant/account/source and is bounded by dispatchDueCollectProcessOutbox.
+	s.seedCollectProcessWakeQueue(ctx)
+	ticker := time.NewTicker(collectProcessDispatcherInterval)
+	defer ticker.Stop()
+	for {
+		s.dispatchCollectProcessWakeups(ctx, collectProcessDispatcherBatch)
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func (s *sSysPublish) seedCollectProcessWakeQueue(ctx context.Context) {
+	if !cache.Initialized() {
+		return
+	}
+	client, err := cache.RedisClient()
+	if err != nil {
+		return
+	}
+	value, err := client.Do(ctx, "SMEMBERS", collectProcessActiveSourcesKey)
+	if err != nil || value.IsNil() {
+		return
+	}
+	for _, member := range value.Strings() {
+		wakeKey := collectProcessSourceWakeKey(member)
+		woken, setErr := client.Do(ctx, "SET", wakeKey, "1", "NX", "EX", 2)
+		if setErr == nil && wakeAccepted(woken.String()) {
+			_, _ = client.Do(ctx, "LPUSH", collectProcessWakeQueueKey, member)
+		}
+	}
+}
+
+func (s *sSysPublish) dispatchCollectProcessWakeups(ctx context.Context, limit int) {
+	if !cache.Initialized() {
+		return
+	}
+	client, err := cache.RedisClient()
+	if err != nil {
+		return
+	}
+	for i := 0; i < limit; i++ {
+		value, popErr := client.Do(ctx, "RPOP", collectProcessWakeQueueKey)
+		if popErr != nil || value.IsNil() {
+			return
+		}
+		parts := strings.Split(value.String(), ":")
+		if len(parts) != 3 {
+			continue
+		}
+		tenantID, errTenant := strconv.ParseInt(parts[0], 10, 64)
+		accountID, errAccount := strconv.ParseInt(parts[1], 10, 64)
+		sourceID, errSource := strconv.ParseInt(parts[2], 10, 64)
+		if errTenant != nil || errAccount != nil || errSource != nil || tenantID <= 0 || accountID < 0 || sourceID <= 0 {
+			continue
+		}
+		if dispatchErr := s.dispatchDueCollectProcessOutbox(ctx, collectProcessDispatchBatchSize(ctx), publishAccountScope{TenantID: tenantID, AccountID: accountID, SourceID: sourceID}); dispatchErr != nil {
+			g.Log().Warning(ctx, "来源采集Outbox调度失败", g.Map{"tenantId": tenantID, "accountId": accountID, "sourceId": sourceID, "error": dispatchErr.Error()})
+		}
+	}
 }
 
 func bootstrapCollectProcessSources(ctx context.Context) {
