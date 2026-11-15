@@ -16,7 +16,12 @@ import (
 // the sole sender until a channel is explicitly migrated.
 func (s *sSysPublish) runTelegramChannelQueueWorker(ctx context.Context) {
 	ticker := time.NewTicker(500 * time.Millisecond)
-	recoveryTicker := time.NewTicker(30 * time.Second)
+	// The Redis active-channel set is only a fast index. Jobs created before
+	// the index write, or jobs whose Redis enqueue was interrupted, remain in
+	// PostgreSQL with dispatch_status=idle. Recover those channel heads
+	// frequently so one lost wake-up cannot leave an entire channel invisible
+	// to the worker for minutes.
+	recoveryTicker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	defer recoveryTicker.Stop()
 	for {
@@ -115,20 +120,24 @@ func (s *sSysPublish) rehydrateMissingTelegramChannelQueue(ctx context.Context, 
 	if limit <= 0 {
 		limit = 500
 	}
-	if limit > 1000 {
-		limit = 1000
+	if limit > 2000 {
+		limit = 2000
 	}
-	// Reconcile queued rows independently of Outbox status. Outbox may already
-	// be marked delivered after a Redis timeout, while the channel ZSET member
-	// was never persisted. Prioritize this exact failure state so a large
-	// historical backlog cannot starve realtime/manual jobs.
-	err := g.DB().Model(publishTgJobTable).Ctx(ctx).
-		Fields("id,channel_id,priority").
-		Where("channel_id > 0").
-		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
-		Where("COALESCE(dispatch_status,'') IN ('queued','idle','')").
-		Order("CASE WHEN COALESCE(dispatch_status,'')='queued' THEN 0 ELSE 1 END, updated_at ASC, id ASC").
-		Limit(limit).Scan(&jobs)
+	// Recover one database head per tenant/channel, rather than taking the
+	// oldest N jobs globally. A global LIMIT can select hundreds of rows from
+	// the same few backlogged channels and leave every other channel absent
+	// from the Redis active set. The channel worker can only make progress for
+	// channels that have an active-set member, so this query must maximize
+	// channel coverage first.
+	err := g.DB().GetScan(ctx, &jobs, `
+		SELECT DISTINCT ON (tenant_id, channel_id)
+			id, channel_id, priority
+		FROM `+publishTgJobTable+`
+		WHERE channel_id > 0
+		  AND status IN ('pending','failed_retry','unknown')
+		  AND COALESCE(dispatch_status,'') IN ('idle','')
+		ORDER BY tenant_id, channel_id, created_at ASC, id ASC
+		LIMIT ?`, limit)
 	if err != nil {
 		return err
 	}
