@@ -92,7 +92,7 @@ func telegramWebhookReconcileGroupKey(chatID, mediaGroupID string) string {
 }
 
 const (
-	telegramWebhookRecentMessagesCapacity = 256
+	telegramWebhookRecentMessagesCapacity = 500
 	telegramWebhookMessageStatusReceived  = "received"
 	telegramWebhookMessageStatusMatched   = "matched"
 )
@@ -117,29 +117,21 @@ func telegramWebhookRecentCapacity(ctx context.Context) int {
 	return capacity
 }
 
-func telegramWebhookReconcileHashKey(chatID string, messageID int64) string {
-	return telegramWebhookReconcileMessageKey(chatID, messageID)
+type telegramWebhookMessageState struct {
+	MediaGroupID string    `json:"media_group_id,omitempty"`
+	MessageType  string    `json:"message_type"`
+	Status       string    `json:"status"`
+	ReceivedAt   time.Time `json:"received_at"`
+	AttemptID    int64     `json:"attempt_id,omitempty"`
+	JobID        int64     `json:"job_id,omitempty"`
+	Phase        string    `json:"phase,omitempty"`
 }
 
-func setTelegramWebhookMessageHash(ctx context.Context, message telegramWebhookReconcileMessage) bool {
-	client, err := cache.RedisClient()
-	if err != nil {
-		return false
+func telegramWebhookMessageStateFrom(message telegramWebhookReconcileMessage) telegramWebhookMessageState {
+	return telegramWebhookMessageState{
+		MediaGroupID: message.MediaGroupID, MessageType: message.MessageType, Status: message.Status,
+		ReceivedAt: message.ReceivedAt, AttemptID: message.AttemptID, JobID: message.JobID, Phase: message.Phase,
 	}
-	key := telegramWebhookReconcileHashKey(message.ChatID, message.MessageID)
-	_, err = client.Do(ctx, "HSET", key,
-		"media_group_id", message.MediaGroupID,
-		"message_type", message.MessageType,
-		"status", message.Status,
-		"received_at", message.ReceivedAt.UnixNano(),
-		"attempt_id", message.AttemptID,
-		"job_id", message.JobID,
-		"phase", message.Phase)
-	if err != nil {
-		return false
-	}
-	_, _ = client.Do(ctx, "EXPIRE", key, int64(telegramWebhookReconcileTTL(ctx)/time.Second))
-	return true
 }
 
 func cacheTelegramWebhookReconcileMessage(ctx context.Context, message telegramWebhookReconcileMessage) {
@@ -150,11 +142,11 @@ func cacheTelegramWebhookReconcileMessage(ctx context.Context, message telegramW
 		message.Status = telegramWebhookMessageStatusReceived
 	}
 	ttl := telegramWebhookReconcileTTL(ctx)
-	if !setTelegramWebhookMessageHash(ctx, message) {
-		// Memory/file adapters remain useful for local tests and provide a safe
-		// read-after-Redis-failure fallback without changing PostgreSQL facts.
-		_ = cache.Instance().Set(ctx, telegramWebhookReconcileMessageKey(message.ChatID, message.MessageID), message, ttl)
+	state, err := json.Marshal(telegramWebhookMessageStateFrom(message))
+	if err != nil {
+		return
 	}
+	_ = cache.Instance().Set(ctx, telegramWebhookReconcileMessageKey(message.ChatID, message.MessageID), string(state), ttl)
 	if strings.TrimSpace(message.MediaGroupID) != "" {
 		_ = cache.Instance().Set(ctx, telegramWebhookReconcileGroupKey(message.ChatID, message.MediaGroupID), message, ttl)
 	}

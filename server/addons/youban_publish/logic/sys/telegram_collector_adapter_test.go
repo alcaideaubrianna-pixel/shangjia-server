@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -419,16 +420,28 @@ func TestTelegramWebhookReconcileIndexUsesMessageAndGroupKeys(t *testing.T) {
 	if err != nil || value.IsNil() {
 		t.Fatalf("message reconcile index missing: value=%v err=%v", value, err)
 	}
-	var got telegramWebhookReconcileMessage
-	if err := value.Struct(&got); err != nil {
-		t.Fatalf("decode message reconcile index: %v", err)
+	var got telegramWebhookMessageState
+	if err := json.Unmarshal([]byte(value.String()), &got); err != nil {
+		t.Fatalf("decode compact message reconcile state: %v", err)
 	}
-	if got.ChatID != message.ChatID || got.MessageID != message.MessageID || got.MediaGroupID != message.MediaGroupID {
-		t.Fatalf("message reconcile index = %+v, want %+v", got, message)
+	if got.MediaGroupID != message.MediaGroupID || got.Status != telegramWebhookMessageStatusReceived {
+		t.Fatalf("message reconcile state = %+v, want group=%q status=%q", got, message.MediaGroupID, telegramWebhookMessageStatusReceived)
+	}
+	if strings.Contains(value.String(), "chatId") || strings.Contains(value.String(), "messageId") || strings.Contains(value.String(), "text") {
+		t.Fatalf("message reconcile state contains forbidden fields: %s", value.String())
 	}
 	group, err := cache.Instance().Get(context.Background(), telegramWebhookReconcileGroupKey(message.ChatID, message.MediaGroupID))
 	if err != nil || group.IsNil() {
 		t.Fatalf("group reconcile index missing: value=%v err=%v", group, err)
+	}
+}
+
+func TestTelegramWebhookRecentIndexDefaultsTo500(t *testing.T) {
+	if telegramWebhookRecentMessagesCapacity != 500 {
+		t.Fatalf("recent message capacity=%d, want 500", telegramWebhookRecentMessagesCapacity)
+	}
+	if got := telegramWebhookRecentCapacity(context.Background()); got != 500 {
+		t.Fatalf("configured default recent capacity=%d, want 500", got)
 	}
 }
 
