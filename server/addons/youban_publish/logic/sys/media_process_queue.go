@@ -16,7 +16,6 @@ import (
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/consts"
-	"hotgo/internal/dao"
 )
 
 // errTelegramProfileMissing marks a durable TG job whose source profile was
@@ -297,8 +296,6 @@ func (s *sSysPublish) profileMediaReady(ctx context.Context, profileId int64) (b
 		}
 		return false, gerror.Wrap(err, "检查资料预期媒体失败")
 	}
-	// Count each purpose independently. A total count can hide a missing
-	// verification asset when an extra display asset exists (or vice versa).
 	displayCount, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 		Where("profile_id", profileId).Where("purpose", "display").WhereNull("deleted_at").Count()
 	if err != nil {
@@ -309,33 +306,9 @@ func (s *sSysPublish) profileMediaReady(ctx context.Context, profileId int64) (b
 	if err != nil {
 		return false, err
 	}
-	actualTotal := displayCount + verifyCount
-	// The expected counters describe the upload intent, not a hard exact
-	// cardinality: edits/imports can legitimately remove an item. Require at
-	// least one asset for each purpose requested, then let the sender use the
-	// current rows. This prevents stale expected counts from blocking a valid
-	// profile forever.
-	if (expected.Display > 0 && displayCount < 1) || (expected.Verify > 0 && verifyCount < 1) {
+	// 发布规则：展示资料至少两张图片；资料声明有验证媒体时，验证媒体必须存在。
+	if displayCount < 2 || (expected.Verify > 0 && verifyCount < 1) {
 		return false, nil
-	}
-	if actualTotal == 0 {
-		// A newly created profile can be published before the asynchronous
-		// media writer inserts its rows. Use the profile declaration to
-		// distinguish that state from an intentional text-only profile.
-		var declared struct {
-			ImageCount           int   `orm:"image_count"`
-			VideoCount           int   `orm:"video_count"`
-			HasVerificationVideo int   `orm:"has_verification_video"`
-			CoverMediaId         int64 `orm:"cover_media_id"`
-		}
-		if err = g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).
-			Fields("image_count,video_count,has_verification_video,cover_media_id").Where("id", profileId).WhereNull("deleted_at").Scan(&declared); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return false, errTelegramProfileMissing
-			}
-			return false, gerror.Wrap(err, "检查资料声明媒体失败")
-		}
-		return declared.ImageCount <= 0 && declared.VideoCount <= 0 && declared.HasVerificationVideo <= 0 && declared.CoverMediaId <= 0, nil
 	}
 	failed, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 		Where("profile_id", profileId).WhereNull("deleted_at").Where("processing_status", mediaProcessingFailed).Count()
@@ -348,8 +321,21 @@ func (s *sSysPublish) profileMediaReady(ctx context.Context, profileId int64) (b
 	if err != nil {
 		return false, err
 	}
-	ready, _ := decideProfileMediaPurposeReadiness(expected.Display, expected.Verify, displayCount, verifyCount, pending, failed)
-	return ready, nil
+	if pending > 0 {
+		return false, nil
+	}
+	if failed > 0 {
+		unavailable, availabilityErr := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+			Where("profile_id", profileId).WhereNull("deleted_at").Where("processing_status", mediaProcessingFailed).
+			Where("(COALESCE(file_url,'') = '' AND COALESCE(storage_path,'') = '' AND COALESCE(tg_file_id,'') = '' AND COALESCE(processed_tg_file_id,'') = '')").Count()
+		if availabilityErr != nil {
+			return false, availabilityErr
+		}
+		if unavailable > 0 {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func decideProfileMediaPurposeReadiness(expectedDisplay, expectedVerify, actualDisplay, actualVerify, pending, failed int) (bool, bool) {
