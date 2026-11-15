@@ -21,6 +21,8 @@ var items = []item{
 	{Key: "system.mode", EnvKeys: []string{"GF_SYSTEM_MODE", "YOUBAN_MODE", "APP_MODE", "MODE"}},
 	{Key: "system.debug", EnvKeys: []string{"GF_SYSTEM_DEBUG", "YOUBAN_DEBUG", "APP_DEBUG", "DEBUG"}},
 	{Key: "system.isCluster", EnvKeys: []string{"GF_SYSTEM_ISCLUSTER", "YOUBAN_CLUSTER_ENABLED", "APP_CLUSTER_ENABLED"}},
+	{Key: "system.log.switch", EnvKeys: []string{"YOUBAN_SYSTEM_LOG_SWITCH"}},
+	{Key: "system.serveLog.switch", EnvKeys: []string{"YOUBAN_SYSTEM_SERVE_LOG_SWITCH"}},
 	{Key: "logger.level", EnvKeys: []string{"GF_LOGGER_LEVEL", "YOUBAN_LOG_LEVEL", "LOG_LEVEL"}},
 	{Key: "database.logger.level", EnvKeys: []string{"GF_DATABASE_LOGGER_LEVEL", "YOUBAN_DB_LOG_LEVEL", "DATABASE_LOG_LEVEL"}},
 	{Key: "server.address", EnvKeys: []string{"GF_SERVER_ADDRESS", "YOUBAN_SERVER_ADDRESS"}},
