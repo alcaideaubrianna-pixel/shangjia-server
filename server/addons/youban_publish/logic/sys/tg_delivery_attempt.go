@@ -241,9 +241,14 @@ func (s *sSysPublish) prepareTelegramDeliveryAttempt(ctx context.Context, job te
 			return gerror.Wrap(valueErr, "创建TG发送Attempt失败")
 		}
 		if advanceJobPhase {
-			result, updateErr := tx.Model(publishTgJobTable).Where("id", job.Id).
-				Where("status", telegramJobStatusSending).Where("send_phase", fromPhase).
-				Data(g.Map{"send_phase": sendingPhase}).Update()
+			phaseUpdate := tx.Model(publishTgJobTable).Where("id", job.Id).
+				Where("status", telegramJobStatusSending)
+			if sendingPhase == telegramSendPhaseVerifySending && current.SendPhase == telegramSendPhaseDisplaySending {
+				phaseUpdate = phaseUpdate.Where("send_phase", telegramSendPhaseDisplaySending)
+			} else {
+				phaseUpdate = phaseUpdate.Where("send_phase", fromPhase)
+			}
+			result, updateErr := phaseUpdate.Data(g.Map{"send_phase": sendingPhase}).Update()
 			if updateErr != nil {
 				return gerror.Wrap(updateErr, "更新TG任务发送阶段失败")
 			}
@@ -278,6 +283,11 @@ func telegramSupersededAttemptCanResume(attempt telegramDeliveryAttempt, auditCo
 
 func telegramAttemptPhaseMode(currentPhase, fromPhase, sendingPhase string, advancePhase bool) (advanceJobPhase, resumeSendingPhase bool) {
 	if advancePhase {
+		// 展示接口已成功但本地确认投影超时时，任务可能仍停留在
+		// display_sending。此时允许直接推进验证阶段，避免验证资料被展示投影阻塞。
+		if sendingPhase == telegramSendPhaseVerifySending && currentPhase == telegramSendPhaseDisplaySending {
+			return true, false
+		}
 		return currentPhase == fromPhase, currentPhase == sendingPhase
 	}
 	return false, currentPhase == sendingPhase

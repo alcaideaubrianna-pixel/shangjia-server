@@ -603,22 +603,38 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 				_ = s.cleanupTelegramSentMessages(ctx, bot, job.TargetChatId, messages, "展示媒体发送结果不完整")
 				return err
 			}
-			// A successful Bot API response with message IDs is authoritative. Commit
-			// its evidence and projections together; only a failed local commit enters
-			// reconciliation, and the external send is never retried directly.
-			step = beginTelegramPublishStage(ctx, "display.confirm_api_success", g.Map{"attemptId": attempt.Id, "messageIds": telegramSentMessageIDs(messages)})
-			err = s.confirmTelegramAPISuccess(ctx, job, attempt, messages)
-			step.End(err, g.Map{"apiConfirmed": true, "localCommitted": err == nil, "waitForWebhook": false})
-			if err != nil {
-				return gerror.Wrap(errTelegramRemoteConfirmed, err.Error())
+			// Telegram API 返回消息 ID 即视为展示发送成功。展示投影和 file_id
+			// 写入放到独立后台上下文，不能阻塞验证资料发送。
+			if len(verifyMedia) > 0 {
+				projectionJob := job
+				projectionAttempt := attempt
+				projectionMessages := append([]*telegramSentMessage(nil), messages...)
+				go func() {
+					projectionCtx := telegramPublishJobTraceContext(context.Background(), projectionJob)
+					if projectionErr := s.confirmTelegramAPISuccess(projectionCtx, projectionJob, projectionAttempt, projectionMessages); projectionErr != nil {
+						g.Log().Warningf(projectionCtx, "TG展示异步投影失败，进入恢复链路 jobId:%d profileId:%d err:%+v", projectionJob.Id, projectionJob.ProfileId, projectionErr)
+						return
+					}
+					if cacheErr := s.updateTelegramMediaFileIds(projectionCtx, projectionMessages); cacheErr != nil {
+						g.Log().Warningf(projectionCtx, "更新TG展示媒体file_id失败 job:%d err:%+v", projectionJob.Id, cacheErr)
+					}
+				}()
+				job.SendPhase = telegramSendPhaseDisplayConfirmed
+			} else {
+				step = beginTelegramPublishStage(ctx, "display.confirm_api_success", g.Map{"attemptId": attempt.Id, "messageIds": telegramSentMessageIDs(messages)})
+				err = s.confirmTelegramAPISuccess(ctx, job, attempt, messages)
+				step.End(err, g.Map{"apiConfirmed": true, "localCommitted": err == nil, "waitForWebhook": false})
+				if err != nil {
+					return gerror.Wrap(errTelegramRemoteConfirmed, err.Error())
+				}
+				step = beginTelegramPublishStage(ctx, "display.cache_file_ids")
+				err = s.updateTelegramMediaFileIds(ctx, messages)
+				step.End(err)
+				if err != nil {
+					g.Log().Warningf(ctx, "更新TG展示媒体file_id失败 job:%d err:%+v", job.Id, err)
+				}
+				job.SendPhase = telegramSendPhaseDisplayConfirmed
 			}
-			step = beginTelegramPublishStage(ctx, "display.cache_file_ids")
-			err = s.updateTelegramMediaFileIds(ctx, messages)
-			step.End(err)
-			if err != nil {
-				g.Log().Warningf(ctx, "更新TG展示媒体file_id失败 job:%d err:%+v", job.Id, err)
-			}
-			job.SendPhase = telegramSendPhaseDisplayConfirmed
 		}
 	}
 	if stillSending, err := s.telegramJobStillSending(ctx, job.Id); err != nil {
