@@ -175,6 +175,14 @@ func (s *sSysPublish) markTelegramJobUnknown(ctx context.Context, job telegramJo
 	if !transitioned {
 		return nil
 	}
+	// Keep the denormalized publish record in the same state as the job. When
+	// the remote API has already accepted the send but the local confirmation
+	// transaction failed, leaving the projection at "sending" makes the UI
+	// report a permanent processing state. Reconciliation will later promote
+	// this row to success without sending Telegram media again.
+	if projectionErr := s.upsertPublishJobRecord(ctx, job, "unknown", message); projectionErr != nil {
+		g.Log().Warningf(ctx, "更新TG待对账发布记录失败 jobId:%d err:%+v", job.Id, projectionErr)
+	}
 	s.appendTelegramJobLog(ctx, job, "publish", "unknown", message)
 	return nil
 }
