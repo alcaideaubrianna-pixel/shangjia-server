@@ -270,12 +270,46 @@ func telegramMediaCacheAssetHash(mediaType string, assetHash string, posterUrl s
 }
 
 func (s *sSysPublish) saveTelegramSentMessages(ctx context.Context, job telegramJobRecord, messages []*telegramSentMessage) error {
+	// The message row is the minimal durable send fact. Commit it independently
+	// from denormalized job/profile projections so a projection failure can never
+	// roll back the Telegram evidence and cause an external resend.
 	if err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		return saveTelegramSentMessagesTx(ctx, tx, job, messages)
 	}); err != nil {
 		return err
 	}
+	if err := s.projectTelegramJobMessagePointer(ctx, job, messages); err != nil {
+		g.Log().Warningf(ctx, "TG发送事实已落库，但Job消息指针投影待恢复 jobId:%d err:%+v", job.Id, err)
+	}
 	s.cacheTelegramSentMessageMetadata(ctx, job, messages)
+	return nil
+}
+
+// projectTelegramJobMessagePointer is deliberately best-effort. The message
+// rows written by saveTelegramSentMessages are the durable send facts; this
+// denormalized pointer only accelerates link generation and may be repaired
+// later without re-sending Telegram messages.
+func (s *sSysPublish) projectTelegramJobMessagePointer(ctx context.Context, job telegramJobRecord, messages []*telegramSentMessage) error {
+	if job.Id <= 0 {
+		return nil
+	}
+	var displayMessageID int64
+	for _, item := range messages {
+		if item != nil && item.Purpose == "display" && item.MessageId > 0 &&
+			(displayMessageID == 0 || item.MessageId < displayMessageID) {
+			displayMessageID = item.MessageId
+		}
+	}
+	if displayMessageID <= 0 {
+		return nil
+	}
+	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("id", job.Id).
+		Where("tg_message_id", 0).
+		Data(g.Map{"tg_message_id": displayMessageID, "updated_at": gtime.Now()}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "更新TG任务展示消息ID失败")
+	}
 	return nil
 }
 
@@ -340,29 +374,15 @@ func saveTelegramSentMessagesTx(ctx context.Context, tx gdb.TX, job telegramJobR
 	if len(rows) == 0 {
 		return nil
 	}
-	stage := beginTelegramPublishStage(ctx, "api_success.message_upsert", g.Map{"jobId": job.Id, "messageCount": len(rows)})
+	stage := beginTelegramPublishStage(ctx, "api_success.message_upsert", g.Map{"jobId": job.Id, "messageCount": len(rows), "idempotency": "job_id,tg_message_id"})
 	_, err := tx.Model(publishTgMessageTable).Data(rows).
+		// (job_id,tg_message_id) is the durable idempotency key. Replaying a
+		// webhook or a recovery callback updates metadata without inserting a
+		// second local fact and never calls Telegram again.
 		OnConflict("job_id,tg_message_id").OnDuplicate("status,tg_file_id,tg_file_unique_id,sent_at,deleted_at").Save()
 	stage.End(err)
 	if err != nil {
 		return gerror.Wrap(err, "保存TG消息记录失败")
-	}
-	// Keep the job-level pointer aligned with the first display message.  The
-	// detail table remains the source of truth for media groups, while this
-	// denormalized value lets completion notices build links without a join.
-	var displayMessageID int64
-	for _, item := range messages {
-		if item != nil && item.Purpose == "display" && item.MessageId > 0 &&
-			(displayMessageID == 0 || item.MessageId < displayMessageID) {
-			displayMessageID = item.MessageId
-		}
-	}
-	if displayMessageID > 0 {
-		if _, err = tx.Model(publishTgJobTable).Where("id", job.Id).
-			Where("tg_message_id", 0).
-			Data(g.Map{"tg_message_id": displayMessageID, "updated_at": gtime.Now()}).Update(); err != nil {
-			return gerror.Wrap(err, "更新TG任务展示消息ID失败")
-		}
 	}
 	return nil
 }

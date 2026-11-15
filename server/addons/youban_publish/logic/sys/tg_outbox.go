@@ -123,6 +123,17 @@ func (s *sSysPublish) rearmTelegramJobOutbox(ctx context.Context, jobId int64, d
 	if jobId <= 0 {
 		return nil
 	}
+	// A durable sent job is terminal. Never rearm its Outbox row: a recovery
+	// pass must repair local projections, not create another Telegram attempt.
+	var job struct {
+		Status string `json:"status"`
+	}
+	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Fields("status").Where("id", jobId).Scan(&job); err != nil {
+		return gerror.Wrap(err, "读取TG任务重入状态失败")
+	}
+	if job.Status == telegramJobStatusSent {
+		return nil
+	}
 	clearTelegramReadyStreamDedupe(ctx, jobId)
 	now := gtime.Now()
 	result, err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
@@ -138,9 +149,6 @@ func (s *sSysPublish) rearmTelegramJobOutbox(ctx context.Context, jobId int64, d
 	}
 	affected, _ := result.RowsAffected()
 	if affected > 0 {
-		// A rearmed Outbox must be handed back to the active transport immediately.
-		// Unified channel mode intentionally skips the legacy recovery scanner, so
-		// leaving this row pending would strand the job in PostgreSQL indefinitely.
 		if err := s.dispatchTelegramJobOutboxByJob(ctx, jobId); err != nil {
 			return gerror.Wrap(err, "重新激活TG任务后入队失败")
 		}
@@ -413,13 +421,18 @@ func (s *sSysPublish) completeTelegramOutbox(ctx context.Context, outboxId int64
 		Fields("o.id,o.job_id,j.tenant_id,j.channel_id,j.priority").Where("o.id", outboxId).Scan(&row); err != nil {
 		return gerror.Wrap(err, "读取TG任务Outbox失败")
 	}
-	_, err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
-		Where("id", outboxId).WhereNot("status", telegramOutboxDelivered).
+	result, err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
+		Where("id", outboxId).
+		WhereIn("status", []string{telegramOutboxPending, telegramOutboxProcessing}).
 		Data(g.Map{"status": telegramOutboxDelivered, "lease_owner": "", "lease_expires_at": nil,
 			"delivered_at": gtime.Now(), "last_error": "", "updated_at": gtime.Now(),
 		}).Update()
 	if err != nil {
 		return gerror.Wrap(err, "收口TG任务Outbox失败")
+	}
+	if affected, affectedErr := result.RowsAffected(); affectedErr == nil && affected == 0 {
+		// Idempotent completion: a concurrent worker already closed this row.
+		return nil
 	}
 	if removeErr := (tgChannelPendingIndex{}).remove(ctx, row.TenantId, row.ChannelId, row.JobId); removeErr != nil {
 		g.Log().Debug(ctx, "频道待投递索引删除失败，继续使用数据库事实", g.Map{"jobId": row.JobId, "channelId": row.ChannelId, "error": removeErr.Error()})
