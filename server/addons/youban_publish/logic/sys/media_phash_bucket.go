@@ -359,7 +359,10 @@ func mediaPHashBucketCandidateRowsWithScopesUncached(ctx context.Context, normal
 		return []mediaPHashBucketCandidateRow{}, nil
 	}
 	if !mediaPHashLshReady(ctx) {
-		return nil, gerror.New("pHash LSH索引尚未完成，暂不可执行相似媒体搜索")
+		// The index is still being backfilled. Treat this as no candidates so
+		// BOT search remains a normal empty-result response; database failures
+		// from an actual LSH query are still returned below.
+		return []mediaPHashBucketCandidateRow{}, nil
 	}
 	if threshold >= mediaPHashLshBlockCount*(mediaPHashLshMaxQueryRadius+1) {
 		return nil, gerror.New("pHash搜索阈值超出LSH索引范围")
