@@ -161,8 +161,12 @@ func (s *sSysPublish) startCollectProcessWorker(ctx context.Context) {
 }
 
 const (
-	collectProcessDispatcherInterval = 5 * time.Second
-	collectProcessDispatcherBatch    = 4
+	// Keep dispatch source-scoped while allowing the wake queue to catch up
+	// with realtime producers. The database claim itself remains bounded per
+	// tenant/account/source, so this does not reintroduce a global scan.
+	collectProcessDispatcherInterval = time.Second
+	collectProcessDispatcherBatch    = 32
+	collectProcessDispatcherWorkers  = 8
 )
 
 func (s *sSysPublish) runCollectProcessOutboxDispatcher(ctx context.Context) {
@@ -210,10 +214,16 @@ func (s *sSysPublish) dispatchCollectProcessWakeups(ctx context.Context, limit i
 	if err != nil {
 		return
 	}
+	if limit <= 0 {
+		limit = collectProcessDispatcherBatch
+	}
+	workers := min(collectProcessDispatcherWorkers, limit)
+	sem := make(chan struct{}, workers)
+	var wg sync.WaitGroup
 	for i := 0; i < limit; i++ {
 		value, popErr := client.Do(ctx, "RPOP", collectProcessWakeQueueKey)
 		if popErr != nil || value.IsNil() {
-			return
+			break
 		}
 		parts := strings.Split(value.String(), ":")
 		if len(parts) != 3 {
@@ -225,10 +235,17 @@ func (s *sSysPublish) dispatchCollectProcessWakeups(ctx context.Context, limit i
 		if errTenant != nil || errAccount != nil || errSource != nil || tenantID <= 0 || accountID < 0 || sourceID <= 0 {
 			continue
 		}
-		if dispatchErr := s.dispatchDueCollectProcessOutbox(ctx, collectProcessDispatchBatchSize(ctx), publishAccountScope{TenantID: tenantID, AccountID: accountID, SourceID: sourceID}); dispatchErr != nil {
-			g.Log().Warning(ctx, "来源采集Outbox调度失败", g.Map{"tenantId": tenantID, "accountId": accountID, "sourceId": sourceID, "error": dispatchErr.Error()})
-		}
+		sem <- struct{}{}
+		wg.Add(1)
+		go func(tenantID, accountID, sourceID int64) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			if dispatchErr := s.dispatchDueCollectProcessOutbox(ctx, collectProcessDispatchBatchSize(ctx), publishAccountScope{TenantID: tenantID, AccountID: accountID, SourceID: sourceID}); dispatchErr != nil {
+				g.Log().Warning(ctx, "来源采集Outbox调度失败", g.Map{"tenantId": tenantID, "accountId": accountID, "sourceId": sourceID, "error": dispatchErr.Error()})
+			}
+		}(tenantID, accountID, sourceID)
 	}
+	wg.Wait()
 }
 
 func bootstrapCollectProcessSources(ctx context.Context) {

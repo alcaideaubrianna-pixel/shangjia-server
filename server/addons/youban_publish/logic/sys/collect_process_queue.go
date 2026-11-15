@@ -54,7 +54,7 @@ func markCollectProcessSourceActive(ctx context.Context, payload collectProcessQ
 	// source into an unbounded Redis list. The database remains authoritative;
 	// this key only wakes the bounded, source-scoped dispatcher.
 	wakeKey := collectProcessSourceWakeKey(member)
-	woken, wakeErr := client.Do(ctx, "SET", wakeKey, "1", "NX", "EX", 2)
+	woken, wakeErr := client.Do(ctx, "SET", wakeKey, "1", "NX", "EX", 30)
 	if wakeErr == nil && wakeAccepted(woken.String()) {
 		_, _ = client.Do(ctx, "LPUSH", collectProcessWakeQueueKey, member)
 	}
