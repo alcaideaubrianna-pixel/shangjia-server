@@ -37,20 +37,7 @@ var mediaPHashLshScopeSizeGroup singleflight.Group
 
 func mediaPHashLshReady(ctx context.Context) bool {
 	value, err := cache.Instance().Get(ctx, mediaPHashLshReadyKey)
-	if err == nil && !value.IsNil() && value.Int() == 1 {
-		return true
-	}
-	// Production deployments may already have the LSH table populated while
-	// the Redis readiness marker was lost during a restart. In that case the
-	// old fallback query scans tens of millions of bucket rows and times out.
-	// Probe the indexed table once and restore the marker when it is present.
-	var exists int
-	if err := g.DB().Model("hg_youban_publish_media_phash_lsh").Ctx(ctx).
-		Fields("1").Limit(1).Scan(&exists); err != nil || exists != 1 {
-		return false
-	}
-	_ = cache.Instance().Set(ctx, mediaPHashLshReadyKey, 1, mediaPHashLshReadyTTL)
-	return true
+	return err == nil && !value.IsNil() && value.Int() == 1
 }
 
 func markMediaPHashLshReady(ctx context.Context) error {
