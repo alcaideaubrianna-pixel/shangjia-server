@@ -101,7 +101,7 @@ const (
 )
 
 func collectProcessQueueName(payload collectProcessQueuePayload) string {
-	if payload.TenantId > 0 && payload.AccountId == 0 && payload.SourceId > 0 {
+	if payload.TenantId > 0 && payload.SourceId > 0 {
 		return collectProcessSourceQueueName(payload)
 	}
 	if payload.TenantId > 0 && payload.AccountId > 0 && (payload.EventId == 0 || payload.OutboxOwner != "") {

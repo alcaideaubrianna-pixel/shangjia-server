@@ -49,8 +49,8 @@ func TestCollectProcessQueuesAreShardedAndObservable(t *testing.T) {
 		t.Fatal("equivalent Telegram chat IDs must use the same process queue")
 	}
 	otherChat := collectProcessQueuePayload{TenantId: 2, AccountId: 3, SourceId: 9, SourceChatId: "3981090529"}
-	if collectProcessQueueName(first) != collectProcessQueueName(otherChat) {
-		t.Fatal("one tenant account must stay in one fair process queue")
+	if collectProcessQueueName(first) == collectProcessQueueName(otherChat) {
+		t.Fatal("different sources must use different physical queues")
 	}
 	queues := collectProcessQueueNames()
 	if len(queues) != collectProcessQueueShards+1 || queues[0] != tgQueueNameCollectProcess {
@@ -184,9 +184,9 @@ func TestCollectProcessTaskBodyPreservesEvent(t *testing.T) {
 
 func TestCollectProcessQueueSeparatesRealtimeFromBacklog(t *testing.T) {
 	realtime := collectProcessQueueName(collectProcessQueuePayload{TenantId: 2, AccountId: 3, SourceId: 4, EventId: 100})
-	backlog := collectProcessQueueName(collectProcessQueuePayload{TenantId: 2, AccountId: 3, SourceId: 4})
-	if realtime != tgQueueNameCollectProcessRealtime {
-		t.Fatalf("realtime queue = %s, want %s", realtime, tgQueueNameCollectProcessRealtime)
+	backlog := collectProcessQueueName(collectProcessQueuePayload{TenantId: 2, AccountId: 3, SourceId: 4, History: true, Recovery: true})
+	if realtime != collectProcessSourceQueueName(collectProcessQueuePayload{TenantId: 2, AccountId: 3, SourceId: 4}) {
+		t.Fatalf("realtime queue = %s, want source queue", realtime)
 	}
 	if backlog == realtime {
 		t.Fatalf("backlog queue must be isolated from realtime: %s", backlog)
