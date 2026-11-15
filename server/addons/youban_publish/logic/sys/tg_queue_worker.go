@@ -992,6 +992,7 @@ func (s *sSysPublish) handleCollectProcessTask(ctx context.Context, task *asynq.
 			}).Update()
 		}
 		if err == nil && removeSchedule {
+			removeCollectProcessSourcePending(ctx, payload)
 			err = s.reconcileCollectProcessSchedule(ctx, payload)
 			if err == nil {
 				completeCollectProcessOutbox(ctx, payload)
@@ -1006,6 +1007,7 @@ func (s *sSysPublish) handleCollectProcessTask(ctx context.Context, task *asynq.
 	if delay < collectProcessMinimumDelay {
 		delay = collectProcessMinimumDelay
 	}
+	removeCollectProcessSourcePending(ctx, payload)
 	enqueued, err := s.enqueueCollectProcessDeferred(ctx, payload, delay)
 	if err != nil {
 		return err

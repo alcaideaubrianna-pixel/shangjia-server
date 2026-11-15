@@ -192,10 +192,26 @@ func (s *sSysPublish) enqueueCollectProcessTask(ctx context.Context, payload col
 	return s.enqueueCollectProcessTaskWithOutbox(ctx, payload, delay, unique, true)
 }
 
-func (s *sSysPublish) enqueueCollectProcessTaskWithOutbox(ctx context.Context, payload collectProcessQueuePayload, delay time.Duration, unique, persist bool) (bool, error) {
+func (s *sSysPublish) enqueueCollectProcessTaskWithOutbox(ctx context.Context, payload collectProcessQueuePayload, delay time.Duration, unique, persist bool) (enqueued bool, err error) {
 	// BOT 采集事件可能没有协议号账户归属，account_id=0 仍是合法租户+来源分片。
 	if payload.TenantId <= 0 || payload.AccountId < 0 || payload.SourceId <= 0 {
 		return false, nil
+	}
+	sourcePendingReserved := false
+	if payload.EventId == 0 && persist {
+		reserved, reserveErr := reserveCollectProcessSourcePending(ctx, payload)
+		if reserveErr != nil {
+			return false, reserveErr
+		}
+		if !reserved {
+			return false, nil
+		}
+		sourcePendingReserved = true
+		defer func() {
+			if sourcePendingReserved && err != nil {
+				removeCollectProcessSourcePending(ctx, payload)
+			}
+		}()
 	}
 	// Event-specific enqueue paths are the low-cost producer for the candidate
 	// index. The index is only an accelerator; PG remains authoritative below.
@@ -269,6 +285,31 @@ func collectProcessScheduleKey(payload collectProcessQueuePayload) string {
 
 func collectProcessThrottleKey(payload collectProcessQueuePayload) string {
 	return fmt.Sprintf("%s%d:%d:%s", publishconsts.CollectProcessThrottleKeyPrefix, payload.TenantId, payload.AccountId, collectProcessPartition(payload))
+}
+
+func collectProcessSourcePendingKey(payload collectProcessQueuePayload) string {
+	return fmt.Sprintf("youban_publish:collect:source:pending:%d:%d:%s", payload.TenantId, payload.AccountId, collectProcessPartition(payload))
+}
+
+func reserveCollectProcessSourcePending(ctx context.Context, payload collectProcessQueuePayload) (bool, error) {
+	if payload.EventId > 0 || !cache.Initialized() || g.Cfg().MustGet(ctx, "cache.adapter").String() != "redis" {
+		return true, nil
+	}
+	ok, err := cache.Instance().SetIfNotExist(ctx, collectProcessSourcePendingKey(payload), 1, collectProcessScheduleTTL)
+	if err != nil {
+		g.Log().Warningf(ctx, "采集源合并缓存不可用，放行任务 sourceId:%d err:%+v", payload.SourceId, err)
+		return true, nil
+	}
+	return ok, nil
+}
+
+func removeCollectProcessSourcePending(ctx context.Context, payload collectProcessQueuePayload) {
+	if payload.EventId > 0 || !cache.Initialized() || g.Cfg().MustGet(ctx, "cache.adapter").String() != "redis" {
+		return
+	}
+	if _, err := cache.Instance().Remove(ctx, collectProcessSourcePendingKey(payload)); err != nil {
+		g.Log().Warningf(ctx, "清理采集源合并缓存失败 sourceId:%d err:%+v", payload.SourceId, err)
+	}
 }
 
 func collectProcessPartition(payload collectProcessQueuePayload) string {
