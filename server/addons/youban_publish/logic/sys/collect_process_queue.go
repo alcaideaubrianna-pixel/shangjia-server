@@ -195,7 +195,9 @@ func (s *sSysPublish) enqueueCollectProcessTaskWithOutbox(ctx context.Context, p
 			}
 			g.Log().Warningf(ctx, "采集处理Outbox尚未迁移，临时沿用Redis任务 eventId:%d err:%+v", payload.EventId, err)
 		} else if payload.EventId > 0 {
-			return true, nil // Only the durable dispatcher creates event tasks.
+			// Persist first, then hand the event directly to the realtime Redis queue.
+			// The durable outbox remains the recovery source if Redis enqueue fails.
+			return s.enqueueCollectProcessTaskWithOutbox(ctx, payload, delay, unique, false)
 		}
 	}
 	client, err := s.telegramQueueClient(ctx)
