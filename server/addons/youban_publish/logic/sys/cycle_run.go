@@ -91,29 +91,51 @@ func (s *sSysPublish) RunChannelCycleScheduler(ctx context.Context) error {
 	})
 }
 
-// supersedeOfflineCycleJobs 收口历史上已经生成但资料后来下架的循环任务。
-// 只处理未发送任务，保留已发送历史审计，避免下架资料继续占用频道队首。
+// supersedeOfflineCycleJobs 只收口明确终态的循环任务：资料不可用、同资料同频道有更新任务、已确认发送、明确取消。历史有效资料不会因等待时间过长而被废弃。
 func (s *sSysPublish) supersedeOfflineCycleJobs(ctx context.Context, limit int) error {
 	if limit <= 0 || limit > 500 {
 		limit = 200
 	}
-	headTimeoutMinutes := cycleHeadTimeoutMinutes()
+	// Queue age is observability only. Valid cycle jobs must not be superseded
+	// merely because they waited longer than the historical 15-minute limit.
 	_, err := g.DB().Exec(ctx, `WITH candidates AS (
-		SELECT j.id,p.status AS profile_status,p.visibility AS profile_visibility,p.deleted_at AS profile_deleted_at FROM `+publishTgJobTable+` j
-		JOIN hg_content_profile p ON p.id=j.profile_id
+		SELECT j.id
+		FROM `+publishTgJobTable+` j
+		LEFT JOIN hg_content_profile p ON p.id=j.profile_id
 		WHERE (j.operation_no LIKE 'cycle_%' OR j.operation_no LIKE 'profile_cycle:%' OR (j.operation_no LIKE 'scheduled:%' AND j.priority>=50))
-		  AND j.status IN ('pending','failed_retry','unknown','sending','confirming')
-		  AND (p.status<>1 OR p.visibility<>? OR p.deleted_at IS NOT NULL
-		       OR j.created_at < NOW() - (? * INTERVAL '1 minute'))
+		  AND j.status IN ('pending','failed_retry','unknown','sending','confirming','sent')
+		  AND (
+			j.status='sent'
+			OR p.id IS NULL OR p.status<>1 OR p.visibility<>? OR p.deleted_at IS NOT NULL
+			OR j.send_phase IN ('cancelled','canceled')
+			OR EXISTS (
+				SELECT 1 FROM `+publishTgJobTable+` newer
+				WHERE newer.id>j.id AND newer.profile_id=j.profile_id AND newer.channel_id=j.channel_id
+				  AND newer.status IN ('pending','sending','confirming','sent','failed_retry','unknown')
+			)
+		)
 		ORDER BY j.id LIMIT `+strconv.Itoa(limit)+`
 	)
-	UPDATE `+publishTgJobTable+` j SET status='superseded',dispatch_status=?,send_phase=CASE WHEN j.created_at < NOW() - (? * INTERVAL '1 minute') AND c.profile_status=1 AND c.profile_visibility=? AND c.profile_deleted_at IS NULL THEN 'skipped_stale_cycle' ELSE 'skipped_offline_profile' END,next_retry_at=NULL,last_dispatch_error=CASE WHEN j.created_at < NOW() - (? * INTERVAL '1 minute') AND c.profile_status=1 AND c.profile_visibility=? AND c.profile_deleted_at IS NULL THEN '循环任务等待超过15分钟，已跳过以释放频道队首' ELSE '资料已下架或不可公开，跳过循环翻新' END,updated_at=NOW()
-	FROM candidates c
-	WHERE j.id=c.id`, consts.ContentVisibilityPublic, headTimeoutMinutes, tgDispatchStatusDone, headTimeoutMinutes, consts.ContentVisibilityPublic, headTimeoutMinutes, consts.ContentVisibilityPublic)
+	UPDATE `+publishTgJobTable+` j
+	SET status='superseded', dispatch_status=?, next_retry_at=NULL,
+		send_phase=CASE
+			WHEN j.status='sent' THEN 'skipped_sent'
+			WHEN j.send_phase IN ('cancelled','canceled') THEN 'skipped_cancelled'
+			WHEN EXISTS (SELECT 1 FROM `+publishTgJobTable+` newer WHERE newer.id>j.id AND newer.profile_id=j.profile_id AND newer.channel_id=j.channel_id AND newer.status IN ('pending','sending','confirming','sent','failed_retry','unknown')) THEN 'skipped_newer_operation'
+			ELSE 'skipped_offline_profile'
+		END,
+		last_dispatch_error=CASE
+			WHEN j.status='sent' THEN '任务已确认发送成功'
+			WHEN j.send_phase IN ('cancelled','canceled') THEN '循环任务已明确取消'
+			WHEN EXISTS (SELECT 1 FROM `+publishTgJobTable+` newer WHERE newer.id>j.id AND newer.profile_id=j.profile_id AND newer.channel_id=j.channel_id AND newer.status IN ('pending','sending','confirming','sent','failed_retry','unknown')) THEN '同资料同频道已有更新任务'
+			ELSE '资料已下架或不可公开，跳过循环翻新'
+		END,
+		updated_at=NOW()
+	FROM candidates c WHERE j.id=c.id`, consts.ContentVisibilityPublic, tgDispatchStatusDone)
 	if err != nil {
-		return gerror.Wrap(err, "收口下架循环任务失败")
+		return gerror.Wrap(err, "收口不可发布循环任务失败")
 	}
-	if _, err = g.DB().Exec(ctx, `UPDATE `+publishTgOutboxTable+` o SET status='delivered',lease_owner='',lease_expires_at=NULL,delivered_at=COALESCE(delivered_at,NOW()),last_error='循环任务已自动收口',updated_at=NOW() FROM `+publishTgJobTable+` j WHERE j.id=o.job_id AND j.send_phase IN ('skipped_stale_cycle','skipped_offline_profile') AND o.status IN ('pending','processing')`); err != nil {
+	if _, err = g.DB().Exec(ctx, `UPDATE `+publishTgOutboxTable+` o SET status='delivered',lease_owner='',lease_expires_at=NULL,delivered_at=COALESCE(delivered_at,NOW()),last_error='循环任务已明确收口',updated_at=NOW() FROM `+publishTgJobTable+` j WHERE j.id=o.job_id AND j.send_phase IN ('skipped_sent','skipped_cancelled','skipped_newer_operation','skipped_offline_profile') AND o.status IN ('pending','processing')`); err != nil {
 		return gerror.Wrap(err, "收口循环任务Outbox失败")
 	}
 	return nil

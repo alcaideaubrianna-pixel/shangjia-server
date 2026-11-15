@@ -270,6 +270,7 @@ func telegramMediaCacheAssetHash(mediaType string, assetHash string, posterUrl s
 }
 
 func (s *sSysPublish) saveTelegramSentMessages(ctx context.Context, job telegramJobRecord, messages []*telegramSentMessage) error {
+	projectTelegramReturnedMessages(ctx, job, messages, "telegram_response")
 	// The message row is the minimal durable send fact. Commit it independently
 	// from denormalized job/profile projections so a projection failure can never
 	// roll back the Telegram evidence and cause an external resend.

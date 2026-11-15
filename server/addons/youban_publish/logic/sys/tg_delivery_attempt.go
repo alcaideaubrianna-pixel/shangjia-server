@@ -299,6 +299,7 @@ func telegramAttemptPhaseMode(currentPhase, fromPhase, sendingPhase string, adva
 // Bot API response never enters reconciliation; retries only repair optional
 // projections such as cached file IDs.
 func (s *sSysPublish) confirmTelegramAPISuccess(ctx context.Context, job telegramJobRecord, attempt telegramDeliveryAttempt, messages []*telegramSentMessage) (resultErr error) {
+	projectTelegramReturnedMessages(ctx, job, messages, "telegram_api")
 	// A received response remains evidence even when the request's deadline
 	// expired concurrently. Persist it with a separate, bounded commit budget.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)

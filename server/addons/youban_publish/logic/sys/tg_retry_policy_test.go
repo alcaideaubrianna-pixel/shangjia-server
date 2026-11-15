@@ -74,6 +74,32 @@ func TestTelegramNetworkErrorKeepsBoundedRetriesWithAccountLimitOne(t *testing.T
 	}
 }
 
+func TestTelegramNetworkErrorUsesProtocolAfterTwoBotAttempts(t *testing.T) {
+	err := assertError("error response from telegram for method sendMediaGroup, 502 Bad Gateway")
+	if shouldFallbackTelegramMediaToAccountAfterBotRetries(err, 0) {
+		t.Fatal("first Bot attempt must remain on the Bot retry path")
+	}
+	if !shouldFallbackTelegramMediaToAccountAfterBotRetries(err, 1) {
+		t.Fatal("second Bot attempt must hand off to protocol fallback")
+	}
+}
+
+func TestTelegramAmbiguousNetworkResultDoesNotBlindlyFallback(t *testing.T) {
+	err := assertError("unexpected eof while reading Telegram response")
+	if shouldFallbackTelegramMediaToAccountAfterBotRetries(err, 1) {
+		t.Fatal("ambiguous result must wait for reconciliation instead of duplicating delivery")
+	}
+}
+
+func TestTelegramSendErrorCode(t *testing.T) {
+	if got := telegramSendErrorCode(assertError("502 Bad Gateway")); got != "502" {
+		t.Fatalf("error code=%q, want 502", got)
+	}
+	if got := telegramSendErrorCode(assertError("connection reset")); got != "" {
+		t.Fatalf("network error code=%q, want empty", got)
+	}
+}
+
 func TestTelegramNetworkErrorStillRespectsDisabledRetry(t *testing.T) {
 	conf := &model.PublishConfig{RetryEnabled: 0, MaxRetryCount: 10, RetryIntervalMinutes: 5}
 	policy := telegramJobErrorRetryPolicyWithConfig(errors.New("502 Bad Gateway"), 1, conf)

@@ -2,7 +2,7 @@ package sys
 
 import "testing"
 
-func TestTelegramMediaSetForGatewayRetryKeepsGroupAndForcesUpload(t *testing.T) {
+func TestTelegramMediaSetForGatewayRetryKeepsReusableFileIDs(t *testing.T) {
 	media := []*telegramMediaItem{
 		{Id: 1, FileUrl: "https://cdn.example/1.jpg", TgFileId: "file-1"},
 		{Id: 2, FileUrl: "https://cdn.example/2.jpg", TgFileId: "file-2"},
@@ -15,8 +15,8 @@ func TestTelegramMediaSetForGatewayRetryKeepsGroupAndForcesUpload(t *testing.T) 
 		t.Fatalf("media group size changed: got %d want %d", len(got), len(media))
 	}
 	for index, item := range got {
-		if item.Id != media[index].Id || !item.ForceUpload || item.TgFileId != "" {
-			t.Fatalf("media %d did not retain order with forced upload: %+v", index, item)
+		if item.Id != media[index].Id || item.ForceUpload != media[index].ForceUpload || item.TgFileId != media[index].TgFileId {
+			t.Fatalf("media %d did not retain reusable file id: %+v", index, item)
 		}
 	}
 	if media[0].ForceUpload || media[0].TgFileId != "file-1" {

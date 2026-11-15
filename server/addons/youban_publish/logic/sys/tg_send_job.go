@@ -571,10 +571,10 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 			cancelDisplaySend()
 			displaySendDuration := time.Since(displaySendStartedAt)
 			observeTelegramMediaSend(ctx, &job, "display", err, displaySendDuration)
-			g.Log().Infof(ctx, "TG展示资料Bot发送结束 jobId:%d profileId:%d channelId:%d botId:%d chat:%s duration:%s messages:%d messageIds:%v err:%v", job.Id, job.ProfileId, job.ChannelId, job.BotId, job.TargetChatId, displaySendDuration.Round(time.Millisecond), len(messages), telegramSentMessageIDs(messages), err)
-			if err != nil && len(messages) == 0 && shouldFallbackTelegramMediaToAccount(err) {
+			g.Log().Info(ctx, "TG展示资料Bot发送结束", g.Map{"event": "telegram_bot_send", "job_id": job.Id, "attempt_id": attempt.Id, "bot_id": job.BotId, "account_id": job.AccountId, "channel_id": job.ChannelId, "target_chat_id": job.TargetChatId, "media_count": len(displayMedia), "send_mode": "bot", "retry_count": job.RetryCount, "duration": displaySendDuration.Milliseconds(), "error_type": telegramSendErrorType(err), "error_code": telegramSendErrorCode(err), "message_ids": telegramSentMessageIDs(messages), "error": telegramPublishLogError(err)})
+			if err != nil && len(messages) == 0 && shouldFallbackTelegramMediaToAccountAfterBotRetries(err, job.RetryCount) {
 				g.Log().Warningf(ctx, "Bot展示媒体发送失败，命中媒体降级条件 jobId:%d botId:%d chat:%s media:%s err:%+v", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(displayMedia), err)
-				messages, err = s.sendTelegramJobMediaByAccount(ctx, job, "display", displayCaption, displayMedia, err)
+				messages, err = s.sendTelegramJobMediaByAccount(ctx, job, attempt.Id, "display", displayCaption, displayMedia, err)
 			}
 			stopAttemptHeartbeat()
 			if err != nil {
@@ -678,10 +678,10 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	cancelVerifySend()
 	verifySendDuration := time.Since(verifySendStartedAt)
 	observeTelegramMediaSend(ctx, &job, "verify", err, verifySendDuration)
-	g.Log().Infof(ctx, "TG验证资料Bot发送结束 jobId:%d profileId:%d channelId:%d botId:%d chat:%s duration:%s messages:%d messageIds:%v err:%v", job.Id, job.ProfileId, job.ChannelId, job.BotId, job.TargetChatId, verifySendDuration.Round(time.Millisecond), len(verifyMessages), telegramSentMessageIDs(verifyMessages), err)
-	if err != nil && len(verifyMessages) == 0 && shouldFallbackTelegramMediaToAccount(err) {
+	g.Log().Info(ctx, "TG验证资料Bot发送结束", g.Map{"event": "telegram_bot_send", "job_id": job.Id, "attempt_id": verifyAttempt.Id, "bot_id": job.BotId, "account_id": job.AccountId, "channel_id": job.ChannelId, "target_chat_id": job.TargetChatId, "media_count": len(verifyMedia), "send_mode": "bot", "retry_count": job.RetryCount, "duration": verifySendDuration.Milliseconds(), "error_type": telegramSendErrorType(err), "error_code": telegramSendErrorCode(err), "message_ids": telegramSentMessageIDs(verifyMessages), "error": telegramPublishLogError(err)})
+	if err != nil && len(verifyMessages) == 0 && shouldFallbackTelegramMediaToAccountAfterBotRetries(err, job.RetryCount) {
 		g.Log().Warningf(ctx, "Bot验证媒体发送失败，命中媒体降级条件 jobId:%d botId:%d chat:%s media:%s err:%+v", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(verifyMedia), err)
-		verifyMessages, err = s.sendTelegramJobMediaByAccount(ctx, job, "verify", verifyCaption, verifyMedia, err)
+		verifyMessages, err = s.sendTelegramJobMediaByAccount(ctx, job, verifyAttempt.Id, "verify", verifyCaption, verifyMedia, err)
 	}
 	stopAttemptHeartbeat()
 	if err != nil {
@@ -812,17 +812,56 @@ func isTelegramBotMediaProcessingError(err error) bool {
 }
 
 func shouldFallbackTelegramMediaToAccount(err error) bool {
-	// Timeout hands ownership to the account queue. Its existing Attempt must
-	// be reconciled before the account sends; never start a parallel sender.
+	// Explicit request timeouts are handed to the existing account queue.
+	// Other ambiguous transport results wait for reconciliation and must not
+	// be blindly duplicated; known 5xx/network failures remain retryable.
 	if isTelegramAPITimeout(err) {
 		return true
 	}
 	if isTelegramAmbiguousDeliveryError(err) {
 		return false
 	}
+	if isTelegramNetworkRetryError(err) {
+		return true
+	}
 	return isTelegramMediaSizeLimitError(err) ||
 		isTelegramMediaSourceUnavailableError(err) ||
 		isTelegramBotMediaProcessingError(err)
+}
+
+// telegramBotAttemptsBeforeAccountFallback limits the Bot path to two total
+// attempts. The next delivery attempt is handed to the existing protocol
+// account fallback queue, so a third external send is not another Bot retry.
+const telegramBotAttemptsBeforeAccountFallback = 2
+
+func shouldFallbackTelegramMediaToAccountAfterBotRetries(err error, retryCount int) bool {
+	if !shouldFallbackTelegramMediaToAccount(err) {
+		return false
+	}
+	// retryCount is the number of completed Bot failures persisted on the job.
+	// Keep the first attempt and one Bot retry; the following attempt uses the
+	// existing protocol account fallback queue.
+	return retryCount+1 >= telegramBotAttemptsBeforeAccountFallback
+}
+
+func telegramSendErrorCode(err error) string {
+	if err == nil {
+		return ""
+	}
+	message := strings.ToLower(err.Error())
+	for _, code := range []string{"502", "503", "504", "429", "400", "401", "403"} {
+		if strings.Contains(message, code) {
+			return code
+		}
+	}
+	return ""
+}
+
+func telegramSendErrorType(err error) string {
+	if err == nil {
+		return ""
+	}
+	return fmt.Sprintf("%T", err)
 }
 
 func isTelegramAPITimeout(err error) bool {
@@ -902,7 +941,7 @@ func (s *sSysPublish) sendTelegramVerifyPart(ctx context.Context, bot *tgbot.Bot
 	return s.sendTelegramMediaSet(ctx, bot, chatId, "verify", caption, telegramMediaSetWithoutCopyRefs(media))
 }
 
-func (s *sSysPublish) sendTelegramJobMediaByAccount(ctx context.Context, job telegramJobRecord, purpose string, caption string, media []*telegramMediaItem, botErr error) (resultMessages []*telegramSentMessage, resultErr error) {
+func (s *sSysPublish) sendTelegramJobMediaByAccount(ctx context.Context, job telegramJobRecord, attemptID int64, purpose string, caption string, media []*telegramMediaItem, botErr error) (resultMessages []*telegramSentMessage, resultErr error) {
 	if isTelegramAPITimeout(botErr) {
 		// Queue the handoff even when the HTTP request consumed its context.
 		var cancel context.CancelFunc
@@ -920,8 +959,12 @@ func (s *sSysPublish) sendTelegramJobMediaByAccount(ctx context.Context, job tel
 		return nil, gerror.Newf("Bot发送媒体超过限制，频道未绑定协议号，无法整组降级发送：%v", botErr)
 	}
 	g.Log().Warning(ctx, "Bot媒体发送触发协议号整组降级", g.Map{
-		"jobId": job.Id, "channelId": job.ChannelId, "tgAccountId": channel.TgAccountId,
-		"purpose": purpose, "mediaCount": len(media), "media": telegramMediaDebugSummary(media), "reason": botErr.Error(),
+		"event": "telegram_protocol_fallback", "job_id": job.Id, "attempt_id": attemptID,
+		"bot_id": job.BotId, "account_id": job.AccountId, "channel_id": job.ChannelId,
+		"target_chat_id": job.TargetChatId, "media_count": len(media), "send_mode": "protocol",
+		"retry_count": job.RetryCount, "duration": 0, "error_type": telegramSendErrorType(botErr),
+		"error_code": telegramSendErrorCode(botErr), "purpose": purpose,
+		"media": telegramMediaDebugSummary(media), "error": telegramPublishLogError(botErr),
 	})
 	err = s.submitTelegramMediaFallback(ctx, job, channel.TgAccountId, purpose)
 	if err != nil {
