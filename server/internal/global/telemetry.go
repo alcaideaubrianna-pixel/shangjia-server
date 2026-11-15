@@ -44,7 +44,7 @@ func initOTelWithConfig(ctx context.Context, endpointKey, secureKey, serviceKey 
 		serviceName = "xiaohuiji"
 	}
 	hostName, _ := os.Hostname()
-	res, err := resource.New(ctx, resource.WithAttributes(
+	res, err := resource.New(ctx, resource.WithFromEnv(), resource.WithAttributes(
 		attribute.String("service.name", serviceName),
 		attribute.String("service.instance.id", hostName),
 		attribute.String("service.version", consts.VersionApp),
