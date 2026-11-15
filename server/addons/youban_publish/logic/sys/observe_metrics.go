@@ -13,6 +13,18 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
+func observeTelegramAPI(ctx context.Context, operation, uploadMode, result string, duration time.Duration, statusCode int) {
+	attrs := []attribute.KeyValue{attribute.String("operation", operation), attribute.String("upload_mode", uploadMode), attribute.String("result", result)}
+	if statusCode > 0 {
+		attrs = append(attrs, attribute.Int64("status_code", int64(statusCode)))
+	}
+	metricAttrs := metric.WithAttributes(attrs...)
+	counter, _ := publishObserveMeter.Int64Counter("xiaohuiji.tg.api.requests")
+	durations, _ := publishObserveMeter.Float64Histogram("xiaohuiji.tg.api.duration_seconds")
+	counter.Add(ctx, 1, metricAttrs)
+	durations.Record(ctx, duration.Seconds(), metricAttrs)
+}
+
 func observeTelegramBotGetFile(ctx context.Context, endpoint, result string, duration time.Duration) {
 	attrs := metric.WithAttributes(attribute.String("endpoint", endpoint), attribute.String("result", result))
 	counter, _ := publishObserveMeter.Int64Counter("xiaohuiji.tg.bot_api.get_file_requests")

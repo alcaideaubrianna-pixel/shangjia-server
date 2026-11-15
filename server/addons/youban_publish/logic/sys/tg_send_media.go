@@ -2,7 +2,6 @@ package sys
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -162,10 +161,16 @@ relayGroupDone:
 		}
 		sendStartedAt := time.Now()
 		step = beginTelegramPublishStage(ctx, "api.sendMediaGroup", g.Map{"purpose": purpose, "chunkIndex": chunkIndex, "inputMode": "primary"})
+		apiStartedAt := time.Now()
 		msgs, err := bot.SendMediaGroup(ctx, &tgbot.SendMediaGroupParams{
 			ChatID: chatId,
 			Media:  group,
 		})
+		apiResult := "success"
+		if err != nil {
+			apiResult = "error"
+		}
+		observeTelegramAPI(ctx, "sendMediaGroup", "auto", apiResult, time.Since(apiStartedAt), 0)
 		step.End(err, g.Map{"messageCount": len(msgs)})
 		closeTelegramMediaFiles(closers)
 		if err != nil && telegramMediaSetCanFallbackFromFileIDToURL(chunk, err) {
@@ -174,7 +179,13 @@ relayGroupDone:
 			step.End(err)
 			if err == nil {
 				step = beginTelegramPublishStage(ctx, "api.sendMediaGroup", g.Map{"purpose": purpose, "chunkIndex": chunkIndex, "inputMode": "fallback_url"})
+				apiStartedAt = time.Now()
 				msgs, err = bot.SendMediaGroup(ctx, &tgbot.SendMediaGroupParams{ChatID: chatId, Media: group})
+				apiResult = "success"
+				if err != nil {
+					apiResult = "error"
+				}
+				observeTelegramAPI(ctx, "sendMediaGroup", "fallback", apiResult, time.Since(apiStartedAt), 0)
 				step.End(err, g.Map{"messageCount": len(msgs)})
 				closeTelegramMediaFiles(closers)
 			} else {
@@ -187,7 +198,13 @@ relayGroupDone:
 			step.End(err)
 			if err == nil {
 				step = beginTelegramPublishStage(ctx, "api.sendMediaGroup", g.Map{"purpose": purpose, "chunkIndex": chunkIndex, "inputMode": "fallback_upload"})
+				apiStartedAt = time.Now()
 				msgs, err = bot.SendMediaGroup(ctx, &tgbot.SendMediaGroupParams{ChatID: chatId, Media: group})
+				apiResult = "success"
+				if err != nil {
+					apiResult = "error"
+				}
+				observeTelegramAPI(ctx, "sendMediaGroup", "fallback", apiResult, time.Since(apiStartedAt), 0)
 				step.End(err, g.Map{"messageCount": len(msgs)})
 				closeTelegramMediaFiles(closers)
 			} else {
@@ -657,6 +674,17 @@ func telegramInputFile(ctx context.Context, media *telegramMediaItem) (models.In
 	if media == nil {
 		return nil, nil, gerror.New("媒体文件为空")
 	}
+	// Keep the decision trace structured so a failed send can be diagnosed from
+	// job/profile/media identifiers without exposing file_id or signed URLs.
+	fileIDPresent := strings.TrimSpace(media.TgFileId) != ""
+	remoteURLPresent := telegramMediaRemoteURL(media) != ""
+	g.Log().Info(ctx, "TG媒体输入解析", g.Map{
+		"event": "telegram_media_input_resolve", "jobId": media.JobId,
+		"mediaId": media.Id, "purpose": media.Purpose,
+		"fileIdPresent": fileIDPresent, "remoteURLPresent": remoteURLPresent,
+		"forceUpload": media.ForceUpload, "antiScan": media.AntiScanEnabled,
+		"sanitizedUpload": telegramMediaRequiresSanitizedUpload(media),
+	})
 	if media.PreparedUploadPath != "" {
 		path := media.PreparedUploadPath
 		cleanup := media.PreparedUploadCleanup
@@ -680,16 +708,19 @@ func telegramInputFile(ctx context.Context, media *telegramMediaItem) (models.In
 		return &models.InputFileUpload{Filename: telegramUploadFilename(media, path), Data: file}, closeWithCleanup(file, cleanup), nil
 	}
 	if source := strings.TrimSpace(media.TgFileId); source != "" && !telegramMediaRequiresSanitizedUpload(media) {
+		g.Log().Info(ctx, "TG媒体输入选择file_id", g.Map{"event": "telegram_media_input_selected", "jobId": media.JobId, "mediaId": media.Id, "purpose": media.Purpose, "mode": "file_id"})
 		g.Log().Infof(ctx, "TG实际媒体输入 jobId:%d mediaId:%d purpose:%s mode:file_id antiScan:%t", media.JobId, media.Id, media.Purpose, media.AntiScanEnabled)
 		logTelegramMediaTraffic(ctx, media, "file_id", "telegram_internal", 0, "prepared")
 		return &models.InputFileString{Data: source}, nil, nil
 	}
 	if source := telegramMediaRemoteURL(media); source != "" {
+		g.Log().Info(ctx, "TG媒体输入选择URL", g.Map{"event": "telegram_media_input_selected", "jobId": media.JobId, "mediaId": media.Id, "purpose": media.Purpose, "mode": "url"})
 		g.Log().Infof(ctx, "TG实际媒体输入 jobId:%d mediaId:%d purpose:%s mode:url antiScan:%t", media.JobId, media.Id, media.Purpose, media.AntiScanEnabled)
 		logTelegramMediaTraffic(ctx, media, "url", "telegram_fetches_remote_url", 0, "prepared")
 		return &models.InputFileString{Data: source}, nil, nil
 	}
 	g.Log().Infof(ctx, "TG实际媒体输入 jobId:%d mediaId:%d purpose:%s mode:multipart antiScan:%t", media.JobId, media.Id, media.Purpose, media.AntiScanEnabled)
+	g.Log().Info(ctx, "TG媒体输入选择multipart", g.Map{"event": "telegram_media_input_selected", "jobId": media.JobId, "mediaId": media.Id, "purpose": media.Purpose, "mode": "multipart", "reason": "file_id_or_url_unavailable"})
 	path, cleanup, err := cachedTelegramMediaFile(ctx, media)
 	if err != nil {
 		return nil, nil, err
@@ -773,13 +804,12 @@ func telegramMediaSetForcedUpload(media []*telegramMediaItem) []*telegramMediaIt
 	return list
 }
 
-// Keep the album intact after a gateway failure, but stop relying on Telegram
-// to fetch its remote URLs on the next queue attempt.
+// Keep the album and reusable Bot-scoped file IDs intact after a gateway
+// failure. A 502/timeout is a transport failure, not evidence that a cached
+// file_id is invalid; clearing valid IDs here needlessly turns a cheap reuse
+// send into another multipart upload and can amplify the outage.
 func telegramMediaSetForGatewayRetry(job telegramJobRecord, media []*telegramMediaItem) []*telegramMediaItem {
-	if job.RetryCount <= 0 || !isTelegramGatewayRetryError(errors.New(job.ErrorMessage)) {
-		return media
-	}
-	return telegramMediaSetForcedUpload(media)
+	return media
 }
 
 func telegramMediaSetWithoutReusableFileID(media []*telegramMediaItem) []*telegramMediaItem {
