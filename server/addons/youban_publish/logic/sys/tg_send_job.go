@@ -147,6 +147,8 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) (resultE
 		_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 			Where("id", jobId).
 			WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
+			Where("(dispatch_status <> ? OR dispatch_status IS NULL OR next_retry_at IS NOT NULL OR COALESCE(last_dispatch_error,'') <> ?)",
+				tgDispatchStatusIdle, "频道正在发送其他任务，已等待重新调度").
 			Data(g.Map{
 				"dispatch_status":     tgDispatchStatusIdle,
 				"next_retry_at":       nil,

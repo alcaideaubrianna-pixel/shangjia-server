@@ -9,10 +9,31 @@ import (
 
 	_ "github.com/gogf/gf/contrib/drivers/pgsql/v2"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gcache"
 	"github.com/gogf/gf/v2/os/gtime"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/library/cache"
 )
+
+func TestProfilePublishNoteIndexStatusCache(t *testing.T) {
+	ctx := context.Background()
+	cache.SetAdapter(ctx)
+	previous := cache.Instance().GetAdapter()
+	cache.Instance().SetAdapter(gcache.NewAdapterMemory())
+	t.Cleanup(func() { cache.Instance().SetAdapter(previous) })
+
+	if noteIndexStatusRecentlyWritten(ctx, 1, 2, 3, sysin.PublishTaskStatusPublishing) {
+		t.Fatal("status must not be cached before the write marker is set")
+	}
+	markNoteIndexStatusWritten(ctx, 1, 2, 3, sysin.PublishTaskStatusPublishing)
+	if !noteIndexStatusRecentlyWritten(ctx, 1, 2, 3, sysin.PublishTaskStatusPublishing) {
+		t.Fatal("status write marker was not found")
+	}
+	if noteIndexStatusRecentlyWritten(ctx, 1, 2, 3, sysin.PublishTaskStatusFailed) {
+		t.Fatal("different task status must not share the write marker")
+	}
+}
 
 func TestLocalProfilePublishStateProjection(t *testing.T) {
 	if os.Getenv("YOUBAN_PUBLISH_INTEGRATION") != "1" {

@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -12,8 +13,35 @@ import (
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/consts"
+	"hotgo/internal/library/cache"
 	"hotgo/internal/service"
 )
+
+const profilePublishNoteIndexStatusCacheTTL = 10 * time.Second
+
+func profilePublishNoteIndexStatusCacheKey(tenantId, accountId, profileId int64, status string) string {
+	return fmt.Sprintf("youban_publish:note_index:task_status:%d:%d:%d:%s", tenantId, accountId, profileId, status)
+}
+
+func noteIndexStatusRecentlyWritten(ctx context.Context, tenantId, accountId, profileId int64, status string) bool {
+	if !cache.Initialized() {
+		return false
+	}
+	value, err := cache.Instance().Get(ctx, profilePublishNoteIndexStatusCacheKey(tenantId, accountId, profileId, status))
+	return err == nil && !value.IsNil()
+}
+
+func markNoteIndexStatusWritten(ctx context.Context, tenantId, accountId, profileId int64, status string) {
+	if !cache.Initialized() {
+		return
+	}
+	_ = cache.Instance().Set(
+		ctx,
+		profilePublishNoteIndexStatusCacheKey(tenantId, accountId, profileId, status),
+		1,
+		profilePublishNoteIndexStatusCacheTTL,
+	)
+}
 
 type profilePublishOperationState struct {
 	TenantId           int64  `orm:"tenant_id"`
@@ -169,6 +197,9 @@ func (s *sSysPublish) writeProfilePublishOperationStateTx(ctx context.Context, t
 	if affected == 0 {
 		return nil
 	}
+	if noteIndexStatusRecentlyWritten(ctx, tenantId, accountId, profileId, status) {
+		return nil
+	}
 	indexMod := tx.Model(publishNoteIndexTable).Unscoped().Safe().Ctx(ctx).
 		Where("tenant_id", tenantId).
 		Where("account_id", accountId).
@@ -178,6 +209,7 @@ func (s *sSysPublish) writeProfilePublishOperationStateTx(ctx context.Context, t
 	if _, err = indexMod.Data(g.Map{"task_status": status}).Update(); err != nil {
 		return gerror.Wrap(err, "更新资料列表上架状态失败")
 	}
+	markNoteIndexStatusWritten(ctx, tenantId, accountId, profileId, status)
 	return nil
 }
 
