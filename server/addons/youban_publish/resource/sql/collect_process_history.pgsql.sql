@@ -27,3 +27,9 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ybp_collect_event_window_ready_accou
    AND status <> 'ignored'
    AND (material_role IS NULL OR material_role IN ('pending','display'))
    AND material_group_status IS DISTINCT FROM 'waiting_verify';
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ybp_collect_process_outbox_scope_due_source
+ ON hg_youban_publish_collect_process_outbox
+ (tenant_id,account_id,status,available_at,source_id,id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ybp_collect_process_outbox_scope_lease_source
+ ON hg_youban_publish_collect_process_outbox
+ (tenant_id,account_id,status,lease_expires_at,source_id,id);

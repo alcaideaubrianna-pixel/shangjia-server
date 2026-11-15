@@ -27,3 +27,7 @@ CREATE INDEX IF NOT EXISTS "idx_tg_collector_delivery_account_source"
 
 CREATE INDEX IF NOT EXISTS "idx_tg_collector_delivery_dispatch_lease"
     ON "hg_tg_collector_delivery" ("dispatch_until", "status", "id");
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_tg_collector_delivery_pending_dispatch"
+    ON "hg_tg_collector_delivery" ("status", "dispatch_until", "priority" DESC, "created_at", "id")
+    WHERE "status" = 'pending';

@@ -65,8 +65,9 @@ func (s *sCollector) dispatchHistoryBatch(ctx context.Context) error {
 		LeftJoin("hg_tg_collector_event e", "e.id = hg_tg_collector_delivery.event_id").
 		Where(columns.Status, sysin.DeliveryStatusPending).
 		Where("e.source_id > 0").
+		Where(fmt.Sprintf("(%s IS NULL OR %s <= ?)", "dispatch_until", "dispatch_until"), gtime.Now()).
 		Order(columns.Priority + " DESC, " + columns.CreatedAt + " ASC, " + columns.Id + " ASC").
-		Limit(historySchedulerBatchSize(ctx) * 4).All()
+		Limit(historySchedulerBatchSize(ctx) * 2).All()
 	if err != nil {
 		return err
 	}
