@@ -13,8 +13,15 @@ func isInteractiveProfilePublishOperation(operationNo string) bool {
 	return strings.HasPrefix(operationNo, "profile:") ||
 		strings.HasPrefix(operationNo, "edit:") ||
 		strings.HasPrefix(operationNo, botProfilePublishOperationPrefix) ||
-		strings.HasPrefix(operationNo, botProfileUnpublishOperationPrefix) ||
 		strings.HasPrefix(operationNo, "batchtext:")
+}
+
+// isInteractiveProfileUnpublishOperation identifies explicit unpublish
+// operations. Keep this separate from publish operations so a bot_unpublish
+// operation can never enter the publish lifecycle and make an offline profile
+// public again.
+func isInteractiveProfileUnpublishOperation(operationNo string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(operationNo)), botProfileUnpublishOperationPrefix)
 }
 
 func telegramJobBypassesAutomaticSchedule(job telegramJobRecord) bool {

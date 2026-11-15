@@ -16,3 +16,12 @@ func TestTelegramJobBypassesAutomaticSchedule(t *testing.T) {
 		}
 	}
 }
+
+func TestInteractivePublishOperationDoesNotIncludeUnpublish(t *testing.T) {
+	if isInteractiveProfilePublishOperation("bot_unpublish:20:-100123:88:123456") {
+		t.Fatal("bot_unpublish must not enter the publish lifecycle")
+	}
+	if !isInteractiveProfileUnpublishOperation("bot_unpublish:20:-100123:88:123456") {
+		t.Fatal("bot_unpublish must be recognized as an unpublish operation")
+	}
+}
