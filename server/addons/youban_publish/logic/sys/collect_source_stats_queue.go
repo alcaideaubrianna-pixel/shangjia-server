@@ -62,17 +62,8 @@ func markCollectSourceStatsDirty(ctx context.Context, sourceID int64) error {
 }
 
 func (s *sSysPublish) scheduleCollectSourceStats(ctx context.Context, sourceID int64) error {
-	if sourceID <= 0 {
-		return nil
-	}
-	if err := markCollectSourceStatsDirty(ctx, sourceID); err != nil {
-		return err
-	}
-	client, err := s.telegramQueueClient(ctx)
-	if err != nil {
-		return err
-	}
-	return enqueueCollectSourceStatsTask(ctx, client, sourceID)
+	// 来源统计不参与实时采集链路，禁止触发事件表聚合扫描。
+	return nil
 }
 
 func enqueueCollectSourceStatsTask(ctx context.Context, client *asynq.Client, sourceID int64) error {

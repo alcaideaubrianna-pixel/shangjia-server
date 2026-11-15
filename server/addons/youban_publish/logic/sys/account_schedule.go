@@ -196,8 +196,17 @@ func (s *sSysPublish) enqueueAccountSchedules(ctx context.Context) error {
 		}
 		// 账户调度使用独立队列，避免历史采集/资料任务占满后台队列后把
 		// 循环计划延迟到下一轮；同一账户仍由租约保证串行，账户之间可并行。
+		// 账户调度不是资料级任务，同一账户在一轮执行期间只允许保留一个
+		// 入队任务。原先 2 秒的唯一窗口小于单任务 25 秒超时，生产者会在
+		// 消费者尚未开始处理前重复创建同一账户任务，最终把 pending 队列
+		// 撑大。使用 30 分钟窗口覆盖正常调度周期；任务完成后由 Asynq
+		// 清理唯一键，异常任务则由超时/重试流程释放。
+		uniqueTTL := g.Cfg().MustGet(ctx, "youbanPublish.queue.accountScheduleUniqueTTL", 30*time.Minute).Duration()
+		if uniqueTTL < 30*time.Minute {
+			uniqueTTL = 30 * time.Minute
+		}
 		_, err = client.EnqueueContext(ctx, asynq.NewTask(publishconsts.QueueAccountScheduleTask, body), asynq.Queue(tgQueueNameAccountSchedule),
-			asynq.Unique(2*time.Second), asynq.Timeout(25*time.Second), asynq.MaxRetry(3))
+			asynq.Unique(uniqueTTL), asynq.Timeout(25*time.Second), asynq.MaxRetry(3))
 		if err != nil && !errors.Is(err, asynq.ErrDuplicateTask) {
 			g.Log().Warning(ctx, "账户循环调度入队失败", g.Map{"tenantId": account.TenantID, "accountId": account.ID, "queueName": tgQueueNameAccountSchedule, "error": err.Error()})
 			return err

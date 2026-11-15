@@ -27,7 +27,12 @@ func (s *sSysPublish) runScheduledPublishRuntime(ctx context.Context) {
 	if legacyInterval <= 0 {
 		legacyInterval = 30
 	}
-	timer := time.NewTimer(time.Second)
+	accountScheduleInterval := g.Cfg().MustGet(ctx, "youbanPublish.queue.accountScheduleIntervalSeconds", 1).Int()
+	if accountScheduleInterval <= 0 {
+		accountScheduleInterval = 1
+	}
+	interval := time.Duration(accountScheduleInterval) * time.Second
+	timer := time.NewTimer(interval)
 	defer timer.Stop()
 	var lastLegacy time.Time
 	for {
@@ -44,7 +49,7 @@ func (s *sSysPublish) runScheduledPublishRuntime(ctx context.Context) {
 					g.Log().Warningf(ctx, "提交旧引擎到期上架任务失败 err:%+v", err)
 				}
 			}
-			timer.Reset(time.Second)
+			timer.Reset(interval)
 		}
 	}
 }
