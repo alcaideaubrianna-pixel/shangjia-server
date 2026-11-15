@@ -72,6 +72,14 @@ func (c *cAIOps) TelegramMessageOffline(ctx context.Context, req *aiops.Telegram
 	return &aiops.TelegramMessageOfflineRes{AIOpsTelegramOfflineResult: result}, nil
 }
 
+func (c *cAIOps) TelegramMessageDirectDelete(ctx context.Context, req *aiops.TelegramMessageDirectDeleteReq) (*aiops.TelegramMessageDirectDeleteRes, error) {
+	result, err := service.SysPublish().AIOpsTelegramDirectDelete(ctx, &req.AIOpsTelegramDirectDeleteInp)
+	if err != nil {
+		return nil, err
+	}
+	return &aiops.TelegramMessageDirectDeleteRes{AIOpsTelegramDirectDeleteResult: result}, nil
+}
+
 func (c *cAIOps) RepairPlan(ctx context.Context, req *aiops.RepairPlanReq) (*aiops.RepairPlanRes, error) {
 	result, err := service.SysPublish().AIOpsCreateRepairPlan(ctx, &req.AIOpsRepairPlanInp)
 	if err != nil {

@@ -101,6 +101,7 @@ type ISysPublish interface {
 	AIOpsDeleteImportedProfiles(ctx context.Context, tenantId, accountId int64, profileIds []int64, dryRun bool) ([]int64, error)
 	AIOpsTelegramMessageContext(ctx context.Context, in *sysin.AIOpsTelegramMessageContextInp) (*sysin.AIOpsTelegramMessageContextModel, error)
 	AIOpsTelegramMessageOffline(ctx context.Context, in *sysin.AIOpsTelegramOfflineInp) (*sysin.AIOpsTelegramOfflineResult, error)
+	AIOpsTelegramDirectDelete(ctx context.Context, in *sysin.AIOpsTelegramDirectDeleteInp) (*sysin.AIOpsTelegramDirectDeleteResult, error)
 	AIOpsCreateRepairPlan(ctx context.Context, in *sysin.AIOpsRepairPlanInp) (*sysin.AIOpsRepairPlanModel, error)
 	AIOpsApplySourceReplayPlan(ctx context.Context, in *sysin.AIOpsRepairApplyInp) (*sysin.AIOpsRepairApplyModel, error)
 	AIOpsSourceReplayPlanStatus(ctx context.Context, in *sysin.AIOpsRepairPlanStatusInp) (*sysin.AIOpsRepairPlanStatusModel, error)

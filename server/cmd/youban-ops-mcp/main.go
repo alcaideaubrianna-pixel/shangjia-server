@@ -99,6 +99,13 @@ type telegramMessageDeleteInput struct {
 	MessageID int64  `json:"messageId" jsonschema:"Telegram message ID"`
 }
 
+type telegramDirectDeleteInput struct {
+	Messages []struct {
+		ChatID    string `json:"chatId" jsonschema:"Telegram channel Chat ID"`
+		MessageID int64  `json:"messageId" jsonschema:"Telegram message ID"`
+	} `json:"messages" jsonschema:"Telegram messages; maximum 100"`
+}
+
 type structuredOutput struct {
 	Data map[string]any `json:"data"`
 }
@@ -152,6 +159,10 @@ func main() {
 		Name: "telegram_message_delete", Description: "Delete one Telegram message directly by channel Chat ID and message ID through the production cleanup queue",
 		Annotations: &mcp.ToolAnnotations{Title: "Delete one Telegram message", ReadOnlyHint: readOnly, DestructiveHint: &destructive, IdempotentHint: true},
 	}, client.telegramMessageDelete)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "telegram_message_direct_delete", Description: "Directly call Telegram deleteMessage by channel Chat ID and message ID, without requiring a local publish record",
+		Annotations: &mcp.ToolAnnotations{Title: "Directly delete Telegram message", ReadOnlyHint: readOnly, DestructiveHint: &destructive, IdempotentHint: true},
+	}, client.telegramMessageDirectDelete)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "collect_preview_repair", Description: "Create a bounded dry-run repair plan and confirmation token without changing business data",
 		Annotations: &mcp.ToolAnnotations{Title: "Preview collection repair", ReadOnlyHint: true, IdempotentHint: false},
@@ -350,6 +361,16 @@ func (c *apiClient) telegramMessageDelete(ctx context.Context, _ *mcp.CallToolRe
 	}
 	data, err := c.call(ctx, http.MethodPost, "/api/youban_publish/ai-ops/telegram/message/offline", map[string]any{
 		"messages": []map[string]any{{"chatId": chatID, "messageId": input.MessageID}},
+	})
+	return nil, structuredOutput{Data: data}, err
+}
+
+func (c *apiClient) telegramMessageDirectDelete(ctx context.Context, _ *mcp.CallToolRequest, input telegramDirectDeleteInput) (*mcp.CallToolResult, structuredOutput, error) {
+	if len(input.Messages) == 0 || len(input.Messages) > 100 {
+		return nil, structuredOutput{}, fmt.Errorf("messages must contain 1 to 100 items")
+	}
+	data, err := c.call(ctx, http.MethodPost, "/api/youban_publish/ai-ops/telegram/message/direct-delete", map[string]any{
+		"messages": input.Messages,
 	})
 	return nil, structuredOutput{Data: data}, err
 }

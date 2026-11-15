@@ -80,6 +80,15 @@ type TelegramMessageOfflineRes struct {
 	*sysin.AIOpsTelegramOfflineResult
 }
 
+type TelegramMessageDirectDeleteReq struct {
+	g.Meta `path:"/telegram/message/direct-delete" method:"post" tags:"AI运维" summary:"按频道和消息ID直接删除TG消息"`
+	sysin.AIOpsTelegramDirectDeleteInp
+}
+
+type TelegramMessageDirectDeleteRes struct {
+	*sysin.AIOpsTelegramDirectDeleteResult
+}
+
 type RepairPlanReq struct {
 	g.Meta `path:"/repair/plan" method:"post" tags:"AI运维" summary:"预演采集修复并生成确认令牌"`
 	sysin.AIOpsRepairPlanInp

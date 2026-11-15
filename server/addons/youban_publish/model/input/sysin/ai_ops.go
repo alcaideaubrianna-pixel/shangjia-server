@@ -113,6 +113,23 @@ type AIOpsTelegramOfflineResult struct {
 	Items          []*AIOpsTelegramOfflineItem `json:"items"`
 }
 
+type AIOpsTelegramDirectDeleteInp struct {
+	Messages []AIOpsTelegramMessageRefInp `json:"messages" dc:"Telegram频道和消息ID"`
+}
+
+type AIOpsTelegramDirectDeleteItem struct {
+	Target  string `json:"target"`
+	Status  string `json:"status"`
+	Message string `json:"message"`
+}
+
+type AIOpsTelegramDirectDeleteResult struct {
+	Total   int                              `json:"total"`
+	Deleted int                              `json:"deleted"`
+	Failed  int                              `json:"failed"`
+	Items   []*AIOpsTelegramDirectDeleteItem `json:"items"`
+}
+
 type AIOpsTelegramMessageContextInp struct {
 	URL       string `json:"url" dc:"Telegram消息地址"`
 	ChatId    string `json:"chatId" dc:"Telegram频道Chat ID"`
