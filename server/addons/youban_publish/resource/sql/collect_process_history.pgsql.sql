@@ -8,3 +8,8 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ybp_collect_process_outbox_fresh
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ybp_collect_process_outbox_history
  ON hg_youban_publish_collect_process_outbox (available_at,id)
  WHERE status='pending' AND history=TRUE;
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ybp_collect_process_outbox_history_status_updated
+ ON hg_youban_publish_collect_process_outbox (history,status,updated_at,id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ybp_collect_event_source_stats_cover
+ ON hg_youban_publish_collect_event (source_id)
+ INCLUDE (status,material_role,received_at);
