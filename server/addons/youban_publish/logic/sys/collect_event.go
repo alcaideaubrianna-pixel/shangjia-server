@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -388,8 +389,19 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 				Where(pdao.YoubanPublishCollectBotChannel.Columns().TenantId, tenantId).
 				Where(pdao.YoubanPublishCollectBotChannel.Columns().BotId, botID).
 				Where(pdao.YoubanPublishCollectBotChannel.Columns().ChannelId, channelID).
-				Scan(&botRelation); relationErr != nil {
+				Scan(&botRelation); relationErr != nil && !errors.Is(relationErr, sql.ErrNoRows) {
 				return gerror.Wrap(relationErr, "读取BOT频道关系失败")
+			} else if errors.Is(relationErr, sql.ErrNoRows) {
+				// Missing discovery metadata is recoverable. The account/channel
+				// relation above already authorizes collection; recreate the BOT
+				// relation so one stale cache row cannot block profile ingestion.
+				_, upsertErr := pdao.YoubanPublishCollectBotChannel.Ctx(ctx).
+					Data(g.Map{"tenant_id": tenantId, "bot_id": botID, "channel_id": channelID, "status": sysin.CollectBotChannelDiscovered, "bot_role": "unknown", "first_seen_at": gtime.Now(), "last_seen_at": gtime.Now(), "removed_at": nil, "removed_reason": ""}).
+					OnConflict("tenant_id,bot_id,channel_id").
+					OnDuplicate("status,last_seen_at,removed_at,removed_reason,updated_at").Save()
+				if upsertErr != nil {
+					return gerror.Wrap(upsertErr, "补建BOT频道关系失败")
+				}
 			} else if botRelation.Status == sysin.CollectBotChannelRemoved {
 				return s.ignoreCollectEvent(ctx, eventId, "机器人已被移出采集频道", "source")
 			}
