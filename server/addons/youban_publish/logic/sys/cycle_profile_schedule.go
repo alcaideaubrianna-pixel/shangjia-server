@@ -406,6 +406,20 @@ func (s *sSysPublish) refreshChannelProfileCycleNextAt(ctx context.Context, chan
 }
 
 func (s *sSysPublish) runProfileCycleDueScan(ctx context.Context) error {
+	// 没有任何账户频道开启循环上架时直接返回，避免无意义的 Redis/PG 到期扫描。
+	channelID, err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
+		Where("cycle_publish_enabled", 1).
+		Where("status", 1).
+		Where("publish_direction", "up").
+		WhereNull("deleted_at").
+		Limit(1).Value("id")
+	if err != nil {
+		return gerror.Wrap(err, "检查循环上架频道失败")
+	}
+	if channelID.Int64() <= 0 {
+		g.Log().Debug(ctx, "没有开启循环上架的频道，跳过资料循环扫描")
+		return nil
+	}
 	if globalStreamPushEngineEnabled() {
 		return s.enqueueAccountSchedules(ctx)
 	}
@@ -619,7 +633,8 @@ func (s *sSysPublish) profileCycleDueRowsShard(ctx context.Context, limit, shard
 			"COALESCE(c.cycle_publish_time,'') AS channel_publish_time,COALESCE(c.cycle_publish_mode,'time') AS channel_mode,COALESCE(c.status,0) AS channel_status,COALESCE(c.publish_direction,'') AS publish_direction").
 		Where("j.cycle_enabled", 1).WhereIn("j.status", []string{"sent", "superseded"}).Where("(j.next_cycle_at IS NOT NULL AND j.next_cycle_at<=? OR COALESCE(cp.applied_cycle_config_version,0)<COALESCE(c.cycle_config_version,0))", gtime.Now()).
 		Where("NOT EXISTS (SELECT 1 FROM "+channelPermissionCircuitTable+" pc WHERE pc.tenant_id=j.tenant_id AND pc.channel_id=j.channel_id AND pc.paused=1)").
-		WhereLTE("j.next_cycle_at", gtime.Now())
+		// 配置版本变化即使 next_cycle_at 为空也必须进入调度；普通到期任务仍要求到期。
+		Where("(j.next_cycle_at IS NULL OR j.next_cycle_at<=?)", gtime.Now())
 	if len(scopes) > 0 {
 		// 新引擎从账户到期索引驱动，历史任务只通过主键读取发送证据。
 		model = g.DB().Model(publishChannelProfileTable+" cp").Safe().Ctx(ctx).
@@ -640,6 +655,10 @@ func (s *sSysPublish) profileCycleDueRowsShard(ctx context.Context, limit, shard
 		model = model.Where("NOT EXISTS (SELECT 1 FROM " + publishProfileCycleRunChannelTable + " planning_channel INNER JOIN " + publishProfileCycleRunTable + " planning ON planning.id=planning_channel.run_id WHERE planning.tenant_id=j.tenant_id AND planning.account_id=j.account_id AND planning.profile_id=j.profile_id AND planning_channel.channel_id=j.channel_id AND planning.status IN ('pending','running','dispatching') AND planning_channel.status IN ('pending','running','dispatching'))")
 		model = model.Where("c.status", 1).Where("c.cycle_publish_enabled", 1).Where("COALESCE(NULLIF(LOWER(TRIM(c.cycle_publish_mode)),''),'time')='time'").Where("c.publish_direction", "up").Where("NOT EXISTS (SELECT 1 FROM " + publishTgJobTable + " active WHERE active.tenant_id=j.tenant_id AND active.account_id=j.account_id AND active.profile_id=j.profile_id AND active.channel_id=j.channel_id AND active.status IN ('pending','sending','failed_retry','unknown'))")
 	}
+	// 所有调度引擎统一检查子任务，防止到期扫描在发送未完成时重复创建循环任务。
+	// 旧实现只在账户新引擎分支检查，导致普通扫描持续生成同一资料的 pending 任务并堵塞频道队列。
+	model = model.Where("NOT EXISTS (SELECT 1 FROM " + publishTgJobTable + " active WHERE active.tenant_id=j.tenant_id AND active.account_id=j.account_id AND active.profile_id=j.profile_id AND active.channel_id=j.channel_id AND active.status IN ('pending','sending','failed_retry','unknown'))")
+
 	if shard < 0 && cache.Initialized() {
 		members, cacheErr := cache.ZSetRangeByScore(ctx, profileCycleDueZSetKey, 0, float64(time.Now().Unix()), limit)
 		if cacheErr == nil && len(members) > 0 {

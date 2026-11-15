@@ -20,6 +20,7 @@ import (
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/consts"
+	"hotgo/internal/dao"
 )
 
 const (
@@ -640,15 +641,23 @@ func (s *sSysPublish) channelCyclePage(ctx context.Context, channel channelCycle
 		model = s.batchCycleEligibleProfileModel(ctx, channel.TenantId, channel.Id)
 	}
 	query := model.Fields("p.id AS id,ps.tenant_id,ps.account_id,p.id AS profile_id")
-	// A persisted profile ID is monotonic and cannot represent a mid-run wrap.
-	// Finish the tail in this run; the scheduler resets to zero only when the
-	// next run observes that no IDs remain after the cursor.
-	query = query.WhereGT("p.id", cursorId).OrderAsc("p.id")
-	if len(upperIDs) > 0 && upperIDs[0] > 0 {
-		query = query.WhereLTE("p.id", upperIDs[0])
+	if channel.Mode == "batch" {
+		// 批次按资料创建时间排序；游标仍保存 profile_id，通过资料表回查创建时间形成稳定二元游标。
+		if cursorId > 0 {
+			query = query.Where("(p.created_at,p.id) > (SELECT cursor.created_at,cursor.id FROM "+dao.ContentProfile.Table()+" cursor WHERE cursor.id=?)", cursorId)
+		}
+		if len(upperIDs) > 0 && upperIDs[0] > 0 {
+			query = query.Where("(p.created_at,p.id) <= (SELECT upper.created_at,upper.id FROM "+dao.ContentProfile.Table()+" upper WHERE upper.id=?)", upperIDs[0])
+		}
+		query = query.OrderAsc("p.created_at").OrderAsc("p.id")
+	} else {
+		// 时间循环只需要按资料 ID 顺序扫描，避免同一批次反复读取。
+		query = query.WhereGT("p.id", cursorId).OrderAsc("p.id")
+		if len(upperIDs) > 0 && upperIDs[0] > 0 {
+			query = query.WhereLTE("p.id", upperIDs[0])
+		}
 	}
-	err := query.Limit(limit).Scan(&items)
-	if err != nil {
+	if err := query.Limit(limit).Scan(&items); err != nil {
 		return nil, gerror.Wrap(err, "分页读取频道循环资料失败")
 	}
 	for i := range items {
