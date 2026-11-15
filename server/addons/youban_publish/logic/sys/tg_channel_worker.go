@@ -53,7 +53,7 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 	if priority <= 0 {
 		priority = tgJobPriorityBulk
 	}
-	if telegramChannelQueueNeedsMigration(claim.Score, priority, claim.Urgent) {
+	if telegramChannelQueueNeedsMigration(claim.Score, priority, claim.Urgent, claim.History) {
 		// Historical members use the old score format. Reinsert the same job
 		// with the current lane/score before sending; this preserves the job and
 		// lets a newly clicked manual job stay ahead on the next pass.
@@ -76,6 +76,8 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 	queueName := telegramChannelQueueKey(channelID)
 	if claim.Urgent {
 		queueName = telegramChannelUrgentQueueKey(channelID)
+	} else if claim.History {
+		queueName = telegramChannelHistoryQueueKey(channelID)
 	}
 	g.Log().Info(ctx, "频道队列取出任务", g.Map{
 		"event":       "channel_queue_dequeue",

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gogf/gf/v2/frame/g"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -23,6 +24,25 @@ func observeTelegramAPI(ctx context.Context, operation, uploadMode, result strin
 	durations, _ := publishObserveMeter.Float64Histogram("xiaohuiji.tg.api.duration_seconds")
 	counter.Add(ctx, 1, metricAttrs)
 	durations.Record(ctx, duration.Seconds(), metricAttrs)
+}
+
+func observeRedisLua(ctx context.Context, scriptName, result string, duration time.Duration) {
+	attrs := metric.WithAttributes(
+		attribute.String("script", scriptName),
+		attribute.String("result", result),
+	)
+	counter, _ := publishObserveMeter.Int64Counter("xiaohuiji.redis.lua.calls")
+	durations, _ := publishObserveMeter.Float64Histogram("xiaohuiji.redis.lua.duration_ms")
+	counter.Add(ctx, 1, attrs)
+	durations.Record(ctx, float64(duration.Milliseconds()), attrs)
+	if duration >= 100*time.Millisecond {
+		g.Log().Warning(ctx, "Redis Lua 执行超过100ms", g.Map{
+			"event":      "redis_lua_slow",
+			"script":     scriptName,
+			"result":     result,
+			"durationMs": duration.Milliseconds(),
+		})
+	}
 }
 
 func observeTelegramBotGetFile(ctx context.Context, endpoint, result string, duration time.Duration) {

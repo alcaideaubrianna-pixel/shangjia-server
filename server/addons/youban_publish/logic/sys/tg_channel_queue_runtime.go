@@ -90,7 +90,8 @@ func (s *sSysPublish) processTelegramChannelQueuePass(ctx context.Context) {
 			if !processed {
 				normal, normalErr := g.Redis().Do(ctx, "ZCARD", telegramChannelQueueKey(channelID))
 				urgent, urgentErr := g.Redis().Do(ctx, "ZCARD", telegramChannelUrgentQueueKey(channelID))
-				if normalErr == nil && urgentErr == nil && normal.Int()+urgent.Int() == 0 {
+				history, historyErr := g.Redis().Do(ctx, "ZCARD", telegramChannelHistoryQueueKey(channelID))
+				if normalErr == nil && urgentErr == nil && historyErr == nil && normal.Int()+urgent.Int()+history.Int() == 0 {
 					if removeErr := removeActiveTelegramChannel(ctx, channelID); removeErr != nil {
 						g.Log().Warningf(ctx, "频道活跃集合清理失败 channel:%d err:%+v", channelID, removeErr)
 					}

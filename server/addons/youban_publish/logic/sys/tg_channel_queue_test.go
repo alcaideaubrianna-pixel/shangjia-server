@@ -36,6 +36,19 @@ func TestTelegramChannelQueueUrgentLaneAndMigration(t *testing.T) {
 	}
 }
 
+func TestTelegramChannelQueueHistoryLane(t *testing.T) {
+	if got := telegramChannelQueueKeyForPriority(254, tgJobPriorityHistory); got != "youban:tg:channel:history:254" {
+		t.Fatalf("history queue key=%q", got)
+	}
+	current := telegramChannelQueueScore(tgJobPriorityHistory, time.UnixMilli(1_700_000_000_000), 101)
+	if telegramChannelQueueNeedsMigration(current, tgJobPriorityHistory, false, true) {
+		t.Fatal("current history score should not migrate")
+	}
+	if !telegramChannelQueueNeedsMigration(current, tgJobPriorityHistory, false, false) {
+		t.Fatal("history job in ordinary lane should migrate")
+	}
+}
+
 func TestTelegramChannelQueueScorePriorityAndFIFO(t *testing.T) {
 	due := time.UnixMilli(1_700_000_000_000)
 	manual := telegramChannelQueueScore(tgJobPriorityInteractive, due, 101)
