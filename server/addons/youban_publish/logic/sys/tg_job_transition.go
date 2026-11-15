@@ -13,6 +13,114 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 )
 
+type telegramJobLifecycle string
+type telegramSendPhaseState string
+type telegramDispatchState string
+type telegramJobSource string
+
+const (
+	telegramLifecyclePending    telegramJobLifecycle  = "pending"
+	telegramLifecycleSending    telegramJobLifecycle  = "sending"
+	telegramLifecycleRetryWait  telegramJobLifecycle  = "failed_retry"
+	telegramLifecycleConfirming telegramJobLifecycle  = "unknown"
+	telegramLifecycleUnknown    telegramJobLifecycle  = telegramLifecycleConfirming
+	telegramLifecycleSent       telegramJobLifecycle  = "sent"
+	telegramLifecycleFailed     telegramJobLifecycle  = "failed"
+	telegramLifecycleSuperseded telegramJobLifecycle  = "superseded"
+	telegramDispatchIdle        telegramDispatchState = "idle"
+	telegramDispatchQueued      telegramDispatchState = "queued"
+	telegramDispatchProcessing  telegramDispatchState = "processing"
+	telegramDispatchDone        telegramDispatchState = "done"
+	telegramSourceManual        telegramJobSource     = "manual"
+	telegramSourceInteractive   telegramJobSource     = "interactive"
+	telegramSourceCycle         telegramJobSource     = "cycle"
+	telegramSourceFullPush      telegramJobSource     = "full_push"
+	telegramSourceCollect       telegramJobSource     = "collect"
+	telegramSourceHistory       telegramJobSource     = "history"
+	telegramSourceCleanup       telegramJobSource     = "cleanup"
+	telegramSourceUnknown       telegramJobSource     = "unknown"
+)
+
+func telegramLifecycleState(value string) telegramJobLifecycle {
+	return telegramJobLifecycle(strings.TrimSpace(value))
+}
+func telegramDispatchStateOf(value string) telegramDispatchState {
+	return telegramDispatchState(strings.TrimSpace(value))
+}
+func telegramJobLifecycleTerminal(value string) bool {
+	switch telegramLifecycleState(value) {
+	case telegramLifecycleSent, telegramLifecycleFailed, telegramLifecycleSuperseded:
+		return true
+	}
+	return false
+}
+func telegramJobLifecycleOccupiesChannel(value string) bool {
+	switch telegramLifecycleState(value) {
+	case telegramLifecycleSending, telegramLifecycleConfirming:
+		return true
+	}
+	return false
+}
+func telegramJobLifecycleCanBeOvertaken(value string) bool {
+	switch telegramLifecycleState(value) {
+	case telegramLifecyclePending, telegramLifecycleRetryWait:
+		return true
+	}
+	return false
+}
+func telegramJobLifecycleNeedsRetry(value string) bool {
+	switch telegramLifecycleState(value) {
+	case telegramLifecyclePending, telegramLifecycleRetryWait:
+		return true
+	}
+	return false
+}
+func telegramJobLifecycleNeedsReconcile(value string) bool {
+	return telegramLifecycleState(value) == telegramLifecycleUnknown
+}
+
+func telegramJobSourceOf(operationNo string, priority int) telegramJobSource {
+	value := strings.ToLower(strings.TrimSpace(operationNo))
+	switch {
+	case strings.HasPrefix(value, "collect:"):
+		return telegramSourceCollect
+	case strings.HasPrefix(value, "cycle_batch:"), strings.HasPrefix(value, "profile_cycle:"):
+		return telegramSourceCycle
+	case strings.HasPrefix(value, "full_push:"):
+		return telegramSourceFullPush
+	case strings.HasPrefix(value, "history:"):
+		return telegramSourceHistory
+	case strings.HasPrefix(value, "down:"), strings.HasPrefix(value, "delete:"):
+		return telegramSourceCleanup
+	case isInteractiveProfilePublishOperation(value):
+		return telegramSourceInteractive
+	case priority == tgJobPriorityInteractive:
+		return telegramSourceManual
+	default:
+		return telegramSourceUnknown
+	}
+}
+
+func telegramJobRetryableStatuses() []string {
+	return []string{telegramJobStatusPending, telegramJobStatusRetryWait}
+}
+
+func telegramJobRecoverableStatuses() []string {
+	return []string{telegramJobStatusPending, telegramJobStatusRetryWait, telegramJobStatusConfirming}
+}
+
+func telegramJobInFlightStatuses() []string {
+	return []string{telegramJobStatusSending, telegramJobStatusConfirming}
+}
+
+func telegramJobReconcileStatuses() []string {
+	return []string{telegramJobStatusConfirming}
+}
+
+func telegramJobTerminalStatuses() []string {
+	return []string{telegramJobStatusSent, telegramJobStatusFailed, telegramJobStatusSuperseded}
+}
+
 const (
 	telegramJobStatusPending    = "pending"
 	telegramJobStatusSending    = "sending"

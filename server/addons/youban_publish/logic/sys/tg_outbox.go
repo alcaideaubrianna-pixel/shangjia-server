@@ -490,10 +490,11 @@ func telegramOutboxDispatchDecision(status, dispatchStatus string, nextRetryAt, 
 }
 
 func telegramOutboxJobStillNeedsDispatch(status, dispatchStatus string) bool {
-	status = strings.TrimSpace(status)
-	dispatchStatus = strings.TrimSpace(dispatchStatus)
-	return (status == "pending" || status == "failed_retry" || status == "unknown") &&
-		(dispatchStatus == "" || dispatchStatus == tgDispatchStatusIdle)
+	if !telegramJobLifecycleNeedsRetry(status) && !telegramJobLifecycleNeedsReconcile(status) {
+		return false
+	}
+	dispatch := telegramDispatchStateOf(dispatchStatus)
+	return dispatch == "" || dispatch == telegramDispatchIdle
 }
 
 func (s *sSysPublish) releaseTelegramOutbox(ctx context.Context, outboxId int64, owner string, attemptCount int, message string) error {

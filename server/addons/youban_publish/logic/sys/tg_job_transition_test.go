@@ -85,3 +85,44 @@ func TestTelegramJobTransitionUpdate(t *testing.T) {
 		t.Fatal("expected status override to be rejected")
 	}
 }
+
+func TestTelegramJobLifecyclePredicates(t *testing.T) {
+	for _, status := range []string{telegramJobStatusSent, telegramJobStatusFailed, telegramJobStatusSuperseded} {
+		if !telegramJobLifecycleTerminal(status) {
+			t.Fatalf("status %q should be terminal", status)
+		}
+	}
+	for _, status := range []string{telegramJobStatusSending, telegramJobStatusConfirming} {
+		if telegramJobLifecycleCanBeOvertaken(status) || !telegramJobLifecycleOccupiesChannel(status) {
+			t.Fatalf("status %q has inconsistent channel lifecycle predicates", status)
+		}
+	}
+	for _, status := range []string{telegramJobStatusPending, telegramJobStatusRetryWait} {
+		if !telegramJobLifecycleNeedsRetry(status) || !telegramJobLifecycleCanBeOvertaken(status) {
+			t.Fatalf("status %q should be retryable and overtaken", status)
+		}
+	}
+	if !telegramJobLifecycleNeedsReconcile(telegramJobStatusConfirming) {
+		t.Fatal("unknown/confirming status should require reconciliation")
+	}
+}
+
+func TestTelegramJobSourceClassification(t *testing.T) {
+	cases := []struct {
+		operation string
+		priority  int
+		want      telegramJobSource
+	}{
+		{operation: "collect:123", want: telegramSourceCollect},
+		{operation: "cycle_batch:1:2:3", want: telegramSourceCycle},
+		{operation: "full_push:1:2", want: telegramSourceFullPush},
+		{operation: "history:1", want: telegramSourceHistory},
+		{operation: "down:1", want: telegramSourceCleanup},
+		{operation: "manual:1", priority: tgJobPriorityInteractive, want: telegramSourceManual},
+	}
+	for _, test := range cases {
+		if got := telegramJobSourceOf(test.operation, test.priority); got != test.want {
+			t.Fatalf("operation=%q priority=%d got=%q want=%q", test.operation, test.priority, got, test.want)
+		}
+	}
+}

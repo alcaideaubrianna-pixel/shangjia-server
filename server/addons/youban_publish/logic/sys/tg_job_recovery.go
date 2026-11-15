@@ -58,7 +58,7 @@ func (s *sSysPublish) recoverInterruptedTelegramJobs(ctx context.Context, limit 
 	var ids []int64
 	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Fields("id").
-		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
+		WhereIn("status", append(telegramJobRetryableStatuses(), telegramJobStatusConfirming)).
 		WhereIn("dispatch_status", []string{tgDispatchStatusQueued, tgDispatchStatusProcessing}).
 		Where("updated_at <= ?", now.Add(-telegramDispatchJobRecoverAfter)).
 		Where(telegramActiveChannelCondition()).
@@ -88,7 +88,7 @@ func (s *sSysPublish) recoverInterruptedTelegramJobs(ctx context.Context, limit 
 		if len(recoverableIDs) > 0 {
 			result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 				WhereIn("id", recoverableIDs).
-				WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
+				WhereIn("status", append(telegramJobRetryableStatuses(), telegramJobStatusConfirming)).
 				WhereIn("dispatch_status", []string{tgDispatchStatusQueued, tgDispatchStatusProcessing}).
 				Where("updated_at <= ?", now.Add(-telegramDispatchJobRecoverAfter)).
 				Data(g.Map{
@@ -501,7 +501,7 @@ func (s *sSysPublish) recoverExpiredTelegramOutboxDispatches(ctx context.Context
 	var accounts []struct {
 		AccountId int64 `orm:"account_id"`
 	}
-	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Fields("account_id").Where("account_id > 0").WhereIn("status", []string{telegramJobStatusPending, telegramJobStatusRetryWait, telegramJobStatusConfirming}).Where("dispatch_status", tgDispatchStatusQueued).Group("account_id").OrderAsc("account_id").Limit(32).Scan(&accounts); err != nil {
+	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Fields("account_id").Where("account_id > 0").WhereIn("status", telegramJobRecoverableStatuses()).Where("dispatch_status", tgDispatchStatusQueued).Group("account_id").OrderAsc("account_id").Limit(32).Scan(&accounts); err != nil {
 		return gerror.Wrap(err, "读取待恢复Outbox账户失败")
 	}
 	for _, account := range accounts {
@@ -529,7 +529,7 @@ func (s *sSysPublish) recoverExpiredTelegramOutboxDispatchesForAccount(ctx conte
 		Where("o.event_type", telegramOutboxEventPublish).
 		Where("o.status", telegramOutboxProcessing).
 		WhereLTE("o.lease_expires_at", now).
-		WhereIn("j.status", []string{telegramJobStatusPending, telegramJobStatusRetryWait, telegramJobStatusConfirming}).
+		WhereIn("j.status", telegramJobRecoverableStatuses()).
 		Where("j.dispatch_status", tgDispatchStatusQueued).
 		Where(telegramActiveChannelConditionForAlias("j")).
 		OrderAsc("o.lease_expires_at").OrderAsc("j.id").Limit(limit)
@@ -874,7 +874,7 @@ func (s *sSysPublish) recoverStaleTelegramDispatchJobs(ctx context.Context, limi
 	deadline := telegramRecoveryTimeText(now.Add(-telegramDispatchJobRecoverAfter))
 	var jobs []telegramJobRecord
 	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
+		WhereIn("status", append(telegramJobRetryableStatuses(), telegramJobStatusConfirming)).
 		WhereIn("dispatch_status", []string{tgDispatchStatusQueued, tgDispatchStatusProcessing}).
 		Where(telegramActiveChannelCondition()).
 		Where(messagePushPlanRecoveryConditionSQL(publishTgJobTable), telegramRecoveryTimeText(now.Add(-messagePushPlanJobExpireAfter))).
@@ -1026,7 +1026,7 @@ func (s *sSysPublish) recoverPendingIdleTelegramJobs(ctx context.Context, limit 
 			telegramRecoveryTimeText(now.Add(-messagePushPlanJobExpireAfter)), nowText, deadline, candidateLimit)
 	} else {
 		err = g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
-			WhereIn("j.status", []string{"pending", "failed_retry", "unknown"}).
+			WhereIn("j.status", append(telegramJobRetryableStatuses(), telegramJobStatusConfirming)).
 			Where(telegramWebhookDetachedJobSQL("j.")).
 			Where("(j.dispatch_status = ? OR j.dispatch_status = '')", tgDispatchStatusIdle).
 			Where("COALESCE(j.asynq_task_id, '') = ''").
