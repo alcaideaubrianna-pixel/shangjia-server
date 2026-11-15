@@ -437,7 +437,15 @@ func (s *sSysPublish) sendTelegramJobLockedByChannel(ctx context.Context, jobId 
 func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJobRecord) (resultErr error) {
 	ctx = telegramPublishJobTraceContext(ctx, job)
 	stage := beginTelegramPublishStage(ctx, "send.execute")
+	startedAt := time.Now()
 	defer stage.Finish(&resultErr)
+	defer func() {
+		result := "success"
+		if resultErr != nil {
+			result = "error"
+		}
+		observeTelegramProfilePublish(ctx, job, result, time.Since(startedAt))
+	}()
 	job.TargetChatId = normalizeTelegramChannelChatID(job.TargetChatId)
 	if strings.TrimSpace(job.TargetChatId) == "" {
 		return gerror.New("TG目标频道未配置")
