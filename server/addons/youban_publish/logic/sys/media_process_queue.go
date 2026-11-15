@@ -190,7 +190,7 @@ func (s *sSysPublish) wakeProfileTelegramJobs(ctx context.Context, profileId int
 			if _, err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
 				Where("profile_id", profileId).WhereNull("deleted_at").
 				Where("publish_task_status", "waiting_media").Data(g.Map{
-				"publish_task_status":     sysin.PublishTaskStatusFailed,
+				"publish_task_status":     string(sysin.PublishTaskStatusFailed),
 				"publish_task_updated_at": gtime.Now(),
 			}).Update(); err != nil {
 				return gerror.Wrap(err, "记录媒体失败导致的上架失败状态失败")
@@ -212,7 +212,7 @@ func (s *sSysPublish) wakeProfileTelegramJobs(ctx context.Context, profileId int
 				Where("profile_id", profileId).
 				Where("publish_task_status", "waiting_media").
 				Where("publish_operation_no", waiting.OperationNo).
-				Data(g.Map{"publish_task_status": sysin.PublishTaskStatusPublishing, "publish_task_updated_at": gtime.Now()}).Update()
+				Data(g.Map{"publish_task_status": string(sysin.PublishTaskStatusPublishing), "publish_task_updated_at": gtime.Now()}).Update()
 			if err != nil {
 				return gerror.Wrap(err, "抢占媒体完成后的资料上架任务失败")
 			}
@@ -228,16 +228,16 @@ func (s *sSysPublish) wakeProfileTelegramJobs(ctx context.Context, profileId int
 			if _, err := s.syncProfilePublishState(ctx, profileId, 1, consts.ContentVisibilityPublic, nil); err != nil {
 				_, _ = g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
 					Where("profile_id", profileId).Where("publish_operation_no", waiting.OperationNo).
-					Where("publish_task_status", sysin.PublishTaskStatusPublishing).
-					Data(g.Map{"publish_task_status": sysin.PublishTaskStatusFailed, "publish_task_updated_at": gtime.Now()}).Update()
+					Where("publish_task_status", string(sysin.PublishTaskStatusPublishing)).
+					Data(g.Map{"publish_task_status": string(sysin.PublishTaskStatusFailed), "publish_task_updated_at": gtime.Now()}).Update()
 				return gerror.Wrap(err, "媒体就绪后切换资料为可发布状态失败")
 			}
 			if _, err := s.profilePublishSource(ctx, profileId, waiting.TenantId, waiting.AccountId, true); err != nil {
 				_, _ = s.syncProfilePublishState(ctx, profileId, 2, consts.ContentVisibilityPrivate, nil)
 				_, _ = g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
 					Where("profile_id", profileId).Where("publish_operation_no", waiting.OperationNo).
-					Where("publish_task_status", sysin.PublishTaskStatusPublishing).
-					Data(g.Map{"publish_task_status": sysin.PublishTaskStatusFailed, "publish_task_updated_at": gtime.Now()}).Update()
+					Where("publish_task_status", string(sysin.PublishTaskStatusPublishing)).
+					Data(g.Map{"publish_task_status": string(sysin.PublishTaskStatusFailed), "publish_task_updated_at": gtime.Now()}).Update()
 				return gerror.Wrap(err, "媒体就绪后校验资料发布状态失败")
 			}
 		}
@@ -246,16 +246,16 @@ func (s *sSysPublish) wakeProfileTelegramJobs(ctx context.Context, profileId int
 		if err != nil {
 			message := boundPublishSuccessRecordMessage(err.Error())
 			_, _ = g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
-				Where("profile_id", profileId).Where("publish_operation_no", waiting.OperationNo).WhereIn("publish_task_status", []string{"waiting_media", sysin.PublishTaskStatusPublishing}).Data(g.Map{
-				"publish_task_status": sysin.PublishTaskStatusFailed, "publish_task_updated_at": gtime.Now(),
+				Where("profile_id", profileId).Where("publish_operation_no", waiting.OperationNo).WhereIn("publish_task_status", []string{"waiting_media", string(sysin.PublishTaskStatusPublishing)}).Data(g.Map{
+				"publish_task_status": string(sysin.PublishTaskStatusFailed), "publish_task_updated_at": gtime.Now(),
 			}).Update()
 			g.Log().Warning(ctx, "媒体就绪后恢复资料上架失败，已结束等待状态", g.Map{"profileId": profileId, "operationNo": waiting.OperationNo, "stage": "media_ready_wakeup", "error": message})
 		} else {
 			if len(jobIds) == 0 {
 				message := "媒体已就绪但未生成任何上架任务"
 				_, _ = g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
-					Where("profile_id", profileId).Where("publish_operation_no", waiting.OperationNo).WhereIn("publish_task_status", []string{"waiting_media", sysin.PublishTaskStatusPublishing}).Data(g.Map{
-					"publish_task_status": sysin.PublishTaskStatusFailed, "publish_task_updated_at": gtime.Now(),
+					Where("profile_id", profileId).Where("publish_operation_no", waiting.OperationNo).WhereIn("publish_task_status", []string{"waiting_media", string(sysin.PublishTaskStatusPublishing)}).Data(g.Map{
+					"publish_task_status": string(sysin.PublishTaskStatusFailed), "publish_task_updated_at": gtime.Now(),
 				}).Update()
 				g.Log().Warning(ctx, "媒体就绪后未生成上架任务，已结束等待状态", g.Map{"profileId": profileId, "operationNo": waiting.OperationNo, "stage": "media_ready_wakeup", "error": message})
 			} else {
