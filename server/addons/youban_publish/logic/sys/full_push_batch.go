@@ -251,27 +251,16 @@ func (s *sSysPublish) advanceFullPushBatch(ctx context.Context, batch fullPushBa
 	if len(profiles) == 0 {
 		return s.beginFullPushDispatch(ctx, batch)
 	}
-	lastProfileId := batch.CursorProfileId
-	queued := 0
-	for _, profile := range profiles {
-		if err = s.enqueueFullPushProfile(ctx, batch, profile); err != nil {
-			if updateErr := s.checkpointFullPushBatch(ctx, batch.Id, lastProfileId, queued); updateErr != nil {
-				return updateErr
-			}
-			if queued > 0 {
-				batch.RetryCount = 0
-			}
-			if errors.Is(err, errTelegramPublishPermissionPaused) {
-				return s.failFullPushBatch(ctx, batch, err)
-			}
-			return s.retryFullPushBatch(ctx, batch, err)
-		}
-		lastProfileId = profile.ProfileId
-		queued++
+	lastProfileId := profiles[len(profiles)-1].ProfileId
+	jobIDs, queued, err := s.prepareFullPushProfileBatch(ctx, batch, profiles)
+	if err != nil {
+		return s.retryFullPushBatch(ctx, batch, err)
 	}
 	if err = s.checkpointFullPushBatch(ctx, batch.Id, lastProfileId, queued); err != nil {
 		return err
 	}
+	// 事务提交后统一唤醒这一批任务，避免在任务写入事务内触碰 Redis/队列。
+	s.enqueuePreparedProfileJobs(ctx, jobIDs, batch.RequestedBy)
 	batch.CursorProfileId = lastProfileId
 	batch.QueuedCount += queued
 	if len(profiles) < limit || lastProfileId >= batch.SnapshotMaxProfileId {
@@ -293,6 +282,53 @@ func (s *sSysPublish) fullPushPendingJobCount(ctx context.Context, tenantId, cha
 		return 0, gerror.Wrap(err, "统计频道待发送TG任务失败")
 	}
 	return count, nil
+}
+
+// prepareFullPushProfileBatch 在一个短事务内准备一批全量推送任务。
+// 事务只写 tg_job/outbox；队列唤醒必须在提交后执行。
+func (s *sSysPublish) prepareFullPushProfileBatch(ctx context.Context, batch fullPushBatchRecord, profiles []fullPushProfile) ([]int64, int, error) {
+	if len(profiles) == 0 {
+		return nil, 0, nil
+	}
+	jobIDs := make([]int64, 0, len(profiles))
+	queued := 0
+	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		for _, profile := range profiles {
+			source, err := s.profilePublishSource(ctx, profile.ProfileId, profile.TenantId, profile.AccountId, true)
+			if errors.Is(err, errPublishProfileUnavailable) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			channels, err := s.telegramJobChannels(ctx, source, []int64{batch.ChannelId})
+			if err != nil {
+				if errors.Is(err, errNoTelegramPublishChannels) {
+					continue
+				}
+				return err
+			}
+			operationNo := fullPushProfileOperationNo(batch.BatchNo, profile.ProfileId)
+			if err := s.beginProfilePublishOperationTx(ctx, tx, profile.TenantId, profile.AccountId, profile.ProfileId, operationNo); err != nil {
+				return err
+			}
+			for _, channel := range channels {
+				jobID, err := s.prepareProfileChannelJobTx(ctx, tx, source, channel, operationNo, telegramProfilePublishMeta{})
+				if err != nil {
+					return err
+				}
+				if jobID > 0 {
+					jobIDs = append(jobIDs, jobID)
+					queued++
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	return jobIDs, queued, nil
 }
 
 func newFullPushBatchNo(channelId, timestampNano int64) string {
