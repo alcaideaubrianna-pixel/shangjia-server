@@ -203,9 +203,13 @@ func (s *sSysPublish) dispatchDueCollectProcessOutbox(ctx context.Context, limit
 		// 这里只需要判断是否达到并发上限，不需要精确 COUNT。精确统计会
 		// 扫描账户下全部 processing Outbox；有界读取 cap+1 条即可做同样的
 		// 限流决策，并把数据库工作量固定在一个很小的上限内。
-		processingRows, readErr := g.DB().Model(collectProcessOutboxTable).Ctx(ctx).
+		processingModel := g.DB().Model(collectProcessOutboxTable).Ctx(ctx).
 			Fields("id").
-			Where("tenant_id", scopes[0].TenantID).Where("account_id", scopes[0].AccountID).
+			Where("tenant_id", scopes[0].TenantID).Where("account_id", scopes[0].AccountID)
+		if scopes[0].SourceID > 0 {
+			processingModel = processingModel.Where("source_id", scopes[0].SourceID)
+		}
+		processingRows, readErr := processingModel.
 			// 过期 processing 也要计入上限；否则旧租约会在每轮被重新 claim，
 			// 总 processing 数持续增长并挤压正常采集终态处理。
 			Where("status", "processing").
@@ -225,6 +229,9 @@ func (s *sSysPublish) dispatchDueCollectProcessOutbox(ctx context.Context, limit
 	model := g.DB().Model(collectProcessOutboxTable).Ctx(ctx)
 	if len(scopes) > 0 {
 		model = model.Where("tenant_id", scopes[0].TenantID).Where("account_id", scopes[0].AccountID)
+		if scopes[0].SourceID > 0 {
+			model = model.Where("source_id", scopes[0].SourceID)
+		}
 	}
 	// 采集 Outbox 只读取领取和重建任务需要的字段，避免把错误文本、
 	// 连接元数据及未来新增的大字段带入每轮分片扫描。
@@ -265,6 +272,9 @@ func (s *sSysPublish) dispatchDueCollectProcessOutbox(ctx context.Context, limit
 		sourceModel := g.DB().Model(collectProcessOutboxTable).Ctx(ctx)
 		if len(scopes) > 0 {
 			sourceModel = sourceModel.Where("tenant_id", scopes[0].TenantID).Where("account_id", scopes[0].AccountID)
+			if scopes[0].SourceID > 0 {
+				sourceModel = sourceModel.Where("source_id", scopes[0].SourceID)
+			}
 		}
 		if err := sourceModel.Fields("source_id").Where("status", status).WhereLTE(dueColumn, now).
 			Where("source_id > 0").Distinct().OrderAsc("source_id").Limit(min(32, count)).Scan(&sources); err != nil {

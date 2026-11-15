@@ -40,6 +40,18 @@ func newCollectProcessRetryError(delay time.Duration, message string) error {
 	return &collectProcessRetryError{delay: delay, message: message}
 }
 
+func markCollectProcessSourceActive(ctx context.Context, payload collectProcessQueuePayload) {
+	if payload.TenantId <= 0 || payload.AccountId < 0 || payload.SourceId <= 0 || !cache.Initialized() {
+		return
+	}
+	client, err := cache.RedisClient()
+	if err != nil {
+		return
+	}
+	member := fmt.Sprintf("%d:%d:%d", payload.TenantId, payload.AccountId, payload.SourceId)
+	_, _ = client.Do(ctx, "SADD", collectProcessActiveSourcesKey, member)
+}
+
 type collectProcessQueuePayload struct {
 	History      bool   `json:"history,omitempty"`
 	AccountId    int64  `json:"accountId"`
@@ -52,6 +64,8 @@ type collectProcessQueuePayload struct {
 	OutboxOwner  string `json:"outboxOwner,omitempty"`
 	Recovery     bool   `json:"recovery,omitempty"`
 }
+
+const collectProcessActiveSourcesKey = "youban_publish:collect:active_sources"
 
 const (
 	collectProcessTaskUniqueTTL   = 30 * time.Minute
@@ -195,6 +209,7 @@ func (s *sSysPublish) enqueueCollectProcessTaskWithOutbox(ctx context.Context, p
 			}
 			g.Log().Warningf(ctx, "采集处理Outbox尚未迁移，临时沿用Redis任务 eventId:%d err:%+v", payload.EventId, err)
 		} else if payload.EventId > 0 {
+			markCollectProcessSourceActive(ctx, payload)
 			// Persist first, then hand the event directly to the realtime Redis queue.
 			// The durable outbox remains the recovery source if Redis enqueue fails.
 			return s.enqueueCollectProcessTaskWithOutbox(ctx, payload, delay, unique, false)

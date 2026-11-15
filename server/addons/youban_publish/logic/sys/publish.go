@@ -46,6 +46,9 @@ type sSysPublish struct {
 	collectRealtimeServer      *asynq.Server
 	collectProcessQueueServer  *asynq.Server
 	collectHistoryQueueServer  *asynq.Server
+	collectSourceQueueServers  map[string]*asynq.Server
+	collectSourceQueueOwners   map[string]string
+	collectSourceWorkerOwner   string
 	backgroundQueueServer      *asynq.Server
 	accountScheduleQueueServer *asynq.Server
 	materialImportPullServer   *asynq.Server

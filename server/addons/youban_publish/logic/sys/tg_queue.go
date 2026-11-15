@@ -125,13 +125,11 @@ func collectProcessQueueName(payload collectProcessQueuePayload) string {
 // collectProcessSourceQueueName 为没有协议号账户的 BOT 采集任务生成稳定来源队列。
 // 只使用租户、来源和来源频道参与分片，事件 ID 不参与，保证同一来源的窗口任务顺序稳定。
 func collectProcessSourceQueueName(payload collectProcessQueuePayload) string {
-	hash := fnv.New32a()
-	_, _ = hash.Write([]byte(fmt.Sprintf("%d:%s", payload.TenantId, collectProcessPartition(payload))))
 	prefix := tgQueueNameCollectProcessSourceRealtimePrefix
 	if payload.History || payload.Recovery {
 		prefix = tgQueueNameCollectProcessSourceRecoveryPrefix
 	}
-	return fmt.Sprintf("%s%02d", prefix, hash.Sum32()%collectProcessSourceQueueShards)
+	return fmt.Sprintf("%s%d:%d:%d", prefix, payload.TenantId, payload.AccountId, payload.SourceId)
 }
 
 // collectProcessRuleQueueKey 返回规则级逻辑队列键。

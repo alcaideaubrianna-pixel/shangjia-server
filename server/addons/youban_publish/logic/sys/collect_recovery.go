@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -106,13 +107,46 @@ func (s *sSysPublish) runCollectRecoveryCycle(ctx context.Context) {
 	s.recoverCollectOnce(ctx)
 }
 
+func activeCollectProcessScopes(ctx context.Context) []publishAccountScope {
+	if !cache.Initialized() {
+		return nil
+	}
+	client, err := cache.RedisClient()
+	if err != nil {
+		return nil
+	}
+	value, err := client.Do(ctx, "SMEMBERS", collectProcessActiveSourcesKey)
+	if err != nil || value.IsNil() {
+		return nil
+	}
+	members := value.Strings()
+	scopes := make([]publishAccountScope, 0, len(members))
+	for _, member := range members {
+		parts := strings.Split(member, ":")
+		if len(parts) != 3 {
+			continue
+		}
+		tenantID, errTenant := strconv.ParseInt(parts[0], 10, 64)
+		accountID, errAccount := strconv.ParseInt(parts[1], 10, 64)
+		sourceID, errSource := strconv.ParseInt(parts[2], 10, 64)
+		if errTenant != nil || errAccount != nil || errSource != nil || tenantID <= 0 || accountID < 0 || sourceID <= 0 {
+			continue
+		}
+		scopes = append(scopes, publishAccountScope{TenantID: tenantID, AccountID: accountID, SourceID: sourceID})
+	}
+	return scopes
+}
+
 func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	if err := s.recoverCollectSourceStats(ctx, 100); err != nil {
 		g.Log().Warningf(ctx, "恢复采集源统计任务失败：%+v", err)
 	}
 	mediaBatchSize := collectMediaRecoveryBatchSize(ctx)
-	if err := s.dispatchDueCollectProcessOutbox(ctx, collectProcessOutboxRecoveryBatchSize(ctx)); err != nil {
-		g.Log().Warningf(ctx, "恢复采集处理Outbox失败：%+v", err)
+	batchSize := collectProcessOutboxRecoveryBatchSize(ctx)
+	for _, scope := range activeCollectProcessScopes(ctx) {
+		if err := s.dispatchDueCollectProcessOutbox(ctx, batchSize, scope); err != nil {
+			g.Log().Warningf(ctx, "恢复采集处理Outbox失败 tenantId:%d accountId:%d sourceId:%d err:%+v", scope.TenantID, scope.AccountID, scope.SourceID, err)
+		}
 	}
 	// Always drain a bounded ready-media transition before backpressure can
 	// yield historical recovery; otherwise ready events remain orphaned while

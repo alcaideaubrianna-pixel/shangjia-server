@@ -25,6 +25,7 @@ import (
 type publishAccountScope struct {
 	TenantID  int64 `json:"tenantId"`
 	AccountID int64 `json:"accountId"`
+	SourceID  int64 `json:"sourceId,omitempty"`
 }
 
 // pauseInactiveAccountCycles 复用免费账户保护策略，每账户每分钟检查一次，避免每秒重复遍历全部频道。
