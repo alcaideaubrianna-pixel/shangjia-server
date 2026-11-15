@@ -147,6 +147,15 @@ func (s *sSysPublish) submitProfilePublishWithMeta(ctx context.Context, profileI
 			return nil
 		}
 	}
+	// Manual web/BOT publishing shares this entrypoint. Once media is ready,
+	// make the authoritative lifecycle state public before creating jobs; the
+	// sender performs a final status check and would otherwise supersede jobs
+	// created while the profile still has its default offline status.
+	if profileId > 0 && (strings.TrimSpace(operationNo) == "" || isInteractiveProfilePublishOperation(operationNo)) {
+		if _, stateErr := s.syncProfilePublishState(ctx, profileId, 1, consts.ContentVisibilityPublic, nil); stateErr != nil {
+			return stateErr
+		}
+	}
 	var jobIds []int64
 	var err error
 	// 新引擎自动循环已有事务幂等和发送前资料校验，不再争用资料级Redis锁阻塞兄弟频道。
