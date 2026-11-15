@@ -240,12 +240,13 @@ func (s *sSysPublish) recoverMissingTelegramStreamTasks(ctx context.Context, aft
 	return cursor, nil
 }
 
-// recoverTelegramStreamExecutions 仅扫描安全检查点；未确认的外部发送仍由原Attempt对账处理，禁止盲目重发。
+// recoverTelegramStreamExecutions 扫描可由持久化 Attempt 证据恢复的执行检查点；
+// 未确认的外部发送仍由原 Attempt 对账处理，禁止盲目重发。
 func (s *sSysPublish) recoverTelegramStreamExecutions(ctx context.Context, limit int) error {
 	var jobs []telegramJobRecord
 	query := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
-		Fields("j.*").WhereIn("j.status", []string{telegramJobStatusSending, telegramJobStatusConfirming}).
-		WhereIn("j.send_phase", []string{telegramSendPhaseDisplayConfirmed, telegramSendPhaseVerifyConfirmed, telegramSendPhaseCompletedNoVerify}).
+		Fields("j.*").WhereIn("j.status", []string{telegramJobStatusSending, telegramJobStatusConfirming, "unknown"}).
+		WhereIn("j.send_phase", []string{telegramSendPhaseDisplaySending, telegramSendPhaseDisplayConfirmed, telegramSendPhaseVerifyConfirmed, telegramSendPhaseCompletedNoVerify}).
 		WhereLTE("j.updated_at", gtime.Now().Add(-telegramStreamExecutionTTL)).
 		Where(telegramActiveChannelConditionForAlias("j")).
 		OrderAsc("j.updated_at").OrderAsc("j.id").Limit(limit)
@@ -273,7 +274,14 @@ func (s *sSysPublish) recoverTelegramStreamExecution(ctx context.Context, job te
 	if err != nil || !acquired {
 		return err
 	}
-	// 已有确认检查点的unknown只补本地提交，仍复用原对账CAS；未确认发送阶段不进入本扫描。
+	if job.Status == "unknown" {
+		s.releaseTelegramChannelLease(ctx, lease)
+		if err := s.reconcileUnknownTelegramJob(ctx, job); err != nil {
+			return err
+		}
+		return s.wakeNextTelegramChannelJob(ctx, job)
+	}
+	// 已有确认检查点的 confirming 任务只补本地提交，仍复用原对账 CAS。
 	if job.Status == telegramJobStatusConfirming {
 		s.releaseTelegramChannelLease(ctx, lease)
 		if err := s.reconcileUnknownTelegramJob(ctx, job); err != nil {
