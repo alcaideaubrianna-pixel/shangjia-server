@@ -44,6 +44,37 @@ type publishCollectorAccountTaskHandler struct{ publish *sSysPublish }
 
 type publishCollectorAccountMediaProvider struct{ publish *sSysPublish }
 
+// telegramWebhookReconcileMessage 是 webhook 到达的 Telegram 消息短期索引。
+// Redis 只用于加速 unknown/reconciling 对账，最终消息记录仍由 PostgreSQL 保存。
+type telegramWebhookReconcileMessage struct {
+	ChatID       string    `json:"chatId"`
+	MessageID    int64     `json:"messageId"`
+	MediaGroupID string    `json:"mediaGroupId,omitempty"`
+	ReceivedAt   time.Time `json:"receivedAt"`
+}
+
+const telegramWebhookReconcileIndexTTL = 24 * time.Hour
+
+func telegramWebhookReconcileMessageKey(chatID string, messageID int64) string {
+	return fmt.Sprintf("youban:tg:reconcile:message:%s:%d", strings.TrimSpace(chatID), messageID)
+}
+
+func telegramWebhookReconcileGroupKey(chatID, mediaGroupID string) string {
+	return fmt.Sprintf("youban:tg:reconcile:group:%s:%s", strings.TrimSpace(chatID), strings.TrimSpace(mediaGroupID))
+}
+
+func cacheTelegramWebhookReconcileMessage(ctx context.Context, message telegramWebhookReconcileMessage) {
+	if strings.TrimSpace(message.ChatID) == "" || message.MessageID <= 0 {
+		return
+	}
+	_ = cache.Instance().Set(ctx, telegramWebhookReconcileMessageKey(message.ChatID, message.MessageID), message, telegramWebhookReconcileIndexTTL)
+	if strings.TrimSpace(message.MediaGroupID) != "" {
+		// Keep the group index as a presence marker. Per-message keys remain the
+		// authoritative Redis entries and avoid a growing list in one key.
+		_ = cache.Instance().Set(ctx, telegramWebhookReconcileGroupKey(message.ChatID, message.MediaGroupID), message.ReceivedAt, telegramWebhookReconcileIndexTTL)
+	}
+}
+
 type botCollectChannelCandidate struct {
 	Id             int64  `json:"id"`
 	TelegramChatId string `json:"telegramChatId"`
@@ -786,9 +817,9 @@ func findTelegramAttemptMessages(ctx context.Context, client *telegram.Client, c
 	defer cancel()
 	started := time.Now()
 	messages, err := findTelegramAttemptMessagesPaged(historyCtx, attempt, func(ctx context.Context, offset int) ([]*tg.Message, error) {
-		res, err := client.API().MessagesGetHistory(ctx, &tg.MessagesGetHistoryRequest{Peer: peer, Limit: 100, OffsetID: offset})
+		res, err := client.API().MessagesGetHistory(ctx, &tg.MessagesGetHistoryRequest{Peer: peer, Limit: 500, OffsetID: offset})
 		if err != nil {
-			return nil, gerror.Wrap(err, "协议号读取频道最近消息失败")
+			return nil, gerror.Wrap(err, "协议号读取频道历史消息失败")
 		}
 		return tgHistoryMessages(res), nil
 	})
@@ -799,11 +830,17 @@ func findTelegramAttemptMessages(ctx context.Context, client *telegram.Client, c
 // An album can straddle the first history page. Never treat a truncated page
 // as evidence of a partial send. Bound both history work and network time.
 func findTelegramAttemptMessagesPaged(ctx context.Context, attempt telegramDeliveryAttempt, fetch func(context.Context, int) ([]*tg.Message, error)) ([]*telegramSentMessage, error) {
+	const (
+		pageSize      = 500
+		maxPages      = 20
+		historyMargin = 60 * time.Second
+	)
+
 	var history []*tg.Message
 	seen := make(map[int]bool)
 	offset := 0
 	var matchErr error
-	for page := 0; page < 5; page++ {
+	for page := 0; page < maxPages; page++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -826,6 +863,7 @@ func findTelegramAttemptMessagesPaged(ctx context.Context, attempt telegramDeliv
 				oldestDate = message.Date
 			}
 		}
+
 		matched, err := selectTelegramAttemptMessages(history, attempt)
 		if err == nil && len(matched) > 0 {
 			return matched, nil
@@ -835,13 +873,25 @@ func findTelegramAttemptMessagesPaged(ctx context.Context, attempt telegramDeliv
 			return nil, matchErr
 		}
 		if offset == previousOffset {
-			return nil, gerror.New("Telegram对账分页未前进，禁止重发")
+			return nil, gerror.New("Telegram对账分页未前进，结果仍不确定，禁止重发")
 		}
-		if attempt.CreatedAt != nil && oldestDate > 0 && int64(oldestDate) < dbtime.FromTimestamp(attempt.CreatedAt).Time.Unix()-60 {
+
+		// A message timestamp older than the attempt's send time proves that the
+		// relevant history window has been covered. Do not require an arbitrary
+		// number of messages to be read before making that determination.
+		if attempt.CreatedAt != nil && oldestDate > 0 && int64(oldestDate) <= dbtime.FromTimestamp(attempt.CreatedAt).Time.Unix()-int64(historyMargin/time.Second) {
+			return nil, matchErr
+		}
+		// A short page is Telegram's explicit history boundary. A full page may
+		// still have older messages, so continue with the message-id cursor.
+		if len(messages) < pageSize {
 			return nil, matchErr
 		}
 	}
-	return nil, gerror.New("Telegram对账达到500条上限，尚未覆盖发送时间，禁止重发")
+
+	// The bounded lookup did not prove absence. Keep the attempt ambiguous so
+	// callers retain the no-blind-retry rule and can schedule another lookup.
+	return nil, gerror.New("Telegram对账分页达到安全上限，结果仍不确定，禁止重发")
 }
 
 type telegramIncompleteAlbumError struct {
@@ -1262,6 +1312,10 @@ func (s *sSysPublish) ingestCollectorBotDelivery(ctx context.Context, delivery *
 	if source.IsEmpty() {
 		return nil
 	}
+	cacheTelegramWebhookReconcileMessage(ctx, telegramWebhookReconcileMessage{
+		ChatID: delivery.SourceChatID, MessageID: delivery.SourceMessageID,
+		MediaGroupID: delivery.SourceGroupedID, ReceivedAt: delivery.ReceivedAt,
+	})
 	// Collector webhook updates carry the authoritative current Chat title.
 	// Synchronize it before any rule-list/cache lookup so channel renames are
 	// visible even when this delivery does not pass a collection rule.

@@ -3,14 +3,17 @@ package sys
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/gogf/gf/v2/os/gcache"
 	"github.com/gotd/td/tg"
 
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
 	collectorservice "hotgo/addons/telegram_collector/service"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/library/cache"
 )
 
 func TestPublishAccountTaskHandlersRegistered(t *testing.T) {
@@ -246,13 +249,15 @@ func TestSelectTelegramAttemptMessagesRejectsIncompleteSingleMessage(t *testing.
 
 func TestFindTelegramAttemptMessagesAcrossHistoryPages(t *testing.T) {
 	attempt := telegramDeliveryAttempt{AttemptToken: "incident-nine", Phase: "display", ExpectedCount: 9}
-	first := make([]*tg.Message, 8)
+	first := make([]*tg.Message, 500)
 	for i := range first {
-		first[i] = &tg.Message{ID: 109 - i}
+		first[i] = &tg.Message{ID: 600 - i}
+	}
+	for i := 0; i < 8; i++ {
 		first[i].SetGroupedID(88)
 	}
 	first[0].Message = telegramAttemptMarker(attempt.AttemptToken)
-	last := &tg.Message{ID: 101}
+	last := &tg.Message{ID: 100}
 	last.SetGroupedID(88)
 	calls := 0
 	messages, err := findTelegramAttemptMessagesPaged(context.Background(), attempt, func(_ context.Context, offset int) ([]*tg.Message, error) {
@@ -260,8 +265,8 @@ func TestFindTelegramAttemptMessagesAcrossHistoryPages(t *testing.T) {
 		if calls == 1 {
 			return first, nil
 		}
-		if offset != 102 {
-			t.Fatalf("history offset=%d, want 102", offset)
+		if offset != 101 {
+			t.Fatalf("history offset=%d, want 101", offset)
 		}
 		return []*tg.Message{last}, nil
 	})
@@ -279,14 +284,21 @@ func TestFindTelegramAttemptMessagesAcrossHistoryPages(t *testing.T) {
 func TestFindTelegramAttemptMessagesPagingIsBounded(t *testing.T) {
 	attempt := telegramDeliveryAttempt{AttemptToken: "missing", Phase: "display", ExpectedCount: 9}
 	calls := 0
+	lastOffset := 0
 	_, err := findTelegramAttemptMessagesPaged(context.Background(), attempt, func(_ context.Context, offset int) ([]*tg.Message, error) {
 		calls++
-		if offset == 0 {
-			offset = 1000
+		if calls > 1 && offset > lastOffset {
+			t.Fatalf("history offset did not move backwards: previous=%d current=%d", lastOffset, offset)
 		}
-		return []*tg.Message{{ID: offset - 1}}, nil
+		page := make([]*tg.Message, 500)
+		base := 100000 - calls*500
+		for i := range page {
+			page[i] = &tg.Message{ID: base + (499 - i)}
+		}
+		lastOffset = base
+		return page, nil
 	})
-	if err == nil || calls != 5 {
+	if err == nil || calls != 20 || !strings.Contains(err.Error(), "结果仍不确定") {
 		t.Fatalf("paging limit: calls=%d err=%v", calls, err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -384,5 +396,35 @@ func TestPublishChannelMessageAuditIsNotRequired(t *testing.T) {
 		if !collectChatMatchesPublishChannel(incoming, publishTargets) {
 			t.Fatalf("publish target %s was not blocked without audit lookup", incoming)
 		}
+	}
+}
+
+func TestTelegramWebhookReconcileIndexUsesMessageAndGroupKeys(t *testing.T) {
+	if !cache.Initialized() {
+		cache.SetAdapter(context.Background())
+	}
+	previous := cache.Instance().GetAdapter()
+	cache.Instance().SetAdapter(gcache.NewAdapterMemory())
+	t.Cleanup(func() { cache.Instance().SetAdapter(previous) })
+
+	message := telegramWebhookReconcileMessage{
+		ChatID: "-100123", MessageID: 88, MediaGroupID: "album-7", ReceivedAt: time.Unix(100, 0),
+	}
+	cacheTelegramWebhookReconcileMessage(context.Background(), message)
+
+	value, err := cache.Instance().Get(context.Background(), telegramWebhookReconcileMessageKey(message.ChatID, message.MessageID))
+	if err != nil || value.IsNil() {
+		t.Fatalf("message reconcile index missing: value=%v err=%v", value, err)
+	}
+	var got telegramWebhookReconcileMessage
+	if err := value.Struct(&got); err != nil {
+		t.Fatalf("decode message reconcile index: %v", err)
+	}
+	if got.ChatID != message.ChatID || got.MessageID != message.MessageID || got.MediaGroupID != message.MediaGroupID {
+		t.Fatalf("message reconcile index = %+v, want %+v", got, message)
+	}
+	group, err := cache.Instance().Get(context.Background(), telegramWebhookReconcileGroupKey(message.ChatID, message.MediaGroupID))
+	if err != nil || group.IsNil() {
+		t.Fatalf("group reconcile index missing: value=%v err=%v", group, err)
 	}
 }
