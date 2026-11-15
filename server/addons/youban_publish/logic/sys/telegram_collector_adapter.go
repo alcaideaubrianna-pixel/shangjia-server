@@ -146,6 +146,22 @@ func telegramWebhookAttemptIDs(ctx context.Context, chatID string) []int64 {
 	return ids
 }
 
+func mergeTelegramWebhookAttempts(primary, fallback []telegramDeliveryAttempt) []telegramDeliveryAttempt {
+	seen := make(map[int64]struct{}, len(primary)+len(fallback))
+	merged := make([]telegramDeliveryAttempt, 0, len(primary)+len(fallback))
+	for _, attempt := range append(primary, fallback...) {
+		if attempt.Id <= 0 {
+			continue
+		}
+		if _, ok := seen[attempt.Id]; ok {
+			continue
+		}
+		seen[attempt.Id] = struct{}{}
+		merged = append(merged, attempt)
+	}
+	return merged
+}
+
 type botCollectChannelCandidate struct {
 	Id             int64  `json:"id"`
 	TelegramChatId string `json:"telegramChatId"`

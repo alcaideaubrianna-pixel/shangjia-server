@@ -453,3 +453,12 @@ func TestTelegramWebhookAttemptIndexRoundTripAndRedisFallback(t *testing.T) {
 		t.Fatalf("redis fallback should return no candidates, got %v", got)
 	}
 }
+
+func TestMergeTelegramWebhookAttemptsKeepsPostgresAttemptWhenRedisCandidateIsDirty(t *testing.T) {
+	redisAttempt := telegramDeliveryAttempt{Id: 10, JobId: 100, TargetChatId: "-1001"}
+	postgresAttempt := telegramDeliveryAttempt{Id: 20, JobId: 200, TargetChatId: "-1001"}
+	merged := mergeTelegramWebhookAttempts([]telegramDeliveryAttempt{redisAttempt, redisAttempt}, []telegramDeliveryAttempt{postgresAttempt, redisAttempt})
+	if len(merged) != 2 || merged[0].Id != redisAttempt.Id || merged[1].Id != postgresAttempt.Id {
+		t.Fatalf("merged attempts=%+v, want redis candidate plus postgres fallback without duplicates", merged)
+	}
+}

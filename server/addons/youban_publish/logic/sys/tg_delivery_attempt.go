@@ -982,8 +982,9 @@ func (s *sSysPublish) matchTelegramDeliveryAttempt(ctx context.Context, botId in
 		window = 24 * time.Hour
 		limit = 1000
 	}
+	attemptIDs := telegramWebhookAttemptIDs(ctx, chatId)
 	attemptQuery := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx)
-	if attemptIDs := telegramWebhookAttemptIDs(ctx, chatId); len(attemptIDs) > 0 {
+	if len(attemptIDs) > 0 {
 		attemptQuery = attemptQuery.WhereIn("id", attemptIDs)
 	}
 	if err := attemptQuery.
@@ -995,18 +996,21 @@ func (s *sSysPublish) matchTelegramDeliveryAttempt(ctx context.Context, botId in
 		g.Log().Warningf(ctx, "匹配TG Webhook Attempt失败 bot:%d chat:%s message:%d err:%+v", botId, chatId, msg.ID, err)
 		return
 	}
-	if len(attempts) == 0 {
-		// Redis is only a candidate accelerator. A stale/truncated index must
-		// never hide a valid PostgreSQL Attempt from the webhook matcher.
+	if len(attemptIDs) > 0 {
+		// Redis is an accelerator only. Always merge a complete PostgreSQL
+		// window when Redis returned candidates: stale/empty candidates must not
+		// hide a real Attempt that was created before the Redis write completed.
+		var fallbackAttempts []telegramDeliveryAttempt
 		if err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
 			Where("bot_id", botId).Where("target_chat_id", chatId).
 			WhereIn("status", []string{telegramAttemptStatusSending, telegramAttemptStatusWaiting, telegramAttemptStatusRetryWait, telegramAttemptStatusConfirmed, telegramAttemptStatusSuperseded}).
 			Where("status <> ? OR webhook_deadline IS NOT NULL", telegramAttemptStatusRetryWait).
 			WhereGTE("created_at", gtime.Now().Add(-window)).
-			OrderDesc("id").Limit(limit).Scan(&attempts); err != nil {
-			g.Log().Warningf(ctx, "Redis对账候选失效后回退PostgreSQL失败 bot:%d chat:%s message:%d err:%v", botId, chatId, msg.ID, err)
+			OrderDesc("id").Limit(limit).Scan(&fallbackAttempts); err != nil {
+			g.Log().Warningf(ctx, "Redis对账候选脏数据回退PostgreSQL失败 bot:%d chat:%s message:%d err:%v", botId, chatId, msg.ID, err)
 			return
 		}
+		attempts = mergeTelegramWebhookAttempts(attempts, fallbackAttempts)
 	}
 	var matched *telegramDeliveryAttempt
 	if strings.TrimSpace(msg.MediaGroupID) != "" {
