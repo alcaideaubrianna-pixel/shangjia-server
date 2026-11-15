@@ -15,6 +15,7 @@ import (
 	"github.com/hibiken/asynq"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 )
 
@@ -198,10 +199,22 @@ func (s *sSysPublish) wakeProfileTelegramJobs(ctx context.Context, profileId int
 			g.Log().Warningf(ctx, "资料上架因媒体终态失败停止等待 profileId:%d failed_media:%d", profileId, failedCount)
 			return nil
 		}
-		// Media completion is already inside the publish lifecycle. Re-entering
-		// submitProfilePublish here can race with the waiting_media projection
-		// and make the request look like a second submission. Prepare the same
-		// Telegram jobs directly, then enqueue the committed job IDs.
+		// Media completion resumes the same interactive publish lifecycle. The
+		// initial request intentionally leaves the profile private while media
+		// is processing, so the wakeup path must perform the same authoritative
+		// public transition before creating Telegram jobs. Otherwise the worker
+		// sees status=private and keeps requeueing the jobs forever.
+		manualLifecycle := strings.TrimSpace(waiting.OperationNo) == "" || isInteractiveProfilePublishOperation(waiting.OperationNo)
+		if manualLifecycle {
+			if _, err := s.syncProfilePublishState(ctx, profileId, 1, consts.ContentVisibilityPublic, nil); err != nil {
+				return gerror.Wrap(err, "媒体就绪后切换资料为可发布状态失败")
+			}
+			if _, err := s.profilePublishSource(ctx, profileId, waiting.TenantId, waiting.AccountId, true); err != nil {
+				_, _ = s.syncProfilePublishState(ctx, profileId, 2, consts.ContentVisibilityPrivate, nil)
+				return gerror.Wrap(err, "媒体就绪后校验资料发布状态失败")
+			}
+		}
+		// Prepare the same Telegram jobs directly, then enqueue the committed job IDs.
 		jobIds, err := s.prepareProfilePublishJobs(ctx, profileId, waiting.TenantId, waiting.AccountId, waiting.OperationNo, nil, false, telegramProfilePublishMeta{})
 		if err != nil {
 			message := boundPublishSuccessRecordMessage(err.Error())

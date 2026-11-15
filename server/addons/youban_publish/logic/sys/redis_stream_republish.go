@@ -10,7 +10,6 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
-	"github.com/hibiken/asynq"
 )
 
 const telegramOutboxCleanupPrefix = "telegram_job.cleanup."
@@ -126,11 +125,11 @@ func (s *sSysPublish) dispatchTelegramCleanupIntents(ctx context.Context, limit 
 		}
 		client, err := s.telegramQueueClient(ctx)
 		if err == nil {
-			// 固定task ID在任务执行或重试期间去重，不覆盖发送任务的asynq_task_id/queue_name。
-			_, err = client.EnqueueContext(ctx, asynq.NewTask(tgTaskTypeCleanup, []byte(fmt.Sprintf(`{"jobId":%d}`, row.JobId))),
-				asynq.Queue(channelDispatchDeleteQueueName(priority)), asynq.TaskID(fmt.Sprintf("tg-cleanup-job-%d", row.JobId)), asynq.MaxRetry(20), asynq.Timeout(2*time.Minute))
+			// 使用与普通清理入队相同的 job 级 task ID 和 payload，
+			// 避免重投路径与首次入队路径产生不同的任务语义。
+			_, err = enqueueTelegramCleanupTask(ctx, client, channelDispatchDeleteQueueName(priority), row.JobId, 0, true, row.AttemptCount, tgQueuePayload{JobId: row.JobId})
 		}
-		if err != nil && !gerror.Is(err, asynq.ErrTaskIDConflict) {
+		if err != nil {
 			if releaseErr := s.releaseTelegramOutbox(ctx, row.Id, owner, row.AttemptCount, err.Error()); releaseErr != nil {
 				return releaseErr
 			}

@@ -90,7 +90,12 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) (resultE
 				}
 				return nil
 			}
-			return gerror.New("资料当前不可发布，等待资料操作状态收敛")
+			// Jobs are created only after the publish lifecycle has been made
+			// public. A private profile here is therefore a stale job (for
+			// example, a job created before media-wakeup fixed the lifecycle
+			// transition). Leaving it pending blocks the channel head forever
+			// and keeps the Bot operation in "processing".
+			return s.supersedeTelegramJobAndCompleteOperation(ctx, targetJob)
 		}
 	}
 	if isMessagePushOperationNo(targetJob.OperationNo) {

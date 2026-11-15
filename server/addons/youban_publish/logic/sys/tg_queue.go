@@ -289,6 +289,75 @@ type tgQueuePayload struct {
 	ForceCompletion    bool    `json:"forceCompletion,omitempty"`
 }
 
+func telegramCleanupTaskID(jobId int64) string {
+	return fmt.Sprintf("tg-cleanup-job-%d", jobId)
+}
+
+func telegramCleanupFallbackTaskID(jobId int64, attemptCount int) string {
+	if attemptCount < 0 {
+		attemptCount = 0
+	}
+	return fmt.Sprintf("tg-cleanup-job-%d-attempt-%d", jobId, attemptCount)
+}
+
+func telegramCleanupTaskBody(payload tgQueuePayload) ([]byte, error) {
+	return json.Marshal(payload)
+}
+
+// enqueueTelegramCleanupTask uses a job-scoped stable ID first and a deterministic
+// attempt-scoped fallback when an old task still occupies that ID. Both IDs are
+// derived from the cleanup job, so different channel jobs cannot collide.
+func enqueueTelegramCleanupTask(ctx context.Context, client *asynq.Client, queueName string, jobId int64, delay time.Duration, unique bool, attemptCount int, payload tgQueuePayload) (taskId string, err error) {
+	payload.JobId = jobId
+	body, err := telegramCleanupTaskBody(payload)
+	if err != nil {
+		return "", err
+	}
+	options := []asynq.Option{
+		asynq.Queue(queueName),
+		asynq.MaxRetry(20),
+		asynq.Timeout(2 * time.Minute),
+		asynq.TaskID(telegramCleanupTaskID(jobId)),
+	}
+	if unique {
+		options = append(options, asynq.Unique(30*time.Second))
+	}
+	if delay > 0 {
+		options = append(options, asynq.ProcessIn(delay))
+	}
+	info, err := client.EnqueueContext(ctx, asynq.NewTask(tgTaskTypeCleanup, body), options...)
+	if err == nil {
+		return info.ID, nil
+	}
+	if errors.Is(err, asynq.ErrDuplicateTask) {
+		return telegramCleanupTaskID(jobId), nil
+	}
+	if !errors.Is(err, asynq.ErrTaskIDConflict) {
+		return "", err
+	}
+
+	fallbackTaskId := telegramCleanupFallbackTaskID(jobId, attemptCount)
+	fallbackOptions := []asynq.Option{
+		asynq.Queue(queueName),
+		asynq.MaxRetry(20),
+		asynq.Timeout(2 * time.Minute),
+		asynq.TaskID(fallbackTaskId),
+	}
+	if delay > 0 {
+		fallbackOptions = append(fallbackOptions, asynq.ProcessIn(delay))
+	}
+	fallbackInfo, fallbackErr := client.EnqueueContext(ctx, asynq.NewTask(tgTaskTypeCleanup, body), fallbackOptions...)
+	if fallbackErr == nil {
+		return fallbackInfo.ID, nil
+	}
+	// The fallback ID is scoped to this job and retry attempt. A conflict means
+	// another dispatcher already accepted the same logical cleanup attempt.
+	if errors.Is(fallbackErr, asynq.ErrDuplicateTask) || errors.Is(fallbackErr, asynq.ErrTaskIDConflict) {
+		return fallbackTaskId, nil
+	}
+	return "", fallbackErr
+}
+
 type tgAttemptQueuePayload struct {
 	AttemptId int64 `json:"attemptId"`
 }
@@ -1109,6 +1178,10 @@ func (s *sSysPublish) enqueueTelegramTaskWithQueuePayload(ctx context.Context, t
 		return err
 	}
 	payload.JobId = jobId
+	if taskType == tgTaskTypeCleanup {
+		_, err = enqueueTelegramCleanupTask(ctx, client, queueName, jobId, delay, unique, 0, payload)
+		return err
+	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
