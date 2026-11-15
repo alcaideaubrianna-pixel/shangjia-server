@@ -156,6 +156,14 @@ func (s *sSysPublish) submitProfilePublishWithMeta(ctx context.Context, profileI
 		if _, stateErr := s.syncProfilePublishState(ctx, profileId, 1, consts.ContentVisibilityPublic, nil); stateErr != nil {
 			return stateErr
 		}
+		// Verify the authoritative row before creating any TG jobs. Several
+		// legacy callers used to update only visibility, leaving status=2; that
+		// made the worker supersede freshly-created jobs at send time. Refuse to
+		// create a half-publish operation and roll the lifecycle state back.
+		if _, verifyErr := s.profilePublishSource(ctx, profileId, tenantId, accountId, true); verifyErr != nil {
+			_, _ = s.syncProfilePublishState(ctx, profileId, 2, consts.ContentVisibilityPrivate, nil)
+			return gerror.Wrap(verifyErr, "资料上架状态未提交，未创建推送任务")
+		}
 	}
 	var jobIds []int64
 	var err error
