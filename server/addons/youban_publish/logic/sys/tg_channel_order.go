@@ -20,6 +20,43 @@ const telegramChannelDispatchLeaseTTL = 30 * time.Second
 const telegramChannelActiveJobLimit = 1
 const telegramChannelWakeDebounce = 200 * time.Millisecond
 
+type telegramChannelExecutionState string
+
+const (
+	telegramChannelExecutionWaiting  telegramChannelExecutionState = "waiting"
+	telegramChannelExecutionBlocking telegramChannelExecutionState = "blocking"
+	telegramChannelExecutionTerminal telegramChannelExecutionState = "terminal"
+)
+
+// telegramChannelJobExecutionState is the single channel-order policy.
+// Source only affects priority; it never changes whether a job owns the
+// destination channel.
+func telegramChannelJobExecutionState(status, phase, dispatchStatus string) telegramChannelExecutionState {
+	status = strings.ToLower(strings.TrimSpace(status))
+	phase = strings.ToLower(strings.TrimSpace(phase))
+	dispatchStatus = strings.ToLower(strings.TrimSpace(dispatchStatus))
+	switch status {
+	case "sending", "confirming", "unknown", "reconciling":
+		return telegramChannelExecutionBlocking
+	case "sent", "failed", "superseded", "cancelled", "deleted":
+		return telegramChannelExecutionTerminal
+	}
+	if dispatchStatus == tgDispatchStatusProcessing {
+		return telegramChannelExecutionBlocking
+	}
+	if phase == "display_sending" || phase == "display_confirming" ||
+		phase == "verify_sending" || phase == "verify_confirming" ||
+		phase == "cleanup_sending" || phase == "cleanup_confirming" ||
+		phase == "reconciling" {
+		return telegramChannelExecutionBlocking
+	}
+	return telegramChannelExecutionWaiting
+}
+
+func telegramChannelJobBlocksExecution(status, phase, dispatchStatus string) bool {
+	return telegramChannelJobExecutionState(status, phase, dispatchStatus) == telegramChannelExecutionBlocking
+}
+
 func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, job telegramJobRecord) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
@@ -164,10 +201,10 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 
 func telegramChannelBlockingJobStatuses() []string {
 	return []string{
-		telegramJobStatusPending,
-		telegramJobStatusRetryWait,
 		telegramJobStatusConfirming,
 		telegramJobStatusSending,
+		"unknown",
+		"reconciling",
 	}
 }
 
@@ -183,20 +220,9 @@ func telegramChannelBlockingJobStateSQLForPriority(alias string, priority int) s
 }
 
 func telegramChannelBlockingJobSQL(alias string) string {
-	// Unknown jobs are reconciled independently. They must not hold the normal
-	// channel queue hostage while waiting for a webhook or account fallback.
-	// Jobs tied to an unavailable protocol account are likewise left durable but
-	// excluded until the account is authorized again.
-	qualified := alias
-	if qualified != "" {
-		qualified += "."
-	}
-	// 已经进入发送队列的任务必须继续占住频道，即使其 Bot/账户信息
-	// 在测试或授权切换期间暂时不可用；否则后续任务会越过已入队任务。
-	return fmt.Sprintf(`(((%sdispatch_status IN ('queued','processing')) OR %s) AND %s AND NOT (
-		%sstatus='pending' AND COALESCE(%sdispatch_status,'')='idle' AND COALESCE(%sasynq_task_id,'')='' AND %supdated_at < CURRENT_TIMESTAMP - (%d * INTERVAL '1 minute')
-	))`,
-		qualified, telegramChannelAvailableAccountSQL(alias), telegramChannelBlockingJobStateSQL(alias), qualified, qualified, qualified, qualified, telegramChannelHeadTimeoutMinutes())
+	// Account availability is a dispatch concern. Channel ordering only cares
+	// whether the current job owns the Telegram execution slot.
+	return telegramChannelBlockingJobStateSQL(alias)
 }
 
 // telegramChannelHeadTimeoutMinutes 返回频道队首最大等待时间，默认10分钟。
@@ -217,22 +243,15 @@ func telegramChannelBlockingJobStateSQL(alias string) string {
 	if alias != "" {
 		alias += "."
 	}
-	// Terminal jobs must never become unschedulable channel heads. Retrying a
-	// failed display later would also send verification apart from its display.
 	return fmt.Sprintf(`(
-		(%[1]sstatus IN ('pending','confirming','sending') AND NOT (
-			%[1]sstatus='pending' AND COALESCE(%[1]sdispatch_status,'')='idle'
-			AND COALESCE(%[1]slast_dispatch_error,'') LIKE '就绪通知或执行任务缺失%%'
-			AND %[1]supdated_at < CURRENT_TIMESTAMP - INTERVAL '5 minutes'
-		)) OR
-		(%[1]sstatus='failed_retry' AND (%[1]snext_retry_at IS NULL OR %[1]snext_retry_at<=CURRENT_TIMESTAMP)) OR
-		(%[1]sstatus='failed' AND %[1]ssend_phase='display_confirmed' AND EXISTS (
-			SELECT 1 FROM %[2]s failed_display_message
-			WHERE failed_display_message.job_id=%[1]sid
-			  AND failed_display_message.status IN ('sent','undeletable')
-			  AND failed_display_message.deleted_at IS NULL
-		))
-	)`, alias, publishTgMessageTable)
+		%[1]sstatus IN ('sending','confirming','unknown','reconciling')
+		OR %[1]sdispatch_status = 'processing'
+		OR %[1]ssend_phase IN (
+			'display_sending','display_confirming',
+			'verify_sending','verify_confirming',
+			'cleanup_sending','cleanup_confirming','reconciling'
+		)
+	)`, alias)
 }
 
 func telegramChannelAvailableAccountSQL(alias string) string {

@@ -208,9 +208,9 @@ func telegramChannelJobRequeueAt(job telegramJobRecord) (int64, string) {
 			}
 		}
 		return now.Add(3 * time.Second).UnixMilli(), reason
-	case telegramJobStatusSending, telegramJobStatusConfirming:
+	case telegramJobStatusSending, telegramJobStatusConfirming, "reconciling":
 		if reason == "" {
-			reason = "任务正在恢复本地发送状态"
+			reason = "任务正在发送或等待对账"
 		}
 		// An in-flight or uncertain Telegram attempt is owned by the
 		// watchdog/reconciliation path. Keep a delayed Redis member only as a

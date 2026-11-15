@@ -191,7 +191,7 @@ func TestTelegramChannelJobRequeueAtUsesPersistedState(t *testing.T) {
 	}
 
 	hold, reason = telegramChannelJobRequeueAt(telegramJobRecord{Status: telegramJobStatusSending})
-	if reason != "任务正在恢复本地发送状态" {
+	if reason != "任务正在发送或等待对账" {
 		t.Fatalf("in-flight reason=%q", reason)
 	}
 	if got := time.Until(time.UnixMilli(hold)); got < 29*time.Second || got > 31*time.Second {

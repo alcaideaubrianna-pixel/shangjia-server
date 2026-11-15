@@ -7,13 +7,15 @@ import (
 	"github.com/gogf/gf/v2/database/gdb"
 )
 
-func TestTelegramChannelBlockingJobExcludesUnknownAndUnavailableAccounts(t *testing.T) {
+func TestTelegramChannelBlockingJobIncludesUnknownAndExcludesWaitingStates(t *testing.T) {
 	condition := telegramChannelBlockingJobSQL("j")
-	if strings.Contains(condition, "'unknown'") {
-		t.Fatalf("unknown reconciliation jobs must not block normal channel order: %s", condition)
+	if !strings.Contains(condition, "'unknown'") || !strings.Contains(condition, "'reconciling'") {
+		t.Fatalf("unknown/reconciling jobs must block channel order: %s", condition)
 	}
-	if !strings.Contains(condition, "status='authorized'") || !strings.Contains(condition, "session_key") {
-		t.Fatalf("channel blocking condition must require an available account: %s", condition)
+	for _, state := range []string{"'pending'", "'failed_retry'", "'retry_wait'"} {
+		if strings.Contains(condition, state) {
+			t.Fatalf("waiting state %s must not block channel order: %s", state, condition)
+		}
 	}
 }
 
@@ -50,13 +52,39 @@ func TestTelegramChannelBlockingJobSQLParentheses(t *testing.T) {
 func TestTelegramChannelBlockingJobIgnoresStaleMissingExecution(t *testing.T) {
 	condition := telegramChannelBlockingJobStateSQL("j")
 	for _, fragment := range []string{
-		"就绪通知或执行任务缺失",
-		"j.updated_at < CURRENT_TIMESTAMP - INTERVAL '5 minutes'",
-		"COALESCE(j.dispatch_status,'')='idle'",
+		"j.status IN ('sending','confirming','unknown','reconciling')",
+		"j.dispatch_status = 'processing'",
 	} {
 		if !strings.Contains(condition, fragment) {
-			t.Fatalf("stale missing execution must not block the channel head; missing %q in %s", fragment, condition)
+			t.Fatalf("unified blocking condition missing %q in %s", fragment, condition)
 		}
+	}
+}
+
+func TestTelegramChannelExecutionStateIsUnified(t *testing.T) {
+	tests := []struct {
+		name     string
+		status   string
+		phase    string
+		dispatch string
+		want     telegramChannelExecutionState
+	}{
+		{"pending waits", "pending", "", "idle", telegramChannelExecutionWaiting},
+		{"failed retry waits", "failed_retry", "", "idle", telegramChannelExecutionWaiting},
+		{"retry wait waits", "retry_wait", "", "idle", telegramChannelExecutionWaiting},
+		{"sending blocks", "sending", "", "processing", telegramChannelExecutionBlocking},
+		{"confirming blocks", "confirming", "", "processing", telegramChannelExecutionBlocking},
+		{"unknown blocks", "unknown", "", "idle", telegramChannelExecutionBlocking},
+		{"reconciling blocks", "reconciling", "", "idle", telegramChannelExecutionBlocking},
+		{"processing claim blocks", "pending", "", "processing", telegramChannelExecutionBlocking},
+		{"terminal releases", "failed", "", "idle", telegramChannelExecutionTerminal},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := telegramChannelJobExecutionState(test.status, test.phase, test.dispatch); got != test.want {
+				t.Fatalf("state=%q phase=%q dispatch=%q got=%q want=%q", test.status, test.phase, test.dispatch, got, test.want)
+			}
+		})
 	}
 }
 

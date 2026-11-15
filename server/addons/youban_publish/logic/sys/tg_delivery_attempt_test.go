@@ -306,10 +306,10 @@ func TestTelegramChannelBlockingStatusesExcludeTerminalJobs(t *testing.T) {
 		statuses[status] = struct{}{}
 	}
 	for _, status := range []string{
-		telegramJobStatusPending,
-		telegramJobStatusRetryWait,
 		telegramJobStatusConfirming,
 		telegramJobStatusSending,
+		"unknown",
+		"reconciling",
 	} {
 		if _, ok := statuses[status]; !ok {
 			t.Fatalf("active status %q must preserve channel ordering", status)
