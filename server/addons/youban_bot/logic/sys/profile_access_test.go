@@ -116,7 +116,7 @@ func TestProfileCardMarkupForNoteOfflineIgnoresStalePublishedTask(t *testing.T) 
 	note := &publishsysin.NoteModel{ProfileModel: publishsysin.ProfileModel{
 		ProfileNo:  "M96590",
 		Status:     2,
-		TaskStatus: publishsysin.PublishTaskStatusPublished,
+		TaskStatus: string(publishsysin.PublishTaskStatusPublished),
 	}}
 	markup := profileCardMarkupForNote(note, "view")
 	if markup == nil || len(markup.InlineKeyboard) < 2 || markup.InlineKeyboard[0][0].Text != "上架" {
@@ -148,7 +148,7 @@ func TestValidateBotProfileLifecycleActionRejectsStaleCallbacks(t *testing.T) {
 		},
 		{
 			name:   "publish in progress",
-			note:   &publishsysin.NoteModel{ProfileModel: publishsysin.ProfileModel{Status: 2, TaskStatus: publishsysin.PublishTaskStatusPending}},
+			note:   &publishsysin.NoteModel{ProfileModel: publishsysin.ProfileModel{Status: 2, TaskStatus: string(publishsysin.PublishTaskStatusPending)}},
 			status: 1,
 			want:   "处理中",
 		},
@@ -198,7 +198,7 @@ func TestProfileEditSuccessMarkupReusesPublishCallback(t *testing.T) {
 }
 
 func TestProfileEditSuccessMarkupReflectsCurrentState(t *testing.T) {
-	note := &publishsysin.NoteModel{ProfileModel: publishsysin.ProfileModel{ProfileNo: "A10007", Status: 1, TaskStatus: publishsysin.PublishTaskStatusPending}}
+	note := &publishsysin.NoteModel{ProfileModel: publishsysin.ProfileModel{ProfileNo: "A10007", Status: 1, TaskStatus: string(publishsysin.PublishTaskStatusPending)}}
 	markup := profileEditSuccessMarkupForNote(note)
 	if markup == nil || markup.InlineKeyboard[0][0].Text != "上架中" || markup.InlineKeyboard[0][0].CallbackData != "pf:view:A10007" {
 		t.Fatalf("editing published profile exposed stale republish action: %#v", markup)

@@ -1269,8 +1269,8 @@ func profileTaskInProgress(note *publishsysin.NoteModel) bool {
 	if note == nil {
 		return false
 	}
-	switch strings.ToLower(strings.TrimSpace(note.TaskStatus)) {
-	case publishsysin.PublishTaskStatusPending, publishsysin.PublishTaskStatusPublishing, "editing":
+	switch publishsysin.PublishTaskStatus(strings.ToLower(strings.TrimSpace(note.TaskStatus))) {
+	case publishsysin.PublishTaskStatusPendingValue, publishsysin.PublishTaskStatusPublishingValue, publishsysin.PublishTaskStatusCyclingValue, publishsysin.PublishTaskStatusEditingValue:
 		return true
 	default:
 		return false
@@ -1568,14 +1568,16 @@ func profileCardDisplayStatus(note *publishsysin.NoteModel) string {
 		}
 		return "下架"
 	}
-	switch strings.ToLower(strings.TrimSpace(note.TaskStatus)) {
-	case publishsysin.PublishTaskStatusPending, publishsysin.PublishTaskStatusPublishing:
+	switch publishsysin.PublishTaskStatus(strings.ToLower(strings.TrimSpace(note.TaskStatus))) {
+	case publishsysin.PublishTaskStatusPendingValue, publishsysin.PublishTaskStatusPublishingValue, publishsysin.PublishTaskStatusCyclingValue:
 		return "上架中"
-	case publishsysin.PublishTaskStatusFailed:
+	case publishsysin.PublishTaskStatusPartialFailedValue:
+		return "部分上架失败"
+	case publishsysin.PublishTaskStatusFailedValue:
 		return "上架失败"
-	case publishsysin.PublishTaskStatusCanceled:
+	case publishsysin.PublishTaskStatusCanceledValue:
 		return "已取消"
-	case publishsysin.PublishTaskStatusPublished:
+	case publishsysin.PublishTaskStatusPublishedValue:
 		return "上架"
 	}
 	if note.Status == 1 {

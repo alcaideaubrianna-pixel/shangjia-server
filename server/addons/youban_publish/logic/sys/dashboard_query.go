@@ -16,6 +16,14 @@ type dashboardTrendRow struct {
 	Count  int    `json:"count"`
 }
 
+func dashboardPublishStatusStrings(values ...sysin.PublishTaskStatus) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		result = append(result, string(value))
+	}
+	return result
+}
+
 func (s *sSysPublish) dashboardTrend(ctx context.Context, in *sysin.TrendInp, tenantId int64, accountId int64) (*sysin.DashboardTrendModel, error) {
 	profile, err := s.profileStats(ctx, in, tenantId, accountId)
 	if err != nil {
@@ -28,7 +36,7 @@ func (s *sSysPublish) dashboardTrend(ctx context.Context, in *sysin.TrendInp, te
 	return &sysin.DashboardTrendModel{ProfileTrend: profile.Trend, PublishTrend: publishTrend}, nil
 }
 
-func (s *sSysPublish) dashboardTaskCounts(ctx context.Context, tenantId int64, accountId int64) (map[string]int, error) {
+func (s *sSysPublish) dashboardTaskCounts(ctx context.Context, tenantId int64, accountId int64) (map[sysin.PublishTaskStatus]int, error) {
 	var rows []struct {
 		Status string `json:"status"`
 		Count  int    `json:"count"`
@@ -37,7 +45,12 @@ func (s *sSysPublish) dashboardTaskCounts(ctx context.Context, tenantId int64, a
 		InnerJoin(publishProfileStateTable+" ps", "ps.profile_id=p.id AND ps.deleted_at IS NULL").
 		Fields("ps.publish_task_status AS status", "COUNT(*) AS count").
 		Where("ps.tenant_id", tenantId).
-		WhereIn("ps.publish_task_status", []string{"pending", "publishing", "published", "failed", "canceled"}).
+		WhereIn("ps.publish_task_status", dashboardPublishStatusStrings(
+			sysin.PublishTaskStatusPendingValue, sysin.PublishTaskStatusPublishingValue,
+			sysin.PublishTaskStatusCyclingValue, sysin.PublishTaskStatusPublishedValue,
+			sysin.PublishTaskStatusPartialFailedValue, sysin.PublishTaskStatusFailedValue,
+			sysin.PublishTaskStatusCanceledValue,
+		)).
 		WhereNull("p.deleted_at").
 		Group("ps.publish_task_status")
 	if accountId > 0 {
@@ -46,9 +59,9 @@ func (s *sSysPublish) dashboardTaskCounts(ctx context.Context, tenantId int64, a
 	if err := mod.Scan(&rows); err != nil {
 		return nil, gerror.Wrap(err, "统计任务状态失败")
 	}
-	counts := make(map[string]int, len(rows))
+	counts := make(map[sysin.PublishTaskStatus]int, len(rows))
 	for _, row := range rows {
-		counts[row.Status] = row.Count
+		counts[sysin.PublishTaskStatus(row.Status)] = row.Count
 	}
 	return counts, nil
 }
@@ -123,12 +136,12 @@ func buildDashboardPublishTrend(dateRange *trendDateRange, rows []dashboardTrend
 		if point == nil {
 			continue
 		}
-		switch row.Status {
-		case sysin.PublishTaskStatusPublished:
+		switch sysin.PublishTaskStatus(row.Status) {
+		case sysin.PublishTaskStatusPublishedValue:
 			point.Success += row.Count
-		case sysin.PublishTaskStatusFailed:
+		case sysin.PublishTaskStatusPartialFailedValue, sysin.PublishTaskStatusFailedValue:
 			point.Failed += row.Count
-		case sysin.PublishTaskStatusPending, sysin.PublishTaskStatusPublishing:
+		case sysin.PublishTaskStatusPendingValue, sysin.PublishTaskStatusPublishingValue, sysin.PublishTaskStatusCyclingValue:
 			point.Pending += row.Count
 		}
 	}

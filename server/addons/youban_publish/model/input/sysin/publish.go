@@ -13,6 +13,52 @@ import (
 	"hotgo/internal/model/input/form"
 )
 
+// PublishTaskStatus is the strongly typed lifecycle state of a profile publish operation.
+type PublishTaskStatus string
+
+const (
+	PublishTaskStatusPendingValue       PublishTaskStatus = "pending"
+	PublishTaskStatusPublishingValue    PublishTaskStatus = "publishing"
+	PublishTaskStatusCyclingValue       PublishTaskStatus = "cycling"
+	PublishTaskStatusPublishedValue     PublishTaskStatus = "published"
+	PublishTaskStatusPartialFailedValue PublishTaskStatus = "partial_failed"
+	PublishTaskStatusFailedValue        PublishTaskStatus = "failed"
+	PublishTaskStatusCanceledValue      PublishTaskStatus = "canceled"
+	PublishTaskStatusWaitingMediaValue  PublishTaskStatus = "waiting_media"
+	PublishTaskStatusEditingValue       PublishTaskStatus = "editing"
+)
+
+const (
+	PublishTaskStatusPending       = PublishTaskStatusPendingValue
+	PublishTaskStatusPublishing    = PublishTaskStatusPublishingValue
+	PublishTaskStatusCycling       = PublishTaskStatusCyclingValue
+	PublishTaskStatusPublished     = PublishTaskStatusPublishedValue
+	PublishTaskStatusPartialFailed = PublishTaskStatusPartialFailedValue
+	PublishTaskStatusFailed        = PublishTaskStatusFailedValue
+	PublishTaskStatusCanceled      = PublishTaskStatusCanceledValue
+	PublishTaskStatusWaitingMedia  = PublishTaskStatusWaitingMediaValue
+	PublishTaskStatusEditing       = PublishTaskStatusEditingValue
+)
+
+func (s PublishTaskStatus) String() string { return string(s) }
+
+func (s PublishTaskStatus) Valid() bool {
+	switch s {
+	case PublishTaskStatusPendingValue,
+		PublishTaskStatusPublishingValue,
+		PublishTaskStatusCyclingValue,
+		PublishTaskStatusPublishedValue,
+		PublishTaskStatusPartialFailedValue,
+		PublishTaskStatusFailedValue,
+		PublishTaskStatusCanceledValue,
+		PublishTaskStatusWaitingMediaValue,
+		PublishTaskStatusEditingValue:
+		return true
+	default:
+		return false
+	}
+}
+
 const (
 	PublishAccountTypeAdmin    = "admin"
 	PublishAccountTypeUploader = "uploader"
@@ -21,12 +67,6 @@ const (
 	ProfilePermissionAdmin   = "admin"
 	ProfilePermissionShared  = "shared"
 	ProfilePermissionVisitor = "visitor"
-
-	PublishTaskStatusPending    = "pending"
-	PublishTaskStatusPublishing = "publishing"
-	PublishTaskStatusPublished  = "published"
-	PublishTaskStatusFailed     = "failed"
-	PublishTaskStatusCanceled   = "canceled"
 
 	PublishTgAccountStatusPending    = "pending"
 	PublishTgAccountStatusScanning   = "scanning"
