@@ -176,6 +176,10 @@ func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	}
 	// 分发恢复不能被实时采集背压短路；资料已经落库的 pending dispatch
 	// 必须优先生成 collect TG Job，否则采集会长期停在“已入库但未推送”。
+	// 发送成功但本地投影中断时，先按 TG Job 终态收口 dispatch，避免恢复器重复创建任务。
+	if err := s.reconcileCollectDispatchesFromSentJobs(ctx, 100); err != nil {
+		g.Log().Warningf(ctx, "对账已发送采集分发失败：%+v", err)
+	}
 	if err := s.recoverCollectPublishTasks(ctx, 100); err != nil {
 		g.Log().Warningf(ctx, "恢复采集推送任务失败：%+v", err)
 	}
@@ -1251,6 +1255,46 @@ var (
 		"验证视频暂未匹配到前序资料",
 	}
 )
+
+func (s *sSysPublish) reconcileCollectDispatchesFromSentJobs(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		limit = 100
+	}
+	dispatchTable := pdao.YoubanPublishCollectDispatch.Table()
+	jobTable := pdao.YoubanPublishTgJob.Table()
+	rows, err := g.DB().Model(dispatchTable+" d").Ctx(ctx).
+		Fields("d.id,d.profile_id,d.event_id").
+		Where("d.profile_id > 0").
+		Where("d.status", sysin.CollectDispatchStatusPending).
+		Where(`EXISTS (
+			SELECT 1 FROM ` + jobTable + ` j
+			WHERE j.tenant_id = d.tenant_id
+			  AND j.account_id = d.account_id
+			  AND j.profile_id = d.profile_id
+			  AND j.collect_event_id = d.event_id
+			  AND j.operation_no = CONCAT('collect:', d.id)
+			  AND j.status = 'sent'
+			  AND j.dispatch_status = 'done'
+		)`).
+		OrderAsc("d.updated_at").OrderAsc("d.id").Limit(limit).All()
+	if err != nil {
+		return gerror.Wrap(err, "读取已发送但未收口的采集分发失败")
+	}
+	reconciled := 0
+	for _, row := range rows {
+		profileID, eventID := row["profile_id"].Int64(), row["event_id"].Int64()
+		if err = s.markCollectDispatchSentByProfile(ctx, profileID, eventID); err != nil {
+			g.Log().Warningf(ctx, "收口采集分发状态失败 dispatch:%d profile:%d event:%d err:%+v",
+				row["id"].Int64(), profileID, eventID, err)
+			continue
+		}
+		reconciled++
+	}
+	if reconciled > 0 {
+		g.Log().Infof(ctx, "已对账收口采集分发：%d条", reconciled)
+	}
+	return nil
+}
 
 func (s *sSysPublish) recoverCollectPublishTasks(ctx context.Context, limit int) error {
 	if limit <= 0 {
