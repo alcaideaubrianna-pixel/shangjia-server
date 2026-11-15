@@ -128,7 +128,7 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 	}
 	// SendTelegramJob may return nil when another sender owns the lease. Do
 	// not lose the popped item in that case; only terminal states are acked.
-	if job, loadErr := s.telegramJobAfterSend(ctx, jobID); loadErr == nil {
+	if job, loadErr := s.telegramJobById(ctx, jobID); loadErr == nil {
 		switch job.Status {
 		case telegramJobStatusSent, "failed", "superseded":
 			g.Log().Info(ctx, "频道队列任务确认完成", g.Map{
@@ -146,33 +146,13 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 			})
 			return true, nil
 		default:
-			// A successful Telegram response can commit the attempt/job
-			// projection just after SendTelegramJob returns. Do not immediately
-			// put the same job back at the channel head and create a hot retry
-			// loop. The bounded settle window below handles the normal commit
-			// race; this longer fallback delay handles a genuinely stuck local
-			// transition without consuming the channel continuously.
-			hold := time.Now().Add(3 * time.Second).UnixMilli()
-			reason := job.LastDispatchError
-			// A nil SendTelegramJob error is not proof of delivery. If the
-			// persisted job is still non-terminal, treat it as a failed state
-			// transition and apply the same retry/downgrade policy as transport
-			// errors; otherwise a pending job can occupy the channel forever.
-			if strings.TrimSpace(reason) == "" {
-				reason = "发送完成但任务状态未落库"
-			}
+			hold, reason := telegramChannelJobRequeueAt(job)
 			priority := job.Priority
 			if priority <= 0 {
 				priority = tgJobPriorityBulk
 			}
 			if strings.Contains(reason, "媒体仍在异步处理中") {
 				g.Log().Info(ctx, "频道队列任务等待媒体就绪", g.Map{"event": "channel_queue_media_not_ready", "channelId": channelID, "jobId": jobID, "profileId": job.ProfileId, "score": hold})
-			}
-			if strings.Contains(reason, "媒体仍在异步处理中") {
-				priority = job.Priority
-				if priority <= 0 {
-					priority = tgJobPriorityBulk
-				}
 			}
 			requeueScore := telegramChannelQueueScore(priority, time.UnixMilli(hold), jobID)
 			_ = enqueueTelegramChannelJob(ctx, channelID, jobID, priority, time.UnixMilli(hold))
@@ -189,7 +169,7 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 				"score":           requeueScore,
 				"durationMs":      time.Since(dequeueStartedAt).Milliseconds(),
 				"reason":          reason,
-				"recoveryDelayMs": 3000,
+				"recoveryDelayMs": time.Until(time.UnixMilli(hold)).Milliseconds(),
 			})
 		}
 	} else {
@@ -200,36 +180,44 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 	return true, nil
 }
 
-// telegramJobAfterSend gives the local confirmation transaction a short,
-// bounded window to publish the terminal state before the channel worker
-// decides that the popped item must be requeued. Telegram API success and the
-// local job projection are separate commits in the unified path.
-func (s *sSysPublish) telegramJobAfterSend(ctx context.Context, jobID int64) (telegramJobRecord, error) {
-	var lastErr error
-	for attempt := 0; attempt < 4; attempt++ {
-		job, err := s.telegramJobById(ctx, jobID)
-		if err != nil {
-			lastErr = err
-		} else {
-			switch job.Status {
-			case telegramJobStatusSent, telegramJobStatusFailed, telegramJobStatusSuperseded:
-				return job, nil
-			default:
-				if attempt == 3 {
-					return job, nil
-				}
+func telegramChannelJobRequeueAt(job telegramJobRecord) (int64, string) {
+	now := time.Now()
+	reason := strings.TrimSpace(job.LastDispatchError)
+	switch job.Status {
+	case telegramJobStatusRetryWait:
+		if reason == "" {
+			reason = "任务等待下一次重试"
+		}
+		if job.NextRetryAt != nil {
+			retryAt := job.NextRetryAt.Time
+			if retryAt.After(now) {
+				return retryAt.UnixMilli(), reason
 			}
 		}
-		timer := time.NewTimer(75 * time.Millisecond)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return telegramJobRecord{}, ctx.Err()
-		case <-timer.C:
+		return now.Add(time.Second).UnixMilli(), reason
+	case telegramJobStatusPending:
+		if reason == "" {
+			reason = "任务仍待发送"
 		}
+		if job.NextRetryAt != nil {
+			retryAt := job.NextRetryAt.Time
+			if retryAt.After(now) {
+				return retryAt.UnixMilli(), reason
+			}
+		}
+		return now.Add(3 * time.Second).UnixMilli(), reason
+	case telegramJobStatusSending, telegramJobStatusConfirming:
+		if reason == "" {
+			reason = "任务正在恢复本地发送状态"
+		}
+		// An in-flight or uncertain Telegram attempt is owned by the
+		// watchdog/reconciliation path. Keep a delayed Redis member only as a
+		// liveness fallback; never hot-loop it as a normal send retry.
+		return now.Add(30 * time.Second).UnixMilli(), reason
+	default:
+		if reason == "" {
+			reason = "任务状态未收口"
+		}
+		return now.Add(3 * time.Second).UnixMilli(), reason
 	}
-	if lastErr != nil {
-		return telegramJobRecord{}, lastErr
-	}
-	return s.telegramJobById(ctx, jobID)
 }

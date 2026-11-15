@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 )
 
 func TestTelegramChannelQueueKey(t *testing.T) {
@@ -159,5 +160,36 @@ func TestTelegramChannelRecoveryBatchSize(t *testing.T) {
 	t.Setenv("YOUBAN_PUBLISH_TG_CHANNEL_RECOVERY_BATCH_SIZE", "99999")
 	if got, want := telegramChannelRecoveryBatchSize(), 2000; got != want {
 		t.Fatalf("capped recovery batch size=%d, want %d", got, want)
+	}
+}
+
+func TestTelegramChannelJobRequeueAtUsesPersistedState(t *testing.T) {
+	retryAt := gtime.Now().Add(2 * time.Minute)
+	hold, reason := telegramChannelJobRequeueAt(telegramJobRecord{
+		Status:            telegramJobStatusRetryWait,
+		LastDispatchError: "telegram rate limit",
+		NextRetryAt:       retryAt,
+	})
+	if reason != "telegram rate limit" {
+		t.Fatalf("reason=%q", reason)
+	}
+	if got := time.Until(time.UnixMilli(hold)); got < time.Minute || got > 3*time.Minute {
+		t.Fatalf("retry hold=%s, want around two minutes", got)
+	}
+
+	hold, reason = telegramChannelJobRequeueAt(telegramJobRecord{Status: telegramJobStatusSending})
+	if reason != "任务正在恢复本地发送状态" {
+		t.Fatalf("in-flight reason=%q", reason)
+	}
+	if got := time.Until(time.UnixMilli(hold)); got < 29*time.Second || got > 31*time.Second {
+		t.Fatalf("in-flight hold=%s, want 30 seconds", got)
+	}
+
+	hold, reason = telegramChannelJobRequeueAt(telegramJobRecord{Status: telegramJobStatusPending})
+	if reason != "任务仍待发送" {
+		t.Fatalf("pending reason=%q", reason)
+	}
+	if got := time.Until(time.UnixMilli(hold)); got < 2*time.Second || got > 4*time.Second {
+		t.Fatalf("pending hold=%s, want 3 seconds", got)
 	}
 }
