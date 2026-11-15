@@ -113,7 +113,7 @@ func (s *sSysPublish) MyProfileCreate(ctx context.Context, in *sysin.ProfileSave
 	}
 	in.Id, in.Uuid = 0, ""
 	in.Status = 2
-	in.Visibility = consts.ContentVisibilityPublic
+	in.Visibility = consts.ContentVisibilityPrivate
 	return s.saveProfile(ctx, in, account.TenantId, account.Id)
 }
 
@@ -166,12 +166,11 @@ func (s *sSysPublish) MyProfileEdit(ctx context.Context, in *sysin.ProfileSaveIn
 		return nil, gerror.Wrap(err, "检查资料历史发布状态失败")
 	}
 	if publishedCount == 0 {
-		if in.Status == 0 {
-			in.Status = 2
-		}
-		if in.Visibility == "" {
-			in.Visibility = consts.ContentVisibilityPublic
-		}
+		// Lifecycle fields are owned by Publish/Unpublish. A normal edit of an
+		// unpublished profile must never make it public from client input.
+		in.Status = 2
+		in.Visibility = consts.ContentVisibilityPrivate
+		in.KeepPublishState = true
 		return s.saveProfile(ctx, in, account.TenantId, ownerAccountId)
 	}
 	operationNo := newTelegramOperationNo("edit", profileId)
@@ -451,7 +450,7 @@ func (s *sSysPublish) AdminProfileCreate(ctx context.Context, in *sysin.ProfileS
 	}
 	in.Id, in.Uuid = 0, ""
 	in.Status = 2
-	in.Visibility = consts.ContentVisibilityPublic
+	in.Visibility = consts.ContentVisibilityPrivate
 	return s.saveProfile(ctx, in, account.TenantId, account.Id)
 }
 
