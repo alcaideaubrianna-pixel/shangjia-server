@@ -358,101 +358,18 @@ func mediaPHashBucketCandidateRowsWithScopesUncached(ctx context.Context, normal
 		g.Log().Warning(ctx, "跳过无租户账号范围的pHash候选查询")
 		return []mediaPHashBucketCandidateRow{}, nil
 	}
-	if err := ensureMediaPHashAliasBucketTable(ctx); err != nil {
-		return nil, err
+	if !mediaPHashLshReady(ctx) {
+		return nil, gerror.New("pHash LSH索引尚未完成，暂不可执行相似媒体搜索")
 	}
-	if mediaPHashLshReady(ctx) && threshold < mediaPHashLshBlockCount*(mediaPHashLshMaxQueryRadius+1) {
-		rows, err := mediaPHashLshCandidateRowsWithScopes(ctx, normalizedHash, threshold, scopes, profileIds, mediaType, excludeProfileId)
-		if err == nil {
-			return rows, nil
-		}
-		// The expired request cannot run another query. Preserve the original
-		// LSH error rather than misreporting a timeout waiting for the legacy slot.
+	if threshold >= mediaPHashLshBlockCount*(mediaPHashLshMaxQueryRadius+1) {
+		return nil, gerror.New("pHash搜索阈值超出LSH索引范围")
+	}
+	rows, err := mediaPHashLshCandidateRowsWithScopes(ctx, normalizedHash, threshold, scopes, profileIds, mediaType, excludeProfileId)
+	if err != nil {
 		if ctx.Err() != nil {
 			return nil, gerror.Wrap(err, "pHash LSH查询超时")
 		}
-		g.Log().Warningf(ctx, "pHash LSH查询失败，回退旧分桶查询：%v", err)
-	}
-	if err := acquireMediaPHashLegacyQuerySlot(ctx); err != nil {
-		return nil, err
-	}
-	defer releaseMediaPHashLegacyQuerySlot()
-	minEqualNibbles := mediaPHashMinEqualNibbles(threshold)
-	if minEqualNibbles <= 0 {
-		minEqualNibbles = 1
-	}
-	branchCapacity := len(normalizedHash)
-	if len(scopes) > 0 {
-		branchCapacity *= len(scopes)
-	}
-	branches := make([]string, 0, branchCapacity)
-	args := make([]any, 0, len(normalizedHash)*8)
-	for i, item := range normalizedHash {
-		if len(scopes) == 0 {
-			branch, branchArgs := mediaPHashBucketBranchSQL(i+1, string(item), nil, profileIds, mediaType, excludeProfileId)
-			branches = append(branches, branch)
-			args = append(args, branchArgs...)
-			continue
-		}
-		for _, scope := range scopes {
-			branch, branchArgs := mediaPHashBucketBranchSQL(i+1, string(item), []mediaPHashBucketScopePart{scope}, profileIds, mediaType, excludeProfileId)
-			branches = append(branches, branch)
-			args = append(args, branchArgs...)
-		}
-	}
-	rows := make([]mediaPHashBucketCandidateRow, 0)
-	sql := fmt.Sprintf(`
-WITH bucket_match AS (
-%s
-), candidate AS (
-SELECT media_id, profile_id, account_id, tenant_id, media_type,
-       hash_value, COUNT(*) AS bucket_hits
-FROM bucket_match
-GROUP BY media_id, profile_id, account_id, tenant_id, media_type, hash_value
-HAVING COUNT(*) >= ?
-)
-SELECT candidate.media_id, candidate.profile_id, candidate.account_id,
-       candidate.tenant_id, candidate.media_type, candidate.hash_value,
-       candidate.bucket_hits
-FROM candidate
-WHERE EXISTS (
-    SELECT 1
-    FROM hg_content_profile p
-    WHERE p.id = candidate.profile_id AND p.deleted_at IS NULL
-)
-AND EXISTS (
-    SELECT 1
-    FROM hg_youban_publish_profile_state ps
-    WHERE ps.profile_id = candidate.profile_id
-      AND ps.tenant_id = candidate.tenant_id
-      AND ps.account_id = candidate.account_id
-      AND ps.deleted_at IS NULL
-)
-ORDER BY candidate.bucket_hits DESC
-LIMIT %d
-`, strings.Join(branches, " UNION ALL "), mediaPHashBucketMaxCandidates)
-	args = append(args, minEqualNibbles)
-	if err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		if strings.EqualFold(g.DB().GetConfig().Type, "pgsql") {
-			if _, err := tx.Exec("SET LOCAL work_mem = '" + mediaPHashCandidateWorkMem + "'"); err != nil {
-				return gerror.Wrap(err, "设置相似媒体查询内存失败")
-			}
-			if _, err := tx.Exec("SET LOCAL jit = off"); err != nil {
-				return gerror.Wrap(err, "关闭相似媒体查询JIT失败")
-			}
-			if _, err := tx.Exec("SET LOCAL max_parallel_workers_per_gather = 0"); err != nil {
-				return gerror.Wrap(err, "限制相似媒体查询并行度失败")
-			}
-			if _, err := tx.Exec("SET LOCAL statement_timeout = '" + mediaPHashLegacyStatementTimeout + "'"); err != nil {
-				return gerror.Wrap(err, "设置相似媒体查询超时失败")
-			}
-		}
-		if err := tx.Raw(sql, args...).Scan(&rows); err != nil {
-			return gerror.Wrap(err, "查询相似媒体分桶失败")
-		}
-		return nil
-	}); err != nil {
-		return nil, err
+		return nil, gerror.Wrap(err, "pHash LSH查询失败")
 	}
 	return rows, nil
 }
