@@ -830,7 +830,7 @@ func (s *sSysPublish) disableProfileCycleJob(ctx context.Context, jobId int64, m
 func (s *sSysPublish) profileCycleChildActive(ctx context.Context, sourceJobId int64) (bool, error) {
 	prefix := fmt.Sprintf("cycle_batch:due:%d:", sourceJobId)
 	count, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		WhereLike("operation_no", prefix+"%").WhereIn("status", []string{"pending", "sending", "failed_retry", "unknown"}).Count()
+		WhereLike("operation_no", prefix+"%").WhereIn("status", telegramJobActiveStatuses()).Count()
 	return count > 0, err
 }
 

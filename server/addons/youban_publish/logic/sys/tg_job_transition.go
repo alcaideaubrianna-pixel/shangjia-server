@@ -113,6 +113,17 @@ func telegramJobInFlightStatuses() []string {
 	return []string{telegramJobStatusSending, telegramJobStatusConfirming}
 }
 
+// telegramJobActiveStatuses 是唯一的“任务仍占用资料/频道”状态集合。
+// 所有循环、批次和手动发布的幂等检查都必须复用它，禁止自行拼接字符串。
+func telegramJobActiveStatuses() []string {
+	return []string{
+		telegramJobStatusPending,
+		telegramJobStatusSending,
+		telegramJobStatusRetryWait,
+		telegramJobStatusConfirming,
+	}
+}
+
 func telegramJobReconcileStatuses() []string {
 	return []string{telegramJobStatusConfirming}
 }
