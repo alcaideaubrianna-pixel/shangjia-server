@@ -46,6 +46,27 @@ func ZSetRange(ctx context.Context, key string, start, stop int) ([]string, erro
 	return result, nil
 }
 
+// ZSetRangeByScore returns members whose score is within the inclusive range.
+func ZSetRangeByScore(ctx context.Context, key string, min, max float64, limit int) ([]string, error) {
+	client, err := RedisClient()
+	if err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		limit = 200
+	}
+	value, err := client.Do(ctx, "ZRANGEBYSCORE", key, strconv.FormatFloat(min, 'f', -1, 64), strconv.FormatFloat(max, 'f', -1, 64), "LIMIT", 0, limit)
+	if err != nil || value == nil || value.IsNil() {
+		return nil, err
+	}
+	items := value.Array()
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		result = append(result, gvar.New(item).String())
+	}
+	return result, nil
+}
+
 func ZSetHead(ctx context.Context, key string) (string, error) {
 	client, err := RedisClient()
 	if err != nil {

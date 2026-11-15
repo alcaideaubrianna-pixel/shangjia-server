@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,8 +35,30 @@ const (
 
 const profileCycleChannelConfigCacheTTL = 30 * time.Second
 
+const profileCycleDueZSetKey = "youban_publish:cycle:profile:due"
+
 func profileCycleChannelConfigCacheKey(channelId int64) string {
 	return fmt.Sprintf("youban_publish:cycle:channel_config:%d", channelId)
+}
+
+func profileCycleDueMember(jobId int64) string {
+	return fmt.Sprintf("%d", jobId)
+}
+
+func indexProfileCycleDue(ctx context.Context, jobId int64, nextAt *gtime.Time) {
+	if jobId <= 0 || nextAt == nil || !cache.Initialized() {
+		return
+	}
+	if err := cache.ZSetAdd(ctx, profileCycleDueZSetKey, float64(nextAt.Unix()), profileCycleDueMember(jobId)); err != nil {
+		g.Log().Debugf(ctx, "写入资料循环Redis调度索引失败 job:%d err:%+v", jobId, err)
+	}
+}
+
+func removeProfileCycleDue(ctx context.Context, jobId int64) {
+	if jobId <= 0 || !cache.Initialized() {
+		return
+	}
+	_ = cache.ZSetRemove(ctx, profileCycleDueZSetKey, profileCycleDueMember(jobId))
 }
 
 func invalidateProfileCycleChannelConfigCache(ctx context.Context, channelId int64) {
@@ -119,6 +142,13 @@ func (s *sSysPublish) syncTelegramJobCycleSchedule(ctx context.Context, job tele
 	if _, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id", job.Id).WhereIn("status", []string{"sent", "superseded"}).Data(data).Update(); err != nil {
 		return gerror.Wrap(err, "更新资料循环计划失败")
+	}
+	if dataNextAt, ok := data["next_cycle_at"]; ok && profileCycleChannelUsable(config) {
+		if nextAt, ok := dataNextAt.(*gtime.Time); ok {
+			indexProfileCycleDue(ctx, job.Id, nextAt)
+		}
+	} else {
+		removeProfileCycleDue(ctx, job.Id)
 	}
 	if err = projectChannelCyclePlans(ctx, []int64{job.Id}); err != nil {
 		return err
@@ -383,6 +413,53 @@ func (s *sSysPublish) runProfileCycleDueScan(ctx context.Context) error {
 	processed := 0
 	affectedChannels := make(map[int64]struct{})
 	channelBacklog := make(map[int64]int)
+	processRows := func(rows []profileCycleDueRow) {
+		for _, row := range rows {
+			if produced >= profileCycleMaxProducePerRun {
+				return
+			}
+			processed++
+			created, handleErr := s.dispatchDueProfileCycle(ctx, row, channelBacklog)
+			if handleErr != nil {
+				g.Log().Warningf(ctx, "提交到期资料循环失败 job:%d channel:%d err:%+v", row.JobId, row.ChannelId, handleErr)
+				continue
+			}
+			affectedChannels[row.ChannelId] = struct{}{}
+			if created {
+				produced++
+				channelBacklog[row.ChannelId]++
+			}
+		}
+	}
+
+	// Redis is the normal candidate index. PG still validates every candidate
+	// and remains the bounded fallback when Redis is empty or unavailable.
+	if cache.Initialized() {
+		members, cacheErr := cache.ZSetRangeByScore(ctx, profileCycleDueZSetKey, 0, float64(time.Now().Unix()), profileCycleMaxProducePerRun)
+		if cacheErr == nil && len(members) > 0 {
+			for produced < profileCycleMaxProducePerRun && processed < profileCycleMaxProducePerRun {
+				rows, err := s.profileCycleDueRowsShard(ctx, profileCycleScanBatchSize, -1)
+				if err != nil {
+					return err
+				}
+				if len(rows) == 0 {
+					break
+				}
+				processRows(rows)
+				if len(rows) < profileCycleScanBatchSize {
+					break
+				}
+			}
+			for channelId := range affectedChannels {
+				if err := s.refreshChannelProfileCycleNextAt(ctx, channelId); err != nil {
+					g.Log().Warningf(ctx, "刷新频道循环时间失败 channel:%d err:%+v", channelId, err)
+				}
+			}
+			g.Log().Infof(ctx, "资料循环Redis到期扫描完成 produced:%d channels:%d", produced, len(affectedChannels))
+			return nil
+		}
+	}
+
 	for shard := 0; shard < profileCycleShardCount; shard++ {
 		lockCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		lock := hglock.NewConfig(10*time.Minute, 100*time.Millisecond).Mutex(fmt.Sprintf("youban_publish:profile_cycle_due_scan:%02d", shard))
@@ -403,22 +480,7 @@ func (s *sSysPublish) runProfileCycleDueScan(ctx context.Context) error {
 			if len(rows) == 0 {
 				break
 			}
-			processed += len(rows)
-			for _, row := range rows {
-				if produced >= profileCycleMaxProducePerRun {
-					break
-				}
-				created, handleErr := s.dispatchDueProfileCycle(ctx, row, channelBacklog)
-				if handleErr != nil {
-					g.Log().Warningf(ctx, "提交到期资料循环失败 job:%d channel:%d err:%+v", row.JobId, row.ChannelId, handleErr)
-					continue
-				}
-				affectedChannels[row.ChannelId] = struct{}{}
-				if created {
-					produced++
-					channelBacklog[row.ChannelId]++
-				}
-			}
+			processRows(rows)
 		}
 		s.releaseTelegramChannelLease(context.Background(), lock)
 	}
@@ -578,6 +640,20 @@ func (s *sSysPublish) profileCycleDueRowsShard(ctx context.Context, limit, shard
 		model = model.Where("NOT EXISTS (SELECT 1 FROM " + publishProfileCycleRunChannelTable + " planning_channel INNER JOIN " + publishProfileCycleRunTable + " planning ON planning.id=planning_channel.run_id WHERE planning.tenant_id=j.tenant_id AND planning.account_id=j.account_id AND planning.profile_id=j.profile_id AND planning_channel.channel_id=j.channel_id AND planning.status IN ('pending','running','dispatching') AND planning_channel.status IN ('pending','running','dispatching'))")
 		model = model.Where("c.status", 1).Where("c.cycle_publish_enabled", 1).Where("COALESCE(NULLIF(LOWER(TRIM(c.cycle_publish_mode)),''),'time')='time'").Where("c.publish_direction", "up").Where("NOT EXISTS (SELECT 1 FROM " + publishTgJobTable + " active WHERE active.tenant_id=j.tenant_id AND active.account_id=j.account_id AND active.profile_id=j.profile_id AND active.channel_id=j.channel_id AND active.status IN ('pending','sending','failed_retry','unknown'))")
 	}
+	if shard < 0 && cache.Initialized() {
+		members, cacheErr := cache.ZSetRangeByScore(ctx, profileCycleDueZSetKey, 0, float64(time.Now().Unix()), limit)
+		if cacheErr == nil && len(members) > 0 {
+			jobIDs := make([]int64, 0, len(members))
+			for _, member := range members {
+				if jobID, parseErr := strconv.ParseInt(member, 10, 64); parseErr == nil && jobID > 0 {
+					jobIDs = append(jobIDs, jobID)
+				}
+			}
+			if len(jobIDs) > 0 {
+				model = model.WhereIn("j.id", jobIDs)
+			}
+		}
+	}
 	// 循环翻新只处理当前仍可发布的资料；下架或非公开资料不再生成新的循环 Job。
 	model = model.Where("p.status", 1).Where("p.visibility", consts.ContentVisibilityPublic)
 	if shard >= 0 {
@@ -590,6 +666,11 @@ func (s *sSysPublish) profileCycleDueRowsShard(ctx context.Context, limit, shard
 	err := model.OrderAsc(orderField).OrderAsc("j.id").Limit(limit).Scan(&rows)
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取到期资料循环计划失败")
+	}
+	for _, row := range rows {
+		if row.NextCycleAt != nil {
+			indexProfileCycleDue(ctx, row.JobId, row.NextCycleAt)
+		}
 	}
 	return rows, nil
 }
@@ -615,10 +696,12 @@ func (s *sSysPublish) dispatchDueProfileCycle(ctx context.Context, row profileCy
 		channelBacklog[row.ChannelId] = backlog
 	}
 	if !profileCycleChannelHasCapacity(ctx, backlog) {
+		nextAt := gtime.Now().Add(profileCycleRetryDelay)
 		_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", row.JobId).Data(g.Map{
-			"next_cycle_at":       gtime.Now().Add(profileCycleRetryDelay),
+			"next_cycle_at":       nextAt,
 			"last_dispatch_error": "频道循环队列积压，已延后领取", "updated_at": gtime.Now(),
 		}).Update()
+		indexProfileCycleDue(ctx, row.JobId, nextAt)
 		return false, err
 	}
 	active, err := s.profileCycleChildActive(ctx, row.JobId)
@@ -626,9 +709,11 @@ func (s *sSysPublish) dispatchDueProfileCycle(ctx context.Context, row profileCy
 		return false, err
 	}
 	if active {
+		nextAt := gtime.Now().Add(profileCycleClaimLease)
 		_, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", row.JobId).Data(g.Map{
-			"next_cycle_at": gtime.Now().Add(profileCycleClaimLease), "updated_at": gtime.Now(),
+			"next_cycle_at": nextAt, "updated_at": gtime.Now(),
 		}).Update()
+		indexProfileCycleDue(ctx, row.JobId, nextAt)
 		return false, err
 	}
 	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
@@ -647,11 +732,14 @@ func (s *sSysPublish) dispatchDueProfileCycle(ctx context.Context, row profileCy
 	if affected == 0 {
 		return false, nil
 	}
+	removeProfileCycleDue(ctx, row.JobId)
 	operationNo := dueProfileCycleOperationNo(row.JobId, row.DispatchCount+1, row.ProfileId, row.ChannelId)
 	err = s.submitProfilePublish(ctx, row.ProfileId, row.TenantId, row.AccountId, 0, operationNo, []int64{row.ChannelId}, true)
 	if errors.Is(err, errTelegramPublishPermissionPaused) {
+		nextAt := gtime.Now().Add(time.Hour)
 		_, updateErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", row.JobId).
-			Data(g.Map{"next_cycle_at": gtime.Now().Add(time.Hour), "last_dispatch_error": err.Error()}).Update()
+			Data(g.Map{"next_cycle_at": nextAt, "last_dispatch_error": err.Error()}).Update()
+		indexProfileCycleDue(ctx, row.JobId, nextAt)
 		return false, updateErr
 	}
 	if err == nil {
@@ -676,6 +764,11 @@ func (s *sSysPublish) dispatchDueProfileCycle(ctx context.Context, row profileCy
 		data["last_dispatch_error"] = message + "；连续失败达到阈值，已暂停循环"
 	}
 	_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", row.JobId).Data(data).Update()
+	if nextAt, ok := data["next_cycle_at"].(*gtime.Time); ok && nextAt != nil {
+		indexProfileCycleDue(ctx, row.JobId, nextAt)
+	} else {
+		removeProfileCycleDue(ctx, row.JobId)
+	}
 	return false, err
 }
 
