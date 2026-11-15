@@ -3,10 +3,12 @@ package sys
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/os/gcache"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gotd/td/tg"
@@ -460,5 +462,31 @@ func TestMergeTelegramWebhookAttemptsKeepsPostgresAttemptWhenRedisCandidateIsDir
 	merged := mergeTelegramWebhookAttempts([]telegramDeliveryAttempt{redisAttempt, redisAttempt}, []telegramDeliveryAttempt{postgresAttempt, redisAttempt})
 	if len(merged) != 2 || merged[0].Id != redisAttempt.Id || merged[1].Id != postgresAttempt.Id {
 		t.Fatalf("merged attempts=%+v, want redis candidate plus postgres fallback without duplicates", merged)
+	}
+}
+
+func TestTelegramWebhookMessageTypeAndStoredFacts(t *testing.T) {
+	cases := []struct {
+		name string
+		msg  *models.Message
+		want string
+	}{
+		{name: "album", msg: &models.Message{MediaGroupID: "g", Photo: []models.PhotoSize{{}}}, want: "album"},
+		{name: "photo", msg: &models.Message{Photo: []models.PhotoSize{{}}}, want: "photo"},
+		{name: "video", msg: &models.Message{Video: &models.Video{}}, want: "video"},
+		{name: "document", msg: &models.Message{Document: &models.Document{}}, want: "document"},
+		{name: "text", msg: &models.Message{Text: "hello"}, want: "text"},
+		{name: "unknown", msg: &models.Message{ID: 1}, want: "unknown"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			if got := telegramWebhookMessageType(test.msg); got != test.want {
+				t.Fatalf("message type=%q, want %q", got, test.want)
+			}
+		})
+	}
+	message := telegramWebhookReconcileMessage{ChatID: "-1001", MessageID: 7, MessageType: "video", Status: telegramWebhookMessageStatusMatched, AttemptID: 9, JobID: 10, Phase: "verify", ReceivedAt: time.Now()}
+	if strings.Contains(fmt.Sprintf("%+v", message), "text") {
+		t.Fatal("webhook reconcile fact must not contain text")
 	}
 }

@@ -973,7 +973,8 @@ func (s *sSysPublish) matchTelegramDeliveryAttempt(ctx context.Context, botId in
 	}
 	chatId := normalizeTelegramChannelChatID(strconv.FormatInt(msg.Chat.ID, 10))
 	cacheTelegramWebhookReconcileMessage(ctx, telegramWebhookReconcileMessage{
-		ChatID: chatId, MessageID: int64(msg.ID), MediaGroupID: msg.MediaGroupID, ReceivedAt: time.Now(),
+		ChatID: chatId, MessageID: int64(msg.ID), MediaGroupID: msg.MediaGroupID,
+		MessageType: telegramWebhookMessageType(msg), ReceivedAt: time.Now(),
 	})
 	var attempts []telegramDeliveryAttempt
 	window := time.Minute
@@ -1120,6 +1121,11 @@ func (s *sSysPublish) matchTelegramDeliveryAttempt(ctx context.Context, botId in
 	if affected == 0 {
 		return
 	}
+	cacheTelegramWebhookReconcileMessage(ctx, telegramWebhookReconcileMessage{
+		ChatID: chatId, MessageID: int64(msg.ID), MediaGroupID: msg.MediaGroupID,
+		MessageType: telegramWebhookMessageType(msg), Status: telegramWebhookMessageStatusMatched,
+		ReceivedAt: time.Now(), AttemptID: matched.Id, JobID: matched.JobId, Phase: matched.Phase,
+	})
 	job, err := s.telegramJobById(ctx, matched.JobId)
 	if err != nil {
 		return
