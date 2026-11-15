@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -137,17 +138,43 @@ func activeCollectProcessScopes(ctx context.Context) []publishAccountScope {
 	return scopes
 }
 
+func collectSourceRecoveryConcurrency(ctx context.Context) int {
+	value := g.Cfg().MustGet(ctx, "youbanPublish.collect.sourceRecoveryConcurrency", 16).Int()
+	if value < 1 {
+		return 1
+	}
+	if value > 128 {
+		return 128
+	}
+	return value
+}
+
 func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	if err := s.recoverCollectSourceStats(ctx, 100); err != nil {
 		g.Log().Warningf(ctx, "恢复采集源统计任务失败：%+v", err)
 	}
 	mediaBatchSize := collectMediaRecoveryBatchSize(ctx)
 	batchSize := collectProcessOutboxRecoveryBatchSize(ctx)
-	for _, scope := range activeCollectProcessScopes(ctx) {
-		if err := s.dispatchDueCollectProcessOutbox(ctx, batchSize, scope); err != nil {
-			g.Log().Warningf(ctx, "恢复采集处理Outbox失败 tenantId:%d accountId:%d sourceId:%d err:%+v", scope.TenantID, scope.AccountID, scope.SourceID, err)
-		}
+	scopes := activeCollectProcessScopes(ctx)
+	limit := make(chan struct{}, collectSourceRecoveryConcurrency(ctx))
+	var wg sync.WaitGroup
+	for _, scope := range scopes {
+		scope := scope
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case limit <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
+			defer func() { <-limit }()
+			if err := s.dispatchDueCollectProcessOutbox(ctx, batchSize, scope); err != nil {
+				g.Log().Warningf(ctx, "恢复采集处理Outbox失败 tenantId:%d accountId:%d sourceId:%d err:%+v", scope.TenantID, scope.AccountID, scope.SourceID, err)
+			}
+		}()
 	}
+	wg.Wait()
 	// Always drain a bounded ready-media transition before backpressure can
 	// yield historical recovery; otherwise ready events remain orphaned while
 	// realtime traffic is continuously above the gate.
