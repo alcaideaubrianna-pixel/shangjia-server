@@ -64,12 +64,15 @@ func (s *sSysPublish) scheduleDueChannelBatchCyclesShard(ctx context.Context, li
 			vipByTenant[channel.TenantId] = vip
 		}
 		if !tenantVipStatusActive(vip) || !containsString(vip.Features, sysin.TenantVipFeatureBatchCycle) {
+			// 权限未确认时只跳过本轮，不持久化改写频道模式。此前将 batch
+			// 永久改成 time 会留下脏配置，且 VIP 恢复后不会自动恢复批次循环。
+			nextRunAt := nextBatchCycleAt(channel.BatchTime, now.Time)
 			if _, updateErr := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).Where("id", channel.Id).Where("tenant_id", channel.TenantId).Data(g.Map{
-				"cycle_publish_mode": "time", "cycle_batch_cursor": 0, "cycle_active_run_id": 0, "cycle_next_run_at": nil, "updated_at": now,
+				"cycle_active_run_id": 0, "cycle_next_run_at": nextRunAt, "updated_at": now,
 			}).Update(); updateErr != nil {
-				g.Log().Warningf(ctx, "降级过期会员批次循环失败 channel:%d tenant:%d err:%+v", channel.Id, channel.TenantId, updateErr)
-			} else if enqueueErr := s.enqueueCycleReschedule(ctx, channel.Id, 0); enqueueErr != nil {
-				g.Log().Warningf(ctx, "提交过期会员循环重算失败 channel:%d tenant:%d err:%+v", channel.Id, channel.TenantId, enqueueErr)
+				g.Log().Warningf(ctx, "跳过无批次权限频道失败 channel:%d tenant:%d err:%+v", channel.Id, channel.TenantId, updateErr)
+			} else {
+				g.Log().Warningf(ctx, "批次循环权限未确认，本轮跳过且保留batch配置 channel:%d tenant:%d next:%s", channel.Id, channel.TenantId, nextRunAt.String())
 			}
 			continue
 		}
