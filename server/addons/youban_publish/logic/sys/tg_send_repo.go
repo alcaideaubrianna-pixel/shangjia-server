@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -395,7 +396,14 @@ func (s *sSysPublish) finalizeTelegramMediaDelivery(ctx context.Context, job tel
 	if !complete {
 		return nil
 	}
-	return s.completeTelegramJobAndWakeChannel(ctx, job)
+	startedAt := time.Now()
+	err := s.completeTelegramJobAndWakeChannel(ctx, job)
+	result := "success"
+	if err != nil {
+		result = "error"
+	}
+	observeTelegramProfilePublish(ctx, job, result, time.Since(startedAt))
+	return err
 }
 
 func (s *sSysPublish) appendTelegramJobLog(ctx context.Context, job telegramJobRecord, action string, status string, message string) {

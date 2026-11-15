@@ -121,6 +121,24 @@ func observeTelegramPublishFailure(ctx context.Context, stage string) {
 	counter.Add(ctx, 1, metric.WithAttributes(attribute.String("stage", stage)))
 }
 
+func observeTelegramProfilePublish(ctx context.Context, job telegramJobRecord, result string, duration time.Duration) {
+	attrs := []attribute.KeyValue{attribute.String("result", result)}
+	if job.ChannelId > 0 {
+		attrs = append(attrs, attribute.Int64("channel_id", job.ChannelId))
+	}
+	if job.ProfileId > 0 {
+		attrs = append(attrs, attribute.Int64("profile_id", job.ProfileId))
+	}
+	if profileNo := strings.TrimSpace(job.ProfileNoSnapshot); profileNo != "" {
+		attrs = append(attrs, attribute.String("profile_no", profileNo))
+	}
+	counter, _ := publishObserveMeter.Int64Counter("xiaohuiji.tg.profile_publish_total")
+	durations, _ := publishObserveMeter.Float64Histogram("xiaohuiji.tg.profile_publish_duration_seconds")
+	metricAttrs := metric.WithAttributes(attrs...)
+	counter.Add(ctx, 1, metricAttrs)
+	durations.Record(ctx, duration.Seconds(), metricAttrs)
+}
+
 func observeTelegramMediaSend(ctx context.Context, job *telegramJobRecord, phase string, err error, duration time.Duration) {
 	result := "success"
 	if err != nil {
