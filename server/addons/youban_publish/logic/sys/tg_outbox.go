@@ -793,7 +793,8 @@ func telegramDueOutboxPostgresSQL() string {
 				SELECT 1 FROM ` + publishTgJobTable + ` earlier
 				WHERE earlier.tenant_id=j.tenant_id
 					AND ` + earlierChannelKey + `=` + channelKey + `
-					AND ` + telegramChannelBlockingJobStateSQL("earlier") + `
+					AND ((j.priority = ` + fmt.Sprintf("%d", tgJobPriorityInteractive) + ` AND ` + telegramChannelBlockingJobStateSQLForPriority("earlier", tgJobPriorityInteractive) + `) OR
+						(j.priority <> ` + fmt.Sprintf("%d", tgJobPriorityInteractive) + ` AND ` + telegramChannelBlockingJobStateSQLForPriority("earlier", tgJobPriorityBulk) + `))
 					AND ` + telegramChannelSchedulePrecedesSQL("earlier", "j") + `
 			)
 	), terminal_outboxes AS (

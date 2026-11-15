@@ -48,7 +48,7 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 		}
 		createdAt = current["created_at"].GTime()
 	}
-	blocking := telegramChannelBlockingJobSQL("j")
+	blocking := telegramChannelBlockingJobStateSQLForPriority("j", job.Priority)
 	if s.accountPushEngine(ctx, job.TenantId, job.AccountId) == pushEngineUnifiedStream {
 		blocking = telegramStreamChannelBlockingJobSQL("j")
 	}
@@ -100,7 +100,11 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 		// actual ordering boundary is an execution that has claimed the job or
 		// entered a send/confirmation phase.  This lets a newer publication
 		// proceed while a stale queued task is waiting for a worker.
-		fast = fast.Where("(j.dispatch_status = 'processing' OR j.status IN ('sending','confirming','unknown'))")
+		if job.Priority == tgJobPriorityInteractive {
+			fast = fast.Where("j.status IN ('sending','confirming','unknown')")
+		} else {
+			fast = fast.Where("(j.dispatch_status = 'processing' OR j.status IN ('sending','confirming','unknown'))")
+		}
 		if strings.TrimSpace(job.TargetChatId) != "" {
 			// target_chat_id 是真实 Telegram 目标的串行边界。即使两个
 			// 采集账户不同，只要租户和目标频道相同，也必须共享同一个队首。
@@ -165,6 +169,17 @@ func telegramChannelBlockingJobStatuses() []string {
 		telegramJobStatusConfirming,
 		telegramJobStatusSending,
 	}
+}
+
+func telegramChannelBlockingJobStateSQLForPriority(alias string, priority int) string {
+	if priority == tgJobPriorityInteractive {
+		qualified := alias
+		if qualified != "" {
+			qualified += "."
+		}
+		return fmt.Sprintf("%sstatus IN ('sending','confirming','unknown')", qualified)
+	}
+	return telegramChannelBlockingJobStateSQL(alias)
 }
 
 func telegramChannelBlockingJobSQL(alias string) string {
