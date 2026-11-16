@@ -559,7 +559,7 @@ func (s *sSysPublish) ensureTelegramProfileJobWithMetaTx(ctx context.Context, tx
 		return 0, gerror.New("目标频道已停用或删除，请刷新后重试")
 	}
 	channel = *current
-	botId, err := telegramChannelSenderBotId(channel)
+	botId, err := telegramChannelSenderBotIdForProfile(channel, source["profile_id"].Int64())
 	if err != nil {
 		return 0, err
 	}

@@ -96,6 +96,13 @@ func TestTelegramNetworkErrorUsesProtocolAfterTwoBotAttempts(t *testing.T) {
 	}
 }
 
+func TestTelegramRateLimitUsesProtocolImmediately(t *testing.T) {
+	err := assertError("too many requests, Too Many Requests: retry after 60: retry_after 60")
+	if !shouldFallbackTelegramMediaToAccountAfterBotRetries(err, 0) {
+		t.Fatal("explicit retry_after must hand off to protocol fallback immediately")
+	}
+}
+
 func TestTelegramAmbiguousNetworkResultDoesNotBlindlyFallback(t *testing.T) {
 	err := assertError("unexpected eof while reading Telegram response")
 	if shouldFallbackTelegramMediaToAccountAfterBotRetries(err, 1) {

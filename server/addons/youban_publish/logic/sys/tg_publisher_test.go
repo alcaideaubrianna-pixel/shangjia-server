@@ -37,6 +37,24 @@ func TestTelegramChannelSenderBotId(t *testing.T) {
 	}
 }
 
+func TestTelegramChannelSenderBotIdForProfileSpreadsStableAssignments(t *testing.T) {
+	channel := telegramJobChannel{BotIdJson: `[11,12,13]`}
+	got := []int64{}
+	for _, profileID := range []int64{1, 2, 3, 4, 5, 6} {
+		botID, err := telegramChannelSenderBotIdForProfile(channel, profileID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, botID)
+	}
+	want := []int64{12, 13, 11, 12, 13, 11}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("profile %d got bot %d, want %d", i+1, got[i], want[i])
+		}
+	}
+}
+
 func TestApplyCollectTextDeletes(t *testing.T) {
 	got := applyCollectTextDeletes("hello 删除 keep 删除", []string{"删除"})
 	if got != "hello  keep " {
