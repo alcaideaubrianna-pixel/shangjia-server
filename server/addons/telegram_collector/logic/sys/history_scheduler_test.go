@@ -1,6 +1,10 @@
 package sys
 
-import "testing"
+import (
+	"testing"
+
+	"hotgo/addons/telegram_collector/model/input/sysin"
+)
 
 func TestHistoryDeliveryWithinQuotaAllowsBotSource(t *testing.T) {
 	if !historyDeliveryWithinQuota(0, 351, map[int64]int{}, map[int64]int{}, 8, 4) {
@@ -23,5 +27,24 @@ func TestHistoryDeliveryWithinQuotaLimitsBotSource(t *testing.T) {
 func TestHistorySchedulerPoolIsStrictlyHistory(t *testing.T) {
 	if historySchedulerPool != "history" {
 		t.Fatalf("history scheduler pool = %q, want %q", historySchedulerPool, "history")
+	}
+}
+
+func TestHistorySchedulerPriorityRange(t *testing.T) {
+	tests := []struct {
+		name     string
+		priority int
+		want     bool
+	}{
+		{name: "normal history", priority: sysin.EventPriorityNormal, want: true},
+		{name: "realtime excluded", priority: sysin.EventPriorityRealtime, want: false},
+		{name: "urgent excluded from background", priority: sysin.EventPriorityUrgent, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := historySchedulerPriorityEligible(tt.priority); got != tt.want {
+				t.Fatalf("priority %d eligible = %v, want %v", tt.priority, got, tt.want)
+			}
+		})
 	}
 }

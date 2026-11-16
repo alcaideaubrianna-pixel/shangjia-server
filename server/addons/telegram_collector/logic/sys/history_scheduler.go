@@ -14,6 +14,13 @@ import (
 
 const historySchedulerPool = "history"
 
+// historySchedulerPriorityEligible keeps the background scheduler on the
+// historical priority range. Urgent historical rows remain compatible with
+// the live urgent queue routing and must be handled there instead.
+func historySchedulerPriorityEligible(priority int) bool {
+	return priority < sysin.EventPriorityRealtime
+}
+
 // StartHistoryScheduler starts the compatibility scheduler used by the
 // background-worker role. Old deliveries are resolved through their event at
 // dispatch time, so a full-table metadata backfill is not required.
@@ -67,6 +74,7 @@ func (s *sCollector) dispatchHistoryBatch(ctx context.Context) error {
 		LeftJoin("hg_tg_collector_event e", "e.id = hg_tg_collector_delivery.event_id").
 		Where(columns.Status, sysin.DeliveryStatusPending).
 		Where("scheduler_pool", historySchedulerPool).
+		Where(columns.Priority, "<", sysin.EventPriorityRealtime).
 		Where("e.source_id > 0").
 		Where(fmt.Sprintf("(%s IS NULL OR %s <= ?)", "dispatch_until", "dispatch_until"), gtime.Now()).
 		Order(columns.Priority + " DESC, " + columns.CreatedAt + " ASC, " + columns.Id + " ASC").
@@ -99,6 +107,7 @@ func (s *sCollector) dispatchHistoryBatch(ctx context.Context) error {
 		claimed, err := dao.TgCollectorDelivery.Ctx(ctx).WherePri(id).
 			Where(columns.Status, sysin.DeliveryStatusPending).
 			Where("scheduler_pool", historySchedulerPool).
+			Where(columns.Priority, "<", sysin.EventPriorityRealtime).
 			Where(fmt.Sprintf("(%s IS NULL OR %s <= ?)", "dispatch_until", "dispatch_until"), gtime.Now()).
 			Data(g.Map{"dispatch_owner": owner, "dispatch_until": leaseUntil}).Update()
 		if err != nil {
