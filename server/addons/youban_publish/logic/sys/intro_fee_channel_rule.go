@@ -226,9 +226,11 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 	for _, row := range disabledChannels {
 		disabledByChannel[canonicalCollectSourceChatID(row.ChannelID)] = true
 	}
-	// A rule-scoped dialog must only contain channels belonging to sources
-	// bound to this rule. The compact source/source_rule tables are the
-	// historical index; do not broaden the result with all account/BOT chats.
+	// The rule-scoped dialog starts from configured rule rows. A source may be
+	// created on the first incoming message before source_rule is backfilled, so
+	// source_rule cannot be the only existence check here. Match the configured
+	// channel against the tenant/account/BOT source index, then apply the
+	// explicit approval and manual-disable gates below.
 	type sourceCandidate struct {
 		Status         int         `orm:"status"`
 		CollectEnabled int         `orm:"collect_enabled"`
@@ -247,9 +249,6 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 	}
 	if botID > 0 {
 		sourceModel = sourceModel.Where("bot_id", botID)
-	}
-	if ruleID > 0 {
-		sourceModel = sourceModel.Where("EXISTS (SELECT 1 FROM "+pdao.YoubanPublishCollectSourceRule.Table()+" sr WHERE sr.source_id="+publishCollectSourceTable+".id AND sr.rule_id=? AND sr.tenant_id=?)", ruleID, tenantID)
 	}
 	var sourceRows []sourceCandidate
 	if err := sourceModel.Fields("status,collect_enabled,bot_id,source_chat_id,title AS chat_title,source_username AS chat_username,last_event_at AS last_message_at").OrderDesc("updated_at").Limit(candidateLimit).Scan(&sourceRows); err != nil {
