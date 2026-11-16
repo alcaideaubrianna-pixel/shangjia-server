@@ -33,8 +33,35 @@ func (s *sSysPublish) handleTelegramUpdate(ctx context.Context, botId int64, ten
 	}
 	text := telegramMessageText(msg)
 	g.Log().Debugf(ctx, "收到上架插件Telegram消息 bot:%d type:%s chat:%d message:%d text:%s", botId, updateType, msg.Chat.ID, msg.ID, text)
+	fact := telegramWebhookReconcileMessage{
+		ChatID:       normalizeTelegramChannelChatID(fmt.Sprintf("%d", msg.Chat.ID)),
+		MessageID:    int64(msg.ID),
+		MediaGroupID: msg.MediaGroupID,
+		MessageType:  telegramWebhookMessageType(msg),
+		ReceivedAt:   time.Now(),
+	}
+	reserved, reserveErr := reserveTelegramWebhookReconcileMessage(ctx, fact)
+	if reserveErr != nil {
+		g.Log().Warning(ctx, "TG消息事实Redis去重不可用，回退数据库幂等", g.Map{
+			"event":   "telegram_webhook_fact_dedupe_fallback",
+			"chat_id": fact.ChatID, "message_id": fact.MessageID, "error": reserveErr,
+		})
+		reserved = true
+	}
 	stageStartedAt := time.Now()
-	s.recordTelegramBotMessageSource(ctx, botId, tenantId, update.ID, updateType, msg, text)
+	if reserved {
+		if err := s.recordTelegramBotMessageSource(ctx, botId, tenantId, update.ID, updateType, msg, text); err != nil {
+			if cache.Initialized() {
+				_, _ = cache.Instance().Remove(ctx, telegramWebhookReconcileMessageKey(fact.ChatID, fact.MessageID))
+			}
+		}
+	} else {
+		g.Log().Info(ctx, "TG消息事实Redis命中，跳过来源表重复写入", g.Map{
+			"event":   "telegram_webhook_fact_deduplicated",
+			"chat_id": fact.ChatID, "message_id": fact.MessageID,
+			"dedupe_key": telegramWebhookReconcileMessageKey(fact.ChatID, fact.MessageID),
+		})
+	}
 	logTelegramUpdateSlowStage(ctx, update.ID, botId, "record_source", time.Since(stageStartedAt), nil)
 	stageStartedAt = time.Now()
 	s.handleTelegramAutoDelete(ctx, botId, tenantId, msg, text)
@@ -46,26 +73,22 @@ func (s *sSysPublish) handleTelegramUpdate(ctx context.Context, botId int64, ten
 	} else {
 		logTelegramUpdateSlowStage(ctx, update.ID, botId, "channel_cache", time.Since(stageStartedAt), nil)
 	}
-	cacheTelegramWebhookReconcileMessage(ctx, telegramWebhookReconcileMessage{
-		ChatID:       normalizeTelegramChannelChatID(fmt.Sprintf("%d", msg.Chat.ID)),
-		MessageID:     int64(msg.ID),
-		MediaGroupID: msg.MediaGroupID,
-		MessageType:   telegramWebhookMessageType(msg),
-		ReceivedAt:    time.Now(),
-	})
+	if reserved {
+		cacheTelegramWebhookReconcileMessage(ctx, fact)
+	}
 	g.Log().Info(ctx, "TG链路 webhook_fact_cached", g.Map{
-		"event":          "telegram_webhook_fact_cached",
-		"update_id":      update.ID,
-		"update_type":    updateType,
-		"bot_id":         botId,
-		"tenant_id":      tenantId,
-		"chat_id":        normalizeTelegramChannelChatID(fmt.Sprintf("%d", msg.Chat.ID)),
-		"message_id":     msg.ID,
-		"media_group_id": msg.MediaGroupID,
-		"message_type":   telegramMessageMediaType(msg),
-		"source_table":   telegramBotMessageSourceTable,
-		"redis_fact":     true,
-		"source":          "telegram_update",
+		"event":                "telegram_webhook_fact_cached",
+		"update_id":            update.ID,
+		"update_type":          updateType,
+		"bot_id":               botId,
+		"tenant_id":            tenantId,
+		"chat_id":              normalizeTelegramChannelChatID(fmt.Sprintf("%d", msg.Chat.ID)),
+		"message_id":           msg.ID,
+		"media_group_id":       msg.MediaGroupID,
+		"message_type":         telegramMessageMediaType(msg),
+		"source_table":         telegramBotMessageSourceTable,
+		"redis_fact":           true,
+		"source":               "telegram_update",
 		"source_table_written": true,
 	})
 	matchCtx := context.WithoutCancel(ctx)
@@ -87,9 +110,9 @@ func logTelegramUpdateSlowStage(ctx context.Context, updateID, botID int64, stag
 	g.Log().Infof(ctx, "TG链路 publish_update_slow_stage updateId:%d botId:%d stage:%s duration:%s result:ok", updateID, botID, stage, duration)
 }
 
-func (s *sSysPublish) recordTelegramBotMessageSource(ctx context.Context, botId, tenantId int64, updateId int64, updateType string, msg *models.Message, text string) {
+func (s *sSysPublish) recordTelegramBotMessageSource(ctx context.Context, botId, tenantId int64, updateId int64, updateType string, msg *models.Message, text string) error {
 	if msg == nil || msg.ID <= 0 || msg.Chat.ID == 0 {
-		return
+		return nil
 	}
 	chatId := normalizeTelegramChannelChatID(fmt.Sprintf("%d", msg.Chat.ID))
 	data := g.Map{
@@ -132,5 +155,7 @@ func (s *sSysPublish) recordTelegramBotMessageSource(ctx context.Context, botId,
 		Save()
 	if err != nil {
 		g.Log().Warningf(ctx, "记录Telegram Bot消息来源失败 bot:%d chat:%s message:%d err:%+v", botId, chatId, msg.ID, err)
+		return err
 	}
+	return nil
 }

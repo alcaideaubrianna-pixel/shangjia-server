@@ -187,6 +187,23 @@ func telegramWebhookMessageStateFrom(message telegramWebhookReconcileMessage) te
 	}
 }
 
+// reserveTelegramWebhookReconcileMessage atomically claims the channel/message
+// fact in Redis. Redis is only a write-through dedupe layer; PostgreSQL unique
+// constraints remain the final correctness boundary when Redis is unavailable.
+func reserveTelegramWebhookReconcileMessage(ctx context.Context, message telegramWebhookReconcileMessage) (bool, error) {
+	if strings.TrimSpace(message.ChatID) == "" || message.MessageID <= 0 || !cache.Initialized() {
+		return true, nil
+	}
+	if message.Status == "" {
+		message.Status = telegramWebhookMessageStatusReceived
+	}
+	state, err := json.Marshal(telegramWebhookMessageStateFrom(message))
+	if err != nil {
+		return false, err
+	}
+	return cache.Instance().SetIfNotExist(ctx, telegramWebhookReconcileMessageKey(message.ChatID, message.MessageID), string(state), telegramWebhookReconcileTTL(ctx))
+}
+
 func cacheTelegramWebhookReconcileMessage(ctx context.Context, message telegramWebhookReconcileMessage) {
 	if strings.TrimSpace(message.ChatID) == "" || message.MessageID <= 0 || !cache.Initialized() {
 		return
