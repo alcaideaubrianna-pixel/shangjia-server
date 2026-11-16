@@ -259,6 +259,17 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 			return enqueueErr
 		}
 		g.Log().Info(ctx, "统一频道队列直接入队", g.Map{"event": "channel_direct_enqueue", "jobId": job.Id, "channelId": job.ChannelId, "outboxId": row.Id, "priority": priority})
+		// Redis 入队成功后立即收口 Outbox。频道 ZSET 是统一队列模式的
+		// 权威传输层；如果这里仍保留 pending，恢复扫描会反复选中同一
+		// 任务，造成数据库扫描膨胀，并让历史 Outbox 看起来像没有消费。
+		// enqueueTelegramChannelJob 本身按 jobId 幂等，重试不会制造重复任务。
+		if err := s.completeTelegramOutbox(ctx, row.Id); err != nil {
+			g.Log().Warning(ctx, "统一频道队列入队成功但Outbox收口失败，保留待恢复", g.Map{
+				"event": "channel_outbox_complete_failed", "jobId": job.Id,
+				"channelId": job.ChannelId, "outboxId": row.Id, "error": err.Error(),
+			})
+			return err
+		}
 		return nil
 	}
 	owner := telegramOutboxOwner()
