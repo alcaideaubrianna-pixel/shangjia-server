@@ -3,6 +3,7 @@ package sys
 import (
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 type profileMessageKind string
@@ -64,6 +65,13 @@ func classifyProfileMessage(text string, media []collectMediaItem) profileMessag
 	text = strings.TrimSpace(text)
 	if profileMessageIgnoredNotice(text) {
 		return profileMessageClassification{Kind: profileMessageKindIgnore}
+	}
+	if len(media) > 0 && utf8.RuneCountInString(text) > 20 {
+		return profileMessageClassification{
+			Kind:  profileMessageKindDisplay,
+			Text:  text,
+			Media: media,
+		}
 	}
 	if profileMessageAllMediaType(media, "video") && !profileMessageHasProfileText(text) {
 		return profileMessageClassification{

@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -111,7 +112,7 @@ func collectMaterialMixedVerification(message collectMaterialMessageView) bool {
 }
 
 func collectMaterialVerifyCandidate(message collectMaterialMessageView) bool {
-	if profileMessageHasProfileText(message.RawText) {
+	if utf8.RuneCountInString(strings.TrimSpace(message.RawText)) > 20 {
 		return false
 	}
 	if !profileMessageHasMediaType(message.Media, "video") {

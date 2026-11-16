@@ -24,16 +24,16 @@ func TestCaptionlessPhotoVideoGroupIsNotVerification(t *testing.T) {
 		t.Fatal("captionless video group must remain a verification candidate")
 	}
 	if !collectMaterialMixedVerification(collectMaterialMessageView{
-		RawText: "视频编号：MM2611161524，请核验",
+		RawText: "编号：123456",
 		Media:   []collectMediaItem{{Type: "video"}},
 	}) {
 		t.Fatal("video caption with an identifier must remain a verification candidate")
 	}
 	if collectMaterialMixedVerification(collectMaterialMessageView{
-		RawText: "昵称：A，城市：成都，年龄：25",
+		RawText: "这是一段超过二十个字符的展示资料文案，不应作为验证资料",
 		Media:   []collectMediaItem{{Type: "video"}},
 	}) {
-		t.Fatal("profile fields must remain a display candidate")
+		t.Fatal("long caption must remain a display candidate")
 	}
 }
 
