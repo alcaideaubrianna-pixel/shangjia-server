@@ -130,10 +130,27 @@ func (s *sSysPublish) markProfilesUnpublishing(ctx context.Context, ids []int64,
 		if state.IsEmpty() {
 			continue
 		}
-		if _, err = g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
+		result, err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
 			Where("tenant_id", tenantId).Where("profile_id", profileID).WhereNull("deleted_at").
-			Data(g.Map{"publish_operation_no": strings.TrimSpace(operationNo), "publish_task_status": sysin.PublishTaskStatusUnpublishing.String(), "publish_task_updated_at": now, "updated_at": now}).Update(); err != nil {
+			Data(g.Map{"publish_operation_no": strings.TrimSpace(operationNo), "publish_task_status": sysin.PublishTaskStatusUnpublishing.String(), "publish_task_updated_at": now, "updated_at": now}).Update()
+		if err != nil {
 			return gerror.Wrap(err, "记录资料下架进行中状态失败")
+		}
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return gerror.Wrap(err, "确认资料下架进行中状态写入结果失败")
+		}
+		if rowsAffected != 1 {
+			return gerror.Newf("记录资料下架进行中状态失败：资料 %d 未写入状态", profileID)
+		}
+		state, err = g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
+			Fields("publish_operation_no,publish_task_status").
+			Where("tenant_id", tenantId).Where("profile_id", profileID).WhereNull("deleted_at").One()
+		if err != nil {
+			return gerror.Wrap(err, "确认资料下架进行中状态失败")
+		}
+		if state.IsEmpty() || state["publish_operation_no"].String() != strings.TrimSpace(operationNo) || state["publish_task_status"].String() != sysin.PublishTaskStatusUnpublishing.String() {
+			return gerror.Newf("确认资料下架进行中状态失败：资料 %d 状态未生效", profileID)
 		}
 		if _, err = g.DB().Model(publishNoteIndexTable).Safe().Ctx(ctx).
 			Where("tenant_id", tenantId).Where("profile_id", profileID).WhereNull("deleted_at").
