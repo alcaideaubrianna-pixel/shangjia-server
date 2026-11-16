@@ -221,21 +221,42 @@ func (s *sSysPublish) reconcileRecoveredChannelCycleRuns(ctx context.Context, li
 	for _, run := range runs {
 		prefix := fmt.Sprintf("cycle_batch:%d:%%", run.Id)
 		message := "原循环任务已由自动补偿任务成功替代"
-		_, err := g.DB().Exec(ctx, `UPDATE `+publishTgJobTable+` source
-			SET status='superseded', dispatch_status=?, next_retry_at=NULL,
-				last_dispatch_error=?, updated_at=NOW()
-			WHERE source.status='failed' AND source.operation_no LIKE ?
-				AND source.tenant_id=? AND source.channel_id=?
-				AND EXISTS (
-					SELECT 1 FROM `+publishTgJobTable+` recovery
-					WHERE (recovery.recovery_of_job_id=source.id OR
-							(recovery.recovery_of_job_id IS NULL AND recovery.operation_no = ('auto-recover:' || source.id || ':' || source.profile_id)))
-						AND recovery.tenant_id=source.tenant_id
-						AND recovery.account_id=source.account_id
-						AND recovery.profile_id=source.profile_id
-						AND recovery.channel_id=source.channel_id
-						AND recovery.status='sent'
-				)`, tgDispatchStatusDone, message, prefix, run.TenantId, run.ChannelId)
+		if run.TenantId <= 0 || run.ChannelId <= 0 {
+			continue
+		}
+		// Scope the bounded candidate IDs before using the canonical transition.
+		// Leaving SendPhase unset preserves confirmed remote progress.
+		var jobs []struct {
+			ID int64 `orm:"id"`
+		}
+		err := g.DB().Model(publishTgJobTable+" source").Safe().Ctx(ctx).
+			Fields("source.id").
+			Where("source.status", JobStatusFailed).
+			Where("source.operation_no LIKE ?", prefix).
+			Where("source.tenant_id", run.TenantId).
+			Where("source.channel_id", run.ChannelId).
+			Where(`EXISTS (
+				SELECT 1 FROM `+publishTgJobTable+` recovery
+				WHERE (recovery.recovery_of_job_id=source.id OR
+					(recovery.recovery_of_job_id IS NULL AND recovery.operation_no = ('auto-recover:' || source.id || ':' || source.profile_id)))
+					AND recovery.tenant_id=source.tenant_id
+					AND recovery.account_id=source.account_id
+					AND recovery.profile_id=source.profile_id
+					AND recovery.channel_id=source.channel_id
+					AND recovery.status=?
+			)`, JobStatusSent).
+			OrderAsc("source.id").Limit(100).Scan(&jobs)
+		if err == nil {
+			ids := make([]int64, 0, len(jobs))
+			for _, job := range jobs {
+				ids = append(ids, job.ID)
+			}
+			_, err = s.transitionTelegramJobs(ctx, ids, telegramJobTransition{
+				From:       []JobStatus{JobStatusFailed},
+				To:         JobStatusSuperseded,
+				Additional: g.Map{"last_dispatch_error": message},
+			})
+		}
 		if err != nil {
 			return gerror.Wrap(err, "核对循环批次自动补偿任务失败")
 		}

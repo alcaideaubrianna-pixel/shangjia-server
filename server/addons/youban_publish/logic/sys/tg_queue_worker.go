@@ -221,7 +221,7 @@ func (s *sSysPublish) runCollectProcessSourceDispatcher(ctx context.Context, mem
 				// loop so a transient DB/queue failure cannot strand this source.
 				// Keep the lock alive while the signal is requeued; producers will
 				// still coalesce duplicate wakeups for this source.
-				if _, requeueErr := client.Do(ctx, "LPUSH", wakeQueueKey, member); requeueErr != nil {
+				if requeueErr := cache.ListPushLeft(ctx, wakeQueueKey, member); requeueErr != nil {
 					g.Log().Warning(ctx, "来源采集唤醒信号回队列失败", g.Map{
 						"tenantId": tenantID, "accountId": accountID, "sourceId": sourceID,
 						"error": requeueErr.Error(),
@@ -262,7 +262,7 @@ func (s *sSysPublish) ensureCollectProcessSourceDispatcher(ctx context.Context, 
 	if client, err := cache.RedisClient(); err == nil {
 		lockKey := collectProcessSourceWakeLockKey(member)
 		if value, setErr := client.Do(ctx, "SET", lockKey, "1", "NX", "EX", 30); setErr == nil && wakeAccepted(value.String()) {
-			_, _ = client.Do(ctx, "LPUSH", collectProcessSourceWakeQueueKey(member), member)
+			_ = cache.ListPushLeft(ctx, collectProcessSourceWakeQueueKey(member), member)
 		}
 	}
 	go func() {

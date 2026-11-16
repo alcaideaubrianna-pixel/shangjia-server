@@ -205,7 +205,7 @@ func (s *sSysPublish) wakeRepublishedProfileJobs(ctx context.Context, profileID 
 	}
 	var rows []gdb.Record
 	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Fields("id,tenant_id,account_id,channel_id,target_chat_id,status,dispatch_status").
+		Fields("id,tenant_id,account_id,channel_id,target_chat_id").
 		Where("profile_id", profileID).
 		Where("operation_no", operationNo).
 		WhereIn("status", telegramJobActiveStatuses()).
@@ -216,9 +216,7 @@ func (s *sSysPublish) wakeRepublishedProfileJobs(ctx context.Context, profileID 
 		job := telegramJobRecord{
 			Id: row["id"].Int64(), TenantId: row["tenant_id"].Int64(),
 			AccountId: row["account_id"].Int64(), ChannelId: row["channel_id"].Int64(),
-			TargetChatId:   row["target_chat_id"].String(),
-			Status:         JobStatus(row["status"].String()),
-			DispatchStatus: DispatchStatus(row["dispatch_status"].String()),
+			TargetChatId: row["target_chat_id"].String(),
 		}
 		if err := s.wakeNextTelegramChannelJob(ctx, job); err != nil {
 			return gerror.Wrapf(err, "唤醒AI重新上架频道失败 channelId:%d jobId:%d", job.ChannelId, job.Id)

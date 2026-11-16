@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gcfg"
 	"github.com/gogf/gf/v2/os/gtime"
 )
 
@@ -29,12 +31,21 @@ func TestTelegramAPITimeoutFallback(t *testing.T) {
 }
 
 func TestTelegramSendBudgetConfiguration(t *testing.T) {
-	g.Cfg().Set(telegramSendBudgetConfigKey, "20m")
+	previous := g.Cfg().GetAdapter()
+	t.Cleanup(func() { g.Cfg().SetAdapter(previous) })
+	setBudget := func(value string) {
+		adapter, err := gcfg.NewAdapterContent(fmt.Sprintf(`{"youbanPublish":{"telegram":{"sendBudget":%q}}}`, value))
+		if err != nil {
+			t.Fatal(err)
+		}
+		g.Cfg().SetAdapter(adapter)
+	}
+	setBudget("20m")
 	if got := telegramSendBudgetDuration(context.Background()); got != 20*time.Minute {
 		t.Fatalf("configured publication budget = %s, want 20m", got)
 	}
 	for _, value := range []string{"bad", "1m", "31m"} {
-		g.Cfg().Set(telegramSendBudgetConfigKey, value)
+		setBudget(value)
 		if got := telegramSendBudgetDuration(context.Background()); got != telegramSendBudgetDefault {
 			t.Fatalf("invalid publication budget %q = %s, want default %s", value, got, telegramSendBudgetDefault)
 		}

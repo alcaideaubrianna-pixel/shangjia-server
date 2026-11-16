@@ -493,23 +493,23 @@ func (s *sSysPublish) ensureTelegramProfileJobWithMetaTx(ctx context.Context, tx
 			Where("tenant_id", source["tenant_id"].Int64()).Where("account_id", source["account_id"].Int64()).
 			Where("profile_id", source["profile_id"].Int64()).Where("channel_id", channel.Id).
 			WhereIn("status", telegramJobActiveStatuses()).
-			Fields("id,status").OrderDesc("id").One()
+			Fields("id").OrderDesc("id").One()
 		if readErr != nil {
 			return 0, gerror.Wrap(readErr, "读取资料活动TG频道任务失败")
 		}
 		if activeID := active["id"].Int64(); activeID > 0 {
-			if _, updateErr := tx.Model(publishTgJobTable).Safe().Ctx(ctx).
-				Where("id", activeID).
-				Data(g.Map{
-					"status":              telegramJobStatusSuperseded,
-					"dispatch_status":     tgDispatchStatusIdle,
+			// Leave SendPhase unset: superseding must preserve confirmed remote
+			// progress. The canonical transition also settles dispatch state.
+			if _, updateErr := s.transitionTelegramJobsTx(ctx, tx, []int64{activeID}, telegramJobTransition{
+				From: telegramJobActiveStatuses(),
+				To:   JobStatusSuperseded,
+				Additional: g.Map{
 					"asynq_task_id":       "",
 					"next_retry_at":       nil,
 					"send_deadline_at":    nil,
-					"send_phase":          "",
 					"last_dispatch_error": "被新的资料重新上架操作替换",
-					"updated_at":          gtime.Now(),
-				}).Update(); updateErr != nil {
+				},
+			}); updateErr != nil {
 				return 0, gerror.Wrap(updateErr, "隔离资料旧TG任务失败")
 			}
 		}

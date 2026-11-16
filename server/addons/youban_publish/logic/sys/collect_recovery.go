@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
-	"github.com/gogf/gf/v2/database/gredis"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -45,12 +44,6 @@ const (
 	collectRecoveryRealtimeWindow     = 10 * time.Minute
 	collectRecoverySourceBatchDefault = 8
 	collectRecoverySourceBatchMaximum = 64
-	// active_sources is a compatibility ingress set populated by the producer.
-	// The recovery worker promotes sampled members into this lease index and
-	// removes members whose Redis work has expired. It must never become a
-	// permanent registry of every source ever seen.
-	collectRecoveryActiveSourceLeaseKey   = "youban_publish:collect:active_sources:lease"
-	collectRecoveryActiveSourceLeaseLimit = 128
 )
 
 func reserveCollectMediaRecovery(ctx context.Context, eventID int64) bool {
@@ -121,20 +114,13 @@ func activeCollectProcessScopes(ctx context.Context) []publishAccountScope {
 	if !cache.Initialized() {
 		return nil
 	}
-	client, err := cache.RedisClient()
+	maxScopes := collectRecoverySourceBatchSize(ctx)
+	// Sampling is bounded; Redis emptiness never proves PG work is drained.
+	members, err := cache.SetSample(ctx, collectProcessActiveSourcesKey, maxScopes)
 	if err != nil {
 		return nil
 	}
-	maxScopes := collectRecoverySourceBatchSize(ctx)
-	// Do not materialize the entire active-source set on every recovery tick.
-	// Redis samples only the bounded number of source lanes this pass may serve.
-	value, err := client.Do(ctx, "SRANDMEMBER", collectProcessActiveSourcesKey, maxScopes)
-	if err != nil || value.IsNil() {
-		return nil
-	}
-	members := value.Strings()
 	scopes := make([]publishAccountScope, 0, min(len(members), maxScopes))
-	leaseUntil := time.Now().Add(time.Duration(collectSourceLeaseSeconds(ctx)) * time.Second).Unix()
 	for _, member := range members {
 		if len(scopes) >= maxScopes {
 			break
@@ -148,15 +134,11 @@ func activeCollectProcessScopes(ctx context.Context) []publishAccountScope {
 		sourceID, errSource := strconv.ParseInt(parts[2], 10, 64)
 		if errTenant != nil || errAccount != nil || errSource != nil || tenantID <= 0 || accountID < 0 || sourceID <= 0 {
 			// Bad legacy members must not remain in the compatibility set.
-			_, _ = client.Do(ctx, "SREM", collectProcessActiveSourcesKey, member)
+			_ = cache.SetRemove(ctx, collectProcessActiveSourcesKey, member)
 			continue
 		}
-		// Refresh only sampled lanes. This makes the lease an activity signal,
-		// rather than turning every historical source into a permanent worker.
-		_, _ = client.Do(ctx, "ZADD", collectRecoveryActiveSourceLeaseKey, leaseUntil, member)
 		scopes = append(scopes, publishAccountScope{TenantID: tenantID, AccountID: accountID, SourceID: sourceID})
 	}
-	cleanupExpiredCollectProcessSources(ctx, client, time.Now().Unix(), collectRecoveryActiveSourceLeaseLimit)
 	sort.Slice(scopes, func(i, j int) bool {
 		if scopes[i].TenantID != scopes[j].TenantID {
 			return scopes[i].TenantID < scopes[j].TenantID
@@ -167,22 +149,6 @@ func activeCollectProcessScopes(ctx context.Context) []publishAccountScope {
 		return scopes[i].SourceID < scopes[j].SourceID
 	})
 	return scopes
-}
-
-// cleanupExpiredCollectProcessSources renews recovery ownership conservatively.
-// Redis transport emptiness cannot prove PostgreSQL work is drained. Do not
-// remove valid source markers until a scoped database drain has been confirmed.
-func cleanupExpiredCollectProcessSources(ctx context.Context, client *gredis.Redis, now int64, limit int) {
-	if limit <= 0 {
-		limit = collectRecoveryActiveSourceLeaseLimit
-	}
-	value, err := client.Do(ctx, "ZRANGEBYSCORE", collectRecoveryActiveSourceLeaseKey, "-inf", now, "LIMIT", 0, limit)
-	if err != nil || value.IsNil() {
-		return
-	}
-	for _, member := range value.Strings() {
-		_, _ = client.Do(ctx, "ZADD", collectRecoveryActiveSourceLeaseKey, now+int64(collectSourceLeaseSeconds(ctx)), member)
-	}
 }
 
 func collectRecoverySourceBatchSize(ctx context.Context) int {

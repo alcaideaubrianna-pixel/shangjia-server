@@ -33,7 +33,7 @@ func TestTelegramChannelLockTimeoutLocalPostgres(t *testing.T) {
 				if _, err := tx.Exec("SELECT set_config('idle_in_transaction_session_timeout', ?, true)", original); err != nil {
 					return err
 				}
-				if err := configureTelegramChannelLockTimeout(tx); err != nil {
+				if err := configureTelegramChannelLockTimeout(ctx, tx); err != nil {
 					return err
 				}
 				val, err := tx.GetValue("SELECT setting FROM pg_settings WHERE name='idle_in_transaction_session_timeout'")
