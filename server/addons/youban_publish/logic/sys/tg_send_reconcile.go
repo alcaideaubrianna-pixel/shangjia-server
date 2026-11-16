@@ -451,22 +451,18 @@ func (s *sSysPublish) parkTelegramUnknownForWebhook(ctx context.Context, job tel
 			current.Status != telegramAttemptStatusRetryWait {
 			return gerror.New("TG待确认Attempt状态已变化")
 		}
-		if _, err := tx.Model(publishTgAttemptTable).Where("id", attempt.Id).Data(g.Map{
-			"status":           telegramAttemptStatusWaiting,
-			"webhook_deadline": deadline,
-			"updated_at":       gtime.Now(),
-		}).Update(); err != nil {
+		statusField := "status"
+		attemptData := g.Map{statusField: telegramAttemptStatusWaiting, "webhook_deadline": deadline, "updated_at": gtime.Now()}
+		if _, err := tx.Model(publishTgAttemptTable).Where("id", attempt.Id).Data(attemptData).Update(); err != nil {
 			return err
 		}
 		_, err := s.transitionTelegramJobTx(ctx, tx, telegramJobTransition{
-			JobId:        job.Id,
-			From:         []JobStatus{JobStatus("unknown"), telegramJobStatusSending, telegramJobStatusConfirming},
-			To:           telegramJobStatusConfirming,
-			ErrorMessage: "等待Telegram Webhook确认",
-			Additional: g.Map{
-				"dispatch_status": tgDispatchStatusProcessing,
-				"next_retry_at":   deadline,
-			},
+			JobId:          job.Id,
+			From:           []JobStatus{JobStatusUnknown, telegramJobStatusSending, telegramJobStatusConfirming},
+			To:             telegramJobStatusConfirming,
+			ErrorMessage:   "等待Telegram Webhook确认",
+			Additional:     g.Map{"next_retry_at": deadline},
+			DispatchStatus: jobDispatch(DispatchStatusProcessing),
 		})
 		return err
 	})
