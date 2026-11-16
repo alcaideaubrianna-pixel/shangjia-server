@@ -17,7 +17,6 @@ import (
 	"go.opentelemetry.io/otel/metric"
 
 	"hotgo/addons/telegram_collector/consts"
-	"hotgo/addons/telegram_collector/domain"
 	"hotgo/addons/telegram_collector/internal/dao"
 	"hotgo/addons/telegram_collector/internal/model/entity"
 	"hotgo/addons/telegram_collector/model/input/sysin"
@@ -278,37 +277,11 @@ func (s *sCollector) processDelivery(ctx context.Context, deliveryID int64) erro
 	}
 	queueName := collectorQueueName(ctx)
 	logCollectorDeliveryStage(ctx, "delivery.handler.started", deliveryID, row.EventId, queueName, nil)
-	var submitResult sysin.CollectSubmitResult
-	if resultHandler, ok := handler.(collectorservice.DeliveryResultHandler); ok {
-		submitResult, err = resultHandler.HandleCollectorDeliveryResult(ctx, &delivery)
-	} else {
-		err = handler.HandleCollectorDelivery(ctx, &delivery)
-		// The legacy contract only proves that the handoff returned nil. Keep a
-		// conservative typed result and explicitly exclude Telegram execution.
-		submitResult = sysin.CollectSubmitResult{
-			Outcome:        domain.CollectSubmitOutcomeAccepted,
-			Stage:          domain.CollectSubmitStageDispatch,
-			Reason:         domain.CollectSubmitReasonAccepted,
-			DeliveryID:     delivery.ID,
-			CollectEventID: delivery.EventID,
-		}
-	}
+	err = handler.HandleCollectorDelivery(ctx, &delivery)
 	if err != nil {
 		logCollectorDeliveryStage(ctx, "delivery.handler.failed", deliveryID, row.EventId, queueName, err)
 		return s.failDelivery(ctx, deliveryID, err)
 	}
-	if submitResult.DeliveryID == 0 {
-		submitResult.DeliveryID = domain.DeliveryID(delivery.ID)
-	}
-	if submitResult.CollectEventID == 0 {
-		submitResult.CollectEventID = domain.EventID(delivery.EventID)
-	}
-	if _, valid := submitResult.ToDomain(); !valid {
-		err = gerror.New("Telegram采集提交结果无效")
-		logCollectorDeliveryStage(ctx, "delivery.handler.invalid_result", deliveryID, row.EventId, queueName, err)
-		return s.failDelivery(ctx, deliveryID, err)
-	}
-	logCollectorSubmitResult(ctx, &delivery, queueName, submitResult)
 	logCollectorDeliveryStage(ctx, "delivery.handler.completed", deliveryID, row.EventId, queueName, nil)
 	_, err = dao.TgCollectorDelivery.Ctx(ctx).WherePri(deliveryID).Data(g.Map{
 		columns.Status:       sysin.DeliveryStatusCompleted,
