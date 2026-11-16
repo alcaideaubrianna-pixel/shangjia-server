@@ -201,7 +201,10 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 			"newScore": telegramChannelQueueScore(priority, time.Now(), jobID),
 			"priority": priority, "urgent": priority <= tgJobPriorityInteractive,
 		})
-		return true, nil
+		// The old claim has already been settled and requeued with the new score.
+		// Re-enter the worker so the migrated member can be claimed and sent
+		// immediately instead of waiting for another scheduler tick.
+		return s.processTelegramChannelQueueHead(ctx, channelID)
 	}
 	queueName := telegramChannelQueueKey(channelID)
 	if claim.Urgent {
