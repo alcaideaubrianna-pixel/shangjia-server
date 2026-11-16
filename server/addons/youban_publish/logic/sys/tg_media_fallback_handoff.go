@@ -854,12 +854,16 @@ func (s *sSysPublish) markTelegramFallbackTransport(ctx context.Context, job tel
 	if err := s.checkTelegramFallbackExecution(ctx, job, purpose); err != nil {
 		return err
 	}
-	_, err := g.DB().Model(publishTgDeliveryStepTable).Ctx(ctx).Data(g.Map{
-		"job_id": job.Id, "step_key": telegramFallbackTransportStep(purpose), "attempt_id": attemptID,
-		"status": telegramDeliveryStepRunning, "error_message": task.TaskKey,
-	}).OnConflict("job_id,step_key").OnDuplicate(g.Map{
-		"attempt_id": attemptID, "status": telegramDeliveryStepRunning, "error_message": task.TaskKey,
-	}).Save()
+	return saveTelegramFallbackTransportCheckpoint(g.DB().Model(publishTgDeliveryStepTable).Ctx(ctx), job.Id, purpose, attemptID, task.TaskKey)
+}
+
+// OnDuplicate takes column names (or column mappings), not literal values.
+// Keep checkpoint data bound through Data so task keys cannot become SQL identifiers.
+func saveTelegramFallbackTransportCheckpoint(model *gdb.Model, jobID int64, purpose string, attemptID int64, taskKey string) error {
+	_, err := model.Data(g.Map{
+		"job_id": jobID, "step_key": telegramFallbackTransportStep(purpose), "attempt_id": attemptID,
+		"status": telegramDeliveryStepRunning, "error_message": taskKey,
+	}).OnConflict("job_id,step_key").OnDuplicate("attempt_id", "status", "error_message", "updated_at").Save()
 	return err
 }
 

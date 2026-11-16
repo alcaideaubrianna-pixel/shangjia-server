@@ -442,7 +442,7 @@ func (s *sAccountTasks) Fail(ctx context.Context, in *sysin.AccountTaskFailure) 
 	clearAccountTaskEmptyCache(ctx, in.Lease.AccountID)
 	columns := dao.TgCollectorAccountTask.Columns()
 	var row entity.TgCollectorAccountTask
-	if err := dao.TgCollectorAccountTask.Ctx(ctx).WherePri(in.TaskID).Scan(&row); err != nil {
+	if err := dao.TgCollectorAccountTask.Ctx(ctx).Master().WherePri(in.TaskID).Scan(&row); err != nil {
 		return gerror.Wrap(err, "读取Telegram账号任务重试状态失败")
 	}
 	status := sysin.AccountTaskStatusFailedRetry

@@ -167,14 +167,19 @@ func processAccountTask(ctx context.Context, client *telegram.Client, lease *sys
 				err = collectorservice.AccountTasks().Complete(ctx, task.ID, lease, result)
 			} else {
 				g.Log().Warningf(ctx, "Telegram账号任务处理失败 taskId:%d type:%s tgAccountId:%d duration:%s err:%+v", task.ID, task.TaskType, task.AccountID, time.Since(startedAt).Round(time.Millisecond), handleErr)
-				if provider := collectorservice.AccountRuntimeProviderInstance(); provider != nil && gateErr == nil {
+				notStarted := accountTaskFailureNotStarted(gateErr, handleErr)
+				if provider := collectorservice.AccountRuntimeProviderInstance(); provider != nil && !notStarted {
 					provider.ObserveAccountTaskError(ctx, task, handleErr)
 				}
 				resultStatus = "failed"
+				if notStarted {
+					resultStatus = "deferred"
+				}
 				err = collectorservice.AccountTasks().Fail(ctx, &sysin.AccountTaskFailure{
-					TaskID: task.ID, Lease: lease, Cause: handleErr, RetryDelay: retryDelay(handleErr), NotStarted: gateErr != nil,
+					TaskID: task.ID, Lease: lease, Cause: handleErr, RetryDelay: retryDelay(handleErr),
+					NotStarted: notStarted,
 				})
-				if err == nil && gateErr == nil && task.AttemptCount >= task.MaxAttempts {
+				if err == nil && accountTaskFailureShouldFinalize(task, notStarted) {
 					task.Status = sysin.AccountTaskStatusFinalizing
 					task.ErrorMessage = handleErr.Error()
 					finalizeAccountTaskFailure(ctx, task)
@@ -205,6 +210,18 @@ func processAccountTask(ctx context.Context, client *telegram.Client, lease *sys
 		))
 	}
 	return true, len(tasks) > 0
+}
+
+func accountTaskFailureNotStarted(gateErr, handlerErr error) bool {
+	if gateErr != nil {
+		return true
+	}
+	var deferred sysin.AccountTaskAdmissionDeferred
+	return errors.As(handlerErr, &deferred) && deferred.AccountTaskNotStarted()
+}
+
+func accountTaskFailureShouldFinalize(task *sysin.AccountTask, notStarted bool) bool {
+	return task != nil && !notStarted && task.AttemptCount >= task.MaxAttempts
 }
 
 func accountTaskLifecycleLogEnabled(taskType string) bool {
@@ -369,7 +386,8 @@ func keepAccountTaskLeaseAlive(ctx context.Context, cancel context.CancelFunc, l
 }
 
 func retryDelay(err error) time.Duration {
-	if retryErr, ok := err.(accountTaskRetryDelay); ok {
+	var retryErr accountTaskRetryDelay
+	if errors.As(err, &retryErr) {
 		if delay := retryErr.AccountTaskRetryDelay(); delay > 0 {
 			return delay
 		}

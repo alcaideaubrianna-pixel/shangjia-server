@@ -31,7 +31,7 @@ func telegramJobPriorityValue(job telegramJobRecord) int {
 	if isInteractiveProfileUnpublishOperation(operationNo) {
 		return tgJobPriorityDefault
 	}
-	if isInteractiveProfilePublishOperation(operationNo) {
+	if isInteractiveProfilePublishOperation(operationNo) || strings.HasPrefix(operationNo, "ai-republish:") {
 		return tgJobPriorityInteractive
 	}
 	if strings.HasPrefix(operationNo, "collect:") && job.Priority == tgJobPriorityHistory {
@@ -61,13 +61,13 @@ func telegramJobEffectivePrioritySQL(alias string) string {
 	}
 	history := fmt.Sprintf("WHEN LEFT(LOWER(TRIM(%soperation_no)),8)='collect:' AND %spriority=%d THEN %d ", prefix, prefix, tgJobPriorityHistory, tgJobPriorityHistory)
 	return fmt.Sprintf("CASE WHEN %sstatus = 'unknown' THEN %d "+history+
-		"WHEN LOWER(TRIM(%soperation_no)) LIKE 'profile:%%' OR LOWER(TRIM(%soperation_no)) LIKE 'edit:%%' OR LOWER(TRIM(%soperation_no)) LIKE 'bot_publish:%%' OR LOWER(TRIM(%soperation_no)) LIKE 'batchtext:%%' THEN %d "+
+		"WHEN LOWER(TRIM(%soperation_no)) LIKE 'profile:%%' OR LOWER(TRIM(%soperation_no)) LIKE 'edit:%%' OR LOWER(TRIM(%soperation_no)) LIKE 'bot_publish:%%' OR LOWER(TRIM(%soperation_no)) LIKE 'batchtext:%%' OR LOWER(TRIM(%soperation_no)) LIKE 'ai-republish:%%' THEN %d "+
 		"WHEN LOWER(TRIM(%soperation_no)) LIKE 'quick_push:%%' OR LOWER(TRIM(%soperation_no)) LIKE 'message_push:%%' OR LOWER(TRIM(%soperation_no)) LIKE 'collect:%%' THEN %d "+
 		"WHEN LOWER(TRIM(%soperation_no)) LIKE 'full_push:%%' THEN %d "+
 		"WHEN (LOWER(TRIM(%soperation_no)) LIKE 'cycle_batch:%%' OR LOWER(TRIM(%soperation_no)) LIKE 'profile_cycle:%%') THEN %d "+
 		"ELSE COALESCE(NULLIF(%spriority, 0), %d) END",
 		prefix, tgJobPriorityUrgent,
-		prefix, prefix, prefix, prefix, tgJobPriorityInteractive,
+		prefix, prefix, prefix, prefix, prefix, tgJobPriorityInteractive,
 		prefix, prefix, prefix, tgJobPriorityUrgent,
 		prefix, tgJobPriorityInteractive,
 		prefix, prefix, tgJobPriorityBulk,
