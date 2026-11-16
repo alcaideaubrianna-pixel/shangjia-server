@@ -558,12 +558,15 @@ func (s *sSysPublish) setProfilesOffline(ctx context.Context, ids []int64, tenan
 	}
 	columns := dao.ContentProfile.Columns()
 	for _, id := range ids {
-		var state gdb.Record
-		if err := dao.ContentProfile.Ctx(ctx).Fields(columns.Status, columns.Visibility).
-			Where(columns.Id, id).Scan(&state); err != nil {
+		state, err := dao.ContentProfile.Ctx(ctx).Fields(columns.Status, columns.Visibility).
+			Where(columns.Id, id).One()
+		if err != nil {
 			return gerror.Wrap(err, "确认资料下架状态失败")
 		}
-		if state["status"].Int() != 2 || state["visibility"].String() != consts.ContentVisibilityPrivate {
+		if state.IsEmpty() {
+			return gerror.Newf("资料 %d 不存在或已删除，无法确认下架状态", id)
+		}
+		if state[columns.Status].Int() != 2 || state[columns.Visibility].String() != consts.ContentVisibilityPrivate {
 			return gerror.Newf("资料 %d 下架状态未生效，请稍后重试", id)
 		}
 	}

@@ -59,6 +59,22 @@ func telegramAutoDeleteWorkerQueues() map[string]int {
 	}
 }
 
+// newTelegramDeleteMux 统一共享删除队列的处理器，避免多个 Worker 争抢到未注册的任务。
+func (s *sSysPublish) newTelegramDeleteMux() *asynq.ServeMux {
+	mux := asynq.NewServeMux()
+	mux.HandleFunc(tgTaskTypeCleanup, s.handleTelegramCleanupTask)
+	mux.HandleFunc(tgTaskTypeAutoDelete, s.handleTelegramAutoDeleteTask)
+	mux.HandleFunc(tgTaskTypeDown, s.handleProfileDownTask)
+	return mux
+}
+
+func (s *sSysPublish) newTelegramAutoDeleteBackfillMux() *asynq.ServeMux {
+	mux := s.newTelegramDeleteMux()
+	// Asynq 按前缀匹配，回填任务必须精确注册，不能落到 auto_delete 处理器。
+	mux.HandleFunc(tgTaskTypeAutoDeleteBackfill, s.handleTelegramAutoDeleteBackfillTask)
+	return mux
+}
+
 func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
 	// Channel-queue mode owns Telegram publish consumption. Keep cleanup on a
 	// separate Asynq lane: cleanup must continue even when the publish ZSET is
@@ -83,13 +99,7 @@ func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
 		s.startTelegramOutboxDispatcher(ctx)
 		go s.runTelegramCleanupIntents(ctx)
 
-		cleanupMux := asynq.NewServeMux()
-		cleanupMux.HandleFunc(tgTaskTypeCleanup, s.handleTelegramCleanupTask)
-		// Down-channel/profile cleanup is dispatched on the same isolated
-		// deletion lane in unified mode. Register it here as well; otherwise
-		// the task can remain in Redis forever because only the legacy server
-		// registered this handler.
-		cleanupMux.HandleFunc(tgTaskTypeDown, s.handleProfileDownTask)
+		cleanupMux := s.newTelegramDeleteMux()
 		go func() {
 			if err := cleanupServer.Run(cleanupMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
 				g.Log().Errorf(ctx, "启动上架插件TG清理队列失败：%+v", err)
@@ -127,11 +137,8 @@ func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
 	go s.runTelegramStreamExecutionRecovery(ctx)
 	go s.runTelegramCleanupIntents(ctx)
 
-	mux := asynq.NewServeMux()
+	mux := s.newTelegramDeleteMux()
 	mux.HandleFunc(tgTaskTypePublish, s.handleTelegramPublishTask)
-	mux.HandleFunc(tgTaskTypeCleanup, s.handleTelegramCleanupTask)
-	mux.HandleFunc(tgTaskTypeAutoDelete, s.handleTelegramAutoDeleteTask)
-	mux.HandleFunc(tgTaskTypeDown, s.handleProfileDownTask)
 
 	go func() {
 		if err := cleanupServer.Run(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
@@ -493,12 +500,8 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	cycleMux.HandleFunc(tgTaskTypeCycleRun, s.handleCycleRunTask)
 	cycleMux.HandleFunc(tgTaskTypeCycleReschedule, s.handleCycleRescheduleTask)
 	cycleMux.HandleFunc(tgTaskTypeCycleRefresh, s.handleCycleRefreshTask)
-	autoDeleteMux := asynq.NewServeMux()
-	autoDeleteMux.HandleFunc(tgTaskTypeAutoDelete, s.handleTelegramAutoDeleteTask)
-	autoDeleteMux.HandleFunc(tgTaskTypeCleanup, s.handleTelegramCleanupTask)
-	autoDeleteBackfillMux := asynq.NewServeMux()
-	autoDeleteBackfillMux.HandleFunc(tgTaskTypeAutoDelete, s.handleTelegramAutoDeleteTask)
-	autoDeleteBackfillMux.HandleFunc(tgTaskTypeAutoDeleteBackfill, s.handleTelegramAutoDeleteBackfillTask)
+	autoDeleteMux := s.newTelegramDeleteMux()
+	autoDeleteBackfillMux := s.newTelegramAutoDeleteBackfillMux()
 	attemptTimeoutMux := asynq.NewServeMux()
 	attemptTimeoutMux.HandleFunc(tgTaskTypeAttemptTimeout, s.handleTelegramAttemptTimeoutTask)
 	profileMux := asynq.NewServeMux()

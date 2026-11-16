@@ -3,10 +3,64 @@ package sys
 import (
 	"database/sql"
 	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/hibiken/asynq"
 )
+
+func TestTelegramDeleteMuxRoutesSharedQueueTasks(t *testing.T) {
+	s := &sSysPublish{}
+	tests := []struct {
+		taskType string
+		payload  []byte
+		handler  asynq.HandlerFunc
+	}{
+		{tgTaskTypeCleanup, []byte(`{"jobId":1}`), s.handleTelegramCleanupTask},
+		// 回归线上样本：关键词队列可能由 publish cleanup 或 background Worker 取走。
+		{tgTaskTypeAutoDelete, []byte(`{"botId":84,"tenantId":90,"accountId":83,"channelId":302,"chatId":"-1002615112422","messageId":79151,"keyword":"收录成功"}`), s.handleTelegramAutoDeleteTask},
+		{tgTaskTypeDown, []byte(`{"tenantId":90,"profileIds":[1]}`), s.handleProfileDownTask},
+	}
+	for _, test := range tests {
+		t.Run(test.taskType, func(t *testing.T) {
+			mux := s.newTelegramDeleteMux()
+			handler, pattern := mux.Handler(asynq.NewTask(test.taskType, test.payload))
+			if pattern != test.taskType {
+				t.Fatalf("task %q resolved to %q, want exact handler", test.taskType, pattern)
+			}
+			if reflect.ValueOf(handler).Pointer() != reflect.ValueOf(test.handler).Pointer() {
+				t.Fatalf("task %q resolved to the wrong business handler", test.taskType)
+			}
+		})
+	}
+}
+
+func TestTelegramDeleteMuxKeepsUnrelatedTasksUnregistered(t *testing.T) {
+	mux := (&sSysPublish{}).newTelegramDeleteMux()
+	for _, taskType := range []string{tgTaskTypePublish, "unknown:task"} {
+		if _, pattern := mux.Handler(asynq.NewTask(taskType, nil)); pattern != "" {
+			t.Fatalf("unrelated task %q unexpectedly resolved to %q", taskType, pattern)
+		}
+	}
+}
+
+func TestTelegramAutoDeleteBackfillMuxUsesExactHandler(t *testing.T) {
+	s := &sSysPublish{}
+	mux := s.newTelegramAutoDeleteBackfillMux()
+	for _, test := range []struct {
+		taskType string
+		handler  asynq.HandlerFunc
+	}{
+		{tgTaskTypeAutoDelete, s.handleTelegramAutoDeleteTask},
+		{tgTaskTypeAutoDeleteBackfill, s.handleTelegramAutoDeleteBackfillTask},
+	} {
+		handler, pattern := mux.Handler(asynq.NewTask(test.taskType, nil))
+		if pattern != test.taskType || reflect.ValueOf(handler).Pointer() != reflect.ValueOf(test.handler).Pointer() {
+			t.Fatalf("task %q resolved to %q with wrong handler", test.taskType, pattern)
+		}
+	}
+}
 
 func TestNormalizeTelegramAutoDeleteConcurrency(t *testing.T) {
 	tests := []struct {
