@@ -1003,6 +1003,15 @@ queue.SendDelayMsg(consts.QueueMyTopic, data, 10) // redis: 延迟秒数；rocke
 - 上线前必须确认：数据库迁移已完成、角色命令已显式配置、Runtime 单例/租约有效、健康检查通过、对象存储可用、队列无大量积压
 - 扩容前必须验证任务幂等、锁超时、优雅退出和实例重启恢复；未经验证的 Runtime 不得直接增加副本
 
+### 本地 Go 编译验证
+
+- 日常修改后的快速编译统一使用 `cd server && GOMAXPROCS=4 go build -p 2 -o /tmp/youban-local-server ./main.go`
+- 只验证指定 Go 包时使用 `GOMAXPROCS=4 go test -p 2 <package> -run '^$'`；`-run '^$'` 只跳过测试用例，不跳过编译
+- 本地编译必须设置并发限制和合理超时，例如 `timeout 120 env GOMAXPROCS=4 go build -p 2 -o /tmp/youban-local-server ./main.go`
+- 禁止日常开发直接运行无并发限制的 `go test ./...` 或 `go test ./... -run '^$'`，避免同时编译整个仓库的所有 addon 和测试包导致 CPU、内存、磁盘 IO 被占满
+- `gf build` 仅用于发布前验证资源打包、Linux AMD64 交叉编译和生产构建参数；它不能替代日常快速编译
+- `gf gen dao` 仅用于根据本地或结构一致的数据库生成 DAO/DO/Entity；生成后必须检查 diff，禁止把本地运行产物和临时文件提交
+
 ---
 
 ## 腾讯云生产环境排障与 MCP 使用
