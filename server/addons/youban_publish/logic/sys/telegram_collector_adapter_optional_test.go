@@ -100,3 +100,35 @@ func TestSelectBotCollectChannelPrefersCanonicalWhenAccountApprovesBoth(t *testi
 		t.Fatalf("selected channel id=%d, want canonical mapping when both are approved", got.Id)
 	}
 }
+
+func TestSelectBotCollectChannelAliasUsesEnabledApprovedRelation(t *testing.T) {
+	candidates := []botCollectChannelCandidate{
+		{Id: 24092, TelegramChatId: "-1003715905169", Title: "historical rejected alias"},
+		{Id: 1845, TelegramChatId: "3715905169", Title: "enabled alias"},
+	}
+	relations := []botCollectChannelRelation{
+		{Id: 1, ChannelId: 24092, SourceId: 351, CollectEnabled: 0, Status: "disabled", ApprovalStatus: "rejected"},
+		{Id: 2, ChannelId: 1845, SourceId: 351, CollectEnabled: 1, Status: "enabled", ApprovalStatus: "approved"},
+	}
+
+	got := selectBotCollectChannelForAccount(candidates, relations, "-1003715905169")
+	if got.Id != 1845 {
+		t.Fatalf("selected channel id=%d, want enabled+approved alias id=1845", got.Id)
+	}
+}
+
+func TestSelectBotCollectChannelDoesNotLetDisabledAliasOverrideEnabledAlias(t *testing.T) {
+	candidates := []botCollectChannelCandidate{
+		{Id: 24092, TelegramChatId: "3715905169", Title: "disabled alias"},
+		{Id: 1845, TelegramChatId: "-1003715905169", Title: "approved alias"},
+	}
+	relations := []botCollectChannelRelation{
+		{Id: 1, ChannelId: 24092, SourceId: 351, CollectEnabled: 0, Status: "disabled", ApprovalStatus: "rejected"},
+		{Id: 2, ChannelId: 1845, SourceId: 351, CollectEnabled: 1, Status: "enabled", ApprovalStatus: "approved"},
+	}
+
+	got := selectBotCollectChannelForAccount(candidates, relations, "3715905169")
+	if got.Id != 1845 {
+		t.Fatalf("disabled alias overrode enabled alias: selected channel id=%d", got.Id)
+	}
+}

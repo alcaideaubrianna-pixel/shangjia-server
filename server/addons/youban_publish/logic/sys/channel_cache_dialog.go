@@ -412,11 +412,12 @@ func tgChannelCacheLookupIds(channelId string) []string {
 	if raw == "" {
 		return nil
 	}
-	ids := []string{raw}
-	if strings.HasPrefix(raw, "-100") && len(raw) > 4 {
-		ids = append(ids, strings.TrimPrefix(raw, "-100"))
-	} else if !strings.HasPrefix(raw, "-") {
-		ids = append(ids, "-100"+raw)
+	canonical := normalizeTelegramChannelChatID(raw)
+	ids := []string{canonical}
+	if canonical != raw {
+		ids = append(ids, raw)
+	} else if strings.HasPrefix(canonical, "-100") && len(canonical) > 4 {
+		ids = append(ids, strings.TrimPrefix(canonical, "-100"))
 	}
 	return uniqueStrings(ids)
 }

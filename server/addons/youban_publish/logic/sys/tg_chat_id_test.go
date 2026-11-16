@@ -49,6 +49,35 @@ func TestTelegramChannelLookupIDsAcceptBothForms(t *testing.T) {
 	}
 }
 
+func TestCollectChannelAccessRelationKeyCanonicalizesAliasesWithoutCrossTenantMerge(t *testing.T) {
+	const chatID = "3715905169"
+
+	sameScopeShort := collectChannelAccessRelationKey(78, 615, 351, chatID)
+	sameScopeCanonical := collectChannelAccessRelationKey(78, 615, 351, "-100"+chatID)
+	if sameScopeShort != sameScopeCanonical {
+		t.Fatalf("short and canonical IDs produced different relation keys: %q vs %q", sameScopeShort, sameScopeCanonical)
+	}
+
+	cases := map[string]string{
+		"tenant":  collectChannelAccessRelationKey(79, 615, 351, "-100"+chatID),
+		"account": collectChannelAccessRelationKey(78, 616, 351, "-100"+chatID),
+		"source":  collectChannelAccessRelationKey(78, 615, 352, "-100"+chatID),
+	}
+	for scope, key := range cases {
+		if key == sameScopeCanonical {
+			t.Fatalf("%s scope changed without changing the relation key: %q", scope, key)
+		}
+	}
+}
+
+func TestCollectChannelAccessRelationKeyDoesNotTreatDifferentChannelsAsAliases(t *testing.T) {
+	left := collectChannelAccessRelationKey(78, 615, 351, "-1003715905169")
+	right := collectChannelAccessRelationKey(78, 615, 351, "-1003715905170")
+	if left == right {
+		t.Fatalf("different Telegram channels were merged into one relation key: %q", left)
+	}
+}
+
 func containsChatID(values []string, target string) bool {
 	for _, value := range values {
 		if value == target {

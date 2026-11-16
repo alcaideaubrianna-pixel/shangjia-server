@@ -1774,7 +1774,7 @@ func (s *sSysPublish) ensureAccountCollectChannelRelation(ctx context.Context, d
 	channelCols := pdao.YoubanPublishCollectChannel.Columns()
 	if err := pdao.YoubanPublishCollectChannel.Ctx(ctx).Fields(channelCols.Id).
 		Where(channelCols.TenantId, delivery.TenantID).
-		WhereIn(channelCols.TelegramChatId, tgChannelCacheLookupIds(chatID)).Scan(&channel); err != nil {
+		Where(channelCols.TelegramChatId, chatID).Scan(&channel); err != nil {
 		return false, gerror.Wrap(err, "读取账户采集频道关系失败")
 	}
 	if channel.Id <= 0 {

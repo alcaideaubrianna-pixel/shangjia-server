@@ -152,6 +152,50 @@ func (s *sSysPublish) upsertCollectChannel(ctx context.Context, tenantID int64, 
 	if tenantID <= 0 || strings.TrimSpace(chatID) == "" {
 		return nil
 	}
+
+	// Prefer the canonical Bot API Chat ID. If only one legacy short-ID row
+	// exists, normalize that row in place so a new canonical duplicate is not
+	// created. Multiple legacy rows are ambiguous and must be repaired
+	// explicitly rather than merged by a live ingest request.
+	channelColumns := pdao.YoubanPublishCollectChannel.Columns()
+	var existing []struct {
+		Id             int64  `json:"id"`
+		TelegramChatId string `json:"telegramChatId"`
+	}
+	if err := pdao.YoubanPublishCollectChannel.Ctx(ctx).
+		Fields(channelColumns.Id, channelColumns.TelegramChatId).
+		Where(channelColumns.TenantId, tenantID).
+		WhereIn(channelColumns.TelegramChatId, tgChannelCacheLookupIds(chatID)).
+		WhereNull(channelColumns.DeletedAt).
+		OrderAsc(channelColumns.TelegramChatId).
+		Scan(&existing); err != nil {
+		return err
+	}
+	canonicalID := int64(0)
+	legacyIDs := make([]int64, 0, len(existing))
+	for _, row := range existing {
+		if normalizeTelegramChannelChatID(row.TelegramChatId) == chatID && row.TelegramChatId == chatID {
+			canonicalID = row.Id
+			break
+		}
+		if row.Id > 0 {
+			legacyIDs = append(legacyIDs, row.Id)
+		}
+	}
+	if canonicalID == 0 {
+		switch len(legacyIDs) {
+		case 0:
+		case 1:
+			if _, err := pdao.YoubanPublishCollectChannel.Ctx(ctx).
+				Where(channelColumns.Id, legacyIDs[0]).
+				Data(g.Map{channelColumns.TelegramChatId: chatID}).Update(); err != nil {
+				return err
+			}
+		default:
+			return gerror.Newf("采集频道 Chat ID 存在多个历史别名，拒绝自动合并 tenant=%d chat_id=%s", tenantID, chatID)
+		}
+	}
+
 	data := pdo.YoubanPublishCollectChannel{TenantId: tenantID, TelegramChatId: chatID, ChatType: chatType, Title: title, Username: username, IsBroadcast: broadcast, IsMegagroup: megagroup, LastMessageId: messageID, LastMessageAt: messageAt, LastSeenAt: now, Status: sysin.CollectChannelStatusActive}
 	_, err := pdao.YoubanPublishCollectChannel.Ctx(ctx).Safe().Data(data).OnConflict("tenant_id,telegram_chat_id").OnDuplicate("chat_type,title,username,is_broadcast,is_megagroup,last_message_id,last_message_at,last_seen_at,updated_at,status,deleted_at").Save()
 	return err

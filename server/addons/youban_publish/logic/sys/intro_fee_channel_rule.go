@@ -567,7 +567,10 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 		if !sourceFound {
 			row.BlockReason = "未绑定采集源或规则"
 		}
-		if sourceEnabled && !sourceConflict && (row.BlockReason == "频道采集已禁用或拒绝" || row.BlockReason == "机器人已移除") {
+		// Historical -100/non--100 aliases can leave two rows for the same
+		// source and canonical channel. An explicit enabled+approved relation
+		// is authoritative; an old disabled alias must not shadow it.
+		if sourceEnabled && (row.BlockReason == "频道采集已禁用或拒绝" || row.BlockReason == "机器人已移除") {
 			row.BlockReason = ""
 		}
 		if conf != nil && conf.Enabled != 1 {
@@ -579,7 +582,7 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 		if row.Blacklisted {
 			row.BlockReason = "频道已加入黑名单"
 		}
-		if sourceConflict {
+		if sourceConflict && !sourceEnabled {
 			row.BlockReason = "同一采集源的频道关联状态冲突"
 		}
 		row.Status = 1
