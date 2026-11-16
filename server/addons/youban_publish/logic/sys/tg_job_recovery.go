@@ -760,6 +760,7 @@ func (s *sSysPublish) recoverStaleSendingTelegramAttempts(ctx context.Context, l
 		InnerJoin(publishTgJobTable+" job", "job.id=attempt.job_id").
 		Fields("attempt.*").
 		Where("attempt.status", telegramAttemptStatusSending).
+		Where("COALESCE(job.last_dispatch_error,'') NOT LIKE ?", telegramMediaFallbackMarker+"%").
 		Where("NOT EXISTS (SELECT 1 FROM "+publishTgAttemptMessageTable+" response WHERE response.attempt_id=attempt.id AND response.source='response')").
 		Where("attempt.updated_at <= ?", gtime.Now().Add(-telegramSendingAttemptRecoverAfter)).
 		WhereIn("job.status", telegramAttemptRecoverableJobStatuses()).
@@ -782,7 +783,9 @@ func (s *sSysPublish) recoverStaleSendingTelegramAttempts(ctx context.Context, l
 			if err := tx.Model(publishTgJobTable).Where("id", currentAttempt.JobId).LockUpdate().Scan(&job); err != nil {
 				return err
 			}
-			if job.Id <= 0 || !telegramAttemptRecoverableJobStatus(string(job.Status)) {
+			// Account-owned attempts are recovered by their operation-bound task.
+			// Recheck under the Job lock: handoff may commit after the scan.
+			if job.Id <= 0 || !telegramAttemptRecoverableJobStatus(string(job.Status)) || telegramMediaFallbackJob(job.LastDispatchError) {
 				return nil
 			}
 			if _, err := tx.Model(publishTgAttemptTable).Where("id", currentAttempt.Id).

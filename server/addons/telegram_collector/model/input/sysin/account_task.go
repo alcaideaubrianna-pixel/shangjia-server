@@ -90,7 +90,15 @@ type AccountTaskFailure struct {
 	Lease      *AccountLease `json:"lease"`
 	Cause      error         `json:"-"`
 	RetryDelay time.Duration `json:"retryDelay"`
-	NotStarted bool          `json:"-"` // Only admission failed; no handler or Telegram call ran.
+	NotStarted bool          `json:"-"` // Admission failed before external side effects, including handler-side channel gates.
+}
+
+// AccountTaskAdmissionDeferred marks a retryable admission wait before a
+// handler starts external side effects. Network/unknown send errors must not
+// implement this contract: they retain normal retry and reconciliation rules.
+type AccountTaskAdmissionDeferred interface {
+	error
+	AccountTaskNotStarted() bool
 }
 
 type AccountTaskStatusStat struct {

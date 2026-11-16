@@ -173,7 +173,7 @@ func (s *sSysPublish) AIOpsRepublishProfiles(ctx context.Context, in *sysin.Prof
 			return nil, gerror.Newf("资料%d媒体尚未恢复完整，禁止重新上架", profileId)
 		}
 		if profile["status"].Int() != 1 || profile["visibility"].String() != consts.ContentVisibilityPublic {
-			if _, err = s.updateProfileStatus(ctx, &sysin.ProfileStatusInp{Ids: []int64{profileId}, Status: 1}, 0, 0); err != nil {
+			if _, err = s.updateProfileStatus(ctx, &sysin.ProfileStatusInp{Ids: []int64{profileId}, Status: 1}, profile["tenant_id"].Int64(), profile["account_id"].Int64()); err != nil {
 				return nil, err
 			}
 			// updateProfileStatus already persists and submits the normal profile

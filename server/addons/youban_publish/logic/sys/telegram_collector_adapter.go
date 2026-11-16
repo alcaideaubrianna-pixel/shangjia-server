@@ -619,6 +619,37 @@ func (s *sSysPublish) handleManagedBotCreateAccountTask(ctx context.Context, cli
 	}, nil
 }
 
+// A channel lease wait is admission, not a failed Telegram send. Keep the
+// existing busy error as its cause while giving Account runtime an explicit
+// no-side-effect contract and a delay bounded by this execution's deadline.
+type telegramFallbackAdmissionDeferredError struct {
+	cause error
+	delay time.Duration
+}
+
+func (e *telegramFallbackAdmissionDeferredError) Error() string               { return e.cause.Error() }
+func (e *telegramFallbackAdmissionDeferredError) Unwrap() error               { return e.cause }
+func (e *telegramFallbackAdmissionDeferredError) AccountTaskNotStarted() bool { return true }
+func (e *telegramFallbackAdmissionDeferredError) AccountTaskRetryDelay() time.Duration {
+	return e.delay
+}
+
+func telegramFallbackAdmissionWait(ctx context.Context) error {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return gerror.New("协议号频道准入缺少持久发送截止时间，拒绝无限等待")
+	}
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return context.DeadlineExceeded
+	}
+	delay := telegramStreamExecutionTTL
+	if remaining < delay {
+		delay = remaining
+	}
+	return &telegramFallbackAdmissionDeferredError{cause: telegramFallbackLaneBusyError{}, delay: delay}
+}
+
 func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) (err error) {
 	startedAt := time.Now()
 	stageStartedAt := startedAt
@@ -650,6 +681,17 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 		logTelegramFallbackHandoff(ctx, "rejected", job, purpose, task.ID, "obsolete_task_identity", job.Status, job.Status)
 		return nil
 	}
+	// Apply the persisted Job deadline before trying a channel slot, so
+	// admission retries never create a fresh send budget or wait indefinitely.
+	if job.SendDeadlineAt == nil {
+		return gerror.New("协议号交接缺少持久发送截止时间，拒绝重新开始发送预算")
+	}
+	bounded, cancelBudget, budgetErr := s.telegramSendBudgetContext(ctx, job)
+	if budgetErr != nil {
+		return budgetErr
+	}
+	defer cancelBudget()
+	ctx = bounded
 	// The Account runtime gate serializes an account, not a target channel.
 	// Use exactly the same channel lease key as Bot publishing before claiming.
 	lease, acquired, leaseErr := s.tryTelegramPublishChannelLease(ctx, job)
@@ -658,7 +700,7 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 	}
 	if !acquired {
 		logTelegramFallbackHandoff(ctx, "rejected", job, purpose, task.ID, "channel_lease_busy", job.Status, job.Status)
-		return telegramFallbackLaneBusyError{}
+		return telegramFallbackAdmissionWait(ctx)
 	}
 	defer s.releaseTelegramChannelLease(ctx, lease)
 	ctx, stopExecution := telegramStreamExecutionContext(ctx, lease)
@@ -668,7 +710,7 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 		return orderErr
 	}
 	if earlier {
-		return telegramFallbackLaneBusyError{}
+		return telegramFallbackAdmissionWait(ctx)
 	}
 	job, err = s.claimTelegramFallbackTask(ctx, task, job, purpose)
 	if errors.Is(err, errTelegramJobSuperseded) {
@@ -680,12 +722,6 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 		return err
 	}
 	ctx = context.WithValue(ctx, telegramFallbackTaskContextKey{}, task)
-	bounded, cancelBudget, budgetErr := s.telegramSendBudgetContext(ctx, job)
-	if budgetErr != nil {
-		return budgetErr
-	}
-	defer cancelBudget()
-	ctx = bounded
 	g.Log().Infof(ctx, "协议号媒体降级任务开始执行 taskId:%d jobId:%d tgAccountId:%d purpose:%s attempt:%d/%d", task.ID, job.Id, task.AccountID, purpose, task.AttemptCount, task.MaxAttempts)
 	channel, err := s.messagePushChannelFromJob(ctx, job)
 	if err != nil {
