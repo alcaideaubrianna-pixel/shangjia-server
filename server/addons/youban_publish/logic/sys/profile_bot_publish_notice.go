@@ -134,7 +134,7 @@ func (s *sSysPublish) submitBotProfilesUnpublishWithNotice(ctx context.Context, 
 				return nil, gerror.New("资料操作参数不完整")
 			}
 			operationNo := newBotProfileUnpublishOperationNo(botId, chatId, profileId)
-			if err = s.setProfilesOffline(ctx, []int64{profileId}, capability.TenantId); err != nil {
+			if err = s.setProfilesOffline(ctx, []int64{profileId}, capability.TenantId, operationNo); err != nil {
 				releaseProfileOperationClaim(ctx, capability.TenantId, profileId)
 				return nil, err
 			}
@@ -199,7 +199,7 @@ func (s *sSysPublish) notifyBotProfilePublishCompleted(ctx context.Context, job 
 func (s *sSysPublish) notifyBotProfileUnpublishCompleted(ctx context.Context, job telegramJobRecord, payload tgQueuePayload) error {
 	operationNo := strings.TrimSpace(payload.CleanupOperationNo)
 	if operationNo == "" {
-		operationNo = strings.TrimSpace(job.OperationNo)
+		return nil
 	}
 	target, unpublish := parseBotProfileUnpublishNoticeTarget(operationNo)
 	deleteTarget, deleted := parseBotProfileDeleteNoticeTarget(operationNo)

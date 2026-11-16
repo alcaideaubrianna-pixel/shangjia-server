@@ -522,11 +522,8 @@ func (s *sSysPublish) updateProfileStatus(ctx context.Context, in *sysin.Profile
 		}
 		return &sysin.ProfileStatusModel{Message: "资料已提交上架"}, nil
 	}
-	if err = s.setProfilesOffline(ctx, ids, tenantId); err != nil {
-		return nil, err
-	}
 	operationNo := fmt.Sprintf("unpublish:%d:%d", tenantId, time.Now().UnixNano())
-	if err = s.markProfilesUnpublishing(ctx, ids, tenantId, operationNo); err != nil {
+	if err = s.setProfilesOffline(ctx, ids, tenantId, operationNo); err != nil {
 		return nil, err
 	}
 	if err = s.enqueueProfileDownRunWithOperationNo(ctx, tenantId, ids, 0, operationNo); err != nil {
@@ -544,7 +541,7 @@ func (s *sSysPublish) updateProfileStatus(ctx context.Context, in *sysin.Profile
 // setProfilesOffline applies the shared local state transition used by both
 // regular batch operations and collect-source shutdowns. Telegram cleanup is
 // intentionally handled by each caller's queue workflow.
-func (s *sSysPublish) setProfilesOffline(ctx context.Context, ids []int64, tenantId int64) error {
+func (s *sSysPublish) setProfilesOffline(ctx context.Context, ids []int64, tenantId int64, operationNos ...string) error {
 	ids = uniqueIds(ids)
 	for _, id := range ids {
 		if err := s.withProfileLifecycleLock(ctx, tenantId, id, func() error {
@@ -554,34 +551,25 @@ func (s *sSysPublish) setProfilesOffline(ctx context.Context, ids []int64, tenan
 			return gerror.Wrap(err, "更新资料状态失败")
 		}
 	}
-	// Do not report a successful down operation until the authoritative profile
-	// row reflects the new state. This protects both the web and Bot entrypoints
-	// from returning "submitted" when a concurrent publish or stale lifecycle
-	// write left the profile publicly visible.
+	if len(operationNos) > 0 && strings.TrimSpace(operationNos[0]) != "" {
+		if err := s.markProfilesUnpublishing(ctx, ids, tenantId, operationNos[0]); err != nil {
+			return err
+		}
+	}
 	columns := dao.ContentProfile.Columns()
 	for _, id := range ids {
-		var state struct {
-			Status     int    `json:"status"`
-			Visibility string `json:"visibility"`
-		}
+		var state gdb.Record
 		if err := dao.ContentProfile.Ctx(ctx).Fields(columns.Status, columns.Visibility).
 			Where(columns.Id, id).Scan(&state); err != nil {
 			return gerror.Wrap(err, "确认资料下架状态失败")
 		}
-		if state.Status != 2 || state.Visibility != consts.ContentVisibilityPrivate {
+		if state["status"].Int() != 2 || state["visibility"].String() != consts.ContentVisibilityPrivate {
 			return gerror.Newf("资料 %d 下架状态未生效，请稍后重试", id)
 		}
 	}
-	// 下架是资料生命周期的最终操作：先确认主资料已变为 private，再废弃
-	// 所有尚未完成的发布任务，避免上架任务在删除完成后继续发送。
 	if err := s.supersedeProfilePendingTelegramJobs(ctx, ids, tenantId); err != nil {
 		return err
 	}
-	// The profile may be unpublished while a publish task is completing. The
-	// task can therefore become sent after the first pending-task cancellation
-	// scan. Re-scan the authoritative message table after the profile is private
-	// and enqueue cleanup for every still-sent message-bearing job. The cleanup
-	// enqueue is idempotent and uses the independent delete lane.
 	activeJobs, err := s.telegramJobsWithActiveMessages(ctx, tenantId, ids, "")
 	if err != nil {
 		return err
@@ -590,7 +578,11 @@ func (s *sSysPublish) setProfilesOffline(ctx context.Context, ids []int64, tenan
 		if job.Id <= 0 {
 			continue
 		}
-		if err := s.enqueueTelegramCleanupJob(ctx, job.Id, 0); err != nil {
+		cleanupPayload := tgQueuePayload{}
+		if len(operationNos) > 0 {
+			cleanupPayload.CleanupOperationNo = strings.TrimSpace(operationNos[0])
+		}
+		if err := s.enqueueTelegramCleanupJobWithContext(ctx, job.Id, 0, cleanupPayload); err != nil {
 			return gerror.Wrap(err, "加入资料已发送消息清理队列失败")
 		}
 		s.appendTelegramJobLog(ctx, job.telegramJobRecord(), "down", "queued", "资料下架后补扫已发送TG消息并加入清理队列")
