@@ -222,9 +222,10 @@ func telegramChannelCursorNext(current int64, channels []telegramChannelQueueCha
 
 func (s *sSysPublish) rehydrateMissingTelegramChannelQueue(ctx context.Context, limit int) error {
 	var jobs []struct {
-		Id        int64 `json:"id"`
-		ChannelId int64 `json:"channel_id"`
-		Priority  int   `json:"priority"`
+		Id          int64       `json:"id"`
+		ChannelId   int64       `json:"channel_id"`
+		Priority    int         `json:"priority"`
+		NextRetryAt *gtime.Time `orm:"next_retry_at"`
 	}
 	if limit <= 0 {
 		limit = 500
@@ -240,7 +241,7 @@ func (s *sSysPublish) rehydrateMissingTelegramChannelQueue(ctx context.Context, 
 	// channel coverage first.
 	err := g.DB().GetScan(ctx, &jobs, `
 		SELECT DISTINCT ON (tenant_id, channel_id)
-			id, channel_id, priority
+			id, channel_id, priority, next_retry_at
 		FROM `+publishTgJobTable+`
 		WHERE channel_id > 0
 		  AND status IN ('pending','failed_retry','unknown')
@@ -251,7 +252,7 @@ func (s *sSysPublish) rehydrateMissingTelegramChannelQueue(ctx context.Context, 
 		return err
 	}
 	for _, job := range jobs {
-		if err = enqueueTelegramChannelJob(ctx, job.ChannelId, job.Id, job.Priority, time.Now()); err != nil {
+		if err = enqueueTelegramChannelJob(ctx, job.ChannelId, job.Id, job.Priority, telegramChannelDispatchDueAt(job.NextRetryAt, 0, time.Now())); err != nil {
 			g.Log().Warningf(ctx, "频道队列对账补入失败 channel:%d job:%d err:%+v", job.ChannelId, job.Id, err)
 			continue
 		}

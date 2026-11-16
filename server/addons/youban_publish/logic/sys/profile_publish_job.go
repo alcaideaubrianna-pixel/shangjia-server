@@ -93,6 +93,11 @@ func (s *sSysPublish) submitProfilePublishWithMeta(ctx context.Context, profileI
 		mediaCheckStartedAt := time.Now()
 		ready, checkErr := s.profilePublishMediaReady(ctx, profileId)
 		if checkErr != nil {
+			if isProfileMediaValidationError(checkErr) {
+				if settleErr := s.settleWaitingProfileMediaFailure(ctx, profileId, checkErr); settleErr != nil {
+					return settleErr
+				}
+			}
 			return checkErr
 		}
 		// Bot creation persists the raw media operation before the worker writes

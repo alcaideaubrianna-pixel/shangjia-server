@@ -70,6 +70,42 @@ func TestTelegramChannelLaneRedisMigrationPreservesJob(t *testing.T) {
 	}
 }
 
+func TestTelegramChannelDelayedEnqueueClaimsOnceWhenDue(t *testing.T) {
+	server := miniredis.RunT(t)
+	client, err := gredis.New(&gredis.Config{Address: server.Addr()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared := g.Redis()
+	previous := shared.GetAdapter()
+	shared.SetAdapter(client.GetAdapter())
+	t.Cleanup(func() { shared.SetAdapter(previous); _ = client.Close(context.Background()) })
+	ctx := context.Background()
+	for i, priority := range []int{tgJobPriorityInteractive, tgJobPriorityDefault, tgJobPriorityHistory} {
+		channelID, jobID := int64(9990700+i), int64(i+1)*telegramChannelQueueSequenceScale
+		now := time.Now()
+		due := telegramChannelDispatchDueAt(nil, 200*time.Millisecond, now)
+		if err := enqueueTelegramChannelJob(ctx, channelID, jobID, priority, due); err != nil {
+			t.Fatal(err)
+		}
+		claim, err := dequeueTelegramChannelHeadWithScore(ctx, channelID)
+		if err != nil || claim.JobID != 0 {
+			t.Fatalf("lane %d claimed early: %+v %v", priority, claim, err)
+		}
+		// Claim uses the client's wall clock, so advancing miniredis TTL time
+		// alone cannot make this job due.
+		time.Sleep(time.Until(due.Add(10 * time.Millisecond)))
+		claim, err = dequeueTelegramChannelHeadWithScore(ctx, channelID)
+		if err != nil || claim.JobID != jobID {
+			t.Fatalf("lane %d missing due job: %+v %v", priority, claim, err)
+		}
+		claim, err = dequeueTelegramChannelHeadWithScore(ctx, channelID)
+		if err != nil || claim.JobID != 0 {
+			t.Fatalf("lane %d claimed twice: %+v %v", priority, claim, err)
+		}
+	}
+}
+
 func TestTelegramChannelClaimDueAllLanes(t *testing.T) {
 	server := miniredis.RunT(t)
 	client, err := gredis.New(&gredis.Config{Address: server.Addr()})

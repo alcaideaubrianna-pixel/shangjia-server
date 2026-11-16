@@ -20,6 +20,7 @@ import (
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/cache"
 	hglock "hotgo/internal/library/hgrds/lock"
+	"hotgo/utility/dbtime"
 )
 
 const (
@@ -851,6 +852,8 @@ func (s *sSysPublish) recoverTerminalTelegramAttempts(ctx context.Context, limit
 	return nil
 }
 
+const telegramStaleDispatchDueCondition = "next_retry_at IS NULL OR next_retry_at <= ?"
+
 func (s *sSysPublish) recoverStaleTelegramDispatchJobs(ctx context.Context, limit int) error {
 	startedAt := time.Now()
 	scanned := 0
@@ -859,8 +862,9 @@ func (s *sSysPublish) recoverStaleTelegramDispatchJobs(ctx context.Context, limi
 	if limit <= 0 {
 		limit = 100
 	}
-	now := gtime.Now()
+	now := gtime.NewFromTime(time.Now().In(dbtime.Location()))
 	deadline := telegramRecoveryTimeText(now.Add(-telegramDispatchJobRecoverAfter))
+	dueAt := telegramRecoveryTimeText(now)
 	var jobs []telegramJobRecord
 	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		WhereIn("status", append(telegramJobRetryableStatuses(), telegramJobStatusConfirming)).
@@ -868,6 +872,7 @@ func (s *sSysPublish) recoverStaleTelegramDispatchJobs(ctx context.Context, limi
 		Where(telegramActiveChannelCondition()).
 		Where(messagePushPlanRecoveryConditionSQL(publishTgJobTable), telegramRecoveryTimeText(now.Add(-messagePushPlanJobExpireAfter))).
 		Where("(dispatch_status=? OR dispatched_at<=?) AND updated_at<=?", tgDispatchStatusQueued, deadline, telegramRecoveryTimeText(now.Add(-time.Minute))).
+		Where(telegramStaleDispatchDueCondition, dueAt).
 		OrderAsc("dispatched_at").OrderAsc("id").
 		Limit(limit).
 		Scan(&jobs)
@@ -909,7 +914,11 @@ func (s *sSysPublish) recoverStaleTelegramDispatchJobs(ctx context.Context, limi
 	// 和行锁竞争。状态条件保留，和发送 worker 的幂等状态转换保持一致。
 	result, updateErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		WhereIn("id", jobIDs).
+		WhereIn("status", append(telegramJobRetryableStatuses(), telegramJobStatusConfirming)).
 		WhereIn("dispatch_status", []string{tgDispatchStatusQueued, tgDispatchStatusProcessing}).
+		// Recheck the same cutoff after inspection: a worker may have installed
+		// a future interval/retry deadline since the candidate query.
+		Where(telegramStaleDispatchDueCondition, dueAt).
 		Data(g.Map{
 			"dispatch_status":     tgDispatchStatusIdle,
 			"next_retry_at":       updatedAt,

@@ -9,18 +9,20 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/hibiken/asynq"
 
+	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/service"
 )
 
 type profileMaintenancePayload struct {
-	ProfileId       int64                `json:"profileId"`
-	TenantId        int64                `json:"tenantId"`
-	AccountId       int64                `json:"accountId"`
-	RemovedMediaIds []int64              `json:"removedMediaIds,omitempty"`
-	MediaChanged    bool                 `json:"mediaChanged,omitempty"`
-	OldFingerprints []profileFingerprint `json:"oldFingerprints,omitempty"`
-	NewFingerprints []profileFingerprint `json:"newFingerprints,omitempty"`
-	WakePublish     bool                 `json:"wakePublish,omitempty"`
+	ProfileId         int64                `json:"profileId"`
+	TenantId          int64                `json:"tenantId"`
+	AccountId         int64                `json:"accountId"`
+	RemovedMediaIds   []int64              `json:"removedMediaIds,omitempty"`
+	MediaChanged      bool                 `json:"mediaChanged,omitempty"`
+	OldFingerprints   []profileFingerprint `json:"oldFingerprints,omitempty"`
+	NewFingerprints   []profileFingerprint `json:"newFingerprints,omitempty"`
+	WakePublish       bool                 `json:"wakePublish,omitempty"`
+	MediaWaitAttempts int                  `json:"mediaWaitAttempts,omitempty"`
 }
 
 func (s *sSysPublish) enqueueProfileMaintenance(ctx context.Context, payload profileMaintenancePayload) error {
@@ -64,13 +66,30 @@ func (s *sSysPublish) handleProfileMaintenanceTask(ctx context.Context, task *as
 	}
 	if payload.WakePublish {
 		ready, err := s.profileMediaReady(ctx, payload.ProfileId)
+		if isProfileMediaValidationError(err) {
+			return s.settleWaitingProfileMediaFailure(ctx, payload.ProfileId, err)
+		}
 		if err != nil {
 			return err
 		}
 		if ready {
 			return s.wakeProfileTelegramJobs(ctx, payload.ProfileId)
 		}
-		return s.enqueueWaitingMediaWake(ctx, payload.ProfileId, payload.TenantId, payload.AccountId)
+		state, stateErr := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
+			Fields("publish_task_status,publish_task_updated_at").Where("profile_id", payload.ProfileId).
+			Where("tenant_id", payload.TenantId).Where("account_id", payload.AccountId).WhereNull("deleted_at").One()
+		if stateErr != nil {
+			return stateErr
+		}
+		if state["publish_task_status"].String() != sysin.PublishTaskStatusWaitingMedia.String() {
+			return nil
+		}
+		payload.MediaWaitAttempts++
+		if mediaWaitExhausted(payload.MediaWaitAttempts, state["publish_task_updated_at"].GTime(), time.Now()) {
+			return s.settleWaitingProfileMediaFailure(ctx, payload.ProfileId,
+				gerror.Wrap(errProfileMediaValidation, "媒体等待已达到 3 次尝试或 10 分钟上限"))
+		}
+		return s.enqueueProfileMaintenanceDelayed(ctx, payload, telegramMediaReadyRetry)
 	}
 	count, err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
 		Where("profile_id", payload.ProfileId).Where("tenant_id", payload.TenantId).

@@ -104,20 +104,23 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) (resultE
 	if isMessagePushOperationNo(targetJob.OperationNo) {
 		return s.SendMessagePushJob(ctx, jobId)
 	}
-	step = beginTelegramPublishStage(ctx, "job.media_ready")
-	ready, readyErr := s.profileMediaReady(ctx, targetJob.ProfileId)
-	step.End(readyErr, g.Map{"ready": ready})
-	if readyErr != nil {
-		if errors.Is(readyErr, errTelegramProfileMissing) {
-			return s.settleMissingTelegramProfileJob(ctx, targetJob)
+	if telegramJobLifecycleNeedsRetry(targetJob.Status) && strings.TrimSpace(targetJob.SendPhase) == "" {
+		step = beginTelegramPublishStage(ctx, "job.media_ready")
+		ready, readyErr := s.profileMediaReady(ctx, targetJob.ProfileId)
+		step.End(readyErr, g.Map{"ready": ready})
+		if readyErr != nil {
+			if isProfileMediaValidationError(readyErr) {
+				_, settleErr := s.settleStreamFailedMediaJob(ctx, targetJob, readyErr)
+				return settleErr
+			}
+			if errors.Is(readyErr, errTelegramProfileMissing) {
+				return s.settleMissingTelegramProfileJob(ctx, targetJob)
+			}
+			return readyErr
+		} else if !ready {
+			beginTelegramPublishStage(ctx, "job.deferred").End(nil, g.Map{"reason": "media_not_ready"})
+			return s.postponeTelegramJobUntilMediaReady(ctx, targetJob)
 		}
-		return readyErr
-	} else if !ready {
-		if settled, settleErr := s.settleStreamFailedMediaJob(ctx, targetJob); settled || settleErr != nil {
-			return settleErr
-		}
-		beginTelegramPublishStage(ctx, "job.deferred").End(nil, g.Map{"reason": "media_not_ready"})
-		return s.postponeTelegramJobUntilMediaReady(ctx, targetJob)
 	}
 	if targetJob.CollectSourceId > 0 && !s.collectPushEnabled(ctx) {
 		beginTelegramPublishStage(ctx, "job.deferred").End(nil, g.Map{"reason": "collect_push_paused"})

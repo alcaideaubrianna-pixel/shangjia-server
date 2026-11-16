@@ -440,6 +440,11 @@ func (s *sSysPublish) enqueueTelegramJobInternal(ctx context.Context, jobId int6
 		return nil
 	}
 	priority := s.telegramJobPriority(job)
+	// Recovery may enqueue with zero delay. Never erase a persisted future
+	// retry/interval deadline merely because the wake-up carried no delay.
+	dispatchNow := time.Now()
+	dueAt := telegramChannelDispatchDueAt(job.NextRetryAt, delay, dispatchNow)
+	delay = dueAt.Sub(dispatchNow)
 	queueName := telegramQueueNameByPriorityAndChannel(ctx, priority, job.ChannelId)
 	// A user-triggered full push is foreground work. Keep it out of the
 	// ordinary shard queues, where historical bulk backlog can delay the
@@ -465,7 +470,10 @@ func (s *sSysPublish) enqueueTelegramJobInternal(ctx context.Context, jobId int6
 		"updated_at":          gtime.Now(),
 	}
 	if delay > 0 {
-		data["next_retry_at"] = gtime.Now().Add(delay)
+		data["next_retry_at"] = gtime.NewFromTime(dueAt)
+		// Preserve the reason while waiting; clearing it hides interval waits
+		// behind the generic pending message in the channel worker.
+		data["last_dispatch_error"] = job.LastDispatchError
 	} else {
 		data["next_retry_at"] = nil
 	}
@@ -488,14 +496,14 @@ func (s *sSysPublish) enqueueTelegramJobInternal(ctx context.Context, jobId int6
 	// worker is enabled, so this write is opt-in and never creates a second
 	// consumer by default.
 	if telegramChannelQueueShadowEnabled() && job.ChannelId > 0 {
-		if queueErr := enqueueTelegramChannelJob(ctx, job.ChannelId, jobId, priority, time.Now()); queueErr != nil {
+		if queueErr := enqueueTelegramChannelJob(ctx, job.ChannelId, jobId, priority, dueAt); queueErr != nil {
 			g.Log().Warningf(ctx, "写入频道逻辑队列失败 jobId:%d err:%+v", jobId, queueErr)
 		}
 	}
 	// In channel-queue mode the ZSET is the execution hand-off. Do not also
 	// create an Asynq task: that would give the same job two consumers.
 	if telegramChannelQueueEnabled() && job.ChannelId > 0 {
-		if queueErr := enqueueTelegramChannelJob(ctx, job.ChannelId, jobId, priority, time.Now()); queueErr != nil {
+		if queueErr := enqueueTelegramChannelJob(ctx, job.ChannelId, jobId, priority, dueAt); queueErr != nil {
 			_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 				Where("id", jobId).Where("dispatch_status", tgDispatchStatusQueued).
 				Data(g.Map{"dispatch_status": tgDispatchStatusIdle, "updated_at": gtime.Now()}).Update()

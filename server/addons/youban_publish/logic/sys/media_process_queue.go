@@ -2,7 +2,6 @@ package sys
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -16,6 +15,8 @@ import (
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/consts"
+	"hotgo/internal/dao"
+	"hotgo/utility/dbtime"
 )
 
 // errTelegramProfileMissing marks a durable TG job whose source profile was
@@ -163,6 +164,13 @@ func (s *sSysPublish) wakeProfileTelegramJobs(ctx context.Context, profileId int
 	if profileId <= 0 {
 		return nil
 	}
+	ready, mediaErr := s.profileMediaReady(ctx, profileId)
+	if isProfileMediaValidationError(mediaErr) {
+		return s.settleWaitingProfileMediaFailure(ctx, profileId, mediaErr)
+	}
+	if mediaErr != nil || !ready {
+		return mediaErr
+	}
 	// A Bot user may request publication before asynchronous media processing
 	// finishes. In that case submitProfilePublish records only a waiting_media
 	// intent and no Telegram job exists yet. Re-submit the same durable intent
@@ -285,57 +293,116 @@ func (s *sSysPublish) profileMediaReady(ctx context.Context, profileId int64) (b
 	if profileId <= 0 {
 		return true, nil
 	}
-	var expected struct {
-		Display int `orm:"expected_display_media_count"`
-		Verify  int `orm:"expected_verify_media_count"`
-	}
-	if err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
-		Fields("expected_display_media_count,expected_verify_media_count").Where("profile_id", profileId).WhereNull("deleted_at").Scan(&expected); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return false, errTelegramProfileMissing
-		}
+	state, err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
+		Fields("tenant_id,account_id,expected_display_media_count,expected_verify_media_count,media_intent_status,created_at").
+		Where("profile_id", profileId).WhereNull("deleted_at").One()
+	if err != nil {
 		return false, gerror.Wrap(err, "检查资料预期媒体失败")
 	}
-	displayCount, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
-		Where("profile_id", profileId).Where("purpose", "display").WhereNull("deleted_at").Count()
-	if err != nil {
-		return false, err
+	if state.IsEmpty() {
+		return false, errTelegramProfileMissing
 	}
-	verifyCount, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
-		Where("profile_id", profileId).Where("purpose", "verify").WhereNull("deleted_at").Count()
-	if err != nil {
-		return false, err
-	}
-	// 发布规则：展示资料至少两张图片；资料声明有验证媒体时，验证媒体必须存在。
-	if displayCount < 2 || (expected.Verify > 0 && verifyCount < 1) {
-		return false, nil
-	}
-	failed, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
-		Where("profile_id", profileId).WhereNull("deleted_at").Where("processing_status", mediaProcessingFailed).Count()
-	if err != nil {
-		return false, err
-	}
-	pending, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+	var counts profileMediaReadinessCounts
+	if err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 		Where("profile_id", profileId).WhereNull("deleted_at").
-		Where("processing_status IS NULL OR processing_status = '' OR processing_status NOT IN (?)", terminalMediaProcessingStatuses()).Count()
-	if err != nil {
-		return false, err
+		Fields("SUM(CASE WHEN purpose='display' THEN 1 ELSE 0 END) AS display_count, " +
+			"SUM(CASE WHEN purpose='verify' THEN 1 ELSE 0 END) AS verify_count, " +
+			"SUM(CASE WHEN processing_status IS NULL OR processing_status NOT IN ('" + strings.Join(terminalMediaProcessingStatuses(), "','") + "') THEN 1 ELSE 0 END) AS pending_count, " +
+			"SUM(CASE WHEN processing_status='failed' AND COALESCE(file_url,'')='' AND COALESCE(storage_path,'')='' AND COALESCE(tg_file_id,'')='' AND COALESCE(processed_tg_file_id,'')='' THEN 1 ELSE 0 END) AS unavailable_count").
+		Scan(&counts); err != nil {
+		return false, gerror.Wrap(err, "统计资料媒体状态失败")
 	}
-	if pending > 0 {
+	// 数量齐全时不额外查询异步操作，正常路径只需两次 SQL。
+	expectedDisplay, expectedVerify := state["expected_display_media_count"].Int(), state["expected_verify_media_count"].Int()
+	writing := false
+	if counts.Display <= 1 || (expectedVerify > 0 && counts.Verify < 1) {
+		op, opErr := g.DB().Model(profileMediaOperationTable).Safe().Ctx(ctx).
+			Fields("retry_count,created_at").Where("tenant_id", state["tenant_id"].Int64()).
+			Where("account_id", state["account_id"].Int64()).
+			Where("profile_no IN (SELECT profile_no FROM "+dao.ContentProfile.Table()+" WHERE id=?)", profileId).
+			WhereIn("status", profileMediaOperationPendingStatuses()).OrderAsc("created_at").Limit(1).One()
+		if opErr != nil {
+			return false, gerror.Wrap(opErr, "检查资料媒体写入状态失败")
+		}
+		if !op.IsEmpty() {
+			if mediaWaitExhausted(op["retry_count"].Int(), op["created_at"].GTime(), time.Now()) {
+				return false, gerror.Wrap(errProfileMediaValidation, "媒体写入已达到 3 次尝试或 10 分钟等待上限")
+			}
+			writing = true
+		} else if state["media_intent_status"].String() == "pending" &&
+			(counts.Display < expectedDisplay || counts.Verify < expectedVerify) {
+			// Bot 创建资料与落库异步操作之间的短窗口。只保护尚未落齐的声明数量。
+			created := dbtime.FromTimestamp(state["created_at"].GTime())
+			writing = created != nil && time.Since(created.Time) < mediaProcessTaskTimeout
+		}
+	}
+	return validateProfileMediaReadiness(counts, expectedVerify, writing)
+}
+
+var errProfileMediaValidation = gerror.New("资料媒体校验不合格")
+
+type profileMediaReadinessCounts struct {
+	Display     int `orm:"display_count"`
+	Verify      int `orm:"verify_count"`
+	Pending     int `orm:"pending_count"`
+	Unavailable int `orm:"unavailable_count"`
+}
+
+func validateProfileMediaReadiness(counts profileMediaReadinessCounts, expectedVerify int, writing bool) (bool, error) {
+	if writing {
 		return false, nil
 	}
-	if failed > 0 {
-		unavailable, availabilityErr := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
-			Where("profile_id", profileId).WhereNull("deleted_at").Where("processing_status", mediaProcessingFailed).
-			Where("(COALESCE(file_url,'') = '' AND COALESCE(storage_path,'') = '' AND COALESCE(tg_file_id,'') = '' AND COALESCE(processed_tg_file_id,'') = '')").Count()
-		if availabilityErr != nil {
-			return false, availabilityErr
-		}
-		if unavailable > 0 {
-			return false, nil
-		}
+	if counts.Display <= 1 {
+		return false, gerror.Wrapf(errProfileMediaValidation, "展示媒体实际 %d 个，要求大于 1 个", counts.Display)
 	}
-	return true, nil
+	if expectedVerify > 0 && counts.Verify < 1 {
+		return false, gerror.Wrapf(errProfileMediaValidation, "验证媒体实际 %d 个，已声明验证资料，要求至少 1 个", counts.Verify)
+	}
+	if counts.Unavailable > 0 {
+		return false, gerror.Wrapf(errProfileMediaValidation, "失败且无可用来源的媒体实际 %d 个，要求为 0 个", counts.Unavailable)
+	}
+	return counts.Pending == 0, nil
+}
+
+func isProfileMediaValidationError(err error) bool {
+	// 错误落库后不再保留 Go 错误链，恢复器还需识别持久化标记。
+	return errors.Is(err, errProfileMediaValidation) ||
+		(err != nil && strings.Contains(err.Error(), errProfileMediaValidation.Error()))
+}
+
+func mediaWaitExhausted(attempts int, startedAt *gtime.Time, now time.Time) bool {
+	started := dbtime.FromTimestamp(startedAt)
+	return attempts >= mediaProcessMaxAttempts || (started != nil && now.Sub(started.Time) >= mediaProcessTaskTimeout)
+}
+
+// 还没有 TG Job 的提交/唤醒入口也必须收口操作投影，不能遗留 waiting_media。
+func (s *sSysPublish) settleWaitingProfileMediaFailure(ctx context.Context, profileId int64, cause error) error {
+	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		state, err := tx.Model(publishProfileStateTable).Safe().Ctx(ctx).
+			Where("profile_id", profileId).WhereNull("deleted_at").LockUpdate().One()
+		if err != nil || state.IsEmpty() {
+			return err
+		}
+		status := sysin.PublishTaskStatus(state["publish_task_status"].String())
+		if status != sysin.PublishTaskStatusWaitingMedia && status != sysin.PublishTaskStatusPending && status != sysin.PublishTaskStatusPublishing {
+			return nil
+		}
+		active, err := tx.Model(publishTgJobTable).Safe().Ctx(ctx).
+			Where("profile_id", profileId).WhereIn("status", telegramJobActiveStatuses()).Count()
+		if err != nil || active > 0 {
+			return err
+		}
+		if err = s.writeProfilePublishOperationStateTx(ctx, tx, state["tenant_id"].Int64(),
+			state["account_id"].Int64(), profileId, state["publish_operation_no"].String(),
+			sysin.PublishTaskStatusFailed, true); err != nil {
+			return err
+		}
+		g.Log().Warning(ctx, "资料媒体不合格，已结束上架等待", g.Map{
+			"event": "publish_media_validation_failed", "profileId": profileId,
+			"operationNo": state["publish_operation_no"].String(), "error": cause.Error(),
+		})
+		return nil
+	})
 }
 
 func decideProfileMediaPurposeReadiness(expectedDisplay, expectedVerify, actualDisplay, actualVerify, pending, failed int) (bool, bool) {
@@ -376,11 +443,21 @@ func terminalMediaProcessingStatuses() []string {
 }
 
 func (s *sSysPublish) postponeTelegramJobUntilMediaReady(ctx context.Context, job telegramJobRecord) error {
+	if !telegramJobLifecycleNeedsRetry(job.Status) || strings.TrimSpace(job.SendPhase) != "" {
+		return nil
+	}
+	if mediaWaitExhausted(job.RetryCount+1, job.CreatedAt, time.Now()) {
+		_, err := s.settleStreamFailedMediaJob(ctx, job,
+			gerror.Wrap(errProfileMediaValidation, "媒体等待已达到 3 次尝试或入队 10 分钟上限"))
+		return err
+	}
 	nextRetryAt := gtime.Now().Add(telegramMediaReadyRetry)
-	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id", job.Id).
-		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
+		WhereIn("status", telegramJobRetryableStatuses()).Where("send_phase", "").
+		Where("retry_count", job.RetryCount).
 		Data(g.Map{
+			"retry_count":         job.RetryCount + 1,
 			"dispatch_status":     tgDispatchStatusIdle,
 			"last_dispatch_error": "媒体仍在异步处理中，媒体就绪后自动唤醒",
 			"next_retry_at":       nextRetryAt,
@@ -388,6 +465,13 @@ func (s *sSysPublish) postponeTelegramJobUntilMediaReady(ctx context.Context, jo
 		}).Update()
 	if err != nil {
 		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return gerror.Wrap(err, "确认媒体等待任务退避结果失败")
+	}
+	if affected == 0 {
+		return nil
 	}
 	if err = s.rearmTelegramJobOutbox(ctx, job.Id, telegramMediaReadyRetry); err != nil {
 		return err

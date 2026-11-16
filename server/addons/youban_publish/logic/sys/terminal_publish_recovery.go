@@ -50,7 +50,8 @@ func terminalPublishRecoveryEligible(job telegramJobRecord, cause error) bool {
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(job.OperationNo)), "auto-recover:") {
 		return false
 	}
-	return !isTelegramPermanentAccountAuthError(cause) && !isTelegramPermanentSendError(cause)
+	return !isProfileMediaValidationError(cause) && !isProfileMediaValidationError(errors.New(jobErrorMessage(job))) &&
+		!isTelegramPermanentAccountAuthError(cause) && !isTelegramPermanentSendError(cause)
 }
 
 func (s *sSysPublish) enqueueTerminalPublishRecoveryBestEffort(ctx context.Context, job telegramJobRecord, cause error) {

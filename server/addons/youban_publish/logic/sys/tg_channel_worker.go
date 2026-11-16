@@ -150,7 +150,7 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 		// Historical members use the old score format. Reinsert the same job
 		// with the current lane/score before sending; this preserves the job and
 		// lets a newly clicked manual job stay ahead on the next pass.
-		if migrateErr := enqueueTelegramChannelJob(ctx, channelID, jobID, priority, time.Now()); migrateErr != nil {
+		if migrateErr := enqueueTelegramChannelJob(ctx, channelID, jobID, priority, telegramChannelDispatchDueAt(job.NextRetryAt, 0, time.Now())); migrateErr != nil {
 			g.Log().Warning(ctx, "频道队列旧成员迁移失败，保留任务待恢复", g.Map{
 				"event": "channel_queue_migration_failed", "channelId": channelID,
 				"jobId": jobID, "score": claim.Score, "priority": priority,
@@ -193,6 +193,7 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 		if refreshed, reloadErr := s.telegramJobById(ctx, jobID); reloadErr == nil {
 			job = refreshed
 		}
+		hold = telegramChannelDispatchDueAt(job.NextRetryAt, time.Second, time.Now()).UnixMilli()
 		priority := job.Priority
 		if priority <= 0 {
 			priority = tgJobPriorityBulk
@@ -294,6 +295,19 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 		g.Log().Warning(ctx, "频道队列任务状态读取失败，已重入队", g.Map{"event": "channel_queue_requeue", "stage": "reload", "channelId": channelID, "jobId": jobID, "score": hold, "error": loadErr.Error()})
 	}
 	return true, nil
+}
+
+// telegramChannelDispatchDueAt keeps delayed jobs delayed in both producer and
+// recovery paths. Database timestamps use the shared business timezone.
+func telegramChannelDispatchDueAt(nextRetryAt *gtime.Time, delay time.Duration, now time.Time) time.Time {
+	due := now
+	if delay > 0 {
+		due = now.Add(delay)
+	}
+	if retryAt := dbtime.FromTimestamp(nextRetryAt); retryAt != nil && retryAt.Time.After(due) {
+		due = retryAt.Time
+	}
+	return due
 }
 
 func telegramChannelJobRequeueAt(job telegramJobRecord) (int64, string) {

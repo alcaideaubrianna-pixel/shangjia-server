@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"fmt"
+	"hotgo/utility/dbtime"
 	"strings"
 	"sync"
 	"time"
@@ -254,7 +255,11 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 			return gerror.New("频道队列模式要求有效channel_id")
 		}
 		priority := telegramJobPriorityValue(job)
-		if enqueueErr := enqueueTelegramChannelJob(ctx, job.ChannelId, job.Id, priority, time.Now()); enqueueErr != nil {
+		availableAt := telegramChannelDispatchDueAt(job.NextRetryAt, 0, time.Now())
+		if outboxAt := dbtime.FromTimestamp(row.AvailableAt); outboxAt != nil && outboxAt.Time.After(availableAt) {
+			availableAt = outboxAt.Time
+		}
+		if enqueueErr := enqueueTelegramChannelJob(ctx, job.ChannelId, job.Id, priority, availableAt); enqueueErr != nil {
 			g.Log().Warning(ctx, "统一频道队列Redis入队失败，保留Outbox待补偿", g.Map{"event": "channel_direct_enqueue_failed", "jobId": job.Id, "channelId": job.ChannelId, "outboxId": row.Id, "error": enqueueErr.Error()})
 			return enqueueErr
 		}
@@ -307,7 +312,10 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 	// legacy transport even when the channel worker is enabled.
 	if telegramChannelQueueEnabled() && job.ChannelId > 0 {
 		priority := telegramJobPriorityValue(job)
-		availableAt := time.Now()
+		availableAt := telegramChannelDispatchDueAt(job.NextRetryAt, 0, time.Now())
+		if outboxAt := dbtime.FromTimestamp(row.AvailableAt); outboxAt != nil && outboxAt.Time.After(availableAt) {
+			availableAt = outboxAt.Time
+		}
 		score := telegramChannelQueueScore(priority, availableAt, job.Id)
 		if err = enqueueTelegramChannelJob(ctx, job.ChannelId, job.Id, priority, availableAt); err != nil {
 			return s.releaseTelegramOutbox(ctx, row.Id, owner, row.AttemptCount, err.Error())

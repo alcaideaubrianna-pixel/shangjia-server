@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"hotgo/utility/dbtime"
+
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 )
@@ -173,6 +175,31 @@ func TestTelegramChannelRecoveryBatchSize(t *testing.T) {
 	t.Setenv("YOUBAN_PUBLISH_TG_CHANNEL_RECOVERY_BATCH_SIZE", "99999")
 	if got, want := telegramChannelRecoveryBatchSize(), 2000; got != want {
 		t.Fatalf("capped recovery batch size=%d, want %d", got, want)
+	}
+}
+
+func TestTelegramChannelDispatchDueAtPreservesDelayAndRecoveryDeadline(t *testing.T) {
+	now := time.Date(2026, 11, 16, 20, 0, 0, 0, dbtime.Location())
+	// PostgreSQL can attach UTC to a timestamp-without-time-zone clock face.
+	persisted := gtime.NewFromTime(time.Date(2026, 11, 16, 20, 1, 0, 0, time.UTC))
+	for _, tc := range []struct {
+		name  string
+		retry *gtime.Time
+		delay time.Duration
+		want  time.Duration
+	}{
+		{"new delayed enqueue", nil, time.Minute, time.Minute},
+		{"recovery preserves due", persisted, 0, time.Minute},
+		{"short wake preserves due", persisted, time.Second, time.Minute},
+		{"longer explicit delay", persisted, 2 * time.Minute, 2 * time.Minute},
+		{"ready job", nil, 0, 0},
+		{"expired due", gtime.NewFromTime(now.Add(-time.Minute)), 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := telegramChannelDispatchDueAt(tc.retry, tc.delay, now).Sub(now); got != tc.want {
+				t.Fatalf("due delay=%s, want %s", got, tc.want)
+			}
+		})
 	}
 }
 
