@@ -1444,17 +1444,9 @@ func logCollectProcessTerminal(ctx context.Context, event gdb.Record, startedAt 
 		return
 	}
 	eventID := event["id"].Int64()
-	current, readErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).
-		Fields("status,error_message,processed_at,updated_at").
-		Where("id", eventID).One()
 	status := event["status"].String()
-	errorMessage := ""
-	processed := false
-	if readErr == nil && !current.IsEmpty() {
-		status = current["status"].String()
-		errorMessage = current["error_message"].String()
-		processed = !current["processed_at"].IsNil()
-	}
+	errorMessage := event["error_message"].String()
+	processed := !event["processed_at"].IsNil()
 	if processErr != nil && errorMessage == "" {
 		errorMessage = processErr.Error()
 	}
@@ -1463,19 +1455,15 @@ func logCollectProcessTerminal(ctx context.Context, event gdb.Record, startedAt 
 	if processErr != nil {
 		retryable = errors.As(processErr, &retryErr)
 	}
-	dispatchCount, dispatchErr := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
-		Where("event_id", eventID).Count()
-	jobCount, jobErr := pdao.YoubanPublishTgJob.Ctx(ctx).
-		Where("collect_event_id", eventID).Count()
 	fields := g.Map{
 		"log_type": "telegram_collect_pipeline", "event": "collect_pipeline_terminal",
 		"stage": "process", "eventStatus": status, "traceId": gtrace.GetTraceID(ctx),
 		"collectEventId": eventID, "tenantId": event["tenant_id"].Int64(), "accountId": event["account_id"].Int64(),
 		"sourceId": event["source_id"].Int64(), "sourceChatId": event["source_chat_id"].String(),
 		"sourceMessageId": event["source_message_id"].Int64(), "sourceGroupedId": event["source_grouped_id"].String(),
-		"processed": processed, "retryable": retryable, "dispatchCount": dispatchCount,
-		"jobCount": jobCount, "durationMs": time.Since(startedAt).Milliseconds(),
-		"outcome": "completed", "telegramExecution": "out_of_scope",
+		"processed": processed, "retryable": retryable,
+		"durationMs": time.Since(startedAt).Milliseconds(),
+		"outcome":    "completed", "telegramExecution": "out_of_scope",
 	}
 	if processErr != nil {
 		fields["outcome"] = "error"
@@ -1484,25 +1472,11 @@ func logCollectProcessTerminal(ctx context.Context, event gdb.Record, startedAt 
 	} else if strings.TrimSpace(status) == sysin.CollectEventStatusIgnored {
 		fields["outcome"] = "skipped"
 		fields["skipReason"] = errorMessage
-	} else if dispatchCount == 0 && jobCount == 0 {
-		fields["outcome"] = "completed_without_dispatch"
+	} else if strings.TrimSpace(errorMessage) != "" {
+		fields["outcome"] = "completed_with_message"
 		fields["reason"] = errorMessage
-	} else if dispatchCount > 0 && jobCount == 0 {
-		fields["outcome"] = "dispatch_without_job"
-		fields["reason"] = "collect_dispatch已创建但尚未提交TG Job"
-	} else if jobCount > 0 {
-		fields["outcome"] = "queued"
 	}
-	if dispatchErr != nil {
-		fields["dispatchCountError"] = dispatchErr.Error()
-	}
-	if jobErr != nil {
-		fields["jobCountError"] = jobErr.Error()
-	}
-	if processErr != nil || readErr != nil || dispatchErr != nil || jobErr != nil {
-		if readErr != nil {
-			fields["eventReadError"] = readErr.Error()
-		}
+	if processErr != nil {
 		g.Log().Warning(ctx, "采集事件处理终态", fields)
 		return
 	}
