@@ -43,10 +43,13 @@ func telegramChannelQueueKeyForPriority(channelID int64, priority int) string {
 }
 
 const (
-	// Redis stores scores as IEEE-754 doubles. Keep the complete score below
-	// 2^53 while reserving the high part for the lane and the low part for the
-	// due timestamp plus a FIFO tie breaker.
-	telegramChannelQueuePriorityScale int64 = 1_800_000_000_000_000
+	// The score is lane * scale + dueMillis. The previous format multiplied
+	// dueMillis by 1,000 and used a lane scale of 1.8e15. At current Unix time
+	// that low part was already close to the scale, so normal lane-4 scores
+	// crossed the boundary and were falsely treated as legacy scores forever.
+	// Keep the lane scale above the current epoch-millisecond range while the
+	// complete score remains far below Redis' exact integer range (2^53).
+	telegramChannelQueuePriorityScale int64 = 2_000_000_000_000
 	telegramChannelQueueSequenceScale int64 = 1_000
 )
 
@@ -84,7 +87,9 @@ func telegramChannelQueueScore(priority int, availableAt time.Time, jobID int64)
 	if sequence < 0 {
 		sequence = -sequence
 	}
-	return telegramChannelQueuePriorityRank(priority)*telegramChannelQueuePriorityScale + dueMillis*telegramChannelQueueSequenceScale + sequence
+	// Millisecond ordering is sufficient for the queue; the job id remains the
+	// durable FIFO tie breaker when jobs share the same availability timestamp.
+	return telegramChannelQueuePriorityRank(priority)*telegramChannelQueuePriorityScale + dueMillis + sequence
 }
 
 func telegramChannelQueueNeedsMigration(score int64, priority int, urgent bool, history ...bool) bool {
@@ -193,7 +198,7 @@ func dequeueTelegramChannelHeadFromKey(ctx context.Context, key string) (telegra
 	// remains part of the score for ordering, but readiness must inspect the
 	// due-time portion only; comparing the complete score would make every
 	// priority lane appear to be in the far future.
-	const claimDueScript = `local v=redis.call('ZRANGE',KEYS[1],0,0,'WITHSCORES'); if #v==0 then return {} end; local score=tonumber(v[2]); local due=math.floor((score % 1800000000000000) / 1000); if due>tonumber(ARGV[1]) then return {} end; redis.call('ZREM',KEYS[1],v[1]); return {v[1],v[2]}`
+	const claimDueScript = `local v=redis.call('ZRANGE',KEYS[1],0,0,'WITHSCORES'); if #v==0 then return {} end; local score=tonumber(v[2]); local due=math.floor(score % 2000000000000); if due>tonumber(ARGV[1]) then return {} end; redis.call('ZREM',KEYS[1],v[1]); return {v[1],v[2]}`
 	startedAt := time.Now()
 	value, err := g.Redis().Do(ctx, "EVAL", claimDueScript, 1, key, strconv.FormatInt(time.Now().UnixMilli(), 10))
 	result := "success"
