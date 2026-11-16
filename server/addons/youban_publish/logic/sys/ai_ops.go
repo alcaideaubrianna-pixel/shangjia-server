@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 
@@ -180,13 +181,55 @@ func (s *sSysPublish) AIOpsRepublishProfiles(ctx context.Context, in *sysin.Prof
 			// leave the profile private after Telegram delivery succeeds.
 			continue
 		}
-		if err = s.submitProfilePublish(ctx, profileId, profile["tenant_id"].Int64(), profile["account_id"].Int64(), 0, newTelegramOperationNo("ai-republish", profileId), nil, false); err != nil {
+		operationNo := newTelegramOperationNo("ai-republish", profileId)
+		if err = s.submitProfilePublish(ctx, profileId, profile["tenant_id"].Int64(), profile["account_id"].Int64(), 0, operationNo, nil, false); err != nil {
 			return nil, gerror.Wrapf(err, "资料%d提交TG发布任务失败", profileId)
+		}
+		if err = s.wakeRepublishedProfileJobs(ctx, profileId, operationNo); err != nil {
+			return nil, gerror.Wrapf(err, "资料%d唤醒TG发布任务失败", profileId)
 		}
 	}
 	result := &sysin.ProfileStatusModel{Message: "资料已提交TG发布任务"}
 	g.Log().Info(ctx, "AI运维资料重新上架", g.Map{"profileIds": ids, "result": result})
 	return result, nil
+}
+
+// wakeRepublishedProfileJobs repairs the handoff for AI operations after the
+// database transaction has committed. The normal submit path already writes
+// the outbox, but an AI operation may be executed while a channel worker is
+// recovering; explicitly rearming the channel active set makes the handoff
+// independent of the legacy account scheduler.
+func (s *sSysPublish) wakeRepublishedProfileJobs(ctx context.Context, profileID int64, operationNo string) error {
+	if profileID <= 0 || strings.TrimSpace(operationNo) == "" {
+		return gerror.New("AI重新上架任务参数不完整")
+	}
+	var rows []gdb.Record
+	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Fields("id,tenant_id,account_id,channel_id,target_chat_id,status,dispatch_status").
+		Where("profile_id", profileID).
+		Where("operation_no", operationNo).
+		WhereIn("status", telegramJobActiveStatuses()).
+		OrderAsc("id").Scan(&rows); err != nil {
+		return gerror.Wrap(err, "读取AI重新上架TG任务失败")
+	}
+	for _, row := range rows {
+		job := telegramJobRecord{
+			Id: row["id"].Int64(), TenantId: row["tenant_id"].Int64(),
+			AccountId: row["account_id"].Int64(), ChannelId: row["channel_id"].Int64(),
+			TargetChatId:   row["target_chat_id"].String(),
+			Status:         JobStatus(row["status"].String()),
+			DispatchStatus: DispatchStatus(row["dispatch_status"].String()),
+		}
+		if err := s.wakeNextTelegramChannelJob(ctx, job); err != nil {
+			return gerror.Wrapf(err, "唤醒AI重新上架频道失败 channelId:%d jobId:%d", job.ChannelId, job.Id)
+		}
+	}
+	g.Log().Info(ctx, "AI重新上架任务已提交频道队列", g.Map{
+		"event": "ai_republish_channel_wake", "profileId": profileID,
+		"operationNo": operationNo, "jobCount": len(rows),
+		"reason": "ai_republish_explicit_channel_wake",
+	})
+	return nil
 }
 
 func (s *sSysPublish) AIOpsOfflineProfiles(ctx context.Context, profileIds []int64) (*sysin.ProfileStatusModel, error) {
