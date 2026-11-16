@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -87,19 +88,22 @@ func (s *sSysPublish) dispatchTelegramCleanupIntents(ctx context.Context, limit 
 		JobId        int64
 		EventType    string
 		AttemptCount int
+		OperationNo  string
+		Payload      string
 		TenantId     int64
 		ChannelId    int64
 	}
 	now := gtime.Now()
 	if err := g.DB().Model(publishTgOutboxTable+" o").Safe().Ctx(ctx).
 		LeftJoin(publishTgJobTable+" j", "j.id=o.job_id").
-		Fields("o.id,o.job_id,o.event_type,o.attempt_count,j.tenant_id,j.channel_id").
+		Fields("o.id,o.job_id,o.event_type,o.attempt_count,o.operation_no,o.payload,j.tenant_id,j.channel_id").
 		WhereIn("o.event_type", []string{telegramOutboxCleanupPrefix + "manual", telegramOutboxCleanupPrefix + "keyword", telegramOutboxCleanupPrefix + "cycle"}).
 		WhereLTE("o.available_at", now).Where("o.status=? OR (o.status=? AND o.lease_expires_at<=?)", telegramOutboxPending, telegramOutboxProcessing, now).
 		OrderAsc("o.available_at").OrderAsc("o.id").Limit(limit).Scan(&rows); err != nil {
 		return err
 	}
 	for _, row := range rows {
+		payload, payloadErr := restoreTelegramCleanupIntentPayload(row.Id, row.JobId, row.OperationNo, row.Payload)
 		owner := telegramOutboxOwner()
 		result, err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).Where("id", row.Id).
 			Where("status=? OR (status=? AND lease_expires_at<=?)", telegramOutboxPending, telegramOutboxProcessing, now).
@@ -112,6 +116,12 @@ func (s *sSysPublish) dispatchTelegramCleanupIntents(ctx context.Context, limit 
 			return err
 		}
 		if changed == 0 {
+			continue
+		}
+		if payloadErr != nil {
+			if err := s.releaseTelegramOutbox(ctx, row.Id, owner, row.AttemptCount, payloadErr.Error()); err != nil {
+				return err
+			}
 			continue
 		}
 		priority := channelPriorityKeywordDelete
@@ -127,7 +137,7 @@ func (s *sSysPublish) dispatchTelegramCleanupIntents(ctx context.Context, limit 
 		if err == nil {
 			// 使用与普通清理入队相同的 job 级 task ID 和 payload，
 			// 避免重投路径与首次入队路径产生不同的任务语义。
-			_, err = enqueueTelegramCleanupTask(ctx, client, channelDispatchDeleteQueueName(priority), row.JobId, 0, true, row.AttemptCount, tgQueuePayload{JobId: row.JobId})
+			_, err = enqueueTelegramCleanupTask(ctx, client, channelDispatchDeleteQueueName(priority), row.JobId, 0, true, row.AttemptCount, payload)
 		}
 		if err != nil {
 			if releaseErr := s.releaseTelegramOutbox(ctx, row.Id, owner, row.AttemptCount, err.Error()); releaseErr != nil {
@@ -139,12 +149,39 @@ func (s *sSysPublish) dispatchTelegramCleanupIntents(ctx context.Context, limit 
 }
 
 // completeTelegramCleanupIntent 只在实际删除成功后确认持久化意图，不修改发送任务执行元数据。
-func (s *sSysPublish) completeTelegramCleanupIntent(ctx context.Context, jobId int64) error {
-	_, err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).Where("job_id", jobId).
+func (s *sSysPublish) completeTelegramCleanupIntent(ctx context.Context, jobId int64, payload tgQueuePayload) error {
+	// Legacy tasks have no durable identity and must never acknowledge newer intents.
+	if payload.CleanupOutboxId <= 0 {
+		return nil
+	}
+	if jobId <= 0 || (payload.JobId != 0 && payload.JobId != jobId) {
+		return gerror.New("清理意图与任务编号不匹配")
+	}
+	result, err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).Where("id", payload.CleanupOutboxId).Where("job_id", jobId).
+		Where("operation_no", strings.TrimSpace(payload.CleanupOperationNo)).
 		WhereIn("event_type", []string{telegramOutboxCleanupPrefix + "manual", telegramOutboxCleanupPrefix + "keyword", telegramOutboxCleanupPrefix + "cycle"}).
 		WhereNot("status", telegramOutboxDelivered).Data(g.Map{"status": telegramOutboxDelivered, "delivered_at": gtime.Now(), "lease_owner": "", "lease_expires_at": nil, "last_error": ""}).Update()
 	if err != nil {
 		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return gerror.Wrap(err, "读取清理意图确认结果失败")
+	}
+	if changed == 0 {
+		return nil
+	}
+	// Another operation may still need this job's channel index. A stale or
+	// duplicate acknowledgement must not remove its scheduling hint.
+	remaining, err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
+		Where("job_id", jobId).
+		WhereIn("event_type", []string{telegramOutboxCleanupPrefix + "manual", telegramOutboxCleanupPrefix + "keyword", telegramOutboxCleanupPrefix + "cycle"}).
+		WhereNot("status", telegramOutboxDelivered).Count()
+	if err != nil {
+		return gerror.Wrap(err, "读取未完成清理意图失败")
+	}
+	if remaining > 0 {
+		return nil
 	}
 	var job struct {
 		TenantId  int64 `orm:"tenant_id"`
@@ -158,4 +195,28 @@ func (s *sSysPublish) completeTelegramCleanupIntent(ctx context.Context, jobId i
 		g.Log().Warningf(ctx, "移除频道删除队列索引失败 tenantId:%d channelId:%d jobId:%d err:%+v", job.TenantId, job.ChannelId, jobId, indexErr)
 	}
 	return err
+}
+
+// restoreTelegramCleanupIntentPayload treats the outbox identity and operation as
+// immutable. It never consults the current profile operation, even for old rows.
+func restoreTelegramCleanupIntentPayload(outboxId, jobId int64, operationNo, body string) (tgQueuePayload, error) {
+	var payload tgQueuePayload
+	if outboxId <= 0 || jobId <= 0 {
+		return payload, gerror.New("清理意图编号或任务编号无效")
+	}
+	if strings.TrimSpace(body) != "" {
+		if err := json.Unmarshal([]byte(body), &payload); err != nil {
+			return payload, gerror.Wrap(err, "恢复清理意图上下文失败")
+		}
+	}
+	operationNo = strings.TrimSpace(operationNo)
+	if (payload.JobId != 0 && payload.JobId != jobId) ||
+		(payload.CleanupOutboxId != 0 && payload.CleanupOutboxId != outboxId) ||
+		(strings.TrimSpace(payload.CleanupOperationNo) != "" && strings.TrimSpace(payload.CleanupOperationNo) != operationNo) {
+		return tgQueuePayload{}, gerror.New("清理意图持久化上下文不一致")
+	}
+	payload.JobId = jobId
+	payload.CleanupOutboxId = outboxId
+	payload.CleanupOperationNo = operationNo
+	return payload, nil
 }

@@ -489,24 +489,26 @@ type profileTaskStatusQuery struct {
 	TaskStatus string `json:"task_status"`
 }
 
-// profileTaskStatusBySelector uses the existing selector indexes:
-// hg_content_profile(id), idx_content_profile_source_uuid/profile UUID,
-// profile_no's unique lookup, and uk_ybp_profile_state_profile for the join.
-// The owner/account authorization query remains separate so this read does
-// not expand the full admin visibility scope.
+// profileTaskStatusBySelector 只读取资料状态及权限校验所需的归属字段。
+// 依赖 hg_content_profile 的主键、idx_content_profile_source_uuid
+// (source_note_uuid) WHERE deleted_at IS NULL、uk_content_profile_no
+// (profile_no)，以及状态表的 uk_ybp_profile_state_profile(profile_id)。
+// 这些索引已在 maintenance.pgsql.sql / upgrade.pgsql.sql 中声明；部署时
+// 应核对实际索引，查询请求中不执行 DDL，也不扩展完整账号可见范围。
 func (s *sSysPublish) profileTaskStatusBySelector(ctx context.Context, in *sysin.ProfileViewInp) (res *profileTaskStatusQuery, err error) {
 	if !hasProfileViewSelector(in) {
 		return nil, gerror.New("资料ID、UUID或编号不能为空")
 	}
+	cols := dao.ContentProfile.Columns()
 	mod := dao.ContentProfile.Ctx(ctx).As("p").
-		InnerJoin(publishProfileStateTable+" ps", "ps.profile_id=p.id AND ps.deleted_at IS NULL").
-		WhereNull("p.deleted_at")
+		InnerJoin(publishProfileStateTable+" ps", "ps.profile_id=p."+cols.Id+" AND ps.deleted_at IS NULL").
+		WhereNull("p." + cols.DeletedAt)
 	if in.Id > 0 {
-		mod = mod.Where("p.id", in.Id)
+		mod = mod.Where("p."+cols.Id, in.Id)
 	} else if uuid := normalizeProfileUUID(in.Uuid); uuid != "" {
-		mod = mod.Where("p.source_note_uuid", uuid)
+		mod = mod.Where("p."+cols.SourceNoteUuid, uuid)
 	} else {
-		mod = mod.Where("p.profile_no", strings.ToUpper(strings.TrimSpace(in.ProfileNo)))
+		mod = mod.Where("p."+cols.ProfileNo, strings.ToUpper(strings.TrimSpace(in.ProfileNo)))
 	}
 	if err = mod.Fields(profileTaskStatusFields()).Scan(&res); err != nil {
 		return nil, gerror.Wrap(err, "获取资料任务状态失败")
@@ -521,7 +523,8 @@ func (s *sSysPublish) profileTaskStatusBySelector(ctx context.Context, in *sysin
 }
 
 func profileTaskStatusFields() string {
-	return "p.id,p.source_note_uuid AS uuid,p.status,ps.tenant_id,ps.account_id," +
+	cols := dao.ContentProfile.Columns()
+	return "p." + cols.Id + ",p." + cols.SourceNoteUuid + " AS uuid,p." + cols.Status + ",ps.tenant_id,ps.account_id," +
 		"CASE WHEN COALESCE(ps.publish_task_status,'') IN ('pending','publishing') " +
 		"AND (LOWER(COALESCE(ps.publish_operation_no,'')) LIKE 'cycle_batch:%' " +
 		"OR LOWER(COALESCE(ps.publish_operation_no,'')) LIKE 'profile_cycle:%') " +

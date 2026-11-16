@@ -23,14 +23,14 @@ func TestProfilePublishNoteIndexStatusCache(t *testing.T) {
 	cache.Instance().SetAdapter(gcache.NewAdapterMemory())
 	t.Cleanup(func() { cache.Instance().SetAdapter(previous) })
 
-	if noteIndexStatusRecentlyWritten(ctx, 1, 2, 3, sysin.PublishTaskStatusPublishing) {
+	if noteIndexStatusRecentlyWritten(ctx, 1, 2, 3, string(sysin.PublishTaskStatusPublishing)) {
 		t.Fatal("status must not be cached before the write marker is set")
 	}
-	markNoteIndexStatusWritten(ctx, 1, 2, 3, sysin.PublishTaskStatusPublishing)
-	if !noteIndexStatusRecentlyWritten(ctx, 1, 2, 3, sysin.PublishTaskStatusPublishing) {
+	markNoteIndexStatusWritten(ctx, 1, 2, 3, string(sysin.PublishTaskStatusPublishing))
+	if !noteIndexStatusRecentlyWritten(ctx, 1, 2, 3, string(sysin.PublishTaskStatusPublishing)) {
 		t.Fatal("status write marker was not found")
 	}
-	if noteIndexStatusRecentlyWritten(ctx, 1, 2, 3, sysin.PublishTaskStatusFailed) {
+	if noteIndexStatusRecentlyWritten(ctx, 1, 2, 3, string(sysin.PublishTaskStatusFailed)) {
 		t.Fatal("different task status must not share the write marker")
 	}
 }
@@ -68,25 +68,25 @@ func TestLocalProfilePublishStateProjection(t *testing.T) {
 	if err := service.beginProfilePublishOperation(ctx, tenantId, accountId, profileId, operationOne); err != nil {
 		t.Fatalf("begin first operation: %v", err)
 	}
-	assertProfilePublishProjection(t, ctx, profileId, operationOne, sysin.PublishTaskStatusPending)
+	assertProfilePublishProjection(t, ctx, profileId, operationOne, string(sysin.PublishTaskStatusPending))
 	if err := service.beginProfilePublishOperation(ctx, tenantId, accountId, profileId, operationTwo); err != nil {
 		t.Fatalf("begin second operation: %v", err)
 	}
 	staleJob := telegramJobRecord{TenantId: tenantId, AccountId: accountId, ProfileId: profileId, OperationNo: operationOne}
-	if err := service.updateProfilePublishOperationState(ctx, staleJob, sysin.PublishTaskStatusPublishing); err != nil {
+	if err := service.updateProfilePublishOperationState(ctx, staleJob, string(sysin.PublishTaskStatusPublishing)); err != nil {
 		t.Fatalf("update stale operation: %v", err)
 	}
-	assertProfilePublishProjection(t, ctx, profileId, operationTwo, sysin.PublishTaskStatusPending)
+	assertProfilePublishProjection(t, ctx, profileId, operationTwo, string(sysin.PublishTaskStatusPending))
 
 	currentJob := telegramJobRecord{TenantId: tenantId, AccountId: accountId, ProfileId: profileId, OperationNo: operationTwo}
-	if err := service.updateProfilePublishOperationState(ctx, currentJob, sysin.PublishTaskStatusPublishing); err != nil {
+	if err := service.updateProfilePublishOperationState(ctx, currentJob, string(sysin.PublishTaskStatusPublishing)); err != nil {
 		t.Fatalf("update current operation: %v", err)
 	}
-	assertProfilePublishProjection(t, ctx, profileId, operationTwo, sysin.PublishTaskStatusPublishing)
+	assertProfilePublishProjection(t, ctx, profileId, operationTwo, string(sysin.PublishTaskStatusPublishing))
 	if err := service.clearProfilePublishOperationState(ctx, staleJob); err != nil {
 		t.Fatalf("clear stale operation: %v", err)
 	}
-	assertProfilePublishProjection(t, ctx, profileId, operationTwo, sysin.PublishTaskStatusPublishing)
+	assertProfilePublishProjection(t, ctx, profileId, operationTwo, string(sysin.PublishTaskStatusPublishing))
 	if err := service.clearProfilePublishOperationState(ctx, currentJob); err != nil {
 		t.Fatalf("clear current operation: %v", err)
 	}
@@ -94,14 +94,14 @@ func TestLocalProfilePublishStateProjection(t *testing.T) {
 	if err := service.beginProfilePublishOperation(ctx, tenantId, accountId, profileId, operationTwo); err != nil {
 		t.Fatalf("restart second operation: %v", err)
 	}
-	if err := service.updateProfilePublishOperationState(ctx, currentJob, sysin.PublishTaskStatusFailed); err != nil {
+	if err := service.updateProfilePublishOperationState(ctx, currentJob, string(sysin.PublishTaskStatusFailed)); err != nil {
 		t.Fatalf("fail current operation: %v", err)
 	}
 	operationThree := fmt.Sprintf("integration:three:%d", profileId)
 	if err := service.beginProfilePublishOperation(ctx, tenantId, accountId, profileId, operationThree); err != nil {
 		t.Fatalf("begin operation after failure: %v", err)
 	}
-	assertProfilePublishProjection(t, ctx, profileId, operationThree, sysin.PublishTaskStatusPending)
+	assertProfilePublishProjection(t, ctx, profileId, operationThree, string(sysin.PublishTaskStatusPending))
 	if err := service.cancelProfilePublishOperation(ctx, profileId); err != nil {
 		t.Fatalf("cancel current operation: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestLocalProfilePublishStateProjection(t *testing.T) {
 	if err = service.recoverMissingProfilePublishOperationStates(ctx, 100); err != nil {
 		t.Fatalf("recover missing pending projection: %v", err)
 	}
-	assertProfilePublishProjection(t, ctx, profileId, operationFour, sysin.PublishTaskStatusPending)
+	assertProfilePublishProjection(t, ctx, profileId, operationFour, string(sysin.PublishTaskStatusPending))
 	if err = service.cancelProfilePublishOperation(ctx, profileId); err != nil {
 		t.Fatalf("clear recovered pending projection: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestLocalProfilePublishStateProjection(t *testing.T) {
 	if err = service.recoverMissingProfilePublishOperationStates(ctx, 100); err != nil {
 		t.Fatalf("recover missing sending projection: %v", err)
 	}
-	assertProfilePublishProjection(t, ctx, profileId, operationFour, sysin.PublishTaskStatusPublishing)
+	assertProfilePublishProjection(t, ctx, profileId, operationFour, string(sysin.PublishTaskStatusPublishing))
 }
 
 func TestLocalRecoverProfilePublishStateSkipsTerminalRows(t *testing.T) {
@@ -150,12 +150,12 @@ func TestLocalRecoverProfilePublishStateSkipsTerminalRows(t *testing.T) {
 	for _, fixture := range []g.Map{
 		{
 			"tenant_id": baseId, "account_id": baseId, "profile_id": failedProfileId,
-			"publish_operation_no": "terminal-failure", "publish_task_status": sysin.PublishTaskStatusFailed,
+			"publish_operation_no": "terminal-failure", "publish_task_status": string(sysin.PublishTaskStatusFailed),
 			"publish_task_updated_at": now.Add(-time.Hour), "created_at": now, "updated_at": now,
 		},
 		{
 			"tenant_id": baseId, "account_id": baseId, "profile_id": activeProfileId,
-			"publish_operation_no": operationNo, "publish_task_status": sysin.PublishTaskStatusPublishing,
+			"publish_operation_no": operationNo, "publish_task_status": string(sysin.PublishTaskStatusPublishing),
 			"publish_task_updated_at": now, "created_at": now, "updated_at": now,
 		},
 	} {
@@ -166,7 +166,7 @@ func TestLocalRecoverProfilePublishStateSkipsTerminalRows(t *testing.T) {
 	if _, err := g.DB().Model(publishNoteIndexTable).Safe().Ctx(ctx).Data(g.Map{
 		"tenant_id": baseId, "account_id": baseId, "profile_id": activeProfileId,
 		"uuid": fmt.Sprintf("publish-state-starvation-%d", baseId), "profile_no": fmt.Sprintf("T%d", baseId),
-		"task_status": sysin.PublishTaskStatusPublishing, "created_at": now, "updated_at": now,
+		"task_status": string(sysin.PublishTaskStatusPublishing), "created_at": now, "updated_at": now,
 	}).Insert(); err != nil {
 		t.Fatalf("create note index fixture: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestLocalRecoverProfilePublishStateSkipsTerminalRows(t *testing.T) {
 	if err = service.recoverProfilePublishOperationStates(ctx, 1); err != nil {
 		t.Fatalf("recover active profile state: %v", err)
 	}
-	assertProfilePublishProjection(t, ctx, activeProfileId, operationNo, sysin.PublishTaskStatusFailed)
+	assertProfilePublishProjection(t, ctx, activeProfileId, operationNo, string(sysin.PublishTaskStatusFailed))
 }
 
 func assertProfilePublishProjection(t *testing.T, ctx context.Context, profileId int64, operationNo, status string) {

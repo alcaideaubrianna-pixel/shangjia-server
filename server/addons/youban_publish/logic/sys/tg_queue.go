@@ -200,6 +200,7 @@ const (
 
 type tgQueuePayload struct {
 	JobId              int64   `json:"jobId"`
+	CleanupOutboxId    int64   `json:"cleanupOutboxId,omitempty"`
 	CleanupOperationNo string  `json:"cleanupOperationNo,omitempty"`
 	CleanupJobIds      []int64 `json:"cleanupJobIds,omitempty"`
 	ForceCompletion    bool    `json:"forceCompletion,omitempty"`
@@ -620,83 +621,27 @@ func (s *sSysPublish) currentTelegramCleanupOperationNo(ctx context.Context, ten
 }
 
 func hydrateTelegramCleanupPayload(ctx context.Context, jobId int64, payload tgQueuePayload) (tgQueuePayload, error) {
-	if jobId <= 0 {
+	if jobId <= 0 || (payload.JobId != 0 && payload.JobId != jobId) || payload.CleanupOutboxId < 0 {
+		return payload, gerror.New("TG清理任务身份不合法或不匹配")
+	}
+	if payload.CleanupOutboxId <= 0 {
+		// Legacy tasks can still physically clean their historical messages. They must
+		// not discover or claim an intent, and must not infer a current operation.
+		payload.CleanupOperationNo = ""
 		return payload, nil
 	}
-	var job struct {
-		TenantId      int64  `orm:"tenant_id"`
-		ProfileId     int64  `orm:"profile_id"`
-		OperationType string `orm:"operation_type"`
-	}
-	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Fields("tenant_id,profile_id,operation_type").Where("id", jobId).Scan(&job); err != nil {
-		return payload, gerror.Wrap(err, "读取TG清理任务上下文失败")
-	}
-	if job.ProfileId <= 0 {
-		return payload, nil
-	}
-
-	var intent struct {
-		Id          int64  `orm:"id"`
-		OperationNo string `orm:"operation_no"`
-		Status      string `orm:"status"`
-	}
-	intentRecord, err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
-		Fields("id,operation_no,status").Where("job_id", jobId).
-		WhereIn("event_type", []string{
-			telegramOutboxCleanupPrefix + "manual",
-			telegramOutboxCleanupPrefix + "keyword",
-			telegramOutboxCleanupPrefix + "cycle",
-		}).OrderDesc("id").One()
+	restored, err := hydrateTelegramCleanupIntentPayload(ctx, payload.CleanupOutboxId)
 	if err != nil {
-		return payload, gerror.Wrap(err, "读取TG清理意图失败")
+		return payload, err
 	}
-	if !intentRecord.IsEmpty() {
-		intent.Id = intentRecord["id"].Int64()
-		intent.OperationNo = intentRecord["operation_no"].String()
-		intent.Status = intentRecord["status"].String()
+	if restored.JobId != jobId {
+		return payload, gerror.Newf("TG清理意图与任务不匹配（意图：%d，任务：%d）", payload.CleanupOutboxId, jobId)
 	}
-
-	operationNo := strings.TrimSpace(payload.CleanupOperationNo)
-	durableOperationNo := strings.TrimSpace(intent.OperationNo)
-	if job.OperationType == "unpublish" {
-		state, err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
-			Fields("publish_operation_no").
-			Where("tenant_id", job.TenantId).
-			Where("profile_id", job.ProfileId).
-			Where("publish_task_status", sysin.PublishTaskStatusUnpublishing.String()).
-			WhereNull("deleted_at").One()
-		if err != nil {
-			return payload, gerror.Wrap(err, "读取当前资料下架操作号失败")
-		}
-		if !state.IsEmpty() {
-			operationNo = strings.TrimSpace(state["publish_operation_no"].String())
-		}
+	if strings.TrimSpace(payload.CleanupOperationNo) != "" &&
+		strings.TrimSpace(payload.CleanupOperationNo) != strings.TrimSpace(restored.CleanupOperationNo) {
+		return payload, gerror.New("TG清理任务操作号与持久化意图不匹配")
 	}
-	if operationNo == "" {
-		operationNo = durableOperationNo
-	}
-	if operationNo == "" {
-		return payload, nil
-	}
-	payload.CleanupOperationNo = operationNo
-
-	if intent.Id > 0 && operationNo != durableOperationNo {
-		data := g.Map{"operation_no": operationNo, "updated_at": gtime.Now()}
-		if intent.Status == telegramOutboxDelivered {
-			data["status"] = telegramOutboxPending
-			data["available_at"] = gtime.Now()
-			data["delivered_at"] = nil
-			data["lease_owner"] = ""
-			data["lease_expires_at"] = nil
-			data["last_error"] = ""
-		}
-		if _, err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
-			Where("id", intent.Id).Data(data).Update(); err != nil {
-			return payload, gerror.Wrap(err, "持久化TG清理操作号失败")
-		}
-	}
-	return payload, nil
+	return restored, nil
 }
 
 func (s *sSysPublish) enqueueTelegramCleanupJobWithContext(ctx context.Context, jobId int64, delay time.Duration, payload tgQueuePayload) error {
@@ -715,30 +660,16 @@ func (s *sSysPublish) enqueueTelegramCleanupJobWithContext(ctx context.Context, 
 		return gerror.Wrap(err, "读取TG删除任务归属失败")
 	}
 	operationNo := strings.TrimSpace(payload.CleanupOperationNo)
-	if owner.OperationType == "unpublish" {
-		currentOperationNo, resolveErr := s.currentTelegramCleanupOperationNo(ctx, owner.TenantId, owner.ProfileId)
-		if resolveErr != nil {
-			return resolveErr
+	if payload.CleanupOutboxId > 0 {
+		restored, err := hydrateTelegramCleanupPayload(ctx, jobId, payload)
+		if err != nil {
+			return err
 		}
-		if currentOperationNo != "" {
-			if operationNo != "" && operationNo != currentOperationNo {
-				g.Log().Warning(ctx, "TG清理入队操作号已按当前资料状态校正", g.Map{
-					"log_type": "telegram_cleanup_enqueue", "event": "operation_no_corrected",
-					"jobId": jobId, "profileId": owner.ProfileId, "tenantId": owner.TenantId,
-					"providedOperationNo": operationNo, "cleanupOperationNo": currentOperationNo,
-				})
-			}
-			operationNo = currentOperationNo
-		}
-		if operationNo == "" {
-			g.Log().Error(ctx, "TG资料下架清理任务缺少当前资料操作号，拒绝入队", g.Map{
-				"log_type": "telegram_cleanup_enqueue", "event": "missing_operation_no",
-				"jobId": jobId, "profileId": owner.ProfileId, "tenantId": owner.TenantId,
-				"accountId": owner.AccountId, "channelId": owner.ChannelId,
-			})
-			return gerror.Newf("资料下架清理任务缺少当前操作号，拒绝入队（任务ID：%d）", jobId)
-		}
+		payload = restored
+		operationNo = restored.CleanupOperationNo
 	}
+	// Only explicitly supplied or persisted operations may own completion.
+	// An empty legacy operation is valid for physical message cleanup alone.
 	payload.CleanupOperationNo = operationNo
 	g.Log().Info(ctx, "TG资料清理任务准备入队", g.Map{
 		"log_type": "telegram_cleanup_enqueue", "event": "started", "jobId": jobId,
@@ -747,7 +678,7 @@ func (s *sSysPublish) enqueueTelegramCleanupJobWithContext(ctx context.Context, 
 		"cleanupOperationNo": operationNo, "cleanupJobIds": payload.CleanupJobIds,
 		"delayMs": delay.Milliseconds(),
 	})
-	priority := telegramCleanupPriority(owner.Priority, operationNo)
+	priority := telegramCleanupPriority(owner.Priority, owner.OperationType, operationNo)
 	if s.unifiedPushEngineEnabled(ctx, owner.TenantId, owner.AccountId) {
 		queueName = channelDispatchDeleteQueueName(priority)
 	}
@@ -755,11 +686,21 @@ func (s *sSysPublish) enqueueTelegramCleanupJobWithContext(ctx context.Context, 
 	if priority == channelPriorityCycleDelete {
 		eventType = telegramOutboxCleanupPrefix + "cycle"
 	}
-	if _, err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).InsertIgnore(g.Map{
-		"job_id": jobId, "event_type": eventType, "dedupe_key": fmt.Sprintf("telegram-cleanup:%d", jobId),
-		"status": telegramOutboxPending, "available_at": gtime.Now(), "created_at": gtime.Now(), "updated_at": gtime.Now(),
-	}); err != nil {
-		return gerror.Wrap(err, "保存TG删除意图失败")
+	if payload.CleanupOutboxId == 0 && operationNo != "" {
+		outboxID, _, err := ensureTelegramCleanupIntent(ctx, jobId, eventType, operationNo, payload)
+		if err != nil {
+			return err
+		}
+		payload.CleanupOutboxId = outboxID
+		// Always dispatch persisted context, including on dedupe conflicts.
+		payload, err = hydrateTelegramCleanupPayload(ctx, jobId, payload)
+		if err != nil {
+			return err
+		}
+	} else if payload.CleanupOutboxId == 0 {
+		// Legacy cleanup has no durable ownership. Keep it limited to physical
+		// message cleanup; it must never create or claim a new intent.
+		payload.CleanupOperationNo = ""
 	}
 	if err := s.enqueueTelegramTaskWithQueuePayload(ctx, tgTaskTypeCleanup, jobId, delay, true, queueName, payload); err != nil {
 		g.Log().Warning(ctx, "TG资料清理任务入队失败", g.Map{

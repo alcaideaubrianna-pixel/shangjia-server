@@ -105,3 +105,87 @@ func TestUnifiedDeleteQueuesHaveConsumers(t *testing.T) {
 		}
 	}
 }
+
+func TestTelegramCleanupPriorityUsesRequestContext(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		jobPriority int
+		operation   string
+		want        channelDispatchPriority
+	}{
+		{"interactive", tgJobPriorityInteractive, "", channelPriorityManualDelete},
+		{"manual_unpublish_of_cycle_job", tgJobPriorityBulk, "unpublish:10:123", channelPriorityManualDelete},
+		{"manual_delete_of_history_job", tgJobPriorityUrgent, "delete:10:123", channelPriorityManualDelete},
+		{"automatic_cycle", tgJobPriorityDefault, "", channelPriorityCycleDelete},
+		{"blank_operation", tgJobPriorityDefault, "  ", channelPriorityCycleDelete},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := telegramCleanupPriority(tc.jobPriority, "", tc.operation)
+			if got != tc.want {
+				t.Fatalf("cleanup priority = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTelegramCleanupPriorityTreatsUnpublishAsManual(t *testing.T) {
+	if got := telegramCleanupPriority(tgJobPriorityBulk, "unpublish", ""); got != channelPriorityManualDelete {
+		t.Fatalf("unpublish cleanup priority = %d, want manual %d", got, channelPriorityManualDelete)
+	}
+	if got := telegramCleanupExecutionPriority(context.Background(), telegramJobRecord{Priority: tgJobPriorityBulk, OperationType: "unpublish"}); got != channelPriorityManualDelete {
+		t.Fatalf("direct unpublish cleanup priority = %d, want manual %d", got, channelPriorityManualDelete)
+	}
+}
+
+func TestTelegramCleanupManualReservedSlots(t *testing.T) {
+	for _, tc := range []struct {
+		name                  string
+		total, reserved, want int
+	}{
+		{"default", 4, 1, 3},
+		{"disabled", 4, 0, 4},
+		{"negative", 4, -1, 4},
+		{"two_reserved", 4, 2, 2},
+		{"clamp_all_reserved", 4, 4, 1},
+		{"clamp_excessive", 4, 100, 1},
+		{"one_slot", 1, 1, 1},
+		{"no_capacity", 0, 1, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, priority := range []channelDispatchPriority{channelPriorityKeywordDelete, channelPriorityCycleDelete} {
+				if got := telegramCleanupSlotLimitForPriority(priority, tc.total, tc.reserved); got != tc.want {
+					t.Fatalf("priority %d limit = %d, want %d", priority, got, tc.want)
+				}
+			}
+			if got := telegramCleanupSlotLimitForPriority(channelPriorityManualDelete, tc.total, tc.reserved); got != tc.total {
+				t.Fatalf("manual limit = %d, want total capacity %d", got, tc.total)
+			}
+		})
+	}
+}
+
+func TestTelegramCleanupManualReservedSlotsConfig(t *testing.T) {
+	previous := g.Cfg().GetAdapter()
+	t.Cleanup(func() { g.Cfg().SetAdapter(previous) })
+	for _, tc := range []struct {
+		config string
+		want   int
+	}{
+		{`{}`, 3},
+		{`{"youbanPublish":{"queue":{"cleanupManualReservedSlots":0}}}`, 4},
+		{`{"youbanPublish":{"queue":{"cleanupManualReservedSlots":2}}}`, 2},
+		{`{"youbanPublish":{"queue":{"cleanupManualReservedSlots":99}}}`, 1},
+	} {
+		adapter, err := gcfg.NewAdapterContent(tc.config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		g.Cfg().SetAdapter(adapter)
+		if got := telegramCleanupSlotLimit(context.Background(), channelPriorityCycleDelete); got != tc.want {
+			t.Fatalf("config %s: cycle limit = %d, want %d", tc.config, got, tc.want)
+		}
+		if got := telegramCleanupSlotLimit(context.Background(), channelPriorityManualDelete); got != 4 {
+			t.Fatalf("manual capacity changed: %d", got)
+		}
+	}
+}

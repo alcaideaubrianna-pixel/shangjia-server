@@ -1522,3 +1522,8 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_profile_media_operation" (
 DROP INDEX IF EXISTS "uk_ybp_profile_media_operation_profile";
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_profile_media_operation_profile_operation" ON "hg_youban_publish_profile_media_operation" ("tenant_id","account_id","profile_no","operation_no");
 CREATE INDEX IF NOT EXISTS "idx_ybp_profile_media_operation_recovery" ON "hg_youban_publish_profile_media_operation" ("status","updated_at","id");
+
+-- Immutable cleanup context. Apply before enabling durable cleanup dispatch.
+ALTER TABLE "hg_youban_publish_tg_outbox" ADD COLUMN IF NOT EXISTS "operation_no" varchar(128) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_tg_outbox" ADD COLUMN IF NOT EXISTS "payload" text NOT NULL DEFAULT '';
+-- Legacy rows stay empty; never backfill from current profile state.

@@ -26,6 +26,11 @@ func telegramJobPriorityValue(job telegramJobRecord) int {
 		return tgJobPriorityUrgent
 	}
 	operationNo := strings.ToLower(strings.TrimSpace(job.OperationNo))
+	// Unpublish is a cleanup operation and must never inherit the interactive
+	// publish priority. It is consumed by the independent delete path.
+	if isInteractiveProfileUnpublishOperation(operationNo) {
+		return tgJobPriorityDefault
+	}
 	if isInteractiveProfilePublishOperation(operationNo) {
 		return tgJobPriorityInteractive
 	}

@@ -10,6 +10,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 
 	hglock "hotgo/internal/library/hgrds/lock"
+	"hotgo/utility/ownedlease"
 )
 
 const telegramCleanupPerChannelConcurrency = 4
@@ -20,6 +21,10 @@ func (s *sSysPublish) CleanupTelegramJobMessages(ctx context.Context, jobId int6
 
 func (s *sSysPublish) cleanupTelegramJobMessages(ctx context.Context, jobId int64, payload tgQueuePayload) (resultErr error) {
 	started := time.Now()
+	payload, err := hydrateTelegramCleanupPayload(ctx, jobId, payload)
+	if err != nil {
+		return err
+	}
 	job, err := s.telegramJobById(ctx, jobId)
 	if err != nil {
 		return err
@@ -78,35 +83,47 @@ func (s *sSysPublish) cleanupTelegramJobMessages(ctx context.Context, jobId int6
 			g.Log().Info(ctx, "TG资料清理阶段", data)
 		}
 	}
-	cleanup := func(_ context.Context) error {
-		stageStarted := time.Now()
-		err := s.deleteTelegramMessageSetLockedByChannel(ctx, job, "资料清理")
-		logStage("delete_messages", stageStarted, err)
-		if err != nil {
+	cleanup := func(cleanupCtx context.Context) error {
+		return s.withTelegramCleanupJobLease(cleanupCtx, job.Id, func(ctx context.Context) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			stageStarted := time.Now()
+			err := s.deleteTelegramMessageSetLockedByChannel(ctx, job, "资料清理")
+			logStage("delete_messages", stageStarted, err)
+			if err != nil {
+				return err
+			}
+			stageStarted = time.Now()
+			err = s.notifyBotProfileUnpublishCompleted(ctx, job, payload)
+			logStage("notify_unpublish_completed", stageStarted, err)
+			if err != nil {
+				g.Log().Warningf(ctx, "发送Bot资料下架完成通知失败 profileId:%d jobId:%d err:%+v", job.ProfileId, job.Id, err)
+				return gerror.Wrap(err, "发送Bot资料下架完成通知失败")
+			}
+			stageStarted = time.Now()
+			err = s.finishTelegramCleanupProfile(ctx, job, payload)
+			logStage("finish_profile_state", stageStarted, err)
+			if err != nil {
+				return err
+			}
+			if err = ctx.Err(); err != nil {
+				return err
+			}
+			stageStarted = time.Now()
+			err = s.completeTelegramCleanupIntent(ctx, job.Id, payload)
+			logStage("complete_cleanup_intent", stageStarted, err)
 			return err
-		}
-		stageStarted = time.Now()
-		err = s.notifyBotProfileUnpublishCompleted(ctx, job, payload)
-		logStage("notify_unpublish_completed", stageStarted, err)
-		if err != nil {
-			g.Log().Warningf(ctx, "发送Bot资料下架完成通知失败 profileId:%d jobId:%d err:%+v", job.ProfileId, job.Id, err)
-			return gerror.Wrap(err, "发送Bot资料下架完成通知失败")
-		}
-		stageStarted = time.Now()
-		err = s.completeTelegramCleanupIntent(ctx, job.Id)
-		logStage("complete_cleanup_intent", stageStarted, err)
-		if err != nil {
-			return err
-		}
-		stageStarted = time.Now()
-		err = s.finishTelegramCleanupProfile(ctx, job, payload)
-		logStage("finish_profile_state", stageStarted, err)
-		return err
+		})
+	}
+	priority := telegramCleanupExecutionPriority(ctx, job)
+	if strings.TrimSpace(payload.CleanupOperationNo) != "" {
+		priority = channelPriorityManualDelete
 	}
 	if s.accountPushEngine(ctx, job.TenantId, job.AccountId) == pushEngineUnifiedStream {
-		return s.withTelegramCleanupExecution(ctx, job, cleanup)
+		return s.withTelegramCleanupExecution(ctx, job, cleanup, priority)
 	}
-	lease, ok, err := tryTelegramCleanupChannelSlot(ctx, job.TargetChatId)
+	lease, ok, err := tryTelegramCleanupChannelSlot(ctx, job.TargetChatId, priority)
 	if err != nil {
 		return err
 	}
@@ -115,6 +132,7 @@ func (s *sSysPublish) cleanupTelegramJobMessages(ctx context.Context, jobId int6
 			"log_type": "telegram_cleanup_stage", "event": "requeue",
 			"stage": "channel_cleanup_slot", "jobId": job.Id, "profileId": job.ProfileId,
 			"channelId": job.ChannelId, "targetChatId": job.TargetChatId,
+			"priority": priority, "slotLimit": telegramCleanupSlotLimit(ctx, priority),
 		})
 		return s.requeueTelegramCleanupJob(ctx, jobId, time.Second, payload)
 	}
@@ -125,22 +143,25 @@ func (s *sSysPublish) cleanupTelegramJobMessages(ctx context.Context, jobId int6
 // finishTelegramCleanupProfile only accepts the operation captured when the
 // current unpublish/delete request created the cleanup payload. A historical
 // publish job operation is never a valid fallback.
+func (s *sSysPublish) withTelegramCleanupJobLease(ctx context.Context, jobId int64, fn func(context.Context) error) error {
+	lease := ownedlease.New(fmt.Sprintf("telegram:cleanup:job:%d", jobId), "telegram_cleanup_job", telegramStreamExecutionTTL)
+	acquired, err := lease.TryAcquire(ctx)
+	if err != nil {
+		return gerror.Wrap(err, "获取清理任务执行租约失败")
+	}
+	if !acquired {
+		return &tgRetryAfterError{after: telegramStreamExecutionRenewInterval, err: gerror.New("该清理任务正在执行")}
+	}
+	bounded, stop := telegramStreamExecutionContext(ctx, lease)
+	defer func() {
+		stop()
+		_ = lease.Unlock(context.Background())
+	}()
+	return fn(bounded)
+}
+
 func (s *sSysPublish) finishTelegramCleanupProfile(ctx context.Context, job telegramJobRecord, payload tgQueuePayload) error {
 	operationNo := strings.TrimSpace(payload.CleanupOperationNo)
-	if operationNo == "" && job.OperationType == "unpublish" {
-		currentOperationNo, err := s.currentTelegramCleanupOperationNo(ctx, job.TenantId, job.ProfileId)
-		if err != nil {
-			return err
-		}
-		if currentOperationNo != "" {
-			operationNo = currentOperationNo
-			g.Log().Info(ctx, "TG清理消费端从当前资料状态补齐下架操作号", g.Map{
-				"log_type": "telegram_cleanup", "event": "operation_no_resolved_from_profile_state",
-				"jobId": job.Id, "profileId": job.ProfileId, "tenantId": job.TenantId,
-				"cleanupOperationNo": operationNo,
-			})
-		}
-	}
 	if operationNo == "" {
 		// 没有当前 unpublishing 状态时，重复清理任务已经是幂等完成；
 		// 不使用历史 job.OperationNo，也不让遗留任务无限重试。
@@ -149,11 +170,12 @@ func (s *sSysPublish) finishTelegramCleanupProfile(ctx context.Context, job tele
 	return s.finishProfilesUnpublishing(ctx, []int64{job.ProfileId}, job.TenantId, operationNo)
 }
 
-// Cleanup uses four Redis slots per channel. Different channels never contend
-// with each other, while a single channel is protected from an unbounded burst.
-func tryTelegramCleanupChannelSlot(ctx context.Context, chatId string) (*hglock.Lock, bool, error) {
+// Cleanup keeps the existing four Redis keys; automatic jobs leave the highest
+// slots available for manual requests. No new lock namespace or extra capacity.
+func tryTelegramCleanupChannelSlot(ctx context.Context, chatId string, priority channelDispatchPriority) (*hglock.Lock, bool, error) {
 	base := telegramChannelLockKey(chatId) + ":cleanup"
-	for slot := 0; slot < telegramCleanupPerChannelConcurrency; slot++ {
+	limit := telegramCleanupSlotLimit(ctx, priority)
+	for slot := 0; slot < limit; slot++ {
 		lock := hglock.NewConfig(telegramChannelLeaseTTL, time.Second).WithoutWatchDog().Mutex(fmt.Sprintf("%s:%d", base, slot))
 		if err := lock.TryLock(ctx); err != nil {
 			if gerror.Is(err, hglock.ErrLockFailed) {

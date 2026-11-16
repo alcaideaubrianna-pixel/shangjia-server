@@ -141,8 +141,8 @@ func telegramCleanupSlotLimit(ctx context.Context, priority channelDispatchPrior
 }
 
 // telegramCleanupPriority 按本次清理请求分类，不让历史发布优先级降低手动下架优先级。
-func telegramCleanupPriority(jobPriority int, cleanupOperationNo string) channelDispatchPriority {
-	if strings.TrimSpace(cleanupOperationNo) != "" || jobPriority <= tgJobPriorityInteractive {
+func telegramCleanupPriority(jobPriority int, operationType, cleanupOperationNo string) channelDispatchPriority {
+	if operationType == "unpublish" || strings.TrimSpace(cleanupOperationNo) != "" || jobPriority <= tgJobPriorityInteractive {
 		return channelPriorityManualDelete
 	}
 	return channelPriorityCycleDelete
@@ -150,6 +150,9 @@ func telegramCleanupPriority(jobPriority int, cleanupOperationNo string) channel
 
 // telegramCleanupExecutionPriority 优先使用实际消费队列，兼容没有请求上下文的恢复任务。
 func telegramCleanupExecutionPriority(ctx context.Context, job telegramJobRecord) channelDispatchPriority {
+	if job.OperationType == "unpublish" {
+		return channelPriorityManualDelete
+	}
 	if queue, ok := asynq.GetQueueName(ctx); ok {
 		switch queue {
 		case channelDispatchQueueDeleteManual:
@@ -160,5 +163,5 @@ func telegramCleanupExecutionPriority(ctx context.Context, job telegramJobRecord
 			return channelPriorityCycleDelete
 		}
 	}
-	return telegramCleanupPriority(job.Priority, "")
+	return telegramCleanupPriority(job.Priority, job.OperationType, "")
 }

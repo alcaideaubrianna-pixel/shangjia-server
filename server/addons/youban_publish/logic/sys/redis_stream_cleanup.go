@@ -10,11 +10,16 @@ import (
 
 // withTelegramCleanupExecution 统一新引擎的独立频道删除槽位，网络调用期间不持有数据库事务或发送租约。
 // 旧引擎沿用原锁；新引擎共用现有删除槽位键，避免灰度期间删除并发超出上限。
-func (s *sSysPublish) withTelegramCleanupExecution(ctx context.Context, job telegramJobRecord, fn func(context.Context) error) error {
+func (s *sSysPublish) withTelegramCleanupExecution(ctx context.Context, job telegramJobRecord, fn func(context.Context) error, priorities ...channelDispatchPriority) error {
 	if s.accountPushEngine(ctx, job.TenantId, job.AccountId) != pushEngineUnifiedStream {
 		return s.withTelegramChannelLock(ctx, job.TargetChatId, func() error { return fn(ctx) })
 	}
-	for slot := 0; slot < telegramCleanupPerChannelConcurrency; slot++ {
+	priority := telegramCleanupExecutionPriority(ctx, job)
+	if len(priorities) > 0 {
+		priority = priorities[0]
+	}
+	limit := telegramCleanupSlotLimit(ctx, priority)
+	for slot := 0; slot < limit; slot++ {
 		lease := ownedlease.New(fmt.Sprintf("%s:cleanup:%d", telegramChannelLockKey(job.TargetChatId), slot), "telegram_cleanup_stream_v2", telegramStreamExecutionTTL)
 		acquired, err := lease.TryAcquire(ctx)
 		if err != nil {

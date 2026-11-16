@@ -2430,3 +2430,8 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_task_execution" (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_task_execution_attempt" ON "hg_youban_publish_task_execution" ("item_id","attempt_no");
 CREATE INDEX IF NOT EXISTS "idx_ybp_task_execution_lease" ON "hg_youban_publish_task_execution" ("status","lease_until","id");
+
+-- Immutable cleanup context. Apply before enabling durable cleanup dispatch.
+ALTER TABLE "hg_youban_publish_tg_outbox" ADD COLUMN IF NOT EXISTS "operation_no" varchar(128) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_tg_outbox" ADD COLUMN IF NOT EXISTS "payload" text NOT NULL DEFAULT '';
+-- Legacy rows stay empty; never backfill from current profile state.
