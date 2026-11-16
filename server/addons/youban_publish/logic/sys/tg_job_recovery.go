@@ -122,14 +122,29 @@ func (s *sSysPublish) recoverInterruptedTelegramJobs(ctx context.Context, limit 
 	return s.recoverStaleTelegramSendingJobs(ctx, limit)
 }
 
-func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
-	// Channel queues own TG delivery and rehydrate their jobs independently.
-	// Never start the legacy DB/Asynq recovery loop in that mode, even when a
-	// broad runtime role configuration invokes this function directly.
-	if telegramChannelQueueEnabled() {
-		g.Log().Info(ctx, "频道队列模式跳过旧TG任务恢复器")
-		return
+// recoverTelegramChannelQueueJobs is the PostgreSQL safety net for the
+// unified channel transport. Redis is only an execution index; the durable
+// job row remains the source of truth after a restart, a lost wake-up, or a
+// cancelled worker context. Each underlying recovery query selects channel
+// heads and every enqueue is idempotent, so the bounded call cannot create a
+// second send or let one busy channel consume the whole batch.
+func (s *sSysPublish) recoverTelegramChannelQueueJobs(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		limit = 100
 	}
+	if limit > 500 {
+		limit = 500
+	}
+	if err := s.recoverPendingIdleTelegramJobs(ctx, limit); err != nil {
+		return err
+	}
+	// A worker context can be cancelled after Telegram accepted the request.
+	// The stale sender path therefore reconciles sending phases before any
+	// retry; it never blindly changes an ambiguous external send to pending.
+	return s.recoverStaleTelegramSendingJobs(ctx, limit)
+}
+
+func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 	if heavyRecoveryDisabled("YOUBAN_DISABLE_TELEGRAM_RECOVERY") {
 		return
 	}

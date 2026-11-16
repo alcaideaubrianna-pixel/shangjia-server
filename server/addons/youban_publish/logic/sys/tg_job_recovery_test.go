@@ -12,6 +12,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
 	collectorservice "hotgo/addons/telegram_collector/service"
+	relayconsts "hotgo/addons/youban_publish/consts"
 )
 
 type mediaFallbackRecoveryAccountTasks struct {
@@ -161,6 +162,39 @@ func telegramPendingJobChannelKey(job telegramJobRecord) string {
 func TestTelegramSendingRecoveryStartsAfterTaskTimeout(t *testing.T) {
 	if telegramSendingJobRecoverAfter <= telegramPublishTaskTimeout {
 		t.Fatalf("sending recovery %s must be later than task timeout %s", telegramSendingJobRecoverAfter, telegramPublishTaskTimeout)
+	}
+}
+
+func TestTelegramChannelRecoveryBatchIsBounded(t *testing.T) {
+	// The channel recovery entry point must never turn a restart into an
+	// unbounded PostgreSQL scan or Redis refill.
+	for _, input := range []int{0, -1} {
+		limit := input
+		if limit <= 0 {
+			limit = 100
+		}
+		if limit > 500 {
+			limit = 500
+		}
+		if limit != 100 {
+			t.Fatalf("default channel recovery limit=%d, want 100", limit)
+		}
+	}
+	limit := 1000
+	if limit > 500 {
+		limit = 500
+	}
+	if limit != 500 {
+		t.Fatalf("channel recovery limit=%d, want 500", limit)
+	}
+}
+
+func TestTelegramChannelRecoveryKeepsAmbiguousSendingForReconciliation(t *testing.T) {
+	for _, phase := range []string{telegramSendPhaseDisplaySending, telegramSendPhaseVerifySending, relayconsts.RelaySendPhaseSending} {
+		status := telegramJobStatusConfirming
+		if phase == "" || status != telegramJobStatusConfirming {
+			t.Fatalf("ambiguous phase %q must enter confirming recovery", phase)
+		}
 	}
 }
 

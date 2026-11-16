@@ -2,11 +2,13 @@ package sys
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
@@ -48,7 +50,9 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 	job, loadErr := s.telegramJobById(ctx, jobID)
 	if loadErr != nil {
 		g.Log().Warning(ctx, "频道队列任务加载失败", g.Map{"event": "channel_queue_error", "stage": "load", "channelId": channelID, "jobId": jobID, "error": loadErr.Error()})
-		_ = enqueueTelegramChannelJob(ctx, channelID, jobID, tgJobPriorityDefault, time.Now().Add(time.Second))
+		if enqueueErr := enqueueTelegramChannelJob(ctx, channelID, jobID, tgJobPriorityDefault, time.Now().Add(time.Second)); enqueueErr != nil {
+			return true, errors.Join(loadErr, enqueueErr)
+		}
 		return true, loadErr
 	}
 	priority := job.Priority
@@ -114,7 +118,13 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 			g.Log().Warning(ctx, "频道队列任务优先级降级", g.Map{"event": "channel_queue_priority_downgrade", "channelId": channelID, "jobId": jobID, "oldPriority": job.Priority, "newPriority": priority, "retryCount": job.RetryCount, "reason": err.Error()})
 		}
 		score := telegramChannelQueueScore(priority, time.UnixMilli(hold), jobID)
-		_ = enqueueTelegramChannelJob(ctx, channelID, jobID, priority, time.UnixMilli(hold))
+		if isTelegramChannelJobTerminal(job) {
+			g.Log().Info(ctx, "频道队列任务发送失败后已收口", g.Map{"event": "channel_queue_ack", "channelId": channelID, "jobId": jobID, "status": job.Status, "reason": "terminal_after_send_error"})
+			return true, nil
+		}
+		if enqueueErr := enqueueTelegramChannelJob(ctx, channelID, jobID, priority, time.UnixMilli(hold)); enqueueErr != nil {
+			return true, gerror.Wrap(enqueueErr, "频道队列发送失败后重入队失败")
+		}
 		g.Log().Warning(ctx, "频道队列任务发送失败，已重入队", g.Map{
 			"event":       "channel_queue_requeue",
 			"stage":       "send",
@@ -159,7 +169,13 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 				g.Log().Info(ctx, "频道队列任务等待媒体就绪", g.Map{"event": "channel_queue_media_not_ready", "channelId": channelID, "jobId": jobID, "profileId": job.ProfileId, "score": hold})
 			}
 			requeueScore := telegramChannelQueueScore(priority, time.UnixMilli(hold), jobID)
-			_ = enqueueTelegramChannelJob(ctx, channelID, jobID, priority, time.UnixMilli(hold))
+			if isTelegramChannelJobTerminal(job) {
+				g.Log().Info(ctx, "频道队列任务已收口", g.Map{"event": "channel_queue_ack", "channelId": channelID, "jobId": jobID, "status": job.Status, "reason": "terminal_after_reload"})
+				return true, nil
+			}
+			if enqueueErr := enqueueTelegramChannelJob(ctx, channelID, jobID, priority, time.UnixMilli(hold)); enqueueErr != nil {
+				return true, gerror.Wrap(enqueueErr, "频道队列未完成任务重入队失败")
+			}
 			g.Log().Warning(ctx, "频道队列任务未完成，已重入队", g.Map{
 				"event":           "channel_queue_requeue",
 				"stage":           "post_send",
@@ -178,7 +194,9 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 		}
 	} else {
 		hold := time.Now().Add(time.Second).UnixMilli()
-		_ = enqueueTelegramChannelJob(ctx, channelID, jobID, tgJobPriorityDefault, time.UnixMilli(hold))
+		if enqueueErr := enqueueTelegramChannelJob(ctx, channelID, jobID, tgJobPriorityDefault, time.UnixMilli(hold)); enqueueErr != nil {
+			return true, gerror.Wrap(enqueueErr, "频道队列状态读取失败后重入队失败")
+		}
 		g.Log().Warning(ctx, "频道队列任务状态读取失败，已重入队", g.Map{"event": "channel_queue_requeue", "stage": "reload", "channelId": channelID, "jobId": jobID, "score": hold, "error": loadErr.Error()})
 	}
 	return true, nil
@@ -217,5 +235,14 @@ func telegramChannelJobRequeueAt(job telegramJobRecord) (int64, string) {
 			reason = "任务状态未收口"
 		}
 		return now.Add(3 * time.Second).UnixMilli(), reason
+	}
+}
+
+func isTelegramChannelJobTerminal(job telegramJobRecord) bool {
+	switch job.Status {
+	case telegramJobStatusSent, telegramJobStatusFailed, telegramJobStatusSuperseded:
+		return true
+	default:
+		return false
 	}
 }
