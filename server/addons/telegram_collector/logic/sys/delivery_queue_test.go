@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -328,5 +330,105 @@ func TestDeliveryHistoryAndRealtimeQueueMapsAreDisjoint(t *testing.T) {
 	}
 	if _, ok := realtime[consts.QueueDeliveryHistory]; ok {
 		t.Fatal("history queue must not be consumed by the realtime worker")
+	}
+}
+
+func TestHistorySchedulerExcludesRealtimePriorityFromHistoryPool(t *testing.T) {
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	schedulerPath := filepath.Join(filepath.Dir(currentFile), "history_scheduler.go")
+	content, err := os.ReadFile(schedulerPath)
+	if err != nil {
+		t.Fatalf("read history scheduler source: %v", err)
+	}
+	source := string(content)
+
+	if !strings.Contains(source, `Where("scheduler_pool", historySchedulerPool)`) {
+		t.Fatal("history scheduler must claim only the history scheduler pool")
+	}
+	if !strings.Contains(source, `Where(columns.Priority, "<", sysin.EventPriorityRealtime)`) {
+		t.Fatal("history scheduler must exclude realtime and urgent priorities")
+	}
+	if historySchedulerPool != "history" {
+		t.Fatalf("history scheduler pool = %q, want history", historySchedulerPool)
+	}
+}
+
+func TestDeliverySchedulerPoolClassifiesLegacyAndRealtimeQueues(t *testing.T) {
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	queuePath := filepath.Join(filepath.Dir(currentFile), "delivery_queue.go")
+	content, err := os.ReadFile(queuePath)
+	if err != nil {
+		t.Fatalf("read delivery queue source: %v", err)
+	}
+	source := string(content)
+
+	if !strings.Contains(source, `schedulerPool == "history" && priority < sysin.EventPriorityRealtime`) {
+		t.Fatal("legacy history scheduler_pool must remain history-only for normal priority")
+	}
+	if !strings.Contains(source, `Fields("account_id", "source_id", "scheduler_pool")`) {
+		t.Fatal("delivery routing must read account_id, source_id and scheduler_pool from delivery")
+	}
+	if strings.Contains(source, `LeftJoin("hg_tg_collector_event e"`) {
+		t.Fatal("delivery routing must not join collector events")
+	}
+	if !strings.Contains(source, `if priority >= sysin.EventPriorityRealtime`) {
+		t.Fatal("realtime delivery must have an explicit priority classification")
+	}
+	if !strings.Contains(source, "consts.DeliveryLiveSourceQueue(sourceID)") {
+		t.Fatal("source-scoped realtime delivery must use the live source queue")
+	}
+	if !strings.Contains(source, "consts.DeliveryHistorySourceQueue(sourceID)") {
+		t.Fatal("source-scoped history delivery must use the history source queue")
+	}
+}
+
+func TestDeliverySourceHistoryAndLiveShardNamespacesAreDisjoint(t *testing.T) {
+	for _, sourceID := range []int64{1, 351, 615, 1024} {
+		history := consts.DeliveryHistorySourceQueue(sourceID)
+		live := consts.DeliveryLiveSourceQueue(sourceID)
+		if history == live {
+			t.Fatalf("source %d history and live queues must be distinct: %q", sourceID, history)
+		}
+		if !strings.HasPrefix(history, consts.QueueDeliveryHistorySourceShardPrefix) {
+			t.Fatalf("source %d history queue has wrong namespace: %q", sourceID, history)
+		}
+		if !strings.HasPrefix(live, consts.QueueDeliveryLiveSourceShardPrefix) {
+			t.Fatalf("source %d live queue has wrong namespace: %q", sourceID, live)
+		}
+	}
+}
+
+func TestDeliveryRecoveryUsesBoundedSchedulerPoolLanes(t *testing.T) {
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	queuePath := filepath.Join(filepath.Dir(currentFile), "delivery_queue.go")
+	content, err := os.ReadFile(queuePath)
+	if err != nil {
+		t.Fatalf("read delivery queue source: %v", err)
+	}
+	source := string(content)
+
+	if !strings.Contains(source, "queryRows := func(poolCondition string, batchLimit int, poolArgs ...any)") {
+		t.Fatal("delivery recovery must use a reusable bounded pool query")
+	}
+	if strings.Count(source, "Limit(batchLimit)") < 1 {
+		t.Fatal("delivery recovery pool queries must have an explicit batch limit")
+	}
+	if strings.Count(source, `"scheduler_pool"`) < 2 {
+		t.Fatal("delivery recovery must separate live and history scheduler pools")
+	}
+	if !strings.Contains(source, "limit-len(liveRows)") {
+		t.Fatal("history recovery must consume only the remaining bounded batch")
+	}
+	if !strings.Contains(source, "columns.Priority") {
+		t.Fatal("delivery recovery must retain priority filtering for pool classification")
 	}
 }

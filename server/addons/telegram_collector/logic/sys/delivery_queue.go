@@ -442,6 +442,9 @@ func (s *sCollector) resetExpiredDeliveryLeases(ctx context.Context, limit int) 
 }
 
 func (s *sCollector) enqueueDueDeliveryTasks(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		return nil
+	}
 	columns := dao.TgCollectorDelivery.Columns()
 	now := gtime.Now()
 	staleBefore := now.Add(-deliveryRecoveryStaleTime)
@@ -465,19 +468,46 @@ func (s *sCollector) enqueueDueDeliveryTasks(ctx context.Context, limit int) err
 		columns.Priority, columns.Priority, sysin.EventPriorityNormal, columns.CreatedAt,
 		recentHistoryCutoff.Format("2006-01-02 15:04:05.999999"), columns.UpdatedAt,
 	)
-	rows, err := dao.TgCollectorDelivery.Ctx(ctx).
-		Fields(columns.Id, columns.Priority, columns.Status).
-		Where(condition,
-			sysin.DeliveryStatusPending, staleBefore,
-			sysin.DeliveryStatusFailedRetry, now,
-		).
-		WhereLT(columns.AttemptCount, deliveryMaxAttempts).
-		Order(gdb.Raw(orderExpression)).
-		Limit(limit).
-		All()
-	if err != nil {
-		return gerror.Wrap(err, "读取待恢复Telegram采集交付失败")
+
+	queryRows := func(poolCondition string, batchLimit int, poolArgs ...any) (gdb.Result, error) {
+		if batchLimit <= 0 {
+			return nil, nil
+		}
+		return dao.TgCollectorDelivery.Ctx(ctx).
+			Fields(columns.Id, columns.Priority, columns.Status).
+			Where(condition,
+				sysin.DeliveryStatusPending, staleBefore,
+				sysin.DeliveryStatusFailedRetry, now,
+			).
+			WhereLT(columns.AttemptCount, deliveryMaxAttempts).
+			Where(poolCondition, poolArgs...).
+			Order(gdb.Raw(orderExpression)).
+			Limit(batchLimit).
+			All()
 	}
+
+	// Realtime recovery is queried first and separately. A single mixed query
+	// lets history backlog consume the recovery limit and delays live delivery.
+	// Legacy rows may still have scheduler_pool=history; realtime priority keeps
+	// them in the live lane until they are reclassified by migration.
+	liveRows, err := queryRows(
+		fmt.Sprintf("%s=? OR (%s=? AND %s>=?)", "scheduler_pool", "scheduler_pool", columns.Priority),
+		limit,
+		"realtime", "history", sysin.EventPriorityRealtime,
+	)
+	if err != nil {
+		return gerror.Wrap(err, "读取实时Telegram采集交付失败")
+	}
+	historyRows, err := queryRows(
+		fmt.Sprintf("%s=? AND %s<?", "scheduler_pool", columns.Priority),
+		limit-len(liveRows),
+		"history", sysin.EventPriorityRealtime,
+	)
+	if err != nil {
+		return gerror.Wrap(err, "读取历史Telegram采集交付失败")
+	}
+	rows := append(liveRows, historyRows...)
+
 	for _, row := range rows {
 		deliveryID := row[columns.Id].Int64()
 		status := row[columns.Status].String()
@@ -618,8 +648,7 @@ func deliveryRouteScope(ctx context.Context, deliveryID int64) (accountID, sourc
 	}
 	row, err := dao.TgCollectorDelivery.Ctx(ctx).
 		WherePri(deliveryID).
-		Fields("hg_tg_collector_delivery.scheduler_pool", "e.account_id", "e.source_id").
-		LeftJoin("hg_tg_collector_event e", "e.id=hg_tg_collector_delivery.event_id").
+		Fields("account_id", "source_id", "scheduler_pool").
 		One()
 	if err != nil {
 		return 0, 0, ""
