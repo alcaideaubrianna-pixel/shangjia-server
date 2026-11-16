@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	tgbot "github.com/go-telegram/bot"
@@ -15,6 +16,9 @@ import (
 
 const telegramDeleteMessagesMaxItems = 100
 const telegramDeleteMessagesBatchThreshold = 10
+
+// Keep per-job Telegram delete requests bounded to avoid triggering channel/API rate limits.
+const telegramDeleteMessagesConcurrency = 3
 
 func (s *sSysPublish) deleteTelegramMessageSet(ctx context.Context, job telegramJobRecord, reason string) error {
 	return s.withTelegramCleanupExecution(ctx, job, func(cleanupCtx context.Context) error {
@@ -74,18 +78,50 @@ func (s *sSysPublish) deleteTelegramMessagesLockedByChannel(ctx context.Context,
 }
 
 func (s *sSysPublish) deleteTelegramMessagesIndividually(ctx context.Context, bot *tgbot.Bot, job telegramJobRecord, messages []telegramDeleteMessage, reason string) error {
+	if len(messages) == 0 {
+		return nil
+	}
+	workerCount := telegramDeleteMessagesConcurrency
+	if len(messages) < workerCount {
+		workerCount = len(messages)
+	}
+
+	type deleteWork struct {
+		index int
+		item  telegramDeleteMessage
+	}
+	jobs := make(chan deleteWork)
+	deleteErrors := make([]error, len(messages))
+	var wg sync.WaitGroup
+	for worker := 0; worker < workerCount; worker++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for work := range jobs {
+				chatID := normalizeTelegramChannelChatID(work.item.TargetChatId)
+				_, err := bot.DeleteMessage(ctx, &tgbot.DeleteMessageParams{ChatID: chatID, MessageID: int(work.item.MessageId)})
+				deleteErrors[work.index] = err
+			}
+		}()
+	}
+	for index, item := range messages {
+		jobs <- deleteWork{index: index, item: item}
+	}
+	close(jobs)
+	wg.Wait()
+
 	fallbackQueued := false
 	var retryErrors []string
-	for _, item := range messages {
-		chatId := normalizeTelegramChannelChatID(item.TargetChatId)
-		_, err := bot.DeleteMessage(ctx, &tgbot.DeleteMessageParams{ChatID: chatId, MessageID: int(item.MessageId)})
+	for index, item := range messages {
+		chatID := normalizeTelegramChannelChatID(item.TargetChatId)
+		err := deleteErrors[index]
 		if err != nil {
 			if isTelegramMessageAlreadyDeletedError(err) {
 				_ = markTelegramMessagesDeleted(ctx, []telegramDeleteMessage{item})
-				s.appendTelegramJobLog(ctx, job, "delete", "skipped", fmt.Sprintf("%s，TG消息已不存在，已同步本地删除状态，频道:%s，消息:%d", reason, chatId, item.MessageId))
+				s.appendTelegramJobLog(ctx, job, "delete", "skipped", fmt.Sprintf("%s，TG消息已不存在，已同步本地删除状态，频道:%s，消息:%d", reason, chatID, item.MessageId))
 				continue
 			}
-			if isTelegramMessagePermanentlyUndeletableError(err) {
+			if isTelegramMessagePermanentlyUndeletableError(err) || isTelegramBotRemovedError(err) {
 				if markErr := markTelegramMessagesUndeletable(ctx, []telegramDeleteMessage{item}); markErr != nil {
 					return markErr
 				}
@@ -95,17 +131,7 @@ func (s *sSysPublish) deleteTelegramMessagesIndividually(ctx context.Context, bo
 				}
 				continue
 			}
-			if isTelegramBotRemovedError(err) {
-				if markErr := markTelegramMessagesUndeletable(ctx, []telegramDeleteMessage{item}); markErr != nil {
-					return markErr
-				}
-				if !fallbackQueued {
-					s.enqueueTelegramMessageDeleteFallback(ctx, job, reason, err)
-					fallbackQueued = true
-				}
-				continue
-			}
-			message := fmt.Sprintf("%s，删除TG消息失败，频道:%s，消息:%d，错误:%s", reason, chatId, item.MessageId, err.Error())
+			message := fmt.Sprintf("%s，删除TG消息失败，频道:%s，消息:%d，错误:%s", reason, chatID, item.MessageId, err.Error())
 			s.appendTelegramJobLog(ctx, job, "delete", "failed", message)
 			if isTelegramDeleteRetryableError(err) {
 				retryErrors = append(retryErrors, message)
@@ -113,8 +139,8 @@ func (s *sSysPublish) deleteTelegramMessagesIndividually(ctx context.Context, bo
 			}
 			return gerror.New(message)
 		}
-		if err = markTelegramMessagesDeleted(ctx, []telegramDeleteMessage{item}); err != nil {
-			return err
+		if markErr := markTelegramMessagesDeleted(ctx, []telegramDeleteMessage{item}); markErr != nil {
+			return markErr
 		}
 	}
 	if len(retryErrors) > 0 {

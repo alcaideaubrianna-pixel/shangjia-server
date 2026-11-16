@@ -16,6 +16,7 @@ import (
 	"github.com/hibiken/asynq"
 
 	publishconsts "hotgo/addons/youban_publish/consts"
+	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
 const (
@@ -594,33 +595,78 @@ func (s *sSysPublish) enqueueTelegramCleanupJob(ctx context.Context, jobId int64
 	return s.enqueueTelegramCleanupJobWithContext(ctx, jobId, delay, tgQueuePayload{})
 }
 
+func (s *sSysPublish) currentTelegramCleanupOperationNo(ctx context.Context, tenantId, profileId int64) (string, error) {
+	if tenantId <= 0 || profileId <= 0 {
+		return "", nil
+	}
+	state, err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
+		Fields("publish_operation_no,publish_task_status").
+		Where("tenant_id", tenantId).
+		Where("profile_id", profileId).
+		Where("publish_task_status", sysin.PublishTaskStatusUnpublishing.String()).
+		WhereNull("deleted_at").
+		One()
+	if err != nil {
+		return "", gerror.Wrap(err, "读取当前资料下架操作号失败")
+	}
+	if state.IsEmpty() {
+		return "", nil
+	}
+	operationNo := strings.TrimSpace(state["publish_operation_no"].String())
+	if operationNo == "" {
+		return "", gerror.Newf("资料下架状态缺少当前操作号（资料ID：%d）", profileId)
+	}
+	return operationNo, nil
+}
+
 func (s *sSysPublish) enqueueTelegramCleanupJobWithContext(ctx context.Context, jobId int64, delay time.Duration, payload tgQueuePayload) error {
 	started := time.Now()
 	queueName := tgQueueNameCleanup
 	var owner struct {
-		TenantId  int64 `orm:"tenant_id"`
-		AccountId int64 `orm:"account_id"`
-		ChannelId int64 `orm:"channel_id"`
-		Priority  int   `orm:"priority"`
+		TenantId      int64  `orm:"tenant_id"`
+		AccountId     int64  `orm:"account_id"`
+		ProfileId     int64  `orm:"profile_id"`
+		OperationType string `orm:"operation_type"`
+		ChannelId     int64  `orm:"channel_id"`
+		Priority      int    `orm:"priority"`
 	}
 	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Master().
-		Fields("tenant_id,account_id,channel_id,priority").Where("id", jobId).Scan(&owner); err != nil {
+		Fields("tenant_id,account_id,profile_id,operation_type,channel_id,priority").Where("id", jobId).Scan(&owner); err != nil {
 		return gerror.Wrap(err, "读取TG删除任务归属失败")
 	}
 	operationNo := strings.TrimSpace(payload.CleanupOperationNo)
+	if owner.OperationType == "unpublish" {
+		currentOperationNo, resolveErr := s.currentTelegramCleanupOperationNo(ctx, owner.TenantId, owner.ProfileId)
+		if resolveErr != nil {
+			return resolveErr
+		}
+		if currentOperationNo != "" {
+			if operationNo != "" && operationNo != currentOperationNo {
+				g.Log().Warning(ctx, "TG清理入队操作号已按当前资料状态校正", g.Map{
+					"log_type": "telegram_cleanup_enqueue", "event": "operation_no_corrected",
+					"jobId": jobId, "profileId": owner.ProfileId, "tenantId": owner.TenantId,
+					"providedOperationNo": operationNo, "cleanupOperationNo": currentOperationNo,
+				})
+			}
+			operationNo = currentOperationNo
+		}
+		if operationNo == "" {
+			g.Log().Error(ctx, "TG资料下架清理任务缺少当前资料操作号，拒绝入队", g.Map{
+				"log_type": "telegram_cleanup_enqueue", "event": "missing_operation_no",
+				"jobId": jobId, "profileId": owner.ProfileId, "tenantId": owner.TenantId,
+				"accountId": owner.AccountId, "channelId": owner.ChannelId,
+			})
+			return gerror.Newf("资料下架清理任务缺少当前操作号，拒绝入队（任务ID：%d）", jobId)
+		}
+	}
+	payload.CleanupOperationNo = operationNo
 	g.Log().Info(ctx, "TG资料清理任务准备入队", g.Map{
 		"log_type": "telegram_cleanup_enqueue", "event": "started", "jobId": jobId,
-		"tenantId": owner.TenantId, "accountId": owner.AccountId, "channelId": owner.ChannelId,
+		"tenantId": owner.TenantId, "accountId": owner.AccountId, "profileId": owner.ProfileId,
+		"channelId": owner.ChannelId, "operationType": owner.OperationType,
 		"cleanupOperationNo": operationNo, "cleanupJobIds": payload.CleanupJobIds,
 		"delayMs": delay.Milliseconds(),
 	})
-	if operationNo == "" {
-		g.Log().Warning(ctx, "TG资料清理任务入队时缺少当前资料操作号", g.Map{
-			"log_type": "telegram_cleanup_enqueue", "event": "missing_operation_no",
-			"jobId": jobId, "profileId": 0, "tenantId": owner.TenantId,
-			"accountId": owner.AccountId, "channelId": owner.ChannelId,
-		})
-	}
 	priority := channelPriorityManualDelete
 	if owner.Priority > tgJobPriorityInteractive {
 		priority = channelPriorityCycleDelete
@@ -641,8 +687,8 @@ func (s *sSysPublish) enqueueTelegramCleanupJobWithContext(ctx context.Context, 
 	if err := s.enqueueTelegramTaskWithQueuePayload(ctx, tgTaskTypeCleanup, jobId, delay, true, queueName, payload); err != nil {
 		g.Log().Warning(ctx, "TG资料清理任务入队失败", g.Map{
 			"log_type": "telegram_cleanup_enqueue", "event": "failed", "jobId": jobId,
-			"tenantId": owner.TenantId, "accountId": owner.AccountId, "channelId": owner.ChannelId,
-			"cleanupOperationNo": operationNo, "queueName": queueName,
+			"tenantId": owner.TenantId, "accountId": owner.AccountId, "profileId": owner.ProfileId,
+			"channelId": owner.ChannelId, "cleanupOperationNo": operationNo, "queueName": queueName,
 			"durationMs": time.Since(started).Milliseconds(), "error": err.Error(),
 		})
 		return err
@@ -652,7 +698,8 @@ func (s *sSysPublish) enqueueTelegramCleanupJobWithContext(ctx context.Context, 
 	}
 	g.Log().Info(ctx, "TG资料清理任务已入队", g.Map{
 		"log_type": "telegram_cleanup_enqueue", "event": "finished", "jobId": jobId,
-		"tenantId": owner.TenantId, "accountId": owner.AccountId, "channelId": owner.ChannelId,
+		"tenantId": owner.TenantId, "accountId": owner.AccountId, "profileId": owner.ProfileId,
+		"channelId": owner.ChannelId, "operationType": owner.OperationType,
 		"cleanupOperationNo": operationNo, "cleanupJobIds": payload.CleanupJobIds,
 		"queueName": queueName, "priority": priority, "durationMs": time.Since(started).Milliseconds(),
 	})
@@ -892,18 +939,23 @@ func (s *sSysPublish) enqueueProfileDownRunWithOperationNo(ctx context.Context, 
 	if tenantId <= 0 || len(profileIds) == 0 {
 		return nil
 	}
+	operationNo = strings.TrimSpace(operationNo)
+	if operationNo == "" && len(profileIds) == 1 {
+		resolved, err := s.currentTelegramCleanupOperationNo(ctx, tenantId, profileIds[0])
+		if err != nil {
+			return err
+		}
+		operationNo = resolved
+	}
+	if operationNo == "" {
+		return gerror.New("资料下架队列缺少当前下架操作号")
+	}
 	client, err := s.telegramQueueClient(ctx)
 	if err != nil {
 		return err
 	}
 	payload, err := json.Marshal(profileDownQueuePayload{
-		TenantId: tenantId, ProfileIds: profileIds, DownAt: gtime.Now().String(),
-		OperationNo: func() string {
-			if strings.TrimSpace(operationNo) != "" {
-				return strings.TrimSpace(operationNo)
-			}
-			return newTelegramOperationNo("down", profileIds[0])
-		}(),
+		TenantId: tenantId, ProfileIds: profileIds, DownAt: gtime.Now().String(), OperationNo: operationNo,
 	})
 	if err != nil {
 		return err
@@ -923,17 +975,17 @@ func (s *sSysPublish) enqueueProfileDownRunWithOperationNo(ctx context.Context, 
 	}
 	info, err := client.EnqueueContext(ctx, task, options...)
 	if errors.Is(err, asynq.ErrDuplicateTask) {
-		g.Log().Infof(ctx, "资料下架任务已存在，跳过重复入队 tenantId:%d profileIds:%v queue:%s", tenantId, profileIds, tgQueueNameCleanup)
+		g.Log().Infof(ctx, "资料下架任务已存在，跳过重复入队 tenantId:%d profileIds:%v operationNo:%s queue:%s", tenantId, profileIds, operationNo, tgQueueNameCleanup)
 		return nil
 	}
 	if err != nil {
-		g.Log().Errorf(ctx, "资料下架任务入队失败 tenantId:%d profileIds:%v queue:%s err:%+v", tenantId, profileIds, tgQueueNameCleanup, err)
+		g.Log().Errorf(ctx, "资料下架任务入队失败 tenantId:%d profileIds:%v operationNo:%s queue:%s err:%+v", tenantId, profileIds, operationNo, tgQueueNameCleanup, err)
 		return err
 	}
 	if info != nil {
-		g.Log().Infof(ctx, "资料下架任务入队成功 tenantId:%d profileIds:%v queue:%s taskId:%s", tenantId, profileIds, tgQueueNameCleanup, info.ID)
+		g.Log().Infof(ctx, "资料下架任务入队成功 tenantId:%d profileIds:%v operationNo:%s queue:%s taskId:%s", tenantId, profileIds, operationNo, tgQueueNameCleanup, info.ID)
 	}
-	return err
+	return nil
 }
 
 // enqueueCycleRun 提交批次生产任务；新引擎复用后台队列并限制单页执行预算。

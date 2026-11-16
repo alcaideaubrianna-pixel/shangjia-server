@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -33,8 +34,16 @@ func (s *sSysPublish) prepareProfileDownPlan(ctx context.Context, tenantId int64
 	return plan, nil
 }
 
-func (s *sSysPublish) handleProfilesDown(ctx context.Context, ids []int64, tenantId int64, downAt string, operationNo string) error {
-	ids, err := s.activeDownProfileIds(ctx, ids, tenantId)
+func (s *sSysPublish) handleProfilesDown(ctx context.Context, ids []int64, tenantId int64, downAt string, operationNo string) (err error) {
+	startedAt := time.Now()
+	defer func() {
+		result := "success"
+		if err != nil {
+			result = "error"
+		}
+		observeTelegramProfileUnpublish(ctx, operationNo, result, time.Since(startedAt), err)
+	}()
+	ids, err = s.activeDownProfileIds(ctx, ids, tenantId)
 	if err != nil {
 		return err
 	}
@@ -43,8 +52,14 @@ func (s *sSysPublish) handleProfilesDown(ctx context.Context, ids []int64, tenan
 	}
 	cutoffAt := strings.TrimSpace(downAt)
 	operationNo = strings.TrimSpace(operationNo)
+	if operationNo == "" && len(ids) == 1 {
+		operationNo, err = s.currentTelegramCleanupOperationNo(ctx, tenantId, ids[0])
+		if err != nil {
+			return err
+		}
+	}
 	if operationNo == "" {
-		operationNo = fmt.Sprintf("down:%d:%s", tenantId, strings.NewReplacer(" ", "-", ":", "", ".", "").Replace(cutoffAt))
+		return gerror.New("资料下架任务缺少当前下架操作号")
 	}
 	cleanupQueued, err := s.deleteProfilesTelegramMessages(ctx, ids, tenantId, cutoffAt, operationNo)
 	if err != nil {

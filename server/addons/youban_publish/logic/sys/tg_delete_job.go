@@ -127,8 +127,23 @@ func (s *sSysPublish) cleanupTelegramJobMessages(ctx context.Context, jobId int6
 // publish job operation is never a valid fallback.
 func (s *sSysPublish) finishTelegramCleanupProfile(ctx context.Context, job telegramJobRecord, payload tgQueuePayload) error {
 	operationNo := strings.TrimSpace(payload.CleanupOperationNo)
+	if operationNo == "" && job.OperationType == "unpublish" {
+		currentOperationNo, err := s.currentTelegramCleanupOperationNo(ctx, job.TenantId, job.ProfileId)
+		if err != nil {
+			return err
+		}
+		if currentOperationNo != "" {
+			operationNo = currentOperationNo
+			g.Log().Info(ctx, "TG清理消费端从当前资料状态补齐下架操作号", g.Map{
+				"log_type": "telegram_cleanup", "event": "operation_no_resolved_from_profile_state",
+				"jobId": job.Id, "profileId": job.ProfileId, "tenantId": job.TenantId,
+				"cleanupOperationNo": operationNo,
+			})
+		}
+	}
 	if operationNo == "" {
-		g.Log().Warningf(ctx, "TG清理完成但缺少当前资料操作号，跳过状态回收 profileId:%d jobId:%d", job.ProfileId, job.Id)
+		// 没有当前 unpublishing 状态时，重复清理任务已经是幂等完成；
+		// 不使用历史 job.OperationNo，也不让遗留任务无限重试。
 		return nil
 	}
 	return s.finishProfilesUnpublishing(ctx, []int64{job.ProfileId}, job.TenantId, operationNo)
