@@ -1101,16 +1101,20 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 	}
 	decision := telegramJobFailureNextStateWithConfig(err, job.RetryCount, conf)
 	step := beginTelegramPublishStage(ctx, "job.failure_transition", g.Map{"nextStatus": decision.Status, "retryCount": decision.RetryCount, "retryDelayMs": decision.RetryDelay.Milliseconds()})
+	additional := g.Map{
+		"retry_count":         decision.RetryCount,
+		"last_dispatch_error": decision.Message,
+	}
+	if rateLimitDelay, rateLimited := telegramRateLimitRetryDelay(err); rateLimited {
+		additional["send_deadline_at"] = telegramSendDeadlineForRateLimit(time.Now(), time.Time{}, rateLimitDelay)
+	}
 	transitioned, updateErr := s.transitionTelegramJob(ctx, telegramJobTransition{
 		JobId:        job.Id,
 		From:         []string{telegramJobStatusSending},
 		To:           decision.Status,
 		RetryDelay:   decision.RetryDelay,
 		ErrorMessage: decision.Message,
-		Additional: g.Map{
-			"retry_count":         decision.RetryCount,
-			"last_dispatch_error": decision.Message,
-		},
+		Additional:   additional,
 	})
 	step.End(updateErr, g.Map{"transitioned": transitioned})
 	if updateErr != nil {

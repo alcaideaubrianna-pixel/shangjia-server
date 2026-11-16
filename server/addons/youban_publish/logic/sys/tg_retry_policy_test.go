@@ -44,6 +44,18 @@ func TestTelegramRateLimitOverridesAccountRetryPolicy(t *testing.T) {
 	}
 }
 
+func TestTelegramSendDeadlineForRateLimitCoversRetryAfter(t *testing.T) {
+	now := time.Date(2026, 11, 16, 21, 0, 0, 0, time.UTC)
+	deadline := telegramSendDeadlineForRateLimit(now, time.Time{}, 25*time.Second)
+	if got, want := deadline, now.Add(55*time.Second); !got.Equal(want) {
+		t.Fatalf("deadline=%s want=%s", got, want)
+	}
+	long := telegramSendDeadlineForRateLimit(now, time.Time{}, telegramRetryMaxDelay)
+	if got, want := long, now.Add(telegramSendMaxRateLimitBudget); !got.Equal(want) {
+		t.Fatalf("long retry deadline=%s want capped=%s", got, want)
+	}
+}
+
 func TestTelegramJobErrorRetryPolicyPermanentForBannedInChannel(t *testing.T) {
 	err := assertError("Bad Request: USER_BANNED_IN_CHANNEL")
 	policy := telegramJobErrorRetryPolicy(err, 1)

@@ -20,6 +20,8 @@ const (
 	// A stuck Telegram call must release the channel promptly; recovery then
 	// lets the next queued job proceed while the timed-out job is reconciled.
 	telegramSendBudget                = 2 * time.Minute
+	telegramSendRateLimitProtection   = 30 * time.Second
+	telegramSendMaxRateLimitBudget    = telegramRetryMaxDelay + telegramSendRateLimitProtection
 	telegramSendMaxRetries            = 3
 	telegramSendPhaseTimeoutCancelled = "timeout_cancelled"
 	telegramSendTimeoutMessage        = "频道发送超过2分钟，旧任务已取消，整组资料移至队尾；迟到消息只删除不补发"
@@ -412,6 +414,7 @@ func (s *sSysPublish) recoverTelegramSendTimeouts(ctx context.Context) {
 	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		WhereIn("status", []string{telegramJobStatusPending, telegramJobStatusSending, telegramJobStatusRetryWait, telegramJobStatusConfirming}).
 		WhereLTE("send_deadline_at", gtime.Now()).
+		Where("(status <> ? OR next_retry_at IS NULL OR next_retry_at <= ?)", telegramJobStatusRetryWait, gtime.Now()).
 		WhereNotIn("send_phase", []string{telegramSendPhaseVerifyConfirmed, telegramSendPhaseCompletedNoVerify}).
 		OrderAsc("send_deadline_at").Limit(100).Scan(&jobs)
 	if err != nil {

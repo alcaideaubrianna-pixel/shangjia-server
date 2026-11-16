@@ -189,6 +189,21 @@ func clampTelegramRetryDelay(delay time.Duration) time.Duration {
 	return delay
 }
 
+func telegramSendDeadlineForRateLimit(now, current time.Time, retryAfter time.Duration) time.Time {
+	if retryAfter < 0 {
+		retryAfter = 0
+	}
+	minimum := now.Add(retryAfter + telegramSendRateLimitProtection)
+	maximum := now.Add(telegramSendMaxRateLimitBudget)
+	if minimum.After(maximum) {
+		minimum = maximum
+	}
+	if current.After(minimum) {
+		return current
+	}
+	return minimum
+}
+
 func telegramRateLimitMessage(delay time.Duration) string {
 	return fmt.Sprintf("Telegram 发送频率过快，已触发限流；系统会等待 %d 秒后自动继续，限流不计入失败次数。", int(delay.Seconds()))
 }
