@@ -19,9 +19,10 @@ import (
 )
 
 type adminNoteCursor struct {
-	IndexId int64  `json:"indexId"`
-	SortBy  string `json:"sortBy"`
-	SortAt  string `json:"sortAt"`
+	IndexId  int64  `json:"indexId"`
+	SortBy   string `json:"sortBy"`
+	SortAt   string `json:"sortAt"`
+	SortNull bool   `json:"sortNull,omitempty"`
 }
 
 const (
@@ -34,15 +35,20 @@ func (s *sSysPublish) adminNoteIndexList(ctx context.Context, in *sysin.NoteList
 	if in == nil {
 		in = &sysin.NoteListInp{}
 	}
-	// Candidate scan must stay on the narrow note-index projection. Joining the
-	// profile/state/account tables before LIMIT causes one random lookup per
-	// candidate and becomes seconds slow for collected/all scopes. The detail
-	// query below validates and enriches only the selected page IDs.
+	// Validate ownership before limiting candidates; details are loaded afterwards.
 	mod := pdao.YoubanPublishNoteIndex.Ctx(ctx).As("i").
 		InnerJoin(publishProfileStateTable+" ps", "ps.tenant_id=i.tenant_id AND ps.account_id=i.account_id AND ps.profile_id=i.profile_id AND ps.deleted_at IS NULL").
 		WhereNull("i.deleted_at")
 	mod = applyNoteIndexScope(mod, tenantId, tenantIds, accountIds, &in.ProfileListInp)
-	mod = applyNoteIndexFilters(mod, &in.ProfileListInp)
+	dbType := strings.TrimSpace(g.DB().GetConfig().Type)
+	keywordTerms := noteIndexUnionKeywordTerms(in.Keyword)
+	useKeywordUnion := g.Cfg().MustGet(ctx, "youbanPublish.noteKeywordUnionQueryEnabled", false).Bool() &&
+		(strings.EqualFold(dbType, "pgsql") || strings.EqualFold(dbType, "postgres")) && len(keywordTerms) > 0
+	filters := in.ProfileListInp
+	if useKeywordUnion {
+		filters.Keyword = ""
+	}
+	mod = applyNoteIndexFilters(mod, &filters)
 	var err error
 	sortBy, err := normalizeAdminNoteSortBy(in.SortBy)
 	if err != nil {
@@ -63,10 +69,46 @@ func (s *sSysPublish) adminNoteIndexList(ctx context.Context, in *sysin.NoteList
 	var candidates []noteIndexCandidate
 	sortExpression := adminNoteSortExpression(sortBy)
 	candidateStartedAt := time.Now()
-	if err := mod.Clone().Fields("i.id AS note_index_id,i.profile_id AS id," + sortExpression + " AS sort_at").
-		Order(sortExpression + " " + adminNoteSortDirection(sortBy)).
-		Order("i.id " + adminNoteSortDirection(sortBy)).
-		Limit(perPage + 1).Scan(&candidates); err != nil {
+	// Keep the ordered stream unbounded so every authorization and filter
+	// predicate is applied before the outer LIMIT.
+	singleTenant := (len(tenantIds) == 1 && tenantIds[0] > 0) || (len(tenantIds) == 0 && tenantId > 0)
+	useOrderedSubquery := g.Cfg().MustGet(ctx, "youbanPublish.noteAccountBranchQueryEnabled", true).Bool() &&
+		(strings.EqualFold(dbType, "pgsql") || strings.EqualFold(dbType, "postgres")) &&
+		singleTenant && len(accountIds) >= 2 && strings.TrimSpace(in.Keyword) == "" &&
+		in.Status == 0 && in.PushChannelId == 0 && in.CollectSourceId == 0 &&
+		strings.TrimSpace(in.CollectSourceChatId) == "" && strings.TrimSpace(in.Province) == "" &&
+		strings.TrimSpace(in.City) == "" && strings.TrimSpace(in.Tag) == "" &&
+		strings.TrimSpace(in.ReviewStatus) == "" && strings.TrimSpace(in.Visibility) == "" &&
+		sortBy == adminNoteSortCreatedAt+"Desc" && strings.TrimSpace(in.SourceScope) == "collected"
+	if useOrderedSubquery {
+		inner := pdao.YoubanPublishNoteIndex.Ctx(ctx).As("i").
+			WhereNull("i.deleted_at").
+			Where("i."+noteIndexCollectedColumn, true)
+		inner = applyNoteIndexScope(inner, tenantId, tenantIds, nil, nil)
+		inner, err = applyNoteIndexCursor(inner, in.Cursor, sortBy)
+		if err != nil {
+			return nil, false, "", err
+		}
+		inner = inner.Order("i.created_at DESC").Order("i.id DESC").Offset(0)
+		mod = pdao.YoubanPublishNoteIndex.DB().Model("? AS i", inner).Ctx(ctx).
+			WhereNull("i.deleted_at").
+			Where("EXISTS (SELECT 1 FROM " + publishProfileStateTable + " ps WHERE ps.tenant_id=i.tenant_id AND ps.account_id=i.account_id AND ps.profile_id=i.profile_id AND ps.deleted_at IS NULL)")
+		mod = applyNoteIndexScope(mod, tenantId, tenantIds, accountIds, &in.ProfileListInp)
+		mod = applyNoteIndexFilters(mod, &in.ProfileListInp)
+		mod, err = applyNoteIndexCursor(mod, in.Cursor, sortBy)
+		if err != nil {
+			return nil, false, "", err
+		}
+	}
+	if useKeywordUnion {
+		err = noteIndexKeywordUnionQuery(ctx, mod, keywordTerms, sortExpression, adminNoteSortDirection(sortBy), perPage+1).Scan(&candidates)
+	} else {
+		err = mod.Fields("i.id AS note_index_id,i.profile_id AS id," + sortExpression + " AS sort_at").
+			Order(sortExpression + " " + adminNoteSortDirection(sortBy)).
+			Order("i.id " + adminNoteSortDirection(sortBy)).
+			Limit(perPage + 1).Scan(&candidates)
+	}
+	if err != nil {
 		g.Log().Warning(ctx, "资料索引候选查询失败", g.Map{
 			"traceId":  gctx.CtxId(ctx),
 			"tenantId": tenantId,
@@ -83,6 +125,8 @@ func (s *sSysPublish) adminNoteIndexList(ctx context.Context, in *sysin.NoteList
 		candidates = candidates[:perPage]
 	}
 	list := make([]*sysin.ProfileModel, 0, len(candidates))
+	var lastSortAt *gtime.Time
+	var lastIndexId int64
 	if len(candidates) > 0 {
 		ids := make([]int64, 0, len(candidates))
 		for _, candidate := range candidates {
@@ -91,6 +135,7 @@ func (s *sSysPublish) adminNoteIndexList(ctx context.Context, in *sysin.NoteList
 		var details []*sysin.ProfileModel
 		detailMod := noteIndexModel(ctx).
 			LeftJoin(publishAccountTable+" a", "a.id=i.account_id AND a.deleted_at IS NULL")
+		detailMod = applyNoteIndexScope(detailMod, tenantId, tenantIds, accountIds, &in.ProfileListInp)
 		detailStartedAt := time.Now()
 		if err := detailMod.WhereIn("i.id", ids).Fields(adminNoteIndexFields()).Scan(&details); err != nil {
 			return nil, false, "", gerror.Wrap(err, "获取资料索引详情失败")
@@ -109,8 +154,17 @@ func (s *sSysPublish) adminNoteIndexList(ctx context.Context, in *sysin.NoteList
 		}
 	}
 	nextCursor := ""
-	if hasMore && len(list) > 0 {
-		nextCursor = encodeAdminNoteCursor(list[len(list)-1], sortBy)
+	if hasMore {
+		// Details can disappear between reads. Advance past every candidate
+		// already scanned, including those with no remaining detail row.
+		if len(candidates) > 0 {
+			last := candidates[len(candidates)-1]
+			lastIndexId, lastSortAt = last.NoteIndexId, last.SortAt
+		}
+		if lastSortAt == nil && !g.Cfg().MustGet(ctx, "youbanPublish.noteNullCursorOutputEnabled", false).Bool() {
+			return nil, false, "", gerror.New("当前排序包含空时间，分页暂不可用，请稍后重试")
+		}
+		nextCursor = encodeAdminNotePageCursor(lastIndexId, lastSortAt, sortBy)
 	}
 	return list, hasMore, nextCursor, nil
 }
@@ -250,16 +304,38 @@ func applyNoteIndexCursor(mod *gdb.Model, raw string, sortBy string) (*gdb.Model
 	if cursor.SortBy != sortBy {
 		return mod, gerror.New("笔记列表排序方式已变化，请重新加载")
 	}
+	condition, args, err := adminNoteCursorCondition(cursor, sortBy)
+	if err != nil {
+		return mod, err
+	}
+	return mod.Where(condition, args...), nil
+}
+
+func adminNoteCursorCondition(cursor *adminNoteCursor, sortBy string) (string, []interface{}, error) {
+	expression := adminNoteSortExpression(sortBy)
+	ascending := adminNoteSortDirection(sortBy) == "ASC"
+	if cursor.SortNull {
+		if strings.HasPrefix(sortBy, adminNoteSortPublishedAt) {
+			return "", nil, gerror.New("笔记列表游标不合法")
+		}
+		if ascending {
+			return "(" + expression + " IS NULL AND i.id > ?)", []interface{}{cursor.IndexId}, nil
+		}
+		return "((" + expression + " IS NULL AND i.id < ?) OR " + expression + " IS NOT NULL)", []interface{}{cursor.IndexId}, nil
+	}
 	sortAt, err := time.Parse(time.RFC3339Nano, cursor.SortAt)
 	if err != nil {
-		return mod, gerror.New("笔记列表游标不合法")
+		return "", nil, gerror.New("笔记列表游标不合法")
 	}
-	expression := adminNoteSortExpression(sortBy)
 	operator := "<"
-	if adminNoteSortDirection(sortBy) == "ASC" {
+	if ascending {
 		operator = ">"
 	}
-	return mod.Where("("+expression+" "+operator+" ? OR ("+expression+" = ? AND i.id "+operator+" ?))", sortAt, sortAt, cursor.IndexId), nil
+	condition := "(" + expression + " " + operator + " ? OR (" + expression + " = ? AND i.id " + operator + " ?)"
+	if ascending && !strings.HasPrefix(sortBy, adminNoteSortPublishedAt) {
+		condition += " OR " + expression + " IS NULL"
+	}
+	return condition + ")", []interface{}{sortAt, sortAt, cursor.IndexId}, nil
 }
 
 func encodeAdminNoteCursor(item *sysin.ProfileModel, sortBy string) string {
@@ -282,7 +358,29 @@ func encodeAdminNoteCursor(item *sysin.ProfileModel, sortBy string) string {
 	if sortAt == nil {
 		return ""
 	}
-	payload, err := json.Marshal(adminNoteCursor{IndexId: item.NoteIndexId, SortBy: sortBy, SortAt: sortAt.Time.Format(time.RFC3339Nano)})
+	return encodeAdminNoteCandidateCursor(item.NoteIndexId, sortAt, sortBy)
+}
+
+// The cursor uses the candidate scan values, which can differ from a later detail read.
+func encodeAdminNoteCandidateCursor(indexId int64, sortAt *gtime.Time, sortBy string) string {
+	if indexId <= 0 || sortAt == nil {
+		return ""
+	}
+	payload, err := json.Marshal(adminNoteCursor{IndexId: indexId, SortBy: sortBy, SortAt: sortAt.Time.Format(time.RFC3339Nano)})
+	if err != nil {
+		return ""
+	}
+	return base64.RawURLEncoding.EncodeToString(payload)
+}
+
+func encodeAdminNotePageCursor(indexId int64, sortAt *gtime.Time, sortBy string) string {
+	if sortAt != nil {
+		return encodeAdminNoteCandidateCursor(indexId, sortAt, sortBy)
+	}
+	if indexId <= 0 || strings.HasPrefix(sortBy, adminNoteSortPublishedAt) {
+		return ""
+	}
+	payload, err := json.Marshal(adminNoteCursor{IndexId: indexId, SortBy: sortBy, SortNull: true})
 	if err != nil {
 		return ""
 	}
@@ -299,7 +397,7 @@ func decodeAdminNoteCursor(raw string) (*adminNoteCursor, error) {
 		return nil, gerror.New("笔记列表游标不合法")
 	}
 	var cursor adminNoteCursor
-	if err = json.Unmarshal(payload, &cursor); err != nil || cursor.IndexId <= 0 || cursor.SortBy == "" || cursor.SortAt == "" {
+	if err = json.Unmarshal(payload, &cursor); err != nil || cursor.IndexId <= 0 || cursor.SortBy == "" || (cursor.SortAt == "") == !cursor.SortNull {
 		return nil, gerror.New("笔记列表游标不合法")
 	}
 	return &cursor, nil
