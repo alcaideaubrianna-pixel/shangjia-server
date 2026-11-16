@@ -18,5 +18,5 @@ func telegramChannelScheduleOrderSQL(alias string) string {
 
 func telegramChannelSchedulePrecedesSQL(left, right string) string {
 	l, r := telegramChannelScheduleRankSQL(left), telegramChannelScheduleRankSQL(right)
-	return "(" + l + " < " + r + " OR (" + l + " = " + r + " AND (" + left + ".created_at<" + right + ".created_at OR (" + left + ".created_at=" + right + ".created_at AND " + left + ".id<" + right + ".id))))"
+	return "((" + l + ") < (" + r + ") OR ((" + l + ") = (" + r + ") AND (" + left + ".created_at<" + right + ".created_at OR (" + left + ".created_at=" + right + ".created_at AND " + left + ".id<" + right + ".id))))"
 }
