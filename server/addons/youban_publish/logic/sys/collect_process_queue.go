@@ -140,7 +140,11 @@ func normalizeCollectProcessOutboxMode(mode string) string {
 }
 
 func collectProcessShouldPersistOutbox(ctx context.Context, payload collectProcessQueuePayload) bool {
-	if collectProcessOutboxMode(ctx) == "postgres_outbox" {
+	return collectProcessShouldPersistOutboxMode(collectProcessOutboxMode(ctx), payload)
+}
+
+func collectProcessShouldPersistOutboxMode(mode string, payload collectProcessQueuePayload) bool {
+	if normalizeCollectProcessOutboxMode(mode) == "postgres_outbox" {
 		return true
 	}
 	// Only a task already claimed by the legacy dispatcher keeps the old
