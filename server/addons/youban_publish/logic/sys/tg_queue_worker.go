@@ -327,7 +327,7 @@ func (s *sSysPublish) runCollectSourceQueueManager(ctx context.Context) {
 }
 
 func (s *sSysPublish) reconcileCollectSourceQueueWorkers(ctx context.Context) {
-	if !cache.Initialized() {
+	if !cache.Initialized() || ctx.Err() != nil {
 		return
 	}
 	client, err := cache.RedisClient()
@@ -339,6 +339,9 @@ func (s *sSysPublish) reconcileCollectSourceQueueWorkers(ctx context.Context) {
 		return
 	}
 	for _, member := range value.Strings() {
+		if ctx.Err() != nil {
+			return
+		}
 		parts := strings.Split(member, ":")
 		if len(parts) != 3 {
 			continue
@@ -352,50 +355,7 @@ func (s *sSysPublish) reconcileCollectSourceQueueWorkers(ctx context.Context) {
 		s.ensureCollectProcessSourceDispatcher(ctx, member)
 		for _, history := range []bool{false, true} {
 			payload := collectProcessQueuePayload{TenantId: tenantID, AccountId: accountID, SourceId: sourceID, History: history, Recovery: history}
-			queueName := collectProcessQueueName(payload)
-			leaseKey := "youban_publish:collect:source:lease:" + queueName
-			s.tgQueueMu.Lock()
-			if s.collectSourceWorkerOwner == "" {
-				s.collectSourceWorkerOwner = guid.S()
-			}
-			owner := s.collectSourceWorkerOwner
-			_, exists := s.collectSourceQueueServers[queueName]
-			s.tgQueueMu.Unlock()
-			if exists {
-				_, _ = client.Do(ctx, "EXPIRE", leaseKey, collectSourceLeaseSeconds(ctx))
-				continue
-			}
-			if !exists {
-				leaseValue, leaseErr := client.Do(ctx, "GET", leaseKey)
-				if leaseErr == nil && !leaseValue.IsNil() && leaseValue.String() != owner {
-					continue
-				}
-				if leaseErr == nil && !leaseValue.IsNil() && leaseValue.String() == owner {
-					_, _ = client.Do(ctx, "EXPIRE", leaseKey, collectSourceLeaseSeconds(ctx))
-				} else {
-					acquired, setErr := client.Do(ctx, "SET", leaseKey, owner, "NX", "EX", collectSourceLeaseSeconds(ctx))
-					if setErr != nil || acquired.String() != "OK" {
-						continue
-					}
-				}
-			}
-			s.tgQueueMu.Lock()
-			_, exists = s.collectSourceQueueServers[queueName]
-			if !exists {
-				server := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{Concurrency: collectSourceWorkerConcurrency(ctx), Queues: map[string]int{queueName: 1}, RetryDelayFunc: telegramQueueRetryDelay})
-				if s.collectSourceQueueServers == nil {
-					s.collectSourceQueueServers = make(map[string]*asynq.Server)
-				}
-				s.collectSourceQueueServers[queueName] = server
-				mux := asynq.NewServeMux()
-				mux.HandleFunc(tgTaskTypeCollectProcess, s.handleCollectProcessTask)
-				go func(name string, worker *asynq.Server, handler *asynq.ServeMux) {
-					if runErr := worker.Run(handler); runErr != nil && !errors.Is(runErr, asynq.ErrServerClosed) {
-						g.Log().Errorf(ctx, "采集来源队列退出 queue:%s err:%+v", name, runErr)
-					}
-				}(queueName, server, mux)
-			}
-			s.tgQueueMu.Unlock()
+			s.ensureCollectSourceQueueWorker(ctx, collectProcessQueueName(payload))
 		}
 	}
 }
@@ -769,7 +729,7 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	}
 	for _, sourceServer := range collectSourceServers {
 		if sourceServer != nil {
-			sourceServer.Shutdown()
+			stopCollectSourceQueueWorker(sourceServer)
 		}
 	}
 	if backgroundServer != nil {
