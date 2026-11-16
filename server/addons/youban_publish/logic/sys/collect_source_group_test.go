@@ -35,6 +35,17 @@ func TestCollectRuleSourceIDSeparatesIngestAndRuleSources(t *testing.T) {
 	}
 }
 
+func TestCollectRuleBindingDefaultsOnUntilExplicitlyDisabled(t *testing.T) {
+	for _, status := range []int{-1, 0, 1} {
+		if !collectRuleBindingEnabled(status) {
+			t.Fatalf("legacy/default rule status %d should remain enabled", status)
+		}
+	}
+	if collectRuleBindingEnabled(2) {
+		t.Fatal("explicitly disabled rule status must not dispatch")
+	}
+}
+
 func TestCollectEventRulesCacheVersionIsAccountScoped(t *testing.T) {
 	first := collectEventRulesCacheAccountVersionKey(43, 520)
 	second := collectEventRulesCacheAccountVersionKey(43, 521)

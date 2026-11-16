@@ -19,6 +19,13 @@ const (
 	collectSourceRouteCacheTTL    = 10 * time.Minute
 )
 
+// collectRuleBindingEnabled keeps the collection policy default-on: only the
+// explicit disabled value stops a rule. Empty and legacy zero values remain
+// usable so old bindings continue to dispatch until an operator disables them.
+func collectRuleBindingEnabled(status int) bool {
+	return status != 2
+}
+
 // collectSourceContext separates the delivery entry point from the source
 // whose channel-specific rule owns the event.
 type collectSourceContext struct {
@@ -60,7 +67,7 @@ func (s *sSysPublish) resolveCollectSourceContext(ctx context.Context, event gdb
 		Where("status", 1).
 		WhereIn("source_chat_id", lookupIDs).
 		WhereNull("deleted_at").
-		Where("EXISTS (SELECT 1 FROM "+pdao.YoubanPublishCollectSourceRule.Table()+" sr JOIN "+pdao.YoubanPublishCollectRule.Table()+" r ON r.id=sr.rule_id WHERE sr.source_id="+pdao.YoubanPublishCollectSource.Table()+".id AND r.tenant_id=? AND r.account_id=? AND r.deleted_at IS NULL)", tenantID, accountID).
+		Where("EXISTS (SELECT 1 FROM "+pdao.YoubanPublishCollectSourceRule.Table()+" sr JOIN "+pdao.YoubanPublishCollectRule.Table()+" r ON r.id=sr.rule_id WHERE sr.tenant_id=? AND sr.source_id="+pdao.YoubanPublishCollectSource.Table()+".id AND (sr.status IS NULL OR sr.status <> 2) AND r.tenant_id=? AND r.account_id=? AND (r.status IS NULL OR r.status <> 2) AND r.deleted_at IS NULL)", tenantID, tenantID, accountID).
 		OrderAsc("id").
 		Limit(2).
 		All()

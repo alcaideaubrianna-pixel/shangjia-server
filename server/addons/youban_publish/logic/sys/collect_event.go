@@ -806,7 +806,12 @@ func (s *sSysPublish) collectEventRules(ctx context.Context, event gdb.Record, t
 	var bindRows []struct {
 		RuleId int64 `json:"ruleId"`
 	}
-	if err := pdao.YoubanPublishCollectSourceRule.Ctx(ctx).Where("source_id", sourceId).OrderAsc("sort").Scan(&bindRows); err != nil {
+	if err := pdao.YoubanPublishCollectSourceRule.Ctx(ctx).
+		Where("tenant_id", tenantId).
+		Where("source_id", sourceId).
+		Where("(status IS NULL OR status <> ?)", 2).
+		OrderAsc("sort").
+		Scan(&bindRows); err != nil {
 		return nil, gerror.Wrap(err, "读取采集源绑定规则失败")
 	}
 	if len(bindRows) == 0 {
@@ -823,6 +828,7 @@ func (s *sSysPublish) collectEventRules(ctx context.Context, event gdb.Record, t
 		Where("tenant_id", tenantId).
 		Where("account_id", accountId).
 		Where("global_enabled", 1).
+		Where("(status IS NULL OR status <> ?)", 2).
 		WhereNull("deleted_at")
 	globalRows, err := globalMod.OrderAsc("sort").OrderAsc("id").All()
 	if err != nil {
@@ -836,7 +842,11 @@ func (s *sSysPublish) collectEventRules(ctx context.Context, event gdb.Record, t
 	if len(ruleIds) > 0 {
 		boundRows, queryErr := pdao.YoubanPublishCollectRule.Ctx(ctx).
 			Where("tenant_id", tenantId).Where("account_id", accountId).
-			WhereIn("id", ruleIds).WhereNull("deleted_at").
+			WhereIn("id", ruleIds).
+			// Rule status 2 is the explicit disabled state. Empty/legacy
+			// values remain enabled under the default-on collection policy.
+			Where("(status IS NULL OR status <> ?)", 2).
+			WhereNull("deleted_at").
 			OrderAsc("sort").OrderAsc("id").All()
 		if queryErr != nil {
 			return nil, gerror.Wrap(queryErr, "读取采集源绑定规则失败")

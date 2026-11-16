@@ -355,7 +355,17 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 		like := "%" + keyword + "%"
 		cacheModel = cacheModel.Where("(chat_id LIKE ? OR chat_title LIKE ? OR chat_username LIKE ?)", like, like, like)
 	}
-	if len(scopedChatIDs) > 0 {
+	if len(boundBotIDs) > 0 {
+		// A BOT source owns every non-private channel present in its cache.
+		// This is the candidate scope; account_channel below remains the
+		// authorization decision and is deliberately not used to hide rows.
+		// Keep explicit source-chat candidates as well for non-BOT sources.
+		if len(scopedChatIDs) > 0 {
+			cacheModel = cacheModel.Where("(bot_id IN (?) OR chat_id IN (?))", boundBotIDs, scopedChatIDs)
+		} else {
+			cacheModel = cacheModel.WhereIn("bot_id", boundBotIDs)
+		}
+	} else if len(scopedChatIDs) > 0 {
 		cacheModel = cacheModel.WhereIn("chat_id", scopedChatIDs)
 	} else if ruleID > 0 {
 		// No source is bound to this rule; configured rows above are still
@@ -368,10 +378,18 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 		ChatId       string      `orm:"chat_id"`
 		ChatTitle    string      `orm:"chat_title"`
 		ChatUsername string      `orm:"chat_username"`
+		BotId        int64       `orm:"bot_id"`
 		LastSeenAt   *gtime.Time `orm:"last_message_at"`
 	}
-	if err := cacheModel.Fields("chat_id,chat_title,chat_username,last_message_at").OrderDesc("last_message_at").Limit(candidateLimit).Scan(&candidates); err != nil {
+	botCacheByBotAndChat := make(map[string]bool)
+	if err := cacheModel.Fields("chat_id,chat_title,chat_username,bot_id,last_message_at").OrderDesc("last_message_at").Limit(candidateLimit).Scan(&candidates); err != nil {
 		return nil, 0, err
+	}
+	for _, candidate := range candidates {
+		id := canonicalCollectSourceChatID(candidate.ChatId)
+		if id != "" && candidate.BotId > 0 {
+			botCacheByBotAndChat[fmt.Sprintf("%d:%s", candidate.BotId, id)] = true
+		}
 	}
 	// Keep the cache scope available for the binding check below. Aggregate BOT
 	// sources intentionally have no source_chat_id; their ownership is proven
@@ -380,6 +398,7 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 		ChatId       string      `orm:"chat_id"`
 		ChatTitle    string      `orm:"chat_title"`
 		ChatUsername string      `orm:"chat_username"`
+		BotId        int64       `orm:"bot_id"`
 		LastSeenAt   *gtime.Time `orm:"last_message_at"`
 	}
 	canonicalModel := g.DB().Model(pdao.YoubanPublishCollectChannel.Table()).Ctx(ctx).
@@ -402,7 +421,7 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 		canonicalModel = canonicalModel.Where("1=0")
 	}
 	if err := canonicalModel.
-		Fields("telegram_chat_id AS chat_id,title AS chat_title,username AS chat_username,last_seen_at AS last_message_at").
+		Fields("telegram_chat_id AS chat_id,title AS chat_title,username AS chat_username,0 AS bot_id,last_seen_at AS last_message_at").
 		OrderDesc("last_seen_at").Limit(candidateLimit).Scan(&canonicalCandidates); err == nil {
 		candidates = append(candidates, canonicalCandidates...)
 	}
@@ -417,8 +436,9 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 			ChatId       string      `orm:"chat_id"`
 			ChatTitle    string      `orm:"chat_title"`
 			ChatUsername string      `orm:"chat_username"`
+			BotId        int64       `orm:"bot_id"`
 			LastSeenAt   *gtime.Time `orm:"last_message_at"`
-		}{ChatId: id, ChatTitle: sourceCandidate.ChatTitle, ChatUsername: sourceCandidate.ChatUsername, LastSeenAt: sourceCandidate.LastSeenAt})
+		}{ChatId: id, ChatTitle: sourceCandidate.ChatTitle, ChatUsername: sourceCandidate.ChatUsername, BotId: sourceCandidate.BotId, LastSeenAt: sourceCandidate.LastSeenAt})
 	}
 	for _, candidate := range candidates {
 		id := canonicalCollectSourceChatID(candidate.ChatId)
@@ -540,9 +560,14 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 		if row == nil {
 			continue
 		}
-		sourceFound, sourceEnabled, sourceConflict := false, false, false
+		sourceFound, sourceEnabled, sourceConflict, sourceRelationFound := false, false, false, false
 		for _, source := range collectionSources {
+			matchedByBotCache := false
 			matches := introFeeCollectionSourceMatchesChannel(source.ChatId, source.BotId, row.ChannelId, row.BotId)
+			if !matches && source.BotId > 0 {
+				matchedByBotCache = botCacheByBotAndChat[fmt.Sprintf("%d:%s", source.BotId, canonicalCollectSourceChatID(row.ChannelId))]
+				matches = matchedByBotCache
+			}
 			if !matches {
 				for _, mappedChannelID := range sourceChannelByID[source.SourceID] {
 					if canonicalCollectSourceChatID(mappedChannelID) == canonicalCollectSourceChatID(row.ChannelId) {
@@ -555,8 +580,11 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 				sourceFound = true
 				mappedKey := fmt.Sprintf("%d:%s", source.SourceID, canonicalCollectSourceChatID(row.ChannelId))
 				if mapped, exists := sourceChannelEnabled[mappedKey]; exists {
+					sourceRelationFound = true
 					sourceEnabled = sourceEnabled || mapped
-				} else {
+				} else if !matchedByBotCache {
+					// A BOT cache hit makes a channel visible, but it does not
+					// authorize collection until account_channel exists.
 					sourceEnabled = sourceEnabled || source.Status == 1 && source.CollectEnabled == 1
 				}
 				if sourceChannelConflict[fmt.Sprintf("%d:%s", source.SourceID, canonicalCollectSourceChatID(row.ChannelId))] {
@@ -577,7 +605,11 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 			row.BlockReason = "采集总开关已关闭"
 		}
 		if sourceFound && !sourceEnabled {
-			row.BlockReason = "采集源已暂停"
+			if sourceRelationFound {
+				row.BlockReason = "采集源已暂停"
+			} else {
+				row.BlockReason = "未绑定采集源或规则"
+			}
 		}
 		if row.Blacklisted {
 			row.BlockReason = "频道已加入黑名单"

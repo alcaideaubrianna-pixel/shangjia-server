@@ -175,6 +175,18 @@ func TestIntroFeeChannelBindingOnlineFixturePostgres(t *testing.T) {
 		}
 		check("汉庭", "", 1)
 		checkList(1, "")
+		// A channel seen by the rule-bound BOT must be visible even before
+		// account_channel is created, but it remains blocked as unbound.
+		if _, err := tx.Exec(`INSERT INTO hg_youban_publish_bot_channel_cache VALUES(78,64,'-1004390000001','未绑定频道','unbound_channel','channel',3,now())`); err != nil {
+			return err
+		}
+		unboundRows, unboundTotal, err := service.introFeeChannelRuleCandidatesWithCounts(ctx, 78, 615, 338, 0, "未绑定频道", 1, 20, false)
+		if err != nil {
+			return err
+		}
+		if unboundTotal != 1 || len(unboundRows) != 1 || unboundRows[0].ChannelId != "4390000001" || unboundRows[0].Status != 2 || unboundRows[0].BlockReason != "未绑定采集源或规则" {
+			t.Fatalf("BOT cache candidate was not kept as unbound: total=%d rows=%+v", unboundTotal, unboundRows)
+		}
 		// More recent unrelated chats must not evict ownership of a configured channel.
 		if _, err := tx.Exec(`INSERT INTO hg_youban_publish_bot_channel_cache SELECT 78,64,('-100900'||n::text),'其他频道','','channel',1,now() FROM generate_series(1,120) n`); err != nil {
 			return err
