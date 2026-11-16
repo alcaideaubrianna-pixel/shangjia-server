@@ -476,6 +476,58 @@ func (s *sSysPublish) profileBaseModel(ctx context.Context, tenantId int64, acco
 	return mod, nil
 }
 
+// profileTaskStatusQuery is deliberately separate from ProfileModel. The
+// polling endpoint only needs lifecycle state and ownership fields; keeping
+// this projection small avoids profile tags, collection metadata, channels,
+// and media-related subqueries on every poll.
+type profileTaskStatusQuery struct {
+	Id         int64  `json:"id"`
+	Uuid       string `json:"uuid"`
+	Status     int    `json:"status"`
+	TenantId   int64  `json:"tenant_id"`
+	AccountId  int64  `json:"account_id"`
+	TaskStatus string `json:"task_status"`
+}
+
+// profileTaskStatusBySelector uses the existing selector indexes:
+// hg_content_profile(id), idx_content_profile_source_uuid/profile UUID,
+// profile_no's unique lookup, and uk_ybp_profile_state_profile for the join.
+// The owner/account authorization query remains separate so this read does
+// not expand the full admin visibility scope.
+func (s *sSysPublish) profileTaskStatusBySelector(ctx context.Context, in *sysin.ProfileViewInp) (res *profileTaskStatusQuery, err error) {
+	if !hasProfileViewSelector(in) {
+		return nil, gerror.New("资料ID、UUID或编号不能为空")
+	}
+	mod := dao.ContentProfile.Ctx(ctx).As("p").
+		InnerJoin(publishProfileStateTable+" ps", "ps.profile_id=p.id AND ps.deleted_at IS NULL").
+		WhereNull("p.deleted_at")
+	if in.Id > 0 {
+		mod = mod.Where("p.id", in.Id)
+	} else if uuid := normalizeProfileUUID(in.Uuid); uuid != "" {
+		mod = mod.Where("p.source_note_uuid", uuid)
+	} else {
+		mod = mod.Where("p.profile_no", strings.ToUpper(strings.TrimSpace(in.ProfileNo)))
+	}
+	if err = mod.Fields(profileTaskStatusFields()).Scan(&res); err != nil {
+		return nil, gerror.Wrap(err, "获取资料任务状态失败")
+	}
+	if res == nil || res.Id <= 0 {
+		return nil, gerror.New("资料不存在或无权操作")
+	}
+	if normalizeProfileUUID(res.Uuid) == "" {
+		res.Uuid = profileTransientUUID(res.Id)
+	}
+	return res, nil
+}
+
+func profileTaskStatusFields() string {
+	return "p.id,p.source_note_uuid AS uuid,p.status,ps.tenant_id,ps.account_id," +
+		"CASE WHEN COALESCE(ps.publish_task_status,'') IN ('pending','publishing') " +
+		"AND (LOWER(COALESCE(ps.publish_operation_no,'')) LIKE 'cycle_batch:%' " +
+		"OR LOWER(COALESCE(ps.publish_operation_no,'')) LIKE 'profile_cycle:%') " +
+		"THEN 'cycling' ELSE COALESCE(ps.publish_task_status,'') END AS task_status"
+}
+
 func profileListFields() string {
 	return "p.id,p.source_note_uuid AS uuid,p.source_type,p.profile_no,p.title,p.summary,p.plain_text,p.province,p.city,p.is_virgin," + profileTagFieldExpr() + " AS tag,p.visibility,p.review_status,p.status,p.image_count,p.video_count,COALESCE(ps.customer_remark,p.admin_remark) AS customer_remark,p.published_at,p.created_at,p.updated_at,ps.tenant_id,ps.account_id,tenant.name AS tenant_name,a.nickname AS account_name,a.nickname,a.username,COALESCE(ps.anti_scan_enabled,0) AS anti_scan_enabled,CASE WHEN COALESCE(ps.publish_task_status,'') IN ('pending','publishing') AND (LOWER(COALESCE(ps.publish_operation_no,'')) LIKE 'cycle_batch:%' OR LOWER(COALESCE(ps.publish_operation_no,'')) LIKE 'profile_cycle:%') THEN 'cycling' ELSE COALESCE(ps.publish_task_status,'') END AS task_status,'' AS tg_status,CASE WHEN EXISTS (SELECT 1 FROM " + publishProfileChannelTable + " pc WHERE pc.tenant_id=ps.tenant_id AND pc.profile_id=ps.profile_id AND pc.is_manual=1 AND pc.deleted_at IS NULL) OR EXISTS (SELECT 1 FROM " + publishChannelTable + " dc WHERE dc.tenant_id=ps.tenant_id AND dc.publish_direction='up' AND dc.status=1 AND dc.is_default_selected=1 AND dc.deleted_at IS NULL) THEN 1 ELSE 0 END AS tg_push_enabled"
 }

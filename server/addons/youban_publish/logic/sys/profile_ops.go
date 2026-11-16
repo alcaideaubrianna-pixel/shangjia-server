@@ -403,11 +403,7 @@ func (s *sSysPublish) AdminProfileTaskStatus(ctx context.Context, in *sysin.Prof
 	if err != nil {
 		return nil, err
 	}
-	// This endpoint is polled while a lifecycle operation is running. Avoid
-	// resolving the complete AccountScope=all visibility set on every poll;
-	// authorize only the profile's owner account after the indexed selector
-	// lookup. This keeps the response bounded to two small queries.
-	profile, err := s.profileBaseBySelector(ctx, in, 0, 0)
+	profile, err := s.profileTaskStatusBySelector(ctx, in)
 	if err != nil {
 		return nil, err
 	}
@@ -418,7 +414,10 @@ func (s *sSysPublish) AdminProfileTaskStatus(ctx context.Context, in *sysin.Prof
 		return nil, gerror.New("资料不存在或无权查看")
 	}
 	return &sysin.ProfileTaskStatusModel{
-		Id: profile.Id, Uuid: profile.Uuid, Status: profile.Status, TaskStatus: profile.TaskStatus,
+		Id:         profile.Id,
+		Uuid:       profile.Uuid,
+		Status:     profile.Status,
+		TaskStatus: profile.TaskStatus,
 	}, nil
 }
 

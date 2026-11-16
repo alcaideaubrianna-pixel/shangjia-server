@@ -2,7 +2,10 @@ package sys
 
 import (
 	"context"
+	"strings"
+
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/hibiken/asynq"
 )
 
 // telegramLegacyPublishQueuesEnabled 迁移期默认排空旧队列；全量新引擎且明确关闭后不再轮询旧分片。
@@ -89,10 +92,73 @@ func queueNameForPushEngine(engine, legacyQueue string) string {
 type channelDispatchPriority int
 
 const (
-	// channelPriorityManualDelete 表示手动上架触发的旧消息删除。
+	// channelPriorityManualDelete 表示手动下架触发的旧消息删除。
 	channelPriorityManualDelete channelDispatchPriority = iota
 	// channelPriorityKeywordDelete 表示关键字规则触发的删除。
 	channelPriorityKeywordDelete
 	// channelPriorityCycleDelete 表示循环翻新触发的旧消息删除。
 	channelPriorityCycleDelete
 )
+
+const telegramCleanupManualReservedSlotsDefault = 1
+
+// normalizeTelegramCleanupManualReservedSlots 限制手动删除的频道保底槽位。
+// 至少保留一个槽位给自动删除，避免配置错误导致自动删除永久无法执行。
+func normalizeTelegramCleanupManualReservedSlots(configured, total int) int {
+	if total <= 1 {
+		return 0
+	}
+	if configured < 0 {
+		return 0
+	}
+	if configured >= total {
+		return total - 1
+	}
+	return configured
+}
+
+// telegramCleanupSlotLimitForPriority 返回任务可使用的频道清理槽位数量。
+// 手动删除可以使用全部槽位；关键字和循环删除让出配置的手动保底槽位。
+func telegramCleanupSlotLimitForPriority(priority channelDispatchPriority, total, reserved int) int {
+	if total <= 0 {
+		return 0
+	}
+	if priority == channelPriorityManualDelete {
+		return total
+	}
+	reserved = normalizeTelegramCleanupManualReservedSlots(reserved, total)
+	limit := total - reserved
+	if limit < 1 {
+		return 1
+	}
+	return limit
+}
+
+// telegramCleanupSlotLimit 使用配置返回当前任务可使用的频道清理槽位数量。
+func telegramCleanupSlotLimit(ctx context.Context, priority channelDispatchPriority) int {
+	reserved := g.Cfg().MustGet(ctx, "youbanPublish.queue.cleanupManualReservedSlots", telegramCleanupManualReservedSlotsDefault).Int()
+	return telegramCleanupSlotLimitForPriority(channelDispatchPriority(priority), telegramCleanupPerChannelConcurrency, reserved)
+}
+
+// telegramCleanupPriority 按本次清理请求分类，不让历史发布优先级降低手动下架优先级。
+func telegramCleanupPriority(jobPriority int, cleanupOperationNo string) channelDispatchPriority {
+	if strings.TrimSpace(cleanupOperationNo) != "" || jobPriority <= tgJobPriorityInteractive {
+		return channelPriorityManualDelete
+	}
+	return channelPriorityCycleDelete
+}
+
+// telegramCleanupExecutionPriority 优先使用实际消费队列，兼容没有请求上下文的恢复任务。
+func telegramCleanupExecutionPriority(ctx context.Context, job telegramJobRecord) channelDispatchPriority {
+	if queue, ok := asynq.GetQueueName(ctx); ok {
+		switch queue {
+		case channelDispatchQueueDeleteManual:
+			return channelPriorityManualDelete
+		case channelDispatchQueueDeleteKeyword:
+			return channelPriorityKeywordDelete
+		case channelDispatchQueueDeleteCycle:
+			return channelPriorityCycleDelete
+		}
+	}
+	return telegramCleanupPriority(job.Priority, "")
+}
