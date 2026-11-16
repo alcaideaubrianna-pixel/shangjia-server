@@ -233,7 +233,7 @@ func (s *sSysPublish) previewAIOpsBotSourceReplay(ctx context.Context, sourceID 
 	for _, candidate := range candidates {
 		resolved, exists := rulesByChat[candidate.ChatID]
 		if !exists {
-			if err = s.validateAIOpsReplayChannelApproval(ctx, target.TenantID, target.AccountID, target.BotID, candidate.ChatID); err != nil {
+			if err = s.validateAIOpsReplayChannelApproval(ctx, target.TenantID, target.AccountID, sourceID, target.BotID, candidate.ChatID); err != nil {
 				return nil, nil, 0, 0, err
 			}
 			event := gdb.Record{"id": gvar.New(int64(0)), "source_id": gvar.New(sourceID), "source_chat_id": gvar.New(candidate.ChatID)}
@@ -257,7 +257,7 @@ func (s *sSysPublish) previewAIOpsBotSourceReplay(ctx context.Context, sourceID 
 	return ids, preview, target.TenantID, target.AccountID, nil
 }
 
-func (s *sSysPublish) validateAIOpsReplayChannelApproval(ctx context.Context, tenantID, accountID, botID int64, chatID string) error {
+func (s *sSysPublish) validateAIOpsReplayChannelApproval(ctx context.Context, tenantID, accountID, sourceID, botID int64, chatID string) error {
 	var channels []botCollectChannelCandidate
 	channelColumns := pdao.YoubanPublishCollectChannel.Columns()
 	if err := pdao.YoubanPublishCollectChannel.Ctx(ctx).
@@ -280,13 +280,14 @@ func (s *sSysPublish) validateAIOpsReplayChannelApproval(ctx context.Context, te
 	if err := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).
 		Fields(relationColumns.Id, relationColumns.ChannelId, relationColumns.CollectEnabled, relationColumns.Status, relationColumns.ApprovalStatus).
 		Where(relationColumns.TenantId, tenantID).Where(relationColumns.AccountId, accountID).
+		Where(relationColumns.SourceId, sourceID).
 		WhereIn(relationColumns.ChannelId, channelIDs).WhereNull(relationColumns.DeletedAt).Scan(&relations); !collectOptionalRecordScanSucceeded(err) {
 		return gerror.Wrap(err, "预演读取Telegram频道审批状态失败")
 	}
 	channel := selectBotCollectChannelForAccount(channels, relations, chatID)
 	relation := selectBotCollectChannelRelation(relations, channel.Id)
 	if channel.Id <= 0 || relation.Id <= 0 || strings.ToLower(strings.TrimSpace(relation.ApprovalStatus)) != "approved" || !botCollectChannelRelationEnabled(relation.CollectEnabled, relation.Status, relation.ApprovalStatus) {
-		return gerror.Newf("频道%s在目标账号下没有已批准的采集关系，拒绝重放", chatID)
+		return gerror.Newf("频道%s在目标账号和source下没有已批准的采集关系，拒绝重放", chatID)
 	}
 	var botRelation struct {
 		Status string `json:"status"`

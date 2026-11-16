@@ -29,9 +29,8 @@ func TestIntroFeeCollectionSourceMatchesChannel(t *testing.T) {
 		want         bool
 	}{
 		{name: "direct channel source", sourceChatID: "-1004294797657", channelID: "4294797657", want: true},
-		{name: "global scope accepts bound aggregate bot", sourceBotID: 64, channelID: "4294797657", want: true},
-		{name: "explicit scope accepts same aggregate bot", sourceBotID: 64, channelID: "4294797657", ruleBotID: 64, want: true},
-		{name: "explicit scope rejects another aggregate bot", sourceBotID: 65, channelID: "4294797657", ruleBotID: 64, want: false},
+		{name: "aggregate bot is not a wildcard", sourceBotID: 64, channelID: "4294797657", want: false},
+		{name: "explicit bot scope is not a wildcard", sourceBotID: 64, channelID: "4294797657", ruleBotID: 64, want: false},
 		{name: "empty non bot source is not aggregate", channelID: "4294797657", want: false},
 	}
 	for _, test := range tests {
@@ -41,16 +40,6 @@ func TestIntroFeeCollectionSourceMatchesChannel(t *testing.T) {
 				t.Fatalf("introFeeCollectionSourceMatchesChannel() = %t, want %t", got, test.want)
 			}
 		})
-	}
-}
-
-func TestIntroFeeAggregateBotSourceMatchesCanonicalCacheChannel(t *testing.T) {
-	candidates := map[string]struct{}{"3998084277": {}}
-	if !introFeeAggregateBotSourceMatchesChannel(candidates, "-1003998084277") {
-		t.Fatal("aggregate BOT source should match the canonical cached channel")
-	}
-	if introFeeAggregateBotSourceMatchesChannel(candidates, "-1001234567890") {
-		t.Fatal("aggregate BOT source must not match an uncached channel")
 	}
 }
 
@@ -67,11 +56,8 @@ func TestIntroFeeOnlineSource351FixtureIsBound(t *testing.T) {
 	if tenantID != 78 || accountID != 615 || ruleID != 338 || sourceID != 351 || botID != 64 {
 		t.Fatal("online fixture was changed unexpectedly")
 	}
-	if !introFeeCollectionSourceMatchesChannel("", botID, channelChatID, 0) {
-		t.Fatal("aggregate source 351 should match the Bot-owned channel")
-	}
-	if !introFeeAggregateBotSourceMatchesChannel(map[string]struct{}{canonicalCollectSourceChatID(channelChatID): {}}, channelChatID) {
-		t.Fatal("Bot cache ownership should bind the canonical channel")
+	if introFeeCollectionSourceMatchesChannel("", botID, channelChatID, 0) {
+		t.Fatal("aggregate source must not act as a wildcard")
 	}
 }
 

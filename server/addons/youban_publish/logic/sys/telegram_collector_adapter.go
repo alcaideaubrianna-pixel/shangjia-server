@@ -1338,7 +1338,7 @@ func (s *sSysPublish) ingestCollectorBotDelivery(ctx context.Context, delivery *
 	}
 	source, err := g.DB().Model(publishCollectSourceTable+" s").Safe().Ctx(ctx).
 		InnerJoin("hg_youban_publish_tenant_vip vip", "vip.tenant_id=s.tenant_id AND vip.status=1 AND vip.level>0 AND vip.deleted_at IS NULL").
-		Fields("s.id,s.tenant_id,s.account_id,s.bot_id").
+		Fields("s.id,s.tenant_id,s.account_id,s.bot_id,s.bot_collect_scope").
 		Where("s.id", delivery.SourceID).
 		Where("s.source_type", sysin.CollectSourceTypeBot).
 		Where("s.collect_enabled", 1).
@@ -1521,7 +1521,13 @@ func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, sourc
 	_ = s.touchCollectBotChannel(ctx, tenantID, botID, chatID, now)
 	relation := selectBotCollectChannelRelation(relations, channel.Id)
 	if relation.Id > 0 {
-		allowed := botCollectChannelRelationEnabled(relation.CollectEnabled, relation.Status, relation.ApprovalStatus)
+		decision := decideCollectChannelAccess(collectChannelAccessPolicyInput{
+			TenantID: tenantID, AccountID: accountID, SourceID: source["id"].Int64(),
+			CanonicalChat: chatID, BotCollectScope: source["bot_collect_scope"].String(),
+			RelationExists: true, CollectEnabled: relation.CollectEnabled,
+			Status: relation.Status, ApprovalStatus: relation.ApprovalStatus,
+		})
+		allowed := decision.Allowed
 		if !allowed {
 			g.Log().Warning(ctx, "BOT采集频道审批未通过，跳过采集交付", g.Map{
 				"tenantId": tenantID, "accountId": accountID, "sourceId": source["id"].Int64(),
@@ -1542,6 +1548,13 @@ func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, sourc
 	}
 	// Queue before creating the discovery relation: a crash or send failure
 	// must not permanently lose the first-channel notification.
+	decision := decideCollectChannelAccess(collectChannelAccessPolicyInput{
+		TenantID: tenantID, AccountID: accountID, SourceID: source["id"].Int64(),
+		CanonicalChat: chatID, BotCollectScope: source["bot_collect_scope"].String(),
+	})
+	if !decision.Discover {
+		return false, nil
+	}
 	if err := s.enqueueCollectNotification(ctx, collectNotificationPayload{
 		ID:    fmt.Sprintf("discovery:%d:%d:%d:%s", tenantID, accountID, source["id"].Int64(), chatID),
 		BotID: botID, TenantID: tenantID, AccountID: accountID, SourceID: source["id"].Int64(), ChannelID: chatID,
@@ -1557,7 +1570,12 @@ func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, sourc
 		var current botCollectChannelRelation
 		lookupErr := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Fields("id,channel_id,source_id,collect_enabled,status,approval_status").Where("tenant_id", tenantID).Where("account_id", accountID).Where("source_id", source["id"].Int64()).Where("channel_id", channel.Id).Scan(&current)
 		if lookupErr == nil && current.Id > 0 {
-			return botCollectChannelRelationEnabled(current.CollectEnabled, current.Status, current.ApprovalStatus), nil
+			return decideCollectChannelAccess(collectChannelAccessPolicyInput{
+				TenantID: tenantID, AccountID: accountID, SourceID: source["id"].Int64(),
+				CanonicalChat: chatID, BotCollectScope: source["bot_collect_scope"].String(),
+				RelationExists: true, CollectEnabled: current.CollectEnabled,
+				Status: current.Status, ApprovalStatus: current.ApprovalStatus,
+			}).Allowed, nil
 		}
 		return false, gerror.Wrap(err, "创建BOT采集频道审批记录失败")
 	}
@@ -1692,8 +1710,13 @@ func (s *sSysPublish) ingestCollectorAccountDelivery(ctx context.Context, delive
 		logCollectorDeliverySkipped(ctx, delivery, "global_disabled")
 		return nil
 	}
-	if err := s.ensureAccountCollectChannelRelation(ctx, delivery); err != nil {
+	allowed, err := s.ensureAccountCollectChannelRelation(ctx, delivery)
+	if err != nil {
 		return err
+	}
+	if !allowed {
+		logCollectorDeliverySkipped(ctx, delivery, "channel_access_blocked")
+		return nil
 	}
 	blocked, err := s.collectMessageFromAccountPublishChannel(ctx, delivery.TenantID, delivery.TgAccountID, delivery.SourceChatID, delivery.SourceMessageID)
 	if err != nil {
@@ -1717,13 +1740,13 @@ func (s *sSysPublish) ingestCollectorAccountDelivery(ctx context.Context, delive
 	return s.submitCollectorDelivery(ctx, message, delivery).Err
 }
 
-func (s *sSysPublish) ensureAccountCollectChannelRelation(ctx context.Context, delivery *collectorin.CollectorDelivery) error {
+func (s *sSysPublish) ensureAccountCollectChannelRelation(ctx context.Context, delivery *collectorin.CollectorDelivery) (bool, error) {
 	if delivery == nil || delivery.SourceID <= 0 || delivery.TenantID <= 0 || delivery.AccountID <= 0 {
-		return nil
+		return false, nil
 	}
 	chatID := normalizeTelegramChannelChatID(delivery.SourceChatID)
 	if chatID == "" {
-		return nil
+		return false, nil
 	}
 	var source struct {
 		Id             int64  `json:"id"`
@@ -1736,14 +1759,14 @@ func (s *sSysPublish) ensureAccountCollectChannelRelation(ctx context.Context, d
 		Fields("id,title,source_username,collect_enabled,status").
 		Where("id", delivery.SourceID).Where("tenant_id", delivery.TenantID).
 		Where("account_id", delivery.AccountID).Scan(&source); err != nil {
-		return gerror.Wrap(err, "读取账户采集源频道信息失败")
+		return false, gerror.Wrap(err, "读取账户采集源频道信息失败")
 	}
 	if source.Id <= 0 {
-		return nil
+		return false, nil
 	}
 	now := gtime.Now()
 	if err := s.upsertCollectChannel(ctx, delivery.TenantID, chatID, "channel", strings.TrimSpace(source.Title), strings.TrimSpace(source.SourceUsername), 0, 0, delivery.SourceMessageID, now, now); err != nil {
-		return gerror.Wrap(err, "同步账户采集频道信息失败")
+		return false, gerror.Wrap(err, "同步账户采集频道信息失败")
 	}
 	var channel struct {
 		Id int64 `json:"id"`
@@ -1752,16 +1775,30 @@ func (s *sSysPublish) ensureAccountCollectChannelRelation(ctx context.Context, d
 	if err := pdao.YoubanPublishCollectChannel.Ctx(ctx).Fields(channelCols.Id).
 		Where(channelCols.TenantId, delivery.TenantID).
 		WhereIn(channelCols.TelegramChatId, tgChannelCacheLookupIds(chatID)).Scan(&channel); err != nil {
-		return gerror.Wrap(err, "读取账户采集频道关系失败")
+		return false, gerror.Wrap(err, "读取账户采集频道关系失败")
 	}
 	if channel.Id <= 0 {
-		return gerror.New("账户采集频道关系创建失败")
+		return false, gerror.New("账户采集频道关系创建失败")
 	}
 	sourceCols := pdao.YoubanPublishCollectSource.Columns()
 	if _, err := pdao.YoubanPublishCollectSource.Ctx(ctx).
 		Where(sourceCols.Id, source.Id).Where(sourceCols.ChannelId, 0).
 		Data(pdo.YoubanPublishCollectSource{ChannelId: channel.Id}).Update(); err != nil {
-		return gerror.Wrap(err, "回写账户采集频道关系失败")
+		return false, gerror.Wrap(err, "回写账户采集频道关系失败")
+	}
+	var current botCollectChannelRelation
+	if err := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).
+		Fields("id,collect_enabled,status,approval_status").
+		Where("tenant_id", delivery.TenantID).Where("account_id", delivery.AccountID).
+		Where("source_id", source.Id).Where("channel_id", channel.Id).Scan(&current); err != nil {
+		return false, gerror.Wrap(err, "读取账户采集频道授权状态失败")
+	}
+	if current.Id > 0 {
+		return decideCollectChannelAccess(collectChannelAccessPolicyInput{
+			TenantID: delivery.TenantID, AccountID: delivery.AccountID, SourceID: source.Id,
+			CanonicalChat: chatID, RelationExists: true, CollectEnabled: current.CollectEnabled,
+			Status: current.Status, ApprovalStatus: current.ApprovalStatus,
+		}).Allowed, nil
 	}
 	enabled := source.CollectEnabled == 1 && source.Status == 1
 	relation := pdo.YoubanPublishCollectAccountChannel{
@@ -1774,11 +1811,10 @@ func (s *sSysPublish) ensureAccountCollectChannelRelation(ctx context.Context, d
 	} else {
 		relation.DisabledAt = now
 	}
-	if _, err := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Data(relation).
-		OnConflict("tenant_id,account_id,channel_id,source_id").OnDuplicate("source_id,updated_at").Save(); err != nil {
-		return gerror.Wrap(err, "同步账户采集频道状态失败")
+	if _, err := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Data(relation).InsertAndGetId(); err != nil {
+		return false, gerror.Wrap(err, "同步账户采集频道状态失败")
 	}
-	return nil
+	return enabled, nil
 }
 
 func logCollectorDeliverySkipped(ctx context.Context, delivery *collectorin.CollectorDelivery, reason string) {

@@ -232,6 +232,7 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 	// channel against the tenant/account/BOT source index, then apply the
 	// explicit approval and manual-disable gates below.
 	type sourceCandidate struct {
+		SourceID       int64       `orm:"source_id"`
 		Status         int         `orm:"status"`
 		CollectEnabled int         `orm:"collect_enabled"`
 		BotId          int64       `orm:"bot_id"`
@@ -250,9 +251,55 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 	if botID > 0 {
 		sourceModel = sourceModel.Where("bot_id", botID)
 	}
+	// Keep the rule scope on the source query itself. Candidate discovery may
+	// use compact channel indexes, but it must never make another rule's source
+	// eligible for this rule page.
+	sourceModel = sourceModel.Where("EXISTS (SELECT 1 FROM "+pdao.YoubanPublishCollectSourceRule.Table()+" sr WHERE sr.source_id="+publishCollectSourceTable+".id AND sr.tenant_id=? AND sr.rule_id=?)", tenantID, ruleID)
 	var sourceRows []sourceCandidate
-	if err := sourceModel.Fields("status,collect_enabled,bot_id,source_chat_id,title AS chat_title,source_username AS chat_username,last_event_at AS last_message_at").OrderDesc("updated_at").Limit(candidateLimit).Scan(&sourceRows); err != nil {
+	if err := sourceModel.Fields("id AS source_id,status,collect_enabled,bot_id,source_chat_id,title AS chat_title,source_username AS chat_username,last_event_at AS last_message_at").OrderDesc("updated_at").Limit(candidateLimit).Scan(&sourceRows); err != nil {
 		return nil, 0, err
+	}
+	// Resolve source ownership through account_channel -> canonical channel.
+	// source_chat_id is an event/source identifier and is not a stable channel
+	// identity when several sources feed the same canonical channel.
+	var sourceChannelRows []struct {
+		SourceID       int64  `orm:"source_id"`
+		ChannelID      string `orm:"channel_id"`
+		Status         string `orm:"status"`
+		CollectEnabled int    `orm:"collect_enabled"`
+		ApprovalStatus string `orm:"approval_status"`
+	}
+	sourceChannelByID := make(map[int64][]string, len(sourceRows))
+	sourceChannelEnabled := make(map[string]bool)
+	sourceChannelConflict := make(map[string]bool)
+	sourceIDs := make([]int64, 0, len(sourceRows))
+	for _, source := range sourceRows {
+		if source.SourceID > 0 {
+			sourceIDs = append(sourceIDs, source.SourceID)
+		}
+	}
+	if len(sourceRows) > 0 && len(sourceIDs) > 0 {
+		if err := g.DB().Model(pdao.YoubanPublishCollectAccountChannel.Table()+" ac").Ctx(ctx).
+			InnerJoin(pdao.YoubanPublishCollectChannel.Table()+" cc", "cc.id=ac.channel_id AND cc.tenant_id=ac.tenant_id").
+			Fields("ac.source_id,cc.telegram_chat_id AS channel_id,ac.status,ac.collect_enabled,ac.approval_status").
+			Where("ac.tenant_id", tenantID).Where("ac.account_id", accountID).
+			WhereIn("ac.source_id", sourceIDs).WhereNull("ac.deleted_at").WhereNull("cc.deleted_at").
+			Scan(&sourceChannelRows); err != nil {
+			return nil, 0, gerror.Wrap(err, "读取采集源频道关联失败")
+		}
+		for _, relation := range sourceChannelRows {
+			id := canonicalCollectSourceChatID(relation.ChannelID)
+			if id != "" {
+				key := fmt.Sprintf("%d:%s", relation.SourceID, id)
+				for _, existing := range sourceChannelByID[relation.SourceID] {
+					if existing == id {
+						sourceChannelConflict[key] = true
+					}
+				}
+				sourceChannelByID[relation.SourceID] = append(sourceChannelByID[relation.SourceID], id)
+				sourceChannelEnabled[key] = botCollectChannelRelationEnabled(relation.CollectEnabled, relation.Status, relation.ApprovalStatus)
+			}
+		}
 	}
 	// Aggregate BOT sources have no source_chat_id. Their compact
 	// channel/profile index replaces the former collect_event history scan.
@@ -276,14 +323,11 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 	}
 	scopedChatIDs := make([]string, 0, len(sourceRows)*2)
 	boundBotIDs := make([]int64, 0, len(sourceRows))
-	aggregateBotSource := false
 	for _, source := range sourceRows {
 		scopedChatIDs = append(scopedChatIDs, tgChannelCacheLookupIds(source.ChatId)...)
+		scopedChatIDs = append(scopedChatIDs, sourceChannelByID[source.SourceID]...)
 		if source.BotId > 0 {
 			boundBotIDs = append(boundBotIDs, source.BotId)
-			if strings.TrimSpace(source.ChatId) == "" {
-				aggregateBotSource = true
-			}
 		}
 	}
 	// Configured rows are always in scope. Aggregate BOT sources intentionally
@@ -311,10 +355,7 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 		like := "%" + keyword + "%"
 		cacheModel = cacheModel.Where("(chat_id LIKE ? OR chat_title LIKE ? OR chat_username LIKE ?)", like, like, like)
 	}
-	if aggregateBotSource {
-		// Aggregate BOT sources own every channel/group that has sent this BOT
-		// a message. The BOT cache is the compact history index for this list.
-	} else if len(scopedChatIDs) > 0 {
+	if len(scopedChatIDs) > 0 {
 		cacheModel = cacheModel.WhereIn("chat_id", scopedChatIDs)
 	} else if ruleID > 0 {
 		// No source is bound to this rule; configured rows above are still
@@ -335,10 +376,6 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 	// Keep the cache scope available for the binding check below. Aggregate BOT
 	// sources intentionally have no source_chat_id; their ownership is proven
 	// by the bound bot seeing this exact chat in bot_channel_cache.
-	candidateChats := make(map[string]struct{}, len(candidates))
-	for _, candidate := range candidates {
-		candidateChats[canonicalCollectSourceChatID(candidate.ChatId)] = struct{}{}
-	}
 	var canonicalCandidates []struct {
 		ChatId       string      `orm:"chat_id"`
 		ChatTitle    string      `orm:"chat_title"`
@@ -359,9 +396,7 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 		canonicalModel = canonicalModel.InnerJoin(pdao.YoubanPublishCollectAccountChannel.Table()+" ac", "ac.channel_id=hg_youban_publish_collect_channel.id AND ac.tenant_id=hg_youban_publish_collect_channel.tenant_id").
 			Where("ac.account_id", accountID).WhereNull("ac.deleted_at")
 	}
-	if aggregateBotSource {
-		// The BOT/channel relation above provides the bounded candidate set.
-	} else if len(scopedChatIDs) > 0 {
+	if len(scopedChatIDs) > 0 {
 		canonicalModel = canonicalModel.WhereIn("hg_youban_publish_collect_channel.telegram_chat_id", scopedChatIDs)
 	} else if ruleID > 0 {
 		canonicalModel = canonicalModel.Where("1=0")
@@ -505,25 +540,35 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 		if row == nil {
 			continue
 		}
-		sourceFound, sourceEnabled := false, false
+		sourceFound, sourceEnabled, sourceConflict := false, false, false
 		for _, source := range collectionSources {
-			if introFeeCollectionSourceMatchesChannel(source.ChatId, source.BotId, row.ChannelId, row.BotId) {
-				sourceFound = true
-				sourceEnabled = sourceEnabled || source.Status == 1 && source.CollectEnabled == 1
+			matches := introFeeCollectionSourceMatchesChannel(source.ChatId, source.BotId, row.ChannelId, row.BotId)
+			if !matches {
+				for _, mappedChannelID := range sourceChannelByID[source.SourceID] {
+					if canonicalCollectSourceChatID(mappedChannelID) == canonicalCollectSourceChatID(row.ChannelId) {
+						matches = true
+						break
+					}
+				}
 			}
-		}
-		if !sourceFound && aggregateBotSource {
-			// An aggregate BOT source has no source_chat_id by design. Its
-			// ownership is established by the same bounded BOT cache used to
-			// build the candidate list, rather than by the request's botId
-			// (which is zero for the rule management view).
-			if introFeeAggregateBotSourceMatchesChannel(candidateChats, row.ChannelId) {
+			if matches {
 				sourceFound = true
-				sourceEnabled = true
+				mappedKey := fmt.Sprintf("%d:%s", source.SourceID, canonicalCollectSourceChatID(row.ChannelId))
+				if mapped, exists := sourceChannelEnabled[mappedKey]; exists {
+					sourceEnabled = sourceEnabled || mapped
+				} else {
+					sourceEnabled = sourceEnabled || source.Status == 1 && source.CollectEnabled == 1
+				}
+				if sourceChannelConflict[fmt.Sprintf("%d:%s", source.SourceID, canonicalCollectSourceChatID(row.ChannelId))] {
+					sourceConflict = true
+				}
 			}
 		}
 		if !sourceFound {
 			row.BlockReason = "未绑定采集源或规则"
+		}
+		if sourceEnabled && !sourceConflict && (row.BlockReason == "频道采集已禁用或拒绝" || row.BlockReason == "机器人已移除") {
+			row.BlockReason = ""
 		}
 		if conf != nil && conf.Enabled != 1 {
 			row.BlockReason = "采集总开关已关闭"
@@ -534,8 +579,14 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 		if row.Blacklisted {
 			row.BlockReason = "频道已加入黑名单"
 		}
+		if sourceConflict {
+			row.BlockReason = "同一采集源的频道关联状态冲突"
+		}
 		row.Status = 1
-		if disabledByChannel[canonicalCollectSourceChatID(row.ChannelId)] {
+		// A manual disable only blocks when no rule-scoped source remains
+		// eligible. Do not let one source's disable shadow another source's
+		// allowed relation for the same canonical channel.
+		if disabledByChannel[canonicalCollectSourceChatID(row.ChannelId)] && !sourceEnabled {
 			row.BlockReason = "当前规则的频道采集已禁用"
 		}
 		if row.BlockReason != "" {
@@ -586,14 +637,6 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 	return pageRows, total, nil
 }
 
-func introFeeAggregateBotSourceMatchesChannel(candidateChats map[string]struct{}, channelID string) bool {
-	if len(candidateChats) == 0 || strings.TrimSpace(channelID) == "" {
-		return false
-	}
-	_, ok := candidateChats[canonicalCollectSourceChatID(channelID)]
-	return ok
-}
-
 func fillCollectChannelProfileCounts(ctx context.Context, tenantID, accountID, ruleID int64, rows []*sysin.IntroFeeChannelRuleItem) error {
 	channels := make([]string, 0, len(rows))
 	for _, row := range rows {
@@ -614,16 +657,11 @@ func fillCollectChannelProfileCounts(ctx context.Context, tenantID, accountID, r
 }
 
 func introFeeCollectionSourceMatchesChannel(sourceChatID string, sourceBotID int64, channelID string, ruleBotID int64) bool {
-	if canonicalCollectSourceChatID(sourceChatID) == canonicalCollectSourceChatID(channelID) {
-		return true
-	}
-	if strings.TrimSpace(sourceChatID) != "" || sourceBotID <= 0 {
-		return false
-	}
-	// bot_id=0 is the global suffix scope. An aggregate BOT source bound to
-	// the collection rule therefore covers the channel candidates discovered
-	// through that BOT, while an explicit BOT scope remains isolated.
-	return ruleBotID == 0 || sourceBotID == ruleBotID
+	// A source without source_chat_id is not a wildcard. Its channel scope
+	// must come from the explicit source/channel relation resolved by the
+	// caller; bot_id alone must never authorize every channel seen by a BOT.
+	return strings.TrimSpace(sourceChatID) != "" &&
+		canonicalCollectSourceChatID(sourceChatID) == canonicalCollectSourceChatID(channelID)
 }
 
 func introFeeChannelDisplayScore(title, username, inviteLink string) int {

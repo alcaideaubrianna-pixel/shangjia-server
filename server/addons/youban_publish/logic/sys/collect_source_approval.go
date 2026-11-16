@@ -23,8 +23,25 @@ func (s *sSysPublish) BotCollectSourceApproval(ctx context.Context, sourceId, te
 		ChannelId int64 `json:"channelId"`
 		AccountId int64 `json:"accountId"`
 	}
-	_ = pdao.YoubanPublishCollectSource.Ctx(ctx).Fields("channel_id,account_id").Where("id", sourceId).Where("tenant_id", tenantId).WhereNull("deleted_at").Scan(&source)
-	result, err := pdao.YoubanPublishCollectSource.Ctx(ctx).Where("id", sourceId).Where("tenant_id", tenantId).WhereNull("deleted_at").Data(data).Update()
+	sourceColumns := pdao.YoubanPublishCollectSource.Columns()
+	if err := pdao.YoubanPublishCollectSource.Ctx(ctx).
+		Fields(sourceColumns.ChannelId, sourceColumns.AccountId).
+		Where(sourceColumns.Id, sourceId).
+		Where(sourceColumns.TenantId, tenantId).
+		Where(sourceColumns.AccountId, accountId).
+		WhereNull(sourceColumns.DeletedAt).
+		Scan(&source); err != nil {
+		return gerror.Wrap(err, "读取采集源归属失败")
+	}
+	if !collectSourceApprovalScopeMatches(source.AccountId, accountId) {
+		return gerror.New("采集源不存在或不属于当前账户")
+	}
+	result, err := pdao.YoubanPublishCollectSource.Ctx(ctx).
+		Where(sourceColumns.Id, sourceId).
+		Where(sourceColumns.TenantId, tenantId).
+		Where(sourceColumns.AccountId, accountId).
+		WhereNull(sourceColumns.DeletedAt).
+		Data(data).Update()
 	if err != nil {
 		return gerror.Wrap(err, "更新采集源审批状态失败")
 	}
@@ -32,7 +49,7 @@ func (s *sSysPublish) BotCollectSourceApproval(ctx context.Context, sourceId, te
 	if rows == 0 {
 		return gerror.New("采集源不存在或已失效")
 	}
-	if source.ChannelId > 0 && source.AccountId > 0 {
+	if source.ChannelId > 0 {
 		now := gtime.Now()
 		status := sysin.CollectAccountChannelDisabled
 		approvalStatus := "rejected"
@@ -40,11 +57,19 @@ func (s *sSysPublish) BotCollectSourceApproval(ctx context.Context, sourceId, te
 			status = sysin.CollectAccountChannelEnabled
 			approvalStatus = "approved"
 		}
-		relation := g.Map{"tenant_id": tenantId, "account_id": source.AccountId, "channel_id": source.ChannelId, "source_id": sourceId, "collect_enabled": introFeeBoolToInt(approved), "status": status, "approval_status": approvalStatus, "approved_at": gdbNil(approved), "disabled_at": gdbNil(!approved), "updated_at": now}
-		_, _ = pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Data(relation).OnConflict("tenant_id,account_id,channel_id,source_id").OnDuplicate("source_id,collect_enabled,status,approval_status,approved_at,disabled_at,updated_at").Save()
+		relation := g.Map{"tenant_id": tenantId, "account_id": accountId, "channel_id": source.ChannelId, "source_id": sourceId, "collect_enabled": introFeeBoolToInt(approved), "status": status, "approval_status": approvalStatus, "approved_at": gdbNil(approved), "disabled_at": gdbNil(!approved), "updated_at": now}
+		// A source approval may create the first relation, but must not reset an
+		// existing per-tenant/account/source/channel decision.
+		_, _ = pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Data(relation).
+			OnConflict("tenant_id,account_id,channel_id,source_id").
+			OnDuplicate("source_id").Save()
 	}
 	s.refreshCollectSourceCache(ctx)
 	return nil
+}
+
+func collectSourceApprovalScopeMatches(sourceAccountID, requestedAccountID int64) bool {
+	return sourceAccountID > 0 && sourceAccountID == requestedAccountID
 }
 
 func (s *sSysPublish) BotCollectChannelView(ctx context.Context, relationId, tenantId, operatorAccountId int64) (*sysin.CollectChannelApprovalModel, error) {

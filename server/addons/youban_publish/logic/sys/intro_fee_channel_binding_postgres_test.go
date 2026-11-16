@@ -73,11 +73,14 @@ func TestIntroFeeChannelBindingOnlineFixturePostgres(t *testing.T) {
 			`INSERT INTO hg_youban_publish_intro_fee_channel_rule VALUES(36,78,615,338,0,'4386299825','汉庭选妃','htbaoyang888','百花阁  Z2',1,now(),now(),NULL)`,
 			`INSERT INTO hg_youban_publish_collect_source VALUES(351,78,615,'','百花阁 BOT 采集','','',64,1,1,0,now(),now(),NULL)`,
 			`INSERT INTO hg_youban_publish_collect_source_rule VALUES(351,78,338)`,
+			`INSERT INTO hg_youban_publish_collect_source VALUES(352,78,615,'source-352','同频道另一采集源','','',64,1,1,0,now(),now(),NULL)`,
+			`INSERT INTO hg_youban_publish_collect_source_rule VALUES(352,78,338)`,
 			`INSERT INTO hg_youban_publish_bot_channel_cache VALUES(78,64,'-1004386299825','汉庭选妃','htbaoyang888','channel',938,'2026-10-12 19:16:54')`,
 			`INSERT INTO hg_youban_publish_collect_channel_profile(tenant_id,account_id,rule_id,channel_id,profile_id,updated_at,deleted_at) SELECT 78,615,338,'4386299825',n,now(),NULL FROM generate_series(1,70) n`,
 			`INSERT INTO hg_youban_publish_collect_channel VALUES(272067,78,'-1004386299825','汉庭选妃','htbaoyang888','','active',now(),NULL)`,
 			`INSERT INTO hg_youban_publish_collect_bot_channel VALUES(78,64,272067,'discovered',NULL)`,
 			`INSERT INTO hg_youban_publish_collect_account_channel VALUES(78,615,272067,351,'disabled',0,'rejected',NULL)`,
+			`INSERT INTO hg_youban_publish_collect_account_channel VALUES(78,615,272067,352,'enabled',1,'approved',NULL)`,
 		} {
 			if _, err := tx.Exec(sql); err != nil {
 				return err

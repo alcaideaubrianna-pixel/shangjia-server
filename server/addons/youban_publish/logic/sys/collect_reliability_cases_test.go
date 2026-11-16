@@ -10,6 +10,7 @@ import (
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/hibiken/asynq"
+	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
 // Production metadata only: two enabled source-78 events were media_pending
@@ -116,5 +117,39 @@ func TestObservedExpiredOutboxSurvivesQueueFailureLocalPostgres(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCollectSourceApprovalScopeIsAccountIsolated(t *testing.T) {
+	if collectSourceApprovalScopeMatches(21, 21) != true {
+		t.Fatal("source approval should accept the owning account")
+	}
+	if collectSourceApprovalScopeMatches(21, 22) {
+		t.Fatal("source approval scope crossed account boundary")
+	}
+	if collectSourceApprovalScopeMatches(0, 21) {
+		t.Fatal("missing source account must not authorize approval")
+	}
+}
+
+func TestBotCollectChannelRelationEnabledPreservesExplicitDecisions(t *testing.T) {
+	cases := []struct {
+		name     string
+		enabled  int
+		status   string
+		approval string
+		want     bool
+	}{
+		{name: "first relation defaults enabled", want: true},
+		{name: "pending remains default enabled", status: sysin.CollectAccountChannelPending, want: true},
+		{name: "disabled stays disabled", enabled: 1, status: sysin.CollectAccountChannelDisabled, approval: "approved", want: false},
+		{name: "rejected stays rejected", enabled: 1, status: sysin.CollectAccountChannelEnabled, approval: "rejected", want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := botCollectChannelRelationEnabled(tc.enabled, tc.status, tc.approval); got != tc.want {
+				t.Fatalf("enabled=%d status=%q approval=%q got %v want %v", tc.enabled, tc.status, tc.approval, got, tc.want)
+			}
+		})
 	}
 }
