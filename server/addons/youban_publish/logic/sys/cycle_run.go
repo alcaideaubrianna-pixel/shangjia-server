@@ -225,13 +225,17 @@ func (s *sSysPublish) reconcileRecoveredChannelCycleRuns(ctx context.Context, li
 			SET status='superseded', dispatch_status=?, next_retry_at=NULL,
 				last_dispatch_error=?, updated_at=NOW()
 			WHERE source.status='failed' AND source.operation_no LIKE ?
+				AND source.tenant_id=? AND source.channel_id=?
 				AND EXISTS (
 					SELECT 1 FROM `+publishTgJobTable+` recovery
-					WHERE recovery.operation_no LIKE ('auto-recover:' || source.id || ':%')
+					WHERE (recovery.recovery_of_job_id=source.id OR
+							(recovery.recovery_of_job_id IS NULL AND recovery.operation_no = ('auto-recover:' || source.id || ':' || source.profile_id)))
+						AND recovery.tenant_id=source.tenant_id
+						AND recovery.account_id=source.account_id
 						AND recovery.profile_id=source.profile_id
 						AND recovery.channel_id=source.channel_id
 						AND recovery.status='sent'
-				)`, tgDispatchStatusDone, message, prefix)
+				)`, tgDispatchStatusDone, message, prefix, run.TenantId, run.ChannelId)
 		if err != nil {
 			return gerror.Wrap(err, "核对循环批次自动补偿任务失败")
 		}

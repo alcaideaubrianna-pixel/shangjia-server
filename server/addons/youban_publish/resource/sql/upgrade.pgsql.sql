@@ -899,6 +899,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_profile_channel" (
 CREATE INDEX IF NOT EXISTS "idx_ybp_profile_channel_owner" ON "hg_youban_publish_profile_channel" ("tenant_id","account_id","profile_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_profile_channel_channel" ON "hg_youban_publish_profile_channel" ("tenant_id","channel_id","profile_id");
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "operation_no" varchar(128) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "recovery_of_job_id" bigint DEFAULT NULL;
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "operation_type" varchar(32) NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "profile_no_snapshot" varchar(32) NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "title_snapshot" text NOT NULL DEFAULT '';

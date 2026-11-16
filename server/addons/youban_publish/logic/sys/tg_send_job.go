@@ -1313,13 +1313,13 @@ func (s *sSysPublish) completeTelegramJob(ctx context.Context, job telegramJobRe
 	if streamEngine {
 		transitioned, err = s.confirmTelegramJobAndCyclePlan(ctx, job, transition)
 	} else {
-		transitioned, err = s.transitionTelegramJob(ctx, transition)
+		transitioned, err = s.confirmTelegramJobAndRecovery(ctx, transition)
 	}
 	if err != nil {
 		if streamEngine {
 			return gerror.Wrap(errTelegramRemoteConfirmed, "保存已确认发送及频道计划失败："+err.Error())
 		}
-		return gerror.Wrap(err, "更新TG任务状态失败")
+		return gerror.Wrap(errTelegramRemoteConfirmed, "保存已确认发送及补偿状态失败："+err.Error())
 	}
 	if !transitioned {
 		s.appendTelegramJobLog(ctx, job, "publish", "skipped", "TG发送完成时任务已不再发送中，跳过成功标记")

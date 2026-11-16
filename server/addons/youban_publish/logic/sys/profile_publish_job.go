@@ -596,6 +596,9 @@ func (s *sSysPublish) ensureTelegramProfileJobWithMetaTx(ctx context.Context, tx
 		"priority": s.telegramJobPriority(job), "queue_name": telegramQueueNameByPriorityAndChannel(ctx, s.telegramJobPriority(job), channel.Id),
 		"dispatch_status": tgDispatchStatusIdle, "created_at": now, "updated_at": now,
 	}
+	if sourceJobID := terminalPublishRecoverySourceJobID(operationNo); sourceJobID > 0 {
+		jobData["recovery_of_job_id"] = sourceJobID
+	}
 	for key, value := range cycleData {
 		jobData[key] = value
 	}

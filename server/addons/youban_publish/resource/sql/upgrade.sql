@@ -815,6 +815,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_tenant_feature_permission` (`id` b
 ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN IF NOT EXISTS `send_phase` varchar(32) NOT NULL DEFAULT '' COMMENT '发送阶段' AFTER `dispatch_count`;
 ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN IF NOT EXISTS `reconcile_count` int(11) NOT NULL DEFAULT '0' COMMENT '对账次数' AFTER `send_phase`;
 ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN IF NOT EXISTS `cycle_failure_count` int(11) NOT NULL DEFAULT '0' COMMENT '循环连续失败次数';
+ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN IF NOT EXISTS `recovery_of_job_id` bigint(20) DEFAULT NULL COMMENT '补偿的源TG任务ID';
 DELETE older FROM `hg_youban_publish_tg_message` older INNER JOIN `hg_youban_publish_tg_message` newer ON older.`job_id` = newer.`job_id` AND older.`tg_message_id` = newer.`tg_message_id` AND older.`id` < newer.`id`;
 ALTER TABLE `hg_youban_publish_tg_message` ADD UNIQUE INDEX `uk_ybp_tg_message_job_message` (`job_id`,`tg_message_id`);
 ALTER TABLE `hg_youban_publish_tg_channel_stat` MODIFY COLUMN `last_error_message` text NOT NULL COMMENT '最后错误';

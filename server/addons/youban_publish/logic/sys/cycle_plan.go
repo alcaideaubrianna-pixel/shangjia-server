@@ -22,6 +22,9 @@ func (s *sSysPublish) confirmTelegramJobAndCyclePlan(ctx context.Context, job te
 		if err != nil || !changed {
 			return err
 		}
+		if _, err = s.closeRecoveredTelegramJobTx(ctx, tx, job.Id); err != nil {
+			return err
+		}
 		return s.upsertChannelProfileFromJobTx(ctx, tx, job)
 	})
 	return

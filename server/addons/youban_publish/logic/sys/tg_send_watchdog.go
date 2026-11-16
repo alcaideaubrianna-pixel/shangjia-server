@@ -145,6 +145,7 @@ func (s *sSysPublish) expireTelegramSendTx(ctx context.Context, tx gdb.TX, id in
 		"status": telegramJobStatusFailed, "dispatch_status": tgDispatchStatusIdle, "priority": 0,
 		"send_phase":            "timeout_wait_cleanup",
 		"timeout_parent_job_id": old.Id,
+		"recovery_of_job_id":    old.Id,
 		"timeout_retry_count":   old.TimeoutRetryCount + 1,
 		"cycle_enabled":         old.CycleEnabled, "cycle_days": old.CycleDays, "cycle_publish_time": old.CyclePublishTime,
 	}

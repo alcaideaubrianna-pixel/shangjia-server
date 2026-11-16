@@ -298,6 +298,7 @@ CREATE INDEX IF NOT EXISTS idx_ybp_bot_account ON hg_youban_publish_bot(tenant_i
 
 ALTER TABLE hg_youban_publish_bot ADD COLUMN IF NOT EXISTS bot_type varchar(32) NOT NULL DEFAULT 'normal';
 ALTER TABLE hg_youban_publish_tg_job ADD COLUMN IF NOT EXISTS cycle_failure_count integer NOT NULL DEFAULT 0;
+ALTER TABLE hg_youban_publish_tg_job ADD COLUMN IF NOT EXISTS recovery_of_job_id bigint DEFAULT NULL;
 
 ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "profile_detail_view_enabled" smallint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "push_engine" varchar(16) NOT NULL DEFAULT 'legacy';

@@ -1161,6 +1161,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_job` (
 	`display_media_selection` text,
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键', `task_id` bigint(20) DEFAULT NULL COMMENT '采集任务ID，普通资料推送为空',
   `operation_no` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG操作号',
+  `recovery_of_job_id` bigint(20) DEFAULT NULL COMMENT '补偿的源TG任务ID',
   `operation_type` varchar(32) NOT NULL DEFAULT '' COMMENT '资料操作类型',
   `profile_no_snapshot` varchar(32) NOT NULL DEFAULT '' COMMENT '删除通知资料编号快照',
   `title_snapshot` text NOT NULL COMMENT '删除通知资料标题快照',

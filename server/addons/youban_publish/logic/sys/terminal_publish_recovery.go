@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -170,35 +171,93 @@ func (s *sSysPublish) handleTerminalPublishRecoveryTask(ctx context.Context, tas
 	return nil
 }
 
-func (s *sSysPublish) reconcileRecoveredCycleJob(ctx context.Context, recoveryJob telegramJobRecord) error {
-	sourceJobID := terminalPublishRecoverySourceJobID(recoveryJob.OperationNo)
-	if sourceJobID <= 0 {
-		return nil
+// closeRecoveredTelegramJobTx runs after the recovery job becomes sent in the
+// same transaction. A non-NULL link is authoritative; only legacy rows fall
+// back to the exact auto-recover operation number.
+func (s *sSysPublish) confirmTelegramJobAndRecovery(ctx context.Context, transition telegramJobTransition) (changed bool, err error) {
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		changed, err = s.transitionTelegramJobTx(ctx, tx, transition)
+		if err != nil || !changed {
+			return err
+		}
+		_, err = s.closeRecoveredTelegramJobTx(ctx, tx, transition.JobId)
+		return err
+	})
+	return
+}
+
+func (s *sSysPublish) closeRecoveredTelegramJobTx(ctx context.Context, tx gdb.TX, recoveryID int64) (string, error) {
+	var recovery struct {
+		Id              int64
+		OperationNo     string
+		TenantId        int64
+		AccountId       int64
+		ProfileId       int64
+		ChannelId       int64
+		RecoveryOfJobId *int64
+	}
+	if err := tx.Model(publishTgJobTable).Safe().Ctx(ctx).
+		Fields("id,operation_no,tenant_id,account_id,profile_id,channel_id,recovery_of_job_id").
+		Where("id", recoveryID).Where("status", telegramJobStatusSent).Scan(&recovery); err != nil {
+		return "", gerror.Wrap(err, "读取已完成补偿任务失败")
+	}
+	if recovery.Id <= 0 {
+		return "", nil
+	}
+	var sourceID int64
+	legacy := recovery.RecoveryOfJobId == nil
+	if legacy {
+		sourceID = terminalPublishRecoverySourceJobID(recovery.OperationNo)
+	} else {
+		sourceID = *recovery.RecoveryOfJobId
+	}
+	if sourceID <= 0 || sourceID == recovery.Id {
+		return "", nil
 	}
 	var source telegramJobRecord
-	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Fields("id,operation_no,status").Where("id", sourceJobID).Scan(&source); err != nil {
-		return gerror.Wrap(err, "读取终态补偿源任务失败")
+	if err := tx.Model(publishTgJobTable).Safe().Ctx(ctx).
+		Fields("id,operation_no,status,tenant_id,account_id,profile_id,channel_id").
+		Where("id", sourceID).LockUpdate().Scan(&source); err != nil {
+		return "", gerror.Wrap(err, "读取补偿源任务失败")
 	}
-	if source.Id <= 0 || !isCycleBatchOperation(source.OperationNo) || source.Status != "failed" {
-		return nil
+	if source.Id <= 0 || source.TenantId != recovery.TenantId || source.AccountId != recovery.AccountId ||
+		source.ProfileId != recovery.ProfileId || source.ChannelId != recovery.ChannelId ||
+		(legacy && recovery.OperationNo != terminalPublishRecoveryOperationNo(source)) {
+		return "", nil
 	}
-	message := "原循环任务已由自动补偿任务成功替代"
-	transitioned, err := s.transitionTelegramJob(ctx, telegramJobTransition{
-		JobId:        source.Id,
-		From:         []JobStatus{telegramJobStatusFailed},
-		To:           telegramJobStatusSuperseded,
-		ErrorMessage: message,
-		Additional:   g.Map{"last_dispatch_error": message},
+	if source.Status == telegramJobStatusFailed {
+		message := "原任务已由自动补偿任务成功替代"
+		changed, err := s.transitionTelegramJobTx(ctx, tx, telegramJobTransition{
+			JobId: source.Id, From: []JobStatus{telegramJobStatusFailed}, To: telegramJobStatusSuperseded,
+			ErrorMessage: message, Additional: g.Map{"last_dispatch_error": message},
+		})
+		if err != nil {
+			return "", gerror.Wrap(err, "收口补偿源任务失败")
+		}
+		if !changed {
+			return "", nil
+		}
+	} else if source.Status != telegramJobStatusSuperseded {
+		return "", nil
+	}
+	if isCycleBatchOperation(source.OperationNo) {
+		return source.OperationNo, nil
+	}
+	return "", nil
+}
+
+func (s *sSysPublish) reconcileRecoveredCycleJob(ctx context.Context, recoveryJob telegramJobRecord) error {
+	var operationNo string
+	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		var err error
+		operationNo, err = s.closeRecoveredTelegramJobTx(ctx, tx, recoveryJob.Id)
+		return err
 	})
 	if err != nil {
-		return gerror.Wrap(err, "回写循环源任务补偿状态失败")
-	}
-	if !transitioned {
-		return nil
-	}
-	if err = s.reconcileCycleRunStatus(ctx, source.OperationNo); err != nil {
 		return err
+	}
+	if operationNo != "" {
+		return s.reconcileCycleRunStatus(ctx, operationNo)
 	}
 	return nil
 }
