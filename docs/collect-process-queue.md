@@ -14,6 +14,13 @@ Telegram 更新
 
 实时采集默认使用 `youbanPublish.collect.processOutboxMode=redis_first`。任务进入 Redis/Asynq 后，由 Asynq 的唯一任务键、延迟任务和重试机制负责执行交接；Worker 只在带有旧 Outbox 租约的任务上回写 Outbox 状态。这样实时事件不会先对 `hg_youban_publish_collect_process_outbox` 执行一次 PostgreSQL upsert，也不会为每个来源启动 PostgreSQL Outbox 轮询器。
 
+SAE ENV 对应字段为：
+
+```text
+YOUBAN_PUBLISH_COLLECT_PROCESS_OUTBOX_MODE=redis_first
+YOUBAN_TELEGRAM_COLLECTOR_INGEST_SPOOL_MODE=redis_first
+```
+
 `hg_youban_publish_collect_process_outbox` 保留给旧版本任务和显式迁移/恢复。新的实时任务和新的历史任务都不再写入这张表。迁移旧任务时可以临时把配置切换为：
 
 ```yaml

@@ -54,6 +54,8 @@ func TestMediaFileCacheEnvironmentMappings(t *testing.T) {
 		"youbanPublish.mediaFileCache.workerCdnBaseUrl":      "YOUBAN_PUBLISH_MEDIA_CACHE_WORKER_CDN_BASE_URL",
 		"youbanPublish.mediaFileCache.cosDownloadCdnBaseUrl": "YOUBAN_PUBLISH_COS_DOWNLOAD_CDN_URL",
 		"youbanPublish.mediaFileCache.fallbackCdnBaseUrl":    "YOUBAN_PUBLISH_MEDIA_CACHE_FALLBACK_CDN_BASE_URL",
+		"youbanPublish.collect.processOutboxMode":            "YOUBAN_PUBLISH_COLLECT_PROCESS_OUTBOX_MODE",
+		"telegramCollector.ingestSpoolMode":                  "YOUBAN_TELEGRAM_COLLECTOR_INGEST_SPOOL_MODE",
 	}
 	for _, item := range items {
 		envKey, ok := want[item.Key]
