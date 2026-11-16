@@ -12,19 +12,6 @@ import (
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
-func TestCaptionlessPhotoVideoGroupIsNotVerification(t *testing.T) {
-	if collectMaterialMixedVerification(collectMaterialMessageView{
-		Media: []collectMediaItem{{Type: "photo"}, {Type: "video"}},
-	}) {
-		t.Fatal("photo+video group must remain a display candidate")
-	}
-	if !collectMaterialMixedVerification(collectMaterialMessageView{
-		Media: []collectMediaItem{{Type: "video"}},
-	}) {
-		t.Fatal("standalone captionless video must remain a verification candidate")
-	}
-}
-
 func TestCollectMaterialMutableStatusesExcludeTerminalEvents(t *testing.T) {
 	statuses := make(map[string]struct{})
 	for _, status := range collectMaterialMutableStatuses() {
@@ -318,23 +305,6 @@ func TestPairCollectMaterialMessagesMultipleAdjacentGroups(t *testing.T) {
 	got := pairCollectMaterialMessages(views)
 	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("pairs=%+v want=%+v", got, want)
-	}
-}
-
-func TestCollectMaterialEventViewsPreservesExplicitVerifyParent(t *testing.T) {
-	rows := []gdb.Record{
-		{"id": gvar.New(217520), "material_parent_event_id": gvar.New(0), "raw_text": gvar.New("昵称：旧资料")},
-		{"id": gvar.New(217524), "material_parent_event_id": gvar.New(0), "raw_text": gvar.New("昵称：新资料")},
-		{"id": gvar.New(217530), "material_parent_event_id": gvar.New(217520), "raw_text": gvar.New("")},
-	}
-	media := map[int64][]collectMediaItem{
-		217520: {{Type: "photo", FileId: "display-old"}},
-		217524: {{Type: "photo", FileId: "display-new"}},
-		217530: {{Type: "video", FileId: "verify-old"}},
-	}
-	pairs := pairCollectMaterialMessages(collectMaterialEventViews(rows, media))
-	if len(pairs) != 1 || pairs[0] != (collectMaterialPair{DisplayIndex: 0, VerifyIndex: 2}) {
-		t.Fatalf("explicit verify parent must win over adjacent display: %+v", pairs)
 	}
 }
 

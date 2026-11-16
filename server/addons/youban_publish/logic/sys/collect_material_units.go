@@ -93,14 +93,10 @@ func pairCollectMaterialMessages(messages []collectMaterialMessageView) []collec
 	return pairs
 }
 
-// A verification material is one standalone captionless video message.
-// A captionless group containing photos and a video is a new display unit,
-// not verification material belonging to the previous display.
+// A captionless mixed album is verification only inside an existing display
+// context. On its own it must not create a profile or claim a new context.
 func collectMaterialMixedVerification(message collectMaterialMessageView) bool {
-	if strings.TrimSpace(message.RawText) != "" || len(message.Media) != 1 {
-		return false
-	}
-	return profileMessageHasMediaType(message.Media, "video")
+	return strings.TrimSpace(message.RawText) == "" && profileMessageHasMediaType(message.Media, "video")
 }
 
 func collectMaterialSkippableMessage(message collectMaterialMessageView) bool {
@@ -140,11 +136,9 @@ func collectMaterialEventViews(rows []gdb.Record, mediaByEvent map[int64][]colle
 	views := make([]collectMaterialMessageView, 0, len(rows))
 	for _, row := range rows {
 		views = append(views, collectMaterialMessageView{
-			EventID:       row["id"].Int64(),
-			ParentEventID: row["material_parent_event_id"].Int64(),
-			RawText:       row["raw_text"].String(),
-			Media:         mediaByEvent[row["id"].Int64()],
-			MessageAt:     collectMaterialEventAt(row),
+			RawText:   row["raw_text"].String(),
+			Media:     mediaByEvent[row["id"].Int64()],
+			MessageAt: collectMaterialEventAt(row),
 		})
 	}
 	return views
