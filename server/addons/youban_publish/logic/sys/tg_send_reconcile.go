@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	relayconsts "hotgo/addons/youban_publish/consts"
+	pdao "hotgo/addons/youban_publish/internal/dao"
 	"strconv"
 	"strings"
 	"time"
@@ -451,8 +452,8 @@ func (s *sSysPublish) parkTelegramUnknownForWebhook(ctx context.Context, job tel
 			current.Status != telegramAttemptStatusRetryWait {
 			return gerror.New("TG待确认Attempt状态已变化")
 		}
-		statusField := "status"
-		attemptData := g.Map{statusField: telegramAttemptStatusWaiting, "webhook_deadline": deadline, "updated_at": gtime.Now()}
+		attemptCols := pdao.YoubanPublishTgAttempt.Columns()
+		attemptData := g.Map{attemptCols.Status: telegramAttemptStatusWaiting, "webhook_deadline": deadline, "updated_at": gtime.Now()}
 		if _, err := tx.Model(publishTgAttemptTable).Where("id", attempt.Id).Data(attemptData).Update(); err != nil {
 			return err
 		}

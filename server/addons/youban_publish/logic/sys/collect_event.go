@@ -1469,7 +1469,7 @@ func logCollectProcessTerminal(ctx context.Context, event gdb.Record, startedAt 
 		Where("collect_event_id", eventID).Count()
 	fields := g.Map{
 		"log_type": "telegram_collect_pipeline", "event": "collect_pipeline_terminal",
-		"stage": "process", "status": status, "traceId": gtrace.GetTraceID(ctx),
+		"stage": "process", "eventStatus": status, "traceId": gtrace.GetTraceID(ctx),
 		"collectEventId": eventID, "tenantId": event["tenant_id"].Int64(), "accountId": event["account_id"].Int64(),
 		"sourceId": event["source_id"].Int64(), "sourceChatId": event["source_chat_id"].String(),
 		"sourceMessageId": event["source_message_id"].Int64(), "sourceGroupedId": event["source_grouped_id"].String(),
