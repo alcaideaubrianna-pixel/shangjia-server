@@ -196,6 +196,10 @@ func inspect(file, path string) ([]entry, error) {
 		ast.Inspect(n, func(n ast.Node) bool {
 			switch x := n.(type) {
 			case *ast.CallExpr:
+				if sel, ok := x.Fun.(*ast.SelectorExpr); ok &&
+					sel.Sel.Name == "dispatchDueCollectProcessOutbox" && len(x.Args) < 3 {
+					add(fn, "collect-outbox-unscoped-dispatch", x)
+				}
 				if !publishFile {
 					return true
 				}

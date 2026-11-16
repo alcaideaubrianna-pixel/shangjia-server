@@ -214,13 +214,27 @@ func (s *sSysPublish) runCollectProcessSourceDispatcher(ctx context.Context, mem
 				"tenantId": tenantID, "accountId": accountID, "sourceId": sourceID, "error": readErr.Error(),
 			})
 		} else if !value.IsNil() {
-			_, _ = client.Do(ctx, "DEL", wakeLockKey)
 			if dispatchErr := s.dispatchDueCollectProcessOutbox(ctx, collectProcessDispatchBatchSize(ctx), publishAccountScope{
 				TenantID: tenantID, AccountID: accountID, SourceID: sourceID,
 			}); dispatchErr != nil {
+				// RPOP is destructive. Put the wake signal back before the next
+				// loop so a transient DB/queue failure cannot strand this source.
+				// Keep the lock alive while the signal is requeued; producers will
+				// still coalesce duplicate wakeups for this source.
+				if _, requeueErr := client.Do(ctx, "LPUSH", wakeQueueKey, member); requeueErr != nil {
+					g.Log().Warning(ctx, "来源采集唤醒信号回队列失败", g.Map{
+						"tenantId": tenantID, "accountId": accountID, "sourceId": sourceID,
+						"error": requeueErr.Error(),
+					})
+				}
 				g.Log().Warning(ctx, "来源采集Outbox调度失败", g.Map{
 					"tenantId": tenantID, "accountId": accountID, "sourceId": sourceID, "error": dispatchErr.Error(),
 				})
+			} else {
+				// Only acknowledge the wake signal after the scoped dispatch pass
+				// completed. Any remaining Outbox work will be woken by the next
+				// producer signal or the durable recovery path.
+				_, _ = client.Do(ctx, "DEL", wakeLockKey)
 			}
 		}
 		select {

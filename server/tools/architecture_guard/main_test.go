@@ -125,6 +125,26 @@ func TestGuardAllowsDomainEntry(t *testing.T) {
 	}
 }
 
+func TestGuardRejectsUnscopedCollectOutboxDispatch(t *testing.T) {
+	items := sample(t, `package sys;func bad(){s.dispatchDueCollectProcessOutbox(ctx, 100)}`)
+	matched := false
+	for _, item := range items {
+		if item.Rule == "collect-outbox-unscoped-dispatch" {
+			matched = true
+		}
+	}
+	if !matched || len(compare(items, nil)) == 0 {
+		t.Fatalf("unscoped collect outbox dispatch was not rejected: %+v", items)
+	}
+
+	items = sample(t, `package sys;func good(){s.dispatchDueCollectProcessOutbox(ctx, 100, publishAccountScope{TenantID: 1, AccountID: 2, SourceID: 3})}`)
+	for _, item := range items {
+		if item.Rule == "collect-outbox-unscoped-dispatch" {
+			t.Fatalf("scoped collect outbox dispatch was flagged: %+v", items)
+		}
+	}
+}
+
 func TestGuardExactPointerReceiver(t *testing.T) {
 	items := sample(t, `package sys;func(s *sSysPublish) legacy(){job.Status="sent"}`)
 	if len(items) == 0 || len(compare(items, items)) != 0 {

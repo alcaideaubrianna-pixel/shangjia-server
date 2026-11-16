@@ -31,6 +31,7 @@ const (
 	collectMaterialWaitingVerifyRetryDelay = 10 * time.Second
 	collectMaterialWindowExecutionTimeout  = 90 * time.Second
 	collectMaterialWindowMergeTTLDefault   = 3 * time.Second
+	collectMaterialCandidateRebuildTTL     = 5 * time.Second
 	collectMaterialRolePending             = "pending"
 	collectMaterialRoleDisplay             = "display"
 	collectMaterialRoleVerify              = "verify"
@@ -38,9 +39,9 @@ const (
 	collectMaterialGroupWaitingVerify      = "waiting_verify"
 )
 
-// collectMaterialWindowMergeKey identifies the smallest unit whose window can
-// be safely coalesced. It deliberately includes chat_id because one source
-// may represent more than one Telegram channel.
+// collectMaterialWindowMergeKey identifies the source/chat window whose work
+// must be coalesced. The source worker already provides bounded concurrency;
+// splitting this lock by event id would allow duplicate window reads.
 func collectMaterialWindowMergeKey(payload collectProcessQueuePayload, chatID string) string {
 	return fmt.Sprintf("youban_publish:collect:window:%d:%d:%d:%s",
 		payload.TenantId, payload.AccountId, payload.SourceId,
@@ -72,6 +73,20 @@ func reserveCollectMaterialWindowMerge(ctx context.Context, payload collectProce
 	ok, err := cache.Instance().SetIfNotExist(ctx, collectMaterialWindowMergeKey(payload, chatID), 1, collectMaterialWindowMergeTTL(ctx))
 	if err != nil {
 		g.Log().Warning(ctx, "采集窗口合并缓存不可用，放行实时窗口", g.Map{"stage": "collect.window.merge", "sourceId": payload.SourceId, "error": err.Error()})
+		return true, nil
+	}
+	return ok, nil
+}
+
+func reserveCollectMaterialCandidateRebuild(ctx context.Context, payload collectProcessQueuePayload) (bool, error) {
+	if !cache.Initialized() {
+		return true, nil
+	}
+	key := collectProcessCandidateIndexKey(payload) + ":rebuild"
+	ok, err := cache.Instance().SetIfNotExist(ctx, key, 1, collectMaterialCandidateRebuildTTL)
+	if err != nil {
+		// Redis is an accelerator; PostgreSQL fallback remains the correctness
+		// path when Redis is unavailable.
 		return true, nil
 	}
 	return ok, nil
@@ -154,6 +169,13 @@ func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload co
 	// A stale/incomplete index must not hide work. One bounded PG fallback rebuilds
 	// the index for this shard; normal indexed cycles avoid the source-range scan.
 	if len(rows) == 0 && candidateMode && payload.EventId == 0 {
+		rebuildReserved, rebuildErr := reserveCollectMaterialCandidateRebuild(ctx, payload)
+		if rebuildErr != nil {
+			return rebuildErr
+		}
+		if !rebuildReserved {
+			return newCollectProcessRetryError(collectMaterialWindowMergeTTL(ctx), "采集候选批次正在重建")
+		}
 		fallbackModel := collectMaterialWindowModel(ctx, payload, false).
 			Where("e.processed_at IS NULL").
 			Where(collectMaterialGroupReadyCondition(), collectMaterialGroupWaitingVerify)

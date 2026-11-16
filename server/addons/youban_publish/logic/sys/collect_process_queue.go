@@ -212,12 +212,10 @@ func collectProcessCandidateIndexReady(ctx context.Context, payload collectProce
 	if err == nil && !value.IsNil() && value.Int() == 1 {
 		return true
 	}
-	// The marker is the logical TTL for the ZSET. Remove the old set when it
-	// expires so abandoned event IDs do not accumulate indefinitely. A failed
-	// cleanup only affects the accelerator; the PG fallback remains correct.
-	if client, clientErr := cache.RedisClient(); clientErr == nil {
-		_, _ = client.Do(ctx, "DEL", collectProcessCandidateIndexKey(payload))
-	}
+	// The marker is the logical TTL for the ZSET. Do not delete the ZSET on a
+	// marker miss: a concurrent producer may have refreshed candidates after
+	// the marker expired, and deleting it would force every caller to rebuild
+	// the same source window.
 	return false
 }
 

@@ -64,6 +64,8 @@ var items = []item{
 	{Key: "youbanPublish.collect.sourceLeaseSeconds", EnvKeys: []string{"YOUBAN_PUBLISH_COLLECT_SOURCE_LEASE_SECONDS"}},
 	{Key: "youbanPublish.collect.sourceManagerIntervalSeconds", EnvKeys: []string{"YOUBAN_PUBLISH_COLLECT_SOURCE_MANAGER_INTERVAL_SECONDS"}},
 	{Key: "youbanPublish.collect.sourceRecoveryConcurrency", EnvKeys: []string{"YOUBAN_PUBLISH_COLLECT_SOURCE_RECOVERY_CONCURRENCY"}},
+	{Key: "youbanPublish.collect.recoverySourceBatchSize", EnvKeys: []string{"YOUBAN_PUBLISH_COLLECT_RECOVERY_SOURCE_BATCH_SIZE"}},
+	{Key: "youbanPublish.collect.legacyGlobalRecoveryEnabled", EnvKeys: []string{"YOUBAN_PUBLISH_COLLECT_LEGACY_GLOBAL_RECOVERY_ENABLED"}},
 	{Key: "youbanPublish.queue.collectSourceConcurrency", EnvKeys: []string{"YOUBAN_PUBLISH_COLLECT_SOURCE_CONCURRENCY"}},
 	{Key: "youbanPublish.collect.processOutboxRecoveryBatchSize", EnvKeys: []string{"YOUBAN_PUBLISH_COLLECT_RECOVERY_BATCH_SIZE"}},
 	{Key: "youbanPublish.collect.ruleConcurrency", EnvKeys: []string{"YOUBAN_PUBLISH_COLLECT_RULE_CONCURRENCY"}},
