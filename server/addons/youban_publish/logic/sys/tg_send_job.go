@@ -49,6 +49,12 @@ func telegramProfilePublishable(ctx context.Context, profileID int64) (bool, err
 	}
 	if err := g.DB().Model("hg_content_profile").Safe().Ctx(ctx).
 		Fields("visibility").Where("id", profileID).WhereNull("deleted_at").Scan(&row); err != nil {
+		// A missing or deleted profile is a stale queued job, not a transient
+		// database failure. Let the caller supersede and settle it so the
+		// channel queue can continue.
+		if errors.Is(err, sql.ErrNoRows) || errors.Is(gerror.Cause(err), sql.ErrNoRows) {
+			return false, nil
+		}
 		return false, gerror.Wrap(err, "读取资料发布状态失败")
 	}
 	return strings.EqualFold(strings.TrimSpace(row.Visibility), "public"), nil
