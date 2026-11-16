@@ -13,18 +13,6 @@ import (
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
-func TestCollectMaterialWindowMergeKeyIncludesSourceScope(t *testing.T) {
-	payload := collectProcessQueuePayload{TenantId: 56, AccountId: 109, SourceId: 1370}
-	key := collectMaterialWindowMergeKey(payload, "-100123456")
-	if key != "youban_publish:collect:window:56:109:1370:-100123456" {
-		t.Fatalf("unexpected merge key: %q", key)
-	}
-	otherChatKey := collectMaterialWindowMergeKey(payload, "-100654321")
-	if key == otherChatKey {
-		t.Fatal("different source chats must not share a merge key")
-	}
-}
-
 func TestCollectMaterialWindowMergeTTL(t *testing.T) {
 	previous, existed := os.LookupEnv("YOUBAN_PUBLISH_COLLECT_WINDOW_MERGE_TTL")
 	t.Cleanup(func() {
@@ -309,12 +297,11 @@ func TestPairCollectMaterialMessagesCases(t *testing.T) {
 			},
 		},
 		{
-			name: "mixed media without profile text is verify",
+			name: "mixed media remains a separate display",
 			views: []collectMaterialMessageView{
 				{RawText: "昵称：A", Media: []collectMediaItem{{Type: "photo", FileId: "p"}}},
 				{Media: []collectMediaItem{{Type: "photo", FileId: "p2"}, {Type: "video", FileId: "v"}}},
 			},
-			want: []collectMaterialPair{{DisplayIndex: 0, VerifyIndex: 1}},
 		},
 		{
 			name: "unknown message blocks later video",
@@ -388,9 +375,13 @@ func TestCollectMaterialEventViewsPreservesExplicitVerifyParent(t *testing.T) {
 		217524: {{Type: "photo", FileId: "display-new"}},
 		217530: {{Type: "video", FileId: "verify-old"}},
 	}
-	pairs := pairCollectMaterialMessages(collectMaterialEventViews(rows, media))
-	if len(pairs) != 1 || pairs[0] != (collectMaterialPair{DisplayIndex: 0, VerifyIndex: 2}) {
-		t.Fatalf("explicit verify parent must win over adjacent display: %+v", pairs)
+	views := collectMaterialEventViews(rows, media)
+	if views[2].ParentEventID != 217520 {
+		t.Fatal("event views must retain stored parent for diagnostics")
+	}
+	pairs := pairCollectMaterialMessages(views)
+	if len(pairs) != 1 || pairs[0] != (collectMaterialPair{DisplayIndex: 1, VerifyIndex: 2}) {
+		t.Fatalf("stale parent must not cross the nearest display: %+v", pairs)
 	}
 }
 

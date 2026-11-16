@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -20,7 +19,6 @@ import (
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/cache"
 	hglock "hotgo/internal/library/hgrds/lock"
-	"hotgo/internal/library/tasklog"
 )
 
 const (
@@ -115,9 +113,10 @@ func activeCollectProcessScopes(ctx context.Context) []publishAccountScope {
 		return nil
 	}
 	maxScopes := collectRecoverySourceBatchSize(ctx)
-	// Sampling is bounded; Redis emptiness never proves PG work is drained.
-	members, err := cache.SetSample(ctx, collectProcessActiveSourcesKey, maxScopes)
+	// Advance the shared source cursor; Redis emptiness never proves PG work is drained.
+	members, err := cache.SetRotate(ctx, collectProcessActiveSourcesKey, maxScopes)
 	if err != nil {
+		g.Log().Warning(ctx, "读取采集恢复来源轮转失败", g.Map{"stage": "collect.recovery.scope_failed", "error": err.Error()})
 		return nil
 	}
 	scopes := make([]publishAccountScope, 0, min(len(members), maxScopes))
@@ -139,15 +138,7 @@ func activeCollectProcessScopes(ctx context.Context) []publishAccountScope {
 		}
 		scopes = append(scopes, publishAccountScope{TenantID: tenantID, AccountID: accountID, SourceID: sourceID})
 	}
-	sort.Slice(scopes, func(i, j int) bool {
-		if scopes[i].TenantID != scopes[j].TenantID {
-			return scopes[i].TenantID < scopes[j].TenantID
-		}
-		if scopes[i].AccountID != scopes[j].AccountID {
-			return scopes[i].AccountID < scopes[j].AccountID
-		}
-		return scopes[i].SourceID < scopes[j].SourceID
-	})
+
 	return scopes
 }
 
@@ -160,15 +151,6 @@ func collectRecoverySourceBatchSize(ctx context.Context) int {
 		return collectRecoverySourceBatchMaximum
 	}
 	return value
-}
-
-// collectLegacyGlobalRecoveryEnabled is deliberately disabled by default.
-// The legacy recovery handlers predate source-lane scheduling and still scan
-// event/media/dispatch tables without a tenant/account/source predicate. Keep
-// them available for a controlled migration window, but never let them run in
-// the normal production recovery loop while realtime source lanes are active.
-func collectLegacyGlobalRecoveryEnabled(ctx context.Context) bool {
-	return g.Cfg().MustGet(ctx, "youbanPublish.collect.legacyGlobalRecoveryEnabled", false).Bool()
 }
 
 func collectSourceRecoveryConcurrency(ctx context.Context) int {
@@ -195,69 +177,11 @@ func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 		return
 	}
 	g.Log().Debug(ctx, "采集恢复使用 Redis 来源 scope", g.Map{"stage": "collect.recovery.scoped", "scopeCount": len(scopes)})
-	if err := s.recoverCollectSourceStats(ctx, 100); err != nil {
-		g.Log().Warningf(ctx, "恢复采集源统计任务失败：%+v", err)
-	}
 	s.recoverCollectMediaSourceScopes(ctx, scopes)
-	if !collectLegacyGlobalRecoveryEnabled(ctx) {
-		if err := s.recoverCollectEvents(ctx, 100); err != nil {
-			g.Log().Warningf(ctx, "恢复采集事件处理失败：%+v", err)
-		}
-		g.Log().Info(ctx, "采集旧版全局恢复已跳过", g.Map{
-			"stage":      "collect.recovery.legacy_global_skipped",
-			"reason":     "source_lane_only",
-			"scopeCount": len(scopes),
-		})
-		return
-	}
-	mediaBatchSize := collectMediaRecoveryBatchSize(ctx)
-	// 采集处理只由来源级 Redis 队列驱动。这里禁止按来源轮询
-	// collect_process_outbox，避免恢复任务再次形成 PostgreSQL 热点。
-	// Always drain a bounded ready-media transition before backpressure can
-	// yield historical recovery; otherwise ready events remain orphaned while
-	// realtime traffic is continuously above the gate.
-	// 媒体已经就绪但历史版本没有生成 collect_dispatch 的事件，不能只依赖
-	// media_pending 恢复；按账户/来源有界补投递，交给正常规则分发流程幂等处理。
-	// Media retries have their own small budget. They must keep making
-	// progress while process recovery yields to realtime traffic.
-	if err := s.recoverRecentOrphanCollectReviews(ctx, 20); err != nil {
-		g.Log().Warningf(ctx, "恢复近期孤立采集审核失败：%+v", err)
-	}
-	// 分发恢复不能被实时采集背压短路；资料已经落库的 pending dispatch
-	// 必须优先生成 collect TG Job，否则采集会长期停在“已入库但未推送”。
-	// 发送成功但本地投影中断时，先按 TG Job 终态收口 dispatch，避免恢复器重复创建任务。
-	if err := s.reconcileCollectDispatchesFromSentJobs(ctx, 100); err != nil {
-		g.Log().Warningf(ctx, "对账已发送采集分发失败：%+v", err)
-	}
-	if err := s.recoverCollectPublishTasks(ctx, 100); err != nil {
-		g.Log().Warningf(ctx, "恢复采集推送任务失败：%+v", err)
-	}
-	if blocked, err := s.collectRecoveryBackpressure(ctx); err != nil {
-		g.Log().Warningf(ctx, "读取实时采集背压状态失败，暂停本轮历史恢复：%+v", err)
-		return
-	} else if blocked {
-		return
-	}
-	if err := s.cleanupCollectEventsOlderThan(ctx, tasklog.RetentionDays(), 1000); err != nil {
-		g.Log().Warningf(ctx, "清理过期采集事件失败：%+v", err)
-	}
-	if err := s.recoverInvalidReadyCollectMedia(ctx, mediaBatchSize); err != nil {
-		g.Log().Warningf(ctx, "恢复无持久化文件的采集媒体失败：%+v", err)
-	}
-	if err := s.recoverLegacyMissingVerifyCollectEvents(ctx, min(mediaBatchSize, 20)); err != nil {
-		g.Log().Warningf(ctx, "恢复历史缺少验证视频的采集事件失败：%+v", err)
-	}
-	if err := s.recoverCollectHistoryTasks(ctx, 20); err != nil {
-		g.Log().Warningf(ctx, "恢复历史采集任务失败：%+v", err)
-	}
-	if err := s.ignoreStaleCollectEventsForDisabledSources(ctx, 100); err != nil {
-		g.Log().Warningf(ctx, "清理已关闭采集源事件失败：%+v", err)
-	}
-	if err := s.recoverCollectEvents(ctx, 100); err != nil {
+	// Automatic recovery is source-scoped only. Legacy migration handlers are
+	// deliberately not reachable here, even when an old ENV flag remains set.
+	if err := s.recoverCollectEvents(ctx, 100, scopes...); err != nil {
 		g.Log().Warningf(ctx, "恢复采集事件处理失败：%+v", err)
-	}
-	if err := s.recoverProcessedCollectEvents(ctx, 200); err != nil {
-		g.Log().Warningf(ctx, "恢复采集事件完成状态失败：%+v", err)
 	}
 }
 
@@ -1162,21 +1086,31 @@ func (s *sSysPublish) recoverCollectHistoryTask(ctx context.Context, row gdb.Rec
 	return s.enqueueCollectHistoryTask(ctx, taskId, 0)
 }
 
-func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error {
+func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int, suppliedScopes ...publishAccountScope) error {
+	parentCtx := ctx
+	ctx, cancelPass := context.WithTimeout(ctx, 30*time.Second)
+	defer cancelPass()
+	// Query cancellation must not cancel processing of rows already collected.
+	// Reserve at least half of the pass for claims and queue submissions.
+	queryCtx, cancelQueries := context.WithTimeout(ctx, 15*time.Second)
+	defer cancelQueries()
 	if limit <= 0 {
 		limit = 100
 	}
 	deadline := gtime.Now().Add(-collectEventRecoverAfter)
 	realtimeCutoff := gtime.Now().Add(-collectRecoveryRealtimeWindow)
 	activeStatuses := []string{sysin.CollectEventStatusPending, sysin.CollectEventStatusGroupCollect, sysin.CollectEventStatusWaitingOrder, sysin.CollectEventStatusPrechecked, sysin.CollectEventStatusMediaPending, sysin.CollectEventStatusMediaReady}
-	scopes := activeCollectProcessScopes(ctx)
+	scopes := suppliedScopes
+	if len(scopes) == 0 {
+		scopes = activeCollectProcessScopes(queryCtx)
+	}
 	if len(scopes) == 0 {
 		// Redis is the source of active recovery lanes. Never fall back to a
 		// global event scan when the candidate index is unavailable.
 		return nil
 	}
-	buildModel := func(scope publishAccountScope) *gdb.Model {
-		return pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
+	buildModel := func(queryCtx context.Context, scope publishAccountScope) *gdb.Model {
+		return pdao.YoubanPublishCollectEvent.Ctx(queryCtx).As("e").
 			Fields("e.id,e.tenant_id,e.account_id,e.source_id,e.source_chat_id,e.status,e.error_message").
 			WhereIn("e.status", activeStatuses).
 			WhereLTE("e.updated_at", deadline).
@@ -1185,11 +1119,11 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 			Where("e.source_id", scope.SourceID).
 			Where(enabledCollectSourceExistsSQL("e"))
 	}
-	queryRows := func(scope publishAccountScope, recent bool, queryLimit int) ([]gdb.Record, error) {
+	queryRows := func(queryCtx context.Context, scope publishAccountScope, recent bool, queryLimit int) ([]gdb.Record, error) {
 		if queryLimit <= 0 {
 			return nil, nil
 		}
-		model := buildModel(scope)
+		model := buildModel(queryCtx, scope)
 		if recent {
 			model = model.WhereGTE("e.updated_at", realtimeCutoff)
 		} else {
@@ -1200,90 +1134,138 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 
 	rows := make([]gdb.Record, 0, limit)
 	perScope := max(1, (limit+len(scopes)-1)/len(scopes))
-	for _, scope := range scopes {
-		if len(rows) >= limit {
+	for scopeIndex, scope := range scopes {
+		if len(rows) >= limit || queryCtx.Err() != nil {
 			break
 		}
+		// Reserve time for every remaining lane; one slow source cannot
+		// consume the page budget before later sources get a query attempt.
+		queryDeadline, _ := queryCtx.Deadline()
+		sourceBudget, branchBudget := collectEventRecoveryTimeBudget(time.Until(queryDeadline), len(scopes)-scopeIndex)
+		sourceCtx, cancelSource := context.WithTimeout(queryCtx, sourceBudget)
 		budget := min(perScope, limit-len(rows))
-		recentRows, err := queryRows(scope, true, budget)
-		if err != nil {
-			return gerror.Wrap(err, "读取来源实时待恢复采集事件失败")
-		}
-		rows = append(rows, recentRows...)
-		if len(recentRows) < budget && len(rows) < limit {
-			historyRows, historyErr := queryRows(scope, false, min(budget-len(recentRows), limit-len(rows)))
-			if historyErr != nil {
-				return gerror.Wrap(historyErr, "读取来源历史待恢复采集事件失败")
+		// Reserve slots for history and failed events even under continuous
+		// realtime traffic. Unused slots are borrowed by the realtime query.
+		recentBudget, historyBudget, failedBudget := collectEventRecoveryBudgets(budget)
+		load := func(recent bool, count int) int {
+			if count <= 0 || sourceCtx.Err() != nil {
+				return 0
 			}
-			rows = append(rows, historyRows...)
-		}
-		if len(rows) < limit {
-			failedModel := recoverableFailedCollectEventModel(ctx, deadline).
-				Where("e.tenant_id", scope.TenantID).
-				Where("e.account_id", scope.AccountID).
-				Where("e.source_id", scope.SourceID)
-			failedRows, failedErr := failedModel.OrderAsc("e.updated_at").OrderAsc("e.id").
-				Limit(min(budget, limit-len(rows))).All()
-			if failedErr != nil {
-				return gerror.Wrap(failedErr, "读取来源失败采集事件失败")
+			branchCtx, cancelBranch := context.WithTimeout(sourceCtx, branchBudget)
+			defer cancelBranch()
+			batch, err := queryRows(branchCtx, scope, recent, count)
+			if err != nil {
+				g.Log().Warningf(ctx, "读取来源采集恢复事件失败 tenant:%d account:%d source:%d recent:%t err:%+v", scope.TenantID, scope.AccountID, scope.SourceID, recent, err)
+				return 0
 			}
-			rows = append(rows, failedRows...)
+			rows = append(rows, batch...)
+			return len(batch)
 		}
+		historyCount := load(false, historyBudget)
+		failedCount := 0
+		if failedBudget > 0 && sourceCtx.Err() == nil {
+			branchCtx, cancelBranch := context.WithTimeout(sourceCtx, branchBudget)
+			failedRows, err := recoverableFailedCollectEventModel(branchCtx, deadline).
+				Where("e.tenant_id", scope.TenantID).Where("e.account_id", scope.AccountID).
+				Where("e.source_id", scope.SourceID).
+				OrderAsc("e.updated_at").OrderAsc("e.id").Limit(failedBudget).All()
+			cancelBranch()
+			if err != nil {
+				g.Log().Warningf(ctx, "读取来源失败采集事件失败 source:%d err:%+v", scope.SourceID, err)
+			} else {
+				rows = append(rows, failedRows...)
+				failedCount = len(failedRows)
+			}
+		}
+		if sourceCtx.Err() == nil {
+			load(true, recentBudget+historyBudget-historyCount+failedBudget-failedCount)
+		}
+		cancelSource()
 	}
+	cancelQueries()
 	for _, row := range rows {
-		if row.IsEmpty() || row["id"].Int64() <= 0 || !shouldRecoverCollectEvent(row) {
-			continue
+		if ctx.Err() != nil {
+			break
 		}
-		if row["status"].String() == sysin.CollectEventStatusMediaPending {
-			canResume, mediaErr := s.collectEventMediaCanResume(ctx, row["id"].Int64())
-			if mediaErr != nil {
-				g.Log().Warningf(ctx, "检查采集事件媒体恢复条件失败 event:%d err:%+v", row["id"].Int64(), mediaErr)
-				continue
+		func() {
+			ctx, cancelEvent := context.WithTimeout(ctx, 5*time.Second)
+			defer cancelEvent()
+			if row.IsEmpty() || row["id"].Int64() <= 0 || !shouldRecoverCollectEvent(row) {
+				return
 			}
-			if !canResume {
-				continue
+			if row["status"].String() == sysin.CollectEventStatusMediaPending {
+				canResume, mediaErr := s.collectEventMediaCanResume(ctx, row["id"].Int64())
+				if mediaErr != nil {
+					g.Log().Warningf(ctx, "检查采集事件媒体恢复条件失败 event:%d err:%+v", row["id"].Int64(), mediaErr)
+					return
+				}
+				if !canResume {
+					return
+				}
 			}
-		}
-		claimData := g.Map{"updated_at": gtime.Now()}
-		if row["status"].String() == sysin.CollectEventStatusFailed {
-			claimData["status"] = sysin.CollectEventStatusPending
-			claimData["error_message"] = ""
-			claimData["processed_at"] = nil
-		}
-		claimResult, claimErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).
-			Where("id", row["id"].Int64()).
-			WhereLTE("updated_at", deadline).
-			Data(claimData).Update()
-		if claimErr != nil {
-			g.Log().Warningf(ctx, "抢占待恢复采集事件失败 event:%d err:%+v", row["id"].Int64(), claimErr)
-			continue
-		}
-		claimed, claimErr := claimResult.RowsAffected()
-		if claimErr != nil {
-			g.Log().Warningf(ctx, "确认待恢复采集事件抢占结果失败 event:%d err:%+v", row["id"].Int64(), claimErr)
-			continue
-		}
-		if claimed == 0 {
-			continue
-		}
-		queued, processErr := s.enqueueCollectProcessDeferred(ctx, collectProcessQueuePayload{
-			Recovery:     true,
-			EventId:      row["id"].Int64(),
-			SourceId:     row["source_id"].Int64(),
-			SourceChatId: row["source_chat_id"].String(),
-			TenantId:     row["tenant_id"].Int64(),
-			AccountId:    row["account_id"].Int64(),
-		}, 0)
-		if processErr != nil {
-			g.Log().Warningf(ctx, "恢复采集事件投递失败 source:%d event:%d err:%+v", row["source_id"].Int64(), row["id"].Int64(), processErr)
-			continue
-		}
-		if !queued {
-			g.Log().Warningf(ctx, "恢复采集事件任务未实际入队 source:%d event:%d", row["source_id"].Int64(), row["id"].Int64())
-			continue
-		}
+			claimData := g.Map{"updated_at": gtime.Now()}
+			if row["status"].String() == sysin.CollectEventStatusFailed {
+				claimData["status"] = sysin.CollectEventStatusPending
+				claimData["error_message"] = ""
+				claimData["processed_at"] = nil
+			}
+			claimResult, claimErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+				Where("id", row["id"].Int64()).
+				WhereLTE("updated_at", deadline).
+				Data(claimData).Update()
+			if claimErr != nil {
+				g.Log().Warningf(ctx, "抢占待恢复采集事件失败 event:%d err:%+v", row["id"].Int64(), claimErr)
+				return
+			}
+			claimed, claimErr := claimResult.RowsAffected()
+			if claimErr != nil {
+				g.Log().Warningf(ctx, "确认待恢复采集事件抢占结果失败 event:%d err:%+v", row["id"].Int64(), claimErr)
+				return
+			}
+			if claimed == 0 {
+				return
+			}
+			queued, processErr := s.enqueueCollectProcessDeferred(ctx, collectProcessQueuePayload{
+				Recovery:     true,
+				EventId:      row["id"].Int64(),
+				SourceId:     row["source_id"].Int64(),
+				SourceChatId: row["source_chat_id"].String(),
+				TenantId:     row["tenant_id"].Int64(),
+				AccountId:    row["account_id"].Int64(),
+			}, 0)
+			if processErr != nil {
+				g.Log().Warningf(ctx, "恢复采集事件投递失败 source:%d event:%d err:%+v", row["source_id"].Int64(), row["id"].Int64(), processErr)
+				return
+			}
+			if !queued {
+				g.Log().Warningf(ctx, "恢复采集事件任务未实际入队 source:%d event:%d", row["source_id"].Int64(), row["id"].Int64())
+				return
+			}
+		}()
 	}
-	return nil
+	return parentCtx.Err()
+}
+
+// Reserve a small scheduling margin as well as independent branch deadlines.
+func collectEventRecoveryTimeBudget(remaining time.Duration, lanes int) (source, branch time.Duration) {
+	if remaining <= 0 || lanes <= 0 {
+		return 0, 0
+	}
+	source = min(5*time.Second, remaining/time.Duration(lanes+1))
+	return source, min(time.Second, source/3)
+}
+
+// collectEventRecoveryBudgets reserves bounded slots for all recovery classes.
+func collectEventRecoveryBudgets(budget int) (recent, history, failed int) {
+	if budget <= 0 {
+		return 0, 0, 0
+	}
+	if budget < 3 {
+		return budget, 0, 0
+	}
+	history = max(1, budget/5)
+	failed = max(1, budget/5)
+	return budget - history - failed, history, failed
 }
 
 func recoverableFailedCollectEventModel(ctx context.Context, deadline *gtime.Time) *gdb.Model {

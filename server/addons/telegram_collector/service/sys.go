@@ -51,6 +51,8 @@ type DeliveryHandler interface {
 }
 
 type IAccountTasks interface {
+	RegisterMaintenanceAccount(ctx context.Context, accountID int64) error
+	MaintenanceAccounts(ctx context.Context, limit int) ([]int64, error)
 	Submit(ctx context.Context, in *sysin.AccountTaskSubmit) (int64, error)
 	SubmitAndWait(ctx context.Context, in *sysin.AccountTaskSubmit, pollInterval time.Duration) (*sysin.AccountTask, error)
 	Get(ctx context.Context, taskID int64) (*sysin.AccountTask, error)
@@ -59,11 +61,11 @@ type IAccountTasks interface {
 	Claim(ctx context.Context, lease *sysin.AccountLease, limit int, ttl time.Duration) ([]*sysin.AccountTask, error)
 	Complete(ctx context.Context, taskID int64, lease *sysin.AccountLease, result *sysin.AccountMediaDownloadResult) error
 	Fail(ctx context.Context, in *sysin.AccountTaskFailure) error
-	RecoverExpired(ctx context.Context, limit int) (int, error)
-	ExpirePending(ctx context.Context, taskType string, before time.Time, limit int) (int, error)
-	ListFinalizing(ctx context.Context, limit int) ([]*sysin.AccountTask, error)
+	RecoverExpired(ctx context.Context, accountID int64, limit int) (int, error)
+	ExpirePending(ctx context.Context, accountID int64, taskType string, before time.Time, limit int) (int, error)
+	ListFinalizing(ctx context.Context, accountID int64, limit int) ([]*sysin.AccountTask, error)
 	FinalizeFailure(ctx context.Context, taskID int64) error
-	ActiveStatusStats(ctx context.Context) ([]sysin.AccountTaskStatusStat, error)
+	ActiveStatusStats(ctx context.Context, accountID int64) ([]sysin.AccountTaskStatusStat, error)
 }
 
 type AccountTaskHandler interface {

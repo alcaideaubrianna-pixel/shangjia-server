@@ -38,62 +38,191 @@ func runAccountTaskLoop(ctx context.Context, client *telegram.Client, lease *sys
 	if client == nil || lease == nil {
 		return
 	}
-	var workers sync.WaitGroup
 	if operationGate == nil {
 		operationGate = &sync.Mutex{}
 	}
 	mediaFallbackGate := &sync.Mutex{}
-	workers.Add(accountTaskWorkerCount)
-	for workerID := 1; workerID <= accountTaskWorkerCount; workerID++ {
-		go func(workerID int) {
-			defer workers.Done()
-			accountTaskWorkerLoop(ctx, client, lease, operationGate, mediaFallbackGate, resetSession, workerID)
-		}(workerID)
-	}
-	workers.Wait()
+	loopCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	runAccountTaskDispatcher(loopCtx, accountTaskWorkerCount,
+		func(ctx context.Context, limit int) ([]*sysin.AccountTask, bool) {
+			return claimAccountTasks(ctx, lease, limit)
+		},
+		func(ctx context.Context, task *sysin.AccountTask) {
+			processAccountTask(ctx, client, lease, operationGate, mediaFallbackGate, resetSession, task)
+		},
+		func(ctx context.Context, delay time.Duration) {
+			if waiter, ok := collectorservice.AccountTasks().(interface {
+				WaitForWork(context.Context, int64, time.Duration)
+			}); ok {
+				waiter.WaitForWork(ctx, lease.AccountID, delay)
+				return
+			}
+			timer := time.NewTimer(delay)
+			defer timer.Stop()
+			select {
+			case <-ctx.Done():
+			case <-timer.C:
+			}
+		},
+		func() {
+			cancel()
+			if ctx.Err() == nil && resetSession != nil {
+				resetSession()
+			}
+		},
+		func(tasks []*sysin.AccountTask) {
+			// Claim already acquired durable leases. Return tasks that never
+			// reached a worker rather than waiting for their execution TTL.
+			cleanupCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), telegrambudget.Finalize(ctx))
+			defer stop()
+			for _, task := range tasks {
+				if cleanupCtx.Err() != nil {
+					return
+				}
+				if task == nil {
+					continue
+				}
+				if err := collectorservice.AccountTasks().Fail(cleanupCtx, &sysin.AccountTaskFailure{
+					TaskID: task.ID, Lease: lease, Cause: context.Canceled, NotStarted: true,
+				}); err != nil {
+					g.Log().Warningf(cleanupCtx, "归还未分发Telegram账号任务失败 taskId:%d err:%+v", task.ID, err)
+				}
+			}
+		})
 }
 
+// accountTaskWorkerLoop retains the single-worker entry for isolated callers.
+// Account runtime uses the shared dispatcher above, never eight polling loops.
 func accountTaskWorkerLoop(ctx context.Context, client *telegram.Client, lease *sysin.AccountLease, operationGate, mediaFallbackGate *sync.Mutex, resetSession context.CancelFunc, workerID int) {
-	ticker := time.NewTicker(accountTaskPollInterval)
-	defer ticker.Stop()
-	for {
-		keepRunning, handled := processAccountTask(ctx, client, lease, operationGate, mediaFallbackGate, resetSession)
-		if !keepRunning {
-			// The task consumer and Telegram session share the same account lease.
-			// End the session as well, so runtime sync can recreate the worker.
+	for ctx.Err() == nil {
+		valid, handled := processAccountTask(ctx, client, lease, operationGate, mediaFallbackGate, resetSession)
+		if !valid {
 			if ctx.Err() == nil && resetSession != nil {
-				g.Log().Warningf(ctx, "Telegram账号任务消费者退出，重建账号会话 tgAccountId:%d worker:%d", lease.AccountID, workerID)
 				resetSession()
 			}
 			return
 		}
 		if handled {
-			g.Log().Debugf(ctx, "Telegram账号任务worker完成任务 tgAccountId:%d worker:%d", lease.AccountID, workerID)
 			continue
 		}
+		timer := time.NewTimer(accountTaskPollInterval)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return
-		case <-ticker.C:
+		case <-timer.C:
 		}
 	}
 }
 
-func processAccountTask(ctx context.Context, client *telegram.Client, lease *sysin.AccountLease, operationGate, mediaFallbackGate *sync.Mutex, resetSession context.CancelFunc) (bool, bool) {
+// One dispatcher owns polling and account lease renewal; execution remains
+// concurrent. Slots prevent claiming work that would wait behind busy workers.
+// While saturated, the account owner's existing lock watchdog and each running
+// task's keepAccountTaskLeaseAlive continue renewal independently of polling.
+func runAccountTaskDispatcher(ctx context.Context, concurrency int,
+	claim func(context.Context, int) ([]*sysin.AccountTask, bool),
+	execute func(context.Context, *sysin.AccountTask),
+	wait func(context.Context, time.Duration), lostLease func(), abandoned ...func([]*sysin.AccountTask)) {
+	if concurrency < 1 {
+		return
+	}
+	jobs := make(chan *sysin.AccountTask)
+	slots := make(chan struct{}, concurrency)
+	for i := 0; i < concurrency; i++ {
+		slots <- struct{}{}
+	}
+	var workers sync.WaitGroup
+	for i := 0; i < concurrency; i++ {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for task := range jobs {
+				execute(ctx, task)
+				// Shutdown must not wait for the dispatcher to drain slot tokens.
+				select {
+				case slots <- struct{}{}:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+	}
+	defer workers.Wait()
+	defer close(jobs)
+	delay := accountTaskPollInterval
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-slots:
+		}
+		capacity := 1
+		for capacity < concurrency {
+			select {
+			case <-slots:
+				capacity++
+			default:
+				goto claimedCapacity
+			}
+		}
+	claimedCapacity:
+		if ctx.Err() != nil {
+			return
+		}
+		tasks, valid := claim(ctx, capacity)
+		if !valid {
+			lostLease()
+			return
+		}
+		for i := len(tasks); i < capacity; i++ {
+			slots <- struct{}{}
+		}
+		if len(tasks) == 0 {
+			wait(ctx, delay)
+			delay = min(delay*2, 8*time.Second)
+			continue
+		}
+		delay = accountTaskPollInterval
+		for index, task := range tasks {
+			select {
+			case <-ctx.Done():
+				if len(abandoned) > 0 && abandoned[0] != nil {
+					abandoned[0](tasks[index:])
+				}
+				return
+			case jobs <- task:
+			}
+		}
+	}
+}
+
+func claimAccountTasks(ctx context.Context, lease *sysin.AccountLease, limit int) ([]*sysin.AccountTask, bool) {
 	renewed, err := collectorservice.AccountLeaseManager().Renew(ctx, lease, 0)
-	if err != nil {
-		g.Log().Warningf(ctx, "续期Telegram账号任务租约失败 tgAccountId:%d err:%+v", lease.AccountID, err)
-		return false, false
+	if err != nil || !renewed {
+		g.Log().Warningf(ctx, "Telegram账号任务租约续期失败 tgAccountId:%d err:%+v", lease.AccountID, err)
+		return nil, false
 	}
-	if !renewed {
-		g.Log().Warningf(ctx, "Telegram账号任务租约已失效，停止领取任务 tgAccountId:%d epoch:%d", lease.AccountID, lease.Epoch)
-		return false, false
-	}
-	tasks, err := collectorservice.AccountTasks().Claim(ctx, lease, 1, accountTaskLeaseTTL)
+	tasks, err := collectorservice.AccountTasks().Claim(ctx, lease, limit, accountTaskLeaseTTL)
 	if err != nil {
 		g.Log().Warningf(ctx, "领取Telegram账号任务失败 tgAccountId:%d err:%+v", lease.AccountID, err)
-		return true, false
+		// A batch may have claimed tasks before a later row failed. Execute
+		// those tasks instead of abandoning their live leases.
+		return tasks, true
 	}
+	return tasks, true
+}
+
+func processAccountTask(ctx context.Context, client *telegram.Client, lease *sysin.AccountLease, operationGate, mediaFallbackGate *sync.Mutex, resetSession context.CancelFunc, supplied ...*sysin.AccountTask) (bool, bool) {
+	tasks := supplied
+	if len(tasks) == 0 {
+		var valid bool
+		tasks, valid = claimAccountTasks(ctx, lease, 1)
+		if !valid {
+			return false, false
+		}
+	}
+	var err error
 	for _, task := range tasks {
 		if task == nil {
 			continue

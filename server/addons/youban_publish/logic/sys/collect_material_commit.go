@@ -602,7 +602,7 @@ func (s *sSysPublish) commitCollectPreparedProfile(ctx context.Context, event gd
 			return gerror.Wrap(txErr, "读取采集资料失败")
 		}
 		if existing.IsEmpty() {
-			existing, txErr = existingLegacyCollectProfile(ctx, tx, event)
+			existing, txErr = existingLegacyCollectProfile(ctx, tx, event, rule)
 			if txErr != nil {
 				return txErr
 			}
@@ -730,7 +730,7 @@ func collectProfileMaterialShouldReplace(existing gdb.Record, imageCount, videoC
 	return imageCount+videoCount >= existing["image_count"].Int()+existing["video_count"].Int()
 }
 
-func existingLegacyCollectProfile(ctx context.Context, tx gdb.TX, event gdb.Record) (gdb.Record, error) {
+func existingLegacyCollectProfile(ctx context.Context, tx gdb.TX, event, rule gdb.Record) (gdb.Record, error) {
 	tenantID := event["tenant_id"].Int64()
 	accountID := event["account_id"].Int64()
 	groupedID := strings.TrimSpace(event["source_grouped_id"].String())
@@ -742,22 +742,93 @@ func existingLegacyCollectProfile(ctx context.Context, tx gdb.TX, event gdb.Reco
 	if strings.HasPrefix(chatID, "-100") {
 		chatIDs = append(chatIDs, strings.TrimPrefix(chatID, "-100"))
 	}
-	conditions := make([]string, 0, len(chatIDs))
-	args := make([]interface{}, 0, len(chatIDs))
-	for _, candidateChatID := range chatIDs {
-		conditions = append(conditions, "p.source_key LIKE ?")
-		args = append(args, "%:"+candidateChatID+":group:"+groupedID+":%")
+	// Resolve legacy rule-suffixed keys through exact material identity, not a
+	// global substring search. Group identity intentionally spans collector
+	// sources in this ownership scope, as the old material dedupe did.
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	const candidateLimit = 128
+	e := pdao.YoubanPublishCollectEvent.Columns()
+	events, err := tx.Model(pdao.YoubanPublishCollectEvent.Table()).Ctx(ctx).
+		Fields(e.Id, e.SourceUniqueKey, e.TenantId, e.AccountId, e.SourceType, e.BotId, e.SourceChatId, e.SourceGroupedId).
+		Where(e.TenantId, tenantID).Where(e.AccountId, accountID).
+		Where(e.SourceGroupedId, groupedID).WhereIn(e.SourceChatId, chatIDs).
+		OrderAsc(e.Id).Limit(candidateLimit + 1).All()
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取旧版采集资料身份事件失败")
 	}
-	row, err := tx.Model(dao.ContentProfile.Table()+" p").Ctx(ctx).
-		Fields("p.id,p.source_key,p.has_verification_video,p.image_count,p.video_count,p.height,p.weight,p.cup_size").
-		WhereNull("p.deleted_at").
-		Where("("+strings.Join(conditions, " OR ")+")", args[:len(chatIDs)]...).
-		Where("EXISTS (SELECT 1 FROM hg_youban_publish_profile_state ps WHERE ps.profile_id=p.id AND ps.tenant_id=? AND ps.account_id=? AND ps.deleted_at IS NULL)", tenantID, accountID).
-		OrderDesc("p.has_verification_video").OrderDesc("p.id").Limit(1).One()
+	if len(events) > candidateLimit {
+		return nil, gerror.New("旧版采集资料身份事件超过安全上限，拒绝创建可能重复的资料")
+	}
+	eventIDs := make([]int64, 0, len(events))
+	identities := make(map[int64]string, len(events))
+	for _, identity := range events {
+		id := identity[e.Id].Int64()
+		eventIDs = append(eventIDs, id)
+		identities[id] = identity[e.SourceUniqueKey].String()
+	}
+	keys := []string{}
+	// Even an old dispatch missing its profile reference can be recovered by
+	// the original request key for this rule, without scanning profile text.
+	if key := legacyCollectMaterialSourceKey(event["source_unique_key"].String(), rule["id"].Int64()); key != "" {
+		keys = append(keys, key)
+	}
+	for _, identity := range events {
+		keys = append(keys, collectPublishClientRequestId(identity, nil))
+		if key := legacyCollectMaterialSourceKey(identity[e.SourceUniqueKey].String(), rule["id"].Int64()); key != "" {
+			keys = append(keys, key)
+		}
+	}
+	for _, candidateChatID := range chatIDs {
+		keys = append(keys, fmt.Sprintf("collect:v2:%d:%d:%s:group:%s", tenantID, accountID, candidateChatID, groupedID))
+	}
+	profileIDs := []int64{}
+	if len(eventIDs) > 0 {
+		d := pdao.YoubanPublishCollectDispatch.Columns()
+		dispatches, readErr := tx.Model(pdao.YoubanPublishCollectDispatch.Table()).Ctx(ctx).
+			Fields(d.EventId, d.RuleId, d.ProfileId).
+			Where(d.TenantId, tenantID).Where(d.AccountId, accountID).
+			WhereIn(d.EventId, eventIDs).OrderAsc(d.Id).Limit(candidateLimit + 1).All()
+		if readErr != nil {
+			return nil, gerror.Wrap(readErr, "读取旧版采集资料归属失败")
+		}
+		if len(dispatches) > candidateLimit {
+			return nil, gerror.New("旧版采集资料分发超过安全上限，拒绝创建可能重复的资料")
+		}
+		for _, dispatch := range dispatches {
+			if id := dispatch[d.ProfileId].Int64(); id > 0 {
+				profileIDs = append(profileIDs, id)
+			}
+			if key := legacyCollectMaterialSourceKey(identities[dispatch[d.EventId].Int64()], dispatch[d.RuleId].Int64()); key != "" {
+				keys = append(keys, key)
+			}
+		}
+	}
+	columns := dao.ContentProfile.Columns()
+	model := tx.Model(dao.ContentProfile.Table()+" p").Ctx(ctx).
+		Fields("p.id,p.source_key,p.has_verification_video,p.image_count,p.video_count,p.age,p.is_virgin,p.height,p.weight,p.cup_size").
+		WhereNull("p."+columns.DeletedAt).
+		Where("EXISTS (SELECT 1 FROM "+publishProfileStateTable+" ps WHERE ps.profile_id=p.id AND ps.tenant_id=? AND ps.account_id=? AND ps.deleted_at IS NULL)", tenantID, accountID)
+	keys = uniqueStrings(keys)
+	if len(profileIDs) > 0 {
+		model = model.Where("(p.id IN (?) OR p.source_key IN (?))", uniqueIds(profileIDs), keys)
+	} else {
+		model = model.WhereIn("p."+columns.SourceKey, keys)
+	}
+	row, err := model.OrderDesc("p." + columns.HasVerificationVideo).OrderDesc("p." + columns.Id).Limit(1).One()
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取旧版采集资料失败")
 	}
 	return row, nil
+}
+
+// Historical keys were created before v2/v3 and ended in the rule ID.
+func legacyCollectMaterialSourceKey(uniqueKey string, ruleID int64) string {
+	uniqueKey = strings.TrimSpace(uniqueKey)
+	if uniqueKey == "" || ruleID <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("collect:%s:%d", uniqueKey, ruleID)
 }
 
 func collectPreparedMediaCounts(media []collectPreparedMedia) (imageCount int, videoCount int, hasVerificationVideo int) {

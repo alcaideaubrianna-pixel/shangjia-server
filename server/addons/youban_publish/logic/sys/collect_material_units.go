@@ -26,9 +26,10 @@ type collectMaterialUnit struct {
 }
 
 type collectMaterialMessageView struct {
-	// EventID/ParentEventID 来自采集事件落库关系；有明确父子关系时优先使用，避免 Telegram 时间乱序导致验证视频丢失。
+	// EventID/ParentEventID 保留已落库关系，但不能绕过消息邻接和单验证组约束。
 	EventID       int64
 	ParentEventID int64
+	GroupedID     string
 	RawText       string
 	Media         []collectMediaItem
 	MessageAt     time.Time
@@ -41,34 +42,10 @@ type collectMaterialPair struct {
 
 func pairCollectMaterialMessages(messages []collectMaterialMessageView) []collectMaterialPair {
 	pairs := make([]collectMaterialPair, 0)
-	// 线上 Bot 可能先落库验证视频、后收到展示资料，不能只按时间顺序判断。
-	displaysByEventID := make(map[int64]int, len(messages))
-	for index, message := range messages {
-		if message.EventID > 0 && classifyProfileMessage(message.RawText, message.Media).Kind == profileMessageKindDisplay {
-			displaysByEventID[message.EventID] = index
-		}
-	}
-	pairedVerify := make(map[int]struct{})
-	pairedDisplay := make(map[int]struct{})
-	for index, message := range messages {
-		if message.ParentEventID <= 0 {
-			continue
-		}
-		displayIndex, ok := displaysByEventID[message.ParentEventID]
-		if !ok || index == displayIndex {
-			continue
-		}
-		if collectMaterialVerifyCandidate(message) {
-			pairs = append(pairs, collectMaterialPair{DisplayIndex: displayIndex, VerifyIndex: index})
-			pairedVerify[index] = struct{}{}
-			pairedDisplay[displayIndex] = struct{}{}
-		}
-	}
+	// Persisted parents cannot override source message adjacency.
+	pairedDisplay := make(map[int]string)
 	lastDisplayIndex := -1
 	for index, message := range messages {
-		if _, exists := pairedVerify[index]; exists {
-			continue
-		}
 		if collectMaterialSkippableMessage(message) {
 			continue
 		}
@@ -81,8 +58,14 @@ func pairCollectMaterialMessages(messages []collectMaterialMessageView) []collec
 			lastDisplayIndex = index
 		case profileMessageKindVerify:
 			if lastDisplayIndex >= 0 {
-				if _, exists := pairedDisplay[lastDisplayIndex]; exists {
-					continue
+				// A stale stored parent neither wins over nor vetoes the
+				// nearest legal source context. Canonical/transaction checks
+				// remain responsible for validating the durable relationship.
+				if group, exists := pairedDisplay[lastDisplayIndex]; exists {
+					if group == "" || group != message.GroupedID {
+						lastDisplayIndex = -1
+						continue
+					}
 				}
 				if !collectMaterialVerifyCandidate(message) {
 					lastDisplayIndex = -1
@@ -94,7 +77,7 @@ func pairCollectMaterialMessages(messages []collectMaterialMessageView) []collec
 					(!verifyAt.Before(displayAt) && verifyAt.Sub(displayAt) <= collectMaterialVerifyWindow())
 				if withinWindow {
 					pairs = append(pairs, collectMaterialPair{DisplayIndex: lastDisplayIndex, VerifyIndex: index})
-					pairedDisplay[lastDisplayIndex] = struct{}{}
+					pairedDisplay[lastDisplayIndex] = message.GroupedID
 				}
 			}
 		default:
@@ -104,9 +87,8 @@ func pairCollectMaterialMessages(messages []collectMaterialMessageView) []collec
 	return pairs
 }
 
-// A verification material is one standalone captionless video message.
-// A captionless group containing photos and a video is a new display unit,
-// not verification material belonging to the previous display.
+// Verification candidates retain the existing short-caption/video-only rule.
+// Several events with one nonempty GroupedID form a single logical group.
 func collectMaterialMixedVerification(message collectMaterialMessageView) bool {
 	return collectMaterialVerifyCandidate(message)
 }
@@ -140,19 +122,27 @@ func collectMaterialSkippableMessage(message collectMaterialMessageView) bool {
 }
 
 // collectMaterialContextClosed reports whether a later effective business
-// message has ended the display's verification context. Pure verification
-// groups and known collector notices keep the context open.
+// message has ended the display's verification context. Members of the first
+// verification group keep it open; a distinct second group closes it.
 func collectMaterialContextClosed(messages []collectMaterialMessageView, displayIndex int) bool {
 	if displayIndex < 0 || displayIndex >= len(messages) {
 		return false
 	}
+	seenVerify := false
+	verifyGroup := ""
 	for index := displayIndex + 1; index < len(messages); index++ {
 		message := messages[index]
 		if collectMaterialSkippableMessage(message) {
 			continue
 		}
 		if collectMaterialVerifyCandidate(message) {
-			continue
+			if !seenVerify {
+				seenVerify, verifyGroup = true, message.GroupedID
+				continue
+			}
+			if verifyGroup != "" && verifyGroup == message.GroupedID {
+				continue
+			}
 		}
 		return true
 	}
@@ -165,6 +155,7 @@ func collectMaterialEventViews(rows []gdb.Record, mediaByEvent map[int64][]colle
 		views = append(views, collectMaterialMessageView{
 			EventID:       row["id"].Int64(),
 			ParentEventID: row["material_parent_event_id"].Int64(),
+			GroupedID:     strings.TrimSpace(row["source_grouped_id"].String()),
 			RawText:       row["raw_text"].String(),
 			Media:         mediaByEvent[row["id"].Int64()],
 			MessageAt:     collectMaterialEventAt(row),
@@ -223,7 +214,7 @@ func pairCollectMaterialUnits(units []*collectMaterialUnit) []*collectMaterialUn
 		if unit.MessageAt != nil {
 			messageAt = unit.MessageAt.Time
 		}
-		views = append(views, collectMaterialMessageView{RawText: unit.RawText, Media: unit.Media, MessageAt: messageAt})
+		views = append(views, collectMaterialMessageView{RawText: unit.RawText, Media: unit.Media, MessageAt: messageAt, GroupedID: unit.GroupedId})
 	}
 	verifyByDisplay := make(map[int][]int)
 	for _, pair := range pairCollectMaterialMessages(views) {

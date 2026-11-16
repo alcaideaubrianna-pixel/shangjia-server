@@ -122,8 +122,8 @@ func TestCollectDispatchHasLateMediaLocalPostgres(t *testing.T) {
 	defer cancel()
 	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		for _, sql := range []string{
-			"CREATE TEMP TABLE hg_youban_publish_collect_event_media(event_id bigint,created_at timestamp)",
-			"INSERT INTO hg_youban_publish_collect_event_media VALUES(9826309,'2026-11-01 19:39:03.952819'),(9826309,'2026-11-01 19:44:12.310683'),(9826309,'2026-11-01 19:53:36.259848')",
+			"CREATE TEMP TABLE hg_youban_publish_collect_event_media(id bigserial PRIMARY KEY,event_id bigint,created_at timestamp)",
+			"INSERT INTO hg_youban_publish_collect_event_media(event_id,created_at) VALUES(9826309,'2026-11-01 19:39:03.952819'),(9826309,'2026-11-01 19:44:12.310683'),(9826309,'2026-11-01 19:53:36.259848')",
 		} {
 			if _, execErr := tx.Exec(sql); execErr != nil {
 				return execErr

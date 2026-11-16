@@ -50,6 +50,10 @@ func markCollectProcessSourceActive(ctx context.Context, payload collectProcessQ
 	}
 	member := fmt.Sprintf("%d:%d:%d", payload.TenantId, payload.AccountId, payload.SourceId)
 	_, _ = client.Do(ctx, "SADD", collectProcessActiveSourcesKey, member)
+	// Redis-first needs recovery membership, but must not wake the legacy Outbox.
+	if collectProcessOutboxMode(ctx) != "postgres_outbox" {
+		return
+	}
 	// Keep wakeups isolated per tenant/account/source. The database remains
 	// authoritative; this Redis list only wakes the source-scoped dispatcher.
 	wakeLockKey := collectProcessSourceWakeLockKey(member)
@@ -301,6 +305,14 @@ func (s *sSysPublish) enqueueCollectProcessTaskWithOutbox(ctx context.Context, p
 	// Event-specific enqueue paths are the low-cost producer for the candidate
 	// index. The index is only an accelerator; PG remains authoritative below.
 	if payload.EventId > 0 {
+		if persist && unique && payload.SourceChatId != "" {
+			if dirtyErr := dirtyCollectTargetBatch(ctx, payload); dirtyErr != nil {
+				return false, dirtyErr
+			}
+		}
+		if registerErr := registerCollectProcessRecoveryScope(ctx, payload); registerErr != nil {
+			return false, registerErr
+		}
 		indexCollectProcessCandidate(ctx, payload, payload.EventId)
 		markCollectProcessHistory(ctx, payload)
 	}
@@ -584,6 +596,12 @@ func (s *sSysPublish) processCollectSourceTask(ctx context.Context, payload coll
 	windowCtx, cancelWindow := context.WithTimeout(ctx, collectMaterialWindowExecutionTimeout)
 	defer cancelWindow()
 	ctx = windowCtx
+	if !cache.Initialized() {
+		return collectProcessRedisRetryDelay, true, false, nil
+	}
+	if _, cacheErr := cache.Instance().Get(ctx, collectTargetBatchKey(payload)+":dirty"); cacheErr != nil {
+		return collectProcessRedisRetryDelay, true, false, nil
+	}
 	enabled, err := collectProcessSourceEnabled(ctx, payload)
 	if err != nil {
 		return 0, false, false, err

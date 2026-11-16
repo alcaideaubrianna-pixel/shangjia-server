@@ -15,6 +15,26 @@ import (
 	"hotgo/addons/telegram_collector/model/input/sysin"
 )
 
+// Invalid scope must fail before acquiring a database connection.
+func TestAccountTaskMaintenanceRequiresAccount(t *testing.T) {
+	tasks := &sAccountTasks{}
+	ctx := context.Background()
+	for _, accountID := range []int64{0, -1} {
+		if _, err := tasks.RecoverExpired(ctx, accountID, 10); err == nil {
+			t.Fatal("RecoverExpired accepted invalid account")
+		}
+		if _, err := tasks.ExpirePending(ctx, accountID, sysin.AccountTaskTypeMessageMediaFallback, time.Now(), 10); err == nil {
+			t.Fatal("ExpirePending accepted invalid account")
+		}
+		if _, err := tasks.ListFinalizing(ctx, accountID, 10); err == nil {
+			t.Fatal("ListFinalizing accepted invalid account")
+		}
+		if _, err := tasks.ActiveStatusStats(ctx, accountID); err == nil {
+			t.Fatal("ActiveStatusStats accepted invalid account")
+		}
+	}
+}
+
 func TestAccountTaskCanReviveMessageDeleteFallback(t *testing.T) {
 	if !accountTaskCanRevive(sysin.AccountTaskTypeMessageDeleteFallback) {
 		t.Fatal("message delete fallback task must revive after account runtime recovers")
@@ -200,7 +220,10 @@ func TestAccountTaskPersistenceIntegration(t *testing.T) {
 		t.Fatalf("claim recovery tasks=%+v err=%v", recoveryTasks, err)
 	}
 	time.Sleep(5 * time.Millisecond)
-	recovered, err := service.RecoverExpired(ctx, 10)
+	if recovered, scopeErr := service.RecoverExpired(ctx, seed+1, 10); scopeErr != nil || recovered != 0 {
+		t.Fatalf("recovery escaped account scope count=%d err=%v", recovered, scopeErr)
+	}
+	recovered, err := service.RecoverExpired(ctx, seed, 10)
 	if err != nil || recovered < 1 {
 		t.Fatalf("recover expired=%d err=%v", recovered, err)
 	}
@@ -221,7 +244,7 @@ func TestAccountTaskPersistenceIntegration(t *testing.T) {
 		t.Fatalf("claim final-attempt recovery tasks=%+v err=%v", crashedTasks, err)
 	}
 	time.Sleep(5 * time.Millisecond)
-	if _, err = service.RecoverExpired(ctx, 10); err != nil {
+	if _, err = service.RecoverExpired(ctx, seed, 10); err != nil {
 		t.Fatalf("recover final-attempt task: %v", err)
 	}
 	crashed, err := service.Get(ctx, crashedID)
@@ -240,7 +263,10 @@ func TestAccountTaskPersistenceIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("age pending task: %v", err)
 	}
-	expired, err := service.ExpirePending(ctx, sysin.AccountTaskTypeMessageMediaFallback, time.Now().Add(-45*time.Minute), 10)
+	if expired, scopeErr := service.ExpirePending(ctx, seed+1, sysin.AccountTaskTypeMessageMediaFallback, time.Now().Add(-45*time.Minute), 10); scopeErr != nil || expired != 0 {
+		t.Fatalf("expiration escaped account scope count=%d err=%v", expired, scopeErr)
+	}
+	expired, err := service.ExpirePending(ctx, seed, sysin.AccountTaskTypeMessageMediaFallback, time.Now().Add(-45*time.Minute), 10)
 	if err != nil || expired != 1 {
 		t.Fatalf("expire pending count=%d err=%v", expired, err)
 	}
@@ -261,7 +287,7 @@ func TestAccountTaskPersistenceIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("age future pending task: %v", err)
 	}
-	if expired, err = service.ExpirePending(ctx, sysin.AccountTaskTypeMessageMediaFallback, time.Now().Add(-45*time.Minute), 10); err != nil || expired != 0 {
+	if expired, err = service.ExpirePending(ctx, seed, sysin.AccountTaskTypeMessageMediaFallback, time.Now().Add(-45*time.Minute), 10); err != nil || expired != 0 {
 		t.Fatalf("future pending task must not expire count=%d err=%v", expired, err)
 	}
 
@@ -273,7 +299,10 @@ func TestAccountTaskPersistenceIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("insert finalizing task: %v", err)
 	}
-	finalizing, err := service.ListFinalizing(ctx, 10)
+	if rows, scopeErr := service.ListFinalizing(ctx, seed+1, 10); scopeErr != nil || len(rows) != 0 {
+		t.Fatalf("finalization escaped account scope rows=%+v err=%v", rows, scopeErr)
+	}
+	finalizing, err := service.ListFinalizing(ctx, seed, 10)
 	if err != nil || len(finalizing) != 1 || finalizing[0].ID != finalizingID {
 		t.Fatalf("list finalizing tasks=%+v err=%v", finalizing, err)
 	}

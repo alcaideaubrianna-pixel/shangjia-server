@@ -54,7 +54,7 @@ func TestCollectMaterialUnitsPairDisplayAndVerify(t *testing.T) {
 	}
 }
 
-func TestCollectMaterialUnitsPairMultipleVerifyGroups(t *testing.T) {
+func TestCollectMaterialUnitsUseOnlyFirstVerifyGroup(t *testing.T) {
 	units := []*collectMaterialUnit{
 		{RawText: "昵称：A100", MessageId: 151, Messages: []int{151}, Media: []collectMediaItem{{Type: "photo", FileId: "photo-1"}}},
 		{MessageId: 152, Messages: []int{152}, Media: []collectMediaItem{{Type: "video", FileId: "video-1"}}},
@@ -70,8 +70,24 @@ func TestCollectMaterialUnitsPairMultipleVerifyGroups(t *testing.T) {
 			verifyCount++
 		}
 	}
-	if verifyCount != 3 {
-		t.Fatalf("verify media=%d, want 3", verifyCount)
+	if verifyCount != 1 {
+		t.Fatalf("verify media=%d, want 1", verifyCount)
+	}
+}
+
+func TestCollectMaterialUnitsPreserveOneSplitVerifyAlbum(t *testing.T) {
+	units := []*collectMaterialUnit{
+		{RawText: "昵称：A100", MessageId: 151, Media: []collectMediaItem{{Type: "photo"}}},
+		{GroupedId: "verify-one", MessageId: 152, Media: []collectMediaItem{{Type: "video", FileId: "v1"}}},
+		{GroupedId: "verify-one", MessageId: 153, Media: []collectMediaItem{{Type: "video", FileId: "v2"}}},
+		{GroupedId: "verify-two", MessageId: 154, Media: []collectMediaItem{{Type: "video", FileId: "v3"}}},
+	}
+	paired := pairCollectMaterialUnits(units)
+	if len(paired) != 1 || len(paired[0].Media) != 3 {
+		t.Fatalf("one display should retain both members of only the first album: %#v", paired)
+	}
+	if paired[0].Media[1].FileId != "v1" || paired[0].Media[2].FileId != "v2" {
+		t.Fatal("another verification album crossed the pairing boundary")
 	}
 }
 

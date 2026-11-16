@@ -1184,14 +1184,15 @@ func collectDispatchHasLateMedia(ctx context.Context, dispatch, event gdb.Record
 		return false, nil
 	}
 	mediaCols := pdao.YoubanPublishCollectEventMedia.Columns()
-	count, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
+	row, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
+		Fields(mediaCols.Id).
 		Where(mediaCols.EventId, event["id"].Int64()).
 		WhereGT(mediaCols.CreatedAt, dispatchedAt).
-		Count()
+		Limit(1).One()
 	if err != nil {
 		return false, gerror.Wrap(err, "检查采集事件迟到媒体失败")
 	}
-	return count > 0, nil
+	return !row.IsEmpty(), nil
 }
 
 func collectContentHasVerification(content *collectContentResult) bool {

@@ -1,15 +1,16 @@
 package consts
 
 const (
-	MediaCachePrefix             = "tg:collector:media:"
-	MediaLockPrefix              = "tg:collector:media-lock:"
-	AccountOwnerPrefix           = "youban_publish:tg:account-client:"
-	AccountLeaseEpochPrefix      = "tg:collector:account-lease-epoch:"
-	AccountTaskEmptyPrefix       = "tg:collector:account-task-empty:"
-	MediaCacheDefaultHours       = 720
-	RecoveryScopeKey             = "telegram_collector:recovery:scopes:v1"
-	EventRecoveryCursorPrefix    = "telegram_collector:event:recovery_cursor:v1"
-	DeliveryRecoveryCursorPrefix = "telegram_collector:delivery:recovery_cursor:v1"
+	MediaCachePrefix                  = "tg:collector:media:"
+	MediaLockPrefix                   = "tg:collector:media-lock:"
+	AccountOwnerPrefix                = "youban_publish:tg:account-client:"
+	AccountLeaseEpochPrefix           = "tg:collector:account-lease-epoch:"
+	AccountTaskEmptyPrefix            = "tg:collector:account-task-empty:"
+	AccountTaskMaintenanceAccountsKey = "telegram_collector:account_task:maintenance_accounts"
+	MediaCacheDefaultHours            = 720
+	RecoveryScopeKey                  = "telegram_collector:recovery:scopes:v1"
+	EventRecoveryCursorPrefix         = "telegram_collector:event:recovery_cursor:v1"
+	DeliveryRecoveryCursorPrefix      = "telegram_collector:delivery:recovery_cursor:v1"
 )
 
 func EventRecoveryCursorKey(scope, status string) string {

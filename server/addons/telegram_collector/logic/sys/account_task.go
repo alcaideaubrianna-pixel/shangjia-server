@@ -10,6 +10,7 @@ import (
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gcache"
 	"github.com/gogf/gf/v2/os/gtime"
 
 	"hotgo/addons/telegram_collector/consts"
@@ -25,6 +26,31 @@ type sAccountTasks struct{}
 
 func init() { collectorservice.RegisterAccountTasks(&sAccountTasks{}) }
 
+func (s *sAccountTasks) RegisterMaintenanceAccount(ctx context.Context, accountID int64) error {
+	if accountID <= 0 {
+		return gerror.New("Telegram账号维护范围无效")
+	}
+	return cache.SetAdd(ctx, consts.AccountTaskMaintenanceAccountsKey, strconv.FormatInt(accountID, 10))
+}
+
+func (s *sAccountTasks) MaintenanceAccounts(ctx context.Context, limit int) ([]int64, error) {
+	if limit <= 0 || limit > 4 {
+		limit = 4
+	}
+	members, err := cache.SetRotateFor(ctx, consts.AccountTaskMaintenanceAccountsKey, "account_maintenance", limit)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]int64, 0, len(members))
+	for _, member := range members {
+		id, err := strconv.ParseInt(member, 10, 64)
+		if err == nil && id > 0 {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+
 func (s *sAccountTasks) Submit(ctx context.Context, in *sysin.AccountTaskSubmit) (int64, error) {
 	if in == nil || in.TenantID <= 0 || in.AccountID <= 0 {
 		return 0, gerror.New("Telegram账号任务归属不完整")
@@ -34,7 +60,6 @@ func (s *sAccountTasks) Submit(ctx context.Context, in *sysin.AccountTaskSubmit)
 	if in.TaskType == "" || in.TaskKey == "" {
 		return 0, gerror.New("Telegram账号任务参数不完整")
 	}
-	clearAccountTaskEmptyCache(ctx, in.AccountID)
 	if err := validateAccountTaskSubmit(in); err != nil {
 		return 0, err
 	}
@@ -97,8 +122,19 @@ func (s *sAccountTasks) Submit(ctx context.Context, in *sysin.AccountTaskSubmit)
 		Scan(&row); err != nil {
 		return 0, gerror.Wrap(err, "读取Telegram账号任务失败")
 	}
+	for _, accountID := range []int64{in.AccountID, in.MediaOwnerAccountID} {
+		if accountID > 0 {
+			if err := s.RegisterMaintenanceAccount(ctx, accountID); err != nil {
+				g.Log().Warningf(ctx, "登记Telegram账号维护范围失败 accountId:%d err:%+v", accountID, err)
+			}
+		}
+	}
 	// Redis 只维护可调度热索引，写入失败不影响 PostgreSQL 事实落库。
 	_ = indexAccountTask(ctx, row.Id, in.AccountID, in.MediaOwnerAccountID, in.Priority, now)
+	// Wake only after the durable write and hot-index update; a pre-write
+	// invalidation lets an empty poll race the insert and hide the new task.
+	clearAccountTaskEmptyCache(ctx, in.AccountID)
+	clearAccountTaskEmptyCache(ctx, in.MediaOwnerAccountID)
 	return row.Id, nil
 }
 
@@ -308,10 +344,13 @@ func (s *sAccountTasks) Claim(ctx context.Context, lease *sysin.AccountLease, li
 	if ttl <= 0 {
 		ttl = 10 * time.Minute
 	}
+	keepEmpty := false
 	if cache.Initialized() {
-		if value, cacheErr := cache.Instance().Get(ctx, consts.AccountTaskEmptyKey(lease.AccountID)); cacheErr == nil && !value.IsNil() {
+		proceed, finish := reserveAccountTaskIdleProbe(ctx, cache.Instance(), consts.AccountTaskEmptyKey(lease.AccountID), accountTaskEmptyCacheTTL())
+		if !proceed {
 			return []*sysin.AccountTask{}, nil
 		}
+		defer func() { finish(keepEmpty) }()
 	}
 	columns := dao.TgCollectorAccountTask.Columns()
 	now := gtime.Now()
@@ -319,23 +358,31 @@ func (s *sAccountTasks) Claim(ctx context.Context, lease *sysin.AccountLease, li
 	// 优先从 Redis 账号热队列读取候选 ID，避免每次按账号扫描大表。
 	if cache.Initialized() {
 		if ids, cacheErr := cache.ZSetRange(ctx, consts.AccountTaskQueueKey(lease.AccountID), 0, limit*4-1); cacheErr == nil {
-			for _, rawID := range ids {
-				id, parseErr := strconv.ParseInt(rawID, 10, 64)
-				if parseErr != nil || id <= 0 {
-					continue
+			eventIDs := accountTaskCandidateIDs(ids)
+			if len(eventIDs) > 0 {
+				var rows []*entity.TgCollectorAccountTask
+				if err := dao.TgCollectorAccountTask.Ctx(ctx).Master().WhereIn(columns.Id, eventIDs).
+					Where("("+columns.AccountId+"=? OR ("+columns.MediaOwnerAccountId+"=? AND "+columns.TaskType+"=?))", lease.AccountID, lease.AccountID, sysin.AccountTaskTypeMediaDownload).
+					Scan(&rows); err != nil {
+					return nil, gerror.Wrap(err, "批量读取Telegram账号候选任务失败")
 				}
-				var row entity.TgCollectorAccountTask
-				if readErr := dao.TgCollectorAccountTask.Ctx(ctx).WherePri(id).Scan(&row); readErr != nil || row.Id <= 0 {
-					continue
+				byID := make(map[int64]*entity.TgCollectorAccountTask, len(rows))
+				for _, row := range rows {
+					if row != nil {
+						byID[row.Id] = row
+					}
 				}
-				if (row.AccountId != lease.AccountID && (row.MediaOwnerAccountId != lease.AccountID || row.TaskType != sysin.AccountTaskTypeMediaDownload)) ||
-					(row.Status != sysin.AccountTaskStatusPending && row.Status != sysin.AccountTaskStatusFailedRetry) ||
-					(row.NextRunAt != nil && row.NextRunAt.After(now)) || (row.LeaseUntil != nil && row.LeaseUntil.After(now)) {
-					continue
-				}
-				candidates = append(candidates, &row)
-				if len(candidates) >= limit {
-					break
+				// Preserve Redis priority/FIFO order after the unordered PG IN read.
+				for _, id := range eventIDs {
+					row := byID[id]
+					if row == nil || (row.Status != sysin.AccountTaskStatusPending && row.Status != sysin.AccountTaskStatusFailedRetry) ||
+						(row.NextRunAt != nil && row.NextRunAt.After(now)) || (row.LeaseUntil != nil && row.LeaseUntil.After(now)) {
+						continue
+					}
+					candidates = append(candidates, row)
+					if len(candidates) >= limit {
+						break
+					}
 				}
 			}
 		}
@@ -344,11 +391,11 @@ func (s *sAccountTasks) Claim(ctx context.Context, lease *sysin.AccountLease, li
 	if len(candidates) == 0 {
 		table := dao.TgCollectorAccountTask.Table()
 		query := `WITH candidates AS (
-			SELECT id,task_type,priority,next_run_at FROM ` + table + ` WHERE account_id=? AND status IN (?,?) AND (next_run_at IS NULL OR next_run_at<=?) AND (lease_until IS NULL OR lease_until<?)
+			SELECT id,task_type,priority,next_run_at,account_id,media_owner_account_id FROM ` + table + ` WHERE account_id=? AND status IN (?,?) AND (next_run_at IS NULL OR next_run_at<=?) AND (lease_until IS NULL OR lease_until<?)
 			UNION ALL
-			SELECT id,task_type,priority,next_run_at FROM ` + table + ` WHERE media_owner_account_id=? AND task_type='media_download' AND account_id<>? AND status IN (?,?) AND (next_run_at IS NULL OR next_run_at<=?) AND (lease_until IS NULL OR lease_until<?)
+			SELECT id,task_type,priority,next_run_at,account_id,media_owner_account_id FROM ` + table + ` WHERE media_owner_account_id=? AND task_type='media_download' AND account_id<>? AND status IN (?,?) AND (next_run_at IS NULL OR next_run_at<=?) AND (lease_until IS NULL OR lease_until<?)
 		)
-		SELECT id,task_type FROM candidates ORDER BY priority DESC, CASE WHEN task_type='media_download' THEN 1 ELSE 0 END DESC, next_run_at ASC NULLS FIRST,id ASC LIMIT ?`
+		SELECT id,task_type,priority,account_id,media_owner_account_id FROM candidates ORDER BY priority DESC, CASE WHEN task_type='media_download' THEN 1 ELSE 0 END DESC, next_run_at ASC NULLS FIRST,id ASC LIMIT ?`
 		if err := g.DB().GetScan(ctx, &candidates, query, lease.AccountID, sysin.AccountTaskStatusPending, sysin.AccountTaskStatusFailedRetry, now, now, lease.AccountID, lease.AccountID, sysin.AccountTaskStatusPending, sysin.AccountTaskStatusFailedRetry, now, now, limit); err != nil {
 			return nil, gerror.Wrap(err, "读取待执行Telegram账号任务失败")
 		}
@@ -359,11 +406,12 @@ func (s *sAccountTasks) Claim(ctx context.Context, lease *sysin.AccountLease, li
 		}
 	}
 	if len(candidates) == 0 {
-		if cache.Initialized() {
-			_ = cache.Instance().Set(ctx, consts.AccountTaskEmptyKey(lease.AccountID), 1, accountTaskEmptyCacheTTL())
-		}
+		// Keep only the pre-read reservation. Never recreate it after a producer
+		// invalidated it while either Redis or PostgreSQL was being read.
+		keepEmpty = true
 		return []*sysin.AccountTask{}, nil
 	}
+
 	claimed := make([]*sysin.AccountTask, 0, len(candidates))
 	for _, candidate := range candidates {
 		if candidate == nil || candidate.Id <= 0 {
@@ -383,15 +431,15 @@ func (s *sAccountTasks) Claim(ctx context.Context, lease *sysin.AccountLease, li
 				columns.AttemptCount: gdb.Raw(columns.AttemptCount + "+1"), columns.UpdatedAt: now,
 			}).Update()
 		if updateErr != nil {
-			return nil, gerror.Wrap(updateErr, "领取Telegram账号任务失败")
+			return claimed, gerror.Wrap(updateErr, "领取Telegram账号任务失败")
 		}
 		affected, _ := result.RowsAffected()
 		if affected == 0 {
 			continue
 		}
 		var row entity.TgCollectorAccountTask
-		if updateErr = dao.TgCollectorAccountTask.Ctx(ctx).WherePri(candidate.Id).Scan(&row); updateErr != nil {
-			return nil, gerror.Wrap(updateErr, "读取已领取Telegram账号任务失败")
+		if updateErr = dao.TgCollectorAccountTask.Ctx(ctx).Master().WherePri(candidate.Id).Scan(&row); updateErr != nil {
+			return claimed, gerror.Wrap(updateErr, "读取已领取Telegram账号任务失败")
 		}
 		claimed = append(claimed, accountTaskModel(&row))
 	}
@@ -482,13 +530,88 @@ func (s *sAccountTasks) Fail(ctx context.Context, in *sysin.AccountTaskFailure) 
 	return nil
 }
 
+// reserveAccountTaskIdleProbe reserves BEFORE any candidate reads so a durable
+// producer's invalidation cannot be overwritten by a stale empty read result.
+func reserveAccountTaskIdleProbe(ctx context.Context, store *gcache.Cache, key string, ttl time.Duration) (bool, func(bool)) {
+	reserved, err := store.SetIfNotExist(ctx, key, 1, ttl)
+	if err != nil {
+		return true, func(bool) {}
+	} // PG remains the fallback.
+	if !reserved {
+		return false, func(bool) {}
+	}
+	return true, func(empty bool) {
+		if !empty {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+			defer cancel()
+			_, _ = store.Remove(cleanupCtx, key)
+		}
+	}
+}
+
+// accountTaskCandidateIDs bounds and deduplicates untrusted hot-index members.
+func accountTaskCandidateIDs(members []string) []int64 {
+	ids := make([]int64, 0, min(len(members), 80))
+	seen := make(map[int64]struct{}, cap(ids))
+	for _, member := range members {
+		id, err := strconv.ParseInt(member, 10, 64)
+		if err != nil || id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+		if len(ids) == 80 {
+			break
+		}
+	}
+	return ids
+}
+
+// WaitForWork observes producer invalidation without querying PG. The bounded
+// timer is mandatory: delayed tasks, lost invalidations and Redis outages must
+// still reach the durable account-scoped fallback.
+func (s *sAccountTasks) WaitForWork(ctx context.Context, accountID int64, delay time.Duration) {
+	waitAccountTaskWork(ctx, delay, func() bool {
+		if !cache.Initialized() {
+			return false
+		}
+		value, err := cache.Instance().Get(ctx, consts.AccountTaskEmptyKey(accountID))
+		return err == nil && (value == nil || value.IsNil())
+	})
+}
+
+func waitAccountTaskWork(ctx context.Context, delay time.Duration, ready func() bool) {
+	if delay <= 0 {
+		delay = 2 * time.Second
+	}
+	deadline := time.NewTimer(delay)
+	defer deadline.Stop()
+	tick := time.NewTicker(250 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-deadline.C:
+			return
+		case <-tick.C:
+			if ready() {
+				return
+			}
+		}
+	}
+}
+
 func accountTaskEmptyCacheTTL() time.Duration {
 	milliseconds, err := strconv.Atoi(strings.TrimSpace(os.Getenv("YOUBAN_PUBLISH_ACCOUNT_TASK_EMPTY_CACHE_MS")))
 	if err != nil || milliseconds < 100 {
-		milliseconds = 500
+		milliseconds = 8000
 	}
-	if milliseconds > 3000 {
-		milliseconds = 3000
+	if milliseconds > 8000 {
+		milliseconds = 8000
 	}
 	return time.Duration(milliseconds) * time.Millisecond
 }
@@ -499,14 +622,18 @@ func clearAccountTaskEmptyCache(ctx context.Context, accountID int64) {
 	}
 }
 
-func (s *sAccountTasks) RecoverExpired(ctx context.Context, limit int) (int, error) {
-	if limit <= 0 {
+func (s *sAccountTasks) RecoverExpired(ctx context.Context, accountID int64, limit int) (int, error) {
+	if accountID <= 0 {
+		return 0, gerror.New("Telegram账号ID无效，禁止无账户范围维护任务")
+	}
+	if limit <= 0 || limit > 100 {
 		limit = 100
 	}
 	columns := dao.TgCollectorAccountTask.Columns()
 	now := gtime.Now()
 	var rows []*entity.TgCollectorAccountTask
 	if err := dao.TgCollectorAccountTask.Ctx(ctx).
+		Where("("+columns.AccountId+"=? OR ("+columns.TaskType+"=? AND "+columns.MediaOwnerAccountId+"=?))", accountID, sysin.AccountTaskTypeMediaDownload, accountID).
 		Fields(columns.Id, columns.AttemptCount, columns.MaxAttempts).
 		Where(columns.Status, sysin.AccountTaskStatusProcessing).
 		WhereLT(columns.LeaseUntil, now).
@@ -524,6 +651,7 @@ func (s *sAccountTasks) RecoverExpired(ctx context.Context, limit int) (int, err
 			nextRunAt = nil
 		}
 		result, err := dao.TgCollectorAccountTask.Ctx(ctx).
+			Where("("+columns.AccountId+"=? OR ("+columns.TaskType+"=? AND "+columns.MediaOwnerAccountId+"=?))", accountID, sysin.AccountTaskTypeMediaDownload, accountID).
 			WherePri(row.Id).
 			Where(columns.Status, sysin.AccountTaskStatusProcessing).
 			WhereLT(columns.LeaseUntil, now).
@@ -541,16 +669,20 @@ func (s *sAccountTasks) RecoverExpired(ctx context.Context, limit int) (int, err
 	return recovered, nil
 }
 
-func (s *sAccountTasks) ExpirePending(ctx context.Context, taskType string, before time.Time, limit int) (int, error) {
+func (s *sAccountTasks) ExpirePending(ctx context.Context, accountID int64, taskType string, before time.Time, limit int) (int, error) {
+	if accountID <= 0 {
+		return 0, gerror.New("Telegram账号ID无效，禁止无账户范围维护任务")
+	}
 	if strings.TrimSpace(taskType) == "" {
 		return 0, gerror.New("Telegram账号任务类型不能为空")
 	}
-	if limit <= 0 {
+	if limit <= 0 || limit > 100 {
 		limit = 100
 	}
 	columns := dao.TgCollectorAccountTask.Columns()
-	var ids []int64
+	var rows []*entity.TgCollectorAccountTask
 	if err := dao.TgCollectorAccountTask.Ctx(ctx).
+		Where("("+columns.AccountId+"=? OR ("+columns.TaskType+"=? AND "+columns.MediaOwnerAccountId+"=?))", accountID, sysin.AccountTaskTypeMediaDownload, accountID).
 		Fields(columns.Id).
 		Where(columns.TaskType, taskType).
 		WhereIn(columns.Status, []string{sysin.AccountTaskStatusPending, sysin.AccountTaskStatusFailedRetry}).
@@ -558,13 +690,20 @@ func (s *sAccountTasks) ExpirePending(ctx context.Context, taskType string, befo
 		Where("("+columns.NextRunAt+" IS NULL OR "+columns.NextRunAt+"<=?)", gtime.Now()).
 		OrderAsc(columns.UpdatedAt + "," + columns.Id).
 		Limit(limit).
-		Scan(&ids); err != nil {
+		Scan(&rows); err != nil {
 		return 0, gerror.Wrap(err, "读取超时未执行Telegram账号任务失败")
+	}
+	ids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		if row != nil && row.Id > 0 {
+			ids = append(ids, row.Id)
+		}
 	}
 	if len(ids) == 0 {
 		return 0, nil
 	}
 	result, err := dao.TgCollectorAccountTask.Ctx(ctx).
+		Where("("+columns.AccountId+"=? OR ("+columns.TaskType+"=? AND "+columns.MediaOwnerAccountId+"=?))", accountID, sysin.AccountTaskTypeMediaDownload, accountID).
 		WhereIn(columns.Id, ids).
 		Where(columns.TaskType, taskType).
 		WhereIn(columns.Status, []string{sysin.AccountTaskStatusPending, sysin.AccountTaskStatusFailedRetry}).
@@ -583,13 +722,17 @@ func (s *sAccountTasks) ExpirePending(ctx context.Context, taskType string, befo
 	return int(affected), nil
 }
 
-func (s *sAccountTasks) ListFinalizing(ctx context.Context, limit int) ([]*sysin.AccountTask, error) {
-	if limit <= 0 {
+func (s *sAccountTasks) ListFinalizing(ctx context.Context, accountID int64, limit int) ([]*sysin.AccountTask, error) {
+	if accountID <= 0 {
+		return nil, gerror.New("Telegram账号ID无效，禁止无账户范围维护任务")
+	}
+	if limit <= 0 || limit > 100 {
 		limit = 100
 	}
 	columns := dao.TgCollectorAccountTask.Columns()
 	var rows []*entity.TgCollectorAccountTask
 	if err := dao.TgCollectorAccountTask.Ctx(ctx).
+		Where("("+columns.AccountId+"=? OR ("+columns.TaskType+"=? AND "+columns.MediaOwnerAccountId+"=?))", accountID, sysin.AccountTaskTypeMediaDownload, accountID).
 		Where(columns.Status, sysin.AccountTaskStatusFinalizing).
 		OrderAsc(columns.UpdatedAt + "," + columns.Id).
 		Limit(limit).
@@ -625,7 +768,10 @@ func (s *sAccountTasks) FinalizeFailure(ctx context.Context, taskID int64) error
 	return nil
 }
 
-func (s *sAccountTasks) ActiveStatusStats(ctx context.Context) ([]sysin.AccountTaskStatusStat, error) {
+func (s *sAccountTasks) ActiveStatusStats(ctx context.Context, accountID int64) ([]sysin.AccountTaskStatusStat, error) {
+	if accountID <= 0 {
+		return nil, gerror.New("Telegram账号ID无效，禁止无账户范围维护任务")
+	}
 	columns := dao.TgCollectorAccountTask.Columns()
 	type statusRow struct {
 		Status          string      `json:"status"`
@@ -635,6 +781,7 @@ func (s *sAccountTasks) ActiveStatusStats(ctx context.Context) ([]sysin.AccountT
 	}
 	var rows []*statusRow
 	if err := dao.TgCollectorAccountTask.Ctx(ctx).
+		Where(columns.AccountId, accountID).
 		Fields(
 			columns.Status,
 			"COUNT(1) AS total",
