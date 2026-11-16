@@ -2,9 +2,11 @@ package sys
 
 import (
 	"context"
+	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 )
 
 func (s *sSysPublish) deleteTelegramJobMessagesForResubmit(ctx context.Context, job telegramResubmitJob) error {
@@ -40,6 +42,50 @@ func (s *sSysPublish) markTelegramJobSuperseded(ctx context.Context, jobId int64
 	// 不能只依赖发送 Worker 的 defer，否则资料下架、编辑覆盖等入口会留下空闲队首。
 	if err := s.wakeNextTelegramChannelJob(ctx, job); err != nil {
 		return gerror.Wrap(err, "废弃TG任务后唤醒频道下一条任务失败")
+	}
+	if err := s.clearSupersededProfileOperationIfTerminal(ctx, job); err != nil {
+		return err
+	}
+	return nil
+}
+
+// clearSupersededProfileOperationIfTerminal releases the durable operation lock
+// after every job of the same operation has been superseded. The profile's
+// business status is intentionally untouched.
+func (s *sSysPublish) clearSupersededProfileOperationIfTerminal(ctx context.Context, job telegramJobRecord) error {
+	if job.TenantId <= 0 || job.AccountId <= 0 || job.ProfileId <= 0 || strings.TrimSpace(job.OperationNo) == "" {
+		return nil
+	}
+	var summary struct {
+		Total      int `orm:"total"`
+		Superseded int `orm:"superseded"`
+		Active     int `orm:"active"`
+	}
+	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("tenant_id", job.TenantId).
+		Where("account_id", job.AccountId).
+		Where("profile_id", job.ProfileId).
+		Where("operation_no", strings.TrimSpace(job.OperationNo)).
+		Fields("COUNT(*) AS total, SUM(CASE WHEN status='superseded' THEN 1 ELSE 0 END) AS superseded, SUM(CASE WHEN status IN ('pending','sending','retry_wait','confirming','failed_retry','unknown') THEN 1 ELSE 0 END) AS active").
+		Scan(&summary); err != nil {
+		return gerror.Wrap(err, "检查已废弃资料操作状态失败")
+	}
+	if summary.Total == 0 || summary.Total != summary.Superseded || summary.Active != 0 {
+		return nil
+	}
+	now := gtime.Now()
+	if _, err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
+		Where("tenant_id", job.TenantId).Where("account_id", job.AccountId).
+		Where("profile_id", job.ProfileId).Where("publish_operation_no", strings.TrimSpace(job.OperationNo)).
+		WhereIn("publish_task_status", []string{"pending", "publishing", "sending"}).
+		Data(g.Map{"publish_operation_no": "", "publish_task_status": "", "publish_task_updated_at": now, "updated_at": now}).Update(); err != nil {
+		return gerror.Wrap(err, "清理已废弃资料操作状态失败")
+	}
+	if _, err := g.DB().Model(publishNoteIndexTable).Unscoped().Safe().Ctx(ctx).
+		Where("tenant_id", job.TenantId).Where("account_id", job.AccountId).
+		Where("profile_id", job.ProfileId).WhereIn("task_status", []string{"pending", "publishing", "sending"}).
+		Data(g.Map{"task_status": "", "updated_at": now}).Update(); err != nil {
+		return gerror.Wrap(err, "同步已废弃资料列表状态失败")
 	}
 	return nil
 }
