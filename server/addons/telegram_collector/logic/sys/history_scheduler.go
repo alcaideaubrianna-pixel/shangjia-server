@@ -12,6 +12,8 @@ import (
 	"hotgo/addons/telegram_collector/model/input/sysin"
 )
 
+const historySchedulerPool = "history"
+
 // StartHistoryScheduler starts the compatibility scheduler used by the
 // background-worker role. Old deliveries are resolved through their event at
 // dispatch time, so a full-table metadata backfill is not required.
@@ -64,6 +66,7 @@ func (s *sCollector) dispatchHistoryBatch(ctx context.Context) error {
 		Fields("hg_tg_collector_delivery.id", "hg_tg_collector_delivery.priority", "e.account_id", "e.source_id").
 		LeftJoin("hg_tg_collector_event e", "e.id = hg_tg_collector_delivery.event_id").
 		Where(columns.Status, sysin.DeliveryStatusPending).
+		Where("scheduler_pool", historySchedulerPool).
 		Where("e.source_id > 0").
 		Where(fmt.Sprintf("(%s IS NULL OR %s <= ?)", "dispatch_until", "dispatch_until"), gtime.Now()).
 		Order(columns.Priority + " DESC, " + columns.CreatedAt + " ASC, " + columns.Id + " ASC").
@@ -95,6 +98,7 @@ func (s *sCollector) dispatchHistoryBatch(ctx context.Context) error {
 		priority := row[columns.Priority].Int()
 		claimed, err := dao.TgCollectorDelivery.Ctx(ctx).WherePri(id).
 			Where(columns.Status, sysin.DeliveryStatusPending).
+			Where("scheduler_pool", historySchedulerPool).
 			Where(fmt.Sprintf("(%s IS NULL OR %s <= ?)", "dispatch_until", "dispatch_until"), gtime.Now()).
 			Data(g.Map{"dispatch_owner": owner, "dispatch_until": leaseUntil}).Update()
 		if err != nil {
@@ -106,11 +110,13 @@ func (s *sCollector) dispatchHistoryBatch(ctx context.Context) error {
 		if err := s.enqueueDeliveryTask(ctx, id, priority); err != nil {
 			_, _ = dao.TgCollectorDelivery.Ctx(ctx).WherePri(id).
 				Where("dispatch_owner", owner).
+				Where("scheduler_pool", historySchedulerPool).
 				Data(g.Map{"dispatch_owner": "", "dispatch_until": nil}).Update()
 			return err
 		}
 		_, _ = dao.TgCollectorDelivery.Ctx(ctx).WherePri(id).
 			Where(columns.Status, sysin.DeliveryStatusPending).
+			Where("scheduler_pool", historySchedulerPool).
 			Data(g.Map{"dispatch_at": gtime.Now(), "dispatch_owner": "", "dispatch_until": nil}).Update()
 		if accountID > 0 {
 			accountCounts[accountID]++

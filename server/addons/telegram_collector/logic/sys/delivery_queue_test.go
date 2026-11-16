@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -261,5 +262,71 @@ func TestCollectorIngressHistoryUsesDedicatedQueue(t *testing.T) {
 		if len(tasks) != want {
 			t.Fatalf("%s jobs=%d want=%d", queue, len(tasks), want)
 		}
+	}
+}
+
+func TestDeliverySchedulerPoolEnforcesSourceAndAccountQuotas(t *testing.T) {
+	accountCounts := map[int64]int{615: 1}
+	sourceCounts := map[int64]int{351: 1}
+
+	if !historyDeliveryWithinQuota(615, 351, accountCounts, sourceCounts, 2, 2) {
+		t.Fatal("source/account scheduler pool should admit work below both quotas")
+	}
+	if historyDeliveryWithinQuota(615, 351, accountCounts, sourceCounts, 1, 2) {
+		t.Fatal("account scheduler quota must reject work at the account limit")
+	}
+	if historyDeliveryWithinQuota(615, 351, accountCounts, sourceCounts, 2, 1) {
+		t.Fatal("source scheduler quota must reject work at the source limit")
+	}
+	if !historyDeliveryWithinQuota(0, 351, accountCounts, sourceCounts, 2, 2) {
+		t.Fatal("bot source should be admitted below the source quota when account_id is zero")
+	}
+	if historyDeliveryWithinQuota(0, 351, accountCounts, sourceCounts, 2, 1) {
+		t.Fatal("bot source must still obey the source quota when account_id is zero")
+	}
+	if !historyDeliveryWithinQuota(0, 352, accountCounts, sourceCounts, 2, 2) {
+		t.Fatal("a different source must have an independent scheduler quota")
+	}
+}
+
+func TestDeliverySourceShardIsStableAndAccountScoped(t *testing.T) {
+	first := consts.DeliveryRealtimeShardQueue(615)
+	retry := consts.DeliveryRealtimeShardQueue(615)
+	other := consts.DeliveryRealtimeShardQueue(616)
+
+	if first != retry {
+		t.Fatalf("same account must remain on the same realtime shard: %q != %q", first, retry)
+	}
+	if first == other {
+		t.Fatalf("different accounts should not use this test's selected adjacent shards: %q", first)
+	}
+	if !strings.HasPrefix(first, consts.QueueDeliveryRealtimeShardPrefix) {
+		t.Fatalf("realtime shard has unexpected prefix: %q", first)
+	}
+
+	history := consts.DeliveryHistoryShardQueue(615)
+	urgent := consts.DeliveryUrgentShardQueue(615)
+	if history == first || urgent == first || history == urgent {
+		t.Fatalf("delivery classes must use distinct shard namespaces: realtime=%q history=%q urgent=%q", first, history, urgent)
+	}
+}
+
+func TestDeliveryHistoryAndRealtimeQueueMapsAreDisjoint(t *testing.T) {
+	history := deliveryHistoryQueues()
+	realtime := deliveryRealtimeQueues()
+
+	if len(history) == 0 || len(realtime) == 0 {
+		t.Fatal("delivery queue maps must not be empty")
+	}
+	for queue := range history {
+		if _, ok := realtime[queue]; ok {
+			t.Fatalf("history and realtime workers must not share queue %q", queue)
+		}
+	}
+	if _, ok := history[consts.QueueDeliveryUrgentLive]; ok {
+		t.Fatal("urgent live queue must not be consumed by the history worker")
+	}
+	if _, ok := realtime[consts.QueueDeliveryHistory]; ok {
+		t.Fatal("history queue must not be consumed by the realtime worker")
 	}
 }

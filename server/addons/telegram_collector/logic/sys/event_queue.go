@@ -396,6 +396,7 @@ func (s *sCollector) saveDelivery(ctx context.Context, delivery *sysin.Collector
 	}
 	data["source_id"] = delivery.SourceID
 	data["account_id"] = delivery.AccountID
+	data["scheduler_pool"] = deliverySchedulerPool(delivery)
 	_, err := dao.TgCollectorDelivery.Ctx(ctx).Data(data).OnConflict(columns.TenantId + "," + columns.DeliveryKey).
 		OnDuplicate(g.Map{columns.DeliveryKey: conflictIncomingColumn(ctx, columns.DeliveryKey)}).
 		Save()
@@ -414,6 +415,13 @@ func (s *sCollector) saveDelivery(ctx context.Context, delivery *sysin.Collector
 		return 0, gerror.New("Telegram采集交付ID无效")
 	}
 	return row.Id, nil
+}
+
+func deliverySchedulerPool(delivery *sysin.CollectorDelivery) string {
+	if delivery != nil && delivery.History {
+		return "history"
+	}
+	return "realtime"
 }
 
 func deliveryPriority(delivery *sysin.CollectorDelivery) int {

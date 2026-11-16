@@ -553,52 +553,82 @@ func isMissingDeliveryRowError(err error) bool {
 }
 
 func deliveryQueueName(ctx context.Context, deliveryID int64, priority int) string {
+	accountID, sourceID, schedulerPool := deliveryRouteScope(ctx, deliveryID)
+	// New rows persist scheduler_pool. Legacy rows may still carry the schema
+	// default (history); a realtime priority is the compatibility signal until
+	// those rows are re-enqueued by the recovery path.
+	if schedulerPool == "history" && priority < sysin.EventPriorityRealtime {
+		if accountID > 0 {
+			return consts.DeliveryHistoryShardQueue(accountID)
+		}
+		if sourceID > 0 {
+			return consts.DeliveryHistorySourceQueue(sourceID)
+		}
+		return consts.QueueDeliveryHistory
+	}
 	if priority >= sysin.EventPriorityUrgent {
-		if accountID := deliveryAccountID(ctx, deliveryID); accountID > 0 {
+		if accountID > 0 {
 			return consts.DeliveryUrgentShardQueue(accountID)
+		}
+		if sourceID > 0 {
+			return consts.DeliveryLiveSourceQueue(sourceID)
 		}
 		return consts.QueueDeliveryUrgentLive
 	}
 	if priority >= sysin.EventPriorityRealtime {
-		if accountID := deliveryAccountID(ctx, deliveryID); accountID > 0 {
+		if accountID > 0 {
 			return consts.DeliveryRealtimeShardQueue(accountID)
+		}
+		if sourceID > 0 {
+			return consts.DeliveryLiveSourceQueue(sourceID)
 		}
 		return consts.QueueDeliveryRealtime
 	}
-	accountID := deliveryAccountID(ctx, deliveryID)
 	if accountID > 0 {
 		return consts.DeliveryHistoryShardQueue(accountID)
+	}
+	if sourceID > 0 {
+		return consts.DeliveryHistorySourceQueue(sourceID)
 	}
 	return consts.QueueDeliveryHistory
 }
 
 func deliveryHistoryQueues() map[string]int {
 	queues := map[string]int{consts.QueueDeliveryHistory: 1}
-	for accountID := int64(0); accountID < consts.DeliveryHistoryShardCount; accountID++ {
-		queues[fmt.Sprintf("%s%02d", consts.QueueDeliveryHistoryShardPrefix, accountID)] = 1
+	for shard := int64(0); shard < consts.DeliveryHistoryShardCount; shard++ {
+		queues[fmt.Sprintf("%s%02d", consts.QueueDeliveryHistoryShardPrefix, shard)] = 1
+		queues[fmt.Sprintf("%s%02d", consts.QueueDeliveryHistorySourceShardPrefix, shard)] = 1
 	}
 	return queues
 }
 
 func deliveryRealtimeQueues() map[string]int {
 	queues := map[string]int{consts.QueueDeliveryUrgentLive: 8, consts.QueueDeliveryRealtime: 2}
-	for accountID := int64(0); accountID < consts.DeliveryHistoryShardCount; accountID++ {
-		queues[fmt.Sprintf("%s%02d", consts.QueueDeliveryUrgentShardPrefix, accountID)] = 2
-		queues[fmt.Sprintf("%s%02d", consts.QueueDeliveryRealtimeShardPrefix, accountID)] = 1
+	for shard := int64(0); shard < consts.DeliveryHistoryShardCount; shard++ {
+		queues[fmt.Sprintf("%s%02d", consts.QueueDeliveryUrgentShardPrefix, shard)] = 2
+		queues[fmt.Sprintf("%s%02d", consts.QueueDeliveryRealtimeShardPrefix, shard)] = 1
+		queues[fmt.Sprintf("%s%02d", consts.QueueDeliveryLiveSourceShardPrefix, shard)] = 2
 	}
 	return queues
 }
 
-func deliveryAccountID(ctx context.Context, deliveryID int64) int64 {
+func deliveryRouteScope(ctx context.Context, deliveryID int64) (accountID, sourceID int64, schedulerPool string) {
 	if deliveryID <= 0 {
-		return 0
+		return 0, 0, ""
 	}
-	var accountID int64
-	_ = dao.TgCollectorDelivery.Ctx(ctx).
+	row, err := dao.TgCollectorDelivery.Ctx(ctx).
 		WherePri(deliveryID).
-		Fields("e.account_id").
+		Fields("hg_tg_collector_delivery.scheduler_pool", "e.account_id", "e.source_id").
 		LeftJoin("hg_tg_collector_event e", "e.id=hg_tg_collector_delivery.event_id").
-		Scan(&accountID)
+		One()
+	if err != nil {
+		return 0, 0, ""
+	}
+	return row["account_id"].Int64(), row["source_id"].Int64(), row["scheduler_pool"].String()
+}
+
+func deliveryAccountID(ctx context.Context, deliveryID int64) int64 {
+	accountID, _, _ := deliveryRouteScope(ctx, deliveryID)
 	return accountID
 }
 

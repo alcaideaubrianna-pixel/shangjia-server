@@ -19,3 +19,9 @@ func TestHistoryDeliveryWithinQuotaLimitsBotSource(t *testing.T) {
 		t.Fatal("bot source at quota must be rejected")
 	}
 }
+
+func TestHistorySchedulerPoolIsStrictlyHistory(t *testing.T) {
+	if historySchedulerPool != "history" {
+		t.Fatalf("history scheduler pool = %q, want %q", historySchedulerPool, "history")
+	}
+}
