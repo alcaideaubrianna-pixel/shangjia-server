@@ -27,7 +27,7 @@ import (
 
 const (
 	collectEventRulesCacheVersionKey = "youban_publish:collect:event_rules:version"
-	collectEventRulesCacheKeyPrefix  = "youban_publish:collect:event_rules"
+	collectEventRulesCacheKeyPrefix  = "youban_publish:collect:event_rules:v2"
 	collectEventRulesCacheTTL        = time.Minute
 )
 
@@ -788,15 +788,13 @@ func (s *sSysPublish) collectEventNeedsProfileRepair(ctx context.Context, eventI
 }
 
 func (s *sSysPublish) collectEventRules(ctx context.Context, event gdb.Record, tenantId int64, accountId int64) ([]gdb.Record, error) {
-	sourceContext, err := s.resolveCollectSourceContext(ctx, event, tenantId, accountId)
-	if err != nil {
-		return nil, err
+	// Ingress already fans out per enabled source. The channel is shared
+	// metadata, never an identity that may replace an event's owning source.
+	sourceId := event["source_id"].Int64()
+	if sourceId <= 0 {
+		return nil, gerror.New("采集事件缺少来源，无法解析专属规则")
 	}
-	sourceId := sourceContext.RuleSourceID
-	if sourceId != event["source_id"].Int64() {
-		g.Log().Infof(ctx, "采集事件按实际频道选择专属规则 eventId:%d eventSourceId:%d channelSourceId:%d sourceChatId:%s",
-			event["id"].Int64(), event["source_id"].Int64(), sourceId, event["source_chat_id"].String())
-	}
+	var err error
 	cacheKey := s.collectEventRulesCacheKey(ctx, tenantId, accountId, sourceId)
 	if rows, ok := collectEventRulesCacheGet(ctx, cacheKey); ok {
 		// Cached rows are complete resolved snapshots. Reattaching source-local

@@ -80,19 +80,19 @@ func TestCollectRuleLifecycleLocalPostgres(t *testing.T) {
 		if err != nil || len(rules) != 1 || rules[0]["id"].Int64() != 338 {
 			t.Fatalf("source 351 failed with disabled legacy rule: rules=%v err=%v", rules, err)
 		}
-		// Channel routing must also ignore legacy rule flags, while honoring source switches.
+		// A shared channel must not redirect source 351 to source 352's rules.
 		event["source_chat_id"].Set("-1001234567890")
-		routed, err := service.resolveCollectSourceContext(ctx, event, 78, 615)
-		if err != nil || routed.RuleSourceID != 352 {
-			t.Fatalf("channel routing skipped legacy rule: route=%+v err=%v", routed, err)
+		rules, err = service.collectEventRules(ctx, event, 78, 615)
+		if err != nil || len(rules) != 1 || rules[0]["id"].Int64() != 338 {
+			t.Fatalf("shared channel changed the source rules: rules=%v err=%v", rules, err)
 		}
 		if _, err = tx.Exec(`UPDATE hg_youban_publish_collect_source SET collect_enabled=0 WHERE id=352`); err != nil {
 			return err
 		}
 		service.refreshCollectSourceCache(ctx)
-		routed, err = service.resolveCollectSourceContext(ctx, event, 78, 615)
-		if err != nil || routed.RuleSourceID != 351 {
-			t.Fatalf("paused source still owns channel routing: route=%+v err=%v", routed, err)
+		rules, err = service.collectEventRules(ctx, event, 78, 615)
+		if err != nil || len(rules) != 1 || rules[0]["id"].Int64() != 338 {
+			t.Fatalf("other source switch changed the source rules: rules=%v err=%v", rules, err)
 		}
 		// Binding saves accept historical disabled rules; ownership boundaries remain strict.
 		if err = service.saveCollectSourceRules(ctx, tx, 78, 351, []int64{338}); err != nil {
