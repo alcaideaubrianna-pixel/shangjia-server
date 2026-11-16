@@ -60,7 +60,7 @@ func TestTelegramChannelHeadFailureModes(t *testing.T) {
 			if time.UnixMilli(hold).Before(before) {
 				t.Fatal("waiting head must never be requeued in the past")
 			}
-			if got := telegramChannelJobExecutionState(tt.job.Status, tt.job.SendPhase, tt.job.DispatchStatus); got != telegramChannelExecutionWaiting && tt.job.Status != telegramJobStatusSending {
+			if got := telegramChannelJobExecutionState(tt.job.Status.String(), tt.job.SendPhase.String(), tt.job.DispatchStatus.String()); got != telegramChannelExecutionWaiting && tt.job.Status != telegramJobStatusSending {
 				t.Fatalf("waiting job became blocking/terminal: %q", got)
 			}
 		})
@@ -77,7 +77,7 @@ func TestTelegramChannelHeadContextCanceledDoesNotBecomeTerminal(t *testing.T) {
 	if !strings.Contains(job.LastDispatchError, "context canceled") {
 		t.Fatalf("cancellation reason was lost: %q", job.LastDispatchError)
 	}
-	if got := telegramChannelJobExecutionState(job.Status, "", job.DispatchStatus); got != telegramChannelExecutionBlocking {
+	if got := telegramChannelJobExecutionState(job.Status.String(), "", job.DispatchStatus.String()); got != telegramChannelExecutionBlocking {
 		t.Fatalf("canceled in-flight job state=%q, want blocking until recovery", got)
 	}
 	if got := telegramChannelJobExecutionState("failed", "", tgDispatchStatusDone); got != telegramChannelExecutionTerminal {

@@ -251,7 +251,7 @@ func TestTelegramChannelLaneMediaCannotMaskBarrier(t *testing.T) {
 		{telegramJobStatusRetryWait, "媒体仍在异步处理中 awaiting_account_fallback"},
 		{telegramJobStatusRetryWait, "媒体仍在异步处理中 账号降级"},
 	} {
-		job := telegramJobRecord{Priority: tgJobPriorityDefault, Status: tt.status, LastDispatchError: tt.reason}
+		job := telegramJobRecord{Priority: tgJobPriorityDefault, Status: JobStatus(tt.status), LastDispatchError: tt.reason}
 		if decision := telegramChannelQueueDecisionFor(job); decision.YieldHead {
 			t.Fatalf("barrier yielded: %+v", job)
 		}

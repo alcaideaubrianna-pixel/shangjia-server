@@ -19,3 +19,16 @@ logs
 server/addons/youban_publish/logic/sys/resource
 server/.tmp-ops
 server/.tmp
+server/tools/__pycache__
+server/testdata
+server/tools
+server/docs
+
+# Track only the publish architecture guard under local tools.
+!/server/tools/
+/server/tools/*
+!/server/tools/architecture_guard/
+/server/tools/architecture_guard/*
+!/server/tools/architecture_guard/main.go
+!/server/tools/architecture_guard/main_test.go
+!/server/tools/architecture_guard/baseline.json

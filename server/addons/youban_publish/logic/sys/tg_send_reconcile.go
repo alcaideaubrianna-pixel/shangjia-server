@@ -136,12 +136,27 @@ func (s *sSysPublish) updateTelegramJobSendPhase(ctx context.Context, jobId int6
 }
 
 func (s *sSysPublish) updateTelegramJobSendPhaseFromStatuses(ctx context.Context, jobId int64, phase string, statuses ...string) error {
+	target, valid := ParseSendPhase(phase)
+	if !valid {
+		return gerror.New("TG任务发送阶段不合法")
+	}
+	phase = target.String()
 	if len(statuses) == 0 {
 		return gerror.New("TG任务发送阶段来源状态不能为空")
 	}
+	sourceStatuses := make([]JobStatus, 0, len(statuses))
+	for _, status := range statuses {
+		parsed, valid := ParseJobStatus(status)
+		if !valid {
+			return gerror.New("TG任务发送阶段来源状态不合法")
+		}
+		sourceStatuses = append(sourceStatuses, parsed)
+	}
+	statuses = jobStatusStrings(sourceStatuses)
 	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id", jobId).
-		WhereIn("status", statuses).
+		WhereIn("status", sourceStatuses).
+		WhereIn("COALESCE(send_phase,'')", telegramPhaseWriteSources(target)).
 		Where("send_phase IS DISTINCT FROM ?", phase).
 		Data(g.Map{"send_phase": phase, "updated_at": gtime.Now()}).Update()
 	if err != nil {
@@ -186,7 +201,7 @@ func (s *sSysPublish) markTelegramJobUnknown(ctx context.Context, job telegramJo
 	message := "Telegram 返回结果不确定，已暂停重发并等待频道消息对账：" + causeMessage
 	transitioned, err := s.transitionTelegramJob(ctx, telegramJobTransition{
 		JobId:        job.Id,
-		From:         []string{telegramJobStatusSending},
+		From:         []JobStatus{telegramJobStatusSending},
 		To:           telegramJobStatusConfirming,
 		RetryDelay:   telegramUnknownReconcileDelay,
 		ErrorMessage: message,
@@ -211,13 +226,25 @@ func (s *sSysPublish) markTelegramJobUnknown(ctx context.Context, job telegramJo
 }
 
 func (s *sSysPublish) reconcileUnknownTelegramJob(ctx context.Context, job telegramJobRecord) error {
-	claimed, err := s.claimUnknownTelegramJob(ctx, job.Id)
+	return s.withTelegramUnknownJobLease(ctx, job.Id, func(ctx context.Context) error {
+		return s.reconcileClaimedUnknownTelegramJob(ctx, job)
+	})
+}
+
+// reconcileClaimedUnknownTelegramJob requires the token-owned per-job reconciliation lease.
+// dispatch_status is a durable checkpoint, not an execution lock.
+func (s *sSysPublish) reconcileClaimedUnknownTelegramJob(ctx context.Context, job telegramJobRecord) error {
+	jobID := job.Id
+	claimed, err := s.claimUnknownTelegramJob(ctx, jobID)
 	if err != nil || !claimed {
 		return err
 	}
-	job, err = s.telegramJobById(ctx, job.Id)
+	job, err = s.telegramJobById(ctx, jobID)
 	if err != nil {
-		return s.releaseUnknownTelegramJobClaim(ctx, job.Id, err)
+		return s.releaseUnknownTelegramJobClaim(ctx, jobID, err)
+	}
+	if job.Status != "unknown" {
+		return nil
 	}
 	handled, recoverErr := s.recoverConfirmedUnknownTelegramJob(ctx, job)
 	if recoverErr != nil {
@@ -240,7 +267,7 @@ func (s *sSysPublish) reconcileUnknownTelegramJob(ctx context.Context, job teleg
 	// accepted even though the HTTP response was lost. Never turn this state
 	// back into failed_retry, because doing so can send the same media twice.
 	dispatchStatus := tgDispatchStatusProcessing
-	if telegramSendPhaseHasDisplay(job.SendPhase) {
+	if telegramSendPhaseHasDisplay(job.SendPhase.String()) {
 		dispatchStatus = tgDispatchStatusIdle
 	}
 	message := "Telegram发送结果未确认，已停止自动重发；等待Webhook确认"
@@ -281,7 +308,7 @@ func telegramUnknownAttemptRecoveryAction(attempt telegramDeliveryAttempt, audit
 
 func (s *sSysPublish) unknownTelegramJobAttempt(ctx context.Context, job telegramJobRecord) (telegramDeliveryAttempt, int, error) {
 	phase := "display"
-	if telegramSendPhaseHasDisplay(job.SendPhase) {
+	if telegramSendPhaseHasDisplay(job.SendPhase.String()) {
 		phase = "verify"
 	}
 	if job.SendPhase == relayconsts.RelaySendPhaseSending || job.SendPhase == relayconsts.RelaySendPhaseConfirmed {
@@ -309,7 +336,7 @@ func (s *sSysPublish) unknownTelegramJobAttempt(ctx context.Context, job telegra
 
 func (s *sSysPublish) latestUnknownTelegramJobAttempt(ctx context.Context, job telegramJobRecord) (telegramDeliveryAttempt, error) {
 	phase := "display"
-	if telegramSendPhaseHasDisplay(job.SendPhase) {
+	if telegramSendPhaseHasDisplay(job.SendPhase.String()) {
 		phase = "verify"
 	}
 	if job.SendPhase == relayconsts.RelaySendPhaseSending || job.SendPhase == relayconsts.RelaySendPhaseConfirmed {
@@ -344,7 +371,7 @@ func (s *sSysPublish) recoverUnconfirmedUnknownTelegramJob(ctx context.Context, 
 		return true, nil
 
 	case telegramUnknownAttemptRetry:
-		phase := telegramSendPhaseCleanupConfirmed
+		var phase SendPhase = telegramSendPhaseCleanupConfirmed
 		if attempt.Phase == "package" || job.SendPhase == relayconsts.RelaySendPhaseSending {
 			phase = relayconsts.RelaySendPhaseReady
 		}
@@ -367,10 +394,9 @@ func (s *sSysPublish) recoverUnconfirmedUnknownTelegramJob(ctx context.Context, 
 			}
 		}
 		transitioned, transitionErr := s.transitionTelegramJob(ctx, telegramJobTransition{
-			JobId: job.Id, From: []string{telegramJobStatusConfirming}, To: telegramJobStatusRetryWait,
-			Additional: g.Map{
-				"send_phase": phase, "error_message": "", "last_dispatch_error": "",
-			},
+			JobId: job.Id, From: []JobStatus{telegramJobStatusConfirming}, To: telegramJobStatusRetryWait,
+			SendPhase:  jobPhase(phase),
+			Additional: g.Map{"error_message": "", "last_dispatch_error": ""},
 		})
 		if transitionErr != nil {
 			return true, transitionErr
@@ -490,7 +516,7 @@ func (s *sSysPublish) recoverConfirmedUnknownTelegramJob(ctx context.Context, jo
 		return false, err
 	}
 
-	if !telegramSendPhaseHasDisplay(job.SendPhase) {
+	if !telegramSendPhaseHasDisplay(job.SendPhase.String()) {
 		restored, restoreErr := s.restoreConfirmedTelegramResponse(ctx, job, "display", displayMedia)
 		if restoreErr != nil {
 			return false, restoreErr
@@ -521,13 +547,13 @@ func (s *sSysPublish) recoverConfirmedUnknownTelegramJob(ctx context.Context, jo
 	if evidenceErr != nil {
 		return false, evidenceErr
 	}
-	action := telegramUnknownRecoveryAction(job.SendPhase, len(verifyMedia), displayConfirmed)
+	action := telegramUnknownRecoveryAction(job.SendPhase.String(), len(verifyMedia), displayConfirmed)
 	switch action {
 	case telegramUnknownRecoveryResumeVerify:
 		transitioned, transitionErr := s.transitionTelegramJob(ctx, telegramJobTransition{
-			JobId: job.Id, From: []string{telegramJobStatusConfirming}, To: telegramJobStatusRetryWait,
+			JobId: job.Id, From: []JobStatus{telegramJobStatusConfirming}, To: telegramJobStatusRetryWait,
+			SendPhase: jobPhase(SendPhaseDisplayConfirmed),
 			Additional: g.Map{
-				"send_phase":          telegramSendPhaseDisplayConfirmed,
 				"error_message":       "",
 				"last_dispatch_error": "",
 			},
@@ -545,14 +571,14 @@ func (s *sSysPublish) recoverConfirmedUnknownTelegramJob(ctx context.Context, jo
 		phase := job.SendPhase
 		if len(verifyMedia) == 0 {
 			phase = telegramSendPhaseCompletedNoVerify
-			if err = s.updateTelegramJobSendPhaseFromStatuses(ctx, job.Id, phase, telegramJobStatusConfirming); err != nil {
+			if err = s.updateTelegramJobSendPhaseFromStatuses(ctx, job.Id, phase.String(), telegramJobStatusConfirming); err != nil {
 				return false, err
 			}
 		}
 		transitioned, transitionErr := s.transitionTelegramJob(ctx, telegramJobTransition{
-			JobId: job.Id, From: []string{telegramJobStatusConfirming}, To: telegramJobStatusSending,
+			JobId: job.Id, From: []JobStatus{telegramJobStatusConfirming}, To: telegramJobStatusSending,
+			SendPhase: jobPhase(phase),
 			Additional: g.Map{
-				"send_phase":          phase,
 				"error_message":       "",
 				"last_dispatch_error": "",
 			},
@@ -580,7 +606,10 @@ func (s *sSysPublish) claimUnknownTelegramJob(ctx context.Context, jobId int64) 
 	if err != nil {
 		return false, gerror.Wrap(err, "领取TG对账任务失败")
 	}
-	affected, _ := result.RowsAffected()
+	affected, rowsErr := result.RowsAffected()
+	if rowsErr != nil {
+		return false, gerror.Wrap(rowsErr, "确认TG对账任务领取结果失败")
+	}
 	return affected > 0, nil
 }
 

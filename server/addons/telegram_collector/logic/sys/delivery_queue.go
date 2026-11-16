@@ -57,8 +57,6 @@ func (s *sCollector) StartDeliveryRuntime(ctx context.Context) {
 		Concurrency: collectorDeliveryHistoryConcurrency(runtimeCtx),
 		Queues:      deliveryHistoryQueues(),
 	})
-	legacyServer := asynq.NewServer(collectorRedisOption(runtimeCtx), asynq.Config{Concurrency: 2, Queues: map[string]int{consts.QueueDeliveryReady: 1, consts.QueueDeliveryUrgent: 1}})
-	s.deliveryLegacyServer = legacyServer
 	s.deliveryServer = server
 	s.deliveryHistoryServer = historyServer
 
@@ -73,11 +71,10 @@ func (s *sCollector) StartDeliveryRuntime(ctx context.Context) {
 		"historyConcurrency":  collectorDeliveryHistoryConcurrency(runtimeCtx),
 		"realtimeQueueCount":  len(deliveryRealtimeQueues()),
 		"historyQueueCount":   len(deliveryHistoryQueues()),
-		"legacyQueueCount":    2,
 	})
 	// The application owns signal handling and calls Shutdown in StopRuntime.
 	// Run waits for an OS signal even after Shutdown and would block runtimeWG.
-	for _, worker := range []*asynq.Server{legacyServer, historyServer, server} {
+	for _, worker := range []*asynq.Server{historyServer, server} {
 		if err := worker.Start(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
 			g.Log().Warningf(runtimeCtx, "启动Telegram交付Worker失败：%+v", err)
 		}
@@ -119,7 +116,10 @@ func (s *sCollector) enqueueDeliveryTaskWithOptions(ctx context.Context, deliver
 	}
 	_, err := client.EnqueueContext(ctx, asynq.NewTask(deliveryTaskType, collectorTaskPayload(deliveryID)), options...)
 	if errors.Is(err, asynq.ErrDuplicateTask) || errors.Is(err, asynq.ErrTaskIDConflict) {
-		logCollectorDeliveryEnqueue(ctx, deliveryID, queueName, "duplicate", nil)
+		logCollectorDeliveryEnqueue(ctx, deliveryID, queueName, "duplicate", err)
+		if !unique {
+			return gerror.Wrap(err, "恢复Telegram采集交付时任务已存在，未确认本次入队")
+		}
 		return nil
 	}
 	if err != nil {
@@ -275,12 +275,40 @@ func (s *sCollector) processDelivery(ctx context.Context, deliveryID int64) erro
 	if handler == nil {
 		return s.failDelivery(ctx, deliveryID, gerror.New("Telegram采集交付处理器尚未注册"))
 	}
-	logCollectorDeliveryStage(ctx, "delivery.handler.started", deliveryID, row.EventId, collectorQueueName(ctx), nil)
-	if err = handler.HandleCollectorDelivery(ctx, &delivery); err != nil {
-		logCollectorDeliveryStage(ctx, "delivery.handler.failed", deliveryID, row.EventId, collectorQueueName(ctx), err)
+	queueName := collectorQueueName(ctx)
+	logCollectorDeliveryStage(ctx, "delivery.handler.started", deliveryID, row.EventId, queueName, nil)
+	var submitResult sysin.CollectSubmitResult
+	if resultHandler, ok := handler.(collectorservice.DeliveryResultHandler); ok {
+		submitResult, err = resultHandler.HandleCollectorDeliveryResult(ctx, &delivery)
+	} else {
+		err = handler.HandleCollectorDelivery(ctx, &delivery)
+		// The legacy contract only proves that the handoff returned nil. Keep a
+		// conservative typed result and explicitly exclude Telegram execution.
+		submitResult = sysin.CollectSubmitResult{
+			Outcome:        "accepted",
+			Stage:          "dispatch",
+			Reason:         "accepted",
+			DeliveryID:     delivery.ID,
+			CollectEventID: delivery.EventID,
+		}
+	}
+	if err != nil {
+		logCollectorDeliveryStage(ctx, "delivery.handler.failed", deliveryID, row.EventId, queueName, err)
 		return s.failDelivery(ctx, deliveryID, err)
 	}
-	logCollectorDeliveryStage(ctx, "delivery.handler.completed", deliveryID, row.EventId, collectorQueueName(ctx), nil)
+	if submitResult.DeliveryID == 0 {
+		submitResult.DeliveryID = delivery.ID
+	}
+	if submitResult.CollectEventID == 0 {
+		submitResult.CollectEventID = delivery.EventID
+	}
+	if _, valid := submitResult.ToDomain(); !valid {
+		err = gerror.New("Telegram采集提交结果无效")
+		logCollectorDeliveryStage(ctx, "delivery.handler.invalid_result", deliveryID, row.EventId, queueName, err)
+		return s.failDelivery(ctx, deliveryID, err)
+	}
+	logCollectorSubmitResult(ctx, &delivery, queueName, submitResult)
+	logCollectorDeliveryStage(ctx, "delivery.handler.completed", deliveryID, row.EventId, queueName, nil)
 	_, err = dao.TgCollectorDelivery.Ctx(ctx).WherePri(deliveryID).Data(g.Map{
 		columns.Status:       sysin.DeliveryStatusCompleted,
 		columns.NextRunAt:    nil,
@@ -295,6 +323,29 @@ func (s *sCollector) processDelivery(ctx context.Context, deliveryID int64) erro
 	}
 	logCollectorDeliveryStage(ctx, "delivery.completed", deliveryID, row.EventId, collectorQueueName(ctx), nil)
 	return nil
+}
+
+func logCollectorSubmitResult(ctx context.Context, delivery *sysin.CollectorDelivery, queue string, result sysin.CollectSubmitResult) {
+	if delivery == nil {
+		return
+	}
+	g.Log().Info(ctx, "Telegram采集提交结果", g.Map{
+		"log_type":          "telegram_collect_delivery",
+		"event":             "collect_submit_result",
+		"outcome":           result.Outcome,
+		"stage":             result.Stage,
+		"reason":            result.Reason,
+		"detail":            result.Detail,
+		"retryable":         result.Retryable,
+		"deliveryId":        delivery.ID,
+		"collectEventId":    result.CollectEventID,
+		"profileId":         result.ProfileID,
+		"dispatchId":        result.DispatchID,
+		"jobId":             result.JobID,
+		"queue":             queue,
+		"ownership":         "collector",
+		"telegramExecution": "out_of_scope",
+	})
 }
 
 func logCollectorDeliveryEnqueue(ctx context.Context, deliveryID int64, queue, status string, err error) {
@@ -389,12 +440,35 @@ func (s *sCollector) runDeliveryRecovery(ctx context.Context) {
 
 func (s *sCollector) recoverDeliveryTasks(ctx context.Context) {
 	limit := collectorRecoveryBatchSize(ctx)
+	if limit <= 0 {
+		return
+	}
+	fields := g.Map{
+		"log_type":   "telegram_collect_delivery",
+		"event":      "collect_delivery_recovery",
+		"stage":      "recovery.started",
+		"batchLimit": limit,
+		"workerRole": "collector-delivery-worker",
+	}
+	g.Log().Debug(ctx, "Telegram采集交付恢复开始", fields)
 	if err := s.resetExpiredDeliveryLeases(ctx, limit); err != nil {
-		g.Log().Warningf(ctx, "恢复超时Telegram采集交付失败：%+v", err)
+		fields["stage"] = "recovery.lease_reset_failed"
+		fields["status"] = "error"
+		fields["errorType"] = fmt.Sprintf("%T", err)
+		fields["error"] = err.Error()
+		g.Log().Warning(ctx, "恢复超时Telegram采集交付失败，下一轮将重试", fields)
 	}
 	if err := s.enqueueDueDeliveryTasks(ctx, limit); err != nil {
-		g.Log().Warningf(ctx, "重新投递Telegram采集交付失败：%+v", err)
+		fields["stage"] = "recovery.enqueue_failed"
+		fields["status"] = "error"
+		fields["errorType"] = fmt.Sprintf("%T", err)
+		fields["error"] = err.Error()
+		g.Log().Warning(ctx, "重新投递Telegram采集交付失败，下一轮将重试", fields)
+		return
 	}
+	fields["stage"] = "recovery.completed"
+	fields["status"] = "ok"
+	g.Log().Debug(ctx, "Telegram采集交付恢复完成", fields)
 }
 
 func (s *sCollector) resetExpiredDeliveryLeases(ctx context.Context, limit int) error {
@@ -525,8 +599,10 @@ func (s *sCollector) enqueueDueDeliveryTasks(ctx context.Context, limit int) err
 		// An urgent task may have an old unique marker in another queue. Allow
 		// recovery to create a current-priority copy; processDelivery's
 		// conditional claim keeps duplicate callbacks idempotent.
-		unique := priority < sysin.EventPriorityUrgent
-		if updateErr := s.enqueueDeliveryTaskWithOptions(ctx, deliveryID, priority, unique); updateErr != nil {
+		// Recovery must submit a fresh Asynq task. A stale Unique marker can make
+		// EnqueueContext return ErrDuplicateTask even when the old task is no
+		// longer present in the live queue, which falsely reports recovery success.
+		if updateErr := s.enqueueDeliveryTaskWithOptions(ctx, deliveryID, priority, false); updateErr != nil {
 			return gerror.Wrap(updateErr, "投递待恢复Telegram采集交付失败")
 		}
 	}

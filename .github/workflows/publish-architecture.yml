@@ -1,0 +1,48 @@
+name: publish-architecture
+
+on:
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish-architecture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: server
+    env:
+      # No production configuration/credentials are loaded by this workflow.
+      YOUBAN_ACCOUNT_SCHEDULE_TEST_REDIS: 127.0.0.1:6379
+    services:
+      redis:
+        image: redis:7.4.2
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd 'redis-cli ping'
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+      - name: Guard self-tests
+        run: go test ./tools/architecture_guard -count=1
+      - name: Guard publish boundaries
+        run: go run ./tools/architecture_guard
+      - name: Compile every package
+        run: go build ./...
+      - name: State machine and scheduling result contracts
+        run: >-
+          go test ./addons/youban_publish/logic/sys
+          -run '^(TestStrongTelegramJobStates|TestStrongTelegramJobStatePredicates|TestTelegramJobTransitionLongDispatchError|TestValidateTelegramJobTransition|TestTelegramJobTransitionUpdate|TestTelegramJobLifecyclePredicates|TestTelegramJobSourceClassification|TestAccountScheduleResultRealErrorPrecedesMore|TestTelegramReconcileLeaseSerializesOnlySameJob|TestTelegramReconcileLeaseReleasesAfterCancellation|TestTelegramJobTransitionProtectedColumns|TestTelegramJobTransitionTypedFields|TestTelegramMediaFallbackTransitionPreservesProgress|TestTelegramJobTransitionRejectsUnknownPhasePredicate|TestTelegramQueueLog.*|TestTelegramPhaseWrite.*|TestTelegramRecovery.*|TestTelegramWatchdog.*|TestTelegramChannelReliable.*|TestTelegramChannelQueueDispatcher.*|TestTelegramChannelQueueSchedule.*)$'
+          -count=1
+      - name: Lease privacy and account queue races with isolated Redis
+        run: go test -race ./utility/ownedlease ./addons/youban_publish/library/accountschedule -count=1

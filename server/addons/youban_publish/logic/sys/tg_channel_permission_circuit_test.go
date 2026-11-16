@@ -33,7 +33,7 @@ func TestTelegramPermissionCircuitClassificationAndStreak(t *testing.T) {
 		t.Fatal("threshold must be exactly 10 distinct terminal jobs")
 	}
 	for _, status := range []string{"sent", "unknown", "failed_retry"} {
-		jobs[5].Status = status
+		jobs[5].Status = JobStatus(status)
 		if telegramChannelPermissionStreak(jobs) {
 			t.Fatalf("%s must break streak", status)
 		}

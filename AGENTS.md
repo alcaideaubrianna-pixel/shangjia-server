@@ -1063,16 +1063,16 @@ GitHub Actions 构建完成后，以镜像 label `org.opencontainers.image.revis
 
 ### 3. PostgreSQL 直连排查
 
-数据库主节点使用 SSH MCP 连接 `b-xiaohuiji-sg`。本机无需持有生产数据库密码，在数据库节点通过本地 PostgreSQL 系统账号执行：
+数据库排查优先使用当前 RDS/DBX 连接；只有在确认需要节点级检查时才使用 SSH MCP 连接 `b-xiaohuiji-sg`。本机无需持有生产数据库密码，在数据库节点通过本地 PostgreSQL 系统账号执行：
 
 ```bash
-sudo -iu postgres psql -d railway -X -P pager=off
+sudo -iu postgres psql -d <production_database> -X -P pager=off
 ```
 
 Agent 执行非交互查询时使用：
 
 ```bash
-sudo -iu postgres psql -d railway -X -v ON_ERROR_STOP=1 -P pager=off -c '<SQL>'
+sudo -iu postgres psql -d <production_database> -X -v ON_ERROR_STOP=1 -P pager=off -c '<SQL>'
 ```
 
 业务排查应先查询表结构和精确数据，再形成关联链路：

@@ -27,7 +27,7 @@ func (s *sSysPublish) AIOpsProfileClearQueue(ctx context.Context, tenantId, prof
 			res.KeptJobId = job.Id
 			continue
 		}
-		if _, err := s.transitionTelegramJobs(ctx, []int64{job.Id}, telegramJobTransition{From: []string{"pending", "sending", "confirming", "retry_wait", "failed_retry", "unknown"}, To: telegramJobStatusSuperseded, ErrorMessage: "AI运维清理资料重复发布任务", Additional: g.Map{"last_dispatch_error": "AI运维清理资料重复发布任务"}}); err != nil {
+		if _, err := s.transitionTelegramJobs(ctx, []int64{job.Id}, telegramJobTransition{From: []JobStatus{"pending", "sending", "confirming", "retry_wait", "failed_retry", "unknown"}, To: telegramJobStatusSuperseded, ErrorMessage: "AI运维清理资料重复发布任务", Additional: g.Map{"last_dispatch_error": "AI运维清理资料重复发布任务"}}); err != nil {
 			return nil, gerror.Wrap(err, "取消资料重复发布任务失败")
 		}
 		res.Cleared++

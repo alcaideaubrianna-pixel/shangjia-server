@@ -79,7 +79,7 @@ func (s *sSysPublish) resumeCollectProfileDispatch(ctx context.Context, dispatch
 			jobIDs = append(jobIDs, value.Int64())
 		}
 		if _, txErr := s.transitionTelegramJobsTx(ctx, tx, jobIDs, telegramJobTransition{
-			From: []string{telegramJobStatusFailed},
+			From: []JobStatus{telegramJobStatusFailed},
 			To:   telegramJobStatusPending,
 			Additional: g.Map{
 				"retry_count": 0, "next_retry_at": nil, "error_message": "", "last_dispatch_error": "",

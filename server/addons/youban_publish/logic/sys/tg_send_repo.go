@@ -21,7 +21,7 @@ func (s *sSysPublish) lockTelegramJob(ctx context.Context, jobId int64) (telegra
 	now := gtime.Now()
 	transitioned, err := s.transitionTelegramJob(ctx, telegramJobTransition{
 		JobId:        jobId,
-		From:         []string{telegramJobStatusPending, telegramJobStatusRetryWait},
+		From:         []JobStatus{telegramJobStatusPending, telegramJobStatusRetryWait},
 		To:           telegramJobStatusSending,
 		NotExpiredAt: now,
 		Additional: g.Map{

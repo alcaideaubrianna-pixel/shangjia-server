@@ -73,13 +73,20 @@ func (s *sSysPublish) cancelProfileCycle(ctx context.Context, ids []int64, tenan
 					Data(g.Map{"status": "canceled", "error_message": profileCycleCancelMessage, "completed_at": now, "updated_at": now}).Update(); err != nil {
 					return gerror.Wrap(err, "取消资料循环任务失败")
 				}
-				if _, err := tx.Model(publishTgJobTable+" j").Safe().Ctx(ctx).
-					Where("j.profile_id", profileID).
-					WhereIn("status", []string{telegramJobStatusPending, telegramJobStatusRetryWait, telegramJobStatusConfirming, telegramJobStatusSending}).
-					Where("EXISTS (SELECT 1 FROM "+publishProfileCycleRunChannelTable+" rc WHERE rc.run_id=? AND rc.job_id=j.id)", run.ID).
-					Data(g.Map{"status": telegramJobStatusSuperseded, "dispatch_status": telegramDispatchDone, "next_retry_at": nil, "last_dispatch_error": profileCycleCancelMessage, "updated_at": now}).Update(); err != nil {
+				runJobIDs := make([]int64, 0, len(jobs))
+				for _, job := range jobs {
+					if job.ID > 0 {
+						runJobIDs = append(runJobIDs, job.ID)
+					}
+				}
+				if _, err := s.transitionTelegramJobsTx(ctx, tx, runJobIDs, telegramJobTransition{
+					From:       []JobStatus{JobStatusPending, JobStatusRetryWait, JobStatusUnknown, JobStatusSending},
+					To:         JobStatusSuperseded,
+					Additional: g.Map{"last_dispatch_error": profileCycleCancelMessage},
+				}); err != nil {
 					return gerror.Wrap(err, "废弃资料循环TG任务失败")
 				}
+
 				stateQuery := tx.Model(publishProfileStateTable).Safe().Ctx(ctx).
 					Where("tenant_id", tenantId).Where("profile_id", profileID).
 					Where("(publish_operation_no LIKE ? OR publish_operation_no LIKE ?)", "profile_cycle:%", "cycle_batch:%").

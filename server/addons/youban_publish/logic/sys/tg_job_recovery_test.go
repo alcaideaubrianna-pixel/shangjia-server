@@ -259,7 +259,7 @@ func TestStaleSendingAttemptRecoveryCoversResetJobs(t *testing.T) {
 			t.Fatalf("stale sending attempt under %s job must be recoverable", status)
 		}
 		if status != telegramJobStatusConfirming {
-			if err := validateTelegramJobTransition([]string{status}, telegramJobStatusConfirming); err != nil {
+			if err := validateTelegramJobTransition([]JobStatus{JobStatus(status)}, telegramJobStatusConfirming); err != nil {
 				t.Fatalf("%s job cannot enter confirmation safely: %v", status, err)
 			}
 		}

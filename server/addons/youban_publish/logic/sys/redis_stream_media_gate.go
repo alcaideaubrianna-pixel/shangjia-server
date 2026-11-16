@@ -14,7 +14,7 @@ import (
 
 func (s *sSysPublish) settleStreamFailedMediaJob(ctx context.Context, job telegramJobRecord, causes ...error) (bool, error) {
 	// 不得用媒体校验覆盖已开始发送或未知结果的任务。
-	if !telegramJobLifecycleNeedsRetry(job.Status) || strings.TrimSpace(job.SendPhase) != "" || job.ProfileId <= 0 {
+	if !telegramJobLifecycleNeedsRetry(job.Status.String()) || strings.TrimSpace(job.SendPhase.String()) != "" || job.ProfileId <= 0 {
 		return false, nil
 	}
 	var cause error
@@ -32,7 +32,7 @@ func (s *sSysPublish) settleStreamFailedMediaJob(ctx context.Context, job telegr
 		var err error
 		changed, err = s.transitionTelegramJobTx(ctx, tx, telegramJobTransition{
 			JobId: job.Id, From: telegramJobRetryableStatuses(),
-			To: telegramJobStatusFailed, SendPhases: []string{""}, ErrorMessage: message,
+			To: telegramJobStatusFailed, SendPhases: []SendPhase{""}, ErrorMessage: message,
 			Additional: g.Map{"last_dispatch_error": message},
 		})
 		if err != nil || !changed {
@@ -66,8 +66,8 @@ func (s *sSysPublish) settleStreamFailedMediaJob(ctx context.Context, job telegr
 func (s *sSysPublish) settleMissingTelegramProfileJob(ctx context.Context, job telegramJobRecord) error {
 	message := "资料已删除，跳过本次推送"
 	changed, err := s.transitionTelegramJob(ctx, telegramJobTransition{
-		JobId: job.Id, From: []string{telegramJobStatusPending, telegramJobStatusRetryWait},
-		To: telegramJobStatusFailed, SendPhases: []string{""}, ErrorMessage: message,
+		JobId: job.Id, From: []JobStatus{telegramJobStatusPending, telegramJobStatusRetryWait},
+		To: telegramJobStatusFailed, SendPhases: []SendPhase{""}, ErrorMessage: message,
 		Additional: g.Map{"last_dispatch_error": message},
 	})
 	if err != nil {

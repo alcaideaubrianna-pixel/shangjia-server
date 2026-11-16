@@ -54,6 +54,168 @@ func indexProfileCycleDue(ctx context.Context, jobId int64, nextAt *gtime.Time) 
 	}
 }
 
+// accountProfileCycleDueKey 隔离账户候选；全局索引仅供旧调度使用。
+func accountProfileCycleDueKey(scope publishAccountScope) string {
+	return fmt.Sprintf("%s:account:%d:%d", profileCycleDueZSetKey, scope.TenantID, scope.AccountID)
+}
+
+// markAccountCycleRepairChannel 仅由已知业务归属或显式历史恢复写入dirty频道。
+func markAccountCycleRepairChannel(ctx context.Context, scope publishAccountScope, channelID int64) error {
+	if !cache.Initialized() || scope.TenantID <= 0 || scope.AccountID <= 0 || channelID <= 0 {
+		return nil
+	}
+	client, err := cache.RedisClient()
+	if err != nil {
+		return err
+	}
+	key := accountProfileCycleDueKey(scope) + ":repair_channels"
+	_, err = client.GroupScript().Eval(ctx, `redis.call("HINCRBY",KEYS[2],ARGV[1],1); redis.call("ZADD",KEYS[1],"NX",ARGV[2],ARGV[1]); return 1`, 2, []string{key, key + ":versions"}, []interface{}{strconv.FormatInt(channelID, 10), time.Now().UnixMilli()})
+	return err
+}
+
+func indexAccountProfileCycleDue(ctx context.Context, scope publishAccountScope, jobID int64, nextAt *gtime.Time) {
+	if cache.Initialized() && scope.TenantID > 0 && scope.AccountID > 0 && jobID > 0 && nextAt != nil {
+		if err := cache.ZSetAdd(ctx, accountProfileCycleDueKey(scope), float64(nextAt.Unix()), profileCycleDueMember(jobID)); err != nil {
+			g.Log().Warningf(ctx, "写入账户循环到期索引失败 tenantId:%d accountId:%d jobId:%d err:%+v", scope.TenantID, scope.AccountID, jobID, err)
+			return
+		}
+		if err := scheduleAccountCycleWake(ctx, scope, nextAt.Time); err != nil {
+			g.Log().Warningf(ctx, "登记账户循环到期唤醒失败 tenantId:%d accountId:%d jobId:%d err:%+v", scope.TenantID, scope.AccountID, jobID, err)
+		}
+	}
+}
+
+type accountCycleDueCursor struct {
+	At *gtime.Time
+	ID int64
+}
+
+// accountProfileCycleDueRows 优先账户Redis；PG每页只读取20条映射，再按这些主键验证。
+// 补偿游标跨轮保存，无效队头不能永久挡住后面的资料；不使用全局候选过滤。
+func (s *sSysPublish) accountProfileCycleDueRows(ctx context.Context, limit int, scope publishAccountScope) ([]profileCycleDueRow, error) {
+	if limit <= 0 || limit > 20 {
+		limit = 20
+	}
+	if scope.TenantID <= 0 || scope.AccountID <= 0 {
+		return nil, nil
+	}
+	key := accountProfileCycleDueKey(scope)
+	var result []profileCycleDueRow
+	seen := make(map[int64]bool)
+	validate := func(ids []int64) error {
+		if len(ids) == 0 {
+			return nil
+		}
+		var rows []profileCycleDueRow
+		err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
+			InnerJoin(publishChannelProfileTable+" cp", "cp.last_job_id=j.id AND cp.tenant_id=j.tenant_id AND cp.account_id=j.account_id AND cp.channel_id=j.channel_id AND cp.profile_id=j.profile_id").
+			InnerJoin("hg_content_profile p", "p.id=j.profile_id AND p.deleted_at IS NULL").
+			InnerJoin(publishChannelTable+" c", "c.id=j.channel_id AND c.tenant_id=j.tenant_id AND c.deleted_at IS NULL").
+			Fields("j.id AS job_id,j.tenant_id,j.account_id,j.profile_id,j.channel_id,j.sent_at,j.cycle_days,j.cycle_publish_time,cp.next_cycle_at,cp.cycle_generation AS dispatch_count,j.cycle_failure_count").
+			WhereIn("j.id", ids).Where("j.tenant_id", scope.TenantID).Where("j.account_id", scope.AccountID).
+			Where("cp.status", "active").WhereNotNull("cp.next_cycle_at").WhereLTE("cp.next_cycle_at", gtime.Now()).
+			WhereIn("j.status", []string{"sent", "superseded"}).
+			Where("p.status", 1).Where("p.visibility", consts.ContentVisibilityPublic).
+			Where("c.status", 1).Where("c.cycle_publish_enabled", 1).Where("c.publish_direction", "up").
+			Where("COALESCE(NULLIF(LOWER(TRIM(c.cycle_publish_mode)),''),'time')='time'").
+			Where("NOT EXISTS (SELECT 1 FROM " + channelPermissionCircuitTable + " pc WHERE pc.tenant_id=j.tenant_id AND pc.channel_id=j.channel_id AND pc.paused=1)").
+			Where("NOT EXISTS (SELECT 1 FROM " + publishTgJobTable + " a WHERE a.tenant_id=j.tenant_id AND a.account_id=j.account_id AND a.profile_id=j.profile_id AND a.channel_id=j.channel_id AND a.status IN ('pending','sending','confirming','failed_retry','unknown'))").
+			Where("NOT EXISTS (SELECT 1 FROM " + publishProfileCycleRunChannelTable + " rc JOIN " + publishProfileCycleRunTable + " r ON r.id=rc.run_id WHERE r.tenant_id=j.tenant_id AND r.account_id=j.account_id AND r.profile_id=j.profile_id AND rc.channel_id=j.channel_id AND r.status IN ('pending','running','dispatching') AND rc.status IN ('pending','running','dispatching'))").
+			OrderAsc("cp.next_cycle_at").OrderAsc("cp.id").Limit(20).Scan(&rows)
+		if err != nil {
+			return gerror.Wrap(err, "校验账户循环候选失败")
+		}
+		for _, id := range ids {
+			if cache.Initialized() {
+				_ = cache.ZSetRemove(ctx, key, profileCycleDueMember(id))
+			}
+		}
+		for _, row := range rows {
+			indexAccountProfileCycleDue(ctx, scope, row.JobId, row.NextCycleAt)
+			if !seen[row.JobId] && len(result) < limit {
+				result = append(result, row)
+				seen[row.JobId] = true
+			}
+		}
+		return nil
+	}
+	if cache.Initialized() {
+		members, err := cache.ZSetRangeByScore(ctx, key, 0, float64(time.Now().Unix()), 20)
+		if err == nil {
+			var ids []int64
+			for _, member := range members {
+				id, parseErr := strconv.ParseInt(member, 10, 64)
+				if parseErr == nil && id > 0 {
+					ids = append(ids, id)
+				} else {
+					_ = cache.ZSetRemove(ctx, key, member)
+				}
+			}
+			if err = validate(ids); err != nil {
+				return nil, err
+			}
+		}
+	}
+	// 即使命中Redis也补一小页，防止有效但长期受阻的旧候选垄断索引。
+	cursorKey := key + ":pg_cursor"
+	var cursor accountCycleDueCursor
+	if cache.Initialized() {
+		if v, err := cache.Instance().Get(ctx, cursorKey); err == nil && !v.IsNil() {
+			_ = v.Scan(&cursor)
+		}
+	}
+	more := len(result) >= limit
+	for page := 0; page < 3 && len(result) < limit; page++ {
+		var candidates []struct {
+			ID        int64
+			LastJobID int64       `orm:"last_job_id"`
+			NextAt    *gtime.Time `orm:"next_cycle_at"`
+		}
+		model := g.DB().Model(publishChannelProfileTable).Safe().Ctx(ctx).
+			Fields("id,last_job_id,next_cycle_at").Where("tenant_id", scope.TenantID).Where("account_id", scope.AccountID).
+			Where("status", "active").WhereNotNull("next_cycle_at").WhereLTE("next_cycle_at", gtime.Now())
+		if cursor.At != nil {
+			model = model.Where("(next_cycle_at,id)>(?,?)", cursor.At, cursor.ID)
+		}
+		if err := model.OrderAsc("next_cycle_at").OrderAsc("id").Limit(20).Scan(&candidates); err != nil {
+			return nil, gerror.Wrap(err, "读取账户循环补偿候选失败")
+		}
+		more = len(candidates) == 20
+		if len(candidates) == 0 {
+			cursor = accountCycleDueCursor{}
+			break
+		}
+		var ids []int64
+		for _, c := range candidates {
+			if c.LastJobID > 0 {
+				ids = append(ids, c.LastJobID)
+			}
+			cursor = accountCycleDueCursor{At: c.NextAt, ID: c.ID}
+		}
+		if err := validate(ids); err != nil {
+			return nil, err
+		}
+		if len(candidates) < 20 {
+			cursor = accountCycleDueCursor{}
+			break
+		}
+	}
+	if cache.Initialized() {
+		_ = cache.Instance().Set(ctx, cursorKey, cursor, time.Hour)
+		_ = cache.Instance().Set(ctx, key+":more", more || len(result) >= limit, time.Minute)
+	}
+	return result, nil
+}
+
+// accountProfileCycleCandidatesMore 供账户消费者将有界前翻剩余工作安排到下一轮。
+func accountProfileCycleCandidatesMore(ctx context.Context, scope publishAccountScope) bool {
+	if !cache.Initialized() {
+		return false
+	}
+	v, err := cache.Instance().Get(ctx, accountProfileCycleDueKey(scope)+":more")
+	return err == nil && !v.IsNil() && v.Bool()
+}
+
 func removeProfileCycleDue(ctx context.Context, jobId int64) {
 	if jobId <= 0 || !cache.Initialized() {
 		return
@@ -146,12 +308,18 @@ func (s *sSysPublish) syncTelegramJobCycleSchedule(ctx context.Context, job tele
 	if dataNextAt, ok := data["next_cycle_at"]; ok && profileCycleChannelUsable(config) {
 		if nextAt, ok := dataNextAt.(*gtime.Time); ok {
 			indexProfileCycleDue(ctx, job.Id, nextAt)
+			indexAccountProfileCycleDue(ctx, publishAccountScope{TenantID: job.TenantId, AccountID: job.AccountId}, job.Id, nextAt)
 		}
 	} else {
 		removeProfileCycleDue(ctx, job.Id)
 	}
 	if err = projectChannelCyclePlans(ctx, []int64{job.Id}); err != nil {
 		return err
+	}
+	if profileCycleChannelUsable(config) {
+		if wakeErr := s.markAccountSchedule(ctx, publishAccountScope{TenantID: job.TenantId, AccountID: job.AccountId}, true); wakeErr != nil {
+			g.Log().Warningf(ctx, "唤醒循环账户失败 account:%d err:%+v", job.AccountId, wakeErr)
+		}
 	}
 	if err = s.enqueueCycleSummaryRefresh(ctx, job.ChannelId, profileCycleSummaryRefreshDelay); err != nil && ctx.Err() == nil {
 		g.Log().Warningf(ctx, "提交频道循环汇总刷新失败 channel:%d job:%d err:%+v", job.ChannelId, job.Id, err)
@@ -623,6 +791,9 @@ func (s *sSysPublish) profileCycleDueRowsShard(ctx context.Context, limit, shard
 	if limit <= 0 {
 		limit = profileCycleScanBatchSize
 	}
+	if len(scopes) > 0 {
+		return s.accountProfileCycleDueRows(ctx, limit, scopes[0])
+	}
 	var rows []profileCycleDueRow
 	model := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
 		InnerJoin(publishChannelProfileTable+" cp", "cp.last_job_id=j.id AND cp.status='active'").
@@ -635,26 +806,7 @@ func (s *sSysPublish) profileCycleDueRowsShard(ctx context.Context, limit, shard
 		Where("NOT EXISTS (SELECT 1 FROM "+channelPermissionCircuitTable+" pc WHERE pc.tenant_id=j.tenant_id AND pc.channel_id=j.channel_id AND pc.paused=1)").
 		// 配置版本变化即使 next_cycle_at 为空也必须进入调度；普通到期任务仍要求到期。
 		Where("(j.next_cycle_at IS NULL OR j.next_cycle_at<=?)", gtime.Now())
-	if len(scopes) > 0 {
-		// 新引擎从账户到期索引驱动，历史任务只通过主键读取发送证据。
-		model = g.DB().Model(publishChannelProfileTable+" cp").Safe().Ctx(ctx).
-			InnerJoin(publishTgJobTable+" j", "j.id=cp.last_job_id AND j.tenant_id=cp.tenant_id AND j.account_id=cp.account_id AND j.profile_id=cp.profile_id AND j.channel_id=cp.channel_id").
-			InnerJoin("hg_content_profile p", "p.id=cp.profile_id AND p.deleted_at IS NULL").
-			InnerJoin(publishChannelTable+" c", "c.id=cp.channel_id AND c.deleted_at IS NULL").
-			Fields("j.id AS job_id,j.tenant_id,j.account_id,j.profile_id,j.channel_id,j.sent_at,j.cycle_days,j.cycle_publish_time,cp.next_cycle_at,cp.cycle_generation AS dispatch_count,j.cycle_failure_count").
-			Where("cp.tenant_id", scopes[0].TenantID).Where("cp.account_id", scopes[0].AccountID).Where("cp.status", "active").
-			Where("(cp.next_cycle_at IS NOT NULL AND cp.next_cycle_at<=? OR COALESCE(cp.applied_cycle_config_version,0)<COALESCE(c.cycle_config_version,0))", gtime.Now()).WhereIn("j.status", []string{"sent", "superseded"}).
-			Where("NOT EXISTS (SELECT 1 FROM " + channelPermissionCircuitTable + " pc WHERE pc.tenant_id=cp.tenant_id AND pc.channel_id=cp.channel_id AND pc.paused=1)")
-	} else {
-		model = accountScheduleModel(model, "j.tenant_id", "j.account_id", scopes)
-	}
-	if len(scopes) > 0 {
-		// 仅阻止同一账户同一资料同一频道的未完成计划，避免一个频道的投影阻塞同资料的其他频道。
-		// profile_cycle_run 是资料级 Run，不含 channel_id；频道状态保存在
-		// profile_cycle_run_channel，必须通过 run_id 关联，不能直接读取不存在的字段。
-		model = model.Where("NOT EXISTS (SELECT 1 FROM " + publishProfileCycleRunChannelTable + " planning_channel INNER JOIN " + publishProfileCycleRunTable + " planning ON planning.id=planning_channel.run_id WHERE planning.tenant_id=j.tenant_id AND planning.account_id=j.account_id AND planning.profile_id=j.profile_id AND planning_channel.channel_id=j.channel_id AND planning.status IN ('pending','running','dispatching') AND planning_channel.status IN ('pending','running','dispatching'))")
-		model = model.Where("c.status", 1).Where("c.cycle_publish_enabled", 1).Where("COALESCE(NULLIF(LOWER(TRIM(c.cycle_publish_mode)),''),'time')='time'").Where("c.publish_direction", "up").Where("NOT EXISTS (SELECT 1 FROM " + publishTgJobTable + " active WHERE active.tenant_id=j.tenant_id AND active.account_id=j.account_id AND active.profile_id=j.profile_id AND active.channel_id=j.channel_id AND active.status IN ('pending','sending','failed_retry','unknown'))")
-	}
+	model = accountScheduleModel(model, "j.tenant_id", "j.account_id", scopes)
 	// 所有调度引擎统一检查子任务，防止到期扫描在发送未完成时重复创建循环任务。
 	// 旧实现只在账户新引擎分支检查，导致普通扫描持续生成同一资料的 pending 任务并堵塞频道队列。
 	model = model.Where("NOT EXISTS (SELECT 1 FROM " + publishTgJobTable + " active WHERE active.tenant_id=j.tenant_id AND active.account_id=j.account_id AND active.profile_id=j.profile_id AND active.channel_id=j.channel_id AND active.status IN ('pending','sending','failed_retry','unknown'))")
@@ -689,6 +841,7 @@ func (s *sSysPublish) profileCycleDueRowsShard(ctx context.Context, limit, shard
 	for _, row := range rows {
 		if row.NextCycleAt != nil {
 			indexProfileCycleDue(ctx, row.JobId, row.NextCycleAt)
+			indexAccountProfileCycleDue(ctx, publishAccountScope{TenantID: row.TenantId, AccountID: row.AccountId}, row.JobId, row.NextCycleAt)
 		}
 	}
 	return rows, nil
@@ -721,6 +874,7 @@ func (s *sSysPublish) dispatchDueProfileCycle(ctx context.Context, row profileCy
 			"last_dispatch_error": "频道循环队列积压，已延后领取", "updated_at": gtime.Now(),
 		}).Update()
 		indexProfileCycleDue(ctx, row.JobId, nextAt)
+		indexAccountProfileCycleDue(ctx, publishAccountScope{TenantID: row.TenantId, AccountID: row.AccountId}, row.JobId, nextAt)
 		return false, err
 	}
 	active, err := s.profileCycleChildActive(ctx, row.JobId)
@@ -733,6 +887,7 @@ func (s *sSysPublish) dispatchDueProfileCycle(ctx context.Context, row profileCy
 			"next_cycle_at": nextAt, "updated_at": gtime.Now(),
 		}).Update()
 		indexProfileCycleDue(ctx, row.JobId, nextAt)
+		indexAccountProfileCycleDue(ctx, publishAccountScope{TenantID: row.TenantId, AccountID: row.AccountId}, row.JobId, nextAt)
 		return false, err
 	}
 	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
@@ -759,6 +914,7 @@ func (s *sSysPublish) dispatchDueProfileCycle(ctx context.Context, row profileCy
 		_, updateErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", row.JobId).
 			Data(g.Map{"next_cycle_at": nextAt, "last_dispatch_error": err.Error()}).Update()
 		indexProfileCycleDue(ctx, row.JobId, nextAt)
+		indexAccountProfileCycleDue(ctx, publishAccountScope{TenantID: row.TenantId, AccountID: row.AccountId}, row.JobId, nextAt)
 		return false, updateErr
 	}
 	if err == nil {
@@ -785,6 +941,7 @@ func (s *sSysPublish) dispatchDueProfileCycle(ctx context.Context, row profileCy
 	_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", row.JobId).Data(data).Update()
 	if nextAt, ok := data["next_cycle_at"].(*gtime.Time); ok && nextAt != nil {
 		indexProfileCycleDue(ctx, row.JobId, nextAt)
+		indexAccountProfileCycleDue(ctx, publishAccountScope{TenantID: row.TenantId, AccountID: row.AccountId}, row.JobId, nextAt)
 	} else {
 		removeProfileCycleDue(ctx, row.JobId)
 	}

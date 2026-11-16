@@ -2,6 +2,19 @@ package sys
 
 import "strings"
 
+func (s telegramJobLifecycle) String() string      { return string(s) }
+func (s telegramDispatchState) String() string     { return string(s) }
+func (s telegramSendPhaseState) String() string    { return string(s) }
+func jobDispatch(v DispatchStatus) *DispatchStatus { return &v }
+func jobPhase(v SendPhase) *SendPhase              { return &v }
+func jobStatusStrings(values []JobStatus) []string {
+	r := make([]string, len(values))
+	for i, v := range values {
+		r[i] = v.String()
+	}
+	return r
+}
+
 // Public state aliases are intentionally backed by the types already used by
 // the publish worker. This lets new code use strong names without requiring a
 // flag-day migration of database models and existing call sites.
@@ -185,7 +198,8 @@ func (s telegramSendPhaseState) Valid() bool {
 		telegramSendPhaseStateCleanupConfirmed, telegramSendPhaseStateDisplaySending,
 		telegramSendPhaseStateDisplayConfirmed, telegramSendPhaseStateVerifySending,
 		telegramSendPhaseStateVerifyConfirmed, telegramSendPhaseStateCompletedNoVerify,
-		telegramSendPhaseStateTimeoutCancelled:
+		telegramSendPhaseStateTimeoutCancelled,
+		SendPhaseRelayPreparing, SendPhaseRelayReady, SendPhasePackageSending, SendPhasePackageConfirmed:
 		return true
 	default:
 		return false
@@ -237,3 +251,11 @@ func telegramJobOccupiesChannelExecution(status, sendPhase, dispatchStatus strin
 		telegramSendPhaseStateOf(sendPhase).OccupiesChannelExecution() ||
 		telegramDispatchStateOfValue(dispatchStatus) == telegramDispatchProcessing
 }
+
+// Relay phases share the existing persisted send_phase column.
+const (
+	SendPhaseRelayPreparing   SendPhase = "relay_preparing"
+	SendPhaseRelayReady       SendPhase = "relay_ready"
+	SendPhasePackageSending   SendPhase = "package_sending"
+	SendPhasePackageConfirmed SendPhase = "package_confirmed"
+)

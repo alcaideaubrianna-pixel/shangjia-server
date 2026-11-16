@@ -407,17 +407,27 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 			}
 		}
 		var channelRelation struct {
+			Id             int64  `orm:"id"`
 			CollectEnabled int    `json:"collectEnabled"`
 			Status         string `json:"status"`
 			ApprovalStatus string `json:"approvalStatus"`
 		}
 		if relationErr := g.DB().Model("hg_youban_publish_collect_account_channel").Ctx(ctx).
-			Fields("collect_enabled,status,approval_status").Where("tenant_id", tenantId).Where("account_id", accountId).
+			Fields("id,collect_enabled,status,approval_status").Where("tenant_id", tenantId).Where("account_id", accountId).
 			Where("source_id", event["source_id"].Int64()).Where("channel_id", channelID).WhereNull("deleted_at").Scan(&channelRelation); !collectOptionalRecordScanSucceeded(relationErr) {
 			return gerror.Wrap(relationErr, "读取频道采集状态失败")
 		} else {
 			if !botCollectChannelRelationEnabled(channelRelation.CollectEnabled, channelRelation.Status, channelRelation.ApprovalStatus) {
-				return s.ignoreCollectEvent(ctx, eventId, "采集频道未启用或机器人已移除", "source")
+				// Account authorization and BOT membership are independent checks.
+				// Keep the exact account relation in SLS; never imply BOT removal here.
+				g.Log().Info(ctx, "采集事件被账户频道授权拦截", g.Map{
+					"event": "collect_account_channel_blocked", "tenantId": tenantId, "accountId": accountId,
+					"sourceId": event["source_id"].Int64(), "collectEventId": eventId,
+					"collectChannelId": channelID, "relationId": channelRelation.Id,
+					"collectEnabled": channelRelation.CollectEnabled, "relationStatus": channelRelation.Status,
+					"approvalStatus": channelRelation.ApprovalStatus,
+				})
+				return s.ignoreCollectEvent(ctx, eventId, "账户频道采集未启用或审批已拒绝", "source")
 			}
 		}
 	}

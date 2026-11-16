@@ -347,7 +347,7 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 	}
 	// Stream 连续失败达到阈值时，任何账户都必须走 Asynq 兜底；不能再依赖
 	// 账户灰度配置，否则旧账户会无限重试而永远没有执行任务。
-	if row.AttemptCount >= 3 && telegramOutboxJobStillNeedsDispatch(job.Status, job.DispatchStatus) {
+	if row.AttemptCount >= 3 && telegramOutboxJobStillNeedsDispatch(job.Status.String(), job.DispatchStatus.String()) {
 		if fallbackErr := s.EnqueueTelegramJob(ctx, job.Id, 0, false); fallbackErr == nil {
 			g.Log().Warning(ctx, "TG任务Outbox达到重试阈值，直接降级Asynq", g.Map{"event": "stream_fallback_enqueue", "jobId": job.Id, "outboxId": row.Id, "attemptCount": row.AttemptCount})
 			return s.confirmTelegramStreamOutbox(ctx, row.Id, owner, job.Id, row.AttemptCount)
@@ -412,7 +412,7 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 	if err != nil {
 		return s.releaseTelegramOutbox(ctx, row.Id, owner, row.AttemptCount, err.Error())
 	}
-	if telegramOutboxJobStillNeedsDispatch(job.Status, job.DispatchStatus) {
+	if telegramOutboxJobStillNeedsDispatch(job.Status.String(), job.DispatchStatus.String()) {
 		beginTelegramPublishStage(ctx, "outbox.deferred").End(nil, g.Map{"reason": "still_needs_dispatch", "jobStatus": job.Status, "dispatchStatus": job.DispatchStatus})
 		g.Log().Info(ctx, "TG Outbox 入队后任务仍待发送", g.Map{"event": "outbox_enqueue_deferred", "outboxId": row.Id, "jobId": row.JobId, "jobStatus": job.Status, "dispatchStatus": job.DispatchStatus})
 		return s.releaseTelegramOutbox(ctx, row.Id, owner, row.AttemptCount, "频道发送槽繁忙，等待再次调度")
@@ -472,7 +472,7 @@ func (s *sSysPublish) telegramOutboxJobDispatchDecision(ctx context.Context, job
 	if job.Id <= 0 {
 		return telegramOutboxDecisionComplete, nil
 	}
-	if !telegramOutboxJobStillNeedsDispatch(job.Status, job.DispatchStatus) {
+	if !telegramOutboxJobStillNeedsDispatch(job.Status.String(), job.DispatchStatus.String()) {
 		return telegramOutboxDecisionComplete, nil
 	}
 	if now == nil {
@@ -486,7 +486,7 @@ func (s *sSysPublish) telegramOutboxJobDispatchDecision(ctx context.Context, job
 		"hasEarlier": hasEarlier, "nextRetryAt": job.NextRetryAt, "now": now,
 		"createdAt": job.CreatedAt, "jobStatus": job.Status, "dispatchStatus": job.DispatchStatus,
 	})
-	return telegramOutboxDispatchDecision(job.Status, job.DispatchStatus, job.NextRetryAt, now, hasEarlier), nil
+	return telegramOutboxDispatchDecision(job.Status.String(), job.DispatchStatus.String(), job.NextRetryAt, now, hasEarlier), nil
 }
 
 func telegramOutboxDispatchDecision(status, dispatchStatus string, nextRetryAt, now *gtime.Time, hasEarlier bool) string {

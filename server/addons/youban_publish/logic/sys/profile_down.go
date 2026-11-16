@@ -304,7 +304,7 @@ func (s *sSysPublish) createDownChannelTelegramJob(ctx context.Context, job tele
 		}
 		transitioned, transitionErr := s.transitionTelegramJob(ctx, telegramJobTransition{
 			JobId: existing["id"].Int64(),
-			From: []string{
+			From: []JobStatus{
 				telegramJobStatusPending, telegramJobStatusRetryWait, telegramJobStatusFailed,
 			},
 			To:         telegramJobStatusSending,
@@ -398,7 +398,7 @@ func (s *sSysPublish) sendDownChannelProfileLockedByChannel(ctx context.Context,
 	sentAt := gtime.Now()
 	_, _ = s.transitionTelegramJob(ctx, telegramJobTransition{
 		JobId:      job.Id,
-		From:       []string{telegramJobStatusSending},
+		From:       []JobStatus{telegramJobStatusSending},
 		To:         telegramJobStatusSent,
 		Additional: g.Map{"sent_at": sentAt},
 	})
@@ -423,13 +423,13 @@ func (s *sSysPublish) handleDownChannelTelegramJobError(ctx context.Context, job
 	if isTelegramAccountBusyError(cause) {
 		retryCount = job.RetryCount
 	}
-	status := telegramJobStatusRetryWait
+	status := JobStatusRetryWait
 	if policy.Permanent {
 		status = telegramJobStatusFailed
 	}
 	transitioned, err := s.transitionTelegramJob(ctx, telegramJobTransition{
 		JobId:        job.Id,
-		From:         []string{telegramJobStatusSending},
+		From:         []JobStatus{telegramJobStatusSending},
 		To:           status,
 		RetryDelay:   policy.RetryDelay,
 		ErrorMessage: policy.Message,
@@ -439,7 +439,7 @@ func (s *sSysPublish) handleDownChannelTelegramJobError(ctx context.Context, job
 		return gerror.Wrap(err, "更新下架频道TG失败任务状态失败")
 	}
 	if transitioned {
-		s.appendTelegramJobLog(ctx, job, "down_notify", status, policy.Message)
+		s.appendTelegramJobLog(ctx, job, "down_notify", status.String(), policy.Message)
 	}
 	return nil
 }

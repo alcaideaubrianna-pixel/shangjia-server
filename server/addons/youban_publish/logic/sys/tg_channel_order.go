@@ -98,7 +98,7 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 	// Once a display is visible in Telegram, finish that operation before
 	// returning it behind untouched historical backlog. Earlier operations that
 	// have also started still block it, preserving media/verification ordering.
-	if telegramJobRequiresChannelCompletionPriority(job.SendPhase) {
+	if telegramJobRequiresChannelCompletionPriority(job.SendPhase.String()) {
 		mod = mod.Where(`(
 			j.status IN (?, ?) OR
 			j.send_phase IN (?, ?, ?)

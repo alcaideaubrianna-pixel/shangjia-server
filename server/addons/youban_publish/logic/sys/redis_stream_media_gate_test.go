@@ -21,7 +21,7 @@ func TestStreamMediaFailureDoesNotBlockProfilePublish(t *testing.T) {
 		{telegramJobStatusRetryWait, telegramSendPhaseVerifySending},
 	} {
 		t.Run(test.status+"/"+test.phase, func(t *testing.T) {
-			settled, err := publish.settleStreamFailedMediaJob(context.Background(), telegramJobRecord{Status: test.status, SendPhase: test.phase})
+			settled, err := publish.settleStreamFailedMediaJob(context.Background(), telegramJobRecord{Status: JobStatus(test.status), SendPhase: SendPhase(test.phase)})
 			if err != nil || settled {
 				t.Fatalf("settled=%v err=%v", settled, err)
 			}

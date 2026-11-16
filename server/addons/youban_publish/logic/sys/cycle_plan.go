@@ -3,10 +3,12 @@ package sys
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 	publishconsts "hotgo/addons/youban_publish/consts"
 	"hotgo/internal/dao"
 	"hotgo/internal/library/cache"
@@ -35,144 +37,143 @@ func projectChannelCyclePlans(ctx context.Context, jobIDs []int64) error {
 	return err
 }
 
-// repairAccountCyclePlans 每次只审计200条成功记录；按账户保存游标，修复丢失映射及空计划，不伪造发送证据。
-// 显式下架的inactive映射不恢复；正常路径通过成功事件同步，扫描仅用于迁移和故障补偿。
+// repairAccountCyclePlans 独立预算按映射主键小页修复；不扫描历史Job大表。
+// 空计划和配置变化与正常到期生产隔离，CAS不覆盖下架、新计划或后续映射。
 func (s *sSysPublish) repairAccountCyclePlans(ctx context.Context, scope publishAccountScope) error {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
 	key := fmt.Sprintf("%s%d:%d", publishconsts.AccountCycleRepairPrefix, scope.TenantID, scope.AccountID)
-	value, err := cache.Instance().Get(ctx, key)
-	if err != nil {
-		return err
-	}
 	var checkpoint struct {
-		Cursor int64
-		NextAt int64
+		Cursor  int64
+		Channel int64
+		Version int64
+		NextAt  int64
 	}
-	if !value.IsNil() {
-		if err := value.Scan(&checkpoint); err != nil {
-			return err
+	if cache.Initialized() {
+		if v, err := cache.Instance().Get(ctx, key); err == nil && !v.IsNil() {
+			_ = v.Scan(&checkpoint)
 		}
 	}
 	if checkpoint.NextAt > time.Now().Unix() {
 		return nil
 	}
-	// 在数据库读取前写入退避时间，错误页也不能每秒重试；游标仅在整页处理成功后推进。
-	checkpoint.NextAt = time.Now().Add(10 * time.Second).Unix()
-	if err := cache.Instance().Set(ctx, key, checkpoint, 24*time.Hour); err != nil {
+	// 仅消费本账户显式dirty频道；禁止以租户目录回退扫描无索引空计划。
+	dirtyKey := accountProfileCycleDueKey(scope) + ":repair_channels"
+	if !cache.Initialized() {
+		return nil
+	}
+	members, err := cache.ZSetRange(ctx, dirtyKey, 0, 0)
+	if err != nil {
 		return err
 	}
-	// 正常发送成功时已经通过 upsertChannelProfileFromJob 写入 last_job_id。
-	// 历史异常映射只按 channel_profile 有界修复，每轮最多 200 条；
-	// 不再对账户全部 sent job 做高频 DISTINCT ON。
-	if _, err := g.DB().Exec(ctx, `WITH candidates AS (
-		SELECT cp.tenant_id, cp.account_id, cp.channel_id, cp.profile_id
-		FROM `+publishChannelProfileTable+` cp
-		WHERE cp.tenant_id=? AND cp.account_id=? AND cp.status='active'
-		  AND (cp.last_job_id=0 OR NOT EXISTS (
-			SELECT 1 FROM `+publishTgJobTable+` current_job
-			WHERE current_job.id=cp.last_job_id
-			  AND current_job.tenant_id=cp.tenant_id
-			  AND current_job.account_id=cp.account_id
-			  AND current_job.channel_id=cp.channel_id
-			  AND current_job.profile_id=cp.profile_id
-			  AND current_job.status IN ('sent','superseded')
-		  ))
-		ORDER BY cp.id
-		LIMIT 200
-	), latest AS (
-		SELECT c.tenant_id, c.account_id, c.channel_id, c.profile_id,
-			(
-				SELECT j.id FROM `+publishTgJobTable+` j
-				JOIN `+publishChannelTable+` ch ON ch.id=j.channel_id
-				  AND ch.tenant_id=j.tenant_id AND ch.deleted_at IS NULL
-				WHERE j.tenant_id=c.tenant_id AND j.account_id=c.account_id
-				  AND j.channel_id=c.channel_id AND j.profile_id=c.profile_id
-				  AND j.status='sent' AND ch.status=1
-				  AND ch.cycle_publish_enabled=1 AND ch.publish_direction='up'
-				ORDER BY j.id DESC
-				LIMIT 1
-			) AS job_id
-		FROM candidates c
-	)
-	UPDATE `+publishChannelProfileTable+` cp
-	SET last_job_id=latest.job_id, next_cycle_at=NULL, updated_at=NOW()
-	FROM latest
-	WHERE latest.job_id IS NOT NULL
-	  AND cp.tenant_id=latest.tenant_id AND cp.account_id=latest.account_id
-	  AND cp.channel_id=latest.channel_id AND cp.profile_id=latest.profile_id
-	  AND cp.status='active'`, scope.TenantID, scope.AccountID); err != nil {
+	if len(members) == 0 {
+		return nil
+	}
+	channelID, err := strconv.ParseInt(members[0], 10, 64)
+	if err != nil || channelID <= 0 {
+		_ = cache.ZSetRemove(ctx, dirtyKey, members[0])
+		return nil
+	}
+	client, err := cache.RedisClient()
+	if err != nil {
 		return err
+	}
+	versionValue, err := client.GroupHash().HGet(ctx, dirtyKey+":versions", members[0])
+	if err != nil {
+		return err
+	}
+	version := versionValue.Int64()
+	if checkpoint.Channel != channelID || checkpoint.Version != version {
+		checkpoint.Channel = channelID
+		checkpoint.Version = version
+		checkpoint.Cursor = 0
 	}
 	var page []struct {
-		ID int64 `orm:"id"`
+		ID        int64
+		TenantID  int64       `orm:"tenant_id"`
+		AccountID int64       `orm:"account_id"`
+		JobID     int64       `orm:"last_job_id"`
+		ProfileID int64       `orm:"profile_id"`
+		ChannelID int64       `orm:"channel_id"`
+		NextAt    *gtime.Time `orm:"next_cycle_at"`
+		Version   int64       `orm:"applied_cycle_config_version"`
 	}
-	if err := g.DB().Model(publishTgJobTable).Ctx(ctx).Where("tenant_id", scope.TenantID).Where("account_id", scope.AccountID).Where("status", "sent").WhereGT("id", checkpoint.Cursor).Fields("id").OrderAsc("id").Limit(200).Scan(&page); err != nil {
+	if err := g.DB().Model(publishChannelProfileTable).Safe().Ctx(ctx).
+		Fields("id,tenant_id,account_id,last_job_id,profile_id,channel_id,next_cycle_at,applied_cycle_config_version").
+		Where("status", "active").Where("channel_id", checkpoint.Channel).
+		WhereGT("id", checkpoint.Cursor).OrderAsc("id").Limit(20).Scan(&page); err != nil {
 		return err
 	}
-	// 即使本页没有历史记录，也继续检查已有映射的空计划。
-	pageIDs := make([]int64, 0, len(page))
 	for _, row := range page {
-		pageIDs = append(pageIDs, row.ID)
-	}
-	var jobs []telegramJobRecord
-	if len(pageIDs) > 0 {
-		if err := g.DB().Model(publishTgJobTable+" j").Ctx(ctx).
-			InnerJoin(publishChannelTable+" c", "c.id=j.channel_id AND c.tenant_id=j.tenant_id AND c.deleted_at IS NULL").
-			InnerJoin(dao.ContentProfile.Table()+" p", "p.id=j.profile_id AND p.deleted_at IS NULL AND p.status=1 AND p.visibility='public'").
-			Where("j.tenant_id", scope.TenantID).Where("j.account_id", scope.AccountID).Where("j.status", "sent").WhereIn("j.id", pageIDs).
-			Where("c.cycle_publish_enabled", 1).Where("c.status", 1).Where("c.publish_direction", "up").Where("COALESCE(NULLIF(c.cycle_publish_mode,''),'time')='time'").
-			Where("NOT EXISTS(SELECT 1 FROM " + publishChannelProfileTable + " cp WHERE cp.channel_id=j.channel_id AND cp.profile_id=j.profile_id AND (cp.status<>'active' OR cp.next_cycle_at IS NOT NULL OR cp.last_job_id<>j.id))").
-			Where("NOT EXISTS(SELECT 1 FROM " + publishTgJobTable + " newer WHERE newer.tenant_id=j.tenant_id AND newer.account_id=j.account_id AND newer.channel_id=j.channel_id AND newer.profile_id=j.profile_id AND newer.status='sent' AND newer.id>j.id)").
-			Fields("j.*").OrderAsc("j.id").Limit(200).Scan(&jobs); err != nil {
+		if err := ctx.Err(); err != nil {
 			return err
 		}
-	}
-	// 已存在映射的空计划优先修复，不必等待历史任务游标绕过整个账户历史。
-	var mapped []telegramJobRecord
-	if err := g.DB().Model(publishChannelProfileTable+" cp").Ctx(ctx).InnerJoin(publishTgJobTable+" j", "j.id=cp.last_job_id AND j.tenant_id=cp.tenant_id AND j.account_id=cp.account_id AND j.profile_id=cp.profile_id AND j.channel_id=cp.channel_id").InnerJoin(publishChannelTable+" c", "c.id=cp.channel_id AND c.deleted_at IS NULL").Where("cp.tenant_id", scope.TenantID).Where("cp.account_id", scope.AccountID).Where("cp.status", "active").WhereNull("cp.next_cycle_at").Where("c.status", 1).Where("c.cycle_publish_enabled", 1).Where("c.publish_direction", "up").Where("COALESCE(NULLIF(c.cycle_publish_mode,''),'time')='time'").WhereIn("j.status", []string{"sent", "superseded"}).Fields("j.*").OrderAsc("cp.id").Limit(200).Scan(&mapped); err != nil {
-		return err
-	}
-	seen := make(map[int64]bool, len(jobs)+len(mapped))
-	for _, job := range mapped {
-		seen[job.Id] = true
-	}
-	for _, job := range jobs {
-		if !seen[job.Id] {
-			mapped = append(mapped, job)
-			seen[job.Id] = true
-		}
-	}
-	jobs = mapped
-	// 以真实成功记录为依据；只补不存在的映射，不覆盖后续手工下架或新任务。
-	for _, job := range jobs {
-		if job.ChannelId <= 0 || job.ProfileId <= 0 || isDownTelegramOperationNo(job.OperationNo) || isMessagePushOperationNo(job.OperationNo) {
+		if row.TenantID != scope.TenantID || row.AccountID != scope.AccountID {
+			checkpoint.Cursor = row.ID
 			continue
 		}
-		inserted := false
-		err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-			// 当前资料必须仍属于账户并处于上架状态，历史成功不代表当前仍应发布。
-			result, e := tx.Exec("INSERT INTO "+publishChannelProfileTable+" (tenant_id,account_id,channel_id,profile_id,last_job_id,status) SELECT j.tenant_id,j.account_id,j.channel_id,j.profile_id,j.id,'active' FROM "+publishTgJobTable+" j JOIN "+publishProfileStateTable+" ps ON ps.tenant_id=j.tenant_id AND ps.account_id=j.account_id AND ps.profile_id=j.profile_id JOIN "+publishChannelTable+" c ON c.id=j.channel_id AND c.tenant_id=j.tenant_id AND c.deleted_at IS NULL WHERE j.id=? AND ps.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM "+publishTgJobTable+" newer WHERE newer.tenant_id=j.tenant_id AND newer.account_id=j.account_id AND newer.channel_id=j.channel_id AND newer.profile_id=j.profile_id AND newer.status='sent' AND newer.id>j.id) ON CONFLICT(channel_id,profile_id) DO NOTHING", job.Id)
-			if e != nil {
-				return e
-			}
-			affected, e := result.RowsAffected()
-			inserted = e == nil && affected > 0
-			return e
-		})
+		if row.JobID <= 0 {
+			g.Log().Warning(ctx, "循环映射缺失成功任务，需要显式恢复", g.Map{"tenantId": scope.TenantID, "accountId": scope.AccountID, "channelId": row.ChannelID, "mappingId": row.ID})
+			checkpoint.Cursor = row.ID
+			continue
+		}
+		config, err := s.profileCycleChannelConfigById(ctx, row.ChannelID)
 		if err != nil {
 			return err
 		}
-		if inserted {
-			if err := s.syncTelegramJobCycleSchedule(ctx, job); err != nil {
-				return err
+		if !profileCycleChannelUsable(config) || (row.NextAt != nil && row.Version >= config.Version) {
+			checkpoint.Cursor = row.ID
+			continue
+		}
+		var job telegramJobRecord
+		if err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", row.JobID).
+			Where("tenant_id", scope.TenantID).Where("account_id", scope.AccountID).
+			Where("channel_id", row.ChannelID).Where("profile_id", row.ProfileID).
+			WhereIn("status", []string{"sent", "superseded"}).Scan(&job); err != nil {
+			return err
+		}
+		if job.Id > 0 && job.SentAt != nil && !isDownTelegramOperationNo(job.OperationNo) && !isMessagePushOperationNo(job.OperationNo) {
+			nextAt := nextProfileCycleAt(ctx, config.Days, config.PublishTime, job.SentAt, row.ProfileID, row.ChannelID)
+			model := g.DB().Model(publishChannelProfileTable).Safe().Ctx(ctx).
+				Where("id", row.ID).Where("tenant_id", scope.TenantID).Where("account_id", scope.AccountID).
+				Where("status", "active").Where("last_job_id", row.JobID).
+				Where("COALESCE(applied_cycle_config_version,0)=?", row.Version).
+				Where("EXISTS (SELECT 1 FROM "+dao.ContentProfile.Table()+" p WHERE p.id=? AND p.deleted_at IS NULL AND p.status=1 AND p.visibility='public')", row.ProfileID).
+				Where("EXISTS (SELECT 1 FROM "+publishChannelTable+" c WHERE c.id=? AND c.tenant_id=? AND c.deleted_at IS NULL AND c.status=1 AND c.publish_direction='up' AND c.cycle_publish_enabled=1 AND COALESCE(c.cycle_config_version,0)=?)", row.ChannelID, scope.TenantID, config.Version)
+			if row.NextAt == nil {
+				model = model.WhereNull("next_cycle_at")
+			} else {
+				model = model.Where("next_cycle_at", row.NextAt)
+			}
+			res, updateErr := model.Data(g.Map{"next_cycle_at": nextAt, "applied_cycle_config_version": config.Version}).Update()
+			if updateErr != nil {
+				return updateErr
+			}
+			affected, updateErr := res.RowsAffected()
+			if updateErr != nil {
+				return updateErr
+			}
+			if affected > 0 {
+				indexAccountProfileCycleDue(ctx, scope, row.JobID, nextAt)
+				if err := s.markAccountSchedule(ctx, scope, true); err != nil {
+					g.Log().Warningf(ctx, "唤醒修复循环账户失败 account:%d err:%+v", scope.AccountID, err)
+				}
 			}
 		}
-		// 已存在映射的 job 不再执行 COUNT(*)；正常成功路径已经写入计划。
-		// 修复任务只在确实补出新映射时同步计划，避免产生 N+1 查询。
+		checkpoint.Cursor = row.ID
 	}
-	checkpoint.Cursor = 0
-	if len(page) == 200 {
-		checkpoint.Cursor = page[len(page)-1].ID
+	if len(page) < 20 {
+		checkpoint.Cursor = 0
+		// An enable/config change during this page must retain a fresh rebuild.
+		_, err = client.GroupScript().Eval(ctx, `if tonumber(redis.call("HGET",KEYS[2],ARGV[1]) or "0")==tonumber(ARGV[2]) then redis.call("ZREM",KEYS[1],ARGV[1]); redis.call("HDEL",KEYS[2],ARGV[1]); return 1 end return 0`, 2, []string{dirtyKey, dirtyKey + ":versions"}, []interface{}{strconv.FormatInt(checkpoint.Channel, 10), checkpoint.Version})
+		if err != nil {
+			return err
+		}
+		checkpoint.Channel = 0
 	}
 	checkpoint.NextAt = time.Now().Add(10 * time.Second).Unix()
-	return cache.Instance().Set(ctx, key, checkpoint, 24*time.Hour)
+	if cache.Initialized() {
+		return cache.Instance().Set(ctx, key, checkpoint, 24*time.Hour)
+	}
+	return nil
 }

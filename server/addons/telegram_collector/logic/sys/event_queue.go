@@ -81,8 +81,6 @@ func (s *sCollector) StopRuntime() {
 	s.queueMu.Lock()
 	eventHistoryServer := s.queueHistoryServer
 	s.queueHistoryServer = nil
-	legacyServer := s.deliveryLegacyServer
-	s.deliveryLegacyServer = nil
 	historyServer := s.deliveryHistoryServer
 	s.deliveryHistoryServer = nil
 	server, deliveryServer, client, runtimeStop := s.queueServer, s.deliveryServer, s.queueClient, s.runtimeStop
@@ -99,9 +97,6 @@ func (s *sCollector) StopRuntime() {
 	}
 	if deliveryServer != nil {
 		deliveryServer.Shutdown()
-	}
-	if legacyServer != nil {
-		legacyServer.Shutdown()
 	}
 	if historyServer != nil {
 		historyServer.Shutdown()

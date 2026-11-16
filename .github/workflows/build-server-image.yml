@@ -13,6 +13,7 @@ on:
       - ".dockerignore"
       - ".env.example"
       - ".github/workflows/build-server-image.yml"
+      - ".github/workflows/publish-architecture.yml"
       - "scripts/ci/**"
   workflow_dispatch:
 
@@ -26,7 +27,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  checks:
+    if: github.ref == 'refs/heads/feat/railway-runtime-ci-split'
+    uses: ./.github/workflows/publish-architecture.yml
+    permissions:
+      contents: read
+
   build:
+    needs: checks
     if: github.ref == 'refs/heads/feat/railway-runtime-ci-split'
     runs-on: ubuntu-latest
     permissions:

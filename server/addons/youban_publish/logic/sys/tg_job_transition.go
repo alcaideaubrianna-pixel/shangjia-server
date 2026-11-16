@@ -101,22 +101,22 @@ func telegramJobSourceOf(operationNo string, priority int) telegramJobSource {
 	}
 }
 
-func telegramJobRetryableStatuses() []string {
-	return []string{telegramJobStatusPending, telegramJobStatusRetryWait}
+func telegramJobRetryableStatuses() []JobStatus {
+	return []JobStatus{telegramJobStatusPending, telegramJobStatusRetryWait}
 }
 
-func telegramJobRecoverableStatuses() []string {
-	return []string{telegramJobStatusPending, telegramJobStatusRetryWait, telegramJobStatusConfirming}
+func telegramJobRecoverableStatuses() []JobStatus {
+	return []JobStatus{telegramJobStatusPending, telegramJobStatusRetryWait, telegramJobStatusConfirming}
 }
 
-func telegramJobInFlightStatuses() []string {
-	return []string{telegramJobStatusSending, telegramJobStatusConfirming}
+func telegramJobInFlightStatuses() []JobStatus {
+	return []JobStatus{telegramJobStatusSending, telegramJobStatusConfirming}
 }
 
 // telegramJobActiveStatuses 是唯一的“任务仍占用资料/频道”状态集合。
 // 所有循环、批次和手动发布的幂等检查都必须复用它，禁止自行拼接字符串。
-func telegramJobActiveStatuses() []string {
-	return []string{
+func telegramJobActiveStatuses() []JobStatus {
+	return []JobStatus{
 		telegramJobStatusPending,
 		telegramJobStatusSending,
 		telegramJobStatusRetryWait,
@@ -124,12 +124,12 @@ func telegramJobActiveStatuses() []string {
 	}
 }
 
-func telegramJobReconcileStatuses() []string {
-	return []string{telegramJobStatusConfirming}
+func telegramJobReconcileStatuses() []JobStatus {
+	return []JobStatus{telegramJobStatusConfirming}
 }
 
-func telegramJobTerminalStatuses() []string {
-	return []string{telegramJobStatusSent, telegramJobStatusFailed, telegramJobStatusSuperseded}
+func telegramJobTerminalStatuses() []JobStatus {
+	return []JobStatus{telegramJobStatusSent, telegramJobStatusFailed, telegramJobStatusSuperseded}
 }
 
 const (
@@ -142,7 +142,7 @@ const (
 	telegramJobStatusSuperseded = "superseded"
 )
 
-var telegramJobAllowedTransitions = map[string]map[string]struct{}{
+var telegramJobAllowedTransitions = map[JobStatus]map[JobStatus]struct{}{
 	telegramJobStatusPending: {
 		telegramJobStatusSending: {}, telegramJobStatusRetryWait: {}, telegramJobStatusConfirming: {}, telegramJobStatusSent: {},
 		telegramJobStatusFailed: {}, telegramJobStatusSuperseded: {},
@@ -169,24 +169,26 @@ var telegramJobAllowedTransitions = map[string]map[string]struct{}{
 }
 
 type telegramJobTransition struct {
-	JobId         int64
-	From          []string
-	To            string
-	RetryDelay    time.Duration
-	ErrorMessage  string
-	Additional    g.Map
-	SendPhases    []string
-	UpdatedBefore *gtime.Time
-	NotExpiredAt  *gtime.Time
+	JobId          int64
+	From           []JobStatus
+	To             JobStatus
+	RetryDelay     time.Duration
+	ErrorMessage   string
+	Additional     g.Map
+	SendPhases     []SendPhase
+	DispatchStatus *DispatchStatus
+	SendPhase      *SendPhase
+	UpdatedBefore  *gtime.Time
+	NotExpiredAt   *gtime.Time
 }
 
-func validateTelegramJobTransition(from []string, to string) error {
-	to = strings.TrimSpace(to)
+func validateTelegramJobTransition(from []JobStatus, to JobStatus) error {
+	to = JobStatus(strings.TrimSpace(to.String()))
 	if to == "" || len(from) == 0 {
 		return gerror.New("TG任务状态迁移参数不完整")
 	}
 	for _, source := range from {
-		source = strings.TrimSpace(source)
+		source = JobStatus(strings.TrimSpace(source.String()))
 		if source == "" {
 			return gerror.New("TG任务来源状态不能为空")
 		}
@@ -218,7 +220,7 @@ func (s *sSysPublish) transitionTelegramJob(ctx context.Context, in telegramJobT
 	result, err := transitionTelegramJobModel(model, in, data)
 	stage.End(err)
 	if err != nil {
-		return false, gerror.Wrapf(err, "TG任务状态迁移失败：%s -> %s", strings.Join(from, ","), in.To)
+		return false, gerror.Wrapf(err, "TG任务状态迁移失败：%s -> %s", strings.Join(jobStatusStrings(from), ","), in.To)
 	}
 	affected, err := result.RowsAffected()
 	beginTelegramPublishStage(ctx, "job.state_transition_result").End(err, g.Map{"jobId": in.JobId, "fromStatus": in.From, "toStatus": in.To, "affectedRows": affected})
@@ -240,7 +242,7 @@ func (s *sSysPublish) transitionTelegramJobTx(ctx context.Context, tx gdb.TX, in
 		Where("id", in.JobId).WhereIn("status", from)
 	result, err := transitionTelegramJobModel(model, in, data)
 	if err != nil {
-		return false, gerror.Wrapf(err, "事务内TG任务状态迁移失败：%s -> %s", strings.Join(from, ","), in.To)
+		return false, gerror.Wrapf(err, "事务内TG任务状态迁移失败：%s -> %s", strings.Join(jobStatusStrings(from), ","), in.To)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
@@ -262,7 +264,7 @@ func (s *sSysPublish) transitionTelegramJobsTx(ctx context.Context, tx gdb.TX, j
 		WhereIn("id", jobIds).WhereIn("status", from)
 	result, err := transitionTelegramJobModel(model, in, data)
 	if err != nil {
-		return 0, gerror.Wrapf(err, "事务内批量TG任务状态迁移失败：%s -> %s", strings.Join(from, ","), in.To)
+		return 0, gerror.Wrapf(err, "事务内批量TG任务状态迁移失败：%s -> %s", strings.Join(jobStatusStrings(from), ","), in.To)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
@@ -302,7 +304,7 @@ func (s *sSysPublish) transitionTelegramJobs(ctx context.Context, jobIds []int64
 		ChannelId    int64  `orm:"channel_id"`
 		TargetChatId string `orm:"target_chat_id"`
 	}
-	if strings.TrimSpace(in.To) == telegramJobStatusSuperseded {
+	if strings.TrimSpace(in.To.String()) == telegramJobStatusSuperseded {
 		if scanErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 			WhereIn("id", jobIds).
 			WhereIn("status", from).
@@ -315,13 +317,13 @@ func (s *sSysPublish) transitionTelegramJobs(ctx context.Context, jobIds []int64
 		WhereIn("id", jobIds).WhereIn("status", from)
 	result, err := transitionTelegramJobModel(model, in, data)
 	if err != nil {
-		return 0, gerror.Wrapf(err, "批量TG任务状态迁移失败：%s -> %s", strings.Join(from, ","), in.To)
+		return 0, gerror.Wrapf(err, "批量TG任务状态迁移失败：%s -> %s", strings.Join(jobStatusStrings(from), ","), in.To)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
 		return 0, gerror.Wrap(err, "确认批量TG任务状态迁移结果失败")
 	}
-	if affected == 0 || strings.TrimSpace(in.To) != telegramJobStatusSuperseded {
+	if affected == 0 || strings.TrimSpace(in.To.String()) != telegramJobStatusSuperseded {
 		return affected, nil
 	}
 	// 状态迁移与后处理之间可能有并发 Worker 改写同一批 Job；
@@ -385,25 +387,50 @@ func (s *sSysPublish) transitionTelegramJobs(ctx context.Context, jobIds []int64
 	return affected, nil
 }
 
-func telegramJobTransitionUpdate(in telegramJobTransition) ([]string, g.Map, error) {
+func telegramJobTransitionUpdate(in telegramJobTransition) ([]JobStatus, g.Map, error) {
 	if err := validateTelegramJobTransition(in.From, in.To); err != nil {
 		return nil, nil, err
 	}
-	from := append([]string(nil), in.From...)
-	for index := range from {
-		from[index] = strings.TrimSpace(from[index])
+	for _, phase := range in.SendPhases {
+		if !phase.Valid() {
+			return nil, nil, gerror.New("TG来源发送阶段不合法")
+		}
 	}
-	sort.Strings(from)
+	from := append([]JobStatus(nil), in.From...)
+	for i := range from {
+		from[i] = JobStatus(strings.TrimSpace(from[i].String()))
+	}
+	sort.Slice(from, func(i, j int) bool { return from[i] < from[j] })
 	now := gtime.Now()
-	data := telegramJobStateUpdateData(strings.TrimSpace(in.To), in.RetryDelay, now)
+	data := telegramJobStateUpdateData(strings.TrimSpace(in.To.String()), in.RetryDelay, now)
 	if in.ErrorMessage != "" || in.To == telegramJobStatusSent {
 		data["error_message"] = strings.TrimSpace(in.ErrorMessage)
 	}
 	for field, value := range in.Additional {
-		if strings.EqualFold(strings.TrimSpace(field), "status") {
-			return nil, nil, gerror.New("TG任务附加更新字段不能包含status")
+		switch strings.ToLower(strings.TrimSpace(field)) {
+		case "status", "dispatch_status", "send_phase":
+			return nil, nil, gerror.Newf("TG任务附加更新字段不能包含受保护状态列 %s", field)
 		}
 		data[field] = value
+	}
+	if in.DispatchStatus != nil {
+		if !in.DispatchStatus.Valid() {
+			return nil, nil, gerror.New("TG调度状态不合法")
+		}
+		data["dispatch_status"] = in.DispatchStatus.String()
+	}
+	if in.SendPhase != nil {
+		if !in.SendPhase.Valid() {
+			return nil, nil, gerror.New("TG发送阶段不合法")
+		}
+		data["send_phase"] = in.SendPhase.String()
+	}
+	dispatch, ok := data["dispatch_status"].(string)
+	if !ok {
+		return nil, nil, gerror.New("TG调度状态写入类型不合法")
+	}
+	if in.To.IsTerminal() && DispatchStatus(dispatch) != DispatchStatusDone {
+		return nil, nil, gerror.New("TG终态任务必须完成调度")
 	}
 	// This summary is varchar(512), unlike the full error_message text field.
 	// An oversized driver error must never prevent a sending job from settling.

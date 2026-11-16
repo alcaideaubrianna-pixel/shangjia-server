@@ -1,0 +1,2531 @@
+[
+  {
+    "file": "addons/youban_publish/devtools/publish_chain/main.go",
+    "function": "<imports>",
+    "rule": "redis-import",
+    "expression": "_ \"github.com/gogf/gf/contrib/nosql/redis/v2\"",
+    "digest": "d08d11ff197df1ebfcb007da82cd483b9d029881602e9446ec709f53be775288",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/library/accountschedule/queue.go",
+    "function": "*Queue.Ack",
+    "rule": "redis-primitive",
+    "expression": "q.client.GroupScript().Eval(ctx, ackScript, 4, q.keys, []interface{}{c.Scope.Member(), c.Token, c.Generation, int(outcome)})",
+    "digest": "00fa5ddeafbd0e08aa7fef162d3b6ced9f703e93c043136732dc40d5e6fc9474",
+    "count": 1,
+    "reason": "Existing infrastructure adapter owns this exact Redis primitive; callers must use its public queue/index API."
+  },
+  {
+    "file": "addons/youban_publish/library/accountschedule/queue.go",
+    "function": "*Queue.Ack",
+    "rule": "redis-primitive",
+    "expression": "q.client.GroupScript()",
+    "digest": "29c8e2ba16bd153536474539911a14c43b78ecfe654cd36e7281a71eae94e81c",
+    "count": 1,
+    "reason": "Existing infrastructure adapter owns this exact Redis primitive; callers must use its public queue/index API."
+  },
+  {
+    "file": "addons/youban_publish/library/accountschedule/queue.go",
+    "function": "*Queue.Claim",
+    "rule": "redis-primitive",
+    "expression": "q.client.GroupScript().Eval(ctx, claimScript, 4, q.keys, []interface{}{guid.S(), lease.Milliseconds()})",
+    "digest": "27663aa0685ed9be756ad3a6cde6590a6a2e37e5037f64cde483a03bb3a36180",
+    "count": 1,
+    "reason": "Existing infrastructure adapter owns this exact Redis primitive; callers must use its public queue/index API."
+  },
+  {
+    "file": "addons/youban_publish/library/accountschedule/queue.go",
+    "function": "*Queue.Claim",
+    "rule": "redis-primitive",
+    "expression": "q.client.GroupScript()",
+    "digest": "29c8e2ba16bd153536474539911a14c43b78ecfe654cd36e7281a71eae94e81c",
+    "count": 1,
+    "reason": "Existing infrastructure adapter owns this exact Redis primitive; callers must use its public queue/index API."
+  },
+  {
+    "file": "addons/youban_publish/library/accountschedule/queue.go",
+    "function": "*Queue.Mark",
+    "rule": "redis-primitive",
+    "expression": "q.client.GroupScript().Eval(ctx, markScript, 4, q.keys, []interface{}{s.Member(), int(w)})",
+    "digest": "1a1bcaaf8ee045e0410bdec10c83b66f226e26591f3599f2978b40a35110ae49",
+    "count": 1,
+    "reason": "Existing infrastructure adapter owns this exact Redis primitive; callers must use its public queue/index API."
+  },
+  {
+    "file": "addons/youban_publish/library/accountschedule/queue.go",
+    "function": "*Queue.Mark",
+    "rule": "redis-primitive",
+    "expression": "q.client.GroupScript()",
+    "digest": "29c8e2ba16bd153536474539911a14c43b78ecfe654cd36e7281a71eae94e81c",
+    "count": 1,
+    "reason": "Existing infrastructure adapter owns this exact Redis primitive; callers must use its public queue/index API."
+  },
+  {
+    "file": "addons/youban_publish/library/accountschedule/queue.go",
+    "function": "*Queue.Schedule",
+    "rule": "redis-primitive",
+    "expression": "q.client.GroupScript()",
+    "digest": "29c8e2ba16bd153536474539911a14c43b78ecfe654cd36e7281a71eae94e81c",
+    "count": 1,
+    "reason": "Existing infrastructure adapter owns this exact Redis primitive; callers must use its public queue/index API."
+  },
+  {
+    "file": "addons/youban_publish/library/accountschedule/queue.go",
+    "function": "*Queue.Schedule",
+    "rule": "redis-primitive",
+    "expression": "q.client.GroupScript().Eval(ctx, scheduleScript, 4, q.keys, []interface{}{scope.Member(), at.UnixMilli()})",
+    "digest": "8cc89cc47fc89da7d8ef4a1519a05ea6093867abaed721aa88c74bfd00a3fcb9",
+    "count": 1,
+    "reason": "Existing infrastructure adapter owns this exact Redis primitive; callers must use its public queue/index API."
+  },
+  {
+    "file": "addons/youban_publish/library/accountschedule/queue.go",
+    "function": "<imports>",
+    "rule": "redis-import",
+    "expression": "\"github.com/gogf/gf/v2/database/gredis\"",
+    "digest": "c9ae87642cd29d3f09dc2dc5f701a6f724e90f01d2785a4bb417d203af1377ce",
+    "count": 1,
+    "reason": "Existing infrastructure adapter owns this exact Redis primitive; callers must use its public queue/index API."
+  },
+  {
+    "file": "addons/youban_publish/library/profilecycle/due_index.go",
+    "function": "*RedisDueIndex.Add",
+    "rule": "redis-primitive",
+    "expression": "i.client.Do(ctx, \"ZADD\", i.key, dueAt.UnixMilli(), runKey)",
+    "digest": "78d1ee9993f6dcd27be38dde8acb502e5ed028f07d97780c9302ba34daf6b812",
+    "count": 1,
+    "reason": "Existing infrastructure adapter owns this exact Redis primitive; callers must use its public queue/index API."
+  },
+  {
+    "file": "addons/youban_publish/library/profilecycle/due_index.go",
+    "function": "*RedisDueIndex.PopDue",
+    "rule": "redis-primitive",
+    "expression": "i.client.Do(ctx, \"ZRANGEBYSCORE\", i.key, \"-inf\", strconv.FormatInt(now.UnixMilli(), 10), \"LIMIT\", 0, limit)",
+    "digest": "a4481c7260a04fbaeab4591b9fc9bfb19d53edb73a18af93f85d5d189c055cc0",
+    "count": 1,
+    "reason": "Existing infrastructure adapter owns this exact Redis primitive; callers must use its public queue/index API."
+  },
+  {
+    "file": "addons/youban_publish/library/profilecycle/due_index.go",
+    "function": "*RedisDueIndex.Remove",
+    "rule": "redis-primitive",
+    "expression": "i.client.Do(ctx, \"ZREM\", i.key, runKey)",
+    "digest": "bcf0f36705acf4be11df56a169a5d2f54ce54d8df9a2e5f1c43e54463e8b35d2",
+    "count": 1,
+    "reason": "Existing infrastructure adapter owns this exact Redis primitive; callers must use its public queue/index API."
+  },
+  {
+    "file": "addons/youban_publish/library/streamgray/redis_group_command.go",
+    "function": "*RedisCommandGroupClient.Ack",
+    "rule": "redis-primitive",
+    "expression": "c.client.Do(ctx, \"XACK\", stream, group, entryID)",
+    "digest": "75e8ca1a17c3ba45d86f1ef732753c444a8af4e66311d52f3654f9f8557e3414",
+    "count": 1,
+    "reason": "Existing infrastructure adapter owns this exact Redis primitive; callers must use its public queue/index API."
+  },
+  {
+    "file": "addons/youban_publish/library/streamgray/redis_group_command.go",
+    "function": "*RedisCommandGroupClient.ClaimPending",
+    "rule": "redis-primitive",
+    "expression": "c.client.Do(ctx, \"XAUTOCLAIM\", stream, group, consumer, minIdle.Milliseconds(), \"0-0\", \"COUNT\", count)",
+    "digest": "671035fb51c13aec71e2d983467b9e1ece7fe2d520f1cae8979917e302c622fa",
+    "count": 1,
+    "reason": "Existing infrastructure adapter owns this exact Redis primitive; callers must use its public queue/index API."
+  },
+  {
+    "file": "addons/youban_publish/library/streamgray/redis_group_command.go",
+    "function": "*RedisCommandGroupClient.CreateGroup",
+    "rule": "redis-primitive",
+    "expression": "c.client.Do(ctx, \"XGROUP\", \"CREATE\", stream, group, \"$\", \"MKSTREAM\")",
+    "digest": "f14c7a49ff6b496d376698db7fa5ad8b4e90c7a466749191cd976acd162c70ad",
+    "count": 1,
+    "reason": "Existing infrastructure adapter owns this exact Redis primitive; callers must use its public queue/index API."
+  },
+  {
+    "file": "addons/youban_publish/library/streamgray/redis_group_command.go",
+    "function": "*RedisCommandGroupClient.ReadGroup",
+    "rule": "redis-primitive",
+    "expression": "c.client.Do(ctx, \"XREADGROUP\", \"GROUP\", group, consumer, \"COUNT\", count, \"BLOCK\", block.Milliseconds(), \"STREAMS\", stream, startID)",
+    "digest": "05b0232c173489a8f08c8b434ecc88b503182c46fa502245e41e5f28444585a8",
+    "count": 1,
+    "reason": "Existing infrastructure adapter owns this exact Redis primitive; callers must use its public queue/index API."
+  },
+  {
+    "file": "addons/youban_publish/library/streamgray/redis_group_command.go",
+    "function": "NewRedisCommandGroupClientFromCache",
+    "rule": "redis-primitive",
+    "expression": "cache.RedisClient()",
+    "digest": "2454b51c1c4cb4a5b6a5ac2ebaea8ca497c4b327facc395f26c2795ffb85b2e9",
+    "count": 1,
+    "reason": "Existing infrastructure adapter owns this exact Redis primitive; callers must use its public queue/index API."
+  },
+  {
+    "file": "addons/youban_publish/library/streamgray/redis_producer.go",
+    "function": "*RedisProducer.Add",
+    "rule": "redis-primitive",
+    "expression": "p.client.Do(ctx, \"XADD\", stream, \"*\", \"payload\", string(body))",
+    "digest": "6142f95e158970849c243edb47800486be720f8a34168155418a8f8a8fdeaeda",
+    "count": 1,
+    "reason": "Existing infrastructure adapter owns this exact Redis primitive; callers must use its public queue/index API."
+  },
+  {
+    "file": "addons/youban_publish/library/streamgray/redis_producer.go",
+    "function": "NewRedisProducerFromCache",
+    "rule": "redis-primitive",
+    "expression": "cache.RedisClient()",
+    "digest": "2454b51c1c4cb4a5b6a5ac2ebaea8ca497c4b327facc395f26c2795ffb85b2e9",
+    "count": 1,
+    "reason": "Existing infrastructure adapter owns this exact Redis primitive; callers must use its public queue/index API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/account_schedule.go",
+    "function": "*sSysPublish.createAccountProfileCycle",
+    "rule": "state-map-write",
+    "expression": "\"status\": \"pending\"",
+    "digest": "273ea78abaf1a1c77dd5155093a9661c6d4a2462cccd875a270381586c226cda",
+    "count": 2,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/account_schedule.go",
+    "function": "*sSysPublish.enqueueAccountSchedules",
+    "rule": "redis-primitive",
+    "expression": "cache.RedisClient()",
+    "digest": "2454b51c1c4cb4a5b6a5ac2ebaea8ca497c4b327facc395f26c2795ffb85b2e9",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/account_schedule.go",
+    "function": "*sSysPublish.syncProfileCycleRunJob",
+    "rule": "state-map-write",
+    "expression": "\"status\": projectionStatus",
+    "digest": "3d0b292b9c13cbdd5dad22c62ab44c16301c0b0a3d16b6dcfd25119355003f27",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/account_schedule.go",
+    "function": "reconcileProfileCycleRunChannels",
+    "rule": "state-sql-write",
+    "expression": "` rc\n\tSET status=c.projection_status,\n\t\terror_message=c.error_message,\n\t\tupdated_at=NOW()\n\tFROM candidates c\n\tWHERE rc.id=c.id\n\tRETURNING rc.run_id`",
+    "digest": "3a0fe14ef89a5e00d4a7bbcc150df3b1700861aee2b8e574ce5ad61309d4d7c9",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/account_schedule.go",
+    "function": "reconcileTerminalTelegramOutboxes",
+    "rule": "state-sql-write",
+    "expression": "` o\n\tSET status='delivered', lease_owner='', lease_expires_at=NULL,\n\t    delivered_at=COALESCE(o.delivered_at,NOW()), last_error='', updated_at=NOW()\n\tFROM candidates c\n\tWHERE o.id=c.id`",
+    "digest": "18870713c9c9c002bd6894bef7b58e6847e00c019d30ea6306add2ebf065f881",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/account_schedule_redis.go",
+    "function": "accountScheduleRedis",
+    "rule": "redis-primitive",
+    "expression": "cache.RedisClient()",
+    "digest": "2454b51c1c4cb4a5b6a5ac2ebaea8ca497c4b327facc395f26c2795ffb85b2e9",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/ai_ops_repair_plan.go",
+    "function": "*sSysPublish.AIOpsCreateRepairPlan",
+    "rule": "state-map-write",
+    "expression": "\"status\": \"pending\"",
+    "digest": "273ea78abaf1a1c77dd5155093a9661c6d4a2462cccd875a270381586c226cda",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/ai_ops_telegram_offline.go",
+    "function": "*sSysPublish.resolveAIOpsOfflineMessage",
+    "rule": "state-map-write",
+    "expression": "\"status\": \"sent\"",
+    "digest": "883f2325aa73b0c8087e99e1435601fda5954ea7349c275d7229727b542742cf",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/anti_scan_aliyun_matting.go",
+    "function": "aliyunSegmentBodyFromURL",
+    "rule": "redis-primitive",
+    "expression": "aliyunResultHTTPClient.Do(request)",
+    "digest": "51eca88d1b6d4a81cc28ef5941d96b268ca45d320e7ccfc00a9c25ffb3426834",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/anti_scan_background.go",
+    "function": "embeddedRabbitBackground",
+    "rule": "redis-primitive",
+    "expression": "defaultRabbitTextureImage.Do(func() {\n\timg, _, err := image.Decode(bytes.NewReader(defaultRabbitTexture))\n\tif err == nil {\n\t\tdefaultRabbitTextureImage.image = img\n\t}\n})",
+    "digest": "3d42573b76aa0eafdcb5b5db05ccb28eb6f0747eb0fb3b974d64d799fa83de6a",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/anti_scan_background.go",
+    "function": "readTextureImageBytes",
+    "rule": "redis-primitive",
+    "expression": "client.Do(request)",
+    "digest": "e9252ceeec67c8172c9229bec70caff24d4c8c7a1091c3cff35f9a8fc8e564c2",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/anti_scan_facepp_matting.go",
+    "function": "facePPPortraitMatting",
+    "rule": "redis-primitive",
+    "expression": "facePPHTTPClient.Do(req)",
+    "digest": "5e04b17ccf66be7bf33132079a1d3b256f315a8bff4b70118eaff46ca1e24613",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/anti_scan_fapihub.go",
+    "function": "*fapiHubClient.removeBackground",
+    "rule": "redis-primitive",
+    "expression": "fapiHubHTTPClient.Do(req)",
+    "digest": "9c0d9cc14917361050449aabc73b9209894922e21e3f4d5981c6586962798296",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/anti_scan_preview.go",
+    "function": "*sSysPublish.getOrCreateAntiScanMatting",
+    "rule": "redis-primitive",
+    "expression": "antiScanMattingGroup.Do(key, func() (interface{}, error) {\n\tif cached, ok := s.getAntiScanSegmentCache(ctx, imageHash, provider); ok {\n\t\treturn antiScanMattingResult{SegmentRaw: cached.SegmentRaw}, nil\n\t}\n\tdistributedLock := lock.NewConfig(2*time.Minute, 100*time.Millisecond).Mutex(\"youban_publish:anti_scan:matting:\" + key)\n\tif lockErr := distributedLock.Lock(ctx); lockErr != nil {\n\t\treturn nil, gerror.Wrap(lockErr, \"等待云端抠图任务失败\")\n\t}\n\tdefer func() { _ = distributedLock.Unlock(context.Background()) }()\n\tif cached, ok := s.getAntiScanSegmentCache(ctx, imageHash, provider); ok {\n\t\treturn antiScanMattingResult{SegmentRaw: cached.SegmentRaw}, nil\n\t}\n\tsegmentRaw, createErr := s.createAntiScanMatting(ctx, imageHash, imageBytes, conf, usageOwner, provider)\n\treturn antiScanMattingResult{SegmentRaw: segmentRaw, CreatorToken: requestToken}, createErr\n})",
+    "digest": "5e6fc1588c422e9bad1d4b4cd44f9b32b33ef8fcaed51255aa085be2caeaa6ab",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/anti_scan_render.go",
+    "function": "loadAntiScanSticker",
+    "rule": "redis-primitive",
+    "expression": "client.Do(req)",
+    "digest": "a9d632b79c6e9605fce18d2b5a89bf40e34c26918706d178299984397c4224ae",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/anti_scan_render.go",
+    "function": "readAntiScanRemoteImage",
+    "rule": "redis-primitive",
+    "expression": "fapiHubHTTPClient.Do(req)",
+    "digest": "9c0d9cc14917361050449aabc73b9209894922e21e3f4d5981c6586962798296",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/anti_scan_watermark.go",
+    "function": "newWatermarkFontFace",
+    "rule": "redis-primitive",
+    "expression": "watermarkFontOnce.Do(func() {\n\twatermarkFont = loadWatermarkFont()\n})",
+    "digest": "62c4b828aec0a9c1aef1454d0e0c58af4736f9891549aa1b18ce8956d438a66f",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/channel_clear_queue.go",
+    "function": "*sSysPublish.clearTelegramChannelQueue",
+    "rule": "redis-primitive",
+    "expression": "g.Redis()",
+    "digest": "7feeb0cf0fbac2f0815e8deed2d7e589b091958de713e38235597ed975061fdb",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/channel_clear_queue.go",
+    "function": "*sSysPublish.clearTelegramChannelQueue",
+    "rule": "redis-primitive",
+    "expression": "g.Redis().Do(ctx, \"ZREM\", append([]interface{}{telegramChannelQueueKey(channelId)}, members...)...)",
+    "digest": "dc4c8e5d71c41325029ec61a1d6d38f80ae8c891ff926c1bc2350e001a4c68f2",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/channel_clear_queue.go",
+    "function": "channelQueueClearStatuses",
+    "rule": "state-cast",
+    "expression": "JobStatus(\"unknown\")",
+    "digest": "b8f941306adb104031eaefbaefe255b28524abd002a596902a99c09274a343a4",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/channel_clear_queue.go",
+    "function": "channelQueueClearStatuses",
+    "rule": "state-cast",
+    "expression": "JobStatus(\"failed_retry\")",
+    "digest": "e4dc4393badd8a0fad55633c2898e394fe1ca573b181c15aefc3edd8094cf115",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/channel_clear_queue.go",
+    "function": "channelQueueClearStatuses",
+    "rule": "state-cast",
+    "expression": "JobStatus(\"pending\")",
+    "digest": "fb986efdb799476cfb828815a0f6e3229df0e5b57ab534c9de5dc8bf2ad22027",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/channel_profile.go",
+    "function": "*sSysPublish.upsertChannelProfileFromJobTx",
+    "rule": "state-map-write",
+    "expression": "\"status\": \"active\"",
+    "digest": "72fd1eeeb22c6e6f55b5ed7b7165c73b7bf982108bece0df0d2eaa9f43756318",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/collect_event.go",
+    "function": "*sSysPublish.fillCollectEventRouting",
+    "rule": "state-selector-write",
+    "expression": "item.DispatchStatus = r.Dispatch",
+    "digest": "35ffcb25d86113d8ccfbdfc98ee9f49c3e5c4a8671948402880ec538726dfd8f",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/collect_material_window.go",
+    "function": "*sSysPublish.findStoredCollectDisplayEvent",
+    "rule": "redis-primitive",
+    "expression": "cache.ZSetRangeByScore(ctx, collectSourceHistoryCursorKey(verify[\"tenant_id\"].Int64(), verify[\"account_id\"].Int64(), verify[\"source_id\"].Int64(), verify[\"source_chat_id\"].String()), 0, float64(messageID-1), 200)",
+    "digest": "bf5c18fad85e4e60d89c52d8f7bb80000895f2ab5b326766f3a76b3997a2ea87",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/collect_process_outbox.go",
+    "function": "*sSysPublish.dispatchDueCollectProcessOutbox",
+    "rule": "state-map-write",
+    "expression": "\"status\": \"pending\"",
+    "digest": "273ea78abaf1a1c77dd5155093a9661c6d4a2462cccd875a270381586c226cda",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/collect_process_outbox.go",
+    "function": "completeCollectProcessOutbox",
+    "rule": "state-map-write",
+    "expression": "\"status\": \"pending\"",
+    "digest": "273ea78abaf1a1c77dd5155093a9661c6d4a2462cccd875a270381586c226cda",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/collect_process_queue.go",
+    "function": "collectProcessCandidateIDs",
+    "rule": "redis-primitive",
+    "expression": "cache.ZSetRange(ctx, collectProcessCandidateIndexKey(payload), 0, limit-1)",
+    "digest": "76db5bc593de1b9e773c1392c3e5849cf3d8bcc2e548bae6e3b6aee6118b68ce",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/collect_process_queue.go",
+    "function": "collectProcessCandidateIndexReady",
+    "rule": "redis-primitive",
+    "expression": "cache.RedisClient()",
+    "digest": "2454b51c1c4cb4a5b6a5ac2ebaea8ca497c4b327facc395f26c2795ffb85b2e9",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/collect_process_queue.go",
+    "function": "collectProcessCandidateIndexReady",
+    "rule": "redis-primitive",
+    "expression": "client.Do(ctx, \"DEL\", collectProcessCandidateIndexKey(payload))",
+    "digest": "59e22542b164fbf3edd0d5632ed1afed1e767499da7c8d663bdb14d6147e316d",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/collect_process_queue.go",
+    "function": "indexCollectProcessCandidate",
+    "rule": "redis-primitive",
+    "expression": "cache.ZSetAdd(ctx, key, float64(eventID), fmt.Sprintf(\"%d\", eventID))",
+    "digest": "e79827d8539ef61ca6268aac352be2e5dcfae0d72a6ee698a129aeb7835804bc",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/collect_process_queue.go",
+    "function": "indexCollectSourceHistoryCursor",
+    "rule": "redis-primitive",
+    "expression": "cache.ZSetAdd(ctx, collectSourceHistoryCursorKey(tenantID, accountID, sourceID, sourceChatID), float64(sourceMessageID), fmt.Sprintf(\"%d\", eventID))",
+    "digest": "4018acdcc025fc691dfc4113b865503367b6c7fc1a760796cfb19eb0a7552ab4",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/collect_process_queue.go",
+    "function": "markCollectProcessSourceActive",
+    "rule": "redis-primitive",
+    "expression": "cache.RedisClient()",
+    "digest": "2454b51c1c4cb4a5b6a5ac2ebaea8ca497c4b327facc395f26c2795ffb85b2e9",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/collect_process_queue.go",
+    "function": "markCollectProcessSourceActive",
+    "rule": "redis-primitive",
+    "expression": "client.Do(ctx, \"SET\", wakeLockKey, \"1\", \"NX\", \"EX\", 30)",
+    "digest": "4a7e231a87e4ed262b34ecd0a23ffb20d2aa8bfdd42f9859057654bdba0aba3d",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/collect_process_queue.go",
+    "function": "markCollectProcessSourceActive",
+    "rule": "redis-primitive",
+    "expression": "client.Do(ctx, \"SADD\", collectProcessActiveSourcesKey, member)",
+    "digest": "67f9b1b639495ea4ac5785d0ecda2423f681b0205bf12dec150fa5b6f5e38ba7",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/collect_process_queue.go",
+    "function": "markCollectProcessSourceActive",
+    "rule": "redis-primitive",
+    "expression": "client.Do(ctx, \"LPUSH\", collectProcessSourceWakeQueueKey(member), member)",
+    "digest": "ab36f60310c027be5a25c67bf116d4f51f9324e180b9590831d6c7b78dfbaaaf",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/collect_process_queue.go",
+    "function": "removeCollectProcessCandidate",
+    "rule": "redis-primitive",
+    "expression": "cache.ZSetRemove(ctx, collectProcessCandidateIndexKey(payload), fmt.Sprintf(\"%d\", eventID))",
+    "digest": "36a49e2e2a0574961accc13700756b1b4069efae8d433ba397480551714729ff",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/collect_profile_dispatch.go",
+    "function": "*sSysPublish.resumeCollectProfileDispatch",
+    "rule": "state-map-write",
+    "expression": "\"status\": sysin.CollectDispatchStatusPending",
+    "digest": "df9532aceb48d350e273cef9df0437ac87eebf48b75ebd05628fcb8ccec0933b",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/collect_recovery.go",
+    "function": "*sSysPublish.reconcileCollectDispatchesFromSentJobs",
+    "rule": "state-map-write",
+    "expression": "\"status\": sysin.CollectEventStatusProcessed",
+    "digest": "b4cbf5bd5baac5228f84b0fb160af99c6732e3edd05f5397a32c20daf1929639",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/collect_recovery.go",
+    "function": "*sSysPublish.reconcileCollectDispatchesFromSentJobs",
+    "rule": "state-map-write",
+    "expression": "\"status\": sysin.CollectDispatchStatusSent",
+    "digest": "da701314bbe0e5eed9a1b61190dbdf7936e1c8a3ff44e1391583abbba8d52ce5",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/collect_recovery.go",
+    "function": "activeCollectProcessScopes",
+    "rule": "redis-primitive",
+    "expression": "cache.RedisClient()",
+    "digest": "2454b51c1c4cb4a5b6a5ac2ebaea8ca497c4b327facc395f26c2795ffb85b2e9",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/collect_recovery.go",
+    "function": "activeCollectProcessScopes",
+    "rule": "redis-primitive",
+    "expression": "client.Do(ctx, \"SMEMBERS\", collectProcessActiveSourcesKey)",
+    "digest": "e3ebf82be8f2d5d275acad24d3d69630eedc76c23b12068acb085b4210fc9434",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/cycle_plan.go",
+    "function": "*sSysPublish.repairAccountCyclePlans",
+    "rule": "redis-primitive",
+    "expression": "cache.RedisClient()",
+    "digest": "2454b51c1c4cb4a5b6a5ac2ebaea8ca497c4b327facc395f26c2795ffb85b2e9",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/cycle_plan.go",
+    "function": "*sSysPublish.repairAccountCyclePlans",
+    "rule": "redis-primitive",
+    "expression": "client.GroupHash()",
+    "digest": "461a3845083da52176c6b37302505c0708dc7e28962b17bd9e7a96a430a85af9",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/cycle_plan.go",
+    "function": "*sSysPublish.repairAccountCyclePlans",
+    "rule": "redis-primitive",
+    "expression": "cache.ZSetRange(ctx, dirtyKey, 0, 0)",
+    "digest": "7576575fbb4a8b396f1d4670f2bb2bd1a7b40cd1710a49ec98354f1e93adc8c6",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/cycle_plan.go",
+    "function": "*sSysPublish.repairAccountCyclePlans",
+    "rule": "redis-primitive",
+    "expression": "cache.ZSetRemove(ctx, dirtyKey, members[0])",
+    "digest": "c3c8c2fb055a58f1c1ce483970e47ca5c3846a2b5093c0ad5f4bf49bc809f87e",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/cycle_plan.go",
+    "function": "*sSysPublish.repairAccountCyclePlans",
+    "rule": "redis-primitive",
+    "expression": "client.GroupScript().Eval(ctx, `if tonumber(redis.call(\"HGET\",KEYS[2],ARGV[1]) or \"0\")==tonumber(ARGV[2]) then redis.call(\"ZREM\",KEYS[1],ARGV[1]); redis.call(\"HDEL\",KEYS[2],ARGV[1]); return 1 end return 0`, 2, []string{dirtyKey, dirtyKey + \":versions\"}, []interface{}{strconv.FormatInt(checkpoint.Channel, 10), checkpoint.Version})",
+    "digest": "ce6f4c9b94736b9f33361e37d7054cd3cefe8b06f81674cc6969a44bce3146b7",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/cycle_plan.go",
+    "function": "*sSysPublish.repairAccountCyclePlans",
+    "rule": "redis-primitive",
+    "expression": "client.GroupScript()",
+    "digest": "d04f9cc9609869842d7ef9d27d8b4e1364b77d1110b2c55ae7e2c0627edc9914",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/cycle_profile_schedule.go",
+    "function": "*sSysPublish.accountProfileCycleDueRows",
+    "rule": "redis-primitive",
+    "expression": "cache.ZSetRemove(ctx, key, profileCycleDueMember(id))",
+    "digest": "4e8c73801fd36434e89d2aa4b412965b35c5905f59da8596c11348b5b456cccd",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/cycle_profile_schedule.go",
+    "function": "*sSysPublish.accountProfileCycleDueRows",
+    "rule": "redis-primitive",
+    "expression": "cache.ZSetRemove(ctx, key, member)",
+    "digest": "a055b6810fce394c25811401d1eeae36db4a94ef7f45d661b2b8092aeca38014",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/cycle_profile_schedule.go",
+    "function": "*sSysPublish.accountProfileCycleDueRows",
+    "rule": "redis-primitive",
+    "expression": "cache.ZSetRangeByScore(ctx, key, 0, float64(time.Now().Unix()), 20)",
+    "digest": "d194c5a092e9596b3e98e42797bc2765b03f82ff23ea2ac0222be0f653e94ec0",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/cycle_profile_schedule.go",
+    "function": "*sSysPublish.profileCycleDueRowsShard",
+    "rule": "redis-primitive",
+    "expression": "cache.ZSetRangeByScore(ctx, profileCycleDueZSetKey, 0, float64(time.Now().Unix()), limit)",
+    "digest": "0f7948094adb59013b74531e27d4864e1d5283a44df183ea04f2a1a77b4fec30",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/cycle_profile_schedule.go",
+    "function": "*sSysPublish.runProfileCycleDueScan",
+    "rule": "redis-primitive",
+    "expression": "cache.ZSetRangeByScore(ctx, profileCycleDueZSetKey, 0, float64(time.Now().Unix()), profileCycleMaxProducePerRun)",
+    "digest": "36c825494607bd81998cced2df5c78ae1ea1f85a1ea54b4dd90032d900006b6b",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/cycle_profile_schedule.go",
+    "function": "indexAccountProfileCycleDue",
+    "rule": "redis-primitive",
+    "expression": "cache.ZSetAdd(ctx, accountProfileCycleDueKey(scope), float64(nextAt.Unix()), profileCycleDueMember(jobID))",
+    "digest": "8d5f4bb1c7f5d2cfb6eeb85d73aeefd5b55b5ef578504fe1918827cbf630679a",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/cycle_profile_schedule.go",
+    "function": "indexProfileCycleDue",
+    "rule": "redis-primitive",
+    "expression": "cache.ZSetAdd(ctx, profileCycleDueZSetKey, float64(nextAt.Unix()), profileCycleDueMember(jobId))",
+    "digest": "4c3d6167bfc5c07343e2c1506801cd1f9284706a7a46ed5ab5b75f45b782d32e",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/cycle_profile_schedule.go",
+    "function": "markAccountCycleRepairChannel",
+    "rule": "redis-primitive",
+    "expression": "cache.RedisClient()",
+    "digest": "2454b51c1c4cb4a5b6a5ac2ebaea8ca497c4b327facc395f26c2795ffb85b2e9",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/cycle_profile_schedule.go",
+    "function": "markAccountCycleRepairChannel",
+    "rule": "redis-primitive",
+    "expression": "client.GroupScript()",
+    "digest": "d04f9cc9609869842d7ef9d27d8b4e1364b77d1110b2c55ae7e2c0627edc9914",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/cycle_profile_schedule.go",
+    "function": "markAccountCycleRepairChannel",
+    "rule": "redis-primitive",
+    "expression": "client.GroupScript().Eval(ctx, `redis.call(\"HINCRBY\",KEYS[2],ARGV[1],1); redis.call(\"ZADD\",KEYS[1],\"NX\",ARGV[2],ARGV[1]); return 1`, 2, []string{key, key + \":versions\"}, []interface{}{strconv.FormatInt(channelID, 10), time.Now().UnixMilli()})",
+    "digest": "e1dc1f87e7d2390b26d565a1a1c0e4d73aeae017039f5dfd1ad3deedc6328ec9",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/cycle_profile_schedule.go",
+    "function": "removeProfileCycleDue",
+    "rule": "redis-primitive",
+    "expression": "cache.ZSetRemove(ctx, profileCycleDueZSetKey, profileCycleDueMember(jobId))",
+    "digest": "7394435a89e328dc844641cec32d3991a78fc723acf039646fc3af2111690edc",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/cycle_run.go",
+    "function": "*sSysPublish.reconcileRecoveredChannelCycleRuns",
+    "rule": "state-sql-write",
+    "expression": "` source\n\t\t\tSET status='superseded', dispatch_status=?, next_retry_at=NULL,\n\t\t\t\tlast_dispatch_error=?, updated_at=NOW()\n\t\t\tWHERE source.status='failed' AND source.operation_no LIKE ?\n\t\t\t\tAND EXISTS (\n\t\t\t\t\tSELECT 1 FROM `",
+    "digest": "e5b039b4abcedc91255f0fe8a9bef69acfbc2cd6c6ea8daa6e6e20d939f625af",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/cycle_run.go",
+    "function": "*sSysPublish.supersedeOfflineCycleJobs",
+    "rule": "state-sql-write",
+    "expression": "` o SET status='delivered',lease_owner='',lease_expires_at=NULL,delivered_at=COALESCE(delivered_at,NOW()),last_error='循环任务已明确收口',updated_at=NOW() FROM `",
+    "digest": "e5666c91e418789d1220ed95228e8e75174fbeb7c79135517bccb61315412770",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/dashboard_query.go",
+    "function": "*sSysPublish.dashboardTaskCounts",
+    "rule": "state-cast",
+    "expression": "sysin.PublishTaskStatus(row.Status)",
+    "digest": "9f3289e83773bb020695c04aaf93b0eb3c2620257c3419ac1ef9065e334761ed",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/dashboard_query.go",
+    "function": "buildDashboardPublishTrend",
+    "rule": "state-cast",
+    "expression": "sysin.PublishTaskStatus(row.Status)",
+    "digest": "9f3289e83773bb020695c04aaf93b0eb3c2620257c3419ac1ef9065e334761ed",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/import_run_match.go",
+    "function": "*sSysPublish.ensureImportMatchTgMessage",
+    "rule": "state-map-write",
+    "expression": "\"status\": \"sent\"",
+    "digest": "883f2325aa73b0c8087e99e1435601fda5954ea7349c275d7229727b542742cf",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/material_import_tg_index.go",
+    "function": "*sSysPublish.ensureMaterialImportTelegramMessage",
+    "rule": "state-map-write",
+    "expression": "\"status\": \"sent\"",
+    "digest": "883f2325aa73b0c8087e99e1435601fda5954ea7349c275d7229727b542742cf",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/media_phash_bucket.go",
+    "function": "mediaPHashBucketCandidateRowsWithScopes",
+    "rule": "redis-primitive",
+    "expression": "mediaPHashBucketCandidateGroup.Do(cacheKey, func() (any, error) {\n\tif value, cacheErr := cache.Instance().Get(ctx, cacheKey); cacheErr == nil && !value.IsNil() {\n\t\tvar cached []mediaPHashBucketCandidateRow\n\t\tif scanErr := value.Scan(&cached); scanErr == nil {\n\t\t\treturn cached, nil\n\t\t}\n\t}\n\trows, queryErr := mediaPHashBucketCandidateRowsWithScopesUncached(ctx, normalizedHash, threshold, scopes, profileIds, mediaType, excludeProfileId)\n\tif queryErr != nil {\n\t\treturn nil, queryErr\n\t}\n\tif len(rows) <= mediaPHashBucketMaxCachedRows {\n\t\t_ = cache.Instance().Set(ctx, cacheKey, rows, mediaPHashBucketResultTTL)\n\t}\n\treturn rows, nil\n})",
+    "digest": "3ba11d88ab46bf8039fa43b255cb465cd452cf553ab5e1abb7a71ca87bb8314d",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/media_phash_lsh.go",
+    "function": "mediaPHashLshScanSmallScope",
+    "rule": "redis-primitive",
+    "expression": "mediaPHashLshScopeSizeGroup.Do(key, func() (interface{}, error) {\n\tvalue, err := cache.Instance().GetOrSetFunc(ctx, key, func(ctx context.Context) (interface{}, error) {\n\t\tfinish := scantrace.Begin(ctx, \"query.phash_scope_estimate\")\n\t\tvalue, err := g.DB().GetValue(ctx, \"EXPLAIN (FORMAT JSON) \"+branch, args...)\n\t\tfinish(err)\n\t\tif err != nil {\n\t\t\treturn nil, gerror.Wrap(err, \"估算扫图指纹查询范围失败\")\n\t\t}\n\t\tvar plans []struct {\n\t\t\tPlan struct {\n\t\t\t\tRows int64 `json:\"Plan Rows\"`\n\t\t\t} `json:\"Plan\"`\n\t\t}\n\t\tif err := json.Unmarshal(value.Bytes(), &plans); err != nil || len(plans) != 1 {\n\t\t\treturn nil, gerror.New(\"解析扫图指纹查询范围失败\")\n\t\t}\n\t\treturn plans[0].Plan.Rows <= mediaPHashLshScopeScanLimit, nil\n\t}, 30*time.Second)\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\treturn value.Bool(), nil\n})",
+    "digest": "f19aabbe655a9615c7a218e7a0876f1cd68f97c3601efabfb2f8fb29168d6851",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/media_process_outbox.go",
+    "function": "claimMediaProcessDeliveries",
+    "rule": "state-sql-write",
+    "expression": "`WITH candidates AS (\n SELECT media_id FROM hg_youban_publish_media_process_outbox\n WHERE status IN ('pending','leased') AND available_at<=statement_timestamp()\n ORDER BY available_at,media_id LIMIT 50 FOR UPDATE SKIP LOCKED\n ) UPDATE hg_youban_publish_media_process_outbox o\n SET status='leased',lease_token=?,available_at=clock_timestamp()+interval '30 seconds',\n attempt_count=o.attempt_count+1,updated_at=clock_timestamp()\n FROM candidates c WHERE o.media_id=c.media_id\n RETURNING o.media_id,o.generation,o.attempt_count,o.bootstrap,o.task_id,o.lease_token`",
+    "digest": "e8b4799b4b58da551969ea6ed3c27e4250ecb8f24e72f79f3238dfe59dede8ef",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/media_process_outbox.go",
+    "function": "dispatchMediaProcessDeliveries",
+    "rule": "state-sql-write",
+    "expression": "`UPDATE hg_youban_publish_media_process_outbox\n SET status=?,lease_token='',last_error=?,updated_at=clock_timestamp()\n WHERE media_id=? AND generation=? AND status='leased' AND lease_token=?`",
+    "digest": "9eb00c2dfc4e3b7ad35eadbce34cb7a239231983432111c85ae8a05ac3b4993c",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/media_process_outbox.go",
+    "function": "dispatchMediaProcessDeliveries",
+    "rule": "state-sql-write",
+    "expression": "`UPDATE hg_youban_publish_media_process_outbox\n SET status='pending',lease_token='',available_at=clock_timestamp()+?*interval '1 second',last_error=?,updated_at=clock_timestamp()\n WHERE media_id=? AND generation=? AND status='leased' AND lease_token=?`",
+    "digest": "a57f39146708796c1c9b87535bceb6e1651897b8bacb64f1399d0bd6dd783e3d",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/media_process_queue.go",
+    "function": "*sSysPublish.postponeTelegramJobUntilMediaReady",
+    "rule": "state-map-write",
+    "expression": "\"dispatch_status\": tgDispatchStatusIdle",
+    "digest": "bc0f9c15e510a08b6c14ea1248d4f511753298c65c6a8a696e52d0c66d45d4ff",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/media_process_queue.go",
+    "function": "*sSysPublish.settleWaitingProfileMediaFailure",
+    "rule": "state-cast",
+    "expression": "sysin.PublishTaskStatus(state[\"publish_task_status\"].String())",
+    "digest": "0600d5b20bef7916e4677c724e3dbb35240976972a11418dc1483a83faa5fa57",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/media_process_queue.go",
+    "function": "*sSysPublish.wakeProfileTelegramJobs",
+    "rule": "state-map-write",
+    "expression": "\"publish_task_status\": sysin.PublishTaskStatusPublishing.String()",
+    "digest": "289749d46fc66fc22c06bf190980e5b7d2512cf6d51de196a760d67753719cb0",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/media_process_queue.go",
+    "function": "*sSysPublish.wakeProfileTelegramJobs",
+    "rule": "state-map-write",
+    "expression": "\"publish_task_status\": sysin.PublishTaskStatusFailed.String()",
+    "digest": "6f6e97c7ca769e57cf8ca92be3a74de2da25a265bbff163421ef4d25f06e7ca4",
+    "count": 5,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/media_search_observe.go",
+    "function": "initBotMediaSearchMetrics",
+    "rule": "redis-primitive",
+    "expression": "botMediaSearchMetricsOnce.Do(func() {\n\tmeter := otel.Meter(\"hotgo/addons/youban_publish/media_search\")\n\tbotMediaSearchStageCount, _ = meter.Int64Counter(\"xiaohuiji.bot.scan.fingerprint.stage.duration.count\")\n\tbotMediaSearchStageSum, _ = meter.Float64Counter(\"xiaohuiji.bot.scan.fingerprint.stage.duration.sum\", metric.WithUnit(\"s\"))\n\tbotMediaDownloadRequests, _ = meter.Int64Counter(\"xiaohuiji.bot.scan.image_fetch.requests\")\n\tbotMediaDownloadDuration, _ = meter.Float64Histogram(\"xiaohuiji.bot.scan.image_fetch.duration_seconds\", metric.WithUnit(\"s\"))\n\tbotMediaDownloadBytes, _ = meter.Int64Histogram(\"xiaohuiji.bot.scan.image_fetch.bytes\", metric.WithUnit(\"By\"))\n})",
+    "digest": "e17b1b354c68c2d238a4b3551920db1470329b79701fe7dd1a5be710f5b8a01a",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/media_similarity_count.go",
+    "function": "*sSysPublish.cachedMediaSimilarCount",
+    "rule": "redis-primitive",
+    "expression": "mediaSimilarCountGroup.Do(cacheKey, func() (any, error) {\n\tif value, cacheErr := cache.Instance().Get(ctx, cacheKey); cacheErr == nil && !value.IsNil() {\n\t\treturn value.Int(), nil\n\t}\n\tcount, countErr := s.computeMediaSimilarCount(ctx, scope, source, threshold)\n\tif countErr != nil {\n\t\treturn 0, countErr\n\t}\n\t_ = cache.Instance().Set(ctx, cacheKey, count, mediaSimilarCountCacheTTL)\n\treturn count, nil\n})",
+    "digest": "c8d05afc9fb1e777b1db17156e2800b053e09418de26b99aad6fb6107c1ac02e",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/message_push_sender.go",
+    "function": "*sSysPublish.SendMessagePushJob",
+    "rule": "state-map-write",
+    "expression": "\"dispatch_status\": tgDispatchStatusIdle",
+    "digest": "bc0f9c15e510a08b6c14ea1248d4f511753298c65c6a8a696e52d0c66d45d4ff",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/message_push_sender.go",
+    "function": "*sSysPublish.createMessagePushJobWithOperation",
+    "rule": "state-cast",
+    "expression": "DispatchStatus(dispatchStatus)",
+    "digest": "993ac9483fc10ab8d91849dc1a4b1754327e1e16196a9f08024143f4705d1d4b",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/message_push_sender.go",
+    "function": "*sSysPublish.createMessagePushJobWithOperation",
+    "rule": "state-map-write",
+    "expression": "\"status\": sysin.MessagePushStatusPending",
+    "digest": "3ed487bb18136425b45437a7695430b033ab3d8cb6a518c0033dc470edcd57f1",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/message_push_sender.go",
+    "function": "*sSysPublish.createMessagePushJobWithOperation",
+    "rule": "state-map-write",
+    "expression": "\"dispatch_status\": dispatchStatus",
+    "digest": "8082fa31d3e69270f7036f5bc8da7274b835cdf44e46ed217274248425a99221",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/message_push_sender.go",
+    "function": "*sSysPublish.handleMessagePushQueuedJobError",
+    "rule": "state-cast",
+    "expression": "JobStatus(decision.Status)",
+    "digest": "afa78e3bdf7c95e4c4bba63da88c3f1e5528cb8db4249c33a3087b00a43a7aec",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/message_push_sender.go",
+    "function": "messagePushActiveStatuses",
+    "rule": "state-cast",
+    "expression": "JobStatus(sysin.MessagePushStatusPending)",
+    "digest": "075c0333dd7e7054c75ce4e153545ef807c38c12aef7d27b085b6a09e413b303",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/message_push_sender.go",
+    "function": "messagePushActiveStatuses",
+    "rule": "state-cast",
+    "expression": "JobStatus(\"sending\")",
+    "digest": "9a1bf59c98c2409f6f94ce6c9837d84a24571206396e916a090005ecd0e182c6",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/message_push_sender.go",
+    "function": "messagePushActiveStatuses",
+    "rule": "state-cast",
+    "expression": "JobStatus(\"failed_retry\")",
+    "digest": "e4dc4393badd8a0fad55633c2898e394fe1ca573b181c15aefc3edd8094cf115",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/ocr_document.go",
+    "function": "classifyTelegramDocumentByOCR",
+    "rule": "redis-primitive",
+    "expression": "http.DefaultClient.Do(req)",
+    "digest": "4264f70a25c55c75e69c9f5a46785bc5a40aff86e5d331890c1064ed8d22db0d",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/profile_bot.go",
+    "function": "*sSysPublish.BotProfilePersistMedia",
+    "rule": "state-cast",
+    "expression": "sysin.PublishTaskStatus(state[\"publish_task_status\"].String())",
+    "digest": "0600d5b20bef7916e4677c724e3dbb35240976972a11418dc1483a83faa5fa57",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/profile_cycle_cancel.go",
+    "function": "*sSysPublish.cancelProfileCycle",
+    "rule": "state-map-write",
+    "expression": "\"publish_task_status\": \"\"",
+    "digest": "608b20184e3acc5c32d20e7a7b71cfb80d96367162cf0653dcaaec2c4763f9dc",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/profile_cycle_cancel.go",
+    "function": "*sSysPublish.cancelProfileCycle",
+    "rule": "state-map-write",
+    "expression": "\"status\": \"superseded\"",
+    "digest": "7ec4bbfd71ee25221d36ab9428c8c9aafadcda43cf7267838ecfd312e54ea391",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/profile_cycle_cancel.go",
+    "function": "*sSysPublish.cancelProfileCycle",
+    "rule": "state-map-write",
+    "expression": "\"status\": \"canceled\"",
+    "digest": "ce779981ed4a631dfc7e8a87ed6eddb5d444fce2ec1d50bed73daa0e23510d38",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/profile_cycle_cancel.go",
+    "function": "*sSysPublish.clearProfilesUnpublishing",
+    "rule": "state-map-write",
+    "expression": "\"publish_task_status\": \"\"",
+    "digest": "608b20184e3acc5c32d20e7a7b71cfb80d96367162cf0653dcaaec2c4763f9dc",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/profile_cycle_cancel.go",
+    "function": "*sSysPublish.markProfilesUnpublishing",
+    "rule": "state-map-write",
+    "expression": "\"publish_task_status\": sysin.PublishTaskStatusUnpublishing.String()",
+    "digest": "7a06890c265a2dd750b3e0ed1ddba5bd58ce8dc39e6b1962a174616c623f1191",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/profile_down.go",
+    "function": "*sSysPublish.createDownChannelTelegramJob",
+    "rule": "state-map-write",
+    "expression": "\"dispatch_status\": tgDispatchStatusProcessing",
+    "digest": "99fcaa3a1cef71b83ab884e49d3eebed384c4b42e308a5c63d58432b10c92877",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/profile_down.go",
+    "function": "*sSysPublish.createDownChannelTelegramJob",
+    "rule": "state-map-write",
+    "expression": "\"status\": \"sending\"",
+    "digest": "b631d777e8a684f407308114e700928634f5e2e863901b23f9d3d945d725593a",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/profile_edit_replace.go",
+    "function": "*sSysPublish.preparePublishedProfileEdit",
+    "rule": "state-cast",
+    "expression": "sysin.PublishTaskStatus(stateRow[\"publish_task_status\"].String())",
+    "digest": "867372cb47b8548dc0b1f3241670aa74400e2e7e50467133218fa04a60c05351",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/profile_edit_replace.go",
+    "function": "*sSysPublish.preparePublishedProfileEdit",
+    "rule": "state-cast",
+    "expression": "sysin.PublishTaskStatus(\"\")",
+    "digest": "aa2398ad90db831c7daa5c5e9758de75058f912f3b7baab287109e5490d96a1d",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/profile_edit_replace.go",
+    "function": "*sSysPublish.preparePublishedProfileEdit",
+    "rule": "state-map-write",
+    "expression": "\"publish_task_status\": sysin.PublishTaskStatusEditing.String()",
+    "digest": "2ec1b48c3a6527cea8941616bee1f3a02fa3eec5b5f0dc005c7682eeea581018",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/profile_edit_replace.go",
+    "function": "*sSysPublish.releaseProfileEditClaim",
+    "rule": "state-map-write",
+    "expression": "\"publish_task_status\": \"\"",
+    "digest": "608b20184e3acc5c32d20e7a7b71cfb80d96367162cf0653dcaaec2c4763f9dc",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/profile_media_operation.go",
+    "function": "*sSysPublish.BotProfileQueueMedia",
+    "rule": "state-map-write",
+    "expression": "\"status\": \"pending\"",
+    "digest": "273ea78abaf1a1c77dd5155093a9661c6d4a2462cccd875a270381586c226cda",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/profile_media_operation.go",
+    "function": "*sSysPublish.handleProfileMediaTask",
+    "rule": "state-map-write",
+    "expression": "\"status\": \"pending\"",
+    "digest": "273ea78abaf1a1c77dd5155093a9661c6d4a2462cccd875a270381586c226cda",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/profile_publish_channel.go",
+    "function": "*sSysPublish.recordProfileChannelPreparationFailureTx",
+    "rule": "state-map-write",
+    "expression": "\"dispatch_status\": tgDispatchStatusDone",
+    "digest": "7b0ab645def7b15495d8ddd81958bc379249d928a7f917a12eca2b84953a3d3b",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/profile_publish_channel.go",
+    "function": "*sSysPublish.recordProfileChannelPreparationFailureTx",
+    "rule": "state-map-write",
+    "expression": "\"status\": telegramJobStatusFailed",
+    "digest": "fddcdcc8981178d081be80f8b339d17b9d38687e2493c1bd3ae70de248091895",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/profile_publish_job.go",
+    "function": "*sSysPublish.ensureTelegramProfileJobWithMetaTx",
+    "rule": "state-map-write",
+    "expression": "\"status\": \"pending\"",
+    "digest": "273ea78abaf1a1c77dd5155093a9661c6d4a2462cccd875a270381586c226cda",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/profile_publish_job.go",
+    "function": "*sSysPublish.ensureTelegramProfileJobWithMetaTx",
+    "rule": "state-map-write",
+    "expression": "\"dispatch_status\": tgDispatchStatusIdle",
+    "digest": "bc0f9c15e510a08b6c14ea1248d4f511753298c65c6a8a696e52d0c66d45d4ff",
+    "count": 2,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/profile_publish_job.go",
+    "function": "*sSysPublish.submitProfilePublishWithMeta",
+    "rule": "state-map-write",
+    "expression": "\"publish_task_status\": sysin.PublishTaskStatusWaitingMedia.String()",
+    "digest": "6be7f146097cfd984756ba01daa69f39dc39ffd2bd9e5d151def0c2a3b28a999",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/profile_publish_job.go",
+    "function": "*sSysPublish.submitProfilePublishWithMeta",
+    "rule": "state-map-write",
+    "expression": "\"publish_task_status\": publishStatus",
+    "digest": "8aee8f9c10186698c395912117684af4a693c8fc6b11c5a7b0c8d879ea76fb0b",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/profile_publish_state_projection.go",
+    "function": "*sSysPublish.cancelProfilePublishOperation",
+    "rule": "state-map-write",
+    "expression": "\"publish_task_status\": \"\"",
+    "digest": "608b20184e3acc5c32d20e7a7b71cfb80d96367162cf0653dcaaec2c4763f9dc",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/profile_publish_state_projection.go",
+    "function": "*sSysPublish.updateProfilePublishOperationState",
+    "rule": "state-cast",
+    "expression": "sysin.PublishTaskStatus(value)",
+    "digest": "b0fc663b2fb0d0fdf457e671e22ec0d12f0a3ee4077ee266261ea6b3114a8b92",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/profile_publish_state_projection.go",
+    "function": "*sSysPublish.updateProfilePublishOperationState",
+    "rule": "state-cast",
+    "expression": "sysin.PublishTaskStatus(strings.TrimSpace(status.String()))",
+    "digest": "eef83ef224ad9a78dd6f2b9bd091e55b8b25df992257b815543ed19166390978",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/profile_publish_state_projection.go",
+    "function": "*sSysPublish.writeProfilePublishOperationStateTx",
+    "rule": "state-map-write",
+    "expression": "\"publish_task_status\": status.String()",
+    "digest": "44c85740af4a340c4a8ef06c44743eb165e089c66fa6809d9e9727dd91c3d1fc",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/publish_success_record.go",
+    "function": "*sSysPublish.upsertPublishJobRecord",
+    "rule": "state-map-write",
+    "expression": "\"status\": status",
+    "digest": "895baed7039486dacbcc0467f30a4846c81619a4529a862f793a80d3da45e8af",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/publish_success_record.go",
+    "function": "*sSysPublish.upsertPublishRecordLog",
+    "rule": "state-map-write",
+    "expression": "\"status\": status",
+    "digest": "895baed7039486dacbcc0467f30a4846c81619a4529a862f793a80d3da45e8af",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/redis_stream_execution.go",
+    "function": "*sSysPublish.recoverMissingTelegramStreamTasks",
+    "rule": "state-map-write",
+    "expression": "\"dispatch_status\": tgDispatchStatusIdle",
+    "digest": "bc0f9c15e510a08b6c14ea1248d4f511753298c65c6a8a696e52d0c66d45d4ff",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/redis_stream_execution.go",
+    "function": "*sSysPublish.recoverTelegramStreamExecution",
+    "rule": "state-cast",
+    "expression": "DispatchStatus(tgDispatchStatusProcessing)",
+    "digest": "8d793504b52b3ae95e355bd7559b54680f95189468ccb5a709f2980d7c39955b",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/redis_stream_execution.go",
+    "function": "*sSysPublish.recoverTelegramStreamExecution",
+    "rule": "state-selector-write",
+    "expression": "job.Status = telegramJobStatusConfirming",
+    "digest": "09d2326da6949a5f0dc88d9c9c9c249449b90930091be04cb3dce9a2b216b436",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/redis_stream_gray_publish.go",
+    "function": "*sSysPublish.confirmTelegramStreamOutbox",
+    "rule": "redis-primitive",
+    "expression": "g.Redis()",
+    "digest": "7feeb0cf0fbac2f0815e8deed2d7e589b091958de713e38235597ed975061fdb",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/redis_stream_gray_publish.go",
+    "function": "*sSysPublish.confirmTelegramStreamOutbox",
+    "rule": "redis-primitive",
+    "expression": "g.Redis().Do(ctx, \"ZSCORE\", telegramChannelQueueKey(job.ChannelId), fmt.Sprintf(\"%d\", jobID))",
+    "digest": "f729e0e407ef890dc74452a44bc9af6446b9bc3f4db28654654f4ef55b581911",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/redis_stream_gray_publish.go",
+    "function": "*sSysPublish.confirmTelegramStreamOutbox",
+    "rule": "state-map-write",
+    "expression": "\"status\": telegramOutboxDelivered",
+    "digest": "791336bc23ece6048cbc1c56c07064515b24e69d9e3ee58ffe1eb8c63269b388",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/redis_stream_republish.go",
+    "function": "*sSysPublish.prepareStreamProfileChannelPublish",
+    "rule": "state-map-write",
+    "expression": "\"status\": telegramOutboxPending",
+    "digest": "f6162eca883997249855f144c8db07c91a17987ff2e99d3ca0f5941d3559799f",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/redis_stream_webhook.go",
+    "function": "*sSysPublish.deferStreamWebhookAfterUnavailableReconcile",
+    "rule": "state-map-write",
+    "expression": "\"status\": telegramAttemptStatusWaiting",
+    "digest": "4ed75cd7a8fe7eaa0395fabcf004a47d383939d26c80614aed397205c06ff099",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/redis_stream_webhook.go",
+    "function": "*sSysPublish.matchStreamWebhookGroup",
+    "rule": "state-map-write",
+    "expression": "\"status\": telegramAttemptStatusWaiting",
+    "digest": "4ed75cd7a8fe7eaa0395fabcf004a47d383939d26c80614aed397205c06ff099",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/relay_package.go",
+    "function": "*sSysPublish.sendRelayPackageJob",
+    "rule": "state-selector-write",
+    "expression": "job.SendPhase = relayconsts.RelaySendPhasePreparing",
+    "digest": "71006a8438f0ed61e7f70757b7c46c3059bfd08130c9f5f99e86fc33b4c8c031",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/relay_package.go",
+    "function": "*sSysPublish.sendRelayPackageJob",
+    "rule": "state-selector-write",
+    "expression": "job.SendPhase = relayconsts.RelaySendPhaseReady",
+    "digest": "90faa9479e28578c7c46aef2cbaf719c508f17c4bc0a9552755d82ca14f25791",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/relay_package_reconcile.go",
+    "function": "*sSysPublish.reconcileRelayPackageWithClient",
+    "rule": "state-cast",
+    "expression": "SendPhase(relayconsts.RelaySendPhaseConfirmed)",
+    "digest": "2a03a9d4b5344c8495fc987049f99e37339b3c83e92c4ace0d40e7b3308866aa",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/telegram_channel_lock.go",
+    "function": "<imports>",
+    "rule": "redis-import",
+    "expression": "\"github.com/gogf/gf/v2/database/gredis\"",
+    "digest": "c9ae87642cd29d3f09dc2dc5f701a6f724e90f01d2785a4bb417d203af1377ce",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/telegram_collector_adapter.go",
+    "function": "*sSysPublish.handleMessageMediaFallbackAccountTask",
+    "rule": "state-selector-write",
+    "expression": "job.Status = \"sending\"",
+    "digest": "64a8269be85b132dc4cdf9b0f90d0cc7b5fd835ba5bc8a084980b5c3104d8ac4",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/telegram_collector_adapter.go",
+    "function": "*sSysPublish.handleMessageReconcileAccountTask",
+    "rule": "state-cast",
+    "expression": "SendPhase(confirmedPhase)",
+    "digest": "1217db228af9931a485305a52ae75ed0f19399de34db1590742a2d54252215d4",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/telegram_collector_adapter.go",
+    "function": "*sSysPublish.handleMessageReconcileAccountTask",
+    "rule": "state-selector-write",
+    "expression": "job.SendPhase = confirmedPhase",
+    "digest": "9ca6e32771655d599d73f0c405c675e93cba5b9163db95daf65f0736d91256da",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/telegram_collector_adapter.go",
+    "function": "*sSysPublish.handleMessageReconcileAccountTask",
+    "rule": "state-selector-write",
+    "expression": "job.Status = nextStatus",
+    "digest": "d445c8444c0eea1f9d8cc1816f7d67688f63a88f39b3b8475264ec69f19075f9",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/telegram_message_batch.go",
+    "function": "telegramDeleteMessagesBatch",
+    "rule": "redis-primitive",
+    "expression": "http.DefaultClient.Do(req)",
+    "digest": "4264f70a25c55c75e69c9f5a46785bc5a40aff86e5d331890c1064ed8d22db0d",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tenant_vip_media_similarity.go",
+    "function": "*sSysPublish.cachedMediaSimilarCandidates",
+    "rule": "redis-primitive",
+    "expression": "mediaSimilarCandidateGroup.Do(cacheKey, func() (any, error) {\n\treturn s.computeMediaSimilarCandidates(ctx, scope, source, threshold, cacheKey)\n})",
+    "digest": "95c8f34dd9d08406ea4738021219113c6a96a75be92b929943a97044b122d58b",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_account_session.go",
+    "function": "*sSysPublish.pauseTelegramJobsForUnavailableAccount",
+    "rule": "state-map-write",
+    "expression": "\"dispatch_status\": tgDispatchStatusIdle",
+    "digest": "bc0f9c15e510a08b6c14ea1248d4f511753298c65c6a8a696e52d0c66d45d4ff",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_channel_delete_index.go",
+    "function": "tgChannelDeleteIndex.addAutoDelete",
+    "rule": "redis-primitive",
+    "expression": "cache.ZSetAdd(ctx, tgChannelDeleteKey(tenantID, channelID), score, fmt.Sprintf(\"message:%d\", messageID))",
+    "digest": "0f9b3cdd20d8ad851d4c3c4c86fea61c61ce9d29718f51b002a7ff924b34050f",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_channel_delete_index.go",
+    "function": "tgChannelDeleteIndex.addJob",
+    "rule": "redis-primitive",
+    "expression": "cache.ZSetAdd(ctx, tgChannelCleanupKey(channelID), score, \"job:\"+strconv.FormatInt(jobID, 10))",
+    "digest": "72d0c5b197d448c201e2eb58ec82bf24fa21ddb459c52f8f343ce094231829ec",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_channel_delete_index.go",
+    "function": "tgChannelDeleteIndex.head",
+    "rule": "redis-primitive",
+    "expression": "cache.ZSetHead(ctx, tgChannelCleanupKey(channelID))",
+    "digest": "7e1625ff3c5875a47f1b2a28127a670bd25abbe9361ec7a53b62801788e7eeb0",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_channel_delete_index.go",
+    "function": "tgChannelDeleteIndex.removeAutoDelete",
+    "rule": "redis-primitive",
+    "expression": "cache.ZSetRemove(ctx, tgChannelDeleteKey(tenantID, channelID), fmt.Sprintf(\"message:%d\", messageID))",
+    "digest": "77386796e3b023199c613d2eb74bb5d846b2baba969c810c5f0e9a46e2172b29",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_channel_delete_index.go",
+    "function": "tgChannelDeleteIndex.removeJob",
+    "rule": "redis-primitive",
+    "expression": "cache.ZSetRemove(ctx, tgChannelCleanupKey(channelID), \"job:\"+strconv.FormatInt(jobID, 10))",
+    "digest": "c5809ca75e1de099cc8454ad4389cba40e56bbee6f04933edda4f49eb67ecb3e",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_channel_member_schema.go",
+    "function": "ensureTgChannelMemberSchema",
+    "rule": "redis-primitive",
+    "expression": "tgChannelMemberSchemaOnce.Do(func() {\n\tif strings.ToLower(g.DB().GetConfig().Type) == consts.DBPgsql {\n\t\t_, err = g.DB().Exec(ctx, tgChannelMemberPgSQL())\n\t\treturn\n\t}\n\t_, err = g.DB().Exec(ctx, tgChannelMemberMySQL())\n})",
+    "digest": "06744e2841dc369b98a328349688d94cef10a3a7a09c6bdc384ab42fcd1ae2dd",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_channel_order.go",
+    "function": "*sSysPublish.postponeTelegramJobForChannelOrder",
+    "rule": "state-map-write",
+    "expression": "\"dispatch_status\": tgDispatchStatusIdle",
+    "digest": "bc0f9c15e510a08b6c14ea1248d4f511753298c65c6a8a696e52d0c66d45d4ff",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_channel_order.go",
+    "function": "*sSysPublish.postponeTelegramJobForCollectPushPause",
+    "rule": "state-map-write",
+    "expression": "\"dispatch_status\": tgDispatchStatusIdle",
+    "digest": "bc0f9c15e510a08b6c14ea1248d4f511753298c65c6a8a696e52d0c66d45d4ff",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_channel_order.go",
+    "function": "*sSysPublish.wakeNextTelegramChannelJob",
+    "rule": "redis-primitive",
+    "expression": "g.Redis().Do(ctx, \"SADD\", telegramChannelActiveSetKey, fmt.Sprintf(\"%d\", job.ChannelId))",
+    "digest": "020c78e6c0c912dd4ecd7aeb33c304db4a3e1303fc0192028c965fecfd21e04d",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_channel_order.go",
+    "function": "*sSysPublish.wakeNextTelegramChannelJob",
+    "rule": "redis-primitive",
+    "expression": "g.Redis()",
+    "digest": "7feeb0cf0fbac2f0815e8deed2d7e589b091958de713e38235597ed975061fdb",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_channel_pending_index.go",
+    "function": "tgChannelPendingIndex.add",
+    "rule": "redis-primitive",
+    "expression": "g.Redis().Do(ctx, \"ZADD\", tgChannelPendingKey(tenantID, channelID), score, strconv.FormatInt(jobID, 10))",
+    "digest": "1c7b07663a844c27ad065370cd56b27430fe73c9d6d423074a0cb1cc622940d6",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_channel_pending_index.go",
+    "function": "tgChannelPendingIndex.add",
+    "rule": "redis-primitive",
+    "expression": "g.Redis()",
+    "digest": "7feeb0cf0fbac2f0815e8deed2d7e589b091958de713e38235597ed975061fdb",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_channel_pending_index.go",
+    "function": "tgChannelPendingIndex.head",
+    "rule": "redis-primitive",
+    "expression": "g.Redis().Do(ctx, \"ZRANGE\", tgChannelPendingKey(tenantID, channelID), 0, 0)",
+    "digest": "3a24798af41ed2218399e4938345dc439eeded1c4efcb638d4a0300bffeffedf",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_channel_pending_index.go",
+    "function": "tgChannelPendingIndex.head",
+    "rule": "redis-primitive",
+    "expression": "g.Redis()",
+    "digest": "7feeb0cf0fbac2f0815e8deed2d7e589b091958de713e38235597ed975061fdb",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_channel_pending_index.go",
+    "function": "tgChannelPendingIndex.remove",
+    "rule": "redis-primitive",
+    "expression": "g.Redis()",
+    "digest": "7feeb0cf0fbac2f0815e8deed2d7e589b091958de713e38235597ed975061fdb",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_channel_pending_index.go",
+    "function": "tgChannelPendingIndex.remove",
+    "rule": "redis-primitive",
+    "expression": "g.Redis().Do(ctx, \"ZREM\", tgChannelPendingKey(tenantID, channelID), strconv.FormatInt(jobID, 10))",
+    "digest": "b526733ed25850e038cd9be4fe2cc200c24d490845c5d1b8b8ebdddd33667713",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_channel_permission_circuit.go",
+    "function": "cancelPermissionBacklogTx",
+    "rule": "state-map-write",
+    "expression": "\"status\": telegramOutboxDelivered",
+    "digest": "791336bc23ece6048cbc1c56c07064515b24e69d9e3ee58ffe1eb8c63269b388",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_channel_permission_circuit.go",
+    "function": "cancelPermissionBacklogTx",
+    "rule": "state-map-write",
+    "expression": "\"dispatch_status\": tgDispatchStatusDone",
+    "digest": "7b0ab645def7b15495d8ddd81958bc379249d928a7f917a12eca2b84953a3d3b",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_channel_permission_circuit.go",
+    "function": "cancelPermissionBacklogTx",
+    "rule": "state-map-write",
+    "expression": "\"status\": telegramJobStatusSuperseded",
+    "digest": "7f8230678e988afa44edf6783b354a68b998faa9d39c7a037afd8fabaa6c8b06",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_channel_permission_circuit.go",
+    "function": "parkPermissionPausedJobTx",
+    "rule": "state-map-write",
+    "expression": "\"dispatch_status\": tgDispatchStatusIdle",
+    "digest": "bc0f9c15e510a08b6c14ea1248d4f511753298c65c6a8a696e52d0c66d45d4ff",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_channel_permission_circuit.go",
+    "function": "parkPermissionPausedJobTx",
+    "rule": "state-map-write",
+    "expression": "\"status\": telegramOutboxPending",
+    "digest": "f6162eca883997249855f144c8db07c91a17987ff2e99d3ca0f5941d3559799f",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_channel_permission_retention.go",
+    "function": "*sSysPublish.maintainPermissionPausedBacklog",
+    "rule": "state-selector-write",
+    "expression": "job.Status = telegramJobStatusPending",
+    "digest": "a64860ed9227109265849739d39d8acdbb42f49bd8e35363b11457a5c8136b22",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_channel_queue.go",
+    "function": "activeTelegramChannelIDs",
+    "rule": "redis-primitive",
+    "expression": "g.Redis()",
+    "digest": "7feeb0cf0fbac2f0815e8deed2d7e589b091958de713e38235597ed975061fdb",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_channel_queue.go",
+    "function": "activeTelegramChannelIDs",
+    "rule": "redis-primitive",
+    "expression": "g.Redis().Do(ctx, \"SMEMBERS\", telegramChannelActiveSetKey)",
+    "digest": "8e6b2ba1d483a5b11e206c5dc96da2a6ffcafb991dc83f70f2f429091d1bad92",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_channel_queue.go",
+    "function": "enqueueTelegramChannelJob",
+    "rule": "redis-primitive",
+    "expression": "g.Redis()",
+    "digest": "7feeb0cf0fbac2f0815e8deed2d7e589b091958de713e38235597ed975061fdb",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_channel_queue.go",
+    "function": "enqueueTelegramChannelJob",
+    "rule": "redis-primitive",
+    "expression": "g.Redis().Do(ctx, \"EVAL\", enqueueChannelJobScript, 4, key, telegramChannelActiveSetKey, otherKeys[0], otherKeys[1], strconv.FormatInt(score, 10), member, strconv.FormatInt(channelID, 10))",
+    "digest": "e08839c0acc10cedeaccadf3dff7fd3bd0d92a123e9d51d85117606217614ff7",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_channel_queue.go",
+    "function": "removeTelegramChannelJob",
+    "rule": "redis-primitive",
+    "expression": "g.Redis()",
+    "digest": "7feeb0cf0fbac2f0815e8deed2d7e589b091958de713e38235597ed975061fdb",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_channel_queue.go",
+    "function": "removeTelegramChannelJob",
+    "rule": "redis-primitive",
+    "expression": "g.Redis().Do(ctx, \"ZREM\", key, member)",
+    "digest": "b0fddf4f82d276eaea9b9d0eb4742b93dc29911d429594fe22dc16407b6fff6c",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_channel_queue.go",
+    "function": "telegramChannelRedisDo",
+    "rule": "redis-primitive",
+    "expression": "cache.RedisClient()",
+    "digest": "2454b51c1c4cb4a5b6a5ac2ebaea8ca497c4b327facc395f26c2795ffb85b2e9",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_channel_queue.go",
+    "function": "telegramChannelRedisDo",
+    "rule": "redis-primitive",
+    "expression": "client.Do(ctx, command, args...)",
+    "digest": "808202e5b35d26d77701e156fb385a694c000ad1454daf333f689c8504cb226d",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_delivery_attempt.go",
+    "function": "*sSysPublish.confirmTelegramAPISuccess",
+    "rule": "state-map-write",
+    "expression": "\"send_phase\": confirmedPhase",
+    "digest": "46ff07f3440bad70b35bcba794c52a54456a8527e24b56dee4fcec09913b5721",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_delivery_attempt.go",
+    "function": "*sSysPublish.confirmTelegramAPISuccess",
+    "rule": "state-map-write",
+    "expression": "\"status\": telegramAttemptStatusConfirmed",
+    "digest": "e65adfd75bb398963f1d4fb3a8a691b357f03aa6d193d154a7fd9436ab407990",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_delivery_attempt.go",
+    "function": "*sSysPublish.confirmTelegramAPISuccess",
+    "rule": "state-selector-write",
+    "expression": "attempt.Status = telegramAttemptStatusConfirmed",
+    "digest": "5f3171a1ed2f9f98f95d109adc1d3b0502a2fd173ba66c5729faa269e045808d",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_delivery_attempt.go",
+    "function": "*sSysPublish.confirmTelegramAttemptFromWebhook",
+    "rule": "state-cast",
+    "expression": "SendPhase(phase)",
+    "digest": "88e10fb4e7b03a83bd29b24ba54ccd4d9457666a659d0b6ae1def5e1de0ba47a",
+    "count": 2,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_delivery_attempt.go",
+    "function": "*sSysPublish.confirmTelegramAttemptFromWebhook",
+    "rule": "state-cast",
+    "expression": "SendPhase(sendingPhase)",
+    "digest": "d999c7f43126ba1449e7d8961a09c8d4cd255131f3232d864941ae02a7b77fe3",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_delivery_attempt.go",
+    "function": "*sSysPublish.confirmTelegramAttemptFromWebhook",
+    "rule": "state-map-write",
+    "expression": "\"send_phase\": phase",
+    "digest": "4f85cbcd3a2279697452c260b42e0a8d0e8d78a94420ed10682f973189894273",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_delivery_attempt.go",
+    "function": "*sSysPublish.confirmTelegramAttemptFromWebhook",
+    "rule": "state-map-write",
+    "expression": "\"status\": telegramAttemptStatusConfirmed",
+    "digest": "e65adfd75bb398963f1d4fb3a8a691b357f03aa6d193d154a7fd9436ab407990",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_delivery_attempt.go",
+    "function": "*sSysPublish.confirmTelegramAttemptFromWebhook",
+    "rule": "state-selector-write",
+    "expression": "attempt.Status = telegramAttemptStatusConfirmed",
+    "digest": "5f3171a1ed2f9f98f95d109adc1d3b0502a2fd173ba66c5729faa269e045808d",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_delivery_attempt.go",
+    "function": "*sSysPublish.handleTelegramAttemptTimeout",
+    "rule": "state-cast",
+    "expression": "SendPhase(phase)",
+    "digest": "88e10fb4e7b03a83bd29b24ba54ccd4d9457666a659d0b6ae1def5e1de0ba47a",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_delivery_attempt.go",
+    "function": "*sSysPublish.handleTelegramAttemptTimeout",
+    "rule": "state-map-write",
+    "expression": "\"status\": telegramAttemptStatusRetryWait",
+    "digest": "a9a71981c6b4b557074faf087e08d68bd2fbd20389d6f91f369632ea58eb8928",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_delivery_attempt.go",
+    "function": "*sSysPublish.handleTelegramAttemptTimeout",
+    "rule": "state-selector-write",
+    "expression": "job.Status = \"failed\"",
+    "digest": "60a2b5d24d1eef50ea4f55e69e27f44bb673ec1657ae897c044abcc070c5eeea",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_delivery_attempt.go",
+    "function": "*sSysPublish.handleTelegramAttemptTimeout",
+    "rule": "state-selector-write",
+    "expression": "attempt.Status = telegramAttemptStatusRetryWait",
+    "digest": "d18c81ce4f384ff4909a5ab09130c023130d9db86df4130adbc26225779662cf",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_delivery_attempt.go",
+    "function": "*sSysPublish.prepareTelegramDeliveryAttempt",
+    "rule": "state-map-write",
+    "expression": "\"status\": attempt.Status",
+    "digest": "2935173061f6e0fcd94984c93d33ed1e8c8fe72470963dba207a6e55fc7b9586",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_delivery_attempt.go",
+    "function": "*sSysPublish.prepareTelegramDeliveryAttempt",
+    "rule": "state-map-write",
+    "expression": "\"status\": telegramAttemptStatusSuperseded",
+    "digest": "3da9b233061866bae5238c77c7c2d105a3a5fe323b1dade04155d7b4826e7843",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_delivery_attempt.go",
+    "function": "*sSysPublish.prepareTelegramDeliveryAttempt",
+    "rule": "state-map-write",
+    "expression": "\"send_phase\": sendingPhase",
+    "digest": "bc3afdfd05c1e47ee5e34b0c08c920be2d194452123291be451d4344e78bd882",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_delivery_attempt.go",
+    "function": "*sSysPublish.restoreConfirmedTelegramResponse",
+    "rule": "state-map-write",
+    "expression": "\"send_phase\": confirmedPhase",
+    "digest": "46ff07f3440bad70b35bcba794c52a54456a8527e24b56dee4fcec09913b5721",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_delivery_attempt.go",
+    "function": "*sSysPublish.restoreConfirmedTelegramResponse",
+    "rule": "state-map-write",
+    "expression": "\"status\": telegramAttemptStatusConfirmed",
+    "digest": "e65adfd75bb398963f1d4fb3a8a691b357f03aa6d193d154a7fd9436ab407990",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_delivery_attempt.go",
+    "function": "*sSysPublish.waitTelegramDeliveryWebhook",
+    "rule": "state-cast",
+    "expression": "SendPhase(phase)",
+    "digest": "88e10fb4e7b03a83bd29b24ba54ccd4d9457666a659d0b6ae1def5e1de0ba47a",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_delivery_attempt.go",
+    "function": "*sSysPublish.waitTelegramDeliveryWebhook",
+    "rule": "state-cast",
+    "expression": "DispatchStatus(telegramAttemptWaitingDispatchStatus())",
+    "digest": "fc22e54931e5d3429b89ec6526cb735f2a4386863b18cb6559fa4df136c7432a",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_delivery_attempt.go",
+    "function": "*sSysPublish.waitTelegramDeliveryWebhook",
+    "rule": "state-map-write",
+    "expression": "\"status\": telegramAttemptStatusWaiting",
+    "digest": "4ed75cd7a8fe7eaa0395fabcf004a47d383939d26c80614aed397205c06ff099",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_delivery_attempt.go",
+    "function": "*sSysPublish.waitTelegramDeliveryWebhook",
+    "rule": "state-selector-write",
+    "expression": "attempt.Status = telegramAttemptStatusConfirmed",
+    "digest": "5f3171a1ed2f9f98f95d109adc1d3b0502a2fd173ba66c5729faa269e045808d",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_delivery_attempt.go",
+    "function": "*sSysPublish.waitTelegramDeliveryWebhook",
+    "rule": "state-selector-write",
+    "expression": "attempt.Status = telegramAttemptStatusWaiting",
+    "digest": "6754df3d003e617fc94b3969e5077bb5501b527d6c9bea0ce3f3de3c9b98c452",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_delivery_attempt.go",
+    "function": "replaceCleanedPartialAttemptTx",
+    "rule": "state-map-write",
+    "expression": "\"status\": telegramAttemptStatusSuperseded",
+    "digest": "3da9b233061866bae5238c77c7c2d105a3a5fe323b1dade04155d7b4826e7843",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_delivery_attempt.go",
+    "function": "replaceCleanedPartialAttemptTx",
+    "rule": "state-map-write",
+    "expression": "\"status\": next.Status",
+    "digest": "4aa2a833528e43bd0e34464acf16dbc6fbaf09d0843cb98ab7c09f24b2707c08",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_delivery_attempt.go",
+    "function": "replaceCleanedPartialAttemptTx",
+    "rule": "state-map-write",
+    "expression": "\"status\": telegramDeliveryStepSucceeded",
+    "digest": "6c4ed7c8f2244a08e196bc58d70fa63d2078ddf732dab5f6e0980f345c5b97a1",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_job_lifecycle.go",
+    "function": "*sSysPublish.clearSupersededProfileOperationTx",
+    "rule": "state-cast",
+    "expression": "sysin.PublishTaskStatus(state[\"publish_task_status\"].String())",
+    "digest": "0600d5b20bef7916e4677c724e3dbb35240976972a11418dc1483a83faa5fa57",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_job_lifecycle.go",
+    "function": "*sSysPublish.clearSupersededProfileOperationTx",
+    "rule": "state-map-write",
+    "expression": "\"publish_task_status\": \"\"",
+    "digest": "608b20184e3acc5c32d20e7a7b71cfb80d96367162cf0653dcaaec2c4763f9dc",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_job_recovery.go",
+    "function": "*sSysPublish.detachFailedTelegramDisplayJobsForAccount",
+    "rule": "state-map-write",
+    "expression": "\"status\": telegramOutboxDelivered",
+    "digest": "791336bc23ece6048cbc1c56c07064515b24e69d9e3ee58ffe1eb8c63269b388",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_job_recovery.go",
+    "function": "*sSysPublish.detachFailedTelegramDisplayJobsForAccount",
+    "rule": "state-map-write",
+    "expression": "\"dispatch_status\": tgDispatchStatusDone",
+    "digest": "7b0ab645def7b15495d8ddd81958bc379249d928a7f917a12eca2b84953a3d3b",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_job_recovery.go",
+    "function": "*sSysPublish.recoverExpiredTelegramOutboxDispatchesForAccount",
+    "rule": "state-map-write",
+    "expression": "\"dispatch_status\": tgDispatchStatusIdle",
+    "digest": "bc0f9c15e510a08b6c14ea1248d4f511753298c65c6a8a696e52d0c66d45d4ff",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_job_recovery.go",
+    "function": "*sSysPublish.recoverInterruptedTelegramJobs",
+    "rule": "state-map-write",
+    "expression": "\"dispatch_status\": tgDispatchStatusIdle",
+    "digest": "bc0f9c15e510a08b6c14ea1248d4f511753298c65c6a8a696e52d0c66d45d4ff",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_job_recovery.go",
+    "function": "*sSysPublish.recoverStalePreAttemptTelegramJobs",
+    "rule": "state-selector-write",
+    "expression": "job.Status = telegramJobStatusRetryWait",
+    "digest": "598e3534e911522148fd42fb04723d9f9ad6d4a691e85e258b645c509e7352a4",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_job_recovery.go",
+    "function": "*sSysPublish.recoverStaleSendingTelegramAttempts",
+    "rule": "state-map-write",
+    "expression": "\"status\": telegramAttemptStatusWaiting",
+    "digest": "4ed75cd7a8fe7eaa0395fabcf004a47d383939d26c80614aed397205c06ff099",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_job_recovery.go",
+    "function": "*sSysPublish.recoverStaleSendingTelegramAttempts",
+    "rule": "state-selector-write",
+    "expression": "attempt.Status = telegramAttemptStatusWaiting",
+    "digest": "6754df3d003e617fc94b3969e5077bb5501b527d6c9bea0ce3f3de3c9b98c452",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_job_recovery.go",
+    "function": "*sSysPublish.recoverStaleTelegramDispatchJobs",
+    "rule": "state-map-write",
+    "expression": "\"dispatch_status\": tgDispatchStatusIdle",
+    "digest": "bc0f9c15e510a08b6c14ea1248d4f511753298c65c6a8a696e52d0c66d45d4ff",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_job_recovery.go",
+    "function": "*sSysPublish.requeueStaleTelegramSendingJob",
+    "rule": "state-cast",
+    "expression": "JobStatus(status)",
+    "digest": "fe1e3db95d7058b99383a8c355b3700fa76853366dba450f5f59cd573cea3334",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_job_states.go",
+    "function": "ParseDispatchStatus",
+    "rule": "state-cast",
+    "expression": "DispatchStatus(strings.TrimSpace(value))",
+    "digest": "1015e1289189ee4b82363f11e9e02ed7d585e0bff5dfa46693f3a3ca8193b81b",
+    "count": 1,
+    "reason": "Canonical state parser/transition adapter serializes or validates this exact domain state expression."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_job_states.go",
+    "function": "ParseJobStatus",
+    "rule": "state-cast",
+    "expression": "JobStatus(strings.TrimSpace(value))",
+    "digest": "e19eb04f7b1b95d087d2b8246edacdb84378bf3fe8610bcdb1fdafd1f60864e8",
+    "count": 1,
+    "reason": "Canonical state parser/transition adapter serializes or validates this exact domain state expression."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_job_states.go",
+    "function": "ParseSendPhase",
+    "rule": "state-cast",
+    "expression": "SendPhase(strings.TrimSpace(value))",
+    "digest": "faa5c9eedb6da97c2db1bb72ef4edb0f91a850af665ffbc9d943a6da17fa9bf7",
+    "count": 1,
+    "reason": "Canonical state parser/transition adapter serializes or validates this exact domain state expression."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_job_states.go",
+    "function": "telegramDispatchStateOfValue",
+    "rule": "state-cast",
+    "expression": "telegramDispatchState(strings.TrimSpace(value))",
+    "digest": "9acf207280c3119d8c566db1b9b8b2376a4cdf747bf184bee1d8ee0c26e8ae21",
+    "count": 1,
+    "reason": "Canonical state parser/transition adapter serializes or validates this exact domain state expression."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_job_states.go",
+    "function": "telegramLifecycleStateOf",
+    "rule": "state-cast",
+    "expression": "telegramJobLifecycle(strings.TrimSpace(value))",
+    "digest": "4a01f1f0b83ba1e046a82fa414b6734a4ff1e97b7d8b2e5a54343fe1a7c7e3fc",
+    "count": 1,
+    "reason": "Canonical state parser/transition adapter serializes or validates this exact domain state expression."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_job_states.go",
+    "function": "telegramSendPhaseStateOf",
+    "rule": "state-cast",
+    "expression": "telegramSendPhaseState(strings.TrimSpace(value))",
+    "digest": "947e625a1f61e5b25e3c80c8ad71a9683c1e75b7498c01f1fc5acaceb930838e",
+    "count": 1,
+    "reason": "Canonical state parser/transition adapter serializes or validates this exact domain state expression."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_job_transition.go",
+    "function": "*sSysPublish.transitionTelegramJobs",
+    "rule": "state-map-write",
+    "expression": "\"status\": \"delivered\"",
+    "digest": "5529b05e9cec520a45aeab420897093f971ab564fd22c2c2afbb1be863a486f1",
+    "count": 1,
+    "reason": "Canonical state parser/transition adapter serializes or validates this exact domain state expression."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_job_transition.go",
+    "function": "telegramDispatchStateOf",
+    "rule": "state-cast",
+    "expression": "telegramDispatchState(strings.TrimSpace(value))",
+    "digest": "9acf207280c3119d8c566db1b9b8b2376a4cdf747bf184bee1d8ee0c26e8ae21",
+    "count": 1,
+    "reason": "Canonical state parser/transition adapter serializes or validates this exact domain state expression."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_job_transition.go",
+    "function": "telegramJobTransitionUpdate",
+    "rule": "state-cast",
+    "expression": "DispatchStatus(dispatch)",
+    "digest": "2f007267fbac7d79cdf81169236d21ad946c17e81363c7d79f0e63229f3901d1",
+    "count": 1,
+    "reason": "Canonical state parser/transition adapter serializes or validates this exact domain state expression."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_job_transition.go",
+    "function": "telegramJobTransitionUpdate",
+    "rule": "state-cast",
+    "expression": "JobStatus(strings.TrimSpace(from[i].String()))",
+    "digest": "69b291e920ed51189d3aa04c3b71ddc3832f830671338e30ec2d55ee3dbdbb66",
+    "count": 1,
+    "reason": "Canonical state parser/transition adapter serializes or validates this exact domain state expression."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_job_transition.go",
+    "function": "telegramJobTransitionUpdate",
+    "rule": "state-index-write",
+    "expression": "data[\"dispatch_status\"] = in.DispatchStatus.String()",
+    "digest": "d676ca2f918cbcab8db8d9762767827b22934866ee2112dc17fcf34ea64df7c8",
+    "count": 1,
+    "reason": "Canonical state parser/transition adapter serializes or validates this exact domain state expression."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_job_transition.go",
+    "function": "telegramJobTransitionUpdate",
+    "rule": "state-index-write",
+    "expression": "data[\"send_phase\"] = in.SendPhase.String()",
+    "digest": "fc6e613c7dbcf9ef9c4b962280a725b48a763dde4368e42970ae11720614fd17",
+    "count": 1,
+    "reason": "Canonical state parser/transition adapter serializes or validates this exact domain state expression."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_job_transition.go",
+    "function": "telegramLifecycleState",
+    "rule": "state-cast",
+    "expression": "telegramJobLifecycle(strings.TrimSpace(value))",
+    "digest": "4a01f1f0b83ba1e046a82fa414b6734a4ff1e97b7d8b2e5a54343fe1a7c7e3fc",
+    "count": 1,
+    "reason": "Canonical state parser/transition adapter serializes or validates this exact domain state expression."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_job_transition.go",
+    "function": "validateTelegramJobTransition",
+    "rule": "state-cast",
+    "expression": "JobStatus(strings.TrimSpace(to.String()))",
+    "digest": "101a18451a1dc8bde9fdbdd1c7b091b8c36153bfc37b32aba2e30111944ee8ea",
+    "count": 1,
+    "reason": "Canonical state parser/transition adapter serializes or validates this exact domain state expression."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_job_transition.go",
+    "function": "validateTelegramJobTransition",
+    "rule": "state-cast",
+    "expression": "JobStatus(strings.TrimSpace(source.String()))",
+    "digest": "fe5d3045f47bd11930cba337d4a57da61196d27fa11497cd8eefadecb6cdbbe3",
+    "count": 1,
+    "reason": "Canonical state parser/transition adapter serializes or validates this exact domain state expression."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_message_repair.go",
+    "function": "*sSysPublish.ensureTgRepairMessage",
+    "rule": "state-map-write",
+    "expression": "\"status\": \"sent\"",
+    "digest": "883f2325aa73b0c8087e99e1435601fda5954ea7349c275d7229727b542742cf",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_outbox.go",
+    "function": "*sSysPublish.dispatchTelegramJobOutbox",
+    "rule": "state-map-write",
+    "expression": "\"status\": telegramOutboxProcessing",
+    "digest": "58009e84d972b74f158d0edebc17ecc09f171c6257316b50dd4530ea695fc547",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_outbox.go",
+    "function": "*sSysPublish.dispatchTelegramJobOutbox",
+    "rule": "state-map-write",
+    "expression": "\"status\": telegramOutboxDelivered",
+    "digest": "791336bc23ece6048cbc1c56c07064515b24e69d9e3ee58ffe1eb8c63269b388",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_outbox.go",
+    "function": "*sSysPublish.dispatchTelegramJobOutbox",
+    "rule": "state-map-write",
+    "expression": "\"dispatch_status\": tgDispatchStatusQueued",
+    "digest": "c88403c7ea01accf85289eeaf92764ffe64873ff3675bcee0ee90fb3af64f1ef",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_outbox.go",
+    "function": "*sSysPublish.dispatchTelegramJobOutbox",
+    "rule": "state-map-write",
+    "expression": "\"status\": telegramOutboxPending",
+    "digest": "f6162eca883997249855f144c8db07c91a17987ff2e99d3ca0f5941d3559799f",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_outbox.go",
+    "function": "*sSysPublish.ensureTelegramJobOutboxTx",
+    "rule": "state-map-write",
+    "expression": "\"status\": telegramOutboxPending",
+    "digest": "f6162eca883997249855f144c8db07c91a17987ff2e99d3ca0f5941d3559799f",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_publish_policy.go",
+    "function": "*sSysPublish.postponeTelegramJobForPublishInterval",
+    "rule": "state-map-write",
+    "expression": "\"dispatch_status\": tgDispatchStatusIdle",
+    "digest": "bc0f9c15e510a08b6c14ea1248d4f511753298c65c6a8a696e52d0c66d45d4ff",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_queue.go",
+    "function": "*sSysPublish.enqueueTelegramJobInternal",
+    "rule": "state-map-write",
+    "expression": "\"dispatch_status\": tgDispatchStatusIdle",
+    "digest": "bc0f9c15e510a08b6c14ea1248d4f511753298c65c6a8a696e52d0c66d45d4ff",
+    "count": 2,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_queue.go",
+    "function": "*sSysPublish.enqueueTelegramJobInternal",
+    "rule": "state-map-write",
+    "expression": "\"dispatch_status\": tgDispatchStatusQueued",
+    "digest": "c88403c7ea01accf85289eeaf92764ffe64873ff3675bcee0ee90fb3af64f1ef",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_queue_worker.go",
+    "function": "*sSysPublish.ensureCollectProcessSourceDispatcher",
+    "rule": "redis-primitive",
+    "expression": "cache.RedisClient()",
+    "digest": "2454b51c1c4cb4a5b6a5ac2ebaea8ca497c4b327facc395f26c2795ffb85b2e9",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_queue_worker.go",
+    "function": "*sSysPublish.ensureCollectProcessSourceDispatcher",
+    "rule": "redis-primitive",
+    "expression": "client.Do(ctx, \"SET\", lockKey, \"1\", \"NX\", \"EX\", 30)",
+    "digest": "6854b73b2fe46cb2956d3c156b6deceab2204b1b69d4cff530a3a49e92376a22",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_queue_worker.go",
+    "function": "*sSysPublish.ensureCollectProcessSourceDispatcher",
+    "rule": "redis-primitive",
+    "expression": "client.Do(ctx, \"LPUSH\", collectProcessSourceWakeQueueKey(member), member)",
+    "digest": "ab36f60310c027be5a25c67bf116d4f51f9324e180b9590831d6c7b78dfbaaaf",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_queue_worker.go",
+    "function": "*sSysPublish.reconcileCollectSourceQueueWorkers",
+    "rule": "redis-primitive",
+    "expression": "cache.RedisClient()",
+    "digest": "2454b51c1c4cb4a5b6a5ac2ebaea8ca497c4b327facc395f26c2795ffb85b2e9",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_queue_worker.go",
+    "function": "*sSysPublish.reconcileCollectSourceQueueWorkers",
+    "rule": "redis-primitive",
+    "expression": "client.Do(ctx, \"GET\", leaseKey)",
+    "digest": "4c65f7c61ca0db304df007727ef602d963ae1b0c6cedd0039a8ce0a5a5320319",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_queue_worker.go",
+    "function": "*sSysPublish.reconcileCollectSourceQueueWorkers",
+    "rule": "redis-primitive",
+    "expression": "client.Do(ctx, \"SET\", leaseKey, owner, \"NX\", \"EX\", collectSourceLeaseSeconds(ctx))",
+    "digest": "7da0b8e3409722194e149d90d1f30bd1157b601e191696a507fa6b6eac7fb006",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_queue_worker.go",
+    "function": "*sSysPublish.reconcileCollectSourceQueueWorkers",
+    "rule": "redis-primitive",
+    "expression": "client.Do(ctx, \"SMEMBERS\", collectProcessActiveSourcesKey)",
+    "digest": "e3ebf82be8f2d5d275acad24d3d69630eedc76c23b12068acb085b4210fc9434",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_queue_worker.go",
+    "function": "*sSysPublish.reconcileCollectSourceQueueWorkers",
+    "rule": "redis-primitive",
+    "expression": "client.Do(ctx, \"EXPIRE\", leaseKey, collectSourceLeaseSeconds(ctx))",
+    "digest": "f6d581e0d56ab7d3dc37cd22b8b04e79e8c0a447dc8a92c4f6982a182702a735",
+    "count": 2,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_queue_worker.go",
+    "function": "*sSysPublish.runCollectProcessSourceDispatcher",
+    "rule": "redis-primitive",
+    "expression": "cache.RedisClient()",
+    "digest": "2454b51c1c4cb4a5b6a5ac2ebaea8ca497c4b327facc395f26c2795ffb85b2e9",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_queue_worker.go",
+    "function": "*sSysPublish.runCollectProcessSourceDispatcher",
+    "rule": "redis-primitive",
+    "expression": "client.Do(ctx, \"DEL\", wakeLockKey)",
+    "digest": "2fbbb014c5a24fa4c32c5bffc971eadc858cb209b89dd5e9f3d006d9a9416372",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_queue_worker.go",
+    "function": "*sSysPublish.runCollectProcessSourceDispatcher",
+    "rule": "redis-primitive",
+    "expression": "client.Do(context.Background(), \"DEL\", leaseKey)",
+    "digest": "36b06cf0c4dee90afa737c2b88c14fff0833f237cf0e530ca282a2b4456e48cc",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_queue_worker.go",
+    "function": "*sSysPublish.runCollectProcessSourceDispatcher",
+    "rule": "redis-primitive",
+    "expression": "client.Do(ctx, \"SET\", leaseKey, owner, \"NX\", \"EX\", collectSourceLeaseSeconds(ctx))",
+    "digest": "7da0b8e3409722194e149d90d1f30bd1157b601e191696a507fa6b6eac7fb006",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_queue_worker.go",
+    "function": "*sSysPublish.runCollectProcessSourceDispatcher",
+    "rule": "redis-primitive",
+    "expression": "client.Do(ctx, \"EXPIRE\", leaseKey, collectSourceLeaseSeconds(ctx))",
+    "digest": "f6d581e0d56ab7d3dc37cd22b8b04e79e8c0a447dc8a92c4f6982a182702a735",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_queue_worker.go",
+    "function": "*sSysPublish.runCollectProcessSourceDispatcher",
+    "rule": "redis-primitive",
+    "expression": "client.Do(ctx, \"RPOP\", wakeQueueKey)",
+    "digest": "f7e09c1aafcbc0182beae74fe32ae644428dd89dca0ed61876de6b452e11f2c8",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_queue_worker.go",
+    "function": "*sSysPublish.runCollectProcessSourceDispatcher",
+    "rule": "redis-primitive",
+    "expression": "client.Do(context.Background(), \"GET\", leaseKey)",
+    "digest": "f8aec90bff588ff6df768379025d39862cf735e292034b88c74da536c8dd924b",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_reconcile_lease.go",
+    "function": "*sSysPublish.withTelegramUnknownJobLease",
+    "rule": "redis-primitive",
+    "expression": "cache.RedisClient()",
+    "digest": "2454b51c1c4cb4a5b6a5ac2ebaea8ca497c4b327facc395f26c2795ffb85b2e9",
+    "count": 1,
+    "reason": "Owned unknown-job lease adapter: obtains the configured Redis client for ownedlease token fencing; no file-wide exemption."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_retry_policy.go",
+    "function": "telegramJobFailureNextStateWithConfig",
+    "rule": "state-selector-write",
+    "expression": "decision.DispatchStatus = tgDispatchStatusDone",
+    "digest": "65407bde35f716d91e2d172cdf124a51b044b347fcf333a219ced65c3a772604",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_retry_policy.go",
+    "function": "telegramJobFailureNextStateWithConfig",
+    "rule": "state-selector-write",
+    "expression": "decision.Status = \"failed\"",
+    "digest": "8737cb233ee0d10950ba1da711c478ea36540daf2a7d56f016d1db1ebc792221",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_retry_policy.go",
+    "function": "telegramJobStateUpdateData",
+    "rule": "state-map-write",
+    "expression": "\"dispatch_status\": dispatchStatus",
+    "digest": "8082fa31d3e69270f7036f5bc8da7274b835cdf44e46ed217274248425a99221",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_send_job.go",
+    "function": "*sSysPublish.SendTelegramJob",
+    "rule": "state-map-write",
+    "expression": "\"dispatch_status\": tgDispatchStatusIdle",
+    "digest": "bc0f9c15e510a08b6c14ea1248d4f511753298c65c6a8a696e52d0c66d45d4ff",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_send_job.go",
+    "function": "*sSysPublish.handleTelegramJobError",
+    "rule": "state-cast",
+    "expression": "JobStatus(decision.Status)",
+    "digest": "afa78e3bdf7c95e4c4bba63da88c3f1e5528cb8db4249c33a3087b00a43a7aec",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_send_job.go",
+    "function": "*sSysPublish.sendLockedTelegramJob",
+    "rule": "state-selector-write",
+    "expression": "job.SendPhase = telegramSendPhaseDisplayConfirmed",
+    "digest": "0ecc61b9710d195989f0f2331db648676ee7106086ba25d07d494beea4b7b496",
+    "count": 3,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_send_job.go",
+    "function": "*sSysPublish.sendTelegramJobLockedByChannel",
+    "rule": "state-selector-write",
+    "expression": "job.SendPhase = telegramSendPhaseCleanupConfirmed",
+    "digest": "18d57ff004243784f3a93cb32f447b7b14116854609d2b4f1403a13ce5d19d4f",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_send_job.go",
+    "function": "*sSysPublish.sendTelegramJobLockedByChannel",
+    "rule": "state-selector-write",
+    "expression": "job.SendPhase = telegramSendPhaseCleanupProcessing",
+    "digest": "e600b450ca867a8cba11634af8f0814c1b7d6c72afa9a08eae8499a8520266e4",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_send_reconcile.go",
+    "function": "*sSysPublish.claimUnknownTelegramJob",
+    "rule": "state-map-write",
+    "expression": "\"dispatch_status\": tgDispatchStatusProcessing",
+    "digest": "99fcaa3a1cef71b83ab884e49d3eebed384c4b42e308a5c63d58432b10c92877",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_send_reconcile.go",
+    "function": "*sSysPublish.reconcileClaimedUnknownTelegramJob",
+    "rule": "state-map-write",
+    "expression": "\"dispatch_status\": dispatchStatus",
+    "digest": "8082fa31d3e69270f7036f5bc8da7274b835cdf44e46ed217274248425a99221",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_send_reconcile.go",
+    "function": "*sSysPublish.recoverConfirmedUnknownTelegramJob",
+    "rule": "state-selector-write",
+    "expression": "job.SendPhase = phase",
+    "digest": "599d48ff64bfdfaf01f266e6a03c786a0002608784af8c2795791a5120d563d5",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_send_reconcile.go",
+    "function": "*sSysPublish.recoverConfirmedUnknownTelegramJob",
+    "rule": "state-selector-write",
+    "expression": "job.Status = telegramJobStatusSending",
+    "digest": "f947f87b93c9c90acf26ae5640dda576824d2bae598a38edd2ae1ea2f906a40d",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_send_reconcile.go",
+    "function": "*sSysPublish.recoverUnconfirmedUnknownTelegramJob",
+    "rule": "state-map-write",
+    "expression": "\"status\": telegramAttemptStatusSuperseded",
+    "digest": "3da9b233061866bae5238c77c7c2d105a3a5fe323b1dade04155d7b4826e7843",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_send_reconcile.go",
+    "function": "*sSysPublish.releaseUnknownTelegramJobClaim",
+    "rule": "state-map-write",
+    "expression": "\"dispatch_status\": tgDispatchStatusIdle",
+    "digest": "bc0f9c15e510a08b6c14ea1248d4f511753298c65c6a8a696e52d0c66d45d4ff",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_send_reconcile.go",
+    "function": "*sSysPublish.updateTelegramJobSendPhaseFromStatuses",
+    "rule": "state-map-write",
+    "expression": "\"send_phase\": phase",
+    "digest": "4f85cbcd3a2279697452c260b42e0a8d0e8d78a94420ed10682f973189894273",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_send_repo.go",
+    "function": "*sSysPublish.appendTelegramJobLog",
+    "rule": "state-map-write",
+    "expression": "\"status\": status",
+    "digest": "895baed7039486dacbcc0467f30a4846c81619a4529a862f793a80d3da45e8af",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_send_repo.go",
+    "function": "saveTelegramSentMessagesTx",
+    "rule": "state-map-write",
+    "expression": "\"status\": \"sent\"",
+    "digest": "883f2325aa73b0c8087e99e1435601fda5954ea7349c275d7229727b542742cf",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_send_watchdog.go",
+    "function": "*sSysPublish.expireTelegramSendTx",
+    "rule": "state-map-write",
+    "expression": "\"status\": telegramAttemptStatusSuperseded",
+    "digest": "3da9b233061866bae5238c77c7c2d105a3a5fe323b1dade04155d7b4826e7843",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_send_watchdog.go",
+    "function": "*sSysPublish.expireTelegramSendTx",
+    "rule": "state-map-write",
+    "expression": "\"status\": telegramOutboxDelivered",
+    "digest": "791336bc23ece6048cbc1c56c07064515b24e69d9e3ee58ffe1eb8c63269b388",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_send_watchdog.go",
+    "function": "*sSysPublish.expireTelegramSendTx",
+    "rule": "state-map-write",
+    "expression": "\"send_phase\": \"timeout_wait_cleanup\"",
+    "digest": "b6d3f4bdeb0a4c8d0ccd89e53271e5f37854b052d60d13d99c5a614f63a0cbe9",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_send_watchdog.go",
+    "function": "*sSysPublish.expireTelegramSendTx",
+    "rule": "state-map-write",
+    "expression": "\"dispatch_status\": tgDispatchStatusIdle",
+    "digest": "bc0f9c15e510a08b6c14ea1248d4f511753298c65c6a8a696e52d0c66d45d4ff",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_send_watchdog.go",
+    "function": "*sSysPublish.expireTelegramSendTx",
+    "rule": "state-map-write",
+    "expression": "\"status\": telegramJobStatusFailed",
+    "digest": "fddcdcc8981178d081be80f8b339d17b9d38687e2493c1bd3ae70de248091895",
+    "count": 1,
+    "reason": "Reviewed existing lifecycle/projection compatibility site; preserve exact expression until migrated to the canonical transition API."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_video_sanitize_cache.go",
+    "function": "cachedTelegramVideoNormalize",
+    "rule": "redis-primitive",
+    "expression": "telegramVideoNormalizeGroup.Do(cacheKey, func() (any, error) {\n\tif info, statErr := os.Stat(cachePath); statErr == nil && info.Size() > 0 {\n\t\t_ = os.Chtimes(cachePath, time.Now(), time.Now())\n\t\treturn cachePath, nil\n\t}\n\tselect {\n\tcase telegramVideoNormalizeSlot <- struct{}{}:\n\t\tdefer func() { <-telegramVideoNormalizeSlot }()\n\tcase <-ctx.Done():\n\t\treturn \"\", ctx.Err()\n\t}\n\ttemp, createErr := os.CreateTemp(cacheDir, \".normalize-*.mp4\")\n\tif createErr != nil {\n\t\treturn \"\", gerror.Wrap(createErr, \"创建视频兼容格式临时文件失败\")\n\t}\n\ttempPath := temp.Name()\n\t_ = temp.Close()\n\t_ = os.Remove(tempPath)\n\tcmdCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)\n\tdefer cancel()\n\toutput, runErr := exec.CommandContext(cmdCtx, ffmpegPath,\n\t\t\"-hide_banner\", \"-loglevel\", \"error\", \"-y\", \"-i\", path,\n\t\t\"-map\", \"0:v:0\", \"-map\", \"0:a:0?\", \"-map_metadata\", \"-1\",\n\t\t\"-vf\", \"scale=trunc(iw/2)*2:trunc(ih/2)*2:in_range=auto:out_range=tv,format=yuv420p\",\n\t\t\"-c:v\", \"libx264\", \"-preset\", \"veryfast\", \"-crf\", \"23\", \"-pix_fmt\", \"yuv420p\",\n\t\t\"-c:a\", \"aac\", \"-b:a\", \"128k\", \"-movflags\", \"+faststart\", tempPath,\n\t).CombinedOutput()\n\tif runErr != nil {\n\t\t_ = os.Remove(tempPath)\n\t\treturn \"\", gerror.Wrapf(runErr, \"转换Telegram兼容视频失败：%s\", ellipsisString(strings.TrimSpace(string(output)), 500))\n\t}\n\tif info, statErr := os.Stat(tempPath); statErr != nil || info.Size() <= 0 {\n\t\t_ = os.Remove(tempPath)\n\t\treturn \"\", gerror.New(\"转换Telegram兼容视频未生成有效文件\")\n\t}\n\tif renameErr := os.Rename(tempPath, cachePath); renameErr != nil {\n\t\t_ = os.Remove(tempPath)\n\t\treturn \"\", gerror.Wrap(renameErr, \"保存视频兼容格式缓存失败\")\n\t}\n\treturn cachePath, nil\n})",
+    "digest": "feebfa7569f5dbcfd03577bbc7d2169539c32f98f03cb7911a2f4ddfa749bec2",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/tg_video_sanitize_cache.go",
+    "function": "cachedTelegramVideoSanitize",
+    "rule": "redis-primitive",
+    "expression": "telegramVideoSanitizeGroup.Do(cacheKey, func() (any, error) {\n\tif info, statErr := os.Stat(cachePath); statErr == nil && info.Size() > 0 {\n\t\t_ = os.Chtimes(cachePath, time.Now(), time.Now())\n\t\treturn cachePath, nil\n\t}\n\tselect {\n\tcase telegramVideoSanitizeSlot <- struct{}{}:\n\t\tdefer func() { <-telegramVideoSanitizeSlot }()\n\tcase <-ctx.Done():\n\t\treturn \"\", ctx.Err()\n\t}\n\ttemp, createErr := os.CreateTemp(cacheDir, \".sanitize-*\"+ext)\n\tif createErr != nil {\n\t\treturn \"\", gerror.Wrap(createErr, \"创建视频元数据缓存临时文件失败\")\n\t}\n\ttempPath := temp.Name()\n\t_ = temp.Close()\n\t_ = os.Remove(tempPath)\n\tcmdCtx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)\n\tdefer cancel()\n\toutput, runErr := exec.CommandContext(cmdCtx, ffmpegPath, \"-y\", \"-i\", path, \"-map_metadata\", \"-1\", \"-c\", \"copy\", tempPath).CombinedOutput()\n\tif runErr != nil {\n\t\t_ = os.Remove(tempPath)\n\t\treturn \"\", gerror.Wrapf(runErr, \"ffmpeg 清理视频元数据失败：%s\", ellipsisString(strings.TrimSpace(string(output)), 500))\n\t}\n\tif renameErr := os.Rename(tempPath, cachePath); renameErr != nil {\n\t\t_ = os.Remove(tempPath)\n\t\treturn \"\", gerror.Wrap(renameErr, \"保存视频元数据缓存失败\")\n\t}\n\treturn cachePath, nil\n})",
+    "digest": "1b8ed2041f26829e8e1679b7543a7d995b58bf006d6504ca3adc1e3d29ee296e",
+    "count": 1,
+    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  }
+]

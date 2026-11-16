@@ -206,9 +206,9 @@ func (s *sSysPublish) failTelegramMissingAccountJob(ctx context.Context, job tel
 		return cause
 	}
 	changed, err := s.transitionTelegramJob(ctx, telegramJobTransition{
-		JobId: job.Id, From: []string{telegramJobStatusPending, telegramJobStatusRetryWait},
+		JobId: job.Id, From: []JobStatus{telegramJobStatusPending, telegramJobStatusRetryWait},
 		To: telegramJobStatusFailed, ErrorMessage: cause.Error(),
-		SendPhases: []string{""},
+		SendPhases: []SendPhase{""},
 		Additional: g.Map{"last_dispatch_error": cause.Error()},
 	})
 	if err != nil {

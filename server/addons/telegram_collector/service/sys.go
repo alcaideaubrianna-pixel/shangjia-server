@@ -50,6 +50,17 @@ type DeliveryHandler interface {
 	HandleCollectorDelivery(ctx context.Context, delivery *sysin.CollectorDelivery) error
 }
 
+// DeliveryResultHandler is the optional typed collection handoff. It records
+// the collector submission outcome while keeping Telegram execution outside
+// the collector completion boundary. Legacy DeliveryHandler implementations
+// remain supported through the queue fallback.
+type DeliveryResultHandler interface {
+	HandleCollectorDeliveryResult(
+		ctx context.Context,
+		delivery *sysin.CollectorDelivery,
+	) (sysin.CollectSubmitResult, error)
+}
+
 type IAccountTasks interface {
 	Submit(ctx context.Context, in *sysin.AccountTaskSubmit) (int64, error)
 	SubmitAndWait(ctx context.Context, in *sysin.AccountTaskSubmit, pollInterval time.Duration) (*sysin.AccountTask, error)

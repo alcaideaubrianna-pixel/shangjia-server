@@ -443,7 +443,7 @@ func terminalMediaProcessingStatuses() []string {
 }
 
 func (s *sSysPublish) postponeTelegramJobUntilMediaReady(ctx context.Context, job telegramJobRecord) error {
-	if !telegramJobLifecycleNeedsRetry(job.Status) || strings.TrimSpace(job.SendPhase) != "" {
+	if !telegramJobLifecycleNeedsRetry(job.Status.String()) || strings.TrimSpace(job.SendPhase.String()) != "" {
 		return nil
 	}
 	if mediaWaitExhausted(job.RetryCount+1, job.CreatedAt, time.Now()) {

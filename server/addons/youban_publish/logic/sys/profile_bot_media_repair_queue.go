@@ -155,7 +155,7 @@ func (s *sSysPublish) quarantineProfileWithUnavailableMedia(ctx context.Context,
 	for _, job := range jobs {
 		transitioned, err := s.transitionTelegramJob(ctx, telegramJobTransition{
 			JobId: job.Id,
-			From: []string{
+			From: []JobStatus{
 				telegramJobStatusPending, telegramJobStatusSending,
 				telegramJobStatusRetryWait, telegramJobStatusConfirming,
 			},

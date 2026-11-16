@@ -46,7 +46,7 @@ func (l *Lease) TryAcquire(ctx context.Context) (bool, error) {
 		`return redis.call('set',KEYS[1],ARGV[1],'PX',ARGV[2],'NX') or ''`,
 		1, []string{l.key}, []interface{}{l.token, l.ttl.Milliseconds()})
 	if err != nil {
-		return false, err
+		return false, RedactError(err, l.token)
 	}
 	return value.String() == "OK", nil
 }
@@ -74,7 +74,7 @@ func ReleaseObserved(ctx context.Context, key string, snapshot Snapshot, clients
 		`if redis.call('get',KEYS[1]) == ARGV[1] then return redis.call('del',KEYS[1]) end return 0`,
 		1, []string{key}, []interface{}{snapshot.Token})
 	if err != nil {
-		return false, err
+		return false, RedactError(err, snapshot.Token)
 	}
 	return value.Int() == 1, nil
 }
@@ -90,7 +90,7 @@ func (l *Lease) Renew(ctx context.Context) (bool, error) {
 		`if redis.call('get',KEYS[1]) == ARGV[1] then return redis.call('pexpire',KEYS[1],ARGV[2]) else return 0 end`,
 		1, []string{l.key}, []interface{}{l.token, l.ttl.Milliseconds()})
 	if err != nil {
-		return false, err
+		return false, RedactError(err, l.token)
 	}
 	return value.Int() == 1, nil
 }

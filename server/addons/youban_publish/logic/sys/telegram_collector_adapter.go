@@ -43,6 +43,60 @@ type publishCollectorDeliveryHandler struct {
 
 type publishCollectorAccountTaskHandler struct{ publish *sSysPublish }
 
+// collectorSubmitStage identifies the lifecycle boundary reached by a
+// collector delivery. It keeps persistence and process-queue submission
+// distinct while preserving the public Handler error API.
+type collectorSubmitStage string
+
+const (
+	collectorSubmitStagePersisted collectorSubmitStage = "event.persisted"
+	collectorSubmitStageQueued    collectorSubmitStage = "process.queued"
+	collectorSubmitStageFailed    collectorSubmitStage = "delivery.failed"
+)
+
+// collectorSubmitOutcome is private because the adapter remains the
+// compatibility boundary for the collector runtime.
+type collectorSubmitOutcome string
+
+const (
+	collectorSubmitOutcomeQueued collectorSubmitOutcome = "queued"
+	collectorSubmitOutcomeFailed collectorSubmitOutcome = "failed"
+)
+
+type collectorSubmitResult struct {
+	Outcome collectorSubmitOutcome
+	Stage   collectorSubmitStage
+	Reason  string
+	EventID int64
+	Err     error
+}
+
+// submitCollectorDelivery records the two meaningful write boundaries. An
+// event ID with an error means persistence succeeded but queue submission
+// failed, which must remain visible to recovery instead of looking successful.
+func (s *sSysPublish) submitCollectorDelivery(ctx context.Context, message *CollectMessage, delivery *collectorin.CollectorDelivery) collectorSubmitResult {
+	eventID, err := s.ingestAndProcessCollectMessage(ctx, message)
+	result := collectorSubmitResult{EventID: eventID, Err: err}
+	if err != nil {
+		result.Outcome = collectorSubmitOutcomeFailed
+		if eventID > 0 {
+			result.Stage = collectorSubmitStagePersisted
+			result.Reason = "process_queue_submit_failed"
+		} else {
+			result.Stage = collectorSubmitStageFailed
+			result.Reason = "event_persist_failed"
+		}
+		logPublishCollectorDeliveryStage(ctx, string(result.Stage), delivery, err)
+		return result
+	}
+	result.Outcome = collectorSubmitOutcomeQueued
+	result.Stage = collectorSubmitStageQueued
+	result.Reason = "event_persisted_and_process_queued"
+	logPublishCollectorDeliveryStage(ctx, string(collectorSubmitStagePersisted), delivery, nil)
+	logPublishCollectorDeliveryStage(ctx, string(result.Stage), delivery, nil)
+	return result
+}
+
 type publishCollectorAccountMediaProvider struct{ publish *sSysPublish }
 
 // telegramWebhookReconcileMessage 是 webhook 到达的 Telegram 消息短期索引。
@@ -303,7 +357,7 @@ func (h *publishCollectorAccountTaskHandler) HandleAccountTaskFailure(ctx contex
 	if err != nil {
 		return err
 	}
-	if accountFallbackFailureIsObsolete(purpose, job.SendPhase) {
+	if accountFallbackFailureIsObsolete(purpose, job.SendPhase.String()) {
 		g.Log().Warning(ctx, "忽略已完成阶段的协议号任务终态失败", g.Map{
 			"taskId": task.ID, "taskType": task.TaskType, "taskKey": task.TaskKey,
 			"jobId": job.Id, "purpose": purpose, "sendPhase": job.SendPhase, "cause": cause,
@@ -590,7 +644,7 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 		if countErr != nil {
 			return countErr
 		}
-		if mediaFallbackTaskCanSkip(job.Status, messageCount) {
+		if mediaFallbackTaskCanSkip(job.Status.String(), messageCount) {
 			g.Log().Infof(ctx, "协议号媒体降级任务幂等完成 taskId:%d jobId:%d tgAccountId:%d purpose:%s messageCount:%d", task.ID, job.Id, task.AccountID, purpose, messageCount)
 			return nil
 		}
@@ -600,7 +654,7 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 		if job.Status == "unknown" && messageCount == 0 {
 			transitioned, updateErr := s.transitionTelegramJob(ctx, telegramJobTransition{
 				JobId: job.Id,
-				From:  []string{telegramJobStatusConfirming},
+				From:  []JobStatus{telegramJobStatusConfirming},
 				To:    telegramJobStatusSending,
 			})
 			if updateErr != nil {
@@ -668,7 +722,7 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 	}
 	stage("媒体内容保护与缩略图准备", "mediaCount", len(media), "verifyMediaCount", len(verifyMedia))
 	var messages []*telegramSentMessage
-	phaseConfirmed := accountFallbackPhaseConfirmed(job.SendPhase, purpose)
+	phaseConfirmed := accountFallbackPhaseConfirmed(job.SendPhase.String(), purpose)
 	if !phaseConfirmed {
 		messages, err = s.sendAccountFallbackPhase(ctx, client, channel, job, task.AccountID, purpose, caption, media)
 		if err != nil {
@@ -676,7 +730,7 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 		}
 		stage("发送并确认媒体", "purpose", purpose, "messageCount", len(messages))
 	} else {
-		stage("跳过已确认媒体阶段", "purpose", purpose, "sendPhase", job.SendPhase)
+		stage("跳过已确认媒体阶段", "purpose", purpose, "sendPhase", job.SendPhase.String())
 	}
 	if purpose == "display" {
 		if len(verifyMedia) == 0 {
@@ -911,7 +965,7 @@ func (s *sSysPublish) handleMessageReconcileAccountTask(ctx context.Context, cli
 				return &telegramReconcileRetryError{delay: delay}
 			}
 			changed, err := s.transitionTelegramJob(ctx, telegramJobTransition{
-				JobId: job.Id, From: []string{telegramJobStatusConfirming}, To: telegramJobStatusSending,
+				JobId: job.Id, From: []JobStatus{telegramJobStatusConfirming}, To: telegramJobStatusSending,
 			})
 			if err != nil {
 				return err
@@ -938,15 +992,17 @@ func (s *sSysPublish) handleMessageReconcileAccountTask(ctx context.Context, cli
 	if err = s.confirmTelegramDeliveryAttempt(ctx, attempt, messages, false); err != nil {
 		return err
 	}
-	confirmedPhase := telegramSendPhaseDisplayConfirmed
-	nextStatus := telegramJobStatusRetryWait
+	confirmedPhase := SendPhaseDisplayConfirmed
+	nextStatus := JobStatusRetryWait
 	if attempt.Phase == "verify" {
 		confirmedPhase = telegramSendPhaseVerifyConfirmed
 		nextStatus = telegramJobStatusSending
 	}
 	transitioned, err := s.transitionTelegramJob(ctx, telegramJobTransition{
-		JobId: job.Id, From: []string{telegramJobStatusConfirming}, To: nextStatus,
-		Additional: g.Map{"send_phase": confirmedPhase, "error_message": ""},
+		SendPhase: jobPhase(SendPhase(confirmedPhase)),
+
+		JobId: job.Id, From: []JobStatus{telegramJobStatusConfirming}, To: nextStatus,
+		Additional: g.Map{"error_message": ""},
 	})
 	if err != nil {
 		return err
@@ -1467,10 +1523,15 @@ func collectMediaItemFromCollector(item collectorin.CollectorMediaItem) collectM
 }
 
 func (h *publishCollectorDeliveryHandler) HandleCollectorDelivery(ctx context.Context, delivery *collectorin.CollectorDelivery) error {
+	_, err := h.HandleCollectorDeliveryResult(ctx, delivery)
+	return err
+}
+
+func (h *publishCollectorDeliveryHandler) HandleCollectorDeliveryResult(ctx context.Context, delivery *collectorin.CollectorDelivery) (collectorin.CollectSubmitResult, error) {
 	if h == nil || h.publish == nil || delivery == nil {
 		err := gerror.New("Telegram采集交付处理参数无效")
 		logPublishCollectorDeliveryStage(ctx, "delivery.handler.invalid", delivery, err)
-		return err
+		return collectorin.CollectSubmitResult{Outcome: "failed", Stage: "validation", Reason: "permanent_failure"}, err
 	}
 	logPublishCollectorDeliveryStage(ctx, "delivery.handler.received", delivery, nil)
 	var err error
@@ -1484,10 +1545,13 @@ func (h *publishCollectorDeliveryHandler) HandleCollectorDelivery(ctx context.Co
 	}
 	if err != nil {
 		logPublishCollectorDeliveryStage(ctx, "delivery.handler.failed", delivery, err)
-		return err
+		return collectorin.CollectSubmitResult{Outcome: "failed", Stage: "persistence", Reason: "retryable_failure", Retryable: true, DeliveryID: delivery.ID, CollectEventID: delivery.EventID}, err
 	}
 	logPublishCollectorDeliveryStage(ctx, "delivery.handler.completed", delivery, nil)
-	return nil
+	return collectorin.CollectSubmitResult{
+		Outcome: "queued", Stage: "queue", Reason: "queued",
+		DeliveryID: delivery.ID, CollectEventID: delivery.EventID,
+	}, nil
 }
 
 func logPublishCollectorDeliveryStage(ctx context.Context, stage string, delivery *collectorin.CollectorDelivery, err error) {
@@ -1530,6 +1594,7 @@ func logPublishCollectorDeliveryStage(ctx context.Context, stage string, deliver
 
 func (s *sSysPublish) ingestCollectorBotDelivery(ctx context.Context, delivery *collectorin.CollectorDelivery) error {
 	if !s.collectGlobalEnabled(ctx) {
+		logCollectorDeliverySkipped(ctx, delivery, "global_disabled")
 		return nil
 	}
 	source, err := g.DB().Model(publishCollectSourceTable+" s").Safe().Ctx(ctx).
@@ -1546,12 +1611,12 @@ func (s *sSysPublish) ingestCollectorBotDelivery(ctx context.Context, delivery *
 		return gerror.Wrap(err, "读取Bot采集源失败")
 	}
 	if source.IsEmpty() {
+		logCollectorDeliverySkipped(ctx, delivery, "source_unavailable")
 		return nil
 	}
-	cacheTelegramWebhookReconcileMessage(ctx, telegramWebhookReconcileMessage{
-		ChatID: delivery.SourceChatID, MessageID: delivery.SourceMessageID,
-		MediaGroupID: delivery.SourceGroupedID, ReceivedAt: delivery.ReceivedAt,
-	})
+	// Collection owns persistence and process-queue handoff. Telegram delivery
+	// reconciliation is maintained by the publish worker and must not be part
+	// of the collector handoff path.
 	// Collector webhook updates carry the authoritative current Chat title.
 	// Synchronize it before any rule-list/cache lookup so channel renames are
 	// visible even when this delivery does not pass a collection rule.
@@ -1561,12 +1626,14 @@ func (s *sSysPublish) ingestCollectorBotDelivery(ctx context.Context, delivery *
 		return gerror.Wrap(err, "检查Bot采集上架频道过滤失败")
 	}
 	if blocked {
+		logCollectorDeliverySkipped(ctx, delivery, "self_loop_publish_target")
 		g.Log().Warning(ctx, "账户采集跳过自循环上架频道", g.Map{
 			"reason":   "source_chat_is_publish_target",
 			"tenantId": delivery.TenantID, "sourceId": delivery.SourceID,
 			"accountId": delivery.AccountID, "tgAccountId": delivery.TgAccountID,
 			"sourceChatId": delivery.SourceChatID, "sourceMessageId": delivery.SourceMessageID,
 		})
+		logPublishCollectorDeliveryStage(ctx, "delivery.skipped.self_loop", delivery, nil)
 		return nil
 	}
 	allowed, err := s.ensureBotCollectChannelApproval(ctx, source, delivery)
@@ -1574,6 +1641,7 @@ func (s *sSysPublish) ingestCollectorBotDelivery(ctx context.Context, delivery *
 		return err
 	}
 	if !allowed {
+		logCollectorDeliverySkipped(ctx, delivery, "approval_blocked")
 		return nil
 	}
 	message := collectorDeliveryMessage(delivery, source["tenant_id"].Int64(), source["account_id"].Int64(), source["id"].Int64(), sysin.CollectSourceTypeBot)
@@ -1581,8 +1649,7 @@ func (s *sSysPublish) ingestCollectorBotDelivery(ctx context.Context, delivery *
 	if collectorDeliveryIsEdit(delivery.RawUpdate) {
 		return s.updateCollectedBotMessage(ctx, message)
 	}
-	_, err = s.ingestAndProcessCollectMessage(ctx, message)
-	return err
+	return s.submitCollectorDelivery(ctx, message, delivery).Err
 }
 
 func collectorDeliveryIsEdit(raw []byte) bool {
@@ -1882,6 +1949,10 @@ func botCollectChannelRelationEnabled(collectEnabled int, status, approvalStatus
 }
 
 func (s *sSysPublish) ingestCollectorAccountDelivery(ctx context.Context, delivery *collectorin.CollectorDelivery) error {
+	if !s.collectGlobalEnabled(ctx) {
+		logCollectorDeliverySkipped(ctx, delivery, "global_disabled")
+		return nil
+	}
 	if err := s.ensureAccountCollectChannelRelation(ctx, delivery); err != nil {
 		return err
 	}
@@ -1890,6 +1961,7 @@ func (s *sSysPublish) ingestCollectorAccountDelivery(ctx context.Context, delive
 		return gerror.Wrap(err, "检查协议号采集上架频道过滤失败")
 	}
 	if blocked {
+		logCollectorDeliverySkipped(ctx, delivery, "self_loop_publish_target")
 		g.Log().Info(ctx, "协议号采集跳过上架目标频道消息", g.Map{
 			"sourceType": "account", "reason": "source_chat_is_publish_target",
 			"tenantId": delivery.TenantID, "accountId": delivery.AccountID,
@@ -1903,8 +1975,7 @@ func (s *sSysPublish) ingestCollectorAccountDelivery(ctx context.Context, delive
 	if groupedID := strings.TrimSpace(delivery.SourceGroupedID); groupedID != "" {
 		message.SourceUniqueKey = accountCollectMaterialGroupKey(delivery, groupedID)
 	}
-	_, err = s.ingestAndProcessCollectMessage(ctx, message)
-	return err
+	return s.submitCollectorDelivery(ctx, message, delivery).Err
 }
 
 func (s *sSysPublish) ensureAccountCollectChannelRelation(ctx context.Context, delivery *collectorin.CollectorDelivery) error {
@@ -1969,6 +2040,25 @@ func (s *sSysPublish) ensureAccountCollectChannelRelation(ctx context.Context, d
 		return gerror.Wrap(err, "同步账户采集频道状态失败")
 	}
 	return nil
+}
+
+func logCollectorDeliverySkipped(ctx context.Context, delivery *collectorin.CollectorDelivery, reason string) {
+	fields := g.Map{
+		"reason":     strings.TrimSpace(reason),
+		"outcome":    "skipped",
+		"workerRole": "publish-delivery-handler",
+	}
+	if delivery != nil {
+		fields["deliveryId"] = delivery.ID
+		fields["collectEventId"] = delivery.EventID
+		fields["tenantId"] = delivery.TenantID
+		fields["accountId"] = delivery.AccountID
+		fields["sourceId"] = delivery.SourceID
+		fields["sourceType"] = delivery.SourceType
+		fields["sourceChatId"] = delivery.SourceChatID
+		fields["sourceMessageId"] = delivery.SourceMessageID
+	}
+	g.Log().Info(ctx, "Telegram采集交付显式跳过", fields)
 }
 
 func collectorDeliveryMessage(delivery *collectorin.CollectorDelivery, tenantID, accountID, sourceID int64, sourceType string) *CollectMessage {

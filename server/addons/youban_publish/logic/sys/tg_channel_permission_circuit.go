@@ -100,7 +100,7 @@ func telegramChannelPermissionStreak(jobs []telegramJobRecord) bool {
 		return false
 	}
 	for _, job := range jobs[:10] {
-		if job.Status != telegramJobStatusFailed || telegramSendPhaseIsCleanup(job.SendPhase) || !isTelegramPermissionCircuitError(errors.New(job.ErrorMessage)) {
+		if job.Status != telegramJobStatusFailed || telegramSendPhaseIsCleanup(job.SendPhase.String()) || !isTelegramPermissionCircuitError(errors.New(job.ErrorMessage)) {
 			return false
 		}
 	}
@@ -189,7 +189,7 @@ func parkPermissionPausedJobTx(ctx context.Context, tx gdb.TX, job telegramJobRe
 // Called only after a successful sending -> failed transition, so redelivery
 // of the same worker task cannot count as another permission failure.
 func (s *sSysPublish) recordChannelPermissionFailure(ctx context.Context, job telegramJobRecord, cause error) error {
-	if !isTelegramPermissionCircuitError(cause) || telegramSendPhaseIsCleanup(job.SendPhase) || isMessagePushOperationNo(job.OperationNo) || isDownTelegramOperationNo(job.OperationNo) {
+	if !isTelegramPermissionCircuitError(cause) || telegramSendPhaseIsCleanup(job.SendPhase.String()) || isMessagePushOperationNo(job.OperationNo) || isDownTelegramOperationNo(job.OperationNo) {
 		return nil
 	}
 	row, err := s.channelPermissionCircuit(ctx, job)

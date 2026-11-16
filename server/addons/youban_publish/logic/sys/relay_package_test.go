@@ -149,7 +149,7 @@ func TestRelayPackageAttemptTransition(t *testing.T) {
 		t.Fatalf("invalid package state machine %s %s %s %v", from, sending, confirmed, err)
 	}
 	t.Setenv("YOUBAN_RELAY_PACKAGE_ENABLED", "false")
-	if !relayPackageEnabled(context.Background(), telegramJobRecord{SendPhase: confirmed}) {
+	if !relayPackageEnabled(context.Background(), telegramJobRecord{SendPhase: SendPhase(confirmed)}) {
 		t.Fatal("confirmed package must still finalize after rollout disabled")
 	}
 }

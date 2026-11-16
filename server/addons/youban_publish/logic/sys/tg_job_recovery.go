@@ -158,18 +158,22 @@ func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 		return
 	case <-startup.C:
 	}
-	s.runTelegramJobRecoveryCycle(ctx)
+	// This cursor is only a scheduling hint; durable job state remains in PG.
+	nextStep := 0
+	s.runTelegramJobRecoveryCycle(ctx, &nextStep)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.runTelegramJobRecoveryCycle(ctx)
+			s.runTelegramJobRecoveryCycle(ctx, &nextStep)
 		}
 	}
 }
 
-func (s *sSysPublish) runTelegramJobRecoveryCycle(ctx context.Context) {
+func (s *sSysPublish) runTelegramJobRecoveryCycle(ctx context.Context, nextStep *int) {
+	ctx = telegramPublishTraceContext(ctx, 0)
+	cycleStartedAt := time.Now()
 	cycleCtx, cancelCycle := context.WithTimeout(ctx, 45*time.Second)
 	defer cancelCycle()
 	lockCtx, cancelLock := context.WithTimeout(cycleCtx, 3*time.Second)
@@ -181,7 +185,7 @@ func (s *sSysPublish) runTelegramJobRecoveryCycle(ctx context.Context) {
 		WithoutWatchDog().Mutex("youban_publish:telegram:job_recovery")
 	if err := distributedLock.TryLock(lockCtx); err != nil {
 		if !errors.Is(err, hglock.ErrLockFailed) && cycleCtx.Err() == nil {
-			g.Log().Warningf(cycleCtx, "获取TG推送恢复任务锁失败：%+v", err)
+			logTelegramQueueEvent(cycleCtx, "channel_recovery_lock_error", g.Map{"action": "acquire"}, err)
 		}
 		return
 	}
@@ -189,7 +193,7 @@ func (s *sSysPublish) runTelegramJobRecoveryCycle(ctx context.Context) {
 		unlockCtx, cancel := context.WithTimeout(context.WithoutCancel(cycleCtx), 3*time.Second)
 		defer cancel()
 		if err := distributedLock.Unlock(unlockCtx); err != nil && !errors.Is(err, hglock.ErrNotExist) {
-			g.Log().Warningf(unlockCtx, "释放TG推送恢复任务锁失败：%+v", err)
+			logTelegramQueueEvent(unlockCtx, "channel_recovery_lock_error", g.Map{"action": "release"}, err)
 		}
 	}()
 
@@ -200,9 +204,12 @@ func (s *sSysPublish) runTelegramJobRecoveryCycle(ctx context.Context) {
 		{"pre_attempt", "恢复发送Attempt创建前中断的TG任务", func(ctx context.Context) error { return s.recoverStalePreAttemptTelegramJobs(ctx, 200) }},
 		{"confirmed_job", "收口已确认TG推送任务", func(ctx context.Context) error { return s.recoverConfirmedTelegramJobs(ctx, 200) }},
 		{"channel_queue_recovery", "恢复频道队列队首任务", func(ctx context.Context) error {
-			return s.recoverTelegramChannelQueueJobs(ctx, telegramOutboxRecoveryBatchSize())
+			return s.recoverPendingIdleTelegramJobs(ctx, telegramOutboxRecoveryBatchSize())
 		}},
 
+		{"stale_sending", "恢复中断的TG发送任务", func(ctx context.Context) error {
+			return s.recoverStaleTelegramSendingJobs(ctx, telegramOutboxRecoveryBatchSize())
+		}},
 		{"media_fallback", "恢复协议号媒体降级任务", func(ctx context.Context) error { return s.recoverStaleTelegramMediaFallbackJobs(ctx, 100) }},
 		{"expired_attempt", "重新投递过期TG发送Attempt", func(ctx context.Context) error { return s.requeueExpiredTelegramAttempts(ctx, 100) }},
 		{"sending_attempt", "恢复中断的TG发送Attempt", func(ctx context.Context) error { return s.recoverStaleSendingTelegramAttempts(ctx, 100) }},
@@ -214,12 +221,11 @@ func (s *sSysPublish) runTelegramJobRecoveryCycle(ctx context.Context) {
 		{"missing_operation_state", "补建资料上架状态", func(ctx context.Context) error { return s.recoverMissingProfilePublishOperationStates(ctx, 50) }},
 		{"operation_state", "恢复资料上架状态", func(ctx context.Context) error { return s.recoverProfilePublishOperationStates(ctx, 100) }},
 	}
-	for _, step := range steps {
-		if cycleCtx.Err() != nil {
-			g.Log().Warningf(cycleCtx, "TG推送恢复整轮超时 step:%s err:%+v", step.name, cycleCtx.Err())
-			return
-		}
-		s.runTelegramRecoveryStep(cycleCtx, step)
+	logTelegramQueueEvent(cycleCtx, "channel_recovery_cycle_started", g.Map{"nextStep": *nextStep, "limit": len(steps)}, nil)
+	runTelegramRecoverySteps(cycleCtx, steps, nextStep, s.runTelegramRecoveryStep)
+	logTelegramQueueEvent(cycleCtx, "channel_recovery_cycle_finished", g.Map{"nextStep": *nextStep, "durationMs": time.Since(cycleStartedAt).Milliseconds(), "cancelled": cycleCtx.Err() != nil}, cycleCtx.Err())
+	if cycleCtx.Err() != nil {
+		logTelegramQueueEvent(cycleCtx, "channel_recovery_budget_exhausted", g.Map{"nextStep": steps[*nextStep].name, "reason": "cycle_context_expired"}, cycleCtx.Err())
 	}
 }
 
@@ -229,24 +235,42 @@ type telegramRecoveryStep struct {
 	run     func(context.Context) error
 }
 
+// runTelegramRecoverySteps resumes after the last attempted step, including
+// failures and timeouts. It never launches detached work: the cycle budget and
+// the existing single DB-operation lane remain unchanged.
+func runTelegramRecoverySteps(ctx context.Context, steps []telegramRecoveryStep, next *int, run func(context.Context, telegramRecoveryStep)) {
+	if len(steps) == 0 {
+		return
+	}
+	start := *next % len(steps)
+	for offset := 0; offset < len(steps); offset++ {
+		if ctx.Err() != nil {
+			return
+		}
+		index := (start + offset) % len(steps)
+		*next = (index + 1) % len(steps)
+		run(ctx, steps[index])
+	}
+	// Even fast, complete rounds rotate who receives the full first-step budget.
+	*next = (start + 1) % len(steps)
+}
+
 func (s *sSysPublish) runTelegramRecoveryStep(ctx context.Context, step telegramRecoveryStep) {
 	stepCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
 	startedAt := time.Now()
-	g.Log().Infof(ctx, "TG推送恢复步骤开始 step:%s", step.name)
+	logTelegramQueueEvent(ctx, "channel_recovery_step_started", g.Map{"step": step.name, "stage": "recovery"}, nil)
 	err := step.run(stepCtx)
 	elapsed := time.Since(startedAt)
 	if err != nil {
-		g.Log().Warningf(ctx, "%s失败 step:%s elapsed:%s err:%+v", step.message, step.name, elapsed, err)
+		logTelegramQueueEvent(ctx, "channel_recovery_step_finished", g.Map{"step": step.name, "stage": "recovery", "durationMs": elapsed.Milliseconds()}, err)
 		return
 	}
 	if stepCtx.Err() != nil {
-		g.Log().Warningf(ctx, "%s超时 step:%s elapsed:%s err:%+v", step.message, step.name, elapsed, stepCtx.Err())
+		logTelegramQueueEvent(ctx, "channel_recovery_step_finished", g.Map{"step": step.name, "stage": "recovery", "reason": "step_context_expired", "durationMs": elapsed.Milliseconds()}, stepCtx.Err())
 		return
 	}
-	if elapsed >= time.Second {
-		g.Log().Infof(ctx, "TG推送恢复慢步骤完成 step:%s elapsed:%s", step.name, elapsed)
-	}
+	logTelegramQueueEvent(ctx, "channel_recovery_step_finished", g.Map{"step": step.name, "stage": "recovery", "durationMs": elapsed.Milliseconds()}, nil)
 }
 
 // recoverConfirmedTelegramJobs repairs the local terminal projection after all
@@ -355,11 +379,11 @@ func (s *sSysPublish) recoverStalePreAttemptTelegramJobs(ctx context.Context, li
 		jobCtx := telegramPublishJobTraceContext(ctx, job)
 		step := beginTelegramPublishStage(jobCtx, "recovery.pre_attempt", g.Map{"reason": "stale_cleanup_without_attempt", "staleAfterMs": telegramPreAttemptRecoverAfter.Milliseconds()})
 		transitioned, transitionErr := s.transitionTelegramJob(ctx, telegramJobTransition{
-			JobId: job.Id, From: []string{telegramJobStatusSending}, To: telegramJobStatusRetryWait,
-			SendPhases: telegramPreAttemptPhases(), UpdatedBefore: now.Add(-telegramPreAttemptRecoverAfter),
-			ErrorMessage: "TG任务在发送前中断，已安全重新投递",
+			JobId: job.Id, From: []JobStatus{telegramJobStatusSending}, To: telegramJobStatusRetryWait,
+			SendPhases: []SendPhase{"", telegramSendPhaseCleanupProcessing, telegramSendPhaseCleanupConfirmed}, UpdatedBefore: now.Add(-telegramPreAttemptRecoverAfter),
+			ErrorMessage:   "TG任务在发送前中断，已安全重新投递",
+			DispatchStatus: jobDispatch(tgDispatchStatusIdle),
 			Additional: g.Map{
-				"dispatch_status":     tgDispatchStatusIdle,
 				"next_retry_at":       now,
 				"last_dispatch_error": "TG任务在发送前中断，已安全重新投递",
 			},
@@ -722,7 +746,7 @@ func (s *sSysPublish) recoverStaleSendingTelegramAttempts(ctx context.Context, l
 			if err := tx.Model(publishTgJobTable).Where("id", currentAttempt.JobId).LockUpdate().Scan(&job); err != nil {
 				return err
 			}
-			if job.Id <= 0 || !telegramAttemptRecoverableJobStatus(job.Status) {
+			if job.Id <= 0 || !telegramAttemptRecoverableJobStatus(string(job.Status)) {
 				return nil
 			}
 			if _, err := tx.Model(publishTgAttemptTable).Where("id", currentAttempt.Id).
@@ -735,9 +759,10 @@ func (s *sSysPublish) recoverStaleSendingTelegramAttempts(ctx context.Context, l
 			}
 			if job.Status != telegramJobStatusConfirming {
 				transitioned, err := s.transitionTelegramJobTx(ctx, tx, telegramJobTransition{
-					JobId: currentAttempt.JobId, From: []string{job.Status}, To: telegramJobStatusConfirming,
-					ErrorMessage: "发送进程中断，等待Telegram结果对账",
-					Additional:   g.Map{"dispatch_status": tgDispatchStatusProcessing, "next_retry_at": deadline},
+					JobId: currentAttempt.JobId, From: []JobStatus{job.Status}, To: telegramJobStatusConfirming,
+					ErrorMessage:   "发送进程中断，等待Telegram结果对账",
+					DispatchStatus: jobDispatch(tgDispatchStatusProcessing),
+					Additional:     g.Map{"next_retry_at": deadline},
 				})
 				if err != nil {
 					return err
@@ -989,7 +1014,7 @@ func (s *sSysPublish) supersedeStalePendingChannelHeads(ctx context.Context, lim
 		return nil
 	}
 	if _, err := s.transitionTelegramJobs(ctx, ids, telegramJobTransition{
-		From: []string{telegramJobStatusPending}, To: telegramJobStatusSuperseded,
+		From: []JobStatus{telegramJobStatusPending}, To: telegramJobStatusSuperseded,
 		ErrorMessage: "频道队首任务等待超过" + strconv.Itoa(telegramChannelHeadTimeoutMinutes()) + "分钟，已自动放弃并唤醒下一任务",
 		Additional:   g.Map{"last_dispatch_error": "频道队首任务超时自动释放"},
 	}); err != nil {
@@ -1215,7 +1240,7 @@ func (s *sSysPublish) supersedeExpiredMessagePushPlanJobs(ctx context.Context, l
 		return nil
 	}
 	affected, err := s.transitionTelegramJobs(ctx, ids, telegramJobTransition{
-		From: []string{
+		From: []JobStatus{
 			telegramJobStatusPending, telegramJobStatusSending,
 			telegramJobStatusRetryWait, telegramJobStatusConfirming,
 		},
@@ -1295,8 +1320,8 @@ func (s *sSysPublish) requeueStaleTelegramSendingJob(ctx context.Context, job te
 	}
 	transitioned, err := s.transitionTelegramJob(ctx, telegramJobTransition{
 		JobId:         job.Id,
-		From:          []string{telegramJobStatusSending},
-		To:            status,
+		From:          []JobStatus{telegramJobStatusSending},
+		To:            JobStatus(status),
 		RetryDelay:    retryDelay,
 		ErrorMessage:  message,
 		UpdatedBefore: now.Add(-telegramSendingJobRecoverAfter),

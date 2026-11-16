@@ -77,7 +77,7 @@ func (s *sSysPublish) restoreUnknownRelayPackage(ctx context.Context, job telegr
 	if err != nil || !restored {
 		return restored, err
 	}
-	changed, err := s.transitionTelegramJob(ctx, telegramJobTransition{JobId: job.Id, From: []string{telegramJobStatusConfirming}, To: telegramJobStatusSending, Additional: g.Map{"error_message": ""}})
+	changed, err := s.transitionTelegramJob(ctx, telegramJobTransition{JobId: job.Id, From: []JobStatus{telegramJobStatusConfirming}, To: telegramJobStatusSending, Additional: g.Map{"error_message": ""}})
 	if err != nil || !changed {
 		return true, err
 	}
@@ -144,7 +144,9 @@ func (s *sSysPublish) reconcileRelayPackageWithClient(ctx context.Context, clien
 	if err = s.saveTelegramSentMessages(ctx, job, messages); err != nil {
 		return err
 	}
-	changed, err := s.transitionTelegramJob(ctx, telegramJobTransition{JobId: job.Id, From: []string{telegramJobStatusConfirming}, To: telegramJobStatusSending, Additional: g.Map{"send_phase": relayconsts.RelaySendPhaseConfirmed, "error_message": ""}})
+	changed, err := s.transitionTelegramJob(ctx, telegramJobTransition{
+		SendPhase: jobPhase(SendPhase(relayconsts.RelaySendPhaseConfirmed)),
+		JobId:     job.Id, From: []JobStatus{telegramJobStatusConfirming}, To: telegramJobStatusSending, Additional: g.Map{"error_message": ""}})
 	if err != nil || !changed {
 		return err
 	}

@@ -351,7 +351,7 @@ func (s *sSysPublish) resetCollectSourceProfilesForDev(ctx context.Context, prof
 		jobIDs = append(jobIDs, value.Int64())
 	}
 	if _, err = s.transitionTelegramJobs(ctx, jobIDs, telegramJobTransition{
-		From: []string{
+		From: []JobStatus{
 			telegramJobStatusPending, telegramJobStatusSending, telegramJobStatusRetryWait,
 			telegramJobStatusFailed, telegramJobStatusSent,
 		},

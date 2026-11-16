@@ -43,6 +43,8 @@ RUN pnpm run build
 FROM golang:1.25.0-bookworm AS server-builder
 
 WORKDIR /src/server
+ARG GOPROXY=https://goproxy.cn,direct
+ENV GOPROXY=${GOPROXY} GOSUMDB=sum.golang.org
 
 RUN go install github.com/gogf/gf/cmd/gf/v2@v2.10.0
 

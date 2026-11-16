@@ -99,6 +99,6 @@ func (s *sSysPublish) channelClearQueueCount(ctx context.Context, tenantId int64
 	return count, nil
 }
 
-func channelQueueClearStatuses() []string {
-	return []string{"pending", "failed_retry", "unknown"}
+func channelQueueClearStatuses() []JobStatus {
+	return []JobStatus{JobStatus("pending"), JobStatus("failed_retry"), JobStatus("unknown")}
 }

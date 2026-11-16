@@ -375,7 +375,7 @@ func (s *sSysPublish) finalizeRelayPackageJob(ctx context.Context, job telegramJ
 
 // Releasing the publish Worker does not consume the business retry counter.
 func (s *sSysPublish) deferRelayPackageJob(ctx context.Context, job telegramJobRecord) error {
-	_, err := s.transitionTelegramJob(ctx, telegramJobTransition{JobId: job.Id, From: []string{telegramJobStatusSending}, To: telegramJobStatusRetryWait, RetryDelay: 2 * time.Second, Additional: g.Map{"error_message": "中转资料准备中"}})
+	_, err := s.transitionTelegramJob(ctx, telegramJobTransition{JobId: job.Id, From: []JobStatus{telegramJobStatusSending}, To: telegramJobStatusRetryWait, RetryDelay: 2 * time.Second, Additional: g.Map{"error_message": "中转资料准备中"}})
 	if err != nil {
 		return err
 	}

@@ -55,7 +55,7 @@ func (s *sSysPublish) rebuildCollectedProfileMedia(ctx context.Context, profileI
 		if jobErr != nil {
 			return jobErr
 		}
-		if telegramSendPhaseHasDisplay(job.SendPhase) {
+		if telegramSendPhaseHasDisplay(job.SendPhase.String()) {
 			targetPurpose = "verify"
 		}
 	}
@@ -169,7 +169,7 @@ func (s *sSysPublish) resumeRepairedTelegramJob(ctx context.Context, jobID int64
 		return err
 	}
 	transitioned, err := s.transitionTelegramJob(ctx, telegramJobTransition{
-		JobId: job.Id, From: []string{telegramJobStatusFailed}, To: telegramJobStatusPending,
+		JobId: job.Id, From: []JobStatus{telegramJobStatusFailed}, To: telegramJobStatusPending,
 		Additional: g.Map{"retry_count": 0, "next_retry_at": nil, "error_message": "", "last_dispatch_error": ""},
 	})
 	if err != nil || !transitioned {

@@ -76,21 +76,21 @@ func TestTelegramCompletedLeaseRecoveryRefusesUncertainOwners(t *testing.T) {
 	base := telegramJobRecord{Id: 10, TenantId: 78, TargetChatId: "3438550143", Status: telegramJobStatusSent, SendPhase: telegramSendPhaseVerifyConfirmed}
 	for _, status := range []string{"pending", "sending", "confirming", "unknown"} {
 		job := base
-		job.Status = status
+		job.Status = JobStatus(status)
 		if telegramCompletedLeaseRecoverable(owner, job, base.TargetChatId) {
 			t.Fatalf("unsafe recovery for %s", status)
 		}
 	}
 	for _, status := range []string{telegramJobStatusRetryWait, telegramJobStatusFailed, telegramJobStatusSuperseded} {
 		job := base
-		job.Status = status
+		job.Status = JobStatus(status)
 		if !telegramCompletedLeaseRecoverable(owner, job, base.TargetChatId) {
 			t.Fatalf("stale non-sending lease should recover for %s", status)
 		}
 	}
 	for _, phase := range []string{"", "display_confirmed", "verify_sending", "timeout_cancelled"} {
 		job := base
-		job.SendPhase = phase
+		job.SendPhase = SendPhase(phase)
 		if telegramCompletedLeaseRecoverable(owner, job, base.TargetChatId) {
 			t.Fatalf("unsafe phase recovery %s", phase)
 		}

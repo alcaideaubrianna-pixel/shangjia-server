@@ -2,11 +2,9 @@ package sys
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -19,7 +17,6 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
-	"github.com/hibiken/asynq"
 )
 
 type publishAccountScope struct {
@@ -108,8 +105,26 @@ func accountScheduleModel(model *gdb.Model, tenantField, accountField string, sc
 	return model.Where("NOT EXISTS (SELECT 1 FROM " + publishAccountSettingTable + " se WHERE se.tenant_id=" + tenantField + " AND se.account_id=" + accountField + " AND se.deleted_at IS NULL AND se.push_engine='unified_stream')")
 }
 
-// enqueueAccountSchedules 只按主键分页读取账户目录，不扫描全局任务大表；复用已有后台队列。
+// enqueueAccountSchedules 只按主键分页恢复账户标记，不扫描全局任务大表。
 func (s *sSysPublish) enqueueAccountSchedules(ctx context.Context) error {
+	client, err := cache.RedisClient()
+	if err != nil {
+		return err
+	}
+	lease := ownedlease.New(publishconsts.AccountScheduleDirectoryLeaseKey, "account_schedule_directory", 15*time.Second, client)
+	acquired, err := lease.TryAcquire(ctx)
+	if err != nil {
+		return err
+	}
+	if !acquired {
+		return nil
+	}
+	defer func() {
+		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+		defer cancel()
+		_ = lease.Unlock(releaseCtx)
+	}()
+
 	cursor, err := cache.Instance().Get(ctx, publishconsts.AccountScheduleCursorKey)
 	if err != nil {
 		return err
@@ -122,93 +137,16 @@ func (s *sSysPublish) enqueueAccountSchedules(ctx context.Context) error {
 		OrderAsc("id").Limit(100).Scan(&accounts); err != nil {
 		return err
 	}
-	// 账户目录游标只保证账户轮询公平；到期账户由 profileCycle Redis ZSET 提供，
-	// 这里只回查少量 job_id 的账户归属，避免每轮对 channel_profile 执行 EXISTS 扫描。
-	dueAccounts := make([]struct {
-		ID       int64 `orm:"id"`
-		TenantID int64 `orm:"tenant_id"`
-	}, 0)
-	if cache.Initialized() {
-		members, cacheErr := cache.ZSetRangeByScore(ctx, profileCycleDueZSetKey, 0, float64(time.Now().Unix()), 200)
-		if cacheErr == nil && len(members) > 0 {
-			jobIDs := make([]int64, 0, len(members))
-			for _, member := range members {
-				if jobID, parseErr := strconv.ParseInt(member, 10, 64); parseErr == nil && jobID > 0 {
-					jobIDs = append(jobIDs, jobID)
-				}
-			}
-			if len(jobIDs) > 0 {
-				if err := g.DB().Model(publishTgJobTable).Ctx(ctx).Fields("account_id AS id,tenant_id").WhereIn("id", jobIDs).Group("tenant_id,account_id").Scan(&dueAccounts); err != nil {
-					return err
-				}
-			}
-		}
-	}
-	seenAccounts := make(map[int64]struct{}, len(accounts)+len(dueAccounts))
+	// 只按账户目录主键推进，禁止把全局到期候选合并回游标造成饥饿。
 	for _, account := range accounts {
-		seenAccounts[account.TenantID*1000000000+account.ID] = struct{}{}
-	}
-	for _, account := range dueAccounts {
-		key := account.TenantID*1000000000 + account.ID
-		if _, ok := seenAccounts[key]; ok {
+		if s.accountPushEngine(ctx, account.TenantID, account.ID) != pushEngineUnifiedStream {
 			continue
 		}
-		accounts = append(accounts, account)
-		seenAccounts[key] = struct{}{}
-	}
-	// 两个来源都按同一个账户游标读取后统一排序并截断，避免普通账户和到期账户
-	// 合并后超过批次上限，导致游标被重置、每分钟重复扫描最小账户集合。
-	sort.Slice(accounts, func(i, j int) bool {
-		if accounts[i].ID == accounts[j].ID {
-			return accounts[i].TenantID < accounts[j].TenantID
-		}
-		return accounts[i].ID < accounts[j].ID
-	})
-	if len(accounts) > 100 {
-		accounts = accounts[:100]
-	}
-	client, err := s.telegramQueueClient(ctx)
-	if err != nil {
-		return err
-	}
-	enqueued := 0
-	for _, account := range accounts {
-		engine := s.accountPushEngine(ctx, account.TenantID, account.ID)
-		if engine != pushEngineUnifiedStream {
-			if account.TenantID == 78 && account.ID == 615 {
-				g.Log().Info(ctx, "账户循环调度跳过", g.Map{"tenantId": account.TenantID, "accountId": account.ID, "pushEngine": engine, "reason": "push_engine_not_unified_stream"})
-			}
-			continue
-		}
-		body, err := json.Marshal(publishAccountScope{TenantID: account.TenantID, AccountID: account.ID})
-		if err != nil {
+		if err := s.markAccountSchedule(ctx, publishAccountScope{TenantID: account.TenantID, AccountID: account.ID}, false); err != nil {
 			return err
 		}
-		// 账户调度使用独立队列，避免历史采集/资料任务占满后台队列后把
-		// 循环计划延迟到下一轮；同一账户仍由租约保证串行，账户之间可并行。
-		// 账户调度不是资料级任务，同一账户在一轮执行期间只允许保留一个
-		// 入队任务。原先 2 秒的唯一窗口小于单任务 25 秒超时，生产者会在
-		// 消费者尚未开始处理前重复创建同一账户任务，最终把 pending 队列
-		// 撑大。使用 30 分钟窗口覆盖正常调度周期；任务完成后由 Asynq
-		// 清理唯一键，异常任务则由超时/重试流程释放。
-		uniqueTTL := g.Cfg().MustGet(ctx, "youbanPublish.queue.accountScheduleUniqueTTL", 30*time.Minute).Duration()
-		if uniqueTTL < 30*time.Minute {
-			uniqueTTL = 30 * time.Minute
-		}
-		_, err = client.EnqueueContext(ctx, asynq.NewTask(publishconsts.QueueAccountScheduleTask, body), asynq.Queue(tgQueueNameAccountSchedule),
-			asynq.Unique(uniqueTTL), asynq.Timeout(25*time.Second), asynq.MaxRetry(3), asynq.Retention(24*time.Hour))
-		if err != nil && !errors.Is(err, asynq.ErrDuplicateTask) {
-			g.Log().Warning(ctx, "账户循环调度入队失败", g.Map{"tenantId": account.TenantID, "accountId": account.ID, "queueName": tgQueueNameAccountSchedule, "error": err.Error()})
-			return err
-		}
-		if account.TenantID == 78 && account.ID == 615 {
-			g.Log().Info(ctx, "账户循环调度入队结果", g.Map{"tenantId": account.TenantID, "accountId": account.ID, "queueName": tgQueueNameAccountSchedule, "duplicate": errors.Is(err, asynq.ErrDuplicateTask), "error": ""})
-		}
-		enqueued++
 	}
-	if len(dueAccounts) > 0 || enqueued > 0 {
-		g.Log().Info(ctx, "账户调度扫描完成", g.Map{"tenantAccounts": len(accounts), "enqueued": enqueued, "cursor": cursor.Int64(), "dueAccounts": len(dueAccounts)})
-	}
+
 	next := int64(0)
 	if len(accounts) == 100 {
 		next = accounts[len(accounts)-1].ID
@@ -216,15 +154,12 @@ func (s *sSysPublish) enqueueAccountSchedules(ctx context.Context) error {
 	return cache.Instance().Set(ctx, publishconsts.AccountScheduleCursorKey, next, time.Hour)
 }
 
-// handleAccountScheduleTask 对每个账户独立限时、独立租约；异常账户不占全局调度锁。
-func (s *sSysPublish) handleAccountScheduleTask(ctx context.Context, task *asynq.Task) error {
-	var scope publishAccountScope
-	if err := json.Unmarshal(task.Payload(), &scope); err != nil {
-		return err
-	}
-	if scope.TenantID <= 0 || scope.AccountID <= 0 {
-		return asynq.SkipRetry
-	}
+var errAccountScheduleMore = errors.New("账户调度仍有剩余工作")
+
+var errAccountScheduleBusy = errors.New("账户调度租约仍被持有")
+
+// executeAccountSchedule 仅由单账户租约消费者调用，不再接受历史 Asynq 调度任务。
+func (s *sSysPublish) executeAccountSchedule(ctx context.Context, scope publishAccountScope, turn int64) error {
 	g.Log().Info(ctx, "账户调度任务开始", g.Map{"tenantId": scope.TenantID, "accountId": scope.AccountID, "queueName": tgQueueNameAccountSchedule})
 	startedAt := time.Now()
 	defer func() {
@@ -235,14 +170,17 @@ func (s *sSysPublish) handleAccountScheduleTask(ctx context.Context, task *asynq
 	}
 	lease := ownedlease.New(fmt.Sprintf("%s%d:%d", publishconsts.AccountScheduleLeasePrefix, scope.TenantID, scope.AccountID), "account_schedule", telegramStreamExecutionTTL)
 	ok, err := lease.TryAcquire(ctx)
-	if err != nil || !ok {
+	if err != nil {
 		return err
+	}
+	if !ok {
+		return errAccountScheduleBusy
 	}
 	bounded, stop := telegramStreamExecutionContext(ctx, lease)
 	defer func() { stop(); s.releaseTelegramChannelLease(ctx, lease) }()
-	// 各阶段都独立继续；错误交给Asynq重试，单阶段不能吞掉其他入口。
+	// 各阶段轮转且独立限时；错误由账户标记独立退避，不占其他账户执行槽。
 	var failures []error
-	for stageIndex, stage := range []func(context.Context) error{
+	stages := []func(context.Context) error{
 		// 先清理已发送任务遗留的 Outbox，避免历史状态阻塞队首。
 		func(ctx context.Context) error { return reconcileTerminalTelegramOutboxes(ctx, scope, 200) },
 		// 先收口已经完成的资料级频道投影，避免历史投影一直停在 pending
@@ -257,13 +195,22 @@ func (s *sSysPublish) handleAccountScheduleTask(ctx context.Context, task *asynq
 		func(ctx context.Context) error { return s.recoverChannelCycleRuns(ctx, scope) },
 		// 历史映射修复是低优先级补偿，必须放在当前循环生产之后，不能阻塞用户当前曝光。
 		func(ctx context.Context) error { return s.repairAccountCyclePlans(ctx, scope) },
-	} {
+	}
+	for offset := 0; offset < len(stages); offset++ {
+		if err := bounded.Err(); err != nil {
+			failures = append(failures, err)
+			break
+		}
+		stageIndex := (int(turn%int64(len(stages))) + offset) % len(stages)
+		stage := stages[stageIndex]
 		// 阶段各自限时，慢查询不能耗尽账户全部预算，挤掉后续循环与恢复。
 		stageCtx, cancel := context.WithTimeout(bounded, accountScheduleStageTimeout())
 		err := stage(stageCtx)
-		budgetEnded := stageCtx.Err() != nil && bounded.Err() == nil
+		stageBudgetErr := stageCtx.Err()
+		budgetEnded := stageBudgetErr != nil && bounded.Err() == nil
 		cancel()
-		if err != nil && budgetEnded {
+		if budgetEnded && !accountScheduleRealError(err, stageBudgetErr) {
+			failures = append(failures, errAccountScheduleMore)
 			g.Log().Info(ctx, "账户调度达到本轮预算，剩余持久计划下轮继续", g.Map{"tenantId": scope.TenantID, "accountId": scope.AccountID, "stage": stageIndex + 1})
 			continue
 		}
@@ -402,8 +349,8 @@ func reconcileTerminalTelegramOutboxes(ctx context.Context, scope publishAccount
 
 // produceAccountProfileCycles 复用已成功任务的到期时间；一份资料的一轮只创建一个run和一次频道准备。
 func (s *sSysPublish) produceAccountProfileCycles(ctx context.Context, scope publishAccountScope) error {
-	// 复用已有调度批量ENV，不再把单账户固定限制为每次20份资料。
-	limit := profileCycleOrchestratorBatchSize(ctx)
+	// 与账户到期索引的单次候选批量一致，满页必须续调。
+	limit := 20
 	rows, err := s.profileCycleDueRowsShard(ctx, limit, -1, scope)
 	if err != nil {
 		return err
@@ -427,6 +374,9 @@ func (s *sSysPublish) produceAccountProfileCycles(ctx context.Context, scope pub
 		if len(seen) >= limit {
 			break
 		}
+	}
+	if len(rows) >= limit || accountProfileCycleCandidatesMore(ctx, scope) {
+		return errAccountScheduleMore
 	}
 	return nil
 }

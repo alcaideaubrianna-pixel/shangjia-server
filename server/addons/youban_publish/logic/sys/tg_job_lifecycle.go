@@ -23,7 +23,7 @@ func (s *sSysPublish) markTelegramJobSuperseded(ctx context.Context, jobId int64
 	}
 	transitioned, err := s.transitionTelegramJob(ctx, telegramJobTransition{
 		JobId: jobId,
-		From: []string{
+		From: []JobStatus{
 			telegramJobStatusPending, telegramJobStatusSending, telegramJobStatusRetryWait,
 			telegramJobStatusConfirming, telegramJobStatusFailed, telegramJobStatusSent,
 		},

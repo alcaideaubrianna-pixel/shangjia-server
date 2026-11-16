@@ -66,13 +66,14 @@ func (s *sSysPublish) expireTelegramSendTx(ctx context.Context, tx gdb.TX, id in
 		return
 	}
 	if old.SendPhase == relayconsts.RelaySendPhaseSending {
-		_, err = s.transitionTelegramJobTx(ctx, tx, telegramJobTransition{JobId: old.Id, From: []string{old.Status}, To: telegramJobStatusFailed, ErrorMessage: "整包复制超过核实时限，已停止自动补发，请核对目标频道"})
+		_, err = s.transitionTelegramJobTx(ctx, tx, telegramJobTransition{JobId: old.Id, From: []JobStatus{old.Status}, To: telegramJobStatusFailed, ErrorMessage: "整包复制超过核实时限，已停止自动补发，请核对目标频道"})
 		return
 	}
 	changed, transitionErr := s.transitionTelegramJobTx(ctx, tx, telegramJobTransition{
-		JobId: old.Id, From: []string{old.Status}, To: telegramJobStatusSuperseded,
+		JobId: old.Id, From: []JobStatus{old.Status}, To: telegramJobStatusSuperseded,
 		ErrorMessage: telegramSendTimeoutMessage,
-		Additional:   g.Map{"send_phase": telegramSendPhaseTimeoutCancelled, "timeout_cleanup_at": gtime.Now()},
+		SendPhase:    jobPhase(telegramSendPhaseTimeoutCancelled),
+		Additional:   g.Map{"timeout_cleanup_at": gtime.Now()},
 	})
 	if transitionErr != nil || !changed {
 		err = transitionErr
@@ -333,7 +334,7 @@ func (s *sSysPublish) cleanupTelegramSendTimeout(ctx context.Context, job telegr
 			return err
 		}
 		if tail.Id > 0 && tail.Status == telegramJobStatusFailed && tail.SendPhase == "timeout_wait_cleanup" {
-			if _, err := s.transitionTelegramJobTx(ctx, tx, telegramJobTransition{JobId: tail.Id, From: []string{telegramJobStatusFailed}, To: telegramJobStatusPending, Additional: g.Map{"next_retry_at": nil, "send_phase": ""}}); err != nil {
+			if _, err := s.transitionTelegramJobTx(ctx, tx, telegramJobTransition{JobId: tail.Id, From: []JobStatus{telegramJobStatusFailed}, To: telegramJobStatusPending, SendPhase: jobPhase(""), Additional: g.Map{"next_retry_at": nil}}); err != nil {
 				return err
 			}
 			if err := s.ensureTelegramJobOutboxTx(ctx, tx, tail.Id, 0); err != nil {
@@ -395,21 +396,8 @@ func telegramTimeoutUnresolvedAttemptCount(tx gdb.TX, jobID int64) (int, error) 
 func (s *sSysPublish) recoverTelegramSendTimeouts(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	// Bounded compatibility backfill for senders created by older releases.
-	// Waiting, never-started publications do not acquire a deadline.
-	_, backfillErr := g.DB().Exec(ctx, `WITH candidates AS (
- SELECT id FROM `+publishTgJobTable+`
- WHERE send_deadline_at IS NULL
- AND (status IN ('sending','unknown') OR
-      (status='failed_retry' AND send_phase IN ('cleanup_processing','display_sending','display_confirmed','verify_sending')))
- ORDER BY id LIMIT 500 FOR UPDATE SKIP LOCKED
- ) UPDATE `+publishTgJobTable+` j
- SET send_deadline_at=COALESCE((SELECT MIN(a.created_at) FROM `+publishTgAttemptTable+` a WHERE a.job_id=j.id),j.updated_at,j.created_at,CURRENT_TIMESTAMP::timestamp)+INTERVAL '10 minutes'
- FROM candidates c WHERE j.id=c.id AND j.send_deadline_at IS NULL`)
-	if backfillErr != nil {
-		g.Log().Warningf(ctx, "TG历史发送截止时间回填失败 err:%+v", backfillErr)
-		return
-	}
+	// Historical deadline backfill is an explicit, scoped maintenance operation.
+	// It must never consume this realtime scan's eight-second budget.
 	var jobs []telegramJobRecord
 	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		WhereIn("status", []string{telegramJobStatusPending, telegramJobStatusSending, telegramJobStatusRetryWait, telegramJobStatusConfirming}).
@@ -462,4 +450,60 @@ func (s *sSysPublish) recoverTelegramSendTimeouts(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// backfillTelegramSendDeadlines is deliberately not called by the watchdog or
+// startup recovery. A maintenance caller must supply a transaction and an
+// explicit tenant/account/primary-key range. Persist the returned cursor only
+// after committing that transaction. Each page visits at most 500 primary keys,
+// including ineligible rows, so completed rows cannot stall historical progress.
+//
+// Maintenance invocation (inside this package, not from a runtime loop):
+//
+//	next := afterID
+//	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+//		var pageErr error
+//		next, pageErr = s.backfillTelegramSendDeadlines(ctx, tx, tenantID, accountID, afterID, throughID, 100)
+//		return pageErr
+//	})
+//	// Only after err == nil: save next as the maintenance checkpoint.
+//	// Stop if next == afterID (empty page) or next >= throughID.
+//
+// There is currently no CLI/admin maintenance entry point. A future explicit
+// maintenance command must validate the tenant/account and finite ID range,
+// retain a committed checkpoint and report each bounded page. It must not
+// discover ranges by scanning all jobs, run automatically on startup, or attach
+// this backfill to the realtime watchdog. Run pages serially to preserve the DB
+// concurrency ceiling. Existing non-NULL deadlines are never overwritten.
+func (s *sSysPublish) backfillTelegramSendDeadlines(ctx context.Context, tx gdb.TX, tenantID, accountID, afterID, throughID int64, limit int) (int64, error) {
+	if tx == nil || tenantID <= 0 || accountID <= 0 || afterID < 0 || throughID <= afterID || limit <= 0 || limit > 500 {
+		return afterID, gerror.New("历史发送截止时间回填必须指定事务、租户、账户、有效ID范围及1至500条批次")
+	}
+	pageCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	// TX.Ctx mutates the transaction; restore its caller context before the
+	// page deadline is cancelled so later pages and COMMIT remain usable.
+	previousCtx := tx.GetCtx()
+	defer tx.Ctx(previousCtx)
+	next, err := tx.Ctx(pageCtx).GetValue(telegramSendDeadlineBackfillSQL(), tenantID, accountID, afterID, throughID, limit, afterID)
+	if err != nil {
+		return afterID, gerror.Wrap(err, "回填历史TG发送截止时间失败")
+	}
+	return next.Int64(), nil
+}
+
+func telegramSendDeadlineBackfillSQL() string {
+	return `WITH candidates AS MATERIALIZED (
+ SELECT id FROM ` + publishTgJobTable + `
+ WHERE tenant_id=? AND account_id=? AND id>? AND id<=?
+ ORDER BY id LIMIT ? FOR UPDATE
+ ), updated AS (
+ UPDATE ` + publishTgJobTable + ` j
+ SET send_deadline_at=COALESCE((SELECT MIN(a.created_at) FROM ` + publishTgAttemptTable + ` a WHERE a.job_id=j.id),j.updated_at,j.created_at,CURRENT_TIMESTAMP::timestamp)+INTERVAL '10 minutes'
+ FROM candidates c
+ WHERE j.id=c.id AND j.send_deadline_at IS NULL
+ AND (j.status IN ('sending','unknown') OR
+      (j.status='failed_retry' AND j.send_phase IN ('cleanup_processing','display_sending','display_confirmed','verify_sending')))
+ RETURNING j.id
+ ) SELECT COALESCE(MAX(id),?) FROM candidates`
 }

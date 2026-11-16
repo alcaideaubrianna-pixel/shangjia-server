@@ -64,7 +64,7 @@ func (s *sSysPublish) confirmTelegramStreamOutbox(ctx context.Context, outboxID 
 	if err != nil {
 		return s.releaseTelegramOutbox(ctx, outboxID, owner, attemptCount, err.Error())
 	}
-	if telegramOutboxJobStillNeedsDispatch(job.Status, job.DispatchStatus) {
+	if telegramOutboxJobStillNeedsDispatch(job.Status.String(), job.DispatchStatus.String()) {
 		// When the channel-queue transport is enabled, Redis ZSET ownership is
 		// the execution hand-off. It deliberately has no Asynq task id, so do
 		// not send it through the legacy fallback/retry loop.

@@ -122,7 +122,7 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 		return false, nil
 	}
 	dequeueStartedAt := time.Now()
-	claim, err := dequeueTelegramChannelHeadWithScore(ctx, channelID)
+	claim, err := claimTelegramChannelJob(ctx, channelID)
 	if err != nil {
 		g.Log().Warning(ctx, "频道队列取头失败", g.Map{"event": "channel_queue_error", "stage": "dequeue", "channelId": channelID, "error": err.Error()})
 		return false, err
@@ -131,10 +131,47 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 	if jobID <= 0 {
 		return false, nil
 	}
+	// 领取租约与发送租约职责不同：前者防止丢失出队任务，后者保护 TG 发送。
+	execution, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	stopRenew := keepTelegramChannelClaim(execution, cancel, claim)
+	ctx = execution
+	settled := false
+	terminal := false
+	requeue := func(_ context.Context, _ int64, _ int64, priority int, at time.Time) error {
+		settleCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+		defer stop()
+		ok, settleErr := settleTelegramChannelClaim(settleCtx, claim, true, priority, at)
+		if settleErr != nil {
+			return settleErr
+		}
+		if !ok {
+			return gerror.New("频道任务领取已失效，交由过期恢复处理")
+		}
+		settled = true
+		return nil
+	}
+	defer func() {
+		cancel()
+		stopRenew()
+		if settled {
+			return
+		}
+		settleCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+		defer stop()
+		priority := tgJobPriorityDefault
+		if claim.Urgent {
+			priority = tgJobPriorityInteractive
+		} else if claim.History {
+			priority = tgJobPriorityHistory
+		}
+		if _, settleErr := settleTelegramChannelClaim(settleCtx, claim, !terminal, priority, time.Now().Add(time.Second)); settleErr != nil {
+			g.Log().Warningf(settleCtx, "频道领取收尾失败，保留过期恢复 channel:%d job:%d err:%+v", channelID, jobID, settleErr)
+		}
+	}()
 	job, loadErr := s.telegramJobById(ctx, jobID)
 	if loadErr != nil {
 		g.Log().Warning(ctx, "频道队列任务加载失败", g.Map{"event": "channel_queue_error", "stage": "load", "channelId": channelID, "jobId": jobID, "error": loadErr.Error()})
-		if enqueueErr := enqueueTelegramChannelJob(ctx, channelID, jobID, tgJobPriorityDefault, time.Now().Add(time.Second)); enqueueErr != nil {
+		if enqueueErr := requeue(ctx, channelID, jobID, tgJobPriorityDefault, time.Now().Add(time.Second)); enqueueErr != nil {
 			return true, errors.Join(loadErr, enqueueErr)
 		}
 		return true, loadErr
@@ -150,7 +187,7 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 		// Historical members use the old score format. Reinsert the same job
 		// with the current lane/score before sending; this preserves the job and
 		// lets a newly clicked manual job stay ahead on the next pass.
-		if migrateErr := enqueueTelegramChannelJob(ctx, channelID, jobID, priority, telegramChannelDispatchDueAt(job.NextRetryAt, 0, time.Now())); migrateErr != nil {
+		if migrateErr := requeue(ctx, channelID, jobID, priority, telegramChannelDispatchDueAt(job.NextRetryAt, 0, time.Now())); migrateErr != nil {
 			g.Log().Warning(ctx, "频道队列旧成员迁移失败，保留任务待恢复", g.Map{
 				"event": "channel_queue_migration_failed", "channelId": channelID,
 				"jobId": jobID, "score": claim.Score, "priority": priority,
@@ -214,10 +251,11 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 		priority = telegramChannelEffectivePriority(job, mediaReady)
 		score := telegramChannelQueueScore(priority, time.UnixMilli(hold), jobID)
 		if isTelegramChannelJobTerminal(job) {
+			terminal = true
 			g.Log().Info(ctx, "频道队列任务发送失败后已收口", g.Map{"event": "channel_queue_ack", "channelId": channelID, "jobId": jobID, "status": job.Status, "reason": "terminal_after_send_error"})
 			return true, nil
 		}
-		if enqueueErr := enqueueTelegramChannelJob(ctx, channelID, jobID, priority, time.UnixMilli(hold)); enqueueErr != nil {
+		if enqueueErr := requeue(ctx, channelID, jobID, priority, time.UnixMilli(hold)); enqueueErr != nil {
 			return true, gerror.Wrap(enqueueErr, "频道队列发送失败后重入队失败")
 		}
 		g.Log().Warning(ctx, "频道队列任务发送失败，已重入队", g.Map{
@@ -240,6 +278,7 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 	if job, loadErr := s.telegramJobById(ctx, jobID); loadErr == nil {
 		switch job.Status {
 		case telegramJobStatusSent, "failed", "superseded":
+			terminal = true
 			g.Log().Info(ctx, "频道队列任务确认完成", g.Map{
 				"event":       "channel_queue_ack",
 				"channelId":   channelID,
@@ -263,10 +302,11 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 			}
 			requeueScore := telegramChannelQueueScore(priority, time.UnixMilli(hold), jobID)
 			if isTelegramChannelJobTerminal(job) {
+				terminal = true
 				g.Log().Info(ctx, "频道队列任务已收口", g.Map{"event": "channel_queue_ack", "channelId": channelID, "jobId": jobID, "status": job.Status, "reason": "terminal_after_reload"})
 				return true, nil
 			}
-			if enqueueErr := enqueueTelegramChannelJob(ctx, channelID, jobID, priority, time.UnixMilli(hold)); enqueueErr != nil {
+			if enqueueErr := requeue(ctx, channelID, jobID, priority, time.UnixMilli(hold)); enqueueErr != nil {
 				return true, gerror.Wrap(enqueueErr, "频道队列未完成任务重入队失败")
 			}
 			g.Log().Warning(ctx, "频道队列任务未完成，已重入队", g.Map{
@@ -289,7 +329,7 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 		}
 	} else {
 		hold := time.Now().Add(time.Second).UnixMilli()
-		if enqueueErr := enqueueTelegramChannelJob(ctx, channelID, jobID, tgJobPriorityDefault, time.UnixMilli(hold)); enqueueErr != nil {
+		if enqueueErr := requeue(ctx, channelID, jobID, tgJobPriorityDefault, time.UnixMilli(hold)); enqueueErr != nil {
 			return true, gerror.Wrap(enqueueErr, "频道队列状态读取失败后重入队失败")
 		}
 		g.Log().Warning(ctx, "频道队列任务状态读取失败，已重入队", g.Map{"event": "channel_queue_requeue", "stage": "reload", "channelId": channelID, "jobId": jobID, "score": hold, "error": loadErr.Error()})
@@ -353,4 +393,29 @@ func isTelegramChannelJobTerminal(job telegramJobRecord) bool {
 	default:
 		return false
 	}
+}
+
+// keepTelegramChannelClaim 续期失败即取消执行；等待协程退出后才允许收尾。
+func keepTelegramChannelClaim(ctx context.Context, cancel context.CancelFunc, claim telegramChannelQueueClaim) func() {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(telegramChannelClaimTTL / 3)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				renewCtx, stop := context.WithTimeout(ctx, 3*time.Second)
+				ok, err := renewTelegramChannelClaim(renewCtx, claim)
+				stop()
+				if err != nil || !ok {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	return func() { <-done }
 }

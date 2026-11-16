@@ -90,7 +90,7 @@ func replaceCleanedPartialAttemptTx(ctx context.Context, tx gdb.TX, jobID, attem
 		return old, errTelegramAttemptNeedsReconcile
 	}
 	_, sendingPhase, _, err := telegramAttemptPhaseTransition(old.Phase)
-	if err != nil || job.SendPhase != sendingPhase || expected <= 0 {
+	if err != nil || job.SendPhase.String() != sendingPhase || expected <= 0 {
 		return old, errTelegramAttemptNeedsReconcile
 	}
 	remaining, err := tx.Model(publishTgMessageTable).Where("job_id", jobID).Where("purpose", old.Phase).WhereNot("status", "deleted").Count()
@@ -155,7 +155,7 @@ func (s *sSysPublish) prepareTelegramDeliveryAttempt(ctx context.Context, job te
 		if current.Id <= 0 || current.Status != telegramJobStatusSending {
 			return errTelegramJobSuperseded
 		}
-		advanceJobPhase, resumeSendingPhase := telegramAttemptPhaseMode(current.SendPhase, fromPhase, sendingPhase, advancePhase)
+		advanceJobPhase, resumeSendingPhase := telegramAttemptPhaseMode(current.SendPhase.String(), fromPhase, sendingPhase, advancePhase)
 		if !advanceJobPhase && !resumeSendingPhase {
 			expectedCurrentPhase := sendingPhase
 			if advancePhase {
@@ -651,7 +651,7 @@ func (s *sSysPublish) restoreConfirmedTelegramResponse(ctx context.Context, job 
 	}
 	// Restoring display evidence must not roll an in-flight verify back to display.
 	if phase == "display" && (job.SendPhase == telegramSendPhaseVerifySending || job.SendPhase == telegramSendPhaseVerifyConfirmed) {
-		confirmedPhase = job.SendPhase
+		confirmedPhase = job.SendPhase.String()
 	}
 	restored := false
 	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
@@ -692,7 +692,7 @@ func (s *sSysPublish) restoreConfirmedTelegramResponse(ctx context.Context, job 
 		if err := saveTelegramSentMessagesTx(ctx, tx, current, messages); err != nil {
 			return err
 		}
-		if confirmedPhase != current.SendPhase {
+		if confirmedPhase != current.SendPhase.String() {
 			if _, err := tx.Model(publishTgJobTable).Where("id", job.Id).
 				Data(g.Map{"send_phase": confirmedPhase, "updated_at": gtime.Now()}).Update(); err != nil {
 				return err
@@ -749,9 +749,9 @@ func (s *sSysPublish) waitTelegramDeliveryWebhook(ctx context.Context, attempt t
 			}
 			_, err := s.transitionTelegramJobTx(ctx, tx, telegramJobTransition{
 				JobId:      attempt.JobId,
-				From:       []string{telegramJobStatusSending},
+				From:       []JobStatus{telegramJobStatusSending},
 				To:         telegramJobStatusRetryWait,
-				SendPhases: []string{phase},
+				SendPhases: []SendPhase{SendPhase(phase)},
 				Additional: g.Map{"error_message": ""},
 			})
 			return err
@@ -764,13 +764,15 @@ func (s *sSysPublish) waitTelegramDeliveryWebhook(ctx context.Context, attempt t
 			return err
 		}
 		_, err := s.transitionTelegramJobTx(ctx, tx, telegramJobTransition{
+			DispatchStatus: jobDispatch(DispatchStatus(telegramAttemptWaitingDispatchStatus())),
+
 			JobId:        attempt.JobId,
-			From:         []string{telegramJobStatusSending},
+			From:         []JobStatus{telegramJobStatusSending},
 			To:           telegramJobStatusConfirming,
 			ErrorMessage: "等待Telegram Webhook确认",
 			Additional: g.Map{
-				"dispatch_status": telegramAttemptWaitingDispatchStatus(),
-				"next_retry_at":   deadline,
+
+				"next_retry_at": deadline,
 			},
 		})
 		return err
@@ -866,11 +868,13 @@ func (s *sSysPublish) handleTelegramAttemptTimeout(ctx context.Context, attemptI
 	message := fmt.Sprintf("Telegram发送结果未在%d秒内确认，已停止自动重试，请人工核对频道消息", int(telegramAttemptWebhookWait/time.Second))
 	g.Log().Warningf(ctx, "TG发送结果不确定，禁止自动重发 attemptId:%d jobId:%d profileId:%d channelId:%d botId:%d chat:%s phase:%s attemptNo:%d", attempt.Id, job.Id, job.ProfileId, job.ChannelId, job.BotId, attempt.TargetChatId, attempt.Phase, attempt.AttemptNo)
 	transitioned, transitionErr := s.transitionTelegramJob(ctx, telegramJobTransition{
+		SendPhase: jobPhase(SendPhase(phase)),
+
 		JobId:        attempt.JobId,
-		From:         []string{telegramJobStatusConfirming},
+		From:         []JobStatus{telegramJobStatusConfirming},
 		To:           telegramJobStatusFailed,
 		ErrorMessage: message,
-		Additional:   g.Map{"send_phase": phase},
+		Additional:   g.Map{},
 	})
 	err = transitionErr
 	if err != nil {
@@ -1389,14 +1393,16 @@ func (s *sSysPublish) confirmTelegramAttemptFromWebhook(ctx context.Context, att
 			return err
 		}
 		if _, err := s.transitionTelegramJobTx(ctx, tx, telegramJobTransition{
+			SendPhase: jobPhase(SendPhase(phase)),
+
 			JobId: job.Id,
-			From: []string{
+			From: []JobStatus{
 				telegramJobStatusConfirming, telegramJobStatusPending,
 				telegramJobStatusRetryWait, telegramJobStatusFailed,
 			},
 			To:         telegramJobStatusRetryWait,
-			SendPhases: []string{sendingPhase, phase, telegramSendPhaseDisplayConfirmed},
-			Additional: g.Map{"send_phase": phase, "error_message": ""},
+			SendPhases: []SendPhase{SendPhase(sendingPhase), SendPhase(phase), telegramSendPhaseDisplayConfirmed},
+			Additional: g.Map{"error_message": ""},
 		}); err != nil {
 			return err
 		}

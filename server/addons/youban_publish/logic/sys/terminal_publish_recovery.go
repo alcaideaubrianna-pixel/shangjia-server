@@ -41,7 +41,7 @@ func terminalPublishRecoverySourceJobID(operationNo string) int64 {
 func terminalPublishRecoveryEligible(job telegramJobRecord, cause error) bool {
 	// Once display was published, recovering only the remaining phase can
 	// interleave with newer jobs. Repair these records through a full relist.
-	if job.SendPhase == telegramSendPhaseDisplaySending || telegramSendPhaseHasDisplay(job.SendPhase) {
+	if job.SendPhase == telegramSendPhaseDisplaySending || telegramSendPhaseHasDisplay(job.SendPhase.String()) {
 		return false
 	}
 	if job.Id <= 0 || job.ProfileId <= 0 || job.ChannelId <= 0 || isMessagePushOperationNo(job.OperationNo) {
@@ -140,7 +140,7 @@ func (s *sSysPublish) handleTerminalPublishRecoveryTask(ctx context.Context, tas
 	}
 	transitioned, err := s.transitionTelegramJob(ctx, telegramJobTransition{
 		JobId: job.Id,
-		From:  []string{telegramJobStatusFailed},
+		From:  []JobStatus{telegramJobStatusFailed},
 		To:    telegramJobStatusPending,
 		Additional: g.Map{
 			"retry_count":         0,
@@ -186,7 +186,7 @@ func (s *sSysPublish) reconcileRecoveredCycleJob(ctx context.Context, recoveryJo
 	message := "原循环任务已由自动补偿任务成功替代"
 	transitioned, err := s.transitionTelegramJob(ctx, telegramJobTransition{
 		JobId:        source.Id,
-		From:         []string{telegramJobStatusFailed},
+		From:         []JobStatus{telegramJobStatusFailed},
 		To:           telegramJobStatusSuperseded,
 		ErrorMessage: message,
 		Additional:   g.Map{"last_dispatch_error": message},

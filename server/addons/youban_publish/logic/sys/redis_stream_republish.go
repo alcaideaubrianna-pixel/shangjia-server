@@ -68,7 +68,7 @@ func (s *sSysPublish) prepareStreamProfileChannelPublish(ctx context.Context, cu
 				}
 			}
 			if job.Status != telegramJobStatusSuperseded {
-				if _, err := s.transitionTelegramJobTx(ctx, tx, telegramJobTransition{JobId: job.Id, From: []string{job.Status}, To: telegramJobStatusSuperseded}); err != nil {
+				if _, err := s.transitionTelegramJobTx(ctx, tx, telegramJobTransition{JobId: job.Id, From: []JobStatus{job.Status}, To: telegramJobStatusSuperseded}); err != nil {
 					return err
 				}
 			}

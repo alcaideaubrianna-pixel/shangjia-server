@@ -94,7 +94,7 @@ func (s *sSysPublish) AdminProfileBatchCancel(ctx context.Context, in *sysin.Adm
 	}
 	if len(ids) > 0 {
 		affected, updateErr := s.transitionTelegramJobs(ctx, ids, telegramJobTransition{
-			From: []string{
+			From: []JobStatus{
 				telegramJobStatusPending, telegramJobStatusRetryWait,
 				telegramJobStatusConfirming, telegramJobStatusSending,
 			},

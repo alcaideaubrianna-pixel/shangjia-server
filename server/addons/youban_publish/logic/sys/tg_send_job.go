@@ -104,7 +104,7 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) (resultE
 	if isMessagePushOperationNo(targetJob.OperationNo) {
 		return s.SendMessagePushJob(ctx, jobId)
 	}
-	if telegramJobLifecycleNeedsRetry(targetJob.Status) && strings.TrimSpace(targetJob.SendPhase) == "" {
+	if telegramJobLifecycleNeedsRetry(targetJob.Status.String()) && strings.TrimSpace(targetJob.SendPhase.String()) == "" {
 		step = beginTelegramPublishStage(ctx, "job.media_ready")
 		ready, readyErr := s.profileMediaReady(ctx, targetJob.ProfileId)
 		step.End(readyErr, g.Map{"ready": ready})
@@ -391,7 +391,7 @@ func (s *sSysPublish) sendTelegramJobLockedByChannel(ctx context.Context, jobId 
 		}
 		return s.completeTelegramJob(ctx, job)
 	}
-	if !telegramSendPhaseHasCleanup(job.SendPhase) {
+	if !telegramSendPhaseHasCleanup(job.SendPhase.String()) {
 		if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseCleanupProcessing); err != nil {
 			return s.handleTelegramJobError(ctx, job, err)
 		}
@@ -543,7 +543,7 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 		s.appendTelegramJobLog(ctx, job, "publish", "superseded", "TG展示资料发送前任务已废弃，停止推送")
 		return errTelegramJobSuperseded
 	}
-	if telegramSendPhaseHasDisplay(job.SendPhase) && len(verifyMedia) > 0 {
+	if telegramSendPhaseHasDisplay(job.SendPhase.String()) && len(verifyMedia) > 0 {
 		displayConfirmed, evidenceErr := s.telegramDisplayDeliveryConfirmed(ctx, job.Id, telegramDisplayExpectedCount(len(displayMedia)))
 		if evidenceErr != nil {
 			return evidenceErr
@@ -553,7 +553,7 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 		}
 	}
 	messages := make([]*telegramSentMessage, 0)
-	if !telegramSendPhaseHasDisplay(job.SendPhase) {
+	if !telegramSendPhaseHasDisplay(job.SendPhase.String()) {
 		restored, restoreErr := s.restoreConfirmedTelegramResponse(ctx, job, "display", displayMedia)
 		if restoreErr != nil {
 			return gerror.Wrap(errTelegramRemoteConfirmed, restoreErr.Error())
@@ -1000,6 +1000,22 @@ func telegramMediaFallbackPurpose(reason string) string {
 	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(reason), telegramMediaFallbackMarker))
 }
 
+// Verification fallback must preserve confirmed display progress.
+func telegramMediaFallbackTransition(job telegramJobRecord, purpose string) telegramJobTransition {
+	phase := SendPhaseEmpty
+	expected := SendPhaseDisplaySending
+	if purpose == "verify" {
+		phase = SendPhaseDisplayConfirmed
+		expected = SendPhaseVerifySending
+	}
+	return telegramJobTransition{
+		JobId: job.Id, From: []JobStatus{JobStatusSending}, To: JobStatusRetryWait,
+		SendPhases: []SendPhase{expected}, SendPhase: jobPhase(phase),
+		DispatchStatus: jobDispatch(DispatchStatusIdle), RetryDelay: telegramMediaFallbackRecoverAfter,
+		Additional: g.Map{"last_dispatch_error": telegramMediaFallbackReason(purpose), "reconcile_count": 0},
+	}
+}
+
 func (s *sSysPublish) submitTelegramMediaFallback(ctx context.Context, job telegramJobRecord, tgAccountID int64, purpose string) error {
 	purpose = strings.TrimSpace(purpose)
 	if job.Id <= 0 || tgAccountID <= 0 || (purpose != "display" && purpose != "verify") {
@@ -1012,27 +1028,14 @@ func (s *sSysPublish) submitTelegramMediaFallback(ctx context.Context, job teleg
 	if !available {
 		return gerror.Newf("协议号媒体降级不可用，TG账号%d未授权或登录态为空，请重新登录", tgAccountID)
 	}
-	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("id", job.Id).Where("status", telegramJobStatusSending).
-		Data(g.Map{
-			"status":              telegramJobStatusRetryWait,
-			"dispatch_status":     tgDispatchStatusIdle,
-			"send_phase":          "",
-			"last_dispatch_error": telegramMediaFallbackReason(purpose),
-			"next_retry_at":       gtime.Now().Add(telegramMediaFallbackRecoverAfter),
-			"reconcile_count":     0,
-			"updated_at":          gtime.Now(),
-		}).Update()
+	transitioned, err := s.transitionTelegramJob(ctx, telegramMediaFallbackTransition(job, purpose))
 	if err != nil {
 		return gerror.Wrap(err, "标记协议号媒体降级等待状态失败")
 	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return gerror.Wrap(err, "确认协议号媒体降级等待状态失败")
-	}
-	if affected == 0 {
+	if !transitioned {
 		return gerror.New("TG任务已不在发送状态，取消协议号媒体降级提交")
 	}
+
 	taskID, submitErr := collectorservice.AccountTasks().Submit(ctx, &collectorin.AccountTaskSubmit{
 		TenantID: job.TenantId, AccountID: tgAccountID,
 		TaskType: collectorin.AccountTaskTypeMessageMediaFallback,
@@ -1075,7 +1078,7 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 		// the marker from channel history and only repair local projections.
 		return s.markTelegramJobUnknown(ctx, job, err)
 	}
-	if !telegramSendPhaseIsCleanup(job.SendPhase) && !isTelegramAccountBusyError(err) && isTelegramAmbiguousDeliveryError(err) {
+	if !telegramSendPhaseIsCleanup(job.SendPhase.String()) && !isTelegramAccountBusyError(err) && isTelegramAmbiguousDeliveryError(err) {
 		return s.markTelegramJobUnknown(ctx, job, err)
 	}
 	allowed, allowedErr := s.canSendTelegramJob(ctx, job)
@@ -1110,8 +1113,8 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 	}
 	transitioned, updateErr := s.transitionTelegramJob(ctx, telegramJobTransition{
 		JobId:        job.Id,
-		From:         []string{telegramJobStatusSending},
-		To:           decision.Status,
+		From:         []JobStatus{telegramJobStatusSending},
+		To:           JobStatus(decision.Status),
 		RetryDelay:   decision.RetryDelay,
 		ErrorMessage: decision.Message,
 		Additional:   additional,
@@ -1159,7 +1162,7 @@ func (s *sSysPublish) failTelegramMediaFallbackJob(ctx context.Context, job tele
 	}
 	transitioned, err := s.transitionTelegramJob(ctx, telegramJobTransition{
 		JobId:        job.Id,
-		From:         []string{telegramJobStatusSending, telegramJobStatusConfirming},
+		From:         []JobStatus{telegramJobStatusSending, telegramJobStatusConfirming},
 		To:           telegramJobStatusFailed,
 		ErrorMessage: message,
 		Additional:   g.Map{"last_dispatch_error": message},
@@ -1214,7 +1217,7 @@ func (s *sSysPublish) switchTelegramJobToNextBot(ctx context.Context, job telegr
 	}
 	transitioned, err := s.transitionTelegramJob(ctx, telegramJobTransition{
 		JobId: job.Id,
-		From:  []string{telegramJobStatusSending},
+		From:  []JobStatus{telegramJobStatusSending},
 		To:    telegramJobStatusPending,
 		Additional: g.Map{
 			"bot_id":        nextBotId,
@@ -1279,7 +1282,7 @@ func (s *sSysPublish) completeTelegramJob(ctx context.Context, job telegramJobRe
 	// fact before taking the profile projection lock: projection contention must
 	// never leave a confirmed job holding the channel's sending slot.
 	sentAt := gtime.Now()
-	transition := telegramJobTransition{JobId: job.Id, From: []string{telegramJobStatusSending, telegramJobStatusConfirming}, To: telegramJobStatusSent, Additional: g.Map{"sent_at": sentAt}}
+	transition := telegramJobTransition{JobId: job.Id, From: []JobStatus{telegramJobStatusSending, telegramJobStatusConfirming}, To: telegramJobStatusSent, Additional: g.Map{"sent_at": sentAt}}
 	streamEngine := s.accountPushEngine(ctx, job.TenantId, job.AccountId) == pushEngineUnifiedStream
 	var transitioned bool
 	if streamEngine {

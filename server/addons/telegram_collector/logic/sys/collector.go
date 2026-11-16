@@ -74,7 +74,6 @@ type sCollector struct {
 	queueHistoryServer    *asynq.Server
 	deliveryServer        *asynq.Server
 	deliveryHistoryServer *asynq.Server
-	deliveryLegacyServer  *asynq.Server
 	historySchedulerStop  context.CancelFunc
 	historyAccountMu      sync.Mutex
 	historyAccountSlots   map[int64]chan struct{}
@@ -122,6 +121,9 @@ func (s *sCollector) IngestBotUpdate(ctx context.Context, bot collectorservice.B
 		event.ChatID = message.Chat.ID
 		event.MessageID = int64(message.ID)
 	}
+	if !event.ValidateBoundary() {
+		return gerror.New("Telegram采集事件归属不完整")
+	}
 	spoolID, err := persistIngestSpool(ctx, &event)
 	if err != nil {
 		return err
@@ -152,7 +154,7 @@ func (s *sCollector) IngestAccountMessage(ctx context.Context, message *sysin.Ac
 	if !collectorEnabled(ctx) {
 		return nil
 	}
-	if message.TenantID <= 0 || message.AccountID <= 0 || message.SourceID <= 0 || message.TgAccountID <= 0 {
+	if !message.ValidateBoundary() || message.TenantID <= 0 || message.AccountID <= 0 || message.SourceID <= 0 || message.TgAccountID <= 0 {
 		return gerror.New("Telegram账号采集消息归属不完整")
 	}
 	message.SourceChatID = strings.TrimSpace(message.SourceChatID)

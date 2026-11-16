@@ -1130,7 +1130,7 @@ func (s *sSysPublish) createMessagePushJobWithOperation(ctx context.Context, tem
 		Status:         sysin.MessagePushStatusPending,
 		Priority:       priority,
 		QueueName:      queueName,
-		DispatchStatus: dispatchStatus,
+		DispatchStatus: DispatchStatus(dispatchStatus),
 		PushMode:       pushMode,
 	}
 	if supersedeErr := s.supersedeOlderMessagePushJobs(ctx, job); supersedeErr != nil {
@@ -1165,7 +1165,7 @@ func (s *sSysPublish) handleMessagePushQueuedJobError(ctx context.Context, job t
 	transitioned, transitionErr := s.transitionTelegramJob(ctx, telegramJobTransition{
 		JobId:        job.Id,
 		From:         messagePushActiveStatuses(),
-		To:           decision.Status,
+		To:           JobStatus(decision.Status),
 		RetryDelay:   decision.RetryDelay,
 		ErrorMessage: decision.Message,
 		Additional: g.Map{
@@ -1343,8 +1343,8 @@ func (s *sSysPublish) failMessagePushJob(ctx context.Context, job telegramJobRec
 	s.appendTelegramJobLog(ctx, job, "message_push", sysin.MessagePushStatusFailed, message)
 }
 
-func messagePushActiveStatuses() []string {
-	return []string{sysin.MessagePushStatusPending, "sending", "failed_retry"}
+func messagePushActiveStatuses() []JobStatus {
+	return []JobStatus{JobStatus(sysin.MessagePushStatusPending), JobStatus("sending"), JobStatus("failed_retry")}
 }
 
 func (s *sSysPublish) supersedeOlderMessagePushJobs(ctx context.Context, job telegramJobRecord) error {

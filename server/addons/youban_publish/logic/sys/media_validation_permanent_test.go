@@ -175,7 +175,7 @@ func TestProfileMediaValidationLocalPostgres(t *testing.T) {
 			if _, err = tx.Exec(`INSERT INTO hg_youban_publish_tg_job(id,status,send_phase) VALUES(?,?,'')`, i+1, status); err != nil {
 				return err
 			}
-			changed, err := s.transitionTelegramJobTx(ctx, tx, telegramJobTransition{JobId: int64(i + 1), From: telegramJobRetryableStatuses(), To: telegramJobStatusFailed, SendPhases: []string{""}, ErrorMessage: "invalid"})
+			changed, err := s.transitionTelegramJobTx(ctx, tx, telegramJobTransition{JobId: int64(i + 1), From: telegramJobRetryableStatuses(), To: telegramJobStatusFailed, SendPhases: []SendPhase{""}, ErrorMessage: "invalid"})
 			if err != nil {
 				return err
 			}

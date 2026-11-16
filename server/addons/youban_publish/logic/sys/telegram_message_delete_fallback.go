@@ -363,7 +363,7 @@ func (s *sSysPublish) cleanupPartialAccountMediaSend(ctx context.Context, client
 		s.appendTelegramJobLog(ctx, job, "account", "cleanup_failed", err.Error())
 		_, _ = s.transitionTelegramJob(ctx, telegramJobTransition{
 			JobId:        job.Id,
-			From:         []string{telegramJobStatusSending},
+			From:         []JobStatus{telegramJobStatusSending},
 			To:           telegramJobStatusConfirming,
 			ErrorMessage: err.Error(),
 		})

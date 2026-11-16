@@ -176,6 +176,8 @@ git diff --check
 
 ## 9. Publish SLS 快速排查
 
+频道无推送的队列事件、租约与恢复排查见 [频道队列 SLS 手册](publish-queue-sls.md)；包含未提取字段时的全文检索兜底。
+
 Publish 线上日志使用以下项目：
 
 ```text
@@ -209,3 +211,46 @@ aliyun sls get-logs-v2 \
 ```
 
 发布链路重点查看 `traceId`、`jobId`、`profileId`、`channelId`、`dispatchStatus`、`jobStatus`、`sendPhase`、`returnedError`、`executionDurationMs`、`deferredReason`。没有 `execution_started` 通常表示队列未消费；`dispatchStatus=queued` 长时间不变表示调度或 Redis/Asynq 消费阻塞；有开始日志但没有完成日志表示执行卡住；接口 `code=52` 必须继续用同一 traceID 搜索底层 SQL 错误。
+
+## 10. SAE 资源反查与 SLS 读取兜底
+
+不要只相信 SLS 控制台 URL 中的 Project/Logstore。先从 SAE Publish 应用读取实际日志绑定：
+
+```sh
+PUBLISH_APP_ID=2fb5d3db-0975-4dea-b086-805d255131fa
+REGION_ID=ap-southeast-1
+aliyun sae ListLogConfigs --RegionId "$REGION_ID" --AppId "$PUBLISH_APP_ID" --PageSize 100 --CurrentPage 1 --profile xiaohuiji-sae
+```
+
+输出中的 `SlsProject`、`SlsLogStore` 和 `ConfigName` 才是当前 SAE 绑定的日志资源。`ListLogConfigs` 缺少分页参数时会分别报 `MissingPageSize` 和 `MissingCurrentPage`。
+
+Publish 实例和镜像版本：
+
+```sh
+aliyun sae DescribeApplicationConfig --RegionId "$REGION_ID" --AppId "$PUBLISH_APP_ID" --profile xiaohuiji-sae | jq '{AppId:.Data.AppId,ImageUrl:.Data.ImageUrl,Replicas:.Data.Replicas,CommandArgs:.Data.CommandArgs}'
+aliyun sae DescribeApplicationGroups --RegionId "$REGION_ID" --AppId "$PUBLISH_APP_ID" --profile xiaohuiji-sae
+aliyun sae DescribeApplicationInstances --RegionId "$REGION_ID" --AppId "$PUBLISH_APP_ID" --GroupId '<DescribeApplicationGroups 返回的 GroupId>' --PageSize 100 --CurrentPage 1 --profile xiaohuiji-sae
+```
+
+当 `get-logs-v2` 返回 `LogStoreNotExist` 时，使用实例 ID 直接读取当前容器 stdout：
+
+```sh
+aliyun sae DescribeInstanceLog --RegionId "$REGION_ID" --InstanceId '<DescribeApplicationInstances 返回的 InstanceId>' --profile xiaohuiji-sae | jq -r '.. | strings' > /tmp/publish-instance.log
+rg -i '全量推送|queueAgeMs|dispatchAgeMs|outbox|failed|超时|TG推送链路' /tmp/publish-instance.log
+```
+
+SLS 查询必须使用 SAE 当前绑定的 `SlsProject`、`SlsLogStore`，并带上 SLS Skill 的 user-agent：
+
+```sh
+aliyun sls get-index --region "$REGION_ID" --profile xiaohuiji-sae --project '<SlsProject>' --logstore '<SlsLogStore>' --user-agent 'AlibabaCloud-Agent-Skills/alibabacloud-sls-query/<session-id>'
+```
+
+如果 `list-log-stores` 能列出 Logstore，但 `get-index`、`get-log-store` 和 `get-logs-v2` 都返回 `LogStoreNotExist`，记录为“CLI 元数据与日志读取接口不一致”，立即改用 `DescribeInstanceLog`，不要据此声称没有线上日志。
+
+SAE 镜像部署前还要检查 ACR：
+
+```sh
+aliyun cr ListInstance --RegionId "$REGION_ID" --profile xiaohuiji-sae
+```
+
+如果 ACR 实例状态为 `STOPPED`，`DeployApplication` 会返回 `InvalidAcrInstance.NotFound` 或 `InvalidImageUrl.MissingAcrInstanceId`。此时 ENV 更新脚本不能完成部署；先恢复有效 ACR 实例或使用仍可用的镜像来源，再重试部署。不要在未成功部署的情况下宣称 ENV 已生效。

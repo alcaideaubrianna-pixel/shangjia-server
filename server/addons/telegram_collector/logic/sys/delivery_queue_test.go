@@ -432,3 +432,25 @@ func TestDeliveryRecoveryUsesBoundedSchedulerPoolLanes(t *testing.T) {
 		t.Fatal("delivery recovery must retain priority filtering for pool classification")
 	}
 }
+
+func TestDeliveryRecoveryDoesNotTreatDuplicateAsSuccessfulEnqueue(t *testing.T) {
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	content, err := os.ReadFile(filepath.Join(filepath.Dir(currentFile), "delivery_queue.go"))
+	if err != nil {
+		t.Fatalf("read delivery queue source: %v", err)
+	}
+	source := string(content)
+
+	if !strings.Contains(source, "enqueueDeliveryTaskWithOptions(ctx, deliveryID, priority, false)") {
+		t.Fatal("delivery recovery must enqueue without Asynq Unique")
+	}
+	if !strings.Contains(source, "if !unique {") {
+		t.Fatal("duplicate Asynq tasks must remain errors for non-unique recovery enqueue")
+	}
+	if !strings.Contains(source, `recovery.enqueue_failed`) {
+		t.Fatal("recovery enqueue failures must be emitted as structured logs")
+	}
+}

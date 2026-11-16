@@ -291,10 +291,12 @@ func (s *sSysPublish) recoverTelegramStreamExecution(ctx context.Context, job te
 	}
 	// 迁移只对无执行者且检查点未变化的任务生效；提交后先释放执行权，再唤醒续跑。
 	changed, transitionErr := s.transitionTelegramJob(ctx, telegramJobTransition{
-		JobId: job.Id, From: []string{telegramJobStatusSending}, To: telegramJobStatusConfirming,
-		SendPhases:    []string{job.SendPhase},
+		DispatchStatus: jobDispatch(DispatchStatus(tgDispatchStatusProcessing)),
+
+		JobId: job.Id, From: []JobStatus{telegramJobStatusSending}, To: telegramJobStatusConfirming,
+		SendPhases:    []SendPhase{job.SendPhase},
 		UpdatedBefore: gtime.Now().Add(-telegramStreamExecutionTTL),
-		Additional:    g.Map{"error_message": "执行进程已退出，按已确认检查点恢复", "dispatch_status": tgDispatchStatusProcessing, "next_retry_at": nil},
+		Additional:    g.Map{"error_message": "执行进程已退出，按已确认检查点恢复", "next_retry_at": nil},
 	})
 	s.releaseTelegramChannelLease(ctx, lease)
 	if transitionErr != nil || !changed {

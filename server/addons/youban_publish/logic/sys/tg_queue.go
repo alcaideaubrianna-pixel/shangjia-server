@@ -423,7 +423,7 @@ func (s *sSysPublish) enqueueTelegramJobInternal(ctx context.Context, jobId int6
 		}
 		_, updateErr := s.transitionTelegramJob(ctx, telegramJobTransition{
 			JobId: jobId,
-			From: []string{
+			From: []JobStatus{
 				telegramJobStatusPending, telegramJobStatusRetryWait,
 				telegramJobStatusConfirming, telegramJobStatusSending,
 			},

@@ -314,7 +314,7 @@ func (s *sSysPublish) supersedeCollectSourcePendingJobs(ctx context.Context, tas
 		jobIds = append(jobIds, job.Id)
 	}
 	_, err = s.transitionTelegramJobs(ctx, jobIds, telegramJobTransition{
-		From: []string{
+		From: []JobStatus{
 			telegramJobStatusPending, telegramJobStatusSending,
 			telegramJobStatusRetryWait, telegramJobStatusConfirming,
 		},
