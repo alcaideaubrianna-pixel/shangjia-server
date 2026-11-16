@@ -196,7 +196,7 @@ func (s *sSysPublish) enqueueAccountSchedules(ctx context.Context) error {
 			uniqueTTL = 30 * time.Minute
 		}
 		_, err = client.EnqueueContext(ctx, asynq.NewTask(publishconsts.QueueAccountScheduleTask, body), asynq.Queue(tgQueueNameAccountSchedule),
-			asynq.Unique(uniqueTTL), asynq.Timeout(25*time.Second), asynq.MaxRetry(3))
+			asynq.Unique(uniqueTTL), asynq.Timeout(25*time.Second), asynq.MaxRetry(3), asynq.Retention(24*time.Hour))
 		if err != nil && !errors.Is(err, asynq.ErrDuplicateTask) {
 			g.Log().Warning(ctx, "账户循环调度入队失败", g.Map{"tenantId": account.TenantID, "accountId": account.ID, "queueName": tgQueueNameAccountSchedule, "error": err.Error()})
 			return err

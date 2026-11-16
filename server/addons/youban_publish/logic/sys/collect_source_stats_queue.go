@@ -71,7 +71,7 @@ func enqueueCollectSourceStatsTask(ctx context.Context, client *asynq.Client, so
 	}
 	_, err = client.EnqueueContext(ctx, asynq.NewTask(tgTaskTypeCollectSourceStats, body),
 		asynq.Queue(tgQueueNameBackground), asynq.ProcessIn(collectSourceStatsRefreshDelay()),
-		asynq.Unique(30*time.Minute), asynq.Timeout(2*time.Minute), asynq.MaxRetry(1000))
+		asynq.Unique(30*time.Minute), asynq.Timeout(2*time.Minute), asynq.MaxRetry(20), asynq.Retention(24*time.Hour))
 	if errors.Is(err, asynq.ErrDuplicateTask) {
 		return nil
 	}
