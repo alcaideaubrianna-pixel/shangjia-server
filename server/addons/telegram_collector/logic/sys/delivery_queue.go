@@ -64,7 +64,17 @@ func (s *sCollector) StartDeliveryRuntime(ctx context.Context) {
 
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(deliveryTaskType, s.handleDeliveryTask)
-	g.Log().Infof(runtimeCtx, "启动Telegram Delivery Worker concurrency:%d", collectorDeliveryConcurrency(runtimeCtx))
+	g.Log().Info(runtimeCtx, "Telegram采集交付Worker已启动", g.Map{
+		"log_type":            "telegram_collect_delivery",
+		"event":               "collect_delivery_worker_started",
+		"workerRole":          "collector-delivery-worker",
+		"workerInstanceId":    collectorInstanceID(),
+		"realtimeConcurrency": collectorDeliveryConcurrency(runtimeCtx),
+		"historyConcurrency":  collectorDeliveryHistoryConcurrency(runtimeCtx),
+		"realtimeQueueCount":  len(deliveryRealtimeQueues()),
+		"historyQueueCount":   len(deliveryHistoryQueues()),
+		"legacyQueueCount":    2,
+	})
 	// The application owns signal handling and calls Shutdown in StopRuntime.
 	// Run waits for an OS signal even after Shutdown and would block runtimeWG.
 	for _, worker := range []*asynq.Server{legacyServer, historyServer, server} {
@@ -109,9 +119,15 @@ func (s *sCollector) enqueueDeliveryTaskWithOptions(ctx context.Context, deliver
 	}
 	_, err := client.EnqueueContext(ctx, asynq.NewTask(deliveryTaskType, collectorTaskPayload(deliveryID)), options...)
 	if errors.Is(err, asynq.ErrDuplicateTask) || errors.Is(err, asynq.ErrTaskIDConflict) {
+		logCollectorDeliveryEnqueue(ctx, deliveryID, queueName, "duplicate", nil)
 		return nil
 	}
-	return err
+	if err != nil {
+		logCollectorDeliveryEnqueue(ctx, deliveryID, queueName, "failed", err)
+		return err
+	}
+	logCollectorDeliveryEnqueue(ctx, deliveryID, queueName, "enqueued", nil)
+	return nil
 }
 
 func (s *sCollector) handleDeliveryTask(ctx context.Context, task *asynq.Task) error {
@@ -120,6 +136,13 @@ func (s *sCollector) handleDeliveryTask(ctx context.Context, task *asynq.Task) e
 		return err
 	}
 	queue := collectorQueueName(ctx)
+	logCollectorDeliveryStage(ctx, "delivery.process.started", deliveryID, 0, queue, nil)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			logCollectorDeliveryStage(ctx, "delivery.process.panic", deliveryID, 0, queue, fmt.Errorf("panic: %v", recovered))
+			panic(recovered)
+		}
+	}()
 	if queue == consts.QueueDeliveryHistory {
 		timer := time.NewTimer(collectorDeliveryHistoryInterval(ctx))
 		defer timer.Stop()
@@ -153,12 +176,14 @@ func (s *sCollector) handleDeliveryTask(ctx context.Context, task *asynq.Task) e
 	}
 	startedAt := time.Now()
 	if err = s.processDelivery(ctx, deliveryID); err != nil {
+		logCollectorDeliveryStage(ctx, "delivery.process.failed", deliveryID, 0, queue, err)
 		counter, _ := collectorMeter.Int64Counter("telegram_collector_delivery_total")
 		counter.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "failed"), attribute.String("queue", collectorQueueName(ctx))))
 		return err
 	}
 	histogram, _ := collectorMeter.Float64Histogram("telegram_collector_delivery_duration_seconds")
 	histogram.Record(ctx, time.Since(startedAt).Seconds(), metric.WithAttributes(attribute.String("result", "completed"), attribute.String("queue", collectorQueueName(ctx))))
+	logCollectorDeliveryStage(ctx, "delivery.process.completed", deliveryID, 0, queue, nil)
 	return nil
 }
 
@@ -214,8 +239,10 @@ func (s *sCollector) processDelivery(ctx context.Context, deliveryID int64) erro
 	}
 	affected, _ := result.RowsAffected()
 	if affected == 0 {
+		logCollectorDeliveryStage(ctx, "delivery.claim.skipped", deliveryID, 0, collectorQueueName(ctx), nil)
 		return nil
 	}
+	logCollectorDeliveryStage(ctx, "delivery.claimed", deliveryID, 0, collectorQueueName(ctx), nil)
 	var row entity.TgCollectorDelivery
 	if err = dao.TgCollectorDelivery.Ctx(ctx).WherePri(deliveryID).Scan(&row); err != nil {
 		return s.failDelivery(ctx, deliveryID, err)
@@ -248,9 +275,12 @@ func (s *sCollector) processDelivery(ctx context.Context, deliveryID int64) erro
 	if handler == nil {
 		return s.failDelivery(ctx, deliveryID, gerror.New("Telegram采集交付处理器尚未注册"))
 	}
+	logCollectorDeliveryStage(ctx, "delivery.handler.started", deliveryID, row.EventId, collectorQueueName(ctx), nil)
 	if err = handler.HandleCollectorDelivery(ctx, &delivery); err != nil {
+		logCollectorDeliveryStage(ctx, "delivery.handler.failed", deliveryID, row.EventId, collectorQueueName(ctx), err)
 		return s.failDelivery(ctx, deliveryID, err)
 	}
+	logCollectorDeliveryStage(ctx, "delivery.handler.completed", deliveryID, row.EventId, collectorQueueName(ctx), nil)
 	_, err = dao.TgCollectorDelivery.Ctx(ctx).WherePri(deliveryID).Data(g.Map{
 		columns.Status:       sysin.DeliveryStatusCompleted,
 		columns.NextRunAt:    nil,
@@ -259,7 +289,55 @@ func (s *sCollector) processDelivery(ctx context.Context, deliveryID int64) erro
 		columns.ErrorMessage: "",
 		columns.UpdatedAt:    gtime.Now(),
 	}).Update()
-	return err
+	if err != nil {
+		logCollectorDeliveryStage(ctx, "delivery.completed.persist_failed", deliveryID, row.EventId, collectorQueueName(ctx), err)
+		return err
+	}
+	logCollectorDeliveryStage(ctx, "delivery.completed", deliveryID, row.EventId, collectorQueueName(ctx), nil)
+	return nil
+}
+
+func logCollectorDeliveryEnqueue(ctx context.Context, deliveryID int64, queue, status string, err error) {
+	fields := g.Map{
+		"log_type":         "telegram_collect_delivery",
+		"event":            "collect_delivery_enqueue",
+		"stage":            "delivery.enqueued",
+		"status":           status,
+		"deliveryId":       deliveryID,
+		"queue":            queue,
+		"workerInstanceId": collectorInstanceID(),
+		"workerRole":       "collector-worker",
+	}
+	if err != nil {
+		fields["errorType"] = fmt.Sprintf("%T", err)
+		fields["error"] = err.Error()
+		g.Log().Warning(ctx, "Telegram采集交付入队", fields)
+		return
+	}
+	g.Log().Info(ctx, "Telegram采集交付入队", fields)
+}
+
+func logCollectorDeliveryStage(ctx context.Context, stage string, deliveryID, eventID int64, queue string, err error) {
+	fields := g.Map{
+		"log_type":         "telegram_collect_delivery",
+		"event":            "collect_delivery_stage",
+		"stage":            stage,
+		"status":           "ok",
+		"deliveryId":       deliveryID,
+		"collectEventId":   eventID,
+		"eventId":          eventID,
+		"queue":            queue,
+		"workerInstanceId": collectorInstanceID(),
+		"workerRole":       "collector-delivery-worker",
+	}
+	if err != nil {
+		fields["status"] = "error"
+		fields["errorType"] = fmt.Sprintf("%T", err)
+		fields["error"] = err.Error()
+		g.Log().Warning(ctx, "Telegram采集交付链路阶段", fields)
+		return
+	}
+	g.Log().Info(ctx, "Telegram采集交付链路阶段", fields)
 }
 
 func (s *sCollector) failDelivery(ctx context.Context, deliveryID int64, cause error) error {

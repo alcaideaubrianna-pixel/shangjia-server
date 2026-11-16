@@ -1468,16 +1468,64 @@ func collectMediaItemFromCollector(item collectorin.CollectorMediaItem) collectM
 
 func (h *publishCollectorDeliveryHandler) HandleCollectorDelivery(ctx context.Context, delivery *collectorin.CollectorDelivery) error {
 	if h == nil || h.publish == nil || delivery == nil {
-		return gerror.New("Telegram采集交付处理参数无效")
+		err := gerror.New("Telegram采集交付处理参数无效")
+		logPublishCollectorDeliveryStage(ctx, "delivery.handler.invalid", delivery, err)
+		return err
 	}
+	logPublishCollectorDeliveryStage(ctx, "delivery.handler.received", delivery, nil)
+	var err error
 	switch delivery.SourceType {
 	case collectorin.SourceTypeBot:
-		return h.publish.ingestCollectorBotDelivery(ctx, delivery)
+		err = h.publish.ingestCollectorBotDelivery(ctx, delivery)
 	case collectorin.SourceTypeAccount:
-		return h.publish.ingestCollectorAccountDelivery(ctx, delivery)
+		err = h.publish.ingestCollectorAccountDelivery(ctx, delivery)
 	default:
-		return gerror.Newf("暂不支持的Telegram采集来源类型：%s", delivery.SourceType)
+		err = gerror.Newf("暂不支持的Telegram采集来源类型：%s", delivery.SourceType)
 	}
+	if err != nil {
+		logPublishCollectorDeliveryStage(ctx, "delivery.handler.failed", delivery, err)
+		return err
+	}
+	logPublishCollectorDeliveryStage(ctx, "delivery.handler.completed", delivery, nil)
+	return nil
+}
+
+func logPublishCollectorDeliveryStage(ctx context.Context, stage string, delivery *collectorin.CollectorDelivery, err error) {
+	fields := g.Map{
+		"log_type":        "telegram_collect_delivery",
+		"event":           "collect_delivery_stage",
+		"stage":           stage,
+		"status":          "ok",
+		"deliveryId":      0,
+		"collectEventId":  0,
+		"eventId":         0,
+		"tenantId":        0,
+		"accountId":       0,
+		"sourceId":        0,
+		"sourceType":      "",
+		"sourceChatId":    "",
+		"sourceMessageId": 0,
+		"workerRole":      "publish-delivery-handler",
+	}
+	if delivery != nil {
+		fields["deliveryId"] = delivery.ID
+		fields["collectEventId"] = delivery.EventID
+		fields["eventId"] = delivery.EventID
+		fields["tenantId"] = delivery.TenantID
+		fields["accountId"] = delivery.AccountID
+		fields["sourceId"] = delivery.SourceID
+		fields["sourceType"] = delivery.SourceType
+		fields["sourceChatId"] = delivery.SourceChatID
+		fields["sourceMessageId"] = delivery.SourceMessageID
+	}
+	if err != nil {
+		fields["status"] = "error"
+		fields["errorType"] = fmt.Sprintf("%T", err)
+		fields["error"] = err.Error()
+		g.Log().Warning(ctx, "Telegram采集交付发布阶段", fields)
+		return
+	}
+	g.Log().Info(ctx, "Telegram采集交付发布阶段", fields)
 }
 
 func (s *sSysPublish) ingestCollectorBotDelivery(ctx context.Context, delivery *collectorin.CollectorDelivery) error {
