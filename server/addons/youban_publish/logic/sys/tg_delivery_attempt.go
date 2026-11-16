@@ -559,6 +559,27 @@ func (s *sSysPublish) startTelegramAttemptHeartbeat(attemptId int64) func() {
 	}
 }
 
+// restoreTelegramResponseBeforeRecovery repairs a durable Telegram response before
+// any timeout path can fence the job. The audit rows are the authoritative evidence.
+func (s *sSysPublish) restoreTelegramResponseBeforeRecovery(ctx context.Context, job telegramJobRecord) (bool, error) {
+	phase := ""
+	switch job.SendPhase {
+	case telegramSendPhaseDisplaySending:
+		phase = "display"
+	case telegramSendPhaseVerifySending:
+		phase = "verify"
+	}
+	if phase == "" {
+		return false, nil
+	}
+	if phase == "verify" {
+		if _, err := s.restoreConfirmedTelegramResponse(ctx, job, "display", nil); err != nil {
+			return true, err
+		}
+	}
+	return s.restoreConfirmedTelegramResponse(ctx, job, phase, nil)
+}
+
 // restoreConfirmedTelegramResponse repairs local projections after Telegram
 // already returned message IDs. It must never call Telegram or start a new
 // delivery attempt.
@@ -575,11 +596,11 @@ func (s *sSysPublish) restoreConfirmedTelegramResponse(ctx context.Context, job 
 	}
 	var rows []*telegramAttemptMessageRecord
 	if err := g.DB().Model(publishTgAttemptMessageTable).Safe().Ctx(ctx).
-		Fields("message_id,message_payload").Where("attempt_id", attempt.Id).OrderAsc("id").Scan(&rows); err != nil {
+		Fields("message_id,message_payload").Where("attempt_id", attempt.Id).OrderAsc("id").Limit(1001).Scan(&rows); err != nil {
 		return true, gerror.Wrap(err, "读取TG已确认消息失败")
 	}
-	if len(rows) == 0 {
-		return true, gerror.New("TG响应已确认但消息审计为空")
+	if len(rows) == 0 || len(rows) > 1000 {
+		return true, gerror.Wrap(errTelegramAttemptAuditIncomplete, "TG响应消息审计为空或超过单次恢复上限")
 	}
 	if attempt.ExpectedCount > 0 && len(rows) < attempt.ExpectedCount {
 		return true, gerror.Wrapf(errTelegramAttemptAuditIncomplete,
@@ -613,13 +634,13 @@ func (s *sSysPublish) restoreConfirmedTelegramResponse(ctx context.Context, job 
 		}
 		messages = append(messages, message)
 	}
+	if len(messages) == 0 || (attempt.ExpectedCount > 0 && len(messages) < attempt.ExpectedCount) {
+		return true, gerror.Wrap(errTelegramAttemptAuditIncomplete, "TG响应有效消息不足，停止恢复确认")
+	}
 	if phase == "package" {
 		if err := s.validateRestoredRelayMessages(ctx, job.Id, messages); err != nil {
 			return true, err
 		}
-	}
-	if err := s.saveTelegramSentMessages(ctx, job, messages); err != nil {
-		return true, err
 	}
 	confirmedPhase := telegramSendPhaseDisplayConfirmed
 	if phase == "verify" {
@@ -628,17 +649,83 @@ func (s *sSysPublish) restoreConfirmedTelegramResponse(ctx context.Context, job 
 	if phase == "package" {
 		confirmedPhase = relayconsts.RelaySendPhaseConfirmed
 	}
-	if err := s.updateTelegramJobSendPhaseFromStatuses(ctx, job.Id, confirmedPhase,
-		telegramJobStatusSending, telegramJobStatusConfirming); err != nil {
-		return true, err
+	// Restoring display evidence must not roll an in-flight verify back to display.
+	if phase == "display" && (job.SendPhase == telegramSendPhaseVerifySending || job.SendPhase == telegramSendPhaseVerifyConfirmed) {
+		confirmedPhase = job.SendPhase
 	}
+	restored := false
+	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if err := boundTelegramConfirmationTransaction(ctx, tx); err != nil {
+			return err
+		}
+		// Match expire/cleanup lock order. A stale recovery snapshot must not
+		// recreate sent facts after a timeout fence or a newer phase transition.
+		var current telegramJobRecord
+		if err := tx.Model(publishTgJobTable).Where("id", job.Id).LockUpdate().Scan(&current); !telegramOptionalAttemptScanSucceeded(err) {
+			return err
+		}
+		if current.Id <= 0 || (current.Status != telegramJobStatusSending && current.Status != telegramJobStatusConfirming) || current.SendPhase != job.SendPhase {
+			return nil
+		}
+		var active telegramDeliveryAttempt
+		if err := tx.Model(publishTgAttemptTable).Where("id", attempt.Id).LockUpdate().Scan(&active); !telegramOptionalAttemptScanSucceeded(err) {
+			return err
+		}
+		if active.Id <= 0 || active.Status == telegramAttemptStatusSuperseded || active.ExpectedCount != attempt.ExpectedCount {
+			return nil
+		}
+		ids := make([]int64, 0, len(messages))
+		for _, message := range messages {
+			ids = append(ids, message.MessageId)
+		}
+		// Retained deletion receipts are authoritative, including soft deletes.
+		existing, err := tx.Model(publishTgMessageTable).Unscoped().Where("job_id", job.Id).
+			WhereIn("tg_message_id", ids).LockUpdate().All()
+		if err != nil {
+			return err
+		}
+		for _, row := range existing {
+			if row["status"].String() == "deleted" || !row["deleted_at"].IsNil() {
+				return nil
+			}
+		}
+		if err := saveTelegramSentMessagesTx(ctx, tx, current, messages); err != nil {
+			return err
+		}
+		if confirmedPhase != current.SendPhase {
+			if _, err := tx.Model(publishTgJobTable).Where("id", job.Id).
+				Data(g.Map{"send_phase": confirmedPhase, "updated_at": gtime.Now()}).Update(); err != nil {
+				return err
+			}
+		}
+		if phase == "display" {
+			if _, err := tx.Model(publishTgJobTable).Where("id", job.Id).
+				Where("tg_message_id", 0).
+				Data(g.Map{"tg_message_id": messages[0].MessageId}).Update(); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.Model(publishTgAttemptTable).Where("id", attempt.Id).Data(g.Map{
+			"status": telegramAttemptStatusConfirmed, "response_received": 1,
+			"confirmed_count": len(messages), "webhook_deadline": nil, "error_message": "", "updated_at": gtime.Now(),
+		}).Update(); err != nil {
+			return err
+		}
+		restored = true
+		return nil
+	})
+	if err != nil {
+		return false, gerror.Wrap(err, "原子恢复TG响应投影失败")
+	}
+	if !restored {
+		return false, nil
+	}
+	// File metadata and cache projection do not hold the job/attempt locks.
+	projectTelegramReturnedMessages(ctx, job, messages, "telegram_response")
 	if err := s.updateTelegramMediaFileIds(ctx, messages); err != nil {
 		g.Log().Warningf(ctx, "恢复TG远端成功响应file_id失败 jobId:%d attemptId:%d err:%+v", job.Id, attempt.Id, err)
 	}
-	_, _ = g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).Where("id", attempt.Id).Data(g.Map{
-		"status": telegramAttemptStatusConfirmed, "response_received": 1,
-		"confirmed_count": len(messages), "webhook_deadline": nil, "error_message": "", "updated_at": gtime.Now(),
-	}).Update()
+	s.cacheTelegramSentMessageMetadata(ctx, job, messages)
 	g.Log().Infof(ctx, "TG远端成功响应本地投影已恢复 jobId:%d attemptId:%d phase:%s messages:%d", job.Id, attempt.Id, phase, len(messages))
 	return true, nil
 }

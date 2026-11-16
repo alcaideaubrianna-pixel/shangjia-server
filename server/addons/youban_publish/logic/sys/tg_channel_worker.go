@@ -34,22 +34,50 @@ type telegramChannelQueueDecision struct {
 	Delay       time.Duration
 }
 
+func telegramChannelEffectivePriority(job telegramJobRecord, mediaReady ...bool) int {
+	priority := job.Priority
+	if priority <= 0 {
+		priority = tgJobPriorityBulk
+	}
+	decision := telegramChannelQueueDecisionFor(job)
+	if priority > tgJobPriorityHistory {
+		priority = tgJobPriorityHistory
+	}
+	if decision.YieldHead && !(len(mediaReady) > 0 && mediaReady[0]) {
+		return tgJobPriorityHistory
+	}
+	return priority
+}
+
+func telegramChannelPriorityAfterFailure(priority, previousRetryCount, retryCount int) int {
+	if priority <= 0 {
+		priority = tgJobPriorityBulk
+	}
+	if priority > tgJobPriorityHistory {
+		priority = tgJobPriorityHistory
+	}
+	if retryCount <= previousRetryCount || retryCount <= 0 || retryCount%3 != 0 || priority >= tgJobPriorityHistory {
+		return priority
+	}
+	// Higher numbers are lower priority. Keep the downgrade bounded at the
+	// existing history lane so a failed job can yield without becoming invalid.
+	if next := priority + 5; next < tgJobPriorityHistory {
+		return next
+	}
+	return tgJobPriorityHistory
+}
+
 func telegramChannelQueueDecisionFor(job telegramJobRecord) telegramChannelQueueDecision {
 	reason := strings.TrimSpace(job.LastDispatchError)
 	switch {
-	case strings.Contains(reason, "媒体仍在异步处理中"):
-		// Media has not started sending. Let ordinary work on this channel pass,
-		// but keep the job in the history lane so it remains durable and ordered
-		// after ready work.
-		return telegramChannelQueueDecision{BlockReason: telegramChannelBlockMedia, YieldHead: true, Delay: 10 * time.Second}
-	case strings.Contains(reason, "awaiting_account_fallback") || strings.Contains(reason, "账号降级"):
-		// Account fallback may still send through a different transport. It is
-		// not safe to pass it because doing so can reorder the same channel.
-		return telegramChannelQueueDecision{BlockReason: telegramChannelBlockAccount, Delay: 30 * time.Second}
 	case telegramChannelJobHasUnknownResult(job):
-		// Telegram may already have accepted the request. Preserve the channel
-		// barrier until reconciliation has a definitive result.
+		// An in-flight or uncertain send always preserves the channel barrier,
+		// even if an earlier media-wait error remains on the record.
 		return telegramChannelQueueDecision{BlockReason: telegramChannelBlockUnknownResult, Delay: 30 * time.Second}
+	case strings.Contains(reason, "awaiting_account_fallback") || strings.Contains(reason, "账号降级"):
+		return telegramChannelQueueDecision{BlockReason: telegramChannelBlockAccount, Delay: 30 * time.Second}
+	case strings.Contains(reason, "媒体仍在异步处理中"):
+		return telegramChannelQueueDecision{BlockReason: telegramChannelBlockMedia, YieldHead: true, Delay: 10 * time.Second}
 	default:
 		return telegramChannelQueueDecision{BlockReason: telegramChannelBlockNone, Delay: time.Second}
 	}
@@ -111,10 +139,13 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 		}
 		return true, loadErr
 	}
-	priority := job.Priority
-	if priority <= 0 {
-		priority = tgJobPriorityBulk
+	// A stale media-wait error is not proof that media is still unavailable.
+	// Check the existing readiness gate before choosing the migration lane.
+	mediaReady := false
+	if telegramChannelQueueDecisionFor(job).YieldHead {
+		mediaReady, _ = s.profileMediaReady(ctx, job.ProfileId)
 	}
+	priority := telegramChannelEffectivePriority(job, mediaReady)
 	if telegramChannelQueueNeedsMigration(claim.Score, priority, claim.Urgent, claim.History) {
 		// Historical members use the old score format. Reinsert the same job
 		// with the current lane/score before sending; this preserves the job and
@@ -153,6 +184,8 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 		"durationMs":  time.Since(dequeueStartedAt).Milliseconds(),
 		"reason":      "head_claimed",
 	})
+	retryCountBeforeSend := job.RetryCount
+	priorityBeforeSend := job.Priority
 	if err = s.SendTelegramJob(ctx, jobID); err != nil {
 		// Keep the job available for the next attempt. A bounded delay avoids a
 		// hot loop when the channel lease or Telegram API is temporarily busy.
@@ -164,15 +197,20 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 		if priority <= 0 {
 			priority = tgJobPriorityBulk
 		}
-		// Every third failed attempt lowers the lane priority by five. There is
-		// deliberately no maximum downgrade: a permanently bad head eventually
-		// yields to newer work while remaining retryable in the queue.
-		if job.RetryCount > 0 && job.RetryCount%3 == 0 {
-			newPriority := priority - 5
-			_, _ = g.DB().Model(publishTgJobTable).Ctx(ctx).Where("id", jobID).Data(g.Map{"priority": newPriority, "updated_at": gtime.Now()}).Update()
-			priority = newPriority
-			g.Log().Warning(ctx, "频道队列任务优先级降级", g.Map{"event": "channel_queue_priority_downgrade", "channelId": channelID, "jobId": jobID, "oldPriority": job.Priority, "newPriority": priority, "retryCount": job.RetryCount, "reason": err.Error()})
+		// Downgrade only when this send actually advanced the retry counter.
+		newPriority := priority
+		if job.RetryCount > retryCountBeforeSend && !isTelegramChannelJobTerminal(job) && telegramChannelQueueDecisionFor(job).BlockReason == telegramChannelBlockNone {
+			newPriority = telegramChannelPriorityAfterFailure(priorityBeforeSend, retryCountBeforeSend, job.RetryCount)
 		}
+		if newPriority != priority {
+			result, updateErr := g.DB().Model(publishTgJobTable).Ctx(ctx).Where("id", jobID).Where("retry_count", job.RetryCount).Where("priority", priorityBeforeSend).Data(g.Map{"priority": newPriority, "updated_at": gtime.Now()}).Update()
+			if updateErr != nil {
+				g.Log().Warning(ctx, "频道队列任务优先级更新失败", g.Map{"jobId": jobID, "error": updateErr.Error()})
+			} else if affected, rowsErr := result.RowsAffected(); rowsErr == nil && affected > 0 {
+				job.Priority = newPriority
+			}
+		}
+		priority = telegramChannelEffectivePriority(job, mediaReady)
 		score := telegramChannelQueueScore(priority, time.UnixMilli(hold), jobID)
 		if isTelegramChannelJobTerminal(job) {
 			g.Log().Info(ctx, "频道队列任务发送失败后已收口", g.Map{"event": "channel_queue_ack", "channelId": channelID, "jobId": jobID, "status": job.Status, "reason": "terminal_after_send_error"})
@@ -218,15 +256,9 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 		default:
 			hold, reason := telegramChannelJobRequeueAt(job)
 			decision := telegramChannelQueueDecisionFor(job)
-			priority := job.Priority
-			if priority <= 0 {
-				priority = tgJobPriorityBulk
-			}
+			priority := telegramChannelEffectivePriority(job, mediaReady)
 			if strings.Contains(reason, "媒体仍在异步处理中") {
 				g.Log().Info(ctx, "频道队列任务等待媒体就绪", g.Map{"event": "channel_queue_media_not_ready", "channelId": channelID, "jobId": jobID, "profileId": job.ProfileId, "score": hold})
-			}
-			if decision.YieldHead {
-				priority = tgJobPriorityHistory
 			}
 			requeueScore := telegramChannelQueueScore(priority, time.UnixMilli(hold), jobID)
 			if isTelegramChannelJobTerminal(job) {

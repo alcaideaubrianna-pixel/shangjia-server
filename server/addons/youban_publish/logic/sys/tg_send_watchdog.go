@@ -316,6 +316,13 @@ func (s *sSysPublish) cleanupTelegramSendTimeout(ctx context.Context, job telegr
 		if err != nil {
 			return err
 		}
+		missing, auditErr := telegramTimeoutUnprojectedAuditCount(tx, job.Id)
+		if auditErr != nil {
+			return auditErr
+		}
+		if missing > 0 {
+			return gerror.New("TG响应审计尚未投影到清理记录，停止自动重新上架")
+		}
 		if unresolved > 0 {
 			return gerror.New("旧发送仍缺少完整确认，已清理已知消息，等待对账或人工补偿；不自动重新上架")
 		}
@@ -337,6 +344,23 @@ func (s *sSysPublish) cleanupTelegramSendTimeout(ctx context.Context, job telegr
 	if err != nil {
 		g.Log().Warningf(ctx, "TG超时清理后重新入队失败 jobId:%d err:%+v", job.Id, err)
 	}
+}
+
+// telegramTimeoutUnprojectedAuditCount prevents an empty message projection from
+// being mistaken for proof of deletion. A deleted row is retained as the receipt.
+func telegramTimeoutUnprojectedAuditCount(tx gdb.TX, jobID int64) (int, error) {
+	row, err := tx.Model(publishTgAttemptMessageTable+" audit").
+		InnerJoin(publishTgAttemptTable+" attempt", "attempt.id=audit.attempt_id").
+		Where("attempt.job_id", jobID).
+		Where("NOT EXISTS (SELECT 1 FROM " + publishTgMessageTable + " message WHERE message.job_id=attempt.job_id AND message.tg_message_id=audit.message_id)").
+		Fields("audit.message_id").Limit(1).One()
+	if err != nil {
+		return 0, err
+	}
+	if !row.IsEmpty() {
+		return 1, nil
+	}
+	return 0, nil
 }
 
 func telegramTimeoutUnresolvedAttemptCount(tx gdb.TX, jobID int64) (int, error) {
@@ -395,6 +419,19 @@ func (s *sSysPublish) recoverTelegramSendTimeouts(ctx context.Context) {
 		return
 	}
 	for _, job := range jobs {
+		if restored, restoreErr := s.restoreTelegramResponseBeforeRecovery(ctx, job); restoreErr != nil {
+			// Incomplete or malformed evidence must not hold the channel forever.
+			// Isolation retains the audit; cleanup cannot activate an unsafe tail.
+			g.Log().Warningf(ctx, "TG超时前恢复响应失败，保留审计并隔离 jobId:%d err:%+v", job.Id, restoreErr)
+		} else if restored && job.SendPhase == telegramSendPhaseVerifySending {
+			current, loadErr := s.telegramJobById(ctx, job.Id)
+			if loadErr == nil && current.SendPhase == telegramSendPhaseVerifyConfirmed {
+				if completeErr := s.completeTelegramJobAndWakeChannel(ctx, current); completeErr != nil {
+					g.Log().Warningf(ctx, "TG恢复验证响应后收口失败 jobId:%d err:%+v", job.Id, completeErr)
+				}
+				continue
+			}
+		}
 		var old telegramJobRecord
 		var replacement int64
 		err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {

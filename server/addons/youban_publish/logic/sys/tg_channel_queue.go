@@ -93,6 +93,9 @@ func telegramChannelQueueScore(priority int, availableAt time.Time, jobID int64)
 }
 
 func telegramChannelQueueNeedsMigration(score int64, priority int, urgent bool, history ...bool) bool {
+	// The effective lane is represented by the queue key and claim metadata.
+	// A media wait may use a temporary history lane without changing the DB
+	// priority; callers must pass that effective priority here.
 	expectedHistory := priority >= tgJobPriorityHistory
 	actualHistory := len(history) > 0 && history[0]
 	if actualHistory != expectedHistory {

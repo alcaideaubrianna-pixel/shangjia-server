@@ -1242,6 +1242,18 @@ func telegramActiveChannelConditionForAlias(jobTable string) string {
 }
 
 func (s *sSysPublish) requeueStaleTelegramSendingJob(ctx context.Context, job telegramJobRecord) error {
+	if restored, err := s.restoreTelegramResponseBeforeRecovery(ctx, job); err != nil {
+		return err
+	} else if restored {
+		current, loadErr := s.telegramJobById(ctx, job.Id)
+		if loadErr != nil {
+			return loadErr
+		}
+		if current.SendPhase == telegramSendPhaseVerifyConfirmed {
+			return s.completeTelegramJobAndWakeChannel(ctx, current)
+		}
+		job = current
+	}
 	now := gtime.Now()
 	status := "failed_retry"
 	message := "TG推送任务长时间处于发送中，已自动重新投递"
@@ -1263,7 +1275,7 @@ func (s *sSysPublish) requeueStaleTelegramSendingJob(ctx context.Context, job te
 		decision := telegramJobFailureNextState(gerror.New(latestAttempt.ErrorMessage), job.RetryCount)
 		status = decision.Status
 		message = decision.Message
-	} else if job.SendPhase == telegramSendPhaseDisplaySending || job.SendPhase == telegramSendPhaseVerifySending || job.SendPhase == relayconsts.RelaySendPhaseSending {
+	} else if job.SendPhase == telegramSendPhaseDisplaySending || job.SendPhase == telegramSendPhaseDisplayConfirmed || job.SendPhase == telegramSendPhaseVerifySending || job.SendPhase == relayconsts.RelaySendPhaseSending {
 		status = telegramJobStatusConfirming
 		message = "服务中断时TG发送结果不确定，已进入频道消息对账"
 		reconcileCount = 0

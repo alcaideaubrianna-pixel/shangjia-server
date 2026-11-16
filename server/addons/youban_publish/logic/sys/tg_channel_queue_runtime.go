@@ -12,10 +12,118 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 )
 
-// runTelegramChannelQueueWorker is the migration consumer for the logical
-// per-channel Redis queues. It is opt-in so the legacy Asynq consumer remains
-// the sole sender until a channel is explicitly migrated.
+// telegramChannelQueueDispatcher bounds local work across polling passes.
+// The existing distributed channel lease still guards cross-process sends.
+type telegramChannelQueueDispatcher struct {
+	sem     chan struct{}
+	mu      sync.Mutex
+	running map[int64]struct{}
+	wg      sync.WaitGroup
+	next    int
+}
+
+// dispatch resumes after the last admitted channel so a fixed active list is fair.
+// Only the scheduling loop calls dispatch; submit protects in-flight state.
+func (d *telegramChannelQueueDispatcher) dispatch(ctx context.Context, channels []int64, process func(int64)) {
+	if len(channels) == 0 {
+		d.next = 0
+		return
+	}
+	start := d.next % len(channels)
+	for i := 0; i < len(channels); i++ {
+		index := (start + i) % len(channels)
+		if d.submit(ctx, channels[index], process) {
+			d.next = (index + 1) % len(channels)
+		}
+	}
+}
+
+// runTelegramChannelQueueSchedule owns all submissions and waits only at shutdown.
+// Recovery has its own single slot, so a slow recovery cannot stall polling.
+func runTelegramChannelQueueSchedule(ctx context.Context, ticks, recoveryTicks <-chan time.Time, pass, recover func(context.Context)) {
+	var recovery sync.WaitGroup
+	busy := make(chan struct{}, 1)
+	defer recovery.Wait()
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticks:
+			if ctx.Err() == nil {
+				pass(ctx)
+			}
+		case <-recoveryTicks:
+			if ctx.Err() != nil {
+				return
+			}
+			select {
+			case busy <- struct{}{}:
+				recovery.Add(1)
+				go func() {
+					defer recovery.Done()
+					defer func() { <-busy }()
+					recover(ctx)
+				}()
+			default:
+			}
+		}
+	}
+}
+
+func newTelegramChannelQueueDispatcher(limit int) *telegramChannelQueueDispatcher {
+	if limit <= 0 {
+		limit = 1
+	}
+	return &telegramChannelQueueDispatcher{
+		sem:     make(chan struct{}, limit),
+		running: make(map[int64]struct{}),
+	}
+}
+
+func (d *telegramChannelQueueDispatcher) submit(ctx context.Context, channelID int64, process func(int64)) bool {
+	d.mu.Lock()
+	if ctx.Err() != nil || channelID <= 0 {
+		d.mu.Unlock()
+		return false
+	}
+	if _, exists := d.running[channelID]; exists {
+		d.mu.Unlock()
+		return false
+	}
+	select {
+	case d.sem <- struct{}{}:
+	default:
+		d.mu.Unlock()
+		return false
+	}
+	d.running[channelID] = struct{}{}
+	d.wg.Add(1)
+	d.mu.Unlock()
+
+	go func() {
+		defer d.wg.Done()
+		defer func() {
+			<-d.sem
+			d.mu.Lock()
+			delete(d.running, channelID)
+			d.mu.Unlock()
+		}()
+		if ctx.Err() == nil {
+			process(channelID)
+		}
+	}()
+	return true
+}
+
+func (d *telegramChannelQueueDispatcher) wait() {
+	d.wg.Wait()
+}
+
 func (s *sSysPublish) runTelegramChannelQueueWorker(ctx context.Context) {
+	dispatcher := newTelegramChannelQueueDispatcher(channelQueueWorkerConcurrency())
 	ticker := time.NewTicker(500 * time.Millisecond)
 	// The Redis active-channel set is only a fast index. Jobs created before
 	// the index write, or jobs whose Redis enqueue was interrupted, remain in
@@ -25,18 +133,14 @@ func (s *sSysPublish) runTelegramChannelQueueWorker(ctx context.Context) {
 	recoveryTicker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	defer recoveryTicker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			s.processTelegramChannelQueuePass(ctx)
-		case <-recoveryTicker.C:
+	defer dispatcher.wait()
+	runTelegramChannelQueueSchedule(ctx, ticker.C, recoveryTicker.C,
+		func(ctx context.Context) { s.processTelegramChannelQueuePass(ctx, dispatcher) },
+		func(ctx context.Context) {
 			if err := s.rehydrateMissingTelegramChannelQueue(ctx, telegramChannelRecoveryBatchSize()); err != nil {
 				g.Log().Warningf(ctx, "频道队列低频恢复失败 err:%+v", err)
 			}
-		}
-	}
+		})
 }
 
 func telegramChannelRecoveryBatchSize() int {
@@ -58,7 +162,7 @@ func telegramChannelRecoveryBatchSize() int {
 	return value
 }
 
-func (s *sSysPublish) processTelegramChannelQueuePass(ctx context.Context) {
+func (s *sSysPublish) processTelegramChannelQueuePass(ctx context.Context, dispatcher *telegramChannelQueueDispatcher) {
 	if !telegramChannelQueueEnabled() {
 		return
 	}
@@ -67,39 +171,23 @@ func (s *sSysPublish) processTelegramChannelQueuePass(ctx context.Context) {
 		g.Log().Warningf(ctx, "频道活跃集合读取失败 err:%+v", err)
 		return
 	}
-	// Channel ordering is enforced by the per-channel Redis lease. Different
-	// channels must run concurrently; a single global loop here otherwise turns
-	// one slow upload into a backlog for every channel.
-	limit := channelQueueWorkerConcurrency()
-	sem := make(chan struct{}, limit)
-	var wg sync.WaitGroup
-	for _, channelID := range channels {
-		if channelID <= 0 {
-			continue
+	dispatcher.dispatch(ctx, channels, func(channelID int64) {
+		processed, processErr := s.processTelegramChannelQueueHead(ctx, channelID)
+		if processErr != nil {
+			g.Log().Warningf(ctx, "频道队列消费失败 channel:%d err:%+v", channelID, processErr)
+			return
 		}
-		sem <- struct{}{}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			defer func() { <-sem }()
-			processed, processErr := s.processTelegramChannelQueueHead(ctx, channelID)
-			if processErr != nil {
-				g.Log().Warningf(ctx, "频道队列消费失败 channel:%d err:%+v", channelID, processErr)
-				return
-			}
-			if !processed {
-				normal, normalErr := g.Redis().Do(ctx, "ZCARD", telegramChannelQueueKey(channelID))
-				urgent, urgentErr := g.Redis().Do(ctx, "ZCARD", telegramChannelUrgentQueueKey(channelID))
-				history, historyErr := g.Redis().Do(ctx, "ZCARD", telegramChannelHistoryQueueKey(channelID))
-				if normalErr == nil && urgentErr == nil && historyErr == nil && normal.Int()+urgent.Int()+history.Int() == 0 {
-					if removeErr := removeActiveTelegramChannel(ctx, channelID); removeErr != nil {
-						g.Log().Warningf(ctx, "频道活跃集合清理失败 channel:%d err:%+v", channelID, removeErr)
-					}
+		if !processed {
+			normal, normalErr := g.Redis().Do(ctx, "ZCARD", telegramChannelQueueKey(channelID))
+			urgent, urgentErr := g.Redis().Do(ctx, "ZCARD", telegramChannelUrgentQueueKey(channelID))
+			history, historyErr := g.Redis().Do(ctx, "ZCARD", telegramChannelHistoryQueueKey(channelID))
+			if normalErr == nil && urgentErr == nil && historyErr == nil && normal.Int()+urgent.Int()+history.Int() == 0 {
+				if removeErr := removeActiveTelegramChannel(ctx, channelID); removeErr != nil {
+					g.Log().Warningf(ctx, "频道活跃集合清理失败 channel:%d err:%+v", channelID, removeErr)
 				}
 			}
-		}()
-	}
-	wg.Wait()
+		}
+	})
 }
 
 func channelQueueWorkerConcurrency() int {
