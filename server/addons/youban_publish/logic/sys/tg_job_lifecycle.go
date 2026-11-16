@@ -4,6 +4,9 @@ import (
 	"context"
 	"strings"
 
+	"hotgo/addons/youban_publish/model/input/sysin"
+
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -56,34 +59,62 @@ func (s *sSysPublish) clearSupersededProfileOperationIfTerminal(ctx context.Cont
 	if job.TenantId <= 0 || job.AccountId <= 0 || job.ProfileId <= 0 || strings.TrimSpace(job.OperationNo) == "" {
 		return nil
 	}
-	var summary struct {
-		Total      int `orm:"total"`
-		Superseded int `orm:"superseded"`
-		Active     int `orm:"active"`
+	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		return s.clearSupersededProfileOperationTx(ctx, tx, job)
+	})
+}
+
+func (s *sSysPublish) clearSupersededProfileOperationTx(ctx context.Context, tx gdb.TX, job telegramJobRecord) error {
+	operationNo := strings.TrimSpace(job.OperationNo)
+	state, err := tx.Model(publishProfileStateTable).Safe().Ctx(ctx).
+		Where("tenant_id", job.TenantId).Where("account_id", job.AccountId).
+		Where("profile_id", job.ProfileId).WhereNull("deleted_at").
+		Fields("publish_operation_no,publish_task_status").LockUpdate().One()
+	if err != nil {
+		return gerror.Wrap(err, "锁定已废弃资料操作状态失败")
 	}
-	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("tenant_id", job.TenantId).
-		Where("account_id", job.AccountId).
-		Where("profile_id", job.ProfileId).
-		Where("operation_no", strings.TrimSpace(job.OperationNo)).
-		Fields("COUNT(*) AS total, SUM(CASE WHEN status='superseded' THEN 1 ELSE 0 END) AS superseded, SUM(CASE WHEN status IN ('pending','sending','retry_wait','confirming','failed_retry','unknown') THEN 1 ELSE 0 END) AS active").
+	if state.IsEmpty() || state["publish_operation_no"].String() != operationNo {
+		return nil
+	}
+	status := sysin.PublishTaskStatus(state["publish_task_status"].String())
+	if status != sysin.PublishTaskStatusPending && status != sysin.PublishTaskStatusPublishing {
+		return nil
+	}
+	// Recheck after locking the operation. Any non-superseded job keeps it alive.
+	var summary struct {
+		Total     int `orm:"total"`
+		Remaining int `orm:"remaining"`
+	}
+	if err := tx.Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("tenant_id", job.TenantId).Where("account_id", job.AccountId).
+		Where("profile_id", job.ProfileId).Where("operation_no", operationNo).
+		Fields("COUNT(*) AS total, COUNT(CASE WHEN status IS NULL OR status<>'" + telegramJobStatusSuperseded + "' THEN 1 END) AS remaining").
 		Scan(&summary); err != nil {
 		return gerror.Wrap(err, "检查已废弃资料操作状态失败")
 	}
-	if summary.Total == 0 || summary.Total != summary.Superseded || summary.Active != 0 {
+	if summary.Total == 0 || summary.Remaining != 0 {
 		return nil
 	}
 	now := gtime.Now()
-	if _, err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
+	result, err := tx.Model(publishProfileStateTable).Safe().Ctx(ctx).
 		Where("tenant_id", job.TenantId).Where("account_id", job.AccountId).
-		Where("profile_id", job.ProfileId).Where("publish_operation_no", strings.TrimSpace(job.OperationNo)).
-		WhereIn("publish_task_status", []string{"pending", "publishing", "sending"}).
-		Data(g.Map{"publish_operation_no": "", "publish_task_status": "", "publish_task_updated_at": now, "updated_at": now}).Update(); err != nil {
+		Where("profile_id", job.ProfileId).Where("publish_operation_no", operationNo).
+		Where("publish_task_status", status.String()).WhereNull("deleted_at").
+		Data(g.Map{"publish_operation_no": "", "publish_task_status": "", "publish_task_updated_at": now, "updated_at": now}).Update()
+	if err != nil {
 		return gerror.Wrap(err, "清理已废弃资料操作状态失败")
 	}
-	if _, err := g.DB().Model(publishNoteIndexTable).Unscoped().Safe().Ctx(ctx).
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return gerror.Wrap(err, "读取已废弃资料状态更新结果失败")
+	}
+	if affected == 0 {
+		return nil
+	}
+	if _, err := tx.Model(publishNoteIndexTable).Unscoped().Safe().Ctx(ctx).
 		Where("tenant_id", job.TenantId).Where("account_id", job.AccountId).
-		Where("profile_id", job.ProfileId).WhereIn("task_status", []string{"pending", "publishing", "sending"}).
+		Where("profile_id", job.ProfileId).WhereNull("deleted_at").
+		WhereIn("task_status", sysin.PublishTaskStatusStrings(sysin.PublishTaskStatusPending, sysin.PublishTaskStatusPublishing)).
 		Data(g.Map{"task_status": "", "updated_at": now}).Update(); err != nil {
 		return gerror.Wrap(err, "同步已废弃资料列表状态失败")
 	}
