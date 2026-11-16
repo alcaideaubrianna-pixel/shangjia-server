@@ -70,6 +70,90 @@ func TestTelegramChannelLaneRedisMigrationPreservesJob(t *testing.T) {
 	}
 }
 
+func TestTelegramChannelClaimDueAllLanes(t *testing.T) {
+	server := miniredis.RunT(t)
+	client, err := gredis.New(&gredis.Config{Address: server.Addr()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared := g.Redis()
+	previousRedis := shared.GetAdapter()
+	shared.SetAdapter(client.GetAdapter())
+	t.Cleanup(func() {
+		shared.SetAdapter(previousRedis)
+		_ = client.Close(context.Background())
+	})
+	ctx := context.Background()
+	const channelID int64 = 9990601
+	keys := []string{telegramChannelUrgentQueueKey(channelID), telegramChannelQueueKey(channelID), telegramChannelHistoryQueueKey(channelID)}
+	for _, tt := range []struct {
+		name     string
+		due      [3]bool
+		wantLane int
+	}{
+		{"all_empty", [3]bool{}, -1},
+		{"urgent_first", [3]bool{true, true, true}, 0},
+		{"future_urgent", [3]bool{false, true, true}, 1},
+		{"future_urgent_normal", [3]bool{false, false, true}, 2},
+		{"all_future", [3]bool{}, -1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := shared.Do(ctx, "DEL", keys[0], keys[1], keys[2])
+			if err != nil {
+				t.Fatal(err)
+			}
+			scores := [3]int64{}
+			if tt.name != "all_empty" {
+				for i, key := range keys {
+					at := time.Now().Add(time.Hour)
+					if tt.due[i] {
+						at = time.Now().Add(-time.Minute)
+					}
+					scores[i] = int64(i)*telegramChannelQueuePriorityScale + at.UnixMilli()
+					if _, err := shared.Do(ctx, "ZADD", key, scores[i], i+1); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			claim, err := dequeueTelegramChannelHeadWithScore(ctx, channelID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tt.wantLane < 0 {
+				if claim != (telegramChannelQueueClaim{}) {
+					t.Fatalf("unexpected claim: %+v", claim)
+				}
+			} else if claim.JobID != int64(tt.wantLane+1) || claim.Score != scores[tt.wantLane] || claim.Urgent != (tt.wantLane == 0) || claim.History != (tt.wantLane == 2) {
+				t.Fatalf("wrong claim: %+v lane=%d scores=%v", claim, tt.wantLane, scores)
+			}
+			for i, key := range keys {
+				value, err := shared.Do(ctx, "ZCARD", key)
+				want := 1
+				if tt.name == "all_empty" || i == tt.wantLane {
+					want = 0
+				}
+				if err != nil || value.Int() != want {
+					t.Fatalf("lane %d cardinality=%v err=%v want=%d", i, value, err, want)
+				}
+			}
+		})
+	}
+	// The single-key entry point keeps its score and lane metadata contract.
+	for i, key := range keys {
+		score := int64(i)*telegramChannelQueuePriorityScale + time.Now().Add(-time.Minute).UnixMilli()
+		if _, err := shared.Do(ctx, "DEL", key); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := shared.Do(ctx, "ZADD", key, score, i+10); err != nil {
+			t.Fatal(err)
+		}
+		claim, err := dequeueTelegramChannelHeadFromKey(ctx, key)
+		if err != nil || claim.JobID != int64(i+10) || claim.Score != score || claim.Urgent != (i == 0) || claim.History != (i == 2) {
+			t.Fatalf("single key lane %d: %+v err=%v", i, claim, err)
+		}
+	}
+}
+
 func TestTelegramChannelLaneFailureDowngrade(t *testing.T) {
 	for _, tt := range []struct{ priority, before, after, want int }{
 		{tgJobPriorityInteractive, 2, 3, 6},
