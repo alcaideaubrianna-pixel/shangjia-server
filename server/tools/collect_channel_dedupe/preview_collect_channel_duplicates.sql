@@ -27,15 +27,32 @@ WITH channels AS (
            max(c.id) FILTER (WHERE c.survivor_rank = 1) OVER (PARTITION BY c.tenant_id, c.canonical_chat_id) AS survivor_channel_id
     FROM channels c
     JOIN groups g USING (tenant_id, canonical_chat_id)
+), account_relations AS (
+    SELECT ac.*, c.canonical_chat_id,
+           row_number() OVER (
+               PARTITION BY ac.tenant_id, ac.account_id, ac.source_id, c.canonical_chat_id
+               ORDER BY ac.updated_at DESC NULLS LAST, ac.id DESC
+           ) AS latest_relation_rank
+    FROM hg_youban_publish_collect_account_channel ac
+    JOIN channels c ON c.tenant_id = ac.tenant_id AND c.id = ac.channel_id
+    WHERE ac.deleted_at IS NULL
 ), relation_groups AS (
     SELECT s.tenant_id, s.canonical_chat_id,
-           count(ac.id) AS account_relation_count,
-           count(*) FILTER (WHERE ac.collect_enabled = 1 AND ac.status = 'enabled' AND ac.approval_status = 'approved') AS allowed_count,
-           count(*) FILTER (WHERE ac.status = 'disabled' OR ac.approval_status = 'rejected' OR coalesce(ac.disabled_reason, '') <> '') AS blocked_or_manual_count,
-           count(*) FILTER (WHERE coalesce(ac.disabled_reason, '') <> '' OR ac.disabled_at IS NOT NULL) AS manual_decision_count
+           count(ar.id) AS account_relation_count,
+           count(*) FILTER (WHERE ar.collect_enabled = 1 AND ar.status = 'enabled' AND ar.approval_status = 'approved') AS allowed_count,
+           count(*) FILTER (WHERE ar.status = 'disabled' OR ar.approval_status = 'rejected' OR coalesce(ar.disabled_reason, '') <> '') AS blocked_or_manual_count,
+           count(*) FILTER (WHERE ar.latest_relation_rank = 1
+                                  AND (coalesce(ar.disabled_reason, '') <> '' OR ar.disabled_at IS NOT NULL)) AS manual_decision_count,
+           count(*) FILTER (WHERE ar.latest_relation_rank = 1) AS latest_relation_count,
+           string_agg(ar.id::text, ',' ORDER BY ar.updated_at DESC NULLS LAST, ar.id DESC)
+               FILTER (WHERE ar.latest_relation_rank = 1) AS latest_relation_ids,
+           string_agg(
+               coalesce(ar.status, '') || '/' || coalesce(ar.approval_status, ''),
+               ',' ORDER BY ar.updated_at DESC NULLS LAST, ar.id DESC
+           ) FILTER (WHERE ar.latest_relation_rank = 1) AS latest_relation_states
     FROM scoped s
-    LEFT JOIN hg_youban_publish_collect_account_channel ac
-      ON ac.tenant_id = s.tenant_id AND ac.channel_id = s.id AND ac.deleted_at IS NULL
+    LEFT JOIN account_relations ar
+      ON ar.tenant_id = s.tenant_id AND ar.canonical_chat_id = s.canonical_chat_id
     GROUP BY s.tenant_id, s.canonical_chat_id
 ), decision AS (
     SELECT s.tenant_id, s.canonical_chat_id,
@@ -78,6 +95,9 @@ SELECT rg.tenant_id,
        rg.allowed_count,
        rg.blocked_or_manual_count,
        rg.manual_decision_count,
+       rg.latest_relation_count,
+       rg.latest_relation_ids,
+       rg.latest_relation_states,
        d.old_bot_ref AS old_channel_has_bot_ref,
        d.old_account_ref AS old_channel_has_account_ref,
        d.old_rule_ref AS old_channel_has_rule_ref,
@@ -86,7 +106,15 @@ SELECT rg.tenant_id,
        d.count_member_ref,
        CASE
            WHEN rg.manual_decision_count > 0
-             OR (rg.allowed_count > 0 AND rg.blocked_or_manual_count > 0)
+             OR EXISTS (
+                 SELECT 1
+                 FROM account_relations ar
+                 WHERE ar.canonical_chat_id = rg.canonical_chat_id
+                   AND ar.tenant_id = rg.tenant_id
+                   AND ar.latest_relation_rank = 1
+                   AND (ar.status = 'disabled' OR ar.approval_status = 'rejected'
+                        OR coalesce(ar.disabled_reason, '') <> '')
+             )
              OR d.old_bot_ref OR d.old_account_ref OR d.old_rule_ref
            THEN 'manual_conflict'
            ELSE 'safe_auto_merge'
@@ -96,6 +124,7 @@ JOIN scoped s USING (tenant_id, canonical_chat_id)
 JOIN decision d USING (tenant_id, canonical_chat_id)
 GROUP BY rg.tenant_id, rg.canonical_chat_id, rg.account_relation_count,
          rg.allowed_count, rg.blocked_or_manual_count, rg.manual_decision_count,
+         rg.latest_relation_count, rg.latest_relation_ids, rg.latest_relation_states,
          d.old_bot_ref, d.old_account_ref, d.old_rule_ref, d.profile_ref,
          d.count_ref, d.count_member_ref
 ORDER BY rg.tenant_id, rg.canonical_chat_id;
@@ -142,6 +171,8 @@ SELECT ac.tenant_id, ac.account_id, ac.source_id, c.canonical_chat_id,
        ac.collect_enabled, ac.status, ac.approval_status,
        ac.approved_at, ac.disabled_at, ac.disabled_reason,
        ac.created_at, ac.updated_at, ac.deleted_at,
+       ac.latest_relation_rank,
+       CASE WHEN ac.latest_relation_rank = 1 THEN 'latest_wins' ELSE 'historical_alias' END AS latest_decision,
        CASE
            WHEN coalesce(ac.disabled_reason, '') <> '' OR ac.disabled_at IS NOT NULL
              OR ac.status = 'disabled' OR ac.approval_status = 'rejected'
@@ -150,10 +181,9 @@ SELECT ac.tenant_id, ac.account_id, ac.source_id, c.canonical_chat_id,
            THEN 'allowed'
            ELSE 'pending_or_other'
        END AS relation_decision
-FROM hg_youban_publish_collect_account_channel ac
+FROM account_relations ac
 JOIN channels c ON c.tenant_id = ac.tenant_id AND c.id = ac.channel_id
 JOIN groups g USING (tenant_id, canonical_chat_id)
-WHERE ac.deleted_at IS NULL
 ORDER BY ac.tenant_id, ac.account_id, ac.source_id, c.canonical_chat_id, ac.id;
 
 \echo '== bot_channel references by duplicate group =='

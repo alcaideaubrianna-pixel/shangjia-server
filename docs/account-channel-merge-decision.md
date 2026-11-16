@@ -65,6 +65,20 @@ disabled_at IS NOT NULL
 updated_at 较新
 ```
 
+本项目当前采用“最新关系优先”的归并决策：`updated_at` 越新的活动关系越优先；如果时间相同，则使用更大的 `relation_id` 作为稳定的最后写入顺序。这个字段只用于确定同一组历史关系的最终状态，不代表它本身就是人工操作证据。
+
+因此，同一 `tenant/account/source/canonical_chat_id` 下：
+
+```text
+最新关系为 disabled/rejected
+    → 最终保留 disabled/rejected
+
+最新关系为 enabled/approved
+    → 最终保留 enabled/approved
+```
+
+若最新关系带有明确人工阻断原因，保留该阻断；若没有原因，也仍按最新状态归并，并在迁移审计中标记为 `latest_state_wins`。
+
 ## 关系分类
 
 迁移预览应把每条关系分类为以下四类之一。
