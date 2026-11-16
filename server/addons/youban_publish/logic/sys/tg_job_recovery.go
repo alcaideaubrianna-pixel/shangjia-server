@@ -1084,17 +1084,34 @@ func (s *sSysPublish) recoverPendingIdleTelegramJobs(ctx context.Context, limit 
 }
 
 func telegramPendingRecoveryPostgresSQL() string {
-	return `SELECT j.* FROM ` + publishTgJobTable + ` j
+	return `WITH channel_candidates AS (
+		SELECT DISTINCT ON (
+			j.tenant_id,
+			j.account_id,
+			j.channel_id,
+			REPLACE(COALESCE(j.target_chat_id,''),'-100','')
+		) j.*
+		FROM ` + publishTgJobTable + ` j
 		WHERE j.status IN ('pending','failed_retry')
-		AND COALESCE(j.dispatch_status,'') IN ('','idle')
-		AND COALESCE(j.asynq_task_id,'')=''
-		AND ` + telegramPendingRecoveryChannelHeadSQL("j", "earlier") + `
-		AND ` + telegramActiveChannelConditionForAlias("j") + `
-		AND ` + messagePushPlanRecoveryConditionSQL("j") + `
-		AND (j.next_retry_at IS NULL OR j.next_retry_at<=?)
-		AND j.updated_at<=?
-		ORDER BY j.created_at,j.id
-		LIMIT ?`
+			AND COALESCE(j.dispatch_status,'') IN ('','idle')
+			AND COALESCE(j.asynq_task_id,'')=''
+			AND ` + telegramActiveChannelConditionForAlias("j") + `
+			AND ` + messagePushPlanRecoveryConditionSQL("j") + `
+			AND (j.next_retry_at IS NULL OR j.next_retry_at<=?)
+			AND j.updated_at<=?
+		ORDER BY
+			j.tenant_id,
+			j.account_id,
+			j.channel_id,
+			REPLACE(COALESCE(j.target_chat_id,''),'-100',''),
+			j.created_at,
+			j.id
+		LIMIT ?
+	)
+	SELECT j.*
+	FROM channel_candidates j
+	WHERE ` + telegramPendingRecoveryChannelHeadSQL("j", "earlier") + `
+	ORDER BY j.created_at,j.id`
 }
 
 // telegramPendingRecoveryChannelHeadSQL keeps heavily backlogged channels from
@@ -1103,6 +1120,7 @@ func telegramPendingRecoveryChannelHeadSQL(jobAlias, earlierAlias string) string
 	return `NOT EXISTS (
 		SELECT 1 FROM ` + publishTgJobTable + ` ` + earlierAlias + `
 		WHERE ` + earlierAlias + `.tenant_id=` + jobAlias + `.tenant_id
+			AND ` + earlierAlias + `.account_id=` + jobAlias + `.account_id
 			AND (
 				(` + jobAlias + `.channel_id>0 AND ` + earlierAlias + `.channel_id=` + jobAlias + `.channel_id) OR
 				(` + jobAlias + `.channel_id<=0 AND ` + earlierAlias + `.channel_id<=0 AND
@@ -1110,7 +1128,6 @@ func telegramPendingRecoveryChannelHeadSQL(jobAlias, earlierAlias string) string
 					REPLACE(COALESCE(` + jobAlias + `.target_chat_id,''),'-100',''))
 			)
 			AND ` + telegramChannelBlockingJobSQL(earlierAlias) + `
-			AND ` + telegramChannelSchedulePrecedesSQL(earlierAlias, jobAlias) + `
 	)`
 }
 
