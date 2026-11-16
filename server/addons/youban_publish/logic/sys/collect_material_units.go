@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -48,6 +49,7 @@ func pairCollectMaterialMessages(messages []collectMaterialMessageView) []collec
 		}
 	}
 	pairedVerify := make(map[int]struct{})
+	pairedDisplay := make(map[int]struct{})
 	for index, message := range messages {
 		if message.ParentEventID <= 0 {
 			continue
@@ -56,9 +58,10 @@ func pairCollectMaterialMessages(messages []collectMaterialMessageView) []collec
 		if !ok || index == displayIndex {
 			continue
 		}
-		if classifyProfileMessage(message.RawText, message.Media).Kind == profileMessageKindVerify || collectMaterialMixedVerification(message) {
+		if collectMaterialVerifyCandidate(message) {
 			pairs = append(pairs, collectMaterialPair{DisplayIndex: displayIndex, VerifyIndex: index})
 			pairedVerify[index] = struct{}{}
+			pairedDisplay[displayIndex] = struct{}{}
 		}
 	}
 	lastDisplayIndex := -1
@@ -78,12 +81,20 @@ func pairCollectMaterialMessages(messages []collectMaterialMessageView) []collec
 			lastDisplayIndex = index
 		case profileMessageKindVerify:
 			if lastDisplayIndex >= 0 {
+				if _, exists := pairedDisplay[lastDisplayIndex]; exists {
+					continue
+				}
+				if !collectMaterialVerifyCandidate(message) {
+					lastDisplayIndex = -1
+					continue
+				}
 				displayAt := messages[lastDisplayIndex].MessageAt
 				verifyAt := message.MessageAt
 				withinWindow := displayAt.IsZero() || verifyAt.IsZero() ||
 					(!verifyAt.Before(displayAt) && verifyAt.Sub(displayAt) <= collectMaterialVerifyWindow())
 				if withinWindow {
 					pairs = append(pairs, collectMaterialPair{DisplayIndex: lastDisplayIndex, VerifyIndex: index})
+					pairedDisplay[lastDisplayIndex] = struct{}{}
 				}
 			}
 		default:
@@ -97,10 +108,22 @@ func pairCollectMaterialMessages(messages []collectMaterialMessageView) []collec
 // A captionless group containing photos and a video is a new display unit,
 // not verification material belonging to the previous display.
 func collectMaterialMixedVerification(message collectMaterialMessageView) bool {
-	if strings.TrimSpace(message.RawText) != "" || len(message.Media) != 1 {
+	return collectMaterialVerifyCandidate(message)
+}
+
+func collectMaterialVerifyCandidate(message collectMaterialMessageView) bool {
+	if utf8.RuneCountInString(strings.TrimSpace(message.RawText)) > 20 {
 		return false
 	}
-	return profileMessageHasMediaType(message.Media, "video")
+	if !profileMessageHasMediaType(message.Media, "video") {
+		return false
+	}
+	for _, media := range message.Media {
+		if !strings.EqualFold(strings.TrimSpace(media.Type), "video") {
+			return false
+		}
+	}
+	return true
 }
 
 func collectMaterialSkippableMessage(message collectMaterialMessageView) bool {
@@ -128,7 +151,7 @@ func collectMaterialContextClosed(messages []collectMaterialMessageView, display
 		if collectMaterialSkippableMessage(message) {
 			continue
 		}
-		if classifyProfileMessage(message.RawText, message.Media).Kind == profileMessageKindVerify || collectMaterialMixedVerification(message) {
+		if collectMaterialVerifyCandidate(message) {
 			continue
 		}
 		return true

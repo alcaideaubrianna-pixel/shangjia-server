@@ -19,9 +19,27 @@ func TestCaptionlessPhotoVideoGroupIsNotVerification(t *testing.T) {
 		t.Fatal("photo+video group must remain a display candidate")
 	}
 	if !collectMaterialMixedVerification(collectMaterialMessageView{
-		Media: []collectMediaItem{{Type: "video"}},
+		Media: []collectMediaItem{{Type: "video"}, {Type: "video"}},
 	}) {
-		t.Fatal("standalone captionless video must remain a verification candidate")
+		t.Fatal("captionless video group must remain a verification candidate")
+	}
+	if collectMaterialMixedVerification(collectMaterialMessageView{
+		RawText: "这是一段超过二十个字符的展示资料文案，不应作为验证资料",
+		Media:   []collectMediaItem{{Type: "video"}},
+	}) {
+		t.Fatal("long caption must not be treated as verification")
+	}
+}
+
+func TestPairCollectMaterialMessagesUsesOnlyOneVerifyGroup(t *testing.T) {
+	views := []collectMaterialMessageView{
+		{RawText: "昵称：A", Media: []collectMediaItem{{Type: "photo"}}},
+		{Media: []collectMediaItem{{Type: "video"}, {Type: "video"}}},
+		{Media: []collectMediaItem{{Type: "video"}}},
+	}
+	pairs := pairCollectMaterialMessages(views)
+	if len(pairs) != 1 || pairs[0] != (collectMaterialPair{DisplayIndex: 0, VerifyIndex: 1}) {
+		t.Fatalf("one display must match only one verify group: %+v", pairs)
 	}
 }
 
@@ -346,23 +364,23 @@ func TestPairCollectMaterialMessagesAttachesAllContinuousVerifyGroups(t *testing
 		{RawText: "✅提交成功！", MessageAt: base.Add(2 * time.Second)},
 		{Media: []collectMediaItem{{Type: "video", FileId: "verify-2a"}, {Type: "video", FileId: "verify-2b"}}, MessageAt: base.Add(3 * time.Second)},
 	}
-	want := []collectMaterialPair{{DisplayIndex: 0, VerifyIndex: 1}, {DisplayIndex: 0, VerifyIndex: 3}}
+	want := []collectMaterialPair{{DisplayIndex: 0, VerifyIndex: 1}}
 	got := pairCollectMaterialMessages(views)
-	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+	if len(got) != len(want) || got[0] != want[0] {
 		t.Fatalf("pairs=%+v want=%+v", got, want)
 	}
-	if collectMaterialContextClosed(views, 0) {
-		t.Fatal("continuous verification groups must keep the context open")
+	if !collectMaterialContextClosed(views, 0) {
+		t.Fatal("a second verification group must close the consumed context")
 	}
 }
 
-func TestPairCollectMaterialMessagesAcceptsMixedVerificationAlbum(t *testing.T) {
+func TestPairCollectMaterialMessagesDoesNotPairPhotoVideoDisplayAlbum(t *testing.T) {
 	views := []collectMaterialMessageView{
 		{RawText: "昵称：A", Media: []collectMediaItem{{Type: "photo"}}},
 		{Media: []collectMediaItem{{Type: "video"}, {Type: "video"}, {Type: "photo"}}},
 	}
-	if got := pairCollectMaterialMessages(views); len(got) != 1 || got[0] != (collectMaterialPair{DisplayIndex: 0, VerifyIndex: 1}) {
-		t.Fatalf("mixed verification album pairs=%v", got)
+	if got := pairCollectMaterialMessages(views); len(got) != 0 {
+		t.Fatalf("photo/video display album must not be verification: %v", got)
 	}
 }
 
