@@ -59,7 +59,7 @@ func telegramStreamExecutionContext(ctx context.Context, lease telegramChannelLe
 	if !ok {
 		return ctx, func() {}
 	}
-	bounded, stopBudget := context.WithTimeout(ctx, telegramSendBudget)
+	bounded, stopBudget := context.WithTimeout(ctx, telegramSendBudgetDuration(ctx))
 	execution, cancel := context.WithCancelCause(bounded)
 	done := make(chan struct{})
 	go func() {

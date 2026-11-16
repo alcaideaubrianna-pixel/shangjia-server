@@ -23,8 +23,21 @@ func TestTelegramAPITimeoutFallback(t *testing.T) {
 	if isTelegramAPITimeout(errors.New("bad request")) {
 		t.Fatal("rejection is not a timeout")
 	}
-	if telegramSendBudget != 2*time.Minute {
-		t.Fatalf("publication budget %s must enforce the 2 minute channel deadline", telegramSendBudget)
+	if got := telegramSendBudgetDuration(context.Background()); got != 30*time.Minute {
+		t.Fatalf("publication budget %s must default to 30 minutes", got)
+	}
+}
+
+func TestTelegramSendBudgetConfiguration(t *testing.T) {
+	g.Cfg().Set(telegramSendBudgetConfigKey, "20m")
+	if got := telegramSendBudgetDuration(context.Background()); got != 20*time.Minute {
+		t.Fatalf("configured publication budget = %s, want 20m", got)
+	}
+	for _, value := range []string{"bad", "1m", "31m"} {
+		g.Cfg().Set(telegramSendBudgetConfigKey, value)
+		if got := telegramSendBudgetDuration(context.Background()); got != telegramSendBudgetDefault {
+			t.Fatalf("invalid publication budget %q = %s, want default %s", value, got, telegramSendBudgetDefault)
+		}
 	}
 }
 
@@ -33,7 +46,7 @@ func TestTelegramSendBudgetBackfillUsesChannelDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read watchdog source: %v", err)
 	}
-	if !strings.Contains(string(source), "INTERVAL '10 minutes'") {
+	if !strings.Contains(string(source), "INTERVAL '1 second' * ?") {
 		t.Fatal("legacy send deadline backfill must use the same 10 minute channel deadline")
 	}
 }

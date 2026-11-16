@@ -158,7 +158,7 @@ func backgroundWorkerQueues(collectorWorker, backgroundWorker bool) map[string]i
 
 // A display send and a verification video can each consume the full media
 // request timeout. Keep the task deadline above their combined budget.
-const telegramPublishTaskTimeout = 25 * time.Minute
+const telegramPublishTaskTimeout = 30 * time.Minute
 
 func collectMediaBulkQueueName(shard int) string {
 	if shard < 0 {

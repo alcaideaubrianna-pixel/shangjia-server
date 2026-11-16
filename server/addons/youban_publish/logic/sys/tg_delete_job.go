@@ -176,7 +176,7 @@ func tryTelegramCleanupChannelSlot(ctx context.Context, chatId string, priority 
 	base := telegramChannelLockKey(chatId) + ":cleanup"
 	limit := telegramCleanupSlotLimit(ctx, priority)
 	for slot := 0; slot < limit; slot++ {
-		lock := hglock.NewConfig(telegramChannelLeaseTTL, time.Second).WithoutWatchDog().Mutex(fmt.Sprintf("%s:%d", base, slot))
+		lock := hglock.NewConfig(telegramChannelLeaseTTL(ctx), time.Second).WithoutWatchDog().Mutex(fmt.Sprintf("%s:%d", base, slot))
 		if err := lock.TryLock(ctx); err != nil {
 			if gerror.Is(err, hglock.ErrLockFailed) {
 				continue

@@ -141,7 +141,7 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) (resultE
 	}
 	step = beginTelegramPublishStage(ctx, "channel.send_lease.acquire")
 	lease, ok, err := s.tryTelegramPublishChannelLease(ctx, targetJob)
-	step.End(err, g.Map{"acquired": ok, "leaseTtlMs": telegramChannelLeaseTTL.Milliseconds()})
+	step.End(err, g.Map{"acquired": ok, "leaseTtlMs": telegramChannelLeaseTTL(ctx).Milliseconds()})
 	if err != nil {
 		return err
 	}
@@ -342,7 +342,7 @@ func (s *sSysPublish) sendTelegramJobLockedByChannel(ctx context.Context, jobId 
 	if budgetErr != nil {
 		// 发送预算已到期时，不能只把错误交给队列重试；先隔离旧任务、释放
 		// 频道队首并唤醒下一条，迟到的 Telegram 回执由 watchdog 对账处理。
-		if strings.Contains(budgetErr.Error(), telegramSendTimeoutMessage) {
+		if strings.Contains(budgetErr.Error(), telegramSendTimeoutText(ctx)) {
 			var expired telegramJobRecord
 			var replacement int64
 			if fenceErr := g.DB().Transaction(context.WithoutCancel(ctx), func(txCtx context.Context, tx gdb.TX) error {

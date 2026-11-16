@@ -17,7 +17,9 @@ import (
 	"hotgo/utility/ownedlease"
 )
 
-const telegramChannelLeaseTTL = telegramSendBudget + 30*time.Second
+func telegramChannelLeaseTTL(ctx context.Context) time.Duration {
+	return telegramSendBudgetDuration(ctx) + 30*time.Second
+}
 
 func (s *sSysPublish) withTelegramChannelLock(ctx context.Context, chatId string, fn func() error) error {
 	key := telegramChannelLockKey(chatId)
@@ -32,7 +34,7 @@ func (s *sSysPublish) tryTelegramChannelLease(ctx context.Context, chatId string
 	// Telegram/network calls can ignore cancellation while a worker is being
 	// recovered. A fixed lease prevents such a caller from blocking the channel
 	// forever through watchdog renewal.
-	lease := hglock.NewConfig(telegramChannelLeaseTTL, time.Second).WithoutWatchDog().Mutex(key)
+	lease := hglock.NewConfig(telegramChannelLeaseTTL(ctx), time.Second).WithoutWatchDog().Mutex(key)
 	if err := lease.TryLock(ctx); err != nil {
 		if gerror.Is(err, hglock.ErrLockFailed) {
 			return nil, false, nil
@@ -77,7 +79,7 @@ func (s *sSysPublish) tryTelegramPublishChannelLease(ctx context.Context, job te
 func tryTelegramPublishChannelLease(ctx context.Context, job telegramJobRecord, lookup func(context.Context, int64) (telegramJobRecord, error), clients ...*gredis.Redis) (telegramChannelLease, bool, error) {
 	key := telegramChannelLockKey(job.TargetChatId)
 	ownerJSON, _ := json.Marshal(telegramPublishLeaseOwner{Kind: "telegram_publish_v1", JobId: job.Id, TenantId: job.TenantId})
-	lease := ownedlease.New(key, string(ownerJSON), telegramChannelLeaseTTL, clients...)
+	lease := ownedlease.New(key, string(ownerJSON), telegramChannelLeaseTTL(ctx), clients...)
 	ok, err := lease.TryAcquire(ctx)
 	if err != nil || ok {
 		return lease, ok, err
@@ -151,7 +153,7 @@ func (s *sSysPublish) withTelegramChannelDBLock(ctx context.Context, key string,
 	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		switch dbType {
 		case consts.DBPgsql:
-			if err := configureTelegramChannelLockTimeout(tx); err != nil {
+			if err := configureTelegramChannelLockTimeout(ctx, tx); err != nil {
 				return err
 			}
 			// 使用非阻塞锁，避免大量频道任务在数据库连接池中排队。
@@ -184,8 +186,8 @@ func (s *sSysPublish) withTelegramChannelDBLock(ctx context.Context, key string,
 // performs Telegram I/O. A short database idle timeout must not release the lock
 // before the existing send budget expires. LOCAL keeps ordinary transactions and
 // pooled connections on their configured timeout; zero (disabled) is preserved.
-func configureTelegramChannelLockTimeout(tx gdb.TX) error {
-	minimum := telegramChannelLeaseTTL.Milliseconds()
+func configureTelegramChannelLockTimeout(ctx context.Context, tx gdb.TX) error {
+	minimum := telegramChannelLeaseTTL(ctx).Milliseconds()
 	_, err := tx.Exec(`SELECT set_config('idle_in_transaction_session_timeout',
 		CASE WHEN setting::bigint > 0 AND setting::bigint < ?
 		THEN ? ELSE setting || 'ms' END, true)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	relayconsts "hotgo/addons/youban_publish/consts"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,20 +20,38 @@ import (
 const (
 	// A stuck Telegram call must release the channel promptly; recovery then
 	// lets the next queued job proceed while the timed-out job is reconciled.
-	telegramSendBudget                = 2 * time.Minute
+	telegramSendBudgetDefault         = 30 * time.Minute
 	telegramSendRateLimitProtection   = 30 * time.Second
 	telegramSendMaxRateLimitBudget    = telegramRetryMaxDelay + telegramSendRateLimitProtection
 	telegramSendMaxRetries            = 3
 	telegramSendPhaseTimeoutCancelled = "timeout_cancelled"
-	telegramSendTimeoutMessage        = "频道发送超过2分钟，旧任务已取消，整组资料移至队尾；迟到消息只删除不补发"
 )
+
+const telegramSendBudgetConfigKey = "youbanPublish.telegram.sendBudget"
+
+func telegramSendBudgetDuration(ctx context.Context) time.Duration {
+	value := strings.TrimSpace(g.Cfg().MustGet(ctx, telegramSendBudgetConfigKey, telegramSendBudgetDefault.String()).String())
+	if value == "" {
+		return telegramSendBudgetDefault
+	}
+	duration, err := time.ParseDuration(value)
+	if err != nil || duration < 2*time.Minute || duration > 30*time.Minute {
+		return telegramSendBudgetDefault
+	}
+	return duration
+}
+
+func telegramSendTimeoutText(ctx context.Context) string {
+	minutes := telegramSendBudgetDuration(ctx).Minutes()
+	return fmt.Sprintf("频道发送超过%.0f分钟，旧任务已取消，整组资料移至队尾；迟到消息只删除不补发", minutes)
+}
 
 // telegramSendBudgetContext uses a durable deadline shared by every retry and
 // Account worker. Heartbeats and queue handoffs never extend the budget.
 func (s *sSysPublish) telegramSendBudgetContext(ctx context.Context, job telegramJobRecord) (context.Context, context.CancelFunc, error) {
 	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).
 		WhereIn("status", []string{telegramJobStatusSending, telegramJobStatusConfirming}).
-		WhereNull("send_deadline_at").Data(g.Map{"send_deadline_at": gtime.Now().Add(telegramSendBudget)}).Update()
+		WhereNull("send_deadline_at").Data(g.Map{"send_deadline_at": gtime.Now().Add(telegramSendBudgetDuration(ctx))}).Update()
 	if err != nil {
 		return nil, nil, gerror.Wrap(err, "保存频道发送超时预算失败")
 	}
@@ -45,7 +64,7 @@ func (s *sSysPublish) telegramSendBudgetContext(ctx context.Context, job telegra
 	}
 	deadline := dbtime.FromTimestamp(current.SendDeadlineAt)
 	if deadline == nil || !deadline.Time.After(time.Now()) {
-		return nil, nil, gerror.New(telegramSendTimeoutMessage)
+		return nil, nil, gerror.New(telegramSendTimeoutText(ctx))
 	}
 	bounded, cancel := context.WithDeadline(ctx, deadline.Time)
 	return bounded, cancel, nil
@@ -71,7 +90,7 @@ func (s *sSysPublish) expireTelegramSendTx(ctx context.Context, tx gdb.TX, id in
 	}
 	changed, transitionErr := s.transitionTelegramJobTx(ctx, tx, telegramJobTransition{
 		JobId: old.Id, From: []JobStatus{old.Status}, To: telegramJobStatusSuperseded,
-		ErrorMessage: telegramSendTimeoutMessage,
+		ErrorMessage: telegramSendTimeoutText(ctx),
 		SendPhase:    jobPhase(telegramSendPhaseTimeoutCancelled),
 		Additional:   g.Map{"timeout_cleanup_at": gtime.Now()},
 	})
@@ -86,7 +105,7 @@ func (s *sSysPublish) expireTelegramSendTx(ctx context.Context, tx gdb.TX, id in
 	}
 	if _, err = tx.Model(publishTgOutboxTable).Where("job_id", old.Id).
 		Data(g.Map{"status": telegramOutboxDelivered, "lease_owner": "", "lease_expires_at": nil,
-			"last_error": telegramSendTimeoutMessage, "delivered_at": gtime.Now()}).Update(); err != nil {
+			"last_error": telegramSendTimeoutText(ctx), "delivered_at": gtime.Now()}).Update(); err != nil {
 		return
 	}
 	state, stateErr := tx.Model(publishProfileStateTable).Where("tenant_id", old.TenantId).
@@ -270,13 +289,13 @@ func (s *sSysPublish) cleanupTelegramSendTimeout(ctx context.Context, job telegr
 	var err error
 	if s.accountPushEngine(cleanupCtx, job.TenantId, job.AccountId) == pushEngineUnifiedStream {
 		err = s.withTelegramCleanupExecution(cleanupCtx, job, func(ctx context.Context) error {
-			return s.deleteTelegramMessageSetLockedByChannel(ctx, job, telegramSendTimeoutMessage)
+			return s.deleteTelegramMessageSetLockedByChannel(ctx, job, telegramSendTimeoutText(ctx))
 		})
 	} else if !lock.TryLock() {
 		err = gerror.New("频道正在处理其他操作，稍后重试清理")
 	} else {
 		err = s.withTelegramChannelDBLock(cleanupCtx, telegramChannelLockKey(job.TargetChatId), func() error {
-			return s.deleteTelegramMessageSetLockedByChannel(cleanupCtx, job, telegramSendTimeoutMessage)
+			return s.deleteTelegramMessageSetLockedByChannel(cleanupCtx, job, telegramSendTimeoutText(ctx))
 		})
 		lock.Unlock()
 	}
@@ -435,7 +454,7 @@ func (s *sSysPublish) recoverTelegramSendTimeouts(ctx context.Context) {
 			continue
 		}
 		if replacement > 0 {
-			s.appendTelegramJobLog(ctx, old, "timeout", "superseded", fmt.Sprintf("%s replacementJobId:%d", telegramSendTimeoutMessage, replacement))
+			s.appendTelegramJobLog(ctx, old, "timeout", "superseded", fmt.Sprintf("%s replacementJobId:%d", telegramSendTimeoutText(ctx), replacement))
 			g.Log().Warningf(ctx, "TG频道超时已隔离 jobId:%d replacementJobId:%d channelId:%d phase:%s action:timeout_requeue", old.Id, replacement, old.ChannelId, old.SendPhase)
 			if err = s.wakeNextTelegramChannelJob(ctx, old); err != nil {
 				g.Log().Errorf(ctx, "TG超时释放后唤醒频道失败 jobId:%d channelId:%d err:%+v", old.Id, old.ChannelId, err)
@@ -485,7 +504,7 @@ func (s *sSysPublish) backfillTelegramSendDeadlines(ctx context.Context, tx gdb.
 	// page deadline is cancelled so later pages and COMMIT remain usable.
 	previousCtx := tx.GetCtx()
 	defer tx.Ctx(previousCtx)
-	next, err := tx.Ctx(pageCtx).GetValue(telegramSendDeadlineBackfillSQL(), tenantID, accountID, afterID, throughID, limit, afterID)
+	next, err := tx.Ctx(pageCtx).GetValue(telegramSendDeadlineBackfillSQL(), tenantID, accountID, afterID, throughID, limit, telegramSendBudgetDuration(ctx).Seconds(), afterID)
 	if err != nil {
 		return afterID, gerror.Wrap(err, "回填历史TG发送截止时间失败")
 	}
@@ -499,7 +518,7 @@ func telegramSendDeadlineBackfillSQL() string {
  ORDER BY id LIMIT ? FOR UPDATE
  ), updated AS (
  UPDATE ` + publishTgJobTable + ` j
- SET send_deadline_at=COALESCE((SELECT MIN(a.created_at) FROM ` + publishTgAttemptTable + ` a WHERE a.job_id=j.id),j.updated_at,j.created_at,CURRENT_TIMESTAMP::timestamp)+INTERVAL '10 minutes'
+ SET send_deadline_at=COALESCE((SELECT MIN(a.created_at) FROM ` + publishTgAttemptTable + ` a WHERE a.job_id=j.id),j.updated_at,j.created_at,CURRENT_TIMESTAMP::timestamp)+INTERVAL '1 second' * ?
  FROM candidates c
  WHERE j.id=c.id AND j.send_deadline_at IS NULL
  AND (j.status IN ('sending','unknown') OR

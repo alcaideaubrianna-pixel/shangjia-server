@@ -42,7 +42,7 @@ func TestTelegramChannelLockTimeoutLocalPostgres(t *testing.T) {
 				}
 				switch original {
 				case "100ms":
-					if val.Int64() != telegramChannelLeaseTTL.Milliseconds() {
+					if val.Int64() != telegramChannelLeaseTTL(context.Background()).Milliseconds() {
 						t.Fatalf("guard timeout=%s", val.String())
 					}
 				case "0":
