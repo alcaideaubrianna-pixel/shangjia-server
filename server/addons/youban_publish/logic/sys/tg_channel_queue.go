@@ -143,31 +143,23 @@ func enqueueTelegramChannelJob(ctx context.Context, channelID, jobID int64, prio
 	// and one job. This replaces four Redis round trips with one EVAL and keeps
 	// the PostgreSQL Outbox as the durable source of truth.
 	const enqueueChannelJobScript = `redis.call('ZADD',KEYS[1],ARGV[1],ARGV[2]); redis.call('ZREM',KEYS[3],ARGV[2]); redis.call('ZREM',KEYS[4],ARGV[2]); redis.call('SADD',KEYS[2],ARGV[3]); return 1`
-	var err error
-	for attempt := 1; attempt <= 3; attempt++ {
+	durable, _ := ctx.Value(telegramChannelOutboxRetryKey{}).(bool)
+	attempts, err := runTelegramChannelEnqueueRetries(ctx, durable, func() error {
 		startedAt := time.Now()
-		_, err = g.Redis().Do(ctx, "EVAL", enqueueChannelJobScript, 4, key, telegramChannelActiveSetKey, otherKeys[0], otherKeys[1], strconv.FormatInt(score, 10), member, strconv.FormatInt(channelID, 10))
+		_, enqueueErr := g.Redis().Do(ctx, "EVAL", enqueueChannelJobScript, 4, key, telegramChannelActiveSetKey, otherKeys[0], otherKeys[1], strconv.FormatInt(score, 10), member, strconv.FormatInt(channelID, 10))
 		result := "success"
-		if err != nil {
+		if enqueueErr != nil {
 			result = "error"
 		}
 		observeRedisLua(ctx, "telegram_channel_enqueue", result, time.Since(startedAt))
-		if err == nil {
-			return nil
-		}
-		if attempt < 3 {
-			timer := time.NewTimer(time.Duration(attempt*20) * time.Millisecond)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return ctx.Err()
-			case <-timer.C:
-			}
-		}
+		return enqueueErr
+	})
+	if err == nil {
+		return nil
 	}
-	g.Log().Warning(ctx, "频道队列写入失败，保留Outbox待重试", g.Map{
+	g.Log().Warning(ctx, "频道队列写入失败", g.Map{
 		"event": "channel_queue_enqueue_failed", "channelId": channelID, "jobId": jobID,
-		"priority": priority, "availableAt": availableAt, "score": score, "queue": key, "attempts": 3, "error": err.Error(),
+		"priority": priority, "availableAt": availableAt, "score": score, "queue": key, "attempts": attempts, "durableOutbox": durable, "error": err.Error(),
 	})
 	return err
 }

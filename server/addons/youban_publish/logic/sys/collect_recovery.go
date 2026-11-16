@@ -625,6 +625,9 @@ func (s *sSysPublish) recoverBotCollectMedia(ctx context.Context, limit int, sco
 	}
 	requeued := 0
 	for _, row := range rows {
+		if err := ctx.Err(); err != nil {
+			return gerror.Wrap(err, "BOT媒体恢复预算已耗尽，保留下一轮处理")
+		}
 		payload := collectMediaQueuePayloadFromEvent(row)
 		payload.Reason = "bot_recovery"
 		if payload.EventId <= 0 || payload.TenantId <= 0 || payload.SourceId <= 0 {
@@ -633,11 +636,16 @@ func (s *sSysPublish) recoverBotCollectMedia(ctx context.Context, limit int, sco
 		if !reserveCollectMediaRecovery(ctx, payload.EventId) {
 			continue
 		}
+		if err := ctx.Err(); err != nil {
+			return gerror.Wrap(err, "BOT媒体恢复预算已耗尽，保留下一轮处理")
+		}
 		queued, enqueueErr := s.enqueueCollectMediaCacheDeferred(ctx, payload, 0)
 		if enqueueErr != nil {
 			releaseCollectMediaRecovery(ctx, payload.EventId)
-			g.Log().Warningf(ctx, "BOT媒体事件重新入队失败 eventId:%d err:%+v", payload.EventId, enqueueErr)
-			continue
+			// Enqueue failure leaves the event eligible in PostgreSQL. Stop this
+			// source pass instead of sending the rest of its batch into an
+			// unhealthy Redis; the existing recovery cycle will retry it.
+			return gerror.Wrapf(enqueueErr, "BOT媒体事件重新入队失败，暂停本轮来源恢复 eventId:%d", payload.EventId)
 		}
 		if queued {
 			status := row[e.Status].String()

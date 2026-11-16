@@ -52,11 +52,16 @@ func observeRedisLua(ctx context.Context, scriptName, result string, duration ti
 	counter.Add(ctx, 1, attrs)
 	durations.Record(ctx, float64(duration.Milliseconds()), attrs)
 	if duration >= 100*time.Millisecond {
-		g.Log().Warning(ctx, "Redis Lua 执行超过100ms", g.Map{
-			"event":      "redis_lua_slow",
-			"script":     scriptName,
-			"result":     result,
-			"durationMs": duration.Milliseconds(),
+		// This duration covers the client call (pool/network/server queue included),
+		// not the server-side Lua execution time measured by Redis SLOWLOG.
+		g.Log().Warning(ctx, "Redis 调用耗时超过100ms", g.Map{
+			// Keep the event/metric names for existing dashboards and alert rules.
+			"event":                   "redis_lua_slow",
+			"measurement":             "client_round_trip",
+			"serverExecutionMeasured": false,
+			"script":                  scriptName,
+			"result":                  result,
+			"durationMs":              duration.Milliseconds(),
 		})
 	}
 }
