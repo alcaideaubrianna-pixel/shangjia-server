@@ -12,6 +12,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/gogf/gf/v2/util/guid"
 	"github.com/hibiken/asynq"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -95,7 +96,7 @@ func (s *sCollector) enqueueDeliveryTask(ctx context.Context, deliveryID int64, 
 // bypass Asynq's old unique task marker. A delivery is still claimed with a
 // status transition in processDelivery, so the duplicate task is harmless and
 // lets a replay move work from a stale queue to its current priority queue.
-func (s *sCollector) enqueueDeliveryTaskWithOptions(ctx context.Context, deliveryID int64, priority int, unique bool) error {
+func (s *sCollector) enqueueDeliveryTaskWithOptions(ctx context.Context, deliveryID int64, priority int, unique bool) (err error) {
 	if deliveryID <= 0 {
 		return gerror.New("Telegram采集交付任务ID无效")
 	}
@@ -105,7 +106,11 @@ func (s *sCollector) enqueueDeliveryTaskWithOptions(ctx context.Context, deliver
 	}
 	client := s.queueClient
 	s.queueMu.Unlock()
+	ctx, observation := startCollectorStage(ctx, collectorStageDeliveryEnqueue, collectorObservationMeta{DeliveryID: deliveryID})
+	observeResult := collectorResultError
+	defer func() { observation.Finish(observeResult, err) }()
 	queueName := deliveryQueueName(ctx, deliveryID, priority)
+	observation.meta.QueueClass = collectorObserveQueueClassFromPriority(priority)
 	options := []asynq.Option{
 		asynq.Queue(queueName),
 		asynq.MaxRetry(deliveryMaxAttempts - 1),
@@ -114,12 +119,13 @@ func (s *sCollector) enqueueDeliveryTaskWithOptions(ctx context.Context, deliver
 	if unique {
 		options = append(options, asynq.Unique(deliveryTaskUniqueTTL))
 	}
-	_, err := client.EnqueueContext(ctx, asynq.NewTask(deliveryTaskType, collectorTaskPayload(deliveryID)), options...)
+	_, err = client.EnqueueContext(ctx, asynq.NewTask(deliveryTaskType, collectorTaskPayload(deliveryID)), options...)
 	if errors.Is(err, asynq.ErrDuplicateTask) || errors.Is(err, asynq.ErrTaskIDConflict) {
 		logCollectorDeliveryEnqueue(ctx, deliveryID, queueName, "duplicate", err)
 		if !unique {
 			return gerror.Wrap(err, "恢复Telegram采集交付时任务已存在，未确认本次入队")
 		}
+		observeResult = collectorResultDuplicate
 		return nil
 	}
 	if err != nil {
@@ -127,6 +133,7 @@ func (s *sCollector) enqueueDeliveryTaskWithOptions(ctx context.Context, deliver
 		return err
 	}
 	logCollectorDeliveryEnqueue(ctx, deliveryID, queueName, "enqueued", nil)
+	observeResult = collectorResultOK
 	return nil
 }
 
@@ -135,8 +142,10 @@ func (s *sCollector) handleDeliveryTask(ctx context.Context, task *asynq.Task) e
 	if err != nil {
 		return err
 	}
+	taskStarted := time.Now()
 	queue := collectorQueueName(ctx)
-	logCollectorDeliveryStage(ctx, "delivery.process.started", deliveryID, 0, queue, nil)
+	logCollectorDeliveryStage(ctx, "delivery.process.started", deliveryID, 0, queue, nil,
+		g.Map{"taskStartedAtUnixMs": taskStarted.UnixMilli()})
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			logCollectorDeliveryStage(ctx, "delivery.process.panic", deliveryID, 0, queue, fmt.Errorf("panic: %v", recovered))
@@ -175,15 +184,17 @@ func (s *sCollector) handleDeliveryTask(ctx context.Context, task *asynq.Task) e
 		return s.enqueueDeliveryTask(ctx, deliveryID, priority)
 	}
 	startedAt := time.Now()
-	if err = s.processDelivery(ctx, deliveryID); err != nil {
-		logCollectorDeliveryStage(ctx, "delivery.process.failed", deliveryID, 0, queue, err)
+	if err = s.processDelivery(ctx, deliveryID, taskStarted); err != nil {
+		logCollectorDeliveryStage(ctx, "delivery.process.failed", deliveryID, 0, queue, err,
+			g.Map{"taskDurationMs": time.Since(taskStarted).Milliseconds()})
 		counter, _ := collectorMeter.Int64Counter("telegram_collector_delivery_total")
 		counter.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "failed"), attribute.String("queue", collectorQueueName(ctx))))
 		return err
 	}
 	histogram, _ := collectorMeter.Float64Histogram("telegram_collector_delivery_duration_seconds")
 	histogram.Record(ctx, time.Since(startedAt).Seconds(), metric.WithAttributes(attribute.String("result", "completed"), attribute.String("queue", collectorQueueName(ctx))))
-	logCollectorDeliveryStage(ctx, "delivery.process.completed", deliveryID, 0, queue, nil)
+	logCollectorDeliveryStage(ctx, "delivery.process.completed", deliveryID, 0, queue, nil,
+		g.Map{"taskDurationMs": time.Since(taskStarted).Milliseconds()})
 	return nil
 }
 
@@ -218,72 +229,135 @@ func (s *sCollector) acquireHistoryAccountSlot(ctx context.Context, accountID in
 	}
 }
 
-func (s *sCollector) processDelivery(ctx context.Context, deliveryID int64) error {
+func (s *sCollector) processDelivery(ctx context.Context, deliveryID int64, taskStarts ...time.Time) (err error) {
 	if deliveryID <= 0 {
 		return gerror.New("Telegram采集交付任务无效")
 	}
+	ctx, observation := startCollectorStage(ctx, collectorStageDeliveryConsume, collectorObservationMeta{
+		DeliveryID: deliveryID, QueueClass: collectorObserveQueueClassFromClass(""),
+	})
+	observeResult := collectorResultError
+	defer func() { observation.Finish(observeResult, err) }()
+	taskStarted := time.Now()
+	if len(taskStarts) > 0 {
+		taskStarted = taskStarts[0]
+	}
+	claimStarted := time.Now()
+	logCollectorDeliveryStage(ctx, "delivery.claim.started", deliveryID, 0, collectorQueueName(ctx), nil,
+		g.Map{"taskStartedAtUnixMs": taskStarted.UnixMilli(), "taskDurationMs": time.Since(taskStarted).Milliseconds()})
 	columns := dao.TgCollectorDelivery.Columns()
 	now := gtime.Now()
+	executionOwner := guid.S()
 	result, err := dao.TgCollectorDelivery.Ctx(ctx).
 		WherePri(deliveryID).
 		WhereIn(columns.Status, []string{sysin.DeliveryStatusPending, sysin.DeliveryStatusFailedRetry}).
 		Data(g.Map{
 			columns.Status:       sysin.DeliveryStatusProcessing,
-			columns.LeaseOwner:   collectorInstanceID(),
+			columns.LeaseOwner:   executionOwner,
 			columns.LeaseUntil:   now.Add(deliveryLeaseDuration),
 			columns.AttemptCount: gdb.Raw(columns.AttemptCount + "+1"),
 			columns.UpdatedAt:    now,
 		}).Update()
+	claimDuration := time.Since(claimStarted).Milliseconds()
 	if err != nil {
+		recordCollectorStage(ctx, collectorStageDeliveryClaim, observation.meta, collectorResultError, time.Since(claimStarted), err)
+		logCollectorDeliveryStage(ctx, "delivery.claim.failed", deliveryID, 0, collectorQueueName(ctx), err,
+			g.Map{"claimDurationMs": claimDuration, "taskDurationMs": time.Since(taskStarted).Milliseconds()})
 		return gerror.Wrap(err, "领取Telegram采集交付失败")
 	}
-	affected, _ := result.RowsAffected()
+	affected, affectedErr := result.RowsAffected()
+	if affectedErr != nil {
+		recordCollectorStage(ctx, collectorStageDeliveryClaim, observation.meta, collectorResultError, time.Since(claimStarted), affectedErr)
+		return gerror.Wrap(affectedErr, "确认Telegram采集交付领取结果失败")
+	}
 	if affected == 0 {
-		logCollectorDeliveryStage(ctx, "delivery.claim.skipped", deliveryID, 0, collectorQueueName(ctx), nil)
+		recordCollectorStage(ctx, collectorStageDeliveryClaim, observation.meta, collectorResultSkipped, time.Since(claimStarted), nil)
+		observeResult = collectorResultSkipped
+		logCollectorDeliveryStage(ctx, "delivery.claim.skipped", deliveryID, 0, collectorQueueName(ctx), nil,
+			g.Map{"claimDurationMs": claimDuration, "taskDurationMs": time.Since(taskStarted).Milliseconds()})
 		return nil
 	}
-	logCollectorDeliveryStage(ctx, "delivery.claimed", deliveryID, 0, collectorQueueName(ctx), nil)
+	recordCollectorStage(ctx, collectorStageDeliveryClaim, observation.meta, collectorResultOK, time.Since(claimStarted), nil)
+	logCollectorDeliveryStage(ctx, "delivery.claimed", deliveryID, 0, collectorQueueName(ctx), nil,
+		g.Map{"claimDurationMs": claimDuration, "taskDurationMs": time.Since(taskStarted).Milliseconds()})
+	readStarted := time.Now()
 	var row entity.TgCollectorDelivery
-	if err = dao.TgCollectorDelivery.Ctx(ctx).WherePri(deliveryID).Scan(&row); err != nil {
-		return s.failDelivery(ctx, deliveryID, err)
+	if err = dao.TgCollectorDelivery.Ctx(ctx).WherePri(deliveryID).Where(columns.Status, sysin.DeliveryStatusProcessing).Where(columns.LeaseOwner, executionOwner).Scan(&row); err != nil {
+		recordCollectorStage(ctx, collectorStageDeliveryRead, observation.meta, collectorResultError, time.Since(readStarted), err)
+		logCollectorDeliveryStage(ctx, "delivery.load.failed", deliveryID, 0, collectorQueueName(ctx), err,
+			g.Map{"readDurationMs": time.Since(readStarted).Milliseconds(), "taskDurationMs": time.Since(taskStarted).Milliseconds()})
+		return s.failDelivery(ctx, deliveryID, executionOwner, err)
 	}
+	if row.LeaseOwner != executionOwner || row.Status != sysin.DeliveryStatusProcessing {
+		return gerror.New("采集执行归属已变化，停止旧执行")
+	}
+	observation.meta.TenantID, observation.meta.EventID = row.TenantId, row.EventId
+	recordCollectorStage(ctx, collectorStageDeliveryRead, observation.meta, collectorResultOK, time.Since(readStarted), nil)
+	readDetails := g.Map{"readDurationMs": time.Since(readStarted).Milliseconds(),
+		"taskDurationMs": time.Since(taskStarted).Milliseconds(), "tenantId": row.TenantId, "attemptCount": row.AttemptCount}
+	readDetails["ageTimeBasis"] = "db_wall_clock_unverified"
+	readDetails["deliveryAgeAvailable"] = false
+	if row.CreatedAt != nil {
+		readDetails["deliveryCreatedAtRaw"] = row.CreatedAt.Time.Format("2006-01-02 15:04:05.999999")
+	}
+	logCollectorDeliveryStage(ctx, "delivery.loaded", deliveryID, row.EventId, collectorQueueName(ctx), nil, readDetails)
 	if row.EventId <= 0 {
-		return s.failDelivery(ctx, deliveryID, gerror.New("Telegram采集交付缺少原始事件"))
+		return s.failDelivery(ctx, deliveryID, executionOwner, gerror.New("Telegram采集交付缺少原始事件"))
 	}
 	var event entity.TgCollectorEvent
+	eventReadStarted := time.Now()
 	if err = dao.TgCollectorEvent.Ctx(ctx).WherePri(row.EventId).Scan(&event); err != nil {
-		return s.failDelivery(ctx, deliveryID, gerror.Wrap(err, "读取Telegram采集原始事件失败"))
+		recordCollectorStage(ctx, collectorStageDeliveryEventRead, observation.meta, collectorResultError, time.Since(eventReadStarted), err)
+		logCollectorDeliveryStage(ctx, "delivery.event.load.failed", deliveryID, row.EventId, collectorQueueName(ctx), err,
+			g.Map{"eventReadDurationMs": time.Since(eventReadStarted).Milliseconds(), "taskDurationMs": time.Since(taskStarted).Milliseconds()})
+		return s.failDelivery(ctx, deliveryID, executionOwner, gerror.Wrap(err, "读取Telegram采集原始事件失败"))
 	}
+	eventReadDuration := time.Since(eventReadStarted).Milliseconds()
+	observation.meta.AccountID, observation.meta.SourceID = event.AccountId, event.SourceId
+	observation.meta.ChatID, observation.meta.MessageID = event.ChatId, event.MessageId
+	observation.meta.SourceType = collectorObserveSourceType(event.SourceType)
+	observation.meta.QueueClass = collectorObserveQueueClassFromPriority(event.Priority)
+	recordCollectorStage(ctx, collectorStageDeliveryEventRead, observation.meta, collectorResultOK, time.Since(eventReadStarted), nil)
 	if event.Id <= 0 || event.RawUpdate == nil {
-		return s.failDelivery(ctx, deliveryID, gerror.New("Telegram采集原始事件不存在"))
+		return s.failDelivery(ctx, deliveryID, executionOwner, gerror.New("Telegram采集原始事件不存在"))
 	}
+	parseStarted := time.Now()
 	delivery, err := collectorDeliveryFromEvent(&event, []byte(event.RawUpdate.String()))
+	recordCollectorStage(ctx, collectorStageDeliveryParse, observation.meta, collectorResultOK, time.Since(parseStarted), err)
 	if err != nil {
-		return s.failDelivery(ctx, deliveryID, err)
+		return s.failDelivery(ctx, deliveryID, executionOwner, err)
 	}
-	class := "realtime"
-	if delivery.History {
-		class = "history"
-	}
-	if row.CreatedAt != nil {
-		wait, _ := collectorMeter.Float64Histogram("telegram_collector_delivery_queue_wait_seconds")
-		wait.Record(ctx, time.Since(row.CreatedAt.Time).Seconds(), metric.WithAttributes(attribute.String("class", class)))
-	}
+	observation.meta.QueueClass = collectorObserveQueueClassFromPriority(deliveryPriority(&delivery))
+	// The legacy numeric task payload has no producer enqueue timestamp.
+	// Database creation time is not a reliable queue-wait timestamp.
+	observeCollectorDeliveryQueueWait(ctx, observation.meta, 0, taskStarted)
 	delivery.ID = deliveryID
 	delivery.DeliveryKey = row.DeliveryKey
 	handler := collectorservice.CollectorDeliveryHandler()
 	if handler == nil {
-		return s.failDelivery(ctx, deliveryID, gerror.New("Telegram采集交付处理器尚未注册"))
+		return s.failDelivery(ctx, deliveryID, executionOwner, gerror.New("Telegram采集交付处理器尚未注册"))
 	}
 	queueName := collectorQueueName(ctx)
-	logCollectorDeliveryStage(ctx, "delivery.handler.started", deliveryID, row.EventId, queueName, nil)
-	err = handler.HandleCollectorDelivery(ctx, &delivery)
+	handlerStarted := time.Now()
+	logCollectorDeliveryStage(ctx, "delivery.handler.started", deliveryID, row.EventId, queueName, nil,
+		g.Map{"eventReadDurationMs": eventReadDuration, "taskDurationMs": time.Since(taskStarted).Milliseconds(),
+			"handlerStartedAtUnixMs": handlerStarted.UnixMilli(), "tenantId": event.TenantId, "accountId": event.AccountId,
+			"sourceId": event.SourceId, "sourceChatId": event.ChatId, "sourceMessageId": event.MessageId, "history": delivery.History})
+	handlerCtx, handlerObservation := startCollectorStage(ctx, collectorStageDeliveryHandler, observation.meta)
+	defer handlerObservation.Finish(collectorResultError, nil)
+	err = handler.HandleCollectorDelivery(handlerCtx, &delivery)
+	handlerObservation.Finish(collectorResultOK, err)
 	if err != nil {
-		logCollectorDeliveryStage(ctx, "delivery.handler.failed", deliveryID, row.EventId, queueName, err)
-		return s.failDelivery(ctx, deliveryID, err)
+		logCollectorDeliveryStage(ctx, "delivery.handler.failed", deliveryID, row.EventId, queueName, err,
+			g.Map{"handlerDurationMs": time.Since(handlerStarted).Milliseconds(), "taskDurationMs": time.Since(taskStarted).Milliseconds()})
+		return s.failDelivery(ctx, deliveryID, executionOwner, err)
 	}
-	logCollectorDeliveryStage(ctx, "delivery.handler.completed", deliveryID, row.EventId, queueName, nil)
-	_, err = dao.TgCollectorDelivery.Ctx(ctx).WherePri(deliveryID).Data(g.Map{
+	logCollectorDeliveryStage(ctx, "delivery.handler.completed", deliveryID, row.EventId, queueName, nil,
+		g.Map{"handlerDurationMs": time.Since(handlerStarted).Milliseconds(), "taskDurationMs": time.Since(taskStarted).Milliseconds()})
+	completeStarted := time.Now()
+	completeResult, completeErr := dao.TgCollectorDelivery.Ctx(ctx).WherePri(deliveryID).
+		Where(columns.Status, sysin.DeliveryStatusProcessing).
+		Where(columns.LeaseOwner, executionOwner).Data(g.Map{
 		columns.Status:       sysin.DeliveryStatusCompleted,
 		columns.NextRunAt:    nil,
 		columns.LeaseOwner:   "",
@@ -291,11 +365,23 @@ func (s *sCollector) processDelivery(ctx context.Context, deliveryID int64) erro
 		columns.ErrorMessage: "",
 		columns.UpdatedAt:    gtime.Now(),
 	}).Update()
+	err = completeErr
+	if err == nil {
+		var affected int64
+		affected, err = completeResult.RowsAffected()
+		if err != nil {
+			err = gerror.Wrap(err, "确认Telegram采集交付完成结果失败")
+		} else if affected != 1 {
+			err = gerror.New("采集交付执行归属已变化，未确认本次完成")
+		}
+	}
+	recordCollectorStage(ctx, collectorStageDeliveryComplete, observation.meta, collectorResultOK, time.Since(completeStarted), err)
 	if err != nil {
 		logCollectorDeliveryStage(ctx, "delivery.completed.persist_failed", deliveryID, row.EventId, collectorQueueName(ctx), err)
 		return err
 	}
 	logCollectorDeliveryStage(ctx, "delivery.completed", deliveryID, row.EventId, collectorQueueName(ctx), nil)
+	observeResult = collectorResultOK
 	return nil
 }
 
@@ -332,6 +418,7 @@ func logCollectorDeliveryEnqueue(ctx context.Context, deliveryID int64, queue, s
 		"queue":            queue,
 		"workerInstanceId": collectorInstanceID(),
 		"workerRole":       "collector-worker",
+		"observedAtUnixMs": time.Now().UnixMilli(),
 	}
 	if err != nil {
 		fields["errorType"] = fmt.Sprintf("%T", err)
@@ -342,7 +429,7 @@ func logCollectorDeliveryEnqueue(ctx context.Context, deliveryID int64, queue, s
 	g.Log().Info(ctx, "Telegram采集交付入队", fields)
 }
 
-func logCollectorDeliveryStage(ctx context.Context, stage string, deliveryID, eventID int64, queue string, err error) {
+func logCollectorDeliveryStage(ctx context.Context, stage string, deliveryID, eventID int64, queue string, err error, details ...g.Map) {
 	fields := g.Map{
 		"log_type":         "telegram_collect_delivery",
 		"event":            "collect_delivery_stage",
@@ -354,6 +441,12 @@ func logCollectorDeliveryStage(ctx context.Context, stage string, deliveryID, ev
 		"queue":            queue,
 		"workerInstanceId": collectorInstanceID(),
 		"workerRole":       "collector-delivery-worker",
+		"observedAtUnixMs": time.Now().UnixMilli(),
+	}
+	for _, detail := range details {
+		for key, value := range detail {
+			fields[key] = value
+		}
 	}
 	if err != nil {
 		fields["status"] = "error"
@@ -365,11 +458,18 @@ func logCollectorDeliveryStage(ctx context.Context, stage string, deliveryID, ev
 	g.Log().Info(ctx, "Telegram采集交付链路阶段", fields)
 }
 
-func (s *sCollector) failDelivery(ctx context.Context, deliveryID int64, cause error) error {
+func (s *sCollector) failDelivery(ctx context.Context, deliveryID int64, executionOwner string, cause error) error {
+	if strings.TrimSpace(executionOwner) == "" {
+		return gerror.New("采集失败更新必须指定本次执行归属")
+	}
 	columns := dao.TgCollectorDelivery.Columns()
 	var row entity.TgCollectorDelivery
-	if err := dao.TgCollectorDelivery.Ctx(ctx).Fields(columns.AttemptCount).WherePri(deliveryID).Scan(&row); err != nil {
+	if err := dao.TgCollectorDelivery.Ctx(ctx).Fields(columns.AttemptCount, columns.LeaseOwner).WherePri(deliveryID).
+		Where(columns.Status, sysin.DeliveryStatusProcessing).Where(columns.LeaseOwner, executionOwner).Scan(&row); err != nil {
 		return gerror.Wrap(err, "读取Telegram采集交付重试次数失败")
+	}
+	if row.LeaseOwner != executionOwner {
+		return gerror.New("采集执行归属已变化，未写入失败状态")
 	}
 	status := sysin.DeliveryStatusFailedRetry
 	var nextRunAt any = gtime.Now().Add(30 * time.Second)
@@ -377,7 +477,9 @@ func (s *sCollector) failDelivery(ctx context.Context, deliveryID int64, cause e
 		status = sysin.DeliveryStatusDead
 		nextRunAt = nil
 	}
-	_, _ = dao.TgCollectorDelivery.Ctx(ctx).WherePri(deliveryID).Data(g.Map{
+	result, err := dao.TgCollectorDelivery.Ctx(ctx).WherePri(deliveryID).
+		Where(columns.Status, sysin.DeliveryStatusProcessing).
+		Where(columns.LeaseOwner, executionOwner).Data(g.Map{
 		columns.Status:       status,
 		columns.NextRunAt:    nextRunAt,
 		columns.LeaseOwner:   "",
@@ -385,6 +487,16 @@ func (s *sCollector) failDelivery(ctx context.Context, deliveryID int64, cause e
 		columns.ErrorMessage: cause.Error(),
 		columns.UpdatedAt:    gtime.Now(),
 	}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "保存采集失败状态失败")
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return gerror.Wrap(err, "确认采集失败状态更新结果失败")
+	}
+	if affected != 1 {
+		return gerror.New("采集执行归属已变化，未确认失败或终止状态")
+	}
 	if status == sysin.DeliveryStatusDead {
 		return fmt.Errorf("%w: Telegram采集交付超过最大重试次数: %v", asynq.SkipRetry, cause)
 	}
@@ -446,10 +558,31 @@ func (s *sCollector) recoverDeliveryTasks(ctx context.Context) {
 }
 
 func (s *sCollector) resetExpiredDeliveryLeases(ctx context.Context, limit int) error {
+	scopes, err := collectorRecoveryScopes(ctx, 8)
+	if err != nil {
+		return err
+	}
+	for _, scope := range scopes {
+		laneCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		err := s.resetExpiredDeliveryLeasesForScope(laneCtx, min(16, limit), scope)
+		cancel()
+		if err != nil {
+			g.Log().Warning(ctx, "来源交付租约恢复失败", g.Map{"scope": scope.key(), "error": err.Error()})
+		}
+	}
+	return nil
+}
+
+func (s *sCollector) resetExpiredDeliveryLeasesForScope(ctx context.Context, limit int, scope collectorRecoveryScope) error {
+	if limit <= 0 || !scope.valid() {
+		return nil
+	}
+
 	columns := dao.TgCollectorDelivery.Columns()
 	now := gtime.Now()
 	rows, err := dao.TgCollectorDelivery.Ctx(ctx).
 		Fields(columns.Id, columns.AttemptCount).
+		Where(columns.TenantId, scope.TenantID).Where("account_id", scope.AccountID).Where("source_id", scope.SourceID).
 		Where(columns.Status, sysin.DeliveryStatusProcessing).
 		WhereNotNull(columns.LeaseUntil).
 		WhereLTE(columns.LeaseUntil, now).
@@ -489,125 +622,57 @@ func (s *sCollector) resetExpiredDeliveryLeases(ctx context.Context, limit int) 
 	return nil
 }
 
-func (s *sCollector) enqueueDueDeliveryTasks(ctx context.Context, limit int) error {
+func (s *sCollector) enqueueDueDeliveryTasks(ctx context.Context, limit int) (recoveryErr error) {
+	meta := collectorObservationMeta{QueueClass: collectorQueueMixed}
+	ctx, recoveryObservation := startCollectorStage(ctx, collectorStageDeliveryRecovery, meta)
+	defer func() { recoveryObservation.Finish(collectorResultOK, recoveryErr) }()
 	if limit <= 0 {
 		return nil
 	}
-	columns := dao.TgCollectorDelivery.Columns()
-	now := gtime.Now()
-	staleBefore := now.Add(-deliveryRecoveryStaleTime)
-	condition := fmt.Sprintf(
-		"(%s=? AND %s<=?) OR (%s=? AND %s IS NOT NULL AND %s<=?)",
-		columns.Status,
-		columns.UpdatedAt,
-		columns.Status,
-		columns.NextRunAt,
-		columns.NextRunAt,
-	)
-	// Query each scheduler lane independently. Mixing realtime and history with
-	// OR/CASE forces PostgreSQL to scan both pools and prevents the partial lane
-	// indexes from being used. A simple deterministic order keeps each query
-	// bounded and index-friendly.
-	queryRows := func(poolCondition string, batchLimit int, poolArgs ...any) (gdb.Result, error) {
-		if batchLimit <= 0 {
-			return nil, nil
-		}
-		return dao.TgCollectorDelivery.Ctx(ctx).
-			Fields(columns.Id, columns.Priority, columns.Status).
-			Where(condition,
-				sysin.DeliveryStatusPending, staleBefore,
-				sysin.DeliveryStatusFailedRetry, now,
-			).
-			WhereLT(columns.AttemptCount, deliveryMaxAttempts).
-			Where(poolCondition, poolArgs...).
-			Order(columns.Priority + " DESC, " + columns.CreatedAt + " ASC, " + columns.Id + " ASC").
-			Limit(batchLimit).
-			All()
-	}
-
-	// Realtime recovery is isolated from history. A plain global ORDER BY lets
-	// one busy source occupy the whole recovery batch and can also starve an
-	// old source behind a continuously arriving source. Cap the number of rows
-	// selected per source in each pass so every source gets a recovery slot.
-	const liveRecoverySourceQuota = 16
-	liveRows, err := s.queryFairRealtimeDeliveryRows(ctx, staleBefore, now, limit, liveRecoverySourceQuota)
+	scopeCtx, cancelScopes := context.WithTimeout(ctx, time.Second)
+	scopes, err := collectorRecoveryScopes(scopeCtx, 8)
+	cancelScopes()
 	if err != nil {
-		return gerror.Wrap(err, "读取实时Telegram采集交付失败")
+		return gerror.Wrap(err, "读取交付恢复来源失败")
 	}
-	legacyRows, err := queryRows(
-		fmt.Sprintf("scheduler_pool = ? AND %s >= ?", columns.Priority),
-		limit-len(liveRows),
-		"history", sysin.EventPriorityRealtime,
-	)
+	if len(scopes) == 0 {
+		return nil
+	}
+	// One scalar clock read per pass, not per empty scope/pool. Cursor strings
+	// retain DB microseconds in the business timezone.
+	clockCtx, cancelClock := context.WithTimeout(ctx, time.Second)
+	upper, err := newDeliveryRecoveryCursor(clockCtx)
+	cancelClock()
 	if err != nil {
-		return gerror.Wrap(err, "读取兼容实时Telegram采集交付失败")
+		return err
 	}
-	historyRows, err := queryRows(
-		fmt.Sprintf("scheduler_pool = ? AND %s < ?", columns.Priority),
-		limit-len(liveRows)-len(legacyRows),
-		"history", sysin.EventPriorityRealtime,
-	)
-	if err != nil {
-		return gerror.Wrap(err, "读取历史Telegram采集交付失败")
-	}
-	rows := append(liveRows, legacyRows...)
-	rows = append(rows, historyRows...)
-
-	for _, row := range rows {
-		deliveryID := row[columns.Id].Int64()
-		status := row[columns.Status].String()
-		if deliveryID <= 0 || status == "" {
-			continue
-		}
-		priority, priorityErr := s.persistedDeliveryPriority(ctx, deliveryID)
-		if priorityErr != nil {
-			if !errors.Is(priorityErr, errDeliveryInvalidEvent) {
-				return priorityErr
+	pools := collectorRecoveryBranchOrder([]string{"realtime", "history"})
+	// Reserve one slot per selected scope/pool even with a tiny configured
+	// batch; earlier lanes cannot spend the later lanes' quota.
+	remaining := max(2*len(scopes), min(limit, 200))
+	laneQuota := max(1, min(deliveryRecoveryPageSize, remaining/(2*len(scopes))))
+	for _, scope := range scopes {
+		for _, pool := range pools {
+			if err := ctx.Err(); err != nil {
+				return errors.Join(recoveryErr, err)
 			}
-			if err := s.quarantineInvalidDelivery(ctx, deliveryID, priorityErr); err != nil {
-				return err
+			if remaining <= 0 {
+				return recoveryErr
 			}
-			g.Log().Warningf(ctx, "隔离无法分类的采集交付，继续恢复后续任务 deliveryId:%d err:%+v", deliveryID, priorityErr)
-			continue
-		}
-		// An urgent task may have an old unique marker in another queue. Allow
-		// recovery to create a current-priority copy; processDelivery's
-		// conditional claim keeps duplicate callbacks idempotent.
-		// Recovery must submit a fresh Asynq task. A stale Unique marker can make
-		// EnqueueContext return ErrDuplicateTask even when the old task is no
-		// longer present in the live queue, which falsely reports recovery success.
-		if updateErr := s.enqueueDeliveryTaskWithOptions(ctx, deliveryID, priority, false); updateErr != nil {
-			return gerror.Wrap(updateErr, "投递待恢复Telegram采集交付失败")
+			laneCtx, cancelLane := context.WithTimeout(ctx, time.Second)
+			count, err := s.recoverDeliveryCursorPage(laneCtx, scope, pool, min(laneQuota, remaining), upper)
+			cancelLane()
+			remaining -= count
+			if errors.Is(err, errCollectorRecoveryRedisUnavailable) {
+				return errors.Join(recoveryErr, err)
+			}
+			if err != nil {
+				recoveryErr = errors.Join(recoveryErr, err)
+				g.Log().Warning(ctx, "来源交付恢复失败", g.Map{"scope": scope.key(), "pool": pool, "error": err.Error()})
+			}
 		}
 	}
-	return nil
-}
-
-// queryFairRealtimeDeliveryRows bounds recovery work per source. The query is
-// deliberately limited to the realtime lane and returns only the columns used
-// by enqueueDueDeliveryTasks; it prevents one source from monopolizing the
-// global recovery batch while preserving a bounded DB read.
-func (s *sCollector) queryFairRealtimeDeliveryRows(ctx context.Context, staleBefore, now *gtime.Time, limit, sourceQuota int) (gdb.Result, error) {
-	if limit <= 0 || sourceQuota <= 0 {
-		return nil, nil
-	}
-	sql := fmt.Sprintf(`
-SELECT id, priority, status
-FROM (
-    SELECT id, priority, status, source_id, created_at,
-           ROW_NUMBER() OVER (PARTITION BY source_id ORDER BY priority DESC, created_at ASC, id ASC) AS source_rank
-    FROM %s
-    WHERE ((status = ? AND updated_at <= ?) OR (status = ? AND next_run_at IS NOT NULL AND next_run_at <= ?))
-      AND attempt_count < ?
-      AND scheduler_pool = ?
-) fair
-WHERE source_rank <= ?
-ORDER BY priority DESC, created_at ASC, id ASC
-LIMIT ?`, dao.TgCollectorDelivery.Table())
-	return g.DB().GetAll(ctx, sql,
-		sysin.DeliveryStatusPending, staleBefore,
-		sysin.DeliveryStatusFailedRetry, now,
-		deliveryMaxAttempts, "realtime", sourceQuota, limit)
+	return recoveryErr
 }
 
 func collectorDeliveryConcurrency(ctx context.Context) int {

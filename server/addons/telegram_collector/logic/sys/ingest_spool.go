@@ -42,6 +42,9 @@ func persistIngestSpool(ctx context.Context, event *sysin.RawUpdateEvent) (int64
 	if event == nil || event.EventID == "" || event.TenantID <= 0 {
 		return 0, fmt.Errorf("采集接收事件标识不完整")
 	}
+	if err := markCollectorRecoveryScope(ctx, collectorRecoveryScope{event.TenantID, event.AccountID, event.SourceID}); err != nil {
+		return 0, err
+	}
 	payload, err := json.Marshal(event)
 	if err != nil {
 		return 0, fmt.Errorf("序列化采集接收事件失败: %w", err)
@@ -72,15 +75,20 @@ func completeIngestSpool(ctx context.Context, id int64) error {
 
 // recoverIngestSpool replays accepted updates whose downstream Event handoff
 // was interrupted. The unique event key makes replay idempotent.
-func (s *sCollector) recoverIngestSpool(ctx context.Context, limit int) error {
-	if limit <= 0 {
-		limit = 100
+func (s *sCollector) recoverIngestSpool(ctx context.Context, limit int, scopes ...collectorRecoveryScope) error {
+	if len(scopes) != 1 || !scopes[0].valid() {
+		return fmt.Errorf("接收 Spool 恢复必须指定唯一有效 scope，禁止全局扫描")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if limit <= 0 || limit > 50 {
+		limit = 50
 	}
 	for i := 0; i < limit; i++ {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		row, err := claimIngestSpool(ctx)
+		row, err := claimIngestSpool(ctx, scopes[0])
 		if err != nil || row.IsEmpty() {
 			return err
 		}
@@ -114,14 +122,18 @@ func (s *sCollector) recoverIngestSpool(ctx context.Context, limit int) error {
 
 // Claim one row at a time so a slow handoff cannot expire the leases of an
 // entire batch. attempt_count is the fencing token for late worker results.
-func claimIngestSpool(ctx context.Context) (gdb.Record, error) {
+func claimIngestSpool(ctx context.Context, scopes ...collectorRecoveryScope) (gdb.Record, error) {
+	if len(scopes) != 1 || !scopes[0].valid() {
+		return nil, fmt.Errorf("接收 Spool 领取必须指定唯一有效 scope，禁止全局扫描")
+	}
+	scope := scopes[0]
 	return g.DB().GetOne(ctx, `WITH ready AS (
  SELECT id, priority FROM `+collectorIngestSpoolTable+`
- WHERE status IN ('received','failed_retry','processing') AND next_run_at IS NULL
+ WHERE tenant_id=? AND account_id=? AND source_id=? AND status IN ('received','failed_retry','processing') AND next_run_at IS NULL
  ORDER BY priority DESC,id FOR UPDATE SKIP LOCKED LIMIT 1
  ), due AS (
  SELECT id, priority FROM `+collectorIngestSpoolTable+`
- WHERE status IN ('received','failed_retry','processing') AND next_run_at <= CURRENT_TIMESTAMP
+ WHERE tenant_id=? AND account_id=? AND source_id=? AND status IN ('received','failed_retry','processing') AND next_run_at <= CURRENT_TIMESTAMP
  ORDER BY priority DESC,next_run_at,id FOR UPDATE SKIP LOCKED LIMIT 1
  ), selected AS (
  SELECT * FROM ready UNION ALL SELECT * FROM due
@@ -130,7 +142,7 @@ func claimIngestSpool(ctx context.Context) (gdb.Record, error) {
  ) UPDATE `+collectorIngestSpoolTable+` AS spool
  SET status='processing',attempt_count=attempt_count+1,
  next_run_at=CURRENT_TIMESTAMP + INTERVAL '2 minutes',updated_at=CURRENT_TIMESTAMP
- FROM winner WHERE spool.id=winner.id RETURNING spool.*`)
+ FROM winner WHERE spool.id=winner.id RETURNING spool.*`, scope.TenantID, scope.AccountID, scope.SourceID, scope.TenantID, scope.AccountID, scope.SourceID)
 }
 
 func finishIngestSpool(ctx context.Context, row gdb.Record, status, lastError string) error {

@@ -73,9 +73,11 @@ type collectorSubmitResult struct {
 // submitCollectorDelivery records the two meaningful write boundaries. An
 // event ID with an error means persistence succeeded but queue submission
 // failed, which must remain visible to recovery instead of looking successful.
-func (s *sSysPublish) submitCollectorDelivery(ctx context.Context, message *CollectMessage, delivery *collectorin.CollectorDelivery) collectorSubmitResult {
+func (s *sSysPublish) submitCollectorDelivery(ctx context.Context, message *CollectMessage, delivery *collectorin.CollectorDelivery) (result collectorSubmitResult) {
+	startedAt := time.Now()
+	defer func() { observeCollectPipelineSubmit(ctx, startedAt, result, delivery) }()
 	eventID, err := s.ingestAndProcessCollectMessage(ctx, message)
-	result := collectorSubmitResult{EventID: eventID, Err: err}
+	result = collectorSubmitResult{EventID: eventID, Err: err}
 	if err != nil {
 		result.Outcome = collectorSubmitOutcomeFailed
 		if eventID > 0 {

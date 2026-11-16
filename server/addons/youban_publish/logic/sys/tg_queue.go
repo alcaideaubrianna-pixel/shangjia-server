@@ -509,7 +509,7 @@ func (s *sSysPublish) enqueueTelegramJobInternal(ctx context.Context, jobId int6
 	// In channel-queue mode the ZSET is the execution hand-off. Do not also
 	// create an Asynq task: that would give the same job two consumers.
 	if telegramChannelQueueEnabled() && job.ChannelId > 0 {
-		if queueErr := enqueueTelegramChannelJob(ctx, job.ChannelId, jobId, priority, dueAt); queueErr != nil {
+		if queueErr := observeCollectChannelEnqueue(ctx, job.ChannelId, jobId, priority, dueAt); queueErr != nil {
 			_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 				Where("id", jobId).Where("dispatch_status", tgDispatchStatusQueued).
 				Data(g.Map{"dispatch_status": tgDispatchStatusIdle, "updated_at": gtime.Now()}).Update()
@@ -1241,7 +1241,11 @@ func (s *sSysPublish) enqueueTelegramTaskWithQueuePayload(ctx context.Context, t
 	enqueueCtx, cancel := context.WithTimeout(ctx, telegrambudget.Enqueue(ctx))
 	defer cancel()
 	step := beginTelegramPublishStage(ctx, "queue.redis_enqueue", g.Map{"targetQueue": queueName})
+	enqueueStartedAt := time.Now()
 	info, err := client.EnqueueContext(enqueueCtx, task, options...)
+	if taskType == tgTaskTypePublish {
+		observeCollectPublishQueue(ctx, jobId, 0, "asynq", enqueueStartedAt, info != nil, err)
+	}
 	step.End(err, g.Map{"duplicate": errors.Is(err, asynq.ErrDuplicateTask), "taskIdConflict": errors.Is(err, asynq.ErrTaskIDConflict)})
 	if errors.Is(err, asynq.ErrDuplicateTask) {
 		return nil
@@ -1299,7 +1303,9 @@ func (s *sSysPublish) enqueueTelegramTaskWithQueuePayload(ctx context.Context, t
 			}
 		}
 		g.Log().Warningf(ctx, "TG任务稳定TaskID冲突，使用兜底任务重入 jobId:%d fallbackTaskId:%s", jobId, fallbackTaskID)
+		enqueueStartedAt = time.Now()
 		info, err = client.EnqueueContext(enqueueCtx, task, fallbackOptions...)
+		observeCollectPublishQueue(ctx, jobId, 0, "asynq", enqueueStartedAt, info != nil, err)
 		if errors.Is(err, asynq.ErrDuplicateTask) {
 			return nil
 		}

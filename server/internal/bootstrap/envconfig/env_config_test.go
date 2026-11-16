@@ -115,8 +115,10 @@ func TestMediaFileCacheEnvironmentMappings(t *testing.T) {
 
 func TestCollectorQueueConfigurationContract(t *testing.T) {
 	want := map[string]string{
-		"youbanPublish.collect.processOutboxMode": "YOUBAN_PUBLISH_COLLECT_PROCESS_OUTBOX_MODE",
-		"telegramCollector.ingestSpoolMode":       "YOUBAN_TELEGRAM_COLLECTOR_INGEST_SPOOL_MODE",
+		"youbanPublish.collect.processOutboxMode":       "YOUBAN_PUBLISH_COLLECT_PROCESS_OUTBOX_MODE",
+		"telegramCollector.ingestSpoolMode":             "YOUBAN_TELEGRAM_COLLECTOR_INGEST_SPOOL_MODE",
+		"telegramCollector.eventHandoff.mode":           "YOUBAN_TELEGRAM_COLLECTOR_HANDOFF_MODE",
+		"telegramCollector.eventHandoff.timeoutSeconds": "YOUBAN_TELEGRAM_COLLECTOR_HANDOFF_TIMEOUT_SECONDS",
 	}
 	for key, envKey := range want {
 		found := false

@@ -1,13 +1,32 @@
 package consts
 
 const (
-	MediaCachePrefix        = "tg:collector:media:"
-	MediaLockPrefix         = "tg:collector:media-lock:"
-	AccountOwnerPrefix      = "youban_publish:tg:account-client:"
-	AccountLeaseEpochPrefix = "tg:collector:account-lease-epoch:"
-	AccountTaskEmptyPrefix  = "tg:collector:account-task-empty:"
-	MediaCacheDefaultHours  = 720
+	MediaCachePrefix             = "tg:collector:media:"
+	MediaLockPrefix              = "tg:collector:media-lock:"
+	AccountOwnerPrefix           = "youban_publish:tg:account-client:"
+	AccountLeaseEpochPrefix      = "tg:collector:account-lease-epoch:"
+	AccountTaskEmptyPrefix       = "tg:collector:account-task-empty:"
+	MediaCacheDefaultHours       = 720
+	RecoveryScopeKey             = "telegram_collector:recovery:scopes:v1"
+	EventRecoveryCursorPrefix    = "telegram_collector:event:recovery_cursor:v1"
+	DeliveryRecoveryCursorPrefix = "telegram_collector:delivery:recovery_cursor:v1"
 )
+
+func EventRecoveryCursorKey(scope, status string) string {
+	return EventRecoveryCursorPrefix + ":" + scope + ":" + status
+}
+
+func EventRecoveryLockKey(scope, status string) string {
+	return EventRecoveryCursorKey(scope, status) + ":lock"
+}
+
+func DeliveryRecoveryCursorKey(scope, pool string) string {
+	return DeliveryRecoveryCursorPrefix + ":" + scope + ":" + pool
+}
+
+func DeliveryRecoveryLockKey(scope, pool string) string {
+	return DeliveryRecoveryCursorKey(scope, pool) + ":lock"
+}
 
 func MediaCacheKey(fingerprint string) string {
 	return MediaCachePrefix + fingerprint

@@ -16,6 +16,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/gtrace"
 	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/gogf/gf/v2/util/guid"
 	"github.com/hibiken/asynq"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -24,6 +25,8 @@ import (
 	"hotgo/addons/telegram_collector/internal/dao"
 	"hotgo/addons/telegram_collector/internal/model/entity"
 	"hotgo/addons/telegram_collector/model/input/sysin"
+	"hotgo/internal/library/cache"
+	"hotgo/internal/library/hgrds/lock"
 )
 
 const eventTaskType = "telegram_collector:event"
@@ -62,12 +65,14 @@ func (s *sCollector) StartRuntime(ctx context.Context) {
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(eventTaskType, s.handleEventTask)
 	g.Log().Info(runtimeCtx, "启动Telegram Collector Worker", g.Map{
-		"log_type":          "telegram_collector",
-		"event":             "collector_worker_started",
-		"concurrency":       collectorConcurrency(runtimeCtx),
-		"ingestSpoolMode":   normalizeCollectorIngestSpoolMode(g.Cfg().MustGet(runtimeCtx, "telegramCollector.ingestSpoolMode", "redis_first").String()),
-		"eventHandoff":      "postgres_event_then_redis",
-		"legacySpoolActive": collectorIngestSpoolEnabled(runtimeCtx),
+		"log_type":                   "telegram_collector",
+		"event":                      "collector_worker_started",
+		"concurrency":                collectorConcurrency(runtimeCtx),
+		"ingestSpoolMode":            normalizeCollectorIngestSpoolMode(g.Cfg().MustGet(runtimeCtx, "telegramCollector.ingestSpoolMode", "redis_first").String()),
+		"eventHandoff":               "postgres_event_then_redis",
+		"legacySpoolActive":          collectorIngestSpoolEnabled(runtimeCtx),
+		"eventHandoffMode":           g.Cfg().MustGet(runtimeCtx, eventHandoffModeConfig, string(eventHandoffDirect)).String(),
+		"eventHandoffTimeoutSeconds": g.Cfg().MustGet(runtimeCtx, eventHandoffTimeoutConfig, 10).Int(),
 	})
 	// Signal handling belongs to the application; StopRuntime owns Shutdown.
 	if err := server.Start(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
@@ -122,10 +127,11 @@ func (s *sCollector) ensureRuntimeContext(ctx context.Context) context.Context {
 	return s.runtimeCtx
 }
 
-func (s *sCollector) enqueueEventTask(ctx context.Context, eventID int64, priority int) error {
+func (s *sCollector) enqueueEventTask(ctx context.Context, eventID int64, priority int, logOrigins ...string) error {
 	if eventID <= 0 {
 		return gerror.New("Telegram采集事件任务ID无效")
 	}
+
 	queueName := consts.QueueCollectHistory
 	if priority >= sysin.EventPriorityRealtime {
 		queueName = consts.QueueCollectRealtime
@@ -139,14 +145,39 @@ func (s *sCollector) enqueueEventTask(ctx context.Context, eventID int64, priori
 	}
 	client := s.queueClient
 	s.queueMu.Unlock()
-	_, err := client.EnqueueContext(ctx, asynq.NewTask(eventTaskType, collectorTaskPayload(eventID)),
-		asynq.Queue(queueName),
-		asynq.MaxRetry(eventMaxAttempts-1),
-		asynq.Timeout(2*time.Minute),
-		asynq.Unique(eventTaskUniqueTTL),
-		asynq.Retention(24*time.Hour),
-	)
+	ctx, observation := startCollectorStage(ctx, collectorStageEventEnqueue, collectorObservationMeta{
+		EventID: eventID, QueueClass: collectorObserveQueueClassFromClass(collectorQueueClass(priority)),
+	})
+	enqueueStarted := time.Now()
+	recovery := len(logOrigins) > 0 && logOrigins[0] == "recovery"
+	options := []asynq.Option{asynq.Queue(queueName), asynq.MaxRetry(eventMaxAttempts - 1), asynq.Timeout(2 * time.Minute), asynq.Retention(24 * time.Hour)}
+	if !recovery {
+		options = append(options, asynq.Unique(eventTaskUniqueTTL))
+	}
+	_, err := client.EnqueueContext(ctx, asynq.NewTask(eventTaskType, collectorTaskPayload(eventID)), options...)
+	outcome := "enqueued"
 	if errors.Is(err, asynq.ErrDuplicateTask) || errors.Is(err, asynq.ErrTaskIDConflict) {
+		outcome = "enqueue_conflict"
+	} else if err != nil {
+		outcome = "error"
+	}
+	logErr := err
+	observeResult := collectorResultOK
+	if outcome == "enqueue_conflict" {
+		logErr = nil // A duplicate is an observation, not a processing failure.
+		observeResult = collectorResultDuplicate
+	}
+	observation.Finish(observeResult, logErr)
+	enqueueOrigin := "direct"
+	if len(logOrigins) > 0 {
+		enqueueOrigin = logOrigins[0]
+	}
+	logCollectorPipelineStage(ctx, &entity.TgCollectorEvent{Id: eventID}, "event.enqueued", enqueueStarted, nil, logErr,
+		g.Map{"queue": queueName, "priority": priority, "outcome": outcome, "enqueueOrigin": enqueueOrigin})
+	if errors.Is(err, asynq.ErrDuplicateTask) || errors.Is(err, asynq.ErrTaskIDConflict) {
+		if recovery {
+			return gerror.Wrap(err, "恢复原始事件未确认实际入队")
+		}
 		return nil
 	}
 	return err
@@ -168,68 +199,96 @@ func (s *sCollector) handleEventTask(ctx context.Context, task *asynq.Task) erro
 	return nil
 }
 
-func (s *sCollector) processEvent(ctx context.Context, eventID int64) error {
+func (s *sCollector) processEvent(ctx context.Context, eventID int64) (err error) {
 	if eventID <= 0 {
 		return gerror.New("Telegram采集事件任务无效")
 	}
+	ctx, observation := startCollectorStage(ctx, collectorStageEventConsume, collectorObservationMeta{
+		EventID: eventID, QueueClass: collectorObserveQueueClassFromClass("mixed"),
+	})
+	observeResult := collectorResultError
+	defer func() { observation.Finish(observeResult, err) }()
+	pipelineStarted := time.Now()
+	var row entity.TgCollectorEvent
+	row.Id = eventID
+	logCollectorPipelineStage(ctx, &row, "event.claim.started", pipelineStarted, nil, nil)
 	columns := dao.TgCollectorEvent.Columns()
 	now := gtime.Now()
+	executionOwner := guid.S()
+	claimStarted := time.Now()
 	result, err := dao.TgCollectorEvent.Ctx(ctx).
 		Where(columns.Id, eventID).
 		WhereIn(columns.Status, []string{sysin.EventStatusReceived, sysin.EventStatusFailedRetry}).
 		Data(g.Map{
 			columns.Status:       sysin.EventStatusProcessing,
-			columns.LeaseOwner:   collectorInstanceID(),
+			columns.LeaseOwner:   executionOwner,
 			columns.LeaseUntil:   now.Add(eventLeaseDuration),
 			columns.AttemptCount: gdb.Raw(columns.AttemptCount + "+1"),
 			columns.UpdatedAt:    now,
 		}).Update()
+	claimDuration := time.Since(claimStarted).Milliseconds()
 	if err != nil {
+		recordCollectorStage(ctx, collectorStageEventClaim, observation.meta, collectorResultError, time.Since(claimStarted), err)
+		logCollectorPipelineStage(ctx, &row, "event.claim.failed", pipelineStarted, nil, err,
+			g.Map{"claimDurationMs": claimDuration})
 		return gerror.Wrap(err, "领取Telegram采集事件失败")
 	}
-	affected, _ := result.RowsAffected()
+	affected, affectedErr := result.RowsAffected()
+	if affectedErr != nil {
+		recordCollectorStage(ctx, collectorStageEventClaim, observation.meta, collectorResultError, time.Since(claimStarted), affectedErr)
+		return gerror.Wrap(affectedErr, "确认Telegram采集事件领取结果失败")
+	}
 	if affected == 0 {
+		recordCollectorStage(ctx, collectorStageEventClaim, observation.meta, collectorResultSkipped, time.Since(claimStarted), nil)
+		observeResult = collectorResultSkipped
+		logCollectorPipelineStage(ctx, &row, "event.claim.skipped", pipelineStarted, nil, nil,
+			g.Map{"claimDurationMs": claimDuration, "rowsAffected": affected})
 		return nil
 	}
-	var row entity.TgCollectorEvent
-	if err = dao.TgCollectorEvent.Ctx(ctx).WherePri(eventID).Scan(&row); err != nil {
-		return s.failEvent(ctx, eventID, err)
+	recordCollectorStage(ctx, collectorStageEventClaim, observation.meta, collectorResultOK, time.Since(claimStarted), nil)
+	logCollectorPipelineStage(ctx, &row, "event.claimed", pipelineStarted, nil, nil,
+		g.Map{"claimDurationMs": claimDuration, "rowsAffected": affected})
+	readStarted := time.Now()
+	if err = dao.TgCollectorEvent.Ctx(ctx).WherePri(eventID).Where(columns.Status, sysin.EventStatusProcessing).Where(columns.LeaseOwner, executionOwner).Scan(&row); err != nil {
+		recordCollectorStage(ctx, collectorStageEventRead, observation.meta, collectorResultError, time.Since(readStarted), err)
+		logCollectorPipelineStage(ctx, &row, "event.load.failed", pipelineStarted, nil, err,
+			g.Map{"readDurationMs": time.Since(readStarted).Milliseconds()})
+		return s.failEvent(ctx, eventID, executionOwner, err)
 	}
-	pipelineStarted := time.Now()
-	logCollectorPipelineStage(ctx, &row, "event.loaded", pipelineStarted, nil, nil)
+	if row.LeaseOwner != executionOwner || row.Status != sysin.EventStatusProcessing {
+		return gerror.New("采集执行归属已变化，停止旧执行")
+	}
+	observation.meta.TenantID, observation.meta.AccountID, observation.meta.SourceID = row.TenantId, row.AccountId, row.SourceId
+	observation.meta.ChatID, observation.meta.MessageID = row.ChatId, row.MessageId
+	observation.meta.SourceType = collectorObserveSourceType(row.SourceType)
+	observation.meta.QueueClass = collectorObserveQueueClassFromPriority(row.Priority)
+	recordCollectorStage(ctx, collectorStageEventRead, observation.meta, collectorResultOK, time.Since(readStarted), nil)
+	logCollectorPipelineStage(ctx, &row, "event.loaded", pipelineStarted, nil, nil,
+		g.Map{"readDurationMs": time.Since(readStarted).Milliseconds(), "claimDurationMs": claimDuration})
 	if row.RawUpdate == nil {
-		return s.failEvent(ctx, eventID, gerror.New("Telegram原始事件为空"))
+		return s.failEvent(ctx, eventID, executionOwner, gerror.New("Telegram原始事件为空"))
 	}
+	parseStarted := time.Now()
 	raw := []byte(row.RawUpdate.String())
 	delivery, err := collectorDeliveryFromEvent(&row, raw)
+	recordCollectorStage(ctx, collectorStageEventParse, observation.meta, collectorResultOK, time.Since(parseStarted), err)
 	if err != nil {
-		return s.failEvent(ctx, eventID, err)
+		return s.failEvent(ctx, eventID, executionOwner, err)
 	}
 	logCollectorPipelineStage(ctx, &row, "delivery.parsed", pipelineStarted, &delivery, nil)
-	deliveryID, err := s.saveDelivery(ctx, &delivery)
+	dispatchCtx, dispatchObservation := startCollectorStage(ctx, collectorStageEventDispatch, observation.meta)
+	defer dispatchObservation.Finish(collectorResultError, nil)
+	err = s.handoffCollectorEvent(dispatchCtx, &row, &delivery)
+	dispatchObservation.Finish(collectorResultOK, err)
 	if err != nil {
-		return s.failEvent(ctx, eventID, err)
+		return s.failEvent(ctx, eventID, executionOwner, err)
 	}
-	delivery.ID = deliveryID
-	logCollectorPipelineStage(ctx, &row, "delivery.persisted", pipelineStarted, &delivery, nil)
-	if err = s.enqueueDeliveryTask(ctx, deliveryID, deliveryPriority(&delivery)); err != nil {
-		return s.failEvent(ctx, eventID, err)
-	}
-	logCollectorPipelineStage(ctx, &row, "delivery.enqueued", pipelineStarted, &delivery, nil)
-	_, err = dao.TgCollectorEvent.Ctx(ctx).WherePri(eventID).Data(g.Map{
-		columns.Status:       sysin.EventStatusReady,
-		columns.ProcessedAt:  gtime.Now(),
-		columns.LeaseOwner:   "",
-		columns.LeaseUntil:   nil,
-		columns.ErrorMessage: "",
-		columns.UpdatedAt:    gtime.Now(),
-	}).Update()
-	logCollectorPipelineStage(ctx, &row, "event.ready", pipelineStarted, &delivery, err)
-	return err
+	observeResult = collectorResultOK
+	return nil
 }
 
 // logCollectorPipelineStage 输出采集到分发的统一链路字段，便于按事件/账户/来源追踪耗时。
-func logCollectorPipelineStage(ctx context.Context, row *entity.TgCollectorEvent, stage string, started time.Time, delivery *sysin.CollectorDelivery, err error) {
+func logCollectorPipelineStage(ctx context.Context, row *entity.TgCollectorEvent, stage string, started time.Time, delivery *sysin.CollectorDelivery, err error, details ...g.Map) {
 	if row == nil {
 		return
 	}
@@ -239,9 +298,21 @@ func logCollectorPipelineStage(ctx context.Context, row *entity.TgCollectorEvent
 		"eventId": row.Id, "tenantId": row.TenantId, "accountId": row.AccountId,
 		"sourceId": row.SourceId, "sourceType": row.SourceType, "sourceChatId": row.ChatId,
 		"sourceMessageId": row.MessageId, "durationMs": time.Since(started).Milliseconds(),
+		"observedAtUnixMs": time.Now().UnixMilli(), "startedAtUnixMs": started.UnixMilli(),
+		"queue": collectorQueueName(ctx),
 	}
+	fields["ageTimeBasis"] = "db_wall_clock_unverified"
+	fields["eventAgeAvailable"] = false
 	if row.CreatedAt != nil {
-		fields["eventAgeMs"] = time.Since(row.CreatedAt.Time).Milliseconds()
+		fields["eventCreatedAtRaw"] = row.CreatedAt.Time.Format("2006-01-02 15:04:05.999999")
+	}
+	if row.ReceivedAt != nil {
+		fields["eventReceivedAtRaw"] = row.ReceivedAt.Time.Format("2006-01-02 15:04:05.999999")
+	}
+	for _, detail := range details {
+		for key, value := range detail {
+			fields[key] = value
+		}
 	}
 	if delivery != nil {
 		fields["history"] = delivery.History
@@ -385,6 +456,13 @@ func collectorBotMediaItems(message *models.Message) []sysin.CollectorMediaItem 
 }
 
 func (s *sCollector) saveDelivery(ctx context.Context, delivery *sysin.CollectorDelivery) (int64, error) {
+	if delivery == nil {
+		return 0, gerror.New("采集交付不能为空")
+	}
+	if err := markCollectorRecoveryScope(ctx, collectorRecoveryScope{delivery.TenantID, delivery.AccountID, delivery.SourceID}); err != nil {
+		return 0, gerror.Wrap(err, "注册采集交付恢复 scope 失败")
+	}
+
 	columns := dao.TgCollectorDelivery.Columns()
 	now := gtime.Now()
 	data := g.Map{
@@ -439,11 +517,18 @@ func deliveryPriority(delivery *sysin.CollectorDelivery) int {
 	return sysin.EventPriorityUrgent
 }
 
-func (s *sCollector) failEvent(ctx context.Context, eventID int64, cause error) error {
+func (s *sCollector) failEvent(ctx context.Context, eventID int64, executionOwner string, cause error) error {
+	if strings.TrimSpace(executionOwner) == "" {
+		return gerror.New("采集失败更新必须指定本次执行归属")
+	}
 	columns := dao.TgCollectorEvent.Columns()
 	var row entity.TgCollectorEvent
-	if err := dao.TgCollectorEvent.Ctx(ctx).Fields(columns.AttemptCount).WherePri(eventID).Scan(&row); err != nil {
+	if err := dao.TgCollectorEvent.Ctx(ctx).Fields(columns.AttemptCount, columns.LeaseOwner).WherePri(eventID).
+		Where(columns.Status, sysin.EventStatusProcessing).Where(columns.LeaseOwner, executionOwner).Scan(&row); err != nil {
 		return gerror.Wrap(err, "读取Telegram采集事件重试次数失败")
+	}
+	if row.LeaseOwner != executionOwner {
+		return gerror.New("采集执行归属已变化，未写入失败状态")
 	}
 	status := sysin.EventStatusFailedRetry
 	var nextRunAt any = gtime.Now().Add(30 * time.Second)
@@ -451,7 +536,9 @@ func (s *sCollector) failEvent(ctx context.Context, eventID int64, cause error) 
 		status = sysin.EventStatusDead
 		nextRunAt = nil
 	}
-	_, _ = dao.TgCollectorEvent.Ctx(ctx).WherePri(eventID).Data(g.Map{
+	result, err := dao.TgCollectorEvent.Ctx(ctx).WherePri(eventID).
+		Where(columns.Status, sysin.EventStatusProcessing).
+		Where(columns.LeaseOwner, executionOwner).Data(g.Map{
 		columns.Status:       status,
 		columns.NextRunAt:    nextRunAt,
 		columns.LeaseOwner:   "",
@@ -459,6 +546,16 @@ func (s *sCollector) failEvent(ctx context.Context, eventID int64, cause error) 
 		columns.ErrorMessage: cause.Error(),
 		columns.UpdatedAt:    gtime.Now(),
 	}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "保存采集失败状态失败")
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return gerror.Wrap(err, "确认采集失败状态更新结果失败")
+	}
+	if affected != 1 {
+		return gerror.New("采集执行归属已变化，未确认失败或终止状态")
+	}
 	if status == sysin.EventStatusDead {
 		return fmt.Errorf("%w: Telegram采集事件超过最大重试次数: %v", asynq.SkipRetry, cause)
 	}
@@ -487,8 +584,21 @@ func (s *sCollector) runEventRecovery(ctx context.Context) {
 }
 
 func (s *sCollector) recoverEventTasks(ctx context.Context) {
-	if err := s.recoverIngestSpool(ctx, collectorRecoveryBatchSize(ctx)); err != nil {
-		g.Log().Warningf(ctx, "恢复Telegram采集接收Spool失败：%+v", err)
+	if collectorIngestSpoolEnabled(ctx) {
+		spoolCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		scopes, err := collectorRecoveryScopes(spoolCtx, 8)
+		if err != nil {
+			g.Log().Warningf(ctx, "读取 Spool 恢复 scope 失败：%+v", err)
+		} else {
+			for _, scope := range scopes {
+				laneCtx, cancelLane := context.WithTimeout(spoolCtx, 500*time.Millisecond)
+				if err := s.recoverIngestSpool(laneCtx, 5, scope); err != nil {
+					g.Log().Warningf(ctx, "恢复来源 Spool 失败 scope:%s err:%+v", scope.key(), err)
+				}
+				cancelLane()
+			}
+		}
+		cancel()
 	}
 	if err := s.resetExpiredEventLeases(ctx, collectorRecoveryBatchSize(ctx)); err != nil {
 		g.Log().Warningf(ctx, "恢复超时Telegram采集事件失败：%+v", err)
@@ -498,11 +608,37 @@ func (s *sCollector) recoverEventTasks(ctx context.Context) {
 	}
 }
 
-func (s *sCollector) resetExpiredEventLeases(ctx context.Context, limit int) error {
+func (s *sCollector) resetExpiredEventLeases(ctx context.Context, limit int, scopes ...collectorRecoveryScope) error {
+	if len(scopes) == 0 {
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		lanes, err := collectorRecoveryScopes(ctx, 8)
+		if err != nil {
+			return gerror.Wrap(err, "读取原始事件租约恢复 scope 失败，禁止全局扫描")
+		}
+		var result error
+		for _, scope := range lanes {
+			laneCtx, cancelLane := context.WithTimeout(ctx, 500*time.Millisecond)
+			result = errors.Join(result, s.resetExpiredEventLeases(laneCtx, min(16, limit), scope))
+			cancelLane()
+		}
+		return result
+	}
+	if len(scopes) != 1 || !scopes[0].valid() {
+		return gerror.New("原始事件恢复需要有效单 scope")
+	}
+	scope := scopes[0]
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if limit <= 0 || limit > 50 {
+		limit = 50
+	}
+
 	columns := dao.TgCollectorEvent.Columns()
 	now := gtime.Now()
 	rows, err := dao.TgCollectorEvent.Ctx(ctx).
 		Fields(columns.Id, columns.AttemptCount).
+		Where(columns.TenantId, scope.TenantID).Where(columns.AccountId, scope.AccountID).Where(columns.SourceId, scope.SourceID).
 		Where(columns.Status, sysin.EventStatusProcessing).
 		WhereNotNull(columns.LeaseUntil).
 		WhereLTE(columns.LeaseUntil, now).
@@ -525,6 +661,7 @@ func (s *sCollector) resetExpiredEventLeases(ctx context.Context, limit int) err
 		}
 		_, updateErr := dao.TgCollectorEvent.Ctx(ctx).
 			WherePri(eventID).
+			Where(columns.TenantId, scope.TenantID).Where(columns.AccountId, scope.AccountID).Where(columns.SourceId, scope.SourceID).
 			Where(columns.Status, sysin.EventStatusProcessing).
 			WhereLTE(columns.LeaseUntil, now).
 			Data(g.Map{
@@ -542,43 +679,223 @@ func (s *sCollector) resetExpiredEventLeases(ctx context.Context, limit int) err
 	return nil
 }
 
-func (s *sCollector) enqueueDueEventTasks(ctx context.Context, limit int) error {
+func (s *sCollector) enqueueDueEventTasks(ctx context.Context, limit int) (recoveryErr error) {
+	ctx, recoveryObservation := startCollectorStage(ctx, collectorStageEventRecovery, collectorObservationMeta{QueueClass: collectorQueueMixed})
+	defer func() { recoveryObservation.Finish(collectorResultOK, recoveryErr) }()
+	scopeCtx, cancel := context.WithTimeout(ctx, time.Second)
+	scopes, err := collectorRecoveryScopes(scopeCtx, 8)
+	cancel()
+	if err != nil {
+		return gerror.Wrap(err, "读取原始事件恢复 scope 失败，禁止全局扫描")
+	}
+	if len(scopes) == 0 {
+		g.Log().Info(ctx, "原始事件恢复跳过", g.Map{"reason": "redis_scope_unavailable"})
+		return nil
+	}
+	receivedLimit, retryLimit := eventRecoveryBranchLimits(min(limit, 50))
+	var result error
+	branches := collectorRecoveryBranchOrder([]string{sysin.EventStatusReceived, sysin.EventStatusFailedRetry})
+	for _, scope := range scopes {
+		for _, status := range branches {
+			branchLimit := receivedLimit
+			if status == sysin.EventStatusFailedRetry {
+				branchLimit = retryLimit
+			}
+			branchCtx, cancelBranch := context.WithTimeout(ctx, 500*time.Millisecond)
+			branchErr := s.enqueueDueEventBranch(branchCtx, status, branchLimit, scope)
+			cancelBranch()
+			result = errors.Join(result, branchErr)
+			if errors.Is(branchErr, errCollectorRecoveryRedisUnavailable) {
+				return result
+			}
+		}
+	}
+	return result
+}
+
+const (
+	eventRecoveryCursorTTL = 24 * time.Hour
+	eventRecoveryTimeField = "recovery_cursor_time"
+)
+
+// Timestamp strings retain the database's wall-clock value. Converting them to
+// Unix and back here would reinterpret historical timestamp-without-time-zone data.
+type eventRecoveryCursor struct {
+	AfterTime string `json:"afterTime"`
+	AfterID   int64  `json:"afterId"`
+	UntilTime string `json:"untilTime"`
+}
+
+func eventRecoveryBranchLimits(limit int) (received, retry int) {
+	// A minimum of two gives both states a slot even with recoveryBatchSize=1.
+	if limit < 2 {
+		limit = 2
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	return (limit + 1) / 2, limit / 2
+}
+
+func newEventRecoveryCursor(ctx context.Context, status string) (eventRecoveryCursor, error) {
+	var staleSeconds int64
+	if status == sysin.EventStatusReceived {
+		staleSeconds = int64(eventRecoveryStaleTime / time.Second)
+	}
+	// Business timestamp fields follow global.Init's Asia/Shanghai wall clock.
+	// Pin that zone explicitly: LOCALTIMESTAMP would follow the DB session zone
+	// and could delay recovery by eight hours on a UTC connection.
+	value, err := g.DB().GetValue(ctx,
+		"SELECT to_char((CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Shanghai') - ? * INTERVAL '1 second', 'YYYY-MM-DD HH24:MI:SS.US')",
+		staleSeconds)
+	if err != nil {
+		return eventRecoveryCursor{}, gerror.Wrap(err, "读取采集事件恢复扫描时间上界失败")
+	}
+	if value == nil || value.String() == "" {
+		return eventRecoveryCursor{}, gerror.New("采集事件恢复扫描时间上界为空")
+	}
+	return eventRecoveryCursor{UntilTime: value.String()}, nil
+}
+
+func eventRecoveryPage(ctx context.Context, status string, cursor eventRecoveryCursor, limit int, scopes ...collectorRecoveryScope) (gdb.Result, error) {
+	if len(scopes) != 1 || !scopes[0].valid() {
+		return nil, gerror.New("原始事件恢复分页必须提供单一 scope，禁止全局扫描")
+	}
+	scope := scopes[0]
+	if limit <= 0 || limit > 50 {
+		limit = 50
+	}
 	columns := dao.TgCollectorEvent.Columns()
-	now := gtime.Now()
-	staleBefore := now.Add(-eventRecoveryStaleTime)
-	condition := fmt.Sprintf(
-		"(%s=? AND %s<=?) OR (%s=? AND %s IS NOT NULL AND %s<=?)",
-		columns.Status,
-		columns.UpdatedAt,
-		columns.Status,
-		columns.NextRunAt,
-		columns.NextRunAt,
-	)
-	rows, err := dao.TgCollectorEvent.Ctx(ctx).
-		Fields(columns.Id, columns.EventKey, columns.Priority, columns.Status, columns.UpdatedAt, columns.NextRunAt).
-		Where(condition,
-			sysin.EventStatusReceived, staleBefore,
-			sysin.EventStatusFailedRetry, now,
-		).
-		WhereLT(columns.AttemptCount, eventMaxAttempts).
-		OrderDesc(columns.Priority).
-		OrderAsc(columns.UpdatedAt).
-		Limit(limit).
-		All()
+	model := dao.TgCollectorEvent.Ctx(ctx).Where(columns.TenantId, scope.TenantID).Where(columns.AccountId, scope.AccountID).Where(columns.SourceId, scope.SourceID)
+	var timeColumn string
+	switch status {
+	case sysin.EventStatusReceived:
+		// Literal predicates also match the partial index with generic prepared plans.
+		model = model.Where(fmt.Sprintf("%s='received'", columns.Status))
+		timeColumn = columns.UpdatedAt
+		// Received is waiting for its first handoff, not an expired retry. No
+		// lower age bound or attempt limit may silently remove this backlog.
+	case sysin.EventStatusFailedRetry:
+		model = model.Where(fmt.Sprintf("%s='failed_retry'", columns.Status)).
+			WhereLT(columns.AttemptCount, eventMaxAttempts)
+		timeColumn = columns.NextRunAt
+	default:
+		return nil, gerror.New("采集事件恢复状态不支持")
+	}
+	model = model.WhereLTE(timeColumn, cursor.UntilTime)
+	if cursor.AfterID > 0 {
+		model = model.Where(fmt.Sprintf("(%s,%s) > (?,?)", timeColumn, columns.Id), cursor.AfterTime, cursor.AfterID)
+	}
+	return model.Fields(columns.Id, columns.Priority,
+		fmt.Sprintf("to_char(%s, 'YYYY-MM-DD HH24:MI:SS.US') AS %s", timeColumn, eventRecoveryTimeField)).
+		OrderAsc(timeColumn).OrderAsc(columns.Id).Limit(limit).All()
+}
+
+func advanceEventRecoveryCursor(cursor eventRecoveryCursor, status string, row gdb.Record) eventRecoveryCursor {
+	// The query returns text directly so ORM timezone interpretation cannot
+	// shift either side of a timestamp-without-time-zone keyset comparison.
+	cursor.AfterTime = row[eventRecoveryTimeField].String()
+	cursor.AfterID = row[dao.TgCollectorEvent.Columns().Id].Int64()
+	return cursor
+}
+
+func enqueueEventRecoveryPage(rows gdb.Result, status string, cursor eventRecoveryCursor, limit int, enqueue func(int64, int) error) (eventRecoveryCursor, error) {
+	columns := dao.TgCollectorEvent.Columns()
+	for _, row := range rows {
+		if err := enqueue(row[columns.Id].Int64(), row[columns.Priority].Int()); err != nil {
+			// Keep the last successful position so this row remains retryable.
+			return cursor, gerror.Wrap(err, "投递待恢复Telegram采集事件失败")
+		}
+		// Asynq conflicts return nil too; they must not pin the next scan.
+		cursor = advanceEventRecoveryCursor(cursor, status, row)
+	}
+	if len(rows) < limit {
+		// End of the fixed window: revisit earlier rows in the next sweep,
+		// including any whose previously enqueued Redis task disappeared.
+		cursor = eventRecoveryCursor{}
+	}
+	return cursor, nil
+}
+
+func (s *sCollector) enqueueDueEventBranch(ctx context.Context, status string, limit int, scope collectorRecoveryScope) error {
+	if !scope.valid() {
+		return gerror.New("原始事件恢复 scope 无效")
+	}
+	recoveryLock := lock.NewConfig(10*time.Second, time.Second).WithoutWatchDog().Mutex(consts.EventRecoveryLockKey(scope.key(), status))
+	if err := recoveryLock.TryLock(ctx); err != nil {
+		if errors.Is(err, lock.ErrLockFailed) {
+			return nil
+		}
+		return errors.Join(errCollectorRecoveryRedisUnavailable, err)
+	}
+	defer func() {
+		unlockCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 100*time.Millisecond)
+		defer cancel()
+		_ = recoveryLock.Unlock(unlockCtx)
+	}()
+	cursorKey := consts.EventRecoveryCursorKey(scope.key(), status)
+	value, err := cache.Instance().Get(ctx, cursorKey)
+	if err != nil {
+		return errors.Join(errCollectorRecoveryRedisUnavailable, gerror.Wrap(err, "读取采集事件恢复游标失败"))
+	}
+	var cursor eventRecoveryCursor
+	if value != nil && !value.IsNil() {
+		if err = value.Scan(&cursor); err != nil {
+			return gerror.Wrap(err, "解析采集事件恢复游标失败")
+		}
+	}
+	if cursor.UntilTime == "" {
+		cursor, err = newEventRecoveryCursor(ctx, status)
+		if err != nil {
+			return err
+		}
+	}
+	queryStarted := time.Now()
+	scanMeta := collectorObservationMeta{
+		QueueClass: collectorQueueMixed,
+		TenantID:   scope.TenantID, AccountID: scope.AccountID, SourceID: scope.SourceID,
+	}
+	scanCtx, observation := startCollectorStage(ctx, collectorStageEventScan, scanMeta)
+	rows, err := eventRecoveryPage(scanCtx, status, cursor, limit, scope)
+	observation.Finish(collectorResultOK, err)
+	if err == nil {
+		observeCollectorRecoveryCandidates(scanCtx, collectorStageEventScan, scanMeta, len(rows))
+	}
+	logCollectorPipelineStage(ctx, &entity.TgCollectorEvent{}, "event.recovery.queried", queryStarted, nil, err,
+		g.Map{"queryDurationMs": time.Since(queryStarted).Milliseconds(), "resultCount": len(rows),
+			"limit": limit, "workerInstanceId": collectorInstanceID(), "recoveryStatus": status,
+			"cursorAfterId": cursor.AfterID, "cursorAfterTime": cursor.AfterTime, "scanUntilTime": cursor.UntilTime,
+			"scope": scope.key(), "tenantId": scope.TenantID, "accountId": scope.AccountID, "sourceId": scope.SourceID})
 	if err != nil {
 		return gerror.Wrap(err, "读取待恢复Telegram采集事件失败")
 	}
-	for _, row := range rows {
-		eventID := row[columns.Id].Int64()
-		status := row[columns.Status].String()
-		if eventID <= 0 || status == "" {
-			continue
+	cursor, enqueueErr := enqueueEventRecoveryPage(rows, status, cursor, limit, func(eventID int64, priority int) error {
+		meta := scanMeta
+		meta.QueueClass = collectorObserveQueueClassFromPriority(priority)
+		meta.EventID = eventID
+		enqueueCtx, observation := startCollectorStage(ctx, collectorStageEventReenqueue, meta)
+		enqueueErr := s.enqueueEventTask(enqueueCtx, eventID, priority, "recovery")
+		observation.Finish(collectorResultOK, enqueueErr)
+		if enqueueErr != nil && !errors.Is(enqueueErr, asynq.ErrDuplicateTask) && !errors.Is(enqueueErr, asynq.ErrTaskIDConflict) {
+			return errors.Join(errCollectorRecoveryRedisUnavailable, enqueueErr)
 		}
-		if updateErr := s.enqueueEventTask(ctx, eventID, row[columns.Priority].Int()); updateErr != nil {
-			return gerror.Wrap(updateErr, "投递待恢复Telegram采集事件失败")
-		}
+		return enqueueErr
+	})
+	// A branch deadline must not discard already confirmed enqueue progress.
+	// Persist only while this execution still owns the cursor lease.
+	saveCtx, cancelSave := context.WithTimeout(context.WithoutCancel(ctx), 100*time.Millisecond)
+	defer cancelSave()
+	owned, refreshErr := recoveryLock.Refresh(saveCtx)
+	if refreshErr != nil {
+		return errors.Join(enqueueErr, errCollectorRecoveryRedisUnavailable, refreshErr)
 	}
-	return nil
+	if !owned {
+		return errors.Join(enqueueErr, gerror.New("采集事件恢复游标租约已失效"))
+	}
+	if saveErr := cache.Instance().Set(saveCtx, cursorKey, cursor, eventRecoveryCursorTTL); saveErr != nil {
+		return errors.Join(enqueueErr, errCollectorRecoveryRedisUnavailable, gerror.Wrap(saveErr, "保存采集事件恢复游标失败"))
+	}
+	return enqueueErr
 }
 
 func collectorRedisOption(ctx context.Context) asynq.RedisClientOpt {

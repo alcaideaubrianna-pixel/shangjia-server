@@ -155,6 +155,11 @@ func (s *sCollector) enqueueReplayEvent(ctx context.Context, eventID int64) (boo
 	if row.Id <= 0 {
 		return false, gerror.New("source重放事件不存在")
 	}
+	// The row is already loaded for replay; register before any state mutation.
+	if err := markCollectorRecoveryScope(ctx, collectorRecoveryScope{row.TenantId, row.AccountId, row.SourceId}); err != nil {
+		return false, gerror.Wrap(err, "登记source重放恢复 scope 失败")
+	}
+
 	switch row.Status {
 	case sysin.EventStatusReceived, sysin.EventStatusFailedRetry:
 		return true, s.enqueueEventTask(ctx, eventID, row.Priority)

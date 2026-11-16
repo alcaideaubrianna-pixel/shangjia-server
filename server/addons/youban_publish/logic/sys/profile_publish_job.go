@@ -205,6 +205,9 @@ func (s *sSysPublish) submitProfilePublishWithMeta(ctx context.Context, profileI
 		}
 		return err
 	}
+	for _, jobID := range jobIds {
+		observeCollectPublishAdmission(ctx, jobID, profileId)
+	}
 	g.Log().Info(ctx, "资料发布任务创建完成", g.Map{
 		"event":       "publish_job_created",
 		"profileId":   profileId,

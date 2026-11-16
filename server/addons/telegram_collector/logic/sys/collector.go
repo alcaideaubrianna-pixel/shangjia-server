@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -51,8 +52,6 @@ func observeIngestLatency(ctx context.Context, event *sysin.RawUpdateEvent, stag
 		attribute.String("stage", stage),
 		attribute.String("source_type", event.SourceType),
 		attribute.String("queue_class", collectorQueueClass(event.Priority)),
-		attribute.Int64("source_id", event.SourceID),
-		attribute.Int64("account_id", event.AccountID),
 	))
 }
 
@@ -92,14 +91,26 @@ func NewCollector() *sCollector { return &sCollector{} }
 
 func (s *sCollector) Enabled(ctx context.Context) bool { return collectorEnabled(ctx) }
 
-func (s *sCollector) IngestBotUpdate(ctx context.Context, bot collectorservice.BotContext, update *models.Update) error {
+func (s *sCollector) IngestBotUpdate(ctx context.Context, bot collectorservice.BotContext, update *models.Update) (err error) {
+	ctx, observation := startCollectorStage(ctx, collectorStageIngestBot, collectorObservationMeta{
+		SourceType: collectorSourceBot, QueueClass: collectorQueueUrgent,
+		TenantID: bot.Binding.TenantID, SourceID: bot.Binding.SourceID,
+	})
+	outcome := collectorResultError // Includes panic paths; never report them as accepted.
+	defer func() { endCollectorStage(observation, outcome, err) }()
+	if message := collectorUpdateMessage(update); message != nil {
+		observation.meta.ChatID = strconv.FormatInt(message.Chat.ID, 10)
+		observation.meta.MessageID = int64(message.ID)
+	}
 	if update == nil {
 		return gerror.New("Telegram更新为空")
 	}
 	if !collectorEnabled(ctx) {
+		outcome = collectorResultSkipped
 		return nil
 	}
 	if message := collectorUpdateMessage(update); message != nil && s.isRelayChannel(ctx, bot.Binding.TenantID, fmt.Sprintf("%d", message.Chat.ID)) {
+		outcome = collectorResultSkipped
 		return nil
 	}
 	raw, err := json.Marshal(update)
@@ -132,6 +143,7 @@ func (s *sCollector) IngestBotUpdate(ctx context.Context, bot collectorservice.B
 		}
 	}
 	eventID, err := s.persistEvent(ctx, &event)
+	observation.meta.EventID = eventID
 	if err != nil {
 		return err
 	}
@@ -147,14 +159,25 @@ func (s *sCollector) IngestBotUpdate(ctx context.Context, bot collectorservice.B
 		attribute.String("source_type", sysin.SourceTypeBot),
 		attribute.String("priority", "urgent"),
 	))
+	outcome = collectorResultAccepted
 	return nil
 }
 
-func (s *sCollector) IngestAccountMessage(ctx context.Context, message *sysin.AccountMessageEvent) error {
+func (s *sCollector) IngestAccountMessage(ctx context.Context, message *sysin.AccountMessageEvent) (err error) {
+	meta := collectorObservationMeta{SourceType: collectorSourceAccount}
+	if message != nil {
+		meta.TenantID, meta.AccountID, meta.SourceID = message.TenantID, message.AccountID, message.SourceID
+		meta.ChatID, meta.MessageID = message.SourceChatID, message.SourceMessageID
+		meta.QueueClass = collectorObserveQueueClassFromPriority(accountMessagePriority(message))
+	}
+	ctx, observation := startCollectorStage(ctx, collectorStageIngestAccount, meta)
+	outcome := collectorResultError
+	defer func() { endCollectorStage(observation, outcome, err) }()
 	if message == nil {
 		return gerror.New("Telegram账号采集消息为空")
 	}
 	if !collectorEnabled(ctx) {
+		outcome = collectorResultSkipped
 		return nil
 	}
 	if !message.ValidateBoundary() || message.TenantID <= 0 || message.AccountID <= 0 || message.SourceID <= 0 || message.TgAccountID <= 0 {
@@ -162,6 +185,7 @@ func (s *sCollector) IngestAccountMessage(ctx context.Context, message *sysin.Ac
 	}
 	message.SourceChatID = strings.TrimSpace(message.SourceChatID)
 	if s.isRelayChannel(ctx, message.TenantID, message.SourceChatID) {
+		outcome = collectorResultSkipped
 		return nil
 	}
 	message.SourceUniqueKey = strings.TrimSpace(message.SourceUniqueKey)
@@ -192,12 +216,18 @@ func (s *sCollector) IngestAccountMessage(ctx context.Context, message *sysin.Ac
 	if eventID, repaired, repairErr := s.refreshCorruptedAccountEvent(ctx, message, raw); repairErr != nil {
 		return repairErr
 	} else if repaired {
+		observation.meta.EventID = eventID
 		if err := s.enqueueEventTask(ctx, eventID, accountMessagePriority(message)); err != nil {
 			return err
 		}
-		return completeIngestSpool(ctx, spoolID)
+		if err = completeIngestSpool(ctx, spoolID); err != nil {
+			return err
+		}
+		outcome = collectorResultAccepted
+		return nil
 	}
 	eventID, err := s.persistEvent(ctx, &event)
+	observation.meta.EventID = eventID
 	if err != nil {
 		return err
 	}
@@ -213,6 +243,7 @@ func (s *sCollector) IngestAccountMessage(ctx context.Context, message *sysin.Ac
 		attribute.String("source_type", sysin.SourceTypeAccount),
 		attribute.String("priority", "realtime"),
 	))
+	outcome = collectorResultAccepted
 	return nil
 }
 
@@ -258,6 +289,12 @@ func (s *sCollector) refreshCorruptedAccountEvent(ctx context.Context, message *
 	if !accountMediaIdentityChanged(stored.Media, message.Media) {
 		return eventID, false, nil
 	}
+	// This repair bypasses persistEvent. Register from the ingress metadata
+	// before reopening the stored event so a crash cannot hide its recovery lane.
+	if err := markCollectorRecoveryScope(ctx, collectorRecoveryScope{message.TenantID, message.TgAccountID, message.SourceID}); err != nil {
+		return 0, false, gerror.Wrap(err, "登记账号事件修复恢复 scope 失败")
+	}
+
 	now := gtime.Now()
 	if _, err := dao.TgCollectorEvent.Ctx(ctx).WherePri(eventID).Data(do.TgCollectorEvent{
 		RawUpdate:    losslessRawUpdate(raw),
@@ -331,13 +368,32 @@ func parseCollectorChatID(value string) int64 {
 	return chatID
 }
 
-func (s *sCollector) persistEvent(ctx context.Context, event *sysin.RawUpdateEvent) (int64, error) {
+func (s *sCollector) persistEvent(ctx context.Context, event *sysin.RawUpdateEvent) (eventID int64, err error) {
+	meta := collectorObservationMeta{}
+	if event != nil {
+		meta.TenantID, meta.SourceID = event.TenantID, event.SourceID
+		meta.SourceType = collectorObserveSourceType(event.SourceType)
+		meta.ChatID, meta.MessageID = strconv.FormatInt(event.ChatID, 10), event.MessageID
+		meta.QueueClass = collectorObserveQueueClassFromPriority(event.Priority)
+	}
+	ctx, observation := startCollectorStage(ctx, collectorStageEventPersist, meta)
+	outcome := collectorResultError
+	defer func() {
+		observation.meta.EventID = eventID
+		endCollectorStage(observation, outcome, err)
+	}()
 	if event == nil {
 		return 0, gerror.New("Telegram采集事件为空")
 	}
+	// Register before persistence: a crash after the database commit must still
+	// leave the raw Bot/account lane discoverable without a global DB scan.
+	if err := markCollectorRecoveryScope(ctx, collectorRecoveryScope{event.TenantID, event.AccountID, event.SourceID}); err != nil {
+		return 0, gerror.Wrap(err, "持久化前注册原始采集恢复 scope 失败")
+	}
+
 	columns := dao.TgCollectorEvent.Columns()
 	now := gtime.Now()
-	_, err := dao.TgCollectorEvent.Ctx(ctx).Data(do.TgCollectorEvent{
+	_, err = dao.TgCollectorEvent.Ctx(ctx).Data(do.TgCollectorEvent{
 		TenantId:   event.TenantID,
 		SourceId:   event.SourceID,
 		SourceType: event.SourceType,
@@ -370,6 +426,7 @@ func (s *sCollector) persistEvent(ctx context.Context, event *sysin.RawUpdateEve
 	if row.Id <= 0 {
 		return 0, gerror.New("Telegram采集事件ID无效")
 	}
+	outcome = collectorResultAccepted // Upsert accepted; not proof of a newly inserted event.
 	return row.Id, nil
 }
 

@@ -35,3 +35,13 @@ func SetRemove(ctx context.Context, key, member string) error {
 	_, err = client.Do(ctx, "SREM", key, member)
 	return err
 }
+
+// SetAdd registers one known member idempotently without expiring durable recovery lanes.
+func SetAdd(ctx context.Context, key, member string) error {
+	client, err := RedisClient()
+	if err != nil {
+		return err
+	}
+	_, err = client.Do(ctx, "SADD", key, member)
+	return err
+}

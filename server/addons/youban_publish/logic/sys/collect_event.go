@@ -1091,7 +1091,9 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 		_ = s.markCollectDispatchFailed(ctx, dispatchId, err.Error())
 		return false, "", err
 	}
-	if err = s.submitCollectProfileDispatch(ctx, dispatchId, profileId, event); err != nil {
+	if err = observeCollectDispatchHandoff(ctx, event, dispatchId, profileId, func() error {
+		return s.submitCollectProfileDispatch(ctx, dispatchId, profileId, event)
+	}); err != nil {
 		return false, "", err
 	}
 	return true, "", nil
@@ -1457,6 +1459,7 @@ func logCollectProcessTerminal(ctx context.Context, event gdb.Record, startedAt 
 	status := event["status"].String()
 	errorMessage := event["error_message"].String()
 	processed := !event["processed_at"].IsNil()
+	observeCollectPipeline(ctx, collectPipelineProcess, collectPipelineProcessResult(status, processed, processErr), startedAt, processErr, collectPipelineEventAttributes(event)...)
 	if processErr != nil && errorMessage == "" {
 		errorMessage = processErr.Error()
 	}

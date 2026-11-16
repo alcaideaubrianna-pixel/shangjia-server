@@ -437,6 +437,11 @@ telegramCollector:
   # 实时 webhook 默认跳过旧 PostgreSQL 接收 Spool，直接写入事件并进入 Redis/Asynq。
   # 迁移旧接收积压时临时改为 postgres_spool。
   ingestSpoolMode: "redis_first"
+  eventHandoff:
+    # 新事件在 Collector 内完成交付，旧 Delivery 队列继续消费和补偿。
+    # queued 可回退到原来的异步 Delivery 路径。
+    mode: "direct"
+    timeoutSeconds: 10
 
 # 悦伴全局 Bot
 youbanBot:
