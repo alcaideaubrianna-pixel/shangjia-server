@@ -145,6 +145,7 @@ func TestLocalRecoverProfilePublishStateSkipsTerminalRows(t *testing.T) {
 	baseId := time.Now().UnixNano()
 	failedProfileId := baseId
 	activeProfileId := baseId + 1
+	freshProfileId := baseId + 2
 	operationNo := fmt.Sprintf("integration:recover-starvation:%d", baseId)
 
 	for _, fixture := range []g.Map{
@@ -156,6 +157,11 @@ func TestLocalRecoverProfilePublishStateSkipsTerminalRows(t *testing.T) {
 		{
 			"tenant_id": baseId, "account_id": baseId, "profile_id": activeProfileId,
 			"publish_operation_no": operationNo, "publish_task_status": string(sysin.PublishTaskStatusPublishing),
+			"publish_task_updated_at": now.Add(-time.Hour), "created_at": now, "updated_at": now,
+		},
+		{
+			"tenant_id": baseId, "account_id": baseId, "profile_id": freshProfileId,
+			"publish_operation_no": operationNo + ":fresh", "publish_task_status": string(sysin.PublishTaskStatusPublishing),
 			"publish_task_updated_at": now, "created_at": now, "updated_at": now,
 		},
 	} {
@@ -170,6 +176,13 @@ func TestLocalRecoverProfilePublishStateSkipsTerminalRows(t *testing.T) {
 	}).Insert(); err != nil {
 		t.Fatalf("create note index fixture: %v", err)
 	}
+	if _, err := g.DB().Model(publishNoteIndexTable).Safe().Ctx(ctx).Data(g.Map{
+		"tenant_id": baseId, "account_id": baseId, "profile_id": freshProfileId,
+		"uuid": fmt.Sprintf("publish-state-fresh-%d", baseId), "profile_no": fmt.Sprintf("TF%d", baseId),
+		"task_status": string(sysin.PublishTaskStatusPublishing), "created_at": now, "updated_at": now,
+	}).Insert(); err != nil {
+		t.Fatalf("create fresh note index fixture: %v", err)
+	}
 	jobId, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Data(g.Map{
 		"operation_no": operationNo, "tenant_id": baseId, "merchant_id": baseId,
 		"account_id": baseId, "profile_id": activeProfileId, "channel_id": baseId,
@@ -180,8 +193,8 @@ func TestLocalRecoverProfilePublishStateSkipsTerminalRows(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Unscoped().Where("id", jobId).Delete()
-		_, _ = g.DB().Model(publishNoteIndexTable).Safe().Ctx(ctx).Unscoped().Where("profile_id", activeProfileId).Delete()
-		_, _ = g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).Unscoped().WhereIn("profile_id", []int64{failedProfileId, activeProfileId}).Delete()
+		_, _ = g.DB().Model(publishNoteIndexTable).Safe().Ctx(ctx).Unscoped().WhereIn("profile_id", []int64{activeProfileId, freshProfileId}).Delete()
+		_, _ = g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).Unscoped().WhereIn("profile_id", []int64{failedProfileId, activeProfileId, freshProfileId}).Delete()
 	})
 
 	service := &sSysPublish{}
@@ -189,6 +202,7 @@ func TestLocalRecoverProfilePublishStateSkipsTerminalRows(t *testing.T) {
 		t.Fatalf("recover active profile state: %v", err)
 	}
 	assertProfilePublishProjection(t, ctx, activeProfileId, operationNo, string(sysin.PublishTaskStatusFailed))
+	assertProfilePublishProjection(t, ctx, freshProfileId, operationNo+":fresh", string(sysin.PublishTaskStatusPublishing))
 }
 
 func assertProfilePublishProjection(t *testing.T, ctx context.Context, profileId int64, operationNo, status string) {

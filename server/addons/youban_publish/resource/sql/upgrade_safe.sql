@@ -239,4 +239,5 @@ ALTER TABLE `hg_youban_publish_message_media` ADD COLUMN IF NOT EXISTS `edit_sta
 UPDATE `hg_youban_publish_message_media` SET `original_file_url` = `file_url`, `original_storage_path` = `storage_path` WHERE `original_file_url` = '' AND `original_storage_path` = '';
 ALTER TABLE `hg_youban_publish_bot_message_source` ADD INDEX IF NOT EXISTS `idx_ybp_bot_message_source_received` (`received_at`,`id`);
 ALTER TABLE `hg_youban_publish_profile_state` ADD COLUMN IF NOT EXISTS `random_media_config` text;
+ALTER TABLE `hg_youban_publish_profile_state` ADD INDEX IF NOT EXISTS `idx_ybp_profile_state_publish_recovery` (`publish_task_status`,`publish_task_updated_at`,`profile_id`,`publish_operation_no`);
 ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN IF NOT EXISTS `display_media_selection` text;

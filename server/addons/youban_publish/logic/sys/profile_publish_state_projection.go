@@ -17,7 +17,10 @@ import (
 	"hotgo/internal/service"
 )
 
-const profilePublishNoteIndexStatusCacheTTL = 10 * time.Second
+const (
+	profilePublishNoteIndexStatusCacheTTL = 10 * time.Second
+	profilePublishStateRecoveryStaleAfter = 15 * time.Minute
+)
 
 func profilePublishNoteIndexStatusCacheKey(tenantId, accountId, profileId int64, status string) string {
 	return fmt.Sprintf("youban_publish:note_index:task_status:%d:%d:%d:%s", tenantId, accountId, profileId, status)
@@ -226,6 +229,7 @@ func (s *sSysPublish) recoverProfilePublishOperationStates(ctx context.Context, 
 	if limit <= 0 {
 		limit = 100
 	}
+	recoveryBefore := time.Now().Add(-profilePublishStateRecoveryStaleAfter)
 	var states []profilePublishOperationState
 	if err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
 		Fields("tenant_id,account_id,profile_id,publish_operation_no,publish_task_status").
@@ -233,11 +237,11 @@ func (s *sSysPublish) recoverProfilePublishOperationStates(ctx context.Context, 
 		// BOT 资料允许使用 account_id=0，不能在状态恢复时被过滤。
 		Where("account_id >= 0").
 		WhereIn("publish_task_status", []string{
-			sysin.PublishTaskStatusEditing.String(),
 			sysin.PublishTaskStatusPending.String(),
 			sysin.PublishTaskStatusPublishing.String(),
-			sysin.PublishTaskStatusFailed.String(),
 		}).
+		Where("publish_operation_no <> ?", "").
+		Where("publish_task_updated_at < ?", recoveryBefore).
 		OrderAsc("publish_task_updated_at").
 		OrderAsc("profile_id").
 		Limit(limit).
@@ -308,6 +312,8 @@ func (s *sSysPublish) recoverProfilePublishOperationState(ctx context.Context, s
 		return s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusFailed)
 	}
 	row, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("tenant_id", job.TenantId).
+		Where("account_id", job.AccountId).
 		Where("profile_id", job.ProfileId).
 		Where("operation_no", job.OperationNo).
 		Fields("COUNT(1) AS total," +

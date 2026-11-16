@@ -304,6 +304,9 @@ ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "push_e
 CREATE INDEX IF NOT EXISTS "idx_ybp_account_setting_push_engine" ON "hg_youban_publish_account_setting" ("tenant_id", "account_id", "push_engine") WHERE "deleted_at" IS NULL;
 ALTER TABLE "hg_youban_publish_material_import_task" ADD COLUMN IF NOT EXISTS "channel_id_json" text;
 ALTER TABLE "hg_youban_publish_profile_state" ADD COLUMN IF NOT EXISTS "dedupe_media_replaced_event_id" bigint NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS "idx_ybp_profile_state_publish_recovery"
+  ON "hg_youban_publish_profile_state" ("publish_task_status", "publish_task_updated_at", "profile_id")
+  WHERE "deleted_at" IS NULL AND "publish_task_status" IN ('pending', 'publishing') AND "publish_operation_no" <> '';
 
 -- Immutable cleanup context. Apply before enabling durable cleanup dispatch.
 ALTER TABLE "hg_youban_publish_tg_outbox" ADD COLUMN IF NOT EXISTS "operation_no" varchar(128) NOT NULL DEFAULT '';

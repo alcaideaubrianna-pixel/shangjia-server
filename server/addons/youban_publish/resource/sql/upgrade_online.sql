@@ -107,6 +107,7 @@ CREATE INDEX idx_ybp_bot_account ON hg_youban_publish_bot(tenant_id,account_id,c
 ALTER TABLE hg_youban_publish_bot ADD COLUMN bot_type varchar(32) NOT NULL DEFAULT 'normal';
 ALTER TABLE `hg_youban_publish_material_import_task` ADD COLUMN IF NOT EXISTS `channel_id_json` text COMMENT '导入资料默认上架频道ID JSON';
 ALTER TABLE `hg_youban_publish_profile_state` ADD COLUMN IF NOT EXISTS `dedupe_media_replaced_event_id` bigint NOT NULL DEFAULT 0 COMMENT '执行重复采集媒体覆盖的事件ID';
+ALTER TABLE `hg_youban_publish_profile_state` ADD INDEX IF NOT EXISTS `idx_ybp_profile_state_publish_recovery` (`publish_task_status`,`publish_task_updated_at`,`profile_id`,`publish_operation_no`);
 ALTER TABLE `hg_youban_publish_collect_process_outbox` ADD COLUMN IF NOT EXISTS `worker_role` varchar(64) NOT NULL DEFAULT '';
 ALTER TABLE `hg_youban_publish_collect_process_outbox` ADD COLUMN IF NOT EXISTS `worker_instance_id` varchar(128) NOT NULL DEFAULT '';
 ALTER TABLE `hg_youban_publish_collect_process_outbox` ADD COLUMN IF NOT EXISTS `worker_revision` varchar(128) NOT NULL DEFAULT '';

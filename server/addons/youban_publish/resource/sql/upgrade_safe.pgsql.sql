@@ -230,3 +230,7 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_account_setting_push_engine" ON "hg_youban_p
 -- 采集入口按租户和 Telegram 目标频道快速判断上架频道，避免每条消息扫描发布频道表。
 CREATE INDEX IF NOT EXISTS "idx_ybp_publish_channel_collect_target"
   ON "hg_youban_publish_channel" ("tenant_id", "target_chat_id", "publish_direction", "status", "deleted_at");
+
+CREATE INDEX IF NOT EXISTS "idx_ybp_profile_state_publish_recovery"
+  ON "hg_youban_publish_profile_state" ("publish_task_status", "publish_task_updated_at", "profile_id")
+  WHERE "deleted_at" IS NULL AND "publish_task_status" IN ('pending', 'publishing') AND "publish_operation_no" <> '';

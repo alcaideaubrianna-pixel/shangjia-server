@@ -528,7 +528,8 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_profile_state` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_ybp_profile_state_profile` (`profile_id`),
   KEY `idx_ybp_profile_state_owner` (`tenant_id`,`account_id`,`profile_id`),
-  KEY `idx_ybp_profile_state_publish_active` (`publish_task_status`,`publish_task_updated_at`,`profile_id`)
+  KEY `idx_ybp_profile_state_publish_active` (`publish_task_status`,`publish_task_updated_at`,`profile_id`),
+  KEY `idx_ybp_profile_state_publish_recovery` (`publish_task_status`,`publish_task_updated_at`,`profile_id`,`publish_operation_no`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='上架资料归属和发布配置';
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_profile_channel` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
