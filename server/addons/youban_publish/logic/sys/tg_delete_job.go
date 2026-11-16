@@ -18,45 +18,108 @@ func (s *sSysPublish) CleanupTelegramJobMessages(ctx context.Context, jobId int6
 	return s.cleanupTelegramJobMessages(ctx, jobId, tgQueuePayload{})
 }
 
-func (s *sSysPublish) cleanupTelegramJobMessages(ctx context.Context, jobId int64, payload tgQueuePayload) error {
+func (s *sSysPublish) cleanupTelegramJobMessages(ctx context.Context, jobId int64, payload tgQueuePayload) (resultErr error) {
+	started := time.Now()
 	job, err := s.telegramJobById(ctx, jobId)
 	if err != nil {
 		return err
 	}
+	base := g.Map{
+		"log_type":           "telegram_cleanup",
+		"event":              "started",
+		"jobId":              job.Id,
+		"profileId":          job.ProfileId,
+		"tenantId":           job.TenantId,
+		"accountId":          job.AccountId,
+		"channelId":          job.ChannelId,
+		"operationNo":        job.OperationNo,
+		"cleanupOperationNo": strings.TrimSpace(payload.CleanupOperationNo),
+		"targetChatId":       job.TargetChatId,
+	}
+	g.Log().Info(ctx, "TG资料清理链路", base)
+	defer func() {
+		result := g.Map{
+			"log_type":           "telegram_cleanup",
+			"event":              "finished",
+			"jobId":              job.Id,
+			"profileId":          job.ProfileId,
+			"tenantId":           job.TenantId,
+			"accountId":          job.AccountId,
+			"channelId":          job.ChannelId,
+			"operationNo":        job.OperationNo,
+			"cleanupOperationNo": strings.TrimSpace(payload.CleanupOperationNo),
+			"durationMs":         time.Since(started).Milliseconds(),
+			"returnedError":      resultErr != nil,
+		}
+		if resultErr != nil {
+			result["error"] = resultErr.Error()
+			g.Log().Warning(ctx, "TG资料清理链路", result)
+		} else {
+			g.Log().Info(ctx, "TG资料清理链路", result)
+		}
+	}()
+	logStage := func(stage string, stageStarted time.Time, stageErr error) {
+		data := g.Map{
+			"log_type":           "telegram_cleanup_stage",
+			"event":              "finished",
+			"stage":              stage,
+			"jobId":              job.Id,
+			"profileId":          job.ProfileId,
+			"channelId":          job.ChannelId,
+			"operationNo":        job.OperationNo,
+			"cleanupOperationNo": strings.TrimSpace(payload.CleanupOperationNo),
+			"durationMs":         time.Since(stageStarted).Milliseconds(),
+			"returnedError":      stageErr != nil,
+		}
+		if stageErr != nil {
+			data["error"] = stageErr.Error()
+			g.Log().Warning(ctx, "TG资料清理阶段", data)
+		} else {
+			g.Log().Info(ctx, "TG资料清理阶段", data)
+		}
+	}
+	cleanup := func(_ context.Context) error {
+		stageStarted := time.Now()
+		err := s.deleteTelegramMessageSetLockedByChannel(ctx, job, "资料清理")
+		logStage("delete_messages", stageStarted, err)
+		if err != nil {
+			return err
+		}
+		stageStarted = time.Now()
+		err = s.notifyBotProfileUnpublishCompleted(ctx, job, payload)
+		logStage("notify_unpublish_completed", stageStarted, err)
+		if err != nil {
+			g.Log().Warningf(ctx, "发送Bot资料下架完成通知失败 profileId:%d jobId:%d err:%+v", job.ProfileId, job.Id, err)
+			return gerror.Wrap(err, "发送Bot资料下架完成通知失败")
+		}
+		stageStarted = time.Now()
+		err = s.completeTelegramCleanupIntent(ctx, job.Id)
+		logStage("complete_cleanup_intent", stageStarted, err)
+		if err != nil {
+			return err
+		}
+		stageStarted = time.Now()
+		err = s.finishTelegramCleanupProfile(ctx, job, payload)
+		logStage("finish_profile_state", stageStarted, err)
+		return err
+	}
 	if s.accountPushEngine(ctx, job.TenantId, job.AccountId) == pushEngineUnifiedStream {
-		return s.withTelegramCleanupExecution(ctx, job, func(ctx context.Context) error {
-			if err := s.deleteTelegramMessageSetLockedByChannel(ctx, job, "资料清理"); err != nil {
-				return err
-			}
-			if err := s.notifyBotProfileUnpublishCompleted(ctx, job, payload); err != nil {
-				g.Log().Warningf(ctx, "发送Bot资料下架完成通知失败 profileId:%d jobId:%d err:%+v", job.ProfileId, job.Id, err)
-				return gerror.Wrap(err, "发送Bot资料下架完成通知失败")
-			}
-			if err := s.completeTelegramCleanupIntent(ctx, job.Id); err != nil {
-				return err
-			}
-			return s.finishTelegramCleanupProfile(ctx, job, payload)
-		})
+		return s.withTelegramCleanupExecution(ctx, job, cleanup)
 	}
 	lease, ok, err := tryTelegramCleanupChannelSlot(ctx, job.TargetChatId)
 	if err != nil {
 		return err
 	}
 	if !ok {
+		g.Log().Warning(ctx, "TG资料清理等待频道并发槽位", g.Map{
+			"log_type": "telegram_cleanup_stage", "event": "requeue",
+			"stage": "channel_cleanup_slot", "jobId": job.Id, "profileId": job.ProfileId,
+			"channelId": job.ChannelId, "targetChatId": job.TargetChatId,
+		})
 		return s.requeueTelegramCleanupJob(ctx, jobId, time.Second, payload)
 	}
 	defer s.releaseTelegramChannelLease(ctx, lease)
-	if err := s.deleteTelegramMessageSetLockedByChannel(ctx, job, "资料清理"); err != nil {
-		return err
-	}
-	if err := s.notifyBotProfileUnpublishCompleted(ctx, job, payload); err != nil {
-		g.Log().Warningf(ctx, "发送Bot资料下架完成通知失败 profileId:%d jobId:%d err:%+v", job.ProfileId, job.Id, err)
-		return gerror.Wrap(err, "发送Bot资料下架完成通知失败")
-	}
-	if err := s.completeTelegramCleanupIntent(ctx, job.Id); err != nil {
-		return err
-	}
-	return s.finishTelegramCleanupProfile(ctx, job, payload)
+	return cleanup(ctx)
 }
 
 // finishTelegramCleanupProfile only accepts the operation captured when the

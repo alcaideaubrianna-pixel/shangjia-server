@@ -595,6 +595,7 @@ func (s *sSysPublish) enqueueTelegramCleanupJob(ctx context.Context, jobId int64
 }
 
 func (s *sSysPublish) enqueueTelegramCleanupJobWithContext(ctx context.Context, jobId int64, delay time.Duration, payload tgQueuePayload) error {
+	started := time.Now()
 	queueName := tgQueueNameCleanup
 	var owner struct {
 		TenantId  int64 `orm:"tenant_id"`
@@ -606,6 +607,20 @@ func (s *sSysPublish) enqueueTelegramCleanupJobWithContext(ctx context.Context, 
 		Fields("tenant_id,account_id,channel_id,priority").Where("id", jobId).Scan(&owner); err != nil {
 		return gerror.Wrap(err, "读取TG删除任务归属失败")
 	}
+	operationNo := strings.TrimSpace(payload.CleanupOperationNo)
+	g.Log().Info(ctx, "TG资料清理任务准备入队", g.Map{
+		"log_type": "telegram_cleanup_enqueue", "event": "started", "jobId": jobId,
+		"tenantId": owner.TenantId, "accountId": owner.AccountId, "channelId": owner.ChannelId,
+		"cleanupOperationNo": operationNo, "cleanupJobIds": payload.CleanupJobIds,
+		"delayMs": delay.Milliseconds(),
+	})
+	if operationNo == "" {
+		g.Log().Warning(ctx, "TG资料清理任务入队时缺少当前资料操作号", g.Map{
+			"log_type": "telegram_cleanup_enqueue", "event": "missing_operation_no",
+			"jobId": jobId, "profileId": 0, "tenantId": owner.TenantId,
+			"accountId": owner.AccountId, "channelId": owner.ChannelId,
+		})
+	}
 	priority := channelPriorityManualDelete
 	if owner.Priority > tgJobPriorityInteractive {
 		priority = channelPriorityCycleDelete
@@ -613,30 +628,34 @@ func (s *sSysPublish) enqueueTelegramCleanupJobWithContext(ctx context.Context, 
 	if s.unifiedPushEngineEnabled(ctx, owner.TenantId, owner.AccountId) {
 		queueName = channelDispatchDeleteQueueName(priority)
 	}
-	// Keep a durable deletion intent alongside the Redis task. Redis is only
-	// the execution index; a restart must not lose a submitted cleanup.
 	eventType := telegramOutboxCleanupPrefix + "manual"
 	if priority == channelPriorityCycleDelete {
 		eventType = telegramOutboxCleanupPrefix + "cycle"
 	}
 	if _, err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).InsertIgnore(g.Map{
-		"job_id":       jobId,
-		"event_type":   eventType,
-		"dedupe_key":   fmt.Sprintf("telegram-cleanup:%d", jobId),
-		"status":       telegramOutboxPending,
-		"available_at": gtime.Now(),
-		"created_at":   gtime.Now(),
-		"updated_at":   gtime.Now(),
+		"job_id": jobId, "event_type": eventType, "dedupe_key": fmt.Sprintf("telegram-cleanup:%d", jobId),
+		"status": telegramOutboxPending, "available_at": gtime.Now(), "created_at": gtime.Now(), "updated_at": gtime.Now(),
 	}); err != nil {
 		return gerror.Wrap(err, "保存TG删除意图失败")
 	}
 	if err := s.enqueueTelegramTaskWithQueuePayload(ctx, tgTaskTypeCleanup, jobId, delay, true, queueName, payload); err != nil {
+		g.Log().Warning(ctx, "TG资料清理任务入队失败", g.Map{
+			"log_type": "telegram_cleanup_enqueue", "event": "failed", "jobId": jobId,
+			"tenantId": owner.TenantId, "accountId": owner.AccountId, "channelId": owner.ChannelId,
+			"cleanupOperationNo": operationNo, "queueName": queueName,
+			"durationMs": time.Since(started).Milliseconds(), "error": err.Error(),
+		})
 		return err
 	}
 	if indexErr := (tgChannelDeleteIndex{}).addJob(ctx, owner.TenantId, owner.ChannelId, jobId, priority); indexErr != nil {
-		// Redis 只是删除队列的高速索引，不能因为索引故障回滚已经入队的删除事实。
 		g.Log().Warningf(ctx, "写入频道删除队列索引失败 tenantId:%d channelId:%d jobId:%d err:%+v", owner.TenantId, owner.ChannelId, jobId, indexErr)
 	}
+	g.Log().Info(ctx, "TG资料清理任务已入队", g.Map{
+		"log_type": "telegram_cleanup_enqueue", "event": "finished", "jobId": jobId,
+		"tenantId": owner.TenantId, "accountId": owner.AccountId, "channelId": owner.ChannelId,
+		"cleanupOperationNo": operationNo, "cleanupJobIds": payload.CleanupJobIds,
+		"queueName": queueName, "priority": priority, "durationMs": time.Since(started).Milliseconds(),
+	})
 	return nil
 }
 
