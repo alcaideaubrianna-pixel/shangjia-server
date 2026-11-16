@@ -456,19 +456,10 @@ func (s *sCollector) enqueueDueDeliveryTasks(ctx context.Context, limit int) err
 		columns.NextRunAt,
 		columns.NextRunAt,
 	)
-	// Keep a bounded recent-history lane ahead of the old backlog. Manual
-	// history imports otherwise wait behind every older account delivery even
-	// though they are already ready to process. The window is intentionally
-	// finite so a continuous stream of new imports cannot starve old work.
-	recentHistoryWindow := collectorDeliveryRecentHistoryWindow(ctx)
-	recentHistoryCutoff := now.Add(-recentHistoryWindow)
-	// Order 只接受完整表达式；不能把 CASE 的参数传给 Order，否则会被 PostgreSQL 当作列名拼入 SQL。
-	orderExpression := fmt.Sprintf(
-		"%s DESC, CASE WHEN %s = %d AND %s >= '%s' THEN 0 ELSE 1 END, %s ASC",
-		columns.Priority, columns.Priority, sysin.EventPriorityNormal, columns.CreatedAt,
-		recentHistoryCutoff.Format("2006-01-02 15:04:05.999999"), columns.UpdatedAt,
-	)
-
+	// Query each scheduler lane independently. Mixing realtime and history with
+	// OR/CASE forces PostgreSQL to scan both pools and prevents the partial lane
+	// indexes from being used. A simple deterministic order keeps each query
+	// bounded and index-friendly.
 	queryRows := func(poolCondition string, batchLimit int, poolArgs ...any) (gdb.Result, error) {
 		if batchLimit <= 0 {
 			return nil, nil
@@ -481,32 +472,38 @@ func (s *sCollector) enqueueDueDeliveryTasks(ctx context.Context, limit int) err
 			).
 			WhereLT(columns.AttemptCount, deliveryMaxAttempts).
 			Where(poolCondition, poolArgs...).
-			Order(gdb.Raw(orderExpression)).
+			Order(columns.Priority + " DESC, " + columns.CreatedAt + " ASC, " + columns.Id + " ASC").
 			Limit(batchLimit).
 			All()
 	}
 
-	// Realtime recovery is queried first and separately. A single mixed query
-	// lets history backlog consume the recovery limit and delays live delivery.
-	// Legacy rows may still have scheduler_pool=history; realtime priority keeps
-	// them in the live lane until they are reclassified by migration.
-	liveRows, err := queryRows(
-		fmt.Sprintf("%s=? OR (%s=? AND %s>=?)", "scheduler_pool", "scheduler_pool", columns.Priority),
-		limit,
-		"realtime", "history", sysin.EventPriorityRealtime,
-	)
+	// Realtime recovery is isolated from history. A plain global ORDER BY lets
+	// one busy source occupy the whole recovery batch and can also starve an
+	// old source behind a continuously arriving source. Cap the number of rows
+	// selected per source in each pass so every source gets a recovery slot.
+	const liveRecoverySourceQuota = 16
+	liveRows, err := s.queryFairRealtimeDeliveryRows(ctx, staleBefore, now, limit, liveRecoverySourceQuota)
 	if err != nil {
 		return gerror.Wrap(err, "读取实时Telegram采集交付失败")
 	}
-	historyRows, err := queryRows(
-		fmt.Sprintf("%s=? AND %s<?", "scheduler_pool", columns.Priority),
+	legacyRows, err := queryRows(
+		fmt.Sprintf("scheduler_pool = ? AND %s >= ?", columns.Priority),
 		limit-len(liveRows),
+		"history", sysin.EventPriorityRealtime,
+	)
+	if err != nil {
+		return gerror.Wrap(err, "读取兼容实时Telegram采集交付失败")
+	}
+	historyRows, err := queryRows(
+		fmt.Sprintf("scheduler_pool = ? AND %s < ?", columns.Priority),
+		limit-len(liveRows)-len(legacyRows),
 		"history", sysin.EventPriorityRealtime,
 	)
 	if err != nil {
 		return gerror.Wrap(err, "读取历史Telegram采集交付失败")
 	}
-	rows := append(liveRows, historyRows...)
+	rows := append(liveRows, legacyRows...)
+	rows = append(rows, historyRows...)
 
 	for _, row := range rows {
 		deliveryID := row[columns.Id].Int64()
@@ -534,6 +531,33 @@ func (s *sCollector) enqueueDueDeliveryTasks(ctx context.Context, limit int) err
 		}
 	}
 	return nil
+}
+
+// queryFairRealtimeDeliveryRows bounds recovery work per source. The query is
+// deliberately limited to the realtime lane and returns only the columns used
+// by enqueueDueDeliveryTasks; it prevents one source from monopolizing the
+// global recovery batch while preserving a bounded DB read.
+func (s *sCollector) queryFairRealtimeDeliveryRows(ctx context.Context, staleBefore, now *gtime.Time, limit, sourceQuota int) (gdb.Result, error) {
+	if limit <= 0 || sourceQuota <= 0 {
+		return nil, nil
+	}
+	sql := fmt.Sprintf(`
+SELECT id, priority, status
+FROM (
+    SELECT id, priority, status, source_id, created_at,
+           ROW_NUMBER() OVER (PARTITION BY source_id ORDER BY priority DESC, created_at ASC, id ASC) AS source_rank
+    FROM %s
+    WHERE ((status = ? AND updated_at <= ?) OR (status = ? AND next_run_at IS NOT NULL AND next_run_at <= ?))
+      AND attempt_count < ?
+      AND scheduler_pool = ?
+) fair
+WHERE source_rank <= ?
+ORDER BY priority DESC, created_at ASC, id ASC
+LIMIT ?`, dao.TgCollectorDelivery.Table())
+	return g.DB().GetAll(ctx, sql,
+		sysin.DeliveryStatusPending, staleBefore,
+		sysin.DeliveryStatusFailedRetry, now,
+		deliveryMaxAttempts, "realtime", sourceQuota, limit)
 }
 
 func collectorDeliveryConcurrency(ctx context.Context) int {

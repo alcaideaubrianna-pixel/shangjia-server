@@ -51,6 +51,11 @@ CREATE INDEX IF NOT EXISTS "idx_tg_collector_delivery_pending_history_dispatch"
     ON "hg_tg_collector_delivery" ("scheduler_pool", "dispatch_until", "priority" DESC, "created_at", "id")
     WHERE "status" = 'pending' AND "scheduler_pool" = 'history';
 
+-- 实时恢复按来源公平取数；source_id 放在分区键前，减少窗口查询的回表范围。
+CREATE INDEX IF NOT EXISTS "idx_tg_collector_delivery_pending_realtime_source"
+    ON "hg_tg_collector_delivery" ("scheduler_pool", "source_id", "priority" DESC, "created_at", "id")
+    WHERE "status" IN ('pending', 'failed_retry') AND "scheduler_pool" = 'realtime';
+
 -- ============================================================================
 -- 手动分批回填（每次执行一条；不要把以下语句包在长事务中）
 -- ============================================================================
