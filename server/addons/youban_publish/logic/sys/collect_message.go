@@ -91,10 +91,32 @@ func (s *sSysPublish) ingestCollectMessage(ctx context.Context, message *Collect
 		message.Media = media
 		eventID := event[eventCols.Id].Int64()
 		indexCollectSourceHistoryCursor(ctx, message.TenantId, message.AccountId, message.SourceId, message.SourceChatId, message.SourceMessageId, eventID)
+		if isCollectBotSystemNotice(message.SourceType, rawText) && !collectEventTerminalStatus(event[eventCols.Status].String()) {
+			_, updateErr := eventDao.Ctx(ctx).Where(eventCols.Id, eventID).Data(g.Map{
+				eventCols.Status:       sysin.CollectEventStatusIgnored,
+				eventCols.ErrorMessage: "BOT系统回执，跳过资料处理",
+				eventCols.ProcessedAt:  now,
+				eventCols.UpdatedAt:    now,
+			}).Update()
+			if updateErr != nil {
+				return eventID, gerror.Wrap(updateErr, "忽略BOT系统回执失败")
+			}
+			s.appendCollectEventLogForRecord(ctx, event, "ingest", "ignored", "BOT系统回执已忽略", "BOT系统回执，跳过资料处理")
+			return eventID, nil
+		}
 		return s.mergeCollectMessageEvent(ctx, event, message, rawText, now)
 	}
 	status := sysin.CollectEventStatusPending
-	if strings.TrimSpace(message.SourceGroupedId) != "" {
+	processedAt := (*gtime.Time)(nil)
+	errorMessage := ""
+	if isCollectBotSystemNotice(message.SourceType, rawText) {
+		// Bot acknowledgement/rejection messages are collector traffic, not
+		// profile material. Mark them terminal at ingest so they never enter
+		// the material window or consume source queue capacity.
+		status = sysin.CollectEventStatusIgnored
+		processedAt = now
+		errorMessage = "BOT系统回执，跳过资料处理"
+	} else if strings.TrimSpace(message.SourceGroupedId) != "" {
 		status = sysin.CollectEventStatusGroupCollect
 	}
 	_, err = eventDao.Ctx(ctx).Data(g.Map{
@@ -113,6 +135,8 @@ func (s *sSysPublish) ingestCollectMessage(ctx context.Context, message *Collect
 		eventCols.TextHash:        collectHash(rawText),
 		eventCols.DedupeKey:       dedupeKey,
 		eventCols.Status:          status,
+		eventCols.ErrorMessage:    errorMessage,
+		eventCols.ProcessedAt:     processedAt,
 		eventCols.ReceivedAt:      receivedAt,
 		eventCols.CreatedAt:       now,
 		eventCols.UpdatedAt:       now,
@@ -138,6 +162,10 @@ func (s *sSysPublish) ingestCollectMessage(ctx context.Context, message *Collect
 	}
 	if err = s.upsertCollectEventMedia(ctx, created, message.Media); err != nil {
 		return 0, err
+	}
+	if status == sysin.CollectEventStatusIgnored {
+		s.appendCollectEventLogForRecord(ctx, created, "ingest", "ignored", "BOT系统回执已忽略", errorMessage)
+		return eventId, nil
 	}
 	s.appendCollectEventLogForRecord(ctx, created, "ingest", "created", "采集事件已入库", "")
 	if err = s.scheduleCollectSourceStats(ctx, message.SourceId); err != nil {

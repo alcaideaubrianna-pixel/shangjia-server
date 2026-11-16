@@ -110,3 +110,15 @@ func TestProfileMessageHasProfileTextSupportsFieldLabels(t *testing.T) {
 		}
 	}
 }
+
+func TestIsCollectBotSystemNotice(t *testing.T) {
+	if !isCollectBotSystemNotice("bot", "❌ 重复投稿\n检测到短时间内提交的相同内容，请稍后再试") {
+		t.Fatal("expected bot rejection notice to be filtered")
+	}
+	if isCollectBotSystemNotice("account", "❌ 重复投稿\n检测到短时间内提交的相同内容，请稍后再试") {
+		t.Fatal("account source must not use bot notice filter")
+	}
+	if isCollectBotSystemNotice("bot", "昵称：小雨\n年龄：22") {
+		t.Fatal("profile material must not be filtered")
+	}
+}

@@ -23,6 +23,10 @@ var profileMessageFieldPattern = regexp.MustCompile(`(?i)(?:编号|昵称|姓名
 var profileMessageNonIndexFieldPattern = regexp.MustCompile(`(?i)(?:昵称|姓名|名字|性别|年龄|身高|体重|职业|工作|省份|所在省份|城市|所在城市|地区|所在地|微信|联系方式|年龄段|name|nickname|username|sex|age|height|weight|job|occupation|province|city|location)\s*[:：=]`)
 var profileMessageCompactValuePattern = regexp.MustCompile(`(?i)(?:年龄|身高|体重|age|height|weight)\s*[-+]?\d`)
 
+func isCollectBotSystemNotice(sourceType, text string) bool {
+	return strings.EqualFold(strings.TrimSpace(sourceType), "bot") && profileMessageIgnoredNotice(text)
+}
+
 func profileMessageIgnoredNotice(text string) bool {
 	normalized := strings.Join(strings.Fields(strings.TrimSpace(text)), "")
 	if normalized == "" {
