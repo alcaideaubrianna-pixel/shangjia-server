@@ -237,6 +237,30 @@ func observeTelegramProfilePublishQueueWait(ctx context.Context, job telegramJob
 	histogram.Record(ctx, wait.Seconds(), metric.WithAttributes(attrs...))
 }
 
+func observeTelegramProfileUnpublish(ctx context.Context, operationNo, result string, duration time.Duration, publishErr error) {
+	attrs := []attribute.KeyValue{
+		attribute.String("source", telegramProfileOperationSource(operationNo)),
+		attribute.String("result", result),
+		attribute.String("error_type", telegramPublishErrorType(publishErr)),
+	}
+	metricAttrs := metric.WithAttributes(attrs...)
+	counter, _ := publishObserveMeter.Int64Counter("xiaohuiji.tg.profile_unpublish_total")
+	durations, _ := publishObserveMeter.Float64Histogram("xiaohuiji.tg.profile_unpublish_duration_seconds")
+	counter.Add(ctx, 1, metricAttrs)
+	durations.Record(ctx, duration.Seconds(), metricAttrs)
+}
+
+func telegramProfileOperationSource(operationNo string) string {
+	value := strings.ToLower(strings.TrimSpace(operationNo))
+	if strings.HasPrefix(value, "bot_publish:") || strings.HasPrefix(value, "bot_unpublish:") || strings.HasPrefix(value, "bot_delete:") {
+		return "bot"
+	}
+	if strings.HasPrefix(value, "profile:") || strings.HasPrefix(value, "edit:") || strings.HasPrefix(value, "batchtext:") {
+		return "web"
+	}
+	return "auto"
+}
+
 func observeTelegramMediaSend(ctx context.Context, job *telegramJobRecord, phase string, err error, duration time.Duration) {
 	result := "success"
 	if err != nil {
