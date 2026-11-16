@@ -21,6 +21,15 @@ type ChannelID int64
 // MessageID identifies a Telegram source message.
 type MessageID int64
 
+// ProfileID identifies a collected content profile.
+type ProfileID int64
+
+// DispatchID identifies a collector dispatch record.
+type DispatchID int64
+
+// TGJobID identifies a Telegram publish job created for a collected profile.
+type TGJobID int64
+
 func (id EventID) Valid() bool    { return id > 0 }
 func (id DeliveryID) Valid() bool { return id > 0 }
 func (id TenantID) Valid() bool   { return id > 0 }

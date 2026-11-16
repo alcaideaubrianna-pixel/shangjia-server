@@ -15,6 +15,7 @@ import (
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/net/gtrace"
 	"github.com/gogf/gf/v2/os/gtime"
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
@@ -335,6 +336,18 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		g.Log().Warningf(ctx, "采集事件不存在，跳过处理 eventId:%d tenantId:%d accountId:%d", eventId, tenantId, accountId)
 		return gerror.New("采集事件不存在")
 	}
+	processStartedAt := time.Now()
+	defer func() {
+		logCollectProcessTerminal(ctx, event, processStartedAt, err)
+	}()
+	g.Log().Info(ctx, "采集事件处理开始", g.Map{
+		"log_type": "telegram_collect_pipeline", "event": "collect_pipeline_process_started",
+		"stage": "process", "status": "started", "traceId": gtrace.GetTraceID(ctx),
+		"collectEventId": eventId, "tenantId": tenantId, "accountId": accountId,
+		"sourceId": event["source_id"].Int64(), "sourceChatId": event["source_chat_id"].String(),
+		"sourceMessageId": event["source_message_id"].Int64(), "sourceGroupedId": event["source_grouped_id"].String(),
+		"eventStatus": event["status"].String(), "mediaCount": event["media_count"].Int(),
+	})
 	g.Log().Debugf(ctx, "采集事件开始处理 eventId:%d sourceId:%d sourceMessageId:%d groupedId:%s status:%s media:%d", eventId, event["source_id"].Int64(), event["source_message_id"].Int64(), event["source_grouped_id"].String(), event["status"].String(), event["media_count"].Int())
 	sourceModel := pdao.YoubanPublishCollectSource.Ctx(ctx).
 		Where("id", event["source_id"].Int64()).
@@ -1421,4 +1434,77 @@ func (s *sSysPublish) markCollectDispatchReviewing(ctx context.Context, dispatch
 		return err
 	})
 	return gerror.Wrap(err, "更新采集审核分发失败")
+}
+
+// logCollectProcessTerminal writes the single terminal observation for one
+// collector event. It deliberately reports the handoff boundary only; Telegram
+// sending remains owned by the publish worker.
+func logCollectProcessTerminal(ctx context.Context, event gdb.Record, startedAt time.Time, processErr error) {
+	if event.IsEmpty() || event["id"].Int64() <= 0 {
+		return
+	}
+	eventID := event["id"].Int64()
+	current, readErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+		Fields("status,error_message,processed_at,updated_at").
+		Where("id", eventID).One()
+	status := event["status"].String()
+	errorMessage := ""
+	processed := false
+	if readErr == nil && !current.IsEmpty() {
+		status = current["status"].String()
+		errorMessage = current["error_message"].String()
+		processed = !current["processed_at"].IsNil()
+	}
+	if processErr != nil && errorMessage == "" {
+		errorMessage = processErr.Error()
+	}
+	retryable := false
+	var retryErr *collectProcessRetryError
+	if processErr != nil {
+		retryable = errors.As(processErr, &retryErr)
+	}
+	dispatchCount, dispatchErr := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
+		Where("event_id", eventID).Count()
+	jobCount, jobErr := pdao.YoubanPublishTgJob.Ctx(ctx).
+		Where("collect_event_id", eventID).Count()
+	fields := g.Map{
+		"log_type": "telegram_collect_pipeline", "event": "collect_pipeline_terminal",
+		"stage": "process", "status": status, "traceId": gtrace.GetTraceID(ctx),
+		"collectEventId": eventID, "tenantId": event["tenant_id"].Int64(), "accountId": event["account_id"].Int64(),
+		"sourceId": event["source_id"].Int64(), "sourceChatId": event["source_chat_id"].String(),
+		"sourceMessageId": event["source_message_id"].Int64(), "sourceGroupedId": event["source_grouped_id"].String(),
+		"processed": processed, "retryable": retryable, "dispatchCount": dispatchCount,
+		"jobCount": jobCount, "durationMs": time.Since(startedAt).Milliseconds(),
+		"outcome": "completed", "telegramExecution": "out_of_scope",
+	}
+	if processErr != nil {
+		fields["outcome"] = "error"
+		fields["errorType"] = fmt.Sprintf("%T", processErr)
+		fields["error"] = processErr.Error()
+	} else if strings.TrimSpace(status) == sysin.CollectEventStatusIgnored {
+		fields["outcome"] = "skipped"
+		fields["skipReason"] = errorMessage
+	} else if dispatchCount == 0 && jobCount == 0 {
+		fields["outcome"] = "completed_without_dispatch"
+		fields["reason"] = errorMessage
+	} else if dispatchCount > 0 && jobCount == 0 {
+		fields["outcome"] = "dispatch_without_job"
+		fields["reason"] = "collect_dispatch已创建但尚未提交TG Job"
+	} else if jobCount > 0 {
+		fields["outcome"] = "queued"
+	}
+	if dispatchErr != nil {
+		fields["dispatchCountError"] = dispatchErr.Error()
+	}
+	if jobErr != nil {
+		fields["jobCountError"] = jobErr.Error()
+	}
+	if processErr != nil || readErr != nil || dispatchErr != nil || jobErr != nil {
+		if readErr != nil {
+			fields["eventReadError"] = readErr.Error()
+		}
+		g.Log().Warning(ctx, "采集事件处理终态", fields)
+		return
+	}
+	g.Log().Info(ctx, "采集事件处理终态", fields)
 }
