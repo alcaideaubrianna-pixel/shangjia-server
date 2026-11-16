@@ -23,6 +23,67 @@ func TestSetRotateRedis(t *testing.T) {
 	g.Cfg().SetAdapter(adapter)
 	t.Cleanup(func() { g.Cfg().SetAdapter(old); _ = g.Redis().Close(context.Background()) })
 	ctx := context.Background()
+	t.Run("duties independently cover the same registry", func(t *testing.T) {
+		key := "rotate:duties"
+		duties := []string{"ingest_spool", "event_lease", "event_enqueue", "delivery_lease", "delivery_enqueue"}
+		seen := make(map[string]map[string]bool)
+		for i := 0; i < 40; i++ {
+			server.SAdd(key, fmt.Sprint(i))
+		}
+		for _, duty := range duties {
+			seen[duty] = make(map[string]bool)
+		}
+		// Reproduce stable scheduling: each duty repeatedly takes eight scopes.
+		// A shared cursor can permanently assign each batch to only one duty.
+		for round := 0; round < 15; round++ {
+			for _, duty := range duties {
+				members, err := SetRotateFor(ctx, key, duty, 8)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(members) > 8 {
+					t.Fatalf("unbounded duty page: %s", duty)
+				}
+				for _, member := range members {
+					seen[duty][member] = true
+				}
+			}
+		}
+		for _, duty := range duties {
+			if len(seen[duty]) != 40 {
+				t.Fatalf("duty %s visited %d/40 scopes", duty, len(seen[duty]))
+			}
+		}
+	})
+	t.Run("same duty shares progress and registry removal", func(t *testing.T) {
+		key := "rotate:shared_duty"
+		for _, member := range []string{"a", "b", "c", "d"} {
+			server.SAdd(key, member)
+		}
+		first, err := SetRotateFor(ctx, key, "event_enqueue", 1)
+		if err != nil || len(first) != 1 {
+			t.Fatalf("first instance: %v %v", first, err)
+		}
+		second, err := SetRotateFor(ctx, key, "event_enqueue", 1)
+		if err != nil || len(second) != 1 || second[0] == first[0] {
+			t.Fatalf("same-duty instances did not share progress: %v %v %v", first, second, err)
+		}
+		other, err := SetRotateFor(ctx, key, "delivery_enqueue", 1)
+		if err != nil || len(other) != 1 || other[0] != first[0] {
+			t.Fatalf("different duty inherited progress: %v %v", other, err)
+		}
+		// Remove the member buffered next for the delivery duty.
+		server.SRem(key, second[0])
+		removed, err := SetRotateFor(ctx, key, "delivery_enqueue", 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, member := range removed {
+			if member == second[0] {
+				t.Fatalf("removed registry member returned: %v", removed)
+			}
+		}
+	})
 	t.Run("overflow and stable members", func(t *testing.T) {
 		key := "rotate:overflow"
 		seen := map[string]bool{}
@@ -101,6 +162,14 @@ func TestSetRotateRedis(t *testing.T) {
 			t.Fatal("wrong type silently accepted")
 		}
 	})
+}
+
+func TestSetRotateForRejectsInvalidConsumer(t *testing.T) {
+	for _, consumer := range []string{"", " ", "Event", "event:lease", "{event}", strings.Repeat("a", 65)} {
+		if _, err := SetRotateFor(context.Background(), "registry", consumer, 8); err == nil {
+			t.Fatalf("invalid consumer accepted: %q", consumer)
+		}
+	}
 }
 
 func TestSetRotateKeysPreserveSlot(t *testing.T) {

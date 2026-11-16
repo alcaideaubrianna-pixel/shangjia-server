@@ -558,7 +558,7 @@ func (s *sCollector) recoverDeliveryTasks(ctx context.Context) {
 }
 
 func (s *sCollector) resetExpiredDeliveryLeases(ctx context.Context, limit int) error {
-	scopes, err := collectorRecoveryScopes(ctx, 8)
+	scopes, err := collectorRecoveryScopes(ctx, collectorRecoveryDeliveryLease, 8)
 	if err != nil {
 		return err
 	}
@@ -630,7 +630,7 @@ func (s *sCollector) enqueueDueDeliveryTasks(ctx context.Context, limit int) (re
 		return nil
 	}
 	scopeCtx, cancelScopes := context.WithTimeout(ctx, time.Second)
-	scopes, err := collectorRecoveryScopes(scopeCtx, 8)
+	scopes, err := collectorRecoveryScopes(scopeCtx, collectorRecoveryDeliveryEnqueue, 8)
 	cancelScopes()
 	if err != nil {
 		return gerror.Wrap(err, "读取交付恢复来源失败")

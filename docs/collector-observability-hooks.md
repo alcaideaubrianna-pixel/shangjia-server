@@ -279,3 +279,30 @@ sum by (sample, queue_class) (rate(telegram_collector_delivery_wait_samples_tota
 - 全仓架构检查失败，报告位于 `tg_media_fallback_handoff.go` 和 `tg_video_sanitize_cache.go`；这两个文件及检查器相对验证时 HEAD 均未改动。本次没有放宽 baseline。
 
 这些是本地验证结果，不代表已完成线上验收或全仓测试。
+
+## 恢复职责轮转隔离
+
+来源登记集合仍为 `telegram_collector:recovery:scopes:v1`，不复制五份来源关系。
+接收 Spool、Event 租约恢复、Event 重新入队、Delivery 租约恢复、Delivery
+重新入队分别使用固定职责 `ingest_spool`、`event_lease`、`event_enqueue`、
+`delivery_lease`、`delivery_enqueue` 保存轮转游标和待访问成员。
+
+同一职责的不同实例共享进度，不同职责独立遍历完整来源集合。职责不能使用实例 ID，
+未知或空职责直接报错，不允许悄悄回到旧共享游标。Redis Cluster 的派生 Key
+保留原集合的 hash slot，脚本仍只执行一页 SSCAN 和有界取出。
+
+升级后各职责从自己的新游标开始，不删除旧集合、旧游标或业务任务。已有来源登记仍有效，
+未登记的旧来源不会因此自动出现，仍须精确补登记；索引前置条件也不变。
+这项修复需要更新运行 Event 恢复的 collector 和运行 Delivery 恢复的 publish 角色。
+
+本次本地验证已通过缓存轮转回归及 race 检查、Collector 恢复/交接/观测专项和受限并发主程序编译。
+轮转回归包含五个职责以固定顺序各取 8 个来源，并断言每个职责均能覆盖同一批 40 个来源；
+同一职责的实例共享进度，另一职责独立开始，已删除成员不再返回，非法职责拒绝执行。
+
+2026-11-17 本轮 DBX 仅按主键和系统目录只读核对：
+
+- 原始事件 `12682247` 仍为 received、attempt_count=0；交付 `40208008` 仍为 pending、attempt_count=0。
+- 两者的恢复范围均为 tenant=78/account=0/source=351，不能以业务 account=615 替代。
+- 五个预期来源恢复索引均未找到。进一步检查 Event/Delivery 现有来源与租约索引，
+  未发现相同的来源范围恢复定义；因此索引前置条件尚未满足。
+- 本轮没有创建生产索引、重放消息、改业务状态或部署镜像；上述记录不是修复后的线上验收。

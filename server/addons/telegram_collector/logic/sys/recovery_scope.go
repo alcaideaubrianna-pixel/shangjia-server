@@ -17,6 +17,27 @@ var errCollectorRecoveryRedisUnavailable = errors.New("采集恢复 Redis 不可
 // Zero account/source IDs are valid for raw Bot updates before source resolution.
 type collectorRecoveryScope struct{ TenantID, AccountID, SourceID int64 }
 
+// A duty owns its progress; process/instance IDs must never be used here.
+type collectorRecoveryLane string
+
+const (
+	collectorRecoverySpool           collectorRecoveryLane = "ingest_spool"
+	collectorRecoveryEventLease      collectorRecoveryLane = "event_lease"
+	collectorRecoveryEventEnqueue    collectorRecoveryLane = "event_enqueue"
+	collectorRecoveryDeliveryLease   collectorRecoveryLane = "delivery_lease"
+	collectorRecoveryDeliveryEnqueue collectorRecoveryLane = "delivery_enqueue"
+)
+
+func (lane collectorRecoveryLane) valid() bool {
+	switch lane {
+	case collectorRecoverySpool, collectorRecoveryEventLease, collectorRecoveryEventEnqueue,
+		collectorRecoveryDeliveryLease, collectorRecoveryDeliveryEnqueue:
+		return true
+	default:
+		return false
+	}
+}
+
 func (s collectorRecoveryScope) valid() bool {
 	return s.TenantID > 0 && s.AccountID >= 0 && s.SourceID >= 0
 }
@@ -48,11 +69,14 @@ func markCollectorRecoveryScope(ctx context.Context, scope collectorRecoveryScop
 	}
 	return cache.SetAdd(ctx, consts.RecoveryScopeKey, scope.key())
 }
-func collectorRecoveryScopes(ctx context.Context, limit int) ([]collectorRecoveryScope, error) {
+func collectorRecoveryScopes(ctx context.Context, lane collectorRecoveryLane, limit int) ([]collectorRecoveryScope, error) {
+	if !lane.valid() {
+		return nil, gerror.New("采集恢复必须指定有效职责，禁止共用未分类游标")
+	}
 	if limit <= 0 || limit > 50 {
 		limit = 50
 	}
-	members, err := cache.SetRotate(ctx, consts.RecoveryScopeKey, limit)
+	members, err := cache.SetRotateFor(ctx, consts.RecoveryScopeKey, string(lane), limit)
 	if err != nil {
 		return nil, err
 	}

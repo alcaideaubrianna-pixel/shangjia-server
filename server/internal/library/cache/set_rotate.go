@@ -34,6 +34,24 @@ return result
 // cursor. An empty page does not prove the set is empty. Errors never trigger
 // a database fallback. The caller owns processing retries after selection.
 func SetRotate(ctx context.Context, key string, limit int) ([]string, error) {
+	return setRotate(ctx, key, "", limit)
+}
+
+// SetRotateFor shares the member set but isolates progress by consumer duty.
+// Instances performing the same duty must use the same stable consumer name.
+func SetRotateFor(ctx context.Context, key, consumer string, limit int) ([]string, error) {
+	if len(consumer) == 0 || len(consumer) > 64 {
+		return nil, fmt.Errorf("SetRotateFor requires a consumer name of 1 to 64 characters")
+	}
+	for _, c := range consumer {
+		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '_') {
+			return nil, fmt.Errorf("SetRotateFor consumer must use lowercase letters, digits or underscores")
+		}
+	}
+	return setRotate(ctx, key, consumer, limit)
+}
+
+func setRotate(ctx context.Context, key, consumer string, limit int) ([]string, error) {
 	if key == "" || limit <= 0 {
 		return nil, nil
 	}
@@ -43,6 +61,10 @@ func SetRotate(ctx context.Context, key string, limit int) ([]string, error) {
 	cursor, pending, err := setRotateKeys(key)
 	if err != nil {
 		return nil, err
+	}
+	if consumer != "" {
+		cursor += ":" + consumer
+		pending += ":" + consumer
 	}
 	client, err := RedisClient()
 	if err != nil {

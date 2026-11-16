@@ -586,7 +586,7 @@ func (s *sCollector) runEventRecovery(ctx context.Context) {
 func (s *sCollector) recoverEventTasks(ctx context.Context) {
 	if collectorIngestSpoolEnabled(ctx) {
 		spoolCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		scopes, err := collectorRecoveryScopes(spoolCtx, 8)
+		scopes, err := collectorRecoveryScopes(spoolCtx, collectorRecoverySpool, 8)
 		if err != nil {
 			g.Log().Warningf(ctx, "读取 Spool 恢复 scope 失败：%+v", err)
 		} else {
@@ -612,7 +612,7 @@ func (s *sCollector) resetExpiredEventLeases(ctx context.Context, limit int, sco
 	if len(scopes) == 0 {
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
-		lanes, err := collectorRecoveryScopes(ctx, 8)
+		lanes, err := collectorRecoveryScopes(ctx, collectorRecoveryEventLease, 8)
 		if err != nil {
 			return gerror.Wrap(err, "读取原始事件租约恢复 scope 失败，禁止全局扫描")
 		}
@@ -683,7 +683,7 @@ func (s *sCollector) enqueueDueEventTasks(ctx context.Context, limit int) (recov
 	ctx, recoveryObservation := startCollectorStage(ctx, collectorStageEventRecovery, collectorObservationMeta{QueueClass: collectorQueueMixed})
 	defer func() { recoveryObservation.Finish(collectorResultOK, recoveryErr) }()
 	scopeCtx, cancel := context.WithTimeout(ctx, time.Second)
-	scopes, err := collectorRecoveryScopes(scopeCtx, 8)
+	scopes, err := collectorRecoveryScopes(scopeCtx, collectorRecoveryEventEnqueue, 8)
 	cancel()
 	if err != nil {
 		return gerror.Wrap(err, "读取原始事件恢复 scope 失败，禁止全局扫描")

@@ -483,7 +483,7 @@ func TestDeliveryRecoveryUsesBoundedSchedulerPoolLanes(t *testing.T) {
 	}
 	scheduler := queue[start : start+end]
 	for _, required := range []string{
-		"collectorRecoveryScopes(scopeCtx, 8)",
+		"collectorRecoveryScopes(scopeCtx, collectorRecoveryDeliveryEnqueue, 8)",
 		`collectorRecoveryBranchOrder([]string{"realtime", "history"})`,
 		"min(laneQuota, remaining)", "s.recoverDeliveryCursorPage(laneCtx, scope, pool,",
 	} {

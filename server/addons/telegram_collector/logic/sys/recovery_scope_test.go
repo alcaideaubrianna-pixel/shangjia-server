@@ -26,3 +26,21 @@ func TestEventRecoveryRejectsUnscopedBeforeDatabase(t *testing.T) {
 		t.Fatal("invalid lease scope accepted")
 	}
 }
+
+func TestCollectorRecoveryRequiresKnownDuty(t *testing.T) {
+	for _, lane := range []collectorRecoveryLane{"", "unknown", "event", "instance_123"} {
+		if _, err := collectorRecoveryScopes(context.Background(), lane, 8); err == nil {
+			t.Fatalf("unclassified duty accepted: %q", lane)
+		}
+	}
+	seen := make(map[collectorRecoveryLane]bool)
+	for _, lane := range []collectorRecoveryLane{
+		collectorRecoverySpool, collectorRecoveryEventLease, collectorRecoveryEventEnqueue,
+		collectorRecoveryDeliveryLease, collectorRecoveryDeliveryEnqueue,
+	} {
+		if !lane.valid() || seen[lane] {
+			t.Fatalf("invalid or duplicate recovery duty: %q", lane)
+		}
+		seen[lane] = true
+	}
+}
