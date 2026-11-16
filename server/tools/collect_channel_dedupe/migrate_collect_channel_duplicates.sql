@@ -17,11 +17,6 @@
   \echo '缺少 -v confirm=I_UNDERSTAND_COLLECT_CHANNEL_MERGE'
   \quit 3
 \endif
-\if :confirm = 'I_UNDERSTAND_COLLECT_CHANNEL_MERGE'
-\else
-  \echo '确认值不正确，拒绝执行'
-  \quit 3
-\endif
 
 BEGIN;
 SET LOCAL lock_timeout = '5s';
@@ -44,7 +39,7 @@ BEGIN
     INTO n, active_n
   FROM hg_youban_publish_collect_channel c
   JOIN _cc_channels x ON x.id=c.id;
-  IF n < 2 THEN RAISE EXCEPTION 'REFUSED: duplicate group not found for tenant %, canonical %', :'tenant_id', :'canonical_chat_id'; END IF;
+  IF n < 2 THEN RAISE EXCEPTION 'REFUSED: duplicate group not found'; END IF;
   IF active_n < 1 THEN RAISE EXCEPTION 'REFUSED: duplicate group has no active collect_channel'; END IF;
 END $$;
 
@@ -97,9 +92,8 @@ FROM (
   WHERE r.deleted_at IS NULL
 ) q WHERE rn=1;
 
--- 先软删 losers，避免更新 winner.channel_id 时触发唯一键冲突。
-UPDATE hg_youban_publish_collect_account_channel r
-SET deleted_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
+-- 该唯一索引不是部分索引，软删不会释放唯一键；旧重复关系必须直接删除。
+DELETE FROM hg_youban_publish_collect_account_channel r
 WHERE r.id IN (
   SELECT r2.id
   FROM hg_youban_publish_collect_account_channel r2
@@ -126,8 +120,7 @@ FROM (
   JOIN _cc_channels x ON x.id=r.channel_id
   WHERE r.deleted_at IS NULL
 ) q WHERE rn=1;
-UPDATE hg_youban_publish_collect_bot_channel r
-SET deleted_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
+DELETE FROM hg_youban_publish_collect_bot_channel r
 WHERE r.id IN (
   SELECT r2.id FROM hg_youban_publish_collect_bot_channel r2
   JOIN _cc_channels x ON x.id=r2.channel_id
@@ -206,7 +199,8 @@ DO $$
 DECLARE n bigint;
 BEGIN
   SELECT count(*) INTO n FROM hg_youban_publish_collect_channel c
-  WHERE c.tenant_id=:'tenant_id'::bigint AND c.deleted_at IS NULL
+  WHERE c.tenant_id=(SELECT tenant_id FROM _cc_channels LIMIT 1)
+    AND c.deleted_at IS NULL
     AND regexp_replace(btrim(c.telegram_chat_id), '^-100', '')=(SELECT canonical_chat_id FROM _cc_channels LIMIT 1);
   IF n <> 1 THEN RAISE EXCEPTION 'VERIFY FAILED: active collect_channel count=%',n; END IF;
 END $$;
