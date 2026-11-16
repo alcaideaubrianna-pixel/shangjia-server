@@ -169,10 +169,9 @@ func activeCollectProcessScopes(ctx context.Context) []publishAccountScope {
 	return scopes
 }
 
-// cleanupExpiredCollectProcessSources removes only lanes with no known Redis
-// work. It deliberately does not query PostgreSQL: a new event re-adds the
-// source to the ingress set and rebuilds its candidate index before recovery
-// can see it again.
+// cleanupExpiredCollectProcessSources renews recovery ownership conservatively.
+// Redis transport emptiness cannot prove PostgreSQL work is drained. Do not
+// remove valid source markers until a scoped database drain has been confirmed.
 func cleanupExpiredCollectProcessSources(ctx context.Context, client *gredis.Redis, now int64, limit int) {
 	if limit <= 0 {
 		limit = collectRecoveryActiveSourceLeaseLimit
@@ -182,39 +181,8 @@ func cleanupExpiredCollectProcessSources(ctx context.Context, client *gredis.Red
 		return
 	}
 	for _, member := range value.Strings() {
-		if collectProcessSourceHasRedisWork(ctx, client, member) {
-			// A lane can be active without being sampled in this pass. Give it
-			// another bounded lease instead of deleting its ingress marker.
-			_, _ = client.Do(ctx, "ZADD", collectRecoveryActiveSourceLeaseKey,
-				now+int64(collectSourceLeaseSeconds(ctx)), member)
-			continue
-		}
-		_, _ = client.Do(ctx, "SREM", collectProcessActiveSourcesKey, member)
-		_, _ = client.Do(ctx, "ZREM", collectRecoveryActiveSourceLeaseKey, member)
+		_, _ = client.Do(ctx, "ZADD", collectRecoveryActiveSourceLeaseKey, now+int64(collectSourceLeaseSeconds(ctx)), member)
 	}
-}
-
-func collectProcessSourceHasRedisWork(ctx context.Context, client *gredis.Redis, member string) bool {
-	parts := strings.Split(member, ":")
-	if len(parts) != 3 {
-		return false
-	}
-	tenantID, errTenant := strconv.ParseInt(parts[0], 10, 64)
-	accountID, errAccount := strconv.ParseInt(parts[1], 10, 64)
-	sourceID, errSource := strconv.ParseInt(parts[2], 10, 64)
-	if errTenant != nil || errAccount != nil || errSource != nil || tenantID <= 0 || accountID < 0 || sourceID <= 0 {
-		return false
-	}
-	payload := collectProcessQueuePayload{TenantId: tenantID, AccountId: accountID, SourceId: sourceID}
-	marker, markerErr := client.Do(ctx, "EXISTS", collectProcessCandidateIndexMarkerKey(payload))
-	if markerErr == nil && marker.Int() == 1 {
-		candidateCount, candidateErr := client.Do(ctx, "ZCARD", collectProcessCandidateIndexKey(payload))
-		if candidateErr == nil && candidateCount.Int64() > 0 {
-			return true
-		}
-	}
-	wakeCount, wakeErr := client.Do(ctx, "LLEN", collectProcessSourceWakeQueueKey(member))
-	return wakeErr == nil && wakeCount.Int64() > 0
 }
 
 func collectRecoverySourceBatchSize(ctx context.Context) int {
@@ -264,6 +232,7 @@ func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	if err := s.recoverCollectSourceStats(ctx, 100); err != nil {
 		g.Log().Warningf(ctx, "恢复采集源统计任务失败：%+v", err)
 	}
+	s.recoverCollectMediaSourceScopes(ctx, scopes)
 	if !collectLegacyGlobalRecoveryEnabled(ctx) {
 		if err := s.recoverCollectEvents(ctx, 100); err != nil {
 			g.Log().Warningf(ctx, "恢复采集事件处理失败：%+v", err)
@@ -281,19 +250,10 @@ func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	// Always drain a bounded ready-media transition before backpressure can
 	// yield historical recovery; otherwise ready events remain orphaned while
 	// realtime traffic is continuously above the gate.
-	if err := s.recoverReadyMediaPendingEvents(ctx, min(mediaBatchSize, 100)); err != nil {
-		g.Log().Warningf(ctx, "恢复媒体已就绪但事件仍待处理的采集任务失败：%+v", err)
-	}
 	// 媒体已经就绪但历史版本没有生成 collect_dispatch 的事件，不能只依赖
 	// media_pending 恢复；按账户/来源有界补投递，交给正常规则分发流程幂等处理。
-	if err := s.recoverMediaReadyWithoutDispatch(ctx, min(mediaBatchSize, 100)); err != nil {
-		g.Log().Warningf(ctx, "恢复媒体就绪但缺少分发记录的采集事件失败：%+v", err)
-	}
 	// Media retries have their own small budget. They must keep making
 	// progress while process recovery yields to realtime traffic.
-	if err := s.recoverPendingCollectMedia(ctx, min(mediaBatchSize, 50)); err != nil {
-		g.Log().Warningf(ctx, "恢复待处理采集媒体任务失败：%+v", err)
-	}
 	if err := s.recoverRecentOrphanCollectReviews(ctx, 20); err != nil {
 		g.Log().Warningf(ctx, "恢复近期孤立采集审核失败：%+v", err)
 	}
@@ -315,17 +275,11 @@ func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	if err := s.cleanupCollectEventsOlderThan(ctx, tasklog.RetentionDays(), 1000); err != nil {
 		g.Log().Warningf(ctx, "清理过期采集事件失败：%+v", err)
 	}
-	if err := s.recoverStaleCollectMediaRows(ctx, mediaBatchSize); err != nil {
-		g.Log().Warningf(ctx, "恢复超时采集媒体失败：%+v", err)
-	}
 	if err := s.recoverInvalidReadyCollectMedia(ctx, mediaBatchSize); err != nil {
 		g.Log().Warningf(ctx, "恢复无持久化文件的采集媒体失败：%+v", err)
 	}
 	if err := s.recoverLegacyMissingVerifyCollectEvents(ctx, min(mediaBatchSize, 20)); err != nil {
 		g.Log().Warningf(ctx, "恢复历史缺少验证视频的采集事件失败：%+v", err)
-	}
-	if err := s.recoverBotCollectMedia(ctx, mediaBatchSize); err != nil {
-		g.Log().Warningf(ctx, "恢复BOT采集媒体事件失败：%+v", err)
 	}
 	if err := s.recoverCollectHistoryTasks(ctx, 20); err != nil {
 		g.Log().Warningf(ctx, "恢复历史采集任务失败：%+v", err)
@@ -344,12 +298,18 @@ func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 // recoverMediaReadyWithoutDispatch 恢复媒体已完成、事件仍未终态且没有
 // collect_dispatch 的历史事件。该入口只重新投递采集处理 Outbox，不直接
 // 创建资料或发布任务，因此不会绕过规则、审核和去重流程。
-func (s *sSysPublish) recoverMediaReadyWithoutDispatch(ctx context.Context, limit int) error {
+func (s *sSysPublish) recoverMediaReadyWithoutDispatch(ctx context.Context, limit int, scopes ...publishAccountScope) error {
+	if len(scopes) != 1 || scopes[0].TenantID <= 0 || scopes[0].AccountID < 0 || scopes[0].SourceID <= 0 {
+		return gerror.New("恢复媒体就绪但缺少分发记录的采集事件必须指定唯一且有效的租户、账户和来源范围")
+	}
+	scope := scopes[0]
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	if heavyRecoveryDisabled("YOUBAN_DISABLE_MEDIA_READY_RECOVERY") {
 		return nil
 	}
-	if limit <= 0 {
-		limit = 100
+	if limit <= 0 || limit > 50 {
+		limit = 50
 	}
 	now := gtime.Now()
 	e := pdao.YoubanPublishCollectEvent.Columns()
@@ -357,6 +317,9 @@ func (s *sSysPublish) recoverMediaReadyWithoutDispatch(ctx context.Context, limi
 	d := pdao.YoubanPublishCollectDispatch.Table()
 	rows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
 		Fields("e.id,e.tenant_id,e.account_id,e.source_id,e.source_chat_id,e.updated_at").
+		Where("e."+e.TenantId, scope.TenantID).
+		Where("e."+e.AccountId, scope.AccountID).
+		Where("e."+e.SourceId, scope.SourceID).
 		Where("e.status", sysin.CollectEventStatusMediaReady).
 		WhereNull("e.processed_at").
 		WhereLTE("e.updated_at", now.Add(-collectEventRecoverAfter)).
@@ -512,9 +475,15 @@ func (s *sSysPublish) recoverOneOrphanCollectReview(ctx context.Context, dispatc
 // have already become ready. Such rows are intentionally excluded from the
 // pending-media query, so normalize the event and put it back on the process
 // queue instead of leaving an orphaned state forever.
-func (s *sSysPublish) recoverReadyMediaPendingEvents(ctx context.Context, limit int) error {
-	if limit <= 0 {
-		limit = 100
+func (s *sSysPublish) recoverReadyMediaPendingEvents(ctx context.Context, limit int, scopes ...publishAccountScope) error {
+	if len(scopes) != 1 || scopes[0].TenantID <= 0 || scopes[0].AccountID < 0 || scopes[0].SourceID <= 0 {
+		return gerror.New("恢复媒体已就绪的待处理采集事件必须指定唯一且有效的租户、账户和来源范围")
+	}
+	scope := scopes[0]
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if limit <= 0 || limit > 50 {
+		limit = 50
 	}
 	e := pdao.YoubanPublishCollectEvent.Columns()
 	m := pdao.YoubanPublishCollectEventMedia.Table()
@@ -522,6 +491,9 @@ func (s *sSysPublish) recoverReadyMediaPendingEvents(ctx context.Context, limit 
 	buildModel := func() *gdb.Model {
 		return pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
 			Fields("e.id,e.tenant_id,e.account_id,e.source_id,e.source_chat_id").
+			Where("e."+e.TenantId, scope.TenantID).
+			Where("e."+e.AccountId, scope.AccountID).
+			Where("e."+e.SourceId, scope.SourceID).
 			Where("e."+e.Status, sysin.CollectEventStatusMediaPending).
 			Where(enabledCollectSourceExistsSQL("e")).
 			Where("EXISTS (SELECT 1 FROM "+m+" m WHERE m.event_id=e."+e.Id+")").
@@ -557,6 +529,7 @@ func (s *sSysPublish) recoverReadyMediaPendingEvents(ctx context.Context, limit 
 			continue
 		}
 		if _, err = pdao.YoubanPublishCollectEvent.Ctx(ctx).Where(e.Id, id).
+			Where(e.TenantId, scope.TenantID).Where(e.AccountId, scope.AccountID).Where(e.SourceId, scope.SourceID).
 			Where(e.Status, sysin.CollectEventStatusMediaPending).
 			Data(g.Map{e.Status: sysin.CollectEventStatusMediaReady, e.ErrorMessage: "", e.ProcessedAt: nil, e.UpdatedAt: gtime.Now()}).Update(); err != nil {
 			return gerror.Wrap(err, "更新媒体已就绪采集事件状态失败")
@@ -731,14 +704,22 @@ func (s *sSysPublish) ignoreCollectNoticeEvents(ctx context.Context, limit int) 
 // recovery can keep a busy BOT source alive without ever putting a particular
 // media group back on the media queue. Re-enqueueing each stale BOT event
 // lets the normal BOT downloader resume the group independently.
-func (s *sSysPublish) recoverBotCollectMedia(ctx context.Context, limit int) error {
-	if limit <= 0 {
-		limit = 1000
+func (s *sSysPublish) recoverBotCollectMedia(ctx context.Context, limit int, scopes ...publishAccountScope) error {
+	if len(scopes) != 1 || scopes[0].TenantID <= 0 || scopes[0].AccountID < 0 || scopes[0].SourceID <= 0 {
+		return gerror.New("BOT媒体恢复必须指定租户、账户和来源")
 	}
+	scope := scopes[0]
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if limit <= 0 {
+		limit = 20
+	}
+	limit = min(limit, 50)
 	e := pdao.YoubanPublishCollectEvent.Columns()
 	deadline := gtime.Now().Add(-collectEventRecoverAfter)
 	model := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
-		Fields("e.id,e.tenant_id,e.account_id,e.source_id,e.tg_account_id,e.status").
+		Fields("e.*").
+		Where("e.tenant_id", scope.TenantID).Where("e.account_id", scope.AccountID).Where("e.source_id", scope.SourceID).
 		Where("e."+e.SourceType, sysin.CollectSourceTypeBot).
 		WhereIn("e."+e.Status, []string{sysin.CollectEventStatusMediaPending, sysin.CollectEventStatusMediaReady, sysin.CollectEventStatusGroupCollect, sysin.CollectEventStatusPending, sysin.CollectEventStatusFailed}).
 		WhereNull("e."+e.ProcessedAt).
@@ -747,7 +728,7 @@ func (s *sSysPublish) recoverBotCollectMedia(ctx context.Context, limit int) err
 	// Keep ordering and pagination on the outer event query. GoFrame may attach
 	// later Order/Limit calls to an EXISTS expression when its predicate is
 	// built inline, producing invalid PostgreSQL SQL (ORDER inside EXISTS).
-	model = model.Where("e."+e.Id+" IN (SELECT m.event_id FROM "+pdao.YoubanPublishCollectEventMedia.Table()+" m WHERE m.cache_status IN (?,?))", collectMediaCachePending, collectMediaCacheDownloading)
+	model = model.Where("e."+e.Id+" IN (SELECT m.event_id FROM "+pdao.YoubanPublishCollectEventMedia.Table()+" m WHERE m.tenant_id=? AND m.account_id=? AND m.source_id=? AND m.cache_status=? AND (m.next_retry_at IS NULL OR m.next_retry_at<=?))", scope.TenantID, scope.AccountID, scope.SourceID, collectMediaCachePending, gtime.Now())
 	rows, err := model.OrderAsc("e." + e.UpdatedAt).Limit(limit).All()
 	if err != nil {
 		return gerror.Wrap(err, "读取待恢复BOT媒体事件失败")
@@ -790,7 +771,18 @@ func (s *sSysPublish) recoverBotCollectMedia(ctx context.Context, limit int) err
 
 // RepairBotCollectMedia exposes the one-shot historical repair for the CLI.
 func RepairBotCollectMedia(ctx context.Context, limit int) error {
-	return NewSysPublish().recoverBotCollectMedia(ctx, limit)
+	scopes := activeCollectProcessScopes(ctx)
+	if len(scopes) == 0 {
+		return gerror.New("没有可恢复的BOT来源 scope，禁止全局扫描")
+	}
+	service := NewSysPublish()
+	budget := max(1, min(50, limit/max(1, len(scopes))))
+	for _, scope := range scopes {
+		if err := service.recoverBotCollectMedia(ctx, budget, scope); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // IgnoreCollectNoticeEvents exposes the one-shot notification cleanup for the CLI.
@@ -844,14 +836,24 @@ func (s *sSysPublish) ignoreStaleCollectEventsForDisabledSources(ctx context.Con
 	return nil
 }
 
-func (s *sSysPublish) recoverStaleCollectMediaRows(ctx context.Context, limit int) error {
-	if limit <= 0 {
-		limit = 1000
+func (s *sSysPublish) recoverStaleCollectMediaRows(ctx context.Context, limit int, scopes ...publishAccountScope) error {
+	// A missing or ambiguous lane must never fall back to a global media scan.
+	if len(scopes) != 1 || scopes[0].TenantID <= 0 || scopes[0].AccountID < 0 || scopes[0].SourceID <= 0 {
+		return gerror.New("采集媒体恢复需要唯一有效的 tenant/account/source scope，已跳过全局扫描")
+	}
+	scope := scopes[0]
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if limit <= 0 || limit > 50 {
+		limit = 50
 	}
 	deadline := gtime.Now().Add(-collectMediaRecoverAfter)
 	mediaCols := pdao.YoubanPublishCollectEventMedia.Columns()
 	rows, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).As("m").
 		Fields("m."+mediaCols.Id, "m."+mediaCols.EventId).
+		Where("m."+mediaCols.TenantId, scope.TenantID).
+		Where("m."+mediaCols.AccountId, scope.AccountID).
+		Where("m."+mediaCols.SourceId, scope.SourceID).
 		Where("m."+mediaCols.CacheStatus, collectMediaCacheDownloading).
 		WhereLTE("m."+mediaCols.UpdatedAt, deadline).
 		Where(enabledCollectSourceExistsSQL("m")).
@@ -877,6 +879,9 @@ func (s *sSysPublish) recoverStaleCollectMediaRows(ctx context.Context, limit in
 	}
 	_, err = pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
 		WhereIn(mediaCols.Id, mediaIds).
+		Where(mediaCols.TenantId, scope.TenantID).
+		Where(mediaCols.AccountId, scope.AccountID).
+		Where(mediaCols.SourceId, scope.SourceID).
 		Where(mediaCols.CacheStatus, collectMediaCacheDownloading).
 		WhereLTE(mediaCols.UpdatedAt, deadline).
 		Data(g.Map{
@@ -898,30 +903,45 @@ func (s *sSysPublish) recoverStaleCollectMediaRows(ctx context.Context, limit in
 // requeues the affected event-scoped media tasks.
 func RepairStaleCollectMedia(ctx context.Context, limit int) error {
 	service := NewSysPublish()
-	if limit <= 0 {
-		limit = 1000
+	scopes := activeCollectProcessScopes(ctx)
+	if len(scopes) == 0 {
+		return gerror.New("没有可恢复的采集来源 scope，禁止全局媒体扫描")
 	}
-	if err := service.recoverStaleCollectMediaRows(ctx, limit); err != nil {
-		return err
+	budget := max(1, min(50, limit/max(1, len(scopes))))
+	for _, scope := range scopes {
+		if err := service.recoverStaleCollectMediaRows(ctx, budget, scope); err != nil {
+			return err
+		}
+		if err := service.recoverPendingCollectMedia(ctx, budget, scope); err != nil {
+			return err
+		}
+		if err := service.recoverBotCollectMedia(ctx, budget, scope); err != nil {
+			return err
+		}
 	}
-	return service.recoverPendingCollectMedia(ctx, limit)
+	return nil
 }
 
-func (s *sSysPublish) recoverPendingCollectMedia(ctx context.Context, limit int) error {
-	if limit <= 0 {
-		limit = 1000
+func (s *sSysPublish) recoverPendingCollectMedia(ctx context.Context, limit int, scopes ...publishAccountScope) error {
+	// A missing or ambiguous lane must never fall back to a global media scan.
+	if len(scopes) != 1 || scopes[0].TenantID <= 0 || scopes[0].AccountID < 0 || scopes[0].SourceID <= 0 {
+		return gerror.New("采集媒体恢复需要唯一有效的 tenant/account/source scope，已跳过全局扫描")
+	}
+	scope := scopes[0]
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if limit <= 0 || limit > 50 {
+		limit = 50
 	}
 	now := gtime.Now()
 	eventCols := pdao.YoubanPublishCollectEvent.Columns()
 	mediaTable := pdao.YoubanPublishCollectEventMedia.Table()
-	candidateLimit := limit * 4
-	if candidateLimit > 2000 {
-		candidateLimit = 2000
-	}
+	candidateLimit := limit
+	cursorKey := fmt.Sprintf("%s:%d:%d:%d", collectRecoveryMediaCursorKey, scope.TenantID, scope.AccountID, scope.SourceID)
 
 	var cursorUpdatedAt *gtime.Time
 	var cursorID int64
-	if cached, cacheErr := cache.Instance().Get(ctx, collectRecoveryMediaCursorKey); cacheErr == nil && !cached.IsNil() {
+	if cached, cacheErr := cache.Instance().Get(ctx, cursorKey); cacheErr == nil && !cached.IsNil() {
 		var cursor struct {
 			UpdatedAtUnixNano int64 `json:"updated_at_unix_nano"`
 			ID                int64 `json:"id"`
@@ -933,10 +953,13 @@ func (s *sSysPublish) recoverPendingCollectMedia(ctx context.Context, limit int)
 	}
 
 	model := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
+		Where("e."+eventCols.TenantId, scope.TenantID).
+		Where("e."+eventCols.AccountId, scope.AccountID).
+		Where("e."+eventCols.SourceId, scope.SourceID).
 		Where("e."+eventCols.Status, sysin.CollectEventStatusMediaPending).
 		WhereNot("e."+eventCols.SourceType, sysin.CollectSourceTypeBot).
 		Where(enabledCollectSourceExistsSQL("e")).
-		Where("EXISTS (SELECT 1 FROM "+mediaTable+" m WHERE m.event_id=e."+eventCols.Id+" AND m.cache_status=? AND (m.next_retry_at IS NULL OR m.next_retry_at<=?))", collectMediaCachePending, now)
+		Where("EXISTS (SELECT 1 FROM "+mediaTable+" m WHERE m.event_id=e."+eventCols.Id+" AND m.tenant_id=? AND m.account_id=? AND m.source_id=? AND m.cache_status=? AND (m.next_retry_at IS NULL OR m.next_retry_at<=?))", scope.TenantID, scope.AccountID, scope.SourceID, collectMediaCachePending, now)
 	if cursorUpdatedAt != nil {
 		model = model.Where("(e."+eventCols.UpdatedAt+">? OR (e."+eventCols.UpdatedAt+"=? AND e."+eventCols.Id+">?))", cursorUpdatedAt, cursorUpdatedAt, cursorID)
 	}
@@ -945,7 +968,7 @@ func (s *sSysPublish) recoverPendingCollectMedia(ctx context.Context, limit int)
 		return gerror.Wrap(err, "读取待恢复采集媒体事件失败")
 	}
 	if len(rows) == 0 && cursorUpdatedAt != nil {
-		_, _ = cache.Instance().Remove(ctx, collectRecoveryMediaCursorKey)
+		_, _ = cache.Instance().Remove(ctx, cursorKey)
 		return nil
 	}
 	if len(rows) == 0 {
@@ -959,7 +982,7 @@ func (s *sSysPublish) recoverPendingCollectMedia(ctx context.Context, limit int)
 		}
 		payload := collectMediaQueuePayloadFromEvent(row)
 		payload.Reason = "recovery"
-		if payload.EventId <= 0 || payload.TenantId <= 0 || payload.AccountId <= 0 || payload.SourceId <= 0 {
+		if payload.EventId <= 0 || payload.TenantId <= 0 || payload.AccountId < 0 || payload.SourceId <= 0 {
 			continue
 		}
 		if !reserveCollectMediaRecovery(ctx, payload.EventId) {
@@ -979,6 +1002,9 @@ func (s *sSysPublish) recoverPendingCollectMedia(ctx context.Context, limit int)
 		observeCollectMediaScheduler(ctx, "recovery_reenqueued", payload.TenantId, payload.TgAccountId)
 		if _, updateErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).
 			Where(eventCols.Id, payload.EventId).
+			Where(eventCols.TenantId, scope.TenantID).
+			Where(eventCols.AccountId, scope.AccountID).
+			Where(eventCols.SourceId, scope.SourceID).
 			Where(eventCols.Status, sysin.CollectEventStatusMediaPending).
 			Data(g.Map{eventCols.ProcessedAt: nil, eventCols.UpdatedAt: now}).Update(); updateErr != nil {
 			g.Log().Warningf(ctx, "更新待处理采集媒体恢复心跳失败 eventId:%d err:%+v", payload.EventId, updateErr)
@@ -991,7 +1017,7 @@ func (s *sSysPublish) recoverPendingCollectMedia(ctx context.Context, limit int)
 	lastUpdatedAt := last[eventCols.UpdatedAt].GTime()
 	lastID := last[eventCols.Id].Int64()
 	if lastUpdatedAt != nil && lastID > 0 {
-		_ = cache.Instance().Set(ctx, collectRecoveryMediaCursorKey, struct {
+		_ = cache.Instance().Set(ctx, cursorKey, struct {
 			UpdatedAtUnixNano int64 `json:"updated_at_unix_nano"`
 			ID                int64 `json:"id"`
 		}{lastUpdatedAt.UnixNano(), lastID}, collectRecoveryMediaCursorTTL)
