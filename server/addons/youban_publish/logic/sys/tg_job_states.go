@@ -2,6 +2,91 @@ package sys
 
 import "strings"
 
+// Public state aliases are intentionally backed by the types already used by
+// the publish worker. This lets new code use strong names without requiring a
+// flag-day migration of database models and existing call sites.
+type JobStatus = telegramJobLifecycle
+type DispatchStatus = telegramDispatchState
+type SendPhase = telegramSendPhaseState
+type BlockReason = telegramChannelBlockReason
+
+const (
+	JobStatusPending    JobStatus = telegramLifecyclePending
+	JobStatusSending    JobStatus = telegramLifecycleSending
+	JobStatusRetryWait  JobStatus = telegramLifecycleRetryWait
+	JobStatusUnknown    JobStatus = telegramLifecycleConfirming
+	JobStatusSent       JobStatus = telegramLifecycleSent
+	JobStatusFailed     JobStatus = telegramLifecycleFailed
+	JobStatusSuperseded JobStatus = telegramLifecycleSuperseded
+
+	DispatchStatusIdle       DispatchStatus = telegramDispatchIdle
+	DispatchStatusQueued     DispatchStatus = telegramDispatchQueued
+	DispatchStatusProcessing DispatchStatus = telegramDispatchProcessing
+	DispatchStatusDone       DispatchStatus = telegramDispatchDone
+
+	SendPhaseEmpty             SendPhase = telegramSendPhaseStateEmpty
+	SendPhaseCleanupProcessing SendPhase = telegramSendPhaseStateCleanupProcessing
+	SendPhaseCleanupConfirmed  SendPhase = telegramSendPhaseStateCleanupConfirmed
+	SendPhaseDisplaySending    SendPhase = telegramSendPhaseStateDisplaySending
+	SendPhaseDisplayConfirmed  SendPhase = telegramSendPhaseStateDisplayConfirmed
+	SendPhaseVerifySending     SendPhase = telegramSendPhaseStateVerifySending
+	SendPhaseVerifyConfirmed   SendPhase = telegramSendPhaseStateVerifyConfirmed
+	SendPhaseCompletedNoVerify SendPhase = telegramSendPhaseStateCompletedNoVerify
+	SendPhaseTimeoutCancelled  SendPhase = telegramSendPhaseStateTimeoutCancelled
+
+	BlockReasonNone          BlockReason = telegramChannelBlockNone
+	BlockReasonMedia         BlockReason = telegramChannelBlockMedia
+	BlockReasonAccount       BlockReason = telegramChannelBlockAccount
+	BlockReasonUnknownResult BlockReason = telegramChannelBlockUnknownResult
+)
+
+func ParseJobStatus(value string) (JobStatus, bool) {
+	s := JobStatus(strings.TrimSpace(value))
+	return s, s.Valid()
+}
+
+func ParseDispatchStatus(value string) (DispatchStatus, bool) {
+	s := DispatchStatus(strings.TrimSpace(value))
+	return s, s.Valid()
+}
+
+func ParseSendPhase(value string) (SendPhase, bool) {
+	s := SendPhase(strings.TrimSpace(value))
+	return s, s.Valid()
+}
+
+func ParseBlockReason(value string) (BlockReason, bool) {
+	s := BlockReason(strings.TrimSpace(value))
+	switch s {
+	case BlockReasonNone, BlockReasonMedia, BlockReasonAccount, BlockReasonUnknownResult:
+		return s, true
+	default:
+		return s, false
+	}
+}
+
+func (s telegramChannelBlockReason) IsBlocking() bool { return s != telegramChannelBlockNone }
+func (s telegramChannelBlockReason) Valid() bool {
+	_, ok := ParseBlockReason(string(s))
+	return ok
+}
+
+func (s telegramJobLifecycle) IsRetryable() bool { return s.NeedsRetry() }
+func (s telegramDispatchState) IsRetryable() bool {
+	return s == telegramDispatchIdle || s == telegramDispatchQueued
+}
+func (s telegramSendPhaseState) IsTerminal() bool {
+	return s == telegramSendPhaseStateVerifyConfirmed ||
+		s == telegramSendPhaseStateCompletedNoVerify ||
+		s == telegramSendPhaseStateTimeoutCancelled
+}
+func (s telegramSendPhaseState) IsRetryable() bool {
+	return s == telegramSendPhaseStateCleanupProcessing ||
+		s == telegramSendPhaseStateDisplaySending ||
+		s == telegramSendPhaseStateVerifySending
+}
+func (s telegramSendPhaseState) IsBlocking() bool { return s.OccupiesChannelExecution() }
+
 const (
 	telegramSendPhaseStateEmpty             telegramSendPhaseState = ""
 	telegramSendPhaseStateCleanupProcessing telegramSendPhaseState = "cleanup_processing"

@@ -15,6 +15,62 @@ import (
 	"hotgo/utility/dbtime"
 )
 
+// telegramChannelBlockReason describes why a queue item cannot make progress.
+// It is deliberately separate from the persisted job status: the status tells
+// us what the sender is doing, while this value tells the channel scheduler
+// whether it may yield the head.
+type telegramChannelBlockReason string
+
+const (
+	telegramChannelBlockNone          telegramChannelBlockReason = ""
+	telegramChannelBlockMedia         telegramChannelBlockReason = "media_not_ready"
+	telegramChannelBlockAccount       telegramChannelBlockReason = "account_fallback"
+	telegramChannelBlockUnknownResult telegramChannelBlockReason = "unknown_result"
+)
+
+type telegramChannelQueueDecision struct {
+	BlockReason telegramChannelBlockReason
+	YieldHead   bool
+	Delay       time.Duration
+}
+
+func telegramChannelQueueDecisionFor(job telegramJobRecord) telegramChannelQueueDecision {
+	reason := strings.TrimSpace(job.LastDispatchError)
+	switch {
+	case strings.Contains(reason, "媒体仍在异步处理中"):
+		// Media has not started sending. Let ordinary work on this channel pass,
+		// but keep the job in the history lane so it remains durable and ordered
+		// after ready work.
+		return telegramChannelQueueDecision{BlockReason: telegramChannelBlockMedia, YieldHead: true, Delay: 10 * time.Second}
+	case strings.Contains(reason, "awaiting_account_fallback") || strings.Contains(reason, "账号降级"):
+		// Account fallback may still send through a different transport. It is
+		// not safe to pass it because doing so can reorder the same channel.
+		return telegramChannelQueueDecision{BlockReason: telegramChannelBlockAccount, Delay: 30 * time.Second}
+	case telegramChannelJobHasUnknownResult(job):
+		// Telegram may already have accepted the request. Preserve the channel
+		// barrier until reconciliation has a definitive result.
+		return telegramChannelQueueDecision{BlockReason: telegramChannelBlockUnknownResult, Delay: 30 * time.Second}
+	default:
+		return telegramChannelQueueDecision{BlockReason: telegramChannelBlockNone, Delay: time.Second}
+	}
+}
+
+func telegramChannelJobHasUnknownResult(job telegramJobRecord) bool {
+	if job.Status == telegramJobStatusSending || job.Status == telegramJobStatusConfirming || job.Status == "reconciling" {
+		return true
+	}
+	reason := strings.ToLower(strings.TrimSpace(job.LastDispatchError))
+	for _, marker := range []string{
+		"context canceled", "context deadline exceeded", "timeout", "超时",
+		"等待webhook", "等待对账", "协议号对账", "网络错误", "network error",
+	} {
+		if strings.Contains(reason, strings.ToLower(marker)) {
+			return true
+		}
+	}
+	return false
+}
+
 // telegramChannelQueueEnabled defaults to the channel queue transport. Set the
 // environment variable to false for an emergency rollback to Asynq.
 func telegramChannelQueueEnabled() bool {
@@ -161,12 +217,16 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 			return true, nil
 		default:
 			hold, reason := telegramChannelJobRequeueAt(job)
+			decision := telegramChannelQueueDecisionFor(job)
 			priority := job.Priority
 			if priority <= 0 {
 				priority = tgJobPriorityBulk
 			}
 			if strings.Contains(reason, "媒体仍在异步处理中") {
 				g.Log().Info(ctx, "频道队列任务等待媒体就绪", g.Map{"event": "channel_queue_media_not_ready", "channelId": channelID, "jobId": jobID, "profileId": job.ProfileId, "score": hold})
+			}
+			if decision.YieldHead {
+				priority = tgJobPriorityHistory
 			}
 			requeueScore := telegramChannelQueueScore(priority, time.UnixMilli(hold), jobID)
 			if isTelegramChannelJobTerminal(job) {
@@ -189,6 +249,8 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 				"score":           requeueScore,
 				"durationMs":      time.Since(dequeueStartedAt).Milliseconds(),
 				"reason":          reason,
+				"blockReason":     decision.BlockReason,
+				"yieldHead":       decision.YieldHead,
 				"recoveryDelayMs": time.Until(time.UnixMilli(hold)).Milliseconds(),
 			})
 		}

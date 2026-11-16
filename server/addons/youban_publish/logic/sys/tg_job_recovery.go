@@ -110,7 +110,7 @@ func (s *sSysPublish) recoverInterruptedTelegramJobs(ctx context.Context, limit 
 	if err := s.supersedeStalePendingChannelHeads(ctx, limit); err != nil {
 		return err
 	}
-	if err := s.recoverPendingIdleTelegramJobs(ctx, limit); err != nil {
+	if err := s.recoverTelegramChannelQueueJobs(ctx, limit); err != nil {
 		return err
 	}
 	if err := s.recoverStaleTelegramDispatchJobs(ctx, limit); err != nil {
@@ -157,9 +157,6 @@ func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 		return
 	case <-startup.C:
 	}
-	// Pending idle recovery has its own lane so slow maintenance steps cannot
-	// consume the recovery cycle budget and starve tasks that need enqueueing.
-	go s.runTelegramPendingRecoveryLane(ctx)
 	s.runTelegramJobRecoveryCycle(ctx)
 	for {
 		select {
@@ -167,32 +164,6 @@ func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 			return
 		case <-ticker.C:
 			s.runTelegramJobRecoveryCycle(ctx)
-		}
-	}
-}
-
-func (s *sSysPublish) runTelegramPendingRecoveryLane(ctx context.Context) {
-	ticker := time.NewTicker(telegramRecoveryInterval(tgJobRecoveryIntervalEnv))
-	defer ticker.Stop()
-	run := func() {
-		stepCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		defer cancel()
-		lock := hglock.NewConfig(20*time.Second, 100*time.Millisecond).WithoutWatchDog().Mutex("youban_publish:telegram:pending_recovery")
-		if err := lock.TryLock(stepCtx); err != nil {
-			return
-		}
-		defer lock.Unlock(context.WithoutCancel(stepCtx))
-		if err := s.recoverPendingIdleTelegramJobs(stepCtx, 500); err != nil {
-			g.Log().Warningf(stepCtx, "独立恢复待入队TG推送任务失败：%+v", err)
-		}
-	}
-	run()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			run()
 		}
 	}
 }
@@ -227,14 +198,17 @@ func (s *sSysPublish) runTelegramJobRecoveryCycle(ctx context.Context) {
 		{"expired_message_plan", "终止过期历史消息计划任务", func(ctx context.Context) error { return s.supersedeExpiredMessagePushPlanJobs(ctx, 1000) }},
 		{"pre_attempt", "恢复发送Attempt创建前中断的TG任务", func(ctx context.Context) error { return s.recoverStalePreAttemptTelegramJobs(ctx, 200) }},
 		{"confirmed_job", "收口已确认TG推送任务", func(ctx context.Context) error { return s.recoverConfirmedTelegramJobs(ctx, 200) }},
-		{"sending_job", "恢复卡住的TG推送任务", func(ctx context.Context) error { return s.recoverStaleTelegramSendingJobs(ctx, 100) }},
+		{"channel_queue_recovery", "恢复频道队列队首任务", func(ctx context.Context) error {
+			return s.recoverTelegramChannelQueueJobs(ctx, telegramOutboxRecoveryBatchSize())
+		}},
+
 		{"media_fallback", "恢复协议号媒体降级任务", func(ctx context.Context) error { return s.recoverStaleTelegramMediaFallbackJobs(ctx, 100) }},
 		{"expired_attempt", "重新投递过期TG发送Attempt", func(ctx context.Context) error { return s.requeueExpiredTelegramAttempts(ctx, 100) }},
 		{"sending_attempt", "恢复中断的TG发送Attempt", func(ctx context.Context) error { return s.recoverStaleSendingTelegramAttempts(ctx, 100) }},
 		{"terminal_attempt", "收敛TG发送Attempt状态", func(ctx context.Context) error { return s.recoverTerminalTelegramAttempts(ctx, 500) }},
 		{"failed_display", "释放展示后失败的历史TG任务", func(ctx context.Context) error { return s.detachFailedTelegramDisplayJobs(ctx, 200) }},
 		{"outbox_dispatch", "恢复Outbox入队确认中断的TG任务", func(ctx context.Context) error { return s.recoverExpiredTelegramOutboxDispatches(ctx, 200) }},
-		{"stale_pending_head", "收口超时未入队的低优先级TG队首", func(ctx context.Context) error { return s.supersedeStalePendingChannelHeads(ctx, 500) }},
+
 		{"stale_dispatch", "恢复调度中断TG推送任务", func(ctx context.Context) error { return s.recoverStaleTelegramDispatchJobs(ctx, 200) }},
 		{"missing_operation_state", "补建资料上架状态", func(ctx context.Context) error { return s.recoverMissingProfilePublishOperationStates(ctx, 50) }},
 		{"operation_state", "恢复资料上架状态", func(ctx context.Context) error { return s.recoverProfilePublishOperationStates(ctx, 100) }},
@@ -1077,9 +1051,10 @@ func (s *sSysPublish) recoverPendingIdleTelegramJobs(ctx context.Context, limit 
 
 func telegramPendingRecoveryPostgresSQL() string {
 	return `SELECT j.* FROM ` + publishTgJobTable + ` j
-		WHERE j.status IN ('pending','failed_retry','unknown')
+		WHERE j.status IN ('pending','failed_retry')
 		AND COALESCE(j.dispatch_status,'') IN ('','idle')
 		AND COALESCE(j.asynq_task_id,'')=''
+		AND ` + telegramPendingRecoveryChannelHeadSQL("j", "earlier") + `
 		AND ` + telegramActiveChannelConditionForAlias("j") + `
 		AND ` + messagePushPlanRecoveryConditionSQL("j") + `
 		AND (j.next_retry_at IS NULL OR j.next_retry_at<=?)
@@ -1181,6 +1156,7 @@ func (s *sSysPublish) recoverStaleTelegramSendingJobs(ctx context.Context, limit
 	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("status", "sending").
 		Where(telegramActiveChannelCondition()).
+		Where(telegramPendingRecoveryChannelHeadSQL(publishTgJobTable, "earlier")).
 		Where(messagePushPlanRecoveryConditionSQL(publishTgJobTable), telegramRecoveryTimeText(now.Add(-messagePushPlanJobExpireAfter))).
 		WhereLTE("updated_at", deadline).
 		OrderAsc("updated_at").

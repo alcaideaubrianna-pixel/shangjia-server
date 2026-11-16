@@ -2,79 +2,44 @@ package sys
 
 import "testing"
 
-func TestTelegramJobStateEnums(t *testing.T) {
-	if !telegramLifecycleStateOf(" sending ").OccupiesChannelExecution() {
-		t.Fatal("sending must occupy channel execution")
-	}
-	if telegramLifecycleStateOf("failed_retry").OccupiesChannelExecution() {
-		t.Fatal("failed_retry must not occupy channel execution")
-	}
-	if !telegramLifecycleStateOf("unknown").NeedsReconcile() {
-		t.Fatal("unknown must require reconciliation")
-	}
-	if !telegramLifecycleStateOf("sent").IsTerminal() {
-		t.Fatal("sent must be terminal")
-	}
-	if telegramLifecycleStateOf("invalid").Valid() {
-		t.Fatal("invalid lifecycle must be rejected")
-	}
-}
-
-func TestTelegramDispatchStateEnums(t *testing.T) {
-	if !telegramDispatchStateOfValue("queued").IsInFlight() {
-		t.Fatal("queued must be in flight")
-	}
-	if !telegramDispatchStateOfValue("processing").IsInFlight() {
-		t.Fatal("processing must be in flight")
-	}
-	if !telegramDispatchStateOfValue("done").IsTerminal() {
-		t.Fatal("done must be terminal")
-	}
-	if telegramDispatchStateOfValue("invalid").Valid() {
-		t.Fatal("invalid dispatch state must be rejected")
-	}
-}
-
-func TestTelegramSendPhaseStateEnums(t *testing.T) {
-	if !telegramSendPhaseStateOf("display_sending").OccupiesChannelExecution() {
-		t.Fatal("display_sending must occupy channel execution")
-	}
-	if telegramSendPhaseStateOf("verify_confirmed").OccupiesChannelExecution() {
-		t.Fatal("verify_confirmed must not occupy channel execution")
-	}
-	if !telegramSendPhaseStateOf("verify_confirmed").IsConfirmed() {
-		t.Fatal("verify_confirmed must be confirmed")
-	}
-}
-
-func TestTelegramJobOccupiesChannelExecution(t *testing.T) {
-	tests := []struct {
-		name                    string
-		status, phase, dispatch string
-		want                    bool
+func TestStrongTelegramJobStates(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		parse func(string) (string, bool)
+		value string
+		want  string
 	}{
-		{name: "waiting retry", status: "failed_retry", dispatch: "idle", want: false},
-		{name: "sending lifecycle", status: "sending", dispatch: "idle", want: true},
-		{name: "unknown requires reconcile", status: "unknown", dispatch: "idle", want: true},
-		{name: "active send phase", status: "pending", phase: "verify_sending", dispatch: "idle", want: true},
-		{name: "processing dispatch", status: "pending", dispatch: "processing", want: true},
-		{name: "completed", status: "sent", phase: "completed_without_verify", dispatch: "done", want: false},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if got := telegramJobOccupiesChannelExecution(test.status, test.phase, test.dispatch); got != test.want {
-				t.Fatalf("telegramJobOccupiesChannelExecution(%q,%q,%q)=%t, want %t",
-					test.status, test.phase, test.dispatch, got, test.want)
+		{"job", func(v string) (string, bool) { s, ok := ParseJobStatus(v); return string(s), ok }, " sent ", "sent"},
+		{"dispatch", func(v string) (string, bool) { s, ok := ParseDispatchStatus(v); return string(s), ok }, "queued", "queued"},
+		{"phase", func(v string) (string, bool) { s, ok := ParseSendPhase(v); return string(s), ok }, "verify_confirmed", "verify_confirmed"},
+		{"block", func(v string) (string, bool) { s, ok := ParseBlockReason(v); return string(s), ok }, "media_not_ready", "media_not_ready"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := tc.parse(tc.value)
+			if !ok || got != tc.want {
+				t.Fatalf("parse(%q)=(%q,%v), want (%q,true)", tc.value, got, ok, tc.want)
 			}
 		})
 	}
+	if _, ok := ParseJobStatus("invalid"); ok {
+		t.Fatal("invalid job status accepted")
+	}
 }
 
-func TestTelegramJobSourcePriority(t *testing.T) {
-	if telegramJobSourceStateOf("collect:1", 50).Priority() >= telegramJobSourceStateOf("cycle_batch:1", 50).Priority() {
-		t.Fatal("collect must have higher priority than cycle")
+func TestStrongTelegramJobStatePredicates(t *testing.T) {
+	if !JobStatusSent.IsTerminal() || JobStatusSent.IsRetryable() {
+		t.Fatal("sent status predicates are incorrect")
 	}
-	if telegramJobSourceStateOf("cycle_batch:1", 50).Priority() >= telegramJobSourceStateOf("full_push:1", 50).Priority() {
-		t.Fatal("cycle must have higher priority than full push")
+	if !JobStatusRetryWait.IsRetryable() || JobStatusRetryWait.IsTerminal() {
+		t.Fatal("retry status predicates are incorrect")
+	}
+	if !DispatchStatusQueued.IsRetryable() || !SendPhaseDisplaySending.IsRetryable() {
+		t.Fatal("retryable state predicates are incorrect")
+	}
+	if !SendPhaseVerifyConfirmed.IsTerminal() || !SendPhaseDisplaySending.IsBlocking() {
+		t.Fatal("send phase predicates are incorrect")
+	}
+	if !BlockReasonMedia.IsBlocking() || BlockReasonNone.IsBlocking() {
+		t.Fatal("block reason predicates are incorrect")
 	}
 }

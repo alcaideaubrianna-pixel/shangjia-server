@@ -92,20 +92,6 @@ func (s *sSysPublish) runTelegramOutboxPass(ctx context.Context) {
 	// Outbox 可能已经持久化，但 Redis/Asynq 任务在进程重启、Redis抖动或
 	// 稳定 TaskID 冲突时丢失。每轮先用有界恢复补灌 pending/idle 任务，
 	// 再处理普通到期 Outbox，避免任务永久停在 pending 且没有 asynq_task_id。
-	// The unified channel queue still needs a durable PostgreSQL recovery path.
-	// Redis active-channel membership is only an index and can be lost during a
-	// restart; recover one bounded set of channel heads before normal Outbox
-	// dispatch. The enqueue path is job-idempotent, so this is safe alongside
-	// the 2-second Redis rehydrator.
-	if telegramChannelQueueEnabled() {
-		if err := s.recoverTelegramChannelQueueJobs(passCtx, telegramOutboxRecoveryBatchSize()); err != nil {
-			g.Log().Warningf(ctx, "恢复频道队列TG任务失败：%+v", err)
-		}
-	} else {
-		if err := s.recoverPendingIdleTelegramJobs(passCtx, telegramOutboxRecoveryBatchSize()); err != nil {
-			g.Log().Warningf(ctx, "恢复待入队TG任务失败：%+v", err)
-		}
-	}
 	if err := s.dispatchDueTelegramJobOutbox(passCtx, 0); err != nil {
 		g.Log().Warningf(ctx, "调度TG任务Outbox失败：%+v", err)
 	}
@@ -116,9 +102,6 @@ func (s *sSysPublish) runTelegramOutboxPass(ctx context.Context) {
 func (s *sSysPublish) RecoverTelegramDispatch(ctx context.Context, limit int) error {
 	if limit <= 0 {
 		limit = 100
-	}
-	if err := s.recoverPendingIdleTelegramJobs(ctx, limit); err != nil {
-		return err
 	}
 	return s.dispatchDueTelegramJobOutbox(ctx, limit)
 }

@@ -226,3 +226,43 @@ func TestTelegramChannelJobRequeueAtPreservesPostgresLocalTimestamp(t *testing.T
 		t.Fatalf("retry hold=%s, want around two minutes", got)
 	}
 }
+
+func TestTelegramChannelQueueDecisionPreservesUnknownBarrier(t *testing.T) {
+	decision := telegramChannelQueueDecisionFor(telegramJobRecord{
+		Status:            telegramJobStatusSending,
+		LastDispatchError: "context canceled",
+	})
+	if decision.BlockReason != telegramChannelBlockUnknownResult || decision.YieldHead {
+		t.Fatalf("unknown result must preserve channel barrier: %+v", decision)
+	}
+}
+
+func TestTelegramChannelQueueDecisionYieldsOnlyBeforeMediaSend(t *testing.T) {
+	decision := telegramChannelQueueDecisionFor(telegramJobRecord{
+		Status:            telegramJobStatusRetryWait,
+		LastDispatchError: "媒体仍在异步处理中：display",
+	})
+	if decision.BlockReason != telegramChannelBlockMedia || !decision.YieldHead {
+		t.Fatalf("media wait before send should yield the head: %+v", decision)
+	}
+}
+
+func TestTelegramChannelQueueDecisionAccountFallbackPreservesOrder(t *testing.T) {
+	decision := telegramChannelQueueDecisionFor(telegramJobRecord{
+		Status:            telegramJobStatusRetryWait,
+		LastDispatchError: "awaiting_account_fallback:display",
+	})
+	if decision.BlockReason != telegramChannelBlockAccount || decision.YieldHead {
+		t.Fatalf("account fallback must preserve channel order: %+v", decision)
+	}
+}
+
+func TestTelegramChannelQueueDecisionRecognizesUnknownRetryResult(t *testing.T) {
+	decision := telegramChannelQueueDecisionFor(telegramJobRecord{
+		Status:            telegramJobStatusRetryWait,
+		LastDispatchError: "context deadline exceeded，等待协议号对账",
+	})
+	if decision.BlockReason != telegramChannelBlockUnknownResult || decision.YieldHead {
+		t.Fatalf("unknown retry result must preserve channel order: %+v", decision)
+	}
+}

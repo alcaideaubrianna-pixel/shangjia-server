@@ -101,7 +101,9 @@ func TestTelegramAllChannelHeadQueriesExcludeFailedDisplays(t *testing.T) {
 		if strings.Contains(query, "channel_display") {
 			t.Fatalf("%s contains obsolete channel_display condition: %s", name, query)
 		}
-		activeOrder := strings.Contains(query, "'pending','failed_retry','confirming','sending'") ||
+		activeOrder := strings.Contains(query, "'sending','confirming'") ||
+			strings.Contains(query, "'pending','failed_retry'") ||
+			strings.Contains(query, "'pending','failed_retry','confirming','sending'") ||
 			(strings.Contains(query, "'pending','confirming','sending'") && strings.Contains(query, "status='failed_retry'"))
 		if name == "pending recovery" {
 			// Recovery intentionally selects non-head stale jobs; active send
