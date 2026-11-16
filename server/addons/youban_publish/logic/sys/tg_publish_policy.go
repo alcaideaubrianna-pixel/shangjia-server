@@ -2,6 +2,8 @@ package sys
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -83,6 +85,12 @@ func (s *sSysPublish) telegramLastSuccessAt(ctx context.Context, job telegramJob
 		WhereNotNull("sent_at").
 		OrderDesc("id").
 		Fields("sent_at").Scan(&row); err != nil {
+		// A channel without a previous successful job is a valid first-send
+		// state. Treat it as no interval delay instead of putting the job into
+		// retry and blocking the channel queue.
+		if errors.Is(err, sql.ErrNoRows) || errors.Is(gerror.Cause(err), sql.ErrNoRows) {
+			return nil, nil
+		}
 		return nil, gerror.Wrap(err, "读取频道最后成功推送时间失败")
 	}
 	last := dbtime.FromTimestamp(row.SentAt)
