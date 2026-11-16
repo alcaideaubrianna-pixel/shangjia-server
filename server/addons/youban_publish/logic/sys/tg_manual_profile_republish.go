@@ -41,9 +41,13 @@ func (s *sSysPublish) prepareProfileChannelPublish(ctx context.Context, current 
 	}
 	var previous []telegramJobRecord
 	err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Fields("id,task_id,operation_no,tenant_id,account_id,profile_id,channel_id,bot_id,target_chat_id,status").
+		Fields("id,task_id,operation_no,operation_type,tenant_id,account_id,profile_id,channel_id,bot_id,target_chat_id,status").
 		Where("tenant_id", current.TenantId).
+		Where("account_id", current.AccountId).
 		Where("profile_id", current.ProfileId).
+		Where("channel_id", current.ChannelId).
+		Where("bot_id", current.BotId).
+		Where("operation_type", current.OperationType).
 		Where("target_chat_id", normalizeTelegramChannelChatID(current.TargetChatId)).
 		WhereLT("id", current.Id).
 		WhereIn("status", []string{"pending", "sending", "failed", "failed_retry", "unknown", "sent"}).

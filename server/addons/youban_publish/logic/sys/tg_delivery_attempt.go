@@ -399,7 +399,9 @@ func (s *sSysPublish) confirmTelegramAPISuccess(ctx context.Context, job telegra
 			return gerror.Wrap(updateErr, "确认TG任务发送阶段失败")
 		}
 		if affected, _ := result.RowsAffected(); affected == 0 {
-			return errTelegramJobSuperseded
+			// Telegram 已经返回了消息 ID，Attempt 审计和消息投影必须保留。
+			// job 可能在本事务期间被清理/替换，阶段 CAS 失败不能回滚远端成功事实。
+			g.Log().Warningf(ctx, "TG发送成功但任务阶段未推进，保留消息投影 attemptId:%d jobId:%d", attempt.Id, job.Id)
 		}
 		return nil
 	})
