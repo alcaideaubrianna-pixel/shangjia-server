@@ -15,6 +15,7 @@ import (
 
 	"hotgo/addons/telegram_collector/model/input/sysin"
 	collectorservice "hotgo/addons/telegram_collector/service"
+	"hotgo/utility/telegrambudget"
 )
 
 const (
@@ -118,7 +119,11 @@ func processAccountTask(ctx context.Context, client *telegram.Client, lease *sys
 			})
 		} else {
 			taskCtx, cancel := context.WithCancel(ctx)
-			waitCtx, waitCancel := context.WithTimeout(taskCtx, 30*time.Second)
+			gateTimeout := 30 * time.Second
+			if task.TaskType == sysin.AccountTaskTypeMessageMediaFallback {
+				gateTimeout = telegrambudget.AccountGate(ctx)
+			}
+			waitCtx, waitCancel := context.WithTimeout(taskCtx, gateTimeout)
 			stopRenew := keepAccountTaskLeaseAlive(taskCtx, cancel, lease)
 			gate := accountTaskOperationGate(task.TaskType, operationGate, mediaFallbackGate)
 			waitStarted := time.Now()
@@ -129,7 +134,7 @@ func processAccountTask(ctx context.Context, client *telegram.Client, lease *sys
 			handleErr = gateErr
 			var executionErr error
 			if gateErr == nil {
-				executionCtx, executionCancel := context.WithTimeout(taskCtx, accountTaskTimeout(task.TaskType))
+				executionCtx, executionCancel := context.WithTimeout(taskCtx, accountTaskTimeoutContext(ctx, task.TaskType))
 				stopWatchdog := watchAccountTaskTimeout(executionCtx, task, lease, resetSession)
 				result, handleErr = handler.HandleAccountTask(executionCtx, client, task)
 				executionErr = executionCtx.Err()
@@ -151,7 +156,7 @@ func processAccountTask(ctx context.Context, client *telegram.Client, lease *sys
 			stopRenew()
 			cancel()
 			if handleErr != nil && errors.Is(taskCtxErr, context.DeadlineExceeded) {
-				g.Log().Warningf(ctx, "Telegram账号任务处理超时 taskId:%d type:%s tgAccountId:%d timeout:%s attempt:%d/%d err:%+v", task.ID, task.TaskType, task.AccountID, accountTaskTimeout(task.TaskType), task.AttemptCount, task.MaxAttempts, taskCtxErr)
+				g.Log().Warningf(ctx, "Telegram账号任务处理超时 taskId:%d type:%s tgAccountId:%d timeout:%s attempt:%d/%d err:%+v", task.ID, task.TaskType, task.AccountID, accountTaskTimeoutContext(ctx, task.TaskType), task.AttemptCount, task.MaxAttempts, taskCtxErr)
 			}
 			if handleErr == nil {
 				if completion := collectorservice.AccountTaskCompletionHandlerFor(task.TaskType); completion != nil {
@@ -228,18 +233,18 @@ func watchAccountTaskTimeout(ctx context.Context, task *sysin.AccountTask, lease
 			// Reset first. A stuck protocol RPC can also delay the task-state
 			// write, and waiting for that write would leave the session wedged.
 			resetSession()
-			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), telegrambudget.Finalize(ctx))
 			defer cancel()
 			cause := gerror.Newf("Telegram账号任务执行中断（%v），已重置协议号连接", ctx.Err())
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				cause = gerror.Newf("Telegram账号任务超过%s，已重置协议号连接", accountTaskTimeout(task.TaskType))
+				cause = gerror.Newf("Telegram账号任务超过%s，已重置协议号连接", accountTaskTimeoutContext(ctx, task.TaskType))
 			}
 			if err := collectorservice.AccountTasks().Fail(cleanupCtx, &sysin.AccountTaskFailure{
 				TaskID: task.ID, Lease: lease, Cause: cause, RetryDelay: retryDelay(cause),
 			}); err != nil {
 				g.Log().Warningf(cleanupCtx, "Telegram账号任务中断状态写回失败 taskId:%d type:%s tgAccountId:%d cause:%v err:%+v", task.ID, task.TaskType, task.AccountID, ctx.Err(), err)
 			} else {
-				g.Log().Warningf(cleanupCtx, "Telegram账号任务调用中断，已重置连接并写回失败 taskId:%d type:%s tgAccountId:%d timeout:%s cause:%v", task.ID, task.TaskType, task.AccountID, accountTaskTimeout(task.TaskType), ctx.Err())
+				g.Log().Warningf(cleanupCtx, "Telegram账号任务调用中断，已重置连接并写回失败 taskId:%d type:%s tgAccountId:%d timeout:%s cause:%v", task.ID, task.TaskType, task.AccountID, accountTaskTimeoutContext(ctx, task.TaskType), ctx.Err())
 			}
 		}
 	}()
@@ -310,7 +315,7 @@ func finalizeAccountTaskFailure(ctx context.Context, task *sysin.AccountTask) {
 	if task == nil {
 		return
 	}
-	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), telegrambudget.Cleanup(ctx))
 	defer cancel()
 	g.Log().Warning(cleanupCtx, "Telegram账号任务开始终态失败回调", g.Map{
 		"taskId": task.ID, "taskType": task.TaskType, "taskKey": task.TaskKey,
@@ -372,7 +377,12 @@ func retryDelay(err error) time.Duration {
 	return 5 * time.Second
 }
 
+// accountTaskTimeout preserves the default-context helper for callers without a task context.
 func accountTaskTimeout(taskType string) time.Duration {
+	return accountTaskTimeoutContext(context.Background(), taskType)
+}
+
+func accountTaskTimeoutContext(ctx context.Context, taskType string) time.Duration {
 	switch taskType {
 	case sysin.AccountTaskTypeBotManager:
 		return 30 * time.Second
@@ -391,7 +401,7 @@ func accountTaskTimeout(taskType string) time.Duration {
 	case sysin.AccountTaskTypeMessageReconcile:
 		return 2 * time.Minute
 	case sysin.AccountTaskTypeMessageMediaFallback:
-		return sysin.AccountTaskMessageMediaFallbackTimeout
+		return telegrambudget.Account(ctx)
 	case sysin.AccountTaskTypeMessageDeleteFallback:
 		return 30 * time.Second
 	case sysin.AccountTaskTypeManagedBotUsernameCheck:

@@ -24,6 +24,45 @@ func TestClusterEnvironmentMapping(t *testing.T) {
 	t.Fatal("missing YOUBAN_CLUSTER_ENABLED mapping")
 }
 
+func TestTelegramBudgetEnvironmentOverrides(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("youbanPublish:\n  telegram:\n    sendBudget: 30m\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	adapter, err := gcfg.NewAdapterFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := g.Cfg().GetAdapter()
+	g.Cfg().SetAdapter(adapter)
+	t.Cleanup(func() { g.Cfg().SetAdapter(previous) })
+	for key, env := range map[string]string{
+		"sendBudget":            "SEND_BUDGET",
+		"displayTimeout":        "DISPLAY_TIMEOUT",
+		"verifyTimeout":         "VERIFY_TIMEOUT",
+		"botRequestTimeout":     "BOT_REQUEST_TIMEOUT",
+		"accountTimeout":        "ACCOUNT_TIMEOUT",
+		"accountGateTimeout":    "ACCOUNT_GATE_TIMEOUT",
+		"finalizeTimeout":       "FINALIZE_TIMEOUT",
+		"responseTimeout":       "RESPONSE_TIMEOUT",
+		"shutdownTimeout":       "SHUTDOWN_TIMEOUT",
+		"enqueueTimeout":        "ENQUEUE_TIMEOUT",
+		"previewTimeout":        "PREVIEW_TIMEOUT",
+		"posterTimeout":         "POSTER_TIMEOUT",
+		"sanitizeTimeout":       "SANITIZE_TIMEOUT",
+		"cleanupTimeout":        "CLEANUP_TIMEOUT",
+		"leaseOperationTimeout": "LEASE_OPERATION_TIMEOUT",
+		"webhookWait":           "WEBHOOK_WAIT",
+	} {
+		t.Setenv("YOUBAN_PUBLISH_TG_"+env, "20s")
+		Apply(context.Background())
+		got, err := adapter.Get(context.Background(), "youbanPublish.telegram."+key)
+		if err != nil || gconv.String(got) != "20s" {
+			t.Errorf("%s ENV override = %v, err=%v", key, got, err)
+		}
+	}
+}
+
 // TestStreamGrayConsumerEnvironmentOverride 验证灰度只开启消费者，不需要开启全量引擎开关。
 func TestStreamGrayConsumerEnvironmentOverride(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")

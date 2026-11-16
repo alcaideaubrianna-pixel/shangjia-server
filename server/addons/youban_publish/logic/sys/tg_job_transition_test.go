@@ -158,7 +158,7 @@ func TestTelegramMediaFallbackTransitionPreservesProgress(t *testing.T) {
 		purpose                 string
 		snapshot, current, want SendPhase
 	}{
-		{"display", SendPhaseCleanupConfirmed, SendPhaseDisplaySending, SendPhaseEmpty},
+		{"display", SendPhaseCleanupConfirmed, SendPhaseDisplaySending, SendPhaseCleanupConfirmed},
 		{"verify", SendPhaseDisplayConfirmed, SendPhaseVerifySending, SendPhaseDisplayConfirmed},
 	} {
 		in := telegramMediaFallbackTransition(telegramJobRecord{Id: 42, SendPhase: tc.snapshot}, tc.purpose)

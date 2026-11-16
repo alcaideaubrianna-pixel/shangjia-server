@@ -337,7 +337,7 @@ func TestTelegramMediaFallbackRecoveryReadsDeterministicAccountTask(t *testing.T
 	if !active {
 		t.Fatal("processing account fallback must prevent scheduler resubmission")
 	}
-	if fake.tenantID != 8 || fake.taskKey != "message-media-fallback:2348982:display" {
+	if fake.tenantID != 8 || fake.taskKey != telegramFallbackTaskKey(telegramJobRecord{Id: 2348982, TenantId: 8}, "display") {
 		t.Fatalf("unexpected account task lookup tenant=%d key=%q", fake.tenantID, fake.taskKey)
 	}
 

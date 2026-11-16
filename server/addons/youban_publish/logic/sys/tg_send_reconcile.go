@@ -114,8 +114,13 @@ func isTelegramAmbiguousDeliveryError(err error) bool {
 			return false
 		}
 	}
+	// Cancellation after entering the send path does not prove Telegram
+	// rejected the request. Shutdown and lease loss must reconcile before retry.
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
 	for _, part := range []string{
-		"context deadline exceeded", "client.timeout exceeded", "closed pipe", "broken pipe", "goaway",
+		"context canceled", "context deadline exceeded", "client.timeout exceeded", "closed pipe", "broken pipe", "goaway",
 		"cannot rewind body", "connection reset", "unexpected eof", "error decode response body for method",
 		"发送进程中断", "等待webhook或协议号对账",
 	} {
@@ -196,6 +201,9 @@ func (s *sSysPublish) updateTelegramJobSendPhaseFromStatuses(ctx context.Context
 }
 
 func (s *sSysPublish) markTelegramJobUnknown(ctx context.Context, job telegramJobRecord, cause error) error {
+	ctx = telegramPublishJobTraceContext(ctx, job)
+	ctx, cancel := telegramFinalizeContext(ctx, "job.mark_unknown")
+	defer cancel()
 	causeMessage := "未知原因"
 	if cause != nil {
 		causeMessage = cause.Error()
@@ -210,9 +218,11 @@ func (s *sSysPublish) markTelegramJobUnknown(ctx context.Context, job telegramJo
 		Additional:   g.Map{"reconcile_count": 0},
 	})
 	if err != nil {
+		logTelegramFinalize(ctx, "job.mark_unknown", "recovery_required", err)
 		return gerror.Wrap(err, "标记TG任务待对账失败")
 	}
 	if !transitioned {
+		logTelegramFinalize(ctx, "job.mark_unknown", "ownership_changed", nil)
 		return nil
 	}
 	// Keep the denormalized publish record in the same state as the job. When
@@ -224,6 +234,7 @@ func (s *sSysPublish) markTelegramJobUnknown(ctx context.Context, job telegramJo
 		g.Log().Warningf(ctx, "更新TG待对账发布记录失败 jobId:%d err:%+v", job.Id, projectionErr)
 	}
 	s.appendTelegramJobLog(ctx, job, "publish", "unknown", message)
+	logTelegramFinalize(ctx, "job.mark_unknown", "awaiting_reconciliation", nil)
 	return nil
 }
 

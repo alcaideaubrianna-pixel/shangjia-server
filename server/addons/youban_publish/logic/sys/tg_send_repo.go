@@ -19,7 +19,7 @@ import (
 func (s *sSysPublish) lockTelegramJob(ctx context.Context, jobId int64) (telegramJobRecord, bool, error) {
 	var job telegramJobRecord
 	now := gtime.Now()
-	transitioned, err := s.transitionTelegramJob(ctx, telegramJobTransition{
+	claim := telegramJobTransition{
 		JobId:        jobId,
 		From:         []JobStatus{telegramJobStatusPending, telegramJobStatusRetryWait},
 		To:           telegramJobStatusSending,
@@ -28,11 +28,22 @@ func (s *sSysPublish) lockTelegramJob(ctx context.Context, jobId int64) (telegra
 			"error_message": "",
 			"sent_at":       nil,
 		},
-	})
+	}
+	from, data, err := telegramJobTransitionUpdate(claim)
+	if err != nil {
+		return job, false, err
+	}
+	result, err := transitionTelegramJobModel(g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("id", jobId).WhereIn("status", from).
+		Where(telegramFallbackMarkerSQL(), telegramMediaFallbackMarker+"%"), claim, data)
 	if err != nil {
 		return job, false, gerror.Wrap(err, "锁定TG任务失败")
 	}
-	if !transitioned {
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return job, false, gerror.Wrap(err, "确认TG任务抢占结果失败")
+	}
+	if affected == 0 {
 		return job, false, nil
 	}
 	if err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).

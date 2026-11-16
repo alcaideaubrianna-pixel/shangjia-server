@@ -181,6 +181,8 @@ git diff --check
 
 Publish 线上日志使用以下项目：
 
+发送预算、协议号交接及新增链路事件见 [Telegram 发布预算与日志](telegram-publish-budget.md)。排查时同时核对 Publish 和 Account；交接已提交不代表协议号已发送，验证续发 Outbox 已提交也不代表验证 API 已成功。
+
 ```text
 Project: sae-2fb5d3db-0975-4dea-b086-805d255131fa
 Logstore: sae-1325481f8155ce1a0e0b76739397e96e

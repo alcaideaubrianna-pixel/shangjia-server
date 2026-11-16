@@ -13,6 +13,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	"hotgo/utility/dbtime"
+	"hotgo/utility/telegrambudget"
 )
 
 // telegramChannelBlockReason describes why a queue item cannot make progress.
@@ -132,13 +133,14 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 		return false, nil
 	}
 	// 领取租约与发送租约职责不同：前者防止丢失出队任务，后者保护 TG 发送。
-	execution, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	// The durable job deadline owns the send budget; claim renewal only cancels on lease loss.
+	execution, cancel := context.WithCancel(ctx)
 	stopRenew := keepTelegramChannelClaim(execution, cancel, claim)
 	ctx = execution
 	settled := false
 	terminal := false
 	requeue := func(_ context.Context, _ int64, _ int64, priority int, at time.Time) error {
-		settleCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+		settleCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), telegrambudget.LeaseOperation(ctx))
 		defer stop()
 		ok, settleErr := settleTelegramChannelClaim(settleCtx, claim, true, priority, at)
 		if settleErr != nil {
@@ -156,7 +158,7 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 		if settled {
 			return
 		}
-		settleCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+		settleCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), telegrambudget.LeaseOperation(ctx))
 		defer stop()
 		priority := tgJobPriorityDefault
 		if claim.Urgent {
@@ -410,7 +412,7 @@ func keepTelegramChannelClaim(ctx context.Context, cancel context.CancelFunc, cl
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				renewCtx, stop := context.WithTimeout(ctx, 3*time.Second)
+				renewCtx, stop := context.WithTimeout(ctx, telegrambudget.LeaseOperation(ctx))
 				ok, err := renewTelegramChannelClaim(renewCtx, claim)
 				stop()
 				if err != nil || !ok {

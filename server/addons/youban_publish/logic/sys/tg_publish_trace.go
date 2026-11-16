@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"hotgo/utility/dbtime"
+
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/gtrace"
 	"github.com/gogf/gf/v2/os/gctx"
@@ -142,7 +144,7 @@ func telegramPublishJobTraceContext(ctx context.Context, job telegramJobRecord) 
 	dispatchAgeMs := telegramPublishElapsedMs(job.CreatedAt, job.DispatchedAt)
 	queueAgeMs := telegramPublishTimestampAge(job.CreatedAt)
 	originalAgeMs := telegramPublishTimestampAge(job.OriginalTelegramAt)
-	return telegramPublishTraceContext(ctx, job.Id, g.Map{
+	fields := g.Map{
 		"tenantId": job.TenantId, "accountId": job.AccountId, "profileId": job.ProfileId,
 		"channelId": job.ChannelId, "botId": job.BotId, "targetChatId": job.TargetChatId,
 		"operationNo": job.OperationNo, "operationType": job.OperationType,
@@ -154,7 +156,13 @@ func telegramPublishJobTraceContext(ctx context.Context, job telegramJobRecord) 
 		"dispatchAgeMs": dispatchAgeMs, "originalTelegramAt": job.OriginalTelegramAt,
 		"originalTelegramAgeMs": originalAgeMs,
 		"operationCategory":     telegramPublishOperationCategory(job.OperationNo),
-	})
+	}
+	if job.SendDeadlineAt != nil {
+		deadline := dbtime.FromTimestamp(job.SendDeadlineAt).Time
+		fields["jobDeadline"] = deadline.UTC().Format(time.RFC3339Nano)
+		fields["jobRemainingMs"] = time.Until(deadline).Milliseconds()
+	}
+	return telegramPublishTraceContext(ctx, job.Id, fields)
 }
 
 func telegramPublishElapsedMs(start, end *gtime.Time) int64 {
@@ -222,6 +230,16 @@ func beginTelegramPublishStage(ctx context.Context, stage string, fields ...g.Ma
 		for key, value := range extra {
 			data[key] = value
 		}
+	}
+	switch stage {
+	case "display.api_send":
+		data["phase"] = "display"
+		data["purpose"] = "display"
+		data["deadlineSource"] = "display"
+	case "verify.api_send":
+		data["phase"] = "verify"
+		data["purpose"] = "verify"
+		data["deadlineSource"] = "verify"
 	}
 	executionID, _ := base["executionId"].(string)
 	step := &telegramPublishStage{ctx: ctx, fields: data, started: time.Now(), detailed: telegramPublishDetailedLogs(executionID)}
@@ -293,11 +311,16 @@ func (s *telegramPublishStage) log(event string, err error, fields []g.Map) {
 		data["status"] = "ok"
 	}
 	data["durationMs"] = time.Since(s.started).Milliseconds()
-	if deadline, ok := s.ctx.Deadline(); ok {
-		data["deadlineRemainingMs"] = time.Until(deadline).Milliseconds()
-	}
+	telegramPublishStageDeadlineFields(s.ctx, data)
 	if ctxErr := s.ctx.Err(); ctxErr != nil {
 		data["contextError"] = ctxErr.Error()
+	}
+	if cause := context.Cause(s.ctx); cause != nil {
+		data["cancelCause"] = telegramPublishLogError(cause)
+	}
+	if scope, ok := s.ctx.Value(telegramFinalizeKey{}).(telegramFinalizeScope); ok {
+		data["deadlineSource"] = scope.source
+		data["cancelCause"] = scope.cause
 	}
 	if err != nil {
 		data["errorType"] = fmt.Sprintf("%T", err)
@@ -307,6 +330,34 @@ func (s *telegramPublishStage) log(event string, err error, fields []g.Map) {
 		g.Log().Warning(s.ctx, "TG推送链路", data)
 	} else {
 		g.Log().Info(s.ctx, "TG推送链路", data)
+	}
+}
+
+// Compute at emission time: slow/end logs must not reuse start-time remaining
+// budgets. The actual context deadline already includes any shorter parent.
+func telegramPublishStageDeadlineFields(ctx context.Context, fields g.Map) {
+	effective, hasDeadline := ctx.Deadline()
+	if deadline, ok := effective, hasDeadline; ok {
+		remaining := time.Until(deadline).Milliseconds()
+		fields["effectiveDeadline"] = deadline.UTC().Format(time.RFC3339Nano)
+		fields["deadlineRemainingMs"] = remaining
+		fields["stageRemainingMs"] = remaining
+	}
+	if value, ok := fields["jobDeadline"].(string); ok {
+		if deadline, err := time.Parse(time.RFC3339Nano, value); err == nil {
+			fields["jobRemainingMs"] = time.Until(deadline).Milliseconds()
+			// A stage child cannot extend its job parent. Equal deadlines mean
+			// the job budget, rather than the requested stage budget, won.
+			if hasDeadline && !deadline.After(effective) {
+				fields["deadlineSource"] = "job"
+			}
+		}
+	}
+	if scope, ok := ctx.Value(telegramFinalizeKey{}).(telegramFinalizeScope); ok {
+		// Finalization deliberately detaches the send/job deadline.
+		fields["deadlineSource"] = scope.source
+	} else if hasDeadline && (fields["deadlineSource"] == nil || fields["deadlineSource"] == "") {
+		fields["deadlineSource"] = "parent"
 	}
 }
 

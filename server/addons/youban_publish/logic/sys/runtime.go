@@ -19,15 +19,21 @@ func (s *sSysPublish) StartRuntime(ctx context.Context) {
 		return
 	}
 	runtimeCtx, cancel := context.WithCancel(context.Background())
+	telegramFinalizeRegistries.Store(s, &telegramFinalizeRegistry{})
 	s.runtimeCancel = cancel
 	s.runtimeDone = make(chan struct{})
+	done := s.runtimeDone
 	go func() {
-		defer close(s.runtimeDone)
+		defer close(done)
 		s.runPublishRuntime(runtimeCtx)
 	}()
 }
 
 func (s *sSysPublish) StopRuntime() {
+	shutdownCtx, stopShutdown := context.WithTimeout(context.Background(), telegramFinalizeShutdownGrace())
+	defer stopShutdown()
+	registry := s.telegramFinalizeRegistry()
+	registry.closeAdmission()
 	s.runtimeMu.Lock()
 	cancel := s.runtimeCancel
 	done := s.runtimeDone
@@ -40,8 +46,13 @@ func (s *sSysPublish) StopRuntime() {
 	if done != nil {
 		select {
 		case <-done:
-		case <-time.After(3 * time.Second):
+		case <-shutdownCtx.Done():
 		}
+	}
+	if err := registry.drain(shutdownCtx); err != nil {
+		logTelegramFinalize(shutdownCtx, "runtime.shutdown", "grace_expired", errTelegramFinalizeShutdown)
+	} else {
+		logTelegramFinalize(shutdownCtx, "runtime.shutdown", "finalizers_drained", nil)
 	}
 	s.stopCollectGroupedEventTimers()
 	s.stopTelegramQueueWorker()

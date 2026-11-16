@@ -17,6 +17,7 @@ import (
 
 	publishconsts "hotgo/addons/youban_publish/consts"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/utility/telegrambudget"
 )
 
 const (
@@ -156,9 +157,9 @@ func backgroundWorkerQueues(collectorWorker, backgroundWorker bool) map[string]i
 	return queues
 }
 
-// A display send and a verification video can each consume the full media
-// request timeout. Keep the task deadline above their combined budget.
-const telegramPublishTaskTimeout = 30 * time.Minute
+// Default reference retained for legacy recovery constants. Enqueue uses
+// TaskTimeout(ctx), which adds finalization time to the configured job budget.
+const telegramPublishTaskTimeout = telegrambudget.DefaultJob + telegrambudget.DefaultFinalize
 
 func collectMediaBulkQueueName(shard int) string {
 	if shard < 0 {
@@ -395,6 +396,10 @@ func (s *sSysPublish) enqueueTelegramJobInternal(ctx context.Context, jobId int6
 		return err
 	}
 	ctx = telegramPublishJobTraceContext(ctx, job)
+	if telegramMediaFallbackJob(job.LastDispatchError) {
+		logTelegramFallbackHandoff(ctx, "waiting", job, telegramMediaFallbackPurpose(job.LastDispatchError), 0, "enqueue_owned_by_account", job.Status, job.Status)
+		return nil
+	}
 	if paused, pauseErr := s.postponePermissionPausedJob(ctx, job); pauseErr != nil || paused {
 		return pauseErr
 	}
@@ -483,6 +488,7 @@ func (s *sSysPublish) enqueueTelegramJobInternal(ctx context.Context, jobId int6
 	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id", jobId).
 		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
+		Where(telegramFallbackMarkerSQL(), telegramMediaFallbackMarker+"%").
 		Where("(dispatch_status = ? OR dispatch_status = '')", tgDispatchStatusIdle).
 		Data(data).Update()
 	if err != nil {
@@ -1205,7 +1211,7 @@ func (s *sSysPublish) enqueueTelegramTaskWithQueuePayload(ctx context.Context, t
 	options := []asynq.Option{
 		asynq.Queue(queueName),
 		asynq.MaxRetry(10),
-		asynq.Timeout(telegramPublishTaskTimeout),
+		asynq.Timeout(telegrambudget.TaskTimeout(ctx)),
 	}
 	// Stream 重复通知、Outbox 恢复和频道完成唤醒可能同时尝试入队。
 	// 使用资料任务的稳定 ID，保证同一 job 在 Asynq 中只有一个执行实体，
@@ -1232,7 +1238,7 @@ func (s *sSysPublish) enqueueTelegramTaskWithQueuePayload(ctx context.Context, t
 	// Queue submission must never hold an HTTP/API request indefinitely when
 	// Redis or an Asynq Lua script is slow. Telegram deletion itself remains in
 	// the existing worker; this timeout only bounds the enqueue operation.
-	enqueueCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	enqueueCtx, cancel := context.WithTimeout(ctx, telegrambudget.Enqueue(ctx))
 	defer cancel()
 	step := beginTelegramPublishStage(ctx, "queue.redis_enqueue", g.Map{"targetQueue": queueName})
 	info, err := client.EnqueueContext(enqueueCtx, task, options...)
@@ -1250,7 +1256,7 @@ func (s *sSysPublish) enqueueTelegramTaskWithQueuePayload(ctx context.Context, t
 		fallbackOptions := []asynq.Option{
 			asynq.Queue(queueName),
 			asynq.MaxRetry(10),
-			asynq.Timeout(telegramPublishTaskTimeout),
+			asynq.Timeout(telegrambudget.TaskTimeout(ctx)),
 			asynq.TaskID(fallbackTaskID),
 		}
 		if delay > 0 {
@@ -1279,7 +1285,7 @@ func (s *sSysPublish) enqueueTelegramTaskWithQueuePayload(ctx context.Context, t
 		fallbackOptions := []asynq.Option{
 			asynq.Queue(queueName),
 			asynq.MaxRetry(10),
-			asynq.Timeout(telegramPublishTaskTimeout),
+			asynq.Timeout(telegrambudget.TaskTimeout(ctx)),
 			asynq.TaskID(fallbackTaskID),
 		}
 		if unique {

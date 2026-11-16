@@ -18,12 +18,13 @@ import (
 	"go.opentelemetry.io/otel/metric"
 
 	"hotgo/addons/youban_tg_bot_gateway/service"
+	"hotgo/utility/telegrambudget"
 )
 
 var gatewayObserveMeter = otel.Meter("hotgo/addons/youban_tg_bot_gateway")
 
 const telegramMediaRequestTimeout = 10 * time.Minute
-const telegramMediaSendRequestTimeout = 5 * time.Minute
+const telegramMediaSendRequestTimeout = telegrambudget.DefaultBotRequest
 
 type botRuntime struct {
 	cancel        context.CancelFunc
@@ -75,8 +76,11 @@ func (s *sGateway) mediaClient(ctx context.Context, token string, sending bool) 
 	token = strings.TrimSpace(token)
 	key := tokenKey(token)
 	cacheKey := key
+	timeout := telegramMediaRequestTimeout
 	if sending {
-		cacheKey += ":send"
+		timeout = telegrambudget.BotRequest(ctx)
+		// A changed policy must not reuse a client with an older HTTP timeout.
+		cacheKey += ":send:" + timeout.String()
 	}
 	s.mu.Lock()
 	client := s.mediaClients[cacheKey]
@@ -104,10 +108,6 @@ func (s *sGateway) mediaClient(ctx context.Context, token string, sending bool) 
 	conf, err := runtimeConfig(ctx)
 	if err != nil {
 		return nil, err
-	}
-	timeout := telegramMediaRequestTimeout
-	if sending {
-		timeout = telegramMediaSendRequestTimeout
 	}
 	clientFactory := func(token, proxyURL, serverURL string, handler tgbot.HandlerFunc) (*tgbot.Bot, error) {
 		return newBotWithTimeout(token, proxyURL, serverURL, handler, timeout)
@@ -169,7 +169,7 @@ func (s *sGateway) StopRuntime() {
 	if done != nil {
 		select {
 		case <-done:
-		case <-time.After(3 * time.Second):
+		case <-time.After(telegrambudget.Shutdown(context.Background())):
 		}
 	}
 	s.stopUpdateQueue()
@@ -319,7 +319,11 @@ func (s *sGateway) sync(ctx context.Context) error {
 			delete(s.runtimes, key)
 			delete(s.clients, key)
 			delete(s.mediaClients, key)
-			delete(s.mediaClients, key+":send")
+			for cacheKey := range s.mediaClients {
+				if strings.HasPrefix(cacheKey, key+":send") {
+					delete(s.mediaClients, cacheKey)
+				}
+			}
 		}
 	}
 	s.mu.Unlock()
@@ -505,7 +509,11 @@ func (s *sGateway) ensure(ctx context.Context, key, token, mode string, conf *se
 	s.mu.Lock()
 	s.runtimes[key], s.clients[key] = runtime, client
 	delete(s.mediaClients, key)
-	delete(s.mediaClients, key+":send")
+	for cacheKey := range s.mediaClients {
+		if strings.HasPrefix(cacheKey, key+":send") {
+			delete(s.mediaClients, cacheKey)
+		}
+	}
 	s.mu.Unlock()
 	return nil
 }

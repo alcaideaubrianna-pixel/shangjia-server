@@ -21,6 +21,7 @@ import (
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/hgrds/lock"
+	"hotgo/utility/telegrambudget"
 )
 
 const (
@@ -297,10 +298,11 @@ func telegramAttemptPhaseMode(currentPhase, fromPhase, sendingPhase string, adva
 // Bot API response never enters reconciliation; retries only repair optional
 // projections such as cached file IDs.
 func (s *sSysPublish) confirmTelegramAPISuccess(ctx context.Context, job telegramJobRecord, attempt telegramDeliveryAttempt, messages []*telegramSentMessage) (resultErr error) {
-	projectTelegramReturnedMessages(ctx, job, messages, "telegram_api")
 	// A received response remains evidence even when the request's deadline
 	// expired concurrently. Persist it with a separate, bounded commit budget.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	ctx = telegramPublishJobTraceContext(ctx, job)
+	ctx = telegramFinalizeAttemptContext(ctx, attempt)
+	ctx, cancel := telegramFinalizeContext(ctx, "api_success.confirm")
 	defer cancel()
 	stage := beginTelegramPublishStage(ctx, "api_success.confirm", g.Map{"attemptId": attempt.Id, "purpose": attempt.Phase, "messageIds": telegramSentMessageIDs(messages)})
 	defer stage.Finish(&resultErr)
@@ -407,6 +409,9 @@ func (s *sSysPublish) confirmTelegramAPISuccess(ctx context.Context, job telegra
 	if err != nil {
 		return err
 	}
+	// Cache projection is optional: durable response evidence and the local
+	// confirmation transaction must finish before Redis can consume the budget.
+	projectTelegramReturnedMessages(ctx, job, messages, "telegram_api")
 	if len(duplicateMessages) > 0 {
 		if err := s.enqueueTelegramDuplicateMessages(ctx, job, duplicateMessages); err != nil {
 			return err
@@ -535,7 +540,7 @@ func (s *sSysPublish) startTelegramAttemptHeartbeat(attemptId int64) func() {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				updateCtx, updateCancel := context.WithTimeout(ctx, 10*time.Second)
+				updateCtx, updateCancel := context.WithTimeout(ctx, telegrambudget.LeaseOperation(ctx))
 				_, updateErr := g.DB().Model(publishTgAttemptTable).Safe().Ctx(updateCtx).
 					Where("id", attemptId).Where("status", telegramAttemptStatusSending).
 					Data(g.Map{"updated_at": gtime.Now()}).Update()
@@ -729,7 +734,11 @@ func (s *sSysPublish) restoreConfirmedTelegramResponse(ctx context.Context, job 
 }
 
 func (s *sSysPublish) waitTelegramDeliveryWebhook(ctx context.Context, attempt telegramDeliveryAttempt, cause error) error {
-	deadline := gtime.Now().Add(telegramAttemptWebhookWait)
+	ctx = telegramFinalizeAttemptContext(ctx, attempt)
+	ctx, cancel := telegramFinalizeContext(ctx, "attempt.await_webhook")
+	defer cancel()
+	webhookWait := telegrambudget.Webhook(ctx)
+	deadline := gtime.Now().Add(webhookWait)
 	confirmed := false
 	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		var current telegramDeliveryAttempt
@@ -785,7 +794,7 @@ func (s *sSysPublish) waitTelegramDeliveryWebhook(ctx context.Context, attempt t
 	}
 	attempt.Status = telegramAttemptStatusWaiting
 	s.projectTelegramDeliveryAttempt(ctx, attempt, cause.Error())
-	_, err = s.enqueueTelegramAttemptTimeout(ctx, attempt.Id, telegramAttemptWebhookWait)
+	_, err = s.enqueueTelegramAttemptTimeout(ctx, attempt.Id, webhookWait)
 	g.Log().Warningf(ctx, "TG发送响应不确定，等待Webhook确认 attemptId:%d jobId:%d phase:%s cause:%v", attempt.Id, attempt.JobId, attempt.Phase, cause)
 	return err
 }
@@ -826,10 +835,13 @@ func (s *sSysPublish) telegramJobHasWaitingAttempt(ctx context.Context, jobId in
 }
 
 func (s *sSysPublish) handleTelegramAttemptTimeout(ctx context.Context, attemptId int64) error {
+	ctx, cancel := telegramFinalizeContext(ctx, "attempt.timeout")
+	defer cancel()
 	attempt, err := s.telegramAttemptById(ctx, attemptId)
 	if err != nil || attempt.Id <= 0 || attempt.Status != telegramAttemptStatusWaiting {
 		return err
 	}
+	ctx = telegramFinalizeAttemptContext(ctx, attempt)
 	result, err := g.DB().Model(publishTgAttemptTable).Safe().Ctx(ctx).
 		Where("id", attempt.Id).Where("status", telegramAttemptStatusWaiting).
 		Where("webhook_deadline IS NOT NULL AND webhook_deadline <= NOW()").
@@ -852,7 +864,7 @@ func (s *sSysPublish) handleTelegramAttemptTimeout(ctx context.Context, attemptI
 	if attempt.Phase == "verify" || attempt.Phase == "package" {
 		phase = telegramSendPhaseDisplayConfirmed
 	}
-	message := fmt.Sprintf("Telegram发送结果未在%d秒内确认，已停止自动重试，请人工核对频道消息", int(telegramAttemptWebhookWait/time.Second))
+	message := fmt.Sprintf("Telegram发送结果未在%s内确认，已停止自动重试，请人工核对频道消息", telegrambudget.Webhook(ctx))
 	g.Log().Warningf(ctx, "TG发送结果不确定，禁止自动重发 attemptId:%d jobId:%d profileId:%d channelId:%d botId:%d chat:%s phase:%s attemptNo:%d", attempt.Id, job.Id, job.ProfileId, job.ChannelId, job.BotId, attempt.TargetChatId, attempt.Phase, attempt.AttemptNo)
 	transitioned, transitionErr := s.transitionTelegramJob(ctx, telegramJobTransition{
 		SendPhase: jobPhase(SendPhase(phase)),
@@ -915,6 +927,9 @@ func (s *sSysPublish) cleanupTelegramAttemptMessages(ctx context.Context, attemp
 }
 
 func (s *sSysPublish) abandonTelegramDeliveryAttempt(ctx context.Context, attempt telegramDeliveryAttempt, messages []*telegramSentMessage, cause error) {
+	ctx = telegramFinalizeAttemptContext(ctx, attempt)
+	ctx, cancel := telegramFinalizeContext(ctx, "attempt.abandon")
+	defer cancel()
 	_ = s.recordTelegramAttemptMessages(ctx, attempt, messages, "response")
 	message := ""
 	if cause != nil {
@@ -985,7 +1000,8 @@ func recordTelegramAttemptMessagesTx(ctx context.Context, tx gdb.TX, attempt tel
 // persistTelegramAttemptResponseDurably 先以独立短事务保存 Telegram 已返回的消息证据。
 // 后续确认投影即使因连接或事务生命周期异常失败，对账仍可恢复并继续验证阶段。
 func persistTelegramAttemptResponseDurably(ctx context.Context, attempt telegramDeliveryAttempt, messages []*telegramSentMessage) error {
-	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	ctx = telegramFinalizeAttemptContext(ctx, attempt)
+	persistCtx, cancel := telegramFinalizeContextWithTimeout(ctx, "response.persist", telegrambudget.Response(ctx))
 	defer cancel()
 	rows := make(g.List, 0, len(messages))
 	positions := make(map[int64]int, len(messages))
@@ -1018,8 +1034,10 @@ func persistTelegramAttemptResponseDurably(ctx context.Context, attempt telegram
 	_, err := g.DB().Model(publishTgAttemptMessageTable).Ctx(persistCtx).Data(rows).
 		OnConflict("attempt_id,message_id").OnDuplicate("source,message_payload").Save()
 	if err != nil {
+		logTelegramFinalize(persistCtx, "response.persist", "recovery_required", err)
 		return gerror.Wrap(err, "持久化TG响应消息失败")
 	}
+	logTelegramFinalize(persistCtx, "response.persist", "evidence_persisted", nil)
 	return nil
 }
 

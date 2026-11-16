@@ -13,6 +13,7 @@ import (
 	"github.com/hibiken/asynq"
 
 	"hotgo/utility/ownedlease"
+	"hotgo/utility/telegrambudget"
 )
 
 // telegramStreamChannelBlockingJobSQL 将未知发送保留为本频道屏障，其他频道继续执行，防止迟到发送打乱组内顺序。
@@ -59,8 +60,8 @@ func telegramStreamExecutionContext(ctx context.Context, lease telegramChannelLe
 	if !ok {
 		return ctx, func() {}
 	}
-	bounded, stopBudget := context.WithTimeout(ctx, telegramSendBudgetDuration(ctx))
-	execution, cancel := context.WithCancelCause(bounded)
+	// Do not restart the job budget on each execution. The sender applies its durable deadline.
+	execution, cancel := context.WithCancelCause(ctx)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -71,7 +72,7 @@ func telegramStreamExecutionContext(ctx context.Context, lease telegramChannelLe
 			case <-execution.Done():
 				return
 			case <-ticker.C:
-				renewCtx, stop := context.WithTimeout(execution, 3*time.Second)
+				renewCtx, stop := context.WithTimeout(execution, telegrambudget.LeaseOperation(execution))
 				owned, err := renewable.Renew(renewCtx)
 				stop()
 				if err != nil || !owned {
@@ -81,7 +82,7 @@ func telegramStreamExecutionContext(ctx context.Context, lease telegramChannelLe
 			}
 		}
 	}()
-	return execution, func() { cancel(context.Canceled); stopBudget(); <-done }
+	return execution, func() { cancel(context.Canceled); <-done }
 }
 
 // runTelegramStreamExecutionRecovery 定期补偿新引擎已失去执行者的确认阶段，单轮有界且按频道独立抢占。
@@ -139,6 +140,7 @@ func (s *sSysPublish) recoverMissingTelegramStreamTasks(ctx context.Context, aft
 	cutoff := gtime.Now().Add(-telegramStreamExecutionTTL)
 	query := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).Fields("j.*").
 		WhereGT("j.id", afterID).WhereIn("j.status", []string{telegramJobStatusPending, telegramJobStatusRetryWait}).
+		Where("COALESCE(j.last_dispatch_error,'') NOT LIKE ?", telegramMediaFallbackMarker+"%").
 		Where("(j.dispatch_status IN (?,?) OR (j.dispatch_status=? AND EXISTS (SELECT 1 FROM "+publishTgOutboxTable+" ready WHERE ready.job_id=j.id AND ready.event_type=? AND ready.status=?)))", tgDispatchStatusQueued, tgDispatchStatusProcessing, tgDispatchStatusIdle, telegramOutboxEventPublish, telegramOutboxDelivered).
 		WhereLTE("j.updated_at", cutoff).Where("j.next_retry_at IS NULL OR j.next_retry_at<=?", gtime.Now()).
 		OrderAsc("j.id").Limit(limit)
@@ -209,6 +211,7 @@ func (s *sSysPublish) recoverMissingTelegramStreamTasks(ctx context.Context, aft
 			}
 			result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).
 				Where("asynq_task_id", job.AsynqTaskId).WhereIn("status", []string{telegramJobStatusPending, telegramJobStatusRetryWait}).
+				Where(telegramFallbackMarkerSQL(), telegramMediaFallbackMarker+"%").
 				WhereIn("dispatch_status", []string{tgDispatchStatusIdle, tgDispatchStatusQueued, tgDispatchStatusProcessing}).WhereLTE("updated_at", cutoff).
 				Data(g.Map{"dispatch_status": tgDispatchStatusIdle, "asynq_task_id": "", "updated_at": gtime.Now(), "last_dispatch_error": "就绪通知或执行任务缺失，已按持久化意图恢复"}).Update()
 			if err != nil {

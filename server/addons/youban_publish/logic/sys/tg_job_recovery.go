@@ -60,6 +60,7 @@ func (s *sSysPublish) recoverInterruptedTelegramJobs(ctx context.Context, limit 
 	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Fields("id").
 		WhereIn("status", append(telegramJobRetryableStatuses(), telegramJobStatusConfirming)).
+		Where(telegramFallbackMarkerSQL(), telegramMediaFallbackMarker+"%").
 		WhereIn("dispatch_status", []string{tgDispatchStatusQueued, tgDispatchStatusProcessing}).
 		Where("updated_at <= ?", now.Add(-telegramDispatchJobRecoverAfter)).
 		Where(telegramActiveChannelCondition()).
@@ -90,6 +91,7 @@ func (s *sSysPublish) recoverInterruptedTelegramJobs(ctx context.Context, limit 
 			result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 				WhereIn("id", recoverableIDs).
 				WhereIn("status", append(telegramJobRetryableStatuses(), telegramJobStatusConfirming)).
+				Where(telegramFallbackMarkerSQL(), telegramMediaFallbackMarker+"%").
 				WhereIn("dispatch_status", []string{tgDispatchStatusQueued, tgDispatchStatusProcessing}).
 				Where("updated_at <= ?", now.Add(-telegramDispatchJobRecoverAfter)).
 				Data(g.Map{
@@ -554,6 +556,7 @@ func (s *sSysPublish) recoverExpiredTelegramOutboxDispatchesForAccount(ctx conte
 		Where("o.status", telegramOutboxProcessing).
 		WhereLTE("o.lease_expires_at", now).
 		WhereIn("j.status", telegramJobRecoverableStatuses()).
+		Where("COALESCE(j.last_dispatch_error,'') NOT LIKE ?", telegramMediaFallbackMarker+"%").
 		Where("j.dispatch_status", tgDispatchStatusQueued).
 		Where(telegramActiveChannelConditionForAlias("j")).
 		OrderAsc("o.lease_expires_at").OrderAsc("j.id").Limit(limit)
@@ -586,6 +589,7 @@ func (s *sSysPublish) recoverExpiredTelegramOutboxDispatchesForAccount(ctx conte
 			}
 			jobResult, updateErr := tx.Model(publishTgJobTable).Safe().Ctx(ctx).
 				Where("id", row.JobId).
+				Where(telegramFallbackMarkerSQL(), telegramMediaFallbackMarker+"%").
 				Where("dispatch_status", tgDispatchStatusQueued).
 				Data(g.Map{
 					"dispatch_status": tgDispatchStatusIdle,
@@ -626,8 +630,8 @@ func (s *sSysPublish) recoverStaleTelegramMediaFallbackJobs(ctx context.Context,
 	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		WhereIn("status", []string{telegramJobStatusSending, telegramJobStatusRetryWait}).
 		WhereLike("last_dispatch_error", telegramMediaFallbackMarker+"%").
-		WhereNotNull("next_retry_at").
-		WhereLTE("next_retry_at", gtime.Now()).
+		Where("(next_retry_at <= ? OR (next_retry_at IS NULL AND send_phase IN (?,?,?)))",
+			gtime.Now(), SendPhaseDisplayConfirmed, SendPhaseVerifyConfirmed, SendPhaseCompletedNoVerify).
 		OrderAsc("next_retry_at").OrderAsc("id").Limit(limit).Scan(&jobs)
 	if err != nil {
 		return gerror.Wrap(err, "读取超时协议号媒体降级任务失败")
@@ -635,6 +639,12 @@ func (s *sSysPublish) recoverStaleTelegramMediaFallbackJobs(ctx context.Context,
 	for _, job := range jobs {
 		purpose := telegramMediaFallbackPurpose(job.LastDispatchError)
 		if purpose != "display" && purpose != "verify" {
+			continue
+		}
+		if recovered, err := s.recoverTelegramFallbackConfirmation(ctx, job, purpose); recovered {
+			if err != nil && !errors.Is(err, errTelegramJobSuperseded) {
+				g.Log().Warningf(ctx, "恢复协议号已确认阶段失败 jobId:%d purpose:%s err:%s", job.Id, purpose, telegramPublishLogError(err))
+			}
 			continue
 		}
 		active, taskErr := telegramMediaFallbackTaskActive(ctx, job, purpose)
@@ -645,6 +655,13 @@ func (s *sSysPublish) recoverStaleTelegramMediaFallbackJobs(ctx context.Context,
 		if active {
 			continue
 		}
+		// Never revive a terminal AccountTask identity. Advance the persisted
+		// generation before creating its replacement so old callbacks are fenced.
+		if err := s.deferTelegramMediaFallbackRecovery(ctx, job); err != nil {
+			g.Log().Warningf(ctx, "推进协议号媒体降级恢复代次失败 jobId:%d", job.Id)
+			continue
+		}
+		job.ReconcileCount++
 		channel, channelErr := s.messagePushChannelFromJob(ctx, job)
 		if channelErr != nil {
 			g.Log().Warningf(ctx, "恢复协议号媒体降级任务缺少可用账号 jobId:%d purpose:%s err:%+v", job.Id, purpose, channelErr)
@@ -655,12 +672,12 @@ func (s *sSysPublish) recoverStaleTelegramMediaFallbackJobs(ctx context.Context,
 		}
 		if channel == nil || channel.TgAccountId <= 0 {
 			cause := gerror.Wrap(errTelegramMediaFallbackUnavailable, "频道未绑定可用协议号")
-			if failErr := s.failTelegramMediaFallbackJob(ctx, job, cause); failErr != nil {
+			if failErr := s.failOwnedTelegramFallbackJob(ctx, job, cause); failErr != nil {
 				g.Log().Warningf(ctx, "终止不可恢复的协议号媒体降级任务失败 jobId:%d purpose:%s err:%+v", job.Id, purpose, failErr)
 			}
 			continue
 		}
-		if submitErr := s.submitTelegramMediaFallback(ctx, job, channel.TgAccountId, purpose); submitErr != nil {
+		if submitErr := s.requestTelegramMediaFallback(ctx, job, channel.TgAccountId, purpose); submitErr != nil {
 			g.Log().Warningf(ctx, "重新提交协议号媒体降级任务失败 jobId:%d purpose:%s err:%+v", job.Id, purpose, submitErr)
 			if deferErr := s.deferTelegramMediaFallbackRecovery(ctx, job); deferErr != nil {
 				g.Log().Warningf(ctx, "延后协议号媒体降级恢复失败 jobId:%d purpose:%s err:%+v", job.Id, purpose, deferErr)
@@ -668,12 +685,13 @@ func (s *sSysPublish) recoverStaleTelegramMediaFallbackJobs(ctx context.Context,
 			continue
 		}
 		s.appendTelegramJobLog(ctx, job, "account_fallback", "requeued", "协议号媒体降级任务超时，已幂等重新提交")
+		logTelegramFallbackHandoff(ctx, "recovered", job, purpose, 0, "missing_or_terminal_account_task", job.Status, job.Status)
 	}
 	return nil
 }
 
 func telegramMediaFallbackTaskActive(ctx context.Context, job telegramJobRecord, purpose string) (bool, error) {
-	task, err := collectorservice.AccountTasks().GetByKey(ctx, job.TenantId, fmt.Sprintf("message-media-fallback:%d:%s", job.Id, purpose))
+	task, err := collectorservice.AccountTasks().GetByKey(ctx, job.TenantId, telegramFallbackTaskKey(job, purpose))
 	if err != nil || task == nil {
 		return false, err
 	}
@@ -706,10 +724,11 @@ func telegramMediaFallbackRecoveryDelay(attempt int) time.Duration {
 
 func (s *sSysPublish) deferTelegramMediaFallbackRecovery(ctx context.Context, job telegramJobRecord) error {
 	attempt := job.ReconcileCount + 1
-	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id", job.Id).
+		Where("operation_no", job.OperationNo).Where("reconcile_count", job.ReconcileCount).
 		WhereIn("status", []string{telegramJobStatusSending, telegramJobStatusRetryWait}).
-		WhereLike("last_dispatch_error", telegramMediaFallbackMarker+"%").
+		Where("last_dispatch_error", job.LastDispatchError).
 		Data(g.Map{
 			"reconcile_count": attempt,
 			"next_retry_at":   gtime.Now().Add(telegramMediaFallbackRecoveryDelay(attempt)),
@@ -717,6 +736,13 @@ func (s *sSysPublish) deferTelegramMediaFallbackRecovery(ctx context.Context, jo
 		}).Update()
 	if err != nil {
 		return gerror.Wrap(err, "更新协议号媒体降级恢复时间失败")
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return gerror.Wrap(err, "确认协议号媒体降级恢复代次失败")
+	}
+	if affected == 0 {
+		return errTelegramJobSuperseded
 	}
 	return nil
 }
@@ -903,6 +929,7 @@ func (s *sSysPublish) recoverStaleTelegramDispatchJobs(ctx context.Context, limi
 	var jobs []telegramJobRecord
 	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		WhereIn("status", append(telegramJobRetryableStatuses(), telegramJobStatusConfirming)).
+		Where(telegramFallbackMarkerSQL(), telegramMediaFallbackMarker+"%").
 		WhereIn("dispatch_status", []string{tgDispatchStatusQueued, tgDispatchStatusProcessing}).
 		Where(telegramActiveChannelCondition()).
 		Where(messagePushPlanRecoveryConditionSQL(publishTgJobTable), telegramRecoveryTimeText(now.Add(-messagePushPlanJobExpireAfter))).
@@ -950,6 +977,7 @@ func (s *sSysPublish) recoverStaleTelegramDispatchJobs(ctx context.Context, limi
 	result, updateErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		WhereIn("id", jobIDs).
 		WhereIn("status", append(telegramJobRetryableStatuses(), telegramJobStatusConfirming)).
+		Where(telegramFallbackMarkerSQL(), telegramMediaFallbackMarker+"%").
 		WhereIn("dispatch_status", []string{tgDispatchStatusQueued, tgDispatchStatusProcessing}).
 		// Recheck the same cutoff after inspection: a worker may have installed
 		// a future interval/retry deadline since the candidate query.
@@ -1216,6 +1244,7 @@ func (s *sSysPublish) recoverStaleTelegramSendingJobs(ctx context.Context, limit
 	var jobs []telegramJobRecord
 	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("status", "sending").
+		Where(telegramFallbackMarkerSQL(), telegramMediaFallbackMarker+"%").
 		Where(telegramActiveChannelCondition()).
 		Where(telegramPendingRecoveryChannelHeadSQL(publishTgJobTable, "earlier")).
 		Where(messagePushPlanRecoveryConditionSQL(publishTgJobTable), telegramRecoveryTimeText(now.Add(-messagePushPlanJobExpireAfter))).
@@ -1303,6 +1332,11 @@ func telegramActiveChannelConditionForAlias(jobTable string) string {
 }
 
 func (s *sSysPublish) requeueStaleTelegramSendingJob(ctx context.Context, job telegramJobRecord) error {
+	if telegramMediaFallbackJob(job.LastDispatchError) {
+		// AccountTask recovery owns this marker/generation. Generic Bot
+		// recovery must not reset it or reopen another transport.
+		return nil
+	}
 	if restored, err := s.restoreTelegramResponseBeforeRecovery(ctx, job); err != nil {
 		return err
 	} else if restored {

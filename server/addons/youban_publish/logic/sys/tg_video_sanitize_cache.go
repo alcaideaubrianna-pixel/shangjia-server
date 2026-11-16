@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"hotgo/utility/telegrambudget"
 	"io"
 	"os"
 	"os/exec"
@@ -63,7 +64,7 @@ func cachedTelegramVideoNormalize(ctx context.Context, ffmpegPath string, path s
 		tempPath := temp.Name()
 		_ = temp.Close()
 		_ = os.Remove(tempPath)
-		cmdCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+		cmdCtx, cancel := context.WithTimeout(ctx, telegrambudget.Sanitize(ctx))
 		defer cancel()
 		output, runErr := exec.CommandContext(cmdCtx, ffmpegPath,
 			"-hide_banner", "-loglevel", "error", "-y", "-i", path,
@@ -121,7 +122,7 @@ func cachedTelegramVideoSanitize(ctx context.Context, ffmpegPath string, path st
 		tempPath := temp.Name()
 		_ = temp.Close()
 		_ = os.Remove(tempPath)
-		cmdCtx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		cmdCtx, cancel := context.WithTimeout(ctx, telegrambudget.Sanitize(ctx))
 		defer cancel()
 		output, runErr := exec.CommandContext(cmdCtx, ffmpegPath, "-y", "-i", path, "-map_metadata", "-1", "-c", "copy", tempPath).CombinedOutput()
 		if runErr != nil {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	relayconsts "hotgo/addons/youban_publish/consts"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -15,12 +14,13 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/utility/dbtime"
+	"hotgo/utility/telegrambudget"
 )
 
 const (
 	// A stuck Telegram call must release the channel promptly; recovery then
 	// lets the next queued job proceed while the timed-out job is reconciled.
-	telegramSendBudgetDefault         = 30 * time.Minute
+	telegramSendBudgetDefault         = telegrambudget.DefaultJob
 	telegramSendRateLimitProtection   = 30 * time.Second
 	telegramSendMaxRateLimitBudget    = telegramRetryMaxDelay + telegramSendRateLimitProtection
 	telegramSendMaxRetries            = 3
@@ -30,15 +30,7 @@ const (
 const telegramSendBudgetConfigKey = "youbanPublish.telegram.sendBudget"
 
 func telegramSendBudgetDuration(ctx context.Context) time.Duration {
-	value := strings.TrimSpace(g.Cfg().MustGet(ctx, telegramSendBudgetConfigKey, telegramSendBudgetDefault.String()).String())
-	if value == "" {
-		return telegramSendBudgetDefault
-	}
-	duration, err := time.ParseDuration(value)
-	if err != nil || duration < 2*time.Minute || duration > 30*time.Minute {
-		return telegramSendBudgetDefault
-	}
-	return duration
+	return telegrambudget.Job(ctx)
 }
 
 func telegramSendTimeoutText(ctx context.Context) string {
@@ -67,6 +59,12 @@ func (s *sSysPublish) telegramSendBudgetContext(ctx context.Context, job telegra
 		return nil, nil, gerror.New(telegramSendTimeoutText(ctx))
 	}
 	bounded, cancel := context.WithDeadline(ctx, deadline.Time)
+	// Log the durable job deadline, even when a shorter parent deadline governs execution.
+	bounded = telegramPublishTraceContext(bounded, current.Id, g.Map{
+		"jobDeadline":    deadline.Time.UTC().Format(time.RFC3339Nano),
+		"jobBudgetMs":    telegrambudget.Job(ctx).Milliseconds(),
+		"deadlineSource": "job",
+	})
 	return bounded, cancel, nil
 }
 
@@ -284,7 +282,7 @@ func (s *sSysPublish) cleanupTelegramSendTimeouts(ctx context.Context) {
 }
 
 func (s *sSysPublish) cleanupTelegramSendTimeout(ctx context.Context, job telegramJobRecord) {
-	cleanupCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	cleanupCtx, cancel := context.WithTimeout(ctx, telegrambudget.Cleanup(ctx))
 	// Do not spend all cleanup workers waiting for a busy in-process channel lock.
 	lock := s.telegramChannelLock(job.TargetChatId)
 	var err error

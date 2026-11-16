@@ -371,16 +371,12 @@ func (h *publishCollectorAccountTaskHandler) HandleAccountTaskFailure(ctx contex
 	if err != nil {
 		return err
 	}
-	if accountFallbackFailureIsObsolete(purpose, job.SendPhase.String()) {
-		g.Log().Warning(ctx, "忽略已完成阶段的协议号任务终态失败", g.Map{
-			"taskId": task.ID, "taskType": task.TaskType, "taskKey": task.TaskKey,
-			"jobId": job.Id, "purpose": purpose, "sendPhase": job.SendPhase, "cause": cause,
-		})
-		h.publish.appendTelegramJobLog(ctx, job, "account_fallback", "superseded",
-			fmt.Sprintf("旧%s任务终态失败已忽略，当前阶段:%s error:%v", purpose, job.SendPhase, cause))
-		return h.publish.EnqueueTelegramJob(ctx, job.Id, 0, false)
+	err = h.publish.failTelegramFallbackTask(ctx, task, job, purpose, cause)
+	if errors.Is(err, errTelegramJobSuperseded) {
+		logTelegramFallbackHandoff(ctx, "rejected", job, purpose, task.ID, "obsolete_failure_callback", job.Status, job.Status)
+		return nil
 	}
-	return h.publish.failTelegramMediaFallbackJob(ctx, job, cause)
+	return err
 }
 
 func accountFallbackFailureIsObsolete(purpose, sendPhase string) bool {
@@ -648,43 +644,40 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 	})
 	ctx = telegramPublishJobTraceContext(ctx, job)
 	stage("读取任务与Job", "purpose", purpose, "jobStatus", job.Status)
-	if job.Status == telegramJobStatusSuperseded {
+	if !telegramFallbackTaskIdentity(job, purpose, task) || !telegramFallbackOwnsPhase(job, purpose) {
+		logTelegramFallbackHandoff(ctx, "rejected", job, purpose, task.ID, "obsolete_task_identity", job.Status, job.Status)
 		return nil
 	}
-	if job.Status != "sending" {
-		messageCount, countErr := s.telegramJobSentMessageCount(ctx, job.Id, purpose)
-		if countErr != nil {
-			return countErr
-		}
-		if mediaFallbackTaskCanSkip(job.Status.String(), messageCount) {
-			g.Log().Infof(ctx, "协议号媒体降级任务幂等完成 taskId:%d jobId:%d tgAccountId:%d purpose:%s messageCount:%d", task.ID, job.Id, task.AccountID, purpose, messageCount)
-			return nil
-		}
-		// Reconciliation may conservatively move a Bot-failed job to unknown
-		// before the account fallback starts. With no messages for this phase,
-		// it is safe to claim the job for the fallback instead of abandoning it.
-		if job.Status == "unknown" && messageCount == 0 {
-			transitioned, updateErr := s.transitionTelegramJob(ctx, telegramJobTransition{
-				JobId: job.Id,
-				From:  []JobStatus{telegramJobStatusConfirming},
-				To:    telegramJobStatusSending,
-			})
-			if updateErr != nil {
-				return gerror.Wrap(updateErr, "恢复协议号媒体降级任务状态失败")
-			}
-			if !transitioned {
-				return gerror.New("协议号媒体降级任务正在被其他发送流程处理")
-			}
-			job.Status = "sending"
-			g.Log().Infof(ctx, "协议号媒体降级任务从未知状态恢复发送 taskId:%d jobId:%d purpose:%s", task.ID, job.Id, purpose)
-		}
-		if job.Status != "sending" {
-			stateErr := gerror.Newf("协议号媒体降级任务状态异常，拒绝静默完成：jobId=%d status=%s sendPhase=%s purpose=%s messageCount=%d", job.Id, job.Status, job.SendPhase, purpose, messageCount)
-			g.Log().Warningf(ctx, "协议号媒体降级任务拒绝静默完成 taskId:%d tgAccountId:%d err:%+v", task.ID, task.AccountID, stateErr)
-			s.appendTelegramJobLog(ctx, job, "account_fallback", "failed", stateErr.Error())
-			return stateErr
-		}
+	// The Account runtime gate serializes an account, not a target channel.
+	// Use exactly the same channel lease key as Bot publishing before claiming.
+	lease, acquired, leaseErr := s.tryTelegramPublishChannelLease(ctx, job)
+	if leaseErr != nil {
+		return leaseErr
 	}
+	if !acquired {
+		logTelegramFallbackHandoff(ctx, "rejected", job, purpose, task.ID, "channel_lease_busy", job.Status, job.Status)
+		return telegramFallbackLaneBusyError{}
+	}
+	defer s.releaseTelegramChannelLease(ctx, lease)
+	ctx, stopExecution := telegramStreamExecutionContext(ctx, lease)
+	defer stopExecution()
+	earlier, orderErr := s.telegramChannelHasEarlierActiveJob(ctx, job)
+	if orderErr != nil {
+		return orderErr
+	}
+	if earlier {
+		return telegramFallbackLaneBusyError{}
+	}
+	job, err = s.claimTelegramFallbackTask(ctx, task, job, purpose)
+	if errors.Is(err, errTelegramJobSuperseded) {
+		// A legacy key or an obsolete operation cannot authorize new delivery.
+		// Recovery creates an operation-bound task for an outstanding marker.
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	ctx = context.WithValue(ctx, telegramFallbackTaskContextKey{}, task)
 	bounded, cancelBudget, budgetErr := s.telegramSendBudgetContext(ctx, job)
 	if budgetErr != nil {
 		return budgetErr
@@ -734,6 +727,18 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 	}
 	stage("媒体内容保护与缩略图准备", "mediaCount", len(media), "verifyMediaCount", len(verifyMedia))
 	var messages []*telegramSentMessage
+	if !accountFallbackPhaseConfirmed(job.SendPhase.String(), purpose) {
+		restored, restoreErr := s.restoreConfirmedTelegramResponse(ctx, job, purpose, media)
+		if restoreErr != nil {
+			return restoreErr
+		}
+		if restored {
+			job, err = s.telegramJobById(ctx, job.Id)
+			if err != nil {
+				return err
+			}
+		}
+	}
 	phaseConfirmed := accountFallbackPhaseConfirmed(job.SendPhase.String(), purpose)
 	if !phaseConfirmed {
 		messages, err = s.sendAccountFallbackPhase(ctx, client, channel, job, task.AccountID, purpose, caption, media)
@@ -747,14 +752,20 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 	if purpose == "display" {
 		if len(verifyMedia) == 0 {
 			g.Log().Infof(ctx, "协议号媒体降级任务发送成功 taskId:%d jobId:%d tgAccountId:%d displayMessages:%d verifyMessages:0", task.ID, job.Id, task.AccountID, len(messages))
-			return s.finalizeTelegramMediaDelivery(ctx, job, false, true)
+			if err := s.checkTelegramFallbackExecution(ctx, job, purpose); err != nil {
+				return err
+			}
+			return s.completeConfirmedTelegramFallbackTask(ctx, task, job, purpose, false)
 		}
 		g.Log().Infof(ctx, "协议号展示媒体降级完成，验证媒体交回正常队列 taskId:%d jobId:%d tgAccountId:%d displayMessages:%d verifyMedia:%d", task.ID, job.Id, task.AccountID, len(messages), len(verifyMedia))
 		s.appendTelegramJobLog(ctx, job, "account_fallback", "display_confirmed", "协议号展示媒体已确认，验证媒体交回正常发送队列")
-		return s.EnqueueTelegramJob(ctx, job.Id, 0, false)
+		return s.resumeTelegramVerificationAfterFallback(ctx, job, task)
 	}
 	g.Log().Infof(ctx, "协议号验证媒体降级任务发送成功 taskId:%d jobId:%d tgAccountId:%d verifyMessages:%d", task.ID, job.Id, task.AccountID, len(messages))
-	return s.finalizeTelegramMediaDelivery(ctx, job, true, true)
+	if err := s.checkTelegramFallbackExecution(ctx, job, purpose); err != nil {
+		return err
+	}
+	return s.completeConfirmedTelegramFallbackTask(ctx, task, job, purpose, true)
 }
 
 func accountFallbackPhaseConfirmed(sendPhase, purpose string) bool {
@@ -763,20 +774,50 @@ func accountFallbackPhaseConfirmed(sendPhase, purpose string) bool {
 }
 
 func (s *sSysPublish) sendAccountFallbackPhase(ctx context.Context, client *telegram.Client, channel *messagePushChannel, job telegramJobRecord, accountID int64, purpose, caption string, media []*telegramMediaItem) ([]*telegramSentMessage, error) {
+	if err := s.checkTelegramFallbackExecution(ctx, job, purpose); err != nil {
+		return nil, err
+	}
 	attempt, messages, err := s.prepareAccountFallbackAttempt(ctx, client, channel, job, purpose, len(media))
 	if err != nil {
 		return nil, err
 	}
+	stopAttemptHeartbeat := s.startTelegramAttemptHeartbeat(attempt.Id)
+	defer stopAttemptHeartbeat()
 	if len(messages) == 0 {
+		if err := s.checkTelegramFallbackExecution(ctx, job, purpose); err != nil {
+			return nil, err
+		}
 		peer, peerErr := messagePushInputPeer(channel)
 		if peerErr != nil {
 			return nil, peerErr
 		}
 		caption = telegramCaptionWithJobMarker(caption, job.Id, purpose) + telegramAttemptMarker(attempt.AttemptToken)
+		sendStartedAt := time.Now()
+		logTelegramProtocolSend(ctx, job, attempt, purpose, len(media), nil, "start", 0, nil)
 		messages, err = s.sendMessageTemplateWithTgClient(ctx, client, peer, caption, media, nil, accountID, "")
+		logTelegramProtocolSend(ctx, job, attempt, purpose, len(media), messages, "result", time.Since(sendStartedAt), err)
 		if err != nil {
+			if !telegramFallbackBotFailureKnown(err) {
+				waitCtx, cancel := telegramFinalizeContext(ctx, "account_fallback.await_facts")
+				defer cancel()
+				if persistErr := s.recordTelegramAttemptMessages(waitCtx, attempt, messages, "response"); persistErr != nil {
+					return nil, persistErr
+				}
+				if waitErr := s.waitTelegramDeliveryWebhook(waitCtx, attempt, err); waitErr != nil {
+					return nil, waitErr
+				}
+				return nil, errTelegramAwaitingWebhook
+			}
 			if cleanupErr := s.cleanupPartialAccountMediaSend(ctx, client, job, channel, purpose, messages, err); cleanupErr != nil {
 				return nil, cleanupErr
+			}
+			if len(messages) > 0 {
+				// Cleanup evidence must be reconciled before another token
+				// can represent the partially delivered album.
+				return nil, errTelegramAttemptNeedsReconcile
+			}
+			if persistErr := s.recordTelegramFallbackAccountRejection(ctx, job, attempt.Id, purpose, err); persistErr != nil {
+				return nil, persistErr
 			}
 			return nil, gerror.Wrap(err, "协议号媒体降级发送失败")
 		}
@@ -784,6 +825,16 @@ func (s *sSysPublish) sendAccountFallbackPhase(ctx context.Context, client *tele
 	bindAccountFallbackMessagesToMedia(messages, media)
 	if err = validateTelegramMediaSendResult(purpose, media, messages); err != nil {
 		s.appendTelegramJobLog(ctx, job, "account", "incomplete", err.Error())
+		return nil, err
+	}
+	// Preserve the API response even if ownership expired while sending. A
+	// stale owner may record facts but must not advance the current operation.
+	responseCtx, cancelResponse := telegramFinalizeContext(ctx, "account_fallback.response")
+	defer cancelResponse()
+	if err = persistTelegramAttemptResponseDurably(responseCtx, attempt, messages); err != nil {
+		return nil, err
+	}
+	if err = s.checkTelegramFallbackExecution(responseCtx, job, purpose); err != nil {
 		return nil, err
 	}
 	if err = s.confirmTelegramAPISuccess(ctx, job, attempt, messages); err != nil {
@@ -798,7 +849,7 @@ func (s *sSysPublish) sendAccountFallbackPhase(ctx context.Context, client *tele
 }
 
 func (s *sSysPublish) prepareAccountFallbackAttempt(ctx context.Context, client *telegram.Client, channel *messagePushChannel, job telegramJobRecord, purpose string, expectedCount int) (telegramDeliveryAttempt, []*telegramSentMessage, error) {
-	attempt, err := s.accountFallbackDeliveryAttempt(ctx, job, purpose, expectedCount)
+	attempt, err := s.activeTelegramDeliveryAttempt(ctx, job.Id, purpose)
 	if err != nil {
 		return attempt, nil, err
 	}
@@ -808,13 +859,27 @@ func (s *sSysPublish) prepareAccountFallbackAttempt(ctx context.Context, client 
 		return attempt, nil, err
 	}
 	if pendingCleanup > 0 {
+		task, _ := ctx.Value(telegramFallbackTaskContextKey{}).(*collectorin.AccountTask)
+		if task == nil {
+			return attempt, nil, errTelegramJobSuperseded
+		}
+		checkpoint, err := g.DB().Model(publishTgDeliveryStepTable).Ctx(ctx).
+			Where("job_id", job.Id).Where("step_key", telegramFallbackTransportStep(purpose)).
+			Where("attempt_id", attempt.Id).Where("error_message", task.TaskKey).One()
+		if err != nil {
+			return attempt, nil, err
+		}
+		if checkpoint.IsEmpty() {
+			return attempt, nil, errTelegramAttemptNeedsReconcile
+		}
 		return s.resumePartialAccountAlbum(ctx, client, channel, job, attempt, expectedCount)
 	}
 	// Protocol-account fallback is a send path only. Do not pull channel history
 	// to deduplicate or reconcile an ambiguous Bot result; Webhook/Redis is the
 	// only remote fact source. Existing local messages are handled by the
 	// partial-cleanup checkpoint above.
-	return attempt, nil, nil
+	attempt, err = s.accountFallbackDeliveryAttempt(ctx, job, purpose, expectedCount)
+	return attempt, nil, err
 }
 
 const telegramPartialCleanupCheckpoint = "partial_album_cleanup:"
@@ -840,18 +905,15 @@ func (s *sSysPublish) resumePartialAccountAlbum(ctx context.Context, client *tel
 }
 
 func (s *sSysPublish) accountFallbackDeliveryAttempt(ctx context.Context, job telegramJobRecord, purpose string, expectedCount int) (telegramDeliveryAttempt, error) {
-	attempt, err := s.activeTelegramDeliveryAttempt(ctx, job.Id, purpose)
+	var attempt telegramDeliveryAttempt
+	if err := s.prepareTelegramFallbackTransport(ctx, job, purpose); err != nil {
+		return attempt, err
+	}
+	attempt, err := s.prepareTelegramDeliveryAttempt(ctx, job, purpose, expectedCount, true)
 	if err != nil {
 		return attempt, err
 	}
-	if attempt.Id <= 0 {
-		// A whole-display account fallback has no pre-created Bot verification
-		// Attempt. Advance the persisted phase and create its first Attempt in
-		// one transaction, exactly like the normal Bot delivery path. Do not use
-		// the stale job snapshot: display may have just been confirmed above.
-		attempt, err = s.prepareTelegramDeliveryAttempt(ctx, job, purpose, expectedCount, true)
-	}
-	return attempt, err
+	return attempt, s.markTelegramFallbackTransport(ctx, job, purpose, attempt.Id)
 }
 
 func bindAccountFallbackMessagesToMedia(messages []*telegramSentMessage, media []*telegramMediaItem) {
@@ -866,7 +928,7 @@ func bindAccountFallbackMessagesToMedia(messages []*telegramSentMessage, media [
 func parseMessageMediaFallbackTaskKey(taskKey string) (int64, string, error) {
 	const prefix = "message-media-fallback:"
 	parts := strings.Split(strings.TrimPrefix(taskKey, prefix), ":")
-	if !strings.HasPrefix(taskKey, prefix) || len(parts) != 2 {
+	if !strings.HasPrefix(taskKey, prefix) || (len(parts) != 2 && len(parts) != 4) {
 		return 0, "", gerror.New("媒体降级发送账号任务参数无效")
 	}
 	jobID, err := strconv.ParseInt(parts[0], 10, 64)

@@ -9,6 +9,7 @@ import (
 
 	_ "github.com/gogf/gf/contrib/drivers/pgsql/v2"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gcfg"
 
 	"hotgo/addons/telegram_collector/internal/dao"
 	"hotgo/addons/telegram_collector/model/input/sysin"
@@ -36,11 +37,18 @@ func TestAccountTaskCompletedRevivalIsLimitedToIdempotentChecks(t *testing.T) {
 }
 
 func TestAccountTaskClaimLeaseTTLBoundsMessageTasks(t *testing.T) {
+	adapter, err := gcfg.NewAdapterContent(`{"youbanPublish":{"telegram":{}}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := g.Cfg().GetAdapter()
+	g.Cfg().SetAdapter(adapter)
+	t.Cleanup(func() { g.Cfg().SetAdapter(previous) })
 	fallback := 30 * time.Minute
 	tests := map[string]time.Duration{
 		sysin.AccountTaskTypeMessagePushInline:         2*time.Minute + 30*time.Second,
 		sysin.AccountTaskTypeMessageReconcile:          2*time.Minute + 30*time.Second,
-		sysin.AccountTaskTypeMessageMediaFallback:      5*time.Minute + 30*time.Second,
+		sysin.AccountTaskTypeMessageMediaFallback:      10*time.Minute + 43*time.Second,
 		sysin.AccountTaskTypeMessageDeleteFallback:     time.Minute,
 		sysin.AccountTaskTypeMaterialImportHistoryPage: fallback,
 	}
@@ -49,8 +57,31 @@ func TestAccountTaskClaimLeaseTTLBoundsMessageTasks(t *testing.T) {
 			t.Fatalf("task %s lease TTL = %s, want %s", taskType, got, want)
 		}
 	}
-	if got := accountTaskClaimLeaseTTL(sysin.AccountTaskTypeMessageMediaFallback, time.Minute); got != time.Minute {
-		t.Fatalf("short caller lease TTL was extended to %s", got)
+	if got := accountTaskClaimLeaseTTL(sysin.AccountTaskTypeMessageMediaFallback, time.Minute); got != 10*time.Minute+43*time.Second {
+		t.Fatalf("short caller TTL must not truncate media fallback execution: %s", got)
+	}
+	if got := accountTaskClaimLeaseTTL(sysin.AccountTaskTypeMessagePushInline, time.Minute); got != time.Minute {
+		t.Fatalf("inline short caller TTL changed unexpectedly: %s", got)
+	}
+}
+
+func TestAccountMediaFallbackClaimLeaseUsesConfiguredExecutionBudget(t *testing.T) {
+	adapter, err := gcfg.NewAdapterContent(`{"youbanPublish":{"telegram":{"accountTimeout":"12m","accountGateTimeout":"40s","finalizeTimeout":"20s","leaseOperationTimeout":"4s"}}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := g.Cfg().GetAdapter()
+	g.Cfg().SetAdapter(adapter)
+	t.Cleanup(func() { g.Cfg().SetAdapter(previous) })
+	ctx := context.Background()
+	if got := accountTaskClaimLeaseTTLContext(ctx, sysin.AccountTaskTypeMessageMediaFallback, 30*time.Minute); got != 13*time.Minute+4*time.Second {
+		t.Fatalf("configured media fallback claim TTL = %s, want execution+gate+finalize+lease slack (13m4s)", got)
+	}
+	if got := accountTaskClaimLeaseTTLContext(ctx, sysin.AccountTaskTypeMessageMediaFallback, time.Minute); got != 13*time.Minute+4*time.Second {
+		t.Fatalf("explicit shorter TTL truncated media fallback safety budget: %s", got)
+	}
+	if got := accountTaskClaimLeaseTTLContext(ctx, sysin.AccountTaskTypeMessagePushInline, 30*time.Minute); got != 2*time.Minute+30*time.Second {
+		t.Fatalf("inline claim TTL changed unexpectedly: %s", got)
 	}
 }
 

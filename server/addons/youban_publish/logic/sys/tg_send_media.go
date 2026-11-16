@@ -21,6 +21,7 @@ import (
 	"hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/internal/model/do"
 	"hotgo/utility/file"
+	"hotgo/utility/telegrambudget"
 	"hotgo/utility/telegramerror"
 )
 
@@ -333,7 +334,7 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 	}
 	switch media.MediaType {
 	case "video":
-		previewCtx, cancelPreview := context.WithTimeout(ctx, 30*time.Second)
+		previewCtx, cancelPreview := context.WithTimeout(ctx, telegrambudget.Preview(ctx))
 		defer cancelPreview()
 		reuseWithCover := telegramVideoUsesReusableFileIdWithCover(media)
 		var thumbnail models.InputFile
@@ -623,7 +624,7 @@ func (s *sSysPublish) telegramInputMediaItem(ctx context.Context, item *telegram
 	if item.MediaType != "video" {
 		return &models.InputMediaPhoto{Media: source, Caption: caption, ParseMode: telegramMediaParseMode(caption), MediaAttachment: attachment}, closers, nil
 	}
-	previewCtx, cancelPreview := context.WithTimeout(ctx, 30*time.Second)
+	previewCtx, cancelPreview := context.WithTimeout(ctx, telegrambudget.Preview(ctx))
 	defer cancelPreview()
 	var thumbnail models.InputFile
 	if !telegramMediaUsesReusableFileId(item) {
@@ -1151,7 +1152,7 @@ func telegramVideoThumbnail(ctx context.Context, media *telegramMediaItem) (mode
 
 // 封面是可选媒体。仅取消封面子任务，不能把本地失败传成发送结果不确定。
 func telegramVideoPreview(ctx context.Context, media *telegramMediaItem, kind string) (models.InputFile, io.Closer, error) {
-	previewCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	previewCtx, cancel := context.WithTimeout(ctx, telegrambudget.Preview(ctx))
 	defer cancel()
 	return telegramVideoPreviewWithBudget(ctx, previewCtx, media, kind)
 }
@@ -1230,7 +1231,7 @@ func cachedTelegramVideoPosterFile(ctx context.Context, media *telegramMediaItem
 	if source := strings.TrimSpace(media.PosterUrl); strings.HasPrefix(strings.ToLower(source), "http") && !isLocalTelegramURL(source) {
 		// 原消息封面已有可访问地址，直接读取；不要先访问存储代理，
 		// 否则代理故障会耗尽预算，导致可用的原图被跳过。
-		posterCtx, cancelPoster := context.WithTimeout(ctx, 5*time.Second)
+		posterCtx, cancelPoster := context.WithTimeout(ctx, telegrambudget.Poster(ctx))
 		step := beginTelegramPublishStage(posterCtx, "media.video.poster.download", telegramPublishMediaLogFields(media))
 		posterPath, posterErr := cachedRemoteMediaFileWithMetaSourceAndDownloader(
 			posterCtx, stableMediaFileCacheKey(normalizedMediaCacheSource(source)),

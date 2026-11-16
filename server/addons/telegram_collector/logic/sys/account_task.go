@@ -18,6 +18,7 @@ import (
 	"hotgo/addons/telegram_collector/model/input/sysin"
 	collectorservice "hotgo/addons/telegram_collector/service"
 	"hotgo/internal/library/cache"
+	"hotgo/utility/telegrambudget"
 )
 
 type sAccountTasks struct{}
@@ -270,13 +271,21 @@ func accountTaskTerminal(status string) bool {
 }
 
 func accountTaskClaimLeaseTTL(taskType string, fallback time.Duration) time.Duration {
+	return accountTaskClaimLeaseTTLContext(context.Background(), taskType, fallback)
+}
+
+func accountTaskClaimLeaseTTLContext(ctx context.Context, taskType string, fallback time.Duration) time.Duration {
 	const grace = 30 * time.Second
 	bounded := fallback
 	switch taskType {
 	case sysin.AccountTaskTypeMessagePushInline, sysin.AccountTaskTypeMessageReconcile:
 		bounded = 2*time.Minute + grace
 	case sysin.AccountTaskTypeMessageMediaFallback:
-		bounded = sysin.AccountTaskMessageMediaFallbackTimeout + grace
+		// Claim precedes gate acquisition. Cover the whole wait, send and
+		// finalization path plus lease-operation slack; a shorter caller TTL
+		// must not expire ownership while that bounded path is still running.
+		return telegrambudget.AccountGate(ctx) + telegrambudget.Account(ctx) +
+			telegrambudget.Finalize(ctx) + telegrambudget.LeaseOperation(ctx)
 	case sysin.AccountTaskTypeMessageDeleteFallback:
 		bounded = 30*time.Second + grace
 	}
@@ -361,7 +370,7 @@ func (s *sAccountTasks) Claim(ctx context.Context, lease *sysin.AccountLease, li
 			continue
 		}
 		claimTTL := ttl
-		if bounded := accountTaskClaimLeaseTTL(candidate.TaskType, ttl); bounded > 0 {
+		if bounded := accountTaskClaimLeaseTTLContext(ctx, candidate.TaskType, ttl); bounded > 0 {
 			claimTTL = bounded
 		}
 		result, updateErr := dao.TgCollectorAccountTask.Ctx(ctx).
