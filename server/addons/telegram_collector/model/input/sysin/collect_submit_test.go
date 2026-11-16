@@ -28,9 +28,9 @@ func TestCollectSubmitResultConversion(t *testing.T) {
 
 func TestCollectSubmitResultConversionRejectsUnknownValues(t *testing.T) {
 	if _, ok := (CollectSubmitResult{
-		Outcome: "unknown",
-		Stage:   string(domain.CollectSubmitStageQueue),
-		Reason:  string(domain.CollectSubmitReasonQueued),
+		Outcome: domain.CollectSubmitOutcome("unknown"),
+		Stage:   domain.CollectSubmitStageQueue,
+		Reason:  domain.CollectSubmitReasonQueued,
 	}).ToDomain(); ok {
 		t.Fatal("boundary conversion accepted an unknown outcome")
 	}

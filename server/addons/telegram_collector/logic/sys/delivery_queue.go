@@ -17,6 +17,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 
 	"hotgo/addons/telegram_collector/consts"
+	"hotgo/addons/telegram_collector/domain"
 	"hotgo/addons/telegram_collector/internal/dao"
 	"hotgo/addons/telegram_collector/internal/model/entity"
 	"hotgo/addons/telegram_collector/model/input/sysin"
@@ -285,9 +286,9 @@ func (s *sCollector) processDelivery(ctx context.Context, deliveryID int64) erro
 		// The legacy contract only proves that the handoff returned nil. Keep a
 		// conservative typed result and explicitly exclude Telegram execution.
 		submitResult = sysin.CollectSubmitResult{
-			Outcome:        "accepted",
-			Stage:          "dispatch",
-			Reason:         "accepted",
+			Outcome:        domain.CollectSubmitOutcomeAccepted,
+			Stage:          domain.CollectSubmitStageDispatch,
+			Reason:         domain.CollectSubmitReasonAccepted,
 			DeliveryID:     delivery.ID,
 			CollectEventID: delivery.EventID,
 		}
@@ -297,10 +298,10 @@ func (s *sCollector) processDelivery(ctx context.Context, deliveryID int64) erro
 		return s.failDelivery(ctx, deliveryID, err)
 	}
 	if submitResult.DeliveryID == 0 {
-		submitResult.DeliveryID = delivery.ID
+		submitResult.DeliveryID = domain.DeliveryID(delivery.ID)
 	}
 	if submitResult.CollectEventID == 0 {
-		submitResult.CollectEventID = delivery.EventID
+		submitResult.CollectEventID = domain.EventID(delivery.EventID)
 	}
 	if _, valid := submitResult.ToDomain(); !valid {
 		err = gerror.New("Telegram采集提交结果无效")

@@ -23,6 +23,7 @@ import (
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/tg"
 
+	collectordomain "hotgo/addons/telegram_collector/domain"
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
 	collectorservice "hotgo/addons/telegram_collector/service"
 	botsysin "hotgo/addons/youban_bot/model/input/sysin"
@@ -1531,7 +1532,7 @@ func (h *publishCollectorDeliveryHandler) HandleCollectorDeliveryResult(ctx cont
 	if h == nil || h.publish == nil || delivery == nil {
 		err := gerror.New("Telegram采集交付处理参数无效")
 		logPublishCollectorDeliveryStage(ctx, "delivery.handler.invalid", delivery, err)
-		return collectorin.CollectSubmitResult{Outcome: "failed", Stage: "validation", Reason: "permanent_failure"}, err
+		return collectorin.CollectSubmitResult{Outcome: collectordomain.CollectSubmitOutcomeFailed, Stage: collectordomain.CollectSubmitStageValidation, Reason: collectordomain.CollectSubmitReasonPermanentFailure}, err
 	}
 	logPublishCollectorDeliveryStage(ctx, "delivery.handler.received", delivery, nil)
 	var err error
@@ -1545,12 +1546,12 @@ func (h *publishCollectorDeliveryHandler) HandleCollectorDeliveryResult(ctx cont
 	}
 	if err != nil {
 		logPublishCollectorDeliveryStage(ctx, "delivery.handler.failed", delivery, err)
-		return collectorin.CollectSubmitResult{Outcome: "failed", Stage: "persistence", Reason: "retryable_failure", Retryable: true, DeliveryID: delivery.ID, CollectEventID: delivery.EventID}, err
+		return collectorin.CollectSubmitResult{Outcome: collectordomain.CollectSubmitOutcomeFailed, Stage: collectordomain.CollectSubmitStagePersistence, Reason: collectordomain.CollectSubmitReasonRetryableFailure, Retryable: true, DeliveryID: collectordomain.DeliveryID(delivery.ID), CollectEventID: collectordomain.EventID(delivery.EventID)}, err
 	}
 	logPublishCollectorDeliveryStage(ctx, "delivery.handler.completed", delivery, nil)
 	return collectorin.CollectSubmitResult{
-		Outcome: "queued", Stage: "queue", Reason: "queued",
-		DeliveryID: delivery.ID, CollectEventID: delivery.EventID,
+		Outcome: collectordomain.CollectSubmitOutcomeQueued, Stage: collectordomain.CollectSubmitStageQueue, Reason: collectordomain.CollectSubmitReasonQueued,
+		DeliveryID: collectordomain.DeliveryID(delivery.ID), CollectEventID: collectordomain.EventID(delivery.EventID),
 	}, nil
 }
 
