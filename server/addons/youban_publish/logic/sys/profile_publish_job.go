@@ -483,11 +483,11 @@ func (s *sSysPublish) ensureTelegramProfileJobWithMetaTx(ctx context.Context, tx
 		return jobId, nil
 	}
 	// A newer manual/full-push request replaces an older active operation for
-	// the same profile/channel. The partial unique index intentionally allows
-	// only one active job, so returning a raw duplicate-key error would make a
-	// user retry appear to do nothing. Promote the existing job to the latest
-	// operation; the caller will rearm its Outbox and enqueue it on the proper
-	// realtime lane.
+	// the same profile/channel. Do not mutate the old row in place: its
+	// send_deadline_at belongs to the old operation and may already be expired.
+	// Fence the old row first, then create a fresh job so the first send of the
+	// new operation initializes a new deadline and the republish cleanup path
+	// can still find the old row and its messages.
 	if !isCycleBatchOperation(operationNo) {
 		active, readErr := tx.Model(publishTgJobTable).Safe().Ctx(ctx).
 			Where("tenant_id", source["tenant_id"].Int64()).Where("account_id", source["account_id"].Int64()).
@@ -498,26 +498,20 @@ func (s *sSysPublish) ensureTelegramProfileJobWithMetaTx(ctx context.Context, tx
 			return 0, gerror.Wrap(readErr, "读取资料活动TG频道任务失败")
 		}
 		if activeID := active["id"].Int64(); activeID > 0 {
-			priority := meta.InitialPriority
-			if priority <= 0 {
-				priority = tgJobPriorityInteractive
-			}
 			if _, updateErr := tx.Model(publishTgJobTable).Safe().Ctx(ctx).
 				Where("id", activeID).
 				Data(g.Map{
-					"operation_no":        operationNo,
-					"operation_type":      string(profileOperationTypeFromNo(operationNo)),
-					"priority":            priority,
-					"queue_name":          telegramQueueNameByPriorityAndChannel(ctx, priority, channel.Id),
+					"status":              telegramJobStatusSuperseded,
 					"dispatch_status":     tgDispatchStatusIdle,
 					"asynq_task_id":       "",
 					"next_retry_at":       nil,
-					"last_dispatch_error": "",
+					"send_deadline_at":    nil,
+					"send_phase":          "",
+					"last_dispatch_error": "被新的资料重新上架操作替换",
 					"updated_at":          gtime.Now(),
 				}).Update(); updateErr != nil {
-				return 0, gerror.Wrap(updateErr, "提升资料活动TG任务失败")
+				return 0, gerror.Wrap(updateErr, "隔离资料旧TG任务失败")
 			}
-			return activeID, nil
 		}
 	}
 	// Cycle scheduling must be idempotent across manual/full-push operations.
