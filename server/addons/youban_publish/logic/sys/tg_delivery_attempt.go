@@ -19,8 +19,6 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/util/guid"
 
-	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
-	collectorservice "hotgo/addons/telegram_collector/service"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/hgrds/lock"
 )
@@ -849,17 +847,6 @@ func (s *sSysPublish) handleTelegramAttemptTimeout(ctx context.Context, attemptI
 	if err != nil {
 		return err
 	}
-	if attempt.Phase == "display" || attempt.Phase == "verify" || attempt.Phase == "package" {
-		if err = s.enqueueTelegramAttemptReconcile(ctx, job, attempt); err == nil {
-			s.appendTelegramJobLog(ctx, job, "reconcile", "queued", "Telegram发送未收到Webhook确认，已提交协议号对账")
-			return nil
-		}
-		g.Log().Warningf(ctx, "提交Telegram消息协议号对账失败 attemptId:%d jobId:%d phase:%s err:%+v", attempt.Id, job.Id, attempt.Phase, err)
-		if deferred, deferErr := s.deferStreamWebhookAfterUnavailableReconcile(ctx, job, attempt, err); deferred || deferErr != nil {
-			return deferErr
-		}
-		return s.failTelegramMediaFallbackJob(ctx, job, err)
-	}
 	// Preserve partial confirmations so a late Webhook can still complete the attempt.
 	phase := telegramSendPhaseCleanupConfirmed
 	if attempt.Phase == "verify" || attempt.Phase == "package" {
@@ -896,23 +883,6 @@ func (s *sSysPublish) handleTelegramAttemptTimeout(ctx context.Context, attemptI
 		return err
 	}
 	return s.wakeNextTelegramChannelJob(ctx, job)
-}
-
-func (s *sSysPublish) enqueueTelegramAttemptReconcile(ctx context.Context, job telegramJobRecord, attempt telegramDeliveryAttempt) error {
-	channel, err := s.messagePushChannelFromJob(ctx, job)
-	if err != nil {
-		return err
-	}
-	if channel.TgAccountId <= 0 {
-		return gerror.New("目标频道未绑定协议号，无法对账验证视频")
-	}
-	_, err = collectorservice.AccountTasks().Submit(ctx, &collectorin.AccountTaskSubmit{
-		TenantID: job.TenantId, AccountID: channel.TgAccountId,
-		TaskType: collectorin.AccountTaskTypeMessageReconcile,
-		TaskKey:  fmt.Sprintf("message-reconcile:%d:%d", job.Id, attempt.Id),
-		Priority: collectorin.EventPriorityUrgent, MaxAttempts: 3,
-	})
-	return gerror.Wrap(err, "提交验证视频协议号对账失败")
 }
 
 func (s *sSysPublish) cleanupTelegramAttemptMessages(ctx context.Context, attempt telegramDeliveryAttempt) error {
@@ -1066,10 +1036,7 @@ func (s *sSysPublish) matchTelegramDeliveryAttempt(ctx context.Context, botId in
 		return
 	}
 	chatId := normalizeTelegramChannelChatID(strconv.FormatInt(msg.Chat.ID, 10))
-	cacheTelegramWebhookReconcileMessage(ctx, telegramWebhookReconcileMessage{
-		ChatID: chatId, MessageID: int64(msg.ID), MediaGroupID: msg.MediaGroupID,
-		MessageType: telegramWebhookMessageType(msg), ReceivedAt: time.Now(),
-	})
+	matchStartedAt := time.Now()
 	var attempts []telegramDeliveryAttempt
 	window := time.Minute
 	limit := 4
@@ -1158,8 +1125,24 @@ func (s *sSysPublish) matchTelegramDeliveryAttempt(ctx context.Context, botId in
 		matched = s.matchTelegramVerifyAttempt(ctx, active, msg)
 	}
 	if matched == nil {
+		g.Log().Info(ctx, "TG消息事实未匹配Attempt", g.Map{
+			"event":  "telegram_message_fact_unmatched",
+			"bot_id": botId, "target_chat_id": chatId, "message_id": msg.ID,
+			"media_group_id": msg.MediaGroupID,
+			"duration_ms":    time.Since(matchStartedAt).Milliseconds(),
+			"fact_source":    "webhook_or_account_update",
+		})
 		return
 	}
+	g.Log().Info(ctx, "TG消息事实匹配Attempt", g.Map{
+		"event":  "telegram_message_fact_matched",
+		"bot_id": botId, "target_chat_id": chatId, "message_id": msg.ID,
+		"media_group_id": msg.MediaGroupID, "job_id": matched.JobId,
+		"attempt_id": matched.Id, "phase": matched.Phase,
+		"attempt_status": matched.Status,
+		"duration_ms":    time.Since(matchStartedAt).Milliseconds(),
+		"fact_source":    "webhook_or_account_update",
+	})
 	if matched.Status != telegramAttemptStatusConfirmed && matched.Status != telegramAttemptStatusSuperseded && matched.Phase != "package" {
 		if job, err := s.telegramJobById(ctx, matched.JobId); err == nil && s.accountPushEngine(ctx, job.TenantId, job.AccountId) == pushEngineUnifiedStream && job.Status != telegramJobStatusSent && job.Status != telegramJobStatusSuperseded && job.SendPhase != telegramSendPhaseTimeoutCancelled {
 			if err := s.matchStreamWebhookGroup(ctx, *matched, job, msg); err != nil {
@@ -1215,11 +1198,6 @@ func (s *sSysPublish) matchTelegramDeliveryAttempt(ctx context.Context, botId in
 	if affected == 0 {
 		return
 	}
-	cacheTelegramWebhookReconcileMessage(ctx, telegramWebhookReconcileMessage{
-		ChatID: chatId, MessageID: int64(msg.ID), MediaGroupID: msg.MediaGroupID,
-		MessageType: telegramWebhookMessageType(msg), Status: telegramWebhookMessageStatusMatched,
-		ReceivedAt: time.Now(), AttemptID: matched.Id, JobID: matched.JobId, Phase: matched.Phase,
-	})
 	job, err := s.telegramJobById(ctx, matched.JobId)
 	if err != nil {
 		return
@@ -1241,6 +1219,15 @@ func (s *sSysPublish) matchTelegramDeliveryAttempt(ctx context.Context, botId in
 		g.Log().Warningf(ctx, "保存TG Webhook确认消息失败 attemptId:%d message:%d err:%+v", matched.Id, msg.ID, err)
 		return
 	}
+	g.Log().Info(ctx, "TG消息事实持久化", g.Map{
+		"event":  "telegram_message_fact_persisted",
+		"job_id": matched.JobId, "attempt_id": matched.Id, "phase": matched.Phase,
+		"target_chat_id": chatId, "message_id": msg.ID,
+		"source": "webhook_or_account_update", "redis_fact": true,
+		"message_table":         telegramBotMessageSourceTable,
+		"attempt_message_table": publishTgAttemptMessageTable,
+		"idempotent_key":        fmt.Sprintf("%s:%d", chatId, msg.ID),
+	})
 	count, err := g.DB().Model(telegramBotMessageSourceTable).Safe().Ctx(ctx).
 		Where("matched_attempt_id", matched.Id).Count()
 	if err != nil {

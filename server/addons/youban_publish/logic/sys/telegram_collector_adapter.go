@@ -23,7 +23,6 @@ import (
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/tg"
 
-	collectordomain "hotgo/addons/telegram_collector/domain"
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
 	collectorservice "hotgo/addons/telegram_collector/service"
 	botsysin "hotgo/addons/youban_bot/model/input/sysin"
@@ -35,7 +34,6 @@ import (
 	idao "hotgo/internal/dao"
 	"hotgo/internal/library/cache"
 	"hotgo/internal/library/hgrds/lock"
-	"hotgo/utility/dbtime"
 )
 
 type publishCollectorDeliveryHandler struct {
@@ -344,8 +342,6 @@ func (h *publishCollectorAccountTaskHandler) HandleAccountTaskFailure(ctx contex
 	)
 	var err error
 	switch task.TaskType {
-	case collectorin.AccountTaskTypeMessageReconcile:
-		jobID, _, err = parseMessageReconcileTaskKey(task.TaskKey)
 	case collectorin.AccountTaskTypeMessageMediaFallback:
 		jobID, purpose, err = parseMessageMediaFallbackTaskKey(task.TaskKey)
 	default:
@@ -529,8 +525,6 @@ func (h *publishCollectorAccountTaskHandler) HandleAccountTask(ctx context.Conte
 		return nil, h.publish.handleDialogCacheRefreshAccountTask(ctx, client, task)
 	case collectorin.AccountTaskTypeMessagePushInline:
 		return nil, h.publish.handleMessagePushInlineAccountTask(ctx, client, task)
-	case collectorin.AccountTaskTypeMessageReconcile:
-		return nil, h.publish.handleMessageReconcileAccountTask(ctx, client, task)
 	case collectorin.AccountTaskTypeMessageMediaFallback:
 		return nil, h.publish.handleMessageMediaFallbackAccountTask(ctx, client, task)
 	case collectorin.AccountTaskTypeMessageDeleteFallback:
@@ -799,24 +793,11 @@ func (s *sSysPublish) prepareAccountFallbackAttempt(ctx context.Context, client 
 	if pendingCleanup > 0 {
 		return s.resumePartialAccountAlbum(ctx, client, channel, job, attempt, expectedCount)
 	}
-	messages, err := findTelegramAttemptMessages(ctx, client, channel, attempt)
-	if err != nil {
-		var partial *telegramIncompleteAlbumError
-		if errors.As(err, &partial) && partial.expected <= telegramMediaGroupMaxItems && len(partial.messages) < partial.expected && attempt.CreatedAt != nil && time.Since(dbtime.FromTimestamp(attempt.CreatedAt).Time) >= telegramReconcileTakeoverWait {
-			if saveErr := s.saveTelegramSentMessages(ctx, job, partial.messages); saveErr != nil {
-				return attempt, nil, saveErr
-			}
-			if saveErr := s.projectTelegramDeliveryStep(ctx, job.Id, fmt.Sprintf("%s%d", telegramPartialCleanupCheckpoint, attempt.Id), telegramDeliveryStepRunning, attempt.Id, err.Error(), gtime.Now()); saveErr != nil {
-				return attempt, nil, saveErr
-			}
-			return s.resumePartialAccountAlbum(ctx, client, channel, job, attempt, expectedCount)
-		}
-		return attempt, nil, err
-	}
-	if len(messages) > 0 {
-		g.Log().Infof(ctx, "协议号发送前对账命中已有消息，跳过重复发送 jobId:%d attemptId:%d purpose:%s messages:%d", job.Id, attempt.Id, purpose, len(messages))
-	}
-	return attempt, messages, nil
+	// Protocol-account fallback is a send path only. Do not pull channel history
+	// to deduplicate or reconcile an ambiguous Bot result; Webhook/Redis is the
+	// only remote fact source. Existing local messages are handled by the
+	// partial-cleanup checkpoint above.
+	return attempt, nil, nil
 }
 
 const telegramPartialCleanupCheckpoint = "partial_album_cleanup:"
@@ -878,6 +859,13 @@ func parseMessageMediaFallbackTaskKey(taskKey string) (int64, string, error) {
 	return jobID, parts[1], nil
 }
 
+func telegramMediaPurposeLabel(purpose string) string {
+	if purpose == "verify" {
+		return "验证视频"
+	}
+	return "展示资料"
+}
+
 func validateTelegramMediaSendResult(purpose string, media []*telegramMediaItem, messages []*telegramSentMessage) error {
 	if len(media) == 0 {
 		return nil
@@ -922,265 +910,6 @@ func (s *sSysPublish) telegramJobSentMessageCount(ctx context.Context, jobID int
 		return 0, gerror.Wrap(err, "读取协议号媒体降级消息数量失败")
 	}
 	return count, nil
-}
-
-func (s *sSysPublish) handleMessageReconcileAccountTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) (err error) {
-	jobID, attemptID, err := parseMessageReconcileTaskKey(task.TaskKey)
-	if err != nil {
-		return gerror.New("消息对账账号任务参数无效")
-	}
-	job, err := s.telegramJobById(ctx, jobID)
-	if err != nil {
-		return err
-	}
-	attempt, err := s.telegramAttemptById(ctx, attemptID)
-	if err != nil || attempt.Id <= 0 || attempt.JobId != job.Id || (attempt.Phase != "display" && attempt.Phase != "verify" && attempt.Phase != "package") {
-		return gerror.New("Telegram消息对账Attempt不存在或不匹配")
-	}
-	if attempt.Phase == "package" {
-		return s.reconcileRelayPackageWithClient(ctx, client, task, job, attempt)
-	}
-	if job.Status == telegramJobStatusSending &&
-		job.SendPhase == telegramSendPhaseVerifyConfirmed &&
-		attempt.Status == telegramAttemptStatusConfirmed {
-		return s.finalizeTelegramMediaDelivery(ctx, job, true, true)
-	}
-	if job.Status != telegramJobStatusConfirming {
-		return nil
-	}
-	channel, err := s.messagePushChannelFromJob(ctx, job)
-	if err != nil {
-		return err
-	}
-	if task.AccountID != channel.TgAccountId {
-		return gerror.New("Telegram消息对账账号与目标频道不一致")
-	}
-	messages, err := findTelegramAttemptMessages(ctx, client, channel, attempt)
-	if err != nil {
-		return err
-	}
-	if len(messages) == 0 {
-		if attempt.ResponseReceived == 0 && attempt.CreatedAt != nil {
-			createdAt := dbtime.FromTimestamp(attempt.CreatedAt).Time
-			if delay := telegramReconcileRetryDelay(createdAt, time.Now()); delay > 0 {
-				return &telegramReconcileRetryError{delay: delay}
-			}
-			changed, err := s.transitionTelegramJob(ctx, telegramJobTransition{
-				JobId: job.Id, From: []JobStatus{telegramJobStatusConfirming}, To: telegramJobStatusSending,
-			})
-			if err != nil {
-				return err
-			}
-			if !changed {
-				return nil
-			}
-			g.Log().Warningf(ctx, "TG结果不明确超过%s，按补偿策略切换协议号 jobId:%d attemptId:%d phase:%s", telegramReconcileTakeoverWait, job.Id, attempt.Id, attempt.Phase)
-			return s.submitTelegramMediaFallback(ctx, job, channel.TgAccountId, attempt.Phase)
-		}
-		if reconcileErr := telegramMissingReconcileMessagesError(attempt.Phase, accountTaskFinalAttempt(task)); !errors.Is(reconcileErr, errTelegramMediaFallbackUnavailable) {
-			return reconcileErr
-		}
-		// An ambiguous Bot API call cannot be proved unsuccessful merely because
-		// the account history window no longer contains its marker. Blindly
-		// falling back here can duplicate an already delivered media group and
-		// break channel ordering. Stop this job and release the channel instead;
-		// operators may explicitly republish it after inspecting Telegram.
-		return s.failTelegramMediaFallbackJob(ctx, job, telegramMissingReconcileMessagesError(attempt.Phase, true))
-	}
-	if err = s.saveTelegramSentMessages(ctx, job, messages); err != nil {
-		return err
-	}
-	if err = s.confirmTelegramDeliveryAttempt(ctx, attempt, messages, false); err != nil {
-		return err
-	}
-	confirmedPhase := SendPhaseDisplayConfirmed
-	nextStatus := JobStatusRetryWait
-	if attempt.Phase == "verify" {
-		confirmedPhase = telegramSendPhaseVerifyConfirmed
-		nextStatus = telegramJobStatusSending
-	}
-	transitioned, err := s.transitionTelegramJob(ctx, telegramJobTransition{
-		SendPhase: jobPhase(SendPhase(confirmedPhase)),
-
-		JobId: job.Id, From: []JobStatus{telegramJobStatusConfirming}, To: nextStatus,
-		Additional: g.Map{"error_message": ""},
-	})
-	if err != nil {
-		return err
-	}
-	if !transitioned {
-		// A late Webhook may have advanced this job concurrently. The persisted
-		// messages and confirmed Attempt make this reconciliation idempotent.
-		return nil
-	}
-	job.Status = nextStatus
-	job.SendPhase = confirmedPhase
-	if attempt.Phase == "display" {
-		// Re-arm the durable intent instead of competing directly with a later
-		// queued channel job. The outbox scheduler will restore this partially
-		// published job as the channel head and resume verification delivery.
-		return s.rearmTelegramJobOutbox(ctx, job.Id, 0)
-	}
-	return s.finalizeTelegramMediaDelivery(ctx, job, true, true)
-}
-
-func telegramMissingReconcileMessagesError(phase string, finalAttempt bool) error {
-	if !finalAttempt {
-		return gerror.New("协议号暂未找到Bot发送消息，等待后重试对账")
-	}
-	return gerror.Wrapf(errTelegramMediaFallbackUnavailable,
-		"协议号最终未找到Bot%s消息，结果仍不确定，已禁止自动补发", telegramMediaPurposeLabel(phase))
-}
-
-func telegramMediaPurposeLabel(purpose string) string {
-	if purpose == "verify" {
-		return "验证视频"
-	}
-	return "展示资料"
-}
-
-func parseMessageReconcileTaskKey(taskKey string) (int64, int64, error) {
-	const prefix = "message-reconcile:"
-	parts := strings.Split(strings.TrimPrefix(taskKey, prefix), ":")
-	if !strings.HasPrefix(taskKey, prefix) || len(parts) != 2 {
-		return 0, 0, gerror.New("消息对账账号任务参数无效")
-	}
-	jobID, jobErr := strconv.ParseInt(parts[0], 10, 64)
-	attemptID, attemptErr := strconv.ParseInt(parts[1], 10, 64)
-	if jobErr != nil || attemptErr != nil || jobID <= 0 || attemptID <= 0 {
-		return 0, 0, gerror.New("消息对账账号任务参数无效")
-	}
-	return jobID, attemptID, nil
-}
-
-func findTelegramAttemptMessages(ctx context.Context, client *telegram.Client, channel *messagePushChannel, attempt telegramDeliveryAttempt) ([]*telegramSentMessage, error) {
-	peer, err := messagePushInputPeer(channel)
-	if err != nil {
-		return nil, err
-	}
-	historyCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-	started := time.Now()
-	messages, err := findTelegramAttemptMessagesPaged(historyCtx, attempt, func(ctx context.Context, offset int) ([]*tg.Message, error) {
-		res, err := client.API().MessagesGetHistory(ctx, &tg.MessagesGetHistoryRequest{Peer: peer, Limit: 500, OffsetID: offset})
-		if err != nil {
-			return nil, gerror.Wrap(err, "协议号读取频道历史消息失败")
-		}
-		return tgHistoryMessages(res), nil
-	})
-	g.Log().Infof(ctx, "协议号发送对账结束 jobId:%d attemptId:%d phase:%s expected:%d actual:%d durationMs:%d err:%v", attempt.JobId, attempt.Id, attempt.Phase, attempt.ExpectedCount, len(messages), time.Since(started).Milliseconds(), err)
-	return messages, err
-}
-
-// An album can straddle the first history page. Never treat a truncated page
-// as evidence of a partial send. Bound both history work and network time.
-func findTelegramAttemptMessagesPaged(ctx context.Context, attempt telegramDeliveryAttempt, fetch func(context.Context, int) ([]*tg.Message, error)) ([]*telegramSentMessage, error) {
-	const (
-		pageSize      = 500
-		maxPages      = 20
-		historyMargin = 60 * time.Second
-	)
-
-	var history []*tg.Message
-	seen := make(map[int]bool)
-	offset := 0
-	var matchErr error
-	for page := 0; page < maxPages; page++ {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		messages, err := fetch(ctx, offset)
-		if err != nil {
-			return nil, err
-		}
-		previousOffset := offset
-		oldestDate := 0
-		for _, message := range messages {
-			if message == nil || message.ID <= 0 || seen[message.ID] {
-				continue
-			}
-			seen[message.ID] = true
-			history = append(history, message)
-			if offset == 0 || message.ID < offset {
-				offset = message.ID
-			}
-			if message.Date > 0 && (oldestDate == 0 || message.Date < oldestDate) {
-				oldestDate = message.Date
-			}
-		}
-
-		matched, err := selectTelegramAttemptMessages(history, attempt)
-		if err == nil && len(matched) > 0 {
-			return matched, nil
-		}
-		matchErr = err
-		if len(messages) == 0 {
-			return nil, matchErr
-		}
-		if offset == previousOffset {
-			return nil, gerror.New("Telegram对账分页未前进，结果仍不确定，禁止重发")
-		}
-
-		// A message timestamp older than the attempt's send time proves that the
-		// relevant history window has been covered. Do not require an arbitrary
-		// number of messages to be read before making that determination.
-		if attempt.CreatedAt != nil && oldestDate > 0 && int64(oldestDate) <= dbtime.FromTimestamp(attempt.CreatedAt).Time.Unix()-int64(historyMargin/time.Second) {
-			return nil, matchErr
-		}
-		// A short page is Telegram's explicit history boundary. A full page may
-		// still have older messages, so continue with the message-id cursor.
-		if len(messages) < pageSize {
-			return nil, matchErr
-		}
-	}
-
-	// The bounded lookup did not prove absence. Keep the attempt ambiguous so
-	// callers retain the no-blind-retry rule and can schedule another lookup.
-	return nil, gerror.New("Telegram对账分页达到安全上限，结果仍不确定，禁止重发")
-}
-
-type telegramIncompleteAlbumError struct {
-	messages []*telegramSentMessage
-	phase    string
-	expected int
-}
-
-func (e *telegramIncompleteAlbumError) Error() string {
-	return fmt.Sprintf("协议号找到的%s媒体组不完整：expected=%d actual=%d", telegramMediaPurposeLabel(e.phase), e.expected, len(e.messages))
-}
-
-func selectTelegramAttemptMessages(history []*tg.Message, attempt telegramDeliveryAttempt) ([]*telegramSentMessage, error) {
-	marker := telegramAttemptMarker(attempt.AttemptToken)
-	var groupedID int64
-	for _, message := range history {
-		if message != nil && strings.Contains(message.Message, marker) {
-			groupedID, _ = message.GetGroupedID()
-			if groupedID == 0 {
-				if attempt.ExpectedCount > 1 {
-					return nil, gerror.Newf("协议号找到的%s消息不完整：expected=%d actual=1", telegramMediaPurposeLabel(attempt.Phase), attempt.ExpectedCount)
-				}
-				return []*telegramSentMessage{{MessageId: int64(message.ID), Purpose: attempt.Phase}}, nil
-			}
-			break
-		}
-	}
-	if groupedID == 0 {
-		return nil, nil
-	}
-	messages := make([]*telegramSentMessage, 0, attempt.ExpectedCount)
-	for _, message := range history {
-		if message == nil {
-			continue
-		}
-		id, ok := message.GetGroupedID()
-		if ok && id == groupedID {
-			messages = append(messages, &telegramSentMessage{MessageId: int64(message.ID), MediaGroupId: strconv.FormatInt(groupedID, 10), Purpose: attempt.Phase})
-		}
-	}
-	if len(messages) != attempt.ExpectedCount {
-		return nil, &telegramIncompleteAlbumError{messages: messages, phase: attempt.Phase, expected: attempt.ExpectedCount}
-	}
-	return messages, nil
 }
 
 func (s *sSysPublish) handleMessagePushInlineAccountTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) (err error) {
@@ -1524,15 +1253,10 @@ func collectMediaItemFromCollector(item collectorin.CollectorMediaItem) collectM
 }
 
 func (h *publishCollectorDeliveryHandler) HandleCollectorDelivery(ctx context.Context, delivery *collectorin.CollectorDelivery) error {
-	_, err := h.HandleCollectorDeliveryResult(ctx, delivery)
-	return err
-}
-
-func (h *publishCollectorDeliveryHandler) HandleCollectorDeliveryResult(ctx context.Context, delivery *collectorin.CollectorDelivery) (collectorin.CollectSubmitResult, error) {
 	if h == nil || h.publish == nil || delivery == nil {
 		err := gerror.New("Telegram采集交付处理参数无效")
 		logPublishCollectorDeliveryStage(ctx, "delivery.handler.invalid", delivery, err)
-		return collectorin.CollectSubmitResult{Outcome: collectordomain.CollectSubmitOutcomeFailed, Stage: collectordomain.CollectSubmitStageValidation, Reason: collectordomain.CollectSubmitReasonPermanentFailure}, err
+		return err
 	}
 	logPublishCollectorDeliveryStage(ctx, "delivery.handler.received", delivery, nil)
 	var err error
@@ -1546,13 +1270,10 @@ func (h *publishCollectorDeliveryHandler) HandleCollectorDeliveryResult(ctx cont
 	}
 	if err != nil {
 		logPublishCollectorDeliveryStage(ctx, "delivery.handler.failed", delivery, err)
-		return collectorin.CollectSubmitResult{Outcome: collectordomain.CollectSubmitOutcomeFailed, Stage: collectordomain.CollectSubmitStagePersistence, Reason: collectordomain.CollectSubmitReasonRetryableFailure, Retryable: true, DeliveryID: collectordomain.DeliveryID(delivery.ID), CollectEventID: collectordomain.EventID(delivery.EventID)}, err
+		return err
 	}
 	logPublishCollectorDeliveryStage(ctx, "delivery.handler.completed", delivery, nil)
-	return collectorin.CollectSubmitResult{
-		Outcome: collectordomain.CollectSubmitOutcomeQueued, Stage: collectordomain.CollectSubmitStageQueue, Reason: collectordomain.CollectSubmitReasonQueued,
-		DeliveryID: collectordomain.DeliveryID(delivery.ID), CollectEventID: collectordomain.EventID(delivery.EventID),
-	}, nil
+	return nil
 }
 
 func logPublishCollectorDeliveryStage(ctx context.Context, stage string, delivery *collectorin.CollectorDelivery, err error) {

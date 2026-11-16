@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -363,11 +364,11 @@ func (s *sSysPublish) recoverUnconfirmedUnknownTelegramJob(ctx context.Context, 
 	}
 	switch telegramUnknownAttemptRecoveryAction(attempt, auditCount) {
 	case telegramUnknownAttemptReconcile:
-		if err = s.enqueueTelegramAttemptReconcile(ctx, job, attempt); err != nil {
+		if err = s.parkTelegramUnknownForWebhook(ctx, job, attempt); err != nil {
 			return true, s.failTelegramMediaFallbackJob(ctx, job,
-				gerror.Wrap(err, "TG发送结果不确定且无法提交协议号对账"))
+				gerror.Wrap(err, "TG发送结果不确定且无法等待Webhook"))
 		}
-		s.appendTelegramJobLog(ctx, job, "reconcile", "queued", "TG发送结果不确定，已提交协议号对账，禁止直接重发")
+		s.appendTelegramJobLog(ctx, job, "reconcile", "waiting", "TG发送结果不确定，等待Webhook/Redis事实，禁止主动读取频道历史或重发")
 		return true, nil
 
 	case telegramUnknownAttemptRetry:
@@ -420,11 +421,59 @@ func (s *sSysPublish) reconcileIncompleteUnknownTelegramAttempt(ctx context.Cont
 		return s.failTelegramMediaFallbackJob(ctx, job,
 			gerror.Wrap(cause, "TG响应已确认但审计不完整且找不到活动Attempt"))
 	}
-	if err = s.enqueueTelegramAttemptReconcile(ctx, job, attempt); err != nil {
+	if err = s.parkTelegramUnknownForWebhook(ctx, job, attempt); err != nil {
 		return s.failTelegramMediaFallbackJob(ctx, job,
-			gerror.Wrap(err, "TG响应审计不完整且无法提交协议号对账"))
+			gerror.Wrap(err, "TG响应审计不完整且无法等待Webhook"))
 	}
-	s.appendTelegramJobLog(ctx, job, "reconcile", "queued", "TG响应审计不完整，已提交协议号补全对账，禁止重复发送")
+	s.appendTelegramJobLog(ctx, job, "reconcile", "waiting", "TG响应审计不完整，等待Webhook/Redis事实，禁止主动读取频道历史或重发")
+	return nil
+}
+
+// parkTelegramUnknownForWebhook keeps an ambiguous Bot result recoverable without
+// assigning an account task that would pull channel history. Webhook delivery
+// is the only remote fact source; Redis accelerates the same fact and the
+// PostgreSQL attempt row remains the durable checkpoint.
+func (s *sSysPublish) parkTelegramUnknownForWebhook(ctx context.Context, job telegramJobRecord, attempt telegramDeliveryAttempt) error {
+	if attempt.Id <= 0 || attempt.JobId != job.Id {
+		return gerror.New("TG待确认Attempt无效")
+	}
+	deadline := gtime.Now().Add(telegramAttemptWebhookWait)
+	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		var current telegramDeliveryAttempt
+		if err := tx.Model(publishTgAttemptTable).Where("id", attempt.Id).Where("job_id", job.Id).LockUpdate().Scan(&current); err != nil {
+			return err
+		}
+		if current.Status == telegramAttemptStatusConfirmed {
+			return nil
+		}
+		if current.Status != telegramAttemptStatusSending &&
+			current.Status != telegramAttemptStatusWaiting &&
+			current.Status != telegramAttemptStatusRetryWait {
+			return gerror.New("TG待确认Attempt状态已变化")
+		}
+		if _, err := tx.Model(publishTgAttemptTable).Where("id", attempt.Id).Data(g.Map{
+			"status":           telegramAttemptStatusWaiting,
+			"webhook_deadline": deadline,
+			"updated_at":       gtime.Now(),
+		}).Update(); err != nil {
+			return err
+		}
+		_, err := s.transitionTelegramJobTx(ctx, tx, telegramJobTransition{
+			JobId:        job.Id,
+			From:         []JobStatus{JobStatus("unknown"), telegramJobStatusSending, telegramJobStatusConfirming},
+			To:           telegramJobStatusConfirming,
+			ErrorMessage: "等待Telegram Webhook确认",
+			Additional: g.Map{
+				"dispatch_status": tgDispatchStatusProcessing,
+				"next_retry_at":   deadline,
+			},
+		})
+		return err
+	})
+	if err != nil {
+		return gerror.Wrap(err, "迁移TG任务到Webhook等待状态失败")
+	}
+	observeTelegramReconcile(ctx, "awaiting_webhook")
 	return nil
 }
 

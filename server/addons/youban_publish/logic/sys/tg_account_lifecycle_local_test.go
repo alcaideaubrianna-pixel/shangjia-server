@@ -340,14 +340,8 @@ func runAccountLifecycleStage(t *testing.T, stage string) {
 		}
 		messages = telegramSentMessagesFromGroup(response, phase, media)
 	}
-	if v.Int() > 0 {
-		// The actual history matching used by account fallback after restart.
-		messages, err = selectTelegramAttemptMessages(history, attempt)
-		if err != nil {
-			t.Fatal(err)
-		}
-		bindAccountFallbackMessagesToMedia(messages, media)
-	}
+	// Account fallback is a send path. Message confirmation comes from the
+	// Bot response or Webhook/Redis facts; do not read channel history here.
 	if err := validateTelegramMediaSendResult(phase, media, messages); err != nil {
 		t.Fatal(err)
 	}

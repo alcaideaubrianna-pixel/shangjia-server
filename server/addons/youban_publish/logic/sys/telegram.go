@@ -46,6 +46,28 @@ func (s *sSysPublish) handleTelegramUpdate(ctx context.Context, botId int64, ten
 	} else {
 		logTelegramUpdateSlowStage(ctx, update.ID, botId, "channel_cache", time.Since(stageStartedAt), nil)
 	}
+	cacheTelegramWebhookReconcileMessage(ctx, telegramWebhookReconcileMessage{
+		ChatID:       normalizeTelegramChannelChatID(fmt.Sprintf("%d", msg.Chat.ID)),
+		MessageID:     int64(msg.ID),
+		MediaGroupID: msg.MediaGroupID,
+		MessageType:   telegramWebhookMessageType(msg),
+		ReceivedAt:    time.Now(),
+	})
+	g.Log().Info(ctx, "TG链路 webhook_fact_cached", g.Map{
+		"event":          "telegram_webhook_fact_cached",
+		"update_id":      update.ID,
+		"update_type":    updateType,
+		"bot_id":         botId,
+		"tenant_id":      tenantId,
+		"chat_id":        normalizeTelegramChannelChatID(fmt.Sprintf("%d", msg.Chat.ID)),
+		"message_id":     msg.ID,
+		"media_group_id": msg.MediaGroupID,
+		"message_type":   telegramMessageMediaType(msg),
+		"source_table":   telegramBotMessageSourceTable,
+		"redis_fact":     true,
+		"source":          "telegram_update",
+		"source_table_written": true,
+	})
 	matchCtx := context.WithoutCancel(ctx)
 	simple.SafeGo(matchCtx, func(ctx context.Context) {
 		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
