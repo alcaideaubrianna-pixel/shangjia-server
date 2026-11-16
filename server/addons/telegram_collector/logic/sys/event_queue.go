@@ -30,7 +30,6 @@ const eventTaskType = "telegram_collector:event"
 
 const (
 	eventLeaseDuration     = 2 * time.Minute
-	eventRecoveryInterval  = 30 * time.Second
 	eventRecoveryStaleTime = 15 * time.Second
 	eventTaskUniqueTTL     = 5 * time.Minute
 	eventMaxAttempts       = 5
@@ -143,6 +142,7 @@ func (s *sCollector) enqueueEventTask(ctx context.Context, eventID int64, priori
 		asynq.MaxRetry(eventMaxAttempts-1),
 		asynq.Timeout(2*time.Minute),
 		asynq.Unique(eventTaskUniqueTTL),
+		asynq.Retention(24*time.Hour),
 	)
 	if errors.Is(err, asynq.ErrDuplicateTask) || errors.Is(err, asynq.ErrTaskIDConflict) {
 		return nil
@@ -472,7 +472,7 @@ func (s *sCollector) runEventRecovery(ctx context.Context) {
 	case <-timer.C:
 	}
 	s.recoverEventTasks(ctx)
-	ticker := time.NewTicker(eventRecoveryInterval)
+	ticker := time.NewTicker(collectorRecoveryInterval(ctx))
 	defer ticker.Stop()
 	for {
 		select {
@@ -616,6 +616,14 @@ func collectorRecoveryBatchSize(ctx context.Context) int {
 		return 1000
 	}
 	return value
+}
+
+func collectorRecoveryInterval(ctx context.Context) time.Duration {
+	value := g.Cfg().MustGet(ctx, "telegramCollector.worker.recoveryIntervalSeconds", 60).Int()
+	if value < 30 {
+		value = 30
+	}
+	return time.Duration(value) * time.Second
 }
 
 func collectorInstanceID() string {
