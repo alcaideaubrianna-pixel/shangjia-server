@@ -71,15 +71,16 @@ func telegramStreamOutboxBatchLimit(ctx context.Context) int {
 }
 
 type telegramJobOutboxRecord struct {
-	Id           int64       `json:"id"`
-	JobId        int64       `json:"jobId"`
-	AttemptCount int         `json:"attemptCount"`
-	AvailableAt  *gtime.Time `json:"availableAt"`
-	AccountId    int64       `json:"accountId"`
-	TenantId     int64       `json:"tenantId"`
-	ChannelId    int64       `json:"channelId"`
-	Priority     int         `json:"priority"`
-	TargetChatId string      `json:"targetChatId"`
+	Id           int64                `json:"id"`
+	JobId        int64                `json:"jobId"`
+	AttemptCount int                  `json:"attemptCount"`
+	Status       TelegramOutboxStatus `json:"status"`
+	AvailableAt  *gtime.Time          `json:"availableAt"`
+	AccountId    int64                `json:"accountId"`
+	TenantId     int64                `json:"tenantId"`
+	ChannelId    int64                `json:"channelId"`
+	Priority     int                  `json:"priority"`
+	TargetChatId string               `json:"targetChatId"`
 }
 
 // ensureTelegramJobOutboxTx persists the initial queue intent in the same
@@ -214,6 +215,7 @@ func telegramJobOutboxRecordFromRecord(record gdb.Record) telegramJobOutboxRecor
 		Id:           record["id"].Int64(),
 		JobId:        record["job_id"].Int64(),
 		AttemptCount: record["attempt_count"].Int(),
+		Status:       TelegramOutboxStatus(record["status"].String()),
 		AvailableAt:  record["available_at"].GTime(),
 		AccountId:    record["account_id"].Int64(),
 		TenantId:     record["tenant_id"].Int64(),
@@ -437,7 +439,7 @@ func (s *sSysPublish) completeTelegramOutbox(ctx context.Context, outboxId int64
 	var row telegramJobOutboxRecord
 	if err := g.DB().Model(publishTgOutboxTable+" o").Safe().Ctx(ctx).
 		LeftJoin(publishTgJobTable+" j", "j.id=o.job_id").
-		Fields("o.id,o.job_id,j.tenant_id,j.channel_id,j.priority").Where("o.id", outboxId).Scan(&row); err != nil {
+		Fields("o.id,o.job_id,o.status,j.tenant_id,j.channel_id,j.priority").Where("o.id", outboxId).Scan(&row); err != nil {
 		return gerror.Wrap(err, "读取TG任务Outbox失败")
 	}
 	result, err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
@@ -668,7 +670,7 @@ func (s *sSysPublish) dueTelegramJobOutboxRows(ctx context.Context, limit int, n
 	var candidates []telegramJobOutboxRecord
 	err := g.DB().Model(publishTgOutboxTable+" o").Safe().Ctx(queryCtx).
 		LeftJoin(publishTgJobTable+" j", "j.id=o.job_id").
-		Fields("o.id,o.job_id,o.attempt_count,o.available_at,j.tenant_id,j.channel_id,j.target_chat_id").
+		Fields("o.id,o.job_id,o.attempt_count,o.status,o.available_at,j.tenant_id,j.channel_id,j.target_chat_id").
 		Where("o.event_type", telegramOutboxEventPublish).
 		Where("o.available_at <= ?", now).
 		Where("o.status = ? OR (o.status = ? AND o.lease_expires_at <= ?)", telegramOutboxPending, telegramOutboxProcessing, now).
@@ -722,7 +724,7 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 	// 对整个候选集排序，直接拖慢实时通知。先按到期时间取有界候选，
 	// 再在内存中做账户/频道配额控制。
 	var candidates []telegramJobOutboxRecord
-	query := `SELECT o.id,o.job_id,o.attempt_count,o.available_at,j.account_id,j.tenant_id,j.channel_id,j.priority
+	query := `SELECT o.id,o.job_id,o.attempt_count,o.status,o.available_at,j.account_id,j.tenant_id,j.channel_id,j.priority
 		FROM ` + publishTgOutboxTable + ` o
 		JOIN ` + publishTgJobTable + ` j ON j.id=o.job_id
 		WHERE j.tenant_id>0 AND j.channel_id>0

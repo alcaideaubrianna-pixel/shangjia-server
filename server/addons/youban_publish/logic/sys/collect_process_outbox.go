@@ -11,11 +11,20 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/util/guid"
 
+	"hotgo/addons/youban_publish/model"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/utility/dbtime"
 )
 
 const collectProcessOutboxTable = "hg_youban_publish_collect_process_outbox"
+
+type collectProcessOutboxStatus = model.CollectProcessOutboxStatus
+
+const (
+	collectProcessOutboxStatusPending    = model.CollectProcessOutboxStatusPending
+	collectProcessOutboxStatusProcessing = model.CollectProcessOutboxStatusProcessing
+	collectProcessOutboxStatusDelivered  = model.CollectProcessOutboxStatusDelivered
+)
 
 const collectProcessOutboxLease = 5 * time.Minute
 const collectProcessProcessingCap = 100
@@ -79,34 +88,32 @@ func ensureCollectProcessOutbox(ctx context.Context, payload collectProcessQueue
 		history = nil
 	}
 	args := []any{payload.EventId, payload.TenantId, payload.AccountId, payload.SourceId, payload.SourceChatId, availableAt, gtime.Now(), gtime.Now(), history}
+	statusSQL := func(status collectProcessOutboxStatus) string { return "'" + string(status) + "'" }
 	var query string
 	if strings.EqualFold(strings.TrimSpace(g.DB().GetConfig().Type), "pgsql") {
 		query = `INSERT INTO ` + collectProcessOutboxTable + `
             (event_id,tenant_id,account_id,source_id,source_chat_id,status,available_at,created_at,updated_at,history)
-            VALUES ($1,$2,$3,$4,$5,'pending',$6,$7,$8,$9)
+            VALUES ($1,$2,$3,$4,$5,` + statusSQL(collectProcessOutboxStatusPending) + `,$6,$7,$8,$9)
             ON CONFLICT (event_id) DO UPDATE SET tenant_id=EXCLUDED.tenant_id,account_id=EXCLUDED.account_id,
-            source_id=EXCLUDED.source_id,source_chat_id=EXCLUDED.source_chat_id,status='pending',
+            source_id=EXCLUDED.source_id,source_chat_id=EXCLUDED.source_chat_id,status=` + statusSQL(collectProcessOutboxStatusPending) + `,
             available_at=EXCLUDED.available_at,lease_owner='',lease_expires_at=NULL,last_error='',updated_at=EXCLUDED.updated_at,
              history=COALESCE(` + collectProcessOutboxTable + `.history,EXCLUDED.history)`
 		if payload.Recovery && payload.OutboxOwner == "" {
-			query += ` WHERE ` + collectProcessOutboxTable + `.status='delivered'`
+			query += ` WHERE ` + collectProcessOutboxTable + `.status=` + statusSQL(collectProcessOutboxStatusDelivered)
 		} else if !payload.Recovery {
-			// 正常入队必须保持已完成事件的终态。重复收到媒体完成、验证完成或
-			// webhook 通知时，不能把 delivered Outbox 重新改成 pending，
-			// 否则会造成重复处理并放大采集压力。
-			query += ` WHERE ` + collectProcessOutboxTable + `.status<>'delivered'`
+			query += ` WHERE ` + collectProcessOutboxTable + `.status<>` + statusSQL(collectProcessOutboxStatusDelivered)
 		}
 	} else {
 		query = `INSERT INTO ` + collectProcessOutboxTable + `
             (event_id,tenant_id,account_id,source_id,source_chat_id,status,available_at,created_at,updated_at,history)
-            VALUES (?,?,?,?,?,'pending',?,?,?,?) ON DUPLICATE KEY UPDATE tenant_id=VALUES(tenant_id),
+            VALUES (?,?,?,?,?,` + statusSQL(collectProcessOutboxStatusPending) + `,?,?,?,?) ON DUPLICATE KEY UPDATE tenant_id=VALUES(tenant_id),
 			account_id=VALUES(account_id),source_id=VALUES(source_id),source_chat_id=VALUES(source_chat_id),
 			history=COALESCE(history,VALUES(history)),
-			status=IF(status='delivered',status,'pending'),
-			available_at=IF(status='delivered',available_at,VALUES(available_at)),
-			lease_owner=IF(status='delivered',lease_owner,''),
-			lease_expires_at=IF(status='delivered',lease_expires_at,NULL),
-			last_error=IF(status='delivered',last_error,''),updated_at=VALUES(updated_at)`
+			status=IF(status=` + statusSQL(collectProcessOutboxStatusDelivered) + `,status,` + statusSQL(collectProcessOutboxStatusPending) + `),
+			available_at=IF(status=` + statusSQL(collectProcessOutboxStatusDelivered) + `,available_at,VALUES(available_at)),
+			lease_owner=IF(status=` + statusSQL(collectProcessOutboxStatusDelivered) + `,lease_owner,''),
+			lease_expires_at=IF(status=` + statusSQL(collectProcessOutboxStatusDelivered) + `,lease_expires_at,NULL),
+			last_error=IF(status=` + statusSQL(collectProcessOutboxStatusDelivered) + `,last_error,''),updated_at=VALUES(updated_at)`
 	}
 	if _, err := g.DB().Exec(ctx, query, args...); err != nil {
 		return gerror.Wrap(err, "保存采集处理Outbox失败")
@@ -162,8 +169,8 @@ func completeCollectProcessOutbox(ctx context.Context, payload collectProcessQue
 				// 处理函数提前返回但没有写入终态时，保留 Outbox 作为恢复入口，
 				// 避免 delivered 掩盖业务事件永久停在 media_ready/pending。
 				_, retryErr := g.DB().Model(collectProcessOutboxTable).Ctx(ctx).
-					Where("event_id", eventID).Where("status", "processing").Where("lease_owner", payload.OutboxOwner).
-					Data(g.Map{"status": "pending", "lease_owner": "", "lease_expires_at": nil,
+					Where("event_id", eventID).Where("status", collectProcessOutboxStatusProcessing).Where("lease_owner", payload.OutboxOwner).
+					Data(g.Map{"status": collectProcessOutboxStatusPending, "lease_owner": "", "lease_expires_at": nil,
 						"available_at": gtime.Now().Add(10 * time.Second), "last_error": "业务事件未进入终态，自动恢复重试",
 						"attempt_count": gdbRawIncrement(), "updated_at": gtime.Now()}).Update()
 				if retryErr != nil {
@@ -173,8 +180,8 @@ func completeCollectProcessOutbox(ctx context.Context, payload collectProcessQue
 			}
 		}
 	}
-	if _, err := g.DB().Model(collectProcessOutboxTable).Ctx(ctx).Where("event_id", eventID).Where("status", "processing").Where("lease_owner", payload.OutboxOwner).Data(g.Map{
-		"status": "delivered", "lease_owner": "", "lease_expires_at": nil,
+	if _, err := g.DB().Model(collectProcessOutboxTable).Ctx(ctx).Where("event_id", eventID).Where("status", collectProcessOutboxStatusProcessing).Where("lease_owner", payload.OutboxOwner).Data(g.Map{
+		"status": collectProcessOutboxStatusDelivered, "lease_owner": "", "lease_expires_at": nil,
 		"delivered_at": gtime.Now(), "updated_at": gtime.Now(),
 	}).Update(); err != nil {
 		g.Log().Warningf(ctx, "确认采集处理Outbox完成失败 eventId:%d err:%+v", eventID, err)
@@ -212,7 +219,7 @@ func (s *sSysPublish) dispatchDueCollectProcessOutbox(ctx context.Context, limit
 		processingRows, readErr := processingModel.
 			// 过期 processing 也要计入上限；否则旧租约会在每轮被重新 claim，
 			// 总 processing 数持续增长并挤压正常采集终态处理。
-			Where("status", "processing").
+			Where("status", collectProcessOutboxStatusProcessing).
 			Limit(collectProcessProcessingCap + 1).All()
 		if readErr != nil {
 			return gerror.Wrap(readErr, "读取账户采集处理中任务数量失败")
@@ -312,15 +319,15 @@ func (s *sSysPublish) dispatchDueCollectProcessOutbox(ctx context.Context, limit
 		}
 		return rows, nil
 	}
-	rows, err := loadFair("pending", "available_at", freshLimit, "COALESCE(history,FALSE)=FALSE")
+	rows, err := loadFair(string(collectProcessOutboxStatusPending), "available_at", freshLimit, "COALESCE(history,FALSE)=FALSE")
 	if err == nil {
 		var more []gdb.Record
-		more, err = loadFair("pending", "available_at", historyLimit, "history=TRUE OR (history IS NULL AND created_at<?)", cutoff)
+		more, err = loadFair(string(collectProcessOutboxStatusPending), "available_at", historyLimit, "history=TRUE OR (history IS NULL AND created_at<?)", cutoff)
 		rows = append(rows, more...)
 	}
 	if err == nil {
 		var more []gdb.Record
-		more, err = loadFair("processing", "lease_expires_at", expiredLimit, "")
+		more, err = loadFair(string(collectProcessOutboxStatusProcessing), "lease_expires_at", expiredLimit, "")
 		rows = append(rows, more...)
 	}
 	if err != nil {
@@ -372,8 +379,8 @@ func (s *sSysPublish) dispatchDueCollectProcessOutbox(ctx context.Context, limit
 			claimModel = claimModel.Where("updated_at::text = ?", version.String())
 		}
 		claimed, claimErr := claimModel.
-			Where("status = ? OR (status = ? AND lease_expires_at <= ?)", "pending", "processing", now).
-			Data(g.Map{"status": "processing", "lease_owner": owner, "lease_expires_at": now.Add(collectProcessOutboxLease), "updated_at": gtime.Now()}).Update()
+			Where("status = ? OR (status = ? AND lease_expires_at <= ?)", collectProcessOutboxStatusPending, collectProcessOutboxStatusProcessing, now).
+			Data(g.Map{"status": collectProcessOutboxStatusProcessing, "lease_owner": owner, "lease_expires_at": now.Add(collectProcessOutboxLease), "updated_at": gtime.Now()}).Update()
 		if claimErr != nil {
 			g.Log().Warningf(ctx, "领取采集处理Outbox失败 id:%d err:%+v", row["id"].Int64(), claimErr)
 			continue
@@ -419,7 +426,7 @@ func (s *sSysPublish) dispatchDueCollectProcessOutbox(ctx context.Context, limit
 			message = queueErr.Error()
 		}
 		_, _ = g.DB().Model(collectProcessOutboxTable).Ctx(ctx).Where("id", row["id"].Int64()).Where("lease_owner", owner).
-			Data(g.Map{"status": "pending", "lease_owner": "", "lease_expires_at": nil, "attempt_count": gdbRawIncrement(), "last_error": message, "available_at": gtime.Now().Add(time.Minute), "updated_at": gtime.Now()}).Update()
+			Data(g.Map{"status": collectProcessOutboxStatusPending, "lease_owner": "", "lease_expires_at": nil, "attempt_count": gdbRawIncrement(), "last_error": message, "available_at": gtime.Now().Add(time.Minute), "updated_at": gtime.Now()}).Update()
 	}
 	return nil
 }
