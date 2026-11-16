@@ -889,6 +889,13 @@ type ProfileStatusModel struct {
 	Message     string `json:"message" dc:"提示信息"`
 }
 
+type ProfileTaskStatusModel struct {
+	Id         int64  `json:"id" dc:"资料ID"`
+	Uuid       string `json:"uuid" dc:"资料UUID"`
+	Status     int    `json:"status" dc:"资料状态"`
+	TaskStatus string `json:"taskStatus" dc:"任务状态"`
+}
+
 type CollectProfileMediaRebuildResult struct {
 	Candidates  int     `json:"candidates"`
 	Recoverable int     `json:"recoverable"`

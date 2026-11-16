@@ -850,6 +850,14 @@ func (c *cPublishAdmin) ProfileView(ctx context.Context, req *publish.AdminProfi
 	return
 }
 
+func (c *cPublishAdmin) ProfileTaskStatus(ctx context.Context, req *publish.AdminProfileTaskStatusReq) (res *publish.AdminProfileTaskStatusRes, err error) {
+	data, err := service.SysPublish().AdminProfileTaskStatus(ctx, &req.ProfileViewInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.AdminProfileTaskStatusRes{ProfileTaskStatusModel: data}, nil
+}
+
 func (c *cPublishAdmin) ProfileBase(ctx context.Context, req *publish.AdminProfileBaseReq) (*publish.AdminProfileBaseRes, error) {
 	profile, err := service.SysPublish().AdminProfileBase(ctx, &req.ProfileViewInp)
 	if err != nil {

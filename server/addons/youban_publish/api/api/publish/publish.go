@@ -700,6 +700,15 @@ type AdminProfileViewRes struct {
 	*sysin.ProfileViewModel
 }
 
+type AdminProfileTaskStatusReq struct {
+	g.Meta `path:"/publish/admin/profile/task-status" method:"get" tags:"上架插件管理端" summary:"资料任务状态"`
+	sysin.ProfileViewInp
+}
+
+type AdminProfileTaskStatusRes struct {
+	*sysin.ProfileTaskStatusModel
+}
+
 type AdminProfileBaseReq struct {
 	g.Meta `path:"/publish/admin/profile/base" method:"get" tags:"上架插件管理端" summary:"资料基础详情"`
 	sysin.ProfileViewInp

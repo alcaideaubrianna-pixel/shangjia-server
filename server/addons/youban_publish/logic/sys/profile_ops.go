@@ -398,6 +398,26 @@ func (s *sSysPublish) AdminProfileBase(ctx context.Context, in *sysin.ProfileVie
 	return profile, err
 }
 
+func (s *sSysPublish) AdminProfileTaskStatus(ctx context.Context, in *sysin.ProfileViewInp) (*sysin.ProfileTaskStatusModel, error) {
+	account, err := s.currentAdminAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	profile, err := s.adminProfileAuthorized(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	if profile == nil {
+		return nil, gerror.New("资料不存在或无权查看")
+	}
+	if account.TenantId > 0 && profile.TenantId != account.TenantId {
+		return nil, gerror.New("资料不存在或无权查看")
+	}
+	return &sysin.ProfileTaskStatusModel{
+		Id: profile.Id, Uuid: profile.Uuid, Status: profile.Status, TaskStatus: profile.TaskStatus,
+	}, nil
+}
+
 func (s *sSysPublish) AdminProfileMedia(ctx context.Context, in *sysin.ProfileViewInp) ([]*sysin.MediaModel, error) {
 	startedAt := time.Now()
 	profile, err := s.adminProfileAuthorized(ctx, in)
