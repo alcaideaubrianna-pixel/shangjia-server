@@ -145,36 +145,43 @@ func (s *sSysPublish) markProfilesUnpublishing(ctx context.Context, ids []int64,
 }
 
 func (s *sSysPublish) clearProfilesUnpublishing(ctx context.Context, ids []int64, tenantId int64, operationNo string) error {
+	ids = uniqueIds(ids)
+	operationNo = strings.TrimSpace(operationNo)
+	if len(ids) == 0 || operationNo == "" {
+		return gerror.New("清理资料下架状态失败：缺少当前下架操作号")
+	}
 	now := gtime.Now()
-	model := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx)
-	result, err := model.
-		Where("tenant_id", tenantId).WhereIn("profile_id", uniqueIds(ids)).
-		Where("publish_operation_no", strings.TrimSpace(operationNo)).
+	result, err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
+		Where("tenant_id", tenantId).WhereIn("profile_id", ids).
+		Where("publish_operation_no", operationNo).
+		Where("publish_task_status", sysin.PublishTaskStatusUnpublishing.String()).
 		Data(g.Map{"publish_operation_no": "", "publish_task_status": "", "publish_task_updated_at": now, "updated_at": now}).Update()
 	if err != nil {
 		return gerror.Wrap(err, "清理资料下架进行中状态失败")
 	}
-	// Cleanup jobs can be created from an older publish/unpublish job and carry
-	// an older operation number. Once the authoritative profile is private and
-	// no active unpublish job or sent message remains, that stale operation
-	// number must not leave the durable state stuck forever. Only fall back for
-	// rows still marked unpublishing; a newer publish operation is untouched.
-	rowsAffected, rowsErr := result.RowsAffected()
-	if rowsErr != nil {
-		return gerror.Wrap(rowsErr, "读取资料下架状态更新结果失败")
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return gerror.Wrap(err, "读取资料下架状态更新结果失败")
 	}
 	if rowsAffected == 0 {
-		_, err = g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
-			Where("tenant_id", tenantId).WhereIn("profile_id", uniqueIds(ids)).
-			Where("publish_task_status", sysin.PublishTaskStatusUnpublishing.String()).
-			Data(g.Map{"publish_operation_no": "", "publish_task_status": "", "publish_task_updated_at": now, "updated_at": now}).Update()
-		if err != nil {
-			return gerror.Wrap(err, "清理过期资料下架状态失败")
+		state, queryErr := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
+			Fields("publish_operation_no,publish_task_status").
+			Where("tenant_id", tenantId).WhereIn("profile_id", ids).
+			WhereNull("deleted_at").One()
+		if queryErr != nil {
+			return gerror.Wrap(queryErr, "确认资料下架状态失败")
 		}
+		if !state.IsEmpty() && state["publish_task_status"].String() == sysin.PublishTaskStatusUnpublishing.String() {
+			g.Log().Errorf(ctx, "资料下架状态回收未更新任何记录 profileIds:%v tenantId:%d expectedOperationNo:%s actualOperationNo:%s", ids, tenantId, operationNo, state["publish_operation_no"].String())
+			return gerror.Newf("资料下架状态回收失败：操作号不匹配，资料仍处于下架中（资料ID：%v）", ids)
+		}
+		g.Log().Infof(ctx, "资料下架状态已被其他流程收口 profileIds:%v tenantId:%d operationNo:%s", ids, tenantId, operationNo)
 	}
-	_, err = g.DB().Model(publishNoteIndexTable).Safe().Ctx(ctx).
-		Where("tenant_id", tenantId).WhereIn("profile_id", uniqueIds(ids)).
+	if _, err = g.DB().Model(publishNoteIndexTable).Safe().Ctx(ctx).
+		Where("tenant_id", tenantId).WhereIn("profile_id", ids).
 		Where("task_status", sysin.PublishTaskStatusUnpublishing.String()).
-		Data(g.Map{"task_status": ""}).Update()
-	return err
+		Data(g.Map{"task_status": "", "updated_at": now}).Update(); err != nil {
+		return gerror.Wrap(err, "同步资料列表下架状态失败")
+	}
+	return nil
 }

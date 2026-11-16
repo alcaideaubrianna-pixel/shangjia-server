@@ -35,7 +35,7 @@ func (s *sSysPublish) cleanupTelegramJobMessages(ctx context.Context, jobId int6
 			if err := s.completeTelegramCleanupIntent(ctx, job.Id); err != nil {
 				return err
 			}
-			return s.finishProfilesUnpublishing(ctx, []int64{job.ProfileId}, job.TenantId, job.OperationNo)
+			return s.finishTelegramCleanupProfile(ctx, job, payload)
 		})
 	}
 	lease, ok, err := tryTelegramCleanupChannelSlot(ctx, job.TargetChatId)
@@ -46,9 +46,6 @@ func (s *sSysPublish) cleanupTelegramJobMessages(ctx context.Context, jobId int6
 		return s.requeueTelegramCleanupJob(ctx, jobId, time.Second, payload)
 	}
 	defer s.releaseTelegramChannelLease(ctx, lease)
-	// Cleanup runs on its own queue and uses four Redis slots per channel. It does
-	// not take the publish channel lease, so publishing and cleanup do not block
-	// each other. The message query is status-aware (only `sent` rows are selected).
 	if err := s.deleteTelegramMessageSetLockedByChannel(ctx, job, "资料清理"); err != nil {
 		return err
 	}
@@ -59,7 +56,19 @@ func (s *sSysPublish) cleanupTelegramJobMessages(ctx context.Context, jobId int6
 	if err := s.completeTelegramCleanupIntent(ctx, job.Id); err != nil {
 		return err
 	}
-	return s.finishProfilesUnpublishing(ctx, []int64{job.ProfileId}, job.TenantId, job.OperationNo)
+	return s.finishTelegramCleanupProfile(ctx, job, payload)
+}
+
+// finishTelegramCleanupProfile only accepts the operation captured when the
+// current unpublish/delete request created the cleanup payload. A historical
+// publish job operation is never a valid fallback.
+func (s *sSysPublish) finishTelegramCleanupProfile(ctx context.Context, job telegramJobRecord, payload tgQueuePayload) error {
+	operationNo := strings.TrimSpace(payload.CleanupOperationNo)
+	if operationNo == "" {
+		g.Log().Warningf(ctx, "TG清理完成但缺少当前资料操作号，跳过状态回收 profileId:%d jobId:%d", job.ProfileId, job.Id)
+		return nil
+	}
+	return s.finishProfilesUnpublishing(ctx, []int64{job.ProfileId}, job.TenantId, operationNo)
 }
 
 // Cleanup uses four Redis slots per channel. Different channels never contend
