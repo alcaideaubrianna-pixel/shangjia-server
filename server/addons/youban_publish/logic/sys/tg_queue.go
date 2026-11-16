@@ -619,6 +619,86 @@ func (s *sSysPublish) currentTelegramCleanupOperationNo(ctx context.Context, ten
 	return operationNo, nil
 }
 
+func hydrateTelegramCleanupPayload(ctx context.Context, jobId int64, payload tgQueuePayload) (tgQueuePayload, error) {
+	if jobId <= 0 {
+		return payload, nil
+	}
+	var job struct {
+		TenantId      int64  `orm:"tenant_id"`
+		ProfileId     int64  `orm:"profile_id"`
+		OperationType string `orm:"operation_type"`
+	}
+	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Fields("tenant_id,profile_id,operation_type").Where("id", jobId).Scan(&job); err != nil {
+		return payload, gerror.Wrap(err, "读取TG清理任务上下文失败")
+	}
+	if job.ProfileId <= 0 {
+		return payload, nil
+	}
+
+	var intent struct {
+		Id          int64  `orm:"id"`
+		OperationNo string `orm:"operation_no"`
+		Status      string `orm:"status"`
+	}
+	intentRecord, err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
+		Fields("id,operation_no,status").Where("job_id", jobId).
+		WhereIn("event_type", []string{
+			telegramOutboxCleanupPrefix + "manual",
+			telegramOutboxCleanupPrefix + "keyword",
+			telegramOutboxCleanupPrefix + "cycle",
+		}).OrderDesc("id").One()
+	if err != nil {
+		return payload, gerror.Wrap(err, "读取TG清理意图失败")
+	}
+	if !intentRecord.IsEmpty() {
+		intent.Id = intentRecord["id"].Int64()
+		intent.OperationNo = intentRecord["operation_no"].String()
+		intent.Status = intentRecord["status"].String()
+	}
+
+	operationNo := strings.TrimSpace(payload.CleanupOperationNo)
+	durableOperationNo := strings.TrimSpace(intent.OperationNo)
+	if job.OperationType == "unpublish" {
+		state, err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
+			Fields("publish_operation_no").
+			Where("tenant_id", job.TenantId).
+			Where("profile_id", job.ProfileId).
+			Where("publish_task_status", sysin.PublishTaskStatusUnpublishing.String()).
+			WhereNull("deleted_at").One()
+		if err != nil {
+			return payload, gerror.Wrap(err, "读取当前资料下架操作号失败")
+		}
+		if !state.IsEmpty() {
+			operationNo = strings.TrimSpace(state["publish_operation_no"].String())
+		}
+	}
+	if operationNo == "" {
+		operationNo = durableOperationNo
+	}
+	if operationNo == "" {
+		return payload, nil
+	}
+	payload.CleanupOperationNo = operationNo
+
+	if intent.Id > 0 && operationNo != durableOperationNo {
+		data := g.Map{"operation_no": operationNo, "updated_at": gtime.Now()}
+		if intent.Status == telegramOutboxDelivered {
+			data["status"] = telegramOutboxPending
+			data["available_at"] = gtime.Now()
+			data["delivered_at"] = nil
+			data["lease_owner"] = ""
+			data["lease_expires_at"] = nil
+			data["last_error"] = ""
+		}
+		if _, err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
+			Where("id", intent.Id).Data(data).Update(); err != nil {
+			return payload, gerror.Wrap(err, "持久化TG清理操作号失败")
+		}
+	}
+	return payload, nil
+}
+
 func (s *sSysPublish) enqueueTelegramCleanupJobWithContext(ctx context.Context, jobId int64, delay time.Duration, payload tgQueuePayload) error {
 	started := time.Now()
 	queueName := tgQueueNameCleanup
@@ -667,10 +747,7 @@ func (s *sSysPublish) enqueueTelegramCleanupJobWithContext(ctx context.Context, 
 		"cleanupOperationNo": operationNo, "cleanupJobIds": payload.CleanupJobIds,
 		"delayMs": delay.Milliseconds(),
 	})
-	priority := channelPriorityManualDelete
-	if owner.Priority > tgJobPriorityInteractive {
-		priority = channelPriorityCycleDelete
-	}
+	priority := telegramCleanupPriority(owner.Priority, operationNo)
 	if s.unifiedPushEngineEnabled(ctx, owner.TenantId, owner.AccountId) {
 		queueName = channelDispatchDeleteQueueName(priority)
 	}

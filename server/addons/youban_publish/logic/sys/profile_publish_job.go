@@ -26,7 +26,7 @@ func (s *sSysPublish) profilePublishSource(ctx context.Context, profileId, tenan
 		InnerJoin(publishProfileStateTable+" ps", "ps.profile_id=p.id AND ps.deleted_at IS NULL").
 		LeftJoin(publishAccountTable+" a", "a.id=ps.account_id AND a.deleted_at IS NULL").
 		Fields("p.id AS profile_id,p.profile_no,p.title,p.province,p.city,p.plain_text,p.status,p.visibility,"+
-			"ps.tenant_id,ps.account_id,ps.customer_remark,ps.anti_scan_enabled,"+
+			"ps.tenant_id,ps.account_id,ps.customer_remark,ps.anti_scan_enabled,ps.publish_task_status,"+
 			"a.nickname AS account_nickname,"+
 			"(SELECT COUNT(1) FROM "+publishProfileStateTable+" ps_seq "+
 			"WHERE ps_seq.tenant_id=ps.tenant_id AND ps_seq.account_id=ps.account_id "+
@@ -45,6 +45,9 @@ func (s *sSysPublish) profilePublishSource(ctx context.Context, profileId, tenan
 	}
 	if row.IsEmpty() {
 		return nil, gerror.New("资料不存在、已删除或账号归属已变化")
+	}
+	if strings.EqualFold(strings.TrimSpace(row["publish_task_status"].String()), "unpublishing") {
+		return nil, errPublishProfileUnavailable
 	}
 	if requireOnline && (row["status"].Int() != 1 || row["visibility"].String() != consts.ContentVisibilityPublic) {
 		return nil, errPublishProfileUnavailable
