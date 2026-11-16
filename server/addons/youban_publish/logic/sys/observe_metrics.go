@@ -26,6 +26,22 @@ func observeTelegramAPI(ctx context.Context, operation, uploadMode, result strin
 	durations.Record(ctx, duration.Seconds(), metricAttrs)
 }
 
+// telegramAPIStatusCode extracts the Telegram Bot API error code for metrics.
+// A successful SDK call is represented as HTTP 200; transport failures have no
+// Telegram response and are intentionally left without a numeric status code.
+func telegramAPIStatusCode(err error) int {
+	if err == nil {
+		return http.StatusOK
+	}
+	if code := telegramSendErrorCode(err); code != "" {
+		var statusCode int
+		if _, scanErr := fmt.Sscanf(code, "%d", &statusCode); scanErr == nil {
+			return statusCode
+		}
+	}
+	return 0
+}
+
 func observeRedisLua(ctx context.Context, scriptName, result string, duration time.Duration) {
 	attrs := metric.WithAttributes(
 		attribute.String("script", scriptName),
@@ -153,8 +169,19 @@ func observeTelegramPublishFailure(ctx context.Context, stage string) {
 	counter.Add(ctx, 1, metric.WithAttributes(attribute.String("stage", stage)))
 }
 
-func observeTelegramProfilePublish(ctx context.Context, job telegramJobRecord, result string, duration time.Duration) {
-	attrs := []attribute.KeyValue{attribute.String("result", result)}
+func observeTelegramProfilePublish(ctx context.Context, job telegramJobRecord, result string, duration time.Duration, publishErr error) {
+	source := "auto"
+	operationNo := strings.ToLower(strings.TrimSpace(job.OperationNo))
+	if strings.HasPrefix(operationNo, "bot_publish:") {
+		source = "bot"
+	} else if strings.HasPrefix(operationNo, "profile:") || strings.HasPrefix(operationNo, "edit:") || strings.HasPrefix(operationNo, "batchtext:") {
+		source = "web"
+	}
+	errorType := "none"
+	if publishErr != nil {
+		errorType = telegramPublishErrorType(publishErr)
+	}
+	attrs := []attribute.KeyValue{attribute.String("result", result), attribute.String("source", source), attribute.String("error_type", errorType)}
 	if job.ChannelId > 0 {
 		attrs = append(attrs, attribute.Int64("channel_id", job.ChannelId))
 	}
@@ -171,8 +198,32 @@ func observeTelegramProfilePublish(ctx context.Context, job telegramJobRecord, r
 	durations.Record(ctx, duration.Seconds(), metricAttrs)
 }
 
+func telegramPublishErrorType(err error) string {
+	if err == nil {
+		return "none"
+	}
+	if code := telegramSendErrorCode(err); code != "" {
+		return "telegram_" + code
+	}
+	message := strings.ToLower(err.Error())
+	if strings.Contains(message, "deadline exceeded") || strings.Contains(message, "timeout") {
+		return "timeout"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "canceled"
+	}
+	return "transport_or_unknown"
+}
+
 func observeTelegramProfilePublishQueueWait(ctx context.Context, job telegramJobRecord, wait time.Duration) {
-	attrs := []attribute.KeyValue{}
+	source := "auto"
+	operationNo := strings.ToLower(strings.TrimSpace(job.OperationNo))
+	if strings.HasPrefix(operationNo, "bot_publish:") {
+		source = "bot"
+	} else if strings.HasPrefix(operationNo, "profile:") || strings.HasPrefix(operationNo, "edit:") || strings.HasPrefix(operationNo, "batchtext:") {
+		source = "web"
+	}
+	attrs := []attribute.KeyValue{attribute.String("source", source)}
 	if job.ChannelId > 0 {
 		attrs = append(attrs, attribute.Int64("channel_id", job.ChannelId))
 	}

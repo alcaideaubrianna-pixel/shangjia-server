@@ -170,7 +170,7 @@ relayGroupDone:
 		if err != nil {
 			apiResult = "error"
 		}
-		observeTelegramAPI(ctx, "sendMediaGroup", "auto", apiResult, time.Since(apiStartedAt), 0)
+		observeTelegramAPI(ctx, "sendMediaGroup", "auto", apiResult, time.Since(apiStartedAt), telegramAPIStatusCode(err))
 		step.End(err, g.Map{"messageCount": len(msgs)})
 		closeTelegramMediaFiles(closers)
 		if err != nil && telegramMediaSetCanFallbackFromFileIDToURL(chunk, err) {
@@ -185,7 +185,7 @@ relayGroupDone:
 				if err != nil {
 					apiResult = "error"
 				}
-				observeTelegramAPI(ctx, "sendMediaGroup", "fallback", apiResult, time.Since(apiStartedAt), 0)
+				observeTelegramAPI(ctx, "sendMediaGroup", "fallback", apiResult, time.Since(apiStartedAt), telegramAPIStatusCode(err))
 				step.End(err, g.Map{"messageCount": len(msgs)})
 				closeTelegramMediaFiles(closers)
 			} else {
@@ -204,7 +204,7 @@ relayGroupDone:
 				if err != nil {
 					apiResult = "error"
 				}
-				observeTelegramAPI(ctx, "sendMediaGroup", "fallback", apiResult, time.Since(apiStartedAt), 0)
+				observeTelegramAPI(ctx, "sendMediaGroup", "fallback", apiResult, time.Since(apiStartedAt), telegramAPIStatusCode(err))
 				step.End(err, g.Map{"messageCount": len(msgs)})
 				closeTelegramMediaFiles(closers)
 			} else {

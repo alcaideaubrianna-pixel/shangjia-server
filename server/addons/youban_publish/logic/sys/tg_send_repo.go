@@ -423,7 +423,7 @@ func (s *sSysPublish) finalizeTelegramMediaDelivery(ctx context.Context, job tel
 	if err != nil {
 		result = "error"
 	}
-	observeTelegramProfilePublish(ctx, job, result, time.Since(startedAt))
+	observeTelegramProfilePublish(ctx, job, result, time.Since(startedAt), err)
 	return err
 }
 

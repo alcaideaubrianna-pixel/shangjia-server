@@ -446,7 +446,7 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 		if resultErr != nil {
 			result = "error"
 		}
-		observeTelegramProfilePublish(ctx, job, result, time.Since(startedAt))
+		observeTelegramProfilePublish(ctx, job, result, time.Since(startedAt), resultErr)
 	}()
 	job.TargetChatId = normalizeTelegramChannelChatID(job.TargetChatId)
 	if strings.TrimSpace(job.TargetChatId) == "" {
