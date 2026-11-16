@@ -759,6 +759,9 @@ func (s *sSysPublish) profileDisplayMediaReady(ctx context.Context, profileID in
 	}
 	if err := g.DB().Model("hg_content_profile").Safe().Ctx(ctx).
 		Fields("image_count,video_count,has_verification_video,cover_media_id").Where("id", profileID).WhereNull("deleted_at").Scan(&profile); err != nil {
+		if errors.Is(err, sql.ErrNoRows) || errors.Is(gerror.Cause(err), sql.ErrNoRows) {
+			return false, errTelegramProfileMissing
+		}
 		return false, gerror.Wrap(err, "检查资料媒体状态失败")
 	}
 	if profile.ImageCount <= 0 && profile.VideoCount <= 0 && profile.HasVerificationVideo <= 0 && profile.CoverMediaId <= 0 {
