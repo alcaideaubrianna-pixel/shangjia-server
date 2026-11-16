@@ -105,9 +105,12 @@ func (s *sSysPublish) fillCollectEventProgress(ctx context.Context, list []*sysi
 		}
 		progress[row[lc.EventId].Int64()] = &sysin.CollectEventProgressModel{Stage: row[lc.Status].String(), Message: row[lc.Message].String(), Since: row[lc.CreatedAt].GTime()}
 	}
-	outboxes, err := g.DB().Model(collectProcessOutboxTable).Ctx(ctx).WhereIn("event_id", ids).Fields("event_id,status,available_at,updated_at,lease_expires_at,last_error").All()
-	if err != nil && !isMissingCollectProcessOutboxError(err) {
-		return err
+	var outboxes []gdb.Record
+	if collectProcessOutboxMode(ctx) == "postgres_outbox" {
+		outboxes, err = g.DB().Model(collectProcessOutboxTable).Ctx(ctx).WhereIn("event_id", ids).Fields("event_id,status,available_at,updated_at,lease_expires_at,last_error").All()
+		if err != nil && !isMissingCollectProcessOutboxError(err) {
+			return err
+		}
 	}
 	mediaDAO := pdao.YoubanPublishCollectEventMedia
 	mc := mediaDAO.Columns()

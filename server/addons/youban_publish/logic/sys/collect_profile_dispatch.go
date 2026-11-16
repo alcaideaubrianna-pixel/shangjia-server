@@ -13,6 +13,7 @@ import (
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/library/cache"
 )
 
 type collectDispatchResumeAction int
@@ -158,11 +159,13 @@ func (s *sSysPublish) submitCollectProfileDispatch(ctx context.Context, dispatch
 		CollectSourceMessageId: event["source_message_id"].Int64(),
 	}
 	if s.accountPushEngine(ctx, event["tenant_id"].Int64(), event["account_id"].Int64()) == pushEngineUnifiedStream {
-		history, historyErr := g.DB().Model(collectProcessOutboxTable).Safe().Ctx(ctx).Where("event_id", event["id"].Int64()).Fields("history").Value()
-		if historyErr != nil {
-			return gerror.Wrap(historyErr, "读取采集来源调度类型失败")
+		history := false
+		if cache.Initialized() {
+			if value, historyErr := cache.Instance().Get(ctx, collectProcessHistoryMarkerKey(event["id"].Int64())); historyErr == nil && !value.IsNil() {
+				history = value.Int() == 1
+			}
 		}
-		if history.Bool() {
+		if history {
 			meta.InitialPriority = tgJobPriorityHistory
 		}
 	}

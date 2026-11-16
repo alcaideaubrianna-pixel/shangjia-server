@@ -454,6 +454,12 @@ func (s *sSysPublish) recoverReadyMediaPendingEvents(ctx context.Context, limit 
 // Recovery must yield to realtime when the shared database/worker budget is
 // under pressure. This is a bounded gate, not a queue deletion or reset.
 func (s *sSysPublish) collectRecoveryBackpressure(ctx context.Context) (bool, error) {
+	if collectProcessOutboxMode(ctx) != "postgres_outbox" {
+		// Redis-first realtime work has no PostgreSQL Outbox rows to sample.
+		// Asynq owns retry/backlog pressure in this mode; querying the legacy
+		// table here would reintroduce the exact hot read this mode removes.
+		return false, nil
+	}
 	if cached, cacheErr := cache.Instance().Get(ctx, collectRecoveryBackpressureCacheKey); cacheErr == nil && !cached.IsNil() {
 		var value collectRecoveryBackpressureValue
 		if cached.Scan(&value) == nil {

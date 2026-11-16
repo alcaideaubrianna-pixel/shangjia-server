@@ -177,6 +177,7 @@ git diff --check
 ## 9. Publish SLS 快速排查
 
 频道无推送的队列事件、租约与恢复排查见 [频道队列 SLS 手册](publish-queue-sls.md)；包含未提取字段时的全文检索兜底。
+采集处理队列的 Redis-first / 历史 Outbox 迁移边界见 [采集处理队列说明](collect-process-queue.md)。
 
 Publish 线上日志使用以下项目：
 

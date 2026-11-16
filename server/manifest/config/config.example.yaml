@@ -403,6 +403,10 @@ youbanPublish:
     # 免费账号连续未使用后台达到该天数后，频道循环推送会自动暂停。
     # 基础版连续未使用后台达到该天数后，自动暂停频道循环上架。
     freeInactiveDays: 3
+  collect:
+    # 新的实时/历史采集处理直接进入 Redis/Asynq；PostgreSQL Outbox 仅用于
+    # 旧版本积压和显式迁移恢复。迁移旧版本积压时临时改为 postgres_outbox。
+    processOutboxMode: "redis_first"
   mediaSearch:
     pgvector:
       enabled: false
@@ -428,6 +432,11 @@ youbanPublish:
     publishBulkConcurrency: 4  # 循环/全量上架低优先级发送并发，建议按节点逐步调整
     cycleConcurrency: 1       # 循环调度任务并发；调度本身有分布式锁，通常保持 1
 
+
+telegramCollector:
+  # 实时 webhook 默认跳过旧 PostgreSQL 接收 Spool，直接写入事件并进入 Redis/Asynq。
+  # 迁移旧接收积压时临时改为 postgres_spool。
+  ingestSpoolMode: "redis_first"
 
 # 悦伴全局 Bot
 youbanBot:

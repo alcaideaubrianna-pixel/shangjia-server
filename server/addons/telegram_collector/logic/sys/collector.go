@@ -124,9 +124,12 @@ func (s *sCollector) IngestBotUpdate(ctx context.Context, bot collectorservice.B
 	if !event.ValidateBoundary() {
 		return gerror.New("Telegram采集事件归属不完整")
 	}
-	spoolID, err := persistIngestSpool(ctx, &event)
-	if err != nil {
-		return err
+	var spoolID int64
+	if collectorIngestSpoolEnabled(ctx) {
+		spoolID, err = persistIngestSpool(ctx, &event)
+		if err != nil {
+			return err
+		}
 	}
 	eventID, err := s.persistEvent(ctx, &event)
 	if err != nil {
@@ -179,9 +182,12 @@ func (s *sCollector) IngestAccountMessage(ctx context.Context, message *sysin.Ac
 		Priority: accountMessagePriority(message), RawUpdate: raw, ReceivedAt: message.ReceivedAt,
 		TraceID: message.TraceID,
 	}
-	spoolID, err := persistIngestSpool(ctx, &event)
-	if err != nil {
-		return err
+	var spoolID int64
+	if collectorIngestSpoolEnabled(ctx) {
+		spoolID, err = persistIngestSpool(ctx, &event)
+		if err != nil {
+			return err
+		}
 	}
 	if eventID, repaired, repairErr := s.refreshCorruptedAccountEvent(ctx, message, raw); repairErr != nil {
 		return repairErr

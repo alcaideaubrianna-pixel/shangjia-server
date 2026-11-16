@@ -61,7 +61,14 @@ func (s *sCollector) StartRuntime(ctx context.Context) {
 	s.queueServer = server
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(eventTaskType, s.handleEventTask)
-	g.Log().Infof(runtimeCtx, "启动Telegram Collector Worker concurrency:%d", collectorConcurrency(runtimeCtx))
+	g.Log().Info(runtimeCtx, "启动Telegram Collector Worker", g.Map{
+		"log_type":          "telegram_collector",
+		"event":             "collector_worker_started",
+		"concurrency":       collectorConcurrency(runtimeCtx),
+		"ingestSpoolMode":   normalizeCollectorIngestSpoolMode(g.Cfg().MustGet(runtimeCtx, "telegramCollector.ingestSpoolMode", "redis_first").String()),
+		"eventHandoff":      "postgres_event_then_redis",
+		"legacySpoolActive": collectorIngestSpoolEnabled(runtimeCtx),
+	})
 	// Signal handling belongs to the application; StopRuntime owns Shutdown.
 	if err := server.Start(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
 		g.Log().Warningf(runtimeCtx, "启动Telegram采集Worker失败：%+v", err)

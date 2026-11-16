@@ -74,6 +74,19 @@ type collectProcessQueuePayload struct {
 
 const collectProcessActiveSourcesKey = "youban_publish:collect:active_sources"
 
+func collectProcessHistoryMarkerKey(eventID int64) string {
+	return fmt.Sprintf("youban_publish:collect:history:event:%d", eventID)
+}
+
+func markCollectProcessHistory(ctx context.Context, payload collectProcessQueuePayload) {
+	if !payload.History || payload.EventId <= 0 || !cache.Initialized() {
+		return
+	}
+	if err := cache.Instance().Set(ctx, collectProcessHistoryMarkerKey(payload.EventId), 1, 24*time.Hour); err != nil {
+		g.Log().Debugf(ctx, "写入采集历史任务标记失败 eventId:%d err:%+v", payload.EventId, err)
+	}
+}
+
 func collectProcessSourceWakeLockKey(member string) string {
 	return "youban_publish:collect:source:wake:lock:" + member
 }
@@ -103,6 +116,38 @@ const (
 	collectProcessCandidateIndexBatchSize  = 256
 	collectProcessCandidateIndexReadFactor = 4
 )
+
+// collectProcessOutboxMode controls the durability boundary for the rule
+// processing queue. Redis/Asynq is the realtime execution queue; PostgreSQL
+// Outbox is retained for history and explicit recovery only.
+//
+// "redis_first" is the default so every realtime collection event avoids a
+// PostgreSQL upsert before it reaches the worker. Set "postgres_outbox" only
+// while migrating an older deployment or replaying a legacy backlog.
+func collectProcessOutboxMode(ctx context.Context) string {
+	mode := g.Cfg().MustGet(ctx, "youbanPublish.collect.processOutboxMode", "redis_first").String()
+	return normalizeCollectProcessOutboxMode(mode)
+}
+
+func normalizeCollectProcessOutboxMode(mode string) string {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	switch mode {
+	case "postgres_outbox", "outbox", "legacy":
+		return "postgres_outbox"
+	default:
+		return "redis_first"
+	}
+}
+
+func collectProcessShouldPersistOutbox(ctx context.Context, payload collectProcessQueuePayload) bool {
+	if collectProcessOutboxMode(ctx) == "postgres_outbox" {
+		return true
+	}
+	// Only a task already claimed by the legacy dispatcher keeps the old
+	// PostgreSQL lease fence. New realtime and history tasks both use Redis;
+	// their priority/classification travels in the task payload.
+	return payload.OutboxOwner != ""
+}
 
 // isCollectProcessRedisTransientError keeps Redis startup/reconnect failures
 // out of the permanent collection-failure path. Redis returns LOADING while
@@ -255,8 +300,9 @@ func (s *sSysPublish) enqueueCollectProcessTaskWithOutbox(ctx context.Context, p
 	// index. The index is only an accelerator; PG remains authoritative below.
 	if payload.EventId > 0 {
 		indexCollectProcessCandidate(ctx, payload, payload.EventId)
+		markCollectProcessHistory(ctx, payload)
 	}
-	if persist {
+	if persist && collectProcessShouldPersistOutbox(ctx, payload) {
 		if err := ensureCollectProcessOutbox(ctx, payload, delay); err != nil {
 			if !isMissingCollectProcessOutboxError(err) {
 				return false, err
@@ -268,6 +314,13 @@ func (s *sSysPublish) enqueueCollectProcessTaskWithOutbox(ctx context.Context, p
 			// The durable outbox remains the recovery source if Redis enqueue fails.
 			return s.enqueueCollectProcessTaskWithOutbox(ctx, payload, delay, unique, false)
 		}
+	}
+	// Redis-first realtime work is already durable in Asynq. Do not create an
+	// otherwise-unused PostgreSQL Outbox row merely to describe a Redis task.
+	// The event table remains the business projection and the task's unique key
+	// plus retry policy provide the execution handoff.
+	if persist && payload.EventId > 0 && collectProcessOutboxMode(ctx) == "postgres_outbox" {
+		markCollectProcessSourceActive(ctx, payload)
 	}
 	client, err := s.telegramQueueClient(ctx)
 	if err != nil {

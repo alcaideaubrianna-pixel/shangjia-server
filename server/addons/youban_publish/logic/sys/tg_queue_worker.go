@@ -233,6 +233,13 @@ func (s *sSysPublish) runCollectProcessSourceDispatcher(ctx context.Context, mem
 }
 
 func (s *sSysPublish) ensureCollectProcessSourceDispatcher(ctx context.Context, member string) {
+	// Redis-first realtime scheduling does not need a PostgreSQL dispatcher.
+	// The dispatcher is retained as an explicit legacy/recovery mode so old
+	// Outbox rows can be drained without keeping a database polling loop alive
+	// in every publish worker.
+	if collectProcessOutboxMode(ctx) != "postgres_outbox" {
+		return
+	}
 	if _, loaded := collectProcessSourceDispatchers.LoadOrStore(member, struct{}{}); loaded {
 		return
 	}
@@ -380,6 +387,14 @@ func (s *sSysPublish) reconcileCollectSourceQueueWorkers(ctx context.Context) {
 }
 
 func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
+	outboxMode := collectProcessOutboxMode(ctx)
+	g.Log().Info(ctx, "采集处理队列模式", g.Map{
+		"log_type":           "telegram_collect_queue",
+		"event":              "collect_process_queue_mode",
+		"outboxMode":         outboxMode,
+		"realtimeQueue":      "redis_asynq",
+		"postgresOutboxUsed": outboxMode == "postgres_outbox",
+	})
 	s.tgQueueMu.Lock()
 	if s.autoDeleteQueueServer != nil || s.autoDeleteBackfillServer != nil || s.attemptTimeoutServer != nil || s.backgroundQueueServer != nil || s.accountScheduleQueueServer != nil || s.materialImportPullServer != nil || s.cycleQueueServer != nil {
 		s.tgQueueMu.Unlock()
@@ -997,7 +1012,7 @@ func (s *sSysPublish) handleCollectProcessTask(ctx context.Context, task *asynq.
 		"ruleConcurrency": collectProcessRuleConcurrency(ctx), "workerRole": identity.Role, "workerInstanceId": identity.InstanceID,
 		"workerRevision": identity.Revision, "workerImageDigest": identity.ImageDigest,
 	})
-	if payload.EventId > 0 {
+	if payload.EventId > 0 && payload.OutboxOwner != "" {
 		_, _ = g.DB().Model(collectProcessOutboxTable).Ctx(ctx).Where("event_id", payload.EventId).Data(g.Map{
 			"worker_role": identity.Role, "worker_instance_id": identity.InstanceID,
 			"worker_revision": identity.Revision, "worker_image_digest": identity.ImageDigest,
@@ -1054,7 +1069,7 @@ func (s *sSysPublish) handleCollectProcessTask(ctx context.Context, task *asynq.
 			"error": errorMessage, "workerRole": identity.Role, "workerInstanceId": identity.InstanceID,
 			"workerRevision": identity.Revision, "workerImageDigest": identity.ImageDigest,
 		})
-		if err != nil && payload.EventId > 0 {
+		if err != nil && payload.EventId > 0 && payload.OutboxOwner != "" {
 			_, _ = g.DB().Model(collectProcessOutboxTable).Ctx(ctx).Where("event_id", payload.EventId).Data(g.Map{
 				"last_error": errorMessage, "worker_finished_at": gtime.Now(), "updated_at": gtime.Now(),
 			}).Update()

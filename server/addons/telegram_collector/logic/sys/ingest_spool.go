@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -14,9 +15,29 @@ import (
 
 const collectorIngestSpoolTable = "hg_tg_collector_ingest_spool"
 
-// persistIngestSpool is the acknowledgement boundary for Telegram updates.
-// The event table remains the business projection; this table is the durable
-// handoff that can be replayed independently when a downstream worker fails.
+// collectorIngestSpoolEnabled keeps the legacy PostgreSQL acknowledgement
+// spool available for migration/replay, while allowing the normal webhook
+// path to persist the business event once and enqueue it directly to Redis.
+// The default is redis_first because persistEvent already has the idempotent
+// event key and Asynq provides the durable execution handoff.
+func collectorIngestSpoolEnabled(ctx context.Context) bool {
+	mode := g.Cfg().MustGet(ctx, "telegramCollector.ingestSpoolMode", "redis_first").String()
+	return normalizeCollectorIngestSpoolMode(mode) == "postgres_spool"
+}
+
+func normalizeCollectorIngestSpoolMode(mode string) string {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	switch mode {
+	case "postgres", "postgres_spool", "legacy":
+		return "postgres_spool"
+	default:
+		return "redis_first"
+	}
+}
+
+// persistIngestSpool is the legacy PostgreSQL acknowledgement boundary for
+// Telegram updates. It is used only when postgres_spool mode is explicitly
+// enabled; the normal webhook path uses the idempotent event row plus Redis.
 func persistIngestSpool(ctx context.Context, event *sysin.RawUpdateEvent) (int64, error) {
 	if event == nil || event.EventID == "" || event.TenantID <= 0 {
 		return 0, fmt.Errorf("采集接收事件标识不完整")

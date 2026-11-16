@@ -15,6 +15,25 @@ import (
 	"hotgo/addons/telegram_collector/model/input/sysin"
 )
 
+func TestCollectorIngestSpoolModeDefaultIsRedisFirst(t *testing.T) {
+	for _, test := range []struct {
+		input string
+		want  string
+	}{
+		{"", "redis_first"},
+		{"redis_first", "redis_first"},
+		{" REDIS_FIRST ", "redis_first"},
+		{"postgres", "postgres_spool"},
+		{"postgres_spool", "postgres_spool"},
+		{"legacy", "postgres_spool"},
+		{"unknown", "redis_first"},
+	} {
+		if got := normalizeCollectorIngestSpoolMode(test.input); got != test.want {
+			t.Fatalf("mode %q: got %q, want %q", test.input, got, test.want)
+		}
+	}
+}
+
 // Only a disposable loopback PostgreSQL is accepted. No production credentials
 // or Telegram clients are used by this test.
 func TestIngestSpoolPostgres(t *testing.T) {

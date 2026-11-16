@@ -409,6 +409,9 @@ youbanPublish:
     freeIntervalDays: 15
     # 单个频道允许存在的活动循环任务数，可通过 YOUBAN_PUBLISH_CYCLE_CHANNELBACKLOGLIMIT 覆盖。
     channelBacklogLimit: 100
+  collect:
+    # 新的实时/历史采集处理走 Redis/Asynq，旧 Outbox 积压迁移时临时切换为 postgres_outbox。
+    processOutboxMode: "redis_first"
   messagePush:
     # 免费用户循环推送的固定间隔天数。
     freeIntervalDays: 9
@@ -437,6 +440,10 @@ youbanPublish:
     publishBulkConcurrency: 4
     cycleConcurrency: 1
 
+
+telegramCollector:
+  # 实时 webhook 默认跳过旧 PostgreSQL 接收 Spool，直接写入事件并进入 Redis/Asynq。
+  ingestSpoolMode: "redis_first"
 
 # 悦伴全局 Bot
 youbanBot:
