@@ -40,7 +40,9 @@ const (
 	collectRecoveryMediaCursorKey       = "youban_publish:collect:recovery:media:cursor"
 	// 恢复查询本身只处理超过 10 秒未推进的事件，因此实时优先窗口
 	// 必须覆盖这段短暂积压，而不能再次使用 10 秒阈值导致全部命中历史。
-	collectRecoveryRealtimeWindow = 10 * time.Minute
+	collectRecoveryRealtimeWindow     = 10 * time.Minute
+	collectRecoverySourceBatchDefault = 8
+	collectRecoverySourceBatchMaximum = 64
 )
 
 func reserveCollectMediaRecovery(ctx context.Context, eventID int64) bool {
@@ -120,8 +122,12 @@ func activeCollectProcessScopes(ctx context.Context) []publishAccountScope {
 		return nil
 	}
 	members := value.Strings()
-	scopes := make([]publishAccountScope, 0, len(members))
+	maxScopes := collectRecoverySourceBatchSize(ctx)
+	scopes := make([]publishAccountScope, 0, min(len(members), maxScopes))
 	for _, member := range members {
+		if len(scopes) >= maxScopes {
+			break
+		}
 		parts := strings.Split(member, ":")
 		if len(parts) != 3 {
 			continue
@@ -135,6 +141,17 @@ func activeCollectProcessScopes(ctx context.Context) []publishAccountScope {
 		scopes = append(scopes, publishAccountScope{TenantID: tenantID, AccountID: accountID, SourceID: sourceID})
 	}
 	return scopes
+}
+
+func collectRecoverySourceBatchSize(ctx context.Context) int {
+	value := g.Cfg().MustGet(ctx, "youbanPublish.collect.recoverySourceBatchSize", collectRecoverySourceBatchDefault).Int()
+	if value < 1 {
+		return collectRecoverySourceBatchDefault
+	}
+	if value > collectRecoverySourceBatchMaximum {
+		return collectRecoverySourceBatchMaximum
+	}
+	return value
 }
 
 func collectSourceRecoveryConcurrency(ctx context.Context) int {
@@ -1054,18 +1071,27 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 	deadline := gtime.Now().Add(-collectEventRecoverAfter)
 	realtimeCutoff := gtime.Now().Add(-collectRecoveryRealtimeWindow)
 	activeStatuses := []string{sysin.CollectEventStatusPending, sysin.CollectEventStatusGroupCollect, sysin.CollectEventStatusWaitingOrder, sysin.CollectEventStatusPrechecked, sysin.CollectEventStatusMediaPending, sysin.CollectEventStatusMediaReady}
-	buildModel := func() *gdb.Model {
+	scopes := activeCollectProcessScopes(ctx)
+	if len(scopes) == 0 {
+		// Redis is the source of active recovery lanes. Never fall back to a
+		// global event scan when the candidate index is unavailable.
+		return nil
+	}
+	buildModel := func(scope publishAccountScope) *gdb.Model {
 		return pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
 			Fields("e.id,e.tenant_id,e.account_id,e.source_id,e.source_chat_id,e.status,e.error_message").
 			WhereIn("e.status", activeStatuses).
 			WhereLTE("e.updated_at", deadline).
+			Where("e.tenant_id", scope.TenantID).
+			Where("e.account_id", scope.AccountID).
+			Where("e.source_id", scope.SourceID).
 			Where(enabledCollectSourceExistsSQL("e"))
 	}
-	queryRows := func(recent bool, queryLimit int) ([]gdb.Record, error) {
+	queryRows := func(scope publishAccountScope, recent bool, queryLimit int) ([]gdb.Record, error) {
 		if queryLimit <= 0 {
 			return nil, nil
 		}
-		model := buildModel()
+		model := buildModel(scope)
 		if recent {
 			model = model.WhereGTE("e.updated_at", realtimeCutoff)
 		} else {
@@ -1074,27 +1100,37 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 		return model.OrderAsc("e.updated_at").OrderAsc("e.id").Limit(queryLimit).All()
 	}
 
-	rows, err := queryRows(true, limit)
-	if err != nil {
-		return gerror.Wrap(err, "读取实时优先待恢复采集事件失败")
-	}
-	if len(rows) < limit {
-		historyRows, historyErr := queryRows(false, limit-len(rows))
-		if historyErr != nil {
-			return gerror.Wrap(historyErr, "读取历史待恢复采集事件失败")
+	rows := make([]gdb.Record, 0, limit)
+	perScope := max(1, (limit+len(scopes)-1)/len(scopes))
+	for _, scope := range scopes {
+		if len(rows) >= limit {
+			break
 		}
-		rows = append(rows, historyRows...)
-	}
-	if len(rows) < limit {
-		failedRows, failedErr := recoverableFailedCollectEventModel(ctx, deadline).
-			OrderAsc("e.updated_at").
-			OrderAsc("e.id").
-			Limit(limit - len(rows)).
-			All()
-		if failedErr != nil {
-			return gerror.Wrap(failedErr, "读取待恢复失败采集事件失败")
+		budget := min(perScope, limit-len(rows))
+		recentRows, err := queryRows(scope, true, budget)
+		if err != nil {
+			return gerror.Wrap(err, "读取来源实时待恢复采集事件失败")
 		}
-		rows = append(rows, failedRows...)
+		rows = append(rows, recentRows...)
+		if len(recentRows) < budget && len(rows) < limit {
+			historyRows, historyErr := queryRows(scope, false, min(budget-len(recentRows), limit-len(rows)))
+			if historyErr != nil {
+				return gerror.Wrap(historyErr, "读取来源历史待恢复采集事件失败")
+			}
+			rows = append(rows, historyRows...)
+		}
+		if len(rows) < limit {
+			failedModel := recoverableFailedCollectEventModel(ctx, deadline).
+				Where("e.tenant_id", scope.TenantID).
+				Where("e.account_id", scope.AccountID).
+				Where("e.source_id", scope.SourceID)
+			failedRows, failedErr := failedModel.OrderAsc("e.updated_at").OrderAsc("e.id").
+				Limit(min(budget, limit-len(rows))).All()
+			if failedErr != nil {
+				return gerror.Wrap(failedErr, "读取来源失败采集事件失败")
+			}
+			rows = append(rows, failedRows...)
+		}
 	}
 	for _, row := range rows {
 		if row.IsEmpty() || row["id"].Int64() <= 0 || !shouldRecoverCollectEvent(row) {
