@@ -103,18 +103,11 @@ func (s *sSysPublish) ensureTelegramJobOutboxTx(ctx context.Context, tx gdb.TX, 
 	if err != nil {
 		return gerror.Wrap(err, "保存TG任务Outbox失败")
 	}
-	// Outbox 是可靠事实记录，频道 ZSET 只是快速队首索引。写入两者后，
-	// 即使 Redis 短暂不可用，后续 Outbox 扫描也会重新回填索引。
-	var job telegramJobRecord
-	if err = tx.Model(publishTgJobTable).Safe().Ctx(ctx).
-		Fields("id,tenant_id,channel_id,priority").Where("id", jobId).Scan(&job); err == nil && job.Id > 0 {
-		if indexErr := (tgChannelPendingIndex{}).add(ctx, job.TenantId, job.ChannelId, job.Id, job.Priority); indexErr != nil {
-			g.Log().Warningf(ctx, "写入频道待投递索引失败，等待Outbox回填 jobId:%d channelId:%d err:%+v", job.Id, job.ChannelId, indexErr)
-		}
-	}
-	// 事务提交后 Dispatcher 会立即被唤醒；若事务尚未提交，下一轮兜底
-	// 扫描仍会再次领取，事件信号本身不承担可靠性。
+	// 事务提交后 Dispatcher 会把已提交的 Outbox 回填到频道索引并投递 Redis。
+	// 当前函数可能运行在未提交的事务中，因此这里不直接写 Redis，避免回滚后留下脏索引。
+	// 即时信号可能在提交前被消费；延迟信号覆盖提交竞态，定时扫描仍是最终兜底。
 	s.wakeTelegramOutbox()
+	time.AfterFunc(100*time.Millisecond, s.wakeTelegramOutbox)
 	return nil
 }
 
@@ -261,7 +254,7 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 		if outboxAt := dbtime.FromTimestamp(row.AvailableAt); outboxAt != nil && outboxAt.Time.After(availableAt) {
 			availableAt = outboxAt.Time
 		}
-		if enqueueErr := enqueueTelegramChannelJob(ctx, job.ChannelId, job.Id, priority, availableAt); enqueueErr != nil {
+		if enqueueErr := enqueueTelegramChannelJob(ctx, job.AccountId, job.ChannelId, job.Id, priority, availableAt); enqueueErr != nil {
 			g.Log().Warning(ctx, "统一频道队列Redis入队失败，保留Outbox待补偿", g.Map{"event": "channel_direct_enqueue_failed", "jobId": job.Id, "channelId": job.ChannelId, "outboxId": row.Id, "error": enqueueErr.Error()})
 			return enqueueErr
 		}
@@ -319,7 +312,7 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 			availableAt = outboxAt.Time
 		}
 		score := telegramChannelQueueScore(priority, availableAt, job.Id)
-		if err = enqueueTelegramChannelJob(ctx, job.ChannelId, job.Id, priority, availableAt); err != nil {
+		if err = enqueueTelegramChannelJob(ctx, job.AccountId, job.ChannelId, job.Id, priority, availableAt); err != nil {
 			return s.releaseTelegramOutbox(ctx, row.Id, owner, row.AttemptCount, err.Error())
 		}
 		g.Log().Info(ctx, "TG频道队列已就绪", g.Map{

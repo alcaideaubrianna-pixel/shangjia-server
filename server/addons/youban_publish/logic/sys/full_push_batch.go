@@ -256,11 +256,12 @@ func (s *sSysPublish) advanceFullPushBatch(ctx context.Context, batch fullPushBa
 	if err != nil {
 		return s.retryFullPushBatch(ctx, batch, err)
 	}
+	// 先显式唤醒这批已落库的 Job/Outbox，再推进游标。若进程在游标提交前退出，
+	// 下一轮会按同一 operationNo 幂等重放；若 Redis 暂时不可用，Outbox 仍是可靠事实记录。
+	s.enqueuePreparedProfileJobs(ctx, jobIDs, batch.RequestedBy)
 	if err = s.checkpointFullPushBatch(ctx, batch.Id, lastProfileId, queued); err != nil {
 		return err
 	}
-	// 事务提交后统一唤醒这一批任务，避免在任务写入事务内触碰 Redis/队列。
-	s.enqueuePreparedProfileJobs(ctx, jobIDs, batch.RequestedBy)
 	batch.CursorProfileId = lastProfileId
 	batch.QueuedCount += queued
 	if len(profiles) < limit || lastProfileId >= batch.SnapshotMaxProfileId {

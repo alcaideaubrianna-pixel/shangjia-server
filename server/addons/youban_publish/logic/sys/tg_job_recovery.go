@@ -136,13 +136,23 @@ func (s *sSysPublish) recoverTelegramChannelQueueJobs(ctx context.Context, limit
 	if limit > 500 {
 		limit = 500
 	}
-	if err := s.recoverPendingIdleTelegramJobs(ctx, limit); err != nil {
-		return err
-	}
+
+	// Pending recovery may touch a large database backlog. Keep it independent
+	// from channel-claim recovery so one slow/failing scan cannot prevent stale
+	// Redis claims from being released in the same cycle.
+	pendingErr := s.recoverPendingIdleTelegramJobs(ctx, limit)
+
 	// A worker context can be cancelled after Telegram accepted the request.
 	// The stale sender path therefore reconciles sending phases before any
 	// retry; it never blindly changes an ambiguous external send to pending.
-	return s.recoverStaleTelegramSendingJobs(ctx, limit)
+	sendingErr := s.recoverStaleTelegramSendingJobs(ctx, limit)
+	if pendingErr != nil && sendingErr != nil {
+		return errors.Join(pendingErr, sendingErr)
+	}
+	if pendingErr != nil {
+		return pendingErr
+	}
+	return sendingErr
 }
 
 func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {

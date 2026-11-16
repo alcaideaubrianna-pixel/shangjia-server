@@ -269,6 +269,9 @@ func (s *sSysPublish) rehydrateMissingTelegramChannelQueue(ctx context.Context, 
 	dueCount = len(due.Array())
 	stage = "due_recovery"
 	for _, v := range due.Array() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		id := gconv.Int64(v)
 		if id <= 0 {
 			continue
@@ -343,6 +346,9 @@ func (s *sSysPublish) rehydrateMissingTelegramChannelQueue(ctx context.Context, 
 		count = limit
 	}
 	for _, key := range state.Pending[:count] {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		scanned++
 		prefix := ""
 		for _, candidate := range []string{telegramChannelProcessingPrefix, telegramChannelUrgentQueuePrefix, telegramChannelHistoryQueuePrefix, telegramChannelQueuePrefix} {
