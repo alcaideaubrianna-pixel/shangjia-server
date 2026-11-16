@@ -93,7 +93,10 @@ func profileMessageHasProfileText(text string) bool {
 	if normalized == "" || profileMessageIgnoredNotice(normalized) {
 		return false
 	}
-	return (profileMessageFieldPattern.MatchString(normalized) && profileMessageNonIndexFieldPattern.MatchString(normalized)) || profileMessageCompactValuePattern.MatchString(normalized)
+	// Any known profile field is sufficient to identify a display record.
+	// Do not require two fields: short records often contain only one field
+	// such as "城市：成都" or "年龄：25".
+	return profileMessageNonIndexFieldPattern.MatchString(normalized) || profileMessageCompactValuePattern.MatchString(normalized)
 }
 
 func profileMessageOnlyIndexText(text string) bool {
