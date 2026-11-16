@@ -434,7 +434,7 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 		if !collectMaterialEventOlderThan(event, collectMaterialGroupingDelay) {
 			return nil
 		}
-		classification, err := s.classifyCollectEvent(ctx, event, nil)
+		classification, err := classifyCollectEventMedia(ctx, event, strings.TrimSpace(event["raw_text"].String()), mediaByEvent[event["id"].Int64()])
 		if err != nil {
 			return err
 		}

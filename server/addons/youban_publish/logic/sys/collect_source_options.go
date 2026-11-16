@@ -8,6 +8,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 
+	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
@@ -32,22 +33,14 @@ func (s *sSysPublish) AdminCollectSourceOptions(ctx context.Context, keyword str
 		perPage = 20
 	}
 	var rows []collectSourceOptionRow
-	base := g.DB().Model(publishCollectEventTable+" e").Safe().Ctx(ctx).
-		InnerJoin(publishCollectSourceTable+" s", "s.id=e.source_id AND s.tenant_id=e.tenant_id").
-		LeftJoin(publishTgChannelTable+" c", "c.tenant_id=e.tenant_id AND c.tg_account_id=e.tg_account_id AND c.channel_id=e.source_chat_id").
-		LeftJoin(publishBotChannelCacheTable+" bc", "bc.tenant_id=e.tenant_id AND bc.bot_id=COALESCE(NULLIF(e.bot_id,0),s.bot_id) AND bc.chat_id=e.source_chat_id").
-		Where("e.tenant_id", account.TenantId).WhereNull("s.deleted_at").Where("e.source_chat_id != ''")
-	if keyword = strings.Trim(strings.TrimSpace(keyword), "@"); keyword != "" {
-		like := "%" + keyword + "%"
-		base = base.Where("(c.channel_title LIKE ? OR c.channel_username LIKE ? OR bc.chat_title LIKE ? OR bc.chat_username LIKE ? OR e.source_chat_id LIKE ? OR s.title LIKE ?)", like, like, like, like, like, like)
-	}
+	base := collectSourceOptionsModel(ctx, account.TenantId, account.Id, keyword)
 	if totalCount, err = countCollectSourceOptionGroups(ctx, base); err != nil {
 		return nil, 0, gerror.Wrap(err, "统计采集频道失败")
 	}
 	// A Telegram channel is identified by source_chat_id. Historical source
 	// rows may point at the same channel, so expose one option per channel.
-	mod := base.Fields("MIN(e.source_id) AS source_id,e.source_chat_id,MAX(s.title) AS title,MAX(s.source_username) AS source_username,COALESCE(MAX(c.channel_title),MAX(bc.chat_title)) AS channel_title,COALESCE(MAX(c.channel_username),MAX(bc.chat_username)) AS channel_username").
-		Group("e.source_chat_id")
+	mod := base.Fields("MIN(ac.source_id) AS source_id,c.telegram_chat_id AS source_chat_id,MAX(s.title) AS title,MAX(s.source_username) AS source_username,MAX(c.title) AS channel_title,MAX(c.username) AS channel_username").
+		Group("c.telegram_chat_id")
 	if err = mod.OrderAsc("title").OrderAsc("source_id").Page(page, perPage).Scan(&rows); err != nil {
 		return nil, 0, gerror.Wrap(err, "获取采集频道筛选选项失败")
 	}
@@ -73,10 +66,24 @@ func (s *sSysPublish) AdminCollectSourceOptions(ctx context.Context, keyword str
 }
 
 func countCollectSourceOptionGroups(ctx context.Context, mod *gdb.Model) (int, error) {
-	var groups []struct {
-		SourceId     int64  `orm:"source_id"`
-		SourceChatId string `orm:"source_chat_id"`
+	row, err := mod.Clone().Fields(gdb.Raw("COUNT(DISTINCT c.telegram_chat_id) AS total")).One()
+	if err != nil {
+		return 0, err
 	}
-	err := mod.Clone().Fields(gdb.Raw("e.source_chat_id")).Group("e.source_chat_id").Scan(&groups)
-	return len(groups), err
+	return row["total"].Int(), nil
+}
+
+func collectSourceOptionsModel(ctx context.Context, tenantID, accountID int64, keyword string) *gdb.Model {
+	// Channel options describe configured collection relations, not historical
+	// messages. Keep disabled/pending relations visible for history filtering.
+	base := g.DB().Model(pdao.YoubanPublishCollectAccountChannel.Table()+" ac").Safe().Ctx(ctx).
+		InnerJoin(pdao.YoubanPublishCollectChannel.Table()+" c", "c.id=ac.channel_id AND c.tenant_id=ac.tenant_id AND c.deleted_at IS NULL").
+		InnerJoin(publishCollectSourceTable+" s", "s.id=ac.source_id AND s.tenant_id=ac.tenant_id AND s.account_id=ac.account_id AND s.deleted_at IS NULL").
+		Where("ac.tenant_id", tenantID).Where("ac.account_id", accountID).
+		WhereNull("ac.deleted_at").Where("c.telegram_chat_id != ''")
+	if keyword = strings.Trim(strings.TrimSpace(keyword), "@"); keyword != "" {
+		like := "%" + keyword + "%"
+		base = base.Where("(c.title LIKE ? OR c.username LIKE ? OR c.telegram_chat_id LIKE ? OR s.title LIKE ?)", like, like, like, like)
+	}
+	return base
 }

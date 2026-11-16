@@ -1307,6 +1307,12 @@ func (s *sSysPublish) classifyCollectEvent(ctx context.Context, event gdb.Record
 		}
 		items = collectMediaRowsToItems(rows, event["material_role"].String())
 	}
+	return classifyCollectEventMedia(ctx, event, text, items)
+}
+
+// Media has already been loaded by the caller, including an empty result.
+// Keep this path free of database reads so window classification stays batched.
+func classifyCollectEventMedia(ctx context.Context, event gdb.Record, text string, items []collectMediaItem) (profileMessageClassification, error) {
 	classification := classifyProfileMessage(text, items)
 	verifyCount := 0
 	displayCount := 0
