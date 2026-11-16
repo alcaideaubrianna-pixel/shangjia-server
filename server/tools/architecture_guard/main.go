@@ -94,39 +94,52 @@ func compare(actual, allowed []entry) []string {
 func digest(s string) string { h := sha256.Sum256([]byte(s)); return hex.EncodeToString(h[:]) }
 
 func scan(root string) ([]entry, error) {
-	base := filepath.Join(root, "addons/youban_publish")
+	bases := []string{
+		filepath.Join(root, "addons/youban_publish"),
+		filepath.Join(root, "addons/telegram_collector"),
+	}
 	items := make(map[string]entry)
-	err := filepath.WalkDir(base, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		found, err := inspect(filepath.ToSlash(rel), path)
-		if err != nil {
-			return err
-		}
-		for _, e := range found {
-			key := identity(e)
-			if old, ok := items[key]; ok {
-				old.Count++
-				items[key] = old
-			} else {
-				items[key] = e
+	visitBase := func(base string) error {
+		return filepath.WalkDir(base, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
 			}
+			if d.IsDir() {
+				return nil
+			}
+			if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			rel, err := filepath.Rel(root, path)
+			if err != nil {
+				return err
+			}
+			found, err := inspect(filepath.ToSlash(rel), path)
+			if err != nil {
+				return err
+			}
+			for _, e := range found {
+				key := identity(e)
+				if old, ok := items[key]; ok {
+					old.Count++
+					items[key] = old
+				} else {
+					items[key] = e
+				}
+			}
+			return nil
+		})
+	}
+	for _, base := range bases {
+		if _, err := os.Stat(base); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
 		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
+		if err := visitBase(base); err != nil {
+			return nil, err
+		}
 	}
 	result := make([]entry, 0, len(items))
 	for _, e := range items {
@@ -143,6 +156,7 @@ func inspect(file, path string) ([]entry, error) {
 		return nil, err
 	}
 	var found []entry
+	publishFile := strings.HasPrefix(file, "addons/youban_publish/")
 	add := func(fn, rule string, n ast.Node) {
 		var b bytes.Buffer
 		_ = format.Node(&b, fset, n)
@@ -157,7 +171,11 @@ func inspect(file, path string) ([]entry, error) {
 			name = im.Name.Name
 		}
 		imports[name] = p
-		if strings.Contains(p, "/redis") || strings.HasSuffix(p, "/gredis") {
+		if strings.HasPrefix(file, "addons/telegram_collector/") &&
+			(strings.Contains(p, "/youban_publish") || strings.Contains(p, "/telegram_job")) {
+			add("<imports>", "collector-publish-coupling", im)
+		}
+		if publishFile && (strings.Contains(p, "/redis") || strings.HasSuffix(p, "/gredis")) {
 			add("<imports>", "redis-import", im)
 		}
 		if strings.Contains(file, "/controller/") && (strings.Contains(p, "/dao") || strings.Contains(p, "/logic/")) {
@@ -178,6 +196,9 @@ func inspect(file, path string) ([]entry, error) {
 		ast.Inspect(n, func(n ast.Node) bool {
 			switch x := n.(type) {
 			case *ast.CallExpr:
+				if !publishFile {
+					return true
+				}
 				if sel, ok := x.Fun.(*ast.SelectorExpr); ok {
 					name := sel.Sel.Name
 					id, _ := sel.X.(*ast.Ident)
@@ -185,20 +206,25 @@ func inspect(file, path string) ([]entry, error) {
 					if id != nil {
 						pkg = imports[id.Name]
 					}
-					if (pkg == "github.com/gogf/gf/v2/frame/g" && name == "Redis") || (pkg == "hotgo/internal/library/cache" && (name == "RedisClient" || strings.HasPrefix(name, "ZSet"))) || strings.HasPrefix(name, "GroupScript") || name == "Do" || name == "Eval" || name == "EvalSha" || strings.HasPrefix(name, "GroupHash") || strings.HasPrefix(name, "GroupSortedSet") || strings.HasPrefix(name, "GroupList") || strings.HasPrefix(name, "GroupString") || strings.HasPrefix(name, "GroupGeneric") {
+					if publishFile && ((pkg == "github.com/gogf/gf/v2/frame/g" && name == "Redis") || (pkg == "hotgo/internal/library/cache" && (name == "RedisClient" || strings.HasPrefix(name, "ZSet"))) || strings.HasPrefix(name, "GroupScript") || name == "Do" || name == "Eval" || name == "EvalSha" || strings.HasPrefix(name, "GroupHash") || strings.HasPrefix(name, "GroupSortedSet") || strings.HasPrefix(name, "GroupList") || strings.HasPrefix(name, "GroupString") || strings.HasPrefix(name, "GroupGeneric")) {
 						add(fn, "redis-primitive", x)
 					}
-					if strings.Contains(pkg, "/redis") || strings.HasSuffix(pkg, "/gredis") {
+					if publishFile && (strings.Contains(pkg, "/redis") || strings.HasSuffix(pkg, "/gredis")) {
 						add(fn, "redis-client", x)
 					}
-					if protectedType(name) {
+					if publishFile && protectedType(name) {
 						add(fn, "state-cast", x)
 					}
 				}
-				if id, ok := x.Fun.(*ast.Ident); ok && protectedType(id.Name) {
-					add(fn, "state-cast", x)
+				if publishFile {
+					if id, ok := x.Fun.(*ast.Ident); ok && protectedType(id.Name) {
+						add(fn, "state-cast", x)
+					}
 				}
 			case *ast.KeyValueExpr:
+				if !publishFile {
+					return true
+				}
 				if key, ok := x.Key.(*ast.BasicLit); ok && key.Kind == token.STRING {
 					value, _ := strconv.Unquote(key.Value)
 					if stateField(value) && (value != "status" || protectedContext || lifecycleValue(x.Value)) {
@@ -206,6 +232,9 @@ func inspect(file, path string) ([]entry, error) {
 					}
 				}
 			case *ast.AssignStmt:
+				if !publishFile {
+					return true
+				}
 				for _, lhs := range x.Lhs {
 					if sel, ok := lhs.(*ast.SelectorExpr); ok {
 						switch sel.Sel.Name {
@@ -229,7 +258,17 @@ func inspect(file, path string) ([]entry, error) {
 				if x.Kind == token.STRING {
 					value, _ := strconv.Unquote(x.Value)
 					lower := strings.ToLower(value)
-					if strings.Contains(lower, "update") && (strings.Contains(lower, "set status") || strings.Contains(lower, "set send_phase") || strings.Contains(lower, "set dispatch_status") || strings.Contains(lower, "set publish_task_status")) {
+					if strings.HasPrefix(file, "addons/telegram_collector/") &&
+						strings.Contains(lower, " from ") &&
+						(strings.Contains(lower, "tg_job") || strings.Contains(lower, "tg_outbox")) {
+						add(fn, "collector-tg-state-sql", x)
+					}
+					if strings.HasPrefix(file, "addons/telegram_collector/") &&
+						strings.Contains(lower, " from ") && strings.Contains(lower, "collect_event") &&
+						!strings.Contains(lower, " where ") && !strings.Contains(lower, " limit ") {
+						add(fn, "collector-global-sql-scan", x)
+					}
+					if publishFile && strings.Contains(lower, "update") && (strings.Contains(lower, "set status") || strings.Contains(lower, "set send_phase") || strings.Contains(lower, "set dispatch_status") || strings.Contains(lower, "set publish_task_status")) {
 						add(fn, "state-sql-write", x)
 					}
 				}

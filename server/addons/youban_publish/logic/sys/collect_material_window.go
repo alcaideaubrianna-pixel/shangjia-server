@@ -30,12 +30,52 @@ const (
 	collectMaterialVerifyRetryDelay        = time.Minute
 	collectMaterialWaitingVerifyRetryDelay = 10 * time.Second
 	collectMaterialWindowExecutionTimeout  = 90 * time.Second
+	collectMaterialWindowMergeTTLDefault   = 3 * time.Second
 	collectMaterialRolePending             = "pending"
 	collectMaterialRoleDisplay             = "display"
 	collectMaterialRoleVerify              = "verify"
 	collectMaterialGroupCollecting         = "group_collecting"
 	collectMaterialGroupWaitingVerify      = "waiting_verify"
 )
+
+// collectMaterialWindowMergeKey identifies the smallest unit whose window can
+// be safely coalesced. It deliberately includes chat_id because one source
+// may represent more than one Telegram channel.
+func collectMaterialWindowMergeKey(payload collectProcessQueuePayload, chatID string) string {
+	return fmt.Sprintf("youban_publish:collect:window:%d:%d:%d:%s",
+		payload.TenantId, payload.AccountId, payload.SourceId,
+		canonicalCollectSourceChatID(chatID))
+}
+
+func collectMaterialWindowMergeTTL(ctx context.Context) time.Duration {
+	value := strings.TrimSpace(os.Getenv("YOUBAN_PUBLISH_COLLECT_WINDOW_MERGE_TTL"))
+	if value == "" {
+		return collectMaterialWindowMergeTTLDefault
+	}
+	if duration, err := time.ParseDuration(value); err == nil && duration > 0 && duration <= time.Minute {
+		return duration
+	}
+	if seconds, err := strconv.Atoi(value); err == nil && seconds > 0 && seconds <= 60 {
+		return time.Duration(seconds) * time.Second
+	}
+	g.Log().Warning(ctx, "采集窗口合并 TTL 配置无效，使用默认值", g.Map{"value": value, "default": collectMaterialWindowMergeTTLDefault.String()})
+	return collectMaterialWindowMergeTTLDefault
+}
+
+// reserveCollectMaterialWindowMerge coalesces concurrent realtime events for
+// one tenant/account/source/chat. Redis is an optimization only: if it is
+// unavailable, the event continues through the durable PostgreSQL path.
+func reserveCollectMaterialWindowMerge(ctx context.Context, payload collectProcessQueuePayload, chatID string) (bool, error) {
+	if payload.TenantId <= 0 || payload.AccountId < 0 || payload.SourceId <= 0 || canonicalCollectSourceChatID(chatID) == "" || !cache.Initialized() {
+		return true, nil
+	}
+	ok, err := cache.Instance().SetIfNotExist(ctx, collectMaterialWindowMergeKey(payload, chatID), 1, collectMaterialWindowMergeTTL(ctx))
+	if err != nil {
+		g.Log().Warning(ctx, "采集窗口合并缓存不可用，放行实时窗口", g.Map{"stage": "collect.window.merge", "sourceId": payload.SourceId, "error": err.Error()})
+		return true, nil
+	}
+	return ok, nil
+}
 
 // collectMaterialVerifyWindow is the single source of truth for display/verify pairing.
 func collectMaterialVerifyWindow() time.Duration {
@@ -223,6 +263,14 @@ func (s *sSysPublish) processTargetCollectEventWindow(ctx context.Context, paylo
 	}
 	if eventAt == nil || eventAt.IsZero() {
 		return gerror.Newf("目标采集事件时间无效 eventId:%d", target["id"].Int64())
+	}
+	chatID := canonicalCollectSourceChatID(target["source_chat_id"].String())
+	reserved, reserveErr := reserveCollectMaterialWindowMerge(ctx, payload, chatID)
+	if reserveErr != nil {
+		return reserveErr
+	}
+	if !reserved {
+		return newCollectProcessRetryError(collectMaterialWindowMergeTTL(ctx), "来源窗口正在合并处理")
 	}
 
 	rows, windowTruncated, err := s.loadTargetCollectMaterialWindow(ctx, payload, target, eventAt)

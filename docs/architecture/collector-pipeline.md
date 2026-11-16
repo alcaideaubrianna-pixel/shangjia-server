@@ -222,6 +222,33 @@ When investigating a missing publication, follow the durable handoff in this ord
 
 Do not restart collection or re-fetch source messages until the collection-to-delivery handoff has been shown to be missing or invalid. A Telegram send failure is a Delivery/Publish incident even when the original material came from the Collector.
 
+## Architecture review gates
+
+The repository guard scans both `addons/telegram_collector` and
+`addons/youban_publish`. Collector code is not allowed to import Publish
+implementation packages or query Telegram Job/Outbox state. A collection
+query must carry a scope predicate and a bounded result (`LIMIT`, or an
+equivalent repository method); an unbounded raw query over collection events
+is a review failure. These checks protect the hot path without requiring a
+database scan during startup.
+
+The queue configuration contract is explicit:
+
+```text
+YOUBAN_TELEGRAM_COLLECTOR_INGEST_SPOOL_MODE=redis_first
+YOUBAN_PUBLISH_COLLECT_PROCESS_OUTBOX_MODE=redis_first
+```
+
+`postgres_outbox` is a migration/recovery mode for legacy rows only. It must
+not be enabled for the realtime hot path. Redis/Asynq is the execution
+handoff; PostgreSQL remains the durable source of collection facts.
+
+The guard does not claim that every existing compatibility query is optimal.
+It prevents new global scans and prevents collection success from being
+implemented by reading or mutating TG Job state. Existing exceptions, if any,
+must be represented by an exact baseline entry with a reviewed function and
+expression digest.
+
 ## Current runtime guard
 
 The implementation has a compatibility bridge between the collector event store and

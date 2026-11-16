@@ -74,6 +74,29 @@ func TestMediaFileCacheEnvironmentMappings(t *testing.T) {
 	}
 }
 
+func TestCollectorQueueConfigurationContract(t *testing.T) {
+	want := map[string]string{
+		"youbanPublish.collect.processOutboxMode": "YOUBAN_PUBLISH_COLLECT_PROCESS_OUTBOX_MODE",
+		"telegramCollector.ingestSpoolMode":       "YOUBAN_TELEGRAM_COLLECTOR_INGEST_SPOOL_MODE",
+	}
+	for key, envKey := range want {
+		found := false
+		for _, item := range items {
+			if item.Key != key {
+				continue
+			}
+			for _, candidate := range item.EnvKeys {
+				if candidate == envKey {
+					found = true
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("collector queue contract is not configurable: %s -> %s", envKey, key)
+		}
+	}
+}
+
 func TestDatabasePoolEnvironmentOverrides(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(path, []byte("database:\n  default:\n    maxOpen: 20\n    maxIdle: 5\n    maxLifeTime: 10m\n"), 0600); err != nil {

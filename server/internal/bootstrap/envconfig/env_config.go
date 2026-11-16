@@ -103,6 +103,7 @@ var items = []item{
 	{Key: "youbanPublish.collect.materialWindowBatchSize", EnvKeys: []string{"YOUBAN_PUBLISH_MATERIAL_WINDOW_BATCH_SIZE"}},
 	{Key: "youbanPublish.collect.materialWindowMaxRows", EnvKeys: []string{"YOUBAN_PUBLISH_MATERIAL_WINDOW_MAX_ROWS"}},
 	{Key: "youbanPublish.collect.materialVerifyWindowSeconds", EnvKeys: []string{"YOUBAN_PUBLISH_MATERIAL_VERIFY_WINDOW_SECONDS"}},
+	{Key: "youbanPublish.collect.windowMergeTTL", EnvKeys: []string{"YOUBAN_PUBLISH_COLLECT_WINDOW_MERGE_TTL"}},
 	{Key: "youbanPublish.collect.duplicateMediaReplaceEnabled", EnvKeys: []string{"YOUBAN_PUBLISH_DUPLICATE_MEDIA_REPLACE_ENABLED"}},
 	{Key: "youbanPublish.mediaFileCache.cosDownloadMode", EnvKeys: []string{"YOUBAN_PUBLISH_MEDIA_CACHE_DOWNLOAD_MODE"}},
 	{Key: "youbanPublish.mediaFileCache.workerCdnBaseUrl", EnvKeys: []string{"YOUBAN_PUBLISH_MEDIA_CACHE_WORKER_CDN_BASE_URL"}},

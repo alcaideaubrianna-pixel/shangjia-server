@@ -670,6 +670,13 @@ func nextCollectProcessDelay(ctx context.Context, payload collectProcessQueuePay
 	}
 	model := collectProcessEventModel(ctx, payload)
 	model = model.WhereIn("e.status", statuses)
+	// Redis is the realtime candidate accelerator. When it has candidates, keep
+	// the scheduling probe on those event IDs instead of re-reading the whole
+	// source window. PostgreSQL remains authoritative through the bounded
+	// fallback when the index is cold or expired.
+	if candidateIDs := collectProcessCandidateIDs(ctx, payload, collectProcessCandidateIndexBatchSize*collectProcessCandidateIndexReadFactor); len(candidateIDs) > 0 {
+		model = model.WhereIn("e.id", candidateIDs)
+	}
 	fields := `
 		COUNT(CASE WHEN (
 			((e.status <> '` + sysin.CollectEventStatusIgnored + `' AND (e.material_role IS NULL OR e.material_role = '' OR e.material_role IN ('` + collectMaterialRolePending + `','` + collectMaterialRoleDisplay + `'))) OR

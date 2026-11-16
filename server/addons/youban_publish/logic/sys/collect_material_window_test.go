@@ -1,6 +1,7 @@
 package sys
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,37 @@ import (
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
+
+func TestCollectMaterialWindowMergeKeyIncludesSourceScope(t *testing.T) {
+	payload := collectProcessQueuePayload{TenantId: 56, AccountId: 109, SourceId: 1370}
+	key := collectMaterialWindowMergeKey(payload, "-100123456")
+	if key != "youban_publish:collect:window:56:109:1370:-100123456" {
+		t.Fatalf("unexpected merge key: %q", key)
+	}
+	otherChatKey := collectMaterialWindowMergeKey(payload, "-100654321")
+	if key == otherChatKey {
+		t.Fatal("different source chats must not share a merge key")
+	}
+}
+
+func TestCollectMaterialWindowMergeTTL(t *testing.T) {
+	previous, existed := os.LookupEnv("YOUBAN_PUBLISH_COLLECT_WINDOW_MERGE_TTL")
+	t.Cleanup(func() {
+		if existed {
+			_ = os.Setenv("YOUBAN_PUBLISH_COLLECT_WINDOW_MERGE_TTL", previous)
+		} else {
+			_ = os.Unsetenv("YOUBAN_PUBLISH_COLLECT_WINDOW_MERGE_TTL")
+		}
+	})
+	_ = os.Unsetenv("YOUBAN_PUBLISH_COLLECT_WINDOW_MERGE_TTL")
+	if got := collectMaterialWindowMergeTTL(nil); got != collectMaterialWindowMergeTTLDefault {
+		t.Fatalf("default merge TTL=%s want=%s", got, collectMaterialWindowMergeTTLDefault)
+	}
+	_ = os.Setenv("YOUBAN_PUBLISH_COLLECT_WINDOW_MERGE_TTL", "5s")
+	if got := collectMaterialWindowMergeTTL(nil); got != 5*time.Second {
+		t.Fatalf("configured merge TTL=%s want=5s", got)
+	}
+}
 
 func TestCaptionlessPhotoVideoGroupIsNotVerification(t *testing.T) {
 	if collectMaterialMixedVerification(collectMaterialMessageView{

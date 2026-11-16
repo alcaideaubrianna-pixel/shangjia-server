@@ -45,6 +45,55 @@ func TestGuardRejectsBypasses(t *testing.T) {
 		})
 	}
 }
+
+func TestGuardRejectsCollectorPublishCouplingAndGlobalScans(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		rule string
+	}{
+		{"publish import", `import _ "hotgo/addons/youban_publish/logic/sys"`, "collector-publish-coupling"},
+		{"telegram job state query", `func bad(){db.Raw("SELECT status FROM hg_youban_publish_tg_job WHERE id=?")}`, "collector-tg-state-sql"},
+		{"unbounded collection query", `func bad(){db.Raw("SELECT id FROM hg_youban_publish_collect_event")}`, "collector-global-sql-scan"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := filepath.Join(t.TempDir(), "sample.go")
+			if err := os.WriteFile(p, []byte("package collector;"+tt.body), 0600); err != nil {
+				t.Fatal(err)
+			}
+			items, err := inspect("addons/telegram_collector/logic/sys/sample.go", p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			matched := false
+			for _, item := range items {
+				if item.Rule == tt.rule {
+					matched = true
+				}
+			}
+			if !matched || len(compare(items, nil)) == 0 {
+				t.Fatalf("collector bypass not rejected: %+v", items)
+			}
+		})
+	}
+}
+
+func TestGuardAllowsBoundedCollectorQuery(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "sample.go")
+	if err := os.WriteFile(p, []byte(`package collector;func good(){db.Raw("SELECT id FROM hg_youban_publish_collect_event WHERE source_id=? ORDER BY id LIMIT 100")}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	items, err := inspect("addons/telegram_collector/logic/sys/sample.go", p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range items {
+		if item.Rule == "collector-global-sql-scan" {
+			t.Fatalf("bounded collector query was flagged: %+v", items)
+		}
+	}
+}
 func TestGuardBaselineIsExact(t *testing.T) {
 	old := sample(t, `package sys;func old(){data["status"]="sent"}`)
 	if len(compare(old, old)) != 0 {
