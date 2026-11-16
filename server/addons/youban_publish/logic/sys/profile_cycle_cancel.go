@@ -146,12 +146,31 @@ func (s *sSysPublish) markProfilesUnpublishing(ctx context.Context, ids []int64,
 
 func (s *sSysPublish) clearProfilesUnpublishing(ctx context.Context, ids []int64, tenantId int64, operationNo string) error {
 	now := gtime.Now()
-	_, err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
+	model := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx)
+	result, err := model.
 		Where("tenant_id", tenantId).WhereIn("profile_id", uniqueIds(ids)).
 		Where("publish_operation_no", strings.TrimSpace(operationNo)).
 		Data(g.Map{"publish_operation_no": "", "publish_task_status": "", "publish_task_updated_at": now, "updated_at": now}).Update()
 	if err != nil {
 		return gerror.Wrap(err, "清理资料下架进行中状态失败")
+	}
+	// Cleanup jobs can be created from an older publish/unpublish job and carry
+	// an older operation number. Once the authoritative profile is private and
+	// no active unpublish job or sent message remains, that stale operation
+	// number must not leave the durable state stuck forever. Only fall back for
+	// rows still marked unpublishing; a newer publish operation is untouched.
+	rowsAffected, rowsErr := result.RowsAffected()
+	if rowsErr != nil {
+		return gerror.Wrap(rowsErr, "读取资料下架状态更新结果失败")
+	}
+	if rowsAffected == 0 {
+		_, err = g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
+			Where("tenant_id", tenantId).WhereIn("profile_id", uniqueIds(ids)).
+			Where("publish_task_status", sysin.PublishTaskStatusUnpublishing.String()).
+			Data(g.Map{"publish_operation_no": "", "publish_task_status": "", "publish_task_updated_at": now, "updated_at": now}).Update()
+		if err != nil {
+			return gerror.Wrap(err, "清理过期资料下架状态失败")
+		}
 	}
 	_, err = g.DB().Model(publishNoteIndexTable).Safe().Ctx(ctx).
 		Where("tenant_id", tenantId).WhereIn("profile_id", uniqueIds(ids)).

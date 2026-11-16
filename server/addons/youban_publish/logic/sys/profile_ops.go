@@ -403,14 +403,18 @@ func (s *sSysPublish) AdminProfileTaskStatus(ctx context.Context, in *sysin.Prof
 	if err != nil {
 		return nil, err
 	}
-	profile, err := s.adminProfileAuthorized(ctx, in)
+	// This endpoint is polled while a lifecycle operation is running. Avoid
+	// resolving the complete AccountScope=all visibility set on every poll;
+	// authorize only the profile's owner account after the indexed selector
+	// lookup. This keeps the response bounded to two small queries.
+	profile, err := s.profileBaseBySelector(ctx, in, 0, 0)
 	if err != nil {
 		return nil, err
 	}
-	if profile == nil {
+	if account.TenantId > 0 && profile.TenantId != account.TenantId {
 		return nil, gerror.New("资料不存在或无权查看")
 	}
-	if account.TenantId > 0 && profile.TenantId != account.TenantId {
+	if err = s.ensureAdminManageableAccount(ctx, account, profile.AccountId); err != nil {
 		return nil, gerror.New("资料不存在或无权查看")
 	}
 	return &sysin.ProfileTaskStatusModel{
