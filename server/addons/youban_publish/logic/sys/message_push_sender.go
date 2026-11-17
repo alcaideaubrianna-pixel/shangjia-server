@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hotgo/addons/youban_publish/model"
 	"html"
 	"image"
 	"image/jpeg"
@@ -246,7 +247,7 @@ func (s *sSysPublish) sendMessagePushJob(ctx context.Context, job telegramJobRec
 		return s.submitMessagePushAccountTask(ctx, job, channel, "account")
 	}
 	media := inlineDisplayMedia(template)
-	if recordErr := s.upsertPublishJobRecord(ctx, job, "sending", ""); recordErr != nil {
+	if recordErr := s.upsertPublishJobRecord(ctx, job, model.PublishRecordStatusSending, ""); recordErr != nil {
 		g.Log().Warningf(ctx, "更新快速推送发送记录失败 jobId:%d err:%+v", job.Id, recordErr)
 	}
 	inlineValidationErr := validateInlinePublishTemplate(template)
@@ -1136,7 +1137,7 @@ func (s *sSysPublish) createMessagePushJobWithOperation(ctx context.Context, tem
 	if supersedeErr := s.supersedeOlderMessagePushJobs(ctx, job); supersedeErr != nil {
 		g.Log().Warningf(ctx, "废弃旧快速推送任务失败 jobId:%d err:%+v", job.Id, supersedeErr)
 	}
-	if recordErr := s.upsertPublishJobRecord(ctx, job, "pending", ""); recordErr != nil {
+	if recordErr := s.upsertPublishJobRecord(ctx, job, model.PublishRecordStatusPending, ""); recordErr != nil {
 		g.Log().Warningf(ctx, "保存快速推送待发送记录失败 jobId:%d err:%+v", job.Id, recordErr)
 	}
 	return job, nil
@@ -1179,7 +1180,11 @@ func (s *sSysPublish) handleMessagePushQueuedJobError(ctx context.Context, job t
 	if !transitioned {
 		return nil
 	}
-	if recordErr := s.upsertPublishJobRecord(ctx, job, decision.Status, decision.Message); recordErr != nil {
+	recordJobStatus, validRecordJobStatus := ParseJobStatus(decision.Status)
+	if !validRecordJobStatus {
+		recordJobStatus = JobStatusUnknown
+	}
+	if recordErr := s.upsertPublishJobRecord(ctx, job, publishRecordStatusFromJob(recordJobStatus), decision.Message); recordErr != nil {
 		g.Log().Warningf(ctx, "更新快速推送失败记录失败 jobId:%d status:%s err:%+v", job.Id, decision.Status, recordErr)
 	}
 	s.appendTelegramJobLog(ctx, job, "message_push", decision.Status, decision.Message)
@@ -1337,7 +1342,7 @@ func (s *sSysPublish) failMessagePushJob(ctx context.Context, job telegramJobRec
 	if !updated {
 		return
 	}
-	if recordErr := s.upsertPublishJobRecord(ctx, job, sysin.MessagePushStatusFailed, message); recordErr != nil {
+	if recordErr := s.upsertPublishJobRecord(ctx, job, model.PublishRecordStatusFailed, message); recordErr != nil {
 		g.Log().Warningf(ctx, "更新快速推送失败记录失败 jobId:%d err:%+v", job.Id, recordErr)
 	}
 	s.appendTelegramJobLog(ctx, job, "message_push", sysin.MessagePushStatusFailed, message)

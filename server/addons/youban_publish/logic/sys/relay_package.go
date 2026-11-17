@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	relayconsts "hotgo/addons/youban_publish/consts"
+	"hotgo/addons/youban_publish/model"
 	"html"
 	"os"
 	"regexp"
@@ -288,7 +289,7 @@ func (s *sSysPublish) sendRelayPackageJob(ctx context.Context, job telegramJobRe
 	if err = s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusPublishing); err != nil {
 		return err
 	}
-	if err = s.upsertPublishJobRecord(ctx, job, "sending", ""); err != nil {
+	if err = s.upsertPublishJobRecord(ctx, job, model.PublishRecordStatusSending, ""); err != nil {
 		return err
 	}
 	allowed, err := s.canSendTelegramJob(ctx, job)

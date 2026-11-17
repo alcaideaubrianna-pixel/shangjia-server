@@ -12,6 +12,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
+	publishmodel "hotgo/addons/youban_publish/model"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/dao"
 	"hotgo/internal/model/input/form"
@@ -238,35 +239,7 @@ func (s *sSysPublish) MyPublishRecordClear(ctx context.Context, in *sysin.Publis
 }
 
 func (s *sSysPublish) publishRecordList(ctx context.Context, in *sysin.PublishRecordListInp, tenantId int64, accountId int64) (list []*sysin.PublishRecordModel, totalCount int, err error) {
-	if in.Keyword == "" {
-		return s.publishRecordListFromLog(ctx, in, tenantId, accountId)
-	}
-	base := s.publishRecordCountModel(ctx, in, tenantId, accountId)
-	totalCount, err = base.Clone().Count()
-	if err != nil {
-		return nil, 0, gerror.Wrap(err, "获取发送记录总数失败")
-	}
-	normalizePublishRecordPage(in, totalCount)
-	mod := s.publishRecordBaseModel(ctx, in, tenantId, accountId).Fields(
-		"l.id,l.job_id,l.task_id,l.tenant_id,l.account_id,l.profile_id,l.channel_id,l.bot_id,l.operation_no,l.target_chat_id,l.action,"+publishRecordStatusExpression+" AS status,"+publishRecordMessageExpression+" AS message,l.created_at",
-		"p.title",
-		"a.nickname AS account_name",
-		"COALESCE(NULLIF(owner.username, ''), NULLIF(tn.name, '')) AS tenant_name",
-		"b.bot_name,b.bot_username",
-		"COALESCE(NULLIF(c.channel_title, ''), NULLIF(tc.channel_title, '')) AS channel_title",
-		"c.channel_username",
-	)
-	if err = mod.Page(in.Page, in.PerPage).OrderDesc("l.id").Scan(&list); err != nil {
-		return nil, 0, gerror.Wrap(err, "获取发送记录失败")
-	}
-	if err = s.enrichPublishRecordChannelDisplays(ctx, tenantId, list); err != nil {
-		return nil, 0, err
-	}
-	if err = s.enrichPublishRecordFullPushProgress(ctx, list); err != nil {
-		return nil, 0, err
-	}
-	normalizeCollectPublishRecordActions(list)
-	return
+	return s.publishRecordListFromLog(ctx, in, tenantId, accountId)
 }
 
 func normalizePublishRecordPage(in *sysin.PublishRecordListInp, totalCount int) {
@@ -344,14 +317,14 @@ AND COALESCE(l.status,'') = 'pending'
 AND COALESCE(j.status,'pending') = 'pending')`)
 }
 
-func applyPublishRecordStatusFilter(mod *gdb.Model, status string) *gdb.Model {
+func applyPublishRecordStatusFilter(mod *gdb.Model, status publishmodel.PublishRecordStatus) *gdb.Model {
 	switch status {
-	case "success", "sent":
-		return mod.Where(publishRecordStatusExpression+" = ?", "success")
-	case "failed":
-		return mod.Where(publishRecordStatusExpression+" IN (?, ?)", "failed", "failed_retry")
-	case "pending":
-		return mod.Where(publishRecordStatusExpression+" IN (?, ?)", "pending", "sending")
+	case publishmodel.PublishRecordStatusSuccess, "sent":
+		return mod.Where(publishRecordStatusExpression+" = ?", publishmodel.PublishRecordStatusSuccess)
+	case publishmodel.PublishRecordStatusFailed:
+		return mod.Where(publishRecordStatusExpression+" IN (?, ?)", publishmodel.PublishRecordStatusFailed, publishmodel.PublishRecordStatusRetryWait)
+	case publishmodel.PublishRecordStatusPending:
+		return mod.Where(publishRecordStatusExpression+" IN (?, ?)", publishmodel.PublishRecordStatusPending, publishmodel.PublishRecordStatusSending)
 	case "":
 		return mod
 	default:
@@ -359,15 +332,19 @@ func applyPublishRecordStatusFilter(mod *gdb.Model, status string) *gdb.Model {
 	}
 }
 
-const publishRecordStatusExpression = "CASE WHEN j.id IS NULL THEN l.status WHEN j.status='sent' THEN 'success' ELSE j.status END"
-const publishRecordMessageExpression = "CASE WHEN j.status IN ('failed','failed_retry','unknown','superseded') AND COALESCE(j.error_message,'')<>'' THEN j.error_message ELSE l.message END"
-
 func (s *sSysPublish) publishRecordClear(ctx context.Context, tenantId int64, accountId int64) error {
-	mod := g.DB().Model(publishSuccessRecordTable).Safe().Ctx(ctx).Where("tenant_id", tenantId)
-	if accountId > 0 {
-		mod = mod.Where("account_id", accountId)
-	}
-	_, err := mod.Delete()
+	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		for _, table := range []string{publishRecordLogTable, publishSuccessRecordTable} {
+			mod := tx.Model(table).Safe().Ctx(ctx).Where("tenant_id", tenantId)
+			if accountId > 0 {
+				mod = mod.Where("account_id", accountId)
+			}
+			if _, err := mod.Delete(); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		return gerror.Wrap(err, "清空发送记录失败")
 	}
@@ -376,7 +353,7 @@ func (s *sSysPublish) publishRecordClear(ctx context.Context, tenantId int64, ac
 
 func (s *sSysPublish) enrichPublishRecordFullPushProgress(ctx context.Context, list []*sysin.PublishRecordModel) error {
 	batchKeys := make(map[string]struct{})
-	operationNos := make(map[string]struct{})
+	jobIDs := make(map[int64]struct{})
 	for _, item := range list {
 		if item == nil || !strings.HasPrefix(item.OperationNo, "full_push:") {
 			continue
@@ -384,7 +361,9 @@ func (s *sSysPublish) enrichPublishRecordFullPushProgress(ctx context.Context, l
 		item.Action = "full_push"
 		if key := fullPushOperationBatchKey(item.OperationNo); key != "" {
 			batchKeys[key] = struct{}{}
-			operationNos[item.OperationNo] = struct{}{}
+			if item.JobId > 0 {
+				jobIDs[item.JobId] = struct{}{}
+			}
 		}
 	}
 	if len(batchKeys) == 0 {
@@ -418,32 +397,39 @@ func (s *sSysPublish) enrichPublishRecordFullPushProgress(ctx context.Context, l
 		}
 		progress[row.BatchNo] = row
 	}
-	// Load all success records for the requested batches in one query.  The
-	// previous per-row snapshot query caused an N+1 DB pattern on large batches.
+	// Rank the complete requested batches before filtering to visible jobs.
+	// Filtering operation_no/job_id inside the window would restart ranks for
+	// every page or keyword. Only current-page results are loaded into Go.
 	type successRow struct {
-		OperationNo string      `orm:"operation_no"`
-		ID          int64       `orm:"id"`
-		CreatedAt   *gtime.Time `orm:"created_at"`
+		JobID int64 `orm:"job_id"`
+		Rank  int   `orm:"rank_no"`
 	}
 	var successRows []successRow
-	ops := make([]string, 0, len(operationNos))
-	for op := range operationNos {
-		ops = append(ops, op)
-	}
-	if err = g.DB().Model(publishSuccessRecordTable+" r").Safe().Ctx(ctx).
-		Fields("r.operation_no,r.id,r.created_at").
-		Where("r.status", "success").
-		WhereIn("r.operation_no", ops).
-		OrderAsc("r.operation_no").OrderAsc("r.created_at").OrderAsc("r.id").
-		Scan(&successRows); err != nil {
-		return gerror.Wrap(err, "批量读取全量推送成功记录失败")
+	if len(jobIDs) > 0 {
+		args := make([]interface{}, 0, len(keys)+len(jobIDs))
+		for _, key := range keys {
+			args = append(args, key)
+		}
+		for id := range jobIDs {
+			args = append(args, id)
+		}
+		query := `SELECT ranked.job_id,ranked.rank_no FROM (
+			SELECT r.job_id,
+				ROW_NUMBER() OVER (PARTITION BY b.batch_no ORDER BY r.created_at,r.id) AS rank_no
+			FROM ` + publishFullPushBatchTable + ` b
+			INNER JOIN ` + publishSuccessRecordTable + ` r
+				ON r.operation_no >= CONCAT(b.batch_no, ':')
+				AND r.operation_no < CONCAT(b.batch_no, ';')
+			WHERE b.batch_no IN (` + strings.TrimSuffix(strings.Repeat("?,", len(keys)), ",") + `)
+				AND r.status='success'
+		) ranked WHERE ranked.job_id IN (` + strings.TrimSuffix(strings.Repeat("?,", len(jobIDs)), ",") + `)`
+		if err = g.DB().GetScan(ctx, &successRows, query, args...); err != nil {
+			return gerror.Wrap(err, "批量读取全量推送成功记录失败")
+		}
 	}
 	ranks := make(map[int64]int, len(successRows))
-	batchRank := make(map[string]int)
 	for _, row := range successRows {
-		key := fullPushOperationBatchKey(row.OperationNo)
-		batchRank[key]++
-		ranks[row.ID] = batchRank[key]
+		ranks[row.JobID] = row.Rank
 	}
 	for _, item := range list {
 		if item == nil || item.Action != "full_push" {
@@ -457,7 +443,7 @@ func (s *sSysPublish) enrichPublishRecordFullPushProgress(ctx context.Context, l
 		// previous implementation reused the current batch total for every row,
 		// so an old 1/438 record changed to 15/438 on the next refresh.
 		item.ProgressDone = value.Done
-		if snapshot := ranks[item.Id]; snapshot > 0 {
+		if snapshot := ranks[item.JobId]; snapshot > 0 {
 			item.ProgressDone = snapshot
 		}
 		item.ProgressTotal = value.SnapshotTotal

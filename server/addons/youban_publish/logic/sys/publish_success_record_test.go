@@ -1,6 +1,8 @@
 package sys
 
 import (
+	"context"
+	"hotgo/addons/youban_publish/model"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -64,19 +66,32 @@ func TestBoundPublishSuccessRecordMessage(t *testing.T) {
 }
 
 func TestPublishRecordStatusFromJob(t *testing.T) {
-	tests := map[string]string{
-		"sent":         "success",
-		"pending":      "pending",
-		"sending":      "sending",
-		"failed_retry": "failed_retry",
-		"failed":       "failed",
-		"superseded":   "superseded",
-		"unknown":      "unknown",
-		"unexpected":   "pending",
+	tests := map[JobStatus]model.PublishRecordStatus{
+		JobStatusSent:       model.PublishRecordStatusSuccess,
+		JobStatusPending:    model.PublishRecordStatusPending,
+		JobStatusSending:    model.PublishRecordStatusSending,
+		JobStatusRetryWait:  model.PublishRecordStatusRetryWait,
+		JobStatusFailed:     model.PublishRecordStatusFailed,
+		JobStatusSuperseded: model.PublishRecordStatusSuperseded,
+		JobStatusUnknown:    model.PublishRecordStatusUnknown,
+		"unexpected":        model.PublishRecordStatusUnknown,
+		"":                  model.PublishRecordStatusUnknown,
 	}
 	for input, want := range tests {
 		if got := publishRecordStatusFromJob(input); got != want {
 			t.Fatalf("publishRecordStatusFromJob(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestPublishRecordWritersRejectInvalidStatusBeforeDatabaseAccess(t *testing.T) {
+	s := new(sSysPublish)
+	for _, status := range []model.PublishRecordStatus{"", "sent", "unexpected", " pending "} {
+		if err := s.upsertPublishJobRecord(context.Background(), telegramJobRecord{Id: 1}, status, ""); err == nil {
+			t.Fatalf("job writer accepted invalid status %q", status)
+		}
+		if err := s.upsertPublishRecordLog(context.Background(), telegramJobRecord{Id: 1}, publishSuccessTypeProfile, status, ""); err == nil {
+			t.Fatalf("log writer accepted invalid status %q", status)
 		}
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hotgo/addons/youban_publish/model"
 	"os"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/gogf/gf/v2/util/guid"
 	"github.com/hibiken/asynq"
 
 	publishconsts "hotgo/addons/youban_publish/consts"
@@ -222,20 +224,24 @@ func telegramCleanupTaskBody(payload tgQueuePayload) ([]byte, error) {
 	return json.Marshal(payload)
 }
 
-// enqueueTelegramCleanupTask uses a job-scoped stable ID first and a deterministic
-// attempt-scoped fallback when an old task still occupies that ID. Both IDs are
-// derived from the cleanup job, so different channel jobs cannot collide.
+// Persisted intents use their own stable task identity. An archived task can
+// retain that ID indefinitely, so recovery uses a fresh fallback on conflict.
+// Legacy tasks retain their historical job-scoped identities.
 func enqueueTelegramCleanupTask(ctx context.Context, client *asynq.Client, queueName string, jobId int64, delay time.Duration, unique bool, attemptCount int, payload tgQueuePayload) (taskId string, err error) {
 	payload.JobId = jobId
 	body, err := telegramCleanupTaskBody(payload)
 	if err != nil {
 		return "", err
 	}
+	taskID := telegramCleanupTaskID(jobId)
+	if payload.CleanupOutboxId > 0 {
+		taskID = fmt.Sprintf("tg-cleanup-intent-%d", payload.CleanupOutboxId)
+	}
 	options := []asynq.Option{
 		asynq.Queue(queueName),
 		asynq.MaxRetry(20),
 		asynq.Timeout(2 * time.Minute),
-		asynq.TaskID(telegramCleanupTaskID(jobId)),
+		asynq.TaskID(taskID),
 	}
 	if unique {
 		options = append(options, asynq.Unique(30*time.Second))
@@ -248,18 +254,24 @@ func enqueueTelegramCleanupTask(ctx context.Context, client *asynq.Client, queue
 		return info.ID, nil
 	}
 	if errors.Is(err, asynq.ErrDuplicateTask) {
-		return telegramCleanupTaskID(jobId), nil
+		return taskID, nil
 	}
 	if !errors.Is(err, asynq.ErrTaskIDConflict) {
 		return "", err
 	}
 
 	fallbackTaskId := telegramCleanupFallbackTaskID(jobId, attemptCount)
+	if payload.CleanupOutboxId > 0 {
+		fallbackTaskId = fmt.Sprintf("tg-cleanup-intent-%d-retry-%s", payload.CleanupOutboxId, guid.S())
+	}
 	fallbackOptions := []asynq.Option{
 		asynq.Queue(queueName),
 		asynq.MaxRetry(20),
 		asynq.Timeout(2 * time.Minute),
 		asynq.TaskID(fallbackTaskId),
+	}
+	if payload.CleanupOutboxId > 0 && unique {
+		fallbackOptions = append(fallbackOptions, asynq.Unique(30*time.Second))
 	}
 	if delay > 0 {
 		fallbackOptions = append(fallbackOptions, asynq.ProcessIn(delay))
@@ -268,9 +280,8 @@ func enqueueTelegramCleanupTask(ctx context.Context, client *asynq.Client, queue
 	if fallbackErr == nil {
 		return fallbackInfo.ID, nil
 	}
-	// The fallback ID is scoped to this job and retry attempt. A conflict means
-	// another dispatcher already accepted the same logical cleanup attempt.
-	if errors.Is(fallbackErr, asynq.ErrDuplicateTask) || errors.Is(fallbackErr, asynq.ErrTaskIDConflict) {
+	if errors.Is(fallbackErr, asynq.ErrDuplicateTask) ||
+		(payload.CleanupOutboxId <= 0 && errors.Is(fallbackErr, asynq.ErrTaskIDConflict)) {
 		return fallbackTaskId, nil
 	}
 	return "", fallbackErr
@@ -439,7 +450,7 @@ func (s *sSysPublish) enqueueTelegramJobInternal(ctx context.Context, jobId int6
 		if updateErr != nil {
 			return gerror.Wrap(updateErr, "终止无效频道TG任务失败")
 		}
-		if recordErr := s.upsertPublishJobRecord(ctx, job, "superseded", message); recordErr != nil {
+		if recordErr := s.upsertPublishJobRecord(ctx, job, model.PublishRecordStatusSuperseded, message); recordErr != nil {
 			g.Log().Warningf(ctx, "更新无效频道发布记录失败 jobId:%d err:%+v", job.Id, recordErr)
 		}
 		return nil
@@ -986,8 +997,22 @@ func (s *sSysPublish) enqueueProfileDownRunWithOperationNo(ctx context.Context, 
 	if err != nil {
 		return err
 	}
+	downAt := gtime.Now().String()
+	if manualProfileDownAsyncEnabled && strings.HasPrefix(operationNo, "unpublish:") && len(profileIds) == 1 {
+		state, stateErr := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).Master().
+			Fields("publish_task_updated_at").Where("tenant_id", tenantId).
+			Where("profile_id", profileIds[0]).Where("publish_operation_no", operationNo).
+			Where("publish_task_status", "unpublishing").WhereNull("deleted_at").One()
+		if stateErr != nil {
+			return gerror.Wrap(stateErr, "读取资料下架时间失败")
+		}
+		if state.IsEmpty() || state["publish_task_updated_at"].IsNil() {
+			return gerror.New("资料下架状态不存在或时间缺失")
+		}
+		downAt = state["publish_task_updated_at"].GTime().String()
+	}
 	payload, err := json.Marshal(profileDownQueuePayload{
-		TenantId: tenantId, ProfileIds: profileIds, DownAt: gtime.Now().String(), OperationNo: operationNo,
+		TenantId: tenantId, ProfileIds: profileIds, DownAt: downAt, OperationNo: operationNo,
 	})
 	if err != nil {
 		return err

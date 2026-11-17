@@ -7,6 +7,7 @@ import (
 	"fmt"
 	relayconsts "hotgo/addons/youban_publish/consts"
 	pdao "hotgo/addons/youban_publish/internal/dao"
+	"hotgo/addons/youban_publish/model"
 	"strconv"
 	"strings"
 	"time"
@@ -230,7 +231,7 @@ func (s *sSysPublish) markTelegramJobUnknown(ctx context.Context, job telegramJo
 	// transaction failed, leaving the projection at "sending" makes the UI
 	// report a permanent processing state. Reconciliation will later promote
 	// this row to success without sending Telegram media again.
-	if projectionErr := s.upsertPublishJobRecord(ctx, job, "unknown", message); projectionErr != nil {
+	if projectionErr := s.upsertPublishJobRecord(ctx, job, model.PublishRecordStatusUnknown, message); projectionErr != nil {
 		g.Log().Warningf(ctx, "更新TG待对账发布记录失败 jobId:%d err:%+v", job.Id, projectionErr)
 	}
 	s.appendTelegramJobLog(ctx, job, "publish", "unknown", message)

@@ -7,17 +7,18 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	publishmodel "hotgo/addons/youban_publish/model"
 	"hotgo/internal/model/input/form"
 )
 
 type PublishRecordListInp struct {
 	form.PageReq
-	AccountId int64  `json:"accountId" dc:"账号ID"`
-	Action    string `json:"action" dc:"动作"`
-	Keyword   string `json:"keyword" dc:"关键词"`
-	ProfileId int64  `json:"profileId" dc:"资料ID"`
-	Status    string `json:"status" dc:"状态"`
-	TaskId    int64  `json:"taskId" dc:"任务ID"`
+	AccountId int64                            `json:"accountId" dc:"账号ID"`
+	Action    string                           `json:"action" dc:"动作"`
+	Keyword   string                           `json:"keyword" dc:"关键词"`
+	ProfileId int64                            `json:"profileId" dc:"资料ID"`
+	Status    publishmodel.PublishRecordStatus `json:"status" dc:"状态"`
+	TaskId    int64                            `json:"taskId" dc:"任务ID"`
 }
 
 type PublishRecordClearInp struct{}
@@ -62,7 +63,16 @@ type TgObserveBotListInp struct {
 func (in *PublishRecordListInp) Filter(ctx context.Context) error {
 	in.Action = strings.TrimSpace(in.Action)
 	in.Keyword = strings.TrimSpace(in.Keyword)
-	in.Status = strings.TrimSpace(in.Status)
+	raw := strings.TrimSpace(in.Status.String())
+	if raw == "" {
+		in.Status = ""
+		return nil
+	}
+	status, ok := publishmodel.ParsePublishRecordStatus(raw)
+	if !ok {
+		return gerror.New("发送记录状态不合法")
+	}
+	in.Status = status
 	return nil
 }
 
@@ -83,32 +93,32 @@ func (in *TgObserveBotListInp) Filter(ctx context.Context) error {
 }
 
 type PublishRecordModel struct {
-	AccountId       int64       `json:"accountId" dc:"账号ID"`
-	AccountName     string      `json:"accountName" dc:"账号名称"`
-	TenantId        int64       `json:"tenantId" dc:"账号归属ID"`
-	TenantName      string      `json:"tenantName" dc:"账号归属"`
-	Action          string      `json:"action" dc:"动作"`
-	BotId           int64       `json:"botId" dc:"Bot ID"`
-	BotName         string      `json:"botName" dc:"Bot名称"`
-	BotUsername     string      `json:"botUsername" dc:"Bot用户名"`
-	ChannelId       int64       `json:"channelId" dc:"频道ID"`
-	ChannelTitle    string      `json:"channelTitle" dc:"频道名称"`
-	ChannelUsername string      `json:"channelUsername" dc:"频道用户名"`
-	ClientRequestId string      `json:"clientRequestId" dc:"客户端幂等ID"`
-	CreatedAt       *gtime.Time `json:"createdAt" dc:"创建时间"`
-	Id              int64       `json:"id" dc:"日志ID"`
-	JobId           int64       `json:"jobId" dc:"TG任务ID"`
-	Message         string      `json:"message" dc:"日志内容"`
-	OperationNo     string      `json:"operationNo" dc:"TG操作号"`
-	ProfileId       int64       `json:"profileId" dc:"资料ID"`
-	Status          string      `json:"status" dc:"状态"`
-	TargetChatId    string      `json:"targetChatId" dc:"目标Chat ID"`
-	TaskId          int64       `json:"taskId" dc:"任务ID"`
-	Title           string      `json:"title" dc:"资料标题"`
-	ProgressDone    int         `json:"progressDone" dc:"批次已完成数量"`
-	ProgressTotal   int         `json:"progressTotal" dc:"批次总数量"`
-	ProgressQueued  int         `json:"progressQueued" dc:"批次已调度数量"`
-	ProgressText    string      `json:"progressText" dc:"批次进度文本"`
+	AccountId       int64                            `json:"accountId" dc:"账号ID"`
+	AccountName     string                           `json:"accountName" dc:"账号名称"`
+	TenantId        int64                            `json:"tenantId" dc:"账号归属ID"`
+	TenantName      string                           `json:"tenantName" dc:"账号归属"`
+	Action          string                           `json:"action" dc:"动作"`
+	BotId           int64                            `json:"botId" dc:"Bot ID"`
+	BotName         string                           `json:"botName" dc:"Bot名称"`
+	BotUsername     string                           `json:"botUsername" dc:"Bot用户名"`
+	ChannelId       int64                            `json:"channelId" dc:"频道ID"`
+	ChannelTitle    string                           `json:"channelTitle" dc:"频道名称"`
+	ChannelUsername string                           `json:"channelUsername" dc:"频道用户名"`
+	ClientRequestId string                           `json:"clientRequestId" dc:"客户端幂等ID"`
+	CreatedAt       *gtime.Time                      `json:"createdAt" dc:"创建时间"`
+	Id              int64                            `json:"id" dc:"日志ID"`
+	JobId           int64                            `json:"jobId" dc:"TG任务ID"`
+	Message         string                           `json:"message" dc:"日志内容"`
+	OperationNo     string                           `json:"operationNo" dc:"TG操作号"`
+	ProfileId       int64                            `json:"profileId" dc:"资料ID"`
+	Status          publishmodel.PublishRecordStatus `json:"status" dc:"状态"`
+	TargetChatId    string                           `json:"targetChatId" dc:"目标Chat ID"`
+	TaskId          int64                            `json:"taskId" dc:"任务ID"`
+	Title           string                           `json:"title" dc:"资料标题"`
+	ProgressDone    int                              `json:"progressDone" dc:"批次已完成数量"`
+	ProgressTotal   int                              `json:"progressTotal" dc:"批次总数量"`
+	ProgressQueued  int                              `json:"progressQueued" dc:"批次已调度数量"`
+	ProgressText    string                           `json:"progressText" dc:"批次进度文本"`
 }
 
 type TgObserveQueueStatModel struct {

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"hotgo/addons/youban_publish/model"
+
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -34,7 +36,7 @@ const (
 
 func (s *sSysPublish) appendPublishSuccessRecord(ctx context.Context, job telegramJobRecord) error {
 	message := s.publishSuccessRecordMessage(ctx, job)
-	if err := s.upsertPublishJobRecord(ctx, job, "success", message); err != nil {
+	if err := s.upsertPublishJobRecord(ctx, job, model.PublishRecordStatusSuccess, message); err != nil {
 		return err
 	}
 	_, err := g.DB().Model(publishSuccessRecordTable).Safe().Ctx(ctx).
@@ -62,18 +64,17 @@ func (s *sSysPublish) publishSuccessRecordMessage(ctx context.Context, job teleg
 	return message
 }
 
-func (s *sSysPublish) upsertPublishJobRecord(ctx context.Context, job telegramJobRecord, status string, message string) error {
+func (s *sSysPublish) upsertPublishJobRecord(ctx context.Context, job telegramJobRecord, status model.PublishRecordStatus, message string) error {
+	if !status.Valid() {
+		return gerror.Newf("发布记录状态不合法：%q", status.String())
+	}
 	if job.Id <= 0 {
 		return nil
 	}
 	action := publishSuccessRecordAction(job.OperationNo)
-	status = strings.TrimSpace(status)
-	if status == "" {
-		status = "pending"
-	}
 	// Queue creation is not a send attempt. Full-push expansion must not flood
 	// operator records; the sending/result path creates the job's single row.
-	if action == publishSuccessTypeFull && status == "pending" {
+	if action == publishSuccessTypeFull && status == model.PublishRecordStatusPending {
 		return nil
 	}
 	if strings.TrimSpace(message) == "" {
@@ -91,7 +92,7 @@ func (s *sSysPublish) upsertPublishJobRecord(ctx context.Context, job telegramJo
 		"operation_no":   job.OperationNo,
 		"target_chat_id": job.TargetChatId,
 		"action":         action,
-		"status":         status,
+		"status":         status.String(),
 		"message":        message,
 		"created_at":     gtime.Now(),
 	}).OnConflict("job_id").OnDuplicateEx("id", "created_at").Save()
@@ -117,7 +118,10 @@ type publishRecordLogSnapshot struct {
 	BotUsername  string `json:"botUsername"`
 }
 
-func (s *sSysPublish) upsertPublishRecordLog(ctx context.Context, job telegramJobRecord, action, status, message string) error {
+func (s *sSysPublish) upsertPublishRecordLog(ctx context.Context, job telegramJobRecord, action string, status model.PublishRecordStatus, message string) error {
+	if !status.Valid() {
+		return gerror.Newf("发布日志状态不合法：%q", status.String())
+	}
 	// The table is introduced online; old test databases and older instances
 	// may not have it yet. Legacy writes remain authoritative until migration.
 	snapshot := publishRecordLogSnapshot{Title: job.TitleSnapshot}
@@ -140,26 +144,24 @@ func (s *sSysPublish) upsertPublishRecordLog(ctx context.Context, job telegramJo
 		"action": action, "title": snapshot.Title, "account_name": snapshot.AccountName,
 		"tenant_name": snapshot.TenantName, "channel_title": snapshot.ChannelTitle,
 		"channel_username": snapshot.ChannelUser, "bot_name": snapshot.BotName,
-		"bot_username": snapshot.BotUsername, "status": status, "message": message,
+		"bot_username": snapshot.BotUsername, "status": status.String(), "message": message,
 		"retry_count": job.RetryCount, "created_at": gtime.Now(), "updated_at": gtime.Now(),
 	}
 	_, err := g.DB().Model(publishRecordLogTable).Safe().Ctx(ctx).Data(data).
-		OnConflict("job_id").OnDuplicateEx("status", "message", "retry_count", "updated_at").Save()
+		OnConflict("job_id").OnDuplicate("status", "message", "retry_count", "updated_at").Save()
 	if err != nil && !strings.Contains(strings.ToLower(err.Error()), "does not exist") && !strings.Contains(strings.ToLower(err.Error()), "undefined table") {
 		return gerror.Wrap(err, "保存发布日志投影失败")
 	}
 	return nil
 }
 
-func publishRecordStatusFromJob(status string) string {
-	switch strings.TrimSpace(status) {
-	case "sent":
-		return "success"
-	case "pending", "sending", "failed_retry", "failed", "superseded", "unknown":
-		return strings.TrimSpace(status)
-	default:
-		return "pending"
+func publishRecordStatusFromJob(status JobStatus) model.PublishRecordStatus {
+	for _, mapping := range publishRecordJobStatusMappings {
+		if mapping.Job == status {
+			return mapping.Record
+		}
 	}
+	return model.PublishRecordStatusUnknown
 }
 
 func (s *sSysPublish) backfillPublishSuccessRecords(ctx context.Context, limit int) error {
@@ -220,35 +222,51 @@ func publishSuccessRecordMessage(action string) string {
 	}
 }
 
-func publishJobRecordMessage(action string, status string) string {
+func publishJobRecordMessage(action string, status model.PublishRecordStatus) string {
 	if action == publishSuccessTypeQuick {
 		switch status {
-		case "sending":
+		case model.PublishRecordStatusSending:
 			return "快速推送正在发送"
-		case "failed_retry":
+		case model.PublishRecordStatusRetryWait:
 			return "快速推送失败，等待重试"
-		case "failed":
+		case model.PublishRecordStatusFailed:
 			return "快速推送失败"
-		case "success", "sent":
+		case model.PublishRecordStatusSuccess:
 			return "快速推送成功"
-		default:
+		case model.PublishRecordStatusUnknown:
+			return "快速推送结果待人工确认"
+		case model.PublishRecordStatusSuperseded:
+			return "快速推送已被新操作替换"
+		case model.PublishRecordStatusCancelled:
+			return "快速推送已取消"
+		case model.PublishRecordStatusDeleted:
+			return "快速推送消息已删除"
+		case model.PublishRecordStatusPending:
 			return "快速推送等待发送"
+		default:
+			return "快速推送状态异常"
 		}
 	}
 	switch status {
-	case "sending":
+	case model.PublishRecordStatusSending:
 		return "TG资料正在发送"
-	case "failed_retry":
+	case model.PublishRecordStatusRetryWait:
 		return "TG资料发送失败，等待重试"
-	case "failed":
+	case model.PublishRecordStatusFailed:
 		return "TG资料发送失败"
-	case "unknown":
+	case model.PublishRecordStatusUnknown:
 		return "TG发送结果待人工确认"
-	case "superseded":
+	case model.PublishRecordStatusSuperseded:
 		return "TG任务已被新操作替换"
-	case "success", "sent":
+	case model.PublishRecordStatusSuccess:
 		return publishSuccessRecordMessage(action)
-	default:
+	case model.PublishRecordStatusCancelled:
+		return "TG任务已取消"
+	case model.PublishRecordStatusDeleted:
+		return "TG消息已删除"
+	case model.PublishRecordStatusPending:
 		return "TG资料等待推送"
+	default:
+		return "TG发布记录状态异常"
 	}
 }

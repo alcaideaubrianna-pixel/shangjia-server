@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"hotgo/addons/youban_publish/model"
 	"net"
 	"os"
 	"strings"
@@ -426,7 +427,7 @@ func (s *sSysPublish) sendTelegramJobLockedByChannel(ctx context.Context, jobId 
 		return err
 	}
 	step = beginTelegramPublishStage(ctx, "job.upsert_sending_record")
-	recordErr := s.upsertPublishJobRecord(ctx, job, "sending", "")
+	recordErr := s.upsertPublishJobRecord(ctx, job, model.PublishRecordStatusSending, "")
 	step.End(recordErr)
 	if recordErr != nil {
 		g.Log().Warningf(ctx, "更新发布发送中记录失败 jobId:%d err:%+v", job.Id, recordErr)
@@ -1120,7 +1121,11 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 			g.Log().Warningf(ctx, "记录频道权限熔断失败 jobId:%d channelId:%d err:%+v", job.Id, job.ChannelId, circuitErr)
 		}
 	}
-	if recordErr := s.upsertPublishJobRecord(ctx, job, decision.Status, decision.Message); recordErr != nil {
+	recordJobStatus, validRecordJobStatus := ParseJobStatus(decision.Status)
+	if !validRecordJobStatus {
+		recordJobStatus = JobStatusUnknown
+	}
+	if recordErr := s.upsertPublishJobRecord(ctx, job, publishRecordStatusFromJob(recordJobStatus), decision.Message); recordErr != nil {
 		g.Log().Warningf(ctx, "更新发布失败记录失败 jobId:%d status:%s err:%+v", job.Id, decision.Status, recordErr)
 	}
 	s.appendTelegramJobLog(ctx, job, "publish", decision.Status, decision.Message)
@@ -1176,7 +1181,7 @@ func (s *sSysPublish) switchTelegramJobToNextBot(ctx context.Context, job telegr
 	if err = s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusPending); err != nil {
 		return false, err
 	}
-	if recordErr := s.upsertPublishJobRecord(ctx, job, "pending", "已切换备用BOT，等待重新发送"); recordErr != nil {
+	if recordErr := s.upsertPublishJobRecord(ctx, job, model.PublishRecordStatusPending, "已切换备用BOT，等待重新发送"); recordErr != nil {
 		g.Log().Warningf(ctx, "更新发布待发送记录失败 jobId:%d err:%+v", job.Id, recordErr)
 	}
 	s.appendTelegramJobLog(ctx, job, "publish", "bot_switched", fmt.Sprintf("当前BOT限流，已切换备用BOT：%d，原因：%s", nextBotId, cause.Error()))

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hotgo/addons/youban_publish/model"
 	"regexp"
 	"strings"
 
@@ -134,7 +135,7 @@ func (s *sSysPublish) AdminProfileBatchCancel(ctx context.Context, in *sysin.Adm
 			}
 		}
 		s.appendTelegramJobLog(ctx, job, "publish", "superseded", adminBatchTextCancelMessage)
-		if recordErr := s.upsertPublishJobRecord(ctx, job, "superseded", adminBatchTextCancelMessage); recordErr != nil {
+		if recordErr := s.upsertPublishJobRecord(ctx, job, model.PublishRecordStatusSuperseded, adminBatchTextCancelMessage); recordErr != nil {
 			g.Log().Warningf(ctx, "更新批量发布取消记录失败 jobId:%d err:%+v", job.Id, recordErr)
 		}
 	}

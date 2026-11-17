@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"hotgo/addons/youban_publish/model"
 	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -38,7 +39,7 @@ func (s *sSysPublish) settleStreamFailedMediaJob(ctx context.Context, job telegr
 		if err != nil || !changed {
 			return err
 		}
-		if err = s.upsertPublishJobRecord(ctx, job, telegramJobStatusFailed, message); err != nil {
+		if err = s.upsertPublishJobRecord(ctx, job, model.PublishRecordStatusFailed, message); err != nil {
 			return err
 		}
 		return s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusFailed)
@@ -77,7 +78,7 @@ func (s *sSysPublish) settleMissingTelegramProfileJob(ctx context.Context, job t
 		return nil
 	}
 	s.appendTelegramJobLog(ctx, job, "media_ready", "failed", message)
-	if recordErr := s.upsertPublishJobRecord(ctx, job, "failed", message); recordErr != nil {
+	if recordErr := s.upsertPublishJobRecord(ctx, job, model.PublishRecordStatusFailed, message); recordErr != nil {
 		g.Log().Warningf(ctx, "记录失效资料推送失败结果失败 jobId:%d profileId:%d err:%+v", job.Id, job.ProfileId, recordErr)
 	}
 	_ = s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusFailed)
