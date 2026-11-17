@@ -74,7 +74,8 @@ func (s *sSysPublish) expireTelegramSendTx(ctx context.Context, tx gdb.TX, id in
 	if err = tx.Model(publishTgJobTable).Where("id", id).LockUpdate().Scan(&old); err != nil {
 		return
 	}
-	if old.Id <= 0 || old.SendDeadlineAt == nil || dbtime.FromTimestamp(old.SendDeadlineAt).Time.After(time.Now()) ||
+	if old.Id <= 0 || (!telegramShutdownHandoffExpired(old, time.Now()) &&
+		(old.SendDeadlineAt == nil || dbtime.FromTimestamp(old.SendDeadlineAt).Time.After(time.Now()))) ||
 		(old.Status != telegramJobStatusPending && old.Status != telegramJobStatusSending && old.Status != telegramJobStatusRetryWait && old.Status != telegramJobStatusConfirming) {
 		return
 	}
@@ -88,7 +89,7 @@ func (s *sSysPublish) expireTelegramSendTx(ctx context.Context, tx gdb.TX, id in
 	}
 	changed, transitionErr := s.transitionTelegramJobTx(ctx, tx, telegramJobTransition{
 		JobId: old.Id, From: []JobStatus{old.Status}, To: telegramJobStatusSuperseded,
-		ErrorMessage: telegramSendTimeoutText(ctx),
+		ErrorMessage: telegramSendExpirationText(ctx, old),
 		SendPhase:    jobPhase(telegramSendPhaseTimeoutCancelled),
 		Additional:   g.Map{"timeout_cleanup_at": gtime.Now()},
 	})
@@ -103,7 +104,7 @@ func (s *sSysPublish) expireTelegramSendTx(ctx context.Context, tx gdb.TX, id in
 	}
 	if _, err = tx.Model(publishTgOutboxTable).Where("job_id", old.Id).
 		Data(g.Map{"status": telegramOutboxDelivered, "lease_owner": "", "lease_expires_at": nil,
-			"last_error": telegramSendTimeoutText(ctx), "delivered_at": gtime.Now()}).Update(); err != nil {
+			"last_error": telegramSendExpirationText(ctx, old), "delivered_at": gtime.Now()}).Update(); err != nil {
 		return
 	}
 	state, stateErr := tx.Model(publishProfileStateTable).Where("tenant_id", old.TenantId).

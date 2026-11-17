@@ -22,6 +22,7 @@ const (
 	DefaultFinalize       = 10 * time.Second
 	DefaultResponse       = 5 * time.Second
 	DefaultShutdown       = 30 * time.Second
+	DefaultShutdownDrain  = 20 * time.Second
 	DefaultEnqueue        = 5 * time.Second
 	DefaultPreview        = 30 * time.Second
 	DefaultPoster         = 5 * time.Second
@@ -48,6 +49,7 @@ var (
 	finalize       = setting{"finalizeTimeout", DefaultFinalize, time.Second, time.Minute}
 	response       = setting{"responseTimeout", DefaultResponse, time.Second, time.Minute}
 	shutdown       = setting{"shutdownTimeout", DefaultShutdown, time.Second, 5 * time.Minute}
+	shutdownDrain  = setting{"shutdownDrainTimeout", DefaultShutdownDrain, time.Second, 5 * time.Minute}
 	enqueue        = setting{"enqueueTimeout", DefaultEnqueue, time.Second, time.Minute}
 	preview        = setting{"previewTimeout", DefaultPreview, time.Second, 5 * time.Minute}
 	poster         = setting{"posterTimeout", DefaultPoster, time.Second, time.Minute}
@@ -93,6 +95,7 @@ func AccountGate(ctx context.Context) time.Duration    { return accountGate.dura
 func Finalize(ctx context.Context) time.Duration       { return finalize.duration(ctx) }
 func Response(ctx context.Context) time.Duration       { return response.duration(ctx) }
 func Shutdown(ctx context.Context) time.Duration       { return shutdown.duration(ctx) }
+func ShutdownDrain(ctx context.Context) time.Duration  { return shutdownDrain.duration(ctx) }
 func Enqueue(ctx context.Context) time.Duration        { return enqueue.duration(ctx) }
 func Preview(ctx context.Context) time.Duration        { return preview.duration(ctx) }
 func Poster(ctx context.Context) time.Duration         { return poster.duration(ctx) }

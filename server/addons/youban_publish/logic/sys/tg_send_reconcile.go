@@ -262,6 +262,11 @@ func (s *sSysPublish) reconcileClaimedUnknownTelegramJob(ctx context.Context, jo
 	handled, recoverErr := s.recoverConfirmedUnknownTelegramJob(ctx, job)
 	if recoverErr != nil {
 		if errors.Is(recoverErr, errTelegramAttemptAuditIncomplete) {
+			if expired, expireErr := s.expireTelegramShutdownHandoff(ctx, job); expireErr != nil {
+				return s.releaseUnknownTelegramJobClaim(ctx, job.Id, expireErr)
+			} else if expired {
+				return nil
+			}
 			return s.reconcileIncompleteUnknownTelegramAttempt(ctx, job, recoverErr)
 		}
 		return s.releaseUnknownTelegramJobClaim(ctx, job.Id, recoverErr)
@@ -274,6 +279,11 @@ func (s *sSysPublish) reconcileClaimedUnknownTelegramJob(ctx context.Context, jo
 		return s.releaseUnknownTelegramJobClaim(ctx, job.Id, recoverErr)
 	}
 	if handled {
+		return nil
+	}
+	if expired, expireErr := s.expireTelegramShutdownHandoff(ctx, job); expireErr != nil {
+		return s.releaseUnknownTelegramJobClaim(ctx, job.Id, expireErr)
+	} else if expired {
 		return nil
 	}
 	// A timeout is an ambiguous Telegram result: the request may have been
@@ -658,7 +668,9 @@ func (s *sSysPublish) recoverConfirmedUnknownTelegramJob(ctx context.Context, jo
 func (s *sSysPublish) claimUnknownTelegramJob(ctx context.Context, jobId int64) (bool, error) {
 	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id", jobId).Where("status", "unknown").
-		WhereIn("dispatch_status", []string{tgDispatchStatusQueued, tgDispatchStatusProcessing}).
+		// The per-job token lease above owns reconciliation. Idle is a resumable
+		// checkpoint after an earlier inconclusive pass, not an ownership lock.
+		WhereIn("dispatch_status", []string{tgDispatchStatusIdle, tgDispatchStatusQueued, tgDispatchStatusProcessing}).
 		Data(g.Map{"dispatch_status": tgDispatchStatusProcessing, "updated_at": gtime.Now()}).Update()
 	if err != nil {
 		return false, gerror.Wrap(err, "领取TG对账任务失败")

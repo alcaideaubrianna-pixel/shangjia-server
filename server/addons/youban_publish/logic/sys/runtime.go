@@ -19,7 +19,7 @@ func (s *sSysPublish) StartRuntime(ctx context.Context) {
 		return
 	}
 	runtimeCtx, cancel := context.WithCancel(context.Background())
-	telegramFinalizeRegistries.Store(s, &telegramFinalizeRegistry{})
+	telegramFinalizeRegistries.Store(s, &telegramFinalizeRegistry{executions: &telegramRuntimeExecutions{}})
 	s.runtimeCancel = cancel
 	s.runtimeDone = make(chan struct{})
 	done := s.runtimeDone
@@ -33,22 +33,24 @@ func (s *sSysPublish) StopRuntime() {
 	shutdownCtx, stopShutdown := context.WithTimeout(context.Background(), telegramFinalizeShutdownGrace())
 	defer stopShutdown()
 	registry := s.telegramFinalizeRegistry()
-	registry.closeAdmission()
+	if registry.executions != nil {
+		registry.executions.closeAdmission()
+	}
 	s.runtimeMu.Lock()
 	cancel := s.runtimeCancel
 	done := s.runtimeDone
-	s.runtimeCancel = nil
-	s.runtimeDone = nil
 	s.runtimeMu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
+	s.drainTelegramRuntimeExecutions(shutdownCtx, registry)
 	if done != nil {
 		select {
 		case <-done:
 		case <-shutdownCtx.Done():
 		}
 	}
+	registry.closeAdmission()
 	if err := registry.drain(shutdownCtx); err != nil {
 		logTelegramFinalize(shutdownCtx, "runtime.shutdown", "grace_expired", errTelegramFinalizeShutdown)
 	} else {
@@ -59,6 +61,12 @@ func (s *sSysPublish) StopRuntime() {
 	s.tgQueueMu.Lock()
 	s.telegramOutboxStarted = false
 	s.tgQueueMu.Unlock()
+	s.runtimeMu.Lock()
+	if s.runtimeDone == done {
+		s.runtimeCancel = nil
+		s.runtimeDone = nil
+	}
+	s.runtimeMu.Unlock()
 }
 
 func (s *sSysPublish) runPublishRuntime(ctx context.Context) {

@@ -875,6 +875,11 @@ func (s *sSysPublish) handleTelegramAttemptTimeout(ctx context.Context, attemptI
 	if err != nil {
 		return err
 	}
+	if _, handoff := telegramShutdownHandoffDeadline(job.LastDispatchError); handoff {
+		// Reuse the token-owned per-job reconciler. A shutdown must not turn
+		// an ambiguous verification into failed while leaving its display live.
+		return s.reconcileUnknownTelegramJob(ctx, job)
+	}
 	// Preserve partial confirmations so a late Webhook can still complete the attempt.
 	phase := telegramSendPhaseCleanupConfirmed
 	if attempt.Phase == "verify" || attempt.Phase == "package" {

@@ -387,6 +387,11 @@ runtime:
   roles: [ "all" ]
 
 youbanPublish:
+  telegram:
+    # 包含发送排空、回执落库和领取收尾的总停机预算。
+    shutdownTimeout: "30s"       # YOUBAN_PUBLISH_TG_SHUTDOWN_TIMEOUT
+    # 排空期间停止领取，继续执行和续租；实际窗口还会预留 finalizeTimeout。
+    shutdownDrainTimeout: "20s"  # YOUBAN_PUBLISH_TG_SHUTDOWN_DRAIN_TIMEOUT
   # Opt-in account visibility read model after parity validation.
   accountVisibilityReadModelEnabled: false
   redisStream:

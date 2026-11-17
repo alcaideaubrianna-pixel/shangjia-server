@@ -134,7 +134,27 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 	}
 	// 领取租约与发送租约职责不同：前者防止丢失出队任务，后者保护 TG 发送。
 	// The durable job deadline owns the send budget; claim renewal only cancels on lease loss.
-	execution, cancel := context.WithCancel(ctx)
+	execution, cancel, finishExecution, admitted := s.admitTelegramRuntimeExecution(ctx)
+	if !admitted {
+		settleCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), telegrambudget.LeaseOperation(ctx))
+		defer stop()
+		priority := tgJobPriorityDefault
+		if claim.Urgent {
+			priority = tgJobPriorityInteractive
+		} else if claim.History {
+			priority = tgJobPriorityHistory
+		}
+		ok, settleErr := settleTelegramChannelClaim(settleCtx, claim, true, priority, time.Now())
+		if settleErr != nil {
+			return true, settleErr
+		}
+		if !ok {
+			return true, gerror.New("停机交接时频道领取已失效，等待过期恢复")
+		}
+		logTelegramQueueEvent(settleCtx, "shutdown_claim_requeued", g.Map{"channelId": channelID, "jobId": jobID, "claimId": telegramQueueClaimID(claim.Token)}, nil)
+		return true, nil
+	}
+	defer finishExecution()
 	stopRenew := keepTelegramChannelClaim(execution, cancel, claim)
 	ctx = execution
 	settled := false
@@ -153,6 +173,9 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 		return nil
 	}
 	defer func() {
+		if !settled && !terminal && errors.Is(context.Cause(execution), errTelegramRuntimeShutdownHandoff) {
+			s.persistTelegramShutdownHandoff(execution, claim)
+		}
 		cancel()
 		stopRenew()
 		if settled {

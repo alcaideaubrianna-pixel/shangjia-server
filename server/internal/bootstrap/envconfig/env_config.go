@@ -58,6 +58,7 @@ var items = []item{
 	{Key: "youbanPublish.telegram.finalizeTimeout", EnvKeys: []string{"YOUBAN_PUBLISH_TG_FINALIZE_TIMEOUT"}},
 	{Key: "youbanPublish.telegram.responseTimeout", EnvKeys: []string{"YOUBAN_PUBLISH_TG_RESPONSE_TIMEOUT"}},
 	{Key: "youbanPublish.telegram.shutdownTimeout", EnvKeys: []string{"YOUBAN_PUBLISH_TG_SHUTDOWN_TIMEOUT"}},
+	{Key: "youbanPublish.telegram.shutdownDrainTimeout", EnvKeys: []string{"YOUBAN_PUBLISH_TG_SHUTDOWN_DRAIN_TIMEOUT"}},
 	{Key: "youbanPublish.telegram.enqueueTimeout", EnvKeys: []string{"YOUBAN_PUBLISH_TG_ENQUEUE_TIMEOUT"}},
 	{Key: "youbanPublish.telegram.previewTimeout", EnvKeys: []string{"YOUBAN_PUBLISH_TG_PREVIEW_TIMEOUT"}},
 	{Key: "youbanPublish.telegram.posterTimeout", EnvKeys: []string{"YOUBAN_PUBLISH_TG_POSTER_TIMEOUT"}},

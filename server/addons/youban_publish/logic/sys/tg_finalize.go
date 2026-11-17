@@ -78,10 +78,11 @@ func telegramFinalizeAttemptContext(ctx context.Context, attempt telegramDeliver
 // The registry uses a count and generation channel rather than WaitGroup so
 // admission can be closed atomically with shutdown, without Add/Wait races.
 type telegramFinalizeRegistry struct {
-	mu      sync.Mutex
-	closing bool
-	active  int
-	idle    chan struct{}
+	executions *telegramRuntimeExecutions
+	mu         sync.Mutex
+	closing    bool
+	active     int
+	idle       chan struct{}
 }
 
 func (r *telegramFinalizeRegistry) admit() bool {
