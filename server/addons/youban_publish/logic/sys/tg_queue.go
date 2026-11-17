@@ -206,11 +206,13 @@ const (
 )
 
 type tgQueuePayload struct {
-	JobId              int64   `json:"jobId"`
-	CleanupOutboxId    int64   `json:"cleanupOutboxId,omitempty"`
-	CleanupOperationNo string  `json:"cleanupOperationNo,omitempty"`
-	CleanupJobIds      []int64 `json:"cleanupJobIds,omitempty"`
-	ForceCompletion    bool    `json:"forceCompletion,omitempty"`
+	Trace               *publishTraceCarrier `json:"trace,omitempty"`
+	JobId               int64                `json:"jobId"`
+	CleanupOutboxId     int64                `json:"cleanupOutboxId,omitempty"`
+	CleanupOperationNo  string               `json:"cleanupOperationNo,omitempty"`
+	ProgressOperationNo string               `json:"progressOperationNo,omitempty"`
+	CleanupJobIds       []int64              `json:"cleanupJobIds,omitempty"`
+	ForceCompletion     bool                 `json:"forceCompletion,omitempty"`
 }
 
 func telegramCleanupTaskID(jobId int64) string {
@@ -225,6 +227,9 @@ func telegramCleanupFallbackTaskID(jobId int64, attemptCount int) string {
 }
 
 func telegramCleanupTaskBody(payload tgQueuePayload) ([]byte, error) {
+	// Cleanup retries and outbox redelivery share payload-based Unique keys.
+	// Trace metadata must not change that digest, even on a non-unique fallback.
+	payload.Trace = nil
 	return json.Marshal(payload)
 }
 
@@ -716,6 +721,9 @@ func (s *sSysPublish) enqueueTelegramCleanupJobWithContext(ctx context.Context, 
 		eventType = telegramOutboxCleanupPrefix + "cycle"
 	}
 	if payload.CleanupOutboxId == 0 && operationNo != "" {
+		// Intent dedupe uses job/event/operation, not the JSON digest. Persist
+		// optional W3C context in this existing write; first writer still wins.
+		payload.Trace = capturePublishTrace(ctx)
 		outboxID, _, err := ensureTelegramCleanupIntent(ctx, jobId, eventType, operationNo, payload)
 		if err != nil {
 			return err
@@ -731,6 +739,7 @@ func (s *sSysPublish) enqueueTelegramCleanupJobWithContext(ctx context.Context, 
 		// message cleanup; it must never create or claim a new intent.
 		payload.CleanupOperationNo = ""
 	}
+	ctx = restorePublishTrace(ctx, payload.Trace)
 	if err := s.enqueueTelegramTaskWithQueuePayload(ctx, tgTaskTypeCleanup, jobId, delay, true, queueName, payload); err != nil {
 		g.Log().Warning(ctx, "TG资料清理任务入队失败", g.Map{
 			"log_type": "telegram_cleanup_enqueue", "event": "failed", "jobId": jobId,
@@ -1229,6 +1238,9 @@ func (s *sSysPublish) enqueueTelegramTaskWithQueuePayload(ctx context.Context, t
 		_, err = enqueueTelegramCleanupTask(ctx, client, queueName, jobId, delay, unique, 0, payload)
 		return err
 	}
+	// Asynq hashes the complete body for Unique, independently of TaskID.
+	// Leave unique tasks byte-for-byte compatible with existing producers.
+	payload = telegramQueueTracePayload(ctx, payload, unique)
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return err

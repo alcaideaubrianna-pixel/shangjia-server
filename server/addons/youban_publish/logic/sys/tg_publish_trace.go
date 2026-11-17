@@ -195,12 +195,14 @@ func telegramPublishOperationCategory(operationNo string) string {
 }
 
 type telegramPublishStage struct {
-	ctx      context.Context
-	fields   g.Map
-	started  time.Time
-	timer    *time.Timer
-	ended    atomic.Bool
-	detailed bool
+	ctx               context.Context
+	fields            g.Map
+	started           time.Time
+	timer             *time.Timer
+	ended             atomic.Bool
+	detailed          bool
+	finishObservation func(error, bool)
+	registry          *publishStageRegistry
 }
 
 // Sample whole executions, not individual stages, so sampled traces stay useful.
@@ -218,9 +220,12 @@ func telegramPublishDetailedLogs(executionID string) bool {
 }
 
 func beginTelegramPublishStage(ctx context.Context, stage string, fields ...g.Map) *telegramPublishStage {
+	finishObservation := startPublishStageObservation(ctx, stage)
 	base, enabled := ctx.Value(telegramPublishTraceContextKey{}).(g.Map)
 	if !enabled {
-		return &telegramPublishStage{}
+		step := &telegramPublishStage{finishObservation: finishObservation}
+		registerPublishStage(ctx, step)
+		return step
 	}
 	data := g.Map{"log_type": "telegram_publish_stage", "stage": stage, "stageId": guid.S()}
 	for key, value := range base {
@@ -242,7 +247,7 @@ func beginTelegramPublishStage(ctx context.Context, stage string, fields ...g.Ma
 		data["deadlineSource"] = "verify"
 	}
 	executionID, _ := base["executionId"].(string)
-	step := &telegramPublishStage{ctx: ctx, fields: data, started: time.Now(), detailed: telegramPublishDetailedLogs(executionID)}
+	step := &telegramPublishStage{ctx: ctx, fields: data, started: time.Now(), detailed: telegramPublishDetailedLogs(executionID), finishObservation: finishObservation}
 	step.log("start", nil, nil)
 	// One warning per slow stage bounds log volume and adds no database/Redis
 	// traffic. Stop on every normal/error/panic exit; never cancel business work.
@@ -255,14 +260,19 @@ func beginTelegramPublishStage(ctx context.Context, stage string, fields ...g.Ma
 			step.log("slow", nil, nil)
 		}
 	})
+	registerPublishStage(ctx, step)
 	return step
 }
 
 func (s *telegramPublishStage) End(err error, fields ...g.Map) {
-	if s.timer == nil {
+	if s.ended.Swap(true) {
 		return
 	}
-	if s.ended.Swap(true) {
+	s.registry.remove(s)
+	if s.finishObservation != nil {
+		s.finishObservation(err, false)
+	}
+	if s.timer == nil {
 		return
 	}
 	s.timer.Stop()
@@ -280,9 +290,15 @@ func (s *telegramPublishStage) End(err error, fields ...g.Map) {
 // Asynq's existing failure/retry behavior rather than silently swallowing it.
 func (s *telegramPublishStage) Finish(err *error) {
 	if recovered := recover(); recovered != nil {
-		if s.timer != nil && !s.ended.Swap(true) {
-			s.timer.Stop()
-			s.log("panic", fmt.Errorf("%v", recovered), []g.Map{{"stack": string(debug.Stack())}})
+		if !s.ended.Swap(true) {
+			s.registry.remove(s)
+			if s.finishObservation != nil {
+				s.finishObservation(nil, true)
+			}
+			if s.timer != nil {
+				s.timer.Stop()
+				s.log("panic", fmt.Errorf("%v", recovered), []g.Map{{"stack": string(debug.Stack())}})
+			}
 		}
 		panic(recovered)
 	}

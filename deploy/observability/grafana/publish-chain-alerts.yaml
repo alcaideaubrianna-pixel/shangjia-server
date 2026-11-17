@@ -1,0 +1,281 @@
+# Grafana unified alerting provisioning; review only, all rules paused.
+# Datasource UID victoriametrics; Prometheus-translated names, fixed job=youban scope.
+# Confirm orgId, target scope, emitted names and collection cadence before enabling.
+# Do not load as vmalert groups; proposed inventory/stall alerts are documentation only.
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: publish-chain-observed-signals
+    folder: Publish chain
+    interval: 1m
+    rules:
+      - uid: pub-chain-api-errors
+        title: "Publish observed API error fraction"
+        condition: C
+        for: 5m
+        noDataState: NoData
+        execErrState: Error
+        isPaused: true
+        labels:
+          severity: warning
+          category: publish
+        annotations:
+          summary: "Publish observed API error fraction"
+          description: "Selected media-group API attempts: error fraction exceeds 20% with at least 20 requests in 5m. Legacy coverage only; not job success or full Telegram coverage."
+          __dashboardUid__: youban-publish-chain
+        data:
+          - refId: A
+            datasourceUid: victoriametrics
+            relativeTimeRange: {from: 600, to: 0}
+            model: {"refId": "A", "datasource": {"type": "prometheus", "uid": "victoriametrics"}, "expr": "(sum by (job) (increase({__name__=\"xiaohuiji_tg_api_requests_total\",job=\"youban\",result=\"error\"}[5m])) / sum by (job) (increase({__name__=\"xiaohuiji_tg_api_requests_total\",job=\"youban\"}[5m]))) and on (job) (sum by (job) (increase({__name__=\"xiaohuiji_tg_api_requests_total\",job=\"youban\"}[5m])) >= 20)", "instant": true, "range": false, "editorMode": "code", "intervalMs": 15000, "maxDataPoints": 43200}
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange: {from: 0, to: 0}
+            model: {"refId": "B", "datasource": {"type": "__expr__", "uid": "__expr__"}, "type": "reduce", "expression": "A", "reducer": "last", "settings": {"mode": "strict"}}
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange: {from: 0, to: 0}
+            model: {"refId": "C", "datasource": {"type": "__expr__", "uid": "__expr__"}, "type": "threshold", "expression": "B", "conditions": [{"type": "query", "query": {"params": ["C"]}, "reducer": {"type": "last", "params": []}, "evaluator": {"type": "gt", "params": [0.2]}, "operator": {"type": "and"}}]}
+      - uid: pub-chain-api-latency
+        title: "Publish observed API P95 latency"
+        condition: C
+        for: 5m
+        noDataState: NoData
+        execErrState: Error
+        isPaused: true
+        labels:
+          severity: warning
+          category: publish
+        annotations:
+          summary: "Publish observed API P95 latency"
+          description: "P95 exceeds 10 seconds with at least 20 instrumented API observations in 5m. No phase label; includes display and verify."
+          __dashboardUid__: youban-publish-chain
+        data:
+          - refId: A
+            datasourceUid: victoriametrics
+            relativeTimeRange: {from: 600, to: 0}
+            model: {"refId": "A", "datasource": {"type": "prometheus", "uid": "victoriametrics"}, "expr": "histogram_quantile(0.95, sum by (job, le) (rate({__name__=\"xiaohuiji_tg_api_duration_seconds_bucket\",job=\"youban\"}[5m]))) and on (job) (sum by (job) (increase({__name__=\"xiaohuiji_tg_api_duration_seconds_count\",job=\"youban\"}[5m])) >= 20)", "instant": true, "range": false, "editorMode": "code", "intervalMs": 15000, "maxDataPoints": 43200}
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange: {from: 0, to: 0}
+            model: {"refId": "B", "datasource": {"type": "__expr__", "uid": "__expr__"}, "type": "reduce", "expression": "A", "reducer": "last", "settings": {"mode": "strict"}}
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange: {from: 0, to: 0}
+            model: {"refId": "C", "datasource": {"type": "__expr__", "uid": "__expr__"}, "type": "threshold", "expression": "B", "conditions": [{"type": "query", "query": {"params": ["C"]}, "reducer": {"type": "last", "params": []}, "evaluator": {"type": "gt", "params": [10]}, "operator": {"type": "and"}}]}
+      - uid: pub-chain-delete-fail
+        title: "Publish delete fallback failure events"
+        condition: C
+        for: 2m
+        noDataState: NoData
+        execErrState: Error
+        isPaused: true
+        labels:
+          severity: warning
+          category: publish
+        annotations:
+          summary: "Publish delete fallback failure events"
+          description: "At least 3 delete fallback failure events in 10m. Events can repeat per task; not unique failed jobs."
+          __dashboardUid__: youban-publish-chain
+        data:
+          - refId: A
+            datasourceUid: victoriametrics
+            relativeTimeRange: {from: 600, to: 0}
+            model: {"refId": "A", "datasource": {"type": "prometheus", "uid": "victoriametrics"}, "expr": "sum by (job) (increase({__name__=\"xiaohuiji_tg_delete_fallback_events_total\",job=\"youban\",result=~\"dead|permanent_failed|enqueue_failed|account_unavailable\"}[10m]))", "instant": true, "range": false, "editorMode": "code", "intervalMs": 15000, "maxDataPoints": 43200}
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange: {from: 0, to: 0}
+            model: {"refId": "B", "datasource": {"type": "__expr__", "uid": "__expr__"}, "type": "reduce", "expression": "A", "reducer": "last", "settings": {"mode": "strict"}}
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange: {from: 0, to: 0}
+            model: {"refId": "C", "datasource": {"type": "__expr__", "uid": "__expr__"}, "type": "threshold", "expression": "B", "conditions": [{"type": "query", "query": {"params": ["C"]}, "reducer": {"type": "last", "params": []}, "evaluator": {"type": "gt", "params": [2]}, "operator": {"type": "and"}}]}
+      - uid: pub-chain-recovery-fail
+        title: "Publish recovery step failures"
+        condition: C
+        for: 2m
+        noDataState: NoData
+        execErrState: Error
+        isPaused: true
+        labels:
+          severity: warning
+          category: publish
+        annotations:
+          summary: "Publish recovery step failures"
+          description: "At least 3 failed/timeout/canceled recovery invocations in 10m. Step success does not imply successful item repairs. This rule remains independent of page freshness to detect scan failure."
+          __dashboardUid__: youban-publish-chain
+        data:
+          - refId: A
+            datasourceUid: victoriametrics
+            relativeTimeRange: {from: 600, to: 0}
+            model: {"refId": "A", "datasource": {"type": "prometheus", "uid": "victoriametrics"}, "expr": "sum by (job, instance, step) (increase({__name__=\"xiaohuiji_publish_recovery_steps_total\",job=\"youban\",outcome=~\"failed|timeout|canceled\"}[10m]))", "instant": true, "range": false, "editorMode": "code", "intervalMs": 15000, "maxDataPoints": 43200}
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange: {from: 0, to: 0}
+            model: {"refId": "B", "datasource": {"type": "__expr__", "uid": "__expr__"}, "type": "reduce", "expression": "A", "reducer": "last", "settings": {"mode": "strict"}}
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange: {from: 0, to: 0}
+            model: {"refId": "C", "datasource": {"type": "__expr__", "uid": "__expr__"}, "type": "threshold", "expression": "B", "conditions": [{"type": "query", "query": {"params": ["C"]}, "reducer": {"type": "last", "params": []}, "evaluator": {"type": "gt", "params": [2]}, "operator": {"type": "and"}}]}
+      - uid: pub-chain-repair-fail
+        title: "Publish confirmed-job repair failures with fresh scan"
+        condition: C
+        for: 2m
+        noDataState: NoData
+        execErrState: Error
+        isPaused: true
+        labels:
+          severity: warning
+          category: publish
+        annotations:
+          summary: "Publish confirmed-job repair failures with fresh scan"
+          description: "At least 3 confirmed-job item failures in 10m on an instance with a successful page scan within 180s. Retries count again; phase is repair_verify_purpose or complete_job, not media purpose."
+          __dashboardUid__: youban-publish-chain
+        data:
+          - refId: A
+            datasourceUid: victoriametrics
+            relativeTimeRange: {from: 600, to: 0}
+            model: {"refId": "A", "datasource": {"type": "prometheus", "uid": "victoriametrics"}, "expr": "sum by (job, instance, phase) (increase({__name__=\"xiaohuiji_publish_recovery_items_total\",job=\"youban\",step=\"confirmed_job\",outcome=~\"failed|timeout|canceled\"}[10m])) and on (job, instance) ((time() - {__name__=\"xiaohuiji_publish_observation_updated_at_seconds\",job=\"youban\",kind=\"confirmed_job_page\"} >= 0) and (time() - {__name__=\"xiaohuiji_publish_observation_updated_at_seconds\",job=\"youban\",kind=\"confirmed_job_page\"} <= 180))", "instant": true, "range": false, "editorMode": "code", "intervalMs": 15000, "maxDataPoints": 43200}
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange: {from: 0, to: 0}
+            model: {"refId": "B", "datasource": {"type": "__expr__", "uid": "__expr__"}, "type": "reduce", "expression": "A", "reducer": "last", "settings": {"mode": "strict"}}
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange: {from: 0, to: 0}
+            model: {"refId": "C", "datasource": {"type": "__expr__", "uid": "__expr__"}, "type": "threshold", "expression": "B", "conditions": [{"type": "query", "query": {"params": ["C"]}, "reducer": {"type": "last", "params": []}, "evaluator": {"type": "gt", "params": [2]}, "operator": {"type": "and"}}]}
+      - uid: pub-chain-scan-stale
+        title: "Publish confirmed-job page observation stale"
+        condition: C
+        for: 2m
+        noDataState: NoData
+        execErrState: Error
+        isPaused: true
+        labels:
+          severity: warning
+          category: publish
+        annotations:
+          summary: "Publish confirmed-job page observation stale"
+          description: "Last successful bounded confirmed-job scan is older than 180s. Cached reexports do not refresh this timestamp. Missing individual instances or roles require expected-runtime inventory; this does not prove a channel is stalled."
+          __dashboardUid__: youban-publish-chain
+        data:
+          - refId: A
+            datasourceUid: victoriametrics
+            relativeTimeRange: {from: 600, to: 0}
+            model: {"refId": "A", "datasource": {"type": "prometheus", "uid": "victoriametrics"}, "expr": "time() - {__name__=\"xiaohuiji_publish_observation_updated_at_seconds\",job=\"youban\",kind=\"confirmed_job_page\"}", "instant": true, "range": false, "editorMode": "code", "intervalMs": 15000, "maxDataPoints": 43200}
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange: {from: 0, to: 0}
+            model: {"refId": "B", "datasource": {"type": "__expr__", "uid": "__expr__"}, "type": "reduce", "expression": "A", "reducer": "last", "settings": {"mode": "strict"}}
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange: {from: 0, to: 0}
+            model: {"refId": "C", "datasource": {"type": "__expr__", "uid": "__expr__"}, "type": "threshold", "expression": "B", "conditions": [{"type": "query", "query": {"params": ["C"]}, "reducer": {"type": "last", "params": []}, "evaluator": {"type": "gt", "params": [180]}, "operator": {"type": "and"}}]}
+      - uid: pub-chain-page-aged
+        title: "Publish fresh confirmed-job page contains old work"
+        condition: C
+        for: 5m
+        noDataState: NoData
+        execErrState: Error
+        isPaused: true
+        labels:
+          severity: warning
+          category: publish
+        annotations:
+          summary: "Publish fresh confirmed-job page contains old work"
+          description: "A fresh bounded confirmed-job page contains work unchanged for more than 600 seconds. This is sampled ordered-page evidence, not total backlog or complete stalled-channel coverage."
+          __dashboardUid__: youban-publish-chain
+        data:
+          - refId: A
+            datasourceUid: victoriametrics
+            relativeTimeRange: {from: 600, to: 0}
+            model: {"refId": "A", "datasource": {"type": "prometheus", "uid": "victoriametrics"}, "expr": "{__name__=\"xiaohuiji_publish_recovery_page_oldest_age_seconds\",job=\"youban\",kind=\"confirmed_job_page\"} and on (job, instance, kind) ((time() - {__name__=\"xiaohuiji_publish_observation_updated_at_seconds\",job=\"youban\",kind=\"confirmed_job_page\"} >= 0) and (time() - {__name__=\"xiaohuiji_publish_observation_updated_at_seconds\",job=\"youban\",kind=\"confirmed_job_page\"} <= 180)) and on (job, instance, kind) ({__name__=\"xiaohuiji_publish_recovery_page_items\",job=\"youban\",kind=\"confirmed_job_page\"} > 0)", "instant": true, "range": false, "editorMode": "code", "intervalMs": 15000, "maxDataPoints": 43200}
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange: {from: 0, to: 0}
+            model: {"refId": "B", "datasource": {"type": "__expr__", "uid": "__expr__"}, "type": "reduce", "expression": "A", "reducer": "last", "settings": {"mode": "strict"}}
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange: {from: 0, to: 0}
+            model: {"refId": "C", "datasource": {"type": "__expr__", "uid": "__expr__"}, "type": "threshold", "expression": "B", "conditions": [{"type": "query", "query": {"params": ["C"]}, "reducer": {"type": "last", "params": []}, "evaluator": {"type": "gt", "params": [600]}, "operator": {"type": "and"}}]}
+      - uid: pub-chain-heartbeat
+        title: "Publish observed runtime heartbeat stale"
+        condition: C
+        for: 2m
+        noDataState: NoData
+        execErrState: Error
+        isPaused: true
+        labels:
+          severity: warning
+          category: publish
+        annotations:
+          summary: "Publish observed runtime heartbeat stale"
+          description: "Observed publish role last_seen timestamp is older than 120s; source loop runs every 30s. No observed series is not proof that all expected roles exist. Configure expected-role inventory separately."
+          __dashboardUid__: youban-publish-chain
+        data:
+          - refId: A
+            datasourceUid: victoriametrics
+            relativeTimeRange: {from: 600, to: 0}
+            model: {"refId": "A", "datasource": {"type": "prometheus", "uid": "victoriametrics"}, "expr": "time() - {__name__=\"xiaohuiji_publish_runtime_last_seen_seconds\",job=\"youban\"}", "instant": true, "range": false, "editorMode": "code", "intervalMs": 15000, "maxDataPoints": 43200}
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange: {from: 0, to: 0}
+            model: {"refId": "B", "datasource": {"type": "__expr__", "uid": "__expr__"}, "type": "reduce", "expression": "A", "reducer": "last", "settings": {"mode": "strict"}}
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange: {from: 0, to: 0}
+            model: {"refId": "C", "datasource": {"type": "__expr__", "uid": "__expr__"}, "type": "threshold", "expression": "B", "conditions": [{"type": "query", "query": {"params": ["C"]}, "reducer": {"type": "last", "params": []}, "evaluator": {"type": "gt", "params": [120]}, "operator": {"type": "and"}}]}
+      - uid: pub-chain-projection-fail
+        title: Publish terminal-confirmation transaction failures
+        condition: C
+        for: 2m
+        noDataState: NoData
+        execErrState: Error
+        isPaused: true
+        labels:
+          severity: warning
+          category: publish
+        annotations:
+          summary: Publish terminal-confirmation transaction failures
+          description: "At least 3 failed/timeout terminal-confirmation transaction attempts in 10m. Retries count again; this is confirmation plus channel-plan work, not eventual async profile/index projection."
+          __dashboardUid__: youban-publish-chain
+        data:
+          - refId: A
+            datasourceUid: victoriametrics
+            relativeTimeRange: {from: 600, to: 0}
+            model: {"refId": "A", "datasource": {"type": "prometheus", "uid": "victoriametrics"}, "expr": "sum by (job, kind) (increase({__name__=\"xiaohuiji_publish_projection_attempts_total\",job=\"youban\",kind=\"terminal_confirmation\",outcome=~\"failed|timeout\"}[10m]))", "instant": true, "range": false, "editorMode": "code", "intervalMs": 15000, "maxDataPoints": 43200}
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange: {from: 0, to: 0}
+            model: {"refId": "B", "datasource": {"type": "__expr__", "uid": "__expr__"}, "type": "reduce", "expression": "A", "reducer": "last", "settings": {"mode": "strict"}}
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange: {from: 0, to: 0}
+            model: {"refId": "C", "datasource": {"type": "__expr__", "uid": "__expr__"}, "type": "threshold", "expression": "B", "conditions": [{"type": "query", "query": {"params": ["C"]}, "reducer": {"type": "last", "params": []}, "evaluator": {"type": "gt", "params": [2]}, "operator": {"type": "and"}}]}
+      - uid: pub-chain-cleanup-fail
+        title: Publish cleanup invocation failures
+        condition: C
+        for: 2m
+        noDataState: NoData
+        execErrState: Error
+        isPaused: true
+        labels:
+          severity: warning
+          category: publish
+        annotations:
+          summary: Publish cleanup invocation failures
+          description: "At least 3 failed/timeout cleanup invocation observations in 10m by reason. Retries count again; this is not distinct failed intents. Deferred/requeue/incomplete are not business success."
+          __dashboardUid__: youban-publish-chain
+        data:
+          - refId: A
+            datasourceUid: victoriametrics
+            relativeTimeRange: {from: 600, to: 0}
+            model: {"refId": "A", "datasource": {"type": "prometheus", "uid": "victoriametrics"}, "expr": "sum by (job, reason) (increase({__name__=\"xiaohuiji_publish_cleanup_attempts_total\",job=\"youban\",outcome=~\"failed|timeout\"}[10m]))", "instant": true, "range": false, "editorMode": "code", "intervalMs": 15000, "maxDataPoints": 43200}
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange: {from: 0, to: 0}
+            model: {"refId": "B", "datasource": {"type": "__expr__", "uid": "__expr__"}, "type": "reduce", "expression": "A", "reducer": "last", "settings": {"mode": "strict"}}
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange: {from: 0, to: 0}
+            model: {"refId": "C", "datasource": {"type": "__expr__", "uid": "__expr__"}, "type": "threshold", "expression": "B", "conditions": [{"type": "query", "query": {"params": ["C"]}, "reducer": {"type": "last", "params": []}, "evaluator": {"type": "gt", "params": [2]}, "operator": {"type": "and"}}]}

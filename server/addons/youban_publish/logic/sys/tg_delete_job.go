@@ -20,71 +20,27 @@ func (s *sSysPublish) CleanupTelegramJobMessages(ctx context.Context, jobId int6
 }
 
 func (s *sSysPublish) cleanupTelegramJobMessages(ctx context.Context, jobId int64, payload tgQueuePayload) (resultErr error) {
-	started := time.Now()
-	payload, err := hydrateTelegramCleanupPayload(ctx, jobId, payload)
+	stageStarted := time.Now()
+	ctx, payload, err := hydrateTelegramCleanupPayloadContext(ctx, jobId, payload)
+	ctx, observation := beginPublishCleanupObservation(ctx, jobId, payload)
+	observation.started = stageStarted
+	defer func() { observation.finish(resultErr) }()
+	observation.stage("hydrate_payload", stageStarted, err)
 	if err != nil {
 		return err
 	}
+	stageStarted = time.Now()
 	job, err := s.telegramJobById(ctx, jobId)
+	observation.stage("load_job", stageStarted, err)
 	if err != nil {
 		return err
 	}
-	base := g.Map{
-		"log_type":           "telegram_cleanup",
-		"event":              "started",
-		"jobId":              job.Id,
-		"profileId":          job.ProfileId,
-		"tenantId":           job.TenantId,
-		"accountId":          job.AccountId,
-		"channelId":          job.ChannelId,
-		"operationNo":        job.OperationNo,
-		"cleanupOperationNo": strings.TrimSpace(payload.CleanupOperationNo),
-		"targetChatId":       job.TargetChatId,
-	}
-	g.Log().Info(ctx, "TG资料清理链路", base)
-	defer func() {
-		result := g.Map{
-			"log_type":           "telegram_cleanup",
-			"event":              "finished",
-			"jobId":              job.Id,
-			"profileId":          job.ProfileId,
-			"tenantId":           job.TenantId,
-			"accountId":          job.AccountId,
-			"channelId":          job.ChannelId,
-			"operationNo":        job.OperationNo,
-			"cleanupOperationNo": strings.TrimSpace(payload.CleanupOperationNo),
-			"durationMs":         time.Since(started).Milliseconds(),
-			"returnedError":      resultErr != nil,
-		}
-		if resultErr != nil {
-			result["error"] = resultErr.Error()
-			g.Log().Warning(ctx, "TG资料清理链路", result)
-		} else {
-			g.Log().Info(ctx, "TG资料清理链路", result)
-		}
-	}()
-	logStage := func(stage string, stageStarted time.Time, stageErr error) {
-		data := g.Map{
-			"log_type":           "telegram_cleanup_stage",
-			"event":              "finished",
-			"stage":              stage,
-			"jobId":              job.Id,
-			"profileId":          job.ProfileId,
-			"channelId":          job.ChannelId,
-			"operationNo":        job.OperationNo,
-			"cleanupOperationNo": strings.TrimSpace(payload.CleanupOperationNo),
-			"durationMs":         time.Since(stageStarted).Milliseconds(),
-			"returnedError":      stageErr != nil,
-		}
-		if stageErr != nil {
-			data["error"] = stageErr.Error()
-			g.Log().Warning(ctx, "TG资料清理阶段", data)
-		} else {
-			g.Log().Info(ctx, "TG资料清理阶段", data)
-		}
-	}
+	observation.job = job
+	observation.logStarted()
+	logStage := observation.stage
 	cleanup := func(cleanupCtx context.Context) error {
-		return s.withTelegramCleanupJobLease(cleanupCtx, job.Id, func(ctx context.Context) error {
+		leaseStarted := time.Now()
+		err := s.withTelegramCleanupJobLease(cleanupCtx, job.Id, func(ctx context.Context) error {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
@@ -95,12 +51,20 @@ func (s *sSysPublish) cleanupTelegramJobMessages(ctx context.Context, jobId int6
 				return err
 			}
 			stageStarted = time.Now()
-			if !strings.HasPrefix(payload.CleanupOperationNo, "cancel:") {
-				err = s.notifyBotProfileUnpublishCompleted(ctx, job, payload)
-			}
-			logStage("notify_unpublish_completed", stageStarted, err)
+			err = s.settleProfileCleanupProgress(ctx, job, payload)
+			logStage("settle_profile_cleanup_progress", stageStarted, err)
 			if err != nil {
-				g.Log().Warningf(ctx, "发送Bot资料下架完成通知失败 profileId:%d jobId:%d err:%+v", job.ProfileId, job.Id, err)
+				return err
+			}
+			stageStarted = time.Now()
+			if !strings.HasPrefix(payload.CleanupOperationNo, "cancel:") && payload.ProgressOperationNo == "" {
+				err = s.notifyBotProfileUnpublishCompleted(ctx, job, payload)
+				logStage("notify_unpublish_completed", stageStarted, err)
+			} else {
+				observation.recordStage("notify_unpublish_completed", "skipped", stageStarted, nil)
+			}
+			if err != nil {
+				g.Log().Warningf(ctx, "发送Bot资料下架完成通知失败 profileId:%d jobId:%d err:%s", job.ProfileId, job.Id, publishCleanupSafeText(err.Error()))
 				return gerror.Wrap(err, "发送Bot资料下架完成通知失败")
 			}
 			stageStarted = time.Now()
@@ -115,29 +79,56 @@ func (s *sSysPublish) cleanupTelegramJobMessages(ctx context.Context, jobId int6
 			stageStarted = time.Now()
 			err = s.completeTelegramCleanupIntent(ctx, job.Id, payload)
 			logStage("complete_cleanup_intent", stageStarted, err)
+			if err == nil {
+				observation.outcome = "settled_attempt"
+			}
 			return err
 		})
+		logStage("job_cleanup_lease", leaseStarted, err)
+		return err
 	}
 	priority := telegramCleanupExecutionPriority(ctx, job)
 	if strings.TrimSpace(payload.CleanupOperationNo) != "" {
 		priority = channelPriorityManualDelete
 	}
+	stageStarted = time.Now()
 	if s.accountPushEngine(ctx, job.TenantId, job.AccountId) == pushEngineUnifiedStream {
-		return s.withTelegramCleanupExecution(ctx, job, cleanup, priority)
+		entered := false
+		err = s.withTelegramCleanupExecution(ctx, job, func(cleanupCtx context.Context) error {
+			entered = true
+			logStage("channel_cleanup_slot", stageStarted, nil)
+			return cleanup(cleanupCtx)
+		}, priority)
+		if !entered {
+			if publishCleanupErrorType(err) == "retry_after" {
+				observation.outcome = "deferred"
+				observation.recordStage("channel_cleanup_slot", "deferred", stageStarted, err)
+			} else {
+				logStage("channel_cleanup_slot", stageStarted, err)
+			}
+		}
+		return err
 	}
 	lease, ok, err := tryTelegramCleanupChannelSlot(ctx, job.TargetChatId, priority)
 	if err != nil {
+		logStage("channel_cleanup_slot", stageStarted, err)
 		return err
 	}
 	if !ok {
-		g.Log().Warning(ctx, "TG资料清理等待频道并发槽位", g.Map{
-			"log_type": "telegram_cleanup_stage", "event": "requeue",
-			"stage": "channel_cleanup_slot", "jobId": job.Id, "profileId": job.ProfileId,
-			"channelId": job.ChannelId, "targetChatId": job.TargetChatId,
-			"priority": priority, "slotLimit": telegramCleanupSlotLimit(ctx, priority),
-		})
-		return s.requeueTelegramCleanupJob(ctx, jobId, time.Second, payload)
+		data := observation.fields("channel_cleanup_slot", "deferred", stageStarted, nil)
+		data["event"], data["priority"] = "requeue", priority
+		data["slotLimit"] = telegramCleanupSlotLimit(ctx, priority)
+		g.Log().Warning(ctx, "TG资料清理等待频道并发槽位", data)
+		observation.recordStage("channel_cleanup_slot", "deferred", stageStarted, nil)
+		stageStarted = time.Now()
+		err = s.requeueTelegramCleanupJob(ctx, jobId, time.Second, payload)
+		logStage("requeue", stageStarted, err)
+		if err == nil {
+			observation.outcome = "deferred"
+		}
+		return err
 	}
+	logStage("channel_cleanup_slot", stageStarted, nil)
 	defer s.releaseTelegramChannelLease(ctx, lease)
 	return cleanup(ctx)
 }
@@ -164,9 +155,9 @@ func (s *sSysPublish) withTelegramCleanupJobLease(ctx context.Context, jobId int
 
 func (s *sSysPublish) finishTelegramCleanupProfile(ctx context.Context, job telegramJobRecord, payload tgQueuePayload) error {
 	operationNo := strings.TrimSpace(payload.CleanupOperationNo)
-	if strings.HasPrefix(operationNo, "cancel:") {
+	if strings.HasPrefix(operationNo, "cancel:") || payload.ProgressOperationNo != "" {
 		return nil
-	} // Cancellation recovery owns its terminal state.
+	} // Cancellation/progress receipt recovery owns its terminal state.
 	if operationNo == "" {
 		// 没有当前 unpublishing 状态时，重复清理任务已经是幂等完成；
 		// 不使用历史 job.OperationNo，也不让遗留任务无限重试。

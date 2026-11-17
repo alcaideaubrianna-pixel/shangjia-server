@@ -97,6 +97,14 @@ func observeTelegramBotFileDownload(ctx context.Context, endpoint string, err er
 
 var publishObserveMeter = otel.Meter("hotgo/addons/youban_publish")
 
+// Keep publishing heartbeats separate from the global runtime heartbeat, whose
+// value is a Unix timestamp. Reusing that name for a constant 1 made freshness
+// queries ambiguous after the two instrumentation scopes were exported.
+var publishRuntimeLastSeen, _ = publishObserveMeter.Int64Gauge("xiaohuiji.publish.runtime.last_seen",
+	metric.WithUnit("s"), metric.WithDescription("Unix timestamp of the last publish-runtime heartbeat by enabled role"))
+var publishRuntimeHeartbeats, _ = publishObserveMeter.Int64Counter("xiaohuiji.publish.runtime.heartbeats",
+	metric.WithDescription("Publish-runtime heartbeat observations; these do not imply queue progress"))
+
 func observeDurableLogWriteFailure(ctx context.Context, logType string) {
 	counter, _ := publishObserveMeter.Int64Counter("xiaohuiji.durable_log.write_failures")
 	counter.Add(ctx, 1, metric.WithAttributes(attribute.String("log_type", logType)))
@@ -110,15 +118,17 @@ func observePublishRuntimeHeartbeat(ctx context.Context, config publishRuntimeCo
 		"media-worker":      config.MediaWorker,
 		"background-worker": config.BackgroundWorker,
 	}
-	gauge, _ := publishObserveMeter.Int64Gauge("xiaohuiji.runtime.heartbeat")
-	counter, _ := publishObserveMeter.Int64Counter("xiaohuiji.runtime.heartbeats")
 	for role, enabled := range roles {
 		if !enabled {
 			continue
 		}
 		attrs := metric.WithAttributes(attribute.String("role", role))
-		gauge.Record(ctx, 1, attrs)
-		counter.Add(ctx, 1, attrs)
+		if publishRuntimeLastSeen != nil {
+			publishRuntimeLastSeen.Record(ctx, time.Now().Unix(), attrs)
+		}
+		if publishRuntimeHeartbeats != nil {
+			publishRuntimeHeartbeats.Add(ctx, 1, attrs)
+		}
 	}
 }
 
@@ -190,12 +200,6 @@ func observeTelegramProfilePublish(ctx context.Context, job telegramJobRecord, r
 	if job.ChannelId > 0 {
 		attrs = append(attrs, attribute.Int64("channel_id", job.ChannelId))
 	}
-	if job.ProfileId > 0 {
-		attrs = append(attrs, attribute.Int64("profile_id", job.ProfileId))
-	}
-	if profileNo := strings.TrimSpace(job.ProfileNoSnapshot); profileNo != "" {
-		attrs = append(attrs, attribute.String("profile_no", profileNo))
-	}
 	counter, _ := publishObserveMeter.Int64Counter("xiaohuiji.tg.profile_publish_total")
 	durations, _ := publishObserveMeter.Float64Histogram("xiaohuiji.tg.profile_publish_duration_seconds")
 	metricAttrs := metric.WithAttributes(attrs...)
@@ -232,12 +236,6 @@ func observeTelegramProfilePublishQueueWait(ctx context.Context, job telegramJob
 	if job.ChannelId > 0 {
 		attrs = append(attrs, attribute.Int64("channel_id", job.ChannelId))
 	}
-	if job.ProfileId > 0 {
-		attrs = append(attrs, attribute.Int64("profile_id", job.ProfileId))
-	}
-	if profileNo := strings.TrimSpace(job.ProfileNoSnapshot); profileNo != "" {
-		attrs = append(attrs, attribute.String("profile_no", profileNo))
-	}
 	histogram, _ := publishObserveMeter.Float64Histogram("xiaohuiji.tg.profile_publish_queue_wait_seconds")
 	histogram.Record(ctx, wait.Seconds(), metric.WithAttributes(attrs...))
 }
@@ -260,7 +258,7 @@ func telegramProfileOperationSource(operationNo string) string {
 	if strings.HasPrefix(value, "bot_publish:") || strings.HasPrefix(value, "bot_unpublish:") || strings.HasPrefix(value, "bot_delete:") {
 		return "bot"
 	}
-	if strings.HasPrefix(value, "profile:") || strings.HasPrefix(value, "edit:") || strings.HasPrefix(value, "batchtext:") {
+	if strings.HasPrefix(value, "profile:") || strings.HasPrefix(value, "edit:") || strings.HasPrefix(value, "batchtext:") || strings.HasPrefix(value, "unpublish:") {
 		return "web"
 	}
 	return "auto"
@@ -280,15 +278,6 @@ func observeTelegramMediaSend(ctx context.Context, job *telegramJobRecord, phase
 	if job != nil {
 		if job.ChannelId > 0 {
 			attrs = append(attrs, attribute.Int64("channel_id", job.ChannelId))
-		}
-		if channelName := strings.TrimSpace(job.TargetChatId); channelName != "" {
-			attrs = append(attrs, attribute.String("channel_name", channelName))
-		}
-		if job.ProfileId > 0 {
-			attrs = append(attrs, attribute.Int64("profile_id", job.ProfileId))
-		}
-		if profileNo := strings.TrimSpace(job.ProfileNoSnapshot); profileNo != "" {
-			attrs = append(attrs, attribute.String("profile_no", profileNo))
 		}
 	}
 	metricAttrs := metric.WithAttributes(attrs...)
@@ -385,12 +374,6 @@ func observeTelegramProfileDeleteDuration(ctx context.Context, job telegramJobRe
 	attrs := []attribute.KeyValue{attribute.String("result", result)}
 	if job.ChannelId > 0 {
 		attrs = append(attrs, attribute.Int64("channel_id", job.ChannelId))
-	}
-	if job.ProfileId > 0 {
-		attrs = append(attrs, attribute.Int64("profile_id", job.ProfileId))
-	}
-	if profileNo := strings.TrimSpace(job.ProfileNoSnapshot); profileNo != "" {
-		attrs = append(attrs, attribute.String("profile_no", profileNo))
 	}
 	counter, _ := publishObserveMeter.Int64Counter("xiaohuiji.tg.profile_delete_total")
 	durations, _ := publishObserveMeter.Float64Histogram("xiaohuiji.tg.profile_delete_duration_seconds")

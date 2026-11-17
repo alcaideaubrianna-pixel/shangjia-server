@@ -51,6 +51,21 @@ func telegramFallbackOwnsPhase(job telegramJobRecord, purpose string) bool {
 }
 
 func logTelegramFallbackHandoff(ctx context.Context, event string, job telegramJobRecord, purpose string, taskID int64, reason string, from, to JobStatus) {
+	outcome, errorClass := "unknown", "none"
+	metricEvent := event
+	if event == "requested" {
+		metricEvent = "queued"
+	}
+	if event == "completed" || event == "recovered" {
+		if strings.Contains(reason, "missing_or_terminal_account_task") {
+			outcome, errorClass = "unknown", "unknown"
+		} else if to == telegramJobStatusFailed {
+			outcome, errorClass = "failed", "other"
+		} else {
+			outcome = "success"
+		}
+	}
+	observePublishTransportFallback(ctx, metricEvent, purpose, "account", "not_applicable", outcome, errorClass)
 	g.Log().Info(ctx, "TG协议号阶段交接", g.Map{
 		"event": "telegram_handoff_" + event, "jobId": job.Id, "profileId": job.ProfileId,
 		"channelId": job.ChannelId, "targetChat": job.TargetChatId, "purpose": purpose,
@@ -66,7 +81,12 @@ func logTelegramProtocolSend(ctx context.Context, job telegramJobRecord, attempt
 	}
 	verdict := "started"
 	if node == "result" {
+		confirmed := mediaCount > 0 && len(telegramSentMessageIDs(messages)) == mediaCount
+		publishTransportMetrics().accountPhase(ctx, purpose, duration, err, confirmed)
 		verdict = "success"
+		if !confirmed {
+			verdict = "unknown"
+		}
 		if err != nil {
 			verdict = "failed"
 			if !telegramFallbackBotFailureKnown(err) {
@@ -94,6 +114,7 @@ func (s *sSysPublish) requestTelegramMediaFallback(ctx context.Context, job tele
 	if job.Id <= 0 || accountID <= 0 || (purpose != "display" && purpose != "verify") {
 		return gerror.New("协议号媒体降级任务参数不完整")
 	}
+	observePublishTransportFallback(ctx, "requested", purpose, "account", "not_applicable", "unknown", "none")
 	available, err := telegramProtocolAccountCanPublish(ctx, job.TenantId, accountID)
 	if err != nil {
 		return err
@@ -151,6 +172,7 @@ func (s *sSysPublish) requestTelegramMediaFallback(ctx context.Context, job tele
 		TaskKey:  telegramFallbackTaskKey(job, purpose), Priority: collectorin.EventPriorityUrgent, MaxAttempts: 5,
 	})
 	if err != nil {
+		observePublishTransportFallback(ctx, "submit_delayed", purpose, "account", "not_applicable", "unknown", "other")
 		return gerror.Wrap(errTelegramMediaFallbackSubmitDelayed, "协议号交接已持久化，等待恢复器补投任务")
 	}
 	logTelegramFallbackHandoff(ctx, "requested", job, purpose, taskID, "durable_task_submitted", job.Status, telegramJobStatusRetryWait)

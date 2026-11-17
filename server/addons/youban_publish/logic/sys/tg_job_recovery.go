@@ -273,6 +273,11 @@ func (s *sSysPublish) runTelegramRecoveryStep(ctx context.Context, step telegram
 	logTelegramQueueEvent(ctx, "channel_recovery_step_started", g.Map{"step": step.name, "stage": "recovery"}, nil)
 	err := step.run(stepCtx)
 	elapsed := time.Since(startedAt)
+	observationErr := err
+	if observationErr == nil {
+		observationErr = stepCtx.Err()
+	}
+	publishRecoveryMetrics.step(ctx, step.name, elapsed, observationErr)
 	if err != nil {
 		logTelegramQueueEvent(ctx, "channel_recovery_step_finished", g.Map{"step": step.name, "stage": "recovery", "durationMs": elapsed.Milliseconds()}, err)
 		return
@@ -300,18 +305,31 @@ func (s *sSysPublish) recoverConfirmedTelegramJobs(ctx context.Context, limit in
 	if err != nil {
 		return gerror.Wrap(err, "读取已确认未收口TG任务失败")
 	}
+	publishRecoveryMetrics.confirmedPage(ctx, jobs, time.Now())
 	for _, job := range jobs {
 		if job.Id <= 0 {
 			continue
 		}
 		if job.SendPhase == telegramSendPhaseVerifyConfirmed {
-			if repairErr := s.repairConfirmedTelegramVerifyPurpose(ctx, job.Id); repairErr != nil {
-				g.Log().Warningf(ctx, "修复已确认TG验证消息用途失败 jobId:%d err:%+v", job.Id, repairErr)
+			repairErr := s.repairConfirmedTelegramVerifyPurpose(ctx, job.Id)
+			publishRecoveryMetrics.item(ctx, "repair_verify_purpose", repairErr)
+			if repairErr != nil {
+				logTelegramQueueEvent(ctx, "channel_recovery_item_finished", g.Map{
+					"step": "confirmed_job", "stage": "repair_verify_purpose",
+					"jobId": job.Id, "channelId": job.ChannelId, "profileId": job.ProfileId,
+					"tenantId": job.TenantId, "accountId": job.AccountId, "operationNo": job.OperationNo,
+				}, repairErr)
 				continue
 			}
 		}
-		if completeErr := s.completeTelegramJobAndWakeChannel(ctx, job); completeErr != nil {
-			g.Log().Warningf(ctx, "收口已确认TG任务失败 jobId:%d phase:%s err:%+v", job.Id, job.SendPhase, completeErr)
+		completeErr := s.completeTelegramJobAndWakeChannel(ctx, job)
+		publishRecoveryMetrics.item(ctx, "complete_job", completeErr)
+		if completeErr != nil {
+			logTelegramQueueEvent(ctx, "channel_recovery_item_finished", g.Map{
+				"step": "confirmed_job", "stage": "complete_job",
+				"jobId": job.Id, "channelId": job.ChannelId, "profileId": job.ProfileId,
+				"tenantId": job.TenantId, "accountId": job.AccountId, "operationNo": job.OperationNo,
+			}, completeErr)
 		}
 	}
 	return nil

@@ -85,16 +85,19 @@ relayGroupDone:
 	if telegramMediaSetHasCopyRef(media) && !telegramMediaSetRequiresUpload(media) {
 		if !telegramMediaSetHasCompleteCopyRefs(media) {
 			g.Log().Warningf(ctx, "TG媒体组复制引用不完整，回退持久化媒体上传 purpose:%s chat:%s media:%s", purpose, chatId, telegramMediaDebugSummary(media))
+			observePublishTransportFallback(ctx, "fallback_source", purpose, "bot", "not_applicable", "unknown", "none")
 			return s.sendTelegramMediaSet(ctx, bot, chatId, purpose, caption, telegramMediaSetWithoutCopyRefs(media), replyMarkup...)
 		}
 		if strings.TrimSpace(caption) == "" {
 			return s.copyTelegramMediaSet(ctx, bot, chatId, purpose, caption, media)
 		}
+		transportStartedAt := time.Now()
 		captionMessage, err := bot.SendMessage(ctx, &tgbot.SendMessageParams{
 			ChatID:    chatId,
 			Text:      caption,
 			ParseMode: models.ParseModeHTML,
 		})
+		observePublishTransportRequest(ctx, "sendMessage", purpose, "not_applicable", transportStartedAt, err, captionMessage != nil && captionMessage.ID > 0)
 		if err != nil {
 			return nil, err
 		}
@@ -104,6 +107,7 @@ relayGroupDone:
 				s.cleanupTelegramSentMessages(ctx, bot, chatId, []*telegramSentMessage{{MessageId: int64(captionMessage.ID), Purpose: purpose}}, "复制媒体组失败")
 			}
 			if isTelegramCopySourceUnavailableError(err) || isTelegramPhotoTooLargeError(err) {
+				observePublishTransportFallback(ctx, "fallback_source", purpose, "bot", "not_applicable", "unknown", "none")
 				return s.sendTelegramMediaSet(ctx, bot, chatId, purpose, caption, telegramMediaSetWithoutCopyRefs(media))
 			}
 			return nil, err
@@ -112,6 +116,7 @@ relayGroupDone:
 			if captionMessage != nil {
 				s.cleanupTelegramSentMessages(ctx, bot, chatId, []*telegramSentMessage{{MessageId: int64(captionMessage.ID), Purpose: purpose}}, "复制媒体组引用不完整")
 			}
+			observePublishTransportFallback(ctx, "fallback_source", purpose, "bot", "not_applicable", "unknown", "none")
 			return s.sendTelegramMediaSet(ctx, bot, chatId, purpose, caption, telegramMediaSetWithoutCopyRefs(media), replyMarkup...)
 		}
 		messages := make([]*telegramSentMessage, 0, len(copied)+1)
@@ -171,10 +176,12 @@ relayGroupDone:
 		if err != nil {
 			apiResult = "error"
 		}
+		observePublishTransportRequest(ctx, "sendMediaGroup", purpose, publishTransportGroupMode(group), apiStartedAt, err, publishTransportMessagesConfirmed(msgs, len(group)))
 		observeTelegramAPI(ctx, "sendMediaGroup", "auto", apiResult, time.Since(apiStartedAt), telegramAPIStatusCode(err))
 		step.End(err, g.Map{"messageCount": len(msgs)})
 		closeTelegramMediaFiles(closers)
 		if err != nil && telegramMediaSetCanFallbackFromFileIDToURL(chunk, err) {
+			observePublishTransportFallback(ctx, "fallback_url", purpose, "bot", "url", "unknown", "none")
 			step = beginTelegramPublishStage(ctx, "media.group.fallback_url", g.Map{"purpose": purpose, "chunkIndex": chunkIndex})
 			group, closers, err = s.telegramInputMediaGroup(ctx, telegramMediaSetWithoutReusableFileID(chunk), chunkCaption)
 			step.End(err)
@@ -186,6 +193,7 @@ relayGroupDone:
 				if err != nil {
 					apiResult = "error"
 				}
+				observePublishTransportRequest(ctx, "sendMediaGroup", purpose, publishTransportGroupMode(group), apiStartedAt, err, publishTransportMessagesConfirmed(msgs, len(group)))
 				observeTelegramAPI(ctx, "sendMediaGroup", "fallback", apiResult, time.Since(apiStartedAt), telegramAPIStatusCode(err))
 				step.End(err, g.Map{"messageCount": len(msgs)})
 				closeTelegramMediaFiles(closers)
@@ -194,6 +202,7 @@ relayGroupDone:
 			}
 		}
 		if err != nil && telegramMediaSetCanFallbackToUpload(telegramMediaSetWithoutReusableFileID(chunk), err) {
+			observePublishTransportFallback(ctx, "fallback_upload", purpose, "bot", "binary", "unknown", "none")
 			step = beginTelegramPublishStage(ctx, "media.group.fallback_upload", g.Map{"purpose": purpose, "chunkIndex": chunkIndex})
 			group, closers, err = s.telegramInputMediaGroup(ctx, telegramMediaSetForcedUpload(chunk), chunkCaption)
 			step.End(err)
@@ -205,6 +214,7 @@ relayGroupDone:
 				if err != nil {
 					apiResult = "error"
 				}
+				observePublishTransportRequest(ctx, "sendMediaGroup", purpose, publishTransportGroupMode(group), apiStartedAt, err, publishTransportMessagesConfirmed(msgs, len(group)))
 				observeTelegramAPI(ctx, "sendMediaGroup", "fallback", apiResult, time.Since(apiStartedAt), telegramAPIStatusCode(err))
 				step.End(err, g.Map{"messageCount": len(msgs)})
 				closeTelegramMediaFiles(closers)
@@ -309,6 +319,7 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 			cloned := *media
 			cloned.TgFileId = ""
 			cloned.TgThumbFileId = ""
+			observePublishTransportFallback(ctx, "fallback_source", purpose, "bot", "not_applicable", "unknown", "none")
 			return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, &cloned, replyMarkup...)
 		}
 		return messages, err
@@ -377,14 +388,22 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 		step = beginTelegramPublishStage(ctx, "api.sendVideo", telegramPublishMediaLogFields(media), g.Map{
 			"hasThumbnail": thumbnail != nil, "hasCover": cover != nil,
 			"videoWidth": videoMeta.Width, "videoHeight": videoMeta.Height, "videoDuration": videoMeta.Duration})
+		transportStartedAt := time.Now()
 		msg, err := bot.SendVideo(ctx, params)
+		observePublishTransportRequest(ctx, "sendVideo", purpose, publishTransportInputMode(input), transportStartedAt, err, msg != nil && msg.ID > 0)
 		messageId := 0
 		if msg != nil {
 			messageId = msg.ID
 		}
 		step.End(err, g.Map{"responseReceived": msg != nil, "messageId": messageId})
 		if err != nil && telegramMediaCanFallbackToUpload(media, err) {
-			return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, telegramMediaFallbackCandidate(media), replyMarkup...)
+			candidate := telegramMediaFallbackCandidate(media)
+			fallbackMode, fallbackEvent := "binary", "fallback_upload"
+			if telegramMediaCanUseRemoteURL(candidate) {
+				fallbackMode, fallbackEvent = "url", "fallback_url"
+			}
+			observePublishTransportFallback(ctx, fallbackEvent, purpose, "bot", fallbackMode, "unknown", "none")
+			return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, candidate, replyMarkup...)
 		}
 		if err != nil {
 			return nil, err
@@ -404,10 +423,18 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 			params.ReplyMarkup = replyMarkup[0]
 		}
 		step = beginTelegramPublishStage(ctx, "api.sendPhoto", telegramPublishMediaLogFields(media))
+		transportStartedAt := time.Now()
 		msg, err := bot.SendPhoto(ctx, params)
+		observePublishTransportRequest(ctx, "sendPhoto", purpose, publishTransportInputMode(input), transportStartedAt, err, msg != nil && msg.ID > 0)
 		step.End(err, g.Map{"responseReceived": msg != nil})
 		if err != nil && telegramMediaCanFallbackToUpload(media, err) {
-			return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, telegramMediaFallbackCandidate(media), replyMarkup...)
+			candidate := telegramMediaFallbackCandidate(media)
+			fallbackMode, fallbackEvent := "binary", "fallback_upload"
+			if telegramMediaCanUseRemoteURL(candidate) {
+				fallbackMode, fallbackEvent = "url", "fallback_url"
+			}
+			observePublishTransportFallback(ctx, fallbackEvent, purpose, "bot", fallbackMode, "unknown", "none")
+			return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, candidate, replyMarkup...)
 		}
 		if err != nil {
 			return nil, err
@@ -428,6 +455,7 @@ func (s *sSysPublish) copyTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 		}
 		messages, err := s.copyTelegramSingleMedia(ctx, bot, chatId, purpose, caption, media[0], ref)
 		if err != nil && (isTelegramPhotoTooLargeError(err) || isTelegramCopySourceUnavailableError(err)) {
+			observePublishTransportFallback(ctx, "fallback_source", purpose, "bot", "not_applicable", "unknown", "none")
 			return s.sendTelegramMediaSet(ctx, bot, chatId, purpose, caption, telegramMediaSetWithoutCopyRefs(media))
 		}
 		return messages, err
@@ -435,6 +463,7 @@ func (s *sSysPublish) copyTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 	copied, ok, err := s.copyTelegramMediaGroup(ctx, bot, chatId, purpose, caption, media)
 	if err != nil {
 		if isTelegramPhotoTooLargeError(err) || isTelegramCopySourceUnavailableError(err) {
+			observePublishTransportFallback(ctx, "fallback_source", purpose, "bot", "not_applicable", "unknown", "none")
 			return s.sendTelegramMediaSet(ctx, bot, chatId, purpose, caption, telegramMediaSetWithoutCopyRefs(media))
 		}
 		return copied, err
@@ -458,12 +487,14 @@ func (s *sSysPublish) copyTelegramMediaGroup(ctx context.Context, bot *tgbot.Bot
 		if !ok {
 			return nil, false, nil
 		}
+		transportStartedAt := time.Now()
 		copied, err := bot.CopyMessages(ctx, &tgbot.CopyMessagesParams{
 			ChatID:        chatId,
 			FromChatID:    fromChatId,
 			MessageIDs:    messageIds,
 			RemoveCaption: true,
 		})
+		observePublishTransportRequest(ctx, "copyMessages", purpose, "copy", transportStartedAt, err, publishTransportCopiesConfirmed(copied, len(messageIds)))
 		if err != nil {
 			return nil, true, err
 		}
@@ -523,6 +554,7 @@ func (s *sSysPublish) copyTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 	if strings.TrimSpace(caption) == "" {
 		return s.copyTelegramSingleMediaWithoutCaption(ctx, bot, chatId, purpose, media, ref)
 	}
+	transportStartedAt := time.Now()
 	msg, err := bot.CopyMessage(ctx, &tgbot.CopyMessageParams{
 		ChatID:     chatId,
 		FromChatID: ref.ChatId,
@@ -530,6 +562,7 @@ func (s *sSysPublish) copyTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 		Caption:    caption,
 		ParseMode:  telegramMediaParseMode(caption),
 	})
+	observePublishTransportRequest(ctx, "copyMessage", purpose, "copy", transportStartedAt, err, msg != nil && msg.ID > 0)
 	if err != nil {
 		return nil, err
 	}
@@ -547,12 +580,14 @@ func (s *sSysPublish) copyTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 }
 
 func (s *sSysPublish) copyTelegramSingleMediaWithoutCaption(ctx context.Context, bot *tgbot.Bot, chatId string, purpose string, media *telegramMediaItem, ref telegramCopyMediaRef) ([]*telegramSentMessage, error) {
+	transportStartedAt := time.Now()
 	copied, err := bot.CopyMessages(ctx, &tgbot.CopyMessagesParams{
 		ChatID:        chatId,
 		FromChatID:    ref.ChatId,
 		MessageIDs:    []int{ref.MessageId},
 		RemoveCaption: true,
 	})
+	observePublishTransportRequest(ctx, "copyMessages", purpose, "copy", transportStartedAt, err, publishTransportCopiesConfirmed(copied, 1))
 	if err != nil {
 		return nil, err
 	}

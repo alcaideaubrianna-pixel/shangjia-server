@@ -247,17 +247,26 @@ func (s *sSysPublish) reconcileUnknownTelegramJob(ctx context.Context, job teleg
 
 // reconcileClaimedUnknownTelegramJob requires the token-owned per-job reconciliation lease.
 // dispatch_status is a durable checkpoint, not an execution lock.
-func (s *sSysPublish) reconcileClaimedUnknownTelegramJob(ctx context.Context, job telegramJobRecord) error {
+func (s *sSysPublish) reconcileClaimedUnknownTelegramJob(ctx context.Context, job telegramJobRecord) (resultErr error) {
 	jobID := job.Id
 	claimed, err := s.claimUnknownTelegramJob(ctx, jobID)
 	if err != nil || !claimed {
 		return err
 	}
+	observation := &publishReconcileObservation{jobID: jobID, phase: job.SendPhase.String(), outcome: "unknown", started: time.Now()}
+	ctx = context.WithValue(ctx, publishReconcileObservationKey{}, observation)
+	defer func() {
+		outcome := publishReconcileResult(observation.outcome, resultErr)
+		publishReconcileMetrics.record(ctx, "aggregate", "resolution", outcome)
+		logPublishReconcile(ctx, "aggregate", "resolution", outcome, *observation)
+	}()
 	job, err = s.telegramJobById(ctx, jobID)
 	if err != nil {
 		return s.releaseUnknownTelegramJobClaim(ctx, jobID, err)
 	}
+	observation.phase = job.SendPhase.String()
 	if job.Status != "unknown" {
+		observation.outcome = "ownership_changed"
 		return nil
 	}
 	handled, recoverErr := s.recoverConfirmedUnknownTelegramJob(ctx, job)
@@ -266,6 +275,7 @@ func (s *sSysPublish) reconcileClaimedUnknownTelegramJob(ctx context.Context, jo
 			if expired, expireErr := s.expireTelegramShutdownHandoff(ctx, job); expireErr != nil {
 				return s.releaseUnknownTelegramJobClaim(ctx, job.Id, expireErr)
 			} else if expired {
+				setPublishReconcileObservation(ctx, "expired", nil)
 				return nil
 			}
 			return s.reconcileIncompleteUnknownTelegramAttempt(ctx, job, recoverErr)
@@ -285,6 +295,7 @@ func (s *sSysPublish) reconcileClaimedUnknownTelegramJob(ctx context.Context, jo
 	if expired, expireErr := s.expireTelegramShutdownHandoff(ctx, job); expireErr != nil {
 		return s.releaseUnknownTelegramJobClaim(ctx, job.Id, expireErr)
 	} else if expired {
+		setPublishReconcileObservation(ctx, "expired", nil)
 		return nil
 	}
 	// A timeout is an ambiguous Telegram result: the request may have been
@@ -306,6 +317,7 @@ func (s *sSysPublish) reconcileClaimedUnknownTelegramJob(ctx context.Context, jo
 	if affected == 0 {
 		return nil
 	}
+	setPublishReconcileObservation(ctx, "waiting", nil)
 	observeTelegramReconcile(ctx, "awaiting_confirmation")
 	s.appendTelegramJobLog(ctx, job, "reconcile", "unknown", message)
 	return nil
@@ -385,6 +397,7 @@ func (s *sSysPublish) recoverUnconfirmedUnknownTelegramJob(ctx context.Context, 
 	if err != nil {
 		return false, err
 	}
+	setPublishReconcileObservation(ctx, "unknown", &attempt)
 	switch telegramUnknownAttemptRecoveryAction(attempt, auditCount) {
 	case telegramUnknownAttemptReconcile:
 		if err = s.parkTelegramUnknownForWebhook(ctx, job, attempt); err != nil {
@@ -426,16 +439,22 @@ func (s *sSysPublish) recoverUnconfirmedUnknownTelegramJob(ctx context.Context, 
 			return true, transitionErr
 		}
 		if !transitioned {
+			setPublishReconcileObservation(ctx, "ownership_changed", nil)
 			return true, nil
 		}
 		s.appendTelegramJobLog(ctx, job, "reconcile", "retry", "TG请求前准备失败且无远端消息证据，已安全重新排队")
-		return true, s.EnqueueTelegramJob(ctx, job.Id, 0, false)
+		enqueueErr := s.EnqueueTelegramJob(ctx, job.Id, 0, false)
+		if enqueueErr == nil {
+			setPublishReconcileObservation(ctx, "retry_scheduled", nil)
+		}
+		return true, enqueueErr
 	default:
 		return false, nil
 	}
 }
 
 func (s *sSysPublish) reconcileIncompleteUnknownTelegramAttempt(ctx context.Context, job telegramJobRecord, cause error) error {
+	setPublishReconcileObservation(ctx, publishReconcileResult("incomplete", cause), nil)
 	attempt, err := s.latestUnknownTelegramJobAttempt(ctx, job)
 	if err != nil {
 		return s.releaseUnknownTelegramJobClaim(ctx, job.Id, err)
@@ -458,9 +477,12 @@ func (s *sSysPublish) reconcileIncompleteUnknownTelegramAttempt(ctx context.Cont
 // PostgreSQL attempt row remains the durable checkpoint.
 func (s *sSysPublish) parkTelegramUnknownForWebhook(ctx context.Context, job telegramJobRecord, attempt telegramDeliveryAttempt) error {
 	if attempt.Id <= 0 || attempt.JobId != job.Id {
+		setPublishReconcileObservation(ctx, "error", &attempt)
 		return gerror.New("TG待确认Attempt无效")
 	}
+	setPublishReconcileObservation(ctx, "unknown", &attempt)
 	deadline := gtime.Now().Add(telegramAttemptWebhookWait)
+	parked := false
 	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		var current telegramDeliveryAttempt
 		if err := tx.Model(publishTgAttemptTable).Where("id", attempt.Id).Where("job_id", job.Id).LockUpdate().Scan(&current); err != nil {
@@ -479,7 +501,7 @@ func (s *sSysPublish) parkTelegramUnknownForWebhook(ctx context.Context, job tel
 		if _, err := tx.Model(publishTgAttemptTable).Where("id", attempt.Id).Data(attemptData).Update(); err != nil {
 			return err
 		}
-		_, err := s.transitionTelegramJobTx(ctx, tx, telegramJobTransition{
+		transitioned, err := s.transitionTelegramJobTx(ctx, tx, telegramJobTransition{
 			JobId:          job.Id,
 			From:           []JobStatus{JobStatusUnknown, telegramJobStatusSending, telegramJobStatusConfirming},
 			To:             telegramJobStatusConfirming,
@@ -487,10 +509,15 @@ func (s *sSysPublish) parkTelegramUnknownForWebhook(ctx context.Context, job tel
 			Additional:     g.Map{"next_retry_at": deadline},
 			DispatchStatus: jobDispatch(DispatchStatusProcessing),
 		})
+		parked = transitioned && err == nil
 		return err
 	})
 	if err != nil {
+		setPublishReconcileObservation(ctx, publishReconcileResult("unknown", err), nil)
 		return gerror.Wrap(err, "迁移TG任务到Webhook等待状态失败")
+	}
+	if parked {
+		setPublishReconcileObservation(ctx, "waiting", &attempt)
 	}
 	observeTelegramReconcile(ctx, "awaiting_webhook")
 	return nil
@@ -585,7 +612,7 @@ func (s *sSysPublish) recoverConfirmedUnknownTelegramJob(ctx context.Context, jo
 	}
 
 	if !telegramSendPhaseHasDisplay(job.SendPhase.String()) {
-		restored, restoreErr := s.restoreConfirmedTelegramResponse(ctx, job, "display", displayMedia)
+		restored, restoreErr := s.restoreObservedTelegramResponse(ctx, job, "display", displayMedia)
 		if restoreErr != nil {
 			return false, restoreErr
 		}
@@ -599,7 +626,7 @@ func (s *sSysPublish) recoverConfirmedUnknownTelegramJob(ctx context.Context, jo
 	}
 
 	if len(verifyMedia) > 0 && job.SendPhase != telegramSendPhaseVerifyConfirmed {
-		restored, restoreErr := s.restoreConfirmedTelegramResponse(ctx, job, "verify", verifyMedia)
+		restored, restoreErr := s.restoreObservedTelegramResponse(ctx, job, "verify", verifyMedia)
 		if restoreErr != nil {
 			return false, restoreErr
 		}
@@ -630,10 +657,15 @@ func (s *sSysPublish) recoverConfirmedUnknownTelegramJob(ctx context.Context, jo
 			return false, transitionErr
 		}
 		if !transitioned {
+			setPublishReconcileObservation(ctx, "ownership_changed", nil)
 			return true, nil
 		}
 		s.appendTelegramJobLog(ctx, job, "reconcile", "confirmed", "TG展示资料已确认，继续按频道顺序推送验证资料")
-		return true, s.EnqueueTelegramJob(ctx, job.Id, 0, false)
+		enqueueErr := s.EnqueueTelegramJob(ctx, job.Id, 0, false)
+		if enqueueErr == nil {
+			setPublishReconcileObservation(ctx, "resumed", nil)
+		}
+		return true, enqueueErr
 
 	case telegramUnknownRecoveryComplete:
 		phase := job.SendPhase
@@ -655,12 +687,19 @@ func (s *sSysPublish) recoverConfirmedUnknownTelegramJob(ctx context.Context, jo
 			return false, transitionErr
 		}
 		if !transitioned {
+			setPublishReconcileObservation(ctx, "ownership_changed", nil)
 			return true, nil
 		}
 		job.Status = telegramJobStatusSending
 		job.SendPhase = phase
 		s.appendTelegramJobLog(ctx, job, "reconcile", "confirmed", "TG远端发送结果已确认，完成本地任务投影")
-		return true, s.completeTelegramJob(ctx, job)
+		completeErr := s.completeTelegramJob(ctx, job)
+		if completeErr == nil {
+			// Completion can be an idempotent/no-op return; do not infer a
+			// newly confirmed delivery from its nil error.
+			setPublishReconcileObservation(ctx, "projection_returned", nil)
+		}
+		return true, completeErr
 	default:
 		return false, nil
 	}
@@ -684,6 +723,9 @@ func (s *sSysPublish) claimUnknownTelegramJob(ctx context.Context, jobId int64) 
 }
 
 func (s *sSysPublish) releaseUnknownTelegramJobClaim(ctx context.Context, jobId int64, cause error) error {
+	if cause != nil {
+		setPublishReconcileObservation(ctx, publishReconcileResult("unknown", cause), nil)
+	}
 	message := "释放TG对账任务失败"
 	if cause != nil {
 		message = "TG对账任务读取失败，等待重试：" + cause.Error()

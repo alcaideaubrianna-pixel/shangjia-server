@@ -36,7 +36,7 @@ func (s *sSysPublish) upsertChannelProfileFromJobTx(ctx context.Context, tx gdb.
 		" tenant_id=EXCLUDED.tenant_id,account_id=EXCLUDED.account_id,last_job_id=EXCLUDED.last_job_id," +
 		" status='active',next_cycle_at=NULL,updated_at=EXCLUDED.updated_at" +
 		" WHERE " + publishChannelProfileTable + ".last_job_id <= EXCLUDED.last_job_id"
-	if _, err := tx.Ctx(ctx).ExecContext(ctx, sql,
+	if _, err := tx.Ctx(ctx).Exec(sql,
 		job.TenantId, job.AccountId, job.ChannelId, job.ProfileId, job.Id, now, now,
 	); err != nil {
 		return gerror.Wrap(err, "保存频道当前上架资料索引失败")

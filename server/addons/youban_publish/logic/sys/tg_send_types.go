@@ -104,6 +104,7 @@ type telegramJobRecord struct {
 	CyclePublishTime       string         `json:"cyclePublishTime"`
 	NextCycleAt            *gtime.Time    `json:"nextCycleAt"`
 	CreatedAt              *gtime.Time    `json:"createdAt"`
+	UpdatedAt              *gtime.Time    `json:"updatedAt"`
 	// 原始 Telegram 时间由采集事件保存，和 Job 创建时间分开记录。
 	OriginalTelegramAt *gtime.Time `json:"originalTelegramAt" orm:"original_telegram_at"`
 	VerifyMediaCount   int         `json:"verifyMediaCount"`

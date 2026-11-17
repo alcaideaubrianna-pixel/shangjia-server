@@ -36,6 +36,7 @@ func (s *sSysPublish) markTelegramJobSuperseded(ctx context.Context, jobId int64
 	if !transitioned {
 		return nil
 	}
+	observePublishTerminalCommit(ctx, job, telegramJobStatusSuperseded, transitioned, nil)
 	if err := s.upsertPublishJobRecord(ctx, job, model.PublishRecordStatusSuperseded, ""); err != nil {
 		return err
 	}

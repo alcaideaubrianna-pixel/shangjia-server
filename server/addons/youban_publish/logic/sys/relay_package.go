@@ -311,7 +311,23 @@ func (s *sSysPublish) sendRelayPackageJob(ctx context.Context, job telegramJobRe
 	}
 	stop := s.startTelegramAttemptHeartbeat(attempt.Id)
 	defer stop()
-	copied, sendErr := bot.CopyMessages(ctx, &tgbot.CopyMessagesParams{ChatID: job.TargetChatId, FromChatID: channel.TargetChatId, MessageIDs: ids})
+	transportPurpose := "unknown"
+	for i, item := range manifest {
+		purpose := publishTransportBounded(item.Message.Purpose, "unknown", "display", "verify")
+		if purpose == "unknown" {
+			transportPurpose = "unknown"
+			break
+		}
+		if i == 0 {
+			transportPurpose = purpose
+		} else if transportPurpose != purpose {
+			transportPurpose = "mixed"
+		}
+	}
+	transportStartedAt := time.Now()
+	transportCtx := telegramPublishTraceContext(ctx, job.Id, g.Map{"attemptId": attempt.Id})
+	copied, sendErr := bot.CopyMessages(transportCtx, &tgbot.CopyMessagesParams{ChatID: job.TargetChatId, FromChatID: channel.TargetChatId, MessageIDs: ids})
+	observePublishTransportRequest(transportCtx, "copyMessages", transportPurpose, "copy", transportStartedAt, sendErr, publishTransportCopiesConfirmed(copied, len(ids)))
 	if sendErr != nil {
 		if isTelegramAmbiguousDeliveryError(sendErr) {
 			if err = s.waitTelegramDeliveryWebhook(context.WithoutCancel(ctx), attempt, sendErr); err != nil {

@@ -769,8 +769,8 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 }
 
 func (s *sSysPublish) handleTelegramPublishTask(ctx context.Context, task *asynq.Task) (err error) {
+	ctx, payload, err := decodeTelegramQueuePayloadContext(ctx, task)
 	ctx = telegramPublishTraceContext(ctx, 0, g.Map{"taskType": task.Type()})
-	payload, err := decodeTelegramQueuePayload(task)
 	if err != nil {
 		beginTelegramPublishStage(ctx, "queue.decode_payload").End(err)
 		return err
@@ -875,7 +875,7 @@ func (s *sSysPublish) handleTelegramAttemptTimeoutTask(ctx context.Context, task
 }
 
 func (s *sSysPublish) handleTelegramCleanupTask(ctx context.Context, task *asynq.Task) error {
-	payload, err := decodeTelegramQueuePayload(task)
+	ctx, payload, err := decodeTelegramQueuePayloadContext(ctx, task)
 	if err != nil {
 		return err
 	}

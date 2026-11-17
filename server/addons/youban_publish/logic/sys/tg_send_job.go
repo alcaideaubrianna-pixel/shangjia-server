@@ -62,14 +62,20 @@ func telegramProfilePublishable(ctx context.Context, profileID int64) (bool, err
 
 // SendTelegramJob 串行执行目标频道任务，统一账户间隔、发送确认和完成后唤醒。
 func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) (resultErr error) {
+	ctx, executionSpan := beginTelegramPublishExecution(ctx, tgQueuePayload{JobId: jobId})
+	ctx, openStages := withPublishStageRegistry(ctx)
 	ctx = telegramPublishTraceContext(ctx, jobId)
 	started := time.Now()
 	defer func() {
 		if recovered := recover(); recovered != nil {
+			openStages.close(errPublishStageAbandoned)
+			finishTelegramPublishSpan(executionSpan, errors.New("publishing execution panicked"))
 			logTelegramPublishSummary(ctx, started, fmt.Errorf("panic: %v", recovered))
 			panic(recovered)
 		}
+		openStages.close(resultErr)
 		logTelegramPublishSummary(ctx, started, resultErr)
+		finishTelegramPublishSpan(executionSpan, resultErr)
 	}()
 	stage := beginTelegramPublishStage(ctx, "job.execute")
 	defer stage.Finish(&resultErr)
@@ -582,6 +588,7 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 			g.Log().Infof(ctx, "TG展示资料开始Bot发送 jobId:%d botId:%d chat:%s media:%s", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(displaySendMedia))
 			stopAttemptHeartbeat := s.startTelegramAttemptHeartbeat(attempt.Id)
 			displaySendCtx, cancelDisplaySend := context.WithTimeout(ctx, telegrambudget.Display(ctx))
+			displaySendCtx = telegramPublishTraceContext(displaySendCtx, job.Id, g.Map{"attemptId": attempt.Id})
 			displaySendStartedAt := time.Now()
 			step = beginTelegramPublishStage(displaySendCtx, "display.api_send", g.Map{"attemptId": attempt.Id, "mediaCount": len(displayMedia)})
 			messages, err = s.sendTelegramDisplayPart(displaySendCtx, bot, job.TargetChatId, displayCaption, displaySendMedia)
@@ -668,6 +675,7 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	g.Log().Infof(ctx, "TG验证资料开始Bot发送 jobId:%d botId:%d chat:%s media:%s", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(verifyMedia))
 	stopAttemptHeartbeat := s.startTelegramAttemptHeartbeat(verifyAttempt.Id)
 	verifySendCtx, cancelVerifySend := context.WithTimeout(ctx, telegrambudget.Verify(ctx))
+	verifySendCtx = telegramPublishTraceContext(verifySendCtx, job.Id, g.Map{"attemptId": verifyAttempt.Id})
 	verifySendStartedAt := time.Now()
 	step = beginTelegramPublishStage(verifySendCtx, "verify.api_send", g.Map{"attemptId": verifyAttempt.Id, "mediaCount": len(verifyMedia)})
 	verifyMessages, err := s.sendTelegramVerifyPart(verifySendCtx, bot, job.TargetChatId, verifyCaption, verifyMedia)
@@ -934,7 +942,10 @@ func (s *sSysPublish) cleanupTelegramSentMessages(ctx context.Context, bot *tgbo
 		if item == nil || item.MessageId <= 0 {
 			continue
 		}
-		if _, err := bot.DeleteMessage(ctx, &tgbot.DeleteMessageParams{ChatID: chatId, MessageID: int(item.MessageId)}); err != nil {
+		requestStarted := time.Now()
+		deleted, err := bot.DeleteMessage(ctx, &tgbot.DeleteMessageParams{ChatID: chatId, MessageID: int(item.MessageId)})
+		publishCleanupObservability.messageRequest(ctx, deleted, time.Since(requestStarted), err)
+		if err != nil {
 			if isTelegramMessageAlreadyDeletedError(err) {
 				deletedIds = append(deletedIds, item.MessageId)
 				g.Log().Infof(ctx, "清理TG半组消息跳过，消息已不存在 chat:%s message:%d reason:%s", chatId, item.MessageId, reason)
@@ -955,7 +966,9 @@ func (s *sSysPublish) sendTelegramDisplayPart(ctx context.Context, bot *tgbot.Bo
 	if strings.TrimSpace(caption) == "" {
 		return nil, gerror.New("展示资料和推送文案不能同时为空")
 	}
+	requestStarted := time.Now()
 	msg, err := bot.SendMessage(ctx, &tgbot.SendMessageParams{ChatID: chatId, Text: caption, ParseMode: models.ParseModeHTML})
+	observePublishTransportRequest(ctx, "sendMessage", "display", "not_applicable", requestStarted, err, msg != nil && msg.ID > 0)
 	if err != nil {
 		return nil, err
 	}
@@ -1116,6 +1129,7 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 	if !transitioned {
 		return nil
 	}
+	observePublishTerminalCommit(ctx, job, JobStatus(decision.Status), transitioned, nil)
 	if decision.Status == "failed" {
 		if circuitErr := s.recordChannelPermissionFailure(ctx, job, err); circuitErr != nil {
 			g.Log().Warningf(ctx, "记录频道权限熔断失败 jobId:%d channelId:%d err:%+v", job.Id, job.ChannelId, circuitErr)
@@ -1177,6 +1191,7 @@ func (s *sSysPublish) switchTelegramJobToNextBot(ctx context.Context, job telegr
 	if !transitioned {
 		return false, nil
 	}
+	observePublishTransportFallback(ctx, "bot_switched", "unknown", "bot", "not_applicable", "unknown", "rate_limited")
 	job.BotId = nextBotId
 	if err = s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusPending); err != nil {
 		return false, err
@@ -1234,11 +1249,13 @@ func (s *sSysPublish) completeTelegramJob(ctx context.Context, job telegramJobRe
 	transition := telegramJobTransition{JobId: job.Id, From: []JobStatus{telegramJobStatusSending, telegramJobStatusConfirming}, To: telegramJobStatusSent, Additional: g.Map{"sent_at": sentAt}}
 	streamEngine := s.accountPushEngine(ctx, job.TenantId, job.AccountId) == pushEngineUnifiedStream
 	var transitioned bool
+	confirmationStarted := time.Now()
 	if streamEngine {
 		transitioned, err = s.confirmTelegramJobAndCyclePlan(ctx, job, transition)
 	} else {
 		transitioned, err = s.confirmTelegramJobAndRecovery(ctx, transition)
 	}
+	observePublishTerminalProjection(ctx, transitioned, err, time.Since(confirmationStarted))
 	if err != nil {
 		if streamEngine {
 			return gerror.Wrap(errTelegramRemoteConfirmed, "保存已确认发送及频道计划失败："+err.Error())
@@ -1258,6 +1275,7 @@ func (s *sSysPublish) completeTelegramJob(ctx context.Context, job telegramJobRe
 			return gerror.Newf("TG发送已完成但任务状态未落库，当前状态：%s", current)
 		}
 	}
+	observePublishTerminalCommit(ctx, job, telegramJobStatusSent, transitioned, nil)
 	s.completeTelegramJobDeliveryProjection(ctx, job, sentAt)
 
 	if s.accountPushEngine(ctx, job.TenantId, job.AccountId) == pushEngineUnifiedStream {
