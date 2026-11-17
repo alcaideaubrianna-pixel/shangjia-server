@@ -7,7 +7,6 @@ import (
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
 	collectorservice "hotgo/addons/telegram_collector/service"
 	relayconsts "hotgo/addons/youban_publish/consts"
-	"strconv"
 	"strings"
 	"time"
 
@@ -110,9 +109,8 @@ func (s *sSysPublish) recoverInterruptedTelegramJobs(ctx context.Context, limit 
 		}
 	}
 
-	if err := s.supersedeStalePendingChannelHeads(ctx, limit); err != nil {
-		return err
-	}
+	// pending/idle 可能只是正常排队，不能因等待时长而终态化；
+	// 保留原任务，由队列恢复和 pending/idle 恢复路径继续调度。
 	if err := s.recoverTelegramChannelQueueJobs(ctx, limit); err != nil {
 		return err
 	}
@@ -1028,44 +1026,6 @@ func (s *sSysPublish) recoverStaleTelegramDispatchJobs(ctx context.Context, limi
 			g.Log().Warningf(ctx, "重新入队调度中断TG任务失败 job:%d err:%+v", job.Id, enqueueErr)
 		}
 	}
-	return nil
-}
-
-// supersedeStalePendingChannelHeads 释放超过配置时限且从未进入发送队列的队首任务。
-// 这些任务没有 asynq_task_id，也没有发送尝试，继续占据频道会让后续任务永久等待。
-func (s *sSysPublish) supersedeStalePendingChannelHeads(ctx context.Context, limit int) error {
-	if limit <= 0 {
-		limit = 100
-	}
-	deadline := telegramRecoveryTimeText(gtime.Now().Add(-time.Duration(telegramChannelHeadTimeoutMinutes()) * time.Minute))
-	var rows []struct {
-		Id int64 `json:"id"`
-	}
-	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Fields("id").Where("status", telegramJobStatusPending).
-		Where("COALESCE(dispatch_status,'') = ?", tgDispatchStatusIdle).
-		Where("COALESCE(asynq_task_id,'') = ?", "").
-		WhereGTE("priority", tgJobPriorityBulk).WhereLTE("updated_at", deadline).
-		OrderAsc("updated_at").OrderAsc("id").Limit(limit).Scan(&rows); err != nil {
-		return gerror.Wrap(err, "读取超时频道队首任务失败")
-	}
-	ids := make([]int64, 0, len(rows))
-	for _, row := range rows {
-		if row.Id > 0 {
-			ids = append(ids, row.Id)
-		}
-	}
-	if len(ids) == 0 {
-		return nil
-	}
-	if _, err := s.transitionTelegramJobs(ctx, ids, telegramJobTransition{
-		From: []JobStatus{telegramJobStatusPending}, To: telegramJobStatusSuperseded,
-		ErrorMessage: "频道队首任务等待超过" + strconv.Itoa(telegramChannelHeadTimeoutMinutes()) + "分钟，已自动放弃并唤醒下一任务",
-		Additional:   g.Map{"last_dispatch_error": "频道队首任务超时自动释放"},
-	}); err != nil {
-		return gerror.Wrap(err, "释放超时频道队首任务失败")
-	}
-	g.Log().Infof(ctx, "已释放超时频道队首任务：%d条", len(ids))
 	return nil
 }
 

@@ -716,6 +716,7 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 	// 不在这里执行全局 DISTINCT ON 频道头部聚合：历史积压会迫使数据库
 	// 对整个候选集排序，直接拖慢实时通知。先按到期时间取有界候选，
 	// 再在内存中做账户/频道配额控制。
+	// pending/idle 的排队时长不是过期条件；通知失败或长队列中的任务仍需调度。
 	var candidates []telegramJobOutboxRecord
 	query := `SELECT o.id,o.job_id,o.attempt_count,o.status,o.available_at,j.account_id,j.tenant_id,j.channel_id,j.priority
 		FROM ` + publishTgOutboxTable + ` o
@@ -725,10 +726,9 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 			AND (o.status=? OR (o.status=? AND o.lease_expires_at<=?))
 			AND j.status IN ('pending','failed_retry','unknown')
 			AND (COALESCE(j.dispatch_status,'') IN ('','idle') OR (j.dispatch_status='queued' AND COALESCE(j.asynq_task_id,'')=''))
-			AND NOT (j.status='pending' AND COALESCE(j.dispatch_status,'')='idle' AND COALESCE(j.asynq_task_id,'')='' AND j.updated_at < CURRENT_TIMESTAMP - (? * INTERVAL '1 minute'))
 			AND (j.next_retry_at IS NULL OR j.next_retry_at<=? OR (j.status='pending' AND COALESCE(j.dispatch_status,'')='idle'))
 		ORDER BY o.available_at,o.id LIMIT ?`
-	if err := g.DB().GetScan(ctx, &candidates, query, telegramOutboxEventPublish, now, telegramOutboxPending, telegramOutboxProcessing, now, telegramChannelHeadTimeoutMinutes(), now, limit*2); err != nil {
+	if err := g.DB().GetScan(ctx, &candidates, query, telegramOutboxEventPublish, now, telegramOutboxPending, telegramOutboxProcessing, now, now, limit*2); err != nil {
 		return nil, gerror.Wrap(err, "读取Stream频道队首失败")
 	}
 	var rows []telegramJobOutboxRecord

@@ -3,8 +3,6 @@ package sys
 import (
 	"context"
 	"fmt"
-	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -119,9 +117,6 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 			Where("j.tenant_id", job.TenantId).
 			Where("j.status IN (?)", []string{telegramJobStatusPending, telegramJobStatusRetryWait, telegramJobStatusConfirming, telegramJobStatusSending}).
 			Where("j.created_at < ? OR (j.created_at = ? AND j.id < ?)", createdAt, createdAt, job.Id)
-		// Outbox 已记录 Stream 入队失败且超过队首超时的旧任务不能继续
-		// 阻塞频道。它们会由恢复扫描收口，当前判断先允许后续任务推进。
-		fast = fast.Where("NOT (j.status='pending' AND COALESCE(j.dispatch_status,'')='idle' AND COALESCE(j.asynq_task_id,'')='' AND j.updated_at < CURRENT_TIMESTAMP - (? * INTERVAL '1 minute'))", telegramChannelHeadTimeoutMinutes())
 		// 媒体尚未就绪的任务只应停留在媒体准备队列，不能占用频道发送队首；
 		// 媒体完成后由唤醒逻辑重新进入 Ready 队列。
 		fast = fast.Where("NOT (j.status IN ('pending','failed_retry') AND COALESCE(j.last_dispatch_error,'') LIKE '媒体仍在异步处理中%')")
@@ -223,20 +218,6 @@ func telegramChannelBlockingJobSQL(alias string) string {
 	// Account availability is a dispatch concern. Channel ordering only cares
 	// whether the current job owns the Telegram execution slot.
 	return telegramChannelBlockingJobStateSQL(alias)
-}
-
-// telegramChannelHeadTimeoutMinutes 返回频道队首最大等待时间，默认10分钟。
-// 与循环队首超时共用环境变量，保证旧队首和循环队首不会使用不同策略。
-func telegramChannelHeadTimeoutMinutes() int {
-	value := os.Getenv("YOUBAN_PUBLISH_CYCLE_HEAD_TIMEOUT_MINUTES")
-	minutes, err := strconv.Atoi(value)
-	if err != nil || minutes <= 0 {
-		return 10
-	}
-	if minutes > 24*60 {
-		return 24 * 60
-	}
-	return minutes
 }
 
 func telegramChannelBlockingJobStateSQL(alias string) string {
