@@ -46,6 +46,12 @@ type BotUpdateReplayResult struct {
 	Failed  []int64
 }
 
+// BotIngressRouter is an optional cache-only execution policy, never an ingest
+// authorization shortcut. Raw updates are persisted regardless of its result.
+type BotIngressRouter interface {
+	ClassifyCollectorBotIngress(context.Context, sysin.BotIngressScope) sysin.BotIngressDecision
+}
+
 type DeliveryHandler interface {
 	HandleCollectorDelivery(ctx context.Context, delivery *sysin.CollectorDelivery) error
 }

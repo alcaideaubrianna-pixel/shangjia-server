@@ -336,8 +336,19 @@ func (s *sCollector) processEvent(ctx context.Context, eventID int64) (err error
 	if err != nil {
 		return s.failEvent(ctx, eventID, executionOwner, err, &row)
 	}
-	// An execution lane is assigned at enqueue/legacy drain, never by elapsed age.
-	if eventQueueIsHistory(collectorQueueName(ctx)) {
+	// Reclassify known rejected backlog without running the slow handler inline.
+	deferred := false
+	if row.SourceType == sysin.SourceTypeBot && !eventQueueIsHistory(collectorQueueName(ctx)) {
+		if chatID, parseErr := strconv.ParseInt(delivery.SourceChatID, 10, 64); parseErr == nil {
+			decision := classifyBotIngress(ctx, row.TenantId, row.SourceId, chatID)
+			deferred = decision.Defer()
+			if deferred {
+				logBotIngressDeferral(ctx, row.TenantId, row.SourceId, row.Id, delivery.SourceMessageID, decision)
+			}
+		}
+	}
+	// Execution class is explicit, never inferred from message age.
+	if deferred || eventQueueIsHistory(collectorQueueName(ctx)) {
 		delivery.History = true
 		observation.meta.Mode = collectorModeHistory
 		observation.meta.QueueClass = collectorObserveQueueClassFromPriority(sysin.EventPriorityNormal)

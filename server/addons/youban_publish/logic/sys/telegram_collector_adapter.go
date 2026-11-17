@@ -1443,10 +1443,17 @@ func (s *sSysPublish) ingestCollectorBotDelivery(ctx context.Context, delivery *
 		logCollectorDeliverySkipped(ctx, delivery, "global_disabled")
 		return nil
 	}
+	if decision := cachedCollectorDeliveryDecision(ctx, delivery); decision.Defer() {
+		logCollectorDeliverySkipped(ctx, delivery, string(decision.Reason))
+		logPublishCollectorDeliveryStage(ctx, "delivery.skipped.ingress_policy", delivery, nil)
+		return nil
+	}
+	policyVersion := collectIngressPolicyVersion(ctx)
 	source, err := g.DB().Model(publishCollectSourceTable+" s").Safe().Ctx(ctx).
 		InnerJoin("hg_youban_publish_tenant_vip vip", "vip.tenant_id=s.tenant_id AND vip.status=1 AND vip.level>0 AND vip.deleted_at IS NULL").
 		Fields("s.id,s.tenant_id,s.account_id,s.bot_id,s.bot_collect_scope").
 		Where("s.id", delivery.SourceID).
+		Where("s.tenant_id", delivery.TenantID).
 		Where("s.source_type", sysin.CollectSourceTypeBot).
 		Where("s.collect_enabled", 1).
 		Where("s.status", 1).
@@ -1470,6 +1477,7 @@ func (s *sSysPublish) ingestCollectorBotDelivery(ctx context.Context, delivery *
 		return gerror.Wrap(err, "检查Bot采集上架频道过滤失败")
 	}
 	if blocked {
+		rememberCollectorIngressDeferral(ctx, delivery, policyVersion, collectorin.IngressDeferralSelfLoop)
 		logCollectorDeliverySkipped(ctx, delivery, "self_loop_publish_target")
 		g.Log().Warning(ctx, "账户采集跳过自循环上架频道", g.Map{
 			"reason":   "source_chat_is_publish_target",
@@ -1485,6 +1493,7 @@ func (s *sSysPublish) ingestCollectorBotDelivery(ctx context.Context, delivery *
 		return err
 	}
 	if !allowed {
+		rememberCollectorIngressDeferral(ctx, delivery, policyVersion, collectorin.IngressDeferralApproval)
 		logCollectorDeliverySkipped(ctx, delivery, "approval_blocked")
 		return nil
 	}

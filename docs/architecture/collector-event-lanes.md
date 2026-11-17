@@ -86,3 +86,20 @@ YOUBAN_TELEGRAM_COLLECTOR_HISTORY_BATCH_WAIT_MS=10
 
 本地验证使用独立 Docker PostgreSQL 的 127.0.0.1:55489，测试仅通过显式
 YOUBAN_COLLECTOR_BATCH_TEST_PORT=55489 启用，不读取生产 DSN。
+
+## 已知拒绝任务的入口路由
+
+Publish adapter 在来源、实际频道审批或自身发布频道检查明确拒绝后，按
+tenant/source/actual-chat/config-generation 写入一分钟的后台路由标记。
+source 是全局唯一主键；版本沿用既有配置失效机制，账户、来源、频道配置变更后
+旧标记失效。检查前捕获版本，防止旧请求把拒绝结论写进新配置版本。
+
+Collector 通过可选 service 接口只读取缓存，不查询 Publish 实现或表。
+新 Bot 更新仍完整写入原始 Event；命中标记只把执行预算改为 history，
+不丢弃更新、不伪造资料成功、不绕过审批或资料去重。
+已排在实时队列中的已知拒绝任务也可交给后台 Delivery；Handler 命中相同标记
+则直接记录 skipped，无需再次读取来源、发布目标和审批关系。
+
+缓存缺失、异常或未知枚举保持原实时路径。配置重新启用后，原始事件可由
+既有指定来源重放入口恢复，不需要重建或借用其他租户的媒体身份。
+上线需更新 collector/publish 消费实现及 web 入口，不新增 SAE 角色或 SQL 迁移。

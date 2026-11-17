@@ -146,6 +146,11 @@ func (s *sCollector) IngestBotUpdate(ctx context.Context, bot collectorservice.B
 	if !event.ValidateBoundary() {
 		return gerror.New("Telegram采集事件归属不完整")
 	}
+	decision := classifyBotIngress(ctx, event.TenantID, event.SourceID, event.ChatID)
+	if decision.Defer() {
+		event.Priority = sysin.EventPriorityNormal
+		logBotIngressDeferral(ctx, event.TenantID, event.SourceID, 0, event.MessageID, decision)
+	}
 	var spoolID int64
 	if collectorIngestSpoolEnabled(ctx) {
 		spoolID, err = persistIngestSpool(ctx, &event)
