@@ -78,3 +78,34 @@ Bot 的原始事件允许 account_id=0。原始事件读取、加锁和状态更
 分发收尾与失败回调按同一父事件行串行化，避免快速失败被最后一次 dispatched
 写入覆盖；快速成功的全部分支在收尾直接 processed。明确的发送失败仍保存
 为 failed，交由现有失败恢复策略判断，不统一改成 media_ready 无限重发。
+
+## 事件实际频道授权
+
+source 351 的事件 19182174 来自 `-1003763752459`，但旧 worker 优先使用
+采集源配置的 channel 1279（`-1003856373273`）检查关系，导致其他频道
+的 disabled/rejected 状态错误地忽略当前事件。多来源分发及多规则索引迁移
+本身没有覆盖这个缺陷。
+
+worker 现在以事件 source_chat_id 查询同租户频道，再按真实业务账户、
+source_id 和实际频道读取订阅，并使用与入口一致的访问政策。短号和
+`-100` 形式的历史别名只在该实际频道内兼容；多条关系按更新时间、ID
+倒序取最新决定。实际频道未登记或缺少身份时返回错误，不借用配置频道，
+也不将其直接标为 ignored。来源本身的暂停和黑名单开关继续保留。
+
+`collect_event_channel_authorization` 日志记录 sourceChatId、
+configuredChannelId、collectChannelId、relationId、allowed 及审批状态；
+`collect_account_channel_blocked` 同时记录实际 Chat ID 和配置频道，
+便于排除错用身份。两条日志均携带事件、来源、租户和业务账户。
+Bot 关系也在同一实际频道的别名集合内按更新时间、ID 取最新状态；
+`collect_event_bot_channel_authorization` 记录实际命中的 Bot 关系及频道。
+缺失发现关系仅插入，不覆盖并发写入的成员变化。
+
+恢复器的来源可用性判断同时兼容原始 Bot account_id=0。别名仅限同
+tenant/source、来源类型为 bot 且实际来源账户为正数；正账户仍须严格相等。
+事件、媒体和历史任务共用该谓词，其反向清理不会再把合法 raw0 误判为来源关闭。
+没有增加扫描入口、扫描范围或自动回填。
+
+本次不修改生产订阅、不自动重放 ignored 事件。代码部署后应按事件实际频道
+验收；历史误拦截需单独预览、授权后通过已有重放接口处理。
+按当前运行角色分工，需部署 collector（事件处理、采集恢复）及 scheduler
+（采集恢复）；本次没有新增 SQL 结构迁移。

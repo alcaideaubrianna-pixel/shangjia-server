@@ -2,7 +2,6 @@ package sys
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -311,7 +310,7 @@ func (s *sSysPublish) CollectEventClear(ctx context.Context, in *sysin.CollectEv
 	return gerror.Wrap(err, "清空采集事件失败")
 }
 
-func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, tenantId int64, accountId int64) error {
+func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, tenantId int64, accountId int64) (err error) {
 	eventLock := lock.NewConfig(2*time.Minute, time.Second).Mutex(fmt.Sprintf("youban_publish:collect:event:%d", eventId))
 	if lockErr := eventLock.TryLock(ctx); lockErr != nil {
 		if errors.Is(lockErr, lock.ErrLockFailed) {
@@ -374,44 +373,50 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 	if source["channel_blacklisted"].Int() != 0 {
 		return s.ignoreCollectEvent(ctx, eventId, "采集频道已禁用", "source")
 	}
-	channelID := source["channel_id"].Int64()
-	if channelID <= 0 {
-		var channel struct {
-			ID int64 `json:"id"`
-		}
-		lookupErr := pdao.YoubanPublishCollectChannel.Ctx(ctx).
-			Fields(pdao.YoubanPublishCollectChannel.Columns().Id).
-			Where(pdao.YoubanPublishCollectChannel.Columns().TenantId, tenantId).
-			WhereIn(pdao.YoubanPublishCollectChannel.Columns().TelegramChatId, tgChannelCacheLookupIds(event["source_chat_id"].String())).
-			WhereNull(pdao.YoubanPublishCollectChannel.Columns().DeletedAt).
-			OrderDesc(pdao.YoubanPublishCollectChannel.Columns().Id).
-			Limit(1).
-			Scan(&channel)
-		if lookupErr != nil {
-			return gerror.Wrap(lookupErr, "读取事件采集频道失败")
-		}
-		channelID = channel.ID
+	access, accessErr := resolveCollectEventChannelAccess(ctx, event, accountId)
+	if accessErr != nil {
+		return accessErr
+	}
+	channelID := access.ChannelID
+	g.Log().Info(ctx, "采集事件实际频道授权检查", g.Map{
+		"event": "collect_event_channel_authorization", "tenantId": tenantId, "accountId": accountId,
+		"sourceId": event["source_id"].Int64(), "collectEventId": eventId,
+		"sourceChatId": event["source_chat_id"].String(), "configuredChannelId": source["channel_id"].Int64(),
+		"collectChannelId": channelID, "relationId": access.Relation.Id, "allowed": access.Allowed,
+		"collectEnabled": access.Relation.CollectEnabled, "relationStatus": access.Relation.Status,
+		"approvalStatus": access.Relation.ApprovalStatus,
+	})
+	if !access.Allowed {
+		g.Log().Info(ctx, "采集事件被账户频道授权拦截", g.Map{
+			"event": "collect_account_channel_blocked", "tenantId": tenantId, "accountId": accountId,
+			"sourceId": event["source_id"].Int64(), "collectEventId": eventId,
+			"sourceChatId": event["source_chat_id"].String(), "configuredChannelId": source["channel_id"].Int64(),
+			"collectChannelId": channelID, "relationId": access.Relation.Id,
+			"collectEnabled": access.Relation.CollectEnabled, "relationStatus": access.Relation.Status,
+			"approvalStatus": access.Relation.ApprovalStatus,
+		})
+		return s.ignoreCollectEvent(ctx, eventId, "账户频道采集未启用或审批已拒绝", "source")
 	}
 	if channelID > 0 {
 		if botID := source["bot_id"].Int64(); botID > 0 {
-			var botRelation struct {
-				Status string `json:"status"`
+			botRelation, relationErr := resolveCollectEventBotChannel(ctx, tenantId, botID, access)
+			if relationErr != nil {
+				return relationErr
 			}
-			if relationErr := pdao.YoubanPublishCollectBotChannel.Ctx(ctx).
-				Fields(pdao.YoubanPublishCollectBotChannel.Columns().Status).
-				Where(pdao.YoubanPublishCollectBotChannel.Columns().TenantId, tenantId).
-				Where(pdao.YoubanPublishCollectBotChannel.Columns().BotId, botID).
-				Where(pdao.YoubanPublishCollectBotChannel.Columns().ChannelId, channelID).
-				Scan(&botRelation); relationErr != nil && !errors.Is(relationErr, sql.ErrNoRows) {
-				return gerror.Wrap(relationErr, "读取BOT频道关系失败")
-			} else if errors.Is(relationErr, sql.ErrNoRows) {
+			g.Log().Info(ctx, "采集事件实际BOT频道关系检查", g.Map{
+				"event": "collect_event_bot_channel_authorization", "collectEventId": eventId,
+				"tenantId": tenantId, "accountId": accountId, "sourceId": event["source_id"].Int64(),
+				"sourceChatId": event["source_chat_id"].String(), "botId": botID,
+				"collectChannelId": channelID, "botChannelId": botRelation.ChannelId,
+				"botRelationId": botRelation.Id, "botRelationStatus": botRelation.Status,
+			})
+			if botRelation.Id <= 0 {
 				// Missing discovery metadata is recoverable. The account/channel
-				// relation above already authorizes collection; recreate the BOT
-				// relation so one stale cache row cannot block profile ingestion.
+				// relation above already authorizes collection. Insert only:
+				// a concurrent membership change must not be overwritten.
 				_, upsertErr := pdao.YoubanPublishCollectBotChannel.Ctx(ctx).
 					Data(g.Map{"tenant_id": tenantId, "bot_id": botID, "channel_id": channelID, "status": sysin.CollectBotChannelDiscovered, "bot_role": "unknown", "first_seen_at": gtime.Now(), "last_seen_at": gtime.Now(), "removed_at": nil, "removed_reason": ""}).
-					OnConflict("tenant_id,bot_id,channel_id").
-					OnDuplicate("status,last_seen_at,removed_at,removed_reason,updated_at").Save()
+					InsertIgnore()
 				if upsertErr != nil {
 					return gerror.Wrap(upsertErr, "补建BOT频道关系失败")
 				}
@@ -419,31 +424,8 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 				return s.ignoreCollectEvent(ctx, eventId, "机器人已被移出采集频道", "source")
 			}
 		}
-		var channelRelation struct {
-			Id             int64  `orm:"id"`
-			CollectEnabled int    `json:"collectEnabled"`
-			Status         string `json:"status"`
-			ApprovalStatus string `json:"approvalStatus"`
-		}
-		if relationErr := g.DB().Model("hg_youban_publish_collect_account_channel").Ctx(ctx).
-			Fields("id,collect_enabled,status,approval_status").Where("tenant_id", tenantId).Where("account_id", accountId).
-			Where("source_id", event["source_id"].Int64()).Where("channel_id", channelID).WhereNull("deleted_at").Scan(&channelRelation); !collectOptionalRecordScanSucceeded(relationErr) {
-			return gerror.Wrap(relationErr, "读取频道采集状态失败")
-		} else {
-			if !botCollectChannelRelationEnabled(channelRelation.CollectEnabled, channelRelation.Status, channelRelation.ApprovalStatus) {
-				// Account authorization and BOT membership are independent checks.
-				// Keep the exact account relation in SLS; never imply BOT removal here.
-				g.Log().Info(ctx, "采集事件被账户频道授权拦截", g.Map{
-					"event": "collect_account_channel_blocked", "tenantId": tenantId, "accountId": accountId,
-					"sourceId": event["source_id"].Int64(), "collectEventId": eventId,
-					"collectChannelId": channelID, "relationId": channelRelation.Id,
-					"collectEnabled": channelRelation.CollectEnabled, "relationStatus": channelRelation.Status,
-					"approvalStatus": channelRelation.ApprovalStatus,
-				})
-				return s.ignoreCollectEvent(ctx, eventId, "账户频道采集未启用或审批已拒绝", "source")
-			}
-		}
 	}
+
 	event["source_name_snapshot"] = source["title"]
 	event["source_username_snapshot"] = source["source_username"]
 	if err = s.ensureTenantVipFeature(ctx, tenantId, sysin.TenantVipFeatureCollectSource); err != nil {

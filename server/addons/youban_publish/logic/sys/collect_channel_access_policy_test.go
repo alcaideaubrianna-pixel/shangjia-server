@@ -3,14 +3,17 @@ package sys
 import "testing"
 
 func TestDecideCollectChannelAccessDefaultsToFirstAllow(t *testing.T) {
-	decision := decideCollectChannelAccess(collectChannelAccessPolicyInput{
-		TenantID: 1, AccountID: 2, SourceID: 3, CanonicalChat: "-1004",
-	})
-	if !decision.Allowed || !decision.Discover {
-		t.Fatalf("missing relation decision = %#v, want allowed and discover", decision)
-	}
-	if decision.RelationKey != "1/2/3/-1004" {
-		t.Fatalf("relation key = %q", decision.RelationKey)
+	for _, chat := range []string{"-1004", "4"} {
+		decision := decideCollectChannelAccess(collectChannelAccessPolicyInput{
+			TenantID: 1, AccountID: 2, SourceID: 3, CanonicalChat: chat,
+		})
+		if !decision.Allowed || !decision.Discover {
+			t.Fatalf("missing relation decision = %#v, want allowed and discover", decision)
+		}
+		// Both Telegram representations must identify the same subscription.
+		if decision.RelationKey != "1/2/3/4" {
+			t.Fatalf("chat %q relation key = %q", chat, decision.RelationKey)
+		}
 	}
 }
 

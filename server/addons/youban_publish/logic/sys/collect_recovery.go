@@ -1301,7 +1301,10 @@ func (s *sSysPublish) RecoverCollectEvents(ctx context.Context, limit int) error
 }
 
 func enabledCollectSourceExistsSQL(ownerAlias string) string {
-	return "EXISTS (SELECT 1 FROM " + pdao.YoubanPublishCollectSource.Table() + " s WHERE s.id=" + ownerAlias + ".source_id AND s.tenant_id=" + ownerAlias + ".tenant_id AND s.account_id=" + ownerAlias + ".account_id AND s.collect_enabled=1 AND s.status=1 AND s.deleted_at IS NULL)"
+	// Bot transport records may retain account_id=0 in events, media and
+	// history. Only the same tenant/source with a real Bot owner may alias 0;
+	// positive accounts must still match exactly.
+	return "EXISTS (SELECT 1 FROM " + pdao.YoubanPublishCollectSource.Table() + " s WHERE s.id=" + ownerAlias + ".source_id AND s.tenant_id=" + ownerAlias + ".tenant_id AND (s.account_id=" + ownerAlias + ".account_id OR (" + ownerAlias + ".account_id=0 AND s.account_id>0 AND s.source_type='bot')) AND s.collect_enabled=1 AND s.status=1 AND s.deleted_at IS NULL)"
 }
 
 func (s *sSysPublish) collectEventMediaCanResume(ctx context.Context, eventId int64) (bool, error) {
