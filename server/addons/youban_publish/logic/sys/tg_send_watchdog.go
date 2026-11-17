@@ -285,54 +285,7 @@ func (s *sSysPublish) cleanupTelegramSendTimeout(ctx context.Context, job telegr
 		g.Log().Warningf(ctx, "TG超时清理失败 jobId:%d channelId:%d err:%+v", job.Id, job.ChannelId, err)
 		return
 	}
-	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		// A late response changes this timestamp. Do not activate the replacement
-		// from an obsolete cleanup snapshot; the next pass must delete it first.
-		current, err := tx.Model(publishTgJobTable).Where("id", job.Id).
-			Where("timeout_cleanup_at", job.TimeoutCleanupAt).LockUpdate().One()
-		if err != nil {
-			return err
-		}
-		if current.IsEmpty() {
-			return nil
-		}
-		remaining, err := tx.Model(publishTgMessageTable).Where("job_id", job.Id).
-			WhereIn("status", []string{"sent", "undeletable"}).Count()
-		if err != nil {
-			return err
-		}
-		if remaining > 0 {
-			return gerror.New("清理期间收到新消息，暂不重新入队")
-		}
-		unresolved, err := telegramTimeoutUnresolvedAttemptCount(tx, job.Id)
-		if err != nil {
-			return err
-		}
-		missing, auditErr := telegramTimeoutUnprojectedAuditCount(tx, job.Id)
-		if auditErr != nil {
-			return auditErr
-		}
-		if missing > 0 {
-			return gerror.New("TG响应审计尚未投影到清理记录，停止自动重新上架")
-		}
-		if unresolved > 0 {
-			return gerror.New("旧发送仍缺少完整确认，已清理已知消息，等待对账或人工补偿；不自动重新上架")
-		}
-		var tail telegramJobRecord
-		if err := tx.Model(publishTgJobTable).Where("timeout_parent_job_id", job.Id).LockUpdate().Scan(&tail); !telegramOptionalAttemptScanSucceeded(err) {
-			return err
-		}
-		if tail.Id > 0 && tail.Status == telegramJobStatusFailed && tail.SendPhase == "timeout_wait_cleanup" {
-			if _, err := s.transitionTelegramJobTx(ctx, tx, telegramJobTransition{JobId: tail.Id, From: []JobStatus{telegramJobStatusFailed}, To: telegramJobStatusPending, SendPhase: jobPhase(""), Additional: g.Map{"next_retry_at": nil}}); err != nil {
-				return err
-			}
-			if err := s.ensureTelegramJobOutboxTx(ctx, tx, tail.Id, 0); err != nil {
-				return err
-			}
-		}
-		_, err = tx.Model(publishTgJobTable).Where("id", job.Id).Where("timeout_cleanup_at", job.TimeoutCleanupAt).Data(g.Map{"timeout_cleanup_at": nil}).Update()
-		return err
-	})
+	err = s.finishTelegramSendTimeoutCleanup(ctx, job)
 	if err != nil {
 		g.Log().Warningf(ctx, "TG超时清理后重新入队失败 jobId:%d err:%+v", job.Id, err)
 	}
