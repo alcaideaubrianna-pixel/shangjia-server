@@ -184,18 +184,23 @@ func (s *sCollector) enqueueEventTask(ctx context.Context, eventID int64, priori
 }
 
 func (s *sCollector) handleEventTask(ctx context.Context, task *asynq.Task) error {
+	_, parseObservation := startCollectorStage(ctx, collectorStageEventTaskParse, collectorObservationMeta{})
+	defer parseObservation.Finish(collectorResultError, nil)
 	eventID, err := parseCollectorTaskID(task.Payload(), "事件")
+	parseObservation.meta.EventID = eventID
+	parseObservation.Finish(collectorResultOK, err)
 	if err != nil {
 		return err
 	}
+	ctx, _ = collectorObservationContext(ctx, parseObservation.meta)
 	startedAt := time.Now()
 	if err = s.processEvent(ctx, eventID); err != nil {
 		counter, _ := collectorMeter.Int64Counter("telegram_collector_event_total")
-		counter.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "failed"), attribute.String("queue", collectorQueueName(ctx))))
+		counter.Add(ctx, 1, metric.WithAttributes(append(collectorCollectionAttributes(ctx), attribute.String("result", "failed"), attribute.String("queue", collectorQueueName(ctx)))...))
 		return err
 	}
 	histogram, _ := collectorMeter.Float64Histogram("telegram_collector_event_duration_seconds")
-	histogram.Record(ctx, time.Since(startedAt).Seconds(), metric.WithAttributes(attribute.String("result", "ready"), attribute.String("queue", collectorQueueName(ctx))))
+	histogram.Record(ctx, time.Since(startedAt).Seconds(), metric.WithAttributes(append(collectorCollectionAttributes(ctx), attribute.String("result", "ready"), attribute.String("queue", collectorQueueName(ctx)))...))
 	return nil
 }
 
@@ -209,6 +214,10 @@ func (s *sCollector) processEvent(ctx context.Context, eventID int64) (err error
 	observeResult := collectorResultError
 	defer func() { observation.Finish(observeResult, err) }()
 	pipelineStarted := time.Now()
+	defer func() {
+		// Numeric tasks carry no enqueue epoch. Do not substitute DB event age.
+		observeCollectorEventQueueWait(ctx, observation.meta, 0, pipelineStarted)
+	}()
 	var row entity.TgCollectorEvent
 	row.Id = eventID
 	logCollectorPipelineStage(ctx, &row, "event.claim.started", pipelineStarted, nil, nil)
@@ -256,12 +265,18 @@ func (s *sCollector) processEvent(ctx context.Context, eventID int64) (err error
 		return s.failEvent(ctx, eventID, executionOwner, err)
 	}
 	if row.LeaseOwner != executionOwner || row.Status != sysin.EventStatusProcessing {
-		return gerror.New("采集执行归属已变化，停止旧执行")
+		err = gerror.New("采集执行归属已变化，停止旧执行")
+		recordCollectorStage(ctx, collectorStageEventRead, observation.meta, collectorResultError, time.Since(readStarted), err)
+		return err
 	}
-	observation.meta.TenantID, observation.meta.AccountID, observation.meta.SourceID = row.TenantId, row.AccountId, row.SourceId
+	observation.meta.TenantID, observation.meta.SourceID = row.TenantId, row.SourceId
+	if row.SourceType == sysin.SourceTypeAccount {
+		observation.meta.TgAccountID = row.AccountId
+	}
 	observation.meta.ChatID, observation.meta.MessageID = row.ChatId, row.MessageId
 	observation.meta.SourceType = collectorObserveSourceType(row.SourceType)
 	observation.meta.QueueClass = collectorObserveQueueClassFromPriority(row.Priority)
+	ctx, observation.meta = collectorObservationContext(ctx, observation.meta)
 	recordCollectorStage(ctx, collectorStageEventRead, observation.meta, collectorResultOK, time.Since(readStarted), nil)
 	logCollectorPipelineStage(ctx, &row, "event.loaded", pipelineStarted, nil, nil,
 		g.Map{"readDurationMs": time.Since(readStarted).Milliseconds(), "claimDurationMs": claimDuration})
@@ -271,6 +286,11 @@ func (s *sCollector) processEvent(ctx context.Context, eventID int64) (err error
 	parseStarted := time.Now()
 	raw := []byte(row.RawUpdate.String())
 	delivery, err := collectorDeliveryFromEvent(&row, raw)
+	if err == nil {
+		observation.meta.Mode = collectorModeFromRaw(row.SourceType, raw)
+		observation.meta.AccountID, observation.meta.TgAccountID = delivery.AccountID, delivery.TgAccountID
+		ctx, observation.meta = collectorObservationContext(ctx, observation.meta)
+	}
 	recordCollectorStage(ctx, collectorStageEventParse, observation.meta, collectorResultOK, time.Since(parseStarted), err)
 	if err != nil {
 		return s.failEvent(ctx, eventID, executionOwner, err)
@@ -302,6 +322,7 @@ func logCollectorPipelineStage(ctx context.Context, row *entity.TgCollectorEvent
 		"queue": collectorQueueName(ctx),
 	}
 	fields["ageTimeBasis"] = "db_wall_clock_unverified"
+	collectorObservationLogFields(ctx, fields)
 	fields["eventAgeAvailable"] = false
 	if row.CreatedAt != nil {
 		fields["eventCreatedAtRaw"] = row.CreatedAt.Time.Format("2006-01-02 15:04:05.999999")

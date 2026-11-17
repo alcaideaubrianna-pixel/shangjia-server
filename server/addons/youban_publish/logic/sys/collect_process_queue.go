@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go.opentelemetry.io/otel/attribute"
+	"hotgo/internal/library/collectobserve"
 	"strings"
 	"time"
 
@@ -459,6 +461,7 @@ func reserveCollectProcessSchedule(ctx context.Context, payload collectProcessQu
 
 func (s *sSysPublish) reconcileCollectProcessSchedule(ctx context.Context, payload collectProcessQueuePayload) error {
 	if payload.EventId > 0 {
+		removeCollectProcessCandidate(ctx, payload, payload.EventId)
 		removeCollectProcessSchedule(ctx, payload)
 		return nil
 	}
@@ -593,6 +596,24 @@ func collectProcessSourceEnabled(ctx context.Context, payload collectProcessQueu
 }
 
 func (s *sSysPublish) processCollectSourceTask(ctx context.Context, payload collectProcessQueuePayload) (delay time.Duration, pending bool, removeSchedule bool, err error) {
+	mode := "unknown"
+	if payload.History {
+		mode = "history"
+	} else if !payload.Recovery && payload.EventId > 0 {
+		mode = "realtime"
+	}
+	ctx = collectobserve.With(ctx, collectobserve.Metadata{TenantID: payload.TenantId, AccountID: payload.AccountId, SourceID: payload.SourceId, EventID: payload.EventId, ChatID: payload.SourceChatId, RuleID: payload.RuleId, Mode: mode})
+	observationStartedAt := time.Now()
+	attemptResult := collectPipelineCompleted
+	defer func() {
+		result := attemptResult
+		if err != nil {
+			result = collectPipelineFailed
+		} else if pending {
+			result = collectPipelinePending
+		}
+		observeCollectPipeline(ctx, collectPipelineSourceAttempt, result, observationStartedAt, err, attribute.String("collect.wait_reason", collectSourceAttemptWaitReason(pending, err)))
+	}()
 	windowCtx, cancelWindow := context.WithTimeout(ctx, collectMaterialWindowExecutionTimeout)
 	defer cancelWindow()
 	ctx = windowCtx
@@ -607,6 +628,7 @@ func (s *sSysPublish) processCollectSourceTask(ctx context.Context, payload coll
 		return 0, false, false, err
 	}
 	if !enabled {
+		attemptResult = collectPipelineIgnored
 		return 0, false, true, nil
 	}
 	if payload.EventId > 0 {
@@ -615,14 +637,27 @@ func (s *sSysPublish) processCollectSourceTask(ctx context.Context, payload coll
 			return 0, false, false, gerror.Wrap(readErr, "读取实时采集事件失败")
 		}
 		if event.IsEmpty() {
+			attemptResult = collectPipelineIgnored
 			return 0, false, true, nil
 		}
 		if !collectProcessEventMatchesPayload(event, payload) {
 			return 0, false, false, gerror.New("采集事件与任务归属不一致")
 		}
+		ctx = bindCollectEventObservation(ctx, event)
 		lateVerificationRepair := collectMaterialLateVerificationRepairCandidate(event)
 		if collectProcessEventFinished(event) {
 			if !lateVerificationRepair {
+				attemptResult = collectPipelineDuplicate
+				if event["status"].String() == sysin.CollectEventStatusIgnored {
+					attemptResult = collectPipelineIgnored
+				}
+				if collectMaterialEventNeedsPairRepair(event) {
+					g.Log().Info(ctx, "未匹配验证已终止主动轮询，保留被动配对", g.Map{
+						"event": "collect_unmatched_verify_wakeup_closed", "tenantId": payload.TenantId,
+						"accountId": payload.AccountId, "sourceId": payload.SourceId, "collectEventId": payload.EventId,
+						"sourceChatId": event["source_chat_id"].String(), "passivePairingEligible": true,
+					})
+				}
 				return 0, false, true, nil
 			}
 			// Only a late binding (group=paired) may reopen completed material.
@@ -632,6 +667,7 @@ func (s *sSysPublish) processCollectSourceTask(ctx context.Context, payload coll
 				return 0, false, false, repairErr
 			}
 			if !needsRepair {
+				attemptResult = collectPipelineDuplicate
 				return 0, false, true, nil
 			}
 		}
@@ -692,109 +728,21 @@ func (s *sSysPublish) processCollectSourceTask(ctx context.Context, payload coll
 }
 
 func nextCollectProcessDelay(ctx context.Context, payload collectProcessQueuePayload) (time.Duration, bool, error) {
-	statuses := collectProcessWindowStatuses()
-	now := time.Now()
-	groupDeadline := now.Add(-collectMaterialGroupingDelay)
-	waitingVerifyDeadline := now.Add(-collectMaterialWaitingVerifyRetryDelay)
-	verifyDeadline := now.Add(-collectMaterialVerifyRetryDelay)
-	// Read all four scheduling windows in one aggregate query. The previous
-	// implementation issued four ordered scans against collect_event for every
-	// account/source shard, multiplying I/O under load.
-	var window struct {
-		Due           int         `orm:"due"`
-		Normal        *gtime.Time `orm:"normal"`
-		WaitingVerify *gtime.Time `orm:"waiting_verify"`
-		Verify        *gtime.Time `orm:"verify"`
-	}
-	model := collectProcessEventModel(ctx, payload)
-	model = model.WhereIn("e.status", statuses)
-	// Redis is the realtime candidate accelerator. When it has candidates, keep
-	// the scheduling probe on those event IDs instead of re-reading the whole
-	// source window. PostgreSQL remains authoritative through the bounded
-	// fallback when the index is cold or expired.
-	if candidateIDs := collectProcessCandidateIDs(ctx, payload, collectProcessCandidateIndexBatchSize*collectProcessCandidateIndexReadFactor); len(candidateIDs) > 0 {
-		model = model.WhereIn("e.id", candidateIDs)
-	}
-	fields := `
-		COUNT(CASE WHEN (
-			((e.status <> '` + sysin.CollectEventStatusIgnored + `' AND (e.material_role IS NULL OR e.material_role = '' OR e.material_role IN ('` + collectMaterialRolePending + `','` + collectMaterialRoleDisplay + `'))) OR
-			(e.status = '` + sysin.CollectEventStatusIgnored + `' AND e.material_role = '` + collectMaterialRoleVerify + `' AND e.error_message = '` + collectMaterialVerifyUnmatchedMessage + `')) AND
-			((e.processed_at IS NULL AND (e.material_group_status IS NULL OR e.material_group_status <> '` + collectMaterialGroupWaitingVerify + `') AND e.created_at <= '` + groupDeadline.Format(time.RFC3339Nano) + `') OR
-			(e.processed_at IS NULL AND e.material_group_status = '` + collectMaterialGroupWaitingVerify + `' AND e.updated_at <= '` + waitingVerifyDeadline.Format(time.RFC3339Nano) + `') OR
-			(e.status = '` + sysin.CollectEventStatusIgnored + `' AND e.material_role = '` + collectMaterialRoleVerify + `' AND e.error_message = '` + collectMaterialVerifyUnmatchedMessage + `' AND e.updated_at <= '` + verifyDeadline.Format(time.RFC3339Nano) + `'))
-		) END) AS due,
-		MIN(CASE WHEN e.status <> '` + sysin.CollectEventStatusIgnored + `' AND (e.material_role IS NULL OR e.material_role = '' OR e.material_role = '` + collectMaterialRolePending + `') AND (e.material_group_status IS NULL OR e.material_group_status <> '` + collectMaterialGroupWaitingVerify + `') AND e.processed_at IS NULL THEN e.created_at END) AS normal,
-		MIN(CASE WHEN e.material_role = '` + collectMaterialRolePending + `' AND e.material_group_status = '` + collectMaterialGroupWaitingVerify + `' AND e.processed_at IS NULL THEN e.updated_at END) AS waiting_verify,
-		MIN(CASE WHEN e.status = '` + sysin.CollectEventStatusIgnored + `' AND e.material_role = '` + collectMaterialRoleVerify + `' AND e.error_message = '` + collectMaterialVerifyUnmatchedMessage + `' THEN e.updated_at END) AS verify`
-	if err := model.Fields(fields).Scan(&window); err != nil {
+	// Read a small page, not a COUNT/MIN aggregation over a source's history.
+	// Candidate-only emptiness must be checked against one scoped fallback page.
+	candidateIDs := collectProcessCandidateIDs(ctx, payload, collectProcessCandidateIndexBatchSize*collectProcessCandidateIndexReadFactor)
+	rows, err := collectProcessScheduleProbe(candidateIDs, func(ids []int64) (gdb.Result, error) {
+		model := collectMaterialActiveWindowModel(ctx, payload)
+		if len(ids) > 0 {
+			model = model.WhereIn("e.id", ids)
+		}
+		return model.Fields("e.id,e.status,e.material_role,e.material_group_status,e.processed_at,e.created_at,e.updated_at").
+			OrderAsc("e.updated_at").OrderAsc("e.id").Limit(collectProcessScheduleProbeLimit).All()
+	})
+	if err != nil {
 		return 0, false, gerror.Wrap(err, "读取采集源后续任务窗口失败")
 	}
-	if window.Due > 0 {
-		return 0, true, nil
-	}
-	var nextDelay time.Duration
-	hasNextDelay := false
-	if window.Normal != nil {
-		nextDelay = collectLocalWindowRemaining(window.Normal, collectMaterialGroupingDelay)
-		hasNextDelay = true
-	}
-	if window.WaitingVerify != nil {
-		d := collectLocalWindowRemaining(window.WaitingVerify, collectMaterialWaitingVerifyRetryDelay)
-		if !hasNextDelay || d < nextDelay {
-			nextDelay, hasNextDelay = d, true
-		}
-	}
-	if window.Verify != nil {
-		d := collectLocalWindowRemaining(window.Verify, collectMaterialVerifyRetryDelay)
-		if !hasNextDelay || d < nextDelay {
-			nextDelay, hasNextDelay = d, true
-		}
-	}
-	if !hasNextDelay {
-		return 0, false, nil
-	}
-	if nextDelay <= 0 {
-		return 0, true, nil
-	}
-	return nextDelay, true, nil
-	/*
-		if err != nil {
-			return 0, false, gerror.Wrap(err, "读取采集源验证等待任务失败")
-		}
-	*/
-	/* legacy four-query implementation removed */
-	/*
-		if err != nil {
-			return 0, false, gerror.Wrap(err, "读取采集源验证等待任务失败")
-		}
-		var nextDelay time.Duration
-		hasNextDelay := false
-		if !normal.IsEmpty() && normal["ready_from"].GTime() != nil {
-			nextDelay = collectLocalWindowRemaining(normal["ready_from"].GTime(), collectMaterialGroupingDelay)
-			hasNextDelay = true
-		}
-		if !waitingVerify.IsEmpty() && waitingVerify["ready_from"].GTime() != nil {
-			waitingDelay := collectLocalWindowRemaining(waitingVerify["ready_from"].GTime(), collectMaterialWaitingVerifyRetryDelay)
-			if !hasNextDelay || waitingDelay < nextDelay {
-				nextDelay = waitingDelay
-				hasNextDelay = true
-			}
-		}
-		if !verify.IsEmpty() && verify["ready_from"].GTime() != nil {
-			verifyDelay := collectLocalWindowRemaining(verify["ready_from"].GTime(), collectMaterialVerifyRetryDelay)
-			if !hasNextDelay || verifyDelay < nextDelay {
-				nextDelay = verifyDelay
-				hasNextDelay = true
-			}
-		}
-		if !hasNextDelay {
-			return 0, false, nil
-		}
-		if nextDelay <= 0 {
-			return 0, true, nil
-		}
-		return nextDelay, true, nil
-	*/
+	return collectProcessScheduleRowsDelay(rows)
 }
 
 func collectProcessEventModel(ctx context.Context, payload collectProcessQueuePayload) *gdb.Model {
@@ -817,16 +765,9 @@ func collectProcessEventModel(ctx context.Context, payload collectProcessQueuePa
 }
 
 func collectProcessWindowStatuses() []string {
-	return []string{
-		sysin.CollectEventStatusPending,
-		sysin.CollectEventStatusGroupCollect,
-		sysin.CollectEventStatusWaitingOrder,
-		sysin.CollectEventStatusPrechecked,
-		sysin.CollectEventStatusMediaPending,
-		sysin.CollectEventStatusMediaReady,
-		sysin.CollectEventStatusIgnored,
-		sysin.CollectEventStatusFailed,
-	}
+	// Wider recovery/target windows may inspect failed or passive verification;
+	// ordinary source scheduling uses only the active prefix above.
+	return append(collectProcessActiveWindowStatuses(), sysin.CollectEventStatusIgnored, sysin.CollectEventStatusFailed)
 }
 
 func collectLocalWindowRemaining(value *gtime.Time, window time.Duration) time.Duration {
@@ -853,7 +794,10 @@ func collectProcessEventFinished(event gdb.Record) bool {
 	case sysin.CollectEventStatusFailed:
 		return !shouldRecoverCollectEvent(event)
 	case sysin.CollectEventStatusIgnored:
-		return event["material_role"].String() != collectMaterialRoleVerify || event["error_message"].String() != collectMaterialVerifyUnmatchedMessage
+		// A rejected/unmatched event is finished for its own durable wakeup.
+		// Late pairing may still read it as passive context when new material
+		// arrives; recoverability must not keep an ignored task polling forever.
+		return true
 	}
 	return false
 }

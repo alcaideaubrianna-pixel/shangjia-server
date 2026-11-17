@@ -105,7 +105,6 @@ func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload co
 	if maxRows := collectMaterialWindowMaxRows(ctx); batchSize > maxRows {
 		batchSize = maxRows
 	}
-	now := gtime.Now()
 	// Redis 只提供候选 ID，PG 仍通过完整窗口条件、租户/账户/来源和状态
 	// 校验事实。索引为空、过期或 Redis 不可用时回退原始 PG 扫描，并用结果回填。
 	candidateIDs := collectProcessCandidateIDs(ctx, payload, batchSize*collectProcessCandidateIndexReadFactor)
@@ -117,9 +116,8 @@ func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload co
 		return model
 	}
 
-	// 正常窗口和验证重试窗口分开查询，避免一个来源的历史验证资料触发大范围 OR 扫描。
-	eventModel := candidateModel(collectMaterialWindowModel(ctx, payload, false)).
-		Where("e.processed_at IS NULL").
+	// 只选择仍需推进的展示/待分类事件。已忽略的验证不是主动恢复任务。
+	eventModel := candidateModel(collectMaterialActiveWindowModel(ctx, payload)).
 		Where(collectMaterialGroupReadyCondition(), collectMaterialGroupWaitingVerify)
 	if payload.EventId > 0 {
 		eventModel = eventModel.Where("e.id", payload.EventId)
@@ -133,16 +131,9 @@ func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload co
 	if err != nil {
 		return gerror.Wrap(err, "读取采集源消息窗口失败")
 	}
-	verifyModel := candidateModel(collectMaterialWindowModel(ctx, payload, true)).
-		Where("e.updated_at <= ?", now.Add(-collectMaterialWaitingVerifyRetryDelay))
-	if payload.EventId > 0 {
-		verifyModel = verifyModel.Where("e.id", payload.EventId)
-	}
-	verifyRows, verifyErr := verifyModel.Fields("e.*").OrderAsc("e.updated_at").OrderAsc("e.id").Limit(batchSize).All()
-	if verifyErr != nil {
-		return gerror.Wrap(verifyErr, "读取验证资料重试窗口失败")
-	}
-	rows = mergeCollectMaterialWindowRows(rows, verifyRows, batchSize)
+	// Ignored verification remains available to an arriving display's bounded
+	// target/lookback queries. It is not active work for a source sweep: polling
+	// the same unmatched row cannot manufacture a missing display group.
 
 	// A stale/incomplete index must not hide work. One bounded PG fallback rebuilds
 	// the index for this shard; normal indexed cycles avoid the source-range scan.
@@ -154,20 +145,12 @@ func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload co
 		if !rebuildReserved {
 			return newCollectProcessRetryError(collectMaterialWindowMergeTTL(ctx), "采集候选批次正在重建")
 		}
-		fallbackModel := collectMaterialWindowModel(ctx, payload, false).
-			Where("e.processed_at IS NULL").
+		fallbackModel := collectMaterialActiveWindowModel(ctx, payload).
 			Where(collectMaterialGroupReadyCondition(), collectMaterialGroupWaitingVerify)
 		rows, err = fallbackModel.Fields("e.*").OrderAsc("e.updated_at").OrderAsc("e.id").Limit(batchSize).All()
 		if err != nil {
 			return gerror.Wrap(err, "回退读取采集源消息窗口失败")
 		}
-		fallbackVerifyModel := collectMaterialWindowModel(ctx, payload, true).
-			Where("e.updated_at <= ?", now.Add(-collectMaterialWaitingVerifyRetryDelay))
-		fallbackVerifyRows, fallbackVerifyErr := fallbackVerifyModel.Fields("e.*").OrderAsc("e.updated_at").OrderAsc("e.id").Limit(batchSize).All()
-		if fallbackVerifyErr != nil {
-			return gerror.Wrap(fallbackVerifyErr, "回退读取验证资料重试窗口失败")
-		}
-		rows = mergeCollectMaterialWindowRows(rows, fallbackVerifyRows, batchSize)
 	}
 	if len(rows) == 0 {
 		return nil
@@ -202,7 +185,7 @@ func collectMaterialWindowModel(ctx context.Context, payload collectProcessQueue
 			Where("e.error_message", collectMaterialVerifyUnmatchedMessage)
 	}
 	return model.Where("e.status <> ?", sysin.CollectEventStatusIgnored).
-		Where("(e.material_role IS NULL OR e.material_role IN (?,?))", collectMaterialRolePending, collectMaterialRoleDisplay)
+		Where("(e.material_role IS NULL OR e.material_role = '' OR e.material_role IN (?,?))", collectMaterialRolePending, collectMaterialRoleDisplay)
 }
 
 // collectMaterialGroupReadyCondition 在 PostgreSQL 中使用 IS DISTINCT FROM，避免 NULL OR
@@ -246,6 +229,7 @@ func mergeCollectMaterialWindowRows(primary, retry gdb.Result, limit int) gdb.Re
 // forward context required to pair a verification message. It deliberately
 // avoids the source backlog so old events cannot delay realtime ingestion.
 func (s *sSysPublish) processTargetCollectEventWindow(ctx context.Context, payload collectProcessQueuePayload, target gdb.Record) (resultErr error) {
+	ctx = collectBusinessEventContext(ctx, target, nil, 0)
 	startedAt := time.Now()
 	reuse := collectBatchReuseObservation{Outcome: collectBatchReuseNotEvaluated, Reason: collectBatchReuseInvalidTarget}
 	var batchRun collectBatchRunObservation
@@ -255,6 +239,10 @@ func (s *sSysPublish) processTargetCollectEventWindow(ctx context.Context, paylo
 	}()
 	if target.IsEmpty() || target["id"].Int64() <= 0 {
 		return gerror.New("目标采集事件不存在")
+	}
+	if collectProcessEventFinished(target) && !collectMaterialLateVerificationRepairCandidate(target) {
+		reuse.Reason = collectBatchReuseTerminalTarget
+		return nil
 	}
 	messageID := target["source_message_id"].Int64()
 	if messageID <= 0 {
@@ -358,7 +346,6 @@ func (s *sSysPublish) loadTargetCollectMaterialWindow(ctx context.Context, paylo
 	if _, cacheErr := cache.Instance().Get(ctx, collectTargetBatchKey(payload)+":dirty"); cacheErr != nil {
 		return nil, false, collectTargetBatchCacheError(cacheErr)
 	}
-	now := gtime.Now()
 	maxRows := collectMaterialWindowMaxRows(ctx)
 	load := func(verifyOnly bool) (gdb.Result, error) {
 		model := collectMaterialWindowModel(ctx, payload, verifyOnly).
@@ -369,9 +356,10 @@ func (s *sSysPublish) loadTargetCollectMaterialWindow(ctx context.Context, paylo
 			// the expression for a broad source range before applying LIMIT.
 			Where("(e.received_at <= ? OR (e.received_at IS NULL AND e.created_at <= ?))",
 				eventAt.Add(collectMaterialVerifyWindow()), eventAt.Add(collectMaterialVerifyWindow()))
-		if verifyOnly {
-			model = model.Where("e.updated_at <= ?", now.Add(-collectMaterialWaitingVerifyRetryDelay))
-		} else {
+		// A new target is already serialized by its channel batch lease. Read
+		// passive unmatched verification immediately: its old polling cooldown
+		// must not hide it when the previously missing display has just arrived.
+		if !verifyOnly {
 			model = model.Where("e.processed_at IS NULL").
 				Where(collectMaterialGroupReadyCondition(), collectMaterialGroupWaitingVerify)
 		}
@@ -422,12 +410,23 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 		return err
 	}
 	messageViews := collectMaterialEventViews(rows, mediaByEvent)
-	return runCollectTargetBatchEvents(ctx, len(rows), func(index int) error {
+	return runCollectTargetBatchEvents(ctx, len(rows), func(index int) (windowErr error) {
 		event := rows[index]
 		if _, ok := processEventIds[event["id"].Int64()]; !ok {
 			return nil
 		}
 		visitCollectTargetBatch(ctx, event["id"].Int64())
+		pairParent := collectBusinessEventContext(ctx, event, nil, 0)
+		ctx, finishPair := startCollectPipelineStage(pairParent, collectPipelineMaterialPair)
+		pairFinished := false
+		pairOutcome := collectPipelinePending
+		finishPairOnce := func(result collectPipelineResult, err error) {
+			if !pairFinished {
+				finishPair(result, err)
+				pairFinished = true
+			}
+		}
+		defer func() { finishPairOnce(collectBusinessStepResult(windowErr, pairOutcome), windowErr) }()
 		role := strings.TrimSpace(event["material_role"].String())
 		if shouldResumeClassifiedDisplayEvent(event) {
 			settled, settleErr := s.collectVerifyEventsSettled(ctx, event, collectMaterialContextClosed(messageViews, index))
@@ -437,6 +436,8 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 			if !settled {
 				return newCollectProcessRetryError(s.collectDisplayRetryDelay(ctx, event), "等待验证资料静默期结束")
 			}
+			finishPairOnce(collectPipelineCompleted, nil)
+			ctx = pairParent
 			if err = s.processCollectEvent(ctx, event["id"].Int64(), payload.TenantId, payload.AccountId); err != nil {
 				// 目标事件的可重试错误必须回传 Outbox，不能误完成后遗留 media_ready。
 				return err
@@ -444,6 +445,7 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 			return nil
 		}
 		if role != "" && role != collectMaterialRolePending && !collectMaterialEventNeedsPairRepair(event) {
+			pairOutcome = collectPipelineDuplicate
 			return nil
 		}
 		if !collectMaterialEventOlderThan(event, collectMaterialGroupingDelay) {
@@ -473,6 +475,8 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 				}
 				// 当前窗口已经完成展示/验证配对，立即处理父展示事件。
 				// 不能沿用配对前的事件快照继续等待验证静默窗口。
+				finishPairOnce(collectPipelineCompleted, nil)
+				ctx = pairParent
 				if err = s.processCollectEvent(ctx, event["id"].Int64(), payload.TenantId, payload.AccountId); err != nil {
 					return err
 				}
@@ -484,6 +488,8 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 					return claimErr
 				}
 				if claimed {
+					finishPairOnce(collectPipelineCompleted, nil)
+					ctx = pairParent
 					if err = s.processCollectEvent(ctx, event["id"].Int64(), payload.TenantId, payload.AccountId); err != nil {
 						// 目标事件的重试错误必须回传 Outbox，不能误完成后遗留 media_ready。
 						return err
@@ -505,6 +511,8 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 				return nil
 			}
 			s.appendCollectEventLogForRecord(ctx, event, "group", "timeout_without_verify", "验证窗口到期，按无验证资料继续处理", "")
+			finishPairOnce(collectPipelineCompleted, nil)
+			ctx = pairParent
 			if err = s.processCollectEvent(ctx, event["id"].Int64(), payload.TenantId, payload.AccountId); err != nil {
 				// 当前事件是本次窗口的目标，重试错误必须回到 Outbox 调度，避免状态停在 media_ready。
 				return err
@@ -524,6 +532,7 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 					if !paired.IsBound() {
 						return nil
 					}
+					pairOutcome = collectPipelineCompleted
 					if err = s.scheduleCollectDisplaySettlement(ctx, payload, storedDisplay, 0); err != nil {
 						return err
 					}
@@ -539,6 +548,7 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 				if !paired.IsBound() {
 					return nil
 				}
+				pairOutcome = collectPipelineCompleted
 				if err = s.scheduleCollectDisplaySettlement(ctx, payload, display, 0); err != nil {
 					return err
 				}
@@ -557,12 +567,14 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 			if !claimed && strings.TrimSpace(event["material_role"].String()) != collectMaterialRoleVerify {
 				return nil
 			}
+			pairOutcome = collectPipelineIgnored
 			if err = s.ignoreCollectEvent(ctx, event["id"].Int64(), collectMaterialVerifyUnmatchedMessage, "group"); err != nil {
 				return err
 			}
 			g.Log().Infof(ctx, "验证资料在窗口内未找到前序展示组，已终止自动配对 eventId:%d sourceMessageId:%d window:%s", event["id"].Int64(), event["source_message_id"].Int64(), collectMaterialVerifyWindow())
 			return nil
 		default:
+			pairOutcome = collectPipelineIgnored
 			if err = s.ignoreCollectEvent(ctx, event["id"].Int64(), "消息不是资料组或验证组", "group"); err != nil {
 				return err
 			}

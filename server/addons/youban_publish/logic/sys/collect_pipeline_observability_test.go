@@ -58,7 +58,7 @@ func TestCollectPipelineSpanBoundedAndNoRawError(t *testing.T) {
 			}
 		}
 		if span.Name() != "collect."+attrs["stage"] || attrs["result"] != "unknown" ||
-			attrs["error.type"] != "other" || len(attrs) != 4 {
+			attrs["error.type"] != "other" || attrs["source_type"] != "unknown" || attrs["collection_mode"] != "unknown" {
 			t.Fatalf("unbounded span dimensions: name=%q attrs=%v", span.Name(), attrs)
 		}
 		if len(span.Events()) != 0 {
@@ -112,7 +112,7 @@ func TestCollectPipelineMetricsDurationAndCardinality(t *testing.T) {
 					t.Fatalf("unexpected counter: %+v", measurement)
 				}
 				point := value.DataPoints[0]
-				if point.Value != 1 || point.Attributes.Len() != 2 {
+				if point.Value != 1 || point.Attributes.Len() != 4 {
 					t.Fatalf("unexpected count/labels: %+v", point)
 				}
 				foundCount = true
@@ -121,7 +121,7 @@ func TestCollectPipelineMetricsDurationAndCardinality(t *testing.T) {
 					t.Fatalf("unexpected histogram: %+v", measurement)
 				}
 				point := value.DataPoints[0]
-				if point.Count != 1 || point.Sum != 0.25 || point.Attributes.Len() != 2 {
+				if point.Count != 1 || point.Sum != 0.25 || point.Attributes.Len() != 4 {
 					t.Fatalf("duration must be seconds with bounded labels: %+v", point)
 				}
 				foundDuration = true
@@ -217,7 +217,7 @@ func TestCollectPublishJobMetricStages(t *testing.T) {
 			switch value := measurement.Data.(type) {
 			case metricdata.Sum[int64]:
 				for _, point := range value.DataPoints {
-					if point.Attributes.Len() != 2 {
+					if point.Attributes.Len() != 4 {
 						t.Fatalf("high-cardinality metric attributes: %v", point.Attributes)
 					}
 					stage, _ := point.Attributes.Value("stage")

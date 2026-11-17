@@ -137,12 +137,21 @@ func (s *sCollector) enqueueDeliveryTaskWithOptions(ctx context.Context, deliver
 	return nil
 }
 
-func (s *sCollector) handleDeliveryTask(ctx context.Context, task *asynq.Task) error {
+func (s *sCollector) handleDeliveryTask(ctx context.Context, task *asynq.Task) (err error) {
+	_, parseObservation := startCollectorStage(ctx, collectorStageDeliveryTaskParse, collectorObservationMeta{})
+	defer parseObservation.Finish(collectorResultError, nil)
 	deliveryID, err := parseCollectorTaskID(task.Payload(), "交付")
+	parseObservation.meta.DeliveryID = deliveryID
+	parseObservation.Finish(collectorResultOK, err)
 	if err != nil {
 		return err
 	}
+	ctx, _ = collectorObservationContext(ctx, parseObservation.meta)
 	taskStarted := time.Now()
+	prepareParent := ctx
+	ctx, prepareObservation := startCollectorStage(ctx, collectorStageDeliveryPrepare, collectorObservationMeta{DeliveryID: deliveryID})
+	prepareResult := collectorResultError
+	defer func() { prepareObservation.Finish(prepareResult, err) }()
 	queue := collectorQueueName(ctx)
 	logCollectorDeliveryStage(ctx, "delivery.process.started", deliveryID, 0, queue, nil,
 		g.Map{"taskStartedAtUnixMs": taskStarted.UnixMilli()})
@@ -181,18 +190,22 @@ func (s *sCollector) handleDeliveryTask(ctx context.Context, task *asynq.Task) e
 			return err
 		}
 		// ACK legacy work only after the classified task is durably enqueued.
-		return s.enqueueDeliveryTask(ctx, deliveryID, priority)
+		err = s.enqueueDeliveryTask(ctx, deliveryID, priority)
+		prepareObservation.Finish(collectorResultAccepted, err)
+		return err
 	}
+	prepareObservation.Finish(collectorResultOK, nil)
+	ctx = prepareParent
 	startedAt := time.Now()
 	if err = s.processDelivery(ctx, deliveryID, taskStarted); err != nil {
 		logCollectorDeliveryStage(ctx, "delivery.process.failed", deliveryID, 0, queue, err,
 			g.Map{"taskDurationMs": time.Since(taskStarted).Milliseconds()})
 		counter, _ := collectorMeter.Int64Counter("telegram_collector_delivery_total")
-		counter.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "failed"), attribute.String("queue", collectorQueueName(ctx))))
+		counter.Add(ctx, 1, metric.WithAttributes(append(collectorCollectionAttributes(ctx), attribute.String("result", "failed"), attribute.String("queue", collectorQueueName(ctx)))...))
 		return err
 	}
 	histogram, _ := collectorMeter.Float64Histogram("telegram_collector_delivery_duration_seconds")
-	histogram.Record(ctx, time.Since(startedAt).Seconds(), metric.WithAttributes(attribute.String("result", "completed"), attribute.String("queue", collectorQueueName(ctx))))
+	histogram.Record(ctx, time.Since(startedAt).Seconds(), metric.WithAttributes(append(collectorCollectionAttributes(ctx), attribute.String("result", "completed"), attribute.String("queue", collectorQueueName(ctx)))...))
 	logCollectorDeliveryStage(ctx, "delivery.process.completed", deliveryID, 0, queue, nil,
 		g.Map{"taskDurationMs": time.Since(taskStarted).Milliseconds()})
 	return nil
@@ -241,6 +254,11 @@ func (s *sCollector) processDelivery(ctx context.Context, deliveryID int64, task
 	taskStarted := time.Now()
 	if len(taskStarts) > 0 {
 		taskStarted = taskStarts[0]
+		defer func() {
+			// Only queued delivery attempts have queue residence. Direct
+			// handoff must not masquerade as another delivery queue sample.
+			observeCollectorDeliveryQueueWait(ctx, observation.meta, 0, taskStarted)
+		}()
 	}
 	claimStarted := time.Now()
 	logCollectorDeliveryStage(ctx, "delivery.claim.started", deliveryID, 0, collectorQueueName(ctx), nil,
@@ -289,9 +307,12 @@ func (s *sCollector) processDelivery(ctx context.Context, deliveryID int64, task
 		return s.failDelivery(ctx, deliveryID, executionOwner, err)
 	}
 	if row.LeaseOwner != executionOwner || row.Status != sysin.DeliveryStatusProcessing {
-		return gerror.New("采集执行归属已变化，停止旧执行")
+		err = gerror.New("采集执行归属已变化，停止旧执行")
+		recordCollectorStage(ctx, collectorStageDeliveryRead, observation.meta, collectorResultError, time.Since(readStarted), err)
+		return err
 	}
 	observation.meta.TenantID, observation.meta.EventID = row.TenantId, row.EventId
+	ctx, observation.meta = collectorObservationContext(ctx, observation.meta)
 	recordCollectorStage(ctx, collectorStageDeliveryRead, observation.meta, collectorResultOK, time.Since(readStarted), nil)
 	readDetails := g.Map{"readDurationMs": time.Since(readStarted).Milliseconds(),
 		"taskDurationMs": time.Since(taskStarted).Milliseconds(), "tenantId": row.TenantId, "attemptCount": row.AttemptCount}
@@ -313,24 +334,32 @@ func (s *sCollector) processDelivery(ctx context.Context, deliveryID int64, task
 		return s.failDelivery(ctx, deliveryID, executionOwner, gerror.Wrap(err, "读取Telegram采集原始事件失败"))
 	}
 	eventReadDuration := time.Since(eventReadStarted).Milliseconds()
-	observation.meta.AccountID, observation.meta.SourceID = event.AccountId, event.SourceId
+	observation.meta.SourceID = event.SourceId
+	if event.SourceType == sysin.SourceTypeAccount {
+		observation.meta.TgAccountID = event.AccountId
+	}
 	observation.meta.ChatID, observation.meta.MessageID = event.ChatId, event.MessageId
 	observation.meta.SourceType = collectorObserveSourceType(event.SourceType)
 	observation.meta.QueueClass = collectorObserveQueueClassFromPriority(event.Priority)
-	recordCollectorStage(ctx, collectorStageDeliveryEventRead, observation.meta, collectorResultOK, time.Since(eventReadStarted), nil)
+	ctx, observation.meta = collectorObservationContext(ctx, observation.meta)
 	if event.Id <= 0 || event.RawUpdate == nil {
-		return s.failDelivery(ctx, deliveryID, executionOwner, gerror.New("Telegram采集原始事件不存在"))
+		cause := gerror.New("Telegram采集原始事件不存在")
+		recordCollectorStage(ctx, collectorStageDeliveryEventRead, observation.meta, collectorResultError, time.Since(eventReadStarted), cause)
+		return s.failDelivery(ctx, deliveryID, executionOwner, cause)
 	}
+	recordCollectorStage(ctx, collectorStageDeliveryEventRead, observation.meta, collectorResultOK, time.Since(eventReadStarted), nil)
 	parseStarted := time.Now()
 	delivery, err := collectorDeliveryFromEvent(&event, []byte(event.RawUpdate.String()))
+	if err == nil {
+		observation.meta.Mode = collectorModeFromRaw(event.SourceType, []byte(event.RawUpdate.String()))
+		observation.meta.AccountID, observation.meta.TgAccountID = delivery.AccountID, delivery.TgAccountID
+		ctx, observation.meta = collectorObservationContext(ctx, observation.meta)
+	}
 	recordCollectorStage(ctx, collectorStageDeliveryParse, observation.meta, collectorResultOK, time.Since(parseStarted), err)
 	if err != nil {
 		return s.failDelivery(ctx, deliveryID, executionOwner, err)
 	}
 	observation.meta.QueueClass = collectorObserveQueueClassFromPriority(deliveryPriority(&delivery))
-	// The legacy numeric task payload has no producer enqueue timestamp.
-	// Database creation time is not a reliable queue-wait timestamp.
-	observeCollectorDeliveryQueueWait(ctx, observation.meta, 0, taskStarted)
 	delivery.ID = deliveryID
 	delivery.DeliveryKey = row.DeliveryKey
 	handler := collectorservice.CollectorDeliveryHandler()
@@ -420,6 +449,7 @@ func logCollectorDeliveryEnqueue(ctx context.Context, deliveryID int64, queue, s
 		"workerRole":       "collector-worker",
 		"observedAtUnixMs": time.Now().UnixMilli(),
 	}
+	collectorObservationLogFields(ctx, fields)
 	if err != nil {
 		fields["errorType"] = fmt.Sprintf("%T", err)
 		fields["error"] = err.Error()
@@ -443,6 +473,7 @@ func logCollectorDeliveryStage(ctx context.Context, stage string, deliveryID, ev
 		"workerRole":       "collector-delivery-worker",
 		"observedAtUnixMs": time.Now().UnixMilli(),
 	}
+	collectorObservationLogFields(ctx, fields)
 	for _, detail := range details {
 		for key, value := range detail {
 			fields[key] = value

@@ -3,6 +3,8 @@ package sys
 import (
 	"context"
 	"fmt"
+	"go.opentelemetry.io/otel/attribute"
+	"hotgo/internal/library/collectobserve"
 	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -32,7 +34,17 @@ type CollectMessage struct {
 }
 
 func (s *sSysPublish) ingestAndProcessCollectMessage(ctx context.Context, message *CollectMessage) (int64, error) {
-	eventId, err := s.ingestCollectMessage(ctx, message)
+	if message != nil {
+		ctx = collectobserve.With(ctx, collectobserve.Metadata{TenantID: message.TenantId, AccountID: message.AccountId, SourceID: message.SourceId, SourceType: message.SourceType, BotID: message.BotId, TgAccountID: message.TgAccountId, ChatID: message.SourceChatId, Mode: collectobserve.ModeForHistory(message.History)})
+	}
+	persistCtx, finishPersist := startCollectPipelineStage(ctx, collectPipelineEventPersist)
+	eventId, err := s.ingestCollectMessage(persistCtx, message)
+	persistResult := collectPipelinePersisted
+	if err != nil {
+		persistResult = collectPipelineFailed
+	}
+	finishPersist(persistResult, err, attribute.Int64("collect.event_id", eventId))
+	ctx = collectobserve.With(ctx, collectobserve.Metadata{EventID: eventId})
 	if err != nil {
 		return 0, err
 	}

@@ -10,10 +10,12 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+	"go.opentelemetry.io/otel/attribute"
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/cache"
+	"hotgo/internal/library/collectobserve"
 )
 
 type collectDispatchResumeAction int
@@ -40,7 +42,7 @@ func (s *sSysPublish) resumeCollectProfileDispatch(ctx context.Context, dispatch
 	if dispatchID <= 0 || event.IsEmpty() || rule.IsEmpty() {
 		return gerror.New("恢复采集分发参数不完整")
 	}
-	profileID, err := s.commitCollectMaterial(ctx, event, content, rule, text)
+	profileID, err := s.commitObservedCollectMaterial(ctx, event, content, rule, text)
 	if err != nil {
 		var duplicate *profileFingerprintDuplicateError
 		if errors.As(err, &duplicate) {
@@ -120,7 +122,17 @@ func (s *sSysPublish) skipCollectProfileDispatchDuplicate(ctx context.Context, d
 	return reason, nil
 }
 
-func (s *sSysPublish) submitCollectProfileDispatch(ctx context.Context, dispatchId, profileId int64, event gdb.Record) error {
+func (s *sSysPublish) submitCollectProfileDispatch(ctx context.Context, dispatchId, profileId int64, event gdb.Record) (submitErr error) {
+	ctx = collectBusinessEventContext(ctx, event, nil, 0)
+	ctx = collectobserve.With(ctx, collectobserve.Metadata{ProfileID: profileId})
+	ctx, finish := startCollectPipelineStage(ctx, collectPipelineDispatch)
+	outcome := collectPipelineUnconfirmed
+	defer func() {
+		// A nil business return is not a Telegram or queue receipt.
+		finish(collectBusinessStepResult(submitErr, outcome), submitErr,
+			attribute.Int64("collect.rule_id", collectobserve.From(ctx).RuleID),
+			attribute.Int64("collect.dispatch_id", dispatchId), attribute.Int64("profile.id", profileId))
+	}()
 	if dispatchId <= 0 || profileId <= 0 || event.IsEmpty() {
 		return gerror.New("采集分发参数不完整")
 	}
@@ -143,9 +155,11 @@ func (s *sSysPublish) submitCollectProfileDispatch(ctx context.Context, dispatch
 	if queryErr != nil {
 		return gerror.Wrap(queryErr, "读取采集分发索引参数失败")
 	}
+	ctx = collectobserve.With(ctx, collectobserve.Metadata{RuleID: dispatch["rule_id"].Int64()})
 	if disabled, gateErr := collectRuleChannelDisabled(ctx, event["tenant_id"].Int64(), event["account_id"].Int64(), dispatch["rule_id"].Int64(), event["bot_id"].Int64(), event["source_chat_id"].String()); gateErr != nil {
 		return gateErr
 	} else if disabled {
+		outcome = collectPipelineIgnored
 		_, err = pdao.YoubanPublishCollectDispatch.Ctx(ctx).Where("id", dispatchId).Data(g.Map{"status": sysin.CollectDispatchStatusSkipped, "error_message": "当前规则的来源频道已下架禁用"}).Update()
 		return err
 	}
@@ -171,6 +185,7 @@ func (s *sSysPublish) submitCollectProfileDispatch(ctx context.Context, dispatch
 	}
 	if err := s.submitProfilePublishWithMeta(ctx, profileId, event["tenant_id"].Int64(), event["account_id"].Int64(), event["account_id"].Int64(), operationNo, channelIds, false, meta); err != nil {
 		if errors.Is(err, errTelegramPublishPermissionPaused) {
+			outcome = collectPipelineIgnored
 			_, updateErr := pdao.YoubanPublishCollectDispatch.Ctx(ctx).Where("id", dispatchId).Data(g.Map{
 				"status": sysin.CollectDispatchStatusSkipped, "error_message": err.Error(), "finished_at": gtime.Now(),
 			}).Update()

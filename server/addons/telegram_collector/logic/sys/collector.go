@@ -40,19 +40,23 @@ const mediaPipelineVersion = "v1"
 var collectorMeter = otel.Meter("hotgo/addons/telegram_collector")
 
 func observeIngestLatency(ctx context.Context, event *sysin.RawUpdateEvent, stage string) {
-	if event == nil || event.ReceivedAt.IsZero() {
+	if event == nil {
 		return
 	}
-	seconds := time.Since(event.ReceivedAt).Seconds()
+	_, meta := collectorObservationContext(ctx, collectorObservationMeta{})
+	if meta.ReceivedAt.IsZero() {
+		return
+	}
+	seconds := time.Since(meta.ReceivedAt).Seconds()
 	if seconds < 0 {
-		seconds = 0
+		return
 	}
 	histogram, _ := collectorMeter.Float64Histogram("telegram_collector_ingest_latency_seconds")
-	histogram.Record(ctx, seconds, metric.WithAttributes(
+	histogram.Record(ctx, seconds, metric.WithAttributes(append(collectorCollectionAttributes(ctx),
 		attribute.String("stage", stage),
 		attribute.String("source_type", event.SourceType),
 		attribute.String("queue_class", collectorQueueClass(event.Priority)),
-	))
+	)...))
 }
 
 func collectorQueueName(ctx context.Context) string {
@@ -95,6 +99,7 @@ func (s *sCollector) IngestBotUpdate(ctx context.Context, bot collectorservice.B
 	ctx, observation := startCollectorStage(ctx, collectorStageIngestBot, collectorObservationMeta{
 		SourceType: collectorSourceBot, QueueClass: collectorQueueUrgent,
 		TenantID: bot.Binding.TenantID, SourceID: bot.Binding.SourceID,
+		Mode: collectorModeRealtime, ReceivedAt: collectorIngressReceivedAt(ctx),
 	})
 	outcome := collectorResultError // Includes panic paths; never report them as accepted.
 	defer func() { endCollectorStage(observation, outcome, err) }()
@@ -102,6 +107,7 @@ func (s *sCollector) IngestBotUpdate(ctx context.Context, bot collectorservice.B
 		observation.meta.ChatID = strconv.FormatInt(message.Chat.ID, 10)
 		observation.meta.MessageID = int64(message.ID)
 	}
+	ctx, observation.meta = collectorObservationContext(ctx, observation.meta)
 	if update == nil {
 		return gerror.New("Telegram更新为空")
 	}
@@ -144,6 +150,7 @@ func (s *sCollector) IngestBotUpdate(ctx context.Context, bot collectorservice.B
 	}
 	eventID, err := s.persistEvent(ctx, &event)
 	observation.meta.EventID = eventID
+	ctx, observation.meta = collectorObservationContext(ctx, observation.meta)
 	if err != nil {
 		return err
 	}
@@ -155,20 +162,22 @@ func (s *sCollector) IngestBotUpdate(ctx context.Context, bot collectorservice.B
 	}
 	observeIngestLatency(ctx, &event, "event_enqueued")
 	counter, _ := collectorMeter.Int64Counter("telegram_collector_ingest_total")
-	counter.Add(ctx, 1, metric.WithAttributes(
+	counter.Add(ctx, 1, metric.WithAttributes(append(collectorCollectionAttributes(ctx),
 		attribute.String("source_type", sysin.SourceTypeBot),
 		attribute.String("priority", "urgent"),
-	))
+	)...))
 	outcome = collectorResultAccepted
 	return nil
 }
 
 func (s *sCollector) IngestAccountMessage(ctx context.Context, message *sysin.AccountMessageEvent) (err error) {
-	meta := collectorObservationMeta{SourceType: collectorSourceAccount}
+	meta := collectorObservationMeta{SourceType: collectorSourceAccount, ReceivedAt: collectorIngressReceivedAt(ctx)}
 	if message != nil {
 		meta.TenantID, meta.AccountID, meta.SourceID = message.TenantID, message.AccountID, message.SourceID
 		meta.ChatID, meta.MessageID = message.SourceChatID, message.SourceMessageID
 		meta.QueueClass = collectorObserveQueueClassFromPriority(accountMessagePriority(message))
+		meta.Mode = collectorModeFromHistory(message.History)
+		meta.TgAccountID = message.TgAccountID
 	}
 	ctx, observation := startCollectorStage(ctx, collectorStageIngestAccount, meta)
 	outcome := collectorResultError
@@ -217,6 +226,7 @@ func (s *sCollector) IngestAccountMessage(ctx context.Context, message *sysin.Ac
 		return repairErr
 	} else if repaired {
 		observation.meta.EventID = eventID
+		ctx, observation.meta = collectorObservationContext(ctx, observation.meta)
 		if err := s.enqueueEventTask(ctx, eventID, accountMessagePriority(message)); err != nil {
 			return err
 		}
@@ -228,6 +238,7 @@ func (s *sCollector) IngestAccountMessage(ctx context.Context, message *sysin.Ac
 	}
 	eventID, err := s.persistEvent(ctx, &event)
 	observation.meta.EventID = eventID
+	ctx, observation.meta = collectorObservationContext(ctx, observation.meta)
 	if err != nil {
 		return err
 	}
@@ -239,10 +250,10 @@ func (s *sCollector) IngestAccountMessage(ctx context.Context, message *sysin.Ac
 	}
 	observeIngestLatency(ctx, &event, "event_enqueued")
 	counter, _ := collectorMeter.Int64Counter("telegram_collector_ingest_total")
-	counter.Add(ctx, 1, metric.WithAttributes(
+	counter.Add(ctx, 1, metric.WithAttributes(append(collectorCollectionAttributes(ctx),
 		attribute.String("source_type", sysin.SourceTypeAccount),
 		attribute.String("priority", "realtime"),
-	))
+	)...))
 	outcome = collectorResultAccepted
 	return nil
 }
@@ -373,8 +384,12 @@ func (s *sCollector) persistEvent(ctx context.Context, event *sysin.RawUpdateEve
 	if event != nil {
 		meta.TenantID, meta.SourceID = event.TenantID, event.SourceID
 		meta.SourceType = collectorObserveSourceType(event.SourceType)
+		meta.Mode = collectorModeFromRaw(event.SourceType, event.RawUpdate)
 		meta.ChatID, meta.MessageID = strconv.FormatInt(event.ChatID, 10), event.MessageID
 		meta.QueueClass = collectorObserveQueueClassFromPriority(event.Priority)
+		if event.SourceType == sysin.SourceTypeAccount {
+			meta.TgAccountID = event.AccountID
+		}
 	}
 	ctx, observation := startCollectorStage(ctx, collectorStageEventPersist, meta)
 	outcome := collectorResultError
@@ -811,6 +826,9 @@ func (f *botCollectorFeature) HandleUpdate(ctx context.Context, bot gatewayservi
 	var ingestErrors []error
 	var targets []botCollectionSource
 	seenTargets := make(map[[2]int64]struct{})
+	// Observation only: retain the same first matched binding as target dedupe.
+	// Gateway ReferenceID is the publish Bot PK; collector Reference is a source.
+	targetBotIDs := make(map[[2]int64]int64)
 	for _, binding := range bot.Bindings {
 		// 采集只消费发布模块提供的规范 Bot 绑定，避免混用入口 Bot 表的 ID。
 		if binding.Owner != "youban_publish" {
@@ -854,12 +872,23 @@ func (f *botCollectorFeature) HandleUpdate(ctx context.Context, bot gatewayservi
 		if len(matchedSources) == 0 {
 			g.Log().Warningf(ctx, "TG Bot采集更新未匹配到采集源 tenantId:%d publishBotId:%d gatewayBotId:%d sourceCount:%d", binding.TenantID, publishBotID, binding.ReferenceID, len(sources))
 		}
+		for _, source := range matchedSources {
+			key := [2]int64{source.TenantID, source.ID}
+			if _, exists := targetBotIDs[key]; !exists {
+				targetBotIDs[key] = publishBotID
+			}
+		}
 		targets = appendMatchedBotCollectionSources(targets, matchedSources, seenTargets)
 	}
 	// Schedule all authorized bindings together: a slow source from the first
 	// tenant must not prevent later tenants from reaching an available worker.
 	if err := ingestBotCollectionSources(ctx, targets, func(source botCollectionSource) error {
-		return collectorservice.Collector().IngestBotUpdate(ctx, collectorservice.BotContext{
+		// All writes finish before bounded workers start; callbacks only read.
+		ingestCtx, _ := collectorObservationContext(ctx, collectorObservationMeta{
+			TenantID: source.TenantID, SourceID: source.ID,
+			BotID: targetBotIDs[[2]int64{source.TenantID, source.ID}],
+		})
+		return collectorservice.Collector().IngestBotUpdate(ingestCtx, collectorservice.BotContext{
 			Key: bot.Key, Token: bot.Token,
 			Binding: collectorservice.BotBinding{TenantID: source.TenantID, SourceID: source.ID, Reference: fmt.Sprintf("source:%d", source.ID)},
 		}, update)

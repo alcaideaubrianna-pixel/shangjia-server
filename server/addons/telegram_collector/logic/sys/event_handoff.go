@@ -71,7 +71,16 @@ func (s *sCollector) handoffCollectorEvent(ctx context.Context, row *entity.TgCo
 	started := time.Now()
 	return executeEventHandoff(ctx, mode, time.Duration(seconds)*time.Second, delivery, eventHandoffActions{
 		save: s.saveDelivery,
-		ready: func(ctx context.Context) error {
+		ready: func(ctx context.Context) (err error) {
+			// Measure only the existing event-ready write and ownership check,
+			// not the full handoff or downstream delivery handler.
+			ctx, observation := startCollectorStage(ctx, collectorStageEventComplete, collectorObservationMeta{
+				TenantID: row.TenantId, SourceID: row.SourceId, EventID: row.Id,
+				DeliveryID: delivery.ID, SourceType: collectorObserveSourceType(row.SourceType),
+				QueueClass: collectorObserveQueueClassFromPriority(deliveryPriority(delivery)),
+			})
+			outcome := collectorResultError
+			defer func() { observation.Finish(outcome, err) }()
 			cols := dao.TgCollectorEvent.Columns()
 			result, err := dao.TgCollectorEvent.Ctx(ctx).WherePri(row.Id).
 				Where(cols.TenantId, row.TenantId).
@@ -91,6 +100,8 @@ func (s *sCollector) handoffCollectorEvent(ctx context.Context, row *entity.TgCo
 			if affected != 1 {
 				return gerror.New("采集事件交接租约已变化，未确认本次交接")
 			}
+			outcome = collectorResultOK
+			observation.Finish(outcome, nil)
 			logCollectorPipelineStage(ctx, row, "event.ready", started, delivery, nil, g.Map{"handoffMode": mode, "fallbackReason": fallbackReason, "retryOwner": "delivery"})
 			return nil
 		},

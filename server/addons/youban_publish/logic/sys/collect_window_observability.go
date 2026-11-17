@@ -34,6 +34,7 @@ const (
 	collectBatchReuseGenerationError  collectBatchReuseReason = "generation_read_failed"
 	collectBatchReuseCompletionError  collectBatchReuseReason = "completion_read_failed"
 	collectBatchReuseInvalidTarget    collectBatchReuseReason = "invalid_target"
+	collectBatchReuseTerminalTarget   collectBatchReuseReason = "terminal_target"
 	collectBatchReuseCacheError       collectBatchReuseReason = "cache_error"
 	collectBatchReuseLeaseBusy        collectBatchReuseReason = "lease_busy"
 )
@@ -69,6 +70,15 @@ func observeCollectWindowQuery(ctx context.Context, payload collectProcessQueueP
 	startedAt := time.Now()
 	rows, err := run()
 	elapsed := time.Since(startedAt)
+	queryStage := collectPipelineWindowPrimary
+	if kind == collectWindowQueryRetry {
+		queryStage = collectPipelineWindowRetry
+	}
+	queryResult := collectPipelineCompleted
+	if err != nil {
+		queryResult = collectPipelineFailed
+	}
+	recordCollectPipelineMetrics(bindCollectEventObservation(ctx, target), publishObserveMeter, queryStage, queryResult, elapsed)
 	fields := collectWindowObservationFields(ctx, payload, target)
 	fields["event"] = "collect_window_query_completed"
 	fields["stage"] = "collect.window." + string(kind)

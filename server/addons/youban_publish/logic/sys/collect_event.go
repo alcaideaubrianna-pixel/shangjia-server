@@ -16,10 +16,12 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/gtrace"
 	"github.com/gogf/gf/v2/os/gtime"
+	"go.opentelemetry.io/otel/attribute"
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/cache"
+	"hotgo/internal/library/collectobserve"
 	"hotgo/internal/library/hgrds/lock"
 	"hotgo/internal/library/tasklog"
 )
@@ -310,6 +312,40 @@ func (s *sSysPublish) CollectEventClear(ctx context.Context, in *sysin.CollectEv
 	return gerror.Wrap(err, "清空采集事件失败")
 }
 
+// Only enrich from already loaded identities. Ingress Mode/ReceivedAt remain
+// owned by the task context; Telegram dates and naive DB timestamps are not epochs.
+func collectBusinessEventContext(ctx context.Context, event, source gdb.Record, ruleID int64) context.Context {
+	ctx = bindCollectEventObservation(ctx, event)
+	meta := collectobserve.Metadata{RuleID: ruleID}
+	if !source.IsEmpty() {
+		if source["account_id"].Int64() > 0 {
+			meta.AccountID = source["account_id"].Int64()
+		}
+		known := collectobserve.From(ctx)
+		if known.BotID <= 0 {
+			meta.BotID = source["bot_id"].Int64()
+		}
+		if known.TgAccountID <= 0 {
+			meta.TgAccountID = source["tg_account_id"].Int64()
+		}
+		if known.SourceType == "" {
+			meta.SourceType = source["source_type"].String()
+		}
+	}
+	return collectobserve.With(ctx, meta)
+}
+
+func collectBusinessStepResult(err error, fallback collectPipelineResult) collectPipelineResult {
+	if err == nil {
+		return fallback
+	}
+	var retry *collectProcessRetryError
+	if errors.As(err, &retry) {
+		return collectPipelineRetryable
+	}
+	return collectPipelineFailed
+}
+
 func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, tenantId int64, accountId int64) (err error) {
 	eventLock := lock.NewConfig(2*time.Minute, time.Second).Mutex(fmt.Sprintf("youban_publish:collect:event:%d", eventId))
 	if lockErr := eventLock.TryLock(ctx); lockErr != nil {
@@ -335,6 +371,19 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		g.Log().Warningf(ctx, "采集事件不存在，跳过处理 eventId:%d tenantId:%d accountId:%d", eventId, tenantId, accountId)
 		return gerror.New("采集事件不存在")
 	}
+	ctx = collectBusinessEventContext(ctx, event, nil, 0)
+	authorizationParent := ctx
+	ctx, finishAuthorization := startCollectPipelineStage(ctx, collectPipelineAuthorization)
+	authorizationFinished := false
+	authorizationResult := collectPipelineIgnored
+	defer func() {
+		if !authorizationFinished {
+			meta := collectobserve.From(ctx)
+			finishAuthorization(collectBusinessStepResult(err, authorizationResult), err,
+				attribute.Int64("account.id", meta.AccountID), attribute.Int64("collect.bot_id", meta.BotID),
+				attribute.Int64("collect.tg_account_id", meta.TgAccountID))
+		}
+	}()
 	processStartedAt := time.Now()
 	defer func() {
 		logCollectProcessTerminal(ctx, event, processStartedAt, err)
@@ -362,6 +411,7 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 	if source.IsEmpty() {
 		return s.ignoreCollectEvent(ctx, eventId, "采集源不存在", "source")
 	}
+	ctx = collectBusinessEventContext(ctx, event, source, 0)
 	// BOT 事件可能以 account_id=0 入库；解析到采集源归属后，后续规则、
 	// 频道关系和资料写入仍沿用真实账户上下文。
 	if accountId <= 0 {
@@ -432,11 +482,19 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		return s.ignoreCollectEvent(ctx, eventId, "VIP会员已到期，停止处理采集事件", "vip")
 	}
 	if source["collect_enabled"].Int() != 1 || source["status"].Int() != 1 {
+		authorizationResult = collectPipelinePending
 		_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusPending, "采集源已暂停，等待恢复")
 		return s.enqueueCollectProcess(ctx, collectProcessQueuePayload{
 			EventId: eventId, TenantId: tenantId, AccountId: accountId, SourceId: event["source_id"].Int64(), SourceChatId: event["source_chat_id"].String(),
 		}, 30*time.Second)
 	}
+	authorizationMeta := collectobserve.From(ctx)
+	finishAuthorization(collectPipelineCompleted, nil,
+		attribute.Int64("account.id", authorizationMeta.AccountID),
+		attribute.Int64("collect.bot_id", authorizationMeta.BotID),
+		attribute.Int64("collect.tg_account_id", authorizationMeta.TgAccountID))
+	authorizationFinished = true
+	ctx = collectBusinessEventContext(authorizationParent, event, source, 0)
 	if collectEventAlreadyMatched(event["status"].String()) {
 		needsRepair, repairErr := s.collectEventNeedsProfileRepair(ctx, eventId)
 		if repairErr != nil {
@@ -449,6 +507,8 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 	}
 	materialRole := strings.TrimSpace(event["material_role"].String())
 	if materialRole == "" || materialRole == collectMaterialRolePending {
+		_, finishPair := startCollectPipelineStage(ctx, collectPipelineMaterialPair)
+		finishPair(collectPipelinePending, nil, attribute.String("collect.wait_reason", "pending_pair"))
 		return newCollectProcessRetryError(30*time.Second, "等待资料组窗口完成")
 	}
 	if materialRole == collectMaterialRoleVerify {
@@ -478,7 +538,13 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 				return newCollectProcessRetryError(5*time.Second, "等待父展示资料完成规则和去重预检")
 			}
 		}
-		needsMediaCache, mediaErr := s.collectEventNeedsMediaCacheResult(ctx, event)
+		mediaCtx, finishMedia := startCollectPipelineStage(ctx, collectPipelineMediaReady)
+		needsMediaCache, mediaErr := s.collectEventNeedsMediaCacheResult(mediaCtx, event)
+		mediaResult := collectPipelineCompleted
+		if needsMediaCache {
+			mediaResult = collectPipelinePending
+		}
+		finishMedia(collectBusinessStepResult(mediaErr, mediaResult), mediaErr)
 		if mediaErr != nil {
 			return gerror.Wrap(mediaErr, "检查验证资料媒体缓存状态失败")
 		}
@@ -516,26 +582,46 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		}
 		return nil
 	}
-	rules, err := s.collectEventRules(ctx, event, tenantId, accountId)
+	// 事件级预检与分支级 rule_match 分开统计，避免耗时和结果分布混杂。
+	ruleCtx, finishRules := startCollectPipelineStage(ctx, collectPipelineRulePreflight)
+	rules, err := s.collectEventRules(ruleCtx, event, tenantId, accountId)
 	if err != nil {
+		finishRules(collectBusinessStepResult(err, collectPipelineFailed), err)
 		return err
 	}
-	preflight, err := s.preflightCollectMaterialGroup(ctx, event, rules)
+	preflight, err := s.preflightCollectMaterialGroup(ruleCtx, event, rules)
 	if err != nil {
+		finishRules(collectBusinessStepResult(err, collectPipelineFailed), err)
 		return err
 	}
 	if len(preflight.Rules) == 0 {
+		finishRules(collectPipelineIgnored, nil)
 		return s.ignoreCollectEvent(ctx, eventId, preflight.Reason, preflight.Stage)
 	}
+	finishRules(collectPipelineCompleted, nil, attribute.Int("collect.match_count", len(preflight.Rules)))
 	candidateRules := preflight.Rules
 	_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusPrechecked, "")
-	verifyReady, verifyErr := s.ensureCollectPairedVerifyReady(ctx, event)
+	mediaCtx, finishMedia := startCollectPipelineStage(ctx, collectPipelineMediaReady)
+	verifyReady, verifyErr := s.ensureCollectPairedVerifyReady(mediaCtx, event)
 	if verifyErr != nil {
+		finishMedia(collectBusinessStepResult(verifyErr, collectPipelineFailed), verifyErr)
 		return verifyErr
 	}
-	needsMediaCache, mediaErr := s.collectEventNeedsMediaCacheResult(ctx, event)
+	needsMediaCache, mediaErr := s.collectEventNeedsMediaCacheResult(mediaCtx, event)
 	if mediaErr != nil {
+		finishMedia(collectBusinessStepResult(mediaErr, collectPipelineFailed), mediaErr)
 		return gerror.Wrap(mediaErr, "检查采集资料媒体缓存状态失败")
+	}
+	mediaResult := collectPipelineCompleted
+	if needsMediaCache || !verifyReady {
+		mediaResult = collectPipelinePending
+	}
+	if needsMediaCache {
+		finishMedia(mediaResult, nil, attribute.String("collect.wait_reason", "media_cache_pending"))
+	} else if !verifyReady {
+		finishMedia(mediaResult, nil, attribute.String("collect.wait_reason", "verify_media_pending"))
+	} else {
+		finishMedia(mediaResult, nil)
 	}
 	if needsMediaCache {
 		g.Log().Debugf(ctx, "采集事件进入媒体缓存 eventId:%d media:%d", eventId, event["media_count"].Int())
@@ -582,27 +668,35 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		s.appendCollectEventLogForRecord(ctx, event, "media", "ready", "媒体已就绪", "")
 	}
 	reportCollectProgress(ctx, "extract", "解析资料正文及合并验证内容")
-	content, err := s.ensureCollectContent(ctx, event)
+	contentCtx, finishContent := startCollectPipelineStage(ctx, collectPipelineContentExtract)
+	content, err := s.ensureCollectContent(contentCtx, event)
 	if err != nil {
+		finishContent(collectBusinessStepResult(err, collectPipelineFailed), err)
 		_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusFailed, err.Error())
 		return err
 	}
-	content, err = s.mergeCollectMaterialContent(ctx, event, content)
+	content, err = s.mergeCollectMaterialContent(contentCtx, event, content)
 	if err != nil {
+		finishContent(collectBusinessStepResult(err, collectPipelineFailed), err)
 		_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusFailed, err.Error())
 		return err
 	}
-	canonical, err := s.canonicalCollectProfileMedia(ctx, event, content)
+	finishContent(collectPipelineCompleted, nil)
+	canonicalCtx, finishCanonical := startCollectPipelineStage(ctx, collectPipelineMediaReady)
+	canonical, err := s.canonicalCollectProfileMedia(canonicalCtx, event, content)
 	if err != nil {
+		finishCanonical(collectBusinessStepResult(err, collectPipelineFailed), err)
 		return err
 	}
 	if err = validateCollectMaterialMedia(canonical); err != nil {
+		finishCanonical(collectPipelinePending, nil, attribute.String("collect.wait_reason", "media_incomplete"))
 		_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusMediaPending, err.Error())
 		if enqueueErr := s.enqueueCollectMediaCache(ctx, collectMediaQueuePayloadFromEvent(event), 0); enqueueErr != nil {
 			return enqueueErr
 		}
 		return newCollectProcessRetryError(30*time.Second, err.Error())
 	}
+	finishCanonical(collectPipelineCompleted, nil)
 	content = canonical
 	// Preserve raw event identity for storage/settlement. Only the submission
 	// branch receives the validated source's real business account.
@@ -931,7 +1025,18 @@ func collectEventRuleMapsToRecords(list []g.Map) []gdb.Record {
 	return rows
 }
 
-func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record) (bool, string, error) {
+func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record) (matched bool, reason string, branchErr error) {
+	ctx = collectBusinessEventContext(ctx, event, nil, rule["id"].Int64())
+	ruleParent := ctx
+	// 分支级 rule_match：每条候选规则各记录一次，重试也会产生新的观测。
+	// 事件级候选预检单独记录为 rule_preflight；本阶段不代表新增资料或交付数量。
+	ctx, finishRule := startCollectPipelineStage(ctx, collectPipelineRuleMatch)
+	ruleFinished := false
+	defer func() {
+		if !ruleFinished {
+			finishRule(collectBusinessStepResult(branchErr, collectPipelineIgnored), branchErr)
+		}
+	}()
 	// 防止采集来源与发布目标相同形成回流死循环；来源和目标统一去掉 -100 后比较。
 	sourceChatID := canonicalCollectSourceChatID(event["source_chat_id"].String())
 	for _, targetChannelID := range collectRuleTargetChannelIds(rule) {
@@ -980,6 +1085,9 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 		s.appendCollectEventLogForRecord(ctx, event, "classifier", "skipped", reason, fmt.Sprintf("rule=%d", rule["id"].Int64()))
 		return false, reason, nil
 	}
+	finishRule(collectPipelineCompleted, nil)
+	ruleFinished = true
+	ctx = ruleParent
 	if !existingDispatch.IsEmpty() {
 		return s.resumeExistingCollectDispatch(ctx, existingDispatch, event, content, rule, decision.Text)
 	}
@@ -1067,7 +1175,7 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 		}
 		return true, "", nil
 	}
-	profileId, err := s.commitCollectMaterial(ctx, event, content, rule, decision.Text)
+	profileId, err := s.commitObservedCollectMaterial(ctx, event, content, rule, decision.Text)
 	if err != nil {
 		var duplicate *profileFingerprintDuplicateError
 		if errors.As(err, &duplicate) {
@@ -1080,13 +1188,27 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 		_ = s.markCollectDispatchFailed(ctx, dispatchId, err.Error())
 		return false, "", err
 	}
-	if err = observeCollectDispatchHandoff(ctx, event, dispatchId, profileId, func() error {
-		return s.submitCollectProfileDispatch(ctx, dispatchId, profileId, event)
-	}); err != nil {
+	if err = s.submitCollectProfileDispatch(ctx, dispatchId, profileId, event); err != nil {
 		_ = s.markCollectDispatchFailed(ctx, dispatchId, err.Error())
 		return false, "", err
 	}
 	return true, "", nil
+}
+
+func (s *sSysPublish) commitObservedCollectMaterial(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record, text string) (profileID int64, persistErr error) {
+	ctx = collectBusinessEventContext(ctx, event, nil, rule["id"].Int64())
+	ctx, finish := startCollectPipelineStage(ctx, collectPipelineProfilePersist)
+	defer func() {
+		result := collectBusinessStepResult(persistErr, collectPipelinePersisted)
+		var duplicate *profileFingerprintDuplicateError
+		if errors.As(persistErr, &duplicate) {
+			result = collectPipelineDuplicate
+		} else if persistErr == nil && profileID <= 0 {
+			result = collectPipelineUnconfirmed
+		}
+		finish(result, persistErr, attribute.Int64("profile.id", profileID))
+	}()
+	return s.commitCollectMaterial(ctx, event, content, rule, text)
 }
 
 // findCollectRuleDuplicate is the only collection dedupe entry. Material

@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"errors"
+	"hotgo/internal/library/collectobserve"
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -20,12 +21,29 @@ import (
 type collectPipelineStage string
 type collectPipelineResult string
 
+// Instruments are registered once during package initialization. The OTel
+// global meter delegates them when the runtime provider is installed.
+var collectPipelineMetrics = newCollectPipelineInstruments(publishObserveMeter)
+
 const (
-	collectPipelineSubmit    collectPipelineStage = "delivery_submit"
-	collectPipelineProcess   collectPipelineStage = "process"
-	collectPipelineDispatch  collectPipelineStage = "dispatch_handoff"
-	collectPipelineAdmission collectPipelineStage = "publish_admission"
-	collectPipelineQueue     collectPipelineStage = "publish_queue_enqueue"
+	collectPipelineSubmit         collectPipelineStage = "delivery_submit"
+	collectPipelineProcess        collectPipelineStage = "process"
+	collectPipelineDispatch       collectPipelineStage = "dispatch_handoff"
+	collectPipelineAdmission      collectPipelineStage = "publish_admission"
+	collectPipelineQueue          collectPipelineStage = "publish_queue_enqueue"
+	collectPipelineEventPersist   collectPipelineStage = "event_persist"
+	collectPipelineSourceAttempt  collectPipelineStage = "source_attempt"
+	collectPipelineMediaCache     collectPipelineStage = "media_cache"
+	collectPipelineMediaQuota     collectPipelineStage = "media_quota_wait"
+	collectPipelineWindowPrimary  collectPipelineStage = "window_primary"
+	collectPipelineWindowRetry    collectPipelineStage = "window_retry"
+	collectPipelineAuthorization  collectPipelineStage = "authorization"
+	collectPipelineRulePreflight  collectPipelineStage = "rule_preflight"
+	collectPipelineMaterialPair   collectPipelineStage = "material_pair"
+	collectPipelineRuleMatch      collectPipelineStage = "rule_match"
+	collectPipelineMediaReady     collectPipelineStage = "media_ready"
+	collectPipelineContentExtract collectPipelineStage = "content_extract"
+	collectPipelineProfilePersist collectPipelineStage = "profile_persist"
 
 	collectPipelineQueued      collectPipelineResult = "queued"
 	collectPipelineFailed      collectPipelineResult = "failed"
@@ -44,7 +62,9 @@ const (
 // to spans/logs; detailed errors remain exclusively in existing business logs.
 func collectPipelineMetricAttributes(stage collectPipelineStage, result collectPipelineResult) []attribute.KeyValue {
 	switch stage {
-	case collectPipelineSubmit, collectPipelineProcess, collectPipelineDispatch, collectPipelineAdmission, collectPipelineQueue:
+	case collectPipelineSubmit, collectPipelineProcess, collectPipelineDispatch, collectPipelineAdmission, collectPipelineQueue,
+		collectPipelineEventPersist, collectPipelineSourceAttempt, collectPipelineMediaCache, collectPipelineMediaQuota, collectPipelineWindowPrimary, collectPipelineWindowRetry,
+		collectPipelineAuthorization, collectPipelineRulePreflight, collectPipelineMaterialPair, collectPipelineRuleMatch, collectPipelineMediaReady, collectPipelineContentExtract, collectPipelineProfilePersist:
 	default:
 		stage = "unknown"
 	}
@@ -108,16 +128,21 @@ func observeCollectChannelEnqueue(ctx context.Context, channelID, jobID int64, p
 }
 
 func recordCollectPipelineMetrics(ctx context.Context, meter metric.Meter, stage collectPipelineStage, result collectPipelineResult, duration time.Duration) {
-	options := metric.WithAttributes(collectPipelineMetricAttributes(stage, result)...)
-	counter, countErr := meter.Int64Counter("xiaohuiji.collect.pipeline.operations",
-		metric.WithDescription("Publish-side collection stage observations; retries are separate attempts"))
-	histogram, durationErr := meter.Float64Histogram("xiaohuiji.collect.pipeline.duration_seconds",
-		metric.WithUnit("s"), metric.WithDescription("Publish-side stage execution time, excluding queue residence"))
-	if countErr == nil {
-		counter.Add(ctx, 1, options)
+	attrs := collectPipelineMetricAttributes(stage, result)
+	meta := collectobserve.From(ctx)
+	attrs = append(attrs, attribute.String("source_type", collectobserve.SourceType(meta.SourceType)), attribute.String("collection_mode", collectobserve.Mode(meta.Mode)))
+	options := metric.WithAttributes(attrs...)
+	var instruments collectPipelineInstruments
+	if meter == publishObserveMeter {
+		instruments = collectPipelineMetrics
+	} else {
+		instruments = newCollectPipelineInstruments(meter)
 	}
-	if durationErr == nil && duration >= 0 {
-		histogram.Record(ctx, duration.Seconds(), options)
+	if instruments.count != nil {
+		instruments.count.Add(ctx, 1, options)
+	}
+	if instruments.duration != nil && duration >= 0 {
+		instruments.duration.Record(ctx, duration.Seconds(), options)
 	}
 }
 
@@ -125,12 +150,14 @@ func observeCollectPipeline(ctx context.Context, stage collectPipelineStage, res
 	finishedAt := time.Now()
 	recordCollectPipelineMetrics(ctx, publishObserveMeter, stage, result, finishedAt.Sub(startedAt))
 	recordCollectPipelineSpan(ctx, otel.Tracer("hotgo/addons/youban_publish"), stage, result, startedAt, finishedAt, err, attrs...)
+	logCollectPipelineObservation(ctx, stage, result, startedAt, finishedAt, err, attrs...)
 }
 
 // Use the same whitelist as metrics, including the span name. Do not copy raw
 // error messages, exception events, SQL, URLs or payloads into telemetry.
 func recordCollectPipelineSpan(ctx context.Context, tracer trace.Tracer, stage collectPipelineStage, result collectPipelineResult, startedAt, finishedAt time.Time, err error, attrs ...attribute.KeyValue) {
 	spanAttrs := collectPipelineMetricAttributes(stage, result)
+	spanAttrs = append(spanAttrs, collectContextTraceAttributes(ctx)...)
 	spanName := "collect." + spanAttrs[0].Value.AsString()
 	for _, attr := range attrs {
 		switch attr.Key {

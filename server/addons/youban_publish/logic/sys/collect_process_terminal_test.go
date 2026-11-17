@@ -16,7 +16,7 @@ func TestCollectProcessProductionTerminalStatesAreIdempotent(t *testing.T) {
 		{"线上已处理验证", sysin.CollectEventStatusProcessed, collectMaterialRoleVerify, "", true},
 		{"线上已忽略普通消息", sysin.CollectEventStatusIgnored, collectMaterialRolePending, "", true},
 		{"线上已忽略重复展示", sysin.CollectEventStatusIgnored, collectMaterialRoleDisplay, "资料库已存在相同资料", true},
-		{"等待验证仍可恢复", sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage, false},
+		{"未匹配验证结束自身轮询", sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage, true},
 	}
 	for _, fixture := range fixtures {
 		t.Run(fixture.name, func(t *testing.T) {

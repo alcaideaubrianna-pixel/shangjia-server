@@ -10,8 +10,9 @@ import (
 	pdao "hotgo/addons/youban_publish/internal/dao"
 )
 
-// RequeueCollectEvents replays explicitly paired display events. It does not
-// run the realtime classification window or infer missing verification groups.
+// RequeueCollectEvents accepts explicitly paired display events for repair.
+// Legacy authorization recovery is handed to the existing process queue;
+// other maintenance completion keeps its existing synchronous behavior.
 func RequeueCollectEvents(ctx context.Context, eventIDs []int64) (int, error) {
 	processed, failed, err := RequeueCollectEventsBestEffort(ctx, eventIDs)
 	if err != nil {
@@ -25,11 +26,17 @@ func RequeueCollectEvents(ctx context.Context, eventIDs []int64) (int, error) {
 
 // RequeueCollectEventsBestEffort processes each event independently. A stale
 // or unmatched event must not stop a repair batch from processing later events.
+// Its count is accepted repair calls, including deduplicated legacy wakeups;
+// it is not a count of newly persisted profiles or completed publications.
 func RequeueCollectEventsBestEffort(ctx context.Context, eventIDs []int64) (int, []int64, error) {
+	eventIDs = uniqueIds(eventIDs)
+	if len(eventIDs) > 1000 {
+		return 0, nil, gerror.New("单次采集事件重放不能超过1000条")
+	}
 	service := NewSysPublish()
 	processed := 0
 	failed := make([]int64, 0)
-	for _, eventID := range uniqueIds(eventIDs) {
+	for _, eventID := range eventIDs {
 		if eventID <= 0 {
 			continue
 		}
@@ -67,27 +74,33 @@ func RequeueCollectEventsBestEffort(ctx context.Context, eventIDs []int64) (int,
 }
 
 func (s *sSysPublish) completeTargetCollectEvent(ctx context.Context, payload collectProcessQueuePayload) error {
-	display, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).WherePri(payload.EventId).One()
-	if err != nil {
-		return gerror.Wrap(err, "重新读取展示采集事件失败")
-	}
-	verifies, err := s.pairedCollectVerifyEvents(ctx, payload.EventId)
+	// Authorization and bounded parent/child restoration precede every media
+	// read/download. The returned records retain their persisted account IDs.
+	display, verifies, restored, err := s.prepareCollectEventRequeue(ctx, payload)
 	if err != nil {
 		return err
 	}
+	if restored {
+		// prepare has committed both the ignored events and canceled media.
+		// Do not spend the HTTP/MCP deadline downloading media: the ordinary
+		// parent+verify worker resumes the preserved pair. Queue dedupe is an
+		// accepted existing wakeup, never a profile-persistence receipt.
+		// The optional request scope may use the resolved business owner.
+		// Queue identity must keep the event's original storage account/chat.
+		payload.AccountId = collectEventStorageAccountID(display)
+		payload.SourceChatId = display["source_chat_id"].String()
+		if err := s.enqueueCollectProcess(ctx, payload, 0); err != nil {
+			return gerror.Wrap(err, "误拦截状态已恢复，但提交父展示处理任务失败，请重试")
+		}
+		g.Log().Info(ctx, "旧频道授权误拦截恢复已接受", g.Map{
+			"event": "collect_requeue_accepted", "eventId": payload.EventId,
+			"tenantId": payload.TenantId, "accountId": payload.AccountId,
+			"sourceId": payload.SourceId, "sourceChatId": payload.SourceChatId,
+			"pairedVerifyCount": len(verifies), "outcome": "accepted",
+		})
+		return nil
+	}
 	for _, verify := range verifies {
-		ready, readyErr := s.collectEventMediaReady(ctx, verify["id"].Int64())
-		if readyErr != nil {
-			return gerror.Wrap(readyErr, "验证视频完整性检查失败")
-		}
-		if !ready {
-			return gerror.Newf("验证视频媒体尚未完整缓存 eventId:%d verifyEventId:%d", payload.EventId, verify["id"].Int64())
-		}
-		for _, field := range []string{"tenant_id", "account_id", "source_id", "source_chat_id"} {
-			if display[field].String() != verify[field].String() {
-				return gerror.Newf("展示组与验证组来源不一致 eventId:%d", payload.EventId)
-			}
-		}
 		verifyRows, rowsErr := s.collectEventMediaRows(ctx, verify["id"].Int64())
 		if rowsErr != nil {
 			return rowsErr

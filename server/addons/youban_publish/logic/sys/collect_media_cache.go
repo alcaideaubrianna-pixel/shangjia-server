@@ -248,6 +248,7 @@ func (s *sSysPublish) ExecuteCollectMediaCache(ctx context.Context, payload coll
 	payload.SourceId = event["source_id"].Int64()
 	payload.TgAccountId = event["tg_account_id"].Int64()
 	ctx = s.collectProgressContext(ctx, payload.EventId, 0)
+	ctx = bindCollectEventObservation(ctx, event)
 	statEvent = event
 	if collectEventAlreadyMatched(event["status"].String()) {
 		g.Log().Debugf(ctx, "采集媒体任务对应事件已完成，跳过重复任务 eventId:%d status:%s", payload.EventId, event["status"].String())
@@ -310,6 +311,11 @@ func (s *sSysPublish) ExecuteCollectMediaCache(ctx context.Context, payload coll
 		ownerCtx, cancelOwner := context.WithTimeout(ctx, collectMediaOwnerAcquireTimeout)
 		ownerLease, err = s.acquireCollectMediaOwnerSlots(ownerCtx, payload)
 		cancelOwner()
+		ownerResult := collectPipelineCompleted
+		if err != nil {
+			ownerResult = collectPipelineRetryable
+		}
+		observeCollectPipeline(ctx, collectPipelineMediaQuota, ownerResult, ownerWaitStartedAt, err)
 		if err != nil {
 			observeCollectMediaOwnerWait(ctx, payload.TenantId, payload.TgAccountId, payload.SourceId, time.Since(ownerWaitStartedAt), "timeout_or_busy")
 			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
@@ -341,7 +347,20 @@ func (s *sSysPublish) ExecuteCollectMediaCache(ctx context.Context, payload coll
 		}
 	}
 	cacheStartedAt := time.Now()
-	changed, err := s.cacheCollectEventStructuredMedia(ctx, event)
+	mediaCtx, finishMedia := startCollectPipelineStage(ctx, collectPipelineMediaCache)
+	changed, err := s.cacheCollectEventStructuredMedia(mediaCtx, event)
+	mediaResult := collectPipelineCompleted
+	if err != nil {
+		var discarded *collectMediaDiscardedError
+		if collectMediaRetryErrorFrom(err) != nil {
+			mediaResult = collectPipelineRetryable
+		} else if errors.As(err, &discarded) {
+			mediaResult = collectPipelineIgnored
+		} else {
+			mediaResult = collectPipelineFailed
+		}
+	}
+	finishMedia(mediaResult, err)
 	if err != nil {
 		if retryErr := collectMediaRetryErrorFrom(err); retryErr != nil && retryErr.deferWithoutFailure {
 			g.Log().Debugf(ctx, "采集媒体任务等待公平调度 eventId:%d duration:%s err:%v", payload.EventId, time.Since(cacheStartedAt).Round(time.Millisecond), err)
