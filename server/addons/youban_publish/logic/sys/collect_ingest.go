@@ -2,9 +2,8 @@ package sys
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
@@ -22,8 +21,8 @@ const (
 // collectMessageFromAccountPublishChannel 拦截所有已配置为上架目标的频道消息，
 // 防止上架频道的消息再次进入采集链路形成死循环。
 func (s *sSysPublish) collectMessageFromAccountPublishChannel(ctx context.Context, tenantId, tgAccountId int64, chatId string, _ ...int64) (bool, error) {
-	chatId = normalizeTelegramChannelChatID(chatId)
-	if tenantId <= 0 || chatId == "" {
+	chatIDs := collectPublishChatLookupIDs(chatId)
+	if tenantId <= 0 || len(chatIDs) == 0 {
 		return false, nil
 	}
 	// Do this lookup synchronously at the ingestion boundary. A long-lived
@@ -31,9 +30,6 @@ func (s *sSysPublish) collectMessageFromAccountPublishChannel(ctx context.Contex
 	// from a publish target re-enter collection, creating an A -> A loop.
 	// Telegram represents channel IDs both as N and -100N, so compare both
 	// canonical forms without stripping arbitrary "100" substrings.
-	var target struct {
-		Id int64 `json:"id"`
-	}
 	model := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
 		Fields("id").
 		Where("tenant_id", tenantId).
@@ -43,19 +39,29 @@ func (s *sSysPublish) collectMessageFromAccountPublishChannel(ctx context.Contex
 		// still deliver messages from a channel after its web configuration is
 		// removed, and allowing that historical target back into collection
 		// creates the same A -> A loop we are trying to prevent.
-		Where("(target_chat_id=? OR target_chat_id=? OR REPLACE(target_chat_id,'-100','')=?)", chatId, "-100"+chatId, chatId)
+		WhereIn("target_chat_id", chatIDs)
 	// 上架目标是租户级频道边界，不能按采集协议账号过滤；同一目标可能由
 	// Bot、多个协议账号或多个账户共用，任何入口都必须拦截，避免自采集循环。
-	err := model.Scan(&target)
-	// 没有匹配的上架目标是正常路径，表示该来源频道可以继续采集。
-	// GoFrame 在 Scan 到空结果时可能返回 sql.ErrNoRows，不能把它当成采集失败。
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
+	target, err := model.Limit(1).One()
 	if err != nil {
 		return false, err
 	}
-	return target.Id > 0, nil
+	return !target.IsEmpty(), nil
+}
+
+func collectPublishChatLookupIDs(chatID string) []string {
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" {
+		return nil
+	}
+	if strings.HasPrefix(chatID, "@") || (strings.HasPrefix(chatID, "-") && !strings.HasPrefix(chatID, "-100")) {
+		return []string{chatID}
+	}
+	short := canonicalCollectSourceChatID(chatID)
+	if short == "" {
+		return nil
+	}
+	return []string{short, "-100" + short}
 }
 
 func collectChatMatchesPublishChannel(chatId string, publishChatIds []string) bool {
