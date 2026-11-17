@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -66,6 +67,7 @@ const (
 	collectorResultDuplicate        collectorObserveResult     = "duplicate"
 	collectorResultSkipped          collectorObserveResult     = "skipped"
 	collectorResultCanceled         collectorObserveResult     = "canceled"
+	collectorResultTimeout          collectorObserveResult     = "timeout"
 	collectorQueueUrgent            collectorObserveQueueClass = "urgent"
 	collectorQueueRealtime          collectorObserveQueueClass = "realtime"
 	collectorQueueHistory           collectorObserveQueueClass = "history"
@@ -100,6 +102,8 @@ type collectorPipelineInstruments struct {
 	waitSample      metric.Int64Counter
 	eventQueueWait  metric.Float64Histogram
 	eventWaitSample metric.Int64Counter
+	started         metric.Int64Counter
+	active          metric.Int64UpDownCounter
 }
 
 var (
@@ -127,10 +131,15 @@ func newCollectorPipelineInstruments(meter metric.Meter) (collectorPipelineInstr
 		metric.WithExplicitBucketBoundaries(.01, .05, .1, .5, 1, 5, 10, 30, 60, 120, 300, 600, 1800, 3600, 21600, 86400))
 	eventWaitSample, e7 := meter.Int64Counter("telegram_collector_event_wait_samples",
 		metric.WithUnit("{sample}"), metric.WithDescription("Event queue wait sample availability: valid, missing or future"))
+	started, e8 := meter.Int64Counter("xiaohuiji.collect.transport.stage.started",
+		metric.WithUnit("{attempt}"), metric.WithDescription("Started collector transport stage attempts; dimensions reflect start-time metadata"))
+	active, e9 := meter.Int64UpDownCounter("xiaohuiji.collect.transport.stage.active",
+		metric.WithUnit("{attempt}"), metric.WithDescription("Collector transport stage attempts started but not finished in this process; nested stages must not be summed"))
 	instruments.operations, instruments.duration, instruments.candidates = operations, duration, candidates
 	instruments.queueWait, instruments.waitSample = queueWait, waitSample
 	instruments.eventQueueWait, instruments.eventWaitSample = eventQueueWait, eventWaitSample
-	return instruments, errors.Join(e1, e2, e3, e4, e5, e6, e7)
+	instruments.started, instruments.active = started, active
+	return instruments, errors.Join(e1, e2, e3, e4, e5, e6, e7, e8, e9)
 }
 
 func collectorPipelineInstrumentsFor(ctx context.Context) collectorPipelineInstruments {
@@ -164,7 +173,7 @@ func collectorBoundedStage(value collectorObserveStage) string {
 
 func collectorBoundedResult(value collectorObserveResult) string {
 	switch value {
-	case collectorResultAccepted, collectorResultOK, collectorResultError, collectorResultDuplicate, collectorResultSkipped, collectorResultCanceled:
+	case collectorResultAccepted, collectorResultOK, collectorResultError, collectorResultDuplicate, collectorResultSkipped, collectorResultCanceled, collectorResultTimeout:
 		return string(value)
 	default:
 		return "unknown"
@@ -300,21 +309,41 @@ func (meta collectorObservationMeta) traceAttributes() []attribute.KeyValue {
 }
 
 type collectorStageObservation struct {
-	ctx     context.Context
-	span    trace.Span
-	started time.Time
-	stage   collectorObserveStage
-	meta    collectorObservationMeta
-	once    sync.Once
+	ctx         context.Context
+	span        trace.Span
+	started     time.Time
+	stage       collectorObserveStage
+	meta        collectorObservationMeta
+	once        sync.Once
+	instruments *collectorPipelineInstruments
+	activeAttrs []attribute.KeyValue
 }
 
 // startCollectorStage starts one operation. Finish exactly where its outcome is
 // known, before wrapping/returning errors. Keep the returned ctx on downstream calls.
 func startCollectorStage(ctx context.Context, stage collectorObserveStage, meta collectorObservationMeta) (context.Context, *collectorStageObservation) {
+	return startCollectorStageWithInstruments(ctx, stage, meta, collectorPipelineInstrumentsFor(ctx), collectorPipelineTracer)
+}
+
+// Explicit dependencies keep ManualReader tests isolated from the global SDK.
+// Production always supplies collectorMeter's instruments and the global tracer.
+func startCollectorStageWithInstruments(ctx context.Context, stage collectorObserveStage, meta collectorObservationMeta, instruments collectorPipelineInstruments, tracer trace.Tracer) (context.Context, *collectorStageObservation) {
+	startedAt := time.Now()
 	ctx, meta = collectorObservationContext(ctx, meta)
 	attrs := append(meta.traceAttributes(), attribute.String("stage", collectorBoundedStage(stage)))
-	ctx, span := collectorPipelineTracer.Start(ctx, "collector."+collectorBoundedStage(stage), trace.WithAttributes(attrs...))
-	return ctx, &collectorStageObservation{ctx: ctx, span: span, started: time.Now(), stage: stage, meta: meta}
+	ctx, span := tracer.Start(ctx, "collector."+collectorBoundedStage(stage), trace.WithAttributes(attrs...))
+	activeAttrs := append(meta.metricAttributes(), attribute.String("stage", collectorBoundedStage(stage)))
+	options := metric.WithAttributes(activeAttrs...)
+	if instruments.started != nil {
+		instruments.started.Add(ctx, 1, options)
+	}
+	if instruments.active != nil {
+		instruments.active.Add(ctx, 1, options)
+	}
+	return ctx, &collectorStageObservation{
+		ctx: ctx, span: span, started: startedAt, stage: stage, meta: meta,
+		instruments: &instruments, activeAttrs: activeAttrs,
+	}
 }
 
 func endCollectorStage(observation *collectorStageObservation, result collectorObserveResult, err error) {
@@ -325,10 +354,38 @@ func collectorObservationResult(result collectorObserveResult, err error) collec
 	if err == nil {
 		return result
 	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return collectorResultTimeout
+	}
+	if errors.Is(err, context.Canceled) {
 		return collectorResultCanceled
 	}
+	var timeout interface{ Timeout() bool }
+	if errors.As(err, &timeout) && timeout.Timeout() {
+		return collectorResultTimeout
+	}
 	return collectorResultError
+}
+
+// Error text, Go concrete type names and remote error codes are never labels.
+func collectorObservationErrorType(result collectorObserveResult, err error) string {
+	result = collectorObservationResult(result, err)
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return "deadline_exceeded"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	case result == collectorResultTimeout:
+		return "timeout"
+	case result == collectorResultCanceled:
+		return "canceled"
+	case err != nil || result == collectorResultError:
+		return "error"
+	case collectorBoundedResult(result) == "unknown":
+		return "unknown"
+	default:
+		return "none"
+	}
 }
 
 // recordCollectorStage is the metric-only hook for existing structured log
@@ -336,12 +393,16 @@ func collectorObservationResult(result collectorObserveResult, err error) collec
 // Do not also start/end the same stage: that would double count. This function
 // neither creates nor ends spans, and performs no logging or external queries.
 func recordCollectorStage(ctx context.Context, stage collectorObserveStage, meta collectorObservationMeta, result collectorObserveResult, elapsed time.Duration, err error) {
+	collectorPipelineInstrumentsFor(ctx).recordStage(ctx, stage, meta, result, elapsed, err)
+}
+
+func (instruments collectorPipelineInstruments) recordStage(ctx context.Context, stage collectorObserveStage, meta collectorObservationMeta, result collectorObserveResult, elapsed time.Duration, err error) {
 	ctx, meta = collectorObservationContext(ctx, meta)
 	result = collectorObservationResult(result, err)
-	instruments := collectorPipelineInstrumentsFor(ctx)
 	attrs := append(meta.metricAttributes(),
 		attribute.String("stage", collectorBoundedStage(stage)),
-		attribute.String("result", collectorBoundedResult(result)))
+		attribute.String("result", collectorBoundedResult(result)),
+		attribute.String("error_type", collectorObservationErrorType(result, err)))
 	options := metric.WithAttributes(attrs...)
 	if instruments.operations != nil {
 		instruments.operations.Add(ctx, 1, options)
@@ -362,15 +423,25 @@ func (observation *collectorStageObservation) Finish(result collectorObserveResu
 	observation.once.Do(func() {
 		result = collectorObservationResult(result, err)
 		elapsed := time.Since(observation.started)
-		recordCollectorStage(observation.ctx, observation.stage, observation.meta, result, elapsed, nil)
+		instruments := observation.instruments
+		if instruments == nil {
+			fallback := collectorPipelineInstrumentsFor(observation.ctx)
+			instruments = &fallback
+		}
+		instruments.recordStage(observation.ctx, observation.stage, observation.meta, result, elapsed, err)
+		if observation.instruments != nil && instruments.active != nil {
+			// Late identity enrichment must not change the series decremented.
+			instruments.active.Add(observation.ctx, -1, metric.WithAttributes(observation.activeAttrs...))
+		}
+		defer observation.span.End()
 		observation.span.SetAttributes(observation.meta.traceAttributes()...)
 		observation.span.SetAttributes(attribute.String("result", collectorBoundedResult(result)))
-		failed := result == collectorResultError || result == collectorResultCanceled
+		failed := result == collectorResultError || result == collectorResultCanceled || result == collectorResultTimeout
 		// Do not record raw error text: Telegram errors may contain private
 		// message content or signed URLs. Existing business logs own details.
 		if failed {
 			observation.span.SetStatus(codes.Error, collectorBoundedResult(result))
-			observation.span.SetAttributes(attribute.String("error.type", collectorBoundedResult(result)))
+			observation.span.SetAttributes(attribute.String("error.type", collectorObservationErrorType(result, err)))
 		}
 		if failed || elapsed >= 100*time.Millisecond {
 			fields := g.Map{"event": "collector.stage.completed", "stage": collectorBoundedStage(observation.stage),
@@ -379,7 +450,8 @@ func (observation *collectorStageObservation) Finish(result collectorObserveResu
 				"sourceId": observation.meta.SourceID, "eventId": observation.meta.EventID,
 				"deliveryId": observation.meta.DeliveryID, "chatId": observation.meta.ChatID,
 				"messageId": observation.meta.MessageID, "botId": observation.meta.BotID,
-				"tgAccountId": observation.meta.TgAccountID}
+				"tgAccountId": observation.meta.TgAccountID,
+				"errorType":   collectorObservationErrorType(result, err)}
 			for _, attr := range observation.meta.metricAttributes() {
 				fields[string(attr.Key)] = attr.Value.AsString()
 			}
@@ -390,7 +462,6 @@ func (observation *collectorStageObservation) Finish(result collectorObserveResu
 				g.Log().Info(observation.ctx, "采集链路阶段耗时", fields)
 			}
 		}
-		observation.span.End()
 	})
 }
 
@@ -425,31 +496,112 @@ func collectorDeliveryWaitSample(producerEnqueuedUnixMS int64, receivedAt time.T
 // receivedAt is captured immediately on handler entry, before claim/read.
 // Missing metadata is expected for legacy tasks; it is not a zero-second wait.
 func observeCollectorDeliveryQueueWait(ctx context.Context, meta collectorObservationMeta, producerEnqueuedUnixMS int64, receivedAt time.Time) {
-	ctx, meta = collectorObservationContext(ctx, meta)
-	elapsed, sample := collectorDeliveryWaitSample(producerEnqueuedUnixMS, receivedAt)
-	instruments := collectorPipelineInstrumentsFor(ctx)
-	attrs := append(meta.metricAttributes(), attribute.String("sample", sample))
-	if instruments.waitSample != nil {
-		instruments.waitSample.Add(ctx, 1, metric.WithAttributes(attrs...))
-	}
-	if sample == "valid" && instruments.queueWait != nil {
-		instruments.queueWait.Record(ctx, elapsed.Seconds(), metric.WithAttributes(meta.metricAttributes()...))
-	}
+	startCollectorQueueWait(ctx, collectorStageDeliveryConsume, meta, producerEnqueuedUnixMS, receivedAt).Finish(meta)
 }
 
 // Numeric event tasks have no trusted enqueue timestamp. Count missing samples
 // rather than substituting local first receipt or DB CreatedAt for enqueue.
 func observeCollectorEventQueueWait(ctx context.Context, meta collectorObservationMeta, producerEnqueuedUnixMS int64, receivedAt time.Time) {
+	startCollectorQueueWait(ctx, collectorStageEventConsume, meta, producerEnqueuedUnixMS, receivedAt).Finish(meta)
+}
+
+// A handle belongs to one actual queue-consume attempt. Construct at handler
+// entry and finish after existing reads enrich metadata. Repeated Finish calls
+// count one sample. Do not use this for a direct/in-process handoff.
+// Numeric payload callers MUST pass 0, not ReceivedAt, TG date or DB timestamps.
+func startCollectorQueueWait(ctx context.Context, stage collectorObserveStage, meta collectorObservationMeta, producerEnqueuedUnixMS int64, receivedAt time.Time) *collectorQueueWaitObservation {
+	return newCollectorQueueWaitObservation(ctx, stage, meta, producerEnqueuedUnixMS, receivedAt, collectorPipelineInstrumentsFor(ctx))
+}
+
+type collectorQueueWaitObservation struct {
+	ctx         context.Context
+	stage       collectorObserveStage
+	meta        collectorObservationMeta
+	enqueuedMS  int64
+	receivedAt  time.Time
+	instruments collectorPipelineInstruments
+	timing      *collectobserve.QueueTiming
+	once        sync.Once
+}
+
+type collectorQueueWaitContextKey struct{}
+
+func collectorQueueWaitContext(ctx context.Context, wait *collectorQueueWaitObservation) context.Context {
+	return context.WithValue(ctx, collectorQueueWaitContextKey{}, wait)
+}
+
+func collectorQueueWaitFromContext(ctx context.Context) *collectorQueueWaitObservation {
+	wait, _ := ctx.Value(collectorQueueWaitContextKey{}).(*collectorQueueWaitObservation)
+	return wait
+}
+
+func startCollectorQueueWaitFromTiming(ctx context.Context, stage collectorObserveStage, meta collectorObservationMeta) *collectorQueueWaitObservation {
+	timing, ok := collectobserve.QueueTimingFrom(ctx)
+	if !ok {
+		return nil
+	}
+	wait := startCollectorQueueWait(ctx, stage, meta, 0, timing.ReceivedAt)
+	if wait != nil {
+		wait.timing = &timing
+	}
+	return wait
+}
+
+// Rolling upgrade gate: new consumers accept both formats immediately. Enable
+// producers only after every consumer understands envelopes. Unique(payload)
+// callers must pass false so timestamps/traces never change their old hash.
+func collectorTaskPayloadForEnqueue(ctx context.Context, taskID int64, stableTaskIDOrNonUnique bool) []byte {
+	enabled, _ := strconv.ParseBool(os.Getenv("YOUBAN_COLLECTOR_TELEMETRY_CARRIER_ENABLED"))
+	if !stableTaskIDOrNonUnique || !enabled {
+		return collectorTaskPayload(taskID)
+	}
+	payload, err := collectobserve.EncodeTask(ctx, taskID, time.Now())
+	if err != nil {
+		// Optional telemetry failure must not change enqueue/ACK/retry behavior.
+		g.Log().Warning(ctx, "采集观测载体编码失败，保留原任务协议", g.Map{
+			"event": "collector.carrier.encode_fallback", "taskId": taskID, "errorType": "carrier_encode",
+		})
+		return collectorTaskPayload(taskID)
+	}
+	return payload
+}
+
+func newCollectorQueueWaitObservation(ctx context.Context, stage collectorObserveStage, meta collectorObservationMeta, producerEnqueuedUnixMS int64, receivedAt time.Time, instruments collectorPipelineInstruments) *collectorQueueWaitObservation {
+	if stage != collectorStageEventConsume && stage != collectorStageDeliveryConsume {
+		return nil
+	}
 	ctx, meta = collectorObservationContext(ctx, meta)
-	elapsed, sample := collectorDeliveryWaitSample(producerEnqueuedUnixMS, receivedAt)
-	instruments := collectorPipelineInstrumentsFor(ctx)
-	attrs := append(meta.metricAttributes(), attribute.String("sample", sample))
-	if instruments.eventWaitSample != nil {
-		instruments.eventWaitSample.Add(ctx, 1, metric.WithAttributes(attrs...))
+	return &collectorQueueWaitObservation{
+		ctx: ctx, stage: stage, meta: meta, enqueuedMS: producerEnqueuedUnixMS,
+		receivedAt: receivedAt, instruments: instruments,
 	}
-	if sample == "valid" && instruments.eventQueueWait != nil {
-		instruments.eventQueueWait.Record(ctx, elapsed.Seconds(), metric.WithAttributes(meta.metricAttributes()...))
+}
+
+func (observation *collectorQueueWaitObservation) Finish(meta collectorObservationMeta) {
+	if observation == nil {
+		return
 	}
+	observation.once.Do(func() {
+		if meta.QueueClass == "" {
+			meta.QueueClass = observation.meta.QueueClass
+		}
+		ctx, meta := collectorObservationContext(observation.ctx, meta)
+		elapsed, sample := collectorDeliveryWaitSample(observation.enqueuedMS, observation.receivedAt)
+		if observation.timing != nil {
+			elapsed, sample = observation.timing.Sample()
+		}
+		histogram, samples := observation.instruments.eventQueueWait, observation.instruments.eventWaitSample
+		if observation.stage == collectorStageDeliveryConsume {
+			histogram, samples = observation.instruments.queueWait, observation.instruments.waitSample
+		}
+		attrs := append(meta.metricAttributes(), attribute.String("sample", sample))
+		if samples != nil {
+			samples.Add(ctx, 1, metric.WithAttributes(attrs...))
+		}
+		if sample == "valid" && histogram != nil {
+			histogram.Record(ctx, elapsed.Seconds(), metric.WithAttributes(meta.metricAttributes()...))
+		}
+	})
 }
 
 func collectorObservationLogFields(ctx context.Context, fields g.Map) {

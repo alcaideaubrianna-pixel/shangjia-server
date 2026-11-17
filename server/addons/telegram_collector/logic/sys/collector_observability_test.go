@@ -30,7 +30,9 @@ func TestCollectorObservationResult(t *testing.T) {
 		{collectorResultDuplicate, nil, collectorResultDuplicate},
 		{collectorResultOK, errors.New("failed"), collectorResultError},
 		{collectorResultOK, context.Canceled, collectorResultCanceled},
-		{collectorResultOK, context.DeadlineExceeded, collectorResultCanceled},
+		{collectorResultOK, context.DeadlineExceeded, collectorResultTimeout},
+		{collectorResultTimeout, nil, collectorResultTimeout},
+		{collectorResultOK, errors.Join(errors.New("wrapped"), context.DeadlineExceeded), collectorResultTimeout},
 	} {
 		if got := collectorObservationResult(tt.result, tt.err); got != tt.want {
 			t.Fatalf("got %q, want %q", got, tt.want)

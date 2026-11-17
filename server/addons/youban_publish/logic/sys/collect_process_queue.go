@@ -76,6 +76,9 @@ type collectProcessQueuePayload struct {
 	RuleQueueKey string `json:"ruleQueueKey,omitempty"`
 	OutboxOwner  string `json:"outboxOwner,omitempty"`
 	Recovery     bool   `json:"recovery,omitempty"`
+	// Observation is absent on payload-hashed Unique tasks: trace/time must
+	// never change their existing business deduplication key.
+	Observation json.RawMessage `json:"observation,omitempty"`
 }
 
 const collectProcessActiveSourcesKey = "youban_publish:collect:active_sources"
@@ -342,6 +345,7 @@ func (s *sSysPublish) enqueueCollectProcessTaskWithOutbox(ctx context.Context, p
 	if err != nil {
 		return false, err
 	}
+	payload = captureCollectProcessObservation(ctx, payload, unique, time.Now())
 	body, err := collectProcessTaskBody(payload)
 	if err != nil {
 		return false, err
@@ -515,6 +519,7 @@ func collectProcessTaskBody(payload collectProcessQueuePayload) ([]byte, error) 
 		RuleQueueKey: collectProcessRuleQueueKey(payload),
 		OutboxOwner:  payload.OutboxOwner,
 		Recovery:     payload.Recovery,
+		Observation:  payload.Observation,
 	})
 }
 
@@ -759,9 +764,9 @@ func (s *sSysPublish) processCollectSourceTask(ctx context.Context, payload coll
 			"eventId": payload.EventId, "collectEventId": payload.EventId,
 			"tenantId": payload.TenantId, "accountId": payload.AccountId,
 			"eventAccountId": event["account_id"].Int64(), "sourceId": event["source_id"].Int64(),
-			"sourceChatId": event["source_chat_id"].String(),
+			"sourceChatId":    event["source_chat_id"].String(),
 			"canonicalChatId": canonicalCollectSourceChatID(event["source_chat_id"].String()),
-			"materialRole": event["material_role"].String(), "groupStatus": event["material_group_status"].String(),
+			"materialRole":    event["material_role"].String(), "groupStatus": event["material_group_status"].String(),
 			"eventStatus": event["status"].String(), "mode": mode, "history": payload.History, "recovery": payload.Recovery,
 		})
 		if processErr == nil {

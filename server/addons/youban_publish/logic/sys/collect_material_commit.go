@@ -579,6 +579,12 @@ func (s *sSysPublish) commitCollectPreparedProfile(ctx context.Context, event gd
 	}
 	var profileId int64
 	wasExisting := false
+	// This is observational state only; legacy_sent deliberately retains the
+	// existing wasExisting control-flow semantics.
+	profileCreated := false
+	database := g.DB()
+	topLevelTransaction := gdb.TXFromCtx(ctx, database.GetGroup()) == nil &&
+		gdb.TXFromCtx(database.GetCtx(), database.GetGroup()) == nil
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) (resultErr error) {
 		// Keep collected media and their search projections in one transaction.
 		// This also repairs indexes when an idempotent retry reuses the profile.
@@ -664,6 +670,7 @@ func (s *sSysPublish) commitCollectPreparedProfile(ctx context.Context, event gd
 			if profileId <= 0 {
 				return gerror.New("创建采集资料失败")
 			}
+			profileCreated = true
 		} else {
 			profileId = existing[columns.Id].Int64()
 			if !collectProfileMaterialShouldReplace(existing, imageCount, videoCount, hasVerificationVideo) {
@@ -719,6 +726,10 @@ func (s *sSysPublish) commitCollectPreparedProfile(ctx context.Context, event gd
 		}
 		return nil
 	})
+	observeCollectProfilePersistence(
+		collectBusinessEventContext(ctx, event, nil, rule["id"].Int64()),
+		profileId, profileCreated, topLevelTransaction, err,
+	)
 	if err != nil {
 		return 0, err
 	}

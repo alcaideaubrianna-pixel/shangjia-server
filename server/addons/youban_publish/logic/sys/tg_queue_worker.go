@@ -19,6 +19,7 @@ import (
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/cache"
+	"hotgo/internal/library/collectobserve"
 	"hotgo/utility/dbtime"
 )
 
@@ -967,11 +968,21 @@ func (s *sSysPublish) handleCollectSourceDeleteTask(ctx context.Context, task *a
 	return s.executeCollectSourceDeleteCleanup(ctx, payload.SourceId, payload.TenantId, payload.AccountId)
 }
 
-func (s *sSysPublish) handleCollectProcessTask(ctx context.Context, task *asynq.Task) error {
+func (s *sSysPublish) handleCollectProcessTask(ctx context.Context, task *asynq.Task) (retErr error) {
+	consumedAt := time.Now()
 	payload, err := decodeCollectProcessQueuePayload(task)
 	if err != nil {
 		return err
 	}
+	ctx = restoreCollectProcessObservation(ctx, payload, consumedAt)
+	timing, _ := collectobserve.QueueTimingFrom(ctx)
+	collectProcessQueueMetrics.record(ctx, timing.EnqueuedAtUnixNano, consumedAt)
+	ctx, finishObservation := startCollectPipelineStage(ctx, collectPipelineProcessConsume)
+	defer func() {
+		// Nil may mean a stale lease, a disabled source or a deferred branch.
+		// The inner business stages report confirmed outcomes independently.
+		finishObservation(collectPipelineUnconfirmed, retErr)
+	}()
 	releaseRuleSlot, err := acquireCollectProcessRuleSlot(ctx, payload)
 	if err != nil {
 		return err

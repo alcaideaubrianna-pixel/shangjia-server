@@ -70,6 +70,7 @@ func observeCollectWindowQuery(ctx context.Context, payload collectProcessQueueP
 	startedAt := time.Now()
 	rows, err := run()
 	elapsed := time.Since(startedAt)
+	collectQueryMetrics.recordQuery(bindCollectEventObservation(ctx, target), kind, elapsed, len(rows), err)
 	queryStage := collectPipelineWindowPrimary
 	if kind == collectWindowQueryRetry {
 		queryStage = collectPipelineWindowRetry
@@ -107,6 +108,7 @@ func observeCollectWindowQuery(ctx context.Context, payload collectProcessQueueP
 
 func logCollectBatchReuse(ctx context.Context, payload collectProcessQueuePayload, target gdb.Record, reuse collectBatchReuseObservation, run collectBatchRunObservation, elapsed time.Duration, err error) {
 	fields := collectWindowObservationFields(ctx, payload, target)
+	collectQueryMetrics.recordReuse(bindCollectEventObservation(ctx, target), reuse.Outcome)
 	fields["event"], fields["stage"] = "collect_target_batch_reuse", "collect.window.batch_reuse"
 	fields["reuseOutcome"], fields["reuseReason"] = reuse.Outcome, reuse.Reason
 	fields["reuseLookupCount"], fields["reuseHitCount"], fields["reuseMissCount"] = 0, 0, 0

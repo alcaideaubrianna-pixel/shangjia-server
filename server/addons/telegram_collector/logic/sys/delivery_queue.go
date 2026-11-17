@@ -22,6 +22,7 @@ import (
 	"hotgo/addons/telegram_collector/internal/model/entity"
 	"hotgo/addons/telegram_collector/model/input/sysin"
 	collectorservice "hotgo/addons/telegram_collector/service"
+	"hotgo/internal/library/collectobserve"
 )
 
 var errDeliveryInvalidEvent = errors.New("采集交付原始事件不可用")
@@ -119,7 +120,7 @@ func (s *sCollector) enqueueDeliveryTaskWithOptions(ctx context.Context, deliver
 	if unique {
 		options = append(options, asynq.Unique(deliveryTaskUniqueTTL))
 	}
-	_, err = client.EnqueueContext(ctx, asynq.NewTask(deliveryTaskType, collectorTaskPayload(deliveryID)), options...)
+	_, err = client.EnqueueContext(ctx, asynq.NewTask(deliveryTaskType, collectorTaskPayloadForEnqueue(ctx, deliveryID, !unique)), options...)
 	if errors.Is(err, asynq.ErrDuplicateTask) || errors.Is(err, asynq.ErrTaskIDConflict) {
 		logCollectorDeliveryEnqueue(ctx, deliveryID, queueName, "duplicate", err)
 		if !unique {
@@ -138,16 +139,24 @@ func (s *sCollector) enqueueDeliveryTaskWithOptions(ctx context.Context, deliver
 }
 
 func (s *sCollector) handleDeliveryTask(ctx context.Context, task *asynq.Task) (err error) {
+	taskReceivedAt := time.Now()
+	ctx, deliveryID, decodeErr := collectobserve.DecodeTask(ctx, task.Payload(), taskReceivedAt)
 	_, parseObservation := startCollectorStage(ctx, collectorStageDeliveryTaskParse, collectorObservationMeta{})
 	defer parseObservation.Finish(collectorResultError, nil)
-	deliveryID, err := parseCollectorTaskID(task.Payload(), "交付")
+	err = decodeErr
+	if err != nil {
+		err = gerror.Wrap(err, "Telegram采集交付任务ID无效")
+	}
 	parseObservation.meta.DeliveryID = deliveryID
 	parseObservation.Finish(collectorResultOK, err)
 	if err != nil {
 		return err
 	}
 	ctx, _ = collectorObservationContext(ctx, parseObservation.meta)
-	taskStarted := time.Now()
+	wait := startCollectorQueueWaitFromTiming(ctx, collectorStageDeliveryConsume, parseObservation.meta)
+	defer wait.Finish(parseObservation.meta)
+	ctx = collectorQueueWaitContext(ctx, wait)
+	taskStarted := taskReceivedAt
 	prepareParent := ctx
 	ctx, prepareObservation := startCollectorStage(ctx, collectorStageDeliveryPrepare, collectorObservationMeta{DeliveryID: deliveryID})
 	prepareResult := collectorResultError
@@ -236,12 +245,12 @@ func (s *sCollector) processDeliveryWithEvent(ctx context.Context, deliveryID in
 	taskStarted := time.Now()
 	if len(taskStarts) > 0 {
 		taskStarted = taskStarts[0]
-		defer func() {
-			// Only queued delivery attempts have queue residence. Direct
-			// handoff must not masquerade as another delivery queue sample.
-			observeCollectorDeliveryQueueWait(ctx, observation.meta, 0, taskStarted)
-		}()
 	}
+	defer func() {
+		if wait := collectorQueueWaitFromContext(ctx); wait != nil && wait.stage == collectorStageDeliveryConsume {
+			wait.Finish(observation.meta)
+		}
+	}()
 	claimStarted := time.Now()
 	logCollectorDeliveryStage(ctx, "delivery.claim.started", deliveryID, 0, collectorQueueName(ctx), nil,
 		g.Map{"taskStartedAtUnixMs": taskStarted.UnixMilli(), "taskDurationMs": time.Since(taskStarted).Milliseconds()})

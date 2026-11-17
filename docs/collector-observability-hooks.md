@@ -57,6 +57,7 @@ endpoint 是部署环境可达的 OTLP gRPC 接收地址；示例本机地址只
 |---|---|
 | `delivery_submit` | submitCollectorDelivery 的持久化与处理队列提交调用；当前结果为 queued/failed |
 | `process` | 成功读取发布侧 collect_event 后的处理终态观测；completed/pending/ignored/retryable/failed |
+| `process_consume` | 一次处理队列消费，从恢复观测上下文到函数返回，包含本实例规则并发闸门等待；nil 结果记 unconfirmed，实际业务结果看内层阶段 |
 | `dispatch_handoff` | 新资料非审核分支对 submitCollectProfileDispatch 的调用；nil 返回为 unconfirmed，错误为 failed |
 | `publish_admission` | prepareProfilePublishJobs 返回的每个有效 TG Job ID；结果为 persisted，无耗时样本 |
 | `publish_queue_enqueue` | 权威 Redis channel 队列及 Asynq 发布任务入队调用；queued/duplicate/conflict/unconfirmed/failed |
@@ -75,7 +76,7 @@ endpoint 是部署环境可达的 OTLP gRPC 接收地址；示例本机地址只
 | `ok` | 当前阶段成功完成 |
 | `skipped` | 开关关闭、relay 过滤、任务不满足领取条件等明确跳过 |
 | `duplicate` | 入队检测到已有任务，并按该调用的业务语义接受去重结果 |
-| `error` / `canceled` | 当前阶段失败 / 取消或 deadline 到期 |
+| `error` / `canceled` / `timeout` | 当前阶段失败 / 取消 / deadline 或网络超时 |
 | `unknown` | 未知或未明确分类的观测值 |
 
 Counter 统计每次尝试，不统计唯一消息、资料或任务。upsert 成功不能据此判断新增数量；修复已有原始事件的路径可能直接进入入队，不经过 event_persist。入口 spool 收口失败时，即使入队已经成功，入口仍是 error，应同时查看 event_enqueue。
@@ -92,11 +93,13 @@ Counter 统计每次尝试，不统计唯一消息、资料或任务。upsert �
 - `result`：固定结果分类。
 - `queue_class`：urgent/realtime/history/mixed/unknown，不含账户分片或真实队列名。
 - `source_type`：bot/account/unknown。
+- `collection_mode`：realtime/history/unknown，未知时不从队列优先级猜测采集模式。
+- `error_type`：Collector 受控错误分类；发布业务阶段对应 `error_kind`。
 - `sample`：仅等待样本计数使用 valid/missing/future。
 
 tenant、account、source、chat、message、event、delivery ID 不作为这些指标的标签。阶段读取记录前，身份或 lane 尚不明确时使用 unknown；后续阶段及整体 span 可以补全。指标已经记录的数据点不会追溯改标签。direct delivery 的 lane 按已加载事件及解析后的 History/路由规则判断，不从父 event task 的 Asynq 队列名推断。
 
-发布侧 `xiaohuiji.collect.pipeline.*` 指标只有白名单 stage/result 标签；job/channel/profile ID、transport、提交原因只进 span，不扩展指标标签。旧 `telegram_collector_ingest_latency_seconds` 也已移除 source_id/account_id 标签；既有报表若使用这两个维度，需要改为按阶段聚合，具体来源通过日志和 span 查询。这不代表已完成仓库所有指标的基数审计。
+发布侧 `xiaohuiji.collect.pipeline.*` 指标使用白名单 stage/result/error_kind/wait_reason/source_type/collection_mode 标签；job/channel/profile ID、transport、提交原因只进 span，不扩展指标标签。旧 `telegram_collector_ingest_latency_seconds` 也已移除 source_id/account_id 标签；既有报表若使用这两个维度，需要改为按阶段聚合，具体来源通过日志和 span 查询。这不代表已完成仓库所有指标的基数审计。
 
 局部 span 与慢/错误日志事件 `collector.stage.completed` 包含 `stage/result/durationMs/queue_class/source_type/traceID`，并带已获得的 `tenantId/accountId/sourceId/eventId/deliveryId/chatId/messageId`。span 属性对应 snake_case ID，零值身份表示当时未知；accountId 的含义需结合原始事件来源判断，不得将 Telegram 运行账户 ID 与业务账户 ID 混用。
 
@@ -131,19 +134,21 @@ tenant、account、source、chat、message、event、delivery ID 不作为这些
 
 | OTel 指标名 | 单位 | 标签 |
 |---|---|---|
-| `telegram_collector_pipeline_operations` | `{operation}` Counter | stage/result/queue_class/source_type |
-| `telegram_collector_pipeline_duration_seconds` | `s` Histogram | stage/result/queue_class/source_type |
-| `telegram_collector_recovery_candidates` | `{candidate}` Counter | stage/queue_class/source_type |
-| `telegram_collector_pipeline_delivery_queue_wait_seconds` | `s` Histogram | queue_class/source_type |
-| `telegram_collector_delivery_wait_samples` | `{sample}` Counter | sample(valid/missing/future)/queue_class/source_type |
-| `xiaohuiji.collect.pipeline.operations` | 未显式设置单位，Counter | stage/result |
-| `xiaohuiji.collect.pipeline.duration_seconds` | `s` Histogram | stage/result |
+| `telegram_collector_pipeline_operations` | `{operation}` Counter | stage/result/error_type/queue_class/source_type/collection_mode |
+| `telegram_collector_pipeline_duration_seconds` | `s` Histogram | 同上 |
+| `telegram_collector_recovery_candidates` | `{candidate}` Counter | stage/queue_class/source_type/collection_mode |
+| `telegram_collector_pipeline_delivery_queue_wait_seconds` | `s` Histogram | queue_class/source_type/collection_mode |
+| `telegram_collector_delivery_wait_samples` | `{sample}` Counter | sample(valid/missing/future)/queue_class/source_type/collection_mode |
+| `telegram_collector_pipeline_event_queue_wait_seconds` | `s` Histogram | queue_class/source_type/collection_mode |
+| `telegram_collector_event_wait_samples` | `{sample}` Counter | sample(valid/missing/future)/queue_class/source_type/collection_mode |
+| `xiaohuiji.collect.pipeline.operations` | 未显式设置单位，Counter | stage/result/error_kind/wait_reason/source_type/collection_mode |
+| `xiaohuiji.collect.pipeline.duration_seconds` | `s` Histogram | 同上 |
 
 阶段 seconds buckets：`0.001,0.005,0.01,0.025,0.05,0.1,0.25,0.5,1,2.5,5,10,30,60,120`。
 
 等待 seconds buckets：`0.01,0.05,0.1,0.5,1,5,10,30,60,120,300,600,1800,3600,21600,86400`。更大值进入 +Inf，并未被丢弃。SDK View 可覆盖 instrument advisory buckets，部署报表前核对导出 `_bucket{le=...}`。
 
-以上显式 buckets 仅属于 Collector pipeline。发布侧 `xiaohuiji.collect.pipeline.duration_seconds` 没有指定显式 buckets，使用 SDK/接收端配置；不能假定其具有相同的 100ms bucket。publish_admission 只增加 operations，不重复为批次内每个 Job 记录准备耗时，因此该 stage 没有对应 duration 样本。
+发布侧 `xiaohuiji.collect.pipeline.duration_seconds` 也使用上述阶段 seconds buckets。SDK View 可以覆盖边界，上线仍应核对实际导出。publish_admission 只增加 operations，不重复为批次内每个 Job 记录准备耗时，因此该 stage 没有对应 duration 样本。
 
 Counter 是每次尝试，不是唯一 event/delivery 数。恢复候选是每次查询实际返回行数，同一记录可跨轮次重复出现，不等于当前 backlog。空页通过 scan 的 operations=ok 计数表示；candidate 的零增加不生成数据点。
 
@@ -157,7 +162,7 @@ Counter 是每次尝试，不是唯一 event/delivery 数。恢复候选是每�
 sum by (stage, source_type, result) (
   rate(telegram_collector_pipeline_operations_total{
     stage=~"ingest_bot|ingest_account",
-    result=~"accepted|skipped|error|canceled"
+    result=~"accepted|skipped|error|canceled|timeout"
   }[5m])
 )
 ```
@@ -211,7 +216,7 @@ sum by (stage, result, queue_class) (
   rate(telegram_collector_pipeline_operations_total[5m])
 )
 sum by (stage) (
-  rate(telegram_collector_pipeline_operations_total{result=~"error|canceled"}[5m])
+  rate(telegram_collector_pipeline_operations_total{result=~"error|canceled|timeout"}[5m])
 ) / clamp_min(sum by (stage) (
   rate(telegram_collector_pipeline_operations_total[5m])
 ), 0.000001)
@@ -253,6 +258,118 @@ sum by (sample, queue_class) (rate(telegram_collector_delivery_wait_samples_tota
 ```
 
 阶段观察应配合已有终态日志：event_dispatch ok 仅说明 Collector 已交付，不代表 profile 入库、各条规则分发成功或 Telegram 发布成功。不要用它替代下游发布成功率。
+
+## 2026-11-18 采集全流程指标契约
+
+业务边界按以下顺序分析，不将相邻 Counter 相减当作丢失资料数：
+
+```text
+入口接收（Bot / 协议号，实时 / 历史）
+  → 原始事件持久化、event 队列
+  → 来源分发、delivery 队列、发布模块接纳
+  → process 队列、授权、规则预检
+  → 窗口读取、展示/验证配对、媒体处理、内容提取
+  → 规则分支、资料创建或复用
+  → TG Job 准备、发布队列回执
+```
+
+来源分发的对象是“消息 × 采集源”，规则分发的对象是“候选资料 × 规则”，
+发布队列交付的对象是“资料 × 目标频道 Job”。一条消息可以产生多次交付；
+多个消息可以组成一份资料；一份资料可以投递多个目标频道。Telegram 实际发送
+由发布模块负责，不属于采集入库成功的定义。
+
+已有 Collector 阶段次数、执行耗时、恢复候选和发布阶段指标继续使用。
+阶段结束通过 once 保护；超时与取消单独归类；Metrics 不依赖 Span 采样。
+嵌套阶段耗时不能相加；`waiting` 类结果表示本次执行进入等待，
+不是已经准确测量了整个配对或媒体等待周期。
+
+| OTel 指标名 | 统计对象、单位和确认节点 | 有界标签 |
+|---|---|---|
+| `xiaohuiji.collect.transport.stage.started` | Collector 阶段开始尝试数，`{attempt}`，包括重试 | stage/queue_class/source_type/collection_mode |
+| `xiaohuiji.collect.transport.stage.active` | 本进程阶段开始减结束，`{attempt}` UpDownCounter；不是共享队列积压 | 同上，使用开始时标签，避免补全身份后减错序列 |
+| `xiaohuiji.collect.query.executions` | 窗口 ORM 调用数，`{query}`，包括失败与重试 | query_name/result/source_type/collection_mode |
+| `xiaohuiji.collect.query.duration_seconds` | 单次 ORM 往返耗时，`s`；包含连接等待及结果解析，不是 PG 服务端执行时间 | 同上 |
+| `xiaohuiji.collect.query.returned_rows` | 成功查询实际返回行数 Histogram，`{row}`；成功空结果记 0，失败不伪装成空结果 | 同上 |
+| `xiaohuiji.collect.batch_reuse` | 已评估的批次复用决定，`{decision}`；缓存错误、租约忙等未评估分支不进入分母 | reuse_result(hit/miss)/source_type/collection_mode |
+| `xiaohuiji.collect.process.queue.wait_seconds` | 可信生产者提交到本次消费，`s`；含计划延迟及 Asynq 重试停留 | source_type/collection_mode |
+| `xiaohuiji.collect.process.queue.wait_samples` | 排队时钟样本可用性，`{sample}`；缺失或未来时间不写耗时 0 | sample(valid/missing/future)/source_type/collection_mode |
+| `xiaohuiji.collect.delivery.skipped` | 发布 adapter 明确策略跳过的交付尝试，`{delivery}`；不算采集成功 | reason/source_type/collection_mode |
+| `xiaohuiji.collect.profiles.persisted` | 顶层事务成功返回后的持久化结果 Counter；created 为新建，reused 为复用，包括幂等重试复用 | action(created/reused)/source_type/collection_mode |
+| `xiaohuiji.collect.lifecycle.duration_seconds` | 可信本地接收至顶层事务确认新建资料，`s`；复用不重复计算新建生命周期 | action/source_type/collection_mode |
+| `xiaohuiji.collect.lifecycle.missing` | 无可信起点、时钟异常或外层事务未确认次数；不补造生命周期耗时 | action/reason/source_type/collection_mode |
+
+新指标复用全局 MeterProvider 和现有 OTLP 配置，不新增 exporter、连接、后台扫描、
+数据库 COUNT 或 Redis 查询。ID、频道名称、账号、Bot、完整错误明细用现有结构化
+日志及 Span 关联；它们不作为新 Metrics 标签。
+
+`delivery.skipped.reason` 仅允许 global_disabled/source_unavailable/
+self_loop_publish_target/approval_blocked/channel_access_blocked/unknown。
+这样即使上游 transport handler 正常返回，也能识别业务策略跳过，避免当成入库成功。
+
+### 跨队列上下文与兼容限制
+
+可安全修改载荷的任务透传 W3C traceparent/tracestate、本地接收时间和本次提交时间，
+不传 Baggage、不改业务任务 ID、权限或路由。载体只用于观测，不能作为授权依据。
+原始 Telegram 消息时间和未经核实的数据库墙钟时间不作为排队或端到端起点。
+
+处理队列仅为固定 TaskID 或不使用载荷哈希去重的事件任务添加可选观测字段；
+按载荷哈希执行 Asynq Unique 的任务保持原有载荷，避免时间戳/Trace 改变去重结果。
+source wake 会处理一批事件，不携带某一条事件的接收时间。旧载荷、恢复任务或
+未安全携带起点的路径会出现 missing/unknown，这是覆盖率限制，不是零延迟。
+
+Collector 的数字载荷兼容旧消费者，但新 JSON envelope 需要新消费者解析。
+因此 `YOUBAN_COLLECTOR_TELEMETRY_CARRIER_ENABLED` 默认关闭；
+先部署所有 event/delivery 消费角色，再开启生产者侧开关。
+未开启时仍有阶段指标，只缺少相应跨进程 Trace 和可信排队样本。
+Unique delivery 始终保留旧数字载荷，不能通过开启开关绕过去重保护。
+处理队列的观测字段为原 JSON 中的可选扩展，旧处理消费者可忽略，
+与 Collector 数字协议的滚动升级限制不同。
+
+资料持久化若运行在外层事务内，子事务返回 nil 不等于最终提交：
+只记录 `transaction_unconfirmed`，不增加已提交资料数。legacy_sent 等复用分支
+不会误算为 created。`profiles.persisted{action="reused"}` 是复用结果次数，
+不是唯一复用资料数；created 也不能用来替代所有入口消息总数。
+
+### 大盘计算
+
+批次复用率 = hit / (hit + miss)，不将 not_evaluated 算成 miss。
+查询平均返回行数 = returned_rows_sum / returned_rows_count，
+与 executions 的失败率一起看，避免把失败误判为查询空跑。
+
+资料新建吞吐看 `profiles.persisted{action="created"}`；
+端到端耗时看 lifecycle Histogram，并同时展示 lifecycle.missing。
+发布队列接纳看 `pipeline.operations{stage="publish_queue_enqueue",result="queued"}`，
+其覆盖共享发布入口，不能和仅采集新建数直接相除计算转化率。
+
+全局积压、最老任务年龄、完整配对等待周期没有可信快照时不新增伪 Gauge。
+transport.active 是每实例正在执行的阶段数，且阶段存在嵌套；
+可以按同一 stage 跨实例汇总，不能跨 stage 求和称为资料数。
+共享队列快照若后续添加 Gauge，需要明确采样上限和实例归属，禁止多实例重复
+上报同一份共享积压再直接 sum。
+
+现存 `runAsynqObserveMetrics` 的全局数据库聚合和跨角色重复采样不在这组新指标中；
+不能因为本轮新埋点没有额外查询，就认为所有旧监控查询已完成性能治理。
+这类旧库存指标跨实例展示应先去重，不能直接当本轮 `transport.stage.active` 使用。
+
+正常停机在 `serverWg` 排空后触发一次 `server.drained`，再关闭 OTel。
+Trace 与 Metrics 各有独立 5 秒预算，不继承已取消的业务 ctx。
+平台退出宽限时间需要覆盖业务排空和这两份预算；强杀仍不保证最终导出。
+
+### 本轮本地验证
+
+2026-11-18 使用 `GOMAXPROCS=2 GOMEMLIMIT=2GiB go test -p 1`，
+发布大包另加 `-gcflags=hotgo/addons/youban_publish/logic/sys=-l` 串行验证：
+
+- collectobserve：W3C 及纳秒时间往返、旧数字任务、非法 Trace、source wake 清理身份；
+- Collector：并发结束至多一次、不采样仍记录、active 标签配对、错误分类、缺失/未来时钟，
+  以及 miniredis 下固定 TaskID 和 Unique 去重兼容；
+- Publish：阶段结果/等待原因、队列回执、新建/复用/外层事务未确认、查询失败与返回行数、
+  复用命中率分母、处理队列载荷和策略跳过指标；
+- global/cmd：已取消 ctx 下的独立 Shutdown 预算、根命令等待业务排空、无 Func 的帮助命令兼容。
+
+以上为选定测试通过，不代表全仓测试或线上验收。未连接生产数据库/Redis，
+未执行迁移、重放或部署。全工作区 architecture_guard 仍报告其他发布/删除等路径违规；
+本轮采集观测相关路径没有报告违规，未修改或放宽 guard/baseline。
 
 ## 部署前置条件与回滚
 

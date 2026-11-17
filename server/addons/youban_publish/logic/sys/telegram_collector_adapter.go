@@ -1989,6 +1989,7 @@ func (s *sSysPublish) ensureAccountCollectChannelRelation(ctx context.Context, d
 }
 
 func logCollectorDeliverySkipped(ctx context.Context, delivery *collectorin.CollectorDelivery, reason string) {
+	recordCollectDeliverySkipped(ctx, collectDeliverySkipped, delivery, reason)
 	fields := g.Map{
 		"reason":     strings.TrimSpace(reason),
 		"outcome":    "skipped",

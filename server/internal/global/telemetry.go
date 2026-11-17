@@ -172,12 +172,19 @@ func otlpHeaders() map[string]string {
 }
 
 func registerTelemetryShutdown(traceProvider *sdktrace.TracerProvider, metricProvider *sdkmetric.MeterProvider) {
-	simple.Event().Register(consts.EventServerClose, func(ctx context.Context, args ...interface{}) {
-		shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-		_ = traceProvider.Shutdown(shutdownCtx)
-		_ = metricProvider.Shutdown(shutdownCtx)
+	simple.Event().Register(consts.EventServerDrained, func(ctx context.Context, args ...interface{}) {
+		shutdownTelemetryProviders(ctx, traceProvider.Shutdown, metricProvider.Shutdown)
 	})
+}
+
+func shutdownTelemetryProviders(ctx context.Context, shutdownTrace, shutdownMetrics func(context.Context) error) {
+	base := context.WithoutCancel(ctx)
+	traceCtx, cancelTrace := context.WithTimeout(base, 5*time.Second)
+	_ = shutdownTrace(traceCtx)
+	cancelTrace()
+	metricCtx, cancelMetric := context.WithTimeout(base, 5*time.Second)
+	_ = shutdownMetrics(metricCtx)
+	cancelMetric()
 }
 
 func startRuntimeMetrics(ctx context.Context, provider *sdkmetric.MeterProvider) {

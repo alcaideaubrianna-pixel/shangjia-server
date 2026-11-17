@@ -43,7 +43,8 @@ func TestCollectPipelineSpanBoundedAndNoRawError(t *testing.T) {
 			startedAt, startedAt.Add(time.Millisecond), errors.New(raw),
 			attribute.Int64("job.id", 123),
 			attribute.String("stage", raw), attribute.String("result", raw),
-			attribute.String("error.type", raw))
+			attribute.String("error.type", raw), attribute.String("error_kind", raw),
+			attribute.String("wait_reason", raw), attribute.String("collect.wait_reason", raw))
 	}
 	spans := recorder.Ended()
 	if len(spans) != 6 {
@@ -57,8 +58,9 @@ func TestCollectPipelineSpanBoundedAndNoRawError(t *testing.T) {
 				t.Fatal("span contains raw sensitive text")
 			}
 		}
-		if span.Name() != "collect."+attrs["stage"] || attrs["result"] != "unknown" ||
-			attrs["error.type"] != "other" || attrs["source_type"] != "unknown" || attrs["collection_mode"] != "unknown" {
+		if span.Name() != "collect."+attrs["stage"] || attrs["result"] != "failed" ||
+			attrs["error.type"] != "other" || attrs["error_kind"] != "other" || attrs["wait_reason"] != "none" ||
+			attrs["source_type"] != "unknown" || attrs["collection_mode"] != "unknown" {
 			t.Fatalf("unbounded span dimensions: name=%q attrs=%v", span.Name(), attrs)
 		}
 		if len(span.Events()) != 0 {
@@ -73,6 +75,40 @@ func TestCollectPipelineSpanBoundedAndNoRawError(t *testing.T) {
 	}
 }
 
+func TestCollectPipelineSpanOutcomeMatchesMetricClassification(t *testing.T) {
+	ctx := context.Background()
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	t.Cleanup(func() { _ = provider.Shutdown(ctx) })
+	for _, test := range []struct {
+		err    error
+		result collectPipelineResult
+		code   codes.Code
+	}{
+		{context.DeadlineExceeded, collectPipelineTimeout, codes.Error},
+		{context.Canceled, collectPipelineCanceled, codes.Error},
+		{newCollectProcessRetryError(time.Second, "private retry"), collectPipelineRetryable, codes.Unset},
+		{asynq.ErrDuplicateTask, collectPipelineDuplicate, codes.Unset},
+		{asynq.ErrTaskIDConflict, collectPipelineConflict, codes.Unset},
+	} {
+		startedAt := time.Now()
+		recordCollectPipelineSpan(ctx, provider.Tracer("outcomes"), collectPipelineProcess, collectPipelineCompleted,
+			startedAt, startedAt.Add(time.Millisecond), test.err)
+		spans := recorder.Ended()
+		span := spans[len(spans)-1]
+		attrs := attribute.NewSet(span.Attributes()...)
+		result, _ := attrs.Value("result")
+		kind, _ := attrs.Value("error_kind")
+		outcome := classifyCollectPipelineObservation(collectPipelineCompleted, test.err)
+		if result.AsString() != string(test.result) || kind.AsString() != string(outcome.errorKind) || span.Status().Code != test.code {
+			t.Fatalf("span/metrics classification differs: attrs=%v status=%v outcome=%+v", attrs, span.Status(), outcome)
+		}
+		if len(span.Events()) != 0 {
+			t.Fatal("raw errors must not become exception events")
+		}
+	}
+}
+
 func TestCollectPipelineErrorTypeBounded(t *testing.T) {
 	for _, test := range []struct {
 		err  error
@@ -81,6 +117,7 @@ func TestCollectPipelineErrorTypeBounded(t *testing.T) {
 		{nil, "none"},
 		{context.Canceled, "canceled"},
 		{context.DeadlineExceeded, "deadline_exceeded"},
+		{collectPipelineTestTimeoutError{}, "timeout"},
 		{newCollectProcessRetryError(time.Second, "private text"), "retryable"},
 		{asynq.ErrDuplicateTask, "duplicate"},
 		{asynq.ErrTaskIDConflict, "conflict"},
@@ -112,7 +149,7 @@ func TestCollectPipelineMetricsDurationAndCardinality(t *testing.T) {
 					t.Fatalf("unexpected counter: %+v", measurement)
 				}
 				point := value.DataPoints[0]
-				if point.Value != 1 || point.Attributes.Len() != 4 {
+				if point.Value != 1 || point.Attributes.Len() != 6 {
 					t.Fatalf("unexpected count/labels: %+v", point)
 				}
 				foundCount = true
@@ -121,7 +158,7 @@ func TestCollectPipelineMetricsDurationAndCardinality(t *testing.T) {
 					t.Fatalf("unexpected histogram: %+v", measurement)
 				}
 				point := value.DataPoints[0]
-				if point.Count != 1 || point.Sum != 0.25 || point.Attributes.Len() != 4 {
+				if point.Count != 1 || point.Sum != 0.25 || point.Attributes.Len() != 6 {
 					t.Fatalf("duration must be seconds with bounded labels: %+v", point)
 				}
 				foundDuration = true
@@ -146,6 +183,8 @@ func TestCollectPipelineProcessResult(t *testing.T) {
 		{"ignored", sysin.CollectEventStatusIgnored, true, nil, collectPipelineIgnored},
 		{"failed", "", true, errors.New("failed"), collectPipelineFailed},
 		{"retryable", "", false, newCollectProcessRetryError(time.Second, "retry"), collectPipelineRetryable},
+		{"deadline", "", false, context.DeadlineExceeded, collectPipelineTimeout},
+		{"canceled", "", false, context.Canceled, collectPipelineCanceled},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if got := collectPipelineProcessResult(test.status, test.processed, test.err); got != test.want {
@@ -186,6 +225,8 @@ func TestCollectPublishQueueRequiresReceipt(t *testing.T) {
 		{"error_beats_receipt", true, errors.New("timeout"), collectPipelineFailed},
 		{"duplicate_is_not_new_admission", false, asynq.ErrDuplicateTask, collectPipelineDuplicate},
 		{"task_id_conflict_is_not_success", false, asynq.ErrTaskIDConflict, collectPipelineConflict},
+		{"timeout_beats_receipt", true, context.DeadlineExceeded, collectPipelineTimeout},
+		{"canceled", false, context.Canceled, collectPipelineCanceled},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if got := collectPublishQueueResult(test.receipt, test.err); got != test.want {
@@ -217,7 +258,7 @@ func TestCollectPublishJobMetricStages(t *testing.T) {
 			switch value := measurement.Data.(type) {
 			case metricdata.Sum[int64]:
 				for _, point := range value.DataPoints {
-					if point.Attributes.Len() != 4 {
+					if point.Attributes.Len() != 6 {
 						t.Fatalf("high-cardinality metric attributes: %v", point.Attributes)
 					}
 					stage, _ := point.Attributes.Value("stage")

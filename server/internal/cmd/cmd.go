@@ -9,8 +9,10 @@ import (
 	"context"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gcmd"
+	"hotgo/internal/consts"
 	"hotgo/utility/runrole"
 	"hotgo/utility/simple"
+	"sync"
 )
 
 var (
@@ -102,6 +104,7 @@ var (
 
 			<-serverCloseSignal
 			serverWg.Wait()
+			serverDrainedEvent(ctx)
 			g.Log().Debug(ctx, "all service successfully closed ..")
 			return
 		},
@@ -145,13 +148,41 @@ func roleCommand(name string, brief string, role string, commands ...*gcmd.Comma
 			signalListen(ctx, signalHandlerForOverall)
 			<-serverCloseSignal
 			serverWg.Wait()
+			serverDrainedEvent(ctx)
 			return nil
 		},
 	}
 }
 
+var serverDrainedOnce sync.Once
+
+func serverDrainedEvent(ctx context.Context) {
+	serverDrainedOnce.Do(func() {
+		simple.Event().Call(consts.EventServerDrained, ctx)
+	})
+}
+
+// Standalone commands have no All/roleCommand coordinator to await shutdown.
+// Wrap only the root registrations; nested service commands retain their
+// existing stop order and never wait for their own WaitGroup slot.
+func standaloneCommand(command *gcmd.Command) *gcmd.Command {
+	root := *command
+	run := command.Func
+	// Help-only commands rely on gcmd's built-in rendering when Func is nil.
+	if run == nil {
+		return &root
+	}
+	root.Func = func(ctx context.Context, parser *gcmd.Parser) error {
+		err := run(ctx, parser)
+		serverWg.Wait()
+		serverDrainedEvent(ctx)
+		return err
+	}
+	return &root
+}
+
 func init() {
-	if err := Main.AddCommand(All, Web, Worker, BackgroundWorker, CollectorWorker, CollectProcessWorker, MediaWorker, PublishWorker, Account, Scheduler, Runtime, Http, Queue, Cron, Auth, Tools, Up, Help); err != nil {
+	if err := Main.AddCommand(All, Web, Worker, BackgroundWorker, CollectorWorker, CollectProcessWorker, MediaWorker, PublishWorker, Account, Scheduler, Runtime, standaloneCommand(Http), standaloneCommand(Queue), standaloneCommand(Cron), standaloneCommand(Auth), standaloneCommand(Tools), standaloneCommand(Up), standaloneCommand(Help)); err != nil {
 		panic(err)
 	}
 }

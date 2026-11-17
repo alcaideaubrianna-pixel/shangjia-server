@@ -6,5 +6,6 @@
 package consts
 
 const (
-	EventServerClose = "server.close" // 服务关闭事件
+	EventServerClose   = "server.close"   // 服务关闭事件
+	EventServerDrained = "server.drained" // 业务服务全部停止后的资源关闭事件
 )

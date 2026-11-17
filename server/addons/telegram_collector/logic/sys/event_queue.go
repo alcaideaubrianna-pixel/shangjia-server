@@ -26,6 +26,7 @@ import (
 	"hotgo/addons/telegram_collector/internal/model/entity"
 	"hotgo/addons/telegram_collector/model/input/sysin"
 	"hotgo/internal/library/cache"
+	"hotgo/internal/library/collectobserve"
 	"hotgo/internal/library/hgrds/lock"
 )
 
@@ -236,7 +237,7 @@ func (s *sCollector) enqueueEventTask(ctx context.Context, eventID int64, priori
 	})
 	enqueueStarted := time.Now()
 	options := []asynq.Option{asynq.Queue(queueName), asynq.MaxRetry(eventMaxAttempts - 1), asynq.Timeout(2 * time.Minute), asynq.TaskID(eventPendingTaskID(eventID))}
-	_, err := client.EnqueueContext(ctx, asynq.NewTask(eventTaskType, collectorTaskPayload(eventID)), options...)
+	_, err := client.EnqueueContext(ctx, asynq.NewTask(eventTaskType, collectorTaskPayloadForEnqueue(ctx, eventID, true)), options...)
 	conflict := errors.Is(err, asynq.ErrTaskIDConflict)
 	if conflict {
 		err = confirmEventTaskConflict(s.eventTaskInspector(ctx), queueName, eventPendingTaskID(eventID))
@@ -261,15 +262,23 @@ func (s *sCollector) enqueueEventTask(ctx context.Context, eventID int64, priori
 }
 
 func (s *sCollector) handleEventTask(ctx context.Context, task *asynq.Task) error {
+	taskReceivedAt := time.Now()
+	ctx, eventID, decodeErr := collectobserve.DecodeTask(ctx, task.Payload(), taskReceivedAt)
 	_, parseObservation := startCollectorStage(ctx, collectorStageEventTaskParse, collectorObservationMeta{})
 	defer parseObservation.Finish(collectorResultError, nil)
-	eventID, err := parseCollectorTaskID(task.Payload(), "事件")
+	err := decodeErr
+	if err != nil {
+		err = gerror.Wrap(err, "Telegram采集事件任务ID无效")
+	}
 	parseObservation.meta.EventID = eventID
 	parseObservation.Finish(collectorResultOK, err)
 	if err != nil {
 		return err
 	}
 	ctx, _ = collectorObservationContext(ctx, parseObservation.meta)
+	wait := startCollectorQueueWaitFromTiming(ctx, collectorStageEventConsume, parseObservation.meta)
+	defer wait.Finish(parseObservation.meta)
+	ctx = collectorQueueWaitContext(ctx, wait)
 	startedAt := time.Now()
 	if err = s.processEvent(ctx, eventID); err != nil {
 		counter, _ := collectorMeter.Int64Counter("telegram_collector_event_total")
@@ -292,8 +301,9 @@ func (s *sCollector) processEvent(ctx context.Context, eventID int64) (err error
 	defer func() { observation.Finish(observeResult, err) }()
 	pipelineStarted := time.Now()
 	defer func() {
-		// Numeric tasks carry no enqueue epoch. Do not substitute DB event age.
-		observeCollectorEventQueueWait(ctx, observation.meta, 0, pipelineStarted)
+		if wait := collectorQueueWaitFromContext(ctx); wait != nil && wait.stage == collectorStageEventConsume {
+			wait.Finish(observation.meta)
+		}
 	}()
 	var row entity.TgCollectorEvent
 	row.Id = eventID
@@ -1040,7 +1050,7 @@ func collectorRedisOption(ctx context.Context) asynq.RedisClientOpt {
 }
 
 func parseCollectorTaskID(payload []byte, taskName string) (int64, error) {
-	taskID, err := strconv.ParseInt(strings.TrimSpace(string(payload)), 10, 64)
+	_, taskID, err := collectobserve.DecodeTask(context.Background(), payload, time.Time{})
 	if err != nil || taskID <= 0 {
 		return 0, gerror.Newf("Telegram采集%s任务ID无效", taskName)
 	}
