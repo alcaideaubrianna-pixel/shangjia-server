@@ -2,12 +2,18 @@
 
 ## 路由
 
-新 Bot 更新进入 `tg.collect.urgent.v2`；新实时账户消息继续进入
+新 Bot 更新进入 `tg.collect.live`；新实时账户消息继续进入
 `tg.collect.realtime`，由同一实时 Worker 池处理。
 
-旧 `tg.collect.urgent` 不再接收新版本入口任务，与 `tg.collect.history`
+旧 `tg.collect.urgent`、`tg.collect.urgent.v2` 不再接收新版本入口任务，与 `tg.collect.history`
 共同使用独立历史 Worker 池。无需清空、搬动或扫描旧 Redis 任务。
 原始事件恢复、来源重放、旧 Spool 恢复一律进入历史队列。
+
+新 Bot 通道任务携带独立的调度时间 `liveEnqueuedAtUnixMs`，不依赖是否开启
+观测载体。超过 `YOUBAN_COLLECTOR_REALTIME_MAX_WAIT_SECONDS`（默认 120，
+有效范围 5～3600 秒）后，先确认稳定 TaskID 的历史任务已入队，再 ACK 当前
+实时任务；交接失败保留重试，不领取数据库事件、不运行资料窗口。超龄转历史
+旨在控制实时工作量，不等于超龄资料已经完成，也不是任意流量下的延迟保证。
 
 消费者按队列确定历史执行属性，不根据当前时间推测消息类型。历史交付持久化
 低优先级和 history pool，Delivery 消费及恢复不能因原始消息为 Bot 再升为实时。
@@ -46,13 +52,24 @@ Delivery 的实时与历史账户额度按 lane/account 分开，避免历史领
 
 沿用现有角色，不新增 SAE 应用或 SQL 表、索引。需要更新：
 
-1. collector：先启动新实时队列消费者，以及旧队列历史消费者。
-2. publish：加载历史 Delivery 属性传递及恢复修复。
-3. web：切换新 Bot 事件生产队列。
+1. publish、media：先启动 fresh Delivery 消费者及媒体实时预留槽位。
+2. collector：启动新实时队列消费者，以及旧队列历史消费者。
+3. web：最后切换新 Bot 事件生产队列。
 
 部署过程中未升级的 web 仍写旧队列，只能使用历史预算；需尽快完成入口升级。
 旧 Collector 仍存活时可能继续消费旧队列并使用旧路由，不应将滚动中间态视为最终隔离。
 回滚时先恢复入口生产路由；新队列中仍有消息时保留新消费者，不能直接撤掉消费者。
+
+首次 queued 实时交接进入 `tg.delivery.fresh.v1`，从原 Delivery 实时总预算
+中预留容量（默认 8 拆为 fresh 6、旧实时 2），不增加总并发。恢复、重放和
+失败重试不升级 fresh；direct handoff 保留原路径。总预算为 1 时共享执行槽，
+启动日志明确标记。Collector 和 Publish 中实际启动 Delivery 的角色都要升级，
+不能只更新生产者。
+
+媒体的账户/来源配额沿用原 Redis key、总槽数和租约 token，总额度大于 1 时
+为实时预留最后一个槽，Bulk 只能使用其他槽。总额度为 1 时仍共享，避免历史
+永久停跑；新旧消费者共存时旧历史任务可能仍持有预留槽，需要等正常释放。
+更新实际运行媒体消费者的 media 角色，不新增角色、不删除租约。
 
 ## 验收
 

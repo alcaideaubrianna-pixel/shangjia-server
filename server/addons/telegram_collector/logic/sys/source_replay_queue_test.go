@@ -10,6 +10,8 @@ import (
 
 	"hotgo/addons/telegram_collector/consts"
 	"hotgo/addons/telegram_collector/model/input/sysin"
+	"hotgo/internal/library/collectobserve"
+	"time"
 )
 
 func TestSourceReplayBypassesUrgentBacklogWithoutRemovingOriginal(t *testing.T) {
@@ -36,7 +38,7 @@ func TestSourceReplayBypassesUrgentBacklogWithoutRemovingOriginal(t *testing.T) 
 			t.Fatal(err)
 		}
 	}
-	for _, queue := range []string{consts.QueueCollectUrgent, consts.QueueCollectUrgentLive, consts.QueueCollectHistory} {
+	for _, queue := range []string{consts.QueueCollectUrgent, consts.QueueCollectFresh, consts.QueueCollectHistory} {
 		tasks, err := inspector.ListPendingTasks(queue)
 		if err != nil {
 			t.Fatal(err)
@@ -45,7 +47,8 @@ func TestSourceReplayBypassesUrgentBacklogWithoutRemovingOriginal(t *testing.T) 
 			t.Fatalf("queue=%s pending=%d, want one deduplicated task", queue, len(tasks))
 		}
 		task := tasks[0]
-		if task.Type != eventTaskType || string(task.Payload) != "12682221" {
+		_, decodedID, decodeErr := collectobserve.DecodeTask(context.Background(), task.Payload, time.Now())
+		if task.Type != eventTaskType || decodeErr != nil || decodedID != eventID {
 			t.Fatalf("repair changed handler or event identity: type=%s payload=%s", task.Type, task.Payload)
 		}
 		if task.MaxRetry != eventMaxAttempts-1 || task.Timeout != eventLeaseDuration {

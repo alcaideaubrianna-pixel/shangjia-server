@@ -69,7 +69,7 @@ func runCollectMaterialPairLocalPostgres(t *testing.T, chatID string, mixedAlias
 			`CREATE TEMP TABLE hg_youban_publish_profile_origin(id bigint PRIMARY KEY,tenant_id bigint,account_id bigint,source_id bigint,event_id bigint) ON COMMIT DROP`,
 			`INSERT INTO hg_youban_publish_collect_event(id,source_message_id,raw_text,material_role) VALUES(5000,99,'这是一份尚未入库、错误关联了验证的旧展示资料，需要安全修复','display')`,
 			`INSERT INTO hg_youban_publish_collect_event(id,source_message_id,raw_text) VALUES(1,100,'这是一份展示资料，明确超过二十个字符，不能和下一份展示资料混合')`,
-			`INSERT INTO hg_youban_publish_collect_event(id,source_message_id,raw_text) SELECT 1000+n,101+n,'✅提交成功！' FROM generate_series(0,100) n`,
+			`INSERT INTO hg_youban_publish_collect_event(id,source_message_id,raw_text,media_count) SELECT 1000+n,101+n,'✅提交成功！',0 FROM generate_series(0,100) n`,
 			`INSERT INTO hg_youban_publish_collect_event(id,source_message_id,source_grouped_id,material_parent_event_id,material_role) VALUES(200,202,'verify-first',5000,'verify')`,
 			`INSERT INTO hg_youban_publish_collect_event(id,tenant_id,source_message_id,raw_text) VALUES(3000,99,201,'这是另一个租户的展示资料，绝对不能成为当前验证资料的父级')`,
 		}

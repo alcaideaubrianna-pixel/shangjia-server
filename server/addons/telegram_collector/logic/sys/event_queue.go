@@ -61,7 +61,7 @@ func (s *sCollector) StartRuntime(ctx context.Context) {
 	}
 	historyServer := asynq.NewServer(collectorRedisOption(runtimeCtx), asynq.Config{
 		Concurrency: collectorEventHistoryConcurrency(runtimeCtx),
-		Queues:      map[string]int{consts.QueueCollectHistory: 1, consts.QueueCollectUrgent: 1},
+		Queues:      map[string]int{consts.QueueCollectHistory: 1, consts.QueueCollectUrgent: 1, consts.QueueCollectUrgentLive: 1},
 	})
 	s.queueHistoryServer = historyServer
 	s.queueServer = server
@@ -76,8 +76,9 @@ func (s *sCollector) StartRuntime(ctx context.Context) {
 		"botRealtimeConcurrency":     total - realtimeConfigs[0].Concurrency,
 		"realtimeCapacityShared":     len(realtimeConfigs) == 1,
 		"historyConcurrency":         collectorEventHistoryConcurrency(runtimeCtx),
-		"botRealtimeQueue":           consts.QueueCollectUrgentLive,
+		"botRealtimeQueue":           consts.QueueCollectFresh,
 		"legacyBacklogQueue":         consts.QueueCollectUrgent,
+		"legacyV2BacklogQueue":       consts.QueueCollectUrgentLive,
 		"legacyBacklogLane":          "history",
 		"ingestSpoolMode":            normalizeCollectorIngestSpoolMode(g.Cfg().MustGet(runtimeCtx, "telegramCollector.ingestSpoolMode", "redis_first").String()),
 		"eventHandoff":               "postgres_event_then_redis",
@@ -107,6 +108,8 @@ func (s *sCollector) StartRuntime(ctx context.Context) {
 
 func (s *sCollector) StopRuntime() {
 	s.queueMu.Lock()
+	freshDeliveryServer := s.deliveryFreshServer
+	s.deliveryFreshServer = nil
 	botServer := s.queueBotServer
 	s.queueBotServer = nil
 	eventHistoryServer := s.queueHistoryServer
@@ -130,6 +133,9 @@ func (s *sCollector) StopRuntime() {
 	}
 	if deliveryServer != nil {
 		deliveryServer.Shutdown()
+	}
+	if freshDeliveryServer != nil {
+		freshDeliveryServer.Shutdown()
 	}
 	if historyServer != nil {
 		historyServer.Shutdown()
@@ -176,7 +182,7 @@ func collectorRealtimeServerConfigs(total, botBudget int) []asynq.Config {
 	}
 	if total == 1 {
 		return []asynq.Config{{Concurrency: 1, Queues: map[string]int{
-			consts.QueueCollectUrgentLive: 8, consts.QueueCollectRealtime: 4,
+			consts.QueueCollectFresh: 8, consts.QueueCollectRealtime: 4,
 		}}}
 	}
 	if botBudget <= 0 {
@@ -187,7 +193,7 @@ func collectorRealtimeServerConfigs(total, botBudget int) []asynq.Config {
 	}
 	return []asynq.Config{
 		{Concurrency: total - botBudget, Queues: map[string]int{consts.QueueCollectRealtime: 1}},
-		{Concurrency: botBudget, Queues: map[string]int{consts.QueueCollectUrgentLive: 1}},
+		{Concurrency: botBudget, Queues: map[string]int{consts.QueueCollectFresh: 1}},
 	}
 }
 
@@ -237,7 +243,16 @@ func (s *sCollector) enqueueEventTask(ctx context.Context, eventID int64, priori
 	})
 	enqueueStarted := time.Now()
 	options := []asynq.Option{asynq.Queue(queueName), asynq.MaxRetry(eventMaxAttempts - 1), asynq.Timeout(2 * time.Minute), asynq.TaskID(eventPendingTaskID(eventID))}
-	_, err := client.EnqueueContext(ctx, asynq.NewTask(eventTaskType, collectorTaskPayloadForEnqueue(ctx, eventID, true)), options...)
+	payload := collectorTaskPayloadForEnqueue(ctx, eventID, true)
+	if queueName == consts.QueueCollectFresh {
+		var payloadErr error
+		payload, payloadErr = collectorFreshEventPayload(ctx, eventID, enqueueStarted)
+		if payloadErr != nil {
+			observation.Finish(collectorResultError, payloadErr)
+			return payloadErr
+		}
+	}
+	_, err := client.EnqueueContext(ctx, asynq.NewTask(eventTaskType, payload), options...)
 	conflict := errors.Is(err, asynq.ErrTaskIDConflict)
 	if conflict {
 		err = confirmEventTaskConflict(s.eventTaskInspector(ctx), queueName, eventPendingTaskID(eventID))
@@ -279,6 +294,17 @@ func (s *sCollector) handleEventTask(ctx context.Context, task *asynq.Task) erro
 	wait := startCollectorQueueWaitFromTiming(ctx, collectorStageEventConsume, parseObservation.meta)
 	defer wait.Finish(parseObservation.meta)
 	ctx = collectorQueueWaitContext(ctx, wait)
+	if collectorQueueName(ctx) == consts.QueueCollectFresh {
+		if age, expired := collectorFreshTaskExpired(task.Payload(), taskReceivedAt, collectorFreshMaxWait()); expired {
+			// Confirm a durable history task before ACK. A Redis error keeps
+			// this task retryable, and no DB claim or business window runs here.
+			if err = s.enqueueEventTask(ctx, eventID, sysin.EventPriorityNormal, eventOriginRecovery); err != nil {
+				return err
+			}
+			g.Log().Info(ctx, "实时采集超龄任务已交给历史预算", g.Map{"event": "collector.event.realtime_deferred", "eventId": eventID, "queueAgeMs": age.Milliseconds(), "queue": consts.QueueCollectFresh, "destinationQueue": consts.QueueCollectHistory})
+			return nil
+		}
+	}
 	startedAt := time.Now()
 	if err = s.processEvent(ctx, eventID); err != nil {
 		counter, _ := collectorMeter.Int64Counter("telegram_collector_event_total")

@@ -5,7 +5,8 @@ import "fmt"
 const (
 	QueueCollectRealtime                  = "tg.collect.realtime"
 	QueueCollectUrgent                    = "tg.collect.urgent" // legacy backlog, history budget only
-	QueueCollectUrgentLive                = "tg.collect.urgent.v2"
+	QueueCollectFresh                     = "tg.collect.live"
+	QueueCollectUrgentLive                = "tg.collect.urgent.v2" // legacy backlog, history budget only
 	QueueCollectHistory                   = "tg.collect.history"
 	QueueMediaUrgent                      = "tg.media.urgent"
 	QueueMediaNormal                      = "tg.media.normal"

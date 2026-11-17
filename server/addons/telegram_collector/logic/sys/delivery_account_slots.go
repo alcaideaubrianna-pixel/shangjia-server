@@ -13,6 +13,7 @@ type deliveryAccountLane uint8
 const (
 	deliveryAccountHistory deliveryAccountLane = iota + 1
 	deliveryAccountRealtime
+	deliveryAccountFresh
 )
 
 type deliveryAccountSlotKey struct {
@@ -21,7 +22,7 @@ type deliveryAccountSlotKey struct {
 }
 
 // These are local account fairness permits, not additional Worker capacity.
-// The two existing Asynq servers continue to bound total in-flight work.
+// The Asynq servers continue to bound total in-flight work within their budgets.
 type deliveryAccountSlotPool struct {
 	mu    sync.Mutex
 	slots map[deliveryAccountSlotKey]chan struct{}
@@ -31,6 +32,8 @@ type deliveryAccountSlotPool struct {
 // no account identity and do not need an extra routing query or semaphore.
 func deliveryAccountLaneForQueue(queue string) (deliveryAccountLane, bool) {
 	switch {
+	case queue == consts.QueueDeliveryFresh:
+		return deliveryAccountFresh, true
 	case queue == consts.QueueDeliveryHistory,
 		strings.HasPrefix(queue, consts.QueueDeliveryHistoryShardPrefix):
 		return deliveryAccountHistory, true
@@ -50,7 +53,7 @@ func (p *deliveryAccountSlotPool) acquire(ctx context.Context, lane deliveryAcco
 	if accountID <= 0 {
 		return noop, true
 	}
-	if limit < 1 || (lane != deliveryAccountHistory && lane != deliveryAccountRealtime) {
+	if limit < 1 || (lane != deliveryAccountHistory && lane != deliveryAccountRealtime && lane != deliveryAccountFresh) {
 		return noop, false
 	}
 	key := deliveryAccountSlotKey{lane: lane, accountID: accountID}

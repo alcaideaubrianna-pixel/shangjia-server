@@ -28,13 +28,13 @@ func eventQueueFor(priority int, origin eventEnqueueOrigin) string {
 		return consts.QueueCollectHistory
 	}
 	if priority >= sysin.EventPriorityUrgent {
-		return consts.QueueCollectUrgentLive
+		return consts.QueueCollectFresh
 	}
 	return consts.QueueCollectRealtime
 }
 
 func eventQueueIsHistory(queue string) bool {
-	return queue == consts.QueueCollectHistory || queue == consts.QueueCollectUrgent
+	return queue == consts.QueueCollectHistory || queue == consts.QueueCollectUrgent || queue == consts.QueueCollectUrgentLive
 }
 
 func eventPendingTaskID(id int64) string {
@@ -48,20 +48,27 @@ func eventLiveTaskExists(inspector *asynq.Inspector, eventID int64, priority int
 	if eventQueueIsHistory(queue) {
 		return false, nil
 	}
-	info, err := inspector.GetTaskInfo(queue, eventPendingTaskID(eventID))
-	if errors.Is(err, asynq.ErrTaskNotFound) || errors.Is(err, asynq.ErrQueueNotFound) ||
-		(err != nil && strings.TrimPrefix(err.Error(), "asynq: UNKNOWN: ") == "ERR NOT FOUND") {
-		return false, nil
+	queues := []string{queue}
+	if queue == consts.QueueCollectFresh {
+		// During rollout an old producer may still own this event in v2.
+		// TaskID is queue-scoped, so inspect both before creating recovery work.
+		queues = append(queues, consts.QueueCollectUrgentLive)
 	}
-	if err != nil {
-		return false, gerror.Wrap(err, "检查实时采集任务是否仍可执行失败")
+	for _, candidate := range queues {
+		info, err := inspector.GetTaskInfo(candidate, eventPendingTaskID(eventID))
+		if errors.Is(err, asynq.ErrTaskNotFound) || errors.Is(err, asynq.ErrQueueNotFound) ||
+			(err != nil && strings.TrimPrefix(err.Error(), "asynq: UNKNOWN: ") == "ERR NOT FOUND") {
+			continue
+		}
+		if err != nil {
+			return false, gerror.Wrap(err, "检查实时采集任务是否仍可执行失败")
+		}
+		switch info.State {
+		case asynq.TaskStatePending, asynq.TaskStateActive, asynq.TaskStateScheduled, asynq.TaskStateRetry:
+			return true, nil
+		}
 	}
-	switch info.State {
-	case asynq.TaskStatePending, asynq.TaskStateActive, asynq.TaskStateScheduled, asynq.TaskStateRetry:
-		return true, nil
-	default:
-		return false, nil
-	}
+	return false, nil
 }
 
 // TaskID is queue-scoped and atomic. Unlike a short Unique TTL it cannot expire

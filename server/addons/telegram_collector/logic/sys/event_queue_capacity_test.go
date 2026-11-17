@@ -26,7 +26,7 @@ func TestCollectorRealtimeCapacityBudget(t *testing.T) {
 			if configs[0].Concurrency+configs[1].Concurrency != tc.total {
 				t.Fatal("total realtime budget increased")
 			}
-			if len(configs[0].Queues) != 1 || configs[0].Queues[consts.QueueCollectRealtime] != 1 || len(configs[1].Queues) != 1 || configs[1].Queues[consts.QueueCollectUrgentLive] != 1 {
+			if len(configs[0].Queues) != 1 || configs[0].Queues[consts.QueueCollectRealtime] != 1 || len(configs[1].Queues) != 1 || configs[1].Queues[consts.QueueCollectFresh] != 1 {
 				t.Fatalf("realtime pools overlap: %+v", configs)
 			}
 		})
@@ -36,7 +36,7 @@ func TestCollectorRealtimeCapacityBudget(t *testing.T) {
 func TestCollectorSingleRealtimeSlotRemainsShared(t *testing.T) {
 	for _, total := range []int{-1, 0, 1} {
 		configs := collectorRealtimeServerConfigs(total, 8)
-		if len(configs) != 1 || configs[0].Concurrency != 1 || len(configs[0].Queues) != 2 || configs[0].Queues[consts.QueueCollectUrgentLive] != 8 || configs[0].Queues[consts.QueueCollectRealtime] != 4 {
+		if len(configs) != 1 || configs[0].Concurrency != 1 || len(configs[0].Queues) != 2 || configs[0].Queues[consts.QueueCollectFresh] != 8 || configs[0].Queues[consts.QueueCollectRealtime] != 4 {
 			t.Fatalf("single slot must not create extra capacity: %+v", configs)
 		}
 	}

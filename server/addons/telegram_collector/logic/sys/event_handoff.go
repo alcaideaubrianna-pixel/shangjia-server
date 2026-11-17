@@ -10,6 +10,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	"hotgo/addons/telegram_collector/consts"
 	"hotgo/addons/telegram_collector/internal/dao"
 	"hotgo/addons/telegram_collector/internal/model/entity"
 	"hotgo/addons/telegram_collector/model/input/sysin"
@@ -51,6 +52,14 @@ type eventHandoffActions struct {
 	enqueue func(context.Context, int64) error
 	process func(context.Context, int64) error
 	observe func(context.Context, int64, error)
+}
+
+// Eligibility is based on durable Event attempts and the execution lane, never
+// optional tracing timestamps. Replay/recovery Event queues are history lanes.
+func firstFreshDeliveryHandoff(attempt int, queue string, delivery *sysin.CollectorDelivery) bool {
+	return attempt == 1 && delivery != nil && !delivery.History &&
+		(queue == consts.QueueCollectFresh || queue == consts.QueueCollectRealtime) &&
+		deliveryPriority(delivery) >= sysin.EventPriorityRealtime
 }
 
 // completeCollectorEvent preserves per-event ownership in both write paths.
@@ -123,6 +132,9 @@ func (s *sCollector) handoffCollectorEvent(ctx context.Context, row *entity.TgCo
 			return nil
 		},
 		enqueue: func(ctx context.Context, id int64) error {
+			if firstFreshDeliveryHandoff(row.AttemptCount, collectorQueueName(ctx), delivery) {
+				return s.enqueueDeliveryTaskToQueue(ctx, id, deliveryPriority(delivery), true, consts.QueueDeliveryFresh)
+			}
 			return s.enqueueDeliveryTask(ctx, id, deliveryPriority(delivery))
 		},
 		process: func(ctx context.Context, id int64) error { return s.processDeliveryWithEvent(ctx, id, row) },

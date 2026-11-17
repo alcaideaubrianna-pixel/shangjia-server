@@ -11,12 +11,6 @@ import (
 	"hotgo/internal/library/hgrds/lock"
 )
 
-const (
-	collectMediaDefaultSourceConcurrency  = 2
-	collectMediaDefaultAccountConcurrency = 4
-	collectMediaMaxOwnerConcurrency       = 16
-)
-
 type collectMediaConcurrencyLease struct {
 	locks []*lock.Lock
 }
@@ -45,14 +39,14 @@ func (s *sSysPublish) acquireCollectMediaOwnerSlots(ctx context.Context, payload
 	accountLimit := normalizeCollectMediaOwnerConcurrency(g.Cfg().MustGet(ctx, "youbanPublish.collect.mediaAccountConcurrency", collectMediaDefaultAccountConcurrency).Int())
 	sourceLimit := normalizeCollectMediaOwnerConcurrency(g.Cfg().MustGet(ctx, "youbanPublish.collect.mediaSourceConcurrency", collectMediaDefaultSourceConcurrency).Int())
 	if payload.TgAccountId > 0 {
-		accountLock, err := acquireCollectMediaOwnerSlot(ctx, "account", payload.TenantId, payload.TgAccountId, payload.EventId, accountLimit)
+		accountLock, err := acquireCollectMediaOwnerSlot(ctx, "account", payload.TenantId, payload.TgAccountId, payload.EventId, accountLimit, payload.Bulk)
 		if err != nil {
 			observeCollectMediaScheduler(ctx, "account_concurrency_full", payload.TenantId, payload.TgAccountId)
 			return nil, err
 		}
 		lease.locks = append(lease.locks, accountLock)
 	}
-	sourceLock, err := acquireCollectMediaOwnerSlot(ctx, "source", payload.TenantId, payload.SourceId, payload.EventId, sourceLimit)
+	sourceLock, err := acquireCollectMediaOwnerSlot(ctx, "source", payload.TenantId, payload.SourceId, payload.EventId, sourceLimit, payload.Bulk)
 	if err != nil {
 		lease.release()
 		observeCollectMediaScheduler(ctx, "source_concurrency_full", payload.TenantId, payload.TgAccountId)
@@ -62,13 +56,11 @@ func (s *sSysPublish) acquireCollectMediaOwnerSlots(ctx context.Context, payload
 	return lease, nil
 }
 
-func acquireCollectMediaOwnerSlot(ctx context.Context, kind string, tenantID, ownerID, eventID int64, limit int) (*lock.Lock, error) {
+func acquireCollectMediaOwnerSlot(ctx context.Context, kind string, tenantID, ownerID, eventID int64, limit int, bulk bool) (*lock.Lock, error) {
 	if tenantID <= 0 || ownerID <= 0 || eventID <= 0 {
 		return nil, fmt.Errorf("采集媒体并发参数无效 kind:%s tenantId:%d ownerId:%d eventId:%d", kind, tenantID, ownerID, eventID)
 	}
-	start := int(eventID % int64(limit))
-	for offset := 0; offset < limit; offset++ {
-		slot := (start + offset) % limit
+	for _, slot := range collectMediaOwnerSlotOrder(eventID, limit, bulk) {
 		locker := lock.NewConfig(collectMediaLeaseTTL, time.Second).WithoutWatchDog().Mutex(fmt.Sprintf("youban_publish:collect:media:%s:%d:%d:slot:%d", kind, tenantID, ownerID, slot))
 		err := locker.TryLock(ctx)
 		if err == nil {
@@ -79,14 +71,4 @@ func acquireCollectMediaOwnerSlot(ctx context.Context, kind string, tenantID, ow
 		}
 	}
 	return nil, newCollectMediaFairnessRetryError("采集媒体并发已满，等待下一轮公平调度", 3*time.Second)
-}
-
-func normalizeCollectMediaOwnerConcurrency(limit int) int {
-	if limit < 1 {
-		return 1
-	}
-	if limit > collectMediaMaxOwnerConcurrency {
-		return collectMediaMaxOwnerConcurrency
-	}
-	return limit
 }

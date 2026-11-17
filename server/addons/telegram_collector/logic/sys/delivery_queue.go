@@ -48,10 +48,13 @@ func (s *sCollector) StartDeliveryRuntime(ctx context.Context) {
 		return
 	}
 	runtimeCtx := s.ensureRuntimeContext(ctx)
-	server := asynq.NewServer(collectorRedisOption(runtimeCtx), asynq.Config{
-		Concurrency: collectorDeliveryConcurrency(runtimeCtx),
-		Queues:      deliveryRealtimeQueues(),
-	})
+	total := collectorDeliveryConcurrency(runtimeCtx)
+	realtimeConfigs := deliveryRealtimeServerConfigs(total)
+	server := asynq.NewServer(collectorRedisOption(runtimeCtx), realtimeConfigs[0])
+	var freshServer *asynq.Server
+	if len(realtimeConfigs) > 1 {
+		freshServer = asynq.NewServer(collectorRedisOption(runtimeCtx), realtimeConfigs[1])
+	}
 	if s.queueClient == nil {
 		s.queueClient = asynq.NewClient(collectorRedisOption(runtimeCtx))
 	}
@@ -60,6 +63,7 @@ func (s *sCollector) StartDeliveryRuntime(ctx context.Context) {
 		Queues:      deliveryHistoryQueues(),
 	})
 	s.deliveryServer = server
+	s.deliveryFreshServer = freshServer
 	s.deliveryHistoryServer = historyServer
 
 	mux := asynq.NewServeMux()
@@ -69,14 +73,24 @@ func (s *sCollector) StartDeliveryRuntime(ctx context.Context) {
 		"event":               "collect_delivery_worker_started",
 		"workerRole":          "collector-delivery-worker",
 		"workerInstanceId":    collectorInstanceID(),
-		"realtimeConcurrency": collectorDeliveryConcurrency(runtimeCtx),
+		"realtimeConcurrency": total,
+		"backlogConcurrency":  realtimeConfigs[0].Concurrency,
+		"freshConcurrency":    total - realtimeConfigs[0].Concurrency,
+		"freshCapacityShared": len(realtimeConfigs) == 1,
+		"freshQueue":          consts.QueueDeliveryFresh,
 		"historyConcurrency":  collectorDeliveryHistoryConcurrency(runtimeCtx),
 		"realtimeQueueCount":  len(deliveryRealtimeQueues()),
 		"historyQueueCount":   len(deliveryHistoryQueues()),
 	})
 	// The application owns signal handling and calls Shutdown in StopRuntime.
 	// Run waits for an OS signal even after Shutdown and would block runtimeWG.
-	for _, worker := range []*asynq.Server{historyServer, server} {
+	if len(realtimeConfigs) == 1 {
+		g.Log().Warning(runtimeCtx, "Delivery实时总预算为单槽，fresh与旧实时共享容量，无法保留独立执行槽", g.Map{"event": "delivery.fresh.capacity_shared", "realtimeConcurrency": total})
+	}
+	for _, worker := range []*asynq.Server{historyServer, server, freshServer} {
+		if worker == nil {
+			continue
+		}
 		if err := worker.Start(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
 			g.Log().Warningf(runtimeCtx, "启动Telegram交付Worker失败：%+v", err)
 		}
@@ -97,7 +111,13 @@ func (s *sCollector) enqueueDeliveryTask(ctx context.Context, deliveryID int64, 
 // bypass Asynq's old unique task marker. A delivery is still claimed with a
 // status transition in processDelivery, so the duplicate task is harmless and
 // lets a replay move work from a stale queue to its current priority queue.
-func (s *sCollector) enqueueDeliveryTaskWithOptions(ctx context.Context, deliveryID int64, priority int, unique bool) (err error) {
+func (s *sCollector) enqueueDeliveryTaskWithOptions(ctx context.Context, deliveryID int64, priority int, unique bool) error {
+	return s.enqueueDeliveryTaskToQueue(ctx, deliveryID, priority, unique, "")
+}
+
+// Only the first queued realtime Event handoff may select the fresh queue.
+// Recovery, replay and legacy callers always retain the ordinary routing.
+func (s *sCollector) enqueueDeliveryTaskToQueue(ctx context.Context, deliveryID int64, priority int, unique bool, explicitQueue string) (err error) {
 	if deliveryID <= 0 {
 		return gerror.New("Telegram采集交付任务ID无效")
 	}
@@ -110,7 +130,10 @@ func (s *sCollector) enqueueDeliveryTaskWithOptions(ctx context.Context, deliver
 	ctx, observation := startCollectorStage(ctx, collectorStageDeliveryEnqueue, collectorObservationMeta{DeliveryID: deliveryID})
 	observeResult := collectorResultError
 	defer func() { observation.Finish(observeResult, err) }()
-	queueName := deliveryQueueName(ctx, deliveryID, priority)
+	queueName := explicitQueue
+	if queueName == "" {
+		queueName = deliveryQueueName(ctx, deliveryID, priority)
+	}
 	observation.meta.QueueClass = collectorObserveQueueClassFromPriority(priority)
 	options := []asynq.Option{
 		asynq.Queue(queueName),
@@ -179,17 +202,8 @@ func (s *sCollector) handleDeliveryTask(ctx context.Context, task *asynq.Task) (
 		case <-timer.C:
 		}
 	}
-	if lane, limited := deliveryAccountLaneForQueue(queue); limited {
-		accountID := deliveryAccountID(ctx, deliveryID)
-		// Both lanes retain the existing per-account limit, but never share
-		// permits. Asynq still bounds each lane by its existing Worker budget.
-		releaseAccountSlot, acquired := s.deliveryAccountSlots.acquire(ctx, lane, accountID, collectorDeliveryHistoryAccountConcurrency(ctx))
-		if !acquired {
-			return newDeliveryAccountBusyError()
-		}
-		defer releaseAccountSlot()
-	}
-	if queue == consts.QueueDeliveryReady {
+	retryCount, _ := asynq.GetRetryCount(ctx)
+	if deliveryTaskNeedsReclassification(queue, retryCount) {
 		priority, err := s.persistedDeliveryPriority(ctx, deliveryID)
 		if err != nil {
 			if errors.Is(err, errDeliveryInvalidEvent) {
@@ -200,10 +214,25 @@ func (s *sCollector) handleDeliveryTask(ctx context.Context, task *asynq.Task) (
 			}
 			return err
 		}
-		// ACK legacy work only after the classified task is durably enqueued.
-		err = s.enqueueDeliveryTask(ctx, deliveryID, priority)
+		// Fresh retries must confirm a new enqueue rather than trusting an
+		// expired/completed task receipt. DB claims still fence duplicates.
+		if queue == consts.QueueDeliveryFresh {
+			err = s.enqueueDeliveryTaskWithOptions(ctx, deliveryID, priority, false)
+		} else {
+			err = s.enqueueDeliveryTask(ctx, deliveryID, priority)
+		}
 		prepareObservation.Finish(collectorResultAccepted, err)
 		return err
+	}
+	if lane, limited := deliveryAccountLaneForQueue(queue); limited {
+		accountID := deliveryAccountID(ctx, deliveryID)
+		// Lane permits only partition the existing Worker budget. A failed
+		// fresh task is rerouted above before it can acquire fresh permits.
+		releaseAccountSlot, acquired := s.deliveryAccountSlots.acquire(ctx, lane, accountID, collectorDeliveryHistoryAccountConcurrency(ctx))
+		if !acquired {
+			return newDeliveryAccountBusyError()
+		}
+		defer releaseAccountSlot()
 	}
 	prepareObservation.Finish(collectorResultOK, nil)
 	ctx = prepareParent
@@ -724,6 +753,28 @@ func collectorDeliveryConcurrency(ctx context.Context) int {
 		return 1
 	}
 	return value
+}
+
+// Partition the existing realtime budget; these configs never add capacity.
+// The first server drains old realtime work, the second reserves fresh work.
+func deliveryRealtimeServerConfigs(total int) []asynq.Config {
+	if total < 1 {
+		total = 1
+	}
+	legacy := deliveryRealtimeQueues()
+	if total == 1 {
+		legacy[consts.QueueDeliveryFresh] = 8
+		return []asynq.Config{{Concurrency: 1, Queues: legacy}}
+	}
+	backlog := max(1, total/4)
+	return []asynq.Config{
+		{Concurrency: backlog, Queues: legacy},
+		{Concurrency: total - backlog, Queues: map[string]int{consts.QueueDeliveryFresh: 1}},
+	}
+}
+
+func deliveryTaskNeedsReclassification(queue string, retryCount int) bool {
+	return queue == consts.QueueDeliveryReady || (queue == consts.QueueDeliveryFresh && retryCount > 0)
 }
 
 // Resolve legacy priorities from the immutable event; recovery and first

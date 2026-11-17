@@ -19,7 +19,7 @@ func TestEventLaneRouting(t *testing.T) {
 		origin   eventEnqueueOrigin
 		queue    string
 	}{
-		{"new_bot", sysin.EventPriorityUrgent, eventOriginIngress, consts.QueueCollectUrgentLive},
+		{"new_bot", sysin.EventPriorityUrgent, eventOriginIngress, consts.QueueCollectFresh},
 		{"new_account", sysin.EventPriorityRealtime, eventOriginIngress, consts.QueueCollectRealtime},
 		{"bot_recovery", sysin.EventPriorityUrgent, eventOriginRecovery, consts.QueueCollectHistory},
 		{"bot_replay", sysin.EventPriorityUrgent, eventOriginReplay, consts.QueueCollectHistory},
@@ -31,7 +31,7 @@ func TestEventLaneRouting(t *testing.T) {
 			}
 		})
 	}
-	if !eventQueueIsHistory(consts.QueueCollectUrgent) || eventQueueIsHistory(consts.QueueCollectUrgentLive) {
+	if !eventQueueIsHistory(consts.QueueCollectUrgent) || !eventQueueIsHistory(consts.QueueCollectUrgentLive) || eventQueueIsHistory(consts.QueueCollectFresh) {
 		t.Fatal("legacy backlog and live ingress must use separate execution budgets")
 	}
 }
@@ -43,7 +43,7 @@ func TestEventPendingIdentitySurvivesUniqueTTLAndRecovery(t *testing.T) {
 	defer c.Close()
 	i := asynq.NewInspector(opt)
 	defer i.Close()
-	queue, taskID := consts.QueueCollectUrgentLive, eventPendingTaskID(42)
+	queue, taskID := consts.QueueCollectFresh, eventPendingTaskID(42)
 	_, err := c.EnqueueContext(context.Background(), asynq.NewTask("test:event", []byte("42")), asynq.Queue(queue), asynq.TaskID(taskID))
 	if err != nil {
 		t.Fatal(err)
@@ -80,5 +80,43 @@ func TestEventPendingIdentitySurvivesUniqueTTLAndRecovery(t *testing.T) {
 	}
 	if exists, err := eventLiveTaskExists(i, 42, sysin.EventPriorityUrgent); err != nil || exists {
 		t.Fatalf("missing live task: exists=%v err=%v", exists, err)
+	}
+}
+
+func TestEventRecoveryPreservesLegacyV2DuringFreshRollout(t *testing.T) {
+	r := miniredis.RunT(t)
+	opt := asynq.RedisClientOpt{Addr: r.Addr()}
+	client := asynq.NewClient(opt)
+	defer client.Close()
+	inspector := asynq.NewInspector(opt)
+	defer inspector.Close()
+	const id int64 = 77
+	_, err := client.Enqueue(asynq.NewTask(eventTaskType, collectorTaskPayload(id)),
+		asynq.Queue(consts.QueueCollectUrgentLive), asynq.TaskID(eventPendingTaskID(id)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exists, err := eventLiveTaskExists(inspector, id, sysin.EventPriorityUrgent); err != nil || !exists {
+		t.Fatalf("legacy v2 task must prevent duplicate recovery: exists=%v err=%v", exists, err)
+	}
+	collector := &sCollector{queueClient: client, queueInspector: inspector}
+	if err := collector.enqueueEventTask(context.Background(), id, sysin.EventPriorityUrgent, eventOriginRecovery); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := inspector.ListPendingTasks(consts.QueueCollectHistory)
+	if err != nil && !errors.Is(err, asynq.ErrQueueNotFound) {
+		t.Fatal(err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("recovery duplicated legacy v2 task: %d", len(pending))
+	}
+	if _, err := inspector.GetTaskInfo(consts.QueueCollectUrgentLive, eventPendingTaskID(id)); err != nil {
+		t.Fatalf("legacy task was removed: %v", err)
+	}
+	if err := inspector.ArchiveTask(consts.QueueCollectUrgentLive, eventPendingTaskID(id)); err != nil {
+		t.Fatal(err)
+	}
+	if exists, err := eventLiveTaskExists(inspector, id, sysin.EventPriorityUrgent); err != nil || exists {
+		t.Fatalf("archived v2 must not block recovery: exists=%v err=%v", exists, err)
 	}
 }

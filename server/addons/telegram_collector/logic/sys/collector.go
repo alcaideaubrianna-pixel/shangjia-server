@@ -78,6 +78,7 @@ type sCollector struct {
 	queueBotServer        *asynq.Server
 	queueHistoryServer    *asynq.Server
 	deliveryServer        *asynq.Server
+	deliveryFreshServer   *asynq.Server
 	deliveryHistoryServer *asynq.Server
 	historySchedulerStop  context.CancelFunc
 	deliveryAccountSlots  deliveryAccountSlotPool
