@@ -15,7 +15,6 @@ import (
 
 	publishconsts "hotgo/addons/youban_publish/consts"
 	pdao "hotgo/addons/youban_publish/internal/dao"
-	pdo "hotgo/addons/youban_publish/internal/model/do"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/cache"
 	hglock "hotgo/internal/library/hgrds/lock"
@@ -605,66 +604,7 @@ func (s *sSysPublish) recoverBotCollectMedia(ctx context.Context, limit int, sco
 		limit = 20
 	}
 	limit = min(limit, 50)
-	e := pdao.YoubanPublishCollectEvent.Columns()
-	deadline := gtime.Now().Add(-collectEventRecoverAfter)
-	model := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
-		Fields("e.*").
-		Where("e.tenant_id", scope.TenantID).Where("e.account_id", scope.AccountID).Where("e.source_id", scope.SourceID).
-		Where("e."+e.SourceType, sysin.CollectSourceTypeBot).
-		WhereIn("e."+e.Status, []string{sysin.CollectEventStatusMediaPending, sysin.CollectEventStatusMediaReady, sysin.CollectEventStatusGroupCollect, sysin.CollectEventStatusPending, sysin.CollectEventStatusFailed}).
-		WhereNull("e."+e.ProcessedAt).
-		WhereLTE("e."+e.UpdatedAt, deadline).
-		Where(enabledCollectSourceExistsSQL("e"))
-	// Keep ordering and pagination on the outer event query. GoFrame may attach
-	// later Order/Limit calls to an EXISTS expression when its predicate is
-	// built inline, producing invalid PostgreSQL SQL (ORDER inside EXISTS).
-	model = model.Where("e."+e.Id+" IN (SELECT m.event_id FROM "+pdao.YoubanPublishCollectEventMedia.Table()+" m WHERE m.tenant_id=? AND m.account_id=? AND m.source_id=? AND m.cache_status=? AND (m.next_retry_at IS NULL OR m.next_retry_at<=?))", scope.TenantID, scope.AccountID, scope.SourceID, collectMediaCachePending, gtime.Now())
-	rows, err := model.OrderAsc("e." + e.UpdatedAt).Limit(limit).All()
-	if err != nil {
-		return gerror.Wrap(err, "读取待恢复BOT媒体事件失败")
-	}
-	requeued := 0
-	for _, row := range rows {
-		if err := ctx.Err(); err != nil {
-			return gerror.Wrap(err, "BOT媒体恢复预算已耗尽，保留下一轮处理")
-		}
-		payload := collectMediaQueuePayloadFromEvent(row)
-		payload.Reason = "bot_recovery"
-		if payload.EventId <= 0 || payload.TenantId <= 0 || payload.SourceId <= 0 {
-			continue
-		}
-		if !reserveCollectMediaRecovery(ctx, payload.EventId) {
-			continue
-		}
-		if err := ctx.Err(); err != nil {
-			return gerror.Wrap(err, "BOT媒体恢复预算已耗尽，保留下一轮处理")
-		}
-		queued, enqueueErr := s.enqueueCollectMediaCacheDeferred(ctx, payload, 0)
-		if enqueueErr != nil {
-			releaseCollectMediaRecovery(ctx, payload.EventId)
-			// Enqueue failure leaves the event eligible in PostgreSQL. Stop this
-			// source pass instead of sending the rest of its batch into an
-			// unhealthy Redis; the existing recovery cycle will retry it.
-			return gerror.Wrapf(enqueueErr, "BOT媒体事件重新入队失败，暂停本轮来源恢复 eventId:%d", payload.EventId)
-		}
-		if queued {
-			status := row[e.Status].String()
-			if _, updateErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).
-				Where(e.Id, payload.EventId).
-				Where(e.Status, status).
-				WhereLTE(e.UpdatedAt, deadline).
-				Data(pdo.YoubanPublishCollectEvent{Status: status}).Update(); updateErr != nil {
-				g.Log().Warningf(ctx, "更新BOT媒体事件恢复心跳失败 eventId:%d err:%+v", payload.EventId, updateErr)
-				continue
-			}
-			requeued++
-			g.Log().Infof(ctx, "BOT媒体事件已按事件重新入队 eventId:%d sourceId:%d", payload.EventId, payload.SourceId)
-		}
-	}
-	if requeued > 0 {
-		g.Log().Infof(ctx, "BOT媒体事件恢复完成 count:%d", requeued)
-	}
-	return nil
+	return s.recoverBotCollectMediaPages(ctx, limit, scope)
 }
 
 // RepairBotCollectMedia exposes the one-shot historical repair for the CLI.

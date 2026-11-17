@@ -10,10 +10,12 @@ const (
 	CollectProcessScheduleKeyPrefix     = "youban_publish:collect:process:schedule:"
 	CollectProcessThrottleKeyPrefix     = "youban_publish:collect:process:throttle:"
 	// CollectProcessRuleQueueKeyPrefix 是采集规则逻辑队列的键前缀。
-	CollectProcessRuleQueueKeyPrefix = "youban_publish:collect:rule:queue:"
-	CollectMediaRecoveryKeyPrefix    = "youban_publish:collect:media:recovery:"
-	CollectMediaCompletionKeyPrefix  = "youban_publish:collect:media:completion:"
-	CollectBotChannelTouchKeyPrefix  = "youban_publish:collect:bot_channel:touch:"
+	CollectProcessRuleQueueKeyPrefix       = "youban_publish:collect:rule:queue:"
+	CollectMediaRecoveryKeyPrefix          = "youban_publish:collect:media:recovery:"
+	CollectBotMediaRecoveryCursorKeyPrefix = "youban_publish:collect:bot_media:cursor:v1:"
+	CollectBotMediaRecoveryLockKeyPrefix   = "youban_publish:collect:bot_media:lock:v1:"
+	CollectMediaCompletionKeyPrefix        = "youban_publish:collect:media:completion:"
+	CollectBotChannelTouchKeyPrefix        = "youban_publish:collect:bot_channel:touch:"
 	// CollectChannelBoundKeyPrefix 仅标记已建立关系，不缓存采集授权决定。
 	CollectChannelBoundKeyPrefix    = "youban_publish:collect:channel:bound:v1:"
 	DuplicateScanSessionKeyPrefix   = "youban_publish:duplicate_scan:session:"
