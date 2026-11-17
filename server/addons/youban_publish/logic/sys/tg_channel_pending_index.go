@@ -20,7 +20,10 @@ func tgChannelPendingKey(tenantID, channelID int64) string {
 
 // add 将 Job 按优先级和创建序号写入频道 ZSET；分数越小越优先。
 func (tgChannelPendingIndex) add(ctx context.Context, tenantID, channelID, jobID int64, priority int) error {
-	if tenantID <= 0 || channelID <= 0 || jobID <= 0 {
+	// Channel queues own ready members through enqueue/claim/settle. The legacy
+	// pending index aliases the normal ready key; touching it here can erase a
+	// delivered job or replace its due score with the old priority encoding.
+	if telegramChannelQueueEnabled() || tenantID <= 0 || channelID <= 0 || jobID <= 0 {
 		return nil
 	}
 	if priority <= 0 {
@@ -33,7 +36,10 @@ func (tgChannelPendingIndex) add(ctx context.Context, tenantID, channelID, jobID
 }
 
 func (tgChannelPendingIndex) remove(ctx context.Context, tenantID, channelID, jobID int64) error {
-	if tenantID <= 0 || channelID <= 0 || jobID <= 0 {
+	// Channel queues own ready members through enqueue/claim/settle. The legacy
+	// pending index aliases the normal ready key; touching it here can erase a
+	// delivered job or replace its due score with the old priority encoding.
+	if telegramChannelQueueEnabled() || tenantID <= 0 || channelID <= 0 || jobID <= 0 {
 		return nil
 	}
 	_, err := g.Redis().Do(ctx, "ZREM", tgChannelPendingKey(tenantID, channelID), strconv.FormatInt(jobID, 10))
@@ -41,7 +47,7 @@ func (tgChannelPendingIndex) remove(ctx context.Context, tenantID, channelID, jo
 }
 
 func (tgChannelPendingIndex) head(ctx context.Context, tenantID, channelID int64) (int64, error) {
-	if tenantID <= 0 || channelID <= 0 {
+	if telegramChannelQueueEnabled() || tenantID <= 0 || channelID <= 0 {
 		return 0, nil
 	}
 	value, err := g.Redis().Do(ctx, "ZRANGE", tgChannelPendingKey(tenantID, channelID), 0, 0)

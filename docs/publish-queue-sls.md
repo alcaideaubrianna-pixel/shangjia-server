@@ -130,3 +130,19 @@ log_type:telegram_queue and channelId:231
 | ack / execution_finished | 某次队列或业务执行结束 | 区分 sent/failed/superseded 等实际结果及原因，核对展示和应有验证资料；不可仅凭 ack 宣称发布成功 |
 
 最终交接格式：业务频道/chat、时间窗与时区、角色/镜像已知范围、原始事件时间及 job/claim/execution、最后确认节点、下一步待证据、索引/分页限制。把“未观察到”与“已证明未执行”分开。本流程不包含补发、清队列、改权限或修改生产状态。
+
+## 普通任务入队成功后消失：旧索引误删
+
+2026-11-17 在频道 1674 确认：采集端和发布端均可记录 `channel_direct_enqueue` 成功，
+Outbox 随后成为 `delivered`，但普通优先级任务仍停在 `pending/idle`，没有发送 Attempt。
+原因是旧 `tgChannelPendingIndex` 与普通 ready 队列共用 key，Outbox 收口清理旧索引时
+删除了刚入队的成员；历史队列使用独立 key，因此历史任务成功不能证明普通任务正常。
+
+频道队列模式下，旧索引的 `add/remove/head` 必须全部停用：`add` 还会覆盖 ready 的到期
+分数，`head` 也不能充当新队列的领取凭证。新队列继续由 enqueue/claim/settle 管理；
+关闭频道队列时保留旧索引行为。该修复不需要 SQL 迁移或新增恢复扫描器。
+
+部署应覆盖可能执行 Outbox 投递或旧索引访问的角色（publish、collector、web、
+background、scheduler），滚动期间旧实例仍可能误删。已消失的历史任务需先检查当前
+operation、权限、Attempt、消息与协议号归属，再通过已有指定 Job 恢复入口有界补偿。
+不要仅重新激活 Outbox 后就宣称恢复：旧版本会在下一次 Outbox 收口时再次删除成员。
