@@ -72,14 +72,15 @@ type collectTargetBatchCompletion struct {
 }
 
 type collectTargetBatchOps struct {
-	targetID   int64
-	mergeTTL   time.Duration
-	coverage   func() []int64
-	generation func(context.Context) (string, error)
-	completed  func(context.Context) (collectTargetBatchCompletion, error)
-	owned      func(context.Context) (bool, error)
-	run        func(context.Context) error
-	finish     func(context.Context, collectTargetBatchCompletion) error
+	targetID     int64
+	mergeTTL     time.Duration
+	coverage     func() []int64
+	generation   func(context.Context) (string, error)
+	completed    func(context.Context) (collectTargetBatchCompletion, error)
+	owned        func(context.Context) (bool, error)
+	run          func(context.Context) error
+	finish       func(context.Context, collectTargetBatchCompletion) error
+	observeReuse func(collectBatchReuseObservation)
 }
 
 // Errors (including retry errors) never acknowledge the durable event task.
@@ -87,22 +88,26 @@ type collectTargetBatchOps struct {
 func runCollectTargetBatch(ctx context.Context, ops collectTargetBatchOps, now time.Time) error {
 	generation, err := ops.generation(ctx)
 	if err != nil {
+		observeCollectBatchReuse(ops, collectBatchReuseObservation{
+			Outcome: collectBatchReuseNotEvaluated, Reason: collectBatchReuseGenerationError,
+		})
 		return collectTargetBatchCacheError(err)
 	}
 	done, err := ops.completed(ctx)
 	if err != nil {
+		observeCollectBatchReuse(ops, collectBatchReuseObservation{
+			Outcome: collectBatchReuseNotEvaluated, Reason: collectBatchReuseCompletionError, Generation: generation,
+		})
 		return collectTargetBatchCacheError(err)
 	}
 	mergeTTL := ops.mergeTTL
 	if mergeTTL <= 0 {
 		mergeTTL = collectMaterialWindowMergeTTLDefault
 	}
-	mergeUntil := done.FinishedAt.Add(mergeTTL)
-	if done.RetryAt.Before(mergeUntil) {
-		mergeUntil = done.RetryAt
-	}
-	if generation != "" && done.Generation == generation && !done.FinishedAt.IsZero() && now.Before(mergeUntil) && collectTargetBatchCovers(done, ops.targetID) {
-		return newCollectProcessRetryError(mergeUntil.Sub(now), "来源批次已合并，等待下一次状态推进")
+	reuse := collectBatchReuseDecision(done, generation, ops.targetID, now, mergeTTL)
+	observeCollectBatchReuse(ops, reuse)
+	if reuse.Outcome == collectBatchReuseHit {
+		return newCollectProcessRetryError(reuse.MergeUntil.Sub(now), "来源批次已合并，等待下一次状态推进")
 	}
 	owned, err := ops.owned(ctx)
 	if err != nil {

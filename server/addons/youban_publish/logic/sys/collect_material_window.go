@@ -245,10 +245,13 @@ func mergeCollectMaterialWindowRows(primary, retry gdb.Result, limit int) gdb.Re
 // processTargetCollectEventWindow processes one realtime event with only the
 // forward context required to pair a verification message. It deliberately
 // avoids the source backlog so old events cannot delay realtime ingestion.
-func (s *sSysPublish) processTargetCollectEventWindow(ctx context.Context, payload collectProcessQueuePayload, target gdb.Record) error {
+func (s *sSysPublish) processTargetCollectEventWindow(ctx context.Context, payload collectProcessQueuePayload, target gdb.Record) (resultErr error) {
 	startedAt := time.Now()
+	reuse := collectBatchReuseObservation{Outcome: collectBatchReuseNotEvaluated, Reason: collectBatchReuseInvalidTarget}
+	var batchRun collectBatchRunObservation
 	defer func() {
 		g.Log().Info(ctx, "采集实时事件窗口处理完成", g.Map{"stage": "collect.window.process", "tenantId": payload.TenantId, "accountId": payload.AccountId, "sourceId": payload.SourceId, "eventId": target["id"].Int64(), "durationMs": time.Since(startedAt).Milliseconds()})
+		logCollectBatchReuse(ctx, payload, target, reuse, batchRun, time.Since(startedAt), resultErr)
 	}()
 	if target.IsEmpty() || target["id"].Int64() <= 0 {
 		return gerror.New("目标采集事件不存在")
@@ -265,6 +268,7 @@ func (s *sSysPublish) processTargetCollectEventWindow(ctx context.Context, paylo
 		return gerror.Newf("目标采集事件时间无效 eventId:%d", target["id"].Int64())
 	}
 	payload.SourceChatId = target["source_chat_id"].String()
+	reuse.Reason = collectBatchReuseCacheError
 	key := collectTargetBatchKey(payload)
 	lease, err := cache.NewQueueLease(key+":lease", "collect_target_batch", collectMaterialWindowExecutionTimeout+10*time.Second)
 	if err != nil {
@@ -275,6 +279,7 @@ func (s *sSysPublish) processTargetCollectEventWindow(ctx context.Context, paylo
 		return collectTargetBatchCacheError(err)
 	}
 	if !acquired {
+		reuse.Reason = collectBatchReuseLeaseBusy
 		return newCollectProcessRetryError(collectProcessMinimumDelay, "来源批次正在处理")
 	}
 	defer func() {
@@ -303,8 +308,11 @@ func (s *sSysPublish) processTargetCollectEventWindow(ctx context.Context, paylo
 	}
 	var coveredIDs []int64
 	return runCollectTargetBatch(ctx, collectTargetBatchOps{
-		targetID:   target["id"].Int64(),
-		mergeTTL:   collectMaterialWindowMergeTTL(ctx),
+		targetID: target["id"].Int64(),
+		mergeTTL: collectMaterialWindowMergeTTL(ctx),
+		observeReuse: func(observation collectBatchReuseObservation) {
+			reuse = observation
+		},
 		coverage:   func() []int64 { return coveredIDs },
 		generation: readGeneration,
 		completed: func(ctx context.Context) (collectTargetBatchCompletion, error) {
@@ -323,7 +331,9 @@ func (s *sSysPublish) processTargetCollectEventWindow(ctx context.Context, paylo
 			return cache.Instance().Set(ctx, key+":completed", done, collectMaterialWindowMergeTTL(ctx))
 		},
 		run: func(ctx context.Context) error {
+			batchRun.Started = true
 			rows, truncated, err := s.loadTargetCollectMaterialWindow(ctx, payload, target, eventAt)
+			batchRun.RowsLoaded, batchRun.WindowTruncated = len(rows), truncated
 			if err != nil {
 				return gerror.Wrap(err, "读取采集合并批次失败")
 			}
@@ -340,7 +350,6 @@ func (s *sSysPublish) processTargetCollectEventWindow(ctx context.Context, paylo
 }
 
 func (s *sSysPublish) loadTargetCollectMaterialWindow(ctx context.Context, payload collectProcessQueuePayload, target gdb.Record, eventAt *gtime.Time) (gdb.Result, bool, error) {
-	startedAt := time.Now()
 	// The current durable target is always the anchor. Source candidates can
 	// contain old history/waiting_verify rows; never move realtime back to them.
 	if !cache.Initialized() {
@@ -366,18 +375,23 @@ func (s *sSysPublish) loadTargetCollectMaterialWindow(ctx context.Context, paylo
 			model = model.Where("e.processed_at IS NULL").
 				Where(collectMaterialGroupReadyCondition(), collectMaterialGroupWaitingVerify)
 		}
-		return model.Fields("e.*").OrderAsc("e.source_message_id").OrderAsc("e.id").Limit(maxRows + 1).All()
+		query := model.Fields("e.*").OrderAsc("e.source_message_id").OrderAsc("e.id").Limit(maxRows + 1)
+		kind := collectWindowQueryPrimary
+		if verifyOnly {
+			kind = collectWindowQueryRetry
+		}
+		return observeCollectWindowQuery(ctx, payload, target, kind, maxRows, func() (gdb.Result, error) {
+			return query.All()
+		})
 	}
 	primary, err := load(false)
 	if err != nil {
 		return nil, false, err
 	}
-	g.Log().Info(ctx, "采集实时窗口查询完成", g.Map{"stage": "collect.window.primary", "tenantId": payload.TenantId, "accountId": payload.AccountId, "sourceId": payload.SourceId, "eventId": target["id"].Int64(), "rows": len(primary), "durationMs": time.Since(startedAt).Milliseconds()})
 	retry, err := load(true)
 	if err != nil {
 		return nil, false, err
 	}
-	g.Log().Info(ctx, "采集验证窗口查询完成", g.Map{"stage": "collect.window.retry", "tenantId": payload.TenantId, "accountId": payload.AccountId, "sourceId": payload.SourceId, "eventId": target["id"].Int64(), "rows": len(retry), "durationMs": time.Since(startedAt).Milliseconds()})
 	rows := mergeCollectMaterialWindowRows(primary, retry, maxRows+1)
 	windowTruncated := len(rows) > maxRows
 	if windowTruncated {
