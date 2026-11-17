@@ -14,6 +14,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gcache"
 	"github.com/gogf/gf/v2/os/gcfg"
+	"github.com/gogf/gf/v2/os/gtime"
 )
 
 // The bound marker must suppress discovery writes without caching permission.
@@ -41,8 +42,11 @@ func TestCollectChannelBoundMarkerPostgres(t *testing.T) {
 	t.Cleanup(func() { cache.Instance().SetAdapter(previous) })
 	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		for _, statement := range []string{
-			"CREATE TEMP TABLE hg_youban_publish_collect_channel (id bigint,tenant_id bigint,telegram_chat_id text,title text,deleted_at timestamp)",
-			"CREATE TEMP TABLE hg_youban_publish_collect_account_channel (id bigint,tenant_id bigint,account_id bigint,channel_id bigint,source_id bigint,collect_enabled int,status text,approval_status text,updated_at timestamp,deleted_at timestamp)",
+			"CREATE TEMP TABLE hg_youban_publish_collect_channel (id bigint,tenant_id bigint,telegram_chat_id text,title text,deleted_at timestamp) ON COMMIT DROP",
+			"CREATE TEMP TABLE hg_youban_publish_collect_account_channel (id bigint,tenant_id bigint,account_id bigint,channel_id bigint,source_id bigint,collect_enabled int,status text,approval_status text,updated_at timestamp,deleted_at timestamp) ON COMMIT DROP",
+			"CREATE TEMP TABLE hg_youban_publish_collect_bot_channel (id bigserial PRIMARY KEY,tenant_id bigint,bot_id bigint,channel_id bigint,status text,bot_role text,last_seen_at timestamp,last_update_id bigint,removed_at timestamp,removed_reason text,created_at timestamp,updated_at timestamp,deleted_at timestamp,UNIQUE(tenant_id,bot_id,channel_id)) ON COMMIT DROP",
+			"INSERT INTO hg_youban_publish_collect_bot_channel(id,tenant_id,bot_id,channel_id,status,updated_at) VALUES (1,56,109,738019,'discovered',NOW())",
+			"CREATE TEMP TABLE hg_youban_publish_collect_source (id bigint,tenant_id bigint,bot_id bigint,source_chat_id text,channel_id bigint,deleted_at timestamp,updated_at timestamp) ON COMMIT DROP",
 			"INSERT INTO hg_youban_publish_collect_channel VALUES (738019,56,'-1004444998796','fixture',NULL)",
 			"INSERT INTO hg_youban_publish_collect_account_channel VALUES (1,56,561,738019,1370,1,'enabled','approved',NOW(),NULL)",
 		} {
@@ -75,10 +79,27 @@ func TestCollectChannelBoundMarkerPostgres(t *testing.T) {
 			if _, err := tx.Exec("UPDATE hg_youban_publish_collect_account_channel SET status=$1,approval_status=$2,collect_enabled=$3", tc.status, tc.approval, tc.enabled); err != nil {
 				return err
 			}
+			service.refreshCollectSourceCache(ctx)
 			got, err := service.ensureBotCollectChannelApproval(ctx, source, &collectorin.CollectorDelivery{SourceChatID: tc.chatID})
 			if err != nil || got != tc.want {
 				t.Fatalf("%s: allowed=%v err=%v want=%v", tc.name, got, err, tc.want)
 			}
+		}
+		if _, err := tx.Exec("UPDATE hg_youban_publish_collect_account_channel SET status='enabled',approval_status='approved',collect_enabled=1"); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("UPDATE hg_youban_publish_collect_bot_channel SET status='bot_removed'"); err != nil {
+			return err
+		}
+		if err := service.touchCollectBotChannel(ctx, 56, 109, "-1004444998796", gtime.Now()); err != nil {
+			return err
+		}
+		botRow, err := tx.GetOne("SELECT status FROM hg_youban_publish_collect_bot_channel WHERE tenant_id=56 AND bot_id=109 AND channel_id=738019")
+		if err != nil {
+			return err
+		}
+		if botRow["status"].String() != "bot_removed" {
+			t.Fatal("ordinary channel-cache touch revived removed BOT")
 		}
 		return nil
 	})

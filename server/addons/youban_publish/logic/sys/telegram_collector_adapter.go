@@ -1715,12 +1715,6 @@ func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, sourc
 	if !decision.Discover {
 		return false, nil
 	}
-	if err := s.enqueueCollectNotification(ctx, collectNotificationPayload{
-		ID:    fmt.Sprintf("discovery:%d:%d:%d:%s", tenantID, accountID, source["id"].Int64(), chatID),
-		BotID: botID, TenantID: tenantID, AccountID: accountID, SourceID: source["id"].Int64(), ChannelID: chatID,
-	}); err != nil {
-		return false, err
-	}
 	_, err := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Data(pdo.YoubanPublishCollectAccountChannel{
 		TenantId: tenantID, AccountId: accountID, ChannelId: channel.Id, SourceId: source["id"].Int64(),
 		CollectEnabled: 1, Status: sysin.CollectAccountChannelEnabled, ApprovalStatus: "approved", ApprovedAt: now,
@@ -1738,6 +1732,12 @@ func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, sourc
 			}).Allowed, nil
 		}
 		return false, gerror.Wrap(err, "创建BOT采集频道审批记录失败")
+	}
+	if err := s.enqueueCollectNotification(ctx, collectNotificationPayload{
+		ID:    fmt.Sprintf("discovery:%d:%d:%d:%s", tenantID, accountID, source["id"].Int64(), chatID),
+		BotID: botID, TenantID: tenantID, AccountID: accountID, SourceID: source["id"].Int64(), ChannelID: chatID,
+	}); err != nil {
+		return false, err
 	}
 	return true, nil
 }

@@ -196,8 +196,13 @@ func (s *sSysPublish) upsertCollectChannel(ctx context.Context, tenantID int64, 
 		}
 	}
 
-	data := pdo.YoubanPublishCollectChannel{TenantId: tenantID, TelegramChatId: chatID, ChatType: chatType, Title: title, Username: username, IsBroadcast: broadcast, IsMegagroup: megagroup, LastMessageId: messageID, LastMessageAt: messageAt, LastSeenAt: now, Status: sysin.CollectChannelStatusActive}
-	_, err := pdao.YoubanPublishCollectChannel.Ctx(ctx).Safe().Data(data).OnConflict("tenant_id,telegram_chat_id").OnDuplicate("chat_type,title,username,is_broadcast,is_megagroup,last_message_id,last_message_at,last_seen_at,updated_at,status,deleted_at").Save()
+	data := pdo.YoubanPublishCollectChannel{TenantId: tenantID, TelegramChatId: chatID, ChatType: chatType, Title: title, Username: username, IsBroadcast: broadcast, IsMegagroup: megagroup, LastSeenAt: now, Status: sysin.CollectChannelStatusActive}
+	duplicateFields := "chat_type,title,username,is_broadcast,is_megagroup,last_seen_at,updated_at,status,deleted_at"
+	if messageID > 0 {
+		data.LastMessageId, data.LastMessageAt = messageID, messageAt
+		duplicateFields += ",last_message_id,last_message_at"
+	}
+	_, err := pdao.YoubanPublishCollectChannel.Ctx(ctx).Safe().Data(data).OnConflict("tenant_id,telegram_chat_id").OnDuplicate(duplicateFields).Save()
 	return err
 }
 
@@ -219,27 +224,12 @@ func (s *sSysPublish) touchCollectBotChannel(ctx context.Context, tenantID, botI
 		return err
 	}
 	data := pdo.YoubanPublishCollectBotChannel{TenantId: tenantID, BotId: botID, ChannelId: channel.Id, Status: sysin.CollectBotChannelDiscovered, FirstSeenAt: now, LastSeenAt: now}
-	_, err := pdao.YoubanPublishCollectBotChannel.Ctx(ctx).Data(data).OnConflict("tenant_id,bot_id,channel_id").OnDuplicate("status,last_seen_at,updated_at").Save()
+	_, err := pdao.YoubanPublishCollectBotChannel.Ctx(ctx).Data(data).OnConflict("tenant_id,bot_id,channel_id").OnDuplicate("last_seen_at,updated_at").Save()
 	if err != nil {
 		return err
 	}
-	// Receiving a message proves the BOT is present again. Clear stale removal
-	// metadata while preserving the account's independent enable/disable state.
-	botCols := pdao.YoubanPublishCollectBotChannel.Columns()
-	_, err = pdao.YoubanPublishCollectBotChannel.Ctx(ctx).
-		Fields(botCols.Status, botCols.LastSeenAt, botCols.RemovedAt, botCols.RemovedReason).
-		Where(botCols.TenantId, tenantID).
-		Where(botCols.BotId, botID).
-		Where(botCols.ChannelId, channel.Id).
-		Data(pdo.YoubanPublishCollectBotChannel{
-			Status:        sysin.CollectBotChannelDiscovered,
-			LastSeenAt:    now,
-			RemovedAt:     nil,
-			RemovedReason: "",
-		}).Update()
-	if err != nil {
-		return err
-	}
+	// Only membership events may restore an explicitly removed BOT. Ordinary
+	// (possibly delayed) messages update last_seen_at without changing status.
 	var sources []struct {
 		Id int64 `json:"id"`
 	}

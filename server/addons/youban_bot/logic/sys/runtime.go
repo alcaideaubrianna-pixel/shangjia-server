@@ -60,6 +60,7 @@ func (s *sSysBot) handleUpdate(ctx context.Context, botId int64, update *models.
 		role := memberStatus
 		if err := publishService.SysPublish().BotChannelMembershipChanged(ctx, botId, chatID, memberStatus, role, update.ID); err != nil {
 			g.Log().Warningf(ctx, "同步Bot频道成员状态失败 botId:%d chatId:%s err:%+v", botId, chatID, err)
+			return err
 		}
 		_, _ = cache.Instance().Remove(ctx, "youban_publish:official_bot_chat_unavailable:"+chatID)
 		g.Log().Infof(ctx, "Bot群成员状态更新，已清除官方Bot不可用缓存 botId:%d chatId:%s", botId, chatID)

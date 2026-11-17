@@ -821,6 +821,11 @@ func (f *botCollectorFeature) Menus(context.Context, gatewayservice.BotContext) 
 }
 
 func (f *botCollectorFeature) HandleUpdate(ctx context.Context, bot gatewayservice.BotContext, update *models.Update) (bool, error) {
+	// Channel membership and other non-message updates are maintained by the
+	// channel discovery feature. They are not profile collection input.
+	if collectorUpdateMessage(update) == nil {
+		return false, nil
+	}
 	if !collectorEnabled(ctx) {
 		return false, nil
 	}
