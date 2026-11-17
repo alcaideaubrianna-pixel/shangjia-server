@@ -702,20 +702,24 @@ type ProfileViewModel struct {
 }
 
 type ProfilePushChannelModel struct {
-	ChannelId           int64       `json:"channelId" dc:"频道ID"`
-	ChannelTitle        string      `json:"channelTitle" dc:"频道名称"`
-	ChannelUsername     string      `json:"channelUsername" dc:"频道用户名"`
-	Status              int         `json:"status" dc:"频道状态"`
-	CyclePublishEnabled int         `json:"cyclePublishEnabled" dc:"是否循环推送"`
-	CyclePublishMode    string      `json:"cyclePublishMode" dc:"循环模式：time天数循环，batch批次循环"`
-	CyclePublishDays    int         `json:"cyclePublishDays" dc:"天数循环间隔，批次模式不使用"`
-	CyclePublishTime    string      `json:"cyclePublishTime" dc:"天数循环发送时刻"`
-	CycleBatchSize      int         `json:"cycleBatchSize" dc:"每批推送数量"`
-	CycleBatchTime      string      `json:"cycleBatchTime" dc:"每日批次发送时刻"`
-	FirstPushAt         *gtime.Time `json:"firstPushAt" dc:"首次推送时间"`
-	NextBatchAt         *gtime.Time `json:"nextBatchAt" dc:"频道下一批次时间，不代表本资料入选"`
-	NextPushAt          *gtime.Time `json:"nextPushAt" dc:"本资料下次计划或预计推送时间"`
-	NextPushAtEstimated bool        `json:"nextPushAtEstimated" dc:"是否按当前配置及排位估算，可能随调度变化"`
+	ChannelId             int64       `json:"channelId" dc:"频道ID"`
+	ChannelTitle          string      `json:"channelTitle" dc:"频道名称"`
+	ChannelUsername       string      `json:"channelUsername" dc:"频道用户名"`
+	Status                int         `json:"status" dc:"频道状态"`
+	CyclePublishEnabled   int         `json:"cyclePublishEnabled" dc:"是否循环推送"`
+	CyclePublishMode      string      `json:"cyclePublishMode" dc:"循环模式：time天数循环，batch批次循环"`
+	CyclePublishDays      int         `json:"cyclePublishDays" dc:"天数循环间隔，批次模式不使用"`
+	CyclePublishTime      string      `json:"cyclePublishTime" dc:"天数循环发送时刻"`
+	CycleBatchSize        int         `json:"cycleBatchSize" dc:"每批推送数量"`
+	CycleBatchTime        string      `json:"cycleBatchTime" dc:"每日批次发送时刻"`
+	FirstPushAt           *gtime.Time `json:"firstPushAt" dc:"首次推送时间"`
+	NextBatchAt           *gtime.Time `json:"nextBatchAt" dc:"频道下一批次时间，不代表本资料入选"`
+	NextPushAt            *gtime.Time `json:"nextPushAt" dc:"本资料下次计划或预计推送时间"`
+	NextPushAtEstimated   bool        `json:"nextPushAtEstimated" dc:"是否按当前配置及排位估算，可能随调度变化"`
+	BatchAheadCount       *int64      `json:"batchAheadCount,omitempty" dc:"预计轮到前需先轮播的资料次数，跨轮包含重复；缺失表示未知，不是Redis队列长度"`
+	BatchRoundRemaining   *int64      `json:"batchRoundRemaining,omitempty" dc:"等待下一轮时，当前轮尚需处理的预计资料次数"`
+	BatchWaitingNextRound bool        `json:"batchWaitingNextRound,omitempty" dc:"本资料是否预计等待下一轮"`
+	BatchInCurrentRun     bool        `json:"batchInCurrentRun,omitempty" dc:"按当前排位估计属于已创建批次，不代表Telegram正在发送"`
 }
 
 type ProfileOptionsModel struct {

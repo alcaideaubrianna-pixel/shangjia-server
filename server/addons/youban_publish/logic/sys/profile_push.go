@@ -96,7 +96,7 @@ func (s *sSysPublish) profilePushChannels(ctx context.Context, profile *sysin.Pr
 		}
 		if channel.CyclePublishMode == "batch" {
 			channel.NextBatchAt = profilePushNextBatchAt(channel.NextBatchAt, now)
-			channel.NextPushAt, err = s.estimateProfileBatchPushAt(estimateCtx, profile, *schedule, now)
+			channel.NextPushAt, err = s.estimateProfileBatchPushAt(estimateCtx, profile, schedule, now)
 			channel.NextPushAtEstimated = channel.NextPushAt != nil
 			if err != nil {
 				g.Log().Warning(ctx, "资料批次循环时间预估失败", g.Map{

@@ -77,7 +77,7 @@ func profilePushBatchDayOffset(batchSize int, rank profilePushBatchRank, activeB
 	return (left+size-1)/size + rank.BeforeTarget/size, true
 }
 
-func (s *sSysPublish) estimateProfileBatchPushAt(ctx context.Context, profile *sysin.ProfileModel, channel profilePushChannelSchedule, now *gtime.Time) (*gtime.Time, error) {
+func (s *sSysPublish) estimateProfileBatchPushAt(ctx context.Context, profile *sysin.ProfileModel, channel *profilePushChannelSchedule, now *gtime.Time) (*gtime.Time, error) {
 	if channel.CycleBatchSize <= 0 {
 		return nil, nil
 	}
@@ -159,6 +159,15 @@ func (s *sSysPublish) estimateProfileBatchPushAt(ctx context.Context, profile *s
 	offset, ok := profilePushBatchDayOffset(channel.CycleBatchSize, rank, activeBatchSize)
 	if !ok {
 		return nil, nil
+	}
+	// Reuse the same cached rank and active-run snapshot as the date estimate.
+	// Do not count a second time just to explain the displayed wait.
+	position := profilePushBatchPosition(rank, activeBatchSize)
+	channel.BatchAheadCount = &position.AheadCount
+	channel.BatchInCurrentRun = position.InCurrentRun
+	channel.BatchWaitingNextRound = position.WaitingNextRound
+	if position.WaitingNextRound {
+		channel.BatchRoundRemaining = &position.RoundRemaining
 	}
 	if offset < 0 {
 		if activeAt != nil && activeAt.After(now) {
