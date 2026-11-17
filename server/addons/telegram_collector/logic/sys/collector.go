@@ -81,6 +81,7 @@ type sCollector struct {
 	historyAccountMu      sync.Mutex
 	historyAccountSlots   map[int64]chan struct{}
 	queueClient           *asynq.Client
+	queueInspector        *asynq.Inspector
 	runtimeCtx            context.Context
 	runtimeStop           context.CancelFunc
 	runtimeWG             sync.WaitGroup

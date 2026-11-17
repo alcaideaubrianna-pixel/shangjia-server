@@ -34,7 +34,6 @@ const eventTaskType = "telegram_collector:event"
 const (
 	eventLeaseDuration     = 2 * time.Minute
 	eventRecoveryStaleTime = 15 * time.Second
-	eventTaskUniqueTTL     = 5 * time.Minute
 	eventMaxAttempts       = 5
 )
 
@@ -52,14 +51,17 @@ func (s *sCollector) StartRuntime(ctx context.Context) {
 	server := asynq.NewServer(collectorRedisOption(runtimeCtx), asynq.Config{
 		Concurrency: collectorConcurrency(ctx),
 		Queues: map[string]int{
-			consts.QueueCollectUrgent:   8,
-			consts.QueueCollectRealtime: 4,
+			consts.QueueCollectUrgentLive: 8,
+			consts.QueueCollectRealtime:   4,
 		},
 	})
 	if s.queueClient == nil {
 		s.queueClient = asynq.NewClient(collectorRedisOption(runtimeCtx))
 	}
-	historyServer := asynq.NewServer(collectorRedisOption(runtimeCtx), asynq.Config{Concurrency: 1, Queues: map[string]int{consts.QueueCollectHistory: 1}})
+	historyServer := asynq.NewServer(collectorRedisOption(runtimeCtx), asynq.Config{
+		Concurrency: collectorEventHistoryConcurrency(runtimeCtx),
+		Queues:      map[string]int{consts.QueueCollectHistory: 1, consts.QueueCollectUrgent: 1},
+	})
 	s.queueHistoryServer = historyServer
 	s.queueServer = server
 	mux := asynq.NewServeMux()
@@ -68,6 +70,10 @@ func (s *sCollector) StartRuntime(ctx context.Context) {
 		"log_type":                   "telegram_collector",
 		"event":                      "collector_worker_started",
 		"concurrency":                collectorConcurrency(runtimeCtx),
+		"historyConcurrency":         collectorEventHistoryConcurrency(runtimeCtx),
+		"botRealtimeQueue":           consts.QueueCollectUrgentLive,
+		"legacyBacklogQueue":         consts.QueueCollectUrgent,
+		"legacyBacklogLane":          "history",
 		"ingestSpoolMode":            normalizeCollectorIngestSpoolMode(g.Cfg().MustGet(runtimeCtx, "telegramCollector.ingestSpoolMode", "redis_first").String()),
 		"eventHandoff":               "postgres_event_then_redis",
 		"legacySpoolActive":          collectorIngestSpoolEnabled(runtimeCtx),
@@ -117,6 +123,13 @@ func (s *sCollector) StopRuntime() {
 		_ = client.Close()
 	}
 	s.runtimeWG.Wait()
+	s.queueMu.Lock()
+	inspector := s.queueInspector
+	s.queueInspector = nil
+	s.queueMu.Unlock()
+	if inspector != nil {
+		_ = inspector.Close()
+	}
 }
 
 func (s *sCollector) ensureRuntimeContext(ctx context.Context) context.Context {
@@ -127,17 +140,32 @@ func (s *sCollector) ensureRuntimeContext(ctx context.Context) context.Context {
 	return s.runtimeCtx
 }
 
-func (s *sCollector) enqueueEventTask(ctx context.Context, eventID int64, priority int, logOrigins ...string) error {
+func (s *sCollector) enqueueEventTask(ctx context.Context, eventID int64, priority int, logOrigins ...eventEnqueueOrigin) error {
 	if eventID <= 0 {
 		return gerror.New("Telegram采集事件任务ID无效")
 	}
 
-	queueName := consts.QueueCollectHistory
-	if priority >= sysin.EventPriorityRealtime {
-		queueName = consts.QueueCollectRealtime
+	origin := eventOriginIngress
+	if len(logOrigins) > 0 {
+		origin = logOrigins[0]
 	}
-	if priority >= sysin.EventPriorityUrgent {
-		queueName = consts.QueueCollectUrgent
+	if origin != eventOriginIngress && origin != eventOriginRecovery && origin != eventOriginReplay {
+		return gerror.New("采集事件入队职责无效")
+	}
+	queueName := eventQueueFor(priority, origin)
+	if origin == eventOriginRecovery {
+		exists, err := eventLiveTaskExists(s.eventTaskInspector(ctx), eventID, priority)
+		if err != nil {
+			return err
+		}
+		if exists {
+			logCollectorPipelineStage(ctx, &entity.TgCollectorEvent{Id: eventID}, "event.recovery.live_task_preserved", time.Now(), nil, nil,
+				g.Map{"queue": eventQueueFor(priority, eventOriginIngress), "enqueueOrigin": origin})
+			return nil
+		}
+	}
+	if eventQueueIsHistory(queueName) {
+		priority = sysin.EventPriorityNormal
 	}
 	s.queueMu.Lock()
 	if s.queueClient == nil {
@@ -149,37 +177,28 @@ func (s *sCollector) enqueueEventTask(ctx context.Context, eventID int64, priori
 		EventID: eventID, QueueClass: collectorObserveQueueClassFromClass(collectorQueueClass(priority)),
 	})
 	enqueueStarted := time.Now()
-	recovery := len(logOrigins) > 0 && logOrigins[0] == "recovery"
-	options := []asynq.Option{asynq.Queue(queueName), asynq.MaxRetry(eventMaxAttempts - 1), asynq.Timeout(2 * time.Minute), asynq.Retention(24 * time.Hour)}
-	if !recovery {
-		options = append(options, asynq.Unique(eventTaskUniqueTTL))
-	}
+	options := []asynq.Option{asynq.Queue(queueName), asynq.MaxRetry(eventMaxAttempts - 1), asynq.Timeout(2 * time.Minute), asynq.TaskID(eventPendingTaskID(eventID))}
 	_, err := client.EnqueueContext(ctx, asynq.NewTask(eventTaskType, collectorTaskPayload(eventID)), options...)
+	conflict := errors.Is(err, asynq.ErrTaskIDConflict)
+	if conflict {
+		err = confirmEventTaskConflict(s.eventTaskInspector(ctx), queueName, eventPendingTaskID(eventID))
+	}
 	outcome := "enqueued"
-	if errors.Is(err, asynq.ErrDuplicateTask) || errors.Is(err, asynq.ErrTaskIDConflict) {
-		outcome = "enqueue_conflict"
-	} else if err != nil {
+	if err != nil {
 		outcome = "error"
+	} else if conflict {
+		outcome = "existing_task_confirmed"
 	}
 	logErr := err
 	observeResult := collectorResultOK
-	if outcome == "enqueue_conflict" {
-		logErr = nil // A duplicate is an observation, not a processing failure.
+	if outcome == "existing_task_confirmed" {
+		logErr = nil
 		observeResult = collectorResultDuplicate
 	}
 	observation.Finish(observeResult, logErr)
-	enqueueOrigin := "direct"
-	if len(logOrigins) > 0 {
-		enqueueOrigin = logOrigins[0]
-	}
+	enqueueOrigin := origin
 	logCollectorPipelineStage(ctx, &entity.TgCollectorEvent{Id: eventID}, "event.enqueued", enqueueStarted, nil, logErr,
 		g.Map{"queue": queueName, "priority": priority, "outcome": outcome, "enqueueOrigin": enqueueOrigin})
-	if errors.Is(err, asynq.ErrDuplicateTask) || errors.Is(err, asynq.ErrTaskIDConflict) {
-		if recovery {
-			return gerror.Wrap(err, "恢复原始事件未确认实际入队")
-		}
-		return nil
-	}
 	return err
 }
 
@@ -294,6 +313,13 @@ func (s *sCollector) processEvent(ctx context.Context, eventID int64) (err error
 	recordCollectorStage(ctx, collectorStageEventParse, observation.meta, collectorResultOK, time.Since(parseStarted), err)
 	if err != nil {
 		return s.failEvent(ctx, eventID, executionOwner, err)
+	}
+	// An execution lane is assigned at enqueue/legacy drain, never by elapsed age.
+	if eventQueueIsHistory(collectorQueueName(ctx)) {
+		delivery.History = true
+		observation.meta.Mode = collectorModeHistory
+		observation.meta.QueueClass = collectorObserveQueueClassFromPriority(sysin.EventPriorityNormal)
+		ctx, observation.meta = collectorObservationContext(ctx, observation.meta)
 	}
 	logCollectorPipelineStage(ctx, &row, "delivery.parsed", pipelineStarted, &delivery, nil)
 	dispatchCtx, dispatchObservation := startCollectorStage(ctx, collectorStageEventDispatch, observation.meta)
@@ -534,10 +560,10 @@ func deliveryPriority(delivery *sysin.CollectorDelivery) int {
 	if delivery == nil {
 		return sysin.EventPriorityNormal
 	}
+	if delivery.History {
+		return sysin.EventPriorityNormal
+	}
 	if delivery.SourceType == sysin.SourceTypeAccount {
-		if delivery.History {
-			return sysin.EventPriorityNormal
-		}
 		return sysin.EventPriorityRealtime
 	}
 	return sysin.EventPriorityUrgent

@@ -185,12 +185,11 @@ func (s *sCollector) enqueueReplayEvent(ctx context.Context, eventID int64) (boo
 	}
 }
 
-// Explicit, bounded repairs use the existing realtime consumer instead of
-// joining the raw urgent backlog again. Keep the persisted priority and update
-// unchanged: the ordinary handler still atomically claims the event, so an old
-// urgent copy cannot repeat an event that this repair has already completed.
+// Explicit, bounded repairs use the isolated history budget. Keep the original
+// raw event unchanged: atomic claims prevent an old urgent copy from repeating
+// an event that this repair has already handed off.
 func (s *sCollector) enqueueSourceReplayEventTask(ctx context.Context, eventID int64) error {
-	return s.enqueueEventTask(ctx, eventID, sysin.EventPriorityRealtime, "source_replay")
+	return s.enqueueEventTask(ctx, eventID, sysin.EventPriorityNormal, eventOriginReplay)
 }
 
 func (s *sCollector) enqueueReplayDelivery(ctx context.Context, eventID int64) (bool, error) {
@@ -216,12 +215,22 @@ func (s *sCollector) enqueueReplayDelivery(ctx context.Context, eventID int64) (
 	case sysin.DeliveryStatusCompleted, sysin.DeliveryStatusProcessing, sysin.DeliveryStatusQuarantined:
 		return false, nil
 	case sysin.DeliveryStatusPending:
-		return true, s.enqueueDeliveryTaskWithOptions(ctx, row.Id, row.Priority, false)
+		result, err := dao.TgCollectorDelivery.Ctx(ctx).WherePri(row.Id).
+			Where(columns.Status, sysin.DeliveryStatusPending).
+			Data(g.Map{columns.Priority: sysin.EventPriorityNormal, "scheduler_pool": "history"}).Update()
+		if err != nil {
+			return false, gerror.Wrap(err, "保存source重放历史链路失败")
+		}
+		if affected, err := result.RowsAffected(); err != nil || affected == 0 {
+			return false, err
+		}
+		return true, s.enqueueDeliveryTaskWithOptions(ctx, row.Id, sysin.EventPriorityNormal, false)
 	case sysin.DeliveryStatusFailedRetry, sysin.DeliveryStatusDead:
 		result, err := dao.TgCollectorDelivery.Ctx(ctx).WherePri(row.Id).
 			WhereIn(columns.Status, []string{sysin.DeliveryStatusFailedRetry, sysin.DeliveryStatusDead}).
 			Where(fmt.Sprintf("(%s IS NULL OR %s<=?)", columns.LeaseUntil, columns.LeaseUntil), gtime.Now()).
 			Data(g.Map{columns.Status: sysin.DeliveryStatusPending, columns.AttemptCount: 0, columns.NextRunAt: nil,
+				columns.Priority: sysin.EventPriorityNormal, "scheduler_pool": "history",
 				columns.LeaseOwner: "", columns.LeaseUntil: nil, columns.ErrorMessage: "", columns.UpdatedAt: gtime.Now()}).Update()
 		if err != nil {
 			return false, gerror.Wrap(err, "恢复source重放交付失败")
@@ -229,7 +238,7 @@ func (s *sCollector) enqueueReplayDelivery(ctx context.Context, eventID int64) (
 		if affected, _ := result.RowsAffected(); affected == 0 {
 			return false, nil
 		}
-		return true, s.enqueueDeliveryTaskWithOptions(ctx, row.Id, row.Priority, false)
+		return true, s.enqueueDeliveryTaskWithOptions(ctx, row.Id, sysin.EventPriorityNormal, false)
 	default:
 		return false, gerror.Newf("source重放交付状态不支持：%s", row.Status)
 	}

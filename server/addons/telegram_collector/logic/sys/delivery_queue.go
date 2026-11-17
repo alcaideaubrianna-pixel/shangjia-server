@@ -242,7 +242,12 @@ func (s *sCollector) acquireHistoryAccountSlot(ctx context.Context, accountID in
 	}
 }
 
-func (s *sCollector) processDelivery(ctx context.Context, deliveryID int64, taskStarts ...time.Time) (err error) {
+func (s *sCollector) processDelivery(ctx context.Context, deliveryID int64, taskStarts ...time.Time) error {
+	return s.processDeliveryWithEvent(ctx, deliveryID, nil, taskStarts...)
+}
+
+// Inline Event handoff already owns a validated raw event; queued attempts load it.
+func (s *sCollector) processDeliveryWithEvent(ctx context.Context, deliveryID int64, loadedEvent *entity.TgCollectorEvent, taskStarts ...time.Time) (err error) {
 	if deliveryID <= 0 {
 		return gerror.New("Telegram采集交付任务无效")
 	}
@@ -327,7 +332,12 @@ func (s *sCollector) processDelivery(ctx context.Context, deliveryID int64, task
 	}
 	var event entity.TgCollectorEvent
 	eventReadStarted := time.Now()
-	if err = dao.TgCollectorEvent.Ctx(ctx).WherePri(row.EventId).Scan(&event); err != nil {
+	if loadedEvent != nil && loadedEvent.Id == row.EventId && loadedEvent.TenantId == row.TenantId {
+		event = *loadedEvent
+	} else {
+		err = dao.TgCollectorEvent.Ctx(ctx).WherePri(row.EventId).Scan(&event)
+	}
+	if err != nil {
 		recordCollectorStage(ctx, collectorStageDeliveryEventRead, observation.meta, collectorResultError, time.Since(eventReadStarted), err)
 		logCollectorDeliveryStage(ctx, "delivery.event.load.failed", deliveryID, row.EventId, collectorQueueName(ctx), err,
 			g.Map{"eventReadDurationMs": time.Since(eventReadStarted).Milliseconds(), "taskDurationMs": time.Since(taskStarted).Milliseconds()})
@@ -368,7 +378,14 @@ func (s *sCollector) processDelivery(ctx context.Context, deliveryID int64, task
 	if err != nil {
 		return s.failDelivery(ctx, deliveryID, executionOwner, err)
 	}
+	// History is persisted on the Delivery because raw Bot updates have no lane.
+	// Legacy rows with schema-default history but realtime priority stay live.
+	if row.Priority < sysin.EventPriorityRealtime {
+		delivery.History = true
+		observation.meta.Mode = collectorModeHistory
+	}
 	observation.meta.QueueClass = collectorObserveQueueClassFromPriority(deliveryPriority(&delivery))
+	ctx, observation.meta = collectorObservationContext(ctx, observation.meta)
 	delivery.ID = deliveryID
 	delivery.DeliveryKey = row.DeliveryKey
 	handler := collectorservice.CollectorDeliveryHandler()
@@ -749,6 +766,10 @@ func (s *sCollector) persistedDeliveryPriority(ctx context.Context, deliveryID i
 	delivery, err := collectorDeliveryFromEvent(&event, []byte(event.RawUpdate.String()))
 	if err != nil {
 		return 0, fmt.Errorf("%w: %v", errDeliveryInvalidEvent, err)
+	}
+	// Explicit history priority must not be promoted by raw Bot type on recovery.
+	if storedPriority.Int() < sysin.EventPriorityRealtime {
+		return storedPriority.Int(), nil
 	}
 	computed := deliveryPriority(&delivery)
 	if storedPriority.Int() > computed {

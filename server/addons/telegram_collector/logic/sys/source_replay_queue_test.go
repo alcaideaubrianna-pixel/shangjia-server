@@ -19,10 +19,15 @@ func TestSourceReplayBypassesUrgentBacklogWithoutRemovingOriginal(t *testing.T) 
 	t.Cleanup(func() { _ = client.Close() })
 	inspector := asynq.NewInspector(opt)
 	t.Cleanup(func() { _ = inspector.Close() })
-	collector := &sCollector{queueClient: client}
+	collector := &sCollector{queueClient: client, queueInspector: inspector}
 	ctx := context.Background()
 	const eventID int64 = 12682221
 
+	// Preserve a UUID-style task from the legacy producer during rolling upgrades.
+	if _, err := client.Enqueue(asynq.NewTask(eventTaskType, collectorTaskPayload(eventID)),
+		asynq.Queue(consts.QueueCollectUrgent), asynq.MaxRetry(eventMaxAttempts-1), asynq.Timeout(eventLeaseDuration)); err != nil {
+		t.Fatal(err)
+	}
 	if err := collector.enqueueEventTask(ctx, eventID, sysin.EventPriorityUrgent); err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +36,7 @@ func TestSourceReplayBypassesUrgentBacklogWithoutRemovingOriginal(t *testing.T) 
 			t.Fatal(err)
 		}
 	}
-	for _, queue := range []string{consts.QueueCollectUrgent, consts.QueueCollectRealtime} {
+	for _, queue := range []string{consts.QueueCollectUrgent, consts.QueueCollectUrgentLive, consts.QueueCollectHistory} {
 		tasks, err := inspector.ListPendingTasks(queue)
 		if err != nil {
 			t.Fatal(err)
@@ -47,11 +52,11 @@ func TestSourceReplayBypassesUrgentBacklogWithoutRemovingOriginal(t *testing.T) 
 			t.Fatalf("repair changed retry or execution budget: retries=%d timeout=%s", task.MaxRetry, task.Timeout)
 		}
 	}
-	history, err := inspector.ListPendingTasks(consts.QueueCollectHistory)
+	history, err := inspector.ListPendingTasks(consts.QueueCollectRealtime)
 	if err != nil && !errors.Is(err, asynq.ErrQueueNotFound) {
 		t.Fatal(err)
 	}
 	if len(history) != 0 {
-		t.Fatalf("repair unexpectedly entered history queue: %d", len(history))
+		t.Fatalf("repair unexpectedly entered realtime account queue: %d", len(history))
 	}
 }

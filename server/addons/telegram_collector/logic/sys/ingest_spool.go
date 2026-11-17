@@ -105,7 +105,7 @@ func (s *sCollector) recoverIngestSpool(ctx context.Context, limit int, scopes .
 		}
 		eventID, err := s.persistEvent(ctx, &event)
 		if err == nil {
-			err = s.enqueueEventTask(ctx, eventID, event.Priority)
+			err = s.enqueueEventTask(ctx, eventID, event.Priority, eventOriginRecovery)
 		}
 		if err == nil {
 			if err = finishIngestSpool(ctx, row, "completed", ""); err != nil {

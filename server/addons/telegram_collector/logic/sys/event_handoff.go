@@ -108,7 +108,7 @@ func (s *sCollector) handoffCollectorEvent(ctx context.Context, row *entity.TgCo
 		enqueue: func(ctx context.Context, id int64) error {
 			return s.enqueueDeliveryTask(ctx, id, deliveryPriority(delivery))
 		},
-		process: func(ctx context.Context, id int64) error { return s.processDelivery(ctx, id) },
+		process: func(ctx context.Context, id int64) error { return s.processDeliveryWithEvent(ctx, id, row) },
 		observe: func(ctx context.Context, _ int64, processErr error) {
 			// A nil return also includes claim.skipped. Completion is reported
 			// only by processDelivery's existing lifecycle logs.
