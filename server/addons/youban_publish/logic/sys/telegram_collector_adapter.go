@@ -1463,10 +1463,8 @@ func (s *sSysPublish) ingestCollectorBotDelivery(ctx context.Context, delivery *
 	// Collection owns persistence and process-queue handoff. Telegram delivery
 	// reconciliation is maintained by the publish worker and must not be part
 	// of the collector handoff path.
-	// Collector webhook updates carry the authoritative current Chat title.
-	// Synchronize it before any rule-list/cache lookup so channel renames are
-	// visible even when this delivery does not pass a collection rule.
-	s.syncBotChannelMetadataFromUpdate(ctx, source["tenant_id"].Int64(), source["bot_id"].Int64(), delivery.RawUpdate)
+	// Reject publish targets and denied subscriptions before metadata writes.
+	// Accepted messages synchronize their current title before rule matching.
 	blocked, err := s.collectMessageFromAccountPublishChannel(ctx, source["tenant_id"].Int64(), 0, delivery.SourceChatID, delivery.SourceMessageID)
 	if err != nil {
 		return gerror.Wrap(err, "检查Bot采集上架频道过滤失败")
@@ -1490,6 +1488,7 @@ func (s *sSysPublish) ingestCollectorBotDelivery(ctx context.Context, delivery *
 		logCollectorDeliverySkipped(ctx, delivery, "approval_blocked")
 		return nil
 	}
+	s.syncBotChannelMetadataFromUpdate(ctx, source["tenant_id"].Int64(), source["bot_id"].Int64(), delivery.RawUpdate)
 	message := collectorDeliveryMessage(delivery, source["tenant_id"].Int64(), source["account_id"].Int64(), source["id"].Int64(), sysin.CollectSourceTypeBot)
 	message.BotId = source["bot_id"].Int64()
 	if collectorDeliveryIsEdit(delivery.RawUpdate) {
@@ -1587,12 +1586,36 @@ func normalizeCollectedBotEditText(rawText string, rule gdb.Record) string {
 	return strings.TrimSpace(text)
 }
 
-func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, source gdb.Record, delivery *collectorin.CollectorDelivery) (bool, error) {
+func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, source gdb.Record, delivery *collectorin.CollectorDelivery) (allowedResult bool, resultErr error) {
 	tenantID, accountID, botID := source["tenant_id"].Int64(), source["account_id"].Int64(), source["bot_id"].Int64()
 	chatID := normalizeTelegramChannelChatID(delivery.SourceChatID)
 	if tenantID <= 0 || accountID <= 0 || botID <= 0 || chatID == "" {
 		return false, nil
 	}
+	// Cache only explicit rejection; an allow decision always checks the database.
+	rejectedKey := s.collectApprovalRejectedKey(ctx, tenantID, accountID, source["id"].Int64(), botID, chatID)
+	cacheRejected := false
+	if rejectedKey != "" {
+		marker, cacheErr := cache.Instance().Get(ctx, rejectedKey)
+		if cacheErr == nil && marker != nil && marker.String() == "rejected" {
+			logCollectApprovalCache(ctx, delivery, accountID, collectApprovalCacheHit)
+			return false, nil
+		}
+		if cacheErr != nil {
+			logCollectApprovalCache(ctx, delivery, accountID, collectApprovalCacheReadFailed)
+		} else {
+			logCollectApprovalCache(ctx, delivery, accountID, collectApprovalCacheMiss)
+		}
+	}
+	defer func() {
+		if rejectedKey != "" && cacheRejected && resultErr == nil {
+			if err := cache.Instance().Set(ctx, rejectedKey, "rejected", collectApprovalRejectedTTL); err != nil {
+				logCollectApprovalCache(ctx, delivery, accountID, collectApprovalCacheWriteFailed)
+			} else {
+				logCollectApprovalCache(ctx, delivery, accountID, collectApprovalCacheStored)
+			}
+		}
+	}()
 	now := gtime.Now()
 	var channels []botCollectChannelCandidate
 	if err := pdao.YoubanPublishCollectChannel.Ctx(ctx).Fields("id,telegram_chat_id,title").Where("tenant_id", tenantID).WhereIn("telegram_chat_id", tgChannelCacheLookupIds(chatID)).Scan(&channels); !collectOptionalRecordScanSucceeded(err) {
@@ -1615,17 +1638,6 @@ func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, sourc
 		}
 	}
 	channel := selectBotCollectChannelForAccount(channels, relations, chatID)
-	if channel.Id <= 0 {
-		if err := s.upsertCollectChannel(ctx, tenantID, chatID, "channel", chatID, "", 1, 0, delivery.SourceMessageID, now, now); err != nil {
-			return false, gerror.Wrap(err, "记录BOT采集频道失败")
-		}
-		if err := pdao.YoubanPublishCollectChannel.Ctx(ctx).Fields("id,telegram_chat_id,title").Where("tenant_id", tenantID).Where("telegram_chat_id", chatID).Scan(&channel); err != nil || channel.Id <= 0 {
-			return false, err
-		}
-	} else {
-		_, _ = pdao.YoubanPublishCollectChannel.Ctx(ctx).Where("id", channel.Id).Data(g.Map{"last_message_id": delivery.SourceMessageID, "last_message_at": now, "last_seen_at": now, "updated_at": now}).Update()
-	}
-	_ = s.touchCollectBotChannel(ctx, tenantID, botID, chatID, now)
 	relation := selectBotCollectChannelRelation(relations, channel.Id)
 	if relation.Id > 0 {
 		decision := decideCollectChannelAccess(collectChannelAccessPolicyInput{
@@ -1636,6 +1648,7 @@ func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, sourc
 		})
 		allowed := decision.Allowed
 		if !allowed {
+			cacheRejected = true
 			g.Log().Warning(ctx, "BOT采集频道审批未通过，跳过采集交付", g.Map{
 				"tenantId": tenantID, "accountId": accountID, "sourceId": source["id"].Int64(),
 				"botId": botID, "chatId": chatID, "channelId": channel.Id, "relationId": relation.Id,
@@ -1651,7 +1664,23 @@ func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, sourc
 				return false, err
 			}
 		}
-		return allowed, nil
+		if !allowed {
+			return false, nil
+		}
+	}
+	if channel.Id <= 0 {
+		if err := s.upsertCollectChannel(ctx, tenantID, chatID, "channel", chatID, "", 1, 0, delivery.SourceMessageID, now, now); err != nil {
+			return false, gerror.Wrap(err, "记录BOT采集频道失败")
+		}
+		if err := pdao.YoubanPublishCollectChannel.Ctx(ctx).Fields("id,telegram_chat_id,title").Where("tenant_id", tenantID).Where("telegram_chat_id", chatID).Scan(&channel); err != nil || channel.Id <= 0 {
+			return false, err
+		}
+	} else {
+		_, _ = pdao.YoubanPublishCollectChannel.Ctx(ctx).Where("id", channel.Id).Data(g.Map{"last_message_id": delivery.SourceMessageID, "last_message_at": now, "last_seen_at": now, "updated_at": now}).Update()
+	}
+	_ = s.touchCollectBotChannel(ctx, tenantID, botID, chatID, now)
+	if relation.Id > 0 {
+		return true, nil
 	}
 	// Queue before creating the discovery relation: a crash or send failure
 	// must not permanently lose the first-channel notification.

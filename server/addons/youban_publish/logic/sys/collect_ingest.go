@@ -90,7 +90,11 @@ func (s *sSysPublish) collectSourceCacheVersion(ctx context.Context) string {
 }
 
 func (s *sSysPublish) refreshCollectSourceCache(ctx context.Context) {
-	_ = cache.Instance().Set(ctx, collectSourceCacheVersionKey, strconv.FormatInt(time.Now().UnixNano(), 10), 24*time.Hour)
+	if err := cache.Instance().Set(ctx, collectSourceCacheVersionKey, strconv.FormatInt(time.Now().UnixNano(), 10), 24*time.Hour); err != nil {
+		g.Log().Warning(ctx, "采集配置缓存失效失败，审批拒绝缓存最多保留一分钟", g.Map{"event": "collect_approval_cache_invalidation", "outcome": "failed", "error": err.Error()})
+		return
+	}
+	g.Log().Info(ctx, "采集配置变更已使审批拒绝缓存失效", g.Map{"event": "collect_approval_cache_invalidation", "outcome": "invalidated"})
 }
 
 type collectMediaItem struct {
