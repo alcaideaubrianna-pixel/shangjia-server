@@ -8,8 +8,8 @@ import (
 
 // RawUpdateIDs exposes the persisted identity using strict domain types while
 // keeping the JSON/DAO-facing event shape unchanged.
-func (e RawUpdateEvent) RawUpdateIDs() (domain.TenantID, domain.AccountID, domain.SourceID, domain.ChannelID, domain.MessageID) {
-	return domain.TenantID(e.TenantID), domain.AccountID(e.AccountID), domain.SourceID(e.SourceID), domain.ChannelID(e.ChatID), domain.MessageID(e.MessageID)
+func (e RawUpdateEvent) RawUpdateIDs() (domain.TenantID, domain.AccountID, domain.SourceID, domain.TelegramChatID, domain.MessageID) {
+	return domain.TenantID(e.TenantID), domain.AccountID(e.AccountID), domain.SourceID(e.SourceID), domain.TelegramChatID(e.ChatID), domain.MessageID(e.MessageID)
 }
 
 func (e RawUpdateEvent) ValidateBoundary() bool {
