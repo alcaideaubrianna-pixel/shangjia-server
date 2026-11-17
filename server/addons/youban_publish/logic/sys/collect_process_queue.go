@@ -620,8 +620,20 @@ func (s *sSysPublish) processCollectSourceTask(ctx context.Context, payload coll
 		if !collectProcessEventMatchesPayload(event, payload) {
 			return 0, false, false, gerror.New("采集事件与任务归属不一致")
 		}
+		lateVerificationRepair := collectMaterialLateVerificationRepairCandidate(event)
 		if collectProcessEventFinished(event) {
-			return 0, false, true, nil
+			if !lateVerificationRepair {
+				return 0, false, true, nil
+			}
+			// Only a late binding (group=paired) may reopen completed material.
+			// Reuse existing branch/profile repair; do not create a second pipeline.
+			needsRepair, repairErr := s.collectEventNeedsProfileRepair(ctx, payload.EventId)
+			if repairErr != nil {
+				return 0, false, false, repairErr
+			}
+			if !needsRepair {
+				return 0, false, true, nil
+			}
 		}
 		if event["processed_at"].GTime() != nil && event["status"].String() != sysin.CollectEventStatusIgnored {
 			cols := pdao.YoubanPublishCollectEvent.Columns()
@@ -630,7 +642,7 @@ func (s *sSysPublish) processCollectSourceTask(ctx context.Context, payload coll
 			}
 		}
 		var processErr error
-		if event["material_role"].String() == collectMaterialRoleVerify && event["material_parent_event_id"].Int64() > 0 {
+		if lateVerificationRepair || (event["material_role"].String() == collectMaterialRoleVerify && event["material_parent_event_id"].Int64() > 0) {
 			processErr = s.processCollectEvent(ctx, payload.EventId, payload.TenantId, payload.AccountId)
 		} else {
 			processErr = s.processTargetCollectEventWindow(ctx, payload, event)
@@ -642,6 +654,16 @@ func (s *sSysPublish) processCollectSourceTask(ctx context.Context, payload coll
 				return retryErr.delay, true, false, nil
 			}
 			return 0, false, false, err
+		}
+		// A nil business return can mean media was queued, not that the event
+		// finished. Keep the wakeup until its durable state confirms completion.
+		current, readErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).WherePri(payload.EventId).
+			Fields("id,status,material_role,material_group_status,error_message").One()
+		if readErr != nil {
+			return 0, false, false, gerror.Wrap(readErr, "确认采集事件完成状态失败")
+		}
+		if !current.IsEmpty() && !collectProcessEventFinished(current) {
+			return 5 * time.Second, true, false, nil
 		}
 		return 0, false, true, nil
 	}
@@ -854,4 +876,12 @@ func lockCollectProcessEvent(ctx context.Context, payload collectProcessQueuePay
 		return nil, err
 	}
 	return func() { _ = mutex.Unlock(context.Background()) }, nil
+}
+
+// A successful late bind persists this marker before queuing the parent. Never
+// reopen arbitrary ignored/failed events or bypass their authorization checks.
+func collectMaterialLateVerificationRepairCandidate(event gdb.Record) bool {
+	return event["material_role"].String() == collectMaterialRoleDisplay &&
+		event["material_group_status"].String() == "paired" &&
+		(event["status"].String() == sysin.CollectEventStatusProcessed || event["status"].String() == sysin.CollectEventStatusDispatched)
 }

@@ -486,6 +486,24 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 			_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusMediaPending, "验证媒体缓存中")
 			return s.enqueueCollectMediaCache(ctx, collectMediaQueuePayloadFromEvent(event), 0)
 		}
+		if parentEventId <= 0 {
+			return newCollectProcessRetryError(30*time.Second, "验证资料缺少父展示事件，保留任务等待修复")
+		}
+		parent, parentErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).WherePri(parentEventId).One()
+		if parentErr != nil {
+			return gerror.Wrap(parentErr, "读取验证资料父展示事件失败")
+		}
+		if parent.IsEmpty() {
+			return newCollectProcessRetryError(30*time.Second, "父展示事件不存在，保留验证任务")
+		}
+		g.Log().Infof(ctx, "验证资料媒体已完成，调度父展示资料静默截止任务 verifyEventId:%d parentEventId:%d", eventId, parentEventId)
+		if err = s.scheduleCollectDisplaySettlement(ctx, collectProcessQueuePayload{
+			EventId: parentEventId, TenantId: tenantId, AccountId: accountId,
+			SourceId: event["source_id"].Int64(), SourceChatId: event["source_chat_id"].String(),
+		}, parent, 0); err != nil {
+			return err
+		}
+		// Do not acknowledge verification before its parent's durable wakeup.
 		_, err = pdao.YoubanPublishCollectEvent.Ctx(ctx).Where("id", eventId).Data(g.Map{
 			"status":                sysin.CollectEventStatusProcessed,
 			"material_group_status": "ready",
@@ -495,24 +513,6 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		}).Update()
 		if err != nil {
 			return gerror.Wrap(err, "完成验证资料组处理失败")
-		}
-		if parentEventId <= 0 {
-			g.Log().Warningf(ctx, "验证资料已完成但没有父展示事件 eventId:%d", eventId)
-			return nil
-		}
-		parent, parentErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).WherePri(parentEventId).One()
-		if parentErr != nil {
-			return gerror.Wrap(parentErr, "读取验证资料父展示事件失败")
-		}
-		if parent.IsEmpty() {
-			return nil
-		}
-		g.Log().Infof(ctx, "验证资料媒体已完成，调度父展示资料静默截止任务 verifyEventId:%d parentEventId:%d", eventId, parentEventId)
-		if err = s.scheduleCollectDisplaySettlement(ctx, collectProcessQueuePayload{
-			EventId: parentEventId, TenantId: tenantId, AccountId: accountId,
-			SourceId: event["source_id"].Int64(), SourceChatId: event["source_chat_id"].String(),
-		}, parent, 0); err != nil {
-			return err
 		}
 		return nil
 	}

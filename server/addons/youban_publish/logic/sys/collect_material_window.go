@@ -16,6 +16,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/util/guid"
 
+	publishconsts "hotgo/addons/youban_publish/consts"
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/cache"
@@ -451,7 +452,7 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 					if pairErr != nil {
 						return pairErr
 					}
-					pairedAny = pairedAny || paired
+					pairedAny = pairedAny || paired.IsBound()
 				}
 				if !pairedAny {
 					return nil
@@ -506,7 +507,7 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 					if pairErr != nil {
 						return pairErr
 					}
-					if !paired {
+					if !paired.IsBound() {
 						return nil
 					}
 					if err = s.scheduleCollectDisplaySettlement(ctx, payload, storedDisplay, 0); err != nil {
@@ -521,7 +522,7 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 				if pairErr != nil {
 					return pairErr
 				}
-				if !paired {
+				if !paired.IsBound() {
 					return nil
 				}
 				if err = s.scheduleCollectDisplaySettlement(ctx, payload, display, 0); err != nil {
@@ -561,6 +562,11 @@ func (s *sSysPublish) scheduleCollectDisplaySettlement(ctx context.Context, payl
 		return nil
 	}
 	target := payload
+	if payload.EventId != display["id"].Int64() {
+		// An Outbox claim belongs to its original event, never the parent.
+		// Reusing it also reuses the Asynq TaskID and can suppress this wakeup.
+		target.OutboxOwner = ""
+	}
 	target.EventId = display["id"].Int64()
 	target.SourceId = display["source_id"].Int64()
 	target.SourceChatId = display["source_chat_id"].String()
@@ -737,6 +743,7 @@ func collectMaterialLookbackCanClear(result gdb.Record, decided, truncated bool)
 // per attempt, sharing the same execution deadline. Partial history ZSETs cannot prove adjacency, so
 // this path uses a per-verification keyset cursor instead of cached ID filters.
 func (s *sSysPublish) findStoredCollectDisplayEvent(ctx context.Context, verify gdb.Record) (resultRecord gdb.Record, resultErr error) {
+	defer restoreCollectMaterialTransactionContext(ctx)()
 	startedAt := time.Now()
 	parentCtx := ctx
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -931,16 +938,18 @@ func collectMaterialOldParentRepairSafe(parent gdb.Record, hasDispatch, hasOrigi
 	return false
 }
 
-func (s *sSysPublish) bindCollectMaterialPair(ctx context.Context, display gdb.Record, verify gdb.Record) (bool, error) {
+func (s *sSysPublish) bindCollectMaterialPair(ctx context.Context, display gdb.Record, verify gdb.Record) (publishconsts.CollectPairOutcome, error) {
+	defer restoreCollectMaterialTransactionContext(ctx)()
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	cols := pdao.YoubanPublishCollectEvent.Columns()
 
 	if display["id"].Int64() <= 0 || verify["id"].Int64() <= 0 {
-		return false, nil
+		return publishconsts.CollectPairUnresolved, gerror.New("展示或验证事件ID无效")
 	}
 	now := gtime.Now()
-	paired := false
+	outcome := publishconsts.CollectPairUnresolved
+	rejectReason := "展示资料已绑定另一组验证资料"
 	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 
 		// Lock both parents and verify in stable ID order, including the snapshot's
@@ -973,15 +982,61 @@ func (s *sSysPublish) bindCollectMaterialPair(ctx context.Context, display gdb.R
 		if !collectMaterialVerifySnapshotMatches(verify, current) {
 			return newCollectProcessRetryError(5*time.Second, "验证资料分类快照已变化，重新加载后匹配")
 		}
+		for _, field := range []string{cols.TenantId, cols.AccountId, cols.SourceId, cols.TgAccountId} {
+			if parent[field].String() != current[field].String() {
+				return gerror.New("展示和验证资料归属不一致，拒绝配对")
+			}
+		}
+		if !collectMaterialSameSourceChat(parent, current) {
+			return gerror.New("展示和验证资料频道不一致，拒绝配对")
+		}
+		refuse := func(result publishconsts.CollectPairOutcome, reason string) error {
+			// Settle while this verification row is still locked. A late repair
+			// must not overwrite a binding created after the transaction commits.
+			if current["material_parent_event_id"].Int64() > 0 || current[cols.Status].String() == sysin.CollectEventStatusProcessed || current[cols.Status].String() == sysin.CollectEventStatusDispatched {
+				return gerror.New("验证资料已有归属或已完成，拒绝自动丢弃，需显式修复")
+			}
+			status := sysin.CollectEventStatusIgnored
+			if result == publishconsts.CollectPairNeedsRepair {
+				status = sysin.CollectEventStatusFailed
+				reason = "历史配对待人工修复：" + reason
+			}
+			if _, err := tx.Model(pdao.YoubanPublishCollectEvent.Table()).Ctx(ctx).Where(cols.Id, current[cols.Id].Int64()).Data(g.Map{cols.Status: status, cols.ErrorMessage: reason, cols.ProcessedAt: now, cols.UpdatedAt: now}).Update(); err != nil {
+				return err
+			}
+			if result == publishconsts.CollectPairRejected {
+				m := pdao.YoubanPublishCollectEventMedia.Columns()
+				if _, err := tx.Model(pdao.YoubanPublishCollectEventMedia.Table()).Ctx(ctx).Where(m.EventId, current[cols.Id].Int64()).WhereIn(m.CacheStatus, []string{collectMediaCachePending, collectMediaCacheDownloading}).Data(g.Map{m.CacheStatus: collectMediaCacheCanceled, m.ErrorMessage: reason, m.UpdatedAt: now}).Update(); err != nil {
+					return err
+				}
+			}
+			outcome = result
+			rejectReason = reason
+			return nil
+		}
+		// A persisted rejection must not be reopened by a raw-caption match.
+		// Historical parents already attached elsewhere require explicit repair.
+		if parent[cols.Status].String() == sysin.CollectEventStatusIgnored && parent["material_role"].String() != collectMaterialRoleDisplay {
+			return refuse(publishconsts.CollectPairNeedsRepair, "前序消息历史分类不完整")
+		}
+		if parent[cols.Status].String() == sysin.CollectEventStatusIgnored {
+			return refuse(publishconsts.CollectPairRejected, "父展示资料已忽略："+parent[cols.ErrorMessage].String())
+		}
+		if role := parent["material_role"].String(); role != "" && role != collectMaterialRolePending && role != collectMaterialRoleDisplay {
+			return refuse(publishconsts.CollectPairNeedsRepair, "前序消息已归属其他资料")
+		}
 		repairing := oldParentID > 0 && oldParentID != parent[cols.Id].Int64()
 		if repairing {
 			if current["processed_at"].GTime() != nil || current["status"].String() == sysin.CollectEventStatusProcessed || current["status"].String() == sysin.CollectEventStatusDispatched {
 				return gerror.New("验证事件已完成或已分发，需显式资料修复")
 			}
-			for _, field := range []string{cols.TenantId, cols.AccountId, cols.SourceId, cols.SourceChatId} {
+			for _, field := range []string{cols.TenantId, cols.AccountId, cols.SourceId} {
 				if oldParent[field].String() != parent[field].String() {
 					return gerror.New("验证资料旧父关系跨来源，需显式资料修复")
 				}
+			}
+			if !collectMaterialSameSourceChat(oldParent, parent) {
+				return gerror.New("验证资料旧父关系跨频道，需显式资料修复")
 			}
 			d := pdao.YoubanPublishCollectDispatch.Columns()
 			dispatched, readErr := tx.Model(pdao.YoubanPublishCollectDispatch.Table()).Ctx(ctx).
@@ -999,7 +1054,7 @@ func (s *sSysPublish) bindCollectMaterialPair(ctx context.Context, display gdb.R
 			}
 			sibling, readErr := tx.Model(pdao.YoubanPublishCollectEvent.Table()).Ctx(ctx).
 				Where(cols.TenantId, parent[cols.TenantId].Int64()).Where(cols.AccountId, parent[cols.AccountId].Int64()).
-				Where(cols.SourceId, parent[cols.SourceId].Int64()).Where(cols.SourceChatId, parent[cols.SourceChatId].String()).
+				Where(cols.SourceId, parent[cols.SourceId].Int64()).WhereIn(cols.SourceChatId, tgChannelCacheLookupIds(parent[cols.SourceChatId].String())).
 				Where("material_role", collectMaterialRoleVerify).Where("material_parent_event_id", oldParentID).
 				Where(cols.Id+" <> ?", verify[cols.Id].Int64()).Fields(cols.Id).Limit(1).One()
 			if readErr != nil {
@@ -1008,6 +1063,28 @@ func (s *sSysPublish) bindCollectMaterialPair(ctx context.Context, display gdb.R
 			if !collectMaterialOldParentRepairSafe(oldParent, !dispatched.IsEmpty(), !origin.IsEmpty(), !sibling.IsEmpty()) {
 				return gerror.New("验证资料旧父关系可能已入库、已分发或包含其他验证事件，需显式资料修复")
 			}
+		}
+
+		// Reject a different verification group with an indexed existence probe;
+		// all members of the same nonempty grouped_id remain one logical group.
+		conflict := tx.Model(pdao.YoubanPublishCollectEvent.Table()).Ctx(ctx).
+			Where(cols.TenantId, display[cols.TenantId].Int64()).Where(cols.AccountId, display[cols.AccountId].Int64()).
+			Where(cols.SourceId, display[cols.SourceId].Int64()).WhereIn(cols.SourceChatId, tgChannelCacheLookupIds(parent[cols.SourceChatId].String())).
+			Where("material_parent_event_id", display[cols.Id].Int64()).Where("material_role", collectMaterialRoleVerify).
+			Where(cols.Id+" <> ?", verify[cols.Id].Int64())
+		group := strings.TrimSpace(verify[cols.SourceGroupedId].String())
+		if group != "" {
+			conflict = conflict.Where("COALESCE("+cols.SourceGroupedId+",'') <> ?", group)
+		}
+		child, txErr := conflict.Fields(cols.Id).Limit(1).One()
+		if txErr != nil {
+			return txErr
+		}
+		if !child.IsEmpty() {
+			if repairing {
+				return gerror.New("新展示已绑定另一验证组，需显式资料修复")
+			}
+			return refuse(publishconsts.CollectPairRejected, "展示资料已绑定另一组验证资料")
 		}
 
 		// Validate only the actual pairing interval under the parent lock.
@@ -1025,30 +1102,8 @@ func (s *sSysPublish) bindCollectMaterialPair(ctx context.Context, display gdb.R
 			return newCollectProcessRetryError(5*time.Second, "配对区间已变化，清理回看游标后从头重查")
 		}
 
-		// Reject a different verification group with an indexed existence probe;
-		// all members of the same nonempty grouped_id remain one logical group.
-		conflict := tx.Model(pdao.YoubanPublishCollectEvent.Table()).Ctx(ctx).
-			Where(cols.TenantId, display[cols.TenantId].Int64()).Where(cols.AccountId, display[cols.AccountId].Int64()).
-			Where(cols.SourceId, display[cols.SourceId].Int64()).Where(cols.SourceChatId, parent[cols.SourceChatId].String()).
-			Where("material_parent_event_id", display[cols.Id].Int64()).Where("material_role", collectMaterialRoleVerify).
-			Where(cols.Id+" <> ?", verify[cols.Id].Int64())
-		group := strings.TrimSpace(verify[cols.SourceGroupedId].String())
-		if group != "" {
-			conflict = conflict.Where("COALESCE("+cols.SourceGroupedId+",'') <> ?", group)
-		}
-		child, txErr := conflict.Fields(cols.Id).Limit(1).One()
-		if txErr != nil {
-			return txErr
-		}
-		if !child.IsEmpty() {
-			if repairing {
-				return gerror.New("新展示已绑定另一验证组，需显式资料修复")
-			}
-			return nil
-		}
-
 		if current["material_role"].String() == collectMaterialRoleVerify && current["material_parent_event_id"].Int64() == display[cols.Id].Int64() {
-			paired = true
+			outcome = publishconsts.CollectPairAlreadyBound
 			return nil
 		}
 
@@ -1072,7 +1127,7 @@ func (s *sSysPublish) bindCollectMaterialPair(ctx context.Context, display gdb.R
 			return gerror.Wrap(txErr, "确认资料展示组绑定结果失败")
 		}
 		if affected == 0 {
-			return nil
+			return errCollectMaterialPairRace
 		}
 		verifyModel := tx.Model(pdao.YoubanPublishCollectEvent.Table()).Ctx(ctx).Where(cols.Id, verify[cols.Id].Int64())
 		if repairing {
@@ -1102,20 +1157,28 @@ func (s *sSysPublish) bindCollectMaterialPair(ctx context.Context, display gdb.R
 				return updateErr
 			}
 		}
-		paired = true
+		outcome = publishconsts.CollectPairBound
 		return nil
 	})
 	if errors.Is(err, errCollectMaterialPairRace) {
 		g.Log().Infof(ctx, "采集验证组配对竞态已恢复重试 displayEventId:%d verifyEventId:%d", display["id"].Int64(), verify["id"].Int64())
 		// 另一 Worker 已经完成配对；当前事件必须回到 Outbox 重试，不能被当成成功结束。
-		return false, newCollectProcessRetryError(2*time.Second, "资料组正在被其他Worker配对，稍后重试")
+		return publishconsts.CollectPairUnresolved, newCollectProcessRetryError(2*time.Second, "资料组正在被其他Worker配对，稍后重试")
 	}
 	if err != nil {
-		return false, err
+		return publishconsts.CollectPairUnresolved, err
 	}
-	if !paired {
-		g.Log().Infof(ctx, "采集资料组配对竞态已跳过 displayEventId:%d verifyEventId:%d", display["id"].Int64(), verify["id"].Int64())
-		return false, nil
+	if outcome == publishconsts.CollectPairNeedsRepair || outcome == publishconsts.CollectPairRejected {
+		stage := "collect.pair.rejected"
+		if outcome == publishconsts.CollectPairNeedsRepair {
+			stage = "collect.pair.needs_repair"
+		}
+		g.Log().Warning(ctx, "验证配对已记录明确结果", g.Map{"stage": stage, "displayEventId": display["id"].Int64(), "verifyEventId": verify["id"].Int64(), "reason": rejectReason})
+		s.appendCollectEventLogForRecord(ctx, verify, "group", stage, rejectReason, "")
+		return outcome, nil
+	}
+	if !outcome.IsBound() {
+		return publishconsts.CollectPairUnresolved, newCollectProcessRetryError(2*time.Second, "配对未完成，重新加载后重试")
 	}
 
 	// The transaction has committed, so the pagination proof can now be dropped.
@@ -1127,7 +1190,7 @@ func (s *sSysPublish) bindCollectMaterialPair(ctx context.Context, display gdb.R
 	}
 	g.Log().Infof(ctx, "采集资料组绑定完成 chat:%s displayEventId:%d verifyEventId:%d", strings.TrimSpace(display["source_chat_id"].String()), display["id"].Int64(), verify["id"].Int64())
 	s.appendCollectEventLogForRecord(ctx, display, "group", "paired", "展示资料与验证资料已在同一窗口配对", fmt.Sprintf(`{"verifyEventId":%d}`, verify["id"].Int64()))
-	return true, nil
+	return outcome, nil
 }
 
 // isCanonicalCollectMaterialPair validates against every persisted event in
@@ -1135,15 +1198,20 @@ func (s *sSysPublish) bindCollectMaterialPair(ctx context.Context, display gdb.R
 // processing windows intentionally filter those rows, but that filter must not
 // allow an older display to steal a verification video from a closer display.
 func (s *sSysPublish) isCanonicalCollectMaterialPair(ctx context.Context, display, verify gdb.Record) (bool, error) {
+	defer restoreCollectMaterialTransactionContext(ctx)()
 	displayMessageID := display["source_message_id"].Int64()
 	verifyMessageID := verify["source_message_id"].Int64()
 	if displayMessageID <= 0 || verifyMessageID <= displayMessageID {
 		return false, nil
 	}
-	for _, field := range []string{"tenant_id", "account_id", "tg_account_id", "source_id", "source_chat_id"} {
+	for _, field := range []string{"tenant_id", "account_id", "tg_account_id", "source_id"} {
 		if display[field].String() != verify[field].String() {
 			return false, nil
 		}
+	}
+
+	if !collectMaterialSameSourceChat(display, verify) {
+		return false, nil
 	}
 
 	displayAt := display["received_at"].GTime()
@@ -1170,7 +1238,7 @@ func (s *sSysPublish) isCanonicalCollectMaterialPair(ctx context.Context, displa
 		model := pdao.YoubanPublishCollectEvent.Ctx(ctx).
 			Where(cols.TenantId, verify[cols.TenantId].Int64()).Where(cols.AccountId, verify[cols.AccountId].Int64()).
 			Where(cols.SourceId, verify[cols.SourceId].Int64()).Where(cols.TgAccountId, verify[cols.TgAccountId].Int64()).
-			Where(cols.SourceChatId, verify[cols.SourceChatId].String()).
+			WhereIn(cols.SourceChatId, tgChannelCacheLookupIds(verify[cols.SourceChatId].String())).
 			Where(cols.SourceMessageId+" >= ? AND "+cols.SourceMessageId+" < ?", displayMessageID, verifyMessageID)
 		if after.MessageID > 0 {
 			model = model.Where("("+cols.SourceMessageId+"<? OR ("+cols.SourceMessageId+"=? AND "+cols.Id+"<?))", after.MessageID, after.MessageID, after.EventID)
@@ -1431,6 +1499,12 @@ func collectMaterialDatabaseWallClock(value *gtime.Time) time.Time {
 	)
 }
 
+// Compare legacy and Bot API channel IDs without rewriting raw event identity.
+func collectMaterialSameSourceChat(left, right gdb.Record) bool {
+	chat := canonicalCollectSourceChatID(left["source_chat_id"].String())
+	return chat != "" && chat == canonicalCollectSourceChatID(right["source_chat_id"].String())
+}
+
 // A lookup timeout proves neither absence nor a classification failure. Leave
 // the cursor and event intact and yield to another task before retrying.
 func collectMaterialLookbackRetryError(parent, lookup context.Context, err error) error {
@@ -1504,4 +1578,15 @@ func collectMaterialLookbackPostgresSQL(verify gdb.Record, verifyAt *gtime.Time,
 		args = append(args, cursor.HighWaterID, cursor.MessageID, cursor.MessageID, cursor.EventID)
 	}
 	return query + " ORDER BY " + cols.SourceMessageId + " DESC," + cols.Id + " DESC LIMIT ?", append(args, limit)
+}
+
+// GoFrame reuses TXCore across nested contexts. Restore its caller context
+// before returning so canceling a bounded lookup cannot poison a savepoint.
+func restoreCollectMaterialTransactionContext(ctx context.Context) func() {
+	tx := gdb.TXFromCtx(ctx, g.DB().GetGroup())
+	if tx == nil {
+		return func() {}
+	}
+	previous := tx.GetCtx()
+	return func() { tx.Ctx(previous) }
 }

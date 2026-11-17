@@ -716,7 +716,7 @@ func (s *sSysPublish) applyIgnoredVerificationEvents(ctx context.Context, eventI
 			continue
 		}
 		paired, err := s.bindCollectMaterialPair(ctx, display, verify)
-		if err != nil || !paired {
+		if err != nil || !paired.IsBound() {
 			failed = append(failed, eventID)
 			continue
 		}

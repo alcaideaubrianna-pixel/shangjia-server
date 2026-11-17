@@ -51,7 +51,7 @@ func (s *sSysPublish) AIOpsRecoverIgnoredCollectVerifications(ctx context.Contex
 			continue
 		}
 		paired, pairErr := s.bindCollectMaterialPair(ctx, display, verify)
-		if pairErr != nil || !paired {
+		if pairErr != nil || !paired.IsBound() {
 			failed = append(failed, verifyID)
 			continue
 		}
