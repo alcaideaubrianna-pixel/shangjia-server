@@ -157,10 +157,19 @@ func runCollectTargetBatch(ctx context.Context, ops collectTargetBatchOps, now t
 	return newCollectProcessRetryError(delay, "采集批次完成，等待事件终态确认")
 }
 
-func collectTargetBatchProcessIDs(rows gdb.Result) map[int64]struct{} {
+func collectTargetBatchProcessIDs(rows gdb.Result, targets ...int64) map[int64]struct{} {
+	targetID := int64(0)
+	if len(targets) > 0 {
+		targetID = targets[0]
+	}
 	ids := make(map[int64]struct{}, len(rows))
 	for _, row := range rows {
 		if id := row["id"].Int64(); id > 0 {
+			// Unmatched ignored verification is passive pairing context. An explicit
+			// durable target may still process itself, but must not poll its peers.
+			if id != targetID && collectMaterialEventNeedsPairRepair(row) {
+				continue
+			}
 			ids[id] = struct{}{}
 		}
 	}

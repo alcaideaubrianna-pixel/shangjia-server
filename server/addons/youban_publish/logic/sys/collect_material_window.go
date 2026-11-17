@@ -330,7 +330,7 @@ func (s *sSysPublish) processTargetCollectEventWindow(ctx context.Context, paylo
 			}
 			visits := &collectTargetBatchVisit{}
 			batchCtx := context.WithValue(ctx, collectTargetBatchVisitKey{}, visits)
-			processErr := s.processCollectMessageWindow(batchCtx, payload, payload.SourceChatId, rows, collectTargetBatchProcessIDs(rows), truncated)
+			processErr := s.processCollectMessageWindow(batchCtx, payload, payload.SourceChatId, rows, collectTargetBatchProcessIDs(rows, target["id"].Int64()), truncated)
 			coveredIDs = visits.ids
 			return processErr
 		},
@@ -338,6 +338,18 @@ func (s *sSysPublish) processTargetCollectEventWindow(ctx context.Context, paylo
 }
 
 func (s *sSysPublish) loadTargetCollectMaterialWindow(ctx context.Context, payload collectProcessQueuePayload, target gdb.Record, eventAt *gtime.Time) (gdb.Result, bool, error) {
+	// A legacy Bot task may carry account 0 while the stored event already has
+	// a business owner, or vice versa. Query one exact storage account; never
+	// relax ownership to every account in this source.
+	targetAccount := collectEventStorageAccountID(target)
+	if targetAccount < 0 || payload.AccountId < 0 {
+		return nil, false, gerror.New("采集窗口账户归属无效")
+	}
+	if payload.AccountId > 0 && targetAccount > 0 && payload.AccountId != targetAccount {
+		return nil, false, gerror.New("采集窗口任务与目标事件账户归属不一致")
+	}
+	storagePayload := payload
+	storagePayload.AccountId = targetAccount
 	// The current durable target is always the anchor. Source candidates can
 	// contain old history/waiting_verify rows; never move realtime back to them.
 	if !cache.Initialized() {
@@ -348,7 +360,8 @@ func (s *sSysPublish) loadTargetCollectMaterialWindow(ctx context.Context, paylo
 	}
 	maxRows := collectMaterialWindowMaxRows(ctx)
 	load := func(verifyOnly bool) (gdb.Result, error) {
-		model := collectMaterialWindowModel(ctx, payload, verifyOnly).
+		model := collectMaterialWindowModel(ctx, storagePayload, verifyOnly).
+			Where("e.account_id", targetAccount).
 			Where("e.source_message_id >= ?", target["source_message_id"].Int64()).
 			Where("(e.received_at >= ? OR (e.received_at IS NULL AND e.created_at >= ?))", eventAt.Add(-collectMaterialVerifyWindow()), eventAt.Add(-collectMaterialVerifyWindow())).
 			// Keep the timestamp predicate sargable for rows with and without
@@ -361,7 +374,7 @@ func (s *sSysPublish) loadTargetCollectMaterialWindow(ctx context.Context, paylo
 		// must not hide it when the previously missing display has just arrived.
 		if !verifyOnly {
 			model = model.Where("e.processed_at IS NULL").
-				Where(collectMaterialGroupReadyCondition(), collectMaterialGroupWaitingVerify)
+				Where("("+collectMaterialGroupReadyCondition()+" OR e.id = ?)", collectMaterialGroupWaitingVerify, target["id"].Int64())
 		}
 		query := model.Fields("e.*").OrderAsc("e.source_message_id").OrderAsc("e.id").Limit(maxRows + 1)
 		kind := collectWindowQueryPrimary
@@ -612,18 +625,26 @@ func (s *sSysPublish) wakePreviousCollectDisplay(ctx context.Context, payload co
 }
 
 func (s *sSysPublish) collectDisplayRetryDelay(ctx context.Context, display gdb.Record) time.Duration {
-	deadline := collectMaterialEventAt(display).Add(collectMaterialVerifyWindow() + collectMaterialVerifySettleDelay)
-	if verifies, err := s.pairedCollectVerifyEvents(ctx, display["id"].Int64()); err == nil && len(verifies) > 0 {
+	verifies, _ := s.pairedCollectVerifyEvents(ctx, display["id"].Int64())
+	return collectDisplayRetryDelayFromEvents(display, verifies, time.Now())
+}
+
+// Waiting for a missing verification starts at business ingestion, just like
+// collectMaterialShouldWaitForVerify. Source timestamps still govern pairing
+// eligibility, and an existing paired video's settle time is unchanged.
+func collectDisplayRetryDelayFromEvents(display gdb.Record, verifies gdb.Result, now time.Time) time.Duration {
+	maximum := collectMaterialEventCreatedAt(display).Add(collectMaterialVerifyWindow() + collectMaterialVerifySettleDelay)
+	deadline := maximum
+	if len(verifies) > 0 {
 		latest := collectMaterialEventAt(verifies[len(verifies)-1])
 		if !latest.IsZero() {
 			deadline = latest.Add(collectMaterialVerifySettleDelay)
-			maximum := collectMaterialEventAt(display).Add(collectMaterialVerifyWindow() + collectMaterialVerifySettleDelay)
 			if !maximum.IsZero() && maximum.Before(deadline) {
 				deadline = maximum
 			}
 		}
 	}
-	delay := time.Until(deadline)
+	delay := deadline.Sub(now)
 	if delay < collectProcessMinimumDelay {
 		return collectProcessMinimumDelay
 	}
