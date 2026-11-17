@@ -170,6 +170,25 @@ func TestProfileMediaValidationLocalPostgres(t *testing.T) {
 		if !errors.Is(err, errProfileMediaValidation) {
 			t.Fatalf("unbounded operation age: %v", err)
 		}
+		// No active media is a domain validation/write-wait result, never a
+		// struct-scan sql.ErrNoRows. Soft-deleted media must not make it ready.
+		if _, err = tx.Exec(`DELETE FROM hg_youban_publish_profile_media_operation`); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(`UPDATE hg_youban_publish_media SET deleted_at=NOW()`); err != nil {
+			return err
+		}
+		ready, err = s.profileMediaReady(ctx, 1)
+		if ready || !errors.Is(err, errProfileMediaValidation) {
+			t.Fatalf("empty active media must fail validation: ready=%v err=%v", ready, err)
+		}
+		if _, err = tx.Exec(`INSERT INTO hg_youban_publish_profile_media_operation VALUES('T00001',7,8,'processing',1,?)`, time.Now().In(dbtime.Location())); err != nil {
+			return err
+		}
+		ready, err = s.profileMediaReady(ctx, 1)
+		if ready || err != nil {
+			t.Fatalf("empty in-progress write must wait: ready=%v err=%v", ready, err)
+		}
 		// Exact production CAS must not touch in-flight or unknown results.
 		for i, status := range []string{telegramJobStatusPending, telegramJobStatusRetryWait, telegramJobStatusSending, telegramJobStatusConfirming} {
 			if _, err = tx.Exec(`INSERT INTO hg_youban_publish_tg_job(id,status,send_phase) VALUES(?,?,'')`, i+1, status); err != nil {

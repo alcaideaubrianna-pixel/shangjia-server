@@ -302,15 +302,26 @@ func (s *sSysPublish) profileMediaReady(ctx context.Context, profileId int64) (b
 	if state.IsEmpty() {
 		return false, errTelegramProfileMissing
 	}
-	var counts profileMediaReadinessCounts
-	if err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+	// An asynchronous profile write may not have inserted any media yet.
+	// Read an optional record instead of Scan(&struct), which treats an empty
+	// result as sql.ErrNoRows. Zero counts must still pass the existing bounded
+	// write-wait and validation checks below; they never mean media is ready.
+	row, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 		Where("profile_id", profileId).WhereNull("deleted_at").
-		Fields("SUM(CASE WHEN purpose='display' THEN 1 ELSE 0 END) AS display_count, " +
-			"SUM(CASE WHEN purpose='verify' THEN 1 ELSE 0 END) AS verify_count, " +
-			"SUM(CASE WHEN processing_status IS NULL OR processing_status NOT IN ('" + strings.Join(terminalMediaProcessingStatuses(), "','") + "') THEN 1 ELSE 0 END) AS pending_count, " +
-			"SUM(CASE WHEN processing_status='failed' AND COALESCE(file_url,'')='' AND COALESCE(storage_path,'')='' AND COALESCE(tg_file_id,'')='' AND COALESCE(processed_tg_file_id,'')='' THEN 1 ELSE 0 END) AS unavailable_count").
-		Scan(&counts); err != nil {
+		Fields("COALESCE(SUM(CASE WHEN purpose='display' THEN 1 ELSE 0 END),0) AS display_count, " +
+			"COALESCE(SUM(CASE WHEN purpose='verify' THEN 1 ELSE 0 END),0) AS verify_count, " +
+			"COALESCE(SUM(CASE WHEN processing_status IS NULL OR processing_status NOT IN ('" + strings.Join(terminalMediaProcessingStatuses(), "','") + "') THEN 1 ELSE 0 END),0) AS pending_count, " +
+			"COALESCE(SUM(CASE WHEN processing_status='failed' AND COALESCE(file_url,'')='' AND COALESCE(storage_path,'')='' AND COALESCE(tg_file_id,'')='' AND COALESCE(processed_tg_file_id,'')='' THEN 1 ELSE 0 END),0) AS unavailable_count").
+		One()
+	if err != nil {
 		return false, gerror.Wrap(err, "统计资料媒体状态失败")
+	}
+	counts := profileMediaReadinessCounts{}
+	if !row.IsEmpty() {
+		counts.Display = row["display_count"].Int()
+		counts.Verify = row["verify_count"].Int()
+		counts.Pending = row["pending_count"].Int()
+		counts.Unavailable = row["unavailable_count"].Int()
 	}
 	// 数量齐全时不额外查询异步操作，正常路径只需两次 SQL。
 	expectedDisplay, expectedVerify := state["expected_display_media_count"].Int(), state["expected_verify_media_count"].Int()
