@@ -129,7 +129,7 @@
     await Promise.all([loadAccounts(), loadRecords()]);
   });
 
-  function createPagination(loader: () => void, pageSize = 20) {
+  function createPagination(loader: () => void, pageSize = 10) {
     const changePage = (value: number) => {
       page.page = value;
       loader();

@@ -30,3 +30,18 @@ func TestPublishRecordFilterValidatesTypedStatus(t *testing.T) {
 		}
 	}
 }
+
+func TestPublishRecordFilterPagination(t *testing.T) {
+	for _, tc := range []struct{ page, size, wantPage, wantSize int }{
+		{0, 0, 1, 10}, {-1, -1, 1, 10}, {2, 10, 2, 10}, {3, 50, 3, 50},
+	} {
+		in := &PublishRecordListInp{}
+		in.Page, in.PerPage = tc.page, tc.size
+		if err := in.Filter(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if in.Page != tc.wantPage || in.PerPage != tc.wantSize {
+			t.Fatalf("page=%d size=%d want page=%d size=%d", in.Page, in.PerPage, tc.wantPage, tc.wantSize)
+		}
+	}
+}

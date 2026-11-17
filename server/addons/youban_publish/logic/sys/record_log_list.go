@@ -45,7 +45,7 @@ func (s *sSysPublish) publishRecordListFromLog(ctx context.Context, in *sysin.Pu
 		return nil, 0, gerror.Wrap(err, "获取发送记录总数失败")
 	}
 	normalizePublishRecordPage(in, total)
-	err = mod.Fields("l.id,l.job_id,l.task_id,l.tenant_id,l.account_id,l.profile_id,l.channel_id,l.bot_id,l.operation_no,l.target_chat_id,l.action,"+publishRecordStatusExpression+" AS status,"+publishRecordMessageExpression+" AS message,l.created_at,l.title,l.account_name,l.tenant_name,l.bot_name,l.bot_username,l.channel_title,l.channel_username").Page(in.Page, in.PerPage).OrderDesc("l.id").Scan(&list)
+	err = mod.Fields("l.id,l.job_id,l.task_id,l.tenant_id,l.account_id,l.profile_id,l.channel_id,l.bot_id,l.operation_no,l.target_chat_id,l.action,"+publishRecordStatusExpression+" AS status,"+publishRecordMessageExpression+" AS message,l.created_at,l.title,l.account_name,l.tenant_name,l.bot_name,l.bot_username,l.channel_title,l.channel_username").Page(in.Page, in.PerPage).OrderDesc("l.created_at").OrderDesc("l.id").Scan(&list)
 	if err != nil {
 		return nil, 0, gerror.Wrap(err, "获取发送记录失败")
 	}
@@ -53,9 +53,6 @@ func (s *sSysPublish) publishRecordListFromLog(ctx context.Context, in *sysin.Pu
 		if item != nil && item.Message == "" {
 			item.Message = publishJobRecordMessage(item.Action, item.Status)
 		}
-	}
-	if err := s.enrichPublishRecordFullPushProgress(ctx, list); err != nil {
-		return nil, 0, err
 	}
 	normalizeCollectPublishRecordActions(list)
 	return list, total, nil

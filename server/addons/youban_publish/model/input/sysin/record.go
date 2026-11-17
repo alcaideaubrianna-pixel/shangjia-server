@@ -61,6 +61,12 @@ type TgObserveBotListInp struct {
 }
 
 func (in *PublishRecordListInp) Filter(ctx context.Context) error {
+	if in.Page <= 0 {
+		in.Page = 1
+	}
+	if in.PerPage <= 0 {
+		in.PerPage = 10
+	}
 	in.Action = strings.TrimSpace(in.Action)
 	in.Keyword = strings.TrimSpace(in.Keyword)
 	raw := strings.TrimSpace(in.Status.String())
