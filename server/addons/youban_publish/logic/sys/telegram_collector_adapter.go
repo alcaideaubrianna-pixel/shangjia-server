@@ -1700,7 +1700,9 @@ func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, sourc
 			return false, err
 		}
 	} else {
-		_, _ = pdao.YoubanPublishCollectChannel.Ctx(ctx).Where("id", channel.Id).Data(g.Map{"last_message_id": delivery.SourceMessageID, "last_message_at": now, "last_seen_at": now, "updated_at": now}).Update()
+		if err := s.touchCollectChannelProgress(ctx, tenantID, channel.Id, delivery.SourceMessageID); err != nil {
+			g.Log().Warning(ctx, "写入采集频道进度失败", g.Map{"tenantId": tenantID, "channelId": channel.Id, "sourceId": delivery.SourceID, "error": err.Error()})
+		}
 	}
 	_ = s.touchCollectBotChannel(ctx, tenantID, botID, chatID, now)
 	if relation.Id > 0 {

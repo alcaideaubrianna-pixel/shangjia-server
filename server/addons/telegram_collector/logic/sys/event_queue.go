@@ -126,9 +126,19 @@ func (s *sCollector) StopRuntime() {
 	s.queueMu.Lock()
 	inspector := s.queueInspector
 	s.queueInspector = nil
+	batch := s.historyEventBatch
+	s.historyEventBatch = nil
+	deliveryBatch := s.historyDeliveryBatch
+	s.historyDeliveryBatch = nil
 	s.queueMu.Unlock()
 	if inspector != nil {
 		_ = inspector.Close()
+	}
+	if batch != nil {
+		batch.Close()
+	}
+	if deliveryBatch != nil {
+		deliveryBatch.Close()
 	}
 }
 
@@ -244,16 +254,29 @@ func (s *sCollector) processEvent(ctx context.Context, eventID int64) (err error
 	now := gtime.Now()
 	executionOwner := guid.S()
 	claimStarted := time.Now()
-	result, err := dao.TgCollectorEvent.Ctx(ctx).
-		Where(columns.Id, eventID).
-		WhereIn(columns.Status, []string{sysin.EventStatusReceived, sysin.EventStatusFailedRetry}).
-		Data(g.Map{
-			columns.Status:       sysin.EventStatusProcessing,
-			columns.LeaseOwner:   executionOwner,
-			columns.LeaseUntil:   now.Add(eventLeaseDuration),
-			columns.AttemptCount: gdb.Raw(columns.AttemptCount + "+1"),
-			columns.UpdatedAt:    now,
-		}).Update()
+	var affected int64
+	batched := historyEventBatchEnabled(ctx)
+	if batched {
+		row, err = s.historyEventWriter(ctx).Do(ctx, historyEventMutation{Kind: historyEventClaim, ID: eventID, Owner: executionOwner})
+		if err == nil && row.Id > 0 {
+			affected = 1
+		}
+	} else {
+		result, claimErr := dao.TgCollectorEvent.Ctx(ctx).
+			Where(columns.Id, eventID).
+			WhereIn(columns.Status, []string{sysin.EventStatusReceived, sysin.EventStatusFailedRetry}).
+			Data(g.Map{
+				columns.Status:       sysin.EventStatusProcessing,
+				columns.LeaseOwner:   executionOwner,
+				columns.LeaseUntil:   now.Add(eventLeaseDuration),
+				columns.AttemptCount: gdb.Raw(columns.AttemptCount + "+1"),
+				columns.UpdatedAt:    now,
+			}).Update()
+		err = claimErr
+		if err == nil {
+			affected, err = result.RowsAffected()
+		}
+	}
 	claimDuration := time.Since(claimStarted).Milliseconds()
 	if err != nil {
 		recordCollectorStage(ctx, collectorStageEventClaim, observation.meta, collectorResultError, time.Since(claimStarted), err)
@@ -261,12 +284,8 @@ func (s *sCollector) processEvent(ctx context.Context, eventID int64) (err error
 			g.Map{"claimDurationMs": claimDuration})
 		return gerror.Wrap(err, "领取Telegram采集事件失败")
 	}
-	affected, affectedErr := result.RowsAffected()
-	if affectedErr != nil {
-		recordCollectorStage(ctx, collectorStageEventClaim, observation.meta, collectorResultError, time.Since(claimStarted), affectedErr)
-		return gerror.Wrap(affectedErr, "确认Telegram采集事件领取结果失败")
-	}
 	if affected == 0 {
+		row.Id = eventID
 		recordCollectorStage(ctx, collectorStageEventClaim, observation.meta, collectorResultSkipped, time.Since(claimStarted), nil)
 		observeResult = collectorResultSkipped
 		logCollectorPipelineStage(ctx, &row, "event.claim.skipped", pipelineStarted, nil, nil,
@@ -277,11 +296,14 @@ func (s *sCollector) processEvent(ctx context.Context, eventID int64) (err error
 	logCollectorPipelineStage(ctx, &row, "event.claimed", pipelineStarted, nil, nil,
 		g.Map{"claimDurationMs": claimDuration, "rowsAffected": affected})
 	readStarted := time.Now()
-	if err = dao.TgCollectorEvent.Ctx(ctx).WherePri(eventID).Where(columns.Status, sysin.EventStatusProcessing).Where(columns.LeaseOwner, executionOwner).Scan(&row); err != nil {
+	if !batched {
+		err = dao.TgCollectorEvent.Ctx(ctx).WherePri(eventID).Where(columns.Status, sysin.EventStatusProcessing).Where(columns.LeaseOwner, executionOwner).Scan(&row)
+	}
+	if err != nil {
 		recordCollectorStage(ctx, collectorStageEventRead, observation.meta, collectorResultError, time.Since(readStarted), err)
 		logCollectorPipelineStage(ctx, &row, "event.load.failed", pipelineStarted, nil, err,
 			g.Map{"readDurationMs": time.Since(readStarted).Milliseconds()})
-		return s.failEvent(ctx, eventID, executionOwner, err)
+		return s.failEvent(ctx, eventID, executionOwner, err, &row)
 	}
 	if row.LeaseOwner != executionOwner || row.Status != sysin.EventStatusProcessing {
 		err = gerror.New("采集执行归属已变化，停止旧执行")
@@ -298,9 +320,9 @@ func (s *sCollector) processEvent(ctx context.Context, eventID int64) (err error
 	ctx, observation.meta = collectorObservationContext(ctx, observation.meta)
 	recordCollectorStage(ctx, collectorStageEventRead, observation.meta, collectorResultOK, time.Since(readStarted), nil)
 	logCollectorPipelineStage(ctx, &row, "event.loaded", pipelineStarted, nil, nil,
-		g.Map{"readDurationMs": time.Since(readStarted).Milliseconds(), "claimDurationMs": claimDuration})
+		g.Map{"readDurationMs": time.Since(readStarted).Milliseconds(), "claimDurationMs": claimDuration, "readFromClaim": batched})
 	if row.RawUpdate == nil {
-		return s.failEvent(ctx, eventID, executionOwner, gerror.New("Telegram原始事件为空"))
+		return s.failEvent(ctx, eventID, executionOwner, gerror.New("Telegram原始事件为空"), &row)
 	}
 	parseStarted := time.Now()
 	raw := []byte(row.RawUpdate.String())
@@ -312,7 +334,7 @@ func (s *sCollector) processEvent(ctx context.Context, eventID int64) (err error
 	}
 	recordCollectorStage(ctx, collectorStageEventParse, observation.meta, collectorResultOK, time.Since(parseStarted), err)
 	if err != nil {
-		return s.failEvent(ctx, eventID, executionOwner, err)
+		return s.failEvent(ctx, eventID, executionOwner, err, &row)
 	}
 	// An execution lane is assigned at enqueue/legacy drain, never by elapsed age.
 	if eventQueueIsHistory(collectorQueueName(ctx)) {
@@ -327,7 +349,7 @@ func (s *sCollector) processEvent(ctx context.Context, eventID int64) (err error
 	err = s.handoffCollectorEvent(dispatchCtx, &row, &delivery)
 	dispatchObservation.Finish(collectorResultOK, err)
 	if err != nil {
-		return s.failEvent(ctx, eventID, executionOwner, err)
+		return s.failEvent(ctx, eventID, executionOwner, err, &row)
 	}
 	observeResult = collectorResultOK
 	return nil
@@ -514,25 +536,33 @@ func (s *sCollector) saveDelivery(ctx context.Context, delivery *sysin.Collector
 	// One bounded fallback handles a stable identity left pointing at an old
 	// database row after a restore. Never modify the old completed delivery.
 	for attempt := 0; attempt < 2; attempt++ {
-		now := gtime.Now()
-		data := g.Map{
-			columns.TenantId: delivery.TenantID, columns.EventId: delivery.EventID,
-			columns.DeliveryKey: delivery.DeliveryKey, columns.Status: sysin.DeliveryStatusPending,
-			columns.Priority: deliveryPriority(delivery), columns.CreatedAt: now, columns.UpdatedAt: now,
-			"source_id": delivery.SourceID, "account_id": delivery.AccountID,
-			"scheduler_pool": deliverySchedulerPool(delivery),
-		}
-		_, err := dao.TgCollectorDelivery.Ctx(ctx).Data(data).OnConflict(columns.TenantId + "," + columns.DeliveryKey).
-			OnDuplicate(g.Map{columns.DeliveryKey: conflictIncomingColumn(ctx, columns.DeliveryKey)}).Save()
-		if err != nil {
-			return 0, gerror.Wrap(err, "保存Telegram采集交付失败")
-		}
 		var row entity.TgCollectorDelivery
-		if err = dao.TgCollectorDelivery.Ctx(ctx).
-			Fields(columns.Id, columns.EventId).
-			Where(columns.TenantId, delivery.TenantID).
-			Where(columns.DeliveryKey, delivery.DeliveryKey).Scan(&row); err != nil {
-			return 0, gerror.Wrap(err, "读取Telegram采集交付失败")
+		if delivery.History && historyEventBatchEnabled(ctx) {
+			saved, err := s.historyDeliveryWriter(ctx).Do(ctx, *delivery)
+			if err != nil {
+				return 0, err
+			}
+			row.Id, row.EventId = saved.ID, saved.EventID
+		} else {
+			now := gtime.Now()
+			data := g.Map{
+				columns.TenantId: delivery.TenantID, columns.EventId: delivery.EventID,
+				columns.DeliveryKey: delivery.DeliveryKey, columns.Status: sysin.DeliveryStatusPending,
+				columns.Priority: deliveryPriority(delivery), columns.CreatedAt: now, columns.UpdatedAt: now,
+				"source_id": delivery.SourceID, "account_id": delivery.AccountID,
+				"scheduler_pool": deliverySchedulerPool(delivery),
+			}
+			_, err := dao.TgCollectorDelivery.Ctx(ctx).Data(data).OnConflict(columns.TenantId + "," + columns.DeliveryKey).
+				OnDuplicate(g.Map{columns.DeliveryKey: conflictIncomingColumn(ctx, columns.DeliveryKey)}).Save()
+			if err != nil {
+				return 0, gerror.Wrap(err, "保存Telegram采集交付失败")
+			}
+			if err = dao.TgCollectorDelivery.Ctx(ctx).
+				Fields(columns.Id, columns.EventId).
+				Where(columns.TenantId, delivery.TenantID).
+				Where(columns.DeliveryKey, delivery.DeliveryKey).Scan(&row); err != nil {
+				return 0, gerror.Wrap(err, "读取Telegram采集交付失败")
+			}
 		}
 		if row.Id <= 0 {
 			return 0, gerror.New("Telegram采集交付ID无效")
@@ -569,13 +599,15 @@ func deliveryPriority(delivery *sysin.CollectorDelivery) int {
 	return sysin.EventPriorityUrgent
 }
 
-func (s *sCollector) failEvent(ctx context.Context, eventID int64, executionOwner string, cause error) error {
+func (s *sCollector) failEvent(ctx context.Context, eventID int64, executionOwner string, cause error, known ...*entity.TgCollectorEvent) error {
 	if strings.TrimSpace(executionOwner) == "" {
 		return gerror.New("采集失败更新必须指定本次执行归属")
 	}
 	columns := dao.TgCollectorEvent.Columns()
 	var row entity.TgCollectorEvent
-	if err := dao.TgCollectorEvent.Ctx(ctx).Fields(columns.AttemptCount, columns.LeaseOwner).WherePri(eventID).
+	if len(known) > 0 && known[0] != nil && known[0].Id == eventID && known[0].LeaseOwner == executionOwner {
+		row = *known[0]
+	} else if err := dao.TgCollectorEvent.Ctx(ctx).Fields(columns.AttemptCount, columns.LeaseOwner).WherePri(eventID).
 		Where(columns.Status, sysin.EventStatusProcessing).Where(columns.LeaseOwner, executionOwner).Scan(&row); err != nil {
 		return gerror.Wrap(err, "读取Telegram采集事件重试次数失败")
 	}

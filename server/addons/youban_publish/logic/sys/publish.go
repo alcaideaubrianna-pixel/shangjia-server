@@ -16,48 +16,51 @@ import (
 
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
 	collectorservice "hotgo/addons/telegram_collector/service"
+	"hotgo/addons/youban_publish/library/channelprogress"
 	"hotgo/addons/youban_publish/model"
 	"hotgo/addons/youban_publish/service"
 	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
+	"hotgo/internal/library/microbatch"
 	"hotgo/internal/library/payment"
 )
 
 type sSysPublish struct {
-	accountClientsMu           sync.RWMutex
-	accountClients             map[int64]*telegram.Client
-	runtimeCancel              context.CancelFunc
-	runtimeDone                chan struct{}
-	runtimeMu                  publishRuntimeMutex
-	tgLoginMu                  publishRuntimeMutex
-	tgLogins                   map[string]*telegramLoginRuntime
-	tgQueueMu                  publishRuntimeMutex
-	telegramOutboxStarted      bool
-	telegramOutboxWake         chan struct{}
-	tgQueueClient              *asynq.Client
-	tgQueueServer              *asynq.Server
-	tgCleanupQueueServer       *asynq.Server
-	mediaQueueServer           *asynq.Server
-	mediaBulkQueueServer       *asynq.Server
-	mediaProcessServer         *asynq.Server
-	relayQueueServer           *asynq.Server
-	autoDeleteQueueServer      *asynq.Server
-	autoDeleteBackfillServer   *asynq.Server
-	attemptTimeoutServer       *asynq.Server
-	collectRealtimeServer      *asynq.Server
-	collectProcessQueueServer  *asynq.Server
-	collectHistoryQueueServer  *asynq.Server
-	collectSourceQueueServers  map[string]*asynq.Server
-	collectSourceQueueOwners   map[string]string
-	collectSourceWorkerOwner   string
-	backgroundQueueServer      *asynq.Server
-	accountScheduleQueueServer *asynq.Server
-	materialImportPullServer   *asynq.Server
-	materialImportMediaServer  *asynq.Server
-	cycleQueueServer           *asynq.Server
-	profileQueueServer         *asynq.Server
-	duplicateQueueServer       *asynq.Server
-	historyQueueServer         *asynq.Server
-	mattingQueueServer         *asynq.Server
+	collectChannelProgressBatch *microbatch.Batcher[channelprogress.Progress, bool]
+	accountClientsMu            sync.RWMutex
+	accountClients              map[int64]*telegram.Client
+	runtimeCancel               context.CancelFunc
+	runtimeDone                 chan struct{}
+	runtimeMu                   publishRuntimeMutex
+	tgLoginMu                   publishRuntimeMutex
+	tgLogins                    map[string]*telegramLoginRuntime
+	tgQueueMu                   publishRuntimeMutex
+	telegramOutboxStarted       bool
+	telegramOutboxWake          chan struct{}
+	tgQueueClient               *asynq.Client
+	tgQueueServer               *asynq.Server
+	tgCleanupQueueServer        *asynq.Server
+	mediaQueueServer            *asynq.Server
+	mediaBulkQueueServer        *asynq.Server
+	mediaProcessServer          *asynq.Server
+	relayQueueServer            *asynq.Server
+	autoDeleteQueueServer       *asynq.Server
+	autoDeleteBackfillServer    *asynq.Server
+	attemptTimeoutServer        *asynq.Server
+	collectRealtimeServer       *asynq.Server
+	collectProcessQueueServer   *asynq.Server
+	collectHistoryQueueServer   *asynq.Server
+	collectSourceQueueServers   map[string]*asynq.Server
+	collectSourceQueueOwners    map[string]string
+	collectSourceWorkerOwner    string
+	backgroundQueueServer       *asynq.Server
+	accountScheduleQueueServer  *asynq.Server
+	materialImportPullServer    *asynq.Server
+	materialImportMediaServer   *asynq.Server
+	cycleQueueServer            *asynq.Server
+	profileQueueServer          *asynq.Server
+	duplicateQueueServer        *asynq.Server
+	historyQueueServer          *asynq.Server
+	mattingQueueServer          *asynq.Server
 
 	telegramChannelMu     publishRuntimeMutex
 	telegramChannelLocks  map[string]*publishRuntimeMutex

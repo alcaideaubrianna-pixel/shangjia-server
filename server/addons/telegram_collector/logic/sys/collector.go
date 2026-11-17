@@ -31,6 +31,7 @@ import (
 	collectorservice "hotgo/addons/telegram_collector/service"
 	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
 	"hotgo/internal/library/cache"
+	"hotgo/internal/library/microbatch"
 )
 
 const gatewayOwner = "telegram_collector"
@@ -82,6 +83,9 @@ type sCollector struct {
 	historyAccountSlots   map[int64]chan struct{}
 	queueClient           *asynq.Client
 	queueInspector        *asynq.Inspector
+	historyEventBatch     *microbatch.Batcher[historyEventMutation, entity.TgCollectorEvent]
+	historyDeliveryBatch  *microbatch.Batcher[sysin.CollectorDelivery, historyDeliverySaved]
+	historyBatchSQLMu     sync.Mutex
 	runtimeCtx            context.Context
 	runtimeStop           context.CancelFunc
 	runtimeWG             sync.WaitGroup

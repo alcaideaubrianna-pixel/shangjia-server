@@ -53,3 +53,36 @@ Inspector 复用连接池，不为每个恢复候选重新连接 Redis。
 
 本改动解除旧 Bot 原始队列对新入口的排队影响，不代表不同来源已经获得独占
 CPU/PG，也不代表 175 万旧任务已经恢复。原始事件的业务完成状态是实际恢复依据。
+
+## 历史 PostgreSQL 写入合并
+
+历史任务使用进程内短窗口合并数据库操作，任务身份、Asynq 领取和重试不变。
+队列交付的明确主键进入批次，不从数据库发现更多历史任务。
+
+- Event：`UPDATE ... RETURNING` 合并领取与读取；同一批重复 ID 只交付给一个执行者。
+- Delivery：批量幂等写入并返回 ID，保留已有记录的 Event 归属和已完成状态。
+- Event ready：按 ID、tenant、lease owner、attempt 精确匹配后合并写回。
+- 失败路径复用已经领取的重试次数，省掉一次重复读取；CAS 更新仍检查当前 owner。
+
+这三类历史批次 SQL 共用一个串行执行锁，单进程最多同时执行其中一个批次。
+这不是所有数据库访问的总预算：业务窗口、Delivery 消费和其他角色仍有独立 SQL。
+调用方只有收到本次数据库结果后才继续；进程退出或结果未知时由原有任务、租约恢复。
+不在内存缓冲后提前 ACK，也不删除 Event/Delivery 的可靠交接状态。
+
+配置：
+
+```text
+YOUBAN_TELEGRAM_COLLECTOR_HISTORY_BATCH_ENABLED=true
+YOUBAN_TELEGRAM_COLLECTOR_HISTORY_BATCH_SIZE=20
+YOUBAN_TELEGRAM_COLLECTOR_HISTORY_BATCH_WAIT_MS=10
+```
+
+批次大小限制 1～50，合并等待限制 0～50ms。设置 enabled=false 可回到原单条路径。
+低流量或并发为 2 时通常合并不到 20 条，不能按满批次推算实际吞吐。
+
+频道进度使用相同合并器，在 5ms 窗口内按 tenant/channel 合并最大消息 ID，
+通过同步批量写回防止较旧消息覆盖较新进度，也避免仅写首条的 TTL 节流漏掉末条。
+无新增 SAE 角色、后台数据库扫描或 SQL 迁移；更新 collector/publish 消费实现。
+
+本地验证使用独立 Docker PostgreSQL 的 127.0.0.1:55489，测试仅通过显式
+YOUBAN_COLLECTOR_BATCH_TEST_PORT=55489 启用，不读取生产 DSN。

@@ -1,5 +1,14 @@
 [
   {
+    "file": "addons/youban_publish/logic/sys/collect_channel_progress.go",
+    "function": "*sSysPublish.touchCollectChannelProgress",
+    "rule": "redis-primitive",
+    "expression": "batch.Do(ctx, channelprogress.Progress{TenantID: tenantID, ChannelID: channelID, MessageID: messageID})",
+    "digest": "9937dc5dc995582d91d9d656d10ee73826f3594d5428b178949aadb14ceb01f0",
+    "count": 1,
+    "reason": "Reviewed synchronous in-process PostgreSQL microbatch submission, not a Redis primitive: internal/library/microbatch has no Redis dependency; at most 50 metadata inputs share a single writer and callers wait for SQL completion. The write remains scoped by tenant/channel and preserves the maximum message ID. This exception allows exactly this call only."
+  },
+  {
     "file": "addons/youban_publish/logic/sys/profile_publish_cancel.go",
     "function": "*sSysPublish.acceptProfilePublishCancelTx",
     "rule": "state-map-write",

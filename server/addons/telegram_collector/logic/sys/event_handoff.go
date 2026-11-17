@@ -53,7 +53,40 @@ type eventHandoffActions struct {
 	observe func(context.Context, int64, error)
 }
 
-// handoffCollectorEvent replaces the entire saveDelivery/enqueue/ready block.
+// completeCollectorEvent preserves per-event ownership in both write paths.
+func (s *sCollector) completeCollectorEvent(ctx context.Context, row *entity.TgCollectorEvent) error {
+	if historyEventBatchEnabled(ctx) {
+		completed, err := s.historyEventWriter(ctx).Do(ctx, historyEventMutation{Kind: historyEventReady, ID: row.Id, TenantID: row.TenantId, Owner: row.LeaseOwner, Attempt: row.AttemptCount})
+		if err != nil {
+			return err
+		}
+		if completed.Id != row.Id {
+			return gerror.New("采集事件交接租约已变化，未确认本次交接")
+		}
+		return nil
+	}
+	cols := dao.TgCollectorEvent.Columns()
+	result, err := dao.TgCollectorEvent.Ctx(ctx).WherePri(row.Id).
+		Where(cols.TenantId, row.TenantId).
+		Where(cols.Status, sysin.EventStatusProcessing).
+		Where(cols.LeaseOwner, row.LeaseOwner).
+		Where(cols.AttemptCount, row.AttemptCount).
+		Data(g.Map{cols.Status: sysin.EventStatusReady, cols.ProcessedAt: gtime.Now(),
+			cols.LeaseOwner: "", cols.LeaseUntil: nil, cols.NextRunAt: nil,
+			cols.ErrorMessage: "", cols.UpdatedAt: gtime.Now()}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "保存采集事件交接状态失败")
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return gerror.Wrap(err, "确认采集事件交接状态失败")
+	}
+	if affected != 1 {
+		return gerror.New("采集事件交接租约已变化，未确认本次交接")
+	}
+	return nil
+}
+
 // Before ready, errors belong to Event. After ready, only Delivery may retry.
 func (s *sCollector) handoffCollectorEvent(ctx context.Context, row *entity.TgCollectorEvent, delivery *sysin.CollectorDelivery) error {
 	if row == nil || row.Id <= 0 || delivery == nil || delivery.EventID != row.Id || delivery.TenantID != row.TenantId {
@@ -81,24 +114,8 @@ func (s *sCollector) handoffCollectorEvent(ctx context.Context, row *entity.TgCo
 			})
 			outcome := collectorResultError
 			defer func() { observation.Finish(outcome, err) }()
-			cols := dao.TgCollectorEvent.Columns()
-			result, err := dao.TgCollectorEvent.Ctx(ctx).WherePri(row.Id).
-				Where(cols.TenantId, row.TenantId).
-				Where(cols.Status, sysin.EventStatusProcessing).
-				Where(cols.LeaseOwner, row.LeaseOwner).
-				Where(cols.AttemptCount, row.AttemptCount).
-				Data(g.Map{cols.Status: sysin.EventStatusReady, cols.ProcessedAt: gtime.Now(),
-					cols.LeaseOwner: "", cols.LeaseUntil: nil, cols.NextRunAt: nil,
-					cols.ErrorMessage: "", cols.UpdatedAt: gtime.Now()}).Update()
-			if err != nil {
-				return gerror.Wrap(err, "保存采集事件交接状态失败")
-			}
-			affected, err := result.RowsAffected()
-			if err != nil {
-				return gerror.Wrap(err, "确认采集事件交接状态失败")
-			}
-			if affected != 1 {
-				return gerror.New("采集事件交接租约已变化，未确认本次交接")
+			if err := s.completeCollectorEvent(ctx, row); err != nil {
+				return err
 			}
 			outcome = collectorResultOK
 			observation.Finish(outcome, nil)

@@ -445,6 +445,9 @@ telegramCollector:
   worker:
     concurrency: 12         # 新实时事件；Bot 使用 tg.collect.urgent.v2
     historyConcurrency: 2   # 旧 urgent 积压及历史恢复，ENV 可独立扩容
+    historyBatchEnabled: true
+    historyBatchSize: 20     # 1～50；只合并已交付任务，不扫描 PG 找任务
+    historyBatchWaitMilliseconds: 10 # 0～50ms；最多增加一个短合并窗口
   eventHandoff:
     # 新事件在 Collector 内完成交付，旧 Delivery 队列继续消费和补偿。
     # queued 可回退到原来的异步 Delivery 路径。

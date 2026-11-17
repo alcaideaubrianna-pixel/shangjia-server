@@ -58,6 +58,7 @@ func (s *sSysPublish) StopRuntime() {
 	}
 	s.stopCollectGroupedEventTimers()
 	s.stopTelegramQueueWorker()
+	s.stopCollectChannelProgress()
 	s.tgQueueMu.Lock()
 	s.telegramOutboxStarted = false
 	s.tgQueueMu.Unlock()
