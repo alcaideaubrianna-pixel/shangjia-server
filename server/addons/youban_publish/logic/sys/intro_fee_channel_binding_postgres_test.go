@@ -73,7 +73,7 @@ func TestIntroFeeChannelBindingOnlineFixturePostgres(t *testing.T) {
 			`INSERT INTO hg_youban_publish_intro_fee_channel_rule VALUES(36,78,615,338,0,'4386299825','汉庭选妃','htbaoyang888','百花阁  Z2',1,now(),now(),NULL)`,
 			`INSERT INTO hg_youban_publish_collect_source VALUES(351,78,615,'','百花阁 BOT 采集','','',64,1,1,0,now(),now(),NULL)`,
 			`INSERT INTO hg_youban_publish_collect_source_rule VALUES(351,78,338)`,
-			`INSERT INTO hg_youban_publish_collect_source VALUES(352,78,615,'source-352','同频道另一采集源','','',64,1,1,0,now(),now(),NULL)`,
+			`INSERT INTO hg_youban_publish_collect_source VALUES(352,78,615,'','同频道另一采集源','','',64,1,1,0,now(),now(),NULL)`,
 			`INSERT INTO hg_youban_publish_collect_source_rule VALUES(352,78,338)`,
 			`INSERT INTO hg_youban_publish_bot_channel_cache VALUES(78,64,'-1004386299825','汉庭选妃','htbaoyang888','channel',938,'2026-10-12 19:16:54')`,
 			`INSERT INTO hg_youban_publish_collect_channel_profile(tenant_id,account_id,rule_id,channel_id,profile_id,updated_at,deleted_at) SELECT 78,615,338,'4386299825',n,now(),NULL FROM generate_series(1,70) n`,
@@ -207,6 +207,54 @@ func TestIntroFeeChannelBindingOnlineFixturePostgres(t *testing.T) {
 			return err
 		}
 		check("汉庭", "未绑定采集源或规则", 2)
+		// Regression: a rule-level candidate (botId=0) belongs to the rule's
+		// Bot even when the source's configured channel is a different chat.
+		// Saving must establish real source relations, rather than reject the
+		// candidate or invent a source-zero relation.
+		for _, statement := range []string{
+			`INSERT INTO hg_youban_publish_collect_source_rule VALUES(351,78,338),(352,78,338)`,
+			`UPDATE hg_youban_publish_collect_source SET source_chat_id='-1003856373273' WHERE id=351`,
+			`INSERT INTO hg_youban_publish_collect_channel VALUES(17282290,78,'-1003736052878','MD test','mdbaoyang1','','active',now(),NULL)`,
+			`INSERT INTO hg_youban_publish_collect_bot_channel VALUES(78,64,17282290,'discovered',NULL)`,
+			`INSERT INTO hg_youban_publish_intro_fee_channel_rule VALUES(37,78,615,338,0,'3736052878','MD test','mdbaoyang1','',2,now(),now(),NULL)`,
+			`INSERT INTO hg_youban_publish_collect_source SELECT 353,tenant_id,account_id,'other-channel','Other rule','','',bot_id,status,collect_enabled,0,now(),now(),NULL FROM hg_youban_publish_collect_source WHERE id=351`,
+			`INSERT INTO hg_youban_publish_collect_source_rule VALUES(353,78,339)`,
+			`INSERT INTO hg_youban_publish_collect_account_channel VALUES(78,615,17282290,353,'disabled',0,'rejected',NULL)`,
+		} {
+			if _, err := tx.Exec(statement); err != nil {
+				return err
+			}
+		}
+		for _, requested := range []int{1, 2, 1} {
+			_, saveErr := service.saveIntroFeeChannelCollectionStatus(ctx, 78, 615,
+				&sysin.IntroFeeChannelRuleSaveInp{RuleId: 338, BotId: 0, ChannelId: "3736052878", Status: requested},
+				func(saveCtx context.Context) (int64, error) {
+					_, err := g.DB().Model(introFeeChannelRuleTable).Ctx(saveCtx).Where("id", 37).Data(g.Map{"status": requested}).Update()
+					return 37, err
+				})
+			if saveErr != nil {
+				t.Fatalf("dynamic Bot candidate status=%d could not be saved: %v", requested, saveErr)
+			}
+			relations, err := tx.Model("hg_youban_publish_collect_account_channel").Where("tenant_id", 78).Where("account_id", 615).Where("channel_id", 17282290).OrderAsc("source_id").All()
+			if err != nil || len(relations) != 3 {
+				t.Fatalf("dynamic channel relations=%v err=%v", relations, err)
+			}
+			for _, relation := range relations {
+				if relation["source_id"].Int64() == 353 {
+					if relation["collect_enabled"].Int() != 0 || relation["approval_status"].String() != "rejected" {
+						t.Fatal("saving rule338 changed another rule's disabled source")
+					}
+					continue
+				}
+				wantEnabled := 1
+				if requested == 2 {
+					wantEnabled = 0
+				}
+				if relation["collect_enabled"].Int() != wantEnabled || relation["approval_status"].String() != "approved" {
+					t.Fatalf("source relation did not follow explicit state change: %v", relation)
+				}
+			}
+		}
 		return nil
 	})
 	if err != nil {

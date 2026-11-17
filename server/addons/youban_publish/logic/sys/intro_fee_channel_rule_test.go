@@ -19,45 +19,33 @@ func TestIntroFeeChannelDisplayScoreUsesAvailableMetadata(t *testing.T) {
 	}
 }
 
-func TestIntroFeeCollectionSourceMatchesChannel(t *testing.T) {
-	tests := []struct {
+func TestIntroFeeConfiguredSourceMatchesChannel(t *testing.T) {
+	for _, tc := range []struct {
 		name         string
 		sourceChatID string
-		sourceBotID  int64
 		channelID    string
-		ruleBotID    int64
 		want         bool
 	}{
-		{name: "direct channel source", sourceChatID: "-1004294797657", channelID: "4294797657", want: true},
-		{name: "aggregate bot is not a wildcard", sourceBotID: 64, channelID: "4294797657", want: false},
-		{name: "explicit bot scope is not a wildcard", sourceBotID: 64, channelID: "4294797657", ruleBotID: 64, want: false},
-		{name: "empty non bot source is not aggregate", channelID: "4294797657", want: false},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			got := introFeeCollectionSourceMatchesChannel(test.sourceChatID, test.sourceBotID, test.channelID, test.ruleBotID)
-			if got != test.want {
-				t.Fatalf("introFeeCollectionSourceMatchesChannel() = %t, want %t", got, test.want)
+		{name: "full and short channel aliases", sourceChatID: "-1004294797657", channelID: "4294797657", want: true},
+		{name: "short and full channel aliases", sourceChatID: "4294797657", channelID: "-1004294797657", want: true},
+		{name: "different configured channel", sourceChatID: "-1003856373273", channelID: "3736052878"},
+		{name: "no configured channel", channelID: "4294797657"},
+		{name: "both empty"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := introFeeConfiguredSourceMatchesChannel(tc.sourceChatID, tc.channelID); got != tc.want {
+				t.Fatalf("configured channel match=%v, want %v", got, tc.want)
 			}
 		})
 	}
 }
 
-func TestIntroFeeOnlineSource351FixtureIsBound(t *testing.T) {
-	// Sanitized production-shaped fixture captured from source 351/rule 338.
-	const (
-		tenantID      int64 = 78
-		accountID     int64 = 615
-		ruleID        int64 = 338
-		sourceID      int64 = 351
-		botID         int64 = 64
-		channelChatID       = "-1003998084277"
-	)
-	if tenantID != 78 || accountID != 615 || ruleID != 338 || sourceID != 351 || botID != 64 {
-		t.Fatal("online fixture was changed unexpectedly")
-	}
-	if introFeeCollectionSourceMatchesChannel("", botID, channelChatID, 0) {
-		t.Fatal("aggregate source must not act as a wildcard")
+func TestIntroFeeConfiguredSourceCannotAuthorizeUnrelatedChannel(t *testing.T) {
+	// The configured-channel predicate deliberately returns false for the
+	// production-shaped dynamic channel. The save path must instead resolve
+	// the real source/channel relation or Bot membership before authorizing it.
+	if introFeeConfiguredSourceMatchesChannel("-1003856373273", "3736052878") {
+		t.Fatal("a different configured channel must not authorize this channel")
 	}
 }
 

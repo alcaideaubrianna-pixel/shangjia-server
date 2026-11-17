@@ -560,10 +560,10 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 		if row == nil {
 			continue
 		}
-		sourceFound, sourceEnabled, sourceConflict, sourceRelationFound := false, false, false, false
+		sourceFound, sourceEnabled, sourceConflict, sourceRelationFound, sourceRelationActive := false, false, false, false, false
 		for _, source := range collectionSources {
 			matchedByBotCache := false
-			matches := introFeeCollectionSourceMatchesChannel(source.ChatId, source.BotId, row.ChannelId, row.BotId)
+			matches := introFeeConfiguredSourceMatchesChannel(source.ChatId, row.ChannelId)
 			if !matches && source.BotId > 0 {
 				matchedByBotCache = botCacheByBotAndChat[fmt.Sprintf("%d:%s", source.BotId, canonicalCollectSourceChatID(row.ChannelId))]
 				matches = matchedByBotCache
@@ -581,7 +581,9 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 				mappedKey := fmt.Sprintf("%d:%s", source.SourceID, canonicalCollectSourceChatID(row.ChannelId))
 				if mapped, exists := sourceChannelEnabled[mappedKey]; exists {
 					sourceRelationFound = true
-					sourceEnabled = sourceEnabled || mapped
+					active := source.Status == 1 && source.CollectEnabled == 1
+					sourceRelationActive = sourceRelationActive || active
+					sourceEnabled = sourceEnabled || active && mapped
 				} else if !matchedByBotCache {
 					// A BOT cache hit makes a channel visible, but it does not
 					// authorize collection until account_channel exists.
@@ -606,7 +608,10 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 		}
 		if sourceFound && !sourceEnabled {
 			if sourceRelationFound {
-				row.BlockReason = "采集源已暂停"
+				row.BlockReason = "频道采集已禁用或拒绝"
+				if !sourceRelationActive {
+					row.BlockReason = "采集源已暂停"
+				}
 			} else {
 				row.BlockReason = "未绑定采集源或规则"
 			}
@@ -691,10 +696,9 @@ func fillCollectChannelProfileCounts(ctx context.Context, tenantID, accountID, r
 	return nil
 }
 
-func introFeeCollectionSourceMatchesChannel(sourceChatID string, sourceBotID int64, channelID string, ruleBotID int64) bool {
-	// A source without source_chat_id is not a wildcard. Its channel scope
-	// must come from the explicit source/channel relation resolved by the
-	// caller; bot_id alone must never authorize every channel seen by a BOT.
+func introFeeConfiguredSourceMatchesChannel(sourceChatID, channelID string) bool {
+	// This proves only a configured-channel match. Dynamic source/channel and
+	// Bot membership evidence is resolved by resolveIntroFeeChannelSourceBindings.
 	return strings.TrimSpace(sourceChatID) != "" &&
 		canonicalCollectSourceChatID(sourceChatID) == canonicalCollectSourceChatID(channelID)
 }
@@ -721,6 +725,7 @@ func (s *sSysPublish) saveIntroFeeChannelCollectionStatus(ctx context.Context, t
 	if in.Status != 1 && in.Status != 2 {
 		return 0, gerror.New("采集状态不合法")
 	}
+	matchedSourceIDs := make([]int64, 0)
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		var saveErr error
 		id, saveErr = save(ctx)
@@ -752,20 +757,23 @@ func (s *sSysPublish) saveIntroFeeChannelCollectionStatus(ctx context.Context, t
 		if in.Status == 2 {
 			status, enabled = sysin.CollectAccountChannelDisabled, 0
 		}
-		var sources []struct {
-			Id     int64  `orm:"id"`
-			ChatId string `orm:"source_chat_id"`
-			BotId  int64  `orm:"bot_id"`
-		}
+		var sources []introFeeChannelSourceScope
 		if queryErr := pdao.YoubanPublishCollectSource.Ctx(ctx).
 			Fields("id,source_chat_id,bot_id").Where("tenant_id", tenantID).Where("account_id", accountID).
 			Where("EXISTS (SELECT 1 FROM "+pdao.YoubanPublishCollectSourceRule.Table()+" sr WHERE sr.source_id="+publishCollectSourceTable+".id AND sr.tenant_id=? AND sr.rule_id=?)", tenantID, in.RuleId).
-			Scan(&sources); queryErr != nil {
+			Limit(1001).Scan(&sources); queryErr != nil {
 			return gerror.Wrap(queryErr, "读取频道绑定采集源失败")
+		}
+		if len(sources) > 1000 {
+			return gerror.New("当前规则关联采集源过多，请缩小操作范围")
+		}
+		bindings, bindingErr := resolveIntroFeeChannelSourceBindings(ctx, tenantID, accountID, in.BotId, in.ChannelId, sources)
+		if bindingErr != nil {
+			return gerror.Wrap(bindingErr, "核对频道采集源归属失败")
 		}
 		matched := false
 		for _, source := range sources {
-			if !introFeeCollectionSourceMatchesChannel(source.ChatId, source.BotId, in.ChannelId, in.BotId) {
+			if !bindings[source.Id] {
 				continue
 			}
 			matched = true
@@ -778,6 +786,7 @@ func (s *sSysPublish) saveIntroFeeChannelCollectionStatus(ctx context.Context, t
 				}).Save(); saveErr != nil {
 				return gerror.Wrap(saveErr, "保存频道采集状态失败")
 			}
+			matchedSourceIDs = append(matchedSourceIDs, source.Id)
 		}
 		if !matched {
 			return gerror.New("频道未绑定当前规则的采集源")
@@ -786,6 +795,12 @@ func (s *sSysPublish) saveIntroFeeChannelCollectionStatus(ctx context.Context, t
 	})
 	if err == nil {
 		_, _ = cache.Instance().Remove(ctx, introFeeChannelRuleCacheKey(tenantID, accountID, in.RuleId, in.BotId, in.ChannelId))
+		g.Log().Info(ctx, "频道采集状态保存完成", g.Map{
+			"event": "collect_channel_binding_saved", "tenantId": tenantID,
+			"accountId": accountID, "ruleId": in.RuleId, "botId": in.BotId,
+			"sourceIds": matchedSourceIDs, "canonicalChatId": canonicalCollectSourceChatID(in.ChannelId),
+			"requestedStatus": in.Status, "channelRuleId": id,
+		})
 	}
 	return
 }
