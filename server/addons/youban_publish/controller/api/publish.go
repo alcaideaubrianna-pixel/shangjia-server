@@ -939,6 +939,14 @@ func (c *cPublishAdmin) ProfileStatus(ctx context.Context, req *publish.AdminPro
 	return
 }
 
+func (c *cPublishAdmin) ProfilePublishCancel(ctx context.Context, req *publish.AdminProfilePublishCancelReq) (*publish.AdminProfilePublishCancelRes, error) {
+	data, err := service.SysPublish().AdminProfilePublishCancel(ctx, &req.ProfilePublishCancelInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.AdminProfilePublishCancelRes{ProfileTaskStatusModel: data}, nil
+}
+
 func (c *cPublishAdmin) ProfileCycleCancel(ctx context.Context, req *publish.AdminProfileCycleCancelReq) (res *publish.AdminProfileCycleCancelRes, err error) {
 	data, err := service.SysPublish().AdminProfileStatus(ctx, &sysin.ProfileStatusInp{
 		Ids:         []int64{req.Id},

@@ -274,6 +274,9 @@ func (s *sSysPublish) transitionTelegramJobsTx(ctx context.Context, tx gdb.TX, j
 }
 
 func transitionTelegramJobModel(model *gdb.Model, in telegramJobTransition, data g.Map) (sql.Result, error) {
+	if profilePublishCancelEnabled() && in.To != JobStatusSuperseded {
+		model = model.Where("NOT EXISTS (SELECT 1 FROM " + publishProfileCancelTable + " pc WHERE pc.tenant_id=" + publishTgJobTable + ".tenant_id AND pc.account_id=" + publishTgJobTable + ".account_id AND pc.profile_id=" + publishTgJobTable + ".profile_id AND pc.operation_no=" + publishTgJobTable + ".operation_no)")
+	}
 	if len(in.SendPhases) > 0 {
 		model = model.WhereIn("send_phase", in.SendPhases)
 	}

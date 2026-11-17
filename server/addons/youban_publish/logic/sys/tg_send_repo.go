@@ -73,7 +73,12 @@ func (s *sSysPublish) telegramJobStillSending(ctx context.Context, jobId int64) 
 	if err != nil {
 		return false, err
 	}
-	return status == "sending", nil
+	if status != "sending" || !profilePublishCancelEnabled() {
+		return status == "sending", nil
+	}
+	count, err := g.DB().Model(publishTgJobTable+" j").Ctx(ctx).
+		InnerJoin(publishProfileCancelTable+" pc", "pc.tenant_id=j.tenant_id AND pc.account_id=j.account_id AND pc.profile_id=j.profile_id AND pc.operation_no=j.operation_no").Where("j.id", jobId).Count()
+	return count == 0, err
 }
 
 func (s *sSysPublish) telegramJobMedia(ctx context.Context, job telegramJobRecord, purpose string) ([]*telegramMediaItem, error) {
@@ -326,6 +331,10 @@ func (s *sSysPublish) projectTelegramJobMessagePointer(ctx context.Context, job 
 }
 
 func saveTelegramSentMessagesTx(ctx context.Context, tx gdb.TX, job telegramJobRecord, messages []*telegramSentMessage) error {
+	canceled, cancelErr := lockCanceledReceiptOperationTx(ctx, tx, job)
+	if cancelErr != nil {
+		return cancelErr
+	}
 	// Validate the complete album before writing any rows, including conflicts
 	// inside this response. One query replaces a query for every media item.
 	groups := make(map[string]string)
@@ -387,14 +396,21 @@ func saveTelegramSentMessagesTx(ctx context.Context, tx gdb.TX, job telegramJobR
 		return nil
 	}
 	stage := beginTelegramPublishStage(ctx, "api_success.message_upsert", g.Map{"jobId": job.Id, "messageCount": len(rows), "idempotency": "job_id,tg_message_id"})
+	duplicateFields := "status,tg_file_id,tg_file_unique_id,sent_at,deleted_at"
+	if canceled {
+		duplicateFields = "tg_file_id,tg_file_unique_id"
+	} // Never resurrect an already-deleted late receipt.
 	_, err := tx.Model(publishTgMessageTable).Data(rows).
 		// (job_id,tg_message_id) is the durable idempotency key. Replaying a
 		// webhook or a recovery callback updates metadata without inserting a
 		// second local fact and never calls Telegram again.
-		OnConflict("job_id,tg_message_id").OnDuplicate("status,tg_file_id,tg_file_unique_id,sent_at,deleted_at").Save()
+		OnConflict("job_id,tg_message_id").OnDuplicate(duplicateFields).Save()
 	stage.End(err)
 	if err != nil {
 		return gerror.Wrap(err, "保存TG消息记录失败")
+	}
+	if canceled {
+		return persistCanceledReceiptCleanupTx(ctx, tx, job, messages)
 	}
 	return nil
 }

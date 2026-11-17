@@ -481,12 +481,13 @@ func (s *sSysPublish) profileBaseModel(ctx context.Context, tenantId int64, acco
 // this projection small avoids profile tags, collection metadata, channels,
 // and media-related subqueries on every poll.
 type profileTaskStatusQuery struct {
-	Id         int64  `json:"id"`
-	Uuid       string `json:"uuid"`
-	Status     int    `json:"status"`
-	TenantId   int64  `json:"tenant_id"`
-	AccountId  int64  `json:"account_id"`
-	TaskStatus string `json:"task_status"`
+	OperationNo string `orm:"operation_no"`
+	Id          int64  `json:"id"`
+	Uuid        string `json:"uuid"`
+	Status      int    `json:"status"`
+	TenantId    int64  `json:"tenant_id"`
+	AccountId   int64  `json:"account_id"`
+	TaskStatus  string `json:"task_status"`
 }
 
 // profileTaskStatusBySelector 只读取资料状态及权限校验所需的归属字段。
@@ -524,7 +525,7 @@ func (s *sSysPublish) profileTaskStatusBySelector(ctx context.Context, in *sysin
 
 func profileTaskStatusFields() string {
 	cols := dao.ContentProfile.Columns()
-	return "p." + cols.Id + ",p." + cols.SourceNoteUuid + " AS uuid,p." + cols.Status + ",ps.tenant_id,ps.account_id," +
+	return "p." + cols.Id + ",p." + cols.SourceNoteUuid + " AS uuid,p." + cols.Status + ",ps.tenant_id,ps.account_id,COALESCE(ps.publish_operation_no,'') AS operation_no," +
 		"CASE WHEN COALESCE(ps.publish_task_status,'') IN ('pending','publishing') " +
 		"AND (LOWER(COALESCE(ps.publish_operation_no,'')) LIKE 'cycle_batch:%' " +
 		"OR LOWER(COALESCE(ps.publish_operation_no,'')) LIKE 'profile_cycle:%') " +

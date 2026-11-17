@@ -210,6 +210,7 @@ func (s *sSysPublish) runTelegramJobRecoveryCycle(ctx context.Context, nextStep 
 	}()
 
 	steps := []telegramRecoveryStep{
+		{"publish_cancel", "收口资料发布取消", func(ctx context.Context) error { return s.recoverProfilePublishCancels(ctx, 25) }},
 		{"permission_backlog", "清理频道权限暂停积压", func(ctx context.Context) error { return s.maintainPermissionPausedBacklog(ctx) }},
 		{"permission_notification", "恢复频道权限暂停通知", func(ctx context.Context) error { return s.retryChannelPermissionNotifications(ctx) }},
 		{"expired_message_plan", "终止过期历史消息计划任务", func(ctx context.Context) error { return s.supersedeExpiredMessagePushPlanJobs(ctx, 1000) }},
@@ -887,9 +888,12 @@ func (s *sSysPublish) recoverTerminalTelegramAttempts(ctx context.Context, limit
 	var rows []struct {
 		Id int64 `json:"id"`
 	}
-	err := g.DB().Model(publishTgAttemptTable+" attempt").Safe().Ctx(ctx).
-		InnerJoin(publishTgJobTable+" job", "job.id=attempt.job_id").
-		Fields("attempt.id").
+	mod := g.DB().Model(publishTgAttemptTable+" attempt").Safe().Ctx(ctx).
+		InnerJoin(publishTgJobTable+" job", "job.id=attempt.job_id")
+	if profilePublishCancelEnabled() {
+		mod = mod.Where("NOT EXISTS (SELECT 1 FROM " + publishProfileCancelTable + " pc WHERE pc.tenant_id=job.tenant_id AND pc.account_id=job.account_id AND pc.profile_id=job.profile_id AND pc.operation_no=job.operation_no)")
+	}
+	err := mod.Fields("attempt.id").
 		WhereIn("attempt.status", []string{telegramAttemptStatusSending, telegramAttemptStatusWaiting, telegramAttemptStatusRetryWait}).
 		WhereIn("job.status", []string{"sent", "failed", "superseded"}).
 		OrderAsc("attempt.id").Limit(limit).Scan(&rows)

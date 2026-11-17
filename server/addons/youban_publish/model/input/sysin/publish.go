@@ -24,6 +24,7 @@ const (
 	PublishTaskStatusPartialFailed PublishTaskStatus = "partial_failed"
 	PublishTaskStatusFailed        PublishTaskStatus = "failed"
 	PublishTaskStatusCanceled      PublishTaskStatus = "canceled"
+	PublishTaskStatusCanceling     PublishTaskStatus = "canceling"
 	PublishTaskStatusUnpublishing  PublishTaskStatus = "unpublishing"
 	PublishTaskStatusWaitingMedia  PublishTaskStatus = "waiting_media"
 	PublishTaskStatusEditing       PublishTaskStatus = "editing"
@@ -48,6 +49,7 @@ func (s PublishTaskStatus) Valid() bool {
 		PublishTaskStatusPartialFailed,
 		PublishTaskStatusFailed,
 		PublishTaskStatusCanceled,
+		PublishTaskStatusCanceling,
 		PublishTaskStatusUnpublishing,
 		PublishTaskStatusWaitingMedia,
 		PublishTaskStatusEditing:
@@ -889,11 +891,27 @@ type ProfileStatusModel struct {
 	Message     string `json:"message" dc:"提示信息"`
 }
 
+type ProfilePublishCancelInp struct {
+	Uuid        string `json:"uuid" v:"required#资料UUID不能为空"`
+	OperationNo string `json:"operationNo" v:"required|length:1,128#发布轮次不能为空|发布轮次长度不合法"`
+}
+
+func (in *ProfilePublishCancelInp) Filter(ctx context.Context) error {
+	in.Uuid = strings.TrimSpace(in.Uuid)
+	// The operation is opaque; never infer it from a prefix or latest Job.
+	if in.Uuid == "" || in.OperationNo == "" || len(in.OperationNo) > 128 || strings.TrimSpace(in.OperationNo) != in.OperationNo {
+		return gerror.New("资料UUID和有效的发布轮次不能为空")
+	}
+	return nil
+}
+
 type ProfileTaskStatusModel struct {
-	Id         int64  `json:"id" dc:"资料ID"`
-	Uuid       string `json:"uuid" dc:"资料UUID"`
-	Status     int    `json:"status" dc:"资料状态"`
-	TaskStatus string `json:"taskStatus" dc:"任务状态"`
+	TaskError   string `json:"taskError,omitempty" dc:"取消发布等待或清理异常说明"`
+	OperationNo string `json:"operationNo,omitempty" dc:"不透明的发布轮次标识"`
+	Id          int64  `json:"id" dc:"资料ID"`
+	Uuid        string `json:"uuid" dc:"资料UUID"`
+	Status      int    `json:"status" dc:"资料状态"`
+	TaskStatus  string `json:"taskStatus" dc:"任务状态"`
 }
 
 type CollectProfileMediaRebuildResult struct {

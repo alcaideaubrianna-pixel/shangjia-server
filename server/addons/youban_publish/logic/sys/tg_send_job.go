@@ -589,6 +589,13 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 			displaySendDuration := time.Since(displaySendStartedAt)
 			observeTelegramMediaSend(ctx, &job, "display", err, displaySendDuration)
 			g.Log().Info(ctx, "TG展示资料Bot发送结束", g.Map{"event": "telegram_bot_send", "purpose": "display", "transport": "bot", "profileId": job.ProfileId, "operationNo": job.OperationNo, "stageTimeoutMs": telegrambudget.Display(ctx).Milliseconds(), "job_id": job.Id, "attempt_id": attempt.Id, "bot_id": job.BotId, "account_id": job.AccountId, "channel_id": job.ChannelId, "target_chat_id": job.TargetChatId, "media_count": len(displayMedia), "send_mode": "bot", "retry_count": job.RetryCount, "duration": displaySendDuration.Milliseconds(), "error_type": telegramSendErrorType(err), "error_code": telegramSendErrorCode(err), "message_ids": telegramSentMessageIDs(messages), "error": telegramPublishLogError(err)})
+			if err != nil {
+				if canceled, cancelErr := recordCanceledSendOutcome(ctx, job, attempt, messages, err); cancelErr != nil {
+					return cancelErr
+				} else if canceled {
+					return errTelegramJobSuperseded
+				}
+			}
 			if err != nil && len(messages) == 0 && s.shouldFallbackAfterBotFailure(ctx, job, err) {
 				g.Log().Warningf(ctx, "Bot展示媒体发送失败，命中媒体降级条件 jobId:%d botId:%d chat:%s media:%s err:%+v", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(displayMedia), err)
 				messages, err = s.sendTelegramJobMediaByAccount(ctx, job, attempt.Id, "display", displayCaption, displayMedia, err)
@@ -668,6 +675,13 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	verifySendDuration := time.Since(verifySendStartedAt)
 	observeTelegramMediaSend(ctx, &job, "verify", err, verifySendDuration)
 	g.Log().Info(ctx, "TG验证资料Bot发送结束", g.Map{"event": "telegram_bot_send", "purpose": "verify", "transport": "bot", "profileId": job.ProfileId, "operationNo": job.OperationNo, "stageTimeoutMs": telegrambudget.Verify(ctx).Milliseconds(), "job_id": job.Id, "attempt_id": verifyAttempt.Id, "bot_id": job.BotId, "account_id": job.AccountId, "channel_id": job.ChannelId, "target_chat_id": job.TargetChatId, "media_count": len(verifyMedia), "send_mode": "bot", "retry_count": job.RetryCount, "duration": verifySendDuration.Milliseconds(), "error_type": telegramSendErrorType(err), "error_code": telegramSendErrorCode(err), "message_ids": telegramSentMessageIDs(verifyMessages), "error": telegramPublishLogError(err)})
+	if err != nil {
+		if canceled, cancelErr := recordCanceledSendOutcome(ctx, job, verifyAttempt, verifyMessages, err); cancelErr != nil {
+			return cancelErr
+		} else if canceled {
+			return errTelegramJobSuperseded
+		}
+	}
 	if err != nil && len(verifyMessages) == 0 && s.shouldFallbackAfterBotFailure(ctx, job, err) {
 		g.Log().Warningf(ctx, "Bot验证媒体发送失败，命中媒体降级条件 jobId:%d botId:%d chat:%s media:%s err:%+v", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(verifyMedia), err)
 		verifyMessages, err = s.sendTelegramJobMediaByAccount(ctx, job, verifyAttempt.Id, "verify", verifyCaption, verifyMedia, err)

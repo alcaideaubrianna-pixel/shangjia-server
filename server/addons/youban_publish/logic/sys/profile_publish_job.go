@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -457,6 +458,9 @@ func (s *sSysPublish) ensureTelegramProfileJobWithMeta(ctx context.Context, sour
 
 // ensureTelegramProfileJobWithMetaTx 按账户、操作和频道幂等创建任务；新操作不复用另一操作的优先级。
 func (s *sSysPublish) ensureTelegramProfileJobWithMetaTx(ctx context.Context, tx gdb.TX, source gdb.Record, channel telegramJobChannel, operationNo string, meta telegramProfilePublishMeta) (int64, error) {
+	if err := lockProfilePublishFenceTx(ctx, tx, telegramJobRecord{TenantId: source["tenant_id"].Int64(), AccountId: source["account_id"].Int64(), ProfileId: source["profile_id"].Int64(), OperationNo: operationNo}); err != nil {
+		return 0, err
+	}
 	// Resolve collection source per target publish channel. A profile can be
 	// matched by multiple rules/BOTs; using the profile-level latest source here
 	// leaks one channel's suffix into another channel's message.
@@ -628,6 +632,22 @@ func (s *sSysPublish) ensureTelegramProfileJobWithMetaTx(ctx context.Context, tx
 
 // completeProfileTelegramOperation 汇总当前操作的频道结果，部分失败保持失败提示，不误报全部完成。
 func (s *sSysPublish) completeProfileTelegramOperation(ctx context.Context, job telegramJobRecord, isCycle bool) (bool, error) {
+	var completed bool
+	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if err := lockProfilePublishFenceTx(ctx, tx, job); err != nil {
+			if errors.Is(err, errTelegramJobSuperseded) {
+				return nil
+			}
+			return err
+		}
+		var err error
+		completed, err = s.completeProfileTelegramOperationLocked(ctx, job, isCycle)
+		return err
+	})
+	return completed, err
+}
+
+func (s *sSysPublish) completeProfileTelegramOperationLocked(ctx context.Context, job telegramJobRecord, isCycle bool) (bool, error) {
 	total, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("tenant_id", job.TenantId).Where("account_id", job.AccountId).
 		Where("profile_id", job.ProfileId).

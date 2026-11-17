@@ -102,6 +102,9 @@ func (s *sSysPublish) requestTelegramMediaFallback(ctx context.Context, job tele
 		return errTelegramMediaFallbackUnavailable
 	}
 	err = telegramFallbackTransaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if err := lockProfilePublishFenceTx(ctx, tx, job); err != nil {
+			return err
+		}
 		var current telegramJobRecord
 		if err := tx.Model(publishTgJobTable).Ctx(ctx).Where("id", job.Id).LockUpdate().Scan(&current); err != nil {
 			return err
@@ -187,6 +190,9 @@ func (s *sSysPublish) recordTelegramFallbackBotRejection(ctx context.Context, jo
 	ctx, cancel := telegramFinalizeContext(ctx, "account_fallback.bot_rejection")
 	defer cancel()
 	return telegramFallbackTransaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if err := lockProfilePublishFenceTx(ctx, tx, job); err != nil {
+			return err
+		}
 		var current telegramJobRecord
 		if err := tx.Model(publishTgJobTable).Ctx(ctx).Where("id", job.Id).LockUpdate().Scan(&current); err != nil {
 			return err
@@ -306,6 +312,9 @@ func (s *sSysPublish) claimTelegramFallbackTask(ctx context.Context, task *colle
 	ctx, cancel := telegramFinalizeContext(ctx, "account_fallback.claim")
 	defer cancel()
 	err := telegramFallbackTransaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if err := lockProfilePublishFenceTx(ctx, tx, job); err != nil {
+			return err
+		}
 		if err := lockTelegramFallbackTaskTx(ctx, tx, task, false); err != nil {
 			return err
 		}
@@ -372,6 +381,9 @@ func (s *sSysPublish) resumeTelegramVerificationAfterFallback(ctx context.Contex
 	ctx, cancel := telegramFinalizeContext(ctx, "account_fallback.resume_verify")
 	defer cancel()
 	err := telegramFallbackTransaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if err := lockProfilePublishFenceTx(ctx, tx, job); err != nil {
+			return err
+		}
 		return s.resumeTelegramVerificationAfterFallbackTx(ctx, tx, job, task)
 	})
 	if err != nil {
@@ -384,6 +396,9 @@ func (s *sSysPublish) resumeTelegramVerificationAfterFallback(ctx context.Contex
 }
 
 func (s *sSysPublish) resumeTelegramVerificationAfterFallbackTx(ctx context.Context, tx gdb.TX, job telegramJobRecord, task *collectorin.AccountTask) error {
+	if err := lockProfilePublishFenceTx(ctx, tx, job); err != nil {
+		return err
+	}
 	if err := lockTelegramFallbackTaskTx(ctx, tx, task, task != nil && task.Status == collectorin.AccountTaskStatusFinalizing); err != nil {
 		return err
 	}
@@ -443,6 +458,9 @@ func (s *sSysPublish) recoverTelegramFallbackConfirmation(ctx context.Context, j
 	}
 	resume := job.SendPhase == SendPhaseDisplayConfirmed && hasVerify
 	err := telegramFallbackTransaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if err := lockProfilePublishFenceTx(ctx, tx, job); err != nil {
+			return err
+		}
 		var current telegramJobRecord
 		if err := tx.Model(publishTgJobTable).Ctx(ctx).Where("id", job.Id).LockUpdate().Scan(&current); err != nil {
 			return err
@@ -493,6 +511,9 @@ func (s *sSysPublish) failTelegramFallbackTask(ctx context.Context, task *collec
 	changed := false
 	confirmed := false
 	err := telegramFallbackTransaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if err := lockProfilePublishFenceTx(ctx, tx, job); err != nil {
+			return err
+		}
 		if err := lockTelegramFallbackTaskTx(ctx, tx, task, true); err != nil {
 			return err
 		}
@@ -562,6 +583,9 @@ func (s *sSysPublish) completeConfirmedTelegramFallbackTask(ctx context.Context,
 	ctx, cancel := telegramFinalizeContext(ctx, "account_fallback.complete_confirmed")
 	defer cancel()
 	err := telegramFallbackTransaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if err := lockProfilePublishFenceTx(ctx, tx, job); err != nil {
+			return err
+		}
 		if err := lockTelegramFallbackTaskTx(ctx, tx, task, task != nil && task.Status == collectorin.AccountTaskStatusFinalizing); err != nil {
 			return err
 		}
@@ -611,11 +635,11 @@ func checkTelegramFallbackProfileOperationTx(ctx context.Context, tx gdb.TX, job
 	}
 	state, err := tx.Model(publishProfileStateTable).Ctx(ctx).
 		Where("tenant_id", job.TenantId).Where("account_id", job.AccountId).Where("profile_id", job.ProfileId).
-		Fields("publish_operation_no").LockUpdate().One()
+		Fields("publish_operation_no,publish_task_status").One()
 	if err != nil {
 		return err
 	}
-	if !state.IsEmpty() && state["publish_operation_no"].String() != "" && state["publish_operation_no"].String() != job.OperationNo {
+	if !state.IsEmpty() && (state["publish_task_status"].String() == "canceling" || state["publish_task_status"].String() == "canceled" || (state["publish_operation_no"].String() != "" && state["publish_operation_no"].String() != job.OperationNo)) {
 		return errTelegramJobSuperseded
 	}
 	return nil
@@ -643,6 +667,9 @@ func (s *sSysPublish) failOwnedTelegramFallbackJob(ctx context.Context, job tele
 	changed := false
 	message := telegramFallbackFailureMessage(cause)
 	err := telegramFallbackTransaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if err := lockProfilePublishFenceTx(ctx, tx, job); err != nil {
+			return err
+		}
 		// Keep the same AccountTask -> Job lock order as execution/callbacks.
 		task, err := tx.Model(telegramFallbackAccountTaskTable).Ctx(ctx).
 			Where("tenant_id", job.TenantId).Where("task_key", telegramFallbackTaskKey(job, purpose)).
@@ -707,6 +734,9 @@ func (s *sSysPublish) failNonAccountTelegramJob(ctx context.Context, job telegra
 	message := telegramFallbackFailureMessage(cause)
 	changed := false
 	err := telegramFallbackTransaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if err := lockProfilePublishFenceTx(ctx, tx, job); err != nil {
+			return err
+		}
 		var err error
 		changed, err = s.failNonAccountTelegramJobTx(ctx, tx, job, message)
 		return err
@@ -718,6 +748,9 @@ func (s *sSysPublish) failNonAccountTelegramJob(ctx context.Context, job telegra
 }
 
 func (s *sSysPublish) failNonAccountTelegramJobTx(ctx context.Context, tx gdb.TX, job telegramJobRecord, message string) (bool, error) {
+	if err := lockProfilePublishFenceTx(ctx, tx, job); err != nil {
+		return false, err
+	}
 	if job.Id <= 0 || (job.Status != telegramJobStatusSending && job.Status != telegramJobStatusConfirming) {
 		return false, nil
 	}
@@ -815,6 +848,9 @@ func (s *sSysPublish) prepareTelegramFallbackTransport(ctx context.Context, job 
 	defer cancel()
 	task, _ := ctx.Value(telegramFallbackTaskContextKey{}).(*collectorin.AccountTask)
 	return telegramFallbackTransaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if err := lockProfilePublishFenceTx(ctx, tx, job); err != nil {
+			return err
+		}
 		if err := lockTelegramFallbackTaskTx(ctx, tx, task, false); err != nil {
 			return err
 		}
@@ -886,6 +922,9 @@ func (s *sSysPublish) recordTelegramFallbackAccountRejection(ctx context.Context
 	defer cancel()
 	task, _ := ctx.Value(telegramFallbackTaskContextKey{}).(*collectorin.AccountTask)
 	return telegramFallbackTransaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if err := lockProfilePublishFenceTx(ctx, tx, job); err != nil {
+			return err
+		}
 		if err := lockTelegramFallbackTaskTx(ctx, tx, task, false); err != nil {
 			return err
 		}

@@ -413,11 +413,22 @@ func (s *sSysPublish) AdminProfileTaskStatus(ctx context.Context, in *sysin.Prof
 	if err = s.ensureAdminManageableAccount(ctx, account, profile.AccountId); err != nil {
 		return nil, gerror.New("资料不存在或无权查看")
 	}
+	taskError := ""
+	if profilePublishCancelEnabled() && (profile.TaskStatus == "canceling" || profile.TaskStatus == "canceled") {
+		var intent profilePublishCancel
+		job := telegramJobRecord{TenantId: profile.TenantId, AccountId: profile.AccountId, ProfileId: profile.Id, OperationNo: profile.OperationNo}
+		if err := profileCancelScope(g.DB().Model(publishProfileCancelTable).Ctx(ctx), job).Scan(&intent); err != nil {
+			return nil, err
+		}
+		taskError = intent.ErrorMessage
+	}
 	return &sysin.ProfileTaskStatusModel{
-		Id:         profile.Id,
-		Uuid:       profile.Uuid,
-		Status:     profile.Status,
-		TaskStatus: profile.TaskStatus,
+		TaskError:   taskError,
+		OperationNo: profile.OperationNo,
+		Id:          profile.Id,
+		Uuid:        profile.Uuid,
+		Status:      profile.Status,
+		TaskStatus:  profile.TaskStatus,
 	}, nil
 }
 

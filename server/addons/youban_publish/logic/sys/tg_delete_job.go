@@ -95,7 +95,9 @@ func (s *sSysPublish) cleanupTelegramJobMessages(ctx context.Context, jobId int6
 				return err
 			}
 			stageStarted = time.Now()
-			err = s.notifyBotProfileUnpublishCompleted(ctx, job, payload)
+			if !strings.HasPrefix(payload.CleanupOperationNo, "cancel:") {
+				err = s.notifyBotProfileUnpublishCompleted(ctx, job, payload)
+			}
 			logStage("notify_unpublish_completed", stageStarted, err)
 			if err != nil {
 				g.Log().Warningf(ctx, "发送Bot资料下架完成通知失败 profileId:%d jobId:%d err:%+v", job.ProfileId, job.Id, err)
@@ -162,6 +164,9 @@ func (s *sSysPublish) withTelegramCleanupJobLease(ctx context.Context, jobId int
 
 func (s *sSysPublish) finishTelegramCleanupProfile(ctx context.Context, job telegramJobRecord, payload tgQueuePayload) error {
 	operationNo := strings.TrimSpace(payload.CleanupOperationNo)
+	if strings.HasPrefix(operationNo, "cancel:") {
+		return nil
+	} // Cancellation recovery owns its terminal state.
 	if operationNo == "" {
 		// 没有当前 unpublishing 状态时，重复清理任务已经是幂等完成；
 		// 不使用历史 job.OperationNo，也不让遗留任务无限重试。

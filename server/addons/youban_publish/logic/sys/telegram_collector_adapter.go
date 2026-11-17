@@ -835,6 +835,13 @@ func (s *sSysPublish) sendAccountFallbackPhase(ctx context.Context, client *tele
 		messages, err = s.sendMessageTemplateWithTgClient(ctx, client, peer, caption, media, nil, accountID, "")
 		logTelegramProtocolSend(ctx, job, attempt, purpose, len(media), messages, "result", time.Since(sendStartedAt), err)
 		if err != nil {
+			if canceled, cancelErr := recordCanceledSendOutcome(ctx, job, attempt, messages, err); cancelErr != nil {
+				return nil, cancelErr
+			} else if canceled {
+				return nil, errTelegramJobSuperseded
+			}
+		}
+		if err != nil {
 			if !telegramFallbackBotFailureKnown(err) {
 				waitCtx, cancel := telegramFinalizeContext(ctx, "account_fallback.await_facts")
 				defer cancel()

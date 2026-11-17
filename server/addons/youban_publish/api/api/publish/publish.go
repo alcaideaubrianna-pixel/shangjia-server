@@ -780,6 +780,15 @@ type AdminProfileStatusRes struct {
 	*sysin.ProfileStatusModel
 }
 
+type AdminProfilePublishCancelReq struct {
+	g.Meta `path:"/publish/admin/profile/publish/cancel" method:"post" tags:"上架插件管理端" summary:"取消资料当前轮次发布"`
+	sysin.ProfilePublishCancelInp
+}
+
+type AdminProfilePublishCancelRes struct {
+	*sysin.ProfileTaskStatusModel
+}
+
 type AdminProfileCycleCancelReq struct {
 	g.Meta `path:"/publish/admin/profile/cycle/cancel" method:"post" tags:"上架插件管理端" summary:"取消资料当前循环上架"`
 	sysin.ProfileViewInp

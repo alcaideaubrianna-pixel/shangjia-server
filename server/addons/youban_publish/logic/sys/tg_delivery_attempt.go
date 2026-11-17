@@ -147,6 +147,9 @@ func (s *sSysPublish) prepareTelegramDeliveryAttempt(ctx context.Context, job te
 	var attempt telegramDeliveryAttempt
 	step = beginTelegramPublishStage(ctx, "attempt.create_transaction", g.Map{"purpose": phase})
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if err := lockProfilePublishFenceTx(ctx, tx, job); err != nil {
+			return err
+		}
 		var current telegramJobRecord
 		if scanErr := tx.Model(publishTgJobTable).Where("id", job.Id).LockUpdate().Scan(&current); scanErr != nil {
 			return gerror.Wrap(scanErr, "锁定TG任务发送阶段失败")
@@ -325,6 +328,14 @@ func (s *sSysPublish) confirmTelegramAPISuccess(ctx context.Context, job telegra
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		if err := boundTelegramConfirmationTransaction(ctx, tx); err != nil {
 			return err
+		}
+		isCanceled, err := lockCanceledReceiptOperationTx(ctx, tx, job)
+		if err != nil {
+			return err
+		}
+		if isCanceled {
+			cancelled = true
+			return captureCanceledAttemptReceiptTx(ctx, tx, attempt, messages)
 		}
 		// 这里只读取超时取消标记，不提前锁定 tg_job。最终状态更新使用
 		// 带状态条件的短更新，避免 API 成功确认阶段长时间等待任务行锁。
@@ -661,6 +672,11 @@ func (s *sSysPublish) restoreConfirmedTelegramResponse(ctx context.Context, job 
 		if err := boundTelegramConfirmationTransaction(ctx, tx); err != nil {
 			return err
 		}
+		if canceled, err := lockCanceledReceiptOperationTx(ctx, tx, job); err != nil {
+			return err
+		} else if canceled {
+			return captureCanceledAttemptReceiptTx(ctx, tx, attempt, messages)
+		}
 		// Match expire/cleanup lock order. A stale recovery snapshot must not
 		// recreate sent facts after a timeout fence or a newer phase transition.
 		var current telegramJobRecord
@@ -994,7 +1010,7 @@ func recordTelegramAttemptMessagesTx(ctx context.Context, tx gdb.TX, attempt tel
 			attempt.Id, attempt.JobId, attempt.Phase, attempt.TargetChatId, len(rows), source, err)
 		return gerror.Wrap(err, "记录TG Attempt消息失败")
 	}
-	return nil
+	return captureCanceledAttemptReceiptTx(ctx, tx, attempt, messages)
 }
 
 // persistTelegramAttemptResponseDurably 先以独立短事务保存 Telegram 已返回的消息证据。
@@ -1031,8 +1047,13 @@ func persistTelegramAttemptResponseDurably(ctx context.Context, attempt telegram
 	if len(rows) == 0 {
 		return nil
 	}
-	_, err := g.DB().Model(publishTgAttemptMessageTable).Ctx(persistCtx).Data(rows).
-		OnConflict("attempt_id,message_id").OnDuplicate("source,message_payload").Save()
+	err := g.DB().Transaction(persistCtx, func(ctx context.Context, tx gdb.TX) error {
+		if _, err := tx.Model(publishTgAttemptMessageTable).Ctx(ctx).Data(rows).
+			OnConflict("attempt_id,message_id").OnDuplicate("source,message_payload").Save(); err != nil {
+			return err
+		}
+		return captureCanceledAttemptReceiptTx(ctx, tx, attempt, messages)
+	})
 	if err != nil {
 		logTelegramFinalize(persistCtx, "response.persist", "recovery_required", err)
 		return gerror.Wrap(err, "持久化TG响应消息失败")
@@ -1161,6 +1182,17 @@ func (s *sSysPublish) matchTelegramDeliveryAttempt(ctx context.Context, botId in
 		"duration_ms":    time.Since(matchStartedAt).Milliseconds(),
 		"fact_source":    "webhook_or_account_update",
 	})
+	if profilePublishCancelEnabled() {
+		if job, err := s.telegramJobById(ctx, matched.JobId); err == nil {
+			sent := &telegramSentMessage{MessageId: int64(msg.ID), MediaGroupId: msg.MediaGroupID, Purpose: matched.Phase, TgFileId: telegramMessageFileId(msg), TgFileUniqueId: telegramMessageFileUniqueId(msg)}
+			if canceled, err := recordCanceledSendOutcome(ctx, job, *matched, []*telegramSentMessage{sent}, nil); err != nil {
+				g.Log().Warningf(ctx, "取消发布Webhook入账待重试 jobId:%d operationNo:%s err:%+v", job.Id, job.OperationNo, err)
+				return
+			} else if canceled {
+				return
+			}
+		}
+	}
 	if matched.Status != telegramAttemptStatusConfirmed && matched.Status != telegramAttemptStatusSuperseded && matched.Phase != "package" {
 		if job, err := s.telegramJobById(ctx, matched.JobId); err == nil && s.accountPushEngine(ctx, job.TenantId, job.AccountId) == pushEngineUnifiedStream && job.Status != telegramJobStatusSent && job.Status != telegramJobStatusSuperseded && job.SendPhase != telegramSendPhaseTimeoutCancelled {
 			if err := s.matchStreamWebhookGroup(ctx, *matched, job, msg); err != nil {

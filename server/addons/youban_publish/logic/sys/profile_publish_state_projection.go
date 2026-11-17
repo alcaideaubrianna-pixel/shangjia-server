@@ -132,6 +132,7 @@ func (s *sSysPublish) cancelProfilePublishOperation(ctx context.Context, profile
 			Where("profile_id", profileId).
 			WhereNull("deleted_at").
 			Where("publish_task_status <> ''").
+			WhereNotIn("publish_task_status", []string{"canceling", "canceled"}).
 			Data(g.Map{"publish_task_status": "", "publish_task_updated_at": now, "updated_at": now}).
 			Update(); err != nil {
 			return gerror.Wrap(err, "取消资料上架操作状态失败")
@@ -140,6 +141,7 @@ func (s *sSysPublish) cancelProfilePublishOperation(ctx context.Context, profile
 			Where("profile_id", profileId).
 			WhereNull("deleted_at").
 			Where("task_status <> ''").
+			WhereNotIn("task_status", []string{"canceling", "canceled"}).
 			Data(g.Map{"task_status": ""}).
 			Update(); err != nil {
 			return gerror.Wrap(err, "清理资料列表上架状态失败")
@@ -157,6 +159,7 @@ func (s *sSysPublish) profilePublishOperationIsCurrent(ctx context.Context, job 
 		Where("account_id", job.AccountId).
 		Where("profile_id", job.ProfileId).
 		Where("publish_operation_no", strings.TrimSpace(job.OperationNo)).
+		WhereNotIn("publish_task_status", []string{"canceling", "canceled"}).
 		WhereNull("deleted_at").
 		Count()
 	if err != nil {
@@ -172,6 +175,18 @@ func (s *sSysPublish) writeProfilePublishOperationState(ctx context.Context, ten
 }
 
 func (s *sSysPublish) writeProfilePublishOperationStateTx(ctx context.Context, tx gdb.TX, tenantId, accountId, profileId int64, operationNo string, status sysin.PublishTaskStatus, requireCurrentOperation bool) error {
+	if err := s.fenceProfileStateWriteTx(ctx, tx, tenantId, accountId, profileId, operationNo, status, requireCurrentOperation); err != nil {
+		return err
+	}
+	if status != sysin.PublishTaskStatusCanceling && status != sysin.PublishTaskStatusCanceled {
+		state, err := tx.Model(publishProfileStateTable).Ctx(ctx).Where("tenant_id", tenantId).Where("account_id", accountId).Where("profile_id", profileId).Fields("publish_operation_no,publish_task_status").One()
+		if err != nil {
+			return err
+		}
+		if state["publish_operation_no"].String() == operationNo && (state["publish_task_status"].String() == "canceling" || state["publish_task_status"].String() == "canceled") {
+			return nil
+		}
+	}
 	now := gtime.Now()
 	// A late failure callback must never overwrite a successful delivery.
 	// Cycle/recovery callbacks can carry an older operation number while the

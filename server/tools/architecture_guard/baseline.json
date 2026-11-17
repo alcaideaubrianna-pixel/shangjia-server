@@ -1,5 +1,68 @@
 [
   {
+    "file": "addons/youban_publish/logic/sys/profile_publish_cancel.go",
+    "function": "*sSysPublish.acceptProfilePublishCancelTx",
+    "rule": "state-map-write",
+    "expression": "\"status\": \"canceling\"",
+    "digest": "923d5966bb2198c55682e95558ba6fa1a0e20f0d99d98bf5dbea1b97a34ae87a",
+    "count": 1,
+    "reason": "Cancellation intent table only: insert exact tenant/account/profile/operation tombstone under the profile state lock, atomically with cleanup Outbox. TG Job state still uses telegramJobTransition."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/profile_publish_cancel.go",
+    "function": "*sSysPublish.settleProfilePublishCancelTx",
+    "rule": "state-map-write",
+    "expression": "\"status\": \"canceled\"",
+    "digest": "ce779981ed4a631dfc7e8a87ed6eddb5d444fce2ec1d50bed73daa0e23510d38",
+    "count": 1,
+    "reason": "Cancellation intent terminal only: same operation after checking protocol owners, Attempt evidence, retained messages and cleanup Outbox. Profile status is projected by its existing fenced helper."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/profile_publish_cancel.go",
+    "function": "*sSysPublish.stopCanceledProfileJobsTx",
+    "rule": "state-map-write",
+    "expression": "\"status\": telegramOutboxDelivered",
+    "digest": "791336bc23ece6048cbc1c56c07064515b24e69d9e3ee58ffe1eb8c63269b388",
+    "count": 1,
+    "reason": "Idempotent Job-stop phase after durable cancellation: close only the exact canceled Jobs' publish Outbox, excluding cleanup Outbox. Runs without the profile lock and without Redis network operations to avoid Job/state lock inversion."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/profile_publish_cancel.go",
+    "function": "captureCanceledAttemptReceiptTx",
+    "rule": "state-map-write",
+    "expression": "\"status\": telegramAttemptStatusConfirmed",
+    "digest": "e65adfd75bb398963f1d4fb3a8a691b357f03aa6d193d154a7fd9436ab407990",
+    "count": 1,
+    "reason": "Attempt evidence only: complete remote IDs have first been persisted with per-message cleanup intents. Does not advance the canceled Job or resume verification/fallback."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/profile_publish_cancel.go",
+    "function": "persistCanceledReceiptCleanupTx",
+    "rule": "state-map-write",
+    "expression": "\"status\": \"canceling\"",
+    "digest": "923d5966bb2198c55682e95558ba6fa1a0e20f0d99d98bf5dbea1b97a34ae87a",
+    "count": 1,
+    "reason": "Exact operation intent only: retain recoverability if genuinely new sent evidence arrives. Deleted duplicate evidence does not reopen cancellation; cleanup is persisted before reopening."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/profile_publish_cancel.go",
+    "function": "recordCanceledSendOutcome",
+    "rule": "state-map-write",
+    "expression": "\"status\": telegramAttemptStatusRetryWait",
+    "digest": "a9a71981c6b4b557074faf087e08d68bd2fbd20389d6f91f369632ea58eb8928",
+    "count": 1,
+    "reason": "Canceled Attempt negative evidence only: persist a definite RPC rejection with no IDs. The Job remains superseded and cannot retry; ambiguous outcomes are never treated as absent."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/profile_publish_cancel_cycle.go",
+    "function": "*sSysPublish.stopCanceledProfileCycleRun",
+    "rule": "state-map-write",
+    "expression": "\"status\": \"superseded\"",
+    "digest": "7ec4bbfd71ee25221d36ab9428c8c9aafadcda43cf7267838ecfd312e54ea391",
+    "count": 1,
+    "reason": "Exact profile cycle Run-channel projection only, matched through run_key and tenant/account/profile. Independent Run-first transaction preserves cycle creator lock order; shared channel batches and TG Job state are not directly changed."
+  },
+  {
     "file": "addons/youban_publish/devtools/publish_chain/main.go",
     "function": "<imports>",
     "rule": "redis-import",
