@@ -162,7 +162,7 @@ func (s *sCollector) enqueueReplayEvent(ctx context.Context, eventID int64) (boo
 
 	switch row.Status {
 	case sysin.EventStatusReceived, sysin.EventStatusFailedRetry:
-		return true, s.enqueueEventTask(ctx, eventID, row.Priority)
+		return true, s.enqueueSourceReplayEventTask(ctx, eventID)
 	case sysin.EventStatusProcessing:
 		return false, nil
 	case sysin.EventStatusDead:
@@ -177,12 +177,20 @@ func (s *sCollector) enqueueReplayEvent(ctx context.Context, eventID int64) (boo
 		if affected, _ := result.RowsAffected(); affected == 0 {
 			return false, nil
 		}
-		return true, s.enqueueEventTask(ctx, eventID, row.Priority)
+		return true, s.enqueueSourceReplayEventTask(ctx, eventID)
 	case sysin.EventStatusReady:
 		return s.enqueueReplayDelivery(ctx, eventID)
 	default:
 		return false, gerror.Newf("source重放事件状态不支持：%s", row.Status)
 	}
+}
+
+// Explicit, bounded repairs use the existing realtime consumer instead of
+// joining the raw urgent backlog again. Keep the persisted priority and update
+// unchanged: the ordinary handler still atomically claims the event, so an old
+// urgent copy cannot repeat an event that this repair has already completed.
+func (s *sCollector) enqueueSourceReplayEventTask(ctx context.Context, eventID int64) error {
+	return s.enqueueEventTask(ctx, eventID, sysin.EventPriorityRealtime, "source_replay")
 }
 
 func (s *sCollector) enqueueReplayDelivery(ctx context.Context, eventID int64) (bool, error) {
@@ -200,7 +208,7 @@ func (s *sCollector) enqueueReplayDelivery(ctx context.Context, eventID int64) (
 			return false, gerror.Wrap(err, "恢复缺失source交付的事件失败")
 		}
 		if affected, _ := result.RowsAffected(); affected > 0 {
-			return true, s.enqueueEventTask(ctx, eventID, sysin.EventPriorityUrgent)
+			return true, s.enqueueSourceReplayEventTask(ctx, eventID)
 		}
 		return false, nil
 	}

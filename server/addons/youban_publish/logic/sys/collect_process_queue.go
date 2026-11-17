@@ -595,6 +595,71 @@ func collectProcessSourceEnabled(ctx context.Context, payload collectProcessQueu
 	return false, nil
 }
 
+// collectProcessResumeClassifiedDisplay bypasses only the assembly window.
+// Authorization, rule matching, media and paired verification checks remain
+// inside processCollectEvent. Failed/unknown/unclassified inputs keep the
+// existing window route; terminal/late-repair handling stays with the caller.
+func collectProcessResumeClassifiedDisplay(ctx context.Context, event gdb.Record, hasVerify func(context.Context, gdb.Record) (bool, error)) (bool, error) {
+	if event["material_role"].String() != collectMaterialRoleDisplay {
+		return false, nil
+	}
+	switch event["status"].String() {
+	case sysin.CollectEventStatusGroupCollect, sysin.CollectEventStatusPrechecked,
+		sysin.CollectEventStatusMediaPending, sysin.CollectEventStatusMediaReady:
+	default:
+		return false, nil
+	}
+	switch event["material_group_status"].String() {
+	case "complete":
+		return true, nil
+	case "paired":
+		if hasVerify == nil {
+			return false, gerror.New("缺少已配对验证组检查")
+		}
+		found, err := hasVerify(ctx, event)
+		if err != nil {
+			return false, gerror.Wrap(err, "核对已分类展示资料的配对验证组失败")
+		}
+		if !found {
+			// A stale paired marker must not downgrade to a display-only
+			// profile. Wait without taking the channel assembly lease.
+			return false, newCollectProcessRetryError(30*time.Second, "已配对展示资料尚未找到同源验证组，保留重试")
+		}
+		return true, nil
+	default:
+		return false, nil
+	}
+}
+
+// hasCollectProcessPairedVerify probes the existing material index prefix.
+// Never search all parents by parent ID alone or infer a new verification pair.
+func hasCollectProcessPairedVerify(ctx context.Context, event gdb.Record) (bool, error) {
+	chatIDs := tgChannelCacheLookupIds(event["source_chat_id"].String())
+	if event["id"].Int64() <= 0 || event["tenant_id"].Int64() <= 0 ||
+		event["source_id"].Int64() <= 0 || event["account_id"].Int64() < 0 || len(chatIDs) == 0 {
+		return false, gerror.New("已分类资料缺少明确的配对查询范围")
+	}
+	parentCtx := ctx
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	if tx := gdb.TXFromCtx(parentCtx, g.DB().GetGroup()); tx != nil {
+		defer tx.Ctx(parentCtx)
+	}
+	cols := pdao.YoubanPublishCollectEvent.Columns()
+	row, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).Fields(cols.Id).
+		Where(cols.TenantId, event["tenant_id"].Int64()).
+		Where(cols.AccountId, collectEventStorageAccountID(event)).
+		Where(cols.SourceId, event["source_id"].Int64()).
+		WhereIn(cols.SourceChatId, chatIDs).
+		Where("material_role", collectMaterialRoleVerify).
+		Where("material_parent_event_id", event["id"].Int64()).
+		Limit(1).One()
+	if err != nil {
+		return false, err
+	}
+	return !row.IsEmpty(), nil
+}
+
 func (s *sSysPublish) processCollectSourceTask(ctx context.Context, payload collectProcessQueuePayload) (delay time.Duration, pending bool, removeSchedule bool, err error) {
 	mode := "unknown"
 	if payload.History {
@@ -677,11 +742,34 @@ func (s *sSysPublish) processCollectSourceTask(ctx context.Context, payload coll
 				return 0, false, false, gerror.Wrap(clearErr, "清理未完成事件的历史完成时间失败")
 			}
 		}
-		var processErr error
-		if lateVerificationRepair || (event["material_role"].String() == collectMaterialRoleVerify && event["material_parent_event_id"].Int64() > 0) {
-			processErr = s.processCollectEvent(ctx, payload.EventId, payload.TenantId, payload.AccountId)
-		} else {
-			processErr = s.processTargetCollectEventWindow(ctx, payload, event)
+		resumeDisplay, processErr := collectProcessResumeClassifiedDisplay(ctx, event, hasCollectProcessPairedVerify)
+		route, reason := "target_window", "assembly_required"
+		switch {
+		case processErr != nil:
+			route, reason = "event_resume_wait", "paired_verify_probe"
+		case lateVerificationRepair:
+			route, reason = "event_resume", "late_verification_repair"
+		case event["material_role"].String() == collectMaterialRoleVerify && event["material_parent_event_id"].Int64() > 0:
+			route, reason = "event_resume", "paired_verify"
+		case resumeDisplay:
+			route, reason = "event_resume", "classified_display"
+		}
+		g.Log().Info(ctx, "采集事件处理路径选择", g.Map{
+			"event": "collect_process_route", "route": route, "reason": reason,
+			"eventId": payload.EventId, "collectEventId": payload.EventId,
+			"tenantId": payload.TenantId, "accountId": payload.AccountId,
+			"eventAccountId": event["account_id"].Int64(), "sourceId": event["source_id"].Int64(),
+			"sourceChatId": event["source_chat_id"].String(),
+			"canonicalChatId": canonicalCollectSourceChatID(event["source_chat_id"].String()),
+			"materialRole": event["material_role"].String(), "groupStatus": event["material_group_status"].String(),
+			"eventStatus": event["status"].String(), "mode": mode, "history": payload.History, "recovery": payload.Recovery,
+		})
+		if processErr == nil {
+			if route == "event_resume" {
+				processErr = s.processCollectEvent(ctx, payload.EventId, payload.TenantId, payload.AccountId)
+			} else {
+				processErr = s.processTargetCollectEventWindow(ctx, payload, event)
+			}
 		}
 		if err = processErr; err != nil {
 			var retryErr *collectProcessRetryError
