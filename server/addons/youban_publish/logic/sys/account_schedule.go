@@ -413,9 +413,10 @@ func (s *sSysPublish) createAccountProfileCycle(ctx context.Context, scope publi
 		var channels []struct {
 			ID int64 `orm:"channel_id"`
 		}
-		if err := tx.Model(publishTgJobTable+" j").InnerJoin(publishChannelProfileTable+" cp", "cp.last_job_id=j.id AND cp.status='active'").
-			InnerJoin(publishChannelTable+" c", "c.id=j.channel_id AND c.deleted_at IS NULL").
-			Where("j.tenant_id", scope.TenantID).Where("j.account_id", scope.AccountID).Where("j.profile_id", row.ProfileId).
+		if err := tx.Model(publishChannelProfileTable+" cp").
+			InnerJoin(publishTgJobTable+" j", "j.id=cp.last_job_id AND j.tenant_id=cp.tenant_id AND j.account_id=cp.account_id AND j.profile_id=cp.profile_id AND j.channel_id=cp.channel_id").
+			InnerJoin(publishChannelTable+" c", "c.id=cp.channel_id AND c.deleted_at IS NULL").
+			Where("cp.tenant_id", scope.TenantID).Where("cp.account_id", scope.AccountID).Where("cp.profile_id", row.ProfileId).Where("cp.status", "active").
 			WhereNotNull("cp.next_cycle_at").WhereLTE("cp.next_cycle_at", gtime.Now()).WhereIn("j.status", []string{"sent", "superseded"}).
 			Where("c.status", 1).Where("c.cycle_publish_enabled", 1).Where("COALESCE(NULLIF(LOWER(TRIM(c.cycle_publish_mode)),''),'time')='time'").Where("c.publish_direction", "up").
 			Where("NOT EXISTS (SELECT 1 FROM " + publishTgJobTable + " running WHERE running.tenant_id=j.tenant_id AND running.account_id=j.account_id AND running.profile_id=j.profile_id AND running.channel_id=j.channel_id AND running.status IN ('pending','sending','failed_retry','unknown'))").Fields("j.channel_id").Scan(&channels); err != nil {
