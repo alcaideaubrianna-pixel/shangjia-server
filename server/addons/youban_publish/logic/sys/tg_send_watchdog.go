@@ -221,52 +221,22 @@ func (s *sSysPublish) cleanupTelegramSendTimeouts(ctx context.Context) {
 	batchCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 	now := gtime.Now()
-	// 先按租户/账户取有限 scope，再在 scope 内领取，禁止全库历史扫描。
-	var scopes []struct {
-		TenantID  int64 `orm:"tenant_id"`
-		AccountID int64 `orm:"account_id"`
-	}
-	var scopeRows []struct {
-		TenantID  int64 `orm:"tenant_id"`
-		AccountID int64 `orm:"account_id"`
-	}
-	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(batchCtx).
-		Fields("tenant_id,account_id").Where("account_id > 0").
-		Where("send_phase", telegramSendPhaseTimeoutCancelled).
-		OrderAsc("tenant_id").OrderAsc("account_id").OrderAsc("id").Limit(128).Scan(&scopeRows); err != nil {
-		g.Log().Warningf(batchCtx, "读取TG超时清理账户分片失败 err:%+v", err)
-		return
-	}
-	seenScopes := make(map[string]struct{}, 16)
-	for _, row := range scopeRows {
-		key := fmt.Sprintf("%d:%d", row.TenantID, row.AccountID)
-		if _, ok := seenScopes[key]; ok || len(scopes) >= 16 {
-			continue
-		}
-		seenScopes[key] = struct{}{}
-		scopes = append(scopes, struct {
-			TenantID  int64 `orm:"tenant_id"`
-			AccountID int64 `orm:"account_id"`
-		}{row.TenantID, row.AccountID})
-	}
+	// The partial due-time index supplies a bounded page across accounts. Claiming
+	// moves each row into the future, so a busy account cannot monopolize every
+	// pass. NULL also represents completed cleanup and cannot be rediscovered safely.
 	var jobs []telegramJobRecord
-	for _, scope := range scopes {
-		var scoped []telegramJobRecord
-		if err := g.DB().GetScan(batchCtx, &scoped, telegramTimeoutCleanupAccountSQL, scope.TenantID, scope.AccountID, now, now.Add(2*time.Minute)); err != nil {
-			g.Log().Warningf(batchCtx, "TG超时清理账户分片失败 tenantId:%d accountId:%d err:%+v", scope.TenantID, scope.AccountID, err)
-		} else {
-			jobs = append(jobs, scoped...)
-		}
-		var legacy []telegramJobRecord
-		if err := g.DB().GetScan(batchCtx, &legacy, telegramLegacyTimeoutCleanupAccountSQL, scope.TenantID, scope.AccountID, now.Add(2*time.Minute)); err != nil {
-			g.Log().Warningf(batchCtx, "TG历史超时清理账户分片失败 tenantId:%d accountId:%d err:%+v", scope.TenantID, scope.AccountID, err)
-		} else {
-			jobs = append(jobs, legacy...)
-		}
+	if err := g.DB().GetScan(batchCtx, &jobs, telegramTimeoutCleanupClaimSQL, now, now.Add(2*time.Minute)); err != nil {
+		g.Log().Warningf(batchCtx, "领取TG超时清理任务失败 err:%+v", err)
+		return
 	}
 	var workers sync.WaitGroup
 	slots := make(chan struct{}, 4)
 	for _, job := range jobs {
+		// Invalid account rows are leased but never executed; their lease keeps
+		// them from blocking valid accounts at the front of the due index.
+		if job.AccountId <= 0 {
+			continue
+		}
 		if batchCtx.Err() != nil {
 			break
 		}

@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -20,6 +21,8 @@ import (
 const (
 	profilePublishNoteIndexStatusCacheTTL = 10 * time.Second
 	profilePublishStateRecoveryStaleAfter = 15 * time.Minute
+	profilePublishStateRecoveryCursorKey  = "youban_publish:profile:publish_state:recovery:cursor"
+	profilePublishStateRecoveryCursorTTL  = 30 * 24 * time.Hour
 )
 
 func profilePublishNoteIndexStatusCacheKey(tenantId, accountId, profileId int64, status string) string {
@@ -47,11 +50,20 @@ func markNoteIndexStatusWritten(ctx context.Context, tenantId, accountId, profil
 }
 
 type profilePublishOperationState struct {
-	TenantId           int64                   `orm:"tenant_id"`
-	AccountId          int64                   `orm:"account_id"`
-	ProfileId          int64                   `orm:"profile_id"`
-	PublishOperationNo string                  `orm:"publish_operation_no"`
-	PublishTaskStatus  sysin.PublishTaskStatus `orm:"publish_task_status"`
+	TenantId             int64                   `orm:"tenant_id"`
+	AccountId            int64                   `orm:"account_id"`
+	ProfileId            int64                   `orm:"profile_id"`
+	PublishOperationNo   string                  `orm:"publish_operation_no"`
+	PublishTaskStatus    sysin.PublishTaskStatus `orm:"publish_task_status"`
+	PublishTaskUpdatedAt *gtime.Time             `orm:"publish_task_updated_at"`
+}
+
+type profilePublishRecoveryCursor struct {
+	Status         string    `json:"status"`
+	UpdatedAt      time.Time `json:"updated_at"`
+	ProfileId      int64     `json:"profile_id"`
+	OtherUpdatedAt time.Time `json:"other_updated_at"`
+	OtherProfileId int64     `json:"other_profile_id"`
 }
 
 func (s *sSysPublish) beginProfilePublishOperation(ctx context.Context, tenantId, accountId, profileId int64, operationNo string) error {
@@ -173,7 +185,7 @@ func (s *sSysPublish) writeProfilePublishOperationStateTx(ctx context.Context, t
 			Where("tenant_id", tenantId).
 			Where("account_id", accountId).
 			Where("profile_id", profileId).
-			Fields("SUM(CASE WHEN status='sent' THEN 1 ELSE 0 END) AS sent, SUM(CASE WHEN status IN ('pending','sending','confirming','failed_retry','unknown') THEN 1 ELSE 0 END) AS active").
+			Fields("SUM(CASE WHEN status='sent' THEN 1 ELSE 0 END) AS sent, SUM(CASE WHEN status IN ('pending','sending','confirming','failed_retry','unknown') OR (status='failed' AND send_phase='timeout_wait_cleanup') THEN 1 ELSE 0 END) AS active").
 			Scan(&summary)
 		if err != nil {
 			return gerror.Wrap(err, "检查资料已成功发送任务失败")
@@ -209,9 +221,8 @@ func (s *sSysPublish) writeProfilePublishOperationStateTx(ctx context.Context, t
 	if affected == 0 {
 		return nil
 	}
-	if noteIndexStatusRecentlyWritten(ctx, tenantId, accountId, profileId, status.String()) {
-		return nil
-	}
+	// A previous write of the same status cannot prove that the index still has
+	// that status after an intervening transition (pending -> publishing -> pending).
 	indexMod := tx.Model(publishNoteIndexTable).Unscoped().Safe().Ctx(ctx).
 		Where("tenant_id", tenantId).
 		Where("account_id", accountId).
@@ -226,34 +237,95 @@ func (s *sSysPublish) writeProfilePublishOperationStateTx(ctx context.Context, t
 }
 
 func (s *sSysPublish) recoverProfilePublishOperationStates(ctx context.Context, limit int) error {
-	if limit <= 0 {
+	if limit <= 0 || limit > 100 {
 		limit = 100
+	}
+	// The caller holds the distributed telegram job recovery lock. The cursor is
+	// shared across instances and is only a scheduling hint; job state remains
+	// authoritative. Do not restart from the head when the cache is unavailable.
+	if !cache.Initialized() {
+		return gerror.New("资料上架恢复游标缓存未初始化")
+	}
+	value, err := cache.Instance().Get(ctx, profilePublishStateRecoveryCursorKey)
+	if err != nil {
+		return gerror.Wrap(err, "读取资料上架恢复游标失败")
+	}
+	cursor := profilePublishRecoveryCursor{Status: sysin.PublishTaskStatusPending.String()}
+	if !value.IsNil() {
+		if err = json.Unmarshal([]byte(value.String()), &cursor); err != nil {
+			return gerror.Wrap(err, "解析资料上架恢复游标失败")
+		}
+		if (cursor.Status != sysin.PublishTaskStatusPending.String() && cursor.Status != sysin.PublishTaskStatusPublishing.String()) || (cursor.UpdatedAt.IsZero() && cursor.ProfileId != 0) || (cursor.OtherUpdatedAt.IsZero() && cursor.OtherProfileId != 0) {
+			return gerror.New("资料上架恢复游标无效")
+		}
+	}
+	saveCursor := func() error {
+		data, marshalErr := json.Marshal(cursor)
+		if marshalErr != nil {
+			return gerror.Wrap(marshalErr, "编码资料上架恢复游标失败")
+		}
+		if cacheErr := cache.Instance().Set(ctx, profilePublishStateRecoveryCursorKey, string(data), profilePublishStateRecoveryCursorTTL); cacheErr != nil {
+			return gerror.Wrap(cacheErr, "保存资料上架恢复游标失败")
+		}
+		return nil
+	}
+	rotateCursor := func() {
+		if cursor.Status == sysin.PublishTaskStatusPending.String() {
+			cursor.Status = sysin.PublishTaskStatusPublishing.String()
+		} else {
+			cursor.Status = sysin.PublishTaskStatusPending.String()
+		}
+		cursor.UpdatedAt, cursor.OtherUpdatedAt = cursor.OtherUpdatedAt, cursor.UpdatedAt
+		cursor.ProfileId, cursor.OtherProfileId = cursor.OtherProfileId, cursor.ProfileId
 	}
 	recoveryBefore := time.Now().Add(-profilePublishStateRecoveryStaleAfter)
 	var states []profilePublishOperationState
-	if err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
-		Fields("tenant_id,account_id,profile_id,publish_operation_no,publish_task_status").
+	query := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
+		Fields("tenant_id,account_id,profile_id,publish_operation_no,publish_task_status,publish_task_updated_at").
 		WhereNull("deleted_at").
 		// BOT 资料允许使用 account_id=0，不能在状态恢复时被过滤。
 		Where("account_id >= 0").
-		WhereIn("publish_task_status", []string{
-			sysin.PublishTaskStatusPending.String(),
-			sysin.PublishTaskStatusPublishing.String(),
-		}).
-		Where("publish_operation_no <> ?", "").
-		Where("publish_task_updated_at < ?", recoveryBefore).
+		Where("publish_task_status IN ('pending','publishing')").
+		Where("publish_task_status", cursor.Status).
+		Where("publish_operation_no <> ''").
+		Where("publish_task_updated_at < ?", recoveryBefore)
+	if !cursor.UpdatedAt.IsZero() {
+		query = query.Where("publish_task_updated_at >= ?", cursor.UpdatedAt).
+			Where("(publish_task_updated_at > ? OR (publish_task_updated_at = ? AND profile_id > ?))", cursor.UpdatedAt, cursor.UpdatedAt, cursor.ProfileId)
+	}
+	if err := query.
 		OrderAsc("publish_task_updated_at").
 		OrderAsc("profile_id").
 		Limit(limit).
 		Scan(&states); err != nil {
 		return gerror.Wrap(err, "读取待恢复资料上架状态失败")
 	}
+	if len(states) == 0 {
+		cursor.UpdatedAt = time.Time{}
+		cursor.ProfileId = 0
+		rotateCursor()
+		return saveCursor()
+	}
 	for _, state := range states {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if state.PublishTaskUpdatedAt == nil {
+			return gerror.New("待恢复资料上架游标字段无效")
+		}
+		// Checkpoint before processing: a stuck or failed row cannot monopolize
+		// the next run, and will be retried after the cursor wraps.
+		cursor.UpdatedAt = state.PublishTaskUpdatedAt.Time
+		cursor.ProfileId = state.ProfileId
+		if err := saveCursor(); err != nil {
+			return err
+		}
 		if err := s.recoverProfilePublishOperationState(ctx, state); err != nil {
 			g.Log().Warningf(ctx, "恢复资料上架状态失败 profileId:%d operationNo:%s err:%+v", state.ProfileId, state.PublishOperationNo, err)
 		}
 	}
-	return nil
+	rotateCursor()
+	return saveCursor()
 }
 
 func (s *sSysPublish) recoverMissingProfilePublishOperationStates(ctx context.Context, limit int) error {
@@ -317,10 +389,11 @@ func (s *sSysPublish) recoverProfilePublishOperationState(ctx context.Context, s
 		Where("profile_id", job.ProfileId).
 		Where("operation_no", job.OperationNo).
 		Fields("COUNT(1) AS total," +
-			"SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed," +
+			"SUM(CASE WHEN status='failed' AND COALESCE(send_phase, '') <> 'timeout_wait_cleanup' THEN 1 ELSE 0 END) AS failed," +
+			"SUM(CASE WHEN status='failed' AND send_phase='timeout_wait_cleanup' THEN 1 ELSE 0 END) AS timeout_wait_cleanup," +
 			"SUM(CASE WHEN status='failed_retry' THEN 1 ELSE 0 END) AS failed_retry," +
 			"SUM(CASE WHEN status='sending' THEN 1 ELSE 0 END) AS sending," +
-			"SUM(CASE WHEN status IN ('pending','failed_retry','unknown') THEN 1 ELSE 0 END) AS pending," +
+			"SUM(CASE WHEN status IN ('pending','failed_retry','unknown','confirming') THEN 1 ELSE 0 END) AS pending," +
 			"SUM(CASE WHEN status='sent' THEN 1 ELSE 0 END) AS sent," +
 			"SUM(CASE WHEN status IN ('sent','superseded') THEN 1 ELSE 0 END) AS completed," +
 			"MIN(created_at) AS first_job_at").
@@ -357,6 +430,8 @@ func (s *sSysPublish) recoverProfilePublishOperationState(ctx context.Context, s
 	recoveryRow, err = g.DB().Model(publishTgJobLogTable+" l").Safe().Ctx(ctx).
 		InnerJoin(publishTgJobTable+" j", "j.id=l.job_id").
 		Fields("MIN(l.created_at) AS first_recovery_at").
+		Where("j.tenant_id", job.TenantId).
+		Where("j.account_id", job.AccountId).
 		Where("j.profile_id", job.ProfileId).
 		Where("j.operation_no", job.OperationNo).
 		Where("l.action", "recovery").
@@ -372,11 +447,15 @@ func (s *sSysPublish) recoverProfilePublishOperationState(ctx context.Context, s
 	switch {
 	case total == 0 || row["failed"].Int() > 0:
 		return s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusFailed)
+	case row["sending"].Int() > 0:
+		return s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusPublishing)
+	case row["timeout_wait_cleanup"].Int() > 0:
+		// The cleaner owns the handoff after reconciliation. Pending represents
+		// that wait; it does not schedule or initiate another send.
+		return s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusPending)
 	case row["failed_retry"].Int() > 0 && staleRetry:
 		g.Log().Warningf(ctx, "资料上架重试已超时，释放卡住的publishing状态 profileId:%d operationNo:%s", job.ProfileId, job.OperationNo)
 		return s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusFailed)
-	case row["sending"].Int() > 0:
-		return s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusPublishing)
 	case row["pending"].Int() > 0:
 		return s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusPending)
 	case row["completed"].Int() == total && row["sent"].Int() == 0:
