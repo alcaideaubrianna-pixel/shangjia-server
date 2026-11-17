@@ -7,13 +7,14 @@ const (
 	EventReceived    EventStatus = "received"
 	EventProcessing  EventStatus = "processing"
 	EventReady       EventStatus = "ready"
+	EventIgnored     EventStatus = "ignored"
 	EventFailedRetry EventStatus = "failed_retry"
 	EventDead        EventStatus = "dead"
 )
 
 func (s EventStatus) Valid() bool {
 	switch s {
-	case EventReceived, EventProcessing, EventReady, EventFailedRetry, EventDead:
+	case EventReceived, EventProcessing, EventReady, EventIgnored, EventFailedRetry, EventDead:
 		return true
 	default:
 		return false

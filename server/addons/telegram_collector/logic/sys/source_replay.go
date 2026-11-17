@@ -165,9 +165,9 @@ func (s *sCollector) enqueueReplayEvent(ctx context.Context, eventID int64) (boo
 		return true, s.enqueueSourceReplayEventTask(ctx, eventID)
 	case sysin.EventStatusProcessing:
 		return false, nil
-	case sysin.EventStatusDead:
+	case sysin.EventStatusDead, sysin.EventStatusIgnored:
 		result, err := dao.TgCollectorEvent.Ctx(ctx).WherePri(eventID).
-			Where(columns.Status, sysin.EventStatusDead).
+			WhereIn(columns.Status, []string{sysin.EventStatusDead, sysin.EventStatusIgnored}).
 			Where(fmt.Sprintf("(%s IS NULL OR %s<=?)", columns.LeaseUntil, columns.LeaseUntil), gtime.Now()).
 			Data(g.Map{columns.Status: sysin.EventStatusReceived, columns.AttemptCount: 0, columns.NextRunAt: nil,
 				columns.LeaseOwner: "", columns.LeaseUntil: nil, columns.ErrorMessage: "", columns.UpdatedAt: gtime.Now()}).Update()

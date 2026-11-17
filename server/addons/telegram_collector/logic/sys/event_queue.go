@@ -324,6 +324,13 @@ func (s *sCollector) processEvent(ctx context.Context, eventID int64) (err error
 	if row.RawUpdate == nil {
 		return s.failEvent(ctx, eventID, executionOwner, gerror.New("Telegram原始事件为空"), &row)
 	}
+	if collectorSystemNotice(row.SourceType, []byte(row.RawUpdate.String())) {
+		if err = ignoreClaimedSystemNotice(ctx, &row); err != nil {
+			return s.failEvent(ctx, eventID, executionOwner, err, &row)
+		}
+		observeResult = collectorResultSkipped
+		return nil
+	}
 	parseStarted := time.Now()
 	raw := []byte(row.RawUpdate.String())
 	delivery, err := collectorDeliveryFromEvent(&row, raw)

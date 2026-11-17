@@ -146,10 +146,13 @@ func (s *sCollector) IngestBotUpdate(ctx context.Context, bot collectorservice.B
 	if !event.ValidateBoundary() {
 		return gerror.New("Telegram采集事件归属不完整")
 	}
-	decision := classifyBotIngress(ctx, event.TenantID, event.SourceID, event.ChatID)
-	if decision.Defer() {
-		event.Priority = sysin.EventPriorityNormal
-		logBotIngressDeferral(ctx, event.TenantID, event.SourceID, 0, event.MessageID, decision)
+	notice := collectorSystemNotice(event.SourceType, event.RawUpdate)
+	if !notice {
+		decision := classifyBotIngress(ctx, event.TenantID, event.SourceID, event.ChatID)
+		if decision.Defer() {
+			event.Priority = sysin.EventPriorityNormal
+			logBotIngressDeferral(ctx, event.TenantID, event.SourceID, 0, event.MessageID, decision)
+		}
 	}
 	var spoolID int64
 	if collectorIngestSpoolEnabled(ctx) {
@@ -163,6 +166,14 @@ func (s *sCollector) IngestBotUpdate(ctx context.Context, bot collectorservice.B
 	ctx, observation.meta = collectorObservationContext(ctx, observation.meta)
 	if err != nil {
 		return err
+	}
+	if notice {
+		if err = completeIngestSpool(ctx, spoolID); err != nil {
+			return err
+		}
+		logCollectorSystemNotice(ctx, event.TenantID, event.SourceID, eventID)
+		outcome = collectorResultSkipped
+		return nil
 	}
 	if err = s.enqueueEventTask(ctx, eventID, event.Priority); err != nil {
 		return gerror.Wrap(err, "Telegram采集事件入队失败")
@@ -412,13 +423,16 @@ func (s *sCollector) persistEvent(ctx context.Context, event *sysin.RawUpdateEve
 	}
 	// Register before persistence: a crash after the database commit must still
 	// leave the raw Bot/account lane discoverable without a global DB scan.
-	if err := markCollectorRecoveryScope(ctx, collectorRecoveryScope{event.TenantID, event.AccountID, event.SourceID}); err != nil {
-		return 0, gerror.Wrap(err, "持久化前注册原始采集恢复 scope 失败")
-	}
+	notice := collectorSystemNotice(event.SourceType, event.RawUpdate)
+	if !notice {
+		if err := markCollectorRecoveryScope(ctx, collectorRecoveryScope{event.TenantID, event.AccountID, event.SourceID}); err != nil {
+			return 0, gerror.Wrap(err, "持久化前注册原始采集恢复 scope 失败")
+		}
 
+	}
 	columns := dao.TgCollectorEvent.Columns()
 	now := gtime.Now()
-	_, err = dao.TgCollectorEvent.Ctx(ctx).Data(do.TgCollectorEvent{
+	data := do.TgCollectorEvent{
 		TenantId:   event.TenantID,
 		SourceId:   event.SourceID,
 		SourceType: event.SourceType,
@@ -434,7 +448,13 @@ func (s *sCollector) persistEvent(ctx context.Context, event *sysin.RawUpdateEve
 		ReceivedAt: gtime.New(event.ReceivedAt),
 		CreatedAt:  now,
 		UpdatedAt:  now,
-	}).OnConflict(columns.TenantId + "," + columns.EventKey).
+	}
+	if notice {
+		data.Status = sysin.EventStatusIgnored
+		data.ProcessedAt = now
+		data.ErrorMessage = collectorSystemNoticeReason
+	}
+	_, err = dao.TgCollectorEvent.Ctx(ctx).Data(data).OnConflict(columns.TenantId + "," + columns.EventKey).
 		OnDuplicate(g.Map{columns.EventKey: conflictIncomingColumn(ctx, columns.EventKey)}).
 		Save()
 	if err != nil {
@@ -442,7 +462,7 @@ func (s *sCollector) persistEvent(ctx context.Context, event *sysin.RawUpdateEve
 	}
 	var row entity.TgCollectorEvent
 	if err = dao.TgCollectorEvent.Ctx(ctx).
-		Fields(columns.Id).
+		Fields(columns.Id, columns.Status).
 		Where(columns.TenantId, event.TenantID).
 		Where(columns.EventKey, event.EventID).
 		Scan(&row); err != nil {
@@ -450,6 +470,14 @@ func (s *sCollector) persistEvent(ctx context.Context, event *sysin.RawUpdateEve
 	}
 	if row.Id <= 0 {
 		return 0, gerror.New("Telegram采集事件ID无效")
+	}
+	if notice && row.Status == sysin.EventStatusReceived {
+		_, err = dao.TgCollectorEvent.Ctx(ctx).WherePri(row.Id).Where(columns.TenantId, event.TenantID).Where(columns.SourceId, event.SourceID).
+			Where(columns.Status, sysin.EventStatusReceived).
+			Data(do.TgCollectorEvent{Status: sysin.EventStatusIgnored, ProcessedAt: now, ErrorMessage: collectorSystemNoticeReason, LeaseOwner: "", LeaseUntil: nil, NextRunAt: nil}).Update()
+		if err != nil {
+			return 0, gerror.Wrap(err, "收口重复接收的BOT系统回执失败")
+		}
 	}
 	outcome = collectorResultAccepted // Upsert accepted; not proof of a newly inserted event.
 	return row.Id, nil

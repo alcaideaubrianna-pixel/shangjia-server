@@ -1,6 +1,7 @@
 package sys
 
 import (
+	"hotgo/internal/library/botnotice"
 	"regexp"
 	"strings"
 	"unicode/utf8"
@@ -29,35 +30,7 @@ func isCollectBotSystemNotice(sourceType, text string) bool {
 }
 
 func profileMessageIgnoredNotice(text string) bool {
-	normalized := strings.Join(strings.Fields(strings.TrimSpace(text)), "")
-	if normalized == "" {
-		return false
-	}
-	for _, prefix := range []string{
-		"❌重复投稿",
-		"✅提交成功",
-		"收录失败",
-		"收录成功",
-		"✅收录成功",
-		"信息投稿推送成功",
-		"信息已存在请勿重复提交",
-		"⚠提交失败",
-		"❌提交失败",
-		"❌上架被拒绝",
-		"❌录入失败",
-		"❌未收录",
-		"⚠️采集失败",
-		"⚠️未找到待配对",
-		"✅内容已自动转发",
-		"✅视频已自动转发",
-		"视频收录成功",
-		"全网无纠纷，认准唯一客服",
-	} {
-		if strings.HasPrefix(normalized, prefix) {
-			return true
-		}
-	}
-	return normalized == "验证视频" || strings.Contains(normalized, "投稿已自动审核通过并成功分发")
+	return botnotice.Matches(text)
 }
 
 func classifyProfileMessage(text string, media []collectMediaItem) profileMessageClassification {

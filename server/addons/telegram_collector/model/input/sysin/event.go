@@ -13,6 +13,7 @@ const (
 	EventStatusReceived    = "received"
 	EventStatusProcessing  = "processing"
 	EventStatusReady       = "ready"
+	EventStatusIgnored     = "ignored"
 	EventStatusFailedRetry = "failed_retry"
 	EventStatusDead        = "dead"
 
