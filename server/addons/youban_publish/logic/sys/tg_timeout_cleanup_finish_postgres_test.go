@@ -143,6 +143,34 @@ func TestTelegramTimeoutFinishEligibilityPostgres(t *testing.T) {
 	}
 }
 
+// Regression: the parent SELECT's FOR UPDATE must not leak into the final
+// UPDATE, including when the child was already retired by an earlier repair.
+func TestTelegramTimeoutFinishAlreadyRetiredTailPostgres(t *testing.T) {
+	db := telegramTimeoutFinishLocalDB(t)
+	ctx := context.Background()
+	parent := telegramTimeoutFinishSeed(t, db)
+	if _, err := db.Exec(ctx, "UPDATE "+publishTgJobTable+" SET status='superseded',dispatch_status='done',send_phase='' WHERE id=101"); err != nil {
+		t.Fatal(err)
+	}
+	if err := new(sSysPublish).finishTelegramSendTimeoutCleanup(ctx, parent); err != nil {
+		t.Fatalf("parent cleanup must commit after the locking read: %v", err)
+	}
+	row, err := db.GetOne(ctx, "SELECT status,timeout_cleanup_at FROM "+publishTgJobTable+" WHERE id=100")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row["status"].String() != JobStatusSuperseded.String() || !row["timeout_cleanup_at"].IsNil() {
+		t.Fatalf("parent cleanup did not settle: %v", row)
+	}
+	tail, err := db.GetOne(ctx, "SELECT status,dispatch_status,send_phase FROM "+publishTgJobTable+" WHERE id=101")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tail["status"].String() != JobStatusSuperseded.String() || tail["dispatch_status"].String() != DispatchStatusDone.String() || tail["send_phase"].String() != "" {
+		t.Fatalf("already retired tail changed: %v", tail)
+	}
+}
+
 func TestTelegramTimeoutActiveConflictClassifier(t *testing.T) {
 	for _, tc := range []struct {
 		code       pq.ErrorCode

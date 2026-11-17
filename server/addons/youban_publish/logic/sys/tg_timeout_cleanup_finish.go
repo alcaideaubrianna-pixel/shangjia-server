@@ -166,7 +166,16 @@ func (s *sSysPublish) finishTelegramSendTimeoutCleanupTx(ctx context.Context, tx
 			decision.Action, decision.Reason = "superseded", reason
 		}
 	}
-	_, err = parentModel.Data(g.Map{"timeout_cleanup_at": nil}).Update()
+	// LockUpdate mutates the read model. Build a fresh write model in the
+	// same transaction so SELECT's FOR UPDATE never reaches the UPDATE SQL.
+	// Keep the cleanup generation predicate: a late receipt must fence this write.
+	parentUpdate := tx.Model(publishTgJobTable).Where("id", snapshot.Id)
+	if snapshot.TimeoutCleanupAt == nil {
+		parentUpdate = parentUpdate.WhereNull("timeout_cleanup_at")
+	} else {
+		parentUpdate = parentUpdate.Where("timeout_cleanup_at", snapshot.TimeoutCleanupAt)
+	}
+	_, err = parentUpdate.Data(g.Map{"timeout_cleanup_at": nil}).Update()
 	return decision, err
 }
 
