@@ -28,6 +28,8 @@ type Metadata struct {
 	// ReceivedAt is the local ingress instant, never Telegram's message date
 	// or an unverified database wall-clock timestamp.
 	ReceivedAt time.Time
+	// TimeBasis identifies the local boundary that supplied ReceivedAt.
+	TimeBasis string
 }
 
 func From(ctx context.Context) Metadata {
@@ -50,6 +52,7 @@ func With(ctx context.Context, next Metadata) context.Context {
 		value.RuleID, value.ProfileID = 0, 0
 		value.UpstreamEventID, value.DeliveryID = 0, 0
 		value.Mode, value.ReceivedAt = "unknown", time.Time{}
+		value.TimeBasis = ""
 	}
 	pairs := [][2]*int64{
 		{&value.TenantID, &next.TenantID}, {&value.AccountID, &next.AccountID},
@@ -73,6 +76,9 @@ func With(ctx context.Context, next Metadata) context.Context {
 		value.Mode = Mode(next.Mode)
 	}
 	if !next.ReceivedAt.IsZero() {
+		if next.TimeBasis != "" || !next.ReceivedAt.Equal(value.ReceivedAt) {
+			value.TimeBasis = TimeBasis(next.TimeBasis)
+		}
 		value.ReceivedAt = next.ReceivedAt
 	}
 	return context.WithValue(ctx, contextKey{}, value)

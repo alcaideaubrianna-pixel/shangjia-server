@@ -6,6 +6,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"hotgo/internal/library/collectobserve"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -17,20 +18,21 @@ import (
 )
 
 type CollectMessage struct {
-	History         bool
-	TenantId        int64
-	AccountId       int64
-	SourceId        int64
-	SourceType      string
-	BotId           int64
-	TgAccountId     int64
-	SourceChatId    string
-	SourceMessageId int64
-	SourceGroupedId string
-	SourceUniqueKey string
-	RawText         string
-	Media           []collectMediaItem
-	ReceivedAt      *gtime.Time
+	History          bool
+	TenantId         int64
+	AccountId        int64
+	SourceId         int64
+	SourceType       string
+	BotId            int64
+	TgAccountId      int64
+	SourceChatId     string
+	SourceMessageId  int64
+	SourceGroupedId  string
+	SourceUniqueKey  string
+	RawText          string
+	Media            []collectMediaItem
+	ReceivedAt       *gtime.Time
+	localObservation []byte
 }
 
 func (s *sSysPublish) ingestAndProcessCollectMessage(ctx context.Context, message *CollectMessage) (int64, error) {
@@ -44,10 +46,11 @@ func (s *sSysPublish) ingestAndProcessCollectMessage(ctx context.Context, messag
 		persistResult = collectPipelineFailed
 	}
 	finishPersist(persistResult, err, attribute.Int64("collect.event_id", eventId))
-	ctx = collectobserve.With(ctx, collectobserve.Metadata{EventID: eventId})
 	if err != nil {
 		return 0, err
 	}
+	ctx = collectobserve.BindPublishEvent(ctx, eventId)
+	ctx = collectobserve.RestorePayloadClock(ctx, message.localObservation, time.Now())
 	if strings.TrimSpace(message.SourceGroupedId) != "" {
 		g.Log().Debugf(ctx, "采集消息已入库，等待媒体组聚合 eventId:%d sourceId:%d sourceMessageId:%d groupedId:%s media:%d", eventId, message.SourceId, message.SourceMessageId, message.SourceGroupedId, len(message.Media))
 		err = s.scheduleCollectGroupedEvent(ctx, eventId, message.SourceId, message.SourceChatId, message.TenantId, message.AccountId, message.History)
@@ -100,6 +103,8 @@ func (s *sSysPublish) ingestCollectMessage(ctx context.Context, message *Collect
 		return 0, gerror.Wrap(err, "读取采集事件失败")
 	}
 	if !event.IsEmpty() {
+		message.localObservation = []byte(event[eventCols.MediaJson].String())
+		ctx = bindCollectEventClock(ctx, event)
 		message.Media = media
 		eventID := event[eventCols.Id].Int64()
 		indexCollectSourceHistoryCursor(ctx, message.TenantId, message.AccountId, message.SourceId, message.SourceChatId, message.SourceMessageId, eventID)
@@ -131,7 +136,11 @@ func (s *sSysPublish) ingestCollectMessage(ctx context.Context, message *Collect
 	} else if strings.TrimSpace(message.SourceGroupedId) != "" {
 		status = sysin.CollectEventStatusGroupCollect
 	}
+	// Retain the local clock with the event, independently of queue carrier
+	// rollout/Unique payloads. Never derive it from message.ReceivedAt.
+	message.localObservation, _ = collectobserve.StampPayload(ctx, []byte(`{}`), time.Now())
 	_, err = eventDao.Ctx(ctx).Data(g.Map{
+		eventCols.MediaJson:       string(message.localObservation),
 		eventCols.TenantId:        message.TenantId,
 		eventCols.AccountId:       message.AccountId,
 		eventCols.SourceId:        message.SourceId,
@@ -165,6 +174,8 @@ func (s *sSysPublish) ingestCollectMessage(ctx context.Context, message *Collect
 	if created.IsEmpty() {
 		return 0, gerror.New("创建采集事件后未找到记录")
 	}
+	message.localObservation = []byte(created[eventCols.MediaJson].String())
+	ctx = bindCollectEventClock(ctx, created)
 	eventId := created[eventCols.Id].Int64()
 	indexCollectSourceHistoryCursor(ctx, message.TenantId, message.AccountId, message.SourceId, message.SourceChatId, message.SourceMessageId, eventId)
 	createdAt := created[eventCols.CreatedAt].GTime()

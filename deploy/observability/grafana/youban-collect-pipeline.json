@@ -1,0 +1,4004 @@
+{
+  "annotations": [],
+  "cursorSync": "Off",
+  "description": "采集产出、全链路阶段性能、稳定性与数据可信度。",
+  "editable": true,
+  "elements": {
+    "batch_reuse": {
+      "kind": "Panel",
+      "spec": {
+        "data": {
+          "kind": "QueryGroup",
+          "spec": {
+            "queries": [
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "(sum(rate(xiaohuiji_collect_batch_reuse_total{reuse_result=\"hit\",source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval])) or (0*sum(rate(xiaohuiji_collect_batch_reuse_total{source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval]))))/(sum(rate(xiaohuiji_collect_batch_reuse_total{source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval])) > 0)",
+                      "legendFormat": "已评估批次命中率",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "A"
+                }
+              }
+            ],
+            "queryOptions": {
+              "interval": "15s",
+              "maxDataPoints": 240
+            },
+            "transformations": []
+          }
+        },
+        "description": "hit / (hit + miss)。缓存故障、租约忙、未评估等不进入分母。没有已评估决定时不显示为 0%。",
+        "id": 20,
+        "links": [],
+        "title": "批次复用命中率",
+        "vizConfig": {
+          "group": "timeseries",
+          "kind": "VizConfig",
+          "spec": {
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "fillOpacity": 12,
+                  "lineWidth": 2,
+                  "spanNulls": false
+                },
+                "max": 1,
+                "min": 0,
+                "noValue": "待批次复用样本",
+                "unit": "percentunit"
+              },
+              "overrides": []
+            },
+            "options": {
+              "legend": {
+                "displayMode": "list",
+                "placement": "bottom"
+              },
+              "tooltip": {
+                "mode": "single"
+              }
+            }
+          },
+          "version": ""
+        }
+      }
+    },
+    "business_flow": {
+      "kind": "Panel",
+      "spec": {
+        "data": {
+          "kind": "QueryGroup",
+          "spec": {
+            "queries": [
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "60*sum(rate(telegram_collector_pipeline_operations_total{stage=~\"ingest_bot|ingest_account\",result=\"accepted\",source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval]))",
+                      "legendFormat": "入口接受尝试",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "A"
+                }
+              },
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "60*sum(rate(telegram_collector_pipeline_operations_total{stage=\"delivery_consume\",result=\"ok\",source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval]))",
+                      "legendFormat": "来源交付完成尝试",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "B"
+                }
+              },
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "60*sum(rate(xiaohuiji_collect_pipeline_operations_total{stage=\"publish_queue_enqueue\",result=\"queued\",source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval]))",
+                      "legendFormat": "发布队列接纳尝试",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "C"
+                }
+              }
+            ],
+            "queryOptions": {
+              "interval": "15s",
+              "maxDataPoints": 240
+            },
+            "transformations": []
+          }
+        },
+        "description": "各曲线是不同统计对象，比较时间走势而非做转化率。来源交付 ok 只代表 handler 完成；发布接纳覆盖共享发布路径。",
+        "id": 12,
+        "links": [],
+        "title": "接收、交付与队列接纳趋势",
+        "vizConfig": {
+          "group": "timeseries",
+          "kind": "VizConfig",
+          "spec": {
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "fillOpacity": 5,
+                  "lineWidth": 2,
+                  "spanNulls": false
+                },
+                "min": 0,
+                "unit": "suffix: 次/分钟"
+              },
+              "overrides": []
+            },
+            "options": {
+              "legend": {
+                "displayMode": "list",
+                "placement": "bottom"
+              },
+              "tooltip": {
+                "mode": "multi"
+              }
+            }
+          },
+          "version": ""
+        }
+      }
+    },
+    "data_quality": {
+      "kind": "Panel",
+      "spec": {
+        "data": {
+          "kind": "QueryGroup",
+          "spec": {
+            "queries": [
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "max(xiaohuiji_collect_observe_healthy{instance=~\"${instance:regex}\"})",
+                      "legendFormat": "观测健康（最大）",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "A"
+                }
+              },
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "sum by(sample)(rate(telegram_collector_event_wait_samples_total{instance=~\"${instance:regex}\"}[$__rate_interval]))",
+                      "legendFormat": "Event wait {{sample}}",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "B"
+                }
+              }
+            ],
+            "queryOptions": {
+              "interval": "15s",
+              "maxDataPoints": 240
+            },
+            "transformations": []
+          }
+        },
+        "description": "用于判断看板本身是否可信：观测健康、队列等待样本 valid/missing/future、生命周期缺失原因。missing 不等于延迟为 0。",
+        "id": 26,
+        "links": [],
+        "title": "数据可信度与观测健康",
+        "vizConfig": {
+          "group": "timeseries",
+          "kind": "VizConfig",
+          "spec": {
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "fillOpacity": 8,
+                  "lineWidth": 1,
+                  "spanNulls": false
+                },
+                "min": 0
+              },
+              "overrides": []
+            },
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "displayMode": "table",
+                "placement": "right"
+              },
+              "tooltip": {
+                "mode": "multi"
+              }
+            }
+          },
+          "version": ""
+        }
+      }
+    },
+    "intro": {
+      "kind": "Panel",
+      "spec": {
+        "data": {
+          "kind": "QueryGroup",
+          "spec": {
+            "queries": [],
+            "queryOptions": {},
+            "transformations": []
+          }
+        },
+        "id": 1,
+        "links": [],
+        "title": "链路说明与统计边界",
+        "vizConfig": {
+          "group": "text",
+          "kind": "VizConfig",
+          "spec": {
+            "fieldConfig": {
+              "defaults": {},
+              "overrides": []
+            },
+            "options": {
+              "content": "### 接收 → 事件队列 → 来源交付 → 授权／规则 → 展示与验证配对 → 媒体准备 → 资料入库／复用 → 发布队列接纳\n**独立对象口径，不能相减作为丢失量。** 接收、交付及阶段计数包含重试；多个消息组成资料，一份资料可产生多个频道任务。发布队列接纳不代表 Telegram 发送成功。\n**暂无数据不等于 0。** 新入库、查询及生命周期指标未上报时保留无数据提示。阶段执行时间、排队时间、端到端时间分开展示，嵌套阶段耗时不能相加。\n**全局快照只随实例筛选。** 媒体积压和队列库存不支持来源／模式过滤，重复实例快照按健康实例最大值去重（保守观测，非唯一采样主节点）。当前仅接入 Metrics；具体频道、Bot、任务使用业务日志／Trace 排查，尚未配置日志和 Trace 数据源。\n**生命周期时钟基准：** 仅 `webhook_received` 代表确切 Webhook HTTP 接收；`gateway_ingress`（含 poll/旧任务）、`gateway_enqueue`、`collector_ingress` 分开标识。顶部 P95 严格限定 `webhook_received`；其他基准仅在分组曲线独立展示，不混算分位数。旧无标签样本不冒充 Webhook。",
+              "mode": "markdown"
+            }
+          },
+          "version": ""
+        }
+      }
+    },
+    "inventory_message_entries_loaded": {
+      "kind": "Panel",
+      "spec": {
+        "data": {
+          "kind": "QueryGroup",
+          "spec": {
+            "queries": [
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "telegram_collector_message_entries_loaded{instance=~\"${instance:regex}\",coverage=\"instance_loaded\",loader=\"account_runtime_provider\",entry_type=\"protocol_account\"} and on(instance,job,coverage,loader,entry_type) (telegram_collector_inventory_snapshot_valid{instance=~\"${instance:regex}\",coverage=\"instance_loaded\",loader=\"account_runtime_provider\",entry_type=\"protocol_account\"} == 1)",
+                      "instant": false,
+                      "legendFormat": "{{instance}} / {{job}}",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "A"
+                }
+              }
+            ],
+            "queryOptions": {
+              "interval": "15s",
+              "maxDataPoints": 240
+            },
+            "transformations": []
+          }
+        },
+        "description": "仅 account_runtime_provider 在各实例内已加载的协议号入口数量（coverage=instance_loaded，entry_type=protocol_account）。不是全局启用总数，不跨实例 sum/max；同一源或入口可能在多实例重复出现。仅在匹配 instance/job/coverage/loader/entry_type 的 inventory_snapshot_valid == 1 时展示；快照无效或未上报时不补零。Bot 入口清点尚无完整配置快照，未覆盖。该快照仅随实例筛选，不支持 source/mode 维度。",
+        "id": 35,
+        "links": [],
+        "title": "每实例已加载协议号入口数量",
+        "vizConfig": {
+          "group": "timeseries",
+          "kind": "VizConfig",
+          "spec": {
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "lineWidth": 2,
+                  "spanNulls": false
+                },
+                "decimals": 0,
+                "min": 0,
+                "noValue": "待有效协议号实例快照上报",
+                "unit": "short"
+              },
+              "overrides": []
+            },
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "displayMode": "table",
+                "placement": "bottom"
+              },
+              "tooltip": {
+                "mode": "multi"
+              }
+            }
+          },
+          "version": ""
+        }
+      }
+    },
+    "inventory_sources_loaded": {
+      "kind": "Panel",
+      "spec": {
+        "data": {
+          "kind": "QueryGroup",
+          "spec": {
+            "queries": [
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "telegram_collector_sources_loaded{instance=~\"${instance:regex}\",coverage=\"instance_loaded\",loader=\"account_runtime_provider\",entry_type=\"protocol_account\"} and on(instance,job,coverage,loader,entry_type) (telegram_collector_inventory_snapshot_valid{instance=~\"${instance:regex}\",coverage=\"instance_loaded\",loader=\"account_runtime_provider\",entry_type=\"protocol_account\"} == 1)",
+                      "instant": false,
+                      "legendFormat": "{{instance}} / {{job}}",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "A"
+                }
+              }
+            ],
+            "queryOptions": {
+              "interval": "15s",
+              "maxDataPoints": 240
+            },
+            "transformations": []
+          }
+        },
+        "description": "仅 account_runtime_provider 在各实例内已加载的协议号源数量（coverage=instance_loaded，entry_type=protocol_account）。不是全局启用总数，不跨实例 sum/max；同一源或入口可能在多实例重复出现。仅在匹配 instance/job/coverage/loader/entry_type 的 inventory_snapshot_valid == 1 时展示；快照无效或未上报时不补零。Bot 入口清点尚无完整配置快照，未覆盖。该快照仅随实例筛选，不支持 source/mode 维度。",
+        "id": 34,
+        "links": [],
+        "title": "每实例已加载协议号源数量",
+        "vizConfig": {
+          "group": "timeseries",
+          "kind": "VizConfig",
+          "spec": {
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "lineWidth": 2,
+                  "spanNulls": false
+                },
+                "decimals": 0,
+                "min": 0,
+                "noValue": "待有效协议号实例快照上报",
+                "unit": "short"
+              },
+              "overrides": []
+            },
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "displayMode": "table",
+                "placement": "bottom"
+              },
+              "tooltip": {
+                "mode": "multi"
+              }
+            }
+          },
+          "version": ""
+        }
+      }
+    },
+    "kpi_created": {
+      "kind": "Panel",
+      "spec": {
+        "data": {
+          "kind": "QueryGroup",
+          "spec": {
+            "queries": [
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "sum(increase(xiaohuiji_collect_profiles_persisted_total{action=\"created\",source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__range]))",
+                      "instant": true,
+                      "range": false
+                    },
+                    "version": ""
+                  },
+                  "refId": "A"
+                }
+              }
+            ],
+            "queryOptions": {},
+            "transformations": []
+          }
+        },
+        "description": "顶层事务确认后的 created。新指标未上报时显示暂无数据，不使用旧 profile_persist 阶段次数代替。",
+        "id": 3,
+        "links": [],
+        "title": "新建资料数｜事务确认",
+        "vizConfig": {
+          "group": "stat",
+          "kind": "VizConfig",
+          "spec": {
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                },
+                "decimals": 0,
+                "noValue": "待入库指标上报",
+                "unit": "short"
+              },
+              "overrides": []
+            },
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "center",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "values": false
+              }
+            }
+          },
+          "version": ""
+        }
+      }
+    },
+    "kpi_errors": {
+      "kind": "Panel",
+      "spec": {
+        "data": {
+          "kind": "QueryGroup",
+          "spec": {
+            "queries": [
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "(sum(increase(xiaohuiji_collect_pipeline_operations_total{stage=\"process\",result=~\"failed|timeout\",source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__range])) or (0*sum(increase(xiaohuiji_collect_pipeline_operations_total{stage=\"process\",source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__range]))))/(sum(increase(xiaohuiji_collect_pipeline_operations_total{stage=\"process\",source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__range])) > 0)",
+                      "instant": true,
+                      "range": false
+                    },
+                    "version": ""
+                  },
+                  "refId": "A"
+                }
+              }
+            ],
+            "queryOptions": {},
+            "transformations": []
+          }
+        },
+        "description": "固定 process 阶段：failed / timeout ÷ 全部结果尝试。不是唯一资料失败率；pending、retryable、ignored 属于分母，取消单独观察；无处理样本时不显示为 0%。",
+        "id": 7,
+        "links": [],
+        "title": "处理尝试失败率",
+        "vizConfig": {
+          "group": "stat",
+          "kind": "VizConfig",
+          "spec": {
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "thresholds"
+                },
+                "decimals": 2,
+                "noValue": "无处理样本",
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 0.01
+                    },
+                    {
+                      "color": "red",
+                      "value": 0.05
+                    }
+                  ]
+                },
+                "unit": "percentunit"
+              },
+              "overrides": []
+            },
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "center",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "values": false
+              }
+            }
+          },
+          "version": ""
+        }
+      }
+    },
+    "kpi_handoff": {
+      "kind": "Panel",
+      "spec": {
+        "data": {
+          "kind": "QueryGroup",
+          "spec": {
+            "queries": [
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "sum(increase(xiaohuiji_collect_pipeline_operations_total{stage=\"publish_queue_enqueue\",result=\"queued\",source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__range]))",
+                      "instant": true,
+                      "range": false
+                    },
+                    "version": ""
+                  },
+                  "refId": "A"
+                }
+              }
+            ],
+            "queryOptions": {},
+            "transformations": []
+          }
+        },
+        "description": "权威发布队列的 queued 回执次数，覆盖共享发布入口，包含恢复再入队，不等于唯一 Job 数或 Telegram 发送成功数。不能与采集新建资料数直接相除。",
+        "id": 5,
+        "links": [],
+        "title": "发布队列接纳次数",
+        "vizConfig": {
+          "group": "stat",
+          "kind": "VizConfig",
+          "spec": {
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "fixedColor": "blue",
+                  "mode": "fixed"
+                },
+                "decimals": 0,
+                "noValue": "暂无回执数据",
+                "unit": "short"
+              },
+              "overrides": []
+            },
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "center",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "values": false
+              }
+            }
+          },
+          "version": ""
+        }
+      }
+    },
+    "kpi_ingest": {
+      "kind": "Panel",
+      "spec": {
+        "data": {
+          "kind": "QueryGroup",
+          "spec": {
+            "queries": [
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "sum(increase(telegram_collector_pipeline_operations_total{stage=~\"ingest_bot|ingest_account\",result=\"accepted\",source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__range]))",
+                      "instant": true,
+                      "legendFormat": "接受次数",
+                      "range": false
+                    },
+                    "version": ""
+                  },
+                  "refId": "A"
+                }
+              }
+            ],
+            "queryOptions": {},
+            "transformations": []
+          }
+        },
+        "description": "所选区间内 ingest_bot / ingest_account 的 accepted 尝试次数，包含来源分支及重复调用，不代表唯一 Telegram 消息数。",
+        "id": 2,
+        "links": [],
+        "title": "接收接受次数",
+        "vizConfig": {
+          "group": "stat",
+          "kind": "VizConfig",
+          "spec": {
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "fixedColor": "blue",
+                  "mode": "fixed"
+                },
+                "decimals": 0,
+                "noValue": "暂无数据",
+                "unit": "short"
+              },
+              "overrides": []
+            },
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "center",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "values": false
+              },
+              "textMode": "auto"
+            }
+          },
+          "version": ""
+        }
+      }
+    },
+    "kpi_lifecycle": {
+      "kind": "Panel",
+      "spec": {
+        "data": {
+          "kind": "QueryGroup",
+          "spec": {
+            "queries": [
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "histogram_quantile(0.95,sum by(le)(increase(xiaohuiji_collect_lifecycle_duration_seconds_bucket{time_basis=\"webhook_received\",source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__range])))",
+                      "instant": true,
+                      "legendFormat": "webhook_received / P95",
+                      "range": false
+                    },
+                    "version": ""
+                  },
+                  "refId": "A"
+                }
+              }
+            ],
+            "queryOptions": {},
+            "transformations": []
+          }
+        },
+        "description": "所选区间确切 HTTP Webhook 接收至新建资料顶层事务提交 P95，严格 time_basis=\"webhook_received\"。receivedAtUnixNano 经 diskqueue 恢复的可信 HTTP 起点纳入；gateway_ingress、gateway_enqueue、collector_ingress 和旧无标签样本均排除，不混算分位数。缺少可信接收时间的样本见生命周期缺失原因图；无有效样本不补零。",
+        "id": 6,
+        "links": [],
+        "title": "Webhook→入库 P95",
+        "vizConfig": {
+          "group": "stat",
+          "kind": "VizConfig",
+          "spec": {
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "thresholds"
+                },
+                "decimals": 1,
+                "noValue": "待确切 Webhook 生命周期样本上报",
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 60
+                    },
+                    {
+                      "color": "red",
+                      "value": 600
+                    }
+                  ]
+                },
+                "unit": "s"
+              },
+              "overrides": []
+            },
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "center",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "values": false
+              }
+            }
+          },
+          "version": ""
+        }
+      }
+    },
+    "kpi_oldest": {
+      "kind": "Panel",
+      "spec": {
+        "data": {
+          "kind": "QueryGroup",
+          "spec": {
+            "queries": [
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "max(xiaohuiji_collect_media_pending_oldest_age_seconds{instance=~\"${instance:regex}\"} and on(instance,job) (xiaohuiji_collect_observe_healthy{instance=~\"${instance:regex}\"} == 1))",
+                      "instant": true,
+                      "range": false
+                    },
+                    "version": ""
+                  },
+                  "refId": "A"
+                }
+              }
+            ],
+            "queryOptions": {},
+            "transformations": []
+          }
+        },
+        "description": "健康实例全局快照最大值；只随实例筛选。用于识别长期滞留，不代表某一个具体来源的年龄；旧数据库墙钟计算口径需结合日志核实。",
+        "id": 9,
+        "links": [],
+        "title": "最老媒体待处理年龄｜全局",
+        "vizConfig": {
+          "group": "stat",
+          "kind": "VizConfig",
+          "spec": {
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "thresholds"
+                },
+                "decimals": 0,
+                "noValue": "无健康快照",
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 300
+                    },
+                    {
+                      "color": "red",
+                      "value": 600
+                    }
+                  ]
+                },
+                "unit": "s"
+              },
+              "overrides": []
+            },
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "center",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "values": false
+              }
+            }
+          },
+          "version": ""
+        }
+      }
+    },
+    "kpi_pending": {
+      "kind": "Panel",
+      "spec": {
+        "data": {
+          "kind": "QueryGroup",
+          "spec": {
+            "queries": [
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "max(xiaohuiji_collect_media_pending_events{instance=~\"${instance:regex}\"} and on(instance,job) (xiaohuiji_collect_observe_healthy{instance=~\"${instance:regex}\"} == 1))",
+                      "instant": true,
+                      "range": false
+                    },
+                    "version": ""
+                  },
+                  "refId": "A"
+                }
+              }
+            ],
+            "queryOptions": {},
+            "transformations": []
+          }
+        },
+        "description": "仅随实例筛选。对健康实例重复上报的同一全局快照取最大值，避免跨实例相加重复计算；采样时点差异时为保守观测，不是指定单主精确快照。",
+        "id": 8,
+        "links": [],
+        "title": "媒体待处理事件｜全局",
+        "vizConfig": {
+          "group": "stat",
+          "kind": "VizConfig",
+          "spec": {
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "fixedColor": "orange",
+                  "mode": "fixed"
+                },
+                "decimals": 0,
+                "noValue": "无健康快照",
+                "unit": "short"
+              },
+              "overrides": []
+            },
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "center",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "values": false
+              }
+            }
+          },
+          "version": ""
+        }
+      }
+    },
+    "kpi_reused": {
+      "kind": "Panel",
+      "spec": {
+        "data": {
+          "kind": "QueryGroup",
+          "spec": {
+            "queries": [
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "sum(increase(xiaohuiji_collect_profiles_persisted_total{action=\"reused\",source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__range]))",
+                      "instant": true,
+                      "range": false
+                    },
+                    "version": ""
+                  },
+                  "refId": "A"
+                }
+              }
+            ],
+            "queryOptions": {},
+            "transformations": []
+          }
+        },
+        "description": "顶层事务确认后的 reused 调用结果，含幂等重试复用，不是唯一资料数。",
+        "id": 4,
+        "links": [],
+        "title": "资料复用次数",
+        "vizConfig": {
+          "group": "stat",
+          "kind": "VizConfig",
+          "spec": {
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "fixedColor": "purple",
+                  "mode": "fixed"
+                },
+                "decimals": 0,
+                "noValue": "待入库指标上报",
+                "unit": "short"
+              },
+              "overrides": []
+            },
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "center",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "values": false
+              }
+            }
+          },
+          "version": ""
+        }
+      }
+    },
+    "lifecycle_missing": {
+      "kind": "Panel",
+      "spec": {
+        "data": {
+          "kind": "QueryGroup",
+          "spec": {
+            "queries": [
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "sum by(time_basis,reason)(increase(xiaohuiji_collect_lifecycle_missing_total{time_basis!=\"\",source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__range]))",
+                      "instant": true,
+                      "legendFormat": "{{time_basis}} / {{reason}}",
+                      "range": false
+                    },
+                    "version": ""
+                  },
+                  "refId": "A"
+                }
+              },
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "sum by(reason)(increase(xiaohuiji_collect_lifecycle_missing_total{time_basis=\"\",source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__range]))",
+                      "instant": true,
+                      "legendFormat": "旧/未标记时间基准 / {{reason}}",
+                      "range": false
+                    },
+                    "version": ""
+                  },
+                  "refId": "B"
+                }
+              }
+            ],
+            "queryOptions": {},
+            "transformations": []
+          }
+        },
+        "description": "按实际 time_basis + reason 展示区间缺失次数。旧无标签/空标签单独展示，不推断为 Webhook；missing_received_at 表示缺少可信接收起点，不代表耗时为零。time_basis：webhook_received 为确切 HTTP Webhook 接收起点（含 receivedAtUnixNano 经 diskqueue 恢复）；gateway_ingress 为 Gateway 入口，兼容旧 EnqueuedAt，可能包含 poll/旧任务，不能全部称 Webhook；gateway_enqueue 为 Gateway 入队起点；collector_ingress 为采集器入口。不同起点不可直接比较为同一端到端口径。旧无 time_basis 标签样本不归为 Webhook。",
+        "id": 28,
+        "links": [],
+        "title": "生命周期缺失原因｜时间基准 × 原因",
+        "vizConfig": {
+          "group": "bargauge",
+          "kind": "VizConfig",
+          "spec": {
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "fixedColor": "yellow",
+                  "mode": "fixed"
+                },
+                "decimals": 0,
+                "min": 0,
+                "noValue": "待跳过原因指标上报",
+                "unit": "short"
+              },
+              "overrides": []
+            },
+            "options": {
+              "displayMode": "basic",
+              "orientation": "horizontal",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "values": false
+              }
+            }
+          },
+          "version": ""
+        }
+      }
+    },
+    "lifecycle_quantiles": {
+      "kind": "Panel",
+      "spec": {
+        "data": {
+          "kind": "QueryGroup",
+          "spec": {
+            "queries": [
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "histogram_quantile(0.5,sum by(le,time_basis)(rate(xiaohuiji_collect_lifecycle_duration_seconds_bucket{time_basis=~\"webhook_received|gateway_ingress|gateway_enqueue|collector_ingress\",source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval])))",
+                      "instant": false,
+                      "legendFormat": "{{time_basis}} / P50",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "A"
+                }
+              },
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "histogram_quantile(0.95,sum by(le,time_basis)(rate(xiaohuiji_collect_lifecycle_duration_seconds_bucket{time_basis=~\"webhook_received|gateway_ingress|gateway_enqueue|collector_ingress\",source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval])))",
+                      "instant": false,
+                      "legendFormat": "{{time_basis}} / P95",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "B"
+                }
+              },
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "histogram_quantile(0.99,sum by(le,time_basis)(rate(xiaohuiji_collect_lifecycle_duration_seconds_bucket{time_basis=~\"webhook_received|gateway_ingress|gateway_enqueue|collector_ingress\",source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval])))",
+                      "instant": false,
+                      "legendFormat": "{{time_basis}} / P99",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "C"
+                }
+              },
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "sum by(time_basis)(rate(xiaohuiji_collect_lifecycle_duration_seconds_sum{time_basis=~\"webhook_received|gateway_ingress|gateway_enqueue|collector_ingress\",source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval])) / (sum by(time_basis)(rate(xiaohuiji_collect_lifecycle_duration_seconds_count{time_basis=~\"webhook_received|gateway_ingress|gateway_enqueue|collector_ingress\",source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval])) > 0)",
+                      "instant": false,
+                      "legendFormat": "{{time_basis}} / 平均",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "D"
+                }
+              }
+            ],
+            "queryOptions": {
+              "interval": "15s",
+              "maxDataPoints": 240
+            },
+            "transformations": []
+          }
+        },
+        "description": "各 time_basis 分别聚合分位数与 sum/count 平均；只覆盖有可信起点的新建资料提交，不把缺失样本当作零。time_basis：webhook_received 为确切 HTTP Webhook 接收起点（含 receivedAtUnixNano 经 diskqueue 恢复）；gateway_ingress 为 Gateway 入口，兼容旧 EnqueuedAt，可能包含 poll/旧任务，不能全部称 Webhook；gateway_enqueue 为 Gateway 入队起点；collector_ingress 为采集器入口。不同起点不可直接比较为同一端到端口径。旧无 time_basis 标签样本不归为 Webhook。",
+        "id": 21,
+        "links": [],
+        "title": "本地入口→入库 P50／P95／P99／平均｜按时间基准",
+        "vizConfig": {
+          "group": "timeseries",
+          "kind": "VizConfig",
+          "spec": {
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "lineWidth": 2,
+                  "spanNulls": false
+                },
+                "min": 0,
+                "noValue": "待生命周期样本",
+                "unit": "s"
+              },
+              "overrides": []
+            },
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom"
+              },
+              "tooltip": {
+                "mode": "multi"
+              }
+            }
+          },
+          "version": ""
+        }
+      }
+    },
+    "material_match_latency": {
+      "kind": "Panel",
+      "spec": {
+        "data": {
+          "kind": "QueryGroup",
+          "spec": {
+            "queries": [
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "histogram_quantile(0.5,sum by(le,stage)(rate(xiaohuiji_collect_pipeline_duration_seconds_bucket{stage=~\"material_pair|rule_match|content_extract\",source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval])))",
+                      "instant": false,
+                      "legendFormat": "{{stage}} / P50",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "A"
+                }
+              },
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "histogram_quantile(0.95,sum by(le,stage)(rate(xiaohuiji_collect_pipeline_duration_seconds_bucket{stage=~\"material_pair|rule_match|content_extract\",source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval])))",
+                      "instant": false,
+                      "legendFormat": "{{stage}} / P95",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "B"
+                }
+              },
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "histogram_quantile(0.99,sum by(le,stage)(rate(xiaohuiji_collect_pipeline_duration_seconds_bucket{stage=~\"material_pair|rule_match|content_extract\",source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval])))",
+                      "instant": false,
+                      "legendFormat": "{{stage}} / P99",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "C"
+                }
+              },
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "sum by(stage)(rate(xiaohuiji_collect_pipeline_duration_seconds_sum{stage=~\"material_pair|rule_match|content_extract\",source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval])) / (sum by(stage)(rate(xiaohuiji_collect_pipeline_duration_seconds_count{stage=~\"material_pair|rule_match|content_extract\",source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval])) > 0)",
+                      "instant": false,
+                      "legendFormat": "{{stage}} / 平均",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "D"
+                }
+              }
+            ],
+            "queryOptions": {
+              "interval": "15s",
+              "maxDataPoints": 240
+            },
+            "transformations": []
+          }
+        },
+        "description": "实际阶段执行耗时，按 stage 独立聚合；平均为 sum/count。阶段可能嵌套，不相加；无样本保留无数据。",
+        "id": 27,
+        "links": [],
+        "title": "资料配对／规则匹配／内容提取 P50／P95／P99／平均",
+        "vizConfig": {
+          "group": "timeseries",
+          "kind": "VizConfig",
+          "spec": {
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "lineWidth": 2,
+                  "spanNulls": false
+                },
+                "min": 0,
+                "noValue": "待生命周期样本",
+                "unit": "s"
+              },
+              "overrides": []
+            },
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom"
+              },
+              "tooltip": {
+                "mode": "multi"
+              }
+            }
+          },
+          "version": ""
+        }
+      }
+    },
+    "media_delegated_results": {
+      "kind": "Panel",
+      "spec": {
+        "data": {
+          "kind": "QueryGroup",
+          "spec": {
+            "queries": [
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "60*sum by(result)(rate(xiaohuiji_collect_media_delegated_results_total{source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval]))",
+                      "instant": false,
+                      "legendFormat": "协议委托 / {{result}}",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "A"
+                }
+              }
+            ],
+            "queryOptions": {
+              "interval": "15s",
+              "maxDataPoints": 240
+            },
+            "transformations": []
+          }
+        },
+        "description": "account SDK SubmitAndWait 操作结果，按 success/error/deferred 展示。成功可能复用 SDK 缓存或已有任务，不能视为实际网络下载次数；不与 Bot 下载尝试相加，也不作为复用率分母。代码指标待部署，未上报时保持无数据。",
+        "id": 33,
+        "links": [],
+        "title": "Account 协议委托结果｜非实际下载",
+        "vizConfig": {
+          "group": "timeseries",
+          "kind": "VizConfig",
+          "spec": {
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "lineWidth": 2,
+                  "spanNulls": false
+                },
+                "min": 0,
+                "noValue": "待媒体指标上报",
+                "unit": "suffix: 次/分钟"
+              },
+              "overrides": []
+            },
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "displayMode": "table",
+                "placement": "bottom"
+              },
+              "tooltip": {
+                "mode": "multi"
+              }
+            }
+          },
+          "version": ""
+        }
+      }
+    },
+    "media_download_attempts": {
+      "kind": "Panel",
+      "spec": {
+        "data": {
+          "kind": "QueryGroup",
+          "spec": {
+            "queries": [
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "60*sum by(result,attempt)(rate(xiaohuiji_collect_media_download_attempts_total{source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval]))",
+                      "instant": false,
+                      "legendFormat": "{{result}} / {{attempt}}",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "A"
+                }
+              }
+            ],
+            "queryOptions": {
+              "interval": "15s",
+              "maxDataPoints": 240
+            },
+            "transformations": []
+          }
+        },
+        "description": "仅实际 Bot 网络下载调用完成后计数，按 result（success/error）和 attempt（initial/retry）分组。失败后重试成功计两次尝试，不是两份唯一媒体；排除缓存命中、getFile、槽等待及 account 委托任务。代码指标待部署，未上报时保持无数据。",
+        "id": 31,
+        "links": [],
+        "title": "Bot 实际网络下载尝试｜结果 × 首次／重试",
+        "vizConfig": {
+          "group": "timeseries",
+          "kind": "VizConfig",
+          "spec": {
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "lineWidth": 2,
+                  "spanNulls": false
+                },
+                "min": 0,
+                "noValue": "待媒体指标上报",
+                "unit": "suffix: 次/分钟"
+              },
+              "overrides": []
+            },
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "displayMode": "table",
+                "placement": "bottom"
+              },
+              "tooltip": {
+                "mode": "multi"
+              }
+            }
+          },
+          "version": ""
+        }
+      }
+    },
+    "media_download_latency": {
+      "kind": "Panel",
+      "spec": {
+        "data": {
+          "kind": "QueryGroup",
+          "spec": {
+            "queries": [
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "histogram_quantile(0.5,sum by(le,result,attempt)(rate(xiaohuiji_collect_media_download_duration_seconds_bucket{source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval])))",
+                      "instant": false,
+                      "legendFormat": "{{result}} / {{attempt}} / P50",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "A"
+                }
+              },
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "histogram_quantile(0.95,sum by(le,result,attempt)(rate(xiaohuiji_collect_media_download_duration_seconds_bucket{source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval])))",
+                      "instant": false,
+                      "legendFormat": "{{result}} / {{attempt}} / P95",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "B"
+                }
+              },
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "histogram_quantile(0.99,sum by(le,result,attempt)(rate(xiaohuiji_collect_media_download_duration_seconds_bucket{source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval])))",
+                      "instant": false,
+                      "legendFormat": "{{result}} / {{attempt}} / P99",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "C"
+                }
+              },
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "sum by(result,attempt)(rate(xiaohuiji_collect_media_download_duration_seconds_sum{source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval])) / (sum by(result,attempt)(rate(xiaohuiji_collect_media_download_duration_seconds_count{source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval])) > 0)",
+                      "instant": false,
+                      "legendFormat": "{{result}} / {{attempt}} / 平均",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "D"
+                }
+              }
+            ],
+            "queryOptions": {
+              "interval": "15s",
+              "maxDataPoints": 240
+            },
+            "transformations": []
+          }
+        },
+        "description": "实际 Bot 网络下载调用耗时，包含失败尝试，按 result/attempt 区分。平均为直方图 sum/count；不包含排队、getFile、指纹和上传耗时，也不包含协议委托耗时。代码指标待部署，未上报或无有效样本时保持无数据，不补零。",
+        "id": 32,
+        "links": [],
+        "title": "Bot 实际下载耗时 P50／P95／P99／平均",
+        "vizConfig": {
+          "group": "timeseries",
+          "kind": "VizConfig",
+          "spec": {
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "lineWidth": 2,
+                  "spanNulls": false
+                },
+                "min": 0,
+                "noValue": "待媒体指标上报",
+                "unit": "s"
+              },
+              "overrides": []
+            },
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom"
+              },
+              "tooltip": {
+                "mode": "multi"
+              }
+            }
+          },
+          "version": ""
+        }
+      }
+    },
+    "media_queue": {
+      "kind": "Panel",
+      "spec": {
+        "data": {
+          "kind": "QueryGroup",
+          "spec": {
+            "queries": [
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "max(xiaohuiji_collect_media_pending_events{instance=~\"${instance:regex}\"} and on(instance,job) (xiaohuiji_collect_observe_healthy{instance=~\"${instance:regex}\"} == 1))",
+                      "legendFormat": "pending_events",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "A"
+                }
+              },
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "max(xiaohuiji_collect_media_queue_pending_tasks{instance=~\"${instance:regex}\"} and on(instance,job) (xiaohuiji_collect_observe_healthy{instance=~\"${instance:regex}\"} == 1))",
+                      "legendFormat": "pending_tasks",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "B"
+                }
+              },
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "max(xiaohuiji_collect_media_queue_oldest_pending_age_seconds{instance=~\"${instance:regex}\"} and on(instance,job) (xiaohuiji_collect_observe_healthy{instance=~\"${instance:regex}\"} == 1))",
+                      "legendFormat": "oldest_age_seconds",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "C"
+                }
+              },
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "max(xiaohuiji_collect_media_queue_amplification_ratio{instance=~\"${instance:regex}\"} and on(instance,job) (xiaohuiji_collect_observe_healthy{instance=~\"${instance:regex}\"} == 1))",
+                      "legendFormat": "amplification_ratio",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "D"
+                }
+              }
+            ],
+            "queryOptions": {
+              "interval": "15s",
+              "maxDataPoints": 240
+            },
+            "transformations": []
+          }
+        },
+        "description": "媒体全局快照：pending events、pending tasks、最老年龄和重复放大。多实例重复上报不求和，按健康实例取最大值；仅随实例筛选。",
+        "id": 24,
+        "links": [],
+        "title": "媒体队列库存与老化",
+        "vizConfig": {
+          "group": "timeseries",
+          "kind": "VizConfig",
+          "spec": {
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "fillOpacity": 8,
+                  "lineWidth": 1,
+                  "spanNulls": false
+                },
+                "min": 0
+              },
+              "overrides": [
+                {
+                  "matcher": {
+                    "id": "byName",
+                    "options": "pending_events"
+                  },
+                  "properties": [
+                    {
+                      "id": "unit",
+                      "value": "short"
+                    },
+                    {
+                      "id": "displayName",
+                      "value": "待处理事件"
+                    }
+                  ]
+                },
+                {
+                  "matcher": {
+                    "id": "byName",
+                    "options": "pending_tasks"
+                  },
+                  "properties": [
+                    {
+                      "id": "unit",
+                      "value": "short"
+                    },
+                    {
+                      "id": "displayName",
+                      "value": "待处理任务"
+                    }
+                  ]
+                },
+                {
+                  "matcher": {
+                    "id": "byName",
+                    "options": "oldest_age_seconds"
+                  },
+                  "properties": [
+                    {
+                      "id": "unit",
+                      "value": "s"
+                    },
+                    {
+                      "id": "displayName",
+                      "value": "最老年龄"
+                    }
+                  ]
+                },
+                {
+                  "matcher": {
+                    "id": "byName",
+                    "options": "amplification_ratio"
+                  },
+                  "properties": [
+                    {
+                      "id": "unit",
+                      "value": "short"
+                    },
+                    {
+                      "id": "displayName",
+                      "value": "重复放大比"
+                    }
+                  ]
+                }
+              ]
+            },
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "right"
+              },
+              "tooltip": {
+                "mode": "multi"
+              }
+            }
+          },
+          "version": ""
+        }
+      }
+    },
+    "media_reuses": {
+      "kind": "Panel",
+      "spec": {
+        "data": {
+          "kind": "QueryGroup",
+          "spec": {
+            "queries": [
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "sum by(reuse_layer)(increase(xiaohuiji_collect_media_reuses_total{source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__range]))",
+                      "instant": true,
+                      "legendFormat": "{{reuse_layer}}",
+                      "range": false
+                    },
+                    "version": ""
+                  },
+                  "refId": "A"
+                }
+              }
+            ],
+            "queryOptions": {},
+            "transformations": []
+          }
+        },
+        "description": "按成功复用分支计次数，不是唯一媒体数，不含资料复用；同一媒体可重复计数。fingerprint_storage 在下载后复用存储，仅节省上传，不代表节省下载。没有严谨分母，不计算复用率。代码指标待部署，未上报时保持无数据。",
+        "id": 30,
+        "links": [],
+        "title": "媒体复用次数｜按复用层",
+        "vizConfig": {
+          "group": "bargauge",
+          "kind": "VizConfig",
+          "spec": {
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "fixedColor": "yellow",
+                  "mode": "fixed"
+                },
+                "decimals": 0,
+                "min": 0,
+                "noValue": "待媒体指标上报",
+                "unit": "short"
+              },
+              "overrides": []
+            },
+            "options": {
+              "displayMode": "basic",
+              "orientation": "horizontal",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "values": false
+              }
+            }
+          },
+          "version": ""
+        }
+      }
+    },
+    "policy_skips": {
+      "kind": "Panel",
+      "spec": {
+        "data": {
+          "kind": "QueryGroup",
+          "spec": {
+            "queries": [
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "sum by(reason)(increase(xiaohuiji_collect_delivery_skipped_total{source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__range]))",
+                      "instant": true,
+                      "legendFormat": "{{reason}}",
+                      "range": false
+                    },
+                    "version": ""
+                  },
+                  "refId": "A"
+                }
+              }
+            ],
+            "queryOptions": {},
+            "transformations": []
+          }
+        },
+        "description": "新 delivery.skipped 指标。只展示明确策略跳过，不把所有 nil handler 返回解释为业务接受。旧版无 reason 时不猜测。",
+        "id": 15,
+        "links": [],
+        "title": "明确策略跳过原因｜区间次数",
+        "vizConfig": {
+          "group": "bargauge",
+          "kind": "VizConfig",
+          "spec": {
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "fixedColor": "yellow",
+                  "mode": "fixed"
+                },
+                "decimals": 0,
+                "min": 0,
+                "noValue": "待跳过原因指标上报",
+                "unit": "short"
+              },
+              "overrides": [
+                {
+                  "matcher": {
+                    "id": "byName",
+                    "options": "global_disabled"
+                  },
+                  "properties": [
+                    {
+                      "id": "displayName",
+                      "value": "全局采集关闭"
+                    }
+                  ]
+                },
+                {
+                  "matcher": {
+                    "id": "byName",
+                    "options": "source_unavailable"
+                  },
+                  "properties": [
+                    {
+                      "id": "displayName",
+                      "value": "来源不可用"
+                    }
+                  ]
+                },
+                {
+                  "matcher": {
+                    "id": "byName",
+                    "options": "self_loop_publish_target"
+                  },
+                  "properties": [
+                    {
+                      "id": "displayName",
+                      "value": "防循环拦截"
+                    }
+                  ]
+                },
+                {
+                  "matcher": {
+                    "id": "byName",
+                    "options": "approval_blocked"
+                  },
+                  "properties": [
+                    {
+                      "id": "displayName",
+                      "value": "频道审核／授权拦截"
+                    }
+                  ]
+                },
+                {
+                  "matcher": {
+                    "id": "byName",
+                    "options": "channel_access_blocked"
+                  },
+                  "properties": [
+                    {
+                      "id": "displayName",
+                      "value": "频道访问拦截"
+                    }
+                  ]
+                }
+              ]
+            },
+            "options": {
+              "displayMode": "basic",
+              "orientation": "horizontal",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "values": false
+              }
+            }
+          },
+          "version": ""
+        }
+      }
+    },
+    "profile_output": {
+      "kind": "Panel",
+      "spec": {
+        "data": {
+          "kind": "QueryGroup",
+          "spec": {
+            "queries": [
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "60*sum by(action)(rate(xiaohuiji_collect_profiles_persisted_total{source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval]))",
+                      "legendFormat": "{{action}}",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "A"
+                }
+              }
+            ],
+            "queryOptions": {
+              "interval": "15s",
+              "maxDataPoints": 240
+            },
+            "transformations": []
+          }
+        },
+        "description": "仅统计顶层事务确认后的资料持久化结果；reused 含重试。无新指标时留空，不回退使用旧入库调用数。",
+        "id": 14,
+        "links": [],
+        "title": "资料新建／复用产出趋势",
+        "vizConfig": {
+          "group": "timeseries",
+          "kind": "VizConfig",
+          "spec": {
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "fillOpacity": 15,
+                  "lineWidth": 2,
+                  "spanNulls": false
+                },
+                "min": 0,
+                "noValue": "待入库指标上报",
+                "unit": "suffix: 次/分钟"
+              },
+              "overrides": [
+                {
+                  "matcher": {
+                    "id": "byName",
+                    "options": "created"
+                  },
+                  "properties": [
+                    {
+                      "id": "displayName",
+                      "value": "新建资料"
+                    },
+                    {
+                      "id": "color",
+                      "value": {
+                        "fixedColor": "green",
+                        "mode": "fixed"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "matcher": {
+                    "id": "byName",
+                    "options": "reused"
+                  },
+                  "properties": [
+                    {
+                      "id": "displayName",
+                      "value": "复用调用"
+                    },
+                    {
+                      "id": "color",
+                      "value": {
+                        "fixedColor": "purple",
+                        "mode": "fixed"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "options": {
+              "legend": {
+                "displayMode": "list",
+                "placement": "bottom"
+              },
+              "tooltip": {
+                "mode": "multi"
+              }
+            }
+          },
+          "version": ""
+        }
+      }
+    },
+    "query_latency": {
+      "kind": "Panel",
+      "spec": {
+        "data": {
+          "kind": "QueryGroup",
+          "spec": {
+            "queries": [
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "histogram_quantile(0.95,sum by(le,query_name,result)(rate(xiaohuiji_collect_query_duration_seconds_bucket{source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval])))",
+                      "legendFormat": "{{query_name}} / {{result}}",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "A"
+                }
+              }
+            ],
+            "queryOptions": {
+              "interval": "15s",
+              "maxDataPoints": 240
+            },
+            "transformations": []
+          }
+        },
+        "description": "新查询指标：实际 ORM round-trip，含连接等待和解析；不是 PostgreSQL 服务端执行时间。query_name 区分展示主窗口与重试窗口，result 区分成功、失败、超时和取消。",
+        "id": 17,
+        "links": [],
+        "title": "窗口 SQL 往返 P95",
+        "vizConfig": {
+          "group": "timeseries",
+          "kind": "VizConfig",
+          "spec": {
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "lineWidth": 2,
+                  "spanNulls": false
+                },
+                "min": 0,
+                "noValue": "待查询指标上报",
+                "unit": "s"
+              },
+              "overrides": []
+            },
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom"
+              },
+              "tooltip": {
+                "mode": "multi"
+              }
+            }
+          },
+          "version": ""
+        }
+      }
+    },
+    "query_rate": {
+      "kind": "Panel",
+      "spec": {
+        "data": {
+          "kind": "QueryGroup",
+          "spec": {
+            "queries": [
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "60*sum by(query_name,result)(rate(xiaohuiji_collect_query_executions_total{source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval]))",
+                      "legendFormat": "{{query_name}} / {{result}}",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "A"
+                }
+              }
+            ],
+            "queryOptions": {
+              "interval": "15s",
+              "maxDataPoints": 240
+            },
+            "transformations": []
+          }
+        },
+        "description": "每个实际窗口 ORM 调用计一次；成功和失败均计，重试独立计数。结合耗时判断该减少重复调用还是优化单次 SQL。",
+        "id": 18,
+        "links": [],
+        "title": "窗口 SQL 调用速率与结果",
+        "vizConfig": {
+          "group": "timeseries",
+          "kind": "VizConfig",
+          "spec": {
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "lineWidth": 2,
+                  "spanNulls": false
+                },
+                "min": 0,
+                "noValue": "待查询指标上报",
+                "unit": "suffix: 次/分钟"
+              },
+              "overrides": []
+            },
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "displayMode": "table",
+                "placement": "bottom"
+              },
+              "tooltip": {
+                "mode": "multi"
+              }
+            }
+          },
+          "version": ""
+        }
+      }
+    },
+    "query_rows": {
+      "kind": "Panel",
+      "spec": {
+        "data": {
+          "kind": "QueryGroup",
+          "spec": {
+            "queries": [
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "sum by(query_name)(rate(xiaohuiji_collect_query_returned_rows_sum{source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval]))/(sum by(query_name)(rate(xiaohuiji_collect_query_returned_rows_count{source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval])) > 0)",
+                      "legendFormat": "{{query_name}}",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "A"
+                }
+              }
+            ],
+            "queryOptions": {
+              "interval": "15s",
+              "maxDataPoints": 240
+            },
+            "transformations": []
+          }
+        },
+        "description": "仅统计 err=nil 的查询，成功零行纳入，失败或返回部分行的错误调用不纳入。不是扫描行数，不表示 PG 大表扫描成本。",
+        "id": 19,
+        "links": [],
+        "title": "成功窗口查询平均返回行数",
+        "vizConfig": {
+          "group": "timeseries",
+          "kind": "VizConfig",
+          "spec": {
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "lineWidth": 2,
+                  "spanNulls": false
+                },
+                "min": 0,
+                "noValue": "待查询行数样本",
+                "unit": "suffix: 行/次"
+              },
+              "overrides": []
+            },
+            "options": {
+              "legend": {
+                "displayMode": "list",
+                "placement": "bottom"
+              },
+              "tooltip": {
+                "mode": "multi"
+              }
+            }
+          },
+          "version": ""
+        }
+      }
+    },
+    "queue_wait": {
+      "kind": "Panel",
+      "spec": {
+        "data": {
+          "kind": "QueryGroup",
+          "spec": {
+            "queries": [
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "histogram_quantile(0.95,sum by(le)(rate(telegram_collector_pipeline_event_queue_wait_seconds_bucket{source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval])))",
+                      "legendFormat": "Event 排队",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "A"
+                }
+              },
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "histogram_quantile(0.95,sum by(le)(rate(telegram_collector_pipeline_delivery_queue_wait_seconds_bucket{source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval])))",
+                      "legendFormat": "Delivery 排队",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "B"
+                }
+              },
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "histogram_quantile(0.95,sum by(le)(rate(xiaohuiji_collect_process_queue_wait_seconds_bucket{source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval])))",
+                      "legendFormat": "Process 排队",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "C"
+                }
+              }
+            ],
+            "queryOptions": {
+              "interval": "15s",
+              "maxDataPoints": 240
+            },
+            "transformations": []
+          }
+        },
+        "description": "可信生产者提交至本次消费者入口，含计划延迟和 Asynq 重试。仅用新可信时钟指标；不回退数据库年龄或 Telegram 日期。Unique／旧任务缺失样本应查看数据可信度。",
+        "id": 16,
+        "links": [],
+        "title": "三段队列排队 P95",
+        "vizConfig": {
+          "group": "timeseries",
+          "kind": "VizConfig",
+          "spec": {
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "lineWidth": 2,
+                  "spanNulls": false
+                },
+                "min": 0,
+                "noValue": "暂无可信排队样本",
+                "unit": "s"
+              },
+              "overrides": []
+            },
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom"
+              },
+              "tooltip": {
+                "mode": "multi"
+              }
+            }
+          },
+          "version": ""
+        }
+      }
+    },
+    "recovery": {
+      "kind": "Panel",
+      "spec": {
+        "data": {
+          "kind": "QueryGroup",
+          "spec": {
+            "queries": [
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "60*sum by(stage,result)(rate(telegram_collector_pipeline_operations_total{stage=~\"event_recovery_scan|delivery_recovery_scan|event_recovery_enqueue|delivery_recovery_enqueue\",instance=~\"${instance:regex}\"}[$__rate_interval]))",
+                      "legendFormat": "{{stage}} / {{result}}",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "A"
+                }
+              },
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "60*sum(rate(telegram_collector_recovery_candidates_total{instance=~\"${instance:regex}\"}[$__rate_interval]))",
+                      "legendFormat": "恢复候选行／分钟",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "B"
+                }
+              }
+            ],
+            "queryOptions": {
+              "interval": "15s",
+              "maxDataPoints": 240
+            },
+            "transformations": []
+          }
+        },
+        "description": "恢复候选是每次有界查询返回的行数，不等于当前积压；同一任务可跨轮次重复。用于判断恢复器是否运行以及失败是否增加。",
+        "id": 25,
+        "links": [],
+        "title": "恢复扫描与重新入队",
+        "vizConfig": {
+          "group": "timeseries",
+          "kind": "VizConfig",
+          "spec": {
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "fillOpacity": 8,
+                  "lineWidth": 1,
+                  "spanNulls": false
+                },
+                "min": 0,
+                "unit": "suffix: 次/分钟"
+              },
+              "overrides": []
+            },
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "displayMode": "table",
+                "placement": "right"
+              },
+              "tooltip": {
+                "mode": "multi"
+              }
+            }
+          },
+          "version": ""
+        }
+      }
+    },
+    "result_distribution": {
+      "kind": "Panel",
+      "spec": {
+        "data": {
+          "kind": "QueryGroup",
+          "spec": {
+            "queries": [
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "60*sum by(result)(rate(xiaohuiji_collect_pipeline_operations_total{stage=\"process\",source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval]))",
+                      "legendFormat": "{{result}}",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "A"
+                }
+              }
+            ],
+            "queryOptions": {
+              "interval": "15s",
+              "maxDataPoints": 240
+            },
+            "transformations": []
+          }
+        },
+        "description": "固定 process 阶段按结果分类。retryable、pending、ignored 不是失败；长期占比和趋势一起判断是否空转。",
+        "id": 22,
+        "links": [],
+        "title": "处理结果分布",
+        "vizConfig": {
+          "group": "timeseries",
+          "kind": "VizConfig",
+          "spec": {
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "fillOpacity": 8,
+                  "lineWidth": 1,
+                  "spanNulls": false
+                },
+                "min": 0,
+                "unit": "suffix: 次/分钟"
+              },
+              "overrides": [
+                {
+                  "matcher": {
+                    "id": "byName",
+                    "options": "failed"
+                  },
+                  "properties": [
+                    {
+                      "id": "color",
+                      "value": {
+                        "fixedColor": "red",
+                        "mode": "fixed"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "matcher": {
+                    "id": "byName",
+                    "options": "retryable"
+                  },
+                  "properties": [
+                    {
+                      "id": "color",
+                      "value": {
+                        "fixedColor": "orange",
+                        "mode": "fixed"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "matcher": {
+                    "id": "byName",
+                    "options": "pending"
+                  },
+                  "properties": [
+                    {
+                      "id": "color",
+                      "value": {
+                        "fixedColor": "yellow",
+                        "mode": "fixed"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "matcher": {
+                    "id": "byName",
+                    "options": "completed"
+                  },
+                  "properties": [
+                    {
+                      "id": "color",
+                      "value": {
+                        "fixedColor": "green",
+                        "mode": "fixed"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "matcher": {
+                    "id": "byName",
+                    "options": "ignored"
+                  },
+                  "properties": [
+                    {
+                      "id": "color",
+                      "value": {
+                        "fixedColor": "gray",
+                        "mode": "fixed"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "matcher": {
+                    "id": "byName",
+                    "options": "unconfirmed"
+                  },
+                  "properties": [
+                    {
+                      "id": "color",
+                      "value": {
+                        "fixedColor": "purple",
+                        "mode": "fixed"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "matcher": {
+                    "id": "byName",
+                    "options": "timeout"
+                  },
+                  "properties": [
+                    {
+                      "id": "color",
+                      "value": {
+                        "fixedColor": "red",
+                        "mode": "fixed"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "displayMode": "table",
+                "placement": "right"
+              },
+              "tooltip": {
+                "mode": "multi"
+              }
+            }
+          },
+          "version": ""
+        }
+      }
+    },
+    "source_mode": {
+      "kind": "Panel",
+      "spec": {
+        "data": {
+          "kind": "QueryGroup",
+          "spec": {
+            "queries": [
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "60*sum by(source_type,collection_mode)(rate(telegram_collector_pipeline_operations_total{stage=\"delivery_consume\",result=\"ok\",source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval]))",
+                      "legendFormat": "{{source_type}} / {{collection_mode}}",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "A"
+                }
+              }
+            ],
+            "queryOptions": {
+              "interval": "15s",
+              "maxDataPoints": 240
+            },
+            "transformations": []
+          }
+        },
+        "description": "以 delivery_consume 为固定边界，展示成功处理的交付尝试速率。入口的历史消息可能走独立路径，因此不混用入口数作为历史总量。unknown 保留展示，不猜测归属。",
+        "id": 13,
+        "links": [],
+        "title": "来源 × 实时／历史处理分布",
+        "vizConfig": {
+          "group": "timeseries",
+          "kind": "VizConfig",
+          "spec": {
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "fillOpacity": 12,
+                  "lineWidth": 2,
+                  "spanNulls": false
+                },
+                "min": 0,
+                "unit": "suffix: 次/分钟"
+              },
+              "overrides": []
+            },
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "displayMode": "table",
+                "placement": "bottom"
+              },
+              "tooltip": {
+                "mode": "multi"
+              }
+            }
+          },
+          "version": ""
+        }
+      }
+    },
+    "stage_p95": {
+      "kind": "Panel",
+      "spec": {
+        "data": {
+          "kind": "QueryGroup",
+          "spec": {
+            "queries": [
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "histogram_quantile(0.95,sum by(le,stage)(rate(xiaohuiji_collect_pipeline_duration_seconds_bucket{source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval])))",
+                      "instant": false,
+                      "legendFormat": "{{stage}}",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "A"
+                }
+              }
+            ],
+            "queryOptions": {
+              "interval": "15s",
+              "maxDataPoints": 240
+            },
+            "transformations": []
+          }
+        },
+        "description": "阶段函数实际执行耗时，包含内部依赖等待；不包含独立队列驻留。父子阶段嵌套，不能相加。按实际 stage 显示代码名便于查日志。",
+        "id": 11,
+        "links": [],
+        "title": "阶段执行 P95｜定位慢点",
+        "vizConfig": {
+          "group": "timeseries",
+          "kind": "VizConfig",
+          "spec": {
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 5,
+                  "lineWidth": 1,
+                  "spanNulls": false
+                },
+                "min": 0,
+                "noValue": "暂无耗时样本",
+                "unit": "s"
+              },
+              "overrides": []
+            },
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "right"
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            }
+          },
+          "version": ""
+        }
+      }
+    },
+    "stage_rate": {
+      "kind": "Panel",
+      "spec": {
+        "data": {
+          "kind": "QueryGroup",
+          "spec": {
+            "queries": [
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "60*sum by(stage)(rate(xiaohuiji_collect_pipeline_operations_total{stage=~\"authorization|rule_preflight|material_pair|media_ready|profile_persist|publish_queue_enqueue\",source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval]))",
+                      "instant": true,
+                      "legendFormat": "{{stage}}",
+                      "range": false
+                    },
+                    "version": ""
+                  },
+                  "refId": "A"
+                }
+              }
+            ],
+            "queryOptions": {
+              "maxDataPoints": 200
+            },
+            "transformations": []
+          }
+        },
+        "description": "同一阶段内汇总尝试速率。阶段对象不同且存在嵌套，不能相减作为丢失或相加作为资料数。入库成功数请看事务确认卡片。",
+        "id": 10,
+        "links": [],
+        "title": "链路各阶段吞吐｜次／分钟",
+        "vizConfig": {
+          "group": "bargauge",
+          "kind": "VizConfig",
+          "spec": {
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "continuous-BlYlRd"
+                },
+                "decimals": 1,
+                "min": 0,
+                "noValue": "暂无阶段数据",
+                "unit": "suffix: 次/分钟"
+              },
+              "overrides": [
+                {
+                  "matcher": {
+                    "id": "byName",
+                    "options": "authorization"
+                  },
+                  "properties": [
+                    {
+                      "id": "displayName",
+                      "value": "授权检查"
+                    }
+                  ]
+                },
+                {
+                  "matcher": {
+                    "id": "byName",
+                    "options": "rule_preflight"
+                  },
+                  "properties": [
+                    {
+                      "id": "displayName",
+                      "value": "规则预检"
+                    }
+                  ]
+                },
+                {
+                  "matcher": {
+                    "id": "byName",
+                    "options": "material_pair"
+                  },
+                  "properties": [
+                    {
+                      "id": "displayName",
+                      "value": "展示／验证配对"
+                    }
+                  ]
+                },
+                {
+                  "matcher": {
+                    "id": "byName",
+                    "options": "media_ready"
+                  },
+                  "properties": [
+                    {
+                      "id": "displayName",
+                      "value": "媒体就绪检查"
+                    }
+                  ]
+                },
+                {
+                  "matcher": {
+                    "id": "byName",
+                    "options": "profile_persist"
+                  },
+                  "properties": [
+                    {
+                      "id": "displayName",
+                      "value": "入库调用（非新建数）"
+                    }
+                  ]
+                },
+                {
+                  "matcher": {
+                    "id": "byName",
+                    "options": "publish_queue_enqueue"
+                  },
+                  "properties": [
+                    {
+                      "id": "displayName",
+                      "value": "发布队列投递尝试"
+                    }
+                  ]
+                }
+              ]
+            },
+            "options": {
+              "displayMode": "gradient",
+              "orientation": "horizontal",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "values": false
+              },
+              "showUnfilled": true
+            }
+          },
+          "version": ""
+        }
+      }
+    },
+    "timeout_top10": {
+      "kind": "Panel",
+      "spec": {
+        "data": {
+          "kind": "QueryGroup",
+          "spec": {
+            "queries": [
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "topk(10,sum by(stage)(increase(xiaohuiji_collect_pipeline_operations_total{result=\"timeout\",source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__range])))",
+                      "instant": true,
+                      "legendFormat": "{{stage}}",
+                      "range": false
+                    },
+                    "version": ""
+                  },
+                  "refId": "A"
+                }
+              }
+            ],
+            "queryOptions": {},
+            "transformations": []
+          }
+        },
+        "description": "按真实 stage 汇总 timeout 尝试次数；无 source_id 来源排名，不代表唯一资料或根因次数。父子阶段可能重复记录。",
+        "id": 29,
+        "links": [],
+        "title": "超时阶段 TOP10｜区间次数",
+        "vizConfig": {
+          "group": "bargauge",
+          "kind": "VizConfig",
+          "spec": {
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "continuous-BlYlRd"
+                },
+                "min": 0,
+                "noValue": "暂无等待样本",
+                "unit": "short"
+              },
+              "overrides": []
+            },
+            "options": {
+              "displayMode": "gradient",
+              "orientation": "horizontal",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "values": false
+              },
+              "showUnfilled": true
+            }
+          },
+          "version": ""
+        }
+      }
+    },
+    "wait_reason": {
+      "kind": "Panel",
+      "spec": {
+        "data": {
+          "kind": "QueryGroup",
+          "spec": {
+            "queries": [
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "sum by(stage,wait_reason)(increase(xiaohuiji_collect_pipeline_operations_total{result=~\"pending|retryable\",wait_reason!=\"\",source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__range]))",
+                      "instant": true,
+                      "legendFormat": "{{stage}} / {{wait_reason}}",
+                      "range": false
+                    },
+                    "version": ""
+                  },
+                  "refId": "A"
+                }
+              },
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "sum(increase(xiaohuiji_collect_pipeline_operations_total{result=~\"pending|retryable\",wait_reason=\"\",source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__range]))",
+                      "instant": true,
+                      "legendFormat": "旧样本｜缺少 wait_reason 标签",
+                      "range": false
+                    },
+                    "version": ""
+                  },
+                  "refId": "B"
+                }
+              }
+            ],
+            "queryOptions": {},
+            "transformations": []
+          }
+        },
+        "description": "按 stage + wait_reason 展示 pending/retryable 尝试。旧缺标签或空标签样本单独汇总，使用固定图例；unspecified 等实际标签原样保留。各阶段不可相加为唯一资料数。",
+        "id": 23,
+        "links": [],
+        "title": "等待原因分布",
+        "vizConfig": {
+          "group": "bargauge",
+          "kind": "VizConfig",
+          "spec": {
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "continuous-BlYlRd"
+                },
+                "min": 0,
+                "noValue": "暂无等待样本",
+                "unit": "short"
+              },
+              "overrides": []
+            },
+            "options": {
+              "displayMode": "gradient",
+              "orientation": "horizontal",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "values": false
+              },
+              "showUnfilled": true
+            }
+          },
+          "version": ""
+        }
+      }
+    },
+    "webhook_lifecycle_latency": {
+      "kind": "Panel",
+      "spec": {
+        "data": {
+          "kind": "QueryGroup",
+          "spec": {
+            "queries": [
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "sum(rate(xiaohuiji_collect_lifecycle_duration_seconds_sum{time_basis=\"webhook_received\",source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval])) / (sum(rate(xiaohuiji_collect_lifecycle_duration_seconds_count{time_basis=\"webhook_received\",source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval])) > 0)",
+                      "instant": false,
+                      "legendFormat": "webhook_received / 平均",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "A"
+                }
+              },
+              {
+                "kind": "PanelQuery",
+                "spec": {
+                  "hidden": false,
+                  "query": {
+                    "datasource": {
+                      "name": "victoriametrics"
+                    },
+                    "group": "prometheus",
+                    "kind": "DataQuery",
+                    "spec": {
+                      "expr": "histogram_quantile(0.95,sum by(le)(rate(xiaohuiji_collect_lifecycle_duration_seconds_bucket{time_basis=\"webhook_received\",source_type=~\"${source:regex}\",collection_mode=~\"${mode:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval])))",
+                      "instant": false,
+                      "legendFormat": "webhook_received / P95",
+                      "range": true
+                    },
+                    "version": ""
+                  },
+                  "refId": "B"
+                }
+              }
+            ],
+            "queryOptions": {
+              "interval": "15s",
+              "maxDataPoints": 240
+            },
+            "transformations": []
+          }
+        },
+        "description": "严格限定 time_basis=\"webhook_received\"；仅统计由确切 HTTP Webhook 接收时间至新建资料顶层事务提交的有效样本。平均=sum/count。gateway_ingress、gateway_enqueue、collector_ingress 及旧无标签样本均不纳入；无样本显示待上报，不补零。time_basis：webhook_received 为确切 HTTP Webhook 接收起点（含 receivedAtUnixNano 经 diskqueue 恢复）；gateway_ingress 为 Gateway 入口，兼容旧 EnqueuedAt，可能包含 poll/旧任务，不能全部称 Webhook；gateway_enqueue 为 Gateway 入队起点；collector_ingress 为采集器入口。不同起点不可直接比较为同一端到端口径。旧无 time_basis 标签样本不归为 Webhook。",
+        "id": 36,
+        "links": [],
+        "title": "确切 Webhook 接收→入库｜平均／P95",
+        "vizConfig": {
+          "group": "timeseries",
+          "kind": "VizConfig",
+          "spec": {
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "lineWidth": 2,
+                  "spanNulls": false
+                },
+                "min": 0,
+                "noValue": "待确切 Webhook 生命周期样本上报",
+                "unit": "s"
+              },
+              "overrides": []
+            },
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom"
+              },
+              "tooltip": {
+                "mode": "multi"
+              }
+            }
+          },
+          "version": ""
+        }
+      }
+    }
+  },
+  "layout": {
+    "kind": "RowsLayout",
+    "spec": {
+      "rows": [
+        {
+          "kind": "RowsLayoutRow",
+          "spec": {
+            "collapse": false,
+            "hideHeader": false,
+            "layout": {
+              "kind": "GridLayout",
+              "spec": {
+                "items": [
+                  {
+                    "kind": "GridLayoutItem",
+                    "spec": {
+                      "element": {
+                        "kind": "ElementReference",
+                        "name": "kpi_ingest"
+                      },
+                      "height": 6,
+                      "width": 6,
+                      "x": 0,
+                      "y": 0
+                    }
+                  },
+                  {
+                    "kind": "GridLayoutItem",
+                    "spec": {
+                      "element": {
+                        "kind": "ElementReference",
+                        "name": "kpi_created"
+                      },
+                      "height": 6,
+                      "width": 6,
+                      "x": 6,
+                      "y": 0
+                    }
+                  },
+                  {
+                    "kind": "GridLayoutItem",
+                    "spec": {
+                      "element": {
+                        "kind": "ElementReference",
+                        "name": "kpi_reused"
+                      },
+                      "height": 6,
+                      "width": 6,
+                      "x": 12,
+                      "y": 0
+                    }
+                  },
+                  {
+                    "kind": "GridLayoutItem",
+                    "spec": {
+                      "element": {
+                        "kind": "ElementReference",
+                        "name": "kpi_handoff"
+                      },
+                      "height": 6,
+                      "width": 6,
+                      "x": 18,
+                      "y": 0
+                    }
+                  },
+                  {
+                    "kind": "GridLayoutItem",
+                    "spec": {
+                      "element": {
+                        "kind": "ElementReference",
+                        "name": "kpi_lifecycle"
+                      },
+                      "height": 6,
+                      "width": 6,
+                      "x": 0,
+                      "y": 6
+                    }
+                  },
+                  {
+                    "kind": "GridLayoutItem",
+                    "spec": {
+                      "element": {
+                        "kind": "ElementReference",
+                        "name": "kpi_errors"
+                      },
+                      "height": 6,
+                      "width": 6,
+                      "x": 6,
+                      "y": 6
+                    }
+                  },
+                  {
+                    "kind": "GridLayoutItem",
+                    "spec": {
+                      "element": {
+                        "kind": "ElementReference",
+                        "name": "kpi_pending"
+                      },
+                      "height": 6,
+                      "width": 6,
+                      "x": 12,
+                      "y": 6
+                    }
+                  },
+                  {
+                    "kind": "GridLayoutItem",
+                    "spec": {
+                      "element": {
+                        "kind": "ElementReference",
+                        "name": "kpi_oldest"
+                      },
+                      "height": 6,
+                      "width": 6,
+                      "x": 18,
+                      "y": 6
+                    }
+                  }
+                ]
+              }
+            },
+            "title": "核心统计｜两行四卡"
+          }
+        },
+        {
+          "kind": "RowsLayoutRow",
+          "spec": {
+            "collapse": false,
+            "hideHeader": false,
+            "layout": {
+              "kind": "GridLayout",
+              "spec": {
+                "items": [
+                  {
+                    "kind": "GridLayoutItem",
+                    "spec": {
+                      "element": {
+                        "kind": "ElementReference",
+                        "name": "intro"
+                      },
+                      "height": 5,
+                      "width": 24,
+                      "x": 0,
+                      "y": 0
+                    }
+                  },
+                  {
+                    "kind": "GridLayoutItem",
+                    "spec": {
+                      "element": {
+                        "kind": "ElementReference",
+                        "name": "business_flow"
+                      },
+                      "height": 9,
+                      "width": 12,
+                      "x": 0,
+                      "y": 5
+                    }
+                  },
+                  {
+                    "kind": "GridLayoutItem",
+                    "spec": {
+                      "element": {
+                        "kind": "ElementReference",
+                        "name": "source_mode"
+                      },
+                      "height": 9,
+                      "width": 12,
+                      "x": 12,
+                      "y": 5
+                    }
+                  },
+                  {
+                    "kind": "GridLayoutItem",
+                    "spec": {
+                      "element": {
+                        "kind": "ElementReference",
+                        "name": "profile_output"
+                      },
+                      "height": 9,
+                      "width": 12,
+                      "x": 0,
+                      "y": 14
+                    }
+                  },
+                  {
+                    "kind": "GridLayoutItem",
+                    "spec": {
+                      "element": {
+                        "kind": "ElementReference",
+                        "name": "policy_skips"
+                      },
+                      "height": 9,
+                      "width": 12,
+                      "x": 12,
+                      "y": 14
+                    }
+                  },
+                  {
+                    "kind": "GridLayoutItem",
+                    "spec": {
+                      "element": {
+                        "kind": "ElementReference",
+                        "name": "batch_reuse"
+                      },
+                      "height": 9,
+                      "width": 24,
+                      "x": 0,
+                      "y": 23
+                    }
+                  }
+                ]
+              }
+            },
+            "title": "链路与业务产出"
+          }
+        },
+        {
+          "kind": "RowsLayoutRow",
+          "spec": {
+            "collapse": false,
+            "hideHeader": false,
+            "layout": {
+              "kind": "GridLayout",
+              "spec": {
+                "items": [
+                  {
+                    "kind": "GridLayoutItem",
+                    "spec": {
+                      "element": {
+                        "kind": "ElementReference",
+                        "name": "stage_rate"
+                      },
+                      "height": 8,
+                      "width": 8,
+                      "x": 0,
+                      "y": 0
+                    }
+                  },
+                  {
+                    "kind": "GridLayoutItem",
+                    "spec": {
+                      "element": {
+                        "kind": "ElementReference",
+                        "name": "stage_p95"
+                      },
+                      "height": 8,
+                      "width": 16,
+                      "x": 8,
+                      "y": 0
+                    }
+                  },
+                  {
+                    "kind": "GridLayoutItem",
+                    "spec": {
+                      "element": {
+                        "kind": "ElementReference",
+                        "name": "queue_wait"
+                      },
+                      "height": 9,
+                      "width": 12,
+                      "x": 0,
+                      "y": 8
+                    }
+                  },
+                  {
+                    "kind": "GridLayoutItem",
+                    "spec": {
+                      "element": {
+                        "kind": "ElementReference",
+                        "name": "query_latency"
+                      },
+                      "height": 9,
+                      "width": 12,
+                      "x": 12,
+                      "y": 8
+                    }
+                  },
+                  {
+                    "kind": "GridLayoutItem",
+                    "spec": {
+                      "element": {
+                        "kind": "ElementReference",
+                        "name": "query_rate"
+                      },
+                      "height": 9,
+                      "width": 12,
+                      "x": 0,
+                      "y": 17
+                    }
+                  },
+                  {
+                    "kind": "GridLayoutItem",
+                    "spec": {
+                      "element": {
+                        "kind": "ElementReference",
+                        "name": "query_rows"
+                      },
+                      "height": 9,
+                      "width": 12,
+                      "x": 12,
+                      "y": 17
+                    }
+                  },
+                  {
+                    "kind": "GridLayoutItem",
+                    "spec": {
+                      "element": {
+                        "kind": "ElementReference",
+                        "name": "lifecycle_quantiles"
+                      },
+                      "height": 9,
+                      "width": 24,
+                      "x": 0,
+                      "y": 26
+                    }
+                  },
+                  {
+                    "kind": "GridLayoutItem",
+                    "spec": {
+                      "element": {
+                        "kind": "ElementReference",
+                        "name": "material_match_latency"
+                      },
+                      "height": 10,
+                      "width": 24,
+                      "x": 0,
+                      "y": 35
+                    }
+                  },
+                  {
+                    "kind": "GridLayoutItem",
+                    "spec": {
+                      "element": {
+                        "kind": "ElementReference",
+                        "name": "webhook_lifecycle_latency"
+                      },
+                      "height": 9,
+                      "width": 24,
+                      "x": 0,
+                      "y": 45
+                    }
+                  }
+                ]
+              }
+            },
+            "title": "阶段性能与排队"
+          }
+        },
+        {
+          "kind": "RowsLayoutRow",
+          "spec": {
+            "collapse": false,
+            "hideHeader": false,
+            "layout": {
+              "kind": "GridLayout",
+              "spec": {
+                "items": [
+                  {
+                    "kind": "GridLayoutItem",
+                    "spec": {
+                      "element": {
+                        "kind": "ElementReference",
+                        "name": "result_distribution"
+                      },
+                      "height": 9,
+                      "width": 12,
+                      "x": 0,
+                      "y": 0
+                    }
+                  },
+                  {
+                    "kind": "GridLayoutItem",
+                    "spec": {
+                      "element": {
+                        "kind": "ElementReference",
+                        "name": "wait_reason"
+                      },
+                      "height": 9,
+                      "width": 12,
+                      "x": 12,
+                      "y": 0
+                    }
+                  },
+                  {
+                    "kind": "GridLayoutItem",
+                    "spec": {
+                      "element": {
+                        "kind": "ElementReference",
+                        "name": "media_queue"
+                      },
+                      "height": 9,
+                      "width": 12,
+                      "x": 0,
+                      "y": 9
+                    }
+                  },
+                  {
+                    "kind": "GridLayoutItem",
+                    "spec": {
+                      "element": {
+                        "kind": "ElementReference",
+                        "name": "recovery"
+                      },
+                      "height": 9,
+                      "width": 12,
+                      "x": 12,
+                      "y": 9
+                    }
+                  },
+                  {
+                    "kind": "GridLayoutItem",
+                    "spec": {
+                      "element": {
+                        "kind": "ElementReference",
+                        "name": "data_quality"
+                      },
+                      "height": 9,
+                      "width": 12,
+                      "x": 0,
+                      "y": 18
+                    }
+                  },
+                  {
+                    "kind": "GridLayoutItem",
+                    "spec": {
+                      "element": {
+                        "kind": "ElementReference",
+                        "name": "lifecycle_missing"
+                      },
+                      "height": 9,
+                      "width": 12,
+                      "x": 12,
+                      "y": 18
+                    }
+                  },
+                  {
+                    "kind": "GridLayoutItem",
+                    "spec": {
+                      "element": {
+                        "kind": "ElementReference",
+                        "name": "timeout_top10"
+                      },
+                      "height": 9,
+                      "width": 24,
+                      "x": 0,
+                      "y": 27
+                    }
+                  }
+                ]
+              }
+            },
+            "title": "稳定性与数据可信度"
+          }
+        },
+        {
+          "kind": "RowsLayoutRow",
+          "spec": {
+            "collapse": false,
+            "hideHeader": false,
+            "layout": {
+              "kind": "GridLayout",
+              "spec": {
+                "items": [
+                  {
+                    "kind": "GridLayoutItem",
+                    "spec": {
+                      "element": {
+                        "kind": "ElementReference",
+                        "name": "media_reuses"
+                      },
+                      "height": 10,
+                      "width": 12,
+                      "x": 0,
+                      "y": 0
+                    }
+                  },
+                  {
+                    "kind": "GridLayoutItem",
+                    "spec": {
+                      "element": {
+                        "kind": "ElementReference",
+                        "name": "media_download_attempts"
+                      },
+                      "height": 10,
+                      "width": 12,
+                      "x": 12,
+                      "y": 0
+                    }
+                  },
+                  {
+                    "kind": "GridLayoutItem",
+                    "spec": {
+                      "element": {
+                        "kind": "ElementReference",
+                        "name": "media_download_latency"
+                      },
+                      "height": 10,
+                      "width": 12,
+                      "x": 0,
+                      "y": 10
+                    }
+                  },
+                  {
+                    "kind": "GridLayoutItem",
+                    "spec": {
+                      "element": {
+                        "kind": "ElementReference",
+                        "name": "media_delegated_results"
+                      },
+                      "height": 10,
+                      "width": 12,
+                      "x": 12,
+                      "y": 10
+                    }
+                  }
+                ]
+              }
+            },
+            "title": "媒体复用与实际下载｜独立统计口径"
+          }
+        },
+        {
+          "kind": "RowsLayoutRow",
+          "spec": {
+            "collapse": false,
+            "hideHeader": false,
+            "layout": {
+              "kind": "GridLayout",
+              "spec": {
+                "items": [
+                  {
+                    "kind": "GridLayoutItem",
+                    "spec": {
+                      "element": {
+                        "kind": "ElementReference",
+                        "name": "inventory_sources_loaded"
+                      },
+                      "height": 9,
+                      "width": 12,
+                      "x": 0,
+                      "y": 0
+                    }
+                  },
+                  {
+                    "kind": "GridLayoutItem",
+                    "spec": {
+                      "element": {
+                        "kind": "ElementReference",
+                        "name": "inventory_message_entries_loaded"
+                      },
+                      "height": 9,
+                      "width": 12,
+                      "x": 12,
+                      "y": 0
+                    }
+                  }
+                ]
+              }
+            },
+            "title": "实例加载清点｜仅协议号，未覆盖 Bot 入口"
+          }
+        }
+      ]
+    }
+  },
+  "links": [],
+  "preload": false,
+  "tags": [
+    "youban",
+    "采集",
+    "性能",
+    "稳定性",
+    "otel"
+  ],
+  "timeSettings": {
+    "autoRefresh": "30s",
+    "autoRefreshIntervals": [],
+    "fiscalYearStartMonth": 0,
+    "from": "now-1h",
+    "hideTimepicker": false,
+    "timezone": "Asia/Shanghai",
+    "to": "now"
+  },
+  "title": "采集全链路运行监控",
+  "variables": [
+    {
+      "kind": "CustomVariable",
+      "spec": {
+        "allValue": ".*",
+        "allowCustomValue": false,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "hide": "dontHide",
+        "includeAll": true,
+        "label": "采集来源",
+        "multi": true,
+        "name": "source",
+        "options": [],
+        "query": "Bot : bot,协议号 : account,未知 : unknown",
+        "skipUrlSync": false
+      }
+    },
+    {
+      "kind": "CustomVariable",
+      "spec": {
+        "allValue": ".*",
+        "allowCustomValue": false,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "hide": "dontHide",
+        "includeAll": true,
+        "label": "采集模式",
+        "multi": true,
+        "name": "mode",
+        "options": [],
+        "query": "实时 : realtime,历史 : history,未知 : unknown",
+        "skipUrlSync": false
+      }
+    },
+    {
+      "kind": "QueryVariable",
+      "spec": {
+        "allValue": ".*",
+        "allowCustomValue": false,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "hide": "dontHide",
+        "includeAll": true,
+        "label": "运行实例",
+        "multi": true,
+        "name": "instance",
+        "options": [],
+        "query": {
+          "datasource": {
+            "name": "victoriametrics"
+          },
+          "group": "prometheus",
+          "kind": "DataQuery",
+          "spec": {
+            "expr": "label_values({__name__=~\"telegram_collector_pipeline_operations_total|xiaohuiji_collect_pipeline_operations_total\"}, instance)",
+            "refId": "StandardVariableQuery"
+          },
+          "version": ""
+        },
+        "refresh": "onTimeRangeChanged",
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": "disabled"
+      }
+    }
+  ]
+}

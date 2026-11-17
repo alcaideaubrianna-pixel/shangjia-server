@@ -188,6 +188,7 @@ func (s *sLazySheepTGGo) startPollingBot(ctx context.Context, botKey string) err
 }
 
 func (s *sLazySheepTGGo) HandleWebhook(ctx context.Context, botKey string, payload []byte, secretToken string) error {
+	receivedAt := time.Now()
 	state, err := s.GetState(ctx)
 	if err != nil {
 		return err
@@ -203,7 +204,7 @@ func (s *sLazySheepTGGo) HandleWebhook(ctx context.Context, botKey string, paylo
 	if err := json.Unmarshal(payload, &update); err != nil {
 		return err
 	}
-	return queue.Push(lsysin.WebhookUpdateTopic, &lsysin.WebhookUpdateTask{BotKey: botKey, Payload: payload})
+	return queue.Push(lsysin.WebhookUpdateTopic, &lsysin.WebhookUpdateTask{BotKey: botKey, Payload: payload, ReceivedAtUnixNano: receivedAt.UnixNano()})
 }
 
 func (s *sLazySheepTGGo) ProcessWebhook(ctx context.Context, botKey string, payload []byte) error {

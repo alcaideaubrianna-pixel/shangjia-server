@@ -383,6 +383,8 @@ func (s *sCollector) processDeliveryWithEvent(ctx context.Context, deliveryID in
 	}
 	recordCollectorStage(ctx, collectorStageDeliveryEventRead, observation.meta, collectorResultOK, time.Since(eventReadStarted), nil)
 	parseStarted := time.Now()
+	ctx = collectobserve.RestorePayloadClock(ctx, []byte(event.RawUpdate.String()), time.Now())
+	observation.meta.ReceivedAt = collectobserve.From(ctx).ReceivedAt
 	delivery, err := collectorDeliveryFromEvent(&event, []byte(event.RawUpdate.String()))
 	if err == nil {
 		observation.meta.Mode = collectorModeFromRaw(event.SourceType, []byte(event.RawUpdate.String()))

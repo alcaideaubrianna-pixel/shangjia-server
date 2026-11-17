@@ -25,6 +25,11 @@ func TestCollectBusinessEventContextKeepsBranchIdentityIsolated(t *testing.T) {
 	source := gdb.Record{
 		"account_id": gvar.New(615), "bot_id": gvar.New(109), "source_type": gvar.New("bot"),
 	}
+	observation, err := collectobserve.StampPayload(ingress, []byte(`{}`), receivedAt.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	event["media_json"] = gvar.New(string(observation))
 	raw := collectBusinessEventContext(ingress, event, nil, 0)
 	business := collectBusinessEventContext(raw, event, source, 0)
 	branchA := collectBusinessEventContext(business, event, nil, 338)

@@ -493,6 +493,7 @@ func (s *sSysPublish) collectMediaCacheEvent(ctx context.Context, payload collec
 // account/source slot is acquired. It returns true only when at least one
 // media item still needs a Telegram download or a later transformation.
 func (s *sSysPublish) collectMediaNeedsOwner(ctx context.Context, event gdb.Record) (bool, error) {
+	ctx = bindCollectEventClock(ctx, event)
 	rows, err := s.collectEventMediaRows(ctx, event["id"].Int64())
 	if err != nil {
 		return true, err
@@ -605,6 +606,7 @@ func (s *sSysPublish) reuseCollectMediaFromMessageSibling(ctx context.Context, r
 	if _, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).WherePri(row.Id).Data(data).Update(); err != nil {
 		return false, gerror.Wrap(err, "写入同消息媒体复用结果失败")
 	}
+	collectMediaMetrics.reuse(ctx, row.SourceType, "message_sibling")
 	return true, nil
 }
 
@@ -645,6 +647,7 @@ func collectLocalElapsedSince(value *gtime.Time) time.Duration {
 }
 
 func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, event gdb.Record) (bool, error) {
+	ctx = bindCollectEventClock(ctx, event)
 	stageStartedAt := time.Now()
 	rows, err := s.collectEventMediaRows(ctx, event["id"].Int64())
 	if err != nil {
@@ -771,7 +774,8 @@ func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, even
 			var cached *collectDownloadedMedia
 			var err error
 			if sourceType == sysin.CollectSourceTypeBot {
-				cached, err = s.downloadBotTelegramMedia(itemCtx, event["tenant_id"].Int64(), event["bot_id"].Int64(), items[index])
+				downloadCtx := collectMediaRetryObservationContext(itemCtx, row.DownloadAttempts > 0)
+				cached, err = s.downloadBotTelegramMedia(downloadCtx, event["tenant_id"].Int64(), event["bot_id"].Int64(), items[index])
 			} else {
 				reportCollectProgress(itemCtx, "account_download", "等待账号媒体任务完成下载和转存")
 				cached, err = s.downloadTelegramMediaWithRefresh(itemCtx, event["tenant_id"].Int64(), event["account_id"].Int64(), event["tg_account_id"].Int64(), row.Id, items[index], collectMediaRequiresStorageRefresh(row.ErrorMessage))
@@ -909,7 +913,12 @@ func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, even
 	return changed, nil
 }
 
-func (s *sSysPublish) reuseCollectMediaCache(ctx context.Context, row *collectEventMediaRow) (bool, error) {
+func (s *sSysPublish) reuseCollectMediaCache(ctx context.Context, row *collectEventMediaRow) (reused bool, err error) {
+	defer func() {
+		if reused && err == nil && row != nil {
+			collectMediaMetrics.reuse(ctx, row.SourceType, "media_row")
+		}
+	}()
 	if row == nil {
 		return false, nil
 	}
@@ -1172,7 +1181,7 @@ func (s *sSysPublish) downloadTelegramMedia(ctx context.Context, tenantId int64,
 	return s.downloadTelegramMediaWithRefresh(ctx, tenantId, accountId, tgAccountId, mediaID, item, false)
 }
 
-func (s *sSysPublish) downloadTelegramMediaWithRefresh(ctx context.Context, tenantId int64, accountId int64, tgAccountId int64, mediaID int64, item collectMediaItem, forceRefresh bool) (*collectDownloadedMedia, error) {
+func (s *sSysPublish) downloadTelegramMediaWithRefresh(ctx context.Context, tenantId int64, accountId int64, tgAccountId int64, mediaID int64, item collectMediaItem, forceRefresh bool) (downloaded *collectDownloadedMedia, delegatedErr error) {
 	if tgAccountId <= 0 {
 		return nil, gerror.New("账号采集媒体缺少TG账号")
 	}
@@ -1186,6 +1195,7 @@ func (s *sSysPublish) downloadTelegramMediaWithRefresh(ctx context.Context, tena
 			return nil, cacheErr
 		}
 		if ok && cached != nil {
+			collectMediaMetrics.reuse(ctx, "account", "identity")
 			item.FileUrl = telegramCollectorMediaCacheURL(cached)
 			item.StoragePath = cached.StoragePath
 			item.SourceSize = cached.Size
@@ -1211,6 +1221,7 @@ func (s *sSysPublish) downloadTelegramMediaWithRefresh(ctx context.Context, tena
 		if cached, ok, cacheErr := lookupTelegramCollectorMediaIdentityCache(ctx, item.Type, identityKey, 0, item.SourceDCId, item.SourceThumbSize); cacheErr != nil {
 			return nil, cacheErr
 		} else if ok {
+			collectMediaMetrics.reuse(ctx, "account", "identity")
 			item.FileUrl = telegramCollectorMediaCacheURL(cached)
 			item.StoragePath = cached.StoragePath
 			item.SourceSize = cached.Size
@@ -1233,6 +1244,8 @@ func (s *sSysPublish) downloadTelegramMediaWithRefresh(ctx context.Context, tena
 	// SDK task result here; returning an async-retry error after Submit leaves
 	// every normal media item permanently stuck in media_pending.
 	task, err := collectorservice.AccountTasks().SubmitAndWait(ctx, submit, time.Second)
+	// Observe the delegated operation separately from real network attempts.
+	defer func() { collectMediaMetrics.delegate(ctx, delegatedErr) }()
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return nil, newCollectMediaFairnessRetryError("账号媒体下载任务等待执行", 3*time.Second)
@@ -1347,6 +1360,7 @@ func (s *sSysPublish) downloadBotTelegramMediaWithToken(ctx context.Context, bot
 	if cached, ok, cacheErr := lookupTelegramCollectorMediaIdentityCache(ctx, item.Type, identityKey, 0, 0, ""); cacheErr != nil {
 		return nil, cacheErr
 	} else if ok {
+		collectMediaMetrics.reuse(ctx, "bot", "identity")
 		item.FileUrl = telegramCollectorMediaCacheURL(cached)
 		item.StoragePath = cached.StoragePath
 		item.SourceSize = cached.Size
@@ -1368,11 +1382,15 @@ func (s *sSysPublish) downloadBotTelegramMediaWithToken(ctx context.Context, bot
 	client.Timeout = 2 * time.Minute
 	defer client.CloseIdleConnections()
 	reportCollectProgress(ctx, "download", "准备媒体缓存或下载文件")
+	networkAttempts := 0
+	retryAttempt, _ := ctx.Value(collectMediaRetryObservationKey{}).(bool)
 	path, err := cachedRemoteMediaFileWithMetaSourceAndDownloader(ctx, cacheKey, remoteSource, cacheSource, collectMediaExt(item.Type, ""), func(downloadCtx context.Context, source string, filePath string) error {
 		downloadStartedAt := time.Now()
 		downloadErr := telegrammedia.DownloadFile(downloadCtx, client, source, filePath)
 		duration := time.Since(downloadStartedAt)
 		observeTelegramBotFileDownload(downloadCtx, endpoint, downloadErr, duration)
+		collectMediaMetrics.download(downloadCtx, retryAttempt || networkAttempts > 0, downloadErr, duration)
+		networkAttempts++
 		result := "success"
 		if downloadErr != nil {
 			result = "error"
@@ -1393,6 +1411,9 @@ func (s *sSysPublish) downloadBotTelegramMediaWithToken(ctx context.Context, bot
 	if strings.TrimSpace(path) == "" {
 		return nil, gerror.New("Bot媒体文件下载完成但缓存路径为空")
 	}
+	if networkAttempts == 0 {
+		collectMediaMetrics.reuse(ctx, "bot", "remote_file")
+	}
 	reportCollectProgress(ctx, "fingerprint", "计算文件MD5并检查可复用存储")
 	md5Value, mediaSize, mimeType, err := calculateTelegramMediaFingerprint(path, item.Type, item.SourceMimeType)
 	if err != nil {
@@ -1401,6 +1422,7 @@ func (s *sSysPublish) downloadBotTelegramMediaWithToken(ctx context.Context, bot
 	if cached, ok, cacheErr := lookupTelegramCollectorMediaCache(ctx, item.Type, md5Value, mediaSize, mimeType); cacheErr != nil {
 		return nil, cacheErr
 	} else if ok {
+		collectMediaMetrics.reuse(ctx, "bot", "fingerprint_storage")
 		item.FileUrl = telegramCollectorMediaCacheURL(cached)
 		item.StoragePath = cached.StoragePath
 		item.FileMd5 = md5Value

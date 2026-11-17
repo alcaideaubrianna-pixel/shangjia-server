@@ -17,6 +17,7 @@ import (
 
 	"hotgo/addons/youban_tg_bot_gateway/service"
 	"hotgo/internal/library/cache"
+	"hotgo/internal/library/collectobserve"
 	"hotgo/utility/scanconfig"
 )
 
@@ -181,7 +182,13 @@ func (s *sGateway) enqueueUpdateBody(ctx context.Context, key string, body []byt
 		return fmt.Errorf("Telegram更新内容为空")
 	}
 	enqueuedAt := time.Now()
-	payload, err := json.Marshal(gatewayUpdatePayload{Key: key, Body: body, EnqueuedAt: enqueuedAt.UnixNano()})
+	// Keep the existing wire fields and Unique options; webhook entry binds
+	// its local receive instant before config/parse/asynchronous submission.
+	clockAt := collectobserve.From(ctx).ReceivedAt
+	if clockAt.IsZero() || clockAt.After(enqueuedAt) || clockAt.UnixNano() <= 0 {
+		clockAt = enqueuedAt
+	}
+	payload, err := json.Marshal(gatewayUpdatePayload{Key: key, Body: body, EnqueuedAt: clockAt.UnixNano()})
 	if err != nil {
 		return fmt.Errorf("序列化Telegram队列任务失败: %w", err)
 	}
@@ -277,6 +284,7 @@ func (s *sGateway) handleUpdateTask(ctx context.Context, task *asynq.Task) error
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 		return fmt.Errorf("解析Telegram队列任务失败: %w", err)
 	}
+	ctx = gatewayUpdateClock(ctx, payload.EnqueuedAt, startedAt)
 	var update models.Update
 	if err := json.Unmarshal(payload.Body, &update); err != nil {
 		return fmt.Errorf("解析Telegram更新失败: %w", err)

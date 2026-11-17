@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"encoding/json"
+	"hotgo/internal/library/collectobserve"
 	"strconv"
 	"strings"
 	"sync"
@@ -520,6 +521,7 @@ func (s *sGateway) ensure(ctx context.Context, key, token, mode string, conf *se
 
 func (s *sGateway) Webhook(ctx context.Context, key string, body []byte, secret string) error {
 	startedAt := time.Now()
+	ctx = collectobserve.With(ctx, collectobserve.Metadata{ReceivedAt: startedAt, TimeBasis: "webhook_received", Mode: "realtime"})
 	webhookResult := "success"
 	defer func() {
 		observeGatewayWebhook(ctx, webhookResult, time.Since(startedAt))

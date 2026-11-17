@@ -3,6 +3,8 @@ package queues
 import (
 	"context"
 	"encoding/json"
+	"hotgo/internal/library/collectobserve"
+	"time"
 
 	"hotgo/addons/lazysheep_tggo/model/input/sysin"
 	"hotgo/addons/lazysheep_tggo/service"
@@ -24,5 +26,6 @@ func (q *qWebhookUpdate) Handle(ctx context.Context, mqMsg queue.MqMsg) error {
 	if err := json.Unmarshal(mqMsg.Body, &task); err != nil {
 		return err
 	}
+	ctx = collectobserve.RestoreIngressClock(ctx, task.ReceivedAtUnixNano, "webhook_received", time.Now())
 	return service.SysLazysheepTggo().ProcessWebhook(ctx, task.BotKey, task.Payload)
 }

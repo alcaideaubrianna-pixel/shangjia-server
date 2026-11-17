@@ -205,7 +205,7 @@ func newCollectPipelineInstruments(meter metric.Meter) collectPipelineInstrument
 		metric.WithDescription("Top-level committed profile persistence outcomes; reused includes idempotent retries"))
 	lifecycleDuration, _ := meter.Float64Histogram("xiaohuiji.collect.lifecycle.duration_seconds",
 		metric.WithUnit("s"), metric.WithDescription("Trusted local ingress to top-level profile creation commit; excludes reuse"),
-		metric.WithExplicitBucketBoundaries(0.1, 0.5, 1, 2, 5, 10, 30, 60, 120, 300, 600, 1200, 3600))
+		metric.WithExplicitBucketBoundaries(0.1, 0.5, 1, 2, 5, 10, 30, 60, 120, 300, 600, 1200, 3600, 7200, 21600, 43200, 86400, 259200, 604800))
 	lifecycleMissing, _ := meter.Int64Counter("xiaohuiji.collect.lifecycle.missing",
 		metric.WithDescription("Missing trusted creation lifecycle samples or unconfirmed outer transaction outcomes"))
 	return collectPipelineInstruments{
@@ -235,6 +235,7 @@ func (instruments collectPipelineInstruments) recordProfilePersistence(ctx conte
 		attribute.String("source_type", collectobserve.SourceType(meta.SourceType)),
 		attribute.String("collection_mode", collectobserve.Mode(meta.Mode)),
 	}
+	lifecycleAttrs := append(attrs, attribute.String("time_basis", collectobserve.TimeBasis(meta.TimeBasis)))
 	missingReason := ""
 	if !topLevel {
 		missingReason = "transaction_unconfirmed"
@@ -254,13 +255,13 @@ func (instruments collectPipelineInstruments) recordProfilePersistence(ctx conte
 			missingReason = "future_received_at"
 		default:
 			if instruments.lifecycleDuration != nil {
-				instruments.lifecycleDuration.Record(ctx, finishedAt.Sub(meta.ReceivedAt).Seconds(), metric.WithAttributes(attrs...))
+				instruments.lifecycleDuration.Record(ctx, finishedAt.Sub(meta.ReceivedAt).Seconds(), metric.WithAttributes(lifecycleAttrs...))
 			}
 			return collectPipelinePersisted
 		}
 	}
 	if instruments.lifecycleMissing != nil {
-		instruments.lifecycleMissing.Add(ctx, 1, metric.WithAttributes(append(attrs, attribute.String("reason", missingReason))...))
+		instruments.lifecycleMissing.Add(ctx, 1, metric.WithAttributes(append(lifecycleAttrs, attribute.String("reason", missingReason))...))
 	}
 	if !topLevel {
 		return collectPipelineUnconfirmed
@@ -271,6 +272,7 @@ func (instruments collectPipelineInstruments) recordProfilePersistence(ctx conte
 func observeCollectProfilePersistence(ctx context.Context, profileID int64, created, topLevel bool, commitErr error) {
 	finishedAt := time.Now()
 	result := collectPipelineMetrics.recordProfilePersistence(ctx, profileID, created, topLevel, commitErr, finishedAt)
+	logCollectProfileLifecycle(ctx, profileID, created, topLevel, commitErr, finishedAt)
 	if commitErr == nil && result == collectPipelineUnconfirmed {
 		logCollectPipelineObservation(ctx, collectPipelineProfilePersist, result, finishedAt, finishedAt, nil,
 			attribute.Int64("profile.id", profileID))
@@ -371,6 +373,13 @@ func logCollectPipelineObservation(ctx context.Context, stage collectPipelineSta
 		"ruleId": meta.RuleID, "profileId": meta.ProfileID, "traceId": gtrace.GetTraceID(ctx),
 		"errorType": collectPipelineErrorType(err),
 		"errorKind": string(outcome.errorKind), "waitReason": string(outcome.waitReason),
+	}
+	// Retain the age of still-pending work for bounded log TOP queries. This is
+	// elapsed local-ingress age, not the duration of this one stage execution.
+	if !meta.ReceivedAt.IsZero() && !meta.ReceivedAt.After(finishedAt) {
+		fields["ingressAgeSeconds"] = finishedAt.Sub(meta.ReceivedAt).Seconds()
+		fields["receivedAtUnixMs"] = meta.ReceivedAt.UnixMilli()
+		fields["ageTimeBasis"] = collectobserve.TimeBasis(meta.TimeBasis)
 	}
 	for _, attr := range attrs {
 		// Only bounded diagnostic facts are copied, never text/error messages,

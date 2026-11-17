@@ -1,5 +1,8 @@
 # Collector 运行观测与报表
 
+入库端到端均值、匹配耗时、具体来源／资料 TOP10 的统计口径与查询见
+[采集入库耗时与积压排查](collector-lifecycle-dashboard.md)。
+
 Collector 观测覆盖接收、原始事件持久化、事件入队、事件消费与交接、交付消费、业务 handler 和恢复扫描。发布侧观测另行覆盖采集提交、事件处理、资料分发调用、TG Job 准备及发布队列投递。两者分别使用 `hotgo/addons/telegram_collector`、`hotgo/addons/youban_publish` scope，复用通用 OpenTelemetry 导出配置。观测本身不新增数据库/Redis 查询或后台扫描。
 
 ## 配置与运行角色

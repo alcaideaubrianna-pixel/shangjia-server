@@ -400,6 +400,8 @@ func (s *sCollector) processEvent(ctx context.Context, eventID int64) (err error
 	}
 	parseStarted := time.Now()
 	raw := []byte(row.RawUpdate.String())
+	ctx = collectobserve.RestorePayloadClock(ctx, raw, time.Now())
+	observation.meta.ReceivedAt = collectobserve.From(ctx).ReceivedAt
 	delivery, err := collectorDeliveryFromEvent(&row, raw)
 	if err == nil {
 		observation.meta.Mode = collectorModeFromRaw(row.SourceType, raw)

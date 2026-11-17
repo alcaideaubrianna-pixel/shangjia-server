@@ -48,6 +48,7 @@ type carrierMetadata struct {
 	SourceType         string `json:"sourceType"`
 	Mode               string `json:"mode"`
 	ReceivedAtUnixNano int64  `json:"receivedAtUnixNano,omitempty"`
+	TimeBasis          string `json:"timeBasis,omitempty"`
 }
 
 type carrierWire struct {
@@ -95,7 +96,7 @@ func (carrier Carrier) MarshalJSON() ([]byte, error) {
 			BotID: meta.BotID, TgAccountID: meta.TgAccountID, EventID: meta.EventID,
 			UpstreamEventID: meta.UpstreamEventID, DeliveryID: meta.DeliveryID,
 			RuleID: meta.RuleID, ProfileID: meta.ProfileID, ChatID: meta.ChatID,
-			SourceType: SourceType(meta.SourceType), Mode: Mode(meta.Mode),
+			SourceType: SourceType(meta.SourceType), Mode: Mode(meta.Mode), TimeBasis: TimeBasis(meta.TimeBasis),
 		},
 	}
 	if !meta.ReceivedAt.IsZero() && meta.ReceivedAt.UnixNano() > 0 &&
@@ -117,7 +118,7 @@ func (carrier *Carrier) UnmarshalJSON(payload []byte) error {
 		BotID: meta.BotID, TgAccountID: meta.TgAccountID, EventID: meta.EventID,
 		UpstreamEventID: meta.UpstreamEventID, DeliveryID: meta.DeliveryID,
 		RuleID: meta.RuleID, ProfileID: meta.ProfileID, ChatID: meta.ChatID,
-		SourceType: SourceType(meta.SourceType), Mode: Mode(meta.Mode),
+		SourceType: SourceType(meta.SourceType), Mode: Mode(meta.Mode), TimeBasis: TimeBasis(meta.TimeBasis),
 	}
 	if meta.ReceivedAtUnixNano > 0 && meta.ReceivedAtUnixNano <= wire.EnqueuedAtUnixNano &&
 		(meta.EventID > 0 || meta.UpstreamEventID > 0) {

@@ -31,6 +31,7 @@ import (
 	collectorservice "hotgo/addons/telegram_collector/service"
 	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
 	"hotgo/internal/library/cache"
+	"hotgo/internal/library/collectobserve"
 	"hotgo/internal/library/microbatch"
 )
 
@@ -144,6 +145,8 @@ func (s *sCollector) IngestBotUpdate(ctx context.Context, bot collectorservice.B
 		event.ChatID = message.Chat.ID
 		event.MessageID = int64(message.ID)
 	}
+	// Stamp after updateEventID: observation must not change business identity.
+	event.RawUpdate, _ = collectobserve.StampPayload(ctx, event.RawUpdate, time.Now())
 	if !event.ValidateBoundary() {
 		return gerror.New("Telegram采集事件归属不完整")
 	}
@@ -230,6 +233,7 @@ func (s *sCollector) IngestAccountMessage(ctx context.Context, message *sysin.Ac
 	if err != nil {
 		return gerror.Wrap(err, "序列化Telegram账号采集事件失败")
 	}
+	raw, _ = collectobserve.StampPayload(ctx, raw, time.Now())
 	event := sysin.RawUpdateEvent{
 		EventID: message.SourceUniqueKey, TenantID: message.TenantID, SourceID: message.SourceID,
 		SourceType: sysin.SourceTypeAccount, AccountID: message.TgAccountID,

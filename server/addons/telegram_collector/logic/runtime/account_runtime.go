@@ -16,6 +16,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
+	collectorsys "hotgo/addons/telegram_collector/logic/sys"
 	"hotgo/addons/telegram_collector/model/input/sysin"
 	collectorservice "hotgo/addons/telegram_collector/service"
 )
@@ -257,9 +258,11 @@ launch:
 func (r *accountRuntime) sync(ctx context.Context) {
 	provider := collectorservice.AccountRuntimeProviderInstance()
 	if provider == nil {
+		collectorsys.ObserveAccountInventory(ctx, nil, false)
 		return
 	}
 	bindings, err := provider.ListAccountRuntimes(ctx)
+	collectorsys.ObserveAccountInventory(ctx, bindings, err == nil)
 	if err != nil {
 		g.Log().Warningf(ctx, "读取Telegram账号运行配置失败：%+v", err)
 		return

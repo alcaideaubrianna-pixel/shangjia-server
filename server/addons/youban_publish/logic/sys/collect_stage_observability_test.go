@@ -227,6 +227,46 @@ func TestCollectStageKnownStagesDoNotCollapseToUnknown(t *testing.T) {
 	}
 }
 
+func TestCollectLifecycleHistogramSeparatesClockBoundaries(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
+	instruments := newCollectPipelineInstruments(provider.Meter("clock-boundary"))
+	now := time.Now()
+	for _, basis := range []string{"collector_ingress", "gateway_ingress", "webhook_received"} {
+		ctx := collectobserve.With(context.Background(), collectobserve.Metadata{
+			ReceivedAt: now.Add(-time.Minute), TimeBasis: basis, Mode: "realtime", SourceType: "bot",
+		})
+		instruments.recordProfilePersistence(ctx, 42, true, true, nil, now)
+		fields := collectProfileLifecycleFields(ctx, 42, true, true, nil, now)
+		if fields["timeBasis"] != basis {
+			t.Fatalf("log lost boundary %s: %+v", basis, fields)
+		}
+	}
+	var data metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &data); err != nil {
+		t.Fatal(err)
+	}
+	seen := make(map[string]bool)
+	for _, scope := range data.ScopeMetrics {
+		for _, measurement := range scope.Metrics {
+			if measurement.Name != "xiaohuiji.collect.lifecycle.duration_seconds" {
+				continue
+			}
+			for _, point := range measurement.Data.(metricdata.Histogram[float64]).DataPoints {
+				basis, _ := point.Attributes.Value("time_basis")
+				seen[basis.AsString()] = true
+				if point.Count != 1 || point.Sum != 60 || point.Attributes.Len() != 4 {
+					t.Fatalf("mixed lifecycle boundary samples: %+v", point)
+				}
+			}
+		}
+	}
+	if len(seen) != 3 {
+		t.Fatalf("missing separate clock boundaries: %v", seen)
+	}
+}
+
 func TestCollectProfilePersistenceRequiresDurableCommitAndTrustedIngress(t *testing.T) {
 	finishedAt := time.Unix(1794960000, 0)
 	for _, test := range []struct {
@@ -241,6 +281,7 @@ func TestCollectProfilePersistenceRequiresDurableCommitAndTrustedIngress(t *test
 		wantSeconds      float64
 	}{
 		{"new_profile", true, true, 831873, nil, finishedAt.Add(-2 * time.Second), collectPipelinePersisted, "created", "", 2},
+		{"historical_backlog_two_days", true, true, 831873, nil, finishedAt.Add(-48 * time.Hour), collectPipelinePersisted, "created", "", 172800},
 		{"existing_profile", false, true, 831873, nil, finishedAt.Add(-time.Hour), collectPipelinePersisted, "reused", "", 0},
 		{"legacy_sent_early_return_is_reused", false, true, 831873, nil, finishedAt.Add(-time.Hour), collectPipelinePersisted, "reused", "", 0},
 		{"outer_transaction_not_committed", true, false, 831873, nil, finishedAt.Add(-time.Second), collectPipelineUnconfirmed, "", "transaction_unconfirmed", 0},
@@ -287,7 +328,8 @@ func TestCollectProfilePersistenceRequiresDurableCommitAndTrustedIngress(t *test
 						for _, point := range sum.DataPoints {
 							missing += point.Value
 							reason, _ := point.Attributes.Value("reason")
-							if reason.AsString() != test.wantMissing || point.Attributes.Len() != 4 {
+							basis, _ := point.Attributes.Value("time_basis")
+							if reason.AsString() != test.wantMissing || point.Attributes.Len() != 5 || basis.AsString() != "collector_ingress" {
 								t.Fatalf("wrong missing reason or unbounded dimensions: %v", point.Attributes)
 							}
 						}
@@ -296,7 +338,8 @@ func TestCollectProfilePersistenceRequiresDurableCommitAndTrustedIngress(t *test
 						for _, point := range histogram.DataPoints {
 							lifecycleCount += point.Count
 							lifecycleSeconds += point.Sum
-							if point.Attributes.Len() != 3 {
+							basis, _ := point.Attributes.Value("time_basis")
+							if point.Attributes.Len() != 4 || basis.AsString() != "collector_ingress" {
 								t.Fatalf("unbounded lifecycle dimensions: %v", point.Attributes)
 							}
 						}

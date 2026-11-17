@@ -312,10 +312,10 @@ func (s *sSysPublish) CollectEventClear(ctx context.Context, in *sysin.CollectEv
 	return gerror.Wrap(err, "清空采集事件失败")
 }
 
-// Only enrich from already loaded identities. Ingress Mode/ReceivedAt remain
-// owned by the task context; Telegram dates and naive DB timestamps are not epochs.
+// Bind identity and local ingress observation from the current loaded event.
+// Telegram dates and naive DB timestamps are never lifecycle epochs.
 func collectBusinessEventContext(ctx context.Context, event, source gdb.Record, ruleID int64) context.Context {
-	ctx = bindCollectEventObservation(ctx, event)
+	ctx = bindCollectEventClock(ctx, event)
 	meta := collectobserve.Metadata{RuleID: ruleID}
 	if !source.IsEmpty() {
 		if source["account_id"].Int64() > 0 {
