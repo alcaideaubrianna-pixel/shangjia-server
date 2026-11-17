@@ -130,13 +130,19 @@ func executeHistoryEventMutation(ctx context.Context, kind historyEventMutationK
 			values = append(values, "(CAST(? AS bigint),CAST(? AS text))")
 			args = append(args, row.ID, row.Owner)
 		}
+		lockClause := " FOR UPDATE OF e SKIP LOCKED"
+		if len(rows) == 1 && !historyEventBatchEnabled(ctx) {
+			// A live task must not ACK merely because an unrelated transaction
+			// temporarily holds its row; preserve the original UPDATE wait.
+			lockClause = " FOR UPDATE OF e"
+		}
 		query = fmt.Sprintf(`WITH input(event_id,owner) AS (VALUES %s), locked AS (
  SELECT e.%s FROM %s e JOIN input i ON e.%s=i.event_id
- WHERE e.%s IN ('%s','%s') ORDER BY e.%s FOR UPDATE OF e SKIP LOCKED)
+ WHERE e.%s IN ('%s','%s') ORDER BY e.%s%s)
  UPDATE %s e SET %s='%s', %s=i.owner, %s=%s+INTERVAL '%d seconds',
  %s=e.%s+1, %s=%s FROM input i, locked l
  WHERE e.%s=i.event_id AND e.%s=l.%s RETURNING e.*`,
-			strings.Join(values, ","), c.Id, table, c.Id, c.Status, sysin.EventStatusReceived, sysin.EventStatusFailedRetry, c.Id,
+			strings.Join(values, ","), c.Id, table, c.Id, c.Status, sysin.EventStatusReceived, sysin.EventStatusFailedRetry, c.Id, lockClause,
 			table, c.Status, sysin.EventStatusProcessing, c.LeaseOwner, c.LeaseUntil, now, int64(eventLeaseDuration/time.Second), c.AttemptCount, c.AttemptCount, c.UpdatedAt, now, c.Id, c.Id, c.Id)
 	case historyEventReady:
 		for _, row := range rows {
@@ -162,6 +168,10 @@ func executeHistoryEventMutation(ctx context.Context, kind historyEventMutationK
 			return nil, gerror.Wrap(err, "解析历史采集批次结果失败")
 		}
 	}
-	g.Log().Info(ctx, "历史采集批次写入", g.Map{"event": "collector.history.batch", "operation": kind, "requested": len(rows), "affected": len(records), "durationMs": time.Since(started).Milliseconds()})
+	logEvent := "collector.event.write"
+	if eventQueueIsHistory(collectorQueueName(ctx)) {
+		logEvent = "collector.history.batch"
+	}
+	g.Log().Info(ctx, "采集事件写入", g.Map{"event": logEvent, "queue": collectorQueueName(ctx), "operation": kind, "requested": len(rows), "affected": len(records), "durationMs": time.Since(started).Milliseconds()})
 	return records, nil
 }

@@ -48,13 +48,13 @@ func (s *sCollector) StartRuntime(ctx context.Context) {
 		return
 	}
 	runtimeCtx := s.ensureRuntimeContext(ctx)
-	server := asynq.NewServer(collectorRedisOption(runtimeCtx), asynq.Config{
-		Concurrency: collectorConcurrency(ctx),
-		Queues: map[string]int{
-			consts.QueueCollectUrgentLive: 8,
-			consts.QueueCollectRealtime:   4,
-		},
-	})
+	total := collectorConcurrency(runtimeCtx)
+	realtimeConfigs := collectorRealtimeServerConfigs(total, collectorBotRealtimeBudget(runtimeCtx))
+	server := asynq.NewServer(collectorRedisOption(runtimeCtx), realtimeConfigs[0])
+	var botServer *asynq.Server
+	if len(realtimeConfigs) > 1 {
+		botServer = asynq.NewServer(collectorRedisOption(runtimeCtx), realtimeConfigs[1])
+	}
 	if s.queueClient == nil {
 		s.queueClient = asynq.NewClient(collectorRedisOption(runtimeCtx))
 	}
@@ -64,12 +64,16 @@ func (s *sCollector) StartRuntime(ctx context.Context) {
 	})
 	s.queueHistoryServer = historyServer
 	s.queueServer = server
+	s.queueBotServer = botServer
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(eventTaskType, s.handleEventTask)
 	g.Log().Info(runtimeCtx, "启动Telegram Collector Worker", g.Map{
 		"log_type":                   "telegram_collector",
 		"event":                      "collector_worker_started",
-		"concurrency":                collectorConcurrency(runtimeCtx),
+		"concurrency":                total,
+		"accountRealtimeConcurrency": realtimeConfigs[0].Concurrency,
+		"botRealtimeConcurrency":     total - realtimeConfigs[0].Concurrency,
+		"realtimeCapacityShared":     len(realtimeConfigs) == 1,
 		"historyConcurrency":         collectorEventHistoryConcurrency(runtimeCtx),
 		"botRealtimeQueue":           consts.QueueCollectUrgentLive,
 		"legacyBacklogQueue":         consts.QueueCollectUrgent,
@@ -81,8 +85,13 @@ func (s *sCollector) StartRuntime(ctx context.Context) {
 		"eventHandoffTimeoutSeconds": g.Cfg().MustGet(runtimeCtx, eventHandoffTimeoutConfig, 10).Int(),
 	})
 	// Signal handling belongs to the application; StopRuntime owns Shutdown.
-	if err := server.Start(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
-		g.Log().Warningf(runtimeCtx, "启动Telegram采集Worker失败：%+v", err)
+	for _, realtimeServer := range []*asynq.Server{server, botServer} {
+		if realtimeServer == nil {
+			continue
+		}
+		if err := realtimeServer.Start(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
+			g.Log().Warningf(runtimeCtx, "启动Telegram实时采集Worker失败：%+v", err)
+		}
 	}
 	if err := historyServer.Start(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
 		g.Log().Warningf(runtimeCtx, "启动历史采集Worker失败：%+v", err)
@@ -97,6 +106,8 @@ func (s *sCollector) StartRuntime(ctx context.Context) {
 
 func (s *sCollector) StopRuntime() {
 	s.queueMu.Lock()
+	botServer := s.queueBotServer
+	s.queueBotServer = nil
 	eventHistoryServer := s.queueHistoryServer
 	s.queueHistoryServer = nil
 	historyServer := s.deliveryHistoryServer
@@ -109,6 +120,9 @@ func (s *sCollector) StopRuntime() {
 	}
 	if server != nil {
 		server.Shutdown()
+	}
+	if botServer != nil {
+		botServer.Shutdown()
 	}
 	if eventHistoryServer != nil {
 		eventHistoryServer.Shutdown()
@@ -139,6 +153,40 @@ func (s *sCollector) StopRuntime() {
 	}
 	if deliveryBatch != nil {
 		deliveryBatch.Close()
+	}
+}
+
+// Zero/invalid Bot budget selects the default. ENV is read here because this
+// change intentionally does not alter the shared bootstrap ENV mapping.
+func collectorBotRealtimeBudget(ctx context.Context) int {
+	if raw := strings.TrimSpace(os.Getenv("YOUBAN_COLLECTOR_BOT_REALTIME_CONCURRENCY")); raw != "" {
+		if value, err := strconv.Atoi(raw); err == nil {
+			return value
+		}
+	}
+	return g.Cfg().MustGet(ctx, "telegramCollector.worker.botRealtimeConcurrency", 0).Int()
+}
+
+// Account is first, Bot second. A single total slot cannot be reserved twice:
+// preserve weighted consumption of both realtime queues in that case.
+func collectorRealtimeServerConfigs(total, botBudget int) []asynq.Config {
+	if total < 1 {
+		total = 1
+	}
+	if total == 1 {
+		return []asynq.Config{{Concurrency: 1, Queues: map[string]int{
+			consts.QueueCollectUrgentLive: 8, consts.QueueCollectRealtime: 4,
+		}}}
+	}
+	if botBudget <= 0 {
+		botBudget = total - total/3
+	}
+	if botBudget >= total {
+		botBudget = total - 1
+	}
+	return []asynq.Config{
+		{Concurrency: total - botBudget, Queues: map[string]int{consts.QueueCollectRealtime: 1}},
+		{Concurrency: botBudget, Queues: map[string]int{consts.QueueCollectUrgentLive: 1}},
 	}
 }
 
@@ -250,8 +298,6 @@ func (s *sCollector) processEvent(ctx context.Context, eventID int64) (err error
 	var row entity.TgCollectorEvent
 	row.Id = eventID
 	logCollectorPipelineStage(ctx, &row, "event.claim.started", pipelineStarted, nil, nil)
-	columns := dao.TgCollectorEvent.Columns()
-	now := gtime.Now()
 	executionOwner := guid.S()
 	claimStarted := time.Now()
 	var affected int64
@@ -262,19 +308,13 @@ func (s *sCollector) processEvent(ctx context.Context, eventID int64) (err error
 			affected = 1
 		}
 	} else {
-		result, claimErr := dao.TgCollectorEvent.Ctx(ctx).
-			Where(columns.Id, eventID).
-			WhereIn(columns.Status, []string{sysin.EventStatusReceived, sysin.EventStatusFailedRetry}).
-			Data(g.Map{
-				columns.Status:       sysin.EventStatusProcessing,
-				columns.LeaseOwner:   executionOwner,
-				columns.LeaseUntil:   now.Add(eventLeaseDuration),
-				columns.AttemptCount: gdb.Raw(columns.AttemptCount + "+1"),
-				columns.UpdatedAt:    now,
-			}).Update()
-		err = claimErr
-		if err == nil {
-			affected, err = result.RowsAffected()
+		// Reuse the bounded primary-key claim without the history batch wait or
+		// writer mutex. RETURNING supplies the owned row in the same round trip.
+		var claimed []entity.TgCollectorEvent
+		claimed, err = executeHistoryEventMutation(ctx, historyEventClaim, []historyEventMutation{{Kind: historyEventClaim, ID: eventID, Owner: executionOwner}})
+		if err == nil && len(claimed) == 1 {
+			row = claimed[0]
+			affected = 1
 		}
 	}
 	claimDuration := time.Since(claimStarted).Milliseconds()
@@ -296,15 +336,6 @@ func (s *sCollector) processEvent(ctx context.Context, eventID int64) (err error
 	logCollectorPipelineStage(ctx, &row, "event.claimed", pipelineStarted, nil, nil,
 		g.Map{"claimDurationMs": claimDuration, "rowsAffected": affected})
 	readStarted := time.Now()
-	if !batched {
-		err = dao.TgCollectorEvent.Ctx(ctx).WherePri(eventID).Where(columns.Status, sysin.EventStatusProcessing).Where(columns.LeaseOwner, executionOwner).Scan(&row)
-	}
-	if err != nil {
-		recordCollectorStage(ctx, collectorStageEventRead, observation.meta, collectorResultError, time.Since(readStarted), err)
-		logCollectorPipelineStage(ctx, &row, "event.load.failed", pipelineStarted, nil, err,
-			g.Map{"readDurationMs": time.Since(readStarted).Milliseconds()})
-		return s.failEvent(ctx, eventID, executionOwner, err, &row)
-	}
 	if row.LeaseOwner != executionOwner || row.Status != sysin.EventStatusProcessing {
 		err = gerror.New("采集执行归属已变化，停止旧执行")
 		recordCollectorStage(ctx, collectorStageEventRead, observation.meta, collectorResultError, time.Since(readStarted), err)
@@ -320,7 +351,7 @@ func (s *sCollector) processEvent(ctx context.Context, eventID int64) (err error
 	ctx, observation.meta = collectorObservationContext(ctx, observation.meta)
 	recordCollectorStage(ctx, collectorStageEventRead, observation.meta, collectorResultOK, time.Since(readStarted), nil)
 	logCollectorPipelineStage(ctx, &row, "event.loaded", pipelineStarted, nil, nil,
-		g.Map{"readDurationMs": time.Since(readStarted).Milliseconds(), "claimDurationMs": claimDuration, "readFromClaim": batched})
+		g.Map{"readDurationMs": time.Since(readStarted).Milliseconds(), "claimDurationMs": claimDuration, "readFromClaim": true})
 	if row.RawUpdate == nil {
 		return s.failEvent(ctx, eventID, executionOwner, gerror.New("Telegram原始事件为空"), &row)
 	}

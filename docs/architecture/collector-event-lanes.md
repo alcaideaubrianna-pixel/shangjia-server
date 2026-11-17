@@ -28,6 +28,16 @@ Inspector 复用连接池，不为每个恢复候选重新连接 Redis。
 
 `YOUBAN_TELEGRAM_COLLECTOR_CONCURRENCY`：实时原始事件并发，沿用当前设置。
 
+实时总预算至少为 2 时，Bot 与账户使用独立消费者：默认总预算 12 拆成
+Bot 8、账户 4，不增加总并发。`YOUBAN_COLLECTOR_BOT_REALTIME_CONCURRENCY`
+可指定其中分配给 Bot 的预算，最多为总预算减 1；总预算为 1 时维持单槽
+共享，启动日志 `realtimeCapacityShared=true` 明确表示不能提供保留容量。
+更新 collector 即加载该分配，无需迁移 Redis 任务或新增 SAE 角色。
+
+Delivery 的实时与历史账户额度按 lane/account 分开，避免历史领取占用实时
+账户名额；两者仍受原有各自 Worker 总并发限制。该隔离不是来源独占配额，
+同一 Bot 的多个来源仍会竞争 Bot 实时预算，不能据此承诺 351 已恢复实时。
+
 `YOUBAN_TELEGRAM_COLLECTOR_HISTORY_CONCURRENCY`：历史原始事件并发，默认 2，最小 1。
 这只控制原始事件阶段，Delivery 历史池和业务来源池仍有自己的容量限制，
 不等于端到端数据库并发预算。不能据此保证 PG 总压力不会升高。
@@ -79,6 +89,12 @@ YOUBAN_TELEGRAM_COLLECTOR_HISTORY_BATCH_WAIT_MS=10
 
 批次大小限制 1～50，合并等待限制 0～50ms。设置 enabled=false 可回到原单条路径。
 低流量或并发为 2 时通常合并不到 20 条，不能按满批次推算实际吞吐。
+
+实时原始事件的领取也复用按主键的 `UPDATE ... RETURNING`，直接取得本次
+租约归属和原始消息，省去领取后的独立 SELECT；不等待历史微批次，也不获取
+历史批次写入锁。实时单条领取保留行锁等待，不能因暂时锁冲突成功 ACK 一个
+尚未领取的任务。历史微批次保留既有 `SKIP LOCKED` 和来源级恢复。
+这只减少领取阶段的数据库往返，不代表端到端吞吐翻倍或历史积压已经清空。
 
 频道进度使用相同合并器，在 5ms 窗口内按 tenant/channel 合并最大消息 ID，
 通过同步批量写回防止较旧消息覆盖较新进度，也避免仅写首条的 TTL 节流漏掉末条。

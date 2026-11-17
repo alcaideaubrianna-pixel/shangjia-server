@@ -75,12 +75,12 @@ func collectorQueueClass(priority int) string {
 type sCollector struct {
 	queueMu               sync.Mutex
 	queueServer           *asynq.Server
+	queueBotServer        *asynq.Server
 	queueHistoryServer    *asynq.Server
 	deliveryServer        *asynq.Server
 	deliveryHistoryServer *asynq.Server
 	historySchedulerStop  context.CancelFunc
-	historyAccountMu      sync.Mutex
-	historyAccountSlots   map[int64]chan struct{}
+	deliveryAccountSlots  deliveryAccountSlotPool
 	queueClient           *asynq.Client
 	queueInspector        *asynq.Inspector
 	historyEventBatch     *microbatch.Batcher[historyEventMutation, entity.TgCollectorEvent]

@@ -170,9 +170,11 @@ func (s *sCollector) handleDeliveryTask(ctx context.Context, task *asynq.Task) (
 		case <-timer.C:
 		}
 	}
-	if queue == consts.QueueDeliveryHistory || strings.HasPrefix(queue, consts.QueueDeliveryHistoryShardPrefix) || strings.HasPrefix(queue, consts.QueueDeliveryRealtimeShardPrefix) || strings.HasPrefix(queue, consts.QueueDeliveryUrgentShardPrefix) {
+	if lane, limited := deliveryAccountLaneForQueue(queue); limited {
 		accountID := deliveryAccountID(ctx, deliveryID)
-		releaseAccountSlot, acquired := s.acquireHistoryAccountSlot(ctx, accountID)
+		// Both lanes retain the existing per-account limit, but never share
+		// permits. Asynq still bounds each lane by its existing Worker budget.
+		releaseAccountSlot, acquired := s.deliveryAccountSlots.acquire(ctx, lane, accountID, collectorDeliveryHistoryAccountConcurrency(ctx))
 		if !acquired {
 			return newDeliveryAccountBusyError()
 		}
@@ -213,34 +215,9 @@ func (s *sCollector) handleDeliveryTask(ctx context.Context, task *asynq.Task) (
 
 type deliveryAccountBusyError struct{}
 
-func (e *deliveryAccountBusyError) Error() string { return "历史采集账户并发额度已满" }
+func (e *deliveryAccountBusyError) Error() string { return "采集交付账户并发额度已满" }
 
 func newDeliveryAccountBusyError() error { return &deliveryAccountBusyError{} }
-
-func (s *sCollector) acquireHistoryAccountSlot(ctx context.Context, accountID int64) (func(), bool) {
-	if accountID <= 0 {
-		return func() {}, true
-	}
-	limit := collectorDeliveryHistoryAccountConcurrency(ctx)
-	s.historyAccountMu.Lock()
-	if s.historyAccountSlots == nil {
-		s.historyAccountSlots = make(map[int64]chan struct{})
-	}
-	slots := s.historyAccountSlots[accountID]
-	if slots == nil || cap(slots) != limit {
-		slots = make(chan struct{}, limit)
-		s.historyAccountSlots[accountID] = slots
-	}
-	s.historyAccountMu.Unlock()
-	select {
-	case slots <- struct{}{}:
-		return func() { <-slots }, true
-	case <-ctx.Done():
-		return func() {}, false
-	default:
-		return func() {}, false
-	}
-}
 
 func (s *sCollector) processDelivery(ctx context.Context, deliveryID int64, taskStarts ...time.Time) error {
 	return s.processDeliveryWithEvent(ctx, deliveryID, nil, taskStarts...)
