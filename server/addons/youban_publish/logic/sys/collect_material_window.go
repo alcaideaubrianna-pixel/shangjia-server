@@ -733,12 +733,25 @@ func collectMaterialLookbackCanClear(result gdb.Record, decided, truncated bool)
 	return result.IsEmpty() && (decided || !truncated)
 }
 
-// findStoredCollectDisplayEvent performs exactly one bounded source-scoped
-// event query per attempt. Partial history ZSETs cannot prove adjacency, so
+// findStoredCollectDisplayEvent reads at most one page per channel-ID alias
+// per attempt, sharing the same execution deadline. Partial history ZSETs cannot prove adjacency, so
 // this path uses a per-verification keyset cursor instead of cached ID filters.
 func (s *sSysPublish) findStoredCollectDisplayEvent(ctx context.Context, verify gdb.Record) (resultRecord gdb.Record, resultErr error) {
+	startedAt := time.Now()
+	parentCtx := ctx
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
+	defer func() {
+		if resultErr != nil && parentCtx.Err() == nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			g.Log().Warning(parentCtx, "验证资料回看超时，保留游标等待重试", g.Map{
+				"stage": "collect.lookback.timeout", "eventId": verify["id"].Int64(),
+				"tenantId": verify["tenant_id"].Int64(), "accountId": verify["account_id"].Int64(),
+				"sourceId": verify["source_id"].Int64(), "sourceChatId": verify["source_chat_id"].String(),
+				"durationMs": time.Since(startedAt).Milliseconds(),
+			})
+		}
+		resultErr = collectMaterialLookbackRetryError(parentCtx, ctx, resultErr)
+	}()
 	if verify["tenant_id"].Int64() <= 0 || verify["account_id"].Int64() < 0 || verify["source_id"].Int64() <= 0 || verify["source_chat_id"].String() == "" {
 		return nil, gerror.New("验证资料回看 scope 不完整")
 	}
@@ -777,21 +790,7 @@ func (s *sSysPublish) findStoredCollectDisplayEvent(ctx context.Context, verify 
 		}
 	}
 	cursor = collectMaterialResumeLookback(cursor, generation)
-	model := pdao.YoubanPublishCollectEvent.Ctx(ctx)
-	cols := pdao.YoubanPublishCollectEvent.Columns()
-	if cursor.MessageID > 0 && cursor.EventID > 0 && cursor.HighWaterID > 0 {
-		// Revisit newly inserted predecessors as well as the next older page. A
-		// delayed display with a higher event ID must not be hidden by the cursor.
-		// Old-row edits are revalidated in the finite canonical interval.
-		model = model.Where("("+cols.Id+">? OR "+cols.SourceMessageId+"<? OR ("+cols.SourceMessageId+"=? AND "+cols.Id+"<?))", cursor.HighWaterID, cursor.MessageID, cursor.MessageID, cursor.EventID)
-	}
-	rows, err := model.
-		Where(cols.TenantId, verify["tenant_id"].Int64()).Where(cols.AccountId, verify["account_id"].Int64()).
-		Where(cols.TgAccountId, verify["tg_account_id"].Int64()).Where(cols.SourceId, verify["source_id"].Int64()).
-		WhereIn(cols.SourceChatId, tgChannelCacheLookupIds(verify["source_chat_id"].String())).
-		Where("source_message_id < ?", messageID).
-		Where("((received_at BETWEEN ? AND ?) OR (received_at IS NULL AND created_at BETWEEN ? AND ?))", verifyAt.Add(-collectMaterialVerifyWindow()), verifyAt, verifyAt.Add(-collectMaterialVerifyWindow()), verifyAt).
-		OrderDesc(cols.SourceMessageId).OrderDesc(cols.Id).Limit(pageSize + 1).All()
+	rows, err := loadCollectMaterialLookbackPage(ctx, verify, verifyAt, cursor, pageSize+1)
 	if err != nil {
 		return nil, gerror.Wrap(err, "回看验证资料前序展示组失败")
 	}
@@ -1430,4 +1429,79 @@ func collectMaterialDatabaseWallClock(value *gtime.Time) time.Time {
 		wallClock.Hour(), wallClock.Minute(), wallClock.Second(),
 		wallClock.Nanosecond(), time.Local,
 	)
+}
+
+// A lookup timeout proves neither absence nor a classification failure. Leave
+// the cursor and event intact and yield to another task before retrying.
+func collectMaterialLookbackRetryError(parent, lookup context.Context, err error) error {
+	if err != nil && parent.Err() == nil && errors.Is(lookup.Err(), context.DeadlineExceeded) {
+		return newCollectProcessRetryError(5*time.Second, "验证资料回看超时，保留进度稍后重试")
+	}
+	return err
+}
+
+func loadCollectMaterialLookbackPage(ctx context.Context, verify gdb.Record, verifyAt *gtime.Time, cursor collectMaterialLookbackCursor, limit int) (gdb.Result, error) {
+	cols := pdao.YoubanPublishCollectEvent.Columns()
+	fields := []string{cols.Id, cols.TenantId, cols.AccountId, cols.TgAccountId, cols.SourceId,
+		cols.SourceChatId, cols.SourceMessageId, cols.SourceGroupedId, cols.RawText,
+		cols.ReceivedAt, cols.CreatedAt, cols.UpdatedAt, cols.ProcessedAt, cols.Status,
+		"material_role", "material_parent_event_id", "material_group_status"}
+	var rows gdb.Result
+	for _, chatID := range tgChannelCacheLookupIds(verify[cols.SourceChatId].String()) {
+		// PostgreSQL must restrict by the expression-time index before applying
+		// message ordering. Without the materialization boundary it can walk a
+		// source's entire message index to find a few rows in this time window.
+		model := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+			Fields(fields).
+			Where(cols.TenantId, verify[cols.TenantId].Int64()).
+			Where(cols.AccountId, verify[cols.AccountId].Int64()).
+			Where(cols.TgAccountId, verify[cols.TgAccountId].Int64()).
+			Where(cols.SourceId, verify[cols.SourceId].Int64()).Where(cols.SourceChatId, chatID).
+			Where("COALESCE("+cols.ReceivedAt+","+cols.CreatedAt+") BETWEEN ? AND ?", verifyAt.Add(-collectMaterialVerifyWindow()), verifyAt)
+		applyPage := func(model *gdb.Model) *gdb.Model {
+			model = model.Where(cols.SourceMessageId+" < ?", verify[cols.SourceMessageId].Int64())
+			if cursor.MessageID > 0 && cursor.EventID > 0 && cursor.HighWaterID > 0 {
+				model = model.Where("("+cols.Id+">? OR "+cols.SourceMessageId+"<? OR ("+cols.SourceMessageId+"=? AND "+cols.Id+"<?))", cursor.HighWaterID, cursor.MessageID, cursor.MessageID, cursor.EventID)
+			}
+			return model.OrderDesc(cols.SourceMessageId).OrderDesc(cols.Id).Limit(limit)
+		}
+		var batch gdb.Result
+		var err error
+		if strings.EqualFold(g.DB().GetConfig().Type, "pgsql") {
+			// Keep all values parameterized. Only DAO-owned identifiers enter SQL.
+			query, args := collectMaterialLookbackPostgresSQL(verify, verifyAt, chatID, cursor, limit, fields)
+			batch, err = g.DB().GetAll(ctx, query, args...)
+		} else {
+			batch, err = applyPage(model).All()
+		}
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, batch...)
+	}
+	// Taking the top page from each disjoint alias preserves the global top
+	// page, including message-ID ties and late predecessors above HighWaterID.
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i][cols.SourceMessageId].Int64() == rows[j][cols.SourceMessageId].Int64() {
+			return rows[i][cols.Id].Int64() > rows[j][cols.Id].Int64()
+		}
+		return rows[i][cols.SourceMessageId].Int64() > rows[j][cols.SourceMessageId].Int64()
+	})
+	if len(rows) > limit {
+		rows = rows[:limit]
+	}
+	return rows, nil
+}
+
+func collectMaterialLookbackPostgresSQL(verify gdb.Record, verifyAt *gtime.Time, chatID string, cursor collectMaterialLookbackCursor, limit int, fields []string) (string, []any) {
+	cols := pdao.YoubanPublishCollectEvent.Columns()
+	query := "WITH collect_lookback_window AS MATERIALIZED (SELECT " + strings.Join(fields, ",") + " FROM " + pdao.YoubanPublishCollectEvent.Table() +
+		" WHERE " + cols.TenantId + "=? AND " + cols.AccountId + "=? AND " + cols.TgAccountId + "=? AND " + cols.SourceId + "=? AND " + cols.SourceChatId + "=?" +
+		" AND COALESCE(" + cols.ReceivedAt + "," + cols.CreatedAt + ") BETWEEN ? AND ?) SELECT * FROM collect_lookback_window WHERE " + cols.SourceMessageId + " < ?"
+	args := []any{verify[cols.TenantId].Int64(), verify[cols.AccountId].Int64(), verify[cols.TgAccountId].Int64(), verify[cols.SourceId].Int64(), chatID, verifyAt.Add(-collectMaterialVerifyWindow()), verifyAt, verify[cols.SourceMessageId].Int64()}
+	if cursor.MessageID > 0 && cursor.EventID > 0 && cursor.HighWaterID > 0 {
+		query += " AND (" + cols.Id + ">? OR " + cols.SourceMessageId + "<? OR (" + cols.SourceMessageId + "=? AND " + cols.Id + "<?))"
+		args = append(args, cursor.HighWaterID, cursor.MessageID, cursor.MessageID, cursor.EventID)
+	}
+	return query + " ORDER BY " + cols.SourceMessageId + " DESC," + cols.Id + " DESC LIMIT ?", append(args, limit)
 }

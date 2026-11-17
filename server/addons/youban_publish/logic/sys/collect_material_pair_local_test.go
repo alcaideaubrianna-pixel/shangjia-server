@@ -86,6 +86,17 @@ func runCollectMaterialPairLocalPostgres(t *testing.T, chatID string) {
 				return err
 			}
 		}
+		// Time filtering must happen before predecessor ordering: these closer
+		// message IDs are outside the verification window and cannot steal it.
+		for _, sql := range []string{
+			`INSERT INTO hg_youban_publish_collect_event(id,source_message_id,raw_text,received_at) VALUES(6000,201,'这是窗口以外的旧展示资料，不能成为当前验证资料的父级',LOCALTIMESTAMP-INTERVAL '21 minutes')`,
+			`INSERT INTO hg_youban_publish_collect_event(id,source_message_id,raw_text,received_at) VALUES(7000,201,'这是未来接收的展示资料，不能成为当前验证资料的父级',LOCALTIMESTAMP+INTERVAL '1 minute')`,
+			`UPDATE hg_youban_publish_collect_event SET received_at=NULL WHERE id=1`,
+		} {
+			if _, err := tx.Exec(strings.ReplaceAll(sql, "-1003954466959", chatID)); err != nil {
+				return err
+			}
+		}
 		if err := g.DB().GetCore().ClearTableFieldsAll(ctx); err != nil {
 			return err
 		}
@@ -112,6 +123,12 @@ func runCollectMaterialPairLocalPostgres(t *testing.T, chatID string) {
 		if display["id"].Int64() != 1 {
 			t.Fatalf("wrong or missing scoped display: %v", display)
 		}
+		// The out-of-time fixtures exercise lookup filtering only. Canonical
+		// adjacency is checked separately against every intervening message.
+		if _, err := tx.Exec(`DELETE FROM hg_youban_publish_collect_event WHERE id IN (6000,7000)`); err != nil {
+			return err
+		}
+
 		// Unrelated future traffic changes the dirty generation but must not
 		// prevent an already established finite interval from being bound.
 		if _, err := tx.Ctx(ctx).Exec(`UPDATE hg_youban_publish_collect_event SET raw_text='这是被编辑成另一份展示的新文案，旧视频分类快照必须失效',updated_at=clock_timestamp() WHERE id=200`); err != nil {
