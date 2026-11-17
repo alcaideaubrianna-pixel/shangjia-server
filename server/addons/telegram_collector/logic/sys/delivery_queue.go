@@ -347,6 +347,15 @@ func (s *sCollector) processDelivery(ctx context.Context, deliveryID int64, task
 		recordCollectorStage(ctx, collectorStageDeliveryEventRead, observation.meta, collectorResultError, time.Since(eventReadStarted), cause)
 		return s.failDelivery(ctx, deliveryID, executionOwner, cause)
 	}
+	if identityErr := validateCollectorDeliveryEvent(&row, &event, []byte(event.RawUpdate.String())); identityErr != nil {
+		logCollectorDeliveryStage(ctx, "delivery.identity_conflict", deliveryID, row.EventId, collectorQueueName(ctx), identityErr,
+			g.Map{"tenantId": row.TenantId, "sourceId": event.SourceId, "sourceMessageId": event.MessageId})
+		if recoveryErr := s.recoverConflictingDelivery(ctx, &row, &event); recoveryErr != nil {
+			return s.failDelivery(ctx, deliveryID, executionOwner, recoveryErr)
+		}
+		observeResult = collectorResultOK
+		return nil
+	}
 	recordCollectorStage(ctx, collectorStageDeliveryEventRead, observation.meta, collectorResultOK, time.Since(eventReadStarted), nil)
 	parseStarted := time.Now()
 	delivery, err := collectorDeliveryFromEvent(&event, []byte(event.RawUpdate.String()))

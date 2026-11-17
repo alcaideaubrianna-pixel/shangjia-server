@@ -360,7 +360,7 @@ func collectorDeliveryFromEvent(row *entity.TgCollectorEvent, raw []byte) (sysin
 		return sysin.CollectorDelivery{}, gerror.New("Telegram采集事件为空")
 	}
 	delivery := sysin.CollectorDelivery{
-		DeliveryKey:     fmt.Sprintf("event:%d", row.Id),
+		DeliveryKey:     collectorDeliveryKey(row, raw),
 		TenantID:        row.TenantId,
 		EventID:         row.Id,
 		SourceID:        row.SourceId,
@@ -483,39 +483,44 @@ func (s *sCollector) saveDelivery(ctx context.Context, delivery *sysin.Collector
 	if err := markCollectorRecoveryScope(ctx, collectorRecoveryScope{delivery.TenantID, delivery.AccountID, delivery.SourceID}); err != nil {
 		return 0, gerror.Wrap(err, "注册采集交付恢复 scope 失败")
 	}
-
 	columns := dao.TgCollectorDelivery.Columns()
-	now := gtime.Now()
-	data := g.Map{
-		"tenant_id":    delivery.TenantID,
-		"event_id":     delivery.EventID,
-		"delivery_key": delivery.DeliveryKey,
-		"status":       sysin.DeliveryStatusPending,
-		"priority":     deliveryPriority(delivery),
-		"created_at":   now,
-		"updated_at":   now,
+	baseKey := delivery.DeliveryKey
+	// One bounded fallback handles a stable identity left pointing at an old
+	// database row after a restore. Never modify the old completed delivery.
+	for attempt := 0; attempt < 2; attempt++ {
+		now := gtime.Now()
+		data := g.Map{
+			columns.TenantId: delivery.TenantID, columns.EventId: delivery.EventID,
+			columns.DeliveryKey: delivery.DeliveryKey, columns.Status: sysin.DeliveryStatusPending,
+			columns.Priority: deliveryPriority(delivery), columns.CreatedAt: now, columns.UpdatedAt: now,
+			"source_id": delivery.SourceID, "account_id": delivery.AccountID,
+			"scheduler_pool": deliverySchedulerPool(delivery),
+		}
+		_, err := dao.TgCollectorDelivery.Ctx(ctx).Data(data).OnConflict(columns.TenantId + "," + columns.DeliveryKey).
+			OnDuplicate(g.Map{columns.DeliveryKey: conflictIncomingColumn(ctx, columns.DeliveryKey)}).Save()
+		if err != nil {
+			return 0, gerror.Wrap(err, "保存Telegram采集交付失败")
+		}
+		var row entity.TgCollectorDelivery
+		if err = dao.TgCollectorDelivery.Ctx(ctx).
+			Fields(columns.Id, columns.EventId).
+			Where(columns.TenantId, delivery.TenantID).
+			Where(columns.DeliveryKey, delivery.DeliveryKey).Scan(&row); err != nil {
+			return 0, gerror.Wrap(err, "读取Telegram采集交付失败")
+		}
+		if row.Id <= 0 {
+			return 0, gerror.New("Telegram采集交付ID无效")
+		}
+		if row.EventId == delivery.EventID {
+			return row.Id, nil
+		}
+		delivery.DeliveryKey = collectorDeliveryCollisionKey(baseKey, delivery.EventID)
+		g.Log().Warning(ctx, "采集交付身份冲突，使用独立恢复交付", g.Map{
+			"tenantId": delivery.TenantID, "sourceId": delivery.SourceID,
+			"eventId": delivery.EventID, "conflictingDeliveryId": row.Id,
+		})
 	}
-	data["source_id"] = delivery.SourceID
-	data["account_id"] = delivery.AccountID
-	data["scheduler_pool"] = deliverySchedulerPool(delivery)
-	_, err := dao.TgCollectorDelivery.Ctx(ctx).Data(data).OnConflict(columns.TenantId + "," + columns.DeliveryKey).
-		OnDuplicate(g.Map{columns.DeliveryKey: conflictIncomingColumn(ctx, columns.DeliveryKey)}).
-		Save()
-	if err != nil {
-		return 0, gerror.Wrap(err, "保存Telegram采集交付失败")
-	}
-	var row entity.TgCollectorDelivery
-	if err = dao.TgCollectorDelivery.Ctx(ctx).
-		Fields(columns.Id).
-		Where(columns.TenantId, delivery.TenantID).
-		Where(columns.DeliveryKey, delivery.DeliveryKey).
-		Scan(&row); err != nil {
-		return 0, gerror.Wrap(err, "读取Telegram采集交付失败")
-	}
-	if row.Id <= 0 {
-		return 0, gerror.New("Telegram采集交付ID无效")
-	}
-	return row.Id, nil
+	return 0, gerror.New("恢复交付尚未保存成功，等待重试")
 }
 
 func deliverySchedulerPool(delivery *sysin.CollectorDelivery) string {

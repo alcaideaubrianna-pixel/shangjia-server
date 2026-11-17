@@ -823,7 +823,7 @@ func TestCollectorPersistenceIntegration(t *testing.T) {
 		t.Fatalf("event exists=%v err=%v", exists, err)
 	}
 	delivery := &sysin.CollectorDelivery{
-		DeliveryKey:     fmt.Sprintf("integration:%d", seed),
+		DeliveryKey:     collectorDeliveryKey(&entity.TgCollectorEvent{TenantId: seed, SourceId: seed, SourceType: sysin.SourceTypeBot, EventKey: event.EventID}, raw),
 		TenantID:        seed,
 		EventID:         eventID,
 		SourceID:        seed,
