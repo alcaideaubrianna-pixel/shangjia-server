@@ -707,9 +707,15 @@ type ProfilePushChannelModel struct {
 	ChannelUsername     string      `json:"channelUsername" dc:"频道用户名"`
 	Status              int         `json:"status" dc:"频道状态"`
 	CyclePublishEnabled int         `json:"cyclePublishEnabled" dc:"是否循环推送"`
-	CyclePublishDays    int         `json:"cyclePublishDays" dc:"循环推送天数"`
+	CyclePublishMode    string      `json:"cyclePublishMode" dc:"循环模式：time天数循环，batch批次循环"`
+	CyclePublishDays    int         `json:"cyclePublishDays" dc:"天数循环间隔，批次模式不使用"`
+	CyclePublishTime    string      `json:"cyclePublishTime" dc:"天数循环发送时刻"`
+	CycleBatchSize      int         `json:"cycleBatchSize" dc:"每批推送数量"`
+	CycleBatchTime      string      `json:"cycleBatchTime" dc:"每日批次发送时刻"`
 	FirstPushAt         *gtime.Time `json:"firstPushAt" dc:"首次推送时间"`
-	NextPushAt          *gtime.Time `json:"nextPushAt" dc:"循环到期时间"`
+	NextBatchAt         *gtime.Time `json:"nextBatchAt" dc:"频道下一批次时间，不代表本资料入选"`
+	NextPushAt          *gtime.Time `json:"nextPushAt" dc:"本资料下次计划或预计推送时间"`
+	NextPushAtEstimated bool        `json:"nextPushAtEstimated" dc:"是否按当前配置及排位估算，可能随调度变化"`
 }
 
 type ProfileOptionsModel struct {
