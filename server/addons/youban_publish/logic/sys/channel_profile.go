@@ -25,39 +25,21 @@ func (s *sSysPublish) upsertChannelProfileFromJobTx(ctx context.Context, tx gdb.
 		return nil
 	}
 	now := gtime.Now()
-	data := g.Map{
-		"tenant_id": job.TenantId, "account_id": job.AccountId, "channel_id": job.ChannelId,
-		"profile_id": job.ProfileId, "last_job_id": job.Id,
-		// 更换当前成功任务时同步撤下旧到期计划，避免新基准沿用旧到期时间被重复领取。
-		"status": "active", "next_cycle_at": nil, "updated_at": now,
-	}
-	result, err := tx.Model(publishChannelProfileTable).Safe().Ctx(ctx).
-		Where("channel_id", job.ChannelId).
-		Where("profile_id", job.ProfileId).
-		Where("last_job_id <= ?", job.Id).
-		Data(data).
-		Update()
-	if err != nil {
-		return gerror.Wrap(err, "更新频道当前上架资料索引失败")
-	}
-	affected, _ := result.RowsAffected()
-	if affected > 0 {
-		return nil
-	}
-	data["created_at"] = now
-	if _, err = tx.Model(publishChannelProfileTable).Safe().Ctx(ctx).Data(data).Insert(); err != nil {
-		if !isDuplicateKeyError(err) {
-			return gerror.Wrap(err, "创建频道当前上架资料索引失败")
-		}
-		_, err = tx.Model(publishChannelProfileTable).Safe().Ctx(ctx).
-			Where("channel_id", job.ChannelId).
-			Where("profile_id", job.ProfileId).
-			Where("last_job_id <= ?", job.Id).
-			Data(data).
-			Update()
-		if err != nil {
-			return gerror.Wrap(err, "并发更新频道当前上架资料索引失败")
-		}
+	// Use one PostgreSQL upsert instead of UPDATE -> INSERT -> UPDATE. The old
+	// sequence raised a duplicate-key error under concurrency, which aborted the
+	// transaction; the fallback UPDATE then only produced current transaction is
+	// aborted and caused confirmed Telegram jobs to retry forever.
+	sql := "INSERT INTO " + publishChannelProfileTable +
+		" (tenant_id,account_id,channel_id,profile_id,last_job_id,status,next_cycle_at,created_at,updated_at)" +
+		" VALUES (?,?,?,?,?,'active',NULL,?,?)" +
+		" ON CONFLICT (channel_id,profile_id) DO UPDATE SET" +
+		" tenant_id=EXCLUDED.tenant_id,account_id=EXCLUDED.account_id,last_job_id=EXCLUDED.last_job_id," +
+		" status='active',next_cycle_at=NULL,updated_at=EXCLUDED.updated_at" +
+		" WHERE " + publishChannelProfileTable + ".last_job_id <= EXCLUDED.last_job_id"
+	if _, err := tx.Ctx(ctx).ExecContext(ctx, sql,
+		job.TenantId, job.AccountId, job.ChannelId, job.ProfileId, job.Id, now, now,
+	); err != nil {
+		return gerror.Wrap(err, "保存频道当前上架资料索引失败")
 	}
 	return nil
 }
