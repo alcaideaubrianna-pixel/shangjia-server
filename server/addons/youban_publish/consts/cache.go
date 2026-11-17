@@ -14,13 +14,15 @@ const (
 	CollectMediaRecoveryKeyPrefix    = "youban_publish:collect:media:recovery:"
 	CollectMediaCompletionKeyPrefix  = "youban_publish:collect:media:completion:"
 	CollectBotChannelTouchKeyPrefix  = "youban_publish:collect:bot_channel:touch:"
-	DuplicateScanSessionKeyPrefix    = "youban_publish:duplicate_scan:session:"
-	DuplicateScanBatchKeyPrefix      = "youban_publish:duplicate_scan:batch:"
-	DuplicateScanWorkKeyPrefix       = "youban_publish:duplicate_scan:work:"
-	DuplicateScanResultKeyPrefix     = "youban_publish:duplicate_scan:result:v4:"
-	PublishAccountActivityKeyPrefix  = "youban_publish:account:activity:"
-	MediaPHashScopeSizeKeyPrefix     = "youban_publish:media_phash_lsh:scope_size:"
-	ProfileMediaValidationKeyPrefix  = "youban_publish:profile_media_validation:"
+	// CollectChannelBoundKeyPrefix 仅标记已建立关系，不缓存采集授权决定。
+	CollectChannelBoundKeyPrefix    = "youban_publish:collect:channel:bound:v1:"
+	DuplicateScanSessionKeyPrefix   = "youban_publish:duplicate_scan:session:"
+	DuplicateScanBatchKeyPrefix     = "youban_publish:duplicate_scan:batch:"
+	DuplicateScanWorkKeyPrefix      = "youban_publish:duplicate_scan:work:"
+	DuplicateScanResultKeyPrefix    = "youban_publish:duplicate_scan:result:v4:"
+	PublishAccountActivityKeyPrefix = "youban_publish:account:activity:"
+	MediaPHashScopeSizeKeyPrefix    = "youban_publish:media_phash_lsh:scope_size:"
+	ProfileMediaValidationKeyPrefix = "youban_publish:profile_media_validation:"
 	// TelegramReadyStreamDedupeKeyPrefix 防止多个 Outbox dispatcher 在租约边界重复写入同一就绪事件。
 	TelegramReadyStreamDedupeKeyPrefix = "youban_publish:tg:ready:dedupe:"
 	// TelegramJobRecoveryKeyPrefix 防止多个恢复器在同一轮重复恢复同一 TG Job。

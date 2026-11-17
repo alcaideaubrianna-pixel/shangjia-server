@@ -1589,7 +1589,7 @@ func normalizeCollectedBotEditText(rawText string, rule gdb.Record) string {
 func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, source gdb.Record, delivery *collectorin.CollectorDelivery) (allowedResult bool, resultErr error) {
 	tenantID, accountID, botID := source["tenant_id"].Int64(), source["account_id"].Int64(), source["bot_id"].Int64()
 	chatID := normalizeTelegramChannelChatID(delivery.SourceChatID)
-	if tenantID <= 0 || accountID <= 0 || botID <= 0 || chatID == "" {
+	if tenantID <= 0 || accountID <= 0 || source["id"].Int64() <= 0 || botID <= 0 || chatID == "" {
 		return false, nil
 	}
 	// Cache only explicit rejection; an allow decision always checks the database.
@@ -1613,6 +1613,30 @@ func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, sourc
 				logCollectApprovalCache(ctx, delivery, accountID, collectApprovalCacheWriteFailed)
 			} else {
 				logCollectApprovalCache(ctx, delivery, accountID, collectApprovalCacheStored)
+			}
+		}
+	}()
+	// The marker only avoids repeating discovery writes. Always read the current
+	// source-scoped decision so a manual disable takes effect immediately.
+	boundKey := publishconsts.CollectChannelBoundKeyPrefix + collectChannelAccessRelationKey(tenantID, accountID, source["id"].Int64(), chatID) + ":bot:" + strconv.FormatInt(botID, 10)
+	if marker, cacheErr := cache.Instance().Get(ctx, boundKey); cacheErr == nil && marker != nil && marker.Bool() {
+		access, accessErr := resolveCollectEventChannelAccess(ctx, gdb.Record{
+			"tenant_id": source["tenant_id"], "source_id": source["id"], "source_chat_id": g.NewVar(chatID),
+		}, accountID)
+		if accessErr != nil {
+			return false, accessErr
+		}
+		if access.Relation.Id > 0 {
+			cacheRejected = !access.Allowed
+			return access.Allowed, nil
+		}
+		// A deleted relation must be rediscovered; Redis is not authoritative.
+		_, _ = cache.Instance().Remove(ctx, boundKey)
+	}
+	defer func() {
+		if resultErr == nil && allowedResult {
+			if cacheErr := cache.Instance().Set(ctx, boundKey, true, 5*time.Minute); cacheErr != nil {
+				g.Log().Warning(ctx, "写入采集频道绑定标记失败", g.Map{"tenantId": tenantID, "accountId": accountID, "sourceId": source["id"].Int64(), "chatId": chatID, "error": cacheErr.Error()})
 			}
 		}
 	}()

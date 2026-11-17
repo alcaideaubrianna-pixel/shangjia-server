@@ -1,0 +1,88 @@
+package sys
+
+import (
+	"context"
+	"os"
+	"testing"
+	"time"
+
+	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
+	publishconsts "hotgo/addons/youban_publish/consts"
+	"hotgo/internal/library/cache"
+
+	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gcache"
+	"github.com/gogf/gf/v2/os/gcfg"
+)
+
+// The bound marker must suppress discovery writes without caching permission.
+func TestCollectChannelBoundMarkerPostgres(t *testing.T) {
+	if os.Getenv("YOUBAN_LOCAL_COLLECT_PG") != "1" {
+		t.Skip("requires disposable PostgreSQL at 127.0.0.1:35432")
+	}
+	before := gdb.GetConfig("default")
+	t.Cleanup(func() { gdb.SetConfigGroup("default", before) })
+	gdb.SetConfigGroup("default", gdb.ConfigGroup{{Type: "pgsql", Host: "127.0.0.1", Port: "35432", User: os.Getenv("USER"), Name: "postgres"}})
+	ctx := context.Background()
+	if !cache.Initialized() {
+		adapter := g.Cfg().GetAdapter().(*gcfg.AdapterFile)
+		original := g.Cfg().MustGet(ctx, "cache.adapter").Val()
+		if err := adapter.Set("cache.adapter", "memory"); err != nil {
+			t.Fatal(err)
+		}
+		cache.SetAdapter(ctx)
+		if err := adapter.Set("cache.adapter", original); err != nil {
+			t.Fatal(err)
+		}
+	}
+	previous := cache.Instance().GetAdapter()
+	cache.Instance().SetAdapter(gcache.NewAdapterMemory())
+	t.Cleanup(func() { cache.Instance().SetAdapter(previous) })
+	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		for _, statement := range []string{
+			"CREATE TEMP TABLE hg_youban_publish_collect_channel (id bigint,tenant_id bigint,telegram_chat_id text,title text,deleted_at timestamp)",
+			"CREATE TEMP TABLE hg_youban_publish_collect_account_channel (id bigint,tenant_id bigint,account_id bigint,channel_id bigint,source_id bigint,collect_enabled int,status text,approval_status text,updated_at timestamp,deleted_at timestamp)",
+			"INSERT INTO hg_youban_publish_collect_channel VALUES (738019,56,'-1004444998796','fixture',NULL)",
+			"INSERT INTO hg_youban_publish_collect_account_channel VALUES (1,56,561,738019,1370,1,'enabled','approved',NOW(),NULL)",
+		} {
+			if _, err := tx.Exec(statement); err != nil {
+				return err
+			}
+		}
+		key := publishconsts.CollectChannelBoundKeyPrefix + collectChannelAccessRelationKey(56, 561, 1370, "4444998796") + ":bot:109"
+		if err := cache.Instance().Set(ctx, key, true, 5*time.Minute); err != nil {
+			return err
+		}
+		source := gdb.Record{
+			"id": g.NewVar(1370), "tenant_id": g.NewVar(56),
+			"account_id": g.NewVar(561), "bot_id": g.NewVar(109),
+		}
+		// Both Chat ID forms must hit the same marker. Missing metadata-write
+		// columns in the fixture make an accidental discovery write fail.
+		service := &sSysPublish{}
+		for _, tc := range []struct {
+			name, chatID, status, approval string
+			enabled                        int
+			want                           bool
+		}{
+			{"enabled", "-1004444998796", "enabled", "approved", 1, true},
+			{"short alias", "4444998796", "enabled", "approved", 1, true},
+			{"manual disable", "-1004444998796", "disabled", "approved", 0, false},
+			{"manual reject", "-1004444998796", "enabled", "rejected", 1, false},
+			{"review pending", "-1004444998796", "pending", "pending", 0, false},
+		} {
+			if _, err := tx.Exec("UPDATE hg_youban_publish_collect_account_channel SET status=$1,approval_status=$2,collect_enabled=$3", tc.status, tc.approval, tc.enabled); err != nil {
+				return err
+			}
+			got, err := service.ensureBotCollectChannelApproval(ctx, source, &collectorin.CollectorDelivery{SourceChatID: tc.chatID})
+			if err != nil || got != tc.want {
+				t.Fatalf("%s: allowed=%v err=%v want=%v", tc.name, got, err, tc.want)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
