@@ -26,5 +26,7 @@ const (
 	// TelegramReadyStreamDedupeKeyPrefix 防止多个 Outbox dispatcher 在租约边界重复写入同一就绪事件。
 	TelegramReadyStreamDedupeKeyPrefix = "youban_publish:tg:ready:dedupe:"
 	// TelegramJobRecoveryKeyPrefix 防止多个恢复器在同一轮重复恢复同一 TG Job。
-	TelegramJobRecoveryKeyPrefix = "youban_publish:tg:job:recovery:"
+	TelegramJobRecoveryKeyPrefix    = "youban_publish:tg:job:recovery:"
+	TelegramOutboxFairScanCursorKey = "youban_publish:tg:outbox:fair_scan:cursor:v1"
+	TelegramOutboxFairScanLockKey   = "youban_publish:tg:outbox:fair_scan:lock:v1"
 )

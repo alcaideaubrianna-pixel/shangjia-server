@@ -221,6 +221,19 @@ func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegra
 	ctx = telegramPublishTraceContext(ctx, row.JobId, g.Map{"outboxId": row.Id, "outboxAttemptCount": row.AttemptCount})
 	stage := beginTelegramPublishStage(ctx, "outbox.dispatch")
 	defer stage.Finish(&resultErr)
+	defer func() {
+		if resultErr == nil || !telegramChannelQueueEnabled() {
+			return
+		}
+		retryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+		defer cancel()
+		if retryErr := s.deferPendingTelegramOutbox(retryCtx, row, resultErr); retryErr != nil {
+			g.Log().Warning(retryCtx, "TG Outbox投递失败退避未落库", g.Map{
+				"event": "outbox_dispatch_defer_failed", "outboxId": row.Id,
+				"jobId": row.JobId, "error": retryErr.Error(),
+			})
+		}
+	}()
 	// 逐条 Outbox 领取是高频热路径，只保留 Debug，避免批量推送时同步格式化大量日志。
 	g.Log().Debug(ctx, "TG Outbox 选中任务", g.Map{"event": "outbox_selected", "outboxId": row.Id, "jobId": row.JobId, "outboxAttemptCount": row.AttemptCount, "availableAt": row.AvailableAt})
 	// 全量 Stream 模式下，频道队首判断由 Stream 消费后的发送逻辑完成。
@@ -712,71 +725,7 @@ func (s *sSysPublish) dueTelegramStreamOutboxRows(ctx context.Context, limit int
 	if limit > telegramOutboxMaxBatchLimit(ctx) {
 		limit = telegramOutboxMaxBatchLimit(ctx)
 	}
-	// Stream dispatcher 只负责可靠通知，频道顺序由发送阶段 lease 保证。
-	// 不在这里执行全局 DISTINCT ON 频道头部聚合：历史积压会迫使数据库
-	// 对整个候选集排序，直接拖慢实时通知。先按到期时间取有界候选，
-	// 再在内存中做账户/频道配额控制。
-	// pending/idle 的排队时长不是过期条件；通知失败或长队列中的任务仍需调度。
-	var candidates []telegramJobOutboxRecord
-	query := `SELECT o.id,o.job_id,o.attempt_count,o.status,o.available_at,j.account_id,j.tenant_id,j.channel_id,j.priority
-		FROM ` + publishTgOutboxTable + ` o
-		JOIN ` + publishTgJobTable + ` j ON j.id=o.job_id
-		WHERE j.tenant_id>0 AND j.channel_id>0
-			AND o.event_type=? AND o.available_at<=?
-			AND (o.status=? OR (o.status=? AND o.lease_expires_at<=?))
-			AND j.status IN ('pending','failed_retry','unknown')
-			AND (COALESCE(j.dispatch_status,'') IN ('','idle') OR (j.dispatch_status='queued' AND COALESCE(j.asynq_task_id,'')=''))
-			AND (j.next_retry_at IS NULL OR j.next_retry_at<=? OR (j.status='pending' AND COALESCE(j.dispatch_status,'')='idle'))
-		ORDER BY o.available_at,o.id LIMIT ?`
-	if err := g.DB().GetScan(ctx, &candidates, query, telegramOutboxEventPublish, now, telegramOutboxPending, telegramOutboxProcessing, now, now, limit*2); err != nil {
-		return nil, gerror.Wrap(err, "读取Stream频道队首失败")
-	}
-	var rows []telegramJobOutboxRecord
-	// 将本轮发现的队首同步到频道索引；Redis 失败只记录日志，数据库仍是可靠事实源。
-	for _, candidate := range candidates {
-		if err := (tgChannelPendingIndex{}).add(ctx, candidate.TenantId, candidate.ChannelId, candidate.JobId, candidate.Priority); err != nil {
-			g.Log().Debug(ctx, "频道待投递索引写入失败，继续使用数据库兜底", g.Map{"jobId": candidate.JobId, "channelId": candidate.ChannelId, "error": err.Error()})
-		}
-	}
-	// 每个账户本轮最多占用固定频道配额，避免大账户耗尽 dispatcher。
-	accountQuota := max(1, limit/8)
-	// 配额按租户和账户联合分片；account_id=0 是 BOT 采集的合法归属，
-	// 不能让不同租户的 BOT 任务共享同一个限额。
-	type accountShard struct {
-		tenantID  int64
-		accountID int64
-	}
-	accountSelected := make(map[accountShard]int)
-	type channelShard struct {
-		tenantID  int64
-		channelID int64
-	}
-	channelSelected := make(map[channelShard]struct{})
-	for _, candidate := range candidates {
-		if candidate.ChannelId > 0 {
-			shard := channelShard{tenantID: candidate.TenantId, channelID: candidate.ChannelId}
-			if _, exists := channelSelected[shard]; exists {
-				continue
-			}
-		}
-		shard := accountShard{tenantID: candidate.TenantId, accountID: candidate.AccountId}
-		if accountSelected[shard] >= accountQuota {
-			continue
-		}
-		// Mark the channel only after all account quota checks pass. If the
-		// first candidate is rejected by quota, a later candidate for the same
-		// channel must still be eligible in this batch.
-		if candidate.ChannelId > 0 {
-			shard := channelShard{tenantID: candidate.TenantId, channelID: candidate.ChannelId}
-			channelSelected[shard] = struct{}{}
-		}
-		accountSelected[shard]++
-		rows = append(rows, candidate)
-		if len(rows) >= limit {
-			break
-		}
-	}
-	return rows, nil
+	return s.fairTelegramStreamOutboxRows(ctx, limit, now)
 }
 
 func telegramDueOutboxPostgresSQL() string {
