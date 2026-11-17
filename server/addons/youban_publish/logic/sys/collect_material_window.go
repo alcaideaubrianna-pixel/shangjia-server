@@ -1123,8 +1123,11 @@ func (s *sSysPublish) bindCollectMaterialPair(ctx context.Context, display gdb.R
 
 		displayStatus := strings.TrimSpace(parent["status"].String())
 		displayGroupStatus := strings.TrimSpace(parent["material_group_status"].String())
+		// Completed displays may retain ready after an explicit replay. Their
+		// first late verification still needs the normal paired-parent wakeup.
+		// Ownership, canonical adjacency and single-group checks above still apply.
 		displayCanReattach := (displayStatus == sysin.CollectEventStatusProcessed || displayStatus == sysin.CollectEventStatusDispatched) &&
-			(displayGroupStatus == "complete" || displayGroupStatus == "paired")
+			(displayGroupStatus == "ready" || displayGroupStatus == "complete" || displayGroupStatus == "paired")
 		displayQuery := tx.Model(pdao.YoubanPublishCollectEvent.Table()).Ctx(ctx).
 			Where("id", display["id"].Int64()).
 			WhereIn("material_role", []string{collectMaterialRolePending, collectMaterialRoleDisplay})
@@ -1531,7 +1534,7 @@ func collectMaterialLookbackRetryError(parent, lookup context.Context, err error
 func loadCollectMaterialLookbackPage(ctx context.Context, verify gdb.Record, verifyAt *gtime.Time, cursor collectMaterialLookbackCursor, limit int) (gdb.Result, error) {
 	cols := pdao.YoubanPublishCollectEvent.Columns()
 	fields := []string{cols.Id, cols.TenantId, cols.AccountId, cols.TgAccountId, cols.SourceId,
-		cols.SourceChatId, cols.SourceMessageId, cols.SourceGroupedId, cols.RawText,
+		cols.SourceChatId, cols.SourceMessageId, cols.SourceGroupedId, cols.RawText, cols.MediaCount,
 		cols.ReceivedAt, cols.CreatedAt, cols.UpdatedAt, cols.ProcessedAt, cols.Status,
 		"material_role", "material_parent_event_id", "material_group_status"}
 	var rows gdb.Result

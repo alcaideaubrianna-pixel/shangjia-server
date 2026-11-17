@@ -264,21 +264,20 @@ func TestPairCollectMaterialMessagesCases(t *testing.T) {
 			want: []collectMaterialPair{{DisplayIndex: 0, VerifyIndex: 2}},
 		},
 		{
-			name: "new profile context replaces previous display",
+			name: "text-only profile fields do not replace a media display",
 			views: []collectMaterialMessageView{
 				{RawText: "昵称：SKS457", Media: []collectMediaItem{{Type: "photo", FileId: "p"}, {Type: "video", FileId: "display-v"}}},
 				{RawText: "昵称：SKS457\n年龄：20"},
 				{Media: []collectMediaItem{{Type: "video", FileId: "verify-v"}}},
 			},
-			want: []collectMaterialPair{{DisplayIndex: 1, VerifyIndex: 2}},
+			want: []collectMaterialPair{{DisplayIndex: 0, VerifyIndex: 2}},
 		},
 		{
-			name: "text only display can pair when no media display is waiting",
+			name: "text-only messages cannot start a media display",
 			views: []collectMaterialMessageView{
 				{RawText: "昵称：A\n年龄：20"},
 				{Media: []collectMediaItem{{Type: "video", FileId: "v"}}},
 			},
-			want: []collectMaterialPair{{DisplayIndex: 0, VerifyIndex: 1}},
 		},
 		{
 			name: "next display closes previous",
@@ -304,12 +303,13 @@ func TestPairCollectMaterialMessagesCases(t *testing.T) {
 			},
 		},
 		{
-			name: "unknown message blocks later video",
+			name: "arbitrary text does not block later video",
 			views: []collectMaterialMessageView{
 				{RawText: "昵称：A", Media: []collectMediaItem{{Type: "photo", FileId: "p"}}},
 				{RawText: "普通业务消息"},
 				{Media: []collectMediaItem{{Type: "video", FileId: "v"}}},
 			},
+			want: []collectMaterialPair{{DisplayIndex: 0, VerifyIndex: 2}},
 		},
 	}
 	for _, test := range tests {
@@ -493,7 +493,7 @@ func TestPairCollectMaterialMessagesMatchesProductionContextWithoutStealingNextP
 	}
 }
 
-func TestPairCollectMaterialMessagesOnlySkipsKnownCollectorNotices(t *testing.T) {
+func TestPairCollectMaterialMessagesSkipsTextOnlyMessages(t *testing.T) {
 	for _, text := range []string{
 		"❌ 重复投稿 检测到短时间内提交的相同内容，请稍后再试",
 		"✅ 提交成功！ 投稿已自动审核通过并成功分发",
@@ -510,23 +510,28 @@ func TestPairCollectMaterialMessagesOnlySkipsKnownCollectorNotices(t *testing.T)
 		"✅ 内容已自动转发到发布频道，编号：MM2610140541",
 		"✅ 视频已自动转发到视频频道，编号：MM2610145172",
 		"验证视频",
+		"👙 内容重复，已跳过\n已有内容编号 123456\n图片相似度 100.0%",
+		"自定义删除关键词",
+		"昵称：纯文本中的资料字段\n城市：本地\n这段长文案没有任何媒体，也必须跳过",
 	} {
 		views := []collectMaterialMessageView{
 			{RawText: "昵称：A", Media: []collectMediaItem{{Type: "photo"}}},
 			{RawText: text},
 			{Media: []collectMediaItem{{Type: "video"}}},
 		}
-		if got := pairCollectMaterialMessages(views); len(got) != 1 {
-			t.Fatalf("known collector notice was not skipped: %q pairs=%v", text, got)
+		if got := pairCollectMaterialMessages(views); len(got) != 1 || got[0].DisplayIndex != 0 || got[0].VerifyIndex != 2 {
+			t.Fatalf("text-only message was not skipped: %q pairs=%v", text, got)
 		}
 	}
 	views := []collectMaterialMessageView{
 		{RawText: "昵称：A", Media: []collectMediaItem{{Type: "photo"}}},
-		{RawText: "自定义删除关键词"},
+		{RawText: "昵称：下一份展示的媒体明细暂时不可用", DeclaredMediaCount: 1},
 		{Media: []collectMediaItem{{Type: "video"}}},
 	}
-	if got := pairCollectMaterialMessages(views); len(got) != 0 {
-		t.Fatalf("configured deletion keyword must not influence pairing: %v", got)
+	for _, pair := range pairCollectMaterialMessages(views) {
+		if pair.DisplayIndex == 0 {
+			t.Fatalf("missing media details must not turn a declared display into skippable text: %v", pair)
+		}
 	}
 }
 

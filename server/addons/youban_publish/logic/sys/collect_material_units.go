@@ -27,12 +27,13 @@ type collectMaterialUnit struct {
 
 type collectMaterialMessageView struct {
 	// EventID/ParentEventID 保留已落库关系，但不能绕过消息邻接和单验证组约束。
-	EventID       int64
-	ParentEventID int64
-	GroupedID     string
-	RawText       string
-	Media         []collectMediaItem
-	MessageAt     time.Time
+	EventID            int64
+	ParentEventID      int64
+	GroupedID          string
+	RawText            string
+	Media              []collectMediaItem
+	DeclaredMediaCount int
+	MessageAt          time.Time
 }
 
 type collectMaterialPair struct {
@@ -109,6 +110,11 @@ func collectMaterialVerifyCandidate(message collectMaterialMessageView) bool {
 }
 
 func collectMaterialSkippableMessage(message collectMaterialMessageView) bool {
+	// Text-only messages never close a display/verification window, regardless
+	// of their caption. Media-bearing messages still define material boundaries.
+	if len(message.Media) == 0 {
+		return message.DeclaredMediaCount == 0
+	}
 	if profileMessageIgnoredNotice(message.RawText) {
 		return true
 	}
@@ -118,7 +124,7 @@ func collectMaterialSkippableMessage(message collectMaterialMessageView) bool {
 	// Telegram may split a display album into several media-only events. A
 	// photo-only continuation cannot start a new profile and must not prevent
 	// the following verification group from reaching the current display.
-	return len(message.Media) == 0 || !profileMessageHasMediaType(message.Media, "video")
+	return !profileMessageHasMediaType(message.Media, "video")
 }
 
 // collectMaterialContextClosed reports whether a later effective business
@@ -153,12 +159,13 @@ func collectMaterialEventViews(rows []gdb.Record, mediaByEvent map[int64][]colle
 	views := make([]collectMaterialMessageView, 0, len(rows))
 	for _, row := range rows {
 		views = append(views, collectMaterialMessageView{
-			EventID:       row["id"].Int64(),
-			ParentEventID: row["material_parent_event_id"].Int64(),
-			GroupedID:     strings.TrimSpace(row["source_grouped_id"].String()),
-			RawText:       row["raw_text"].String(),
-			Media:         mediaByEvent[row["id"].Int64()],
-			MessageAt:     collectMaterialEventAt(row),
+			EventID:            row["id"].Int64(),
+			ParentEventID:      row["material_parent_event_id"].Int64(),
+			GroupedID:          strings.TrimSpace(row["source_grouped_id"].String()),
+			RawText:            row["raw_text"].String(),
+			Media:              mediaByEvent[row["id"].Int64()],
+			DeclaredMediaCount: row["media_count"].Int(),
+			MessageAt:          collectMaterialEventAt(row),
 		})
 	}
 	return views
