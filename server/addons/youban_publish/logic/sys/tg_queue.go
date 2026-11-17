@@ -22,6 +22,10 @@ import (
 	"hotgo/utility/telegrambudget"
 )
 
+// Disabled until preparation and cleanup completion have a durable phase fence.
+// Keep the gate with its queue caller so committed builds do not depend on recovery scaffolding.
+const manualProfileDownAsyncEnabled = false
+
 const (
 	// tgQueueNameMediaLegacy is read only by the one-time migration. It is
 	// intentionally not registered by any worker.
