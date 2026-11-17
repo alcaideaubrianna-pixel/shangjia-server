@@ -1993,8 +1993,10 @@ func relayChannelInputOwner(tenantID, accountID, botID int64) error {
 	if tenantID <= 0 || accountID <= 0 {
 		return gerror.New("请选择租户和协议账号")
 	}
-	if botID <= 0 {
-		return gerror.New("请选择机器人")
+	// Shared relay channels are not bound to one publisher Bot. A positive
+	// optional Bot ID is checked against the tenant by validateRelayOwner.
+	if botID < 0 {
+		return gerror.New("机器人编号不合法")
 	}
 	return nil
 }
