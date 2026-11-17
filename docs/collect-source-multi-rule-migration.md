@@ -12,7 +12,7 @@
 
 `server/addons/youban_publish/resource/sql/migrations/20261117_collect_source_multi_rule.pgsql.sql`
 
-脚本仅预备，尚未执行。目标固定为 `public.hg_youban_publish_collect_source_rule`。若部署 schema 不是 public，需要另行审核和调整，不能依赖隐式 search_path。
+已于 2026-11-17 通过 DBX 在生产连接 `PostgreSQL_Xiaohuiji` 执行，结果见文末。目标固定为 `public.hg_youban_publish_collect_source_rule`。若部署 schema 不是 public，需要另行审核和调整，不能依赖隐式 search_path。
 
 ## 执行与保护
 
@@ -48,5 +48,20 @@ psql -X -v ON_ERROR_STOP=1 \
 - 原有 status=2 的绑定保持禁用，不因迁移重置。
 - 旧索引定义异常时拒绝执行，事务回滚并保留索引。
 
-本地测试不读取生产连接、不启动业务消费者。生产目录只读核对发现旧单列
-唯一索引仍存在；本轮尚未执行生产迁移、部署或历史重放。
+本地测试不读取生产连接、不启动业务消费者。
+
+## 生产执行记录
+
+2026-11-17，按用户指示通过 DBX 执行。连接 `PostgreSQL_Xiaohuiji`，
+数据库 `railway`，用户 `dbuser_dba`。将脚本中的 psql 专用指令移除后，
+在同一 DBX 批次执行 BEGIN、超时设置、受保护 DO、目录报告及 COMMIT。
+事务正常提交；随后独立查询在北京时间 08:04:25 验证：
+
+- `public.uk_ybp_collect_source_single_rule` 已不存在。
+- `public.uk_ybp_collect_source_rule` 仍为有效、ready、立即生效的双列唯一索引。
+- 目标表主键和两个普通索引保留。
+- 精确读取的来源绑定前后一致：1203 / tenant 87 / source 457 / rule 449 / status 1；
+  1202 / tenant 87 / source 487 / rule 476 / status 1。
+
+迁移仅修改结构，没有 UPDATE/DELETE 业务绑定，没有改变人工禁用状态。
+没有部署应用、重放历史消息或创建测试业务绑定。结构验证不代表采集链路已经在线恢复。
