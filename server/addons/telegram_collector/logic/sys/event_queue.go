@@ -18,8 +18,6 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/util/guid"
 	"github.com/hibiken/asynq"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
 
 	"hotgo/addons/telegram_collector/consts"
 	"hotgo/addons/telegram_collector/internal/dao"
@@ -28,6 +26,7 @@ import (
 	"hotgo/internal/library/cache"
 	"hotgo/internal/library/collectobserve"
 	"hotgo/internal/library/hgrds/lock"
+	"hotgo/utility/sourcequeue"
 )
 
 const eventTaskType = "telegram_collector:event"
@@ -49,55 +48,63 @@ func (s *sCollector) StartRuntime(ctx context.Context) {
 		return
 	}
 	runtimeCtx := s.ensureRuntimeContext(ctx)
-	total := collectorConcurrency(runtimeCtx)
-	realtimeConfigs := collectorRealtimeServerConfigs(total, collectorBotRealtimeBudget(runtimeCtx))
-	server := asynq.NewServer(collectorRedisOption(runtimeCtx), realtimeConfigs[0])
-	var botServer *asynq.Server
-	if len(realtimeConfigs) > 1 {
-		botServer = asynq.NewServer(collectorRedisOption(runtimeCtx), realtimeConfigs[1])
+	q, err := sourcequeue.New(collectorEventSourceNamespace)
+	if err != nil {
+		s.queueMu.Unlock()
+		g.Log().Warning(runtimeCtx, "来源采集队列初始化失败，Worker未启动", g.Map{"event": "collector.event.source_start_failed", "queueAdapter": "cache.Instance/sourcequeue", "error": err.Error()})
+		return
 	}
-	if s.queueClient == nil {
-		s.queueClient = asynq.NewClient(collectorRedisOption(runtimeCtx))
+	probeCtx, stopProbe := context.WithTimeout(runtimeCtx, 5*time.Second)
+	probeErr := q.Recover(probeCtx, sourcequeue.Realtime, 1)
+	if probeErr == nil {
+		probeErr = q.Recover(probeCtx, sourcequeue.History, 1)
 	}
-	historyServer := asynq.NewServer(collectorRedisOption(runtimeCtx), asynq.Config{
-		Concurrency: collectorEventHistoryConcurrency(runtimeCtx),
-		Queues:      map[string]int{consts.QueueCollectHistory: 1, consts.QueueCollectUrgent: 1, consts.QueueCollectUrgentLive: 1},
+	stopProbe()
+	if probeErr != nil {
+		s.queueMu.Unlock()
+		g.Log().Warning(runtimeCtx, "来源队列不可用，Worker未启动", g.Map{"event": "collector.event.source_start_failed", "queueAdapter": "cache.Instance/sourcequeue", "error": probeErr.Error()})
+		return
+	}
+	// The legacy reader only migrates existing tasks; it has no business slots.
+	server := asynq.NewServer(collectorRedisOption(runtimeCtx), asynq.Config{
+		Concurrency: 1,
+		Queues: map[string]int{consts.QueueCollectFresh: 1, consts.QueueCollectRealtime: 1,
+			consts.QueueCollectHistory: 1, consts.QueueCollectUrgent: 1, consts.QueueCollectUrgentLive: 1},
 	})
-	s.queueHistoryServer = historyServer
-	s.queueServer = server
-	s.queueBotServer = botServer
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(eventTaskType, s.handleEventTask)
-	g.Log().Info(runtimeCtx, "启动Telegram Collector Worker", g.Map{
-		"log_type":                   "telegram_collector",
-		"event":                      "collector_worker_started",
-		"concurrency":                total,
-		"accountRealtimeConcurrency": realtimeConfigs[0].Concurrency,
-		"botRealtimeConcurrency":     total - realtimeConfigs[0].Concurrency,
-		"realtimeCapacityShared":     len(realtimeConfigs) == 1,
-		"historyConcurrency":         collectorEventHistoryConcurrency(runtimeCtx),
-		"botRealtimeQueue":           consts.QueueCollectFresh,
-		"legacyBacklogQueue":         consts.QueueCollectUrgent,
-		"legacyV2BacklogQueue":       consts.QueueCollectUrgentLive,
-		"legacyBacklogLane":          "history",
-		"ingestSpoolMode":            normalizeCollectorIngestSpoolMode(g.Cfg().MustGet(runtimeCtx, "telegramCollector.ingestSpoolMode", "redis_first").String()),
-		"eventHandoff":               "postgres_event_then_redis",
-		"legacySpoolActive":          collectorIngestSpoolEnabled(runtimeCtx),
-		"eventHandoffMode":           g.Cfg().MustGet(runtimeCtx, eventHandoffModeConfig, string(eventHandoffDirect)).String(),
-		"eventHandoffTimeoutSeconds": g.Cfg().MustGet(runtimeCtx, eventHandoffTimeoutConfig, 10).Int(),
+	if collectorEventHistoryConcurrency(runtimeCtx) > 0 {
+		if err := server.Start(mux); err != nil {
+			s.queueMu.Unlock()
+			g.Log().Warning(runtimeCtx, "采集兼容迁移消费者启动失败，Worker未标记启动", g.Map{"event": "collector.event.source_start_failed", "error": err.Error()})
+			return
+		}
+	}
+	s.queueServer = server
+	s.runtimeWG.Add(1)
+	go func() { defer s.runtimeWG.Done(); s.runSourceEventRecovery(runtimeCtx, q) }()
+
+	for _, pool := range []struct {
+		lane sourcequeue.Lane
+		size int
+	}{
+		{sourcequeue.Realtime, collectorConcurrency(runtimeCtx)},
+		{sourcequeue.History, collectorEventHistoryConcurrency(runtimeCtx)},
+	} {
+		for i := 0; i < pool.size; i++ {
+			s.runtimeWG.Add(1)
+			go func(lane sourcequeue.Lane) {
+				defer s.runtimeWG.Done()
+				s.runSourceEventWorker(runtimeCtx, q, lane)
+			}(pool.lane)
+		}
+	}
+	g.Log().Info(runtimeCtx, "启动来源隔离Collector Worker", g.Map{
+		"event": "collector_worker_started", "queueAdapter": "cache.Instance/sourcequeue",
+		"realtimeConcurrency": collectorConcurrency(runtimeCtx),
+		"historyConcurrency":  collectorEventHistoryConcurrency(runtimeCtx),
+		"legacyMode":          "history_migration_only", "eventHandoffMode": "queued",
 	})
-	// Signal handling belongs to the application; StopRuntime owns Shutdown.
-	for _, realtimeServer := range []*asynq.Server{server, botServer} {
-		if realtimeServer == nil {
-			continue
-		}
-		if err := realtimeServer.Start(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
-			g.Log().Warningf(runtimeCtx, "启动Telegram实时采集Worker失败：%+v", err)
-		}
-	}
-	if err := historyServer.Start(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
-		g.Log().Warningf(runtimeCtx, "启动历史采集Worker失败：%+v", err)
-	}
 	s.runtimeWG.Add(1)
 	go func() {
 		defer s.runtimeWG.Done()
@@ -217,63 +224,7 @@ func (s *sCollector) enqueueEventTask(ctx context.Context, eventID int64, priori
 	if origin != eventOriginIngress && origin != eventOriginRecovery && origin != eventOriginReplay {
 		return gerror.New("采集事件入队职责无效")
 	}
-	queueName := eventQueueFor(priority, origin)
-	if origin == eventOriginRecovery {
-		exists, err := eventLiveTaskExists(s.eventTaskInspector(ctx), eventID, priority)
-		if err != nil {
-			return err
-		}
-		if exists {
-			logCollectorPipelineStage(ctx, &entity.TgCollectorEvent{Id: eventID}, "event.recovery.live_task_preserved", time.Now(), nil, nil,
-				g.Map{"queue": eventQueueFor(priority, eventOriginIngress), "enqueueOrigin": origin})
-			return nil
-		}
-	}
-	if eventQueueIsHistory(queueName) {
-		priority = sysin.EventPriorityNormal
-	}
-	s.queueMu.Lock()
-	if s.queueClient == nil {
-		s.queueClient = asynq.NewClient(collectorRedisOption(ctx))
-	}
-	client := s.queueClient
-	s.queueMu.Unlock()
-	ctx, observation := startCollectorStage(ctx, collectorStageEventEnqueue, collectorObservationMeta{
-		EventID: eventID, QueueClass: collectorObserveQueueClassFromClass(collectorQueueClass(priority)),
-	})
-	enqueueStarted := time.Now()
-	options := []asynq.Option{asynq.Queue(queueName), asynq.MaxRetry(eventMaxAttempts - 1), asynq.Timeout(2 * time.Minute), asynq.TaskID(eventPendingTaskID(eventID))}
-	payload := collectorTaskPayloadForEnqueue(ctx, eventID, true)
-	if queueName == consts.QueueCollectFresh {
-		var payloadErr error
-		payload, payloadErr = collectorFreshEventPayload(ctx, eventID, enqueueStarted)
-		if payloadErr != nil {
-			observation.Finish(collectorResultError, payloadErr)
-			return payloadErr
-		}
-	}
-	_, err := client.EnqueueContext(ctx, asynq.NewTask(eventTaskType, payload), options...)
-	conflict := errors.Is(err, asynq.ErrTaskIDConflict)
-	if conflict {
-		err = confirmEventTaskConflict(s.eventTaskInspector(ctx), queueName, eventPendingTaskID(eventID))
-	}
-	outcome := "enqueued"
-	if err != nil {
-		outcome = "error"
-	} else if conflict {
-		outcome = "existing_task_confirmed"
-	}
-	logErr := err
-	observeResult := collectorResultOK
-	if outcome == "existing_task_confirmed" {
-		logErr = nil
-		observeResult = collectorResultDuplicate
-	}
-	observation.Finish(observeResult, logErr)
-	enqueueOrigin := origin
-	logCollectorPipelineStage(ctx, &entity.TgCollectorEvent{Id: eventID}, "event.enqueued", enqueueStarted, nil, logErr,
-		g.Map{"queue": queueName, "priority": priority, "outcome": outcome, "enqueueOrigin": enqueueOrigin})
-	return err
+	return s.enqueueSourceEvent(ctx, eventID, priority, origin)
 }
 
 func (s *sCollector) handleEventTask(ctx context.Context, task *asynq.Task) error {
@@ -290,30 +241,9 @@ func (s *sCollector) handleEventTask(ctx context.Context, task *asynq.Task) erro
 	if err != nil {
 		return err
 	}
-	ctx, _ = collectorObservationContext(ctx, parseObservation.meta)
-	wait := startCollectorQueueWaitFromTiming(ctx, collectorStageEventConsume, parseObservation.meta)
-	defer wait.Finish(parseObservation.meta)
-	ctx = collectorQueueWaitContext(ctx, wait)
-	if collectorQueueName(ctx) == consts.QueueCollectFresh {
-		if age, expired := collectorFreshTaskExpired(task.Payload(), taskReceivedAt, collectorFreshMaxWait()); expired {
-			// Confirm a durable history task before ACK. A Redis error keeps
-			// this task retryable, and no DB claim or business window runs here.
-			if err = s.enqueueEventTask(ctx, eventID, sysin.EventPriorityNormal, eventOriginRecovery); err != nil {
-				return err
-			}
-			g.Log().Info(ctx, "实时采集超龄任务已交给历史预算", g.Map{"event": "collector.event.realtime_deferred", "eventId": eventID, "queueAgeMs": age.Milliseconds(), "queue": consts.QueueCollectFresh, "destinationQueue": consts.QueueCollectHistory})
-			return nil
-		}
-	}
-	startedAt := time.Now()
-	if err = s.processEvent(ctx, eventID); err != nil {
-		counter, _ := collectorMeter.Int64Counter("telegram_collector_event_total")
-		counter.Add(ctx, 1, metric.WithAttributes(append(collectorCollectionAttributes(ctx), attribute.String("result", "failed"), attribute.String("queue", collectorQueueName(ctx)))...))
-		return err
-	}
-	histogram, _ := collectorMeter.Float64Histogram("telegram_collector_event_duration_seconds")
-	histogram.Record(ctx, time.Since(startedAt).Seconds(), metric.WithAttributes(append(collectorCollectionAttributes(ctx), attribute.String("result", "ready"), attribute.String("queue", collectorQueueName(ctx)))...))
-	return nil
+	// Existing shared live tasks are backlog on upgrade. Migration must
+	// succeed before Asynq ACK; it never consumes the realtime business pool.
+	return s.migrateLegacySourceEvent(ctx, eventID)
 }
 
 func (s *sCollector) processEvent(ctx context.Context, eventID int64) (err error) {
@@ -337,15 +267,19 @@ func (s *sCollector) processEvent(ctx context.Context, eventID int64) (err error
 	executionOwner := guid.S()
 	claimStarted := time.Now()
 	var affected int64
-	batched := historyEventBatchEnabled(ctx)
-	if batched {
+	scope, sourceRuntime := collectorSourceScopeFromContext(ctx)
+	batched := historyEventBatchEnabled(ctx) && !sourceRuntime
+	if sourceRuntime {
+		row, err = claimSourceCollectorEvent(ctx, eventID, executionOwner, scope)
+		if err == nil && row.Id > 0 {
+			affected = 1
+		}
+	} else if batched {
 		row, err = s.historyEventWriter(ctx).Do(ctx, historyEventMutation{Kind: historyEventClaim, ID: eventID, Owner: executionOwner})
 		if err == nil && row.Id > 0 {
 			affected = 1
 		}
 	} else {
-		// Reuse the bounded primary-key claim without the history batch wait or
-		// writer mutex. RETURNING supplies the owned row in the same round trip.
 		var claimed []entity.TgCollectorEvent
 		claimed, err = executeHistoryEventMutation(ctx, historyEventClaim, []historyEventMutation{{Kind: historyEventClaim, ID: eventID, Owner: executionOwner}})
 		if err == nil && len(claimed) == 1 {
@@ -376,6 +310,9 @@ func (s *sCollector) processEvent(ctx context.Context, eventID int64) (err error
 		err = gerror.New("采集执行归属已变化，停止旧执行")
 		recordCollectorStage(ctx, collectorStageEventRead, observation.meta, collectorResultError, time.Since(readStarted), err)
 		return err
+	}
+	if sourceRuntime && (row.TenantId != scope.TenantID || row.SourceId != scope.SourceID) {
+		return gerror.New("采集事件持久化来源与队列归属不一致")
 	}
 	observation.meta.TenantID, observation.meta.SourceID = row.TenantId, row.SourceId
 	if row.SourceType == sysin.SourceTypeAccount {
@@ -424,7 +361,7 @@ func (s *sCollector) processEvent(ctx context.Context, eventID int64) (err error
 		}
 	}
 	// Execution class is explicit, never inferred from message age.
-	if deferred || eventQueueIsHistory(collectorQueueName(ctx)) {
+	if lane, ok := collectorSourceLaneFromContext(ctx); deferred || (ok && lane == sourcequeue.History) || eventQueueIsHistory(collectorQueueName(ctx)) {
 		delivery.History = true
 		observation.meta.Mode = collectorModeHistory
 		observation.meta.QueueClass = collectorObserveQueueClassFromPriority(sysin.EventPriorityNormal)
@@ -1045,7 +982,7 @@ func (s *sCollector) enqueueDueEventBranch(ctx context.Context, status string, l
 		meta.QueueClass = collectorObserveQueueClassFromPriority(priority)
 		meta.EventID = eventID
 		enqueueCtx, observation := startCollectorStage(ctx, collectorStageEventReenqueue, meta)
-		enqueueErr := s.enqueueEventTask(enqueueCtx, eventID, priority, "recovery")
+		enqueueErr := s.enqueueEventTask(withCollectorSourceScope(enqueueCtx, scope.TenantID, scope.SourceID), eventID, priority, "recovery")
 		observation.Finish(collectorResultOK, enqueueErr)
 		if enqueueErr != nil && !errors.Is(enqueueErr, asynq.ErrDuplicateTask) && !errors.Is(enqueueErr, asynq.ErrTaskIDConflict) {
 			return errors.Join(errCollectorRecoveryRedisUnavailable, enqueueErr)

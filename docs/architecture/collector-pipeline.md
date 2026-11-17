@@ -82,7 +82,7 @@ The queue system has independent logical lanes:
 
 A queue name, shard, or Redis key is an execution detail. The durable database record remains the source of truth for business state. Queue depth alone does not prove that a record has been claimed or published.
 
-Dynamic source or account queues may share physical shards for operational reasons. Logical fairness must still be enforced by bounded batches, per-source or per-account quotas, and independent realtime/history budgets.
+Collection queues are physically independent per `tenant_id/source_id` and per realtime/history lane. Do not hash source IDs into fixed shared task queues. A bounded pool claims active-source notifications; these notifications contain source identities, never a shared FIFO of business messages. No `SMEMBERS`, `KEYS`, or full-source polling is permitted for queue discovery.
 
 ## Collector completion contract
 
@@ -151,7 +151,7 @@ The pipeline must satisfy these rules:
 - Queue depth and oldest-item age must be reported per lane and, where practical, per source or account.
 - A delivery backlog must not cause the Collector to repeatedly fetch or reprocess the same source message.
 
-The preferred scheduling model is a durable outbox with lease-based claiming, bounded `FOR UPDATE SKIP LOCKED` batches, per-lane budgets, and weighted or deficit round-robin fairness across active sources.
+The collection execution model uses per-source Redis queues with atomic enqueue/activation, token-checked claim/renew/settle, and a bounded pool with independent realtime/history budgets. Each claim executes bounded work before yielding. Delayed and expired claims are recovered from bounded due indexes, without querying PostgreSQL for global pending work. Durable Event/CollectorDelivery rows retain business recovery facts; explicit historical replay uses source scope and an ID cursor. A realtime task never becomes historical merely because it waited too long.
 
 ## Retry and permanent failure semantics
 
@@ -268,3 +268,13 @@ of `youban_publish` and direct Telegram send method calls. Role gating is also
 covered: a collector-only deployment must not start the delivery runtime. Any
 change that moves a send API or publish worker startup into the collector role is
 an architecture violation and should be rejected during review.
+
+## Source queue execution contract
+
+`hg_tg_collector_delivery` / `CollectorDelivery` is an internal collection handoff, not a Telegram publish job. Its consumer still belongs to collection preparation. Publish ownership starts at the final `collect_dispatch` handoff. Source-queue migration must not change classification, media grouping, verification pairing, rule ownership, or Telegram sending behavior.
+
+The raw Event, internal CollectorDelivery, and business collection-processing stages use separate namespaces with the same `tenant/source/lane` scope. This keeps each stage bounded while preserving source identity across handoffs. Queue input is checked against the durable row before executing business logic.
+
+Enqueue during an in-flight task must not be swallowed by an older ACK. Queue settlement is token checked; changed generations retain their wakeup. Worker cancellation or lease loss stops further work, and the durable business lease remains the idempotency boundary. Redis unavailability is retried with backoff rather than falling back to a database-wide pending scan. Pending tasks do not expire by TTL. Redis persistence/HA remains an operational prerequisite; Redis queue acknowledgement alone is not a claim of zero data loss under infrastructure loss.
+
+Existing Asynq backlog is a legacy history input. It must neither be deleted nor automatically copied wholesale at application startup. New producers never use legacy fixed shards. Deployment must state which legacy consumers remain enabled, their bounded budget, and how explicit source replay resumes old durable records.

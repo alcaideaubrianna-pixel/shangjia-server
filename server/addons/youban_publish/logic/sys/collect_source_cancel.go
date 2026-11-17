@@ -28,6 +28,9 @@ func (s *sSysPublish) executeCollectSourceDeleteCleanup(ctx context.Context, sou
 	if err = cancelCollectorSourceTasks(ctx, sourceId, tenantId, accountId, now); err != nil {
 		return err
 	}
+	if err = cancelCollectSourceExecutionQueues(ctx, tenantId, sourceId); err != nil {
+		return err
+	}
 	if err = s.clearCollectSourceDispatchClaims(ctx, sourceId, tenantId, accountId); err != nil {
 		return err
 	}
@@ -71,6 +74,9 @@ func (s *sSysPublish) cancelCollectSourceRuntime(ctx context.Context, sourceId i
 	if err = cancelCollectorSourceTasks(ctx, sourceId, tenantId, accountId, now); err != nil {
 		return err
 	}
+	if err = cancelCollectSourceExecutionQueues(ctx, tenantId, sourceId); err != nil {
+		return err
+	}
 	if err = s.clearCollectSourceAsynqTasks(ctx, sourceId, taskIDs); err != nil {
 		return err
 	}
@@ -90,7 +96,10 @@ func cancelCollectorSourceTasks(ctx context.Context, sourceId, tenantId, account
 	eventTable := "hg_tg_collector_event"
 	deliveryTable := "hg_tg_collector_delivery"
 	accountTaskTable := "hg_tg_collector_account_task"
-	eventIDs := "SELECT id FROM " + eventTable + " WHERE source_id=? AND tenant_id=? AND account_id=?"
+	// Raw account_id is a protocol account (zero for Bot), not the owning
+	// publish account. Source ownership was checked above; tenant/source is
+	// the durable cancellation scope for both Bot and protocol events.
+	eventIDs := "SELECT id FROM " + eventTable + " WHERE source_id=? AND tenant_id=?"
 	if _, err := g.DB().Model(accountTaskTable).Ctx(ctx).
 		Where("history_task_id IN (SELECT id FROM "+pdao.YoubanPublishCollectHistoryTask.Table()+" WHERE source_id=? AND tenant_id=? AND account_id=?)", sourceId, tenantId, accountId).
 		WhereIn("status", []string{"pending", "processing", "failed_retry", "finalizing"}).
@@ -98,7 +107,7 @@ func cancelCollectorSourceTasks(ctx context.Context, sourceId, tenantId, account
 		return gerror.Wrap(err, "取消采集源账号任务失败")
 	}
 	if _, err := g.DB().Model(deliveryTable).Ctx(ctx).
-		Where("event_id IN ("+eventIDs+")", sourceId, tenantId, accountId).
+		Where("event_id IN ("+eventIDs+")", sourceId, tenantId).
 		WhereIn("status", []string{"pending", "processing", "failed_retry"}).
 		Data(g.Map{"status": "dead", "error_message": collectSourceCanceledMessage, "lease_owner": "", "lease_until": nil, "next_run_at": nil, "updated_at": now}).Update(); err != nil {
 		return gerror.Wrap(err, "终止采集源交付任务失败")
@@ -106,7 +115,6 @@ func cancelCollectorSourceTasks(ctx context.Context, sourceId, tenantId, account
 	if _, err := g.DB().Model(eventTable).Ctx(ctx).
 		Where("source_id", sourceId).
 		Where("tenant_id", tenantId).
-		Where("account_id", accountId).
 		WhereIn("status", []string{"received", "processing", "failed_retry", "ready"}).
 		Data(g.Map{"status": "dead", "error_message": collectSourceCanceledMessage, "lease_owner": "", "lease_until": nil, "next_run_at": nil, "processed_at": now, "updated_at": now}).Update(); err != nil {
 		return gerror.Wrap(err, "终止采集源原始事件失败")

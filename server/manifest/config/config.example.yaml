@@ -439,19 +439,19 @@ youbanPublish:
 
 
 telegramCollector:
-  # 实时 webhook 默认跳过旧 PostgreSQL 接收 Spool，直接写入事件并进入 Redis/Asynq。
+  # 原始事实仍写入 PG；实时执行进入 tenant/source 独立 Redis 队列。
   # 迁移旧接收积压时临时改为 postgres_spool。
   ingestSpoolMode: "redis_first"
   worker:
-    concurrency: 12         # 新实时事件；Bot 使用 tg.collect.urgent.v2
-    historyConcurrency: 2   # 旧 urgent 积压及历史恢复，ENV 可独立扩容
+    concurrency: 12         # 来源实时队列的总执行槽，不是每个来源创建12个Worker
+    historyConcurrency: 2   # 来源历史队列独立预算，旧积压不占实时槽
     historyBatchEnabled: true
     historyBatchSize: 20     # 1～50；只合并已交付任务，不扫描 PG 找任务
     historyBatchWaitMilliseconds: 10 # 0～50ms；最多增加一个短合并窗口
   eventHandoff:
-    # 新事件在 Collector 内完成交付，旧 Delivery 队列继续消费和补偿。
-    # queued 可回退到原来的异步 Delivery 路径。
-    mode: "direct"
+    # 新来源队列统一异步交给 Collector 内部交付消费者。
+    # direct 仅用于旧调用兼容，不控制新来源执行链路。
+    mode: "queued"
     timeoutSeconds: 10
 
 # 悦伴全局 Bot
@@ -460,3 +460,12 @@ youbanBot:
     proxyUrl: ""                                  # Telegram API 代理，例如：http://127.0.0.1:6152 或 socks5://127.0.0.1:6153
   exchangeRate:
     proxyUrl: ""                                  # 实时汇率接口代理，例如：http://127.0.0.1:6152 或 socks5://127.0.0.1:6153
+
+# 来源处理预算使用已有 youbanPublish.queue / collect 节点：
+# YOUBAN_PUBLISH_COLLECT_SOURCE_REALTIME_CONCURRENCY=4
+# YOUBAN_PUBLISH_COLLECT_SOURCE_HISTORY_CONCURRENCY=1
+# YOUBAN_PUBLISH_COLLECT_SOURCE_LEGACY_CONCURRENCY=1
+# YOUBAN_PUBLISH_COLLECT_SOURCE_RUNTIME_LEASE_SECONDS=30
+# YOUBAN_PUBLISH_COLLECT_SOURCE_RUNTIME_POLL_MS=200
+# 显式指定少量旧队列迁移，不扫描/枚举全部来源：
+# YOUBAN_PUBLISH_COLLECT_SOURCE_LEGACY_QUEUES='["旧来源队列名"]'

@@ -53,7 +53,10 @@ func (m *module) Start(option *addons.Option) error {
 	if runrole.Enabled(m.ctx, runrole.Worker) || runrole.Enabled(m.ctx, runrole.CollectorWorker) {
 		collectorservice.Collector().StartRuntime(m.ctx)
 	}
-	if runrole.Enabled(m.ctx, runrole.Worker) || runrole.Enabled(m.ctx, runrole.PushWorker) {
+	// CollectorDelivery is an internal collection handoff, not a Telegram send.
+	// Keep its source-scoped consumer with Collector so ingestion does not depend
+	// on a Publish deployment to drain newly accepted source messages.
+	if runrole.Enabled(m.ctx, runrole.Worker) || runrole.Enabled(m.ctx, runrole.CollectorWorker) {
 		collectorservice.Collector().StartDeliveryRuntime(m.ctx)
 	}
 	if runrole.Enabled(m.ctx, runrole.BackgroundWorker) {

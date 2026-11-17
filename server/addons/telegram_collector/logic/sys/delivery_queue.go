@@ -23,6 +23,7 @@ import (
 	"hotgo/addons/telegram_collector/model/input/sysin"
 	collectorservice "hotgo/addons/telegram_collector/service"
 	"hotgo/internal/library/collectobserve"
+	"hotgo/utility/sourcequeue"
 )
 
 var errDeliveryInvalidEvent = errors.New("采集交付原始事件不可用")
@@ -39,126 +40,65 @@ const (
 
 func (s *sCollector) StartDeliveryRuntime(ctx context.Context) {
 	if !collectorEnabled(ctx) {
-		g.Log().Info(ctx, "Telegram采集插件处于关闭状态，Publish Worker不会消费采集交付")
 		return
 	}
 	s.queueMu.Lock()
+	defer s.queueMu.Unlock()
 	if s.deliveryServer != nil {
-		s.queueMu.Unlock()
 		return
 	}
 	runtimeCtx := s.ensureRuntimeContext(ctx)
-	total := collectorDeliveryConcurrency(runtimeCtx)
-	realtimeConfigs := deliveryRealtimeServerConfigs(total)
-	server := asynq.NewServer(collectorRedisOption(runtimeCtx), realtimeConfigs[0])
-	var freshServer *asynq.Server
-	if len(realtimeConfigs) > 1 {
-		freshServer = asynq.NewServer(collectorRedisOption(runtimeCtx), realtimeConfigs[1])
+	q, err := sourcequeue.New(collectorDeliverySourceNamespace)
+	if err != nil {
+		g.Log().Warning(runtimeCtx, "初始化来源交付队列失败", g.Map{"error": err.Error()})
+		return
 	}
-	if s.queueClient == nil {
-		s.queueClient = asynq.NewClient(collectorRedisOption(runtimeCtx))
-	}
-	historyServer := asynq.NewServer(collectorRedisOption(runtimeCtx), asynq.Config{
-		Concurrency: collectorDeliveryHistoryConcurrency(runtimeCtx),
-		Queues:      deliveryHistoryQueues(),
-	})
+	historyWorkers, legacyWorkers := deliverySourceHistoryBudgets(collectorDeliveryHistoryConcurrency(runtimeCtx))
+	// StopRuntime owns this marker. Legacy history readers share the history
+	// budget; no new task is ever routed to Asynq.
+	server := asynq.NewServer(collectorRedisOption(runtimeCtx), asynq.Config{Concurrency: 1, Queues: deliveryHistoryQueues()})
 	s.deliveryServer = server
-	s.deliveryFreshServer = freshServer
-	s.deliveryHistoryServer = historyServer
-
-	mux := asynq.NewServeMux()
-	mux.HandleFunc(deliveryTaskType, s.handleDeliveryTask)
-	g.Log().Info(runtimeCtx, "Telegram采集交付Worker已启动", g.Map{
-		"log_type":            "telegram_collect_delivery",
-		"event":               "collect_delivery_worker_started",
-		"workerRole":          "collector-delivery-worker",
-		"workerInstanceId":    collectorInstanceID(),
-		"realtimeConcurrency": total,
-		"backlogConcurrency":  realtimeConfigs[0].Concurrency,
-		"freshConcurrency":    total - realtimeConfigs[0].Concurrency,
-		"freshCapacityShared": len(realtimeConfigs) == 1,
-		"freshQueue":          consts.QueueDeliveryFresh,
-		"historyConcurrency":  collectorDeliveryHistoryConcurrency(runtimeCtx),
-		"realtimeQueueCount":  len(deliveryRealtimeQueues()),
-		"historyQueueCount":   len(deliveryHistoryQueues()),
-	})
-	// The application owns signal handling and calls Shutdown in StopRuntime.
-	// Run waits for an OS signal even after Shutdown and would block runtimeWG.
-	if len(realtimeConfigs) == 1 {
-		g.Log().Warning(runtimeCtx, "Delivery实时总预算为单槽，fresh与旧实时共享容量，无法保留独立执行槽", g.Map{"event": "delivery.fresh.capacity_shared", "realtimeConcurrency": total})
-	}
-	for _, worker := range []*asynq.Server{historyServer, server, freshServer} {
-		if worker == nil {
-			continue
-		}
-		if err := worker.Start(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
-			g.Log().Warningf(runtimeCtx, "启动Telegram交付Worker失败：%+v", err)
+	if legacyWorkers > 0 {
+		mux := asynq.NewServeMux()
+		mux.HandleFunc(deliveryTaskType, s.migrateLegacyDeliveryTask)
+		if err := server.Start(mux); err != nil {
+			g.Log().Warning(runtimeCtx, "启动历史交付兼容Worker失败", g.Map{"error": err.Error()})
 		}
 	}
+	s.startDeliverySourcePools(runtimeCtx, q, collectorDeliveryConcurrency(runtimeCtx), historyWorkers)
 	s.runtimeWG.Add(1)
-	go func() {
-		defer s.runtimeWG.Done()
-		s.runDeliveryRecovery(runtimeCtx)
-	}()
-	s.queueMu.Unlock()
+	go func() { defer s.runtimeWG.Done(); s.runDeliveryRecovery(runtimeCtx) }()
+	g.Log().Info(runtimeCtx, "Telegram来源交付Worker已启动", g.Map{
+		"event": "collect_delivery_worker_started", "queueAdapter": "sourcequeue",
+		"realtimeConcurrency": collectorDeliveryConcurrency(runtimeCtx),
+		"historyConcurrency":  historyWorkers, "legacyConcurrency": legacyWorkers,
+	})
 }
 
 func (s *sCollector) enqueueDeliveryTask(ctx context.Context, deliveryID int64, priority int) error {
 	return s.enqueueDeliveryTaskWithOptions(ctx, deliveryID, priority, true)
 }
 
-// enqueueDeliveryTaskWithOptions allows an explicitly requested replay to
-// bypass Asynq's old unique task marker. A delivery is still claimed with a
-// status transition in processDelivery, so the duplicate task is harmless and
-// lets a replay move work from a stale queue to its current priority queue.
+// enqueueDeliveryTaskWithOptions preserves the replay API. Source queue IDs
+// coalesce until ACK; the existing DB claim still fences business execution.
 func (s *sCollector) enqueueDeliveryTaskWithOptions(ctx context.Context, deliveryID int64, priority int, unique bool) error {
 	return s.enqueueDeliveryTaskToQueue(ctx, deliveryID, priority, unique, "")
 }
 
-// Only the first queued realtime Event handoff may select the fresh queue.
-// Recovery, replay and legacy callers always retain the ordinary routing.
+// All producers, replay and recovery use source-isolated lanes. The explicit
+// queue argument remains API-compatible but cannot route work back to Asynq.
 func (s *sCollector) enqueueDeliveryTaskToQueue(ctx context.Context, deliveryID int64, priority int, unique bool, explicitQueue string) (err error) {
-	if deliveryID <= 0 {
-		return gerror.New("Telegram采集交付任务ID无效")
-	}
-	s.queueMu.Lock()
-	if s.queueClient == nil {
-		s.queueClient = asynq.NewClient(collectorRedisOption(ctx))
-	}
-	client := s.queueClient
-	s.queueMu.Unlock()
 	ctx, observation := startCollectorStage(ctx, collectorStageDeliveryEnqueue, collectorObservationMeta{DeliveryID: deliveryID})
 	observeResult := collectorResultError
 	defer func() { observation.Finish(observeResult, err) }()
-	queueName := explicitQueue
-	if queueName == "" {
-		queueName = deliveryQueueName(ctx, deliveryID, priority)
-	}
 	observation.meta.QueueClass = collectorObserveQueueClassFromPriority(priority)
-	options := []asynq.Option{
-		asynq.Queue(queueName),
-		asynq.MaxRetry(deliveryMaxAttempts - 1),
-		asynq.Timeout(3 * time.Minute),
+	// Legacy unique/explicitQueue inputs cannot route new work to Asynq.
+	// Source queue IDs coalesce until ACK, including replay and recovery.
+	err = s.enqueueDeliverySourceTask(ctx, deliveryID, priority)
+	if err == nil {
+		observeResult = collectorResultOK
 	}
-	if unique {
-		options = append(options, asynq.Unique(deliveryTaskUniqueTTL))
-	}
-	_, err = client.EnqueueContext(ctx, asynq.NewTask(deliveryTaskType, collectorTaskPayloadForEnqueue(ctx, deliveryID, !unique)), options...)
-	if errors.Is(err, asynq.ErrDuplicateTask) || errors.Is(err, asynq.ErrTaskIDConflict) {
-		logCollectorDeliveryEnqueue(ctx, deliveryID, queueName, "duplicate", err)
-		if !unique {
-			return gerror.Wrap(err, "恢复Telegram采集交付时任务已存在，未确认本次入队")
-		}
-		observeResult = collectorResultDuplicate
-		return nil
-	}
-	if err != nil {
-		logCollectorDeliveryEnqueue(ctx, deliveryID, queueName, "failed", err)
-		return err
-	}
-	logCollectorDeliveryEnqueue(ctx, deliveryID, queueName, "enqueued", nil)
-	observeResult = collectorResultOK
-	return nil
+	return err
 }
 
 func (s *sCollector) handleDeliveryTask(ctx context.Context, task *asynq.Task) (err error) {
@@ -280,6 +220,25 @@ func (s *sCollector) processDeliveryWithEvent(ctx context.Context, deliveryID in
 			wait.Finish(observation.meta)
 		}
 	}()
+	// Source claims reuse these exact rows below; scope validation happens
+	// before taking a business lease or invoking any handler.
+	var sourceRow *entity.TgCollectorDelivery
+	if scope, ok := ctx.Value(deliverySourceClaimKey{}).(sourcequeue.Scope); ok {
+		var row entity.TgCollectorDelivery
+		if err := dao.TgCollectorDelivery.Ctx(ctx).WherePri(deliveryID).Scan(&row); err != nil {
+			return gerror.Wrap(err, "读取来源交付记录失败")
+		}
+		var event entity.TgCollectorEvent
+		if loadedEvent != nil && loadedEvent.Id == row.EventId {
+			event = *loadedEvent
+		} else if err := dao.TgCollectorEvent.Ctx(ctx).WherePri(row.EventId).Scan(&event); err != nil {
+			return gerror.Wrap(err, "读取来源交付事件失败")
+		}
+		if err := validateDeliverySourceScope(scope, &row, &event); err != nil {
+			return err
+		}
+		sourceRow, loadedEvent = &row, &event
+	}
 	claimStarted := time.Now()
 	logCollectorDeliveryStage(ctx, "delivery.claim.started", deliveryID, 0, collectorQueueName(ctx), nil,
 		g.Map{"taskStartedAtUnixMs": taskStarted.UnixMilli(), "taskDurationMs": time.Since(taskStarted).Milliseconds()})
@@ -320,7 +279,14 @@ func (s *sCollector) processDeliveryWithEvent(ctx context.Context, deliveryID in
 		g.Map{"claimDurationMs": claimDuration, "taskDurationMs": time.Since(taskStarted).Milliseconds()})
 	readStarted := time.Now()
 	var row entity.TgCollectorDelivery
-	if err = dao.TgCollectorDelivery.Ctx(ctx).WherePri(deliveryID).Where(columns.Status, sysin.DeliveryStatusProcessing).Where(columns.LeaseOwner, executionOwner).Scan(&row); err != nil {
+	if sourceRow != nil {
+		row = *sourceRow
+		row.Status, row.LeaseOwner = sysin.DeliveryStatusProcessing, executionOwner
+		row.AttemptCount++
+	} else {
+		err = dao.TgCollectorDelivery.Ctx(ctx).WherePri(deliveryID).Where(columns.Status, sysin.DeliveryStatusProcessing).Where(columns.LeaseOwner, executionOwner).Scan(&row)
+	}
+	if err != nil {
 		recordCollectorStage(ctx, collectorStageDeliveryRead, observation.meta, collectorResultError, time.Since(readStarted), err)
 		logCollectorDeliveryStage(ctx, "delivery.load.failed", deliveryID, 0, collectorQueueName(ctx), err,
 			g.Map{"readDurationMs": time.Since(readStarted).Milliseconds(), "taskDurationMs": time.Since(taskStarted).Milliseconds()})
@@ -697,6 +663,7 @@ func (s *sCollector) resetExpiredDeliveryLeasesForScope(ctx context.Context, lim
 }
 
 func (s *sCollector) enqueueDueDeliveryTasks(ctx context.Context, limit int) (recoveryErr error) {
+	ctx = context.WithValue(ctx, deliverySourceRecoveryKey{}, true)
 	meta := collectorObservationMeta{QueueClass: collectorQueueMixed}
 	ctx, recoveryObservation := startCollectorStage(ctx, collectorStageDeliveryRecovery, meta)
 	defer func() { recoveryObservation.Finish(collectorResultOK, recoveryErr) }()
@@ -910,8 +877,8 @@ func collectorDeliveryHistoryInterval(ctx context.Context) time.Duration {
 
 func collectorDeliveryHistoryConcurrency(ctx context.Context) int {
 	value := g.Cfg().MustGet(ctx, "telegramCollector.delivery.historyConcurrency", 4).Int()
-	if value < 1 {
-		value = 1
+	if value < 0 {
+		value = 0
 	}
 	if value > 32 {
 		value = 32

@@ -71,9 +71,9 @@ func TestCollectorPackageKeepsCollectionBoundary(t *testing.T) {
 	}
 }
 
-// TestCollectorRuntimeRoleBoundary ensures the delivery runtime remains
-// attached to push-worker. A collector-only deployment must ingest and persist
-// source events without becoming a Telegram delivery consumer.
+// TestCollectorRuntimeRoleBoundary keeps the internal collection handoff on
+// Collector. CollectorDelivery is not a Telegram send; Publish remains the
+// owner of collect_dispatch -> Telegram execution.
 func TestCollectorRuntimeRoleBoundary(t *testing.T) {
 	_, currentFile, _, ok := runtime.Caller(0)
 	if !ok {
@@ -85,10 +85,10 @@ func TestCollectorRuntimeRoleBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := string(content)
-	if !strings.Contains(source, "runrole.PushWorker") || !strings.Contains(source, "StartDeliveryRuntime") {
-		t.Fatalf("delivery runtime is no longer explicitly gated by push-worker")
+	if !strings.Contains(source, "CollectorWorker) {\n\t\tcollectorservice.Collector().StartDeliveryRuntime") {
+		t.Fatalf("collector-worker must consume its internal collection handoff")
 	}
-	if strings.Contains(source, "CollectorWorker) {\n\t\tcollectorservice.Collector().StartDeliveryRuntime") {
-		t.Fatalf("collector-worker must not start the delivery runtime")
+	if strings.Contains(source, "PushWorker) {\n\t\tcollectorservice.Collector().StartDeliveryRuntime") {
+		t.Fatalf("internal collection handoff must not depend on publish-worker")
 	}
 }

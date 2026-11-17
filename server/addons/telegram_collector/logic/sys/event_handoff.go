@@ -110,6 +110,9 @@ func (s *sCollector) handoffCollectorEvent(ctx context.Context, row *entity.TgCo
 		return gerror.New("采集内联交付超时必须为1到30秒")
 	}
 	mode, fallbackReason := selectEventHandoffMode(mode, delivery.History, deliveryPriority(delivery))
+	if _, sourceRuntime := collectorSourceLaneFromContext(ctx); sourceRuntime {
+		mode, fallbackReason = eventHandoffQueued, "source_queue_handoff"
+	}
 	started := time.Now()
 	return executeEventHandoff(ctx, mode, time.Duration(seconds)*time.Second, delivery, eventHandoffActions{
 		save: s.saveDelivery,

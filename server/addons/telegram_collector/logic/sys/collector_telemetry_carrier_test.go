@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"hotgo/addons/telegram_collector/consts"
 	"hotgo/addons/telegram_collector/model/input/sysin"
 	"hotgo/internal/library/collectobserve"
+	"hotgo/utility/sourcequeue"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/hibiken/asynq"
@@ -33,34 +35,41 @@ func TestCollectorTelemetryCarrierGatePreservesNumericProtocol(t *testing.T) {
 
 func TestCollectorTelemetryEventCarrierKeepsFixedTaskIDDedup(t *testing.T) {
 	t.Setenv("YOUBAN_COLLECTOR_TELEMETRY_CARRIER_ENABLED", "true")
-	redis := miniredis.RunT(t)
-	options := asynq.RedisClientOpt{Addr: redis.Addr()}
-	client, inspector := asynq.NewClient(options), asynq.NewInspector(options)
-	t.Cleanup(func() { _ = client.Close(); _ = inspector.Close() })
-	collector := &sCollector{queueClient: client, queueInspector: inspector}
-	ctx := collectobserve.With(context.Background(), collectobserve.Metadata{
+	_, q := eventSourceQueueRedisFixture(t)
+	collector := &sCollector{}
+	scope := sourcequeue.Scope{TenantID: 78, SourceID: 351}
+	ctx := withCollectorSourceScope(collectobserve.With(context.Background(), collectobserve.Metadata{
 		UpstreamEventID: 123, ReceivedAt: time.Now().Add(-time.Second), SourceType: "bot", Mode: "realtime",
-	})
+	}), scope.TenantID, scope.SourceID)
 	for i := 0; i < 3; i++ {
 		if err := collector.enqueueEventTask(ctx, 123, sysin.EventPriorityRealtime); err != nil {
 			t.Fatal(err)
 		}
 	}
-	tasks, err := inspector.ListPendingTasks(consts.QueueCollectRealtime)
-	if err != nil || len(tasks) != 1 {
-		t.Fatalf("fixed TaskID dedup changed: tasks=%d err=%v", len(tasks), err)
+	claim, err := q.Claim(ctx, sourcequeue.Realtime, eventLeaseDuration)
+	if err != nil || claim == nil {
+		t.Fatalf("claim=%+v err=%v", claim, err)
 	}
-	task := tasks[0]
-	if task.ID != eventPendingTaskID(123) || task.MaxRetry != eventMaxAttempts-1 || task.Timeout != eventLeaseDuration {
-		t.Fatalf("carrier changed task identity or retry budget: %+v", task)
+	if claim.ID != "123" || claim.Scope != scope {
+		t.Fatalf("lost stable identity: %+v", claim)
 	}
-	ctx, id, err := collectobserve.DecodeTask(context.Background(), task.Payload, time.Now())
-	if err != nil || id != 123 {
-		t.Fatalf("stored carrier failed to decode: %v", err)
+	var payload collectorSourceEventPayload
+	if err = json.Unmarshal(claim.Payload, &payload); err != nil || payload.EventID != 123 {
+		t.Fatalf("carrier decode: %v", err)
 	}
-	timing, ok := collectobserve.QueueTimingFrom(ctx)
+	restored := payload.Carrier.RestoreAt(context.Background(), time.Now())
+	timing, ok := collectobserve.QueueTimingFrom(restored)
 	if !ok || timing.EnqueuedAtUnixNano <= 0 {
-		t.Fatal("actual producer did not persist a trusted enqueue epoch")
+		t.Fatal("producer lost trusted enqueue epoch")
+	}
+	if err = q.Ack(ctx, claim); err != nil {
+		t.Fatal(err)
+	}
+	if exists, err := q.HasTask(ctx, scope, sourcequeue.Realtime, "123"); err != nil || exists {
+		t.Fatalf("duplicate work survived single ACK: exists=%v err=%v", exists, err)
+	}
+	if next, err := q.Claim(ctx, sourcequeue.Realtime, eventLeaseDuration); err != nil || next != nil {
+		t.Fatalf("duplicate carrier created extra task: claim=%+v err=%v", next, err)
 	}
 }
 

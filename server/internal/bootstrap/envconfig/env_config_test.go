@@ -115,10 +115,16 @@ func TestMediaFileCacheEnvironmentMappings(t *testing.T) {
 
 func TestCollectorQueueConfigurationContract(t *testing.T) {
 	want := map[string]string{
-		"youbanPublish.collect.processOutboxMode":       "YOUBAN_PUBLISH_COLLECT_PROCESS_OUTBOX_MODE",
-		"telegramCollector.ingestSpoolMode":             "YOUBAN_TELEGRAM_COLLECTOR_INGEST_SPOOL_MODE",
-		"telegramCollector.eventHandoff.mode":           "YOUBAN_TELEGRAM_COLLECTOR_HANDOFF_MODE",
-		"telegramCollector.eventHandoff.timeoutSeconds": "YOUBAN_TELEGRAM_COLLECTOR_HANDOFF_TIMEOUT_SECONDS",
+		"youbanPublish.queue.collectSourceRealtimeConcurrency": "YOUBAN_PUBLISH_COLLECT_SOURCE_REALTIME_CONCURRENCY",
+		"youbanPublish.queue.collectSourceHistoryConcurrency":  "YOUBAN_PUBLISH_COLLECT_SOURCE_HISTORY_CONCURRENCY",
+		"youbanPublish.queue.collectSourceLegacyConcurrency":   "YOUBAN_PUBLISH_COLLECT_SOURCE_LEGACY_CONCURRENCY",
+		"youbanPublish.collect.sourceRuntimeLeaseSeconds":      "YOUBAN_PUBLISH_COLLECT_SOURCE_RUNTIME_LEASE_SECONDS",
+		"youbanPublish.collect.sourceRuntimePollMilliseconds":  "YOUBAN_PUBLISH_COLLECT_SOURCE_RUNTIME_POLL_MS",
+		"youbanPublish.collect.sourceLegacyQueues":             "YOUBAN_PUBLISH_COLLECT_SOURCE_LEGACY_QUEUES",
+		"youbanPublish.collect.processOutboxMode":              "YOUBAN_PUBLISH_COLLECT_PROCESS_OUTBOX_MODE",
+		"telegramCollector.ingestSpoolMode":                    "YOUBAN_TELEGRAM_COLLECTOR_INGEST_SPOOL_MODE",
+		"telegramCollector.eventHandoff.mode":                  "YOUBAN_TELEGRAM_COLLECTOR_HANDOFF_MODE",
+		"telegramCollector.eventHandoff.timeoutSeconds":        "YOUBAN_TELEGRAM_COLLECTOR_HANDOFF_TIMEOUT_SECONDS",
 	}
 	for key, envKey := range want {
 		found := false

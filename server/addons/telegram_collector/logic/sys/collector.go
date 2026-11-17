@@ -33,6 +33,7 @@ import (
 	"hotgo/internal/library/cache"
 	"hotgo/internal/library/collectobserve"
 	"hotgo/internal/library/microbatch"
+	"hotgo/utility/sourcequeue"
 )
 
 const gatewayOwner = "telegram_collector"
@@ -62,6 +63,14 @@ func observeIngestLatency(ctx context.Context, event *sysin.RawUpdateEvent, stag
 }
 
 func collectorQueueName(ctx context.Context) string {
+	// Preserve the business execution lane for handlers shared with the legacy
+	// Asynq adapter. The source scope and actual adapter are logged separately.
+	if lane, ok := collectorSourceLaneFromContext(ctx); ok {
+		if lane == sourcequeue.History {
+			return consts.QueueDeliveryHistory
+		}
+		return consts.QueueDeliveryRealtime
+	}
 	queue, _ := asynq.GetQueueName(ctx)
 	return queue
 }
@@ -179,6 +188,7 @@ func (s *sCollector) IngestBotUpdate(ctx context.Context, bot collectorservice.B
 		outcome = collectorResultSkipped
 		return nil
 	}
+	ctx = withCollectorSourceScope(ctx, event.TenantID, event.SourceID)
 	if err = s.enqueueEventTask(ctx, eventID, event.Priority); err != nil {
 		return gerror.Wrap(err, "Telegram采集事件入队失败")
 	}
@@ -253,6 +263,7 @@ func (s *sCollector) IngestAccountMessage(ctx context.Context, message *sysin.Ac
 	} else if repaired {
 		observation.meta.EventID = eventID
 		ctx, observation.meta = collectorObservationContext(ctx, observation.meta)
+		ctx = withCollectorSourceScope(ctx, message.TenantID, message.SourceID)
 		if err := s.enqueueEventTask(ctx, eventID, accountMessagePriority(message)); err != nil {
 			return err
 		}
@@ -268,6 +279,7 @@ func (s *sCollector) IngestAccountMessage(ctx context.Context, message *sysin.Ac
 	if err != nil {
 		return err
 	}
+	ctx = withCollectorSourceScope(ctx, event.TenantID, event.SourceID)
 	if err = s.enqueueEventTask(ctx, eventID, event.Priority); err != nil {
 		return gerror.Wrap(err, "Telegram账号采集事件入队失败")
 	}

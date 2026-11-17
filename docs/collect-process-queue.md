@@ -1,41 +1,49 @@
-# 采集处理队列
+# 采集来源独立队列
 
-采集处理链路分成两个边界：
+## 新执行路径
 
-```text
-Telegram 更新
-  → collect_event 业务事件
-  → Redis/Asynq collect-process 队列
-  → 规则处理 Worker
-  → collect_event / collect_dispatch 业务投影
-```
-
-接收层的旧 `hg_tg_collector_ingest_spool` 也默认使用 `telegramCollector.ingestSpoolMode=redis_first` 绕过。实时 webhook 只保留一次 `collect_event` 幂等写入，再把事件交给 Redis/Asynq；接收 Spool 仅在迁移旧部署或回放接收积压时通过 `postgres_spool` 显式启用。
-
-实时采集默认使用 `youbanPublish.collect.processOutboxMode=redis_first`。任务进入 Redis/Asynq 后，由 Asynq 的唯一任务键、延迟任务和重试机制负责执行交接；Worker 只在带有旧 Outbox 租约的任务上回写 Outbox 状态。这样实时事件不会先对 `hg_youban_publish_collect_process_outbox` 执行一次 PostgreSQL upsert，也不会为每个来源启动 PostgreSQL Outbox 轮询器。
-
-SAE ENV 对应字段为：
+原始 Event、内部 CollectorDelivery 和资料处理使用三个队列命名空间；每个阶段都按 `tenant_id/source_id/realtime|history` 建立独立 Redis 待处理队列，不再先进入共享实时消息队列或按固定数量分片。
 
 ```text
-YOUBAN_PUBLISH_COLLECT_PROCESS_OUTBOX_MODE=redis_first
-YOUBAN_TELEGRAM_COLLECTOR_INGEST_SPOOL_MODE=redis_first
+Webhook → 原始 Event 持久化
+        → 来源实时 Event 队列
+        → 来源实时 CollectorDelivery 队列
+        → 业务 collect_event 入库
+        → 来源实时资料处理队列
+        → 资料及 collect_dispatch handoff
+        → 现有 Publish 引擎
 ```
 
-`hg_youban_publish_collect_process_outbox` 保留给旧版本任务和显式迁移/恢复。新的实时任务和新的历史任务都不再写入这张表。迁移旧任务时可以临时把配置切换为：
+`CollectorDelivery` 是内部采集交接，不是 Telegram 推送。它与原始 Event、资料处理均由现有 `collector-worker` 角色消费；Publish 继续拥有 dispatch 之后的发送执行。不会新增 SAE 角色。
 
-```yaml
-youbanPublish:
-  collect:
-    processOutboxMode: "postgres_outbox"
-```
+每个命名空间使用活跃来源通知和有界执行池，不为每个来源常驻一个 Asynq Server。单次领取后来源持有带 token 的租约；ACK、NACK、续租都校验 token 和有效期。等待媒体或重试时释放执行槽。入队与来源激活原子完成；处理期间再收到同 ID 唤醒时递增版本，旧 ACK 不会删除新唤醒。
 
-切换后重启负责采集处理的 publish worker，等待旧 Outbox 积压收口，再切回 `redis_first`。切换期间不要同时让旧版本和新版本处理同一个来源，否则旧版本仍可能为实时事件写入 Outbox。
+Realtime 与 History 使用独立队列、租约和执行预算。Realtime 不再因等待超过 120 秒降级历史。历史处理在领取后先检查同来源的实时待处理/在执行任务，有则延期让位；资料历史单次业务执行上限为 5 秒，仍沿用跨通道的配对写入锁避免数据竞争。延迟任务、崩溃领取只通过有界 Redis 到期索引恢复，不通过枚举全部来源或全库 pending 查询来领取执行任务。现有来源级业务补偿仍保留其数据库幂等和范围约束。
 
-Redis-first 模式的边界是：`collect_event` 仍是业务事实，Redis/Asynq 是执行交接。Redis 不可用时，任务入队会失败并由上游/Asynq 调用方重试；系统不会伪造 PostgreSQL Outbox 行来掩盖 Redis 故障。需要长期离线接收保障时，应先恢复 Redis 高可用，再考虑增加独立 Redis Stream 或接收层队列，不能把 PostgreSQL Outbox重新放回每条实时事件的热路径。
+## 配置与迁移
 
-排查实时采集时，优先查看 `collect_event` 的事件状态和 Asynq 队列深度，再查看 `hg_youban_publish_collect_process_outbox`。Redis-first 下没有对应 Outbox 行属于预期；只有带 `outboxOwner` 的历史/恢复任务才需要核对 Outbox 租约。
+原始处理与内部交付沿用 `YOUBAN_TELEGRAM_COLLECTOR_CONCURRENCY`、`YOUBAN_TELEGRAM_COLLECTOR_HISTORY_CONCURRENCY`、`YOUBAN_TELEGRAM_DELIVERY_CONCURRENCY`、`YOUBAN_TELEGRAM_DELIVERY_HISTORY_CONCURRENCY`。资料处理池使用：
 
-启动日志会输出 `telegram_collector / collector_worker_started` 和 `telegram_collect_queue / collect_process_queue_mode`，其中 `ingestSpoolMode`、`outboxMode`、`legacySpoolActive` 和 `postgresOutboxUsed` 用于确认实际镜像是否加载了 Redis-first 配置。
+需要暂停历史执行时，把三个阶段的历史并发设为 `0`：`YOUBAN_TELEGRAM_COLLECTOR_HISTORY_CONCURRENCY`、`YOUBAN_TELEGRAM_DELIVERY_HISTORY_CONCURRENCY`、`YOUBAN_PUBLISH_COLLECT_SOURCE_HISTORY_CONCURRENCY`。历史任务保留，实时继续消费；来源级持久化补偿和 Redis 到期租约维护仍保留。旧资料队列迁移默认空名单，暂停历史时不要另行启用迁移名单。
+
+| ENV | 默认值 | 用途 |
+|---|---:|---|
+| `YOUBAN_PUBLISH_COLLECT_SOURCE_REALTIME_CONCURRENCY` | 4 | 实时总执行槽 |
+| `YOUBAN_PUBLISH_COLLECT_SOURCE_HISTORY_CONCURRENCY` | 1 | 历史总执行槽 |
+| `YOUBAN_PUBLISH_COLLECT_SOURCE_LEGACY_CONCURRENCY` | 1 | 显式旧 Asynq 队列兼容预算 |
+| `YOUBAN_PUBLISH_COLLECT_SOURCE_RUNTIME_LEASE_SECONDS` | 30 | 资料队列租约 |
+| `YOUBAN_PUBLISH_COLLECT_SOURCE_RUNTIME_POLL_MS` | 200 | 空队列退避间隔 |
+| `YOUBAN_PUBLISH_COLLECT_SOURCE_LEGACY_QUEUES` | 空列表 | 明确旧队列名单，不枚举全部来源 |
+
+旧 Asynq 数据不删除、不清空；新生产者不再写旧共享队列。旧原始事件兼容读取只负责有界迁移到来源历史队列；动态来源旧资料队列通过明确队列名单或现有按来源原始消息重放入口推进，不在启动时全量查询 PG/Redis 回填。历史重放应指定租户、来源、事件范围和批次检查点，复用分类配对规则。
+
+上线涉及现有 Web、Collector、Publish 三个角色，不新增角色：Web 包含原始消息生产者；Collector 消费新来源队列并拥有内部 CollectorDelivery；Publish 升级后退出旧内部 CollectorDelivery 消费，只负责发布。不能仅部署 Collector 后让旧 Web 持续投递旧共享实时队列，也不能长期保留旧 Publish 的交付恢复逻辑。先升级 Web 将新消息可靠写入新来源队列，再尽快升级 Collector 开始消费，并升级 Publish 收口旧内部交付消费者；切换窗口的新队列可能短时等待，需监控接收数、队列年龄和消费者 readiness。旧积压保留在历史边界，禁止直接清库。核验 `collector_worker_started`、内部交付和资料处理来源 Worker 启动日志，再选同一 webhook 样本检查 `event.enqueued → event.persisted → process.queued → 资料入库/明确终态 → dispatch handoff`。队列迁移成功、进程健康或发布 Job 日志不等于采集闭环成功。
+
+Redis 使用既有项目 cache 适配器，不切换 endpoint、账号或逻辑 DB。持久业务事实仍在 PostgreSQL，Redis 持久化和高可用仍是运行前提；Redis 故障应保留可重试状态，不以全局 SQL 扫描代替队列。无需为队列引入新数据库表。
+
+## 保留的业务边界
+
+以下记录为既有业务语义，来源队列迁移不修改展示/验证分类、媒体组配对和审核规则。
 
 ## 已忽略验证的调度边界
 

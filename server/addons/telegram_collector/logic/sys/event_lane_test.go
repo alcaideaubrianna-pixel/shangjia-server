@@ -10,6 +10,7 @@ import (
 	"github.com/hibiken/asynq"
 	"hotgo/addons/telegram_collector/consts"
 	"hotgo/addons/telegram_collector/model/input/sysin"
+	"hotgo/utility/sourcequeue"
 )
 
 func TestEventLaneRouting(t *testing.T) {
@@ -84,6 +85,7 @@ func TestEventPendingIdentitySurvivesUniqueTTLAndRecovery(t *testing.T) {
 }
 
 func TestEventRecoveryPreservesLegacyV2DuringFreshRollout(t *testing.T) {
+	_, q := eventSourceQueueRedisFixture(t)
 	r := miniredis.RunT(t)
 	opt := asynq.RedisClientOpt{Addr: r.Addr()}
 	client := asynq.NewClient(opt)
@@ -91,32 +93,40 @@ func TestEventRecoveryPreservesLegacyV2DuringFreshRollout(t *testing.T) {
 	inspector := asynq.NewInspector(opt)
 	defer inspector.Close()
 	const id int64 = 77
-	_, err := client.Enqueue(asynq.NewTask(eventTaskType, collectorTaskPayload(id)),
-		asynq.Queue(consts.QueueCollectUrgentLive), asynq.TaskID(eventPendingTaskID(id)))
-	if err != nil {
+	if _, err := client.Enqueue(asynq.NewTask(eventTaskType, collectorTaskPayload(id)), asynq.Queue(consts.QueueCollectUrgentLive), asynq.TaskID(eventPendingTaskID(id))); err != nil {
 		t.Fatal(err)
-	}
-	if exists, err := eventLiveTaskExists(inspector, id, sysin.EventPriorityUrgent); err != nil || !exists {
-		t.Fatalf("legacy v2 task must prevent duplicate recovery: exists=%v err=%v", exists, err)
 	}
 	collector := &sCollector{queueClient: client, queueInspector: inspector}
-	if err := collector.enqueueEventTask(context.Background(), id, sysin.EventPriorityUrgent, eventOriginRecovery); err != nil {
+	scope := sourcequeue.Scope{TenantID: 78, SourceID: 351}
+	ctx := withCollectorSourceScope(context.Background(), scope.TenantID, scope.SourceID)
+	if err := collector.enqueueEventTask(ctx, id, sysin.EventPriorityUrgent, eventOriginIngress); err != nil {
 		t.Fatal(err)
 	}
-	pending, err := inspector.ListPendingTasks(consts.QueueCollectHistory)
-	if err != nil && !errors.Is(err, asynq.ErrQueueNotFound) {
+	// Recovery must not duplicate or advance the generation of a live claim.
+	claim, err := q.Claim(ctx, sourcequeue.Realtime, eventLeaseDuration)
+	if err != nil || claim == nil {
+		t.Fatalf("live claim=%+v err=%v", claim, err)
+	}
+	if err := collector.enqueueEventTask(ctx, id, sysin.EventPriorityUrgent, eventOriginRecovery); err != nil {
 		t.Fatal(err)
 	}
-	if len(pending) != 0 {
-		t.Fatalf("recovery duplicated legacy v2 task: %d", len(pending))
+	if exists, err := q.HasTask(ctx, scope, sourcequeue.History, "77"); err != nil || exists {
+		t.Fatalf("recovery interrupted live: history=%v err=%v", exists, err)
+	}
+	if err = q.Ack(ctx, claim); err != nil {
+		t.Fatal(err)
+	}
+	if exists, err := q.HasTask(ctx, scope, sourcequeue.Realtime, "77"); err != nil || exists {
+		t.Fatalf("recovery re-generated live task: exists=%v err=%v", exists, err)
 	}
 	if _, err := inspector.GetTaskInfo(consts.QueueCollectUrgentLive, eventPendingTaskID(id)); err != nil {
-		t.Fatalf("legacy task was removed: %v", err)
+		t.Fatalf("legacy backlog removed: %v", err)
 	}
-	if err := inspector.ArchiveTask(consts.QueueCollectUrgentLive, eventPendingTaskID(id)); err != nil {
+	// Once no source task remains, recovery is explicitly historical.
+	if err := collector.enqueueEventTask(ctx, id, sysin.EventPriorityUrgent, eventOriginRecovery); err != nil {
 		t.Fatal(err)
 	}
-	if exists, err := eventLiveTaskExists(inspector, id, sysin.EventPriorityUrgent); err != nil || exists {
-		t.Fatalf("archived v2 must not block recovery: exists=%v err=%v", exists, err)
+	if exists, err := q.HasTask(ctx, scope, sourcequeue.History, "77"); err != nil || !exists {
+		t.Fatalf("missing historical recovery: exists=%v err=%v", exists, err)
 	}
 }

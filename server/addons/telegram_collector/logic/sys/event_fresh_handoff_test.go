@@ -2,95 +2,99 @@ package sys
 
 import (
 	"context"
-	"errors"
-	"testing"
-	"time"
-
+	"encoding/json"
 	"github.com/alicebob/miniredis/v2"
+	"github.com/gogf/gf/v2/database/gredis"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gcfg"
 	"github.com/hibiken/asynq"
-
 	"hotgo/addons/telegram_collector/consts"
-	"hotgo/internal/library/collectobserve"
+	"hotgo/utility/sourcequeue"
+	"testing"
+	"time"
 )
 
-// Real Asynq consumption exercises its queue context and ACK/retry behavior.
-// No DB is configured: an accidental fallthrough into processEvent cannot pass.
-func TestExpiredFreshEventReliableHistoryHandoff(t *testing.T) {
+// Override both configuration and a possibly cached default Redis client.
+// All consumers in these tests point at disposable local Redis, never a DB.
+func eventSourceQueueRedisFixture(t *testing.T) (*miniredis.Miniredis, *sourcequeue.Queue) {
+	t.Helper()
+	r := miniredis.RunT(t)
 	previous := g.Cfg().GetAdapter()
-	adapter, err := gcfg.NewAdapterContent(`{"database":{},"telegramCollector":{}}`)
+	adapter, err := gcfg.NewAdapterContent("cache:\n  adapter: redis\nredis:\n  default:\n    address: '" + r.Addr() + "'\n")
 	if err != nil {
 		t.Fatal(err)
 	}
 	g.Cfg().SetAdapter(adapter)
-	t.Cleanup(func() { g.Cfg().SetAdapter(previous) })
-	t.Setenv("YOUBAN_COLLECTOR_REALTIME_MAX_WAIT_SECONDS", "120")
-	t.Setenv("YOUBAN_COLLECTOR_TELEMETRY_CARRIER_ENABLED", "false")
+	shared := g.Redis()
+	oldAdapter := shared.GetAdapter()
+	local, err := gredis.New(&gredis.Config{Address: r.Addr()})
+	if err != nil {
+		g.Cfg().SetAdapter(previous)
+		t.Fatal(err)
+	}
+	shared.SetAdapter(local.GetAdapter())
+	t.Cleanup(func() {
+		shared.SetAdapter(oldAdapter)
+		_ = local.Close(context.Background())
+		g.Cfg().SetAdapter(previous)
+	})
+	q, err := sourcequeue.New(collectorEventSourceNamespace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r, q
+}
+
+// Legacy shared tasks migrate to source history before the Asynq receipt is
+// ACKed. The age is legacy input only, never a reason to demote a new source task.
+func TestExpiredFreshEventReliableHistoryHandoff(t *testing.T) {
 	for _, failHandoff := range []bool{false, true} {
-		name := "ack_after_history"
+		name := "ack_after_source_handoff"
 		if failHandoff {
-			name = "retry_on_enqueue_failure"
+			name = "retry_on_source_failure"
 		}
 		t.Run(name, func(t *testing.T) {
-			r := miniredis.RunT(t)
-			opt := asynq.RedisClientOpt{Addr: r.Addr()}
+			sourceRedis, q := eventSourceQueueRedisFixture(t)
+			legacyRedis := miniredis.RunT(t)
+			opt := asynq.RedisClientOpt{Addr: legacyRedis.Addr()}
 			producer := asynq.NewClient(opt)
 			defer producer.Close()
-			handoffClient := asynq.NewClient(opt)
-			defer handoffClient.Close()
 			inspector := asynq.NewInspector(opt)
 			defer inspector.Close()
-			collector := &sCollector{queueClient: handoffClient, queueInspector: inspector}
-			if failHandoff {
-				// Only break the handoff client; the worker's ACK/retry Redis remains healthy.
-				if err := handoffClient.Close(); err != nil {
-					t.Fatal(err)
-				}
-			}
+			collector := &sCollector{}
+			scope := sourcequeue.Scope{TenantID: 78, SourceID: 351}
+			ctx := withCollectorSourceScope(context.Background(), scope.TenantID, scope.SourceID)
 			const eventID int64 = 987654321
-			raw, err := collectorFreshEventPayload(context.Background(), eventID, time.Now().Add(-3*time.Minute))
+			raw, err := collectorFreshEventPayload(ctx, eventID, time.Now().Add(-3*time.Minute))
 			if err != nil {
 				t.Fatal(err)
 			}
-			const freshID = "fresh-handoff-test"
-			if _, err := producer.Enqueue(asynq.NewTask(eventTaskType, raw), asynq.Queue(consts.QueueCollectFresh), asynq.TaskID(freshID), asynq.MaxRetry(2), asynq.Retention(time.Minute)); err != nil {
+			const taskID = "fresh-handoff-test"
+			if _, err = producer.Enqueue(asynq.NewTask(eventTaskType, raw), asynq.Queue(consts.QueueCollectFresh), asynq.TaskID(taskID), asynq.MaxRetry(2), asynq.Retention(time.Minute)); err != nil {
 				t.Fatal(err)
+			}
+			if failHandoff {
+				sourceRedis.SetError("ERR injected source queue failure")
 			}
 			observed := make(chan error, 1)
 			mux := asynq.NewServeMux()
-			mux.HandleFunc(eventTaskType, func(ctx context.Context, task *asynq.Task) error {
-				err := collector.handleEventTask(ctx, task)
-				if err == nil {
-					info, inspectErr := inspector.GetTaskInfo(consts.QueueCollectHistory, eventPendingTaskID(eventID))
-					if inspectErr != nil {
-						err = inspectErr
-					} else {
-						_, id, decodeErr := collectobserve.DecodeTask(ctx, info.Payload, time.Now())
-						if info.Type != eventTaskType || id != eventID || decodeErr != nil || info.State != asynq.TaskStatePending {
-							err = errors.New("history task identity/state not durable before ACK")
-						}
-					}
-				}
+			mux.HandleFunc(eventTaskType, func(workerCtx context.Context, task *asynq.Task) error {
+				err := collector.handleEventTask(withCollectorSourceScope(workerCtx, scope.TenantID, scope.SourceID), task)
 				observed <- err
 				return err
 			})
-			server := asynq.NewServer(opt, asynq.Config{
-				Concurrency: 1, Queues: map[string]int{consts.QueueCollectFresh: 1},
-				ShutdownTimeout: time.Second,
-				RetryDelayFunc:  func(int, error, *asynq.Task) time.Duration { return time.Hour },
-			})
-			if err := server.Start(mux); err != nil {
+			server := asynq.NewServer(opt, asynq.Config{Concurrency: 1, Queues: map[string]int{consts.QueueCollectFresh: 1}, ShutdownTimeout: time.Second, RetryDelayFunc: func(int, error, *asynq.Task) time.Duration { return time.Hour }})
+			if err = server.Start(mux); err != nil {
 				t.Fatal(err)
 			}
 			defer server.Shutdown()
 			select {
-			case err := <-observed:
+			case err = <-observed:
 				if (err != nil) != failHandoff {
-					t.Fatalf("handoff error=%v failHandoff=%v", err, failHandoff)
+					t.Fatalf("handoff err=%v failure=%v", err, failHandoff)
 				}
 			case <-time.After(5 * time.Second):
-				t.Fatal("fresh task was not consumed")
+				t.Fatal("legacy task not handled")
 			}
 			want := asynq.TaskStateCompleted
 			if failHandoff {
@@ -98,19 +102,33 @@ func TestExpiredFreshEventReliableHistoryHandoff(t *testing.T) {
 			}
 			deadline := time.Now().Add(5 * time.Second)
 			for {
-				info, err := inspector.GetTaskInfo(consts.QueueCollectFresh, freshID)
+				info, err := inspector.GetTaskInfo(consts.QueueCollectFresh, taskID)
 				if err == nil && info.State == want {
 					break
 				}
 				if time.Now().After(deadline) {
-					t.Fatalf("fresh ACK/retry state: info=%+v err=%v want=%v", info, err, want)
+					t.Fatalf("legacy receipt info=%+v err=%v want=%v", info, err, want)
 				}
 				time.Sleep(10 * time.Millisecond)
 			}
+			sourceRedis.SetError("")
+			exists, err := q.HasTask(ctx, scope, sourcequeue.History, "987654321")
+			if err != nil || exists == failHandoff {
+				t.Fatalf("source durable handoff exists=%v err=%v failure=%v", exists, err, failHandoff)
+			}
 			if failHandoff {
-				if _, err := inspector.GetTaskInfo(consts.QueueCollectHistory, eventPendingTaskID(eventID)); !errors.Is(err, asynq.ErrTaskNotFound) && !errors.Is(err, asynq.ErrQueueNotFound) {
-					t.Fatalf("failed handoff unexpectedly created history task: %v", err)
-				}
+				return
+			}
+			claim, err := q.Claim(ctx, sourcequeue.History, eventLeaseDuration)
+			if err != nil || claim == nil || claim.ID != "987654321" || claim.Scope != scope {
+				t.Fatalf("history claim=%+v err=%v", claim, err)
+			}
+			var payload collectorSourceEventPayload
+			if err = json.Unmarshal(claim.Payload, &payload); err != nil || payload.EventID != eventID {
+				t.Fatalf("identity lost: payload=%+v err=%v", payload, err)
+			}
+			if err = q.Ack(ctx, claim); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}

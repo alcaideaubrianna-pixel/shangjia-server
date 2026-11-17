@@ -92,8 +92,9 @@ func confirmEventTaskConflict(inspector *asynq.Inspector, queue, taskID string) 
 
 func collectorEventHistoryConcurrency(ctx context.Context) int {
 	n := g.Cfg().MustGet(ctx, "telegramCollector.worker.historyConcurrency", 2).Int()
-	if n < 1 {
-		return 1
+	// Zero pauses historical execution while realtime keeps its own pool.
+	if n < 0 {
+		return 0
 	}
 	return n
 }

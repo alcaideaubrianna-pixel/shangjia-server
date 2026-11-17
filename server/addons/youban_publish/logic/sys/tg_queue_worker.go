@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	publishconsts "hotgo/addons/youban_publish/consts"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -14,11 +13,9 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
-	"github.com/gogf/gf/v2/util/guid"
 	"github.com/hibiken/asynq"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
-	"hotgo/internal/library/cache"
 	"hotgo/internal/library/collectobserve"
 	"hotgo/utility/dbtime"
 )
@@ -154,211 +151,7 @@ func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
 }
 
 func (s *sSysPublish) startCollectProcessWorker(ctx context.Context) {
-	s.tgQueueMu.Lock()
-	if s.collectSourceQueueServers != nil {
-		s.tgQueueMu.Unlock()
-		return
-	}
-	s.collectSourceQueueServers = make(map[string]*asynq.Server)
-	s.collectSourceQueueOwners = make(map[string]string)
-	s.tgQueueMu.Unlock()
-	g.Log().Info(ctx, "启动来源级采集处理 Worker")
-	go s.runCollectSourceQueueManager(ctx)
-}
-
-const collectProcessSourceDispatcherPrefix = "youban_publish:collect:source:dispatcher:"
-
-// runCollectProcessSourceDispatcher waits on one source wake key and dispatches
-// only that source's durable Outbox. Redis is used as a low-cost wake signal;
-// PostgreSQL remains the source of truth and every claim is source-scoped.
-func (s *sSysPublish) runCollectProcessSourceDispatcher(ctx context.Context, member string) {
-	parts := strings.Split(member, ":")
-	if len(parts) != 3 {
-		return
-	}
-	tenantID, errTenant := strconv.ParseInt(parts[0], 10, 64)
-	accountID, errAccount := strconv.ParseInt(parts[1], 10, 64)
-	sourceID, errSource := strconv.ParseInt(parts[2], 10, 64)
-	if errTenant != nil || errAccount != nil || errSource != nil || tenantID <= 0 || accountID < 0 || sourceID <= 0 {
-		return
-	}
-
-	client, err := cache.RedisClient()
-	if err != nil {
-		return
-	}
-	leaseKey := collectProcessSourceDispatcherPrefix + member
-	owner := guid.S()
-	acquired, err := client.Do(ctx, "SET", leaseKey, owner, "NX", "EX", collectSourceLeaseSeconds(ctx))
-	if err != nil || acquired.String() != "OK" {
-		return
-	}
-	defer func() {
-		current, getErr := client.Do(context.Background(), "GET", leaseKey)
-		if getErr == nil && current.String() == owner {
-			_, _ = client.Do(context.Background(), "DEL", leaseKey)
-		}
-	}()
-
-	wakeQueueKey := collectProcessSourceWakeQueueKey(member)
-	wakeLockKey := collectProcessSourceWakeKey(member)
-	interval := time.Second
-	if configured := collectSourceManagerInterval(ctx); configured > interval {
-		interval = configured
-	}
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		value, readErr := client.Do(ctx, "RPOP", wakeQueueKey)
-		if readErr != nil {
-			g.Log().Warning(ctx, "读取来源采集唤醒信号失败", g.Map{
-				"tenantId": tenantID, "accountId": accountID, "sourceId": sourceID, "error": readErr.Error(),
-			})
-		} else if !value.IsNil() {
-			if dispatchErr := s.dispatchDueCollectProcessOutbox(ctx, collectProcessDispatchBatchSize(ctx), publishAccountScope{
-				TenantID: tenantID, AccountID: accountID, SourceID: sourceID,
-			}); dispatchErr != nil {
-				// RPOP is destructive. Put the wake signal back before the next
-				// loop so a transient DB/queue failure cannot strand this source.
-				// Keep the lock alive while the signal is requeued; producers will
-				// still coalesce duplicate wakeups for this source.
-				if requeueErr := cache.ListPushLeft(ctx, wakeQueueKey, member); requeueErr != nil {
-					g.Log().Warning(ctx, "来源采集唤醒信号回队列失败", g.Map{
-						"tenantId": tenantID, "accountId": accountID, "sourceId": sourceID,
-						"error": requeueErr.Error(),
-					})
-				}
-				g.Log().Warning(ctx, "来源采集Outbox调度失败", g.Map{
-					"tenantId": tenantID, "accountId": accountID, "sourceId": sourceID, "error": dispatchErr.Error(),
-				})
-			} else {
-				// Only acknowledge the wake signal after the scoped dispatch pass
-				// completed. Any remaining Outbox work will be woken by the next
-				// producer signal or the durable recovery path.
-				_, _ = client.Do(ctx, "DEL", wakeLockKey)
-			}
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-		_, _ = client.Do(ctx, "EXPIRE", leaseKey, collectSourceLeaseSeconds(ctx))
-	}
-}
-
-func (s *sSysPublish) ensureCollectProcessSourceDispatcher(ctx context.Context, member string) {
-	// Redis-first realtime scheduling does not need a PostgreSQL dispatcher.
-	// The dispatcher is retained as an explicit legacy/recovery mode so old
-	// Outbox rows can be drained without keeping a database polling loop alive
-	// in every publish worker.
-	if collectProcessOutboxMode(ctx) != "postgres_outbox" {
-		return
-	}
-	if _, loaded := collectProcessSourceDispatchers.LoadOrStore(member, struct{}{}); loaded {
-		return
-	}
-	// Wake once on startup so pending Outbox rows that predate this process
-	// are recovered without rebuilding active sources from PostgreSQL.
-	if client, err := cache.RedisClient(); err == nil {
-		lockKey := collectProcessSourceWakeLockKey(member)
-		if value, setErr := client.Do(ctx, "SET", lockKey, "1", "NX", "EX", 30); setErr == nil && wakeAccepted(value.String()) {
-			_ = cache.ListPushLeft(ctx, collectProcessSourceWakeQueueKey(member), member)
-		}
-	}
-	go func() {
-		s.runCollectProcessSourceDispatcher(ctx, member)
-		collectProcessSourceDispatchers.Delete(member)
-	}()
-}
-
-var collectProcessSourceDispatchers sync.Map
-
-func bootstrapCollectProcessSources(ctx context.Context) {
-	// Active sources are populated by the event producer and persist in Redis.
-	// Do not rebuild this set from PostgreSQL at startup: that would reintroduce
-	// the global source scan this worker is designed to avoid.
-}
-
-func collectSourceWorkerConcurrency(ctx context.Context) int {
-	value := g.Cfg().MustGet(ctx, "youbanPublish.queue.collectSourceConcurrency", 1).Int()
-	if value < 1 {
-		return 1
-	}
-	if value > 16 {
-		return 16
-	}
-	return value
-}
-
-func collectSourceLeaseSeconds(ctx context.Context) int {
-	value := g.Cfg().MustGet(ctx, "youbanPublish.collect.sourceLeaseSeconds", 15).Int()
-	if value < 10 {
-		return 10
-	}
-	if value > 300 {
-		return 300
-	}
-	return value
-}
-
-func collectSourceManagerInterval(ctx context.Context) time.Duration {
-	value := g.Cfg().MustGet(ctx, "youbanPublish.collect.sourceManagerIntervalSeconds", 5).Int()
-	if value < 1 {
-		value = 1
-	}
-	if value > 60 {
-		value = 60
-	}
-	return time.Duration(value) * time.Second
-}
-
-func (s *sSysPublish) runCollectSourceQueueManager(ctx context.Context) {
-	bootstrapCollectProcessSources(ctx)
-	ticker := time.NewTicker(collectSourceManagerInterval(ctx))
-	defer ticker.Stop()
-	for {
-		s.reconcileCollectSourceQueueWorkers(ctx)
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-	}
-}
-
-func (s *sSysPublish) reconcileCollectSourceQueueWorkers(ctx context.Context) {
-	if !cache.Initialized() || ctx.Err() != nil {
-		return
-	}
-	client, err := cache.RedisClient()
-	if err != nil {
-		return
-	}
-	value, err := client.Do(ctx, "SMEMBERS", collectProcessActiveSourcesKey)
-	if err != nil || value.IsNil() {
-		return
-	}
-	for _, member := range value.Strings() {
-		if ctx.Err() != nil {
-			return
-		}
-		parts := strings.Split(member, ":")
-		if len(parts) != 3 {
-			continue
-		}
-		tenantID, errTenant := strconv.ParseInt(parts[0], 10, 64)
-		accountID, errAccount := strconv.ParseInt(parts[1], 10, 64)
-		sourceID, errSource := strconv.ParseInt(parts[2], 10, 64)
-		if errTenant != nil || errAccount != nil || errSource != nil || tenantID <= 0 || accountID < 0 || sourceID <= 0 {
-			continue
-		}
-		s.ensureCollectProcessSourceDispatcher(ctx, member)
-		for _, history := range []bool{false, true} {
-			payload := collectProcessQueuePayload{TenantId: tenantID, AccountId: accountID, SourceId: sourceID, History: history, Recovery: history}
-			s.ensureCollectSourceQueueWorker(ctx, collectProcessQueueName(payload))
-		}
-	}
+	s.startCollectSourceRuntime(ctx)
 }
 
 func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
@@ -367,7 +160,7 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 		"log_type":           "telegram_collect_queue",
 		"event":              "collect_process_queue_mode",
 		"outboxMode":         outboxMode,
-		"realtimeQueue":      "redis_asynq",
+		"realtimeQueue":      "redis_sourcequeue",
 		"postgresOutboxUsed": outboxMode == "postgres_outbox",
 	})
 	s.tgQueueMu.Lock()
@@ -647,6 +440,7 @@ func (s *sSysPublish) startTelegramMediaWorker(ctx context.Context) {
 }
 
 func (s *sSysPublish) stopTelegramQueueWorker() {
+	s.stopCollectSourceRuntime()
 	s.tgQueueMu.Lock()
 	server := s.tgQueueServer
 	cleanupServer := s.tgCleanupQueueServer
@@ -983,11 +777,16 @@ func (s *sSysPublish) handleCollectProcessTask(ctx context.Context, task *asynq.
 		// The inner business stages report confirmed outcomes independently.
 		finishObservation(collectPipelineUnconfirmed, retErr)
 	}()
-	releaseRuleSlot, err := acquireCollectProcessRuleSlot(ctx, payload)
-	if err != nil {
-		return err
+	// The new source protocol already owns one job per source/lane inside a
+	// bounded pool. Do not wait for a rule shared by unrelated sources here.
+	// Legacy handler callers retain their existing semaphore.
+	if !collectSourceRuntimeJob(ctx) {
+		releaseRuleSlot, slotErr := acquireCollectProcessRuleSlot(ctx, payload)
+		if slotErr != nil {
+			return slotErr
+		}
+		defer releaseRuleSlot()
 	}
-	defer releaseRuleSlot()
 	ctx = s.collectProgressContext(ctx, payload.EventId, 0)
 	identity := currentCollectWorkerIdentity(ctx)
 	g.Log().Info(ctx, "采集处理任务开始", g.Map{
@@ -1074,6 +873,13 @@ func (s *sSysPublish) handleCollectProcessTask(ctx context.Context, task *asynq.
 	}
 	if delay < collectProcessMinimumDelay {
 		delay = collectProcessMinimumDelay
+	}
+	// Keep dependency waits on this job's claim; Nack releases the worker.
+	if collectSourceRuntimeJob(ctx) {
+		if err := refreshCollectProcessSchedule(ctx, payload, max(collectProcessScheduleTTL, delay+10*time.Second)); err != nil {
+			return err
+		}
+		return newCollectProcessRetryError(delay, "采集处理等待当前任务依赖")
 	}
 	removeCollectProcessSourcePending(ctx, payload)
 	enqueued, err := s.enqueueCollectProcessDeferred(ctx, payload, delay)

@@ -21,6 +21,7 @@ import (
 	"hotgo/addons/telegram_collector/internal/model/entity"
 	"hotgo/addons/telegram_collector/model/input/sysin"
 	"hotgo/internal/library/cache"
+	"hotgo/utility/sourcequeue"
 )
 
 func TestDeliveryRecoveryPriorityLocalPostgres(t *testing.T) {
@@ -98,65 +99,65 @@ func TestDeliveryHistoryAndRealtimeClassification(t *testing.T) {
 }
 
 func TestDeliveryRedisQueueIsolationAndDuplicateEnqueue(t *testing.T) {
-	redis := miniredis.RunT(t)
-	opt := asynq.RedisClientOpt{Addr: redis.Addr()}
-	client := asynq.NewClient(opt)
-	defer client.Close()
-	inspector := asynq.NewInspector(opt)
-	defer inspector.Close()
-	collector := &sCollector{queueClient: client}
-	ctx := context.Background()
-	for i := int64(1); i <= 20; i++ {
-		if err := collector.enqueueDeliveryTask(ctx, i, sysin.EventPriorityNormal); err != nil {
+	q := deliverySourceTestRedis(t)
+	collector := &sCollector{}
+	ctx := withCollectorSourceScope(context.Background(), 78, 351)
+	for id := int64(1); id <= 20; id++ {
+		if err := collector.enqueueDeliveryTask(ctx, id, sysin.EventPriorityNormal); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for _, p := range []int{sysin.EventPriorityRealtime, sysin.EventPriorityUrgent} {
-		for i := 0; i < 3; i++ {
-			if err := collector.enqueueDeliveryTask(ctx, int64(p), p); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	for queue, want := range map[string]int{consts.QueueDeliveryHistory: 20, consts.QueueDeliveryRealtime: 1, consts.QueueDeliveryUrgentLive: 1, consts.QueueDeliveryUrgent: 0} {
-		tasks, err := inspector.ListPendingTasks(queue)
-		if want == 0 && errors.Is(err, asynq.ErrQueueNotFound) {
-			continue
-		}
-		if err != nil {
+	for i := 0; i < 3; i++ {
+		if err := collector.enqueueDeliveryTask(ctx, 99, sysin.EventPriorityRealtime); err != nil {
 			t.Fatal(err)
 		}
-		if len(tasks) != want {
-			t.Fatalf("queue %s pending=%d want=%d", queue, len(tasks), want)
+	}
+	// A distinct source is not stuck behind the first source's history backlog.
+	other := withCollectorSourceScope(context.Background(), 78, 352)
+	if err := collector.enqueueDeliveryTask(other, 100, sysin.EventPriorityUrgent); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"99", "100"} {
+		claim, err := q.Claim(ctx, sourcequeue.Realtime, time.Minute)
+		if err != nil || claim == nil || claim.ID != id {
+			t.Fatalf("claim=%+v err=%v want=%s", claim, err, id)
+		}
+		if err := q.Ack(ctx, claim); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if claim, err := q.Claim(ctx, sourcequeue.Realtime, time.Minute); err != nil || claim != nil {
+		t.Fatalf("duplicate not coalesced: %+v %v", claim, err)
+	}
+	for i := 0; i < 20; i++ {
+		claim, err := q.Claim(ctx, sourcequeue.History, time.Minute)
+		if err != nil || claim == nil || claim.Scope.SourceID != 351 {
+			t.Fatalf("history claim=%+v err=%v", claim, err)
+		}
+		if err := q.Ack(ctx, claim); err != nil {
+			t.Fatal(err)
 		}
 	}
 }
 
 func TestReplayDeliveryCanMovePastStaleUniqueTask(t *testing.T) {
-	redis := miniredis.RunT(t)
-	opt := asynq.RedisClientOpt{Addr: redis.Addr()}
-	client := asynq.NewClient(opt)
-	defer client.Close()
-	inspector := asynq.NewInspector(opt)
-	defer inspector.Close()
-	collector := &sCollector{queueClient: client}
-	ctx := context.Background()
-
-	// Simulate a delivery already parked in the history queue under Asynq's
-	// unique marker, then replay the same delivery at urgent priority.
+	q := deliverySourceTestRedis(t)
+	collector := &sCollector{}
+	ctx := withCollectorSourceScope(context.Background(), 78, 351)
 	if err := collector.enqueueDeliveryTask(ctx, 991, sysin.EventPriorityNormal); err != nil {
 		t.Fatal(err)
 	}
 	if err := collector.enqueueDeliveryTaskWithOptions(ctx, 991, sysin.EventPriorityUrgent, false); err != nil {
 		t.Fatal(err)
 	}
-	history, err := inspector.ListPendingTasks(consts.QueueDeliveryHistory)
-	if err != nil || len(history) != 1 {
-		t.Fatalf("stale history task count=%d err=%v", len(history), err)
-	}
-	urgent, err := inspector.ListPendingTasks(consts.QueueDeliveryUrgentLive)
-	if err != nil || len(urgent) != 1 {
-		t.Fatalf("replay urgent task count=%d err=%v", len(urgent), err)
+	for _, lane := range []sourcequeue.Lane{sourcequeue.History, sourcequeue.Realtime} {
+		claim, err := q.Claim(ctx, lane, time.Minute)
+		if err != nil || claim == nil || claim.ID != "991" {
+			t.Fatalf("replay lane=%s claim=%+v err=%v", lane, claim, err)
+		}
+		if err := q.Ack(ctx, claim); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
@@ -171,38 +172,23 @@ func TestDeliveryRecoveryQuarantinesBadEventAndContinuesLocalPostgres(t *testing
 	ctx := context.Background()
 	_ = g.DB().GetCore().ClearTableFieldsAll(ctx)
 	defer g.DB().GetCore().ClearTableFieldsAll(ctx)
-	redis := miniredis.RunT(t)
-	previousConfig := g.Cfg().GetAdapter()
-	adapter, err := gcfg.NewAdapterContent("cache:\n  adapter: redis\nredis:\n  default:\n    address: '" + redis.Addr() + "'\n")
-	if err != nil {
-		t.Fatal(err)
-	}
-	g.Cfg().SetAdapter(adapter)
+	q := deliverySourceTestRedis(t)
 	cache.SetAdapter(ctx)
-	defer func() {
-		g.Cfg().SetAdapter(previousConfig)
-		cache.SetAdapter(ctx)
-	}()
 	if err := markCollectorRecoveryScope(ctx, collectorRecoveryScope{TenantID: 1}); err != nil {
 		t.Fatal(err)
 	}
-	opt := asynq.RedisClientOpt{Addr: redis.Addr()}
-	client := asynq.NewClient(opt)
-	defer client.Close()
-	inspector := asynq.NewInspector(opt)
-	defer inspector.Close()
-	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		for _, sql := range []string{
-			`CREATE TEMP TABLE hg_tg_collector_event(id bigint,source_type text,raw_update jsonb,created_at timestamp,received_at timestamp) ON COMMIT DROP`,
+			`CREATE TEMP TABLE hg_tg_collector_event(id bigint,source_type text,raw_update jsonb,created_at timestamp,received_at timestamp,tenant_id bigint DEFAULT 1,source_id bigint DEFAULT 351) ON COMMIT DROP`,
 			`CREATE TEMP TABLE hg_tg_collector_delivery(id bigint PRIMARY KEY,event_id bigint,status text,priority int,updated_at timestamp,next_run_at timestamp,attempt_count int,error_message text,tenant_id bigint DEFAULT 1,account_id bigint DEFAULT 0,source_id bigint DEFAULT 0,scheduler_pool text DEFAULT 'realtime',created_at timestamp DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Shanghai') - interval '1 hour') ON COMMIT DROP`,
-			`INSERT INTO hg_tg_collector_event VALUES(1,'account','"malformed"',now(),now()),(2,'account','{"history":false}',now(),now())`,
+			`INSERT INTO hg_tg_collector_event(id,source_type,raw_update,created_at,received_at) VALUES(1,'account','"malformed"',now(),now()),(2,'account','{"history":false}',now(),now())`,
 			`INSERT INTO hg_tg_collector_delivery(id,event_id,status,priority,updated_at,next_run_at,attempt_count,error_message) VALUES(1,1,'pending',100,now()-interval '1 hour',NULL,0,''),(2,2,'pending',50,now()-interval '1 hour',NULL,0,'')`,
 		} {
 			if _, err := tx.Exec(sql); err != nil {
 				return err
 			}
 		}
-		collector := &sCollector{queueClient: client}
+		collector := &sCollector{}
 		if err := collector.enqueueDueDeliveryTasks(ctx, 10); err != nil {
 			return err
 		}
@@ -213,12 +199,12 @@ func TestDeliveryRecoveryQuarantinesBadEventAndContinuesLocalPostgres(t *testing
 		if row["status"].String() != sysin.DeliveryStatusQuarantined {
 			t.Fatal("malformed event was not quarantined")
 		}
-		tasks, err := inspector.ListPendingTasks(consts.QueueDeliveryRealtime)
+		claim, err := q.Claim(ctx, sourcequeue.Realtime, time.Minute)
 		if err != nil {
 			return err
 		}
-		if len(tasks) != 1 {
-			t.Fatalf("valid task after malformed event was not recovered: %d", len(tasks))
+		if claim == nil || claim.ID != "2" || claim.Scope != (sourcequeue.Scope{TenantID: 1, SourceID: 351}) {
+			t.Fatalf("valid task after malformed event was not recovered: %+v", claim)
 		}
 		cancelled, cancel := context.WithCancel(ctx)
 		cancel()
@@ -523,8 +509,13 @@ func TestDeliveryRecoveryDoesNotTreatDuplicateAsSuccessfulEnqueue(t *testing.T) 
 	if !strings.Contains(cursor, "enqueueDeliveryTaskWithOptions(enqueueCtx, deliveryID, priority, false)") {
 		t.Fatal("delivery recovery must enqueue without Asynq Unique")
 	}
-	if !strings.Contains(queue, "if !unique {") || !strings.Contains(queue, "恢复Telegram采集交付时任务已存在，未确认本次入队") {
-		t.Fatal("non-unique recovery enqueue must return duplicate conflicts as errors")
+	source := deliveryRecoverySource(t, "delivery_source_queue.go")
+	if !strings.Contains(queue, "s.enqueueDeliverySourceTask(ctx, deliveryID, priority)") ||
+		!strings.Contains(source, "q.Enqueue(ctx, scope, lane,") {
+		t.Fatal("recovery must confirm the source queue enqueue result")
+	}
+	if !strings.Contains(source, "deliverySourceRecoveryKey{}") || !strings.Contains(source, "q.HasTask(") {
+		t.Fatal("recovery must preserve a task already present in either source lane")
 	}
 	if !strings.Contains(queue, `recovery.enqueue_failed`) {
 		t.Fatal("recovery enqueue failures must be emitted as structured logs")

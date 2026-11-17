@@ -42,27 +42,13 @@ func newCollectProcessRetryError(delay time.Duration, message string) error {
 	return &collectProcessRetryError{delay: delay, message: message}
 }
 
-func markCollectProcessSourceActive(ctx context.Context, payload collectProcessQueuePayload) {
-	if payload.TenantId <= 0 || payload.AccountId < 0 || payload.SourceId <= 0 || !cache.Initialized() {
-		return
-	}
-	client, err := cache.RedisClient()
-	if err != nil {
-		return
-	}
-	member := fmt.Sprintf("%d:%d:%d", payload.TenantId, payload.AccountId, payload.SourceId)
-	_, _ = client.Do(ctx, "SADD", collectProcessActiveSourcesKey, member)
-	// Redis-first needs recovery membership, but must not wake the legacy Outbox.
+// Legacy outbox wakeups use the same reliable source protocol as process
+// jobs. No active-source scan or destructive wake-list pop is involved.
+func markCollectProcessSourceActive(ctx context.Context, payload collectProcessQueuePayload) error {
 	if collectProcessOutboxMode(ctx) != "postgres_outbox" {
-		return
+		return nil
 	}
-	// Keep wakeups isolated per tenant/account/source. The database remains
-	// authoritative; this Redis list only wakes the source-scoped dispatcher.
-	wakeLockKey := collectProcessSourceWakeLockKey(member)
-	woken, wakeErr := client.Do(ctx, "SET", wakeLockKey, "1", "NX", "EX", 30)
-	if wakeErr == nil && wakeAccepted(woken.String()) {
-		_, _ = client.Do(ctx, "LPUSH", collectProcessSourceWakeQueueKey(member), member)
-	}
+	return enqueueCollectSourceOutboxWake(ctx, payload)
 }
 
 type collectProcessQueuePayload struct {
@@ -289,7 +275,7 @@ func (s *sSysPublish) enqueueCollectProcessTask(ctx context.Context, payload col
 func (s *sSysPublish) enqueueCollectProcessTaskWithOutbox(ctx context.Context, payload collectProcessQueuePayload, delay time.Duration, unique, persist bool) (enqueued bool, err error) {
 	// BOT 采集事件可能没有协议号账户归属，account_id=0 仍是合法租户+来源分片。
 	if payload.TenantId <= 0 || payload.AccountId < 0 || payload.SourceId <= 0 {
-		return false, nil
+		return false, gerror.New("采集任务缺少有效租户或来源归属")
 	}
 	sourcePendingReserved := false
 	if payload.EventId == 0 && persist {
@@ -297,10 +283,9 @@ func (s *sSysPublish) enqueueCollectProcessTaskWithOutbox(ctx context.Context, p
 		if reserveErr != nil {
 			return false, reserveErr
 		}
-		if !reserved {
-			return false, nil
-		}
-		sourcePendingReserved = true
+		// Even a coalesced wake must reach sourcequeue: its generation fences
+		// an older in-flight ACK from swallowing this notification.
+		sourcePendingReserved = reserved
 		defer func() {
 			if sourcePendingReserved && err != nil {
 				removeCollectProcessSourcePending(ctx, payload)
@@ -328,63 +313,43 @@ func (s *sSysPublish) enqueueCollectProcessTaskWithOutbox(ctx context.Context, p
 			}
 			g.Log().Warningf(ctx, "采集处理Outbox尚未迁移，临时沿用Redis任务 eventId:%d err:%+v", payload.EventId, err)
 		} else if payload.EventId > 0 {
-			markCollectProcessSourceActive(ctx, payload)
+			if wakeErr := markCollectProcessSourceActive(ctx, payload); wakeErr != nil {
+				return false, wakeErr
+			}
 			// Persist first, then hand the event directly to the realtime Redis queue.
 			// The durable outbox remains the recovery source if Redis enqueue fails.
 			return s.enqueueCollectProcessTaskWithOutbox(ctx, payload, delay, unique, false)
 		}
 	}
-	// Redis-first realtime work is already durable in Asynq. Do not create an
+	// Redis-first realtime work is durable in the source queue. Do not create an
 	// otherwise-unused PostgreSQL Outbox row merely to describe a Redis task.
 	// The event table remains the business projection and the task's unique key
 	// plus retry policy provide the execution handoff.
 	if persist && payload.EventId > 0 && collectProcessOutboxMode(ctx) == "postgres_outbox" {
-		markCollectProcessSourceActive(ctx, payload)
+		if wakeErr := markCollectProcessSourceActive(ctx, payload); wakeErr != nil {
+			return false, wakeErr
+		}
 	}
-	client, err := s.telegramQueueClient(ctx)
-	if err != nil {
-		return false, err
+	// sourcequeue's identity excludes Observation, so Unique no longer needs
+	// to discard a carrier. Preserve an existing event trace on every retry.
+	if len(payload.Observation) == 0 {
+		payload = captureCollectProcessObservation(ctx, payload, false, time.Now())
 	}
-	payload = captureCollectProcessObservation(ctx, payload, unique, time.Now())
-	body, err := collectProcessTaskBody(payload)
-	if err != nil {
-		return false, err
-	}
-	task := asynq.NewTask(tgTaskTypeCollectProcess, body)
-	uniqueTTL := collectProcessTaskUniqueTTL
-	if delay > 0 && delay+10*time.Second > uniqueTTL {
-		uniqueTTL = delay + 10*time.Second
-	}
-	options := []asynq.Option{
-		asynq.Queue(collectProcessQueueName(payload)),
-		asynq.MaxRetry(collectProcessTaskMaxRetry),
-		asynq.Timeout(2 * time.Minute),
-	}
-	if payload.OutboxOwner != "" {
-		options = append(options, asynq.TaskID("collect-"+payload.OutboxOwner))
-	} else if unique {
-		reserved, reserveErr := reserveCollectProcessSchedule(ctx, payload, uniqueTTL)
-		if reserveErr != nil {
+	uniqueTTL := max(collectProcessTaskUniqueTTL, delay+10*time.Second)
+	if payload.OutboxOwner == "" && unique {
+		if _, reserveErr := reserveCollectProcessSchedule(ctx, payload, uniqueTTL); reserveErr != nil {
 			return false, reserveErr
 		}
-		if !reserved {
-			return false, nil
-		}
-		options = append(options, asynq.Unique(uniqueTTL))
-	} else if err = refreshCollectProcessSchedule(ctx, payload, uniqueTTL); err != nil {
+	} else if refreshErr := refreshCollectProcessSchedule(ctx, payload, uniqueTTL); refreshErr != nil {
+		return false, refreshErr
+	}
+	// The queue coalesces stable IDs with generations. Schedule reservations
+	// remain a business hint, never a reason to drop a newer wakeup.
+	if err = enqueueCollectSourceProcess(ctx, payload, delay); err != nil {
+		removeCollectProcessSchedule(ctx, payload)
 		return false, err
 	}
-	if delay > 0 {
-		options = append(options, asynq.ProcessIn(delay))
-	}
-	_, err = client.EnqueueContext(ctx, task, options...)
-	if errors.Is(err, asynq.ErrDuplicateTask) || errors.Is(err, asynq.ErrTaskIDConflict) {
-		return false, nil
-	}
-	if err != nil {
-		removeCollectProcessSchedule(ctx, payload)
-	}
-	return err == nil, err
+	return true, nil
 }
 
 func collectProcessScheduleKey(payload collectProcessQueuePayload) string {
