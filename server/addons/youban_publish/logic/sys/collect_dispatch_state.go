@@ -42,23 +42,13 @@ func (s *sSysPublish) markCollectDispatchFailed(ctx context.Context, dispatchId 
 }
 
 func (s *sSysPublish) markCollectEventsFailedByDispatchRows(ctx context.Context, rows gdb.Result, message string) error {
-	now := gtime.Now()
 	for _, row := range rows {
 		eventId := row["event_id"].Int64()
 		if eventId <= 0 {
 			continue
 		}
-		if _, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
-			Where("id", eventId).
-			Where("status", sysin.CollectEventStatusDispatched).
-			Data(g.Map{
-				"status":        sysin.CollectEventStatusFailed,
-				"error_message": message,
-				"processed_at":  now,
-				"updated_at":    now,
-			}).
-			Update(); err != nil {
-			return gerror.Wrap(err, "更新采集事件失败状态失败")
+		if err := s.reopenCollectEventAfterDispatchFailure(ctx, eventId, message); err != nil {
+			return err
 		}
 		s.syncCollectSourceStatsForEvent(ctx, eventId)
 	}

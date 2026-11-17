@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -40,46 +41,102 @@ func (s *sSysPublish) filterCollectRulesByClaimedSourceGroup(ctx context.Context
 	if len(rules) == 0 || collectSourceGroupKey(event) == "" {
 		return rules, nil
 	}
-	chatID := canonicalCollectSourceChatID(event["source_chat_id"].String())
-	query := g.DB().Model(publishCollectDispatchTable+" d").Safe().Ctx(ctx).
-		InnerJoin(publishCollectEventTable+" e", "e.id=d.event_id").
-		InnerJoin(pdao.YoubanPublishCollectSource.Table()+" s", "s.id=d.source_id AND s.deleted_at IS NULL").
-		InnerJoin(collectDispatchChannelTable+" dc", "dc.dispatch_id=d.id").
-		Fields("dc.channel_id").
-		Where("d.tenant_id", event["tenant_id"].Int64()).
-		Where("d.account_id", event["account_id"].Int64()).
-		Where("d.status <> ?", sysin.CollectDispatchStatusFailed).
-		Where("d.event_id <> ?", event["id"].Int64()).
-		Where("REPLACE(e.source_chat_id, '-100', '') = ?", chatID)
-	if groupedID := strings.TrimSpace(event["source_grouped_id"].String()); groupedID != "" {
-		query = query.Where("e.source_grouped_id", groupedID)
-	} else {
-		query = query.Where("e.source_grouped_id = ''").Where("e.source_message_id", event["source_message_id"].Int64())
+	tenantID, accountID, sourceID := event["tenant_id"].Int64(), event["account_id"].Int64(), event["source_id"].Int64()
+	if tenantID <= 0 || accountID <= 0 || sourceID <= 0 {
+		return nil, gerror.New("来源消息组分发归属不完整")
 	}
-	values, err := query.Array()
+	// The branch event carries the business owner. Historical Bot events and
+	// their dispatch claims may still use transport account 0; the helper
+	// preserves that raw scope without substituting it for the business owner.
+	accountScope := collectEventAccountScope(event)
+	const candidateLimit = 128
+	const claimLimit = 4096
+	if len(rules) > candidateLimit {
+		return nil, gerror.New("来源消息组规则超过安全查询上限")
+	}
+	parentCtx := ctx
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if tx := gdb.TXFromCtx(parentCtx, g.DB().GetGroup()); tx != nil {
+		defer tx.Ctx(parentCtx)
+	}
+	e := pdao.YoubanPublishCollectEvent.Columns()
+	query := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+		Fields(e.Id).Where(e.TenantId, tenantID).WhereIn(e.AccountId, accountScope).
+		Where(e.SourceId, sourceID).Where(e.Id+" <> ?", event["id"].Int64()).
+		WhereIn(e.SourceChatId, tgChannelCacheLookupIds(event["source_chat_id"].String()))
+	if groupedID := strings.TrimSpace(event["source_grouped_id"].String()); groupedID != "" {
+		query = query.Where(e.SourceGroupedId, groupedID)
+	} else {
+		query = query.Where(e.SourceGroupedId, "").Where(e.SourceMessageId, event["source_message_id"].Int64())
+	}
+	values, err := query.OrderAsc(e.Id).Limit(candidateLimit + 1).Array()
+	if err != nil {
+		return nil, gerror.Wrap(err, "检查同来源消息组事件失败")
+	}
+	if len(values) > candidateLimit {
+		return nil, gerror.New("同来源消息组事件超过安全查询上限")
+	}
+	if len(values) == 0 {
+		return rules, nil
+	}
+	eventIDs := make([]int64, 0, len(values))
+	for _, value := range values {
+		eventIDs = append(eventIDs, value.Int64())
+	}
+	ruleIDs := make([]int64, 0, len(rules))
+	for _, rule := range rules {
+		if rule["id"].Int64() <= 0 || collectRuleSourceID(event, rule) != sourceID {
+			return nil, gerror.New("采集规则与事件来源归属不一致")
+		}
+		ruleIDs = append(ruleIDs, rule["id"].Int64())
+	}
+	rows, err := g.DB().Model(publishCollectDispatchTable+" d").Safe().Ctx(ctx).
+		InnerJoin(collectDispatchChannelTable+" dc", "dc.dispatch_id=d.id").
+		Fields("d.rule_id,dc.channel_id").
+		Where("d.tenant_id", tenantID).WhereIn("d.account_id", accountScope).Where("d.source_id", sourceID).
+		WhereIn("d.event_id", eventIDs).WhereIn("d.rule_id", uniqueIds(ruleIDs)).
+		Where("d.status <> ?", sysin.CollectDispatchStatusFailed).
+		OrderAsc("d.id").OrderAsc("dc.channel_id").Limit(claimLimit + 1).All()
 	if err != nil {
 		return nil, gerror.Wrap(err, "检查来源消息组分发记录失败")
 	}
-	claimed := make(map[int64]struct{}, len(values))
-	for _, value := range values {
-		claimed[value.Int64()] = struct{}{}
+	if len(rows) > claimLimit {
+		return nil, gerror.New("来源消息组分发记录超过安全查询上限")
+	}
+	return filterCollectRulesByBranchClaims(rules, rows), nil
+}
+
+// Claims are already scoped to tenant/account/source. Rule A never reserves a
+// channel for rule B, including when neither has a persisted dispatch yet.
+func filterCollectRulesByBranchClaims(rules []gdb.Record, claims []gdb.Record) []gdb.Record {
+	claimed := make(map[int64]map[int64]bool)
+	for _, claim := range claims {
+		ruleID := claim["rule_id"].Int64()
+		if claimed[ruleID] == nil {
+			claimed[ruleID] = make(map[int64]bool)
+		}
+		claimed[ruleID][claim["channel_id"].Int64()] = true
 	}
 	filtered := make([]gdb.Record, 0, len(rules))
 	for _, rule := range rules {
 		available := make([]int64, 0)
 		for _, channelID := range collectRuleTargetChannelIds(rule) {
-			if _, exists := claimed[channelID]; !exists {
+			if !claimed[rule["id"].Int64()][channelID] {
 				available = append(available, channelID)
-				claimed[channelID] = struct{}{}
 			}
 		}
 		if len(available) == 0 {
 			continue
 		}
-		rule["target_channel_ids"] = g.NewVar(available)
-		filtered = append(filtered, rule)
+		copyRule := make(gdb.Record, len(rule))
+		for key, value := range rule {
+			copyRule[key] = value
+		}
+		copyRule["target_channel_ids"] = g.NewVar(available)
+		filtered = append(filtered, copyRule)
 	}
-	return filtered, nil
+	return filtered
 }
 
 func attachCollectRuleChannels(ctx context.Context, rules []gdb.Record) error {

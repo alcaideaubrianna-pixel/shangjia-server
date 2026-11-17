@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -392,9 +393,12 @@ func TestMatchBotCollectionSourcesFansOutToEveryAccountRule(t *testing.T) {
 func TestIngestBotCollectionSourcesContinuesAfterSourceFailure(t *testing.T) {
 	sources := []botCollectionSource{{TenantID: 10, ID: 130}, {TenantID: 10, ID: 131}, {TenantID: 10, ID: 132}}
 	wantFailure := errors.New("temporary database error")
-	attempted := make([]int64, 0, len(sources))
-	err := ingestBotCollectionSources(sources, func(source botCollectionSource) error {
-		attempted = append(attempted, source.ID)
+	attempted := make(map[int64]int, len(sources))
+	var mu sync.Mutex
+	err := ingestBotCollectionSources(context.Background(), sources, func(source botCollectionSource) error {
+		mu.Lock()
+		attempted[source.ID]++
+		mu.Unlock()
 		if source.ID == 131 {
 			return wantFailure
 		}
@@ -406,9 +410,9 @@ func TestIngestBotCollectionSourcesContinuesAfterSourceFailure(t *testing.T) {
 	if len(attempted) != len(sources) {
 		t.Fatalf("attempted sources=%v, want every source attempted", attempted)
 	}
-	for i, source := range sources {
-		if attempted[i] != source.ID {
-			t.Fatalf("attempted sources=%v, want source order %v", attempted, sources)
+	for _, source := range sources {
+		if attempted[source.ID] != 1 {
+			t.Fatalf("attempted sources=%v, want each source once", attempted)
 		}
 	}
 }
@@ -416,14 +420,290 @@ func TestIngestBotCollectionSourcesContinuesAfterSourceFailure(t *testing.T) {
 func TestIngestBotCollectionSourcesReturnsNilWhenAllAccepted(t *testing.T) {
 	sources := []botCollectionSource{{TenantID: 10, ID: 130}, {TenantID: 10, ID: 131}}
 	calls := 0
-	if err := ingestBotCollectionSources(sources, func(botCollectionSource) error {
+	var mu sync.Mutex
+	if err := ingestBotCollectionSources(context.Background(), sources, func(botCollectionSource) error {
+		mu.Lock()
 		calls++
+		mu.Unlock()
 		return nil
 	}); err != nil {
 		t.Fatalf("unexpected ingest error: %v", err)
 	}
 	if calls != len(sources) {
 		t.Fatalf("ingest calls=%d, want %d", calls, len(sources))
+	}
+}
+
+func TestIngestBotCollectionSourcesPanicIsolationAndStableErrors(t *testing.T) {
+	sources := []botCollectionSource{{ID: 130}, {ID: 131}, {ID: 132}, {ID: 133}, {ID: 134}}
+	firstErr := errors.New("first failure")
+	panicErr := errors.New("panic failure")
+	attempted := make(map[int64]int)
+	var mu sync.Mutex
+	for iteration := 0; iteration < 3; iteration++ {
+		secondReached := make(chan struct{})
+		err := ingestBotCollectionSources(context.Background(), sources, func(source botCollectionSource) error {
+			mu.Lock()
+			attempted[source.ID]++
+			mu.Unlock()
+			switch source.ID {
+			case 130:
+				<-secondReached // Later source finishes first; errors must not follow completion order.
+				return firstErr
+			case 131:
+				close(secondReached)
+				panic(panicErr)
+			case 132:
+				panic("private payload must not be copied")
+			default:
+				return nil
+			}
+		})
+		if !errors.Is(err, firstErr) || !errors.Is(err, panicErr) {
+			t.Fatalf("lost callback/panic error identity: %v", err)
+		}
+		joined, ok := err.(interface{ Unwrap() []error })
+		if !ok || len(joined.Unwrap()) != 3 {
+			t.Fatalf("expected three source failures: %v", err)
+		}
+		failures := joined.Unwrap()
+		if !errors.Is(failures[0], firstErr) || !errors.Is(failures[1], panicErr) ||
+			failures[2].Error() != "采集source 132接收Telegram更新失败: 采集来源处理发生panic，类型: string" {
+			t.Fatalf("source errors reordered or panic payload leaked: %v", failures)
+		}
+	}
+	for _, source := range sources {
+		if attempted[source.ID] != 3 {
+			t.Fatalf("source %d calls=%d, want once per invocation", source.ID, attempted[source.ID])
+		}
+	}
+}
+
+func TestIngestBotCollectionSourcesEmptyCancellation(t *testing.T) {
+	if err := ingestBotCollectionSources(context.Background(), nil, nil); err != nil {
+		t.Fatalf("empty input should succeed: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := ingestBotCollectionSources(ctx, nil, nil); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled empty input must not report success: %v", err)
+	}
+}
+
+func TestIngestBotCollectionSourcesConcurrencyBound(t *testing.T) {
+	sources := make([]botCollectionSource, 12)
+	for i := range sources {
+		sources[i] = botCollectionSource{TenantID: 10, ID: int64(i + 1)}
+	}
+	started := make(chan int64, len(sources))
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	var (
+		mu      sync.Mutex
+		once    sync.Once
+		active  int
+		maximum int
+		calls   = make(map[int64]int)
+	)
+	unblock := func() { once.Do(func() { close(release) }) }
+	t.Cleanup(unblock)
+	go func() {
+		done <- ingestBotCollectionSources(context.Background(), sources, func(source botCollectionSource) error {
+			mu.Lock()
+			calls[source.ID]++
+			active++
+			if active > maximum {
+				maximum = active
+			}
+			mu.Unlock()
+			started <- source.ID
+			<-release
+			mu.Lock()
+			active--
+			mu.Unlock()
+			return nil
+		})
+	}()
+	for i := 0; i < 4; i++ {
+		select {
+		case <-started:
+		case <-time.After(2 * time.Second):
+			t.Fatal("did not start four concurrent callbacks")
+		}
+	}
+	mu.Lock()
+	peakBeforeRelease := maximum
+	mu.Unlock()
+	if peakBeforeRelease != 4 {
+		t.Fatalf("concurrency=%d, want 4", peakBeforeRelease)
+	}
+	unblock()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("workers did not finish")
+	}
+	if maximum > 4 {
+		t.Fatalf("unbounded callback concurrency: %d", maximum)
+	}
+	for _, source := range sources {
+		if calls[source.ID] != 1 {
+			t.Fatalf("source %d calls=%d", source.ID, calls[source.ID])
+		}
+	}
+}
+
+func TestIngestBotCollectionSourcesSlowSourceDoesNotBlockSiblings(t *testing.T) {
+	sources := []botCollectionSource{{ID: 1}, {ID: 2}, {ID: 3}, {ID: 4}, {ID: 5}, {ID: 6}}
+	slowStarted := make(chan struct{})
+	siblingFinished := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	t.Cleanup(unblock)
+	go func() {
+		done <- ingestBotCollectionSources(context.Background(), sources, func(source botCollectionSource) error {
+			if source.ID == 1 {
+				close(slowStarted)
+				<-release
+			}
+			if source.ID == 6 {
+				close(siblingFinished)
+			}
+			return nil
+		})
+	}()
+	for _, signal := range []<-chan struct{}{slowStarted, siblingFinished} {
+		select {
+		case <-signal:
+		case <-time.After(2 * time.Second):
+			t.Fatal("slow source blocked another source")
+		}
+	}
+	unblock()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("fanout did not finish")
+	}
+}
+
+func TestBotCollectionBindingsShareBoundedSchedulingAcrossTenants(t *testing.T) {
+	candidates := []botCollectionSource{
+		{TenantID: 10, ID: 130}, {TenantID: 10, ID: 131},
+		{TenantID: 11, ID: 140}, {TenantID: 11, ID: 141},
+		{TenantID: 99, ID: 990}, // Not authorized by either binding.
+	}
+	var targets []botCollectionSource
+	seen := make(map[[2]int64]struct{})
+	for _, tenantID := range []int64{10, 10, 11} { // Repeated binding must not duplicate delivery.
+		matched := matchBotCollectionSources(candidates, tenantID, 9)
+		targets = appendMatchedBotCollectionSources(targets, matched, seen)
+	}
+	targets = appendMatchedBotCollectionSources(targets, matchBotCollectionSources(candidates, 99, 0), seen)
+	if len(targets) != 4 {
+		t.Fatalf("expected four authorized tenant/source targets, got %+v", targets)
+	}
+
+	release := make(chan struct{})
+	started := make(chan botCollectionSource, len(targets))
+	done := make(chan error, 1)
+	var (
+		mu    sync.Mutex
+		once  sync.Once
+		calls = make(map[[2]int64]int)
+	)
+	unblock := func() { once.Do(func() { close(release) }) }
+	t.Cleanup(unblock)
+	go func() {
+		done <- ingestBotCollectionSources(context.Background(), targets, func(source botCollectionSource) error {
+			mu.Lock()
+			calls[[2]int64{source.TenantID, source.ID}]++
+			mu.Unlock()
+			started <- source
+			if source.ID == 130 || source.ID == 140 {
+				<-release // Each tenant has one independently blocked source.
+			}
+			return nil
+		})
+	}()
+	scheduled := make(map[[2]int64]bool)
+	for i := 0; i < len(targets); i++ {
+		select {
+		case source := <-started:
+			scheduled[[2]int64{source.TenantID, source.ID}] = true
+		case <-time.After(2 * time.Second):
+			t.Fatal("a slow tenant prevented another tenant's sources from being scheduled")
+		}
+	}
+	for _, key := range [][2]int64{{10, 130}, {10, 131}, {11, 140}, {11, 141}} {
+		if !scheduled[key] {
+			t.Fatalf("source %v did not start while slow sources remained blocked", key)
+		}
+	}
+	unblock()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("shared scheduling did not finish")
+	}
+	for key, count := range calls {
+		if count != 1 {
+			t.Fatalf("duplicate callback for tenant/source %v: %d", key, count)
+		}
+	}
+}
+
+func TestAppendMatchedBotCollectionSourcesDedupeUsesTenantAndSource(t *testing.T) {
+	seen := make(map[[2]int64]struct{})
+	first := botCollectionSource{TenantID: 10, ID: 130}
+	second := botCollectionSource{TenantID: 11, ID: 130}
+	targets := appendMatchedBotCollectionSources(nil, []botCollectionSource{first, second, first}, seen)
+	if len(targets) != 2 || targets[0] != first || targets[1] != second {
+		t.Fatalf("dedupe must preserve distinct tenants and first-seen ordering: %+v", targets)
+	}
+}
+
+func TestIngestBotCollectionSourcesSharedCancellation(t *testing.T) {
+	for _, beforeStart := range []bool{true, false} {
+		t.Run(fmt.Sprintf("beforeStart=%t", beforeStart), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if beforeStart {
+				cancel()
+			}
+			sources := []botCollectionSource{{ID: 1}, {ID: 2}, {ID: 3}, {ID: 4}, {ID: 5}}
+			var mu sync.Mutex
+			calls := make(map[int64]int)
+			err := ingestBotCollectionSources(ctx, sources, func(source botCollectionSource) error {
+				mu.Lock()
+				calls[source.ID]++
+				mu.Unlock()
+				cancel()
+				return nil // Even a callback that ignores cancellation cannot imply all succeeded.
+			})
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("cancellation falsely reported as success: %v", err)
+			}
+			if beforeStart && len(calls) != 0 {
+				t.Fatalf("called sources after pre-cancel: %v", calls)
+			}
+			for id, count := range calls {
+				if count != 1 {
+					t.Fatalf("source %d called %d times", id, count)
+				}
+			}
+		})
 	}
 }
 

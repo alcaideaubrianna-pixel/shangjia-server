@@ -326,7 +326,7 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		Where("id", eventId).
 		Where("tenant_id", tenantId)
 	if accountId > 0 {
-		eventModel = eventModel.Where("account_id", accountId)
+		eventModel = eventModel.Where("(account_id=? OR (account_id=0 AND source_type=?))", accountId, sysin.CollectSourceTypeBot)
 	}
 	event, err := eventModel.One()
 	if err != nil {
@@ -476,7 +476,7 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 				Fields("id,status,error_message").
 				Where("id", parentEventId).
 				Where("tenant_id", tenantId).
-				Where("account_id", accountId).
+				Where("account_id", collectEventStorageAccountID(event)).
 				One()
 			if parentErr != nil {
 				return gerror.Wrap(parentErr, "读取验证资料父展示事件失败")
@@ -578,8 +578,8 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		// 去重锁只保护资料提交的短事务，禁止在这里无限等待；
 		// Redis 锁被其他事件占用时让 Outbox 延迟重入，避免整个来源队列被阻塞。
 		dedupeLock := lock.NewConfig(30*time.Second, 20*time.Millisecond).WithoutWatchDog().Mutex(fmt.Sprintf(
-			"youban_publish:collect:dedupe-commit:%d:%d:%s",
-			event["tenant_id"].Int64(), event["account_id"].Int64(), collectHash(signatureKey),
+			"youban_publish:collect:dedupe-commit:%d:%d:%d:%s",
+			event["tenant_id"].Int64(), event["account_id"].Int64(), event["source_id"].Int64(), collectHash(signatureKey),
 		))
 		if err = dedupeLock.TryLock(ctx); err != nil {
 			for index := len(dedupeLocks) - 1; index >= 0; index-- {
@@ -622,45 +622,62 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		return newCollectProcessRetryError(30*time.Second, err.Error())
 	}
 	content = canonical
-	candidateRules, err = s.filterCollectRulesByClaimedSourceGroup(ctx, event, candidateRules)
+	// Preserve raw event identity for storage/settlement. Only the submission
+	// branch receives the validated source's real business account.
+	branchEvent, branchErr := collectEventForBranch(event, source)
+	if branchErr != nil {
+		return branchErr
+	}
+	candidateRules, err = s.filterCollectRulesByClaimedSourceGroup(ctx, branchEvent, candidateRules)
 	if err != nil {
 		return err
 	}
 	if len(candidateRules) == 0 {
 		return s.ignoreCollectEvent(ctx, eventId, "同一来源消息组已生成推送任务", "source_group")
 	}
-	matched := false
-	reasons := make([]string, 0, len(candidateRules))
 	reportCollectProgress(ctx, "commit", "按匹配规则保存资料并创建分发任务")
-	for _, rule := range candidateRules {
-		ruleMatched, skipReason, dispatchErr := s.dispatchCollectEventByRule(ctx, event, content, rule)
-		if dispatchErr != nil {
-			err = dispatchErr
-			var retryErr *collectProcessRetryError
-			if !errors.As(err, &retryErr) {
-				_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusFailed, err.Error())
-			}
-			return err
-		}
-		if ruleMatched {
-			matched = true
-		} else if strings.TrimSpace(skipReason) != "" {
-			reasons = append(reasons, strings.TrimSpace(skipReason))
+	fanout := executeCollectRuleBranches(ctx, candidateRules, func(branchCtx context.Context, rule gdb.Record) (bool, string, error) {
+		return s.dispatchCollectEventByRule(branchCtx, branchEvent, content, rule)
+	})
+	for _, branch := range fanout.Branches {
+		if branch.Err != nil {
+			g.Log().Warning(ctx, "采集规则分支未完成，其他规则继续执行", g.Map{
+				"event": "collect_rule_branch_incomplete", "collectEventId": eventId,
+				"tenantId": tenantId, "accountId": accountId, "sourceId": event["source_id"].Int64(),
+				"ruleId": branch.RuleID, "outcome": branch.Outcome, "error": branch.Err.Error(),
+			})
 		}
 	}
-	if !matched {
+	if fanout.Err != nil {
+		// A failed branch must not finish the whole event or cancel its media.
+		// Completed branches retain their dispatch/operation identity on retry.
+		cols := pdao.YoubanPublishCollectEvent.Columns()
+		saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+		_, saveErr := pdao.YoubanPublishCollectEvent.Ctx(saveCtx).WherePri(eventId).
+			Where(cols.TenantId, tenantId).Where(cols.SourceId, event["source_id"].Int64()).
+			Data(g.Map{cols.Status: sysin.CollectEventStatusMediaReady, cols.ProcessedAt: nil,
+				cols.ErrorMessage: fanout.Err.Error()}).Update()
+		cancel()
+		if saveErr != nil {
+			err = gerror.Wrap(saveErr, "保存采集规则未完成状态失败")
+			return err
+		}
+		err = fanout.Err
+		return err
+	}
+	if !fanout.Matched {
 		message := "未命中规则或被屏蔽"
-		if len(reasons) > 0 {
-			message = strings.Join(uniqueStrings(reasons), "；")
+		if len(fanout.Reasons) > 0 {
+			message = strings.Join(uniqueStrings(fanout.Reasons), "；")
 		}
 		return s.ignoreCollectEvent(ctx, eventId, message, "final")
 	}
-	g.Log().Infof(ctx, "采集事件分发完成 eventId:%d matched:%t rules:%d", eventId, matched, len(candidateRules))
+	g.Log().Infof(ctx, "采集事件分发完成 eventId:%d matched:%t rules:%d", eventId, fanout.Matched, len(candidateRules))
 	s.appendCollectEventLogForRecord(ctx, event, "dispatch", "dispatched", "采集事件已生成分发任务", "")
 	if err = s.completePairedCollectVerifyEvent(ctx, eventId); err != nil {
 		return err
 	}
-	return s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusDispatched, "")
+	return s.finishCollectEventDispatchHandoff(ctx, eventId)
 }
 
 func (s *sSysPublish) completePairedCollectVerifyEvent(ctx context.Context, displayEventID int64) error {
@@ -951,10 +968,21 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 	} else if ok {
 		rule["intro_fee_suffix"] = gvar.New(suffix)
 	}
-	decision := buildCollectRuleDecision(event, content, rule)
-	if decision.Skipped || !decision.Matched {
-		s.appendCollectEventLogForRecord(ctx, event, "rule", "skipped", decision.Reason, fmt.Sprintf("rule=%d", rule["id"].Int64()))
-		return false, decision.Reason, nil
+	existingDispatch, err := findCollectBranchDispatch(ctx, pdao.YoubanPublishCollectDispatch.Ctx(ctx), event, rule)
+	if err != nil {
+		return false, "", gerror.Wrap(err, "读取采集分发幂等记录失败")
+	}
+	var decision *collectRuleDecision
+	if !existingDispatch.IsEmpty() {
+		// This branch was already accepted. Keep its dispatch/operation and
+		// render the body without reapplying today's keyword/precheck gates.
+		decision = &collectRuleDecision{Matched: true, Text: renderCollectRuleText(event, content, rule), MatchJSON: existingDispatch["match_json"].String()}
+	} else {
+		decision = buildCollectRuleDecision(event, content, rule)
+		if decision.Skipped || !decision.Matched {
+			s.appendCollectEventLogForRecord(ctx, event, "rule", "skipped", decision.Reason, fmt.Sprintf("rule=%d", rule["id"].Int64()))
+			return false, decision.Reason, nil
+		}
 	}
 	classification, err := s.classifyCollectEvent(ctx, event, content)
 	if err != nil {
@@ -969,16 +997,6 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 		const reason = "验证资料组不能独立创建资料"
 		s.appendCollectEventLogForRecord(ctx, event, "classifier", "skipped", reason, fmt.Sprintf("rule=%d", rule["id"].Int64()))
 		return false, reason, nil
-	}
-	existingDispatch, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
-		Where("tenant_id", event["tenant_id"].Int64()).
-		Where("account_id", event["account_id"].Int64()).
-		Where("event_id", event["id"].Int64()).
-		Where("rule_id", rule["id"].Int64()).
-		OrderDesc("id").
-		One()
-	if err != nil {
-		return false, "", gerror.Wrap(err, "读取采集分发幂等记录失败")
 	}
 	if !existingDispatch.IsEmpty() {
 		return s.resumeExistingCollectDispatch(ctx, existingDispatch, event, content, rule, decision.Text)
@@ -1002,11 +1020,8 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 		reason := collectDuplicateReason(hit, replaced)
 		s.appendCollectEventLogForRecord(ctx, event, "dedupe", "skipped", reason, fmt.Sprintf("rule=%d", rule["id"].Int64()))
 		g.Log().Infof(ctx, "采集资料指纹命中 eventId:%d ruleId:%d profileId:%d channelId:%d layer:%s cacheHit:%t mediaReplaced:%t", event["id"].Int64(), rule["id"].Int64(), hit.ProfileID, hit.ChannelID, hit.Layer, hit.CacheHit, replaced)
-		// 重复资料已经完成复用/替换，当前事件不再需要创建新的发布分发；
-		// 必须立即落终态，否则 Outbox 会把 media_ready 无限重试。
-		if terminalErr := s.ignoreCollectEvent(ctx, event["id"].Int64(), "重复资料已复用，跳过重复分发", "dedupe"); terminalErr != nil {
-			return false, "", terminalErr
-		}
+		// Only this rule is skipped. The event owner settles after all rules,
+		// so a duplicate in one branch cannot cancel another branch's media.
 		return false, reason, nil
 	}
 	var dispatchId int64
@@ -1016,7 +1031,7 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 			Fields("id").
 			Where("id", event["id"].Int64()).
 			Where("tenant_id", event["tenant_id"].Int64()).
-			Where("account_id", event["account_id"].Int64()).
+			Where("account_id", collectEventStorageAccountID(event)).
 			LockUpdate().
 			One()
 		if txErr != nil {
@@ -1025,13 +1040,7 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 		if lockedEvent.IsEmpty() {
 			return gerror.New("采集事件不存在，无法创建分发记录")
 		}
-		concurrentDispatch, txErr = tx.Model(pdao.YoubanPublishCollectDispatch.Table()).Ctx(ctx).
-			Where("tenant_id", event["tenant_id"].Int64()).
-			Where("account_id", event["account_id"].Int64()).
-			Where("event_id", event["id"].Int64()).
-			Where("rule_id", rule["id"].Int64()).
-			OrderDesc("id").
-			One()
+		concurrentDispatch, txErr = findCollectBranchDispatch(ctx, tx.Model(pdao.YoubanPublishCollectDispatch.Table()).Ctx(ctx), event, rule)
 		if txErr != nil {
 			return gerror.Wrap(txErr, "复查采集分发幂等记录失败")
 		}
@@ -1092,6 +1101,7 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 	if err = observeCollectDispatchHandoff(ctx, event, dispatchId, profileId, func() error {
 		return s.submitCollectProfileDispatch(ctx, dispatchId, profileId, event)
 	}); err != nil {
+		_ = s.markCollectDispatchFailed(ctx, dispatchId, err.Error())
 		return false, "", err
 	}
 	return true, "", nil
@@ -1112,7 +1122,12 @@ func (s *sSysPublish) findCollectRuleDuplicate(ctx context.Context, event, rule 
 		// 只有明确开启全量回填时才等待索引；否则直接使用数据库指纹查询降级，不能阻塞采集入库。
 		return nil, newCollectProcessRetryError(15*time.Second, "资料指纹索引正在初始化")
 	}
-	return s.findProfileFingerprintDuplicate(ctx, event["tenant_id"].Int64(), event["account_id"].Int64(), event["bot_id"].Int64(), fingerprints, 0)
+	scoped := scopeCollectProfileFingerprints(collectPublishClientRequestId(event, rule), fingerprints)
+	hit, err := s.findProfileFingerprintDuplicate(ctx, event["tenant_id"].Int64(), event["account_id"].Int64(), event["bot_id"].Int64(), scoped, 0)
+	if err != nil || hit != nil {
+		return hit, err
+	}
+	return s.findLegacyCollectRuleDuplicate(ctx, event, rule, fingerprints)
 }
 
 func collectRuleDedupeEnabled(rule gdb.Record) bool {
@@ -1121,11 +1136,46 @@ func collectRuleDedupeEnabled(rule gdb.Record) bool {
 }
 
 func (s *sSysPublish) resumeExistingCollectDispatch(ctx context.Context, dispatch gdb.Record, event gdb.Record, content *collectContentResult, rule gdb.Record, text string) (bool, string, error) {
-	if rule["review_enabled"].Int() == 1 && dispatch["review_id"].Int64() <= 0 {
+	if err := validateCollectBranchProfileOwner(ctx, dispatch, event); err != nil {
+		return false, "", err
+	}
+	status := dispatch["status"].String()
+	handedOff := false
+	if status == sysin.CollectDispatchStatusPending && dispatch["profile_id"].Int64() > 0 {
+		job, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+			Fields("id").Where("tenant_id", event["tenant_id"].Int64()).
+			WhereIn("account_id", collectEventAccountScope(event)).
+			Where("profile_id", dispatch["profile_id"].Int64()).
+			Where("operation_no", fmt.Sprintf("collect:%d", dispatch["id"].Int64())).
+			OrderAsc("account_id").Limit(1).One()
+		if err != nil {
+			return false, "", gerror.Wrap(err, "核对采集分支发布交接失败")
+		}
+		handedOff = !job.IsEmpty()
+	}
+	if rule["review_enabled"].Int() == 1 && dispatch["review_id"].Int64() <= 0 &&
+		(status == sysin.CollectDispatchStatusPending || status == sysin.CollectDispatchStatusFailed) && !handedOff {
 		return true, "", s.createCollectReview(ctx, event, content, rule, dispatch["id"].Int64(), text)
 	}
-	switch collectDispatchResumeActionForStatus(dispatch["status"].String()) {
+	action := collectDispatchResumeActionForStatus(status)
+	if status == sysin.CollectDispatchStatusPending && rule["review_enabled"].Int() != 1 {
+		// A crash can leave a pending dispatch before material commit or queue
+		// submission. Pending alone is not a receipt that this branch finished.
+		if dispatch["profile_id"].Int64() <= 0 {
+			action = collectDispatchResumeSubmit
+		} else {
+			if !handedOff {
+				// The profile already exists; submit the same operation without
+				// rebuilding media or touching completed branches.
+				return true, "", s.submitCollectProfileDispatch(ctx, dispatch["id"].Int64(), dispatch["profile_id"].Int64(), event)
+			}
+		}
+	}
+	switch action {
 	case collectDispatchResumeNoop:
+		if status == sysin.CollectDispatchStatusSkipped {
+			return false, dispatch["error_message"].String(), nil
+		}
 		if dispatch["status"].String() == sysin.CollectDispatchStatusSent {
 			hasLateMedia, err := collectDispatchHasLateMedia(ctx, dispatch, event)
 			if err != nil {

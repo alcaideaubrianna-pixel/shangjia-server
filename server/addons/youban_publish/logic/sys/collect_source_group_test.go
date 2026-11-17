@@ -1,7 +1,9 @@
 package sys
 
 import (
+	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/gogf/gf/v2/container/gvar"
@@ -125,5 +127,66 @@ func TestCachedCollectRuleKeepsResolvedGlobalTextPolicy(t *testing.T) {
 	}
 	if got := rows[0]["intro_fee_suffix"].String(); got != "source-only" {
 		t.Fatalf("cached source suffix = %q", got)
+	}
+}
+
+func TestCollectSourceGroupClaimsDoNotConsumeOtherRules(t *testing.T) {
+	makeRule := func(id int64, channels ...int64) gdb.Record {
+		return gdb.Record{"id": gvar.New(id), "target_channel_ids": gvar.New(channels)}
+	}
+	rules := []gdb.Record{makeRule(48, 101, 102), makeRule(49, 101, 102)}
+	claims := []gdb.Record{{"rule_id": gvar.New(48), "channel_id": gvar.New(101)}}
+	filtered := filterCollectRulesByBranchClaims(rules, claims)
+	if len(filtered) != 2 {
+		t.Fatalf("rule A claim removed rule B: %v", filtered)
+	}
+	if got := collectRuleTargetChannelIds(filtered[0]); !reflect.DeepEqual(got, []int64{102}) {
+		t.Fatalf("rule A remaining channels=%v", got)
+	}
+	if got := collectRuleTargetChannelIds(filtered[1]); !reflect.DeepEqual(got, []int64{101, 102}) {
+		t.Fatalf("rule B must keep both channels: %v", got)
+	}
+	if got := collectRuleTargetChannelIds(rules[0]); !reflect.DeepEqual(got, []int64{101, 102}) {
+		t.Fatal("filter mutated cached rule targets")
+	}
+	// No in-memory reservation by rule A may remove B before either commits.
+	filtered = filterCollectRulesByBranchClaims(rules, nil)
+	if len(filtered) != 2 || len(collectRuleTargetChannelIds(filtered[1])) != 2 {
+		t.Fatal("independent rules sharing a target must both dispatch")
+	}
+	// A successful same-branch claim suppresses only that branch/target.
+	filtered = filterCollectRulesByBranchClaims([]gdb.Record{makeRule(48, 101), makeRule(49, 101)}, claims)
+	if len(filtered) != 1 || filtered[0]["id"].Int64() != 49 {
+		t.Fatal("same-branch claim must not suppress another rule")
+	}
+}
+
+func TestCollectSourceGroupClaimLookupStaysBranchScopedAndBounded(t *testing.T) {
+	raw, err := os.ReadFile("collect_channel_relation.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(raw)
+	start := strings.Index(source, "func (s *sSysPublish) filterCollectRulesByClaimedSourceGroup(")
+	if start < 0 {
+		t.Fatal("branch claim lookup not found")
+	}
+	end := strings.Index(source[start:], "\n// Claims are already scoped")
+	if end < 0 {
+		t.Fatal("branch claim lookup not found")
+	}
+	body := source[start : start+end]
+	for _, required := range []string{
+		"accountScope := collectEventAccountScope(event)",
+		"Where(e.TenantId, tenantID)", "WhereIn(e.AccountId, accountScope)", "Where(e.SourceId, sourceID)",
+		"WhereIn(\"d.account_id\", accountScope)", "Where(\"d.source_id\", sourceID)", "WhereIn(\"d.rule_id\", uniqueIds(ruleIDs))",
+		"Limit(candidateLimit + 1)", "Limit(claimLimit + 1)", "context.WithTimeout(ctx, 5*time.Second)",
+	} {
+		if !strings.Contains(body, required) {
+			t.Errorf("missing source-group isolation contract: %s", required)
+		}
+	}
+	if strings.Contains(body, "REPLACE(e.source_chat_id") {
+		t.Fatal("source-group lookup must use exact Chat ID aliases")
 	}
 }

@@ -150,13 +150,23 @@ func buildCollectRuleDecision(event gdb.Record, content *collectContentResult, r
 	if !precheck.Matched {
 		return &collectRuleDecision{Skipped: true, Reason: precheck.Reason, MatchJSON: precheck.MatchJSON}
 	}
-	matchJSON := precheck.MatchJSON
+	return &collectRuleDecision{
+		Matched: true, Text: renderCollectRuleText(event, content, rule), MatchJSON: precheck.MatchJSON,
+	}
+}
+
+// renderCollectRuleText applies only body transformations, without deciding
+// whether a new rule matches. Accepted dispatch retries use the same renderer
+// as new branches, so a changed precheck cannot replace their text with "".
+func renderCollectRuleText(event gdb.Record, content *collectContentResult, rule gdb.Record) string {
+	rawText := authoritativeCollectRawText(event["raw_text"].String())
+	mediaCount := event["media_count"].Int()
+	if content != nil {
+		rawText = authoritativeCollectRawText(content.RawText)
+		mediaCount = content.MediaCount
+	}
 	if strings.TrimSpace(rawText) == "" {
-		return &collectRuleDecision{
-			Matched:   true,
-			Text:      "",
-			MatchJSON: matchJSON,
-		}
+		return ""
 	}
 	introFeeSuffix := strings.TrimSpace(rule["intro_fee_suffix"].String())
 	text := normalizeCollectRuleBody(rawText, rule)
@@ -167,11 +177,11 @@ func buildCollectRuleDecision(event gdb.Record, content *collectContentResult, r
 	// entire body; the fee line itself must be restored from the pre-truncate text.
 	if strings.TrimSpace(text) == "" {
 		if introFeeSuffix == "" {
-			return &collectRuleDecision{Matched: true, Text: "", MatchJSON: matchJSON}
+			return ""
 		}
 		candidate := normalizeCollectRuleBodyWithoutTruncate(rawText, rule)
 		if strings.Contains(candidate, "\nKK") {
-			return &collectRuleDecision{Matched: true, Text: "", MatchJSON: matchJSON}
+			return ""
 		}
 		meaningful := false
 		feeSeen := false
@@ -182,7 +192,7 @@ func buildCollectRuleDecision(event gdb.Record, content *collectContentResult, r
 				continue
 			}
 			if feeSeen && (isCollectIntroFeeStandaloneSuffix(line) || collectShortTitleLine(line)) {
-				return &collectRuleDecision{Matched: true, Text: "", MatchJSON: matchJSON}
+				return ""
 			}
 			if line == "" || collectMaterialMetaLineRule.MatchString(line) {
 				continue
@@ -191,7 +201,7 @@ func buildCollectRuleDecision(event gdb.Record, content *collectContentResult, r
 			break
 		}
 		if !meaningful {
-			return &collectRuleDecision{Matched: true, Text: "", MatchJSON: matchJSON}
+			return ""
 		}
 	}
 	if rule["header_enabled"].Int() == 1 && strings.TrimSpace(rule["header_markdown"].String()) != "" {
@@ -207,11 +217,7 @@ func buildCollectRuleDecision(event gdb.Record, content *collectContentResult, r
 		text = applyCollectIntroFeeSuffix(text, amountText, introFeeSuffix)
 	}
 	text = preserveCollectCriticalProfileLines(rawText, text)
-	return &collectRuleDecision{
-		Matched:   true,
-		Text:      text,
-		MatchJSON: matchJSON,
-	}
+	return text
 }
 
 func normalizeCollectRuleBodyWithoutTruncate(text string, rule gdb.Record) string {

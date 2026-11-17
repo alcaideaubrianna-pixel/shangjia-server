@@ -1089,3 +1089,96 @@ func TestNormalizeCollectMaterialTextPreservesFooterIntroFee(t *testing.T) {
 		t.Fatalf("footer intro fee was removed: got %q want %q", got, want)
 	}
 }
+
+func TestAcceptedCollectDispatchRendersDespiteChangedPrecheck(t *testing.T) {
+	event := gdb.Record{
+		"raw_text": gvar.New("南京资料正文\n年龄：22\n介绍费 7888"), "media_count": gvar.New(4),
+	}
+	rule := gdb.Record{
+		"keywords":       gvar.New([]string{"后来新增的关键词"}),
+		"header_enabled": gvar.New(1), "header_markdown": gvar.New("前置说明"),
+		"footer_enabled": gvar.New(1), "footer_markdown": gvar.New("尾部说明"),
+		"intro_fee_suffix": gvar.New("来源后缀"),
+	}
+	decision := buildCollectRuleDecision(event, nil, rule)
+	if !decision.Skipped || decision.Matched || decision.Text != "" {
+		t.Fatal("new branches must still pass today's precheck")
+	}
+	acceptedText := renderCollectRuleText(event, nil, rule)
+	if acceptedText == "" || !strings.Contains(acceptedText, "南京资料正文") || !strings.Contains(acceptedText, "年龄：22") {
+		t.Fatal("accepted branch lost its body due to changed match conditions")
+	}
+	for _, want := range []string{"前置说明", "来源后缀"} {
+		if !strings.Contains(acceptedText, want) {
+			t.Fatalf("accepted branch bypassed body rendering: missing %q", want)
+		}
+	}
+	allowedRule := make(gdb.Record, len(rule))
+	for key, value := range rule {
+		allowedRule[key] = value
+	}
+	allowedRule["keywords"] = gvar.New([]string{})
+	if want := buildCollectRuleDecision(event, nil, allowedRule).Text; acceptedText != want {
+		t.Fatalf("accepted/new rendering differs: accepted=%q new=%q", acceptedText, want)
+	}
+	// Fee suffix reconstruction intentionally replaces the trailing fee area.
+	// Without that operation, the configured footer must survive rendering.
+	delete(allowedRule, "intro_fee_suffix")
+	if got := renderCollectRuleText(event, nil, allowedRule); !strings.Contains(got, "尾部说明") {
+		t.Fatalf("accepted branch lost its configured footer: %q", got)
+	}
+}
+
+func TestCollectRuleRendererUsesPreparedBodyWithoutRecheckingMatch(t *testing.T) {
+	event := gdb.Record{"raw_text": gvar.New("过时的原文"), "media_count": gvar.New(0)}
+	content := &collectContentResult{RawText: "合并后的资料正文\n介绍费 7888", MediaCount: 4}
+	rule := gdb.Record{"blocked_texts": gvar.New([]string{"合并后的资料正文"})}
+	if decision := buildCollectRuleDecision(event, content, rule); !decision.Skipped {
+		t.Fatal("new branch must still honor block matching")
+	}
+	if got := renderCollectRuleText(event, content, rule); !strings.Contains(got, "合并后的资料正文") || strings.Contains(got, "过时的原文") {
+		t.Fatalf("accepted branch must render authoritative material: %q", got)
+	}
+	if got := renderCollectRuleText(gdb.Record{}, nil, gdb.Record{
+		"header_enabled": gvar.New(1), "header_markdown": gvar.New("不应凭空创建正文"),
+	}); got != "" {
+		t.Fatal("renderer must not fabricate a body for empty material")
+	}
+}
+
+func TestCollectDispatchRecoveryPrecedesNewRuleMatching(t *testing.T) {
+	raw, err := os.ReadFile("collect_event.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(raw)
+	start := strings.Index(source, "func (s *sSysPublish) dispatchCollectEventByRule(")
+	if start < 0 {
+		t.Fatal("dispatch entry not found")
+	}
+	body := source[start:]
+	if end := strings.Index(body, "\n// findCollectRuleDuplicate"); end >= 0 {
+		body = body[:end]
+	}
+	lookup := strings.Index(body, "existingDispatch, err :=")
+	match := strings.Index(body, "decision = buildCollectRuleDecision(")
+	classify := strings.Index(body, "s.classifyCollectEvent(")
+	resume := strings.Index(body, "return s.resumeExistingCollectDispatch(")
+	dedupe := strings.Index(body, "fingerprints := buildProfileFingerprints(")
+	if lookup < 0 || match <= lookup || classify <= match || resume <= classify || dedupe <= resume {
+		t.Fatal("accepted branch must be read before new matching and resume after classifier safety checks")
+	}
+	for _, gate := range []string{"collectRuleChannelDisabled(", "采集来源与目标发布频道相同"} {
+		if index := strings.Index(body, gate); index < 0 || index >= lookup {
+			t.Fatalf("authorization/loop protection must precede accepted branch recovery: %s", gate)
+		}
+	}
+	acceptedStart := strings.Index(body, "if !existingDispatch.IsEmpty() {")
+	if acceptedStart < 0 || acceptedStart >= match {
+		t.Fatal("missing accepted branch before new matching")
+	}
+	accepted := body[acceptedStart:match]
+	if !strings.Contains(accepted, "renderCollectRuleText(event, content, rule)") || !strings.Contains(accepted, "existingDispatch[\"match_json\"]") {
+		t.Fatal("accepted branch must render independently and retain accepted match evidence")
+	}
+}

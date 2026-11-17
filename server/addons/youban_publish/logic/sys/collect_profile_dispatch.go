@@ -192,20 +192,22 @@ func (s *sSysPublish) markCollectDispatchSentByProfile(ctx context.Context, prof
 	}
 	rows, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
 		Fields("id,event_id").Where("profile_id", profileId).Where("event_id", eventId).
-		WhereIn("status", []string{sysin.CollectDispatchStatusPending, sysin.CollectDispatchStatusReviewing}).All()
+		WhereIn("status", []string{sysin.CollectDispatchStatusPending, sysin.CollectDispatchStatusReviewing, sysin.CollectDispatchStatusFailed}).All()
 	if err != nil {
 		return gerror.Wrap(err, "读取采集分发事件失败")
 	}
 	_, err = pdao.YoubanPublishCollectDispatch.Ctx(ctx).
 		Where("profile_id", profileId).Where("event_id", eventId).
-		WhereIn("status", []string{sysin.CollectDispatchStatusPending, sysin.CollectDispatchStatusReviewing}).
+		WhereIn("status", []string{sysin.CollectDispatchStatusPending, sysin.CollectDispatchStatusReviewing, sysin.CollectDispatchStatusFailed}).
+		Where(collectDispatchAllJobsSentCondition(pdao.YoubanPublishCollectDispatch.Table())).
 		Data(g.Map{"status": sysin.CollectDispatchStatusSent, "error_message": "", "finished_at": gtime.Now(), "updated_at": gtime.Now()}).Update()
 	if err != nil {
 		return gerror.Wrap(err, "更新采集分发发送状态失败")
 	}
 	for _, row := range rows {
 		_, err = pdao.YoubanPublishCollectEvent.Ctx(ctx).Where("id", row["event_id"].Int64()).
-			Where("status", sysin.CollectEventStatusDispatched).
+			WhereIn("status", []string{sysin.CollectEventStatusDispatched, sysin.CollectEventStatusFailed}).
+			Where(collectEventAllDispatchesFinishedCondition(pdao.YoubanPublishCollectEvent.Table())).
 			Data(g.Map{"status": sysin.CollectEventStatusProcessed, "error_message": "", "processed_at": gtime.Now(), "updated_at": gtime.Now()}).Update()
 		if err != nil {
 			return gerror.Wrap(err, "更新采集事件完成状态失败")

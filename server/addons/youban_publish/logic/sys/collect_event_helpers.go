@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -19,29 +20,157 @@ import (
 
 var collectGeneratedTitleNumberPattern = regexp.MustCompile(`(?im)^\s*编号\s*[:：=]\s*C\d+\s*$\n?`)
 
+const collectEventStorageAccountField = "_collect_storage_account_id"
+
+// collectEventStorageAccountID is the persisted event owner, not the resolved
+// business owner. Zero is meaningful for legacy Bot ingress and must survive.
+func collectEventStorageAccountID(event gdb.Record) int64 {
+	if value, ok := event[collectEventStorageAccountField]; ok && value != nil && !value.IsNil() {
+		return value.Int64()
+	}
+	return event["account_id"].Int64()
+}
+
+// collectEventAccountScope is for exact source/event legacy lookups only.
+// Profile ownership must always use event.account_id, never this relaxed scope.
+func collectEventAccountScope(event gdb.Record) []int64 {
+	owner, storage := event["account_id"].Int64(), collectEventStorageAccountID(event)
+	if owner == storage || storage < 0 {
+		return []int64{owner}
+	}
+	return []int64{owner, storage}
+}
+
+func collectEventForBranch(event, source gdb.Record) (gdb.Record, error) {
+	owner := source["account_id"].Int64()
+	storage := collectEventStorageAccountID(event)
+	if event.IsEmpty() || owner <= 0 || storage < 0 || source["id"].Int64() != event["source_id"].Int64() ||
+		source["tenant_id"].Int64() != event["tenant_id"].Int64() ||
+		(storage > 0 && storage != owner) || (storage == 0 && event["source_type"].String() != sysin.CollectSourceTypeBot) {
+		return nil, gerror.New("采集事件与来源业务账户归属不一致")
+	}
+	branch := make(gdb.Record, len(event)+1)
+	for key, value := range event {
+		branch[key] = value
+	}
+	branch[collectEventStorageAccountField] = g.NewVar(storage)
+	branch["account_id"] = g.NewVar(owner)
+	return branch, nil
+}
+
+// Exact accepted-branch lookup: legacy account=0 and resolved owner are
+// aliases only inside the same tenant/source/event/rule, never globally.
+func findCollectBranchDispatch(ctx context.Context, model *gdb.Model, event, rule gdb.Record) (gdb.Record, error) {
+	parentCtx := ctx
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	if tx := gdb.TXFromCtx(parentCtx, g.DB().GetGroup()); tx != nil {
+		defer tx.Ctx(parentCtx)
+	}
+	rows, err := model.Ctx(ctx).Where("tenant_id", event["tenant_id"].Int64()).
+		WhereIn("account_id", collectEventAccountScope(event)).Where("source_id", event["source_id"].Int64()).
+		Where("event_id", event["id"].Int64()).Where("rule_id", rule["id"].Int64()).
+		OrderDesc("id").Limit(3).All()
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取采集分发幂等记录失败")
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	if len(rows) == 1 {
+		return rows[0], nil
+	}
+	if len(rows) > 2 {
+		return nil, gerror.New("采集分支存在多个历史分发记录，拒绝自动归并")
+	}
+	var selected gdb.Record
+	for _, row := range rows {
+		job, queryErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+			Fields("id").Where("tenant_id", event["tenant_id"].Int64()).
+			Where("operation_no", fmt.Sprintf("collect:%d", row["id"].Int64())).Limit(1).One()
+		if queryErr != nil {
+			return nil, gerror.Wrap(queryErr, "确认历史采集分支发布操作失败")
+		}
+		if !job.IsEmpty() {
+			if !selected.IsEmpty() {
+				return nil, gerror.New("历史采集分支存在多个发布操作，拒绝重复交付")
+			}
+			selected = row
+		}
+	}
+	if selected.IsEmpty() {
+		return nil, gerror.New("历史采集账户别名存在多个未交付分支，拒绝猜测归属")
+	}
+	return selected, nil
+}
+
+func validateCollectBranchProfileOwner(ctx context.Context, dispatch, event gdb.Record) error {
+	tenantID, owner := event["tenant_id"].Int64(), event["account_id"].Int64()
+	profileID := dispatch["profile_id"].Int64()
+	accountScope := collectEventAccountScope(event)
+	dispatchAccountAllowed := false
+	for _, accountID := range accountScope {
+		dispatchAccountAllowed = dispatchAccountAllowed || dispatch["account_id"].Int64() == accountID
+	}
+	if tenantID <= 0 || owner <= 0 || !dispatchAccountAllowed || dispatch["tenant_id"].Int64() != tenantID || dispatch["source_id"].Int64() != event["source_id"].Int64() {
+		return gerror.New("历史采集分支归属不一致，拒绝迁移")
+	}
+	parentCtx := ctx
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	if tx := gdb.TXFromCtx(parentCtx, g.DB().GetGroup()); tx != nil {
+		defer tx.Ctx(parentCtx)
+	}
+	if profileID > 0 {
+		states, err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
+			Fields("tenant_id,account_id").Where("profile_id", profileID).WhereNull("deleted_at").Limit(2).All()
+		if err != nil {
+			return gerror.Wrap(err, "核对历史采集资料账户归属失败")
+		}
+		if len(states) != 1 || states[0]["tenant_id"].Int64() != tenantID || states[0]["account_id"].Int64() != owner {
+			return gerror.New("历史采集资料真实账户归属冲突或已删除，拒绝迁移")
+		}
+	}
+	// Only a proven business profile may accept legacy account-zero evidence.
+	// Preserve the original operation, including jobs written under dispatch's
+	// storage account; do not mistake them for a missing business-account job.
+	conflict, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Fields("id").Where("tenant_id", tenantID).
+		Where("operation_no", fmt.Sprintf("collect:%d", dispatch["id"].Int64())).
+		Where("(account_id NOT IN (?) OR profile_id<>?)", accountScope, profileID).Limit(1).One()
+	if err != nil {
+		return gerror.Wrap(err, "核对历史采集发布操作归属失败")
+	}
+	if !conflict.IsEmpty() {
+		return gerror.New("历史采集发布操作账户或资料归属冲突，拒绝迁移或重发")
+	}
+	return nil
+}
+
 func collectPublishClientRequestId(event gdb.Record, rule gdb.Record) string {
 	tenantID := event["tenant_id"].Int64()
 	accountID := event["account_id"].Int64()
+	sourceID := event["source_id"].Int64()
+	ruleID := rule["id"].Int64()
+	if tenantID <= 0 || accountID <= 0 || sourceID <= 0 || ruleID <= 0 {
+		return ""
+	}
+	// A Bot/account identifies the transport, not the collection branch.
+	// Every rule/source owns its own profile, even on the same target channel.
+	prefix := fmt.Sprintf("collect:v4:%d:%d:source:%d:rule:%d:", tenantID, accountID, sourceID, ruleID)
 	chatID := normalizeTelegramChannelChatID(event["source_chat_id"].String())
-	groupedID := strings.TrimSpace(event["source_grouped_id"].String())
-	// Bot collectors must remain independent within the same account. Account
-	// and follow-account collectors intentionally keep the shared v2 identity.
-	if event["source_type"].String() == sysin.CollectSourceTypeBot && event["bot_id"].Int64() > 0 {
-		botID := event["bot_id"].Int64()
-		if tenantID > 0 && accountID > 0 && chatID != "" && groupedID != "" {
-			return fmt.Sprintf("collect:v3:%d:%d:bot:%d:%s:group:%s", tenantID, accountID, botID, chatID, groupedID)
+	if chatID != "" {
+		if groupedID := strings.TrimSpace(event["source_grouped_id"].String()); groupedID != "" {
+			return prefix + fmt.Sprintf("%s:group:%s", chatID, groupedID)
 		}
-		if messageID := event["source_message_id"].Int64(); tenantID > 0 && accountID > 0 && chatID != "" && messageID > 0 {
-			return fmt.Sprintf("collect:v3:%d:%d:bot:%d:%s:message:%d", tenantID, accountID, botID, chatID, messageID)
+		if messageID := event["source_message_id"].Int64(); messageID > 0 {
+			return prefix + fmt.Sprintf("%s:message:%d", chatID, messageID)
 		}
 	}
-	if tenantID > 0 && accountID > 0 && chatID != "" && groupedID != "" {
-		return fmt.Sprintf("collect:v2:%d:%d:%s:group:%s", tenantID, accountID, chatID, groupedID)
+	if uniqueKey := strings.TrimSpace(event["source_unique_key"].String()); uniqueKey != "" {
+		return prefix + "key:" + collectHash(uniqueKey)
 	}
-	if messageID := event["source_message_id"].Int64(); tenantID > 0 && accountID > 0 && chatID != "" && messageID > 0 {
-		return fmt.Sprintf("collect:v2:%d:%d:%s:message:%d", tenantID, accountID, chatID, messageID)
-	}
-	return fmt.Sprintf("collect:%s:%d", event["source_unique_key"].String(), rule["id"].Int64())
+	return ""
 }
 
 func (s *sSysPublish) markCollectEvent(ctx context.Context, id int64, status string, message string) error {

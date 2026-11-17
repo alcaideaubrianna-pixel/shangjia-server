@@ -712,14 +712,88 @@ func matchBotCollectionSources(sources []botCollectionSource, tenantID, botID in
 	return matched
 }
 
-func ingestBotCollectionSources(sources []botCollectionSource, ingest func(botCollectionSource) error) error {
-	var ingestErrors []error
-	for _, source := range sources {
-		if err := ingest(source); err != nil {
-			ingestErrors = append(ingestErrors, fmt.Errorf("采集source %d接收Telegram更新失败: %w", source.ID, err))
-		}
+func ingestBotCollectionSources(ctx context.Context, sources []botCollectionSource, ingest func(botCollectionSource) error) error {
+	if len(sources) == 0 {
+		return ctx.Err()
 	}
-	return errors.Join(ingestErrors...)
+	// Bound workers, not just concurrent callbacks: a Bot with many sources
+	// must not create a goroutine per source. Each input index has one owner.
+	const concurrency = 4
+	workers := concurrency
+	if len(sources) < workers {
+		workers = len(sources)
+	}
+	var (
+		mu           sync.Mutex
+		wg           sync.WaitGroup
+		next         int
+		ingestErrors = make([]error, len(sources))
+	)
+	invoke := func(source botCollectionSource) (ingestErr error) {
+		returned := false
+		defer func() {
+			if !returned {
+				value := recover()
+				if panicErr, ok := value.(error); ok {
+					ingestErr = fmt.Errorf("采集来源处理发生panic: %w", panicErr)
+				} else {
+					// Avoid copying arbitrary panic payloads into logs/errors.
+					ingestErr = fmt.Errorf("采集来源处理发生panic，类型: %T", value)
+				}
+			}
+		}()
+		ingestErr = ingest(source)
+		returned = true
+		return ingestErr
+	}
+	wg.Add(workers)
+	for worker := 0; worker < workers; worker++ {
+		go func() {
+			defer wg.Done()
+			for {
+				mu.Lock()
+				index := next
+				if index >= len(sources) {
+					mu.Unlock()
+					return
+				}
+				next++
+				mu.Unlock()
+				source := sources[index]
+				// Only shared caller cancellation stops unstarted sources.
+				// A per-source error or recovered panic never cancels siblings.
+				ingestErr := ctx.Err()
+				if ingestErr == nil {
+					ingestErr = invoke(source)
+				}
+				if ingestErr != nil {
+					ingestErrors[index] = fmt.Errorf("采集source %d接收Telegram更新失败: %w", source.ID, ingestErr)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	// Callback completion order is intentionally independent; error ordering
+	// remains deterministic in the original source order.
+	combined := errors.Join(ingestErrors...)
+	if cancelErr := ctx.Err(); cancelErr != nil && !errors.Is(combined, cancelErr) {
+		combined = errors.Join(combined, cancelErr)
+	}
+	return combined
+}
+
+// Only accept sources already matched within their own gateway binding.
+// Dedupe across bindings by tenant/source without widening authorization.
+func appendMatchedBotCollectionSources(targets, matched []botCollectionSource, seen map[[2]int64]struct{}) []botCollectionSource {
+	for _, source := range matched {
+		key := [2]int64{source.TenantID, source.ID}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		targets = append(targets, source)
+	}
+	return targets
 }
 
 func (f *botCollectorFeature) Key() string { return gatewayOwner }
@@ -735,6 +809,8 @@ func (f *botCollectorFeature) HandleUpdate(ctx context.Context, bot gatewayservi
 		return false, nil
 	}
 	var ingestErrors []error
+	var targets []botCollectionSource
+	seenTargets := make(map[[2]int64]struct{})
 	for _, binding := range bot.Bindings {
 		// 采集只消费发布模块提供的规范 Bot 绑定，避免混用入口 Bot 表的 ID。
 		if binding.Owner != "youban_publish" {
@@ -778,14 +854,17 @@ func (f *botCollectorFeature) HandleUpdate(ctx context.Context, bot gatewayservi
 		if len(matchedSources) == 0 {
 			g.Log().Warningf(ctx, "TG Bot采集更新未匹配到采集源 tenantId:%d publishBotId:%d gatewayBotId:%d sourceCount:%d", binding.TenantID, publishBotID, binding.ReferenceID, len(sources))
 		}
-		if err := ingestBotCollectionSources(matchedSources, func(source botCollectionSource) error {
-			return collectorservice.Collector().IngestBotUpdate(ctx, collectorservice.BotContext{
-				Key: bot.Key, Token: bot.Token,
-				Binding: collectorservice.BotBinding{TenantID: source.TenantID, SourceID: source.ID, Reference: fmt.Sprintf("source:%d", source.ID)},
-			}, update)
-		}); err != nil {
-			ingestErrors = append(ingestErrors, err)
-		}
+		targets = appendMatchedBotCollectionSources(targets, matchedSources, seenTargets)
+	}
+	// Schedule all authorized bindings together: a slow source from the first
+	// tenant must not prevent later tenants from reaching an available worker.
+	if err := ingestBotCollectionSources(ctx, targets, func(source botCollectionSource) error {
+		return collectorservice.Collector().IngestBotUpdate(ctx, collectorservice.BotContext{
+			Key: bot.Key, Token: bot.Token,
+			Binding: collectorservice.BotBinding{TenantID: source.TenantID, SourceID: source.ID, Reference: fmt.Sprintf("source:%d", source.ID)},
+		}, update)
+	}); err != nil {
+		ingestErrors = append(ingestErrors, err)
 	}
 	// Collector is an additional gateway consumer. Returning false allows the
 	// existing provider features to process the same update as before.

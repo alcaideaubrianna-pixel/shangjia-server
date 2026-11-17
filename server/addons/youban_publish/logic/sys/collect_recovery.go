@@ -1391,21 +1391,11 @@ func (s *sSysPublish) reconcileCollectDispatchesFromSentJobs(ctx context.Context
 		limit = 100
 	}
 	dispatchTable := pdao.YoubanPublishCollectDispatch.Table()
-	jobTable := pdao.YoubanPublishTgJob.Table()
 	rows, err := g.DB().Model(dispatchTable+" d").Ctx(ctx).
 		Fields("d.id,d.event_id").
 		Where("d.profile_id > 0").
 		Where("d.status", sysin.CollectDispatchStatusPending).
-		Where(`EXISTS (
-			SELECT 1 FROM ` + jobTable + ` j
-			WHERE j.tenant_id = d.tenant_id
-			  AND j.account_id = d.account_id
-			  AND j.profile_id = d.profile_id
-			  AND j.collect_event_id = d.event_id
-			  AND j.operation_no = CONCAT('collect:', d.id)
-			  AND j.status = 'sent'
-			  AND j.dispatch_status = 'done'
-		)`).
+		Where(collectDispatchAllJobsSentCondition("d")).
 		OrderAsc("d.updated_at").OrderAsc("d.id").Limit(limit).All()
 	if err != nil {
 		return gerror.Wrap(err, "读取已发送但未收口的采集分发失败")
@@ -1425,6 +1415,7 @@ func (s *sSysPublish) reconcileCollectDispatchesFromSentJobs(ctx context.Context
 	result, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
 		WhereIn("id", dispatchIDs).
 		Where("status", sysin.CollectDispatchStatusPending).
+		Where(collectDispatchAllJobsSentCondition(dispatchTable)).
 		Data(g.Map{
 			"status":        sysin.CollectDispatchStatusSent,
 			"error_message": "",
@@ -1438,7 +1429,8 @@ func (s *sSysPublish) reconcileCollectDispatchesFromSentJobs(ctx context.Context
 	if len(eventIDs) > 0 {
 		if _, err = pdao.YoubanPublishCollectEvent.Ctx(ctx).
 			WhereIn("id", eventIDs).
-			Where("status", sysin.CollectEventStatusDispatched).
+			WhereIn("status", []string{sysin.CollectEventStatusDispatched, sysin.CollectEventStatusFailed}).
+			Where(collectEventAllDispatchesFinishedCondition(pdao.YoubanPublishCollectEvent.Table())).
 			Data(g.Map{
 				"status":        sysin.CollectEventStatusProcessed,
 				"error_message": "",

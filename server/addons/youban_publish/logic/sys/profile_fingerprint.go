@@ -317,7 +317,7 @@ func (s *sSysPublish) replaceProfileFingerprintProjectionTx(ctx context.Context,
 	}
 	oldItems := fingerprintRowsToItems(oldRows)
 	profileColumns := dao.ContentProfile.Columns()
-	profile, err := tx.Model(dao.ContentProfile.Table()).Ctx(ctx).Fields(profileColumns.PlainText).
+	profile, err := tx.Model(dao.ContentProfile.Table()).Ctx(ctx).Fields(profileColumns.PlainText, profileColumns.SourceKey).
 		Where(profileColumns.Id, profileID).WhereNull(profileColumns.DeletedAt).One()
 	if err != nil {
 		return nil, nil, gerror.Wrap(err, "读取资料指纹正文失败")
@@ -331,7 +331,7 @@ func (s *sSysPublish) replaceProfileFingerprintProjectionTx(ctx context.Context,
 	for _, row := range mediaRows {
 		media = append(media, collectMediaItem{Type: row["media_type"].String(), FileMd5: row["md5"].String(), FilePhash: row["perceptual_hash"].String()})
 	}
-	items := buildProfileFingerprints(channelIDs, profile["plain_text"].String(), media)
+	items := scopeCollectProfileFingerprints(profile["source_key"].String(), buildProfileFingerprints(channelIDs, profile["plain_text"].String(), media))
 	if _, err = detachProfileFingerprintsTx(ctx, tx, []int64{profileID}); err != nil {
 		return nil, nil, err
 	}
@@ -510,7 +510,7 @@ func (s *sSysPublish) backfillProfileFingerprints(ctx context.Context, limit int
 	cursor := cursorValue.Int64()
 	model := g.DB().Model(dao.ContentProfile.Table()+" p").Safe().Ctx(ctx).
 		InnerJoin(publishProfileStateTable+" ps", "ps.profile_id=p.id AND ps.deleted_at IS NULL").
-		Fields("p.id,p.plain_text,ps.tenant_id,ps.account_id").WhereNull("p.deleted_at").
+		Fields("p.id,p.plain_text,p.source_key,ps.tenant_id,ps.account_id").WhereNull("p.deleted_at").
 		Where("NOT EXISTS (SELECT 1 FROM " + publishProfileFingerprintTable + " f WHERE f.profile_id=p.id AND f.layer='_indexed')")
 	if cursor > 0 {
 		model = model.WhereGT("p.id", cursor)
@@ -585,7 +585,7 @@ func (s *sSysPublish) backfillProfileFingerprints(ctx context.Context, limit int
 				defaultChannelsByTenant[tenantID] = channelIDs
 			}
 		}
-		items := buildProfileFingerprints(channelIDs, row["plain_text"].String(), mediaByProfile[profileID])
+		items := scopeCollectProfileFingerprints(row["source_key"].String(), buildProfileFingerprints(channelIDs, row["plain_text"].String(), mediaByProfile[profileID]))
 		for _, item := range items {
 			data := g.Map{
 				"tenant_id": row["tenant_id"].Int64(), "account_id": row["account_id"].Int64(), "profile_id": profileID,
