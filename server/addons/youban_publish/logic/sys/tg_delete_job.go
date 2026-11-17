@@ -51,7 +51,7 @@ func (s *sSysPublish) cleanupTelegramJobMessages(ctx context.Context, jobId int6
 				return err
 			}
 			stageStarted = time.Now()
-			err = s.settleProfileCleanupProgress(ctx, job, payload)
+			err = settleTelegramCleanupProgress(ctx, s, job, payload)
 			logStage("settle_profile_cleanup_progress", stageStarted, err)
 			if err != nil {
 				return err
