@@ -734,7 +734,7 @@ func (s *sCollector) enqueueDueDeliveryTasks(ctx context.Context, limit int) (re
 				return recoveryErr
 			}
 			laneCtx, cancelLane := context.WithTimeout(ctx, time.Second)
-			count, err := s.recoverDeliveryCursorPage(laneCtx, scope, pool, min(laneQuota, remaining), upper)
+			count, err := s.recoverDeliveryBoundedCursorPage(laneCtx, scope, pool, min(laneQuota, remaining), upper)
 			cancelLane()
 			remaining -= count
 			if errors.Is(err, errCollectorRecoveryRedisUnavailable) {

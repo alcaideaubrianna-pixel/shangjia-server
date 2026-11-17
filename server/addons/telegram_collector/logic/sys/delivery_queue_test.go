@@ -485,7 +485,7 @@ func TestDeliveryRecoveryUsesBoundedSchedulerPoolLanes(t *testing.T) {
 	for _, required := range []string{
 		"collectorRecoveryScopes(scopeCtx, collectorRecoveryDeliveryEnqueue, 8)",
 		`collectorRecoveryBranchOrder([]string{"realtime", "history"})`,
-		"min(laneQuota, remaining)", "s.recoverDeliveryCursorPage(laneCtx, scope, pool,",
+		"min(laneQuota, remaining)", "s.recoverDeliveryBoundedCursorPage(laneCtx, scope, pool,",
 	} {
 		if !strings.Contains(scheduler, required) {
 			t.Fatalf("scoped scheduler missing %s", required)

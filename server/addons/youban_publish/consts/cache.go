@@ -29,4 +29,6 @@ const (
 	TelegramJobRecoveryKeyPrefix    = "youban_publish:tg:job:recovery:"
 	TelegramOutboxFairScanCursorKey = "youban_publish:tg:outbox:fair_scan:cursor:v1"
 	TelegramOutboxFairScanLockKey   = "youban_publish:tg:outbox:fair_scan:lock:v1"
+	// TelegramPermissionBacklogCursorKey 同时作为权限积压范围和任务分页游标的共享键前缀。
+	TelegramPermissionBacklogCursorKey = "youban_publish:permission_backlog:cursor"
 )

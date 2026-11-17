@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -141,9 +142,15 @@ func (s *sSysPublish) fairTelegramStreamOutboxRows(ctx context.Context, limit in
 		func(ctx context.Context, after telegramOutboxFairCursor, pageSize int) ([]telegramOutboxFairCandidate, error) {
 			pages++
 			query, args := telegramOutboxFairScanSQL(after, nowText, pageSize, g.DB().GetConfig().Type)
-			var candidates []telegramOutboxFairCandidate
-			err := g.DB().GetScan(ctx, &candidates, query, args...)
-			scanned += len(candidates)
+			// The candidate embeds an unexported record type. Decode database
+			// columns explicitly: reflective scanning can leave that embedded
+			// record zero-valued while still populating cursor_at.
+			records, err := g.DB().GetAll(ctx, query, args...)
+			if err != nil {
+				return nil, err
+			}
+			candidates, err := telegramOutboxFairCandidatesFromRecords(records)
+			scanned += len(records)
 			return candidates, err
 		})
 	if err != nil {
@@ -200,4 +207,20 @@ func telegramOutboxFairScanSQL(after telegramOutboxFairCursor, nowText string, p
 	query += ` ORDER BY o.available_at,o.id LIMIT ?`
 	args = append(args, pageSize)
 	return query, args
+}
+
+// Decode the existing bounded query result without relying on reflection into
+// an unexported embedded struct. Reject malformed rows before cursor progress
+// is saved, so a mapping failure cannot skip work or dispatch job zero.
+func telegramOutboxFairCandidatesFromRecords(records gdb.Result) ([]telegramOutboxFairCandidate, error) {
+	candidates := make([]telegramOutboxFairCandidate, 0, len(records))
+	for _, record := range records {
+		row := telegramJobOutboxRecordFromRecord(record)
+		cursorAt := record["cursor_at"].String()
+		if row.Id <= 0 || row.JobId <= 0 || row.TenantId <= 0 || row.ChannelId <= 0 || cursorAt == "" {
+			return nil, gerror.Newf("TG Outbox候选记录身份或游标不完整 outboxId:%d jobId:%d", row.Id, row.JobId)
+		}
+		candidates = append(candidates, telegramOutboxFairCandidate{telegramJobOutboxRecord: row, CursorAt: cursorAt})
+	}
+	return candidates, nil
 }

@@ -30,8 +30,12 @@ func TestTelegramOutboxFairScanPostgresKeysetMapping(t *testing.T) {
 	if got := len(args); got != 7 {
 		t.Fatalf("first page args=%d, want 7", got)
 	}
-	var rows []telegramOutboxFairCandidate
-	if err := db.GetScan(ctx, &rows, query, args...); err != nil {
+	records, err := db.GetAll(ctx, query, args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := telegramOutboxFairCandidatesFromRecords(records)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if len(rows) != 3 || rows[0].Id != 1 || rows[2].Id != 3 {
@@ -41,14 +45,18 @@ func TestTelegramOutboxFairScanPostgresKeysetMapping(t *testing.T) {
 	if got := len(args); got != 9 {
 		t.Fatalf("keyset args=%d, want 9", got)
 	}
-	rows = nil
-	if err := db.GetScan(ctx, &rows, query, args...); err != nil {
+	records, err = db.GetAll(ctx, query, args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err = telegramOutboxFairCandidatesFromRecords(records)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if len(rows) != 2 || rows[0].Id != 2 || rows[1].Id != 3 || rows[0].CursorAt != when {
 		t.Fatalf("keyset/mapping rows=%+v", rows)
 	}
 	if rows[0].AvailableAt == nil || rows[0].AvailableAt.String() == "" {
-		t.Fatal("anonymous embedded available_at was not mapped")
+		t.Fatal("decoded available_at was not preserved")
 	}
 }

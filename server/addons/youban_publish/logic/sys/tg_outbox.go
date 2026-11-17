@@ -218,6 +218,9 @@ func telegramJobOutboxRecordFromRecord(record gdb.Record) telegramJobOutboxRecor
 }
 
 func (s *sSysPublish) dispatchTelegramJobOutbox(ctx context.Context, row telegramJobOutboxRecord) (resultErr error) {
+	if row.Id <= 0 || row.JobId <= 0 {
+		return gerror.Newf("TG Outbox记录身份不合法 outboxId:%d jobId:%d", row.Id, row.JobId)
+	}
 	ctx = telegramPublishTraceContext(ctx, row.JobId, g.Map{"outboxId": row.Id, "outboxAttemptCount": row.AttemptCount})
 	stage := beginTelegramPublishStage(ctx, "outbox.dispatch")
 	defer stage.Finish(&resultErr)
