@@ -45,15 +45,18 @@ Run → profile_state 锁顺序反转。频道批次可能包含多条资料，�
 
 ## 启用和回滚约束
 
-默认关闭：`YOUBAN_PUBLISH_PROFILE_CANCEL_ENABLED` 未设或不是 `true`
-时，接口拒绝受理；正常发送不会访问新取消表。
+默认开启：`YOUBAN_PUBLISH_PROFILE_CANCEL_ENABLED` 未设、为空或为 `true`
+时启用取消发布。显式设置为 `false` 可关闭；关闭时接口拒绝受理，
+正常发送不会访问新取消表。其他非空且不是 `true` 的值也按关闭处理。
 
-1. 执行 `server/addons/youban_publish/resource/sql/profile_publish_cancel.pgsql.sql`。
+1. 默认开启要求迁移先于新版进程启动；分阶段升级时先统一显式设置开关为 `false`。
+   执行 `server/addons/youban_publish/resource/sql/profile_publish_cancel.pgsql.sql`。
    现有发布状态字段、Attempt 表及 Cleanup Outbox 的
    `operation_no / payload / dedupe_key` 必须已完成原有迁移。
 2. 升级全部 Web、发布、协议号执行和调度实例。旧实例不认识取消围栏，
    不能与启用后的新实例共同处理取消任务。
-3. 所有相关角色统一设置 `YOUBAN_PUBLISH_PROFILE_CANCEL_ENABLED=true`。
+3. 默认无需配置开关。若升级期间显式设置了 `YOUBAN_PUBLISH_PROFILE_CANCEL_ENABLED=false`，
+   全部实例升级完成后统一移除该配置或设置为 `true`。
    现有 publish 恢复周期和 Cleanup Outbox Worker 必须保持运行。
 4. 有未完成取消时不能直接撤销开关或回滚至不认识取消的旧版本。
    先停止新取消受理并完成/人工处理既有取消，再安排回滚。

@@ -38,9 +38,15 @@ func TestProfileCancelContract(t *testing.T) {
 			t.Fatalf("invalid selector accepted: %+v", in)
 		}
 	}
-	t.Setenv("YOUBAN_PUBLISH_PROFILE_CANCEL_ENABLED", "")
-	if enabled := profilePublishCancelEnabled(); enabled {
-		t.Fatal("cancellation must be disabled before migration/rollout")
+	for _, value := range []string{"", "true", "TRUE"} {
+		t.Setenv("YOUBAN_PUBLISH_PROFILE_CANCEL_ENABLED", value)
+		if !profilePublishCancelEnabled() {
+			t.Fatalf("cancellation must be enabled for %q", value)
+		}
+	}
+	t.Setenv("YOUBAN_PUBLISH_PROFILE_CANCEL_ENABLED", "false")
+	if profilePublishCancelEnabled() {
+		t.Fatal("explicit false must disable cancellation")
 	}
 	if canceled, err := profileOperationCanceledTx(context.Background(), nil, cancelFixtureOperation()); err != nil || canceled {
 		t.Fatalf("disabled feature must not access cancellation schema: %v %v", canceled, err)

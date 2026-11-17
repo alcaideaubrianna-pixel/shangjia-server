@@ -22,7 +22,8 @@ const publishProfileCancelTable = "hg_youban_publish_profile_cancel"
 type profilePublishCancelUUIDKey struct{}
 
 func profilePublishCancelEnabled() bool {
-	return strings.EqualFold(os.Getenv("YOUBAN_PUBLISH_PROFILE_CANCEL_ENABLED"), "true")
+	value := os.Getenv("YOUBAN_PUBLISH_PROFILE_CANCEL_ENABLED")
+	return value == "" || strings.EqualFold(value, "true")
 }
 
 // profilePublishCancel is an operation tombstone. It never changes the
