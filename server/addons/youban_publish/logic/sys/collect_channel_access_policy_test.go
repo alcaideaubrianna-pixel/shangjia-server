@@ -19,21 +19,21 @@ func TestDecideCollectChannelAccessDefaultsToFirstAllow(t *testing.T) {
 
 func TestDecideCollectChannelAccessPreservesExplicitBlocks(t *testing.T) {
 	for _, tc := range []struct {
-		name           string
-		status         string
-		approvalStatus string
+		name   string
+		status string
+		want   bool
 	}{
-		{"disabled", "disabled", "approved"},
-		{"rejected", "enabled", "rejected"},
-		{"pending", "pending", "pending"},
+		{"disabled", "disabled", false},
+		{"enabled", "enabled", true},
+		{"legacy pending", "pending", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			decision := decideCollectChannelAccess(collectChannelAccessPolicyInput{
 				TenantID: 1, AccountID: 2, SourceID: 3, CanonicalChat: "-1004",
-				RelationExists: true, CollectEnabled: 1,
-				Status: tc.status, ApprovalStatus: tc.approvalStatus,
+				RelationExists: true,
+				Status:         tc.status,
 			})
-			if decision.Allowed || decision.Discover {
+			if decision.Allowed != tc.want || decision.Discover {
 				t.Fatalf("blocked relation decision = %#v", decision)
 			}
 		})
@@ -44,7 +44,7 @@ func TestBotCollectScopeDoesNotReplaceSpecificRelation(t *testing.T) {
 	decision := decideCollectChannelAccess(collectChannelAccessPolicyInput{
 		TenantID: 1, AccountID: 2, SourceID: 3, CanonicalChat: "-1004",
 		BotCollectScope: "all", RelationExists: true,
-		CollectEnabled: 1, Status: "disabled", ApprovalStatus: "approved",
+		Status: "disabled",
 	})
 	if decision.Allowed {
 		t.Fatal("bot_collect_scope=all bypassed a disabled relation")

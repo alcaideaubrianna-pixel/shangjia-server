@@ -1667,7 +1667,7 @@ func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, sourc
 	var relations []botCollectChannelRelation
 	if len(channelIDs) > 0 {
 		if err := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).
-			Fields("id,channel_id,source_id,collect_enabled,status,approval_status").
+			Fields("id,channel_id,source_id,status").
 			Where("tenant_id", tenantID).Where("account_id", accountID).
 			Where("source_id", source["id"].Int64()).
 			WhereIn("channel_id", channelIDs).Scan(&relations); !collectOptionalRecordScanSucceeded(err) {
@@ -1680,8 +1680,8 @@ func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, sourc
 		decision := decideCollectChannelAccess(collectChannelAccessPolicyInput{
 			TenantID: tenantID, AccountID: accountID, SourceID: source["id"].Int64(),
 			CanonicalChat: chatID, BotCollectScope: source["bot_collect_scope"].String(),
-			RelationExists: true, CollectEnabled: relation.CollectEnabled,
-			Status: relation.Status, ApprovalStatus: relation.ApprovalStatus,
+			RelationExists: true,
+			Status:         relation.Status,
 		})
 		allowed := decision.Allowed
 		if !allowed {
@@ -1689,7 +1689,7 @@ func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, sourc
 			g.Log().Warning(ctx, "BOT采集频道审批未通过，跳过采集交付", g.Map{
 				"tenantId": tenantID, "accountId": accountID, "sourceId": source["id"].Int64(),
 				"botId": botID, "chatId": chatID, "channelId": channel.Id, "relationId": relation.Id,
-				"collectEnabled": relation.CollectEnabled, "status": relation.Status, "approvalStatus": relation.ApprovalStatus,
+				"status":          relation.Status,
 				"sourceMessageId": delivery.SourceMessageID,
 			})
 		}
@@ -1737,13 +1737,13 @@ func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, sourc
 	if err != nil {
 		// A concurrent delivery may have created the relation; respect its decision.
 		var current botCollectChannelRelation
-		lookupErr := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Fields("id,channel_id,source_id,collect_enabled,status,approval_status").Where("tenant_id", tenantID).Where("account_id", accountID).Where("source_id", source["id"].Int64()).Where("channel_id", channel.Id).Scan(&current)
+		lookupErr := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Fields("id,channel_id,source_id,status").Where("tenant_id", tenantID).Where("account_id", accountID).Where("source_id", source["id"].Int64()).Where("channel_id", channel.Id).Scan(&current)
 		if lookupErr == nil && current.Id > 0 {
 			return decideCollectChannelAccess(collectChannelAccessPolicyInput{
 				TenantID: tenantID, AccountID: accountID, SourceID: source["id"].Int64(),
 				CanonicalChat: chatID, BotCollectScope: source["bot_collect_scope"].String(),
-				RelationExists: true, CollectEnabled: current.CollectEnabled,
-				Status: current.Status, ApprovalStatus: current.ApprovalStatus,
+				RelationExists: true,
+				Status:         current.Status,
 			}).Allowed, nil
 		}
 		return false, gerror.Wrap(err, "创建BOT采集频道审批记录失败")
@@ -1781,7 +1781,7 @@ func selectBotCollectChannelForAccount(candidates []botCollectChannelCandidate, 
 			continue
 		}
 		related = append(related, candidate)
-		if botCollectChannelRelationEnabled(relation.CollectEnabled, relation.Status, relation.ApprovalStatus) {
+		if botCollectChannelRelationEnabled(relation.Status) {
 			enabled = append(enabled, candidate)
 		}
 	}
@@ -1867,17 +1867,8 @@ func collectOptionalRecordScanSucceeded(err error) bool {
 	return err == nil || errors.Is(err, sql.ErrNoRows)
 }
 
-func botCollectChannelRelationEnabled(collectEnabled int, status, approvalStatus string) bool {
-	status = strings.ToLower(strings.TrimSpace(status))
-	approvalStatus = strings.ToLower(strings.TrimSpace(approvalStatus))
-	if status == sysin.CollectAccountChannelDisabled || approvalStatus == "rejected" {
-		return false
-	}
-	// Missing and legacy pending relations follow the default-enabled policy.
-	if status == "" || status == sysin.CollectAccountChannelPending {
-		return true
-	}
-	return collectEnabled == 1 && (status == sysin.CollectAccountChannelEnabled || status == "approved")
+func botCollectChannelRelationEnabled(status string) bool {
+	return strings.EqualFold(strings.TrimSpace(status), sysin.CollectAccountChannelEnabled)
 }
 
 func (s *sSysPublish) ingestCollectorAccountDelivery(ctx context.Context, delivery *collectorin.CollectorDelivery) error {
@@ -1973,7 +1964,7 @@ func (s *sSysPublish) ensureAccountCollectChannelRelation(ctx context.Context, d
 	relationCols := pdao.YoubanPublishCollectAccountChannel.Columns()
 	relationModel := func() *gdb.Model {
 		return pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).
-			Fields(relationCols.Id, relationCols.CollectEnabled, relationCols.Status, relationCols.ApprovalStatus).
+			Fields(relationCols.Id, relationCols.Status).
 			Where(relationCols.TenantId, delivery.TenantID).Where(relationCols.AccountId, delivery.AccountID).
 			Where(relationCols.SourceId, delivery.SourceID).Where(relationCols.ChannelId, channelID)
 	}
@@ -1984,8 +1975,8 @@ func (s *sSysPublish) ensureAccountCollectChannelRelation(ctx context.Context, d
 		}
 		return decideCollectChannelAccess(collectChannelAccessPolicyInput{
 			TenantID: delivery.TenantID, AccountID: delivery.AccountID, SourceID: delivery.SourceID,
-			CanonicalChat: chatID, RelationExists: true, CollectEnabled: current[relationCols.CollectEnabled].Int(),
-			Status: current[relationCols.Status].String(), ApprovalStatus: current[relationCols.ApprovalStatus].String(),
+			CanonicalChat: chatID, RelationExists: true,
+			Status: current[relationCols.Status].String(),
 		}).Allowed
 	}
 	// Absence is normal discovery, not an SQL failure. One() returns an empty

@@ -292,7 +292,7 @@ func (s *sSysPublish) validateAIOpsReplayChannelApproval(ctx context.Context, te
 	var relations []botCollectChannelRelation
 	relationColumns := pdao.YoubanPublishCollectAccountChannel.Columns()
 	if err := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).
-		Fields(relationColumns.Id, relationColumns.ChannelId, relationColumns.CollectEnabled, relationColumns.Status, relationColumns.ApprovalStatus).
+		Fields(relationColumns.Id, relationColumns.ChannelId, relationColumns.Status).
 		Where(relationColumns.TenantId, tenantID).Where(relationColumns.AccountId, accountID).
 		Where(relationColumns.SourceId, sourceID).
 		WhereIn(relationColumns.ChannelId, channelIDs).WhereNull(relationColumns.DeletedAt).Scan(&relations); !collectOptionalRecordScanSucceeded(err) {
@@ -300,7 +300,7 @@ func (s *sSysPublish) validateAIOpsReplayChannelApproval(ctx context.Context, te
 	}
 	channel := selectBotCollectChannelForAccount(channels, relations, chatID)
 	relation := selectBotCollectChannelRelation(relations, channel.Id)
-	if channel.Id <= 0 || relation.Id <= 0 || strings.ToLower(strings.TrimSpace(relation.ApprovalStatus)) != "approved" || !botCollectChannelRelationEnabled(relation.CollectEnabled, relation.Status, relation.ApprovalStatus) {
+	if channel.Id <= 0 || relation.Id <= 0 || !botCollectChannelRelationEnabled(relation.Status) {
 		return gerror.Newf("频道%s在目标账号和source下没有已批准的采集关系，拒绝重放", chatID)
 	}
 	var botRelation struct {

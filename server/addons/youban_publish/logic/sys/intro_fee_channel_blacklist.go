@@ -34,10 +34,10 @@ func introFeeChannelBlacklistCanClaim(row introFeeChannelBlacklistRelation) bool
 		return false
 	}
 	if row.SourceId == 0 {
-		return botCollectChannelRelationEnabled(row.CollectEnabled, row.Status, row.ApprovalStatus) ||
+		return botCollectChannelRelationEnabled(row.Status) ||
 			row.CollectEnabled == 0 && row.Status == sysin.CollectAccountChannelDisabled && row.ApprovalStatus == "rejected"
 	}
-	return botCollectChannelRelationEnabled(row.CollectEnabled, row.Status, row.ApprovalStatus)
+	return botCollectChannelRelationEnabled(row.Status)
 }
 
 func introFeeChannelBlacklistAffected(result sql.Result, err error, expected int64) (int64, error) {

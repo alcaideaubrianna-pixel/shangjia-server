@@ -131,25 +131,3 @@ func TestCollectSourceApprovalScopeIsAccountIsolated(t *testing.T) {
 		t.Fatal("missing source account must not authorize approval")
 	}
 }
-
-func TestBotCollectChannelRelationEnabledPreservesExplicitDecisions(t *testing.T) {
-	cases := []struct {
-		name     string
-		enabled  int
-		status   string
-		approval string
-		want     bool
-	}{
-		{name: "first relation defaults enabled", want: true},
-		{name: "pending remains default enabled", status: sysin.CollectAccountChannelPending, want: true},
-		{name: "disabled stays disabled", enabled: 1, status: sysin.CollectAccountChannelDisabled, approval: "approved", want: false},
-		{name: "rejected stays rejected", enabled: 1, status: sysin.CollectAccountChannelEnabled, approval: "rejected", want: false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := botCollectChannelRelationEnabled(tc.enabled, tc.status, tc.approval); got != tc.want {
-				t.Fatalf("enabled=%d status=%q approval=%q got %v want %v", tc.enabled, tc.status, tc.approval, got, tc.want)
-			}
-		})
-	}
-}

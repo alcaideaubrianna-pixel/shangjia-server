@@ -302,11 +302,9 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 	// source_chat_id is an event/source identifier and is not a stable channel
 	// identity when several sources feed the same canonical channel.
 	var sourceChannelRows []struct {
-		SourceID       int64  `orm:"source_id"`
-		ChannelID      string `orm:"channel_id"`
-		Status         string `orm:"status"`
-		CollectEnabled int    `orm:"collect_enabled"`
-		ApprovalStatus string `orm:"approval_status"`
+		SourceID  int64  `orm:"source_id"`
+		ChannelID string `orm:"channel_id"`
+		Status    string `orm:"status"`
 	}
 	sourceChannelByID := make(map[int64][]string, len(sourceRows))
 	sourceChannelEnabled := make(map[string]bool)
@@ -320,7 +318,7 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 	if len(sourceRows) > 0 && len(sourceIDs) > 0 {
 		if err := g.DB().Model(pdao.YoubanPublishCollectAccountChannel.Table()+" ac").Ctx(ctx).
 			InnerJoin(pdao.YoubanPublishCollectChannel.Table()+" cc", "cc.id=ac.channel_id AND cc.tenant_id=ac.tenant_id").
-			Fields("ac.source_id,cc.telegram_chat_id AS channel_id,ac.status,ac.collect_enabled,ac.approval_status").
+			Fields("ac.source_id,cc.telegram_chat_id AS channel_id,ac.status").
 			Where("ac.tenant_id", tenantID).Where("ac.account_id", accountID).
 			WhereIn("ac.source_id", sourceIDs).WhereNull("ac.deleted_at").WhereNull("cc.deleted_at").
 			Scan(&sourceChannelRows); err != nil {
@@ -336,7 +334,7 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 					}
 				}
 				sourceChannelByID[relation.SourceID] = append(sourceChannelByID[relation.SourceID], id)
-				sourceChannelEnabled[key] = botCollectChannelRelationEnabled(relation.CollectEnabled, relation.Status, relation.ApprovalStatus)
+				sourceChannelEnabled[key] = botCollectChannelRelationEnabled(relation.Status)
 			}
 		}
 	}
@@ -539,13 +537,6 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 		}
 	}
 	botStatusByChannel := make(map[int64]string, len(channels))
-	type accountChannelState struct {
-		ChannelId      int64  `json:"channelId"`
-		Status         string `json:"status"`
-		CollectEnabled int    `json:"collectEnabled"`
-		ApprovalStatus string `json:"approvalStatus"`
-	}
-	accountStatusByChannel := make(map[int64]accountChannelState, len(channels))
 	if len(channelPKs) > 0 && effectiveBotID > 0 {
 		var relations []struct {
 			ChannelId int64  `json:"channelId"`
@@ -556,15 +547,6 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 		}
 		for _, relation := range relations {
 			botStatusByChannel[relation.ChannelId] = relation.Status
-		}
-	}
-	if len(channelPKs) > 0 && accountID > 0 {
-		var relations []accountChannelState
-		if err := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Fields("channel_id,status,collect_enabled,approval_status").Where("tenant_id", tenantID).Where("account_id", accountID).WhereIn("channel_id", channelPKs).WhereNull("deleted_at").Scan(&relations); err != nil {
-			return nil, 0, gerror.Wrap(err, "读取频道采集状态失败")
-		}
-		for _, relation := range relations {
-			accountStatusByChannel[relation.ChannelId] = relation
 		}
 	}
 	for _, row := range configured {
@@ -580,10 +562,6 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 			}
 			if strings.TrimSpace(channel.InviteLink) != "" {
 				row.ChannelLink = strings.TrimSpace(channel.InviteLink)
-			}
-			relation := accountStatusByChannel[channel.Id]
-			if !botCollectChannelRelationEnabled(relation.CollectEnabled, relation.Status, relation.ApprovalStatus) {
-				row.BlockReason = "频道采集已禁用或拒绝"
 			}
 			if botStatusByChannel[channel.Id] == sysin.CollectBotChannelRemoved {
 				row.BlockReason = "机器人已移除"
@@ -836,6 +814,7 @@ func (s *sSysPublish) saveIntroFeeChannelCollectionStatus(ctx context.Context, t
 	})
 	if err == nil {
 		_, _ = cache.Instance().Remove(ctx, introFeeChannelRuleCacheKey(tenantID, accountID, in.RuleId, in.BotId, in.ChannelId))
+		s.refreshCollectSourceCache(ctx)
 		g.Log().Info(ctx, "频道采集状态保存完成", g.Map{
 			"event": "collect_channel_binding_saved", "tenantId": tenantID,
 			"accountId": accountID, "ruleId": in.RuleId, "botId": in.BotId,

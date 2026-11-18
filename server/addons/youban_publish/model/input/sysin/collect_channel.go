@@ -7,7 +7,6 @@ const (
 	CollectBotChannelEnabled      = "enabled"
 	CollectBotChannelDisabled     = "disabled"
 	CollectBotChannelRemoved      = "bot_removed"
-	CollectAccountChannelPending  = "pending"
 	CollectAccountChannelEnabled  = "enabled"
 	CollectAccountChannelDisabled = "disabled"
 	CollectAccountChannelRemoved  = "bot_removed"

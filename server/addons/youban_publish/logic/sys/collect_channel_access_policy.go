@@ -2,9 +2,6 @@ package sys
 
 import (
 	"fmt"
-	"strings"
-
-	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
 type collectChannelAccessPolicyInput struct {
@@ -14,9 +11,7 @@ type collectChannelAccessPolicyInput struct {
 	CanonicalChat   string
 	BotCollectScope string
 	RelationExists  bool
-	CollectEnabled  int
 	Status          string
-	ApprovalStatus  string
 }
 
 type collectChannelAccessPolicyDecision struct {
@@ -34,16 +29,8 @@ func decideCollectChannelAccess(in collectChannelAccessPolicyInput) collectChann
 			RelationKey: key,
 		}
 	}
-	status := strings.ToLower(strings.TrimSpace(in.Status))
-	approval := strings.ToLower(strings.TrimSpace(in.ApprovalStatus))
-	if status == sysin.CollectAccountChannelDisabled || approval == "rejected" ||
-		status == sysin.CollectAccountChannelPending {
-		return collectChannelAccessPolicyDecision{RelationKey: key}
-	}
 	return collectChannelAccessPolicyDecision{
-		Allowed: in.CollectEnabled == 1 &&
-			(status == sysin.CollectAccountChannelEnabled || status == "approved") &&
-			approval != "rejected",
+		Allowed:     botCollectChannelRelationEnabled(in.Status),
 		RelationKey: key,
 	}
 }
