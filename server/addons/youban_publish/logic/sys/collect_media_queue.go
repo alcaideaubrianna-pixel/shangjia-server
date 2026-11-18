@@ -24,6 +24,7 @@ type collectMediaQueuePayload struct {
 }
 
 const (
+	collectMediaMaxRetries              = 10
 	collectMediaTaskUniqueTTL           = 24 * time.Hour
 	collectMediaTaskTimeout             = 15 * time.Minute
 	collectMediaRealtimeWindow          = 10 * time.Minute
@@ -155,7 +156,7 @@ func (s *sSysPublish) enqueueCollectMediaCacheTaskWithUnique(ctx context.Context
 	queueName := collectMediaQueueName(ctx, payload)
 	options := []asynq.Option{
 		asynq.Queue(queueName),
-		asynq.MaxRetry(10),
+		asynq.MaxRetry(collectMediaMaxRetries),
 		asynq.Timeout(collectMediaTaskTimeout),
 	}
 	if unique {

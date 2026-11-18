@@ -32,6 +32,51 @@ const (
 	collectEventRulesCacheTTL        = time.Minute
 )
 
+// A live event can keep refreshing its timestamp while media recovery is
+// fenced on an older event page. Check only this event's overdue media.
+func (s *sSysPublish) enqueueCollectEventMediaWithRecovery(ctx context.Context, event gdb.Record) error {
+	payload := collectMediaQueuePayloadFromEvent(event)
+	if err := s.enqueueCollectMediaCache(ctx, payload, 0); err != nil {
+		return err
+	}
+	if event["source_type"].String() != sysin.CollectSourceTypeBot ||
+		event["status"].String() != sysin.CollectEventStatusMediaPending || payload.EventId <= 0 ||
+		payload.TenantId <= 0 || payload.AccountId <= 0 || payload.SourceId <= 0 ||
+		!reserveCollectMediaRecovery(ctx, payload.EventId) {
+		return nil
+	}
+	c := pdao.YoubanPublishCollectEventMedia.Columns()
+	row, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).Fields(c.Id).
+		Where(c.EventId, payload.EventId).Where(c.TenantId, payload.TenantId).
+		Where(c.AccountId, payload.AccountId).Where(c.SourceId, payload.SourceId).
+		Where(c.CacheStatus, collectMediaCachePending).
+		WhereGTE(c.DownloadAttempts, collectMediaMaxRetries+1).
+		WhereLTE(c.NextRetryAt, gtime.Now()).Limit(1).One()
+	if err != nil {
+		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+		defer cancel()
+		releaseCollectMediaRecovery(releaseCtx, payload.EventId)
+		return gerror.Wrap(err, "核对到期BOT媒体重试失败")
+	}
+	if row.IsEmpty() {
+		return nil
+	}
+	payload.Reason = "bot_recovery"
+	queued, err := s.enqueueCollectMediaCacheDeferred(ctx, payload, 0)
+	if err != nil {
+		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+		defer cancel()
+		releaseCollectMediaRecovery(releaseCtx, payload.EventId)
+		return err
+	}
+	g.Log().Info(ctx, "采集事件触发到期BOT媒体恢复", g.Map{
+		"event": "collect.media.due_recovery", "tenantId": payload.TenantId,
+		"accountId": payload.AccountId, "sourceId": payload.SourceId,
+		"eventId": payload.EventId, "mediaId": row[c.Id].Int64(), "queued": queued,
+	})
+	return nil
+}
+
 func (s *sSysPublish) CollectEventList(ctx context.Context, in *sysin.CollectEventListInp) (list []*sysin.CollectEventModel, totalCount int, err error) {
 	account, err := s.currentAccount(ctx)
 	if err != nil {
@@ -559,7 +604,7 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		}
 		if needsMediaCache {
 			_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusMediaPending, "验证媒体缓存中")
-			return s.enqueueCollectMediaCache(ctx, collectMediaQueuePayloadFromEvent(event), 0)
+			return s.enqueueCollectEventMediaWithRecovery(ctx, event)
 		}
 		if parentEventId <= 0 {
 			return newCollectProcessRetryError(30*time.Second, "验证资料缺少父展示事件，保留任务等待修复")
@@ -639,7 +684,7 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		}
 		reportCollectProgress(ctx, "media_queued", "等待媒体工作线程执行缓存任务")
 		s.appendCollectEventLogForRecord(ctx, event, "media", "pending", "媒体等待缓存", "")
-		return s.enqueueCollectMediaCache(ctx, collectMediaQueuePayloadFromEvent(event), 0)
+		return s.enqueueCollectEventMediaWithRecovery(ctx, event)
 	}
 	if !verifyReady {
 		return newCollectProcessRetryError(30*time.Second, "等待验证资料媒体缓存完成")
