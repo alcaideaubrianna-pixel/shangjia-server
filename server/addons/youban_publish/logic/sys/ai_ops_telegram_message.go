@@ -324,11 +324,8 @@ func (s *sSysPublish) fillAIOpsCollectEvent(ctx context.Context, result *sysin.A
 			result.CollectSourceMessageId = event["source_message_id"].Int64()
 		}
 	}
-	counts, err := g.DB().Model("hg_youban_publish_collect_event_media em").Ctx(ctx).
-		LeftJoin("hg_youban_publish_collect_event e", "e.id=em.event_id").
-		Fields("COUNT(*) FILTER (WHERE COALESCE(e.material_role,'') <> 'verify') AS display_count,COUNT(*) FILTER (WHERE e.material_role='verify') AS verify_count").
-		Where("em.event_id=? OR (e.material_parent_event_id=? AND e.material_role=?)", result.CollectEventId, result.CollectEventId, collectMaterialRoleVerify).
-		One()
+	countsQuery, countsArgs := aiOpsCollectMediaCountsSQL(result.CollectEventId)
+	counts, err := g.DB().GetOne(ctx, countsQuery, countsArgs...)
 	if err != nil {
 		return gerror.Wrap(err, "统计采集媒体失败")
 	}
