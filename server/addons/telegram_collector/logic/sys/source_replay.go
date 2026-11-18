@@ -288,15 +288,8 @@ func (s *sCollector) enqueueReplayDelivery(ctx context.Context, event *entity.Tg
 	case sysin.DeliveryStatusCompleted, sysin.DeliveryStatusProcessing, sysin.DeliveryStatusQuarantined:
 		return false, nil
 	case sysin.DeliveryStatusPending:
-		result, err := dao.TgCollectorDelivery.Ctx(ctx).WherePri(row.Id).
-			Where(columns.Status, sysin.DeliveryStatusPending).
-			Data(g.Map{columns.Priority: sysin.EventPriorityNormal, "scheduler_pool": "history"}).Update()
-		if err != nil {
-			return false, gerror.Wrap(err, "保存source重放历史链路失败")
-		}
-		if affected, err := result.RowsAffected(); err != nil || affected == 0 {
-			return false, err
-		}
+		// Keep the existing task and its priority if either lane already owns it.
+		ctx = context.WithValue(ctx, deliverySourceRecoveryKey{}, true)
 		return true, s.enqueueDeliveryTaskWithOptions(ctx, row.Id, sysin.EventPriorityNormal, false)
 	case sysin.DeliveryStatusFailedRetry, sysin.DeliveryStatusDead:
 		result, err := dao.TgCollectorDelivery.Ctx(ctx).WherePri(row.Id).

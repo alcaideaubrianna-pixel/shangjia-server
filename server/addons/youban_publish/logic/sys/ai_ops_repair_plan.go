@@ -48,6 +48,7 @@ var aiOpsRepairActions = map[string]struct{}{
 }
 
 type aiOpsRepairPlanPayload struct {
+	RuleID            int64                                `json:"ruleId,omitempty"`
 	Action            string                               `json:"action"`
 	SourceID          int64                                `json:"sourceId"`
 	EventIDs          []int64                              `json:"eventIds"`
@@ -72,6 +73,9 @@ func (s *sSysPublish) AIOpsCreateRepairPlan(ctx context.Context, in *sysin.AIOps
 		limit = 100
 		if action == "replay_bot_source_updates" {
 			limit = 1000
+			if in.RuleId > 0 {
+				limit = 200
+			}
 		}
 		if action == aiOpsCollectWakeAction {
 			limit = 200
@@ -88,12 +92,17 @@ func (s *sSysPublish) AIOpsCreateRepairPlan(ctx context.Context, in *sysin.AIOps
 		tenantID, accountID                                     int64
 	)
 	if action == "replay_bot_source_updates" {
+		if in.RuleId < 0 || in.RuleId > 0 && (len(in.EventIds) != 0 || len(in.CollectorEventIds) != 0 ||
+			strings.TrimSpace(in.ChatId) == "" || in.StartMessageId <= 0 || in.EndMessageId < in.StartMessageId ||
+			in.EndMessageId-in.StartMessageId >= 200 || limit > 200) {
+			return nil, gerror.New("指定规则重放需要频道和明确的消息范围，每次最多200个消息号")
+		}
 		// Older MCP clients send the generic eventIds field. Treat it as
 		// collectorEventIds for this action so an explicitly bounded replay is
 		// not rejected merely because the client has not adopted the newer
 		// field name yet.
 		replayEventIDs := sourceReplayEventIDs(in)
-		collectorEventIDs, replayPreview, tenantID, accountID, err = s.previewAIOpsBotSourceReplay(ctx, in.SourceId, replayEventIDs, in.ChatId, in.StartMessageId, in.EndMessageId, limit)
+		collectorEventIDs, replayPreview, tenantID, accountID, err = s.previewAIOpsBotSourceReplay(ctx, in.SourceId, replayEventIDs, in.ChatId, in.StartMessageId, in.EndMessageId, limit, in.RuleId)
 	} else if action == aiOpsCollectWakeAction {
 		eventIDs, wakePreview, tenantID, accountID, err = s.previewAIOpsCollectWake(ctx, in)
 	} else {
@@ -104,7 +113,7 @@ func (s *sSysPublish) AIOpsCreateRepairPlan(ctx context.Context, in *sysin.AIOps
 		return nil, err
 	}
 	payload, err := json.Marshal(aiOpsRepairPlanPayload{
-		Action: action, SourceID: in.SourceId, EventIDs: eventIDs, VerifyEventIDs: verifyEventIDs, ProfileIDs: profileIDs,
+		Action: action, SourceID: in.SourceId, RuleID: in.RuleId, EventIDs: eventIDs, VerifyEventIDs: verifyEventIDs, ProfileIDs: profileIDs,
 		CollectorEventIDs: collectorEventIDs, TenantID: tenantID, AccountID: accountID, CollectWakeEvents: wakePreview,
 	})
 	if err != nil {
@@ -130,7 +139,7 @@ func (s *sSysPublish) AIOpsCreateRepairPlan(ctx context.Context, in *sysin.AIOps
 	}
 	g.Log().Info(ctx, "AI运维修复计划已生成", g.Map{"planId": planID, "action": action, "candidates": candidateCount})
 	return &sysin.AIOpsRepairPlanModel{
-		PlanId: planID, Action: action, Candidates: candidateCount, EventIds: eventIDs, VerifyEventIds: verifyEventIDs, ProfileIds: profileIDs,
+		PlanId: planID, Action: action, RuleId: in.RuleId, Candidates: candidateCount, EventIds: eventIDs, VerifyEventIds: verifyEventIDs, ProfileIds: profileIDs,
 		CollectorEventIds: collectorEventIDs, ReplayPreview: replayPreview, WakePreview: wakePreview,
 		ConfirmToken: token, ExpiresAt: expiresAt.Time.Format(time.RFC3339),
 	}, nil
@@ -149,7 +158,7 @@ func sourceReplayEventIDs(in *sysin.AIOpsRepairPlanInp) []int64 {
 }
 
 // previewAIOpsBotSourceReplay 统一解析明确ID、频道或消息区间，生成有界重放清单。
-func (s *sSysPublish) previewAIOpsBotSourceReplay(ctx context.Context, sourceID int64, requested []int64, chatID string, startMessageID, endMessageID int64, limit int) ([]int64, []*sysin.AIOpsSourceReplayPreviewItem, int64, int64, error) {
+func (s *sSysPublish) previewAIOpsBotSourceReplay(ctx context.Context, sourceID int64, requested []int64, chatID string, startMessageID, endMessageID int64, limit int, expectedRuleID int64) ([]int64, []*sysin.AIOpsSourceReplayPreviewItem, int64, int64, error) {
 	ids := uniqueIds(requested)
 	if sourceID <= 0 || len(ids) > limit {
 		return nil, nil, 0, 0, gerror.Newf("目标source无效或事件数量超过%d条", limit)
@@ -186,14 +195,26 @@ func (s *sSysPublish) previewAIOpsBotSourceReplay(ctx context.Context, sourceID 
 		var rows []struct{ ID int64 }
 		model := g.DB().Model("hg_tg_collector_event").Ctx(ctx).
 			Fields("id").Where("tenant_id", target.TenantID).Where("source_id", sourceID).
-			Where("source_type", sysin.CollectSourceTypeBot).Where("chat_id", strings.TrimSpace(chatID))
+			Where("source_type", sysin.CollectSourceTypeBot)
+		if expectedRuleID > 0 {
+			model = model.Where("chat_id", normalizeTelegramChannelChatID(chatID))
+		} else {
+			model = model.Where("chat_id", strings.TrimSpace(chatID))
+		}
 		if startMessageID > 0 {
 			model = model.WhereBetween("message_id", startMessageID, endMessageID)
 		}
-		model = model.OrderDesc("message_id").Limit(limit)
+		if expectedRuleID > 0 {
+			model = model.OrderAsc("message_id").OrderAsc("id").Limit(limit + 1)
+		} else {
+			model = model.OrderDesc("message_id").Limit(limit)
+		}
 
 		if err := model.Scan(&rows); err != nil {
 			return nil, nil, 0, 0, gerror.Wrap(err, "按频道消息区间读取重放事件失败")
+		}
+		if len(rows) > limit {
+			return nil, nil, 0, 0, gerror.New("消息范围内原始事件数量超过上限，请拆分范围")
 		}
 		for _, row := range rows {
 			ids = append(ids, row.ID)
@@ -261,6 +282,9 @@ func (s *sSysPublish) previewAIOpsBotSourceReplay(ctx context.Context, sourceID 
 			rule := rules[0]
 			resolved = resolvedReplayRule{sourceID: collectRuleSourceID(event, rule), ruleID: rule["id"].Int64(), name: rule["name"].String()}
 			rulesByChat[candidate.ChatID] = resolved
+		}
+		if expectedRuleID > 0 && (resolved.sourceID != sourceID || resolved.ruleID != expectedRuleID) {
+			return nil, nil, 0, 0, gerror.Newf("频道%s的唯一规则不是指定规则%d，拒绝重放", candidate.ChatID, expectedRuleID)
 		}
 		preview = append(preview, &sysin.AIOpsSourceReplayPreviewItem{
 			CollectorEventId: candidate.ID, OriginSourceId: candidate.SourceID, UpdateId: candidate.UpdateID,
@@ -618,7 +642,7 @@ func (s *sSysPublish) runAIOpsSourceReplayPlanAsync(planID string, payload aiOps
 		}
 		// Revalidate exactly the same ownership, approval and replay eligibility
 		// as synchronous apply; the collector still owns replay idempotency.
-		_, _, tenantID, accountID, err := s.previewAIOpsBotSourceReplay(ctx, payload.SourceID, payload.CollectorEventIDs, "", 0, 0, 1000)
+		_, _, tenantID, accountID, err := s.previewAIOpsBotSourceReplay(ctx, payload.SourceID, payload.CollectorEventIDs, "", 0, 0, 1000, payload.RuleID)
 		if err != nil {
 			return err
 		}

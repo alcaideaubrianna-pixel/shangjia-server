@@ -3,15 +3,17 @@ package sys
 import (
 	"context"
 	"encoding/json"
+	"strconv"
+	"testing"
+
 	"github.com/alicebob/miniredis/v2"
 	"github.com/hibiken/asynq"
 	"hotgo/addons/telegram_collector/consts"
 	"hotgo/addons/telegram_collector/model/input/sysin"
 	"hotgo/utility/sourcequeue"
-	"testing"
 )
 
-func TestSourceReplayBypassesUrgentBacklogWithoutRemovingOriginal(t *testing.T) {
+func TestSourceReplayPreservesExistingWorkAndQueuesMissingWorkOnce(t *testing.T) {
 	_, q := eventSourceQueueRedisFixture(t)
 	redis := miniredis.RunT(t)
 	opt := asynq.RedisClientOpt{Addr: redis.Addr()}
@@ -23,6 +25,7 @@ func TestSourceReplayBypassesUrgentBacklogWithoutRemovingOriginal(t *testing.T) 
 	scope := sourcequeue.Scope{TenantID: 78, SourceID: 351}
 	ctx := withCollectorSourceScope(context.Background(), scope.TenantID, scope.SourceID)
 	const eventID int64 = 12682221
+	const missingEventID = eventID + 1
 	original, err := client.Enqueue(asynq.NewTask(eventTaskType, collectorTaskPayload(eventID)), asynq.Queue(consts.QueueCollectUrgent), asynq.MaxRetry(eventMaxAttempts-1), asynq.Timeout(eventLeaseDuration))
 	if err != nil {
 		t.Fatal(err)
@@ -31,21 +34,24 @@ func TestSourceReplayBypassesUrgentBacklogWithoutRemovingOriginal(t *testing.T) 
 		t.Fatal(err)
 	}
 	for i := 0; i < 3; i++ {
-		if err = collector.enqueueSourceReplayEventTask(ctx, eventID); err != nil {
-			t.Fatal(err)
+		for _, id := range []int64{eventID, missingEventID} {
+			if err = collector.enqueueSourceReplayEventTask(ctx, id); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
-	for _, lane := range []sourcequeue.Lane{sourcequeue.Realtime, sourcequeue.History} {
-		exists, err := q.HasTask(ctx, scope, lane, "12682221")
+	for lane, id := range map[sourcequeue.Lane]int64{sourcequeue.Realtime: eventID, sourcequeue.History: missingEventID} {
+		taskID := strconv.FormatInt(id, 10)
+		exists, err := q.HasTask(ctx, scope, lane, taskID)
 		if err != nil || !exists {
 			t.Fatalf("lane=%s exists=%v err=%v", lane, exists, err)
 		}
 		claim, err := q.Claim(ctx, lane, eventLeaseDuration)
-		if err != nil || claim == nil || claim.Scope != scope || claim.ID != "12682221" {
+		if err != nil || claim == nil || claim.Scope != scope || claim.ID != taskID {
 			t.Fatalf("lane=%s claim=%+v err=%v", lane, claim, err)
 		}
 		var payload collectorSourceEventPayload
-		if err = json.Unmarshal(claim.Payload, &payload); err != nil || payload.EventID != eventID {
+		if err = json.Unmarshal(claim.Payload, &payload); err != nil || payload.EventID != id {
 			t.Fatalf("identity changed: err=%v payload=%+v", err, payload)
 		}
 		if err = q.Ack(ctx, claim); err != nil {

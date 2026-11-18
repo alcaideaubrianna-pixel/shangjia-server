@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -45,6 +46,14 @@ type repairPlanInput struct {
 	StartAt    string   `json:"startAt,omitempty" jsonschema:"RFC3339 range start"`
 	EndAt      string   `json:"endAt,omitempty" jsonschema:"RFC3339 range end"`
 	Limit      int      `json:"limit,omitempty" jsonschema:"Maximum candidates, up to 1000"`
+}
+
+type collectReplayMessageRangeInput struct {
+	SourceID       int64  `json:"sourceId" jsonschema:"Target Bot collection source ID"`
+	RuleID         int64  `json:"ruleId" jsonschema:"Expected uniquely bound collection rule ID"`
+	ChatID         string `json:"chatId" jsonschema:"Numeric Telegram source channel Chat ID"`
+	StartMessageID int64  `json:"startMessageId" jsonschema:"First Telegram message ID, inclusive"`
+	EndMessageID   int64  `json:"endMessageId" jsonschema:"Last Telegram message ID, inclusive; at most 200 message IDs per call"`
 }
 
 type repairApplyInput struct {
@@ -164,6 +173,10 @@ func main() {
 		Annotations: &mcp.ToolAnnotations{Title: "Directly delete Telegram message", ReadOnlyHint: readOnly, DestructiveHint: &destructive, IdempotentHint: true},
 	}, client.telegramMessageDirectDelete)
 	mcp.AddTool(server, &mcp.Tool{
+		Name: "collect_replay_message_range", Description: "Replay stored Bot messages from an inclusive channel range through the specified collection source and rule. Check ops_plan_status with the returned planId.",
+		Annotations: &mcp.ToolAnnotations{Title: "Replay collection message range", ReadOnlyHint: readOnly, DestructiveHint: &destructive},
+	}, client.collectReplayMessageRange)
+	mcp.AddTool(server, &mcp.Tool{
 		Name: "collect_preview_repair", Description: "Create a bounded dry-run repair plan and confirmation token without changing business data",
 		Annotations: &mcp.ToolAnnotations{Title: "Preview collection repair", ReadOnlyHint: true, IdempotentHint: false},
 	}, client.previewRepair)
@@ -273,6 +286,39 @@ func (c *apiClient) messageContext(ctx context.Context, input messageContextInpu
 		query.Set("messageId", fmt.Sprint(input.MessageID))
 	}
 	return c.call(ctx, http.MethodGet, "/api/youban_publish/ai-ops/telegram/message/context?"+query.Encode(), nil)
+}
+
+func (c *apiClient) collectReplayMessageRange(ctx context.Context, _ *mcp.CallToolRequest, input collectReplayMessageRangeInput) (*mcp.CallToolResult, structuredOutput, error) {
+	input.ChatID = strings.TrimSpace(input.ChatID)
+	chatID, err := strconv.ParseInt(input.ChatID, 10, 64)
+	if err != nil || chatID == 0 || strconv.FormatInt(chatID, 10) != input.ChatID || input.SourceID <= 0 || input.RuleID <= 0 ||
+		input.StartMessageID <= 0 || input.EndMessageID < input.StartMessageID || input.EndMessageID-input.StartMessageID >= 200 {
+		return nil, structuredOutput{}, fmt.Errorf("provide a numeric chatId, positive sourceId and ruleId, and an inclusive range of at most 200 message IDs")
+	}
+	const path = "/api/youban_publish/ai-ops/collector/source/replay"
+	plan, err := c.call(ctx, http.MethodPost, path+"/plan", struct {
+		collectReplayMessageRangeInput
+		Limit int `json:"limit"`
+	}{input, 200})
+	if err != nil {
+		return nil, structuredOutput{}, err
+	}
+	planID, token := mapString(plan, "planId"), mapString(plan, "confirmToken")
+	if planID == "" || token == "" || mapInt64(plan, "ruleId") != input.RuleID ||
+		mapString(plan, "action") != "replay_bot_source_updates" || mapInt64(plan, "candidates") <= 0 {
+		return nil, structuredOutput{}, fmt.Errorf("server did not return a verified replay plan for rule %d", input.RuleID)
+	}
+	data, err := c.call(ctx, http.MethodPost, path+"/apply", repairApplyInput{PlanID: planID, ConfirmToken: token})
+	if err != nil {
+		return nil, structuredOutput{}, fmt.Errorf("apply for plan %s did not return success; check ops_plan_status before retrying: %w", planID, err)
+	}
+	if data == nil {
+		data = make(map[string]any)
+	}
+	data["planId"] = planID
+	data["ruleId"] = input.RuleID
+	data["candidates"] = mapInt64(plan, "candidates")
+	return nil, structuredOutput{Data: data}, nil
 }
 
 func (c *apiClient) previewRepair(ctx context.Context, _ *mcp.CallToolRequest, input repairPlanInput) (*mcp.CallToolResult, structuredOutput, error) {

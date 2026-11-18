@@ -1,6 +1,7 @@
 package sysin
 
 type AIOpsRepairPlanInp struct {
+	RuleId            int64    `json:"ruleId,omitempty" dc:"重放目标规则ID"`
 	Action            string   `json:"action" dc:"受控运维动作"`
 	SourceId          int64    `json:"sourceId" dc:"采集源ID"`
 	EventIds          []int64  `json:"eventIds" dc:"采集事件ID"`
@@ -18,6 +19,7 @@ type AIOpsRepairPlanInp struct {
 }
 
 type AIOpsRepairPlanModel struct {
+	RuleId            int64                           `json:"ruleId,omitempty" dc:"重放目标规则ID"`
 	PlanId            string                          `json:"planId"`
 	Action            string                          `json:"action"`
 	Candidates        int                             `json:"candidates"`
@@ -71,12 +73,13 @@ type AIOpsCollectWakeProgress struct {
 
 // AIOpsSourceReplayPlanInp 描述 Bot 采集原始消息的重放范围。
 type AIOpsSourceReplayPlanInp struct {
+	RuleId            int64   `json:"ruleId,omitempty" dc:"重放目标规则ID"`
 	SourceId          int64   `json:"sourceId" v:"required|min:1#目标采集源ID不能为空|目标采集源ID不能为空" dc:"接收重放事件的目标采集source ID"`
 	CollectorEventIds []int64 `json:"collectorEventIds" dc:"明确指定的Telegram Collector原始事件ID"`
 	ChatId            string  `json:"chatId" dc:"按频道Chat ID筛选"`
 	StartMessageId    int64   `json:"startMessageId" dc:"消息区间起始ID，包含"`
 	EndMessageId      int64   `json:"endMessageId" dc:"消息区间结束ID，包含"`
-	Limit             int     `json:"limit" d:"1000" dc:"最大原始事件数，最多1000"`
+	Limit             int     `json:"limit" dc:"最大原始事件数，指定规则时最多200，否则最多1000"`
 }
 
 type AIOpsSourceReplayPreviewItem struct {

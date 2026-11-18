@@ -123,3 +123,41 @@ func TestPreviewProfileOperationRejectsUnknownOperation(t *testing.T) {
 		t.Fatal("unknown destructive operation must be rejected")
 	}
 }
+
+func TestCollectReplayMessageRangeChecksRuleBeforeApply(t *testing.T) {
+	for _, rule := range []int64{338, 339, 0} {
+		input := collectReplayMessageRangeInput{351, 338, "-1004424159439", 7893, 7899}
+		calls := make(chan string, 2)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calls <- r.URL.Path
+			const base = "/api/youban_publish/ai-ops/collector/source/replay"
+			data := map[string]any{"status": "running"}
+			switch r.URL.Path {
+			case base + "/plan":
+				var body collectReplayMessageRangeInput
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body != input {
+					t.Errorf("unexpected plan request: %+v, %v", body, err)
+				}
+				data = map[string]any{"planId": "plan-1", "confirmToken": "signed", "action": "replay_bot_source_updates", "ruleId": rule, "candidates": 2}
+			case base + "/apply":
+				var body repairApplyInput
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.PlanID != "plan-1" || body.ConfirmToken != "signed" {
+					t.Errorf("unexpected apply request: %+v, %v", body, err)
+				}
+			default:
+				t.Errorf("unexpected endpoint: %s", r.URL.Path)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": data})
+		}))
+		client := &apiClient{baseURL: server.URL, token: "test-token", client: server.Client()}
+		_, output, err := client.collectReplayMessageRange(context.Background(), nil, input)
+		server.Close()
+		if rule == input.RuleID {
+			if err != nil || len(calls) != 2 || mapString(output.Data, "planId") != "plan-1" || output.Data["confirmToken"] != nil {
+				t.Fatalf("expected one confirmed apply, got %+v, %v, requests=%d", output, err, len(calls))
+			}
+		} else if err == nil || len(calls) != 1 {
+			t.Fatalf("rule %d must stop after preview, got %v, requests=%d", rule, err, len(calls))
+		}
+	}
+}

@@ -86,14 +86,14 @@ func (s *sCollector) enqueueSourceEvent(ctx context.Context, eventID int64, prio
 		return gerror.Wrap(err, "初始化来源采集队列失败")
 	}
 	started := time.Now()
-	if origin == eventOriginRecovery {
+	if origin == eventOriginRecovery || origin == eventOriginReplay {
 		for _, existingLane := range []sourcequeue.Lane{sourcequeue.Realtime, sourcequeue.History} {
 			exists, lookupErr := q.HasTask(ctx, scope, existingLane, strconv.FormatInt(eventID, 10))
 			if lookupErr != nil {
 				return gerror.Wrap(lookupErr, "检查来源采集任务失败，禁止降级重复投递")
 			}
 			if exists {
-				logCollectorPipelineStage(ctx, &entity.TgCollectorEvent{Id: eventID, TenantId: scope.TenantID, SourceId: scope.SourceID}, "event.recovery.existing_task_preserved", started, nil, nil, g.Map{"outcome": "existing_task_preserved", "queueLane": existingLane})
+				logCollectorPipelineStage(ctx, &entity.TgCollectorEvent{Id: eventID, TenantId: scope.TenantID, SourceId: scope.SourceID}, "event.recovery.existing_task_preserved", started, nil, nil, g.Map{"outcome": "existing_task_preserved", "queueLane": existingLane, "enqueueOrigin": origin})
 				return nil
 			}
 		}
