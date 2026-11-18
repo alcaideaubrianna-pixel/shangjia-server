@@ -1,6 +1,7 @@
 package sysin
 
 type AIOpsRepairPlanInp struct {
+	PrioritizeHistory bool     `json:"prioritizeHistory,omitempty" dc:"将指定采集业务事件提前至来源历史队首"`
 	RuleId            int64    `json:"ruleId,omitempty" dc:"重放目标规则ID"`
 	Action            string   `json:"action" dc:"受控运维动作"`
 	SourceId          int64    `json:"sourceId" dc:"采集源ID"`

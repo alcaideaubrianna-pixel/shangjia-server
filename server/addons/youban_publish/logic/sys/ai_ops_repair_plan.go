@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -48,6 +49,7 @@ var aiOpsRepairActions = map[string]struct{}{
 }
 
 type aiOpsRepairPlanPayload struct {
+	PrioritizeHistory bool                                 `json:"prioritizeHistory,omitempty"`
 	RuleID            int64                                `json:"ruleId,omitempty"`
 	Action            string                               `json:"action"`
 	SourceID          int64                                `json:"sourceId"`
@@ -58,6 +60,15 @@ type aiOpsRepairPlanPayload struct {
 	TenantID          int64                                `json:"tenantId"`
 	AccountID         int64                                `json:"accountId"`
 	CollectWakeEvents []*sysin.AIOpsCollectWakePreviewItem `json:"collectWakeEvents,omitempty"`
+}
+
+func sourceReplayLimitFromEnv(name string) int {
+	const maximum = 200
+	value, err := strconv.Atoi(strings.TrimSpace(os.Getenv(name)))
+	if err != nil || value < 1 || value > maximum {
+		return maximum
+	}
+	return value
 }
 
 func (s *sSysPublish) AIOpsCreateRepairPlan(ctx context.Context, in *sysin.AIOpsRepairPlanInp) (*sysin.AIOpsRepairPlanModel, error) {
@@ -74,7 +85,7 @@ func (s *sSysPublish) AIOpsCreateRepairPlan(ctx context.Context, in *sysin.AIOps
 		if action == "replay_bot_source_updates" {
 			limit = 1000
 			if in.RuleId > 0 {
-				limit = 200
+				limit = sourceReplayLimitFromEnv("YOUBAN_COLLECTOR_REPLAY_BATCH_SIZE")
 			}
 		}
 		if action == aiOpsCollectWakeAction {
@@ -91,11 +102,16 @@ func (s *sSysPublish) AIOpsCreateRepairPlan(ctx context.Context, in *sysin.AIOps
 		wakePreview                                             []*sysin.AIOpsCollectWakePreviewItem
 		tenantID, accountID                                     int64
 	)
+	if in.PrioritizeHistory && action != aiOpsCollectWakeAction {
+		return nil, gerror.New("仅业务采集事件唤醒支持历史提优先级")
+	}
 	if action == "replay_bot_source_updates" {
+		batchLimit := sourceReplayLimitFromEnv("YOUBAN_COLLECTOR_REPLAY_BATCH_SIZE")
+		rangeLimit := sourceReplayLimitFromEnv("YOUBAN_COLLECTOR_REPLAY_MAX_MESSAGE_SPAN")
 		if in.RuleId < 0 || in.RuleId > 0 && (len(in.EventIds) != 0 || len(in.CollectorEventIds) != 0 ||
 			strings.TrimSpace(in.ChatId) == "" || in.StartMessageId <= 0 || in.EndMessageId < in.StartMessageId ||
-			in.EndMessageId-in.StartMessageId >= 200 || limit > 200) {
-			return nil, gerror.New("指定规则重放需要频道和明确的消息范围，每次最多200个消息号")
+			in.EndMessageId-in.StartMessageId >= int64(rangeLimit) || limit > batchLimit) {
+			return nil, gerror.Newf("指定规则重放需要频道和明确的消息范围，每次最多%d个消息号和%d条原始事件", rangeLimit, batchLimit)
 		}
 		// Older MCP clients send the generic eventIds field. Treat it as
 		// collectorEventIds for this action so an explicitly bounded replay is
@@ -113,7 +129,7 @@ func (s *sSysPublish) AIOpsCreateRepairPlan(ctx context.Context, in *sysin.AIOps
 		return nil, err
 	}
 	payload, err := json.Marshal(aiOpsRepairPlanPayload{
-		Action: action, SourceID: in.SourceId, RuleID: in.RuleId, EventIDs: eventIDs, VerifyEventIDs: verifyEventIDs, ProfileIDs: profileIDs,
+		Action: action, SourceID: in.SourceId, RuleID: in.RuleId, PrioritizeHistory: in.PrioritizeHistory, EventIDs: eventIDs, VerifyEventIDs: verifyEventIDs, ProfileIDs: profileIDs,
 		CollectorEventIDs: collectorEventIDs, TenantID: tenantID, AccountID: accountID, CollectWakeEvents: wakePreview,
 	})
 	if err != nil {

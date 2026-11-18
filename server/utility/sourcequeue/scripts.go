@@ -15,6 +15,19 @@ end
 const enqueueScript = commonScript + `
 local source,id,payload,delay,member=ARGV[1],ARGV[2],ARGV[3],tonumber(ARGV[4]),ARGV[5]
 local state=redis.call('HGET',KEYS[9],id)
+local priority=ARGV[6]=='1'
+if priority then
+ if state=='i' or state=='d' then return 1 end
+ if state=='p' then
+  if redis.call('LINDEX',KEYS[5],0)~=id then
+   if redis.call('LLEN',KEYS[5])>10000 then return redis.error_reply('sourcequeue priority limit exceeded') end
+   if redis.call('LREM',KEYS[5],1,id)~=1 then return redis.error_reply('sourcequeue pending task missing') end
+   redis.call('LPUSH',KEYS[5],id)
+  end
+  activate(source)
+  return 1
+ end
+end
 redis.call('HSET',KEYS[6],id,payload)
 redis.call('HINCRBY',KEYS[8],id,1)
 if not state then
@@ -23,7 +36,7 @@ if not state then
   redis.call('ZADD',KEYS[4],now+delay,member)
  else
   redis.call('HSET',KEYS[9],id,'p')
-  redis.call('RPUSH',KEYS[5],id)
+  if priority then redis.call('LPUSH',KEYS[5],id) else redis.call('RPUSH',KEYS[5],id) end
  end
 elseif state=='i' then
  redis.call('HSET',KEYS[10],id,now+delay)

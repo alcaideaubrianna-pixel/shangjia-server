@@ -33,7 +33,11 @@ func setupQueue(t *testing.T) testQueue {
 		address = server.Addr()
 		now := time.Now()
 		server.SetTime(now)
-		advance = func(d time.Duration) { now = now.Add(d); server.SetTime(now) }
+		advance = func(d time.Duration) {
+			now = now.Add(d)
+			server.SetTime(now)
+			server.FastForward(d)
+		}
 	} else {
 		host, port, e := net.SplitHostPort(address)
 		if e != nil {
@@ -60,7 +64,7 @@ func setupQueue(t *testing.T) testQueue {
 			for tenant := int64(1); tenant <= 2; tenant++ {
 				for source := int64(1); source <= 4; source++ {
 					keys := q.keys(Scope{tenant, source}, lane)
-					keys = append(keys, keys[1]+":recover-turn")
+					keys = append(keys, keys[1]+":recover-turn", keys[8]+":budget")
 					args := make([]interface{}, len(keys))
 					for i, k := range keys {
 						args[i] = k
@@ -629,4 +633,51 @@ func TestQueueCancelScopeOldDelayedMembersCannotDeleteReplacement(t *testing.T) 
 		mustAck(t, q, c)
 		mustEmpty(t, q, lane)
 	}
+}
+
+func TestHistoryPriorityPreservesTaskAndLease(t *testing.T) {
+	q := setupQueue(t).q
+	ctx := context.Background()
+	scope := Scope{1, 1}
+	mustEnqueue(t, q, scope, History, "active", nil)
+	active := mustClaim(t, q, History)
+	mustEnqueue(t, q, scope, History, "ordinary", nil)
+	mustEnqueue(t, q, scope, History, "promote", []byte("original"))
+	if err := q.EnqueueAfter(ctx, scope, History, "delayed", nil, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"active", "delayed", "missing", "promote", "promote"} {
+		if err := q.EnqueueHistoryPriority(ctx, scope, id, []byte("priority")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustEmpty(t, q, History)
+	mustAck(t, q, active)
+	for _, id := range []string{"promote", "missing", "ordinary"} {
+		got := mustClaim(t, q, History)
+		if got.ID != id || (id == "promote" && string(got.Payload) != "original") {
+			t.Fatalf("want %s, got %+v", id, got)
+		}
+		mustAck(t, q, got)
+	}
+	mustEmpty(t, q, History)
+}
+
+func TestReserveHistorySlotIsScopedAndExpires(t *testing.T) {
+	fixture := setupQueue(t)
+	ctx := context.Background()
+	scope := Scope{TenantID: 1, SourceID: 1}
+	reserve := func(scope Scope, want bool) {
+		t.Helper()
+		got, err := fixture.q.ReserveHistorySlot(ctx, scope, time.Second)
+		if err != nil || got != want {
+			t.Fatalf("scope=%+v got=%v want=%v err=%v", scope, got, want, err)
+		}
+	}
+	reserve(scope, true)
+	reserve(scope, false)
+	reserve(Scope{TenantID: 1, SourceID: 2}, true)
+	reserve(Scope{TenantID: 2, SourceID: 1}, true)
+	fixture.advance(2 * time.Second)
+	reserve(scope, true)
 }

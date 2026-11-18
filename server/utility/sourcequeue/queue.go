@@ -138,6 +138,16 @@ func (q *Queue) Enqueue(ctx context.Context, s Scope, lane Lane, id string, payl
 // enqueue during a claim advances its generation so the old Ack cannot lose it.
 // A duplicate delayed enqueue may bring its due time forward, never postpone it.
 func (q *Queue) EnqueueAfter(ctx context.Context, s Scope, lane Lane, id string, payload []byte, delay time.Duration) error {
+	return q.enqueueAfter(ctx, s, lane, id, payload, delay, 0)
+}
+
+// EnqueueHistoryPriority moves a pending task to the front or inserts a missing
+// task. Active leases and delayed retry deadlines are preserved.
+func (q *Queue) EnqueueHistoryPriority(ctx context.Context, s Scope, id string, payload []byte) error {
+	return q.enqueueAfter(ctx, s, History, id, payload, 0, 1)
+}
+
+func (q *Queue) enqueueAfter(ctx context.Context, s Scope, lane Lane, id string, payload []byte, delay time.Duration, priority int) error {
 	if e := validate(s, lane); e != nil {
 		return e
 	}
@@ -148,7 +158,7 @@ func (q *Queue) EnqueueAfter(ctx context.Context, s Scope, lane Lane, id string,
 	if e != nil {
 		return e
 	}
-	_, e = q.eval(ctx, enqueueScript, q.keys(s, lane), scopeID(s), id, string(payload), ms, delayMember(s, id))
+	_, e = q.eval(ctx, enqueueScript, q.keys(s, lane), scopeID(s), id, string(payload), ms, delayMember(s, id), priority)
 	return e
 }
 func delayMember(s Scope, id string) string {
@@ -294,6 +304,24 @@ func (q *Queue) HasImmediateWork(ctx context.Context, scope Scope, lane Lane) (b
 		return false, err
 	}
 	return value.Int64() > 0, nil
+}
+
+// ReserveHistorySlot admits one historical execution per scope and interval
+// across all workers sharing the queue.
+func (q *Queue) ReserveHistorySlot(ctx context.Context, scope Scope, interval time.Duration) (bool, error) {
+	if err := validate(scope, History); err != nil {
+		return false, err
+	}
+	ttl, err := millis(interval, true)
+	if err != nil {
+		return false, err
+	}
+	key := q.keys(scope, History)[8] + ":budget"
+	value, err := q.eval(ctx, `if redis.call('SET',KEYS[1],1,'NX','PX',ARGV[1]) then return 1 end return 0`, []string{key}, ttl)
+	if err != nil {
+		return false, err
+	}
+	return value.Int() == 1, nil
 }
 
 // HasTask checks one explicit task's state, including pending, inflight and

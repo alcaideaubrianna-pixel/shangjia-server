@@ -52,16 +52,17 @@ func markCollectProcessSourceActive(ctx context.Context, payload collectProcessQ
 }
 
 type collectProcessQueuePayload struct {
-	History      bool   `json:"history,omitempty"`
-	AccountId    int64  `json:"accountId"`
-	EventId      int64  `json:"eventId"`
-	SourceId     int64  `json:"sourceId"`
-	SourceChatId string `json:"sourceChatId,omitempty"`
-	TenantId     int64  `json:"tenantId"`
-	RuleId       int64  `json:"ruleId,omitempty"`
-	RuleQueueKey string `json:"ruleQueueKey,omitempty"`
-	OutboxOwner  string `json:"outboxOwner,omitempty"`
-	Recovery     bool   `json:"recovery,omitempty"`
+	PrioritizeHistory bool   `json:"-"`
+	History           bool   `json:"history,omitempty"`
+	AccountId         int64  `json:"accountId"`
+	EventId           int64  `json:"eventId"`
+	SourceId          int64  `json:"sourceId"`
+	SourceChatId      string `json:"sourceChatId,omitempty"`
+	TenantId          int64  `json:"tenantId"`
+	RuleId            int64  `json:"ruleId,omitempty"`
+	RuleQueueKey      string `json:"ruleQueueKey,omitempty"`
+	OutboxOwner       string `json:"outboxOwner,omitempty"`
+	Recovery          bool   `json:"recovery,omitempty"`
 	// Observation is absent on payload-hashed Unique tasks: trace/time must
 	// never change their existing business deduplication key.
 	Observation json.RawMessage `json:"observation,omitempty"`

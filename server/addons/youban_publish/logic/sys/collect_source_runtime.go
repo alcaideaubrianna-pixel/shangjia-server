@@ -109,7 +109,15 @@ func enqueueCollectSourceEnvelope(ctx context.Context, envelope collectSourceRun
 		return err
 	}
 	started := time.Now()
-	err = queue.EnqueueAfter(ctx, sourcequeue.Scope{TenantID: payload.TenantId, SourceID: payload.SourceId}, lane, id, body, delay)
+	scope := sourcequeue.Scope{TenantID: payload.TenantId, SourceID: payload.SourceId}
+	if payload.PrioritizeHistory {
+		if lane != sourcequeue.History || delay != 0 {
+			return gerror.New("历史提优先级任务必须立即进入历史队列")
+		}
+		err = queue.EnqueueHistoryPriority(ctx, scope, id, body)
+	} else {
+		err = queue.EnqueueAfter(ctx, scope, lane, id, body, delay)
+	}
 	fields := collectSourceRuntimeFields(envelope, lane)
 	fields["event"] = "collect.source.enqueued"
 	fields["enqueueDurationMs"] = time.Since(started).Milliseconds()

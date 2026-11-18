@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"testing"
 	"time"
 
@@ -24,6 +25,11 @@ type deliverySourceFakeQueue struct {
 	renewErr, ackErr      error
 	busy                  bool
 	immediateErr          error
+	historySlot           bool
+}
+
+func (q *deliverySourceFakeQueue) ReserveHistorySlot(context.Context, sourcequeue.Scope, time.Duration) (bool, error) {
+	return q.historySlot, nil
 }
 
 func (q *deliverySourceFakeQueue) HasImmediateWork(context.Context, sourcequeue.Scope, sourcequeue.Lane) (bool, error) {
@@ -183,6 +189,7 @@ func TestDeliverySourceBudgetsAndLane(t *testing.T) {
 }
 
 func TestDeliverySourceHistoryYieldsToRealtime(t *testing.T) {
+	t.Setenv("YOUBAN_TELEGRAM_DELIVERY_HISTORY_BUSY_SCOPES", "")
 	q := &deliverySourceFakeQueue{busy: true}
 	claim := deliverySourceTestClaim(t, sourcequeue.History)
 	err := executeDeliverySourceClaim(context.Background(), q, claim, claim.Lane, time.Second, func(context.Context, int64, ...time.Time) error {
@@ -294,5 +301,26 @@ func TestDeliverySourceIngressStillWakesInflightTask(t *testing.T) {
 	next, err := q.Claim(ctx, sourcequeue.Realtime, time.Minute)
 	if err != nil || next == nil || next.ID != "42" {
 		t.Fatalf("inflight ingress notification lost: claim=%+v err=%v", next, err)
+	}
+}
+
+func TestDeliverySourceHistoryUsesScopedBudgetWhenRealtimeBusy(t *testing.T) {
+	claim := deliverySourceTestClaim(t, sourcequeue.History)
+	t.Setenv("YOUBAN_TELEGRAM_DELIVERY_HISTORY_BUSY_SCOPES", strconv.FormatInt(claim.Scope.TenantID, 10)+":"+strconv.FormatInt(claim.Scope.SourceID, 10))
+	t.Setenv("YOUBAN_TELEGRAM_DELIVERY_HISTORY_BUSY_INTERVAL", "2s")
+	queue := &deliverySourceFakeQueue{busy: true, historySlot: true}
+	processed := 0
+	run := func() error {
+		return executeDeliverySourceClaim(context.Background(), queue, claim, claim.Lane, time.Second, func(context.Context, int64, ...time.Time) error {
+			processed++
+			return nil
+		})
+	}
+	if err := run(); err != nil || processed != 1 || queue.acked != 1 {
+		t.Fatalf("reserved history slot did not run: processed=%d queue=%+v err=%v", processed, queue, err)
+	}
+	queue.historySlot = false
+	if err := run(); err != nil || processed != 1 || queue.nacked != 1 {
+		t.Fatalf("exhausted budget did not defer: processed=%d queue=%+v err=%v", processed, queue, err)
 	}
 }

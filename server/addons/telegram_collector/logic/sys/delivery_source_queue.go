@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -38,6 +40,21 @@ type deliverySourceQueue interface {
 	Renew(context.Context, *sourcequeue.Claim, time.Duration) error
 	Recover(context.Context, sourcequeue.Lane, int) error
 	HasImmediateWork(context.Context, sourcequeue.Scope, sourcequeue.Lane) (bool, error)
+	ReserveHistorySlot(context.Context, sourcequeue.Scope, time.Duration) (bool, error)
+}
+
+func deliverySourceHistoryBusyInterval(scope sourcequeue.Scope) time.Duration {
+	scopeID := strconv.FormatInt(scope.TenantID, 10) + ":" + strconv.FormatInt(scope.SourceID, 10)
+	for _, configured := range strings.Split(os.Getenv("YOUBAN_TELEGRAM_DELIVERY_HISTORY_BUSY_SCOPES"), ",") {
+		if strings.TrimSpace(configured) != scopeID {
+			continue
+		}
+		interval, err := time.ParseDuration(strings.TrimSpace(os.Getenv("YOUBAN_TELEGRAM_DELIVERY_HISTORY_BUSY_INTERVAL")))
+		if err == nil && interval >= time.Second && interval <= time.Minute {
+			return interval
+		}
+	}
+	return 0
 }
 
 func deliverySourceHistoryBudgets(total int) (workers, legacy int) {
@@ -214,7 +231,21 @@ func executeDeliverySourceClaim(ctx context.Context, q deliverySourceQueue, clai
 			return err
 		}
 		if busy {
-			return q.Nack(ctx, claim, time.Second)
+			interval := deliverySourceHistoryBusyInterval(claim.Scope)
+			if interval == 0 {
+				return q.Nack(ctx, claim, time.Second)
+			}
+			admitted, err := q.ReserveHistorySlot(ctx, claim.Scope, interval)
+			if err != nil {
+				return err
+			}
+			if !admitted {
+				return q.Nack(ctx, claim, time.Second)
+			}
+			g.Log().Info(ctx, "历史交付取得保底额度", g.Map{
+				"event": "collector.delivery.history_budget_granted", "tenantId": payload.TenantID,
+				"sourceId": payload.SourceID, "deliveryId": payload.DeliveryID, "intervalMs": interval.Milliseconds(),
+			})
 		}
 	}
 	workCtx := withCollectorSourceLane(withCollectorSourceScope(ctx, claim.Scope.TenantID, claim.Scope.SourceID), lane)

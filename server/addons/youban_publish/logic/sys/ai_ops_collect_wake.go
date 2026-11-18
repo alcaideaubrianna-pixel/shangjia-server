@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
@@ -46,6 +47,9 @@ func (s *sSysPublish) loadAIOpsCollectWake(ctx context.Context, in *sysin.AIOpsR
 	}
 	if len(in.CollectorEventIds) > 0 || len(in.ProfileIds) > 0 || len(in.ProfileNos) > 0 {
 		return nil, nil, nil, nil, gerror.New("业务事件唤醒不能混用原始事件ID或资料ID")
+	}
+	if in.PrioritizeHistory && (in.RuleId <= 0 || len(in.EventIds) > 50) {
+		return nil, nil, nil, nil, gerror.New("历史提优先级必须指定规则，最多50个业务事件")
 	}
 	if in.Limit < 0 || in.Limit > 200 {
 		return nil, nil, nil, nil, gerror.New("业务事件唤醒上限必须在0到200之间")
@@ -158,6 +162,15 @@ func (s *sSysPublish) loadAIOpsCollectWake(ctx context.Context, in *sysin.AIOpsR
 				return nil, nil, nil, nil, targetErr
 			}
 			allowed = allowed && !blocked
+			if allowed && in.PrioritizeHistory {
+				rules, ruleErr := s.collectEventRules(ctx, event, in.TenantId, in.AccountId)
+				if ruleErr != nil {
+					return nil, nil, nil, nil, ruleErr
+				}
+				if len(rules) != 1 || rules[0]["id"].Int64() != in.RuleId || collectRuleSourceID(event, rules[0]) != in.SourceId {
+					return nil, nil, nil, nil, gerror.New("频道未唯一绑定指定采集规则")
+				}
+			}
 			allowedByChat[chat] = allowed
 		}
 		if allowed {
@@ -172,7 +185,7 @@ func (s *sSysPublish) applyAIOpsCollectWake(ctx context.Context, payload aiOpsRe
 		return gerror.New("缺少业务事件唤醒执行结果")
 	}
 	_, preview, facts, source, err := s.loadAIOpsCollectWake(ctx, &sysin.AIOpsRepairPlanInp{
-		TenantId: payload.TenantID, AccountId: payload.AccountID, SourceId: payload.SourceID, EventIds: payload.EventIDs,
+		TenantId: payload.TenantID, AccountId: payload.AccountID, SourceId: payload.SourceID, EventIds: payload.EventIDs, RuleId: payload.RuleID, PrioritizeHistory: payload.PrioritizeHistory,
 	})
 	if err != nil {
 		return err
@@ -196,6 +209,11 @@ func (s *sSysPublish) applyAIOpsCollectWake(ctx context.Context, payload aiOpsRe
 		}
 		plannedIDs[id] = true
 	}
+	if payload.PrioritizeHistory {
+		// Each priority insertion goes to the front. Reverse the batch so it
+		// keeps the same relative order as the approved event list.
+		slices.Reverse(preview)
+	}
 	accepted, skipped, failed := 0, 0, 0
 	for _, item := range preview {
 		before := original[item.EventId]
@@ -211,7 +229,7 @@ func (s *sSysPublish) applyAIOpsCollectWake(ctx context.Context, payload aiOpsRe
 			skipped++
 			continue
 		}
-		wake := collectProcessQueuePayload{History: true, EventId: item.EventId, TenantId: item.TenantId,
+		wake := collectProcessQueuePayload{History: true, PrioritizeHistory: payload.PrioritizeHistory, EventId: item.EventId, TenantId: item.TenantId,
 			AccountId: item.AccountId, SourceId: item.SourceId, SourceChatId: item.SourceChatId}
 		wake = captureCollectProcessObservation(collectBusinessEventContext(ctx, facts[item.EventId], source, 0), wake, false, time.Now())
 		if err = s.enqueueCollectProcess(ctx, wake, 0); err != nil {

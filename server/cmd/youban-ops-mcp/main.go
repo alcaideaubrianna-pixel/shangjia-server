@@ -36,16 +36,18 @@ type messageContextInput struct {
 }
 
 type repairPlanInput struct {
-	Action     string   `json:"action" jsonschema:"Controlled operation action"`
-	SourceID   int64    `json:"sourceId,omitempty" jsonschema:"Collection source ID"`
-	EventIDs   []int64  `json:"eventIds,omitempty" jsonschema:"Explicit collection event IDs"`
-	ProfileIDs []int64  `json:"profileIds,omitempty" jsonschema:"Explicit profile IDs"`
-	ProfileNos []string `json:"profileNos,omitempty" jsonschema:"Explicit profile numbers"`
-	TenantID   int64    `json:"tenantId,omitempty" jsonschema:"Tenant ID required when deleting profiles"`
-	AccountID  int64    `json:"accountId,omitempty" jsonschema:"Account ID required when deleting profiles"`
-	StartAt    string   `json:"startAt,omitempty" jsonschema:"RFC3339 range start"`
-	EndAt      string   `json:"endAt,omitempty" jsonschema:"RFC3339 range end"`
-	Limit      int      `json:"limit,omitempty" jsonschema:"Maximum candidates, up to 1000"`
+	PrioritizeHistory bool     `json:"prioritizeHistory,omitempty" jsonschema:"Move eligible wake_collect_events tasks to the front of their source history queue"`
+	RuleID            int64    `json:"ruleId,omitempty" jsonschema:"Required collection rule ID when prioritizing history"`
+	Action            string   `json:"action" jsonschema:"Controlled operation action"`
+	SourceID          int64    `json:"sourceId,omitempty" jsonschema:"Collection source ID"`
+	EventIDs          []int64  `json:"eventIds,omitempty" jsonschema:"Explicit collection event IDs"`
+	ProfileIDs        []int64  `json:"profileIds,omitempty" jsonschema:"Explicit profile IDs"`
+	ProfileNos        []string `json:"profileNos,omitempty" jsonschema:"Explicit profile numbers"`
+	TenantID          int64    `json:"tenantId,omitempty" jsonschema:"Tenant ID required when deleting profiles"`
+	AccountID         int64    `json:"accountId,omitempty" jsonschema:"Account ID required when deleting profiles"`
+	StartAt           string   `json:"startAt,omitempty" jsonschema:"RFC3339 range start"`
+	EndAt             string   `json:"endAt,omitempty" jsonschema:"RFC3339 range end"`
+	Limit             int      `json:"limit,omitempty" jsonschema:"Maximum candidates, up to 1000"`
 }
 
 type collectReplayMessageRangeInput struct {
@@ -296,10 +298,7 @@ func (c *apiClient) collectReplayMessageRange(ctx context.Context, _ *mcp.CallTo
 		return nil, structuredOutput{}, fmt.Errorf("provide a numeric chatId, positive sourceId and ruleId, and an inclusive range of at most 200 message IDs")
 	}
 	const path = "/api/youban_publish/ai-ops/collector/source/replay"
-	plan, err := c.call(ctx, http.MethodPost, path+"/plan", struct {
-		collectReplayMessageRangeInput
-		Limit int `json:"limit"`
-	}{input, 200})
+	plan, err := c.call(ctx, http.MethodPost, path+"/plan", input)
 	if err != nil {
 		return nil, structuredOutput{}, err
 	}
