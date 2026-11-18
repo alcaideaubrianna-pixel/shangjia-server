@@ -214,6 +214,9 @@ func (s *sSysPublish) submitProfilePublishWithMeta(ctx context.Context, profileI
 		return err
 	}
 	for _, jobID := range jobIds {
+		if err := attachCycleBatchAdmission(ctx, jobID, profileId); err != nil {
+			return gerror.Wrap(err, "绑定轮播批次发送任务失败")
+		}
 		observeCollectPublishAdmission(ctx, jobID, profileId)
 	}
 	g.Log().Info(ctx, "资料发布任务创建完成", g.Map{
@@ -644,6 +647,12 @@ func (s *sSysPublish) ensureTelegramProfileJobWithMetaTx(ctx context.Context, tx
 		// constraint names), which is an information disclosure risk.
 		g.Log().Errorf(ctx, "创建资料TG频道任务失败 tenant:%d account:%d profile:%d channel:%d err:%+v", job.TenantId, job.AccountId, job.ProfileId, job.ChannelId, err)
 		return 0, gerror.New("创建资料TG频道任务失败，请稍后重试")
+	}
+	job.Id = jobID
+	// Admission creates only a rotation membership. A failed first send must
+	// not make an otherwise online profile disappear from future batch picks.
+	if err = s.admitBatchRotationProfileTx(ctx, tx, job); err != nil {
+		return 0, gerror.Wrap(err, "登记频道批次轮播资料失败")
 	}
 	return jobID, nil
 }

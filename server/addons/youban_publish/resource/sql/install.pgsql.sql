@@ -1748,6 +1748,12 @@ ALTER TABLE IF EXISTS "hg_youban_publish_cycle_run" ADD COLUMN IF NOT EXISTS "cu
 ALTER TABLE IF EXISTS "hg_youban_publish_cycle_run" ADD COLUMN IF NOT EXISTS "total_count" integer NOT NULL DEFAULT 0;
 ALTER TABLE IF EXISTS "hg_youban_publish_cycle_run" ADD COLUMN IF NOT EXISTS "queued_count" integer NOT NULL DEFAULT 0;
 
+ALTER TABLE IF EXISTS "hg_youban_publish_cycle_run" ADD COLUMN IF NOT EXISTS "upper_profile_id" bigint NOT NULL DEFAULT 0;
+ALTER TABLE IF EXISTS "hg_youban_publish_cycle_run" ADD COLUMN IF NOT EXISTS "scheduled_day" date;
+CREATE UNIQUE INDEX IF NOT EXISTS "uq_ybp_cycle_snapshot_day"
+  ON "hg_youban_publish_cycle_run" ("channel_id", "scheduled_day")
+  WHERE "upper_profile_id"=-1 AND "scheduled_at" IS NOT NULL;
+CREATE SEQUENCE IF NOT EXISTS "hg_ybp_batch_order_seq" AS bigint START WITH 1 CACHE 1;
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_channel_profile" (
   "id" bigserial PRIMARY KEY,
   "tenant_id" bigint NOT NULL DEFAULT 0,
@@ -1755,6 +1761,8 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_channel_profile" (
   "channel_id" bigint NOT NULL DEFAULT 0,
   "profile_id" bigint NOT NULL DEFAULT 0,
   "last_job_id" bigint NOT NULL DEFAULT 0,
+  "batch_order" bigint NOT NULL DEFAULT 0,
+  "batch_last_sent_job_id" bigint NOT NULL DEFAULT 0,
   "status" varchar(16) NOT NULL DEFAULT 'active',
   "created_at" timestamp DEFAULT NULL,
   "updated_at" timestamp DEFAULT NULL
@@ -1762,6 +1770,30 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_channel_profile" (
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_channel_profile" ON "hg_youban_publish_channel_profile" ("channel_id", "profile_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_channel_profile_scan" ON "hg_youban_publish_channel_profile" ("channel_id", "status", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_channel_profile_profile" ON "hg_youban_publish_channel_profile" ("profile_id", "channel_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_batch_rotation" ON "hg_youban_publish_channel_profile"
+  ("tenant_id", "channel_id", "status", "batch_order", "profile_id")
+  WHERE "status"='active' AND "batch_order">0;
+CREATE INDEX IF NOT EXISTS "idx_ybp_batch_unmigrated" ON "hg_youban_publish_channel_profile"
+  ("tenant_id", "channel_id")
+  WHERE "status"='active' AND "batch_order"<=0;
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_cycle_batch_item" (
+  "run_id" bigint NOT NULL,
+  "ordinal" bigint NOT NULL CHECK ("ordinal">0),
+  "tenant_id" bigint NOT NULL,
+  "account_id" bigint NOT NULL,
+  "channel_id" bigint NOT NULL,
+  "profile_id" bigint NOT NULL,
+  "batch_order" bigint NOT NULL,
+  "job_id" bigint NOT NULL DEFAULT 0,
+  "item_state" varchar(24) NOT NULL DEFAULT 'selected'
+    CHECK ("item_state" IN ('selected','admitted','deferred','failed','skipped')),
+  "error_message" text NOT NULL DEFAULT '',
+  PRIMARY KEY ("run_id", "ordinal"),
+  UNIQUE ("run_id", "profile_id")
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_cycle_run_scheduled_day"
+  ON "hg_youban_publish_cycle_run" ("tenant_id", "channel_id", "scheduled_at")
+  WHERE "scheduled_at" IS NOT NULL;
 CREATE INDEX IF NOT EXISTS "idx_ybp_cycle_run_plan" ON "hg_youban_publish_cycle_run" ("plan_id", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_cycle_run_owner" ON "hg_youban_publish_cycle_run" ("tenant_id", "account_id", "status", "id");
 

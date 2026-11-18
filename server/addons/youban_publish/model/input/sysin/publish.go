@@ -716,10 +716,10 @@ type ProfilePushChannelModel struct {
 	NextBatchAt           *gtime.Time `json:"nextBatchAt" dc:"频道下一批次时间，不代表本资料入选"`
 	NextPushAt            *gtime.Time `json:"nextPushAt" dc:"本资料下次计划或预计推送时间"`
 	NextPushAtEstimated   bool        `json:"nextPushAtEstimated" dc:"是否按当前配置及排位估算，可能随调度变化"`
-	BatchAheadCount       *int64      `json:"batchAheadCount,omitempty" dc:"预计轮到前需先轮播的资料次数，跨轮包含重复；缺失表示未知，不是Redis队列长度"`
-	BatchRoundRemaining   *int64      `json:"batchRoundRemaining,omitempty" dc:"等待下一轮时，当前轮尚需处理的预计资料次数"`
-	BatchWaitingNextRound bool        `json:"batchWaitingNextRound,omitempty" dc:"本资料是否预计等待下一轮"`
-	BatchInCurrentRun     bool        `json:"batchInCurrentRun,omitempty" dc:"按当前排位估计属于已创建批次，不代表Telegram正在发送"`
+	BatchAheadCount       *int64      `json:"batchAheadCount,omitempty" dc:"连续轮播中预计排在本资料之前的有效资料数量；缺失表示未知，不是已入队任务数量"`
+	BatchRoundRemaining   *int64      `json:"batchRoundRemaining,omitempty" dc:"兼容旧固定轮次字段，连续轮播不再返回本轮剩余量"`
+	BatchWaitingNextRound bool        `json:"batchWaitingNextRound,omitempty" dc:"兼容旧固定轮次字段，连续轮播为false"`
+	BatchInCurrentRun     bool        `json:"batchInCurrentRun,omitempty" dc:"是否属于尚待处理的本日持久化批次快照，不代表Telegram正在发送"`
 }
 
 type ProfileOptionsModel struct {

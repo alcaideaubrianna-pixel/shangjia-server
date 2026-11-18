@@ -25,6 +25,7 @@ import (
 
 const (
 	aiOpsRepairPlanTable     = "hg_youban_publish_ai_ops_repair_plan"
+	aiOpsCollectWakeAction   = "wake_collect_events"
 	aiOpsRepairPlanTTL       = 15 * time.Minute
 	aiOpsSourceReplayTimeout = 5 * time.Minute
 	aiOpsRepairResultTimeout = 5 * time.Second
@@ -43,17 +44,19 @@ var aiOpsRepairActions = map[string]struct{}{
 	"delete_profiles":             {},
 	"repair_profile_media":        {},
 	"replay_bot_source_updates":   {},
+	aiOpsCollectWakeAction:        {},
 }
 
 type aiOpsRepairPlanPayload struct {
-	Action            string  `json:"action"`
-	SourceID          int64   `json:"sourceId"`
-	EventIDs          []int64 `json:"eventIds"`
-	VerifyEventIDs    []int64 `json:"verifyEventIds"`
-	CollectorEventIDs []int64 `json:"collectorEventIds,omitempty"`
-	ProfileIDs        []int64 `json:"profileIds"`
-	TenantID          int64   `json:"tenantId"`
-	AccountID         int64   `json:"accountId"`
+	Action            string                               `json:"action"`
+	SourceID          int64                                `json:"sourceId"`
+	EventIDs          []int64                              `json:"eventIds"`
+	VerifyEventIDs    []int64                              `json:"verifyEventIds"`
+	CollectorEventIDs []int64                              `json:"collectorEventIds,omitempty"`
+	ProfileIDs        []int64                              `json:"profileIds"`
+	TenantID          int64                                `json:"tenantId"`
+	AccountID         int64                                `json:"accountId"`
+	CollectWakeEvents []*sysin.AIOpsCollectWakePreviewItem `json:"collectWakeEvents,omitempty"`
 }
 
 func (s *sSysPublish) AIOpsCreateRepairPlan(ctx context.Context, in *sysin.AIOpsRepairPlanInp) (*sysin.AIOpsRepairPlanModel, error) {
@@ -70,6 +73,9 @@ func (s *sSysPublish) AIOpsCreateRepairPlan(ctx context.Context, in *sysin.AIOps
 		if action == "replay_bot_source_updates" {
 			limit = 1000
 		}
+		if action == aiOpsCollectWakeAction {
+			limit = 200
+		}
 	}
 	if limit > 1000 {
 		return nil, gerror.New("单次修复最多1000条事件")
@@ -78,6 +84,7 @@ func (s *sSysPublish) AIOpsCreateRepairPlan(ctx context.Context, in *sysin.AIOps
 		err                                                     error
 		eventIDs, verifyEventIDs, profileIDs, collectorEventIDs []int64
 		replayPreview                                           []*sysin.AIOpsSourceReplayPreviewItem
+		wakePreview                                             []*sysin.AIOpsCollectWakePreviewItem
 		tenantID, accountID                                     int64
 	)
 	if action == "replay_bot_source_updates" {
@@ -87,6 +94,8 @@ func (s *sSysPublish) AIOpsCreateRepairPlan(ctx context.Context, in *sysin.AIOps
 		// field name yet.
 		replayEventIDs := sourceReplayEventIDs(in)
 		collectorEventIDs, replayPreview, tenantID, accountID, err = s.previewAIOpsBotSourceReplay(ctx, in.SourceId, replayEventIDs, in.ChatId, in.StartMessageId, in.EndMessageId, limit)
+	} else if action == aiOpsCollectWakeAction {
+		eventIDs, wakePreview, tenantID, accountID, err = s.previewAIOpsCollectWake(ctx, in)
 	} else {
 		eventIDs, verifyEventIDs, profileIDs, err = s.previewAIOpsRepairTargets(ctx, action, in, limit)
 		tenantID, accountID = in.TenantId, in.AccountId
@@ -96,7 +105,7 @@ func (s *sSysPublish) AIOpsCreateRepairPlan(ctx context.Context, in *sysin.AIOps
 	}
 	payload, err := json.Marshal(aiOpsRepairPlanPayload{
 		Action: action, SourceID: in.SourceId, EventIDs: eventIDs, VerifyEventIDs: verifyEventIDs, ProfileIDs: profileIDs,
-		CollectorEventIDs: collectorEventIDs, TenantID: tenantID, AccountID: accountID,
+		CollectorEventIDs: collectorEventIDs, TenantID: tenantID, AccountID: accountID, CollectWakeEvents: wakePreview,
 	})
 	if err != nil {
 		return nil, gerror.Wrap(err, "生成修复计划失败")
@@ -122,8 +131,8 @@ func (s *sSysPublish) AIOpsCreateRepairPlan(ctx context.Context, in *sysin.AIOps
 	g.Log().Info(ctx, "AI运维修复计划已生成", g.Map{"planId": planID, "action": action, "candidates": candidateCount})
 	return &sysin.AIOpsRepairPlanModel{
 		PlanId: planID, Action: action, Candidates: candidateCount, EventIds: eventIDs, VerifyEventIds: verifyEventIDs, ProfileIds: profileIDs,
-		CollectorEventIds: collectorEventIDs, ReplayPreview: replayPreview,
-		ConfirmToken: token, ExpiresAt: expiresAt.Format(time.RFC3339),
+		CollectorEventIds: collectorEventIDs, ReplayPreview: replayPreview, WakePreview: wakePreview,
+		ConfirmToken: token, ExpiresAt: expiresAt.Time.Format(time.RFC3339),
 	}, nil
 }
 
@@ -522,7 +531,7 @@ func (s *sSysPublish) AIOpsApplyRepairPlan(ctx context.Context, in *sysin.AIOpsR
 		return nil, gerror.New("不支持的修复计划操作")
 	}
 	replaySlot := false
-	if payload.Action == "replay_bot_source_updates" {
+	if payload.Action == "replay_bot_source_updates" || payload.Action == aiOpsCollectWakeAction {
 		select {
 		case aiOpsSourceReplaySlots <- struct{}{}:
 			replaySlot = true
@@ -547,7 +556,7 @@ func (s *sSysPublish) AIOpsApplyRepairPlan(ctx context.Context, in *sysin.AIOpsR
 	if affected == 0 {
 		return nil, gerror.New("修复计划已被其他执行器领取")
 	}
-	if payload.Action == "replay_bot_source_updates" {
+	if payload.Action == "replay_bot_source_updates" || payload.Action == aiOpsCollectWakeAction {
 		go s.runAIOpsSourceReplayPlanAsync(in.PlanId, payload)
 		replaySlot = false // The background runner now owns the admission slot.
 		return &sysin.AIOpsRepairApplyModel{PlanId: in.PlanId, Status: "running", Message: "采集重放已转入后台执行", Failed: []int64{}}, nil
@@ -604,6 +613,9 @@ func (s *sSysPublish) runAIOpsSourceReplayPlanAsync(planID string, payload aiOps
 	ctx, cancel := context.WithTimeout(context.Background(), aiOpsSourceReplayTimeout)
 	defer cancel()
 	runAIOpsSourceReplayPlan(ctx, planID, func(ctx context.Context, result *sysin.AIOpsRepairApplyModel) error {
+		if payload.Action == aiOpsCollectWakeAction {
+			return s.applyAIOpsCollectWake(ctx, payload, result)
+		}
 		// Revalidate exactly the same ownership, approval and replay eligibility
 		// as synchronous apply; the collector still owns replay idempotency.
 		_, _, tenantID, accountID, err := s.previewAIOpsBotSourceReplay(ctx, payload.SourceID, payload.CollectorEventIDs, "", 0, 0, 1000)
@@ -773,12 +785,27 @@ func (s *sSysPublish) AIOpsRepairPlanStatus(ctx context.Context, in *sysin.AIOps
 	}
 	formatTime := func(field string) string {
 		if value := row[field].GTime(); value != nil && !value.IsZero() {
-			return value.Format(time.RFC3339)
+			return value.Time.Format(time.RFC3339)
 		}
 		return ""
 	}
+	var wakeProgress *sysin.AIOpsCollectWakeProgress
+	var wakeEventIDs []int64
+	if row["action"].String() == aiOpsCollectWakeAction {
+		var payload aiOpsRepairPlanPayload
+		if decodeErr := json.Unmarshal([]byte(row["payload_json"].String()), &payload); decodeErr != nil {
+			return nil, gerror.Wrap(decodeErr, "解析业务采集唤醒计划失败")
+		}
+		wakeEventIDs = payload.EventIDs
+		if row["status"].String() == "completed" || row["status"].String() == "failed" {
+			wakeProgress, err = s.aiOpsCollectWakeProgress(ctx, payload)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
 	return &sysin.AIOpsRepairPlanStatusModel{
-		PlanId: row["plan_id"].String(), Action: row["action"].String(), Status: row["status"].String(),
+		PlanId: row["plan_id"].String(), Action: row["action"].String(), Status: row["status"].String(), WakeProgress: wakeProgress, EventIds: wakeEventIDs,
 		Candidates: row["candidate_count"].Int(), Applied: row["applied_count"].Int(), Failed: failed,
 		Message: row["error_message"].String(), ExpiresAt: formatTime("expires_at"),
 		StartedAt: formatTime("started_at"), FinishedAt: formatTime("finished_at"),

@@ -2,7 +2,9 @@ package sys
 
 import (
 	"context"
+	"errors"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/utility/dbtime"
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -87,120 +89,84 @@ func (s *sSysPublish) scheduleDueChannelBatchCyclesShard(ctx context.Context, li
 func (s *sSysPublish) createScheduledBatchCycleRun(ctx context.Context, channel dueBatchCycleChannel, now *gtime.Time) error {
 	var runID int64
 	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		locked, err := tx.Model(publishChannelTable).Safe().Ctx(ctx).Where("id", channel.Id).
+		locked, err := tx.Model(publishChannelTable).Ctx(ctx).Where("id", channel.Id).Where("tenant_id", channel.TenantId).
 			Where("cycle_active_run_id", 0).Where("cycle_publish_mode", "batch").
+			Where("cycle_publish_enabled", 1).Where("status", 1).Where("publish_direction", "up").
 			Where("cycle_next_run_at IS NULL OR cycle_next_run_at<=?", now).
-			Data(g.Map{"cycle_active_run_id": -1, "updated_at": now}).Update()
+			Data(g.Map{"cycle_active_run_id": -1}).Update()
 		if err != nil {
 			return err
 		}
-		affected, _ := locked.RowsAffected()
-		if affected == 0 {
-			return nil
-		}
-		// 在取得频道行锁后重新读取游标与轮次边界，不能沿用扫描时的旧快照。
-		if err := tx.Model(publishChannelTable).Where("id", channel.Id).Scan(&channel); err != nil {
+		affected, err := locked.RowsAffected()
+		if err != nil || affected == 0 {
 			return err
 		}
-		cursor := channel.BatchCursor
-		if channel.BatchCursorKind != "profile" {
-			cursor, err = migrateBatchCycleCursorTx(ctx, tx, channel.Id, cursor)
-			if err != nil {
-				return err
-			}
-		}
-		activeRunValue, valueErr := tx.Model(publishCycleRunTable).Safe().Ctx(ctx).
-			Where("channel_id", channel.Id).
-			WhereIn("status", []string{cycleRunStatusPending, cycleRunStatusRunning, cycleRunStatusDispatching}).
-			OrderAsc("id").Value("id")
-		if valueErr != nil {
-			return valueErr
-		}
-		activeRunId := activeRunValue.Int64()
-		if activeRunId > 0 {
-			result, updateErr := tx.Model(publishChannelTable).Safe().Ctx(ctx).
-				Where("id", channel.Id).Where("cycle_active_run_id", -1).
-				Data(g.Map{"cycle_active_run_id": activeRunId, "updated_at": now}).Update()
-			if updateErr != nil {
-				return updateErr
-			}
-			updated, rowsErr := result.RowsAffected()
-			if rowsErr != nil {
-				return rowsErr
-			}
-			if updated == 0 {
-				return gerror.New("恢复频道循环运行状态失败")
-			}
-			return nil
-		}
-		// 固定一轮上界；新增资料不能无限延长本轮，旧资料最终能重新轮到。
-		upper := channel.RoundEndID
-		if upper <= 0 || cursor >= upper {
-			if upper > 0 {
-				cursor = 0
-			} // 已有profile游标首次迁移时保留进度。
-			value, queryErr := s.batchCycleEligibleProfileModel(ctx, channel.TenantId, channel.Id).Fields("p.id").OrderDesc("p.id").Limit(1).Value()
-			if queryErr != nil {
-				return queryErr
-			}
-			upper = value.Int64()
-			if cursor >= upper {
-				cursor = 0
-			}
-		}
-		// 只读取本批数量，避免每次创建批次都COUNT全部剩余资料。
-		var candidates []struct {
-			ID int64 `orm:"id"`
-		}
-		readCandidates := func() error {
-			candidates = nil
-			if upper <= 0 {
-				return nil
-			}
-			return s.batchCycleEligibleProfileModel(ctx, channel.TenantId, channel.Id).WhereGT("p.id", cursor).WhereLTE("p.id", upper).Fields("p.id").OrderAsc("p.id").Limit(channel.BatchSize).Scan(&candidates)
-		}
-		if err := readCandidates(); err != nil {
+		if err = tx.Model(publishChannelTable).Where("id", channel.Id).Scan(&channel); err != nil {
 			return err
 		}
-		if len(candidates) == 0 && cursor > 0 {
-			// 尾部资料可能全部下架：本轮已结束，直接开启新轮，不能空等一个调度日。
-			cursor = 0
-			value, err := s.batchCycleEligibleProfileModel(ctx, channel.TenantId, channel.Id).Fields("p.id").OrderDesc("p.id").Limit(1).Value()
-			if err != nil {
-				return err
-			}
-			upper = value.Int64()
-			if err := readCandidates(); err != nil {
-				return err
-			}
-		}
-		if len(candidates) == 0 {
-			// 本轮剩余资料可能已下架；结束本轮，下一调度日重新确定上界。
-			_, err = tx.Model(publishChannelTable).Where("id", channel.Id).Data(g.Map{
-				"cycle_active_run_id": 0, "cycle_batch_cursor": 0, "cycle_round_end_id": 0,
-				"cycle_next_run_at": nextBatchCycleAt(channel.BatchTime, now.Time),
-			}).Update()
+		// Recover ownership before starting a new day, including legacy runs. Their
+		// producers are retired by ExecuteCycleRun without selecting a fresh batch.
+		active, err := tx.Model(publishCycleRunTable).Ctx(ctx).Where("tenant_id", channel.TenantId).Where("channel_id", channel.Id).
+			WhereIn("status", []string{cycleRunStatusPending, cycleRunStatusRunning, cycleRunStatusDispatching}).OrderAsc("id").Value("id")
+		if err != nil {
 			return err
 		}
-		total := len(candidates)
-		runId, err := tx.Model(publishCycleRunTable).Safe().Ctx(ctx).Data(g.Map{
+		if active.Int64() > 0 {
+			runID = active.Int64()
+			_, err = tx.Model(publishChannelTable).Where("id", channel.Id).Data(g.Map{"cycle_active_run_id": runID}).Update()
+			return err
+		}
+		start, end := batchCycleLocalDay(now.Time)
+		existing, err := tx.Model(publishCycleRunTable).Ctx(ctx).Where("tenant_id", channel.TenantId).Where("channel_id", channel.Id).
+			WhereGTE("scheduled_at", start).WhereLT("scheduled_at", end).OrderDesc("id").Value("id")
+		if err != nil {
+			return err
+		}
+		if existing.Int64() > 0 || channel.BatchSize <= 0 {
+			_, err = tx.Model(publishChannelTable).Where("id", channel.Id).Data(g.Map{"cycle_active_run_id": 0, "cycle_next_run_at": nextBatchCycleAt(channel.BatchTime, now.Time)}).Update()
+			return err
+		}
+		candidates, err := batchRotationCandidatesTx(ctx, tx, channel.TenantId, channel.Id, channel.BatchSize)
+		if errors.Is(err, errBatchRotationScanBudget) {
+			// Commit the readmodel scan's bounded CAS progress without consuming
+			// today's snapshot allowance. Retry this channel shortly.
+			_, updateErr := tx.Model(publishChannelTable).Where("id", channel.Id).
+				Where("cycle_active_run_id", -1).
+				Data(g.Map{"cycle_active_run_id": 0, "cycle_next_run_at": now.Add(30 * time.Second)}).Update()
+			return updateErr
+		}
+		if err != nil {
+			return err
+		}
+		if err = reserveBatchRotationCandidatesTx(ctx, tx, channel.TenantId, channel.Id, candidates); err != nil {
+			return err
+		}
+		items, err := newCycleBatchSnapshot(channel.TenantId, channel.Id, channel.BatchSize, candidates)
+		if err != nil {
+			return err
+		}
+		// A negative legacy upper bound is the durable snapshot protocol marker;
+		// stage is free to progress through the existing producing/dispatching states.
+		runID, err = tx.Model(publishCycleRunTable).Ctx(ctx).Data(g.Map{
 			"tenant_id": channel.TenantId, "channel_id": channel.Id, "status": cycleRunStatusPending,
-			"stage": "batch", "cursor_id": cursor, "upper_profile_id": upper, "total_count": total, "queued_count": 0,
-			"scheduled_at": now, "created_at": now, "updated_at": now,
+			"stage": "batch", "cursor_id": 0, "upper_profile_id": cycleBatchSnapshotVersion,
+			"total_count": len(items), "queued_count": 0, "scheduled_at": now, "scheduled_day": start.Format("2006-01-02"),
 		}).InsertAndGetId()
 		if err != nil {
 			return err
 		}
-		runID = runId
-		_, err = tx.Model(publishChannelTable).Safe().Ctx(ctx).Where("id", channel.Id).Data(g.Map{
-			"cycle_active_run_id": runId, "cycle_round_end_id": upper, "cycle_next_run_at": nextBatchCycleAt(channel.BatchTime, now.Time), "updated_at": now,
+		if err = persistCycleBatchSnapshotTx(ctx, tx, runID, items); err != nil {
+			return err
+		}
+		_, err = tx.Model(publishChannelTable).Where("id", channel.Id).Data(g.Map{
+			"cycle_active_run_id": runID, "cycle_batch_cursor": 0, "cycle_batch_cursor_kind": "batch_order",
+			"cycle_round_end_id": 0, "cycle_next_run_at": nextBatchCycleAt(channel.BatchTime, now.Time),
 		}).Update()
 		return err
 	})
 	if err != nil || runID <= 0 {
 		return err
 	}
-	// 事务提交后再入队，避免 Redis 成功而数据库回滚产生幽灵批次。
 	if err = s.enqueueCycleRun(ctx, runID, 0); err != nil {
 		g.Log().Warningf(ctx, "提交定时批次循环入队失败，等待恢复扫描 run:%d channel:%d err:%+v", runID, channel.Id, err)
 	}
@@ -244,6 +210,7 @@ func cycleProfileMediaAvailableSQL(profileField string) string {
 }
 
 func nextBatchCycleAt(clock string, base time.Time) *gtime.Time {
+	base = base.In(dbtime.Location())
 	hour, minute, ok := parseCycleClock(clock)
 	if !ok {
 		hour, minute = 0, 0

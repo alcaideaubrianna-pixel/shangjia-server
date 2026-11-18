@@ -394,13 +394,19 @@ func (s *sSysPublish) recoverChannelCycleRuns(ctx context.Context, scopes ...pub
 	// otherwise Telegram messages could be sent twice.
 	var staleDispatching []cycleRunRecord
 	if err := cycleRunAccountModel(ctx, scopes).
-		Fields("id,channel_id").
+		Fields("id,tenant_id,channel_id,upper_profile_id,scheduled_at,total_count,queued_count,cursor_id").
 		Where("status", cycleRunStatusDispatching).
 		WhereLTE("updated_at", staleDispatchingBefore).
 		OrderAsc("id").Limit(20).Scan(&staleDispatching); err != nil {
 		return gerror.Wrap(err, "读取超时频道循环发送批次失败")
 	}
 	for _, run := range staleDispatching {
+		if cycleBatchSnapshotRun(run) {
+			if err := s.finalizeCycleBatchSnapshot(ctx, run); err != nil {
+				return err
+			}
+			continue
+		}
 		active, err := s.cycleRunHasUnfinishedJobs(ctx, run.Id)
 		if err != nil {
 			return err
@@ -485,6 +491,14 @@ func (s *sSysPublish) ExecuteCycleRun(ctx context.Context, runId int64) error {
 	if scheduledBatchCycleRun(run) && channel.Mode != "batch" {
 		s.finishChannelCycleRun(ctx, run, cycleRunStatusSkipped, "批次循环已切换为时间循环")
 		return nil
+	}
+	if scheduledBatchCycleRun(run) {
+		if cycleBatchSnapshotRun(run) {
+			return s.executeCycleBatchSnapshot(ctx, run)
+		}
+		// Legacy cursors cannot be translated into a moving queue. Stop producing
+		// and drain only the jobs already admitted by the old operation.
+		return s.beginChannelCycleDispatch(ctx, run)
 	}
 	backlog, err := s.channelCycleBacklog(ctx, run.ChannelId)
 	if err != nil {
@@ -614,6 +628,9 @@ func (s *sSysPublish) finalizeDispatchingChannelCycleRuns(ctx context.Context, l
 }
 
 func (s *sSysPublish) finalizeChannelCycleDelivery(ctx context.Context, run cycleRunRecord) error {
+	if cycleBatchSnapshotRun(run) {
+		return s.finalizeCycleBatchSnapshot(ctx, run)
+	}
 	done, status, message, err := publishBatchTerminalState(ctx, fmt.Sprintf("cycle_batch:%d:", run.Id))
 	if err != nil || !done {
 		return err
@@ -737,7 +754,7 @@ func (s *sSysPublish) finishChannelCycleRun(ctx context.Context, run cycleRunRec
 	data := g.Map{
 		"cycle_active_run_id": 0, "cycle_last_run_at": now, "cycle_last_error_message": message, "updated_at": now,
 	}
-	if status == cycleRunStatusFinished || status == cycleRunStatusPartial {
+	if !scheduledBatchCycleRun(run) && (status == cycleRunStatusFinished || status == cycleRunStatusPartial) {
 		data["cycle_batch_cursor"] = run.CursorId
 		data["cycle_batch_cursor_kind"] = "profile"
 	}

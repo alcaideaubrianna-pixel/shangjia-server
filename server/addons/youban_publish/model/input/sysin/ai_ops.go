@@ -26,8 +26,47 @@ type AIOpsRepairPlanModel struct {
 	VerifyEventIds    []int64                         `json:"verifyEventIds"`
 	CollectorEventIds []int64                         `json:"collectorEventIds,omitempty"`
 	ReplayPreview     []*AIOpsSourceReplayPreviewItem `json:"replayPreview,omitempty"`
+	WakePreview       []*AIOpsCollectWakePreviewItem  `json:"wakePreview,omitempty"`
 	ConfirmToken      string                          `json:"confirmToken"`
 	ExpiresAt         string                          `json:"expiresAt"`
+}
+
+// AIOpsCollectWakeDecision is admission only, never a profile or send receipt.
+type AIOpsCollectWakeDecision string
+
+const (
+	CollectWakeEligible AIOpsCollectWakeDecision = "eligible"
+	CollectWakeTerminal AIOpsCollectWakeDecision = "terminal"
+	CollectWakeBlocked  AIOpsCollectWakeDecision = "blocked"
+)
+
+func (d AIOpsCollectWakeDecision) Valid() bool {
+	return d == CollectWakeEligible || d == CollectWakeTerminal || d == CollectWakeBlocked
+}
+
+type AIOpsCollectWakePreviewItem struct {
+	EventId         int64                    `json:"eventId"`
+	TenantId        int64                    `json:"tenantId"`
+	AccountId       int64                    `json:"accountId"`
+	OwnerAccountId  int64                    `json:"ownerAccountId"`
+	SourceId        int64                    `json:"sourceId"`
+	SourceChatId    string                   `json:"sourceChatId"`
+	SourceMessageId int64                    `json:"sourceMessageId"`
+	Status          string                   `json:"status"`
+	Decision        AIOpsCollectWakeDecision `json:"decision"`
+	Identity        string                   `json:"identity"`
+}
+
+// Counts refer only to explicitly planned business event IDs. Dispatched means
+// collection handed off publication, not that Telegram has confirmed sending.
+type AIOpsCollectWakeProgress struct {
+	Total      int `json:"total"`
+	Pending    int `json:"pending"`
+	Ignored    int `json:"ignored"`
+	Dispatched int `json:"dispatched"`
+	Processed  int `json:"processed"`
+	Failed     int `json:"failed"`
+	Missing    int `json:"missing"`
 }
 
 // AIOpsSourceReplayPlanInp 描述 Bot 采集原始消息的重放范围。
@@ -56,16 +95,18 @@ type AIOpsRepairPlanStatusInp struct {
 }
 
 type AIOpsRepairPlanStatusModel struct {
-	PlanId     string  `json:"planId"`
-	Action     string  `json:"action"`
-	Status     string  `json:"status"`
-	Candidates int     `json:"candidates"`
-	Applied    int     `json:"applied"`
-	Failed     []int64 `json:"failed"`
-	Message    string  `json:"message"`
-	ExpiresAt  string  `json:"expiresAt"`
-	StartedAt  string  `json:"startedAt"`
-	FinishedAt string  `json:"finishedAt"`
+	EventIds     []int64                   `json:"eventIds,omitempty"`
+	PlanId       string                    `json:"planId"`
+	Action       string                    `json:"action"`
+	Status       string                    `json:"status"`
+	Candidates   int                       `json:"candidates"`
+	Applied      int                       `json:"applied"`
+	Failed       []int64                   `json:"failed"`
+	Message      string                    `json:"message"`
+	ExpiresAt    string                    `json:"expiresAt"`
+	StartedAt    string                    `json:"startedAt"`
+	FinishedAt   string                    `json:"finishedAt"`
+	WakeProgress *AIOpsCollectWakeProgress `json:"wakeProgress,omitempty"`
 }
 
 type AIOpsRepairApplyInp struct {

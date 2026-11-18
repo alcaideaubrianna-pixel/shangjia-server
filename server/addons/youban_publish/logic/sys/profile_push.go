@@ -24,7 +24,7 @@ func (s *sSysPublish) profilePushChannels(ctx context.Context, profile *sysin.Pr
 	}
 	var schedules []*profilePushChannelSchedule
 	if err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
-		Fields("id AS channel_id,channel_title,channel_username,status,cycle_publish_enabled,cycle_publish_mode,cycle_publish_days,cycle_publish_time,cycle_batch_size,cycle_batch_time,cycle_batch_cursor,cycle_batch_cursor_kind,cycle_round_end_id,cycle_active_run_id,cycle_next_run_at AS next_batch_at").
+		Fields("id AS channel_id,channel_title,channel_username,status,cycle_publish_enabled,cycle_publish_mode,cycle_publish_days,cycle_publish_time,cycle_batch_size,cycle_batch_time,cycle_active_run_id,cycle_next_run_at AS next_batch_at").
 		Where("tenant_id", profile.TenantId).
 		Where("publish_direction", "up").WhereNull("deleted_at").
 		WhereIn("id", channelIds).OrderAsc("id").Scan(&schedules); err != nil {
@@ -104,6 +104,7 @@ func (s *sSysPublish) profilePushChannels(ctx context.Context, profile *sysin.Pr
 					"accountId": profile.AccountId, "profileId": profile.Id,
 					"channelId": channel.ChannelId, "error": err.Error(),
 				})
+				return nil, err
 			}
 			continue
 		}
