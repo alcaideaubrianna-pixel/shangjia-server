@@ -19,10 +19,12 @@ import (
 )
 
 const (
-	profilePublishNoteIndexStatusCacheTTL = 10 * time.Second
-	profilePublishStateRecoveryStaleAfter = 15 * time.Minute
-	profilePublishStateRecoveryCursorKey  = "youban_publish:profile:publish_state:recovery:cursor"
-	profilePublishStateRecoveryCursorTTL  = 30 * 24 * time.Hour
+	profilePublishNoteIndexStatusCacheTTL        = 10 * time.Second
+	profilePublishStateRecoveryStaleAfter        = 15 * time.Minute
+	profilePublishStateRecoveryCursorKey         = "youban_publish:profile:publish_state:recovery:cursor"
+	profilePublishStateRecoveryCursorTTL         = 30 * 24 * time.Hour
+	profilePublishStateRecoveryCheckpointReserve = 500 * time.Millisecond
+	profilePublishStateRecoveryRowBudget         = time.Second
 )
 
 func profilePublishNoteIndexStatusCacheKey(tenantId, accountId, profileId int64, status string) string {
@@ -235,16 +237,70 @@ func (s *sSysPublish) writeProfilePublishOperationStateTx(ctx context.Context, t
 	return nil
 }
 
-func (s *sSysPublish) recoverProfilePublishOperationStates(ctx context.Context, limit int) error {
+// profilePublishStateRecoveryHasBudget leaves time for the shared cursor checkpoint.
+func profilePublishStateRecoveryHasBudget(ctx context.Context, reserve time.Duration) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	deadline, ok := ctx.Deadline()
+	return !ok || time.Until(deadline) > reserve
+}
+
+// A matching snapshot needs no write. A concurrent cancellation or newer
+// operation is left untouched; any later projection change is revisited on wrap.
+func profilePublishRecoveryStateUnchanged(state profilePublishOperationState, job telegramJobRecord, status sysin.PublishTaskStatus) bool {
+	return (status == sysin.PublishTaskStatusPending || status == sysin.PublishTaskStatusPublishing) &&
+		state.TenantId == job.TenantId && state.AccountId == job.AccountId && state.ProfileId == job.ProfileId &&
+		strings.TrimSpace(job.OperationNo) != "" && strings.TrimSpace(state.PublishOperationNo) == job.OperationNo &&
+		state.PublishTaskStatus == status
+}
+
+func (s *sSysPublish) recoverProfilePublishOperationStates(ctx context.Context, limit int) (resultErr error) {
+	startedAt := time.Now()
+	var scanned, processed, cursorWrites int
+	var cursorDuration, scanDuration, processDuration time.Duration
+	yielded := false
 	defer func() {
-		// Failed reconciliation is independent best-effort work. It must never
-		// consume the active scanner's budget or prevent its cursor advancing.
-		failedCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		g.Log().Info(ctx, "资料上架状态恢复统计", g.Map{
+			"event": "profile.publish_state.recovery_summary", "stage": "summary",
+			"scanned": scanned, "processed": processed, "cursorWrites": cursorWrites,
+			"cursorMs": cursorDuration.Milliseconds(), "scanMs": scanDuration.Milliseconds(),
+			"processMs": processDuration.Milliseconds(), "durationMs": time.Since(startedAt).Milliseconds(),
+			"yielded": yielded, "error": resultErr,
+		})
+	}()
+	defer func() {
+		// Best-effort work shares the caller's budget. Never start cache/DB
+		// requests with an expired context or spend the checkpoint reserve.
+		if !profilePublishStateRecoveryHasBudget(ctx, profilePublishStateRecoveryRowBudget) {
+			return
+		}
+		failedDeadline := time.Now().Add(3 * time.Second)
+		if deadline, ok := ctx.Deadline(); ok && deadline.Add(-profilePublishStateRecoveryCheckpointReserve).Before(failedDeadline) {
+			failedDeadline = deadline.Add(-profilePublishStateRecoveryCheckpointReserve)
+		}
+		failedCtx, cancel := context.WithDeadline(ctx, failedDeadline)
 		defer cancel()
 		if err := s.recoverFailedCyclePublishStates(failedCtx); err != nil {
 			g.Log().Warning(ctx, "旧循环失败扫描未完成", g.Map{"event": "failed_cycle_scan_error", "error": err.Error()})
 		}
 	}()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if !profilePublishStateRecoveryHasBudget(ctx, profilePublishStateRecoveryRowBudget) {
+		yielded = true
+		g.Log().Info(ctx, "资料上架状态恢复预算不足，暂缓扫描", g.Map{
+			"event": "profile.publish_state.recovery_yield", "stage": "yield", "processed": processed,
+		})
+		return nil
+	}
+	workCtx := ctx
+	if deadline, ok := ctx.Deadline(); ok {
+		var cancel context.CancelFunc
+		workCtx, cancel = context.WithDeadline(ctx, deadline.Add(-profilePublishStateRecoveryCheckpointReserve))
+		defer cancel()
+	}
 	if limit <= 0 || limit > 100 {
 		limit = 100
 	}
@@ -254,7 +310,13 @@ func (s *sSysPublish) recoverProfilePublishOperationStates(ctx context.Context, 
 	if !cache.Initialized() {
 		return gerror.New("资料上架恢复游标缓存未初始化")
 	}
+	cursorStartedAt := time.Now()
 	value, err := cache.Instance().Get(ctx, profilePublishStateRecoveryCursorKey)
+	cursorDuration += time.Since(cursorStartedAt)
+	g.Log().Info(ctx, "读取资料上架状态恢复游标", g.Map{
+		"event": "profile.publish_state.recovery_cursor", "stage": "cursor_read",
+		"durationMs": time.Since(cursorStartedAt).Milliseconds(), "error": err,
+	})
 	if err != nil {
 		return gerror.Wrap(err, "读取资料上架恢复游标失败")
 	}
@@ -267,7 +329,21 @@ func (s *sSysPublish) recoverProfilePublishOperationStates(ctx context.Context, 
 			return gerror.New("资料上架恢复游标无效")
 		}
 	}
-	saveCursor := func() error {
+	saveCursor := func() (saveErr error) {
+		cursorStartedAt := time.Now()
+		defer func() {
+			cursorDuration += time.Since(cursorStartedAt)
+			if saveErr != nil || time.Since(cursorStartedAt) >= 100*time.Millisecond {
+				g.Log().Info(ctx, "保存资料上架状态恢复游标", g.Map{
+					"event": "profile.publish_state.recovery_cursor", "stage": "cursor_save",
+					"status": cursor.Status, "profileId": cursor.ProfileId,
+					"durationMs": time.Since(cursorStartedAt).Milliseconds(), "error": saveErr,
+				})
+			}
+		}()
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		data, marshalErr := json.Marshal(cursor)
 		if marshalErr != nil {
 			return gerror.Wrap(marshalErr, "编码资料上架恢复游标失败")
@@ -275,6 +351,7 @@ func (s *sSysPublish) recoverProfilePublishOperationStates(ctx context.Context, 
 		if cacheErr := cache.Instance().Set(ctx, profilePublishStateRecoveryCursorKey, string(data), profilePublishStateRecoveryCursorTTL); cacheErr != nil {
 			return gerror.Wrap(cacheErr, "保存资料上架恢复游标失败")
 		}
+		cursorWrites++
 		return nil
 	}
 	rotateCursor := func() {
@@ -288,7 +365,7 @@ func (s *sSysPublish) recoverProfilePublishOperationStates(ctx context.Context, 
 	}
 	recoveryBefore := time.Now().Add(-profilePublishStateRecoveryStaleAfter)
 	var states []profilePublishOperationState
-	query := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
+	query := g.DB().Model(publishProfileStateTable).Safe().Ctx(workCtx).
 		Fields("tenant_id,account_id,profile_id,publish_operation_no,publish_task_status,publish_task_updated_at").
 		WhereNull("deleted_at").
 		// BOT 资料允许使用 account_id=0，不能在状态恢复时被过滤。
@@ -301,11 +378,19 @@ func (s *sSysPublish) recoverProfilePublishOperationStates(ctx context.Context, 
 		query = query.Where("publish_task_updated_at >= ?", cursor.UpdatedAt).
 			Where("(publish_task_updated_at > ? OR (publish_task_updated_at = ? AND profile_id > ?))", cursor.UpdatedAt, cursor.UpdatedAt, cursor.ProfileId)
 	}
-	if err := query.
+	scanStartedAt := time.Now()
+	err = query.
 		OrderAsc("publish_task_updated_at").
 		OrderAsc("profile_id").
 		Limit(limit).
-		Scan(&states); err != nil {
+		Scan(&states)
+	scanDuration = time.Since(scanStartedAt)
+	scanned = len(states)
+	g.Log().Info(ctx, "扫描资料上架状态恢复候选", g.Map{
+		"event": "profile.publish_state.recovery_scan", "stage": "scan", "status": cursor.Status,
+		"limit": limit, "scanned": scanned, "durationMs": scanDuration.Milliseconds(), "error": err,
+	})
+	if err != nil {
 		return gerror.Wrap(err, "读取待恢复资料上架状态失败")
 	}
 	if len(states) == 0 {
@@ -318,6 +403,17 @@ func (s *sSysPublish) recoverProfilePublishOperationStates(ctx context.Context, 
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		if !profilePublishStateRecoveryHasBudget(ctx, profilePublishStateRecoveryRowBudget) {
+			// Keep both status cursors, including the last attempted row, and
+			// give the other status a turn without skipping unvisited rows.
+			yielded = true
+			g.Log().Info(ctx, "资料上架状态恢复保存进度并让出预算", g.Map{
+				"event": "profile.publish_state.recovery_yield", "stage": "yield",
+				"scanned": scanned, "processed": processed, "nextProfileId": state.ProfileId,
+			})
+			rotateCursor()
+			return saveCursor()
+		}
 		if state.PublishTaskUpdatedAt == nil {
 			return gerror.New("待恢复资料上架游标字段无效")
 		}
@@ -328,8 +424,20 @@ func (s *sSysPublish) recoverProfilePublishOperationStates(ctx context.Context, 
 		if err := saveCursor(); err != nil {
 			return err
 		}
-		if err := s.recoverProfilePublishOperationState(ctx, state); err != nil {
-			g.Log().Warningf(ctx, "恢复资料上架状态失败 profileId:%d operationNo:%s err:%+v", state.ProfileId, state.PublishOperationNo, err)
+		processStartedAt := time.Now()
+		processErr := s.recoverProfilePublishOperationState(workCtx, state)
+		processDuration += time.Since(processStartedAt)
+		processed++
+		if processErr != nil || time.Since(processStartedAt) >= 250*time.Millisecond {
+			g.Log().Info(ctx, "处理资料上架状态恢复候选", g.Map{
+				"event": "profile.publish_state.recovery_item", "stage": "process",
+				"tenantId": state.TenantId, "accountId": state.AccountId, "profileId": state.ProfileId,
+				"operationNo": state.PublishOperationNo, "snapshotStatus": state.PublishTaskStatus,
+				"processed": processed, "durationMs": time.Since(processStartedAt).Milliseconds(), "error": processErr,
+			})
+		}
+		if processErr != nil {
+			g.Log().Warningf(ctx, "恢复资料上架状态失败 profileId:%d operationNo:%s err:%+v", state.ProfileId, state.PublishOperationNo, processErr)
 		}
 	}
 	rotateCursor()
@@ -414,39 +522,49 @@ func (s *sSysPublish) recoverProfilePublishOperationState(ctx context.Context, s
 		return gerror.Wrap(err, "统计资料上架任务状态失败")
 	}
 	total := row["total"].Int()
-	firstRecoveryAt := (*gtime.Time)(nil)
-	var recoveryRow gdb.Record
-	recoveryRow, err = g.DB().Model(publishTgJobLogTable+" l").Safe().Ctx(ctx).
-		InnerJoin(publishTgJobTable+" j", "j.id=l.job_id").
-		Fields("MIN(l.created_at) AS first_recovery_at").
-		Where("j.tenant_id", job.TenantId).
-		Where("j.account_id", job.AccountId).
-		Where("j.profile_id", job.ProfileId).
-		Where("j.operation_no", job.OperationNo).
-		Where("l.action", "recovery").
-		Where("l.status", "queued").One()
-	if err != nil {
-		return gerror.Wrap(err, "统计资料上架恢复时间失败")
+	staleRetry := false
+	// Only this branch consumes recovery age. Preserve failed/sending/cleanup
+	// precedence and avoid the log join for ordinary pending/publishing rows.
+	if total > 0 && row["failed"].Int() == 0 && row["sending"].Int() == 0 && row["timeout_wait_cleanup"].Int() == 0 && row["failed_retry"].Int() > 0 {
+		recoveryRow, err := g.DB().Model(publishTgJobLogTable+" l").Safe().Ctx(ctx).
+			InnerJoin(publishTgJobTable+" j", "j.id=l.job_id").
+			Fields("MIN(l.created_at) AS first_recovery_at").
+			Where("j.tenant_id", job.TenantId).
+			Where("j.account_id", job.AccountId).
+			Where("j.profile_id", job.ProfileId).
+			Where("j.operation_no", job.OperationNo).
+			Where("l.action", "recovery").
+			Where("l.status", "queued").One()
+		if err != nil {
+			return gerror.Wrap(err, "统计资料上架恢复时间失败")
+		}
+		firstRecoveryAt := recoveryRow["first_recovery_at"].GTime()
+		if firstRecoveryAt == nil {
+			firstRecoveryAt = row["first_job_at"].GTime()
+		}
+		staleRetry = firstRecoveryAt != nil && firstRecoveryAt.Before(gtime.Now().Add(-15*time.Minute))
 	}
-	firstRecoveryAt = recoveryRow["first_recovery_at"].GTime()
-	if firstRecoveryAt == nil {
-		firstRecoveryAt = row["first_job_at"].GTime()
+	updateState := func(status sysin.PublishTaskStatus) error {
+		if profilePublishRecoveryStateUnchanged(state, job, status) {
+			return nil
+		}
+		// Real transitions retain the current-operation and cancellation fence.
+		return s.updateProfilePublishOperationState(ctx, job, status)
 	}
-	staleRetry := firstRecoveryAt != nil && firstRecoveryAt.Before(gtime.Now().Add(-15*time.Minute))
 	switch {
 	case total == 0 || row["failed"].Int() > 0:
 		return s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusFailed)
 	case row["sending"].Int() > 0:
-		return s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusPublishing)
+		return updateState(sysin.PublishTaskStatusPublishing)
 	case row["timeout_wait_cleanup"].Int() > 0:
 		// The cleaner owns the handoff after reconciliation. Pending represents
 		// that wait; it does not schedule or initiate another send.
-		return s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusPending)
+		return updateState(sysin.PublishTaskStatusPending)
 	case row["failed_retry"].Int() > 0 && staleRetry:
 		g.Log().Warningf(ctx, "资料上架重试已超时，释放卡住的publishing状态 profileId:%d operationNo:%s", job.ProfileId, job.OperationNo)
 		return s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusFailed)
 	case row["pending"].Int() > 0:
-		return s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusPending)
+		return updateState(sysin.PublishTaskStatusPending)
 	case row["completed"].Int() == total && row["sent"].Int() == 0:
 		return s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusFailed)
 	case row["completed"].Int() == total:

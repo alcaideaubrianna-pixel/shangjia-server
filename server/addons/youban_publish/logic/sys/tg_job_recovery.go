@@ -1051,7 +1051,17 @@ func (s *sSysPublish) recoverPendingIdleTelegramJobs(ctx context.Context, limit 
 	startedAt := time.Now()
 	scanned := 0
 	var observeErr error
-	defer func() { observeRecoveryRun(ctx, "pending_idle", startedAt, scanned, observeErr) }()
+	selected, processed, itemErrors := 0, 0, 0
+	scanDuration := time.Duration(0)
+	yielded := false
+	defer func() {
+		observeRecoveryRun(ctx, "pending_idle", startedAt, scanned, observeErr)
+		logTelegramQueueEvent(ctx, "channel_recovery_batch_finished", g.Map{
+			"step": "pending_idle", "scanned": scanned, "selected": selected,
+			"processed": processed, "itemErrors": itemErrors, "yielded": yielded,
+			"scanDurationMs": scanDuration.Milliseconds(), "durationMs": time.Since(startedAt).Milliseconds(),
+		}, observeErr)
+	}()
 	if limit <= 0 {
 		limit = 100
 	}
@@ -1082,26 +1092,35 @@ func (s *sSysPublish) recoverPendingIdleTelegramJobs(ctx context.Context, limit 
 			WhereLTE("j.updated_at", deadline).
 			OrderAsc("j.created_at").OrderAsc("j.id").Limit(candidateLimit).Scan(&candidates)
 	}
+	scanDuration = time.Since(startedAt)
 	if err != nil {
 		observeErr = err
 		return gerror.Wrap(err, "读取待入队TG推送任务失败")
 	}
 	jobs := fairPendingTelegramJobs(candidates, limit)
+	selected = len(jobs)
 	scanned = len(candidates)
 	if len(jobs) > 0 {
 		g.Log().Infof(ctx, "恢复待入队TG推送任务：%d条", len(jobs))
 	}
 	for _, job := range jobs {
+		if ctx.Err() != nil {
+			observeErr = ctx.Err()
+			return ctx.Err()
+		}
+		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < time.Second {
+			yielded = true // Remaining durable intents will be selected next cycle.
+			break
+		}
 		if job.Id <= 0 {
 			continue
 		}
 		if err = s.rearmTelegramJobOutbox(ctx, job.Id, 0); err != nil {
+			itemErrors++
 			g.Log().Warningf(ctx, "重新激活待入队TG任务Outbox失败 job:%d err:%+v", job.Id, err)
 			continue
 		}
-		if err = s.dispatchTelegramJobOutboxByJob(ctx, job.Id); err != nil {
-			g.Log().Warningf(ctx, "恢复待入队TG推送任务失败 job:%d err:%+v", job.Id, err)
-		}
+		processed++
 	}
 	return nil
 }

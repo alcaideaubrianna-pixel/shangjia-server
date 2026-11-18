@@ -54,3 +54,21 @@
 遵照用户要求，不编译、不运行单元测试或消费者；补充回归用例源文件并执行格式化、差异和独立静态 review。生产只读查询验证不写入业务数据。
 
 代码可回退本次提交。两个索引可在确认负载与依赖后分别 `DROP INDEX CONCURRENTLY`；回滚索引会失去已验证的线上查询性能收益。不得为了回滚重置已完成任务。
+
+## 后续：恢复批次的重复工作与预算
+
+部署窄行查询后进一步定位到三个应用层问题，本轮代码修复如下：
+
+1. **恢复投递统一入口。** `rearmTelegramJobOutbox` 对已有和新建 Outbox 都负责投递。待入队恢复器移除外层第二次 dispatch；延迟 intent 仍由 `available_at` 约束。未修改 stale Asynq 恢复中为绕过失效唯一键而显式新建任务的逻辑。
+2. **取消恢复复用删除事实。** 每 job 最多读取一次已删除消息 ID；只有 confirmed、有响应、预期数量有效、完整 audit 且所有 ID 已持久化 deleted 的回执才跳过 capture。活跃/缺失消息、部分/未知回执走原路径，settle 的所有完成条件保留。重复等待提示不再反复更新同值。
+3. **资料状态恢复减少无效工作。** 仅 failed_retry 需要判断恢复年龄时查询日志；推导出的 pending/publishing 与同一 operation 的扫描快照相同则不启动写事务。真正转换仍通过原权限/operation/取消 fence。
+4. **主动让出预算。** 待入队处理在不足 1 秒时停止开启新项；资料状态扫描/处理给游标保存预留 500ms，不足 1 秒时保存并轮转游标。已过期 context 不再启动 deferred 旧失败扫描，且不延长父预算。单个已启动操作仍可能超时，本次没有扩大总超时。
+
+新增或完善的日志：
+
+- `channel_recovery_batch_finished`：候选扫描耗时、选中/处理数、错误数及 yielded。
+- `profile.publish_state.recovery_summary`：游标、扫描、处理和总耗时，游标写入数及 yielded。
+- `profile.publish_state.recovery_cursor / recovery_scan / recovery_item / recovery_yield`：细分定位；游标写入仅慢于 100ms 或出错时逐项记录，资料处理仅慢于 250ms 或出错时逐项记录，避免正常路径高频日志。
+- `profile_cancel_receipts_reused`：每 job 跳过的已删除确认回执数。
+
+这些优化未新增表、索引或环境变量；需部署 Publish 验证。保留逐行游标 checkpoint，未引入并发恢复或新的消费者。回归源码覆盖预算、相同状态跳过以及删除回执复用的边界；遵照禁令，未编译、未运行测试。

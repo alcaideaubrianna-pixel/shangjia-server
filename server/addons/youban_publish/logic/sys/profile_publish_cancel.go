@@ -400,6 +400,7 @@ func (s *sSysPublish) settleProfilePublishCancelTx(ctx context.Context, tx gdb.T
 		if err != nil || active > 0 {
 			if err == nil && active > 0 {
 				_, err = profileCancelScope(tx.Model(publishProfileCancelTable).Ctx(ctx), job).
+					Where("COALESCE(error_message, '') <> ?", "正在等待在途发送结果；结果不确定时不会宣告取消完成").
 					Data(g.Map{"error_message": "正在等待在途发送结果；结果不确定时不会宣告取消完成"}).Update()
 			}
 			return err
@@ -408,6 +409,7 @@ func (s *sSysPublish) settleProfilePublishCancelTx(ctx context.Context, tx gdb.T
 		if err != nil || messages > 0 {
 			if err == nil && messages > 0 {
 				_, err = profileCancelScope(tx.Model(publishProfileCancelTable).Ctx(ctx), job).
+					Where("COALESCE(error_message, '') <> ?", "本轮频道消息正在清理；清理失败将由现有队列重试").
 					Data(g.Map{"error_message": "本轮频道消息正在清理；清理失败将由现有队列重试"}).Update()
 			}
 			return err
@@ -458,6 +460,24 @@ func recordCanceledSendOutcome(ctx context.Context, job telegramJobRecord, attem
 	return canceled, err
 }
 
+// canceledAttemptReceiptNeedsReplay skips only complete, confirmed receipts whose
+// message identities are all durably deleted. Missing, live, partial or unknown
+// receipts still follow the original capture and cleanup path.
+func canceledAttemptReceiptNeedsReplay(attempt telegramDeliveryAttempt, messages []*telegramSentMessage, deleted map[int64]struct{}) bool {
+	if attempt.Status != telegramAttemptStatusConfirmed || attempt.ResponseReceived <= 0 || attempt.ExpectedCount <= 0 || len(messages) < attempt.ExpectedCount {
+		return true
+	}
+	for _, message := range messages {
+		if message == nil || message.MessageId <= 0 {
+			return true
+		}
+		if _, ok := deleted[message.MessageId]; !ok {
+			return true
+		}
+	}
+	return false
+}
+
 // Recovery also examines superseded Attempts: an older worker may already
 // have retired one, but its audit remains evidence. Never resume sending.
 func (s *sSysPublish) recoverCanceledProfileAttemptsTx(ctx context.Context, tx gdb.TX, job telegramJobRecord) (int, error) {
@@ -465,6 +485,34 @@ func (s *sSysPublish) recoverCanceledProfileAttemptsTx(ctx context.Context, tx g
 	if err := tx.Model(publishTgAttemptTable).Ctx(ctx).Where("job_id", job.Id).OrderAsc("id").Scan(&attempts); err != nil {
 		return 0, err
 	}
+	// Deleted message facts are durable cleanup proof. Replaying their already
+	// confirmed receipts would only rewrite metadata and recheck cleanup intents.
+	deletedMessages := make(map[int64]struct{})
+	for _, attempt := range attempts {
+		if attempt.Status != telegramAttemptStatusConfirmed || attempt.ResponseReceived <= 0 || attempt.ExpectedCount <= 0 {
+			continue
+		}
+		var deleted []struct {
+			MessageId int64 `orm:"tg_message_id"`
+		}
+		if err := tx.Model(publishTgMessageTable).Unscoped().Ctx(ctx).
+			Where("job_id", job.Id).Where("status", "deleted").Fields("tg_message_id").Scan(&deleted); err != nil {
+			return 0, err
+		}
+		for _, message := range deleted {
+			deletedMessages[message.MessageId] = struct{}{}
+		}
+		break
+	}
+	skippedReceipts := 0
+	defer func() {
+		if skippedReceipts > 0 {
+			g.Log().Info(ctx, "取消恢复复用已删除回执", g.Map{
+				"event": "profile_cancel_receipts_reused", "jobId": job.Id,
+				"profileId": job.ProfileId, "operationNo": job.OperationNo, "skippedAttempts": skippedReceipts,
+			})
+		}
+	}()
 	unresolved := 0
 	for _, attempt := range attempts {
 		var rows []telegramAttemptMessageRecord
@@ -483,8 +531,12 @@ func (s *sSysPublish) recoverCanceledProfileAttemptsTx(ctx context.Context, tx g
 			messages = append(messages, message)
 		}
 		if len(messages) > 0 {
-			if err := captureCanceledAttemptReceiptTx(ctx, tx, attempt, messages); err != nil {
-				return 0, err
+			if canceledAttemptReceiptNeedsReplay(attempt, messages, deletedMessages) {
+				if err := captureCanceledAttemptReceiptTx(ctx, tx, attempt, messages); err != nil {
+					return 0, err
+				}
+			} else {
+				skippedReceipts++
 			}
 		}
 		if len(messages) >= attempt.ExpectedCount && (attempt.ExpectedCount > 0 || attempt.ResponseReceived > 0) {

@@ -16,6 +16,71 @@ import (
 	"hotgo/internal/library/cache"
 )
 
+func TestProfilePublishStateRecoveryBudget(t *testing.T) {
+	if !profilePublishStateRecoveryHasBudget(context.Background(), time.Second) {
+		t.Fatal("a context without a deadline must keep its existing behavior")
+	}
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Hour))
+	defer cancel()
+	if !profilePublishStateRecoveryHasBudget(ctx, time.Second) {
+		t.Fatal("available budget was rejected")
+	}
+	if profilePublishStateRecoveryHasBudget(ctx, 2*time.Hour) {
+		t.Fatal("recovery must yield before consuming its reserve")
+	}
+	cancel()
+	if profilePublishStateRecoveryHasBudget(ctx, 0) {
+		t.Fatal("a canceled context must not start recovery I/O")
+	}
+	expired, stop := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer stop()
+	if profilePublishStateRecoveryHasBudget(expired, 0) {
+		t.Fatal("an expired context must not start recovery I/O")
+	}
+}
+
+func TestProfilePublishRecoveryUnchangedSnapshot(t *testing.T) {
+	state := profilePublishOperationState{
+		TenantId: 1, AccountId: 2, ProfileId: 3,
+		PublishOperationNo: "operation:one", PublishTaskStatus: sysin.PublishTaskStatusPending,
+	}
+	job := telegramJobRecord{TenantId: 1, AccountId: 2, ProfileId: 3, OperationNo: "operation:one"}
+	for _, status := range []sysin.PublishTaskStatus{sysin.PublishTaskStatusPending, sysin.PublishTaskStatusPublishing} {
+		snapshot := state
+		snapshot.PublishTaskStatus = status
+		if !profilePublishRecoveryStateUnchanged(snapshot, job, status) {
+			t.Fatalf("matching active snapshot should skip its write: %s", status)
+		}
+	}
+	for _, tc := range []struct {
+		name   string
+		change func(*profilePublishOperationState, *telegramJobRecord)
+		status sysin.PublishTaskStatus
+	}{
+		{"pending to publishing", func(_ *profilePublishOperationState, _ *telegramJobRecord) {}, sysin.PublishTaskStatusPublishing},
+		{"failed must retain fence", func(_ *profilePublishOperationState, _ *telegramJobRecord) {}, sysin.PublishTaskStatusFailed},
+		{"canceled must retain fence", func(_ *profilePublishOperationState, _ *telegramJobRecord) {}, sysin.PublishTaskStatusCanceled},
+		{"canceling snapshot", func(s *profilePublishOperationState, _ *telegramJobRecord) {
+			s.PublishTaskStatus = sysin.PublishTaskStatusCanceling
+		}, sysin.PublishTaskStatusPending},
+		{"new operation", func(_ *profilePublishOperationState, j *telegramJobRecord) { j.OperationNo = "operation:two" }, sysin.PublishTaskStatusPending},
+		{"empty operation", func(s *profilePublishOperationState, j *telegramJobRecord) {
+			s.PublishOperationNo, j.OperationNo = "", ""
+		}, sysin.PublishTaskStatusPending},
+		{"other tenant", func(_ *profilePublishOperationState, j *telegramJobRecord) { j.TenantId++ }, sysin.PublishTaskStatusPending},
+		{"other account", func(_ *profilePublishOperationState, j *telegramJobRecord) { j.AccountId++ }, sysin.PublishTaskStatusPending},
+		{"other profile", func(_ *profilePublishOperationState, j *telegramJobRecord) { j.ProfileId++ }, sysin.PublishTaskStatusPending},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			snapshot, current := state, job
+			tc.change(&snapshot, &current)
+			if profilePublishRecoveryStateUnchanged(snapshot, current, tc.status) {
+				t.Fatal("changed scope, operation or state incorrectly skipped its fence")
+			}
+		})
+	}
+}
+
 func TestProfilePublishNoteIndexStatusCache(t *testing.T) {
 	ctx := context.Background()
 	cache.SetAdapter(ctx)

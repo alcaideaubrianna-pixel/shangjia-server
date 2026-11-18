@@ -167,7 +167,9 @@ func (s *sSysPublish) rearmTelegramJobOutbox(ctx context.Context, jobId int64, d
 	if err != nil {
 		return gerror.Wrap(err, "补建TG任务Outbox失败")
 	}
-	return nil
+	// Rearm owns dispatch for both existing and newly inserted intents. A
+	// delayed intent remains pending until available_at; dispatch enforces it.
+	return s.dispatchTelegramJobOutboxByJob(ctx, jobId)
 }
 
 func (s *sSysPublish) dispatchTelegramJobOutboxByJob(ctx context.Context, jobId int64) error {
