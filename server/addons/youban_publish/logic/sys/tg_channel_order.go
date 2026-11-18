@@ -224,13 +224,18 @@ func telegramChannelBlockingJobStateSQL(alias string) string {
 	if alias != "" {
 		alias += "."
 	}
+	// Match telegramChannelJobExecutionState: terminal jobs cannot own a
+	// channel slot even when an interrupted finalizer left an active phase.
 	return fmt.Sprintf(`(
-		%[1]sstatus IN ('sending','confirming','unknown','reconciling')
-		OR %[1]sdispatch_status = 'processing'
-		OR %[1]ssend_phase IN (
-			'display_sending','display_confirming',
-			'verify_sending','verify_confirming',
-			'cleanup_sending','cleanup_confirming','reconciling'
+		COALESCE(%[1]sstatus, '') NOT IN ('sent','failed','superseded','cancelled','deleted')
+		AND (
+			%[1]sstatus IN ('sending','confirming','unknown','reconciling')
+			OR %[1]sdispatch_status = 'processing'
+			OR %[1]ssend_phase IN (
+				'display_sending','display_confirming',
+				'verify_sending','verify_confirming',
+				'cleanup_sending','cleanup_confirming','reconciling'
+			)
 		)
 	)`, alias)
 }

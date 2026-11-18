@@ -54,6 +54,7 @@ func TestTelegramChannelBlockingJobIgnoresStaleMissingExecution(t *testing.T) {
 	for _, fragment := range []string{
 		"j.status IN ('sending','confirming','unknown','reconciling')",
 		"j.dispatch_status = 'processing'",
+		"COALESCE(j.status, '') NOT IN ('sent','failed','superseded','cancelled','deleted')",
 	} {
 		if !strings.Contains(condition, fragment) {
 			t.Fatalf("unified blocking condition missing %q in %s", fragment, condition)
@@ -78,6 +79,13 @@ func TestTelegramChannelExecutionStateIsUnified(t *testing.T) {
 		{"reconciling blocks", "reconciling", "", "idle", telegramChannelExecutionBlocking},
 		{"processing claim blocks", "pending", "", "processing", telegramChannelExecutionBlocking},
 		{"terminal releases", "failed", "", "idle", telegramChannelExecutionTerminal},
+		{"failed stale verify releases", "failed", "verify_sending", "done", telegramChannelExecutionTerminal},
+		{"sent stale display releases", "sent", "display_sending", "processing", telegramChannelExecutionTerminal},
+		{"superseded stale cleanup releases", "superseded", "cleanup_sending", "processing", telegramChannelExecutionTerminal},
+		{"cancelled stale verify releases", "cancelled", "verify_confirming", "processing", telegramChannelExecutionTerminal},
+		{"deleted stale phase releases", "deleted", "reconciling", "processing", telegramChannelExecutionTerminal},
+		{"unknown stale verify still blocks", "unknown", "verify_sending", "done", telegramChannelExecutionBlocking},
+		{"reconciling stale verify still blocks", "reconciling", "verify_sending", "done", telegramChannelExecutionBlocking},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
