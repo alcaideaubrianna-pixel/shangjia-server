@@ -328,6 +328,19 @@ func captureCanceledAttemptReceiptTx(ctx context.Context, tx gdb.TX, attempt tel
 	return err
 }
 
+func logProfileCancelRecoveryStage(ctx context.Context, job telegramJobRecord, stage string, startedAt time.Time, err error) {
+	fields := g.Map{"event": "profile_cancel_recovery_stage", "stage": stage,
+		"tenantId": job.TenantId, "accountId": job.AccountId, "profileId": job.ProfileId,
+		"operationNo": job.OperationNo, "jobId": job.Id,
+		"durationMs": time.Since(startedAt).Milliseconds(), "result": "ok"}
+	if err != nil {
+		fields["result"] = "error"
+		fields["errorType"] = fmt.Sprintf("%T", err)
+	}
+	// Detailed errors remain at the existing boundary; do not log SQL payloads.
+	g.Log().Info(ctx, "取消发布恢复阶段", fields)
+}
+
 // Existing publish recovery role owns this bounded, indexed lane. Updating
 // next_check_at before work rotates stalled operations and prevents starvation.
 func (s *sSysPublish) recoverProfilePublishCancels(ctx context.Context, limit int) error {
@@ -349,18 +362,28 @@ func (s *sSysPublish) recoverProfilePublishCancels(ctx context.Context, limit in
 			return err
 		}
 		job := telegramJobRecord{TenantId: intent.TenantID, AccountId: intent.AccountID, ProfileId: intent.ProfileID, OperationNo: intent.OperationNo}
-		if err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-			return s.stopCanceledProfileJobsTx(ctx, tx, job)
+		runStage := func(stage string, work func() error) error {
+			startedAt := time.Now()
+			err := work()
+			logProfileCancelRecoveryStage(ctx, job, stage, startedAt, err)
+			return err
+		}
+		if err := runStage("stop_jobs", func() error {
+			return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+				return s.stopCanceledProfileJobsTx(ctx, tx, job)
+			})
 		}); err != nil {
 			g.Log().Warningf(ctx, "取消发布停止Job待重试 profileId:%d operationNo:%s err:%+v", intent.ProfileID, intent.OperationNo, err)
 			continue
 		}
-		if err := s.stopCanceledProfileCycleRun(ctx, intent); err != nil {
+		if err := runStage("stop_cycle", func() error { return s.stopCanceledProfileCycleRun(ctx, intent) }); err != nil {
 			g.Log().Warningf(ctx, "取消资料循环运行待重试 profileId:%d operationNo:%s err:%+v", intent.ProfileID, intent.OperationNo, err)
 			continue
 		}
-		if err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-			return s.settleProfilePublishCancelTx(ctx, tx, intent)
+		if err := runStage("settle", func() error {
+			return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+				return s.settleProfilePublishCancelTx(ctx, tx, intent)
+			})
 		}); err != nil {
 			g.Log().Warning(ctx, "取消发布收尾待重试", g.Map{"profileId": intent.ProfileID,
 				"tenantId": intent.TenantID, "accountId": intent.AccountID, "operationNo": intent.OperationNo, "error": err.Error()})
@@ -372,9 +395,12 @@ func (s *sSysPublish) recoverProfilePublishCancels(ctx context.Context, limit in
 func (s *sSysPublish) settleProfilePublishCancelTx(ctx context.Context, tx gdb.TX, intent profilePublishCancel) error {
 	job := telegramJobRecord{TenantId: intent.TenantID, AccountId: intent.AccountID, ProfileId: intent.ProfileID, OperationNo: intent.OperationNo}
 	// Same ordering as acceptance and generation; no network I/O under this lock.
-	if _, err := tx.Model(publishProfileStateTable).Ctx(ctx).Where("tenant_id", job.TenantId).
-		Where("account_id", job.AccountId).Where("profile_id", job.ProfileId).Fields("profile_id").LockUpdate().One(); err != nil {
-		return err
+	lockStartedAt := time.Now()
+	_, lockErr := tx.Model(publishProfileStateTable).Ctx(ctx).Where("tenant_id", job.TenantId).
+		Where("account_id", job.AccountId).Where("profile_id", job.ProfileId).Fields("profile_id").LockUpdate().One()
+	logProfileCancelRecoveryStage(ctx, job, "state_lock", lockStartedAt, lockErr)
+	if lockErr != nil {
+		return lockErr
 	}
 	var jobs []telegramJobRecord
 	if err := profileCancelScope(tx.Model(publishTgJobTable).Ctx(ctx), job).OrderAsc("id").Scan(&jobs); err != nil {
@@ -396,7 +422,9 @@ func (s *sSysPublish) settleProfilePublishCancelTx(ctx context.Context, tx gdb.T
 		}
 		// Keep unknown/in-flight attempts unresolved. Receipt recovery, not a
 		// local timeout, determines whether a remote send actually happened.
+		attemptStartedAt := time.Now()
 		active, err := s.recoverCanceledProfileAttemptsTx(ctx, tx, current)
+		logProfileCancelRecoveryStage(ctx, current, "attempt_evidence", attemptStartedAt, err)
 		if err != nil || active > 0 {
 			if err == nil && active > 0 {
 				_, err = profileCancelScope(tx.Model(publishProfileCancelTable).Ctx(ctx), job).
@@ -458,6 +486,21 @@ func recordCanceledSendOutcome(ctx context.Context, job telegramJobRecord, attem
 		return nil
 	})
 	return canceled, err
+}
+
+// Cancellation may retire an attempt after the sender persisted a canonical
+// rejection proof. Superseding its lifecycle must not erase that no-send fact.
+func canceledAttemptHasDefiniteNoSendProof(attempt telegramDeliveryAttempt, auditCount int) bool {
+	if attempt.Id <= 0 || (attempt.Status != telegramAttemptStatusRetryWait && attempt.Status != telegramAttemptStatusSuperseded) ||
+		auditCount != 0 || attempt.ResponseReceived != 0 || attempt.ConfirmedCount != 0 || attempt.WebhookDeadline != nil {
+		return false
+	}
+	switch strings.TrimSpace(attempt.ErrorMessage) {
+	case "bot_definite_rejection", "bot_preparation_failed_before_send", "protocol_definite_rejection", "protocol_preparation_failed_before_send":
+		return true
+	default:
+		return false
+	}
 }
 
 // canceledAttemptReceiptNeedsReplay skips only complete, confirmed receipts whose
@@ -544,7 +587,8 @@ func (s *sSysPublish) recoverCanceledProfileAttemptsTx(ctx context.Context, tx g
 		}
 		// A definite rejection with no IDs proves there is nothing to delete.
 		// Merely changing an attempt to superseded does not provide that proof.
-		if telegramUnknownAttemptRecoveryAction(attempt, len(rows)) == telegramUnknownAttemptRetry {
+		if canceledAttemptHasDefiniteNoSendProof(attempt, len(rows)) ||
+			telegramUnknownAttemptRecoveryAction(attempt, len(rows)) == telegramUnknownAttemptRetry {
 			continue
 		}
 		unresolved++

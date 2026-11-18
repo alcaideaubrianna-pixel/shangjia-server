@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -217,18 +218,53 @@ func (s *sSysPublish) submitCollectProfileDispatch(ctx context.Context, dispatch
 	return nil
 }
 
-func (s *sSysPublish) markCollectDispatchSentByProfile(ctx context.Context, profileId, eventId int64) error {
+// reconcileCollectOperationDispatch uses only an already-known operation ID.
+// It does not discover work or scan historical dispatches. The existing channel
+// manifest predicate remains the authority for acknowledging delivery.
+func (s *sSysPublish) reconcileCollectOperationDispatch(ctx context.Context, job telegramJobRecord) error {
+	if !strings.HasPrefix(job.OperationNo, "collect:") {
+		return nil
+	}
+	dispatchID, err := strconv.ParseInt(strings.TrimPrefix(job.OperationNo, "collect:"), 10, 64)
+	if err != nil || dispatchID <= 0 {
+		return gerror.New("采集分发操作编号无效")
+	}
+	row, err := g.DB().Model(publishCollectDispatchTable).Ctx(ctx).
+		Fields("id,event_id").Where("id", dispatchID).
+		Where("tenant_id", job.TenantId).Where("profile_id", job.ProfileId).
+		WhereIn("account_id", []int64{0, job.AccountId}).One()
+	if err != nil {
+		return gerror.Wrap(err, "读取采集操作收尾范围失败")
+	}
+	if row.IsEmpty() {
+		return nil // A stale operation must never acknowledge another scope.
+	}
+	return s.markCollectDispatchSentByProfile(ctx, job.ProfileId, row["event_id"].Int64(), dispatchID)
+}
+
+func (s *sSysPublish) markCollectDispatchSentByProfile(ctx context.Context, profileId, eventId int64, dispatchIDs ...int64) error {
 	if profileId <= 0 || eventId <= 0 {
 		return nil
 	}
-	rows, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
-		Fields("id,event_id").Where("profile_id", profileId).Where("event_id", eventId).
-		WhereIn("status", []string{sysin.CollectDispatchStatusPending, sysin.CollectDispatchStatusReviewing, sysin.CollectDispatchStatusFailed}).All()
+	scope := func(model *gdb.Model) *gdb.Model {
+		model = model.Where("profile_id", profileId).Where("event_id", eventId)
+		if len(dispatchIDs) > 0 {
+			model = model.WhereIn("id", dispatchIDs)
+		}
+		return model
+	}
+	// Include already-sent rows: a previous call may have committed dispatch
+	// before event finalization failed. Retrying must still repair that event.
+	rows, err := scope(pdao.YoubanPublishCollectDispatch.Ctx(ctx)).
+		WhereIn("status", []string{sysin.CollectDispatchStatusPending, sysin.CollectDispatchStatusReviewing, sysin.CollectDispatchStatusFailed, sysin.CollectDispatchStatusSent}).
+		Fields("id,event_id").All()
 	if err != nil {
 		return gerror.Wrap(err, "读取采集分发事件失败")
 	}
-	_, err = pdao.YoubanPublishCollectDispatch.Ctx(ctx).
-		Where("profile_id", profileId).Where("event_id", eventId).
+	if len(rows) == 0 {
+		return nil
+	}
+	_, err = scope(pdao.YoubanPublishCollectDispatch.Ctx(ctx)).
 		WhereIn("status", []string{sysin.CollectDispatchStatusPending, sysin.CollectDispatchStatusReviewing, sysin.CollectDispatchStatusFailed}).
 		Where(collectDispatchAllJobsSentCondition(pdao.YoubanPublishCollectDispatch.Table())).
 		Data(g.Map{"status": sysin.CollectDispatchStatusSent, "error_message": "", "finished_at": gtime.Now(), "updated_at": gtime.Now()}).Update()

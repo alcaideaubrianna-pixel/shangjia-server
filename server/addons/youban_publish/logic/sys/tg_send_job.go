@@ -1339,9 +1339,6 @@ func (s *sSysPublish) completeTelegramJobLockedByProfile(ctx context.Context, jo
 	if completedNotice != nil {
 		*completedNotice = true
 	}
-	if job.CollectEventId > 0 {
-		return s.markCollectDispatchSentByProfile(ctx, job.ProfileId, job.CollectEventId)
-	}
 	return nil
 }
 

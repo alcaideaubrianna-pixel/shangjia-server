@@ -568,6 +568,11 @@ func (s *sSysPublish) recoverProfilePublishOperationState(ctx context.Context, s
 	case row["completed"].Int() == total && row["sent"].Int() == 0:
 		return s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusFailed)
 	case row["completed"].Int() == total:
+		// Reuse this bounded operation scanner instead of scanning all dispatches.
+		// Keep its candidate until dispatch acknowledgement succeeds.
+		if err = s.reconcileCollectOperationDispatch(ctx, job); err != nil {
+			return err
+		}
 		if !isCycleBatchOperation(job.OperationNo) {
 			if _, err = s.syncProfilePublishState(ctx, job.ProfileId, 1, consts.ContentVisibilityPublic, gtime.Now()); err != nil {
 				return err

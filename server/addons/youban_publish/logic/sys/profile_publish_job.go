@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"sort"
@@ -666,9 +667,10 @@ func (s *sSysPublish) completeProfileTelegramOperation(ctx context.Context, job 
 		if err := g.DB().Model(publishProfileStateTable).Ctx(ctx).
 			Where("tenant_id", job.TenantId).Where("account_id", job.AccountId).
 			Where("profile_id", job.ProfileId).Where("publish_task_status", sysin.PublishTaskStatusFailed).
-			WhereNull("deleted_at").Scan(&state); err != nil {
+			WhereNull("deleted_at").Scan(&state); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return false, err
 		}
+		// No failed-state row is the normal successful publishing path.
 		if state.ProfileId > 0 {
 			repaired, err := s.recoverFailedCyclePublishState(ctx, g.DB(), state)
 			if err != nil || repaired {

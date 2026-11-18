@@ -83,6 +83,17 @@ func (s *sSysPublish) handleStreamProfileProjection(ctx context.Context, task *a
 
 // projectCompletedTelegramOperation 复用既有状态、统计、循环清理和通知能力；新引擎仅在后台合并执行。
 func (s *sSysPublish) projectCompletedTelegramOperation(ctx context.Context, job telegramJobRecord) error {
+	// Dispatch delivery is historical fact, independent of the profile's current
+	// operation. Do not lose it when a later projection is stale or fails.
+	if strings.HasPrefix(job.OperationNo, "collect:") {
+		if err := s.reconcileCollectOperationDispatch(ctx, job); err != nil {
+			return err
+		}
+	} else if job.CollectEventId > 0 {
+		if err := s.markCollectDispatchSentByProfile(ctx, job.ProfileId, job.CollectEventId); err != nil {
+			return err
+		}
+	}
 	operationCompleted := false
 	if err := s.withProfileLifecycleLock(ctx, job.TenantId, job.ProfileId, func() error {
 		return s.completeTelegramJobLockedByProfile(ctx, job, &operationCompleted)
