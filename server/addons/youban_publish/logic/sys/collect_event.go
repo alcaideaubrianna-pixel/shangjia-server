@@ -569,7 +569,7 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		parentEventId := event["material_parent_event_id"].Int64()
 		if parentEventId > 0 {
 			parent, parentErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).
-				Fields("id,status,error_message").
+				Fields("*").
 				Where("id", parentEventId).
 				Where("tenant_id", tenantId).
 				Where("account_id", collectEventStorageAccountID(event)).
@@ -581,14 +581,21 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 				return newCollectProcessRetryError(30*time.Second, "等待父展示资料进入处理链路")
 			}
 			parentStatus := strings.TrimSpace(parent["status"].String())
-			if parentStatus == sysin.CollectEventStatusIgnored || parentStatus == sysin.CollectEventStatusFailed {
+			mappedDuplicate := false
+			if parentStatus == sysin.CollectEventStatusIgnored {
+				mappedDuplicate, parentErr = collectEventCanResumeDuplicate(ctx, parent)
+				if parentErr != nil {
+					return parentErr
+				}
+			}
+			if (parentStatus == sysin.CollectEventStatusIgnored && !mappedDuplicate) || parentStatus == sysin.CollectEventStatusFailed {
 				message := strings.TrimSpace(parent["error_message"].String())
 				if message == "" {
 					message = "父展示资料已忽略"
 				}
 				return s.ignoreCollectEvent(ctx, eventId, message, "group")
 			}
-			if !collectDisplayEventPassedEarlyCheck(parentStatus) {
+			if !mappedDuplicate && !collectDisplayEventPassedEarlyCheck(parentStatus) {
 				return newCollectProcessRetryError(5*time.Second, "等待父展示资料完成规则和去重预检")
 			}
 		}
@@ -615,6 +622,20 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		}
 		if parent.IsEmpty() {
 			return newCollectProcessRetryError(30*time.Second, "父展示事件不存在，保留验证任务")
+		}
+		if parent["status"].String() == sysin.CollectEventStatusIgnored {
+			mapped, readErr := collectEventCanResumeDuplicate(ctx, parent)
+			if readErr != nil {
+				return readErr
+			}
+			if mapped {
+				_, readErr = pdao.YoubanPublishCollectEvent.Ctx(ctx).WherePri(parentEventId).
+					Where("status", sysin.CollectEventStatusIgnored).
+					Data(g.Map{"status": sysin.CollectEventStatusGroupCollect, "processed_at": nil}).Update()
+				if readErr != nil {
+					return readErr
+				}
+			}
 		}
 		g.Log().Infof(ctx, "验证资料媒体已完成，调度父展示资料静默截止任务 verifyEventId:%d parentEventId:%d", eventId, parentEventId)
 		if err = s.scheduleCollectDisplaySettlement(ctx, collectProcessQueuePayload{
@@ -837,6 +858,15 @@ func (s *sSysPublish) ignoreCollectEvent(ctx context.Context, eventId int64, mes
 	if stage == "" {
 		stage = "precheck"
 	}
+	// Only rule-fanout dedupe settlement may retain a resumable identity
+	// marker. Later authorization/keyword/manual rejection is authoritative.
+	if stage != "final" {
+		if _, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).WherePri(eventId).
+			Where("material_group_status", collectDuplicateGroupStatus).
+			Data(g.Map{"material_group_status": "rejected"}).Update(); err != nil {
+			return err
+		}
+	}
 	s.appendCollectEventLog(ctx, eventId, stage, "ignored", message, "")
 	if err := s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusIgnored, message); err != nil {
 		return err
@@ -870,6 +900,17 @@ func collectDisplayEventPassedEarlyCheck(status string) bool {
 
 func (s *sSysPublish) ignorePairedCollectVerifyEvents(ctx context.Context, displayEventId int64, message string) error {
 	if displayEventId <= 0 {
+		return nil
+	}
+	parent, readErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).WherePri(displayEventId).One()
+	if readErr != nil {
+		return readErr
+	}
+	mapped, readErr := collectEventCanResumeDuplicate(ctx, parent)
+	if readErr != nil {
+		return readErr
+	}
+	if mapped {
 		return nil
 	}
 	eventCols := pdao.YoubanPublishCollectEvent.Columns()
@@ -1147,6 +1188,18 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 	if !existingDispatch.IsEmpty() {
 		return s.resumeExistingCollectDispatch(ctx, existingDispatch, event, content, rule, decision.Text)
 	}
+	identity, identityErr := g.DB().Model(collectIdentityTable).Ctx(ctx).
+		Where("tenant_id", event["tenant_id"].Int64()).Where("account_id", event["account_id"].Int64()).
+		Where("source_id", event["source_id"].Int64()).Where("rule_id", rule["id"].Int64()).Where("event_id", event["id"].Int64()).One()
+	if identityErr != nil {
+		return false, "", identityErr
+	}
+	if !identity.IsEmpty() {
+		if mergeErr := s.mergeCollectDuplicateVerification(ctx, event, rule, content); mergeErr != nil {
+			return false, "", mergeErr
+		}
+		return false, collectDuplicateReason(&profileFingerprintDuplicateError{ProfileID: identity["profile_id"].Int64(), Layer: identity["match_layer"].String()}, false), nil
+	}
 	now := gtime.Now()
 	workerIdentity := currentCollectWorkerIdentity(ctx)
 	channelIds := collectRuleTargetChannelIds(rule)
@@ -1159,13 +1212,15 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 		return false, "", findErr
 	}
 	if hit != nil {
-		replaced, replaceErr := s.replaceDuplicateCollectProfileMedia(ctx, event, content, hit.ProfileID)
-		if replaceErr != nil {
-			return false, "", replaceErr
+		if err = s.recordCollectDuplicateIdentity(ctx, event, rule, hit); err != nil {
+			return false, "", err
 		}
-		reason := collectDuplicateReason(hit, replaced)
+		if mergeErr := s.mergeCollectDuplicateVerification(ctx, event, rule, content); mergeErr != nil {
+			return false, "", mergeErr
+		}
+		reason := collectDuplicateReason(hit, false)
 		s.appendCollectEventLogForRecord(ctx, event, "dedupe", "skipped", reason, fmt.Sprintf("rule=%d", rule["id"].Int64()))
-		g.Log().Infof(ctx, "采集资料指纹命中 eventId:%d ruleId:%d profileId:%d channelId:%d layer:%s cacheHit:%t mediaReplaced:%t", event["id"].Int64(), rule["id"].Int64(), hit.ProfileID, hit.ChannelID, hit.Layer, hit.CacheHit, replaced)
+
 		// Only this rule is skipped. The event owner settles after all rules,
 		// so a duplicate in one branch cannot cancel another branch's media.
 		return false, reason, nil
@@ -1334,6 +1389,9 @@ func (s *sSysPublish) resumeExistingCollectDispatch(ctx context.Context, dispatc
 	switch action {
 	case collectDispatchResumeNoop:
 		if status == sysin.CollectDispatchStatusSkipped {
+			if err := s.mergeCollectDuplicateVerification(ctx, event, rule, content); err != nil {
+				return false, "", err
+			}
 			return false, dispatch["error_message"].String(), nil
 		}
 		if dispatch["status"].String() == sysin.CollectDispatchStatusSent {

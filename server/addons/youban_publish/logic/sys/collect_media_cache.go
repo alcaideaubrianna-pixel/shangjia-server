@@ -260,13 +260,20 @@ func (s *sSysPublish) ExecuteCollectMediaCache(ctx context.Context, payload coll
 	}
 	if event["material_role"].String() == collectMaterialRoleVerify && event["material_parent_event_id"].Int64() > 0 {
 		parent, parentErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).
-			Fields("status,error_message").
+			Fields("*").
 			Where("id", event["material_parent_event_id"].Int64()).
 			One()
 		if parentErr != nil {
 			return gerror.Wrap(parentErr, "检查验证媒体父展示事件失败")
 		}
-		if !parent.IsEmpty() && (parent["status"].String() == sysin.CollectEventStatusIgnored || parent["status"].String() == sysin.CollectEventStatusFailed) {
+		mappedDuplicate := false
+		if parent["status"].String() == sysin.CollectEventStatusIgnored {
+			mappedDuplicate, parentErr = collectEventCanResumeDuplicate(ctx, parent)
+			if parentErr != nil {
+				return parentErr
+			}
+		}
+		if !parent.IsEmpty() && ((parent["status"].String() == sysin.CollectEventStatusIgnored && !mappedDuplicate) || parent["status"].String() == sysin.CollectEventStatusFailed) {
 			message := strings.TrimSpace(parent["error_message"].String())
 			if message == "" {
 				message = "父展示资料已忽略"
@@ -274,7 +281,7 @@ func (s *sSysPublish) ExecuteCollectMediaCache(ctx context.Context, payload coll
 			g.Log().Infof(ctx, "验证媒体父展示资料已忽略，取消媒体下载 eventId:%d parentEventId:%d", payload.EventId, event["material_parent_event_id"].Int64())
 			return s.ignoreCollectEvent(ctx, payload.EventId, message, "group")
 		}
-		if !parent.IsEmpty() && !collectDisplayEventPassedEarlyCheck(parent["status"].String()) {
+		if !parent.IsEmpty() && !mappedDuplicate && !collectDisplayEventPassedEarlyCheck(parent["status"].String()) {
 			g.Log().Infof(
 				ctx,
 				"验证媒体等待父展示资料预检，取消旧媒体任务 eventId:%d parentEventId:%d parentStatus:%s",

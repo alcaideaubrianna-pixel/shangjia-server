@@ -1079,7 +1079,14 @@ func (s *sSysPublish) bindCollectMaterialPair(ctx context.Context, display gdb.R
 		if parent[cols.Status].String() == sysin.CollectEventStatusIgnored && parent["material_role"].String() != collectMaterialRoleDisplay {
 			return refuse(publishconsts.CollectPairNeedsRepair, "前序消息历史分类不完整")
 		}
-		if parent[cols.Status].String() == sysin.CollectEventStatusIgnored {
+		mappedDuplicate := false
+		if parent[cols.Status].String() == sysin.CollectEventStatusIgnored && parent["material_group_status"].String() == collectDuplicateGroupStatus {
+			mappedDuplicate, txErr = collectEventHasDuplicateIdentityModel(ctx, tx.Model(collectIdentityTable).Ctx(ctx), parent)
+			if txErr != nil {
+				return txErr
+			}
+		}
+		if parent[cols.Status].String() == sysin.CollectEventStatusIgnored && !mappedDuplicate {
 			return refuse(publishconsts.CollectPairRejected, "父展示资料已忽略："+parent[cols.ErrorMessage].String())
 		}
 		if role := parent["material_role"].String(); role != "" && role != collectMaterialRolePending && role != collectMaterialRoleDisplay {
@@ -1177,11 +1184,17 @@ func (s *sSysPublish) bindCollectMaterialPair(ctx context.Context, display gdb.R
 		displayQuery := tx.Model(pdao.YoubanPublishCollectEvent.Table()).Ctx(ctx).
 			Where("id", display["id"].Int64()).
 			WhereIn("material_role", []string{collectMaterialRolePending, collectMaterialRoleDisplay})
-		if !displayCanReattach {
+		if !displayCanReattach && !mappedDuplicate {
 			displayQuery = displayQuery.WhereIn("status", collectMaterialMutableStatuses())
 		}
+		displayData := g.Map{"material_role": collectMaterialRoleDisplay, "material_group_status": "paired", "updated_at": now}
+		if mappedDuplicate {
+			displayQuery = displayQuery.Where(cols.Status, sysin.CollectEventStatusIgnored)
+			displayData[cols.Status] = sysin.CollectEventStatusGroupCollect
+			displayData[cols.ProcessedAt] = nil
+		}
 		result, txErr := displayQuery.
-			Data(g.Map{"material_role": collectMaterialRoleDisplay, "material_group_status": "paired", "updated_at": now}).Update()
+			Data(displayData).Update()
 		if txErr != nil {
 			return gerror.Wrap(txErr, "绑定资料展示组失败")
 		}

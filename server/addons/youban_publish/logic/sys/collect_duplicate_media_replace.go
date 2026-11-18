@@ -134,17 +134,6 @@ func collectDuplicateReason(duplicate *profileFingerprintDuplicateError, replace
 	return reason
 }
 
-// replaceDuplicateCollectProfileMedia lets an account-based collector repair a
-// deduplicated profile once without changing its identity, text, or channels.
-func (s *sSysPublish) replaceDuplicateCollectProfileMedia(
-	ctx context.Context,
-	event gdb.Record,
-	content *collectContentResult,
-	profileID int64,
-) (bool, error) {
-	return s.replaceCollectProfileMedia(ctx, event, content, profileID, collectMediaReplaceDuplicate)
-}
-
 func (s *sSysPublish) replaceLateCollectProfileMedia(ctx context.Context, event gdb.Record, content *collectContentResult, profileID int64) (bool, error) {
 	return s.replaceCollectProfileMedia(ctx, event, content, profileID, collectMediaReplaceLateArrival)
 }
