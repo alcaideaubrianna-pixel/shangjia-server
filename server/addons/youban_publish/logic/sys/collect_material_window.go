@@ -544,6 +544,13 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 					return lookupErr
 				}
 				if !storedDisplay.IsEmpty() {
+					storedDisplay, lookupErr = s.resolveCanonicalDuplicateDisplay(ctx, storedDisplay, event)
+					if lookupErr != nil {
+						return lookupErr
+					}
+					if storedDisplay.IsEmpty() {
+						return nil
+					}
 					paired, pairErr := s.bindCollectMaterialPair(ctx, storedDisplay, event)
 					if pairErr != nil {
 						return pairErr
@@ -600,6 +607,23 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 		}
 		return nil
 	})
+}
+
+func (s *sSysPublish) resolveCanonicalDuplicateDisplay(ctx context.Context, candidate, verify gdb.Record) (gdb.Record, error) {
+	if candidate["status"].String() != sysin.CollectEventStatusIgnored || candidate["material_role"].String() != collectMaterialRoleDisplay || !strings.HasPrefix(strings.TrimSpace(candidate["error_message"].String()), "资料库已存在相同资料") {
+		return candidate, nil
+	}
+	cols := pdao.YoubanPublishCollectEvent.Columns()
+	canonical, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+		Where(cols.TenantId, verify[cols.TenantId].Int64()).Where(cols.AccountId, verify[cols.AccountId].Int64()).Where(cols.SourceId, verify[cols.SourceId].Int64()).
+		WhereIn(cols.SourceChatId, tgChannelCacheLookupIds(verify[cols.SourceChatId].String())).Where(cols.MaterialRole, collectMaterialRoleDisplay).
+		Where(cols.TextHash, candidate[cols.TextHash].String()).WhereIn(cols.Status, []string{sysin.CollectEventStatusProcessed, sysin.CollectEventStatusDispatched}).
+		Where(cols.Id+" <> ?", candidate[cols.Id].Int64()).Where(cols.SourceMessageId+" < ?", candidate[cols.SourceMessageId].Int64()).
+		OrderDesc(cols.SourceMessageId).OrderDesc(cols.Id).Limit(1).One()
+	if err != nil {
+		return nil, gerror.Wrap(err, "查找重复展示资料正式事件失败")
+	}
+	return canonical, nil
 }
 
 func (s *sSysPublish) scheduleCollectDisplaySettlement(ctx context.Context, payload collectProcessQueuePayload, display gdb.Record, delay time.Duration) error {
