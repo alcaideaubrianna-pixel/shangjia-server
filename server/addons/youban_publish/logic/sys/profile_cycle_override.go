@@ -52,6 +52,14 @@ func (s *sSysPublish) AdminProfileCycleOverride(ctx context.Context, in *sysin.P
 			}
 		}
 	}
+	// Migrations may add these columns while a long-lived instance is running.
+	// GoFrame caches table metadata until process restart, so refresh this table
+	// before the first write after deployment.
+	for _, table := range []string{publishProfileStateTable, publishChannelProfileTable, publishTgJobTable} {
+		if err = g.DB().GetCore().ClearTableFields(ctx, table); err != nil {
+			return gerror.Wrapf(err, "刷新资料循环表结构缓存失败：%s", table)
+		}
+	}
 	err = s.withProfileLifecycleLock(ctx, profile.TenantId, profile.Id, func() error {
 		return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 			state, lockErr := tx.Model(publishProfileStateTable).Safe().Ctx(ctx).
