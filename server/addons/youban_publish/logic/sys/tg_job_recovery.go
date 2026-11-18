@@ -1107,13 +1107,16 @@ func (s *sSysPublish) recoverPendingIdleTelegramJobs(ctx context.Context, limit 
 }
 
 func telegramPendingRecoveryPostgresSQL() string {
-	return `WITH channel_candidates AS (
+	// Keep eligibility before DISTINCT ON: a disabled bot or a future retry
+	// must not hide another eligible job in the same channel. Only sort job
+	// identities; load the wide record after selecting bounded channel heads.
+	return `WITH channel_candidates AS MATERIALIZED (
 		SELECT DISTINCT ON (
 			j.tenant_id,
 			j.account_id,
 			j.channel_id,
 			REPLACE(COALESCE(j.target_chat_id,''),'-100','')
-		) j.*
+		) j.id,j.tenant_id,j.account_id,j.channel_id,j.target_chat_id,j.created_at
 		FROM ` + publishTgJobTable + ` j
 		WHERE j.status IN ('pending','failed_retry')
 			AND COALESCE(j.dispatch_status,'') IN ('','idle')
@@ -1130,11 +1133,13 @@ func telegramPendingRecoveryPostgresSQL() string {
 			j.created_at,
 			j.id
 		LIMIT ?
+	), recoverable_heads AS MATERIALIZED (
+		SELECT c.id,c.created_at FROM channel_candidates c
+		WHERE ` + telegramPendingRecoveryChannelHeadSQL("c", "earlier") + `
 	)
-	SELECT j.*
-	FROM channel_candidates j
-	WHERE ` + telegramPendingRecoveryChannelHeadSQL("j", "earlier") + `
-	ORDER BY j.created_at,j.id`
+	SELECT j.* FROM recoverable_heads h
+	JOIN ` + publishTgJobTable + ` j ON j.id=h.id
+	ORDER BY h.created_at,h.id`
 }
 
 // telegramPendingRecoveryChannelHeadSQL keeps heavily backlogged channels from

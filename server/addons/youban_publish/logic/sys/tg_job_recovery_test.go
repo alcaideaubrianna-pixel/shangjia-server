@@ -32,14 +32,19 @@ func (f *mediaFallbackRecoveryAccountTasks) GetByKey(_ context.Context, tenantID
 func TestTelegramPendingRecoverySelectsChannelHeadsBeforeLimit(t *testing.T) {
 	query := telegramPendingRecoveryChannelHeadSQL("j", "earlier")
 	for _, fragment := range []string{
-		"NOT EXISTS", "earlier.tenant_id=j.tenant_id", "j.channel_id>0",
+		"NOT EXISTS", "earlier.tenant_id=j.tenant_id", "earlier.account_id=j.account_id", "j.channel_id>0",
 		"earlier.channel_id=j.channel_id", "REPLACE(COALESCE(earlier.target_chat_id,''),'-100','')",
 		"earlier.status IN ('sending','confirming','unknown','reconciling')",
-		"earlier.created_at<j.created_at", "earlier.id<j.id",
+		"COALESCE(earlier.status, '') NOT IN ('sent','failed','superseded','cancelled','deleted')",
 	} {
 		if !strings.Contains(query, fragment) {
 			t.Fatalf("channel-head recovery query missing %q: %s", fragment, query)
 		}
+	}
+	// An executing job blocks the channel even when it was created after the
+	// pending candidate. Recovery must not race a newer realtime send.
+	if strings.Contains(query, "earlier.created_at<") || strings.Contains(query, "earlier.id<") {
+		t.Fatal("recovery must protect all executing jobs, not only older jobs")
 	}
 }
 
@@ -49,13 +54,22 @@ func TestTelegramPendingRecoveryPostgresSelectsHeadsBeforeDueFilters(t *testing.
 		t.Fatalf("PostgreSQL recovery query has unbalanced parentheses: %s", query)
 	}
 	for _, fragment := range []string{
-		"SELECT j.* FROM", "j.status IN ('pending','failed_retry')",
+		"channel_candidates AS MATERIALIZED", "recoverable_heads AS MATERIALIZED",
+		"j.status IN ('pending','failed_retry')",
 		"COALESCE(j.dispatch_status,'') IN ('','idle')", "j.next_retry_at IS NULL OR j.next_retry_at<=?",
-		"j.updated_at<=?", "ORDER BY", "j.created_at,j.id", "LIMIT ?",
+		"j.updated_at<=?", "j.created_at", "LIMIT ?",
+		"SELECT j.* FROM recoverable_heads h", "j ON j.id=h.id",
+		"ORDER BY h.created_at,h.id", "earlier.tenant_id=c.tenant_id",
 	} {
 		if !strings.Contains(query, fragment) {
 			t.Fatalf("PostgreSQL bulk recovery query missing %q: %s", fragment, query)
 		}
+	}
+	if strings.Contains(query, ") j.*") {
+		t.Fatal("channel-head selection must not sort wide Telegram job records")
+	}
+	if strings.Index(query, "j.next_retry_at<=?") > strings.Index(query, "LIMIT ?") {
+		t.Fatal("eligibility filters must precede the channel-head limit")
 	}
 	if got := strings.Count(query, "?"); got != 4 {
 		t.Fatalf("PostgreSQL channel-head recovery placeholders=%d, want 4: %s", got, query)
