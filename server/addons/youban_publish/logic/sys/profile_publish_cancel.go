@@ -283,6 +283,16 @@ func persistCanceledReceiptCleanupTx(ctx context.Context, tx gdb.TX, job telegra
 			Data(g.Map{"status": "canceling", "next_check_at": gtime.Now()}).Update(); err != nil {
 			return err
 		}
+		state, err := tx.Model(publishProfileStateTable).Ctx(ctx).
+			Where("tenant_id", job.TenantId).Where("account_id", job.AccountId).Where("profile_id", job.ProfileId).
+			Fields("publish_operation_no,publish_task_status").LockUpdate().One()
+		if err != nil {
+			return err
+		}
+		// Cleanup may reopen, but a released frontend or a newer round must not.
+		if state["publish_operation_no"].String() != job.OperationNo || state["publish_task_status"].String() == "canceled" {
+			return nil
+		}
 		if err := (&sSysPublish{}).writeProfilePublishOperationStateTx(ctx, tx, job.TenantId, job.AccountId,
 			job.ProfileId, job.OperationNo, sysin.PublishTaskStatusCanceling, true); err != nil {
 			return err
@@ -410,6 +420,18 @@ func (s *sSysPublish) settleProfilePublishCancelTx(ctx context.Context, tx gdb.T
 		if !current.Status.IsTerminal() {
 			return nil // The independent Job-stop phase must finish first.
 		}
+	}
+	// Release only after checking the entire round. The tombstone remains
+	// canceling until all remote evidence and cleanup have actually settled.
+	if _, err := profileCancelScope(tx.Model(publishProfileCancelTable).Ctx(ctx), job).
+		Where("status", "canceling").Where("error_message", "").Data(g.Map{"error_message": "发布已停止，后台仍在对账并清理频道消息；未知发送结果不会视为未发送"}).Update(); err != nil {
+		return err
+	}
+	if err := s.writeProfilePublishOperationStateTx(ctx, tx, job.TenantId, job.AccountId, job.ProfileId,
+		job.OperationNo, sysin.PublishTaskStatusCanceled, true); err != nil {
+		return err
+	}
+	for _, current := range jobs {
 		// Protocol task account_id is the Telegram account, not the business
 		// account. Match the exact Job + opaque operation digest in its key.
 		digest := sha256.Sum256([]byte(current.OperationNo))
@@ -428,8 +450,8 @@ func (s *sSysPublish) settleProfilePublishCancelTx(ctx context.Context, tx gdb.T
 		if err != nil || active > 0 {
 			if err == nil && active > 0 {
 				_, err = profileCancelScope(tx.Model(publishProfileCancelTable).Ctx(ctx), job).
-					Where("COALESCE(error_message, '') <> ?", "正在等待在途发送结果；结果不确定时不会宣告取消完成").
-					Data(g.Map{"error_message": "正在等待在途发送结果；结果不确定时不会宣告取消完成"}).Update()
+					Where("COALESCE(error_message, '') <> ?", "发布已停止，后台仍在等待在途发送结果并清理消息；未知结果将继续对账").
+					Data(g.Map{"error_message": "发布已停止，后台仍在等待在途发送结果并清理消息；未知结果将继续对账"}).Update()
 			}
 			return err
 		}

@@ -83,16 +83,28 @@ func (s *sSysPublish) deleteTelegramMessagesIndividually(ctx context.Context, bo
 	}
 	deleteErrors, rateErr, rateDelay := telegramDeleteMessageRequests(ctx, bot, messages)
 
+	// Persist all confirmed deletions before inspecting failures: an earlier
+	// non-retryable error must not discard a later in-flight success.
+	confirmed := make([]telegramDeleteMessage, 0, len(messages))
+	for index, item := range messages {
+		if deleteErrors[index] == nil || isTelegramMessageAlreadyDeletedError(deleteErrors[index]) {
+			confirmed = append(confirmed, item)
+		}
+	}
+	if err := markTelegramMessagesDeleted(ctx, confirmed); err != nil {
+		return err
+	}
+
 	fallbackQueued := false
 	var retryErrors []string
 	for index, item := range messages {
 		chatID := normalizeTelegramChannelChatID(item.TargetChatId)
 		err := deleteErrors[index]
 		if err != nil {
+			if _, limited := telegramDeleteRateDelay(err); limited {
+				continue
+			}
 			if isTelegramMessageAlreadyDeletedError(err) {
-				if markErr := markTelegramMessagesDeleted(ctx, []telegramDeleteMessage{item}); markErr != nil {
-					return markErr
-				}
 				s.appendTelegramJobLog(ctx, job, "delete", "skipped", fmt.Sprintf("%s，TG消息已不存在，已同步本地删除状态，频道:%s，消息:%d", reason, chatID, item.MessageId))
 				continue
 			}
@@ -113,9 +125,6 @@ func (s *sSysPublish) deleteTelegramMessagesIndividually(ctx context.Context, bo
 				continue
 			}
 			return gerror.New(message)
-		}
-		if markErr := markTelegramMessagesDeleted(ctx, []telegramDeleteMessage{item}); markErr != nil {
-			return markErr
 		}
 	}
 	if rateErr != nil {
@@ -158,6 +167,9 @@ func telegramDeleteMessageRequests(ctx context.Context, bot *tgbot.Bot, messages
 				chatID := normalizeTelegramChannelChatID(work.item.TargetChatId)
 				requestStarted := time.Now()
 				deleted, err := bot.DeleteMessage(ctx, &tgbot.DeleteMessageParams{ChatID: chatID, MessageID: int(work.item.MessageId)})
+				if err == nil && !deleted {
+					err = gerror.New("TG未确认消息删除成功")
+				}
 				publishCleanupObservability.messageRequest(ctx, deleted, time.Since(requestStarted), err)
 				deleteErrors[work.index] = err
 				if delay, limited := telegramDeleteRateDelay(err); limited {
@@ -180,7 +192,13 @@ func telegramDeleteMessageRequests(ctx context.Context, bot *tgbot.Bot, messages
 
 func telegramDeleteRateDelay(err error) (time.Duration, bool) {
 	var rate *tgbot.TooManyRequestsError
-	if errors.As(err, &rate) && rate != nil && rate.RetryAfter > 0 {
+	if errors.As(err, &rate) {
+		if rate == nil {
+			return 0, false
+		}
+		if rate.RetryAfter <= 0 {
+			return telegramRetryMinDelay, true
+		}
 		seconds := int64(rate.RetryAfter)
 		maxSeconds := int64((time.Duration(1<<63-1) - time.Minute) / time.Second)
 		if seconds > maxSeconds {

@@ -102,7 +102,8 @@ func (s *sSysPublish) handleProfilesDown(ctx context.Context, ids []int64, tenan
 
 // finishProfilesUnpublishing clears the durable loading state only after the
 // profile's historical publish messages and down-run jobs have both settled.
-func (s *sSysPublish) finishProfilesUnpublishing(ctx context.Context, ids []int64, tenantId int64, operationNo string) error {
+// cleanupScope optionally carries the request job IDs, then IDs skipped in this execution.
+func (s *sSysPublish) finishProfilesUnpublishing(ctx context.Context, ids []int64, tenantId int64, operationNo string, cleanupScope ...[]int64) error {
 	ids = uniqueIds(ids)
 	if len(ids) == 0 {
 		return nil
@@ -117,16 +118,38 @@ func (s *sSysPublish) finishProfilesUnpublishing(ctx context.Context, ids []int6
 	if pending > 0 {
 		return nil
 	}
-	sent, err := g.DB().Model(publishTgMessageTable+" m").Safe().Ctx(ctx).
-		InnerJoin(publishTgJobTable+" j", "j.id=m.job_id").
-		WhereIn("j.profile_id", ids).
-		Where("m.status", "sent").
+	// Only a delivered cleanup intent from this operation is durable completion
+	// evidence. EXISTS handles multiple intents per job without relying on row order.
+	manualDown := isManualTelegramCleanupUnpublish(tgQueuePayload{CleanupOperationNo: operationNo})
+	var jobs []telegramJobRecord
+	mod := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).Master().
+		Fields("j.id").Where("j.tenant_id", tenantId).WhereIn("j.profile_id", ids).
 		WhereNot("j.operation_type", "unpublish").
-		Count()
-	if err != nil {
+		Where("EXISTS (SELECT 1 FROM " + publishTgMessageTable + " m WHERE m.job_id=j.id AND m.status='sent')")
+	if manualDown {
+		if len(cleanupScope) > 0 && len(cleanupScope[0]) > 0 {
+			mod = mod.WhereIn("j.id", cleanupScope[0])
+		}
+		if len(cleanupScope) > 1 && len(cleanupScope[1]) > 0 {
+			mod = mod.WhereNotIn("j.id", cleanupScope[1])
+		}
+		mod = mod.Where("NOT EXISTS (SELECT 1 FROM "+publishTgOutboxTable+" o WHERE o.job_id=j.id AND o.operation_no=? AND o.event_type IN (?,?,?) AND o.status=?)",
+			strings.TrimSpace(operationNo), telegramOutboxCleanupPrefix+"manual", telegramOutboxCleanupPrefix+"keyword", telegramOutboxCleanupPrefix+"cycle", telegramOutboxDelivered)
+	}
+	if err = mod.Scan(&jobs); err != nil {
 		return gerror.Wrap(err, "检查资料历史TG消息状态失败")
 	}
-	if sent > 0 {
+	remaining := make([]int64, 0, len(jobs))
+	for _, job := range jobs {
+		remaining = append(remaining, job.Id)
+	}
+	if manualDown {
+		remaining, err = s.telegramCleanupDeletableJobIds(ctx, tenantId, remaining)
+		if err != nil {
+			return err
+		}
+	}
+	if len(remaining) > 0 {
 		return nil
 	}
 	return s.clearProfilesUnpublishing(ctx, ids, tenantId, operationNo)

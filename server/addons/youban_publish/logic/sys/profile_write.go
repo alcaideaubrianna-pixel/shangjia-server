@@ -329,10 +329,12 @@ func (s *sSysPublish) deleteProfilesWithOperationNo(ctx context.Context, in *sys
 			releaseProfileOperationClaim(ctx, tenantId, profileID)
 		}
 	}()
-	cleanupQueued, snapshotsByID, err := s.enqueueProfilesTelegramCleanupBeforeDelete(ctx, ids, tenantId, operationNo)
-	if err != nil {
-		return err
+	operationNo = strings.TrimSpace(operationNo)
+	if operationNo == "" {
+		operationNo = fmt.Sprintf("delete:%d:%d", tenantId, time.Now().UnixNano())
 	}
+	var cleanupPersisted bool
+	var snapshotsByID map[int64]gdb.Record
 	if err = s.deactivateChannelProfiles(ctx, tenantId, ids); err != nil {
 		return err
 	}
@@ -345,6 +347,11 @@ func (s *sSysPublish) deleteProfilesWithOperationNo(ctx context.Context, in *sys
 		return gerror.Wrap(err, "读取待删除资料指纹失败")
 	}
 	if err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		var txErr error
+		cleanupPersisted, snapshotsByID, txErr = s.persistProfilesTelegramCleanupBeforeDeleteTx(ctx, tx, ids, tenantId, operationNo)
+		if txErr != nil {
+			return txErr
+		}
 		if _, txErr := detachProfileFingerprintsTx(ctx, tx, ids); txErr != nil {
 			return txErr
 		}
@@ -372,7 +379,7 @@ func (s *sSysPublish) deleteProfilesWithOperationNo(ctx context.Context, in *sys
 	if err = s.deleteProfileNoteIndex(ctx, ids); err != nil {
 		return err
 	}
-	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(operationNo)), botProfileDeleteOperationPrefix) && !cleanupQueued {
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(operationNo)), botProfileDeleteOperationPrefix) && !cleanupPersisted {
 		for _, profileID := range ids {
 			snapshot := snapshotsByID[profileID]
 			job := telegramJobRecord{
@@ -414,7 +421,10 @@ func (s *sSysPublish) supersedeProfilePendingTelegramJobs(ctx context.Context, p
 	return nil
 }
 
-func (s *sSysPublish) enqueueProfilesTelegramCleanupBeforeDelete(ctx context.Context, ids []int64, tenantId int64, operationNo string) (bool, map[int64]gdb.Record, error) {
+// Persist cleanup with the deletion; the existing cleanup intent recovery loop
+// dispatches committed rows without a post-commit enqueue dependency.
+func (s *sSysPublish) persistProfilesTelegramCleanupBeforeDeleteTx(ctx context.Context, tx gdb.TX, ids []int64, tenantId int64, operationNo string) (bool, map[int64]gdb.Record, error) {
+	ctx = gdb.WithTX(ctx, tx)
 	if len(ids) == 0 {
 		return false, map[int64]gdb.Record{}, nil
 	}
@@ -451,13 +461,14 @@ func (s *sSysPublish) enqueueProfilesTelegramCleanupBeforeDelete(ctx context.Con
 		if job.Id <= 0 {
 			continue
 		}
-		if err := s.enqueueTelegramCleanupJobWithContext(ctx, job.Id, 0, tgQueuePayload{
-			CleanupOperationNo: strings.TrimSpace(operationNo),
+		if _, _, err := ensureTelegramCleanupIntent(ctx, job.Id, telegramOutboxCleanupPrefix+"manual", operationNo, tgQueuePayload{
+			CleanupOperationNo: operationNo,
 			CleanupJobIds:      jobIds,
+			Trace:              capturePublishTrace(ctx),
 		}); err != nil {
-			return len(jobIds) > 0, snapshotByID, gerror.Wrap(err, "加入资料TG清理队列失败")
+			return len(jobIds) > 0, snapshotByID, gerror.Wrap(err, "保存资料TG清理意图失败")
 		}
-		s.appendTelegramJobLog(ctx, job.telegramJobRecord(), "delete", "queued", "资料已删除，TG历史消息已加入异步清理队列")
+		s.appendTelegramJobLog(ctx, job.telegramJobRecord(), "delete", "pending", "已保存资料TG历史消息清理意图，事务提交后由后台分发")
 	}
 	return len(jobIds) > 0, snapshotByID, nil
 }
@@ -577,9 +588,26 @@ func (s *sSysPublish) setProfilesOffline(ctx context.Context, ids []int64, tenan
 	if err != nil {
 		return err
 	}
+	manualDown := len(operationNos) > 0 && isManualTelegramCleanupUnpublish(tgQueuePayload{CleanupOperationNo: operationNos[0]})
+	var policies map[int64]bool
+	if manualDown {
+		channelIDs := make([]int64, 0, len(activeJobs))
+		for _, job := range activeJobs {
+			channelIDs = append(channelIDs, job.ChannelId)
+		}
+		policies, err = s.channelHistoryMessagePolicies(ctx, tenantId, channelIDs)
+		if err != nil {
+			return err
+		}
+	}
 	for _, job := range activeJobs {
 		if job.Id <= 0 {
 			continue
+		}
+		if manualDown {
+			if preserve, configured := policies[job.ChannelId]; !configured || preserve {
+				continue
+			}
 		}
 		cleanupPayload := tgQueuePayload{}
 		if len(operationNos) > 0 {

@@ -45,7 +45,21 @@ func (s *sSysPublish) cleanupTelegramJobMessages(ctx context.Context, jobId int6
 				return err
 			}
 			stageStarted := time.Now()
-			err := s.deleteTelegramMessageSetLockedByChannel(ctx, job, "资料清理")
+			manualDown := isManualTelegramCleanupUnpublish(payload)
+			preserve := false
+			if manualDown {
+				var policyErr error
+				preserve, policyErr = s.channelPreservesHistoryMessages(ctx, job.TenantId, job.ChannelId)
+				if policyErr != nil {
+					return policyErr
+				}
+			}
+			var err error
+			if preserve {
+				s.appendTelegramJobLog(ctx, job, "down", "skipped", "资料下架，执行时频道配置缺失或保留旧消息，跳过TG删除")
+			} else {
+				err = s.deleteTelegramMessageSetLockedByChannel(ctx, job, "资料清理")
+			}
 			logStage("delete_messages", stageStarted, err)
 			if err != nil {
 				return err
@@ -58,7 +72,24 @@ func (s *sSysPublish) cleanupTelegramJobMessages(ctx context.Context, jobId int6
 			}
 			stageStarted = time.Now()
 			if !strings.HasPrefix(payload.CleanupOperationNo, "cancel:") && payload.ProgressOperationNo == "" {
-				err = s.notifyBotProfileUnpublishCompleted(ctx, job, payload)
+				noticePayload := payload
+				if manualDown && len(payload.CleanupJobIds) > 0 {
+					// The current intent is still processing. Preserve the decision
+					// already executed even if channel policy changes before notification.
+					noticeIds := make([]int64, 0, len(payload.CleanupJobIds))
+					for _, id := range payload.CleanupJobIds {
+						if preserve && id == job.Id {
+							continue
+						}
+						noticeIds = append(noticeIds, id)
+					}
+					noticePayload.CleanupJobIds, err = s.telegramCleanupDeletableJobIds(ctx, job.TenantId, noticeIds, payload.CleanupOperationNo)
+					if err != nil {
+						return err
+					}
+					noticePayload.ForceCompletion = len(noticePayload.CleanupJobIds) == 0
+				}
+				err = s.notifyBotProfileUnpublishCompleted(ctx, job, noticePayload)
 				logStage("notify_unpublish_completed", stageStarted, err)
 			} else {
 				observation.recordStage("notify_unpublish_completed", "skipped", stageStarted, nil)
@@ -68,7 +99,11 @@ func (s *sSysPublish) cleanupTelegramJobMessages(ctx context.Context, jobId int6
 				return gerror.Wrap(err, "发送Bot资料下架完成通知失败")
 			}
 			stageStarted = time.Now()
-			err = s.finishTelegramCleanupProfile(ctx, job, payload)
+			var skippedJobIds []int64
+			if manualDown && preserve {
+				skippedJobIds = []int64{job.Id}
+			}
+			err = s.finishTelegramCleanupProfile(ctx, job, payload, skippedJobIds...)
 			logStage("finish_profile_state", stageStarted, err)
 			if err != nil {
 				return err
@@ -153,7 +188,7 @@ func (s *sSysPublish) withTelegramCleanupJobLease(ctx context.Context, jobId int
 	return fn(bounded)
 }
 
-func (s *sSysPublish) finishTelegramCleanupProfile(ctx context.Context, job telegramJobRecord, payload tgQueuePayload) error {
+func (s *sSysPublish) finishTelegramCleanupProfile(ctx context.Context, job telegramJobRecord, payload tgQueuePayload, skippedJobIds ...int64) error {
 	operationNo := strings.TrimSpace(payload.CleanupOperationNo)
 	if strings.HasPrefix(operationNo, "cancel:") || payload.ProgressOperationNo != "" {
 		return nil
@@ -163,7 +198,51 @@ func (s *sSysPublish) finishTelegramCleanupProfile(ctx context.Context, job tele
 		// 不使用历史 job.OperationNo，也不让遗留任务无限重试。
 		return nil
 	}
-	return s.finishProfilesUnpublishing(ctx, []int64{job.ProfileId}, job.TenantId, operationNo)
+	return s.finishProfilesUnpublishing(ctx, []int64{job.ProfileId}, job.TenantId, operationNo, payload.CleanupJobIds, skippedJobIds)
+}
+
+// Only the current cleanup request identifies a manual unpublish. Historical
+// job operations must not make delete, cancellation or progress cleanup skip TG.
+func isManualTelegramCleanupUnpublish(payload tgQueuePayload) bool {
+	if strings.TrimSpace(payload.ProgressOperationNo) != "" {
+		return false
+	}
+	operationNo := strings.ToLower(strings.TrimSpace(payload.CleanupOperationNo))
+	return strings.HasPrefix(operationNo, "unpublish:") || isDownTelegramOperationNo(operationNo)
+}
+
+// Keep preserved messages sent so a later explicit delete can still find them.
+// Only unpublish completion and its notice exclude these jobs.
+func (s *sSysPublish) telegramCleanupDeletableJobIds(ctx context.Context, tenantId int64, ids []int64, operationNo ...string) ([]int64, error) {
+	ids = uniqueIds(ids)
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var jobs []telegramJobRecord
+	mod := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).Master().
+		Fields("j.id,j.channel_id").Where("j.tenant_id", tenantId).WhereIn("j.id", ids)
+	if len(operationNo) > 0 && strings.TrimSpace(operationNo[0]) != "" {
+		mod = mod.Where("NOT EXISTS (SELECT 1 FROM "+publishTgOutboxTable+" o WHERE o.job_id=j.id AND o.operation_no=? AND o.event_type IN (?,?,?) AND o.status=?)",
+			strings.TrimSpace(operationNo[0]), telegramOutboxCleanupPrefix+"manual", telegramOutboxCleanupPrefix+"keyword", telegramOutboxCleanupPrefix+"cycle", telegramOutboxDelivered)
+	}
+	if err := mod.Scan(&jobs); err != nil {
+		return nil, gerror.Wrap(err, "读取下架清理频道失败")
+	}
+	channelIds := make([]int64, 0, len(jobs))
+	for _, job := range jobs {
+		channelIds = append(channelIds, job.ChannelId)
+	}
+	policies, err := s.channelHistoryMessagePolicies(ctx, tenantId, channelIds)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]int64, 0, len(jobs))
+	for _, job := range jobs {
+		if preserve, configured := policies[job.ChannelId]; configured && !preserve {
+			result = append(result, job.Id)
+		}
+	}
+	return result, nil
 }
 
 // Cleanup keeps the existing four Redis keys; automatic jobs leave the highest
