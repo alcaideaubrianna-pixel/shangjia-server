@@ -174,7 +174,7 @@ func (s *sSysPublish) writeProfilePublishOperationState(ctx context.Context, ten
 	})
 }
 
-func (s *sSysPublish) writeProfilePublishOperationStateTx(ctx context.Context, tx gdb.TX, tenantId, accountId, profileId int64, operationNo string, status sysin.PublishTaskStatus, requireCurrentOperation bool) error {
+func (s *sSysPublish) writeProfilePublishOperationStateTx(ctx context.Context, tx gdb.TX, tenantId, accountId, profileId int64, operationNo string, status sysin.PublishTaskStatus, requireCurrentOperation bool, expected ...profilePublishOperationState) error {
 	if err := s.fenceProfileStateWriteTx(ctx, tx, tenantId, accountId, profileId, operationNo, status, requireCurrentOperation); err != nil {
 		return err
 	}
@@ -188,27 +188,6 @@ func (s *sSysPublish) writeProfilePublishOperationStateTx(ctx context.Context, t
 		}
 	}
 	now := gtime.Now()
-	// A late failure callback must never overwrite a successful delivery.
-	// Cycle/recovery callbacks can carry an older operation number while the
-	// same profile already has successful jobs from another operation.
-	if status == sysin.PublishTaskStatusFailed {
-		var summary struct {
-			Sent   int `orm:"sent"`
-			Active int `orm:"active"`
-		}
-		err := tx.Model(publishTgJobTable).Safe().Ctx(ctx).
-			Where("tenant_id", tenantId).
-			Where("account_id", accountId).
-			Where("profile_id", profileId).
-			Fields("SUM(CASE WHEN status='sent' THEN 1 ELSE 0 END) AS sent, SUM(CASE WHEN status IN ('pending','sending','confirming','failed_retry','unknown') OR (status='failed' AND send_phase='timeout_wait_cleanup') THEN 1 ELSE 0 END) AS active").
-			Scan(&summary)
-		if err != nil {
-			return gerror.Wrap(err, "检查资料已成功发送任务失败")
-		}
-		if summary.Sent > 0 && summary.Active == 0 {
-			status = sysin.PublishTaskStatusPublished
-		}
-	}
 	stateMod := tx.Model(publishProfileStateTable).Safe().Ctx(ctx).
 		Where("tenant_id", tenantId).
 		Where("account_id", accountId).
@@ -216,6 +195,11 @@ func (s *sSysPublish) writeProfilePublishOperationStateTx(ctx context.Context, t
 		WhereNull("deleted_at")
 	if requireCurrentOperation {
 		stateMod = stateMod.Where("publish_operation_no", strings.TrimSpace(operationNo))
+	}
+	if len(expected) > 0 {
+		stateMod = stateMod.Where("publish_operation_no", expected[0].PublishOperationNo).
+			Where("publish_task_status", expected[0].PublishTaskStatus).
+			Where("publish_task_updated_at", expected[0].PublishTaskUpdatedAt)
 	}
 	if requireCurrentOperation && (status == sysin.PublishTaskStatusPending || status == sysin.PublishTaskStatusPublishing) {
 		stateMod = stateMod.Where("publish_task_status <> ?", sysin.PublishTaskStatusFailed)
@@ -252,6 +236,15 @@ func (s *sSysPublish) writeProfilePublishOperationStateTx(ctx context.Context, t
 }
 
 func (s *sSysPublish) recoverProfilePublishOperationStates(ctx context.Context, limit int) error {
+	defer func() {
+		// Failed reconciliation is independent best-effort work. It must never
+		// consume the active scanner's budget or prevent its cursor advancing.
+		failedCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+		if err := s.recoverFailedCyclePublishStates(failedCtx); err != nil {
+			g.Log().Warning(ctx, "旧循环失败扫描未完成", g.Map{"event": "failed_cycle_scan_error", "error": err.Error()})
+		}
+	}()
 	if limit <= 0 || limit > 100 {
 		limit = 100
 	}
@@ -391,6 +384,10 @@ func (s *sSysPublish) recoverMissingProfilePublishOperationStates(ctx context.Co
 }
 
 func (s *sSysPublish) recoverProfilePublishOperationState(ctx context.Context, state profilePublishOperationState) error {
+	if state.PublishTaskStatus == sysin.PublishTaskStatusFailed {
+		_, err := s.recoverFailedCyclePublishState(ctx, g.DB(), state)
+		return err
+	}
 	job := telegramJobRecord{
 		TenantId: state.TenantId, AccountId: state.AccountId, ProfileId: state.ProfileId,
 		OperationNo: strings.TrimSpace(state.PublishOperationNo),
@@ -417,29 +414,6 @@ func (s *sSysPublish) recoverProfilePublishOperationState(ctx context.Context, s
 		return gerror.Wrap(err, "统计资料上架任务状态失败")
 	}
 	total := row["total"].Int()
-	// A terminal failed projection can be stale when the final job callback
-	// succeeded but the state/index projection failed afterwards. Repair only
-	// when the current operation is fully terminal and contains at least one
-	// successful Telegram job; real failed operations remain failed below.
-	if state.PublishTaskStatus == sysin.PublishTaskStatusFailed &&
-		row["failed"].Int() == 0 && row["failed_retry"].Int() == 0 &&
-		row["sending"].Int() == 0 && row["pending"].Int() == 0 &&
-		row["sent"].Int() > 0 && row["completed"].Int() == total {
-		if !isCycleBatchOperation(job.OperationNo) {
-			if _, err = s.syncProfilePublishState(ctx, job.ProfileId, 1, consts.ContentVisibilityPublic, gtime.Now()); err != nil {
-				return gerror.Wrap(err, "修复资料上架状态失败")
-			}
-		}
-		if err = s.clearProfilePublishOperationState(ctx, job); err != nil {
-			return err
-		}
-		if err = s.syncProfileNoteIndex(ctx, job.ProfileId); err != nil {
-			return err
-		}
-		service.SysContent().ClearHomeProfileCardsCache(ctx)
-		g.Log().Infof(ctx, "修复资料上架失败状态 profileId:%d operationNo:%s", job.ProfileId, job.OperationNo)
-		return nil
-	}
 	firstRecoveryAt := (*gtime.Time)(nil)
 	var recoveryRow gdb.Record
 	recoveryRow, err = g.DB().Model(publishTgJobLogTable+" l").Safe().Ctx(ctx).

@@ -909,6 +909,19 @@ func (s *sSysPublish) dispatchDueProfileCycle(ctx context.Context, row profileCy
 	removeProfileCycleDue(ctx, row.JobId)
 	operationNo := dueProfileCycleOperationNo(row.JobId, row.DispatchCount+1, row.ProfileId, row.ChannelId)
 	err = s.submitProfilePublish(ctx, row.ProfileId, row.TenantId, row.AccountId, 0, operationNo, []int64{row.ChannelId}, true)
+	if errors.Is(err, errProfileCycleMediaPending) {
+		// No send job was created. Media waiting is not a Telegram failure and
+		// must not exhaust the source plan's consecutive send failure budget.
+		nextAt := gtime.Now().Add(5 * time.Minute)
+		_, updateErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", row.JobId).
+			Data(g.Map{"next_cycle_at": nextAt, "last_dispatch_error": err.Error()}).Update()
+		if updateErr != nil {
+			return false, gerror.Wrap(updateErr, "延后资料循环媒体等待失败")
+		}
+		indexProfileCycleDue(ctx, row.JobId, nextAt)
+		indexAccountProfileCycleDue(ctx, publishAccountScope{TenantID: row.TenantId, AccountID: row.AccountId}, row.JobId, nextAt)
+		return false, nil
+	}
 	if errors.Is(err, errTelegramPublishPermissionPaused) {
 		nextAt := gtime.Now().Add(time.Hour)
 		_, updateErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", row.JobId).

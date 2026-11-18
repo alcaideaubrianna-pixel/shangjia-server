@@ -70,6 +70,7 @@ type telegramProfilePublishMeta struct {
 }
 
 var errTelegramPublishPermissionPaused = gerror.New("目标频道推送已因权限错误暂停，资料已保留，请恢复频道权限后主动重新上架")
+var errProfileCycleMediaPending = errors.New("循环发布媒体尚不可用，未创建任务，请稍后重试")
 
 func profilePublishPreparationError(channelCount int, jobIds []int64) error {
 	if channelCount > 0 && len(jobIds) == 0 {
@@ -95,6 +96,9 @@ func (s *sSysPublish) submitProfilePublishWithMeta(ctx context.Context, profileI
 		ready, checkErr := s.profilePublishMediaReady(ctx, profileId)
 		if checkErr != nil {
 			if isProfileMediaValidationError(checkErr) {
+				if isCycleBatchOperation(operationNo) {
+					return deferCycleMediaPreflight(ctx, tenantId, accountId, profileId, operationNo, "media_validation_failed")
+				}
 				if settleErr := s.settleWaitingProfileMediaFailure(ctx, profileId, checkErr); settleErr != nil {
 					return settleErr
 				}
@@ -141,20 +145,23 @@ func (s *sSysPublish) submitProfilePublishWithMeta(ctx context.Context, profileI
 					// 预处理失败但仍有原始文件或 Telegram 缓存时，交给发送阶段降级处理。
 					g.Log().Warningf(ctx, "资料媒体预处理失败，已允许发送阶段降级 profileId:%d operationNo:%s failed_media:%d", profileId, operationNo, failedMediaCount)
 				} else {
-					publishStatus := sysin.PublishTaskStatusFailed
-					if _, updateErr := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
-						Where("tenant_id", tenantId).Where("account_id", accountId).Where("profile_id", profileId).WhereNull("deleted_at").
-						Data(g.Map{"publish_task_status": publishStatus, "publish_operation_no": strings.TrimSpace(operationNo), "publish_task_updated_at": gtime.Now()}).Update(); updateErr != nil {
+					if isCycleBatchOperation(operationNo) {
+						return deferCycleMediaPreflight(ctx, tenantId, accountId, profileId, operationNo, "failed_without_source")
+					}
+					if updateErr := s.writeProfilePublishOperationState(ctx, tenantId, accountId, profileId,
+						operationNo, sysin.PublishTaskStatusFailed, false); updateErr != nil {
 						return gerror.Wrap(updateErr, "记录资料媒体失败状态失败")
 					}
 					g.Log().Warningf(ctx, "资料上架因媒体无可用来源停止 profileId:%d operationNo:%s failed_media:%d unavailable:%d", profileId, operationNo, failedMediaCount, unavailableFailedMediaCount)
 					return nil
 				}
 			} else {
+				if isCycleBatchOperation(operationNo) {
+					return deferCycleMediaPreflight(ctx, tenantId, accountId, profileId, operationNo, "media_processing")
+				}
 				g.Log().Infof(ctx, "资料上架等待媒体完成 profileId:%d operationNo:%s", profileId, operationNo)
-				if _, updateErr := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
-					Where("tenant_id", tenantId).Where("account_id", accountId).Where("profile_id", profileId).WhereNull("deleted_at").
-					Data(g.Map{"publish_task_status": sysin.PublishTaskStatusWaitingMedia.String(), "publish_operation_no": strings.TrimSpace(operationNo), "publish_task_updated_at": gtime.Now()}).Update(); updateErr != nil {
+				if updateErr := s.writeProfilePublishOperationState(ctx, tenantId, accountId, profileId,
+					operationNo, sysin.PublishTaskStatusWaitingMedia, false); updateErr != nil {
 					return gerror.Wrap(updateErr, "记录资料媒体等待状态失败")
 				}
 				if enqueueErr := s.enqueueWaitingMediaWake(ctx, profileId, tenantId, accountId); enqueueErr != nil {
@@ -221,6 +228,17 @@ func (s *sSysPublish) submitProfilePublishWithMeta(ctx context.Context, profileI
 	})
 	s.enqueuePreparedProfileJobs(ctx, jobIds, operatorId)
 	return nil
+}
+
+func deferCycleMediaPreflight(ctx context.Context, tenantID, accountID, profileID int64, operationNo, reason string) error {
+	// No job exists yet. Never claim the projection from a manual edit,
+	// unpublish or cancellation merely because a scheduler checked media.
+	g.Log().Info(ctx, "循环发布媒体未就绪，未创建任务，等待重试", g.Map{
+		"event": "cycle_media_preflight_deferred", "profileId": profileID,
+		"tenantId": tenantID, "accountId": accountID, "operationNo": operationNo,
+		"stage": "media_preflight", "jobsCreated": false, "reason": reason,
+	})
+	return errProfileCycleMediaPending
 }
 
 func (s *sSysPublish) profileMediaOperationPending(ctx context.Context, tenantId, accountId, profileId int64) (bool, error) {
@@ -632,6 +650,25 @@ func (s *sSysPublish) ensureTelegramProfileJobWithMetaTx(ctx context.Context, tx
 
 // completeProfileTelegramOperation 汇总当前操作的频道结果，部分失败保持失败提示，不误报全部完成。
 func (s *sSysPublish) completeProfileTelegramOperation(ctx context.Context, job telegramJobRecord, isCycle bool) (bool, error) {
+	// A recovery operation may differ from the stale due projection. Use the
+	// same source/target proof as the bounded failed scanner before its fence.
+	if job.Id > 0 {
+		var state profilePublishOperationState
+		if err := g.DB().Model(publishProfileStateTable).Ctx(ctx).
+			Where("tenant_id", job.TenantId).Where("account_id", job.AccountId).
+			Where("profile_id", job.ProfileId).Where("publish_task_status", sysin.PublishTaskStatusFailed).
+			WhereNull("deleted_at").Scan(&state); err != nil {
+			return false, err
+		}
+		if state.ProfileId > 0 {
+			repaired, err := s.recoverFailedCyclePublishState(ctx, g.DB(), state)
+			if err != nil || repaired {
+				return repaired, err
+			}
+			// Do not let the normal completion path clear an unproven failure.
+			return false, nil
+		}
+	}
 	var completed bool
 	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		if err := lockProfilePublishFenceTx(ctx, tx, job); err != nil {
