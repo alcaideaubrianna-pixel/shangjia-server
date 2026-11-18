@@ -15,7 +15,7 @@ func batchRotationCandidatePageSQL() string {
 	return `WITH page AS MATERIALIZED (
 		SELECT profile_id,account_id,batch_order,tenant_id,channel_id
 		FROM ` + publishChannelProfileTable + `
-		WHERE tenant_id=? AND channel_id=? AND status='active' AND batch_order>0
+		WHERE tenant_id=? AND channel_id=? AND status='active' AND batch_order>0 AND cycle_override_enabled=false
 		  AND (batch_order,profile_id)>(?,?)
 		  AND (batch_order,profile_id)<=(?,?)
 		ORDER BY batch_order,profile_id LIMIT ?
@@ -29,10 +29,10 @@ func batchRotationCandidatePageSQL() string {
 func batchRotationIndexReadyTx(ctx context.Context, tx gdb.TX) error {
 	row, err := tx.Ctx(ctx).GetOne(`SELECT EXISTS (
 		SELECT 1 FROM pg_index i
-		WHERE i.indrelid=to_regclass(?) AND i.indexrelid=to_regclass('idx_ybp_batch_rotation')
+		WHERE i.indrelid=to_regclass(?) AND i.indexrelid=to_regclass('idx_ybp_batch_inherited_rotation')
 		  AND i.indisvalid AND i.indisready AND i.indnkeyatts=5
 		  AND lower(regexp_replace(pg_get_expr(i.indpred,i.indrelid),
-		    '::(text|character varying)|[()[:space:]]', '', 'g'))='status=''active''andbatch_order>0'
+		    '::(text|character varying)|[()[:space:]]', '', 'g'))='status=''active''andbatch_order>0andcycle_override_enabled=false'
 		  AND ARRAY(SELECT a.attname::text
 		    FROM unnest(i.indkey::smallint[]) WITH ORDINALITY k(attnum,n)
 		    JOIN pg_attribute a ON a.attrelid=i.indrelid AND a.attnum=k.attnum
@@ -43,7 +43,7 @@ func batchRotationIndexReadyTx(ctx context.Context, tx gdb.TX) error {
 		return gerror.Wrap(err, "检查频道轮播读取索引失败")
 	}
 	if !row["ready"].Bool() {
-		return gerror.New("频道轮播迁移未就绪：缺少有效的 idx_ybp_batch_rotation 索引")
+		return gerror.New("频道轮播迁移未就绪：缺少有效的 idx_ybp_batch_inherited_rotation 索引")
 	}
 	return nil
 }

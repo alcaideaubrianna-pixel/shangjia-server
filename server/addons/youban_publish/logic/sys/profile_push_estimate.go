@@ -41,7 +41,7 @@ func profilePushQueueSnapshotSQL() string {
 	return `WITH page AS MATERIALIZED (
 		SELECT cp.profile_id,cp.account_id,cp.batch_order,cp.tenant_id,cp.channel_id
 		FROM ` + publishChannelProfileTable + ` cp
-		WHERE cp.tenant_id=? AND cp.channel_id=? AND cp.status='active' AND cp.batch_order>0
+		WHERE cp.tenant_id=? AND cp.channel_id=? AND cp.status='active' AND cp.batch_order>0 AND cp.cycle_override_enabled=false
 		ORDER BY cp.batch_order,cp.profile_id LIMIT ?
 	), selected AS MATERIALIZED (
 		SELECT profile_id,account_id,batch_order,ordinal,job_id,item_state,tenant_id,channel_id
@@ -66,8 +66,8 @@ func profilePushQueueSnapshotSQL() string {
 func profilePushBatchSchemaSQL() string {
 	return `SELECT
 		EXISTS (SELECT 1 FROM pg_index i WHERE i.indrelid=to_regclass(?)
-		 AND i.indexrelid=to_regclass('idx_ybp_batch_rotation')
-		 AND lower(regexp_replace(pg_get_expr(i.indpred,i.indrelid), '::(text|character varying)|[()[:space:]]', '', 'g'))='status=''active''andbatch_order>0'
+		 AND i.indexrelid=to_regclass('idx_ybp_batch_inherited_rotation')
+		 AND lower(regexp_replace(pg_get_expr(i.indpred,i.indrelid), '::(text|character varying)|[()[:space:]]', '', 'g'))='status=''active''andbatch_order>0andcycle_override_enabled=false'
 		 AND i.indisvalid AND i.indisready AND i.indnkeyatts=5
 		 AND ARRAY(SELECT a.attname::text FROM unnest(i.indkey::smallint[]) WITH ORDINALITY k(attnum,n)
 		 JOIN pg_attribute a ON a.attrelid=i.indrelid AND a.attnum=k.attnum
@@ -163,7 +163,7 @@ func (s *sSysPublish) estimateProfileBatchPushAt(ctx context.Context, profile *s
 		}
 		unmigrated, err := g.DB().GetValue(ctx, `SELECT EXISTS (
 			SELECT 1 FROM `+publishChannelProfileTable+`
-			WHERE tenant_id=? AND channel_id=? AND status='active' AND batch_order<=0 LIMIT 1)`,
+			WHERE tenant_id=? AND channel_id=? AND status='active' AND batch_order<=0 AND cycle_override_enabled=false LIMIT 1)`,
 			profile.TenantId, channel.ChannelId)
 		if err != nil {
 			return nil, err

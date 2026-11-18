@@ -74,6 +74,9 @@ CREATE INDEX IF NOT EXISTS "idx_content_profile_weight_active" ON "hg_content_pr
 CREATE INDEX IF NOT EXISTS "idx_content_profile_cup_active" ON "hg_content_profile" ("cup_size") WHERE "deleted_at" IS NULL AND "cup_size" <> '';
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_profile_state" (
+  "cycle_override_enabled" boolean NOT NULL DEFAULT false,
+  "cycle_override_days" integer NOT NULL DEFAULT 0,
+  "cycle_override_version" bigint NOT NULL DEFAULT 0,
 	"random_media_config" text NOT NULL DEFAULT '',
   "id" BIGSERIAL PRIMARY KEY,
   "tenant_id" bigint NOT NULL DEFAULT 0,
@@ -715,6 +718,7 @@ FROM (
 WHERE NOT EXISTS (SELECT 1 FROM "hg_youban_publish_tag");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_job" (
+  "profile_cycle_version" bigint NOT NULL DEFAULT 0,
 	"display_media_selection" text NOT NULL DEFAULT '',
   "id" BIGSERIAL PRIMARY KEY, "task_id" bigint DEFAULT NULL, "operation_no" varchar(128) NOT NULL DEFAULT '', "operation_type" varchar(32) NOT NULL DEFAULT '', "profile_no_snapshot" varchar(32) NOT NULL DEFAULT '', "title_snapshot" text NOT NULL DEFAULT '', "notify_account_id" bigint NOT NULL DEFAULT 0, "tenant_id" bigint NOT NULL DEFAULT 0,
   "merchant_id" bigint NOT NULL DEFAULT 0, "account_id" bigint NOT NULL DEFAULT 0, "profile_id" bigint NOT NULL DEFAULT 0,
@@ -808,6 +812,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_outbox" (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_outbox_dedupe" ON "hg_youban_publish_tg_outbox" ("dedupe_key");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_outbox_due" ON "hg_youban_publish_tg_outbox" ("available_at", "id") WHERE "status" = 'pending';
+CREATE INDEX IF NOT EXISTS "idx_ybp_profile_cycle_override_due" ON "hg_youban_publish_tg_outbox" ("available_at", "id") WHERE "event_type" = 'profile.cycle_override.rebuild' AND "status" = 'pending';
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_outbox_lease" ON "hg_youban_publish_tg_outbox" ("lease_expires_at", "id") WHERE "status" = 'processing';
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_outbox_job" ON "hg_youban_publish_tg_outbox" ("job_id", "event_type", "id");
 
@@ -1755,6 +1760,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS "uq_ybp_cycle_snapshot_day"
   WHERE "upper_profile_id"=-1 AND "scheduled_at" IS NOT NULL;
 CREATE SEQUENCE IF NOT EXISTS "hg_ybp_batch_order_seq" AS bigint START WITH 1 CACHE 1;
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_channel_profile" (
+  "cycle_override_enabled" boolean NOT NULL DEFAULT false,
+  "applied_profile_cycle_version" bigint NOT NULL DEFAULT 0,
   "id" bigserial PRIMARY KEY,
   "tenant_id" bigint NOT NULL DEFAULT 0,
   "account_id" bigint NOT NULL DEFAULT 0,
@@ -1770,6 +1777,9 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_channel_profile" (
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_channel_profile" ON "hg_youban_publish_channel_profile" ("channel_id", "profile_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_channel_profile_scan" ON "hg_youban_publish_channel_profile" ("channel_id", "status", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_channel_profile_profile" ON "hg_youban_publish_channel_profile" ("profile_id", "channel_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_batch_inherited_rotation"
+  ON "hg_youban_publish_channel_profile" ("tenant_id", "channel_id", "status", "batch_order", "profile_id")
+  WHERE "status" = 'active' AND "batch_order" > 0 AND "cycle_override_enabled" = false;
 CREATE INDEX IF NOT EXISTS "idx_ybp_batch_rotation" ON "hg_youban_publish_channel_profile"
   ("tenant_id", "channel_id", "status", "batch_order", "profile_id")
   WHERE "status"='active' AND "batch_order">0;

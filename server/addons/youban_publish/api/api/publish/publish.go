@@ -709,6 +709,13 @@ type AdminProfileTaskStatusRes struct {
 	*sysin.ProfileTaskStatusModel
 }
 
+type AdminProfileCycleOverrideReq struct {
+	g.Meta `path:"/publish/admin/profile/cycleOverride" method:"post" tags:"上架插件管理端" summary:"保存资料独立循环配置"`
+	sysin.ProfileCycleOverrideInp
+}
+
+type AdminProfileCycleOverrideRes struct{}
+
 type AdminProfileBaseReq struct {
 	g.Meta `path:"/publish/admin/profile/base" method:"get" tags:"上架插件管理端" summary:"资料基础详情"`
 	sysin.ProfileViewInp

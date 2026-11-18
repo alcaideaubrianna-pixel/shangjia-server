@@ -7,12 +7,20 @@ import (
 	"fmt"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/utility/dbtime"
 	"strings"
 )
 
 // cycleChannelAllowed 任务准备和发送前复用同一频道配置拦截；手工上架与删除不受循环开关影响。
-func cycleChannelAllowed(ctx context.Context, tenantID, channelID int64, operation string) (bool, error) {
+// cycleProfileScope identifies the tenant-owned profile policy at a cycle boundary.
+type cycleProfileScope struct {
+	ProfileID int64
+	AccountID int64
+}
+
+func cycleChannelAllowed(ctx context.Context, tenantID, channelID int64, operation string, profiles ...cycleProfileScope) (bool, error) {
 	if !isCycleBatchOperation(operation) {
 		return true, nil
 	}
@@ -28,7 +36,52 @@ func cycleChannelAllowed(ctx context.Context, tenantID, channelID int64, operati
 		return false, nil
 	}
 	mode := strings.ToLower(strings.TrimSpace(channel.Mode))
+	independent := false
+	independentDays := 0
+	if len(profiles) > 0 && profiles[0].ProfileID > 0 {
+		scope := profiles[0]
+		value, lookupErr := g.DB().Model(publishProfileStateTable).Ctx(ctx).
+			Where("tenant_id", tenantID).Where("account_id", scope.AccountID).
+			Where("profile_id", scope.ProfileID).WhereNull("deleted_at").
+			Fields("cycle_override_enabled,cycle_override_days").One()
+		if lookupErr != nil {
+			return false, lookupErr
+		}
+		independent = value["cycle_override_enabled"].Bool()
+		independentDays = value["cycle_override_days"].Int()
+	}
 	if strings.HasPrefix(operation, "profile_cycle:") {
+		if independent {
+			if independentDays <= 0 {
+				return false, nil
+			}
+			independentDays = new(sSysPublish).effectiveProfileCycleOverrideDays(ctx, tenantID, independentDays)
+			scope := profiles[0]
+			var last struct {
+				SentAt *gtime.Time `orm:"sent_at"`
+			}
+			lookupErr := g.DB().Model(publishChannelProfileTable+" cp").Ctx(ctx).
+				InnerJoin(publishTgJobTable+" j", "j.id=cp.last_job_id").
+				Fields("j.sent_at").Where("cp.tenant_id", tenantID).
+				Where("cp.account_id", scope.AccountID).Where("cp.profile_id", scope.ProfileID).
+				Where("cp.channel_id", channelID).Where("cp.status", "active").
+				Where("j.tenant_id", tenantID).Where("j.account_id", scope.AccountID).
+				Where("j.profile_id", scope.ProfileID).Where("j.channel_id", channelID).
+				WhereNotNull("j.sent_at").Scan(&last)
+			if lookupErr != nil {
+				if errors.Is(lookupErr, sql.ErrNoRows) {
+					return false, nil
+				}
+				return false, lookupErr
+			}
+			// A queued child created under the old interval must not send before
+			// the freshly saved independent interval, even before projection catches up.
+			if last.SentAt == nil {
+				return false, nil
+			}
+			nextAt := nextProfileCycleAt(ctx, independentDays, "", dbtime.FromTimestamp(last.SentAt), scope.ProfileID, channelID)
+			return nextAt != nil && !nextAt.After(gtime.Now()), nil
+		}
 		return mode == "" || mode == "time", nil
 	}
 	// 手工触发的整频道循环沿用原语义；只有定时批次要求当前仍为batch。
@@ -49,7 +102,7 @@ func cycleChannelAllowed(ctx context.Context, tenantID, channelID int64, operati
 		}
 		return false, err
 	}
-	return run.Id > 0 && (!scheduledBatchCycleRun(run) || mode == "batch"), nil
+	return run.Id > 0 && !independent && (!scheduledBatchCycleRun(run) || mode == "batch"), nil
 }
 
 // isDefinitiveTelegramPermissionError 只把明确的发送权限丢失立即熔断，不把限流、超时或媒体错误当成失权。

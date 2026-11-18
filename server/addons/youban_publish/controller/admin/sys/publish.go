@@ -357,6 +357,14 @@ func (c *cPublishServer) GlobalProfileStatus(ctx context.Context, req *publish.G
 	return &publish.GlobalProfileStatusRes{ProfileStatusModel: data}, nil
 }
 
+func (c *cPublishServer) ProfileCycleOverride(ctx context.Context, req *publish.ProfileCycleOverrideReq) (res *publish.ProfileCycleOverrideRes, err error) {
+	err = service.SysPublish().AdminProfileCycleOverride(ctx, &req.ProfileCycleOverrideInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.ProfileCycleOverrideRes{}, nil
+}
+
 func (c *cPublishServer) ProfileView(ctx context.Context, req *publish.ProfileViewReq) (res *publish.ProfileViewRes, err error) {
 	data, err := service.SysPublish().ServerProfileView(ctx, &req.ProfileViewInp)
 	if err != nil {

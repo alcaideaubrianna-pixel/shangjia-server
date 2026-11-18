@@ -669,10 +669,10 @@
     "file": "addons/youban_publish/logic/sys/cycle_plan.go",
     "function": "*sSysPublish.repairAccountCyclePlans",
     "rule": "redis-primitive",
-    "expression": "client.GroupScript().Eval(ctx, `if tonumber(redis.call(\"HGET\",KEYS[2],ARGV[1]) or \"0\")==tonumber(ARGV[2]) then redis.call(\"ZREM\",KEYS[1],ARGV[1]); redis.call(\"HDEL\",KEYS[2],ARGV[1]); return 1 end return 0`, 2, []string{dirtyKey, dirtyKey + \":versions\"}, []interface{}{strconv.FormatInt(checkpoint.Channel, 10), checkpoint.Version})",
-    "digest": "ce6f4c9b94736b9f33361e37d7054cd3cefe8b06f81674cc6969a44bce3146b7",
+    "expression": "client.GroupScript().Eval(ctx, `if (redis.call(\"HGET\",KEYS[2],ARGV[1]) or \"0\")==ARGV[2] then redis.call(\"ZREM\",KEYS[1],ARGV[1]); redis.call(\"HDEL\",KEYS[2],ARGV[1]); return 1 end return 0`, 2, []string{dirtyKey, dirtyKey + \":versions\"}, []interface{}{strconv.FormatInt(checkpoint.Channel, 10), checkpoint.Version})",
+    "digest": "dbddce5913a24115d738439fd7d2c821e30f11147c8d9feb61408cbd91115c52",
     "count": 1,
-    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+    "reason": "Reviewed exact completion CAS for the existing bounded account repair consumer. Compare decimal version tokens as strings to avoid bigint precision loss; remove only the matching dirty member/version, preserving newer profile rebuild callbacks. No Job lifecycle changes or new consumer."
   },
   {
     "file": "addons/youban_publish/logic/sys/cycle_plan.go",
@@ -768,10 +768,10 @@
     "file": "addons/youban_publish/logic/sys/cycle_profile_schedule.go",
     "function": "markAccountCycleRepairChannel",
     "rule": "redis-primitive",
-    "expression": "client.GroupScript().Eval(ctx, `redis.call(\"HINCRBY\",KEYS[2],ARGV[1],1); redis.call(\"ZADD\",KEYS[1],\"NX\",ARGV[2],ARGV[1]); return 1`, 2, []string{key, key + \":versions\"}, []interface{}{strconv.FormatInt(channelID, 10), time.Now().UnixMilli()})",
-    "digest": "e1dc1f87e7d2390b26d565a1a1c0e4d73aeae017039f5dfd1ad3deedc6328ec9",
+    "expression": "client.GroupScript().Eval(ctx, `if ARGV[4]==\"1\" then local old=redis.call(\"HGET\",KEYS[2],ARGV[1]); local wanted=ARGV[3]; if not old or #wanted>#old or (#wanted==#old and wanted>old) then redis.call(\"HSET\",KEYS[2],ARGV[1],wanted) end else redis.call(\"HINCRBY\",KEYS[2],ARGV[1],1) end; redis.call(\"ZADD\",KEYS[1],\"NX\",ARGV[2],ARGV[1]); return 1`, 2, []string{key, key + \":versions\"}, []interface{}{strconv.FormatInt(channelID, 10), time.Now().UnixMilli(), version, explicit})",
+    "digest": "91c18d015a4379dfe3a2677d066008106cdd590d7d5305332b59f50f75683e92",
     "count": 1,
-    "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+    "reason": "Reviewed exact existing repair-index registration primitive. Negative profile members merge the latest explicit state version monotonically and idempotently, so repeated Outbox callbacks preserve later-page cursors; positive channel members retain increment semantics. Tenant/account keys, bounded existing consumer, no parallel engine or lifecycle writes."
   },
   {
     "file": "addons/youban_publish/logic/sys/cycle_profile_schedule.go",
@@ -2599,5 +2599,14 @@
     "digest": "1b8ed2041f26829e8e1679b7543a7d995b58bf006d6504ca3adc1e3d29ee296e",
     "count": 1,
     "reason": "Reviewed existing infrastructure integration; this exact operation is retained, new callers or changed expressions require review."
+  },
+  {
+    "file": "addons/youban_publish/logic/sys/batch_rotation.go",
+    "function": "*sSysPublish.admitBatchRotationProfileTx",
+    "rule": "state-sql-write",
+    "expression": "` p\n\t\t  WHERE p.id=? AND p.status=1 AND p.visibility='public' AND p.deleted_at IS NULL)\n\t\tON CONFLICT (channel_id,profile_id) DO UPDATE\n\t\tSET status='active',batch_order=nextval('hg_ybp_batch_order_seq')\n\t\tWHERE cp.tenant_id=EXCLUDED.tenant_id AND cp.account_id=EXCLUDED.account_id\n\t\t  AND ((cp.status='active' AND cp.batch_order=0)\n\t\t    OR (cp.status='inactive' AND cp.last_job_id<? AND cp.batch_last_sent_job_id<?))`",
+    "digest": "949ad0a01f30708ff0ac333aca9387f5025d4d43435ea300abb5595c4b5cf7cb",
+    "count": 1,
+    "reason": "Explicitly reviewed by the main integrator: this SQL fragment only reactivates the channel-profile mapping and advances batch_order on conflict. The profile_state subquery split exposes the existing normal mapping status assignment to the guard; tenant/account ownership and both Job watermarks remain enforced. No Telegram Job status is written."
   }
 ]

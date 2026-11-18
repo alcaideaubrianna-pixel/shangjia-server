@@ -319,6 +319,7 @@ type ISysPublish interface {
 	AdminProfileList(ctx context.Context, in *sysin.ProfileListInp) (list []*sysin.ProfileModel, totalCount int, err error)
 	AdminProfileView(ctx context.Context, in *sysin.ProfileViewInp) (res *sysin.ProfileViewModel, err error)
 	AdminProfileBase(ctx context.Context, in *sysin.ProfileViewInp) (*sysin.ProfileModel, error)
+	AdminProfileCycleOverride(ctx context.Context, in *sysin.ProfileCycleOverrideInp) error
 	AdminProfileTaskStatus(ctx context.Context, in *sysin.ProfileViewInp) (*sysin.ProfileTaskStatusModel, error)
 	AdminProfilePublishCancel(ctx context.Context, in *sysin.ProfilePublishCancelInp) (*sysin.ProfileTaskStatusModel, error)
 	AdminProfileMedia(ctx context.Context, in *sysin.ProfileViewInp) ([]*sysin.MediaModel, error)

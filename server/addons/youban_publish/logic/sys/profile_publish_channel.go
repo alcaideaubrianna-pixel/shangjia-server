@@ -9,7 +9,7 @@ import (
 
 // prepareProfileChannelJobTx 复用统一任务工厂，将频道任务及其Outbox放在同一事务。
 func (s *sSysPublish) prepareProfileChannelJobTx(ctx context.Context, tx gdb.TX, source gdb.Record, channel telegramJobChannel, operationNo string, meta telegramProfilePublishMeta) (int64, error) {
-	allowed, err := cycleChannelAllowed(ctx, source["tenant_id"].Int64(), channel.Id, operationNo)
+	allowed, err := cycleChannelAllowed(ctx, source["tenant_id"].Int64(), channel.Id, operationNo, cycleProfileScope{ProfileID: source["profile_id"].Int64(), AccountID: source["account_id"].Int64()})
 	if err != nil || !allowed {
 		return 0, err
 	}

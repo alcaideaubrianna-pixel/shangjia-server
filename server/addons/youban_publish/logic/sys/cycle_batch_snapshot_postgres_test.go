@@ -34,11 +34,12 @@ func TestCycleBatchSnapshotPostgres(t *testing.T) {
 			`CREATE TEMP TABLE hg_youban_publish_channel_profile
 			(id bigserial PRIMARY KEY,tenant_id bigint,account_id bigint,channel_id bigint,profile_id bigint,
 			status text,batch_order bigint,batch_last_sent_job_id bigint DEFAULT 0,
+			cycle_override_enabled boolean NOT NULL DEFAULT false,
 			UNIQUE(channel_id,profile_id)) ON COMMIT DROP`,
-			`CREATE INDEX idx_ybp_batch_rotation ON hg_youban_publish_channel_profile
-			(tenant_id,channel_id,status,batch_order,profile_id) WHERE status='active' AND batch_order>0`,
+			`CREATE INDEX idx_ybp_batch_inherited_rotation ON hg_youban_publish_channel_profile
+			(tenant_id,channel_id,status,batch_order,profile_id) WHERE status='active' AND batch_order>0 AND cycle_override_enabled=false`,
 			`CREATE TEMP TABLE hg_content_profile(id bigint PRIMARY KEY,status int,visibility text,deleted_at timestamp) ON COMMIT DROP`,
-			`CREATE TEMP TABLE hg_youban_publish_profile_state(profile_id bigint,tenant_id bigint,account_id bigint,deleted_at timestamp) ON COMMIT DROP`,
+			`CREATE TEMP TABLE hg_youban_publish_profile_state(profile_id bigint,tenant_id bigint,account_id bigint,deleted_at timestamp,cycle_override_enabled boolean NOT NULL DEFAULT false) ON COMMIT DROP`,
 			`CREATE TEMP TABLE hg_youban_publish_account(id bigint PRIMARY KEY,tenant_id bigint,status int,deleted_at timestamp) ON COMMIT DROP`,
 			`CREATE TEMP TABLE hg_youban_publish_profile_channel
 			(tenant_id bigint,account_id bigint,profile_id bigint,channel_id bigint,is_manual int,deleted_at timestamp) ON COMMIT DROP`,
@@ -61,7 +62,7 @@ func TestCycleBatchSnapshotPostgres(t *testing.T) {
 				id := int64(10000 - i)
 				for _, query := range []string{
 					`INSERT INTO hg_content_profile VALUES(?,1,'public',NULL)`,
-					`INSERT INTO hg_youban_publish_profile_state VALUES(?,1,0,NULL)`,
+					`INSERT INTO hg_youban_publish_profile_state(profile_id,tenant_id,account_id,deleted_at) VALUES(?,1,0,NULL)`,
 				} {
 					if err := exec(query, id); err != nil {
 						return err

@@ -141,6 +141,13 @@ type ProfileListRes struct {
 	List []*sysin.ProfileModel `json:"list" dc:"资料列表"`
 }
 
+type ProfileCycleOverrideReq struct {
+	g.Meta `path:"/publish/profile/cycleOverride" method:"post" tags:"资料管理" summary:"保存资料独立循环配置"`
+	sysin.ProfileCycleOverrideInp
+}
+
+type ProfileCycleOverrideRes struct{}
+
 type ProfileViewReq struct {
 	g.Meta `path:"/publish/profile/view" method:"get" tags:"上架插件后台" summary:"笔记资料详情"`
 	sysin.ProfileViewInp

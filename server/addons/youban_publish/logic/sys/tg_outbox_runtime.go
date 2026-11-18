@@ -95,6 +95,13 @@ func (s *sSysPublish) runTelegramOutboxPass(ctx context.Context) {
 	if err := s.dispatchDueTelegramJobOutbox(passCtx, 0); err != nil {
 		g.Log().Warningf(ctx, "调度TG任务Outbox失败：%+v", err)
 	}
+	// Policy edits share the durable outbox, but may never exhaust the real-time
+	// dispatch pass. Each edit touches only one profile's indexed memberships.
+	overrideCtx, cancelOverride := context.WithTimeout(passCtx, 2*time.Second)
+	defer cancelOverride()
+	if err := s.dispatchPendingProfileCycleOverrides(overrideCtx, 10); err != nil {
+		g.Log().Warningf(ctx, "处理资料独立循环计划变更失败：%+v", err)
+	}
 }
 
 // RecoverTelegramDispatch runs one bounded scheduler pass. It is used by

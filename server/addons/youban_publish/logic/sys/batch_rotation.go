@@ -25,6 +25,7 @@ func batchRotationEligibilitySQL() string {
 		AND EXISTS (SELECT 1 FROM ` + publishProfileStateTable + ` ps
 		WHERE ps.profile_id=cp.profile_id AND ps.tenant_id=cp.tenant_id
 		  AND ps.account_id=cp.account_id AND ps.deleted_at IS NULL
+		  AND ps.cycle_override_enabled=false
 		  AND (cp.account_id=0 OR EXISTS (SELECT 1 FROM ` + publishAccountTable + ` a
 		    WHERE a.id=ps.account_id AND a.tenant_id=cp.tenant_id AND a.status=1 AND a.deleted_at IS NULL)))
 		AND (
@@ -57,7 +58,7 @@ func batchRotationCandidatesTx(ctx context.Context, tx gdb.TX, tenantID, channel
 		return nil, err
 	}
 	upper, err := tx.Ctx(ctx).GetAll(`SELECT batch_order,profile_id FROM `+publishChannelProfileTable+`
-		WHERE tenant_id=? AND channel_id=? AND status='active' AND batch_order>0
+		WHERE tenant_id=? AND channel_id=? AND status='active' AND batch_order>0 AND cycle_override_enabled=false
 		ORDER BY batch_order DESC,profile_id DESC LIMIT 1`, tenantID, channelID)
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取频道轮播扫描边界失败")
@@ -118,8 +119,10 @@ func (s *sSysPublish) admitBatchRotationProfileTx(ctx context.Context, tx gdb.TX
 		return gerror.New("批次轮播入队参数不合法")
 	}
 	_, err := tx.Ctx(ctx).Exec(`INSERT INTO `+publishChannelProfileTable+` AS cp
-		(tenant_id,account_id,channel_id,profile_id,status,batch_order)
-		SELECT ?,?,?,?,'active',nextval('hg_ybp_batch_order_seq')
+		(tenant_id,account_id,channel_id,profile_id,status,batch_order,cycle_override_enabled)
+		SELECT ?,?,?,?,'active',nextval('hg_ybp_batch_order_seq'),
+		  COALESCE((SELECT ps.cycle_override_enabled FROM `+publishProfileStateTable+` ps
+		    WHERE ps.tenant_id=? AND ps.account_id=? AND ps.profile_id=? AND ps.deleted_at IS NULL LIMIT 1),false)
 		WHERE EXISTS (SELECT 1 FROM `+dao.ContentProfile.Table()+` p
 		  WHERE p.id=? AND p.status=1 AND p.visibility='public' AND p.deleted_at IS NULL)
 		ON CONFLICT (channel_id,profile_id) DO UPDATE
@@ -127,7 +130,7 @@ func (s *sSysPublish) admitBatchRotationProfileTx(ctx context.Context, tx gdb.TX
 		WHERE cp.tenant_id=EXCLUDED.tenant_id AND cp.account_id=EXCLUDED.account_id
 		  AND ((cp.status='active' AND cp.batch_order=0)
 		    OR (cp.status='inactive' AND cp.last_job_id<? AND cp.batch_last_sent_job_id<?))`,
-		tenantID, accountID, channelID, profileID, profileID, job.Id, job.Id)
+		tenantID, accountID, channelID, profileID, tenantID, accountID, profileID, profileID, job.Id, job.Id)
 	if err != nil {
 		return gerror.Wrap(err, "批次轮播资料入队失败")
 	}
@@ -180,7 +183,7 @@ func reserveBatchRotationCandidatesTx(ctx context.Context, tx gdb.TX, tenantID, 
 		return gerror.Wrap(err, "读取批次轮播领取数量失败")
 	}
 	if count != int64(len(candidates)) {
-		return gerror.New("批次轮播候选已变化，请回滚事务后重试，候选数："+strconv.Itoa(len(candidates)))
+		return gerror.New("批次轮播候选已变化，请回滚事务后重试，候选数：" + strconv.Itoa(len(candidates)))
 	}
 	return nil
 }

@@ -119,10 +119,10 @@ func TestProfilePushEstimateRotationPostgres(t *testing.T) {
 		}
 		// Connection-local TEMP tables deliberately omit every legacy round,
 		// created_at, media-ready and task-status field.
-		exec(`CREATE TEMP TABLE hg_youban_publish_channel_profile (tenant_id bigint,account_id bigint,channel_id bigint,profile_id bigint,status text,batch_order bigint) ON COMMIT DROP`)
+		exec(`CREATE TEMP TABLE hg_youban_publish_channel_profile (tenant_id bigint,account_id bigint,channel_id bigint,profile_id bigint,status text,batch_order bigint,cycle_override_enabled boolean NOT NULL DEFAULT false) ON COMMIT DROP`)
 		exec(`CREATE TEMP TABLE hg_youban_publish_cycle_batch_item (run_id bigint,ordinal bigint,tenant_id bigint,account_id bigint,channel_id bigint,profile_id bigint,batch_order bigint,job_id bigint,item_state text,PRIMARY KEY(run_id,ordinal)) ON COMMIT DROP`)
 		exec(`CREATE TEMP TABLE hg_content_profile (id bigint PRIMARY KEY,status int,visibility text,deleted_at timestamp) ON COMMIT DROP`)
-		exec(`CREATE TEMP TABLE hg_youban_publish_profile_state (profile_id bigint,tenant_id bigint,account_id bigint,deleted_at timestamp) ON COMMIT DROP`)
+		exec(`CREATE TEMP TABLE hg_youban_publish_profile_state (profile_id bigint,tenant_id bigint,account_id bigint,deleted_at timestamp,cycle_override_enabled boolean NOT NULL DEFAULT false) ON COMMIT DROP`)
 		exec(`CREATE TEMP TABLE hg_youban_publish_account (id bigint PRIMARY KEY,tenant_id bigint,status int,deleted_at timestamp) ON COMMIT DROP`)
 		exec(`CREATE TEMP TABLE hg_youban_publish_profile_channel (tenant_id bigint,account_id bigint,profile_id bigint,channel_id bigint,is_manual int,deleted_at timestamp) ON COMMIT DROP`)
 		exec(`CREATE TEMP TABLE hg_youban_publish_channel (id bigint PRIMARY KEY,tenant_id bigint,status int,publish_direction text,is_default_selected int,deleted_at timestamp) ON COMMIT DROP`)
@@ -138,10 +138,10 @@ func TestProfilePushEstimateRotationPostgres(t *testing.T) {
 			}
 		}
 		check(false)
-		exec(`CREATE INDEX idx_ybp_batch_rotation ON hg_youban_publish_channel_profile(tenant_id,channel_id,status,batch_order,profile_id) WHERE status='inactive' AND batch_order>0`)
+		exec(`CREATE INDEX idx_ybp_batch_inherited_rotation ON hg_youban_publish_channel_profile(tenant_id,channel_id,status,batch_order,profile_id) WHERE status='inactive' AND batch_order>0`)
 		check(false) // Same columns with a wrong partial predicate is not ready.
-		exec(`DROP INDEX pg_temp.idx_ybp_batch_rotation`)
-		exec(`CREATE INDEX idx_ybp_batch_rotation ON hg_youban_publish_channel_profile(tenant_id,channel_id,status,batch_order,profile_id) WHERE status='active' AND batch_order>0`)
+		exec(`DROP INDEX pg_temp.idx_ybp_batch_inherited_rotation`)
+		exec(`CREATE INDEX idx_ybp_batch_inherited_rotation ON hg_youban_publish_channel_profile(tenant_id,channel_id,status,batch_order,profile_id) WHERE status='active' AND batch_order>0 AND cycle_override_enabled=false`)
 		exec(`CREATE INDEX idx_ybp_batch_unmigrated ON hg_youban_publish_channel_profile(tenant_id,channel_id) WHERE status='active' AND batch_order<=0`)
 		check(true)
 		exec(`INSERT INTO hg_youban_publish_channel VALUES (10,1,1,'up',1,NULL)`)
@@ -149,7 +149,7 @@ func TestProfilePushEstimateRotationPostgres(t *testing.T) {
 		exec(`UPDATE hg_content_profile SET status=2 WHERE id=7`)
 		exec(`UPDATE hg_content_profile SET visibility='private' WHERE id=8`)
 		exec(`UPDATE hg_content_profile SET deleted_at=now() WHERE id=9`)
-		exec(`INSERT INTO hg_youban_publish_profile_state SELECT id,1,0,NULL FROM generate_series(1,9) id`)
+		exec(`INSERT INTO hg_youban_publish_profile_state(profile_id,tenant_id,account_id,deleted_at) SELECT id,1,0,NULL FROM generate_series(1,9) id`)
 		// Selection moved 1 and 2 to the tail; 3 later sent and moved again.
 		exec(`INSERT INTO hg_youban_publish_channel_profile VALUES (1,0,10,4,'active',4),(1,0,10,5,'active',5),(1,0,10,6,'active',6),(1,0,10,1,'active',101),(1,0,10,2,'active',102),(1,0,10,3,'active',200),(1,0,10,7,'active',1),(1,0,10,8,'active',2),(1,0,10,9,'active',3),(2,0,10,900,'active',1),(1,0,99,901,'active',1)`)
 		exec(`INSERT INTO hg_youban_publish_cycle_batch_item VALUES (20,1,1,0,10,1,1,0,'selected'),(20,2,1,0,10,2,2,22,'admitted'),(20,3,1,0,10,3,3,23,'admitted')`)

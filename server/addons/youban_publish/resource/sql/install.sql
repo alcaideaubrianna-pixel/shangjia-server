@@ -508,6 +508,9 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_account_follow` (
   KEY `idx_ybp_account_follow_following` (`tenant_id`,`following_account_id`,`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴账号关注';
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_profile_state` (
+  `cycle_override_enabled` boolean NOT NULL DEFAULT false,
+  `cycle_override_days` int NOT NULL DEFAULT 0,
+  `cycle_override_version` bigint NOT NULL DEFAULT 0,
 	`random_media_config` text,
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `tenant_id` bigint(20) NOT NULL DEFAULT '0',
@@ -1158,6 +1161,7 @@ FROM (
 WHERE NOT EXISTS (SELECT 1 FROM `hg_youban_publish_tag`);
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_job` (
+  `profile_cycle_version` bigint NOT NULL DEFAULT 0,
 	`display_media_selection` text,
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键', `task_id` bigint(20) DEFAULT NULL COMMENT '采集任务ID，普通资料推送为空',
   `operation_no` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG操作号',
@@ -1209,6 +1213,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_outbox` (
   `created_at` datetime DEFAULT NULL COMMENT '创建时间', `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
   PRIMARY KEY (`id`), UNIQUE KEY `uk_ybp_tg_outbox_dedupe` (`dedupe_key`),
   KEY `idx_ybp_tg_outbox_due` (`status`,`available_at`,`id`),
+  KEY `idx_ybp_profile_cycle_override_due` (`event_type`,`status`,`available_at`,`id`),
   KEY `idx_ybp_tg_outbox_lease` (`status`,`lease_expires_at`,`id`),
   KEY `idx_ybp_tg_outbox_job` (`job_id`,`event_type`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='TG任务事务Outbox';
@@ -1734,6 +1739,8 @@ ALTER TABLE `hg_youban_publish_cycle_run` ADD COLUMN IF NOT EXISTS `total_count`
 ALTER TABLE `hg_youban_publish_cycle_run` ADD COLUMN IF NOT EXISTS `queued_count` int(11) NOT NULL DEFAULT '0' COMMENT '已生成任务数';
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_channel_profile` (
+  `cycle_override_enabled` boolean NOT NULL DEFAULT false,
+  `applied_profile_cycle_version` bigint NOT NULL DEFAULT 0,
   `id` bigint(20) NOT NULL AUTO_INCREMENT,
   `tenant_id` bigint(20) NOT NULL DEFAULT '0',
   `account_id` bigint(20) NOT NULL DEFAULT '0',

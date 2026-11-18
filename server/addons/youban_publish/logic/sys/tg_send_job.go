@@ -239,7 +239,7 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) (resultE
 	}
 	// 只拦截尚未开始发送的循环；在途、未知结果和已确认检查点继续对账/续跑。
 	if targetJob.Status == telegramJobStatusPending || targetJob.Status == telegramJobStatusRetryWait {
-		allowed, guardErr := cycleChannelAllowed(ctx, targetJob.TenantId, targetJob.ChannelId, targetJob.OperationNo)
+		allowed, guardErr := cycleChannelAllowed(ctx, targetJob.TenantId, targetJob.ChannelId, targetJob.OperationNo, cycleProfileScope{ProfileID: targetJob.ProfileId, AccountID: targetJob.AccountId})
 		if guardErr != nil {
 			return guardErr
 		}

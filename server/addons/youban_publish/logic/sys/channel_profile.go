@@ -30,8 +30,8 @@ func (s *sSysPublish) upsertChannelProfileFromJobTx(ctx context.Context, tx gdb.
 	// transaction; the fallback UPDATE then only produced current transaction is
 	// aborted and caused confirmed Telegram jobs to retry forever.
 	sql := "INSERT INTO " + publishChannelProfileTable +
-		" (tenant_id,account_id,channel_id,profile_id,last_job_id,batch_last_sent_job_id,batch_order,status,next_cycle_at,created_at,updated_at)" +
-		" VALUES (?,?,?,?,?,?,nextval('hg_ybp_batch_order_seq'),'active',NULL,?,?)" +
+		" (tenant_id,account_id,channel_id,profile_id,last_job_id,batch_last_sent_job_id,batch_order,cycle_override_enabled,status,next_cycle_at,created_at,updated_at)" +
+		" VALUES (?,?,?,?,?,?,nextval('hg_ybp_batch_order_seq'),COALESCE((SELECT ps.cycle_override_enabled FROM " + publishProfileStateTable + " ps WHERE ps.tenant_id=? AND ps.account_id=? AND ps.profile_id=? AND ps.deleted_at IS NULL LIMIT 1),false),'active',NULL,?,?)" +
 		" ON CONFLICT (channel_id,profile_id) DO UPDATE SET" +
 		" tenant_id=EXCLUDED.tenant_id,account_id=EXCLUDED.account_id,last_job_id=EXCLUDED.last_job_id," +
 		" batch_last_sent_job_id=EXCLUDED.batch_last_sent_job_id,batch_order=nextval('hg_ybp_batch_order_seq')," +
@@ -42,7 +42,8 @@ func (s *sSysPublish) upsertChannelProfileFromJobTx(ctx context.Context, tx gdb.
 		" AND " + publishChannelProfileTable + ".last_job_id <= EXCLUDED.last_job_id" +
 		" AND " + publishChannelProfileTable + ".batch_last_sent_job_id < EXCLUDED.batch_last_sent_job_id"
 	if _, err := tx.Ctx(ctx).Exec(sql,
-		job.TenantId, job.AccountId, job.ChannelId, job.ProfileId, job.Id, job.Id, now, now,
+		job.TenantId, job.AccountId, job.ChannelId, job.ProfileId, job.Id, job.Id,
+		job.TenantId, job.AccountId, job.ProfileId, now, now,
 	); err != nil {
 		return gerror.Wrap(err, "保存频道当前上架资料索引失败")
 	}

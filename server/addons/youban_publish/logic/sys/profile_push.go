@@ -56,14 +56,15 @@ func (s *sSysPublish) profilePushChannels(ctx context.Context, profile *sysin.Pr
 		}
 	}
 	type cycleDueRow struct {
-		ChannelId  int64       `orm:"channel_id"`
-		CycleDueAt *gtime.Time `orm:"cycle_due_at"`
+		ChannelId      int64       `orm:"channel_id"`
+		CycleDueAt     *gtime.Time `orm:"cycle_due_at"`
+		ProfileVersion int64       `orm:"applied_profile_cycle_version"`
 	}
 	var cycleDueRows []*cycleDueRow
 	// Use the same plan projection as the scheduler, rather than the historical
 	// Job's cycle_enabled flag (which is deliberately off for batch channels).
 	if err := g.DB().Model(publishChannelProfileTable+" cp").Safe().Ctx(ctx).
-		Fields("cp.channel_id,cp.next_cycle_at AS cycle_due_at").
+		Fields("cp.channel_id,cp.next_cycle_at AS cycle_due_at,cp.applied_profile_cycle_version").
 		Where("cp.tenant_id", profile.TenantId).Where("cp.account_id", profile.AccountId).
 		Where("cp.profile_id", profile.Id).Where("cp.status", "active").
 		WhereIn("cp.channel_id", channelIds).Scan(&cycleDueRows); err != nil {
@@ -71,7 +72,7 @@ func (s *sSysPublish) profilePushChannels(ctx context.Context, profile *sysin.Pr
 	}
 	cycleDueByChannel := make(map[int64]*gtime.Time, len(cycleDueRows))
 	for _, item := range cycleDueRows {
-		if item != nil {
+		if item != nil && item.ProfileVersion == profile.CycleOverrideVersion {
 			cycleDueByChannel[item.ChannelId] = dbtime.FromTimestamp(item.CycleDueAt)
 		}
 	}
@@ -86,6 +87,13 @@ func (s *sSysPublish) profilePushChannels(ctx context.Context, profile *sysin.Pr
 		channels = append(channels, channel)
 		channel.CyclePublishMode = normalizedProfilePushCycleMode(channel.CyclePublishMode)
 		channel.CyclePublishDays = s.effectiveChannelCycleDays(ctx, profile.TenantId, channel.CyclePublishDays)
+		channel.CycleOverrideEnabled = profile.CycleOverrideEnabled
+		channel.CycleOverrideDays = profile.CycleOverrideDays
+		if profile.CycleOverrideEnabled {
+			channel.CyclePublishMode = "time"
+			channel.CyclePublishDays = s.effectiveChannelCycleDays(ctx, profile.TenantId, profile.CycleOverrideDays)
+			channel.CyclePublishTime = ""
+		}
 		var lastPushAt *gtime.Time
 		if item := historyByChannel[channel.ChannelId]; item != nil {
 			channel.FirstPushAt, lastPushAt = item.FirstPushAt, item.LastPushAt

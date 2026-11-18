@@ -858,6 +858,14 @@ func (c *cPublishAdmin) ProfileTaskStatus(ctx context.Context, req *publish.Admi
 	return &publish.AdminProfileTaskStatusRes{ProfileTaskStatusModel: data}, nil
 }
 
+func (c *cPublishAdmin) ProfileCycleOverride(ctx context.Context, req *publish.AdminProfileCycleOverrideReq) (res *publish.AdminProfileCycleOverrideRes, err error) {
+	err = service.SysPublish().AdminProfileCycleOverride(ctx, &req.ProfileCycleOverrideInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.AdminProfileCycleOverrideRes{}, nil
+}
+
 func (c *cPublishAdmin) ProfileBase(ctx context.Context, req *publish.AdminProfileBaseReq) (*publish.AdminProfileBaseRes, error) {
 	profile, err := service.SysPublish().AdminProfileBase(ctx, &req.ProfileViewInp)
 	if err != nil {

@@ -643,8 +643,27 @@ type AdminProfileBatchCancelModel struct {
 	Sending  int `json:"sending" dc:"已进入发送流程、无法取消的任务数"`
 }
 
+type ProfileCycleOverrideInp struct {
+	ProfileViewInp
+	CycleOverrideEnabled bool `json:"cycleOverrideEnabled" dc:"是否启用资料独立循环"`
+	CycleOverrideDays    int  `json:"cycleOverrideDays" dc:"资料独立循环天数"`
+}
+
+func (in *ProfileCycleOverrideInp) Filter(ctx context.Context) error {
+	if in.Id <= 0 && strings.TrimSpace(in.Uuid) == "" && strings.TrimSpace(in.ProfileNo) == "" {
+		return gerror.New("资料ID、UUID或编号不能为空")
+	}
+	if in.CycleOverrideDays < 0 || (in.CycleOverrideEnabled && in.CycleOverrideDays <= 0) {
+		return gerror.New("开启资料独立循环时天数必须为正整数")
+	}
+	return nil
+}
+
 type ProfileModel struct {
-	RandomMedia *ProfileRandomMediaPolicy `json:"randomMedia,omitempty"`
+	CycleOverrideVersion int64                     `json:"-"`
+	CycleOverrideEnabled bool                      `json:"cycleOverrideEnabled" dc:"是否启用资料独立循环"`
+	CycleOverrideDays    int                       `json:"cycleOverrideDays" dc:"资料独立循环天数"`
+	RandomMedia          *ProfileRandomMediaPolicy `json:"randomMedia,omitempty"`
 
 	Id                     int64                 `json:"id" dc:"资料ID"`
 	CoverMediaId           int64                 `json:"-" dc:"封面媒体ID"`
@@ -702,6 +721,8 @@ type ProfileViewModel struct {
 }
 
 type ProfilePushChannelModel struct {
+	CycleOverrideEnabled  bool        `json:"cycleOverrideEnabled" dc:"是否启用资料独立循环"`
+	CycleOverrideDays     int         `json:"cycleOverrideDays" dc:"资料独立循环天数"`
 	ChannelId             int64       `json:"channelId" dc:"频道ID"`
 	ChannelTitle          string      `json:"channelTitle" dc:"频道名称"`
 	ChannelUsername       string      `json:"channelUsername" dc:"频道用户名"`

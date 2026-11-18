@@ -32,10 +32,14 @@ func TestBatchRotationPostgres(t *testing.T) {
 			id bigserial PRIMARY KEY, tenant_id bigint,account_id bigint,channel_id bigint,profile_id bigint,
 			status text,last_job_id bigint DEFAULT 0,batch_last_sent_job_id bigint DEFAULT 0,
 			batch_order bigint DEFAULT 0,next_cycle_at timestamp,created_at timestamp,updated_at timestamp,
+			cycle_override_enabled boolean NOT NULL DEFAULT false,
 			UNIQUE(channel_id,profile_id))`)
+		exec(`CREATE INDEX idx_ybp_batch_inherited_rotation ON hg_youban_publish_channel_profile
+			(tenant_id,channel_id,status,batch_order,profile_id)
+			WHERE status='active' AND batch_order>0 AND cycle_override_enabled=false`)
 		exec(`CREATE TEMP TABLE hg_content_profile (id bigint PRIMARY KEY,status int,visibility text,deleted_at timestamp)`)
 		exec(`CREATE TEMP TABLE hg_youban_publish_profile_state
-			(profile_id bigint,tenant_id bigint,account_id bigint,deleted_at timestamp)`)
+			(profile_id bigint,tenant_id bigint,account_id bigint,deleted_at timestamp,cycle_override_enabled boolean NOT NULL DEFAULT false)`)
 		exec(`CREATE TEMP TABLE hg_youban_publish_account
 			(id bigint PRIMARY KEY,tenant_id bigint,status int,deleted_at timestamp)`)
 		exec(`CREATE TEMP TABLE hg_youban_publish_profile_channel
@@ -44,7 +48,7 @@ func TestBatchRotationPostgres(t *testing.T) {
 			(id bigint PRIMARY KEY,tenant_id bigint,status int,publish_direction text,is_default_selected int,deleted_at timestamp)`)
 		exec(`INSERT INTO hg_content_profile VALUES
 			(1,1,'public',NULL),(2,2,'public',NULL),(3,1,'private',NULL),(4,1,'public',NULL)`)
-		exec(`INSERT INTO hg_youban_publish_profile_state VALUES
+		exec(`INSERT INTO hg_youban_publish_profile_state(profile_id,tenant_id,account_id,deleted_at) VALUES
 			(1,1,0,NULL),(2,1,0,NULL),(3,1,0,NULL),(4,1,0,NULL)`)
 		exec(`INSERT INTO hg_youban_publish_channel VALUES (10,1,1,'up',1,NULL)`)
 		s := new(sSysPublish)
@@ -62,7 +66,6 @@ func TestBatchRotationPostgres(t *testing.T) {
 		if len(items) != 2 || items[0].ProfileID != 1 || items[1].ProfileID != 4 {
 			t.Fatalf("unsent BOT candidates: %+v", items)
 		}
-		order := items[0].Order
 		exec(`UPDATE hg_content_profile SET status=2 WHERE id=1`)
 		items, err = batchRotationCandidatesTx(ctx, tx, 1, 10, 1)
 		if err != nil {
@@ -72,6 +75,13 @@ func TestBatchRotationPostgres(t *testing.T) {
 			t.Fatalf("rejected keyset head hid later eligible profile: %+v", items)
 		}
 		exec(`UPDATE hg_content_profile SET status=1 WHERE id=1`)
+		// The scan legitimately moves a rejected head. Readmission must retain
+		// that current order rather than restoring the order before the scan.
+		beforeAdmission, err := tx.GetValue(`SELECT batch_order FROM hg_youban_publish_channel_profile WHERE profile_id=1`)
+		if err != nil {
+			return err
+		}
+		order := beforeAdmission.Int64()
 		exec(`UPDATE hg_youban_publish_channel_profile SET last_job_id=99 WHERE profile_id=1`)
 		if err := s.admitBatchRotationProfileTx(ctx, tx, telegramJobRecord{
 			Id: 100, TenantId: 1, AccountId: 0, ChannelId: 10, ProfileId: 1,
@@ -195,7 +205,7 @@ func TestBatchRotationPostgres(t *testing.T) {
 		// assertions detect accidental truncation at the old limit of 1000.
 		exec(`INSERT INTO hg_content_profile
 			SELECT id,1,'public',NULL FROM generate_series(10000,15000) AS id`)
-		exec(`INSERT INTO hg_youban_publish_profile_state
+		exec(`INSERT INTO hg_youban_publish_profile_state(profile_id,tenant_id,account_id,deleted_at)
 			SELECT id,1,0,NULL FROM generate_series(10000,15000) AS id`)
 		exec(`INSERT INTO hg_youban_publish_channel VALUES (20,1,1,'up',1,NULL)`)
 		exec(`INSERT INTO hg_youban_publish_channel_profile
@@ -203,7 +213,7 @@ func TestBatchRotationPostgres(t *testing.T) {
 			SELECT 1,0,20,id,'active',nextval('hg_ybp_batch_order_seq'),7,7
 			FROM generate_series(10000,15000) AS id ORDER BY id`)
 		var candidates []batchRotationCandidate
-		for _, limit := range []int{5000, 5001} {
+		for _, limit := range []int{5000} {
 			candidates, err = batchRotationCandidatesTx(ctx, tx, 1, 20, limit)
 			if err != nil {
 				return err
@@ -216,6 +226,9 @@ func TestBatchRotationPostgres(t *testing.T) {
 					t.Fatalf("limit=%d returned unordered candidates at %d", limit, i)
 				}
 			}
+		}
+		if _, err := batchRotationCandidatesTx(ctx, tx, 1, 20, 5001); err == nil {
+			t.Fatal("candidate scan accepted more than 5000 candidates")
 		}
 		exec(`CREATE TEMP TABLE batch_rotation_test_snapshot(profile_id bigint PRIMARY KEY,original_order bigint)`)
 		exec(`SAVEPOINT rotation_over_limit`)
