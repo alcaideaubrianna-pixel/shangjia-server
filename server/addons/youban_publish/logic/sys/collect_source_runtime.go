@@ -23,8 +23,6 @@ const (
 	collectSourceRuntimeOutbox  collectSourceRuntimeKind = "outbox"
 )
 
-var errCollectSourceRealtimePending = gerror.New("同来源实时任务待处理，历史任务让位")
-
 type collectSourceRuntimeContextKey struct{}
 
 func collectSourceRuntimeJob(ctx context.Context) bool {
@@ -44,7 +42,6 @@ type collectSourceRuntimeQueue interface {
 	Nack(context.Context, *sourcequeue.Claim, time.Duration) error
 	Renew(context.Context, *sourcequeue.Claim, time.Duration) error
 	Recover(context.Context, sourcequeue.Lane, int) error
-	HasImmediateWork(context.Context, sourcequeue.Scope, sourcequeue.Lane) (bool, error)
 }
 
 func collectSourceRuntimeConfig(ctx context.Context, key string, def, low, high int) int {
@@ -180,6 +177,25 @@ func (s *sSysPublish) runCollectSourceRuntimeWorker(ctx context.Context, queue c
 }
 
 func (s *sSysPublish) executeCollectSourceRuntimeClaim(ctx context.Context, queue collectSourceRuntimeQueue, claim *sourcequeue.Claim, lease, claimDuration time.Duration) {
+	executeCollectSourceRuntimeClaimWithHandler(ctx, queue, claim, lease, claimDuration, s.handleCollectSourceRuntimeEnvelope)
+}
+
+func (s *sSysPublish) handleCollectSourceRuntimeEnvelope(ctx context.Context, envelope collectSourceRuntimeEnvelope) error {
+	ctx = context.WithValue(ctx, collectSourceRuntimeContextKey{}, true)
+	if envelope.Kind == collectSourceRuntimeOutbox {
+		return s.executeCollectSourceOutboxWake(ctx, envelope.Process)
+	}
+	body, err := collectProcessTaskBody(envelope.Process)
+	if err != nil {
+		return err
+	}
+	return s.handleCollectProcessTask(ctx, asynq.NewTask(tgTaskTypeCollectProcess, body))
+}
+
+// Each lane already owns a bounded worker pool and lease. A nonempty realtime
+// queue must not veto the reserved history capacity. Actual event/window locks
+// and dependency waits remain inside the business handler and retain retry.
+func executeCollectSourceRuntimeClaimWithHandler(ctx context.Context, queue collectSourceRuntimeQueue, claim *sourcequeue.Claim, lease, claimDuration time.Duration, handle func(context.Context, collectSourceRuntimeEnvelope) error) {
 	envelope, decodeErr := decodeCollectSourceRuntimeClaim(claim)
 	fields := collectSourceRuntimeFields(envelope, claim.Lane)
 	fields["event"] = "collect.source.claimed"
@@ -196,24 +212,7 @@ func (s *sSysPublish) executeCollectSourceRuntimeClaim(ctx context.Context, queu
 		if decodeErr != nil {
 			return decodeErr
 		}
-		if claim.Lane == sourcequeue.History {
-			pending, err := queue.HasImmediateWork(workCtx, claim.Scope, sourcequeue.Realtime)
-			if err != nil {
-				return gerror.Wrap(err, "核对同来源实时待办失败，历史任务让位")
-			}
-			if pending {
-				return errCollectSourceRealtimePending
-			}
-		}
-		workCtx = context.WithValue(workCtx, collectSourceRuntimeContextKey{}, true)
-		if envelope.Kind == collectSourceRuntimeOutbox {
-			return s.executeCollectSourceOutboxWake(workCtx, envelope.Process)
-		}
-		body, err := collectProcessTaskBody(envelope.Process)
-		if err != nil {
-			return err
-		}
-		return s.handleCollectProcessTask(workCtx, asynq.NewTask(tgTaskTypeCollectProcess, body))
+		return handle(workCtx, envelope)
 	})
 	fields["event"] = "collect.source.settled"
 	fields["executionDurationMs"] = time.Since(started).Milliseconds()
@@ -255,9 +254,6 @@ func (s *sSysPublish) executeCollectSourceRuntimeClaim(ctx context.Context, queu
 func collectSourceRuntimeRetry(err error) (time.Duration, string) {
 	if err == nil {
 		return 0, "none"
-	}
-	if errors.Is(err, errCollectSourceRealtimePending) {
-		return time.Second, "realtime_pending"
 	}
 	var retry *collectProcessRetryError
 	if errors.As(err, &retry) {

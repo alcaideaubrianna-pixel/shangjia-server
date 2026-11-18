@@ -12,13 +12,14 @@ import (
 )
 
 type collectSourceRuntimeFakeQueue struct {
-	renew     func(context.Context, *sourcequeue.Claim, time.Duration) error
-	immediate bool
-	probeErr  error
-	ackCount  atomic.Int32
-	nackCount atomic.Int32
-	nackDelay time.Duration
-	settleErr error
+	renew      func(context.Context, *sourcequeue.Claim, time.Duration) error
+	immediate  bool
+	probeErr   error
+	probeCount atomic.Int32
+	ackCount   atomic.Int32
+	nackCount  atomic.Int32
+	nackDelay  time.Duration
+	settleErr  error
 }
 
 func (q *collectSourceRuntimeFakeQueue) Claim(context.Context, sourcequeue.Lane, time.Duration) (*sourcequeue.Claim, error) {
@@ -43,6 +44,7 @@ func (q *collectSourceRuntimeFakeQueue) Recover(context.Context, sourcequeue.Lan
 	return nil
 }
 func (q *collectSourceRuntimeFakeQueue) HasImmediateWork(context.Context, sourcequeue.Scope, sourcequeue.Lane) (bool, error) {
+	q.probeCount.Add(1)
 	return q.immediate, q.probeErr
 }
 
@@ -171,14 +173,41 @@ func TestCollectSourceRuntimeAwaitDeadlineAndPending(t *testing.T) {
 	}
 }
 
-func TestCollectSourceRuntimeHistoryYieldsBeforeBusinessAndNackFailure(t *testing.T) {
-	for _, settleErr := range []error{nil, errors.New("redis unavailable")} {
-		q := &collectSourceRuntimeFakeQueue{immediate: true, settleErr: settleErr}
-		// If the preflight does not yield, the handler would touch the DB. This
-		// test intentionally has no database setup or production configuration.
-		(&sSysPublish{}).executeCollectSourceRuntimeClaim(context.Background(), q, collectSourceRuntimeTestClaim(t, true), 30*time.Second, time.Millisecond)
-		if q.ackCount.Load() != 0 || q.nackCount.Load() != 1 || q.nackDelay != time.Second {
-			t.Fatalf("history did not yield: ack=%d nack=%d delay=%v", q.ackCount.Load(), q.nackCount.Load(), q.nackDelay)
+func TestCollectSourceRuntimeHistoryExecutesWithoutRealtimeProbe(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		immediate bool
+		probeErr  error
+	}{
+		{name: "realtime_always_pending", immediate: true},
+		{name: "realtime_probe_unavailable", immediate: true, probeErr: errors.New("redis probe unavailable")},
+	} {
+		for _, failAck := range []bool{false, true} {
+			name := tc.name + "/ack_success"
+			if failAck {
+				name = tc.name + "/ack_failure"
+			}
+			t.Run(name, func(t *testing.T) {
+				q := &collectSourceRuntimeFakeQueue{immediate: tc.immediate, probeErr: tc.probeErr}
+				if failAck {
+					q.settleErr = errors.New("redis ack unavailable")
+				}
+				called := 0
+				executeCollectSourceRuntimeClaimWithHandler(context.Background(), q, collectSourceRuntimeTestClaim(t, true), 30*time.Second, time.Millisecond,
+					func(ctx context.Context, envelope collectSourceRuntimeEnvelope) error {
+						called++
+						if !envelope.Process.History || envelope.Process.EventId != 100 || envelope.Process.TenantId != 78 || envelope.Process.SourceId != 351 || envelope.Process.AccountId != 0 || string(envelope.Process.Observation) != `{"carrier":"retained"}` {
+							t.Errorf("history handler lost original scope/carrier: %+v", envelope)
+						}
+						if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > 5*time.Second {
+							t.Error("history handler lost bounded execution budget")
+						}
+						return nil
+					})
+				if called != 1 || q.probeCount.Load() != 0 || q.ackCount.Load() != 1 || q.nackCount.Load() != 0 {
+					t.Fatalf("history vetoed or settled twice: called=%d probes=%d ack=%d nack=%d", called, q.probeCount.Load(), q.ackCount.Load(), q.nackCount.Load())
+				}
+			})
 		}
 	}
 }
@@ -207,11 +236,36 @@ func TestCollectSourceRuntimeLegacyQueuesAreExplicitAndBounded(t *testing.T) {
 	}
 }
 
-func TestCollectSourceRuntimeHistoryProbeErrorFailsClosed(t *testing.T) {
-	q := &collectSourceRuntimeFakeQueue{probeErr: errors.New("redis probe unavailable")}
-	(&sSysPublish{}).executeCollectSourceRuntimeClaim(context.Background(), q, collectSourceRuntimeTestClaim(t, true), 30*time.Second, 0)
-	if q.ackCount.Load() != 0 || q.nackCount.Load() != 1 || q.nackDelay <= 0 {
-		t.Fatal("uncertain realtime backlog allowed history execution")
+func TestCollectSourceRuntimeHistoryDependencyAndLockRetry(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		delay   time.Duration
+		message string
+	}{
+		{name: "media_dependency", delay: 17 * time.Second, message: "媒体待就绪"},
+		{name: "business_lock_conflict", delay: 2 * time.Second, message: "采集资料提交锁被占用，稍后重试"},
+	} {
+		for _, failNack := range []bool{false, true} {
+			name := tc.name + "/nack_success"
+			if failNack {
+				name = tc.name + "/nack_failure"
+			}
+			t.Run(name, func(t *testing.T) {
+				q := &collectSourceRuntimeFakeQueue{immediate: true, probeErr: errors.New("unused realtime probe")}
+				if failNack {
+					q.settleErr = errors.New("redis nack unavailable")
+				}
+				called := 0
+				executeCollectSourceRuntimeClaimWithHandler(context.Background(), q, collectSourceRuntimeTestClaim(t, true), 30*time.Second, 0,
+					func(context.Context, collectSourceRuntimeEnvelope) error {
+						called++
+						return newCollectProcessRetryError(tc.delay, tc.message)
+					})
+				if called != 1 || q.probeCount.Load() != 0 || q.ackCount.Load() != 0 || q.nackCount.Load() != 1 || q.nackDelay != max(collectProcessMinimumDelay, tc.delay) {
+					t.Fatalf("business retry lost or additionally confirmed: called=%d probes=%d ack=%d nack=%d delay=%v", called, q.probeCount.Load(), q.ackCount.Load(), q.nackCount.Load(), q.nackDelay)
+				}
+			})
+		}
 	}
 }
 
