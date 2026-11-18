@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -22,6 +24,8 @@ type collectReplayRow struct {
 	RawText       string   `json:"raw_text"`
 	ReceivedAt    string   `json:"received_at"`
 	MediaTypes    []string `json:"media_types"`
+	GroupedID     string   `json:"grouped_id"`
+	MediaCount    int      `json:"media_count"`
 	MaterialRole  string   `json:"material_role"`
 	ParentEventID int64    `json:"parent_event_id"`
 }
@@ -41,6 +45,7 @@ type collectReplayStats struct {
 	SampledWithVerify    int
 	SampledWithoutVerify int
 	NewlyMatchedDisplays int
+	ContextAuditDiffs    int
 }
 
 func TestCollectMaterialReplayProductionMessages(t *testing.T) {
@@ -57,6 +62,16 @@ func TestCollectMaterialReplayProductionMessages(t *testing.T) {
 	}
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
+	batchSize := 100
+	if raw := os.Getenv("YOUBAN_COLLECT_REPLAY_CURSOR_BATCH_SIZE"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 || value > 1000 {
+			t.Fatal("YOUBAN_COLLECT_REPLAY_CURSOR_BATCH_SIZE must be between 1 and 1000")
+		}
+		batchSize = value
+	}
+	bounded := os.Getenv("YOUBAN_COLLECT_REPLAY_BOUNDED") == "1"
+	reportOnly := os.Getenv("YOUBAN_COLLECT_REPLAY_REPORT_ONLY") == "1"
 	stats := collectReplayStats{}
 	currentKey := ""
 	rows := make([]collectReplayRow, 0, 4096)
@@ -65,7 +80,7 @@ func TestCollectMaterialReplayProductionMessages(t *testing.T) {
 			return
 		}
 		stats.Channels++
-		replayCollectMaterialChannel(t, rows, &stats)
+		replayCollectMaterialChannel(t, rows, &stats, batchSize, reportOnly)
 		rows = rows[:0]
 	}
 	for scanner.Scan() {
@@ -84,7 +99,6 @@ func TestCollectMaterialReplayProductionMessages(t *testing.T) {
 		t.Fatalf("read production replay stream: %v", err)
 	}
 	flush()
-	bounded := os.Getenv("YOUBAN_COLLECT_REPLAY_BOUNDED") == "1"
 	if !bounded && stats.Channels != 50 {
 		t.Fatalf("replayed channels=%d, want 50", stats.Channels)
 	}
@@ -94,8 +108,8 @@ func TestCollectMaterialReplayProductionMessages(t *testing.T) {
 	if !bounded && stats.Events < 1000 {
 		t.Fatalf("production sample is too small: %+v", stats)
 	}
-	t.Logf("production replay: channels=%d events=%d displays=%d verifies=%d pairs=%d multiVerifyDisplays=%d existingBindings=%d bindingDiffs=%d existingNowUnmatched=%d existingParentDiffs=%d newlyMatchedDisplays=%d sampledDisplays=%d sampledWithVerify=%d sampledWithoutVerify=%d",
-		stats.Channels, stats.Events, stats.Displays, stats.Verifies, stats.Pairs, stats.MultiVerifyDisplays, stats.ExistingBindings, stats.ExistingBindingDiffs, stats.ExistingNowUnmatched, stats.ExistingParentDiffs, stats.NewlyMatchedDisplays, stats.SampledDisplays, stats.SampledWithVerify, stats.SampledWithoutVerify)
+	t.Logf("production replay: channels=%d events=%d displays=%d verifies=%d pairs=%d multiVerifyDisplays=%d existingBindings=%d bindingDiffs=%d existingNowUnmatched=%d existingParentDiffs=%d newlyMatchedDisplays=%d sampledDisplays=%d sampledWithVerify=%d sampledWithoutVerify=%d contextAuditDiffs=%d",
+		stats.Channels, stats.Events, stats.Displays, stats.Verifies, stats.Pairs, stats.MultiVerifyDisplays, stats.ExistingBindings, stats.ExistingBindingDiffs, stats.ExistingNowUnmatched, stats.ExistingParentDiffs, stats.NewlyMatchedDisplays, stats.SampledDisplays, stats.SampledWithVerify, stats.SampledWithoutVerify, stats.ContextAuditDiffs)
 }
 
 func TestPairCollectMaterialMessagesHundredThousandWaitingEvents(t *testing.T) {
@@ -140,7 +154,7 @@ func TestHundredThousandWaitingEventsHaveIndependentSchedules(t *testing.T) {
 	}
 }
 
-func replayCollectMaterialChannel(t *testing.T, rows []collectReplayRow, stats *collectReplayStats) {
+func replayCollectMaterialChannel(t *testing.T, rows []collectReplayRow, stats *collectReplayStats, batchSize int, reportOnly bool) {
 	t.Helper()
 	views := make([]collectMaterialMessageView, 0, len(rows))
 	eventIndex := make(map[int64]int, len(rows))
@@ -153,7 +167,7 @@ func replayCollectMaterialChannel(t *testing.T, rows []collectReplayRow, stats *
 		if err != nil {
 			t.Fatalf("parse event %d received_at %q: %v", row.EventID, row.ReceivedAt, err)
 		}
-		views = append(views, collectMaterialMessageView{EventID: row.EventID, ParentEventID: row.ParentEventID, RawText: row.RawText, Media: media, MessageAt: messageAt})
+		views = append(views, collectMaterialMessageView{EventID: row.EventID, ParentEventID: row.ParentEventID, RawText: row.RawText, GroupedID: row.GroupedID, DeclaredMediaCount: row.MediaCount, Media: media, MessageAt: messageAt})
 		eventIndex[row.EventID] = index
 		stats.Events++
 		switch classifyProfileMessage(row.RawText, media).Kind {
@@ -163,7 +177,14 @@ func replayCollectMaterialChannel(t *testing.T, rows []collectReplayRow, stats *
 			stats.Verifies++
 		}
 	}
-	pairs := pairCollectMaterialMessages(views)
+	var cursor collectMaterialPairCursor
+	pairs := make([]collectMaterialPair, 0)
+	for start := 0; start < len(views); start += batchSize {
+		pairs = cursor.appendPairs(pairs, views[start:min(start+batchSize, len(views))])
+	}
+	if whole := pairCollectMaterialMessages(views); !reflect.DeepEqual(pairs, whole) {
+		t.Fatalf("cursor replay changed pairing across pages: channel=%s batch_size=%d", rows[0].SourceChatID, batchSize)
+	}
 	predictedParent := make(map[int]int, len(pairs))
 	verifyCountByDisplay := make(map[int]int)
 	existingVerifyByDisplay := make(map[int64]int)
@@ -199,7 +220,7 @@ func replayCollectMaterialChannel(t *testing.T, rows []collectReplayRow, stats *
 		predictedCount := verifyCountByDisplay[index]
 		if predictedCount == 0 {
 			channelUnmatched++
-			assertCollectReplayDisplayContext(t, rows, views, index, predictedCount)
+			auditCollectReplayDisplayContext(t, rows, views, index, predictedCount, reportOnly, stats)
 		} else if existingVerifyByDisplay[row.EventID] == 0 {
 			stats.NewlyMatchedDisplays++
 		}
@@ -212,7 +233,7 @@ func replayCollectMaterialChannel(t *testing.T, rows []collectReplayRow, stats *
 		} else {
 			stats.SampledWithoutVerify++
 		}
-		assertCollectReplayDisplayContext(t, rows, views, index, predictedCount)
+		auditCollectReplayDisplayContext(t, rows, views, index, predictedCount, reportOnly, stats)
 	}
 	for verifyIndex, row := range rows {
 		if row.MaterialRole != collectMaterialRoleVerify || row.ParentEventID <= 0 {
@@ -237,7 +258,7 @@ func replayCollectMaterialChannel(t *testing.T, rows []collectReplayRow, stats *
 	t.Logf("channel=%s source=%d events=%d displays=%d pairs=%d unmatchedDisplays=%d", rows[0].SourceChatID, rows[0].SourceID, len(rows), channelDisplays, channelPairs, channelUnmatched)
 }
 
-func assertCollectReplayDisplayContext(t *testing.T, rows []collectReplayRow, views []collectMaterialMessageView, displayIndex, predictedCount int) {
+func auditCollectReplayDisplayContext(t *testing.T, rows []collectReplayRow, views []collectMaterialMessageView, displayIndex, predictedCount int, reportOnly bool, stats *collectReplayStats) {
 	t.Helper()
 	displayAt := views[displayIndex].MessageAt
 	expected := 0
@@ -269,6 +290,10 @@ func assertCollectReplayDisplayContext(t *testing.T, rows []collectReplayRow, vi
 		}
 	}
 	if predictedCount != expected {
+		stats.ContextAuditDiffs++
+		if reportOnly {
+			return
+		}
 		t.Fatalf("10%% context audit failed channel=%s displayEvent=%d predicted=%d expected=%d", rows[displayIndex].SourceChatID, rows[displayIndex].EventID, predictedCount, expected)
 	}
 }

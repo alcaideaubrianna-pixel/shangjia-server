@@ -41,51 +41,60 @@ type collectMaterialPair struct {
 	VerifyIndex  int
 }
 
-func pairCollectMaterialMessages(messages []collectMaterialMessageView) []collectMaterialPair {
-	pairs := make([]collectMaterialPair, 0)
-	// Persisted parents cannot override source message adjacency.
-	pairedDisplay := make(map[int]string)
-	lastDisplayIndex := -1
-	for index, message := range messages {
+// collectMaterialPairCursor retains only the active display context between
+// ordered pages. A caller keeps the cursor for exactly one channel.
+type collectMaterialPairCursor struct {
+	nextIndex    int
+	displayIndex int
+	displayAt    time.Time
+	hasDisplay   bool
+	hasVerify    bool
+	verifyGroup  string
+}
+
+func (c *collectMaterialPairCursor) appendPairs(pairs []collectMaterialPair, messages []collectMaterialMessageView) []collectMaterialPair {
+	for _, message := range messages {
+		index := c.nextIndex
+		c.nextIndex++
 		if collectMaterialSkippableMessage(message) {
 			continue
 		}
 		kind := classifyProfileMessage(message.RawText, message.Media).Kind
-		if lastDisplayIndex >= 0 && collectMaterialMixedVerification(message) {
+		if c.hasDisplay && collectMaterialMixedVerification(message) {
 			kind = profileMessageKindVerify
 		}
 		switch kind {
 		case profileMessageKindDisplay:
-			lastDisplayIndex = index
+			c.hasDisplay = true
+			c.displayIndex = index
+			c.displayAt = message.MessageAt
+			c.hasVerify = false
+			c.verifyGroup = ""
 		case profileMessageKindVerify:
-			if lastDisplayIndex >= 0 {
-				// A stale stored parent neither wins over nor vetoes the
-				// nearest legal source context. Canonical/transaction checks
-				// remain responsible for validating the durable relationship.
-				if group, exists := pairedDisplay[lastDisplayIndex]; exists {
-					if group == "" || group != message.GroupedID {
-						lastDisplayIndex = -1
-						continue
-					}
-				}
-				if !collectMaterialVerifyCandidate(message) {
-					lastDisplayIndex = -1
-					continue
-				}
-				displayAt := messages[lastDisplayIndex].MessageAt
-				verifyAt := message.MessageAt
-				withinWindow := displayAt.IsZero() || verifyAt.IsZero() ||
-					(!verifyAt.Before(displayAt) && verifyAt.Sub(displayAt) <= collectMaterialVerifyWindow())
-				if withinWindow {
-					pairs = append(pairs, collectMaterialPair{DisplayIndex: lastDisplayIndex, VerifyIndex: index})
-					pairedDisplay[lastDisplayIndex] = message.GroupedID
-				}
+			if !c.hasDisplay {
+				continue
+			}
+			if (c.hasVerify && (c.verifyGroup == "" || c.verifyGroup != message.GroupedID)) || !collectMaterialVerifyCandidate(message) {
+				c.hasDisplay = false
+				continue
+			}
+			verifyAt := message.MessageAt
+			if c.displayAt.IsZero() || verifyAt.IsZero() ||
+				(!verifyAt.Before(c.displayAt) && verifyAt.Sub(c.displayAt) <= collectMaterialVerifyWindow()) {
+				pairs = append(pairs, collectMaterialPair{DisplayIndex: c.displayIndex, VerifyIndex: index})
+				c.hasVerify = true
+				c.verifyGroup = message.GroupedID
 			}
 		default:
-			lastDisplayIndex = -1
+			c.hasDisplay = false
 		}
 	}
 	return pairs
+}
+
+func pairCollectMaterialMessages(messages []collectMaterialMessageView) []collectMaterialPair {
+	var cursor collectMaterialPairCursor
+	return cursor.appendPairs(make([]collectMaterialPair, 0), messages)
 }
 
 // Verification candidates retain the existing short-caption/video-only rule.

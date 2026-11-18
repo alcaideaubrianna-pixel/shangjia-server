@@ -423,6 +423,12 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 		return err
 	}
 	messageViews := collectMaterialEventViews(rows, mediaByEvent)
+	verifyByDisplay := make(map[int][]int)
+	displayByVerify := make(map[int]int)
+	for _, pair := range pairCollectMaterialMessages(messageViews) {
+		verifyByDisplay[pair.DisplayIndex] = append(verifyByDisplay[pair.DisplayIndex], pair.VerifyIndex)
+		displayByVerify[pair.VerifyIndex] = pair.DisplayIndex
+	}
 	return runCollectTargetBatchEvents(ctx, len(rows), func(index int) (windowErr error) {
 		event := rows[index]
 		if _, ok := processEventIds[event["id"].Int64()]; !ok {
@@ -473,7 +479,7 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 			if err = s.wakePreviousCollectDisplay(ctx, payload, event); err != nil {
 				return err
 			}
-			verifyIndexes := s.findCollectVerifyEvents(rows, messageViews, index)
+			verifyIndexes := eligibleCollectVerifyIndexes(rows, verifyByDisplay[index])
 			if len(verifyIndexes) > 0 {
 				pairedAny := false
 				for _, verifyIndex := range verifyIndexes {
@@ -531,8 +537,8 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 				return err
 			}
 		case profileMessageKindVerify:
-			displayIndex := s.findCollectDisplayEvent(rows, messageViews, index)
-			if displayIndex < 0 {
+			displayIndex, foundDisplay := displayByVerify[index]
+			if !foundDisplay {
 				storedDisplay, lookupErr := s.findStoredCollectDisplayEvent(ctx, event)
 				if lookupErr != nil {
 					return lookupErr
@@ -552,7 +558,7 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 					return nil
 				}
 			}
-			if displayIndex >= 0 {
+			if foundDisplay {
 				display := rows[displayIndex]
 				paired, pairErr := s.bindCollectMaterialPair(ctx, display, event)
 				if pairErr != nil {
@@ -703,19 +709,26 @@ func isCollectProcessRetryError(err error) bool {
 }
 
 func (s *sSysPublish) findCollectVerifyEvents(rows []gdb.Record, views []collectMaterialMessageView, displayIndex int) []int {
-	indexes := make([]int, 0)
+	var candidates []int
 	for _, pair := range pairCollectMaterialMessages(views) {
-		if pair.DisplayIndex != displayIndex {
-			continue
+		if pair.DisplayIndex == displayIndex {
+			candidates = append(candidates, pair.VerifyIndex)
 		}
-		candidate := rows[pair.VerifyIndex]
+	}
+	return eligibleCollectVerifyIndexes(rows, candidates)
+}
+
+func eligibleCollectVerifyIndexes(rows []gdb.Record, candidates []int) []int {
+	indexes := make([]int, 0, len(candidates))
+	for _, index := range candidates {
+		candidate := rows[index]
 		if strings.TrimSpace(candidate["material_role"].String()) != "" && strings.TrimSpace(candidate["material_role"].String()) != collectMaterialRolePending && !collectMaterialEventNeedsPairRepair(candidate) {
 			continue
 		}
 		if !collectMaterialEventOlderThan(candidate, collectMaterialGroupingDelay) {
 			continue
 		}
-		indexes = append(indexes, pair.VerifyIndex)
+		indexes = append(indexes, index)
 	}
 	return indexes
 }
