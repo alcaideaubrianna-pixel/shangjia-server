@@ -163,6 +163,7 @@ func (s *sSysPublish) fillIntroFeeChannelBlacklist(ctx context.Context, tenantID
 		Fields("ch."+ch.TelegramChatId+" AS chat_id").
 		Where("ac."+ac.TenantId, tenantID).Where("ac."+ac.AccountId, accountID).
 		Where("ac."+ac.SourceId, 0).Where("ac."+ac.DisabledReason, introFeeChannelBlacklistReason).
+		Where("ac."+ac.Status, sysin.CollectAccountChannelDisabled).
 		WhereIn("ch."+ch.TelegramChatId, aliases).
 		WhereNull("ac." + ac.DeletedAt).WhereNull("ch." + ch.DeletedAt).Scan(&markers); err != nil {
 		return gerror.Wrap(err, "读取频道黑名单标记失败")

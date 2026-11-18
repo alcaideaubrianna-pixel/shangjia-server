@@ -3,6 +3,7 @@ package sys
 import "testing"
 
 func TestDecideCollectChannelAccessDefaultsToFirstAllow(t *testing.T) {
+	t.Setenv(collectChannelDefaultStatusEnv, "")
 	for _, chat := range []string{"-1004", "4"} {
 		decision := decideCollectChannelAccess(collectChannelAccessPolicyInput{
 			TenantID: 1, AccountID: 2, SourceID: 3, CanonicalChat: chat,
@@ -14,6 +15,20 @@ func TestDecideCollectChannelAccessDefaultsToFirstAllow(t *testing.T) {
 		if decision.RelationKey != "1/2/3/4" {
 			t.Fatalf("chat %q relation key = %q", chat, decision.RelationKey)
 		}
+	}
+}
+
+func TestDecideCollectChannelAccessDisabledDiscovery(t *testing.T) {
+	t.Setenv(collectChannelDefaultStatusEnv, "disabled")
+	in := collectChannelAccessPolicyInput{
+		TenantID: 1, AccountID: 2, SourceID: 3, CanonicalChat: "-1004",
+	}
+	if got := decideCollectChannelAccess(in); got.Allowed || !got.Discover {
+		t.Fatalf("new relation must be recorded without allowing collection: %#v", got)
+	}
+	in.RelationExists, in.Status = true, "enabled"
+	if got := decideCollectChannelAccess(in); !got.Allowed || got.Discover {
+		t.Fatalf("default must not override the saved relation: %#v", got)
 	}
 }
 

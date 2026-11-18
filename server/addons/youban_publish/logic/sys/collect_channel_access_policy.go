@@ -2,7 +2,23 @@ package sys
 
 import (
 	"fmt"
+	"os"
+	"strings"
+
+	"hotgo/addons/youban_publish/model/input/sysin"
 )
+
+const collectChannelDefaultStatusEnv = "YOUBAN_COLLECT_CHANNEL_DEFAULT_STATUS"
+
+// This setting applies to newly discovered channel relations only.
+func defaultCollectChannelStatus() string {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(collectChannelDefaultStatusEnv))) {
+	case "", sysin.CollectAccountChannelEnabled:
+		return sysin.CollectAccountChannelEnabled
+	default:
+		return sysin.CollectAccountChannelDisabled
+	}
+}
 
 type collectChannelAccessPolicyInput struct {
 	TenantID        int64
@@ -24,7 +40,7 @@ func decideCollectChannelAccess(in collectChannelAccessPolicyInput) collectChann
 	key := collectChannelAccessRelationKey(in.TenantID, in.AccountID, in.SourceID, in.CanonicalChat)
 	if !in.RelationExists {
 		return collectChannelAccessPolicyDecision{
-			Allowed:     true,
+			Allowed:     botCollectChannelRelationEnabled(defaultCollectChannelStatus()),
 			Discover:    true,
 			RelationKey: key,
 		}

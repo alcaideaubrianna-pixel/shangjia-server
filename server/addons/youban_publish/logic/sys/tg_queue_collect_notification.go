@@ -126,14 +126,16 @@ func (s *sSysPublish) handleCollectNotificationTask(ctx context.Context, task *a
 		return err
 	}
 	var relation struct {
-		Id       int64
-		Status   string
-		SourceId int64
+		Id             int64
+		Status         string
+		ApprovalStatus string
 	}
 	err = pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).As("ac").
 		InnerJoin(pdao.YoubanPublishCollectChannel.Table()+" ch", "ch.id=ac.channel_id AND ch.tenant_id=ac.tenant_id").
-		Fields("ac.id,ac.status,ac.source_id").
+		Fields("ac.id,ac.status,ac.approval_status").
 		Where("ac.tenant_id", payload.TenantID).Where("ac.account_id", payload.AccountID).
+		Where("ac.source_id", payload.SourceID).
+		WhereNull("ac.deleted_at").WhereNull("ch.deleted_at").
 		WhereIn("ch.telegram_chat_id", tgChannelCacheLookupIds(payload.ChannelID)).Scan(&relation)
 	if !collectOptionalRecordScanSucceeded(err) {
 		return err
@@ -141,7 +143,9 @@ func (s *sSysPublish) handleCollectNotificationTask(ctx context.Context, task *a
 	if relation.Id <= 0 {
 		return gerror.New("新频道关系尚未创建，稍后重试通知")
 	}
-	if relation.SourceId != payload.SourceID || !botCollectChannelRelationEnabled(relation.Status) {
+	// Discovery notifications also let operators review new disabled channels.
+	// An explicit rejection must not send another review prompt.
+	if !botCollectChannelRelationEnabled(relation.Status) && relation.ApprovalStatus != "pending" {
 		return nil
 	}
 	if err := s.sendBotCollectChannelDiscovery(ctx, source, payload.ChannelID, relation.Id, payload.ID); err != nil {

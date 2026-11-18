@@ -4,6 +4,7 @@ import (
 	"context"
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
+	"hotgo/addons/youban_publish/model/input/sysin"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 )
@@ -20,6 +21,7 @@ func collectAccountChannelBlacklisted(ctx context.Context, tenantID, accountID i
 		Where(cols.TenantId, tenantID).Where(cols.AccountId, accountID).
 		WhereIn(cols.ChannelId, channelIDs).Where(cols.SourceId, 0).
 		Where(cols.DisabledReason, introFeeChannelBlacklistReason).
+		Where(cols.Status, sysin.CollectAccountChannelDisabled).
 		WhereNull(cols.DeletedAt).Limit(1).One()
 	if err != nil {
 		return false, gerror.Wrap(err, "读取频道黑名单状态失败")

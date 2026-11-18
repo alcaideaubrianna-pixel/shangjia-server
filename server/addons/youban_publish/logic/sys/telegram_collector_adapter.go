@@ -1730,9 +1730,13 @@ func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, sourc
 	if !decision.Discover {
 		return false, nil
 	}
+	relationStatus := sysin.CollectAccountChannelDisabled
+	if decision.Allowed {
+		relationStatus = sysin.CollectAccountChannelEnabled
+	}
 	_, err := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Data(pdo.YoubanPublishCollectAccountChannel{
 		TenantId: tenantID, AccountId: accountID, ChannelId: channel.Id, SourceId: source["id"].Int64(),
-		CollectEnabled: 1, Status: sysin.CollectAccountChannelEnabled, ApprovalStatus: "approved", ApprovedAt: now,
+		CollectEnabled: introFeeBoolToInt(decision.Allowed), Status: relationStatus, ApprovalStatus: "pending",
 	}).InsertAndGetId()
 	if err != nil {
 		// A concurrent delivery may have created the relation; respect its decision.
@@ -1754,7 +1758,7 @@ func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, sourc
 	}); err != nil {
 		return false, err
 	}
-	return true, nil
+	return decision.Allowed, nil
 }
 
 func selectBotCollectChannel(candidates []botCollectChannelCandidate, chatID string) botCollectChannelCandidate {
@@ -1988,11 +1992,12 @@ func (s *sSysPublish) ensureAccountCollectChannelRelation(ctx context.Context, d
 	if !current.IsEmpty() {
 		return allowed(current), nil
 	}
+	discoveryEnabled := enabled && botCollectChannelRelationEnabled(defaultCollectChannelStatus())
 	relation := pdo.YoubanPublishCollectAccountChannel{
 		TenantId: delivery.TenantID, AccountId: delivery.AccountID, ChannelId: channelID, SourceId: delivery.SourceID,
-		CollectEnabled: introFeeBoolToInt(enabled), Status: sysin.CollectAccountChannelDisabled, ApprovalStatus: "approved",
+		CollectEnabled: introFeeBoolToInt(discoveryEnabled), Status: sysin.CollectAccountChannelDisabled, ApprovalStatus: "pending",
 	}
-	if enabled {
+	if discoveryEnabled {
 		relation.Status = sysin.CollectAccountChannelEnabled
 		relation.ApprovedAt = now
 	} else {
