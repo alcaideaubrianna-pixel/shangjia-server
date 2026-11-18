@@ -6,14 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
-	pdao "hotgo/addons/youban_publish/internal/dao"
 	iservice "hotgo/internal/service"
 )
 
@@ -24,7 +22,6 @@ type collectMediaReplaceMode int
 const (
 	collectMediaReplaceDuplicate collectMediaReplaceMode = iota
 	collectMediaReplaceLateArrival
-	collectMediaFillVerification
 )
 
 func duplicateCollectMediaReplaceEnabled(ctx context.Context) bool {
@@ -152,43 +149,6 @@ func (s *sSysPublish) replaceLateCollectProfileMedia(ctx context.Context, event 
 	return s.replaceCollectProfileMedia(ctx, event, content, profileID, collectMediaReplaceLateArrival)
 }
 
-// fillDuplicateCollectVerification accepts only the explicit fingerprint hit
-// of this rule. Source adjacency stays attached to the original event; dedupe
-// must not discard a ready verification group just because its display exists.
-func (s *sSysPublish) fillDuplicateCollectVerification(ctx context.Context, event, rule gdb.Record, content *collectContentResult, hit *profileFingerprintDuplicateError) (bool, error) {
-	if hit == nil || hit.Layer != "text_hash" || !collectContentHasVerification(content) || rule["review_enabled"].Int() == 1 || strings.TrimSpace(event["text_hash"].String()) == "" {
-		return false, nil
-	}
-	lookupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	// A channel-level hit alone is insufficient: prove the original accepted
-	// branch belongs to this same rule, source, actual channel and raw text.
-	d := pdao.YoubanPublishCollectDispatch.Columns()
-	dispatches, err := pdao.YoubanPublishCollectDispatch.Ctx(lookupCtx).
-		Where(d.TenantId, event["tenant_id"].Int64()).Where(d.AccountId, event["account_id"].Int64()).
-		Where(d.SourceId, event["source_id"].Int64()).Where(d.RuleId, rule["id"].Int64()).
-		Where(d.ProfileId, hit.ProfileID).Fields(d.EventId).Limit(2).All()
-	if err != nil {
-		return false, gerror.Wrap(err, "核对重复资料验证补全分支失败")
-	}
-	if len(dispatches) != 1 {
-		return false, nil
-	}
-	c := pdao.YoubanPublishCollectEvent.Columns()
-	original, err := pdao.YoubanPublishCollectEvent.Ctx(lookupCtx).
-		Where(c.Id, dispatches[0][d.EventId].Int64()).Where(c.TenantId, event["tenant_id"].Int64()).
-		WhereIn(c.AccountId, collectEventAccountScope(event)).Where(c.SourceId, event["source_id"].Int64()).
-		WhereIn(c.SourceChatId, tgChannelCacheLookupIds(event["source_chat_id"].String())).
-		Where(c.TextHash, event["text_hash"].String()).Fields(c.Id).One()
-	if err != nil {
-		return false, gerror.Wrap(err, "核对重复资料验证补全来源失败")
-	}
-	if original.IsEmpty() {
-		return false, nil
-	}
-	return s.replaceCollectProfileMedia(ctx, event, content, hit.ProfileID, collectMediaFillVerification)
-}
-
 func (s *sSysPublish) replaceCollectProfileMedia(
 	ctx context.Context,
 	event gdb.Record,
@@ -235,19 +195,10 @@ func (s *sSysPublish) replaceCollectProfileMedia(
 	replaced := decision == duplicateMediaReplaceRetryPublish && mode == collectMediaReplaceDuplicate
 	var oldFingerprints, fingerprints []profileFingerprint
 	var prepared *collectPreparedMaterial
-	if decision == duplicateMediaReplaceAllowed || mode == collectMediaReplaceLateArrival || mode == collectMediaFillVerification {
+	if decision == duplicateMediaReplaceAllowed || mode == collectMediaReplaceLateArrival {
 		prepared, err = s.prepareCollectMaterial(ctx, event, content)
 		if err != nil {
 			return false, err
-		}
-		if mode == collectMediaFillVerification {
-			verifyMedia := make([]collectPreparedMedia, 0, len(prepared.Media))
-			for _, media := range prepared.Media {
-				if media.Purpose == collectMaterialRoleVerify {
-					verifyMedia = append(verifyMedia, media)
-				}
-			}
-			prepared.Media = verifyMedia
 		}
 		now := gtime.Now()
 		err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
@@ -278,12 +229,6 @@ func (s *sSysPublish) replaceCollectProfileMedia(
 				return gerror.Wrap(txErr, "读取重复资料原媒体失败")
 			}
 			plan := buildDuplicateMediaReplacePlan(existingMedia, prepared.Media)
-			if mode == collectMediaFillVerification {
-				plan, txErr = duplicateVerificationFillPlan(existingMedia, prepared.Media)
-				if txErr != nil {
-					return txErr
-				}
-			}
 			if !plan.DisplayChanged && !plan.VerifyChanged {
 				return nil
 			}
@@ -349,7 +294,7 @@ func (s *sSysPublish) replaceCollectProfileMedia(
 			return replaced, err
 		}
 	}
-	if (mode == collectMediaReplaceLateArrival || mode == collectMediaFillVerification) && !replaced {
+	if mode == collectMediaReplaceLateArrival && !replaced {
 		// A prior attempt may have committed the media transaction but failed
 		// before persisting the publish jobs. Reuse the versioned operation below.
 		replaced = true
@@ -372,13 +317,8 @@ func (s *sSysPublish) replaceCollectProfileMedia(
 		CollectSourceMessageId: event["source_message_id"].Int64(),
 	}
 	operationNo := fmt.Sprintf("collect_media_replace:%d", eventID)
-	if mode == collectMediaReplaceLateArrival || mode == collectMediaFillVerification {
+	if mode == collectMediaReplaceLateArrival {
 		operationNo = collectMediaReplaceOperationNo(eventID, prepared.Media)
-		if mode == collectMediaFillVerification {
-			// Multiple duplicate events carrying the same verification must
-			// converge on one profile/media operation, including crash retries.
-			operationNo = "collect_verify_fill:" + collectMediaReplaceOperationNo(profileID, prepared.Media)
-		}
 		if _, sourceErr := s.profilePublishSource(ctx, profileID, tenantID, accountID, true); sourceErr != nil {
 			if errors.Is(sourceErr, errPublishProfileUnavailable) {
 				s.appendCollectEventLogForRecord(ctx, event, "late_media_replace", "skipped", "资料已下架或非公开，仅更新迟到媒体，不自动发布", fmt.Sprintf("profileId=%d operationNo=%s", profileID, operationNo))
@@ -387,7 +327,7 @@ func (s *sSysPublish) replaceCollectProfileMedia(
 			return true, sourceErr
 		}
 	}
-	requireOnline := mode == collectMediaReplaceLateArrival || mode == collectMediaFillVerification
+	requireOnline := mode == collectMediaReplaceLateArrival
 	if err = s.submitProfilePublishWithMeta(ctx, profileID, tenantID, accountID, accountID, operationNo, channelIDs, requireOnline, meta); err != nil {
 		if requireOnline && errors.Is(err, errPublishProfileUnavailable) {
 			s.appendCollectEventLogForRecord(ctx, event, "late_media_replace", "skipped", "资料已下架或非公开，仅更新迟到媒体，不自动发布", fmt.Sprintf("profileId=%d operationNo=%s", profileID, operationNo))
@@ -395,28 +335,8 @@ func (s *sSysPublish) replaceCollectProfileMedia(
 		}
 		return true, gerror.Wrap(err, "提交重复资料媒体覆盖发布失败")
 	}
-	if mode == collectMediaFillVerification {
-		g.Log().Info(ctx, "重复资料验证补全已交接发布", g.Map{
-			"event": "collect_duplicate_verification_submitted", "collectEventId": eventID,
-			"sourceId": event["source_id"].Int64(), "profileId": profileID,
-			"operationNo": operationNo, "verificationCount": len(prepared.Media),
-		})
-	} else {
-		s.appendCollectEventLogForRecord(ctx, event, "dedupe_media_replace", "completed", "重复资料媒体已覆盖并重新提交发布", fmt.Sprintf("profileId=%d", profileID))
-	}
+	s.appendCollectEventLogForRecord(ctx, event, "dedupe_media_replace", "completed", "重复资料媒体已覆盖并重新提交发布", fmt.Sprintf("profileId=%d", profileID))
 	return true, nil
-}
-
-func duplicateVerificationFillPlan(existing gdb.Result, prepared []collectPreparedMedia) (duplicateMediaReplacePlan, error) {
-	wanted := preparedDuplicateMediaByPurpose(prepared, collectMaterialRoleVerify)
-	stored := storedDuplicateMediaByPurpose(existing, collectMaterialRoleVerify)
-	if len(wanted) == 0 {
-		return duplicateMediaReplacePlan{}, gerror.New("重复资料验证补全缺少验证媒体")
-	}
-	if len(stored) > 0 && !duplicateMediaSnapshotsEqual(stored, wanted) {
-		return duplicateMediaReplacePlan{}, gerror.New("资料已有其他验证媒体，拒绝自动覆盖")
-	}
-	return duplicateMediaReplacePlan{VerifyChanged: len(stored) == 0}, nil
 }
 
 func collectMediaReplaceOperationNo(eventID int64, media []collectPreparedMedia) string {

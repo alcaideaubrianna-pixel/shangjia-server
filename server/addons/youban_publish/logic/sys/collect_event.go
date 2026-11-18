@@ -1159,12 +1159,6 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 		return false, "", findErr
 	}
 	if hit != nil {
-		if filled, fillErr := s.fillDuplicateCollectVerification(ctx, event, rule, content, hit); fillErr != nil {
-			return false, "", fillErr
-		} else if filled {
-			s.appendCollectEventLogForRecord(ctx, event, "dedupe_verify_fill", "completed", "重复展示资料的验证媒体已补全并提交发布", fmt.Sprintf("rule=%d profileId=%d", rule["id"].Int64(), hit.ProfileID))
-			return true, "", nil
-		}
 		replaced, replaceErr := s.replaceDuplicateCollectProfileMedia(ctx, event, content, hit.ProfileID)
 		if replaceErr != nil {
 			return false, "", replaceErr
