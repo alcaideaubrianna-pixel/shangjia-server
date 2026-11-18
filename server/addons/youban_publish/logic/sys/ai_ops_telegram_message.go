@@ -103,7 +103,7 @@ func (s *sSysPublish) resolveAIOpsCollectedMessage(ctx context.Context, ref aiOp
 		LeftJoin(publishAccountTable+" a", "a.id=s.account_id AND a.deleted_at IS NULL").
 		Where("e.source_message_id", ref.MessageId)
 	if ref.Username != "" {
-		mod = mod.Where("LOWER(TRIM(LEADING '@' FROM s.source_username))", strings.ToLower(ref.Username))
+		mod = mod.Where("LOWER(TRIM(LEADING '@' FROM s.source_username)) = ?", strings.ToLower(ref.Username))
 	} else {
 		mod = mod.Where("e.source_chat_id", ref.ChatId)
 	}
