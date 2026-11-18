@@ -310,6 +310,22 @@ func (s *sSysPublish) prepareFullPushProfileBatch(ctx context.Context, batch ful
 				return err
 			}
 			operationNo := fullPushProfileOperationNo(batch.BatchNo, profile.ProfileId)
+			// Revalidate under the profile fence before replacing its UI operation.
+			// A concurrent takedown skips this profile, not the remaining batch.
+			if fenceErr := lockProfileFullPushFenceTx(ctx, tx, telegramJobRecord{
+				TenantId: profile.TenantId, AccountId: profile.AccountId, ProfileId: profile.ProfileId,
+				ChannelId: batch.ChannelId, OperationNo: operationNo,
+			}); fenceErr != nil {
+				if errors.Is(fenceErr, errTelegramJobSuperseded) {
+					g.Log().Info(ctx, "全量推送资料已失去入场资格，继续处理批次", g.Map{
+						"event": "telegram_full_push_admission_skipped", "tenantId": profile.TenantId,
+						"accountId": profile.AccountId, "profileId": profile.ProfileId,
+						"channelId": batch.ChannelId, "operationNo": operationNo, "reason": "operation_fence",
+					})
+					continue
+				}
+				return fenceErr
+			}
 			if err := s.beginProfilePublishOperationTx(ctx, tx, profile.TenantId, profile.AccountId, profile.ProfileId, operationNo); err != nil {
 				return err
 			}

@@ -1064,8 +1064,8 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 	stage := beginTelegramPublishStage(ctx, "job.handle_error", g.Map{"cause": telegramPublishLogError(err)})
 	defer stage.Finish(&resultErr)
 	if errors.Is(err, errTelegramJobSuperseded) {
-		beginTelegramPublishStage(ctx, "job.error_decision").End(nil, g.Map{"decision": "superseded"})
-		return nil
+		beginTelegramPublishStage(ctx, "job.error_decision").End(nil, g.Map{"decision": "settle_superseded"})
+		return s.settleSupersededTelegramSend(ctx, job)
 	}
 	if errors.Is(err, errTelegramAwaitingWebhook) {
 		beginTelegramPublishStage(ctx, "job.error_decision").End(nil, g.Map{"decision": "await_ambiguous_delivery"})

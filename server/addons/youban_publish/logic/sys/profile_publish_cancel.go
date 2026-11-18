@@ -58,6 +58,9 @@ func lockProfilePublishFenceTx(ctx context.Context, tx gdb.TX, job telegramJobRe
 	if !profilePublishCancelEnabled() || job.ProfileId <= 0 || job.OperationNo == "" {
 		return nil
 	}
+	if strings.HasPrefix(job.OperationNo, "full_push:") {
+		return lockProfileFullPushFenceTx(ctx, tx, job)
+	}
 	state, err := tx.Model(publishProfileStateTable).Ctx(ctx).
 		Where("tenant_id", job.TenantId).Where("account_id", job.AccountId).
 		Where("profile_id", job.ProfileId).Fields("publish_operation_no,publish_task_status").

@@ -655,6 +655,12 @@ func checkTelegramFallbackProfileOperationTx(ctx context.Context, tx gdb.TX, job
 	if job.ProfileId <= 0 || job.OperationNo == "" {
 		return nil
 	}
+	if profilePublishCancelEnabled() && strings.HasPrefix(job.OperationNo, "full_push:") {
+		// Callers already acquired the profile fence before AccountTask/Job.
+		// Rechecking the current Job reenters those same transaction-held locks;
+		// it must use channel-batch scope rather than the last UI operation.
+		return lockProfilePublishFenceTx(ctx, tx, job)
+	}
 	state, err := tx.Model(publishProfileStateTable).Ctx(ctx).
 		Where("tenant_id", job.TenantId).Where("account_id", job.AccountId).Where("profile_id", job.ProfileId).
 		Fields("publish_operation_no,publish_task_status").One()

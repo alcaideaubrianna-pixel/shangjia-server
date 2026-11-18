@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -200,24 +201,17 @@ func (s *sSysPublish) deleteProfilesTelegramMessages(ctx context.Context, ids []
 	if err != nil {
 		return false, err
 	}
-	cleanupJobs := make([]int64, 0, len(jobs))
+	cleanupPayloads, err := s.prepareProfileDownCleanupPayloads(ctx, jobs, policies, operationNo)
+	if err != nil {
+		return false, err
+	}
 	for _, job := range jobs {
-		preserve, configured := policies[job.ChannelId]
-		if !configured || preserve {
+		payload, ok := cleanupPayloads[job.Id]
+		if !ok {
 			s.appendTelegramJobLog(ctx, job.telegramJobRecord(), "down", "skipped", "资料下架，频道已配置保留旧消息")
 			continue
 		}
-		cleanupJobs = append(cleanupJobs, job.Id)
-	}
-	for _, job := range jobs {
-		preserve, configured := policies[job.ChannelId]
-		if !configured || preserve {
-			continue
-		}
-		if err = s.enqueueTelegramCleanupJobWithContext(ctx, job.Id, 0, tgQueuePayload{
-			CleanupOperationNo: strings.TrimSpace(operationNo),
-			CleanupJobIds:      cleanupJobs,
-		}); err != nil {
+		if err = s.enqueueTelegramCleanupJobWithContext(ctx, job.Id, 0, payload); err != nil {
 			failed++
 			if firstErr == nil {
 				firstErr = gerror.Wrapf(err, "加入TG下架清理队列失败 jobId:%d", job.Id)
@@ -228,9 +222,95 @@ func (s *sSysPublish) deleteProfilesTelegramMessages(ctx context.Context, ids []
 		s.appendTelegramJobLog(ctx, job.telegramJobRecord(), "down", "queued", "资料下架，TG历史消息已加入Redis清理队列")
 	}
 	if firstErr != nil {
-		return len(cleanupJobs) > 0, gerror.Wrapf(firstErr, "批量下架清理完成，失败%d条", failed)
+		return len(cleanupPayloads) > 0, gerror.Wrapf(firstErr, "批量下架清理完成，失败%d条", failed)
 	}
-	return len(cleanupJobs) > 0, nil
+	return len(cleanupPayloads) > 0, nil
+}
+
+// Both the initial offline sweep and the down-run use the same owner-scoped
+// context. A retry restores each existing intent even if its sibling jobs have
+// already been cleaned; recomputing from only live messages would shrink it.
+func (s *sSysPublish) prepareProfileDownCleanupPayloads(ctx context.Context, jobs []telegramResubmitJob, policies map[int64]bool, operationNo string) (map[int64]tgQueuePayload, error) {
+	payloads, err := buildProfileDownCleanupPayloads(jobs, policies, operationNo)
+	if err != nil || len(payloads) == 0 {
+		return payloads, err
+	}
+	jobIDs := make([]int64, 0, len(payloads))
+	for jobID := range payloads {
+		jobIDs = append(jobIDs, jobID)
+	}
+	sort.Slice(jobIDs, func(i, j int) bool { return jobIDs[i] < jobIDs[j] })
+	var intents []telegramCleanupIntent
+	if err = g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).Master().
+		WhereIn("job_id", jobIDs).Where("event_type", telegramOutboxCleanupPrefix+"manual").
+		Where("operation_no", strings.TrimSpace(operationNo)).
+		Fields("id,job_id,event_type,operation_no,payload").Scan(&intents); err != nil {
+		return nil, gerror.Wrap(err, "读取资料下架清理上下文失败")
+	}
+	for _, intent := range intents {
+		payload, err := restoreProfileDownCleanupPayload(payloads[intent.JobId], intent)
+		if err != nil {
+			return nil, err
+		}
+		payloads[intent.JobId] = payload
+	}
+	return payloads, nil
+}
+
+func buildProfileDownCleanupPayloads(jobs []telegramResubmitJob, policies map[int64]bool, operationNo string) (map[int64]tgQueuePayload, error) {
+	operationNo = strings.TrimSpace(operationNo)
+	if operationNo == "" {
+		return nil, gerror.New("资料下架清理缺少当前操作号")
+	}
+	var (
+		owners    = make(map[int64][3]int64)
+		ownerJobs = make(map[[3]int64][]int64)
+		payloads  = make(map[int64]tgQueuePayload)
+	)
+	for _, job := range jobs {
+		if job.Id <= 0 {
+			continue
+		}
+		if job.TenantId <= 0 || job.AccountId < 0 || job.ProfileId <= 0 {
+			return nil, gerror.New("资料下架清理任务归属不完整")
+		}
+		owner := [3]int64{job.TenantId, job.AccountId, job.ProfileId}
+		if previous, ok := owners[job.Id]; ok && previous != owner {
+			return nil, gerror.New("资料下架清理任务归属冲突")
+		}
+		owners[job.Id] = owner
+		if preserve, configured := policies[job.ChannelId]; !configured || preserve {
+			continue
+		}
+		ownerJobs[owner] = append(ownerJobs[owner], job.Id)
+	}
+	for _, ids := range ownerJobs {
+		ids = uniqueIds(ids)
+		sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+		for _, jobID := range ids {
+			payloads[jobID] = tgQueuePayload{
+				JobId: jobID, CleanupOperationNo: operationNo,
+				CleanupJobIds: append([]int64(nil), ids...),
+			}
+		}
+	}
+	return payloads, nil
+}
+
+// Persisted context wins, including legacy empty sets and delivered intents.
+// Returning its exact ID makes enqueue hydrate it instead of proposing a new
+// context to ensureTelegramCleanupIntent. Never rewrite or upgrade that intent.
+func restoreProfileDownCleanupPayload(candidate tgQueuePayload, intent telegramCleanupIntent) (tgQueuePayload, error) {
+	if intent.Id <= 0 || candidate.JobId != intent.JobId ||
+		intent.EventType != telegramOutboxCleanupPrefix+"manual" ||
+		strings.TrimSpace(candidate.CleanupOperationNo) == "" || candidate.CleanupOperationNo != intent.OperationNo {
+		return tgQueuePayload{}, gerror.New("资料下架清理意图归属不匹配")
+	}
+	payload, err := decodeTelegramCleanupIntentPayload(intent)
+	if err != nil {
+		return tgQueuePayload{}, err
+	}
+	return payload, nil
 }
 
 func (s *sSysPublish) notifyProfilesDown(ctx context.Context, ids []int64, tenantId int64, channels []telegramJobChannel, operationNo string, cutoffAt string) error {

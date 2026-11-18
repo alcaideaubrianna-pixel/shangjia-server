@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -573,18 +574,76 @@ func (s *sSysPublish) recoverProfilePublishOperationState(ctx context.Context, s
 		if err = s.reconcileCollectOperationDispatch(ctx, job); err != nil {
 			return err
 		}
-		if !isCycleBatchOperation(job.OperationNo) {
-			if _, err = s.syncProfilePublishState(ctx, job.ProfileId, 1, consts.ContentVisibilityPublic, gtime.Now()); err != nil {
-				return err
-			}
-		}
-		if err = s.clearProfilePublishOperationState(ctx, job); err != nil {
-			return err
-		}
-		if err = s.syncProfileNoteIndex(ctx, job.ProfileId); err != nil {
-			return err
-		}
-		service.SysContent().ClearHomeProfileCardsCache(ctx)
+		return s.recoverCompletedProfilePublishOperation(ctx, job)
 	}
 	return nil
+}
+
+// Follow normal completion's lock order: lifecycle lock, then the transactional
+// profile-state fence, before changing the profile's business visibility.
+func (s *sSysPublish) recoverCompletedProfilePublishOperation(ctx context.Context, job telegramJobRecord) error {
+	return s.withProfileLifecycleLock(ctx, job.TenantId, job.ProfileId, func() error {
+		var completed bool
+		if err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+			var err error
+			completed, err = s.recoverCompletedProfilePublishOperationTx(ctx, tx, job)
+			return err
+		}); err != nil {
+			return err
+		}
+		if !completed {
+			return nil
+		}
+		// Rebuild the read model only after the source transaction commits, while
+		// still excluding a concurrent lifecycle operation.
+		indexErr := s.syncProfileNoteIndex(ctx, job.ProfileId)
+		service.SysContent().ClearHomeProfileCardsCache(ctx)
+		return indexErr
+	})
+}
+
+func (s *sSysPublish) recoverCompletedProfilePublishOperationTx(ctx context.Context, tx gdb.TX, job telegramJobRecord) (bool, error) {
+	if job.TenantId <= 0 || job.AccountId < 0 || job.ProfileId <= 0 || strings.TrimSpace(job.OperationNo) == "" {
+		return false, nil
+	}
+	if err := lockProfilePublishFenceTx(ctx, tx, job); err != nil {
+		if errors.Is(err, errTelegramJobSuperseded) {
+			return false, nil
+		}
+		return false, err
+	}
+	// Keep the row lock and current-operation check even when cancellation is
+	// disabled. A cleared status is a newer takedown/completion, not permission
+	// to republish an operation found by the earlier recovery scan.
+	var current profilePublishOperationState
+	if err := tx.Model(publishProfileStateTable).Ctx(ctx).
+		Where("tenant_id", job.TenantId).Where("account_id", job.AccountId).
+		Where("profile_id", job.ProfileId).WhereNull("deleted_at").
+		LockUpdate().Scan(&current); !telegramOptionalAttemptScanSucceeded(err) {
+		return false, gerror.Wrap(err, "锁定待恢复资料上架操作失败")
+	}
+	if current.ProfileId <= 0 || current.PublishOperationNo != job.OperationNo ||
+		(current.PublishTaskStatus != sysin.PublishTaskStatusPending && current.PublishTaskStatus != sysin.PublishTaskStatusPublishing) {
+		return false, nil
+	}
+	canceled, err := profileOperationCanceledTx(ctx, tx, job)
+	if err != nil {
+		return false, gerror.Wrap(err, "检查待恢复资料取消状态失败")
+	}
+	if canceled {
+		return false, nil
+	}
+	if !isCycleBatchOperation(job.OperationNo) {
+		// Use the transaction callback's context, as normal completion does:
+		// the existing business writer participates in this same transaction.
+		if _, err := s.syncProfilePublishState(ctx, job.ProfileId, 1, consts.ContentVisibilityPublic, gtime.Now()); err != nil {
+			return false, err
+		}
+	}
+	// Preserve the existing clear entry point's account eligibility. Its nested
+	// transaction uses this callback context, retaining the operation row lock.
+	if err := s.clearProfilePublishOperationState(ctx, job); err != nil {
+		return false, err
+	}
+	return true, nil
 }

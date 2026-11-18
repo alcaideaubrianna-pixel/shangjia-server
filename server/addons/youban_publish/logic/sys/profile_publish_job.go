@@ -337,6 +337,27 @@ func (s *sSysPublish) prepareProfilePublishJobs(ctx context.Context, profileId, 
 		jobIds = jobIds[:0]
 	}
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if strings.HasPrefix(operationNo, "full_push:") {
+			if len(channels) != 1 {
+				return gerror.New("全量推送目标频道不完整")
+			}
+			// Check admission before replacing the UI operation: a stale source
+			// snapshot must not overwrite a concurrent takedown or cancellation.
+			if fenceErr := lockProfileFullPushFenceTx(ctx, tx, telegramJobRecord{
+				TenantId: source["tenant_id"].Int64(), AccountId: source["account_id"].Int64(),
+				ProfileId: profileId, ChannelId: channels[0].Id, OperationNo: operationNo,
+			}); fenceErr != nil {
+				if errors.Is(fenceErr, errTelegramJobSuperseded) {
+					g.Log().Info(ctx, "全量推送资料已失去入场资格", g.Map{
+						"event": "telegram_full_push_admission_skipped", "tenantId": source["tenant_id"].Int64(),
+						"accountId": source["account_id"].Int64(), "profileId": profileId,
+						"channelId": channels[0].Id, "operationNo": operationNo, "reason": "operation_fence",
+					})
+					return errPublishProfileUnavailable
+				}
+				return fenceErr
+			}
+		}
 		if txErr := s.beginProfilePublishOperationTx(ctx, tx, source["tenant_id"].Int64(), source["account_id"].Int64(), profileId, operationNo); txErr != nil {
 			return txErr
 		}
@@ -480,7 +501,7 @@ func (s *sSysPublish) ensureTelegramProfileJobWithMeta(ctx context.Context, sour
 
 // ensureTelegramProfileJobWithMetaTx 按账户、操作和频道幂等创建任务；新操作不复用另一操作的优先级。
 func (s *sSysPublish) ensureTelegramProfileJobWithMetaTx(ctx context.Context, tx gdb.TX, source gdb.Record, channel telegramJobChannel, operationNo string, meta telegramProfilePublishMeta) (int64, error) {
-	if err := lockProfilePublishFenceTx(ctx, tx, telegramJobRecord{TenantId: source["tenant_id"].Int64(), AccountId: source["account_id"].Int64(), ProfileId: source["profile_id"].Int64(), OperationNo: operationNo}); err != nil {
+	if err := lockProfilePublishFenceTx(ctx, tx, telegramJobRecord{TenantId: source["tenant_id"].Int64(), AccountId: source["account_id"].Int64(), ProfileId: source["profile_id"].Int64(), ChannelId: channel.Id, OperationNo: operationNo}); err != nil {
 		return 0, err
 	}
 	// Resolve collection source per target publish channel. A profile can be

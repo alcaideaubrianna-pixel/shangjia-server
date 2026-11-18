@@ -589,13 +589,17 @@ func (s *sSysPublish) setProfilesOffline(ctx context.Context, ids []int64, tenan
 		return err
 	}
 	manualDown := len(operationNos) > 0 && isManualTelegramCleanupUnpublish(tgQueuePayload{CleanupOperationNo: operationNos[0]})
-	var policies map[int64]bool
+	var cleanupPayloads map[int64]tgQueuePayload
 	if manualDown {
 		channelIDs := make([]int64, 0, len(activeJobs))
 		for _, job := range activeJobs {
 			channelIDs = append(channelIDs, job.ChannelId)
 		}
-		policies, err = s.channelHistoryMessagePolicies(ctx, tenantId, channelIDs)
+		policies, policyErr := s.channelHistoryMessagePolicies(ctx, tenantId, channelIDs)
+		if policyErr != nil {
+			return policyErr
+		}
+		cleanupPayloads, err = s.prepareProfileDownCleanupPayloads(ctx, activeJobs, policies, operationNos[0])
 		if err != nil {
 			return err
 		}
@@ -604,13 +608,14 @@ func (s *sSysPublish) setProfilesOffline(ctx context.Context, ids []int64, tenan
 		if job.Id <= 0 {
 			continue
 		}
+		cleanupPayload := tgQueuePayload{}
 		if manualDown {
-			if preserve, configured := policies[job.ChannelId]; !configured || preserve {
+			var ok bool
+			cleanupPayload, ok = cleanupPayloads[job.Id]
+			if !ok {
 				continue
 			}
-		}
-		cleanupPayload := tgQueuePayload{}
-		if len(operationNos) > 0 {
+		} else if len(operationNos) > 0 {
 			cleanupPayload.CleanupOperationNo = strings.TrimSpace(operationNos[0])
 		}
 		if err := s.enqueueTelegramCleanupJobWithContext(ctx, job.Id, 0, cleanupPayload); err != nil {
