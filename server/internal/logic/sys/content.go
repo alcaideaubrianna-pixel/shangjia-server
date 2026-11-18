@@ -16,6 +16,7 @@ import (
 	"hotgo/internal/library/storager"
 	"hotgo/internal/library/token"
 	"hotgo/internal/model/entity"
+	"hotgo/internal/model/input/form"
 	"hotgo/internal/model/input/sysin"
 	"hotgo/internal/service"
 	"hotgo/utility/profilesearch"
@@ -450,7 +451,7 @@ func (s *sSysContent) ListProfiles(ctx context.Context, in *sysin.ContentProfile
 func (s *sSysContent) listProfilesByFilter(ctx context.Context, in *sysin.ContentProfileListInp, feed homeProfileFeed) (list []*sysin.ContentProfileListModel, totalCount int, err error) {
 	profileColumns := dao.ContentProfile.Columns()
 	mod := dao.ContentProfile.Ctx(ctx).As("p")
-	mod = s.publicProfileWhere(mod)
+	mod = s.publicProfileWhere(mod, feed == homeProfileFeedLatest && in.FetchNextRow && isPgsql())
 	if len(in.ProfileIds) > 0 {
 		mod = mod.WhereIn(aliasField("p", profileColumns.Id), in.ProfileIds)
 	}
@@ -589,7 +590,12 @@ func (s *sSysContent) listProfilesByFilter(ctx context.Context, in *sysin.Conten
 			profileColumns.PublishedAt,
 		),
 	)
-	mod = mod.Page(in.Page, in.PerPage)
+	if in.FetchNextRow {
+		_, pageSize, offset := form.CalPage(in.Page, in.PerPage)
+		mod = mod.Limit(offset, pageSize+1)
+	} else {
+		mod = mod.Page(in.Page, in.PerPage)
+	}
 	switch feed {
 	case homeProfileFeedHot, homeProfileFeedRecommended:
 		mod = mod.LeftJoin(contentProfileStatsTable+" ps", "ps.profile_id="+aliasField("p", profileColumns.Id))
@@ -1812,18 +1818,25 @@ func (s *sSysContent) ImportRunList(ctx context.Context, in *sysin.ContentImport
 	return
 }
 
-func (s *sSysContent) publicProfileWhere(mod *gdb.Model) *gdb.Model {
-	mod = s.publicProfileAccessWhere(mod)
+func (s *sSysContent) publicProfileWhere(mod *gdb.Model, preferScopeFirst ...bool) *gdb.Model {
 	profileColumns := dao.ContentProfile.Columns()
 	mediaColumns := dao.ContentMedia.Columns()
-	mod = mod.
-		Where("EXISTS (SELECT 1 FROM ("+
-			"SELECT m."+mediaColumns.ProfileId+" FROM "+dao.ContentMedia.Table()+" m WHERE m."+mediaColumns.ProfileId+"=p."+profileColumns.Id+" AND m."+mediaColumns.Status+"=? AND m."+mediaColumns.MediaType+"=? AND COALESCE(m."+mediaColumns.DisplayStoragePath+", '')<>'' "+
-			"UNION ALL "+
-			"SELECT pm.profile_id FROM hg_youban_publish_media pm WHERE pm.profile_id=p."+profileColumns.Id+" AND pm.status=? AND pm.deleted_at IS NULL AND pm.media_type=? AND COALESCE(NULLIF(pm.edited_storage_path, ''), NULLIF(pm.storage_path, ''), NULLIF(pm.edited_file_url, ''), NULLIF(pm.file_url, ''))<>''"+
-			") available_media LIMIT 1)",
-			consts.StatusEnabled, consts.ContentMediaTypeImage, consts.StatusEnabled, "image")
-	return mod
+	condition := "EXISTS (SELECT 1 FROM (" +
+		"SELECT m." + mediaColumns.ProfileId + " FROM " + dao.ContentMedia.Table() + " m WHERE m." + mediaColumns.ProfileId + "=p." + profileColumns.Id + " AND m." + mediaColumns.Status + "=? AND m." + mediaColumns.MediaType + "=? AND COALESCE(m." + mediaColumns.DisplayStoragePath + ", '')<>'' " +
+		"UNION ALL " +
+		"SELECT pm.profile_id FROM hg_youban_publish_media pm WHERE pm.profile_id=p." + profileColumns.Id + " AND pm.status=? AND pm.deleted_at IS NULL AND pm.media_type=? AND COALESCE(NULLIF(pm.edited_storage_path, ''), NULLIF(pm.storage_path, ''), NULLIF(pm.edited_file_url, ''), NULLIF(pm.file_url, ''))<>''" +
+		") available_media LIMIT 1)"
+	scope := profilescope.FromContext(mod.GetCtx())
+	if len(preferScopeFirst) > 0 && preferScopeFirst[0] && scope.Applied && len(scope.TenantIds) == 1 {
+		// Keep media probes behind the tenant check on the ordered latest scan.
+		return mod.Where("p."+profileColumns.Status, 1).
+			Where("p."+profileColumns.Visibility, consts.ContentVisibilityPublic).
+			Where("CASE WHEN "+publicProfileScopeExistsCondition(profileColumns.Id, scope.RequireEnabledAccount)+
+				" THEN "+condition+" ELSE FALSE END", scope.TenantIds,
+				consts.StatusEnabled, consts.ContentMediaTypeImage, consts.StatusEnabled, "image")
+	}
+	return s.publicProfileAccessWhere(mod).Where(condition,
+		consts.StatusEnabled, consts.ContentMediaTypeImage, consts.StatusEnabled, "image")
 }
 
 func (s *sSysContent) publicProfileAccessWhere(mod *gdb.Model) *gdb.Model {

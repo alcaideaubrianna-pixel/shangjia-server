@@ -34,7 +34,8 @@ type ListReq struct {
 
 type ListRes struct {
 	form.PageRes
-	List []*sysin.ContentProfileListModel `json:"list"`
+	List    []*sysin.ContentProfileListModel `json:"list"`
+	HasMore bool                             `json:"hasMore"`
 }
 
 type ViewReq struct {

@@ -42,6 +42,7 @@ type ContentProfileListInp struct {
 	HasTattoo         int    `json:"hasTattoo" dc:"有纹身"`
 	Sort              string `json:"sort" dc:"排序"`
 	WithTotal         int    `json:"withTotal" dc:"是否返回总数"`
+	FetchNextRow      bool   `json:"-"`
 	ExcludeActions    []string
 	ProfileIds        []int64 `json:"-"`
 	RankProfileIds    []int64 `json:"-"`

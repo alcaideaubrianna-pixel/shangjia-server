@@ -12,6 +12,7 @@ import (
 	addonService "hotgo/addons/youban_open/service"
 	"hotgo/internal/dao"
 	"hotgo/internal/library/profilescope"
+	"hotgo/internal/model/input/form"
 	"hotgo/internal/model/input/sysin"
 	"hotgo/internal/service"
 )
@@ -22,6 +23,7 @@ type cOpenProfile struct{}
 
 func (c *cOpenProfile) List(ctx context.Context, req *open.ListReq) (res *open.ListRes, err error) {
 	normalizeOpenProfilePage(req)
+	req.Page, req.PerPage, _ = form.CalPage(req.Page, req.PerPage)
 	in := openProfileListInput(req)
 	provinceCodes, err := normalizeProvinceCodes(req.ProvinceCode, req.ProvinceCodes)
 	if err != nil {
@@ -68,12 +70,21 @@ func (c *cOpenProfile) List(ctx context.Context, req *open.ListReq) (res *open.L
 	// interaction pipeline and must not block the list response.
 	in.RankProfileIds = nil
 	in.Feed, in.ActorId, in.WithTotal = feed, strings.TrimSpace(req.ActorId), req.WithTotal
+	in.FetchNextRow = in.WithTotal == 0
 	list, total, err := service.SysContent().ListProfiles(scopedCtx, &in)
 	if err != nil {
 		return nil, err
 	}
 	res = &open.ListRes{List: list}
 	res.PageRes.Pack(req, total)
+	if in.FetchNextRow {
+		res.HasMore = len(list) > req.PerPage
+		if res.HasMore {
+			res.List = list[:req.PerPage]
+		}
+	} else {
+		res.HasMore = req.Page < res.PageCount
+	}
 	return res, nil
 }
 
