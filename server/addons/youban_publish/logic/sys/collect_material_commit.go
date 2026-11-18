@@ -547,6 +547,15 @@ func (s *sSysPublish) commitCollectPreparedProfile(ctx context.Context, event gd
 	if content == nil || content.Content == nil {
 		return 0, gerror.New("采集资料媒体尚未准备完成")
 	}
+	// Approval of an old review can enter here without processing the event
+	// again. Never let that path create a profile from a publish target.
+	ctx, blocked, guardErr := s.checkCollectEventPublishTarget(ctx, event)
+	if guardErr != nil {
+		return 0, guardErr
+	}
+	if blocked {
+		return 0, gerror.New("采集来源是发布目标频道，禁止创建资料")
+	}
 	text = strings.TrimSpace(text)
 	title := collectTitle(text)
 	if title == "" {

@@ -24,9 +24,14 @@ import (
 )
 
 const (
-	aiOpsRepairPlanTable = "hg_youban_publish_ai_ops_repair_plan"
-	aiOpsRepairPlanTTL   = 15 * time.Minute
+	aiOpsRepairPlanTable     = "hg_youban_publish_ai_ops_repair_plan"
+	aiOpsRepairPlanTTL       = 15 * time.Minute
+	aiOpsSourceReplayTimeout = 5 * time.Minute
+	aiOpsRepairResultTimeout = 5 * time.Second
 )
+
+// Admission is per instance. Durable plan status still arbitrates claims across instances.
+var aiOpsSourceReplaySlots = make(chan struct{}, 2)
 
 var aiOpsRepairActions = map[string]struct{}{
 	"recover_verifications":       {},
@@ -513,14 +518,39 @@ func (s *sSysPublish) AIOpsApplyRepairPlan(ctx context.Context, in *sysin.AIOpsR
 	if err = json.Unmarshal([]byte(row["payload_json"].String()), &payload); err != nil {
 		return nil, gerror.Wrap(err, "解析修复计划失败")
 	}
+	if _, known := aiOpsRepairActions[payload.Action]; !known {
+		return nil, gerror.New("不支持的修复计划操作")
+	}
+	replaySlot := false
+	if payload.Action == "replay_bot_source_updates" {
+		select {
+		case aiOpsSourceReplaySlots <- struct{}{}:
+			replaySlot = true
+		default:
+			return nil, gerror.New("采集重放执行器繁忙，请稍后重试，计划尚未领取")
+		}
+		defer func() {
+			if replaySlot {
+				<-aiOpsSourceReplaySlots
+			}
+		}()
+	}
 	claim, err := g.DB().Model(aiOpsRepairPlanTable).Ctx(ctx).Where("plan_id", in.PlanId).Where("status", "pending").
 		Data(g.Map{"status": "running", "started_at": gtime.Now(), "updated_at": gtime.Now()}).Update()
 	if err != nil {
 		return nil, gerror.Wrap(err, "领取修复计划失败")
 	}
-	affected, _ := claim.RowsAffected()
+	affected, err := claim.RowsAffected()
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取修复计划领取结果失败")
+	}
 	if affected == 0 {
 		return nil, gerror.New("修复计划已被其他执行器领取")
+	}
+	if payload.Action == "replay_bot_source_updates" {
+		go s.runAIOpsSourceReplayPlanAsync(in.PlanId, payload)
+		replaySlot = false // The background runner now owns the admission slot.
+		return &sysin.AIOpsRepairApplyModel{PlanId: in.PlanId, Status: "running", Message: "采集重放已转入后台执行", Failed: []int64{}}, nil
 	}
 	if isAsyncAIOpsProfileAction(payload.Action) {
 		go s.runAIOpsProfilePlanAsync(in.PlanId, payload)
@@ -554,21 +584,6 @@ func (s *sSysPublish) AIOpsApplyRepairPlan(ctx context.Context, in *sysin.AIOpsR
 		result.Applied, result.Failed = s.applyAIOpsProfilePlan(ctx, payload.Action, payload.ProfileIDs, payload.TenantID, payload.AccountID)
 	case "repair_profile_media":
 		result.Applied, result.Failed = s.applyAIOpsProfilePlan(ctx, payload.Action, payload.ProfileIDs, payload.TenantID, payload.AccountID)
-	case "replay_bot_source_updates":
-		var tenantID, accountID int64
-		_, _, tenantID, accountID, err = s.previewAIOpsBotSourceReplay(ctx, payload.SourceID, payload.CollectorEventIDs, "", 0, 0, 1000)
-		if err == nil && (tenantID != payload.TenantID || accountID != payload.AccountID) {
-			err = gerror.New("目标source归属在计划预演后发生变化，请重新预演")
-		}
-		if err == nil {
-			var replay *collectorservice.BotUpdateReplayResult
-			replay, err = collectorservice.Collector().ReplayBotUpdatesForSource(ctx, tenantID, payload.SourceID, payload.CollectorEventIDs)
-			if err == nil && replay != nil {
-				result.Applied = replay.Queued
-				result.Failed = replay.Failed
-				result.Message = fmt.Sprintf("已入队%d条，已存在或正在处理%d条", replay.Queued, replay.Skipped)
-			}
-		}
 	}
 	if err != nil {
 		result.Status, result.Message = "failed", err.Error()
@@ -582,6 +597,74 @@ func (s *sSysPublish) AIOpsApplyRepairPlan(ctx context.Context, in *sysin.AIOpsR
 	}
 	g.Log().Info(ctx, "AI运维修复计划执行完成", g.Map{"planId": in.PlanId, "result": result})
 	return result, err
+}
+
+func (s *sSysPublish) runAIOpsSourceReplayPlanAsync(planID string, payload aiOpsRepairPlanPayload) {
+	defer func() { <-aiOpsSourceReplaySlots }()
+	ctx, cancel := context.WithTimeout(context.Background(), aiOpsSourceReplayTimeout)
+	defer cancel()
+	runAIOpsSourceReplayPlan(ctx, planID, func(ctx context.Context, result *sysin.AIOpsRepairApplyModel) error {
+		// Revalidate exactly the same ownership, approval and replay eligibility
+		// as synchronous apply; the collector still owns replay idempotency.
+		_, _, tenantID, accountID, err := s.previewAIOpsBotSourceReplay(ctx, payload.SourceID, payload.CollectorEventIDs, "", 0, 0, 1000)
+		if err != nil {
+			return err
+		}
+		if tenantID != payload.TenantID || accountID != payload.AccountID {
+			return gerror.New("目标source归属在计划预演后发生变化，请重新预演")
+		}
+		replay, err := collectorservice.Collector().ReplayBotUpdatesForSource(ctx, tenantID, payload.SourceID, payload.CollectorEventIDs)
+		if replay != nil {
+			result.Applied = replay.Queued
+			result.Failed = replay.Failed
+			result.Message = fmt.Sprintf("已入队%d条，已存在或正在处理%d条", replay.Queued, replay.Skipped)
+		}
+		if err == nil && replay == nil {
+			return gerror.New("采集重放未返回执行结果，请核查计划状态")
+		}
+		return err
+	})
+}
+
+// One execution only: an interrupted process leaves running for explicit
+// inspection. Unknown outcomes must never trigger automatic source replay.
+func runAIOpsSourceReplayPlan(ctx context.Context, planID string, execute func(context.Context, *sysin.AIOpsRepairApplyModel) error) {
+	result := &sysin.AIOpsRepairApplyModel{PlanId: planID, Status: "completed", Failed: []int64{}}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			result.Status, result.Message = "failed", fmt.Sprintf("采集重放执行异常：%v", recovered)
+			g.Log().Warning(ctx, "AI运维采集重放计划异常", g.Map{"planId": planID, "panic": recovered})
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil && result.Status != "failed" {
+			result.Status, result.Message = "failed", ctxErr.Error()
+		}
+		if len(result.Failed) > 0 && result.Status != "failed" {
+			result.Status = "failed"
+			result.Message = fmt.Sprintf("%s；%d条事件处理失败", result.Message, len(result.Failed))
+		}
+		// Request cancellation and the execution deadline cannot cancel the
+		// terminal write. If storage is unavailable, keep running and log it;
+		// never report success or silently replay an uncertain operation.
+		saveCtx, cancel := context.WithTimeout(context.Background(), aiOpsRepairResultTimeout)
+		defer cancel()
+		saved, err := g.DB().Model(aiOpsRepairPlanTable).Ctx(saveCtx).
+			Where("plan_id", planID).Where("status", "running").Data(g.Map{
+			"status": result.Status, "applied_count": result.Applied, "failed_ids_json": mustJSONString(result.Failed),
+			"error_message": result.Message, "finished_at": gtime.Now(), "updated_at": gtime.Now(),
+		}).Update()
+		if err != nil {
+			g.Log().Warning(saveCtx, "AI运维后台采集重放计划结果写回失败", g.Map{"planId": planID, "error": err.Error(), "result": result})
+			return
+		}
+		if affected, rowsErr := saved.RowsAffected(); rowsErr != nil || affected != 1 {
+			g.Log().Warning(saveCtx, "AI运维后台采集重放计划结果未写入运行态计划", g.Map{"planId": planID, "affected": affected, "error": rowsErr})
+			return
+		}
+		g.Log().Info(saveCtx, "AI运维后台采集重放计划执行完成", g.Map{"planId": planID, "result": result})
+	}()
+	if err := execute(ctx, result); err != nil {
+		result.Status, result.Message = "failed", err.Error()
+	}
 }
 
 func isAsyncAIOpsProfileAction(action string) bool {

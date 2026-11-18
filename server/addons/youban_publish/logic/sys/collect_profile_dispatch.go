@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
+	pdo "hotgo/addons/youban_publish/internal/model/do"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/cache"
 	"hotgo/internal/library/collectobserve"
@@ -135,6 +136,21 @@ func (s *sSysPublish) submitCollectProfileDispatch(ctx context.Context, dispatch
 	}()
 	if dispatchId <= 0 || profileId <= 0 || event.IsEmpty() {
 		return gerror.New("采集分发参数不完整")
+	}
+	// Existing pending dispatches can be resumed without the raw-message or
+	// event-processing ingress. They must pass the same actual-chat boundary.
+	ctx, blocked, guardErr := s.checkCollectEventPublishTarget(ctx, event)
+	if guardErr != nil {
+		return guardErr
+	}
+	if blocked {
+		outcome = collectPipelineIgnored
+		cols := pdao.YoubanPublishCollectDispatch.Columns()
+		_, updateErr := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
+			Where(cols.Id, dispatchId).Where(cols.TenantId, event["tenant_id"].Int64()).
+			Where(cols.SourceId, event["source_id"].Int64()).
+			Data(pdo.YoubanPublishCollectDispatch{Status: sysin.CollectDispatchStatusSkipped, ErrorMessage: "采集来源是发布目标频道，禁止回流分发"}).Update()
+		return gerror.Wrap(updateErr, "终止发布频道回流分发失败")
 	}
 	channelMap, err := collectDispatchChannelMap(ctx, []int64{dispatchId})
 	if err != nil {

@@ -221,7 +221,13 @@ func (s *sSysPublish) aiOpsOfflineResolvedProfiles(ctx context.Context, profileI
 		ProfileId int64 `json:"profile_id"`
 		TenantId  int64 `json:"tenant_id"`
 	}
-	if err := g.DB().Model(publishProfileStateTable).Ctx(ctx).Fields("profile_id,tenant_id").WhereIn("profile_id", profileIds).WhereNull("deleted_at").Scan(&owners); err != nil {
+	// Explicit message evidence may outlive its physically deleted profile. Only
+	// existing parents can be taken offline; their old jobs still use the normal
+	// cleanup path below, without treating a missing parent as a DB failure.
+	if err := g.DB().Model(publishProfileStateTable+" ps").Ctx(ctx).
+		InnerJoin("hg_content_profile p", "p.id=ps.profile_id AND p.deleted_at IS NULL").
+		Fields("ps.profile_id,ps.tenant_id").WhereIn("ps.profile_id", profileIds).
+		WhereNull("ps.deleted_at").Scan(&owners); err != nil {
 		return nil, gerror.Wrap(err, "读取资料租户失败")
 	}
 	groups := make(map[int64][]int64)

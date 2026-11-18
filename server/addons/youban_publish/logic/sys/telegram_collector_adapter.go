@@ -1443,9 +1443,21 @@ func (s *sSysPublish) ingestCollectorBotDelivery(ctx context.Context, delivery *
 		logCollectorDeliverySkipped(ctx, delivery, "global_disabled")
 		return nil
 	}
+
 	if decision := cachedCollectorDeliveryDecision(ctx, delivery); decision.Defer() {
 		logCollectorDeliverySkipped(ctx, delivery, string(decision.Reason))
 		logPublishCollectorDeliveryStage(ctx, "delivery.skipped.ingress_policy", delivery, nil)
+		return nil
+	}
+	// Honor cache-only rejection before SQL; accepted deliveries must check
+	// live publish targets before source loading or any business side effects.
+	blocked, err := s.collectMessageFromAccountPublishChannel(ctx, delivery.TenantID, 0, delivery.SourceChatID, delivery.SourceMessageID)
+	if err != nil {
+		return gerror.Wrap(err, "检查Bot采集上架频道过滤失败")
+	}
+	if blocked {
+		logCollectorDeliverySkipped(ctx, delivery, "self_loop_publish_target")
+		logPublishCollectorDeliveryStage(ctx, "delivery.skipped.self_loop", delivery, nil)
 		return nil
 	}
 	policyVersion := collectIngressPolicyVersion(ctx)
@@ -1465,27 +1477,6 @@ func (s *sSysPublish) ingestCollectorBotDelivery(ctx context.Context, delivery *
 	}
 	if source.IsEmpty() {
 		logCollectorDeliverySkipped(ctx, delivery, "source_unavailable")
-		return nil
-	}
-	// Collection owns persistence and process-queue handoff. Telegram delivery
-	// reconciliation is maintained by the publish worker and must not be part
-	// of the collector handoff path.
-	// Reject publish targets and denied subscriptions before metadata writes.
-	// Accepted messages synchronize their current title before rule matching.
-	blocked, err := s.collectMessageFromAccountPublishChannel(ctx, source["tenant_id"].Int64(), 0, delivery.SourceChatID, delivery.SourceMessageID)
-	if err != nil {
-		return gerror.Wrap(err, "检查Bot采集上架频道过滤失败")
-	}
-	if blocked {
-		rememberCollectorIngressDeferral(ctx, delivery, policyVersion, collectorin.IngressDeferralSelfLoop)
-		logCollectorDeliverySkipped(ctx, delivery, "self_loop_publish_target")
-		g.Log().Warning(ctx, "账户采集跳过自循环上架频道", g.Map{
-			"reason":   "source_chat_is_publish_target",
-			"tenantId": delivery.TenantID, "sourceId": delivery.SourceID,
-			"accountId": delivery.AccountID, "tgAccountId": delivery.TgAccountID,
-			"sourceChatId": delivery.SourceChatID, "sourceMessageId": delivery.SourceMessageID,
-		})
-		logPublishCollectorDeliveryStage(ctx, "delivery.skipped.self_loop", delivery, nil)
 		return nil
 	}
 	allowed, err := s.ensureBotCollectChannelApproval(ctx, source, delivery)
@@ -1881,14 +1872,7 @@ func (s *sSysPublish) ingestCollectorAccountDelivery(ctx context.Context, delive
 		logCollectorDeliverySkipped(ctx, delivery, "global_disabled")
 		return nil
 	}
-	allowed, err := s.ensureAccountCollectChannelRelation(ctx, delivery)
-	if err != nil {
-		return err
-	}
-	if !allowed {
-		logCollectorDeliverySkipped(ctx, delivery, "channel_access_blocked")
-		return nil
-	}
+
 	blocked, err := s.collectMessageFromAccountPublishChannel(ctx, delivery.TenantID, delivery.TgAccountID, delivery.SourceChatID, delivery.SourceMessageID)
 	if err != nil {
 		return gerror.Wrap(err, "检查协议号采集上架频道过滤失败")
@@ -1901,6 +1885,14 @@ func (s *sSysPublish) ingestCollectorAccountDelivery(ctx context.Context, delive
 			"tgAccountId": delivery.TgAccountID, "sourceId": delivery.SourceID,
 			"sourceChatId": delivery.SourceChatID, "sourceMessageId": delivery.SourceMessageID,
 		})
+		return nil
+	}
+	allowed, err := s.ensureAccountCollectChannelRelation(ctx, delivery)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		logCollectorDeliverySkipped(ctx, delivery, "channel_access_blocked")
 		return nil
 	}
 	message := collectorDeliveryMessage(delivery, delivery.TenantID, delivery.AccountID, delivery.SourceID, sysin.CollectSourceTypeAccount)

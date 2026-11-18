@@ -372,6 +372,15 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		return gerror.New("采集事件不存在")
 	}
 	ctx = collectBusinessEventContext(ctx, event, nil, 0)
+	// Old persisted events and recovery tasks bypass the delivery ingress.
+	// Check the actual Telegram chat before any media, profile or dispatch work.
+	ctx, blocked, guardErr := s.checkCollectEventPublishTarget(ctx, event)
+	if guardErr != nil {
+		return guardErr
+	}
+	if blocked {
+		return s.ignoreCollectEvent(ctx, eventId, "采集来源是发布目标频道，禁止回流采集", "source")
+	}
 	authorizationParent := ctx
 	ctx, finishAuthorization := startCollectPipelineStage(ctx, collectPipelineAuthorization)
 	authorizationFinished := false
@@ -1037,12 +1046,14 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 			finishRule(collectBusinessStepResult(branchErr, collectPipelineIgnored), branchErr)
 		}
 	}()
-	// 防止采集来源与发布目标相同形成回流死循环；来源和目标统一去掉 -100 后比较。
-	sourceChatID := canonicalCollectSourceChatID(event["source_chat_id"].String())
-	for _, targetChannelID := range collectRuleTargetChannelIds(rule) {
-		if sourceChatID != "" && sourceChatID == canonicalCollectSourceChatID(fmt.Sprintf("%d", targetChannelID)) {
-			return false, "采集来源与目标发布频道相同，已跳过防止循环", nil
-		}
+	// TargetChannelIds are database primary keys, not Telegram chat IDs.
+	// Reuse this call's checked scope, or validate direct/recovery branch calls.
+	ctx, blocked, guardErr := s.checkCollectEventPublishTarget(ctx, event)
+	if guardErr != nil {
+		return false, "", guardErr
+	}
+	if blocked {
+		return false, "采集来源是发布目标频道，禁止回流采集", nil
 	}
 	if disabled, err := collectRuleChannelDisabled(ctx, event["tenant_id"].Int64(), event["account_id"].Int64(), rule["id"].Int64(), event["bot_id"].Int64(), event["source_chat_id"].String()); err != nil {
 		return false, "", err
