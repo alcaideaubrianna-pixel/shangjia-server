@@ -140,23 +140,62 @@ func (s *sSysPublish) fillIntroFeeChannelEffectiveStatus(ctx context.Context, te
 	}
 }
 
-func (s *sSysPublish) fillIntroFeeChannelBlacklist(ctx context.Context, tenantID, accountID int64, list []*sysin.IntroFeeChannelRuleItem) {
+func (s *sSysPublish) fillIntroFeeChannelBlacklist(ctx context.Context, tenantID, accountID int64, list []*sysin.IntroFeeChannelRuleItem) error {
+	aliases := make([]string, 0, len(list)*2)
 	for _, row := range list {
-		if row == nil || row.ChannelId == "" {
-			continue
-		}
-		mod := g.DB().Model(publishCollectSourceTable).Ctx(ctx).Where("tenant_id", tenantID).WhereIn("source_chat_id", tgChannelCacheLookupIds(row.ChannelId))
-		if accountID > 0 {
-			mod = mod.Where("account_id", accountID)
-		}
-		if row.BotId > 0 {
-			mod = mod.Where("bot_id", row.BotId)
-		}
-		var value int
-		if err := mod.Fields("channel_blacklisted").OrderDesc("id").Limit(1).Scan(&value); err == nil {
-			row.Blacklisted = value != 0
+		if row != nil {
+			aliases = append(aliases, tgChannelCacheLookupIds(row.ChannelId)...)
 		}
 	}
+	aliases = uniqueStrings(aliases)
+	if len(aliases) == 0 {
+		return nil
+	}
+	if tenantID <= 0 || accountID <= 0 {
+		return gerror.New("读取频道黑名单缺少账户范围")
+	}
+	ac, ch := pdao.YoubanPublishCollectAccountChannel.Columns(), pdao.YoubanPublishCollectChannel.Columns()
+	var markers []struct {
+		ChatID string `orm:"chat_id"`
+	}
+	if err := g.DB().Model(pdao.YoubanPublishCollectAccountChannel.Table()+" ac").Ctx(ctx).
+		InnerJoin(pdao.YoubanPublishCollectChannel.Table()+" ch", "ch."+ch.Id+"=ac."+ac.ChannelId+" AND ch."+ch.TenantId+"=ac."+ac.TenantId).
+		Fields("ch."+ch.TelegramChatId+" AS chat_id").
+		Where("ac."+ac.TenantId, tenantID).Where("ac."+ac.AccountId, accountID).
+		Where("ac."+ac.SourceId, 0).Where("ac."+ac.DisabledReason, introFeeChannelBlacklistReason).
+		WhereIn("ch."+ch.TelegramChatId, aliases).
+		WhereNull("ac." + ac.DeletedAt).WhereNull("ch." + ch.DeletedAt).Scan(&markers); err != nil {
+		return gerror.Wrap(err, "读取频道黑名单标记失败")
+	}
+	blocked := make(map[string]bool, len(markers))
+	for _, marker := range markers {
+		blocked[canonicalCollectSourceChatID(marker.ChatID)] = true
+	}
+	var legacy []struct {
+		ChatID string `orm:"source_chat_id"`
+		BotID  int64  `orm:"bot_id"`
+	}
+	sc := pdao.YoubanPublishCollectSource.Columns()
+	if err := pdao.YoubanPublishCollectSource.Ctx(ctx).Fields(sc.SourceChatId, sc.BotId).
+		Where(sc.TenantId, tenantID).Where(sc.AccountId, accountID).
+		WhereIn(sc.SourceChatId, aliases).WhereNot(sc.ChannelBlacklisted, 0).
+		Group(sc.SourceChatId + "," + sc.BotId).Scan(&legacy); err != nil {
+		return gerror.Wrap(err, "读取旧版频道黑名单失败")
+	}
+	for _, row := range list {
+		if row == nil {
+			continue
+		}
+		chatID := canonicalCollectSourceChatID(row.ChannelId)
+		row.Blacklisted = blocked[chatID]
+		for _, source := range legacy {
+			if canonicalCollectSourceChatID(source.ChatID) == chatID && (row.BotId == 0 || row.BotId == source.BotID) {
+				row.Blacklisted = true
+				break
+			}
+		}
+	}
+	return nil
 }
 
 // introFeeChannelRuleCandidates combines configured rules with channels already
@@ -555,7 +594,9 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 		}
 		row.ProfileCount = profileCountByChannel[canonicalCollectSourceChatID(row.ChannelId)]
 	}
-	s.fillIntroFeeChannelBlacklist(ctx, tenantID, accountID, configured)
+	if err := s.fillIntroFeeChannelBlacklist(ctx, tenantID, accountID, configured); err != nil {
+		return nil, 0, err
+	}
 	for _, row := range configured {
 		if row == nil {
 			continue
@@ -1018,13 +1059,8 @@ func (s *sSysPublish) IntroFeeChannelBlacklist(ctx context.Context, in *sysin.In
 	if channelID == "" || !s.introFeeRuleOwned(ctx, account.TenantId, account.Id, ruleID) {
 		return gerror.New("介绍费规则不存在或无权修改")
 	}
-	mod := g.DB().Model(publishCollectSourceTable).Ctx(ctx).Where("tenant_id", account.TenantId).Where("account_id", account.Id).WhereIn("source_chat_id", tgChannelCacheLookupIds(channelID))
-	if botID > 0 {
-		mod = mod.Where("bot_id", botID)
-	}
-	_, err = mod.Data(g.Map{"channel_blacklisted": introFeeBoolToInt(in.Blacklisted != 0)}).Update()
+	err = s.setIntroFeeChannelBlacklist(ctx, account.TenantId, account.Id, ruleID, botID, channelID, in.Blacklisted)
 	if err == nil {
-		s.setCollectAccountChannelEnabled(ctx, account.TenantId, account.Id, channelID, in.Blacklisted == 0)
 		s.refreshCollectSourceCache(ctx)
 	}
 	return err
@@ -1038,50 +1074,25 @@ func (s *sSysPublish) AdminIntroFeeChannelBlacklist(ctx context.Context, in *sys
 	if in == nil {
 		return gerror.New("频道状态参数不能为空")
 	}
-	accountID, botID, channelID := in.AccountId, in.BotId, canonicalCollectSourceChatID(in.ChannelId)
+	accountID, ruleID, botID, channelID := in.AccountId, in.RuleId, in.BotId, canonicalCollectSourceChatID(in.ChannelId)
 	if in.Id > 0 {
-		row, queryErr := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Fields("account_id,bot_id,channel_id").Where("id", in.Id).Where("tenant_id", admin.TenantId).WhereNull("deleted_at").One()
+		row, queryErr := g.DB().Model(introFeeChannelRuleTable).Ctx(ctx).Fields("account_id,rule_id,bot_id,channel_id").Where("id", in.Id).Where("tenant_id", admin.TenantId).WhereNull("deleted_at").One()
 		if queryErr != nil {
 			return gerror.Wrap(queryErr, "读取介绍费频道规则失败")
 		}
 		if row.IsEmpty() {
 			return gerror.New("介绍费频道规则不存在")
 		}
-		accountID, botID, channelID = row["account_id"].Int64(), row["bot_id"].Int64(), row["channel_id"].String()
+		accountID, ruleID, botID, channelID = row["account_id"].Int64(), row["rule_id"].Int64(), row["bot_id"].Int64(), row["channel_id"].String()
 	}
 	if accountID <= 0 || channelID == "" || !s.publishAccountBelongsToTenant(ctx, accountID, admin.TenantId) {
 		return gerror.New("采集账户或频道不存在")
 	}
-	mod := g.DB().Model(publishCollectSourceTable).Ctx(ctx).Where("tenant_id", admin.TenantId).Where("account_id", accountID).Where("bot_id", botID).WhereIn("source_chat_id", tgChannelCacheLookupIds(channelID))
-	_, err = mod.Data(g.Map{"channel_blacklisted": introFeeBoolToInt(in.Blacklisted != 0)}).Update()
+	err = s.setIntroFeeChannelBlacklist(ctx, admin.TenantId, accountID, ruleID, botID, channelID, in.Blacklisted)
 	if err == nil {
-		s.setCollectAccountChannelEnabled(ctx, admin.TenantId, accountID, channelID, in.Blacklisted == 0)
 		s.refreshCollectSourceCache(ctx)
 	}
 	return err
-}
-
-func (s *sSysPublish) setCollectAccountChannelEnabled(ctx context.Context, tenantID, accountID int64, chatID string, enabled bool) {
-	status := sysin.CollectAccountChannelDisabled
-	approval := "rejected"
-	if enabled {
-		status = sysin.CollectAccountChannelEnabled
-		approval = "approved"
-	}
-	var channel struct {
-		Id int64 `json:"id"`
-	}
-	if err := pdao.YoubanPublishCollectChannel.Ctx(ctx).Fields("id").Where("tenant_id", tenantID).WhereIn("telegram_chat_id", tgChannelCacheLookupIds(chatID)).Scan(&channel); err != nil || channel.Id <= 0 {
-		return
-	}
-	now := gtime.Now()
-	data := pdo.YoubanPublishCollectAccountChannel{TenantId: tenantID, AccountId: accountID, ChannelId: channel.Id, CollectEnabled: introFeeBoolToInt(enabled), Status: status, ApprovalStatus: approval}
-	if enabled {
-		data.ApprovedAt = now
-	} else {
-		data.DisabledAt = now
-	}
-	pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Data(data).OnConflict("tenant_id,account_id,channel_id,source_id").OnDuplicate("collect_enabled,status,approval_status,approved_at,disabled_at,updated_at").Save()
 }
 
 func introFeeBoolToInt(value bool) int {

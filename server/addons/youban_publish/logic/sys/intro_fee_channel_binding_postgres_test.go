@@ -69,7 +69,7 @@ func TestIntroFeeChannelBindingOnlineFixturePostgres(t *testing.T) {
 			`CREATE TEMP TABLE hg_youban_publish_bot_channel_cache(tenant_id bigint,bot_id bigint,chat_id text,chat_title text,chat_username text,chat_type text,message_count int,last_message_at timestamp) ON COMMIT DROP`,
 			`CREATE TEMP TABLE hg_youban_publish_collect_channel(id bigint,tenant_id bigint,telegram_chat_id text,title text,username text,invite_link text,status text,last_seen_at timestamp,deleted_at timestamp) ON COMMIT DROP`,
 			`CREATE TEMP TABLE hg_youban_publish_collect_bot_channel(tenant_id bigint,bot_id bigint,channel_id bigint,status text,deleted_at timestamp) ON COMMIT DROP`,
-			`CREATE TEMP TABLE hg_youban_publish_collect_account_channel(tenant_id bigint,account_id bigint,channel_id bigint,source_id bigint,status text,collect_enabled int,approval_status text,deleted_at timestamp,UNIQUE(tenant_id,account_id,channel_id,source_id)) ON COMMIT DROP`,
+			`CREATE TEMP TABLE hg_youban_publish_collect_account_channel(tenant_id bigint,account_id bigint,channel_id bigint,source_id bigint,status text,collect_enabled int,approval_status text,disabled_reason text DEFAULT '',deleted_at timestamp,UNIQUE(tenant_id,account_id,channel_id,source_id)) ON COMMIT DROP`,
 			`INSERT INTO hg_youban_publish_intro_fee_channel_rule VALUES(36,78,615,338,0,'4386299825','汉庭选妃','htbaoyang888','百花阁  Z2',1,now(),now(),NULL)`,
 			`INSERT INTO hg_youban_publish_collect_source VALUES(351,78,615,'','百花阁 BOT 采集','','',64,1,1,0,now(),now(),NULL)`,
 			`INSERT INTO hg_youban_publish_collect_source_rule VALUES(351,78,338)`,
@@ -79,8 +79,8 @@ func TestIntroFeeChannelBindingOnlineFixturePostgres(t *testing.T) {
 			`INSERT INTO hg_youban_publish_collect_channel_profile(tenant_id,account_id,rule_id,channel_id,profile_id,updated_at,deleted_at) SELECT 78,615,338,'4386299825',n,now(),NULL FROM generate_series(1,70) n`,
 			`INSERT INTO hg_youban_publish_collect_channel VALUES(272067,78,'-1004386299825','汉庭选妃','htbaoyang888','','active',now(),NULL)`,
 			`INSERT INTO hg_youban_publish_collect_bot_channel VALUES(78,64,272067,'discovered',NULL)`,
-			`INSERT INTO hg_youban_publish_collect_account_channel VALUES(78,615,272067,351,'disabled',0,'rejected',NULL)`,
-			`INSERT INTO hg_youban_publish_collect_account_channel VALUES(78,615,272067,352,'enabled',1,'approved',NULL)`,
+			`INSERT INTO hg_youban_publish_collect_account_channel(tenant_id,account_id,channel_id,source_id,status,collect_enabled,approval_status,deleted_at) VALUES(78,615,272067,351,'disabled',0,'rejected',NULL)`,
+			`INSERT INTO hg_youban_publish_collect_account_channel(tenant_id,account_id,channel_id,source_id,status,collect_enabled,approval_status,deleted_at) VALUES(78,615,272067,352,'enabled',1,'approved',NULL)`,
 		} {
 			if _, err := tx.Exec(sql); err != nil {
 				return err
@@ -219,7 +219,7 @@ func TestIntroFeeChannelBindingOnlineFixturePostgres(t *testing.T) {
 			`INSERT INTO hg_youban_publish_intro_fee_channel_rule VALUES(37,78,615,338,0,'3736052878','MD test','mdbaoyang1','',2,now(),now(),NULL)`,
 			`INSERT INTO hg_youban_publish_collect_source SELECT 353,tenant_id,account_id,'other-channel','Other rule','','',bot_id,status,collect_enabled,0,now(),now(),NULL FROM hg_youban_publish_collect_source WHERE id=351`,
 			`INSERT INTO hg_youban_publish_collect_source_rule VALUES(353,78,339)`,
-			`INSERT INTO hg_youban_publish_collect_account_channel VALUES(78,615,17282290,353,'disabled',0,'rejected',NULL)`,
+			`INSERT INTO hg_youban_publish_collect_account_channel(tenant_id,account_id,channel_id,source_id,status,collect_enabled,approval_status,deleted_at) VALUES(78,615,17282290,353,'disabled',0,'rejected',NULL)`,
 		} {
 			if _, err := tx.Exec(statement); err != nil {
 				return err

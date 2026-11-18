@@ -1651,6 +1651,19 @@ func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, sourc
 			channelIDs = append(channelIDs, candidate.Id)
 		}
 	}
+	blacklisted, blacklistErr := collectAccountChannelBlacklisted(ctx, tenantID, accountID, channelIDs)
+	if blacklistErr != nil {
+		return false, blacklistErr
+	}
+	if blacklisted {
+		cacheRejected = true
+		g.Log().Info(ctx, "频道黑名单拦截BOT采集交付", g.Map{
+			"event": "collect.channel.blacklist_rejected", "tenantId": tenantID,
+			"accountId": accountID, "sourceId": source["id"].Int64(), "botId": botID,
+			"chatId": chatID, "sourceMessageId": delivery.SourceMessageID,
+		})
+		return false, nil
+	}
 	var relations []botCollectChannelRelation
 	if len(channelIDs) > 0 {
 		if err := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).
@@ -1936,6 +1949,18 @@ func (s *sSysPublish) ensureAccountCollectChannelRelation(ctx context.Context, d
 	channelID := channel[channelCols.Id].Int64()
 	if channelID <= 0 {
 		return false, gerror.New("账户采集频道关系创建失败")
+	}
+	blacklisted, blacklistErr := collectAccountChannelBlacklisted(ctx, delivery.TenantID, delivery.AccountID, []int64{channelID})
+	if blacklistErr != nil {
+		return false, blacklistErr
+	}
+	if blacklisted {
+		g.Log().Info(ctx, "频道黑名单拦截协议号采集交付", g.Map{
+			"event": "collect.channel.blacklist_rejected", "tenantId": delivery.TenantID,
+			"accountId": delivery.AccountID, "sourceId": delivery.SourceID,
+			"chatId": chatID, "channelId": channelID, "sourceMessageId": delivery.SourceMessageID,
+		})
+		return false, nil
 	}
 	if source[sourceCols.ChannelId].Int64() == 0 {
 		if _, err := pdao.YoubanPublishCollectSource.Ctx(ctx).

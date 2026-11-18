@@ -71,6 +71,18 @@ func resolveCollectEventChannelAccess(ctx context.Context, event gdb.Record, acc
 		// explicit subscription decision rather than preferring an enabled alias.
 		result.ChannelID = result.Relation.ChannelId
 	}
+	blacklisted, blacklistErr := collectAccountChannelBlacklisted(ctx, tenantID, accountID, ids)
+	if blacklistErr != nil {
+		return result, blacklistErr
+	}
+	if blacklisted {
+		g.Log().Info(ctx, "频道黑名单拦截采集事件", g.Map{
+			"event": "collect.channel.blacklist_rejected", "tenantId": tenantID,
+			"accountId": accountID, "sourceId": sourceID, "eventId": event["id"].Int64(),
+			"channelId": result.ChannelID, "chatId": event["source_chat_id"].String(),
+		})
+		return result, nil
+	}
 	result.Allowed = decideCollectChannelAccess(collectChannelAccessPolicyInput{
 		TenantID: tenantID, AccountID: accountID, SourceID: sourceID,
 		CanonicalChat:  event["source_chat_id"].String(),

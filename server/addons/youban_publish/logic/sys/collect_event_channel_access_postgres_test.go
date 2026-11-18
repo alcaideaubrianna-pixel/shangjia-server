@@ -41,7 +41,7 @@ func TestCollectEventChannelAccessLocalPostgres(t *testing.T) {
 			`CREATE TEMP TABLE hg_youban_publish_collect_account_channel(
 				id bigint PRIMARY KEY, tenant_id bigint, account_id bigint,
 				channel_id bigint, source_id bigint, collect_enabled smallint,
-				status text, approval_status text, updated_at timestamp,
+				status text, approval_status text, disabled_reason text NOT NULL DEFAULT '', updated_at timestamp,
 				deleted_at timestamp,
 				UNIQUE(tenant_id,account_id,channel_id,source_id)
 			) ON COMMIT DROP`,
@@ -104,6 +104,56 @@ func TestCollectEventChannelAccessLocalPostgres(t *testing.T) {
 		t.Run("actual_channel_not_configured_channel_and_foreign_denials_ignored", func(t *testing.T) {
 			check(t, "-1003763752459", true, 1280, 2)
 			check(t, "3763752459", true, 1280, 2)
+		})
+		t.Run("channel_blacklist_overrides_enabled_source_and_removal_restores_allow", func(t *testing.T) {
+			for _, markerChannelID := range []int64{1280, 1281} {
+				for _, status := range []string{"disabled", "enabled", "pending"} {
+					if _, err := tx.Exec(`INSERT INTO hg_youban_publish_collect_account_channel
+						(id,tenant_id,account_id,channel_id,source_id,collect_enabled,status,approval_status,disabled_reason,updated_at)
+						VALUES(10,78,615,$1,0,1,$2,'approved',$3,'2026-11-15 01:00:00')`,
+						markerChannelID, status, introFeeChannelBlacklistReason); err != nil {
+						t.Fatal(err)
+					}
+					for _, chat := range []string{"-1003763752459", "3763752459"} {
+						// The older account marker must override the newer enabled
+						// source relation without replacing its identity.
+						check(t, chat, false, 1280, 2)
+					}
+					if _, err := tx.Exec(`DELETE FROM hg_youban_publish_collect_account_channel WHERE id=10`); err != nil {
+						t.Fatal(err)
+					}
+					check(t, "-1003763752459", true, 1280, 2)
+					check(t, "3763752459", true, 1280, 2)
+				}
+			}
+		})
+		t.Run("unrelated_blacklist_markers_do_not_block_enabled_source", func(t *testing.T) {
+			for _, tc := range []struct {
+				name                           string
+				tenantID, accountID, channelID int64
+				sourceID                       int64
+				reason                         string
+			}{
+				{"other account", 78, 616, 1281, 0, introFeeChannelBlacklistReason},
+				{"other tenant same channel", 79, 615, 1281, 0, introFeeChannelBlacklistReason},
+				{"configured channel", 78, 615, 1279, 0, introFeeChannelBlacklistReason},
+				{"specific source is not account marker", 78, 615, 1281, 352, introFeeChannelBlacklistReason},
+				{"different reason", 78, 615, 1281, 0, "manual_disable"},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					if _, err := tx.Exec(`INSERT INTO hg_youban_publish_collect_account_channel
+						(id,tenant_id,account_id,channel_id,source_id,collect_enabled,status,approval_status,disabled_reason)
+						VALUES(11,$1,$2,$3,$4,0,'disabled','rejected',$5)`,
+						tc.tenantID, tc.accountID, tc.channelID, tc.sourceID, tc.reason); err != nil {
+						t.Fatal(err)
+					}
+					check(t, "-1003763752459", true, 1280, 2)
+					check(t, "3763752459", true, 1280, 2)
+					if _, err := tx.Exec(`DELETE FROM hg_youban_publish_collect_account_channel WHERE id=11`); err != nil {
+						t.Fatal(err)
+					}
+				})
+			}
 		})
 		t.Run("missing_source_subscription_follows_default_discovery_policy", func(t *testing.T) {
 			got, err := resolveCollectEventChannelAccess(ctx, event("-1003763752459"), 617)
