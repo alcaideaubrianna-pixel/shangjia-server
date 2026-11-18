@@ -108,11 +108,21 @@ func (s *sSysPublish) skipCollectProfileDispatchDuplicate(ctx context.Context, d
 	if dispatchID <= 0 || event.IsEmpty() || rule.IsEmpty() || duplicate == nil {
 		return "", gerror.New("跳过重复采集分发参数不完整")
 	}
-	replaced, err := s.replaceDuplicateCollectProfileMedia(ctx, event, content, duplicate.ProfileID)
+	filled, err := s.fillDuplicateCollectVerification(ctx, event, rule, content, duplicate)
+	if err != nil {
+		return "", err
+	}
+	replaced := false
+	if !filled {
+		replaced, err = s.replaceDuplicateCollectProfileMedia(ctx, event, content, duplicate.ProfileID)
+	}
 	if err != nil {
 		return "", err
 	}
 	reason := collectDuplicateReason(duplicate, replaced)
+	if filled {
+		reason += "，已补全缺失验证媒体并提交发布"
+	}
 	if _, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).Where("id", dispatchID).Data(g.Map{
 		"status": sysin.CollectDispatchStatusSkipped, "error_message": reason,
 		"finished_at": gtime.Now(), "updated_at": gtime.Now(),

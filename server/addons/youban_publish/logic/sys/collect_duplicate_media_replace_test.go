@@ -15,6 +15,37 @@ func TestDuplicateCollectMediaReplaceDisabledByDefault(t *testing.T) {
 	}
 }
 
+func TestDuplicateVerificationFillPlan(t *testing.T) {
+	display := gdb.Record{"media_type": g.NewVar("image"), "purpose": g.NewVar("display"), "md5": g.NewVar("original-display")}
+	verification := gdb.Record{"media_type": g.NewVar("video"), "purpose": g.NewVar("verify"), "md5": g.NewVar("original-verify")}
+	prepared := []collectPreparedMedia{
+		{MediaType: "image", Purpose: "display", MD5: "duplicate-display"},
+		{MediaType: "video", Purpose: "verify", MD5: "original-verify"},
+	}
+	for _, sample := range []struct {
+		name       string
+		stored     gdb.Result
+		media      []collectPreparedMedia
+		wantChange bool
+		wantErr    bool
+	}{
+		{name: "missing verification preserves display", stored: gdb.Result{display}, media: prepared, wantChange: true},
+		{name: "same verification retries without rewriting", stored: gdb.Result{display, verification}, media: prepared},
+		{name: "different verification cannot overwrite", stored: gdb.Result{display, verification}, media: []collectPreparedMedia{{MediaType: "video", Purpose: "verify", MD5: "different"}}, wantErr: true},
+		{name: "display video is not verification", stored: gdb.Result{display}, media: []collectPreparedMedia{{MediaType: "video", Purpose: "display", MD5: "display-video"}}, wantErr: true},
+	} {
+		t.Run(sample.name, func(t *testing.T) {
+			plan, err := duplicateVerificationFillPlan(sample.stored, sample.media)
+			if (err != nil) != sample.wantErr {
+				t.Fatalf("error=%v wantError=%v", err, sample.wantErr)
+			}
+			if plan.DisplayChanged || plan.VerifyChanged != sample.wantChange {
+				t.Fatalf("plan=%+v wantVerifyChanged=%v", plan, sample.wantChange)
+			}
+		})
+	}
+}
+
 func TestCollectDuplicateReasonMarksMediaReplacement(t *testing.T) {
 	duplicate := &profileFingerprintDuplicateError{ProfileID: 12, ChannelID: 34, Layer: "text_hash"}
 	plain := collectDuplicateReason(duplicate, false)
