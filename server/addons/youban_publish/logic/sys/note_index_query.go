@@ -48,6 +48,20 @@ func (s *sSysPublish) adminNoteIndexList(ctx context.Context, in *sysin.NoteList
 	if useKeywordUnion {
 		filters.Keyword = ""
 	}
+	// Materialize the source candidates once instead of probing dispatch/event
+	// for every visible profile. Keep authorization and pagination on the outer query.
+	useSourceCandidates := (strings.EqualFold(dbType, "pgsql") || strings.EqualFold(dbType, "postgres")) &&
+		in.CollectSourceId > 0 && strings.TrimSpace(in.CollectSourceChatId) != ""
+	if useSourceCandidates {
+		chatID := canonicalCollectSourceChatID(in.CollectSourceChatId)
+		mod = mod.Where("i.profile_id IN (WITH source_profiles AS MATERIALIZED ("+
+			"SELECT DISTINCT d.profile_id FROM "+publishCollectDispatchTable+" d "+
+			"JOIN "+publishCollectEventTable+" e ON e.id=d.event_id "+
+			"WHERE d.source_id=? AND e.source_chat_id IN (?,?)) SELECT profile_id FROM source_profiles)",
+			in.CollectSourceId, chatID, "-100"+chatID)
+		filters.CollectSourceId = 0
+		filters.CollectSourceChatId = ""
+	}
 	mod = applyNoteIndexFilters(mod, &filters)
 	var err error
 	sortBy, err := normalizeAdminNoteSortBy(in.SortBy)

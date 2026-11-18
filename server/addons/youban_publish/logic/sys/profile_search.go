@@ -97,7 +97,7 @@ func applyProfileKeywordSearch(mod *gdb.Model, keyword string, fields profileSea
 	}
 	upper := strings.ToUpper(keyword)
 	if profileSearchNoRegexp.MatchString(upper) {
-		return mod.Where(fields.ProfileNo+" = ?", upper)
+		return mod.Where("("+fields.ProfileNo+" = ? OR "+fields.Title+" = ?)", upper, keyword)
 	}
 	if strings.HasPrefix(fields.ProfileNo, "i.") {
 		terms := splitProfileSearchTerms(keyword)
