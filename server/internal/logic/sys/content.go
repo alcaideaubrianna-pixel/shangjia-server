@@ -459,8 +459,9 @@ func (s *sSysContent) listProfilesByFilter(ctx context.Context, in *sysin.Conten
 	if projected {
 		// The counter, exclusions and page must see the same committed snapshot.
 		err = dao.ContentProfile.DB().TransactionWithOptions(ctx, gdb.TxOptions{
-			Isolation: sql.LevelRepeatableRead,
-			ReadOnly:  true,
+			Propagation: gdb.PropagationRequiresNew,
+			Isolation:   sql.LevelRepeatableRead,
+			ReadOnly:    true,
 		}, func(txCtx context.Context, tx gdb.TX) error {
 			ready, err := tx.GetValue("SELECT ready FROM public.hg_open_profile_count_state WHERE singleton")
 			if err != nil {
@@ -473,8 +474,15 @@ func (s *sSysContent) listProfilesByFilter(ctx context.Context, in *sysin.Conten
 			rows, totalCount, err = s.queryProfileList(txCtx, in, feed, true)
 			return err
 		})
+		if err != nil && ctx.Err() == nil {
+			g.Log().Warningf(ctx, "开放资料读表查询失败，回退原查询: %v", err)
+			usedProjection = false
+		}
 	}
-	if err == nil && !usedProjection {
+	if !usedProjection {
+		if ctx.Err() != nil {
+			return nil, 0, ctx.Err()
+		}
 		rows, totalCount, err = s.queryProfileList(ctx, in, feed, false)
 	}
 	if err != nil {
