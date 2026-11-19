@@ -451,7 +451,6 @@ func (s *sSysContent) ListProfiles(ctx context.Context, in *sysin.ContentProfile
 func (s *sSysContent) listProfilesByFilter(ctx context.Context, in *sysin.ContentProfileListInp, feed homeProfileFeed) (list []*sysin.ContentProfileListModel, totalCount int, err error) {
 	profileColumns := dao.ContentProfile.Columns()
 	mod := dao.ContentProfile.Ctx(ctx).As("p")
-	mod = s.publicProfileWhere(mod, feed == homeProfileFeedLatest && in.FetchNextRow && isPgsql())
 	if len(in.ProfileIds) > 0 {
 		mod = mod.WhereIn(aliasField("p", profileColumns.Id), in.ProfileIds)
 	}
@@ -560,7 +559,7 @@ func (s *sSysContent) listProfilesByFilter(ctx context.Context, in *sysin.Conten
 	}
 
 	if in.WithTotal == 1 {
-		totalCount, err = mod.Count()
+		totalCount, err = s.publicProfileWhere(mod.Clone()).Count()
 		if err != nil {
 			err = gerror.Wrap(err, "获取资料数据行失败")
 			return
@@ -571,6 +570,7 @@ func (s *sSysContent) listProfilesByFilter(ctx context.Context, in *sysin.Conten
 		}
 	}
 
+	mod = s.publicProfileWhere(mod, feed == homeProfileFeedLatest && isPgsql())
 	mod = mod.Fields(
 		aliasFields("p",
 			profileColumns.Id,
