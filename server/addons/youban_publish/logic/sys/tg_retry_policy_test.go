@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -290,3 +291,81 @@ func assertError(message string) error {
 type simpleError string
 
 func (e simpleError) Error() string { return string(e) }
+
+func TestTelegramPublishConfigurationFailureStopsWithoutRetry(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+	}{
+		{"gateway disabled bot", errors.New("TG Bot Gateway未找到已启用的Bot")},
+		{"gateway wrapped channel 79", fmt.Errorf("Gateway发送失败 bot_id:20 channel_id:79: %w", errors.New("TG Bot Gateway未找到已启用的Bot"))},
+		{"gateway wrapped channel 131", fmt.Errorf("Gateway发送失败 bot_id:20 channel_id:131: %w", errors.New("TG Bot Gateway未找到已启用的Bot"))},
+		{"missing bot", errors.New("Bot配置不存在")},
+		{"missing token", errors.New("Bot Token未配置")},
+		{"missing telegram token", errors.New("Telegram Bot Token未配置")},
+		{"missing historical token", errors.New("历史Bot Token未配置")},
+		{"no available bot", errors.New("未配置可用Bot")},
+		{"missing channel", errors.New("TG目标频道未配置")},
+		{"missing configuration", errors.New("Telegram配置不能为空")},
+		{"missing local bot endpoint", errors.New("已启用Telegram Local Bot模式，但未配置YOUBAN_TELEGRAM_BOT_API_URL")},
+		{"selector missing sender", errors.New("目标频道未配置可用推送BOT")},
+		{"missing account sentinel", fmt.Errorf("频道未配置可用Bot或协议号，channel:79: %w", errTelegramPublishAccountMissing)},
+		{"missing channels sentinel", fmt.Errorf("准备发送失败: %w", errNoTelegramPublishChannels)},
+	}
+	conf := &model.PublishConfig{RetryEnabled: 1, MaxRetryCount: 100, RetryIntervalMinutes: 2}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if !isTelegramPermanentSendError(tc.err) {
+				t.Fatal("configuration failure must be permanent")
+			}
+			for _, currentRetryCount := range []int{0, 1} {
+				decision := telegramJobFailureNextStateWithConfig(tc.err, currentRetryCount, conf)
+				if decision.Status != JobStatusFailed.String() || decision.DispatchStatus != tgDispatchStatusDone || decision.RetryDelay != 0 {
+					t.Fatalf("configuration error must fail immediately, retry=%d: %+v", currentRetryCount, decision)
+				}
+				if !strings.Contains(decision.Message, tc.err.Error()) || !strings.Contains(decision.Message, "配置错误") {
+					t.Fatalf("channel failure must retain its precise cause: %q", decision.Message)
+				}
+				data := telegramJobFailureUpdateData(decision, gtime.Now())
+				if data["next_retry_at"] != nil || data["error_message"] != decision.Message || data["last_dispatch_error"] != decision.Message {
+					t.Fatalf("terminal projection lost error or retained retry time: %+v", data)
+				}
+			}
+			if policy := telegramJobErrorRetryPolicy(tc.err, 0); !policy.Permanent || policy.RetryDelay != 0 {
+				t.Fatalf("default policy also must be terminal: %+v", policy)
+			}
+		})
+	}
+}
+
+func TestTelegramGatewayTemporaryFailureStillRetries(t *testing.T) {
+	conf := &model.PublishConfig{RetryEnabled: 1, MaxRetryCount: 4, RetryIntervalMinutes: 2}
+	for _, message := range []string{
+		"TG Bot Gateway调用失败: 502 Bad Gateway",
+		"TG Bot Gateway调用失败: 503 Service Unavailable",
+		"TG Bot Gateway调用失败: 504 Gateway Timeout",
+		"TG Bot Gateway请求失败: connection refused",
+		"TG Bot Gateway请求失败: context deadline exceeded",
+		"dial tcp 127.0.0.1:6379: connect: connection refused",
+		"读取Bot配置失败: context deadline exceeded",
+		"读取推送配置失败: pq: canceling statement due to statement timeout",
+	} {
+		t.Run(message, func(t *testing.T) {
+			err := errors.New(message)
+			if isTelegramPublishConfigurationError(err) || isTelegramPermanentSendError(err) {
+				t.Fatal("temporary dependency failure was classified as missing configuration")
+			}
+			decision := telegramJobFailureNextStateWithConfig(err, 0, conf)
+			if decision.Status != JobStatusRetryWait.String() || decision.DispatchStatus != tgDispatchStatusIdle || decision.RetryDelay <= 0 {
+				t.Fatalf("temporary failure lost existing retry policy: %+v", decision)
+			}
+		})
+	}
+}
+
+func TestTelegramConfigurationFailureDoesNotOverrideUncertainDelivery(t *testing.T) {
+	err := errors.Join(errTelegramAttemptNeedsReconcile, errors.New("TG Bot Gateway未找到已启用的Bot"))
+	if !isTelegramAmbiguousDeliveryError(err) {
+		t.Fatal("configuration classification must not discard an existing reconciliation requirement")
+	}
+}

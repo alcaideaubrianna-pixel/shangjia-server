@@ -360,16 +360,45 @@ func isTelegramSlowModeError(err error) bool {
 	return strings.Contains(message, "SLOWMODE_WAIT") || strings.Contains(message, "SLOWMODE WAIT")
 }
 
+// Configuration must be changed before these local failures can recover.
+// Match explicit configuration errors, never the generic Gateway name or 5xx.
+func isTelegramPublishConfigurationError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, errTelegramPublishAccountMissing) || errors.Is(err, errNoTelegramPublishChannels) {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	for _, part := range []string{
+		"tg bot gateway未找到已启用的bot",
+		"bot配置不存在",
+		"bot token未配置",
+		"未配置可用bot",
+		"目标频道未配置可用推送bot",
+		"tg目标频道未配置",
+		"telegram配置不能为空",
+		"已启用telegram local bot模式，但未配置youban_telegram_bot_api_url",
+	} {
+		if strings.Contains(message, part) {
+			return true
+		}
+	}
+	return false
+}
+
 func isTelegramPermanentSendError(err error) bool {
 	if err == nil {
 		return false
+	}
+	if isTelegramPublishConfigurationError(err) {
+		return true
 	}
 	message := strings.ToLower(err.Error())
 	permanentParts := []string{
 		strings.ToLower(telegramMediaUploadSizeError),
 		// These errors cannot recover by retrying the same job. Keep history,
 		// but move the job to a terminal state so it cannot starve a channel.
-		"bot配置不存在",
 		"读取tg会话失败",
 		"tg会话不存在",
 		"relation \"hg_youban_publish_tg_session\" does not exist",
@@ -472,6 +501,9 @@ func telegramPermanentSendErrorMessage(err error) string {
 	}
 	if isTelegramPermanentAccountAuthError(err) {
 		return telegramPermanentAccountAuthMessage(err) + "，已停止该任务并释放频道队列：" + err.Error()
+	}
+	if isTelegramPublishConfigurationError(err) {
+		return "Telegram 发布配置错误，已停止该频道任务且不再自动重试，请修复配置后重新发布：" + err.Error()
 	}
 	message := strings.ToLower(err.Error())
 	if strings.Contains(message, "user_banned_in_channel") || strings.Contains(message, "user banned in channel") {
