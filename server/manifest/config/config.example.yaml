@@ -311,7 +311,7 @@ contentImport:
 
 # 内容展示
 content:
-  openProfileCountsEnabled: false               # PostgreSQL 计数回填并校验通过后启用
+  openProfileCountsEnabled: true                # PostgreSQL 计数校验通过后自动切读，可设为 false 回退
   cdnBaseUrl: "https://img.xiaohuiji.cc"          # 前端图片/视频 CDN 域名；为空时使用原始 COS 地址
 
 # 悦伴聊天

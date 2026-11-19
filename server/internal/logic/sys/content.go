@@ -452,7 +452,7 @@ func (s *sSysContent) ListProfiles(ctx context.Context, in *sysin.ContentProfile
 func (s *sSysContent) listProfilesByFilter(ctx context.Context, in *sysin.ContentProfileListInp, feed homeProfileFeed) (list []*sysin.ContentProfileListModel, totalCount int, err error) {
 	scope := profilescope.FromContext(ctx)
 	projected := feed == homeProfileFeedLatest && scope.Applied && len(scope.TenantIds) == 1 &&
-		isPgsql() && g.Cfg().MustGet(ctx, "content.openProfileCountsEnabled", false).Bool()
+		isPgsql() && g.Cfg().MustGet(ctx, "content.openProfileCountsEnabled", true).Bool()
 
 	var rows []contentProfileRow
 	usedProjection := false

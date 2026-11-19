@@ -261,8 +261,8 @@ BEGIN
 END;
 $$;
 
--- Install with content.openProfileCountsEnabled=false, call open_profile_backfill
--- in short autocommit batches until it returns NULL, then run
--- open_profile_verify_counts() off peak. Enable reads only after it returns true.
+-- Call open_profile_backfill in short autocommit batches until it returns NULL,
+-- then run open_profile_verify_counts() off peak. A successful verification
+-- enables reads when content.openProfileCountsEnabled is true (the default).
 -- To revert reads immediately, set ready=false or disable the application flag.
 COMMIT;
