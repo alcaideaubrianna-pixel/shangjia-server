@@ -391,7 +391,7 @@ func isTelegramPermanentSendError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if isTelegramPublishConfigurationError(err) {
+	if isTelegramPublishConfigurationError(err) || isTelegramBotNotMemberError(err) {
 		return true
 	}
 	message := strings.ToLower(err.Error())

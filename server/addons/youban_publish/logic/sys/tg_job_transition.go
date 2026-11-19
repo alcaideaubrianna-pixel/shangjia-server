@@ -398,7 +398,9 @@ func (s *sSysPublish) transitionTelegramJobs(ctx context.Context, jobIds []int64
 func telegramTerminalFailureCleanupFields() g.Map {
 	const started = "send_phase IN ('display_sending','display_confirmed','verify_sending')"
 	return g.Map{
-		"send_phase":         gdb.Raw("CASE WHEN " + started + " THEN 'timeout_cancelled' ELSE send_phase END"),
+		// Empty means this execution has no active send phase. Do not claim
+		// cleanup_confirmed when deleting the previous publication failed.
+		"send_phase":         gdb.Raw("CASE WHEN " + started + " THEN 'timeout_cancelled' WHEN send_phase='cleanup_processing' AND timeout_cleanup_at IS NULL THEN '' ELSE send_phase END"),
 		"timeout_cleanup_at": gdb.Raw("CASE WHEN " + started + " THEN CURRENT_TIMESTAMP ELSE timeout_cleanup_at END"),
 	}
 }

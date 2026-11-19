@@ -185,6 +185,30 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) (resultE
 	if streamEngine {
 		ctx, stopExecution = telegramStreamExecutionContext(ctx, lease)
 	}
+	// 所有持租约的退出路径都必须释放槽位；通过最终闸门后才唤醒后续任务。
+	wakeNextAllowed := false
+	defer func() {
+		stopExecution()
+		finalizeCtx, cancelFinalize := telegramFinalizeContext(ctx, "channel.send_lease.finalize")
+		defer cancelFinalize()
+		releaseStage := beginTelegramPublishStage(finalizeCtx, "channel.send_lease.release")
+		s.releaseTelegramChannelLease(finalizeCtx, lease)
+		releaseStage.End(nil)
+		if !wakeNextAllowed {
+			return
+		}
+		wakeStage := beginTelegramPublishStage(finalizeCtx, "channel.wake_next")
+		wakeErr := s.wakeNextTelegramChannelJob(finalizeCtx, targetJob)
+		wakeStage.End(wakeErr)
+		if wakeErr != nil {
+			g.Log().Warningf(finalizeCtx, "释放频道发送槽位后唤醒下一条TG任务失败 jobId:%d channelId:%d err:%+v", targetJob.Id, targetJob.ChannelId, wakeErr)
+		}
+	}()
+	// Recheck under the send lease before the order gate: a paused channel must
+	// settle its queued jobs even when an earlier job still blocks the head.
+	if paused, pauseErr := s.postponePermissionPausedJob(ctx, targetJob); pauseErr != nil || paused {
+		return pauseErr
+	}
 	// 获取频道执行租约后必须再次确认队首。Outbox/Stream 入队检查与
 	// Worker 开始执行之间存在时间窗口，单靠前一次检查会让后创建的任务
 	// 在旧任务尚未发送时提前进入 Telegram。此处在频道租约保护下重新读取
@@ -193,14 +217,13 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) (resultE
 	gateWaitingOrder, gateErr := s.telegramChannelHasEarlierActiveJob(ctx, targetJob)
 	step.End(gateErr, g.Map{"hasEarlier": gateWaitingOrder, "gate": "execution"})
 	if gateErr != nil {
-		stopExecution()
-		s.releaseTelegramChannelLease(ctx, lease)
 		return gerror.Wrap(gateErr, "执行阶段频道队首闸门检查失败")
 	}
 	if gateWaitingOrder {
 		stopExecution()
-		s.releaseTelegramChannelLease(ctx, lease)
-		if postponeErr := s.postponeTelegramJobForChannelOrder(ctx, targetJob); postponeErr != nil {
+		finalizeCtx, cancelFinalize := telegramFinalizeContext(ctx, "job.postpone_channel_order")
+		defer cancelFinalize()
+		if postponeErr := s.postponeTelegramJobForChannelOrder(finalizeCtx, targetJob); postponeErr != nil {
 			return gerror.Wrap(postponeErr, "执行阶段非队首任务退避失败")
 		}
 		return nil
@@ -208,35 +231,18 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) (resultE
 	// 下架可能刚好发生在取队首/获取 lease 期间，再做一次最终闸门检查。
 	if targetJob.ProfileId > 0 && !isMessagePushOperationNo(targetJob.OperationNo) {
 		if active, stateErr := telegramProfilePublishable(ctx, targetJob.ProfileId); stateErr != nil {
-			stopExecution()
-			s.releaseTelegramChannelLease(ctx, lease)
 			return stateErr
 		} else if !active {
 			stopExecution()
-			s.releaseTelegramChannelLease(ctx, lease)
-			if supersedeErr := s.markTelegramJobSuperseded(ctx, targetJob.Id); supersedeErr != nil {
+			finalizeCtx, cancelFinalize := telegramFinalizeContext(ctx, "job.supersede_before_send")
+			defer cancelFinalize()
+			if supersedeErr := s.markTelegramJobSuperseded(finalizeCtx, targetJob.Id); supersedeErr != nil {
 				return supersedeErr
 			}
 			return nil
 		}
 	}
-	defer func() {
-		stopExecution()
-		releaseStage := beginTelegramPublishStage(ctx, "channel.send_lease.release")
-		s.releaseTelegramChannelLease(ctx, lease)
-		releaseStage.End(nil)
-		wakeStage := beginTelegramPublishStage(ctx, "channel.wake_next")
-		wakeErr := s.wakeNextTelegramChannelJob(ctx, targetJob)
-		wakeStage.End(wakeErr)
-		if wakeErr != nil {
-			g.Log().Warningf(ctx, "释放频道发送槽位后唤醒下一条TG任务失败 jobId:%d channelId:%d err:%+v", targetJob.Id, targetJob.ChannelId, wakeErr)
-		}
-	}()
-	// Recheck under the send lease: another worker may have opened the circuit
-	// between enqueueing this job and acquiring the channel.
-	if paused, pauseErr := s.postponePermissionPausedJob(ctx, targetJob); pauseErr != nil || paused {
-		return pauseErr
-	}
+	wakeNextAllowed = true
 	// 只拦截尚未开始发送的循环；在途、未知结果和已确认检查点继续对账/续跑。
 	if targetJob.Status == telegramJobStatusPending || targetJob.Status == telegramJobStatusRetryWait {
 		allowed, guardErr := cycleChannelAllowed(ctx, targetJob.TenantId, targetJob.ChannelId, targetJob.OperationNo, cycleProfileScope{ProfileID: targetJob.ProfileId, AccountID: targetJob.AccountId})
@@ -1137,7 +1143,7 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 	step := beginTelegramPublishStage(ctx, "job.failure_transition", g.Map{"nextStatus": decision.Status, "retryCount": decision.RetryCount, "retryDelayMs": decision.RetryDelay.Milliseconds()})
 	// Retry scheduling never rewrites the durable job deadline. Bot switches,
 	// rate limits and account handoffs all consume the same original budget.
-	transitioned, updateErr := s.transitionTelegramJob(ctx, telegramJobTransition{
+	failureTransition := telegramJobTransition{
 		JobId:              job.Id,
 		From:               []JobStatus{telegramJobStatusSending},
 		To:                 JobStatus(decision.Status),
@@ -1145,7 +1151,15 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 		ErrorMessage:       decision.Message,
 		Additional:         additional,
 		CleanupStartedSend: decision.Status == telegramJobStatusFailed,
-	})
+	}
+	var transitioned bool
+	var updateErr error
+	membershipFailure := decision.Status == telegramJobStatusFailed && isTelegramBotNotMemberError(err)
+	if membershipFailure {
+		transitioned, updateErr = s.failTelegramBotNotMember(ctx, job, failureTransition, err)
+	} else {
+		transitioned, updateErr = s.transitionTelegramJob(ctx, failureTransition)
+	}
 	step.End(updateErr, g.Map{"transitioned": transitioned})
 	if updateErr != nil {
 		return gerror.Wrap(updateErr, "更新TG失败任务状态失败")
@@ -1154,7 +1168,7 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 		return nil
 	}
 	observePublishTerminalCommit(ctx, job, JobStatus(decision.Status), transitioned, nil)
-	if decision.Status == "failed" {
+	if decision.Status == "failed" && !membershipFailure {
 		if circuitErr := s.recordChannelPermissionFailure(ctx, job, err); circuitErr != nil {
 			g.Log().Warningf(ctx, "记录频道权限熔断失败 jobId:%d channelId:%d err:%+v", job.Id, job.ChannelId, circuitErr)
 		}

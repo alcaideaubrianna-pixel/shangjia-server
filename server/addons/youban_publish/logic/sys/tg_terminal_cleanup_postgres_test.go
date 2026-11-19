@@ -90,7 +90,7 @@ func TestTelegramTerminalCleanupEvidencePostgres(t *testing.T) {
 // Exercise the actual SQL CASE expressions in a single UPDATE, so status and
 // cleanup claim cannot expose an intermediate unblocked terminal row.
 func TestTelegramTerminalFailureAtomicFieldsPostgres(t *testing.T) {
-	for _, phase := range []string{"", "pending", "display_sending", "display_confirmed", "verify_sending"} {
+	for _, phase := range []string{"", "pending", "cleanup_processing", "display_sending", "display_confirmed", "verify_sending"} {
 		t.Run("phase="+phase, func(t *testing.T) {
 			db := telegramTimeoutFinishLocalDB(t)
 			ctx := context.Background()
@@ -121,8 +121,14 @@ func TestTelegramTerminalFailureAtomicFieldsPostgres(t *testing.T) {
 				if row["send_phase"].String() != telegramSendPhaseTimeoutCancelled || row["timeout_cleanup_at"].IsNil() {
 					t.Fatalf("started failure lost cleanup claim: %v", row)
 				}
-			} else if row["send_phase"].String() != phase || !row["timeout_cleanup_at"].IsNil() {
-				t.Fatalf("unstarted failure created cleanup claim: %v", row)
+			} else {
+				wantPhase := phase
+				if phase == "cleanup_processing" {
+					wantPhase = ""
+				}
+				if row["send_phase"].String() != wantPhase || !row["timeout_cleanup_at"].IsNil() {
+					t.Fatalf("unstarted failure retained active cleanup or created a claim: %v", row)
+				}
 			}
 		})
 	}

@@ -63,7 +63,9 @@ func telegramChannelPendingCleanupSQL(alias string) string {
 	if alias != "" {
 		p = strings.TrimSuffix(alias, ".") + "."
 	}
-	return fmt.Sprintf("(%stimeout_cleanup_at IS NOT NULL OR %ssend_phase='cleanup_processing')", p, p)
+	// A terminal failure may retain the audit phase of a failed pre-send
+	// cleanup. Only an explicit compensation marker keeps its channel fence.
+	return fmt.Sprintf("(%stimeout_cleanup_at IS NOT NULL OR (%ssend_phase='cleanup_processing' AND %sstatus NOT IN ('sent','failed','superseded')))", p, p, p)
 }
 
 func telegramChannelStartedJobSQL(alias string) string {
@@ -87,7 +89,7 @@ func telegramChannelOrderScopeSQL(alias string, job telegramJobRecord) (string, 
 }
 
 func telegramChannelJobPendingCleanup(job telegramJobRecord) bool {
-	return job.TimeoutCleanupAt != nil || job.SendPhase == "cleanup_processing"
+	return job.TimeoutCleanupAt != nil || (job.SendPhase == "cleanup_processing" && !job.Status.IsTerminal())
 }
 
 func telegramChannelJobOwnsOrder(job telegramJobRecord) bool {

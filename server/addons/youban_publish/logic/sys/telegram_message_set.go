@@ -124,6 +124,9 @@ func (s *sSysPublish) deleteTelegramMessagesIndividually(ctx context.Context, bo
 				retryErrors = append(retryErrors, message)
 				continue
 			}
+			if isTelegramBotNotMemberError(err) {
+				return gerror.Wrap(&telegramBotMembershipError{botID: job.BotId, cause: err}, message)
+			}
 			return gerror.New(message)
 		}
 	}

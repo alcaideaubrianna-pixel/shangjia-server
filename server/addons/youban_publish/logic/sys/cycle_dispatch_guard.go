@@ -134,6 +134,7 @@ func (s *sSysPublish) projectChannelPermissionFailure(ctx context.Context, tx gd
 	}
 	if strings.Contains(strings.ToLower(cause.Error()), "kicked") || strings.Contains(strings.ToLower(cause.Error()), "not a member") {
 		result.InChannel = 0
+		result.CanDeleteMessages = 0
 	}
 	raw := mergeChannelBotPermissionState(value.String(), result)
 	_, err = tx.Model(publishChannelTable).Where("tenant_id", job.TenantId).Where("id", job.ChannelId).Data(g.Map{"bot_permission_status_json": raw}).Update()

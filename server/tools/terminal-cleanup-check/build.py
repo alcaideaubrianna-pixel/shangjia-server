@@ -12,7 +12,7 @@ import tempfile
 
 root = pathlib.Path(__file__).resolve().parents[2]
 pkg = root / "addons/youban_publish/logic/sys"
-fixtures = ["tg_outbox_dispatch_retry_postgres_test.go", "tg_timeout_cleanup_finish_postgres_test.go", "tg_terminal_cleanup_postgres_test.go"]
+fixtures = ["tg_outbox_dispatch_retry_postgres_test.go", "tg_timeout_cleanup_finish_postgres_test.go", "tg_terminal_cleanup_postgres_test.go", "tg_bot_membership_failure_postgres_test.go"]
 pgbin = pathlib.Path(os.environ.get("TERMINAL_CHECK_PG_BIN", "/opt/homebrew/opt/postgresql@17/bin"))
 for command in ("initdb", "pg_ctl"):
     if not (pgbin / command).is_file():
