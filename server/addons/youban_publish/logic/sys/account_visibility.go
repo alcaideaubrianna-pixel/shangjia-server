@@ -47,7 +47,7 @@ func refreshAccountVisibilityAccountEdge(ctx context.Context, tenantID, accountI
 		_, err := g.DB().Model(accountVisibilityReadModelTable).Ctx(ctx).Data(g.Map{
 			"tenant_id": tenantID, "viewer_account_id": accountID, "visible_account_id": accountID,
 			"relation_type": "self", "updated_at": now,
-		}).OnConflict("(tenant_id,viewer_account_id,visible_account_id)").OnDuplicateEx("relation_type", "updated_at").Save()
+		}).OnConflict("tenant_id", "viewer_account_id", "visible_account_id").OnDuplicateEx("relation_type", "updated_at").Save()
 		if err != nil {
 			return err
 		}
@@ -55,7 +55,7 @@ func refreshAccountVisibilityAccountEdge(ctx context.Context, tenantID, accountI
 			_, err = g.DB().Model(accountVisibilityReadModelTable).Ctx(ctx).Data(g.Map{
 				"tenant_id": tenantID, "viewer_account_id": parentID, "visible_account_id": accountID,
 				"relation_type": "managed", "updated_at": now,
-			}).OnConflict("(tenant_id,viewer_account_id,visible_account_id)").OnDuplicateEx("relation_type", "updated_at").Save()
+			}).OnConflict("tenant_id", "viewer_account_id", "visible_account_id").OnDuplicateEx("relation_type", "updated_at").Save()
 		}
 		return err
 	}

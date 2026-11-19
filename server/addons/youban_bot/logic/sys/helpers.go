@@ -202,6 +202,9 @@ func (s *sSysBot) loginPublishAccount(ctx context.Context, accountId int64) (*bo
 }
 
 func (s *sSysBot) botById(ctx context.Context, id int64) (*sysin.BotModel, error) {
+	if state := collectorInteractionFromContext(ctx); id < 0 && state != nil && state.botID == id {
+		return s.profileBotById(ctx, id)
+	}
 	var row *sysin.BotModel
 	if err := g.DB().Model(botTable).Safe().Ctx(ctx).Where("id", id).WhereNull("deleted_at").Scan(&row); err != nil {
 		return nil, gerror.Wrap(err, "读取Bot配置失败")
@@ -362,6 +365,13 @@ func (s *sSysBot) trackReplyResult(ctx context.Context, botId int64, replyMarkup
 }
 
 func (s *sSysBot) replyBotToken(ctx context.Context, botId int64) string {
+	if botId < 0 {
+		row, err := s.profileBotById(ctx, botId)
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(row.BotToken)
+	}
 	if botId > 0 {
 		if row, err := s.botById(ctx, botId); err == nil && row != nil && strings.TrimSpace(row.BotToken) != "" {
 			return strings.TrimSpace(row.BotToken)
@@ -619,6 +629,9 @@ func (s *sSysBot) sendMessageWithMarkup(ctx context.Context, botToken, chatId, t
 }
 
 func (s *sSysBot) replyKeyboard(ctx context.Context) *models.ReplyKeyboardMarkup {
+	if state := collectorInteractionFromContext(ctx); state != nil {
+		return state.keyboard
+	}
 	buttons := make([]replyKeyboardItem, 0, len(botFeatures))
 	for _, feature := range botFeatures {
 		if feature == nil {

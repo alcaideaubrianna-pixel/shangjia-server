@@ -23,6 +23,32 @@ import (
 	ps "hotgo/addons/youban_publish/service"
 )
 
+type collectorAuthorizationTenantKey struct{}
+
+func withCollectorAuthorization(ctx context.Context, tenantID int64) context.Context {
+	return context.WithValue(ctx, collectorAuthorizationTenantKey{}, tenantID)
+}
+
+func collectorAuthorizationTenant(ctx context.Context) int64 {
+	tenantID, _ := ctx.Value(collectorAuthorizationTenantKey{}).(int64)
+	return tenantID
+}
+
+func (s *sSysBot) accountAuthorizationEnabled(ctx context.Context) bool {
+	if collectorAuthorizationTenant(ctx) > 0 {
+		return true
+	}
+	_, enabled := s.featureConfig(ctx, accountManagementFeature{}.Key())
+	return enabled
+}
+
+func accountAuthorizationShareScope(ctx context.Context, mod *gdb.Model, botID int64) *gdb.Model {
+	if tenantID := collectorAuthorizationTenant(ctx); tenantID > 0 {
+		return mod.Where("tenant_id", tenantID)
+	}
+	return mod.Where("bot_id", botID)
+}
+
 const accountAuthorizationPrefix = "account_auth_"
 const accountShareStatusAvailable = "available"
 
@@ -66,7 +92,7 @@ func (s *sSysBot) beginAccountAuthorization(ctx context.Context, fc *botFeatureC
 		return nil
 	}
 	chatID := fmt.Sprint(msg.Chat.ID)
-	if _, enabled := s.featureConfig(ctx, accountManagementFeature{}.Key()); !enabled {
+	if !s.accountAuthorizationEnabled(ctx) {
 		return s.reply(ctx, fc.BotId, chatID, "账户管理当前未启用。")
 	}
 	token := strings.TrimPrefix(strings.TrimSpace(fc.Args), accountAuthorizationPrefix)
@@ -75,7 +101,7 @@ func (s *sSysBot) beginAccountAuthorization(ctx context.Context, fc *botFeatureC
 		return s.reply(ctx, fc.BotId, chatID, "授权链接无效。")
 	}
 	var share *profileSessionRow
-	err = g.DB().Model(profileSessionTable).Ctx(ctx).Where("bot_id", fc.BotId).Where("scene", "account_share").Where("profile_no", accountAuthorizationDigest(token)).Where("status", accountShareStatusAvailable).WhereGT("expires_at", gtime.Now()).Scan(&share)
+	err = accountAuthorizationShareScope(ctx, g.DB().Model(profileSessionTable).Ctx(ctx), fc.BotId).Where("scene", "account_share").Where("profile_no", accountAuthorizationDigest(token)).Where("status", accountShareStatusAvailable).WhereGT("expires_at", gtime.Now()).Scan(&share)
 	if err != nil {
 		return err
 	}
@@ -163,7 +189,7 @@ func (s *sSysBot) handleAccountAuthorizationCallback(ctx context.Context, botID 
 		return true, nil
 	}
 	chatID := fmt.Sprint(query.Message.Message.Chat.ID)
-	if _, enabled := s.featureConfig(ctx, accountManagementFeature{}.Key()); !enabled {
+	if !s.accountAuthorizationEnabled(ctx) {
 		return true, s.reply(ctx, botID, chatID, "账户管理当前未启用。")
 	}
 	if client, err := s.telegramBot(ctx, s.replyBotToken(ctx, botID)); err == nil {
@@ -226,7 +252,7 @@ func (s *sSysBot) consumeAccountAuthorization(ctx context.Context, botID int64, 
 		if err = s.accountAuthorizationRecipientAvailable(ctx, fmt.Sprint(user.ID)); err != nil {
 			return err
 		}
-		shareMod := g.DB().Model(profileSessionTable).Ctx(ctx).Where("id", draft.ShareID).Where("bot_id", botID).Where("tenant_id", current.TenantId).Where("account_id", current.AccountId).Where("scene", "account_share").Where("status", accountShareStatusAvailable).WhereGT("expires_at", gtime.Now())
+		shareMod := accountAuthorizationShareScope(ctx, g.DB().Model(profileSessionTable).Ctx(ctx), botID).Where("id", draft.ShareID).Where("tenant_id", current.TenantId).Where("account_id", current.AccountId).Where("scene", "account_share").Where("status", accountShareStatusAvailable).WhereGT("expires_at", gtime.Now())
 		result, err = shareMod.Clone().Data(g.Map{"status": profileSessionStatusCompleted}).Update()
 		if err != nil {
 			return err
@@ -245,25 +271,9 @@ func (s *sSysBot) consumeAccountAuthorization(ctx context.Context, botID int64, 
 		if capability == nil || capability.AccountType != pi.PublishAccountTypeAdmin || capability.TenantId != current.TenantId {
 			return gerror.New("邀请方账户已失效或归属已变更。")
 		}
-		authCtx := quickPushMediaUploadContext(ctx, current.AccountId)
-		in := uploaderCreateInput(draft.Username)
-		in.TelegramUserId = fmt.Sprint(user.ID)
-		in.TelegramUsername = user.Username
-		created, err = ps.SysPublish().AdminAccountSave(authCtx, in)
+		created, err = s.createAndBindUploader(ctx, botID, current.AccountId, draft.Username, user)
 		if err != nil {
 			return err
-		}
-		if created == nil || created.Id <= 0 {
-			return gerror.New("未返回创建结果。")
-		}
-		// Share authorization explicitly grants TG binding, using the same admin-only
-		// partial-setting service as account management rather than bypassing policy.
-		if _, err = ps.SysPublish().PatchAccountSetting(authCtx, &pi.AccountSettingPatchInp{AccountId: created.Id, Field: "telegramBindingEnabled", Value: "1"}); err != nil {
-			return err
-		}
-		_, err = g.DB().Model(accountBindTbl).Ctx(ctx).Data(g.Map{"app": "api", "account_id": created.Id, "telegram_user_id": fmt.Sprint(user.ID), "telegram_username": user.Username, "telegram_first_name": user.FirstName, "telegram_last_name": user.LastName, "bot_id": botID, "status": 1}).Insert()
-		if err != nil {
-			return gerror.Wrap(err, "绑定TG失败（可能已绑定其他账户）")
 		}
 		audit, _ := json.Marshal(accountAuthorizationDraft{ShareID: draft.ShareID, Username: draft.Username, RecipientID: fmt.Sprint(user.ID), CreatedAccountID: created.Id})
 		_, err = g.DB().Model(profileSessionTable).Ctx(ctx).WhereIn("id", []int64{current.Id, draft.ShareID}).Data(g.Map{"payload_json": string(audit)}).Update()

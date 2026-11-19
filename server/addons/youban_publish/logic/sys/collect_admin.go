@@ -14,6 +14,7 @@ import (
 	"hotgo/addons/youban_publish/consts"
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/library/botregistry"
 )
 
 func (s *sSysPublish) CollectSourceList(ctx context.Context, in *sysin.CollectSourceListInp) (list []*sysin.CollectSourceModel, totalCount int, err error) {
@@ -95,30 +96,26 @@ func (s *sSysPublish) CollectSourceSave(ctx context.Context, in *sysin.CollectSo
 	if err = in.Filter(ctx); err != nil {
 		return 0, err
 	}
-	if in.SourceType == sysin.CollectSourceTypeBot {
-		var botExists bool
-		botExists, err = g.DB().Model(publishBotTable).Safe().Ctx(ctx).
-			Where("id", in.BotId).
-			Where("tenant_id", account.TenantId).
-			Where("status", 1).
-			WhereNull("deleted_at").
-			Exist()
-		if err != nil {
-			return 0, gerror.Wrap(err, "校验Bot采集机器人失败")
+	if in.RequireRegistration != nil {
+		if in.SourceType != sysin.CollectSourceTypeBot {
+			return 0, gerror.New("只有Bot采集来源可以设置注册开关")
 		}
-		if !botExists {
-			return 0, gerror.New("Bot采集机器人不存在、已停用或不属于当前账号")
-		}
-		bot, botErr := s.getBotById(ctx, in.BotId, account.TenantId)
-		if botErr != nil {
-			return 0, botErr
-		}
-		if bot.BotType == consts.PublishBotTypeTwoWay {
-			return 0, gerror.New("双向机器人不能用于频道采集，请选择普通机器人")
+		if account.AccountType != sysin.PublishAccountTypeAdmin {
+			return 0, gerror.New("只有租户管理员可以修改采集机器人注册开关")
 		}
 	}
 	now := gtime.Now()
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if in.Id > 0 {
+			if _, err := lockOwnedCollectSource(ctx, tx, in.Id, account.TenantId, account.Id); err != nil {
+				return err
+			}
+		}
+		if in.SourceType == sysin.CollectSourceTypeBot {
+			if err := claimCollectSourceBot(ctx, in.BotId, account.TenantId, in.RequireRegistration); err != nil {
+				return err
+			}
+		}
 		data := g.Map{
 			"tenant_id":               account.TenantId,
 			"account_id":              account.Id,
@@ -140,7 +137,7 @@ func (s *sSysPublish) CollectSourceSave(ctx context.Context, in *sysin.CollectSo
 			"updated_at":              now,
 		}
 		if in.Id > 0 {
-			if _, err = tx.Model(pdao.YoubanPublishCollectSource.Table()).Ctx(ctx).
+			if _, err := tx.Model(pdao.YoubanPublishCollectSource.Table()).Ctx(ctx).
 				Where("id", in.Id).
 				Where("tenant_id", account.TenantId).
 				Where("account_id", account.Id).
@@ -170,6 +167,58 @@ func (s *sSysPublish) CollectSourceSave(ctx context.Context, in *sysin.CollectSo
 		s.refreshAccountCollectSupervisor()
 	}
 	return id, err
+}
+
+func lockOwnedCollectSource(ctx context.Context, tx gdb.TX, id, tenantID, accountID int64) (*sysin.CollectSourceModel, error) {
+	cols := pdao.YoubanPublishCollectSource.Columns()
+	var source *sysin.CollectSourceModel
+	err := tx.Model(pdao.YoubanPublishCollectSource.Table()).Ctx(ctx).
+		Fields(cols.SourceType, cols.BotId).
+		Where(cols.Id, id).
+		Where(cols.TenantId, tenantID).
+		Where(cols.AccountId, accountID).
+		WhereNull(cols.DeletedAt).
+		LockUpdate().
+		Scan(&source)
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取采集源失败")
+	}
+	if source == nil {
+		return nil, gerror.New("采集源不存在或不属于当前账户")
+	}
+	return source, nil
+}
+
+func claimCollectSourceBot(ctx context.Context, botID, tenantID int64, requireRegistration *bool) error {
+	cols := pdao.YoubanPublishBot.Columns()
+	var bot *sysin.BotModel
+	err := pdao.YoubanPublishBot.Ctx(ctx).
+		Fields(cols.BotType, cols.BotToken).
+		Where(cols.Id, botID).
+		Where(cols.TenantId, tenantID).
+		Where(cols.Status, 1).
+		WhereNull(cols.DeletedAt).
+		LockUpdate().
+		Scan(&bot)
+	if err != nil {
+		return gerror.Wrap(err, "校验Bot采集机器人失败")
+	}
+	if bot == nil {
+		return gerror.New("Bot采集机器人不存在、已停用或不属于当前账号")
+	}
+	if bot.BotType == consts.PublishBotTypeTwoWay {
+		return gerror.New("双向机器人不能用于频道采集，请选择普通机器人")
+	}
+	if bot.BotType == botregistry.RoleUploader {
+		return gerror.New("上架机器人不能用于频道采集")
+	}
+	if err := botregistry.Claim(ctx, bot.BotToken, tenantID, botregistry.RoleCollector); err != nil {
+		return err
+	}
+	if requireRegistration != nil {
+		return botregistry.SetCollectorRequireRegistration(ctx, bot.BotToken, tenantID, *requireRegistration)
+	}
+	return nil
 }
 
 func (s *sSysPublish) CollectSourceDelete(ctx context.Context, in *sysin.IdsInp) error {
@@ -249,13 +298,27 @@ func (s *sSysPublish) CollectSourceStatus(ctx context.Context, in *sysin.Collect
 	if in.Status > 0 {
 		data["status"] = in.Status
 	}
-	_, err = pdao.YoubanPublishCollectSource.Ctx(ctx).
-		Where("id", in.Id).
-		Where("tenant_id", account.TenantId).
-		Where("account_id", account.Id).
-		WhereNull("deleted_at").
-		Data(data).
-		Update()
+	err = pdao.YoubanPublishCollectSource.Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if in.Enabled == 1 {
+			source, err := lockOwnedCollectSource(ctx, tx, in.Id, account.TenantId, account.Id)
+			if err != nil {
+				return err
+			}
+			if source.SourceType == sysin.CollectSourceTypeBot {
+				if err := claimCollectSourceBot(ctx, source.BotId, account.TenantId, nil); err != nil {
+					return err
+				}
+			}
+		}
+		_, err := tx.Model(pdao.YoubanPublishCollectSource.Table()).Ctx(ctx).
+			Where("id", in.Id).
+			Where("tenant_id", account.TenantId).
+			Where("account_id", account.Id).
+			WhereNull("deleted_at").
+			Data(data).
+			Update()
+		return gerror.Wrap(err, "更新采集源状态失败")
+	})
 	if err == nil {
 		s.refreshCollectSourceCache(ctx)
 		s.refreshAccountCollectSupervisor()
@@ -263,7 +326,7 @@ func (s *sSysPublish) CollectSourceStatus(ctx context.Context, in *sysin.Collect
 			go s.retryCollectSourceAfterEnabled(context.Background(), in.Id, account.TenantId, account.Id)
 		}
 	}
-	return gerror.Wrap(err, "更新采集源状态失败")
+	return err
 }
 
 func (s *sSysPublish) fillCollectSourceRules(ctx context.Context, list []*sysin.CollectSourceModel) error {

@@ -20,6 +20,7 @@ import (
 	"hotgo/addons/youban_publish/model"
 	"hotgo/addons/youban_publish/service"
 	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
+	"hotgo/internal/library/botregistry"
 	"hotgo/internal/library/microbatch"
 	"hotgo/internal/library/payment"
 )
@@ -114,6 +115,7 @@ func init() {
 	collectorservice.RegisterAccountMedia(&publishCollectorAccountMediaProvider{publish: publish})
 	collectorservice.RegisterAccountRuntimeProvider(&publishAccountRuntimeProvider{publish: publish})
 	gatewayservice.RegisterProvider(&publishBotGatewayProvider{publish: publish})
+	gatewayservice.RegisterProvider(&publishBotGatewayProvider{publish: publish, uploader: true})
 	gatewayservice.RegisterConfigProvider(func(ctx context.Context) (*gatewayservice.RuntimeConfig, error) {
 		conf, err := NewSysConfig().GetTelegram(ctx)
 		if err != nil {
@@ -151,9 +153,17 @@ func telegramGatewayRuntimeConfig(conf *model.TelegramConfig) (*gatewayservice.R
 	}, nil
 }
 
-type publishBotGatewayProvider struct{ publish *sSysPublish }
+type publishBotGatewayProvider struct {
+	publish  *sSysPublish
+	uploader bool
+}
 
-func (p *publishBotGatewayProvider) Name() string { return "youban_publish" }
+func (p *publishBotGatewayProvider) Name() string {
+	if p.uploader {
+		return botregistry.UploaderGatewayOwner
+	}
+	return "youban_publish"
+}
 
 func (p *publishBotGatewayProvider) ListEnabledBots(ctx context.Context) ([]gatewayservice.BotBinding, error) {
 	var rows []*struct {
@@ -161,12 +171,14 @@ func (p *publishBotGatewayProvider) ListEnabledBots(ctx context.Context) ([]gate
 		TenantId int64  `json:"tenantId"`
 		BotToken string `json:"botToken"`
 	}
-	if err := g.DB().Model(publishBotTable).Safe().Ctx(ctx).
-		Fields("id", "tenant_id", "bot_token").
-		Where("status", 1).
-		Where("bot_type<>?", "two_way").
-		WhereNull("deleted_at").
-		Scan(&rows); err != nil {
+	mod := g.DB().Model(publishBotTable).Ctx(ctx).
+		Fields("id", "tenant_id", "bot_token").Where("status", 1).WhereNull("deleted_at")
+	if p.uploader {
+		mod = mod.Where("bot_type", botregistry.RoleUploader)
+	} else {
+		mod = mod.WhereNotIn("bot_type", []string{"two_way", botregistry.RoleUploader})
+	}
+	if err := mod.Scan(&rows); err != nil {
 		return nil, err
 	}
 	items := make([]gatewayservice.BotBinding, 0, len(rows))
@@ -180,6 +192,8 @@ func (p *publishBotGatewayProvider) ListEnabledBots(ctx context.Context) ([]gate
 }
 
 func (p *publishBotGatewayProvider) HandleUpdate(ctx context.Context, binding gatewayservice.BotBinding, update *models.Update) error {
-	p.publish.handleTelegramUpdate(ctx, binding.ReferenceID, binding.TenantID, update)
+	if !p.uploader {
+		p.publish.handleTelegramUpdate(ctx, binding.ReferenceID, binding.TenantID, update)
+	}
 	return nil
 }

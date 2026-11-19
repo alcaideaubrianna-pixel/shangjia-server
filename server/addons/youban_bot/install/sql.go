@@ -19,6 +19,7 @@ var mysqlSqlFiles = []string{
 	"addons/youban_bot/resource/sql/manager.sql",
 	"addons/youban_bot/resource/sql/menu.sql",
 	"addons/youban_bot/resource/sql/account_management.sql",
+	"addons/youban_bot/resource/sql/bot_registry.sql",
 }
 
 var pgsqlSqlFiles = []string{
@@ -28,6 +29,7 @@ var pgsqlSqlFiles = []string{
 	"addons/youban_bot/resource/sql/manager.pgsql.sql",
 	"addons/youban_bot/resource/sql/menu.pgsql.sql",
 	"addons/youban_bot/resource/sql/account_management.pgsql.sql",
+	"addons/youban_bot/resource/sql/bot_registry.pgsql.sql",
 }
 
 func Install(ctx context.Context) error { return execSql(ctx) }
@@ -39,7 +41,7 @@ func execSql(ctx context.Context) (err error) {
 			return gerror.Wrapf(err, "执行全局机器人 SQL 失败：%s；%s", file, gerror.Current(err).Error())
 		}
 	}
-	return nil
+	return backfillBotRegistry(ctx)
 }
 
 func sqlFiles() []string {

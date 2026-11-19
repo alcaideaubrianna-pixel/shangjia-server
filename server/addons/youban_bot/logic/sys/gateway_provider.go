@@ -56,3 +56,7 @@ func (p *botGatewayProvider) HandleUpdate(ctx context.Context, binding gatewayse
 	}
 	return p.bot.handleUpdate(ctx, binding.ReferenceID, update)
 }
+
+func init() {
+	gatewayservice.RegisterFeature(&collectorGatewayFeature{})
+}

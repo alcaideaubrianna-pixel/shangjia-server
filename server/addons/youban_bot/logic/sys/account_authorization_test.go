@@ -47,7 +47,7 @@ func (s *accountAuthorizationTestService) PatchAccountSetting(ctx context.Contex
 }
 
 func TestAccountAuthorizationConsumption(t *testing.T) {
-	for _, scenario := range []string{"success", "wrong_user", "wrong_bot", "wrong_chat", "expired_share", "revoked_share", "wrong_tenant", "bound_user", "setting_failure"} {
+	for _, scenario := range []string{"success", "collector_same_tenant", "collector_other_tenant", "wrong_user", "wrong_bot", "wrong_chat", "expired_share", "revoked_share", "wrong_tenant", "bound_user", "setting_failure"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx := relayTestDatabase(t)
 			db, _ := gdb.Instance()
@@ -107,10 +107,21 @@ func TestAccountAuthorizationConsumption(t *testing.T) {
 			if scenario == "wrong_chat" {
 				chatID = "12"
 			}
+			if strings.HasPrefix(scenario, "collector_") {
+				if _, err := db.Exec(ctx, "UPDATE "+profileSessionTable+" SET bot_id=8 WHERE id=2"); err != nil {
+					t.Fatal(err)
+				}
+				botID = 8
+				tenant := int64(1)
+				if scenario == "collector_other_tenant" {
+					tenant = 2
+				}
+				ctx = withCollectorAuthorization(ctx, tenant)
+			}
 			s := &sSysBot{}
 			session := &profileSessionRow{Id: 2}
 			result, err := s.consumeAccountAuthorization(ctx, botID, user, chatID, session)
-			if scenario == "success" {
+			if scenario == "success" || scenario == "collector_same_tenant" {
 				if err != nil || result == nil {
 					t.Fatalf("authorize: %+v %v", result, err)
 				}

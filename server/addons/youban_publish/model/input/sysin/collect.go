@@ -145,6 +145,7 @@ type CollectSourceSaveInp struct {
 	RuleIds               []int64 `json:"ruleIds" dc:"绑定规则ID"`
 	Remark                string  `json:"remark" dc:"备注"`
 	Status                int     `json:"status" dc:"状态"`
+	RequireRegistration   *bool   `json:"requireRegistration" dc:"该采集Bot是否要求注册或授权"`
 }
 
 type CollectSourceHistoryStartInp struct {

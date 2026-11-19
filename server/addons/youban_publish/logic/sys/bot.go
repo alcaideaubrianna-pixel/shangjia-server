@@ -5,11 +5,13 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -18,6 +20,7 @@ import (
 	"hotgo/addons/youban_publish/consts"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
+	"hotgo/internal/library/botregistry"
 	"hotgo/internal/library/contexts"
 )
 
@@ -44,6 +47,9 @@ func (s *sSysPublish) AdminBotList(ctx context.Context, in *sysin.BotListInp) (l
 	}
 	if list == nil {
 		list = []*sysin.BotModel{}
+	}
+	if err = fillPublishBotRoles(ctx, list); err != nil {
+		return nil, 0, err
 	}
 	return list, totalCount, nil
 }
@@ -119,7 +125,65 @@ func (s *sSysPublish) botList(ctx context.Context, in *sysin.BotListInp) (list [
 	if list == nil {
 		list = []*sysin.BotModel{}
 	}
+	if err = fillPublishBotRoles(ctx, list); err != nil {
+		return nil, 0, err
+	}
 	return list, totalCount, nil
+}
+
+func fillPublishBotRoles(ctx context.Context, bots []*sysin.BotModel) error {
+	ids := make([]int64, 0, len(bots))
+	for _, bot := range bots {
+		if bot.BotType == consts.PublishBotTypeTwoWay {
+			bot.Role = consts.PublishBotRoleRelay
+		} else if bot.BotType == botregistry.RoleUploader {
+			bot.Role = consts.PublishBotRoleUploader
+			_, required, err := botregistry.UploaderConfig(ctx, bot.BotToken, bot.TenantId)
+			if err != nil {
+				return err
+			}
+			bot.RequireRegistration = required
+		} else {
+			ids = append(ids, bot.Id)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := g.DB().Model("hg_youban_publish_collect_source").Ctx(ctx).
+		Fields("bot_id").Distinct().WhereIn("bot_id", ids).Where("source_type", "bot").WhereNull("deleted_at").All()
+	if err != nil {
+		return gerror.Wrap(err, "查询机器人采集角色失败")
+	}
+	collectors := make(map[int64]bool, len(rows))
+	for _, row := range rows {
+		collectors[row["bot_id"].Int64()] = true
+	}
+	identityByBot := make(map[int64]int64, len(ids))
+	identities := make([]int64, 0, len(ids))
+	for _, bot := range bots {
+		if bot.Role != consts.PublishBotRoleUnassigned {
+			continue
+		}
+		if collectors[bot.Id] {
+			bot.Role = consts.PublishBotRoleCollector
+			continue
+		}
+		if identity, parseErr := botregistry.TelegramBotID(bot.BotToken); parseErr == nil {
+			identityByBot[bot.Id] = identity
+			identities = append(identities, identity)
+		}
+	}
+	claims, err := botregistry.CollectorClaims(ctx, identities)
+	if err != nil {
+		return gerror.Wrap(err, "查询机器人角色登记失败")
+	}
+	for _, bot := range bots {
+		if tenantID, found := claims[identityByBot[bot.Id]]; found && tenantID == bot.TenantId {
+			bot.Role = consts.PublishBotRoleCollector
+		}
+	}
+	return nil
 }
 
 // Only the dedicated two-way setup may opt a Bot into the two-way runtime.
@@ -143,28 +207,50 @@ func normalizePublishBotType(requested, current string) (string, error) {
 }
 
 func (s *sSysPublish) saveBot(ctx context.Context, in *sysin.BotSaveInp, tenantId int64, operatorId int64, accountId int64) (err error) {
+	var old *sysin.BotModel
 	currentType := ""
 	if in.Id > 0 {
-		old, err := s.getBotById(ctx, in.Id, tenantId)
+		old, err = s.getBotById(ctx, in.Id, tenantId)
 		if err != nil {
 			return err
 		}
 		currentType = old.BotType
 	}
-	botType, err := normalizePublishBotType(in.BotType, currentType)
-	if err != nil {
-		return err
+	requested := in.BotType
+	if in.Role != nil {
+		switch *in.Role {
+		case consts.PublishBotRoleUnassigned:
+			requested = consts.PublishBotTypeNormal
+		case consts.PublishBotRoleCollector:
+			return gerror.New("请通过采集配置分配代理采集角色")
+		case consts.PublishBotRoleRelay:
+			requested = consts.PublishBotTypeTwoWay
+		case consts.PublishBotRoleUploader:
+			requested = botregistry.RoleUploader
+		default:
+			return gerror.New("机器人角色无效")
+		}
 	}
-	botToken := strings.TrimSpace(in.BotToken)
-	if botToken == "" && in.Id <= 0 {
-		return gerror.New("Bot Token不能为空")
-	}
-	if botToken == "" {
-		bot, err := s.getBotById(ctx, in.Id, tenantId)
+	botType := botregistry.RoleUploader
+	if requested != botregistry.RoleUploader && !(requested == "" && currentType == botregistry.RoleUploader) {
+		botType, err = normalizePublishBotType(requested, currentType)
 		if err != nil {
 			return err
 		}
-		botToken = bot.BotToken
+	}
+	if currentType == consts.PublishBotTypeTwoWay && botType != currentType ||
+		currentType == botregistry.RoleUploader && botType != currentType {
+		return gerror.New("机器人已分配角色，无法直接切换")
+	}
+	if in.RequireRegistration != nil && botType != botregistry.RoleUploader {
+		return gerror.New("只有上架机器人可以设置登录要求")
+	}
+	botToken := strings.TrimSpace(in.BotToken)
+	if botToken == "" && old != nil {
+		botToken = old.BotToken
+	}
+	if botToken == "" {
+		return gerror.New("Bot Token不能为空")
 	}
 	tgUser, err := s.telegramBotProfile(ctx, botToken)
 	if err != nil {
@@ -192,26 +278,76 @@ func (s *sSysPublish) saveBot(ctx context.Context, in *sysin.BotSaveInp, tenantI
 		"updated_by":   operatorId,
 		"updated_at":   gtime.Now(),
 	}
-	if in.Id > 0 {
-		if tenantId > 0 {
-			if err = s.ensureBotsBelongTenant(ctx, []int64{in.Id}, tenantId); err != nil {
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		mod := tx.Model(publishBotTable).Ctx(ctx).Where("tenant_id", tenantId).WhereNull("deleted_at")
+		if old != nil {
+			row, err := mod.Clone().WherePri(in.Id).LockUpdate().One()
+			if err != nil {
+				return err
+			}
+			if row.IsEmpty() || row["bot_type"].String() != currentType || row["bot_token"].String() != old.BotToken {
+				return gerror.New("机器人设置已变更，请刷新后重试")
+			}
+			oldID, parseErr := botregistry.TelegramBotID(old.BotToken)
+			if parseErr != nil || oldID != tgUser.ID {
+				return gerror.New("只允许更新同一个Telegram机器人的Token")
+			}
+			ownerID := row["account_id"].Int64()
+			if botType == botregistry.RoleUploader && ownerID > 0 && accountId > 0 && accountId != ownerID {
+				return gerror.New("该机器人不属于当前账户")
+			}
+			if ownerID > 0 {
+				accountId = ownerID
+			}
+		}
+		if botType == botregistry.RoleUploader {
+			if accountId <= 0 || tenantId <= 0 {
+				return gerror.New("请使用租户管理账户配置上架机器人")
+			}
+			if old != nil && currentType != botregistry.RoleUploader {
+				used, err := tx.Model("hg_youban_publish_collect_source").Ctx(ctx).
+					Where("tenant_id", tenantId).Where("bot_id", old.Id).
+					Where("source_type", "bot").WhereNull("deleted_at").Exist()
+				if err != nil {
+					return err
+				}
+				if used {
+					return gerror.New("该机器人已配置为采集机器人，无法分配上架角色")
+				}
+			}
+			if err := botregistry.ClaimIdentity(ctx, tgUser.ID, tenantId, botregistry.RoleUploader); err != nil {
+				return err
+			}
+			if in.RequireRegistration != nil {
+				if err := botregistry.SetUploaderRequireRegistration(ctx, botToken, tenantId, *in.RequireRegistration); err != nil {
+					return err
+				}
+			}
+			data["account_id"] = accountId
+		}
+		if old == nil && botType == consts.PublishBotTypeNormal {
+			if err := botregistry.ClaimIdentity(ctx, tgUser.ID, tenantId, botregistry.RoleUnassigned); err != nil {
 				return err
 			}
 		}
-		mod := g.DB().Model(publishBotTable).Safe().Ctx(ctx).Where("id", in.Id).WhereNull("deleted_at")
-		if tenantId > 0 {
-			mod = mod.Where("tenant_id", tenantId)
+		duplicate, err := tx.Model(publishBotTable).Ctx(ctx).WhereNull("deleted_at").
+			WhereNot("id", in.Id).WhereLike("bot_token", strconv.FormatInt(tgUser.ID, 10)+":%").Exist()
+		if err != nil {
+			return err
 		}
-		_, err = mod.Data(data).Update()
-	} else {
-		if tenantId <= 0 {
-			return gerror.New("请选择账号归属")
+		if duplicate {
+			return gerror.New("该Telegram机器人已登记，请使用原Bot进行配置")
+		}
+		if old != nil {
+			_, err = mod.WherePri(in.Id).Data(data).Update()
+			return err
 		}
 		data["account_id"] = accountId
 		data["created_by"] = operatorId
 		data["created_at"] = gtime.Now()
-		_, err = g.DB().Model(publishBotTable).Safe().Ctx(ctx).Data(data).Insert()
-	}
+		_, err = tx.Model(publishBotTable).Ctx(ctx).Data(data).Insert()
+		return err
+	})
 	if err != nil {
 		return gerror.Wrap(err, "保存Bot配置失败")
 	}
