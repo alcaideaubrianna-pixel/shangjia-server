@@ -48,12 +48,21 @@ type Claim struct {
 	Turn       int64
 }
 type Queue struct {
-	client *gredis.Redis
-	keys   []string
+	client       *gredis.Redis
+	keys         []string
+	idleInterval time.Duration
 }
 
 func New(client *gredis.Redis, prefix string) *Queue {
-	return &Queue{client: client, keys: []string{prefix + ":ready", prefix + ":running", prefix + ":state", prefix + ":wake"}}
+	return NewWithIdleInterval(client, prefix, 30*time.Second)
+}
+
+// NewWithIdleInterval preserves immediate business wakeups while configuring idle polling.
+func NewWithIdleInterval(client *gredis.Redis, prefix string, idle time.Duration) *Queue {
+	if idle < time.Millisecond {
+		idle = 30 * time.Second
+	}
+	return &Queue{idleInterval: idle, client: client, keys: []string{prefix + ":ready", prefix + ":running", prefix + ":state", prefix + ":wake"}}
 }
 
 // All scripts touch one account and O(log(accounts)) indexes. Redis TIME avoids host clock skew.
@@ -115,7 +124,7 @@ elseif ARGV[4]=='1' then
  redis.call('HSET',KEYS[3],m,cjson.encode(s)); redis.call('ZADD',KEYS[1],now+delay,m)
 elseif s.g>tonumber(ARGV[3]) then
  s.failures=0; s.state='ready'; redis.call('HSET',KEYS[3],m,cjson.encode(s)); redis.call('ZADD',KEYS[1],now+1,m)
-else s.state='idle'; s.failures=0; redis.call('HSET',KEYS[3],m,cjson.encode(s)); redis.call('ZADD',KEYS[1],now+30000,m) end
+else s.state='idle'; s.failures=0; redis.call('HSET',KEYS[3],m,cjson.encode(s)); redis.call('ZADD',KEYS[1],now+tonumber(ARGV[5]),m) end
 return 1`
 
 func (q *Queue) Mark(ctx context.Context, s Scope, w Wake) error {
@@ -157,7 +166,7 @@ func (q *Queue) Claim(ctx context.Context, lease time.Duration) (*Claim, error) 
 	return &Claim{Scope: Scope{tenant, account}, Token: a[1], Generation: generation, Turn: turn}, nil
 }
 func (q *Queue) Ack(ctx context.Context, c Claim, outcome Outcome) (bool, error) {
-	v, err := q.client.GroupScript().Eval(ctx, ackScript, 4, q.keys, []interface{}{c.Scope.Member(), c.Token, c.Generation, int(outcome)})
+	v, err := q.client.GroupScript().Eval(ctx, ackScript, 4, q.keys, []interface{}{c.Scope.Member(), c.Token, c.Generation, int(outcome), q.idleInterval.Milliseconds()})
 	if err != nil {
 		return false, err
 	}

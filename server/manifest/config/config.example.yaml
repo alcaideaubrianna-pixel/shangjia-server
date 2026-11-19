@@ -433,6 +433,9 @@ youbanPublish:
     schedulerIntervalSeconds: 2
     expandLeaseSeconds: 60
   queue:
+    # 账户目录每批最多100个；空闲兜底不影响业务变更和计划到期唤醒。
+    accountScheduleIntervalSeconds: 300
+    accountScheduleIdleIntervalSeconds: 300
     accountBusyTimeoutSeconds: 10
     publishQueueShards: 16
     publishBulkConcurrency: 4  # 循环/全量上架低优先级发送并发，建议按节点逐步调整

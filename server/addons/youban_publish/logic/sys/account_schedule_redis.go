@@ -19,7 +19,11 @@ func accountScheduleRedis() (*accountschedule.Queue, error) {
 	if err != nil {
 		return nil, err
 	}
-	return accountschedule.New(client, publishconsts.AccountScheduleRedisPrefix), nil
+	seconds := g.Cfg().MustGet(context.Background(), "youbanPublish.queue.accountScheduleIdleIntervalSeconds", 300).Int()
+	if seconds <= 0 {
+		seconds = 300
+	}
+	return accountschedule.NewWithIdleInterval(client, publishconsts.AccountScheduleRedisPrefix, time.Duration(seconds)*time.Second), nil
 }
 
 // markAccountSchedule 合并扫描；实际业务变更通过 changed 保留执行期间的新唤醒。

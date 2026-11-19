@@ -21,20 +21,21 @@ type scheduledPublishProfile struct {
 	TenantId  int64       `json:"tenantId"`
 }
 
-// runScheduledPublishRuntime 每秒分发账户调度；旧引擎定时上架保留原配置频率，互不阻塞账户任务执行。
+// runScheduledPublishRuntime 账户目录兜底和旧引擎到期发布独立计时。
 func (s *sSysPublish) runScheduledPublishRuntime(ctx context.Context) {
 	legacyInterval := g.Cfg().MustGet(ctx, "youbanPublish.scheduled.intervalSeconds", 30).Int()
 	if legacyInterval <= 0 {
 		legacyInterval = 30
 	}
-	accountScheduleInterval := g.Cfg().MustGet(ctx, "youbanPublish.queue.accountScheduleIntervalSeconds", 1).Int()
-	if accountScheduleInterval <= 0 {
-		accountScheduleInterval = 1
+	accountInterval := g.Cfg().MustGet(ctx, "youbanPublish.queue.accountScheduleIntervalSeconds", 300).Int()
+	if accountInterval <= 0 {
+		accountInterval = 300
 	}
-	interval := time.Duration(accountScheduleInterval) * time.Second
+	interval := time.Duration(accountInterval) * time.Second
 	timer := time.NewTimer(interval)
 	defer timer.Stop()
-	var lastLegacy time.Time
+	legacyTimer := time.NewTimer(time.Duration(legacyInterval) * time.Second)
+	defer legacyTimer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -43,13 +44,14 @@ func (s *sSysPublish) runScheduledPublishRuntime(ctx context.Context) {
 			if err := s.enqueueAccountSchedules(ctx); err != nil {
 				g.Log().Warningf(ctx, "分发账户调度任务失败 err:%+v", err)
 			}
-			if !globalStreamPushEngineEnabled() && time.Since(lastLegacy) >= time.Duration(legacyInterval)*time.Second {
-				lastLegacy = time.Now()
+			timer.Reset(interval)
+		case <-legacyTimer.C:
+			if !globalStreamPushEngineEnabled() {
 				if err := s.submitDuePublishTasks(ctx); err != nil {
 					g.Log().Warningf(ctx, "提交旧引擎到期上架任务失败 err:%+v", err)
 				}
 			}
-			timer.Reset(interval)
+			legacyTimer.Reset(time.Duration(legacyInterval) * time.Second)
 		}
 	}
 }

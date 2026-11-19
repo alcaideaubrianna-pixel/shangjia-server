@@ -84,8 +84,8 @@
     "file": "addons/youban_publish/library/accountschedule/queue.go",
     "function": "*Queue.Ack",
     "rule": "redis-primitive",
-    "expression": "q.client.GroupScript().Eval(ctx, ackScript, 4, q.keys, []interface{}{c.Scope.Member(), c.Token, c.Generation, int(outcome)})",
-    "digest": "00fa5ddeafbd0e08aa7fef162d3b6ced9f703e93c043136732dc40d5e6fc9474",
+    "expression": "q.client.GroupScript().Eval(ctx, ackScript, 4, q.keys, []interface{}{c.Scope.Member(), c.Token, c.Generation, int(outcome), q.idleInterval.Milliseconds()})",
+    "digest": "42bbbdab9492bd4ebfb50c26b2f88711160563d5ee3b1f7b0bbfaafe9454fd25",
     "count": 1,
     "reason": "Existing infrastructure adapter owns this exact Redis primitive; callers must use its public queue/index API."
   },

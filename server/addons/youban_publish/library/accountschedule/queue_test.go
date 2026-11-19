@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +15,50 @@ import (
 	"github.com/gogf/gf/v2/database/gredis"
 	"github.com/gogf/gf/v2/util/guid"
 )
+
+func TestConfiguredIdlePreservesChangedWake(t *testing.T) {
+	q := testQueue(t)
+	q = NewWithIdleInterval(q.client, strings.TrimSuffix(q.keys[0], ":ready"), 5*time.Minute)
+	ctx := context.Background()
+	scope := Scope{TenantID: 1, AccountID: 2}
+	if err := q.Mark(ctx, scope, Changed); err != nil {
+		t.Fatal(err)
+	}
+	claim, err := q.Claim(ctx, time.Minute)
+	if err != nil || claim == nil {
+		t.Fatalf("claim: %v %v", claim, err)
+	}
+	if ok, err := q.Ack(ctx, *claim, Success); err != nil || !ok {
+		t.Fatalf("ack: %v %v", ok, err)
+	}
+	score, err := q.client.Do(ctx, "ZSCORE", q.keys[0], scope.Member())
+	if err != nil {
+		t.Fatal(err)
+	}
+	remaining := time.Until(time.UnixMilli(score.Int64()))
+	if remaining < 290*time.Second || remaining > 310*time.Second {
+		t.Fatalf("idle interval: %v", remaining)
+	}
+	if c, err := q.Claim(ctx, time.Minute); err != nil || c != nil {
+		t.Fatalf("premature claim: %v %v", c, err)
+	}
+	if err := q.Schedule(ctx, scope, time.Now().Add(-time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	c, err := q.Claim(ctx, time.Minute)
+	if err != nil || c == nil {
+		t.Fatalf("due wake delayed: %v %v", c, err)
+	}
+	if ok, err := q.Ack(ctx, *c, Success); err != nil || !ok {
+		t.Fatalf("ack due: %v %v", ok, err)
+	}
+	if err := q.Mark(ctx, scope, Changed); err != nil {
+		t.Fatal(err)
+	}
+	if c, err := q.Claim(ctx, time.Minute); err != nil || c == nil {
+		t.Fatalf("changed wake delayed: %v %v", c, err)
+	}
+}
 
 func testQueue(t *testing.T) *Queue {
 	t.Helper()
