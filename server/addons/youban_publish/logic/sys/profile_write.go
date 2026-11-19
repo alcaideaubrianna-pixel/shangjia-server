@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -44,11 +45,12 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 	logStage("validate_input", stageStartedAt, nil)
 	draftOnly := in.DraftOnly && in.Id <= 0 && normalizeProfileUUID(in.Uuid) == ""
 	stageStartedAt = time.Now()
+	var regions profileRegionPreparation
 	if draftOnly {
 		in.Province = safeProfileRegionValue(in.Province)
 		in.City = safeProfileRegionValue(in.City)
 	} else {
-		in.Province, in.City = normalizeProfileRegionsBestEffort(ctx, in.PlainText, in.Province, in.City)
+		regions = prepareProfileRegions(ctx, in.Id, in.PlainText, in.Province, in.City)
 	}
 	if tenantId <= 0 || accountId <= 0 {
 		return nil, gerror.New("上架账号信息不完整")
@@ -121,13 +123,16 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 			}
 			if profileId == 0 {
 				stepStartedAt := time.Now()
+				if !draftOnly {
+					in.Province, in.City = selectProfileRegions(regions, true, "", "", "", in.PlainText)
+				}
 				profileId, err = s.createProfileFromInput(ctx, tx, in, tenantId, accountId)
 				logStage("create_profile_row_and_number", stepStartedAt, err)
 				if err != nil {
 					return err
 				}
 			} else {
-				if err = s.updateProfileFromInput(ctx, tx, in, profileId, accountId, publishAt); err != nil {
+				if err = s.updateProfileFromInput(ctx, tx, in, profileId, accountId, publishAt, regions); err != nil {
 					return err
 				}
 			}
@@ -196,15 +201,21 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 const profileRegionMaxRunes = 64
 const profileRegionLookupTimeout = 3 * time.Second
 
-// normalizeProfileRegionsBestEffort keeps region enrichment from blocking a
-// profile save. Region parsing and the province dictionary are auxiliary
-// metadata; the original profile text remains the source of truth when either
-// step is unavailable. Values that cannot fit the database contract are
-// cleared rather than allowing the INSERT to fail.
-func normalizeProfileRegionsBestEffort(ctx context.Context, plainText, province, city string) (string, string) {
-	// Some clients send labelled values in the province/city fields themselves,
-	// for example "北京     城市：北京". Parse those fields first so the next
-	// label cannot leak into a varchar(64) value.
+// profileRegionPreparation retains the request values until the existing row is
+// available. All dictionary lookups finish before entering the save transaction.
+type profileRegionPreparation struct {
+	rawProvince, rawCity   string
+	province, city         string
+	bodyProvince, bodyCity string
+	cityProvince           string
+	explicitFailed         bool
+}
+
+func prepareProfileRegions(ctx context.Context, profileID int64, text, province, city string) profileRegionPreparation {
+	started := time.Now()
+	prepared := profileRegionPreparation{rawProvince: province, rawCity: city}
+	lookupCtx, cancel := context.WithTimeout(ctx, profileRegionLookupTimeout)
+	defer cancel()
 	providedProvince, providedCity := profileextractor.RegionLabels(fmt.Sprintf("省份:%s\n城市:%s", province, city))
 	if providedProvince != "" {
 		province = providedProvince
@@ -212,41 +223,163 @@ func normalizeProfileRegionsBestEffort(ctx context.Context, plainText, province,
 	if providedCity != "" {
 		city = providedCity
 	}
-	if strings.TrimSpace(province) == "" || strings.TrimSpace(city) == "" {
-		parsedProvince, parsedCity := profileextractor.RegionLabels(plainText)
-		if strings.TrimSpace(province) == "" {
-			province = parsedProvince
+	prepared.province, prepared.city = safeProfileRegionValue(province), safeProfileRegionValue(city)
+	var lookupErrors []string
+	if len([]rune(strings.TrimSpace(prepared.rawProvince))) > profileRegionMaxRunes || len([]rune(strings.TrimSpace(prepared.rawCity))) > profileRegionMaxRunes {
+		prepared.explicitFailed = true
+		lookupErrors = append(lookupErrors, "地区输入超过长度限制")
+	}
+	explicitResult := "empty"
+	if !prepared.explicitFailed && (prepared.province != "" || prepared.city != "") {
+		// Canonical code lists need no name lookup. Parent validation below uses
+		// the same cached legacy index as body recognition.
+		normalizedProvince, normalizedCity := prepared.province, prepared.city
+		var err error
+		if !profileRegionCodeList(prepared.province) || !profileRegionCodeList(prepared.city) {
+			normalizedProvince, normalizedCity, _, err = location.NormalizeRegionCodes(lookupCtx, prepared.province, prepared.city)
 		}
-		if strings.TrimSpace(city) == "" {
-			city = parsedCity
+		if err != nil {
+			prepared.explicitFailed = true
+			lookupErrors = append(lookupErrors, err.Error())
+			explicitResult = "lookup_error"
+		} else {
+			prepared.province, prepared.city = safeProfileRegionValue(normalizedProvince), safeProfileRegionValue(normalizedCity)
+			explicitResult = "normalized"
 		}
 	}
-	provinceLength, cityLength := len([]rune(strings.TrimSpace(province))), len([]rune(strings.TrimSpace(city)))
-	if provinceLength > profileRegionMaxRunes || cityLength > profileRegionMaxRunes {
-		g.Log().Warning(ctx, "资料地区字段超过数据库长度，已忽略异常字段", g.Map{
-			"provinceLength": provinceLength,
-			"cityLength":     cityLength,
-			"maxLength":      profileRegionMaxRunes,
-		})
+	if !prepared.explicitFailed && prepared.city != "" && profileRegionCodeList(prepared.city) {
+		index, err := getLegacyCMSRegionIndex(lookupCtx)
+		if err == nil {
+			parents := make([]string, 0)
+			for _, code := range strings.Split(profileRegionComparisonKey(prepared.city), ",") {
+				id, _ := strconv.ParseInt(code, 10, 64)
+				row := index.optionsById[id]
+				if row == nil || row.Level != 2 || row.Pid <= 0 || index.optionsById[row.Pid] == nil || index.optionsById[row.Pid].Level != 1 {
+					err = gerror.Newf("城市编码%s未找到有效父省", code)
+					break
+				}
+				parents = append(parents, strconv.FormatInt(row.Pid, 10))
+			}
+			if err == nil {
+				prepared.cityProvince = profileRegionComparisonKey(strings.Join(parents, ","))
+			}
+		}
+		if err != nil {
+			prepared.explicitFailed = true
+			explicitResult = "lookup_error"
+			lookupErrors = append(lookupErrors, err.Error())
+		}
 	}
-	province = safeProfileRegionValue(province)
-	city = safeProfileRegionValue(city)
-	if province == "" && city == "" {
-		return "", ""
+	if prepared.explicitFailed && explicitResult == "empty" {
+		explicitResult = "invalid_input"
 	}
+	result := "no_location_fields"
+	fields := materialImportRegionFieldsFromText(text)
+	if len(fields.provinceTexts) > 0 || len(fields.cityTexts) > 0 {
+		bodyProvince, bodyCity, err := materialImportRegionCodes(lookupCtx, text)
+		if err != nil {
+			lookupErrors = append(lookupErrors, err.Error())
+			result = "lookup_error"
+		} else {
+			prepared.bodyProvince, prepared.bodyCity = safeProfileRegionValue(bodyProvince), safeProfileRegionValue(bodyCity)
+			result = "no_match"
+			if prepared.bodyProvince != "" || prepared.bodyCity != "" {
+				result = "matched"
+			}
+		}
+	}
+	fieldsLog := g.Map{"profileId": profileID, "entry": "saveProfile", "phase": "region_prepare", "elapsedMs": time.Since(started).Milliseconds(), "result": result, "explicitResult": explicitResult}
+	if len(lookupErrors) > 0 {
+		fieldsLog["error"] = strings.Join(lookupErrors, "; ")
+	}
+	if result == "lookup_error" || prepared.explicitFailed {
+		g.Log().Warning(ctx, "资料地区预处理已降级", fieldsLog)
+	} else {
+		g.Log().Info(ctx, "资料地区预处理完成", fieldsLog)
+	}
+	return prepared
+}
 
-	lookupCtx, cancel := context.WithTimeout(ctx, profileRegionLookupTimeout)
-	defer cancel()
-	normalizedProvince, normalizedCity, _, err := location.NormalizeRegionCodes(lookupCtx, province, city)
-	if err != nil {
-		g.Log().Warning(ctx, "资料地区编码转换失败，已降级保存原始资料", g.Map{
-			"provinceLength": len([]rune(province)),
-			"cityLength":     len([]rune(city)),
-			"error":          err.Error(),
-		})
-		return province, city
+// profileRegionCodeList accepts empty fields and canonical six-digit code lists.
+func profileRegionCodeList(value string) bool {
+	key := profileRegionComparisonKey(value)
+	if key == "" {
+		return true
 	}
-	return safeProfileRegionValue(normalizedProvince), safeProfileRegionValue(normalizedCity)
+	for _, code := range strings.Split(key, ",") {
+		if len(code) != 6 {
+			return false
+		}
+		for _, digit := range code {
+			if digit < '0' || digit > '9' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// profileRegionComparisonKey treats code lists as sets, including JSON-style
+// list strings returned by older clients. It performs no dictionary lookups.
+func profileRegionComparisonKey(value string) string {
+	parts := strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || r == '，' || r == '[' || r == ']' || r == '"' || r == '\'' || r == ' ' || r == '\n' || r == '\t'
+	})
+	seen := make(map[string]bool, len(parts))
+	unique := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if !seen[part] {
+			seen[part] = true
+			unique = append(unique, part)
+		}
+	}
+	sort.Strings(unique)
+	return strings.Join(unique, ",")
+}
+
+// selectProfileRegions chooses a whole pair: a partial new province must never
+// inherit an unrelated old city. Empty/failed recognition preserves the old pair.
+func selectProfileRegions(prepared profileRegionPreparation, create bool, oldProvince, oldCity, oldText, text string) (string, string) {
+	if create {
+		if prepared.cityProvince != "" {
+			return prepared.cityProvince, prepared.city
+		}
+		if prepared.province != "" || prepared.city != "" {
+			return prepared.province, prepared.city
+		}
+		return prepared.bodyProvince, prepared.bodyCity
+	}
+	if prepared.explicitFailed {
+		return oldProvince, oldCity
+	}
+	same := func(raw, normalized, old string) bool {
+		key := profileRegionComparisonKey(old)
+		return profileRegionComparisonKey(raw) == key || profileRegionComparisonKey(normalized) == key
+	}
+	// Missing fields carry no manual selection intent. Compare only supplied
+	// fields, so omitting a city cannot clear it during an ordinary content edit.
+	provinceProvided := strings.TrimSpace(prepared.rawProvince) != ""
+	cityProvided := strings.TrimSpace(prepared.rawCity) != ""
+	manualProvince := provinceProvided && !same(prepared.rawProvince, prepared.province, oldProvince)
+	manualCity := cityProvided && !same(prepared.rawCity, prepared.city, oldCity)
+	if manualProvince || manualCity {
+		if prepared.province == "" && prepared.city == "" {
+			return oldProvince, oldCity
+		}
+		// A changed province with the previous city echoed by a client is a
+		// province-only selection; retaining that city would create a mixed pair.
+		if manualProvince && !manualCity {
+			return prepared.province, ""
+		}
+		if manualCity && prepared.cityProvince != "" {
+			return prepared.cityProvince, prepared.city
+		}
+		return prepared.province, prepared.city
+	}
+	if (text != oldText || strings.TrimSpace(oldProvince) == "" || strings.TrimSpace(oldCity) == "") && (prepared.bodyProvince != "" || prepared.bodyCity != "") {
+		return prepared.bodyProvince, prepared.bodyCity
+	}
+	return oldProvince, oldCity
 }
 
 func safeProfileRegionValue(value string) string {
@@ -715,7 +848,7 @@ func (s *sSysPublish) createProfileFromInput(ctx context.Context, tx gdb.TX, in 
 	return 0, gerror.Wrap(lastErr, "创建资料失败，资料编号重复")
 }
 
-func (s *sSysPublish) updateProfileFromInput(ctx context.Context, tx gdb.TX, in *sysin.ProfileSaveInp, profileId int64, accountId int64, publishAt *gtime.Time) error {
+func (s *sSysPublish) updateProfileFromInput(ctx context.Context, tx gdb.TX, in *sysin.ProfileSaveInp, profileId int64, accountId int64, publishAt *gtime.Time, regions profileRegionPreparation) error {
 	columns := dao.ContentProfile.Columns()
 	now := gtime.Now()
 	current, err := tx.Model(dao.ContentProfile.Table()).Ctx(ctx).
@@ -738,6 +871,7 @@ func (s *sSysPublish) updateProfileFromInput(ctx context.Context, tx gdb.TX, in 
 	if err != nil {
 		return gerror.Wrap(err, "读取资料当前状态失败")
 	}
+	in.Province, in.City = selectProfileRegions(regions, false, current[columns.Province].String(), current[columns.City].String(), current[columns.PlainText].String(), in.PlainText)
 	// Editing content must not change lifecycle state. Publish/Unpublish/
 	// Republish are the only operations allowed to transition it.
 	nextStatus := current[columns.Status].Int()
