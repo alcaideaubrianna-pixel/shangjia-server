@@ -101,34 +101,27 @@ var provinceAliases = map[string]string{
 	"台湾": "台湾", "台湾省": "台湾",
 }
 
-var cityProvinceMap = map[string]string{
-	"北京": "北京", "天津": "天津", "上海": "上海", "重庆": "重庆",
-	"广州": "广东", "深圳": "广东", "佛山": "广东", "东莞": "广东", "珠海": "广东", "惠州": "广东", "中山": "广东", "汕头": "广东", "揭阳": "广东", "湛江": "广东", "江门": "广东", "肇庆": "广东", "茂名": "广东", "清远": "广东", "河源": "广东", "梅州": "广东", "汕尾": "广东", "潮州": "广东", "韶关": "广东", "阳江": "广东", "云浮": "广东",
-	"杭州": "浙江", "宁波": "浙江", "温州": "浙江", "绍兴": "浙江", "金华": "浙江", "义乌": "浙江", "嘉兴": "浙江",
-	"南京": "江苏", "苏州": "江苏", "无锡": "江苏", "常州": "江苏",
-	"成都": "四川", "武汉": "湖北", "长沙": "湖南", "郑州": "河南", "西安": "陕西", "昆明": "云南",
-	"厦门": "福建", "福州": "福建", "青岛": "山东", "济南": "山东", "合肥": "安徽", "南昌": "江西",
-	"太原": "山西", "沈阳": "辽宁", "大连": "辽宁", "长春": "吉林", "哈尔滨": "黑龙江",
-	"南宁": "广西", "海口": "海南", "贵阳": "贵州", "兰州": "甘肃", "银川": "宁夏", "西宁": "青海",
-	"乌鲁木齐": "新疆", "拉萨": "西藏", "香港": "香港", "澳门": "澳门", "台北": "台湾",
-	"吉隆坡": "马来西亚", "新加坡": "新加坡", "东京": "日本", "大阪": "日本", "曼谷": "泰国",
-	"首尔": "韩国", "纽约": "美国", "洛杉矶": "美国", "旧金山": "美国", "伦敦": "英国",
-}
+var cityProvinceMap = func() map[string]string {
+	cities := map[string]string{
+		"北京": "北京", "天津": "天津", "上海": "上海", "重庆": "重庆",
+		"广州": "广东", "深圳": "广东", "佛山": "广东", "东莞": "广东", "珠海": "广东", "惠州": "广东", "中山": "广东", "汕头": "广东", "揭阳": "广东", "湛江": "广东", "江门": "广东", "肇庆": "广东", "茂名": "广东", "清远": "广东", "河源": "广东", "梅州": "广东", "汕尾": "广东", "潮州": "广东", "韶关": "广东", "阳江": "广东", "云浮": "广东",
+		"杭州": "浙江", "宁波": "浙江", "温州": "浙江", "绍兴": "浙江", "金华": "浙江", "义乌": "浙江", "嘉兴": "浙江",
+		"南京": "江苏", "苏州": "江苏", "无锡": "江苏", "常州": "江苏",
+		"成都": "四川", "武汉": "湖北", "长沙": "湖南", "郑州": "河南", "西安": "陕西", "昆明": "云南",
+		"厦门": "福建", "福州": "福建", "青岛": "山东", "济南": "山东", "合肥": "安徽", "南昌": "江西",
+		"太原": "山西", "沈阳": "辽宁", "大连": "辽宁", "长春": "吉林", "哈尔滨": "黑龙江",
+		"南宁": "广西", "海口": "海南", "贵阳": "贵州", "兰州": "甘肃", "银川": "宁夏", "西宁": "青海",
+		"乌鲁木齐": "新疆", "拉萨": "西藏", "香港": "香港", "澳门": "澳门", "台北": "台湾",
+	}
+	for country, names := range location.OverseasRegionCities() {
+		for _, city := range names {
+			cities[city] = country
+		}
+	}
+	return cities
+}()
 
-var overseasRegionSeeds = map[string][]string{
-	"马来西亚": {"吉隆坡", "槟城"},
-	"新加坡":  {"新加坡"},
-	"日本":   {"东京", "大阪"},
-	"泰国":   {"曼谷"},
-	"美国":   {"纽约", "旧金山", "洛杉矶"},
-	"英国":   {"伦敦", "利兹"},
-	"澳大利亚": {"堪培拉", "墨尔本"},
-	"韩国":   {"首尔"},
-	"奥地利":  {"维也纳"},
-	"菲律宾":  {"马尼拉"},
-	"柬埔寨":  {"柬埔寨"},
-	"阿联酋":  {"迪拜"},
-}
+var overseasRegionSeeds = location.OverseasRegionCities()
 
 type sSysContent struct{}
 
@@ -1028,7 +1021,9 @@ func (s *sSysContent) buildStandardRegionOptions(ctx context.Context) (list []*s
 			continue
 		}
 		city := normalizeCityForProvince(parent.Province, title)
-		if city == "" || city == parent.Province {
+		if _, overseas := overseasRegionSeeds[parent.Province]; overseas {
+			city = title
+		} else if city == "" || city == parent.Province {
 			continue
 		}
 		parent.Children = append(parent.Children, &sysin.ContentProfileRegionOption{
@@ -1052,33 +1047,7 @@ func (s *sSysContent) buildStandardRegionOptions(ctx context.Context) (list []*s
 		item.Children = dedupeRegionChildren(item.Children)
 		list = append(list, item)
 	}
-	for province, cities := range overseasRegionSeeds {
-		if exists[province] {
-			continue
-		}
-		item := &sysin.ContentProfileRegionOption{
-			Label:    province,
-			Value:    province,
-			Code:     province,
-			Type:     "country",
-			Province: province,
-			Children: []*sysin.ContentProfileRegionOption{},
-		}
-		for _, city := range cities {
-			if city == province {
-				continue
-			}
-			item.Children = append(item.Children, &sysin.ContentProfileRegionOption{
-				Label:    city,
-				Value:    province + "/" + city,
-				Code:     province + "/" + city,
-				Type:     "city",
-				Province: province,
-				City:     city,
-			})
-		}
-		list = append(list, item)
-	}
+	list = appendOverseasRegionOptions(list)
 	return
 }
 

@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/gogf/gf/v2/database/gdb"
 )
 
 func TestSafeProfileRegionValueClearsOversizedValue(t *testing.T) {
@@ -46,6 +48,9 @@ func TestSelectProfileRegions(t *testing.T) {
 		{name: "新建显式优先", create: true, prepared: profileRegionPreparation{province: "320000", city: "320100", bodyProvince: "330000", bodyCity: "330100"}, province: "320000", city: "320100"},
 		{name: "新建部分显式不混正文", create: true, prepared: profileRegionPreparation{province: "320000", bodyProvince: "330000", bodyCity: "330100"}, province: "320000"},
 		{name: "新建缺省用正文多地区", create: true, prepared: profileRegionPreparation{bodyProvince: "330000,440000", bodyCity: "330100,440300"}, province: "330000,440000", city: "330100,440300"},
+		{name: "海外只改城市纠正旧国家", prepared: profileRegionPreparation{rawProvince: "900764000", rawCity: "东京", province: "900764000", city: "东京", cityProvince: "900392000"}, oldProvince: "900764000", oldCity: "曼谷", province: "900392000", city: "东京"},
+		{name: "城市组合简称覆盖回显旧国家", prepared: profileRegionPreparation{rawProvince: "900764000", rawCity: "新马泰", province: "900764000", cityProvince: "900458000,900702000,900764000"}, oldProvince: "900764000", oldCity: "曼谷", province: "900458000,900702000,900764000"},
+		{name: "无旧国家城市组合简称", prepared: profileRegionPreparation{rawCity: "新马泰", cityProvince: "900458000,900702000,900764000"}, province: "900458000,900702000,900764000"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -60,14 +65,23 @@ func TestSelectProfileRegions(t *testing.T) {
 // Exercise the real save preprocessing and selection together. Populate only
 // the existing legacy cache; canonical input codes require no SQL/name lookup.
 func TestPrepareProfileRegionsPairCompatibility(t *testing.T) {
+	// This test must use only the seeded region index. A regression that
+	// consults application configuration cannot reach a real database.
+	previousDB := gdb.GetConfig("default")
+	gdb.SetConfigGroup("default", gdb.ConfigGroup{{Type: "pgsql", Host: "127.0.0.1", Port: "1", User: "region_test", Name: "region_test"}})
+	t.Cleanup(func() { gdb.SetConfigGroup("default", previousDB) })
 	guangdong := &legacyCMSRegionOption{Id: 440000, Level: 1, Title: "广东省"}
 	zhejiang := &legacyCMSRegionOption{Id: 330000, Level: 1, Title: "浙江省"}
 	shenzhen := &legacyCMSRegionOption{Id: 440300, Pid: 440000, Level: 2, Title: "深圳市"}
 	hangzhou := &legacyCMSRegionOption{Id: 330100, Pid: 330000, Level: 2, Title: "杭州市"}
+	japan := &legacyCMSRegionOption{Id: 900392000, Level: 1, Title: "日本"}
+	thailand := &legacyCMSRegionOption{Id: 900764000, Level: 1, Title: "泰国"}
+	singapore := &legacyCMSRegionOption{Id: 900702000, Level: 1, Title: "新加坡"}
+	malaysia := &legacyCMSRegionOption{Id: 900458000, Level: 1, Title: "马来西亚"}
 	index := &legacyCMSRegionIndex{
-		provincesByName: map[string]*legacyCMSRegionOption{"广东": guangdong, "浙江": zhejiang},
+		provincesByName: map[string]*legacyCMSRegionOption{"广东": guangdong, "浙江": zhejiang, "日本": japan, "泰国": thailand, "新加坡": singapore, "马来西亚": malaysia},
 		citiesByName:    map[string][]*legacyCMSRegionOption{"深圳": {shenzhen}, "杭州": {hangzhou}},
-		optionsById:     map[int64]*legacyCMSRegionOption{440000: guangdong, 330000: zhejiang, 440300: shenzhen, 330100: hangzhou},
+		optionsById:     map[int64]*legacyCMSRegionOption{440000: guangdong, 330000: zhejiang, 440300: shenzhen, 330100: hangzhou, japan.Id: japan, thailand.Id: thailand, singapore.Id: singapore, malaysia.Id: malaysia},
 	}
 	legacyCMSRegionIndexCache.Lock()
 	previous := legacyCMSRegionIndexCache.index
@@ -89,6 +103,11 @@ func TestPrepareProfileRegionsPairCompatibility(t *testing.T) {
 		{name: "超长省份不清空", province: strings.Repeat("北", profileRegionMaxRunes+1), city: "440300", text: "资料正文", wantProvince: "440000", wantCity: "440300", failed: true},
 		{name: "超长城市不清空", province: "440000", city: strings.Repeat("北", profileRegionMaxRunes+1), text: "资料正文", wantProvince: "440000", wantCity: "440300", failed: true},
 		{name: "未知城市无法校验则保留", province: "440000", city: "999999", text: "资料正文", wantProvince: "440000", wantCity: "440300", failed: true},
+		{name: "海外九位国家编码", province: "900392000", text: "资料正文", wantProvince: "900392000"},
+		{name: "海外多国家编码", province: "900764000,900392000", text: "资料正文", wantProvince: "900392000,900764000"},
+		{name: "未知国家编码拒绝猜测", province: "999999999", text: "资料正文", wantProvince: "440000", wantCity: "440300", failed: true},
+		{name: "正文新马泰展开现有国家编码", text: "国家：新马泰", wantProvince: "900458000,900702000,900764000"},
+		{name: "正文海外城市保留名称", text: "地区：泰国曼谷", wantProvince: "900764000", wantCity: "曼谷"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -101,5 +120,18 @@ func TestPrepareProfileRegionsPairCompatibility(t *testing.T) {
 				t.Fatalf("regions = (%q, %q), want (%q, %q)", province, city, tt.wantProvince, tt.wantCity)
 			}
 		})
+	}
+}
+
+func TestProfileRegionCodeListRecognizesSyntaxOnly(t *testing.T) {
+	for _, value := range []string{"", "440000", "900392000", "900702000,900458000,900764000"} {
+		if !profileRegionCodeList(value) {
+			t.Errorf("numeric dictionary lookup candidate rejected: %q", value)
+		}
+	}
+	for _, value := range []string{"日本", "新马泰", "-1", "0", "1.5", "999999999999999999999999999"} {
+		if profileRegionCodeList(value) {
+			t.Errorf("non-code syntax accepted: %q", value)
+		}
 	}
 }

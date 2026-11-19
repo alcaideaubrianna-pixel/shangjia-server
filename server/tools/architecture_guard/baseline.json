@@ -1,5 +1,14 @@
 [
   {
+    "file": "addons/youban_publish/logic/sys/material_import_region_matcher.go",
+    "function": "*legacyCMSRegionIndex.regionMatcher",
+    "rule": "redis-primitive",
+    "expression": "index.compileOnce.Do(func() {\n\tindex.compiled = compileMaterialImportRegionMatcher(index)\n})",
+    "digest": "70b05cdc8e1af6a803ad8f6e4df82cb62fd3f2e97ea8f928b2c4a7736f4293d9",
+    "count": 1,
+    "reason": "Reviewed sync.Once.Do only: compiles an immutable in-process region name index once per cached dictionary snapshot. No Redis access, network I/O, job transition or query occurs in this callback. Exception is limited to this exact initialization expression."
+  },
+  {
     "file": "addons/youban_publish/logic/sys/collect_channel_progress.go",
     "function": "*sSysPublish.touchCollectChannelProgress",
     "rule": "redis-primitive",
