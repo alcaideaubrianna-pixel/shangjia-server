@@ -498,6 +498,21 @@ func (s *sSysContent) listProfilesByFilter(ctx context.Context, in *sysin.Conten
 func (s *sSysContent) queryProfileList(ctx context.Context, in *sysin.ContentProfileListInp, feed homeProfileFeed, projected bool) (rows []contentProfileRow, totalCount int, err error) {
 	profileColumns := dao.ContentProfile.Columns()
 	mod := dao.ContentProfile.Ctx(ctx).As("p")
+	provinces := openProfileProvinces(in)
+	if projected {
+		scope := profilescope.FromContext(ctx)
+		// Preserve the ordered candidate scan. OFFSET 0 prevents PostgreSQL
+		// from flattening the lookup into a join that sorts the full tenant.
+		db := dao.ContentProfile.DB()
+		table := db.GetCore().QuotePrefixTableName(dao.ContentProfile.Table())
+		mod = db.Model("hg_open_profile_candidate opc JOIN LATERAL (SELECT cp.* FROM "+
+			table+" cp WHERE cp."+profileColumns.Id+"=opc.profile_id AND cp."+
+			profileColumns.DeletedAt+" IS NULL OFFSET 0) p ON TRUE").Ctx(ctx).
+			Unscoped().Where("opc.tenant_id", scope.TenantIds[0])
+		if scope.RequireEnabledAccount {
+			mod = mod.Where("EXISTS (SELECT 1 FROM hg_youban_publish_account a WHERE a.id=opc.account_id AND a.tenant_id=opc.tenant_id AND a.status=1 AND a.deleted_at IS NULL)")
+		}
+	}
 	if len(in.ProfileIds) > 0 {
 		mod = mod.WhereIn(aliasField("p", profileColumns.Id), in.ProfileIds)
 	}
@@ -512,16 +527,24 @@ func (s *sSysContent) queryProfileList(ctx context.Context, in *sysin.ContentPro
 		mod = s.excludeMemberProfileActions(ctx, mod, memberId, in.ExcludeActions)
 	}
 
-	if in.Provinces != "" {
-		values := uniqueNonEmptyStrings(strings.Split(in.Provinces, ",")...)
-		if values = uniqueNonEmptyStrings(values...); len(values) > 0 {
-			mod = mod.WhereIn(aliasField("p", profileColumns.Province), values)
-		}
-	} else if in.Province != "" {
-		mod = mod.Where(aliasField("p", profileColumns.Province), strings.TrimSpace(in.Province))
+	provinceColumn := aliasField("p", profileColumns.Province)
+	cityColumn := aliasField("p", profileColumns.City)
+	if projected {
+		provinceColumn, cityColumn = "opc.province", "opc.city"
+	}
+	switch {
+	case len(provinces) == 1:
+		mod = mod.Where(provinceColumn, provinces[0])
+	case len(provinces) > 1:
+		mod = mod.WhereIn(provinceColumn, provinces)
+	case in.Provinces == "" && in.Province != "":
+		mod = mod.Where(aliasField("p", profileColumns.Province), "")
 	}
 	if in.City != "" {
-		mod = mod.Where(aliasField("p", profileColumns.City), strings.TrimSpace(in.City))
+		if strings.TrimSpace(in.City) == "" {
+			cityColumn = aliasField("p", profileColumns.City)
+		}
+		mod = mod.Where(cityColumn, strings.TrimSpace(in.City))
 	}
 	if in.AgeRanges != "" {
 		mod = applyRangeFilters(mod, aliasField("p", profileColumns.Age), parseFilterRanges(in.AgeRanges))
@@ -606,24 +629,10 @@ func (s *sSysContent) queryProfileList(ctx context.Context, in *sysin.ContentPro
 		return nil, 0, err
 	}
 
-	if projected {
-		scope := profilescope.FromContext(ctx)
-		mod = mod.InnerJoin("hg_open_profile_candidate opc", "opc.profile_id="+aliasField("p", profileColumns.Id)).
-			Where("opc.tenant_id", scope.TenantIds[0])
-		if province := strings.TrimSpace(in.Province); in.Provinces == "" && province != "" {
-			mod = mod.Where("opc.province", province)
-		}
-		if city := strings.TrimSpace(in.City); city != "" {
-			mod = mod.Where("opc.city", city)
-		}
-		if scope.RequireEnabledAccount {
-			mod = mod.Where("EXISTS (SELECT 1 FROM hg_youban_publish_account a WHERE a.id=opc.account_id AND a.tenant_id=opc.tenant_id AND a.status=1 AND a.deleted_at IS NULL)")
-		}
-	}
 	if in.WithTotal == 1 {
 		switch {
-		case projected && supportsOpenProfileCounter(in):
-			totalCount, err = s.openProfileCounter(ctx, in, memberId)
+		case projected && supportsOpenProfileCounter(in, provinces):
+			totalCount, err = s.openProfileCounter(ctx, in, provinces, memberId)
 		case projected:
 			totalCount, err = mod.Clone().Count()
 		default:

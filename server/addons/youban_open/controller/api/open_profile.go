@@ -2,9 +2,12 @@ package api
 
 import (
 	"context"
-	"github.com/gogf/gf/v2/errors/gerror"
+	"errors"
 	"regexp"
 	"strings"
+	"time"
+
+	"github.com/gogf/gf/v2/errors/gerror"
 
 	"hotgo/addons/youban_open/api/api/open"
 	"hotgo/addons/youban_open/internal/opencontext"
@@ -22,6 +25,15 @@ var OpenProfile = cOpenProfile{}
 type cOpenProfile struct{}
 
 func (c *cOpenProfile) List(ctx context.Context, req *open.ListReq) (res *open.ListRes, err error) {
+	ctx, cancel := context.WithTimeout(ctx, 9*time.Second)
+	defer cancel()
+	defer func() {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			res = nil
+			err = gerror.New("资料列表查询超时，请缩小筛选范围后重试")
+		}
+	}()
+
 	normalizeOpenProfilePage(req)
 	req.Page, req.PerPage, _ = form.CalPage(req.Page, req.PerPage)
 	in := openProfileListInput(req)

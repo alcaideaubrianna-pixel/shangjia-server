@@ -10,11 +10,18 @@ import (
 	"hotgo/internal/model/input/sysin"
 )
 
-func supportsOpenProfileCounter(in *sysin.ContentProfileListInp) bool {
-	province := strings.TrimSpace(in.Province)
+func openProfileProvinces(in *sysin.ContentProfileListInp) []string {
+	if in.Provinces != "" {
+		return uniqueNonEmptyStrings(strings.Split(in.Provinces, ",")...)
+	}
+	return uniqueNonEmptyStrings(in.Province)
+}
+
+func supportsOpenProfileCounter(in *sysin.ContentProfileListInp, provinces []string) bool {
 	city := strings.TrimSpace(in.City)
-	return len(in.ProfileIds) == 0 && in.Provinces == "" && strings.TrimSpace(in.Keyword) == "" &&
-		(in.Province == "" || province != "") && (in.City == "" || city != "" && province != "") &&
+	return len(in.ProfileIds) == 0 && strings.TrimSpace(in.Keyword) == "" &&
+		(in.Provinces != "" || in.Province == "" || len(provinces) != 0) &&
+		(in.City == "" || city != "" && len(provinces) != 0) &&
 		in.AgeRanges == "" && in.HeightRanges == "" && in.WeightRanges == "" &&
 		in.AgeMin <= 0 && in.HeightMin <= 0 && in.WeightMin <= 0 &&
 		in.Cup == "" && in.Cups == "" && in.HasVideo != 1 && in.HasVerification != 1 &&
@@ -23,7 +30,7 @@ func supportsOpenProfileCounter(in *sysin.ContentProfileListInp) bool {
 		in.NoCondom != 1 && in.AllowCreampie != 1 && in.HasTattoo != 1
 }
 
-func (s *sSysContent) openProfileCounter(ctx context.Context, in *sysin.ContentProfileListInp, memberID int64) (int, error) {
+func (s *sSysContent) openProfileCounter(ctx context.Context, in *sysin.ContentProfileListInp, provinces []string, memberID int64) (int, error) {
 	excluded := parseInt64FilterValues(in.ExcludeProfileIds)
 	if memberID > 0 {
 		columns := dao.MemberProfileAction.Columns()
@@ -51,10 +58,13 @@ func (s *sSysContent) openProfileCounter(ctx context.Context, in *sysin.ContentP
 
 	scope := profilescope.FromContext(ctx)
 	value, err := dao.ContentProfile.DB().GetValue(ctx, `
-		SELECT public.open_profile_exact_count(
-			?, ?, NULLIF(?, ''), NULLIF(?, ''), string_to_array(?, ',')::bigint[]
-		)`, scope.TenantIds[0], scope.RequireEnabledAccount,
-		strings.TrimSpace(in.Province), strings.TrimSpace(in.City), strings.Join(excludedValues, ","))
+		SELECT sum(public.open_profile_exact_count(
+			?, ?, areas.province, NULLIF(?, ''), string_to_array(?, ',')::bigint[]
+		))
+		FROM (SELECT 1) AS base
+		LEFT JOIN unnest(string_to_array(?, ',')) AS areas(province) ON TRUE
+	`, scope.TenantIds[0], scope.RequireEnabledAccount, strings.TrimSpace(in.City),
+		strings.Join(excludedValues, ","), strings.Join(provinces, ","))
 	if err != nil {
 		return 0, err
 	}
