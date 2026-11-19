@@ -216,14 +216,20 @@ func prepareProfileRegions(ctx context.Context, profileID int64, text, province,
 	prepared := profileRegionPreparation{rawProvince: province, rawCity: city}
 	lookupCtx, cancel := context.WithTimeout(ctx, profileRegionLookupTimeout)
 	defer cancel()
-	providedProvince, providedCity := profileextractor.RegionLabels(fmt.Sprintf("省份:%s\n城市:%s", province, city))
-	if providedProvince != "" {
-		province = providedProvince
-	}
-	if providedCity != "" {
-		city = providedCity
+	// Plain lists must reach the dictionary intact. RegionLabels parses one
+	// labelled value and intentionally stops at commas; it is only needed for
+	// legacy fields carrying embedded labels such as "北京 城市：北京".
+	if strings.ContainsAny(province, ":：=") || strings.ContainsAny(city, ":：=") {
+		providedProvince, providedCity := profileextractor.RegionLabels(fmt.Sprintf("省份:%s\n城市:%s", province, city))
+		if providedProvince != "" {
+			province = providedProvince
+		}
+		if providedCity != "" {
+			city = providedCity
+		}
 	}
 	prepared.province, prepared.city = safeProfileRegionValue(province), safeProfileRegionValue(city)
+	normalizeStarted := time.Now()
 	var lookupErrors []string
 	if len([]rune(strings.TrimSpace(prepared.rawProvince))) > profileRegionMaxRunes || len([]rune(strings.TrimSpace(prepared.rawCity))) > profileRegionMaxRunes {
 		prepared.explicitFailed = true
@@ -247,11 +253,41 @@ func prepareProfileRegions(ctx context.Context, profileID int64, text, province,
 			explicitResult = "normalized"
 		}
 	}
-	if !prepared.explicitFailed && prepared.city != "" && profileRegionCodeList(prepared.city) {
+	// Resolve changed city names independently of an echoed old province.
+	// Save-time selection below decides which field the user actually changed.
+	if !prepared.explicitFailed && city != "" && !profileRegionCodeList(city) {
+		parent, resolvedCity, matched, err := location.ResolveCityRegion(lookupCtx, city)
+		if err != nil {
+			prepared.explicitFailed = true
+			explicitResult = "lookup_error"
+			lookupErrors = append(lookupErrors, err.Error())
+		} else if matched {
+			prepared.cityProvince = safeProfileRegionValue(parent)
+			prepared.city = safeProfileRegionValue(resolvedCity)
+		}
+	}
+	normalizeElapsed := time.Since(normalizeStarted)
+	dictionaryStarted := time.Now()
+	if !prepared.explicitFailed && ((prepared.province != "" && profileRegionCodeList(prepared.province)) || (prepared.city != "" && profileRegionCodeList(prepared.city))) {
 		index, err := getLegacyCMSRegionIndex(lookupCtx)
 		if err == nil {
+			if prepared.province != "" && profileRegionCodeList(prepared.province) {
+				for _, code := range strings.Split(profileRegionComparisonKey(prepared.province), ",") {
+					id, _ := strconv.ParseInt(code, 10, 64)
+					row := index.optionsById[id]
+					if row == nil || row.Level != 1 {
+						err = gerror.Newf("省份或国家编码%s未找到有效地区", code)
+						break
+					}
+				}
+				prepared.province = profileRegionComparisonKey(prepared.province)
+			}
 			parents := make([]string, 0)
-			for _, code := range strings.Split(profileRegionComparisonKey(prepared.city), ",") {
+			var cityCodes []string
+			if err == nil && prepared.city != "" && profileRegionCodeList(prepared.city) {
+				cityCodes = strings.Split(profileRegionComparisonKey(prepared.city), ",")
+			}
+			for _, code := range cityCodes {
 				id, _ := strconv.ParseInt(code, 10, 64)
 				row := index.optionsById[id]
 				if row == nil || row.Level != 2 || row.Pid <= 0 || index.optionsById[row.Pid] == nil || index.optionsById[row.Pid].Level != 1 {
@@ -261,7 +297,10 @@ func prepareProfileRegions(ctx context.Context, profileID int64, text, province,
 				parents = append(parents, strconv.FormatInt(row.Pid, 10))
 			}
 			if err == nil {
-				prepared.cityProvince = profileRegionComparisonKey(strings.Join(parents, ","))
+				if len(cityCodes) > 0 {
+					prepared.cityProvince = profileRegionComparisonKey(strings.Join(parents, ","))
+					prepared.city = profileRegionComparisonKey(prepared.city)
+				}
 			}
 		}
 		if err != nil {
@@ -270,13 +309,17 @@ func prepareProfileRegions(ctx context.Context, profileID int64, text, province,
 			lookupErrors = append(lookupErrors, err.Error())
 		}
 	}
+	dictionaryElapsed := time.Since(dictionaryStarted)
 	if prepared.explicitFailed && explicitResult == "empty" {
 		explicitResult = "invalid_input"
 	}
 	result := "no_location_fields"
+	extractStarted := time.Now()
 	fields := materialImportRegionFieldsFromText(text)
+	extractElapsed := time.Since(extractStarted)
+	matchStarted := time.Now()
 	if len(fields.provinceTexts) > 0 || len(fields.cityTexts) > 0 {
-		bodyProvince, bodyCity, err := materialImportRegionCodes(lookupCtx, text)
+		bodyProvince, bodyCity, err := materialImportRegionCodesForFields(lookupCtx, fields)
 		if err != nil {
 			lookupErrors = append(lookupErrors, err.Error())
 			result = "lookup_error"
@@ -288,7 +331,14 @@ func prepareProfileRegions(ctx context.Context, profileID int64, text, province,
 			}
 		}
 	}
-	fieldsLog := g.Map{"profileId": profileID, "entry": "saveProfile", "phase": "region_prepare", "elapsedMs": time.Since(started).Milliseconds(), "result": result, "explicitResult": explicitResult}
+	fieldsLog := g.Map{
+		"profileId": profileID, "entry": "saveProfile", "phase": "region_prepare",
+		"elapsedMs": time.Since(started).Milliseconds(), "result": result, "explicitResult": explicitResult,
+		"normalizeMs":  float64(normalizeElapsed.Microseconds()) / 1000,
+		"dictionaryMs": float64(dictionaryElapsed.Microseconds()) / 1000,
+		"extractMs":    float64(extractElapsed.Microseconds()) / 1000,
+		"matchMs":      float64(time.Since(matchStarted).Microseconds()) / 1000,
+	}
 	if len(lookupErrors) > 0 {
 		fieldsLog["error"] = strings.Join(lookupErrors, "; ")
 	}
@@ -300,14 +350,15 @@ func prepareProfileRegions(ctx context.Context, profileID int64, text, province,
 	return prepared
 }
 
-// profileRegionCodeList accepts empty fields and canonical six-digit code lists.
+// profileRegionCodeList only identifies numeric input. Membership and hierarchy
+// are checked against the shared dictionary, never inferred from code length.
 func profileRegionCodeList(value string) bool {
 	key := profileRegionComparisonKey(value)
 	if key == "" {
 		return true
 	}
 	for _, code := range strings.Split(key, ",") {
-		if len(code) != 6 {
+		if id, err := strconv.ParseInt(code, 10, 64); err != nil || id <= 0 {
 			return false
 		}
 		for _, digit := range code {
@@ -362,8 +413,14 @@ func selectProfileRegions(prepared profileRegionPreparation, create bool, oldPro
 	cityProvided := strings.TrimSpace(prepared.rawCity) != ""
 	manualProvince := provinceProvided && !same(prepared.rawProvince, prepared.province, oldProvince)
 	manualCity := cityProvided && !same(prepared.rawCity, prepared.city, oldCity)
+	if cityProvided && prepared.city == "" && prepared.cityProvince != "" &&
+		profileRegionComparisonKey(prepared.cityProvince) != profileRegionComparisonKey(oldProvince) {
+		// A country-only value in the city field legitimately normalizes to an
+		// empty city. That is still a changed selection when the country differs.
+		manualCity = true
+	}
 	if manualProvince || manualCity {
-		if prepared.province == "" && prepared.city == "" {
+		if prepared.province == "" && prepared.city == "" && prepared.cityProvince == "" {
 			return oldProvince, oldCity
 		}
 		// A changed province with the previous city echoed by a client is a

@@ -2574,6 +2574,8 @@ type legacyCMSRegionOption struct {
 }
 
 type legacyCMSRegionIndex struct {
+	compileOnce     sync.Once
+	compiled        *materialImportRegionMatcher
 	provincesByName map[string]*legacyCMSRegionOption
 	citiesByName    map[string][]*legacyCMSRegionOption
 	districtsByName map[string][]*legacyCMSRegionOption
@@ -2598,13 +2600,8 @@ func getLegacyCMSRegionIndex(ctx context.Context) (*legacyCMSRegionIndex, error)
 	if legacyCMSRegionIndexCache.index != nil {
 		return legacyCMSRegionIndexCache.index, nil
 	}
-	cols := dao.SysProvinces.Columns()
-	var rows []*legacyCMSRegionOption
-	if err := dao.SysProvinces.Ctx(ctx).
-		Fields(fmt.Sprintf("%s,%s,%s,%s", cols.Id, cols.Pid, cols.Level, cols.Title)).
-		Where(cols.Status, 1).
-		WhereIn(cols.Level, []int{1, 2, 3}).
-		Scan(&rows); err != nil {
+	records, err := location.RegionRecords(ctx)
+	if err != nil {
 		return nil, gerror.Wrap(err, "读取全局城市编码失败")
 	}
 	index := &legacyCMSRegionIndex{
@@ -2614,10 +2611,11 @@ func getLegacyCMSRegionIndex(ctx context.Context) (*legacyCMSRegionIndex, error)
 		childrenByPid:   make(map[int64][]*legacyCMSRegionOption),
 		optionsById:     make(map[int64]*legacyCMSRegionOption),
 	}
-	for _, row := range rows {
-		if row == nil || row.Id <= 0 {
+	for _, record := range records {
+		if record.Id <= 0 || record.Level < 1 || record.Level > 3 {
 			continue
 		}
+		row := &legacyCMSRegionOption{Id: record.Id, Pid: record.Pid, Level: record.Level, Title: record.Title}
 		name := normalizeLegacyRegionName(row.Title)
 		if name == "" {
 			continue

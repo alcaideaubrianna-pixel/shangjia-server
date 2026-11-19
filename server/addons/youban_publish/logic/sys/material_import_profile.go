@@ -90,53 +90,11 @@ func (s *sSysPublish) saveMaterialImportGroupProfile(ctx context.Context, task *
 }
 
 func materialImportRegionCodes(ctx context.Context, text string) (string, string, error) {
-	index, err := getLegacyCMSRegionIndex(ctx)
-	if err != nil {
-		return "", "", err
-	}
-	province, city := materialImportRegionCodesFromIndex(text, index)
-	return province, city, nil
+	return materialImportRegionCodesForFields(ctx, materialImportRegionFieldsFromText(text))
 }
 
 func materialImportRegionCodesFromIndex(text string, index *legacyCMSRegionIndex) (string, string) {
-	if index == nil {
-		return "", ""
-	}
-	fields := materialImportRegionFieldsFromText(text)
-	provinceIDs := make(map[int64]struct{})
-	cityIDs := make(map[int64]struct{})
-	for _, provinceText := range fields.provinceTexts {
-		normalizedText := normalizeMaterialImportMatchText(provinceText)
-		for name, province := range index.provincesByName {
-			if province != nil && materialImportRegionNameMatches(normalizedText, name) {
-				provinceIDs[province.Id] = struct{}{}
-			}
-		}
-	}
-	allowedProvinceIDs := make(map[int64]struct{}, len(provinceIDs))
-	for provinceID := range provinceIDs {
-		allowedProvinceIDs[provinceID] = struct{}{}
-	}
-	for _, cityText := range fields.cityTexts {
-		materialImportMatchCityText(cityText, index, allowedProvinceIDs, provinceIDs, cityIDs)
-	}
-	if len(provinceIDs) == 0 {
-		for _, provinceText := range fields.provinceTexts {
-			materialImportMatchCityText(provinceText, index, nil, provinceIDs, cityIDs)
-		}
-	}
-	for provinceID := range provinceIDs {
-		if !materialImportMunicipalityProvince(provinceID) {
-			continue
-		}
-		for _, city := range index.childrenByPid[provinceID] {
-			if city != nil && city.Level == 2 {
-				cityIDs[city.Id] = struct{}{}
-				break
-			}
-		}
-	}
-	return joinMaterialImportRegionIDs(provinceIDs), joinMaterialImportRegionIDs(cityIDs)
+	return materialImportRegionCodesForFieldsFromIndex(materialImportRegionFieldsFromText(text), index)
 }
 
 type materialImportRegionFields struct {
@@ -145,7 +103,7 @@ type materialImportRegionFields struct {
 }
 
 var materialImportProvinceLabels = []string{
-	"所在省份", "现居省份", "常住省份", "常驻省份", "省份", "所在省", "现居省",
+	"所在省份", "现居省份", "常住省份", "常驻省份", "省份", "所在省", "现居省", "所在国家", "国家", "国别",
 }
 
 var materialImportCityLabels = []string{
@@ -174,12 +132,21 @@ func materialImportRegionFieldsFromText(text string) materialImportRegionFields 
 		}
 		if value, ok := materialImportRegionFieldValue(line, materialImportProvinceLabels); ok {
 			fields.provinceTexts = append(fields.provinceTexts, value)
+			// The shared extractor requires a separator before a city label;
+			// also support 国家：日本城市：东京 without scanning outside this line.
+			for _, label := range materialImportRegionInlineLabel.FindAllStringIndex(line, -1) {
+				if city, ok := materialImportRegionFieldValue(line[label[0]:], materialImportCityLabels); ok {
+					fields.cityTexts = append(fields.cityTexts, city)
+				}
+			}
 			continue
 		}
 		if value, ok := materialImportRegionFieldValue(line, materialImportCityLabels); ok {
 			fields.cityTexts = append(fields.cityTexts, value)
 		}
 	}
+	fields.provinceTexts = materialImportUniqueRegionFields(fields.provinceTexts)
+	fields.cityTexts = materialImportUniqueRegionFields(fields.cityTexts)
 	return fields
 }
 
@@ -192,85 +159,14 @@ func materialImportRegionFieldValue(line string, labels []string) (string, bool)
 		}
 		remainder := strings.TrimSpace(string([]rune(line)[len([]rune(label)):]))
 		remainder = strings.TrimSpace(strings.TrimLeft(remainder, ":：;；,，-—"))
+		if boundary := materialImportRegionInlineLabel.FindStringIndex(remainder); boundary != nil {
+			remainder = strings.TrimSpace(remainder[:boundary[0]])
+		}
 		if remainder != "" {
 			return remainder, true
 		}
 	}
 	return "", false
-}
-
-func materialImportMatchCityText(text string, index *legacyCMSRegionIndex, allowedProvinceIDs map[int64]struct{}, provinceIDs map[int64]struct{}, cityIDs map[int64]struct{}) {
-	normalizedText := normalizeMaterialImportMatchText(text)
-	for name, province := range index.provincesByName {
-		if province == nil || !materialImportMunicipalityProvince(province.Id) || !materialImportRegionNameMatches(normalizedText, name) {
-			continue
-		}
-		if len(allowedProvinceIDs) > 0 {
-			if _, ok := allowedProvinceIDs[province.Id]; !ok {
-				continue
-			}
-		}
-		provinceIDs[province.Id] = struct{}{}
-	}
-	for name, cities := range index.citiesByName {
-		for _, city := range cities {
-			if city == nil || !materialImportRegionOptionMatches(normalizedText, name, city) || !materialImportRegionParentAllowed(city.Pid, allowedProvinceIDs) {
-				continue
-			}
-			cityIDs[city.Id] = struct{}{}
-			if city.Pid > 0 {
-				provinceIDs[city.Pid] = struct{}{}
-			}
-		}
-	}
-	for name, districts := range index.districtsByName {
-		for _, district := range districts {
-			if district == nil || district.Pid <= 0 || !materialImportRegionOptionMatches(normalizedText, name, district) || materialImportRegionNameShadowed(normalizedText, name, index.districtsByName) || materialImportDistrictAliasConflictsWithCity(normalizedText, name, district, index) {
-				continue
-			}
-			city := index.optionsById[district.Pid]
-			if city == nil || city.Level != 2 || !materialImportRegionParentAllowed(city.Pid, allowedProvinceIDs) {
-				continue
-			}
-			cityIDs[city.Id] = struct{}{}
-			if city.Pid > 0 {
-				provinceIDs[city.Pid] = struct{}{}
-			}
-		}
-	}
-}
-
-func materialImportDistrictAliasConflictsWithCity(normalizedText string, name string, district *legacyCMSRegionOption, index *legacyCMSRegionIndex) bool {
-	if district == nil || index == nil || materialImportRegionNameMatches(normalizedText, name) {
-		return false
-	}
-	for _, alias := range materialImportRegionTitleAliases(district.Title) {
-		if !materialImportRegionNameMatches(normalizedText, alias) {
-			continue
-		}
-		normalizedAlias := normalizeMaterialImportMatchText(alias)
-		for cityName := range index.citiesByName {
-			if normalizeMaterialImportMatchText(cityName) == normalizedAlias {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func materialImportRegionOptionMatches(normalizedText string, name string, option *legacyCMSRegionOption) bool {
-	if materialImportRegionNameMatches(normalizedText, name) {
-		return true
-	}
-	if option == nil {
-		return false
-	}
-	for _, alias := range materialImportRegionTitleAliases(option.Title) {
-		if materialImportRegionNameMatches(normalizedText, alias) {
-			return true
-		}
-	}
-	return false
 }
 
 func materialImportRegionTitleAliases(title string) []string {
@@ -292,20 +188,6 @@ func materialImportRegionTitleAliases(title string) []string {
 		aliases = append(aliases, normalizedTitle[:markerIndex])
 	}
 	return aliases
-}
-
-func materialImportRegionNameShadowed(normalizedText string, name string, candidates map[string][]*legacyCMSRegionOption) bool {
-	normalizedName := normalizeMaterialImportMatchText(name)
-	for candidate := range candidates {
-		normalizedCandidate := normalizeMaterialImportMatchText(candidate)
-		if len([]rune(normalizedCandidate)) <= len([]rune(normalizedName)) || !strings.Contains(normalizedCandidate, normalizedName) {
-			continue
-		}
-		if materialImportRegionNameMatches(normalizedText, candidate) {
-			return true
-		}
-	}
-	return false
 }
 
 func materialImportRegionParentAllowed(provinceID int64, provinceIDs map[int64]struct{}) bool {
@@ -418,7 +300,7 @@ func joinMaterialImportRegionIDs(ids map[int64]struct{}) string {
 }
 
 func normalizeMaterialImportMatchText(value string) string {
-	return strings.ToLower(strings.NewReplacer(" ", "", "\t", "", "\r", "", "\n", "", "\u00a0", "", "　", "", "，", ",").Replace(strings.TrimSpace(value)))
+	return strings.ToLower(materialImportMatchTextReplacer.Replace(strings.TrimSpace(value)))
 }
 
 func sortMaterialImportTagNames(names []string) []string {
