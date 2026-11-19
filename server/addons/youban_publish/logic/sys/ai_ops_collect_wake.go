@@ -229,7 +229,11 @@ func (s *sSysPublish) applyAIOpsCollectWake(ctx context.Context, payload aiOpsRe
 			skipped++
 			continue
 		}
-		wake := collectProcessQueuePayload{History: true, PrioritizeHistory: payload.PrioritizeHistory, EventId: item.EventId, TenantId: item.TenantId,
+		// An explicit event wake is a bounded operator repair. Put it at the
+		// front of the history lane so a large historical backlog cannot make a
+		// repaired paired group appear stuck indefinitely. The event scope and
+		// preview signature still limit this to the approved IDs.
+		wake := collectProcessQueuePayload{History: true, PrioritizeHistory: true, EventId: item.EventId, TenantId: item.TenantId,
 			AccountId: item.AccountId, SourceId: item.SourceId, SourceChatId: item.SourceChatId}
 		wake = captureCollectProcessObservation(collectBusinessEventContext(ctx, facts[item.EventId], source, 0), wake, false, time.Now())
 		if err = s.enqueueCollectProcess(ctx, wake, 0); err != nil {
