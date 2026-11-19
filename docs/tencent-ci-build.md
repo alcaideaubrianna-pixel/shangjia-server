@@ -8,7 +8,7 @@
 - 不再安装阿里云 CLI、修改 ACR 白名单、获取 ACR Token、上传 ACR 或部署 SAE。
 - 一次 BuildKit 构建，通过两个独立 image exporter 并行上传 GHCR、腾讯云。不要添加全局 `tags` 输入，否则 Buildx 会覆盖两个 exporter 各自的 `name`。
 - 两个 exporter 都成功之后才创建成功构建 Git tag。单仓上传成功不代表整次发布成功。
-- GHCR 使用分支标签和 `sha-<短 SHA>`。腾讯云使用短 SHA 标签；正式分支同时更新 `latest`，优化分支仅更新自己的分支标签，避免测试镜像覆盖正式 `latest`。
+- GHCR 和腾讯云统一只生成两个镜像标签：`last` 和 commit SHA 前 7 位（例如 `f11329f`），不添加 `sha-` 前缀。两个触发分支都会更新同仓库的 `last`，部署应指定 commit 标签。
 - 部署使用不可变 SHA 标签；工作流不自动部署业务服务。
 - 同分支新提交取消旧构建。取消或单仓失败可能留下部分已经上传的标签；不要用浮动标签判断本次构建是否完整成功。
 
@@ -32,6 +32,16 @@ Go 编译缓存按工具链、平台和 go.sum 分组，每个提交保存更新
 文档、运维工具、Go 测试文件不触发镜像构建；后端工具和测试文件也不进入 Docker 构建上下文。测试验证仍可通过独立流程运行，本工作流不新增 `go test`。
 
 ## 配置
+
+GitHub 仓库的 `Settings → Secrets and variables → Actions → Variables` 支持配置：
+
+填写在 **Repository variables**。当前构建 Job 未绑定 GitHub Environment，因此不会读取某个 Environment 下单独配置的变量。
+
+| Repository Variable | 默认值 / 行为 |
+| --- | --- |
+| `TENCENT_IMAGE` | 完整镜像地址，不带协议、标签或 digest。默认 `sgccr.ccs.tencentyun.com/xiaohuiji-cc/xiaohuiji-package` |
+
+登录域名从 `TENCENT_IMAGE` 第一个 `/` 前自动提取，无需配置独立的 `TENCENT_REGISTRY`。修改完整镜像地址即可同步修改登录和上传目标，镜像标签由工作流自动添加。
 
 沿用现有凭据：
 
