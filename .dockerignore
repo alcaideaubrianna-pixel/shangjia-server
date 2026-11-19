@@ -17,6 +17,10 @@ server/main
 server/runtime
 server/temp
 server/__debug_bin*
+server/**/.serena
+server/**/*_test.go
+server/tools
+server/docs
 server/internal/packed/packed.go
 server/resource/public/admin
 server/manifest/config/config.yaml

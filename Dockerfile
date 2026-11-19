@@ -40,39 +40,55 @@ ENV VITE_PUBLIC_PATH=${VITE_PUBLIC_PATH} \
 RUN pnpm run build
 
 
-FROM golang:1.25.0-bookworm AS server-builder
+FROM golang:1.25.0-bookworm AS server-build-base
 
 WORKDIR /src/server
-ARG GOPROXY=https://goproxy.cn,direct
+ARG GOPROXY=https://proxy.golang.org,direct
 ENV GOPROXY=${GOPROXY} GOSUMDB=sum.golang.org
 
-RUN go install github.com/gogf/gf/cmd/gf/v2@v2.10.0
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    go install github.com/gogf/gf/cmd/gf/v2@v2.10.0
 
 COPY server/go.mod server/go.sum ./
 RUN go mod download
 
-COPY server ./
+# Packing depends only on resources/config/frontend, not on every Go edit or
+# build number. Backend-only changes reuse both the web build and packed Go.
+FROM server-build-base AS resource-packer
+COPY server/resource ./resource
+COPY server/storage ./storage
+COPY server/manifest/config ./manifest/config
 RUN cp manifest/config/config.example.yaml manifest/config/config.yaml
-RUN rm -rf resource/public/admin && mkdir -p resource/public/admin
 COPY --from=web-builder /src/web/dist/. ./resource/public/admin/
+RUN mkdir -p internal/packed \
+    && gf pack resource,storage,manifest/config internal/packed/packed.go --keepPath=true
 
+FROM server-build-base AS server-builder
+COPY server ./
+COPY --from=resource-packer /src/server/internal/packed/packed.go ./internal/packed/packed.go
+COPY --from=resource-packer /src/server/resource ./resource
+COPY --from=resource-packer /src/server/manifest/config ./manifest/config
+
+# A new build number changes the final link, not resource packing or dependency
+# compilation. The workflow restores this mount across ephemeral runners.
 ARG BUILD_VERSION=dev
-RUN rm -f internal/packed/packed.go \
-    && gf pack resource,storage,manifest/config internal/packed/packed.go --keepPath=true \
-    && CGO_ENABLED=1 go build -trimpath -ldflags "-X hotgo/internal/consts.BuildVersion=${BUILD_VERSION}" -o /tmp/hotgo ./main.go \
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=1 go build -trimpath -ldflags "-X hotgo/internal/consts.BuildVersion=${BUILD_VERSION}" -o /tmp/hotgo ./main.go \
     && chmod +x /tmp/hotgo
 
 
 FROM debian:trixie-slim AS runtime
 
-ARG GIT_REVISION=unknown
 ENV WORKDIR=/app \
-	TZ=Asia/Shanghai \
-	APP_REVISION=${GIT_REVISION}
+	TZ=Asia/Shanghai
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates ffmpeg tzdata \
     && rm -rf /var/lib/apt/lists/*
+
+# Revision metadata must not invalidate installation of OS dependencies.
+ARG GIT_REVISION=unknown
+ENV APP_REVISION=${GIT_REVISION}
 
 WORKDIR ${WORKDIR}
 
