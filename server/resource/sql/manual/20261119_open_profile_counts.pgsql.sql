@@ -3,6 +3,12 @@
 BEGIN;
 SET LOCAL lock_timeout = '2s';
 
+CREATE TABLE public.hg_open_profile_count_state (
+    singleton boolean PRIMARY KEY CHECK (singleton),
+    ready boolean NOT NULL
+);
+INSERT INTO public.hg_open_profile_count_state VALUES (true, false);
+
 CREATE TABLE public.hg_open_profile_candidate (
     profile_id bigint PRIMARY KEY,
     tenant_id bigint NOT NULL,
@@ -16,6 +22,10 @@ CREATE TABLE public.hg_open_profile_candidate (
 CREATE INDEX idx_open_profile_candidate_latest
 ON public.hg_open_profile_candidate
     (tenant_id, source_created_at DESC, source_note_id DESC, profile_id DESC);
+
+CREATE INDEX idx_open_profile_candidate_province_latest
+ON public.hg_open_profile_candidate
+    (tenant_id, province, source_created_at DESC, source_note_id DESC, profile_id DESC);
 
 CREATE INDEX idx_open_profile_candidate_area_latest
 ON public.hg_open_profile_candidate
@@ -203,4 +213,56 @@ LANGUAGE sql STABLE SET search_path = pg_catalog, public AS $$
            )))
     END;
 $$;
+-- Run explicitly after the bounded backfill finishes. Compare the full source,
+-- projection and counters in one snapshot before permitting application reads.
+CREATE FUNCTION public.open_profile_verify_counts() RETURNS boolean
+LANGUAGE plpgsql VOLATILE SET search_path = pg_catalog, public AS $$
+DECLARE matches boolean;
+BEGIN
+    WITH source_rows AS MATERIALIZED (
+        SELECT p.id AS profile_id, s.tenant_id, s.account_id,
+               COALESCE(p.province, '')::text AS province, COALESCE(p.city, '')::text AS city,
+               p.source_created_at, p.source_note_id
+        FROM public.hg_content_profile p
+        JOIN public.hg_youban_publish_profile_state s ON s.profile_id = p.id
+        WHERE p.deleted_at IS NULL AND p.status = 1 AND p.visibility = 'public'
+          AND s.deleted_at IS NULL
+          AND (
+              EXISTS (SELECT 1 FROM public.hg_content_media m
+                      WHERE m.profile_id = p.id AND m.status = 1 AND m.media_type = 'image'
+                        AND COALESCE(m.display_storage_path, '') <> '')
+              OR EXISTS (SELECT 1 FROM public.hg_youban_publish_media m
+                         WHERE m.profile_id = p.id AND m.status = 1 AND m.media_type = 'image'
+                           AND m.deleted_at IS NULL
+                           AND COALESCE(NULLIF(m.edited_storage_path, ''), NULLIF(m.storage_path, ''),
+                                        NULLIF(m.edited_file_url, ''), NULLIF(m.file_url, '')) <> '')
+          )
+    ), expected_counts AS (
+        SELECT p.tenant_id, p.account_id, g.level,
+               CASE WHEN g.level >= 1 THEN p.province ELSE '' END AS province,
+               CASE WHEN g.level = 2 THEN p.city ELSE '' END AS city,
+               mod(p.profile_id, 64) AS shard, count(*) AS total
+        FROM source_rows p CROSS JOIN generate_series(0, 2) AS g(level)
+        GROUP BY 1, 2, 3, 4, 5, 6
+    )
+    SELECT NOT EXISTS (
+        (SELECT * FROM source_rows EXCEPT ALL SELECT * FROM public.hg_open_profile_candidate)
+        UNION ALL
+        (SELECT * FROM public.hg_open_profile_candidate EXCEPT ALL SELECT * FROM source_rows)
+    ) AND NOT EXISTS (
+        SELECT 1 FROM expected_counts e
+        FULL JOIN public.hg_open_profile_count c
+            USING (tenant_id, account_id, level, province, city, shard)
+        WHERE COALESCE(e.total, 0) <> COALESCE(c.total, 0)
+    ) INTO matches;
+
+    UPDATE public.hg_open_profile_count_state SET ready = matches WHERE singleton;
+    RETURN matches;
+END;
+$$;
+
+-- Install with content.openProfileCountsEnabled=false, call open_profile_backfill
+-- in short autocommit batches until it returns NULL, then run
+-- open_profile_verify_counts() off peak. Enable reads only after it returns true.
+-- To revert reads immediately, set ready=false or disable the application flag.
 COMMIT;

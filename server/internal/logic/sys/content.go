@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"crypto/sha1"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -449,6 +450,44 @@ func (s *sSysContent) ListProfiles(ctx context.Context, in *sysin.ContentProfile
 }
 
 func (s *sSysContent) listProfilesByFilter(ctx context.Context, in *sysin.ContentProfileListInp, feed homeProfileFeed) (list []*sysin.ContentProfileListModel, totalCount int, err error) {
+	scope := profilescope.FromContext(ctx)
+	projected := feed == homeProfileFeedLatest && scope.Applied && len(scope.TenantIds) == 1 &&
+		isPgsql() && g.Cfg().MustGet(ctx, "content.openProfileCountsEnabled", false).Bool()
+
+	var rows []contentProfileRow
+	usedProjection := false
+	if projected {
+		// The counter, exclusions and page must see the same committed snapshot.
+		err = dao.ContentProfile.DB().TransactionWithOptions(ctx, gdb.TxOptions{
+			Isolation: sql.LevelRepeatableRead,
+			ReadOnly:  true,
+		}, func(txCtx context.Context, tx gdb.TX) error {
+			ready, err := tx.GetValue("SELECT ready FROM public.hg_open_profile_count_state WHERE singleton")
+			if err != nil {
+				return err
+			}
+			if !ready.Bool() {
+				return nil
+			}
+			usedProjection = true
+			rows, totalCount, err = s.queryProfileList(txCtx, in, feed, true)
+			return err
+		})
+	}
+	if err == nil && !usedProjection {
+		rows, totalCount, err = s.queryProfileList(ctx, in, feed, false)
+	}
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(rows) == 0 {
+		return []*sysin.ContentProfileListModel{}, totalCount, nil
+	}
+	list, err = s.buildProfileListFromRows(ctx, rows)
+	return
+}
+
+func (s *sSysContent) queryProfileList(ctx context.Context, in *sysin.ContentProfileListInp, feed homeProfileFeed, projected bool) (rows []contentProfileRow, totalCount int, err error) {
 	profileColumns := dao.ContentProfile.Columns()
 	mod := dao.ContentProfile.Ctx(ctx).As("p")
 	if len(in.ProfileIds) > 0 {
@@ -460,7 +499,8 @@ func (s *sSysContent) listProfilesByFilter(ctx context.Context, in *sysin.Conten
 	if len(in.ExcludeActions) == 0 {
 		in.ExcludeActions = []string{"block"}
 	}
-	if memberId := s.requestMemberId(ctx); memberId > 0 {
+	memberId := s.requestMemberId(ctx)
+	if memberId > 0 {
 		mod = s.excludeMemberProfileActions(ctx, mod, memberId, in.ExcludeActions)
 	}
 
@@ -558,19 +598,41 @@ func (s *sSysContent) listProfilesByFilter(ctx context.Context, in *sysin.Conten
 		return nil, 0, err
 	}
 
+	if projected {
+		scope := profilescope.FromContext(ctx)
+		mod = mod.InnerJoin("hg_open_profile_candidate opc", "opc.profile_id="+aliasField("p", profileColumns.Id)).
+			Where("opc.tenant_id", scope.TenantIds[0])
+		if province := strings.TrimSpace(in.Province); in.Provinces == "" && province != "" {
+			mod = mod.Where("opc.province", province)
+		}
+		if city := strings.TrimSpace(in.City); city != "" {
+			mod = mod.Where("opc.city", city)
+		}
+		if scope.RequireEnabledAccount {
+			mod = mod.Where("EXISTS (SELECT 1 FROM hg_youban_publish_account a WHERE a.id=opc.account_id AND a.tenant_id=opc.tenant_id AND a.status=1 AND a.deleted_at IS NULL)")
+		}
+	}
 	if in.WithTotal == 1 {
-		totalCount, err = s.publicProfileWhere(mod.Clone()).Count()
+		switch {
+		case projected && supportsOpenProfileCounter(in):
+			totalCount, err = s.openProfileCounter(ctx, in, memberId)
+		case projected:
+			totalCount, err = mod.Clone().Count()
+		default:
+			totalCount, err = s.publicProfileWhere(mod.Clone()).Count()
+		}
 		if err != nil {
 			err = gerror.Wrap(err, "获取资料数据行失败")
 			return
 		}
 		if totalCount == 0 {
-			list = []*sysin.ContentProfileListModel{}
 			return
 		}
 	}
 
-	mod = s.publicProfileWhere(mod, feed == homeProfileFeedLatest && isPgsql())
+	if !projected {
+		mod = s.publicProfileWhere(mod, feed == homeProfileFeedLatest && isPgsql())
+	}
 	mod = mod.Fields(
 		aliasFields("p",
 			profileColumns.Id,
@@ -608,6 +670,10 @@ func (s *sSysContent) listProfilesByFilter(ctx context.Context, in *sysin.Conten
 			OrderDesc(aliasField("p", profileColumns.SourceCreatedAt)).
 			OrderDesc(aliasField("p", profileColumns.Id))
 	case homeProfileFeedLatest:
+		if projected {
+			mod = mod.OrderDesc("opc.source_created_at").OrderDesc("opc.source_note_id").OrderDesc("opc.profile_id")
+			break
+		}
 		mod = mod.OrderDesc(aliasField("p", profileColumns.SourceCreatedAt)).OrderDesc(aliasField("p", profileColumns.SourceNoteId)).OrderDesc(aliasField("p", profileColumns.Id))
 	default:
 		mod = mod.
@@ -618,13 +684,11 @@ func (s *sSysContent) listProfilesByFilter(ctx context.Context, in *sysin.Conten
 			OrderDesc(aliasField("p", profileColumns.Id))
 	}
 
-	var rows []contentProfileRow
 	if err = mod.Scan(&rows); err != nil {
 		err = gerror.Wrap(err, "获取资料列表失败，请稍后重试")
 		return
 	}
 
-	list, err = s.buildProfileListFromRows(ctx, rows)
 	return
 }
 
