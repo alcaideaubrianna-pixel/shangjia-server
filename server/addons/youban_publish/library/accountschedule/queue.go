@@ -35,6 +35,8 @@ const (
 	Failure
 	Deferred
 	More
+	Stalled // Execution budget exhausted; unlike lock contention this backs off.
+	Retired // Caller verified the account no longer exists; token/generation/wake fenced.
 )
 
 type Scope struct{ TenantID, AccountID int64 }
@@ -72,7 +74,10 @@ local m=ARGV[1]; local raw=redis.call('HGET',KEYS[3],m)
 if raw then
  local s=cjson.decode(raw)
  if s.state=='idle' then s.g=s.g+1; s.state='ready'; redis.call('HSET',KEYS[3],m,cjson.encode(s)); redis.call('ZADD',KEYS[1],now,m)
- elseif ARGV[2]=='1' then s.g=s.g+1; redis.call('HSET',KEYS[3],m,cjson.encode(s)) end
+ elseif ARGV[2]=='1' then
+  s.g=s.g+1; s.stalls=0; s.more=0; redis.call('HSET',KEYS[3],m,cjson.encode(s))
+  if s.state=='ready' and (s.failures or 0)==0 then local due=redis.call('ZSCORE',KEYS[1],m); if not due or tonumber(due)>now then redis.call('ZADD',KEYS[1],now,m) end end
+ end
  return s.state
 end
 redis.call('HSET',KEYS[3],m,cjson.encode({g=1,state='ready',failures=0}))
@@ -90,7 +95,9 @@ if #wake>0 then
  redis.call('HSET',KEYS[3],m,cjson.encode({g=1,state='ready',failures=0}));redis.call('ZADD',KEYS[1],now,m)
  else local s=cjson.decode(raw)
  if s.state=='idle' then s.state='ready';s.g=s.g+1;redis.call('ZADD',KEYS[1],now,m)
- elseif s.state=='running' then s.g=s.g+1 end
+ elseif s.state=='running' then s.g=s.g+1
+ elseif s.state=='ready' then
+ local due=redis.call('ZSCORE',KEYS[1],m); if not due or tonumber(due)>now then redis.call('ZADD',KEYS[1],now,m) end end
  redis.call('HSET',KEYS[3],m,cjson.encode(s)) end
 end
 
@@ -115,16 +122,25 @@ local expiry=redis.call('ZSCORE',KEYS[2],m)
 if s.state~='running' or s.token~=ARGV[2] or not expiry or tonumber(expiry)<=now then return 0 end
 redis.call('ZREM',KEYS[2],m); s.token=nil
 if ARGV[4]=='3' then
- s.state='ready'; s.failures=0; redis.call('HSET',KEYS[3],m,cjson.encode(s)); redis.call('ZADD',KEYS[1],now+10,m)
+ s.state='ready'; s.failures=0; s.more=math.min((s.more or 0)+1,8)
+ local delay=10; if s.more>3 then delay=math.min(100*2^(s.more-4),1000) end
+ redis.call('HSET',KEYS[3],m,cjson.encode(s)); redis.call('ZADD',KEYS[1],now+delay,m)
 elseif ARGV[4]=='2' then
  s.state='ready'; redis.call('HSET',KEYS[3],m,cjson.encode(s)); redis.call('ZADD',KEYS[1],now+1000,m)
+elseif ARGV[4]=='4' then
+ s.stalls=math.min((s.stalls or 0)+1,10); s.state='ready'
+ local delay=math.min(1000*2^(s.stalls-1),300000)
+ if s.g>tonumber(ARGV[3]) then delay=1; s.stalls=0 end
+ redis.call('HSET',KEYS[3],m,cjson.encode(s)); redis.call('ZADD',KEYS[1],now+delay,m)
 elseif ARGV[4]=='1' then
  s.failures=math.min((s.failures or 0)+1,8); s.state='ready'
  local delay=math.min(1000*2^(s.failures-1),60000)
  redis.call('HSET',KEYS[3],m,cjson.encode(s)); redis.call('ZADD',KEYS[1],now+delay,m)
 elseif s.g>tonumber(ARGV[3]) then
  s.failures=0; s.state='ready'; redis.call('HSET',KEYS[3],m,cjson.encode(s)); redis.call('ZADD',KEYS[1],now+1,m)
-else s.state='idle'; s.failures=0; redis.call('HSET',KEYS[3],m,cjson.encode(s)); redis.call('ZADD',KEYS[1],now+tonumber(ARGV[5]),m) end
+elseif ARGV[4]=='5' and not redis.call('ZSCORE',KEYS[4],m) then
+ redis.call('HDEL',KEYS[3],m); redis.call('ZREM',KEYS[1],m)
+else s.state='idle'; s.failures=0; s.stalls=0; s.more=0; redis.call('HSET',KEYS[3],m,cjson.encode(s)); redis.call('ZADD',KEYS[1],now+tonumber(ARGV[5]),m) end
 return 1`
 
 func (q *Queue) Mark(ctx context.Context, s Scope, w Wake) error {

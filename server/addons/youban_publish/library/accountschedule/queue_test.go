@@ -60,6 +60,95 @@ func TestConfiguredIdlePreservesChangedWake(t *testing.T) {
 	}
 }
 
+func TestStalledBackoffAndImmediateWake(t *testing.T) {
+	q, r, now := faultQueue(t)
+	scope := Scope{1, 1}
+	mustMark(t, q, scope, Ensure)
+	for i := 0; i < 12; i++ {
+		c := mustClaim(t, q, time.Minute)
+		mustAck(t, q, c, Stalled)
+		score, err := r.ZScore(q.keys[0], scope.Member())
+		delay := time.Duration(1<<min(i, 9)) * time.Second
+		if delay > 5*time.Minute {
+			delay = 5 * time.Minute
+		}
+		if err != nil || score != float64(now.Add(delay).UnixMilli()) {
+			t.Fatalf("round %d score=%v delay=%v err=%v", i, score, delay, err)
+		}
+		now = now.Add(delay)
+		r.SetTime(now)
+	}
+	c := mustClaim(t, q, time.Minute)
+	mustAck(t, q, c, Stalled)
+	mustMark(t, q, scope, Changed)
+	c = mustClaim(t, q, time.Minute)
+	mustAck(t, q, c, Stalled)
+	if err := q.Schedule(context.Background(), scope, now.Add(-time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	c = mustClaim(t, q, time.Minute)
+	mustAck(t, q, c, Success)
+}
+
+func TestRetireFencesWakeAndOwner(t *testing.T) {
+	for _, mode := range []string{"clean", "changed", "plan", "expired"} {
+		t.Run(mode, func(t *testing.T) {
+			q, r, now := faultQueue(t)
+			ctx := context.Background()
+			scope := Scope{1, 2}
+			mustMark(t, q, scope, Ensure)
+			c := mustClaim(t, q, time.Minute)
+			switch mode {
+			case "changed":
+				mustMark(t, q, scope, Changed)
+			case "plan":
+				if err := q.Schedule(ctx, scope, now.Add(time.Hour)); err != nil {
+					t.Fatal(err)
+				}
+			case "expired":
+				r.SetTime(now.Add(time.Minute))
+			}
+			ok, err := q.Ack(ctx, *c, Retired)
+			if err != nil || ok == (mode == "expired") {
+				t.Fatalf("ack %v %v", ok, err)
+			}
+			value, err := q.client.Do(ctx, "HEXISTS", q.keys[2], scope.Member())
+			if err != nil || value.Bool() != (mode != "clean") {
+				t.Fatalf("state retention %v %v", value, err)
+			}
+			if mode == "clean" {
+				for _, key := range []string{q.keys[0], q.keys[1], q.keys[3]} {
+					if _, err := r.ZScore(key, scope.Member()); err == nil {
+						t.Fatal("retired index remains", key)
+					}
+				}
+				mustMark(t, q, scope, Changed)
+				mustClaim(t, q, time.Minute)
+			}
+		})
+	}
+}
+
+func TestRepeatedContinuationYieldsWithoutDroppingAccount(t *testing.T) {
+	q, r, now := faultQueue(t)
+	scope := Scope{1, 3}
+	mustMark(t, q, scope, Ensure)
+	for i := 0; i < 12; i++ {
+		c := mustClaim(t, q, time.Minute)
+		mustAck(t, q, c, More)
+		score, err := r.ZScore(q.keys[0], scope.Member())
+		delay := time.Duration(score-float64(now.UnixMilli())) * time.Millisecond
+		if err != nil || delay <= 0 || delay > time.Second {
+			t.Fatalf("delay %v err %v", delay, err)
+		}
+		if i >= 7 && delay != time.Second {
+			t.Fatalf("hot continuation not limited: %v", delay)
+		}
+		now = now.Add(delay)
+		r.SetTime(now)
+	}
+}
+
 func testQueue(t *testing.T) *Queue {
 	t.Helper()
 	addr := os.Getenv("YOUBAN_ACCOUNT_SCHEDULE_TEST_REDIS")

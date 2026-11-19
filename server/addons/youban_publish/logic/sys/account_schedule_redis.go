@@ -110,8 +110,22 @@ func (s *sSysPublish) executeAccountScheduleClaim(ctx context.Context, q *accoun
 	}()
 	bounded, cancel := context.WithTimeout(ctx, 25*time.Second)
 	defer cancel()
-	err := s.executeAccountSchedule(bounded, publishAccountScope{TenantID: claim.Scope.TenantID, AccountID: claim.Scope.AccountID}, claim.Turn-1)
+	// Only absent/deleted accounts are retired. Disabled accounts can still need cleanup.
+	accountID, err := g.DB().Model(publishAccountTable).Ctx(bounded).Fields("id").
+		Where("tenant_id", claim.Scope.TenantID).Where("id", claim.Scope.AccountID).WhereNull("deleted_at").Value()
+	if err != nil {
+		g.Log().Warningf(ctx, "核验调度账户失败 accountId:%d err:%+v", claim.Scope.AccountID, err)
+		return
+	}
+	if accountID.IsNil() || accountID.Int64() <= 0 {
+		outcome = accountschedule.Retired
+		return
+	}
+	err = s.executeAccountSchedule(bounded, publishAccountScope{TenantID: claim.Scope.TenantID, AccountID: claim.Scope.AccountID}, claim.Turn-1)
 	outcome = accountScheduleResult(err, bounded.Err())
+	if outcome == accountschedule.Stalled {
+		g.Log().Warning(ctx, "账户调度预算耗尽，保留任务并退避重试", g.Map{"tenantId": claim.Scope.TenantID, "accountId": claim.Scope.AccountID, "turn": claim.Turn})
+	}
 	if outcome == accountschedule.Failure {
 		g.Log().Warningf(ctx, "账户Redis调度执行失败 tenantId:%d accountId:%d err:%v context:%v", claim.Scope.TenantID, claim.Scope.AccountID, err, bounded.Err())
 	}
@@ -156,10 +170,13 @@ func accountScheduleResult(err, budgetErr error) accountschedule.Outcome {
 	if accountScheduleRealError(err, budgetErr) {
 		return accountschedule.Failure
 	}
+	if errors.Is(budgetErr, context.DeadlineExceeded) {
+		return accountschedule.Stalled
+	}
 	if errors.Is(err, errAccountScheduleMore) {
 		return accountschedule.More
 	}
-	if errors.Is(err, errAccountScheduleBusy) || errors.Is(budgetErr, context.DeadlineExceeded) {
+	if errors.Is(err, errAccountScheduleBusy) {
 		return accountschedule.Deferred
 	}
 	if err == nil && budgetErr == nil {

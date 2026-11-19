@@ -16,6 +16,7 @@ import (
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gcache"
 	"github.com/gogf/gf/v2/os/gtime"
 )
 
@@ -106,6 +107,22 @@ func accountScheduleModel(model *gdb.Model, tenantField, accountField string, sc
 }
 
 // enqueueAccountSchedules 只按主键分页恢复账户标记，不扫描全局任务大表。
+// reserveAccountScheduleDirectory must be called under the shared directory lease.
+// The TTL is owned by the cache backend, avoiding clock skew between scheduler instances.
+func reserveAccountScheduleDirectory(ctx context.Context, store *gcache.Cache, interval time.Duration) (bool, error) {
+	marker, err := store.Get(ctx, publishconsts.AccountScheduleDirectoryNextKey)
+	if err != nil {
+		return false, err
+	}
+	if !marker.IsNil() {
+		return false, nil
+	}
+	if err := store.Set(ctx, publishconsts.AccountScheduleDirectoryNextKey, true, interval); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (s *sSysPublish) enqueueAccountSchedules(ctx context.Context) error {
 	client, err := cache.RedisClient()
 	if err != nil {
@@ -125,6 +142,21 @@ func (s *sSysPublish) enqueueAccountSchedules(ctx context.Context) error {
 		_ = lease.Unlock(releaseCtx)
 	}()
 
+	// Finish within the directory lease; a failed batch retains its cursor for the next pass.
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	// All cron/recovery entrypoints share this gate; the lease only prevents overlap.
+	seconds := g.Cfg().MustGet(ctx, "youbanPublish.queue.accountScheduleIntervalSeconds", 300).Int()
+	if seconds <= 0 {
+		seconds = 300
+	}
+	allowed, err := reserveAccountScheduleDirectory(ctx, cache.Instance(), time.Duration(seconds)*time.Second)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return nil
+	}
 	cursor, err := cache.Instance().Get(ctx, publishconsts.AccountScheduleCursorKey)
 	if err != nil {
 		return err
