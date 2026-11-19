@@ -308,6 +308,20 @@ func (s *sSysPublish) previewAIOpsBotSourceReplay(ctx context.Context, sourceID 
 			RuleSourceId: resolved.sourceID, RuleId: resolved.ruleID, RuleName: resolved.name,
 		})
 	}
+	if startMessageID > 0 {
+		// Empty candidate sets still need channel authorization before reading
+		// shared facts. Global message identity is not a permission boundary.
+		if err = s.validateAIOpsReplayChannelApproval(ctx, target.TenantID, target.AccountID, sourceID, target.BotID, chatID); err != nil {
+			return nil, nil, 0, 0, err
+		}
+		messages := make([]int64, 0, len(candidates))
+		for _, candidate := range candidates {
+			messages = append(messages, candidate.MessageID)
+		}
+		if err = validateAIOpsReplayCompleteness(ctx, target.TenantID, target.AccountID, sourceID, chatID, startMessageID, endMessageID, messages); err != nil {
+			return nil, nil, 0, 0, err
+		}
+	}
 	return ids, preview, target.TenantID, target.AccountID, nil
 }
 
