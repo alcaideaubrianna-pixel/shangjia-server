@@ -90,30 +90,41 @@ func ensureCollectProcessOutbox(ctx context.Context, payload collectProcessQueue
 	args := []any{payload.EventId, payload.TenantId, payload.AccountId, payload.SourceId, payload.SourceChatId, availableAt, gtime.Now(), gtime.Now(), history}
 	statusSQL := func(status collectProcessOutboxStatus) string { return "'" + string(status) + "'" }
 	var query string
-	if strings.EqualFold(strings.TrimSpace(g.DB().GetConfig().Type), "pgsql") {
+	if payload.OutboxOwner != "" {
+		query = `UPDATE ` + collectProcessOutboxTable + ` SET
+		 available_at=CASE WHEN status=? THEN LEAST(available_at,?) ELSE ? END,
+		 status=?,lease_owner='',lease_expires_at=NULL,last_error='',updated_at=?
+		 WHERE event_id=? AND tenant_id=? AND source_id=?
+		 AND (status=? OR (status=? AND lease_owner=?))`
+		args = []any{collectProcessOutboxStatusPending, availableAt, availableAt, collectProcessOutboxStatusPending, gtime.Now(), payload.EventId, payload.TenantId, payload.SourceId, collectProcessOutboxStatusPending, collectProcessOutboxStatusProcessing, payload.OutboxOwner}
+	} else if strings.EqualFold(strings.TrimSpace(g.DB().GetConfig().Type), "pgsql") {
 		query = `INSERT INTO ` + collectProcessOutboxTable + `
             (event_id,tenant_id,account_id,source_id,source_chat_id,status,available_at,created_at,updated_at,history)
             VALUES ($1,$2,$3,$4,$5,` + statusSQL(collectProcessOutboxStatusPending) + `,$6,$7,$8,$9)
             ON CONFLICT (event_id) DO UPDATE SET tenant_id=EXCLUDED.tenant_id,account_id=EXCLUDED.account_id,
             source_id=EXCLUDED.source_id,source_chat_id=EXCLUDED.source_chat_id,status=` + statusSQL(collectProcessOutboxStatusPending) + `,
-            available_at=EXCLUDED.available_at,lease_owner='',lease_expires_at=NULL,last_error='',updated_at=EXCLUDED.updated_at,
+            available_at=CASE WHEN ` + collectProcessOutboxTable + `.status=` + statusSQL(collectProcessOutboxStatusPending) + ` THEN LEAST(` + collectProcessOutboxTable + `.available_at,EXCLUDED.available_at) ELSE EXCLUDED.available_at END,lease_owner='',lease_expires_at=NULL,last_error='',updated_at=EXCLUDED.updated_at,
              history=COALESCE(` + collectProcessOutboxTable + `.history,EXCLUDED.history)`
-		if payload.Recovery && payload.OutboxOwner == "" {
+		if payload.Recovery && !payload.explicitWake {
 			query += ` WHERE ` + collectProcessOutboxTable + `.status=` + statusSQL(collectProcessOutboxStatusDelivered)
-		} else if !payload.Recovery {
+		} else if !payload.explicitWake {
 			query += ` WHERE ` + collectProcessOutboxTable + `.status<>` + statusSQL(collectProcessOutboxStatusDelivered)
 		}
 	} else {
+		deliveredGuard := "status=" + statusSQL(collectProcessOutboxStatusDelivered)
+		if payload.explicitWake {
+			deliveredGuard = "0=1"
+		}
 		query = `INSERT INTO ` + collectProcessOutboxTable + `
             (event_id,tenant_id,account_id,source_id,source_chat_id,status,available_at,created_at,updated_at,history)
             VALUES (?,?,?,?,?,` + statusSQL(collectProcessOutboxStatusPending) + `,?,?,?,?) ON DUPLICATE KEY UPDATE tenant_id=VALUES(tenant_id),
 			account_id=VALUES(account_id),source_id=VALUES(source_id),source_chat_id=VALUES(source_chat_id),
 			history=COALESCE(history,VALUES(history)),
-			status=IF(status=` + statusSQL(collectProcessOutboxStatusDelivered) + `,status,` + statusSQL(collectProcessOutboxStatusPending) + `),
-			available_at=IF(status=` + statusSQL(collectProcessOutboxStatusDelivered) + `,available_at,VALUES(available_at)),
-			lease_owner=IF(status=` + statusSQL(collectProcessOutboxStatusDelivered) + `,lease_owner,''),
-			lease_expires_at=IF(status=` + statusSQL(collectProcessOutboxStatusDelivered) + `,lease_expires_at,NULL),
-			last_error=IF(status=` + statusSQL(collectProcessOutboxStatusDelivered) + `,last_error,''),updated_at=VALUES(updated_at)`
+			available_at=IF(` + deliveredGuard + `,available_at,IF(status=` + statusSQL(collectProcessOutboxStatusPending) + `,LEAST(available_at,VALUES(available_at)),VALUES(available_at))),
+			status=IF(` + deliveredGuard + `,status,` + statusSQL(collectProcessOutboxStatusPending) + `),
+			lease_owner=IF(` + deliveredGuard + `,lease_owner,''),
+			lease_expires_at=IF(` + deliveredGuard + `,lease_expires_at,NULL),
+			last_error=IF(` + deliveredGuard + `,last_error,''),updated_at=VALUES(updated_at)`
 	}
 	if _, err := g.DB().Exec(ctx, query, args...); err != nil {
 		return gerror.Wrap(err, "保存采集处理Outbox失败")

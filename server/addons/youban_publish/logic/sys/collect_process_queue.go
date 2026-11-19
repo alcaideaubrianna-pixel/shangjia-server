@@ -52,6 +52,8 @@ func markCollectProcessSourceActive(ctx context.Context, payload collectProcessQ
 }
 
 type collectProcessQueuePayload struct {
+	// Enqueue-only intent: a verified parent wake can reopen a delivered row.
+	explicitWake      bool
 	PrioritizeHistory bool   `json:"-"`
 	History           bool   `json:"history,omitempty"`
 	AccountId         int64  `json:"accountId"`

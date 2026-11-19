@@ -12,6 +12,7 @@ import (
 
 func telegramTimeoutFinishLocalDB(t *testing.T) gdb.DB {
 	t.Helper()
+	t.Setenv("YOUBAN_PUBLISH_CHANNEL_QUEUE_ENABLED", "false")
 	db := telegramOutboxRetryLocalDB(t) // opt-in loopback 127.0.0.1:35432 only
 	ctx := context.Background()
 	for _, query := range []string{
@@ -27,7 +28,6 @@ func telegramTimeoutFinishLocalDB(t *testing.T) gdb.DB {
 			(profile_id,channel_id) WHERE status IN ('pending','sending','failed_retry','unknown')`,
 		"CREATE TABLE " + publishProfileStateTable + " (tenant_id bigint,account_id bigint,profile_id bigint,publish_operation_no text,publish_task_status text,deleted_at timestamp)",
 		"CREATE TABLE " + publishProfileCancelTable + " (tenant_id bigint,account_id bigint,profile_id bigint,operation_no text)",
-		"CREATE TABLE " + profileDeleteIntentTable + " (tenant_id bigint,profile_id bigint)",
 		"CREATE TABLE hg_content_profile (id bigint PRIMARY KEY,status integer,visibility text,deleted_at timestamp)",
 		"CREATE TABLE " + publishChannelTable + " (id bigint PRIMARY KEY,tenant_id bigint,status integer,deleted_at timestamp)",
 		"CREATE TABLE " + publishTgMessageTable + " (job_id bigint,status text,tg_message_id bigint)",
@@ -81,7 +81,7 @@ func TestTelegramTimeoutFinishEligibilityPostgres(t *testing.T) {
 		{"new operation", "UPDATE " + publishProfileStateTable + " SET publish_operation_no='profile:new'", JobStatusSuperseded, false, false},
 		{"cancel tombstone", "INSERT INTO " + publishProfileCancelTable + " VALUES (1,1,1,'profile:old')", JobStatusSuperseded, false, false},
 		{"cancel state", "UPDATE " + publishProfileStateTable + " SET publish_task_status='canceling'", JobStatusSuperseded, false, false},
-		{"delete fence", "INSERT INTO " + profileDeleteIntentTable + " VALUES (1,1)", JobStatusSuperseded, false, false},
+		{"delete fence", "UPDATE hg_content_profile SET deleted_at='2026-11-18 02:00:00' WHERE id=1", JobStatusSuperseded, false, false},
 		{"profile offline", "UPDATE hg_content_profile SET status=2", JobStatusSuperseded, false, false},
 		{"channel disabled", "UPDATE " + publishChannelTable + " SET status=2", JobStatusSuperseded, false, false},
 		{"tail identity changed", "UPDATE " + publishTgJobTable + " SET account_id=2 WHERE id=101", JobStatusFailed, true, false},

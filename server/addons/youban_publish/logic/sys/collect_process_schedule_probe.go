@@ -57,7 +57,7 @@ func collectProcessScheduleRowsDelay(rows gdb.Result) (time.Duration, bool, erro
 		}
 		from, wait := row["created_at"].GTime(), time.Duration(collectMaterialGroupingDelay)
 		if row["material_group_status"].String() == collectMaterialGroupWaitingVerify {
-			from, wait = row["updated_at"].GTime(), collectMaterialWaitingVerifyRetryDelay
+			from, wait = row["updated_at"].GTime(), collectMaterialUnpairedRetryDelay(row, time.Now())
 		}
 		if from == nil || from.IsZero() {
 			return 0, false, gerror.New("采集调度候选缺少有效时间，保留任务等待修复")

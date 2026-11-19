@@ -59,12 +59,11 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
-	// The channel ZSET is the sole ordering source in channel-queue mode.
-	// Consulting the legacy DB head here lets stale pending/idle jobs block a
-	// ready ZSET task even though the Channel Worker already owns ordering and
-	// the channel lease. Keep this check only for the legacy transport.
+	// Redis orders untouched work. Only an already-started operation or pending
+	// cleanup may fence another sender to the same real chat across queue retries
+	// and channel aliases; stale pending/idle rows never become a DB head gate.
 	if telegramChannelQueueEnabled() {
-		return false, nil
+		return s.telegramChannelHasStartedOwner(ctx, job)
 	}
 	if job.Id <= 0 {
 		return false, nil
@@ -99,10 +98,10 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 	if telegramJobRequiresChannelCompletionPriority(job.SendPhase.String()) {
 		mod = mod.Where(`(
 			j.status IN (?, ?) OR
-			j.send_phase IN (?, ?, ?)
+			j.send_phase IN (?, ?, ?, ?)
 		)`, telegramJobStatusSending, telegramJobStatusConfirming,
 			telegramSendPhaseDisplaySending, telegramSendPhaseDisplayConfirmed,
-			telegramSendPhaseVerifySending)
+			telegramSendPhaseVerifySending, "cleanup_processing")
 	}
 	if strings.TrimSpace(job.TargetChatId) != "" {
 		mod = mod.WhereIn("j.target_chat_id", telegramChannelChatIDVariants(job.TargetChatId))
@@ -168,7 +167,7 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 	// only comparable within one source channel, so using them here lets jobs
 	// from another collection source bypass an older job between its display
 	// and verification phases.
-	mod = mod.Where("EXISTS (SELECT 1 FROM "+publishTgJobTable+" current_job WHERE current_job.id=? AND "+telegramChannelSchedulePrecedesSQL("j", "current_job")+")", job.Id)
+	mod = mod.Where("("+telegramChannelPendingCleanupSQL("j")+" OR EXISTS (SELECT 1 FROM "+publishTgJobTable+" current_job WHERE current_job.id=? AND "+telegramChannelSchedulePrecedesSQL("j", "current_job")+"))", job.Id)
 	// Interactive publications may overtake untouched work, but never a
 	// started display/verification operation. Use the same ordering as Outbox.
 	if err := ctx.Err(); err != nil {
@@ -440,7 +439,7 @@ func (s *sSysPublish) telegramChannelHasDispatchCapacity(ctx context.Context, jo
 	model := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id <> ?", job.Id).
 		Where(telegramWebhookDetachedJobSQL("")).
-		Where(`(
+		Where(`(`+telegramChannelPendingCleanupSQL("")+` OR
 			status = 'sending' OR
 			(status IN ('pending', 'failed_retry', 'unknown') AND dispatch_status IN (?, ?))
 		)`, tgDispatchStatusQueued, tgDispatchStatusProcessing).

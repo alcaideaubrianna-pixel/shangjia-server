@@ -71,7 +71,7 @@ func telegramChannelPriorityAfterFailure(priority, previousRetryCount, retryCoun
 func telegramChannelQueueDecisionFor(job telegramJobRecord) telegramChannelQueueDecision {
 	reason := strings.TrimSpace(job.LastDispatchError)
 	switch {
-	case telegramChannelJobHasUnknownResult(job):
+	case telegramChannelJobOwnsOrder(job) || telegramChannelJobHasUnknownResult(job):
 		// An in-flight or uncertain send always preserves the channel barrier,
 		// even if an earlier media-wait error remains on the record.
 		return telegramChannelQueueDecision{BlockReason: telegramChannelBlockUnknownResult, Delay: 30 * time.Second}
@@ -201,6 +201,7 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 		}
 		return true, loadErr
 	}
+	claim.PreserveOrder = telegramChannelJobOwnsOrder(job)
 	// A stale media-wait error is not proof that media is still unavailable.
 	// Check the existing readiness gate before choosing the migration lane.
 	mediaReady := false
@@ -257,7 +258,11 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 		hold := time.Now().Add(time.Second).UnixMilli()
 		if refreshed, reloadErr := s.telegramJobById(ctx, jobID); reloadErr == nil {
 			job = refreshed
+		} else {
+			// A failed reload cannot prove that no display became visible.
+			claim.PreserveOrder = true
 		}
+		claim.PreserveOrder = claim.PreserveOrder || telegramChannelJobOwnsOrder(job)
 		hold = telegramChannelDispatchDueAt(job.NextRetryAt, time.Second, time.Now()).UnixMilli()
 		priority := job.Priority
 		if priority <= 0 {
@@ -287,25 +292,27 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 			return true, gerror.Wrap(enqueueErr, "频道队列发送失败后重入队失败")
 		}
 		g.Log().Warning(ctx, "频道队列任务发送失败，已重入队", g.Map{
-			"event":       "channel_queue_requeue",
-			"stage":       "send",
-			"channelId":   channelID,
-			"jobId":       jobID,
-			"profileId":   job.ProfileId,
-			"operationNo": job.OperationNo,
-			"priority":    priority,
-			"queue":       queueName,
-			"score":       score,
-			"durationMs":  time.Since(dequeueStartedAt).Milliseconds(),
-			"reason":      telegramPublishLogError(err),
+			"event":         "channel_queue_requeue",
+			"stage":         "send",
+			"preserveOrder": claim.PreserveOrder,
+			"channelId":     channelID,
+			"jobId":         jobID,
+			"profileId":     job.ProfileId,
+			"operationNo":   job.OperationNo,
+			"priority":      priority,
+			"queue":         queueName,
+			"score":         score,
+			"durationMs":    time.Since(dequeueStartedAt).Milliseconds(),
+			"reason":        telegramPublishLogError(err),
 		})
 		return true, err
 	}
 	// SendTelegramJob may return nil when another sender owns the lease. Do
 	// not lose the popped item in that case; only terminal states are acked.
 	if job, loadErr := s.telegramJobById(ctx, jobID); loadErr == nil {
-		switch job.Status {
-		case telegramJobStatusSent, "failed", "superseded":
+		claim.PreserveOrder = claim.PreserveOrder || telegramChannelJobOwnsOrder(job)
+		switch {
+		case isTelegramChannelJobTerminal(job):
 			terminal = true
 			g.Log().Info(ctx, "频道队列任务确认完成", g.Map{
 				"event":       "channel_queue_ack",
@@ -340,6 +347,7 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 			g.Log().Warning(ctx, "频道队列任务未完成，已重入队", g.Map{
 				"event":           "channel_queue_requeue",
 				"stage":           "post_send",
+				"preserveOrder":   claim.PreserveOrder,
 				"channelId":       channelID,
 				"jobId":           jobID,
 				"profileId":       job.ProfileId,
@@ -356,6 +364,7 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 			})
 		}
 	} else {
+		claim.PreserveOrder = true
 		hold := time.Now().Add(time.Second).UnixMilli()
 		if enqueueErr := requeue(ctx, channelID, jobID, tgJobPriorityDefault, time.UnixMilli(hold)); enqueueErr != nil {
 			return true, gerror.Wrap(enqueueErr, "频道队列状态读取失败后重入队失败")
@@ -381,6 +390,9 @@ func telegramChannelDispatchDueAt(nextRetryAt *gtime.Time, delay time.Duration, 
 func telegramChannelJobRequeueAt(job telegramJobRecord) (int64, string) {
 	now := time.Now()
 	reason := strings.TrimSpace(job.LastDispatchError)
+	if telegramChannelJobPendingCleanup(job) {
+		return telegramChannelDispatchDueAt(job.TimeoutCleanupAt, 3*time.Second, now).UnixMilli(), "等待旧消息清理，保留频道发送顺序"
+	}
 	switch job.Status {
 	case telegramJobStatusRetryWait:
 		if reason == "" {
@@ -415,6 +427,9 @@ func telegramChannelJobRequeueAt(job telegramJobRecord) (int64, string) {
 }
 
 func isTelegramChannelJobTerminal(job telegramJobRecord) bool {
+	if telegramChannelJobPendingCleanup(job) {
+		return false
+	}
 	switch job.Status {
 	case telegramJobStatusSent, telegramJobStatusFailed, telegramJobStatusSuperseded:
 		return true

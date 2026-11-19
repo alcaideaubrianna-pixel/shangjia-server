@@ -103,6 +103,13 @@ func (s *sSysPublish) handleTerminalPublishRecoveryTask(ctx context.Context, tas
 		observeTelegramPublishRecovery(ctx, "skipped")
 		return nil
 	}
+	if job.TimeoutCleanupAt != nil && !job.TimeoutCleanupAt.IsZero() {
+		g.Log().Info(ctx, "终态任务等待旧消息清理后再恢复", g.Map{
+			"event": "telegram.recovery.waiting_cleanup", "jobId": job.Id,
+			"profileId": job.ProfileId, "channelId": job.ChannelId,
+		})
+		return gerror.New("终态任务旧消息尚未清理完成，稍后重试恢复")
+	}
 	current, err := s.profilePublishOperationIsCurrent(ctx, job)
 	if err != nil {
 		return err

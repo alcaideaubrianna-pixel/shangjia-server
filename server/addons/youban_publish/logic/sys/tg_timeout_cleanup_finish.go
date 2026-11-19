@@ -34,6 +34,14 @@ func (s *sSysPublish) finishTelegramSendTimeoutCleanup(ctx context.Context, job 
 			return err
 		})
 		if err == nil {
+			if decision.Action != "snapshot_changed" && telegramChannelQueueEnabled() {
+				if _, wakeErr := wakeTelegramChannelOrderOwner(ctx, job); wakeErr != nil {
+					g.Log().Warning(ctx, "旧消息已清理，提前唤醒频道顺序持有任务失败", g.Map{
+						"event": "channel_queue_cleanup_wake_failed", "jobId": job.Id,
+						"channelId": job.ChannelId, "error": wakeErr.Error(),
+					})
+				}
+			}
 			g.Log().Info(ctx, "TG超时清理事务完成", g.Map{
 				"event": "timeout_cleanup_finished", "parentJobId": job.Id,
 				"tailJobId": decision.TailID, "activeJobId": decision.ActiveID,
@@ -78,8 +86,10 @@ func (s *sSysPublish) finishTelegramSendTimeoutCleanupTx(ctx context.Context, tx
 	if parent.Id <= 0 {
 		return decision, nil
 	}
-	if !telegramTimeoutSameIdentity(parent, snapshot) ||
-		parent.Status != JobStatusSuperseded || parent.SendPhase != telegramSendPhaseTimeoutCancelled {
+	timeoutParent := parent.Status == JobStatusSuperseded && parent.SendPhase == telegramSendPhaseTimeoutCancelled
+	failedCleanup := parent.Status == JobStatusFailed &&
+		parent.SendPhase == telegramSendPhaseTimeoutCancelled && snapshot.TimeoutCleanupAt != nil
+	if !telegramTimeoutSameIdentity(parent, snapshot) || (!timeoutParent && !failedCleanup) {
 		return decision, gerror.New("TG超时清理父任务身份或代次已变化")
 	}
 	// NULL cleanup timestamps do not prove deletion. Legacy/manual callers
@@ -112,7 +122,7 @@ func (s *sSysPublish) finishTelegramSendTimeoutCleanupTx(ctx context.Context, tx
 	}
 	decision.TailID = tail.Id
 	decision.Action = "no_waiting_tail"
-	if tail.Id > 0 && tail.Status == JobStatusFailed && tail.SendPhase == "timeout_wait_cleanup" {
+	if timeoutParent && tail.Id > 0 && tail.Status == JobStatusFailed && tail.SendPhase == "timeout_wait_cleanup" {
 		reason, activeID, err := telegramTimeoutTailEligibilityTx(ctx, tx, parent, tail)
 		if err != nil {
 			return decision, err
@@ -175,7 +185,11 @@ func (s *sSysPublish) finishTelegramSendTimeoutCleanupTx(ctx context.Context, tx
 	} else {
 		parentUpdate = parentUpdate.Where("timeout_cleanup_at", snapshot.TimeoutCleanupAt)
 	}
-	_, err = parentUpdate.Data(g.Map{"timeout_cleanup_at": nil}).Update()
+	data := g.Map{"timeout_cleanup_at": nil}
+	if failedCleanup {
+		decision.Action = "terminal_failure_cleaned"
+	}
+	_, err = parentUpdate.Data(data).Update()
 	return decision, err
 }
 

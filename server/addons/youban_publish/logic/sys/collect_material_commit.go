@@ -268,6 +268,13 @@ func (s *sSysPublish) normalizeCollectMaterialText(ctx context.Context, event gd
 }
 
 func (s *sSysPublish) prepareCollectMaterial(ctx context.Context, event gdb.Record, content *collectContentResult) (*collectPreparedMaterial, error) {
+	ready, err := s.ensureCollectPairedVerifyReady(ctx, event)
+	if err != nil {
+		return nil, err
+	}
+	if !ready {
+		return nil, newCollectProcessRetryError(collectMaterialWaitingVerifyRetryDelay, "采集准入等待验证视频匹配并写入")
+	}
 	canonical, err := s.canonicalCollectProfileMedia(ctx, event, content)
 	if err != nil {
 		return nil, gerror.Wrap(err, "整理采集资料媒体失败")
@@ -499,18 +506,25 @@ func isCollectMediaCachePath(path string) bool {
 
 func validateCollectMaterialMedia(content *collectContentResult) error {
 	if content == nil || content.MediaCount <= 0 {
-		return nil
+		return newCollectProcessRetryError(collectMaterialWaitingVerifyRetryDelay, "采集资料等待展示和验证媒体")
 	}
 	if len(content.Media) != content.MediaCount {
 		return gerror.New("采集资料媒体快照数量不完整，等待媒体准备完成")
 	}
+	hasVerificationVideo := false
 	for _, item := range content.Media {
+		if item.Type == "video" && strings.EqualFold(strings.TrimSpace(item.Purpose), collectMaterialRoleVerify) {
+			hasVerificationVideo = true
+		}
 		if collectPublishMediaType(item.Type) == "" {
 			return gerror.New("采集资料包含无效媒体，等待重新处理")
 		}
 		if strings.TrimSpace(item.StoragePath) == "" && strings.TrimSpace(item.FileUrl) == "" {
 			return gerror.New("采集资料媒体尚未全部下载完成")
 		}
+	}
+	if !hasVerificationVideo {
+		return newCollectProcessRetryError(collectMaterialWaitingVerifyRetryDelay, "采集准入等待已匹配验证视频，禁止仅展示入库")
 	}
 	return nil
 }
@@ -546,6 +560,10 @@ func mediaStorageSize(path string) int64 {
 func (s *sSysPublish) commitCollectPreparedProfile(ctx context.Context, event gdb.Record, content *collectPreparedMaterial, rule gdb.Record, text string) (int64, error) {
 	if content == nil || content.Content == nil {
 		return 0, gerror.New("采集资料媒体尚未准备完成")
+	}
+	_, _, verification := collectPreparedMediaCounts(content.Media)
+	if verification == 0 {
+		return 0, newCollectProcessRetryError(collectMaterialWaitingVerifyRetryDelay, "采集提交等待已准备完成的验证视频")
 	}
 	// Approval of an old review can enter here without processing the event
 	// again. Never let that path create a profile from a publish target.

@@ -118,7 +118,7 @@ func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload co
 
 	// 只选择仍需推进的展示/待分类事件。已忽略的验证不是主动恢复任务。
 	eventModel := candidateModel(collectMaterialActiveWindowModel(ctx, payload)).
-		Where(collectMaterialGroupReadyCondition(), collectMaterialGroupWaitingVerify)
+		Handler(func(model *gdb.Model) *gdb.Model { return collectMaterialWindowDueModel(model, time.Now()) })
 	if payload.EventId > 0 {
 		eventModel = eventModel.Where("e.id", payload.EventId)
 	}
@@ -146,7 +146,7 @@ func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload co
 			return newCollectProcessRetryError(collectMaterialWindowMergeTTL(ctx), "采集候选批次正在重建")
 		}
 		fallbackModel := collectMaterialActiveWindowModel(ctx, payload).
-			Where(collectMaterialGroupReadyCondition(), collectMaterialGroupWaitingVerify)
+			Handler(func(model *gdb.Model) *gdb.Model { return collectMaterialWindowDueModel(model, time.Now()) })
 		rows, err = fallbackModel.Fields("e.*").OrderAsc("e.updated_at").OrderAsc("e.id").Limit(batchSize).All()
 		if err != nil {
 			return gerror.Wrap(err, "回退读取采集源消息窗口失败")
@@ -453,6 +453,9 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 				return settleErr
 			}
 			if !settled {
+				if err = s.markCollectMaterialWaitingVerify(ctx, event["id"].Int64()); err != nil {
+					return err
+				}
 				return newCollectProcessRetryError(s.collectDisplayRetryDelay(ctx, event), "等待验证资料静默期结束")
 			}
 			finishPairOnce(collectPipelineCompleted, nil)
@@ -501,41 +504,20 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 				}
 				return nil
 			}
-			if collectMaterialContextClosed(messageViews, index) {
-				claimed, claimErr := s.markCollectMaterialRole(ctx, event["id"].Int64(), collectMaterialRoleDisplay, 0, "complete")
-				if claimErr != nil {
-					return claimErr
-				}
-				if claimed {
-					finishPairOnce(collectPipelineCompleted, nil)
-					ctx = pairParent
-					if err = s.processCollectEvent(ctx, event["id"].Int64(), payload.TenantId, payload.AccountId); err != nil {
-						// 目标事件的重试错误必须回传 Outbox，不能误完成后遗留 media_ready。
-						return err
-					}
-				}
-				return nil
-			}
-			if !collectClassificationHasVerifyMedia(classification) && collectMaterialShouldWaitForVerify(event, windowTruncated) {
-				if err = s.markCollectMaterialWaitingVerify(ctx, event["id"].Int64()); err != nil {
-					return err
-				}
-				return newCollectProcessRetryError(s.collectDisplayRetryDelay(ctx, event), "等待验证资料或窗口到期")
-			}
-			claimed, claimErr := s.markCollectMaterialRole(ctx, event["id"].Int64(), collectMaterialRoleDisplay, 0, "complete")
-			if claimErr != nil {
-				return claimErr
-			}
-			if !claimed {
-				return nil
-			}
-			s.appendCollectEventLogForRecord(ctx, event, "group", "timeout_without_verify", "验证窗口到期，按无验证资料继续处理", "")
-			finishPairOnce(collectPipelineCompleted, nil)
-			ctx = pairParent
-			if err = s.processCollectEvent(ctx, event["id"].Int64(), payload.TenantId, payload.AccountId); err != nil {
-				// 当前事件是本次窗口的目标，重试错误必须回到 Outbox 调度，避免状态停在 media_ready。
+			// A closed source window or an expired timer is not proof of verification.
+			// Keep the raw event retryable until a paired video has been persisted.
+			if err = s.markCollectMaterialWaitingVerify(ctx, event["id"].Int64()); err != nil {
 				return err
 			}
+			g.Log().Info(ctx, "采集准入等待已匹配验证视频", g.Map{
+				"event": "collect.admission.waiting_verify", "eventId": event["id"].Int64(),
+				"tenantId": payload.TenantId, "accountId": payload.AccountId,
+				"sourceId": event["source_id"].Int64(), "sourceChatId": chatID,
+				"sourceMessageId": event["source_message_id"].Int64(),
+				"reason":          "no_paired_verify", "windowTruncated": windowTruncated,
+				"contextClosed": collectMaterialContextClosed(messageViews, index),
+			})
+			return newCollectProcessRetryError(collectMaterialUnpairedRetryDelay(event, time.Now()), "等待验证视频匹配并写入，禁止无验证入库")
 		case profileMessageKindVerify:
 			displayIndex, foundDisplay := displayByVerify[index]
 			if !foundDisplay {
@@ -607,6 +589,7 @@ func (s *sSysPublish) scheduleCollectDisplaySettlement(ctx context.Context, payl
 		return nil
 	}
 	target := payload
+	target.explicitWake = true
 	if payload.EventId != display["id"].Int64() {
 		// An Outbox claim belongs to its original event, never the parent.
 		// Reusing it also reuses the Asynq TaskID and can suppress this wakeup.
@@ -636,11 +619,14 @@ func (s *sSysPublish) collectDisplayRetryDelay(ctx context.Context, display gdb.
 }
 
 // Waiting for a missing verification starts at business ingestion, just like
-// collectMaterialShouldWaitForVerify. Source timestamps still govern pairing
+// the local ingestion window. Source timestamps still govern pairing
 // eligibility, and an existing paired video's settle time is unchanged.
 func collectDisplayRetryDelayFromEvents(display gdb.Record, verifies gdb.Result, now time.Time) time.Duration {
 	maximum := collectMaterialEventCreatedAt(display).Add(collectMaterialVerifyWindow() + collectMaterialVerifySettleDelay)
 	deadline := maximum
+	if len(verifies) == 0 {
+		return collectMaterialUnpairedRetryDelay(display, now)
+	}
 	if len(verifies) > 0 {
 		latest := collectMaterialEventAt(verifies[len(verifies)-1])
 		if !latest.IsZero() {
@@ -665,10 +651,6 @@ func collectClassificationHasVerifyMedia(classification profileMessageClassifica
 		}
 	}
 	return false
-}
-
-func collectMaterialShouldWaitForVerify(event gdb.Record, windowTruncated bool) bool {
-	return windowTruncated || !collectMaterialEventIngestOlderThan(event, collectMaterialVerifyWindow()+collectMaterialVerifySettleDelay)
 }
 
 func shouldResumeClassifiedDisplayEvent(event gdb.Record) bool {
@@ -1381,7 +1363,7 @@ func (s *sSysPublish) markCollectMaterialWaitingVerify(ctx context.Context, even
 	result, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
 		Where("id", eventID).
 		WhereIn("material_role", []string{collectMaterialRolePending, collectMaterialRoleDisplay}).
-		Where("material_group_status IS NULL OR material_group_status = '' OR material_group_status IN (?, ?)", collectMaterialGroupWaitingVerify, collectMaterialGroupCollecting).
+		Where("material_group_status IS NULL OR material_group_status = '' OR material_group_status IN (?, ?, ?)", collectMaterialGroupWaitingVerify, collectMaterialGroupCollecting, "complete").
 		Data(g.Map{
 			"material_group_status": collectMaterialGroupWaitingVerify,
 			"updated_at":            gtime.Now(),
@@ -1394,7 +1376,7 @@ func (s *sSysPublish) markCollectMaterialWaitingVerify(ctx context.Context, even
 		return gerror.Wrap(err, "确认采集资料验证等待状态失败")
 	}
 	if affected > 0 {
-		s.appendCollectEventLog(ctx, eventID, "group", "waiting_verify", "展示资料进入固定20分钟验证窗口", "")
+		s.appendCollectEventLog(ctx, eventID, "group", "waiting_verify", "展示资料等待验证视频匹配并写入，窗口到期不放行", "")
 	}
 	return nil
 }
@@ -1416,9 +1398,6 @@ func (s *sSysPublish) pairedCollectVerifyEvents(ctx context.Context, displayEven
 }
 
 func (s *sSysPublish) collectVerifyEventsSettled(ctx context.Context, display gdb.Record, contextClosed bool) (bool, error) {
-	if contextClosed {
-		return true, nil
-	}
 	rows, err := s.pairedCollectVerifyEvents(ctx, display["id"].Int64())
 	if err != nil {
 		return false, err
@@ -1444,16 +1423,39 @@ func collectMaterialVerifyDeadlineReached(displayAt, latestVerifyAt, now time.Ti
 
 func (s *sSysPublish) ensureCollectPairedVerifyReady(ctx context.Context, display gdb.Record) (bool, error) {
 	verifies, err := s.pairedCollectVerifyEvents(ctx, display["id"].Int64())
-	if err != nil || len(verifies) == 0 {
-		return err == nil, err
+	if err != nil {
+		return false, err
+	}
+	if len(verifies) == 0 {
+		g.Log().Info(ctx, "采集准入尚无已写入的配对验证事件", g.Map{
+			"event": "collect.admission.waiting_verify", "reason": "no_persisted_pair",
+			"eventId": display["id"].Int64(), "tenantId": display["tenant_id"].Int64(),
+			"accountId": display["account_id"].Int64(), "sourceId": display["source_id"].Int64(),
+			"sourceChatId": display["source_chat_id"].String(), "sourceMessageId": display["source_message_id"].Int64(),
+		})
+		return false, nil
 	}
 	ready := true
 	for _, verify := range verifies {
-		needsMediaCache, mediaErr := s.collectEventNeedsMediaCacheResult(ctx, verify)
-		if mediaErr != nil {
-			return false, gerror.Wrap(mediaErr, "检查配对验证资料媒体缓存状态失败")
+		// Admission must distinguish unavailable media from a failed query.
+		// The legacy boolean cache helper intentionally hides read failures and
+		// therefore cannot provide a safe admission decision.
+		rows, rowsErr := s.collectEventMediaRows(ctx, verify["id"].Int64())
+		if rowsErr != nil {
+			return false, gerror.Wrap(rowsErr, "检查配对验证媒体准入失败")
 		}
-		if !needsMediaCache {
+		if len(rows) == 0 {
+			ready = false
+			continue
+		}
+		needsCache := false
+		for _, row := range rows {
+			if collectEventMediaRowNeedsCache(verify, row) {
+				needsCache = true
+				break
+			}
+		}
+		if !needsCache {
 			continue
 		}
 		ready = false
@@ -1665,4 +1667,27 @@ func restoreCollectMaterialTransactionContext(ctx context.Context) func() {
 	}
 	previous := tx.GetCtx()
 	return func() { tx.Ctx(previous) }
+}
+
+func collectMaterialUnpairedRetryDelay(event gdb.Record, now time.Time) time.Duration {
+	created := collectMaterialDatabaseWallClock(event["created_at"].GTime())
+	if !created.IsZero() && !now.Before(created.Add(collectMaterialVerifyWindow())) {
+		return collectMaterialVerifyRetryDelay
+	}
+	return collectMaterialWaitingVerifyRetryDelay
+}
+
+// collectMaterialWindowDueModel is shared by source/target window selection and
+// next-delay detection. Paired events leave waiting_verify and bypass backoff.
+func collectMaterialWindowDueModel(model *gdb.Model, now time.Time) *gdb.Model {
+	cutoff := now.Add(-collectMaterialVerifyWindow())
+	return model.Where(`(e.processed_at IS NULL AND (
+		((e.material_group_status IS NULL OR e.material_group_status <> ?) AND e.created_at <= ?)
+		OR (e.material_group_status = ? AND (
+			((e.created_at IS NULL OR e.created_at > ?) AND e.updated_at <= ?)
+			OR (e.created_at <= ? AND e.updated_at <= ?)))))
+		OR (e.status = ? AND e.material_role = ? AND e.error_message = ? AND e.updated_at <= ?)`,
+		collectMaterialGroupWaitingVerify, now.Add(-collectMaterialGroupingDelay), collectMaterialGroupWaitingVerify,
+		cutoff, now.Add(-collectMaterialWaitingVerifyRetryDelay), cutoff, now.Add(-collectMaterialVerifyRetryDelay),
+		sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage, now.Add(-collectMaterialVerifyRetryDelay))
 }

@@ -217,12 +217,12 @@ func TestCollectDisplayRetryUsesBusinessIngestDeadline(t *testing.T) {
 	t.Setenv("YOUBAN_COLLECT_VERIFY_WINDOW", "20m")
 	now := time.Now()
 	display := gdb.Record{"received_at": gvar.New(gtime.New(now.Add(-6 * time.Hour))), "created_at": gvar.New(gtime.New(now.Add(-5 * time.Second)))}
-	if !collectMaterialShouldWaitForVerify(display, false) {
+	if collectMaterialUnpairedRetryDelay(display, now) != collectMaterialWaitingVerifyRetryDelay {
 		t.Fatal("new business event should retain its verification wait")
 	}
 	got := collectDisplayRetryDelayFromEvents(display, nil, now)
-	if got < 20*time.Minute || got > 21*time.Minute {
-		t.Fatalf("history source caused short retry instead of ingest deadline: %s", got)
+	if got != collectMaterialWaitingVerifyRetryDelay {
+		t.Fatalf("fresh ingress retry=%s", got)
 	}
 	verifies := gdb.Result{{"received_at": gvar.New(gtime.New(now.Add(-10 * time.Second)))}}
 	got = collectDisplayRetryDelayFromEvents(display, verifies, now)
@@ -235,10 +235,10 @@ func TestCollectDisplayRetryUsesBusinessIngestDeadline(t *testing.T) {
 		t.Fatalf("paired settle exceeded business deadline: %s", got)
 	}
 	display["created_at"] = gvar.New(gtime.New(now.Add(-22 * time.Minute)))
-	if collectMaterialShouldWaitForVerify(display, false) {
+	if collectMaterialUnpairedRetryDelay(display, now) != collectMaterialVerifyRetryDelay {
 		t.Fatal("expired business wait did not close")
 	}
-	if got := collectDisplayRetryDelayFromEvents(display, nil, now); got != collectProcessMinimumDelay {
+	if got := collectDisplayRetryDelayFromEvents(display, nil, now); got != collectMaterialVerifyRetryDelay {
 		t.Fatalf("expired retry=%s", got)
 	}
 }

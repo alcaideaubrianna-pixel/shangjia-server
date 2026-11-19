@@ -563,24 +563,6 @@ func TestPairCollectMaterialMessagesRejectsOutOfOrderVerifyTimestamp(t *testing.
 	}
 }
 
-func TestCollectMaterialShouldWaitForVerify(t *testing.T) {
-	oldEvent := gdb.Record{"created_at": gvar.New(time.Now().Add(-collectMaterialVerifyWindow() - collectMaterialVerifySettleDelay - time.Minute))}
-	freshEvent := gdb.Record{"created_at": gvar.New(time.Now())}
-	settlingEvent := gdb.Record{"created_at": gvar.New(time.Now().Add(-collectMaterialVerifyWindow() - 30*time.Second))}
-	if !collectMaterialShouldWaitForVerify(oldEvent, true) {
-		t.Fatal("a truncated scan must never finalize a display without verification")
-	}
-	if collectMaterialShouldWaitForVerify(oldEvent, false) {
-		t.Fatal("an exhausted verification window may continue without verification")
-	}
-	if !collectMaterialShouldWaitForVerify(freshEvent, false) {
-		t.Fatal("a fresh display must wait for verification")
-	}
-	if !collectMaterialShouldWaitForVerify(settlingEvent, false) {
-		t.Fatal("a display must wait through the one-minute settlement period")
-	}
-}
-
 func TestCollectMaterialWindowHasBoundedExecution(t *testing.T) {
 	if collectMaterialWindowExecutionTimeout <= 0 || collectMaterialWindowExecutionTimeout > 2*time.Minute {
 		t.Fatalf("unexpected material window timeout: %s", collectMaterialWindowExecutionTimeout)

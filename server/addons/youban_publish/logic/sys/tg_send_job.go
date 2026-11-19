@@ -515,6 +515,18 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	if err != nil {
 		return err
 	}
+	// Collected profiles must arrive with their verification media already
+	// persisted. Reject an incomplete historical job before sending its display;
+	// media matching belongs to collection, never to the publish worker.
+	if !telegramCollectedVerificationReady(job, verifyMedia) {
+		g.Log().Warning(ctx, "采集资料缺少验证媒体，拒绝发送展示", g.Map{
+			"event": "telegram_collect_media_incomplete", "jobId": job.Id,
+			"profileId": job.ProfileId, "channelId": job.ChannelId,
+			"collectEventId": job.CollectEventId, "collectSourceId": job.CollectSourceId,
+			"reason": "verification_media_missing", "displaySent": telegramSendPhaseHasDisplay(job.SendPhase.String()),
+		})
+		return gerror.New("采集资料验证媒体未完整写入，禁止发送展示，请完成采集配对后重试")
+	}
 	// Legacy jobs used verify_confirmed for both verified and display-only
 	// publishes. Keep verified jobs idempotent, while allowing display-only
 	// jobs to migrate to the truthful completed_without_verify phase below.
@@ -767,6 +779,20 @@ func (s *sSysPublish) profileDisplayMediaReady(ctx context.Context, profileID in
 		return true, nil
 	}
 	return false, nil
+}
+
+// Collected jobs require an actual verification video before their first external
+// send. Manual display-only profiles keep their existing publishing contract.
+func telegramCollectedVerificationReady(job telegramJobRecord, media []*telegramMediaItem) bool {
+	if job.CollectEventId <= 0 {
+		return true
+	}
+	for _, item := range media {
+		if item != nil && strings.EqualFold(strings.TrimSpace(item.MediaType), "video") {
+			return true
+		}
+	}
+	return false
 }
 
 func telegramVerifyMediaNeedsAccountUpload(media []*telegramMediaItem) bool {
@@ -1107,20 +1133,18 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 		conf = defaultPublishConfig()
 	}
 	decision := telegramJobFailureNextStateWithConfig(err, job.RetryCount, conf)
+	additional := g.Map{"retry_count": decision.RetryCount, "last_dispatch_error": decision.Message}
 	step := beginTelegramPublishStage(ctx, "job.failure_transition", g.Map{"nextStatus": decision.Status, "retryCount": decision.RetryCount, "retryDelayMs": decision.RetryDelay.Milliseconds()})
-	additional := g.Map{
-		"retry_count":         decision.RetryCount,
-		"last_dispatch_error": decision.Message,
-	}
 	// Retry scheduling never rewrites the durable job deadline. Bot switches,
 	// rate limits and account handoffs all consume the same original budget.
 	transitioned, updateErr := s.transitionTelegramJob(ctx, telegramJobTransition{
-		JobId:        job.Id,
-		From:         []JobStatus{telegramJobStatusSending},
-		To:           JobStatus(decision.Status),
-		RetryDelay:   decision.RetryDelay,
-		ErrorMessage: decision.Message,
-		Additional:   additional,
+		JobId:              job.Id,
+		From:               []JobStatus{telegramJobStatusSending},
+		To:                 JobStatus(decision.Status),
+		RetryDelay:         decision.RetryDelay,
+		ErrorMessage:       decision.Message,
+		Additional:         additional,
+		CleanupStartedSend: decision.Status == telegramJobStatusFailed,
 	})
 	step.End(updateErr, g.Map{"transitioned": transitioned})
 	if updateErr != nil {

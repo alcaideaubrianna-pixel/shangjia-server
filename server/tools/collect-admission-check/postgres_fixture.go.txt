@@ -1,0 +1,453 @@
+package sys
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"github.com/gogf/gf/v2/os/gcfg"
+	"hotgo/internal/library/cache"
+	"os"
+	"sync"
+	"time"
+
+	_ "github.com/gogf/gf/contrib/drivers/pgsql/v2"
+	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/frame/g"
+)
+
+var admissionFixtureEnqueued []int64
+
+// Local fixture deliberately does not invoke publish submission, cache preparation,
+// metadata enrichment or application bootstrap. The profile/dispatch sink below is
+// a test fixture, not a substitute implementation of production persistence.
+func RunCollectAdmissionPostgresFixture() {
+	port := os.Getenv("COLLECT_ADMISSION_LOCAL_PORT")
+	if port == "" {
+		panic("local PostgreSQL port required")
+	}
+	gdb.SetConfigGroup("default", gdb.ConfigGroup{{Type: "pgsql", Host: "127.0.0.1", Port: port, User: "admission_fixture", Name: "postgres", MaxOpenConnCount: 4}})
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	db := g.DB()
+	cfg, cfgErr := gcfg.NewAdapterContent("cache:\n  adapter: memory\n")
+	if cfgErr != nil {
+		panic(cfgErr)
+	}
+	g.Cfg().SetAdapter(cfg)
+	cache.SetAdapter(ctx)
+	s := &sSysPublish{}
+	must := func(err error) {
+		if err != nil {
+			panic(err)
+		}
+	}
+	for _, sql := range []string{
+		`CREATE TABLE hg_youban_publish_collect_event(id bigint PRIMARY KEY, tenant_id bigint DEFAULT 78,account_id bigint DEFAULT 615,source_id bigint DEFAULT 351,source_chat_id text DEFAULT '3954709181',source_message_id bigint,source_type text DEFAULT 'bot',material_role text,material_parent_event_id bigint DEFAULT 0,status text DEFAULT 'media_ready',processed_at timestamp,material_group_status text DEFAULT '',error_message text DEFAULT '',updated_at timestamp DEFAULT now(),created_at timestamp DEFAULT now(),received_at timestamp DEFAULT now())`,
+		`CREATE TABLE hg_youban_publish_collect_event_media(id bigint PRIMARY KEY,event_id bigint,sort_index int DEFAULT 0,media_type text,source_file_id text DEFAULT '',source_message_ref text DEFAULT '',storage_path text DEFAULT '',file_url text DEFAULT '',cache_status text DEFAULT 'pending')`,
+		// Sentinel business tables: the blocked real entry must not write either.
+		`CREATE TABLE hg_content_profile(id bigserial PRIMARY KEY)`,
+		`CREATE TABLE hg_youban_publish_collect_dispatch(id bigserial PRIMARY KEY)`,
+		`CREATE TABLE admission_fixture_profile(id bigserial PRIMARY KEY,event_id bigint UNIQUE NOT NULL,verify_count int NOT NULL CHECK(verify_count>0))`,
+		`CREATE TABLE admission_fixture_dispatch(id bigserial PRIMARY KEY,event_id bigint UNIQUE NOT NULL,profile_id bigint NOT NULL REFERENCES admission_fixture_profile(id))`,
+		`CREATE TABLE admission_fixture_alias(event_id bigint PRIMARY KEY,canonical_event_id bigint NOT NULL)`,
+		`INSERT INTO hg_youban_publish_collect_event(id,source_message_id,material_role) VALUES(20904504,60929,'display'),(20906683,60933,'display'),(20906722,60937,'verify')`,
+		`INSERT INTO hg_youban_publish_collect_event_media(id,event_id,media_type,file_url,cache_status) VALUES(1,20904504,'photo','https://fixture.invalid/display.jpg','ready'),(2,20906683,'photo','https://fixture.invalid/display.jpg','ready')`,
+		`INSERT INTO admission_fixture_alias VALUES(20904504,20904504),(20906683,20904504)`,
+		`UPDATE hg_youban_publish_collect_event SET created_at=now()-interval '2 days',received_at=now()-interval '2 days' WHERE id IN(20904504,20906683)`,
+	} {
+		_, err := db.Exec(ctx, sql)
+		must(err)
+	}
+	event := func(c context.Context, id int64) gdb.Record {
+		r, e := db.GetOne(c, "SELECT * FROM hg_youban_publish_collect_event WHERE id=?", id)
+		must(e)
+		return r
+	}
+	counts := func(want int) {
+		for _, table := range []string{"admission_fixture_profile", "admission_fixture_dispatch"} {
+			v, e := db.GetValue(ctx, "SELECT count(*) FROM "+table)
+			must(e)
+			if v.Int() != want {
+				panic(fmt.Sprintf("%s count=%d want=%d", table, v.Int(), want))
+			}
+		}
+	}
+	// This invokes the real production entry, which must return before any profile,
+	// dispatch, enrichment, asset preparation or cache write for a missing pair.
+	_, err := s.commitCollectMaterial(ctx, event(ctx, 20904504), &collectContentResult{}, gdb.Record{}, "fixture")
+	if !isCollectProcessRetryError(err) {
+		panic(fmt.Sprintf("missing pair must retry: %v", err))
+	}
+	counts(0)
+	readyMissing, missingErr := s.ensureCollectPairedVerifyReady(ctx, event(ctx, 20904504))
+	must(missingErr)
+	if readyMissing {
+		panic("real ensure admitted missing pair")
+	}
+	for _, table := range []string{"hg_content_profile", "hg_youban_publish_collect_dispatch"} {
+		value, err := db.GetValue(ctx, "SELECT count(*) FROM "+table)
+		must(err)
+		if value.Int() != 0 {
+			panic("blocked real entry wrote " + table)
+		}
+	}
+	for _, closed := range []bool{false, true} {
+		settled, e := s.collectVerifyEventsSettled(ctx, event(ctx, 20904504), closed)
+		must(e)
+		if settled {
+			panic("missing pair settled")
+		}
+	}
+	fmt.Println("PASS PG real_commit_missing_pair_no_profile_dispatch_window_closed_or_expired")
+	// Actual repository queries + actual merge/validation, with an explicitly
+	// bounded test sink. No production profile/schema/services are simulated.
+	admit := func(id int64) error {
+		return db.Transaction(ctx, func(c context.Context, tx gdb.TX) error {
+			canonical, e := tx.GetValue("SELECT canonical_event_id FROM admission_fixture_alias WHERE event_id=?", id)
+			if e != nil {
+				return e
+			}
+			display := event(c, canonical.Int64())
+			verifies, e := s.pairedCollectVerifyEvents(c, display["id"].Int64())
+			if e != nil {
+				return e
+			}
+			if len(verifies) == 0 {
+				return newCollectProcessRetryError(time.Second, "waiting pair")
+			}
+			for _, v := range verifies {
+				ready, e := s.collectEventMediaReady(c, v["id"].Int64())
+				if e != nil {
+					return e
+				}
+				if !ready {
+					return newCollectProcessRetryError(time.Second, "waiting persisted video")
+				}
+			}
+			rows, e := s.collectEventMediaRows(c, display["id"].Int64())
+			if e != nil {
+				return e
+			}
+			content, e := s.mergeCollectMaterialContent(c, display, &collectContentResult{Media: collectMediaRowsToItems(rows, "display")})
+			if e != nil {
+				return e
+			}
+			if e = validateCollectMaterialMedia(content); e != nil {
+				return e
+			}
+			if _, e = tx.Exec(`INSERT INTO admission_fixture_profile(event_id,verify_count) VALUES(?,?) ON CONFLICT(event_id) DO NOTHING`, canonical.Int64(), len(verifies)); e != nil {
+				return e
+			}
+			_, e = tx.Exec(`INSERT INTO admission_fixture_dispatch(event_id,profile_id) SELECT event_id,id FROM admission_fixture_profile WHERE event_id=? ON CONFLICT(event_id) DO NOTHING`, canonical.Int64())
+			return e
+		})
+	}
+	if e := admit(20906683); !isCollectProcessRetryError(e) {
+		panic(fmt.Sprintf("duplicate must wait: %v", e))
+	}
+	counts(0)
+	fmt.Println("PASS PG duplicate_alias_without_verify_cannot_create")
+	// Pair is committed, but the referenced video row has not been persisted.
+	_, err = db.Exec(ctx, "UPDATE hg_youban_publish_collect_event SET material_parent_event_id=20904504 WHERE id=20906722")
+	must(err)
+	if e := admit(20906683); !isCollectProcessRetryError(e) {
+		panic(fmt.Sprintf("pair without media must wait: %v", e))
+	}
+	counts(0)
+	missingMediaReady, missingMediaErr := s.ensureCollectPairedVerifyReady(ctx, event(ctx, 20904504))
+	must(missingMediaErr)
+	if missingMediaReady {
+		panic("real ensure admitted pair without persisted media")
+	}
+	fmt.Println("PASS PG paired_event_without_video_row_no_profile_dispatch")
+	// A paired video reference without a prepared asset cannot pass admission.
+	_, err = db.Exec(ctx, `INSERT INTO hg_youban_publish_collect_event_media(id,event_id,media_type,source_file_id,cache_status) VALUES(3,20906722,'video','gotd:fixture','pending')`)
+	must(err)
+	if e := admit(20906683); !isCollectProcessRetryError(e) {
+		panic(fmt.Sprintf("pending video must wait: %v", e))
+	}
+	counts(0)
+	pendingDisplay := event(ctx, 20904504)
+	pendingReady, pendingErr := s.ensureCollectPairedVerifyReady(ctx, pendingDisplay)
+	must(pendingErr)
+	if pendingReady {
+		panic("real ensure admitted pending video")
+	}
+	_, pendingErr = s.prepareCollectMaterial(ctx, pendingDisplay, &collectContentResult{})
+	if !isCollectProcessRetryError(pendingErr) {
+		panic(fmt.Sprintf("real prepare must retry pending video: %v", pendingErr))
+	}
+	_, pendingErr = s.commitCollectMaterial(ctx, pendingDisplay, &collectContentResult{}, gdb.Record{}, "fixture")
+	if !isCollectProcessRetryError(pendingErr) {
+		panic(fmt.Sprintf("real commit must retry pending video: %v", pendingErr))
+	}
+	if len(admissionFixtureEnqueued) != 3 {
+		panic("pending video should request one enqueue per call")
+	}
+	for _, id := range admissionFixtureEnqueued {
+		if id != 20906722 {
+			panic("wrong media enqueue event")
+		}
+	}
+	for _, table := range []string{"hg_content_profile", "hg_youban_publish_collect_dispatch"} {
+		value, e := db.GetValue(ctx, "SELECT count(*) FROM "+table)
+		must(e)
+		if value.Int() != 0 {
+			panic("pending real entry wrote " + table)
+		}
+	}
+	fmt.Println("PASS PG real_ensure_prepare_commit_pending_video_retries_no_business_writes")
+	_, err = db.Exec(ctx, `DELETE FROM hg_youban_publish_collect_event_media WHERE id=3`)
+	must(err)
+	fmt.Println("PASS PG paired_video_cache_pending_no_profile_dispatch")
+	// An uncommitted video must be invisible to a separate DB transaction.
+	uncommitted := errors.New("rollback video fixture")
+	err = db.Transaction(ctx, func(c context.Context, tx gdb.TX) error {
+		_, e := tx.Exec(`INSERT INTO hg_youban_publish_collect_event_media(id,event_id,media_type,file_url,cache_status) VALUES(3,20906722,'video','https://fixture.invalid/verify.mp4','ready')`)
+		if e != nil {
+			return e
+		}
+		// admit uses the outer context, so it opens a separate transaction/connection.
+		if e = admit(20906683); !isCollectProcessRetryError(e) {
+			return fmt.Errorf("uncommitted video visible or unexpected failure: %v", e)
+		}
+		return uncommitted
+	})
+	if !errors.Is(err, uncommitted) {
+		panic(err)
+	}
+	counts(0)
+	fmt.Println("PASS PG uncommitted_ready_video_invisible_rollback_keeps_zero")
+	_, err = db.Exec(ctx, `INSERT INTO hg_youban_publish_collect_event_media(id,event_id,media_type,file_url,cache_status) VALUES(3,20906722,'video','https://fixture.invalid/verify.mp4','ready')`)
+	must(err)
+	// A video attached only to the duplicate cannot authorize the canonical
+	// group. The fixture mapping alone must never invent a canonical pairing.
+	_, err = db.Exec(ctx, `UPDATE hg_youban_publish_collect_event SET material_parent_event_id=20906683 WHERE id=20906722`)
+	must(err)
+	if e := admit(20906683); !isCollectProcessRetryError(e) {
+		panic(fmt.Sprintf("duplicate-only pair authorized canonical: %v", e))
+	}
+	counts(0)
+	_, err = db.Exec(ctx, `UPDATE hg_youban_publish_collect_event SET material_parent_event_id=20904504 WHERE id=20906722`)
+	must(err)
+	fmt.Println("PASS PG duplicate_only_verify_cannot_authorize_canonical_group")
+	ready, e := s.ensureCollectPairedVerifyReady(ctx, event(ctx, 20904504))
+	must(e)
+	if !ready {
+		panic("persisted pair not ready")
+	}
+	for i := 0; i < 5; i++ {
+		must(admit(20904504))
+		must(admit(20906683))
+	}
+	counts(1)
+	fmt.Println("PASS PG committed_ready_video_fixture_sink_once_across_canonical_and_duplicate_retries")
+	// Atomic sink rollback: a dispatch constraint failure must not leave a profile.
+	_, err = db.Exec(ctx, `DELETE FROM admission_fixture_dispatch`)
+	must(err)
+	_, err = db.Exec(ctx, `DELETE FROM admission_fixture_profile`)
+	must(err)
+	_, err = db.Exec(ctx, `ALTER TABLE admission_fixture_dispatch ADD CONSTRAINT fixture_reject CHECK(event_id<0)`)
+	must(err)
+	if e := admit(20904504); e == nil {
+		panic("expected dispatch constraint failure")
+	}
+	counts(0)
+	fmt.Println("PASS PG fixture_profile_and_dispatch_rollback_together")
+	_, err = db.Exec(ctx, `ALTER TABLE hg_youban_publish_collect_event RENAME TO admission_hidden_events`)
+	must(err)
+	display := gdb.Record{"id": g.NewVar(20904504)}
+	ready, pairErr := s.ensureCollectPairedVerifyReady(ctx, display)
+	if ready || pairErr == nil {
+		panic("ensure lost pair-query database error")
+	}
+	for _, closed := range []bool{false, true} {
+		settled, settleErr := s.collectVerifyEventsSettled(ctx, display, closed)
+		if settled || settleErr == nil {
+			panic("settlement lost pair-query database error")
+		}
+	}
+	_, err = db.Exec(ctx, `ALTER TABLE admission_hidden_events RENAME TO hg_youban_publish_collect_event`)
+	must(err)
+	fmt.Println("PASS PG real_ensure_and_settlement_propagate_pair_query_db_error")
+	_, err = db.Exec(ctx, `ALTER TABLE hg_youban_publish_collect_event_media RENAME TO admission_hidden_media`)
+	must(err)
+	ready, mediaErr := s.ensureCollectPairedVerifyReady(ctx, display)
+	if ready || mediaErr == nil {
+		panic(fmt.Sprintf("real ensure lost media-query DB failure: ready=%v err=%v", ready, mediaErr))
+	}
+	fmt.Println("PASS PG real_ensure_propagates_media_query_db_error")
+	_, err = db.Exec(ctx, `ALTER TABLE admission_hidden_media RENAME TO hg_youban_publish_collect_event_media`)
+	must(err)
+	runCollectWaitingSchedulePostgres(ctx)
+}
+
+// Exercise real source/target eligibility, next-delay and outbox SQL. No mocks
+// replace these functions; all mutations below belong to the disposable DB.
+func runCollectWaitingSchedulePostgres(ctx context.Context) {
+	db := g.DB()
+	s := &sSysPublish{}
+	must := func(err error) {
+		if err != nil {
+			panic(err)
+		}
+	}
+	exec := func(sql string, args ...any) { _, e := db.Exec(ctx, sql, args...); must(e) }
+	exec(`CREATE TABLE hg_youban_publish_collect_event_log(id bigserial PRIMARY KEY,tenant_id bigint,account_id bigint,event_id bigint,stage text,status text,message text,meta_text text,created_at timestamp)`)
+	exec(`CREATE TABLE hg_youban_publish_collect_source(id bigint PRIMARY KEY,tenant_id bigint,account_id bigint,channel_blacklisted int DEFAULT 0)`)
+	exec(`INSERT INTO hg_youban_publish_collect_source(id,tenant_id,account_id) VALUES(999,78,615)`)
+	exec(`CREATE TABLE hg_youban_publish_collect_process_outbox(id bigserial PRIMARY KEY,event_id bigint UNIQUE,tenant_id bigint,account_id bigint,source_id bigint,source_chat_id text,status text,available_at timestamp,created_at timestamp,updated_at timestamp,lease_owner text DEFAULT '',lease_expires_at timestamp,last_error text DEFAULT '',history boolean,attempt_count int DEFAULT 0,delivered_at timestamp)`)
+	exec(`INSERT INTO hg_youban_publish_collect_event(id,source_id,source_chat_id,source_message_id,material_role,material_group_status,created_at,received_at,updated_at) VALUES(91001,999,'999001',100,'pending','waiting_verify',now()-interval '2 hours',now()-interval '2 hours',now()-interval '20 seconds'),(91002,999,'999002',200,'pending','waiting_verify',now()-interval '1 minute',now()-interval '1 minute',now()-interval '5 seconds')`)
+	payload := collectProcessQueuePayload{TenantId: 78, AccountId: 615, SourceId: 999, SourceChatId: "999001", EventId: 91001}
+	getEvent := func(id int64) gdb.Record {
+		r, e := db.GetOne(ctx, "SELECT * FROM hg_youban_publish_collect_event WHERE id=?", id)
+		must(e)
+		return r
+	}
+	getOutbox := func() gdb.Record {
+		r, e := db.GetOne(ctx, "SELECT *,available_at::text AS exact_deadline FROM hg_youban_publish_collect_process_outbox WHERE event_id=?", payload.EventId)
+		must(e)
+		return r
+	}
+	sourceRows := func(p collectProcessQueuePayload) gdb.Result {
+		m := collectProcessEventModel(ctx, p).Fields("e.*").WhereIn("e.status", collectProcessWindowStatuses())
+		rows, e := collectMaterialWindowDueModel(m, time.Now()).All()
+		must(e)
+		return rows
+	}
+	check := func(p collectProcessQueuePayload, wantRows int, minDelay, maxDelay time.Duration) {
+		target := getEvent(p.EventId)
+		rows, _, e := s.loadTargetCollectMaterialWindow(ctx, p, target, target["received_at"].GTime())
+		must(e)
+		if len(rows) != 1 || rows[0]["id"].Int64() != p.EventId {
+			panic(fmt.Sprintf("explicit target anchor lost: event=%d rows=%d", p.EventId, len(rows)))
+		}
+		rows = sourceRows(p)
+		if len(rows) != wantRows {
+			panic(fmt.Sprintf("source %d rows=%d want=%d", p.EventId, len(rows), wantRows))
+		}
+		delay, pending, e := nextCollectProcessDelay(ctx, p)
+		must(e)
+		if !pending || delay < minDelay || delay > maxDelay {
+			panic(fmt.Sprintf("event %d next=%s pending=%v want [%s,%s]", p.EventId, delay, pending, minDelay, maxDelay))
+		}
+	}
+	if collectMaterialUnpairedRetryDelay(getEvent(91001), time.Now()) != collectMaterialVerifyRetryDelay {
+		panic("expired retry must be one minute")
+	}
+	if collectMaterialUnpairedRetryDelay(getEvent(91002), time.Now()) != collectMaterialWaitingVerifyRetryDelay {
+		panic("fresh retry must be ten seconds")
+	}
+	check(payload, 0, 35*time.Second, 41*time.Second)
+	fresh := payload
+	fresh.EventId = 91002
+	fresh.SourceChatId = "999002"
+	check(fresh, 0, time.Second, 6*time.Second)
+	mixed := payload
+	mixed.SourceChatId = ""
+	mixed.EventId = 0
+	delay, pending, e := nextCollectProcessDelay(ctx, mixed)
+	must(e)
+	if !pending || delay < time.Second || delay > 6*time.Second {
+		panic(fmt.Sprintf("mixed cohorts hid fresh event: %s", delay))
+	}
+	// Unknown ingestion time follows the short cohort in both SQL and Go,
+	// regardless of the historical Telegram timestamp.
+	exec(`UPDATE hg_youban_publish_collect_event SET created_at=NULL WHERE id=91002`)
+	if collectMaterialUnpairedRetryDelay(getEvent(91002), time.Now()) != collectMaterialWaitingVerifyRetryDelay {
+		panic("null ingestion timestamp must match SQL short cohort")
+	}
+	check(fresh, 0, time.Second, 6*time.Second)
+	exec(`UPDATE hg_youban_publish_collect_event SET created_at=now()-interval '1 minute' WHERE id=91002`)
+	fmt.Println("PASS PG expired_60s_fresh_10s_source_target_nextdelay_agree")
+	exec(`UPDATE hg_youban_publish_collect_event SET updated_at=now()-interval '61 seconds' WHERE id=91001`)
+	check(payload, 1, 0, 0)
+	exec(`UPDATE hg_youban_publish_collect_event SET updated_at=now()-interval '11 seconds' WHERE id=91002`)
+	check(fresh, 1, 0, 0)
+	// Real waiting update must refresh the timestamp, not leave a due source
+	// spinning even though the event worker requested a long delayed retry.
+	must(s.markCollectMaterialWaitingVerify(ctx, 91001))
+	check(payload, 0, 55*time.Second, 61*time.Second)
+	fmt.Println("PASS PG expired_due_and_waiting_refresh_preserve_backoff")
+	// Establish a pending late deadline, then explicitly wake this exact event.
+	must(ensureCollectProcessOutbox(ctx, payload, time.Minute))
+	late := getOutbox()["exact_deadline"].String()
+	must(s.scheduleCollectDisplaySettlement(ctx, payload, getEvent(91001), 0))
+	early := getOutbox()["exact_deadline"].String()
+	if early >= late {
+		panic("explicit wake did not advance deadline")
+	}
+	worker := payload
+	worker.OutboxOwner = "obsolete-worker"
+	must(ensureCollectProcessOutbox(ctx, worker, time.Minute))
+	if getOutbox()["exact_deadline"].String() != early {
+		panic("old worker delayed explicit wake")
+	}
+	must(ensureCollectProcessOutbox(ctx, payload, time.Minute))
+	if getOutbox()["exact_deadline"].String() != early {
+		panic("generic late retry delayed earlier available_at")
+	}
+	if getOutbox()["status"].String() != "pending" {
+		panic("old retry consumed explicit wake")
+	}
+	fmt.Println("PASS PG real_explicit_wake_advances_and_late_retry_keeps_earlier_available_at")
+	var wg sync.WaitGroup
+	errs := make(chan error, 16)
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			d := time.Minute
+			if i%2 == 0 {
+				d = 10 * time.Second
+			}
+			errs <- ensureCollectProcessOutbox(ctx, payload, d)
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for e := range errs {
+		must(e)
+	}
+	if getOutbox()["exact_deadline"].String() != early {
+		panic("concurrent retries delayed earlier wake")
+	}
+	fmt.Println("PASS PG concurrent_retries_cannot_postpone_pending_wake")
+	// A running lease's old, consumed deadline must not defeat a legitimate
+	// retry; a worker holding a different lease must not replace current work.
+	exec(`UPDATE hg_youban_publish_collect_process_outbox SET status='processing',lease_owner='current-worker',available_at=now()-interval '1 hour' WHERE event_id=?`, payload.EventId)
+	current := payload
+	current.OutboxOwner = "current-worker"
+	must(ensureCollectProcessOutbox(ctx, current, time.Minute))
+	row := getOutbox()
+	if row["available_at"].GTime().Time.Before(time.Now().Add(55 * time.Second)) {
+		panic("current lease reused consumed past deadline")
+	}
+	exec(`UPDATE hg_youban_publish_collect_process_outbox SET status='processing',lease_owner='new-worker' WHERE event_id=?`, payload.EventId)
+	before := getOutbox()["exact_deadline"].String()
+	must(ensureCollectProcessOutbox(ctx, current, time.Minute))
+	row = getOutbox()
+	if row["status"].String() != "processing" || row["lease_owner"].String() != "new-worker" || row["exact_deadline"].String() != before {
+		panic("obsolete retry replaced new lease")
+	}
+	exec(`UPDATE hg_youban_publish_collect_process_outbox SET status='delivered',lease_owner='' WHERE event_id=?`, payload.EventId)
+	must(ensureCollectProcessOutbox(ctx, current, time.Minute))
+	if getOutbox()["status"].String() != "delivered" {
+		panic("obsolete retry reopened delivered event")
+	}
+	must(ensureCollectProcessOutbox(ctx, payload, time.Minute))
+	if getOutbox()["status"].String() != "delivered" {
+		panic("ordinary producer reopened delivered HEAD event")
+	}
+	fmt.Println("PASS PG HEAD_ordinary_producer_preserves_delivered_guard")
+	fmt.Println("PASS PG current_lease_retries_but_obsolete_lease_cannot_overwrite_or_reopen")
+	// Model the persisted result of binding a new verify: paired groups leave
+	// the unpaired waiting state and become eligible without waiting one minute.
+	exec(`UPDATE hg_youban_publish_collect_event SET material_role='display',material_group_status='paired',updated_at=now() WHERE id=91001`)
+	check(payload, 1, 0, 0)
+	must(s.scheduleCollectDisplaySettlement(ctx, payload, getEvent(91001), 0))
+	if getOutbox()["status"].String() != "pending" {
+		panic("explicit wake cannot reopen delivered event")
+	}
+	fmt.Println("PASS PG persisted_pair_bypasses_backoff_and_real_wake_reopens_event")
+}

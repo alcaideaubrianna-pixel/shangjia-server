@@ -14,7 +14,7 @@ func TestValidateCollectMaterialMediaRequiresEveryMediaAsset(t *testing.T) {
 				MediaCount: 2,
 				Media: []collectMediaItem{
 					{Type: "photo", StoragePath: "cache/a.jpg"},
-					{Type: "video", FileUrl: "https://cdn.test/a.mp4"},
+					{Type: "video", Purpose: collectMaterialRoleVerify, FileUrl: "https://cdn.test/a.mp4"},
 				},
 			},
 		},

@@ -178,8 +178,11 @@ type telegramJobTransition struct {
 	SendPhases     []SendPhase
 	DispatchStatus *DispatchStatus
 	SendPhase      *SendPhase
-	UpdatedBefore  *gtime.Time
-	NotExpiredAt   *gtime.Time
+	// Atomically fence a failed started send until its existing cleanup runs.
+	// The SQL reads the persisted phase; callers cannot supply raw phase writes.
+	CleanupStartedSend bool
+	UpdatedBefore      *gtime.Time
+	NotExpiredAt       *gtime.Time
 }
 
 func validateTelegramJobTransition(from []JobStatus, to JobStatus) error {
@@ -390,6 +393,16 @@ func (s *sSysPublish) transitionTelegramJobs(ctx context.Context, jobIds []int64
 	return affected, nil
 }
 
+// Preserve the destination order atomically with terminal failure until the
+// existing watchdog has removed all messages and resolved outstanding attempts.
+func telegramTerminalFailureCleanupFields() g.Map {
+	const started = "send_phase IN ('display_sending','display_confirmed','verify_sending')"
+	return g.Map{
+		"send_phase":         gdb.Raw("CASE WHEN " + started + " THEN 'timeout_cancelled' ELSE send_phase END"),
+		"timeout_cleanup_at": gdb.Raw("CASE WHEN " + started + " THEN CURRENT_TIMESTAMP ELSE timeout_cleanup_at END"),
+	}
+}
+
 func telegramJobTransitionUpdate(in telegramJobTransition) ([]JobStatus, g.Map, error) {
 	if err := validateTelegramJobTransition(in.From, in.To); err != nil {
 		return nil, nil, err
@@ -427,6 +440,14 @@ func telegramJobTransitionUpdate(in telegramJobTransition) ([]JobStatus, g.Map, 
 			return nil, nil, gerror.New("TG发送阶段不合法")
 		}
 		data["send_phase"] = in.SendPhase.String()
+	}
+	if in.CleanupStartedSend {
+		if in.To != JobStatusFailed || in.SendPhase != nil {
+			return nil, nil, gerror.New("发送清理栅栏只能用于失败终态，且不能同时指定发送阶段")
+		}
+		for field, value := range telegramTerminalFailureCleanupFields() {
+			data[field] = value
+		}
 	}
 	dispatch, ok := data["dispatch_status"].(string)
 	if !ok {
