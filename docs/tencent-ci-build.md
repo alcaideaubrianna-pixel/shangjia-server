@@ -7,6 +7,7 @@
 - 仅 `develop/tencent-ci` 分支的镜像相关改动触发构建，也支持在该分支手动触发。
 - 不再安装阿里云 CLI、修改 ACR 白名单、获取 ACR Token、上传 ACR 或部署 SAE。
 - 一次 BuildKit 构建，通过两个独立 image exporter 并行上传 GHCR、腾讯云。不要添加全局 `tags` 输入，否则 Buildx 会覆盖两个 exporter 各自的 `name`。
+- GHCR 地址跟随实际 GitHub 仓库：`ghcr.io/${GITHUB_REPOSITORY}`（转为小写）。在 `mjiadfwaff-bot/xiaohuiji-server` 中运行时使用 `ghcr.io/mjiadfwaff-bot/xiaohuiji-server`，不再固定使用历史 `youban-server` 包名。
 - 两个 exporter 都成功之后才创建成功构建 Git tag。单仓上传成功不代表整次发布成功。
 - GHCR 和腾讯云统一只生成两个镜像标签：`last` 和 commit SHA 前 7 位（例如 `f11329f`），不添加 `sha-` 前缀。部署应指定 commit 标签。
 - 部署使用不可变 SHA 标签；工作流不自动部署业务服务。
