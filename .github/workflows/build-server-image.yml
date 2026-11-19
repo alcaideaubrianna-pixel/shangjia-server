@@ -3,8 +3,7 @@ name: build-images
 on:
   push:
     branches:
-      - feat/railway-runtime-ci-split
-      - ci/tencent-build-speed
+      - develop/tencent-ci
     paths:
       - "server/**"
       - "web/**"
@@ -28,7 +27,7 @@ concurrency:
 
 jobs:
   build:
-    if: github.ref == 'refs/heads/feat/railway-runtime-ci-split' || github.ref == 'refs/heads/ci/tencent-build-speed'
+    if: github.ref == 'refs/heads/develop/tencent-ci'
     # Set BUILD_RUNNER to a dedicated Linux AMD64 runner label when available.
     runs-on: ${{ vars.BUILD_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 45
