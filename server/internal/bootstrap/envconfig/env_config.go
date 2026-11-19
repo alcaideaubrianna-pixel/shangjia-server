@@ -171,6 +171,7 @@ var items = []item{
 	{Key: "tcp.client.auth.name", EnvKeys: []string{"GF_TCP_CLIENT_AUTH_NAME", "YOUBAN_TCP_AUTH_NAME", "TCP_AUTH_NAME"}},
 	{Key: "tcp.client.auth.appId", EnvKeys: []string{"GF_TCP_CLIENT_AUTH_APPID", "YOUBAN_TCP_AUTH_APP_ID", "TCP_AUTH_APP_ID"}},
 	{Key: "tcp.client.auth.secretKey", EnvKeys: []string{"GF_TCP_CLIENT_AUTH_SECRETKEY", "YOUBAN_TCP_AUTH_SECRET_KEY", "TCP_AUTH_SECRET_KEY"}},
+	{Key: "content.openProfileCountsEnabled", EnvKeys: []string{"YOUBAN_OPEN_PROFILE_COUNTS_ENABLED"}},
 	{Key: "content.cdnBaseUrl", EnvKeys: []string{"GF_CONTENT_CDNBASEURL", "GF_CONTENT_CDN_BASE_URL", "YOUBAN_CONTENT_CDN_BASE_URL", "CONTENT_CDN_BASE_URL"}},
 	{Key: "youbanChat.pocketPing.baseUrl", EnvKeys: []string{"GF_YOUBANCHAT_POCKETPING_BASEURL", "YOUBAN_CHAT_POCKETPING_BASE_URL"}},
 	{Key: "youbanChat.pocketPing.apiKey", EnvKeys: []string{"GF_YOUBANCHAT_POCKETPING_APIKEY", "YOUBAN_CHAT_POCKETPING_API_KEY"}},
