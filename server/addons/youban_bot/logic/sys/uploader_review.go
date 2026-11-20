@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -21,7 +22,6 @@ import (
 	"hotgo/addons/youban_bot/model/input/sysin"
 	pi "hotgo/addons/youban_publish/model/input/sysin"
 	ps "hotgo/addons/youban_publish/service"
-	"hotgo/internal/consts"
 	"hotgo/internal/library/botregistry"
 )
 
@@ -29,6 +29,7 @@ const (
 	uploaderReviewTable    = "hg_youban_uploader_bot_review"
 	uploaderPending        = "pending"
 	uploaderApproved       = "approved"
+	uploaderDirect         = "direct"
 	uploaderRejected       = "rejected"
 	uploaderReviewCallback = "upr:"
 )
@@ -171,10 +172,20 @@ func parseUploaderReviewCallback(data string) (string, int64, bool) {
 
 func (s *sSysBot) decideUploaderReview(ctx context.Context, id, reviewerID int64, action string) (string, error) {
 	var message string
-	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+	err := g.DB().TransactionWithOptions(ctx, gdb.TxOptions{Propagation: gdb.PropagationNested, Isolation: sql.LevelReadCommitted}, func(ctx context.Context, tx gdb.TX) error {
 		var review *uploaderReview
-		if err := tx.Model(uploaderReviewTable).Where("id", id).LockUpdate().Scan(&review); err != nil {
+		target := tx.Model(uploaderReviewTable).Where("id", id).Where("owner_account_id", reviewerID)
+		if err := target.Clone().Scan(&review); err != nil {
 			return err
+		}
+		if review != nil {
+			if err := lockPersonalUploader(tx, review.TenantId, review.TelegramUserId); err != nil {
+				return err
+			}
+			review = nil
+			if err := target.LockUpdate().Scan(&review); err != nil {
+				return err
+			}
 		}
 		if review == nil || review.OwnerAccountId != reviewerID {
 			message = "申请不存在或当前账号无权审批"
@@ -202,14 +213,7 @@ func (s *sSysBot) decideUploaderReview(ctx context.Context, id, reviewerID int64
 		accountID := int64(0)
 		message = "已拒绝"
 		if action == "approve" {
-			// The account table checks username uniqueness in the application.
-			// Serialize approvals for the same preferred name across Bots.
-			if review.TelegramUsername != "" && g.DB().GetConfig().Type == consts.DBPgsql {
-				if _, err = tx.Exec("SELECT pg_advisory_xact_lock(hashtext(?), hashtext(?))", "youban:publish:username", strings.ToLower(strings.TrimPrefix(strings.TrimSpace(review.TelegramUsername), "@"))); err != nil {
-					return gerror.Wrap(err, "锁定上架账号用户名失败")
-				}
-			}
-			accountID, err = createReviewedUploader(ctx, review)
+			accountID, err = s.findOrCreatePersonalUploader(ctx, tx, review)
 			if err != nil {
 				return err
 			}
@@ -309,7 +313,7 @@ func (s *sSysBot) DeliverUploaderReviewNotice(ctx context.Context, in *pi.Upload
 	var review *uploaderReview
 	mod := g.DB().Model(uploaderReviewTable).Ctx(ctx).Where("tenant_id", in.TenantID)
 	if in.Kind == pi.UploaderAccountStatusNotice {
-		mod = mod.Where("account_id", in.AccountID).Where("status", uploaderApproved)
+		mod = mod.Where("account_id", in.AccountID).Where("status", uploaderApproved).OrderDesc("id").Limit(1)
 	} else {
 		mod = mod.Where("id", in.ReviewID).Where("owner_account_id", in.AccountID)
 	}
@@ -348,7 +352,7 @@ func (s *sSysBot) DeliverUploaderReviewNotice(ctx context.Context, in *pi.Upload
 		message := "注册申请未通过，请联系管理员。"
 		var markup models.ReplyMarkup = &models.ReplyKeyboardRemove{RemoveKeyboard: true}
 		if review.Status == uploaderApproved {
-			_, accountErr := scopedUploaderAccount(ctx, review.TenantId, review.AccountId)
+			_, accountErr := scopedUploaderAccount(ctx, review.TenantId, review.OwnerAccountId, review.AccountId)
 			if accountErr != nil && in.Status == 1 {
 				return accountErr
 			}
@@ -374,12 +378,12 @@ func (s *sSysBot) DeliverUploaderReviewNotice(ctx context.Context, in *pi.Upload
 	}
 }
 
-func scopedUploaderAccount(ctx context.Context, tenantID, accountID int64) (*botProfileAccount, error) {
+func scopedUploaderAccount(ctx context.Context, tenantID, ownerID, accountID int64) (*botProfileAccount, error) {
 	capability, err := ps.SysPublish().AccountCapability(ctx, "api", accountID)
 	if err != nil {
 		return nil, err
 	}
-	if capability == nil || capability.TenantId != tenantID ||
+	if capability == nil || capability.TenantId != tenantID || capability.ParentId != ownerID ||
 		capability.AccountType != pi.PublishAccountTypeUploader || capability.TelegramBindingEnabled != 1 {
 		return nil, gerror.New("上架账户不可用")
 	}
@@ -403,7 +407,7 @@ func (s *sSysBot) existingScopedUploaderAccount(ctx context.Context, bot *collec
 	if err != nil || bind == nil || bind.BotId != -bot.Id {
 		return nil, err
 	}
-	return scopedUploaderAccount(ctx, bot.TenantId, bind.AccountId)
+	return scopedUploaderAccount(ctx, bot.TenantId, bot.AccountId, bind.AccountId)
 }
 
 func (s *sSysBot) handleUploaderRegistration(ctx context.Context, bot *collectorBotRow, user *models.User, query *models.CallbackQuery, action string, review *uploaderReview) error {

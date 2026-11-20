@@ -231,6 +231,32 @@ func TestUploaderReviewLocalPostgres(t *testing.T) {
 	assertCount("SELECT count(*) FROM hg_youban_publish_account_notice WHERE category='uploader_account_status'", 2)
 	assertCount("SELECT count(*) FROM "+accountBindTbl, 1)
 
+	exec("INSERT INTO hg_youban_publish_bot(id,tenant_id,account_id,bot_type,bot_token,status) VALUES(9,1,99,'uploader','789:fake',1)")
+	exec("INSERT INTO hg_youban_bot_role_registry(telegram_bot_id,tenant_id,role,require_registration) VALUES(789,1,'uploader',1)")
+	secondBot, err := collectorBotByID(ctx, 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerUser := &models.User{ID: 99, Username: "owner_personal"}
+	personal, err := s.resolveCollectorAccount(ctx, bot, ownerUser, true)
+	if err != nil || personal == nil || personal.AccountId == 99 || personal.AccountType != pi.PublishAccountTypeUploader {
+		t.Fatalf("direct provisioning used official admin binding: %+v, %v", personal, err)
+	}
+	second, err := s.resolveCollectorAccount(ctx, secondBot, ownerUser, true)
+	if err != nil || second == nil || second.AccountId != personal.AccountId {
+		t.Fatalf("second Bot should reuse personal account: %+v, %v", second, err)
+	}
+	secondReview, err := s.submitUploaderReview(ctx, secondBot, &models.User{ID: 11, Username: "review_collision"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decide(secondReview.Id, 99, "approve", "已通过")
+	reused, err := uploaderReviewByUser(ctx, secondBot, 11)
+	if err != nil || reused == nil || reused.AccountId != review.AccountId {
+		t.Fatalf("second approval should reuse personal account: %+v, %v", reused, err)
+	}
+	assertCount("SELECT count(*) FROM "+accountBindTbl+" WHERE telegram_user_id='99' AND account_id=99 AND bot_id=8", 1)
+
 	const profileID = 987654321
 	exec("UPDATE hg_youban_publish_bot SET require_publish_review=1 WHERE id=7")
 	exec(fmt.Sprintf("INSERT INTO hg_content_profile(id,profile_no,title,status,visibility) VALUES(%d,'A98765','待审测试',2,'private')", profileID))

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -225,7 +226,11 @@ func (s *sSysBot) handleAccountAuthorizationCallback(ctx context.Context, botID 
 
 func (s *sSysBot) consumeAccountAuthorization(ctx context.Context, botID int64, user models.User, chatID string, session *profileSessionRow) (*pi.AccountSaveModel, error) {
 	var created *pi.AccountSaveModel
-	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+	options := gdb.TxOptions{Propagation: gdb.PropagationNested}
+	if botID < 0 {
+		options.Isolation = sql.LevelReadCommitted
+	}
+	err := g.DB().TransactionWithOptions(ctx, options, func(ctx context.Context, tx gdb.TX) error {
 		var current *profileSessionRow
 		mod := g.DB().Model(profileSessionTable).Ctx(ctx).Where("id", session.Id).Where("bot_id", botID).Where("telegram_user_id", fmt.Sprint(user.ID)).Where("chat_id", chatID).Where("scene", "account_authorize").WhereGT("expires_at", gtime.Now())
 		result, err := mod.Clone().Where("status", profileSessionStatusActive).Data(g.Map{"status": profileSessionStatusCompleted}).Update()
@@ -270,6 +275,27 @@ func (s *sSysBot) consumeAccountAuthorization(ctx context.Context, botID int64, 
 		}
 		if capability == nil || capability.AccountType != pi.PublishAccountTypeAdmin || capability.TenantId != current.TenantId {
 			return gerror.New("邀请方账户已失效或归属已变更。")
+		}
+		if botID < 0 {
+			bot, err := collectorBotByID(ctx, -botID)
+			if err != nil {
+				return err
+			}
+			if bot.TenantId != current.TenantId || bot.AccountId != current.AccountId {
+				return gerror.New("邀请方与当前上架机器人归属不一致。")
+			}
+			if err = lockPersonalUploader(tx, bot.TenantId, user.ID); err != nil {
+				return err
+			}
+			accountID, err := s.findPersonalUploader(ctx, &uploaderReview{
+				TenantId: bot.TenantId, OwnerAccountId: bot.AccountId, TelegramUserId: user.ID,
+			})
+			if err != nil {
+				return err
+			}
+			if accountID > 0 {
+				return gerror.New("已有个人上架账户，请直接使用资料管理。")
+			}
 		}
 		created, err = s.createAndBindUploader(ctx, botID, current.AccountId, draft.Username, user)
 		if err != nil {

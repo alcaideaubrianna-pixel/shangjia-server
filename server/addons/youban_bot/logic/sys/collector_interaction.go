@@ -148,7 +148,7 @@ func (s *sSysBot) handleCollectorPrivateUpdate(ctx context.Context, row *collect
 	if err != nil {
 		return err
 	}
-	legacyAuthorization := !requireRegistration && (review == nil || review.Status != uploaderApproved)
+	legacyAuthorization := !requireRegistration && (review == nil || review.Status != uploaderApproved && review.Status != uploaderDirect)
 
 	if legacyAuthorization && query != nil && strings.HasPrefix(query.Data, "acctauth:") {
 		handled, err := s.handleAccountAuthorizationCallback(authCtx, botID, query)
@@ -182,11 +182,11 @@ func (s *sSysBot) handleCollectorPrivateUpdate(ctx context.Context, row *collect
 	}
 
 	var account *botProfileAccount
-	if review != nil && review.Status == uploaderApproved {
+	if review != nil && (review.Status == uploaderApproved || review.Status == uploaderDirect) {
 		if review.OwnerAccountId != row.AccountId {
 			return s.sendUploaderReplyWithoutKeyboard(ctx, row, chatID, uploaderReviewMessage(review))
 		}
-		account, err = scopedUploaderAccount(ctx, review.TenantId, review.AccountId)
+		account, err = scopedUploaderAccount(ctx, review.TenantId, row.AccountId, review.AccountId)
 	} else if requireRegistration {
 		if review == nil {
 			account, err = s.existingScopedUploaderAccount(ctx, row, user.ID)
@@ -197,7 +197,7 @@ func (s *sSysBot) handleCollectorPrivateUpdate(ctx context.Context, row *collect
 	} else {
 		allowProvision := query == nil &&
 			(action == "publish" || action == "manage" || (strings.HasPrefix(action, "pf:") && action != "pf:cancel"))
-		account, err = s.resolveCollectorAccount(ctx, state.botID, row.TenantId, row.AccountId, user, allowProvision)
+		account, err = s.resolveCollectorAccount(ctx, row, user, allowProvision)
 	}
 	if err != nil {
 		if query != nil {
@@ -251,7 +251,7 @@ func (s *sSysBot) handleCollectorPrivateUpdate(ctx context.Context, row *collect
 }
 
 func (s *sSysBot) refreshCollectorKeyboardAfterAuthorization(ctx context.Context, row *collectorBotRow, user *models.User, state *collectorInteraction, chatID string) error {
-	account, err := s.resolveCollectorAccount(ctx, state.botID, row.TenantId, row.AccountId, user, false)
+	account, err := s.resolveCollectorAccount(ctx, row, user, false)
 	if err != nil || account == nil {
 		return err
 	}

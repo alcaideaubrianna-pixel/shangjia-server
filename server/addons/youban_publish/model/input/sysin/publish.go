@@ -388,6 +388,7 @@ type AccountSettingModel struct {
 }
 
 type AccountCapabilityModel struct {
+	ParentId                 int64  `json:"-"`
 	AccountId                int64  `json:"accountId" dc:"账号ID"`
 	TenantId                 int64  `json:"tenantId" dc:"租户ID"`
 	AccountType              string `json:"accountType" dc:"账号类型"`
