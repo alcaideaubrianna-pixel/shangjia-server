@@ -28,11 +28,11 @@ func TestTelegramChannelSameChatBarrierPostgres(t *testing.T) {
 		}
 	}
 	exec("CREATE TABLE " + publishTgJobTable + ` (id bigint PRIMARY KEY, tenant_id bigint, account_id bigint,
-channel_id bigint, target_chat_id text, status text, send_phase text, timeout_cleanup_at timestamp)`)
+channel_id bigint, target_chat_id text, status text, send_phase text, timeout_cleanup_at timestamp, profile_id bigint)`)
 	defer exec("DROP TABLE " + publishTgJobTable)
-	exec("INSERT INTO " + publishTgJobTable + ` VALUES (3442309,78,615,231,'-1003763589169','unknown','display_confirmed',NULL),
-(3442317,78,615,220,'-1003763589169','pending','',NULL)`)
-	current := telegramJobRecord{Id: 3442316, TenantId: 78, AccountId: 615, ChannelId: 220, TargetChatId: "3763589169"}
+	exec("INSERT INTO " + publishTgJobTable + ` VALUES (3442309,78,615,231,'-1003763589169','unknown','display_confirmed',NULL,10),
+(3442317,78,615,220,'-1003763589169','pending','',NULL,11)`)
+	current := telegramJobRecord{Id: 3442316, TenantId: 78, AccountId: 615, ChannelId: 220, TargetChatId: "3763589169", ProfileId: 11}
 	check := func(want bool) {
 		t.Helper()
 		blocked, err := new(sSysPublish).telegramChannelHasEarlierActiveJob(ctx, current)
@@ -42,13 +42,19 @@ channel_id bigint, target_chat_id text, status text, send_phase text, timeout_cl
 	}
 	check(true) // Real queue mode must no longer bypass a started alias.
 	exec("UPDATE " + publishTgJobTable + " SET status='failed',send_phase='timeout_cancelled',timeout_cleanup_at=now()+interval '1 hour' WHERE id=3442309")
-	check(true)
+	check(false)
 	exec("UPDATE " + publishTgJobTable + " SET status='superseded' WHERE id=3442309")
+	check(false)
+	current.ProfileId = 10
 	check(true)
+	current.ProfileId = 11
 	exec("UPDATE " + publishTgJobTable + " SET timeout_cleanup_at=NULL WHERE id=3442309")
 	check(false) // Untouched pending aliases never recreate a DB head gate.
 	exec("UPDATE " + publishTgJobTable + " SET timeout_cleanup_at=now(),send_phase='' WHERE id=3442309")
-	check(true) // Even a no-message timeout parent retains the cleanup fence.
+	check(false)
+	current.ProfileId = 10
+	check(true) // Missing receipts still prevent a resend of the same profile.
+	current.ProfileId = 11
 	exec("UPDATE " + publishTgJobTable + " SET timeout_cleanup_at=NULL WHERE id=3442309")
 	check(false)
 	exec("UPDATE " + publishTgJobTable + " SET status='unknown',send_phase='' WHERE id=3442309")
@@ -143,28 +149,11 @@ func TestTelegramChannelOrderedRetry(t *testing.T) {
 		t.Fatalf("expired owner released ordering %v %v", ok, err)
 	}
 	cleanup := telegramJobRecord{Status: telegramJobStatusSuperseded, SendPhase: telegramSendPhaseTimeoutCancelled, TimeoutCleanupAt: gtime.Now()}
-	if isTelegramChannelJobTerminal(cleanup) || !telegramChannelJobOwnsOrder(cleanup) {
-		t.Fatal("terminal timeout parent released before cleanup")
-	}
-	current.PreserveOrder = telegramChannelJobOwnsOrder(cleanup)
-	if ok, err := settleTelegramChannelClaim(ctx, current, true, tgJobPriorityHistory, time.Now().Add(time.Hour)); err != nil || !ok {
-		t.Fatalf("cleanup requeue %v %v", ok, err)
-	}
-	pick(0)
-	// Removing a queue notification must not strand or bypass its durable owner.
-	if err := removeTelegramChannelJob(ctx, channel, oldJob); err != nil {
-		t.Fatal(err)
-	}
-	if err := removeActiveTelegramChannel(ctx, channel); err != nil {
-		t.Fatal(err)
-	}
-	current = pick(oldJob)
-	cleanup.TimeoutCleanupAt = nil
-	if !isTelegramChannelJobTerminal(cleanup) || telegramChannelJobOwnsOrder(cleanup) {
-		t.Fatal("successful cleanup did not release terminal parent")
+	if !isTelegramChannelJobTerminal(cleanup) || telegramChannelJobOwnsOrder(cleanup) || !telegramChannelJobPendingCleanup(cleanup) {
+		t.Fatal("terminal timeout parent must leave the send queue and retain cleanup")
 	}
 	if ok, err := settleTelegramChannelClaim(ctx, current, false, 0, time.Time{}); err != nil || !ok {
-		t.Fatalf("completed cleanup ack %v %v", ok, err)
+		t.Fatalf("terminal cleanup parent ack %v %v", ok, err)
 	}
 	next := pick(nextJob)
 	if ok, err := settleTelegramChannelClaim(ctx, next, false, 0, time.Time{}); err != nil || !ok {
@@ -255,5 +244,21 @@ func TestTelegramChannelOrderOwnerWake(t *testing.T) {
 	first = pick(nextJob)
 	if ok, err := settleTelegramChannelClaim(ctx, first, false, 0, time.Time{}); err != nil || !ok {
 		t.Fatalf("first cleaned owner ACK %v %v", ok, err)
+	}
+}
+
+func TestTelegramChannelDeferredPriorityDoesNotBlockReadyJob(t *testing.T) {
+	reliableChannelTestRedis(t, false)
+	ctx := context.Background()
+	const channel = 241
+	if err := enqueueTelegramChannelJob(ctx, channel, 1, tgJobPriorityUrgent, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := enqueueTelegramChannelJob(ctx, channel, 2, tgJobPriorityDefault, time.Now().Add(-time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	claim, err := claimTelegramChannelJob(ctx, channel)
+	if err != nil || claim.JobID != 2 {
+		t.Fatalf("ready job should bypass delayed job: claim=%+v err=%v", claim, err)
 	}
 }

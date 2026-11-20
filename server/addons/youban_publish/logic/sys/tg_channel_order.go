@@ -68,6 +68,17 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 	if job.Id <= 0 {
 		return false, nil
 	}
+	if job.ProfileId > 0 {
+		scope, args := telegramChannelOrderScopeSQL("j", job)
+		row, err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).Master().Unscoped().
+			Where("j.id <> ?", job.Id).Where(scope, args...).
+			Where("j.profile_id", job.ProfileId).
+			Where("j.status IN ('sent','failed','superseded') AND j.timeout_cleanup_at IS NOT NULL").
+			Fields("j.id").Limit(1).One()
+		if err != nil || !row.IsEmpty() {
+			return !row.IsEmpty(), err
+		}
+	}
 	createdAt := job.CreatedAt
 	if createdAt == nil {
 		current, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Master().
@@ -439,7 +450,7 @@ func (s *sSysPublish) telegramChannelHasDispatchCapacity(ctx context.Context, jo
 	model := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id <> ?", job.Id).
 		Where(telegramWebhookDetachedJobSQL("")).
-		Where(`(`+telegramChannelPendingCleanupSQL("")+` OR
+		Where(`((status NOT IN ('sent','failed','superseded') AND `+telegramChannelPendingCleanupSQL("")+`) OR
 			status = 'sending' OR
 			(status IN ('pending', 'failed_retry', 'unknown') AND dispatch_status IN (?, ?))
 		)`, tgDispatchStatusQueued, tgDispatchStatusProcessing).

@@ -201,6 +201,10 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 		}
 		return true, loadErr
 	}
+	if isTelegramChannelJobTerminal(job) {
+		terminal = true
+		return true, nil
+	}
 	claim.PreserveOrder = telegramChannelJobOwnsOrder(job)
 	// A stale media-wait error is not proof that media is still unavailable.
 	// Check the existing readiness gate before choosing the migration lane.
@@ -426,10 +430,8 @@ func telegramChannelJobRequeueAt(job telegramJobRecord) (int64, string) {
 	}
 }
 
+// Terminal jobs leave the send queue even when cleanup still owns their receipts.
 func isTelegramChannelJobTerminal(job telegramJobRecord) bool {
-	if telegramChannelJobPendingCleanup(job) {
-		return false
-	}
 	switch job.Status {
 	case telegramJobStatusSent, telegramJobStatusFailed, telegramJobStatusSuperseded:
 		return true
