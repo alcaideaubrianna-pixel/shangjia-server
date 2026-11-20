@@ -693,6 +693,13 @@ func (s *sSysPublish) processCollectSourceTask(ctx context.Context, payload coll
 		if !collectProcessEventMatchesPayload(event, payload) {
 			return 0, false, false, gerror.New("采集事件与任务归属不一致")
 		}
+		if cooldownErr := collectEventConfigurationCooldown(ctx, event); cooldownErr != nil {
+			var retry *collectProcessRetryError
+			if errors.As(cooldownErr, &retry) {
+				return retry.delay, true, false, nil
+			}
+			return 0, false, false, cooldownErr
+		}
 		ctx = bindCollectEventObservation(ctx, event)
 		if collectEventTerminalProcessingFailure(event) {
 			attemptResult = collectPipelineFailed

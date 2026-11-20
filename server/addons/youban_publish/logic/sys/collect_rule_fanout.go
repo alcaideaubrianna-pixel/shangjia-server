@@ -157,3 +157,25 @@ func (r collectRuleFanoutResult) terminalProcessingFailure() bool {
 	}
 	return hasFailure
 }
+
+// A shared event cooldown is safe only when no sibling needs an earlier retry.
+func (r collectRuleFanoutResult) configurationCooldownDelay() time.Duration {
+	found := false
+	for _, branch := range r.Branches {
+		if branch.Err == nil {
+			continue
+		}
+		if collectConfigurationFailure(branch.Err) {
+			found = true
+			continue
+		}
+		if !collectTerminalProcessingFailure(branch.Err) {
+			return 0
+		}
+	}
+	var retry *collectProcessRetryError
+	if found && errors.As(r.Err, &retry) && retry.delay == collectConfigurationRetryDelay {
+		return retry.delay
+	}
+	return 0
+}

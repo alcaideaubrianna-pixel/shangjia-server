@@ -416,6 +416,9 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		g.Log().Warningf(ctx, "采集事件不存在，跳过处理 eventId:%d tenantId:%d accountId:%d", eventId, tenantId, accountId)
 		return gerror.New("采集事件不存在")
 	}
+	if cooldownErr := collectEventConfigurationCooldown(ctx, event); cooldownErr != nil {
+		return cooldownErr
+	}
 	ctx = collectBusinessEventContext(ctx, event, nil, 0)
 	// Old persisted events and recovery tasks bypass the delivery ingress.
 	// Check the actual Telegram chat before any media, profile or dispatch work.
@@ -841,6 +844,11 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 			event[cols.ErrorMessage] = g.NewVar(fanout.Err.Error())
 			s.syncCollectSourceStatsForEvent(ctx, eventId)
 			return nil
+		}
+		if delay := fanout.configurationCooldownDelay(); delay > 0 {
+			if cooldownErr := saveCollectEventConfigurationCooldown(ctx, event, fanout.Err.Error(), delay); cooldownErr != nil {
+				return cooldownErr
+			}
 		}
 		err = fanout.Err
 		return err

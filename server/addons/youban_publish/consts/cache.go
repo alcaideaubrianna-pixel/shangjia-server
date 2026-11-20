@@ -8,6 +8,7 @@ const (
 	AntiScanHashHistoryCacheKeyPrefix   = "youban_publish:anti_scan:history:"
 	AntiScanHashHistoryLockKeyPrefix    = "youban_publish:anti_scan:history_lock:"
 	CollectProcessScheduleKeyPrefix     = "youban_publish:collect:process:schedule:"
+	CollectEventCooldownKeyPrefix       = "youban_publish:collect:event:cooldown:v1:"
 	CollectProcessThrottleKeyPrefix     = "youban_publish:collect:process:throttle:"
 	// CollectProcessRuleQueueKeyPrefix 是采集规则逻辑队列的键前缀。
 	CollectProcessRuleQueueKeyPrefix       = "youban_publish:collect:rule:queue:"
