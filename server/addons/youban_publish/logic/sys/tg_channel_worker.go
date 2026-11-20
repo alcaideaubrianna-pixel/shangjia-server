@@ -26,6 +26,7 @@ const (
 	telegramChannelBlockNone          telegramChannelBlockReason = ""
 	telegramChannelBlockMedia         telegramChannelBlockReason = "media_not_ready"
 	telegramChannelBlockAccount       telegramChannelBlockReason = "account_fallback"
+	telegramChannelBlockOrderWait     telegramChannelBlockReason = "previous_profile_cleanup"
 	telegramChannelBlockUnknownResult telegramChannelBlockReason = "unknown_result"
 )
 
@@ -44,10 +45,32 @@ func telegramChannelEffectivePriority(job telegramJobRecord, mediaReady ...bool)
 	if priority > tgJobPriorityHistory {
 		priority = tgJobPriorityHistory
 	}
-	if decision.YieldHead && !(len(mediaReady) > 0 && mediaReady[0]) {
+	// Media readiness only releases a media wait, never another profile's cleanup barrier.
+	if decision.YieldHead && (decision.BlockReason != telegramChannelBlockMedia || !(len(mediaReady) > 0 && mediaReady[0])) {
 		return tgJobPriorityHistory
 	}
 	return priority
+}
+
+// telegramChannelEnqueuePlacement keeps producer retries consistent with the worker's
+// temporary yielding lane without changing durable Job priority or safety fences.
+func telegramChannelEnqueuePlacement(job telegramJobRecord, priority int, dueAt, now time.Time) (int, time.Time) {
+	if decision := telegramChannelQueueDecisionFor(job); decision.BlockReason == telegramChannelBlockOrderWait {
+		priority = tgJobPriorityHistory
+		if until := now.Add(decision.Delay); until.After(dueAt) {
+			dueAt = until
+		}
+	}
+	return priority, dueAt
+}
+
+// Keep the order-wait reason across zero-delay Outbox recovery. Clearing it
+// before the worker reloads would immediately promote the waiter back to urgent.
+func telegramChannelEnqueueDispatchReason(job telegramJobRecord, delay time.Duration) string {
+	if delay > 0 || telegramChannelQueueDecisionFor(job).BlockReason == telegramChannelBlockOrderWait {
+		return job.LastDispatchError
+	}
+	return ""
 }
 
 func telegramChannelPriorityAfterFailure(priority, previousRetryCount, retryCount int) int {
@@ -75,6 +98,10 @@ func telegramChannelQueueDecisionFor(job telegramJobRecord) telegramChannelQueue
 		// An in-flight or uncertain send always preserves the channel barrier,
 		// even if an earlier media-wait error remains on the record.
 		return telegramChannelQueueDecision{BlockReason: telegramChannelBlockUnknownResult, Delay: 30 * time.Second}
+	case (job.Status == telegramJobStatusPending || job.Status == telegramJobStatusRetryWait) && reason == "等待同频道前序推送任务完成":
+		// This job has not started; the separate durable predecessor still owns
+		// its safety barrier. Let unrelated ready profiles use the channel.
+		return telegramChannelQueueDecision{BlockReason: telegramChannelBlockOrderWait, YieldHead: true, Delay: 30 * time.Second}
 	case strings.Contains(reason, "awaiting_account_fallback") || strings.Contains(reason, "账号降级"):
 		return telegramChannelQueueDecision{BlockReason: telegramChannelBlockAccount, Delay: 30 * time.Second}
 	case strings.Contains(reason, "媒体仍在异步处理中"):
@@ -209,7 +236,7 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 	// A stale media-wait error is not proof that media is still unavailable.
 	// Check the existing readiness gate before choosing the migration lane.
 	mediaReady := false
-	if telegramChannelQueueDecisionFor(job).YieldHead {
+	if telegramChannelQueueDecisionFor(job).BlockReason == telegramChannelBlockMedia {
 		mediaReady, _ = s.profileMediaReady(ctx, job.ProfileId)
 	}
 	priority := telegramChannelEffectivePriority(job, mediaReady)
@@ -396,6 +423,9 @@ func telegramChannelJobRequeueAt(job telegramJobRecord) (int64, string) {
 	reason := strings.TrimSpace(job.LastDispatchError)
 	if telegramChannelJobPendingCleanup(job) {
 		return telegramChannelDispatchDueAt(job.TimeoutCleanupAt, 3*time.Second, now).UnixMilli(), "等待旧消息清理，保留频道发送顺序"
+	}
+	if decision := telegramChannelQueueDecisionFor(job); decision.BlockReason == telegramChannelBlockOrderWait {
+		return telegramChannelDispatchDueAt(job.NextRetryAt, decision.Delay, now).UnixMilli(), reason
 	}
 	switch job.Status {
 	case telegramJobStatusRetryWait:

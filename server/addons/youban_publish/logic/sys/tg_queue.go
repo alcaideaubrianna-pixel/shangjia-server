@@ -491,14 +491,11 @@ func (s *sSysPublish) enqueueTelegramJobInternal(ctx context.Context, jobId int6
 		"dispatch_status":     tgDispatchStatusQueued,
 		"dispatched_at":       gtime.Now(),
 		"dispatch_count":      gdb.Raw("dispatch_count + 1"),
-		"last_dispatch_error": "",
+		"last_dispatch_error": telegramChannelEnqueueDispatchReason(job, delay),
 		"updated_at":          gtime.Now(),
 	}
 	if delay > 0 {
 		data["next_retry_at"] = gtime.NewFromTime(dueAt)
-		// Preserve the reason while waiting; clearing it hides interval waits
-		// behind the generic pending message in the channel worker.
-		data["last_dispatch_error"] = job.LastDispatchError
 	} else {
 		data["next_retry_at"] = nil
 	}
@@ -517,19 +514,22 @@ func (s *sSysPublish) enqueueTelegramJobInternal(ctx context.Context, jobId int6
 	if affected, _ := result.RowsAffected(); affected == 0 {
 		return nil
 	}
+	// Keep untouched order-wait jobs in the yielding lane even when Outbox
+	// replays their enqueue. The durable business priority remains unchanged.
+	channelPriority, channelDueAt := telegramChannelEnqueuePlacement(job, priority, dueAt, time.Now())
 	// During migration the channel queue can be enabled in shadow mode.  The
 	// existing Asynq transport remains authoritative until a dedicated channel
 	// worker is enabled, so this write is opt-in and never creates a second
 	// consumer by default.
 	if telegramChannelQueueShadowEnabled() && job.ChannelId > 0 {
-		if queueErr := enqueueTelegramChannelJob(ctx, job.ChannelId, jobId, priority, dueAt); queueErr != nil {
+		if queueErr := enqueueTelegramChannelJob(ctx, job.ChannelId, jobId, channelPriority, channelDueAt); queueErr != nil {
 			g.Log().Warningf(ctx, "写入频道逻辑队列失败 jobId:%d err:%+v", jobId, queueErr)
 		}
 	}
 	// In channel-queue mode the ZSET is the execution hand-off. Do not also
 	// create an Asynq task: that would give the same job two consumers.
 	if telegramChannelQueueEnabled() && job.ChannelId > 0 {
-		if queueErr := observeCollectChannelEnqueue(ctx, job.ChannelId, jobId, priority, dueAt); queueErr != nil {
+		if queueErr := observeCollectChannelEnqueue(ctx, job.ChannelId, jobId, channelPriority, channelDueAt); queueErr != nil {
 			_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 				Where("id", jobId).Where("dispatch_status", tgDispatchStatusQueued).
 				Data(g.Map{"dispatch_status": tgDispatchStatusIdle, "updated_at": gtime.Now()}).Update()
