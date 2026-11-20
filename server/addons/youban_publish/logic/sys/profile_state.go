@@ -7,6 +7,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/dao"
 )
 
@@ -33,6 +34,7 @@ func (s *sSysPublish) syncProfilePublishState(ctx context.Context, profileId int
 	}
 	result, err := dao.ContentProfile.Ctx(ctx).
 		Where(columns.Id, profileId).
+		WhereNot(columns.Status, sysin.ProfileStatusReviewPending).
 		Where(condition, args...).
 		Data(data).
 		Update()

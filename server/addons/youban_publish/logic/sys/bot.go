@@ -242,7 +242,7 @@ func (s *sSysPublish) saveBot(ctx context.Context, in *sysin.BotSaveInp, tenantI
 		currentType == botregistry.RoleUploader && botType != currentType {
 		return gerror.New("机器人已分配角色，无法直接切换")
 	}
-	if in.RequireRegistration != nil && botType != botregistry.RoleUploader {
+	if (in.RequireRegistration != nil || in.RequirePublishReview != nil) && botType != botregistry.RoleUploader {
 		return gerror.New("只有上架机器人可以设置登录要求")
 	}
 	botToken := strings.TrimSpace(in.BotToken)
@@ -324,6 +324,12 @@ func (s *sSysPublish) saveBot(ctx context.Context, in *sysin.BotSaveInp, tenantI
 				}
 			}
 			data["account_id"] = accountId
+			if in.RequirePublishReview != nil {
+				data["require_publish_review"] = 0
+				if *in.RequirePublishReview {
+					data["require_publish_review"] = 1
+				}
+			}
 		}
 		if old == nil && botType == consts.PublishBotTypeNormal {
 			if err := botregistry.ClaimIdentity(ctx, tgUser.ID, tenantId, botregistry.RoleUnassigned); err != nil {

@@ -22,6 +22,7 @@ var mysqlBusinessSqlFiles = []string{
 	"addons/youban_publish/resource/sql/relay.sql",
 	"addons/youban_publish/resource/sql/daily_report.sql",
 	"addons/youban_publish/resource/sql/account_notice.sql",
+	"addons/youban_publish/resource/sql/profile_review.sql",
 	"addons/youban_publish/resource/sql/menu.sql",
 }
 
@@ -32,6 +33,7 @@ var mysqlOnlineUpgradeSqlFiles = []string{
 	"addons/youban_publish/resource/sql/relay.sql",
 	"addons/youban_publish/resource/sql/daily_report.sql",
 	"addons/youban_publish/resource/sql/account_notice.sql",
+	"addons/youban_publish/resource/sql/profile_review.sql",
 }
 
 var pgsqlBusinessSqlFiles = []string{
@@ -40,6 +42,7 @@ var pgsqlBusinessSqlFiles = []string{
 	"addons/youban_publish/resource/sql/relay.pgsql.sql",
 	"addons/youban_publish/resource/sql/daily_report.pgsql.sql",
 	"addons/youban_publish/resource/sql/account_notice.pgsql.sql",
+	"addons/youban_publish/resource/sql/profile_review.pgsql.sql",
 	"addons/youban_publish/resource/sql/menu.pgsql.sql",
 }
 
@@ -50,6 +53,7 @@ var pgsqlOnlineUpgradeSqlFiles = []string{
 	"addons/youban_publish/resource/sql/relay.pgsql.sql",
 	"addons/youban_publish/resource/sql/daily_report.pgsql.sql",
 	"addons/youban_publish/resource/sql/account_notice.pgsql.sql",
+	"addons/youban_publish/resource/sql/profile_review.pgsql.sql",
 }
 
 const publishInstallLockKey = "youban_publish:install"

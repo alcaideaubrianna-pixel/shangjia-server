@@ -249,7 +249,7 @@ func normalizeReplyKeyboardMarkup(markup models.ReplyMarkup) models.ReplyMarkup 
 func collectorReplyKeyboard(waitingRegistration bool) *models.ReplyKeyboardMarkup {
 	buttons := []models.KeyboardButton{{Text: "上架资料"}, {Text: "资料管理"}}
 	if waitingRegistration {
-		buttons = []models.KeyboardButton{{Text: "注册申请"}, {Text: "重新绑定"}}
+		buttons = []models.KeyboardButton{{Text: "注册申请"}}
 	}
 	return &models.ReplyKeyboardMarkup{
 		Keyboard:       [][]models.KeyboardButton{buttons},

@@ -13,6 +13,9 @@ import (
 )
 
 type ISysPublish interface {
+	SubmitBotProfileReview(ctx context.Context, in *sysin.BotProfileReviewSubmit) error
+	HandleBotProfileReview(ctx context.Context, id, adminID int64, action string) (*sysin.BotProfileReview, error)
+	EnqueueUploaderReviewNotice(ctx context.Context, in *sysin.UploaderReviewNotice) error
 	BotManagerCatalog(ctx context.Context, tenantId, accountId int64) ([]*sysin.BotManagerChannel, []*sysin.BotManagerBot, error)
 	BotManagerApplyBinding(ctx context.Context, in *sysin.BotManagerProjection) (int64, error)
 	BotManagerRemoveFromChannel(ctx context.Context, in *sysin.BotManagerProjection, remove func() error) error

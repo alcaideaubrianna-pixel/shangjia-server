@@ -28,14 +28,15 @@ func (*collectorGatewayFeature) Menus(context.Context, gatewayservice.BotContext
 
 type collectorBotRow struct {
 	sysin.BotModel
-	TenantId  int64
-	AccountId int64
+	TenantId             int64
+	AccountId            int64
+	RequirePublishReview bool
 }
 
 func collectorBotByID(ctx context.Context, id int64) (*collectorBotRow, error) {
 	var row *collectorBotRow
 	err := g.DB().Model("hg_youban_publish_bot").Ctx(ctx).
-		Fields("id", "bot_token", "bot_username", "tenant_id", "account_id").
+		Fields("id", "bot_token", "bot_username", "tenant_id", "account_id", "require_publish_review").
 		Where("id", id).Where("status", 1).Where("bot_type", botregistry.RoleUploader).WhereNull("deleted_at").Scan(&row)
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取上架机器人失败")
@@ -52,6 +53,8 @@ type collectorInteraction struct {
 	botID    int64
 	userID   int64
 	account  *botProfileAccount
+	bot      *collectorBotRow
+	user     *models.User
 	keyboard *models.ReplyKeyboardMarkup
 }
 
@@ -127,7 +130,7 @@ func (s *sSysBot) handleCollectorPrivateUpdate(ctx context.Context, row *collect
 	if query != nil {
 		user = &query.From
 	}
-	if user == nil || user.ID != msg.Chat.ID {
+	if user == nil || user.ID <= 0 || user.ID != msg.Chat.ID {
 		return nil
 	}
 
@@ -135,13 +138,19 @@ func (s *sSysBot) handleCollectorPrivateUpdate(ctx context.Context, row *collect
 	// identifies a publish Bot across updates and background media recovery.
 	botID, chatID := -row.Id, fmt.Sprint(msg.Chat.ID)
 	ctx = context.WithValue(ctx, telegramUserIdCtxKey{}, fmt.Sprint(user.ID))
-	state := &collectorInteraction{botID: botID, userID: user.ID}
+	state := &collectorInteraction{botID: botID, userID: user.ID, bot: row, user: user}
 	ctx = context.WithValue(ctx, collectorInteractionKey{}, state)
 	authCtx := withCollectorAuthorization(ctx, row.TenantId)
 	text := strings.TrimSpace(firstNonEmpty(msg.Text, msg.Caption))
 	command, args := botCommandAndArgs(text)
 
-	if query != nil && strings.HasPrefix(query.Data, "acctauth:") {
+	review, err := uploaderReviewByUser(ctx, row, user.ID)
+	if err != nil {
+		return err
+	}
+	legacyAuthorization := !requireRegistration && (review == nil || review.Status != uploaderApproved)
+
+	if legacyAuthorization && query != nil && strings.HasPrefix(query.Data, "acctauth:") {
 		handled, err := s.handleAccountAuthorizationCallback(authCtx, botID, query)
 		if handled || err != nil {
 			if err != nil {
@@ -150,12 +159,12 @@ func (s *sSysBot) handleCollectorPrivateUpdate(ctx context.Context, row *collect
 			return s.refreshCollectorKeyboardAfterAuthorization(ctx, row, user, state, chatID)
 		}
 	}
-	if query == nil && command == "start" && strings.HasPrefix(args, accountAuthorizationPrefix) {
+	if legacyAuthorization && query == nil && command == "start" && strings.HasPrefix(args, accountAuthorizationPrefix) {
 		return s.beginAccountAuthorization(authCtx, &botFeatureContext{BotId: botID, Msg: msg, Args: args})
 	}
 
 	session := s.activeProfileSessionByIds(ctx, botID, fmt.Sprint(user.ID), chatID)
-	if query == nil && session != nil && session.Scene == "account_authorize" {
+	if legacyAuthorization && query == nil && session != nil && session.Scene == "account_authorize" {
 		_, err := s.handleAccountManagementInput(authCtx, botID, msg)
 		return err
 	}
@@ -172,29 +181,38 @@ func (s *sSysBot) handleCollectorPrivateUpdate(ctx context.Context, row *collect
 		action = "menu"
 	}
 
-	allowProvision := !requireRegistration && query == nil &&
-		(action == "publish" || action == "manage" || (strings.HasPrefix(action, "pf:") && action != "pf:cancel"))
-	account, err := s.resolveCollectorAccount(ctx, state.botID, row.TenantId, row.AccountId, user, allowProvision)
+	var account *botProfileAccount
+	if review != nil && review.Status == uploaderApproved {
+		if review.OwnerAccountId != row.AccountId {
+			return s.sendUploaderReplyWithoutKeyboard(ctx, row, chatID, uploaderReviewMessage(review))
+		}
+		account, err = scopedUploaderAccount(ctx, review.TenantId, review.AccountId)
+	} else if requireRegistration {
+		if review == nil {
+			account, err = s.existingScopedUploaderAccount(ctx, row, user.ID)
+		}
+		if account == nil && err == nil {
+			return s.handleUploaderRegistration(ctx, row, user, query, action, review)
+		}
+	} else {
+		allowProvision := query == nil &&
+			(action == "publish" || action == "manage" || (strings.HasPrefix(action, "pf:") && action != "pf:cancel"))
+		account, err = s.resolveCollectorAccount(ctx, state.botID, row.TenantId, row.AccountId, user, allowProvision)
+	}
 	if err != nil {
 		if query != nil {
 			s.answerProfileCallback(ctx, botID, query, "上架账户不可用")
 		}
+		if requireRegistration || (review != nil && review.Status == uploaderApproved) {
+			return s.sendUploaderReplyWithoutKeyboard(ctx, row, chatID, "上架账户不可用，请联系管理员。")
+		}
 		return s.replyBotError(ctx, botID, chatID, "上架机器人上架账户", err)
 	}
-	if account != nil && account.TenantId != row.TenantId {
-		return gerror.New("上架账户不属于当前机器人租户")
-	}
-	state.account = account
-	waitingRegistration := requireRegistration && account == nil
-	state.keyboard = collectorReplyKeyboard(waitingRegistration)
-	if waitingRegistration {
-		if query != nil {
-			s.answerProfileCallback(ctx, botID, query, "请先完成授权绑定")
-		}
-		return s.sendCollectorReply(ctx, botID, chatID, "请向管理员索取上架账户授权链接，并在当前机器人打开链接完成绑定。")
-	}
 
-	if action != "menu" && action != "register" && action != "rebind" && session == nil {
+	state.account = account
+	state.keyboard = collectorReplyKeyboard(false)
+
+	if action != "menu" && action != "register" && session == nil {
 		if err := s.ensureReplyKeyboardCurrent(ctx, botID, chatID); err != nil {
 			return err
 		}
@@ -208,7 +226,7 @@ func (s *sSysBot) handleCollectorPrivateUpdate(ctx context.Context, row *collect
 			return err
 		}
 		err = s.showProfileMenu(ctx, botID, msg)
-	case "menu", "register", "rebind":
+	case "menu", "register":
 		return s.sendCollectorReply(ctx, botID, chatID, "请选择底部功能。")
 	default:
 		if account == nil {
@@ -255,8 +273,6 @@ func collectorMessageAction(command, text string) string {
 		return "manage"
 	case text == "注册申请":
 		return "register"
-	case text == "重新绑定":
-		return "rebind"
 	case text == "笔记列表":
 		return "pf:list:1"
 	case text == "搜索笔记":
@@ -280,7 +296,7 @@ func collectorCallbackAction(data string) string {
 	switch parts[1] {
 	case "menu", "list", "askpage", "search", "view", "backview", "askedit", "edit",
 		"edtitle", "edtext", "edno", "replace", "editback", "create", "createback",
-		"createskip", "cancel", "publishup":
+		"createskip", "cancel", "publishup", "down", "del", "delconfirm", "delcancel", "preview":
 		return data
 	default:
 		return ""

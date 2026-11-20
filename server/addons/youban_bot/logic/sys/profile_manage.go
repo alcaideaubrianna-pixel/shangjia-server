@@ -478,6 +478,9 @@ func (s *sSysBot) handleProfileCallback(ctx context.Context, botId int64, query 
 		if botId >= 0 {
 			return true, nil
 		}
+		if state := collectorInteractionFromContext(ctx); state != nil && state.bot != nil && state.bot.RequirePublishReview {
+			return true, s.submitCollectorProfileReview(ctx, state, chatId, query, no)
+		}
 		return true, s.changeProfilesStatusByCallback(ctx, botId, chatId, account, query, "up", no, 1)
 	case "up":
 		return true, s.changeProfilesStatusByCallback(ctx, botId, chatId, account, query, action, no, 1)
@@ -571,7 +574,7 @@ func (s *sSysBot) confirmProfileDelete(ctx context.Context, botId int64, chatId,
 	if err != nil {
 		return err
 	}
-	account, err := s.boundProfileAccountByUser(ctx, parseTelegramUserId(telegramUserIdFromCtx(ctx)))
+	account, err := s.profileAccountForInteraction(ctx, parseTelegramUserId(telegramUserIdFromCtx(ctx)))
 	if err != nil {
 		return s.replyBotError(ctx, botId, chatId, "资料删除", err)
 	}
@@ -579,7 +582,7 @@ func (s *sSysBot) confirmProfileDelete(ctx context.Context, botId int64, chatId,
 	if err != nil {
 		return s.replyBotError(ctx, botId, chatId, "资料删除", err)
 	}
-	if profileCardPurpose(account, note, "delete") == "readonly" {
+	if profileCardPurpose(account, note, "delete") == "readonly" || (botId < 0 && note.AccountId != account.AccountId) {
 		return s.replyBotError(ctx, botId, chatId, "资料删除", gerror.New("当前资料只读，无权删除"))
 	}
 	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId,
@@ -596,7 +599,7 @@ func (s *sSysBot) deleteProfileByCallback(ctx context.Context, botId int64, chat
 	if err != nil {
 		return s.replyBotError(ctx, botId, chatId, "资料删除", err)
 	}
-	if profileCardPurpose(account, note, "delete") == "readonly" {
+	if profileCardPurpose(account, note, "delete") == "readonly" || (botId < 0 && note.AccountId != account.AccountId) {
 		return s.replyBotError(ctx, botId, chatId, "资料删除", gerror.New("当前资料只读，无权删除"))
 	}
 	claimed, err := reserveBotProfileMutation(ctx, account, note.Id, "delete")
@@ -615,13 +618,16 @@ func (s *sSysBot) deleteProfileByCallback(ctx context.Context, botId int64, chat
 	accountCopy := *account
 	go func() {
 		workCtx := context.Background()
-		err := publishService.SysPublish().BotProfileDeleteWithNotice(workCtx, &publishsysin.BotProfileDeleteInp{
-			ProfileDeleteInp: publishsysin.ProfileDeleteInp{Ids: []int64{profileId}},
-			TenantId:         accountCopy.TenantId,
-			AccountId:        accountCopy.AccountId,
-			NotifyBotId:      botId,
-			NotifyChatId:     chatId,
-		})
+		input := publishsysin.ProfileDeleteInp{Ids: []int64{profileId}}
+		var err error
+		if botId < 0 {
+			err = publishService.SysPublish().BotProfileDelete(workCtx, accountCopy.TenantId, accountCopy.AccountId, &input)
+		} else {
+			err = publishService.SysPublish().BotProfileDeleteWithNotice(workCtx, &publishsysin.BotProfileDeleteInp{
+				ProfileDeleteInp: input, TenantId: accountCopy.TenantId, AccountId: accountCopy.AccountId,
+				NotifyBotId: botId, NotifyChatId: chatId,
+			})
+		}
 		if err != nil {
 			_ = releaseBotProfileMutation(workCtx, &accountCopy, profileId, "delete")
 			_ = s.sendMessageOnly(workCtx, botId, chatId, fmt.Sprintf("资料编号：%s 下架删除失败：%s", html.EscapeString(no), html.EscapeString(err.Error())))
@@ -1237,6 +1243,10 @@ func (s *sSysBot) changeProfilesStatusByCallback(ctx context.Context, botId int6
 		s.answerProfileCallback(ctx, botId, query, viewErr.Error())
 		return s.replyBotError(ctx, botId, chatId, "资料管理", viewErr)
 	}
+	if botId < 0 && current != nil && current.AccountId != account.AccountId {
+		s.answerProfileCallback(ctx, botId, query, "只能操作自己的资料")
+		return nil
+	}
 	if writeErr := ensureBotProfileWritable(account, current); writeErr != nil {
 		s.auditProfileCallback(ctx, query, account, action, no, writeErr)
 		s.answerProfileCallback(ctx, botId, query, writeErr.Error())
@@ -1563,7 +1573,19 @@ func (s *sSysBot) sendProfileCard(ctx context.Context, botId int64, chatId strin
 	text := profileCardText(header, "")
 	markup := profileCardMarkupForNote(note, purpose)
 	if botId < 0 {
-		markup = collectorNoteMarkup(markup)
+		state := collectorInteractionFromContext(ctx)
+		if purpose == "view" && state != nil && state.account != nil &&
+			note.AccountId == state.account.AccountId && note.TenantId == state.account.TenantId {
+			markup = collectorOwnedNoteMarkup(note, state.bot != nil && state.bot.RequirePublishReview)
+		} else {
+			if purpose == "view" || purpose == "readonly" {
+				markup = &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
+					{{Text: "预览", CallbackData: profileCallbackDataForNote("preview", note)}},
+					{{Text: "返回列表", CallbackData: "pf:list:1"}},
+				}}
+			}
+			markup = collectorNoteMarkup(markup)
+		}
 	}
 	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, text, "HTML", false, markup)
 	return err
@@ -1598,6 +1620,9 @@ func profileCardDisplayStatus(note *publishsysin.NoteModel) string {
 	// The persisted online/offline state is authoritative. A previous
 	// publish task can remain "published" after a successful offline
 	// transition, and must not make an offline card look online.
+	if note.Status == publishsysin.ProfileStatusReviewPending {
+		return "审核中"
+	}
 	if note.Status != 1 {
 		if profileTaskInProgress(note) {
 			return "下架中"
@@ -2243,7 +2268,10 @@ func profileCardMarkupForNote(note *publishsysin.NoteModel, purpose string) *mod
 		profileNo := strings.ToUpper(strings.TrimSpace(note.ProfileNo))
 		statusAction := "pf:up:"
 		statusLabel := "上架"
-		if profileTaskInProgress(note) {
+		if note.Status == publishsysin.ProfileStatusReviewPending {
+			statusAction = "pf:view:"
+			statusLabel = "审核中"
+		} else if profileTaskInProgress(note) {
 			statusAction = "pf:view:"
 			statusLabel = "处理中"
 			if note.Status == 1 {
@@ -3362,8 +3390,17 @@ func (s *sSysBot) sendProfileCreateSuccess(ctx context.Context, botId int64, cha
 	}
 	if botId < 0 {
 		markup = collectorNoteMarkup(markup)
-		if isBatch && profileNo != "" {
-			markup.InlineKeyboard = append([][]models.InlineKeyboardButton{{{Text: "上架", CallbackData: "pf:publishup:" + profileNo}}}, markup.InlineKeyboard...)
+		bot, err := collectorBotByID(ctx, -botId)
+		if err != nil {
+			return err
+		}
+		if profileNo != "" && (isBatch || bot.RequirePublishReview) {
+			label := "上架"
+			if bot.RequirePublishReview {
+				label = "提交审核"
+				text = strings.Replace(text, "，确认无误后可直接上架", "，确认无误后可提交审核", 1)
+			}
+			markup.InlineKeyboard = append([][]models.InlineKeyboardButton{{{Text: label, CallbackData: "pf:publishup:" + profileNo}}}, markup.InlineKeyboard...)
 		} else {
 			text = strings.Replace(text, "，确认无误后可直接上架", "", 1)
 		}

@@ -335,6 +335,11 @@ func (s *sSysPublish) AdminAccountTransferProfiles(ctx context.Context, in *sysi
 }
 
 func (s *sSysPublish) savePublishAccount(ctx context.Context, tx gdb.TX, in *sysin.AccountSaveInp) (err error) {
+	if tx == nil && in.Id > 0 && in.AccountType == sysin.PublishAccountTypeUploader {
+		return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+			return s.savePublishAccount(ctx, tx, in)
+		})
+	}
 	if err = s.ensurePublishAccountUnique(ctx, in.Id, in.Username); err != nil {
 		return err
 	}
@@ -363,13 +368,29 @@ func (s *sSysPublish) savePublishAccount(ctx context.Context, tx gdb.TX, in *sys
 		mod = tx.Model(pdao.YoubanPublishAccount.Table()).Safe().Ctx(ctx)
 	}
 	if in.Id > 0 {
-		result, updateErr := mod.Where(accountColumns.Id, in.Id).Where(accountColumns.TenantId, in.TenantId).WhereNull(accountColumns.DeletedAt).Data(data).Update()
+		target := mod.Where(accountColumns.Id, in.Id).Where(accountColumns.TenantId, in.TenantId).WhereNull(accountColumns.DeletedAt)
+		statusChanged := false
+		if in.AccountType == sysin.PublishAccountTypeUploader {
+			previous, readErr := target.Clone().Fields(accountColumns.Status).LockUpdate().One()
+			if readErr != nil {
+				return gerror.Wrap(readErr, "读取上架账号状态失败")
+			}
+			statusChanged = !previous.IsEmpty() && previous[accountColumns.Status].Int() != in.Status
+		}
+		result, updateErr := target.Data(data).Update()
 		if updateErr != nil {
 			return gerror.Wrap(updateErr, "保存上架账号失败")
 		}
 		affected, _ := result.RowsAffected()
 		if affected == 0 {
 			return gerror.New("账号不存在或无权操作")
+		}
+		if statusChanged {
+			if err = s.EnqueueUploaderReviewNotice(ctx, &sysin.UploaderReviewNotice{
+				Kind: sysin.UploaderAccountStatusNotice, TenantID: in.TenantId, AccountID: in.Id, Status: in.Status,
+			}); err != nil {
+				return gerror.Wrap(err, "保存上架账号状态通知失败")
+			}
 		}
 	} else {
 		data[accountColumns.CreatedBy] = contexts.GetUserId(ctx)

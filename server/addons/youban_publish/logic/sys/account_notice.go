@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"html"
+	"strconv"
 	"strings"
 	"time"
 
@@ -109,7 +110,7 @@ func noticeName(value string) string {
 	return html.EscapeString(value)
 }
 func accountNoticeDue() string {
-	return "((status IN ('pending','failed') AND (next_retry_at IS NULL OR next_retry_at<=?)) OR (status='sending' AND lease_until<=?))"
+	return "((status IN ('pending','failed','bot_pending','bot_failed') AND (next_retry_at IS NULL OR next_retry_at<=?)) OR (status IN ('sending','bot_sending') AND lease_until<=?))"
 }
 
 func (s *sSysPublish) runAccountNotices(ctx context.Context) {
@@ -160,7 +161,12 @@ func (s *sSysPublish) processAccountNotices(ctx context.Context, now time.Time, 
 func (s *sSysPublish) deliverAccountNotice(ctx context.Context, row *entity.YoubanPublishAccountNotice, now time.Time) error {
 	cols := pdao.YoubanPublishAccountNotice.Columns()
 	token := guid.S()
-	result, err := pdao.YoubanPublishAccountNotice.Ctx(ctx).Where(cols.Id, row.Id).Where(accountNoticeDue(), now, now).WhereLT(cols.Attempts, 5).Data(do.YoubanPublishAccountNotice{Status: "sending", LeaseToken: token, LeaseUntil: gtime.New(now.Add(2 * time.Minute))}).Update()
+	isUploaderNotice := strings.HasPrefix(row.Status, "bot_")
+	sendingStatus, failedStatus := "sending", "failed"
+	if isUploaderNotice {
+		sendingStatus, failedStatus = "bot_sending", "bot_failed"
+	}
+	result, err := pdao.YoubanPublishAccountNotice.Ctx(ctx).Where(cols.Id, row.Id).Where(accountNoticeDue(), now, now).WhereLT(cols.Attempts, 5).Data(do.YoubanPublishAccountNotice{Status: sendingStatus, LeaseToken: token, LeaseUntil: gtime.New(now.Add(2 * time.Minute))}).Update()
 	if err != nil {
 		return err
 	}
@@ -171,23 +177,28 @@ func (s *sSysPublish) deliverAccountNotice(ctx context.Context, row *entity.Youb
 	if err = pdao.YoubanPublishAccountNotice.Ctx(ctx).Where(cols.Id, row.Id).Where(cols.LeaseToken, token).Scan(row); err != nil {
 		return err
 	}
-	enabled, err := s.accountNotificationEnabled(ctx, row.TenantId, row.AccountId, row.Category)
-	if err == nil && !enabled {
-		return s.finishAccountNotice(ctx, row.Id, token, "skipped", "")
-	}
-	if err == nil {
-		// Resolve the tenant before using the Bot binding. A moved account must not
-		// receive another tenant's pending event. Deleted admins may receive their
-		// own deletion warning through their existing binding.
-		accountCols := pdao.YoubanPublishAccount.Columns()
-		target, targetErr := pdao.YoubanPublishAccount.Ctx(ctx).Unscoped().Where(accountCols.Id, row.AccountId).Where(accountCols.TenantId, row.TenantId).Where(accountCols.AccountType, sysin.PublishAccountTypeAdmin).One()
-		err = targetErr
-		if err == nil && target.IsEmpty() {
-			return s.finishAccountNotice(ctx, row.Id, token, "skipped", "账户归属已改变")
+	if isUploaderNotice {
+		err = s.deliverUploaderReviewNotice(ctx, row)
+	} else {
+		var enabled bool
+		enabled, err = s.accountNotificationEnabled(ctx, row.TenantId, row.AccountId, row.Category)
+		if err == nil && !enabled {
+			return s.finishAccountNotice(ctx, row.Id, token, "skipped", "")
 		}
-	}
-	if err == nil {
-		err = botService.SysBot().NotifyAccount(ctx, &botsysin.NotifyAccountInp{NoticeId: row.Id, App: "api", AccountId: row.AccountId, Text: row.TextContent, ParseMode: "HTML", BotStrategy: "bound", IgnoreFeatureSwitch: true, RequireDelivery: true})
+		if err == nil {
+			// Resolve the tenant before using the Bot binding. A moved account must not
+			// receive another tenant's pending event. Deleted admins may receive their
+			// own deletion warning through their existing binding.
+			accountCols := pdao.YoubanPublishAccount.Columns()
+			target, targetErr := pdao.YoubanPublishAccount.Ctx(ctx).Unscoped().Where(accountCols.Id, row.AccountId).Where(accountCols.TenantId, row.TenantId).Where(accountCols.AccountType, sysin.PublishAccountTypeAdmin).One()
+			err = targetErr
+			if err == nil && target.IsEmpty() {
+				return s.finishAccountNotice(ctx, row.Id, token, "skipped", "账户归属已改变")
+			}
+		}
+		if err == nil {
+			err = botService.SysBot().NotifyAccount(ctx, &botsysin.NotifyAccountInp{NoticeId: row.Id, App: "api", AccountId: row.AccountId, Text: row.TextContent, ParseMode: "HTML", BotStrategy: "bound", IgnoreFeatureSwitch: true, RequireDelivery: true})
+		}
 	}
 	if err == nil {
 		return s.finishAccountNotice(ctx, row.Id, token, "sent", "")
@@ -212,7 +223,7 @@ func (s *sSysPublish) deliverAccountNotice(ctx context.Context, row *entity.Youb
 		nextRetryAt = now.Add(delay)
 		attempts = row.Attempts
 	}
-	_, persistErr := pdao.YoubanPublishAccountNotice.Ctx(cleanup).Where(cols.Id, row.Id).Where(cols.LeaseToken, token).Where(cols.Status, "sending").Data(g.Map{cols.Status: "failed", cols.Attempts: attempts, cols.NextRetryAt: nextRetryAt, cols.LeaseUntil: nil, cols.ErrorMessage: boundDailyReportError(err.Error())}).Update()
+	_, persistErr := pdao.YoubanPublishAccountNotice.Ctx(cleanup).Where(cols.Id, row.Id).Where(cols.LeaseToken, token).Where(cols.Status, sendingStatus).Data(g.Map{cols.Status: failedStatus, cols.Attempts: attempts, cols.NextRetryAt: nextRetryAt, cols.LeaseUntil: nil, cols.ErrorMessage: boundDailyReportError(err.Error())}).Update()
 	if persistErr != nil {
 		return gerror.Wrap(persistErr, "保存账户通知重试状态失败")
 	}
@@ -220,7 +231,7 @@ func (s *sSysPublish) deliverAccountNotice(ctx context.Context, row *entity.Youb
 }
 func (s *sSysPublish) finishAccountNotice(ctx context.Context, id int64, token, status, message string) error {
 	cols := pdao.YoubanPublishAccountNotice.Columns()
-	_, err := pdao.YoubanPublishAccountNotice.Ctx(ctx).Where(cols.Id, id).Where(cols.LeaseToken, token).Where(cols.Status, "sending").Data(g.Map{cols.Status: status, cols.LeaseUntil: nil, cols.NextRetryAt: nil, cols.ErrorMessage: message}).Update()
+	_, err := pdao.YoubanPublishAccountNotice.Ctx(ctx).Where(cols.Id, id).Where(cols.LeaseToken, token).WhereIn(cols.Status, []string{"sending", "bot_sending"}).Data(g.Map{cols.Status: status, cols.LeaseUntil: nil, cols.NextRetryAt: nil, cols.ErrorMessage: message}).Update()
 	return err
 }
 
@@ -333,4 +344,42 @@ func (s *sSysPublish) enqueueProfileUnpublishSuccessNotice(ctx context.Context, 
 		_, err = tx.Model(pdao.YoubanPublishAccountNotice.Table()).Ctx(ctx).Data(notice).OnConflict("event_key,account_id").OnDuplicate("event_key").Save()
 		return gerror.Wrap(err, "保存资料下架完成通知失败")
 	})
+}
+
+func (s *sSysPublish) EnqueueUploaderReviewNotice(ctx context.Context, in *sysin.UploaderReviewNotice) error {
+	reference := strconv.FormatInt(in.ReviewID, 10)
+	key := fmt.Sprintf("%s:%s", in.Kind, reference)
+	if in.Kind == sysin.UploaderAccountStatusNotice {
+		reference = strconv.Itoa(in.Status)
+		key = fmt.Sprintf("%s:%d:%s", in.Kind, in.AccountID, guid.S())
+	}
+	// Older workers do not claim these states during a rolling upgrade.
+	_, err := pdao.YoubanPublishAccountNotice.Ctx(ctx).Data(do.YoubanPublishAccountNotice{
+		TenantId: in.TenantID, AccountId: in.AccountID, EventKey: key, Category: in.Kind, TextContent: reference, Status: "bot_pending",
+	}).Insert()
+	return err
+}
+
+func (s *sSysPublish) deliverUploaderReviewNotice(ctx context.Context, row *entity.YoubanPublishAccountNotice) error {
+	reference, err := strconv.ParseInt(row.TextContent, 10, 64)
+	if err != nil {
+		return gerror.Wrap(err, "上架机器人通知引用无效")
+	}
+	if row.Category == profileReviewRequest || row.Category == profileReviewPublish || row.Category == profileReviewApprovedNotice {
+		return s.deliverProfileReviewNotice(ctx, row, reference)
+	}
+	in := &sysin.UploaderReviewNotice{Kind: row.Category, NoticeID: row.Id, TenantID: row.TenantId, AccountID: row.AccountId, ReviewID: reference}
+	if row.Category == sysin.UploaderAccountStatusNotice {
+		cols := pdao.YoubanPublishAccount.Columns()
+		account, err := pdao.YoubanPublishAccount.Ctx(ctx).Where(cols.Id, row.AccountId).Where(cols.TenantId, row.TenantId).
+			Where(cols.AccountType, sysin.PublishAccountTypeUploader).WhereNull(cols.DeletedAt).Fields(cols.Status).One()
+		if err != nil {
+			return err
+		}
+		if account.IsEmpty() || account[cols.Status].Int64() != reference {
+			return nil
+		}
+		in.Status = int(reference)
+	}
+	return botService.SysBot().DeliverUploaderReviewNotice(ctx, in)
 }

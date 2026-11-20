@@ -1391,31 +1391,33 @@ type BotChannelCacheModel struct {
 }
 
 type BotModel struct {
-	Role                int         `json:"role" dc:"0未分配 1采集 2双向 3上架"`
-	RequireRegistration bool        `json:"requireRegistration" dc:"上架机器人需要授权登录"`
-	BotType             string      `json:"botType" dc:"Bot用途：normal普通机器人，two_way双向机器人"`
-	Id                  int64       `json:"id" dc:"ID"`
-	TenantId            int64       `json:"tenantId" dc:"租户ID，0表示全局"`
-	BotName             string      `json:"botName" dc:"Bot名称"`
-	BotUsername         string      `json:"botUsername" dc:"Bot用户名"`
-	BotToken            string      `json:"botToken" dc:"Bot Token"`
-	Remark              string      `json:"remark" dc:"备注"`
-	Status              int         `json:"status" dc:"状态"`
-	CreatedAt           *gtime.Time `json:"createdAt" dc:"创建时间"`
-	UpdatedAt           *gtime.Time `json:"updatedAt" dc:"更新时间"`
+	RequirePublishReview bool        `json:"requirePublishReview"`
+	Role                 int         `json:"role" dc:"0未分配 1采集 2双向 3上架"`
+	RequireRegistration  bool        `json:"requireRegistration" dc:"上架机器人需要授权登录"`
+	BotType              string      `json:"botType" dc:"Bot用途：normal普通机器人，two_way双向机器人"`
+	Id                   int64       `json:"id" dc:"ID"`
+	TenantId             int64       `json:"tenantId" dc:"租户ID，0表示全局"`
+	BotName              string      `json:"botName" dc:"Bot名称"`
+	BotUsername          string      `json:"botUsername" dc:"Bot用户名"`
+	BotToken             string      `json:"botToken" dc:"Bot Token"`
+	Remark               string      `json:"remark" dc:"备注"`
+	Status               int         `json:"status" dc:"状态"`
+	CreatedAt            *gtime.Time `json:"createdAt" dc:"创建时间"`
+	UpdatedAt            *gtime.Time `json:"updatedAt" dc:"更新时间"`
 }
 
 type BotSaveInp struct {
-	Role                *int   `json:"role" dc:"0未分配 1采集 2双向 3上架"`
-	RequireRegistration *bool  `json:"requireRegistration" dc:"上架机器人需要授权登录"`
-	BotType             string `json:"botType" dc:"Bot用途：normal普通机器人，two_way双向机器人"`
-	Id                  int64  `json:"id" dc:"ID"`
-	TenantId            int64  `json:"tenantId" dc:"租户ID，0表示全局"`
-	BotName             string `json:"botName" dc:"Bot名称"`
-	BotUsername         string `json:"botUsername" dc:"Bot用户名"`
-	BotToken            string `json:"botToken" dc:"Bot Token"`
-	Remark              string `json:"remark" dc:"备注"`
-	Status              int    `json:"status" dc:"状态：1启用 2停用"`
+	RequirePublishReview *bool  `json:"requirePublishReview"`
+	Role                 *int   `json:"role" dc:"0未分配 1采集 2双向 3上架"`
+	RequireRegistration  *bool  `json:"requireRegistration" dc:"上架机器人需要授权登录"`
+	BotType              string `json:"botType" dc:"Bot用途：normal普通机器人，two_way双向机器人"`
+	Id                   int64  `json:"id" dc:"ID"`
+	TenantId             int64  `json:"tenantId" dc:"租户ID，0表示全局"`
+	BotName              string `json:"botName" dc:"Bot名称"`
+	BotUsername          string `json:"botUsername" dc:"Bot用户名"`
+	BotToken             string `json:"botToken" dc:"Bot Token"`
+	Remark               string `json:"remark" dc:"备注"`
+	Status               int    `json:"status" dc:"状态：1启用 2停用"`
 }
 
 type BotCreateInp struct {

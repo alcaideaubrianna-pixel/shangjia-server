@@ -54,8 +54,13 @@ func (s *sSysBot) resolveCollectorAccount(ctx context.Context, botID, tenantID, 
 	}
 
 	err = g.DB().Transaction(ctx, func(ctx context.Context, _ gdb.TX) error {
-		_, err := s.createAndBindUploader(ctx, botID, ownerAccountID, fmt.Sprintf("tg_%d", user.ID), *user)
-		return err
+		createdID, err := createReviewedUploader(ctx, &uploaderReview{
+			OwnerAccountId: ownerAccountID, TelegramUserId: user.ID, TelegramUsername: user.Username,
+		})
+		if err != nil {
+			return err
+		}
+		return bindLegacyUploader(ctx, botID, createdID, *user)
 	})
 	account, lookupErr := s.resolveCollectorAccount(ctx, botID, tenantID, ownerAccountID, user, false)
 	if account != nil || lookupErr != nil {
@@ -84,13 +89,17 @@ func (s *sSysBot) createAndBindUploader(ctx context.Context, botID, ownerAccount
 	if err != nil {
 		return nil, err
 	}
-	_, err = g.DB().Model(accountBindTbl).Ctx(ctx).Data(g.Map{
-		"app": "api", "account_id": created.Id, "telegram_user_id": in.TelegramUserId,
+	return created, bindLegacyUploader(ctx, botID, created.Id, user)
+}
+
+func bindLegacyUploader(ctx context.Context, botID, accountID int64, user models.User) error {
+	_, err := g.DB().Model(accountBindTbl).Ctx(ctx).Data(g.Map{
+		"app": "api", "account_id": accountID, "telegram_user_id": fmt.Sprint(user.ID),
 		"telegram_username": user.Username, "telegram_first_name": user.FirstName,
 		"telegram_last_name": user.LastName, "bot_id": botID, "status": 1,
 	}).Insert()
 	if err != nil {
-		return nil, gerror.Wrap(err, "绑定TG失败（可能已绑定其他账户）")
+		return gerror.Wrap(err, "绑定TG失败（可能已绑定其他账户）")
 	}
-	return created, nil
+	return nil
 }

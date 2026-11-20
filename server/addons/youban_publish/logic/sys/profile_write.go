@@ -928,6 +928,9 @@ func (s *sSysPublish) updateProfileFromInput(ctx context.Context, tx gdb.TX, in 
 	if err != nil {
 		return gerror.Wrap(err, "读取资料当前状态失败")
 	}
+	if current[columns.Status].Int() == sysin.ProfileStatusReviewPending {
+		return gerror.New("资料正在审核，暂时无法编辑")
+	}
 	in.Province, in.City = selectProfileRegions(regions, false, current[columns.Province].String(), current[columns.City].String(), current[columns.PlainText].String(), in.PlainText)
 	// Editing content must not change lifecycle state. Publish/Unpublish/
 	// Republish are the only operations allowed to transition it.

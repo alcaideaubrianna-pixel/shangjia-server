@@ -752,7 +752,7 @@ func (s *sSysPublish) ServerProfileReview(ctx context.Context, in *sysin.Profile
 		return gerror.New("资料不存在或无权操作")
 	}
 	columns := dao.ContentProfile.Columns()
-	if _, err = dao.ContentProfile.Ctx(ctx).WhereIn(columns.Id, ids).Data(g.Map{
+	if _, err = dao.ContentProfile.Ctx(ctx).WhereIn(columns.Id, ids).WhereNot(columns.Status, sysin.ProfileStatusReviewPending).Data(g.Map{
 		columns.ReviewStatus: in.ReviewStatus,
 	}).Update(); err != nil {
 		return gerror.Wrap(err, "审核资料失败")
