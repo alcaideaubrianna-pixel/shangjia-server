@@ -28,6 +28,7 @@ var pgsqlSqlFiles = []string{
 	"addons/youban_bot/resource/sql/upgrade.pgsql.sql",
 	"addons/youban_bot/resource/sql/relay.pgsql.sql",
 	"addons/youban_bot/resource/sql/manager.pgsql.sql",
+	"addons/youban_bot/resource/sql/manager_notification_index.pgsql.sql",
 	"addons/youban_bot/resource/sql/menu.pgsql.sql",
 	"addons/youban_bot/resource/sql/account_management.pgsql.sql",
 	"addons/youban_bot/resource/sql/bot_registry.pgsql.sql",
