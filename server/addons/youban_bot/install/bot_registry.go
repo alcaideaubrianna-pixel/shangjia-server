@@ -44,6 +44,9 @@ func backfillBotRegistry(ctx context.Context) error {
 			available[row["table_name"].String()] = true
 		}
 
+		if err := copyPreviousRoleRegistry(tx, db.GetConfig().Type, schema); err != nil {
+			return err
+		}
 		claims, issues, err := readLegacyBotClaims(tx, available)
 		if err != nil {
 			return err
@@ -52,10 +55,10 @@ func backfillBotRegistry(ctx context.Context) error {
 		issues = append(issues, conflicts...)
 		if len(issues) > 0 {
 			sort.Strings(issues)
-			return gerror.New("机器人登记迁移发现冲突：" + strings.Join(issues, "；"))
+			g.Log().Warning(ctx, "机器人登记回填已跳过需核对的记录", issues)
 		}
 		for _, claim := range unique {
-			if err := botregistry.ClaimIdentity(ctx, claim.identity, claim.tenantID, claim.role); err != nil {
+			if err := insertLegacyBotClaim(tx, db.GetConfig().Type, claim); err != nil {
 				return gerror.Wrapf(err, "机器人 %d 回填失败（%s）", claim.identity, claim.origin)
 			}
 		}
@@ -148,14 +151,24 @@ func auditLegacyBotClaims(claims []legacyBotClaim) ([]legacyBotClaim, []string) 
 	for start := 0; start < len(claims); {
 		first := claims[start]
 		end := start + 1
-		hasConflict := false
+		sameTenant := true
+		hasRoleConflict := false
+		collectorOrRelay := first.role == botregistry.RoleCollector || first.role == botregistry.RoleRelay
+		chosen := first
 		for end < len(claims) && claims[end].identity == first.identity {
 			claim := claims[end]
-			hasConflict = hasConflict || first.tenantID != claim.tenantID || first.role != claim.role
+			sameTenant = sameTenant && first.tenantID == claim.tenantID
+			collectorOrRelay = collectorOrRelay && (claim.role == botregistry.RoleCollector || claim.role == botregistry.RoleRelay)
+			hasRoleConflict = hasRoleConflict || first.role != claim.role
+			if claim.role == botregistry.RoleCollector {
+				chosen = claim
+			}
 			end++
 		}
-		unique = append(unique, first)
-		if hasConflict {
+		if sameTenant && (!hasRoleConflict || collectorOrRelay && chosen.role == botregistry.RoleCollector) {
+			unique = append(unique, chosen)
+		}
+		if !sameTenant || (hasRoleConflict && (!collectorOrRelay || chosen.role != botregistry.RoleCollector)) {
 			origins := make([]string, 0, end-start)
 			for _, claim := range claims[start:end] {
 				origins = append(origins, fmt.Sprintf("%s（租户 %d，角色 %s）", claim.origin, claim.tenantID, claim.role))
@@ -166,4 +179,31 @@ func auditLegacyBotClaims(claims []legacyBotClaim) ([]legacyBotClaim, []string) 
 	}
 
 	return unique, conflicts
+}
+
+// Preserve previously deployed role settings only when the old name has the
+// role-table schema. Production also uses that name for a legacy Bot inventory.
+func copyPreviousRoleRegistry(tx gdb.TX, dbType, schema string) error {
+	row, err := tx.GetOne("SELECT COUNT(*) AS n FROM information_schema.columns WHERE table_schema = " + schema +
+		" AND table_name = 'hg_youban_bot_registry' AND column_name IN ('telegram_bot_id','tenant_id','role','require_registration')")
+	if err != nil || row["n"].Int() != 4 {
+		return err
+	}
+	sql := "INSERT INTO hg_youban_bot_role_registry (telegram_bot_id, tenant_id, role, require_registration)" +
+		" SELECT telegram_bot_id, tenant_id, role, require_registration FROM hg_youban_bot_registry"
+	_, err = tx.Exec(legacyRoleInsertSQL(dbType, sql))
+	return err
+}
+
+func insertLegacyBotClaim(tx gdb.TX, dbType string, claim legacyBotClaim) error {
+	sql := "INSERT INTO hg_youban_bot_role_registry (telegram_bot_id, tenant_id, role) VALUES (?, ?, ?)"
+	_, err := tx.Exec(legacyRoleInsertSQL(dbType, sql), claim.identity, claim.tenantID, claim.role)
+	return err
+}
+
+func legacyRoleInsertSQL(dbType, sql string) string {
+	if dbType == consts.DBPgsql {
+		return sql + " ON CONFLICT (telegram_bot_id) DO NOTHING"
+	}
+	return sql + " ON DUPLICATE KEY UPDATE telegram_bot_id = hg_youban_bot_role_registry.telegram_bot_id"
 }

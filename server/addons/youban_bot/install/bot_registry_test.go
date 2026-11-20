@@ -17,10 +17,10 @@ func TestAuditLegacyBotClaims(t *testing.T) {
 		{44, 2, botregistry.RoleRelay, "relay 2"},
 	}
 	unique, issues := auditLegacyBotClaims(claims)
-	if len(unique) != 3 || len(issues) != 2 {
-		t.Fatalf("expected three identities and two conflicts, got %d and %d", len(unique), len(issues))
+	if len(unique) != 2 || len(issues) != 1 {
+		t.Fatalf("expected two safe identities and one conflict, got %d and %d", len(unique), len(issues))
 	}
-	if !strings.Contains(issues[0], "机器人 42") || !strings.Contains(issues[1], "机器人 43") {
+	if unique[0].role != botregistry.RoleCollector || !strings.Contains(issues[0], "机器人 43") {
 		t.Fatalf("unexpected conflict report: %v", issues)
 	}
 }

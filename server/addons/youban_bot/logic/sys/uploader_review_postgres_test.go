@@ -76,7 +76,7 @@ func TestUploaderReviewLocalPostgres(t *testing.T) {
 		}
 	}
 	for _, table := range []string{
-		uploaderReviewTable, "hg_youban_bot_registry", botTable, userTable, accountBindTbl,
+		uploaderReviewTable, "hg_youban_bot_role_registry", botTable, userTable, accountBindTbl,
 		"hg_youban_publish_bot", "hg_youban_publish_account_notice", "hg_youban_publish_account",
 		"hg_youban_publish_tenant", "hg_youban_publish_account_setting", "hg_youban_publish_account_visibility",
 		"hg_youban_publish_profile_review", "hg_content_profile", "hg_youban_publish_profile_state",
@@ -95,7 +95,7 @@ func TestUploaderReviewLocalPostgres(t *testing.T) {
 	exec(`INSERT INTO hg_youban_publish_account(id,tenant_id,merchant_id,parent_id,account_type,username,nickname,status)
 		VALUES(99,1,1,0,'admin','owner','owner',1),(100,1,1,99,'uploader','review_collision','collision',1)`)
 	exec(`INSERT INTO hg_youban_publish_bot(id,tenant_id,account_id,bot_type,bot_token,status) VALUES(7,1,99,'uploader','123:fake',1)`)
-	exec(`INSERT INTO hg_youban_bot_registry(telegram_bot_id,tenant_id,role,require_registration) VALUES(123,1,'uploader',1)`)
+	exec(`INSERT INTO hg_youban_bot_role_registry(telegram_bot_id,tenant_id,role,require_registration) VALUES(123,1,'uploader',1)`)
 	exec("INSERT INTO " + botTable + "(id,bot_token,is_official,status) VALUES(8,'456:fake',1,1)")
 	exec("INSERT INTO " + accountBindTbl + "(app,account_id,telegram_user_id,bot_id,status) VALUES('api',99,'99',8,1)")
 	exec("INSERT INTO " + userTable + "(bot_id,telegram_user_id,chat_id,status) VALUES(8,'99','99',1)")

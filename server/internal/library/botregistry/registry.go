@@ -19,7 +19,7 @@ const (
 	RoleUploader         = "uploader"
 	UploaderGatewayOwner = "youban_publish_uploader"
 
-	table = "hg_youban_bot_registry"
+	table = "hg_youban_bot_role_registry"
 )
 
 // TelegramBotID extracts the stable identity without returning token material.
