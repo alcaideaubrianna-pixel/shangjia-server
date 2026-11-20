@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -40,6 +41,7 @@ func executeCollectRuleBranches(ctx context.Context, rules []gdb.Record, dispatc
 	result := collectRuleFanoutResult{Branches: make([]collectRuleBranchResult, 0, len(rules))}
 	var failures []error
 	var wait time.Duration
+	var configurationReasons []string
 	for index, rule := range rules {
 		budget := 10 * time.Second
 		if deadline, ok := ctx.Deadline(); ok {
@@ -60,6 +62,12 @@ func executeCollectRuleBranches(ctx context.Context, rules []gdb.Record, dispatc
 			if reason != "" {
 				result.Reasons = append(result.Reasons, reason)
 			}
+		case collectConfigurationFailure(err):
+			branch.Outcome = collectRuleBranchWaiting
+			configurationReasons = append(configurationReasons, fmt.Sprintf("规则%d: %s", branch.RuleID, err.Error()))
+			if wait == 0 || collectConfigurationRetryDelay < wait {
+				wait = collectConfigurationRetryDelay
+			}
 		case realFailure == nil && errors.As(err, &retry):
 			branch.Outcome = collectRuleBranchWaiting
 			if wait == 0 || retry.delay < wait {
@@ -75,8 +83,21 @@ func executeCollectRuleBranches(ctx context.Context, rules []gdb.Record, dispatc
 	// select retry scheduling, which must not conceal a hard branch failure.
 	if len(failures) > 0 {
 		result.Err = errors.Join(failures...)
+		// A terminal sibling must not force the remaining configuration/media
+		// dependency back onto the generic 15-second retry loop.
+		if wait > 0 && collectTerminalProcessingFailure(result.Err) {
+			message := result.Err.Error()
+			if len(configurationReasons) > 0 {
+				message += "；" + strings.Join(configurationReasons, "；")
+			}
+			result.Err = newCollectProcessRetryError(wait, message)
+		}
 	} else if wait > 0 {
-		result.Err = newCollectProcessRetryError(wait, "部分采集规则等待重试")
+		message := "部分采集规则等待重试"
+		if len(configurationReasons) > 0 {
+			message += "：" + strings.Join(configurationReasons, "；")
+		}
+		result.Err = newCollectProcessRetryError(wait, message)
 	}
 	return result
 }
@@ -121,40 +142,18 @@ func executeCollectRuleBranch(ctx context.Context, rule gdb.Record, dispatch fun
 
 // Stop polling only after every branch has settled. A successful sibling keeps
 // its dispatch identity; temporary errors and dependency waits still retry.
-func (r collectRuleFanoutResult) terminalMediaValidationFailure() bool {
+func (r collectRuleFanoutResult) terminalProcessingFailure() bool {
 	hasFailure := false
 	for _, branch := range r.Branches {
 		if branch.Outcome == collectRuleBranchWaiting {
 			return false
 		}
 		if branch.Err != nil {
-			if !collectOnlyMediaValidationErrors(branch.Err) {
+			if !collectTerminalProcessingFailure(branch.Err) {
 				return false
 			}
 			hasFailure = true
 		}
 	}
 	return hasFailure
-}
-
-func collectOnlyMediaValidationErrors(err error) bool {
-	if err == nil {
-		return false
-	}
-	if joined, ok := err.(interface{ Unwrap() []error }); ok {
-		children := joined.Unwrap()
-		if len(children) == 0 {
-			return false
-		}
-		for _, child := range children {
-			if !collectOnlyMediaValidationErrors(child) {
-				return false
-			}
-		}
-		return true
-	}
-	if child := errors.Unwrap(err); child != nil {
-		return collectOnlyMediaValidationErrors(child)
-	}
-	return isProfileMediaValidationError(err)
 }

@@ -141,7 +141,7 @@ func TestCollectRuleFanoutTerminalMediaValidation(t *testing.T) {
 				err := tc.errs[rule["id"].Int()-1]
 				return err == nil, "", err
 			})
-			if calls != len(rules) || result.terminalMediaValidationFailure() != tc.want {
+			if calls != len(rules) || result.terminalProcessingFailure() != tc.want {
 				t.Fatalf("calls=%d result=%+v wantTerminal=%t", calls, result, tc.want)
 			}
 		})

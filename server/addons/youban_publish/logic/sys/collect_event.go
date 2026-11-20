@@ -800,13 +800,13 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		}
 	}
 	if fanout.Err != nil {
-		// Persist terminal validation failures before acknowledging the wakeup.
+		// Persist terminal input/validation failures before acknowledging the wakeup.
 		// Mixed transient failures keep the event retryable; successful siblings
 		// retain their existing dispatch/operation identities in either case.
-		terminalValidation := fanout.terminalMediaValidationFailure()
+		terminalFailure := fanout.terminalProcessingFailure()
 		status := sysin.CollectEventStatusMediaReady
 		var processedAt *gtime.Time
-		if terminalValidation {
+		if terminalFailure {
 			status = sysin.CollectEventStatusFailed
 			processedAt = gtime.Now()
 		}
@@ -814,7 +814,7 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
 		failureModel := pdao.YoubanPublishCollectEvent.Ctx(saveCtx).WherePri(eventId).
 			Where(cols.TenantId, tenantId).Where(cols.SourceId, event["source_id"].Int64())
-		if terminalValidation {
+		if terminalFailure {
 			// An arriving album item/replay may already have reopened this row.
 			// Never close that newer material using the previous attempt's error.
 			failureModel = failureModel.WhereIn(cols.Status, []string{sysin.CollectEventStatusMediaReady, sysin.CollectEventStatusFailed}).
@@ -828,7 +828,7 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 			err = gerror.Wrap(saveErr, "保存采集规则未完成状态失败")
 			return err
 		}
-		if terminalValidation {
+		if terminalFailure {
 			affected, affectedErr := saved.RowsAffected()
 			if affectedErr != nil {
 				return gerror.Wrap(affectedErr, "确认采集校验失败状态保存结果失败")

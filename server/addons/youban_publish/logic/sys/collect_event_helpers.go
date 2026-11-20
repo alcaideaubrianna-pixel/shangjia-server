@@ -308,7 +308,7 @@ func collectTitle(text string) string {
 	}
 	text = collectGeneratedTitleNumberPattern.ReplaceAllString(text, "")
 	if title, _, _ := materialImportTitle(text); title != "" {
-		return title
+		return collectProfileTitle(title)
 	}
 	runes := []rune(text)
 	if len(runes) > 48 {
