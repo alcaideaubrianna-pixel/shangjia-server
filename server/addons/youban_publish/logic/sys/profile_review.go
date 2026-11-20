@@ -108,6 +108,21 @@ func (s *sSysPublish) profileReviewAdmin(ctx context.Context, tenantID, adminID 
 	return admin, nil
 }
 
+func (s *sSysPublish) approvePendingProfileFromAdmin(ctx context.Context, profile *sysin.ProfileModel, adminID int64) error {
+	value, err := g.DB().Model(profileReviewTable).Ctx(ctx).Where("profile_id", profile.Id).
+		Where("tenant_id", profile.TenantId).Where("account_id", profile.AccountId).
+		Where("owner_account_id", adminID).Where("status", consts.ContentReviewPending).
+		OrderDesc("id").Fields("id").Value()
+	if err != nil {
+		return err
+	}
+	if value.Int64() <= 0 {
+		return gerror.New("待审核申请不存在或当前管理员无权审批")
+	}
+	_, err = s.HandleBotProfileReview(ctx, value.Int64(), adminID, "approve")
+	return err
+}
+
 func (s *sSysPublish) HandleBotProfileReview(ctx context.Context, id, adminID int64, action string) (*sysin.BotProfileReview, error) {
 	var review *sysin.BotProfileReview
 	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {

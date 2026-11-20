@@ -607,7 +607,8 @@ type BotMediaCacheFileModel struct {
 }
 
 type ProfileListInp struct {
-	PushChannelId int64 `json:"pushChannelId" dc:"推送目标频道ID"`
+	IncludePendingReview bool  `json:"-"`
+	PushChannelId        int64 `json:"pushChannelId" dc:"推送目标频道ID"`
 	form.PageReq
 	TenantId            int64  `json:"tenantId" dc:"租户ID"`
 	AccountId           int64  `json:"accountId" dc:"上架账号ID"`

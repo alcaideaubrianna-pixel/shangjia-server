@@ -236,7 +236,9 @@ func applyNoteIndexFilters(mod *gdb.Model, in *sysin.ProfileListInp) *gdb.Model 
 	if visibility := strings.TrimSpace(in.Visibility); visibility != "" {
 		mod = mod.Where("i.visibility", visibility)
 	}
-	if in.Status > 0 {
+	if in.Status == 2 && in.IncludePendingReview {
+		mod = mod.WhereIn("i.status", []int{2, sysin.ProfileStatusReviewPending})
+	} else if in.Status > 0 {
 		mod = mod.Where("i.status", in.Status)
 	}
 	mod = applyProfileCollectionSourceFilter(mod, in, "i.profile_id")

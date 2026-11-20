@@ -388,6 +388,7 @@ func (s *sSysPublish) AdminProfileImageSearch(ctx context.Context, in *sysin.Pro
 		return nil, 0, err
 	}
 	searchIn := *in
+	searchIn.IncludePendingReview = true
 	return s.profileImageSearch(ctx, &searchIn, file, searchScope, account)
 }
 

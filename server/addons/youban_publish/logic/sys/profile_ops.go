@@ -577,6 +577,7 @@ func (s *sSysPublish) AdminNoteList(ctx context.Context, in *sysin.NoteListInp) 
 	if in == nil {
 		in = &sysin.NoteListInp{}
 	}
+	in.IncludePendingReview = true
 	scope, err := s.adminProfileVisibleScope(ctx, account, &in.ProfileListInp)
 	if err != nil {
 		return nil, err
