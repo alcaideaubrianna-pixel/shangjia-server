@@ -633,7 +633,8 @@ type ProfileViewInp struct {
 
 type AdminProfilePublishInp struct {
 	ProfileViewInp
-	BatchId string `json:"batchId" dc:"批量操作ID"`
+	ApproveReview bool   `json:"approveReview" dc:"仅通过待审核申请"`
+	BatchId       string `json:"batchId" dc:"批量操作ID"`
 }
 
 type AdminProfileBatchCancelInp struct {
@@ -802,6 +803,7 @@ type BotMediaSearchProgress struct {
 }
 
 type ProfileSaveInp struct {
+	EditPendingReview bool                      `json:"editPendingReview" dc:"仅编辑待审核资料"`
 	RandomMedia       *ProfileRandomMediaPolicy `json:"randomMedia,omitempty"`
 	DiagnosticTraceId string                    `json:"-"`
 

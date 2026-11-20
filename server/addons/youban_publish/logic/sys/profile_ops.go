@@ -499,6 +499,9 @@ func (s *sSysPublish) AdminProfileEdit(ctx context.Context, in *sysin.ProfileSav
 	if in == nil || (in.Id <= 0 && normalizeProfileUUID(in.Uuid) == "") {
 		return nil, gerror.New("资料UUID不能为空")
 	}
+	if in.EditPendingReview && in.AsyncSubmit {
+		return nil, gerror.New("待审核资料必须同步保存")
+	}
 	if in.AsyncSubmit {
 		return s.enqueueProfileSubmit(ctx, in, account.TenantId, account.Id)
 	}
@@ -516,6 +519,7 @@ func (s *sSysPublish) AdminProfileEdit(ctx context.Context, in *sysin.ProfileSav
 		return nil, gerror.New("资料归属账号不存在")
 	}
 	in.KeepPublishState = true
+	ctx = context.WithValue(ctx, pendingProfileEditorKey{}, account.Id)
 	return s.saveProfile(ctx, in, account.TenantId, ownerAccountId)
 }
 

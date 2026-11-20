@@ -132,7 +132,7 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 					return err
 				}
 			} else {
-				if err = s.updateProfileFromInput(ctx, tx, in, profileId, accountId, publishAt, regions); err != nil {
+				if err = s.updateProfileFromInput(ctx, tx, in, profileId, tenantId, accountId, publishAt, regions); err != nil {
 					return err
 				}
 			}
@@ -905,7 +905,9 @@ func (s *sSysPublish) createProfileFromInput(ctx context.Context, tx gdb.TX, in 
 	return 0, gerror.Wrap(lastErr, "创建资料失败，资料编号重复")
 }
 
-func (s *sSysPublish) updateProfileFromInput(ctx context.Context, tx gdb.TX, in *sysin.ProfileSaveInp, profileId int64, accountId int64, publishAt *gtime.Time, regions profileRegionPreparation) error {
+type pendingProfileEditorKey struct{}
+
+func (s *sSysPublish) updateProfileFromInput(ctx context.Context, tx gdb.TX, in *sysin.ProfileSaveInp, profileId, tenantId, accountId int64, publishAt *gtime.Time, regions profileRegionPreparation) error {
 	columns := dao.ContentProfile.Columns()
 	now := gtime.Now()
 	current, err := tx.Model(dao.ContentProfile.Table()).Ctx(ctx).
@@ -928,8 +930,25 @@ func (s *sSysPublish) updateProfileFromInput(ctx context.Context, tx gdb.TX, in 
 	if err != nil {
 		return gerror.Wrap(err, "读取资料当前状态失败")
 	}
+	if in.EditPendingReview && current[columns.Status].Int() != sysin.ProfileStatusReviewPending {
+		return gerror.New("资料审核状态已变化，请刷新后重试")
+	}
+	var pendingReviewID int64
 	if current[columns.Status].Int() == sysin.ProfileStatusReviewPending {
-		return gerror.New("资料正在审核，暂时无法编辑")
+		adminID, _ := ctx.Value(pendingProfileEditorKey{}).(int64)
+		if adminID <= 0 {
+			return gerror.New("资料正在审核，请由审批管理员编辑")
+		}
+		review, err := tx.Model(profileReviewTable).Ctx(ctx).Where("profile_id", profileId).
+			Where("tenant_id", tenantId).Where("account_id", accountId).Where("owner_account_id", adminID).
+			Where("status", consts.ContentReviewPending).Fields("id").OrderDesc("id").LockUpdate().One()
+		if err != nil {
+			return err
+		}
+		if review.IsEmpty() {
+			return gerror.New("审核状态已变化或当前管理员无权编辑")
+		}
+		pendingReviewID = review["id"].Int64()
 	}
 	in.Province, in.City = selectProfileRegions(regions, false, current[columns.Province].String(), current[columns.City].String(), current[columns.PlainText].String(), in.PlainText)
 	// Editing content must not change lifecycle state. Publish/Unpublish/
@@ -984,6 +1003,11 @@ func (s *sSysPublish) updateProfileFromInput(ctx context.Context, tx gdb.TX, in 
 	data[columns.PublishedAt] = profilePublishedAt
 	if _, err := tx.Model(dao.ContentProfile.Table()).Ctx(ctx).Where(columns.Id, profileId).Data(data).Update(); err != nil {
 		return gerror.Wrap(err, "更新资料失败")
+	}
+	if pendingReviewID > 0 && in.Title != current[columns.Title].String() {
+		if _, err := tx.Model(profileReviewTable).Ctx(ctx).Where("id", pendingReviewID).Data("title", in.Title).Update(); err != nil {
+			return gerror.Wrap(err, "更新待审核资料标题失败")
+		}
 	}
 	return nil
 }
