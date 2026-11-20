@@ -1314,6 +1314,7 @@ func shouldRecoverCollectEvent(row gdb.Record) bool {
 
 var (
 	collectEventTerminalFailureMessages = []string{
+		errProfileMediaValidation.Error(),
 		"未找到原消息",
 		"无法刷新文件引用",
 		"缺少原消息引用",

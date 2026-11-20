@@ -76,3 +76,19 @@ func TestCollectMediaRecoveryFollowsItemTimeout(t *testing.T) {
 		t.Fatalf("media recovery is too slow: %s", collectMediaRecoverAfter)
 	}
 }
+
+func TestCollectMediaValidationStopsPollingUntilReplay(t *testing.T) {
+	event := gdb.Record{"status": gvar.New("failed"), "error_message": gvar.New("采集规则338分发失败: 展示媒体实际1个: 资料媒体校验不合格")}
+	if shouldRecoverCollectEvent(event) || !collectProcessEventFinished(event) || !collectEventTerminalMediaValidationFailure(event) {
+		t.Fatal("validation failure must remain terminal for automatic recovery")
+	}
+	fields := collectReplayUpdateFields(event, &CollectMessage{}, gtime.Now())
+	if fields["status"] == "failed" || fields["processed_at"] != nil || fields["error_message"] != "" {
+		t.Fatalf("media replay must reopen failed event: %+v", fields)
+	}
+	event["status"] = gvar.New(fields["status"])
+	event["error_message"] = gvar.New(fields["error_message"])
+	if collectEventTerminalMediaValidationFailure(event) || collectProcessEventFinished(event) {
+		t.Fatal("updated material must be processable")
+	}
+}

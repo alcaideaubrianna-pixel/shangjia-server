@@ -429,6 +429,9 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 	}
 	return runCollectTargetBatchEvents(ctx, len(rows), func(index int) (windowErr error) {
 		event := rows[index]
+		if collectEventTerminalMediaValidationFailure(event) {
+			return nil
+		}
 		if _, ok := processEventIds[event["id"].Int64()]; !ok {
 			return nil
 		}

@@ -118,3 +118,43 @@ func executeCollectRuleBranch(ctx context.Context, rule gdb.Record, dispatch fun
 	}
 	return
 }
+
+// Stop polling only after every branch has settled. A successful sibling keeps
+// its dispatch identity; temporary errors and dependency waits still retry.
+func (r collectRuleFanoutResult) terminalMediaValidationFailure() bool {
+	hasFailure := false
+	for _, branch := range r.Branches {
+		if branch.Outcome == collectRuleBranchWaiting {
+			return false
+		}
+		if branch.Err != nil {
+			if !collectOnlyMediaValidationErrors(branch.Err) {
+				return false
+			}
+			hasFailure = true
+		}
+	}
+	return hasFailure
+}
+
+func collectOnlyMediaValidationErrors(err error) bool {
+	if err == nil {
+		return false
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		children := joined.Unwrap()
+		if len(children) == 0 {
+			return false
+		}
+		for _, child := range children {
+			if !collectOnlyMediaValidationErrors(child) {
+				return false
+			}
+		}
+		return true
+	}
+	if child := errors.Unwrap(err); child != nil {
+		return collectOnlyMediaValidationErrors(child)
+	}
+	return isProfileMediaValidationError(err)
+}

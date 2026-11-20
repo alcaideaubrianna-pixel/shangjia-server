@@ -682,6 +682,10 @@ func (s *sSysPublish) processCollectSourceTask(ctx context.Context, payload coll
 			return 0, false, false, gerror.New("采集事件与任务归属不一致")
 		}
 		ctx = bindCollectEventObservation(ctx, event)
+		if collectEventTerminalMediaValidationFailure(event) {
+			attemptResult = collectPipelineFailed
+			return 0, false, true, nil
+		}
 		lateVerificationRepair := collectMaterialLateVerificationRepairCandidate(event)
 		if collectProcessEventFinished(event) {
 			if !lateVerificationRepair {
@@ -889,4 +893,11 @@ func collectMaterialLateVerificationRepairCandidate(event gdb.Record) bool {
 	return event["material_role"].String() == collectMaterialRoleDisplay &&
 		event["material_group_status"].String() == "paired" &&
 		(event["status"].String() == sysin.CollectEventStatusProcessed || event["status"].String() == sysin.CollectEventStatusDispatched)
+}
+
+// Media updates reopen the event through collectReplayUpdateFields. Repeated
+// durable wakeups alone must not reopen an unchanged rejected material group.
+func collectEventTerminalMediaValidationFailure(event gdb.Record) bool {
+	return event["status"].String() == sysin.CollectEventStatusFailed &&
+		isProfileMediaValidationError(gerror.New(event["error_message"].String()))
 }
