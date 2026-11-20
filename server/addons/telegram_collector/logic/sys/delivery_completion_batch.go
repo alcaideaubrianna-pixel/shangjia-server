@@ -49,17 +49,28 @@ func writeDeliveryCompletions(ctx context.Context, completions []deliveryComplet
 	c := dao.TgCollectorDelivery.Columns()
 	values := make([]string, 0, len(completions))
 	args := make([]any, 0, len(completions)*2+2)
-	args = append(args, sysin.DeliveryStatusCompleted)
 	for _, completion := range completions {
 		values = append(values, "(CAST(? AS bigint),CAST(? AS text))")
 		args = append(args, completion.ID, completion.Owner)
 	}
-	args = append(args, sysin.DeliveryStatusProcessing)
-	query := fmt.Sprintf(`UPDATE %s d SET %s=?, %s=NULL, %s='', %s=NULL, %s='', %s=(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Shanghai')
+	args = append(args, sysin.DeliveryStatusProcessing, sysin.DeliveryStatusCompleted)
+	// Claim only the requested rows. A busy row cannot hold the other
+	// completions, and the original caller only ACKs the returned owner.
+	table := dao.TgCollectorDelivery.Table()
+	query := fmt.Sprintf(`WITH locked AS MATERIALIZED (
+ SELECT picked.tid,input.delivery_id,input.owner
  FROM (VALUES %s) AS input(delivery_id,owner)
- WHERE d.%s=input.delivery_id AND d.%s=input.owner AND d.%s=?
- RETURNING input.delivery_id,input.owner`, dao.TgCollectorDelivery.Table(), c.Status, c.NextRunAt, c.LeaseOwner, c.LeaseUntil, c.ErrorMessage, c.UpdatedAt,
-		strings.Join(values, ","), c.Id, c.LeaseOwner, c.Status)
+ CROSS JOIN LATERAL (
+  SELECT d.ctid AS tid FROM %s d
+  WHERE d.%s=input.delivery_id AND d.%s=? AND d.%s=input.owner
+  LIMIT 1 FOR UPDATE SKIP LOCKED
+ ) AS picked
+)
+UPDATE %s d SET %s=?, %s=NULL, %s='', %s=NULL, %s='', %s=(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Shanghai')
+ FROM locked WHERE d.ctid=locked.tid
+ RETURNING locked.delivery_id,locked.owner`,
+		strings.Join(values, ","), table, c.Id, c.Status, c.LeaseOwner,
+		table, c.Status, c.NextRunAt, c.LeaseOwner, c.LeaseUntil, c.ErrorMessage, c.UpdatedAt)
 	rows, err := g.DB().GetAll(ctx, query, args...)
 	matched := make(map[deliveryCompletion]bool, len(rows))
 	for _, row := range rows {

@@ -63,29 +63,36 @@ func (s *sSysPublish) syncProfileCycleRunJob(ctx context.Context, job telegramJo
 	default:
 		return nil
 	}
-	value, err := g.DB().Model(publishProfileCycleRunChannelTable).Ctx(ctx).
-		Where("tenant_id", job.TenantId).Where("account_id", job.AccountId).Where("job_id", job.Id).
-		Fields("run_id").Value()
-	if err != nil || value.IsNil() {
+	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		// 与取消和计划写入保持一致，先锁父 Run，再写频道投影。
+		rows, err := tx.GetAll(`SELECT r.id
+			FROM `+publishProfileCycleRunTable+` r
+			JOIN `+publishProfileCycleRunChannelTable+` rc ON rc.run_id=r.id
+			WHERE rc.tenant_id=? AND rc.account_id=? AND rc.job_id=?
+			  AND r.tenant_id=? AND r.account_id=? AND r.status<>'canceled'
+			ORDER BY r.id
+			LIMIT 1
+			FOR NO KEY UPDATE OF r NOWAIT`, job.TenantId, job.AccountId, job.Id, job.TenantId, job.AccountId)
+		if err != nil || len(rows) == 0 {
+			return err
+		}
+		runID := rows[0]["id"].Int64()
+		if _, err := tx.Model(publishProfileCycleRunChannelTable).
+			Where("run_id", runID).Where("job_id", job.Id).
+			Data(g.Map{"status": projectionStatus, "error_message": job.ErrorMessage, "updated_at": gtime.Now()}).
+			Update(); err != nil {
+			return err
+		}
+		_, err = tx.Exec(finishProfileCycleRunSQL, runID)
 		return err
-	}
-	runID := value.Int64()
-	if runID <= 0 {
-		return nil
-	}
-	if _, err := g.DB().Model(publishProfileCycleRunChannelTable).Ctx(ctx).
-		Where("run_id", runID).Where("job_id", job.Id).
-		Data(g.Map{"status": projectionStatus, "error_message": job.ErrorMessage, "updated_at": gtime.Now()}).
-		Update(); err != nil {
-		return err
-	}
-	// 先提交本频道结果，再检查全体，避免并发事务互相看不到对方的最终状态。
-	return finishProfileCycleRun(ctx, runID)
+	})
 }
+
+const finishProfileCycleRunSQL = "UPDATE " + publishProfileCycleRunTable + " r SET status=CASE WHEN EXISTS(SELECT 1 FROM " + publishProfileCycleRunChannelTable + " f WHERE f.run_id=r.id AND f.status='failed') THEN CASE WHEN EXISTS(SELECT 1 FROM " + publishProfileCycleRunChannelTable + " ok WHERE ok.run_id=r.id AND ok.status='sent') THEN 'partial' ELSE 'failed' END ELSE 'completed' END,completed_at=NOW() WHERE r.id=? AND r.status='dispatched' AND NOT EXISTS(SELECT 1 FROM " + publishProfileCycleRunChannelTable + " rc WHERE rc.run_id=r.id AND rc.status NOT IN ('sent','superseded','failed','skipped'))"
 
 // finishProfileCycleRun 统一收口成功、部分失败、全部失败和跳过的频道结果，不把失败当成仍在排队。
 func finishProfileCycleRun(ctx context.Context, runID int64) error {
-	_, err := g.DB().Exec(ctx, "UPDATE "+publishProfileCycleRunTable+" r SET status=CASE WHEN EXISTS(SELECT 1 FROM "+publishProfileCycleRunChannelTable+" f WHERE f.run_id=r.id AND f.status='failed') THEN CASE WHEN EXISTS(SELECT 1 FROM "+publishProfileCycleRunChannelTable+" ok WHERE ok.run_id=r.id AND ok.status='sent') THEN 'partial' ELSE 'failed' END ELSE 'completed' END,completed_at=NOW() WHERE r.id=? AND r.status='dispatched' AND NOT EXISTS(SELECT 1 FROM "+publishProfileCycleRunChannelTable+" rc WHERE rc.run_id=r.id AND rc.status NOT IN ('sent','superseded','failed','skipped'))", runID)
+	_, err := g.DB().Exec(ctx, finishProfileCycleRunSQL, runID)
 	return err
 }
 
@@ -283,64 +290,99 @@ func reconcileProfileCycleRunChannels(ctx context.Context, scope publishAccountS
 	if limit > 500 {
 		limit = 500
 	}
-	rows, err := g.DB().GetAll(ctx, `WITH candidates AS (
-		SELECT rc.id, rc.run_id,
-			CASE
-				WHEN j.status='sent' THEN 'sent'
-				WHEN j.status='superseded' THEN 'superseded'
-				WHEN j.status='failed' THEN 'failed'
-				ELSE 'skipped'
-			END AS projection_status,
-			CASE
-				WHEN j.status='superseded' THEN COALESCE(NULLIF(j.error_message, ''), '原任务已被替代')
-				WHEN j.status='failed' THEN COALESCE(NULLIF(j.error_message, ''), 'Telegram任务已终态失败')
-				WHEN j.id IS NULL THEN '频道已关闭或任务已清理'
-				ELSE ''
-			END AS error_message
-		FROM `+publishProfileCycleRunChannelTable+` rc
-		JOIN `+publishProfileCycleRunTable+` r ON r.id=rc.run_id
-		LEFT JOIN `+publishTgJobTable+` j ON j.id=rc.job_id
-		LEFT JOIN `+publishChannelTable+` c ON c.id=rc.channel_id AND c.deleted_at IS NULL
-		WHERE rc.tenant_id=? AND rc.account_id=?
-		  AND r.tenant_id=? AND r.account_id=?
-		  AND rc.status NOT IN ('sent','superseded','failed','skipped')
-		  AND (
-				(j.status IN ('sent','superseded','failed') AND COALESCE(j.dispatch_status,'')='done')
-				OR (rc.job_id=0 AND (c.id IS NULL OR c.status<>1 OR c.cycle_publish_enabled<>1 OR c.publish_direction<>'up'))
-		  )
-		ORDER BY rc.id
-		LIMIT ?
-	)
-	UPDATE `+publishProfileCycleRunChannelTable+` rc
-	SET status=c.projection_status,
-		error_message=c.error_message,
-		updated_at=NOW()
-	FROM candidates c
-	WHERE rc.id=c.id
-	RETURNING rc.run_id`, scope.TenantID, scope.AccountID, scope.TenantID, scope.AccountID, limit)
-	if err != nil {
-		return gerror.Wrap(err, "收口资料循环频道投影失败")
+	key := fmt.Sprintf("%s%d:%d", publishconsts.AccountScheduleCycleProjectionEmptyPrefix, scope.TenantID, scope.AccountID)
+	if cache.Initialized() {
+		value, err := cache.Instance().Get(ctx, key)
+		if err == nil && !value.IsNil() {
+			return nil
+		}
 	}
-	if len(rows) == 0 {
+	var rowCount, runCount int
+	// 先按 ID 锁定父 Run。遇到并发操作立即返回错误，由账户调度重试整批。
+	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		rows, err := tx.GetAll(`WITH candidates AS (
+			SELECT rc.id, rc.run_id, rc.job_id,
+				CASE
+					WHEN j.status='sent' THEN 'sent'
+					WHEN j.status='superseded' THEN 'superseded'
+					WHEN j.status='failed' THEN 'failed'
+					ELSE 'skipped'
+				END AS projection_status,
+				CASE
+					WHEN j.status='superseded' THEN COALESCE(NULLIF(j.error_message, ''), '原任务已被替代')
+					WHEN j.status='failed' THEN COALESCE(NULLIF(j.error_message, ''), 'Telegram任务已终态失败')
+					WHEN j.id IS NULL THEN '频道已关闭或任务已清理'
+					ELSE ''
+				END AS error_message
+			FROM `+publishProfileCycleRunChannelTable+` rc
+			JOIN `+publishProfileCycleRunTable+` r ON r.id=rc.run_id
+			LEFT JOIN `+publishTgJobTable+` j ON j.id=rc.job_id
+			LEFT JOIN `+publishChannelTable+` c ON c.id=rc.channel_id AND c.deleted_at IS NULL
+			WHERE rc.tenant_id=? AND rc.account_id=?
+			  AND r.tenant_id=? AND r.account_id=? AND r.status<>'canceled'
+			  AND rc.status NOT IN ('sent','superseded','failed','skipped')
+			  AND (
+					(j.status IN ('sent','superseded','failed') AND COALESCE(j.dispatch_status,'')='done')
+					OR (rc.job_id=0 AND (c.id IS NULL OR c.status<>1 OR c.cycle_publish_enabled<>1 OR c.publish_direction<>'up'))
+			  )
+			ORDER BY rc.id
+			LIMIT ?
+		), locked_runs AS MATERIALIZED (
+			SELECT r.id
+			FROM `+publishProfileCycleRunTable+` r
+			WHERE r.id IN (SELECT run_id FROM candidates) AND r.status<>'canceled'
+			ORDER BY r.id
+			FOR NO KEY UPDATE OF r NOWAIT
+		)
+		UPDATE `+publishProfileCycleRunChannelTable+` rc
+		SET status=c.projection_status,
+			error_message=c.error_message,
+			updated_at=NOW()
+		FROM candidates c
+		JOIN locked_runs r ON r.id=c.run_id
+		WHERE rc.id=c.id AND rc.job_id=c.job_id
+		  AND rc.status NOT IN ('sent','superseded','failed','skipped')
+		RETURNING rc.run_id`, scope.TenantID, scope.AccountID, scope.TenantID, scope.AccountID, limit)
+		if err != nil {
+			return gerror.Wrap(err, "收口资料循环频道投影失败")
+		}
+		seen := make(map[int64]struct{}, len(rows))
+		rowCount = len(rows)
+		for _, row := range rows {
+			runID := row["run_id"].Int64()
+			if runID <= 0 {
+				continue
+			}
+			if _, ok := seen[runID]; ok {
+				continue
+			}
+			seen[runID] = struct{}{}
+			if _, err := tx.Exec(finishProfileCycleRunSQL, runID); err != nil {
+				return gerror.Wrapf(err, "收口资料循环运行状态失败 runId:%d", runID)
+			}
+		}
+		runCount = len(seen)
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if rowCount == 0 {
+		// The next account turn can scan again after expiry. Successful
+		// batches and SQL errors never delay follow-up work.
+		if cache.Initialized() {
+			if err := cache.Instance().Set(ctx, key, true, 30*time.Second); err != nil {
+				g.Log().Warningf(ctx, "记录空循环频道投影补偿失败 tenantId:%d accountId:%d err:%+v", scope.TenantID, scope.AccountID, err)
+			}
+		}
 		return nil
 	}
-	seen := make(map[int64]struct{}, len(rows))
-	for _, row := range rows {
-		runID := row["run_id"].Int64()
-		if runID <= 0 {
-			continue
-		}
-		if _, ok := seen[runID]; ok {
-			continue
-		}
-		seen[runID] = struct{}{}
-		if err := finishProfileCycleRun(ctx, runID); err != nil {
-			return gerror.Wrapf(err, "收口资料循环运行状态失败 runId:%d", runID)
-		}
-	}
 	g.Log().Info(ctx, "资料循环频道投影已收口", g.Map{
-		"tenantId": scope.TenantID, "accountId": scope.AccountID, "count": len(rows), "runCount": len(seen),
+		"tenantId": scope.TenantID, "accountId": scope.AccountID, "count": rowCount, "runCount": runCount,
 	})
+	if rowCount == limit {
+		return errAccountScheduleMore
+	}
 	return nil
 }
 
@@ -395,6 +437,9 @@ func reconcileTerminalTelegramOutboxes(ctx context.Context, scope publishAccount
 	// continue on the next account turn. Primary completion callbacks are unchanged.
 	if changed == 0 && cache.Initialized() {
 		return cache.Instance().Set(ctx, key, true, 30*time.Second)
+	}
+	if changed == int64(limit) {
+		return errAccountScheduleMore
 	}
 	return nil
 }
