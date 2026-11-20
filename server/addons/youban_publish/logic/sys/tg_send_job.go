@@ -301,7 +301,7 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) (resultE
 	if err != nil {
 		// 前序查询失败时只退避当前频道任务，不能让 Asynq 高频重试占满
 		// 全局资源；任务保持可恢复状态，其他频道继续发送。
-		if rearmErr := s.postponeTelegramJobForChannelOrder(ctx, targetJob); rearmErr != nil {
+		if rearmErr := s.postponeTelegramChannelJob(ctx, targetJob, 5*time.Second, "频道前序检查失败，等待重试"); rearmErr != nil {
 			return gerror.Wrap(rearmErr, "频道前序检查失败且任务退避失败")
 		}
 		return gerror.Wrap(err, "频道前序检查失败，已退避重试")

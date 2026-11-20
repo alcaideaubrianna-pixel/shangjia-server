@@ -262,3 +262,40 @@ func TestTelegramChannelDeferredPriorityDoesNotBlockReadyJob(t *testing.T) {
 		t.Fatalf("ready job should bypass delayed job: claim=%+v err=%v", claim, err)
 	}
 }
+
+func TestTelegramPredecessorWakePreservesUnrelatedDelay(t *testing.T) {
+	reliableChannelTestRedis(t, false)
+	t.Setenv("YOUBAN_PUBLISH_CHANNEL_QUEUE_ENABLED", "true")
+	ctx := context.Background()
+	due := time.Now().Add(30 * time.Second)
+	const channel int64 = 231
+	const blocker int64 = 3400
+	const priority = tgJobPriorityDefault
+
+	for _, id := range []int64{3401, 3402, 3403, 3404} {
+		if err := enqueueTelegramChannelJob(ctx, channel, id, priority, due); err != nil {
+			t.Fatal(err)
+		}
+	}
+	register := func(id int64, at time.Time) {
+		t.Helper()
+		if err := registerTelegramPredecessorWake(ctx, blocker, channel, id, priority, telegramChannelQueueScore(priority, at, id)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	register(3401, due)
+	register(3404, due.Add(time.Second))
+	finishTelegramPredecessorWake(ctx, blocker)
+	register(3403, due)
+
+	for _, id := range []int64{3401, 3402, 3403, 3404} {
+		score, err := telegramChannelRedisDo(ctx, "ZSCORE", telegramChannelQueueKey(channel), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		unchanged := score.Int64() == telegramChannelQueueScore(priority, due, id)
+		if unchanged != (id == 3402 || id == 3404) {
+			t.Errorf("unexpected score for job %d: %s", id, score.String())
+		}
+	}
+}

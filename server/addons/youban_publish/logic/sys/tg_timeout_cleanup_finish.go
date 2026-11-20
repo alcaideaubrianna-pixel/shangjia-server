@@ -35,6 +35,7 @@ func (s *sSysPublish) finishTelegramSendTimeoutCleanup(ctx context.Context, job 
 		})
 		if err == nil {
 			if decision.Action != "snapshot_changed" && telegramChannelQueueEnabled() {
+				finishTelegramPredecessorWake(ctx, job.Id)
 				if _, wakeErr := wakeTelegramChannelOrderOwner(ctx, job); wakeErr != nil {
 					g.Log().Warning(ctx, "旧消息已清理，提前唤醒频道顺序持有任务失败", g.Map{
 						"event": "channel_queue_cleanup_wake_failed", "jobId": job.Id,

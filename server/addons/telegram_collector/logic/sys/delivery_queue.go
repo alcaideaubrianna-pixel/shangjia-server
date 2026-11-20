@@ -421,24 +421,30 @@ func (s *sCollector) processDeliveryWithEvent(ctx context.Context, deliveryID in
 	logCollectorDeliveryStage(ctx, "delivery.handler.completed", deliveryID, row.EventId, queueName, nil,
 		g.Map{"handlerDurationMs": time.Since(handlerStarted).Milliseconds(), "taskDurationMs": time.Since(taskStarted).Milliseconds()})
 	completeStarted := time.Now()
-	completeResult, completeErr := dao.TgCollectorDelivery.Ctx(ctx).WherePri(deliveryID).
-		Where(columns.Status, sysin.DeliveryStatusProcessing).
-		Where(columns.LeaseOwner, executionOwner).Data(g.Map{
-		columns.Status:       sysin.DeliveryStatusCompleted,
-		columns.NextRunAt:    nil,
-		columns.LeaseOwner:   "",
-		columns.LeaseUntil:   nil,
-		columns.ErrorMessage: "",
-		columns.UpdatedAt:    gtime.Now(),
-	}).Update()
-	err = completeErr
-	if err == nil {
-		var affected int64
-		affected, err = completeResult.RowsAffected()
-		if err != nil {
-			err = gerror.Wrap(err, "确认Telegram采集交付完成结果失败")
-		} else if affected != 1 {
-			err = gerror.New("采集交付执行归属已变化，未确认本次完成")
+	if !delivery.History && queueName != "" && !eventQueueIsHistory(queueName) &&
+		g.Cfg().MustGet(ctx, "telegramCollector.worker.realtimeDeliveryBatchEnabled", false).Bool() &&
+		g.DB().GetConfig().Type == "pgsql" {
+		err = s.completeRealtimeDelivery(ctx, deliveryCompletion{ID: deliveryID, Owner: executionOwner})
+	} else {
+		completeResult, completeErr := dao.TgCollectorDelivery.Ctx(ctx).WherePri(deliveryID).
+			Where(columns.Status, sysin.DeliveryStatusProcessing).
+			Where(columns.LeaseOwner, executionOwner).Data(g.Map{
+			columns.Status:       sysin.DeliveryStatusCompleted,
+			columns.NextRunAt:    nil,
+			columns.LeaseOwner:   "",
+			columns.LeaseUntil:   nil,
+			columns.ErrorMessage: "",
+			columns.UpdatedAt:    gtime.Now(),
+		}).Update()
+		err = completeErr
+		if err == nil {
+			var affected int64
+			affected, err = completeResult.RowsAffected()
+			if err != nil {
+				err = gerror.Wrap(err, "确认Telegram采集交付完成结果失败")
+			} else if affected != 1 {
+				err = gerror.New("采集交付执行归属已变化，未确认本次完成")
+			}
 		}
 	}
 	recordCollectorStage(ctx, collectorStageDeliveryComplete, observation.meta, collectorResultOK, time.Since(completeStarted), err)

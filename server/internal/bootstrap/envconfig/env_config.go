@@ -146,6 +146,7 @@ var items = []item{
 	{Key: "telegramCollector.eventHandoff.timeoutSeconds", EnvKeys: []string{"YOUBAN_TELEGRAM_COLLECTOR_HANDOFF_TIMEOUT_SECONDS"}},
 	{Key: "telegramCollector.worker.concurrency", EnvKeys: []string{"YOUBAN_TELEGRAM_COLLECTOR_CONCURRENCY"}},
 	{Key: "telegramCollector.worker.historyConcurrency", EnvKeys: []string{"YOUBAN_TELEGRAM_COLLECTOR_HISTORY_CONCURRENCY"}},
+	{Key: "telegramCollector.worker.realtimeDeliveryBatchEnabled", EnvKeys: []string{"YOUBAN_TELEGRAM_COLLECTOR_REALTIME_DELIVERY_BATCH_ENABLED"}},
 	{Key: "telegramCollector.worker.realtimeReadyBatchEnabled", EnvKeys: []string{"YOUBAN_TELEGRAM_COLLECTOR_REALTIME_READY_BATCH_ENABLED"}},
 	{Key: "telegramCollector.worker.historyBatchEnabled", EnvKeys: []string{"YOUBAN_TELEGRAM_COLLECTOR_HISTORY_BATCH_ENABLED"}},
 	{Key: "telegramCollector.worker.historyBatchSize", EnvKeys: []string{"YOUBAN_TELEGRAM_COLLECTOR_HISTORY_BATCH_SIZE"}},

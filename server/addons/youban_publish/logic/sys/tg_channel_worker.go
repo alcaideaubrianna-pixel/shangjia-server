@@ -183,9 +183,11 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 	}
 	defer finishExecution()
 	stopRenew := keepTelegramChannelClaim(execution, cancel, claim)
-	ctx = execution
+	var predecessor int64
+	ctx = context.WithValue(execution, telegramPredecessorKey{}, &predecessor)
 	settled := false
 	terminal := false
+	releasePredecessor := false
 	requeue := func(_ context.Context, _ int64, _ int64, priority int, at time.Time) error {
 		settleCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), telegrambudget.LeaseOperation(ctx))
 		defer stop()
@@ -216,20 +218,26 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 		} else if claim.History {
 			priority = tgJobPriorityHistory
 		}
+		if releasePredecessor {
+			defer finishTelegramPredecessorWake(ctx, jobID)
+		}
 		if _, settleErr := settleTelegramChannelClaim(settleCtx, claim, !terminal, priority, time.Now().Add(time.Second)); settleErr != nil {
 			g.Log().Warningf(settleCtx, "频道领取收尾失败，保留过期恢复 channel:%d job:%d err:%+v", channelID, jobID, settleErr)
 		}
 	}()
-	job, loadErr := s.telegramJobById(ctx, jobID)
+	loadCtx, cancelLoad := context.WithTimeout(ctx, 2*time.Second)
+	job, loadErr := s.telegramJobById(loadCtx, jobID)
+	cancelLoad()
 	if loadErr != nil {
 		g.Log().Warning(ctx, "频道队列任务加载失败", g.Map{"event": "channel_queue_error", "stage": "load", "channelId": channelID, "jobId": jobID, "error": loadErr.Error()})
-		if enqueueErr := requeue(ctx, channelID, jobID, tgJobPriorityDefault, time.Now().Add(time.Second)); enqueueErr != nil {
+		if enqueueErr := requeue(ctx, channelID, jobID, tgJobPriorityDefault, time.Now().Add(5*time.Second)); enqueueErr != nil {
 			return true, errors.Join(loadErr, enqueueErr)
 		}
 		return true, loadErr
 	}
 	if isTelegramChannelJobTerminal(job) {
 		terminal = true
+		releasePredecessor = !telegramChannelJobPendingCleanup(job)
 		return true, nil
 	}
 	claim.PreserveOrder = telegramChannelJobOwnsOrder(job)
@@ -316,6 +324,7 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 		score := telegramChannelQueueScore(priority, time.UnixMilli(hold), jobID)
 		if isTelegramChannelJobTerminal(job) {
 			terminal = true
+			releasePredecessor = !telegramChannelJobPendingCleanup(job)
 			g.Log().Info(ctx, "频道队列任务发送失败后已收口", g.Map{"event": "channel_queue_ack", "channelId": channelID, "jobId": jobID, "status": job.Status, "reason": "terminal_after_send_error"})
 			return true, nil
 		}
@@ -345,6 +354,7 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 		switch {
 		case isTelegramChannelJobTerminal(job):
 			terminal = true
+			releasePredecessor = !telegramChannelJobPendingCleanup(job)
 			g.Log().Info(ctx, "频道队列任务确认完成", g.Map{
 				"event":       "channel_queue_ack",
 				"channelId":   channelID,
@@ -369,11 +379,20 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 			requeueScore := telegramChannelQueueScore(priority, time.UnixMilli(hold), jobID)
 			if isTelegramChannelJobTerminal(job) {
 				terminal = true
+				releasePredecessor = !telegramChannelJobPendingCleanup(job)
 				g.Log().Info(ctx, "频道队列任务已收口", g.Map{"event": "channel_queue_ack", "channelId": channelID, "jobId": jobID, "status": job.Status, "reason": "terminal_after_reload"})
 				return true, nil
 			}
 			if enqueueErr := requeue(ctx, channelID, jobID, priority, time.UnixMilli(hold)); enqueueErr != nil {
 				return true, gerror.Wrap(enqueueErr, "频道队列未完成任务重入队失败")
+			}
+			if predecessor > 0 && decision.BlockReason == telegramChannelBlockOrderWait {
+				wakeCtx, cancelWake := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+				wakeErr := registerTelegramPredecessorWake(wakeCtx, predecessor, channelID, jobID, priority, requeueScore)
+				cancelWake()
+				if wakeErr != nil {
+					g.Log().Warningf(ctx, "记录频道前序等待失败 jobId:%d predecessorId:%d err:%+v", jobID, predecessor, wakeErr)
+				}
 			}
 			g.Log().Warning(ctx, "频道队列任务未完成，已重入队", g.Map{
 				"event":           "channel_queue_requeue",

@@ -86,24 +86,25 @@ func collectorQueueClass(priority int) string {
 }
 
 type sCollector struct {
-	queueMu               sync.Mutex
-	queueServer           *asynq.Server
-	queueBotServer        *asynq.Server
-	queueHistoryServer    *asynq.Server
-	deliveryServer        *asynq.Server
-	deliveryFreshServer   *asynq.Server
-	deliveryHistoryServer *asynq.Server
-	historySchedulerStop  context.CancelFunc
-	deliveryAccountSlots  deliveryAccountSlotPool
-	queueClient           *asynq.Client
-	queueInspector        *asynq.Inspector
-	realtimeEventBatch    *microbatch.Batcher[historyEventMutation, entity.TgCollectorEvent]
-	historyEventBatch     *microbatch.Batcher[historyEventMutation, entity.TgCollectorEvent]
-	historyDeliveryBatch  *microbatch.Batcher[sysin.CollectorDelivery, historyDeliverySaved]
-	historyBatchSQLMu     sync.Mutex
-	runtimeCtx            context.Context
-	runtimeStop           context.CancelFunc
-	runtimeWG             sync.WaitGroup
+	queueMu                    sync.Mutex
+	queueServer                *asynq.Server
+	queueBotServer             *asynq.Server
+	queueHistoryServer         *asynq.Server
+	deliveryServer             *asynq.Server
+	deliveryFreshServer        *asynq.Server
+	deliveryHistoryServer      *asynq.Server
+	historySchedulerStop       context.CancelFunc
+	deliveryAccountSlots       deliveryAccountSlotPool
+	queueClient                *asynq.Client
+	queueInspector             *asynq.Inspector
+	realtimeEventBatch         *microbatch.Batcher[historyEventMutation, entity.TgCollectorEvent]
+	historyEventBatch          *microbatch.Batcher[historyEventMutation, entity.TgCollectorEvent]
+	realtimeDeliveryReadyBatch *microbatch.Batcher[deliveryCompletion, bool]
+	historyDeliveryBatch       *microbatch.Batcher[sysin.CollectorDelivery, historyDeliverySaved]
+	historyBatchSQLMu          sync.Mutex
+	runtimeCtx                 context.Context
+	runtimeStop                context.CancelFunc
+	runtimeWG                  sync.WaitGroup
 }
 
 func init() {

@@ -56,6 +56,8 @@ func telegramChannelJobBlocksExecution(status, phase, dispatchStatus string) boo
 }
 
 func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, job telegramJobRecord) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
@@ -479,7 +481,12 @@ func (s *sSysPublish) postponeTelegramJobForChannelOrder(ctx context.Context, jo
 	// 前序任务等待不是异常重试。使用固定短延迟，避免同频道正常串行发送
 	// 因历史 dispatch_count 被放大到 30 秒，造成资料之间出现长时间空洞。
 	// 锁竞争和 Redis/数据库错误仍使用独立的指数退避策略。
-	retryDelay := telegramChannelOrderRetryDelay()
+	return s.postponeTelegramChannelJob(ctx, job, telegramChannelOrderRetryDelay(), "等待同频道前序推送任务完成")
+}
+
+func (s *sSysPublish) postponeTelegramChannelJob(ctx context.Context, job telegramJobRecord, retryDelay time.Duration, reason string) error {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
 	nextRetryAt := gtime.Now().Add(retryDelay)
 	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id", job.Id).
@@ -493,7 +500,7 @@ func (s *sSysPublish) postponeTelegramJobForChannelOrder(ctx context.Context, jo
 			// invalid input syntax for type bigint 并让频道队首反复重试。
 			"task_id":             nil,
 			"next_retry_at":       nextRetryAt,
-			"last_dispatch_error": "等待同频道前序推送任务完成",
+			"last_dispatch_error": reason,
 			"updated_at":          gtime.Now(),
 		}).
 		Update()

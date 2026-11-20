@@ -160,6 +160,8 @@ func (s *sCollector) StopRuntime() {
 	s.realtimeEventBatch = nil
 	deliveryBatch := s.historyDeliveryBatch
 	s.historyDeliveryBatch = nil
+	deliveryReadyBatch := s.realtimeDeliveryReadyBatch
+	s.realtimeDeliveryReadyBatch = nil
 	s.queueMu.Unlock()
 	if inspector != nil {
 		_ = inspector.Close()
@@ -169,6 +171,9 @@ func (s *sCollector) StopRuntime() {
 	}
 	if realtimeBatch != nil {
 		realtimeBatch.Close()
+	}
+	if deliveryReadyBatch != nil {
+		deliveryReadyBatch.Close()
 	}
 	if deliveryBatch != nil {
 		deliveryBatch.Close()
