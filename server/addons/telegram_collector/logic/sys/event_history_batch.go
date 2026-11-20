@@ -71,6 +71,30 @@ func (s *sCollector) historyEventWriter(ctx context.Context) *microbatch.Batcher
 	return s.historyEventBatch
 }
 
+func realtimeEventReadyBatchEnabled(ctx context.Context) bool {
+	queue := collectorQueueName(ctx)
+	return queue != "" && !eventQueueIsHistory(queue) &&
+		g.Cfg().MustGet(ctx, "telegramCollector.worker.realtimeReadyBatchEnabled", true).Bool() &&
+		g.DB().GetConfig().Type == "pgsql"
+}
+
+func (s *sCollector) realtimeEventReadyWriter() *microbatch.Batcher[historyEventMutation, entity.TgCollectorEvent] {
+	s.queueMu.Lock()
+	defer s.queueMu.Unlock()
+	if s.realtimeEventBatch == nil {
+		parent := s.runtimeCtx
+		if parent == nil {
+			parent = context.Background()
+		}
+		s.realtimeEventBatch = microbatch.New(parent, 16, 5*time.Millisecond, func(ctx context.Context, rows []historyEventMutation) []microbatch.Result[entity.TgCollectorEvent] {
+			writeCtx, cancel := context.WithTimeout(ctx, time.Second)
+			defer cancel()
+			return writeHistoryEventMutations(writeCtx, rows)
+		})
+	}
+	return s.realtimeEventBatch
+}
+
 // Each statement uses explicit, bounded primary keys. No scope discovery or
 // historical table scan is performed here. One writer serializes batch SQL.
 func writeHistoryEventMutations(ctx context.Context, mutations []historyEventMutation) []microbatch.Result[entity.TgCollectorEvent] {

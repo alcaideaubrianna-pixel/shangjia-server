@@ -94,6 +94,7 @@ type sCollector struct {
 	deliveryAccountSlots  deliveryAccountSlotPool
 	queueClient           *asynq.Client
 	queueInspector        *asynq.Inspector
+	realtimeEventBatch    *microbatch.Batcher[historyEventMutation, entity.TgCollectorEvent]
 	historyEventBatch     *microbatch.Batcher[historyEventMutation, entity.TgCollectorEvent]
 	historyDeliveryBatch  *microbatch.Batcher[sysin.CollectorDelivery, historyDeliverySaved]
 	historyBatchSQLMu     sync.Mutex

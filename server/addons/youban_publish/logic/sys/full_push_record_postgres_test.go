@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
+	"hotgo/addons/youban_publish/model"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"os"
 	"testing"
@@ -56,7 +57,7 @@ func TestFullPushRecordsFollowExecutionPostgres(t *testing.T) {
 			return err
 		}
 		for _, state := range []string{"sending", "failed_retry", "sending", "success"} {
-			if err := s.upsertPublishJobRecord(ctx, jobs[0], state, ""); err != nil {
+			if err := s.upsertPublishJobRecord(ctx, jobs[0], model.PublishRecordStatus(state), ""); err != nil {
 				return err
 			}
 			if err := assertCount(1); err != nil {

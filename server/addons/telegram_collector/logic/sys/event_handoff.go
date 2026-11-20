@@ -64,8 +64,31 @@ func firstFreshDeliveryHandoff(attempt int, queue string, delivery *sysin.Collec
 
 // completeCollectorEvent preserves per-event ownership in both write paths.
 func (s *sCollector) completeCollectorEvent(ctx context.Context, row *entity.TgCollectorEvent) error {
-	if historyEventBatchEnabled(ctx) {
-		completed, err := s.historyEventWriter(ctx).Do(ctx, historyEventMutation{Kind: historyEventReady, ID: row.Id, TenantID: row.TenantId, Owner: row.LeaseOwner, Attempt: row.AttemptCount})
+	mutation := historyEventMutation{Kind: historyEventReady, ID: row.Id, TenantID: row.TenantId, Owner: row.LeaseOwner, Attempt: row.AttemptCount}
+	switch {
+	case historyEventBatchEnabled(ctx):
+		completed, err := s.historyEventWriter(ctx).Do(ctx, mutation)
+		if err != nil {
+			return err
+		}
+		if completed.Id != row.Id {
+			return gerror.New("采集事件交接租约已变化，未确认本次交接")
+		}
+		return nil
+	case realtimeEventReadyBatchEnabled(ctx):
+		completed, err := s.realtimeEventReadyWriter().Do(ctx, mutation)
+		if err != nil && ctx.Err() != nil {
+			// A caller can time out while the independent batch is committing.
+			checkCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 250*time.Millisecond)
+			defer cancel()
+			cols := dao.TgCollectorEvent.Columns()
+			count, checkErr := dao.TgCollectorEvent.Ctx(checkCtx).WherePri(row.Id).
+				Where(cols.TenantId, row.TenantId).Where(cols.AttemptCount, row.AttemptCount).
+				Where(cols.Status, sysin.EventStatusReady).Count()
+			if checkErr == nil && count == 1 {
+				return nil
+			}
+		}
 		if err != nil {
 			return err
 		}

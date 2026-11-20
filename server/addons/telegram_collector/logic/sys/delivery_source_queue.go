@@ -304,6 +304,10 @@ func executeDeliverySourceClaim(ctx context.Context, q deliverySourceQueue, clai
 	if processErr == nil || errors.Is(processErr, asynq.SkipRetry) {
 		return q.Ack(finishCtx, claim)
 	}
+	var notDue *deliveryNotDueError
+	if errors.As(processErr, &notDue) {
+		return q.Nack(finishCtx, claim, max(time.Second, time.Until(notDue.at)))
+	}
 	return errors.Join(processErr, q.Nack(finishCtx, claim, 30*time.Second))
 }
 

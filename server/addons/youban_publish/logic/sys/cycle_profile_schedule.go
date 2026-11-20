@@ -99,6 +99,11 @@ type accountCycleDueCursor struct {
 
 // accountProfileCycleDueRows 优先账户Redis；PG每页只读取20条映射，再按这些主键验证。
 // 补偿游标跨轮保存，无效队头不能永久挡住后面的资料；不使用全局候选过滤。
+// Compensation runs in account workers and shares PostgreSQL with live sends.
+var accountCycleCompensationSlots = make(chan struct{}, 2)
+
+var accountCycleDuplicateCandidates, _ = publishObserveMeter.Int64Counter("xiaohuiji.publish.cycle.candidates_deduplicated")
+
 func (s *sSysPublish) accountProfileCycleDueRows(ctx context.Context, limit int, scope publishAccountScope) ([]profileCycleDueRow, error) {
 	if limit <= 0 || limit > 20 {
 		limit = 20
@@ -108,8 +113,21 @@ func (s *sSysPublish) accountProfileCycleDueRows(ctx context.Context, limit int,
 	}
 	key := accountProfileCycleDueKey(scope)
 	var result []profileCycleDueRow
+	validated := make(map[int64]struct{})
 	seen := make(map[int64]bool)
 	validate := func(ids []int64) error {
+		unique := ids[:0]
+		for _, id := range ids {
+			if _, exists := validated[id]; exists {
+				continue
+			}
+			validated[id] = struct{}{}
+			unique = append(unique, id)
+		}
+		if skipped := len(ids) - len(unique); skipped > 0 {
+			accountCycleDuplicateCandidates.Add(ctx, int64(skipped))
+		}
+		ids = unique
 		if len(ids) == 0 {
 			return nil
 		}
@@ -196,6 +214,18 @@ func (s *sSysPublish) accountProfileCycleDueRows(ctx context.Context, limit int,
 		}
 	}
 	more := len(result) >= limit
+	if len(result) < limit {
+		select {
+		case accountCycleCompensationSlots <- struct{}{}:
+			defer func() { <-accountCycleCompensationSlots }()
+		default:
+			// Retry the account on its normal continuation without advancing its cursor.
+			if cache.Initialized() {
+				_ = cache.Instance().Set(ctx, key+":more", true, time.Minute)
+			}
+			return result, nil
+		}
+	}
 	for page := 0; page < 3 && len(result) < limit; page++ {
 		var candidates []struct {
 			ID        int64

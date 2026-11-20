@@ -28,6 +28,12 @@ import (
 
 var errDeliveryInvalidEvent = errors.New("采集交付原始事件不可用")
 
+type deliveryNotDueError struct {
+	at time.Time
+}
+
+func (e *deliveryNotDueError) Error() string { return "采集交付尚未到重试时间" }
+
 const deliveryTaskType = "telegram_collector:delivery"
 
 const (
@@ -245,16 +251,19 @@ func (s *sCollector) processDeliveryWithEvent(ctx context.Context, deliveryID in
 	columns := dao.TgCollectorDelivery.Columns()
 	now := gtime.Now()
 	executionOwner := guid.S()
-	result, err := dao.TgCollectorDelivery.Ctx(ctx).
+	claim := dao.TgCollectorDelivery.Ctx(ctx).
 		WherePri(deliveryID).
-		WhereIn(columns.Status, []string{sysin.DeliveryStatusPending, sysin.DeliveryStatusFailedRetry}).
-		Data(g.Map{
-			columns.Status:       sysin.DeliveryStatusProcessing,
-			columns.LeaseOwner:   executionOwner,
-			columns.LeaseUntil:   now.Add(deliveryLeaseDuration),
-			columns.AttemptCount: gdb.Raw(columns.AttemptCount + "+1"),
-			columns.UpdatedAt:    now,
-		}).Update()
+		WhereIn(columns.Status, []string{sysin.DeliveryStatusPending, sysin.DeliveryStatusFailedRetry})
+	if sourceRow != nil {
+		claim = claim.Where("("+columns.NextRunAt+" IS NULL OR "+columns.NextRunAt+" <= ?)", now)
+	}
+	result, err := claim.Data(g.Map{
+		columns.Status:       sysin.DeliveryStatusProcessing,
+		columns.LeaseOwner:   executionOwner,
+		columns.LeaseUntil:   now.Add(deliveryLeaseDuration),
+		columns.AttemptCount: gdb.Raw(columns.AttemptCount + "+1"),
+		columns.UpdatedAt:    now,
+	}).Update()
 	claimDuration := time.Since(claimStarted).Milliseconds()
 	if err != nil {
 		recordCollectorStage(ctx, collectorStageDeliveryClaim, observation.meta, collectorResultError, time.Since(claimStarted), err)
@@ -272,6 +281,17 @@ func (s *sCollector) processDeliveryWithEvent(ctx context.Context, deliveryID in
 		observeResult = collectorResultSkipped
 		logCollectorDeliveryStage(ctx, "delivery.claim.skipped", deliveryID, 0, collectorQueueName(ctx), nil,
 			g.Map{"claimDurationMs": claimDuration, "taskDurationMs": time.Since(taskStarted).Milliseconds()})
+		if sourceRow != nil {
+			var current entity.TgCollectorDelivery
+			if err := dao.TgCollectorDelivery.Ctx(ctx).Fields(columns.Status, columns.NextRunAt).
+				WherePri(deliveryID).Scan(&current); err != nil {
+				return gerror.Wrap(err, "复查Telegram采集交付重试时间失败")
+			}
+			if (current.Status == sysin.DeliveryStatusPending || current.Status == sysin.DeliveryStatusFailedRetry) &&
+				current.NextRunAt != nil {
+				return &deliveryNotDueError{at: current.NextRunAt.Time}
+			}
+		}
 		return nil
 	}
 	recordCollectorStage(ctx, collectorStageDeliveryClaim, observation.meta, collectorResultOK, time.Since(claimStarted), nil)

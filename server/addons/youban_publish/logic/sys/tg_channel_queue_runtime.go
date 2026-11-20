@@ -14,6 +14,12 @@ import (
 	publishconsts "hotgo/addons/youban_publish/consts"
 )
 
+var (
+	channelQueueSlots, _     = publishObserveMeter.Int64Gauge("xiaohuiji.publish.channel_worker.slots_in_use")
+	channelQueueSlotLimit, _ = publishObserveMeter.Int64Gauge("xiaohuiji.publish.channel_worker.slot_limit")
+	channelQueueSlotFull, _  = publishObserveMeter.Int64Counter("xiaohuiji.publish.channel_worker.slot_full")
+)
+
 // telegramChannelQueueDispatcher bounds local work across polling passes.
 // The existing distributed channel lease still guards cross-process sends.
 type telegramChannelQueueDispatcher struct {
@@ -27,6 +33,10 @@ type telegramChannelQueueDispatcher struct {
 // dispatch resumes after the last admitted channel so a fixed active list is fair.
 // Only the scheduling loop calls dispatch; submit protects in-flight state.
 func (d *telegramChannelQueueDispatcher) dispatch(ctx context.Context, channels []int64, process func(int64)) {
+	defer func() {
+		channelQueueSlots.Record(ctx, int64(len(d.sem)))
+		channelQueueSlotLimit.Record(ctx, int64(cap(d.sem)))
+	}()
 	if len(channels) == 0 {
 		d.next = 0
 		return
@@ -99,6 +109,7 @@ func (d *telegramChannelQueueDispatcher) submit(ctx context.Context, channelID i
 	case d.sem <- struct{}{}:
 	default:
 		d.mu.Unlock()
+		channelQueueSlotFull.Add(ctx, 1)
 		return false
 	}
 	d.running[channelID] = struct{}{}
